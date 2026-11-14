@@ -306,6 +306,7 @@ ssh_key_put_public_line(
 	size_t text_size;
 	int error;
 
+	/* Takes the length of the comment, which may be absent. */
 	comment_size = 0;
 	if (comment != NULL)
 		comment_size = strlen(comment);
@@ -338,6 +339,8 @@ ssh_key_put_public_line(
 			out->error = error;
 		return;
 	}
+
+	/* Takes the length of the text. */
 	text_size = strlen(text);
 
 	/* Writes the type, a space and the base64 blob. */
@@ -475,6 +478,8 @@ ssh_key_parse_private(
 		error = EMSGSIZE;
 		goto done;
 	}
+
+	/* Refuses a missing text. */
 	if (text == NULL) {
 		error = EINVAL;
 		goto done;
@@ -503,6 +508,8 @@ ssh_key_parse_private(
 		error = EINVAL;
 		goto done;
 	}
+
+	/* Records the length that was decoded. */
 	decoded.size = decoded_size;
 
 	/* Parses the openssh-key-v1 structure and checks the key it holds. */
@@ -591,11 +598,15 @@ ssh_key_put_private(
 		error = ssh_buf_error(&armoured);
 		goto done;
 	}
+
+	/* Encodes the body into the room that was reserved. */
 	error = ssh_base64_encode(body.data, body.size, (char *)space, encoded_size + 1U, 1);
 	if (error != 0) {
 		error = EIO;
 		goto done;
 	}
+
+	/* Drops the terminating zero from the armoured size. */
 	armoured.size = armoured.size - 1U;
 
 	/* Reserves the room for the BEGIN line, the wrapped base64 lines and the END line. */
@@ -828,6 +839,7 @@ key_text_is(
 	const char *expected)
 {
 	size_t expected_size;
+	int different;
 
 	/* A different length is a different text. */
 	expected_size = strlen(expected);
@@ -835,7 +847,8 @@ key_text_is(
 		return 0;
 
 	/* The same length with different bytes is a different text. */
-	if (memcmp(text, expected, size) != 0)
+	different = memcmp(text, expected, size);
+	if (different != 0)
 		return 0;
 
 	/* The two texts are equal. */
@@ -865,6 +878,7 @@ private_join_lines(
 	int is_end;
 	int error;
 
+	/* Starts at the first line with no armour line seen. */
 	position = 0;
 	found_begin = 0;
 	found_end = 0;
@@ -888,6 +902,7 @@ private_join_lines(
 		is_begin = key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_BEGIN);
 		is_end = key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_END);
 
+		/* Handles the line according to where it stands against the armour lines. */
 		if (!found_begin) {
 			/* Text before the BEGIN line is ignored. */
 			if (is_begin)
@@ -905,6 +920,7 @@ private_join_lines(
 				return error;
 		}
 
+		/* Moves on to the next line. */
 		position = next;
 	}
 
@@ -959,12 +975,14 @@ private_parse_decoded(
 	uint8_t blob_public[SSH_ED25519_PUBLIC];
 	uint8_t derived_public[SSH_ED25519_PUBLIC];
 	int same;
+	int different;
 	int error;
 
 	/* Checks the magic and its NUL (PROTOCOL.key 1). */
 	if (size < sizeof(private_magic))
 		return EINVAL;
-	if (memcmp(data, private_magic, sizeof(private_magic)) != 0)
+	different = memcmp(data, private_magic, sizeof(private_magic));
+	if (different != 0)
 		return EINVAL;
 
 	/* Reads the cipher, the KDF, its options and the key count. */

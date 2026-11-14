@@ -514,6 +514,8 @@ ssh_client_report(
 			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Unable to negotiate with %s port %u: no matching %s found", client->host_name, (unsigned)client->port, kind);
 			return;
 		}
+
+		/* Reports any other reason with the host and port. */
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s port %u: %s", client->host_name, (unsigned)client->port, reason);
 		return;
 	}
@@ -742,6 +744,8 @@ client_wait_connected(
 				return ETIMEDOUT;
 			wait_ms = (int)(deadline - now);
 		}
+
+		/* Waits until the descriptor can be written. */
 		poller.fd = descriptor;
 		poller.events = POLLOUT;
 		poller.revents = 0;

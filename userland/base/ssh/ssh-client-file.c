@@ -194,6 +194,8 @@ ssh_client_log(
 	} else {
 		fputs("\n", stderr);
 	}
+
+	/* Flushes the message to the terminal. */
 	fflush(stderr);
 }
 
@@ -235,6 +237,8 @@ ssh_client_ask(
 			close(descriptor);
 			return error;
 		}
+
+		/* Builds the settings without echo from the saved ones. */
 		quiet = saved;
 		quiet.c_lflag &= ~(tcflag_t)ECHO;
 		status = tcsetattr(descriptor, TCSAFLUSH, &quiet);
@@ -359,6 +363,8 @@ client_read_line(
 			too_long = 1;
 			continue;
 		}
+
+		/* Stores the byte and counts it. */
 		out[length] = byte;
 		length++;
 	}

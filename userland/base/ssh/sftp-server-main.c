@@ -158,6 +158,8 @@ main(
 			(void)closedir(sftp_handles[index].directory);
 		sftp_handles[index].kind = SFTP_HANDLE_FREE;
 	}
+
+	/* Returns the failure of the loop. */
 	if (status != 0)
 		return 1;
 
@@ -205,11 +207,15 @@ sftp_serve(void)
 				status = 1;
 				break;
 			}
+
+			/* Writes the response to the client. */
 			status = sftp_write_all(out.data, out.size);
 			if (status != 0)
 				break;
 			continue;
 		}
+
+		/* Fails on any result other than a request that needs more bytes. */
 		if (taken != EAGAIN) {
 			/* A length the protocol does not allow: the framing is lost. */
 			status = 1;
@@ -272,6 +278,8 @@ sftp_handle_request(
 		*initialized = 1;
 		return 0;
 	}
+
+	/* Refuses any request before the version exchange. */
 	if (!*initialized)
 		return 1;
 
@@ -594,6 +602,8 @@ sftp_read(
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Invalid handle", out);
 		return;
 	}
+
+	/* Reports the end of the file for an offset no file can have. */
 	if (request->offset > (uint64_t)LONG_MAX) {
 		ssh_sftp_put_status(request->id, SSH_FX_EOF, "End of file", out);
 		return;
@@ -611,6 +621,8 @@ sftp_read(
 		sftp_put_errno(request->id, saved, out);
 		return;
 	}
+
+	/* Reports the end of the file when nothing was read. */
 	if (got == 0 && length > 0) {
 		ssh_sftp_put_status(request->id, SSH_FX_EOF, "End of file", out);
 		return;
@@ -637,6 +649,8 @@ sftp_write(
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Invalid handle", out);
 		return;
 	}
+
+	/* Refuses an offset that would overflow with the data. */
 	if (request->offset > (uint64_t)LONG_MAX - (uint64_t)request->data_size) {
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Offset too large", out);
 		return;
@@ -655,6 +669,8 @@ sftp_write(
 			sftp_put_errno(request->id, saved, out);
 			return;
 		}
+
+		/* Counts the bytes that were written. */
 		done += (size_t)written;
 	}
 
@@ -682,6 +698,8 @@ sftp_stat(
 			ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Invalid handle", out);
 			return;
 		}
+
+		/* Reads the attributes of the open file. */
 		looked = fstat(handle->descriptor, &status);
 	} else {
 		sftp_copy_path(request->path, request->path_size, path);
@@ -690,6 +708,8 @@ sftp_stat(
 		else
 			looked = stat(path, &status);
 	}
+
+	/* Reports a failure to read the attributes. */
 	if (looked != 0) {
 		saved = errno;
 		sftp_put_errno(request->id, saved, out);
@@ -718,11 +738,15 @@ sftp_setstat(
 			ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Invalid handle", out);
 			return;
 		}
+
+		/* Applies the attributes to the open file. */
 		error = sftp_apply_attrs(NULL, handle->descriptor, &request->attrs);
 	} else {
 		sftp_copy_path(request->path, request->path_size, path);
 		error = sftp_apply_attrs(path, -1, &request->attrs);
 	}
+
+	/* Reports a failure to apply the attributes. */
 	if (error != 0) {
 		sftp_put_errno(request->id, error, out);
 		return;
@@ -822,6 +846,8 @@ sftp_opendir(
 		sftp_put_errno(request->id, saved, out);
 		return;
 	}
+
+	/* Records the directory in the slot. */
 	sftp_handles[slot].kind = SFTP_HANDLE_DIRECTORY;
 	sftp_handles[slot].descriptor = -1;
 	sftp_handles[slot].directory = directory;
@@ -919,6 +945,8 @@ sftp_name_entry(
 		if (length < sizeof(owner))
 			memcpy(owner, owner_entry->pw_name, length + 1U);
 	}
+
+	/* Takes the group name, or its number when it has none. */
 	sprintf(group, "%lu", (unsigned long)status->st_gid);
 	group_entry = getgrgid(status->st_gid);
 	if (group_entry != NULL) {
@@ -964,6 +992,8 @@ sftp_path_call(
 		sftp_copy_path(request->target, request->target_size, target);
 		done = symlink(path, target);
 	}
+
+	/* Reports a failure to create the link. */
 	if (done != 0) {
 		saved = errno;
 		sftp_put_errno(request->id, saved, out);
@@ -1003,9 +1033,13 @@ sftp_rename(
 			sftp_put_errno(request->id, saved, out);
 			return;
 		}
+
+		/* Reports success. */
 		sftp_put_ok(request->id, out);
 		return;
 	}
+
+	/* Refuses a name that is taken. */
 	saved = errno;
 	if (saved == EEXIST) {
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "File exists", out);
@@ -1018,6 +1052,8 @@ sftp_rename(
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "File exists", out);
 		return;
 	}
+
+	/* Renames the file to the new name. */
 	done = rename(path, target);
 	if (done != 0) {
 		saved = errno;
@@ -1056,12 +1092,16 @@ sftp_realpath(
 			return;
 		}
 	}
+
+	/* Refuses a path longer than the protocol allows. */
 	length = strlen(resolved);
 	if (length > SSH_SFTP_PATH_MAX) {
 		free(resolved);
 		ssh_sftp_put_status(request->id, SSH_FX_FAILURE, "Path too long", out);
 		return;
 	}
+
+	/* Returns the resolved path as the only name. */
 	sftp_put_one_name(request->id, resolved, out);
 	free(resolved);
 }
@@ -1098,6 +1138,8 @@ sftp_realpath_new(
 		directory[slash - path] = '\0';
 		base = slash + 1;
 	}
+
+	/* Refuses a name of nothing or of the parent directory. */
 	same = strcmp(base, "..");
 	if (base[0] == '\0' || same == 0)
 		return NULL;
@@ -1118,6 +1160,8 @@ sftp_realpath_new(
 		free(parent);
 		return NULL;
 	}
+
+	/* Copies the parent into the joined path. */
 	memcpy(joined, parent, parent_size);
 	if (parent_size == 1 && parent[0] == '/')
 		parent_size = 0;
@@ -1148,6 +1192,8 @@ sftp_readlink(
 		sftp_put_errno(request->id, saved, out);
 		return;
 	}
+
+	/* Terminates the target and returns it as the only name. */
 	target[got] = '\0';
 	sftp_put_one_name(request->id, target, out);
 }

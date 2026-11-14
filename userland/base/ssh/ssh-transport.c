@@ -972,6 +972,8 @@ transport_receive_disconnect(
 			transport->reason[index] = (char)description[index];
 		}
 	}
+
+	/* Ends the reason text. */
 	transport->reason[description_size] = '\0';
 
 	/*
@@ -1030,9 +1032,13 @@ transport_receive_kexinit(
 			length++;
 			kind++;
 		}
+
+		/* Ends the description and disconnects with the failure. */
 		description[length] = '\0';
 		return transport_fail(transport, error, SSH_DISCONNECT_KEY_EXCHANGE_FAILED, description);
 	}
+
+	/* Disconnects with a protocol error for any other failure. */
 	if (error != 0)
 		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "key exchange failed");
 

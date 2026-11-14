@@ -195,6 +195,7 @@ sshd_account_policy(
 	if (method != SSH_AUTH_PUBLICKEY && method != SSH_AUTH_PASSWORD)
 		return EACCES;
 
+	/* Checks the account against the shadow entry or the privilege. */
 	if (privileged) {
 		/* As root, an account without a shadow entry cannot log in, as at the console. */
 		if (shadow_hash == NULL)
@@ -290,6 +291,8 @@ sshd_key_authorized(
 		free(text);
 		return EIO;
 	}
+
+	/* Marks both ends of the pipe close-on-exec. */
 	(void)fcntl(pipe_ends[0], F_SETFD, FD_CLOEXEC);
 	(void)fcntl(pipe_ends[1], F_SETFD, FD_CLOEXEC);
 
@@ -301,6 +304,8 @@ sshd_key_authorized(
 		free(text);
 		return EIO;
 	}
+
+	/* Runs the key reader in the child. */
 	if (child == 0) {
 		(void)close(pipe_ends[0]);
 		login_keys_child(config, account, path, pipe_ends[1]);
@@ -401,6 +406,8 @@ sshd_password_ok(
 		login_dummy_crypt(password);
 		return EACCES;
 	}
+
+	/* Wipes the hash that was read. */
 	ssh_wipe(hash, sizeof(hash));
 
 	/* Checks the password as the console login does, which erases it. */
@@ -453,6 +460,8 @@ sshd_login_record(
 	} else {
 		record.ut_type = DEAD_PROCESS;
 	}
+
+	/* Fills the line and the identifier of the record. */
 	strncpy(record.ut_line, tty + sizeof(LOGIN_DEV_PREFIX) - 1U, sizeof(record.ut_line) - 1U);
 	strncpy(record.ut_id, number, sizeof(record.ut_id));
 
@@ -523,6 +532,7 @@ sshd_authorized_path(
 				out[0] = '\0';
 				return EINVAL;
 			}
+
 			continue;
 		}
 
@@ -537,10 +547,14 @@ sshd_authorized_path(
 		} else {
 			added = EINVAL;
 		}
+
+		/* Refuses the text when an expansion failed. */
 		if (added != 0) {
 			out[0] = '\0';
 			return EINVAL;
 		}
+
+		/* Moves on to the next character. */
 		index++;
 	}
 
@@ -678,6 +692,8 @@ login_lookup(
 			*have_hash = 1;
 		}
 	}
+
+	/* Wipes the shadow buffer. */
 	ssh_wipe(shadow_buffer, sizeof(shadow_buffer));
 
 	/* Succeeded: the account exists. */
@@ -1024,6 +1040,8 @@ login_keys_open_strict(
 			(void)close(directory);
 			return LOGIN_KEYS_UNSAFE;
 		}
+
+		/* Copies the next name into a terminated string. */
 		memcpy(name, rest, name_size);
 		name[name_size] = '\0';
 
@@ -1040,6 +1058,8 @@ login_keys_open_strict(
 				return LOGIN_KEYS_ABSENT;
 			return LOGIN_KEYS_UNSAFE;
 		}
+
+		/* Continues in the directory that was opened. */
 		directory = next;
 
 		/* Checks it as the first. */
@@ -1048,6 +1068,8 @@ login_keys_open_strict(
 			(void)close(directory);
 			return LOGIN_KEYS_UNSAFE;
 		}
+
+		/* Moves on to the next name. */
 		rest = end + 1;
 	}
 
@@ -1195,6 +1217,8 @@ login_keys_collect(
 			failure = EIO;
 			break;
 		}
+
+		/* Keeps waiting when the descriptor is not ready. */
 		if (ready == 0)
 			continue;
 
@@ -1212,6 +1236,8 @@ login_keys_collect(
 			failure = EIO;
 			break;
 		}
+
+		/* Ends the read at the end of the input. */
 		if (got == 0)
 			break;
 		*size += (size_t)got;

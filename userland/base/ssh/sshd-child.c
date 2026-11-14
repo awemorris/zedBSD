@@ -116,6 +116,8 @@ sshd_child_read_frame(
 			taken = EIO;
 			break;
 		}
+
+		/* Appends the chunk to the input buffer. */
 		ssh_buf_put_bytes(input, chunk, (size_t)got);
 		added = ssh_buf_error(input);
 		if (added != 0) {
@@ -163,6 +165,8 @@ sshd_child_read_config(
 		ssh_buf_free(&body);
 		return EIO;
 	}
+
+	/* Refuses a reply that is not the configuration message. */
 	if (type != SSH_MON_CONFIG) {
 		ssh_buf_free(&body);
 		return EPROTO;
@@ -188,6 +192,8 @@ sshd_child_read_config(
 		ssh_buf_free(&body);
 		return EPROTO;
 	}
+
+	/* Keeps the host key blob and the privilege flag of the monitor. */
 	memcpy(child->host_key_blob, blob, SSH_KEY_BLOB_SIZE);
 	child->privileged = (int)privileged;
 
@@ -265,6 +271,8 @@ sshd_child_sign(
 		ssh_buf_free(&reply);
 		return EIO;
 	}
+
+	/* Appends the signed blob to the output. */
 	ssh_buf_put_bytes(out, blob, blob_size);
 	ssh_buf_free(&reply);
 	written = ssh_buf_error(out);
@@ -298,6 +306,8 @@ sshd_child_ask(
 		ssh_buf_free(&reply);
 		return EIO;
 	}
+
+	/* Takes the result code from the reply. */
 	*result = ssh_load_be32(reply.data);
 	ssh_buf_free(&reply);
 
@@ -328,6 +338,8 @@ sshd_child_flush(
 			ssh_transport_written(transport, (size_t)written);
 			continue;
 		}
+
+		/* Retries an interrupted write and gives up on any other failure. */
 		if (written < 0 && errno == EINTR)
 			continue;
 		if (written < 0 &&

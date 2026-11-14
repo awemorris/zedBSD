@@ -229,6 +229,8 @@ sshd_monitor_run_program(
 		syslog(LOG_AUTH | LOG_ERR, "monitor: the settings cannot be passed on");
 		goto done;
 	}
+
+	/* Sets up the monitor state with the settings and the host key. */
 	sshd_monitor_init(&monitor, &context->config, host_key, context->privileged);
 
 	/* Starts the pre-authentication process and gives it its settings. */
@@ -248,6 +250,8 @@ sshd_monitor_run_program(
 		deadline.tv_sec += (time_t)context->config.login_grace_time;
 		limit = &deadline;
 	}
+
+	/* Serves the pre-authentication process until it ends or the grace time runs out. */
 	served = monitor_serve(&monitor, socket_end, limit, &started);
 
 	/* Ends the pre-authentication process whatever happened: it has nothing more to do. */
@@ -370,6 +374,7 @@ sshd_monitor_handle(
 		} else if (type == SSH_MON_PASSWORD_LOGIN) {
 			handled = monitor_password_login(monitor, body, size, arrived, reply);
 		}
+
 		break;
 	case SSHD_STAGE_GRANTED:
 		if (type == SSH_MON_SIGN) {
@@ -379,6 +384,7 @@ sshd_monitor_handle(
 			if (handled == 0)
 				*next = SSHD_NEXT_START_SESSION;
 		}
+
 		break;
 	case SSHD_STAGE_SESSION:
 		if (type == SSH_MON_SIGN) {
@@ -388,6 +394,7 @@ sshd_monitor_handle(
 		} else if (type == SSH_MON_LOGOUT_RECORD) {
 			handled = monitor_logout_record(monitor, body, size, reply);
 		}
+
 		break;
 	default:
 		break;
@@ -491,6 +498,8 @@ sshd_config_put_text(
 	} else if (config->permit_root == SSHD_PERMIT_ROOT_PROHIBIT_PASSWORD) {
 		name = "prohibit-password";
 	}
+
+	/* Refuses a setting that has no name. */
 	if (name == NULL)
 		status = EINVAL;
 	if (status == 0)
@@ -540,6 +549,8 @@ sshd_config_put_text(
 		out->size = start;
 		return EINVAL;
 	}
+
+	/* Compares the parsed settings with the ones that were written. */
 	equal = monitor_config_equal(config, &parsed);
 	if (!equal) {
 		out->size = start;
@@ -605,6 +616,8 @@ monitor_sign(
 		ssh_buf_free(&signature);
 		return EIO;
 	}
+
+	/* Records when the host key signed last. */
 	(void)clock_gettime(CLOCK_MONOTONIC, &monitor->last_sign);
 	monitor->have_last_sign = 1;
 
@@ -782,6 +795,8 @@ monitor_pubkey_login(
 		syslog(LOG_AUTH | LOG_NOTICE, "Failed publickey for %.64s%s ssh2: ED25519 %s", shown, from, fingerprint);
 		status = monitor_put_result(EACCES, reply);
 	}
+
+	/* Fails the monitor when the reply could not be built. */
 	if (status != 0)
 		return EIO;
 
@@ -858,6 +873,8 @@ monitor_password_login(
 		if (allowed == 0)
 			uid = account.pw_uid;
 	}
+
+	/* Checks the password and wipes it. */
 	correct = sshd_password_ok(monitor->config, user, password);
 	ssh_wipe(password, sizeof(password));
 
@@ -874,6 +891,8 @@ monitor_password_login(
 		syslog(LOG_AUTH | LOG_NOTICE, "Failed password for %.64s%s ssh2", shown, from);
 		status = monitor_put_result(EACCES, reply);
 	}
+
+	/* Fails the monitor when the reply could not be built. */
 	if (status != 0)
 		return EIO;
 
@@ -976,10 +995,14 @@ monitor_login_record(
 				slot = index;
 			continue;
 		}
+
+		/* Compares the terminal with the one of the record. */
 		same = strcmp(monitor->records[index].tty, tty);
 		if (same == 0)
 			reason = "the terminal has a record";
 	}
+
+	/* Refuses a new record when every slot is in use. */
 	if (reason == NULL && slot == slots)
 		reason = "no room for another record";
 
@@ -989,6 +1012,8 @@ monitor_login_record(
 		if (status != 0)
 			reason = "not the user's terminal";
 	}
+
+	/* Refuses a process that is not a child of the session. */
 	if (reason == NULL) {
 		status = monitor_pid_is_child(pid, monitor->session_pid, monitor->user_uid);
 		if (status != 0)
@@ -1065,6 +1090,8 @@ monitor_logout_record(
 		monitor->records[index].used = 0;
 		break;
 	}
+
+	/* Logs a refusal. */
 	if (result == EACCES) {
 		/* Logs the refusal with the terminal as the log may show it. */
 		monitor_log_text(tty, shown, sizeof(shown));
@@ -1446,6 +1473,8 @@ monitor_time_add_ms(
 		nanoseconds -= MONITOR_NS_PER_SECOND;
 		time->tv_sec++;
 	}
+
+	/* Stores the nanoseconds. */
 	time->tv_nsec = nanoseconds;
 }
 
@@ -1461,6 +1490,8 @@ monitor_time_before(
 			return 1;
 		return 0;
 	}
+
+	/* Compares the nanoseconds when the seconds are equal. */
 	if (left->tv_nsec < right->tv_nsec)
 		return 1;
 
@@ -1498,6 +1529,8 @@ monitor_wait_until(
 			rest.tv_nsec += MONITOR_NS_PER_SECOND;
 			rest.tv_sec--;
 		}
+
+		/* Sleeps for the rest of the time. */
 		(void)nanosleep(&rest, NULL);
 	}
 }
@@ -1588,6 +1621,8 @@ monitor_put_line(
 		if (kind == MONITOR_WORD_QUOTED)
 			ssh_buf_put_u8(out, '"');
 	}
+
+	/* Ends the line. */
 	ssh_buf_put_u8(out, '\n');
 
 	/* Succeeded: the line is appended (a failure of out is recorded in it). */
@@ -1713,6 +1748,8 @@ monitor_config_body(
 		ssh_buf_free(&blob);
 		return EINVAL;
 	}
+
+	/* Compares the key with the host key of the monitor. */
 	same = memcmp(blob.data, context->host_key_blob, SSH_KEY_BLOB_SIZE);
 	if (same != 0) {
 		ssh_buf_free(&blob);
@@ -1774,6 +1811,8 @@ monitor_start_child(
 		(void)close(pair[1]);
 		return EIO;
 	}
+
+	/* Runs the program in the child. */
 	if (forked == 0) {
 		(void)close(pair[0]);
 		monitor_exec_child(program, mode, client, pair[1]);
@@ -1945,6 +1984,8 @@ monitor_serve(
 				status = handled;
 				break;
 			}
+
+			/* Reports the grant when this message moved the stage from the pre-authentication to granted. */
 			if (before == SSHD_STAGE_PREAUTH && monitor->stage == SSHD_STAGE_GRANTED)
 				monitor_report_grant(started);
 
@@ -1973,6 +2014,8 @@ monitor_serve(
 			status = ETIMEDOUT;
 			break;
 		}
+
+		/* Waits for the socket to be readable within the timeout. */
 		waiting.fd = socket_end;
 		waiting.events = POLLIN;
 		waiting.revents = 0;
@@ -1983,6 +2026,8 @@ monitor_serve(
 			status = EIO;
 			break;
 		}
+
+		/* Keeps waiting when no input arrived. */
 		if (ready == 0)
 			continue;
 
@@ -1994,10 +2039,14 @@ monitor_serve(
 			status = EIO;
 			break;
 		}
+
+		/* Treats the end of the input as a closed peer. */
 		if (got == 0) {
 			status = EPIPE;
 			break;
 		}
+
+		/* Appends the bytes that were read to the input. */
 		ssh_buf_put_bytes(&input, chunk, (size_t)got);
 		status = ssh_buf_error(&input);
 		if (status != 0) {

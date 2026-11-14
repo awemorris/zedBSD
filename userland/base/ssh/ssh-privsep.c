@@ -304,9 +304,12 @@ mon_write_all(
 			/* The descriptor failed or the other side closed. */
 			return EIO;
 		}
+
+		/* Treats a zero-byte write as a closed descriptor. */
 		if (written == 0)
 			return EIO;
 
+		/* Counts the bytes that were written. */
 		done += (size_t)written;
 	}
 

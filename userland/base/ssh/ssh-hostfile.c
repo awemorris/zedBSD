@@ -86,6 +86,7 @@ ssh_pattern_match(
 	unsigned string_byte;
 	int have_star;
 
+	/* Starts both scans at the beginning with no star seen. */
 	pattern_at = 0;
 	string_at = 0;
 	star_pattern = 0;
@@ -161,6 +162,7 @@ ssh_pattern_list_match(
 	int positive;
 	int matched;
 
+	/* Starts at the first entry of the list. */
 	position = 0;
 	positive = 0;
 
@@ -225,6 +227,7 @@ ssh_authorized_keys_find(
 	int more;
 	int error;
 
+	/* Starts at the beginning of the file with no entries counted. */
 	offset = 0;
 	count = 0;
 
@@ -321,6 +324,7 @@ ssh_known_hosts_check(
 	int more;
 	int error;
 
+	/* Starts at the beginning of the file with no entries counted. */
 	offset = 0;
 	count = 0;
 	revoked = 0;
@@ -380,6 +384,8 @@ ssh_known_hosts_check(
 				count++;
 				continue;
 			}
+
+			/* Marks the key revoked when the line names the same key. */
 			same_key = hostfile_same_key(key.public_key, public_key);
 			if (same_key)
 				revoked = 1;
@@ -521,6 +527,7 @@ ssh_known_hosts_remove(
 	int more;
 	int error;
 
+	/* Starts at the beginning of the file with no entries counted. */
 	offset = 0;
 	count = 0;
 
@@ -785,6 +792,7 @@ hostfile_split_known(
 	size_t key_start;
 	int is_revoked;
 
+	/* Starts at the beginning of the line with no marker and no hash. */
 	position = start;
 	parsed->marker = HOSTFILE_MARKER_NONE;
 	parsed->hashed = 0;
@@ -924,6 +932,8 @@ hostfile_make_name(
 		name[length] = digits[count];
 		length++;
 	}
+
+	/* Ends the name and reports its length. */
 	name[length] = '\0';
 	*name_size = length;
 
@@ -962,8 +972,11 @@ hostfile_same_key(
 	const uint8_t *left,
 	const uint8_t *right)
 {
+	int different;
+
 	/* A difference in any byte makes the keys different. */
-	if (memcmp(left, right, SSH_ED25519_PUBLIC) != 0)
+	different = memcmp(left, right, SSH_ED25519_PUBLIC);
+	if (different != 0)
 		return 0;
 
 	/* The keys are equal. */
@@ -981,6 +994,7 @@ hostfile_text_is(
 	const char *expected)
 {
 	size_t expected_size;
+	int different;
 
 	/* A different length is a different text. */
 	expected_size = strlen(expected);
@@ -988,7 +1002,8 @@ hostfile_text_is(
 		return 0;
 
 	/* The same length with different bytes is a different text. */
-	if (memcmp(text, expected, size) != 0)
+	different = memcmp(text, expected, size);
+	if (different != 0)
 		return 0;
 
 	/* The two texts are equal. */
