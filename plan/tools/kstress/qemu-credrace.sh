@@ -3,7 +3,7 @@
 # a thread acting as root after another dropped, a sleeper, si_uid) as root on an 8-CPU guest, then the guest must
 # still answer.
 #   [ROUNDS=2000] sh plan/tools/kstress/qemu-credrace.sh IMAGE
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES='--file /root/credrace=OUT/credrace-zedbsd'
+# IMAGE: plan/tools/posix/config-amd64-serial.mk with ROOTFS_EXTRA_FILES='--file /root/credrace=OUT/credrace-zedbsd'
 # (OUT from plan/tools/kstress/build.sh).  W is build/tmp/qemu-credrace (a fresh run each time).  The last line
 # is "qemu-credrace: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

@@ -1,9 +1,13 @@
-# The rpi4 image of the kernel's boot check: the port's configuration with
-# only the programs a text login needs, so the image builds without the
-# external packages.
-#   make ZEDBSD_CONFIG=plan/tools/boot-images/config-rpi4-boot.mk BUILD=build/<dir> disk-image
+# The rpi4 image of the kernel's boot check: the SD card's configuration
+# (plan/tools/rpi4/config-rpi4-sd.mk) with only the programs a text login
+# needs, so the image builds without the external packages.
+#   make CONFIGMK=plan/tools/boot-images/config-rpi4-boot.mk BUILD=build/<dir> disk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-include plan/tools/rpi4/config-rpi4-sd.mk
-ZEDBSD_GRAPHICAL_BOOT := n
-ZEDBSD_GRAPHICAL_LOGIN := n
-ZEDBSD_USER_PROGRAMS := cat chown echo login ls mkdir sh uname
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/plan/tools/rpi4/config-rpi4-sd.mk
+override CONFIG_BOOT_SPLASH := n
+override CONFIG_GRAPHICAL_LOGIN := n
+override CONFIG_ROOTFS_DEVELOPMENT := n
+override CONFIG_USERLAND_PROGRAMS := cat chown echo login ls mkdir sh uname

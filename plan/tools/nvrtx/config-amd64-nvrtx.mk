@@ -1,5 +1,5 @@
 # ws037-p004: the image for the nvrtx runs on the RTX 2070 handed to a QEMU guest by VFIO
-# (fb1f6afee: plan/ws037/phase004/phase.md section 3).  The CI amd64 image (config/ci/config-amd64.mk) with:
+# (fb1f6afee: plan/ws037/phase004/phase.md section 3).  The CI amd64 image (config/config.x86_64.mk) with:
 #   - the nvrtx driver built in (CONFIG_DRIVER_PCI_NVRTX, on by default since 2026-10-15),
 #   - the GSP firmware package (nvidia-gsp-firmware; its license is accepted first with
 #     "yes | make firmware-licenses", as for every image with a firmware package),
@@ -16,14 +16,18 @@
 #     taken-over head, the GPU device); fb1f6afee: plan/ws037/phase004 to phase006 give what each run must show.
 # Build one image per run, each into its own BUILD:
 #   plan/tools/guest/test-image.sh --no-harness plan/tools/nvrtx/config-amd64-nvrtx.mk build/ws037-nvrtx/r0 NVRTX_RUN=R0
-include config/ci/config-amd64.mk
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/config/config.x86_64.mk
+include $(TEST_TREE)/mk/platform-x86_64/defaults.mk
 
-CONFIG_DRIVER_PCI_NVRTX := y
-ZEDBSD_USER_PROGRAMS += nvidia-gsp-firmware
+override CONFIG_DRIVER_PCI_NVRTX := y
+override CONFIG_USERLAND_PROGRAMS += nvidia-gsp-firmware
 
-ZEDBSD_GRAPHICAL_BOOT := n
-ZEDBSD_GRAPHICAL_LOGIN := n
-ZEDBSD_BOOT_KERNEL_MESSAGES := y
+override CONFIG_BOOT_SPLASH := n
+override CONFIG_GRAPHICAL_LOGIN := n
+override CONFIG_QUIET_BOOT := n
 
 NVRTX_RUN ?= R0
 ifeq ($(NVRTX_RUN),R0)
@@ -32,7 +36,7 @@ endif
 # ws037-p006 method A: the main image's default boot (the console kept through the GSP boot and shown on the head).
 ifeq ($(NVRTX_RUN),RA)
 ZEDBSD_BOOT_EXTRA_LINES :=
-ZEDBSD_USER_PROGRAMS += display-inventory display-control
+override CONFIG_USERLAND_PROGRAMS += display-inventory display-control
 endif
 ifeq ($(NVRTX_RUN),R1)
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.gsp=1 nvrtx.stop=devinit
@@ -76,13 +80,13 @@ endif
 # and the display probes that drive it from the serial console (display-inventory, display-control).
 ifeq ($(NVRTX_RUN),R8c)
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.gsp=1 nvrtx.disp.test=1
-ZEDBSD_USER_PROGRAMS += display-inventory display-control
+override CONFIG_USERLAND_PROGRAMS += display-inventory display-control
 endif
 # ws037-p006 P8c (2): R8c's device with the display's events, refresh, cursor plane, blob sharing and scanout constraints,
 # and the probe that drives the new parts from the serial console (display-scanout) besides R8c's two.
 ifeq ($(NVRTX_RUN),R8d)
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.gsp=1 nvrtx.disp.test=1
-ZEDBSD_USER_PROGRAMS += display-inventory display-control display-scanout
+override CONFIG_USERLAND_PROGRAMS += display-inventory display-control display-scanout
 endif
 # ws037-p007 D1: R7 with the work channel the GPU device will keep (stage P9w: the golden context, the channel with
 # the 3D and compute objects, its first fence), stopped again at the end.
@@ -98,22 +102,22 @@ endif
 # renderer (nvrtx.vk=1, off by default), so the console is kept through the GSP boot and the compositor starts on the RTX;
 # RAd is RAk with the kernel lines on the screen and no boot logo, to see the last mark when RAk fails (phase007 8.14).
 ifeq ($(NVRTX_RUN),RAk)
-ZEDBSD_GRAPHICAL_BOOT := y
-ZEDBSD_GRAPHICAL_LOGIN := y
-ZEDBSD_BOOT_KERNEL_MESSAGES := n
+override CONFIG_BOOT_SPLASH := y
+override CONFIG_GRAPHICAL_LOGIN := y
+override CONFIG_QUIET_BOOT := y
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.vk=1
-ZEDBSD_USER_PROGRAMS += display-inventory
+override CONFIG_USERLAND_PROGRAMS += display-inventory
 endif
 ifeq ($(NVRTX_RUN),RAd)
-ZEDBSD_GRAPHICAL_BOOT := n
-ZEDBSD_GRAPHICAL_LOGIN := y
-ZEDBSD_BOOT_KERNEL_MESSAGES := y
+override CONFIG_BOOT_SPLASH := n
+override CONFIG_GRAPHICAL_LOGIN := y
+override CONFIG_QUIET_BOOT := n
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.vk=1
-ZEDBSD_USER_PROGRAMS += display-inventory
+override CONFIG_USERLAND_PROGRAMS += display-inventory
 endif
 ifeq ($(NVRTX_RUN),R9v)
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.gsp=1 nvrtx.disp.test=1 nvrtx.vk=1
-ZEDBSD_USER_PROGRAMS += vkquad display-events
+override CONFIG_USERLAND_PROGRAMS += vkquad display-events
 endif
 # ws037-p007 D6: the desktop on the RTX: R9v's renderer, the takeover with the driver's own surface at once
 # (nvrtx.disp.own=1: the test's 16 s of waits would outlast sessiond's 15 s wait for the display, T1-676), with the
@@ -121,10 +125,10 @@ endif
 # starts the compositor on /dev/gpu0, the RTX), the compositor's capture channel and keiland-shot (what it composes, to
 # a PNG fetched over SSH), and R9v's two probes.
 ifeq ($(NVRTX_RUN),R9k)
-ZEDBSD_GRAPHICAL_BOOT := y
-ZEDBSD_GRAPHICAL_LOGIN := y
-ZEDBSD_BOOT_KERNEL_MESSAGES := n
+override CONFIG_BOOT_SPLASH := y
+override CONFIG_GRAPHICAL_LOGIN := y
+override CONFIG_QUIET_BOOT := y
 ZEDBSD_BOOT_EXTRA_LINES := nvrtx.gsp=1 nvrtx.disp.own=1 nvrtx.vk=1
 ZEDBSD_TEST_SCREEN_CAPTURE := y
-ZEDBSD_USER_PROGRAMS += vkquad display-events keiland-shot
+override CONFIG_USERLAND_PROGRAMS += vkquad display-events keiland-shot
 endif

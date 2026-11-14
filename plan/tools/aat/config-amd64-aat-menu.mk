@@ -4,7 +4,10 @@
 # A test image only.  Build:
 #   plan/tools/guest/test-image.sh plan/tools/aat/config-amd64-aat-menu.mk BUILD \
 #	--file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png
-include plan/tools/titlebar/config-amd64-menu.mk
-CONFIG_INPUT_TEST_INJECT := y
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/plan/tools/titlebar/config-amd64-menu.mk
+override CONFIG_INPUT_TEST_INJECT := y
 ZEDBSD_TEST_SCREEN_CAPTURE := y
-ZEDBSD_USER_PROGRAMS += aat-input keiland-shot
+override CONFIG_USERLAND_PROGRAMS += aat-input keiland-shot

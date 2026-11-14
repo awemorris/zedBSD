@@ -1,6 +1,6 @@
 #!/bin/sh
 # WS103: builds the Venus guest image of the GPU-boundary tests (plan/tools/gpu-boundary/config-amd64-forge.mk, the
-# criteria image's config: the generated wallpapers come from ZEDBSD_KEILAND_WALLPAPERS there).
+# criteria image's config: the generated wallpapers come from KEILAND_WALLPAPERS there).
 # ws136-p001 (2026-10-04): the image is a config.mk build plus files of the tree (plan/tools/guest/test-image.sh).
 # The fonts come with the compositor's package (userland/desktop/fonts/); the wallpaper is
 # userland/desktop/wallpapers/Birch-Lake.png.

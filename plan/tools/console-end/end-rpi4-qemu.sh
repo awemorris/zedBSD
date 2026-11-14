@@ -7,7 +7,7 @@
 #
 # BUILD_DIR holds the image of plan/tools/console-end/config-rpi4-end.mk (hdd-image.img,
 # vmunix and its symbols kernel.elf beside it):
-#   make ZEDBSD_CONFIG=plan/tools/console-end/config-rpi4-end.mk BUILD=BUILD_DIR disk-image
+#   make CONFIGMK=plan/tools/console-end/config-rpi4-end.mk BUILD=BUILD_DIR disk
 #
 # One run: the overlay of the image, QEMU raspi4b with its QMP socket and a
 # gdbstub (port GDB_PORT, default 2221), then

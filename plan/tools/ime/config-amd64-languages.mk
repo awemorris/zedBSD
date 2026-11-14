@@ -3,5 +3,8 @@
 # settings tool.  Build (the result is BUILD/hdd-image.img):
 #   plan/tools/guest/test-image.sh plan/tools/ime/config-amd64-languages.mk BUILD \
 #     --file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png
-include plan/tools/files/config-amd64-files.mk
-ZEDBSD_USER_PROGRAMS += keiland-ime ime-dict-ja ime-dict-skk ime-probe settings keiland-settings
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/plan/tools/files/config-amd64-files.mk
+override CONFIG_USERLAND_PROGRAMS += ime dict skk-dict ime-probe settings keiland-settings

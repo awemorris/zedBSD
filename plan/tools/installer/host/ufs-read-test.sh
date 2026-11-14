@@ -6,7 +6,7 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 cd "$(dirname "$0")/../../../.."
-make -s ZEDBSD_CONFIG=config/ci/config-amd64.mk build/zedimage-host
+make -s CONFIGMK=config/config.x86_64.mk build/x86_64/zedimage-host
 mkdir -p build/installer-test
 out=$(mktemp -d build/installer-test/ufs-read.XXXXXX)
 tree=$out/tree
@@ -22,6 +22,6 @@ while [ $i -lt 400 ]; do
 	i=$((i + 1))
 done
 ln -s boot "$tree/link"
-build/zedimage-host ufs 67108864 "$tree" "$out/root.ufs" > "$out/zedimage.txt" 2>&1
+build/x86_64/zedimage-host ufs 67108864 "$tree" "$out/root.ufs" > "$out/zedimage.txt" 2>&1
 cc -std=c99 -Wall -Wextra -Werror -I. -o "$out/ufs-read-test" plan/tools/installer/host/ufs-read-test.c bootloader/common/ufs-read.c
 "$out/ufs-read-test" "$out/root.ufs" "$tree"

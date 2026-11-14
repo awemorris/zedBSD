@@ -5,7 +5,7 @@
 # The fonts come with the compositor's package (userland/desktop/fonts/); the wallpaper is
 # userland/desktop/wallpapers/Birch-Lake.png.
 #
-#   plan/ws035/tests/build-login-image.sh [BUILD] [graphical] [TARGET...]     (default build/amd64, disk-image)
+#   plan/ws035/tests/build-login-image.sh [BUILD] [graphical] [TARGET...]     (default build/amd64, disk)
 # With "graphical" the image boots graphically (config-amd64-graphical.mk: logo, kmsg=quiet, login=graphical);
 # "graphical-network" adds the networkd stand-in (config-amd64-graphical-network.mk, ws035-p104).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
