@@ -4,9 +4,10 @@
 # guest file, and judges by counting the compositor's KWL lines in that file with commands on the serial line (the
 # console's text is never read for the verdict).
 #
-# Steps: the start (the timer thread in KWL THREADS, the capture listening); 30 s idle (the KWL PERF windows over it:
-# at most two passes in ten seconds and no timeout, where a 10 ms pace makes a thousand of each: the PING's pass
-# and the clock's minute, on its timer); the
+# Steps: the start (the timer thread in KWL THREADS, the capture listening); the start's own deadlines passed (the
+# network's grace, then the log quiet for 12 s); 30 s idle (the KWL PERF windows over it: at most two passes in ten seconds and no timeout,
+# where a 10 ms pace makes a thousand of each: the PING's pass, and four more for a minute of the clock, its timer's
+# pass and its frame's); the
 # wallpaper changed twice with keiland-settings (the loader's end wakes the loop: each picture shown within 30 s);
 # two captures with keiland-shot at once (the second waits for the first's sending, whose end wakes the loop: both
 # written within 30 s); 20 s idle again; a USB keyboard plugged with QMP (taken from the system's event, the time from
@@ -162,22 +163,27 @@ wait_count() {
 rate() {
 	tries=0
 	while [ "$tries" -lt 4 ]; do
-		line=$(serial "sh /root/perf-rate.sh $1 $log" 2>/dev/null | tr -d '\r' | grep -E '^ms=[0-9]+ passes=[0-9]+ timeouts=[0-9]+ lines=[0-9]+$' | sed -n '$p' || true)
-		if [ -n "$line" ]; then
-			echo "$line"
+		answer=$(serial "sh /root/perf-rate.sh $1 $log" 2>/dev/null | tr -d '\r' || true)
+		line=$(echo "$answer" | grep -E '^ms=[0-9]+ passes=[0-9]+ timeouts=[0-9]+ lines=[0-9]+$' | sed -n '$p' || true)
+		clock=$(echo "$answer" | grep -E '^clock=[0-9]+$' | sed -n '$p' || true)
+		if [ -n "$line" ] && [ -n "$clock" ]; then
+			echo "$line $clock"
 			return 0
 		fi
 		tries=$((tries + 1))
 		sleep 1
 	done
-	echo "ms=0 passes=0 timeouts=0 lines=0"
+	echo "ms=0 passes=0 timeouts=0 lines=0 clock=0"
 }
 
 # An idle stretch of SECONDS: its KWL PERF windows (printed by the pass a capture's PING brings after it) hold at most
-# two passes in ten seconds and no timeout at all (the PING's pass, and the clock's minute, which is its timer's
-# pass; a 10 ms pace makes a thousand of each).  The window under way is ended first (a PING's pass, five seconds after it began), so that the windows
-# summed hold only the idle stretch; they cover it but for the last one when a pass printed a window less than five
-# seconds before the last PING.
+# two passes in ten seconds and no timeout at all (the PING's pass; a 10 ms pace makes a thousand of each), and
+# CLOCK_PASSES more for each minute of the clock in them (KWL PERF timers clock=: its timer's pass draws the bar's
+# time, and the frame's completions wake the loop again; a 20 s stretch has a minute in it one time in three).  The
+# window under way is ended first (a PING's pass, five seconds after it began), so that the windows summed hold only
+# the idle stretch; they cover it but for the last one when a pass printed a window less than five seconds before the
+# last PING.
+CLOCK_PASSES=4
 idle() {
 	name=$1
 	sleep 6
@@ -191,10 +197,11 @@ idle() {
 	ms=$(echo "$numbers" | sed 's/^ms=\([0-9]*\) .*/\1/')
 	passes=$(echo "$numbers" | sed 's/.* passes=\([0-9]*\) .*/\1/')
 	timeouts=$(echo "$numbers" | sed 's/.* timeouts=\([0-9]*\) .*/\1/')
-	if [ "$ms" -ge $(( ($2 - 5) * 1000 )) ] && [ $(( passes * 10000 )) -le $(( ms * 2 )) ] && [ "$timeouts" -eq 0 ]; then
+	clocks=$(echo "$numbers" | sed 's/.* clock=\([0-9]*\)$/\1/')
+	if [ "$ms" -ge $(( ($2 - 5) * 1000 )) ] && [ $(( (passes - clocks * CLOCK_PASSES) * 10000 )) -le $(( ms * 2 )) ] && [ "$timeouts" -eq 0 ]; then
 		say "$name: PASS $numbers"
 	else
-		fail_step "$name" "$numbers (wanted ms>=$(( ($2 - 5) * 1000 )), passes<=2 in 10 s and timeouts 0)"
+		fail_step "$name" "$numbers (wanted ms>=$(( ($2 - 5) * 1000 )), passes<=2 in 10 s and $CLOCK_PASSES a clock minute, timeouts 0)"
 	fi
 }
 
@@ -208,7 +215,26 @@ if wait_count 'KWL MODE window' 1 120 && wait_count 'KWL THREADS .*timer' 1 30 &
 else
 	fail_step start "no window mode, timer thread or capture (see $out/kwl.log)"
 fi
-sleep 10
+
+# The start's own deadlines first: Home's picture baked in the quiet after the start, and the network's grace, 30 s
+# after its opening, whose end changes the bar's network icon (the glass looks' maps are baked again in the quiet
+# after it).  The grace's timer has fired (KWL PERF timers network-grace, at most 60 s), then the log has not grown
+# for 12 s (at most 90 s).
+settle_start=$(date +%s)
+wait_count 'KWL PERF timers.*network-grace' 1 60 || say "settle: no network grace within 60 s"
+settle_lines=$(count '')
+settle_since=$settle_start
+while [ $(( $(date +%s) - settle_start )) -lt 90 ]; do
+	sleep 3
+	lines_now=$(count '')
+	if [ "$lines_now" != "$settle_lines" ]; then
+		settle_lines=$lines_now
+		settle_since=$(date +%s)
+	elif [ $(( $(date +%s) - settle_since )) -ge 12 ]; then
+		break
+	fi
+done
+say "settle: quiet after $(( $(date +%s) - settle_start )) s"
 
 # Idle.
 idle idle-30 30

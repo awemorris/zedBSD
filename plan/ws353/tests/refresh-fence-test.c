@@ -759,6 +759,14 @@ step_frames(
 		if (whole == 1U)
 			single++;
 	}
+	/* Each late fence told: its wait, and where its registration's end fell in the period of the first signal's grid. */
+	for (index = 0U; index < TEST_FRAMES; index++) {
+		if (latencies[index] <= period_us + 4000U)
+			continue;
+		test_say(state, "frames: late fence=%u wait=%llu us registration=%llu us ended at %llu us of the period",
+		    index, (unsigned long long)latencies[index], (unsigned long long)costs[index],
+		    (unsigned long long)(registered[index] >= times[0] ? (registered[index] - times[0]) % period_us : 0U));
+	}
 	qsort(latencies, TEST_FRAMES, sizeof(latencies[0]), test_compare);
 	qsort(costs, TEST_FRAMES, sizeof(costs[0]), test_compare);
 
