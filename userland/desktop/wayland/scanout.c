@@ -929,6 +929,8 @@ scanout_frame(
 		kwl_scanout_leave(server, KWL_SCANOUT_REFUSED);
 		return;
 	}
+
+	/* A lent image still being adopted waits for its end. */
 	if (chain->shown == 0U && chain->flight < 0)
 		scanout_wait(server, &scanout_lend_timer, "scanout-lend", chain->lent_ms + SCANOUT_ADOPT_MS + 1U);
 

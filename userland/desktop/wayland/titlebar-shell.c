@@ -3581,7 +3581,7 @@ shell_repeat_start(
 
 /*
  * Presses the key held in the field with the keyboard again when its next
- * press is due (ws074-p229): after the keyboards' delay, then at their
+ * press is due: after the keyboards' delay, then at their
  * rate, as wl_keyboard.repeat_info tells the applications to repeat.  Each
  * press arms the timer for the next one.
  */
@@ -3624,8 +3624,8 @@ shell_repeat_fired(
 
 	/*
 	 * The next press an interval after this one was due, from now when the
-	 * loop fell a whole interval behind (as the input method repeats,
-	 * BUG-172), so that a late pass does not type a burst.
+	 * loop fell a whole interval behind (as the input method repeats),
+	 * so that a late pass does not type a burst.
 	 */
 	interval = 1000U / (uint64_t)server->repeat_rate;
 	if (interval == 0U)

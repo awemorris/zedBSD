@@ -377,7 +377,7 @@ kwl_displays_key(
  * Sets the light displays.conf keeps once a session's first frame is up
  * (D-BRIGHT-BOOT: the panel is not lit by the driver before it); a light
  * not kept stays as the firmware left it.  A displays result held back too
- * long (BUG-266) is answered by its timer.
+ * long is answered by its timer.
  */
 void
 kwl_displays_tick(

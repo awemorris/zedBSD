@@ -305,6 +305,8 @@ vulkan_wsi_display_node_hotplug(
 			vulkan_wsi_display_node_fence_cancel(physical, entries[index].node, entries[index].fd);
 			close(entries[index].fd);
 		}
+
+		/* Reports why the registration failed. */
 		return error;
 	}
 

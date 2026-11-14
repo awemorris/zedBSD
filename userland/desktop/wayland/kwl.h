@@ -1403,7 +1403,7 @@ struct kwl_server {
 	 * seat_fd: the socket sessiond opens the input devices on for the
 	 * greeter or the session (--seat-fd, -1 for none);
 	 * auth_fd, control_fd and seat_fd are handed to libkeiland-backend,
-	 * which speaks on them (ws131-p006);
+	 * which speaks on them;
 	 * handed_over: the display's hand-over (handoff.c, ws035-p101) is done;
 	 * logout_ms: when Log Out asked sessiond for a greeter (0: it did not).
 	 */

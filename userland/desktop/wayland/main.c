@@ -296,7 +296,8 @@ main(
 	 * program, the input method, App Home's programs) and starts it again
 	 * when it has to; the loop does not look for it on a clock.
 	 */
-	if (child_wake_install() != 0)
+	error = child_wake_install();
+	if (error != 0)
 		return 1;
 	backend_options.threads.wake_descriptor = server.wake[1];
 	backend_options.threads.start = kwl_thread_start_lent;
@@ -559,13 +560,15 @@ child_wake_install(
 	void)
 {
 	struct sigaction action;
+	int status;
 
 	/* Only ends and stops of children matter for the reaping: ends alone. */
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = child_ended;
 	(void)sigemptyset(&action.sa_mask);
 	action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	if (sigaction(SIGCHLD, &action, NULL) != 0)
+	status = sigaction(SIGCHLD, &action, NULL);
+	if (status != 0)
 		return errno;
 
 	/* Succeeded: an ended child wakes the loop. */
@@ -1065,6 +1068,7 @@ event_loop(
 	int flushed;
 	int error;
 	int remove;
+	int wakes;
 	const char *why;
 
 	/* A finite monotonic deadline covers both idle service and active clients. */
@@ -1274,7 +1278,8 @@ event_loop(
 		 * A backend that does not wake the loop has its areas read on every
 		 * pass, as if each pass were woken.
 		 */
-		if (!kl_backend_wakes(server->backend))
+		wakes = kl_backend_wakes(server->backend);
+		if (!wakes)
 			server->woken = 1U;
 
 		/*
@@ -1658,6 +1663,8 @@ kwl_clock_follow(
 		kwl_timer_wake_at(server, &server->clock_timer, "clock", kwl_milliseconds() + 1000U);
 		return;
 	}
+
+	/* Counts the milliseconds the wall clock has run in this minute. */
 	into = (uint64_t)(wall.tv_sec % 60) * 1000U + (uint64_t)wall.tv_nsec / 1000000U;
 
 	/* The rest of it, and a little more so that the minute has turned. */
@@ -1837,6 +1844,8 @@ input_scan_pace(
 		kwl_timer_wake_at(server, &server->input_scan_timer, "input-scan", server->input_scan_time + KWL_INPUT_SCAN_MS);
 		return;
 	}
+
+	/* A backend that tells the comings needs no scan. */
 	kwl_timer_set(server, &server->input_scan_timer, UINT64_MAX);
 }
 

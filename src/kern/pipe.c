@@ -572,6 +572,7 @@ fifo_open_file(
 
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
+	/* The polls following the pipe look again. */
 	poll_notify_object(pipe);
 
 	/* Reports the opened FIFO. */

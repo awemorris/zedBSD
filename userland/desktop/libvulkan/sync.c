@@ -1697,9 +1697,11 @@ sync_fences_wait(
 					if (external_pending)
 						first_external = sync;
 
+					/* A display-event fence is the one the wait registers. */
 					if (event_pending)
 						first_event = sync;
 
+					/* The first fence's own wake decides whether to sleep at all. */
 					first_woken = woken;
 					first_pending = VK_FALSE;
 				}
@@ -1794,6 +1796,7 @@ sync_fences_wait(
 			if (first_event != NULL)
 				descriptor_count = sync_wait_events(descriptors, descriptor_count, first_event);
 
+			/* Sleeps until the required fence or a wake. */
 			status = sync_notification_poll(device->object.context, delay, descriptors, descriptor_count, 1U, VK_FALSE);
 		} else if (!all && !missing) {
 			/*
@@ -1827,6 +1830,7 @@ sync_fences_wait(
 					descriptor_count = sync_wait_events(descriptors, descriptor_count, sync);
 			}
 
+			/* Sleeps until a candidate fence or a wake. */
 			status = sync_notification_poll(device->object.context, delay, descriptors, descriptor_count, checked_count, completions);
 		} else {
 			/* A marker the pin missed is pinned by the next pass at once: it does not sleep. */
@@ -1866,6 +1870,7 @@ sync_wait_capacity(
 		if (sync->event_fence_count > SIZE_MAX / sizeof(struct pollfd) - total)
 			return VK_ERROR_OUT_OF_HOST_MEMORY;
 
+		/* Counts this fence's registrations. */
 		total += sync->event_fence_count;
 	}
 

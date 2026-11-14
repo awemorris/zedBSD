@@ -7,7 +7,7 @@
 
 /*
  * The seat's devices: the display (/dev/gpu*), the panel's light
- * (/dev/backlight/backlight*, ws113-p013), and the security keys' raw HID
+ * (/dev/backlight/backlight*), and the security keys' raw HID
  * nodes
  * (/dev/input/hidraw*) and the smart card slots (/dev/smartcard*,
  * ws161-p002, the user's approval U3) and the cameras (/dev/cam*) belong
@@ -28,7 +28,7 @@
  * again under that name (a key plugged in again).  A node that appears for
  * the first time comes with devfs's own owner.  The devices are given when
  * the greeter or the session starts, and again only when the system's
- * events on /dev/system (ws132-p002) tell of a device that came: the raw
+ * events on /dev/system tell of a device that came: the raw
  * HID nodes post the input devices' class, the smart card slots the USB
  * devices', the cameras their own.  The displays and the backlights post
  * none: one that attaches after the greeter or the session started is not

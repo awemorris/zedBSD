@@ -121,9 +121,14 @@ poll_notify_object(
 {
 	struct poll_waiter *waiter;
 	unsigned long irq;
+	unsigned ready;
+	int follows;
+
+	/* Reads whether the channel exists yet. */
+	ready = atomic_load_acquire(&channel_ready);
 
 	/* Ignores a change before the channel exists. */
-	if (atomic_load_acquire(&channel_ready) == 0)
+	if (ready == 0)
 		return;
 
 	/* Counts the change and wakes the polls that follow the object. */
@@ -131,7 +136,17 @@ poll_notify_object(
 
 	channel.sequence++;
 	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next) {
-		if (waiter->every || poll_follows(waiter, object))
+		/* A poll that waits for every change wakes whatever the object is. */
+		if (waiter->every) {
+			waitq_wake_all(&waiter->waitq);
+			continue;
+		}
+
+		/* Asks whether this poll follows the changed object by name. */
+		follows = poll_follows(waiter, object);
+
+		/* Wakes the poll that follows this object. */
+		if (follows != 0)
 			waitq_wake_all(&waiter->waitq);
 	}
 
@@ -166,6 +181,7 @@ poll_wait_object(
 {
 	struct poll_waiter *waiter;
 	struct thread *thread;
+	int follows;
 
 	/* Only a thread scanning for a poll follows objects. */
 	thread = thread_current();
@@ -176,13 +192,24 @@ poll_wait_object(
 	/* The descriptor named an object. */
 	waiter->noted = 1U;
 
-	/* Each object once; one too many makes the poll follow every change. */
-	if (object == NULL || poll_follows(waiter, object))
+	/* An unnamed object has nothing to follow. */
+	if (object == NULL)
 		return;
+
+	/* Asks whether the poll follows this object already. */
+	follows = poll_follows(waiter, object);
+
+	/* Each object once. */
+	if (follows != 0)
+		return;
+
+	/* One too many makes the poll follow every change. */
 	if (waiter->count >= POLL_OBJECTS) {
 		waiter->every = 1U;
 		return;
 	}
+
+	/* Remembers the object the poll follows. */
 	waiter->objects[waiter->count] = object;
 	waiter->count++;
 }
@@ -265,12 +292,18 @@ poll_sleep(
 			break;
 		}
 	}
+
+	/* The waiter is no longer linked. */
 	waiter->next = NULL;
 
 	spin_unlock_irqrestore(&channel.lock, irq);
 
-	/* Reports why the sleep ended. */
-	return error;
+	/* Reports an interruption or a deadline as the reason the sleep ended. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: a change woke the poll. */
+	return 0;
 }
 
 /*
@@ -425,8 +458,10 @@ poll_wait_ready(
 		 * An expired deadline scans once more: a change that came as it
 		 * passed (the system busy past it) is still reported (T1-129).
 		 */
-		if (error == ETIMEDOUT)
-			return poll_scan(process, fds, count, NULL, ready);
+		if (error == ETIMEDOUT) {
+			error = poll_scan(process, fds, count, NULL, ready);
+			return error;
+		}
 
 		/* Another failure of the sleep ends the poll. */
 		if (error != 0 && error != EAGAIN)
@@ -434,8 +469,10 @@ poll_wait_ready(
 
 		/* The same for a deadline that passed while the wake was on its way. */
 		now = sched_ticks();
-		if (deadline != 0 && now >= deadline)
-			return poll_scan(process, fds, count, NULL, ready);
+		if (deadline != 0 && now >= deadline) {
+			error = poll_scan(process, fds, count, NULL, ready);
+			return error;
+		}
 	}
 }
 
@@ -457,6 +494,7 @@ poll_scan(
 	struct thread *thread;
 	nfds_t i;
 	short revents;
+	const void *key;
 	int total;
 	int error;
 
@@ -482,7 +520,8 @@ poll_scan(
 
 		/* The number polled: its slot taken away or replaced wakes the poll (not the object's own name). */
 		if (waiter != NULL && fds[i].fd >= 0) {
-			poll_wait_object(poll_slot_key(process->fd, fds[i].fd));
+			key = poll_slot_key(process->fd, fds[i].fd);
+			poll_wait_object(key);
 			waiter->noted = 0;
 		}
 		/* Negative poll entries intentionally carry no descriptor ownership. */

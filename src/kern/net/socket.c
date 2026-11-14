@@ -458,6 +458,7 @@ socket_set_error(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
+	/* The polls following the socket look again. */
 	poll_notify_object(socket);
 }
 
@@ -545,6 +546,7 @@ socket_close_endpoint(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
+	/* The polls following the socket look again. */
 	poll_notify_object(socket);
 }
 
@@ -584,6 +586,7 @@ socket_release(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
+	/* The polls following the socket look again. */
 	poll_notify_object(socket);
 
 	/* Frees the queued packets. */

@@ -1421,13 +1421,19 @@ notify_slot_pollers(
 	struct filedesc *fd,
 	int descriptor)
 {
+	const void *key;
 	unsigned pollers;
 
 	/* As for the table, only while a poll scans it. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 	pollers = __atomic_load_n(&fd->pollers, __ATOMIC_SEQ_CST);
-	if (pollers != 0)
-		poll_notify_object(poll_slot_key(fd, descriptor));
+	if (pollers != 0) {
+		/* Names the slot a poll of this number follows. */
+		key = poll_slot_key(fd, descriptor);
+
+		/* The polls following the slot look again. */
+		poll_notify_object(key);
+	}
 }
 
 /* Marks a slot free. */

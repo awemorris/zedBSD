@@ -453,6 +453,8 @@ sleep_quiet_since(
 		if (top != NULL && top->fullscreen)
 			inhibiting = 1;
 	}
+
+	/* The inhibited time follows the pass that sees the inhibition begin or end. */
 	if (inhibiting || server->sleep.inhibiting)
 		server->sleep.inhibited_ms = now_ms;
 	server->sleep.inhibiting = (unsigned)inhibiting;
@@ -501,6 +503,8 @@ sleep_idle(
 		server->screen_idle_off = 1U;
 		printf("KWL SLEEP screen off via=idle quiet_ms=%llu\n", (unsigned long long)quiet);
 	}
+
+	/* The screen still lit puts itself out at half the time. */
 	if (limit != 0U && !server->screen_off)
 		sleep_due_lower(due_ms, since + limit / 2U);
 
@@ -530,6 +534,8 @@ sleep_idle(
 		sleep_begin(server, KWL_SLEEP_VIA_REST, now_ms);
 		return;
 	}
+
+	/* A rest still going on ends at its time. */
 	if (sleep->resting)
 		sleep_due_lower(due_ms, since + KWL_SLEEP_REST_MS);
 
@@ -539,6 +545,8 @@ sleep_idle(
 		sleep_begin(server, KWL_SLEEP_VIA_IDLE, now_ms);
 		return;
 	}
+
+	/* The idle sleep, when allowed, comes at the whole time. */
 	if (limit != 0U && allowed)
 		sleep_due_lower(due_ms, since + limit);
 }

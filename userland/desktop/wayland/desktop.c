@@ -326,7 +326,7 @@ kwl_desktop_tick(
 	int32_t height;
 	int error;
 
-	/* The program: started, and started again after its end (kwl_desktop_child_ended); the Welcome once after it (ws164-p002). */
+	/* The program: started, and started again after its end (kwl_desktop_child_ended); the Welcome once after it. */
 	desktop_start(server);
 	desktop_welcome(server);
 

@@ -123,14 +123,14 @@ kwl_schedule(
 	if (server->os_paused != 0)
 		return;
 
-	/* The scheduler's parts are timed (KWL PERF main, ws213-p001 M0), its ticks first; whether a frame was asked for before them. */
+	/* The scheduler's parts are timed (KWL PERF main), its ticks first; whether a frame was asked for before them. */
 	part = kwl_cycles();
 	asked = server->dirty;
 
 	/* The sleep's causes and its course (sleep.c, ws052-p012), before the lock screen's own tick. */
 	kwl_sleep_tick(server);
 
-	/* The light a session keeps once its first frame is up (displays-shell.c, ws113-p005). */
+	/* The light a session keeps once its first frame is up (displays-shell.c). */
 	kwl_displays_tick(server);
 
 	/* The glass look's clock turns over. */

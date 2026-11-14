@@ -232,7 +232,7 @@ kwl_backend_input_found(
 
 /*
  * An input device came or went, or records of the system's events were
- * lost (ws132-p003): the devices are scanned again in the event loop's
+ * lost: the devices are scanned again in the event loop's
  * next pass, once.  A node the scan opens through sessiond's seat socket
  * needs no owner of the seat's user's; one it opens itself is root's and
  * wheel's from its start (no session manager changes it).
