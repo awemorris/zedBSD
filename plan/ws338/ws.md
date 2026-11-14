@@ -23,7 +23,7 @@
 
 | ID | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| p001 | 設計（WS326 p024 の案 a〜e を Phase に分ける、受け入れの数） | O | in-progress（2026-11-15 P1 q2121。設計・review の反映・phase.md は済み、Q1 の確かめ待ち） | WS326 |
+| p001 | 設計（WS326 p024 の案 a〜e を Phase に分ける、受け入れの数） | O | in-progress（2026-11-15 Q1、b82d0fb060 を main に merge 6aeb76a864。Q1 の独立の設計レビューの結果待ち、問い Q338-1〜3 はユーザーへ） | WS326 |
 | [p002](phase002/phase.md) | host の計測の道具（compiler の指定・module の時間・出力の MD5 の一覧・zedBSD 用の bench の build・実機の 1 本の script）と host の基準 | O | planned | p001 |
 | [p003](phase003/phase.md) | Pi 5・5330 の基準の実測と換算の置き換え | O | planned | p002、-O2 が main に、実機 |
 | [p004](phase004/phase.md) | deblock の書き直し | S | planned | p002 |

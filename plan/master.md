@@ -28,12 +28,12 @@
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q2121 | [WS338](ws338/ws.md)（H.264 の decoder を速く）p001 設計。WS353 は completed |
+| P1 | q2125 | [WS328](ws328/ws.md) p007 vec-rrect（Sonnet）。WS338 p001 の設計は merge 済み（問い Q338-1〜3 はユーザーへ） |
 | agy | — | [WS347](ws347/ws.md) RTL の reset は 10 回目（amaterrace-gpu 38593b0e）まで。11 回目は Q1 が 10 回目を確かめてから |
 | P2 | q2122 | [WS328](ws328/ws.md) p004 vec-stroke（Sonnet）。p002・p003 cleared |
 | P3 | q2115 | [WS345](ws345/ws.md) p015 headless の _OWN の道（p011 cleared） |
 | P4 | q2116 | [WS068](ws068/ws.md)（EGL・GL を Vulkan の上に）試験の config と p045 |
-| P5 | q2119 | [WS339](ws339/ws.md)（UEFI の起動の画面を EDID の解像度に）p001 |
+| P5 | q2126 | [WS328](ws328/ws.md) p006 vec-gradient（Sonnet）。WS339 p001 は merge 済み（受け入れの文はユーザーへ、p002 は 5330） |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
 | P7 | q2123 | [WS328](ws328/ws.md) p005 vec-raster（Sonnet） |
 | P8 | q2124 | [WS349](ws349/ws.md)（Pi 5 の HDMI の音）p002 値の表・p003 wire。設計第二版は merge 済み |
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2125 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2127 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

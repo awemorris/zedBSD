@@ -7,11 +7,11 @@
 | P2 | phase-runner-low | ws328 p004 vec-stroke (q2122-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p004` / `agent/p2-ws328p004` | 動いている（2026-11-15 02:0x） | — |
 | P7 | phase-runner-low | ws328 p005 vec-raster (q2123-i01) | `/home/awe/zedBSD-worktrees/p7-ws328p005` / `agent/p7-ws328p005` | 動いている（2026-11-15 02:3x） | — |
 | P8 | phase-runner | ws349 p002 値の表・p003 wire (q2124-i01) | `/home/awe/zedBSD-worktrees/p8-ws349p002` / `agent/p8-ws349p002` | 動いている（2026-11-15 02:3x） | — |
-| P5 | phase-runner | ws339 EDID の解像度 (q2119-i01) | `/home/awe/zedBSD-worktrees/p5-ws339` / `agent/p5-ws339` | 動いている（2026-11-15 01:5x） | — |
+| P5 | phase-runner-low | ws328 p006 vec-gradient (q2126-i01) | `/home/awe/zedBSD-worktrees/p5-ws328p006` / `agent/p5-ws328p006` | 動いている（2026-11-15 02:4x） | — |
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
 | P3 | phase-runner-mid | ws345 p015 (q2115-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p015` / `agent/p3-ws345p015` | 動いている（2026-11-15 01:5x） | — |
 | P4 | phase-runner-mid | ws068 試験の config と p045 (q2116-i01) | `/home/awe/zedBSD-worktrees/p4-ws068` / `agent/p4-ws068` | 動いている（2026-11-15 01:5x） | — |
-| P1 | phase-runner | ws338 p001 設計 (q2121-i01) | `/home/awe/zedBSD-worktrees/p1-ws338` / `agent/p1-ws338` | 動いている（2026-11-15 02:0x） | — |
+| P1 | phase-runner-low | ws328 p007 vec-rrect (q2125-i01) | `/home/awe/zedBSD-worktrees/p1-ws328p007` / `agent/p1-ws328p007` | 動いている（2026-11-15 02:4x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws347 p006 RTL の CAPS (q2010-i01) | `/home/awe/amaterrace-worktrees/p1-ws347rtl` / `ws347-rtl`（amaterrace-gpu） | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の RTL の変更あり、merge しない） | — |
 | P2 | phase-runner-high | ws347 p003 driver の追従 (q2011-i01) | `/home/awe/zedBSD-worktrees/p2-ws347` / `agent/p2-ws347` | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の変更あり） | — |

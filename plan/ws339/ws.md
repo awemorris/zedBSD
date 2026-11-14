@@ -18,5 +18,5 @@
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | loader の EDID による mode の選び方、標準の設定の video= の確かめ、host 試験と QEMU | in-progress（2026-11-15 P5 q2119、実装・試験済み、cleared は Q1） | — |
+| [p001](phase001/phase.md) | loader の EDID による mode の選び方、標準の設定の video= の確かめ、host 試験と QEMU | in-progress（2026-11-15 Q1、ed959bfb55 を main に merge 4c4875632c。実装・host 試験・QEMU は済み。受け入れの文の変更をユーザーに確認中） | — |
 | p002 | 5330 の受け入れ（GOP が EDID の protocol を出すか、内蔵の panel の preferred の大きさで splash と console が出るか） | planned | p001 |
