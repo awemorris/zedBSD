@@ -106,11 +106,12 @@ typedef int (*vm_lender)(void *context, vm_lend_work work, void *argument);
 /*
  * The tasks of the heaps that run on one thread at a time (an agent): the
  * number of the task that runs, 0 between tasks (written by the thread that
- * runs the tasks, read by any through __atomic), the number the last task
- * got (that thread's alone), the task another thread asked to end, 0 for
- * none (written by any thread through __atomic, put back to 0 by the
- * running thread when a task begins and ends, so that a request never
- * outlives its task; VM_AGENT_DEADLINE while a deadline is set), and the
+ * runs the tasks, read by any through __atomic; the numbers are counted for
+ * the process, so no two agents' tasks share one), the task another thread
+ * asked to end, 0 for none (written by any thread through __atomic, put
+ * back to 0 by the running thread when a task begins and ends, so that a
+ * request never outlives its task; VM_AGENT_DEADLINE while a deadline is
+ * set), and the
  * deadline of the running task on the monotonic clock in nanoseconds, 0
  * for none (the running thread's alone), the lender its heaps are lent
  * through (NULL: the work runs on the calling thread; set before the first
@@ -123,7 +124,6 @@ typedef int (*vm_lender)(void *context, vm_lend_work work, void *argument);
  */
 struct vm_agent {
 	uint32_t task;
-	uint32_t task_last;
 	uint32_t terminate;
 	uint32_t reserved;
 	uint64_t deadline_ns;

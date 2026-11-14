@@ -469,10 +469,12 @@ int browser_view_request_image(struct browser_view *view, float x, float y);
  * responding: wait or stop"): browser_view_script_busy reports, from any
  * thread and reading only, whether a task of the page's scripts runs now
  * (a script, a timer's callback, an event's listeners, the page's round
- * with its loads; the iframes' too): 1 with its number in *task and how
- * long it has run, in milliseconds, or 0 (both 0) between tasks and in a
- * view of the caller's thread.  browser_view_stop_script, on the program's
- * thread, ends the task of that number: its scripts stop where they are
+ * with its loads; the iframes' too, and of the iframes of other origins,
+ * which run beside the page, the one that has run longest): 1 with its
+ * number in *task and how long it has run, in milliseconds, or 0 (both 0)
+ * between tasks and in a view of the caller's thread.
+ * browser_view_stop_script, on the program's thread, ends the task of that
+ * number, and no other running beside it: its scripts stop where they are
  * (no catch nor finally runs, and what it queued is dropped), what it
  * waits for (a synchronous XMLHttpRequest) is woken, and the page stays:
  * its next events and timers run.  It reports 0, ESRCH when that task does

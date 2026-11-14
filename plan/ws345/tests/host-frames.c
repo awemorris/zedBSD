@@ -36,7 +36,9 @@
  *   (k) an iframe of another origin (the server's second port) runs in an
  *       agent of its own: while its timer runs for ever, the page's own
  *       interval goes on, on another thread, and the window's calls stay
- *       under 20 ms;
+ *       under 20 ms; the view's busy task is the frame's loop, stopping it
+ *       ends that loop alone (the frame stays, the page's interval goes
+ *       on), and a stop of the ended task's number is ESRCH;
  *   (l) an iframe of the page's origin stays in the page's agent (its
  *       document reached at once);
  *   (m) postMessage both ways between agents: the values (Array, plain
@@ -1053,6 +1055,13 @@ test_cross_loop(void)
 	double frame_spent;
 	double longest;
 	char *after;
+	size_t mark;
+	long long stopped;
+	long long ended;
+	uint32_t task;
+	uint32_t later;
+	uint32_t milliseconds;
+	int busy;
 	int ticks;
 	int error;
 
@@ -1098,6 +1107,41 @@ test_cross_loop(void)
 	    "(k) the iframe of another origin loops on a thread of its own", "%zu frames of other agents, its thread %.0f ms of 1000", test_remotes(view), frame_spent);
 	test_check(ticks >= 12, "(k) the page's script runs on during the other agent's loop", "%d ticks of the page's 50 ms interval in 1000 ms", ticks);
 	test_check(longest <= TEST_WINDOW_MAX_MS, "(k) window calls during the other agent's loop", "longest %.2f ms", longest);
+
+	/* The question of a page that does not answer sees the other agent's loop, and stopping it ends that task alone. */
+	busy = browser_view_script_busy(view, &task, &milliseconds);
+	test_check(busy == 1 && task != 0U && milliseconds >= 1000U, "(k) the other agent's loop is the view's busy task", "busy %d, task %u, %u ms", busy, task, milliseconds);
+	stopped = test_now();
+	error = browser_view_stop_script(view, task);
+
+	/* Until the task is gone (the loop's thread leaves at its next look), for a second at most. */
+	do {
+		(void)test_pump(view, 5, NULL, NULL);
+		busy = browser_view_script_busy(view, &later, &milliseconds);
+	} while (busy == 1 && later == task && test_now() - stopped < 1000000000LL);
+	ended = (test_now() - stopped) / 1000000LL;
+	(void)test_pump(view, 100, NULL, NULL);
+	frame_before = test_cpu_ms(frame);
+	pthread_mutex_lock(&test_lock);
+	mark = test_console_length;
+	pthread_mutex_unlock(&test_lock);
+	(void)test_pump(view, 1000, NULL, NULL);
+	frame_spent = test_cpu_ms(frame) - frame_before;
+	ticks = 0;
+	pthread_mutex_lock(&test_lock);
+	after = test_console + mark;
+	while ((after = strstr(after, "xtick ")) != NULL) {
+		ticks++;
+		after++;
+	}
+	pthread_mutex_unlock(&test_lock);
+	busy = browser_view_script_busy(view, &later, &milliseconds);
+	test_check(error == 0 && ended <= 300 && frame_spent < 200.0 && test_remotes(view) == 1U && (busy == 0 || later != task),
+	    "(k) stopping the other agent's task ends its loop and keeps the frame", "stop %d, ended in %lld ms, its thread %.0f ms of the next 1000, %zu frames, busy %d task %u",
+	    error, ended, frame_spent, test_remotes(view), busy, later);
+	test_check(ticks >= 12, "(k) the page's script runs on after the other agent's stop", "%d ticks of the page's 50 ms interval in 1000 ms", ticks);
+	error = browser_view_stop_script(view, task);
+	test_check(error == ESRCH, "(k) a stop of the ended task's number", "stop %d", error);
 	browser_view_destroy(view);
 }
 

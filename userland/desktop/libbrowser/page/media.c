@@ -101,6 +101,12 @@ static const struct media_threads media_threads = {
 	media_thread_join
 };
 
+/*
+ * libmedia's log is the process's, read by every engine's thread: it is set
+ * once, by the first page made, and the once orders that for the rest.
+ */
+static struct wb_once media_log_once = WB_ONCE_INIT;
+
 static int media_walk(struct page *page, struct dom_node *node, int depth);
 static int media_add(struct page *page, struct dom_element *element);
 static int media_source(struct page *page, const struct dom_element *element, struct wb_buffer *location, int *found);
@@ -118,6 +124,7 @@ static void media_log_line(void *context, const char *line);
 static void media_controls(struct page_media *media);
 static int media_bar_height(int height);
 static void media_fill(struct img_bitmap *bitmap, int x, int y, int width, int height, uint32_t color, unsigned alpha);
+static void media_log_start(void *argument);
 
 /*
  * Starts a page's table of media empty, and sends libmedia's log lines to
@@ -129,6 +136,23 @@ page_media_init(
 {
 	/* No media yet. */
 	wb_vector_init(&page->media, sizeof(struct page_media *));
+
+	/* libmedia's log, once for the process (pages are made on several threads at once). */
+	wb_once_run(&media_log_once, media_log_start, NULL);
+}
+
+/*
+ * Sends libmedia's log lines to media_log_line (wb_once_run of
+ * page_media_init's).
+ */
+static void
+media_log_start(
+	void *argument)
+{
+	/* No argument. */
+	(void)argument;
+
+	/* The library's log. */
 	media_set_log(media_log_line, NULL);
 }
 

@@ -801,61 +801,98 @@ view_remotes_key(
 }
 
 /*
- * Finds a frame whose task runs now (the first of the list), for the
- * question of a page that does not answer: its number and its task's
- * (0 when none runs one).
+ * Finds the task of the frames that has run longest, for the question of
+ * a page that does not answer: 1 with its number and how long it has run
+ * in milliseconds, 0 (and both 0) when no frame runs a task.
  */
-uint64_t
+int
 view_remotes_busy(
 	struct view_remotes *remotes,
-	uint32_t *task)
+	uint32_t *task,
+	uint32_t *milliseconds)
 {
 	struct view_remote *remote;
-	uint64_t found;
 	uint32_t current;
+	uint32_t ran;
 	size_t index;
+	int busy;
 
-	/* Each frame's agent, under its lock. */
-	*task = 0;
-	found = 0;
+	/* None yet. */
+	*task = 0U;
+	*milliseconds = 0U;
 	if (remotes == NULL)
 		return 0;
 	wb_mutex_lock(&remotes->lock);
 
-	for (index = 0; index < remotes->live.count && found == 0; index++) {
+	/* Each frame's agent, read under the frame's lock (its thread lets the agent go under it); the longest stays. */
+	for (index = 0; index < remotes->live.count; index++) {
 		remote = *(struct view_remote **)wb_vector_at(&remotes->live, index);
 		wb_mutex_lock(&remote->lock);
-		current = remote->agent != NULL ? vm_agent_task_current(remote->agent) : 0U;
+
+		busy = 0;
+		if (remote->agent != NULL)
+			busy = vm_agent_task_since(remote->agent, &current, &ran);
+
 		wb_mutex_unlock(&remote->lock);
-		if (current != 0) {
-			found = remote->number;
+		if (busy && (*task == 0U || ran > *milliseconds)) {
 			*task = current;
+			*milliseconds = ran;
 		}
 	}
 
 	wb_mutex_unlock(&remotes->lock);
-	return found;
+
+	/* Whether a frame runs a task. */
+	busy = *task != 0U;
+	return busy;
 }
 
-/* Asks the task of a number of a frame to end (any thread; nothing when the frame or the task is gone). */
-void
+/*
+ * Asks the frame whose task has a number to end it, and wakes the frame
+ * out of the requests it waits for (any thread).  Reports 0, or ESRCH when
+ * no frame runs that task (task numbers are the process's, so at most one
+ * frame runs it).
+ */
+int
 view_remotes_stop(
 	struct view_remotes *remotes,
-	uint64_t frame,
 	uint32_t task)
 {
 	struct view_remote *remote;
+	uint32_t current;
+	size_t index;
+	int error;
 
-	/* The frame, under the lock. */
-	if (remotes == NULL || task == 0)
-		return;
+	/* No task is none of the frames'. */
+	if (remotes == NULL || task == 0U)
+		return ESRCH;
 	wb_mutex_lock(&remotes->lock);
 
-	remote = remote_find(remotes, frame);
-	if (remote != NULL)
-		remote_terminate(remote, task);
+	/* The frame that runs the task: its agent asked, its waits woken (the list holds the frame and its client). */
+	error = ESRCH;
+	for (index = 0; index < remotes->live.count && error != 0; index++) {
+		remote = *(struct view_remote **)wb_vector_at(&remotes->live, index);
+		wb_mutex_lock(&remote->lock);
+
+		current = 0U;
+		if (remote->agent != NULL)
+			current = vm_agent_task_current(remote->agent);
+		if (current == task)
+			vm_agent_request_termination(remote->agent, task);
+
+		wb_mutex_unlock(&remote->lock);
+		if (current == task) {
+			net_loader_client_abort_waited(remote->client);
+			error = 0;
+		}
+	}
 
 	wb_mutex_unlock(&remotes->lock);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the frame's task is asked to end. */
+	return 0;
 }
 
 /* postMessage of a window of the view's agent to the frame an iframe shows (its proxy's). */

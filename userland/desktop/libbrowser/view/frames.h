@@ -49,8 +49,14 @@ void view_frames_destroy(struct view_frames *frames);
 void view_frames_enter(struct view_frames *frames);
 void view_frames_leave(struct view_frames *frames);
 
-/* Wakes out of their waited requests the frames' threads (from any thread, as the view navigates or ends). */
+/*
+ * Wakes out of their waited requests the frames' threads, the frames of
+ * other agents with their tasks asked to end (from any thread, as the view
+ * navigates or ends), or only the frames of the view's agent (a task of
+ * that agent is stopped).
+ */
 void view_frames_abort_waited(struct view_frames *frames);
+void view_frames_abort_agent_waited(struct view_frames *frames);
 
 /* The frames of other agents (remote.c), the room for one more frame, a runner's wake, and the page's own thread's delivery of what they ask. */
 struct view_remotes *view_frames_remotes(struct view_frames *frames);
