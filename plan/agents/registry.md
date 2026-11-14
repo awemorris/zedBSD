@@ -5,6 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P2 | phase-runner | Pi 5 の 60 fps (q2087-i01) | `/home/awe/zedBSD-worktrees/p2-pi5fps` / `agent/p2-pi5fps` | 動いている（2026-11-14、Pi 5） | — |
 | P3 | phase-runner | arm64 の起動の切り分け (q2086-i01) | `/home/awe/zedBSD-worktrees/p3-arm64boot` / `agent/p3-arm64boot` | 返却（2026-11-14、canceled） | — |
 | P2 | phase-runner | Pi 5 の更新 (q2085-i01) | `/home/awe/zedBSD-worktrees/p2-pi5uat` / `agent/p2-pi5uat` | 返却（2026-11-14、cleared: 板は 10.0.30.2 で動いていた） | 39c2a744a2 |
 | P1 | phase-runner | ws353 p016 試験 (q2084-i01) | `/home/awe/zedBSD-worktrees/p1-ws353m` / `agent/p1-ws353m` | 動いている（2026-11-14、5330） | — |

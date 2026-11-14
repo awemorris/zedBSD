@@ -94,6 +94,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 ## Resume point
 
+- 2026-11-14 Q1: ユーザーが Pi 5（main 024d9ef56f、10.0.30.2）で UAT をし、正常だった。続けて Pi 5 の desktop の描画の 60 fps を P2 が測る（q2087）。
 - 2026-11-14 09:4x P1（q2076-i01、branch `agent/p1-ws353k`）: p012 を実装（cursor の thread の 1 ms の再試行・5 ms の pin の見回り・present の経路の 100 ms を消し、acquire は変化の後に timeout 0、空きが無ければ `UINT64_MAX`、copy の fence は present の直後に無期限で待ち pin を外す、期限は移動の hold だけ、`KWL CURSOR_PLANE stopped` の数え）。3 機種の build warning 0、host 試験（`plan/ws353/tests/cursor-step/run.sh`）PASS、QEMU（`qemu-render-wait.sh`、回帰だけ）PASS（[phase012](phase012/phase.md) の結果）。Venus には cursor plane が無いので plane の経路は p016 の実機で（手順は phase012 の申し送り）。
 - 2026-11-14 08:4x P1（q2074-i01、branch `agent/p1-ws353j`）: p019 を実装（printers の 1 s の check を消し、一覧は printers の object を作った時に 1 回読む、printd の状態は socket の push のまま、protocol を破った printd の打ち切りは `kl_backend_print_due` の timer、`print.c` が `~/.config` から folder を作る）。3 機種の build warning 0、host 試験（`plan/ws353/tests/printers/run.sh`）PASS、QEMU（新しい `plan/ws353/tests/qemu-printers.sh`）PASS（[phase019](phase019/phase.md) の結果）。
 - 2026-11-14 07:4x P1（q2072-i01、branch `agent/p1-ws353i`）: p018 を実装（sessiond の seat の socket で入力の device を開かせる、compositor の devices の thread、settle の scan を消した）。3 機種の build warning 0、host 試験 PASS、QEMU の `qemu-seat-hotplug.sh` PASS（[phase018](phase018/phase.md) の結果）。Log Out の handoff の QEMU と実機は未実施。
