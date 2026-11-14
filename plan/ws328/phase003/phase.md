@@ -3,7 +3,7 @@
 # ws328-p003 vec-flatten（平坦化）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
+- Status: 実装済み・試験 PASS（2026-11-15 P2 q2117-i01。cleared は Q1 が決める）
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: p002（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
@@ -65,4 +65,41 @@
 
 ## 結果
 
-（実装の担当が書く。）
+日付: 2026-11-15（host の `date`）。担当 P2（Queue q2117-i01）。worktree `/home/awe/zedBSD-worktrees/p2-ws328p003`、基点 main 1bf2cbe5e3、header の基点 57bf94e62f。
+
+実装: `userland/desktop/libbrowser/vector/vec-flatten.c`（header の全関数: vec_lines_init・release・reset・begin・add・close・check、vec_flatten、vec_lines_transform・bounds）。試験: `plan/ws328/tests/unit/test-flatten.c`（13 の群）。
+
+実行した command と最後の行:
+
+- `sh plan/ws328/tests/run-unit.sh flatten`: `test-flatten: PASS (93774 checks)`、`run-unit: PASS`。
+- `sh plan/ws328/tests/run-unit.sh all`: base 204220・flatten 93774・harness 1127・path 348081 checks、`run-unit: PASS`。`CC=clang` の `all` も `run-unit: PASS`。ASan・UBSan 付き（run-unit.sh の既定）。
+- `BASE=57bf94e62f sh plan/ws328/tests/check-skeleton.sh`: `check-skeleton: PASS`（check 6 は自分の build/ の `build/llvm/bin/clang` と `build/x86_64/sysroot`。`llvm-toolchain-cached` と `sysroot` を `make -j4 CONFIGMK=config/config.x86_64.mk` で自分の build/ に入れた）。
+- `git diff --check`: 出力なし。
+
+試験の中身（期待の値は仕様の式と手の計算）:
+
+- 分割数: 二次 (0,0)(5,10)(10,0)・tol 0.1 → D=20、N=8。三次 (0,0)(0,10)(10,10)(10,0)・tol 0.1 → D=14.142、N=11（tol 1 → 4、tol 100 → 1）。式が整数ちょうどになる例（二次 (0,0)(0,0)(16,0)・tol 0.25 → N=4、5 でない）。二階差分の片方だけが大きい三次 2 通り（N=5）。D=0 は 1 線分。全点が同じ曲線は長さ 0 の 1 線分を残す。
+- 頂点が t = i/N の Bernstein 形（double）の評価と 1e-5 で一致、内側は印なし、終点は制御点そのもの（誤差 0）。
+- 曲線から折れ線への最大の距離を 2000 標本で測り tolerance 以下（二次・三次・張り出しの大きい三次 × tol 2・0.5・0.1・0.01）。
+- VEC_FLATTEN_SEGMENTS_MAX（巨大な曲線、VEC_TOLERANCE_MIN の小さい曲線、座標の上限の二次）で 1024 線分。tolerance 1e-6 を受け、その半分・0・負・NaN・±inf は EINVAL、3e38 は 1 線分。
+- 失敗の巻き戻し: 壊れた view（先頭が move でない・点の数の食い違い・NaN）、NaN の行列、行列で範囲の外へ出る点（途中の頂点を足した後）、頂点の上限の途中で ENOBUFS。どれも out の contour・頂点の数が元に戻る。
+- 行列: 単位行列と NULL の一致、scale 10 で N=33（D=141.42）、回転 90 度・平行移動の位置、scale 0.1 で N=4。
+- vec_lines_check（first + count の overflow・count 0・配列の外・NaN・上限・配列なし）、begin・add・close・reset・release、頂点・contour の上限の ENOBUFS（各 2^21・2^20 まで作って確かめた）、transform（全部を確かめてから書く）、bounds。
+- 乱数: builder の乱数 path 600 本（contour の数 = move の数、vec_lines_check が 0）と乱数の view 20000 本（0 か EINVAL、失敗で巻き戻し）。
+
+壊す確かめ（git の外で vec-flatten.c を書き換え、試験を流し、元に戻した。最後に `git diff` が空）: 21 通りで全て FAIL（見逃し 0）。ceil → floor、8 → 4、n(n-1) → n、二階差分を 1 つだけにする、tolerance の下限の `<` → `<=`、分割数の上限を外す、頂点・contour の巻き戻しをそれぞれ外す、check の overflow の式を first + count に、内側の頂点に CORNER、終点の CORNER を外す、close で頂点を足す、transform を検査なしで書く、t の分母をずらす、行列を無視、bounds が空で成功、close の後の描画で新しい contour を作らない、contour の上限を外す（ASan の heap overflow）、終点を評価で置く、長さ 0 の線分を落とす、count 0 の contour を許す。最初の流しで 3 通りが -Werror の build の失敗で FAIL だったので、build が通る形で書き直して流し直し、全て試験の FAIL であることを確かめた。見逃し 0。試験で検出できない書き換え: 曲線の評価結果を制御点の箱へ clamp する処理（丸めで箱の外へ出ない保証で、float では箱の外に出る入力を作れていない）。
+
+自分で決めた点（header が黙っている所）:
+
+1. vec_lines_add: 最後の contour が頂点配列の末尾で終わっていない構造（`first + count != vertex_count`）は EINVAL（他の contour の中へ頂点を差し込まない）。contour が無い時は begin と同じ。
+2. vec_lines_bounds: 頂点配列の全頂点が対象（どの contour にも属さない頂点も含む）。頂点が 0 なら EINVAL。
+3. vec_flatten: 空の view（verb 0 個）は成功して何も足さない。view の検査は vec_path_view_check。
+4. close の直後に move なしで描く命令がある view（手で作った view）: SVG 2 §9.3.4 のとおり閉じた subpath の最初の点（行列の後）から新しい contour（CORNER）を始める。builder が作る path は常に move を挟む。
+5. 曲線の内側の頂点は de Casteljau で float の評価をし、制御点の箱へ clamp する（丸めで VEC_COORD_MAX の外へ出さない）。終点は評価でなく制御点そのもの。
+6. 行列を掛けた後の点（制御点も）が vec_point_valid でなければ EINVAL（path の入力の検査は行列の前）。
+7. 巨大な tolerance で 8 * tolerance が float で inf になる時は 1 線分。分割数は float の段階で上限と比べてから整数にする。
+8. vec_lines_check は件数の上限も検査する（頂点 > VEC_LINES_VERTICES_MAX、contour > VEC_LINES_CONTOURS_MAX も EINVAL）。
+
+header の疑問（直していない）: `VEC_LINES_VERTICES_MAX` の comment「8 MiB of vertices at the most」は、sizeof(struct vec_vertex) = 12 バイトで 2^21 個なので 24 MiB（contour も 24 バイト × 2^20 = 24 MiB）。数字の誤りで、契約の動作には影響しない。Q1 が header の再凍結をする時に合わせて直す案。
+
+未実施: QEMU・実機の試験（この Phase の範囲外）。規約の全文の見直しは p023。
