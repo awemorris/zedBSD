@@ -1,0 +1,28 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * VFS
+ */
+
+#ifndef KERN_KERN_VFS_H
+#define KERN_KERN_VFS_H
+
+#include "kern/boot.h"
+#include "kern/namei.h"
+
+extern struct cwdinfo kern_cwdinfo;
+struct root_image_info;
+int kern_vfs_root_image_info(struct root_image_info *result);
+
+int
+kern_vfs_init(
+	const struct kern_boot_handoff *handoff,
+	const struct kern_boot_device *devices,
+	unsigned device_count);
+
+#endif

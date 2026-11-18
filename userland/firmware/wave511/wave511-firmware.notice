@@ -1,0 +1,12 @@
+Firmware: Chips&Media Wave511 video decoder firmware (chagall.bin, revision
+          0x0002d46a)
+Hardware: Chips&Media Wave511 of the StarFive JH7110 (VisionFive 2), used by
+          the Wave5 decoder driver (CONFIG_DRIVER_VF2_VPU)
+Files:    /lib/firmware/wave511/chagall.bin
+Source:   github.com/starfive-tech/soft_3rdpart branch JH7110_VisionFive2_devel,
+          commit b60da16be1b36453aa46599889c28310fd148fb8, wave511/firmware/
+
+Copyright (C) 2022 Chips&Media, Inc.  Redistribution and use in binary form
+is permitted with the copyright notice, the conditions and the disclaimer of
+LICENSE.txt; reverse engineering, decompilation and disassembly are not
+permitted.  Provided as is, without warranty.

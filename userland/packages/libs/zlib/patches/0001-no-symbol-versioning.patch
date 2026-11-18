@@ -1,0 +1,17 @@
+zedBSD: do not link libz with a version script.
+
+The zedBSD runtime loader does not read symbol versions, and the image
+check rejects a shared object that carries them (.gnu.version_d).
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -187,7 +187,8 @@
+     if(UNIX
+         AND NOT APPLE
+         AND NOT (CMAKE_SYSTEM_NAME STREQUAL AIX)
+-        AND NOT (CMAKE_SYSTEM_NAME STREQUAL SunOS))
++        AND NOT (CMAKE_SYSTEM_NAME STREQUAL SunOS)
++        AND NOT (CMAKE_SYSTEM_NAME STREQUAL zedBSD))
+         # On unix-like platforms the library is almost always called libz
+         set_target_properties(
+             zlib

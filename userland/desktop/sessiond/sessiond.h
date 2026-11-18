@@ -1,0 +1,162 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The graphical login's session manager.
+ */
+
+#ifndef SESSIOND_H
+#define SESSIOND_H
+
+#include <poll.h>
+#include <pwd.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <time.h>
+
+/* The greeter program and the session script sessiond starts by default. */
+#define SESSIOND_GREETER	"/bin/wayland"
+#define SESSIOND_SESSION	"/etc/keiland/session"
+
+/* The unprivileged account the greeter runs as. */
+#define SESSIOND_GREETER_USER	"_greeter"
+
+/* The wallpaper the greeter shows when the image has one. */
+#define SESSIOND_WALLPAPER	"/usr/share/keiland/wallpaper.png"
+
+/* The descriptor the greeter talks to sessiond on, and the one the session does. */
+#define SESSIOND_AUTH_FD	3
+#define SESSIOND_CONTROL_FD	3
+
+/*
+ * The descriptor the greeter and the session ask sessiond to open the
+ * seat's input devices on (--seat-fd, seat.c), and how many such sockets
+ * sessiond keeps at once (a greeter, its session, and the greeter a Log
+ * Out starts while the session still shows).
+ */
+#define SESSIOND_SEAT_FD	4
+#define SESSIOND_SEAT_SOCKETS	4U
+
+/* The longest line of the greeter's protocol, and the longest user name. */
+#define SESSIOND_LINE_MAX	512U
+#define SESSIOND_NAME_MAX	64U
+
+/* The size of the buffer an account's strings are kept in. */
+#define SESSIOND_ACCOUNT_BUFFER	2048U
+
+/*
+ * How a greeter ended: a user logged in, it failed, it ended by itself, or
+ * sessiond is being stopped.
+ */
+enum sessiond_greeter_end {
+	SESSIOND_GREETER_LOGIN,
+	SESSIOND_GREETER_FAILED,
+	SESSIOND_GREETER_ENDED,
+	SESSIOND_GREETER_STOP
+};
+
+/*
+ * One seat's user: who owns the display and uses the input devices, and the
+ * buffer passwd's strings for the account live in.
+ */
+struct sessiond_account {
+	struct passwd passwd;
+	char buffer[SESSIOND_ACCOUNT_BUFFER];
+};
+
+/*
+ * What sessiond was started with: the greeter program and the session
+ * script.  A greeter that outlives the step that started it (after a
+ * login it stays on the screen until the session is ready for the
+ * display; at a Log Out it starts while the session still shows): its
+ * process (0 for none), sessiond's end of its socket, and when it started.
+ */
+struct sessiond {
+	const char *greeter;
+	const char *session;
+	pid_t greeter_pid;
+	int greeter_socket;
+	time_t greeter_started;
+
+	/*
+	 * Set by main while the automatic login's session runs at boot, with
+	 * no greeter behind it: a session that has not taken the
+	 * display within SESSIOND_GREETER_START_SECONDS hangs in its start and
+	 * is ended, so that it does not keep the boot logo on the screen.
+	 */
+	int session_bounded;
+
+	/* Set once the running session has said READY (it took the display), on time or late. */
+	int session_ready;
+
+	/*
+	 * The session's lock screen: whether the next session starts with it
+	 * (the session that crashed showed it), and whether the running one
+	 * shows it now (its compositor says LOCKED and UNLOCKED; it starts as
+	 * the session was started).
+	 */
+	int session_start_locked;
+	int session_locked;
+
+	/*
+	 * Set when the session that ended crashed: it ended by a signal or an
+	 * error, without a Log Out, while sessiond was not stopping and the
+	 * machine was not ending (sessiond_session_crashed).  The same user's
+	 * session is then started again in its place (sessiond_restart_due).
+	 */
+	int session_crashed;
+};
+
+/* Set by SIGTERM and SIGINT: sessiond ends its greeter or session and stops. */
+extern volatile sig_atomic_t sessiond_stopping;
+
+/* Readable once sessiond_stopping is set, or -1 (main.c). */
+int sessiond_stop_fd(void);
+
+enum sessiond_greeter_end sessiond_greeter_run(struct sessiond *daemon, struct sessiond_account *account);
+void sessiond_greeter_finish(struct sessiond *daemon);
+void sessiond_greeter_release(struct sessiond *daemon);
+int sessiond_greeter_prepare(struct sessiond *daemon);
+void sessiond_greeter_go(struct sessiond *daemon);
+int sessiond_read_line(int descriptor, char *line, size_t size, int timeout_ms);
+long long sessiond_milliseconds(void);
+int sessiond_session_run(struct sessiond *daemon, struct sessiond_account *account);
+void sessiond_seat_give(uid_t uid, gid_t gid, int keys);
+void sessiond_seat_restore(void);
+
+/* The system's events of the seat's devices: a device that comes is given at once (seat.c). */
+void sessiond_seat_events_open(void);
+int sessiond_seat_events_fd(void);
+int sessiond_seat_events_collect(void);
+
+/* The compositors' seat sockets: the input devices opened for the one that holds the seat (seat.c). */
+int sessiond_seat_socket(int *own, int *child);
+void sessiond_seat_hold(int own);
+nfds_t sessiond_seat_poll_fill(struct pollfd *entries, nfds_t room);
+void sessiond_seat_poll_done(const struct pollfd *entries, nfds_t count);
+
+void sessiond_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/* Leaves the mark init waits for once a desktop has taken the display (KERN_INIT_DESKTOP_SHOWN). */
+void sessiond_desktop_shown(void);
+
+/* Ending the machine: the login screen's and a session's POWER (power.c); nonzero once it is ending. */
+extern int sessiond_power_started;
+int sessiond_power_run(const char *program, const char *what, const char *from);
+void sessiond_power_session(const struct sessiond_account *account, int control, const char *what);
+
+/* The machine's sleep: POWER suspend and POWER cancel (sleep.c). */
+void sessiond_sleep_request(int control, const char *from);
+void sessiond_sleep_cancel(void);
+int sessiond_sleep_fd(void);
+void sessiond_sleep_collect(void);
+void sessiond_sleep_forget(int control);
+
+/* A session's SERVICE request (service.c). */
+void sessiond_service(const struct sessiond_account *account, int control, const char *arguments);
+
+#endif

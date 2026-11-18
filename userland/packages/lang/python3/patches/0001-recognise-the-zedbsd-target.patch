@@ -1,0 +1,81 @@
+Teach config.sub and configure the zedBSD operating system name.
+
+config.sub refuses a host triple whose operating system it does not know,
+and configure allows a cross build only to the systems it lists: both stop
+before anything is compiled.  config.sub names zedbsd with the other
+systems; configure gives it MACHDEP "zedbsd" (ac_sys_system zedBSD) and the
+host CPU as the platform's identity, and treats it as Linux for shared
+objects: libpython$(LDVERSION).so with an SONAME, "$(CC) -shared", -fPIC,
+and the interpreter's symbols exported to the extension modules
+(-Xlinker -export-dynamic).  zedBSD loads ordinary ELF shared objects by
+their SONAME through /lib/ld.so.  configure.ac is not regenerated: only the
+generated configure is patched, as the release tarball ships it.
+
+--- a/config.sub
++++ b/config.sub
+@@ -1769,6 +1769,7 @@
+ 	     | onefs* | tirtos* | phoenix* | fuchsia* | redox* | bme* \
+ 	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | wasi* \
+ 	     | nsk* | powerunix* | genode* | zvmoe* | qnx* | emx* | zephyr* \
++	     | zedbsd* \
+ 	     | fiwix* | mlibc* | cos* | mbr* | ironclad* )
+ 		;;
+ 	# This one is extra strict with allowed versions
+--- a/configure
++++ b/configure
+@@ -4130,6 +4130,9 @@
+ 	*-*-wasi*)
+ 	    ac_sys_system=WASI
+ 	    ;;
++	*-*-zedbsd*)
++		ac_sys_system=zedBSD
++		;;
+ 	*)
+ 		# for now, limit cross builds to known configurations
+ 		MACHDEP="unknown"
+@@ -4628,6 +4631,9 @@
+ 	*-*-vxworks*)
+ 		_host_ident=$host_cpu
+ 		;;
++	*-*-zedbsd*)
++		_host_ident=$host_cpu
++		;;
+ 	*-*-emscripten)
+ 		_host_ident=$(emcc -dumpversion | cut -f1 -d-)-$host_cpu
+ 		;;
+@@ -7740,7 +7746,7 @@
+         PY3LIBRARY=libpython3.so
+       fi
+       ;;
+-    Linux*|GNU*|NetBSD*|FreeBSD*|DragonFly*|OpenBSD*|VxWorks*)
++    Linux*|GNU*|NetBSD*|FreeBSD*|DragonFly*|OpenBSD*|VxWorks*|zedBSD*)
+       LDLIBRARY='libpython$(LDVERSION).so'
+       BLDLIBRARY='-L. -lpython$(LDVERSION)'
+       RUNSHARED=LD_LIBRARY_PATH=`pwd`${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+@@ -13755,7 +13761,7 @@
+ 	Emscripten*|WASI*)
+ 		LDSHARED='$(CC) -shared'
+ 		LDCXXSHARED='$(CXX) -shared';;
+-	Linux*|GNU*|QNX*|VxWorks*|Haiku*)
++	Linux*|GNU*|QNX*|VxWorks*|Haiku*|zedBSD*)
+ 		LDSHARED='$(CC) -shared'
+ 		LDCXXSHARED='$(CXX) -shared';;
+ 	FreeBSD*)
+@@ -13840,7 +13846,7 @@
+ 		 then CCSHARED="-fPIC";
+ 		 else CCSHARED="+z";
+ 		 fi;;
+-	Linux*|GNU*) CCSHARED="-fPIC";;
++	Linux*|GNU*|zedBSD*) CCSHARED="-fPIC";;
+ 	Emscripten*|WASI*)
+ 		if test "x$enable_wasm_dynamic_linking" = xyes
+ then :
+@@ -13878,7 +13884,7 @@
+ 	    LINKFORSHARED="-Wl,-E -Wl,+s";;
+ #	    LINKFORSHARED="-Wl,-E -Wl,+s -Wl,+b\$(BINLIBDEST)/lib-dynload";;
+ 	Linux-android*) LINKFORSHARED="-pie -Xlinker -export-dynamic";;
+-	Linux*|GNU*) LINKFORSHARED="-Xlinker -export-dynamic";;
++	Linux*|GNU*|zedBSD*) LINKFORSHARED="-Xlinker -export-dynamic";;
+ 	# -u libsys_s pulls in all symbols in libsys
+ 	Darwin/*|iOS/*)
+ 		LINKFORSHARED="$extra_undefs -framework CoreFoundation"

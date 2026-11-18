@@ -1,0 +1,120 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Deterministic fuzz: the same PRNG runs in the remacs VM and, after
+// transpilation, in GNU Emacs, so both sides generate an identical
+// stream of editing operations. Any divergence in the observations is
+// a real behavioral difference.
+//
+// The LCG stays within 32-bit ints so VM and Emacs arithmetic agree.
+//
+
+func fuzzNext(st) {
+    st.x = (st.x * 1103 + 12345) % 32768;
+    return st.x;
+}
+
+func fuzzPos(st) {
+    return Editor.pointMin() + fuzzNext(st) % (Editor.pointMax() - Editor.pointMin() + 1);
+}
+
+func fuzzRun(seed, steps) {
+    var st = { x: seed % 32768 };
+    var words = ["fox", "ab", "日本語", "x\ny", " ", "12", "、句読点。", "字のカナ"];
+
+    for (i in 0..steps) {
+        var op = fuzzNext(st) % 13;
+
+        if (op == 0 || op == 1 || op == 2) {
+            // Insert a word at a random position.
+            Editor.gotoChar(fuzzPos(st));
+            Editor.insert(words[fuzzNext(st) % 8]);
+        } else if (op == 3) {
+            // Delete a small region.
+            var a = fuzzPos(st);
+            var b = a + fuzzNext(st) % 5;
+            if (b > Editor.pointMax()) {
+                b = Editor.pointMax();
+            }
+            if (a != b) {
+                Editor.deleteRegion(a, b);
+            }
+        } else if (op == 4) {
+            Editor.gotoChar(fuzzPos(st));
+            Editor.forwardLine(fuzzNext(st) % 4 - 2);
+        } else if (op == 5) {
+            Editor.gotoChar(fuzzPos(st));
+            Editor.forwardWord(fuzzNext(st) % 3 - 1);
+        } else if (op == 6) {
+            // Kill a region and yank it somewhere else.
+            var a = fuzzPos(st);
+            var b = a + fuzzNext(st) % 8;
+            if (b > Editor.pointMax()) {
+                b = Editor.pointMax();
+            }
+            if (a != b) {
+                Editor.killRegion(a, b);
+                Editor.gotoChar(fuzzPos(st));
+                Editor.yank();
+            }
+        } else if (op == 7) {
+            Editor.undoBoundary();
+            Editor.gotoChar(fuzzPos(st));
+            Editor.insert(words[fuzzNext(st) % 8]);
+            Editor.undoBoundary();
+            Editor.undo();
+        } else if (op == 8) {
+            Editor.gotoChar(fuzzPos(st));
+            Editor.searchForward(words[fuzzNext(st) % 8]);
+        } else if (op == 9) {
+            var m = Editor.makeMarker();
+            Editor.setMarker(m, fuzzPos(st));
+            Editor.gotoChar(fuzzPos(st));
+            Editor.insert("Q");
+            oracleEmit(Editor.markerPosition(m));
+        } else if (op == 10) {
+            // Word kills, forward and backward.
+            Editor.gotoChar(fuzzPos(st));
+            if (fuzzNext(st) % 2 == 0) {
+                Editor.killWord(1);
+            } else {
+                Editor.backwardKillWord(1);
+            }
+        } else if (op == 11) {
+            // Region via mark, then inspect it.
+            Editor.setMark(fuzzPos(st));
+            Editor.gotoChar(fuzzPos(st));
+            oracleEmit(Editor.bufferSubstring(Editor.regionBeginning(), Editor.regionEnd()));
+            Editor.exchangePointAndMark();
+            oracleEmit(Editor.mark());
+        } else {
+            // Peek primitives.
+            var pp = fuzzPos(st);
+            oracleEmit(Editor.charAfter(pp));
+            oracleEmit(Editor.charBefore(pp));
+            oracleEmit(Editor.lineBeginningPosition());
+            oracleEmit(Editor.lineEndPosition());
+        }
+
+        // Keep the buffer bounded.
+        if (Editor.bufferSize() > 1500) {
+            Editor.deleteRegion(1, 700);
+        }
+
+        oracleEmit(Editor.point());
+        if (i % 20 == 0) {
+            oracleEmit(Editor.bufferString());
+        }
+    }
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.bufferSize());
+    return 0;
+}
+
+func oracleTest() {
+    fuzzRun(20260808, 300);
+    Editor.deleteRegion(Editor.pointMin(), Editor.pointMax());
+    fuzzRun(424242, 250);
+    Editor.deleteRegion(Editor.pointMin(), Editor.pointMax());
+    fuzzRun(7, 250);
+}

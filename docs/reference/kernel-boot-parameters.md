@@ -1,0 +1,677 @@
+# Kernel boot parameters
+
+Status: current for the four x86 production-loader paths; reconciled with
+current source and retained configured-loader evidence
+
+This document defines the implemented textual kernel-parameter contract for
+selecting boot filesystems, the root mode, swap sources, and PID 1. The common
+parser and kernel consumers are used by these production paths:
+
+- i386 PC/AT;
+- i386 PC-98;
+- amd64 legacy BIOS; and
+- amd64 UEFI.
+
+## 1. Implementation scope
+
+The four x86 loaders pass one bounded parameter string through their
+architecture handoff. The HAL copies it into kernel-owned storage before
+temporary loader memory can be released, and the common parser implements
+`boot0=` through `boot3=`, `rootpart=`, `overlay-root=`,
+`overlay-data=`, `swap0=` through `swap3=`, and `init=`.
+
+The implemented VFS path provides four private boot-filesystem slots, explicit
+native-root versus overlay-root selection, configurable image paths, file and
+raw-partition swap, and atomic activation of up to four swap sources. The old
+`boot=` and `root=` names are not compatibility aliases. The singular
+`swap=` name is not introduced.
+
+This strict contract applies to every explicit parameter source on every
+architecture. A separate, narrowly bounded compatibility path exists only
+when a non-x86 architecture supplies a NULL parameter-source pointer; Section
+9.1 documents that boundary.
+
+### 1.1 Source and evidence map
+
+| Contract area | Production anchors |
+| --- | --- |
+| Limits, record, names, grammar, defaults | [`include/kern/boot.h`](../../include/kern/boot.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`src/kern/boot.c`](../../src/kern/boot.c) |
+| Selectors, boot slots, and root modes | [`src/kern/block-identity.c`](../../src/kern/block-identity.c), [`src/kern/boot.c`](../../src/kern/boot.c), [`src/kern/vfs.c`](../../src/kern/vfs.c) |
+| Boot-time swap sources | [`src/kern/vm/swap-control.c`](../../src/kern/vm/swap-control.c), [`src/kern/vm/swap-source.c`](../../src/kern/vm/swap-source.c), [`src/kern/vm/swap-header.c`](../../src/kern/vm/swap-header.c) |
+| Runtime swap separation | [`include/uapi/system.h`](../../include/uapi/system.h), [`src/kern/vm/swap-control.c`](../../src/kern/vm/swap-control.c), [`src/drivers/generic/system-device.c`](../../src/drivers/generic/system-device.c) |
+| PID 1 selection | [`src/kern/main.c`](../../src/kern/main.c), [`src/kern/init.c`](../../src/kern/init.c) |
+| Common configured-loader language | [`bootloader/uefi/zedbsd-config.c`](../../bootloader/uefi/zedbsd-config.c), [`bootloader/uefi/zedbsd-config.h`](../../bootloader/uefi/zedbsd-config.h) |
+| amd64 UEFI root-partition paths | [`bootloader/uefi/root-config.c`](../../bootloader/uefi/root-config.c), [`bootloader/common/ufs-read.c`](../../bootloader/common/ufs-read.c), [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c) |
+| Four current x86 loader paths | [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c), [`bootloader/pcat/bootzbsd.S`](../../bootloader/pcat/bootzbsd.S), [`bootloader/pc98/bootzbsd.S`](../../bootloader/pc98/bootzbsd.S), [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c) |
+
+## 2. Text format
+
+The parameter string is a sequence of ASCII `name=value` tokens separated by
+one or more ASCII spaces. The maximum complete string is 3071 bytes excluding
+the terminating NUL.
+
+- Names and values are case-sensitive unless the selected filesystem or block
+  identity format says otherwise.
+- Quoting, escapes, embedded whitespace, and empty values are not supported in
+  the initial contract.
+- A known name may occur at most once. A duplicate known name is an error.
+- Unknown names are ignored with a bounded diagnostic so future independent
+  parameters do not make an older kernel unbootable.
+- A malformed known parameter or an invalid combination stops root
+  initialization with a visible error.
+
+The complete initial name set is:
+
+```text
+boot0= boot1= boot2= boot3=
+rootpart=
+overlay-root= overlay-data=
+swap0= swap1= swap2= swap3=
+init=
+kmsg= login=          (Sections 7a and 7b)
+mac0=                 (Section 7e)
+```
+
+## 3. Block-device selectors
+
+`bootN=`, `rootpart=`, and the block-device form of `swapN=` accept the common
+block selector grammar:
+
+```text
+/dev/sda1
+sda1
+UUID=6740-911D
+LABEL=ZEDBOOT
+PARTUUID=...
+PARTLABEL=...
+```
+
+`/dev/NAME` is parsed as an early-boot device selector; the kernel does not
+open a devfs pathname before devfs exists. UUID, label, PARTUUID, and PARTLABEL
+matching is case-insensitive where the current block-identity resolver already
+defines it that way. No match is an error. More than one match is an ambiguous
+selector error.
+
+## 4. Boot filesystem slots
+
+`boot0=` through `boot3=` name up to four FAT16 or FAT32 filesystems whose
+files may be used by root and swap parameters.
+
+```text
+boot0=UUID=6740-911D
+boot1=/dev/sdb1
+```
+
+The slots are independent names, not an overlay order.
+
+- If `boot0=` is omitted, `boot0` denotes the loader-origin boot partition
+  identified by the architecture handoff.
+- `boot1` through `boot3` have no implicit value.
+- Sparse definitions are valid; for example, `boot0` and `boot3` may be
+  defined without `boot1` or `boot2`.
+- A `bootN:` file reference to an undefined slot is an error.
+- Two slots resolving to the same partition are an error.
+- A resolved initial boot slot must contain a supported FAT16 or FAT32
+  filesystem. Other boot-filesystem types require a later contract revision.
+- On amd64 PC/AT the kernel uses `boot0=UUID=` to wait for its boot disk:
+  it probes the USB roots and the fixed disks (NVMe, SATA) at once, and
+  waits, at most five seconds, only while no disk found so far has a
+  partition whose FAT carries that volume serial.  A machine started from
+  its internal disk does not wait for USB storage; one started from a USB
+  stick waits until the stick is found.  Without `boot0=UUID=` the kernel
+  waits up to five seconds for the first disk before it probes the fixed
+  disks, as before.  A boot disk that never comes fails in the VFS as
+  before.
+
+A file reference has this form:
+
+```text
+boot0:rootfs.img
+boot1:/images/data-work.img
+```
+
+The path is rooted at the selected boot filesystem. One leading `/` after the
+colon is optional and normalized away. An empty path, `.` or `..` component,
+backslash, control character, or path of 256 bytes or more is rejected. FAT
+case matching follows the mounted FAT implementation.
+
+Boot filesystems are mounted only in the kernel's private boot namespace for
+these lookups. This contract does not itself require exposing them at `/boot`.
+
+Partition discovery publishes block-device nodes, not filesystem mounts.
+Detected auxiliary FAT filesystems are no longer automatically mounted at
+`/diskN`; configured boot/root/overlay/swap sources are unchanged. Use an
+explicit mount request for an auxiliary filesystem. The current public mount
+API accepts root-level targets (for example `/data`), not nested targets.
+
+## 5. Root modes
+
+Exactly one of `rootpart=` and `overlay-root=` must be effective after the
+complete loader-produced parameter record is parsed.
+
+### 5.1 Native root partition
+
+`rootpart=` selects one filesystem-bearing block device and disables the
+overlay-root path.
+
+```text
+rootpart=UUID=0123456789ABCDEF
+```
+
+In this mode:
+
+- `overlay-root=` is forbidden;
+- `overlay-data=` is forbidden;
+- boot slots may still be used by `swapN=bootM:FILE`; and
+- the selected root filesystem is mounted directly as `/`.
+
+### 5.2 Overlay root
+
+`overlay-root=` enables the overlay-root path and names its immutable lower
+image. `overlay-data=` names the writable upper image.
+
+```text
+overlay-root=boot0:rootfs.img
+overlay-data=boot0:data.img
+```
+
+Both parameters are required in the initial overlay mode.
+
+- `overlay-root=` and `overlay-data=` accept only `bootN:PATH` references.
+- The lower image is attached read-only.
+- The upper image is attached read-write.
+- Both files must be regular files and must not resolve to the same file.
+- Existing loop-recursion and nested-overlay rejection remains mandatory.
+- `overlay-data=` without `overlay-root=` is an error.
+- `overlay-root=` without `overlay-data=` is an error; an ephemeral or
+  read-only upper is not implied.
+- `rootpart=` together with either overlay parameter is an error.
+
+The overlay is enabled only by `overlay-root=`. The kernel no longer silently
+selects an overlay merely because files named `rootfs.img` and `data.img`
+exist.
+
+The repository-generated overlay configuration files contain these root/swap
+lines:
+
+```text
+overlay-root=rootfs.img
+overlay-data=data.img
+swap0=swapfile
+```
+
+The configuration parser turns the omitted `boot0=` into the selected payload
+FAT UUID and qualifies the three relative file values with `boot0:` before it
+builds this normalized final record:
+
+```text
+boot0=UUID=XXXX-XXXX overlay-root=boot0:rootfs.img \
+overlay-data=boot0:data.img swap0=boot0:swapfile
+```
+
+`init=` is omitted so its kernel default applies.
+
+This is installed configuration content, not a missing-input loader fallback.
+The current production loaders stop when their configuration file is absent or
+invalid. A configuration which supplies neither `rootpart=` nor the complete
+overlay pair reaches the common root-mode check and fails there; the loader
+does not invent a root mode.
+
+## 6. Swap sources
+
+`swap0=` through `swap3=` select zero to four swap sources. Each value is
+either a block-device selector or a file on a boot filesystem.
+
+```text
+swap0=boot0:swapfile
+swap1=/dev/sda5
+swap2=UUID=89ABCDEF01234567
+swap3=boot1:swap-extra
+```
+
+- Sparse swap numbers are valid.
+- A physical partition or file may appear in at most one swap slot.
+- A raw swap partition must not overlap the selected `rootpart=` on the same
+  physical leaf disk. This is rejected before the aggregate backend is
+  published; a FAT swap file on the native-root filesystem remains valid.
+- Every source must be writable and contain a valid zedBSD swap header at
+  offset zero. An arbitrary partition is never accepted merely because the
+  user named it.
+- The first page is reserved for the swap header. Page slots begin at the
+  second 4096-byte page.
+- Existing `ZEDSWAP1` 32/64-MiB files remain readable. The implemented
+  `ZEDSWAP2` header carries 64-bit capacity fields so larger files and raw
+  partitions can be represented without truncation.
+- The initial file-backed implementation accepts FAT files with at most 1024
+  physical extents. A more fragmented file is rejected during atomic source
+  preparation; it is never activated partially.
+- Source validation is atomic: if any explicitly selected swap source is
+  missing, ambiguous, read-only, malformed, duplicated, or cannot be opened,
+  no selected swap source is activated and boot fails visibly.
+- With no `swapN=` parameters, the kernel runs without swap. The
+  repository-installed overlay configuration above explicitly supplies
+  `swap0=`.
+
+The active sources form one system swap pool. Allocation is deterministic:
+the kernel fills available slots in `swap0`, then `swap1`, `swap2`, and
+`swap3`. Freeing a page returns it to its original source. Statistics report
+the aggregate total and free page counts. Flush and shutdown visit every
+active source in numeric order and preserve the first error while still
+attempting the remaining sources.
+
+An I/O error after activation is reported for the affected page and source;
+the kernel does not silently reinterpret that page as belonging to another
+source.
+
+The `swapN=` parameters describe boot-time activation. Runtime
+`/sbin/swapon` and `/sbin/swapoff` are a separate control path and do not add,
+remove, or reinterpret kernel parameters. Their implementation uses the same
+source manager with backing-object claims, writable-alias exclusion, draining,
+and VM commit-limit resizing; none of those runtime operations changes the
+immutable boot-parameter record. The runtime ABI and behavioral evidence are
+linked from the source/evidence map in Section 1.1.
+
+## 7. Init selection
+
+`init=` selects the executable started as PID 1.
+
+```text
+init=/sbin/init
+init=/bin/sh
+```
+
+- The value must be an absolute path shorter than 256 bytes.
+- Arguments and environment assignments are not part of `init=`.
+- If omitted, the value is `/sbin/init`.
+- `init=/bin/sh` is the explicit rescue/single-process boot mechanism; no
+  separate single-user-mode parameter is introduced.
+- Failure to validate, open, or execute the selected path is reported and
+  leaves the kernel in its diagnosable idle path. It does not silently select
+  a different init.
+
+The selection and validation code is architecture-independent. An explicit
+parameter source without `init=` obtains the `/sbin/init` default. The
+compile-time init paths retained by the non-x86 NULL-source compatibility path
+are documented in Section 9.1.
+
+## 7a. Kernel messages: kmsg=
+
+`kmsg=` says where the kernel's messages go (a fully graphical boot keeps
+them off the screen and only stores them, like dmesg).
+
+```text
+kmsg=console     the default: every message is also written on the console
+kmsg=quiet       messages go to the log buffer (dmesg, sysctl kern.msgbuf)
+                 and the platform debug port only
+```
+
+- Any other value is an error (the boot stops with a visible parse error).
+- `kmsg=quiet` is read from the raw parameter string as soon as the log is
+  initialized, before the first driver logs, so no kernel message reaches
+  the screen.  The HAL's own lines printed after the kernel console exists
+  also go to the log.  (The HAL's early console, before the kernel console,
+  is outside the kernel.)
+- The text console keeps what is written to it but does not draw it, so the
+  loader's logo (`logo=`, see `bootloader/uefi/README.md`) stays on the
+  screen.  The console is shown ("revealed") when a process reads from it
+  (a login prompt: the console getty, or the graphical login falling back to
+  it) and on a kernel panic; from then on the kernel's messages are written
+  on it again.
+- The UEFI loader also reads `kmsg=quiet`: it draws no progress blocks.
+- The kernel reports the value as `sysctl kern.boot.kmsg` (empty when the
+  boot did not give one).  init reads it for the order of the services: a
+  boot that writes `kmsg=console` is the debug boot, which starts the
+  services in the order their dependencies give, so the network is up
+  before the login; any other boot, one without `kmsg=` included, starts the
+  login (the graphical one or the console's getty) first and the network,
+  sound, sshd and cron after it
+  ([init and services](init-services.md#boot-order)).
+- For kernel development write `kmsg=console` (or hold Ctrl, below), and use
+  `login=console` (Section 7b).
+- On amd64 UEFI, holding Ctrl while the loader runs gives the kernel
+  `kmsg=console` and no `logo=` for that one boot, whatever `zedbsd.cfg` says
+  (Section 7c).
+
+## 7b. The login: login=
+
+`login=` chooses how a person logs in on the machine's screen (the graphical login is the
+default).  The kernel
+only validates it and reports it as `sysctl kern.boot.login`; the graphical
+login's `sessiond` (the rc.conf service `greeter`) reads it.
+
+```text
+login=graphical  the greeter (/bin/wayland --greeter) on the display
+login=console    the console's getty (also what no login= means)
+```
+
+- Any other value is an error, as for `kmsg=`.
+- With `login=graphical`, init holds `getty_console` back (the greeter
+  service says `replaces=getty_console`).  When the machine has no display
+  (no `/dev/gpu0`; GPU node numbers follow the order in which drivers
+  register, see [GPU device interface](gpu.md)), no `/bin/wayland`, or the
+  greeter fails three times in a row, `sessiond` ends and init starts `getty_console` (the console is then
+  revealed by its read, Section 7a).  Serial and SSH logins are unchanged.
+- On amd64 UEFI, holding Shift while the loader runs gives the kernel
+  `login=console` for that one boot, whatever `zedbsd.cfg` says (Section 7c).
+
+### The default and kernel development
+
+The amd64 native images' `zedbsd.cfg` gets `logo=logo.ppm kmsg=quiet
+login=graphical` when the build option `ZEDBSD_GRAPHICAL_BOOT` is `y` (the
+default; the build menu's "Graphical boot").  For kernel development set it to
+`n` (the messages on the console and the console login), or edit the lines on
+the image's boot FAT32 partition labelled `ZEDBSD` (`/zedbsd.cfg` there, which
+the running system shows at `/boot/boot0/zedbsd.cfg`; the ESP holds only the
+loader): remove the three tokens or write
+`kmsg=console login=console`.
+
+## 7c. Boot keys (amd64 UEFI)
+
+The amd64 UEFI loader (`BOOTX64.EFI`) reads two keys while it runs and
+rewrites the parameter record it hands the kernel for that one boot.  The file
+`zedbsd.cfg` and its format do not change; the keys are the way to get a
+readable boot from a machine whose configuration is graphical and quiet.
+
+| Key held | Record handed to the kernel | Screen |
+| --- | --- | --- |
+| Ctrl (left or right) | every `kmsg=` and `logo=` token removed, `kmsg=console` appended | no logo; the loader asks the firmware for 640x480 when `video=` names no mode (a wish: the current mode stays when the firmware has none) |
+| Shift (left or right) | every `login=` token removed, `login=console` appended | the logo as configured |
+| Both | both rewrites | no logo |
+| Neither | unchanged, byte for byte | unchanged |
+
+- **How to press them.** Turn the machine on, then hold Ctrl (or Shift, or
+  both) and tap Space repeatedly until the logo appears or kernel messages
+  start to scroll.  The loader never waits for a key; when it starts and
+  again right after reading `zedbsd.cfg` it reads the firmware's key queue
+  and the modifier keys held at that moment (the key state the extended
+  input reports with an empty queue).  The held state does not depend on
+  the firmware passing earlier key events on to the loader, and the queue
+  still gives a modifier that was let go after being typed with Space.  A
+  modifier held alone is seen only by firmware that reports the held state
+  or supports exposed modifier keys, so holding it from power-on without
+  Space is not reliable.  Shift with a letter or digit may not be reported as
+  Shift, which is why Space is used.
+- **What it means.** Ctrl shows the kernel's messages on the console from the
+  start, so the last message before a stop stays on the screen.  Shift makes
+  `sessiond` end at once and init start the console's getty, so no graphical
+  session starts (Section 7b).  Holding both gives a fully textual boot.  Ctrl
+  alone keeps `login=graphical`, so the display driver and the greeter may
+  still take the screen over later.
+- **Rewrite rules.** Tokens are matched by their whole name (the text before
+  the first `=`), never by a value: `rootpart=PARTLABEL=kmsg=quiet` is kept.
+  Dropping comes before appending because the kernel refuses a known name
+  given twice.  When an appended token would make the record longer than 3071
+  bytes it is left out; the kernel's default for an absent `kmsg=` or
+  `login=` is the console, so the meaning is the same.
+- **Messages.** When a key is seen the loader writes
+  `Boot: kernel messages (Ctrl)` and/or `Boot: console login (Shift)` and the
+  line `A64 PARAMS OVERRIDE <record>` to the firmware console and the debug
+  port.  On screen these lines are best effort: a mode change, the logo or the
+  kernel's console may cover them at once.  `dmesg` keeps the record the
+  kernel received (`boot: parameters: ...`), and `sysctl kern.boot.login`
+  reports the login.
+- **Firmware notes.** The keys need the firmware's extended console input
+  (UEFI 2.1 and later); without it the boot goes on as if no key were held.
+  Asking for exposed modifier keys also resets the keyboard's lock-key state
+  (NumLock, CapsLock, ScrollLock) to off.  Some firmware skips the USB
+  keyboard's initialization in its fastest boot setting, so the keys are not
+  seen; and some warns of a stuck key during POST when a key is held from
+  power-on.  Tapping Space with the modifier after POST avoids both.
+- The BIOS loaders (i386 PC/AT, PC-98, amd64 BIOS) do not read these keys.
+
+## 7d. The ZYBO's programmable logic in the emulator: fpga.no-pl-wait=1
+
+`fpga.no-pl-wait=1` is for the emulator's `xilinx-zynq-a9` machine only.
+Its model of the device configuration interface never raises the logic's
+INIT nor PCFG_DONE, so a program of `/dev/fpga0` would wait for them and
+time out.  With the token, and only when the SLCR's `PSS_IDCODE` reads 0
+(the emulator), the driver skips those two waits and the DMA queue's
+empty bit, which the model never sets, still runs the rest of the
+configuration (the unlock, the PROG_B writes, the DMA of the bitstream),
+and reports `FPGA_STATUS_EMULATED`; the logic is not enabled
+and its window stays closed.  On the board the token is ignored with the
+message `fpga: fpga.no-pl-wait=1 ignored on the board`.  The token is read
+as a whole word of the command line, like `kmsg=quiet`, not through the
+parameter table, so `boot: ignored 1 unknown parameter` is also logged.
+
+## 7e. The Ethernet address: mac0=
+
+`mac0=` gives the first Ethernet port its station address on a board that
+has none of its own where the kernel can read it.  The value is six pairs
+of hex digits separated by colons, such as `mac0=02:5a:59:42:4f:31`.
+
+```text
+mac0=xx:xx:xx:xx:xx:xx   a unicast address, not all zeros
+```
+
+- Only the ZYBO reads it (the Zynq's GEM0, `en0`).  It takes, in order,
+  `mac0=`, then the `local-mac-address` of GEM0's node in the device tree a
+  loader wrote, then the fixed locally administered `02:5a:59:42:4f:30`
+  with a line in the kernel log.  A fixed address keeps the DHCP lease and
+  the clients' known hosts the same from boot to boot; two boards on one
+  network each need their own `mac0=`.
+- The network driver starts before the kernel parses the line, so it reads
+  the loader's line itself.  A value that is not a unicast address in that
+  form is passed over with a line in the kernel log (`zynq-ethernet: mac0=…
+  is not a unicast address`) and the next source is taken; it does not stop
+  the boot.
+- Other boards ignore it; their ports have addresses of their own.
+
+## 7f. Leaving Intel VMDs alone: pci.vmd=off
+
+`pci.vmd=off` keeps the Intel VMD driver (amd64, `CONFIG_DRIVER_PCI_VMD`)
+from binding.  A PC whose firmware storage mode is RAID hides its NVMe disks
+behind a VMD; the driver numbers the buses behind it, places their BARs in
+its windows and publishes them as a PCI segment of their own (`ffff`), so
+the NVMe driver finds the disks.  With the token the VMD is left as the
+firmware set it, the disks behind it are not seen, and the kernel log says
+`vmd: disabled by pci.vmd=off`.  It is the way to boot a machine on which
+the driver stops the boot.
+
+Two more values stop the driver at a stage, to find which stage stops a
+machine that has no serial console:
+
+```text
+pci.vmd=off      the driver does not bind
+pci.vmd=read     it maps the VMD's configuration space, logs what the
+                 firmware left behind it (vmd: firmware ...), and stops;
+                 it writes nothing
+pci.vmd=noscan   it arranges the buses and takes its interrupt vector,
+                 but publishes no bus, so no driver binds behind it
+```
+
+The tokens are read as whole words of the command line, like `kmsg=quiet`,
+not through the parameter table, so `boot: ignored 1 unknown parameter` is
+also logged.
+
+## 8. Valid and invalid examples
+
+Current-layout overlay root using loader-origin FAT:
+
+```text
+overlay-root=boot0:rootfs.img overlay-data=boot0:data.img \
+swap0=boot0:swapfile
+```
+
+Native root plus two swap sources:
+
+```text
+rootpart=PARTUUID=01234567-01 swap0=/dev/sda5 \
+swap1=boot0:swapfile init=/sbin/init
+```
+
+Root and data images on different boot filesystems:
+
+```text
+boot1=UUID=1111-2222 overlay-root=boot0:rootfs.img \
+overlay-data=boot1:data-work.img swap0=boot1:swapfile
+```
+
+The following are errors:
+
+```text
+rootpart=/dev/sda2 overlay-root=boot0:rootfs.img
+overlay-data=boot0:data.img
+overlay-root=boot2:rootfs.img overlay-data=boot0:data.img
+boot1=UUID=1111-2222 boot2=UUID=1111-2222
+swap0=/dev/sda5 swap1=UUID=<the same sda5 UUID>
+init=bin/sh
+```
+
+The third example fails because `boot2` is undefined.
+
+## 9. Handoff and acceptance requirements
+
+The bootloader-to-HAL handoff carries one bounded, NUL-terminated parameter
+string. The HAL copies it into kernel-owned storage before temporary loader
+memory can be unmapped. No CPAR-specific binary handoff is added.
+
+All four current x86 production paths require a FAT-root configuration file.
+i386 PC/AT and amd64 BIOS read `/zedbsd.cfg` from the active payload FAT;
+PC-98 reads `/BOOTZBSD.CFG` from its active payload FAT. amd64 UEFI searches
+same-physical-disk FAT16/FAT32 filesystems for `/zedbsd.cfg`, considering the
+loaded filesystem first and otherwise retaining firmware enumeration order;
+zero candidates is fatal, while multiple candidates warn and use the first.
+
+The three loader implementations use the same bounded configuration parser.
+Exactly one `kernel=` directive selects a safe path relative to the selected
+FAT, or on amd64 UEFI a path on the root partition (Section 9.2), and is
+consumed by the loader. Every other nonempty line contributes one
+kernel-parameter token; on amd64 UEFI the boot keys may then drop and append
+tokens of the assembled record (Section 7c). A `video=WIDTHxHEIGHT` line
+is such a token: the amd64 UEFI loader reads it to choose the GOP mode
+(`bootloader/uefi/video.c`; without it the loader takes the monitor's size
+from its EDID, see `bootloader/uefi/README.md`), the BIOS loaders do not read
+it, and it reaches the kernel unchanged on every path.  The standard amd64
+`zedbsd.cfg` files have none. The kernel has no
+`video` parameter, so such a boot also logs
+`boot: ignored 1 unknown parameter; first=video`. The parser synthesizes `boot0=UUID=XXXX-XXXX` when
+`boot0=` is absent and qualifies bare `overlay-root`, `overlay-data`, and
+file-form `swapN` values with `boot0:`. Explicit boot references and raw swap
+selectors beginning with `/dev/`, `UUID=`, `LABEL=`, `PARTUUID=`, or
+`PARTLABEL=` remain unchanged. An unqualified `swapN` value is deliberately a
+file on the selected FAT and receives `boot0:`. Missing or malformed
+configuration, a missing or invalid configured kernel, and an over-limit final
+record stop visibly; there is no embedded-parameter, fixed-`VMUNIX`, or
+direct-kernel production fallback.
+
+UEFI `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` is ignored unconditionally. It
+does not replace, prepend, append, or repair `/zedbsd.cfg`, and descriptor or
+opaque firmware data cannot prevent discovery of the required configuration.
+The only change the UEFI loader makes to the record after parsing comes from
+the boot keys (Section 7c).
+
+All four x86 paths use the same common parser and observable semantics; the
+boot keys of Section 7c are the one amd64 UEFI addition:
+
+| Platform | Required transport and runtime result |
+| --- | --- |
+| i386 PC/AT | PBR -> `BOOTZBSD.EXE` consumes required `/zedbsd.cfg`; copied Multiboot text reaches the common parser and boots both root modes |
+| i386 PC-98 | PBR -> `BOOTZBSD.EXE` consumes required `/BOOTZBSD.CFG`; its versioned inline record reaches the common parser and boots both root modes |
+| amd64 BIOS | PBR -> `BOOTZBSD.EXE` consumes required `/zedbsd.cfg`; its versioned ZBL6 record reaches the common parser and boots both root modes |
+| amd64 UEFI | `BOOTX64.EFI` discovers required same-disk `/zedbsd.cfg`; its versioned ZBL6 record reaches the common parser and boots both root modes, with UEFI `LoadOptions` ignored |
+
+Older supported x86 handoff forms remain a compatibility boundary inside the
+HAL. When such a form has no parameter record, or an i386 Multiboot source is
+absent or empty, [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c)
+synthesizes `ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT`. That compatibility behavior
+does not relax the required configuration-file policy of the current
+production loaders.
+
+### 9.1 Non-x86 NULL-source compatibility boundary
+
+NULL at the kernel parameter-source interface is not the same condition as an
+absent legacy x86 loader option. The x86 HAL compatibility path converts the
+latter to the generated default before the kernel parser runs, while current
+production loaders provide a configuration-derived record. On i386 and amd64,
+the kernel therefore never invokes legacy automatic root selection.
+
+Only a non-x86 build receiving a NULL parameter-source pointer uses the
+retained legacy automatic-root path:
+
+1. begin with the loader-origin boot partition;
+2. inspect sibling partitions on that same physical disk for exactly one UFS
+   filesystem containing `/etc/zedbsd-root` with the exact marker
+   `zedBSD ufs root v1\n`, rejecting ambiguity;
+3. on ARM64, if no marked UFS partition exists, try `/rootfs.img` (then
+   `/rootfs.rp4`) together with `/data.img` using the legacy overlay path;
+4. otherwise mount the uniquely marked UFS partition, or the loader-origin
+   boot partition when no marker is present, directly as root.
+
+That compatibility path does not interpret the new `bootN=`, root-mode, or
+`swapN=` contract and does not activate a new swap source. It retains the
+architecture build's `ZEDBSD_INIT_PATH`: normally `/sbin/init`,
+`/bin/sh` for sparcv9, and `/x68k/bin/sh` for x68k. Any non-NULL parameter
+source, including on a non-x86 architecture, uses the strict common contract;
+a non-NULL empty source does not enter legacy automatic root selection.
+
+### 9.2 amd64 UEFI: the kernel on the root partition
+
+On amd64 UEFI, `kernel=` and `logo=` may begin with `rootpart:`, which names an
+absolute path in the UFS filesystem of the partition `rootpart=` selects:
+
+```text
+kernel=rootpart:/boot/vmunix
+rootpart=PARTUUID=0F3C2B6A-7D51-4E0B-9A47-2C1D5E8F6A90
+logo=rootpart:/boot/logo.ppm
+```
+
+- The loader removes the prefix before the shared parser checks the rest of
+  the path, so the path rules (`..`, `:`, length) are unchanged. A path without
+  the prefix is relative to the configuration FAT as before.
+- `rootpart:` needs exactly one `rootpart=` line, and the loader accepts only
+  the `PARTUUID=` form (other selectors stop with `rootpart= is not
+  PARTUUID=`). The `rootpart=` line still reaches the kernel unchanged.
+- The loader enumerates the firmware's block devices and takes the GPT
+  partition on its own physical disk whose partition signature equals the
+  PARTUUID, compared as binary GUIDs, case-insensitively in text. None, or more
+  than one, on that disk stops it. The same PARTUUID on another disk stops it
+  with `duplicate PARTUUID`, since the kernel would refuse that root.
+- It reads native little-endian UFS read-only: superblock, inodes, direct and
+  indirect blocks, holes as zero bytes, and directories. Symbolic links are not
+  followed, and the journal is not replayed. A byte-swapped volume, a fragment
+  smaller than the device's block, a volume larger than its partition or a
+  block number past the volume stops it. Logical blocks that are powers of
+  two from 512 to 4096 bytes are accepted.
+- Every failure shows `A64 KERN UFS <reason>` and stops; there is no fallback
+  to a kernel on the FAT.
+
+The BIOS loaders do not read UFS: they reject a `rootpart:` path like any
+other invalid path.
+
+## 10. Verification contract
+
+The implementation is divided into focused production-code gates:
+
+- BR-T42 covers bounded parsing, owned storage, the complete key set,
+  duplicates, malformed input, and `init=`;
+- BR-T43 covers the shared record and all four x86 handoff layouts;
+- CT-T008--CT-T018 cover bounded `/zedbsd.cfg` parsing, selected-FAT
+  normalization, configured-kernel loading, discovery, and ignored UEFI
+  `LoadOptions`;
+- BR-T44 covers selectors, private boot slots, aliases, root-mode selection,
+  path validation, and reverse-order failure unwind;
+- BR-T45 covers `ZEDSWAP1`, `ZEDSWAP2`, four-source aggregation,
+  allocation/free, first-error flush, and shutdown;
+- BR-T46 is the completed common-parser/root/swap QEMU acceptance gate;
+  and
+- CT-T025--CT-T031 are the later current-loader configuration and
+  no-fallback gates for PC/AT BIOS and PC-98.
+
+The authoritative BR-T46 run passed 31 cells: six common cases on each of
+i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI (24 cells); mixed file/raw
+swap, UUID disk reordering, and PARTUUID disk reordering on both amd64 firmware
+paths (six cells); and one PC/AT native-root/raw-swap alias rejection cell. The
+six common cases covered the then-generated overlay selection and normal login,
+`init=/bin/sh`, native root, file swap, raw swap, and visible rejection of
+invalid input.
+
+Every positive swap cell forced at least 1024 pages (4 MiB) to page out, read
+all touched anonymous pages back with their contents intact, and observed a
+positive page-in counter. The alias-rejection cell failed before swap
+publication, root mount, or init. The UUID and PARTUUID reordering cells
+enumerated another disk first while still selecting the production boot image,
+so loader-origin `boot0` and explicit secondary-slot resolution were both
+proved. The later loader gates (CT-T025--CT-T031) replace BR-T46 only for
+loader configuration and fallback wording; BR-T46 remains the integrated
+kernel parser, root, swap, and PID 1 evidence.

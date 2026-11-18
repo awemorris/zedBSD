@@ -1,0 +1,21 @@
+Keep -Wunused-but-set-global a warning with newer clang.
+
+Pango builds with -Werror=unused-but-set-variable.  The clang of the zedBSD
+toolchain (LLVM 23) puts -Wunused-but-set-global in that group and reports
+the parent_class variable that G_DEFINE_TYPE defines in files that do not
+chain up, so pango-fontset.c and others stopped.  That one diagnostic stays
+a warning, as it is in GLib's own build.  (The getc_unlocked fallback this
+patch also had in WS115 p007 went when the C library gained the function.)
+
+--- a/meson.build
++++ b/meson.build
+@@ -145,6 +145,9 @@
+     '-Werror=empty-body',
+     '-Werror=write-strings',
+     '-Werror=unused-but-set-variable',
++    # Newer clang counts an unused G_DEFINE_TYPE parent_class, a file-scope
++    # variable, in the group above; it stays a warning, as elsewhere.
++    '-Wno-error=unused-but-set-global',
+     '-Wundef', # FIXME: https://bugzilla.gnome.org/show_bug.cgi?id=792481
+   ]
+ 

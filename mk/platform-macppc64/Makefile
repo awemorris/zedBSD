@@ -1,0 +1,9 @@
+include mk/platform-macppc64/defaults.mk
+include mk/platform-macppc64/libc.mk
+include mk/platform-macppc64/sysroot.mk
+include mk/platform-macppc64/vmunix.mk
+include mk/platform-macppc64/firmware.mk
+include mk/platform-macppc64/bootloader.mk
+include mk/platform-macppc64/programs.mk
+include mk/platform-macppc64/rootfs.mk
+include mk/platform-macppc64/image.mk

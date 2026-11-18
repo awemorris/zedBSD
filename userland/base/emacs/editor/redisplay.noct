@@ -1,0 +1,603 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Redisplay: full-redraw over the window tree, column-aware.
+//
+// A logical buffer line is expanded into display cells (tabs become
+// spaces up to 8-column tab stops, East Asian wide characters take
+// two columns), then wrapped into display rows of the window's text
+// width. A row that continues gets a '\' in its last column, tty
+// Emacs style. Cells are always overwritten to the full window
+// width, so no clearing is needed and side-by-side windows cannot
+// smear into each other; a window not reaching the right screen edge
+// gets a '|' divider column.
+//
+
+// Display width of a codepoint (an East Asian Width subset).
+func charWidth(cp) {
+    if (cp < 0x1100) { return 1; }
+    // SKK composition marks (ambiguous EAW; CJK terminals draw them
+    // double width -- counting them as 1 left the cursor on the right
+    // half of the last kanji during conversion).
+    if (cp == 0x25BC || cp == 0x25BD) { return 2; }  // ▼ ▽
+    if (cp <= 0x115F) { return 2; }              // Hangul Jamo
+    if (cp >= 0x2E80 && cp <= 0xA4CF) { return 2; }  // CJK radicals..Yi
+    if (cp >= 0xAC00 && cp <= 0xD7A3) { return 2; }  // Hangul syllables
+    if (cp >= 0xF900 && cp <= 0xFAFF) { return 2; }  // CJK compat
+    if (cp >= 0xFE30 && cp <= 0xFE4F) { return 2; }  // CJK compat forms
+    if (cp >= 0xFF00 && cp <= 0xFF60) { return 2; }  // Fullwidth forms
+    if (cp >= 0xFFE0 && cp <= 0xFFE6) { return 2; }
+    if (cp >= 0x20000 && cp <= 0x3FFFD) { return 2; }  // CJK ext B+
+    return 1;
+}
+
+// Display width of a whole string (no tabs).
+func stringWidth(s) {
+    var w = 0;
+    var n = String.charCount(s);
+    for (i in 0..n) {
+        w = w + charWidth(String.charCodeAt(s, i));
+    }
+    return w;
+}
+
+// Truncate a string to at most "width" columns.
+func truncateToWidth(s, width) {
+    var w = 0;
+    var n = String.charCount(s);
+    var i = 0;
+    while (i < n) {
+        var cw = charWidth(String.charCodeAt(s, i));
+        if (w + cw > width) {
+            break;
+        }
+        w = w + cw;
+        i = i + 1;
+    }
+    return String.substring(s, 0, i);
+}
+
+// Pad (or truncate) a string to exactly "width" columns.
+func padToWidth(s, width) {
+    s = truncateToWidth(s, width);
+    var w = stringWidth(s);
+    while (w < width) {
+        s = s + " ";
+        w = w + 1;
+    }
+    return s;
+}
+
+// Wrap the cell at display column col (0-based) in reverse video.
+// In-band like the mode line, so the row still diffs as one string.
+func overlayReverseCell(row, col) {
+    var esc = String.chr(27);
+    var n = String.charCount(row);
+    var w = 0;
+    var i = 0;
+    while (i < n && w < col) {
+        w = w + charWidth(String.charCodeAt(row, i));
+        i = i + 1;
+    }
+    if (i >= n) {
+        // Point past the drawn text (end of line): pad and mark a space.
+        while (w < col) {
+            row = row + " ";
+            w = w + 1;
+        }
+        return row + esc + "[7m " + esc + "[0m";
+    }
+    var head = String.substring(row, 0, i);
+    var cell = String.charAt(row, i);
+    var tail = "";
+    if (i + 1 < n) {
+        tail = String.substring(row, i + 1, -1);
+    }
+    return head + esc + "[7m" + cell + esc + "[0m" + tail;
+}
+
+// The previous frame's rows, for damage tracking. Only rows that
+// changed since the last frame are rewritten, and the whole frame is
+// bracketed with synchronized-output marks, which removes flicker.
+func redisplayInit() {
+    PrevFrame = {
+        rows: [], cols: 0, count: 0,
+        cursorValid: 0, cursorBuf: "", textTick: 0,
+        point: 0, cursorRow: 1, cursorCol: 1,
+        echoMessage: "", modeLine: ""
+    };
+    return 0;
+}
+
+// Return target's display column within one cached display row. The logical
+// column anchor preserves tab stops, while the substring is at most one row.
+func layoutPointColumn(rowStart, target, logicalColumn) {
+    var text = Editor.bufferSubstring(rowStart, target);
+    var n = String.charCount(text);
+    var rowWidth = 0;
+    var col = logicalColumn;
+    var i = 0;
+    while (i < n) {
+        var cp = String.charCodeAt(text, i);
+        var pieceW = charWidth(cp);
+        if (cp == 0x09) {
+            pieceW = 8 - (col % 8);
+        }
+        rowWidth = rowWidth + pieceW;
+        col = col + pieceW;
+        i = i + 1;
+    }
+    return rowWidth;
+}
+
+func makeModeLine(w, lineNo) {
+    var name = Editor.bufferName();
+    var flags = "--";
+    if (Editor.bufferModifiedP() == 1) {
+        flags = "**";
+    }
+    var modeLine = "-" + flags + ":---" + name + "   (" +
+        Buf.mode + ")" + skkIndicator() + " L" + lineNo + " ";
+    modeLine = truncateToWidth(modeLine, w.cols);
+    var mlLen = stringWidth(modeLine);
+    while (mlLen < w.cols) {
+        modeLine = modeLine + "-";
+        mlLen = mlLen + 1;
+    }
+    var esc = String.chr(27);
+    return esc + "[7m" + modeLine + esc + "[0m";
+}
+
+// If only point changed and it remains in the previously rendered sole
+// window, reuse the cached visible-line geometry. This turns ordinary
+// cursor motion into one terminal cursor move instead of a full buffer scan.
+func redisplayCursorOnly(ed, rows, cols) {
+    if (PrevFrame.cursorValid == 0 || PrevFrame.cols != cols ||
+        PrevFrame.count != rows || ed.echoCursor >= 0 ||
+        ed.echoMessage != PrevFrame.echoMessage ||
+        !Dict.hasKey(WinRoot, "win") || WinRoot.win != SelWin ||
+        PrevFrame.cursorBuf != Editor.bufferName() ||
+        PrevFrame.textTick != Buf.textTick) {
+        return 0;
+    }
+
+    var point = Editor.point();
+    var found = 0 - 1;
+    var n = Array.size(SelWin.renderRowStarts);
+    for (i in 0..n) {
+        // Wrapped-row boundaries are shared positions. Do not break: the
+        // later row owns the boundary, matching layoutLogicalLine().
+        if (point >= SelWin.renderRowStarts[i] &&
+            point <= SelWin.renderRowEnds[i]) {
+            found = i;
+        }
+    }
+    if (found < 0) {
+        return 0;
+    }
+
+    var relRow = SelWin.renderRowScreenRows[found];
+    if (relRow < 0 || relRow >= SelWin.rows - 1) {
+        return 0;
+    }
+    var cursorRow = SelWin.top + relRow;
+    var cursorCol = SelWin.left +
+        layoutPointColumn(SelWin.renderRowStarts[found], point,
+                          SelWin.renderRowLogicalCols[found]);
+    var lineNo = SelWin.renderRowLineNos[found] + 1;
+    var modeLine = makeModeLine(SelWin, lineNo);
+    var modeRow = SelWin.top + SelWin.rows - 1;
+
+    if (modeLine != PrevFrame.modeLine) {
+        Term.syncBegin();
+        Term.showCursor(0);
+        Term.moveTo(modeRow, SelWin.left);
+        Term.write(modeLine);
+        PrevFrame.rows[modeRow - 1] = modeLine;
+        PrevFrame.modeLine = modeLine;
+        Term.moveTo(cursorRow, cursorCol);
+        Term.showCursor(1);
+        Term.syncEnd();
+        Term.flush();
+    } else {
+        // The common cursor-only update needs no frame synchronization or
+        // visibility toggle; emit only the terminal cursor position.
+        Term.moveTo(cursorRow, cursorCol);
+        Term.flush();
+    }
+
+    SelWin.point = point;
+    PrevFrame.point = point;
+    PrevFrame.cursorRow = cursorRow;
+    PrevFrame.cursorCol = cursorCol;
+    return 1;
+}
+
+func redisplay(_) {
+    var size = Term.size();
+    var rows = size.rows;
+    var cols = size.cols;
+
+    // The selected window always shows the current buffer.
+    SelWin.buf = Editor.bufferName();
+    SelWin.point = Editor.point();
+
+    if (redisplayCursorOnly(_, rows, cols) == 1) {
+        return 0;
+    }
+
+    layoutWindows(WinRoot, 1, 1, rows - 1, cols);
+
+    // Compose the frame into row strings.
+    Frame = [];
+    for (i in 0..rows) {
+        Array.push(Frame, "");
+    }
+
+    var savedBuf = Editor.bufferName();
+    var savedPoint = Editor.point();
+    var cursorRow = 1;
+    var cursorCol = 1;
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    for (w in leaves) {
+        var isSel = (w == SelWin);
+        var cur = renderWindow(w, isSel);
+        if (isSel == 1) {
+            cursorRow = cur.row;
+            cursorCol = cur.col;
+        }
+    }
+    Editor.setBuffer(savedBuf);
+    Editor.gotoChar(savedPoint);
+
+    // Echo area.
+    Frame[rows - 1] = padToWidth(_.echoMessage, cols);
+
+    // Minibuffer-style input: the terminal cursor sits on the echo
+    // line at the input position; the buffer point keeps a reverse-
+    // video pseudo cursor during isearch so the current match stays
+    // visible.
+    if (_.echoCursor >= 0) {
+        if (_.echoHl == 1 && cursorRow >= 1 && cursorRow < rows) {
+            Frame[cursorRow - 1] =
+                overlayReverseCell(Frame[cursorRow - 1], cursorCol - 1);
+        }
+        cursorRow = rows;
+        cursorCol = _.echoCursor + 1;
+        if (cursorCol > cols) {
+            cursorCol = cols;
+        }
+    }
+
+    // A resize (or the first frame) invalidates the cache.
+    var full = 0;
+    if (PrevFrame.cols != cols || PrevFrame.count != rows) {
+        full = 1;
+        PrevFrame.rows = [];
+        for (i in 0..rows) {
+            Array.push(PrevFrame.rows, "\u0001");
+        }
+        PrevFrame.cols = cols;
+        PrevFrame.count = rows;
+    }
+
+    Term.syncBegin();
+    Term.showCursor(0);
+    for (i in 0..rows) {
+        if (full == 1 || Frame[i] != PrevFrame.rows[i]) {
+            Term.moveTo(i + 1, 1);
+            Term.write(Frame[i]);
+            PrevFrame.rows[i] = Frame[i];
+        }
+    }
+    Term.moveTo(cursorRow, cursorCol);
+    Term.showCursor(1);
+    Term.syncEnd();
+    Term.flush();
+
+    PrevFrame.cursorValid = 0;
+    if (_.echoCursor < 0 && Dict.hasKey(WinRoot, "win") &&
+        WinRoot.win == SelWin) {
+        PrevFrame.cursorValid = 1;
+        PrevFrame.cursorBuf = Editor.bufferName();
+        PrevFrame.textTick = Buf.textTick;
+        PrevFrame.point = Editor.point();
+        PrevFrame.cursorRow = cursorRow;
+        PrevFrame.cursorCol = cursorCol;
+        PrevFrame.echoMessage = _.echoMessage;
+        PrevFrame.modeLine = SelWin.renderModeLine;
+    }
+    return 0;
+}
+
+// Expand the logical line starting at the current point into display
+// rows for a window of the given text width. Fills st.rows with row
+// strings and sets st.pointRow / st.pointCol (relative, 0-based) when
+// the position "target" falls in this line (target < 0 to skip).
+// Leaves point at the start of the next line, or at eob.
+func layoutLogicalLine(st, textWidth, target, logicalLine) {
+    var lineStart = Editor.point();
+    var lineEnd = Editor.lineEndPosition();
+    var text = Editor.bufferSubstring(lineStart, lineEnd);
+    var n = String.charCount(text);
+
+    var rowText = "";
+    var rowWidth = 0;
+    var col = 0;
+    var capacity = textWidth;
+    var rowStart = lineStart;
+    var rowLogicalCol = 0;
+
+    var i = 0;
+    while (i < n) {
+        var cp = String.charCodeAt(text, i);
+        var piece = "";
+        var pieceW = 0;
+        if (cp == 0x09) {
+            var k = 8 - (col % 8);
+            for (j in 0..k) {
+                piece = piece + " ";
+            }
+            pieceW = k;
+        } else {
+            piece = String.charAt(text, i);
+            pieceW = charWidth(cp);
+        }
+
+        // Continuation rows keep their last column for the backslash;
+        // the final cell of the line may still use the full width.
+        var limit = capacity - 1;
+        if (i == n - 1 && rowWidth + pieceW <= capacity) {
+            limit = capacity;
+        }
+        if (rowWidth + pieceW > limit && rowWidth > 0) {
+            Array.push(st.rowStarts, rowStart);
+            Array.push(st.rowEnds, lineStart + i);
+            Array.push(st.rowLogicalCols, rowLogicalCol);
+            Array.push(st.rowLineNos, logicalLine);
+            Array.push(st.rowScreenRows, Array.size(st.rows));
+            Array.push(st.rows, padToWidth(rowText, capacity - 1) + "\\");
+            rowText = "";
+            rowWidth = 0;
+            rowStart = lineStart + i;
+            rowLogicalCol = col;
+        }
+
+        if (target >= 0 && lineStart + i == target) {
+            st.pointRow = Array.size(st.rows);
+            st.pointCol = rowWidth;
+        }
+        rowText = rowText + piece;
+        rowWidth = rowWidth + pieceW;
+        col = col + pieceW;
+        i = i + 1;
+    }
+    // Point at the end of the line sits after the last cell.
+    if (target >= 0 && target == lineEnd) {
+        st.pointRow = Array.size(st.rows);
+        st.pointCol = rowWidth;
+    }
+    Array.push(st.rowStarts, rowStart);
+    Array.push(st.rowEnds, lineEnd);
+    Array.push(st.rowLogicalCols, rowLogicalCol);
+    Array.push(st.rowLineNos, logicalLine);
+    Array.push(st.rowScreenRows, Array.size(st.rows));
+    Array.push(st.rows, padToWidth(rowText, textWidth));
+
+    // Advance past this line.
+    Editor.gotoChar(lineEnd);
+    if (!Editor.eobp()) {
+        Editor.forwardChar(1);
+        return 1;
+    }
+    return 0;
+}
+
+// Render one window; returns {row, col} of its cursor cell.
+func renderWindow(w, isSel) {
+    Editor.setBuffer(w.buf);
+    var wpoint = w.point;
+    if (wpoint > Editor.pointMax()) {
+        wpoint = Editor.pointMax();
+    }
+    if (wpoint < 1) {
+        wpoint = 1;
+    }
+    w.point = wpoint;
+
+    var size = Term.size();
+    var hasDivider = 0;
+    if (w.left + w.cols - 1 < size.cols) {
+        hasDivider = 1;
+    }
+    var textWidth = w.cols - hasDivider;
+    var textRows = w.rows - 1;
+
+    // Reuse the previous visible/overscan line map when possible. A
+    // cursor crossing the viewport boundary then avoids a scan from
+    // point-min; large jumps still use the complete count once.
+    var pointLine = 0 - 1;
+    if (Dict.hasKey(w, "renderBufferName") &&
+        w.renderBufferName == Editor.bufferName() &&
+        w.renderTextTick == Buf.textTick) {
+        var cachedCount = Array.size(w.renderLineStarts);
+        for (ci in 0..cachedCount) {
+            if (wpoint >= w.renderLineStarts[ci] &&
+                wpoint <= w.renderLineEnds[ci]) {
+                pointLine = w.renderLineNos[ci];
+                break;
+            }
+        }
+    }
+    if (pointLine < 0) {
+        pointLine = countLinesBefore(wpoint);
+    }
+    if (pointLine < w.startLine) {
+        w.startLine = pointLine;
+    }
+
+    // Lay out rows from the window start; scroll down until the
+    // point's display row fits. (Wrapping means a logical line can
+    // span several display rows, so this may take a few passes.)
+    var st = {
+        rows: [], pointRow: 0 - 1, pointCol: 0,
+        lineStarts: [], lineEnds: [], lineRows: [], lineNos: [],
+        rowStarts: [], rowEnds: [], rowLogicalCols: [],
+        rowLineNos: [], rowScreenRows: []
+    };
+    var guard = 0;
+    while (guard < 50) {
+        guard = guard + 1;
+        var anchor = 0 - 1;
+        var oldCount = Array.size(st.lineNos);
+        for (oi in 0..oldCount) {
+            if (st.lineNos[oi] == w.startLine) {
+                anchor = st.lineStarts[oi];
+                break;
+            }
+        }
+        if (anchor < 0 && Dict.hasKey(w, "renderBufferName") &&
+            w.renderBufferName == Editor.bufferName() &&
+            w.renderTextTick == Buf.textTick) {
+            var renderCount = Array.size(w.renderLineNos);
+            for (ri in 0..renderCount) {
+                if (w.renderLineNos[ri] == w.startLine) {
+                    anchor = w.renderLineStarts[ri];
+                    break;
+                }
+            }
+        }
+        st.rows = [];
+        st.pointRow = 0 - 1;
+        st.pointCol = 0;
+        st.lineStarts = [];
+        st.lineEnds = [];
+        st.lineRows = [];
+        st.lineNos = [];
+        st.rowStarts = [];
+        st.rowEnds = [];
+        st.rowLogicalCols = [];
+        st.rowLineNos = [];
+        st.rowScreenRows = [];
+        if (anchor >= Editor.pointMin()) {
+            Editor.gotoChar(anchor);
+        } else {
+            Editor.gotoChar(Editor.pointMin());
+            Editor.forwardLine(w.startLine);
+        }
+        var more = 1;
+        var logicalLine = w.startLine;
+        while (more == 1 && Array.size(st.rows) < textRows + 8) {
+            var target = 0 - 1;
+            var ls = Editor.point();
+            var le = Editor.lineEndPosition();
+            if (wpoint >= ls && wpoint <= le) {
+                target = wpoint;
+            }
+            Array.push(st.lineStarts, ls);
+            Array.push(st.lineEnds, le);
+            Array.push(st.lineRows, Array.size(st.rows));
+            Array.push(st.lineNos, logicalLine);
+            more = layoutLogicalLine(st, textWidth, target, logicalLine);
+            logicalLine = logicalLine + 1;
+        }
+        if (st.pointRow >= 0 && st.pointRow < textRows) {
+            break;
+        }
+        if (st.pointRow < 0) {
+            // Point is beyond the laid-out region: jump so its line
+            // lands near the bottom, then fine-tune. The estimate
+            // assumes one display row per logical line; when wrapping
+            // stretches lines the same start would be recomputed
+            // forever, so always force progress toward the point's
+            // line (halving the remaining distance converges).
+            var jump = pointLine - textRows + 1;
+            if (jump < 0) {
+                jump = 0;
+            }
+            if (jump <= w.startLine) {
+                jump = w.startLine + 1 + (pointLine - w.startLine) / 2;
+                if (jump > pointLine) {
+                    jump = pointLine;
+                }
+            }
+            w.startLine = jump;
+            continue;
+        }
+        if (w.startLine >= pointLine && st.pointRow >= textRows) {
+            // One logical line wraps past the whole window even when
+            // it starts the frame; showing its head is the best this
+            // renderer can do. Stop rather than oscillate.
+            break;
+        }
+        w.startLine = w.startLine + (st.pointRow - textRows + 1);
+        if (w.startLine > pointLine) {
+            w.startLine = pointLine;
+        }
+    }
+
+    // Compose the rows into the frame buffer.
+    var row = 0;
+    while (row < textRows) {
+        var line = "";
+        if (row < Array.size(st.rows)) {
+            line = st.rows[row];
+        }
+        line = padToWidth(line, textWidth);
+        if (hasDivider == 1) {
+            line = line + "|";
+        }
+        Frame[w.top + row - 1] = Frame[w.top + row - 1] + line;
+        row = row + 1;
+    }
+
+    // The window's mode line.
+    // pointLine was already computed to clamp/scroll the window.
+    var lineNo = pointLine + 1;
+    var modeLine = makeModeLine(w, lineNo);
+    Frame[w.top + w.rows - 2] = Frame[w.top + w.rows - 2] +
+        modeLine;
+
+    if (isSel == 1) {
+        w.renderLineStarts = st.lineStarts;
+        w.renderLineEnds = st.lineEnds;
+        w.renderLineRows = st.lineRows;
+        w.renderLineNos = st.lineNos;
+        w.renderRowStarts = st.rowStarts;
+        w.renderRowEnds = st.rowEnds;
+        w.renderRowLogicalCols = st.rowLogicalCols;
+        w.renderRowLineNos = st.rowLineNos;
+        w.renderRowScreenRows = st.rowScreenRows;
+        w.renderTextWidth = textWidth;
+        w.renderModeLine = modeLine;
+        w.renderBufferName = Editor.bufferName();
+        w.renderTextTick = Buf.textTick;
+    }
+
+    var cr = w.top;
+    var cc = w.left;
+    if (st.pointRow >= 0) {
+        cr = w.top + st.pointRow;
+        cc = w.left + st.pointCol;
+    }
+    return { row: cr, col: cc };
+}
+
+// Count the newlines before a position. (0-based line number)
+func countLinesBefore(pos) {
+    var saved = Editor.point();
+    Editor.gotoChar(Editor.pointMin());
+    var n = 0;
+    while (Editor.point() < pos) {
+        var e = Editor.lineEndPosition();
+        if (e >= pos) {
+            break;
+        }
+        Editor.gotoChar(e);
+        Editor.forwardChar(1);
+        n = n + 1;
+    }
+    Editor.gotoChar(saved);
+    return n;
+}

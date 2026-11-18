@@ -1,0 +1,26 @@
+ZEDTERM 1
+name:longname=foot terminal emulator
+bool:am=1
+bool:bce=1
+num:cols=80
+num:lines=24
+num:colors=256
+num:pairs=32767
+str:bel=^G
+str:cr=\r
+str:clear=\E[H\E[2J
+str:el=\E[K
+str:ed=\E[J
+str:cup=\E[%i%p1%d;%p2%dH
+str:cuf=\E[%p1%dC
+str:civis=\E[?25l
+str:cnorm=\E[?25h
+str:smcup=\E[?1049h
+str:rmcup=\E[?1049l
+str:bold=\E[1m
+str:rev=\E[7m
+str:sgr0=\E[0m
+str:setaf=\E[38;5;%p1%dm
+str:setab=\E[48;5;%p1%dm
+str:hts=\EH
+str:tbc=\E[3g

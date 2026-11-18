@@ -1,0 +1,35 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    // Grow past several gap expansions with interleaved edits.
+    for (i in 0..2000) {
+        Editor.insert("line-" + i + "\n");
+    }
+    print(Editor.bufferSize());
+
+    // Jump around: every move drags the gap across the buffer.
+    Editor.gotoChar(1);
+    Editor.insert("HEAD\n");
+    Editor.gotoChar(Editor.pointMax());
+    Editor.insert("TAIL\n");
+    Editor.gotoChar(Editor.pointMax() / 2);
+    Editor.insert("[MID]");
+    print(Editor.bufferSize());
+
+    // Delete a large middle region.
+    var q = Editor.pointMax() / 4;
+    Editor.deleteRegion(q, q * 3);
+    print(Editor.bufferSize());
+
+    // Content integrity at the edges.
+    print(Editor.bufferSubstring(1, 6));
+    Editor.gotoChar(Editor.pointMax());
+    Editor.forwardLine(-1);
+    print(Editor.bufferSubstring(Editor.point(), Editor.lineEndPosition()));
+
+    // Multibyte across the gap.
+    Editor.gotoChar(3);
+    Editor.insert("あ𠀋い");
+    print(Editor.bufferSubstring(3, 6));
+    print(Editor.charAfter(4));
+}

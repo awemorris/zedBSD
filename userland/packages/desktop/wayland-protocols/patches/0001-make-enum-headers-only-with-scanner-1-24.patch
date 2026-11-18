@@ -1,0 +1,23 @@
+Generate the enum headers only with a scanner that knows frozen interfaces.
+
+Without the tests, the build makes the enum headers whenever it finds
+wayland-scanner 1.22.90 or later, and runs it with --strict.  The XML of
+this release marks interfaces with the frozen attribute, which the
+scanner's DTD has only from 1.24 on, so wayland-scanner 1.23.1 (the build
+machine's) fails validation and the build stops.  The headers now need
+1.24.0; with an older scanner they are left out, as with none, and the
+XML and the .pc file install as before.
+
+--- a/meson.build
++++ b/meson.build
+@@ -9,7 +9,9 @@
+ fs = import('fs')
+ 
+ dep_scanner = dependency('wayland-scanner',
+-    version: get_option('tests') ? '>=1.25.0' : '>=1.22.90',
++    # The enum headers are made with --strict, and the XML marks interfaces
++    # frozen, which wayland-scanner knows from 1.24 on.
++    version: get_option('tests') ? '>=1.25.0' : '>=1.24.0',
+     required: get_option('tests'),
+     native: true,
+     fallback: 'wayland'

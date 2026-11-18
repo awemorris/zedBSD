@@ -1,0 +1,45 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    Editor.insert("line one\nline two\nline three");
+
+    // forward-line moves to line beginnings.
+    Editor.gotoChar(Editor.pointMin());
+    print(Editor.forwardLine(1));
+    print(Editor.point());
+    print(Editor.forwardLine(1));
+    print(Editor.point());
+
+    // Shortfall when moving past the end.
+    print(Editor.forwardLine(5));
+    print(Editor.point());
+
+    // Backward.
+    print(Editor.forwardLine(-1));
+    print(Editor.point());
+    print(Editor.forwardLine(-10));
+    print(Editor.point());
+
+    // bolp / eolp.
+    print(Editor.bolp());
+    print(Editor.eolp());
+    Editor.gotoChar(9);
+    print(Editor.bolp());
+    print(Editor.eolp());
+
+    // line positions.
+    Editor.gotoChar(12);
+    print(Editor.lineBeginningPosition());
+    print(Editor.lineEndPosition());
+
+    // The noct-implemented commands layered on top.
+    Editor.gotoChar(12);
+    endOfLine();
+    print(Editor.point());
+    beginningOfLine();
+    print(Editor.point());
+    deleteChar(5);
+    print(Editor.bufferString());
+    newline(2);
+    print(Editor.bufferSize());
+}

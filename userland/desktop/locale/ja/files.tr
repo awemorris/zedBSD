@@ -1,0 +1,81 @@
+# Files' texts in Japanese (domain files, WS158 p004). tools/i18n/tr.py update keeps the translations.
+# userland/desktop/locale/files.keys:3
+msg	Today	今日
+# userland/desktop/locale/files.keys:4, userland/desktop/files/ui.c:710
+msg	Home	ホーム
+# userland/desktop/locale/files.keys:5
+msg	Desktop	デスクトップ
+# userland/desktop/locale/files.keys:6
+msg	Documents	書類
+# userland/desktop/locale/files.keys:7
+msg	Downloads	ダウンロード
+# userland/desktop/locale/files.keys:8
+msg	Pictures	ピクチャ
+# userland/desktop/locale/files.keys:9
+msg	Music	ミュージック
+# userland/desktop/locale/files.keys:10
+msg	Movies	ムービー
+# userland/desktop/locale/files.keys:11
+msg	Recents	最近使った項目
+# userland/desktop/locale/files.keys:12
+msg	Trash	ゴミ箱
+# userland/desktop/locale/files.keys:13, userland/desktop/files/ui.c:714
+msg	Computer	コンピューター
+# userland/desktop/locale/files.keys:15
+msg	Favorites	よく使う項目
+# userland/desktop/locale/files.keys:16
+msg	Locations	場所
+# userland/desktop/locale/files.keys:17
+msg	Devices	デバイス
+# userland/desktop/files/dir.c:355
+plural	{1} item	{1} items	{1} 項目
+# userland/desktop/files/titlebar.c:400
+msg	Go to folder	フォルダへ移動
+# userland/desktop/files/titlebar.c:404
+msg	Search	検索
+# userland/desktop/files/ui-grid.c:103
+msg	This folder can't be opened.	このフォルダは開けません。
+# userland/desktop/files/ui-grid.c:110
+msg	Nothing here	何もありません
+# userland/desktop/files/ui-home.c:214
+msg	Good morning	おはようございます
+# userland/desktop/files/ui-home.c:215
+msg	Good morning, {1}	{1} さん、おはようございます
+# userland/desktop/files/ui-home.c:217
+msg	Good afternoon	こんにちは
+# userland/desktop/files/ui-home.c:218
+msg	Good afternoon, {1}	{1} さん、こんにちは
+# userland/desktop/files/ui-home.c:220
+msg	Good evening	こんばんは
+# userland/desktop/files/ui-home.c:221
+msg	Good evening, {1}	{1} さん、こんばんは
+# userland/desktop/files/ui-home.c:233
+plural	{1} file opened today	{1} files opened today	今日開いたファイル {1} 件
+# userland/desktop/files/ui-home.c:235
+msg	{1} free	空き {1}
+# userland/desktop/files/ui-home.c:325
+msg	Folders	フォルダ
+# userland/desktop/files/ui-home.c:329
+msg	Recent Files	最近使ったファイル
+# userland/desktop/files/ui-home.c:334
+msg	Recent Folders	最近使ったフォルダ
+# userland/desktop/files/ui-home.c:645
+msg	Show all →	すべて表示 →
+# userland/desktop/files/ui-home.c:798
+msg	Files you open appear here.	開いたファイルがここに表示されます。
+# userland/desktop/files/ui-list.c:631
+msg	Name	名前
+# userland/desktop/files/ui-list.c:633
+msg	Kind	種類
+# userland/desktop/files/ui-list.c:635
+msg	Size	サイズ
+# userland/desktop/files/ui-list.c:637
+msg	Date Modified	変更日
+# userland/desktop/files/ui-list.c:639
+msg	Date Changed	属性変更日
+# userland/desktop/files/ui-list.c:641
+msg	Owner	所有者
+# userland/desktop/files/ui-list.c:643
+msg	Location	場所
+# userland/desktop/files/ui-list.c:645
+msg	Date Deleted	削除日

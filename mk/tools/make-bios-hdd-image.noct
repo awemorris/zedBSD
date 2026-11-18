@@ -1,0 +1,171 @@
+require zedbuild;
+
+func cleanupUnchecked(output) {
+    System.shell("rm -f " + zbShellQuote(output + ".unchecked") + " " +
+                 zbShellQuote(output + ".unchecked.tmp"));
+}
+
+func main(args) {
+    var backend = "";
+    var checker = "";
+    var checkerRunner = "";
+    var forwarded = [];
+    var checkerArgs = [];
+    var statedGeometry = false;
+    var i = 0;
+    if (Array.size(args) == 0 || String.indexOf(args[Array.size(args) - 1], "--") == 0) {
+        zbFail("make-bios-hdd-image: output path is required");
+    }
+    var output = args[Array.size(args) - 1];
+    while (i < Array.size(args)) {
+        if (args[i] == "--backend" && i + 1 < Array.size(args)) {
+            backend = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--checker" && i + 1 < Array.size(args)) {
+            checker = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--checker-runner" && i + 1 < Array.size(args)) {
+            checkerRunner = args[i + 1]; i = i + 2;
+        } else if (i + 1 == Array.size(args)) {
+            if (checker == "") { Array.push(forwarded, output); }
+            else { Array.push(forwarded, output + ".unchecked"); }
+            i = i + 1;
+        } else {
+            if (args[i] == "--size-mib" || args[i] == "--fat-size-mib") {
+                statedGeometry = true;
+            }
+            Array.push(forwarded, args[i]); i = i + 1;
+        }
+    }
+    if (backend == "") { zbFail("make-bios-hdd-image: --backend is required"); }
+    if (checker != "" && checkerRunner == "") {
+        zbFail("make-bios-hdd-image: --checker requires --checker-runner");
+    }
+    if (checker != "") { cleanupUnchecked(output); }
+
+    // The payload partition carries everything the loader reads at boot, so
+    // its capacity is measured from those inputs instead of being a fixed
+    // figure that a growing tree would one day overflow.  The reserved area,
+    // the directory and cluster rounding all cost far less than the margin,
+    // and a larger image is of no consequence here.  The same numbers go to
+    // the builder and to the checker, so one place decides the geometry.
+    var geometry = [];
+    if (!statedGeometry) {
+        var payload = 0;
+        i = 0;
+        while (i + 1 < Array.size(args)) {
+            var name = args[i];
+            if (name == "--bootzbsd" || name == "--kernel" ||
+                name == "--bootx64" || name == "--zedbsd-config" ||
+                name == "--arch-image" || name == "--data-image" ||
+                name == "--swapfile") {
+                var bytes = FileUtil.getFileSize(args[i + 1]);
+                if (bytes < 0) { zbFail("cannot stat image input: " + args[i + 1]); }
+                payload = payload + bytes;
+                i = i + 2;
+            } else {
+                i = i + 1;
+            }
+        }
+        var fatMiB = payload / (1024 * 1024) + 32;
+        if (fatMiB < 176) { fatMiB = 176; }
+        geometry = ["--fat-size-mib", "" + fatMiB,
+                    "--size-mib", "" + (fatMiB + 1)];
+    }
+    var command = [backend, "disk"];
+    for (i in 0..Array.size(forwarded)) { Array.push(command, forwarded[i]); }
+    for (i in 0..Array.size(geometry)) { Array.push(command, geometry[i]); }
+    var child = Process.spawn(command);
+    if (child < 0) {
+        if (checker != "") { cleanupUnchecked(output); }
+        zbFail("cannot start disk-image backend");
+    }
+    while (Process.isAlive(child) == 1) { Process.read(child, 100); }
+    Process.read(child, 0);
+    var status = Process.wait(child); Process.close(child);
+    if (status != 0) {
+        if (checker != "") { cleanupUnchecked(output); }
+        zbFail("disk-image backend failed");
+    }
+    if (checker == "") { return; }
+
+    // Reconstruct only the public validator arguments.  Builder-private
+    // stage/layout switches must not leak into a checker interface.
+    i = 0;
+    while (i + 1 < Array.size(args)) {
+        var option = args[i];
+        if (option == "--machine" || option == "--stage1" ||
+            option == "--stage2" ||
+            option == "--partition-pbr" ||
+            option == "--bootzbsd" || option == "--kernel" ||
+            option == "--bootx64" || option == "--zedbsd-config" ||
+            option == "--arch-profile" || option == "--arch-image" ||
+            option == "--arch-format" || option == "--data-image" ||
+            option == "--swapfile" || option == "--ufs-root" ||
+            option == "--layout" ||
+            option == "--fat-type" || option == "--noct" ||
+            option == "--holoris" || option == "--bin-file") {
+            if (i + 1 >= Array.size(args)) {
+                cleanupUnchecked(output);
+                zbFail("missing image option value");
+            }
+            Array.push(checkerArgs, option);
+            Array.push(checkerArgs, args[i + 1]);
+            i = i + 2;
+        } else if (option == "--size-mib" || option == "--fat-size-mib") {
+            Array.push(checkerArgs, option);
+            Array.push(checkerArgs, args[i + 1]);
+            i = i + 2;
+        } else if (option == "--backend" || option == "--checker" ||
+                   option == "--checker-runner") {
+            i = i + 2;
+        } else {
+            i = i + 1;
+        }
+    }
+    for (i in 0..Array.size(geometry)) { Array.push(checkerArgs, geometry[i]); }
+    Array.push(checkerArgs, output + ".unchecked");
+    // The checker reads the artifact into memory to validate it, so the
+    // interpreter is given a heap proportional to the image rather than a
+    // fixed one that the next larger image would exhaust.
+    //
+    // The size is held below two gigabytes.  The interpreter takes this
+    // figure as a signed 32-bit count, so a larger one wraps and it starts
+    // with almost nothing, which it reports as running out of memory --
+    // a message that points at the image rather than at the number that
+    // described it.  An image holding a compiler reaches that limit; the
+    // proportional figure is what smaller images get, and the ceiling is
+    // what stops the arithmetic from meaning the opposite of itself.
+    var imageBytes = FileUtil.getFileSize(output + ".unchecked");
+    if (imageBytes < 0) { cleanupUnchecked(output); zbFail("cannot stat the unchecked image"); }
+    var heapBytes = 2000000000;
+    if (imageBytes < 400000000) { heapBytes = imageBytes * 4 + 268435456; }
+    var checkCommand = [checkerRunner,
+                        "--gc-tenure-size=" + heapBytes,
+                        "--path=tools/build", checker];
+    for (i in 0..Array.size(checkerArgs)) { Array.push(checkCommand, checkerArgs[i]); }
+    child = Process.spawn(checkCommand);
+    if (child < 0) {
+        cleanupUnchecked(output);
+        zbFail("cannot start disk-image checker");
+    }
+    // What the checker says is why it refused, so it is kept and shown.
+    // Reading it and dropping it leaves a failure with no reason attached,
+    // which is a worse thing to hand someone than the refusal itself.
+    var checkerSaid = "";
+    while (Process.isAlive(child) == 1) {
+        var chunk = Process.read(child, 100);
+        if (chunk != "") { checkerSaid = checkerSaid + chunk; }
+    }
+    var rest = Process.read(child, 0);
+    if (rest != "") { checkerSaid = checkerSaid + rest; }
+    status = Process.wait(child); Process.close(child);
+    if (status != 0) {
+        if (checkerSaid != "") { print(checkerSaid); }
+        cleanupUnchecked(output);
+        zbFail("disk-image checker failed");
+    }
+    if (System.shell("mv -f " + zbShellQuote(output + ".unchecked") + " " +
+                     zbShellQuote(output)) != 0) {
+        cleanupUnchecked(output);
+        zbFail("cannot publish checked disk image");
+    }
+}

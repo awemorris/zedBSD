@@ -1,0 +1,6 @@
+# zedBSD ssh client configuration.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+Host *
+	# Nothing here resolves a name to check a fingerprint against.
+	VerifyHostKeyDNS no

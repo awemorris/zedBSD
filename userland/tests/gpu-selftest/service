@@ -1,0 +1,5 @@
+type=oneshot
+command=/bin/gpu-selftest
+arguments=-c
+restart=no
+required=NO

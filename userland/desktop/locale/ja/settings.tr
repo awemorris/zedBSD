@@ -1,0 +1,389 @@
+# Settings' texts in Japanese (domain settings, WS158 p004). tools/i18n/tr.py update keeps the translations.
+# userland/desktop/locale/settings.keys:3, userland/desktop/settings/ui.c:580
+msg	Settings	設定
+# userland/desktop/locale/settings.keys:4
+msg	Change how {1} looks and works.	{1} の見た目と動きを変えます。
+# userland/desktop/locale/settings.keys:5
+msg	Wi-Fi	Wi-Fi
+# userland/desktop/locale/settings.keys:6
+msg	Join wireless networks and turn the radio on or off.	無線のネットワークに接続し、電波を入れたり切ったりします。
+# userland/desktop/locale/settings.keys:7
+msg	Ethernet	イーサネット
+# userland/desktop/locale/settings.keys:8
+msg	Wired connections and their addresses.	有線の接続とそのアドレス。
+# userland/desktop/locale/settings.keys:9
+msg	Bluetooth	Bluetooth
+# userland/desktop/locale/settings.keys:10
+msg	Pair and connect wireless devices.	無線の機器をペアリングして接続します。
+# userland/desktop/locale/settings.keys:11
+msg	VPN	VPN
+# userland/desktop/locale/settings.keys:12
+msg	Connect securely to other networks.	ほかのネットワークに安全に接続します。
+# userland/desktop/locale/settings.keys:13
+msg	Network	ネットワーク
+# userland/desktop/locale/settings.keys:14
+msg	Manage connections and internet settings.	接続とインターネットの設定を管理します。
+# userland/desktop/locale/settings.keys:15
+msg	Appearance	外観
+# userland/desktop/locale/settings.keys:16
+msg	The look of windows and the desktop.	ウインドウとデスクトップの見た目。
+# userland/desktop/locale/settings.keys:17
+msg	Wallpaper	壁紙
+# userland/desktop/locale/settings.keys:18
+msg	The picture behind your windows.	ウインドウの後ろの画像。
+# userland/desktop/locale/settings.keys:19
+msg	Notifications	通知
+# userland/desktop/locale/settings.keys:20
+msg	Choose which applications may notify you.	通知してよいアプリケーションを選びます。
+# userland/desktop/locale/settings.keys:21
+msg	Sound	サウンド
+# userland/desktop/locale/settings.keys:22
+msg	Volume and the sound output.	音量と音の出力。
+# userland/desktop/locale/settings.keys:23
+msg	Display	ディスプレイ
+# userland/desktop/locale/settings.keys:24
+msg	Arrange the displays and set their resolution and brightness.	ディスプレイを並べ、解像度と明るさを設定します。
+# userland/desktop/locale/settings.keys:25
+msg	Languages	言語
+# userland/desktop/locale/settings.keys:26
+msg	The input method and the display language.	入力方式と表示の言語。
+# userland/desktop/locale/settings.keys:27
+msg	Storage	ストレージ
+# userland/desktop/locale/settings.keys:28
+msg	How the disks and folders are used, and the Trash.	ディスクとフォルダの使用量、ゴミ箱。
+# userland/desktop/locale/settings.keys:29
+msg	Power	電源
+# userland/desktop/locale/settings.keys:30
+msg	Sleep and the screen.	スリープと画面。
+# userland/desktop/locale/settings.keys:31
+msg	Keyboard	キーボード
+# userland/desktop/locale/settings.keys:32
+msg	Key repeat and the layout.	キーのリピートと配列。
+# userland/desktop/locale/settings.keys:33
+msg	Mouse	マウス
+# userland/desktop/locale/settings.keys:34
+msg	Pointer speed, acceleration and scrolling.	ポインターの速さ、加速、スクロール。
+# userland/desktop/locale/settings.keys:35
+msg	Touchpad	タッチパッド
+# userland/desktop/locale/settings.keys:36
+msg	Printers	プリンター
+# userland/desktop/locale/settings.keys:37
+msg	Add and manage printers.	プリンターを追加して管理します。
+# userland/desktop/locale/settings.keys:38
+msg	Sharing	共有
+# userland/desktop/locale/settings.keys:39
+msg	Remote Login and, later, cloud storage.	リモートログイン（のちにクラウドストレージ）。
+# userland/desktop/locale/settings.keys:40
+msg	Users	ユーザー
+# userland/desktop/locale/settings.keys:41
+msg	Accounts on this computer.	このコンピューターのアカウント。
+# userland/desktop/locale/settings.keys:42
+msg	Updates	アップデート
+# userland/desktop/locale/settings.keys:43
+msg	Keep {1} up to date.	{1} を最新に保ちます。
+# userland/desktop/locale/settings.keys:44
+msg	About	情報
+# userland/desktop/locale/settings.keys:45
+msg	This computer and the version of {1}.	このコンピューターと {1} のバージョン。
+# userland/desktop/locale/settings.keys:47
+msg	Search Results	検索結果
+# userland/desktop/locale/settings.keys:49
+msg	Japanese	日本語
+# userland/desktop/locale/settings.keys:50
+msg	{1}'s input method: romaji to kana, converted a phrase at a time.	{1} の入力方式: ローマ字をかなにし、文節ごとに変換します。
+# userland/desktop/locale/settings.keys:51
+msg	SKK	SKK
+# userland/desktop/locale/settings.keys:52
+msg	Emacs's SKK: an upper-case letter starts a word, Space converts it.	Emacs の SKK: 大文字で単語を始め、スペースで変換します。
+# userland/desktop/locale/settings.keys:53
+msg	None (English)	なし（英語）
+# userland/desktop/locale/settings.keys:54
+msg	The keys type as they are; no input method.	キーをそのまま入力します。入力方式は使いません。
+# userland/desktop/locale/settings.keys:56
+msg	Connect to a network	ネットワークに接続
+# userland/desktop/locale/settings.keys:57
+msg	Join Wi-Fi now, or later in Settings.	今 Wi-Fi に接続するか、あとで設定から接続します。
+# userland/desktop/locale/settings.keys:58
+msg	Your network	ネットワーク
+# userland/desktop/locale/settings.keys:59
+msg	The wired connection and its address.	有線の接続とそのアドレス。
+# userland/desktop/locale/settings.keys:60
+msg	Choose your look	見た目を選ぶ
+# userland/desktop/locale/settings.keys:61
+msg	A picture for the desktop, and how clear the windows are.	デスクトップの画像と、ウインドウの透け具合。
+# userland/desktop/locale/settings.keys:62
+msg	Languages and input	言語と入力
+# userland/desktop/locale/settings.keys:63
+msg	How you type, and the language of the desktop's words.	入力のしかたと、デスクトップの言葉の言語。
+# userland/desktop/locale/settings.keys:64
+msg	Keys to know	覚えておきたいキー
+# userland/desktop/locale/settings.keys:65
+msg	{1} is quick to use from the keyboard.	{1} はキーボードからすばやく使えます。
+# userland/desktop/locale/settings.keys:66
+msg	You are all set	準備ができました
+# userland/desktop/locale/settings.keys:67
+msg	Start using {1} opens Files at Today. The Welcome is in Settings > About whenever you want it again.	「{1} を使い始める」でファイルの「今日」を開きます。ようこそは、設定 > 情報 からいつでももう一度見られます。
+# userland/desktop/locale/settings.keys:68
+msg	Open App Home (tap the key)	App Home を開く（キーを軽く押す）
+# userland/desktop/locale/settings.keys:69
+msg	Wiseview: every window at a glance	Wiseview: すべてのウインドウを一覧
+# userland/desktop/locale/settings.keys:70
+msg	Switch between windows	ウインドウを切り替える
+# userland/desktop/locale/settings.keys:71
+msg	Lock the screen	画面をロック
+# userland/desktop/locale/settings.keys:72
+msg	Move between desktops	デスクトップを移る
+# userland/desktop/locale/settings.keys:73
+msg	Switch the input language	入力の言語を切り替える
+# userland/desktop/locale/settings.keys:75
+msg	Blue	青
+# userland/desktop/locale/settings.keys:76
+msg	Purple	紫
+# userland/desktop/locale/settings.keys:77
+msg	Pink	ピンク
+# userland/desktop/locale/settings.keys:78
+msg	Red	赤
+# userland/desktop/locale/settings.keys:79
+msg	Orange	オレンジ
+# userland/desktop/locale/settings.keys:80
+msg	Yellow	黄
+# userland/desktop/locale/settings.keys:81
+msg	Green	緑
+# userland/desktop/locale/settings.keys:82
+msg	Graphite	グラファイト
+# userland/desktop/locale/settings.keys:84
+msg	Mail	メール
+# userland/desktop/locale/settings.keys:85
+msg	Calendar	カレンダー
+# userland/desktop/locale/settings.keys:86
+msg	Phone	電話
+# userland/desktop/locale/settings.keys:87, userland/desktop/settings/page-notifications.c:96
+msg	Browser	ブラウザー
+# userland/desktop/settings/page-about.c:122
+msg	Show Welcome again	ようこそをもう一度見る
+# userland/desktop/settings/page-display.c:203
+msg	Extend spreads the desktop over the displays. Mirror shows it on each.	拡張はデスクトップを複数のディスプレイに広げます。ミラーはどのディスプレイにも同じものを映します。
+# userland/desktop/settings/page-display.c:205
+msg	Displays	ディスプレイ
+# userland/desktop/settings/page-display.c:209
+msg	Extend	拡張
+# userland/desktop/settings/page-display.c:210
+msg	Mirror	ミラー
+# userland/desktop/settings/page-display.c:214
+msg	With one display both show the same.	ディスプレイが1つの時はどちらも同じです。
+# userland/desktop/settings/page-display.c:226, userland/desktop/settings/page-display.c:227, userland/desktop/settings/page-languages.c:202
+msg	Apply	適用
+# userland/desktop/settings/page-display.c:228, userland/desktop/settings/page-display.c:229, userland/desktop/settings/page-display.c:2221
+msg	Revert	元に戻す
+# userland/desktop/settings/page-display.c:473, userland/desktop/settings/page-display.c:1094
+msg	The brightness could not be changed.	明るさを変えられませんでした。
+# userland/desktop/settings/page-display.c:488
+msg	At least one display stays on.	少なくとも 1 つのディスプレイはオンのままです。
+# userland/desktop/settings/page-display.c:491, userland/desktop/settings/page-display.c:518, userland/desktop/settings/page-display.c:2427
+msg	The display is not connected.	ディスプレイが接続されていません。
+# userland/desktop/settings/page-display.c:494, userland/desktop/settings/page-display.c:521, userland/desktop/settings/page-display.c:581
+msg	The displays can be changed only in an unlocked session.	ディスプレイはロックされていないセッションでだけ変えられます。
+# userland/desktop/settings/page-display.c:497
+msg	The display could not be turned off or on.	ディスプレイをオフ・オンにできませんでした。
+# userland/desktop/settings/page-display.c:515
+msg	This display cannot be rotated that way.	このディスプレイはその向きに回転できません。
+# userland/desktop/settings/page-display.c:524
+msg	The display could not be rotated.	ディスプレイを回転できませんでした。
+# userland/desktop/settings/page-display.c:554
+msg	The time ran out: the previous resolution is back.	時間が切れたので、前の解像度に戻りました。
+# userland/desktop/settings/page-display.c:556
+msg	The resolution could not be kept.	解像度を保てませんでした。
+# userland/desktop/settings/page-display.c:575, userland/desktop/settings/page-display.c:1001
+msg	The displays changed. Arrange them again.	ディスプレイが変わりました。もう一度並べてください。
+# userland/desktop/settings/page-display.c:578
+msg	The displays must touch along an edge and not overlap.	ディスプレイは辺で接し、重ならないように並べてください。
+# userland/desktop/settings/page-display.c:584, userland/desktop/settings/page-display.c:1062
+msg	This desktop cannot change the displays.	このデスクトップではディスプレイを変えられません。
+# userland/desktop/settings/page-display.c:587
+msg	The displays could not be changed.	ディスプレイを変えられませんでした。
+# userland/desktop/settings/page-display.c:617
+msg	Screen	画面
+# userland/desktop/settings/page-display.c:618
+msg	Mode	モード
+# userland/desktop/settings/page-display.c:619
+msg	Graphics	グラフィックス
+# userland/desktop/settings/page-display.c:748
+msg	built in	内蔵
+# userland/desktop/settings/page-display.c:753
+msg	Not shown: the computer shows no more displays at once	表示されていません: このコンピューターが同時に映せるディスプレイの数を超えています
+# userland/desktop/settings/page-display.c:755
+msg	Off	オフ
+# userland/desktop/settings/page-display.c:794
+msg	Brightness	明るさ
+# userland/desktop/settings/page-display.c:1147
+msg	This desktop cannot turn displays off.	このデスクトップではディスプレイをオフにできません。
+# userland/desktop/settings/page-display.c:1200
+msg	Rotation	回転
+# userland/desktop/settings/page-display.c:1200
+msg	Turn the picture to match how the display stands.	ディスプレイの置き方に合わせて画面を回転します。
+# userland/desktop/settings/page-display.c:1393
+msg	This display cannot be rotated.	このディスプレイは回転できません。
+# userland/desktop/settings/page-display.c:1395
+msg	The rotation can be changed while this display is the only one shown.	このディスプレイだけを表示しているときに回転を変えられます。
+# userland/desktop/settings/page-display.c:1397
+msg	The display could not be rotated (not enough memory).	ディスプレイを回転できませんでした（メモリが足りません）。
+# userland/desktop/settings/page-display.c:1399
+msg	Rotation is paused while a game is shown.	ゲームを表示している間は回転を止めています。
+# userland/desktop/settings/page-display.c:1401
+msg	90 and 270 degrees are not available on this device yet.	この機器ではまだ 90 度と 270 度を使えません。
+# userland/desktop/settings/page-display.c:1486
+msg	This desktop cannot rotate the displays.	このデスクトップはディスプレイを回転できません。
+# userland/desktop/settings/page-display.c:1532
+msg	Resolution	解像度
+# userland/desktop/settings/page-display.c:1532
+msg	A new resolution goes back by itself unless you keep it.	新しい解像度は、保たない限り自動で元に戻ります。
+# userland/desktop/settings/page-display.c:1697
+msg	The resolution is being changed.	解像度を変えています。
+# userland/desktop/settings/page-display.c:1702
+plural	A new resolution is being tried. It goes back in {1} second unless kept.	A new resolution is being tried. It goes back in {1} seconds unless kept.	新しい解像度を試しています。保たないと {1} 秒で元に戻ります。
+# userland/desktop/settings/page-display.c:1707
+msg	The previous resolution is coming back.	前の解像度に戻しています。
+# userland/desktop/settings/page-display.c:1732, userland/desktop/settings/page-display.c:1733
+msg	Use Recommended	推奨に戻す
+# userland/desktop/settings/page-display.c:1797, userland/desktop/settings/page-display.c:1799
+msg	Recommended	推奨
+# userland/desktop/settings/page-display.c:1851
+msg	Refresh rate	リフレッシュレート
+# userland/desktop/settings/page-display.c:1880
+msg	The resolution can be changed on the display the desktop is shown on.	解像度は、デスクトップを表示しているディスプレイで変えられます。
+# userland/desktop/settings/page-display.c:1882, userland/desktop/settings/page-display.c:2421
+msg	The resolution can be changed while this display is the only one shown.	解像度は、このディスプレイだけを表示している時に変えられます。
+# userland/desktop/settings/page-display.c:1884
+msg	The resolution cannot be changed while a game is shown.	ゲームを表示している間は解像度を変えられません。
+# userland/desktop/settings/page-display.c:2139, userland/desktop/settings/page-display.c:2172
+msg	This desktop cannot change the resolution.	このデスクトップは解像度を変えられません。
+# userland/desktop/settings/page-display.c:2148
+msg	Changing the resolution	解像度の変更
+# userland/desktop/settings/page-display.c:2148
+msg	The display may go dark for a moment.	ディスプレイが少しの間暗くなることがあります。
+# userland/desktop/settings/page-display.c:2149
+msg	Waiting for the display...	ディスプレイを待っています...
+# userland/desktop/settings/page-display.c:2212, userland/desktop/settings/page-display.c:2320
+msg	The previous resolution is back.	前の解像度に戻りました。
+# userland/desktop/settings/page-display.c:2220
+msg	Keep this resolution?	この解像度を保ちますか?
+# userland/desktop/settings/page-display.c:2220
+msg	Keep	保つ
+# userland/desktop/settings/page-display.c:2286
+plural	The display shows {1} now. Unless you keep it, {2} comes back in {3} second.	The display shows {1} now. Unless you keep it, {2} comes back in {3} seconds.	ディスプレイは今 {1} です。保たないと {3} 秒で {2} に戻ります。
+# userland/desktop/settings/page-display.c:2415
+msg	The display could not show that resolution. The previous one is back.	ディスプレイはその解像度を表示できませんでした。前の解像度に戻りました。
+# userland/desktop/settings/page-display.c:2418
+msg	This display cannot show that resolution.	このディスプレイはその解像度を表示できません。
+# userland/desktop/settings/page-display.c:2424
+msg	The displays are being changed, or a game is shown. Try again later.	ディスプレイを変えている途中か、ゲームを表示しています。後でもう一度試してください。
+# userland/desktop/settings/page-display.c:2433
+msg	The resolution could not be changed.	解像度を変えられませんでした。
+# userland/desktop/settings/page-home.c:62
+msg	Connectivity	接続
+# userland/desktop/settings/page-home.c:63
+msg	Personalization	パーソナライズ
+# userland/desktop/settings/page-home.c:64
+msg	Devices	デバイス
+# userland/desktop/settings/page-home.c:65
+msg	System	システム
+# userland/desktop/settings/page-languages.c:109
+msg	Input method	入力方式
+# userland/desktop/settings/page-languages.c:109
+msg	What the keyboard types through. The change applies at once.	キーボードの入力に使うもの。変更はすぐに反映されます。
+# userland/desktop/settings/page-languages.c:124
+msg	Display language	表示の言語
+# userland/desktop/settings/page-languages.c:124
+msg	The language of the desktop's words. The change applies at once.	デスクトップの文字の言語。変更はすぐに反映されます。
+# userland/desktop/settings/page-languages.c:179
+msg	Login screen	ログイン画面
+# userland/desktop/settings/page-languages.c:179
+msg	The language of the login screen, for everyone on this computer.	このコンピューターの全員のログイン画面の言語。
+# userland/desktop/settings/page-languages.c:180
+msg	Not set (English)	未設定（英語）
+# userland/desktop/settings/page-languages.c:183
+msg	Now	現在
+# userland/desktop/settings/page-languages.c:232
+msg	Your password	あなたのパスワード
+# userland/desktop/settings/page-languages.c:242
+msg	Needed for the change	変更に必要です
+# userland/desktop/settings/page-languages.c:402
+msg	Changed. The login screen uses it from the next time it shows.	変更しました。次にログイン画面が出る時から使われます。
+# userland/desktop/settings/page-languages.c:414, userland/desktop/settings/page-languages.c:572
+msg	The change could not be made.	変更できませんでした。
+# userland/desktop/settings/page-languages.c:539
+msg	The change could not be asked.	変更を依頼できませんでした。
+# userland/desktop/settings/page-languages.c:548
+msg	Changing...	変更しています...
+# userland/desktop/settings/page-languages.c:563
+msg	Only an administrator can change the login screen's language.	ログイン画面の言語は管理者だけが変更できます。
+# userland/desktop/settings/page-languages.c:566
+msg	Your password is wrong.	パスワードが違います。
+# userland/desktop/settings/page-languages.c:569
+msg	Another change is under way. Try again in a moment.	ほかの変更が進行中です。少し待ってからやり直してください。
+# userland/desktop/settings/page-look.c:605
+msg	Accent color	アクセントカラー
+# userland/desktop/settings/page-notifications.c:84
+msg	Applications	アプリケーション
+# userland/desktop/settings/page-notifications.c:84
+msg	Turn off an application to hide its notifications.	アプリケーションを切ると、その通知を表示しません。
+# userland/desktop/settings/page-notifications.c:87
+msg	Show its notifications	通知を表示する
+# userland/desktop/settings/page-notifications.c:94
+msg	Sign-in Codes	サインインのコード
+# userland/desktop/settings/page-notifications.c:94
+msg	A code that comes by mail can be filled in for you.	メールで届いたコードを代わりに入力できます。
+# userland/desktop/settings/page-notifications.c:96
+msg	May read the sign-in codes in new mail	新しいメールのサインインのコードを読んでよい
+# userland/desktop/settings/page-power.c:94
+msg	The screen turns off after half that time.	画面はその半分の時間で消えます。
+# userland/desktop/settings/page-power.c:96
+msg	This computer cannot sleep. The screen turns off after half that time.	このコンピューターはスリープできません。画面はその半分の時間で消えます。
+# userland/desktop/settings/page-power.c:100
+msg	Sleep	スリープ
+# userland/desktop/settings/page-power.c:101
+msg	Sleep after, on the power adapter	電源アダプター使用時、スリープまで
+# userland/desktop/settings/page-power.c:102
+msg	Sleep after, on battery	バッテリー使用時、スリープまで
+# userland/desktop/settings/page-power.c:107
+msg	Screen Lock	画面のロック
+# userland/desktop/settings/page-power.c:107
+msg	The screen locks after this long without input. A sleep locks it too.	操作が無いままこの時間が過ぎると画面をロックします。スリープの時もロックします。
+# userland/desktop/settings/page-power.c:108
+msg	Lock the screen after	画面をロックするまで
+# userland/desktop/settings/page-power.c:206, userland/desktop/settings/page-power.c:262
+msg	Never	しない
+# userland/desktop/settings/page-power.c:207
+msg	2 hours	2 時間
+# userland/desktop/settings/page-power.c:209
+msg	1 hour	1 時間
+# userland/desktop/settings/page-power.c:268
+plural	{1} minute	{1} minutes	{1} 分
+# userland/desktop/settings/search.c:529
+msg	Coming in a later version	今後のバージョンで対応予定
+# userland/desktop/settings/titlebar.c:227
+msg	Search settings	設定を検索
+# userland/desktop/settings/ui.c:583
+msg	Search	検索
+# userland/desktop/settings/welcome.c:142, userland/desktop/settings/welcome.c:143
+msg	Skip	スキップ
+# userland/desktop/settings/welcome.c:220, userland/desktop/settings/welcome.c:221
+msg	Back	戻る
+# userland/desktop/settings/welcome.c:226
+msg	Next	次へ
+# userland/desktop/settings/welcome.c:228
+msg	Start using {1}	{1} を使い始める
+# userland/desktop/settings/welcome.c:230
+msg	Close	
+# userland/desktop/settings/welcome.c:362
+msg	Files could not be opened. Open it from App Home.	
+# userland/desktop/settings/welcome.c:412
+msg	Welcome to {1}, {2}	{1} へようこそ、{2} さん
+# userland/desktop/settings/welcome.c:419
+msg	Let's set up a few things. You can change each of them later in Settings.	いくつか設定しましょう。どれもあとで設定から変えられます。
+# userland/desktop/settings/welcome.c:569
+msg	Try the key again, or press Next and connect later in Settings.	
+# userland/desktop/settings/welcome.c:578
+msg	No Wi-Fi and no wired connection were found. Press Next to go on; Settings > Ethernet or Wi-Fi connects later.	
+# userland/desktop/settings/welcome.c:639
+msg	The Welcome could not be marked as done; it will show again at the next login. Press again to go on.	

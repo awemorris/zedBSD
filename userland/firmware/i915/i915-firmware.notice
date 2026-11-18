@@ -1,0 +1,12 @@
+Firmware: Intel i915 display DMC (Display Microcontroller) firmware
+Hardware: Intel Ice Lake (ICL), Tiger Lake (TGL), Rocket Lake (RKL),
+          Alder Lake-S (ADL-S) and Alder Lake-P (ADL-P) integrated graphics
+Files:    /lib/firmware/i915/adlp_dmc.bin (DMC 2.20)
+          /lib/firmware/i915/adlp_dmc_ver2_16.bin (DMC 2.16)
+          /lib/firmware/i915/adls_dmc_ver2_01.bin (DMC 2.01)
+          /lib/firmware/i915/icl_dmc_ver1_09.bin (DMC 1.09)
+          /lib/firmware/i915/rkl_dmc_ver2_03.bin (DMC 2.03)
+          /lib/firmware/i915/tgl_dmc_ver2_12.bin (DMC 2.12)
+Source:   linux-firmware tag 20260410 (commit dc85ccedc9c973682fbcf4d628ca61174bcc3120)
+
+Copyright (c) 2015, Intel Corporation.

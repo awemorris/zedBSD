@@ -1,0 +1,68 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+func trim(text) {
+    var first = 0; var last = String.charCount(text);
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    return String.substring(text, first, last - first);
+}
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func lines(text) {
+    var out = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") { Array.push(out, String.substring(text, start, i - start)); start = i + 1; }
+    }
+    return out;
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: maintain-dispatch.noct PUBLIC_HEADER OUTPUT_DIRECTORY"); }
+    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h"));
+    var banner = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n";
+    var table = banner + "/*\n * Maintained declaration metadata, see include/libc/vulkan/API-PROVENANCE.md.\n */\n\n";
+    var manifest = "name\tscope\textension\n"; var extension = "0"; var count = 0;
+    for (i in 0..Array.size(source)) {
+        var line = trim(source[i]);
+        if (line == "#define VK_KHR_wayland_surface 1") { extension = "VULKAN_INSTANCE_WAYLAND"; }
+        if (line == "#define VK_KHR_surface 1") { extension = "VULKAN_INSTANCE_SURFACE"; }
+        if (line == "#define VK_KHR_display 1") { extension = "VULKAN_INSTANCE_DISPLAY"; }
+        if (line == "#define VK_KHR_swapchain 1") { extension = "VULKAN_DEVICE_SWAPCHAIN"; }
+        if (line == "#define VK_KHR_display_swapchain 1") { extension = "VULKAN_DEVICE_DISPLAY_SWAPCHAIN"; }
+        if (line == "#define VK_KHR_get_physical_device_properties2 1") { extension = "VULKAN_INSTANCE_PROPERTIES2"; }
+        if (line == "#define VK_KHR_external_memory_capabilities 1") { extension = "VULKAN_INSTANCE_EXTERNAL_MEMORY"; }
+        if (line == "#define VK_KHR_external_fence_capabilities 1") { extension = "VULKAN_INSTANCE_EXTERNAL_FENCE"; }
+        if (line == "#define VK_KHR_external_memory_fd 1") { extension = "VULKAN_DEVICE_EXTERNAL_MEMORY_FD"; }
+        if (line == "#define VK_KHR_external_fence_fd 1") { extension = "VULKAN_DEVICE_EXTERNAL_FENCE_FD"; }
+        if (line == "#define VK_KHR_get_memory_requirements2 1") { extension = "VULKAN_DEVICE_MEMORY_REQUIREMENTS2"; }
+        if (line == "#define VK_KHR_dedicated_allocation 1") { extension = "VULKAN_DEVICE_DEDICATED_ALLOCATION"; }
+        if (line == "#define VK_KHR_video_queue 1") { extension = "VULKAN_DEVICE_VIDEO_QUEUE"; }
+        if (line == "#define VK_KHR_video_decode_queue 1") { extension = "VULKAN_DEVICE_VIDEO_DECODE_QUEUE"; }
+        if (line == "#define VK_KHR_synchronization2 1") { extension = "VULKAN_DEVICE_SYNCHRONIZATION2"; }
+        if (line == "#define VK_KHR_get_surface_capabilities2 1") { extension = "VULKAN_INSTANCE_SURFACE_CAPABILITIES2"; }
+        if (line == "#define VK_EXT_swapchain_maintenance1 1") { extension = "VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1"; }
+        if (line == "#define VK_EXT_display_surface_counter 1") { extension = "VULKAN_INSTANCE_SURFACE_COUNTER"; }
+        if (line == "#define VK_EXT_display_control 1") { extension = "VULKAN_DEVICE_DISPLAY_CONTROL"; }
+        if (line == "#define VK_KHR_get_display_properties2 1") { extension = "VULKAN_INSTANCE_DISPLAY_PROPERTIES2"; }
+        var at = String.indexOf(line, "(VKAPI_PTR *PFN_vk");
+        if (at < 0) { continue; }
+        var rest = String.substring(line, at + 16, -1);
+        var end = String.indexOf(rest, ")(");
+        if (end < 0) { System.error("unrecognized PFN declaration"); }
+        var name = String.substring(rest, 0, end);
+        var arguments = String.substring(rest, end + 2, -1);
+        if (name == "vkVoidFunction" || name == "vkAllocationFunction" || name == "vkReallocationFunction" || name == "vkFreeFunction" || name == "vkInternalAllocationNotification" || name == "vkInternalFreeNotification") { continue; }
+        var scope = "VULKAN_ENTRY_INSTANCE";
+        if (starts(arguments, "VkDevice ") || starts(arguments, "VkQueue ") || starts(arguments, "VkCommandBuffer ")) { scope = "VULKAN_ENTRY_DEVICE"; }
+        if (scope == "VULKAN_ENTRY_INSTANCE" && starts(extension, "VULKAN_DEVICE_")) { scope = "VULKAN_ENTRY_PHYSICAL"; }
+        if (name == "vkCreateInstance" || name == "vkEnumerateInstanceExtensionProperties" || name == "vkEnumerateInstanceLayerProperties" || name == "vkGetInstanceProcAddr") { scope = "VULKAN_ENTRY_GLOBAL"; }
+        table = table + "\t{\"" + name + "\", (PFN_vkVoidFunction)" + name + ", " + scope + ", " + extension + "},\n";
+        manifest = manifest + name + "\t" + scope + "\t" + extension + "\n";
+        count = count + 1;
+    }
+    if (count != 204) { System.error("expected 204 public command records, got " + count); }
+    FileUtil.writeText(args[1] + "/dispatch-table.inc", table);
+    FileUtil.writeText(args[1] + "/api-commands.tsv", manifest);
+    print("maintained 204 dispatch records");
+}

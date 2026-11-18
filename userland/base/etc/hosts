@@ -1,0 +1,8 @@
+# zedBSD host name database.
+#
+# Each line gives an address, the host's canonical name, and any further
+# names for it.  getaddrinfo and gethostbyname read it before asking the
+# DNS, so a name listed here is answered without a server.
+
+127.0.0.1	localhost
+::1		localhost

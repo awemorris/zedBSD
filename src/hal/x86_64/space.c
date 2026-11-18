@@ -1,0 +1,3553 @@
+/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 four-level page-table implementation.
+ */
+
+#include <hal/hal.h>
+
+#include "acpi-window.h"
+#include "asm.h"
+#include "bootloader/include/amd64-handoff.h"
+#include "bsp.h"
+#include "bsp-pcat/lapic.h"
+#include "defs.h"
+#include "percpu.h"
+#include "ram-map.h"
+#include "framebuffer-map.h"
+#include "smp.h"
+#include "space.h"
+#include "image.h"
+
+#define AMD64_USER_LIMIT 0x0000800000000000ULL
+
+/*
+ * The entry that points to a page table carries, in the bits the hardware
+ * ignores (52..62), how many entries of that table are present.  It makes
+ * "is this table empty" a single load instead of a scan of 512 entries,
+ * which the unmap path asked for every table of the space on every call.
+ */
+#define AMD64_PTE_COUNT_SHIFT  52
+#define AMD64_PTE_COUNT_MASK   (0x7ffULL << AMD64_PTE_COUNT_SHIFT)
+
+_Static_assert(AMD64_RAM_BASE == AMD64_DIRECT_BASE, "RAM window base agreement");
+_Static_assert(AMD64_RAM_LIMIT == AMD64_DIRECT_LIMIT, "RAM window size agreement");
+
+#define AMD64_ACPI_PDPT_INDEX 509U
+#define AMD64_ACPI_WINDOW_BASE 0xffffffff40000000ULL
+
+#define AMD64_ECAM_PD_FIRST 128U
+#define AMD64_ECAM_PD_COUNT 128U
+#define AMD64_ECAM_VIRTUAL_BASE 0xffffffffd0000000ULL
+
+/*
+ * Reserves two kernel PDPT slots below the ACPI window for owned mappings.
+ * The 2-GiB window holds a whole 1-GiB Venus aperture beside other views
+ * (BUG-144); it has its own directories, not the shared MMIO directory.
+ */
+#define AMD64_DEVICE_PDPT_FIRST 507U
+#define AMD64_DEVICE_PDPT_COUNT 2U
+#define AMD64_DEVICE_PD_COUNT (AMD64_DEVICE_PDPT_COUNT * 512U)
+#define AMD64_DEVICE_PAGE_COUNT (AMD64_DEVICE_PD_COUNT * 512U)
+#define AMD64_DEVICE_WINDOW_BASE 0xfffffffec0000000ULL
+
+_Static_assert(AMD64_DEVICE_PDPT_FIRST + AMD64_DEVICE_PDPT_COUNT ==
+    AMD64_ACPI_PDPT_INDEX, "device window ends at the ACPI window");
+_Static_assert(AMD64_DEVICE_WINDOW_BASE == 0xffffff8000000000ULL +
+    (unsigned long long)AMD64_DEVICE_PDPT_FIRST * 0x40000000ULL,
+    "device window base agreement");
+
+/*
+ * The UEFI runtime window: the kernel PDPT slot below the device window,
+ * where the UEFI loader told the firmware its runtime services are.  Only
+ * hal_space_map(HAL_SPACE_SYS, ...) fills it, and only with firmware pages
+ * outside the RAM map; its mappings last for the kernel's life.
+ */
+#define AMD64_FIRMWARE_PDPT_INDEX 506U
+#define AMD64_FIRMWARE_PD_COUNT \
+	(ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE / (512U * PAGE_SIZE))
+
+_Static_assert(ZBL6_UEFI_RUNTIME_VIRTUAL_BASE == 0xffffff8000000000ULL +
+    (unsigned long long)AMD64_FIRMWARE_PDPT_INDEX * 0x40000000ULL,
+    "firmware window base agreement");
+_Static_assert(AMD64_FIRMWARE_PDPT_INDEX < AMD64_DEVICE_PDPT_FIRST,
+    "firmware window lies below the device window");
+_Static_assert(AMD64_FIRMWARE_PD_COUNT <= 512U,
+    "firmware window fits one directory");
+
+#define AMD64_FRAMEBUFFER_PD_FIRST 16U
+#define AMD64_FRAMEBUFFER_PD_COUNT \
+	(AMD64_ECAM_PD_FIRST - AMD64_FRAMEBUFFER_PD_FIRST)
+
+#define AMD64_SHOOTDOWN_REQUESTS (AMD64_SMP_MAX_CPUS * 4U)
+
+/*
+ * One kernel device view retained until its final unmap and TLB retirement.
+ * The address-space registry lock protects the sorted list and references.
+ */
+struct amd64_device_mapping {
+	struct amd64_device_mapping *next;
+	hal_physaddr_t physical;
+	size_t requested_size;
+	unsigned first_page;
+	unsigned page_count;
+	unsigned references;
+	uint32_t attributes;
+	void *address;
+};
+
+/* The largest shootdown range invalidated page by page rather than whole. */
+#define AMD64_INVLPG_MAX_PAGES 32U
+
+/* The smallest unmap that frees the page tables it empties: one leaf table's span. */
+#define AMD64_DETACH_MIN_BYTES (512U * PAGE_SIZE)
+
+/* The offset bits inside one leaf table's span, for rounding up to the next span. */
+#define AMD64_LEAF_SPAN_MASK ((uintptr_t)AMD64_DETACH_MIN_BYTES - 1U)
+
+/* CR4.PGE: global pages are enabled, and the G bit keeps an entry across CR3 loads. */
+#define AMD64_CR4_PGE ((uint64_t)1U << 7)
+
+struct amd64_shootdown_request {
+	volatile unsigned active;
+	hal_space_t space;
+	void *vaddr;
+	size_t size;
+	unsigned global;
+	volatile uint64_t pending;
+};
+
+/*
+ * The states of the early console's mapping of the boot framebuffer: none
+ * (no framebuffer), held by the early console, given to the kernel's
+ * console (one mapping request of exactly the framebuffer once the kernel
+ * prints), and removed.
+ */
+enum amd64_fb_window_state {
+	AMD64_FB_WINDOW_NONE,
+	AMD64_FB_WINDOW_HELD,
+	AMD64_FB_WINDOW_GIVEN,
+	AMD64_FB_WINDOW_REMOVED
+};
+
+/*
+ * The early console's mapping of the boot framebuffer: its state, the
+ * framebuffer's physical base and size as the kernel reads them, the
+ * kernel address of its first byte, and the system directory entries it
+ * takes from AMD64_FRAMEBUFFER_PD_FIRST.
+ */
+struct amd64_fb_window {
+	enum amd64_fb_window_state state;
+	hal_physaddr_t physical;
+	size_t size;
+	uintptr_t address;
+	unsigned pd_count;
+};
+
+typedef char amd64_user_pointer_window_assert[
+	AMD64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX ? 1 : -1];
+
+extern char __kernel_virt_start[];
+extern char __kernel_virt_end[];
+extern char __kernel_phys_start[];
+extern char __kernel_phys_end[];
+extern char __kernel_text_phys_start[];
+extern char __kernel_text_phys_end[];
+extern char __kernel_rodata_phys_start[];
+extern char __kernel_rodata_phys_end[];
+extern char __kernel_data_phys_start[];
+extern char __kernel_data_phys_end[];
+
+static uint64_t system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_kernel_pt[8][512]
+	__attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_identity_pt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_legacy_pt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_framebuffer_edges[2][512] __attribute__((aligned(PAGE_SIZE)));
+static struct amd64_ram_builder ram_builder;
+static int ram_active;
+static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_device_pd[AMD64_DEVICE_PDPT_COUNT][512]
+	__attribute__((aligned(PAGE_SIZE)));
+/*
+ * The directory of the UEFI runtime window, linked into the shared system
+ * PDPT when the system page table is built so that every address space
+ * sees what is mapped there.  Its leaf tables are allocated when a page of
+ * their span is first mapped and stay attached for the kernel's life; the
+ * address-space registry lock serializes their creation and every entry
+ * written to them.
+ */
+static uint64_t system_firmware_pd[512] __attribute__((aligned(PAGE_SIZE)));
+
+/*
+ * Device leaf tables remain attached for the kernel lifetime. Individual views
+ * release their PTEs and slots; at most the reserved 2-GiB window needs tables.
+ */
+static hal_physaddr_t device_leaf_tables[AMD64_DEVICE_PD_COUNT];
+
+/* Sorted active and retiring device views; retiring slots cannot be reused. */
+static struct amd64_device_mapping *device_mappings;
+
+static uint64_t system_acpi_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t
+    system_acpi_pt[AMD64_ACPI_WINDOW_PT_COUNT][512]
+	__attribute__((aligned(PAGE_SIZE)));
+static struct amd64_acpi_window acpi_window;
+static int acpi_discovery_finished;
+static paddr_t acpi_physical_max;
+static unsigned ecam_pd_used;
+static uintptr_t system_cr3;
+static int next_space_id = 1;
+static uint32_t space_count;
+static uint32_t page_table_count;
+static volatile unsigned space_registry_lock;
+static struct amd64_space *space_registry;
+static struct amd64_shootdown_request
+    shootdowns[AMD64_SHOOTDOWN_REQUESTS];
+
+/*
+ * The early console's mapping of the boot framebuffer.  Set while the
+ * system page table is built; its state changes under the address-space
+ * registry lock.
+ */
+static struct amd64_fb_window fb_window;
+
+static paddr_t cpu_physical_max(void);
+static int ram_allocate(void *context, uint64_t *physical, uint64_t **table);
+static uint64_t *ram_resolve(void *context, uint64_t physical);
+static void build_ram_map(const struct zbl6_framebuffer *framebuffer);
+static void map_legacy_image_alias(void);
+static int arena_is_mapped(void);
+static void verify_ram_map(void);
+static void table_count_drop(void);
+static int alloc_page(hal_physaddr_t *paddr);
+static bool registry_lock_enter(void);
+static void registry_lock_leave(bool enabled);
+static int space_op_enter(struct amd64_space *space);
+static void space_op_leave(struct amd64_space *space);
+static bool space_lock_enter(struct amd64_space *space);
+static void space_lock_leave(struct amd64_space *space, bool enabled);
+static int valid_user_range(uintptr_t address, size_t size);
+static struct amd64_table_page *allocate_table(struct amd64_space *space, uint64_t *parent, unsigned parent_index);
+static void table_count_adjust(uint64_t *owner, int delta);
+static uint64_t *walk_leaf(struct amd64_space *space, uintptr_t address, int create, uint64_t **owner);
+static int table_is_empty(const struct amd64_table_page *page);
+static uint64_t *table_owner_of(struct amd64_space *space, uint64_t *table);
+static void flush_request_range(hal_space_t handle, void *vaddr, size_t size, unsigned global);
+static void flush_tlb_global(void);
+static uint64_t *table_at(uint64_t entry);
+static struct amd64_table_page *detach_empty_tables(struct amd64_space *space);
+static void free_detached_tables(struct amd64_table_page *page);
+static uint64_t leaf_flags(uint32_t attr);
+static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+static void shootdown_request(hal_space_t handle, void *vaddr, size_t size, unsigned global);
+static void fb_window_hold(uint64_t physical, uint64_t size);
+static int fb_window_give(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
+static int fb_window_remove(void *address, size_t size, int *matched);
+static int fb_window_meets_fixed(hal_physaddr_t physical, size_t size);
+static void service_shootdowns(hal_cpu_id_t cpu);
+static int user_page_allowed(hal_physaddr_t physical, uint32_t attr);
+static int device_fixed_range(hal_physaddr_t physical, size_t size, void **address);
+static int firmware_window_map(uintptr_t address, hal_physaddr_t physical, size_t size, uint32_t attr);
+static int device_window_map(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
+static int device_window_unmap(void *address, size_t size);
+static int device_window_populate(struct amd64_device_mapping *mapping);
+static void device_window_clear(struct amd64_device_mapping *mapping);
+static void device_window_retire(struct amd64_device_mapping *mapping);
+static hal_space_t current_space_load(void);
+static void current_space_store(hal_space_t handle);
+
+/*
+ * Converts a direct-map address to its physical address.
+ */
+uintptr_t
+amd64_direct_to_phys(
+	const void *address)
+{
+	uint64_t physical;
+	uint64_t entry;
+
+	if ((uintptr_t)address < (uintptr_t)AMD64_DIRECT_BASE ||
+	    (uintptr_t)address - (uintptr_t)AMD64_DIRECT_BASE >= AMD64_DIRECT_LIMIT)
+		return UINTPTR_MAX;
+	physical = (uintptr_t)address - (uintptr_t)AMD64_DIRECT_BASE;
+	if (!ram_active || !amd64_ram_lookup(&ram_builder, physical, &entry))
+		return UINTPTR_MAX;
+	return (uintptr_t)physical;
+}
+
+/*
+ * Tests whether the direct map aliases every page of a physical range.
+ *
+ * Walks the RAM map page by page, stepping over a whole 2 MiB leaf at once,
+ * so the answer is exact at page granularity.
+ */
+int
+amd64_direct_covers(
+	uint64_t base,
+	uint64_t end)
+{
+	uint64_t address;
+	uint64_t entry;
+	int present;
+
+	/* Reports nothing covered before the direct map is live. */
+	if (!ram_active)
+		return 0;
+
+	/* Probes each leaf that the range touches. */
+	address = base & ~(uint64_t)(PAGE_SIZE - 1U);
+	while (address < end) {
+		present = amd64_ram_lookup(&ram_builder, address, &entry);
+		if (!present)
+			return 0;
+
+		/* Steps over the whole leaf that maps this address. */
+		if ((entry & AMD64_PTE_LARGE) != 0)
+			address = (address + 0x200000U) & ~(uint64_t)0x1fffffU;
+		else
+			address += PAGE_SIZE;
+	}
+
+	/* Reports a fully aliased range. */
+	return 1;
+}
+
+/*
+ * Converts a physical address to its direct-map address.
+ */
+void *
+amd64_phys_to_direct(
+	uintptr_t address)
+{
+	uint64_t entry;
+
+	if (!ram_active || !amd64_ram_lookup(&ram_builder, address, &entry))
+		return NULL;
+	return (void *)((uintptr_t)AMD64_DIRECT_BASE + address);
+}
+
+/*
+ * Resolves a device physical address to its fixed kernel window.
+ *
+ * RAM is reached through the direct map. Device memory is not, so each
+ * supported controller range has a fixed window in the kernel half and is
+ * mapped explicitly.
+ */
+void *
+amd64_device_vaddr(
+	hal_physaddr_t physical)
+{
+	/* Selects the direct legacy-device window. */
+	if (physical >= 0x000a0000U && physical < 0x00100000U) {
+		return (void *)((uintptr_t)AMD64_LEGACY_MMIO_BASE +
+		    physical - 0xa0000U);
+	}
+
+	/* Selects the PCI MMIO window. */
+	if (physical >= 0xf0000000U && physical < 0xf1000000U) {
+		return (void *)(uintptr_t)(0xffffffffc0000000ULL +
+		    (physical - 0xf0000000U));
+	}
+
+	/* Selects the local APIC MMIO window. */
+	if (physical >= 0xfee00000U && physical < 0xff000000U) {
+		return (void *)(uintptr_t)(0xffffffffc1000000ULL +
+		    (physical - 0xfee00000U));
+	}
+
+	/* Selects the I/O APIC MMIO window. */
+	if (physical >= 0xfec00000U && physical < 0xfee00000U) {
+		return (void *)(uintptr_t)(0xffffffffc1200000ULL +
+		    (physical - 0xfec00000U));
+	}
+
+	/* Rejects addresses outside every fixed window. */
+	return NULL;
+}
+
+/*
+ * Maps a device extent into a retained kernel view.
+ *
+ * Existing legacy windows stay permanent. Other physical extents use owned
+ * page mappings in a separate window shared by every process page table.
+ */
+int
+hal_space_map_device(
+	hal_physaddr_t paddr,
+	size_t size,
+	uint32_t attr,
+	void **vaddr)
+{
+	int given;
+	int fixed;
+	int error;
+
+	/* Refuses empty requests and invalid output storage before any mapping. */
+	if (vaddr == NULL || size == 0)
+		return HAL_ERR_INVALID;
+
+	/* Device views permit data access only; all aliases remain uncached. */
+	if ((attr & HAL_SPACE_EXEC) != 0 ||
+	    (attr & (HAL_SPACE_READ | HAL_SPACE_WRITE)) == 0 ||
+	    (attr & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE |
+	    HAL_SPACE_WRITETHRU | HAL_SPACE_DEVICE | HAL_SPACE_WC)) != 0) {
+		return HAL_ERR_INVALID;
+	}
+
+	/* The shared device aliases have one cache policy on this port. */
+	if ((attr & HAL_SPACE_WRITETHRU) != 0)
+		return HAL_ERR_UNSUPPORTED;
+
+	/* Write-combining is a distinct cache policy and excludes the others. */
+	if ((attr & HAL_SPACE_WC) != 0 &&
+	    (attr & (HAL_SPACE_NOCACHE | HAL_SPACE_WRITETHRU |
+	    HAL_SPACE_DEVICE)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Bounds the entire extent within the CPU physical-address width. */
+	if (paddr > acpi_physical_max || size - 1U > acpi_physical_max - paddr)
+		return HAL_ERR_INVALID;
+
+	/* The early console's mapping of exactly the boot framebuffer goes to the kernel's console once it prints. */
+	given = fb_window_give(paddr, size, attr, vaddr);
+	if (given)
+		return HAL_OK;
+
+	/* Preserves the boot-established legacy mappings without replacing PTEs. */
+	fixed = device_fixed_range(paddr, size, vaddr);
+	if (fixed)
+		return HAL_OK;
+
+	/* Acquires a page-granular view without relocating the device's BAR. */
+	error = device_window_map(paddr, size, attr, vaddr);
+	if (error != HAL_OK)
+		return error;
+
+	/* Succeeded: the caller owns a view until its matching unmap. */
+	return HAL_OK;
+}
+
+/*
+ * Releases a kernel device view after every CPU retires its translations.
+ */
+int
+hal_space_unmap_device(
+	void *vaddr,
+	size_t size)
+{
+	uintptr_t address;
+	uint64_t physical;
+	void *fixed_address;
+	int matched;
+	int fixed;
+	int error;
+
+	/* Rejects an empty release before decoding a permanent legacy view. */
+	if (vaddr == NULL || size == 0)
+		return HAL_ERR_INVALID;
+
+	/* The early console's mapping, given to the kernel's console, goes (or stays, in a fixed window). */
+	error = fb_window_remove(vaddr, size, &matched);
+	if (matched) {
+		if (error != HAL_OK)
+			return error;
+
+		/* Succeeded: no CPU keeps a translation of the framebuffer through it. */
+		return HAL_OK;
+	}
+
+	/* Recognizes only the exact fixed windows established by early paging. */
+	address = (uintptr_t)vaddr;
+	physical = UINT64_MAX;
+	if (address >= AMD64_LEGACY_MMIO_BASE &&
+	    address - AMD64_LEGACY_MMIO_BASE < 0x60000U) {
+		physical = address - AMD64_LEGACY_MMIO_BASE + 0xa0000U;
+	} else if (address >= 0xffffffffc0000000ULL &&
+	    address - 0xffffffffc0000000ULL < 0x01000000U) {
+		physical = address - 0xffffffffc0000000ULL + 0xf0000000U;
+	} else if (address >= 0xffffffffc1000000ULL &&
+	    address - 0xffffffffc1000000ULL < 0x00200000U) {
+		physical = address - 0xffffffffc1000000ULL + 0xfee00000U;
+	} else if (address >= 0xffffffffc1200000ULL &&
+	    address - 0xffffffffc1200000ULL < 0x00200000U) {
+		physical = address - 0xffffffffc1200000ULL + 0xfec00000U;
+	}
+
+	/* Permanent mappings outlive individual driver references. */
+	fixed = device_fixed_range(physical, size, &fixed_address);
+	if (fixed && fixed_address == vaddr)
+		return HAL_OK;
+
+	/* Retires only a matching live dynamic view. */
+	error = device_window_unmap(vaddr, size);
+	if (error != HAL_OK)
+		return error;
+
+	/* Succeeded: the released view cannot retain a stale device translation. */
+	return HAL_OK;
+}
+
+/*
+ * Maps one device range into its fixed kernel window, uncached.
+ */
+int
+amd64_device_map(
+	hal_physaddr_t physical,
+	size_t size,
+	void **vaddr)
+{
+	void *address;
+
+	/* Requires a supported window and a destination. */
+	address = amd64_device_vaddr(physical);
+	if (address == NULL || vaddr == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Refreshes the fixed window; an existing mapping is expected. */
+	(void)hal_space_map(
+		HAL_SPACE_SYS,
+		address,
+		physical,
+		size,
+		HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE);
+
+	/* Reports the mapped window. */
+	*vaddr = address;
+	return HAL_OK;
+}
+
+/*
+ * Converts only linker-owned image addresses, independently of RAM aliases.
+ * The image may live at a physical address other than the one it was linked
+ * for; the conversion follows the placement the loader reported.
+ */
+uintptr_t
+amd64_image_to_phys(
+	const void *address)
+{
+	const struct amd64_kernel_image *img;
+
+	if ((uintptr_t)address < (uintptr_t)__kernel_virt_start ||
+	    (uintptr_t)address >= (uintptr_t)__kernel_virt_end)
+		return UINTPTR_MAX;
+	img = amd64_kernel_image();
+	return (uintptr_t)address - (uintptr_t)img->virt_start +
+	    (uintptr_t)img->phys_start;
+}
+
+/* Reports actual mapped RAM bytes rather than the virtual window's span. */
+uint64_t
+amd64_direct_mapped_bytes(void)
+{
+	return ram_active ? ram_builder.mapped_bytes : 0;
+}
+
+/*
+ * Reports the system page-table root.
+ */
+uintptr_t
+amd64_system_cr3(
+	void)
+{
+	/* Reports the physical address loaded for the system space. */
+	return system_cr3;
+}
+
+/*
+ * Initializes the system address space.
+ */
+void
+prekern_amd64_space_init(
+	void)
+{
+	const struct zbl6_framebuffer *framebuffer;
+	const struct amd64_kernel_image *img;
+	uintptr_t kernel_start;
+	uintptr_t kernel_end;
+	uintptr_t delta;
+	uintptr_t base;
+	uintptr_t physical;
+	unsigned index;
+	unsigned first_chunk;
+	unsigned chunks;
+	unsigned chunk;
+	uint64_t framebuffer_tables[2];
+	uint64_t efer;
+	uint64_t flags;
+	uintptr_t cr0;
+	uintptr_t cr4;
+
+	/*
+	 * Reads the firmware display and the kernel extent.  The window slots
+	 * follow the linked extent (the virtual layout is fixed); the pages they
+	 * map follow the placement, `delta` bytes away.
+	 */
+	framebuffer = bsp_boot_framebuffer();
+	img = amd64_kernel_image();
+	kernel_start = (uintptr_t)img->link_phys_start;
+	kernel_end = (uintptr_t)img->link_phys_end;
+	delta = (uintptr_t)img->phys_start - kernel_start;
+
+	/* Initializes the address-space registry. */
+	space_registry_lock = 0;
+	space_registry = NULL;
+
+	/* Clears every statically allocated system page table. */
+	hal_memset(system_pml4, 0, sizeof(system_pml4));
+	hal_memset(system_pdpt, 0, sizeof(system_pdpt));
+	hal_memset(system_pd, 0, sizeof(system_pd));
+	hal_memset(system_kernel_pt, 0, sizeof(system_kernel_pt));
+	hal_memset(system_mmio_pd, 0, sizeof(system_mmio_pd));
+	hal_memset(system_device_pd, 0, sizeof(system_device_pd));
+	hal_memset(system_acpi_pd, 0, sizeof(system_acpi_pd));
+	hal_memset(system_acpi_pt, 0, sizeof(system_acpi_pt));
+
+	/* Initializes the reserved ACPI and ECAM mapping windows. */
+	amd64_acpi_window_init(&acpi_window);
+	acpi_physical_max = cpu_physical_max();
+	ecam_pd_used = 0;
+
+	/* Validates the bounded kernel permission window. */
+	first_chunk = (unsigned)(kernel_start / 0x200000U);
+	chunks = (unsigned)((kernel_end + 0x1fffffU) / 0x200000U) -
+	    first_chunk;
+	if (chunks == 0 || chunks > sizeof(system_kernel_pt) / sizeof(system_kernel_pt[0]))
+		HAL_FATAL("amd64 kernel W^X window exceeded");
+
+	/* Replaces kernel large pages with per-page W^X mappings. */
+	for (chunk = 0; chunk < chunks; chunk++) {
+		base = (uintptr_t)(first_chunk + chunk) * 0x200000U;
+
+		/* Assigns permissions to every kernel page in this chunk. */
+		for (index = 0; index < 512; index++) {
+			physical = base + (uintptr_t)index * PAGE_SIZE;
+			if (physical < kernel_start || physical >= kernel_end)
+				continue;
+			flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL |
+			    AMD64_PTE_NX;
+
+			/* Makes text executable and non-rodata pages writable. */
+			if (physical >= (uintptr_t)__kernel_text_phys_start &&
+			    physical < (uintptr_t)__kernel_text_phys_end) {
+				flags &= ~AMD64_PTE_NX;
+			} else if (
+			    physical < (uintptr_t)__kernel_rodata_phys_start ||
+			    physical >= (uintptr_t)__kernel_rodata_phys_end) {
+				flags |= AMD64_PTE_WRITE;
+			}
+
+			/* Publishes this kernel page, at its placed home, with its permissions. */
+			system_kernel_pt[chunk][index] = (physical + delta) | flags;
+		}
+
+		/* Links the populated kernel leaf table into the direct map. */
+		system_pd[first_chunk + chunk] =
+		    amd64_image_to_phys(system_kernel_pt[chunk]) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	}
+
+	/* Maps the fixed legacy MMIO range as uncached large pages. */
+	for (index = 0; index < 8; index++) {
+		system_mmio_pd[index] = (0xf0000000ULL +
+		    (uint64_t)index * 0x200000ULL) | AMD64_PTE_PRESENT |
+		    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	}
+
+	/* Maps dedicated uncached windows for the Local APIC and I/O APIC. */
+	system_mmio_pd[8] = 0xfee00000ULL | AMD64_PTE_PRESENT |
+	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	system_mmio_pd[9] = 0xfec00000ULL | AMD64_PTE_PRESENT |
+	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+
+	/* Maps framebuffer edges at 4 KiB granularity to exclude adjacent RAM. */
+	if (framebuffer != NULL) {
+		framebuffer_tables[0] = amd64_image_to_phys(system_framebuffer_edges[0]);
+		framebuffer_tables[1] = amd64_image_to_phys(system_framebuffer_edges[1]);
+		if (!amd64_framebuffer_map(&system_mmio_pd[AMD64_FRAMEBUFFER_PD_FIRST],
+		    AMD64_FRAMEBUFFER_PD_COUNT, system_framebuffer_edges, framebuffer_tables,
+		    framebuffer->physical_base, framebuffer->size, acpi_physical_max))
+			HAL_FATAL("amd64 framebuffer MMIO geometry invalid");
+
+		/* The early console draws through it until the kernel's console takes it over. */
+		fb_window_hold(framebuffer->physical_base, framebuffer->size);
+	}
+
+	/* Gives legacy VGA/ROM its own uncached window, outside the RAM map. */
+	for (index = 0; index < 0x60000U / PAGE_SIZE; index++)
+		system_legacy_pt[index] = (0xa0000U + (uint64_t)index * PAGE_SIZE) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE | AMD64_PTE_NOCACHE |
+		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	system_mmio_pd[10] = amd64_image_to_phys(system_legacy_pt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+
+	/* Retains only the AP trampoline in the low identity map. */
+	system_identity_pt[AMD64_AP_TRAMPOLINE / PAGE_SIZE] = AMD64_AP_TRAMPOLINE |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_identity_pd[0] = amd64_image_to_phys(system_identity_pt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_identity_pdpt[0] = amd64_image_to_phys(system_identity_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+
+	/* Connects every ACPI window page table. */
+	for (index = 0; index < AMD64_ACPI_WINDOW_PT_COUNT; index++) {
+		system_acpi_pd[index] =
+		    amd64_image_to_phys(system_acpi_pt[index]) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	}
+
+	/* Connects the device, ACPI, direct-map, and fixed-MMIO directories. */
+	for (index = 0; index < AMD64_DEVICE_PDPT_COUNT; index++) {
+		system_pdpt[AMD64_DEVICE_PDPT_FIRST + index] =
+		    amd64_image_to_phys(system_device_pd[index]) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	}
+	system_pdpt[AMD64_ACPI_PDPT_INDEX] =
+	    amd64_image_to_phys(system_acpi_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pdpt[AMD64_FIRMWARE_PDPT_INDEX] =
+	    amd64_image_to_phys(system_firmware_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pdpt[510] = amd64_image_to_phys(system_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pdpt[511] = amd64_image_to_phys(system_mmio_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+
+	/* Publishes the high and temporary low PML4 roots. */
+	system_pml4[511] = amd64_image_to_phys(system_pdpt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pml4[0] = amd64_image_to_phys(system_identity_pdpt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+
+	/* Enables execute-disable, global pages, and supervisor write protection. */
+	efer = asm_read_msr(0xc0000080U);
+	asm_write_msr(0xc0000080U, efer | (1ULL << 11));
+	__asm__ volatile("movq %%cr4,%0" : "=r"(cr4));
+	cr4 |= 0x80U;
+	__asm__ volatile("movq %0,%%cr4" : : "r"(cr4) : "memory");
+	__asm__ volatile("movq %%cr0,%0" : "=r"(cr0));
+	cr0 |= 0x10000U;
+	__asm__ volatile("movq %0,%%cr0" : : "r"(cr0) : "memory");
+
+	build_ram_map(framebuffer);
+
+	/* Activates and records the completed system page-table root. */
+	system_cr3 = amd64_image_to_phys(system_pml4);
+	asm_load_cr3(system_cr3);
+	ram_active = 1;
+	pcat_cons_paging_ready();
+	verify_ram_map();
+	hal_printf("A64 RAM MAP bytes=%llu tables=%llu large=%llu small=%llu\n",
+	    (unsigned long long)ram_builder.mapped_bytes,
+	    (unsigned long long)ram_builder.table_pages,
+	    (unsigned long long)ram_builder.large_pages,
+	    (unsigned long long)ram_builder.small_pages);
+	current_space_store(HAL_SPACE_SYS);
+}
+
+/*
+ * Maps an ACPI physical range into the reserved system window.
+ */
+const void *
+amd64_acpi_map_physical(
+	paddr_t physical,
+	size_t size)
+{
+	const void *result;
+	unsigned first;
+	unsigned new_first;
+	unsigned new_count;
+	unsigned index;
+	unsigned slot;
+	paddr_t page_physical;
+	paddr_t page;
+	size_t offset;
+	size_t page_span;
+	int mappable;
+	int reserved;
+
+	/* Splits the requested address into its page and byte offset. */
+	page_physical = physical & ~(paddr_t)(PAGE_SIZE - 1U);
+	offset = (size_t)(physical - page_physical);
+
+	/* Rejects an empty mapping. */
+	if (size == 0)
+		return NULL;
+
+	/* Rejects an offset and size which overflow. */
+	if (size > SIZE_MAX - offset)
+		return NULL;
+
+	/* Rejects a request larger than the reserved virtual window. */
+	if (size + offset >
+	    (size_t)AMD64_ACPI_WINDOW_SLOTS * PAGE_SIZE)
+		return NULL;
+
+	/* Rounds the mapping extent to whole pages. */
+	page_span = size + offset;
+
+	/* Rejects an extent whose page rounding would overflow. */
+	if (page_span > SIZE_MAX - (PAGE_SIZE - 1U))
+		return NULL;
+
+	/* Applies the validated whole-page rounding. */
+	page_span = (page_span + PAGE_SIZE - 1U) &
+	    ~(size_t)(PAGE_SIZE - 1U);
+
+	/* Rejects a starting page outside the CPU physical-address range. */
+	if (page_physical > acpi_physical_max)
+		return NULL;
+
+	/* Rejects an ending page outside the CPU physical-address range. */
+	if (page_span - 1U > acpi_physical_max - page_physical)
+		return NULL;
+
+	/* Confirms that the BSP permits access to the physical extent. */
+	mappable = bsp_physical_range_mappable(page_physical, page_span);
+	if (!mappable)
+		return NULL;
+
+	/* Prevents late discovery from reading BootServices pages already reused. */
+	if (acpi_discovery_finished) {
+		for (page = page_physical; page < page_physical + page_span; page += PAGE_SIZE) {
+			if (!amd64_acpi_page_reserved(page))
+				return NULL;
+		}
+	}
+
+	/* Reserves slots for all newly required pages. */
+	reserved = amd64_acpi_window_reserve(
+		&acpi_window,
+		physical,
+		size,
+		&first,
+		&offset,
+		&new_first,
+		&new_count);
+	if (!reserved)
+		return NULL;
+
+	/* Installs every page newly assigned by the window allocator. */
+	for (index = 0; index < new_count; index++) {
+		slot = new_first + index;
+		page = acpi_window.slot_physical[slot];
+		system_acpi_pt[slot / 512U][slot % 512U] =
+		    (uint64_t)page | AMD64_PTE_PRESENT | AMD64_PTE_NX;
+	}
+
+	/* Makes newly installed translations visible before flushing the TLB. */
+	if (new_count != 0) {
+		__atomic_thread_fence(__ATOMIC_RELEASE);
+		asm_flush_tlb();
+	}
+
+	/* Forms the address of the requested byte within its reserved slot. */
+	result = (const void *)(uintptr_t)(AMD64_ACPI_WINDOW_BASE +
+	    (uint64_t)first * PAGE_SIZE + offset);
+
+	/* Reports the completed ACPI mapping. */
+	return result;
+}
+
+/*
+ * Maps a PCI ECAM range into the fixed MMIO window.
+ */
+int
+amd64_mmio_map_ecam(
+	paddr_t physical,
+	size_t size,
+	void **result)
+{
+	const uint64_t page_size = 0x200000ULL;
+	uint64_t aligned;
+	uint64_t end;
+	uint64_t offset;
+	unsigned count;
+	unsigned index;
+	unsigned first;
+
+	/* Rejects a missing output location. */
+	if (result == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Rejects an empty mapping. */
+	if (size == 0)
+		return HAL_ERR_INVALID;
+
+	/* Rejects a physical extent which overflows. */
+	if (physical > UINT64_MAX - size)
+		return HAL_ERR_INVALID;
+
+	/* Computes the enclosing large-page extent. */
+	aligned = (uint64_t)physical & ~(page_size - 1U);
+	offset = (uint64_t)physical - aligned;
+	end = offset + size;
+	count = (unsigned)((end + page_size - 1U) / page_size);
+
+	/* Rejects a request outside the remaining ECAM window. */
+	if (count == 0 || count > AMD64_ECAM_PD_COUNT - ecam_pd_used)
+		return HAL_ERR_UNSUPPORTED;
+
+	/* Installs every large page in the requested ECAM extent. */
+	first = AMD64_ECAM_PD_FIRST + ecam_pd_used;
+	for (index = 0; index < count; index++) {
+		system_mmio_pd[first + index] = (aligned +
+		    (uint64_t)index * page_size) | AMD64_PTE_PRESENT |
+		    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	}
+
+	/* Publishes the consumed window and mapped virtual address. */
+	ecam_pd_used += count;
+	*result = (void *)(uintptr_t)(AMD64_ECAM_VIRTUAL_BASE +
+	    (uint64_t)(first - AMD64_ECAM_PD_FIRST) * page_size + offset);
+
+	/* Reports a successful ECAM mapping. */
+	return HAL_OK;
+}
+
+/*
+ * Creates an empty user address space.
+ */
+hal_space_t
+hal_space_create(
+	void)
+{
+	struct amd64_space *space;
+	bool enabled;
+	int status;
+	unsigned index;
+
+	/* Allocates the software address-space record. */
+	space = kernel_alloc(sizeof(*space));
+	if (space == NULL)
+		return NULL;
+
+	/* Initializes the software record before acquiring its root page. */
+	hal_memset(space, 0, sizeof(*space));
+
+	/* Allocates the top-level hardware page table. */
+	status = alloc_page(&space->pml4_paddr);
+	if (status != HAL_OK) {
+		kernel_free(space);
+		return NULL;
+	}
+
+	/* Initializes the user root with the shared system mapping. */
+	space->pml4 = amd64_phys_to_direct(space->pml4_paddr);
+	hal_memset(space->pml4, 0, PAGE_SIZE);
+	for (index = 256; index < 512; index++)
+		space->pml4[index] = system_pml4[index];
+	space->magic = AMD64_SPACE_MAGIC;
+	space->space_id = __atomic_fetch_add(
+	    &next_space_id,
+	    1,
+	    __ATOMIC_RELAXED);
+	(void)__atomic_fetch_add(&space_count, 1U, __ATOMIC_RELAXED);
+
+	/* Publishes the initialized space in the lifetime registry. */
+	enabled = registry_lock_enter();
+	space->registry_next = space_registry;
+	space_registry = space;
+	registry_lock_leave(enabled);
+
+	/* Reports the new address-space handle. */
+	return space;
+}
+
+/*
+ * Destroys a retired user address space.
+ */
+void
+hal_space_destroy(
+	hal_space_t handle)
+{
+	struct amd64_space *space;
+	struct amd64_space **link;
+	struct amd64_table_page *page;
+	struct hal_cpu_mask ready;
+	struct amd64_percpu *target;
+	hal_cpu_id_t cpu;
+	hal_cpu_id_t current_cpu;
+	unsigned active;
+	uint32_t old_count;
+	bool enabled;
+
+	/* Resolves the opaque handle before validating its lifetime. */
+	space = handle;
+
+	/* Ignores a null address-space handle. */
+	if (space == NULL)
+		return;
+
+	/* Finds and retires the space under the registry lock. */
+	enabled = registry_lock_enter();
+	link = &space_registry;
+	while (*link != NULL && *link != space)
+		link = &(*link)->registry_next;
+
+	/* Rejects an unknown or already retiring space. */
+	if (*link == NULL || space->destroying)
+		HAL_FATAL("invalid amd64 space destroy");
+
+	/*
+	 * Retires and unlinks the space before releasing the registry.  The
+	 * flag is published sequentially consistent against the ownership
+	 * count taken in space_op_enter(), see there.
+	 */
+	__atomic_store_n(&space->destroying, 1U, __ATOMIC_SEQ_CST);
+	*link = space->registry_next;
+	registry_lock_leave(enabled);
+
+	/*
+	 * Waits for operations admitted before retirement to release their
+	 * ownership of the page-table storage.
+	 */
+	for (;;) {
+		active = __atomic_load_n(&space->active_ops, __ATOMIC_SEQ_CST);
+
+		/* Leaves the wait once every admitted operation has departed. */
+		if (active == 0)
+			break;
+
+		/* Services reciprocal requests while waiting for ownership release. */
+		current_cpu = hal_cpu_current();
+		service_shootdowns(current_cpu);
+		__asm__ volatile("pause");
+	}
+
+	/* Closes every cached translation before checking active CPUs. */
+	shootdown(space, NULL, 0);
+
+	/*
+	 * Verifies the generic kernel detached all tasks from this space.
+	 * The HAL closes hardware translation windows but never changes task
+	 * ownership implicitly.
+	 */
+	hal_cpu_ready_mask(&ready);
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
+		/* Skips processors which have not completed startup. */
+		if (!hal_cpu_mask_test(&ready, cpu))
+			continue;
+
+		/* Resolves the ready processor's current ownership record. */
+		target = amd64_percpu_get(cpu);
+
+		/* Rejects destruction while a ready CPU still owns this space. */
+		if (__atomic_load_n(
+		    &target->current_space,
+		    __ATOMIC_ACQUIRE) == space) {
+			HAL_FATAL("destroying an active amd64 space");
+		}
+	}
+
+	/* Releases every subordinate page table. */
+	while ((page = space->tables) != NULL) {
+		space->tables = page->next;
+		(void)hal_pmem_free(&page->paddr, PAGE_SIZE);
+		kernel_free(page);
+		table_count_drop();
+	}
+
+	/* Invalidates and releases the top-level space record. */
+	space->magic = 0;
+	(void)hal_pmem_free(&space->pml4_paddr, PAGE_SIZE);
+	kernel_free(space);
+
+	/* Accounts for the released address space. */
+	old_count = __atomic_fetch_sub(&space_count, 1U, __ATOMIC_RELAXED);
+	if (old_count == 0)
+		HAL_FATAL("amd64 space counter underflow");
+}
+
+/*
+ * Switches the current CPU to an address space.
+ */
+void
+hal_space_switch(
+	hal_space_t handle)
+{
+	struct amd64_space *space;
+	hal_space_t current;
+	uintptr_t cr3;
+	bool enabled;
+	int entered;
+
+	/* Keeps the current hardware space when no switch is required. */
+	current = current_space_load();
+	if (current == handle)
+		return;
+
+	/* Switches directly to the immortal system page tables. */
+	if (handle == HAL_SPACE_SYS) {
+		enabled = hal_irq_disable();
+		asm_load_cr3(system_cr3);
+		current_space_store(handle);
+
+		/* Restores the caller's interrupt state. */
+		if (enabled)
+			hal_irq_enable();
+
+		/* Completes the system-space switch. */
+		return;
+	}
+
+	/* Acquires lifetime ownership of the requested user space. */
+	space = handle;
+	entered = space_op_enter(space);
+	if (!entered)
+		HAL_FATAL("invalid amd64 space switch");
+
+	/* Serializes the CR3 switch with page-table operations. */
+	enabled = space_lock_enter(space);
+	cr3 = (uintptr_t)space->pml4_paddr;
+	asm_load_cr3(cr3);
+	current_space_store(handle);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+}
+
+/*
+ * Maps physical pages into a user address space.
+ */
+int
+hal_space_map(
+	hal_space_t handle,
+	void *pointer,
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr)
+{
+	struct amd64_space *space;
+	struct amd64_table_page *detached;
+	uint64_t *owner;
+	uint64_t *leaf;
+	uintptr_t address;
+	uintptr_t offset;
+	uintptr_t rollback;
+	bool enabled;
+	int entered;
+	int error;
+
+	/* Resolves the mapping destination and its virtual base. */
+	space = handle;
+	address = (uintptr_t)pointer;
+
+	/* The system space takes firmware pages in the UEFI runtime window alone. */
+	if (space == HAL_SPACE_SYS) {
+		error = firmware_window_map(address, physical, size, attr);
+		if (error != HAL_OK)
+			return error;
+
+		/* Succeeded: the firmware pages stay mapped for the kernel's life. */
+		return HAL_OK;
+	}
+
+	/* Rejects an invalid user virtual range. */
+	if (!valid_user_range(address, size))
+		return HAL_ERR_INVALID;
+
+	/* Rejects an unaligned physical base. */
+	if ((physical & (PAGE_SIZE - 1U)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Rejects a physical base outside the direct-map limit. */
+	if (physical >= AMD64_DIRECT_LIMIT)
+		return HAL_ERR_INVALID;
+
+	/* Rejects a physical extent outside the direct-map limit. */
+	if (size > AMD64_DIRECT_LIMIT - physical)
+		return HAL_ERR_INVALID;
+
+	/* Device pages must also fit the physical-address width of this CPU. */
+	if (physical > acpi_physical_max ||
+	    size - 1U > acpi_physical_max - physical) {
+		return HAL_ERR_INVALID;
+	}
+
+	/* Validates every RAM or device page before publishing the first mapping. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		error = user_page_allowed(physical + offset, attr);
+		if (error != HAL_OK)
+			return error;
+	}
+
+	/* Requires at least one useful access permission. */
+	if (!(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
+		return HAL_ERR_INVALID;
+
+	/* Acquires lifetime ownership of the destination space. */
+	entered = space_op_enter(space);
+	if (!entered)
+		return HAL_ERR_STATE;
+
+	/* Serializes validation and publication of the mapping. */
+	enabled = space_lock_enter(space);
+
+	/* Verifies that every destination leaf is currently unmapped. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 0, NULL);
+
+		/* Rejects an overlap with an existing mapping. */
+		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_INVALID;
+		}
+	}
+
+	/* Installs each requested leaf mapping. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 1, &owner);
+
+		/* Rolls back all installed leaves when table allocation fails. */
+		if (leaf == NULL) {
+			/* Clears every leaf installed by this request. */
+			for (rollback = 0;
+			     rollback < offset;
+			     rollback += PAGE_SIZE) {
+				leaf = walk_leaf(space, address + rollback, 0, &owner);
+
+				/* Clears a present leaf and uncounts it in its table. */
+				if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT) != 0) {
+					*leaf = 0;
+					table_count_adjust(owner, -1);
+				}
+			}
+
+			/* Disconnects page tables made empty by rollback. */
+			detached = detach_empty_tables(space);
+
+			/* Flushes the broadest range required by the rollback. */
+			if (detached != NULL) {
+				shootdown(space, NULL, 0);
+			} else if (offset != 0) {
+				shootdown(space, pointer, offset);
+			}
+
+			/* Releases detached tables after remote acknowledgement. */
+			free_detached_tables(detached);
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_NOMEM;
+		}
+
+		/* Publishes this requested leaf mapping, counting a new one. */
+		if ((*leaf & AMD64_PTE_PRESENT) == 0)
+			table_count_adjust(owner, 1);
+		*leaf = (physical + offset) | leaf_flags(attr);
+	}
+
+	/*
+	 * Needs no invalidation: every leaf was checked not present above,
+	 * and an x86 processor caches neither a not-present translation nor
+	 * a not-present paging-structure entry, so no CPU can hold a stale
+	 * view of these addresses.
+	 */
+
+	/* Releases mapping and lifetime serialization. */
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+
+	/* Reports a successful mapping. */
+	return HAL_OK;
+}
+
+/*
+ * Changes permissions on a mapped user range.
+ */
+int
+hal_space_prot(
+	hal_space_t handle,
+	void *pointer,
+	size_t size,
+	uint32_t attr)
+{
+	int status;
+
+	/* Applies permissions without requesting observed hardware flags. */
+	status = hal_space_prot_query(handle, pointer, size, attr, NULL);
+
+	/* Reports the permission operation status. */
+	return status;
+}
+
+/*
+ * Changes permissions and reports observed page flags.
+ */
+int
+hal_space_prot_query(
+	hal_space_t handle,
+	void *pointer,
+	size_t size,
+	uint32_t attr,
+	uint32_t *flags)
+{
+	struct amd64_space *space;
+	uint64_t *leaf;
+	uint64_t old;
+	uint64_t desired;
+	uint64_t entry;
+	uintptr_t address;
+	uintptr_t offset;
+	uint32_t observed;
+	bool enabled;
+	int entered;
+	int error;
+
+	/* Resolves the destination and initializes flag observation. */
+	space = handle;
+	address = (uintptr_t)pointer;
+	observed = 0;
+
+	/* Rejects a missing address space. */
+	if (space == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Rejects an invalid user virtual range. */
+	if (!valid_user_range(address, size))
+		return HAL_ERR_INVALID;
+
+	/* Requires at least one useful access permission. */
+	if (!(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
+		return HAL_ERR_INVALID;
+
+	/* Acquires lifetime ownership of the destination space. */
+	entered = space_op_enter(space);
+	if (!entered)
+		return HAL_ERR_STATE;
+
+	/* Serializes validation and replacement of the mappings. */
+	enabled = space_lock_enter(space);
+
+	/* Validates the complete range before publishing any permission change. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 0, NULL);
+
+		/* Rejects a hole in the requested mapped range. */
+		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_INVALID;
+		}
+
+		/* A protection change cannot turn device storage into cached or executable RAM. */
+		error = user_page_allowed(*leaf & AMD64_PTE_ADDR_MASK, attr);
+		if (error != HAL_OK) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return error;
+		}
+	}
+
+	/* Replaces each leaf while preserving accessed and dirty observations. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 0, NULL);
+		old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+
+		/* Retries the replacement if hardware updates the leaf concurrently. */
+		do {
+			desired = (old & AMD64_PTE_ADDR_MASK) |
+			    leaf_flags(attr) |
+			    (old & (AMD64_PTE_ACCESSED | AMD64_PTE_DIRTY));
+		} while (!__atomic_compare_exchange_n(
+		    leaf,
+		    &old,
+		    desired,
+		    false,
+		    __ATOMIC_ACQ_REL,
+		    __ATOMIC_ACQUIRE));
+
+		/* Records a previously observed access. */
+		if (old & AMD64_PTE_ACCESSED)
+			observed |= HAL_SPACE_PAGE_ACCESSED;
+
+		/* Records a previously observed write. */
+		if (old & AMD64_PTE_DIRTY)
+			observed |= HAL_SPACE_PAGE_DIRTY;
+	}
+
+	/* Invalidates every old translation before the final observation. */
+	shootdown(space, pointer, size);
+
+	/*
+	 * Collects A/D updates made through old remote translations before
+	 * those CPUs acknowledged the shootdown.
+	 */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 0, NULL);
+
+		/* Detects an unexpected page-table topology change. */
+		if (leaf == NULL) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_STATE;
+		}
+
+		/* Reads the replacement leaf after remote acknowledgement. */
+		entry = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+
+		/* Detects an unexpectedly absent replacement leaf. */
+		if (!(entry & AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_STATE;
+		}
+
+		/* Records that the replacement leaf remains present. */
+		observed |= HAL_SPACE_PAGE_PRESENT;
+
+		/* Records an access observed after the shootdown. */
+		if (entry & AMD64_PTE_ACCESSED)
+			observed |= HAL_SPACE_PAGE_ACCESSED;
+
+		/* Records a write observed after the shootdown. */
+		if (entry & AMD64_PTE_DIRTY)
+			observed |= HAL_SPACE_PAGE_DIRTY;
+	}
+
+	/* Releases mapping and lifetime serialization. */
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+
+	/* Publishes observed flags when requested by the caller. */
+	if (flags != NULL)
+		*flags = observed;
+
+	/* Reports a successful permission update. */
+	return HAL_OK;
+}
+
+/*
+ * Removes mappings from a user address space.
+ */
+int
+hal_space_unmap(
+	hal_space_t handle,
+	void *pointer,
+	size_t size)
+{
+	struct amd64_space *space;
+	struct amd64_table_page *detached;
+	uint64_t *owner;
+	uint64_t *leaf;
+	uintptr_t address;
+	uintptr_t offset;
+	bool enabled;
+	int entered;
+
+	/* Resolves the unmap destination and its virtual base. */
+	space = handle;
+	address = (uintptr_t)pointer;
+
+	/* Accepts an empty unmap operation without inspecting the handle. */
+	if (size == 0)
+		return HAL_OK;
+
+	/* Rejects a missing address space. */
+	if (space == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Rejects an invalid user virtual range. */
+	if (!valid_user_range(address, size))
+		return HAL_ERR_INVALID;
+
+	/* Acquires lifetime ownership of the destination space. */
+	entered = space_op_enter(space);
+	if (!entered)
+		return HAL_ERR_STATE;
+
+	/* Serializes removal of the requested leaves. */
+	enabled = space_lock_enter(space);
+
+	/* Clears every reachable leaf in the requested range. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		leaf = walk_leaf(space, address + offset, 0, &owner);
+
+		/*
+		 * Without a leaf table nothing up to the next 2 MiB boundary is
+		 * mapped, so the walk continues from there instead of asking
+		 * about each of the remaining pages of that table's span.
+		 */
+		if (leaf == NULL) {
+			offset = ((address + offset) | AMD64_LEAF_SPAN_MASK) + 1U - address;
+			offset -= PAGE_SIZE;
+			continue;
+		}
+
+		/* Clears a present mapping and uncounts it in its table. */
+		if ((*leaf & AMD64_PTE_PRESENT) != 0) {
+			*leaf = 0;
+			table_count_adjust(owner, -1);
+		}
+	}
+
+	/*
+	 * Disconnects empty tables before acknowledgement while retaining their
+	 * storage until every stale translation and page walk has ended.
+	 *
+	 * Only an unmap as large as one leaf table's span does so.  A smaller
+	 * one is a page leaving for swap, a copy-on-write replacement or a
+	 * short munmap: the same addresses are usually mapped again soon, and
+	 * a table freed here would have to be allocated again by the fault
+	 * that maps them, when memory is shortest.  An empty table left behind
+	 * is freed by the next large unmap or when the space is destroyed.
+	 */
+	detached = NULL;
+	if (size >= AMD64_DETACH_MIN_BYTES)
+		detached = detach_empty_tables(space);
+
+	/* Flushes the full space when parent entries were disconnected. */
+	if (detached != NULL) {
+		shootdown(space, NULL, 0);
+	} else {
+		shootdown(space, pointer, size);
+	}
+
+	/* Releases detached tables after remote acknowledgement. */
+	free_detached_tables(detached);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+
+	/* Reports a successful unmap operation. */
+	return HAL_OK;
+}
+
+/*
+ * Reports hardware flags for one user page.
+ */
+int
+hal_space_query(
+	hal_space_t handle,
+	void *pointer,
+	uint32_t *flags)
+{
+	struct amd64_space *space;
+	uint64_t *leaf;
+	bool enabled;
+	int entered;
+
+	/* Resolves the queried address-space handle. */
+	space = handle;
+
+	/* Rejects a missing address space or output location. */
+	if (space == NULL || flags == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Rejects an invalid user page address. */
+	if (!valid_user_range((uintptr_t)pointer, PAGE_SIZE))
+		return HAL_ERR_INVALID;
+
+	/* Acquires lifetime ownership of the queried space. */
+	entered = space_op_enter(space);
+	if (!entered)
+		return HAL_ERR_STATE;
+
+	/* Reads the leaf under the page-table serializer. */
+	enabled = space_lock_enter(space);
+	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
+	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ?
+	    HAL_SPACE_PAGE_PRESENT : 0;
+
+	/* Reports an observed access bit. */
+	if (leaf != NULL && (*leaf & AMD64_PTE_ACCESSED))
+		*flags |= HAL_SPACE_PAGE_ACCESSED;
+
+	/* Reports an observed dirty bit. */
+	if (leaf != NULL && (*leaf & AMD64_PTE_DIRTY))
+		*flags |= HAL_SPACE_PAGE_DIRTY;
+
+	/* Releases page-table and lifetime ownership. */
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+
+	/* Reports a successful query. */
+	return HAL_OK;
+}
+
+/*
+ * Clears selected hardware flags on one user page.
+ */
+int
+hal_space_clear_flags(
+	hal_space_t handle,
+	void *pointer,
+	uint32_t flags)
+{
+	struct amd64_space *space;
+	uint64_t *leaf;
+	uint64_t mask;
+	uint64_t old;
+	uint64_t desired;
+	bool enabled;
+	int entered;
+
+	/* Resolves the destination and initializes its hardware clear mask. */
+	space = handle;
+	mask = 0;
+
+	/* Rejects a missing address space. */
+	if (space == NULL)
+		return HAL_ERR_INVALID;
+
+	/* Rejects an invalid user page address. */
+	if (!valid_user_range((uintptr_t)pointer, PAGE_SIZE))
+		return HAL_ERR_INVALID;
+
+	/* Rejects flags outside the clearable hardware set. */
+	if ((flags & ~(HAL_SPACE_PAGE_ACCESSED | HAL_SPACE_PAGE_DIRTY)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Acquires lifetime ownership of the destination space. */
+	entered = space_op_enter(space);
+	if (!entered)
+		return HAL_ERR_STATE;
+
+	/* Locates the leaf under the page-table serializer. */
+	enabled = space_lock_enter(space);
+	leaf = walk_leaf(space, (uintptr_t)pointer, 0, NULL);
+
+	/* Rejects an absent mapping. */
+	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+		space_lock_leave(space, enabled);
+		space_op_leave(space);
+		return HAL_ERR_INVALID;
+	}
+
+	/* Builds the hardware bit mask requested by the caller. */
+	if (flags & HAL_SPACE_PAGE_ACCESSED)
+		mask |= AMD64_PTE_ACCESSED;
+
+	/* Includes the dirty bit when requested by the caller. */
+	if (flags & HAL_SPACE_PAGE_DIRTY)
+		mask |= AMD64_PTE_DIRTY;
+
+	/* Clears the selected bits despite concurrent hardware updates. */
+	old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+	do {
+		desired = old & ~mask;
+	} while (!__atomic_compare_exchange_n(
+	    leaf,
+	    &old,
+	    desired,
+	    false,
+	    __ATOMIC_ACQ_REL,
+	    __ATOMIC_ACQUIRE));
+
+	/* Invalidates cached translations of the changed leaf. */
+	shootdown(space, pointer, PAGE_SIZE);
+
+	/* Releases page-table and lifetime ownership. */
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+
+	/* Reports a successful flag clear. */
+	return HAL_OK;
+}
+
+/*
+ * Services a TLB shootdown interrupt.
+ */
+void
+amd64_tlb_interrupt(
+	void)
+{
+	hal_irq_ack_t acknowledge;
+	hal_cpu_id_t cpu;
+
+	/* Acknowledges and services all requests pending for this CPU. */
+	acknowledge = amd64_irq_ack_begin(AMD64_VECTOR_TLB, -1);
+	cpu = hal_cpu_current();
+	service_shootdowns(cpu);
+	hal_irq_send_eoi(acknowledge);
+}
+
+/*
+ * Flushes all translations for an address space.
+ */
+void
+hal_space_flush_tlb(
+	hal_space_t handle)
+{
+	struct amd64_space *space;
+	bool enabled;
+	int entered;
+
+	/* Flushes the immortal system space without registry ownership. */
+	if (handle == HAL_SPACE_SYS) {
+		shootdown(handle, NULL, 0);
+
+		/* Completes the system-space flush. */
+		return;
+	}
+
+	/* Acquires lifetime ownership of the requested user space. */
+	space = handle;
+	entered = space_op_enter(space);
+	if (!entered)
+		HAL_FATAL("invalid amd64 space flush");
+
+	/* Serializes and broadcasts the complete invalidation. */
+	enabled = space_lock_enter(space);
+	shootdown(space, NULL, 0);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+}
+
+/*
+ * Flushes a translation range for an address space.
+ */
+void
+hal_space_flush_tlb_range(
+	hal_space_t handle,
+	void *vaddr,
+	size_t size)
+{
+	struct amd64_space *space;
+	bool enabled;
+	int entered;
+
+	/* Ignores an empty flush range. */
+	if (size == 0)
+		return;
+
+	/* Flushes the immortal system space without registry ownership. */
+	if (handle == HAL_SPACE_SYS) {
+		shootdown(handle, vaddr, size);
+
+		/* Completes the system-space range flush. */
+		return;
+	}
+
+	/* Acquires lifetime ownership of the requested user space. */
+	space = handle;
+	entered = space_op_enter(space);
+	if (!entered)
+		HAL_FATAL("invalid amd64 space range flush");
+
+	/* Serializes and broadcasts the range invalidation. */
+	enabled = space_lock_enter(space);
+	shootdown(space, vaddr, size);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
+}
+
+/*
+ * Reports the page size for a translation level.
+ */
+size_t
+hal_space_get_page_size(
+	int level)
+{
+	/* Reports the leaf-page size. */
+	if (level == 1)
+		return PAGE_SIZE;
+
+	/* Reports the supported large-page size. */
+	if (level == 2)
+		return 0x200000U;
+
+	/* Reports an unsupported translation level. */
+	return 0;
+}
+
+/*
+ * Reports the valid user virtual-address range.
+ */
+void
+hal_space_get_user_range(
+	uintptr_t *minimum,
+	uintptr_t *limit)
+{
+	/* Publishes the lowest valid user page when requested. */
+	if (minimum != NULL)
+		*minimum = PAGE_SIZE;
+
+	/* Publishes the exclusive upper user address when requested. */
+	if (limit != NULL)
+		*limit = AMD64_USER_LIMIT;
+}
+
+/*
+ * Reports live amd64 address-space memory statistics.
+ */
+void
+amd64_hal_space_memory_stats(
+	uint32_t *spaces,
+	uint32_t *tables)
+{
+	/* Publishes the live address-space count when requested. */
+	if (spaces != NULL)
+		*spaces = __atomic_load_n(&space_count, __ATOMIC_RELAXED);
+
+	/* Publishes the subordinate page-table count when requested. */
+	if (tables != NULL) {
+		*tables = __atomic_load_n(
+		    &page_table_count,
+		    __ATOMIC_RELAXED);
+	}
+}
+
+/* Reports the highest physical address supported by the CPU. */
+static paddr_t
+cpu_physical_max(
+	void)
+{
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
+	unsigned bits;
+	paddr_t maximum;
+
+	/* Queries the highest supported extended CPUID leaf. */
+	eax = 0x80000000U;
+	bits = 36U;
+	__asm__ volatile("cpuid"
+	    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+
+	/* Reads the architectural physical-address width when available. */
+	if (eax >= 0x80000008U) {
+		eax = 0x80000008U;
+		__asm__ volatile("cpuid"
+		    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+		bits = eax & 0xffU;
+	}
+
+	/* Falls back when firmware exposes an invalid architectural width. */
+	if (bits < 32U || bits > 52U)
+		bits = 36U;
+
+	/* Forms the inclusive maximum physical address. */
+	maximum = ((paddr_t)1U << bits) - 1U;
+
+	/* Reports the physical-address ceiling. */
+	return maximum;
+}
+
+/* Decrements the subordinate page-table allocation count. */
+static void
+table_count_drop(
+	void)
+{
+	uint32_t old;
+
+	/* Accounts for one released page table. */
+	old = __atomic_fetch_sub(&page_table_count, 1U, __ATOMIC_RELAXED);
+
+	/* Detects page-table accounting underflow. */
+	if (old == 0)
+		HAL_FATAL("amd64 page-table counter underflow");
+}
+
+/* Allocates one page-table page. */
+static int
+alloc_page(
+	hal_physaddr_t *paddr)
+{
+	/* Page tables are ordinary RAM reached through the direct map. */
+	return hal_pmem_alloc(PAGE_SIZE, PAGE_SIZE, paddr);
+}
+
+/* Acquires the address-space registry lock. */
+static bool
+registry_lock_enter(
+	void)
+{
+	bool enabled;
+
+	/* Disables local interrupts before taking the registry serializer. */
+	enabled = hal_irq_disable();
+
+	/* Waits until this CPU owns the registry serializer. */
+	while (__atomic_exchange_n(
+	    &space_registry_lock,
+	    1U,
+	    __ATOMIC_ACQUIRE) != 0) {
+		__asm__ volatile("pause");
+	}
+
+	/* Reports the caller's prior interrupt state. */
+	return enabled;
+}
+
+/* Releases the address-space registry lock. */
+static void
+registry_lock_leave(
+	bool enabled)
+{
+	/* Publishes every registry update before releasing ownership. */
+	__atomic_store_n(&space_registry_lock, 0U, __ATOMIC_RELEASE);
+
+	/* Restores enabled interrupts when the caller had them enabled. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/* Registers an operation against a space which may be retired. */
+static int
+space_op_enter(
+	struct amd64_space *space)
+{
+	unsigned destroying;
+
+	/* Rejects a handle that is not a live address-space record. */
+	if (space->magic != AMD64_SPACE_MAGIC)
+		return 0;
+
+	/*
+	 * Takes ownership first, then looks for retirement, and the retiring
+	 * side sets the flag first and then waits for the count: whichever
+	 * order the two race in, a retirement either sees this operation or
+	 * this operation sees the retirement.  Both steps are sequentially
+	 * consistent so neither side can reorder its two accesses.
+	 */
+	(void)__atomic_fetch_add(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
+	destroying = __atomic_load_n(&space->destroying, __ATOMIC_SEQ_CST);
+
+	/* Backs out of a space that is being retired. */
+	if (destroying != 0) {
+		(void)__atomic_fetch_sub(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
+		return 0;
+	}
+
+	/* Reports successful admission. */
+	return 1;
+}
+
+/* Releases an admitted address-space operation. */
+static void
+space_op_leave(
+	struct amd64_space *space)
+{
+	unsigned previous;
+
+	/* Releases lifetime ownership; the retiring side waits for zero. */
+	previous = __atomic_fetch_sub(&space->active_ops, 1U, __ATOMIC_SEQ_CST);
+
+	/* Detects an unbalanced operation release. */
+	if (previous == 0)
+		HAL_FATAL("amd64 space operation counter underflow");
+}
+
+/* Acquires one address space's page-table lock. */
+static bool
+space_lock_enter(
+	struct amd64_space *space)
+{
+	bool enabled;
+
+	/* Disables interrupts before acquiring the page-table serializer. */
+	enabled = hal_irq_disable();
+
+	/*
+	 * Waits for ownership while servicing incoming invalidations.  A target
+	 * spinning with IRQs masked must acknowledge a request issued by the CPU
+	 * which owns this serializer.
+	 */
+	while (__atomic_exchange_n(
+	    &space->lock,
+	    1U,
+	    __ATOMIC_ACQUIRE) != 0) {
+		service_shootdowns(hal_cpu_current());
+		__asm__ volatile("pause");
+	}
+
+	/* Reports the caller's prior interrupt state. */
+	return enabled;
+}
+
+/* Releases one address space's page-table lock. */
+static void
+space_lock_leave(
+	struct amd64_space *space,
+	bool enabled)
+{
+	/* Publishes page-table updates before releasing ownership. */
+	__atomic_store_n(&space->lock, 0U, __ATOMIC_RELEASE);
+
+	/* Restores enabled interrupts when the caller had them enabled. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/* Validates one page-aligned user virtual range. */
+static int
+valid_user_range(
+	uintptr_t address,
+	size_t size)
+{
+	/* Rejects an empty range. */
+	if (size == 0)
+		return 0;
+
+	/* Rejects an unaligned starting address. */
+	if ((address & (PAGE_SIZE - 1U)) != 0)
+		return 0;
+
+	/* Rejects a non-page-sized extent. */
+	if ((size & (PAGE_SIZE - 1U)) != 0)
+		return 0;
+
+	/* Keeps the null guard page outside user mappings. */
+	if (address < PAGE_SIZE)
+		return 0;
+
+	/* Rejects a starting address outside the lower canonical half. */
+	if (address >= AMD64_USER_LIMIT)
+		return 0;
+
+	/* Rejects an extent which crosses the user limit. */
+	if (size > AMD64_USER_LIMIT - address)
+		return 0;
+
+	/* Reports a valid user range. */
+	return 1;
+}
+
+/* Allocates and links one subordinate page table. */
+static struct amd64_table_page *
+allocate_table(
+	struct amd64_space *space,
+	uint64_t *parent,
+	unsigned parent_index)
+{
+	struct amd64_table_page *page;
+	int status;
+
+	/* Allocates the software ownership record. */
+	page = kernel_alloc(sizeof(*page));
+	if (page == NULL)
+		return NULL;
+
+	/* Allocates the physical page-table storage. */
+	status = alloc_page(&page->paddr);
+	if (status != HAL_OK) {
+		kernel_free(page);
+		return NULL;
+	}
+
+	/* Initializes and links the new subordinate table. */
+	hal_memset(amd64_phys_to_direct(page->paddr), 0, PAGE_SIZE);
+	page->parent = parent;
+	page->parent_index = parent_index;
+	page->next = space->tables;
+	space->tables = page;
+	(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
+
+	/* Reports the linked table owner. */
+	return page;
+}
+
+/* Adds to the present-entry count kept in the entry that owns a table. */
+static void
+table_count_adjust(
+	uint64_t *owner,
+	int delta)
+{
+	uint64_t count;
+
+	/* The top-level table has no owning entry and no count. */
+	if (owner == NULL)
+		return;
+
+	/* Moves the count by delta, staying inside its 11 bits. */
+	count = (*owner & AMD64_PTE_COUNT_MASK) >> AMD64_PTE_COUNT_SHIFT;
+	if (delta < 0 && count < (uint64_t)(-delta))
+		HAL_FATAL("amd64 page table present count underflow");
+	count += (uint64_t)delta;
+	if (count > 512U)
+		HAL_FATAL("amd64 page table present count overflow");
+	*owner = (*owner & ~AMD64_PTE_COUNT_MASK) |
+	    (count << AMD64_PTE_COUNT_SHIFT);
+}
+
+/* Finds or creates the leaf entry for a virtual address. */
+static uint64_t *
+walk_leaf(
+	struct amd64_space *space,
+	uintptr_t address,
+	int create,
+	uint64_t **owner)
+{
+	unsigned shifts[3] = { 39, 30, 21 };
+	struct amd64_table_page *page;
+	uint64_t *table;
+	uint64_t *table_owner;
+	uint64_t entry;
+	unsigned level;
+	unsigned index;
+
+	/* Descends the three page-table levels above the leaf. */
+	table = space->pml4;
+	table_owner = NULL;
+	for (level = 0; level < 3; level++) {
+		index = (unsigned)(address >> shifts[level]) & 511U;
+		entry = table[index];
+
+		/* Creates a missing subordinate table when requested. */
+		if (!(entry & AMD64_PTE_PRESENT)) {
+			/* Reports a missing path to a lookup-only caller. */
+			if (!create)
+				return NULL;
+
+			/* Allocates the subordinate table required by this level. */
+			page = allocate_table(space, table, index);
+
+			/* Reports allocation failure to the mapping caller. */
+			if (page == NULL)
+				return NULL;
+
+			/* Links the new subordinate table into its parent. */
+			entry = (uintptr_t)page->paddr |
+			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+			if (address < AMD64_USER_LIMIT)
+				entry |= AMD64_PTE_USER;
+			table[index] = entry;
+
+			/* The parent table now holds one more present entry. */
+			table_count_adjust(table_owner, 1);
+		}
+
+		/* Rejects an unexpected large page in a user-table path. */
+		if (entry & AMD64_PTE_LARGE)
+			return NULL;
+
+		/* Descends through the selected subordinate table. */
+		table_owner = &table[index];
+		table = table_at(entry);
+	}
+
+	/* Tells the caller which entry owns the leaf table, for its count. */
+	if (owner != NULL)
+		*owner = table_owner;
+
+	/* Reports the leaf entry selected by the address. */
+	return &table[(address >> 12) & 511U];
+}
+
+/* Tests whether a table holds no present entry, from its owner's count. */
+static int
+table_is_empty(
+	const struct amd64_table_page *page)
+{
+	uint64_t entry;
+
+	/* The count lives in the parent's entry that points to this table. */
+	entry = page->parent[page->parent_index];
+
+	/* Reports an empty table. */
+	if ((entry & AMD64_PTE_COUNT_MASK) == 0)
+		return 1;
+
+	/* Reports a table which still owns a child mapping. */
+	return 0;
+}
+
+/* Finds the entry that owns a table, or NULL for the top-level table. */
+static uint64_t *
+table_owner_of(
+	struct amd64_space *space,
+	uint64_t *table)
+{
+	struct amd64_table_page *page;
+	uint64_t physical;
+
+	/* The top-level table is owned by the space, not by an entry. */
+	if (table == space->pml4)
+		return NULL;
+
+	/* Every table is reached through the direct map, so its offset there is its address. */
+	physical = (uint64_t)((uintptr_t)table - (uintptr_t)AMD64_DIRECT_BASE);
+
+	/* Finds the record of the table among the space's tables. */
+	for (page = space->tables; page != NULL; page = page->next) {
+		if ((uint64_t)page->paddr == physical)
+			return &page->parent[page->parent_index];
+	}
+
+	/* An unrecorded table is a broken ownership link. */
+	HAL_FATAL("amd64 page table without an ownership record");
+	return NULL;
+}
+
+/*
+ * Converts a present non-leaf entry to the table it names.
+ *
+ * Page tables are RAM the HAL allocated and cleared through the direct map
+ * (allocate_table()), so the walk needs no RAM-map lookup to reach them:
+ * the direct map places every such table at a fixed offset.  Before the
+ * direct map is live the checked conversion is used.
+ */
+static uint64_t *
+table_at(
+	uint64_t entry)
+{
+	uint64_t physical;
+
+	/* Takes the table's physical address out of the entry. */
+	physical = entry & AMD64_PTE_ADDR_MASK;
+
+	/* Uses the checked conversion until the direct map is active. */
+	if (!ram_active)
+		return amd64_phys_to_direct((uintptr_t)physical);
+
+	/* Refuses an address beyond the direct map. */
+	if (physical >= AMD64_DIRECT_LIMIT)
+		HAL_FATAL("amd64 page table outside the direct map");
+
+	/* Reports the table's direct-map address. */
+	return (uint64_t *)((uintptr_t)AMD64_DIRECT_BASE + (uintptr_t)physical);
+}
+
+/* Detaches every empty table without releasing its storage. */
+static struct amd64_table_page *
+detach_empty_tables(
+	struct amd64_space *space)
+{
+	struct amd64_table_page *detached;
+	struct amd64_table_page **link;
+	struct amd64_table_page *page;
+	uint64_t expected;
+	uint64_t parent_entry;
+	int empty;
+	int reclaimed;
+
+	/* Starts with an empty detached-table result list. */
+	detached = NULL;
+
+	/*
+	 * Repeats until removing a child no longer makes another table empty.
+	 * Storage remains valid until the caller completes a full shootdown.
+	 */
+	do {
+		link = &space->tables;
+		reclaimed = 0;
+
+		/* Examines every table still linked to this address space. */
+		while (*link != NULL) {
+			page = *link;
+			expected = (uintptr_t)page->paddr;
+
+			/* Keeps nonempty tables linked in the hardware tree. */
+			empty = table_is_empty(page);
+			if (!empty) {
+				link = &page->next;
+				continue;
+			}
+
+			/* Reads the software-owned table's parent link. */
+			parent_entry = page->parent[page->parent_index];
+
+			/* Detects a broken software-to-hardware ownership link. */
+			if (!(parent_entry & AMD64_PTE_PRESENT) ||
+			    (parent_entry & AMD64_PTE_ADDR_MASK) != expected) {
+				HAL_FATAL("detaching an unlinked amd64 page table");
+			}
+
+			/* Disconnects and transfers the empty table to the result list. */
+			page->parent[page->parent_index] = 0;
+			table_count_adjust(table_owner_of(space, page->parent), -1);
+			*link = page->next;
+			page->next = detached;
+			detached = page;
+			reclaimed = 1;
+		}
+	} while (reclaimed);
+
+	/* Reports tables safe to release after a complete shootdown. */
+	return detached;
+}
+
+/* Releases a list of detached subordinate page tables. */
+static void
+free_detached_tables(
+	struct amd64_table_page *page)
+{
+	struct amd64_table_page *next;
+
+	/* Releases every detached table and its ownership record. */
+	while (page != NULL) {
+		next = page->next;
+		(void)hal_pmem_free(&page->paddr, PAGE_SIZE);
+		kernel_free(page);
+		table_count_drop();
+		page = next;
+	}
+}
+
+/* Builds a hardware leaf permission mask. */
+static uint64_t
+leaf_flags(
+	uint32_t attr)
+{
+	uint64_t flags;
+
+	/* Starts with the permissions common to every user mapping. */
+	flags = AMD64_PTE_PRESENT | AMD64_PTE_USER;
+
+	/* Enables writes when requested. */
+	if (attr & HAL_SPACE_WRITE)
+		flags |= AMD64_PTE_WRITE;
+
+	/* Disables caching when requested. */
+	if (attr & HAL_SPACE_NOCACHE)
+		flags |= AMD64_PTE_NOCACHE;
+
+	/* Enables write-through caching when requested. */
+	if (attr & HAL_SPACE_WRITETHRU)
+		flags |= AMD64_PTE_WRITETHRU;
+
+	/*
+	 * Treats device mappings as uncached, or write-combining when asked:
+	 * PAT index 4 (PAT set, PCD and PWT clear), which amd64_cpu_init()
+	 * programs as WC.
+	 *
+	 * Values referenced: Intel SDM Vol. 3A, Page Attribute Table
+	 * ("Selecting a Memory Type from the PAT": the PAT, PCD and PWT bits
+	 * of a 4-KByte PTE form the index).
+	 */
+	if ((attr & (HAL_SPACE_DEVICE | HAL_SPACE_WC)) == (HAL_SPACE_DEVICE | HAL_SPACE_WC))
+		flags |= AMD64_PTE_PAT_4K;
+	else if (attr & HAL_SPACE_DEVICE)
+		flags |= AMD64_PTE_NOCACHE;
+
+	/* Disables execution unless explicitly requested. */
+	if (!(attr & HAL_SPACE_EXEC))
+		flags |= AMD64_PTE_NX;
+
+	/* Reports the completed hardware flags. */
+	return flags;
+}
+
+/* Invalidates matching non-global translations on every ready CPU. */
+static void
+shootdown(
+	hal_space_t handle,
+	void *vaddr,
+	size_t size)
+{
+	/* An ordinary request leaves the global entries. */
+	shootdown_request(handle, vaddr, size, 0U);
+}
+
+/*
+ * Invalidates matching translations on every ready CPU; a global request
+ * (only for the system space) also removes every global entry and the
+ * paging-structure caches.
+ */
+static void
+shootdown_request(
+	hal_space_t handle,
+	void *vaddr,
+	size_t size,
+	unsigned global)
+{
+	struct amd64_shootdown_request *request;
+	struct amd64_percpu *target;
+	struct hal_cpu_mask ready;
+	hal_cpu_id_t sender;
+	hal_cpu_id_t cpu;
+	hal_space_t current_space;
+	uint32_t apic_id;
+	unsigned slot;
+	unsigned expected;
+	uint64_t pending;
+	int reserved;
+	int status;
+	bool enabled;
+
+	/*
+	 * Stays on one CPU for the whole request.  A caller moved to another
+	 * CPU after the sender is captured would leave the old CPU out of the
+	 * targets while it may still hold the space, and would acknowledge the
+	 * old CPU's bit from the new one.  Reciprocal requests are polled
+	 * below, so waiting with interrupts disabled cannot deadlock.
+	 */
+	enabled = hal_irq_disable();
+
+	/* Captures the sending CPU and initializes request construction. */
+	sender = hal_cpu_current();
+	request = NULL;
+	pending = 0;
+
+	/*
+	 * Reserves a pool entry rather than indexing by sender CPU, so the
+	 * pool does not depend on how many requests one CPU can have open.
+	 */
+	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
+		expected = 0;
+		reserved = __atomic_compare_exchange_n(
+			&shootdowns[slot].active,
+			&expected,
+			2U,
+			0,
+			__ATOMIC_ACQUIRE,
+			__ATOMIC_RELAXED);
+
+		/* Selects the first request slot reserved by this CPU. */
+		if (reserved) {
+			request = &shootdowns[slot];
+			break;
+		}
+	}
+
+	/* Rejects exhaustion rather than losing an invalidation. */
+	if (request == NULL)
+		HAL_FATAL("amd64 TLB shootdown request pool exhausted");
+
+	/* Selects every ready remote CPU using the affected address space. */
+	hal_cpu_ready_mask(&ready);
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
+		/* Skips the sender, out-of-range CPUs, and CPUs not yet ready. */
+		if (cpu == sender || cpu >= AMD64_SMP_MAX_CPUS ||
+		    !hal_cpu_mask_test(&ready, cpu)) {
+			continue;
+		}
+
+		/* Resolves the ready remote processor's current-space record. */
+		target = amd64_percpu_get(cpu);
+
+		/* Selects every remote CPU for a system-space flush. */
+		if (handle == HAL_SPACE_SYS) {
+			pending |= (uint64_t)1U << cpu;
+			continue;
+		}
+
+		/* Observes the remote processor's current address space. */
+		current_space = __atomic_load_n(
+		    &target->current_space,
+		    __ATOMIC_ACQUIRE);
+
+		/* Selects a remote CPU currently using this user space. */
+		if (current_space == handle)
+			pending |= (uint64_t)1U << cpu;
+	}
+
+	/* Publishes request contents before making the slot active. */
+	request->space = handle;
+	request->vaddr = vaddr;
+	request->size = size;
+	request->global = global;
+	__atomic_store_n(&request->pending, pending, __ATOMIC_RELEASE);
+	__atomic_store_n(&request->active, 1U, __ATOMIC_RELEASE);
+
+	/* Delivers the shootdown interrupt to every selected remote CPU. */
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
+		/* Skips CPUs absent from this request. */
+		if ((pending & ((uint64_t)1U << cpu)) == 0)
+			continue;
+
+		/* Resolves and signals the target processor. */
+		apic_id = amd64_smp_apic_id(cpu);
+		status = amd64_lapic_send_vector(
+			apic_id,
+			AMD64_VECTOR_TLB);
+
+		/* Rejects a delivery failure which could leave stale translations. */
+		if (status != HAL_OK)
+			HAL_FATAL("amd64 TLB shootdown delivery failed");
+	}
+
+	/* Invalidates the sender when it currently uses the affected space. */
+	current_space = current_space_load();
+	if (handle == HAL_SPACE_SYS || current_space == handle)
+		flush_request_range(handle, vaddr, size, global);
+
+	/*
+	 * Waits for acknowledgements while servicing reciprocal requests.  Page
+	 * operations may enter with local interrupts disabled, so polling avoids
+	 * a reciprocal-shootdown deadlock without enabling arbitrary handlers.
+	 */
+	while (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) != 0) {
+		service_shootdowns(sender);
+		__asm__ volatile("pause");
+	}
+
+	/* Releases the acknowledged request slot. */
+	__atomic_store_n(&request->active, 0U, __ATOMIC_RELEASE);
+
+	/* Restores the caller's interrupt state. */
+	if (enabled)
+		hal_irq_enable();
+}
+
+/*
+ * Invalidates this CPU's translations for one shootdown request.
+ *
+ * A small user range is invalidated page by page, which keeps the rest of
+ * the TLB; a request with no range, a large one, or one for the system
+ * space reloads CR3 as before; a global request flushes every entry,
+ * global ones too.
+ */
+static void
+flush_request_range(
+	hal_space_t handle,
+	void *vaddr,
+	size_t size,
+	unsigned global)
+{
+	uintptr_t address;
+	uintptr_t end;
+
+	/* A global request leaves no translation at all. */
+	if (global != 0U) {
+		flush_tlb_global();
+		return;
+	}
+
+	/* Flushes everything for a whole-space, large, or system request. */
+	if (handle == HAL_SPACE_SYS ||
+	    vaddr == NULL ||
+	    size == 0 ||
+	    size > AMD64_INVLPG_MAX_PAGES * PAGE_SIZE) {
+		asm_flush_tlb();
+		return;
+	}
+
+	/* Invalidates each page of the range. */
+	address = (uintptr_t)vaddr & ~(uintptr_t)(PAGE_SIZE - 1U);
+	end = (uintptr_t)vaddr + size;
+	while (address < end) {
+		__asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+		address += PAGE_SIZE;
+	}
+}
+
+/*
+ * Flushes this CPU's whole translation cache, global entries and the
+ * paging-structure caches too.  Interrupts are disabled by the caller.
+ */
+static void
+flush_tlb_global(
+	void)
+{
+	uint64_t cr4;
+
+	/* Reads whether this CPU has global pages enabled. */
+	cr4 = asm_get_cr4();
+
+	/*
+	 * With global pages enabled, clearing CR4.PGE and setting it again
+	 * invalidates every TLB entry, global ones included, and the
+	 * paging-structure caches.
+	 * Procedure referenced: Intel SDM Vol. 3A section 4.10.4.1, operations
+	 * that invalidate TLBs and paging-structure caches.
+	 */
+	if ((cr4 & AMD64_CR4_PGE) != 0U) {
+		asm_load_cr4(cr4 & ~AMD64_CR4_PGE);
+		asm_load_cr4(cr4);
+		return;
+	}
+
+	/* Without global pages the G bit is ignored, and a reload of CR3 flushes every entry. */
+	asm_flush_tlb();
+}
+
+/* Services all active shootdown requests targeting one CPU. */
+static void
+service_shootdowns(
+	hal_cpu_id_t cpu)
+{
+	struct amd64_shootdown_request *request;
+	uint64_t bit;
+	uint64_t pending;
+	unsigned active;
+	unsigned slot;
+
+	/* Selects this CPU's bit in every pending request mask. */
+	bit = (uint64_t)1U << cpu;
+
+	/* Examines every request which could target this CPU. */
+	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
+		request = &shootdowns[slot];
+		active = __atomic_load_n(&request->active, __ATOMIC_ACQUIRE);
+
+		/* Skips slots not yet published as active. */
+		if (active != 1U)
+			continue;
+
+		/* Observes the processors still awaiting acknowledgement. */
+		pending = __atomic_load_n(&request->pending, __ATOMIC_ACQUIRE);
+
+		/* Skips requests which do not target this CPU. */
+		if ((pending & bit) == 0)
+			continue;
+
+		/* Flushes locally before acknowledging the request. */
+		flush_request_range(request->space, request->vaddr, request->size, request->global);
+		(void)__atomic_fetch_and(
+		    &request->pending,
+		    ~bit,
+		    __ATOMIC_RELEASE);
+	}
+}
+
+/* Reserves each early table while its old bootstrap alias remains reachable. */
+static int
+ram_allocate(void *context, uint64_t *physical, uint64_t **table)
+{
+	UNUSED_PARAMETER(context);
+	if (!amd64_early_table_page(physical, ram_active)) {
+		hal_printf("A64 RAM ARENA NEED bytes=%u tables=%llu mapped=%llu active=%u\n",
+		    PAGE_SIZE, (unsigned long long)ram_builder.table_pages,
+		    (unsigned long long)ram_builder.mapped_bytes, ram_active);
+		return 0;
+	}
+	/* Before the direct map the page is reached through the bootstrap
+	 * window, where the image's linked range shows the image itself. */
+	if (!ram_active && amd64_kernel_image_owns(*physical))
+		HAL_FATAL("amd64 early table page aliases the kernel image");
+	*table = (void *)((ram_active ? (uintptr_t)AMD64_DIRECT_BASE :
+	    (uintptr_t)AMD64_IMAGE_BASE) + *physical);
+	hal_memset(*table, 0, PAGE_SIZE);
+	return 1;
+}
+
+/* Resolves table ownership before and after the permanent CR3 transition. */
+static uint64_t *
+ram_resolve(void *context, uint64_t physical)
+{
+	UNUSED_PARAMETER(context);
+	if ((!ram_active && physical >= AMD64_BOOTSTRAP_LIMIT) ||
+	    physical >= AMD64_DIRECT_LIMIT || (physical & (PAGE_SIZE - 1U)) != 0)
+		return NULL;
+	return (void *)((ram_active ? (uintptr_t)AMD64_DIRECT_BASE :
+	    (uintptr_t)AMD64_IMAGE_BASE) + physical);
+}
+
+/* Builds sparse RAM aliases and fixes shared upper-half roots before fork. */
+static void
+build_ram_map(const struct zbl6_framebuffer *framebuffer)
+{
+	uint64_t base;
+	uint64_t size;
+	uint64_t end;
+	uint64_t next;
+	uint64_t attributes;
+	uint64_t before;
+	uint64_t flags;
+	uint64_t cache_flags;
+	uint64_t physical;
+	uint64_t *table;
+	uint64_t boundaries[8];
+	uint32_t type;
+	uint32_t index;
+	unsigned slot;
+	enum amd64_ram_result result;
+
+	hal_memset(&ram_builder, 0, sizeof(ram_builder));
+	ram_builder.root = system_pml4;
+	ram_builder.allocate = ram_allocate;
+	ram_builder.resolve = ram_resolve;
+	ram_builder.physical_max = acpi_physical_max;
+	/* Empty PDPTs ensure later kernel mapping changes reach every process. */
+	for (index = 256; index < 511; index++) {
+		if (!ram_allocate(NULL, &physical, &table))
+			HAL_FATAL("amd64 early shared-root arena exhausted");
+		system_pml4[index] = physical | AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+		ram_builder.table_pages++;
+	}
+	/* The direct map aliases the placed pages, so W^X follows the placement. */
+	boundaries[0] = (uintptr_t)amd64_kernel_image()->text_phys_start;
+	boundaries[1] = (uintptr_t)amd64_kernel_image()->text_phys_end;
+	boundaries[2] = (uintptr_t)amd64_kernel_image()->rodata_phys_start;
+	boundaries[3] = (uintptr_t)amd64_kernel_image()->rodata_phys_end;
+	boundaries[4] = 0xa0000U;
+	boundaries[5] = 0x100000U;
+	boundaries[6] = framebuffer == NULL ? 0 : framebuffer->physical_base & ~4095ULL;
+	boundaries[7] = framebuffer == NULL ? 0 :
+	    (framebuffer->physical_base + framebuffer->size + 4095U) & ~4095ULL;
+	for (index = 0; index < bsp_mem_range_count(); index++) {
+		if (!bsp_mem_range(index, &base, &size, &type) || !bsp_mem_attributes(index, &attributes))
+			HAL_FATAL("amd64 RAM range disappeared");
+		if (type != ZBL6_MEMORY_USABLE && type != ZBL6_MEMORY_BOOT_RECLAIM)
+			continue;
+		end = (base + size) & ~4095ULL;
+		base = (base + 4095U) & ~4095ULL;
+		cache_flags = 0;
+		/* The image, user mappings and table walker currently require WB RAM.
+		 * Do not create a different-cache alias for a non-WB-only range. */
+		if (bsp_memory_source() == ZBL6_MEMORY_SOURCE_UEFI && (attributes & 8U) == 0)
+			HAL_FATAL("unsupported amd64 non-WB RAM attributes");
+		while (base < end) {
+			next = end;
+			for (slot = 0; slot < 8; slot++)
+				if (boundaries[slot] > base && boundaries[slot] < next)
+					next = boundaries[slot];
+			if ((base >= boundaries[4] && base < boundaries[5]) ||
+			    (framebuffer != NULL && base >= boundaries[6] && base < boundaries[7])) {
+				base = next;
+				continue;
+			}
+			flags = cache_flags | AMD64_PTE_NX | AMD64_PTE_GLOBAL;
+			if (!(base >= boundaries[0] && base < boundaries[1]) &&
+			    !(base >= boundaries[2] && base < boundaries[3]))
+				flags |= AMD64_PTE_WRITE;
+			before = ram_builder.mapped_bytes;
+			result = amd64_ram_map(&ram_builder, base, next - base, flags);
+			if (result == AMD64_RAM_NOMEM && !ram_active && arena_is_mapped()) {
+				/* Return from all walks before invalidating bootstrap aliases. */
+				base += ram_builder.mapped_bytes - before;
+				system_cr3 = amd64_image_to_phys(system_pml4);
+				asm_load_cr3(system_cr3);
+				ram_active = 1;
+				pcat_cons_paging_ready();
+				hal_puts("A64 RAM ARENA extending into mapped RAM\n");
+				result = amd64_ram_map(&ram_builder, base, next - base, flags);
+			}
+			if (result != AMD64_RAM_OK) {
+				hal_printf("A64 RAM MAP FAIL result=%u base=%llu size=%llu tables=%llu\n",
+				    result, (unsigned long long)base, (unsigned long long)(next - base),
+				    (unsigned long long)ram_builder.table_pages);
+				HAL_FATAL("amd64 RAM map construction failed");
+			}
+			base = next;
+		}
+	}
+	/* Old UEFI maps classify loader-owned kernel pages as reserved RAM. */
+	if (bsp_memory_source() == 0)
+		map_legacy_image_alias();
+}
+
+/* Maps only the known loaded image, without treating other legacy reservations as RAM. */
+static void
+map_legacy_image_alias(void)
+{
+	uint64_t physical;
+	uint64_t entry;
+	uint64_t flags;
+	enum amd64_ram_result result;
+
+	/* Preserves the same text/rodata W^X aliases used by typed RAM ranges. */
+	const struct amd64_kernel_image *img = amd64_kernel_image();
+
+	for (physical = (uintptr_t)img->phys_start;
+	     physical < (uintptr_t)img->phys_end; physical += PAGE_SIZE) {
+		if (amd64_ram_lookup(&ram_builder, physical, &entry))
+			continue;
+		flags = AMD64_PTE_NX | AMD64_PTE_GLOBAL;
+		if (!(physical >= (uintptr_t)img->text_phys_start && physical < (uintptr_t)img->text_phys_end) &&
+		    !(physical >= (uintptr_t)img->rodata_phys_start && physical < (uintptr_t)img->rodata_phys_end))
+			flags |= AMD64_PTE_WRITE;
+		result = amd64_ram_map(&ram_builder, physical, PAGE_SIZE, flags);
+		if (result != AMD64_RAM_OK)
+			HAL_FATAL("amd64 legacy kernel RAM alias failed");
+	}
+}
+
+/* Requires every table alias to survive before abandoning bootstrap pointers. */
+static int
+arena_is_mapped(void)
+{
+	uint64_t base;
+	uint64_t size;
+	uint64_t offset;
+	uint64_t entry;
+	uint32_t index;
+
+	for (index = 0; amd64_early_reservation(index, &base, &size); index++)
+		for (offset = 0; offset < size; offset += PAGE_SIZE)
+			if (!amd64_ram_lookup(&ram_builder, base + offset, &entry))
+				return 0;
+	return 1;
+}
+
+/* Checks W^X aliases and reads one available RAM page beyond each old limit. */
+static void
+verify_ram_map(void)
+{
+	uint64_t entry;
+	uint64_t base;
+	uint64_t size;
+	uint64_t probe;
+	uint64_t boundary;
+	uint64_t low_bytes;
+	uint64_t high_bytes;
+	uint32_t index;
+	uint32_t type;
+	volatile const uint8_t *pointer;
+	volatile uint8_t observed;
+
+	low_bytes = 0;
+	high_bytes = 0;
+	for (index = 0; amd64_early_reservation(index, &base, &size); index++) {
+		if (base < AMD64_BOOTSTRAP_LIMIT)
+			low_bytes += size;
+		else
+			high_bytes += size;
+	}
+	if (low_bytes + high_bytes != ram_builder.table_pages * PAGE_SIZE)
+		HAL_FATAL("amd64 table arena accounting invariant failed");
+	hal_printf("A64 RAM ARENA low=%llu high=%llu runs=%u root=%llu\n",
+	    (unsigned long long)low_bytes, (unsigned long long)high_bytes,
+	    index, (unsigned long long)system_cr3);
+	if (!arena_is_mapped() || amd64_phys_to_direct(0xb8000U) != NULL ||
+	    amd64_direct_to_phys(system_pml4) != UINTPTR_MAX ||
+	    amd64_image_to_phys(system_pml4) != system_cr3)
+		HAL_FATAL("amd64 RAM/image conversion invariant failed");
+	if (!amd64_ram_lookup(&ram_builder, (uintptr_t)amd64_kernel_image()->text_phys_start, &entry) ||
+	    (entry & AMD64_PTE_WRITE) != 0 || (entry & AMD64_PTE_NX) == 0 ||
+	    !amd64_ram_lookup(&ram_builder, (uintptr_t)amd64_kernel_image()->rodata_phys_start, &entry) ||
+	    (entry & AMD64_PTE_WRITE) != 0 || (entry & AMD64_PTE_NX) == 0)
+		HAL_FATAL("amd64 RAM alias permission invariant failed");
+	/* The placed text must be what the CPU executes through the image window. */
+	if (amd64_image_to_phys(__kernel_virt_start) != amd64_kernel_image()->phys_start ||
+	    amd64_image_to_phys(__kernel_virt_end - 1) != amd64_kernel_image()->phys_end - 1)
+		HAL_FATAL("amd64 image placement invariant failed");
+	for (boundary = 1ULL << 30; boundary <= (1ULL << 32); boundary <<= 2) {
+		for (index = 0; index < bsp_mem_range_count(); index++) {
+			if (!bsp_mem_range(index, &base, &size, &type) || type != ZBL6_MEMORY_USABLE)
+				continue;
+			probe = base > boundary ? base : boundary;
+			if (probe >= base + size || PAGE_SIZE > base + size - probe)
+				continue;
+			pointer = amd64_phys_to_direct((uintptr_t)probe);
+			if (pointer == NULL || amd64_direct_to_phys((const void *)pointer) != probe)
+				HAL_FATAL("amd64 high RAM round-trip failed");
+			observed = *pointer;
+			(void)observed;
+			hal_printf("A64 RAM PROBE boundary=%llu physical=%llu read=ok\n",
+			    (unsigned long long)boundary, (unsigned long long)probe);
+			break;
+		}
+	}
+}
+
+/*
+ * Preserves every persistent ACPI mapping during boot-owner retirement.
+ * Discovery completes before this boot-only ownership query is used.
+ */
+int
+amd64_acpi_page_reserved(
+	uint64_t physical)
+{
+	unsigned index;
+
+	/* Searches physical slots; duplicate aliases retain the same owner. */
+	for (index = 0; index < acpi_window.used; index++) {
+		if (acpi_window.slot_physical[index] == physical)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Freezes physical ACPI ownership before reclaiming firmware boot memory.
+ * Existing persistent pages remain accessible; new discovery must run earlier.
+ */
+void
+amd64_acpi_finish_discovery(void)
+{
+	acpi_discovery_finished = 1;
+}
+
+/* Validates one user page without weakening the existing managed-RAM rule. */
+static int
+user_page_allowed(
+	hal_physaddr_t physical,
+	uint32_t attr)
+{
+	uint64_t entry;
+	int ram_present;
+
+	/* Uses the immutable RAM map to distinguish device storage on every operation. */
+	ram_present = amd64_ram_lookup(&ram_builder, physical, &entry);
+	if ((attr & HAL_SPACE_DEVICE) != 0) {
+		/* A device alias cannot execute or overlap the ordinary cached RAM map. */
+		if ((attr & HAL_SPACE_EXEC) != 0 || ram_present)
+			return HAL_ERR_INVALID;
+
+		/* Matches the cache bits used by the kernel's device view; write-combining excludes the others. */
+		if ((attr & HAL_SPACE_WRITETHRU) != 0)
+			return HAL_ERR_UNSUPPORTED;
+		if ((attr & HAL_SPACE_WC) != 0 && (attr & HAL_SPACE_NOCACHE) != 0)
+			return HAL_ERR_INVALID;
+	} else if ((attr & HAL_SPACE_WC) != 0) {
+		/* Write-combining is offered for device pages alone. */
+		return HAL_ERR_UNSUPPORTED;
+	} else if (!ram_present || (entry & AMD64_PTE_WRITE) == 0) {
+		/* Untagged mappings retain the original RAM-only contract. */
+		return HAL_ERR_INVALID;
+	}
+
+	/* Succeeded: the requested attributes preserve this page's storage type. */
+	return HAL_OK;
+}
+
+/*
+ * Maps firmware pages into the UEFI runtime window of the system space.
+ *
+ * The pages must lie outside the RAM map, so no cached alias of them exists
+ * elsewhere, and the window pages must be unmapped.  Execution and writes
+ * are given as asked; HAL_SPACE_NOCACHE makes the pages uncached.  The
+ * entries go from not present to present, which no processor caches, so no
+ * TLB shootdown is needed.
+ */
+static int
+firmware_window_map(
+	uintptr_t address,
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr)
+{
+	hal_physaddr_t table_physical;
+	uint64_t ram_entry;
+	uint64_t flags;
+	uint64_t *table;
+	uintptr_t window_offset;
+	size_t offset;
+	unsigned directory;
+	bool enabled;
+	int ram_present;
+	int error;
+
+	/* Refuses attributes other than the access rights and uncached. */
+	if ((attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) == 0 ||
+	    (attr & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC |
+	    HAL_SPACE_NOCACHE)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Refuses an empty or unaligned extent. */
+	if (size == 0 ||
+	    ((address | physical | size) & (PAGE_SIZE - 1U)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Refuses an extent outside the window. */
+	if (address < ZBL6_UEFI_RUNTIME_VIRTUAL_BASE ||
+	    address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE >= ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE ||
+	    size > ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE -
+	    (address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE))
+		return HAL_ERR_INVALID;
+
+	/* Refuses a physical extent beyond this processor's address width. */
+	if (physical > acpi_physical_max || size - 1U > acpi_physical_max - physical)
+		return HAL_ERR_INVALID;
+
+	/* Refuses RAM, which the direct map already holds with its own attributes. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		ram_present = amd64_ram_lookup(&ram_builder, physical + offset, &ram_entry);
+		if (ram_present)
+			return HAL_ERR_INVALID;
+	}
+
+	/* Builds the supervisor entry bits shared by every page of the extent. */
+	flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL;
+	if ((attr & HAL_SPACE_WRITE) != 0)
+		flags |= AMD64_PTE_WRITE;
+	if ((attr & HAL_SPACE_EXEC) == 0)
+		flags |= AMD64_PTE_NX;
+	if ((attr & HAL_SPACE_NOCACHE) != 0)
+		flags |= AMD64_PTE_NOCACHE;
+
+	/* Fills the window under the registry lock, which owns its tables. */
+	window_offset = address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE;
+	enabled = registry_lock_enter();
+
+	/* Refuses window pages that are already mapped, before changing any. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		if ((system_firmware_pd[directory] & AMD64_PTE_PRESENT) == 0)
+			continue;
+
+		/* Reads the leaf entry of a page whose table exists. */
+		table = table_at(system_firmware_pd[directory]);
+		if ((table[((window_offset + offset) / PAGE_SIZE) % 512U] & AMD64_PTE_PRESENT) != 0) {
+			registry_lock_leave(enabled);
+			return HAL_ERR_INVALID;
+		}
+	}
+
+	/* Creates the leaf tables the extent needs; they stay for the kernel's life. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		if ((system_firmware_pd[directory] & AMD64_PTE_PRESENT) != 0)
+			continue;
+
+		/* Reserves ordinary RAM for one kernel leaf table. */
+		error = alloc_page(&table_physical);
+		if (error != HAL_OK) {
+			registry_lock_leave(enabled);
+			return error;
+		}
+
+		/* Clears and links the table; the page counter counts it as a table. */
+		table = (uint64_t *)hal_pmem_to_kernel(table_physical);
+		hal_memset(table, 0, PAGE_SIZE);
+		(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
+		system_firmware_pd[directory] = table_physical |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	}
+
+	/* Publishes every page of the extent. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		table = table_at(system_firmware_pd[directory]);
+		table[((window_offset + offset) / PAGE_SIZE) % 512U] =
+		    (physical + offset) | flags;
+	}
+
+	/* Lets other changes of the shared tables in again. */
+	registry_lock_leave(enabled);
+
+	/* Succeeded: the extent is mapped at the address the firmware was given. */
+	return HAL_OK;
+}
+
+/* Resolves only extents fully contained by one permanent device window. */
+static int
+device_fixed_range(
+	hal_physaddr_t physical,
+	size_t size,
+	void **address)
+{
+	uint64_t limit;
+
+	/* Refuses empty extents before subtracting from a window boundary. */
+	if (size == 0)
+		return 0;
+
+	/* Selects one of the boot-established, permanently uncached windows. */
+	if (physical >= 0xa0000U && physical < 0x100000U) {
+		limit = 0x100000U;
+	} else if (physical >= 0xf0000000U && physical < 0xf1000000U) {
+		limit = 0xf1000000U;
+	} else if (physical >= 0xfee00000U && physical < 0xff000000U) {
+		limit = 0xff000000U;
+	} else if (physical >= 0xfec00000U && physical < 0xfee00000U) {
+		limit = 0xfee00000U;
+	} else {
+		/* An arbitrary BAR needs an owned page-granular mapping. */
+		return 0;
+	}
+
+	/* A supported starting byte does not authorize crossing its fixed window. */
+	if (size > limit - physical)
+		return 0;
+
+	/* Resolves the validated permanent translation. */
+	*address = amd64_device_vaddr(physical);
+
+	/* Succeeded: the entire extent has a permanent kernel mapping. */
+	return 1;
+}
+
+/* Reserves and populates an owned view in the shared device window. */
+static int
+device_window_map(
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr,
+	void **address)
+{
+	struct amd64_device_mapping *mapping;
+	struct amd64_device_mapping **link;
+	struct amd64_device_mapping *other;
+	hal_physaddr_t aligned;
+	size_t offset;
+	size_t span;
+	uint64_t ram_entry;
+	unsigned count;
+	unsigned first;
+	unsigned index;
+	uint32_t attributes;
+	bool enabled;
+	int ram_present;
+	int error;
+
+	/* Includes both partial boundary pages while preserving the returned offset. */
+	aligned = physical & ~(hal_physaddr_t)(PAGE_SIZE - 1U);
+	offset = (size_t)(physical - aligned);
+	if (size > SIZE_MAX - offset - (PAGE_SIZE - 1U))
+		return HAL_ERR_INVALID;
+
+	span = (size + offset + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
+	if (span > (size_t)AMD64_DEVICE_PAGE_COUNT * PAGE_SIZE)
+		return HAL_ERR_NOMEM;
+
+	count = (unsigned)(span / PAGE_SIZE);
+
+	/* Excludes all RAM, including bytes outside partial device boundary pages. */
+	for (index = 0; index < count; index++) {
+		ram_present = amd64_ram_lookup(&ram_builder,
+		    aligned + (hal_physaddr_t)index * PAGE_SIZE, &ram_entry);
+		if (ram_present)
+			return HAL_ERR_INVALID;
+	}
+
+	/* Normalizes cache policy: write-combining is preserved, else uncached. */
+	if ((attr & HAL_SPACE_WC) != 0)
+		attributes = (attr & (HAL_SPACE_READ | HAL_SPACE_WRITE)) |
+		    HAL_SPACE_WC;
+	else
+		attributes = (attr & (HAL_SPACE_READ | HAL_SPACE_WRITE)) |
+		    HAL_SPACE_DEVICE;
+
+	/* Allocates ownership metadata before disabling interrupts for publication. */
+	mapping = kernel_alloc(sizeof(*mapping));
+	if (mapping == NULL)
+		return HAL_ERR_NOMEM;
+
+	hal_memset(mapping, 0, sizeof(*mapping));
+	mapping->physical = physical;
+	mapping->requested_size = size;
+	mapping->page_count = count;
+	mapping->references = 1U;
+	mapping->attributes = attributes;
+
+	/* Shares identical live views and excludes retiring ranges from reuse. */
+	enabled = registry_lock_enter();
+
+	for (other = device_mappings; other != NULL; other = other->next) {
+		if (other->physical == physical &&
+		    other->requested_size == size &&
+		    other->attributes == attributes &&
+		    other->references != 0) {
+			/* A live reference preserves every page in this identical view. */
+			if (other->references == (unsigned)-1) {
+				registry_lock_leave(enabled);
+				kernel_free(mapping);
+				return HAL_ERR_STATE;
+			}
+
+			other->references++;
+			*address = other->address;
+			registry_lock_leave(enabled);
+			kernel_free(mapping);
+			return HAL_OK;
+		}
+	}
+
+	/* Finds the first contiguous hole in the sorted list of retained views. */
+	first = 0;
+	link = &device_mappings;
+	while (*link != NULL) {
+		other = *link;
+		if (count <= other->first_page - first)
+			break;
+
+		first = other->first_page + other->page_count;
+		link = &other->next;
+	}
+
+	/* Refuses window exhaustion without disturbing any active device view. */
+	if (first > AMD64_DEVICE_PAGE_COUNT - count) {
+		registry_lock_leave(enabled);
+		kernel_free(mapping);
+		return HAL_ERR_NOMEM;
+	}
+
+	/* Publishes slot ownership before any page-table entry becomes visible. */
+	mapping->first_page = first;
+	mapping->address = (void *)(uintptr_t)(AMD64_DEVICE_WINDOW_BASE +
+	    (uint64_t)first * PAGE_SIZE + offset);
+	mapping->next = *link;
+	*link = mapping;
+
+	/* Populates only the requested device pages, never neighbouring RAM. */
+	error = device_window_populate(mapping);
+	if (error != HAL_OK) {
+		/* Retain the occupied slots until rollback translations are retired. */
+		mapping->references = 0;
+		device_window_clear(mapping);
+	}
+
+	registry_lock_leave(enabled);
+
+	/* Makes the shared kernel PTE change visible on every ready processor. */
+	shootdown(HAL_SPACE_SYS, NULL, 0);
+
+	/* Releases failed ownership only after every old translation is gone. */
+	if (error != HAL_OK) {
+		device_window_retire(mapping);
+		return error;
+	}
+
+	/* Publishes the requested byte address, retaining the enclosing whole pages. */
+	*address = mapping->address;
+
+	/* Succeeded: the driver owns one independently releasable device view. */
+	return HAL_OK;
+}
+
+/* Installs leaf PTEs while the registry lock retains every mapping slot. */
+static int
+device_window_populate(
+	struct amd64_device_mapping *mapping)
+{
+	uint64_t *table;
+	hal_physaddr_t physical;
+	hal_physaddr_t table_physical;
+	uint64_t flags;
+	unsigned index;
+	unsigned slot;
+	unsigned directory;
+	int error;
+
+	/* Device pages remain supervisor-only and non-global for full TLB retirement. */
+	flags = AMD64_PTE_PRESENT | AMD64_PTE_NX;
+	if ((mapping->attributes & HAL_SPACE_WC) != 0)
+		/* PAT index 4 selects write-combining with PCD and PWT clear. */
+		flags |= AMD64_PTE_PAT_4K;
+	else
+		flags |= AMD64_PTE_NOCACHE;
+	if ((mapping->attributes & HAL_SPACE_WRITE) != 0)
+		flags |= AMD64_PTE_WRITE;
+
+	physical = mapping->physical & ~(hal_physaddr_t)(PAGE_SIZE - 1U);
+
+	/* Creates persistent leaf tables only for the occupied directory slots. */
+	for (index = 0; index < mapping->page_count; index++) {
+		slot = mapping->first_page + index;
+		directory = slot / 512U;
+		table_physical = device_leaf_tables[directory];
+		if (table_physical == 0) {
+			/* Reserves ordinary RAM for one kernel leaf table. */
+			error = alloc_page(&table_physical);
+			if (error != HAL_OK)
+				return error;
+
+			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
+			hal_memset(table, 0, PAGE_SIZE);
+			device_leaf_tables[directory] = table_physical;
+			(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
+			system_device_pd[directory / 512U][directory % 512U] =
+			    table_physical | AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+		} else {
+			/* Reuses the leaf table retained from earlier views in this slot. */
+			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
+		}
+
+		/* Publishes exactly one owned physical page without enabling execution. */
+		table[slot % 512U] = (physical + (hal_physaddr_t)index * PAGE_SIZE) | flags;
+	}
+
+	/* Succeeded: every page of this view has a supervisor device PTE. */
+	return HAL_OK;
+}
+
+/* Clears a retiring view while its reserved slots still exclude other maps. */
+static void
+device_window_clear(
+	struct amd64_device_mapping *mapping)
+{
+	uint64_t *table;
+	hal_physaddr_t table_physical;
+	unsigned index;
+	unsigned slot;
+
+	/* Clears every installed leaf, including partially populated failure paths. */
+	for (index = 0; index < mapping->page_count; index++) {
+		slot = mapping->first_page + index;
+		table_physical = device_leaf_tables[slot / 512U];
+		if (table_physical != 0) {
+			/* Persistent empty tables keep directory publication stable on SMP. */
+			table = (uint64_t *)hal_pmem_to_kernel(table_physical);
+			table[slot % 512U] = 0;
+		}
+	}
+}
+
+/* Releases a view only after its PTEs have been invalidated on every CPU. */
+static void
+device_window_retire(
+	struct amd64_device_mapping *mapping)
+{
+	struct amd64_device_mapping **link;
+	bool enabled;
+
+	/* Removes only the exact retiring owner whose TLB acknowledgement completed. */
+	enabled = registry_lock_enter();
+
+	link = &device_mappings;
+	while (*link != NULL && *link != mapping)
+		link = &(*link)->next;
+
+	/* A published view cannot disappear before its final retire operation. */
+	if (*link != mapping || mapping->references != 0)
+		HAL_FATAL("amd64 device view retirement lost ownership");
+
+	*link = mapping->next;
+
+	registry_lock_leave(enabled);
+
+	/* Releases metadata after making the virtual slots available for reuse. */
+	kernel_free(mapping);
+}
+
+/* Drops one exact driver reference and drains the final view's translations. */
+static int
+device_window_unmap(
+	void *address,
+	size_t size)
+{
+	struct amd64_device_mapping *mapping;
+	bool enabled;
+
+	/* Resolves the exact retained view rather than accepting an interior pointer. */
+	enabled = registry_lock_enter();
+
+	for (mapping = device_mappings; mapping != NULL; mapping = mapping->next) {
+		if (mapping->address == address && mapping->requested_size == size)
+			break;
+	}
+
+	/* Stale, partial, or already retiring releases cannot consume ownership. */
+	if (mapping == NULL || mapping->references == 0) {
+		registry_lock_leave(enabled);
+		return HAL_ERR_INVALID;
+	}
+
+	/* Other driver references retain the complete shared view. */
+	mapping->references--;
+	if (mapping->references != 0) {
+		registry_lock_leave(enabled);
+		return HAL_OK;
+	}
+
+	/* Removes PTEs while zero references keep these slots in retirement. */
+	device_window_clear(mapping);
+
+	registry_lock_leave(enabled);
+
+	/* Prevents slot or device reuse before remote processors drop stale aliases. */
+	shootdown(HAL_SPACE_SYS, NULL, 0);
+	device_window_retire(mapping);
+
+	/* Succeeded: no CPU can access the device through this released view. */
+	return HAL_OK;
+}
+
+/*
+ * Reads the address space this CPU has loaded, in one GS-relative load.
+ *
+ * Loading the per-CPU pointer and then the field is two loads, and a caller
+ * moved to another CPU between them would read the old CPU's space.  One
+ * load is taken whole on one CPU.  The present callers run with interrupts
+ * disabled (BUG-088); the single load keeps the read right for any caller.
+ * On amd64 an aligned load is an acquire, and the clobber keeps the
+ * compiler from moving memory accesses across it.
+ */
+static hal_space_t
+current_space_load(
+	void)
+{
+	hal_space_t space;
+
+	/* Traps on an absent per-CPU selection. */
+	(void)amd64_percpu_current();
+
+	/* Reads the field through GS. */
+	__asm__ volatile("movq %%gs:%c1, %0"
+			 : "=r"(space)
+			 : "i"(AMD64_PERCPU_CURRENT_SPACE)
+			 : "memory");
+
+	/* Reports the loaded space. */
+	return space;
+}
+
+/*
+ * Records the address space this CPU has loaded, in one GS-relative store.
+ *
+ * Other CPUs read the field to choose shootdown targets; on amd64 an aligned
+ * store is a release, and the clobber keeps earlier accesses before it.
+ */
+static void
+current_space_store(
+	hal_space_t handle)
+{
+	/* Traps on an absent per-CPU selection. */
+	(void)amd64_percpu_current();
+
+	/* Writes the field through GS. */
+	__asm__ volatile("movq %0, %%gs:%c1"
+			 :
+			 : "r"(handle),
+			   "i"(AMD64_PERCPU_CURRENT_SPACE)
+			 : "memory");
+}
+
+/*
+ * Records the early console's mapping of the boot framebuffer, which the
+ * system page table maps from AMD64_FRAMEBUFFER_PD_FIRST at the loader's
+ * framebuffer window: 2 MiB directory entries, with the partial ends
+ * through the edge tables.
+ */
+static void
+fb_window_hold(
+	uint64_t physical,
+	uint64_t size)
+{
+	uint64_t aligned;
+	uint64_t end;
+
+	/* The 2 MiB page the window starts at and the page-rounded end of the framebuffer. */
+	aligned = physical & ~(uint64_t)0x1fffffU;
+	end = (physical + size + PAGE_SIZE - 1U) & ~(uint64_t)(PAGE_SIZE - 1U);
+
+	/* The early console holds it, and draws through it until the kernel prints. */
+	fb_window.state = AMD64_FB_WINDOW_HELD;
+	fb_window.physical = physical;
+	fb_window.size = (size_t)size;
+	fb_window.address = (uintptr_t)(ZBL6_FRAMEBUFFER_VIRTUAL_BASE + (physical - aligned));
+	fb_window.pd_count = (unsigned)((end - aligned + 0x1fffffU) / 0x200000U);
+}
+
+/*
+ * Gives the early console's mapping of the boot framebuffer to the
+ * kernel's console: the first mapping request of exactly the framebuffer
+ * (its physical base and size, uncached and writable) once the kernel
+ * prints through kernel_putc, when the early console draws through it no
+ * more.  Returns 1 with address set, or 0 for every other request.
+ */
+static int
+fb_window_give(
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr,
+	void **address)
+{
+	void (*printer)(int);
+	bool enabled;
+	int given;
+
+	/* Only the uncached writable mapping the window is. */
+	if (attr != (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE))
+		return 0;
+
+	/* Only once the kernel prints, so that the early console no longer draws. */
+	printer = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (printer == NULL)
+		return 0;
+
+	/* Gives only the framebuffer itself, exactly, while the early console holds it. */
+	enabled = registry_lock_enter();
+
+	given = 0;
+	if (fb_window.state == AMD64_FB_WINDOW_HELD &&
+	    fb_window.physical == physical &&
+	    fb_window.size == size) {
+		/* GIVEN: the one holder's release removes it; no other request gets it. */
+		fb_window.state = AMD64_FB_WINDOW_GIVEN;
+		*address = (void *)fb_window.address;
+		given = 1;
+	}
+
+	registry_lock_leave(enabled);
+
+	/* Reports whether the request took the window. */
+	return given;
+}
+
+/*
+ * Removes the early console's mapping of the boot framebuffer once it was
+ * given and its holder releases it (address and size as given): the early
+ * console forgets it, the directory entries go, and every CPU drops every
+ * translation, global ones included.  A framebuffer that meets one of the
+ * fixed windows shares their large pages and stays mapped (HAL_ERR_BUSY,
+ * nothing changes).  matched says whether the release was of the window.
+ */
+static int
+fb_window_remove(
+	void *address,
+	size_t size,
+	int *matched)
+{
+	unsigned index;
+	unsigned slot;
+	bool enabled;
+	int fixed;
+
+	/* Takes only a release of the window as it was given. */
+	enabled = registry_lock_enter();
+
+	*matched = 0;
+	if (fb_window.state != AMD64_FB_WINDOW_GIVEN ||
+	    fb_window.address != (uintptr_t)address ||
+	    fb_window.size != size) {
+		registry_lock_leave(enabled);
+		return HAL_OK;
+	}
+
+	*matched = 1;
+
+	/* A framebuffer meeting a fixed window (legacy, low MMIO, APIC) cannot lose its pages. */
+	fixed = fb_window_meets_fixed(fb_window.physical, fb_window.size);
+	if (fixed) {
+		registry_lock_leave(enabled);
+		return HAL_ERR_BUSY;
+	}
+
+	/* The window is the remover's alone from here. */
+	fb_window.state = AMD64_FB_WINDOW_REMOVED;
+
+	registry_lock_leave(enabled);
+
+	/* The early console forgets it first. */
+	pcat_cons_framebuffer_release();
+
+	/* The directory entries and the edge tables of the window. */
+	for (index = 0U; index < fb_window.pd_count; index++)
+		__atomic_store_n(&system_mmio_pd[AMD64_FRAMEBUFFER_PD_FIRST + index], 0U, __ATOMIC_RELEASE);
+	for (index = 0U; index < 2U; index++) {
+		/* Every entry of one edge table. */
+		for (slot = 0U; slot < 512U; slot++)
+			__atomic_store_n(&system_framebuffer_edges[index][slot], 0U, __ATOMIC_RELEASE);
+	}
+
+	/* Every CPU drops every translation, the global ones of the window too. */
+	shootdown_request(HAL_SPACE_SYS, NULL, 0, 1U);
+
+	/* Succeeded: the window is gone. */
+	return HAL_OK;
+}
+
+/*
+ * Reports whether a physical extent meets any of the fixed device windows
+ * (the legacy VGA and ROM range, the low MMIO range, and the I/O and
+ * local APIC pages), even in one byte: the system page table maps those
+ * for good, beside the window, the low MMIO and APIC ones with large pages
+ * shared by other devices.  Unlike
+ * device_fixed_range(), an extent that starts before a window and runs
+ * into it meets it too.
+ */
+static int
+fb_window_meets_fixed(
+	hal_physaddr_t physical,
+	size_t size)
+{
+	uint64_t end;
+
+	/* The first byte past the extent. */
+	end = physical + size;
+
+	/* Meets the legacy VGA and ROM window. */
+	if (physical < 0x100000U && end > 0xa0000U)
+		return 1;
+
+	/* Meets the low MMIO window. */
+	if (physical < 0xf1000000U && end > 0xf0000000U)
+		return 1;
+
+	/* Meets the I/O APIC or the local APIC window. */
+	if (physical < 0xff000000U && end > 0xfec00000U)
+		return 1;
+
+	/* Meets none: the extent has no permanent mapping beside its own window. */
+	return 0;
+}

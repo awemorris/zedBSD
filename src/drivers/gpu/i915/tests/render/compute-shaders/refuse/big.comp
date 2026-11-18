@@ -1,0 +1,22 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* REFUSE: shared memory past the device's 16 KiB. */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+
+shared uint big[4097];
+
+void main()
+{
+    big[gl_LocalInvocationIndex] = 1u;
+    barrier();
+    o[gl_GlobalInvocationID.x] = big[4096u - gl_LocalInvocationIndex];
+}

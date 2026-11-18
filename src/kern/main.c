@@ -1,0 +1,262 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Kernel entry after the HAL and scheduler are up.
+ *
+ * kernel_main() retains the boot handoff and starts a worker for device
+ * discovery, boot parameters, VFS and VM commit accounting, and init.
+ * The boot CPU becomes idle while the worker can sleep during device
+ * power transitions, firmware methods, and storage operations.
+ */
+
+#include "hal/hal.h"
+#include <drivers/pci/pci-i915.h>
+#include "kern/kernel.h"
+#include "kern/vfs.h"
+#include "kern/init.h"
+#include "kern/boot.h"
+#include "kern/platform.h"
+#include "kern/klog.h"
+#include "kern/sched.h"
+#include "kern/sched_private.h"
+#include "kern/thread.h"
+#include "kern/vm-commit.h"
+#include "kern/vm-reclaim.h"
+#include <kern/kcrt.h>
+
+#ifndef KERN_INIT_PATH
+#define KERN_INIT_PATH "/sbin/init"
+#endif
+
+/* Retains the loader's handoff in kernel memory before the worker starts. */
+static struct kern_boot_handoff handoff_snapshot;
+
+/* Owns the boot devices beyond the discovery worker's lifetime. */
+static struct kern_boot_device boot_devices[KERN_PLATFORM_MAX_DEVICES];
+
+/* Publishes the worker's device count before VFS and init can query it. */
+static unsigned boot_device_count;
+
+static void boot_worker(void *argument);
+static void boot_start(const struct kern_boot_handoff *h, const struct kern_boot_device *platform_devices, unsigned platform_device_count);
+
+/*
+ * Reports the BIOS identifier of the device the system booted from.
+ */
+uint8_t
+kern_boot_bios_id(
+	void)
+{
+	/* Reports the retained handoff value. */
+	return handoff_snapshot.boot_bios_id;
+}
+
+/*
+ * Reports the number of boot devices the platform published.
+ */
+unsigned
+kern_boot_device_count(
+	void)
+{
+	/* Reports the retained count. */
+	return boot_device_count;
+}
+
+/*
+ * Reports one published boot device by index.
+ */
+const struct kern_boot_device *
+kern_boot_device_at(
+	unsigned index)
+{
+	/* Rejects an index past the published devices. */
+	if (index >= boot_device_count)
+		return NULL;
+
+	/* Reports the device. */
+	return &boot_devices[index];
+}
+
+/*
+ * Runs the top-level kernel initialization and then idles forever.
+ *
+ * The boot handoff has already been validated by the platform binding.
+ */
+void
+kernel_main(
+	const struct kern_boot_handoff *h)
+{
+	struct thread *worker;
+	int error;
+
+	/*
+	 * PC-98 Stage 1 places its handoff below 1 MiB.  User address spaces do
+	 * not retain that identity mapping, so persistent kernel services must
+	 * refer to a kernel-owned copy after init has started.
+	 */
+	kern_memcpy(&handoff_snapshot, h, sizeof(handoff_snapshot));
+
+	/* Starts the reclaim machinery before any subsystem can need memory. */
+	vm_reclaim_init();
+
+	/*
+	 * PCI power recovery, ACPI methods, and mounting may all sleep.
+	 * The bootstrap thread is CPU0's idle task and cannot serve as their
+	 * waiter. Start the worker before discovering any platform device.
+	 * Pass the original handoff for the platform-specific extension, which
+	 * stays mapped until this worker starts userspace after discovery.
+	 */
+	error = kthread_create(
+	    boot_worker,
+	    (void *)h,
+	    SCHED_PRIORITY_DEFAULT,
+	    &worker);
+	if (error != 0) {
+		kern_logf("boot: initialization thread failed (%d); entering idle.\n",
+			  error);
+		kern_logf("boot: initialization thread failed (%d); entering idle.\n",
+			  error);
+	} else {
+		/* No joiner is needed; retirement releases this one-shot task. */
+		worker->detached = 1;
+		thread_start(worker);
+	}
+	sched_idle();
+}
+
+/* Discovers devices before using the retained handoff to start userspace. */
+static void
+boot_worker(
+	void *argument)
+{
+	const struct kern_boot_handoff *platform_handoff;
+	size_t device_count;
+
+	/* Discovers PCI and ACPI devices in a thread that can wait for them. */
+	platform_handoff = argument;
+	kern_logf("boot: platform device discovery\n");
+	kern_log_boot_step("the platform's devices are being discovered");
+	device_count = kern_platform_init(
+	    platform_handoff,
+	    boot_devices,
+	    KERN_PLATFORM_MAX_DEVICES);
+
+	/* Retains the discovered table before refreshing boot storage. */
+	boot_device_count = (unsigned)device_count;
+	kern_logf("boot: platform devices detected: %u\n", boot_device_count);
+	kern_log_boot_step("the platform's devices are attached");
+	kern_platform_refresh_devices(boot_devices, device_count);
+	kern_log_boot_step("the boot storage is discovered");
+
+	/* Mounts the discovered storage and starts userspace in the same thread. */
+	boot_start(&handoff_snapshot, boot_devices, boot_device_count);
+}
+
+/* Parses the boot parameters, mounts the root, and starts init. */
+static void
+boot_start(
+	const struct kern_boot_handoff *h,
+	const struct kern_boot_device *platform_devices,
+	unsigned platform_device_count)
+{
+	const struct kern_boot_parameters *boot_parameters;
+	struct hal_memstat memory;
+	const char *boot_parameter_line;
+	const char *init_path;
+	const char *name;
+	unsigned count;
+	int truncated;
+	int error;
+	int init_error;
+
+#ifdef ZEDBSD_VERSION
+	/* The version, first in the kernel's log (the HAL's banner reaches only the console). */
+	kern_logf("zedBSD %s\n", ZEDBSD_VERSION);
+#endif
+
+	/* Reports the boot parameter line the loader handed over. */
+	boot_parameter_line = hal_get_arch_handoff("boot.command-line");
+	kern_logf("boot: parameters: %s\n",
+	    boot_parameter_line != NULL ? boot_parameter_line : "");
+
+	/* Parses the parameters; a malformed line leaves the system idle. */
+	error = kern_boot_parameters_initialize(boot_parameter_line,
+	    boot_parameter_line != NULL ? KERN_BOOT_PARAMETERS_STORAGE_SIZE : 0U);
+	if (error != 0) {
+		kern_logf("boot: parameter parsing failed (%d); entering idle.\n",
+		    error);
+		kern_logf("boot: parameter parsing failed (%d); entering idle.\n",
+		    error);
+		return;
+	}
+
+	/* Reports ignored parameters without failing the boot. */
+	boot_parameters = kern_boot_parameters_current();
+	if (kern_boot_parameters_unknown_count(boot_parameters) != 0U) {
+		name = kern_boot_parameters_unknown_name(boot_parameters, &truncated);
+		count = kern_boot_parameters_unknown_count(boot_parameters);
+		kern_logf("boot: ignored %u unknown parameter%s; first=%s%s\n",
+		    count, count == 1U ? "" : "s", name, truncated ? "..." : "");
+	}
+
+	/* Mounts the root filesystem from the published boot devices. */
+#if CONFIG_DRIVER_PCI_I915
+	/*
+	 * Lets the i915 driver start its devices: the scheduler and timer are up
+	 * and platform devices are discovered.  Runs before VFS so a device starts
+	 * even on an image whose VFS mount has no storage.  Does not wait.
+	 */
+	drv_i915_runtime_ready();
+#endif
+	kern_logf("boot: VFS initialization\n");
+	error = kern_vfs_init(h, platform_devices, platform_device_count);
+	if (error != 0) {
+		kern_logf("VFS initialization failed (%d); entering idle.\n",
+		    error);
+		return;
+	}
+
+	/* The root and the boot slots are mounted. */
+	kern_log_boot_step("the VFS is initialized");
+
+	/* Starts commit accounting now that swap can be known. */
+	error = vm_commit_init();
+	if (error != 0) {
+		kern_logf("VM commit initialization failed (%d); entering idle.\n",
+		    error);
+		kern_logf("VM commit initialization failed (%d); entering idle.\n",
+		    error);
+		return;
+	}
+
+	/* Selects the init program, defaulting on platforms without a loader. */
+	init_path = kern_boot_parameters_init_path(boot_parameters);
+#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_X86_64)
+	if (!kern_boot_parameters_source_present())
+		init_path = KERN_INIT_PATH;
+#endif
+
+	/* States what the board gave us, while the log is still on screen. */
+	hal_get_memstat(&memory);
+	kern_logf("boot: memory %lu KiB total, %lu KiB free, "
+		  "%lu KiB reserved\n",
+		  (unsigned long)(memory.physical_total / 1024U),
+		  (unsigned long)(memory.physical_free / 1024U),
+		  (unsigned long)(memory.physical_reserved / 1024U));
+
+	/* Starts init and reports a failure to do so. */
+	kern_log_boot_step("init is starting");
+	kern_logf("boot: starting init %s\n\n", init_path);
+	init_error = kern_init_start(init_path);
+	if (init_error != 0) {
+		kern_logf("init %s not started (%d); entering idle.\n",
+		    init_path, init_error);
+		kern_logf("init %s not started (%d); entering idle.\n",
+		    init_path, init_error);
+	}
+}

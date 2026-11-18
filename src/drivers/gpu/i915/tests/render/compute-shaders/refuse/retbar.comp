@@ -1,0 +1,28 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* REFUSE: a workgroup barrier after a return some invocations take. */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+
+layout(push_constant) uniform P { uint n; } p;
+
+shared uint s[64];
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+
+    if (gl_GlobalInvocationID.x >= p.n)
+        return;
+    s[l] = l;
+    barrier();
+    o[gl_GlobalInvocationID.x] = s[63u - l];
+}

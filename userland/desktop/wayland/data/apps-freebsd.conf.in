@@ -1,0 +1,12 @@
+# Keiland FreeBSD App Home: name|command|keywords|RRGGBB|picture.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+Files|@PREFIX@/bin/files|files file manager folder finder browse|2f7cf6|files
+Notes|@PREFIX@/bin/notes|notes note notebook pen handwriting draw pdf|e0a526|notes
+Settings|@PREFIX@/bin/settings|settings preferences control panel system network wifi display sound wallpaper about|6b7a8f|settings
+Terminal|@PREFIX@/bin/terminal|term shell console sh|323a4e|terminal
+PDF Viewer|@PREFIX@/bin/pdfviewer|pdf viewer document reader|d9534f|pdf
+Image Viewer|@PREFIX@/bin/imageview|image picture photo viewer png jpeg gif|3fa36b|image
+Text Editor|@PREFIX@/bin/textedit|text editor edit txt notepad write|1f9e9a|text
+System Monitor|@PREFIX@/bin/monitor|monitor system activity cpu memory disk network process|4a6a8f|
+Model viewer|@PREFIX@/bin/mview --windowed --size=960x640|3d mview model vulkan viewer|e07a5a|model
+Widget Demo|@PREFIX@/bin/kuidemo|widgets controls demo sample|3fa36b|settings

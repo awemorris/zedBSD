@@ -1,0 +1,20 @@
+#version 450
+// Stage 2: a 16 x 8 tile transposed through shared memory by a two-dimensional workgroup.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 16, local_size_y = 8) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint t[128];
+void main()
+{
+	uvec3 g = gl_GlobalInvocationID;
+	uint lx = gl_LocalInvocationID.x;
+	uint ly = gl_LocalInvocationID.y;
+	uint tile = gl_WorkGroupID.y * 2u + gl_WorkGroupID.x;
+	t[ly * 16u + lx] = src[g.y * 32u + g.x];
+	barrier();
+	uint index = gl_LocalInvocationIndex;
+	uint col = index / 8u;
+	uint row = index % 8u;
+	o[tile * 128u + index] = t[row * 16u + col];
+}

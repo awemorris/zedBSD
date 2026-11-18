@@ -1,0 +1,2373 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Bluetooth on zedBSD (ws143-p006, plan/ws143/phase006/phase.md section 3):
+ * bluetoothd's text lines on /run/bluetoothd.sock (plan/ws143/phase004
+ * section 5, phase005 section 5).
+ *
+ * Three conversations at most, each a connection of its own and none
+ * waited for: the reading (SHOW, BONDS, DEVICES and STATUS, one after the
+ * other, every two seconds while someone watches and after each answer,
+ * otherwise every thirty), the request (POWER, PAIR, FORGET, CONNECT or
+ * DISCONNECT, one at a time, answered up to its DONE) and the scan (SCAN
+ * of a few seconds, again and again while the devices around are looked
+ * for).  Beside them the agent: a connection that said AGENT and hears a
+ * pairing's questions (CONFIRM, CONSENT, PASSKEY), answered YES or NO; a
+ * pairing asked without the agent gets its questions on the request's own
+ * connection.  bluetoothd keeps eight clients; this uses four.
+ *
+ * bluetoothd tells no change by itself (no SUBSCRIBE, Future Work F-086),
+ * so the state is read again.  A daemon without POWER or without
+ * CONNECT, DISCONNECT and STATUS (it answers ERROR request) is shown
+ * without them.  A daemon that is not running is not a failure: the state
+ * is unreachable and is read again every second.
+ *
+ * The connections are a thread's of their own (daemon-link-zedbsd.h): it
+ * connects (which may wait), writes and reads.  The event loop's calls copy
+ * what the thread published, number the requests and hand them over, the
+ * answers and the cancel too; none of them waits.  A request that cannot be
+ * sent is answered by a result with its errno value.
+ */
+
+#include "userland/desktop/libkeiland-backend/keiland-backend.h"
+#include "userland/desktop/libkeiland-backend-zedbsd/daemon-link-zedbsd.h"
+#include "userland/base/bluetoothd/protocol.h"
+
+#include <errno.h>
+#include <poll.h>
+#include <pwd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <time.h>
+#include <unistd.h>
+
+/* bluetoothd's socket (a host test builds with another path). */
+#ifndef BT_SOCKET_PATH
+#define BT_SOCKET_PATH		BTD_SOCKET
+#endif
+
+/* The waits: before connecting again, between readings while watched and not, before the agent is tried again, between scans. */
+#define BT_RETRY_MS		1000U
+#define BT_WATCH_MS		2000U
+#define BT_IDLE_MS		30000U
+#define BT_AGENT_RETRY_MS	30000U
+#define BT_AGENT_AGAIN_MS	5000U
+#define BT_SCAN_AGAIN_MS	2000U
+#define BT_SCAN_FAILED_MS	5000U
+
+/* How long a device a scan saw stays in the list after it was last seen (milliseconds). */
+#define BT_SEEN_MS		30000U
+
+/* The longest line read (a name of 249 bytes escaped is 996), the answers and the questions kept. */
+#define BT_INPUT_MAX		2048U
+#define BT_RESULTS_MAX		8U
+#define BT_QUESTIONS_MAX	4U
+
+/* The steps of the reading. */
+#define BT_STEP_NONE		0U
+#define BT_STEP_SHOW		1U
+#define BT_STEP_BONDS		2U
+#define BT_STEP_DEVICES		3U
+#define BT_STEP_STATUS		4U
+
+/* The connections, as bt_read names them to bt_line. */
+#define BT_LINK_READING		1U
+#define BT_LINK_REQUEST		2U
+#define BT_LINK_SCAN		3U
+#define BT_LINK_AGENT		4U
+
+/* Who waits for the answer to the question asked last. */
+#define BT_ASKED_NONE		0U
+#define BT_ASKED_AGENT		1U
+#define BT_ASKED_REQUEST	2U
+
+/* send's flag that keeps a broken connection from raising SIGPIPE, where there is one. */
+#ifdef MSG_NOSIGNAL
+#define BT_SEND_FLAGS		(MSG_DONTWAIT | MSG_NOSIGNAL)
+#else
+#define BT_SEND_FLAGS		MSG_DONTWAIT
+#endif
+
+/* One conversation with bluetoothd: the connection (-1 while none) and the bytes of a line not ended yet. */
+struct bt_link {
+	int socket;
+	char input[BT_INPUT_MAX];
+	size_t used;
+};
+
+/* One answer to a request: its number, its errno value and bluetoothd's reason. */
+struct bt_result {
+	uint32_t id;
+	int error;
+	char reason[KL_BACKEND_BT_REASON_MAX];
+};
+
+/* One device a scan saw, and when it was last seen (it stays a while after a new scan starts). */
+struct bt_seen {
+	struct kl_backend_bluetooth_device device;
+	uint64_t seen_ms;
+};
+
+/*
+ * The following of bluetoothd: the state and the devices of the last whole
+ * reading, the reading going on (its step, what it has read so far, when
+ * the next is due), whether someone watches and scans, the request going
+ * on (its number, kind and device, how it ended so far), the scan and the
+ * agent, which of them waits for an answer, what the daemon cannot do, the
+ * answers and questions not published yet, and what changed since the last
+ * publication (KL_BACKEND_BT_CHANGED_* bits).
+ *
+ * Only the link's thread reads and writes it, from the link's start until
+ * its stop; after the stop the record's close releases the connections.
+ */
+struct bt_follow {
+	/* The last whole reading. */
+	struct kl_backend_bluetooth_state state;
+	struct kl_backend_bluetooth_device devices[KL_BACKEND_BT_DEVICES_MAX];
+	size_t count;
+
+	/* The reading going on. */
+	struct bt_link reading;
+	unsigned step;
+	struct kl_backend_bluetooth_state next_state;
+	struct kl_backend_bluetooth_device next[KL_BACKEND_BT_DEVICES_MAX];
+	size_t next_count;
+	uint64_t due_ms;
+
+	/* Whether someone watches, and whether the devices around are looked for. */
+	unsigned watching;
+	unsigned scanning;
+
+	/* The request going on. */
+	struct bt_link request;
+	uint32_t request_id;
+	uint32_t next_id;
+	unsigned request_kind;
+	char request_address[KL_BACKEND_BT_ADDRESS_MAX];
+	int request_error;
+	char request_reason[KL_BACKEND_BT_REASON_MAX];
+
+	/* The scan going on, and when the next may start. */
+	struct bt_link scan;
+	uint64_t scan_due_ms;
+
+	/*
+	 * The agent: its connection, when to try it again, whether it holds
+	 * the role (not when another program of the user took it: it is not
+	 * taken back, but asked again before a pairing of this program's),
+	 * who waits for the answer to the question asked now, the question's
+	 * id, and the next id.
+	 */
+	struct bt_link agent;
+	uint64_t agent_due_ms;
+	unsigned agent_held;
+	unsigned asked;
+	uint32_t question_id;
+	uint32_t next_question;
+
+	/* A request asked while a scan runs, sent when the scan ends (the daemon refuses it meanwhile). */
+	char waiting_line[96];
+	unsigned waiting;
+
+	/* The devices scans saw, kept a while; and how many lines the reading had (none: the daemon was full). */
+	struct bt_seen seen[KL_BACKEND_BT_DEVICES_MAX];
+	size_t seen_count;
+	unsigned reading_lines;
+
+	/* What the daemon answered it cannot do (KL_BACKEND_BT_CAN_* bits), and whether its SHOW has the switch. */
+	unsigned missing;
+	unsigned power_known;
+
+	/* The answers and the questions not taken yet. */
+	struct bt_result results[BT_RESULTS_MAX];
+	size_t result_count;
+	struct kl_backend_bluetooth_question questions[BT_QUESTIONS_MAX];
+	size_t question_count;
+	unsigned changed;
+};
+
+/* What a request handed to the thread asks. */
+#define BT_OP_WATCHING		1U
+#define BT_OP_SCANNING		2U
+#define BT_OP_REQUEST		3U
+#define BT_OP_ANSWER		4U
+#define BT_OP_CANCEL		5U
+
+/*
+ * What the event loop sees of the following: the state and the devices of
+ * the last whole reading, what the daemon cannot do, the question asked
+ * now (who waits for its answer and its id), and the answers and the
+ * questions not taken yet, the oldest first.
+ */
+struct bt_view {
+	struct kl_backend_bluetooth_state state;
+	struct kl_backend_bluetooth_device devices[KL_BACKEND_BT_DEVICES_MAX];
+	size_t count;
+	unsigned missing;
+	unsigned asked;
+	uint32_t question_id;
+	struct bt_result results[BT_RESULTS_MAX];
+	size_t result_count;
+	struct kl_backend_bluetooth_question questions[BT_QUESTIONS_MAX];
+	size_t question_count;
+};
+
+/*
+ * One following of bluetoothd: the link (its thread and lock), the
+ * thread's own record, the view the thread published with the changes the
+ * event loop has not taken (both under the link's lock), the event loop's
+ * copy of the view, and the event loop's request: the next number, and the
+ * number and kind of the one going on (kind 0: none; it goes on until its
+ * result is taken from the thread).
+ *
+ * It lives from kl_backend_bluetooth_open to kl_backend_bluetooth_close.
+ */
+struct kl_backend_bluetooth {
+	struct kl_daemon_link link;
+	struct bt_follow inner;
+	struct bt_view published;
+	unsigned published_changed;
+	struct bt_view view;
+	uint32_t next_id;
+	uint32_t request_id;
+	unsigned request_kind;
+};
+
+/*
+ * One request handed to the thread: a watch or a scan wished on or off, a
+ * request (its kind, line, device and number), or the answer to a question
+ * (its id and yes), or the cancel of this program's pairing.
+ */
+struct bt_op {
+	struct kl_daemon_link_op op;
+	unsigned kind;
+	unsigned on;
+	unsigned request;
+	char line[96];
+	char address[KL_BACKEND_BT_ADDRESS_MAX];
+	uint32_t id;
+};
+
+static void bt_step(void *owner);
+static int bt_scan_may_start(const struct bt_follow *bluetooth);
+static size_t bt_poll_fill(void *owner, struct pollfd *descriptors, size_t capacity, int *timeout);
+static int bt_publish(void *owner);
+
+/* What bluetoothd's connections do on their link's thread. */
+static const struct kl_daemon_link_ops bt_link_ops = {
+	bt_step,
+	bt_poll_fill,
+	bt_publish,
+};
+
+static void bt_op_run(void *owner, struct kl_daemon_link_op *op);
+static int bt_submit(struct kl_backend_bluetooth *bluetooth, unsigned kind, unsigned on, unsigned request, const char *line, const char *address, uint32_t id);
+static void bt_request_run(struct bt_follow *bluetooth, const struct bt_op *request);
+static void bt_answer_run(struct bt_follow *bluetooth, const struct bt_op *answer);
+static void bt_cancel_run(struct bt_follow *bluetooth);
+static void bt_view_take(struct kl_backend_bluetooth *bluetooth);
+static uint64_t bt_milliseconds(void);
+static int bt_connect(struct bt_link *link, const char *line);
+static void bt_close(struct bt_link *link);
+static int bt_send(struct bt_link *link, const char *line);
+static int bt_read(struct bt_link *link, struct bt_follow *bluetooth, unsigned which, unsigned *changed);
+static void bt_line(struct bt_follow *bluetooth, unsigned which, char *line, unsigned *changed);
+static void bt_reading_start(struct bt_follow *bluetooth, uint64_t now, unsigned *changed);
+static void bt_reading_line(struct bt_follow *bluetooth, char *line, unsigned *changed);
+static void bt_reading_end(struct bt_follow *bluetooth, unsigned *changed);
+static void bt_request_line(struct bt_follow *bluetooth, char *line, unsigned *changed);
+static void bt_request_end(struct bt_follow *bluetooth, unsigned *changed);
+static void bt_result_push(struct bt_follow *bluetooth, uint32_t id, int error, const char *reason, unsigned *changed);
+static void bt_agent_line(struct bt_follow *bluetooth, char *line, unsigned *changed);
+static void bt_scan_line(struct bt_follow *bluetooth, char *line);
+static int bt_question_line(struct bt_follow *bluetooth, const char *line, unsigned asked, unsigned *changed);
+static void bt_question_push(struct bt_follow *bluetooth, unsigned kind, uint32_t number, const char *line, unsigned *changed);
+static void bt_question_end(struct bt_follow *bluetooth, unsigned *changed);
+static void bt_seen_merge(struct bt_follow *bluetooth, uint64_t now);
+static int bt_send_request(struct bt_follow *bluetooth, const char *line);
+static void bt_unreachable(struct bt_follow *bluetooth, unsigned *changed);
+static void bt_state_word(struct kl_backend_bluetooth_state *state, const char *word);
+static void bt_device_line(struct bt_follow *bluetooth, const char *line, unsigned source);
+static struct kl_backend_bluetooth_device *bt_device_find(struct bt_follow *bluetooth, const char *address, unsigned type);
+static int bt_field(const char *line, const char *name, char *value, size_t size);
+static void bt_unescape(const char *text, char *output, size_t size);
+static unsigned bt_type(const char *word);
+static const char *bt_type_name(unsigned type);
+static unsigned bt_kind(unsigned long class_of_device, unsigned long appearance);
+static int bt_error(const char *reason);
+static void bt_commit(struct bt_follow *bluetooth, unsigned *changed);
+static int bt_address_valid(const char *address);
+
+/*
+ * Starts following bluetoothd; the link's thread reads the state at once,
+ * and again a second after each reading that could not be made.  Returns
+ * NULL only without memory (or without a thread).
+ */
+struct kl_backend_bluetooth *
+kl_backend_bluetooth_open(
+	void)
+{
+	struct kl_backend_bluetooth *bluetooth;
+	int error;
+
+	/* The record, with no connection. */
+	bluetooth = calloc(1, sizeof(*bluetooth));
+	if (bluetooth == NULL)
+		return NULL;
+	bluetooth->inner.reading.socket = -1;
+	bluetooth->inner.request.socket = -1;
+	bluetooth->inner.scan.socket = -1;
+	bluetooth->inner.agent.socket = -1;
+
+	/* Unreachable until the first reading; that reading at once. */
+	bluetooth->inner.state.state = KL_BACKEND_BT_ABSENT;
+	bluetooth->inner.next_question = 1U;
+	bluetooth->published.state.state = KL_BACKEND_BT_ABSENT;
+	bluetooth->view.state.state = KL_BACKEND_BT_ABSENT;
+	bluetooth->next_id = 1U;
+
+	/* The thread that reads, asks and answers. */
+	error = kl_daemon_link_start(&bluetooth->link, "bluetoothd", &bt_link_ops, bluetooth);
+	if (error != 0) {
+		free(bluetooth);
+		return NULL;
+	}
+
+	/* Succeeded: the thread reads the state. */
+	return bluetooth;
+}
+
+/*
+ * Stops following: every connection closes, which ends a request or a
+ * question outstanding (bluetoothd takes a pairing's lost client as a no).
+ */
+void
+kl_backend_bluetooth_close(
+	struct kl_backend_bluetooth *bluetooth)
+{
+	/* Nothing to close. */
+	if (bluetooth == NULL)
+		return;
+
+	/* The thread ends; each connection is this thread's to close, then the record. */
+	kl_daemon_link_stop(&bluetooth->link);
+	bt_close(&bluetooth->inner.reading);
+	bt_close(&bluetooth->inner.request);
+	bt_close(&bluetooth->inner.scan);
+	bt_close(&bluetooth->inner.agent);
+	free(bluetooth);
+}
+
+/*
+ * Takes what the link's thread found since the last update: the state,
+ * the devices, the answers and the questions.
+ */
+int
+kl_backend_bluetooth_update(
+	struct kl_backend_bluetooth *bluetooth,
+	unsigned *changed)
+{
+	size_t index;
+
+	/* A record and somewhere to say what changed. */
+	if (bluetooth == NULL || changed == NULL)
+		return EINVAL;
+
+	/* Copies the published view, moves its answers and questions here, and takes its changes. */
+	kl_daemon_link_lock(&bluetooth->link);
+
+	bt_view_take(bluetooth);
+	*changed = bluetooth->published_changed;
+	bluetooth->published_changed = 0U;
+
+	kl_daemon_link_unlock(&bluetooth->link);
+
+	/* The request going on is over once its answer came. */
+	for (index = 0U; index < bluetooth->view.result_count; index++) {
+		if (bluetooth->request_kind != 0U && bluetooth->view.results[index].id == bluetooth->request_id)
+			bluetooth->request_kind = 0U;
+	}
+
+	/*
+	 * Answers and questions not taken yet are told again (a pairing given
+	 * up by kl_backend_bluetooth_cancel ends between two updates).
+	 */
+	if (bluetooth->view.result_count > 0U)
+		*changed |= KL_BACKEND_BT_CHANGED_RESULT;
+	if (bluetooth->view.question_count > 0U)
+		*changed |= KL_BACKEND_BT_CHANGED_QUESTION;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Copies the state of the last whole reading.
+ */
+void
+kl_backend_bluetooth_get_state(
+	const struct kl_backend_bluetooth *bluetooth,
+	struct kl_backend_bluetooth_state *state)
+{
+	/* Nothing followed: unreachable. */
+	memset(state, 0, sizeof(*state));
+	if (bluetooth == NULL)
+		return;
+
+	/* Succeeded: the copy the last update took. */
+	*state = bluetooth->view.state;
+}
+
+/*
+ * Copies the devices of the last whole reading, the paired first.
+ */
+size_t
+kl_backend_bluetooth_get_devices(
+	const struct kl_backend_bluetooth *bluetooth,
+	struct kl_backend_bluetooth_device *devices,
+	size_t capacity)
+{
+	size_t count;
+
+	/* As many as fit. */
+	if (bluetooth == NULL || devices == NULL)
+		return 0U;
+	count = bluetooth->view.count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(devices, bluetooth->view.devices, count * sizeof(devices[0]));
+
+	/* Succeeded: how many there are. */
+	return bluetooth->view.count;
+}
+
+/*
+ * Reads the state often while someone shows it; a watch that starts reads
+ * at once.
+ */
+void
+kl_backend_bluetooth_set_watching(
+	struct kl_backend_bluetooth *bluetooth,
+	unsigned on)
+{
+	/* Nothing followed. */
+	if (bluetooth == NULL)
+		return;
+
+	/* The wish, for the thread (a wish lost without memory is the old one kept). */
+	(void)bt_submit(bluetooth, BT_OP_WATCHING, on, 0U, NULL, NULL, 0U);
+}
+
+/*
+ * Looks for the devices around while scanning is 1; a scan going on ends
+ * by itself.
+ */
+void
+kl_backend_bluetooth_set_scanning(
+	struct kl_backend_bluetooth *bluetooth,
+	unsigned on)
+{
+	/* Nothing followed. */
+	if (bluetooth == NULL)
+		return;
+
+	/* The wish, for the thread (a wish lost without memory is the old one kept). */
+	(void)bt_submit(bluetooth, BT_OP_SCANNING, on, 0U, NULL, NULL, 0U);
+}
+
+/*
+ * Sends a request on a connection of its own; its answer comes as a
+ * result numbered *id.
+ */
+int
+kl_backend_bluetooth_request(
+	struct kl_backend_bluetooth *bluetooth,
+	unsigned request,
+	const char *address,
+	unsigned type,
+	uint32_t *id)
+{
+	char line[96];
+	const char *verb;
+	uint32_t number;
+	int valid;
+	int error;
+
+	/* A record, a daemon, and no request going on (nor one waiting for the scan to end). */
+	if (bluetooth == NULL || id == NULL)
+		return EINVAL;
+	if (!bluetooth->view.state.reachable)
+		return ENOTCONN;
+	if (bluetooth->request_kind != 0U)
+		return EBUSY;
+
+	/* The power: what the daemon can do. */
+	if (request == KL_BACKEND_BT_POWER_ON || request == KL_BACKEND_BT_POWER_OFF) {
+		if ((bluetooth->view.missing & KL_BACKEND_BT_CAN_POWER) != 0U)
+			return ENOTSUP;
+		verb = "POWER on";
+		if (request == KL_BACKEND_BT_POWER_OFF)
+			verb = "POWER off";
+		(void)snprintf(line, sizeof(line), "%s\n", verb);
+	} else {
+		/* A device's request: its verb. */
+		switch (request) {
+		case KL_BACKEND_BT_PAIR:
+		case KL_BACKEND_BT_PAIR_PHONE:
+			verb = "PAIR";
+			break;
+		case KL_BACKEND_BT_FORGET:
+			verb = "FORGET";
+			break;
+		case KL_BACKEND_BT_CONNECT:
+			verb = "CONNECT";
+			break;
+		case KL_BACKEND_BT_DISCONNECT:
+			verb = "DISCONNECT";
+			break;
+		default:
+			return EINVAL;
+		}
+
+		/* Connecting is what an older daemon cannot do. */
+		if ((request == KL_BACKEND_BT_CONNECT || request == KL_BACKEND_BT_DISCONNECT) &&
+		    (bluetooth->view.missing & KL_BACKEND_BT_CAN_CONNECT) != 0U)
+			return ENOTSUP;
+
+		/* The device, as written in the lines. */
+		if (address == NULL || type > KL_BACKEND_BT_LE_RANDOM)
+			return EINVAL;
+		valid = bt_address_valid(address);
+		if (!valid)
+			return EINVAL;
+		(void)snprintf(line, sizeof(line), "%s %s %s\n", verb, address, bt_type_name(type));
+
+		/* A phone of the user's is paired over BR/EDR, as the user's (ws197-p004 section 5.1). */
+		if (request == KL_BACKEND_BT_PAIR_PHONE) {
+			if (type != KL_BACKEND_BT_BREDR)
+				return EINVAL;
+			(void)snprintf(line, sizeof(line), "%s %s %s phone=1\n", verb, address, bt_type_name(type));
+		}
+	}
+
+	/* The request's number (never 0). */
+	number = bluetooth->next_id;
+
+	/* Hands the request to the thread, which sends it now or when the scan going on ends. */
+	error = bt_submit(bluetooth, BT_OP_REQUEST, 0U, request, line, address, number);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: numbered, its answer to come; it goes on until then. */
+	bluetooth->next_id++;
+	if (bluetooth->next_id == 0U)
+		bluetooth->next_id = 1U;
+	bluetooth->request_id = number;
+	bluetooth->request_kind = request;
+	*id = number;
+	return 0;
+}
+
+/*
+ * Takes the oldest answer to a request.
+ */
+int
+kl_backend_bluetooth_take_result(
+	struct kl_backend_bluetooth *bluetooth,
+	uint32_t *id,
+	int *error,
+	char *reason,
+	size_t size)
+{
+	/* None waiting. */
+	if (bluetooth == NULL || bluetooth->view.result_count == 0U)
+		return 0;
+
+	/* The oldest, then the others move up. */
+	*id = bluetooth->view.results[0].id;
+	*error = bluetooth->view.results[0].error;
+	if (reason != NULL && size > 0U)
+		(void)snprintf(reason, size, "%s", bluetooth->view.results[0].reason);
+	bluetooth->view.result_count--;
+	memmove(&bluetooth->view.results[0], &bluetooth->view.results[1], bluetooth->view.result_count * sizeof(bluetooth->view.results[0]));
+
+	/* Succeeded: one answer. */
+	return 1;
+}
+
+/*
+ * Takes the oldest question of a pairing.
+ */
+int
+kl_backend_bluetooth_take_question(
+	struct kl_backend_bluetooth *bluetooth,
+	struct kl_backend_bluetooth_question *question)
+{
+	/* None waiting. */
+	if (bluetooth == NULL || question == NULL || bluetooth->view.question_count == 0U)
+		return 0;
+
+	/* The oldest, then the others move up. */
+	*question = bluetooth->view.questions[0];
+	bluetooth->view.question_count--;
+	memmove(&bluetooth->view.questions[0], &bluetooth->view.questions[1], bluetooth->view.question_count * sizeof(bluetooth->view.questions[0]));
+
+	/* Succeeded: one question. */
+	return 1;
+}
+
+/*
+ * Answers the question of an id, on the connection it came on; an answer
+ * to a question that is over (or not the one asked now) is not sent.
+ */
+int
+kl_backend_bluetooth_answer(
+	struct kl_backend_bluetooth *bluetooth,
+	uint32_t id,
+	unsigned yes)
+{
+	int error;
+
+	/* The question asked now, of that id, as the last update saw it. */
+	if (bluetooth == NULL || bluetooth->view.asked == BT_ASKED_NONE || bluetooth->view.question_id != id)
+		return ENOENT;
+
+	/* Hands YES or NO to the thread, which sends it unless the question ended meanwhile. */
+	error = bt_submit(bluetooth, BT_OP_ANSWER, yes, 0U, NULL, NULL, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: answered; a second answer to it is refused. */
+	bluetooth->view.asked = BT_ASKED_NONE;
+	return 0;
+}
+
+/*
+ * Gives up this program's own pairing: its connection closes, which the
+ * daemon takes as the pairing cancelled (its answer is the result).
+ */
+int
+kl_backend_bluetooth_cancel(
+	struct kl_backend_bluetooth *bluetooth)
+{
+	int error;
+
+	/* Only a pairing of this program's going on. */
+	if (bluetooth == NULL)
+		return ENOENT;
+	if (bluetooth->request_kind != KL_BACKEND_BT_PAIR && bluetooth->request_kind != KL_BACKEND_BT_PAIR_PHONE)
+		return ENOENT;
+
+	/* Hands the cancel to the thread; its end comes as the result (cancelled). */
+	error = bt_submit(bluetooth, BT_OP_CANCEL, 0U, 0U, NULL, NULL, 0U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: given up. */
+	return 0;
+}
+
+/* Steps the following on the link's thread: reads each connection and starts what is due (a reading, the agent, a scan). */
+static void
+bt_step(
+	void *owner)
+{
+	struct kl_backend_bluetooth *record;
+	struct bt_follow *bluetooth;
+	unsigned *changed;
+	uint64_t now;
+	int may_start;
+	int error;
+
+	/* The thread's own part of the record. */
+	record = owner;
+	bluetooth = &record->inner;
+	changed = &bluetooth->changed;
+	now = bt_milliseconds();
+
+	/* What has come on each connection. */
+	(void)bt_read(&bluetooth->reading, bluetooth, BT_LINK_READING, changed);
+	(void)bt_read(&bluetooth->request, bluetooth, BT_LINK_REQUEST, changed);
+	(void)bt_read(&bluetooth->scan, bluetooth, BT_LINK_SCAN, changed);
+	(void)bt_read(&bluetooth->agent, bluetooth, BT_LINK_AGENT, changed);
+
+	/* A reading that is due. */
+	if (bluetooth->reading.socket < 0 && now >= bluetooth->due_ms)
+		bt_reading_start(bluetooth, now, changed);
+
+	/* The agent, while the daemon answers. */
+	if (bluetooth->agent.socket < 0 && bluetooth->state.reachable && now >= bluetooth->agent_due_ms) {
+		error = bt_connect(&bluetooth->agent, "AGENT\n");
+		if (error != 0)
+			bluetooth->agent_due_ms = now + BT_AGENT_AGAIN_MS;
+	}
+
+	/* Asks whether a scan is wanted and nothing stops it. */
+	may_start = bt_scan_may_start(bluetooth);
+
+	/* A scan, while one is wanted and nothing stops it (Bluetooth off, a pairing, a request going on). */
+	if (may_start && now >= bluetooth->scan_due_ms) {
+		error = bt_connect(&bluetooth->scan, "SCAN 6\n");
+		if (error != 0)
+			bluetooth->scan_due_ms = now + BT_SCAN_FAILED_MS;
+	}
+}
+
+/* Tells whether a scan is wanted and nothing stops it (Bluetooth off, a pairing, a request going on). */
+static int
+bt_scan_may_start(
+	const struct bt_follow *bluetooth)
+{
+	/* Wanted, not going on, and nothing holds it back. */
+	return bluetooth->scanning &&
+	    bluetooth->scan.socket < 0 &&
+	    bluetooth->state.reachable &&
+	    bluetooth->state.state == KL_BACKEND_BT_ON &&
+	    !bluetooth->state.pairing &&
+	    bluetooth->request.socket < 0 &&
+	    !bluetooth->waiting;
+}
+
+/* Gives the connections to wait for, and the wait until the next reading, agent or scan is due. */
+static size_t
+bt_poll_fill(
+	void *owner,
+	struct pollfd *descriptors,
+	size_t capacity,
+	int *timeout)
+{
+	struct kl_backend_bluetooth *record;
+	struct bt_follow *bluetooth;
+	struct bt_link *links[4];
+	uint64_t due;
+	uint64_t now;
+	size_t count;
+	size_t index;
+	int may_start;
+
+	/* The thread's own part of the record. */
+	record = owner;
+	bluetooth = &record->inner;
+	now = bt_milliseconds();
+
+	/* What is due next: a reading, the agent, a scan. */
+	due = UINT64_MAX;
+	if (bluetooth->reading.socket < 0)
+		due = bluetooth->due_ms;
+	if (bluetooth->agent.socket < 0 && bluetooth->state.reachable && bluetooth->agent_due_ms < due)
+		due = bluetooth->agent_due_ms;
+
+	/* Asks whether a scan is wanted and nothing stops it. */
+	may_start = bt_scan_may_start(bluetooth);
+	if (may_start && bluetooth->scan_due_ms < due)
+		due = bluetooth->scan_due_ms;
+
+	/* Lowers the wait to what is due (a scan held back by something else waits for what lets it go, which comes on a connection or as an operation). */
+	if (due <= now) {
+		*timeout = 0;
+	} else if (due - now < (uint64_t)*timeout) {
+		*timeout = (int)(due - now);
+	}
+
+	/* Each open connection wakes the thread with its lines. */
+	links[0] = &bluetooth->reading;
+	links[1] = &bluetooth->request;
+	links[2] = &bluetooth->scan;
+	links[3] = &bluetooth->agent;
+	count = 0U;
+	for (index = 0U; index < 4U && count < capacity; index++) {
+		if (links[index]->socket < 0)
+			continue;
+		descriptors[count].fd = links[index]->socket;
+		descriptors[count].events = POLLIN;
+		descriptors[count].revents = 0;
+		count++;
+	}
+
+	/* Succeeded: the descriptors to wait for. */
+	return count;
+}
+
+/* Publishes the reading, the answers and the questions to the event loop's side (under the link's lock); 1 when something changed. */
+static int
+bt_publish(
+	void *owner)
+{
+	struct kl_backend_bluetooth *record;
+	struct bt_follow *bluetooth;
+	struct bt_view *published;
+	size_t index;
+
+	/* The thread's own part of the record, and its published view. */
+	record = owner;
+	bluetooth = &record->inner;
+	published = &record->published;
+
+	/* Nothing new: no wake. */
+	if (bluetooth->changed == 0U)
+		return 0;
+
+	/* The reading, what the daemon cannot do, and the question asked now. */
+	published->state = bluetooth->state;
+	memcpy(published->devices, bluetooth->devices, bluetooth->count * sizeof(bluetooth->devices[0]));
+	published->count = bluetooth->count;
+	published->missing = bluetooth->missing;
+	published->asked = bluetooth->asked;
+	published->question_id = bluetooth->question_id;
+
+	/* The answers after those not taken yet (the oldest is lost when they pile up). */
+	for (index = 0U; index < bluetooth->result_count; index++) {
+		if (published->result_count == BT_RESULTS_MAX) {
+			published->result_count--;
+			memmove(&published->results[0], &published->results[1], published->result_count * sizeof(published->results[0]));
+		}
+
+		/* Appends the result to the published results. */
+		published->results[published->result_count] = bluetooth->results[index];
+		published->result_count++;
+	}
+
+	/* Empties the follower's results, which are all published. */
+	bluetooth->result_count = 0U;
+
+	/* The questions likewise. */
+	for (index = 0U; index < bluetooth->question_count; index++) {
+		if (published->question_count == BT_QUESTIONS_MAX) {
+			published->question_count--;
+			memmove(&published->questions[0], &published->questions[1], published->question_count * sizeof(published->questions[0]));
+		}
+
+		/* Appends the question to the published questions. */
+		published->questions[published->question_count] = bluetooth->questions[index];
+		published->question_count++;
+	}
+
+	/* Empties the follower's questions, which are all published. */
+	bluetooth->question_count = 0U;
+
+	/* The changes not taken yet. */
+	record->published_changed |= bluetooth->changed;
+	bluetooth->changed = 0U;
+
+	/* Succeeded: the event loop has something to take. */
+	return 1;
+}
+
+/* Runs a request on the link's thread. */
+static void
+bt_op_run(
+	void *owner,
+	struct kl_daemon_link_op *op)
+{
+	struct kl_backend_bluetooth *record;
+	struct bt_follow *bluetooth;
+	struct bt_op *request;
+
+	/* The thread's own part of the record, and the request. */
+	record = owner;
+	bluetooth = &record->inner;
+	request = (struct bt_op *)op;
+
+	/* What it asks. */
+	switch (request->kind) {
+	case BT_OP_WATCHING:
+		/* A new watch reads now. */
+		if (request->on && !bluetooth->watching)
+			bluetooth->due_ms = 0U;
+		bluetooth->watching = 0U;
+		if (request->on)
+			bluetooth->watching = 1U;
+		break;
+	case BT_OP_SCANNING:
+		/* A new wish scans at once. */
+		if (request->on && !bluetooth->scanning)
+			bluetooth->scan_due_ms = 0U;
+		bluetooth->scanning = 0U;
+		if (request->on)
+			bluetooth->scanning = 1U;
+		break;
+	case BT_OP_REQUEST:
+		bt_request_run(bluetooth, request);
+		break;
+	case BT_OP_ANSWER:
+		bt_answer_run(bluetooth, request);
+		break;
+	default:
+		bt_cancel_run(bluetooth);
+		break;
+	}
+}
+
+/* Hands a request to the link's thread; 0 or ENOMEM. */
+static int
+bt_submit(
+	struct kl_backend_bluetooth *bluetooth,
+	unsigned kind,
+	unsigned on,
+	unsigned request,
+	const char *line,
+	const char *address,
+	uint32_t id)
+{
+	struct bt_op *asked;
+
+	/* The request, the link's from the submit on. */
+	asked = calloc(1U, sizeof(*asked));
+	if (asked == NULL)
+		return ENOMEM;
+	asked->op.run = bt_op_run;
+	asked->kind = kind;
+	asked->on = on;
+	asked->request = request;
+	if (line != NULL)
+		(void)snprintf(asked->line, sizeof(asked->line), "%s", line);
+	if (address != NULL)
+		(void)snprintf(asked->address, sizeof(asked->address), "%s", address);
+	asked->id = id;
+	kl_daemon_link_submit(&bluetooth->link, &asked->op);
+
+	/* Succeeded: the thread runs it before its next step. */
+	return 0;
+}
+
+/* Starts a request on the link's thread: now, or when the scan going on ends; one that cannot go is answered at once. */
+static void
+bt_request_run(
+	struct bt_follow *bluetooth,
+	const struct bt_op *request)
+{
+	int error;
+
+	/* Another request still going on (the event loop waits for each one's answer): this one is busy. */
+	if (bluetooth->request_kind != 0U) {
+		bt_result_push(bluetooth, request->id, EBUSY, "busy", &bluetooth->changed);
+		return;
+	}
+
+	/* The request going on, numbered by the event loop. */
+	bluetooth->request_id = request->id;
+	bluetooth->request_kind = request->request;
+	(void)snprintf(bluetooth->request_address, sizeof(bluetooth->request_address), "%s", request->address);
+	bluetooth->request_error = 0;
+	bluetooth->request_reason[0] = '\0';
+
+	/* The daemon went since the request was made: answered at once. */
+	if (!bluetooth->state.reachable) {
+		(void)snprintf(bluetooth->request_reason, sizeof(bluetooth->request_reason), "%s", "lost");
+		bluetooth->request_error = ENOTCONN;
+		bt_request_end(bluetooth, &bluetooth->changed);
+		return;
+	}
+
+	/*
+	 * This program's pairing asks to be the agent again first (another
+	 * program of the user may have taken it): its AGENT goes before the
+	 * PAIR, so that the pairing's questions come to it.
+	 */
+	if ((request->request == KL_BACKEND_BT_PAIR || request->request == KL_BACKEND_BT_PAIR_PHONE) && bluetooth->agent.socket < 0) {
+		error = bt_connect(&bluetooth->agent, "AGENT\n");
+		bluetooth->agent_due_ms = 0U;
+		if (error == 0)
+			bluetooth->agent_due_ms = bt_milliseconds() + BT_AGENT_AGAIN_MS;
+	}
+
+	/* The line now, or when the scan going on ends (the daemon refuses it meanwhile); one that cannot be sent is answered. */
+	if (bluetooth->scan.socket >= 0) {
+		(void)snprintf(bluetooth->waiting_line, sizeof(bluetooth->waiting_line), "%s", request->line);
+		bluetooth->waiting = 1U;
+	} else {
+		(void)bt_send_request(bluetooth, request->line);
+	}
+}
+
+/* Sends the answer to the question asked now on the link's thread, on the connection it came on; one to a question over is not sent. */
+static void
+bt_answer_run(
+	struct bt_follow *bluetooth,
+	const struct bt_op *answer)
+{
+	struct bt_link *link;
+	const char *line;
+
+	/* The question asked now, of that id. */
+	if (bluetooth->asked == BT_ASKED_NONE || bluetooth->question_id != answer->id)
+		return;
+
+	/* The connection it came on. */
+	link = &bluetooth->agent;
+	if (bluetooth->asked == BT_ASKED_REQUEST)
+		link = &bluetooth->request;
+	bluetooth->asked = BT_ASKED_NONE;
+	bluetooth->changed |= KL_BACKEND_BT_CHANGED_QUESTION;
+
+	/* YES or NO; a connection that broke ends its conversation on the next read. */
+	line = "NO\n";
+	if (answer->on)
+		line = "YES\n";
+	(void)bt_send(link, line);
+}
+
+/* Gives up this program's own pairing on the link's thread: its connection closes, and its end is the result (cancelled). */
+static void
+bt_cancel_run(
+	struct bt_follow *bluetooth)
+{
+	/* Only a pairing of this program's going on. */
+	if (bluetooth->request_kind != KL_BACKEND_BT_PAIR && bluetooth->request_kind != KL_BACKEND_BT_PAIR_PHONE)
+		return;
+
+	/* Its connection, and its end as a result (cancelled). */
+	bt_close(&bluetooth->request);
+	bluetooth->waiting = 0U;
+	(void)snprintf(bluetooth->request_reason, sizeof(bluetooth->request_reason), "%s", "cancelled");
+	bluetooth->request_error = ECANCELED;
+	bt_request_end(bluetooth, &bluetooth->changed);
+}
+
+/* Copies the published view to the event loop's and moves its answers and questions after those not taken yet (under the link's lock). */
+static void
+bt_view_take(
+	struct kl_backend_bluetooth *bluetooth)
+{
+	struct bt_view *published;
+	struct bt_view *view;
+	size_t index;
+
+	/* The two views. */
+	published = &bluetooth->published;
+	view = &bluetooth->view;
+
+	/* The reading, what the daemon cannot do, and the question asked now. */
+	view->state = published->state;
+	memcpy(view->devices, published->devices, published->count * sizeof(published->devices[0]));
+	view->count = published->count;
+	view->missing = published->missing;
+	view->asked = published->asked;
+	view->question_id = published->question_id;
+
+	/* The answers (the oldest is lost when they pile up). */
+	for (index = 0U; index < published->result_count; index++) {
+		if (view->result_count == BT_RESULTS_MAX) {
+			view->result_count--;
+			memmove(&view->results[0], &view->results[1], view->result_count * sizeof(view->results[0]));
+		}
+
+		/* Appends the result to the view's results. */
+		view->results[view->result_count] = published->results[index];
+		view->result_count++;
+	}
+
+	/* Empties the published results, which are all taken. */
+	published->result_count = 0U;
+
+	/* The questions likewise. */
+	for (index = 0U; index < published->question_count; index++) {
+		if (view->question_count == BT_QUESTIONS_MAX) {
+			view->question_count--;
+			memmove(&view->questions[0], &view->questions[1], view->question_count * sizeof(view->questions[0]));
+		}
+
+		/* Appends the question to the view's questions. */
+		view->questions[view->question_count] = published->questions[index];
+		view->question_count++;
+	}
+
+	/* Empties the published questions, which are all taken. */
+	published->question_count = 0U;
+}
+
+/* Gives the monotonic clock in milliseconds. */
+static uint64_t
+bt_milliseconds(
+	void)
+{
+	struct timespec now;
+
+	/* The monotonic clock. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+
+	/* Succeeded: milliseconds. */
+	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+/* Connects to bluetoothd and writes a line; 0, or an errno value with no connection. */
+static int
+bt_connect(
+	struct bt_link *link,
+	const char *line)
+{
+	struct sockaddr_un address;
+	int descriptor;
+	int status;
+	int error;
+
+	/* The connection. */
+	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (descriptor < 0)
+		return errno;
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", BT_SOCKET_PATH);
+	status = connect(descriptor, (struct sockaddr *)&address, sizeof(address));
+	if (status != 0) {
+		status = errno;
+		(void)close(descriptor);
+		return status;
+	}
+
+	/* Kept, nothing read yet. */
+	link->socket = descriptor;
+	link->used = 0U;
+
+	/* The line. */
+	error = bt_send(link, line);
+	if (error != 0) {
+		bt_close(link);
+		return error;
+	}
+
+	/* Succeeded: connected and asked. */
+	return 0;
+}
+
+/* Closes a connection (none is fine). */
+static void
+bt_close(
+	struct bt_link *link)
+{
+	/* Only an open one. */
+	if (link->socket < 0)
+		return;
+	(void)close(link->socket);
+	link->socket = -1;
+	link->used = 0U;
+}
+
+/* Writes a short line whole; 0, or EPIPE when it could not. */
+static int
+bt_send(
+	struct bt_link *link,
+	const char *line)
+{
+	ssize_t sent;
+	size_t length;
+
+	/* A connection. */
+	if (link->socket < 0)
+		return EPIPE;
+
+	/* The line, at once (bluetoothd reads it at once; it is short). */
+	length = strlen(line);
+	sent = send(link->socket, line, length, BT_SEND_FLAGS);
+	if (sent < 0 || (size_t)sent != length)
+		return EPIPE;
+
+	/* Succeeded: written. */
+	return 0;
+}
+
+/*
+ * Reads what has come on a connection and gives each whole line to its
+ * conversation; a connection that ended or broke ends its conversation.
+ * Returns 1 when the connection is still open.
+ */
+static int
+bt_read(
+	struct bt_link *link,
+	struct bt_follow *bluetooth,
+	unsigned which,
+	unsigned *changed)
+{
+	ssize_t count;
+	size_t length;
+	char *end;
+
+	/* Every byte there now, line by line. */
+	while (link->socket >= 0) {
+		count = recv(link->socket, link->input + link->used, sizeof(link->input) - 1U - link->used, MSG_DONTWAIT);
+		if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+			break;
+
+		/* The end of the connection: its conversation ends. */
+		if (count <= 0) {
+			bt_close(link);
+			bt_line(bluetooth, which, NULL, changed);
+			break;
+		}
+
+		/* Each whole line; a conversation that closes its connection stops the loop. */
+		link->used += (size_t)count;
+		link->input[link->used] = '\0';
+		for (;;) {
+			end = strchr(link->input, '\n');
+			if (end == NULL || link->socket < 0)
+				break;
+			*end = '\0';
+			length = (size_t)(end + 1 - link->input);
+			bt_line(bluetooth, which, link->input, changed);
+			if (link->socket < 0)
+				break;
+			memmove(link->input, end + 1, link->used - length + 1U);
+			link->used -= length;
+		}
+
+		/* A line longer than any is a broken connection. */
+		if (link->socket >= 0 && link->used >= sizeof(link->input) - 1U) {
+			bt_close(link);
+			bt_line(bluetooth, which, NULL, changed);
+		}
+	}
+
+	/* Succeeded: whether it is still open. */
+	if (link->socket < 0)
+		return 0;
+	return 1;
+}
+
+/* Gives a line (NULL: the connection ended) to its conversation. */
+static void
+bt_line(
+	struct bt_follow *bluetooth,
+	unsigned which,
+	char *line,
+	unsigned *changed)
+{
+	/* The conversation by the connection. */
+	switch (which) {
+	case BT_LINK_READING:
+		/* The reading: a line, or its end before DONE (the daemon went). */
+		if (line != NULL) {
+			bluetooth->reading_lines++;
+			bt_reading_line(bluetooth, line, changed);
+		} else if (bluetooth->reading_lines == 0U) {
+			/* Closed before any line: the daemon had no room for another client; the state stays, read again soon. */
+			bluetooth->step = BT_STEP_NONE;
+			bluetooth->due_ms = bt_milliseconds() + BT_RETRY_MS;
+		} else {
+			bt_unreachable(bluetooth, changed);
+		}
+
+		/* Taken. */
+		break;
+	case BT_LINK_REQUEST:
+		/* The request: a line, or its end. */
+		if (line != NULL) {
+			bt_request_line(bluetooth, line, changed);
+		} else {
+			bt_request_end(bluetooth, changed);
+		}
+
+		/* Taken. */
+		break;
+	case BT_LINK_AGENT:
+		/* The agent: a question, or its end (tried again a little later). */
+		if (line != NULL) {
+			bt_agent_line(bluetooth, line, changed);
+		} else {
+			if (bluetooth->asked == BT_ASKED_AGENT)
+				bt_question_end(bluetooth, changed);
+
+			/* Tried again a little later. */
+			bluetooth->agent_held = 0U;
+			bluetooth->agent_due_ms = bt_milliseconds() + BT_AGENT_AGAIN_MS;
+		}
+
+		/* Taken. */
+		break;
+	default:
+		/* The scan: its end reads the state again. */
+		if (line != NULL) {
+			bt_scan_line(bluetooth, line);
+		} else {
+			bluetooth->due_ms = 0U;
+			bluetooth->scan_due_ms = bt_milliseconds() + BT_SCAN_AGAIN_MS;
+			if (bluetooth->waiting) {
+				bluetooth->waiting = 0U;
+				(void)bt_send_request(bluetooth, bluetooth->waiting_line);
+			}
+		}
+
+		/* Taken. */
+		break;
+	}
+}
+
+/* Starts a reading with SHOW; a daemon that does not answer is unreachable, tried again in a second. */
+static void
+bt_reading_start(
+	struct bt_follow *bluetooth,
+	uint64_t now,
+	unsigned *changed)
+{
+	int error;
+
+	/* The next try, should this one fail. */
+	bluetooth->due_ms = now + BT_RETRY_MS;
+
+	/* The connection and SHOW. */
+	error = bt_connect(&bluetooth->reading, "SHOW\n");
+	if (error != 0) {
+		bt_unreachable(bluetooth, changed);
+		return;
+	}
+
+	/* Succeeded: the reading starts from nothing. */
+	memset(&bluetooth->next_state, 0, sizeof(bluetooth->next_state));
+	bluetooth->next_state.reachable = 1U;
+	bluetooth->next_state.state = KL_BACKEND_BT_NONE;
+	bluetooth->next_state.power = 1U;
+	bluetooth->next_count = 0U;
+	bluetooth->step = BT_STEP_SHOW;
+	bluetooth->reading_lines = 0U;
+}
+
+/* Takes one line of the reading; DONE moves to the next step, or ends it. */
+static void
+bt_reading_line(
+	struct bt_follow *bluetooth,
+	char *line,
+	unsigned *changed)
+{
+	char value[KL_BACKEND_BT_NAME_MAX * 4U];
+	int unknown;
+	int found;
+	int same;
+	int off;
+	int yes;
+
+	/* The state: its word. */
+	same = strncmp(line, "STATE ", 6U);
+	if (same == 0) {
+		bt_state_word(&bluetooth->next_state, line + 6);
+		return;
+	}
+
+	/* The controller: its address, its name, and whether a pairing runs. */
+	same = strncmp(line, "CONTROLLER ", 11U);
+	if (same == 0) {
+		found = bt_field(line, "address=", value, sizeof(value));
+		unknown = strcmp(value, "-");
+		if (found && unknown != 0)
+			(void)snprintf(bluetooth->next_state.address, sizeof(bluetooth->next_state.address), "%s", value);
+		found = bt_field(line, "name=", value, sizeof(value));
+		if (found)
+			bt_unescape(value, bluetooth->next_state.name, sizeof(bluetooth->next_state.name));
+		found = bt_field(line, "pairing=", value, sizeof(value));
+		yes = strcmp(value, "1");
+		if (found && yes == 0)
+			bluetooth->next_state.pairing = 1U;
+		return;
+	}
+
+	/* The user's switch (a daemon without POWER has no such line). */
+	same = strncmp(line, "POWER ", 6U);
+	if (same == 0) {
+		off = strcmp(line + 6, "off");
+		bluetooth->next_state.power = 1U;
+		if (off == 0)
+			bluetooth->next_state.power = 0U;
+		bluetooth->power_known = 1U;
+		return;
+	}
+
+	/* A bond, a device seen, a connected device. */
+	same = strncmp(line, "BOND ", 5U);
+	if (same == 0) {
+		bt_device_line(bluetooth, line, BT_STEP_BONDS);
+		return;
+	}
+
+	/* A device the last scan saw. */
+	same = strncmp(line, "DEVICE ", 7U);
+	if (same == 0) {
+		bt_device_line(bluetooth, line, BT_STEP_DEVICES);
+		return;
+	}
+
+	/* A device connected for its input. */
+	same = strncmp(line, "HID ", 4U);
+	if (same == 0) {
+		bt_device_line(bluetooth, line, BT_STEP_STATUS);
+		return;
+	}
+
+	/* A request the daemon does not know: STATUS (no connecting yet). */
+	same = strcmp(line, "ERROR request");
+	if (same == 0 && bluetooth->step == BT_STEP_STATUS) {
+		bluetooth->missing |= KL_BACKEND_BT_CAN_CONNECT;
+		return;
+	}
+
+	/* Anything but DONE is not the reading's. */
+	same = strcmp(line, "DONE");
+	if (same != 0)
+		return;
+
+	/* DONE: the next step, on the same connection. */
+	switch (bluetooth->step) {
+	case BT_STEP_SHOW:
+		bluetooth->step = BT_STEP_BONDS;
+		(void)bt_send(&bluetooth->reading, "BONDS\n");
+		return;
+	case BT_STEP_BONDS:
+		bluetooth->step = BT_STEP_DEVICES;
+		(void)bt_send(&bluetooth->reading, "DEVICES\n");
+		return;
+	case BT_STEP_DEVICES:
+		/* STATUS only from a daemon that has it. */
+		if ((bluetooth->missing & KL_BACKEND_BT_CAN_CONNECT) == 0U) {
+			bluetooth->step = BT_STEP_STATUS;
+			(void)bt_send(&bluetooth->reading, "STATUS\n");
+			return;
+		}
+
+		/* Without STATUS the reading is whole. */
+		break;
+	default:
+		break;
+	}
+
+	/* Succeeded: the reading is whole. */
+	bt_reading_end(bluetooth, changed);
+}
+
+/* Ends a whole reading: it becomes the state, and the next is due. */
+static void
+bt_reading_end(
+	struct bt_follow *bluetooth,
+	unsigned *changed)
+{
+	uint64_t wait;
+
+	/* The connection goes; the next reading after the wait. */
+	bt_close(&bluetooth->reading);
+	bluetooth->step = BT_STEP_NONE;
+	wait = BT_IDLE_MS;
+	if (bluetooth->watching)
+		wait = BT_WATCH_MS;
+	bluetooth->due_ms = bt_milliseconds() + wait;
+
+	/* What the daemon can do, as far as known (the switch only from one whose SHOW tells it), and whether this is the agent. */
+	bluetooth->next_state.features = KL_BACKEND_BT_CAN_CONNECT & ~bluetooth->missing;
+	if (bluetooth->power_known && (bluetooth->missing & KL_BACKEND_BT_CAN_POWER) == 0U)
+		bluetooth->next_state.features |= KL_BACKEND_BT_CAN_POWER;
+	bluetooth->next_state.agent = bluetooth->agent_held;
+
+	/* The devices scans saw a while ago, still listed. */
+	bt_seen_merge(bluetooth, bt_milliseconds());
+
+	/* Succeeded: the state and the devices, told when they changed. */
+	bt_commit(bluetooth, changed);
+}
+
+/* Takes one line of the request's answer; DONE ends it. */
+static void
+bt_request_line(
+	struct bt_follow *bluetooth,
+	char *line,
+	unsigned *changed)
+{
+	int taken;
+	int same;
+
+	/* A question of a pairing asked without the agent: answered on this connection. */
+	taken = bt_question_line(bluetooth, line, BT_ASKED_REQUEST, changed);
+	if (taken)
+		return;
+
+	/* A refusal: why. */
+	same = strncmp(line, "ERROR ", 6U);
+	if (same == 0) {
+		(void)snprintf(bluetooth->request_reason, sizeof(bluetooth->request_reason), "%s", line + 6);
+		bluetooth->request_error = bt_error(line + 6);
+		return;
+	}
+
+	/* The end. */
+	same = strcmp(line, "DONE");
+	if (same == 0)
+		bt_request_end(bluetooth, changed);
+}
+
+/* Ends the request: its answer is kept, the question it asked is over, and the state is read again. */
+static void
+bt_request_end(
+	struct bt_follow *bluetooth,
+	unsigned *changed)
+{
+	int error;
+	int same;
+
+	/* A request: one that ended before DONE failed. */
+	if (bluetooth->request_kind == 0U)
+		return;
+	error = bluetooth->request_error;
+	if (bluetooth->request.socket < 0 && error == 0 && bluetooth->request_reason[0] == '\0') {
+		error = EIO;
+		(void)snprintf(bluetooth->request_reason, sizeof(bluetooth->request_reason), "%s", "lost");
+	}
+
+	/* The connection goes. */
+	bt_close(&bluetooth->request);
+
+	/* A daemon without POWER or connecting says so once. */
+	same = strcmp(bluetooth->request_reason, "request");
+	if (same == 0 && (bluetooth->request_kind == KL_BACKEND_BT_POWER_ON || bluetooth->request_kind == KL_BACKEND_BT_POWER_OFF))
+		bluetooth->missing |= KL_BACKEND_BT_CAN_POWER;
+	if (same == 0 && (bluetooth->request_kind == KL_BACKEND_BT_CONNECT || bluetooth->request_kind == KL_BACKEND_BT_DISCONNECT))
+		bluetooth->missing |= KL_BACKEND_BT_CAN_CONNECT;
+
+	/* The question it asked is over. */
+	if (bluetooth->asked == BT_ASKED_REQUEST || bluetooth->question_id != 0U)
+		bt_question_end(bluetooth, changed);
+
+	/* The answer kept. */
+	bt_result_push(bluetooth, bluetooth->request_id, error, bluetooth->request_reason, changed);
+
+	/* Succeeded: no request, and the state read again now. */
+	bluetooth->request_kind = 0U;
+	bluetooth->due_ms = 0U;
+}
+
+/* Keeps the answer to a request, told as a result (the oldest is lost when they pile up). */
+static void
+bt_result_push(
+	struct bt_follow *bluetooth,
+	uint32_t id,
+	int error,
+	const char *reason,
+	unsigned *changed)
+{
+	struct bt_result *result;
+
+	/* Room, the oldest going when there is none. */
+	if (bluetooth->result_count == BT_RESULTS_MAX) {
+		bluetooth->result_count--;
+		memmove(&bluetooth->results[0], &bluetooth->results[1], bluetooth->result_count * sizeof(bluetooth->results[0]));
+	}
+
+	/* This one, last. */
+	result = &bluetooth->results[bluetooth->result_count];
+	result->id = id;
+	result->error = error;
+	(void)snprintf(result->reason, sizeof(result->reason), "%s", reason);
+	bluetooth->result_count++;
+	*changed |= KL_BACKEND_BT_CHANGED_RESULT;
+}
+
+/* Takes one line of the agent: its acceptance, a refusal (tried again later), a question, its end, or the role taken by another. */
+static void
+bt_agent_line(
+	struct bt_follow *bluetooth,
+	char *line,
+	unsigned *changed)
+{
+	int taken;
+	int same;
+
+	/* A question, or a question that is over. */
+	taken = bt_question_line(bluetooth, line, BT_ASKED_AGENT, changed);
+	if (taken)
+		return;
+
+	/* The role held. */
+	same = strcmp(line, "AGENT ok");
+	if (same == 0) {
+		bluetooth->agent_held = 1U;
+		return;
+	}
+
+	/* Refused (another user's agent, or not permitted): tried again in a while. */
+	same = strncmp(line, "ERROR ", 6U);
+	if (same == 0) {
+		bt_close(&bluetooth->agent);
+		bluetooth->agent_held = 0U;
+		bluetooth->agent_due_ms = bt_milliseconds() + BT_AGENT_RETRY_MS;
+		return;
+	}
+
+	/*
+	 * Another program of the user took the role (bt agent in a terminal):
+	 * it is not taken back now (the two would take it from each other), but
+	 * asked for again before a pairing of this program's.
+	 */
+	same = strcmp(line, "AGENT-END");
+	if (same == 0) {
+		bt_close(&bluetooth->agent);
+		bluetooth->agent_held = 0U;
+		bluetooth->agent_due_ms = UINT64_MAX;
+		if (bluetooth->asked == BT_ASKED_AGENT)
+			bt_question_end(bluetooth, changed);
+		bluetooth->due_ms = 0U;
+	}
+}
+
+/* Takes one line of a scan: its DONE (or ERROR) ends it; the devices are read by the reading. */
+static void
+bt_scan_line(
+	struct bt_follow *bluetooth,
+	char *line)
+{
+	uint64_t soon;
+	int same;
+
+	/* A refusal waits longer before the next scan. */
+	same = strncmp(line, "ERROR ", 6U);
+	if (same == 0) {
+		bluetooth->scan_due_ms = bt_milliseconds() + BT_SCAN_FAILED_MS;
+		return;
+	}
+
+	/* The end: the connection goes, the state is read now, the next scan soon. */
+	same = strcmp(line, "DONE");
+	if (same != 0)
+		return;
+	bt_close(&bluetooth->scan);
+	bluetooth->due_ms = 0U;
+	soon = bt_milliseconds() + BT_SCAN_AGAIN_MS;
+	if (bluetooth->scan_due_ms < soon)
+		bluetooth->scan_due_ms = soon;
+
+	/* A request that waited for the scan goes now. */
+	if (bluetooth->waiting) {
+		bluetooth->waiting = 0U;
+		(void)bt_send_request(bluetooth, bluetooth->waiting_line);
+	}
+}
+
+/*
+ * Takes a question line (CONFIRM, CONSENT, PASSKEY, each naming the device
+ * and who started the pairing) or ASK-END on a connection; 1 when it was
+ * one.
+ */
+static int
+bt_question_line(
+	struct bt_follow *bluetooth,
+	const char *line,
+	unsigned asked,
+	unsigned *changed)
+{
+	unsigned long number;
+	char *end;
+	int same;
+
+	/* The question asked is over. */
+	same = strcmp(line, "ASK-END");
+	if (same == 0) {
+		bt_question_end(bluetooth, changed);
+		return 1;
+	}
+
+	/* A number to compare (the other side shows it too). */
+	same = strncmp(line, "CONFIRM ", 8U);
+	if (same == 0) {
+		number = strtoul(line + 8, &end, 10);
+		if (end == line + 8 || number > 999999UL)
+			return 1;
+		bluetooth->asked = asked;
+		bt_question_push(bluetooth, KL_BACKEND_BT_ASK_CONFIRM, (uint32_t)number, line, changed);
+		return 1;
+	}
+
+	/* Agreeing to pair at all. */
+	same = strncmp(line, "CONSENT", 7U);
+	if (same == 0 && (line[7] == '\0' || line[7] == ' ')) {
+		bluetooth->asked = asked;
+		bt_question_push(bluetooth, KL_BACKEND_BT_ASK_CONSENT, 0U, line, changed);
+		return 1;
+	}
+
+	/* A number to type on the device (nothing to answer). */
+	same = strncmp(line, "PASSKEY ", 8U);
+	if (same == 0) {
+		number = strtoul(line + 8, &end, 10);
+		if (end == line + 8 || number > 999999UL)
+			return 1;
+		bt_question_push(bluetooth, KL_BACKEND_BT_ASK_PASSKEY, (uint32_t)number, line, changed);
+		return 1;
+	}
+
+	/* Not a question. */
+	return 0;
+}
+
+/*
+ * Keeps a new question, numbered: the device it names (its name when it
+ * is known, else the address), and who started the pairing (the user's
+ * name, and whether it is this program's user's own pairing).  The oldest
+ * goes when they pile up.
+ */
+static void
+bt_question_push(
+	struct bt_follow *bluetooth,
+	unsigned kind,
+	uint32_t number,
+	const char *line,
+	unsigned *changed)
+{
+	struct kl_backend_bluetooth_question *question;
+	struct passwd *account;
+	char value[KL_BACKEND_BT_NAME_MAX];
+	unsigned long uid;
+	uid_t self;
+	size_t index;
+	int found;
+	int same;
+
+	/* Room. */
+	if (bluetooth->question_count == BT_QUESTIONS_MAX) {
+		bluetooth->question_count--;
+		memmove(&bluetooth->questions[0], &bluetooth->questions[1], bluetooth->question_count * sizeof(bluetooth->questions[0]));
+	}
+
+	/* The question, numbered (the id stays the one asked now until its end). */
+	question = &bluetooth->questions[bluetooth->question_count];
+	memset(question, 0, sizeof(*question));
+	question->id = bluetooth->next_question;
+	bluetooth->next_question++;
+	if (bluetooth->next_question == 0U)
+		bluetooth->next_question = 1U;
+	question->kind = kind;
+	question->number = number;
+	bluetooth->question_id = question->id;
+
+	/* The device it names (the request's when an older daemon names none). */
+	found = bt_field(line, "address=", question->address, sizeof(question->address));
+	if (!found)
+		(void)snprintf(question->address, sizeof(question->address), "%s", bluetooth->request_address);
+	found = bt_field(line, "type=", value, sizeof(value));
+	if (found)
+		question->type = bt_type(value);
+	memcpy(question->name, question->address, sizeof(question->address));
+	for (index = 0; index < bluetooth->count; index++) {
+		same = strcmp(bluetooth->devices[index].address, question->address);
+		if (same == 0)
+			(void)snprintf(question->name, sizeof(question->name), "%s", bluetooth->devices[index].name);
+	}
+
+	/* Who started it: this program's user, or another user named. */
+	question->own = 1U;
+	found = bt_field(line, "uid=", value, sizeof(value));
+	if (found) {
+		uid = strtoul(value, NULL, 10);
+		self = getuid();
+		if ((uid_t)uid != self)
+			question->own = 0U;
+		account = getpwuid((uid_t)uid);
+		if (account != NULL)
+			(void)snprintf(question->user, sizeof(question->user), "%s", account->pw_name);
+		else
+			(void)snprintf(question->user, sizeof(question->user), "%lu", uid);
+	}
+
+	/* Succeeded: kept. */
+	bluetooth->question_count++;
+	*changed |= KL_BACKEND_BT_CHANGED_QUESTION;
+}
+
+/* Ends the question asked now: nobody waits for its answer, and an END of its id is kept. */
+static void
+bt_question_end(
+	struct bt_follow *bluetooth,
+	unsigned *changed)
+{
+	struct kl_backend_bluetooth_question *question;
+	uint32_t id;
+
+	/* Only a question asked. */
+	id = bluetooth->question_id;
+	bluetooth->asked = BT_ASKED_NONE;
+	bluetooth->question_id = 0U;
+	if (id == 0U)
+		return;
+
+	/* Room (the oldest goes). */
+	if (bluetooth->question_count == BT_QUESTIONS_MAX) {
+		bluetooth->question_count--;
+		memmove(&bluetooth->questions[0], &bluetooth->questions[1], bluetooth->question_count * sizeof(bluetooth->questions[0]));
+	}
+
+	/* Succeeded: the END of that id. */
+	question = &bluetooth->questions[bluetooth->question_count];
+	memset(question, 0, sizeof(*question));
+	question->id = id;
+	question->kind = KL_BACKEND_BT_ASK_END;
+	bluetooth->question_count++;
+	*changed |= KL_BACKEND_BT_CHANGED_QUESTION;
+}
+
+/*
+ * Keeps the devices this reading's DEVICES listed as seen now, and lists
+ * again those seen within BT_SEEN_MS that a new scan has not found yet
+ * (a scan starts its table from nothing).
+ */
+static void
+bt_seen_merge(
+	struct bt_follow *bluetooth,
+	uint64_t now)
+{
+	struct kl_backend_bluetooth_device *device;
+	struct bt_seen kept[KL_BACKEND_BT_DEVICES_MAX];
+	size_t kept_count;
+	size_t index;
+	size_t other;
+	int same;
+
+	/* The devices read now that a scan saw (not paired, not connected: only DEVICES lines give rssi or a kind). */
+	kept_count = 0;
+	for (index = 0; index < bluetooth->next_count && kept_count < KL_BACKEND_BT_DEVICES_MAX; index++) {
+		device = &bluetooth->next[index];
+		if (device->paired || device->connected)
+			continue;
+		kept[kept_count].device = *device;
+		kept[kept_count].seen_ms = now;
+		kept_count++;
+	}
+
+	/* Those seen before, not too long ago, not seen now: kept, and listed again. */
+	for (index = 0; index < bluetooth->seen_count && kept_count < KL_BACKEND_BT_DEVICES_MAX; index++) {
+		/* Too old. */
+		if (now - bluetooth->seen[index].seen_ms > BT_SEEN_MS)
+			continue;
+
+		/* Seen now already. */
+		same = 1;
+		for (other = 0; other < kept_count; other++) {
+			same = strcmp(kept[other].device.address, bluetooth->seen[index].device.address);
+			if (same == 0)
+				break;
+		}
+
+		/* Seen now already: kept once. */
+		if (same == 0)
+			continue;
+
+		/* Kept, and listed again unless the reading has it (paired or connected). */
+		kept[kept_count] = bluetooth->seen[index];
+		kept_count++;
+		device = bt_device_find(bluetooth, bluetooth->seen[index].device.address, bluetooth->seen[index].device.type);
+		if (device != NULL && !device->paired && !device->connected)
+			*device = bluetooth->seen[index].device;
+	}
+
+	/* Succeeded: the table for the next reading. */
+	memcpy(bluetooth->seen, kept, kept_count * sizeof(kept[0]));
+	bluetooth->seen_count = kept_count;
+}
+
+/* Sends a request's line on a connection of its own; 0, or an errno value. */
+static int
+bt_send_request(
+	struct bt_follow *bluetooth,
+	const char *line)
+{
+	unsigned changed;
+	int error;
+
+	/* The connection and the line. */
+	error = bt_connect(&bluetooth->request, line);
+
+	/* A request that cannot be sent ends at once, failed. */
+	if (error != 0) {
+		changed = 0;
+		(void)snprintf(bluetooth->request_reason, sizeof(bluetooth->request_reason), "%s", "lost");
+		bluetooth->request_error = ENOTCONN;
+		bt_request_end(bluetooth, &changed);
+		return error;
+	}
+
+	/* Succeeded: the request is sent. */
+	return 0;
+}
+
+/* The daemon does not answer: unreachable, no device, the agent dropped; the questions asked are over. */
+static void
+bt_unreachable(
+	struct bt_follow *bluetooth,
+	unsigned *changed)
+{
+	/* The reading goes, tried again in a second. */
+	bt_close(&bluetooth->reading);
+	bluetooth->step = BT_STEP_NONE;
+	bluetooth->due_ms = bt_milliseconds() + BT_RETRY_MS;
+
+	/* What it could do is not known any more. */
+	bluetooth->missing = 0U;
+
+	/* Succeeded: an unreachable state with no device, told when it changed. */
+	memset(&bluetooth->next_state, 0, sizeof(bluetooth->next_state));
+	bluetooth->next_state.state = KL_BACKEND_BT_ABSENT;
+	bluetooth->next_count = 0U;
+	bt_commit(bluetooth, changed);
+}
+
+/* Reads the state's word (and why) into a state. */
+static void
+bt_state_word(
+	struct kl_backend_bluetooth_state *state,
+	const char *word)
+{
+	static const struct {
+		const char *word;
+		unsigned state;
+	} words[] = {
+		{ "ready", KL_BACKEND_BT_ON },
+		{ "scanning", KL_BACKEND_BT_ON },
+		{ "off", KL_BACKEND_BT_OFF },
+		{ "starting", KL_BACKEND_BT_STARTING },
+		{ "firmware-needed", KL_BACKEND_BT_FIRMWARE },
+		{ "firmware-failed", KL_BACKEND_BT_FIRMWARE },
+		{ "unsupported", KL_BACKEND_BT_UNSUPPORTED },
+		{ "none", KL_BACKEND_BT_NONE },
+		{ "lost", KL_BACKEND_BT_NONE }
+	};
+	size_t length;
+	size_t index;
+	size_t size;
+	int same;
+
+	/* The word alone (a reason may follow it); an unknown one is an error. */
+	length = strcspn(word, " ");
+	state->state = KL_BACKEND_BT_ERROR;
+
+	/* The word's state. */
+	for (index = 0; index < sizeof(words) / sizeof(words[0]); index++) {
+		/* Only a word of the same length and letters. */
+		size = strlen(words[index].word);
+		if (size != length)
+			continue;
+		same = strncmp(word, words[index].word, length);
+		if (same != 0)
+			continue;
+		state->state = words[index].state;
+		break;
+	}
+
+	/* Scanning is on, and scans. */
+	same = strncmp(word, "scanning", 8U);
+	if (same == 0 && length == 8U)
+		state->scanning = 1U;
+}
+
+/*
+ * Takes a device's line of the reading (BOND, DEVICE or HID) into the
+ * devices being read: a new device, or more about one already there.
+ */
+static void
+bt_device_line(
+	struct bt_follow *bluetooth,
+	const char *line,
+	unsigned source)
+{
+	struct kl_backend_bluetooth_device *device;
+	char address[KL_BACKEND_BT_ADDRESS_MAX];
+	char value[KL_BACKEND_BT_NAME_MAX * 4U];
+	char name[KL_BACKEND_BT_NAME_MAX];
+	unsigned long class_of_device;
+	unsigned long appearance;
+	unsigned type;
+	int unnamed;
+	int found;
+	int valid;
+	int same;
+
+	/* Its address and type. */
+	found = bt_field(line, "address=", address, sizeof(address));
+	if (!found)
+		return;
+	valid = bt_address_valid(address);
+	if (!valid)
+		return;
+	found = bt_field(line, "type=", value, sizeof(value));
+	if (!found)
+		return;
+	type = bt_type(value);
+
+	/* The device, found or new (none when the list is full). */
+	device = bt_device_find(bluetooth, address, type);
+	if (device == NULL)
+		return;
+
+	/* Its name, when the line has one and the device had none. */
+	found = bt_field(line, "name=", value, sizeof(value));
+	if (found) {
+		bt_unescape(value, name, sizeof(name));
+		unnamed = strcmp(device->name, device->address);
+		if (name[0] != '\0' && unnamed == 0)
+			(void)snprintf(device->name, sizeof(device->name), "%s", name);
+	}
+
+	/* A bond: paired, and whether by the legacy way. */
+	if (source == BT_STEP_BONDS) {
+		device->paired = 1U;
+		found = bt_field(line, "legacy=", value, sizeof(value));
+		same = strcmp(value, "1");
+		if (found && same == 0)
+			device->legacy = 1U;
+	}
+
+	/* A device seen: its signal and what it is. */
+	if (source == BT_STEP_DEVICES) {
+		found = bt_field(line, "rssi=", value, sizeof(value));
+		if (found)
+			device->rssi = atoi(value);
+		class_of_device = 0;
+		appearance = 0;
+		found = bt_field(line, "class=", value, sizeof(value));
+		if (found)
+			class_of_device = strtoul(value, NULL, 16);
+		found = bt_field(line, "appearance=", value, sizeof(value));
+		if (found)
+			appearance = strtoul(value, NULL, 16);
+		if (device->kind == KL_BACKEND_BT_KIND_OTHER)
+			device->kind = bt_kind(class_of_device, appearance);
+	}
+
+	/* A connected device: open is connected, with its battery when told. */
+	if (source == BT_STEP_STATUS) {
+		found = bt_field(line, "state=", value, sizeof(value));
+		same = strcmp(value, "open");
+		if (found && same == 0)
+			device->connected = 1U;
+		found = bt_field(line, "battery=", value, sizeof(value));
+		same = strcmp(value, "-");
+		if (found && same != 0)
+			device->battery = atoi(value);
+	}
+}
+
+/* Finds a device being read by its address and type, or adds it (NULL when the list is full). */
+static struct kl_backend_bluetooth_device *
+bt_device_find(
+	struct bt_follow *bluetooth,
+	const char *address,
+	unsigned type)
+{
+	struct kl_backend_bluetooth_device *device;
+	size_t index;
+	int same;
+
+	/* One already there. */
+	for (index = 0; index < bluetooth->next_count; index++) {
+		device = &bluetooth->next[index];
+		same = strcmp(device->address, address);
+		if (same == 0 && device->type == type)
+			return device;
+	}
+
+	/* No room. */
+	if (bluetooth->next_count == KL_BACKEND_BT_DEVICES_MAX)
+		return NULL;
+
+	/* Succeeded: a new one, named by its address until a name comes. */
+	device = &bluetooth->next[bluetooth->next_count];
+	bluetooth->next_count++;
+	memset(device, 0, sizeof(*device));
+	(void)snprintf(device->address, sizeof(device->address), "%s", address);
+	(void)snprintf(device->name, sizeof(device->name), "%s", address);
+	device->type = type;
+	device->battery = -1;
+	return device;
+}
+
+/*
+ * Finds a field "name=value" of a line: the value up to the next space,
+ * or between the quotes of name="...".  Returns 1 with the value (as
+ * written, still escaped), 0 when the line has none.
+ */
+static int
+bt_field(
+	const char *line,
+	const char *name,
+	char *value,
+	size_t size)
+{
+	const char *at;
+	const char *end;
+	size_t length;
+
+	/* The field, at the start of the line or after a space. */
+	value[0] = '\0';
+	at = line;
+	for (;;) {
+		at = strstr(at, name);
+		if (at == NULL)
+			return 0;
+		if (at == line || at[-1] == ' ')
+			break;
+		at++;
+	}
+
+	/* The value, after the name. */
+	at += strlen(name);
+
+	/* A quoted value to its closing quote (a quote inside is escaped), else to the next space. */
+	if (*at == '"') {
+		at++;
+		end = strchr(at, '"');
+		if (end == NULL)
+			return 0;
+	} else {
+		end = at + strcspn(at, " ");
+	}
+
+	/* The value, cut to the room there is. */
+	length = (size_t)(end - at);
+	if (length >= size)
+		length = size - 1U;
+	memcpy(value, at, length);
+	value[length] = '\0';
+
+	/* Succeeded: found. */
+	return 1;
+}
+
+/* Turns bluetoothd's \xNN back into bytes; a control byte becomes '?'. */
+static void
+bt_unescape(
+	const char *text,
+	char *output,
+	size_t size)
+{
+	unsigned long value;
+	size_t used;
+	char digits[3];
+	char *end;
+
+	/* Each byte, or each escape. */
+	used = 0;
+	while (*text != '\0' && used + 1U < size) {
+		/* An escape of two hexadecimal digits. */
+		if (text[0] == '\\' && text[1] == 'x' && text[2] != '\0' && text[3] != '\0') {
+			digits[0] = text[2];
+			digits[1] = text[3];
+			digits[2] = '\0';
+			value = strtoul(digits, &end, 16);
+			if (end == digits + 2) {
+				if (value < 0x20UL || value == 0x7fUL)
+					value = '?';
+				output[used++] = (char)value;
+				text += 4;
+				continue;
+			}
+		}
+
+		/* A byte as it is. */
+		output[used++] = *text;
+		text++;
+	}
+
+	/* Succeeded: ended. */
+	output[used] = '\0';
+}
+
+/* Gives the type an address type's word names. */
+static unsigned
+bt_type(
+	const char *word)
+{
+	int same;
+
+	/* LE's public address. */
+	same = strcmp(word, "le-public");
+	if (same == 0)
+		return KL_BACKEND_BT_LE_PUBLIC;
+
+	/* LE's random address. */
+	same = strcmp(word, "le-random");
+	if (same == 0)
+		return KL_BACKEND_BT_LE_RANDOM;
+
+	/* BR/EDR. */
+	return KL_BACKEND_BT_BREDR;
+}
+
+/* Gives the word of an address type, as the requests write it. */
+static const char *
+bt_type_name(
+	unsigned type)
+{
+	/* LE's two. */
+	if (type == KL_BACKEND_BT_LE_PUBLIC)
+		return "le-public";
+	if (type == KL_BACKEND_BT_LE_RANDOM)
+		return "le-random";
+
+	/* BR/EDR. */
+	return "bredr";
+}
+
+/*
+ * Tells what a device is from its class of device (BR/EDR: the major
+ * class, and a peripheral's minor class) or its appearance (LE).
+ */
+static unsigned
+bt_kind(
+	unsigned long class_of_device,
+	unsigned long appearance)
+{
+	unsigned long major;
+	unsigned long minor;
+	unsigned long category;
+
+	/* LE's appearance: a keyboard, a mouse, a phone, a computer, audio. */
+	if (appearance == 0x03c1UL)
+		return KL_BACKEND_BT_KIND_KEYBOARD;
+	if (appearance == 0x03c2UL || appearance == 0x03c5UL)
+		return KL_BACKEND_BT_KIND_MOUSE;
+	category = appearance >> 6;
+	if (category == 0x01UL)
+		return KL_BACKEND_BT_KIND_PHONE;
+	if (category == 0x02UL)
+		return KL_BACKEND_BT_KIND_COMPUTER;
+	if (category == 0x21UL || category == 0x25UL)
+		return KL_BACKEND_BT_KIND_AUDIO;
+
+	/* BR/EDR's class: the major class and a peripheral's kind. */
+	major = (class_of_device >> 8) & 0x1fUL;
+	minor = (class_of_device >> 6) & 0x03UL;
+	if (major == 0x05UL && (minor == 0x01UL || minor == 0x03UL))
+		return KL_BACKEND_BT_KIND_KEYBOARD;
+	if (major == 0x05UL && minor == 0x02UL)
+		return KL_BACKEND_BT_KIND_MOUSE;
+	if (major == 0x04UL)
+		return KL_BACKEND_BT_KIND_AUDIO;
+	if (major == 0x02UL)
+		return KL_BACKEND_BT_KIND_PHONE;
+	if (major == 0x01UL)
+		return KL_BACKEND_BT_KIND_COMPUTER;
+
+	/* Anything else. */
+	return KL_BACKEND_BT_KIND_OTHER;
+}
+
+/* Gives the errno value of bluetoothd's reason for a refusal. */
+static int
+bt_error(
+	const char *reason)
+{
+	static const struct {
+		const char *reason;
+		int error;
+	} reasons[] = {
+		{ "permission", EACCES },
+		{ "busy", EBUSY },
+		{ "off", ENETDOWN },
+		{ "timeout", ETIMEDOUT },
+		{ "rejected", ECONNREFUSED },
+		{ "request", ENOTSUP },
+		{ "not-ready", EAGAIN },
+		{ "no-controller", EAGAIN }
+	};
+	size_t index;
+	int same;
+
+	/* The reasons the desktop tells apart. */
+	for (index = 0; index < sizeof(reasons) / sizeof(reasons[0]); index++) {
+		same = strcmp(reason, reasons[index].reason);
+		if (same == 0)
+			return reasons[index].error;
+	}
+
+	/* Any other. */
+	return EIO;
+}
+
+/*
+ * Makes the reading the state: the devices paired first (then by name),
+ * and what changed told.
+ */
+static void
+bt_commit(
+	struct bt_follow *bluetooth,
+	unsigned *changed)
+{
+	struct kl_backend_bluetooth_device swap;
+	size_t index;
+	size_t other;
+	int differs;
+	int later;
+
+	/* The paired first, then by name (a few devices: a plain sort). */
+	for (index = 0; index < bluetooth->next_count; index++) {
+		for (other = index + 1U; other < bluetooth->next_count; other++) {
+			/* Whether the other goes before this one. */
+			later = 0;
+			if (bluetooth->next[other].paired > bluetooth->next[index].paired) {
+				later = 1;
+			} else if (bluetooth->next[other].paired == bluetooth->next[index].paired) {
+				differs = strcmp(bluetooth->next[other].name, bluetooth->next[index].name);
+				if (differs < 0)
+					later = 1;
+			}
+
+			/* Swapped when it does. */
+			if (!later)
+				continue;
+			swap = bluetooth->next[index];
+			bluetooth->next[index] = bluetooth->next[other];
+			bluetooth->next[other] = swap;
+		}
+	}
+
+	/* The state, told when it changed. */
+	differs = memcmp(&bluetooth->state, &bluetooth->next_state, sizeof(bluetooth->state));
+	if (differs != 0) {
+		bluetooth->state = bluetooth->next_state;
+		*changed |= KL_BACKEND_BT_CHANGED_STATE;
+	}
+
+	/* Succeeded: the devices, told when they changed. */
+	differs = 0;
+	if (bluetooth->count != bluetooth->next_count)
+		differs = 1;
+	if (!differs && bluetooth->count != 0U)
+		differs = memcmp(bluetooth->devices, bluetooth->next, bluetooth->count * sizeof(bluetooth->devices[0]));
+	if (differs != 0) {
+		memcpy(bluetooth->devices, bluetooth->next, bluetooth->next_count * sizeof(bluetooth->devices[0]));
+		bluetooth->count = bluetooth->next_count;
+		*changed |= KL_BACKEND_BT_CHANGED_DEVICES;
+	}
+}
+
+/* Tells whether an address is six pairs of hexadecimal digits with colons. */
+static int
+bt_address_valid(
+	const char *address)
+{
+	size_t length;
+	size_t index;
+	char character;
+
+	/* Seventeen characters. */
+	length = strlen(address);
+	if (length != 17U)
+		return 0;
+
+	/* Each a digit, or a colon every third. */
+	for (index = 0; index < 17U; index++) {
+		character = address[index];
+		if (index % 3U == 2U) {
+			if (character != ':')
+				return 0;
+			continue;
+		}
+
+		/* A hexadecimal digit elsewhere. */
+		if ((character < '0' || character > '9') &&
+		    (character < 'a' || character > 'f') &&
+		    (character < 'A' || character > 'F'))
+			return 0;
+	}
+
+	/* Succeeded: an address. */
+	return 1;
+}

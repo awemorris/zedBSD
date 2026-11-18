@@ -1,0 +1,125 @@
+zedbsd-nightly: third-party software
+====================================
+
+This package bundles the programs and libraries below. Each keeps its own
+license; the full texts are in the LICENSES directory (LICENSES/<name>/).
+Where a license (GPL, LGPL) requires the corresponding source code, the
+"Source" line says where to get the exact source of the bundled binary.
+
+The disk image (data/hdd-image.img, when present) is zedBSD, distributed
+under the zlib license: https://github.com/awemorris/zedBSD. The licenses of the
+software inside the image are installed in the image under /usr/share/licenses.
+
+
+QEMU emulator (WINQ-EMU fork)
+-----------------------------
+
+Files:   qemu-system-x86_64.exe, qemu-img.exe,
+         share/keymaps/*, share/firmware/*.json,
+         share/kvmvapic.bin, share/linuxboot_dma.bin, share/multiboot_dma.bin,
+         share/pvh.bin, share/vof.bin, share/vof-nvram.bin
+Version: QEMU 11.0.0 with the WINQ-EMU alpha10 patches (WHPX, Venus on
+         Windows) and changes for zedBSD
+License: GPL-2.0-only; some parts are under other GPL-compatible licenses
+         (LICENSES/qemu/LICENSE explains which)
+Source:  https://github.com/awemorris/qemu-win32-vulkan
+         commit @QEMU_COMMIT@
+         (fork of https://github.com/cmspam/winq-emu-qemu, branch alpha10,
+         which is based on https://download.qemu.org/qemu-11.0.0.tar.xz)
+Built:   MSYS2 UCRT64 (qemu-system-x86_64.exe with GCC 16.2.0,
+         qemu-img.exe with GCC 15.2.0)
+
+virglrenderer (WINQ-EMU fork)
+-----------------------------
+
+Files:   libvirglrenderer-1.dll
+Version: virglrenderer with the WINQ-EMU alpha10 patches (Venus on Windows)
+         and changes for zedBSD
+License: MIT (LICENSES/virglrenderer/COPYING)
+Source:  https://github.com/awemorris/virglrenderer
+         commit @VIRGLRENDERER_COMMIT@
+         (fork of https://github.com/cmspam/winq-emu-virglrenderer, branch
+         alpha10)
+Built:   MSYS2 UCRT64, GCC 16.2.0
+
+Firmware from the QEMU 11.0.0 release
+-------------------------------------
+
+The firmware images are the prebuilt ones shipped in the QEMU 11.0.0 source
+release (pc-bios/), unmodified. Their sources are in the same release
+archive under roms/:
+
+  https://download.qemu.org/qemu-11.0.0.tar.xz
+  SHA-256 c04ca36012653f32d11c674d370cf52a710e7d3f18c2d8b63e4932052a4854d6
+
+  File(s)                                  Project      License
+  ---------------------------------------  -----------  -------------------------------
+  data/edk2-x86_64-code.fd,                EDK II       BSD-2-Clause-Patent, with bundled
+  data/ovmf-vars.fd (a variable store      (OVMF)       OpenSSL and other components
+  made from edk2-i386-vars.fd),                         (LICENSES/edk2/edk2-licenses.txt)
+  share/edk2-*.fd
+  share/bios.bin, share/bios-256k.bin,     SeaBIOS      LGPL-3.0-only (LICENSES/seabios/)
+  share/bios-microvm.bin,
+  share/vgabios*.bin
+  share/efi-*.rom, share/pxe-*.rom         iPXE         GPL-2.0-or-later, some files UBDL
+                                                        (LICENSES/ipxe/)
+  share/opensbi-riscv*-fw_dynamic.bin      OpenSBI      BSD-2-Clause (LICENSES/opensbi/)
+  share/slof.bin                           SLOF         BSD-3-Clause (LICENSES/slof/)
+  share/QEMU,tcx.bin, share/QEMU,cgthree   OpenBIOS     GPL-2.0-only (LICENSES/openbios/)
+  .bin
+  share/qboot.rom                          qboot        GPL-2.0-only (LICENSES/qboot/)
+  share/u-boot-sam460.bin                  U-Boot       GPL-2.0-or-later
+                                                        (LICENSES/u-boot-sam460ex/)
+  share/npcm7xx_bootrom.bin,               vbootrom     Apache-2.0 (LICENSES/vbootrom/)
+  share/npcm8xx_bootrom.bin,
+  share/ast27x0_bootrom.bin
+  share/pnv-pnor.bin                       skiboot      Apache-2.0 (LICENSES/skiboot/)
+                                           (NVRAM image)
+
+Runtime libraries from MSYS2 UCRT64
+-----------------------------------
+
+These DLLs are unmodified copies from the MSYS2 UCRT64 packages named below
+(each DLL is byte-identical to the one in that package). Binary packages:
+https://repo.msys2.org/mingw/ucrt64/<package>-any.pkg.tar.zst
+Source packages (the upstream source and the MSYS2 build recipe and patches):
+https://repo.msys2.org/mingw/sources/<source package>.src.tar.zst
+
+  DLL                        Package (mingw-w64-ucrt-x86_64-*)   License                      Source package (mingw-w64-*)
+  -------------------------  ----------------------------------  ---------------------------  ----------------------------------
+  libgio-2.0-0.dll,          glib2-2.88.0-1                      LGPL-2.1-or-later            glib2-2.88.0-1
+  libglib-2.0-0.dll,
+  libgmodule-2.0-0.dll,
+  libgobject-2.0-0.dll
+  libintl-8.dll              gettext-runtime-1.0-1               LGPL-2.1-or-later            gettext-1.0-1
+  libiconv-2.dll             libiconv-1.19-1                     LGPL-2.1-or-later            libiconv-1.19-1
+  libfdt-1.dll               dtc-1.7.2-3                         GPL-2.0-or-later OR          dtc-1.7.2-3
+                                                                 BSD-2-Clause
+  libgcc_s_seh-1.dll         gcc-libs-15.2.0-14                  GPL-3.0-or-later WITH        gcc-15.2.0-14
+                                                                 GCC-exception-3.1
+  libwinpthread-1.dll        libwinpthread-14.0.0.r14.           MIT and BSD-3-Clause         winpthreads-14.0.0.r14.
+                             g4761eabdd-1                                                     g4761eabdd-1
+  SDL2.dll                   SDL2-2.32.10-1                      Zlib                         SDL2-2.32.10-1
+  libepoxy-0.dll             libepoxy-1.5.10-7                   MIT                          libepoxy-1.5.10-7
+  libpixman-1-0.dll          pixman-0.46.4-1                     MIT                          pixman-0.46.4-1
+  libslirp-0.dll             libslirp-4.9.1-2                    BSD-3-Clause                 libslirp-4.9.1-2
+  libffi-8.dll               libffi-3.5.2-1                      MIT                          libffi-3.5.2-1
+  libpcre2-8-0.dll           pcre2-10.47-1                       BSD-3-Clause WITH            pcre2-10.47-1
+                                                                 PCRE2-exception
+  libncursesw6.dll           ncurses-6.6-4                       X11 (MIT-style)              ncurses-6.6-4
+  libzstd.dll                zstd-1.5.7-1                        BSD-3-Clause                 zstd-1.5.7-1
+                                                                 (dual GPL-2.0-only)
+  zlib1.dll                  zlib-1.3.2-2                        Zlib                         zlib-1.3.2-2
+  libbz2-1.dll               bzip2-1.0.8-3                       bzip2-1.0.6                  bzip2-1.0.8-3
+
+The license texts are the ones each package installs (share/licenses/), copied
+to LICENSES/<package name>/.
+
+WINQ-EMU icon
+-------------
+
+Files:   winq-emu.ico
+Source:  https://github.com/cmspam/winq-emu (launcher/winq-emu.ico,
+         commit d14088845e9db1a49727ba8f2cc9a7117e5d8189)
+License: MIT, as stated for the launcher and installer in that project's
+         README.md (LICENSES/winq-emu/README.txt)

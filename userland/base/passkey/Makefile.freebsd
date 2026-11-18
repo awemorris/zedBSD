@@ -1,0 +1,14 @@
+# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# The independent FreeBSD build of passkey (ws172-p011): $(KEILAND_PREFIX)/sbin/passkey checks a password
+# (master.passwd, through freebsd-compat's shadow.h) or a PIN and changes $(KEILAND_PREFIX)/etc/passkey, under its own
+# lock there.  No security key backend: passkey-fido2 is not built, so a key's request answers "fail no-key" (and no
+# OpenSSL is needed).
+KEILAND_FREEBSD_PASSKEY_SOURCES := userland/base/passkey/main.c \
+	userland/base/passkey/request.c \
+	userland/base/passkey/record.c \
+	userland/base/common/account.c \
+	userland/base/login/verify.c
+KEILAND_FREEBSD_CPPFLAGS_userland_base_passkey_ := -DPASSKEY_FILE='"$(KEILAND_PREFIX)/etc/passkey"' \
+	-DPASSKEY_FIDO2_PATH='"$(KEILAND_PREFIX)/libexec/passkey-fido2"'
+KEILAND_FREEBSD_CPPFLAGS_userland_base_common_ := -DACCOUNT_SHADOW_LOCK='"$(KEILAND_PREFIX)/etc/passkey.lock"'
+$(eval $(call KEILAND_FREEBSD_PROGRAM,passkey,sbin,$(KEILAND_FREEBSD_PASSKEY_SOURCES),libkeiland-compat.a,-lcrypt))

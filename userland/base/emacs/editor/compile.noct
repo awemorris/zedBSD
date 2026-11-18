@@ -1,0 +1,165 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// compilation-mode: a simple version.
+//
+//  - M-x compile runs a shell command (default "make -k") in the
+//    *compilation* buffer, streaming output like a shell session.
+//  - M-x recompile reruns the last command.
+//  - next-error (M-g M-n / M-g n) jumps to the next "file:line:"
+//    match, opening the file in the other window at that line.
+//
+// Output is scanned for GCC/Clang-style "file:line[:col]: message"
+// locations with the Regex API; matches accumulate in CompileErrors.
+//
+
+func compileInit() {
+    CompileCommand = "make -k";
+    CompileErrors = [];      // [{file, line}]
+    CompileErrorIdx = 0 - 1;
+    CompileAcc = "";         // partial-line accumulator
+    return 0;
+}
+
+// M-x compile: prompt for the command and run it.
+func compileStart(ed, cmd) {
+    if (Type.of(cmd) != "string" || cmd == "") {
+        cmd = CompileCommand;
+    }
+    CompileCommand = cmd;
+    CompileErrors = [];
+    CompileErrorIdx = 0 - 1;
+    CompileAcc = "";
+    CompileDir = defaultDirectory();
+
+    Editor.getBufferCreate("*compilation*");
+    Editor.setBuffer("*compilation*");
+    windowNoteBuffer();
+    setMode("Compilation");
+    Editor.deleteRegion(Editor.pointMin(), Editor.pointMax());
+    Editor.insert("cd " + CompileDir + "\n" + cmd + "\n\n");
+
+    // Run through a shell so pipelines and && work.
+    var sh = System.getEnv("SHELL");
+    if (sh == "") { sh = "/bin/sh"; }
+    var h = Process.spawn([sh, "-c", "cd '" + CompileDir + "' && " + cmd + " 2>&1"]);
+    if (h < 0) {
+        ed.echoMessage = "Cannot start compilation";
+        return 0;
+    }
+    Editor.gotoChar(Editor.pointMax());
+    var mk = Editor.pointMarker();
+    var sess = { proc: h, mark: mk, buf: "*compilation*", kind: "compile" };
+    ShellSessions["*compilation*"] = sess;
+    ed.echoMessage = "Compilation started: " + cmd;
+    return 0;
+}
+
+// M-x recompile.
+func compileRecompile(ed) {
+    return compileStart(ed, CompileCommand);
+}
+
+// Scan compilation output for error locations, keeping partial lines.
+func compileFilter(sess, text) {
+    CompileAcc = CompileAcc + text;
+    while (true) {
+        var nl = String.indexOf(CompileAcc, "\n");
+        if (nl < 0) {
+            break;
+        }
+        var line = String.substring(CompileAcc, 0, nl);
+        CompileAcc = String.substring(CompileAcc, nl + 1, -1);
+        compileScanLine(line);
+    }
+    return text;
+}
+
+// Record a "file:line:" location if the line has one.
+func compileScanLine(line) {
+    var m = Regex.search("^([^ :]+):([0-9]+):", line, 0);
+    if (Type.of(m) != "dict") {
+        return 0;
+    }
+    var g = m.groups;
+    var file = String.substring(line, g[0].start, g[0].end - g[0].start);
+    var lno = Int.from(String.substring(line, g[1].start, g[1].end - g[1].start));
+    Array.push(CompileErrors, { file: file, line: lno });
+    return 0;
+}
+
+// next-error: visit the next recorded location.
+func compileNextError(ed) {
+    if (Array.size(CompileErrors) == 0) {
+        ed.echoMessage = "No errors";
+        return 0;
+    }
+    CompileErrorIdx = CompileErrorIdx + 1;
+    if (CompileErrorIdx >= Array.size(CompileErrors)) {
+        CompileErrorIdx = Array.size(CompileErrors) - 1;
+        ed.echoMessage = "No more errors";
+        return 0;
+    }
+    var e = CompileErrors[CompileErrorIdx];
+    compileVisit(ed, e.file, e.line);
+    return 0;
+}
+
+func compilePreviousError(ed) {
+    if (Array.size(CompileErrors) == 0) {
+        ed.echoMessage = "No errors";
+        return 0;
+    }
+    CompileErrorIdx = CompileErrorIdx - 1;
+    if (CompileErrorIdx < 0) {
+        CompileErrorIdx = 0;
+    }
+    var e = CompileErrors[CompileErrorIdx];
+    compileVisit(ed, e.file, e.line);
+    return 0;
+}
+
+// Open file:line in the other window, keeping *compilation* selected.
+func compileVisit(ed, file, line) {
+    var path = Editor.expandFileName(file, CompileDir);
+    var here = SelWin;
+
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    if (Array.size(leaves) == 1) {
+        windowSplit("v");
+        leaves = [];
+        windowLeaves(WinRoot, leaves);
+    }
+    var target = 0;
+    for (w in leaves) {
+        if (!(w == here)) {
+            target = w;
+        }
+    }
+    if (Type.of(target) != "dict") {
+        return 0;
+    }
+
+    windowSelect(target);
+    var name = Editor.fileNameNondirectory(path);
+    var fresh = !Dict.hasKey(Buffers, name);
+    Editor.getBufferCreate(name);
+    Editor.setBuffer(name);
+    windowNoteBuffer();
+    if (fresh == 1) {
+        Buf.fileName = path;
+        Buf.defaultDir = Editor.fileNameDirectory(path);
+        if (FileUtil.checkFileExists(path) == 1) {
+            Editor.insertFileContents(path);
+            Editor.setBufferModifiedP(0);
+        }
+    }
+    Editor.gotoChar(Editor.pointMin());
+    Editor.forwardLine(line - 1);
+    target.point = Editor.point();
+
+    windowSelect(here);
+    ed.echoMessage = file + ":" + line;
+    return 0;
+}

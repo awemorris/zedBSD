@@ -1,0 +1,16 @@
+{
+  "debian13": {
+    "id": "debian",
+    "version": "13",
+    "url": "https://cloud.debian.org/images/cloud/trixie/20260914-2601/debian-13-generic-amd64-20260914-2601.qcow2",
+    "algorithm": "sha512",
+    "hash": "a733e7d49442a03e70d03e4eb5aaf3967f3efc69ef70952f9bb10fc1ee2c4876eb95956b5ad2d31350e5fada768feb651352535fb8cd1233f61998a5a7d2e93c"
+  },
+  "ubuntu2604": {
+    "id": "ubuntu",
+    "version": "26.04",
+    "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260927/ubuntu-26.04-server-cloudimg-amd64.img",
+    "algorithm": "sha256",
+    "hash": "8800651811af9a85465ad1d552add729947bb16488dddb4a9b5305a3d97332b2"
+  }
+}

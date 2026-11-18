@@ -1,0 +1,7 @@
+type=oneshot
+command=/bin/sh
+arguments=/usr/libexec/make-homes
+after=syslogd
+restart=no
+required=NO
+late=yes

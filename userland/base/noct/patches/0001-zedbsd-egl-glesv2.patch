@@ -1,0 +1,20 @@
+--- a/CMakeLists.txt	2026-11-06 15:06:27.000000000 +0900
++++ b/CMakeLists.txt	2026-11-07 13:55:52.827407188 +0900
+@@ -741,9 +741,15 @@
+       ${NOCT_FOUNDATION_FRAMEWORK}
+       ${NOCT_METAL_FRAMEWORK}
+     )
++  elseif(NOCT_TARGET_ZEDBSD)
++    target_link_libraries(
++      noct
++      PUBLIC
++      EGL
++      GLESv2
++    )
+   elseif(   CMAKE_SYSTEM_NAME STREQUAL "Linux"
+-         OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"
+-	 OR NOCT_TARGET_ZEDBSD)
++         OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+     find_package(PkgConfig REQUIRED)
+     pkg_check_modules(NOCT_EGL REQUIRED IMPORTED_TARGET egl)
+     pkg_check_modules(NOCT_GLESV2 REQUIRED IMPORTED_TARGET glesv2)

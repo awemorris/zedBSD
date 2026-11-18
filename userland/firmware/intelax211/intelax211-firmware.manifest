@@ -1,0 +1,37 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=intelax211-firmware
+package-version=89.735b75a4.0
+installed-firmware=/lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode
+installed-pnvm=/lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm
+installed-license=/usr/share/licenses/intelax211-firmware/LICENCE.iwlwifi_firmware
+installed-whence=/usr/share/licenses/intelax211-firmware/WHENCE
+
+acquisition-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-tag=20260410
+acquisition-tag-object=4585dd5a5f0cee08990d754701d8866d9e9266e6
+acquisition-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-base-url=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
+acquisition-url-suffix=?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-firmware-path=intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode
+acquisition-firmware-size=1736748
+acquisition-firmware-sha256=c569c4b0ffe2054a1cedd5affccff2da8515325eeb23f788c7abe9463d1a1514
+acquisition-pnvm-path=intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm
+acquisition-pnvm-size=55176
+acquisition-pnvm-sha256=efa9726d4a9d44b83fc9a14cedcf306a4e439e9de919802eb9e92df4ec032b2a
+acquisition-license-path=LICENCE.iwlwifi_firmware
+acquisition-license-size=2046
+acquisition-license-sha256=16d5040c7cf851fc693b7542e20870935b99802533ea1bfd231c377a2305e5c5
+acquisition-whence-path=WHENCE
+acquisition-whence-size=425450
+acquisition-whence-sha256=c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
+
+firmware-runtime-version=89.735b75a4.0
+whence-recorded-version=86.735b75a4.0
+version-discrepancy=retained
+redistribution=unmodified-binary-only
+redistribution-notice=Copyright and disclaimer must accompany the unmodified binaries; consult the exact installed Intel license
+license=Intel binary firmware terms in the installed license file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

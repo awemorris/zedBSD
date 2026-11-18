@@ -1,0 +1,4 @@
+# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# The independent FreeBSD build of kuidemo; source membership mirrors the target package.
+KEILAND_FREEBSD_KUIDEMO_SOURCES := userland/tests/kuidemo/main.c
+$(eval $(call KEILAND_FREEBSD_PROGRAM,kuidemo,bin,$(KEILAND_FREEBSD_KUIDEMO_SOURCES),libkeiland.so libwayland-client.so libtruetype.so libvulkan.so.1,-lm))

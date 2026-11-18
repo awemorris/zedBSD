@@ -1,0 +1,2 @@
+kernel=vmunix
+rootpart=PARTLABEL=zedBSD-root

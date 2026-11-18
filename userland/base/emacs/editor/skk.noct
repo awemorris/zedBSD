@@ -1,0 +1,850 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// SKK: a small Japanese input method in the SKK style.
+//
+//  - C-x C-j toggles skk-mode for the current buffer (hiragana).
+//  - In kana modes, romaji compose into kana; q toggles hiragana and
+//    katakana, l drops to ASCII, C-j returns to hiragana from ASCII.
+//  - An uppercase letter starts a conversion segment, shown inline
+//    as a marked composition. SPC looks the reading up in the
+//    dictionaries and cycles candidates, x steps back, C-j commits,
+//    C-g cancels, q commits the reading as katakana.
+//  - When no candidate remains, the minibuffer asks for a new word,
+//    which is saved to the personal dictionary (~/.SKK-JISYO,
+//    or ~/SKKUSER.DIC on filesystems that reject the name).
+//
+// The main dictionary is ~/SKK-JISYO.L (EUC-JP), read through
+// FileUtil.readTextEucJp and searched on demand. Without it, the
+// bundled UTF-8 dictionaries are used: the compact one
+// (REMACS_SKK_DICT, /usr/share/remacs/skkjisyo.dic) and then the
+// fuller SKK-JISYO.X (REMACS_SKK_DICT_X, /usr/share/remacs/skkjisyo-x.dic).
+//
+
+func skkInit() {
+    SkkDict = 0;         // main dictionary text, loaded lazily
+    SkkPersonal = 0;     // personal dictionary text
+    // Personal dictionary: ~/.SKK-JISYO, falling back to SKKUSER.DIC
+    // for filesystems that reject leading-dot names (FAT16).
+    SkkPersonalPath = System.getEnv("HOME") + "/.SKK-JISYO";
+    SkkPersonalFallback = System.getEnv("HOME") + "/SKKUSER.DIC";
+    SkkDictPath = System.getEnv("HOME") + "/SKK-JISYO.L";
+    // Bundled, clean-room, UTF-8 fallback dictionary shipped with remacs.
+    // Used when the user has not installed the full SKK-JISYO.L (EUC-JP).
+    SkkBundledPath = System.getEnv("REMACS_SKK_DICT");
+    if (Type.of(SkkBundledPath) != "string" || SkkBundledPath == "") {
+        // The installed copy (userland/base/emacs/Makefile), then the
+        // source tree's when remacs runs from there.
+        SkkBundledPath = "/usr/share/remacs/skkjisyo.dic";
+        if (FileUtil.checkFileExists(SkkBundledPath) != 1) {
+            SkkBundledPath = "dict/SKK-JISYO.remacs";
+        }
+    }
+    // The fuller bundled dictionary, looked in after the compact one.
+    SkkDictX = 0;
+    SkkBundledXPath = System.getEnv("REMACS_SKK_DICT_X");
+    if (Type.of(SkkBundledXPath) != "string" || SkkBundledXPath == "") {
+        SkkBundledXPath = "/usr/share/remacs/skkjisyo-x.dic";
+        if (FileUtil.checkFileExists(SkkBundledXPath) != 1) {
+            SkkBundledXPath = "dict/SKK-JISYO.X";
+        }
+    }
+    // 1 when no main dictionary could be read (see skkNoDictWarn).
+    SkkDictMissing = 0;
+    // Composition state (one segment at a time).
+    Skk = {
+        pending: "",     // romaji not yet composed
+        pendingShown: 0, // chars of pending currently visible in the buffer
+        conv: 0,         // 0 plain, 1 reading (marked), 2 candidates
+        start: 0,        // marker before the composition mark
+        reading: "",
+        cands: [],
+        idx: 0,
+        // Okuri-ari (送りあり) sub-state, active while composing an
+        // inflected word like KaKeru -> 書ける.
+        okuri: 0,            // 1 while okurigana is being entered
+        stem: "",            // the reading before the okurigana
+        okuriConsonant: "",  // the okurigana's leading consonant (dict key tail)
+        okuriKana: "",       // the composed okurigana so far
+        okuriPending: "",    // okurigana romaji not yet composed
+        okuriShown: 0,       // chars after the stem currently in the buffer
+        noDictShown: 0       // 1 once this segment showed "no dictionary"
+    };
+    skkInitRomaji();
+    return 0;
+}
+
+// Is SKK handling keys in the current buffer?
+func skkActive() {
+    if (!Dict.hasKey(Buf, "skkOn")) {
+        return 0;
+    }
+    return Buf.skkOn;
+}
+
+// The mode-line segment, DDSKK style. Empty when SKK is off.
+func skkIndicator() {
+    if (skkActive() == 0) {
+        return "";
+    }
+    if (Buf.skkMode == "hira") {
+        return " --かな";
+    }
+    if (Buf.skkMode == "kata") {
+        return " --カナ";
+    }
+    return " --aA";
+}
+
+// The C-x C-j toggle.
+func skkToggle(ed) {
+    if (skkActive() == 1) {
+        skkFlushPending();
+        skkResetComposition();
+        Buf.skkOn = 0;
+        ed.echoMessage = "";
+    } else {
+        Buf.skkOn = 1;
+        Buf.skkMode = "hira";
+        ed.echoMessage = "";
+    }
+    return 0;
+}
+
+func skkResetComposition() {
+    Skk.pending = "";
+    Skk.pendingShown = 0;
+    Skk.conv = 0;
+    Skk.okuri = 0;
+    Skk.stem = "";
+    Skk.okuriConsonant = "";
+    Skk.okuriKana = "";
+    Skk.okuriPending = "";
+    Skk.okuriShown = 0;
+    Skk.reading = "";
+    Skk.cands = [];
+    Skk.idx = 0;
+    Skk.noDictShown = 0;
+    return 0;
+}
+
+// --- romaji composition ------------------------------------------------
+
+func skkInitRomaji() {
+    Romaji = {};
+    var rows = [
+        "a あ", "i い", "u う", "e え", "o お",
+        "ka か", "ki き", "ku く", "ke け", "ko こ",
+        "sa さ", "si し", "shi し", "su す", "se せ", "so そ",
+        "ta た", "ti ち", "chi ち", "tu つ", "tsu つ", "te て", "to と",
+        "na な", "ni に", "nu ぬ", "ne ね", "no の",
+        "ha は", "hi ひ", "hu ふ", "fu ふ", "he へ", "ho ほ",
+        "ma ま", "mi み", "mu む", "me め", "mo も",
+        "ya や", "yu ゆ", "yo よ",
+        "ra ら", "ri り", "ru る", "re れ", "ro ろ",
+        "wa わ", "wo を", "nn ん",
+        "ga が", "gi ぎ", "gu ぐ", "ge げ", "go ご",
+        "za ざ", "zi じ", "ji じ", "zu ず", "ze ぜ", "zo ぞ",
+        "da だ", "di ぢ", "du づ", "de で", "do ど",
+        "ba ば", "bi び", "bu ぶ", "be べ", "bo ぼ",
+        "pa ぱ", "pi ぴ", "pu ぷ", "pe ぺ", "po ぽ",
+        "kya きゃ", "kyu きゅ", "kyo きょ",
+        "sha しゃ", "shu しゅ", "sho しょ",
+        "sya しゃ", "syu しゅ", "syo しょ",
+        "cha ちゃ", "chu ちゅ", "cho ちょ",
+        "tya ちゃ", "tyu ちゅ", "tyo ちょ",
+        "nya にゃ", "nyu にゅ", "nyo にょ",
+        "hya ひゃ", "hyu ひゅ", "hyo ひょ",
+        "mya みゃ", "myu みゅ", "myo みょ",
+        "rya りゃ", "ryu りゅ", "ryo りょ",
+        "gya ぎゃ", "gyu ぎゅ", "gyo ぎょ",
+        "ja じゃ", "ju じゅ", "jo じょ",
+        "jya じゃ", "jyu じゅ", "jyo じょ",
+        "zya じゃ", "zyu じゅ", "zyo じょ",
+        "bya びゃ", "byu びゅ", "byo びょ",
+        "pya ぴゃ", "pyu ぴゅ", "pyo ぴょ",
+        "fa ふぁ", "fi ふぃ", "fe ふぇ", "fo ふぉ",
+        "va ゔぁ", "vi ゔぃ", "vu ゔ", "ve ゔぇ", "vo ゔぉ",
+        "xa ぁ", "xi ぃ", "xu ぅ", "xe ぇ", "xo ぉ",
+        "xya ゃ", "xyu ゅ", "xyo ょ", "xtu っ",
+        "la ぁ", "li ぃ", "lu ぅ", "le ぇ", "lo ぉ",
+        "dya ぢゃ", "dyu ぢゅ", "dyo ぢょ",
+        "we うぇ", "wi うぃ"
+    ];
+    for (row in rows) {
+        var sp = String.indexOf(row, " ");
+        var k = String.substring(row, 0, sp);
+        var v = String.substring(row, sp + 1, -1);
+        Romaji[k] = v;
+    }
+    return 0;
+}
+
+// Compose one romaji letter into a string-collecting state, for
+// skk-isearch (kana go into the search string, not the buffer).
+// st = { pending, out, mode }.
+func skkComposeChar(st, ch) {
+    st.pending = st.pending + ch;
+    while (st.pending != "") {
+        if (Dict.hasKey(Romaji, st.pending)) {
+            var kana = Romaji[st.pending];
+            if (st.mode == "kata") {
+                kana = skkToKatakana(kana);
+            }
+            st.out = st.out + kana;
+            st.pending = "";
+            break;
+        }
+        if (skkIsPrefix(st.pending) == 1) {
+            break;
+        }
+        var c0 = String.charAt(st.pending, 0);
+        if (c0 == "n") {
+            st.out = st.out + "ん";
+            st.pending = String.substring(st.pending, 1, -1);
+            continue;
+        }
+        var pn = String.charCount(st.pending);
+        if (pn >= 2 && c0 == String.charAt(st.pending, 1)) {
+            st.out = st.out + "っ";
+            st.pending = String.substring(st.pending, 1, -1);
+            continue;
+        }
+        st.pending = String.substring(st.pending, 1, -1);
+    }
+    return 0;
+}
+
+// Merge user rom-kana rules (e.g. {"!": "！"}) into the table. Called
+// from init files via Editor.skkSetRomKanaRule.
+func skkSetRomKanaRule(rules) {
+    for (k, v in rules) {
+        Romaji[k] = v;
+    }
+    return 0;
+}
+
+// Is s a proper prefix of any romaji key?
+func skkIsPrefix(s) {
+    var n = String.charCount(s);
+    for (k, v in Romaji) {
+        if (String.charCount(k) > n && String.substring(k, 0, n) == s) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Hiragana to katakana (0x3041-0x3096 -> +0x60).
+func skkToKatakana(s) {
+    var out = "";
+    var n = String.charCount(s);
+    for (i in 0..n) {
+        var cp = String.charCodeAt(s, i);
+        if (cp >= 0x3041 && cp <= 0x3096) {
+            out = out + String.chr(cp + 0x60);
+        } else {
+            out = out + String.charAt(s, i);
+        }
+    }
+    return out;
+}
+
+// Remove the visible pending romaji from the buffer (before a
+// conversion, confirmation, or the next keystroke).
+func skkClearPending() {
+    if (Skk.pendingShown > 0) {
+        deleteChar(0 - Skk.pendingShown);
+        Skk.pendingShown = 0;
+    }
+    return 0;
+}
+
+// Finish the pending romaji before a conversion, a commit, or a mode
+// change. A lone "n" is ん (ン in katakana mode), as in DDSKK, so
+// Henkan SPC looks up へんかん; any other unfinished romaji is dropped.
+func skkFlushPending() {
+    var lone = 0;
+    if (Skk.pending == "n") {
+        lone = 1;
+    }
+    skkClearPending();
+    Skk.pending = "";
+    if (lone == 1) {
+        skkEmit("ん");
+    }
+    return 0;
+}
+
+// Input one romaji letter with the in-progress alphabet shown inline,
+// as DDSKK does. Completed kana replace the shown romaji.
+func skkInputRomaji(ch) {
+    skkClearPending();
+    skkFeedRomaji(ch);
+    if (Skk.pending != "") {
+        Editor.insert(Skk.pending);
+        Skk.pendingShown = String.charCount(Skk.pending);
+    }
+    return 0;
+}
+
+// Feed one lowercase letter into the romaji buffer; inserts finished
+// kana into the buffer.
+func skkFeedRomaji(ch) {
+    Skk.pending = Skk.pending + ch;
+    while (Skk.pending != "") {
+        if (Dict.hasKey(Romaji, Skk.pending)) {
+            skkEmit(Romaji[Skk.pending]);
+            Skk.pending = "";
+            break;
+        }
+        if (skkIsPrefix(Skk.pending) == 1) {
+            break;
+        }
+        // "n" before a non-vowel consonant is ん.
+        var n = String.charCount(Skk.pending);
+        var c0 = String.charAt(Skk.pending, 0);
+        if (c0 == "n") {
+            skkEmit("ん");
+            Skk.pending = String.substring(Skk.pending, 1, -1);
+            continue;
+        }
+        // A doubled consonant is っ.
+        if (n >= 2 && c0 == String.charAt(Skk.pending, 1)) {
+            skkEmit("っ");
+            Skk.pending = String.substring(Skk.pending, 1, -1);
+            continue;
+        }
+        // Drop an unusable leading character.
+        Skk.pending = String.substring(Skk.pending, 1, -1);
+    }
+    return 0;
+}
+
+// Insert composed kana (converted for katakana mode).
+func skkEmit(kana) {
+    if (Buf.skkMode == "kata") {
+        kana = skkToKatakana(kana);
+    }
+    Editor.insert(kana);
+    return 0;
+}
+
+// --- dictionary --------------------------------------------------------
+
+func skkLoadDicts() {
+    if (Type.of(SkkDict) != "string") {
+        // Prefer the user-downloaded SKK-JISYO.L (EUC-JP); otherwise fall
+        // back to the bundled clean-room dictionaries (UTF-8): the
+        // compact one, then the fuller SKK-JISYO.X. A read error leaves
+        // SkkDict unset, so the next conversion tries (and reports) again.
+        var mainText = "";
+        var extraText = "";
+        if (FileUtil.checkFileExists(SkkDictPath) == 1) {
+            mainText = FileUtil.readTextEucJp(SkkDictPath);
+        } else {
+            if (FileUtil.checkFileExists(SkkBundledPath) == 1) {
+                mainText = FileUtil.readText(SkkBundledPath);
+            }
+            if (FileUtil.checkFileExists(SkkBundledXPath) == 1) {
+                extraText = FileUtil.readText(SkkBundledXPath);
+            }
+        }
+        SkkDict = mainText;
+        SkkDictX = extraText;
+        if (SkkDict == "" && SkkDictX == "") {
+            SkkDictMissing = 1;
+        } else {
+            SkkDictMissing = 0;
+        }
+    }
+    if (Type.of(SkkPersonal) != "string") {
+        // Non-throwing reads: a missing/unreadable path (or a stray
+        // directory of the same name) just moves to the next choice.
+        var text = FileUtil.tryReadText(SkkPersonalPath);
+        if (Type.of(text) != "string") {
+            // The FAT16-safe name may have been used previously.
+            text = FileUtil.tryReadText(SkkPersonalFallback);
+            if (Type.of(text) == "string") {
+                SkkPersonalPath = SkkPersonalFallback;
+            } else {
+                // Legacy location from older remacs versions.
+                text = FileUtil.tryReadText(System.getEnv("HOME") + "/.skk-jisyo");
+            }
+        }
+        if (Type.of(text) == "string") {
+            SkkPersonal = text;
+        } else {
+            SkkPersonal = "";
+        }
+    }
+    return 0;
+}
+
+// Candidates for a reading, personal dictionary first.
+func skkLookup(reading) {
+    skkLoadDicts();
+    var out = [];
+    skkLookupIn(SkkPersonal, reading, out);
+    skkLookupIn(SkkDict, reading, out);
+    skkLookupIn(SkkDictX, reading, out);
+    return out;
+}
+
+// Is cand already among the candidates?
+func skkHasCandidate(out, cand) {
+    for (c in out) {
+        if (c == cand) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// With no main dictionary, the first failed conversion of a segment
+// says so in the echo area instead of asking to register the word, so
+// a missing dictionary is told apart from a missing word. Returns 1
+// when the message was shown.
+func skkNoDictWarn(ed) {
+    if (SkkDictMissing != 1 || Skk.noDictShown == 1) {
+        return 0;
+    }
+    Skk.noDictShown = 1;
+    ed.echoMessage = "SKK: no dictionary (~/SKK-JISYO.L, " + SkkBundledPath + ")";
+    return 1;
+}
+
+func skkLookupIn(text, reading, out) {
+    if (Type.of(text) != "string" || text == "") {
+        return 0;
+    }
+    var probe = "\n" + reading + " /";
+    var idx = String.indexOf(text, probe);
+    if (idx < 0) {
+        return 0;
+    }
+    // Cut the candidate line. String.substring takes (start, length).
+    var from = idx + String.charCount(probe);
+    var slice = String.substring(text, from, 4000);
+    var eol = String.indexOf(slice, "\n");
+    if (eol >= 0) {
+        slice = String.substring(slice, 0, eol);
+    }
+    // slice = "cand1/cand2;note/.../"
+    var start = 0;
+    var n = String.charCount(slice);
+    var i = 0;
+    while (i <= n) {
+        if (i == n || String.charAt(slice, i) == "/") {
+            if (i > start) {
+                var cand = String.substring(slice, start, i - start);
+                var semi = String.indexOf(cand, ";");
+                if (semi >= 0) {
+                    cand = String.substring(cand, 0, semi);
+                }
+                if (cand != "" && String.charAt(cand, 0) != "[" &&
+                    skkHasCandidate(out, cand) == 0) {
+                    Array.push(out, cand);
+                }
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+// Append a newly registered word to the personal dictionary.
+func skkRegister(reading, word) {
+    skkLoadDicts();
+    SkkPersonal = reading + " /" + word + "/\n" + SkkPersonal;
+    if (FileUtil.tryWriteText(SkkPersonalPath, SkkPersonal) == 0) {
+        // Leading-dot names are invalid on FAT16: fall back and stick
+        // to the fallback for the rest of the session.
+        SkkPersonalPath = SkkPersonalFallback;
+        FileUtil.tryWriteText(SkkPersonalPath, SkkPersonal);
+    }
+    return 0;
+}
+
+// --- the key handler ---------------------------------------------------
+
+// Returns 1 when the key was consumed by SKK.
+func skkHandleKey(ed, key) {
+    if (skkActive() == 0) {
+        return 0;
+    }
+
+    // ASCII passthrough mode: only C-j returns to kana.
+    if (Buf.skkMode == "ascii") {
+        if (key == (Term.CTRL | 0x6A)) {
+            Buf.skkMode = "hira";
+            ed.echoMessage = "";
+            return 1;
+        }
+        return 0;
+    }
+
+    // While entering okurigana, letters build it (in both the
+    // pre-conversion reading state and the candidate state).
+    if (Skk.okuri == 1 && key >= 0x61 && key <= 0x7A) {
+        return skkOkuriInput(ed, String.chr(key));
+    }
+    if (Skk.okuri == 1 && key >= 0x41 && key <= 0x5A) {
+        return skkOkuriInput(ed, String.toLowerCase(String.chr(key)));
+    }
+
+    // Candidate selection state.
+    if (Skk.conv == 2) {
+        return skkCandidateKey(ed, key);
+    }
+
+    // Reading (marked) state extras.
+    if (Skk.conv == 1) {
+        if (key == 0x20) {                        // SPC: convert
+            skkFlushPending();
+            return skkStartConversion(ed);
+        }
+        if (key == (Term.CTRL | 0x6A)) {          // C-j: commit as kana
+            skkFlushPending();
+            skkCommitReading();
+            return 1;
+        }
+        if (key == 0x71) {                        // q: commit as katakana
+            skkFlushPending();
+            var mk = Editor.markerPosition(Skk.start);
+            var reading = Editor.bufferSubstring(mk + 1, Editor.point());
+            Editor.deleteRegion(mk, Editor.point());
+            Editor.insert(skkToKatakana(reading));
+            skkResetComposition();
+            return 1;
+        }
+        if (key == (Term.CTRL | 0x67)) {          // C-g: cancel
+            Skk.pendingShown = 0;
+            var mk2 = Editor.markerPosition(Skk.start);
+            Editor.deleteRegion(mk2, Editor.point());
+            skkResetComposition();
+            ed.echoMessage = "Quit";
+            return 1;
+        }
+        if (key == 0x7F) {                        // DEL
+            if (Skk.pendingShown > 0) {
+                deleteChar(0 - 1);
+                Skk.pendingShown = Skk.pendingShown - 1;
+                Skk.pending = String.substring(Skk.pending, 0,
+                                               String.charCount(Skk.pending) - 1);
+                return 1;
+            }
+            var mk3 = Editor.markerPosition(Skk.start);
+            if (Editor.point() == mk3 + 1) {
+                // Deleting the mark cancels the segment.
+                Editor.deleteRegion(mk3, Editor.point());
+                skkResetComposition();
+                return 1;
+            }
+            deleteChar(0 - 1);
+            return 1;
+        }
+        // Letters keep composing below.
+    }
+
+    // Uppercase inside a non-empty reading starts the okurigana.
+    if (key >= 0x41 && key <= 0x5A && Skk.conv == 1 && Skk.okuri == 0) {
+        skkFlushPending();
+        var mk = Editor.markerPosition(Skk.start);
+        Skk.stem = Editor.bufferSubstring(mk + 1, Editor.point());
+        if (Skk.stem != "") {
+            Skk.okuri = 1;
+            Skk.okuriConsonant = String.toLowerCase(String.chr(key));
+            Skk.okuriPending = Skk.okuriConsonant;
+            Skk.okuriKana = "";
+            Editor.insert(Skk.okuriPending);
+            Skk.okuriShown = String.charCount(Skk.okuriPending);
+            return 1;
+        }
+    }
+
+    // Plain and reading states share the composing keys.
+    if (key >= 0x41 && key <= 0x5A) {             // uppercase: open a segment
+        if (Skk.conv == 0) {
+            Skk.start = Editor.pointMarker();
+            Editor.insert("▽");
+            Skk.conv = 1;
+        }
+        skkInputRomaji(String.toLowerCase(String.chr(key)));
+        return 1;
+    }
+    if (key >= 0x61 && key <= 0x7A) {             // lowercase
+        if (Skk.conv == 0) {
+            if (key == 0x71) {                    // q: toggle kana type
+                skkFlushPending();
+                if (Buf.skkMode == "hira") {
+                    Buf.skkMode = "kata";
+                } else {
+                    Buf.skkMode = "hira";
+                }
+                Skk.pending = "";
+                return 1;
+            }
+            if (key == 0x6C) {                    // l: ASCII
+                skkFlushPending();
+                Buf.skkMode = "ascii";
+                Skk.pending = "";
+                return 1;
+            }
+        }
+        skkInputRomaji(String.chr(key));
+        return 1;
+    }
+
+    // Punctuation with kana equivalents.
+    if ((Skk.conv == 0 || Skk.conv == 1) && key >= 0x20 && key < 0x7F) {
+        // A user rom-kana rule for this single character wins first.
+        var kc = String.chr(key);
+        if (Dict.hasKey(Romaji, kc) && Skk.pending == "") {
+            skkFlushPending();
+            skkEmit(Romaji[kc]);
+            return 1;
+        }
+        if (key == 0x2E) { skkFlushPending(); skkEmit("。"); return 1; }
+        if (key == 0x2C) { skkFlushPending(); skkEmit("、"); return 1; }
+        if (key == 0x2D) { skkFlushPending(); skkEmit("ー"); return 1; }
+        if (key == 0x5B) { skkFlushPending(); skkEmit("「"); return 1; }
+        if (key == 0x5D) { skkFlushPending(); skkEmit("」"); return 1; }
+    }
+
+    if (Skk.conv == 1) {
+        // Other keys inside a reading are ignored.
+        if (key >= 0x20 && key < 0x7F) {
+            return 1;
+        }
+        return 0;
+    }
+
+    if (key == 0x7F && Skk.pending != "") {
+        if (Skk.pendingShown > 0) {
+            deleteChar(0 - 1);
+            Skk.pendingShown = Skk.pendingShown - 1;
+        }
+        Skk.pending = String.substring(Skk.pending, 0,
+                                       String.charCount(Skk.pending) - 1);
+        return 1;
+    }
+
+    // A key that inserts text (SPC, RET, TAB, a digit, ...) first
+    // finishes the pending romaji, so "hon" SPC is "ほん ".
+    if ((key >= 0x20 && key < 0x7F) || key == 0x0D || key == 0x09) {
+        skkFlushPending();
+    }
+
+    return 0;
+}
+
+// Feed one romaji letter into the okurigana. The first completed
+// okurigana kana triggers conversion with the key stem+consonant.
+func skkOkuriInput(ed, ch) {
+    // Remove the currently shown okuri suffix (kana + pending romaji).
+    if (Skk.okuriShown > 0) {
+        deleteChar(0 - Skk.okuriShown);
+        Skk.okuriShown = 0;
+    }
+    // Compose into okuriKana using a local state.
+    var st = { pending: Skk.okuriPending + ch, out: Skk.okuriKana, mode: Buf.skkMode };
+    skkComposeChar(st, "");   // no-op flush of existing pending
+    // Re-run composition on the full pending by feeding one char.
+    st = { pending: Skk.okuriPending, out: Skk.okuriKana, mode: Buf.skkMode };
+    skkComposeChar(st, ch);
+    Skk.okuriKana = st.out;
+    Skk.okuriPending = st.pending;
+
+    // The first okurigana kana triggers the lookup.
+    if (Skk.conv == 1 && Skk.okuriKana != "") {
+        return skkOkuriConvert(ed);
+    }
+    skkRenderOkuri();
+    return 1;
+}
+
+// Convert using the okuri-ari key: stem + leading consonant.
+func skkOkuriConvert(ed) {
+    var key = Skk.stem + Skk.okuriConsonant;
+    Skk.reading = Skk.stem;
+    Skk.cands = skkLookup(key);
+    if (Array.size(Skk.cands) == 0) {
+        if (skkNoDictWarn(ed) == 1) {
+            skkRenderOkuri();
+            return 1;
+        }
+        return skkOkuriRegister(ed);
+    }
+    Skk.idx = 0;
+    Skk.conv = 2;
+    skkRenderOkuri();
+    return 1;
+}
+
+// Redraw the composition region for the okuri states.
+//   reading:   ▽ stem okuriKana pending
+//   candidate: ▼ candidate okuriKana pending
+func skkRenderOkuri() {
+    var mk = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk, Editor.point());
+    var body = "";
+    if (Skk.conv == 2) {
+        body = "▼" + Skk.cands[Skk.idx] + Skk.okuriKana + Skk.okuriPending;
+    } else {
+        body = "▽" + Skk.stem + Skk.okuriKana + Skk.okuriPending;
+    }
+    Editor.gotoChar(mk);
+    Editor.insert(body);
+    Skk.okuriShown = String.charCount(Skk.okuriKana) + String.charCount(Skk.okuriPending);
+    return 0;
+}
+
+// No candidate for an okuri word: ask, then insert with the okurigana.
+func skkOkuriRegister(ed) {
+    var word = readFromMinibuffer(ed, Skk.stem + Skk.okuriConsonant + " (登録): ", 0);
+    var mk = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk, Editor.point());
+    Editor.gotoChar(mk);
+    if (Type.of(word) != "string" || word == "") {
+        Editor.insert(Skk.stem + Skk.okuriKana);
+    } else {
+        skkRegister(Skk.stem + Skk.okuriConsonant, word);
+        Editor.insert(word + Skk.okuriKana);
+    }
+    skkResetComposition();
+    return 1;
+}
+
+// SPC in the reading state: look up and show the first candidate.
+func skkStartConversion(ed) {
+    var mk = Editor.markerPosition(Skk.start);
+    Skk.reading = Editor.bufferSubstring(mk + 1, Editor.point());
+    if (Skk.reading == "") {
+        return 1;
+    }
+    Skk.cands = skkLookup(Skk.reading);
+    if (Array.size(Skk.cands) == 0) {
+        if (skkNoDictWarn(ed) == 1) {
+            return 1;
+        }
+        return skkRegisterFlow(ed);
+    }
+    Skk.idx = 0;
+    Editor.deleteRegion(mk, Editor.point());
+    Editor.insert("▼" + Skk.cands[0]);
+    Skk.conv = 2;
+    skkShowCandidate(ed);
+    return 1;
+}
+
+func skkShowCandidate(ed) {
+    ed.echoMessage = "[" + (Skk.idx + 1) + "/" + Array.size(Skk.cands) + "]";
+    return 0;
+}
+
+// Replace the shown candidate with candidate i.
+func skkShowNth(i) {
+    var mk = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk, Editor.point());
+    Editor.insert("▼" + Skk.cands[i]);
+    return 0;
+}
+
+// Keys during candidate selection.
+func skkCandidateKey(ed, key) {
+    if (key == 0x20) {                            // SPC: next candidate
+        if (Skk.idx + 1 >= Array.size(Skk.cands)) {
+            if (Skk.okuri == 1) {
+                return skkOkuriRegister(ed);
+            }
+            return skkRegisterFlow(ed);
+        }
+        Skk.idx = Skk.idx + 1;
+        if (Skk.okuri == 1) {
+            skkRenderOkuri();
+        } else {
+            skkShowNth(Skk.idx);
+        }
+        skkShowCandidate(ed);
+        return 1;
+    }
+    if (key == 0x78) {                            // x: previous
+        if (Skk.idx > 0) {
+            Skk.idx = Skk.idx - 1;
+            if (Skk.okuri == 1) {
+                skkRenderOkuri();
+            } else {
+                skkShowNth(Skk.idx);
+            }
+            skkShowCandidate(ed);
+        } else {
+            // Back to the reading state.
+            var mk = Editor.markerPosition(Skk.start);
+            Editor.deleteRegion(mk, Editor.point());
+            if (Skk.okuri == 1) {
+                Skk.conv = 1;
+                skkRenderOkuri();
+            } else {
+                Editor.insert("▽" + Skk.reading);
+                Skk.conv = 1;
+            }
+            ed.echoMessage = "";
+        }
+        return 1;
+    }
+    if (key == (Term.CTRL | 0x67)) {              // C-g: back to reading
+        var mk2 = Editor.markerPosition(Skk.start);
+        Editor.deleteRegion(mk2, Editor.point());
+        Editor.insert("▽" + Skk.reading);
+        Skk.conv = 1;
+        ed.echoMessage = "Quit";
+        return 1;
+    }
+    if (key == (Term.CTRL | 0x6A) || key == 0x0D) {  // C-j / RET: commit
+        skkCommitCandidate();
+        ed.echoMessage = "";
+        return 1;
+    }
+    // Any other key commits, then is handled normally.
+    skkCommitCandidate();
+    ed.echoMessage = "";
+    return skkHandleKey(ed, key);
+}
+
+// Remove the candidate mark, fixing the text.
+func skkCommitCandidate() {
+    var mk = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk, mk + 1);
+    skkResetComposition();
+    return 0;
+}
+
+// Commit the reading as plain kana (C-j in the reading state).
+func skkCommitReading() {
+    var mk = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk, mk + 1);
+    skkResetComposition();
+    return 0;
+}
+
+// No candidate (or cycled past the end): ask for a new word.
+func skkRegisterFlow(ed) {
+    var word = readFromMinibuffer(ed, Skk.reading + " (登録): ", 0);
+    if (Type.of(word) != "string" || word == "") {
+        // Back to the reading state.
+        var mk = Editor.markerPosition(Skk.start);
+        Editor.deleteRegion(mk, Editor.point());
+        Editor.insert("▽" + Skk.reading);
+        Skk.conv = 1;
+        return 1;
+    }
+    skkRegister(Skk.reading, word);
+    var mk2 = Editor.markerPosition(Skk.start);
+    Editor.deleteRegion(mk2, Editor.point());
+    Editor.insert(word);
+    skkResetComposition();
+    ed.echoMessage = "Registered: " + word;
+    return 1;
+}

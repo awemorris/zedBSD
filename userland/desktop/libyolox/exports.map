@@ -1,0 +1,25 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls yolox.h declares leave the library. */
+{
+	global:
+		yolox_class_name;
+		yolox_collect;
+		yolox_detect;
+		yolox_model_free;
+		yolox_model_load;
+		yolox_reason;
+		yolox_runner_backend;
+		yolox_runner_config_default;
+		yolox_runner_create;
+		yolox_runner_free;
+		yolox_runner_read_tensor;
+		yolox_submit_buffer;
+	local:
+		*;
+};

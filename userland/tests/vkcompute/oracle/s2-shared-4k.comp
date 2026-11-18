@@ -1,0 +1,19 @@
+#version 450
+// Stage 2: 4 KiB of shared memory, written in rows and read back in columns after a barrier.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint s[1024];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	uint v = src[gl_GlobalInvocationID.x];
+	for (uint k = 0u; k < 16u; k++)
+		s[l * 16u + k] = v + k;
+	barrier();
+	uint sum = 0u;
+	for (uint k = 0u; k < 16u; k++)
+		sum = sum + s[k * 64u + l] * (k + 1u);
+	o[gl_GlobalInvocationID.x] = sum;
+}

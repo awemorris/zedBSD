@@ -1,0 +1,554 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// A Lisp-to-Noct source compiler.
+//
+// Global defuns with no free variables and no nested lambdas are
+// translated into Noct source functions and registered on the running
+// VM with System.registerSource, so they become JIT-eligible. Control
+// flow (if/cond/progn/let/while/and/or/setq) becomes native Noct code;
+// non-tail function applications still go through lispApplyNamed. A tail
+// application updates the evaluator's trampoline state, so compiled and
+// interpreted functions can tail-call each other without growing VM frames.
+// Anything the compiler cannot handle leaves the defun in the interpreter.
+//
+// The value representation is shared between the interpreter and
+// compiled code (int / string / array / cons-dict), so no marshalling
+// is needed at the boundary.
+//
+
+func lispCompileInit() {
+    LispCompiled = {};       // name -> compiled Noct function
+    LispCompileSeq = 0;      // unique id for generated function names
+    return 0;
+}
+
+// Try to compile a global defun by name. Returns 1 on success.
+func lispCompileDefun(name) {
+    if (!Dict.hasKey(LispFuncs, name)) {
+        return 0;
+    }
+    var clo = LispFuncs[name];
+    if (Type.of(clo) != "dict" || !Dict.hasKey(clo, "lparams")) {
+        return 0;
+    }
+    // Only simple parameter lists (no &optional/&rest) for now.
+    for (p in clo.lparams) {
+        if (p == "&optional" || p == "&rest") {
+            return 0;
+        }
+    }
+
+    var cx = {
+        ok: 1,
+        tmp: 0,
+        locals: {},          // Lisp var name -> Noct var name
+        src: ""
+    };
+    // Parameters are the initial locals.
+    var params = [];
+    for (p in clo.lparams) {
+        var nn = "lv_" + p;
+        cx.locals[p] = nn;
+        Array.push(params, nn);
+    }
+
+    // Compile the body as a progn.
+    var bodyNode = [];
+    Array.push(bodyNode, { sym: "progn" });
+    for (b in clo.lbody) {
+        Array.push(bodyNode, b);
+    }
+    lispcTail(cx, bodyNode, "__lisp_tail_state");
+    if (cx.ok == 0) {
+        return 0;
+    }
+
+    LispCompileSeq = LispCompileSeq + 1;
+    var fname = "lispc_" + LispCompileSeq;
+    var src = "func " + fname + "(__lisp_tail_state";
+    var i = 0;
+    while (i < Array.size(params)) {
+        src = src + ", " + params[i];
+        i = i + 1;
+    }
+    src = src + ") {\n";
+    src = src + cx.src;
+    src = src + "}\n";
+
+    // Register on the VM and grab the callable.
+    System.registerSource(src);
+    if (Global.hasVariable(fname) == 0) {
+        return 0;
+    }
+    LispCompiled[name] = lispcResolve(fname);
+    return 1;
+}
+
+// Emit a line of Noct into the current function body.
+func lispcEmit(cx, line) {
+    cx.src = cx.src + "    " + line + "\n";
+    return 0;
+}
+
+func lispcTmp(cx) {
+    cx.tmp = cx.tmp + 1;
+    return "t" + cx.tmp;
+}
+
+// Compile a Lisp expression; returns a Noct expression string whose
+// value is the result. Statements are emitted into cx.src.
+func lispcExpr(cx, node) {
+    if (cx.ok == 0) {
+        return "0";
+    }
+    var t = Type.of(node);
+    if (t == "int") {
+        return "" + node;
+    }
+    if (t == "string") {
+        return lispcStringLit(node);
+    }
+    if (t == "dict") {
+        if (Dict.hasKey(node, "sym")) {
+            var nm = node.sym;
+            if (Dict.hasKey(cx.locals, nm)) {
+                return cx.locals[nm];
+            }
+            // A free variable: not compilable.
+            cx.ok = 0;
+            return "0";
+        }
+        if (Dict.hasKey(node, "q")) {
+            return lispcQuote(cx, node.q);
+        }
+        // vectors etc: bail.
+        cx.ok = 0;
+        return "0";
+    }
+    if (t != "array") {
+        cx.ok = 0;
+        return "0";
+    }
+    if (Array.size(node) == 0) {
+        return "0";
+    }
+
+    var head = node[0];
+    if (Type.of(head) != "dict" || !Dict.hasKey(head, "sym")) {
+        // ((lambda ...) ...) or computed head: bail.
+        cx.ok = 0;
+        return "0";
+    }
+    var op = head.sym;
+
+    if (op == "quote") { return lispcQuote(cx, node[1]); }
+    if (op == "if") { return lispcIf(cx, node); }
+    if (op == "cond") { return lispcCond(cx, node); }
+    if (op == "progn") { return lispcProgn(cx, node, 1); }
+    if (op == "setq") { return lispcSetq(cx, node); }
+    if (op == "let") { return lispcLet(cx, node, 0); }
+    if (op == "let*") { return lispcLet(cx, node, 1); }
+    if (op == "and") { return lispcAndOr(cx, node, "and"); }
+    if (op == "or") { return lispcAndOr(cx, node, "or"); }
+    if (op == "while") { return lispcWhile(cx, node); }
+    if (op == "lambda" || op == "function" || op == "defun" ||
+        op == "defvar" || op == "defconst" || op == "interactive") {
+        cx.ok = 0;
+        return "0";
+    }
+
+    // A named function application.
+    var argExprs = [];
+    var i = 1;
+    while (i < Array.size(node)) {
+        Array.push(argExprs, lispcExpr(cx, node[i]));
+        i = i + 1;
+    }
+    var arr = "[";
+    var j = 0;
+    while (j < Array.size(argExprs)) {
+        if (j > 0) { arr = arr + ", "; }
+        arr = arr + argExprs[j];
+        j = j + 1;
+    }
+    arr = arr + "]";
+    var t2 = lispcTmp(cx);
+    lispcEmit(cx, "var " + t2 + " = lispApplyNamed(" + lispcStringLit(op) + ", " + arr + ");");
+    return t2;
+}
+
+// Compile an expression whose value is returned directly by the current Lisp
+// function. Applications schedule the next trampoline step; other values are
+// returned normally. Every generated path terminates with return.
+func lispcTail(cx, node, stateName) {
+    if (cx.ok == 0) { return 0; }
+    if (Type.of(node) == "array" && Array.size(node) > 0) {
+        var head = node[0];
+        if (Type.of(head) == "dict" && Dict.hasKey(head, "sym")) {
+            var op = head.sym;
+            if (op == "if") { return lispcTailIf(cx, node, stateName); }
+            if (op == "cond") { return lispcTailCond(cx, node, stateName); }
+            if (op == "progn") { return lispcTailBody(cx, node, 1, stateName); }
+            if (op == "let") { return lispcTailLet(cx, node, 0, stateName); }
+            if (op == "let*") { return lispcTailLet(cx, node, 1, stateName); }
+            if (op == "and") { return lispcTailAndOr(cx, node, "and", stateName); }
+            if (op == "or") { return lispcTailAndOr(cx, node, "or", stateName); }
+            if (op != "quote" && op != "setq" && op != "while" &&
+                op != "lambda" && op != "function" && op != "defun" &&
+                op != "defvar" && op != "defconst" && op != "interactive") {
+                return lispcTailCall(cx, node, op, stateName);
+            }
+        }
+    }
+    var value = lispcExpr(cx, node);
+    if (cx.ok == 1) {
+        lispcEmit(cx, "return " + value + ";");
+    }
+    return 0;
+}
+
+func lispcTailCall(cx, node, op, stateName) {
+    var argExprs = [];
+    var i = 1;
+    while (i < Array.size(node)) {
+        Array.push(argExprs, lispcExpr(cx, node[i]));
+        i = i + 1;
+    }
+    var arr = "[";
+    var j = 0;
+    while (j < Array.size(argExprs)) {
+        if (j > 0) { arr = arr + ", "; }
+        arr = arr + argExprs[j];
+        j = j + 1;
+    }
+    arr = arr + "]";
+    if (cx.ok == 1) {
+        lispcEmit(cx, "lispScheduleTail(" + stateName + ", " +
+                  lispcStringLit(op) + ", " + arr + ");");
+        lispcEmit(cx, "return 0;");
+    }
+    return 0;
+}
+
+func lispcTailBody(cx, node, from, stateName) {
+    if (from >= Array.size(node)) {
+        lispcEmit(cx, "return 0;");
+        return 0;
+    }
+    var i = from;
+    while (i + 1 < Array.size(node)) {
+        lispcExpr(cx, node[i]);
+        i = i + 1;
+    }
+    return lispcTail(cx, node[i], stateName);
+}
+
+func lispcTailIf(cx, node, stateName) {
+    var cv = lispcExpr(cx, node[1]);
+    lispcEmit(cx, "if (lispTruthy(" + cv + ")) {");
+    if (Array.size(node) > 2) {
+        lispcTail(cx, node[2], stateName);
+    } else {
+        lispcEmit(cx, "return 0;");
+    }
+    lispcEmit(cx, "} else {");
+    lispcTailBody(cx, node, 3, stateName);
+    lispcEmit(cx, "}");
+    return 0;
+}
+
+func lispcTailCond(cx, node, stateName) {
+    var depth = 0;
+    var i = 1;
+    while (i < Array.size(node)) {
+        var clause = node[i];
+        var cv = lispcExpr(cx, clause[0]);
+        lispcEmit(cx, "if (lispTruthy(" + cv + ")) {");
+        if (Array.size(clause) == 1) {
+            lispcEmit(cx, "return " + cv + ";");
+        } else {
+            lispcTailBody(cx, clause, 1, stateName);
+        }
+        lispcEmit(cx, "} else {");
+        depth = depth + 1;
+        i = i + 1;
+    }
+    lispcEmit(cx, "return 0;");
+    var d = 0;
+    while (d < depth) {
+        lispcEmit(cx, "}");
+        d = d + 1;
+    }
+    return 0;
+}
+
+func lispcTailLet(cx, node, star, stateName) {
+    var names = [];
+    var saved = {};
+    for (b in node[1]) {
+        var lispName = "";
+        var valExpr = "0";
+        if (Type.of(b) == "dict" && Dict.hasKey(b, "sym")) {
+            lispName = b.sym;
+        } else {
+            lispName = b[0].sym;
+            if (Array.size(b) > 1) {
+                valExpr = lispcExpr(cx, b[1]);
+            }
+        }
+        var nn = "ll" + lispcTmp(cx);
+        lispcEmit(cx, "var " + nn + " = " + valExpr + ";");
+        Array.push(names, lispName);
+        if (Dict.hasKey(cx.locals, lispName)) {
+            saved[lispName] = cx.locals[lispName];
+        } else {
+            saved[lispName] = 0;
+        }
+        cx.locals[lispName] = nn;
+    }
+    lispcTailBody(cx, node, 2, stateName);
+    for (nm in names) {
+        if (Type.of(saved[nm]) == "string") {
+            cx.locals[nm] = saved[nm];
+        } else {
+            Dict.remove(cx.locals, nm);
+        }
+    }
+    return 0;
+}
+
+func lispcTailAndOr(cx, node, kind, stateName) {
+    if (Array.size(node) == 1) {
+        if (kind == "and") { lispcEmit(cx, "return 1;"); }
+        else { lispcEmit(cx, "return 0;"); }
+        return 0;
+    }
+    var i = 1;
+    while (i + 1 < Array.size(node)) {
+        var value = lispcExpr(cx, node[i]);
+        if (kind == "and") {
+            lispcEmit(cx, "if (!lispTruthy(" + value + ")) { return 0; }");
+        } else {
+            lispcEmit(cx, "if (lispTruthy(" + value + ")) { return " + value + "; }");
+        }
+        i = i + 1;
+    }
+    return lispcTail(cx, node[i], stateName);
+}
+
+func lispcProgn(cx, node, from) {
+    var last = "0";
+    var i = from;
+    while (i < Array.size(node)) {
+        last = lispcExpr(cx, node[i]);
+        i = i + 1;
+    }
+    return last;
+}
+
+func lispcIf(cx, node) {
+    var cv = lispcExpr(cx, node[1]);
+    var res = lispcTmp(cx);
+    lispcEmit(cx, "var " + res + " = 0;");
+    lispcEmit(cx, "if (lispTruthy(" + cv + ")) {");
+    var av = lispcExpr(cx, node[2]);
+    lispcEmit(cx, "    " + res + " = " + av + ";");
+    lispcEmit(cx, "} else {");
+    var bv = lispcProgn(cx, node, 3);
+    lispcEmit(cx, "    " + res + " = " + bv + ";");
+    lispcEmit(cx, "}");
+    return res;
+}
+
+func lispcCond(cx, node) {
+    var res = lispcTmp(cx);
+    lispcEmit(cx, "var " + res + " = 0;");
+    var depth = 0;
+    var i = 1;
+    while (i < Array.size(node)) {
+        var clause = node[i];
+        var cv = lispcExpr(cx, clause[0]);
+        lispcEmit(cx, "if (lispTruthy(" + cv + ")) {");
+        if (Array.size(clause) == 1) {
+            lispcEmit(cx, "    " + res + " = " + cv + ";");
+        } else {
+            var bv = lispcProgn(cx, clause, 1);
+            lispcEmit(cx, "    " + res + " = " + bv + ";");
+        }
+        lispcEmit(cx, "} else {");
+        depth = depth + 1;
+        i = i + 1;
+    }
+    var d = 0;
+    while (d < depth) {
+        lispcEmit(cx, "}");
+        d = d + 1;
+    }
+    return res;
+}
+
+func lispcSetq(cx, node) {
+    var res = "0";
+    var i = 1;
+    while (i + 1 < Array.size(node) + 1 && i + 1 <= Array.size(node)) {
+        var nameNode = node[i];
+        if (Type.of(nameNode) != "dict" || !Dict.hasKey(nameNode, "sym")) {
+            cx.ok = 0;
+            return "0";
+        }
+        var nm = nameNode.sym;
+        if (!Dict.hasKey(cx.locals, nm)) {
+            // Assigning a global: not compilable.
+            cx.ok = 0;
+            return "0";
+        }
+        var v = lispcExpr(cx, node[i + 1]);
+        lispcEmit(cx, cx.locals[nm] + " = " + v + ";");
+        res = cx.locals[nm];
+        i = i + 2;
+    }
+    return res;
+}
+
+func lispcLet(cx, node, star) {
+    // Evaluate bindings; for let (not let*) evaluate values before
+    // binding, but with unique Noct names either way there is no
+    // clash, so sequential emission is fine.
+    var names = [];
+    var saved = {};
+    for (b in node[1]) {
+        var lispName = "";
+        var valExpr = "0";
+        if (Type.of(b) == "dict" && Dict.hasKey(b, "sym")) {
+            lispName = b.sym;
+        } else {
+            lispName = b[0].sym;
+            if (Array.size(b) > 1) {
+                if (star == 1) {
+                    valExpr = lispcExpr(cx, b[1]);
+                } else {
+                    valExpr = lispcExpr(cx, b[1]);
+                }
+            }
+        }
+        var nn = "ll" + lispcTmp(cx);
+        lispcEmit(cx, "var " + nn + " = " + valExpr + ";");
+        Array.push(names, lispName);
+        // Save any shadowed binding.
+        if (Dict.hasKey(cx.locals, lispName)) {
+            saved[lispName] = cx.locals[lispName];
+        } else {
+            saved[lispName] = 0;
+        }
+        cx.locals[lispName] = nn;
+    }
+    var res = lispcProgn(cx, node, 2);
+    // Restore shadowed bindings.
+    for (nm in names) {
+        if (Type.of(saved[nm]) == "string") {
+            cx.locals[nm] = saved[nm];
+        } else {
+            Dict.remove(cx.locals, nm);
+        }
+    }
+    return res;
+}
+
+func lispcAndOr(cx, node, kind) {
+    var res = lispcTmp(cx);
+    if (kind == "and") {
+        lispcEmit(cx, "var " + res + " = 1;");
+    } else {
+        lispcEmit(cx, "var " + res + " = 0;");
+    }
+    var depth = 0;
+    var i = 1;
+    while (i < Array.size(node)) {
+        var v = lispcExpr(cx, node[i]);
+        lispcEmit(cx, res + " = " + v + ";");
+        if (kind == "and") {
+            lispcEmit(cx, "if (lispTruthy(" + res + ")) {");
+        } else {
+            lispcEmit(cx, "if (!lispTruthy(" + res + ")) {");
+        }
+        depth = depth + 1;
+        i = i + 1;
+    }
+    if (kind == "or") {
+        // nothing; res holds the last falsy or the truthy value
+    }
+    var d = 0;
+    while (d < depth) {
+        lispcEmit(cx, "}");
+        d = d + 1;
+    }
+    return res;
+}
+
+func lispcWhile(cx, node) {
+    // The condition must be re-evaluated each iteration, so its
+    // statements go inside the loop via a helper block.
+    lispcEmit(cx, "while (true) {");
+    var cv = lispcExpr(cx, node[1]);
+    lispcEmit(cx, "if (!lispTruthy(" + cv + ")) { break; }");
+    lispcProgn(cx, node, 2);
+    lispcEmit(cx, "}");
+    return "0";
+}
+
+// Compile a quoted datum to a Noct literal expression.
+func lispcQuote(cx, node) {
+    var t = Type.of(node);
+    if (t == "int") {
+        return "" + node;
+    }
+    if (t == "string") {
+        return lispcStringLit(node);
+    }
+    if (t == "dict") {
+        if (Dict.hasKey(node, "sym")) {
+            return lispcStringLit(node.sym);
+        }
+        cx.ok = 0;
+        return "0";
+    }
+    if (t == "array") {
+        var out = "[";
+        var i = 0;
+        while (i < Array.size(node)) {
+            if (i > 0) { out = out + ", "; }
+            out = out + lispcQuote(cx, node[i]);
+            i = i + 1;
+        }
+        return out + "]";
+    }
+    cx.ok = 0;
+    return "0";
+}
+
+// A Noct string literal with escaping.
+func lispcStringLit(s) {
+    var out = "\"";
+    var n = String.charCount(s);
+    var i = 0;
+    while (i < n) {
+        var c = String.charAt(s, i);
+        if (c == "\"") {
+            out = out + "\\\"";
+        } else if (c == "\\") {
+            out = out + "\\\\";
+        } else if (String.charCodeAt(s, i) == 0x0A) {
+            out = out + "\\n";
+        } else {
+            out = out + c;
+        }
+        i = i + 1;
+    }
+    return out + "\"";
+}
+
+// Resolve a compiled function's callable by its global name.
+func lispcResolve(fname) {
+    return Global.get(fname);
+}

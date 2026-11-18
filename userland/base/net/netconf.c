@@ -1,0 +1,2201 @@
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD userland netconf component.
+ */
+
+#include "userland/base/net/netconf.h"
+#include "userland/base/net/publication-trace.h"
+
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define NETCONF_LINE_MAX 512
+
+enum section { SECTION_NONE, SECTION_INTERFACES, SECTION_ROUTES, SECTION_DNS };
+enum subsection {
+	SUBSECTION_NONE,
+	SUBSECTION_IPV4,
+	SUBSECTION_ADDRESSES,
+	SUBSECTION_MEMBERS,
+	SUBSECTION_DNS_SERVERS,
+	SUBSECTION_IPV6,
+	SUBSECTION_ADDRESSES6
+};
+
+struct parser {
+	struct netconf *configuration;
+	char *error;
+	size_t error_capacity;
+	unsigned line;
+	enum section section;
+	enum subsection subsection;
+	struct netconf_interface *interface;
+	struct netconf_address *address;
+	struct netconf_route *route;
+	unsigned top_seen;
+	unsigned interface_seen;
+	unsigned ipv4_seen;
+	unsigned ipv6_seen;
+	unsigned dns_seen;
+	unsigned route_seen;
+};
+
+static int validate_graph(const struct netconf *configuration, size_t index, unsigned *visiting, unsigned *visited);
+static struct netconf_interface *find_interface(const struct netconf *configuration, const char *name);
+static int fail(struct parser *parser, const char *format, ...);
+static int parse_content(struct parser *parser, unsigned indent, char *text);
+static int parse_top(struct parser *parser, char *text);
+static int split_mapping(struct parser *parser, char *text, char **key, char **value);
+static int set_once(struct parser *parser, unsigned *bits, unsigned bit, const char *key);
+static int unsigned_value(const char *text, unsigned minimum, unsigned maximum, unsigned *result);
+static int new_interface(struct parser *parser, char *text);
+static int name_valid(const char *name);
+static int interface_property(struct parser *parser, char *text);
+static int boolean_value(const char *text, int *result);
+static int ipv4_property(struct parser *parser, char *text);
+static int member_entry(struct parser *parser, char *text);
+static int new_address(struct parser *parser, char *text);
+static int ipv4_valid(const char *text);
+static int address_property(struct parser *parser, char *text);
+static int route_entry(struct parser *parser, char *text, int continuation);
+static int ipv4_prefix_valid(const char *text);
+static int copy_value(struct parser *parser, char *output, size_t capacity, const char *value, const char *what);
+static int dns_property(struct parser *parser, char *text);
+static int dns_entry(struct parser *parser, char *text);
+static int ipv6_property(struct parser *parser, char *text);
+static int ipv6_valid(const char *text);
+static int ipv6_prefix_valid(const char *text);
+static int ipv6_link_local(const char *text);
+static int write_ipv6(FILE *stream, const struct netconf_interface *item);
+static const char *type_name(enum netconf_interface_type type);
+static const char *dns_name(enum netconf_dns_mode mode);
+
+/*
+ * Implements the netconf validate operation.
+ */
+int
+netconf_validate(
+	const struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	const struct netconf_interface *item;
+	const struct netconf_route *route;
+	size_t index, address;
+	unsigned visiting, visited;
+	int gateway6;
+	int destination6;
+
+	visiting = 0;
+	visited = 0;
+#define VALIDATE_ERROR(...)                                                    \
+	do {                                                                   \
+		if (error != NULL && capacity != 0)                            \
+			(void)snprintf(error, capacity, __VA_ARGS__);          \
+		errno = EINVAL;                                                \
+		return -1;                                                     \
+	} while (0)
+
+	/* Handles the configuration condition. */
+	if (configuration->version != 1)
+		VALIDATE_ERROR("version must be 1");
+
+	/* Process each remaining element. */
+	for (index = 0; index < configuration->interface_count; index++) {
+		item = &configuration->interfaces[index];
+
+		/* Handles the item condition. */
+		if (item->type == NETCONF_INTERFACE_UNSET || !item->enabled_set) {
+			VALIDATE_ERROR("interface %s lacks type or enabled",
+				       item->name);
+		}
+
+		/* Handles the item condition. */
+		if (item->dhcp && item->address_count != 0) {
+			VALIDATE_ERROR(
+			    "interface %s mixes DHCP and static addresses",
+			    item->name);
+		}
+
+		/* Handles the item condition. */
+		if (item->dhcp_timeout_set && !item->dhcp) {
+			VALIDATE_ERROR("interface %s has timeout without DHCP",
+				       item->name);
+		}
+
+		/* Process each remaining element. */
+		for (address = 0; address < item->address_count; address++) {
+			/* Handles the item condition. */
+			if (item->addresses[address].prefix_length > 32) {
+				VALIDATE_ERROR(
+				    "interface %s address lacks prefix",
+				    item->name);
+			}
+		}
+
+		/* Each static IPv6 address has its prefix length (ws130-p005). */
+		for (address = 0; address < item->ipv6.address_count; address++) {
+			if (item->ipv6.addresses[address].prefix_length > 128U)
+				VALIDATE_ERROR("interface %s IPv6 address lacks prefix", item->name);
+		}
+
+		/* Handles the item condition. */
+		if (item->type == NETCONF_INTERFACE_VLAN) {
+			/* Handles the item condition. */
+			if (*item->parent == '\0' || !item->vlan_id_set) {
+				VALIDATE_ERROR("VLAN %s lacks parent or ID",
+					       item->name);
+			}
+		} else if (*item->parent != '\0' || item->vlan_id_set) {
+			VALIDATE_ERROR("non-VLAN %s has VLAN fields",
+				       item->name);
+		}
+
+		/* Handles the item condition. */
+		if (item->type != NETCONF_INTERFACE_BRIDGE &&
+		    item->member_count != 0)
+			VALIDATE_ERROR("non-bridge %s has members", item->name);
+
+		/* An MTU is within the bounds any device could take. */
+		if (item->mtu_set &&
+		    (item->mtu < NETCONF_MTU_MIN || item->mtu > NETCONF_MTU_MAX))
+			VALIDATE_ERROR("interface %s mtu is outside 1280 through 65535", item->name);
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < configuration->route_count; index++) {
+		/* Handles the configuration condition. */
+		if (*configuration->routes[index].destination == '\0' ||
+		    *configuration->routes[index].gateway == '\0')
+			VALIDATE_ERROR("route lacks destination or gateway");
+
+		/* An IPv6 destination goes through an IPv6 gateway, and the other way (ws130-p005). */
+		route = &configuration->routes[index];
+		gateway6 = ipv6_valid(route->gateway);
+		destination6 = strchr(route->destination, ':') != NULL;
+		if (destination6 && !gateway6)
+			VALIDATE_ERROR("IPv6 route %s through an IPv4 gateway", route->destination);
+		if (gateway6 && !destination6 && strcmp(route->destination, "default") != 0)
+			VALIDATE_ERROR("IPv4 route %s through an IPv6 gateway", route->destination);
+
+		/* A link-local gateway is reached through its interface. */
+		if (ipv6_link_local(route->gateway) && route->interface[0] == '\0')
+			VALIDATE_ERROR("route through %s lacks interface", route->gateway);
+	}
+
+	/* Handles the configuration condition. */
+	if (configuration->dns_mode == NETCONF_DNS_UNSET)
+		VALIDATE_ERROR("DNS mode is required");
+
+	/* Handles the configuration condition. */
+	if (configuration->dns_mode == NETCONF_DNS_STATIC &&
+	    configuration->dns_count == 0)
+		VALIDATE_ERROR("static DNS requires servers");
+
+	/* Process each remaining element. */
+	for (index = 0; index < configuration->interface_count; index++) {
+		/* Handles a failed validate graph operation. */
+		if (validate_graph(configuration, index, &visiting, &visited) !=
+		    0)
+			VALIDATE_ERROR("invalid or cyclic interface topology");
+	}
+
+	/* Reports successful completion. */
+	return 0;
+#undef VALIDATE_ERROR
+}
+
+/*
+ * Implements the netconf parse operation.
+ */
+int
+netconf_parse(
+	FILE *stream,
+	struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	int function_result;
+	char *cursor, *end, *comment;
+	unsigned indent;
+	struct parser parser;
+	char line[NETCONF_LINE_MAX];
+
+	/* Handles the stream availability. */
+	if (stream == NULL || configuration == NULL) {
+		errno = EINVAL;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+	memset(configuration, 0, sizeof(*configuration));
+	memset(&parser, 0, sizeof(parser));
+
+	/* Process input until it is exhausted. */
+	parser.configuration = configuration;
+	parser.error = error;
+	parser.error_capacity = capacity;
+	while (fgets(line, sizeof(line), stream) != NULL) {
+		indent = 0;
+		parser.line++;
+
+		/* Handles a failed strchr operation. */
+		if (strchr(line, '\n') == NULL && !feof(stream)) {
+			/* Obtains the fail result. */
+			function_result = fail(&parser, "line is too long");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Continue while the operation condition remains true. */
+		end = line + strlen(line);
+		while (end > line &&
+		       (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' '))
+
+		/* Process each element required by the operation. */
+			*--end = '\0';
+		for (cursor = line; *cursor == ' '; cursor++)
+			indent++;
+
+		/* Handles a failed strchr operation. */
+		if (*cursor == '\t' || strchr(cursor, '\t') != NULL) {
+			/* Obtains the fail result. */
+			function_result = fail(&parser, "tabs are forbidden");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		comment = strchr(cursor, '#');
+
+		/* Handles the comment availability. */
+		if (comment != NULL &&
+		    (comment == cursor || comment[-1] == ' ')) {
+			/* Continue while the operation condition remains true. */
+			*comment = '\0';
+			end = comment;
+			while (end > cursor && end[-1] == ' ')
+				*--end = '\0';
+		}
+
+		/* Checks the current cursor position. */
+		if (*cursor == '\0')
+			continue;
+
+		/* Handles the indent condition. */
+		if ((indent & 1U) != 0) {
+			/* Obtains the fail result. */
+			function_result = fail(&parser,
+				    "indentation must use two-space units");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles a failed strchr operation. */
+		if (strchr(cursor, '{') != NULL ||
+		    strchr(cursor, '}') != NULL ||
+		    strchr(cursor, '[') != NULL ||
+		    strchr(cursor, ']') != NULL ||
+		    strchr(cursor, '&') != NULL ||
+		    strchr(cursor, '*') != NULL ||
+		    strncmp(cursor, "---", 3) == 0) {
+			/* Obtains the fail result. */
+			function_result = fail(&parser, "unsupported YAML feature");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles a failed parse content operation. */
+		if (parse_content(&parser, indent, cursor) != 0)
+			return -1;
+	}
+
+	/* Handles an operation failure. */
+	if (ferror(stream)) {
+		errno = EIO;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	/* Checks the parser state. */
+	if ((parser.top_seen & 3U) != 3U) {
+		/* Obtains the fail result. */
+		function_result = fail(&parser, "version and interfaces are required");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Obtains the netconf validate result. */
+	function_result = netconf_validate(configuration, error, capacity);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/*
+ * Implements the netconf load operation.
+ */
+int
+netconf_load(
+	const char *path,
+	struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	FILE *stream;
+	int result;
+
+	stream = fopen(path, "r");
+
+	/* Handles the stream availability. */
+	if (stream == NULL)
+		return -1;
+	result = netconf_parse(stream, configuration, error, capacity);
+
+	/* Handles a failed fclose operation. */
+	if (fclose(stream) != 0 && result == 0)
+		return -1;
+
+	/* Returns the computed result. */
+	return result;
+}
+
+/*
+ * Implements the netconf write operation.
+ */
+int
+netconf_write(
+	FILE *stream,
+	const struct netconf *configuration)
+{
+	int function_result;
+	const struct netconf_interface *item;
+	size_t index, child;
+	char error[128];
+	int written;
+
+	/* Handles an operation failure. */
+	if (stream == NULL || configuration == NULL ||
+	    netconf_validate(configuration, error, sizeof(error)) != 0)
+
+		/* Reports operation failure. */
+		return -1;
+
+	/* Handles a failed fprintf operation. */
+	if (fprintf(stream, "version: 1\n\ninterfaces:\n") < 0)
+		return -1;
+
+	/* Process each remaining element. */
+	for (index = 0; index < configuration->interface_count; index++) {
+		item = &configuration->interfaces[index];
+
+		/* Handles a failed fprintf operation. */
+		if (fprintf(stream, "  %s:\n    type: %s\n    enabled: %s\n",
+			    item->name, type_name(item->type),
+			    item->enabled ? "true" : "false") < 0)
+
+			/* Reports operation failure. */
+			return -1;
+
+		/* Handles a failed fprintf operation. */
+		if (*item->parent != '\0' &&
+		    fprintf(stream, "    parent: %s\n", item->parent) < 0)
+
+			/* Reports operation failure. */
+			return -1;
+
+		/* Handles a failed fprintf operation. */
+		if (item->vlan_id_set &&
+		    fprintf(stream, "    vlan-id: %u\n", item->vlan_id) < 0)
+
+			/* Reports operation failure. */
+			return -1;
+
+		/* The MTU, when the file names one. */
+		if (item->mtu_set) {
+			written = fprintf(stream, "    mtu: %u\n", item->mtu);
+			if (written < 0)
+				return -1;
+		}
+
+		/* Handles the item condition. */
+		if (item->member_count != 0) {
+			/* Handles the end-of-file condition. */
+			if (fputs("    members:\n", stream) == EOF)
+				return -1;
+
+			/* Process each remaining element. */
+			for (child = 0; child < item->member_count; child++) {
+				/* Handles a failed fprintf operation. */
+				if (fprintf(stream, "      - %s\n",
+					    item->members[child]) < 0)
+
+					/* Reports operation failure. */
+					return -1;
+			}
+		}
+
+		/* Handles the item condition. */
+		if (item->dhcp_set || item->address_count != 0) {
+			/* Handles the end-of-file condition. */
+			if (fputs("    ipv4:\n", stream) == EOF)
+				return -1;
+
+			/* Handles a failed fprintf operation. */
+			if (item->dhcp_set &&
+			    fprintf(stream, "      dhcp: %s\n",
+				    item->dhcp ? "true" : "false") < 0)
+
+				/* Reports operation failure. */
+				return -1;
+
+			/* Handles a failed fprintf operation. */
+			if (item->dhcp_timeout_set &&
+			    fprintf(stream, "      dhcp-timeout: %u\n",
+				    item->dhcp_timeout) < 0)
+
+				/* Reports operation failure. */
+				return -1;
+
+			/* Handles the item condition. */
+			if (item->address_count != 0) {
+				/* Handles the end-of-file condition. */
+				if (fputs("      addresses:\n", stream) == EOF)
+					return -1;
+
+				/* Process each remaining element. */
+				for (child = 0; child < item->address_count;
+				     child++) {
+					/* Handles a failed fprintf operation. */
+					if (fprintf(
+						stream,
+						"        - address: %s\n"
+						"          prefix-length: %u\n",
+						item->addresses[child].address,
+						item->addresses[child]
+						    .prefix_length) < 0)
+
+						/* Reports operation failure. */
+						return -1;
+				}
+			}
+		}
+
+		/* The IPv6 section, its keys that are not the defaults (ws130-p005). */
+		if (write_ipv6(stream, item) != 0)
+			return -1;
+
+		/* Handles the end-of-file condition. */
+		if (fputc('\n', stream) == EOF)
+			return -1;
+	}
+
+	/* Handles the configuration condition. */
+	if (configuration->route_count != 0) {
+		/* Handles the end-of-file condition. */
+		if (fputs("routes:\n", stream) == EOF)
+			return -1;
+
+		/* Process each remaining element. */
+		for (index = 0; index < configuration->route_count; index++) {
+			/* Handles a failed fprintf operation. */
+			if (fprintf(stream,
+				    "  - destination: %s\n    gateway: %s\n",
+				    configuration->routes[index].destination,
+				    configuration->routes[index].gateway) < 0)
+
+				/* Reports operation failure. */
+				return -1;
+
+			/* The interface of a link-local IPv6 gateway (ws130-p005). */
+			if (configuration->routes[index].interface[0] != '\0' &&
+			    fprintf(stream, "    interface: %s\n", configuration->routes[index].interface) < 0)
+				return -1;
+		}
+
+		/* Handles the end-of-file condition. */
+		if (fputc('\n', stream) == EOF)
+			return -1;
+	}
+
+	/* Handles a failed fprintf operation. */
+	if (fprintf(stream, "dns:\n  mode: %s\n",
+		    dns_name(configuration->dns_mode)) < 0)
+
+		/* Reports operation failure. */
+		return -1;
+
+	/* Handles the configuration condition. */
+	if (configuration->dns_count != 0) {
+		/* Handles the end-of-file condition. */
+		if (fputs("  servers:\n", stream) == EOF)
+			return -1;
+
+		/* Process each remaining element. */
+		for (index = 0; index < configuration->dns_count; index++) {
+			/* Handles a failed fprintf operation. */
+			if (fprintf(stream, "    - %s\n",
+				    configuration->dns_servers[index]) < 0)
+
+				/* Reports operation failure. */
+				return -1;
+		}
+	}
+
+	/* Computes the function result. */
+	function_result = ferror(stream) ? -1 : 0;
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Acquires the permanent writer lock without replacing its inode. */
+int
+netconf_writer_lock(
+	char *error,
+	size_t capacity)
+{
+	struct flock lock;
+	struct stat status;
+	int descriptor;
+	int saved;
+
+	descriptor = open(NETCONF_LOCK_PATH,
+	    O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (descriptor < 0)
+		goto failed;
+	if (fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) ||
+	    status.st_nlink != 1 || status.st_uid != geteuid()) {
+		saved = errno != 0 ? errno : EINVAL;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	if ((status.st_mode & 07777U) != 0600U &&
+	    fchmod(descriptor, 0600) != 0) {
+		saved = errno;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	if (fcntl(descriptor, F_SETLK, &lock) != 0) {
+		saved = errno;
+		(void)close(descriptor);
+		errno = saved;
+		goto failed;
+	}
+	if (error != NULL && capacity != 0U)
+		error[0] = '\0';
+	return descriptor;
+
+failed:
+	if (error != NULL && capacity != 0U)
+		(void)snprintf(error, capacity, "%s", strerror(errno));
+	return -1;
+}
+
+/* Releases one writer lock descriptor. */
+int
+netconf_writer_unlock(
+	int descriptor)
+{
+	struct flock lock;
+	int result;
+	int saved;
+
+	if (descriptor < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_UNLCK;
+	lock.l_whence = SEEK_SET;
+	result = fcntl(descriptor, F_SETLK, &lock);
+	saved = errno;
+	if (close(descriptor) != 0 && result == 0)
+		return -1;
+	errno = saved;
+	return result;
+}
+
+/* Locks and atomically publishes one validated configuration. */
+int
+netconf_save_atomic(
+	const char *path,
+	const struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	int descriptor;
+	int result;
+	int saved;
+
+	descriptor = netconf_writer_lock(error, capacity);
+	if (descriptor < 0)
+		return -1;
+	result = netconf_save_atomic_locked(path, configuration, error, capacity);
+	saved = errno;
+	if (netconf_writer_unlock(descriptor) != 0 && result == 0) {
+		if (error != NULL && capacity != 0U)
+			(void)snprintf(error, capacity, "%s", strerror(errno));
+		return -1;
+	}
+	errno = saved;
+	return result;
+}
+
+/* Implements atomic publication while the caller owns the writer lock. */
+int
+netconf_save_atomic_locked(
+	const char *path,
+	const struct netconf *configuration,
+	char *error,
+	size_t capacity)
+{
+	char temporary[512], validation[160];
+	FILE *stream;
+	int descriptor, saved_errno, temporary_created;
+
+	stream = NULL;
+	descriptor = -1;
+	temporary_created = 0;
+	NCOM_TRACE("save-enter", 0);
+
+	/* Handles a failed netconf validate operation. */
+	if (path == NULL || configuration == NULL ||
+	    netconf_validate(configuration, validation, sizeof(validation)) !=
+		0) {
+		/* Handles an operation failure. */
+		if (error != NULL && capacity != 0) {
+			(void)snprintf(error, capacity, "%s",
+				       path == NULL || configuration == NULL
+					   ? "invalid save request"
+					   : validation);
+		}
+		errno = EINVAL;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	/* Handles a failed snprintf operation. */
+	if (snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path,
+		     (long)getpid()) >= (int)sizeof(temporary)) {
+		errno = ENAMETOOLONG;
+
+		/* Handles an operation failure. */
+		if (error != NULL && capacity != 0)
+			(void)snprintf(error, capacity, "path is too long");
+
+		/* Reports operation failure. */
+		return -1;
+	}
+	NCOM_TRACE("save-open-enter", 0);
+	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	NCOM_TRACE("save-open-done", 0);
+
+	/* Checks the file descriptor. */
+	if (descriptor < 0)
+		goto failed;
+	temporary_created = 1;
+	NCOM_TRACE("save-fdopen-enter", 0);
+	stream = fdopen(descriptor, "w");
+	NCOM_TRACE("save-fdopen-done", 0);
+
+	/* Handles the stream availability. */
+	if (stream == NULL)
+		goto failed;
+	descriptor = -1;
+
+	/* Handles a failed netconf write operation. */
+	NCOM_TRACE("save-write-enter", 0);
+	if (netconf_write(stream, configuration) != 0)
+		goto failed;
+	NCOM_TRACE("save-flush-enter", 0);
+	if (fflush(stream) != 0)
+		goto failed;
+	NCOM_TRACE("save-fsync-enter", 0);
+	if (fsync(fileno(stream)) != 0)
+		goto failed;
+	NCOM_TRACE("save-fsync-done", 0);
+
+	/* Handles a failed fclose operation. */
+	NCOM_TRACE("save-close-enter", 0);
+	if (fclose(stream) != 0) {
+		stream = NULL;
+		goto failed;
+	}
+	stream = NULL;
+	NCOM_TRACE("save-close-done", 0);
+
+	/* Handles a failed rename operation. */
+	NCOM_TRACE("save-rename-enter", 0);
+	if (rename(temporary, path) != 0)
+		goto failed;
+	NCOM_TRACE("save-rename-done", 0);
+
+	/* Handles an operation failure. */
+	if (error != NULL && capacity != 0)
+		error[0] = '\0';
+
+	/* Reports successful completion. */
+	return 0;
+
+failed:
+	saved_errno = errno;
+	NCOM_TRACE("save-error-cleanup-enter", 0);
+
+	/* Handles the stream availability. */
+	if (stream != NULL)
+		(void)fclose(stream);
+	else if (descriptor >= 0)
+		(void)close(descriptor);
+
+	/* Handles the temporary created condition. */
+	if (temporary_created)
+		(void)unlink(temporary);
+	NCOM_TRACE("save-error-cleanup-done", 0);
+
+	/* Handles an operation failure. */
+	if (error != NULL && capacity != 0)
+		(void)snprintf(error, capacity, "%s", strerror(saved_errno));
+	errno = saved_errno;
+
+	/* Reports operation failure. */
+	return -1;
+}
+
+/* Supports the validate graph operation. */
+static int
+validate_graph(
+	const struct netconf *configuration,
+	size_t index,
+	unsigned *visiting,
+	unsigned *visited)
+{
+	struct netconf_interface *target_local;
+	struct netconf_interface *target_local1;
+	const struct netconf_interface *interface =
+	    &configuration->interfaces[index];
+	size_t child, member;
+	unsigned bit = 1U << index;
+
+	/* Handles the visiting condition. */
+	if ((*visiting & bit) != 0)
+		return -1;
+
+	/* Handles the visited condition. */
+	if ((*visited & bit) != 0)
+		return 0;
+	*visiting |= bit;
+	/* Handles the interface condition. */
+	if (*interface->parent != '\0') {
+		target_local = find_interface(configuration, interface->parent);
+
+		/* Handles the target local availability. */
+		if (target_local == NULL)
+			return -1;
+		child = (size_t)(target_local - configuration->interfaces);
+
+		/* Handles a failed validate graph operation. */
+		if (validate_graph(configuration, child, visiting, visited) !=
+		    0)
+
+			/* Reports operation failure. */
+			return -1;
+	}
+
+	/* Process each remaining element. */
+	for (member = 0; member < interface->member_count; member++) {
+		target_local1 = find_interface(configuration, interface->members[member]);
+
+		/* Handles the target local1 availability. */
+		if (target_local1 == NULL)
+			return -1;
+		child = (size_t)(target_local1 - configuration->interfaces);
+
+		/* Handles a failed validate graph operation. */
+		if (validate_graph(configuration, child, visiting, visited) !=
+		    0)
+
+			/* Reports operation failure. */
+			return -1;
+	}
+	*visiting &= ~bit;
+	*visited |= bit;
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the find interface operation. */
+static struct netconf_interface *
+find_interface(
+	const struct netconf *configuration,
+	const char *name)
+{
+	size_t index;
+
+	/* Process each remaining element. */
+	for (index = 0; index < configuration->interface_count; index++) {
+		/* Selects the matching value. */
+		if (strcmp(configuration->interfaces[index].name, name) == 0) {
+			return (struct netconf_interface *)&configuration
+			    ->interfaces[index];
+		}
+	}
+
+	/* Reports that no result is available. */
+	return NULL;
+}
+
+/* Supports the fail operation. */
+static int
+fail(
+	struct parser *parser,
+	const char *format,
+	...)
+{
+	int used;
+
+	va_list arguments;
+
+	/* Handles an operation failure. */
+	if (parser->error != NULL && parser->error_capacity != 0) {
+		used = snprintf(parser->error, parser->error_capacity,
+		    "line %u: ", parser->line);
+
+		/* Handles an operation failure. */
+		if (used >= 0 && (size_t)used < parser->error_capacity) {
+			va_start(arguments, format);
+			(void)vsnprintf(parser->error + used,
+					parser->error_capacity - (size_t)used,
+					format, arguments);
+			va_end(arguments);
+		}
+	}
+	errno = EINVAL;
+
+	/* Reports operation failure. */
+	return -1;
+}
+
+/* Supports the parse content operation. */
+static int
+parse_content(
+	struct parser *parser,
+	unsigned indent,
+	char *text)
+{
+	int function_result;
+
+	/* Handles the indent condition. */
+	if (indent == 0) {
+		/* Obtains the parse top result. */
+		function_result = parse_top(parser, text);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Checks the parser state. */
+	if (parser->section == SECTION_INTERFACES) {
+		/* Handles the indent condition. */
+		if (indent == 2) {
+			/* Obtains the new interface result. */
+			function_result = new_interface(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 4) {
+			/* Obtains the interface property result. */
+			function_result = interface_property(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 6 && parser->subsection == SUBSECTION_IPV4) {
+			/* Obtains the ipv4 property result. */
+			function_result = ipv4_property(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* The IPv6 section's keys (ws130-p005). */
+		if (indent == 6 &&
+		    (parser->subsection == SUBSECTION_IPV6 || parser->subsection == SUBSECTION_ADDRESSES6)) {
+			function_result = ipv6_property(parser, text);
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 6 && parser->subsection == SUBSECTION_MEMBERS) {
+			/* Obtains the member entry result. */
+			function_result = member_entry(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 8) {
+			/* Obtains the new address result. */
+			function_result = new_address(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 10) {
+			/* Obtains the address property result. */
+			function_result = address_property(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Checks the parser state. */
+	if (parser->section == SECTION_ROUTES) {
+		/* Handles the indent condition. */
+		if (indent == 2) {
+			/* Obtains the route entry result. */
+			function_result = route_entry(parser, text, 0);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 4) {
+			/* Obtains the route entry result. */
+			function_result = route_entry(parser, text, 1);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Checks the parser state. */
+	if (parser->section == SECTION_DNS) {
+		/* Handles the indent condition. */
+		if (indent == 2) {
+			/* Obtains the dns property result. */
+			function_result = dns_property(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Handles the indent condition. */
+		if (indent == 4) {
+			/* Obtains the dns entry result. */
+			function_result = dns_entry(parser, text);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Obtains the fail result. */
+	function_result = fail(parser, "unexpected indentation or nesting");
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Supports the parse top operation. */
+static int
+parse_top(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+
+	/* Handles a failed split mapping operation. */
+	if (split_mapping(parser, text, &key, &value) != 0)
+		return -1;
+	parser->interface = NULL;
+	parser->address = NULL;
+	parser->route = NULL;
+	parser->subsection = SUBSECTION_NONE;
+
+	/* Selects the matching value. */
+	if (strcmp(key, "version") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->top_seen, 1U, key) != 0 ||
+		    unsigned_value(value, 1, 1,
+				   &parser->configuration->version) != 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "version must be 1");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		parser->section = SECTION_NONE;
+
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* Validates the current value. */
+	if (*value != '\0') {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "top-level section %s cannot have a value",
+			    key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (strcmp(key, "interfaces") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->top_seen, 2U, key) != 0)
+			return -1;
+		parser->section = SECTION_INTERFACES;
+	} else if (strcmp(key, "routes") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->top_seen, 4U, key) != 0)
+			return -1;
+		parser->section = SECTION_ROUTES;
+	} else if (strcmp(key, "dns") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->top_seen, 8U, key) != 0)
+			return -1;
+		parser->section = SECTION_DNS;
+	} else {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "unknown top-level key %s", key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the split mapping operation. */
+static int
+split_mapping(
+	struct parser *parser,
+	char *text,
+	char **key,
+	char **value)
+{
+	int function_result;
+	char *colon;
+	char *end;
+
+	colon = strchr(text, ':');
+
+	/* Handles the colon availability. */
+	if (colon == NULL || (colon[1] != '\0' && colon[1] != ' ')) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected key: value");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Continue while the operation condition remains true. */
+	*colon = '\0';
+	end = colon;
+	while (end > text && end[-1] == ' ')
+		*--end = '\0';
+	/* Validates the current text. */
+	if (*text == '\0') {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "empty key");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+	*key = text;
+	*value = colon + 1;
+	/* Validates the current value. */
+	if (**value == ' ')
+		(*value)++;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the set once operation. */
+static int
+set_once(
+	struct parser *parser,
+	unsigned *bits,
+	unsigned bit,
+	const char *key)
+{
+	int function_result;
+
+	/* Handles the bits condition. */
+	if ((*bits & bit) != 0) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "duplicate key %s", key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+	*bits |= bit;
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the unsigned value operation. */
+static int
+unsigned_value(
+	const char *text,
+	unsigned minimum,
+	unsigned maximum,
+	unsigned *result)
+{
+	char *end;
+	unsigned long value;
+
+	/* Handles a failed isdigit operation. */
+	if (*text == '\0' || !isdigit((unsigned char)*text))
+		return -1;
+	value = strtoul(text, &end, 10);
+
+	/* Checks the current endpoint. */
+	if (*end != '\0' || value < minimum || value > maximum)
+		return -1;
+	*result = (unsigned)value;
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the new interface operation. */
+static int
+new_interface(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+	size_t index;
+
+	/* Handles a failed split mapping operation. */
+	if (parser->section != SECTION_INTERFACES ||
+	    split_mapping(parser, text, &key, &value) != 0) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected an interface entry");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles a failed name valid operation. */
+	if (*value != '\0' || !name_valid(key)) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "invalid interface name");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < parser->configuration->interface_count; index++) {
+		/* Selects the matching value. */
+		if (strcmp(parser->configuration->interfaces[index].name,
+			   key) == 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "duplicate interface %s", key);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Checks the parser state. */
+	if (parser->configuration->interface_count == NETCONF_MAX_INTERFACES) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "too many interfaces");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	parser->interface =
+	    &parser->configuration
+		 ->interfaces[parser->configuration->interface_count++];
+	strcpy(parser->interface->name, key);
+	parser->interface_seen = 0;
+	parser->ipv4_seen = 0;
+	parser->ipv6_seen = 0;
+	parser->subsection = SUBSECTION_NONE;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the name valid operation. */
+static int
+name_valid(
+	const char *name)
+{
+	size_t index, length;
+
+	length = strlen(name);
+
+	/* Handles a failed isalnum operation. */
+	if (length == 0 || length > NETCONF_NAME_MAX ||
+	    !isalnum((unsigned char)name[0]))
+
+		/* Reports successful completion. */
+		return 0;
+
+	/* Process each remaining element. */
+	for (index = 1; index < length; index++) {
+		/* Handles a failed isalnum operation. */
+		if (!isalnum((unsigned char)name[index]) &&
+		    name[index] != '_' && name[index] != '-')
+
+			/* Reports successful completion. */
+			return 0;
+	}
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the interface property operation. */
+static int
+interface_property(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+	struct netconf_interface *interface;
+	int named;
+	int parsed;
+
+	interface = parser->interface;
+
+	/* Handles a failed split mapping operation. */
+	if (interface == NULL || split_mapping(parser, text, &key, &value) != 0) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "interface property without interface");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	parser->address = NULL;
+
+	/* Selects the matching value. */
+	if (strcmp(key, "type") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 1U, key) != 0)
+			return -1;
+
+		/* Selects the matching value. */
+		if (strcmp(value, "loopback") == 0)
+			interface->type = NETCONF_INTERFACE_LOOPBACK;
+		else if (strcmp(value, "ethernet") == 0)
+			interface->type = NETCONF_INTERFACE_ETHERNET;
+		else if (strcmp(value, "vlan") == 0)
+			interface->type = NETCONF_INTERFACE_VLAN;
+		else if (strcmp(value, "bridge") == 0) {
+			interface->type = NETCONF_INTERFACE_BRIDGE;
+		} else {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid interface type");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		parser->subsection = SUBSECTION_NONE;
+	} else if (strcmp(key, "enabled") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 2U, key) != 0 ||
+		    boolean_value(value, &interface->enabled) != 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "enabled must be true or false");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		interface->enabled_set = 1;
+		parser->subsection = SUBSECTION_NONE;
+	} else if (strcmp(key, "parent") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 4U, key) != 0 ||
+		    !name_valid(value)) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid VLAN parent");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		strcpy(interface->parent, value);
+		parser->subsection = SUBSECTION_NONE;
+	} else if (strcmp(key, "vlan-id") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 8U, key) != 0 ||
+		    unsigned_value(value, 1, 4094, &interface->vlan_id) != 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "VLAN ID must be 1 through 4094");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		interface->vlan_id_set = 1;
+		parser->subsection = SUBSECTION_NONE;
+	} else if (strcmp(key, "ipv4") == 0 && *value == '\0') {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 16U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_IPV4;
+	} else if (strcmp(key, "members") == 0 && *value == '\0') {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->interface_seen, 32U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_MEMBERS;
+	} else if (strcmp(key, "ipv6") == 0 && *value == '\0') {
+		/* The IPv6 section (ws130-p005). */
+		if (set_once(parser, &parser->interface_seen, 64U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_IPV6;
+	} else if (strcmp(key, "mtu") == 0) {
+		/* The MTU, named once; the device's own limit is checked when it is applied. */
+		named = set_once(parser, &parser->interface_seen, 128U, key);
+		if (named != 0)
+			return -1;
+		parsed = unsigned_value(value, NETCONF_MTU_MIN, NETCONF_MTU_MAX, &interface->mtu);
+		if (parsed != 0) {
+			(void)fail(parser, "mtu must be 1280 through 65535");
+			return -1;
+		}
+
+		/* Written down as named. */
+		interface->mtu_set = 1;
+		parser->subsection = SUBSECTION_NONE;
+	} else {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "unknown interface key %s", key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the boolean value operation. */
+static int
+boolean_value(
+	const char *text,
+	int *result)
+{
+	/* Selects the matching value. */
+	if (strcmp(text, "true") == 0)
+		*result = 1;
+	else if (strcmp(text, "false") == 0)
+		*result = 0;
+	else
+
+		/* Reports operation failure. */
+		return -1;
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the ipv4 property operation. */
+static int
+ipv4_property(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+	struct netconf_interface *interface;
+
+	interface = parser->interface;
+
+	/* Handles a failed split mapping operation. */
+	if (interface == NULL || parser->subsection != SUBSECTION_IPV4 ||
+	    split_mapping(parser, text, &key, &value) != 0) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected an IPv4 property");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (strcmp(key, "dhcp") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->ipv4_seen, 1U, key) != 0 ||
+		    boolean_value(value, &interface->dhcp) != 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "dhcp must be true or false");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		interface->dhcp_set = 1;
+	} else if (strcmp(key, "dhcp-timeout") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->ipv4_seen, 2U, key) != 0 ||
+		    unsigned_value(value, 1, 3600, &interface->dhcp_timeout) !=
+			0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid DHCP timeout");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		interface->dhcp_timeout_set = 1;
+	} else if (strcmp(key, "addresses") == 0 && *value == '\0') {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->ipv4_seen, 4U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_ADDRESSES;
+	} else {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "unknown IPv4 key %s", key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the member entry operation. */
+static int
+member_entry(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	struct netconf_interface *interface;
+	const char *name;
+	size_t index;
+
+	interface = parser->interface;
+
+	/* Handles a failed name valid operation. */
+	if (interface == NULL || parser->subsection != SUBSECTION_MEMBERS ||
+	    text[0] != '-' || text[1] != ' ' || !name_valid(name = text + 2)) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected - interface-name");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < interface->member_count; index++) {
+		/* Selects the matching value. */
+		if (strcmp(interface->members[index], name) == 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "duplicate bridge member %s", name);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Handles the interface condition. */
+	if (interface->member_count == NETCONF_MAX_MEMBERS) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "too many bridge members");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	strcpy(interface->members[interface->member_count++], name);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the new address operation (an IPv4 one, or an IPv6 one in the IPv6 section, ws130-p005). */
+static int
+new_address(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+	struct netconf_address *addresses;
+	size_t *count;
+	int six;
+	int valid;
+
+	/* An entry of either section's addresses. */
+	six = parser->subsection == SUBSECTION_ADDRESSES6;
+	if (parser->interface == NULL ||
+	    (parser->subsection != SUBSECTION_ADDRESSES && !six) ||
+	    text[0] != '-' ||
+	    text[1] != ' ' ||
+	    split_mapping(parser, text + 2, &key, &value) != 0 ||
+	    strcmp(key, "address") != 0) {
+		function_result = fail(parser, "expected - address: ADDRESS");
+		return function_result;
+	}
+
+	/* An address of the section's family. */
+	if (six)
+		valid = ipv6_valid(value);
+	else
+		valid = ipv4_valid(value);
+	if (!valid) {
+		function_result = fail(parser, six ? "expected - address: IPv6" : "expected - address: IPv4");
+		return function_result;
+	}
+
+	/* Room for it. */
+	addresses = parser->interface->addresses;
+	count = &parser->interface->address_count;
+	if (six) {
+		addresses = parser->interface->ipv6.addresses;
+		count = &parser->interface->ipv6.address_count;
+	}
+	if (*count == NETCONF_MAX_ADDRESSES) {
+		function_result = fail(parser, "too many addresses");
+		return function_result;
+	}
+
+	/* Succeeded: its prefix length follows (the mark of none: one past the family's longest). */
+	parser->address = &addresses[(*count)++];
+	strcpy(parser->address->address, value);
+	parser->address->prefix_length = six ? 129U : 33U;
+	return 0;
+}
+
+/* Supports the ipv4 valid operation. */
+static int
+ipv4_valid(
+	const char *text)
+{
+	unsigned value, digits;
+	unsigned parts;
+	const char *cursor;
+
+	/* Continue while the operation condition remains true. */
+	parts = 0;
+	cursor = text;
+	while (*cursor != '\0') {
+		/* Continue while the operation condition remains true. */
+		value = 0;
+		digits = 0;
+		while (isdigit((unsigned char)*cursor)) {
+			value = value * 10U + (unsigned)(*cursor++ - '0');
+			digits++;
+
+			/* Handles the digits condition. */
+			if (digits > 3 || value > 255)
+				return 0;
+		}
+
+		/* Handles the digits condition. */
+		if (digits == 0 || ++parts > 4)
+			return 0;
+
+		/* Handles the parts condition. */
+		if (parts == 4)
+			return *cursor == '\0';
+
+		/* Checks the current cursor position. */
+		if (*cursor++ != '.')
+			return 0;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the address property operation: an address's prefix length, 0..32 or 0..128 (ws130-p005). */
+static int
+address_property(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+	unsigned longest;
+
+	/* The family's longest prefix. */
+	longest = 32U;
+	if (parser->subsection == SUBSECTION_ADDRESSES6)
+		longest = 128U;
+
+	/* One prefix-length of the address just read. */
+	if (parser->address == NULL ||
+	    split_mapping(parser, text, &key, &value) != 0 ||
+	    strcmp(key, "prefix-length") != 0 ||
+	    parser->address->prefix_length != longest + 1U ||
+	    unsigned_value(value, 0, longest, &parser->address->prefix_length) != 0) {
+		function_result = fail(parser, "expected one prefix-length: 0..%u", longest);
+		return function_result;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the route entry operation. */
+static int
+route_entry(
+	struct parser *parser,
+	char *text,
+	int continuation)
+{
+	int function_result;
+	char *key, *value;
+
+	/* Handles the continuation condition. */
+	if (!continuation) {
+		/* Checks the parser state. */
+		if (parser->section != SECTION_ROUTES || text[0] != '-' ||
+		    text[1] != ' ' ||
+		    parser->configuration->route_count == NETCONF_MAX_ROUTES) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "expected a route entry");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		parser->route =
+		    &parser->configuration
+			 ->routes[parser->configuration->route_count++];
+		parser->route_seen = 0;
+		text += 2;
+	} else if (parser->route == NULL) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "route property without route");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles a failed split mapping operation. */
+	if (split_mapping(parser, text, &key, &value) != 0)
+		return -1;
+
+	/* Selects the matching value. */
+	if (strcmp(key, "destination") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->route_seen, 1U, key) != 0 ||
+		    (strcmp(value, "default") != 0 &&
+		     !ipv4_prefix_valid(value) &&
+		     !ipv6_prefix_valid(value))) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid route destination");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+
+		/* Obtains the copy value result. */
+		function_result = copy_value(parser, parser->route->destination,
+				  sizeof(parser->route->destination), value,
+				  "route destination");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (strcmp(key, "gateway") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->route_seen, 2U, key) != 0 ||
+		    (!ipv4_valid(value) && !ipv6_valid(value))) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid route gateway");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		strcpy(parser->route->gateway, value);
+
+		/* Reports successful completion. */
+		return 0;
+	}
+
+	/* The interface of a link-local IPv6 gateway (ws130-p005). */
+	if (strcmp(key, "interface") == 0) {
+		if (set_once(parser, &parser->route_seen, 4U, key) != 0 || !name_valid(value)) {
+			function_result = fail(parser, "invalid route interface");
+			return function_result;
+		}
+		strcpy(parser->route->interface, value);
+		return 0;
+	}
+
+	/* Obtains the fail result. */
+	function_result = fail(parser, "unknown route key %s", key);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Supports the ipv4 prefix valid operation. */
+static int
+ipv4_prefix_valid(
+	const char *text)
+{
+	int function_result;
+	char address[NETCONF_IPV4_MAX + 1];
+	const char *slash;
+	unsigned prefix;
+	size_t length;
+
+	slash = strchr(text, '/');
+
+	/* Handles a failed strchr operation. */
+	if (slash == NULL || strchr(slash + 1, '/') != NULL)
+		return 0;
+	length = (size_t)(slash - text);
+
+	/* Checks the current data length. */
+	if (length == 0 || length >= sizeof(address))
+		return 0;
+	memcpy(address, text, length);
+	address[length] = '\0';
+
+	/* Computes the function result. */
+	function_result = ipv4_valid(address) &&
+	       unsigned_value(slash + 1, 0, 32, &prefix) == 0;
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Supports the copy value operation. */
+static int
+copy_value(
+	struct parser *parser,
+	char *output,
+	size_t capacity,
+	const char *value,
+	const char *what)
+{
+	int function_result;
+
+	/* Handles a failed strlen operation. */
+	if (*value == '\0' || strlen(value) >= capacity) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "invalid %s", what);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	strcpy(output, value);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the dns property operation. */
+static int
+dns_property(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	char *key, *value;
+
+	/* Handles a failed split mapping operation. */
+	if (parser->section != SECTION_DNS ||
+	    split_mapping(parser, text, &key, &value) != 0) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected DNS property");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (strcmp(key, "mode") == 0) {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->dns_seen, 1U, key) != 0)
+			return -1;
+
+		/* Selects the matching value. */
+		if (strcmp(value, "dhcp") == 0)
+			parser->configuration->dns_mode = NETCONF_DNS_DHCP;
+		else if (strcmp(value, "static") == 0)
+			parser->configuration->dns_mode = NETCONF_DNS_STATIC;
+		else if (strcmp(value, "merge") == 0) {
+			parser->configuration->dns_mode = NETCONF_DNS_MERGE;
+		} else {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "invalid DNS mode");
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+		parser->subsection = SUBSECTION_NONE;
+	} else if (strcmp(key, "servers") == 0 && *value == '\0') {
+		/* Handles a failed set once operation. */
+		if (set_once(parser, &parser->dns_seen, 2U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_DNS_SERVERS;
+	} else {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "unknown DNS key %s", key);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the dns entry operation. */
+static int
+dns_entry(
+	struct parser *parser,
+	char *text)
+{
+	int function_result;
+	const char *address;
+	size_t index;
+
+	/* Handles a failed ipv4 valid operation. */
+	if (parser->section != SECTION_DNS ||
+	    parser->subsection != SUBSECTION_DNS_SERVERS || text[0] != '-' ||
+	    text[1] != ' ' ||
+	    (!ipv4_valid(address = text + 2) && !ipv6_valid(text + 2))) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "expected - DNS-address");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Process each remaining element. */
+	for (index = 0; index < parser->configuration->dns_count; index++) {
+		/* Selects the matching value. */
+		if (strcmp(parser->configuration->dns_servers[index],
+			   address) == 0) {
+			/* Obtains the fail result. */
+			function_result = fail(parser, "duplicate DNS server %s", address);
+
+			/* Returns the computed result. */
+			return function_result;
+		}
+	}
+
+	/* Checks the parser state. */
+	if (parser->configuration->dns_count == NETCONF_MAX_DNS) {
+		/* Obtains the fail result. */
+		function_result = fail(parser, "too many DNS servers");
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	strcpy(parser->configuration
+		   ->dns_servers[parser->configuration->dns_count++],
+	       address);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the type name operation. */
+static const char *
+type_name(
+	enum netconf_interface_type type)
+{
+	static const char *const names[] = {"unset", "loopback", "ethernet",
+					    "vlan", "bridge"};
+
+	/* Returns the computed result. */
+	return names[type];
+}
+
+/* Supports the dns name operation. */
+static const char *
+dns_name(
+	enum netconf_dns_mode mode)
+{
+	static const char *const names[] = {"unset", "dhcp", "static", "merge"};
+
+	/* Returns the computed result. */
+	return names[mode];
+}
+
+/*
+ * Reads a key of an interface's IPv6 section (ws130-p005): enabled,
+ * autoconf, dhcp (auto, stateless, stateful or false), stable-address,
+ * temporary, and the addresses.
+ */
+static int
+ipv6_property(
+	struct parser *parser,
+	char *text)
+{
+	struct netconf_ipv6 *ipv6;
+	char *key;
+	char *value;
+	int status;
+
+	/* A key with its value. */
+	if (parser->interface == NULL || split_mapping(parser, text, &key, &value) != 0) {
+		status = fail(parser, "expected an IPv6 property");
+		return status;
+	}
+	ipv6 = &parser->interface->ipv6;
+	parser->subsection = SUBSECTION_IPV6;
+	parser->address = NULL;
+
+	/* The switches. */
+	if (strcmp(key, "enabled") == 0) {
+		if (set_once(parser, &parser->ipv6_seen, 1U, key) != 0 || boolean_value(value, &ipv6->enabled) != 0)
+			return fail(parser, "enabled must be true or false");
+		ipv6->enabled_set = 1;
+		return 0;
+	}
+	if (strcmp(key, "autoconf") == 0) {
+		if (set_once(parser, &parser->ipv6_seen, 2U, key) != 0 || boolean_value(value, &ipv6->autoconf) != 0)
+			return fail(parser, "autoconf must be true or false");
+		ipv6->autoconf_set = 1;
+		return 0;
+	}
+	if (strcmp(key, "stable-address") == 0) {
+		if (set_once(parser, &parser->ipv6_seen, 4U, key) != 0 || boolean_value(value, &ipv6->stable_address) != 0)
+			return fail(parser, "stable-address must be true or false");
+		ipv6->stable_address_set = 1;
+		return 0;
+	}
+	if (strcmp(key, "temporary") == 0) {
+		if (set_once(parser, &parser->ipv6_seen, 8U, key) != 0 || boolean_value(value, &ipv6->temporary) != 0)
+			return fail(parser, "temporary must be true or false");
+		ipv6->temporary_set = 1;
+		return 0;
+	}
+
+	/* DHCPv6's use. */
+	if (strcmp(key, "dhcp") == 0) {
+		if (set_once(parser, &parser->ipv6_seen, 16U, key) != 0)
+			return -1;
+		if (strcmp(value, "auto") == 0)
+			ipv6->dhcp = NETCONF_IPV6_DHCP_AUTO;
+		else if (strcmp(value, "stateless") == 0)
+			ipv6->dhcp = NETCONF_IPV6_DHCP_STATELESS;
+		else if (strcmp(value, "stateful") == 0)
+			ipv6->dhcp = NETCONF_IPV6_DHCP_STATEFUL;
+		else if (strcmp(value, "false") == 0)
+			ipv6->dhcp = NETCONF_IPV6_DHCP_OFF;
+		else
+			return fail(parser, "dhcp must be auto, stateless, stateful or false");
+		ipv6->dhcp_set = 1;
+		return 0;
+	}
+
+	/* The static addresses. */
+	if (strcmp(key, "addresses") == 0 && *value == '\0') {
+		if (set_once(parser, &parser->ipv6_seen, 32U, key) != 0)
+			return -1;
+		parser->subsection = SUBSECTION_ADDRESSES6;
+		return 0;
+	}
+
+	/* Not a key of the section. */
+	status = fail(parser, "unknown IPv6 key %s", key);
+	return status;
+}
+
+/* Tells whether a text is an IPv6 address. */
+static int
+ipv6_valid(
+	const char *text)
+{
+	struct in6_addr address;
+	int ok;
+
+	/* The C library's reading. */
+	ok = inet_pton(AF_INET6, text, &address);
+	return ok == 1;
+}
+
+/* Tells whether a text is an IPv6 prefix, "ADDRESS/LENGTH" (0..128). */
+static int
+ipv6_prefix_valid(
+	const char *text)
+{
+	char address[NETCONF_ADDRESS_MAX + 1];
+	const char *slash;
+	unsigned prefix;
+	size_t length;
+	int valid;
+
+	/* The address before the slash. */
+	slash = strchr(text, '/');
+	if (slash == NULL)
+		return 0;
+	length = (size_t)(slash - text);
+	if (length == 0 || length >= sizeof(address))
+		return 0;
+	memcpy(address, text, length);
+	address[length] = '\0';
+
+	/* An address, and a length. */
+	valid = ipv6_valid(address);
+	if (!valid)
+		return 0;
+	valid = unsigned_value(slash + 1, 0, 128, &prefix) == 0;
+	return valid;
+}
+
+/* Tells whether a text is a link-local IPv6 address (fe80::/10). */
+static int
+ipv6_link_local(
+	const char *text)
+{
+	struct in6_addr address;
+	int ok;
+
+	/* The address, then its prefix. */
+	ok = inet_pton(AF_INET6, text, &address);
+	if (ok != 1)
+		return 0;
+	return address.s6_addr[0] == 0xfe && (address.s6_addr[1] & 0xc0) == 0x80;
+}
+
+/* Writes an interface's IPv6 section: the keys that are not the defaults, and the static addresses (ws130-p005). */
+static int
+write_ipv6(
+	FILE *stream,
+	const struct netconf_interface *item)
+{
+	static const char *const dhcp_names[] = { "auto", "stateless", "stateful", "false" };
+	const struct netconf_ipv6 *ipv6;
+	size_t index;
+	int any;
+
+	/* Nothing that is not the default: no section. */
+	ipv6 = &item->ipv6;
+	any = ipv6->enabled_set || ipv6->autoconf_set || ipv6->dhcp_set;
+	any = any || ipv6->stable_address_set || ipv6->temporary_set || ipv6->address_count != 0;
+	if (!any)
+		return 0;
+	if (fputs("    ipv6:\n", stream) == EOF)
+		return -1;
+
+	/* The switches named. */
+	if (ipv6->enabled_set && fprintf(stream, "      enabled: %s\n", ipv6->enabled ? "true" : "false") < 0)
+		return -1;
+	if (ipv6->autoconf_set && fprintf(stream, "      autoconf: %s\n", ipv6->autoconf ? "true" : "false") < 0)
+		return -1;
+	if (ipv6->dhcp_set && fprintf(stream, "      dhcp: %s\n", dhcp_names[ipv6->dhcp]) < 0)
+		return -1;
+	if (ipv6->stable_address_set && fprintf(stream, "      stable-address: %s\n", ipv6->stable_address ? "true" : "false") < 0)
+		return -1;
+	if (ipv6->temporary_set && fprintf(stream, "      temporary: %s\n", ipv6->temporary ? "true" : "false") < 0)
+		return -1;
+
+	/* The static addresses. */
+	if (ipv6->address_count == 0)
+		return 0;
+	if (fputs("      addresses:\n", stream) == EOF)
+		return -1;
+	for (index = 0; index < ipv6->address_count; index++) {
+		if (fprintf(stream, "        - address: %s\n          prefix-length: %u\n", ipv6->addresses[index].address, ipv6->addresses[index].prefix_length) < 0)
+			return -1;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Whether IPv6 is on at an interface (the default: on, H3). */
+int
+netconf_ipv6_enabled(
+	const struct netconf_interface *item)
+{
+	/* Named, or the default. */
+	if (item->ipv6.enabled_set)
+		return item->ipv6.enabled;
+	return 1;
+}
+
+/* Whether an interface takes addresses from Router Advertisements (the default: yes). */
+int
+netconf_ipv6_autoconf(
+	const struct netconf_interface *item)
+{
+	/* Named, or the default. */
+	if (item->ipv6.autoconf_set)
+		return item->ipv6.autoconf;
+	return 1;
+}
+
+/* Whether an interface's SLAAC address is stable (RFC 7217; the default: yes). */
+int
+netconf_ipv6_stable_address(
+	const struct netconf_interface *item)
+{
+	/* Named, or the default. */
+	if (item->ipv6.stable_address_set)
+		return item->ipv6.stable_address;
+	return 1;
+}
+
+/* Whether an interface makes temporary addresses (RFC 8981; the default: yes). */
+int
+netconf_ipv6_temporary(
+	const struct netconf_interface *item)
+{
+	/* Named, or the default. */
+	if (item->ipv6.temporary_set)
+		return item->ipv6.temporary;
+	return 1;
+}
+
+/* How an interface asks DHCPv6 (the default: by the Router Advertisement's flags). */
+enum netconf_ipv6_dhcp
+netconf_ipv6_dhcp(
+	const struct netconf_interface *item)
+{
+	/* Named, or the default. */
+	if (item->ipv6.dhcp_set)
+		return item->ipv6.dhcp;
+	return NETCONF_IPV6_DHCP_AUTO;
+}

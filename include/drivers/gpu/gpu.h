@@ -1,0 +1,322 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * GPU backend operations and dynamic device registration.
+ */
+
+#ifndef DRIVERS_GPU_H
+#define DRIVERS_GPU_H
+
+#include <uapi/gpu.h>
+#include <drivers/gpu/gpu-display.h>
+#include <drivers/gpu/gpu-share.h>
+#include <drivers/gpu/gpu-scanout.h>
+
+#include <stdint.h>
+
+#define DRV_GPU_INTERFACE_VERSION	10U
+#define DRV_GPU_MAPPING_DEVICE		1U
+/* Normal non-cacheable RAM keeps ordinary byte access and managed-memory identity. */
+#define DRV_GPU_MAPPING_UNCACHED_RAM	2U
+/* Device memory whose user view write-combines (only together with DRV_GPU_MAPPING_DEVICE). */
+#define DRV_GPU_MAPPING_WRITE_COMBINE	4U
+
+struct drv_gpu_device;
+struct drv_gpu_completion;
+
+/*
+ * Optional queued commands retain a common completion until exactly one finish.
+ * Submit failure retains no completion. Drain ends every accepted callback before
+ * the backend session closes, including when uncertain DMA remains quarantined.
+ */
+struct drv_gpu_command_ops {
+	int (*submit)(void *, void *, const void *, uint32_t, uint32_t, uint32_t, struct drv_gpu_completion *);
+	void (*drain)(void *, void *);
+};
+
+/*
+ * One supervised reservation retains a callback before userspace submits native
+ * work. Reserve owns backend storage while the framework supervises producer
+ * and execution deadlines. Commit uses that storage without allocation; normal
+ * cancel removes the callback before
+ * returning success. Fault cancellation terminates uncertain work with ERROR.
+ * Each action verifies both the reservation token and original completion.
+ * The core publishes the session loss after a successful fault cancellation;
+ * the backend only retains the uncertain callback. After a proven stop the
+ * core withdraws every unpublished reservation with a normal cancel.
+ * The ordinary command drain also retires every accepted job callback.
+ * Optional command (GPU_JOB_SUBMIT) runs a native command stream at once on
+ * the caller's thread, as the command op does, between the core's reserve
+ * and its commit or cancel, and sets the outcome (GPU_JOB_SUBMIT_*):
+ * COMMITTED when the stream ran queue operations and every one was
+ * accepted, CANCELED when no work of the stream reached the GPU, FAULTED
+ * when some may have and not all was accepted, DEFERRED (nothing ran) when
+ * it cannot run the stream now.  It returns 0, or the stream's error with
+ * the outcome CANCELED or FAULTED (never EAGAIN).
+ */
+struct drv_gpu_job_ops {
+	int (*reserve)(void *, void *, uint32_t, struct drv_gpu_completion *, void **);
+	int (*commit)(void *, void *, void *, struct drv_gpu_completion *);
+	int (*cancel)(void *, void *, void *, struct drv_gpu_completion *, unsigned);
+	int (*capacity)(void *, void *, uint32_t, unsigned *);
+	int (*command)(void *, void *, const void *, uint32_t, uint32_t *);
+};
+
+/*
+ * Optional hardware recovery preserves uncertain resources until actual access
+ * has stopped. Begin and poll never block waiting for native work. The core calls
+ * begin only for a context that may have reached the GPU or still retains a
+ * backend callback. Poll returns EAGAIN while pending, and zero only after native
+ * access has stopped and every posted descriptor and callback for the session has
+ * retired; unpublished reservations may remain, and the core then withdraws them
+ * through cancel. Other errors require device-wide fault.
+ * Fault is required whenever this table exists. It is idempotent, stops new
+ * publication and arms every destroy/close path to retain uncertain DMA before
+ * publishing device loss. It cannot silently release backing or claim that
+ * hardware has stopped. Callback drain remains a separate lifetime barrier.
+ * Reset runs only at root's request (GPU_DEVICE_RESET) when the backend
+ * has no service reset, only after every old external owner has retired,
+ * and returns zero only after checked hardware reinitialization.
+ * Optional isolate quarantines one context whose stop could not be confirmed:
+ * it ends every callback of that context with an error, keeps the context's
+ * descriptors and allocations device-owned until checked reset, and refuses
+ * further host traffic for it, while every other context continues. After a
+ * successful isolate the core still calls resource_destroy and close for that
+ * session, and the backend must retire them without hardware access. Failure
+ * or absence of isolate escalates to the device-wide fault. Isolated capacity
+ * is reclaimed by root's checked reset.
+ */
+struct drv_gpu_recovery_ops {
+	int (*stop_begin)(void *, void *, int);
+	int (*stop_poll)(void *, void *);
+	void (*fault)(void *, int);
+	int (*reset)(void *);
+	int (*isolate)(void *, void *);
+};
+
+/*
+ * One piece of one of the driver's reports (GPU_DIAGNOSE): the kind and its
+ * word as the caller named them, where in the report the piece starts, and
+ * a kernel buffer of capacity bytes (NULL when capacity is 0: only the
+ * total is asked for).  The backend fills bytes (at most capacity) and the
+ * report's whole length (total).
+ */
+struct drv_gpu_report {
+	uint32_t kind;
+	uint32_t argument;
+	uint64_t offset;
+	void *buffer;
+	uint32_t capacity;
+	uint32_t bytes;
+	uint64_t total;
+};
+
+/*
+ * Optional services root and the driver's tools ask for, outside
+ * rendering; a device without one answers its request with ENOTSUP.
+ *
+ * Reset resets the hardware and sets it up again at root's request
+ * (GPU_DEVICE_RESET), with the contract of the recovery reset: the core
+ * calls it only when no backend session exists (it has closed the asking
+ * open's own session and every other open was told of the loss, after the
+ * recovery fault, and has closed), and opens a new session for the asking
+ * open after it.  It returns zero only after checked hardware
+ * reinitialization.  The core prefers it to the recovery reset, which it
+ * calls for the same request when the backend has no service reset; the
+ * core never resets a device on its own, and a failed device admits no
+ * new open but root's, which has no backend session until a reset.
+ *
+ * Diagnose fills one piece of a report (struct drv_gpu_report); the core
+ * calls it piece after piece into its own buffer and copies each piece to
+ * the caller, so the backend never touches the caller's memory and may
+ * take its locks.  A kind that acts (rather than reads) acts only for the
+ * piece at offset 0 and answers in one piece.  The core has checked
+ * GPU_DIAGNOSE_ROOT.  It runs without a session, on a failed device and
+ * during a reset, alongside any other callback: the backend keeps its
+ * reads away from hardware a reset of its own has taken.
+ */
+struct drv_gpu_service_ops {
+	int (*reset)(void *);
+	int (*diagnose)(void *, struct drv_gpu_report *);
+};
+
+/*
+ * An immutable CPU view borrowed from one retained resource. The GPU core
+ * retains the resource and its open file through every VM mapping and pin.
+ * DEVICE distinguishes MMIO from managed RAM; UNCACHED_RAM preserves a backend
+ * Normal non-cacheable alias in userspace without treating RAM as device registers.
+ */
+struct drv_gpu_mapping {
+	uint64_t physical;
+	void *address;
+	uint64_t bytes;
+	uint32_t attributes;
+};
+
+/*
+ * Immutable operations shared by instances of one backend.
+ *
+ *  - No callback runs under a core spinlock.
+ *  - Distinct sessions may execute concurrently, a single session
+ *    admits one ordinary ioctl at a time; completion/event snapshots bypass
+ *    admission and may run concurrently with any ordinary callback.
+ *  - Open failure must unwind its own state.
+ *  - Resource and blob allocation failures must unwind their own state.
+ *  - Optional capabilities require their complete callback pair or operation.
+ *  - All buffers passed to optional operations are validated kernel copies.
+ *  - Resource read/write finish copying before returning; command receipt is
+ *    independent of Vulkan execution completion.
+ *  - Present accepts storage resources; the backend owns display arbitration.
+ *  - Close and resource_destroy cannot fail and must finish using the state
+ *    before returning.
+ *  - Unregister preserves private_data until all sessions close; the owner
+ *    must retry EBUSY before releasing device state.
+ */
+struct drv_gpu_ops {
+	uint32_t version;
+	uint32_t size;
+	uint32_t capabilities;
+	uint32_t reserved;
+
+	int (*open)(void *, void **);
+	void (*close)(void *, void *);
+	int (*get_info)(void *, void *, struct gpu_info *);
+	int (*resource_create)(void *, void *, const struct gpu_resource_create *, void **);
+	void (*resource_destroy)(void *, void *, void *);
+	int (*get_capset)(void *, void *, struct gpu_capset *);
+	int (*blob_create)(void *, void *, const struct gpu_blob_create *, void **, uint32_t *);
+	int (*resource_read)(void *, void *, void *, uint64_t, void *, uint32_t);
+	int (*resource_write)(void *, void *, void *, uint64_t, const void *, uint32_t);
+	int (*command)(void *, void *, const void *, uint32_t);
+	int (*present)(void *, void *, void *, const struct gpu_present *);
+	int (*resource_map)(void *, void *, void *, struct drv_gpu_mapping *);
+
+	/*
+	 * Optional physical placement allocator validates actual backing before success.
+	 * It must satisfy every condition or unwind its own allocations and return
+	 * ENOTSUP. Native renderer IDs, BAR addresses and requested flags alone do
+	 * not prove physical placement, contiguity or cache coherence.
+	 */
+	int (*blob_create_placed)(void *, void *, const struct gpu_blob_create_placed *, void **, uint32_t *);
+
+	/* Optional display ownership and immutable mapping views retain the same session lifetime. */
+	const struct drv_gpu_display_ops *display;
+	const struct drv_gpu_share_ops *share;
+	const struct drv_gpu_command_ops *commands;
+	const struct drv_gpu_scanout_ops *scanout;
+	const struct drv_gpu_job_ops *jobs;
+	const struct drv_gpu_recovery_ops *recovery;
+
+	/* Optional image layouts besides linear rows (gpu-share.h); without them only linear images are shared. */
+	const struct drv_gpu_layout_ops *layouts;
+
+	/* Optional reset at root's request and the driver's reports. */
+	const struct drv_gpu_service_ops *service;
+};
+
+/*
+ * Retains a wrapper protected by an existing reference or its publisher's lock.
+ * The reference preserves the wrapper, not the backend's separate hardware life.
+ */
+void drv_gpu_retain(struct drv_gpu_device *device);
+
+/*
+ * Releases one retained wrapper without invoking backend operations.
+ */
+void drv_gpu_release(struct drv_gpu_device *device);
+
+/*
+ * Finishes one accepted request from an interrupt or ordinary driver context.
+ */
+void drv_gpu_complete(struct drv_gpu_completion *completion, int error);
+
+/*
+ * Publishes a device-wide failure after the backend has armed quarantine.
+ *
+ * Before a nonzero report, new hardware publication must be stopped and every
+ * resource destroy/close path must retain uncertain native or DMA ownership.
+ * The core may begin logical teardown after publication, while callback drain
+ * and checked hardware reset remain separate barriers. This is not a request
+ * to stop hardware; use report_session_error for an unconfirmed local loss.
+ * Zero is reserved for checked fresh-session recovery with no older owner.
+ */
+void drv_gpu_report_error(struct drv_gpu_device *device, int error);
+
+/*
+ * Publishes one retained backend session's failure without failing other opens.
+ */
+void drv_gpu_report_session_error(struct drv_gpu_device *device, void *session, int error);
+
+/*
+ * Announces actual backend capacity release after dropping its resource lock.
+ */
+void drv_gpu_capacity_changed(struct drv_gpu_device *device);
+
+/*
+ * Publishes a new display topology sequence of the device.
+ *
+ * The backend calls it after its events operation reports the new sequence, in
+ * place of the poll_notify() that the change would otherwise make: it signals
+ * every GPU_DISPLAY_FENCE hotplug registration whose sequence is older and then
+ * wakes every poll.  It takes only the core's registry lock and the fences'
+ * IRQ-safe locks, so it may run in an interrupt handler or a thread, but never
+ * under a lock the events operation takes.  The caller retains the wrapper
+ * (a NULL one, before publication or after withdrawal, only wakes the polls).
+ */
+void drv_gpu_display_changed(struct drv_gpu_device *device, uint64_t sequence);
+
+/*
+ * Publishes a refresh boundary of one output of the device.
+ *
+ * The backend calls it, while the output is armed (the display refresh_arm
+ * operation), with the output's ID and generation and the refresh count that
+ * the display refresh operation reports for the boundary.  It signals every
+ * GPU_DISPLAY_FENCE refresh registration of the output whose count is older,
+ * ends the ones of another generation with ESTALE, and returns how many of
+ * the output's registrations are left armed (zero: the backend may stop
+ * watching).  Like drv_gpu_display_changed it takes only the core's registry
+ * lock and the fences' IRQ-safe locks, so it may run in an interrupt handler
+ * or a thread, but never under a lock the refresh operation takes.  The
+ * caller retains the wrapper; a NULL one has no registrations.
+ */
+unsigned drv_gpu_display_refreshed(struct drv_gpu_device *device, uint32_t display_id, uint64_t generation, uint64_t sequence);
+
+/*
+ * Says and clears the GPU ioctl timing's sums (a build with -DGPU_IOCTL_TIMING=1;
+ * nothing otherwise), from a backend's timing thread.
+ */
+void drv_gpu_ioctl_timing_report(void);
+
+/*
+ * Registers one initialized device using borrowed operations and private data.
+ *
+ *  - Every call creates an independent device, even when operations are shared.
+ *  - The core owns the returned handle and its /dev/gpuN publication.
+ *  - Failure leaves result NULL and does not consume operations or private_data.
+ *  - Both borrowed objects must remain valid until unregister succeeds.
+ */
+int
+drv_gpu_register(
+	const struct drv_gpu_ops *ops,
+	void *private_data,
+	struct drv_gpu_device **result);
+
+/*
+ * Withdraws a device and releases its registration after all sessions close.
+ *
+ *  - EBUSY retains the handle and its borrowed state for a later retry.
+ *  - Once withdrawal starts, new opens and ioctls fail with ENODEV.
+ *  - Success consumes the handle, the caller may then release its private data
+ *    and operations.
+ *  - Old inode references retain only the offline core wrapper.
+ */
+int
+drv_gpu_unregister(
+	struct drv_gpu_device *device);
+
+#endif

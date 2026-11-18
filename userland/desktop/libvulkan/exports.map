@@ -1,0 +1,5 @@
+/* Keep the library's implementation and Venus transport private. */
+{
+	global: vk*;
+	local: *;
+};

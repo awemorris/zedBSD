@@ -1,0 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
+
+KEILAND_LINUX_TRUETYPE_SOURCES := $(LIBTRUETYPE_SOURCES)
+
+$(eval $(call KEILAND_LINUX_LIBRARY,truetype,libtruetype.so,$(KEILAND_LINUX_TRUETYPE_SOURCES),,-lm,userland/desktop/libtruetype/exports.map))

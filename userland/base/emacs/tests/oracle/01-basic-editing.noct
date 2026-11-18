@@ -1,0 +1,21 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("hello world");
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.pointMin());
+    oracleEmit(Editor.pointMax());
+    Editor.gotoChar(1);
+    oracleEmit(Editor.bobp());
+    oracleEmit(Editor.eobp());
+    Editor.forwardChar(6);
+    oracleEmit(Editor.point());
+    Editor.insert("big ");
+    oracleEmit(Editor.bufferString());
+    Editor.deleteRegion(1, 7);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.bufferSubstring(1, 4));
+    oracleEmit(Editor.charAfter(1));
+    oracleEmit(Editor.charBefore(Editor.pointMax()));
+    oracleEmit(Editor.charAfter(999));
+}

@@ -1,0 +1,40 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Overlay filesystem
+ */
+#ifndef KERN_KERN_OVERLAYFS_H
+#define KERN_KERN_OVERLAYFS_H
+
+#include "kern/mount.h"
+
+enum overlay_mount_flags {
+	OVERLAY_READ_ONLY = 0x0001U,
+	OVERLAY_READ_WRITE = 0x0002U,
+};
+
+struct overlay_mount_args {
+	struct path upper;
+	struct path lower;
+	unsigned flags;
+};
+
+int
+drv_overlayfs_init(void);
+
+/* Caller holds a mount reference; result owns its lower path reference. */
+int drv_overlay_lower_root_ref(struct mount *mountp, struct path *result);
+
+int
+drv_overlay_mount_at(
+	struct mount *namespace_root,
+	const char *target,
+	const struct overlay_mount_args *args,
+	struct mount **result);
+
+#endif

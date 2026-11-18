@@ -1,0 +1,41 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("one two three\nfour five six\n");
+
+    // kill-region records and removes the text.
+    Editor.killRegion(1, 4);
+    oracleEmit(Editor.currentKill(0));
+    oracleEmit(Editor.bufferString());
+
+    // kill-line to end of line, then the newline separately.
+    Editor.gotoChar(1);
+    Editor.killLine();
+    oracleEmit(Editor.currentKill(0));
+    Editor.killLine();
+    oracleEmit(Editor.bufferString());
+
+    // copy-region-as-kill leaves the text in place.
+    Editor.copyRegionAsKill(1, 5);
+    oracleEmit(Editor.currentKill(0));
+    oracleEmit(Editor.bufferString());
+
+    // yank inserts the newest kill and sets the mark before it.
+    Editor.gotoChar(Editor.pointMax());
+    Editor.yank();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.mark());
+
+    // The ring rotates with current-kill and a later yank follows the
+    // rotated pointer.
+    oracleEmit(Editor.currentKill(1));
+    Editor.gotoChar(1);
+    Editor.yank();
+    oracleEmit(Editor.bufferString());
+
+    // kill-new / kill-append primitives.
+    Editor.killNew("alpha");
+    Editor.killAppend(" beta");
+    oracleEmit(Editor.currentKill(0));
+}

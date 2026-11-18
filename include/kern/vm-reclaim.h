@@ -1,0 +1,197 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Virtual memory reclaim
+ */
+
+#ifndef KERN_KERN_VM_RECLAIM_H
+#define KERN_KERN_VM_RECLAIM_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+struct vm_page;
+struct vm_private_page;
+struct kern_pmem;
+
+struct vm_reclaim_stats {
+	uint32_t resident;
+	uint32_t swapped;
+	uint32_t page_ins;
+	uint32_t page_outs;
+	uint32_t reclaims;
+	uint32_t io_errors;
+	uint32_t faults;
+	uint32_t anonymous_resident;
+	uint32_t file_resident;
+	uint32_t wired;
+	uint32_t busy;
+	uint32_t dirty;
+	uint32_t clean;
+};
+
+extern struct vm_reclaim_stats vm_reclaim_counters;
+
+void
+vm_reclaim_init(void);
+
+void
+vm_private_page_init(
+	struct vm_private_page *backing);
+
+void
+vm_private_page_ref(
+	struct vm_private_page *backing);
+
+void
+vm_private_page_put(
+	struct vm_private_page *backing);
+
+/*
+ * The blocking acquire requires a caller-owned lifetime reference.
+ */
+int
+vm_private_page_io_acquire(
+	struct vm_private_page *backing);
+
+/*
+ * On success the nonblocking form also returns an I/O lifetime reference.
+ */
+int
+vm_private_page_io_try_acquire(
+	struct vm_private_page *backing);
+
+void
+vm_private_page_io_release(
+	struct vm_private_page *backing);
+
+int
+vm_private_page_wait_idle(
+	struct vm_private_page *backing);
+
+/*
+ * A successful short operation includes a backing lifetime reference.
+ */
+int
+vm_private_page_operation_try_begin(
+	struct vm_private_page *backing);
+
+void
+vm_private_page_operation_end(
+	struct vm_private_page *backing);
+
+void
+vm_private_page_mark_dirty(
+	struct vm_private_page *backing);
+
+int
+vm_private_page_pin(
+	struct vm_private_page *backing,
+	struct kern_pmem *memory);
+
+void
+vm_private_page_unpin(
+	struct vm_private_page *backing);
+
+void
+vm_page_track(
+	struct vm_page *page);
+
+void
+vm_page_untrack(
+	struct vm_page *page);
+
+int
+vm_reclaim_one(
+	struct vm_page *avoid);
+
+/*
+ * Allocates one page frame for a fault, reclaiming until one is free.
+ *
+ * Commit is charged before a page is faulted, so a frame always exists in
+ * memory or swap; a single reclaim can still lose its frame to another CPU
+ * or find every candidate busy with swap I/O.  This retries, waiting a
+ * little between attempts when reclaim made no progress, and fails only
+ * after a bounded time.  The avoided mapping is the one being faulted.
+ */
+int
+vm_reclaim_frame(
+	struct kern_pmem *memory,
+	struct vm_page *avoid);
+
+/*
+ * Waits until memory has been freed or a short time has passed, waking the
+ * page-out worker first.  For a fault that could not map for lack of
+ * page-table memory.
+ */
+int
+vm_reclaim_frame_private(
+	struct kern_pmem *memory);
+
+void
+vm_reclaim_wait_free(void);
+
+/*
+ * Reports the free physical memory in bytes for a caller about to take a
+ * page: the fault path's estimate, exact near the reserve.
+ */
+size_t
+vm_free_bytes_estimate(void);
+
+/*
+ * Fault paths which retain BUSY VM/object state must not enter object
+ * writeback, because an object content or resize transaction can be waiting
+ * for that retained state.  This bounded form considers private mappings
+ * only and never waits on an object transaction.  EAGAIN means that no
+ * eligible private backing was available.
+ */
+int
+vm_reclaim_private_one(
+	struct vm_page *avoid);
+
+/*
+ * The caller owns backing I/O.  A successful call changes a swapped private
+ * backing into a resident, dirty backing and returns its old slot to swap.
+ * Failure leaves the swap token and its only valid copy intact.
+ */
+int
+vm_private_page_in_owned(
+	struct vm_private_page *backing,
+	struct vm_page *accounting_page);
+
+/*
+ * Page in every private backing whose encoded slot belongs to source_id.
+ * The swap manager must put that source in DRAINING state before calling.
+ */
+int
+vm_reclaim_drain_swap_source(
+	unsigned source_id);
+
+/*
+ * The cancel callback is sampled between page-ins and while retrying a busy
+ * backing.  A nonzero result stops the drain without discarding any resident
+ * page already recovered; the swap manager can then restore ACTIVE state.
+ */
+int
+vm_reclaim_drain_swap_source_cancelable(
+	unsigned source_id,
+	int (*cancel)(void *),
+	void *cancel_argument);
+
+void
+vm_page_note_in(
+	struct vm_page *page);
+
+void
+vm_reclaim_note_fault(void);
+
+void
+vm_reclaim_get_stats(
+	struct vm_reclaim_stats *output);
+
+#endif

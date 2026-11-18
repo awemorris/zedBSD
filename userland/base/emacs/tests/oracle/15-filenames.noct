@@ -1,0 +1,12 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    oracleEmit(Editor.expandFileName("~/notes.txt", ""));
+    oracleEmit(Editor.expandFileName("rel.txt", "/tmp/"));
+    oracleEmit(Editor.expandFileName("rel.txt", "/tmp"));
+    oracleEmit(Editor.expandFileName("/abs/path.txt", "/tmp/"));
+    oracleEmit(Editor.abbreviateFileName(Editor.expandFileName("~/deep/dir/f.c", "")));
+    oracleEmit(Editor.fileNameDirectory("/a/b/c.txt"));
+    oracleEmit(Editor.fileNameDirectory("plain.txt"));
+    oracleEmit(Editor.fileNameNondirectory("/a/b/c.txt"));
+}

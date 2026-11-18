@@ -1,0 +1,23 @@
+Firmware: NVIDIA GSP-RM firmware 570.144 for Turing (TU102, TU104, TU106,
+          TU116, TU117), Ampere (GA102 to GA107) and Ada (AD102 to AD107)
+Hardware: NVIDIA GeForce RTX 20xx, GTX 16xx, RTX 30xx and RTX 40xx graphics
+          cards, used by the nvrtx driver (CONFIG_DRIVER_PCI_NVRTX)
+Files:    /lib/firmware/nvidia/tu102/gsp/gsp-570.144.bin (GSP-RM image, Turing)
+          /lib/firmware/nvidia/tu102/gsp/bootloader-570.144.bin
+          /lib/firmware/nvidia/tu102/gsp/booter_load-570.144.bin
+          /lib/firmware/nvidia/tu102/gsp/booter_unload-570.144.bin
+          /lib/firmware/nvidia/tu102/acr/bl.bin
+          /lib/firmware/nvidia/tu116/gsp/booter_load-570.144.bin
+          /lib/firmware/nvidia/tu116/gsp/booter_unload-570.144.bin
+          /lib/firmware/nvidia/ga102/gsp/gsp-570.144.bin (GSP-RM image, Ampere and Ada)
+          /lib/firmware/nvidia/ga102/gsp/bootloader-570.144.bin
+          /lib/firmware/nvidia/ga102/gsp/booter_load-570.144.bin
+          /lib/firmware/nvidia/ga102/gsp/booter_unload-570.144.bin
+          /lib/firmware/nvidia/ad102/gsp/bootloader-570.144.bin
+          /lib/firmware/nvidia/ad102/gsp/booter_load-570.144.bin
+          /lib/firmware/nvidia/ad102/gsp/booter_unload-570.144.bin
+Source:   linux-firmware tag 20260410 (commit dc85ccedc9c973682fbcf4d628ca61174bcc3120)
+
+Copyright NVIDIA Corporation or its suppliers.  Redistributed unmodified,
+for use with an operating system distributed under an OSI-approved open
+source license, together with this license (LICENCE.nvidia section 2.1.2).

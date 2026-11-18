@@ -1,0 +1,38 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * LOOP: the inclusive prefix sums of each group's 64 words, a
+ * loop of six steps with two barriers in each (every invocation takes the
+ * same trips): read the word off places back, wait, add it, wait.
+ */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer V { uint v[]; };
+layout(std430, set = 0, binding = 1) buffer P { uint prefix[]; };
+
+shared uint run[64];
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+
+    run[l] = v[gl_GlobalInvocationID.x];
+    barrier();
+    for (uint off = 1u; off < 64u; off <<= 1) {
+        uint before = 0u;
+
+        if (l >= off)
+            before = run[l - off];
+        barrier();
+        run[l] += before;
+        barrier();
+    }
+    prefix[gl_GlobalInvocationID.x] = run[l];
+}

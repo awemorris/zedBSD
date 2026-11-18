@@ -1,0 +1,18 @@
+zedBSD: select the BSD-style locale backend
+
+zedBSD's C library provides the POSIX.1-2008 locale-aware functions that
+__locale_dir/support/bsd_like.h calls, so that backend describes it.  Without
+a branch of its own it falls through to the transitional one, which pulls in
+the AIX header and fails to compile.
+
+--- a/libcxx/include/__locale_dir/locale_base_api.h
++++ b/libcxx/include/__locale_dir/locale_base_api.h
+@@ -122,6 +122,8 @@
+ #    include <__locale_dir/support/fuchsia.h>
+ #  elif _LIBCPP_LIBC_LLVM_LIBC
+ #    include <__locale_dir/support/llvm_libc.h>
++#  elif defined(__ZEDBSD__)
++#    include <__locale_dir/support/bsd_like.h>
+ #  elif defined(__linux__)
+ #    include <__locale_dir/support/linux.h>
+ #  elif _LIBCPP_LIBC_NEWLIB

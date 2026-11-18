@@ -1,0 +1,58 @@
+#!/bin/sh
+# zedBSD OpenSSH server startup.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+#
+# A host key identifies this machine to everyone who connects, so it cannot
+# be built into the image: every machine made from that image would claim
+# the same identity, and anybody holding the image would hold the key.  It
+# is made here instead, the first time the server is started.
+
+
+config=/etc/ssh/sshd_config
+keygen=/usr/bin/ssh-keygen
+sshd=/usr/sbin/sshd
+
+# The server refuses to start without a configuration, and says so in a way
+# that is harder to read than this.
+if [ ! -f "$config" ]; then
+	echo "sshd-start: $config is missing" >&2
+	exit 1
+fi
+
+# Privilege separation needs a directory that nobody may write to, and the
+# server checks that before it will run.
+if [ ! -d /var/empty ]; then
+	mkdir -p /var/empty
+fi
+chmod 0755 /var/empty
+
+# Each kind of key is made only when it is not already there, so a key that
+# has been put here on purpose is kept and a key that has been removed comes
+# back.  ssh-keygen -A would do all of this itself, but doing it a key at a
+# time says in the log which one was missing.
+for kind in rsa ecdsa ed25519; do
+	key=/etc/ssh/ssh_host_${kind}_key
+	if [ ! -f "$key" ]; then
+		echo "sshd-start: making a $kind host key" >&2
+		if "$keygen" -q -t "$kind" -N '' -f "$key"; then
+			chmod 0600 "$key"
+		else
+			echo "sshd-start: cannot make a $kind host key" >&2
+		fi
+	fi
+done
+
+# Without at least one key the server has no identity to offer, and every
+# connection would be refused for a reason the client cannot explain.
+have_key=no
+for kind in rsa ecdsa ed25519; do
+	if [ -f /etc/ssh/ssh_host_${kind}_key ]; then
+		have_key=yes
+	fi
+done
+if [ "$have_key" = no ]; then
+	echo "sshd-start: no host key could be made" >&2
+	exit 1
+fi
+
+exec "$sshd" "$@"

@@ -1,0 +1,25 @@
+Use the POSIX field name for the statvfs flags on zedBSD
+
+Path.inc picks <sys/statvfs.h> and struct statvfs for every system that is
+not Linux, FreeBSD, AIX or managarm, and zedBSD is one of those.  It then
+reads the flags field under the name struct statfs gives it, f_flags,
+because the list of systems that use the POSIX name names only four.
+
+struct statvfs has f_flag.  A system that gets the POSIX struct and the BSD
+field name cannot compile this file, so zedBSD is added to the list rather
+than growing a second name for one field in its own headers.
+
+This is not specific to zedBSD: any system reaching the statvfs branch and
+not named on line 113 has the same problem.
+
+--- a/llvm/lib/Support/Unix/Path.inc
++++ b/llvm/lib/Support/Unix/Path.inc
+@@ -111,7 +111,7 @@
+ #endif
+ 
+ #if defined(__NetBSD__) || defined(__DragonFly__) || defined(__GNU__) ||       \
+-    defined(__MVS__)
++    defined(__MVS__) || defined(__ZEDBSD__)
+ #define STATVFS_F_FLAG(vfs) (vfs).f_flag
+ #else
+ #define STATVFS_F_FLAG(vfs) (vfs).f_flags

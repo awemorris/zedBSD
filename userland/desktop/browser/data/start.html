@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser</title>
+<style>
+body { margin: 0; background: #eef1f6; color: #1f2633; font-family: sans-serif; font-size: 15px; line-height: 1.5; }
+.banner { background: #1d2b45; color: #ffffff; padding: 30px 0 26px; border-bottom: 4px solid #4f8cd6; }
+.banner .inner { width: 720px; margin: 0 auto; }
+.banner h1 { margin: 0; font-size: 34px; line-height: 1.2; }
+.banner p { margin: 6px 0 0; color: #b9c8e0; font-size: 16px; }
+.main { width: 720px; margin: 24px auto 40px; }
+.card { background: #ffffff; border: 1px solid #d3dae6; padding: 14px 22px 16px; margin: 0 0 16px; }
+.card h2 { margin: 0 0 8px; font-size: 20px; color: #1d2b45; border-bottom: 1px solid #e3e8f0; padding-bottom: 6px; }
+.card p { margin: 6px 0; }
+.card ul { margin: 6px 0; padding-left: 24px; }
+a { color: #2463b3; }
+code { background: #f0f2f6; padding: 0 3px; font-size: 13px; }
+.note { color: #5f6b7d; font-size: 13px; }
+.footer { text-align: center; color: #7b8698; font-size: 12px; }
+@media (prefers-color-scheme: dark) {
+body { background: #1a1e25; color: #d9dee7; }
+.banner { background: #111723; border-bottom-color: #4f8cd6; }
+.card { background: #232933; border-color: #3a4351; }
+.card h2 { color: #dce6f7; border-bottom-color: #3a4351; }
+a { color: #82b4f5; }
+code { background: #2e3541; }
+.note { color: #a0aabb; }
+.footer { color: #8d97a8; }
+}
+</style>
+</head>
+<body>
+<div class="banner">
+<div class="inner">
+<h1>Browser</h1>
+<p>The Web browser of the desktop, with an engine of its own.</p>
+</div>
+</div>
+<div class="main">
+<div class="card">
+<h2>Welcome</h2>
+<p>This page is drawn by <code>browser</code>: its HTML parser, style engine and layout are written for this system,
+and the page is painted with Vulkan in a window of the desktop.</p>
+<p>日本語の文章も、フォールバックのフォントで表示できます。</p>
+</div>
+<div class="card">
+<h2>Pages on this system</h2>
+<ul>
+<li><a href="about.html">About the engine</a>: what it is made of and what comes next.</li>
+<li><a href="text.html">Text and blocks</a>: headings, paragraphs, lists, alignment and preformatted text.</li>
+</ul>
+</div>
+<div class="card">
+<h2>Getting around</h2>
+<ul>
+<li>Click a link to follow it. <b>Back</b>, <b>Forward</b> and <b>Reload</b> are in the title bar.</li>
+<li><code>Alt+Left</code> and <code>Alt+Right</code> go back and forward; <code>F5</code> reloads.</li>
+<li><code>Ctrl+L</code> edits the location; type a file path and press Enter.</li>
+<li>The arrow keys, <code>Page Up</code>, <code>Page Down</code>, <code>Space</code>, <code>Home</code> and <code>End</code> scroll.</li>
+<li><code>Ctrl+W</code> or <code>Ctrl+Q</code> closes the window.</li>
+</ul>
+</div>
+<div class="card">
+<h2>Today and tomorrow</h2>
+<p>Local files open today. Networking, images, JavaScript in pages and more CSS arrive step by step.</p>
+<p class="note">The JavaScript engine already runs scripts on its own: <code>browser --js FILE.js</code>.</p>
+</div>
+<p class="footer">browser</p>
+</div>
+</body>
+</html>

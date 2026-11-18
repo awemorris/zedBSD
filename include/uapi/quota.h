@@ -1,0 +1,47 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_UAPI_QUOTA_H
+#define KERN_UAPI_QUOTA_H
+
+#include <stdint.h>
+
+#define KERN_QUOTA_VERSION	1U
+
+#define KERN_QUOTA_GET	1U
+#define KERN_QUOTA_SET	2U
+#define KERN_QUOTA_ENABLE	3U
+#define KERN_QUOTA_DISABLE	4U
+#define KERN_QUOTA_SYNC	5U
+
+#define KERN_QUOTA_USER	0U
+#define KERN_QUOTA_GROUP	1U
+
+#define KERN_QUOTA_F_ENABLED	0x00000001U
+
+/*
+ * All quantities are filesystem blocks, inodes, or absolute UTC seconds.
+ */
+struct quota_control {
+	uint32_t size;
+	uint32_t version;
+	uint32_t command;
+	uint32_t type;
+	uint32_t id;
+	uint32_t flags;
+	uint64_t block_soft;
+	uint64_t block_hard;
+	uint64_t inode_soft;
+	uint64_t inode_hard;
+	uint64_t blocks;
+	uint64_t inodes;
+	uint64_t block_deadline;
+	uint64_t inode_deadline;
+	uint64_t grace_seconds;
+};
+
+#endif

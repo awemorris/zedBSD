@@ -1,0 +1,31 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_WAYLAND_SOURCES := \
+	userland/desktop/libwayland/client.c \
+	userland/desktop/libwayland/proxy.c \
+	userland/desktop/libwayland/wire.c \
+	userland/desktop/libwayland/event.c \
+	userland/desktop/libwayland/protocol.c \
+	userland/desktop/libwayland/utility.c \
+	userland/desktop/libwayland/menu-protocol.c \
+	userland/desktop/libwayland/titlebar-protocol.c \
+	userland/desktop/libwayland/glass-protocol.c \
+	userland/desktop/libwayland/subsurface-protocol.c \
+	userland/desktop/libwayland/data-device-protocol.c \
+	userland/desktop/libwayland/primary-selection-protocol.c \
+	userland/desktop/libwayland/tablet-protocol.c \
+	userland/desktop/libwayland/touch-protocol.c \
+	userland/desktop/libwayland/text-input-protocol.c \
+	userland/desktop/libwayland/input-method-protocol.c \
+	userland/desktop/libwayland/virtual-keyboard-protocol.c \
+	userland/desktop/libwayland/ime-status-protocol.c \
+	userland/desktop/libwayland/keyboard-inset-protocol.c \
+	userland/desktop/libwayland/edit-protocol.c \
+	userland/desktop/libwayland/activation-protocol.c \
+	userland/desktop/libwayland/content-type-protocol.c \
+	userland/desktop/libwayland/theme-protocol.c
+
+$(eval $(call KEILAND_LINUX_LIBRARY,wayland,libwayland-client.so,$(KEILAND_LINUX_WAYLAND_SOURCES),,,userland/desktop/libwayland/exports.map))

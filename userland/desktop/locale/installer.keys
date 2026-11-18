@@ -1,0 +1,63 @@
+# The installer's texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source).
+# Why a disk or its partitions cannot be chosen (disk.c inst_disk_refusal and inst_chosen_refusal, drawn with kl_tr(reason)).
+msg	The running system uses this disk.
+msg	This disk is read-only.
+msg	This disk is a file, not a device.
+msg	This disk's sector size is not supported.
+msg	This disk is too small.
+msg	The disk has no GPT partition table.
+msg	The disk's partition table cannot be edited here.
+msg	The disk's partition table is full.
+msg	Another installation of this system may be on this disk.
+msg	The disk's EFI system partition cannot be read.
+msg	The disk's EFI system partition is too small or cannot be used.
+# The partition types' names (disk.c disk_type_names).
+msg	EFI system
+msg	System (UFS)
+msg	Swap
+msg	Unassigned
+msg	Microsoft basic data
+msg	Microsoft reserved
+msg	Windows recovery
+msg	Linux file system
+msg	Linux swap
+msg	FreeBSD boot
+msg	Apple APFS
+# The dialogs' buttons (screens.c screen_dialog).
+msg	Cancel installation
+msg	Keep going
+msg	OK
+msg	Delete
+msg	Keep
+msg	Erase
+msg	Continue
+msg	Back
+msg	Leave out
+msg	Install
+msg	Not yet
+msg	Stop
+# The installation's steps (screens.c screen_steps).
+msg	Checking the plan
+msg	Preparing the disk
+msg	Writing the partition table
+msg	Formatting the partitions
+msg	Mounting the system's partition
+msg	Copying the system
+msg	Writing the settings
+msg	Writing everything to the disk
+msg	Making the disk start
+msg	Finishing
+# The items of the page of what to install (platform/amd64/installer-items, from the index).
+msg	Base System
+msg	Keiland Desktop
+msg	Firmware
+msg	Packages
+msg	Clang
+msg	OpenSSH
+msg	OpenSSL and CA certificates
+msg	GTK4
+msg	Fonts
+msg	libavcodec
+msg	curl
+msg	Python
+msg	Other packages

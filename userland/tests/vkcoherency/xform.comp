@@ -1,0 +1,6 @@
+#version 450
+// vkcoherency: out[x] = in[x] + 3x, the input the CPU wrote, the output the CPU reads back.
+layout(local_size_x = 32) in;
+layout(std430, set = 0, binding = 0) readonly buffer In { uint words_in[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint words_out[]; };
+void main() { uint x = gl_GlobalInvocationID.x; words_out[x] = words_in[x] + x * 3u; }

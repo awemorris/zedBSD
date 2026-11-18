@@ -1,0 +1,32 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * SHARED: each 8 x 8 group moves an 8 x 8 tile of a 64 x 64
+ * matrix through shared memory, tile[ly][lx], and after the barrier writes
+ * it back transposed, tile[lx][ly], at the mirrored tile: t = m transposed.
+ */
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer M { uint m[]; };
+layout(std430, set = 0, binding = 1) buffer T { uint t[]; };
+
+shared uint tile[8][8];
+
+void main()
+{
+    uint lx = gl_LocalInvocationID.x;
+    uint ly = gl_LocalInvocationID.y;
+    uint gx = gl_WorkGroupID.x;
+    uint gy = gl_WorkGroupID.y;
+
+    tile[ly][lx] = m[(gy * 8u + ly) * 64u + gx * 8u + lx];
+    barrier();
+    t[(gx * 8u + ly) * 64u + gy * 8u + lx] = tile[lx][ly];
+}

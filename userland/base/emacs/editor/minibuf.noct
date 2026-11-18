@@ -1,0 +1,191 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Minibuffer: line input in the echo area, with TAB completion.
+//
+// readFromMinibuffer(ed, prompt, completer): completer is 0 for no
+// completion, or a function (input) -> array of candidate strings.
+// TAB extends the input to the longest common prefix; when nothing
+// extends, the candidates (or [No match]) are shown inline.
+//
+
+func readFromMinibuffer(ed, prompt, completer) {
+    return readFromMinibufferInit(ed, prompt, completer, "");
+}
+
+// The full version, with initial input already in the edit line.
+func readFromMinibufferInit(ed, prompt, completer, initial) {
+    var input = initial;
+    var note = "";
+    while (true) {
+        ed.echoMessage = prompt + input + note;
+        ed.echoCursor = stringWidth(prompt + input);
+        if (Term.pendingInput() == 0) {
+            redisplay(ed);
+        }
+        var k = Term.readKey(30000);
+        if (k < 0) {
+            continue;
+        }
+        note = "";
+        if (k == 0x0D) {
+            ed.echoCursor = -1;
+            return input;
+        }
+        if (k == (Term.CTRL | 0x67)) {
+            ed.echoMessage = "Quit";
+            ed.echoCursor = -1;
+            return 0;
+        }
+        if (k == 0x7F) {
+            var n = String.charCount(input);
+            if (n > 0) {
+                input = String.substring(input, 0, n - 1);
+            }
+            continue;
+        }
+        if (k == 0x09 && Type.of(completer) == "func") {
+            var st = { input: input, note: "" };
+            minibufComplete(st, completer);
+            input = st.input;
+            note = st.note;
+            continue;
+        }
+        if (k >= 0x20 && k < 0x110000) {
+            input = input + Editor.charToString(k);
+        }
+    }
+}
+
+// One TAB press: extend to the common prefix, otherwise show status.
+func minibufComplete(st, completer) {
+    var cands = completer(st.input);
+    var n = Array.size(cands);
+    if (n == 0) {
+        st.note = " [No match]";
+        return 0;
+    }
+    if (n == 1) {
+        st.input = cands[0];
+        st.note = " [Sole completion]";
+        return 0;
+    }
+    var common = minibufCommonPrefix(cands);
+    if (String.charCount(common) > String.charCount(st.input)) {
+        st.input = common;
+        return 0;
+    }
+    // No progress: list the candidates inline, truncated.
+    var listing = "";
+    var count = 0;
+    for (c in cands) {
+        if (count == 6) {
+            listing = listing + " ...";
+            break;
+        }
+        listing = listing + " " + c;
+        count = count + 1;
+    }
+    st.note = " {" + listing + " }";
+    return 0;
+}
+
+func minibufCommonPrefix(cands) {
+    var common = cands[0];
+    var n = Array.size(cands);
+    for (i in 1..n) {
+        var c = cands[i];
+        var limit = String.charCount(common);
+        if (String.charCount(c) < limit) {
+            limit = String.charCount(c);
+        }
+        var j = 0;
+        while (j < limit && String.charAt(common, j) == String.charAt(c, j)) {
+            j = j + 1;
+        }
+        common = String.substring(common, 0, j);
+    }
+    return common;
+}
+
+// Insertion sort for candidate lists (no Array.sort intrinsic yet).
+func sortStrings(arr) {
+    var n = Array.size(arr);
+    for (i in 1..n) {
+        var v = arr[i];
+        var j = i - 1;
+        while (j >= 0 && arr[j] > v) {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = v;
+    }
+    return arr;
+}
+
+// --- completers --------------------------------------------------------
+
+func completeFromList(input, all) {
+    var out = [];
+    var n = String.charCount(input);
+    for (name in all) {
+        if (String.charCount(name) >= n && String.substring(name, 0, n) == input) {
+            Array.push(out, name);
+        }
+    }
+    return out;
+}
+
+func commandCompleter(input) {
+    var all = [];
+    for (name, fn in Commands) {
+        Array.push(all, name);
+    }
+    sortStrings(all);
+    return completeFromList(input, all);
+}
+
+func bufferCompleter(input) {
+    var all = [];
+    for (name, b in Buffers) {
+        Array.push(all, name);
+    }
+    sortStrings(all);
+    return completeFromList(input, all);
+}
+
+// File names complete per directory component.
+func fileCompleter(input) {
+    // Listing happens on the substituted/expanded path, but the
+    // candidates are returned in the input's own coordinates so TAB
+    // extends what the user actually sees ("~//tmp/x" stays intact
+    // until RET).
+    var sub = substituteInFileName(input);
+    var dir = "";
+    var partial = sub;
+    var n = String.charCount(sub);
+    var slash = 0 - 1;
+    for (i in 0..n) {
+        if (String.charAt(sub, i) == "/") {
+            slash = i;
+        }
+    }
+    if (slash >= 0) {
+        dir = String.substring(sub, 0, slash + 1);
+        partial = String.substring(sub, slash + 1, -1);
+    }
+    var origDir = String.substring(input, 0,
+                                   String.charCount(input) - String.charCount(partial));
+    var lsdir = Editor.expandFileName(dir, defaultDirectory());
+    if (dir == "") {
+        lsdir = Editor.expandFileName(".", defaultDirectory());
+    }
+    var out = [];
+    var pn = String.charCount(partial);
+    for (e in FileUtil.listDirectory(lsdir)) {
+        if (String.charCount(e) >= pn && String.substring(e, 0, pn) == partial) {
+            Array.push(out, origDir + e);
+        }
+    }
+    return out;
+}

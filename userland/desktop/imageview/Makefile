@@ -1,0 +1,28 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+
+IMAGEVIEW_SOURCES := \
+	userland/desktop/imageview/main.c \
+	userland/desktop/imageview/present.c \
+	userland/desktop/imageview/menu.c \
+	userland/desktop/imageview/titlebar.c \
+	userland/desktop/imageview/glass.c \
+	userland/desktop/imageview/view.c \
+	userland/desktop/imageview/draw.c \
+	userland/desktop/imageview/image.c \
+	userland/desktop/imageview/folder.c \
+	userland/desktop/imageview/canvas.c \
+	userland/desktop/imageview/text.c \
+	userland/desktop/imageview/touch.c \
+	userland/desktop/imageview/share.c \
+	userland/desktop/files/trash.c \
+	userland/desktop/files/apps.c \
+	userland/desktop/files/mounts.c \
+	userland/desktop/artwork/mark.c \
+	userland/desktop/picture/picture.c
+
+$(eval $(call USERLAND_PACKAGE,imageview,imageview - Image Viewer,x86_64,y,basic,$(IMAGEVIEW_SOURCES),y,desktop,desktop/imageview,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat desktop/libpng-compat desktop/libjpeg-compat desktop/libgif-compat,0755,program,,,bin))

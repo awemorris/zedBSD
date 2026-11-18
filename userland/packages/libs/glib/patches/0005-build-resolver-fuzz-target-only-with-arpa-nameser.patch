@@ -1,0 +1,29 @@
+Build the resolver fuzz target only where the record parser exists.
+
+fuzzing/fuzz_resolver.c calls g_resolver_records_from_res_query(), the DNS
+answer parser of the threaded resolver.  Without <arpa/nameser.h> that
+parser is not compiled (0003), so the target cannot link.  When 0001 finds
+no <arpa/nameser.h>, the target is left out of the list; every other fuzz
+target, and systems that have the header, are unchanged.
+
+--- a/fuzzing/meson.build
++++ b/fuzzing/meson.build
+@@ -46,6 +46,18 @@
+   'fuzz_variant_text',
+ ]
+ 
++# The resolver target feeds DNS answers to the record parser of the threaded
++# resolver, which is built only with <arpa/nameser.h> (gio/meson.build).
++if not have_arpa_nameser_h
++  kept_fuzz_targets = []
++  foreach target_name : fuzz_targets
++    if target_name != 'fuzz_resolver'
++      kept_fuzz_targets += target_name
++    endif
++  endforeach
++  fuzz_targets = kept_fuzz_targets
++endif
++
+ deps = [libgmodule_dep, libgio_dep, libglib_dep, libgobject_dep]
+ 
+ extra_sources = []

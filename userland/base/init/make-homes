@@ -1,0 +1,28 @@
+#!/bin/sh
+# Makes the home directories that /etc/passwd names under /home and that are not there yet (ws129-p004): a user who
+# logs in before a graphical session made the home (sessiond makes it then), over SSH or the console, finds it.
+# Each is made private to its user (mode 0700, owned by the account's uid and gid).  A path that exists in any form,
+# or one that is not a plain name directly under /home, is left alone.  Run once at boot by the homes service.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+[ -d /home ] || exit 0
+while IFS=: read -r name password uid gid comment home shell; do
+	# Only a name directly under /home.
+	case "$home" in
+	/home/*/*|/home/|/home/.|/home/..) continue ;;
+	/home/*) ;;
+	*) continue ;;
+	esac
+
+	# Something already there is not replaced.
+	if [ -e "$home" ] || [ -L "$home" ]; then
+		continue
+	fi
+
+	# The directory, private to the account.
+	if mkdir -m 700 "$home" && chown "$uid:$gid" "$home"; then
+		echo "homes: made $home for $name"
+	else
+		echo "homes: could not make $home for $name" >&2
+	fi
+done < /etc/passwd
+exit 0

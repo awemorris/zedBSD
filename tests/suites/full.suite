@@ -1,0 +1,31 @@
+# full: every active scenario (plan/tests.md §4), in an order that keeps the session: the boot first, the log out
+# and the shutdown last.  Scenarios that need a person's hands come out as needs-person.
+os.boot.*
+os.acpi.*
+os.power.battery-state
+desktop.startup.*
+desktop.bar.*
+desktop.home.*
+desktop.wiseview.*
+desktop.keyboard.*
+desktop.windows.move-by-title
+desktop.windows.maximize-double-click
+desktop.windows.unmaximize-drag
+desktop.windows.open-maximized
+desktop.windows.close-minimize
+desktop.widgets.*
+desktop.dnd.*
+apps.*.open-from-home
+apps.*
+os.accounts.*
+desktop.appearance.*
+desktop.input-method.choose-method
+desktop.input-method.*
+desktop.osk.*
+desktop.touchpad.*
+desktop.lock.*
+os.power.ac-plug
+os.power.lid
+os.power.power-button
+desktop.session.*
+os.power.shutdown

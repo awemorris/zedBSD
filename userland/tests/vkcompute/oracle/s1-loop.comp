@@ -1,0 +1,34 @@
+#version 450
+// Stage 1: loops with a trip count that differs per invocation, a nested branch and a break.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint v = src[i];
+	uint n = v % 17u;
+	uint acc = 0u;
+	for (uint k = 0u; k < n; k++)
+		acc = acc + k * v + 1u;
+	o[i * 3u + 0u] = acc;
+	uint w = (v & 1023u) + 1u;
+	uint steps = 0u;
+	while (w != 1u && steps < 64u) {
+		if ((w & 1u) != 0u)
+			w = w * 3u + 1u;
+		else
+			w = w >> 1;
+		steps = steps + 1u;
+	}
+	o[i * 3u + 1u] = steps;
+	uint bit = 32u;
+	for (uint k = 0u; k < 32u; k++) {
+		if (((v >> k) & 1u) != 0u) {
+			bit = k;
+			break;
+		}
+	}
+	o[i * 3u + 2u] = bit;
+}

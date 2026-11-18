@@ -1,0 +1,20 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <compat/gif_lib.h> declares leave the library. */
+{
+	global:
+		DGifOpenFileName;
+		DGifOpenFileHandle;
+		DGifOpen;
+		DGifSlurp;
+		DGifSavedExtensionToGCB;
+		DGifCloseFile;
+		GifErrorString;
+	local:
+		*;
+};

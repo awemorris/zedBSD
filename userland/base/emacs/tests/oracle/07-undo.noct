@@ -1,0 +1,36 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("hello");
+    Editor.undoBoundary();
+    Editor.insert(" world");
+    Editor.undoBoundary();
+
+    // Undo removes the newest change group.
+    Editor.undo();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // A second, non-consecutive undo undoes the undo (redo).
+    Editor.undoBoundary();
+    Editor.undo();
+    oracleEmit(Editor.bufferString());
+
+    // Undoing a deletion restores the text.
+    Editor.undoBoundary();
+    Editor.deleteRegion(1, 4);
+    Editor.undoBoundary();
+    Editor.undo();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // Several edits inside one group undo together.
+    Editor.undoBoundary();
+    Editor.gotoChar(1);
+    Editor.insert("A");
+    Editor.insert("B");
+    Editor.insert("C");
+    Editor.undoBoundary();
+    Editor.undo();
+    oracleEmit(Editor.bufferString());
+}

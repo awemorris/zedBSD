@@ -1,0 +1,64 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=i915-firmware
+package-version=20260410
+installed-adlp-dmc=/lib/firmware/i915/adlp_dmc.bin
+installed-tgl-dmc=/lib/firmware/i915/tgl_dmc_ver2_12.bin
+installed-adlp-fallback-dmc=/lib/firmware/i915/adlp_dmc_ver2_16.bin
+installed-adls-dmc=/lib/firmware/i915/adls_dmc_ver2_01.bin
+installed-icl-dmc=/lib/firmware/i915/icl_dmc_ver1_09.bin
+installed-rkl-dmc=/lib/firmware/i915/rkl_dmc_ver2_03.bin
+installed-license=/usr/share/licenses/i915-firmware/LICENSE.i915
+installed-whence=/usr/share/licenses/i915-firmware/WHENCE
+
+acquisition-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-tag=20260410
+acquisition-tag-object=4585dd5a5f0cee08990d754701d8866d9e9266e6
+acquisition-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-base-url=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
+acquisition-url-suffix=?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-adlp-dmc-path=i915/adlp_dmc.bin
+acquisition-adlp-dmc-size=79088
+acquisition-adlp-dmc-sha256=3516de2e134ddcf3b319c75d2e437779fecbd58cbb77234bd6f297c544e92ccb
+acquisition-tgl-dmc-path=i915/tgl_dmc_ver2_12.bin
+acquisition-tgl-dmc-size=19760
+acquisition-tgl-dmc-sha256=3c013ef0ad96ba73aee8e5bd04a8e27cc9b1c6e9183b1a83ce124485f325afca
+acquisition-adlp-fallback-dmc-path=i915/adlp_dmc_ver2_16.bin
+acquisition-adlp-fallback-dmc-size=77084
+acquisition-adlp-fallback-dmc-sha256=2da482ea46a40e54c9ca3b54185959177f393eff98ece21acdac7eb6cacb0fcb
+acquisition-adls-dmc-path=i915/adls_dmc_ver2_01.bin
+acquisition-adls-dmc-size=18704
+acquisition-adls-dmc-sha256=96e426ed7e80f0cc6644ada1928f4d02b163ff59b14b2339aa28a374d65a5b19
+acquisition-icl-dmc-path=i915/icl_dmc_ver1_09.bin
+acquisition-icl-dmc-size=25952
+acquisition-icl-dmc-sha256=aafad1967679baa36e971e5331da73eea31c68239416432df83e71332755dc01
+acquisition-rkl-dmc-path=i915/rkl_dmc_ver2_03.bin
+acquisition-rkl-dmc-size=18476
+acquisition-rkl-dmc-sha256=139ce0eb873a13679a4685463cdacf6d247073ce286c8a5bca443ef1d17ee2ac
+acquisition-license-path=LICENSE.i915
+acquisition-license-size=2080
+acquisition-license-sha256=8542aeabf2761935122d693561e16766ce1bcc2b0d003204f9040b7d6d929f2e
+acquisition-whence-path=WHENCE
+acquisition-whence-size=425450
+acquisition-whence-sha256=c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
+
+adlp-dmc-version=2.20
+tgl-dmc-version=2.12
+adlp-fallback-dmc-version=2.16
+adls-dmc-version=2.01
+icl-dmc-version=1.09
+rkl-dmc-version=2.03
+whence-recorded-adlp-dmc-version=DMC API/APB ver 2 release 20 for Alderlake P
+whence-recorded-tgl-dmc-version=DMC API/APB ver 2 release 12 for Tigerlake
+whence-recorded-adlp-fallback-dmc-version=DMC API/APB ver 2 release 16 for Alderlake P
+whence-recorded-adls-dmc-version=DMC API/APB ver 2 release 1 for Alderlake S
+whence-recorded-icl-dmc-version=DMC API/ABI ver 1 - release 09 for icelake
+whence-recorded-rkl-dmc-version=DMC API/APB ver 2 release 3 for Rocketlake
+driver-reference-bytes=adlp_dmc.bin and tgl_dmc_ver2_12.bin are identical to the i915 driver bring-up reference blobs (same size and SHA-256)
+driver-named-programs=every DMC program the i915 driver names: the platforms' own and the Alder Lake-P fallback
+redistribution=unmodified-binary-only
+redistribution-notice=Copyright and disclaimer must accompany the unmodified binaries; consult the exact installed Intel license
+license=Intel binary firmware terms in the installed LICENSE.i915 file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

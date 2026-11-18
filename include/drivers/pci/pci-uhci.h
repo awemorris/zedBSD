@@ -1,0 +1,20 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * PCI UHCI host controller.
+ */
+#ifndef KERN_DRIVERS_PCI_UHCI_H
+#define KERN_DRIVERS_PCI_UHCI_H
+
+int
+drv_pci_uhci_driver_register(void);
+
+void
+drv_pci_uhci_probe_roots(void);
+
+#endif

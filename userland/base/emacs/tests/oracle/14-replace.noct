@@ -1,0 +1,36 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("cat dog cat bird cat\nmore cats here");
+    Editor.gotoChar(1);
+    Editor.replaceString("cat", "ferret");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // Replacement containing the pattern must not loop.
+    Editor.gotoChar(1);
+    Editor.replaceString("dog", "dogdog");
+    oracleEmit(Editor.bufferString());
+
+    // Regexp replace with backreferences.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("alpha=1, beta=22, gamma=333");
+    Editor.gotoChar(1);
+    Editor.replaceRegexp("\\([a-z]+\\)=\\([0-9]+\\)", "\\2:\\1");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // Whole-match reference.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("aa bb cc");
+    Editor.gotoChar(1);
+    Editor.replaceRegexp("[a-z]+", "<\\&>");
+    oracleEmit(Editor.bufferString());
+
+    // Replacement only applies after point.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("xx yy xx yy");
+    Editor.gotoChar(7);
+    Editor.replaceString("yy", "ZZ");
+    oracleEmit(Editor.bufferString());
+}

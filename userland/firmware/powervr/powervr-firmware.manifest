@@ -1,0 +1,33 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=powervr-firmware
+package-version=1.1.OS@6976702
+installed-firmware=/lib/firmware/powervr/rogue_36.50.54.182_v1.fw
+installed-license=/usr/share/licenses/powervr-firmware/LICENSE.powervr
+installed-whence=/usr/share/licenses/powervr-firmware/WHENCE
+
+acquisition-repository=https://gitlab.freedesktop.org/imagination/linux-firmware.git
+acquisition-branch=powervr
+acquisition-revision=8a58f81883f7be458daa34e418cc4079f995b279
+acquisition-firmware-path=powervr/rogue_36.50.54.182_v1.fw
+acquisition-firmware-size=131072
+acquisition-firmware-sha256=59127d3a02e48876310a520b7dc355f7430d3748d2940caaa33f39237d517abb
+acquisition-license-path=LICENSE.powervr
+acquisition-license-size=2190
+acquisition-license-sha256=1c9aa6bd6703a7ce1cdb879542fa1d8aca115a327bd819b193c971de9c53f402
+acquisition-whence-path=WHENCE
+acquisition-whence-size=341319
+acquisition-whence-sha256=ec86d7649ff9e80e728b129dd725db1728f8a441cf342f1715c0a76dcf8146c3
+
+mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-revision=df57bb4b778ace43df7d472185d041e5bd4ef9ce
+mirror-path=powervr/
+
+hardware=Imagination PowerVR BXE-4-32, BVNC 36.50.54.182 (StarFive JH7110, VisionFive 2)
+redistribution=unmodified-binary-only
+redistribution-notice=Copyright notice and disclaimer must accompany the unmodified binary; consult the exact installed Imagination license
+license=Imagination Technologies binary firmware terms in the installed license file
+reverse-engineering=forbidden
+source-tree-blob=absent
+runtime-network-fetch=forbidden

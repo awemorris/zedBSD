@@ -1,0 +1,115 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_LANGINFO_H
+#define LIBC_LANGINFO_H
+
+#include <locale.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <locale-format.h>
+#include <nl_types.h>
+
+#define CODESET KERN_LOCALE_KEY_CODESET
+#define RADIXCHAR KERN_LOCALE_KEY_DECIMAL_POINT
+#define THOUSEP KERN_LOCALE_KEY_THOUSANDS_SEP
+#define CRNCYSTR KERN_LOCALE_KEY_CURRENCY_SYMBOL
+#define D_T_FMT KERN_LOCALE_KEY_D_T_FMT
+#define D_FMT KERN_LOCALE_KEY_D_FMT
+#define T_FMT KERN_LOCALE_KEY_T_FMT
+#define T_FMT_AMPM KERN_LOCALE_KEY_T_FMT_AMPM
+#define AM_STR KERN_LOCALE_KEY_AM_STR
+#define PM_STR KERN_LOCALE_KEY_PM_STR
+#define ABDAY_1 KERN_LOCALE_KEY_ABDAY_1
+#define ABDAY_2 KERN_LOCALE_KEY_ABDAY_2
+#define ABDAY_3 KERN_LOCALE_KEY_ABDAY_3
+#define ABDAY_4 KERN_LOCALE_KEY_ABDAY_4
+#define ABDAY_5 KERN_LOCALE_KEY_ABDAY_5
+#define ABDAY_6 KERN_LOCALE_KEY_ABDAY_6
+#define ABDAY_7 KERN_LOCALE_KEY_ABDAY_7
+#define DAY_1 KERN_LOCALE_KEY_DAY_1
+#define DAY_2 KERN_LOCALE_KEY_DAY_2
+#define DAY_3 KERN_LOCALE_KEY_DAY_3
+#define DAY_4 KERN_LOCALE_KEY_DAY_4
+#define DAY_5 KERN_LOCALE_KEY_DAY_5
+#define DAY_6 KERN_LOCALE_KEY_DAY_6
+#define DAY_7 KERN_LOCALE_KEY_DAY_7
+#define ABMON_1 KERN_LOCALE_KEY_ABMON_1
+#define ABMON_2 KERN_LOCALE_KEY_ABMON_2
+#define ABMON_3 KERN_LOCALE_KEY_ABMON_3
+#define ABMON_4 KERN_LOCALE_KEY_ABMON_4
+#define ABMON_5 KERN_LOCALE_KEY_ABMON_5
+#define ABMON_6 KERN_LOCALE_KEY_ABMON_6
+#define ABMON_7 KERN_LOCALE_KEY_ABMON_7
+#define ABMON_8 KERN_LOCALE_KEY_ABMON_8
+#define ABMON_9 KERN_LOCALE_KEY_ABMON_9
+#define ABMON_10 KERN_LOCALE_KEY_ABMON_10
+#define ABMON_11 KERN_LOCALE_KEY_ABMON_11
+#define ABMON_12 KERN_LOCALE_KEY_ABMON_12
+#define MON_1 KERN_LOCALE_KEY_MON_1
+#define MON_2 KERN_LOCALE_KEY_MON_2
+#define MON_3 KERN_LOCALE_KEY_MON_3
+#define MON_4 KERN_LOCALE_KEY_MON_4
+#define MON_5 KERN_LOCALE_KEY_MON_5
+#define MON_6 KERN_LOCALE_KEY_MON_6
+#define MON_7 KERN_LOCALE_KEY_MON_7
+#define MON_8 KERN_LOCALE_KEY_MON_8
+#define MON_9 KERN_LOCALE_KEY_MON_9
+#define MON_10 KERN_LOCALE_KEY_MON_10
+#define MON_11 KERN_LOCALE_KEY_MON_11
+#define MON_12 KERN_LOCALE_KEY_MON_12
+
+/*
+ * The month names as they stand alone (POSIX.1-2024), for a language that
+ * declines them inside a date.  zedBSD's locales keep one form of each
+ * name, so these give the same names as MON_n and ABMON_n.
+ */
+#define ALTMON_1 MON_1
+#define ALTMON_2 MON_2
+#define ALTMON_3 MON_3
+#define ALTMON_4 MON_4
+#define ALTMON_5 MON_5
+#define ALTMON_6 MON_6
+#define ALTMON_7 MON_7
+#define ALTMON_8 MON_8
+#define ALTMON_9 MON_9
+#define ALTMON_10 MON_10
+#define ALTMON_11 MON_11
+#define ALTMON_12 MON_12
+#define ABALTMON_1 ABMON_1
+#define ABALTMON_2 ABMON_2
+#define ABALTMON_3 ABMON_3
+#define ABALTMON_4 ABMON_4
+#define ABALTMON_5 ABMON_5
+#define ABALTMON_6 ABMON_6
+#define ABALTMON_7 ABMON_7
+#define ABALTMON_8 ABMON_8
+#define ABALTMON_9 ABMON_9
+#define ABALTMON_10 ABMON_10
+#define ABALTMON_11 ABMON_11
+#define ABALTMON_12 ABMON_12
+#define ERA KERN_LOCALE_KEY_ERA
+#define ERA_D_FMT KERN_LOCALE_KEY_ERA_D_FMT
+#define ERA_D_T_FMT KERN_LOCALE_KEY_ERA_D_T_FMT
+#define ERA_T_FMT KERN_LOCALE_KEY_ERA_T_FMT
+#define ALT_DIGITS KERN_LOCALE_KEY_ALT_DIGITS
+#define YESEXPR KERN_LOCALE_KEY_YESEXPR
+#define NOEXPR KERN_LOCALE_KEY_NOEXPR
+#define YESSTR KERN_LOCALE_KEY_YESSTR
+#define NOSTR KERN_LOCALE_KEY_NOSTR
+char *nl_langinfo(nl_item);
+/* The locale-aware form POSIX.1-2008 added. */
+char *nl_langinfo_l(nl_item, locale_t);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -1,0 +1,22 @@
+Report a missing session bus as a11y debugging, not as a warning.
+
+When GTK finds no D-Bus session bus, it cannot reach the accessibility
+bus and runs without one.  It said so with g_warning() on every start,
+which on a system without D-Bus (zedBSD; the user decided GTK runs there
+without portals or D-Bus) is a warning about the normal state.  The
+message now goes to GTK's own a11y debugging (GTK_DEBUG=a11y shows it);
+the behaviour is unchanged.
+
+--- a/gtk/a11y/gtkatspicontext.c
++++ b/gtk/a11y/gtkatspicontext.c
+@@ -1803,7 +1803,9 @@
+ 
+   if (error != NULL)
+     {
+-      g_warning ("Unable to acquire session bus: %s", error->message);
++      /* A system without a session bus (zedBSD has no D-Bus) simply has no
++       * accessibility bus; say so only when a11y debugging is asked for. */
++      GTK_DEBUG (A11Y, "Unable to acquire session bus: %s", error->message);
+       g_error_free (error);
+       return NULL;
+     }

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Starts the native desktop from a console without changing seat authority.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+set -eu
+
+prefix='@PREFIX@'
+
+# A display manager supplies its own runtime directory; console sessions need one.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+	: "${HOME:?keiland-desktop needs HOME when XDG_RUNTIME_DIR is unset}"
+	XDG_RUNTIME_DIR="$HOME/.cache/keiland-runtime"
+	umask 077
+	if [ -L "$XDG_RUNTIME_DIR" ]; then
+		printf '%s\n' 'keiland-desktop: runtime directory must not be a symbolic link' >&2
+		exit 1
+	fi
+	mkdir -p "$XDG_RUNTIME_DIR"
+	chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
+# Refuse unusable runtime paths before the compositor acquires any seat devices.
+case "$XDG_RUNTIME_DIR" in
+	/*) ;;
+	*) printf '%s\n' 'keiland-desktop: XDG_RUNTIME_DIR must be absolute' >&2; exit 1 ;;
+esac
+if [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+	printf '%s\n' 'keiland-desktop: runtime directory is missing or not writable' >&2
+	exit 1
+fi
+
+# Keep the client display name and server socket in the same namespace.
+WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-keiland}
+case "$WAYLAND_DISPLAY" in
+	/*) socket=$WAYLAND_DISPLAY ;;
+	*) socket=$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY ;;
+esac
+export XDG_RUNTIME_DIR WAYLAND_DISPLAY
+
+# Exec keeps termination signals and exit status attached to the actual desktop.
+exec "$prefix/bin/wayland" --session --glass \
+	--socket="$socket" --wallpaper="$prefix/share/keiland/wallpaper.png" "$@"

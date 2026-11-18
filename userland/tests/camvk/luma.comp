@@ -1,0 +1,11 @@
+#version 450
+// The luma of four YUYV pixels (two words) packed into one word of bytes.
+layout(local_size_x = 32) in;
+layout(std430, set = 0, binding = 0) readonly buffer Frame { uint yuyv[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Gray { uint gray[]; };
+void main() {
+	uint q = gl_GlobalInvocationID.x;
+	uint a = yuyv[2u * q];
+	uint b = yuyv[2u * q + 1u];
+	gray[q] = (a & 0xffu) | ((a >> 8) & 0xff00u) | ((b & 0xffu) << 16) | ((b << 8) & 0xff000000u);
+}

@@ -1,0 +1,180 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Keybinding infrastructure, modeled on GNU Emacs.
+//
+//  - Commands are registered by their Emacs name (a string, so it may
+//    contain hyphens): defineCommand("forward-char", cmdForwardChar).
+//    M-x reads this same registry.
+//  - kbd("C-x C-s") parses a key description into an array of key
+//    event integers, the same integers Term.readKey returns.
+//  - A keymap is a dictionary keyed by the string form of a key event.
+//    A value is a command name (string) or, for a prefix, a nested
+//    keymap (dictionary). defineKey builds intermediate prefix maps.
+//  - lookupKey walks a keymap for a full key sequence.
+//
+// The event integer layout matches Term.*: a Unicode codepoint or a
+// KEY_* constant, OR-ed with Term.META / Term.CTRL / Term.SHIFT.
+//
+
+// --- command registry --------------------------------------------------
+
+func keysInit() {
+    Commands = {};   // name -> function (the environment-dict lambda)
+    GlobalMap = {};
+    return 0;
+}
+
+// Register a command under its Emacs name.
+func defineCommand(name, fn) {
+    Commands[name] = fn;
+    return 0;
+}
+
+func commandByName(name) {
+    if (Dict.hasKey(Commands, name)) {
+        return Commands[name];
+    }
+    return 0;
+}
+
+// --- kbd: parse a key description into an array of event integers ------
+
+// Parse one space-separated token like "C-x", "M-f", "RET", "a".
+func kbdToken(tok) {
+    var mods = 0;
+    // Strip leading "C-" / "M-" / "S-" prefixes.
+    while (String.charCount(tok) >= 2 && String.charAt(tok, 1) == "-") {
+        var p = String.charAt(tok, 0);
+        if (p == "C") {
+            mods = mods | Term.CTRL;
+        } else if (p == "M") {
+            mods = mods | Term.META;
+        } else if (p == "S") {
+            mods = mods | Term.SHIFT;
+        } else {
+            break;
+        }
+        tok = String.substring(tok, 2, -1);
+    }
+
+    var base = kbdBaseKey(tok);
+    // Control of an ASCII letter uses the C0 convention Term produces:
+    // C-a is CTRL | 0x61. Term reports control letters that way, so a
+    // binding must match. Uppercase is normalized to lowercase here.
+    return mods | base;
+}
+
+// Map a base key name to its codepoint / special constant.
+func kbdBaseKey(name) {
+    if (String.charCount(name) == 1) {
+        return String.charCodeAt(name, 0);
+    }
+    if (name == "SPC") { return 0x20; }
+    if (name == "RET") { return 0x0D; }
+    if (name == "TAB") { return 0x09; }
+    if (name == "ESC") { return 0x1B; }
+    if (name == "DEL") { return 0x7F; }
+    if (name == "LEFT") { return Term.KEY_LEFT; }
+    if (name == "RIGHT") { return Term.KEY_RIGHT; }
+    if (name == "UP") { return Term.KEY_UP; }
+    if (name == "DOWN") { return Term.KEY_DOWN; }
+    if (name == "HOME") { return Term.KEY_HOME; }
+    if (name == "END") { return Term.KEY_END; }
+    if (name == "PRIOR") { return Term.KEY_PGUP; }
+    if (name == "NEXT") { return Term.KEY_PGDN; }
+    if (name == "INSERT") { return Term.KEY_INSERT; }
+    if (name == "DELETE") { return Term.KEY_DELETE; }
+    // Function keys "f1".."f12".
+    if (String.charAt(name, 0) == "f") {
+        return Term.KEY_F1 + Int.from(String.substring(name, 1, -1)) - 1;
+    }
+    // Fallback: first codepoint.
+    return String.charCodeAt(name, 0);
+}
+
+// Parse a whole description into an array of event integers.
+func kbd(desc) {
+    var keys = [];
+    var tok = "";
+    var len = String.charCount(desc);
+    for (i in 0..len) {
+        var c = String.charAt(desc, i);
+        if (c == " ") {
+            if (tok != "") {
+                Array.push(keys, kbdToken(tok));
+                tok = "";
+            }
+        } else {
+            tok = tok + c;
+        }
+    }
+    if (tok != "") {
+        Array.push(keys, kbdToken(tok));
+    }
+    return keys;
+}
+
+// --- keymap operations -------------------------------------------------
+
+// Bind a key sequence to a command name in a keymap. Intermediate
+// prefixes become nested keymaps automatically.
+func defineKeyIn(map, keys, commandName) {
+    var n = Array.size(keys);
+    var cur = map;
+    for (i in 0..(n - 1)) {
+        var k = "" + keys[i];
+        if (!Dict.hasKey(cur, k) || Type.of(cur[k]) != "dict") {
+            cur[k] = {};
+        }
+        cur = cur[k];
+    }
+    cur["" + keys[n - 1]] = commandName;
+    return 0;
+}
+
+// Bind in the global map, taking a key description string.
+func globalSetKey(desc, commandName) {
+    defineKeyIn(GlobalMap, kbd(desc), commandName);
+    return 0;
+}
+
+// Describe a key event integer for the echo area ("C-x", "M-f", "a").
+func describeKey(key) {
+    var s = "";
+    if (key & Term.META) { s = s + "M-"; }
+    if (key & Term.CTRL) {
+        // A control letter arrives as CTRL | (letter+0x60).
+        var base = key & 0x1FFFFF;
+        s = s + "C-";
+        if (base >= 0x61 && base <= 0x7A) {
+            return s + String.chr(base);
+        }
+        return s + describeBase(base);
+    }
+    if (key & Term.SHIFT) { s = s + "S-"; }
+    return s + describeBase(key & 0x1FFFFF);
+}
+
+func describeBase(base) {
+    if (base == 0x20) { return "SPC"; }
+    if (base == 0x0D) { return "RET"; }
+    if (base == 0x09) { return "TAB"; }
+    if (base == 0x1B) { return "ESC"; }
+    if (base == 0x7F) { return "DEL"; }
+    if (base >= 0x20 && base < 0x7F) { return String.chr(base); }
+    if (base >= 0x20) { return String.chr(base); }
+    return "<" + base + ">";
+}
+
+// Bind in the current buffer's local keymap.
+func localSetKey(desc, commandName) {
+    defineKeyIn(Buf.localMap, kbd(desc), commandName);
+    return 0;
+}
+
+// Set the current buffer's major mode name.
+func setMode(name) {
+    Buf.mode = name;
+    return 0;
+}

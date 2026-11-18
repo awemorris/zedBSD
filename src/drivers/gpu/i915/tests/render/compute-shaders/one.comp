@@ -1,0 +1,24 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ONE: one invocation a group, as the compute
+ * test of tests/execution/eu-test.c runs one thread of one channel; group g
+ * writes one word at g.
+ */
+#version 450
+
+layout(local_size_x = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+
+void main()
+{
+    uint g = gl_WorkGroupID.x;
+
+    o[g] = 0x01234567u + g * 3u;
+}

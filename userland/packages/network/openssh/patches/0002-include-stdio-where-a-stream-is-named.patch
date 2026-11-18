@@ -1,0 +1,17 @@
+Include <stdio.h> where a declaration names a stream.
+
+auth-shadow.c reaches hostfile.h, which declares functions taking a FILE *,
+without having made FILE visible.  It compiles elsewhere because <shadow.h>
+happens to drag <stdio.h> in on those systems; zedBSD's does not, because it
+declares nothing that takes a stream.  Naming the dependency is the fix.
+
+--- a/auth-shadow.c
++++ b/auth-shadow.c
+@@ -26,6 +26,7 @@
+ #if defined(USE_SHADOW) && defined(HAS_SHADOW_EXPIRE)
+ #include <shadow.h>
+ #include <stdarg.h>
++#include <stdio.h>
+ #include <string.h>
+ #include <time.h>
+ 

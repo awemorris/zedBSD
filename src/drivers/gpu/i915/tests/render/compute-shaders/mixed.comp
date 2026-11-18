@@ -1,0 +1,37 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * MIXED: reads the pixels a draw left and a copy moved into a buffer; writes
+ * each pixel word plus one, and the vertices of the left half of the target
+ * in the inverse of the first pixel's colour, which the next draw fetches.
+ */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer P { uint pixels[]; };
+layout(std430, set = 0, binding = 1) buffer Q { uint plus[]; };
+layout(std430, set = 0, binding = 2) buffer V { vec4 vertices[]; };
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+
+    plus[i] = pixels[i] + 1u;
+    if (i < 6u) {
+        uint c = pixels[0];
+        float x = (i == 1u || i == 2u || i == 4u) ? 0.0 : -1.0;
+        float y = (i == 2u || i == 4u || i == 5u) ? 1.0 : -1.0;
+
+        vertices[2u * i] = vec4(x, y, 0.0, 1.0);
+        vertices[2u * i + 1u] = vec4(float(255u - (c & 255u)) / 255.0,
+                                     float(255u - ((c >> 8) & 255u)) / 255.0,
+                                     float(255u - ((c >> 16) & 255u)) / 255.0,
+                                     1.0);
+    }
+}

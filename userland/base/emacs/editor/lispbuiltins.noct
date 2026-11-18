@@ -1,0 +1,564 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Lisp builtin functions (the hand-written part; the Editor bridge in
+// generated/lisp-bridge.noct covers the buffer primitives).
+//
+// Builtins are stored in LispFuncs as { lbuiltin: fn } entries handled
+// by lispApply... no: to keep lispApply simple they are closures over
+// nothing — instead each builtin is registered in LispBridge with its
+// arity, or implemented as a "vararg" entry in LispVarargs handled
+// here by name.
+//
+
+func lispDefineBuiltins() {
+    LispVarargs = {};
+    LispCommands = {};
+    var names = [
+        "+", "-", "*", "/", "%", "=", "/=", "<", ">", "<=", ">=",
+        "1+", "1-", "not", "null", "eq", "eql", "equal",
+        "car", "cdr", "cons", "list", "length", "nth", "elt",
+        "assoc", "assq", "member", "memq", "append", "reverse",
+        "concat", "format", "message", "princ", "prin1", "terpri",
+        "number-to-string", "string-to-number", "symbol-name", "intern",
+        "stringp", "numberp", "listp", "consp", "atom", "arrayp",
+        "funcall", "apply", "mapcar", "mapc",
+        "global-set-key", "define-key", "kbd", "local-set-key",
+        "current-buffer", "add-hook", "setcar", "setcdr",
+        "string=", "string<", "substring", "string-length", "upcase", "downcase"
+    ];
+    for (n in names) {
+        LispVarargs[n] = 1;
+    }
+    // Editor commands callable from Lisp (lambda bodies in ~/.emacs).
+    var cmds = [
+        "next-line", "previous-line", "forward-line",
+        "scroll-up", "scroll-down", "recenter",
+        "switch-to-buffer", "next-buffer", "kill-buffer",
+        "other-window", "delete-window", "delete-other-windows",
+        "split-window-vertically", "split-window-horizontally",
+        "kill-buffer-and-window", "enlarge-window",
+        "enlarge-window-horizontally", "beginning-of-buffer",
+        "end-of-buffer", "universal-argument", "keyboard-quit",
+        "save-buffer", "forward-word", "backward-word"
+    ];
+    for (c in cmds) {
+        LispCommands[c] = 1;
+    }
+    return 0;
+}
+
+// Editor commands invoked from Lisp. They act on the global editor
+// state; the command loop keeps Ed pointing at the current editor
+// environment so echo/prefix work.
+func lispCallCommand(name, args) {
+    var n = Array.size(args);
+    var a0 = 1;
+    if (n > 0 && Type.of(args[0]) == "int") { a0 = args[0]; }
+
+    if (name == "next-line") { Editor.forwardLine(a0); return 0; }
+    if (name == "previous-line") { Editor.forwardLine(0 - a0); return 0; }
+    if (name == "forward-line") { Editor.forwardLine(a0); return 0; }
+    if (name == "forward-word") { Editor.forwardWord(a0); return 0; }
+    if (name == "backward-word") { Editor.backwardWord(a0); return 0; }
+    if (name == "scroll-up") {
+        var sz = Term.size(); Editor.forwardLine(sz.rows - 4); return 0;
+    }
+    if (name == "scroll-down") {
+        var sz2 = Term.size(); Editor.forwardLine(0 - (sz2.rows - 4)); return 0;
+    }
+    if (name == "recenter") {
+        var tr = SelWin.rows - 1;
+        SelWin.startLine = countLinesBefore(Editor.point()) - tr / 2;
+        if (SelWin.startLine < 0) { SelWin.startLine = 0; }
+        return 0;
+    }
+    if (name == "beginning-of-buffer") {
+        Editor.pushMark(Editor.point()); Editor.gotoChar(Editor.pointMin()); return 0;
+    }
+    if (name == "end-of-buffer") {
+        Editor.pushMark(Editor.point()); Editor.gotoChar(Editor.pointMax()); return 0;
+    }
+    if (name == "switch-to-buffer") {
+        var nm = 0;
+        if (n > 0) { nm = args[0]; }
+        switchToBufferArg(nm);
+        return 0;
+    }
+    if (name == "next-buffer") { nextBufferInWindow(); return 0; }
+    if (name == "other-window") { windowSelectNext(); return 0; }
+    if (name == "delete-window") { windowDelete(); return 0; }
+    if (name == "delete-other-windows") { windowDeleteOthers(); return 0; }
+    if (name == "split-window-vertically") { windowSplit("v"); return 0; }
+    if (name == "split-window-horizontally") { windowSplit("h"); return 0; }
+    if (name == "enlarge-window") { windowEnlarge(a0); return 0; }
+    if (name == "enlarge-window-horizontally") { windowEnlargeHorizontally(a0); return 0; }
+    if (name == "kill-buffer-and-window") {
+        Editor.killBuffer(Editor.bufferName());
+        windowNoteBuffer(); windowDelete(); return 0;
+    }
+
+    // Commands that need the editor environment run their command
+    // handler with Ed (set by the command loop).
+    var fn = commandByName(name);
+    if (Type.of(fn) == "func" && Type.of(Ed) == "dict") {
+        fn(Ed);
+        return 0;
+    }
+    return 0;
+}
+
+// Dispatcher for the variadic builtins; called from lispApplyNamed.
+func lispCallBuiltin(name, args) {
+    var n = Array.size(args);
+
+    // Arithmetic.
+    if (name == "+") { return lispFold(args, "+"); }
+    if (name == "-") {
+        if (n == 1) { return 0 - args[0]; }
+        return lispFold(args, "-");
+    }
+    if (name == "*") { return lispFold(args, "*"); }
+    if (name == "/") { return lispFold(args, "/"); }
+    if (name == "%") { return args[0] % args[1]; }
+    if (name == "1+") { return args[0] + 1; }
+    if (name == "1-") { return args[0] - 1; }
+    if (name == "=") { return lispBool(args[0] == args[1]); }
+    if (name == "/=") { return lispBool(args[0] != args[1]); }
+    if (name == "<") { return lispBool(args[0] < args[1]); }
+    if (name == ">") { return lispBool(args[0] > args[1]); }
+    if (name == "<=") { return lispBool(args[0] <= args[1]); }
+    if (name == ">=") { return lispBool(args[0] >= args[1]); }
+
+    // Predicates and equality.
+    if (name == "not" || name == "null") { return lispBool(!lispTruthy(args[0])); }
+    if (name == "eq" || name == "eql" || name == "equal") {
+        return lispBool(lispEqual(args[0], args[1]));
+    }
+    if (name == "stringp") { return lispBool(Type.of(args[0]) == "string"); }
+    if (name == "numberp") { return lispBool(Type.of(args[0]) == "int"); }
+    if (name == "listp" || name == "arrayp") { return lispBool(Type.of(args[0]) == "array"); }
+    if (name == "consp") {
+        if (Type.of(args[0]) == "array") { return lispBool(Array.size(args[0]) > 0); }
+        return lispBool(Type.of(args[0]) == "dict" && Dict.hasKey(args[0], "car"));
+    }
+    if (name == "atom") {
+        if (Type.of(args[0]) == "array") { return lispBool(Array.size(args[0]) == 0); }
+        return 1;
+    }
+
+    // Lists.
+    if (name == "car") { return lispCar(args[0]); }
+    if (name == "cdr") { return lispCdr(args[0]); }
+    if (name == "cons") { return lispCons(args[0], args[1]); }
+    if (name == "list") { return args; }
+    if (name == "length") {
+        if (Type.of(args[0]) == "string") { return String.charCount(args[0]); }
+        if (Type.of(args[0]) == "int") { return 0; }
+        return Array.size(args[0]);
+    }
+    if (name == "nth" || name == "elt") {
+        var arr = args[1];
+        var idx = args[0];
+        if (name == "elt") { arr = args[0]; idx = args[1]; }
+        if (Type.of(arr) != "array" || idx < 0 || idx >= Array.size(arr)) { return 0; }
+        return arr[idx];
+    }
+    if (name == "assoc" || name == "assq") {
+        for (e in args[1]) {
+            if (Type.of(e) == "dict" && Dict.hasKey(e, "car")) {
+                if (lispEqual(e.car, args[0])) { return e; }
+            } else if (Type.of(e) == "array" && Array.size(e) > 0) {
+                if (lispEqual(e[0], args[0])) { return e; }
+            }
+        }
+        return 0;
+    }
+    if (name == "member" || name == "memq") {
+        var src = args[1];
+        var sz = Array.size(src);
+        for (i in 0..sz) {
+            if (lispEqual(src[i], args[0])) {
+                var out = [];
+                var j = i;
+                while (j < sz) { Array.push(out, src[j]); j = j + 1; }
+                return out;
+            }
+        }
+        return 0;
+    }
+    if (name == "append") {
+        var out = [];
+        for (a in args) {
+            if (Type.of(a) == "array") {
+                for (e in a) { Array.push(out, e); }
+            }
+        }
+        return out;
+    }
+    if (name == "reverse") {
+        var out = [];
+        var i = Array.size(args[0]) - 1;
+        while (i >= 0) { Array.push(out, args[0][i]); i = i - 1; }
+        return out;
+    }
+    if (name == "setcar") { args[0].car = args[1]; return args[1]; }
+    if (name == "setcdr") { args[0].cdr = args[1]; return args[1]; }
+
+    // Strings.
+    if (name == "concat") {
+        var out = "";
+        for (a in args) { out = out + lispToString(a); }
+        return out;
+    }
+    if (name == "format") { return lispFormat(args); }
+    if (name == "message") {
+        var m = lispFormat(args);
+        LispLastMessage = m;
+        return m;
+    }
+    if (name == "princ") { LispOut = LispOut + lispToString(args[0]); return args[0]; }
+    if (name == "prin1") { LispOut = LispOut + lispPrin1(args[0]); return args[0]; }
+    if (name == "terpri") { print(LispOut); LispOut = ""; return 1; }
+    if (name == "number-to-string") { return "" + args[0]; }
+    if (name == "string-to-number") { return Int.from(args[0]); }
+    if (name == "symbol-name") { return args[0]; }
+    if (name == "intern") { return args[0]; }
+    if (name == "string=") { return lispBool(args[0] == args[1]); }
+    if (name == "string<") { return lispBool(args[0] < args[1]); }
+    if (name == "substring") {
+        // Emacs substring is end-exclusive; String.substring takes a length.
+        if (n > 2) {
+            return String.substring(args[0], args[1], args[2] - args[1]);
+        }
+        return String.substring(args[0], args[1], 0 - 1);
+    }
+    if (name == "string-length") { return String.charCount(args[0]); }
+    if (name == "upcase") { return String.toUpperCase(args[0]); }
+    if (name == "downcase") { return String.toLowerCase(args[0]); }
+
+    // Higher order.
+    if (name == "funcall") { return lispApply(args[0], lispRestArgs(args, 1)); }
+    if (name == "apply") {
+        return lispApply(args[0], lispExpandApplyArgs(args));
+    }
+    if (name == "mapcar" || name == "mapc") {
+        var out = [];
+        for (e in args[1]) {
+            var one = [];
+            Array.push(one, e);
+            Array.push(out, lispApply(args[0], one));
+        }
+        if (name == "mapc") { return args[1]; }
+        return out;
+    }
+
+    // Keys.
+    if (name == "kbd") { return kbd(args[0]); }
+    if (name == "global-set-key") {
+        defineKeyIn(GlobalMap, lispKeySpec(args[0]), args[1]);
+        return 0;
+    }
+    if (name == "local-set-key") {
+        defineKeyIn(Buf.localMap, lispKeySpec(args[0]), args[1]);
+        return 0;
+    }
+    if (name == "define-key") {
+        // (define-key map key cmd): only the global map is exposed.
+        defineKeyIn(GlobalMap, lispKeySpec(args[1]), args[2]);
+        return 0;
+    }
+    if (name == "current-buffer") { return Editor.bufferName(); }
+    if (name == "add-hook") { return 0; }
+
+    lispError("Void function: " + name);
+    return 0;
+}
+
+// Lisp booleans: t is the symbol printed as "t", nil is 0. Using the
+// symbol keeps (princ (= 1 1)) => "t", matching Emacs, while integer
+// results still print as their number.
+func lispBool(b) {
+    if (b) { return "t"; }
+    return 0;
+}
+
+func lispFold(args, op) {
+    var acc = args[0];
+    var i = 1;
+    while (i < Array.size(args)) {
+        if (op == "+") { acc = acc + args[i]; }
+        if (op == "-") { acc = acc - args[i]; }
+        if (op == "*") { acc = acc * args[i]; }
+        if (op == "/") { acc = acc / args[i]; }
+        i = i + 1;
+    }
+    return acc;
+}
+
+func lispEqual(a, b) {
+    var ta = Type.of(a);
+    var tb = Type.of(b);
+    if (ta != tb) { return 0; }
+    if (ta == "int" || ta == "string") { return lispBool(a == b); }
+    if (ta == "array") {
+        if (Array.size(a) != Array.size(b)) { return 0; }
+        var sz = Array.size(a);
+        for (i in 0..sz) {
+            if (lispEqual(a[i], b[i]) == 0) { return 0; }
+        }
+        return 1;
+    }
+    return lispBool(a == b);
+}
+
+func lispCar(v) {
+    if (Type.of(v) == "array") {
+        if (Array.size(v) == 0) { return 0; }
+        return v[0];
+    }
+    if (Type.of(v) == "dict" && Dict.hasKey(v, "car")) { return v.car; }
+    return 0;
+}
+
+func lispCdr(v) {
+    if (Type.of(v) == "array") {
+        return lispRestArgs(v, 1);
+    }
+    if (Type.of(v) == "dict" && Dict.hasKey(v, "cdr")) { return v.cdr; }
+    return 0;
+}
+
+func lispCons(a, b) {
+    if (Type.of(b) == "array") {
+        var out = [];
+        Array.push(out, a);
+        for (e in b) { Array.push(out, e); }
+        return out;
+    }
+    if (Type.of(b) == "int" && b == 0) {
+        var out2 = [];
+        Array.push(out2, a);
+        return out2;
+    }
+    return { car: a, cdr: b };
+}
+
+func lispRestArgs(args, from) {
+    var out = [];
+    var i = from;
+    while (i < Array.size(args)) {
+        Array.push(out, args[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// Build apply's effective argument list. Keeping this separate lets the
+// tail-call trampoline forward apply without starting a nested trampoline.
+func lispExpandApplyArgs(args) {
+    var fargs = lispRestArgs(args, 1);
+    var last = 0;
+    if (Array.size(fargs) > 0) {
+        last = fargs[Array.size(fargs) - 1];
+        Array.pop(fargs);
+        if (Type.of(last) == "array") {
+            for (e in last) { Array.push(fargs, e); }
+        }
+    }
+    return fargs;
+}
+
+func lispToString(v) {
+    var t = Type.of(v);
+    if (t == "string") { return v; }
+    if (t == "int") { return "" + v; }
+    return lispPrin1(v);
+}
+
+func lispPrin1(v) {
+    var t = Type.of(v);
+    if (t == "int") { return "" + v; }
+    if (t == "string") { return "\"" + v + "\""; }
+    if (t == "array") {
+        var out = "(";
+        var sz = Array.size(v);
+        for (i in 0..sz) {
+            if (i > 0) { out = out + " "; }
+            out = out + lispPrin1(v[i]);
+        }
+        return out + ")";
+    }
+    if (t == "dict" && Dict.hasKey(v, "car")) {
+        return "(" + lispPrin1(v.car) + " . " + lispPrin1(v.cdr) + ")";
+    }
+    if (t == "dict" && Dict.hasKey(v, "lparams")) {
+        return "#<closure>";
+    }
+    return "#<value>";
+}
+
+// (format "fmt" args...): %s %d %% subset.
+func lispFormat(args) {
+    var fmt = args[0];
+    var out = "";
+    var ai = 1;
+    var n = String.charCount(fmt);
+    var i = 0;
+    while (i < n) {
+        var c = String.charAt(fmt, i);
+        if (c == "%" && i + 1 < n) {
+            var c2 = String.charAt(fmt, i + 1);
+            if (c2 == "%") {
+                out = out + "%";
+                i = i + 2;
+                continue;
+            }
+            if (c2 == "s" || c2 == "d") {
+                if (ai < Array.size(args)) {
+                    out = out + lispToString(args[ai]);
+                    ai = ai + 1;
+                }
+                i = i + 2;
+                continue;
+            }
+        }
+        out = out + c;
+        i = i + 1;
+    }
+    return out;
+}
+
+// Key designators: a string is a kbd() description, an array is an
+// Emacs key vector like [(delete)] or [(control ?c)].
+func lispKeySpec(spec) {
+    if (Type.of(spec) == "string") {
+        return lispParseKeyString(spec);
+    }
+    var keys = [];
+    for (e in spec) {
+        Array.push(keys, lispKeyEvent(e));
+    }
+    return keys;
+}
+
+// Parse an Emacs string key sequence: each char is one event, with
+// \C-x \M-x \e \d \t etc. escapes. Returns an array of events.
+func lispParseKeyString(s) {
+    var keys = [];
+    var n = String.charCount(s);
+    var i = 0;
+    while (i < n) {
+        var mods = 0;
+        // Consume \C- \M- \S- prefixes.
+        while (i + 2 < n && String.charAt(s, i) == "\\" &&
+               (String.charAt(s, i + 1) == "C" ||
+                String.charAt(s, i + 1) == "M" ||
+                String.charAt(s, i + 1) == "S") &&
+               String.charAt(s, i + 2) == "-") {
+            var mc = String.charAt(s, i + 1);
+            if (mc == "C") { mods = mods | Term.CTRL; }
+            if (mc == "M") { mods = mods | Term.META; }
+            if (mc == "S") { mods = mods | Term.SHIFT; }
+            i = i + 3;
+        }
+        if (i >= n) { break; }
+        var base = 0;
+        var c = String.charAt(s, i);
+        if (c == "\\" && i + 1 < n) {
+            var e = String.charAt(s, i + 1);
+            i = i + 2;
+            if (e == "d") { base = 0x7F; }        // DEL
+            else if (e == "e") { base = 0x1B; }   // ESC
+            else if (e == "t") { base = 0x09; }   // TAB
+            else if (e == "r") { base = 0x0D; }   // RET
+            else if (e == "n") { base = 0x0A; }
+            else { base = String.charCodeAt(e, 0); }
+        } else {
+            base = String.charCodeAt(s, i);
+            i = i + 1;
+        }
+        // A control letter is encoded as CTRL | (letter | 0x60) to
+        // match Term's decoding.
+        if ((mods & Term.CTRL) && base >= 0x41 && base <= 0x5A) {
+            base = base + 0x20;
+        }
+        Array.push(keys, mods | base);
+    }
+    return keys;
+}
+
+func lispKeyEvent(e) {
+    if (Type.of(e) == "int") {
+        return e;
+    }
+    if (Type.of(e) == "string") {
+        return lispSpecialKey(e);
+    }
+    if (Type.of(e) == "array") {
+        // (control meta x) style: modifiers then the base.
+        var mods = 0;
+        var base = 0;
+        for (m in e) {
+            if (m == "control") { mods = mods | Term.CTRL; }
+            else if (m == "meta") { mods = mods | Term.META; }
+            else if (m == "shift") { mods = mods | Term.SHIFT; }
+            else if (Type.of(m) == "int") {
+                // Bare small ints in key position ((meta 2)) almost
+                // always mean the digit key, not C0 codepoint 2; those
+                // are written as (control b) / named symbols instead.
+                // ?2-style char literals arrive here as 0x32 already.
+                if (m >= 0 && m <= 9) { base = 0x30 + m; }
+                else { base = m; }
+            }
+            else { base = lispSpecialKey(m); }
+        }
+        if ((mods & Term.CTRL) && base >= 0x41 && base <= 0x5A) {
+            base = base + 0x20;
+        }
+        return mods | base;
+    }
+    return 0;
+}
+
+// Map an Emacs key symbol (a string here) to an event value. Named
+// special keys go to the PUA constants; a single char is its codepoint.
+func lispSpecialKey(name) {
+    if (name == "delete") { return Term.KEY_DELETE; }
+    if (name == "backspace") { return 0x7F; }
+    if (name == "up") { return Term.KEY_UP; }
+    if (name == "down") { return Term.KEY_DOWN; }
+    if (name == "left") { return Term.KEY_LEFT; }
+    if (name == "right") { return Term.KEY_RIGHT; }
+    if (name == "home") { return Term.KEY_HOME; }
+    if (name == "end") { return Term.KEY_END; }
+    if (name == "next") { return Term.KEY_PGDN; }
+    if (name == "prior") { return Term.KEY_PGUP; }
+    if (name == "insert") { return Term.KEY_INSERT; }
+    if (name == "return") { return 0x0D; }
+    if (name == "tab") { return 0x09; }
+    if (name == "escape") { return 0x1B; }
+    if (name == "SPC" || name == "space") { return 0x20; }
+    return kbdBaseKey(name);
+}
+
+// Editor-coupled special variables: a setq of one of these names feeds
+// the value into the corresponding editor mechanism, so DDSKK-style
+// configuration pastes into ~/.remacs.el unchanged.
+func lispSpecialVarHook(name, val) {
+    if (name == "skk-rom-kana-rule-list") {
+        // '(("1" nil "#1") ...): DDSKK (input next-state output)
+        // triples. next-state and non-string outputs are ignored;
+        // string rules merge into the SKK romaji table.
+        if (Type.of(val) != "array") { return 0; }
+        var rules = {};
+        for (t in val) {
+            if (Type.of(t) == "array" && Array.size(t) >= 3 &&
+                Type.of(t[0]) == "string" && Type.of(t[2]) == "string") {
+                rules[t[0]] = t[2];
+            }
+        }
+        skkSetRomKanaRule(rules);
+    }
+    return 0;
+}

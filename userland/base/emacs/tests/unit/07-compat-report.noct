@@ -1,0 +1,30 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// The Elisp compatibility scanner (editor/lispcompat.noct).
+//
+// What this pins down is the shape of the report, not a count of what
+// remacs is missing: the fixture names functions that will never exist
+// ("compat-no-such-function"), so implementing more of Emacs does not
+// move it. A real package would.
+//
+
+func main() {
+    var path = "unit/07-compat-report.el";
+    lispCompatBegin();
+    var ok = lispCompatScanFile(path);
+    lispCompatEnd();
+    if (ok == 0) {
+        print("cannot read " + path);
+        return 1;
+    }
+    for (line in lispCompatReport(path)) {
+        print(line);
+    }
+
+    // The scan must leave the interpreter as it found it: recording mode
+    // off, and the Lisp compiler back on. A scan that silently disabled
+    // the compiler for the rest of the session would be a trap.
+    print("LispCompat=" + LispCompat + " LispCompileEnabled=" + LispCompileEnabled);
+    return 0;
+}

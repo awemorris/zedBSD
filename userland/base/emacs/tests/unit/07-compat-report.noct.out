@@ -1,0 +1,19 @@
+remacs elisp compatibility report
+file: unit/07-compat-report.el
+top-level forms: 7 read, 7 evaluated without error
+
+unsupported reader syntax (1)
+  #s reader macro                         1
+
+missing functions (1)
+  compat-no-such-function                 1
+
+unbound variables (1)
+  compat-undefined-variable               1
+
+missing functions in code that did not run (1)
+  compat-deep-call                        1
+
+forms that did not complete (1)
+  unit/07-compat-report.el:41: read: Unsupported # syntax
+LispCompat=0 LispCompileEnabled=1

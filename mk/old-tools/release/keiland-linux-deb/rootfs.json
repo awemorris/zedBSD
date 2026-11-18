@@ -1,0 +1,71 @@
+{
+  "deb13-amd64": {
+    "label": "Debian 13 and Ubuntu 26.04 (amd64)",
+    "architecture": "amd64",
+    "suite": "trixie",
+    "id": "debian",
+    "version": "13",
+    "suffix": "deb13",
+    "mirrors": ["deb http://deb.debian.org/debian trixie main",
+                "deb http://deb.debian.org/debian trixie-updates main",
+                "deb http://security.debian.org/debian-security trixie-security main"],
+    "checks": ["debian13", "ubuntu2604"]
+  },
+  "deb13-arm64": {
+    "label": "Debian 13 and Ubuntu 26.04 (arm64)",
+    "architecture": "arm64",
+    "suite": "trixie",
+    "id": "debian",
+    "version": "13",
+    "suffix": "deb13",
+    "mirrors": ["deb http://deb.debian.org/debian trixie main",
+                "deb http://deb.debian.org/debian trixie-updates main",
+                "deb http://security.debian.org/debian-security trixie-security main"],
+    "checks": ["debian13", "ubuntu2604"]
+  },
+  "rpios13-arm64": {
+    "label": "Raspberry Pi OS (trixie, arm64)",
+    "architecture": "arm64",
+    "suite": "trixie",
+    "id": "debian",
+    "version": "13",
+    "suffix": "rpios13",
+    "raspberrypi": true,
+    "mirrors": ["deb http://deb.debian.org/debian trixie main",
+                "deb http://deb.debian.org/debian trixie-updates main",
+                "deb http://security.debian.org/debian-security trixie-security main",
+                "deb [signed-by={raspberrypi_keyring}] http://archive.raspberrypi.com/debian trixie main"],
+    "checks": ["rpios13"]
+  },
+  "environments": {
+    "debian13": {
+      "suite": "trixie",
+      "mirrors": {"amd64": ["deb http://deb.debian.org/debian trixie main",
+                            "deb http://security.debian.org/debian-security trixie-security main"],
+                  "arm64": ["deb http://deb.debian.org/debian trixie main",
+                            "deb http://security.debian.org/debian-security trixie-security main"]}
+    },
+    "ubuntu2604": {
+      "suite": "resolute",
+      "keyring": "/usr/share/keyrings/ubuntu-archive-keyring.gpg",
+      "mirrors": {"amd64": ["deb http://archive.ubuntu.com/ubuntu resolute main universe",
+                            "deb http://archive.ubuntu.com/ubuntu resolute-updates main universe"],
+                  "arm64": ["deb http://ports.ubuntu.com/ubuntu-ports resolute main universe",
+                            "deb http://ports.ubuntu.com/ubuntu-ports resolute-updates main universe"]}
+    },
+    "rpios13": {
+      "suite": "trixie",
+      "raspberrypi": true,
+      "mirrors": {"arm64": ["deb http://deb.debian.org/debian trixie main",
+                            "deb http://security.debian.org/debian-security trixie-security main",
+                            "deb [signed-by={raspberrypi_keyring}] http://archive.raspberrypi.com/debian trixie main"]}
+    }
+  },
+  "raspberrypi_key": {
+    "url": "https://archive.raspberrypi.com/debian/raspberrypi.gpg.key",
+    "archive": "http://archive.raspberrypi.com/debian",
+    "fingerprint": "CF8A1AF502A2AA2D763BAE7E82B129927FA3303E"
+  },
+  "build_packages": ["build-essential", "pkg-config", "python3", "binutils", "dpkg-dev", "libvulkan-dev", "libdrm-dev",
+                     "ca-certificates", "curl", "xz-utils"]
+}

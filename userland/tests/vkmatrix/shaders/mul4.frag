@@ -1,0 +1,77 @@
+#version 450
+// vkmatrix perf-mul4 (q1539): 64 multiplies of four values by each other, two at a
+// time independent (a by b, c by d, then b by a, d by c), then a colour.
+layout(push_constant) uniform Push { float red; } push;
+layout(location = 0) out vec4 colour;
+void main()
+{
+	float a = push.red;
+	float b = push.red + 0.5;
+	float c = push.red + 0.25;
+	float d = push.red + 0.125;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	a = a * b;
+	c = c * d;
+	b = b * a;
+	d = d * c;
+	colour = vec4(a, b, c, d);
+}

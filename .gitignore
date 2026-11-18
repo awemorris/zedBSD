@@ -1,0 +1,33 @@
+/build/
+/config.mk
+/userland/base/noct/distfiles/
+/userland/base/noct/noct/
+/toolchain/llvm/distfiles/
+__pycache__/
+*~
+.internal/
+plan/ws*/temp/
+
+distfiles/
+
+.tar.gz
+.tar.bz2
+.tar.xz
+
+# Awesome Plan local cache, write-back journal and conflicts
+/plan/.sync/
+
+# Temp
+plan/ws031/mesa-refs/
+/userland/desktop/browser/distfiles/
+
+.wifi
+.switchbot
+.switchbot~
+
+# The plan records live in a separate private repository; plan is a local symlink to it
+/plan
+/AGENTS.md
+/docs/agent
+/.claude/agents
+/.claude/settings.json

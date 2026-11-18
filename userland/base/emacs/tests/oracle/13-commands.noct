@@ -1,0 +1,55 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    // open-line leaves point before the inserted newlines.
+    Editor.insert("abcdef");
+    Editor.gotoChar(4);
+    Editor.openLine(2);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // transpose-chars mid-line and at end of line.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("abcd");
+    Editor.gotoChar(3);
+    Editor.transposeChars();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    Editor.gotoChar(Editor.pointMax());
+    Editor.transposeChars();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // Case conversion over words.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("hello world FOO bar 日本 mix99up");
+    Editor.gotoChar(1);
+    Editor.upcaseWord(1);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    Editor.downcaseWord(2);
+    oracleEmit(Editor.bufferString());
+    Editor.capitalizeWord(2);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // Negative arg upcases backward, leaving point.
+    var p = Editor.point();
+    Editor.upcaseWord(0 - 1);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point() == p);
+
+    // kill-whole-line takes the newline too.
+    Editor.deleteRegion(1, Editor.pointMax());
+    Editor.insert("one\ntwo\nthree");
+    Editor.gotoChar(6);
+    Editor.killWholeLine();
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.currentKill(0));
+
+    // push-mark keeps the previous mark reachable.
+    Editor.pushMark(3);
+    Editor.pushMark(7);
+    oracleEmit(Editor.mark());
+}

@@ -1,0 +1,35 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * REDUCE: the sum of each group's 128 words by a tree in
+ * shared memory, seven halvings with a barrier after each; invocation 0
+ * writes the group's sum.
+ */
+#version 450
+
+layout(local_size_x = 128) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer V { uint v[]; };
+layout(std430, set = 0, binding = 1) buffer S { uint sums[]; };
+
+shared uint partial[128];
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+
+    partial[l] = v[gl_GlobalInvocationID.x];
+    barrier();
+    for (uint stride = 64u; stride > 0u; stride >>= 1) {
+        if (l < stride)
+            partial[l] += partial[l + stride];
+        barrier();
+    }
+    if (l == 0u)
+        sums[gl_WorkGroupID.x] = partial[0];
+}

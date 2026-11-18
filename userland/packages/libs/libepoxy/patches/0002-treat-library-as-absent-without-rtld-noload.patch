@@ -1,0 +1,30 @@
+Treat a library as not loaded when dlopen() has no RTLD_NOLOAD.
+
+When epoxy only wants to know whether the application already loaded a
+GL library, it calls dlopen() with RTLD_NOLOAD, which returns the library
+if it is loaded and does not load it otherwise.  zedBSD's <dlfcn.h> has
+no RTLD_NOLOAD (it is an extension, not POSIX).  Without it, such a query
+now answers that the library is not loaded.  A library epoxy loaded
+itself is still found, because its handle is kept; GTK reaches EGL only
+through epoxy.  Systems with RTLD_NOLOAD are unchanged.
+
+--- a/src/dispatch_common.c
++++ b/src/dispatch_common.c
+@@ -314,10 +314,17 @@
+     pthread_mutex_lock(&api.mutex);
+     if (!*handle) {
+         int flags = RTLD_LAZY | RTLD_LOCAL;
++#ifdef RTLD_NOLOAD
+         if (!load)
+             flags |= RTLD_NOLOAD;
+ 
+         *handle = dlopen(lib_name, flags);
++#else
++        /* Without RTLD_NOLOAD (zedBSD) a library cannot be looked up without
++         * loading it, so one epoxy has not loaded itself counts as absent. */
++        if (load)
++            *handle = dlopen(lib_name, flags);
++#endif
+         if (!*handle) {
+             if (exit_on_fail) {
+                 fprintf(stderr, "Couldn't open %s: %s\n", lib_name, dlerror());

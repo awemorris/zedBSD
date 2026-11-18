@@ -1,0 +1,23 @@
+Ask statvfs whether a filesystem is local, on zedBSD
+
+is_local_impl falls through to masking the statvfs flags with MNT_LOCAL.
+MNT_LOCAL belongs to struct statfs and the mount interface; the field being
+masked is struct statvfs's f_flag, which carries ST_ values.  On a system
+that reaches this branch with a real statvfs, the two do not meet: the
+constant is not declared by any header this file includes, and it would not
+mean anything in that field if it were.
+
+zedBSD reports ST_LOCAL in f_flag, which is the same question asked in the
+terms that field is written in.
+
+--- a/llvm/lib/Support/Unix/Path.inc
++++ b/llvm/lib/Support/Unix/Path.inc
+@@ -570,6 +570,8 @@
+   // The file system can have an arbitrary structure on z/OS; must go with the
+   // conservative answer.
+   return false;
++#elif defined(__ZEDBSD__)
++  return !!(STATVFS_F_FLAG(Vfs) & ST_LOCAL);
+ #else
+   return !!(STATVFS_F_FLAG(Vfs) & MNT_LOCAL);
+ #endif

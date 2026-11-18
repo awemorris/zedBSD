@@ -1,0 +1,32 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * LENGTH: the lengths of two run-time arrays as their bound
+ * ranges make them: words of W, and 12-byte structures after an 8-byte
+ * head in T (a range that ends inside a structure does not count it).
+ */
+#version 450
+
+layout(local_size_x = 1) in;
+
+struct Item {
+    uint a;
+    uint b;
+    uint c;
+};
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+layout(std430, set = 0, binding = 1) readonly buffer W { uint w[]; };
+layout(std430, set = 0, binding = 2) readonly buffer T { uvec2 head; Item items[]; } t;
+
+void main()
+{
+    o[0] = uint(w.length());
+    o[1] = uint(t.items.length());
+    o[2] = t.head.x + t.items[1].b;
+}

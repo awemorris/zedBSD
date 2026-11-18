@@ -1,0 +1,35 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Kernel main
+ */
+
+#ifndef KERN_KERN_KERNEL_H
+#define KERN_KERN_KERNEL_H
+
+#include "kern/boot.h"
+
+void
+kernel_main(
+	const struct kern_boot_handoff *handoff);
+
+/*
+ * kernel_main() retains the handoff; its worker discovers the boot devices
+ * before mounting filesystems. Device entries are borrowed from kernel-lifetime
+ * storage; an out-of-range lookup returns NULL.
+ */
+uint8_t
+kern_boot_bios_id(void);
+
+unsigned
+kern_boot_device_count(void);
+
+const struct kern_boot_device *
+kern_boot_device_at(unsigned index);
+
+#endif

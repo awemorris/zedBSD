@@ -1,0 +1,81 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Partition
+ */
+
+#ifndef KERN_KERN_PARTITION_H
+#define KERN_KERN_PARTITION_H
+
+#include "kern/disk.h"
+
+#define PARTITION_MAX		16U
+#define PARTITION_POOL_MAX	64U
+/* A GPT name is 36 UTF-16 code units, or at most 108 UTF-8 bytes. */
+#define PARTITION_LABEL_MAX	109U
+#define PARTITION_UUID_MAX	64U
+#define PARTITION_BOOTABLE	0x0001U
+#define PARTITION_HAS_LABEL	0x0002U
+#define PARTITION_HAS_UUID	0x0004U
+/* The partition table marks the partition as an EFI system partition. */
+#define PARTITION_EFI_SYSTEM	0x0008U
+
+int partition_retire_media(struct disk *parent);
+
+struct partition {
+	struct disk *p_parent;
+	struct disk *p_disk;
+	unsigned p_index;
+	uint64_t p_start_block;
+	uint64_t p_data_block;
+	uint64_t p_block_count;
+	unsigned p_flags;
+	char p_label[PARTITION_LABEL_MAX];
+	char p_uuid[PARTITION_UUID_MAX];
+};
+
+struct partition_scheme {
+	const char *name;
+	int (*scan)(const struct partition_scheme *scheme, struct disk *disk, struct partition *entries, unsigned capacity);
+};
+
+void
+partition_set_scheme(
+	const struct partition_scheme *scheme);
+
+const struct partition_scheme *
+partition_get_scheme(void);
+
+int
+partition_scan(
+	struct disk *disk,
+	struct partition *entries,
+	unsigned capacity);
+
+int
+partition_create_disk(
+	struct partition *partition);
+
+int partition_reload(struct disk *);
+int partition_reload_claimed(struct disk *, const struct backing_claim *);
+
+void
+partition_reset(void);
+
+unsigned
+partition_count(void);
+
+const struct partition *
+partition_at(
+	unsigned index);
+
+int
+partition_disk_is_efi_system(
+	const struct disk *disk);
+
+#endif

@@ -1,0 +1,77 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The shell of browser: the compositor window, its titlebar and
+ * toolbar, the tabs and the input.
+ *
+ * main.c hands the window mode here.  The host tests build the engine
+ * without this directory and supply their own shell_run that refuses.
+ * The shell and main.c use the engine through <browser/browser.h> only (the
+ * engine is libbrowser.so, ws074-p057).
+ */
+
+#ifndef KEILAND_BROWSER_SHELL_H
+#define KEILAND_BROWSER_SHELL_H
+
+#include <browser/browser.h>
+
+/*
+ * The names of the program.  SHELL_PRODUCT_NAME is what the program is
+ * called to the user (the Vulkan application's name); SHELL_APPLICATION_ID
+ * is the application ID libkeiland's application gets (what the desktop
+ * knows the program by, and the name of its data directory).  A build may
+ * replace the ID.
+ */
+#define SHELL_PRODUCT_NAME	"OmniGrammaton"
+#ifndef SHELL_APPLICATION_ID
+#define SHELL_APPLICATION_ID	"browser"
+#endif
+
+/* Marks a parameter a function has to take but does not use (the engine's base.h has the same). */
+#ifndef UNUSED_PARAMETER
+#define UNUSED_PARAMETER(name)	((void)(name))
+#endif
+
+/*
+ * What the command line asked of the window: the display, the page to
+ * open, the window's size, the fonts, and whether to draw with the CPU
+ * and not try the GPU (no_gpu; a window whose GPU cannot be used draws with
+ * the CPU anyway).
+ */
+struct shell_options {
+	int no_gpu;
+	const char *display;
+	const char *start;
+	unsigned width;
+	unsigned height;
+	const struct browser_fonts *fonts;
+};
+
+int shell_run(const struct shell_options *options);
+
+struct browser_storage_calls;
+struct browser_threads;
+
+/*
+ * The program's threads the engine makes its own threads with (given to it
+ * with browser_threads_set before anything else): libkeiland's threads
+ * (shell/threads.c), the same on every system the browser runs on.
+ */
+const struct browser_threads *shell_threads(void);
+
+/*
+ * The system's wrapping of the storage backend the instance keeps its
+ * records with: on Windows a backend that keeps the cookies encrypted for
+ * the user (apps/browser-win32/protect.c), on a POSIX system none (the
+ * backend as it is, main-posix.c).  *calls and *context are replaced by
+ * the wrapping backend's, which owns the one given.  Returns 0, or an
+ * error after closing the backend given (both NULL).
+ */
+int shell_storage_wrap(const struct browser_storage_calls **calls, void **context);
+
+#endif

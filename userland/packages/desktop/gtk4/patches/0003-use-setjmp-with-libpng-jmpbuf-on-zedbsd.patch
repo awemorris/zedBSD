@@ -1,0 +1,28 @@
+Use setjmp() with libpng's jmp_buf on zedBSD.
+
+The PNG loader saves libpng's error context with sigsetjmp() on
+png_jmpbuf(png), which is a jmp_buf.  That works where sigjmp_buf and
+jmp_buf are the same type (glibc); on zedBSD sigjmp_buf is a different
+structure and the call does not compile.  libpng leaves its context with
+longjmp(), so setjmp() is the matching call; on zedBSD the loader now
+uses it, as it already does where sigsetjmp() is absent.  Other systems
+are unchanged.
+
+--- a/gdk/loaders/gdkpng.c
++++ b/gdk/loaders/gdkpng.c
+@@ -37,8 +37,13 @@
+ 
+ /* {{{ Callbacks */
+ 
+-/* No sigsetjmp on Windows */
+-#ifndef HAVE_SIGSETJMP
++/* No sigsetjmp on Windows.  On zedBSD sigjmp_buf is not jmp_buf, and
++ * png_jmpbuf() is a jmp_buf that libpng leaves with longjmp(), so setjmp()
++ * is the call that matches it. */
++#if !defined(HAVE_SIGSETJMP) || defined(__ZEDBSD__)
++#undef sigjmp_buf
++#undef sigsetjmp
++#undef siglongjmp
+ #define sigjmp_buf jmp_buf
+ #define sigsetjmp(jb, x) setjmp(jb)
+ #define siglongjmp longjmp

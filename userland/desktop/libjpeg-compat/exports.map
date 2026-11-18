@@ -1,0 +1,28 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <compat/jpeglib.h> declares leave the library. */
+{
+	global:
+		jpeg_std_error;
+		jpeg_CreateDecompress;
+		jpeg_destroy_decompress;
+		jpeg_abort_decompress;
+		jpeg_destroy;
+		jpeg_abort;
+		jpeg_stdio_src;
+		jpeg_mem_src;
+		jpeg_read_header;
+		jpeg_calc_output_dimensions;
+		jpeg_start_decompress;
+		jpeg_read_scanlines;
+		jpeg_finish_decompress;
+		jpeg_resync_to_restart;
+		jpeg_save_markers;
+	local:
+		*;
+};

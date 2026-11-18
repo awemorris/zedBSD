@@ -1,0 +1,24 @@
+#version 450
+// Stage 3: atomicAdd on shared memory; each workgroup's counter returns 0 to 127 once each.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 128) in;
+layout(std430, set = 0, binding = 0) writeonly buffer Old { uint old[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Totals { uint totals[]; };
+shared uint counter;
+shared uint sums[4];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	if (l == 0u)
+		counter = 0u;
+	if (l < 4u)
+		sums[l] = 0u;
+	barrier();
+	old[gl_GlobalInvocationID.x] = atomicAdd(counter, 1u);
+	atomicAdd(sums[l & 3u], l);
+	barrier();
+	if (l < 4u)
+		totals[gl_WorkGroupID.x * 5u + l] = sums[l];
+	if (l == 4u)
+		totals[gl_WorkGroupID.x * 5u + 4u] = counter;
+}

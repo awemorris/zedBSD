@@ -1,0 +1,8 @@
+type=oneshot
+command=/sbin/net
+arguments=startup
+after=syslogd,networkd
+requires=networkd
+restart=no
+required=NO
+late=yes

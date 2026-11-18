@@ -1,0 +1,812 @@
+== case: tree address
+map 300
+R clk 0064 00000000
+log gem: Ethernet clock was off (00000000)
+W clk 0064 00000800
+R clk 0134 00000800
+map 100
+R gem 00fc 00070109
+R gem 0294 00800206
+R gem 029c 02010000
+log gem: revision 00070109, queues 0207, MDIO divider 96
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00080000
+W gem 0004 00140000
+W gem 0000 00000010
+gpio init
+gpio 32 0
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+gpio 32 1
+usleep 1000 1000
+R gem 0008 00000004
+W gem 0034 608a0000
+R gem 0008 00000004
+R gem 0034 608a600d
+R gem 0008 00000004
+W gem 0034 608e0000
+R gem 0008 00000004
+R gem 0034 608e84a2
+R gem 0008 00000004
+W gem 0034 50828000
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60820000
+R gem 0008 00000004
+R gem 0034 60828000
+R gem 0008 00000004
+W gem 0034 60820000
+R gem 0008 00000004
+R gem 0034 60821140
+R gem 0008 00000004
+W gem 0034 50e27007
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60e20000
+R gem 0008 00000004
+R gem 0034 60e27007
+R gem 0008 00000004
+W gem 0034 50e2f207
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50f20c00
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60f20000
+R gem 0008 00000004
+R gem 0034 60f20c00
+R gem 0008 00000004
+W gem 0034 50f28e00
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50920141
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50a60200
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50821200
+R gem 0008 00000004
+log gem: PHY 1 id 600d84a2
+dma 8224 align 4096 at 2080000000
+dma 524288 align 2048 at 2080100000
+dma 524288 align 2048 at 2080200000
+irq init
+irq of 100 0
+irq establish 6 4
+net alloc
+net create en0 mtu 1500 hwaddr d8:3a:dd:11:22:33 len 6 flags c
+log gem: en0 ready MAC d8:3a:dd:11:22:33
+init 0
+init again 114
+kthread 8
+net ref
+thread start
+lock
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00140000
+W gem 0004 00140000
+W gem 0000 00000010
+barrier w
+W gem 04d4 00000020
+W gem 0018 80000000
+W gem 04c8 00000020
+W gem 001c 80001010
+W gem 0480 80001001
+W gem 0440 80002011
+W gem 0484 80001001
+W gem 0444 80002011
+W gem 05c4 80001001
+W gem 0460 80002011
+W gem 0088 11dd3ad8
+W gem 008c 00003322
+W gem 0090 00000000
+W gem 0094 00000000
+W gem 0098 00000000
+W gem 009c 00000000
+W gem 00a0 00000000
+W gem 00a4 00000000
+W gem 0080 ffffffff
+W gem 0084 ffffffff
+R gem 0004 00140000
+W gem 0004 00160112
+R gem 0010 00020784
+W gem 0010 41200710
+W gem 0000 00000030
+W gem 0000 0000001c
+W gem 0024 ffffffff
+W gem 0028 00000c82
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60700
+log gem: en0 link up 1000 Mbps full duplex
+R gem 0004 00160112
+W gem 0004 00160513
+unlock
+carrier 1
+log gem: en0 RX/TX enabled
+open 0
+digest rings 9503d07f8e52bce4
+desc rx 0: 80100000 00000000 00000020 00000000
+desc rx 1: 80100800 00000000 00000020 00000000
+desc rx 255: 8017f802 00000000 00000020 00000000
+desc rx 256: 00000003 00000000 00000000 00000000
+desc tx 257: 00000000 80000000 00000000 00000000
+desc tx 258: 00000000 80000000 00000000 00000000
+desc tx 512: 00000000 c0000000 00000000 00000000
+desc tx 513: 00000000 c0000000 00000000 00000000
+packet alloc
+lock
+barrier w
+barrier w
+W gem 0000 0000021c
+unlock
+packet free
+transmit 42: 0
+packet alloc
+lock
+barrier w
+barrier w
+W gem 0000 0000021c
+unlock
+packet free
+transmit 1514: 0
+packet alloc
+packet free
+transmit 1515: 90
+packet alloc
+packet free
+transmit 10: 90
+transmit none: 22
+desc tx 257: 80200000 0000803c 00000020 00000000
+desc tx 258: 80200800 000085ea 00000020 00000000
+desc tx 259: 00000000 80000000 00000000 00000000
+digest tx slots 37f1f431c907d299
+lock
+R gem 0024 00000482
+W gem 0024 00000482
+W gem 002c 00000002
+unlock
+schedule poll
+lock
+unlock
+carrier 1
+packet alloc
+lock
+barrier r
+barrier
+unlock
+receive 64 sum e2f25420
+packet free
+packet alloc
+lock
+barrier r
+barrier
+unlock
+packet free
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 2 rx_errors 2 rx_dropped 1 tx_errors 1
+desc rx 0: 80100000 00000000 00000020 00000000
+desc rx 1: 80100800 00000000 00000020 00000000
+desc rx 2: 80101000 00000000 00000020 00000000
+lock
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60500
+log gem: en0 link up 100 Mbps full duplex
+R gem 0004 00160513
+W gem 0004 00160113
+unlock
+carrier 1
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 100
+lock
+unlock
+carrier 1
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 100
+lock
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 60867949
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 60867949
+log gem: en0 link down
+R gem 0004 00160113
+W gem 0004 00160112
+unlock
+carrier 0
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 0
+lock
+R gem 0024 00000800
+W gem 0024 00000800
+W gem 0000 00000010
+W gem 002c ffffffff
+log gem: DMA error, interface stopped
+unlock
+lock
+W gem 002c ffffffff
+W gem 0000 00000010
+R gem 0014 00000000
+W gem 0024 ffffffff
+unlock
+carrier 0
+lock
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00160112
+W gem 0004 00160112
+W gem 0000 00000010
+barrier w
+W gem 04d4 00000020
+W gem 0018 80000000
+W gem 04c8 00000020
+W gem 001c 80001010
+W gem 0480 80001001
+W gem 0440 80002011
+W gem 0484 80001001
+W gem 0444 80002011
+W gem 05c4 80001001
+W gem 0460 80002011
+W gem 0088 11dd3ad8
+W gem 008c 00003322
+W gem 0090 00000000
+W gem 0094 00000000
+W gem 0098 00000000
+W gem 009c 00000000
+W gem 00a0 00000000
+W gem 00a4 00000000
+W gem 0080 ffffffff
+W gem 0084 ffffffff
+R gem 0004 00160112
+W gem 0004 00160112
+R gem 0010 41200710
+W gem 0010 41200710
+W gem 0000 00000030
+W gem 0000 0000001c
+W gem 0024 ffffffff
+W gem 0028 00000c82
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60500
+log gem: en0 link up 100 Mbps full duplex
+R gem 0004 00160112
+W gem 0004 00160113
+unlock
+carrier 1
+log gem: en0 RX/TX enabled
+reopen 0
+digest rings 9503d07f8e52bce4
+lock
+W gem 002c ffffffff
+W gem 0000 00000010
+R gem 0014 00000000
+W gem 0024 ffffffff
+unlock
+carrier 0
+== case: filter address
+map 300
+R clk 0064 00000000
+log gem: Ethernet clock was off (00000000)
+W clk 0064 00000800
+R clk 0134 00000800
+map 100
+R gem 00fc 00070109
+R gem 0294 00800206
+R gem 029c 02010000
+log gem: revision 00070109, queues 0207, MDIO divider 96
+R gem 0088 00000000
+R gem 008c 00000000
+R gem 0090 00005e01
+R gem 0094 00000001
+R gem 0098 01dd3ad8
+R gem 009c 00000302
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00080000
+W gem 0004 00140000
+W gem 0000 00000010
+gpio init
+gpio 32 0
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+usleep 1000 1000
+gpio 32 1
+usleep 1000 1000
+R gem 0008 00000004
+W gem 0034 608a0000
+R gem 0008 00000004
+R gem 0034 608a600d
+R gem 0008 00000004
+W gem 0034 608e0000
+R gem 0008 00000004
+R gem 0034 608e84a2
+R gem 0008 00000004
+W gem 0034 50828000
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60820000
+R gem 0008 00000004
+R gem 0034 60828000
+R gem 0008 00000004
+W gem 0034 60820000
+R gem 0008 00000004
+R gem 0034 60821140
+R gem 0008 00000004
+W gem 0034 50e27007
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60e20000
+R gem 0008 00000004
+R gem 0034 60e27007
+R gem 0008 00000004
+W gem 0034 50e2f207
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50f20c00
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 60f20000
+R gem 0008 00000004
+R gem 0034 60f20c00
+R gem 0008 00000004
+W gem 0034 50f28e00
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50920141
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50a60200
+R gem 0008 00000004
+R gem 0008 00000004
+W gem 0034 50821200
+R gem 0008 00000004
+log gem: PHY 1 id 600d84a2
+dma 8224 align 4096 at 2080000000
+dma 524288 align 2048 at 2080100000
+dma 524288 align 2048 at 2080200000
+irq init
+irq of 100 0
+irq establish 6 4
+net alloc
+net create en0 mtu 1500 hwaddr d8:3a:dd:01:02:03 len 6 flags c
+log gem: en0 ready MAC d8:3a:dd:01:02:03
+init 0
+init again 114
+kthread 8
+net ref
+thread start
+lock
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00140000
+W gem 0004 00140000
+W gem 0000 00000010
+barrier w
+W gem 04d4 00000020
+W gem 0018 80000000
+W gem 04c8 00000020
+W gem 001c 80001010
+W gem 0480 80001001
+W gem 0440 80002011
+W gem 0484 80001001
+W gem 0444 80002011
+W gem 05c4 80001001
+W gem 0460 80002011
+W gem 0088 01dd3ad8
+W gem 008c 00000302
+W gem 0090 00000000
+W gem 0094 00000000
+W gem 0098 00000000
+W gem 009c 00000000
+W gem 00a0 00000000
+W gem 00a4 00000000
+W gem 0080 ffffffff
+W gem 0084 ffffffff
+R gem 0004 00140000
+W gem 0004 00160112
+R gem 0010 00020784
+W gem 0010 41200710
+W gem 0000 00000030
+W gem 0000 0000001c
+W gem 0024 ffffffff
+W gem 0028 00000c82
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60700
+log gem: en0 link up 1000 Mbps full duplex
+R gem 0004 00160112
+W gem 0004 00160513
+unlock
+carrier 1
+log gem: en0 RX/TX enabled
+open 0
+digest rings 9503d07f8e52bce4
+desc rx 0: 80100000 00000000 00000020 00000000
+desc rx 1: 80100800 00000000 00000020 00000000
+desc rx 255: 8017f802 00000000 00000020 00000000
+desc rx 256: 00000003 00000000 00000000 00000000
+desc tx 257: 00000000 80000000 00000000 00000000
+desc tx 258: 00000000 80000000 00000000 00000000
+desc tx 512: 00000000 c0000000 00000000 00000000
+desc tx 513: 00000000 c0000000 00000000 00000000
+packet alloc
+lock
+barrier w
+barrier w
+W gem 0000 0000021c
+unlock
+packet free
+transmit 42: 0
+packet alloc
+lock
+barrier w
+barrier w
+W gem 0000 0000021c
+unlock
+packet free
+transmit 1514: 0
+packet alloc
+packet free
+transmit 1515: 90
+packet alloc
+packet free
+transmit 10: 90
+transmit none: 22
+desc tx 257: 80200000 0000803c 00000020 00000000
+desc tx 258: 80200800 000085ea 00000020 00000000
+desc tx 259: 00000000 80000000 00000000 00000000
+digest tx slots 37f1f431c907d299
+lock
+R gem 0024 00000482
+W gem 0024 00000482
+W gem 002c 00000002
+unlock
+schedule poll
+lock
+unlock
+carrier 1
+packet alloc
+lock
+barrier r
+barrier
+unlock
+receive 64 sum e2f25420
+packet free
+packet alloc
+lock
+barrier r
+barrier
+unlock
+packet free
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 2 rx_errors 2 rx_dropped 1 tx_errors 1
+desc rx 0: 80100000 00000000 00000020 00000000
+desc rx 1: 80100800 00000000 00000020 00000000
+desc rx 2: 80101000 00000000 00000020 00000000
+lock
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60500
+log gem: en0 link up 100 Mbps full duplex
+R gem 0004 00160513
+W gem 0004 00160113
+unlock
+carrier 1
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 100
+lock
+unlock
+carrier 1
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 100
+lock
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 60867949
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 60867949
+log gem: en0 link down
+R gem 0004 00160113
+W gem 0004 00160112
+unlock
+carrier 0
+packet alloc
+lock
+unlock
+packet free
+lock
+W gem 0028 00000002
+unlock
+poll 0 link 0
+lock
+R gem 0024 00000800
+W gem 0024 00000800
+W gem 0000 00000010
+W gem 002c ffffffff
+log gem: DMA error, interface stopped
+unlock
+lock
+W gem 002c ffffffff
+W gem 0000 00000010
+R gem 0014 00000000
+W gem 0024 ffffffff
+unlock
+carrier 0
+lock
+W gem 0000 00000000
+W gem 002c ffffffff
+W gem 0020 00000000
+W gem 0014 00000000
+W gem 04d4 00000000
+W gem 04c8 00000000
+W gem 0018 00000000
+W gem 001c 00000000
+W gem 0480 00000000
+W gem 0440 00000000
+W gem 0484 00000000
+W gem 0444 00000000
+W gem 05c4 00000000
+W gem 0460 00000000
+W gem 0500 00000000
+W gem 0504 00000000
+W gem 0540 00000000
+R gem 0004 00160112
+W gem 0004 00160112
+W gem 0000 00000010
+barrier w
+W gem 04d4 00000020
+W gem 0018 80000000
+W gem 04c8 00000020
+W gem 001c 80001010
+W gem 0480 80001001
+W gem 0440 80002011
+W gem 0484 80001001
+W gem 0444 80002011
+W gem 05c4 80001001
+W gem 0460 80002011
+W gem 0088 01dd3ad8
+W gem 008c 00000302
+W gem 0090 00000000
+W gem 0094 00000000
+W gem 0098 00000000
+W gem 009c 00000000
+W gem 00a0 00000000
+W gem 00a4 00000000
+W gem 0080 ffffffff
+W gem 0084 ffffffff
+R gem 0004 00160112
+W gem 0004 00160112
+R gem 0010 41200710
+W gem 0010 41200710
+W gem 0000 00000030
+W gem 0000 0000001c
+W gem 0024 ffffffff
+W gem 0028 00000c82
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60860000
+R gem 0008 00000004
+R gem 0034 6086796d
+R gem 0008 00000004
+W gem 0034 60e60000
+R gem 0008 00000004
+R gem 0034 60e60500
+log gem: en0 link up 100 Mbps full duplex
+R gem 0004 00160112
+W gem 0004 00160113
+unlock
+carrier 1
+log gem: en0 RX/TX enabled
+reopen 0
+digest rings 9503d07f8e52bce4
+lock
+W gem 002c ffffffff
+W gem 0000 00000010
+R gem 0014 00000000
+W gem 0024 ffffffff
+unlock
+carrier 0
+== case: no address
+map 300
+R clk 0064 00000000
+log gem: Ethernet clock was off (00000000)
+W clk 0064 00000800
+R clk 0134 00000800
+map 100
+R gem 00fc 00070109
+R gem 0294 00800206
+R gem 029c 02010000
+log gem: revision 00070109, queues 0207, MDIO divider 96
+R gem 0088 00000000
+R gem 008c 00000000
+R gem 0090 00000000
+R gem 0094 00000000
+R gem 0098 00000000
+R gem 009c 00000000
+R gem 00a0 00000000
+R gem 00a4 00000000
+log gem: no Ethernet address from the firmware
+log gem: initialization failed at MAC address (19)
+init 19

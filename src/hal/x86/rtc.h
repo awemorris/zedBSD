@@ -1,0 +1,17 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_HAL_X86_RTC_H
+#define KERN_HAL_X86_RTC_H
+
+#include <hal/types.h>
+
+typedef uint8_t (*x86_cmos_read_fn)(uint8_t index, void *context);
+
+bool x86_cmos_rtc_read(x86_cmos_read_fn, void *, uint64_t *);
+
+#endif

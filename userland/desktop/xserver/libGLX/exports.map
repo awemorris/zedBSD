@@ -1,0 +1,42 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only GLX leaves the library (libX11 inside it stays inside), with the swap's step a watchdog reads. */
+{
+	global:
+		glXChooseFBConfig;
+		glXChooseVisual;
+		glXCreateContext;
+		glXCreateContextAttribsARB;
+		glXCreateNewContext;
+		glXCreateWindow;
+		glXDestroyContext;
+		glXDestroyWindow;
+		glXGetClientString;
+		glXGetConfig;
+		glXGetCurrentContext;
+		glXGetCurrentDisplay;
+		glXGetCurrentDrawable;
+		glXGetFBConfigAttrib;
+		glXGetFBConfigs;
+		glXGetProcAddress;
+		glXGetProcAddressARB;
+		glXGetVisualFromFBConfig;
+		glXIsDirect;
+		glXMakeContextCurrent;
+		glXMakeCurrent;
+		glXQueryExtension;
+		glXQueryExtensionsString;
+		glXQueryServerString;
+		glXQueryVersion;
+		glXSwapBuffers;
+		glXWaitGL;
+		glXWaitX;
+		zglx_swap_step;
+	local:
+		*;
+};

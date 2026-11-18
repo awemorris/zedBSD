@@ -1,0 +1,46 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("hello world, foo bar. 2nd 日本語です end");
+    Editor.gotoChar(1);
+    oracleEmit(Editor.forwardWord(1));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.forwardWord(2));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.backwardWord(1));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.forwardWord(10));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.backwardWord(100));
+    oracleEmit(Editor.point());
+
+    // Words and multibyte text.
+    Editor.gotoChar(23);
+    oracleEmit(Editor.forwardWord(2));
+    oracleEmit(Editor.point());
+
+    // kill-word records the killed text.
+    Editor.gotoChar(1);
+    Editor.killWord(2);
+    oracleEmit(Editor.currentKill(0));
+    oracleEmit(Editor.bufferString());
+    Editor.gotoChar(9);
+    Editor.backwardKillWord(1);
+    oracleEmit(Editor.currentKill(0));
+    oracleEmit(Editor.bufferString());
+    oracleTestScripts();
+}
+
+// Script-boundary rules, pinned explicitly: words combine only going
+// down the kanji > katakana > hiragana hierarchy.
+func oracleTestScripts() {
+    Editor.deleteRegion(Editor.pointMin(), Editor.pointMax());
+    Editor.insert("字ナナ ナナ字 字なな なな字 ナナなな 25日 日25 ta日本語Qil");
+    Editor.gotoChar(1);
+    while (Editor.forwardWord(1)) {
+        oracleEmit(Editor.point());
+    }
+    while (Editor.backwardWord(1)) {
+        oracleEmit(Editor.point());
+    }
+}

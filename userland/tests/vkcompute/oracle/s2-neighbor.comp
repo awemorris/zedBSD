@@ -1,0 +1,14 @@
+#version 450
+// Stage 2: each invocation reads what two others of its workgroup stored in shared memory before a barrier.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint s[64];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	s[l] = src[gl_GlobalInvocationID.x];
+	barrier();
+	o[gl_GlobalInvocationID.x] = s[(l + 1u) & 63u] * 3u + s[63u - l];
+}

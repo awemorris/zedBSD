@@ -1,0 +1,293 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * BSD socket
+ */
+
+#ifndef KERN_KERN_NET_SOCKET_H
+#define KERN_KERN_NET_SOCKET_H
+
+#include <kern/fd-object.h>
+#include <kern/atomic.h>
+#include <kern/lock.h>
+#include <kern/waitq.h>
+#include <uapi/socket.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <uapi/types.h>
+
+/*
+ * The number of sockets the whole system may hold at once.
+ *
+ * Sockets are allocated one by one, so this is a guard against a runaway
+ * program rather than the size of a table; every socket is also an open
+ * file, and the file pool (2048) stays the larger of the two.  A desktop
+ * session holds many unix sockets and an SSH session three or four
+ * (BUG-107: the former 32 refused the sixth parallel SSH session).
+ */
+#define SOCKET_MAX 1024U
+
+/*
+ * The number of sockets of one broadcast family (raw ICMP, packet, route)
+ * that may exist at once.
+ *
+ * Those families copy every packet or event to each of their sockets
+ * from a snapshot on the kernel stack, so creating one more than the
+ * snapshot holds is refused rather than silently left out of delivery.
+ */
+#define SOCKET_BROADCAST_MAX 32U
+#define SOCKET_RECEIVE_MESSAGES_MAX 8U
+/* The jumbo packets a datagram socket's receive queue holds at most. */
+#define SOCKET_RECEIVE_JUMBO_MAX 2U
+#define SOCKET_BUFFER_DEFAULT (64U * 1024U)
+#define SOCKET_BUFFER_MIN 2048U
+#define SOCKET_BUFFER_MAX (1024U * 1024U)
+/*
+ * The bytes each packet of a stream's receive queue holds at least, but
+ * the last (socket_enqueue_stream fills a packet holding fewer before it
+ * queues another), so that a queue of N packets more takes N times this
+ * many bytes however the peer cuts its segments.
+ */
+#define SOCKET_STREAM_PACKET_BYTES 1024U
+
+struct file;
+struct filedesc;
+struct cwdinfo;
+struct ucred;
+struct packet_buf;
+struct socket;
+struct uaccess_pin;
+struct thread;
+struct path;
+
+enum socket_lifecycle { SOCKET_OPEN = 1, SOCKET_CLOSING, SOCKET_CLOSED };
+
+struct socket_ops {
+	int (*bind)(struct socket *, const struct sockaddr *, socklen_t);
+	int (*connect)(struct socket *, const struct sockaddr *, socklen_t,
+		       unsigned);
+	int (*listen)(struct socket *, int);
+	int (*accept)(struct socket *, struct socket **, struct sockaddr *,
+		      socklen_t *, unsigned);
+	ssize_t (*sendto)(struct socket *, const void *, size_t, int,
+			  const struct sockaddr *, socklen_t);
+	/*
+	 * sendto without an address from a user buffer the caller has pinned
+	 * (length bytes at offset in the pin), copied straight into the
+	 * protocol's own buffers rather than through the system call's bounce
+	 * buffer; NULL where the protocol takes kernel buffers only (write(2)
+	 * then bounces).
+	 */
+	ssize_t (*send_pinned)(struct socket *, const struct uaccess_pin *, size_t, size_t, int);
+	ssize_t (*recvfrom)(struct socket *, void *, size_t, int,
+			    struct sockaddr *, socklen_t *);
+	/*
+	 * recvfrom that also gives the hop limit the datagram came with (-1
+	 * for none kept), for recvmsg (ws177-p044); NULL where no protocol
+	 * keeps one.
+	 */
+	ssize_t (*recvfrom_hop)(struct socket *, void *, size_t, int,
+				struct sockaddr *, socklen_t *, int *);
+	int (*shutdown)(struct socket *, int);
+	int (*getsockname)(struct socket *, struct sockaddr *, socklen_t *);
+	int (*getpeername)(struct socket *, struct sockaddr *, socklen_t *);
+	int (*setsockopt)(struct socket *, int, int, const void *, socklen_t);
+	/* Told that SO_KEEPALIVE changed, so an idle timer can be armed. */
+	void (*keepalive_changed)(struct socket *);
+	int (*getsockopt)(struct socket *, int, int, void *, socklen_t *);
+	int (*ioctl)(struct socket *, unsigned long, uintptr_t);
+	int (*poll)(struct socket *, short, short *);
+	void (*buffer_changed)(struct socket *, int);
+	void (*endpoint_close)(struct socket *);
+	void (*close)(struct socket *);
+};
+
+struct socket {
+	int family;
+	int type;
+	int protocol;
+	int state;
+	int error;
+	unsigned flags;
+	refcount_t refs;
+	struct spinlock lock;
+	struct wait_queue receive_waitq;
+	struct wait_queue receive_space_waitq;
+	struct wait_queue send_waitq;
+	struct wait_queue connect_waitq;
+	struct wait_queue accept_waitq;
+	enum socket_lifecycle lifecycle;
+	const struct socket_ops *ops;
+	void *private_data;
+	struct packet_buf *receive_head;
+	struct packet_buf *receive_tail;
+	unsigned receive_packets;
+	/*
+	 * The jumbo packets among them (socket_enqueue_packet keeps a datagram
+	 * socket's to SOCKET_RECEIVE_JUMBO_MAX); guarded by the lock.
+	 */
+	unsigned receive_jumbo;
+	size_t receive_bytes;
+	size_t receive_packet_limit;
+	size_t receive_hiwat_bytes;
+	size_t send_hiwat_bytes;
+	uint64_t receive_timeout_ticks;
+	uint64_t send_timeout_ticks;
+	unsigned reuse_address;
+	unsigned keepalive;
+	unsigned read_shutdown;
+	unsigned write_shutdown;
+	/*
+	 * Set, and never cleared, once poll or select has looked at the
+	 * socket.  The frequent readiness changes of a socket no one polls
+	 * (each segment queued, each acknowledgement that frees room) then
+	 * skip the system-wide poll channel, which would wake every polling
+	 * thread of the system to scan its descriptors again.  Written and
+	 * read atomically, with a full fence on both sides (socket_poll_watch,
+	 * socket_poll_notify).
+	 */
+	unsigned polled;
+};
+
+#define SOCKET_IO_NONBLOCK 0x0001U
+#define SOCKET_IO_NOSIGNAL 0x0002U
+
+struct socket_file_ref {
+	struct file *file;
+	struct socket *socket;
+};
+
+struct unix_recv_transaction {
+	struct socket *socket;
+	void *packet;
+	uint64_t token;
+	size_t copied;
+	unsigned datagram;
+	unsigned file_count;
+	unsigned data_truncated;
+	unsigned control_truncated;
+	unsigned active;
+	struct fd_object objects[KERN_MSG_FD_MAX];
+};
+
+struct socket_family_ops {
+	int (*create)(int type, int protocol, struct socket **result);
+};
+
+void socket_core_init(void);
+int socket_family_register(int family, const struct socket_family_ops *ops);
+int socket_create(int family, int type, int protocol, struct socket **result);
+int socket_setsockopt_common(struct socket *socket, int level, int option,
+			     const void *value, socklen_t length);
+int socket_getsockopt_common(struct socket *socket, int level, int option,
+			     void *value, socklen_t *length);
+void socket_init_object(struct socket *socket, int family, int type,
+			int protocol, const struct socket_ops *ops);
+void socket_ref(struct socket *socket);
+int socket_tryref(struct socket *socket);
+void socket_close_endpoint(struct socket *socket);
+void socket_release(struct socket *socket);
+int socket_enqueue_packet(struct socket *socket, struct packet_buf *packet);
+int socket_enqueue_stream(struct socket *socket, struct packet_buf *packet);
+int socket_enqueue_stream_advance(struct socket *socket, struct packet_buf *packet, uint32_t *next);
+/*
+ * The longest datagram a socket sends or receives in one call: a packet's
+ * storage, the largest (jumbo) one for the Internet families, the standard
+ * one for AF_UNIX, whose datagrams stay standard packets.
+ */
+size_t socket_datagram_max(const struct socket *socket);
+void socket_poll_watch(struct socket *socket);
+void socket_poll_notify(struct socket *socket);
+int socket_enqueue_packet_wait(struct socket *socket, struct packet_buf *packet,
+			       int flags, uint64_t timeout_ticks);
+int socket_requeue_packet_front(struct socket *socket,
+				struct packet_buf *packet);
+int socket_dequeue_packet(struct socket *socket, int flags,
+			  struct packet_buf **result);
+int socket_file_create(struct socket *socket, struct file **result);
+int socket_file_reserve(struct file **result);
+int socket_file_attach(struct file *file, struct socket *socket);
+struct socket *socket_from_file(struct file *file);
+/*
+ * Whether write(2) on the file goes straight from the caller's pinned
+ * pages into the socket (socket_file_write_pinned), and the write itself.
+ */
+int socket_file_takes_pinned(struct file *file);
+ssize_t socket_file_write_pinned(struct file *file, const struct uaccess_pin *pin, size_t length);
+int socket_file_ref_get(struct filedesc *fd, int descriptor,
+			struct socket_file_ref *reference);
+void socket_file_ref_put(struct socket_file_ref *reference);
+unsigned socket_file_effective_flags(const struct socket_file_ref *reference,
+				     int message_flags);
+int socket_take_error(struct socket *socket);
+void socket_set_error(struct socket *socket, int error);
+void socket_wake_receive(struct socket *socket);
+void socket_wake_send(struct socket *socket);
+void socket_wake_connect(struct socket *socket);
+void socket_wake_accept(struct socket *socket);
+int socket_poll_common(struct socket *socket, short events, short *revents);
+unsigned socket_count_current(void);
+
+int packet_socket_init(void);
+int route_socket_init(void);
+int unix_socket_init(void);
+int unix_socket_pair_create(int type, int protocol,
+			    const struct kern_peercred *creator,
+			    struct socket **left_result,
+			    struct socket **right_result);
+/* These calls consume owned references on success and failure. */
+ssize_t unix_socket_send_objects(struct socket *socket, const void *buffer, size_t length, int flags, const struct sockaddr *address, socklen_t address_length, struct fd_object *objects, unsigned count);
+ssize_t unix_socket_send_objects_at(struct socket *socket, struct cwdinfo *context, const struct ucred *cred, const void *buffer, size_t length, int flags, const struct sockaddr *address, socklen_t address_length, struct fd_object *objects, unsigned count);
+ssize_t unix_socket_send_message(struct socket *socket, const void *buffer,
+				 size_t length, int flags,
+				 const struct sockaddr *address,
+				 socklen_t address_length, struct file **files,
+				 unsigned count);
+ssize_t unix_socket_send_message_at(struct socket *socket,
+				    struct cwdinfo *context,
+				    const struct ucred *cred,
+				    const void *buffer, size_t length,
+				    int flags, const struct sockaddr *address,
+				    socklen_t address_length,
+				    struct file **files, unsigned count);
+ssize_t unix_socket_receive_message(struct socket *socket, void *buffer,
+				    size_t length, int flags,
+				    struct sockaddr *address,
+				    socklen_t *address_length,
+				    struct file **files, unsigned *file_count,
+				    unsigned *control_truncated);
+ssize_t unix_socket_receive_begin(struct socket *socket, void *buffer,
+				  size_t length, int flags,
+				  struct sockaddr *address,
+				  socklen_t *address_length,
+				  unsigned file_capacity,
+				  struct unix_recv_transaction *transaction);
+void unix_socket_receive_commit(struct unix_recv_transaction *transaction);
+void unix_socket_receive_abort(struct unix_recv_transaction *transaction);
+int unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
+			  const struct ucred *cred, mode_t umask,
+			  const struct sockaddr *address, socklen_t length);
+int unix_socket_listen(struct socket *socket, int backlog,
+		       const struct kern_peercred *listener);
+int unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
+			     const struct ucred *cred,
+			     const struct kern_peercred *connector,
+			     const struct sockaddr *address, socklen_t length,
+			     unsigned io_flags);
+int unix_socket_bound_path_matches(struct socket *socket,
+				   const struct path *path);
+void packet_socket_deliver(const struct packet_buf *packet,
+			   const uint8_t source[6], uint8_t packet_type);
+void route_socket_notify(unsigned ifindex, uint64_t device_generation,
+			 unsigned device_flags, unsigned transition);
+struct in6_addr;
+void route_socket_notify_routeradv(unsigned ifindex, const struct in6_addr *source, const void *message, size_t length);
+void route_socket_notify_address(unsigned ifindex, const struct in6_addr *address, unsigned prefixlen, unsigned transition, unsigned flags);
+void route_socket_notify_neighbor(unsigned ifindex, const struct in6_addr *address, unsigned transition, int router);
+
+#endif

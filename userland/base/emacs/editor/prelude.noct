@@ -1,0 +1,138 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// The Elisp prelude: the part of Emacs Lisp that is written in Emacs
+// Lisp.
+//
+// In GNU Emacs, when, unless, dolist, push and their kin are not
+// primitives -- they are macros in subr.el, expanding to if, while, setq
+// and cons. Now that this interpreter has defmacro and backquote, they
+// can be the same here: ordinary Lisp, not more Noct.
+//
+// That is the whole point of the macro layer. A compatibility scan of
+// 149 packages found "when" in 117 of them and "unless" in 104; none of
+// that needs a line of the editor's own language.
+//
+// The source is kept here as text rather than a separate .el file
+// because remacs ships as one bytecode bundle with no data files to
+// read at startup. It is evaluated by lispInit, before any user code.
+//
+// What is deliberately absent: anything needing a facility this
+// interpreter does not have yet. save-excursion, with-current-buffer and
+// ignore-errors all want unwind-protect or condition-case, and a version
+// that skipped the unwinding would be worse than an honest gap -- it
+// would look like it worked.
+
+func lispPreludeSource() {
+    var src = [];
+
+    // --- conditionals ---
+    Array.push(src, "(defmacro when (c &rest body) `(if ,c (progn ,@body)))");
+    Array.push(src, "(defmacro unless (c &rest body) `(if ,c nil (progn ,@body)))");
+
+    // --- sequencing ---
+    Array.push(src, "(defmacro prog1 (first &rest body)"
+                  + "  `(let ((--prog1-- ,first)) ,@body --prog1--))");
+    Array.push(src, "(defmacro prog2 (a b &rest body)"
+                  + "  `(progn ,a (prog1 ,b ,@body)))");
+
+    // --- iteration ---
+    // (dolist (VAR LIST [RESULT]) BODY...)
+    Array.push(src, "(defmacro dolist (spec &rest body)"
+                  + "  `(let ((--dolist-tail-- ,(car (cdr spec)))"
+                  + "         (,(car spec) nil))"
+                  + "     (while --dolist-tail--"
+                  + "       (setq ,(car spec) (car --dolist-tail--))"
+                  + "       ,@body"
+                  + "       (setq --dolist-tail-- (cdr --dolist-tail--)))"
+                  + "     ,(car (cdr (cdr spec)))))");
+    // (dotimes (VAR COUNT [RESULT]) BODY...)
+    Array.push(src, "(defmacro dotimes (spec &rest body)"
+                  + "  `(let ((--dotimes-limit-- ,(car (cdr spec)))"
+                  + "         (,(car spec) 0))"
+                  + "     (while (< ,(car spec) --dotimes-limit--)"
+                  + "       ,@body"
+                  + "       (setq ,(car spec) (1+ ,(car spec))))"
+                  + "     ,(car (cdr (cdr spec)))))");
+
+    // --- list mutation ---
+    // push and pop are macros on a *place*; only the variable form is
+    // supported, which is what almost every use is.
+    Array.push(src, "(defmacro push (x place) `(setq ,place (cons ,x ,place)))");
+    Array.push(src, "(defmacro pop (place)"
+                  + "  `(prog1 (car ,place) (setq ,place (cdr ,place))))");
+
+    // --- counters ---
+    Array.push(src, "(defmacro cl-incf (place &optional n)"
+                  + "  `(setq ,place (+ ,place (or ,n 1))))");
+    Array.push(src, "(defmacro cl-decf (place &optional n)"
+                  + "  `(setq ,place (- ,place (or ,n 1))))");
+    Array.push(src, "(defmacro incf (place &optional n) `(cl-incf ,place ,n))");
+    Array.push(src, "(defmacro decf (place &optional n) `(cl-decf ,place ,n))");
+
+    // --- error handling ---
+    Array.push(src, "(defmacro ignore-errors (&rest body)"
+                  + "  `(condition-case nil (progn ,@body) (error nil)))");
+    Array.push(src, "(defmacro with-demoted-errors (fmt &rest body)"
+                  + "  `(condition-case --wde-- (progn ,@body)"
+                  + "     (error (message ,fmt --wde--) nil)))");
+
+    // --- saving and restoring editor state ---
+    //
+    // Point is saved as a marker, not a number, so that text inserted
+    // before it moves the saved position with it -- restoring to a stale
+    // integer is the classic way to get this wrong.
+    Array.push(src, "(defmacro save-current-buffer (&rest body)"
+                  + "  `(let ((--scb-- (buffer-name)))"
+                  + "     (unwind-protect (progn ,@body) (set-buffer --scb--))))");
+    Array.push(src, "(defmacro save-excursion (&rest body)"
+                  + "  `(let ((--se-buf-- (buffer-name)) (--se-pt-- (point-marker)))"
+                  + "     (unwind-protect (progn ,@body)"
+                  + "       (set-buffer --se-buf--)"
+                  + "       (goto-char (marker-position --se-pt--)))))");
+    Array.push(src, "(defmacro with-current-buffer (buf &rest body)"
+                  + "  `(let ((--wcb-- (buffer-name)))"
+                  + "     (unwind-protect (progn (set-buffer ,buf) ,@body)"
+                  + "       (set-buffer --wcb--))))");
+    // A counter rather than generate-new-buffer, which does not exist
+    // here: nesting must not land two temp buffers on one name.
+    Array.push(src, "(defvar --temp-buffer-seq-- 0)");
+    Array.push(src, "(defmacro with-temp-buffer (&rest body)"
+                  + "  `(let* ((--tb-prev-- (buffer-name))"
+                  + "          (--tb-- (progn (setq --temp-buffer-seq-- (1+ --temp-buffer-seq--))"
+                  + "                         (concat \" *temp*-\""
+                  + "                                 (number-to-string --temp-buffer-seq--)))))"
+                  + "     (unwind-protect"
+                  + "         (progn (get-buffer-create --tb--) (set-buffer --tb--) ,@body)"
+                  + "       (set-buffer --tb-prev--)"
+                  + "       (kill-buffer --tb--))))");
+
+    // --- loading ---
+    //
+    // There is no separate compilation step here, so the "when compile"
+    // forms are just their bodies. declare-function is a promise to the
+    // byte-compiler and has nothing to say to an interpreter.
+    Array.push(src, "(defmacro eval-when-compile (&rest body) `(progn ,@body))");
+    Array.push(src, "(defmacro eval-and-compile (&rest body) `(progn ,@body))");
+    Array.push(src, "(defmacro declare-function (&rest _ignored) nil)");
+    Array.push(src, "(defmacro with-eval-after-load (file &rest body)"
+                  + "  `(eval-after-load ,file (lambda () ,@body)))");
+
+    return src;
+}
+
+// Evaluate the prelude. Called from lispInit once the builtins and the
+// bridge are in place, since the macros below expand into them.
+func lispLoadPrelude() {
+    for (form in lispPreludeSource()) {
+        lispEvalText(form);
+        if (LispErr == 1) {
+            // A broken prelude is a bug in this file, not in user code,
+            // and silence would make it look like a missing feature.
+            print("remacs: prelude: " + LispErrMsg);
+            LispErr = 0;
+            LispErrMsg = "";
+        }
+    }
+    return 0;
+}

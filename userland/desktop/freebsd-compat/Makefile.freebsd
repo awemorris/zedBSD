@@ -1,0 +1,25 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_DIGEST_SOURCES := \
+	src/libc/openbsd-sha2.c src/libc/openbsd-digest.c \
+	userland/desktop/freebsd-compat/freebsd/xattr-freebsd.c \
+	userland/desktop/freebsd-compat/freebsd/shadow-freebsd.c
+
+$(eval $(call KEILAND_FREEBSD_STATIC,digest,libkeiland-compat.a,$(KEILAND_FREEBSD_DIGEST_SOURCES)))
+
+# These native bridges are private build headers, not installed Keiland public interfaces.
+$(KEILAND_FREEBSD_BUILD)/include/pty.h: userland/desktop/freebsd-compat/freebsd/pty-freebsd.h
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(KEILAND_FREEBSD_BUILD)/include/sys/xattr.h: userland/desktop/freebsd-compat/freebsd/xattr-freebsd.h
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(KEILAND_FREEBSD_BUILD)/include/shadow.h: userland/desktop/freebsd-compat/freebsd/shadow-freebsd.h
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(KEILAND_FREEBSD_BUILD)/include/crypt.h: userland/desktop/freebsd-compat/freebsd/crypt-freebsd.h
+	@mkdir -p $(dir $@)
+	cp $< $@

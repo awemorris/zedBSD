@@ -1,0 +1,43 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_BACKEND_SOURCES := \
+	userland/desktop/libkeiland-backend/backend.c \
+	userland/desktop/libkeiland-backend/media/media.c \
+	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/libkeiland-backend/machine/machine.c \
+	userland/desktop/libkeiland-backend/machine/filesystems.c \
+	userland/desktop/libkeiland-backend/machine/users.c \
+	userland/desktop/libkeiland-backend/machine/mounts.c \
+	userland/desktop/libkeiland-backend/machine/mounts-mntent.c \
+	userland/desktop/libkeiland-backend-linux/users-linux.c \
+	userland/desktop/libkeiland-backend/wpa/network-wpa.c \
+	userland/desktop/libkeiland-backend/wpa/network-config-wpa.c \
+	userland/desktop/libkeiland-backend-linux/network-link-linux.c \
+	userland/desktop/libkeiland-backend-linux/monitor-linux.c \
+	userland/desktop/libkeiland-backend-linux/audio-linux.c \
+	userland/desktop/libkeiland-backend-linux/audio-stream-linux.c \
+	userland/desktop/libkeiland-backend/audio/pump.c \
+	userland/desktop/libkeiland-backend-linux/power-linux.c \
+	userland/desktop/libkeiland-backend/unsupported/events-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/account-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/backlight-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/volume-unsupported.c \
+	userland/desktop/libkeiland-backend-linux/bluetooth-linux.c \
+	userland/desktop/libkeiland-backend/unsupported/phone-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/sharing-unsupported.c \
+	userland/desktop/libkeiland-backend/session/session-none.c \
+	userland/desktop/libkeiland-backend-linux/dbus-linux.c \
+	userland/desktop/libkeiland-backend-linux/notify-linux.c \
+	userland/desktop/libkeiland-backend-linux/seat-linux.c \
+	userland/desktop/libkeiland-backend-linux/seat-logind-linux.c \
+	userland/desktop/libkeiland-backend-linux/seat-direct-linux.c \
+	userland/desktop/libkeiland-backend/evdev/input-evdev.c \
+	userland/desktop/libkeiland-backend/drm/display-drm.c \
+	userland/desktop/libkeiland-backend-linux/peer-linux.c \
+	userland/desktop/libkeiland-backend/dmabuf/gpu-dmabuf.c \
+	userland/desktop/libkeiland-backend-linux/sync-linux.c
+
+$(eval $(call KEILAND_LINUX_STATIC,keiland-backend,libkeiland-backend.a,$(KEILAND_LINUX_BACKEND_SOURCES)))

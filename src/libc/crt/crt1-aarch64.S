@@ -1,0 +1,39 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+.text
+.balign 16
+.global _start
+.type _start, %function
+_start:
+	.cfi_startproc
+	/*
+	 * Nothing called this, so a debugger walking the stack stops here:
+	 * the register it would return through holds no return address.
+	 */
+	.cfi_undefined x30
+	mov x29, xzr
+	mov x30, xzr
+	mov x19, sp
+	ldr x20, [x19]
+	add x21, x19, #8
+	add x22, x21, x20, lsl #3
+	add x22, x22, #8
+	mov x0, x20
+	mov x1, x21
+	mov x2, x22
+	bl __libc_init
+	mov x0, x20
+	mov x1, x21
+	mov x2, x22
+	bl main
+	bl exit
+1:
+	wfe
+	b 1b
+	.cfi_endproc
+.size _start, .-_start

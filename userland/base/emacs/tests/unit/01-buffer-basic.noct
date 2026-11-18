@@ -1,0 +1,52 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    // An empty buffer.
+    print(Editor.point());
+    print(Editor.pointMin());
+    print(Editor.pointMax());
+    print(Editor.bufferSize());
+    print(Editor.bobp());
+    print(Editor.eobp());
+
+    // Insertion moves point past the inserted text.
+    Editor.insert("hello");
+    print(Editor.point());
+    print(Editor.bufferSize());
+    print(Editor.bufferString());
+
+    // Multibyte: positions are characters.
+    Editor.insert("あい");
+    print(Editor.bufferSize());
+    print(Editor.point());
+    print(Editor.bufferString());
+
+    // goto-char clamps.
+    Editor.gotoChar(3);
+    print(Editor.point());
+    Editor.gotoChar(999);
+    print(Editor.point());
+    Editor.gotoChar(-5);
+    print(Editor.point());
+
+    // Insertion in the middle.
+    Editor.gotoChar(6);
+    Editor.insert("X");
+    print(Editor.bufferString());
+    print(Editor.point());
+
+    // bufferSubstring.
+    print(Editor.bufferSubstring(1, 6));
+    print(Editor.bufferSubstring(6, 9));
+
+    // charAfter / charBefore.
+    print(Editor.charAfter(6));
+    print(Editor.charBefore(6));
+    print(Editor.charAfter(999));
+    print(Editor.charBefore(1));
+
+    // deleteRegion.
+    Editor.deleteRegion(6, 7);
+    print(Editor.bufferString());
+    print(Editor.point());
+}

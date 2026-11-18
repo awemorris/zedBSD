@@ -1,0 +1,22 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * System device (/dev/system)
+ */
+
+#ifndef KERN_KERN_SYSTEM_DEVICE_H
+#define KERN_KERN_SYSTEM_DEVICE_H
+
+int
+drv_system_device_register(void);
+
+/* Common thread-context boundary for every orderly halt or reboot path. */
+int
+system_shutdown_prepare(void);
+
+#endif

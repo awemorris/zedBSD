@@ -1,0 +1,147 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The floating-point save and restore below needs the FP and SIMD
+ * registers and the FPCR and FPSR system registers. The kernel compiles
+ * its C with -mgeneral-regs-only so the compiler never emits FP of its
+ * own; this states that the assembler may, which is the whole point of
+ * these two routines.
+ */
+	.arch armv8-a+fp+simd
+
+	.text
+	.balign 16
+	.global asm_task_dispatch
+	.type asm_task_dispatch,%function
+asm_task_dispatch:
+	sub sp,sp,#96
+	stp x19,x20,[sp,#0]
+	stp x21,x22,[sp,#16]
+	stp x23,x24,[sp,#32]
+	stp x25,x26,[sp,#48]
+	stp x27,x28,[sp,#64]
+	stp x29,x30,[sp,#80]
+	mov x2,sp
+	str x2,[x0]
+	ldr x2,[x1]
+	mov sp,x2
+	ldp x19,x20,[sp,#0]
+	ldp x21,x22,[sp,#16]
+	ldp x23,x24,[sp,#32]
+	ldp x25,x26,[sp,#48]
+	ldp x27,x28,[sp,#64]
+	ldp x29,x30,[sp,#80]
+	add sp,sp,#96
+	ret
+	.size asm_task_dispatch,.-asm_task_dispatch
+
+	.global arm64_kernel_task_entry
+arm64_kernel_task_entry:
+	/*
+	 * Every new context first releases the task its CPU switched away
+	 * from (arm64_task_finish_switch); x19 and x20 survive the call.
+	 */
+	bl arm64_task_finish_switch
+	/*
+	 * A new worker has no suspended scheduler call to restore IRQ
+	 * delivery.  It takes SErrors too, so that one a device access of
+	 * the worker raises is reported near the access.
+	 */
+	msr daifclr, #6
+	mov x0,x20
+	blr x19
+	bl arm64_task_returned
+	b .
+
+	.global arm64_user_task_entry
+arm64_user_task_entry:
+	bl arm64_task_finish_switch
+	/* No SError may overwrite ELR and SPSR before the eret. */
+	msr daifset, #4
+	msr sp_el0,x20
+	msr elr_el1,x19
+	msr spsr_el1,xzr
+	eret
+
+	.global arm64_user_frame_entry
+arm64_user_frame_entry:
+	/* The frame on the stack survives the call; every register is reloaded. */
+	bl arm64_task_finish_switch
+	/* No SError may overwrite ELR and SPSR before the eret. */
+	msr daifset, #4
+	ldp x0,x1,[sp,#248]
+	msr elr_el1,x0
+	msr spsr_el1,x1
+	ldr x2,[sp,#280]
+	msr sp_el0,x2
+	ldp x0,x1,[sp,#0]
+	ldp x2,x3,[sp,#16]
+	ldp x4,x5,[sp,#32]
+	ldp x6,x7,[sp,#48]
+	ldp x8,x9,[sp,#64]
+	ldp x10,x11,[sp,#80]
+	ldp x12,x13,[sp,#96]
+	ldp x14,x15,[sp,#112]
+	ldp x16,x17,[sp,#128]
+	ldp x18,x19,[sp,#144]
+	ldp x20,x21,[sp,#160]
+	ldp x22,x23,[sp,#176]
+	ldp x24,x25,[sp,#192]
+	ldp x26,x27,[sp,#208]
+	ldp x28,x29,[sp,#224]
+	ldr x30,[sp,#240]
+	add sp,sp,#288
+	eret
+
+	.global arm64_fp_save
+arm64_fp_save:
+	stp q0,q1,[x0,#0]
+	stp q2,q3,[x0,#32]
+	stp q4,q5,[x0,#64]
+	stp q6,q7,[x0,#96]
+	stp q8,q9,[x0,#128]
+	stp q10,q11,[x0,#160]
+	stp q12,q13,[x0,#192]
+	stp q14,q15,[x0,#224]
+	stp q16,q17,[x0,#256]
+	stp q18,q19,[x0,#288]
+	stp q20,q21,[x0,#320]
+	stp q22,q23,[x0,#352]
+	stp q24,q25,[x0,#384]
+	stp q26,q27,[x0,#416]
+	stp q28,q29,[x0,#448]
+	stp q30,q31,[x0,#480]
+	mrs x1,fpcr
+	mrs x2,fpsr
+	str x1,[x0,#512]
+	str x2,[x0,#520]
+	ret
+
+	.global arm64_fp_restore
+arm64_fp_restore:
+	ldp q0,q1,[x0,#0]
+	ldp q2,q3,[x0,#32]
+	ldp q4,q5,[x0,#64]
+	ldp q6,q7,[x0,#96]
+	ldp q8,q9,[x0,#128]
+	ldp q10,q11,[x0,#160]
+	ldp q12,q13,[x0,#192]
+	ldp q14,q15,[x0,#224]
+	ldp q16,q17,[x0,#256]
+	ldp q18,q19,[x0,#288]
+	ldp q20,q21,[x0,#320]
+	ldp q22,q23,[x0,#352]
+	ldp q24,q25,[x0,#384]
+	ldp q26,q27,[x0,#416]
+	ldp q28,q29,[x0,#448]
+	ldp q30,q31,[x0,#480]
+	ldr x1,[x0,#512]
+	ldr x2,[x0,#520]
+	msr fpcr,x1
+	msr fpsr,x2
+	ret

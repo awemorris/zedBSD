@@ -1,0 +1,32 @@
+Include <strings.h> where strcasecmp() and strncasecmp() are called.
+
+POSIX declares strcasecmp() and strncasecmp() in <strings.h>.  These two
+files include only <string.h>, which declares them as well on glibc and
+the BSDs but not in zedBSD's C library, so the calls were undeclared and
+the build stopped.  The include is guarded by the HAVE_STRINGS_H the
+configure step already defines.
+
+--- a/glib/glib-init.c
++++ b/glib/glib-init.c
+@@ -31,6 +31,9 @@
+ #include "gmem.h"       /* for g_mem_gc_friendly */
+ 
+ #include <string.h>
++#ifdef HAVE_STRINGS_H
++#include <strings.h>
++#endif
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <ctype.h>
+--- a/glib/gstrfuncs.c
++++ b/glib/gstrfuncs.c
+@@ -35,6 +35,9 @@
+ #include <stdlib.h>
+ #include <locale.h>
+ #include <string.h>
++#ifdef HAVE_STRINGS_H
++#include <strings.h>
++#endif
+ #include <locale.h>
+ #include <errno.h>
+ #include <garray.h>

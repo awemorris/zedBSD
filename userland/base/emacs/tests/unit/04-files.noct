@@ -1,0 +1,23 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    // Modified flag tracking.
+    print(Editor.bufferModifiedP());
+    Editor.insert("hello");
+    print(Editor.bufferModifiedP());
+    Editor.setBufferModifiedP(0);
+    print(Editor.bufferModifiedP());
+    Editor.deleteRegion(1, 2);
+    print(Editor.bufferModifiedP());
+
+    // Write and read back through the primitives.
+    var tmp = "/tmp/remacs-unit-files.txt";
+    Editor.writeRegion(Editor.pointMin(), Editor.pointMax(), tmp);
+    Editor.deleteRegion(Editor.pointMin(), Editor.pointMax());
+    print(Editor.bufferSize());
+    print(Editor.insertFileContents(tmp));
+    print(Editor.bufferString());
+
+    // File name bookkeeping.
+    print(Editor.bufferFileName() == "");
+}

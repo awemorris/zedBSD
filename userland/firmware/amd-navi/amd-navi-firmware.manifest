@@ -1,0 +1,56 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=amd-navi-firmware
+package-version=20260410
+consumer=amdrdna kernel driver (src/drivers/gpu/amdrdna, plan/ws039/design.md section 4.1)
+installed-directory=/lib/firmware/amdgpu
+installed-file=navi10_sos.bin
+installed-file=navi10_asd.bin
+installed-file=navi10_smc.bin
+installed-file=navi10_pfp.bin
+installed-file=navi10_me.bin
+installed-file=navi10_ce.bin
+installed-file=navi10_mec.bin
+installed-file=navi10_mec2.bin
+installed-file=navi10_rlc.bin
+installed-file=navi10_sdma.bin
+installed-file=navi10_sdma1.bin
+installed-file=navi10_vcn.bin
+not-installed=navi10_ta.bin (HDCP and DTM applications only)
+not-installed=navi10_gpu_info.bin (not read for Navi10)
+installed-license=/usr/share/licenses/amd-navi-firmware/LICENSE.amdgpu
+installed-whence=/usr/share/licenses/amd-navi-firmware/WHENCE
+
+acquisition-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-tag=20260410
+acquisition-tag-object=4585dd5a5f0cee08990d754701d8866d9e9266e6
+acquisition-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-base-url=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
+acquisition-url-suffix=?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-file=amdgpu/navi10_sos.bin size=184512 sha256=3112ea8519545ac89c1623e2e08e841a6a9bc31c2aab2f9b787979e51277e395
+acquisition-file=amdgpu/navi10_asd.bin size=205312 sha256=2d084493e763e60cd90ac25b054f73e4857a24864334cd3c5b092f3273cd12de
+acquisition-file=amdgpu/navi10_smc.bin size=267970 sha256=49ed339d0ff71fe64347380ee12b00c3c69a546f454bcd4323c411c72fe6fb2e
+acquisition-file=amdgpu/navi10_pfp.bin size=263424 sha256=310032fe0698871b80be6eb5877ae7ed3395cb712629698c5c631e0af7c4e04a
+acquisition-file=amdgpu/navi10_me.bin size=263424 sha256=faf2f9ff33580b53f7b90f410447efa1d2b21366f344ff5a383d074bf1ea8c35
+acquisition-file=amdgpu/navi10_ce.bin size=263296 sha256=074ec5270eb7cad73906a1a591c274a40895b170091bc8068180a4c4d7771165
+acquisition-file=amdgpu/navi10_mec.bin size=268160 sha256=936de4938bcfd5e1691b1e544247000f7b4b7430eef317e28f8560bb9e88e758
+acquisition-file=amdgpu/navi10_mec2.bin size=268160 sha256=936de4938bcfd5e1691b1e544247000f7b4b7430eef317e28f8560bb9e88e758
+acquisition-file=amdgpu/navi10_rlc.bin size=43952 sha256=1f52478fb78dee904361b93ad67955fcff151bb7a7772bbfbd2c448c814be1f5
+acquisition-file=amdgpu/navi10_sdma.bin size=33792 sha256=3fc635b9a17819eaf13913882676f0cd07a6c1a31c87b3ef0dcedebf594c8dd0
+acquisition-file=amdgpu/navi10_sdma1.bin size=33792 sha256=317b398d0563c8c89b10c31712296843143385f5a1ddcee2031536fe67576c3b
+acquisition-file=amdgpu/navi10_vcn.bin size=404544 sha256=ac5f2182b0ddee7a2886bf1239a47b4027becd0c37a1b0b6cac1f335393302c9
+acquisition-license-path=LICENSE.amdgpu
+acquisition-license-size=2938
+acquisition-license-sha256=572872598565dc3513470de971a32bf9db301f47afeef3636345eadae33b2eee
+acquisition-whence-path=WHENCE
+acquisition-whence-size=425450
+acquisition-whence-sha256=c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
+whence-origin=WHENCE section "Driver: amdgpu - AMD Radeon" lists amdgpu/navi10_*.bin with "Licence: Redistributable. See LICENSE.amdgpu for details."
+
+redistribution=binary form only, unmodified, reproducing the copyright notice, the conditions and the disclaimer of LICENSE.amdgpu
+reverse-engineering=forbidden by the licence; amdrdna reads only the container headers (sizes and offsets of the pieces it hands to the security processor) and never disassembles the programs
+export=subject to United States export laws and regulations (the notice in LICENSE.amdgpu)
+license=AMD microcode license in the installed LICENSE.amdgpu file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

@@ -1,0 +1,654 @@
+--- a/clang/lib/Basic/Targets/OSTargets.h
++++ b/clang/lib/Basic/Targets/OSTargets.h
+@@ -531,6 +531,31 @@
+   }
+ };
+ 
++// zedBSD Target
++template <typename Target>
++class LLVM_LIBRARY_VISIBILITY ZedBSDTargetInfo : public OSTargetInfo<Target> {
++protected:
++  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
++                    MacroBuilder &Builder) const override {
++    Builder.defineMacro("__ZEDBSD__", "1");
++    DefineStd(Builder, "unix", Opts);
++  }
++
++public:
++  ZedBSDTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
++      : OSTargetInfo<Target>(Triple, Opts) {
++    // zedBSD's i386 soft-float ABI follows GCC -mlong-double-64: long double
++    // is IEEE binary64 and is returned through the ordinary soft-float
++    // integer-register path when x87 is disabled.
++    if (Triple.getArch() == llvm::Triple::x86) {
++      this->LongDoubleWidth = 64;
++      this->LongDoubleAlign = this->DoubleAlign;
++      this->LongDoubleFormat = &llvm::APFloat::IEEEdouble();
++      this->resetDataLayout();
++    }
++  }
++};
++
+ // PS3 PPU Target
+ template <typename Target>
+ class LLVM_LIBRARY_VISIBILITY PS3PPUTargetInfo : public OSTargetInfo<Target> {
+--- a/clang/lib/Basic/Targets.cpp
++++ b/clang/lib/Basic/Targets.cpp
+@@ -176,6 +176,9 @@
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDTargetInfo<AArch64leTargetInfo>>(Triple,
+                                                                       Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<AArch64leTargetInfo>>(Triple,
++                                                                     Opts);
+     case llvm::Triple::Hurd:
+       return std::make_unique<HurdTargetInfo<AArch64leTargetInfo>>(Triple,
+                                                                    Opts);
+@@ -235,6 +238,8 @@
+       return std::make_unique<NetBSDTargetInfo<ARMleTargetInfo>>(Triple, Opts);
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDTargetInfo<ARMleTargetInfo>>(Triple, Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<ARMleTargetInfo>>(Triple, Opts);
+     case llvm::Triple::RTEMS:
+       return std::make_unique<RTEMSTargetInfo<ARMleTargetInfo>>(Triple, Opts);
+     case llvm::Triple::Haiku:
+@@ -377,6 +382,8 @@
+       return std::make_unique<NetBSDTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDTargetInfo<PPC32TargetInfo>>(Triple, Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::RTEMS:
+       return std::make_unique<RTEMSTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::AIX:
+@@ -407,6 +414,8 @@
+       return std::make_unique<NetBSDTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDTargetInfo<PPC64TargetInfo>>(Triple, Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::AIX:
+       return std::make_unique<AIXPPC64TargetInfo>(Triple, Opts);
+     default:
+@@ -468,6 +477,9 @@
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDTargetInfo<RISCV64TargetInfo>>(Triple,
+                                                                     Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<RISCV64TargetInfo>>(Triple,
++                                                                   Opts);
+     case llvm::Triple::Fuchsia:
+       return std::make_unique<FuchsiaTargetInfo<RISCV64TargetInfo>>(Triple,
+                                                                     Opts);
+@@ -594,6 +606,8 @@
+       return std::make_unique<NetBSDI386TargetInfo>(Triple, Opts);
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDI386TargetInfo>(Triple, Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<X86_32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<X86_32TargetInfo>>(Triple,
+                                                                    Opts);
+@@ -653,6 +667,8 @@
+       return std::make_unique<NetBSDTargetInfo<X86_64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::OpenBSD:
+       return std::make_unique<OpenBSDX86_64TargetInfo>(Triple, Opts);
++    case llvm::Triple::ZedBSD:
++      return std::make_unique<ZedBSDTargetInfo<X86_64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<X86_64TargetInfo>>(Triple,
+                                                                    Opts);
+--- a/clang/lib/Driver/CMakeLists.txt
++++ b/clang/lib/Driver/CMakeLists.txt
+@@ -99,6 +99,7 @@
+   ToolChains/PPCFreeBSD.cpp
+   ToolChains/InterfaceStubs.cpp
+   ToolChains/ZOS.cpp
++  ToolChains/ZedBSD.cpp
+   Types.cpp
+   XRayArgs.cpp
+ 
+--- a/clang/lib/Driver/Driver.cpp
++++ b/clang/lib/Driver/Driver.cpp
+@@ -53,6 +53,7 @@
+ #include "ToolChains/WebAssembly.h"
+ #include "ToolChains/XCore.h"
+ #include "ToolChains/ZOS.h"
++#include "ToolChains/ZedBSD.h"
+ #include "clang/Basic/DiagnosticDriver.h"
+ #include "clang/Basic/TargetID.h"
+ #include "clang/Basic/Version.h"
+@@ -7135,6 +7136,9 @@
+       else
+         TC = std::make_unique<toolchains::FreeBSD>(*this, Target, Args);
+       break;
++    case llvm::Triple::ZedBSD:
++      TC = std::make_unique<toolchains::ZedBSD>(*this, Target, Args);
++      break;
+     case llvm::Triple::Linux:
+     case llvm::Triple::ELFIAMCU:
+       if (Target.getArch() == llvm::Triple::hexagon)
+--- a/llvm/include/llvm/TargetParser/Triple.h
++++ b/llvm/include/llvm/TargetParser/Triple.h
+@@ -310,6 +310,7 @@
+     Managarm,
+     NetBSD,
+     OpenBSD,
++    ZedBSD,
+     Solaris,
+     UEFI,
+     Win32,
+@@ -742,6 +743,8 @@
+ 
+   bool isOSOpenBSD() const { return getOS() == Triple::OpenBSD; }
+ 
++  bool isOSZedBSD() const { return getOS() == Triple::ZedBSD; }
++
+   bool isOSFreeBSD() const { return getOS() == Triple::FreeBSD; }
+ 
+   bool isOSFuchsia() const { return getOS() == Triple::Fuchsia; }
+@@ -1151,7 +1154,8 @@
+     return (getArch() == Triple::ppc64 &&
+             ((getOS() == Triple::FreeBSD &&
+               (getOSMajorVersion() >= 13 || getOSVersion().empty())) ||
+-             getOS() == Triple::OpenBSD || isMusl()));
++             getOS() == Triple::OpenBSD || getOS() == Triple::ZedBSD ||
++             isMusl()));
+   }
+ 
+   /// Tests whether the target 32-bit PowerPC uses Secure PLT.
+@@ -1160,7 +1164,7 @@
+             ((getOS() == Triple::FreeBSD &&
+               (getOSMajorVersion() >= 13 || getOSVersion().empty())) ||
+              getOS() == Triple::NetBSD || getOS() == Triple::OpenBSD ||
+-             isMusl()));
++             getOS() == Triple::ZedBSD || isMusl()));
+   }
+ 
+   /// Tests whether the target is 32-bit RISC-V.
+--- a/llvm/include/llvm/TargetParser/TripleName.def
++++ b/llvm/include/llvm/TargetParser/TripleName.def
+@@ -42,6 +42,7 @@
+ TRIPLE_OS(Managarm, "managarm")
+ TRIPLE_OS(NetBSD, "netbsd")
+ TRIPLE_OS(OpenBSD, "openbsd")
++TRIPLE_OS(ZedBSD, "zedbsd")
+ TRIPLE_OS(Solaris, "solaris")
+ TRIPLE_OS(UEFI, "uefi")
+ TRIPLE_OS(Win32, "windows")
+--- a/llvm/unittests/TargetParser/TripleTest.cpp
++++ b/llvm/unittests/TargetParser/TripleTest.cpp
+@@ -15,6 +15,68 @@
+ 
+ using namespace llvm;
+ 
++TEST(TripleTest, ZedBSD) {
++  Triple X86_64("x86_64-unknown-zedbsd");
++  EXPECT_EQ(Triple::x86_64, X86_64.getArch());
++  EXPECT_EQ(Triple::UnknownVendor, X86_64.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, X86_64.getOS());
++  EXPECT_EQ(Triple::UnknownEnvironment, X86_64.getEnvironment());
++  EXPECT_EQ(Triple::ELF, X86_64.getObjectFormat());
++  EXPECT_TRUE(X86_64.isOSZedBSD());
++
++  Triple I386("i386-unknown-zedbsd");
++  EXPECT_EQ(Triple::x86, I386.getArch());
++  EXPECT_EQ(Triple::UnknownVendor, I386.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, I386.getOS());
++  EXPECT_EQ(Triple::UnknownEnvironment, I386.getEnvironment());
++  EXPECT_EQ(Triple::ELF, I386.getObjectFormat());
++
++  Triple AArch64("aarch64-unknown-zedbsd");
++  EXPECT_EQ(Triple::aarch64, AArch64.getArch());
++  EXPECT_EQ(Triple::UnknownVendor, AArch64.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, AArch64.getOS());
++  EXPECT_EQ(Triple::UnknownEnvironment, AArch64.getEnvironment());
++  EXPECT_EQ(Triple::ELF, AArch64.getObjectFormat());
++  EXPECT_TRUE(AArch64.isOSZedBSD());
++
++  Triple ARMv7("armv7-unknown-zedbsd-eabihf");
++  EXPECT_EQ(Triple::arm, ARMv7.getArch());
++  EXPECT_EQ(Triple::ARMSubArch_v7, ARMv7.getSubArch());
++  EXPECT_EQ(Triple::UnknownVendor, ARMv7.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, ARMv7.getOS());
++  EXPECT_EQ(Triple::EABIHF, ARMv7.getEnvironment());
++  EXPECT_EQ(Triple::ELF, ARMv7.getObjectFormat());
++  EXPECT_TRUE(ARMv7.isOSZedBSD());
++
++  Triple PPC("powerpc-unknown-zedbsd");
++  EXPECT_EQ(Triple::ppc, PPC.getArch());
++  EXPECT_EQ(Triple::UnknownVendor, PPC.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, PPC.getOS());
++  EXPECT_EQ(Triple::UnknownEnvironment, PPC.getEnvironment());
++  EXPECT_EQ(Triple::ELF, PPC.getObjectFormat());
++  EXPECT_TRUE(PPC.isOSZedBSD());
++  EXPECT_TRUE(PPC.isPPC32SecurePlt());
++
++  Triple PPC64("powerpc64-unknown-zedbsd");
++  EXPECT_EQ(Triple::ppc64, PPC64.getArch());
++  EXPECT_EQ(Triple::UnknownVendor, PPC64.getVendor());
++  EXPECT_EQ(Triple::ZedBSD, PPC64.getOS());
++  EXPECT_EQ(Triple::UnknownEnvironment, PPC64.getEnvironment());
++  EXPECT_EQ(Triple::ELF, PPC64.getObjectFormat());
++  EXPECT_TRUE(PPC64.isOSZedBSD());
++  EXPECT_TRUE(PPC64.isPPC64ELFv2ABI());
++
++  EXPECT_EQ("x86_64-unknown-zedbsd",
++            Triple::normalize("x86_64-zedbsd"));
++  EXPECT_EQ("i386-unknown-zedbsd", Triple::normalize("i386-zedbsd"));
++  EXPECT_EQ("aarch64-unknown-zedbsd", Triple::normalize("aarch64-zedbsd"));
++  EXPECT_EQ("armv7-unknown-zedbsd-eabihf",
++            Triple::normalize("armv7-zedbsd-eabihf"));
++  EXPECT_EQ("powerpc-unknown-zedbsd", Triple::normalize("powerpc-zedbsd"));
++  EXPECT_EQ("powerpc64-unknown-zedbsd",
++            Triple::normalize("powerpc64-zedbsd"));
++}
++
+ namespace {
+ 
+ TEST(TripleTest, BasicParsing) {
+--- /dev/null
++++ b/clang/lib/Driver/ToolChains/ZedBSD.h
+@@ -0,0 +1,64 @@
++//===---- ZedBSD.h - zedBSD ToolChain Implementation -----------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_ZEDBSD_H
++#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_ZEDBSD_H
++
++#include "Gnu.h"
++#include "clang/Driver/Tool.h"
++
++namespace clang::driver::tools::zedbsd {
++
++/// Links with ld.lld using zedBSD's own start file, loader and link options.
++class LLVM_LIBRARY_VISIBILITY Linker final : public Tool {
++public:
++  Linker(const ToolChain &TC) : Tool("zedbsd::Linker", "ld.lld", TC) {}
++
++  bool hasIntegratedCPP() const override { return false; }
++  bool isLinkJob() const override { return true; }
++
++  void ConstructJob(Compilation &C, const JobAction &JA,
++                    const InputInfo &Output, const InputInfoList &Inputs,
++                    const llvm::opt::ArgList &TCArgs,
++                    const char *LinkingOutput) const override;
++};
++
++} // namespace clang::driver::tools::zedbsd
++
++namespace clang::driver::toolchains {
++
++class LLVM_LIBRARY_VISIBILITY ZedBSD final : public Generic_ELF {
++public:
++  ZedBSD(const Driver &D, const llvm::Triple &Triple,
++         const llvm::opt::ArgList &Args);
++
++  void AddClangSystemIncludeArgs(
++      const llvm::opt::ArgList &DriverArgs,
++      llvm::opt::ArgStringList &CC1Args) const override;
++
++  RuntimeLibType GetDefaultRuntimeLibType() const override {
++    return ToolChain::RLT_CompilerRT;
++  }
++
++  const char *getDefaultLinker() const override { return "ld.lld"; }
++  bool HasNativeLLVMSupport() const override { return true; }
++  bool isPICDefault() const override { return false; }
++
++  // zedBSD's runtime loader does not implement copy relocations, so an
++  // executable that refers to data in a shared library has to be position
++  // independent.
++  bool isPIEDefault(const llvm::opt::ArgList &) const override { return true; }
++  bool isPICDefaultForced() const override { return false; }
++
++protected:
++  Tool *buildLinker() const override;
++};
++
++} // namespace clang::driver::toolchains
++
++#endif // LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_ZEDBSD_H
+--- /dev/null
++++ b/clang/lib/Driver/ToolChains/ZedBSD.cpp
+@@ -0,0 +1,163 @@
++//===---- ZedBSD.cpp - zedBSD ToolChain Implementation -------------------===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#include "ZedBSD.h"
++#include "clang/Driver/CommonArgs.h"
++#include "clang/Driver/Compilation.h"
++#include "clang/Driver/Driver.h"
++#include "clang/Options/Options.h"
++#include "llvm/Option/ArgList.h"
++#include "llvm/Support/Path.h"
++
++using namespace clang::driver;
++using namespace clang::driver::toolchains;
++using namespace llvm::opt;
++
++ZedBSD::ZedBSD(const Driver &D, const llvm::Triple &Triple,
++               const ArgList &Args)
++    : Generic_ELF(D, Triple, Args) {
++  getFilePaths().push_back(concat(getDriver().SysRoot, "/usr/lib"));
++}
++
++void ZedBSD::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
++                                       ArgStringList &CC1Args) const {
++  const Driver &D = getDriver();
++
++  if (DriverArgs.hasArg(options::OPT_nostdinc))
++    return;
++  if (!DriverArgs.hasArg(options::OPT_nobuiltininc))
++    addSystemInclude(DriverArgs, CC1Args, concat(D.ResourceDir, "/include"));
++  if (!DriverArgs.hasArg(options::OPT_nostdlibinc))
++    addSystemInclude(DriverArgs, CC1Args, concat(D.SysRoot, "/usr/include"));
++}
++
++Tool *ZedBSD::buildLinker() const {
++  return new tools::zedbsd::Linker(*this);
++}
++
++/*
++ * zedBSD's link line is not the usual ELF one: the loader is /lib/ld.so, its
++ * symbol lookup is by SysV hash, it binds everything at load time, and it has
++ * no copy relocations, so executables are position independent.  The shared
++ * C library also leaves the loader's own entry points undefined, which the
++ * link has to permit.  Describing all of that here is what lets an ordinary
++ * `clang foo.c -o foo` produce a program this system can run.
++ */
++void tools::zedbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
++                                         const InputInfo &Output,
++                                         const InputInfoList &Inputs,
++                                         const ArgList &Args,
++                                         const char *LinkingOutput) const {
++  const ToolChain &TC = getToolChain();
++  const Driver &D = TC.getDriver();
++  ArgStringList CmdArgs;
++
++  const bool IsShared = Args.hasArg(options::OPT_shared);
++  const bool IsStatic = Args.hasArg(options::OPT_static);
++  const bool NoStdLib = Args.hasArg(options::OPT_nostdlib);
++  const bool IsPIE = !IsShared && !IsStatic &&
++                     Args.hasFlag(options::OPT_pie, options::OPT_no_pie, true);
++
++  if (!D.SysRoot.empty())
++    CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
++
++  // The emulation is named rather than inferred, so a link whose first input
++  // is an archive or a script still resolves to the configured target.
++  const llvm::Triple::ArchType Arch = TC.getTriple().getArch();
++  CmdArgs.push_back("-m");
++  if (Arch == llvm::Triple::x86_64)
++    CmdArgs.push_back("elf_x86_64");
++  else if (Arch == llvm::Triple::aarch64)
++    CmdArgs.push_back("aarch64elf");
++  else if (Arch == llvm::Triple::riscv64)
++    CmdArgs.push_back("elf64lriscv");
++  else if (Arch == llvm::Triple::arm || Arch == llvm::Triple::thumb)
++    CmdArgs.push_back("armelf_linux_eabi");
++  else if (Arch == llvm::Triple::ppc)
++    CmdArgs.push_back("elf32ppc");
++  else if (Arch == llvm::Triple::ppc64)
++    CmdArgs.push_back("elf64ppc");
++  else
++    CmdArgs.push_back("elf_i386");
++
++  if (IsShared)
++    CmdArgs.push_back("-shared");
++  if (IsStatic)
++    CmdArgs.push_back("-static");
++  if (IsPIE)
++    CmdArgs.push_back("-pie");
++
++  // A shared object is also looked up by name from an executable built
++  // elsewhere, so it carries both hash tables; the loader reads the SysV one.
++  CmdArgs.push_back(IsShared ? "--hash-style=both" : "--hash-style=sysv");
++  CmdArgs.push_back("-z");
++  CmdArgs.push_back("now");
++  CmdArgs.push_back("-z");
++  CmdArgs.push_back("relro");
++  CmdArgs.push_back("-z");
++  CmdArgs.push_back("separate-code");
++  CmdArgs.push_back("-z");
++  CmdArgs.push_back("stack-size=0x100000");
++  // zedBSD maps 4 KiB pages on AArch64, ARM and PowerPC too, and lays its
++  // programs out on that boundary rather than on the 64 KiB one ld.lld
++  // assumes there.
++  if (Arch == llvm::Triple::aarch64 || Arch == llvm::Triple::arm ||
++      Arch == llvm::Triple::thumb || Arch == llvm::Triple::ppc ||
++      Arch == llvm::Triple::ppc64) {
++    CmdArgs.push_back("-z");
++    CmdArgs.push_back("max-page-size=4096");
++  }
++  CmdArgs.push_back("--no-relax");
++
++  // An unwinder reaches a frame's tables through PT_GNU_EH_FRAME, so the
++  // index it searches has to be built: without it a throw finds no handler
++  // and terminates.
++  CmdArgs.push_back("--eh-frame-hdr");
++
++  // The shared C library takes __rtld_exports from the loader, which is not
++  // one of the link's inputs.
++  CmdArgs.push_back("--allow-shlib-undefined");
++
++  // A version script may name a symbol the link does not define, as GNU ld
++  // allows; ld.lld refuses that by default since LLVM 16, which makes a
++  // configure script (zlib's) decide that shared libraries cannot be built.
++  // -Wl,--no-undefined-version, which comes after this, turns it back on.
++  CmdArgs.push_back("--undefined-version");
++
++  if (!IsShared && !IsStatic) {
++    CmdArgs.push_back("-dynamic-linker");
++    CmdArgs.push_back("/lib/ld.so");
++  }
++
++  CmdArgs.push_back("-o");
++  CmdArgs.push_back(Output.getFilename());
++
++  if (!NoStdLib && !Args.hasArg(options::OPT_nostartfiles) && !IsShared)
++    CmdArgs.push_back(Args.MakeArgString(TC.GetFilePath("crt1.o")));
++
++  Args.AddAllArgs(CmdArgs, options::OPT_L);
++  Args.AddAllArgs(CmdArgs, options::OPT_u);
++  TC.AddFilePathLibArgs(Args, CmdArgs);
++  Args.addAllArgs(CmdArgs, {options::OPT_T_Group, options::OPT_s,
++                            options::OPT_t, options::OPT_r});
++
++  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
++
++  // The C library comes last so that it answers the inputs' references, and
++  // the compiler runtime after it for the helpers the code generator emits.
++  if (!NoStdLib && !Args.hasArg(options::OPT_nodefaultlibs)) {
++    CmdArgs.push_back("-lc");
++    CmdArgs.push_back(
++        Args.MakeArgString(TC.GetFilePath("libclang_rt.builtins.a")));
++  }
++
++  const char *Exec = Args.MakeArgString(TC.GetLinkerPath());
++  C.addCommand(std::make_unique<Command>(JA, *this,
++                                         ResponseFileSupport::AtFileCurCP(),
++                                         Exec, CmdArgs, Inputs, Output));
++}
+--- /dev/null
++++ b/clang/test/Preprocessor/zedbsd.c
+@@ -0,0 +1,44 @@
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple x86_64-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=X64
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple i386-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=X86
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple aarch64-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=A64
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple riscv64-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=RV64
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple armv7-unknown-zedbsd-eabihf < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=ARMV7
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple powerpc-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=PPC
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple powerpc64-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=COMMON --check-prefix=PPC64
++// RUN: %clang_cc1 -E -dM -ffreestanding -triple powerpc64-unknown-zedbsd < /dev/null | FileCheck %s --check-prefix=PPC64-LD
++
++// COMMON-DAG: #define __ELF__ 1
++// COMMON-DAG: #define __ZEDBSD__ 1
++// COMMON-DAG: #define __unix 1
++// COMMON-DAG: #define __unix__ 1
++// X64-DAG: #define __x86_64__ 1
++// X64-DAG: #define __SIZEOF_LONG_DOUBLE__ 16
++// X86-DAG: #define __i386__ 1
++// X86-DAG: #define __SIZEOF_LONG_DOUBLE__ 8
++// A64-DAG: #define __aarch64__ 1
++// A64-DAG: #define __SIZEOF_LONG_DOUBLE__ 16
++// RV64-DAG: #define __riscv 1
++// RV64-DAG: #define __SIZEOF_LONG_DOUBLE__ 16
++// ARMV7-DAG: #define __arm__ 1
++// ARMV7-DAG: #define __ARM_ARCH 7
++// ARMV7-DAG: #define __ARM_EABI__ 1
++// ARMV7-DAG: #define __ARM_PCS_VFP 1
++// ARMV7-DAG: #define __SIZEOF_LONG_DOUBLE__ 8
++// PPC-DAG: #define __powerpc__ 1
++// PPC-DAG: #define __PPC__ 1
++// PPC-DAG: #define _BIG_ENDIAN 1
++// PPC-DAG: #define __BIG_ENDIAN__ 1
++// PPC-DAG: #define __SIZEOF_LONG_DOUBLE__ 8
++// PPC-DAG: #define __SIZE_TYPE__ unsigned int
++// PPC64-DAG: #define __powerpc64__ 1
++// PPC64-DAG: #define __PPC64__ 1
++// PPC64-DAG: #define _BIG_ENDIAN 1
++// PPC64-DAG: #define __BIG_ENDIAN__ 1
++// PPC64-DAG: #define _CALL_ELF 2
++// PPC64-DAG: #define __LP64__ 1
++// PPC64-DAG: #define __SIZEOF_LONG_DOUBLE__ 8
++// PPC64-DAG: #define __SIZE_TYPE__ long unsigned int
++// COMMON-NOT: __FreeBSD__
++// COMMON-NOT: __NetBSD__
++// COMMON-NOT: __linux__
++// PPC64-LD-NOT: __LONG_DOUBLE_128__
+--- a/clang/lib/Driver/ToolChains/Clang.cpp
++++ b/clang/lib/Driver/ToolChains/Clang.cpp
+@@ -2202,6 +2202,15 @@
+   if (NoImplicitFloat)
+     CmdArgs.push_back("-no-implicit-float");
+ 
++  // zedBSD defines a complete i386 software-float ABI.  Other X86 targets
++  // historically interpret -msoft-float as merely prohibiting implicit FP
++  // instructions, but zedBSD also needs the backend use-soft-float attribute
++  // so arithmetic is lowered to runtime calls and FP values use GPRs.
++  if (getToolChain().getTriple().isOSZedBSD() &&
++      Args.hasFlag(options::OPT_msoft_float, options::OPT_mno_soft_float,
++                   false))
++    CmdArgs.push_back("-msoft-float");
++
+   if (Arg *A = Args.getLastArg(options::OPT_masm_EQ)) {
+     StringRef Value = A->getValue();
+     if (Value == "intel" || Value == "att") {
+--- a/llvm/lib/Target/X86/X86CallingConv.td
++++ b/llvm/lib/Target/X86/X86CallingConv.td
+@@ -298,9 +298,9 @@
+   // conv.
+   CCIfInReg<CCIfSubtarget<"hasSSE2()",
+     CCIfType<[f32, f64], CCAssignToReg<[XMM0,XMM1,XMM2]>>>>,
+-  CCIfSubtarget<"hasX87()",
++  CCIfSubtarget<"useX87CallingConv()",
+     CCIfType<[f32, f64], CCAssignToReg<[FP0, FP1]>>>,
+-  CCIfNotSubtarget<"hasX87()",
++  CCIfSubtarget<"useSoftFloatCallingConv()",
+     CCIfType<[f32], CCAssignToReg<[EAX, EDX, ECX]>>>,
+   CCIfType<[f16], CCAssignToReg<[XMM0,XMM1,XMM2]>>,
+   CCDelegateTo<RetCC_X86Common>
+--- a/llvm/lib/Target/X86/X86ISelLoweringCall.cpp
++++ b/llvm/lib/Target/X86/X86ISelLoweringCall.cpp
+@@ -120,9 +120,10 @@
+       return MVT::v8f16;
+   }
+ 
+-  // We will use more GPRs for f64 and f80 on 32 bits when x87 is disabled.
++  // We will use more GPRs for f64 and f80 on 32 bits when x87 is disabled or
++  // the software-float ABI is selected.
+   if ((VT == MVT::f64 || VT == MVT::f80) && !Subtarget.is64Bit() &&
+-      !Subtarget.hasX87())
++      (Subtarget.useSoftFloat() || !Subtarget.hasX87()))
+     return MVT::i32;
+ 
+   if (isTypeLegal(MVT::f16)) {
+@@ -157,8 +158,9 @@
+   }
+ 
+   // We have to split f64 to 2 registers and f80 to 3 registers on 32 bits if
+-  // x87 is disabled.
+-  if (!Subtarget.is64Bit() && !Subtarget.hasX87()) {
++  // x87 is disabled or the software-float ABI is selected.
++  if (!Subtarget.is64Bit() &&
++      (Subtarget.useSoftFloat() || !Subtarget.hasX87())) {
+     if (VT == MVT::f64)
+       return 2;
+     if (VT == MVT::f80)
+--- a/llvm/lib/Target/X86/X86Subtarget.h
++++ b/llvm/lib/Target/X86/X86Subtarget.h
+@@ -381,6 +381,11 @@
+     }
+   }
+ 
++  bool useX87CallingConv() const { return hasX87() && !useSoftFloat(); }
++  bool useSoftFloatCallingConv() const {
++    return !hasX87() || useSoftFloat();
++  }
++
+   /// Classify a global variable reference for the current subtarget according
+   /// to how we should reference it in a non-pcrel context.
+   unsigned char classifyLocalReference(const GlobalValue *GV) const;
+--- a/clang/lib/Basic/Targets/PPC.h
++++ b/clang/lib/Basic/Targets/PPC.h
+@@ -401,6 +401,7 @@
+     case llvm::Triple::Linux:
+     case llvm::Triple::FreeBSD:
+     case llvm::Triple::NetBSD:
++    case llvm::Triple::ZedBSD:
+       SizeType = UnsignedInt;
+       PtrDiffType = SignedInt;
+       IntPtrType = SignedInt;
+@@ -418,7 +419,7 @@
+     }
+ 
+     if (Triple.isOSFreeBSD() || Triple.isOSNetBSD() || Triple.isOSOpenBSD() ||
+-        Triple.isMusl()) {
++        Triple.isOSZedBSD() || Triple.isMusl()) {
+       LongDoubleWidth = LongDoubleAlign = 64;
+       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+     }
+@@ -459,7 +460,8 @@
+       ABI = "elfv1";
+     }
+ 
+-    if (Triple.isOSFreeBSD() || Triple.isOSOpenBSD() || Triple.isMusl()) {
++    if (Triple.isOSFreeBSD() || Triple.isOSOpenBSD() ||
++        Triple.isOSZedBSD() || Triple.isMusl()) {
+       LongDoubleWidth = LongDoubleAlign = 64;
+       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+     }
+--- /dev/null
++++ b/clang/test/Driver/zedbsd-ppc64.c
+@@ -0,0 +1,7 @@
++// RUN: %clang --target=powerpc64-unknown-zedbsd -### %s 2>&1 | FileCheck %s
++
++// CHECK: "-cc1" "-triple" "powerpc64-unknown-zedbsd"
++// CHECK-SAME: "-target-abi" "elfv2"
++// CHECK: "{{[^"]*}}ld.lld{{(\.exe)?}}" "-m" "elf64ppc"
++// CHECK-SAME: "-z" "max-page-size=4096"
++// CHECK-SAME: "-dynamic-linker" "/lib/ld.so"
+--- /dev/null
++++ b/llvm/test/CodeGen/PowerPC/zedbsd-elfv2-abi.ll
+@@ -0,0 +1,9 @@
++; RUN: llc -mtriple=powerpc64-unknown-zedbsd -filetype=obj < %s | \
++; RUN:   llvm-readobj -h - | FileCheck %s
++
++; zedBSD's 64-bit big-endian PowerPC uses the ELFv2 ABI by default.
++; CHECK: Flags [ (0x2)
++
++define void @f() {
++  ret void
++}

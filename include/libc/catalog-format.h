@@ -1,0 +1,49 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * XXX:
+ *  - Describe what this is for.
+ *  - If it is not used, just remove.
+ */
+
+#ifndef LIBC_KERN_CATALOG_FORMAT_H
+#define LIBC_KERN_CATALOG_FORMAT_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+
+#define KERN_CATALOG_MAGIC "ZMCAT01\0"
+#define KERN_CATALOG_MAGIC_SIZE 8U
+#define KERN_CATALOG_VERSION 1U
+#define KERN_CATALOG_HEADER_SIZE 28U
+#define KERN_CATALOG_ENTRY_SIZE 16U
+
+static inline uint32_t
+kern_catalog_get32(const unsigned char *bytes)
+{
+	return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 |
+	       (uint32_t)bytes[2] << 8 | (uint32_t)bytes[3];
+}
+
+static inline void
+kern_catalog_put32(unsigned char *bytes, uint32_t value)
+{
+	bytes[0] = (unsigned char)(value >> 24);
+	bytes[1] = (unsigned char)(value >> 16);
+	bytes[2] = (unsigned char)(value >> 8);
+	bytes[3] = (unsigned char)value;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

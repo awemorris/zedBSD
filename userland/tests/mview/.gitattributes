@@ -1,0 +1,3 @@
+# Texture and SPIR-V files are binary data, not text.
+*.pam binary
+*.spv binary

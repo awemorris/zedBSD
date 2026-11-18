@@ -1,0 +1,73 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_SIGNAL_H
+#define LIBC_SIGNAL_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <features.h>
+#include <uapi/signal.h>
+#include <sys/types.h>
+#include <time.h>
+
+#define SIG_ERR ((sighandler_t) - 1)
+#define SIG_HOLD ((sighandler_t)2)
+#define SIG2STR_MAX 32
+
+typedef void (*sighandler_t)(int);
+typedef int sig_atomic_t;
+typedef void (*siginfo_handler_t)(int, siginfo_t *, void *);
+typedef struct {
+	void *ss_sp;
+	size_t ss_size;
+	int ss_flags;
+} stack_t;
+
+int sig2str(int signal_number, char *name);
+int str2sig(const char *__restrict name, int *__restrict signal_number);
+int sigaction(int, const struct sigaction *, struct sigaction *);
+int sigprocmask(int, const sigset_t *, sigset_t *);
+int sigpending(sigset_t *);
+int sigsuspend(const sigset_t *);
+int kill(pid_t, int);
+sighandler_t signal(int, sighandler_t);
+int sigemptyset(sigset_t *);
+int sigfillset(sigset_t *);
+int sigaddset(sigset_t *, int);
+int sigdelset(sigset_t *, int);
+int sigismember(const sigset_t *, int);
+int sigaltstack(const stack_t *, stack_t *);
+int sigtimedwait(const sigset_t *, siginfo_t *, const struct timespec *);
+int sigwaitinfo(const sigset_t *, siginfo_t *);
+int sigwait(const sigset_t *, int *);
+int sigqueue(pid_t, int, const union sigval);
+int raise(int);
+void psignal(int, const char *);
+void psiginfo(const siginfo_t *, const char *);
+void abort(void) __attribute__((__noreturn__));
+int killpg(pid_t, int);
+/* Signals to and the signal mask of a thread, which POSIX declares here as well as in <pthread.h>. */
+int pthread_kill(pthread_t, int);
+int pthread_sigmask(int, const sigset_t *, sigset_t *);
+
+#if __KERN_LEGACY_VISIBLE
+int sighold(int);
+int sigignore(int);
+int siginterrupt(int, int);
+int sigpause(int);
+int sigrelse(int);
+sighandler_t sigset(int, sighandler_t);
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

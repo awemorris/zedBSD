@@ -1,0 +1,18 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+# zedBSD's independent Wayland client library (userland/desktop/libwayland).
+# The version is the upstream client ABI it follows.
+# The headers are in the sysroot's usr/include, so there are no Cflags.
+
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: Wayland Client
+Description: zedBSD Wayland client library
+Version: 1.23.1
+Libs: -L${libdir} -lwayland-client
+Cflags:

@@ -1,0 +1,165 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The display 9 registers, fields, DPCD addresses and EDID sizes the
+ * Gen9 host tests and their model of the hardware (gen9-fake-hw.c) name.
+ * The production code uses the xd code's own (intel/display-regs-xd9.h);
+ * these are the tests' independent copy, so a test checks the code
+ * against numbers it does not share with it.
+ *
+ * Values referenced: Intel Kaby Lake PRM Volume 2c, Command Reference:
+ * Registers (the display engine's and the south display's registers);
+ * VESA DisplayPort Standard 1.4 (the DPCD); VESA E-EDID Standard
+ * (the block size).
+ */
+
+#ifndef DRIVERS_GPU_I915_TESTS_DISPLAY_GEN9_FAKE_REGS_H
+#define DRIVERS_GPU_I915_TESTS_DISPLAY_GEN9_FAKE_REGS_H
+
+#define I915_SKL_TRANSCODER_EDP			3U
+#define I915_SKL_PWR_WELL_CTL2			0x45404U
+#define I915_SKL_PW_2_STATE			(1U << 30)
+#define I915_SKL_DPLL_CTRL1			0x6c058U
+#define I915_SKL_DPLL_CTRL2			0x6c05cU
+#define I915_SKL_LINK_RATE_2700			0U
+#define I915_SKL_LINK_RATE_1350			1U
+#define I915_SKL_LINK_RATE_810			2U
+#define I915_SKL_LINK_RATE_1620			3U
+#define I915_SKL_LINK_RATE_1080			4U
+#define I915_SKL_LINK_RATE_2160			5U
+#define I915_SKL_TRANS_DDI_FUNC_CTL_A		0x60400U
+#define I915_SKL_TRANS_DDI_FUNC_CTL_EDP		0x6f400U
+#define I915_SKL_TRANS_DDI_FUNC_ENABLE		(1U << 31)
+#define I915_SKL_TRANSCONF_A			0x70008U
+#define I915_SKL_TRANSCONF_ENABLE		(1U << 31)
+#define I915_SKL_TRANSCONF_STATE		(1U << 30)
+#define I915_SKL_TRANS_HTOTAL_A			0x60000U
+#define I915_SKL_LINK_N1_A			0x60044U
+#define I915_SKL_EDP_PSR_ENABLE			(1U << 31)
+#define I915_SKL_DPFC_CTL_EN			(1U << 31)
+#define I915_SKL_PIPESRC_A			0x6001cU
+#define I915_SKL_PIPE_FRMCOUNT_A		0x70040U
+#define I915_SKL_PLANE_CTL_1_A			0x70180U
+#define I915_SKL_PLANE_STRIDE_1_A		0x70188U
+#define I915_SKL_PLANE_SIZE_1_A			0x70190U
+#define I915_SKL_PLANE_SURF_1_A			0x7019cU
+#define I915_SKL_PLANE_SURFLIVE_1_A		0x701acU
+#define I915_SKL_PLANE_CTL_ENABLE		(1U << 31)
+#define I915_SKL_PLANE_CTL_ORDER_RGBX		(1U << 20)
+#define I915_SKL_PLANE_CTL_ASYNC_FLIP		(1U << 9)
+#define I915_SKL_PS_SCALER_EN			(1U << 31)
+#define I915_SKL_BLC_PWM_PCH_CTL1		0xc8250U
+#define I915_SKL_BLC_PWM_PCH_CTL2		0xc8254U
+#define I915_CNP_BLC_PWM_CTL1			0xc8250U
+#define I915_CNP_BLC_PWM_FREQ1			0xc8254U
+#define I915_CNP_BLC_PWM_DUTY1			0xc8258U
+#define I915_SKL_PORT_A				0U
+#define I915_SKL_PORT_B				1U
+#define I915_SKL_PORT_C				2U
+#define I915_SKL_PORT_D				3U
+#define I915_SKL_PORTS				4U
+#define I915_SKL_PW_DDI_REQUEST(port)		(2U << (2U * ((port) + 1U)))
+#define I915_SKL_PW_DDI_STATE(port)		(1U << (2U * ((port) + 1U)))
+#define I915_SKL_FUSE_STATUS			0x42000U
+#define I915_SKL_FUSE_PG_DIST(pg)		(1U << (27U - (pg)))
+#define I915_SKL_DPLL1_CTL			0x46014U
+#define I915_SKL_DPLL2_CTL			0x46040U
+#define I915_SKL_DPLL3_CTL			0x46060U
+#define I915_SKL_DPLL_ENABLE			(1U << 31)
+#define I915_SKL_DPLL_STATUS			0x6c060U
+#define I915_SKL_DPLL_LOCK(id)			(1U << ((id) * 8U))
+#define I915_SKL_DPLL_CTRL2_CLK_OFF(port)	(1U << ((port) + 15U))
+#define I915_SKL_DDI_BUF_CTL_A			0x64000U
+#define I915_SKL_DDI_BUF_ENABLE			(1U << 31)
+#define I915_SKL_DDI_BUF_IS_IDLE		(1U << 7)
+#define I915_SKL_DDI_BUF_TRANS_A		0x64e00U
+#define I915_SKL_DDI_BUF_TRANS_STRIDE		0x60U
+#define I915_SKL_DISPIO_CR_TX_BMU_CR0		0x6c00cU
+#define I915_SKL_BALANCE_LEG_SHIFT(port)	(8U + 3U * (port))
+#define I915_SKL_BALANCE_LEG_MASK(port)		(7U << (8U + 3U * (port)))
+#define I915_SKL_DP_TP_CTL_A			0x64040U
+#define I915_SKL_DP_TP_STATUS_A			0x64044U
+#define I915_SKL_DP_TP_ENABLE			(1U << 31)
+#define I915_SKL_DP_TP_ENHANCED_FRAME		(1U << 18)
+#define I915_SKL_DP_TP_TRAIN_NORMAL		(3U << 8)
+#define I915_SKL_AUX_CTL_A			0x64010U
+#define I915_SKL_AUX_DATA_A			0x64014U
+#define I915_SKL_AUX_SEND_BUSY			(1U << 31)
+#define I915_SKL_AUX_DONE			(1U << 30)
+#define I915_SKL_AUX_TIME_OUT_ERROR		(1U << 28)
+#define I915_SKL_AUX_RECEIVE_ERROR		(1U << 25)
+#define I915_SKL_AUX_MESSAGE_SIZE_SHIFT		20U
+#define I915_SKL_AUX_MESSAGE_SIZE_MASK		0x1fU
+#define I915_SKL_GMBUS0				0xc5100U
+#define I915_SKL_GMBUS1				0xc5104U
+#define I915_SKL_GMBUS2				0xc5108U
+#define I915_SKL_GMBUS3				0xc510cU
+#define I915_SKL_GMBUS_SW_CLR_INT		(1U << 31)
+#define I915_SKL_GMBUS_SW_RDY			(1U << 30)
+#define I915_SKL_GMBUS_CYCLE_STOP		(4U << 25)
+#define I915_SKL_GMBUS_BYTE_COUNT_SHIFT		16U
+#define I915_SKL_GMBUS_SLAVE_INDEX_SHIFT	8U
+#define I915_SKL_GMBUS_SLAVE_READ		(1U << 0)
+#define I915_SKL_GMBUS_HW_WAIT_PHASE		(1U << 14)
+#define I915_SKL_GMBUS_HW_RDY			(1U << 11)
+#define I915_SKL_GMBUS_SATOER			(1U << 10)
+#define I915_SKL_GMBUS_PIN_DPC			4U
+#define I915_SKL_GMBUS_PIN_DPB			5U
+#define I915_SKL_GMBUS_PIN_DPD			6U
+#define I915_SKL_SOUTH_DSPCLK_GATE_D		0xc2020U
+#define I915_SKL_PCH_GMBUSUNIT_CLOCK_GATE_DISABLE	(1U << 31)
+#define I915_SKL_TRANS_VSYNC_A			0x60014U
+#define I915_SKL_DATA_M1_A			0x60030U
+#define I915_SKL_TRANS_MSA_MISC_A		0x60410U
+#define I915_SKL_TRANS_CLK_SEL_A		0x46140U
+#define I915_SKL_TRANS_DDI_PVSYNC		(1U << 17)
+#define I915_SKL_TRANS_DDI_PHSYNC		(1U << 16)
+#define I915_SKL_CHICKEN_TRANS_A		0x420c0U
+#define I915_SKL_WM_LINETIME_A			0x45270U
+#define I915_SKL_PLANE_WM_1_A_0			0x70240U
+#define I915_SKL_CUR_WM_A_0			0x70140U
+#define I915_SKL_PLANE_BUF_CFG_1_A		0x7027cU
+#define I915_SKL_CUR_BUF_CFG_A			0x7017cU
+#define I915_SKL_SDEISR				0xc4000U
+#define I915_SKL_SDE_PORTB_HOTPLUG		(1U << 21)
+#define I915_SKL_SDE_PORTC_HOTPLUG		(1U << 22)
+#define I915_SKL_SDE_PORTD_HOTPLUG		(1U << 23)
+#define I915_SKL_PCH_PORT_HOTPLUG		0xc4030U
+#define I915_SKL_PORTB_HOTPLUG_ENABLE		(1U << 4)
+#define I915_SKL_SFUSE_STRAP			0xc2014U
+#define I915_SKL_SFUSE_STRAP_DDIB_DETECTED	(1U << 2)
+#define I915_SKL_SFUSE_STRAP_DDIC_DETECTED	(1U << 1)
+#define I915_SKL_SFUSE_STRAP_DDID_DETECTED	(1U << 0)
+#define I915_DPCD_REV				0x000U
+#define I915_DPCD_MAX_LINK_RATE			0x001U
+#define I915_DPCD_MAX_LANE_COUNT		0x002U
+#define I915_DPCD_ENHANCED_FRAME_CAP		(1U << 7)
+#define I915_DPCD_TPS3_SUPPORTED		(1U << 6)
+#define I915_DPCD_RECEIVER_CAP_SIZE		0x0fU
+#define I915_DPCD_LINK_BW_SET			0x100U
+#define I915_DPCD_LANE_COUNT_SET		0x101U
+#define I915_DPCD_TRAINING_PATTERN_SET		0x102U
+#define I915_DPCD_TRAINING_LANE0_SET		0x103U
+#define I915_DPCD_MAIN_LINK_CHANNEL_CODING_SET	0x108U
+#define I915_DPCD_SET_ANSI_8B10B		1U
+#define I915_DPCD_LANE0_1_STATUS		0x202U
+#define I915_DPCD_LANE_CR_DONE			(1U << 0)
+#define I915_DPCD_LANE_CHANNEL_EQ_DONE		(1U << 1)
+#define I915_DPCD_LANE_SYMBOL_LOCKED		(1U << 2)
+#define I915_DPCD_INTERLANE_ALIGN_DONE		(1U << 0)
+#define I915_DPCD_SET_POWER			0x600U
+#define I915_DPCD_SET_POWER_D0			1U
+#define I915_DPCD_SET_POWER_D3			2U
+#define I915_DPCD_LINK_BW_1_62			0x06U
+#define I915_DPCD_LINK_BW_5_4			0x14U
+#define I915_DP_AUX_I2C_WRITE			0x0U
+#define I915_DP_AUX_I2C_MOT			0x4U
+#define I915_DP_AUX_NATIVE_WRITE		0x8U
+#define I915_DP_AUX_NATIVE_REPLY_DEFER		0x2U
+
+#endif /* DRIVERS_GPU_I915_TESTS_DISPLAY_GEN9_FAKE_REGS_H */

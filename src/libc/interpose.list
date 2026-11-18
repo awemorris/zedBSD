@@ -1,0 +1,19 @@
+/*
+ * ws066-p002: the functions of libc.so that a program may replace for the
+ * C library's own calls too.  libc.so is linked with -Bsymbolic-functions
+ * (platform/amd64/vmunix.mk), which binds its calls to its own functions;
+ * the functions named here stay preemptible, so a program with its own
+ * allocator still gets every allocation, the library's included.
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
+{
+	malloc;
+	free;
+	calloc;
+	realloc;
+	reallocarray;
+	aligned_alloc;
+	posix_memalign;
+	strdup;
+	strndup;
+};

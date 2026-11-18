@@ -1,0 +1,952 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// A small Emacs Lisp interpreter.
+//
+// Code representation (the reader's output):
+//   integer          -> Noct int
+//   "string"         -> Noct string
+//   symbol           -> { sym: "name" }
+//   (a b c)          -> Noct array of nodes
+//   (a . b)          -> array with a trailing { dot: node }
+//   [a b c]          -> { vec: array }
+//   'x  #'x          -> { q: node }
+//
+// Data representation (what quote and the bridge produce):
+//   symbols become plain strings, lists and vectors become arrays,
+//   dotted pairs become { car, cdr } dictionaries, nil is 0, t is 1.
+//
+// The function namespace (Lisp-2) is the LispFuncs dictionary: defuns
+// store closures { lparams, lbody, lenv }, builtins store Noct
+// functions, and the Editor bridge is generated from napi.def.
+// Closures capture their environment as a chain of Noct dictionaries,
+// so Lisp has real lexical closures even though Noct itself does not.
+//
+
+func lispInit() {
+    LispCompileEnabled = 1;
+    LispGlobals = { vars: {}, parent: 0 };
+    LispFuncs = {};
+    LispErr = 0;
+    LispErrMsg = "";
+    LispOut = "";
+    lispDefineBuiltins();
+    lispBridgeInit();
+    lispCompileInit();
+    return 0;
+}
+
+func lispError(msg) {
+    if (LispErr == 0) {
+        LispErr = 1;
+        LispErrMsg = msg;
+    }
+    return 0;
+}
+
+// --- reader ------------------------------------------------------------
+
+func lispRead(text) {
+    var st = { s: text, n: String.charCount(text), i: 0 };
+    var forms = [];
+    while (true) {
+        lispSkipSpace(st);
+        if (st.i >= st.n) {
+            break;
+        }
+        var f = lispReadForm(st);
+        if (LispErr == 1) {
+            break;
+        }
+        Array.push(forms, f);
+    }
+    return forms;
+}
+
+func lispSkipSpace(st) {
+    while (st.i < st.n) {
+        var c = String.charAt(st.s, st.i);
+        if (c == ";") {
+            while (st.i < st.n && String.charAt(st.s, st.i) != "\n") {
+                st.i = st.i + 1;
+            }
+            continue;
+        }
+        var cp = String.charCodeAt(st.s, st.i);
+        if (cp == 0x20 || cp == 0x09 || cp == 0x0A || cp == 0x0D || cp == 0x0C) {
+            st.i = st.i + 1;
+            continue;
+        }
+        break;
+    }
+    return 0;
+}
+
+func lispReadForm(st) {
+    lispSkipSpace(st);
+    if (st.i >= st.n) {
+        lispError("Unexpected end of input");
+        return 0;
+    }
+    var c = String.charAt(st.s, st.i);
+
+    if (c == "(") {
+        st.i = st.i + 1;
+        return lispReadList(st, ")");
+    }
+    if (c == "[") {
+        st.i = st.i + 1;
+        return { vec: lispReadList(st, "]") };
+    }
+    if (c == ")" || c == "]") {
+        lispError("Unbalanced parenthesis");
+        st.i = st.i + 1;
+        return 0;
+    }
+    if (c == "'") {
+        st.i = st.i + 1;
+        return { q: lispReadForm(st) };
+    }
+    if (c == "`") {
+        // Backquote without unquote support: treated as quote.
+        st.i = st.i + 1;
+        return { q: lispReadForm(st) };
+    }
+    if (c == "#") {
+        // #'func
+        if (st.i + 1 < st.n && String.charAt(st.s, st.i + 1) == "'") {
+            st.i = st.i + 2;
+            return { q: lispReadForm(st) };
+        }
+        lispError("Unsupported # syntax");
+        st.i = st.i + 1;
+        return 0;
+    }
+    if (c == "?") {
+        // Character literal.
+        st.i = st.i + 1;
+        if (st.i < st.n && String.charAt(st.s, st.i) == "\\") {
+            st.i = st.i + 1;
+            var e = String.charAt(st.s, st.i);
+            st.i = st.i + 1;
+            if (e == "n") { return 0x0A; }
+            if (e == "t") { return 0x09; }
+            if (e == "r") { return 0x0D; }
+            return String.charCodeAt(e, 0);
+        }
+        var ch = String.charCodeAt(st.s, st.i);
+        st.i = st.i + 1;
+        return ch;
+    }
+    if (c == "\"") {
+        return lispReadString(st);
+    }
+    return lispReadAtom(st);
+}
+
+func lispReadList(st, closer) {
+    var items = [];
+    while (true) {
+        lispSkipSpace(st);
+        if (st.i >= st.n) {
+            lispError("Unterminated list");
+            return items;
+        }
+        var c = String.charAt(st.s, st.i);
+        if (c == closer) {
+            st.i = st.i + 1;
+            return items;
+        }
+        if (c == "." && st.i + 1 < st.n) {
+            var c2 = String.charCodeAt(st.s, st.i + 1);
+            if (c2 == 0x20 || c2 == 0x09 || c2 == 0x0A) {
+                st.i = st.i + 1;
+                var tail = lispReadForm(st);
+                Array.push(items, { dot: tail });
+                lispSkipSpace(st);
+                if (st.i < st.n && String.charAt(st.s, st.i) == closer) {
+                    st.i = st.i + 1;
+                }
+                return items;
+            }
+        }
+        var f = lispReadForm(st);
+        if (LispErr == 1) {
+            return items;
+        }
+        Array.push(items, f);
+    }
+}
+
+func lispReadString(st) {
+    st.i = st.i + 1;
+    var out = "";
+    while (st.i < st.n) {
+        var c = String.charAt(st.s, st.i);
+        if (c == "\"") {
+            st.i = st.i + 1;
+            return out;
+        }
+        if (c == "\\") {
+            st.i = st.i + 1;
+            var e = String.charAt(st.s, st.i);
+            st.i = st.i + 1;
+            if (e == "n") { out = out + "\n"; continue; }
+            if (e == "t") { out = out + "\t"; continue; }
+            if (e == "r") { out = out + "\r"; continue; }
+            if (e == "e") { out = out + String.chr(0x1B); continue; }
+            if (e == "d") { out = out + String.chr(0x7F); continue; }
+            // Key-sequence modifier escapes (\C- \M- \S-): keep the
+            // backslash so lispParseKeyString can see the prefix.
+            if ((e == "C" || e == "M" || e == "S") &&
+                st.i < st.n && String.charAt(st.s, st.i) == "-") {
+                out = out + "\\" + e;
+                continue;
+            }
+            out = out + e;
+            continue;
+        }
+        out = out + c;
+        st.i = st.i + 1;
+    }
+    lispError("Unterminated string");
+    return out;
+}
+
+func lispIsDelim(c) {
+    var cp = String.charCodeAt(c, 0);
+    if (cp == 0x20 || cp == 0x09 || cp == 0x0A || cp == 0x0D) { return 1; }
+    if (c == "(" || c == ")" || c == "[" || c == "]" ||
+        c == "\"" || c == ";" || c == "'") { return 1; }
+    return 0;
+}
+
+func lispReadAtom(st) {
+    // Build the token, honoring backslash escapes so that symbols like
+    // \] \\ \^ read as ] \ ^ (used in key designators).
+    var tok = "";
+    while (st.i < st.n) {
+        var c = String.charAt(st.s, st.i);
+        if (c == "\\" && st.i + 1 < st.n) {
+            tok = tok + String.charAt(st.s, st.i + 1);
+            st.i = st.i + 2;
+            continue;
+        }
+        if (lispIsDelim(c) == 1) {
+            break;
+        }
+        tok = tok + c;
+        st.i = st.i + 1;
+    }
+
+    // Integer?
+    var isNum = 1;
+    var j = 0;
+    var tn = String.charCount(tok);
+    if (tn == 0) {
+        lispError("Empty token");
+        return 0;
+    }
+    if (String.charAt(tok, 0) == "-" && tn > 1) {
+        j = 1;
+    }
+    if (j >= tn) {
+        isNum = 0;
+    }
+    while (j < tn) {
+        var cp = String.charCodeAt(tok, j);
+        if (cp < 0x30 || cp > 0x39) {
+            isNum = 0;
+            break;
+        }
+        j = j + 1;
+    }
+    if (isNum == 1) {
+        return Int.from(tok);
+    }
+    if (tok == "nil") { return { q: 0 }; }
+    if (tok == "t") { return { q: "t" }; }
+    return { sym: tok };
+}
+
+// --- quote: code nodes to data values ----------------------------------
+
+func lispQuoteToData(node) {
+    if (Type.of(node) == "int" || Type.of(node) == "string") {
+        return node;
+    }
+    if (Type.of(node) == "array") {
+        var out = [];
+        for (e in node) {
+            if (Type.of(e) == "dict" && Dict.hasKey(e, "dot")) {
+                // A dotted tail turns the result into cons cells.
+                return lispArrayToConses(node);
+            }
+            Array.push(out, lispQuoteToData(e));
+        }
+        return out;
+    }
+    if (Type.of(node) == "dict") {
+        if (Dict.hasKey(node, "sym")) {
+            return node.sym;
+        }
+        if (Dict.hasKey(node, "q")) {
+            // Nested quote: ''x -> (quote x)
+            var inner = [];
+            Array.push(inner, "quote");
+            Array.push(inner, lispQuoteToData(node.q));
+            return inner;
+        }
+        if (Dict.hasKey(node, "vec")) {
+            var vout = [];
+            for (v in node.vec) {
+                Array.push(vout, lispQuoteToData(v));
+            }
+            return vout;
+        }
+    }
+    return node;
+}
+
+// Build { car, cdr } chains for a dotted list.
+func lispArrayToConses(node) {
+    var n = Array.size(node);
+    var tail = 0;
+    var i = n - 1;
+    if (Type.of(node[i]) == "dict" && Dict.hasKey(node[i], "dot")) {
+        tail = lispQuoteToData(node[i].dot);
+        i = i - 1;
+    }
+    while (i >= 0) {
+        tail = { car: lispQuoteToData(node[i]), cdr: tail };
+        i = i - 1;
+    }
+    return tail;
+}
+
+// --- environment -------------------------------------------------------
+
+func lispLookup(env, name) {
+    var e = env;
+    while (Type.of(e) == "dict") {
+        if (Dict.hasKey(e.vars, name)) {
+            return e.vars[name];
+        }
+        e = e.parent;
+    }
+    lispError("Void variable: " + name);
+    return 0;
+}
+
+func lispSetVar(env, name, val) {
+    var e = env;
+    while (Type.of(e) == "dict") {
+        if (Dict.hasKey(e.vars, name)) {
+            e.vars[name] = val;
+            return val;
+        }
+        e = e.parent;
+    }
+    LispGlobals.vars[name] = val;
+    return val;
+}
+
+// --- evaluator ---------------------------------------------------------
+
+func lispTruthy(v) {
+    if (Type.of(v) == "int") {
+        return v != 0;
+    }
+    if (Type.of(v) == "array") {
+        return Array.size(v) > 0;
+    }
+    return 1;
+}
+
+func lispEval(node, env) {
+    if (LispErr == 1) {
+        return 0;
+    }
+    var t = Type.of(node);
+    if (t == "int" || t == "string") {
+        return node;
+    }
+    if (t == "dict") {
+        if (Dict.hasKey(node, "sym")) {
+            return lispLookup(env, node.sym);
+        }
+        if (Dict.hasKey(node, "q")) {
+            return lispQuoteToData(node.q);
+        }
+        if (Dict.hasKey(node, "vec")) {
+            var vout = [];
+            for (v in node.vec) {
+                Array.push(vout, lispQuoteToData(v));
+            }
+            return vout;
+        }
+        return node;
+    }
+    if (t != "array") {
+        return node;
+    }
+    if (Array.size(node) == 0) {
+        return 0;
+    }
+
+    var head = node[0];
+    if (Type.of(head) == "dict" && Dict.hasKey(head, "sym")) {
+        var name = head.sym;
+        // Special forms.
+        if (name == "quote") { return lispQuoteToData(node[1]); }
+        if (name == "function") { return lispEval(node[1], env); }
+        if (name == "lambda") { return lispMakeClosure(node, env); }
+        if (name == "if") { return lispEvalIf(node, env); }
+        if (name == "cond") { return lispEvalCond(node, env); }
+        if (name == "progn") { return lispEvalBody(node, 1, env); }
+        if (name == "setq") { return lispEvalSetq(node, env); }
+        if (name == "defvar" || name == "defconst") { return lispEvalDefvar(node, env); }
+        if (name == "defun") { return lispEvalDefun(node, env); }
+        if (name == "let") { return lispEvalLet(node, env, 0); }
+        if (name == "let*") { return lispEvalLet(node, env, 1); }
+        if (name == "and") { return lispEvalAnd(node, env); }
+        if (name == "or") { return lispEvalOr(node, env); }
+        if (name == "while") { return lispEvalWhile(node, env); }
+        if (name == "interactive") { return 0; }
+
+        // A named function call.
+        var args = [];
+        var i = 1;
+        while (i < Array.size(node)) {
+            Array.push(args, lispEval(node[i], env));
+            if (LispErr == 1) {
+                return 0;
+            }
+            i = i + 1;
+        }
+        return lispApplyNamed(name, args);
+    }
+
+    // ((lambda ...) args)
+    var fn = lispEval(head, env);
+    var args2 = [];
+    var k = 1;
+    while (k < Array.size(node)) {
+        Array.push(args2, lispEval(node[k], env));
+        k = k + 1;
+    }
+    return lispApply(fn, args2);
+}
+
+// Evaluate an expression in tail position. A user-function application is
+// scheduled on state instead of called recursively. Special forms propagate
+// tail position only to the subexpression whose value they return unchanged.
+func lispEvalTail(node, env, state) {
+    if (LispErr == 1) {
+        return 0;
+    }
+    var t = Type.of(node);
+    if (t == "int" || t == "string") {
+        return node;
+    }
+    if (t == "dict") {
+        if (Dict.hasKey(node, "sym")) {
+            return lispLookup(env, node.sym);
+        }
+        if (Dict.hasKey(node, "q")) {
+            return lispQuoteToData(node.q);
+        }
+        if (Dict.hasKey(node, "vec")) {
+            var vout = [];
+            for (v in node.vec) {
+                Array.push(vout, lispQuoteToData(v));
+            }
+            return vout;
+        }
+        return node;
+    }
+    if (t != "array" || Array.size(node) == 0) {
+        if (t == "array") { return 0; }
+        return node;
+    }
+
+    var head = node[0];
+    if (Type.of(head) == "dict" && Dict.hasKey(head, "sym")) {
+        var name = head.sym;
+        if (name == "quote") { return lispQuoteToData(node[1]); }
+        if (name == "function") { return lispEval(node[1], env); }
+        if (name == "lambda") { return lispMakeClosure(node, env); }
+        if (name == "if") {
+            var condition = lispEval(node[1], env);
+            if (LispErr == 1) { return 0; }
+            if (lispTruthy(condition)) {
+                if (Array.size(node) < 3) { return 0; }
+                return lispEvalTail(node[2], env, state);
+            }
+            return lispEvalBodyTail(node, 3, env, state);
+        }
+        if (name == "cond") { return lispEvalCondTail(node, env, state); }
+        if (name == "progn") { return lispEvalBodyTail(node, 1, env, state); }
+        if (name == "setq") { return lispEvalSetq(node, env); }
+        if (name == "defvar" || name == "defconst") { return lispEvalDefvar(node, env); }
+        if (name == "defun") { return lispEvalDefun(node, env); }
+        if (name == "let") { return lispEvalLetTail(node, env, 0, state); }
+        if (name == "let*") { return lispEvalLetTail(node, env, 1, state); }
+        if (name == "and") { return lispEvalAndTail(node, env, state); }
+        if (name == "or") { return lispEvalOrTail(node, env, state); }
+        if (name == "while") { return lispEvalWhile(node, env); }
+        if (name == "interactive") { return 0; }
+
+        var args = [];
+        var i = 1;
+        while (i < Array.size(node)) {
+            Array.push(args, lispEval(node[i], env));
+            if (LispErr == 1) { return 0; }
+            i = i + 1;
+        }
+        lispScheduleTail(state, name, args);
+        return 0;
+    }
+
+    var fn = lispEval(head, env);
+    if (LispErr == 1) { return 0; }
+    var args2 = [];
+    var k = 1;
+    while (k < Array.size(node)) {
+        Array.push(args2, lispEval(node[k], env));
+        if (LispErr == 1) { return 0; }
+        k = k + 1;
+    }
+    lispScheduleTail(state, fn, args2);
+    return 0;
+}
+
+// Evaluate every expression except the last normally, then preserve tail
+// position for the last expression.
+func lispEvalBodyTail(node, from, env, state) {
+    if (from >= Array.size(node)) {
+        return 0;
+    }
+    var i = from;
+    while (i + 1 < Array.size(node)) {
+        lispEval(node[i], env);
+        if (LispErr == 1) { return 0; }
+        i = i + 1;
+    }
+    return lispEvalTail(node[i], env, state);
+}
+
+func lispEvalCondTail(node, env, state) {
+    var i = 1;
+    while (i < Array.size(node)) {
+        var clause = node[i];
+        var test = lispEval(clause[0], env);
+        if (LispErr == 1) { return 0; }
+        if (lispTruthy(test)) {
+            if (Array.size(clause) == 1) { return test; }
+            return lispEvalBodyTail(clause, 1, env, state);
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+func lispEvalLetTail(node, env, star, state) {
+    var newEnv = { vars: {}, parent: env };
+    var evalEnv = env;
+    if (star == 1) { evalEnv = newEnv; }
+    for (binding in node[1]) {
+        if (Type.of(binding) == "dict" && Dict.hasKey(binding, "sym")) {
+            newEnv.vars[binding.sym] = 0;
+        } else {
+            var v = 0;
+            if (Array.size(binding) > 1) {
+                v = lispEval(binding[1], evalEnv);
+                if (LispErr == 1) { return 0; }
+            }
+            newEnv.vars[binding[0].sym] = v;
+        }
+    }
+    return lispEvalBodyTail(node, 2, newEnv, state);
+}
+
+func lispEvalAndTail(node, env, state) {
+    if (Array.size(node) == 1) { return 1; }
+    var i = 1;
+    while (i + 1 < Array.size(node)) {
+        var ret = lispEval(node[i], env);
+        if (LispErr == 1) { return 0; }
+        if (!lispTruthy(ret)) { return 0; }
+        i = i + 1;
+    }
+    return lispEvalTail(node[i], env, state);
+}
+
+func lispEvalOrTail(node, env, state) {
+    if (Array.size(node) == 1) { return 0; }
+    var i = 1;
+    while (i + 1 < Array.size(node)) {
+        var ret = lispEval(node[i], env);
+        if (LispErr == 1) { return 0; }
+        if (lispTruthy(ret)) { return ret; }
+        i = i + 1;
+    }
+    return lispEvalTail(node[i], env, state);
+}
+
+func lispMakeClosure(node, env) {
+    var params = [];
+    for (p in node[1]) {
+        if (Type.of(p) == "dict" && Dict.hasKey(p, "sym")) {
+            Array.push(params, p.sym);
+        }
+    }
+    var body = [];
+    var i = 2;
+    while (i < Array.size(node)) {
+        Array.push(body, node[i]);
+        i = i + 1;
+    }
+    return { lparams: params, lbody: body, lenv: env };
+}
+
+func lispEvalIf(node, env) {
+    if (lispTruthy(lispEval(node[1], env))) {
+        return lispEval(node[2], env);
+    }
+    return lispEvalBody(node, 3, env);
+}
+
+func lispEvalCond(node, env) {
+    var i = 1;
+    while (i < Array.size(node)) {
+        var clause = node[i];
+        var test = lispEval(clause[0], env);
+        if (lispTruthy(test)) {
+            if (Array.size(clause) == 1) {
+                return test;
+            }
+            return lispEvalBody(clause, 1, env);
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+func lispEvalBody(node, from, env) {
+    var ret = 0;
+    var i = from;
+    while (i < Array.size(node)) {
+        ret = lispEval(node[i], env);
+        if (LispErr == 1) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    return ret;
+}
+
+func lispEvalSetq(node, env) {
+    var ret = 0;
+    var i = 1;
+    while (i + 1 < Array.size(node) + 1 && i < Array.size(node)) {
+        var nameNode = node[i];
+        if (i + 1 >= Array.size(node)) {
+            break;
+        }
+        ret = lispEval(node[i + 1], env);
+        lispSetVar(env, nameNode.sym, ret);
+        lispSpecialVarHook(nameNode.sym, ret);
+        i = i + 2;
+    }
+    return ret;
+}
+
+func lispEvalDefvar(node, env) {
+    var name = node[1].sym;
+    if (!Dict.hasKey(LispGlobals.vars, name)) {
+        var v = 0;
+        if (Array.size(node) > 2) {
+            v = lispEval(node[2], env);
+        }
+        LispGlobals.vars[name] = v;
+    }
+    return name;
+}
+
+func lispEvalDefun(node, env) {
+    var name = node[1].sym;
+    var lam = [];
+    Array.push(lam, { sym: "lambda" });
+    var i = 2;
+    while (i < Array.size(node)) {
+        Array.push(lam, node[i]);
+        i = i + 1;
+    }
+    LispFuncs[name] = lispMakeClosure(lam, env);
+    // Only global defuns can be compiled (their env is the globals).
+    if (env == LispGlobals && LispCompileEnabled == 1) {
+        lispCompileDefun(name);
+    }
+    return name;
+}
+
+func lispEvalLet(node, env, star) {
+    var newEnv = { vars: {}, parent: env };
+    var evalEnv = env;
+    if (star == 1) {
+        evalEnv = newEnv;
+    }
+    for (binding in node[1]) {
+        if (Type.of(binding) == "dict" && Dict.hasKey(binding, "sym")) {
+            newEnv.vars[binding.sym] = 0;
+        } else {
+            var v = 0;
+            if (Array.size(binding) > 1) {
+                v = lispEval(binding[1], evalEnv);
+            }
+            newEnv.vars[binding[0].sym] = v;
+        }
+    }
+    return lispEvalBody(node, 2, newEnv);
+}
+
+func lispEvalAnd(node, env) {
+    var ret = 1;
+    var i = 1;
+    while (i < Array.size(node)) {
+        ret = lispEval(node[i], env);
+        if (!lispTruthy(ret)) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    return ret;
+}
+
+func lispEvalOr(node, env) {
+    var i = 1;
+    while (i < Array.size(node)) {
+        var ret = lispEval(node[i], env);
+        if (lispTruthy(ret)) {
+            return ret;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+func lispEvalWhile(node, env) {
+    var guard = 0;
+    while (lispTruthy(lispEval(node[1], env))) {
+        if (LispErr == 1) {
+            return 0;
+        }
+        lispEvalBody(node, 2, env);
+        guard = guard + 1;
+        if (guard > 1000000) {
+            lispError("while: too many iterations");
+            return 0;
+        }
+    }
+    return 0;
+}
+
+// --- application -------------------------------------------------------
+
+// Call a function by name: user defuns and builtins first, then the
+// generated Editor bridge.
+// Call a compiled Noct function (fixed arity) with the args array.
+func lispCallCompiled(fn, args, name, state) {
+    var n = Array.size(args);
+    if (n == 0) { return fn(state); }
+    if (n == 1) { return fn(state, args[0]); }
+    if (n == 2) { return fn(state, args[0], args[1]); }
+    if (n == 3) { return fn(state, args[0], args[1], args[2]); }
+    if (n == 4) { return fn(state, args[0], args[1], args[2], args[3]); }
+    if (n == 5) { return fn(state, args[0], args[1], args[2], args[3], args[4]); }
+    lispError("Compiled arity too high: " + name);
+    return 0;
+}
+
+// Is a name callable through the Lisp layer? (defun, compiled, command,
+// builtin, or the Editor bridge.)
+func lispIsCommand(name) {
+    if (Dict.hasKey(LispCompiled, name)) { return 1; }
+    if (Dict.hasKey(LispFuncs, name)) { return 1; }
+    if (Dict.hasKey(LispCommands, name)) { return 1; }
+    if (Dict.hasKey(LispVarargs, name)) { return 1; }
+    if (Dict.hasKey(LispBridge, name)) { return 1; }
+    return 0;
+}
+
+func lispApplyNamed(name, args) {
+    if (Dict.hasKey(LispCompiled, name)) { return lispRunApply(name, args); }
+    if (Dict.hasKey(LispFuncs, name)) { return lispRunApply(name, args); }
+    if (Dict.hasKey(LispVarargs, name)) {
+        return lispCallBuiltin(name, args);
+    }
+    if (Dict.hasKey(LispCommands, name)) {
+        return lispCallCommand(name, args);
+    }
+    if (Dict.hasKey(LispBridge, name)) {
+        return lispCallBridge(LispBridge[name], args, name);
+    }
+    lispError("Void function: " + name);
+    return 0;
+}
+
+// Apply a closure or builtin value.
+func lispApply(fn, args) {
+    if (Type.of(fn) == "string") {
+        // A symbol names a function (funcall 'f ...).
+        return lispApplyNamed(fn, args);
+    }
+    if (Type.of(fn) != "dict" || !Dict.hasKey(fn, "lparams")) {
+        lispError("Not a function");
+        return 0;
+    }
+    return lispRunApply(fn, args);
+}
+
+// Run one user-function call chain. The state object is allocated once for
+// the chain and reused by every tail hop.
+func lispRunApply(target, args) {
+    var state = { pending: 1, target: target, args: args };
+    var result = 0;
+    while (state.pending == 1) {
+        var nextTarget = state.target;
+        var nextArgs = state.args;
+        state.pending = 0;
+        result = lispApplyStep(nextTarget, nextArgs, state);
+        if (LispErr == 1) { return 0; }
+    }
+    return result;
+}
+
+func lispScheduleTail(state, target, args) {
+    state.target = target;
+    state.args = args;
+    state.pending = 1;
+    return 0;
+}
+
+// Dispatch one function without recursively entering another user function.
+func lispApplyStep(target, args, state) {
+    if (Type.of(target) == "string") {
+        var name = target;
+        if (Dict.hasKey(LispCompiled, name)) {
+            return lispCallCompiled(LispCompiled[name], args, name, state);
+        }
+        if (Dict.hasKey(LispFuncs, name)) {
+            return lispApplyClosureStep(LispFuncs[name], args, state);
+        }
+        if (Dict.hasKey(LispVarargs, name)) {
+            // These two builtins are themselves applications. Forward them
+            // in the current chain so they cannot nest trampolines.
+            if (name == "funcall") {
+                lispScheduleTail(state, args[0], lispRestArgs(args, 1));
+                return 0;
+            }
+            if (name == "apply") {
+                lispScheduleTail(state, args[0], lispExpandApplyArgs(args));
+                return 0;
+            }
+            return lispCallBuiltin(name, args);
+        }
+        if (Dict.hasKey(LispCommands, name)) {
+            return lispCallCommand(name, args);
+        }
+        if (Dict.hasKey(LispBridge, name)) {
+            return lispCallBridge(LispBridge[name], args, name);
+        }
+        lispError("Void function: " + name);
+        return 0;
+    }
+    if (Type.of(target) != "dict" || !Dict.hasKey(target, "lparams")) {
+        lispError("Not a function");
+        return 0;
+    }
+    return lispApplyClosureStep(target, args, state);
+}
+
+func lispApplyClosureStep(fn, args, state) {
+    var env = { vars: {}, parent: fn.lenv };
+    var pi = 0;
+    var ai = 0;
+    var mode = "";
+    while (pi < Array.size(fn.lparams)) {
+        var p = fn.lparams[pi];
+        if (p == "&optional") {
+            mode = "opt";
+            pi = pi + 1;
+            continue;
+        }
+        if (p == "&rest") {
+            mode = "rest";
+            pi = pi + 1;
+            continue;
+        }
+        if (mode == "rest") {
+            var rest = [];
+            while (ai < Array.size(args)) {
+                Array.push(rest, args[ai]);
+                ai = ai + 1;
+            }
+            env.vars[p] = rest;
+            pi = pi + 1;
+            continue;
+        }
+        if (ai < Array.size(args)) {
+            env.vars[p] = args[ai];
+            ai = ai + 1;
+        } else {
+            env.vars[p] = 0;
+        }
+        pi = pi + 1;
+    }
+    return lispEvalBodyTail(fn.lbody, 0, env, state);
+}
+
+// The generated bridge: entries are { fn, n }.
+func lispCallBridge(ent, args, name) {
+    var a0 = 0;
+    var a1 = 0;
+    var a2 = 0;
+    if (Array.size(args) > 0) { a0 = args[0]; }
+    if (Array.size(args) > 1) { a1 = args[1]; }
+    if (Array.size(args) > 2) { a2 = args[2]; }
+    if (ent.n == 0) { return ent.fn(); }
+    if (ent.n == 1) { return ent.fn(a0); }
+    if (ent.n == 2) { return ent.fn(a0, a1); }
+    if (ent.n == 3) { return ent.fn(a0, a1, a2); }
+    lispError("Bad bridge arity: " + name);
+    return 0;
+}
+
+// --- loading -----------------------------------------------------------
+
+// Evaluate every form in the text. Returns 1 on success.
+func lispEvalText(text) {
+    LispErr = 0;
+    LispErrMsg = "";
+    var forms = lispRead(text);
+    if (LispErr == 1) {
+        return 0;
+    }
+    for (f in forms) {
+        lispEval(f, LispGlobals);
+        if (LispErr == 1) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+func lispLoadFile(path) {
+    if (FileUtil.checkFileExists(path) == 0) {
+        return 0;
+    }
+    var text = FileUtil.readText(path);
+    return lispEvalText(text);
+}

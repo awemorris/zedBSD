@@ -1,0 +1,21 @@
+[pi4]
+arm_64bit=1
+kernel=vmunix
+kernel_address=0x80000
+device_tree=bcm2711-rpi-4-b.dtb
+enable_gic=1
+enable_uart=1
+init_uart_clock=48000000
+uart_2ndstage=1
+dtoverlay=disable-bt
+framebuffer_depth=32
+framebuffer_ignore_alpha=1
+# 1920x1080 60 Hz (DMT group mode 82, standard 1080p 16:9, no hdmi_cvt needed),
+# no overscan border, and a framebuffer of the same size, scanned out 1:1.
+hdmi_group:0=2
+hdmi_mode:0=82
+hdmi_group:1=2
+hdmi_mode:1=82
+disable_overscan=1
+framebuffer_width=1920
+framebuffer_height=1080

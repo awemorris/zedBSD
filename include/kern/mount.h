@@ -1,0 +1,391 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * mount
+ */
+
+#ifndef KERN_KERN_MOUNT_H
+#define KERN_KERN_MOUNT_H
+
+#include "kern/disk.h"
+#include "kern/atomic.h"
+#include <kern/io-epoch.h>
+#include <kern/io-error.h>
+#include <uapi/unmount.h>
+#include "kern/backing-claim.h"
+#include "kern/lock.h"
+#include "kern/waitq.h"
+#include <limits.h>
+#include <uapi/limits.h>
+#include <uapi/types.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX		256U
+#endif
+#ifndef NAME_MAX
+#define NAME_MAX		255U
+#endif
+#ifndef KERN_PATH_MAX
+#define KERN_PATH_MAX		PATH_MAX
+#endif
+
+#define MOUNT_MAX		64U
+#define MOUNT_READ_ONLY		0x00000001U
+#define MOUNT_NOSUID		0x00000002U
+/* The same bit as MNT_WRITETHRU: writes reach the device synchronously. */
+#define MOUNT_WRITE_THROUGH	0x00000004U
+/* The same bit as MNT_NOJOURNAL: no journal of metadata changes. */
+#define MOUNT_NO_JOURNAL	0x00000008U
+/* The same bit as MNT_NOEXEC: no file of the mount is executed. */
+#define MOUNT_NOEXEC		0x00000010U
+#define MOUNT_PRIVATE_INTERNAL	0x00000002U
+#define FILESYSTEM_NODEV	0x00000001U
+
+struct file;
+struct inode;
+struct mount;
+struct componentname;
+struct dirent;
+struct statvfs;
+struct quota_control;
+struct snapshot_control;
+struct kern_mount_info;
+int mount_info_snapshot(struct kern_mount_info *, unsigned, unsigned *);
+struct block_identity;
+
+struct path {
+	struct mount *p_mount;
+	struct inode *p_inode;
+};
+
+enum mount_state {
+	MOUNT_STATE_FREE = 0,
+	MOUNT_STATE_PREPARING,
+	MOUNT_STATE_LIVE,
+	MOUNT_STATE_DYING,
+	MOUNT_STATE_DEAD,
+};
+
+typedef int (*file_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
+typedef int (*file_metadata_extent_cb)(uint64_t, uint32_t, void *);
+
+struct filesystem_type {
+	const char *fs_name;
+	unsigned fs_flags;
+	int (*probe)(struct disk *);
+	/*
+	 * Return 0 after recognizing the disk and filling only filesystem-owned
+	 * TYPE/UUID/LABEL metadata, or EOPNOTSUPP for a format mismatch.  Other
+	 * errno values report bounded metadata-read or validation failures.
+	 */
+	int (*identify)(struct disk *, struct block_identity *);
+	int (*mount)(struct mount *);
+	int (*sync)(struct mount *);
+	int (*statvfs)(struct mount *, struct statvfs *);
+	int (*quotactl)(struct mount *, struct quota_control *);
+	int (*snapshotctl)(struct mount *, struct snapshot_control *);
+
+	/*
+	 * Last failure-capable step before namespace/inode state is destroyed.
+	 */
+	int (*prepare_unmount)(struct mount *);
+	/*
+	 * Optional revoked-media preflight, before any destructive cache discard.
+	 * Caller closes admission and joins I/O owners. Must not mutate state or
+	 * issue backend I/O; NULL means revoked teardown is unsupported.
+	 */
+	int (*prepare_unmount_revoked)(struct mount *);
+	/* No-fail/no-I/O commit after all owners pass preflight, before file close. */
+	void (*commit_unmount_revoked)(struct mount *);
+	void (*unmount)(struct mount *);
+	struct inode *(*alloc_inode)(struct mount *);
+	void (*free_inode)(struct inode *);
+	/* Caller holds the inode I/O lease. 1: allocated existing data,
+	 * 0: through required, negative errno: validation failure. */
+	int (*writeback_range)(struct file *, off_t, size_t);
+	/*
+	 * Optional: 1 when a live mount delays its files' page writes by
+	 * default (the page cache writes them back itself), 0 otherwise.
+	 * Asked once, right after the mount is published.
+	 */
+	int (*writeback_default)(struct mount *);
+	/* Caller retains a prepared backing claim. Report ordered logical and
+	 * physical 512-byte sectors; never allocate blocks or retain the callback. */
+	int (*file_extents)(struct file *, file_extent_cb, void *);
+	/* Optional exclusive metadata ranges in physical 512-byte sectors, never
+	 * shared allocation tables.  These protect layout; they are not part of
+	 * the logical file I/O map. */
+	int (*file_metadata_extents)(struct file *, file_metadata_extent_cb, void *);
+	/* Stable file identity across separate mounts; no mutation or admission. */
+	int (*file_backing_identity)(struct inode *, struct disk **, uint64_t *);
+};
+
+struct mount {
+	char m_path[KERN_PATH_MAX];
+	char m_name[NAME_MAX + 1U];
+	unsigned m_flags;
+	struct io_epoch m_write_epoch;
+	struct io_error_state m_write_error;
+	/* Shared metadata failures have no single data-inode owner. */
+	struct io_error_state m_metadata_error;
+	volatile uint64_t m_write_error_cursor;
+	refcount_t m_refs;
+	struct mutex m_lock;
+	/*
+	 * All mounts share one sleeping namespace transaction gate. It serializes
+	 * permission checks, namespace commits and mount admission; ordinary file
+	 * I/O does not take it. Stacking filesystems join an already-owned gate.
+	 * Lock order: transaction, namespace spinlock (briefly), filesystem locks.
+	 */
+	struct mutex *m_vfs_transaction_lock;
+	struct wait_queue m_waitq;
+	enum mount_state m_state;
+	unsigned m_internal_flags;
+	/* Held from writable mount preparation through LIVE publication. */
+	struct backing_mutation_guard m_backing_guard;
+	struct disk *m_disk;
+	const struct filesystem_type *m_type;
+	struct inode *m_root;
+	struct mount *m_parent;
+	struct path m_cover;
+	/* Optional backing entry hidden by this attachment, held by reference. */
+	struct inode *m_covered_inode;
+	struct mount *m_bind_source;
+	struct mount *m_children;
+	struct mount *m_sibling;
+	void *m_data;
+	struct mount *m_next;
+};
+
+/*
+ * The mount data of a disk filesystem: the disk, and the owner a
+ * filesystem without owners (FAT) shows for its files when owner_set is
+ * nonzero (ws132-p004); otherwise root.
+ */
+struct fat_mount_args {
+	const char *fspec;
+	unsigned owner_set;
+	uid_t owner_uid;
+	gid_t owner_gid;
+};
+
+int
+filesystem_register(
+	const struct filesystem_type *type);
+
+/* Dispatch registered identity callbacks without mounting the disk. */
+int
+filesystem_identify(
+	struct disk *disk,
+	struct block_identity *identity);
+
+void
+mount_reset(void);
+
+void
+path_init(
+	struct path *path);
+
+void
+mount_ref(
+	struct mount *mountp);
+
+void
+mount_release(
+	struct mount *mountp);
+
+void
+path_set(
+	struct path *path,
+	struct mount *mountp,
+	struct inode *inode);
+
+void
+path_ref(
+	struct path *path);
+
+void
+path_release(
+	struct path *path);
+
+int
+path_equal(
+	const struct path *left,
+	const struct path *right);
+
+int
+mount_root_create(
+	const char *type_name,
+	int flags,
+	void *data,
+	struct mount **result);
+
+struct mount *
+mount_root_get_ref(void);
+
+int
+mount_at(
+	const char *type_name,
+	const struct path *directory,
+	const char *name,
+	int flags,
+	void *data,
+	struct mount **result);
+
+int
+mount_bind_at(
+	const struct path *source,
+	const struct path *directory,
+	const char *name,
+	struct mount **result);
+
+int
+mount_private(
+	const char *type_name,
+	struct disk *disk,
+	int flags,
+	void *data,
+	struct mount **result);
+
+int
+mount_private_lookup(
+	struct mount *mountp,
+	const char *relative,
+	struct path *result);
+
+int
+mount_private_promote_root(
+	struct mount *mountp,
+	struct mount **result);
+
+int
+unmount_private(
+	struct mount *mountp);
+
+int
+mount_private_allow_adoption(
+	struct mount *mountp);
+
+int
+mount_is_private(
+	const struct mount *mountp);
+
+/* Internal filesystem barrier: never reenters VM or consumes sync errors. */
+int mount_sync_backend(struct mount *mountp);
+int mount_sync_buffer(struct mount *mountp, void *scratch, size_t capacity);
+
+int
+mount_sync(
+	struct mount *mountp);
+
+int
+mount_sync_all(void);
+
+int
+mount_disk_writable_busy(
+	struct disk *disk);
+
+int
+mount_statvfs(
+	struct mount *mountp,
+	struct statvfs *result);
+
+/*
+ * Reports the device number a mount's files carry in st_dev: the disk's
+ * number, or a synthetic one for a mount without a disk.
+ */
+dev_t mount_device_number(const struct mount *mountp);
+
+int
+mount_quotactl(
+	struct mount *mountp,
+	struct quota_control *request);
+
+int
+mount_snapshotctl(
+	struct mount *mountp,
+	struct snapshot_control *request);
+
+int
+mount(
+	const char *type_name,
+	const char *dir,
+	int flags,
+	void *data);
+
+/* Process path operations retain resolved identities across namespace changes. */
+struct cwdinfo;
+int mount_context(struct cwdinfo *context, const char *type_name, const char *directory, int flags, void *data);
+int unmount_context(struct cwdinfo *context, const char *directory);
+int unmount_context_flags(struct cwdinfo *, const char *, int);
+
+int
+unmount(
+	const char *dir,
+	int flags);
+
+struct mount *
+mount_find_ref(
+	const char *path);
+
+struct mount *
+mount_for_inode(
+	const struct inode *inode);
+
+int
+mount_lookup_child(
+	const struct path *directory,
+	const struct componentname *component,
+	struct path *result);
+
+int
+mount_cross_path_parent(
+	const struct path *current,
+	struct path *result);
+
+int
+mount_readdir_child(
+	const struct path *directory,
+	unsigned *cursor,
+	struct dirent *entry);
+
+int
+mount_child_shadows(
+	const struct path *directory,
+	const char *name);
+
+void
+mount_vfs_transaction_enter(
+	struct mount *mountp);
+
+void
+mount_vfs_transaction_leave(
+	struct mount *mountp);
+
+/* Return one only when this call acquired the gate; leave only in that case. */
+int
+mount_vfs_transaction_join(
+	struct mount *mountp);
+
+/* Caller holds the namespace transaction through its filesystem commit.
+ * Name checks include attachments in every bind view of the backing parent.
+ * Inode checks reject mount anchors and their ancestors (EBUSY), preserving
+ * reachability and cached mount paths. Ancestor I/O never holds a spinlock. */
+int
+mount_namespace_check_name(
+	struct inode *directory,
+	const struct componentname *name);
+
+int
+mount_namespace_check_inode(
+	struct inode *inode);
+
+unsigned
+mount_count(void);
+
+#endif

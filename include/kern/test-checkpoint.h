@@ -1,0 +1,57 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_KERN_TEST_CHECKPOINT_H
+#define KERN_KERN_TEST_CHECKPOINT_H
+
+enum kern_test_checkpoint_id {
+	KERN_TEST_DISK_LOOKUP_BEFORE_REF = 1,
+	KERN_TEST_FD_LOOKUP_BEFORE_REF,
+	KERN_TEST_NAMECACHE_HIT_BEFORE_REF,
+	KERN_TEST_WAIT_BEFORE_REGISTER,
+	KERN_TEST_WAIT_AFTER_REGISTER,
+	KERN_TEST_PROCESS_PARENT_BEFORE_REF,
+	KERN_TEST_ITIMER_TICK_LOCKED,
+	KERN_TEST_ITIMER_TICK_RETRY,
+	KERN_TEST_THREAD_RETIRED_AFTER_PUBLISH,
+	KERN_TEST_THREAD_EXIT_COMMITTED,
+	KERN_TEST_PROCESS_WAIT_REAP_RESERVED,
+	KERN_TEST_PROCESS_TIMER_CREATE_ADMITTED,
+	KERN_TEST_PROCESS_TIMER_SETTIME_SNAPSHOT,
+	KERN_TEST_PROCESS_STOP_CALLBACK_BEFORE_NOTIFY,
+	KERN_TEST_VM_PAGE_BEFORE_IO,
+	KERN_TEST_SOCKET_BEFORE_WAIT,
+	KERN_TEST_EXEC_LEASE_RELEASED,
+	KERN_TEST_EXEC_RETIREMENT_BEGIN,
+};
+
+#ifdef KERN_TEST_CHECKPOINTS
+typedef void (
+	*kern_test_checkpoint_fn)(
+	enum kern_test_checkpoint_id,
+	void *,
+	void *);
+
+void
+kern_test_checkpoint_set(
+	kern_test_checkpoint_fn,
+	void *);
+
+void
+kern_test_checkpoint(
+	enum kern_test_checkpoint_id,
+	void *);
+
+#define KERN_TEST_CHECKPOINT(id, object)	kern_test_checkpoint((id), (object))
+
+#else
+
+#define KERN_TEST_CHECKPOINT(id, object)	((void)0)
+
+#endif
+
+#endif

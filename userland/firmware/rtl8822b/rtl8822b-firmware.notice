@@ -1,0 +1,7 @@
+Firmware: Realtek RTL8822B WiFi firmware (rtw88, 30.20.0)
+Hardware: Realtek RTL8822BE / RTL8822BU 802.11ac WiFi
+Files:    /lib/firmware/rtw88/rtw8822b_fw.bin
+Source:   endlessm/linux-firmware commit 2f56219d20e4becccd718963fc3bcc671c543ce5
+          (the same bytes as linux-firmware commit 458e40fdbb4dad5134ec230a42df21aea1b5baf8)
+
+Copyright (c) 2010, Realtek Semiconductor Corporation

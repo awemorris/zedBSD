@@ -1,0 +1,131 @@
+# Copyright (C) 2026 Awe Morris
+# SPDX-License-Identifier: Zlib
+# remacs native API definition table. Single source of truth.
+#
+# Columns (tab-separated):
+#   noct      Function name under the Editor.* namespace (camelCase).
+#   emacs     Emacs function name. "-" derives it mechanically from the
+#             noct name (gotoChar -> goto-char). Anything else overrides.
+#   impl      c    = implemented in C (none at present; the buffer
+#                    layer is Noct on purpose, as a JIT/GC workload)
+#             noct = implemented in editor/*.noct
+#   shim      direct = the transpiler may call the Emacs name directly
+#             adapt  = the oracle shim needs an adapter (noct--*)
+#   args      Comma-separated argument names, or "-" for none.
+#
+# gen-napi.py turns this table into:
+#   - the C FFI registration table (impl=c rows)
+#   - the elisp namespace map for the transpiler
+#   - the oracle shim adapters (shim=adapt rows)
+#   - a scope lint: editor/ code may only call what is listed here.
+#
+# v1 scope is frozen by this file. Additions require editing this table.
+
+# --- point and movement (impl=c) ---
+point	-	noct	direct	-
+pointMin	-	noct	direct	-
+pointMax	-	noct	direct	-
+gotoChar	-	noct	direct	pos
+bobp	-	noct	direct	-
+eobp	-	noct	direct	-
+bolp	-	noct	direct	-
+eolp	-	noct	direct	-
+forwardChar	-	noct	direct	n
+backwardChar	-	noct	direct	n
+forwardLine	-	noct	direct	n
+lineBeginningPosition	-	noct	direct	-
+lineEndPosition	-	noct	direct	-
+
+# --- buffer contents (impl=c) ---
+bufferSize	-	noct	direct	-
+bufferString	-	noct	direct	-
+bufferSubstring	-	noct	direct	start,end
+charAfter	-	noct	adapt	pos	# Emacs: optional arg, nil at eob
+charBefore	-	noct	adapt	pos	# Emacs: optional arg, nil at bob
+insert	-	noct	direct	text	# v1: exactly one string argument
+charToString	-	noct	direct	ch
+deleteRegion	-	noct	direct	start,end
+
+# --- files and state (impl=noct) ---
+insertFileContents	-	noct	adapt	file	# Emacs: optional args, returns (name count)
+writeRegion	-	noct	adapt	start,end,file	# Emacs: many optional args
+bufferModifiedP	-	noct	direct	-
+setBufferModifiedP	-	noct	adapt	flag	# Emacs: nil/t
+bufferFileName	-	noct	adapt	-	# Emacs: nil when no file
+
+# --- editing commands (impl=noct, later phases) ---
+deleteChar	-	noct	direct	n
+newline	-	noct	adapt	n	# Emacs: optional arg
+beginningOfLine	-	noct	direct	-
+endOfLine	-	noct	direct	-
+
+# --- markers ---
+makeMarker	-	noct	direct	-
+setMarker	-	noct	direct	marker,pos
+markerPosition	-	noct	adapt	m
+copyMarker	-	noct	direct	m
+pointMarker	-	noct	direct	-
+
+# --- mark and region ---
+setMark	-	noct	direct	pos
+mark	-	noct	adapt	-
+regionBeginning	-	noct	direct	-
+regionEnd	-	noct	direct	-
+exchangePointAndMark	-	noct	direct	-
+
+# --- kill ring and yank ---
+killNew	-	noct	direct	s
+killAppend	-	noct	adapt	s
+currentKill	-	noct	direct	n
+killRegion	-	noct	direct	start,end
+copyRegionAsKill	-	noct	direct	start,end
+killLine	-	noct	direct	-
+yank	-	noct	direct	-
+
+# --- undo ---
+undoBoundary	-	noct	direct	-
+undo	-	noct	direct	-
+
+# --- word movement ---
+forwardWord	-	noct	direct	n
+backwardWord	-	noct	direct	n
+killWord	-	noct	direct	n
+backwardKillWord	-	noct	direct	n
+
+# --- search ---
+searchForward	-	noct	adapt	s
+searchBackward	-	noct	adapt	s
+
+# --- buffers ---
+bufferName	-	noct	direct	-
+getBufferCreate	-	noct	direct	name
+setBuffer	-	noct	direct	name
+killBuffer	-	noct	direct	name
+fileNameNondirectory	-	noct	direct	f
+
+# --- regex search ---
+reSearchForward	-	noct	adapt	s
+reSearchBackward	-	noct	adapt	s
+matchBeginning	-	noct	adapt	n
+matchEnd	-	noct	adapt	n
+
+# --- editing commands ---
+openLine	-	noct	direct	n
+transposeChars	-	noct	adapt	-
+upcaseWord	-	noct	direct	n
+downcaseWord	-	noct	direct	n
+capitalizeWord	-	noct	direct	n
+killWholeLine	-	noct	direct	-
+pushMark	-	noct	direct	pos
+
+# --- replace ---
+replaceString	-	noct	adapt	from,to
+replaceRegexp	-	noct	adapt	pat,to
+
+# --- file names ---
+expandFileName	-	noct	adapt	name,dir
+abbreviateFileName	-	noct	adapt	name
+fileNameDirectory	-	noct	adapt	name
+
+# --- SKK ---
+skkSetRomKanaRule	-	noct	direct	rules

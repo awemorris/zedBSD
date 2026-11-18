@@ -1,0 +1,41 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * BSD error-reporting interfaces.
+ */
+
+#ifndef LIBC_ERR_H
+#define LIBC_ERR_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdarg.h>
+#include <stdio.h>
+
+void err(int, const char *, ...) __attribute__((__noreturn__));
+void errc(int, int, const char *, ...) __attribute__((__noreturn__));
+void errx(int, const char *, ...) __attribute__((__noreturn__));
+void verr(int, const char *, va_list) __attribute__((__noreturn__));
+void verrc(int, int, const char *, va_list) __attribute__((__noreturn__));
+void verrx(int, const char *, va_list) __attribute__((__noreturn__));
+void warn(const char *, ...);
+void warnc(int, const char *, ...);
+void warnx(const char *, ...);
+void vwarn(const char *, va_list);
+void vwarnc(int, const char *, va_list);
+void vwarnx(const char *, va_list);
+void err_set_file(void *);
+void err_set_exit(void (*)(int));
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

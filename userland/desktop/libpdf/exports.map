@@ -1,0 +1,88 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <pdf.h> declares leave the library. */
+{
+	global:
+		pdf_writer_create;
+		pdf_writer_destroy;
+		pdf_writer_begin_page;
+		pdf_writer_end_page;
+		pdf_writer_set_fill_color;
+		pdf_writer_move_to;
+		pdf_writer_line_to;
+		pdf_writer_curve_to;
+		pdf_writer_close_path;
+		pdf_writer_fill;
+		pdf_writer_fill_outline;
+		pdf_writer_draw_rgba_image;
+		pdf_writer_draw_jpeg_image;
+		pdf_writer_attach_file;
+		pdf_writer_set_document_id;
+		pdf_writer_get_document_id;
+		pdf_writer_set_dates;
+		pdf_writer_get_page_content_hash;
+		pdf_writer_save;
+		pdf_writer_save_state;
+		pdf_writer_restore_state;
+		pdf_writer_set_blend_mode;
+		pdf_writer_set_content_flate;
+		pdf_writer_add_grain;
+		pdf_writer_set_fill_grain;
+		pdf_writer_create_update;
+		pdf_document_save_clean;
+		pdf_writer_keep_page;
+		pdf_writer_begin_page_over;
+		pdf_outline_stroke;
+		pdf_outline_free;
+		pdf_outline_stroke_style;
+		pdf_outline_stroke_ranges;
+		pdf_outline_ranges_free;
+		pdf_document_open;
+		pdf_document_open_memory;
+		pdf_font_memory_add;
+		pdf_document_open_password;
+		pdf_document_open_memory_password;
+		pdf_document_close;
+		pdf_document_page_count;
+		pdf_document_page_box;
+		pdf_document_page_content_hash;
+		pdf_document_find_attachment;
+		pdf_document_find_attachment_type;
+		pdf_document_get_id;
+		pdf_document_get_dates;
+		pdf_document_get_revision;
+		pdf_document_signed;
+		pdf_document_encrypted;
+		pdf_page_render;
+		pdf_display_list_destroy;
+		pdf_display_list_rasterize;
+		pdf_page_editor_open;
+		pdf_page_editor_close;
+		pdf_page_editor_status;
+		pdf_page_editor_count;
+		pdf_page_editor_object;
+		pdf_page_editor_key;
+		pdf_page_editor_find;
+		pdf_page_editor_hit;
+		pdf_page_editor_reset;
+		pdf_page_editor_delete;
+		pdf_page_editor_place;
+		pdf_page_editor_render;
+		pdf_page_editor_set_image;
+		pdf_page_editor_insert_image;
+		pdf_writer_begin_page_edited;
+		pdf_page_editor_read_image;
+		pdf_page_editor_blank;
+		pdf_writer_draw_page_editor;
+		pdf_page_editor_set_text;
+		pdf_page_editor_insert_text;
+		pdf_page_text_open;
+		pdf_page_text_close;
+	local:
+		*;
+};

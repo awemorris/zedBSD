@@ -1,0 +1,24 @@
+#version 450
+// Stage 2: an inclusive prefix sum over 64 words, two shared arrays and two barriers per step.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint a[64];
+shared uint b[64];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	a[l] = src[gl_GlobalInvocationID.x];
+	barrier();
+	for (uint offset = 1u; offset < 64u; offset = offset << 1) {
+		uint v = a[l];
+		if (l >= offset)
+			v = v + a[l - offset];
+		b[l] = v;
+		barrier();
+		a[l] = b[l];
+		barrier();
+	}
+	o[gl_GlobalInvocationID.x] = a[l];
+}

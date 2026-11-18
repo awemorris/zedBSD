@@ -1,0 +1,48 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The rows of the Gen12 MOCS table; workarounds.c includes them inside
+ * the initializer of i915_gen12_mocs_table[].  A row is
+ * { index, control, l3cc }; the value macros come from mocs.h.  Entries 0
+ * and 1 are left to the platform and Gen12 does not set them.  Entry 63 has
+ * no row and takes the unused-entry values (I915_GT_L3_3_WB in the upper
+ * half of LNCFCMOCS31), as the table checked on the hardware had it.
+ *
+ * Values referenced: Linux v6.8.12 drivers/gpu/drm/i915/gt/intel_mocs.c
+ * (gen12_mocs_table, GEN11_MOCS_ENTRIES).
+ */
+
+	{  2, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_3_WB },
+	{  3, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC, I915_GT_L3_1_UC },
+	{  4, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC, I915_GT_L3_3_WB },
+	{  5, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_1_UC },
+	{  6, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(1), I915_GT_L3_1_UC },
+	{  7, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(1), I915_GT_L3_3_WB },
+	{  8, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(2), I915_GT_L3_1_UC },
+	{  9, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(2), I915_GT_L3_3_WB },
+	{ 10, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_AOM(1), I915_GT_L3_1_UC },
+	{ 11, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_AOM(1), I915_GT_L3_3_WB },
+	{ 12, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(1) | I915_GT_LE_AOM(1), I915_GT_L3_1_UC },
+	{ 13, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(1) | I915_GT_LE_AOM(1), I915_GT_L3_3_WB },
+	{ 14, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(2) | I915_GT_LE_AOM(1), I915_GT_L3_1_UC },
+	{ 15, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(2) | I915_GT_LE_AOM(1), I915_GT_L3_3_WB },
+	{ 16, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC | I915_GT_LE_SCF(1), I915_GT_L3_1_UC },
+	{ 17, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC | I915_GT_LE_SCF(1), I915_GT_L3_3_WB },
+	{ 18, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_SSE(3), I915_GT_L3_3_WB },
+	{ 19, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_SCC(7), I915_GT_L3_3_WB },
+	{ 20, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_SCC(3), I915_GT_L3_3_WB },
+	{ 21, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_SCC(1), I915_GT_L3_3_WB },
+	{ 22, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_RSC(1) | I915_GT_LE_SCC(3), I915_GT_L3_3_WB },
+	{ 23, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3) | I915_GT_LE_RSC(1) | I915_GT_LE_SCC(7), I915_GT_L3_3_WB },
+	{ 62, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_1_UC },
+	{ 48, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_3_WB },
+	{ 49, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC, I915_GT_L3_3_WB },
+	{ 50, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_1_UC },
+	{ 51, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC, I915_GT_L3_1_UC },
+	{ 60, I915_GT_LE_3_WB | I915_GT_LE_TC_1_LLC | I915_GT_LE_LRUM(3), I915_GT_L3_1_UC },
+	{ 61, I915_GT_LE_1_UC | I915_GT_LE_TC_1_LLC, I915_GT_L3_3_WB },

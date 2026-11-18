@@ -1,0 +1,40 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ID: a 4 x 2 x 3 group: every invocation writes its built-ins, 13 words at its global
+ * linear index, and counts itself in the last word of the buffer's head.
+ */
+#version 450
+
+layout(local_size_x = 4, local_size_y = 2, local_size_z = 3) in;
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+layout(std430, set = 0, binding = 1) buffer N { uint count; };
+
+void main()
+{
+    uvec3 g = gl_GlobalInvocationID;
+    uvec3 size = gl_NumWorkGroups * gl_WorkGroupSize;
+    uint linear = g.x + size.x * (g.y + size.y * g.z);
+    uint at = linear * 13u;
+
+    o[at + 0u] = gl_LocalInvocationID.x;
+    o[at + 1u] = gl_LocalInvocationID.y;
+    o[at + 2u] = gl_LocalInvocationID.z;
+    o[at + 3u] = gl_LocalInvocationIndex;
+    o[at + 4u] = gl_WorkGroupID.x;
+    o[at + 5u] = gl_WorkGroupID.y;
+    o[at + 6u] = gl_WorkGroupID.z;
+    o[at + 7u] = gl_NumWorkGroups.x;
+    o[at + 8u] = gl_NumWorkGroups.y;
+    o[at + 9u] = gl_NumWorkGroups.z;
+    o[at + 10u] = g.x;
+    o[at + 11u] = g.y;
+    o[at + 12u] = g.z;
+    atomicAdd(count, 1u);
+}

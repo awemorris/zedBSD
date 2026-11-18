@@ -1,0 +1,51 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("alpha 123 beta\ngamma 4567 delta\nfoo@bar.com line\nend");
+    Editor.gotoChar(1);
+
+    // Basic forward search with groups (Emacs escape syntax).
+    oracleEmit(Editor.reSearchForward("\\([0-9]+\\) \\([a-z]+\\)"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.matchBeginning(0));
+    oracleEmit(Editor.matchEnd(0));
+    oracleEmit(Editor.matchBeginning(1));
+    oracleEmit(Editor.matchEnd(1));
+    oracleEmit(Editor.matchBeginning(2));
+    oracleEmit(Editor.matchEnd(2));
+
+    // Next occurrence.
+    oracleEmit(Editor.reSearchForward("[0-9]+"));
+    oracleEmit(Editor.matchBeginning(0));
+
+    // Failure leaves point.
+    oracleEmit(Editor.reSearchForward("[0-9]+"));
+    oracleEmit(Editor.point());
+
+    // Anchors respect real lines even when starting mid-line.
+    Editor.gotoChar(8);
+    oracleEmit(Editor.reSearchForward("^gamma"));
+    oracleEmit(Editor.matchBeginning(0));
+    Editor.gotoChar(3);
+    oracleEmit(Editor.reSearchForward("a$"));
+    oracleEmit(Editor.matchBeginning(0));
+
+    // Alternation and repetition in Emacs syntax.
+    Editor.gotoChar(1);
+    oracleEmit(Editor.reSearchForward("gamma\\|beta"));
+    oracleEmit(Editor.matchBeginning(0));
+    Editor.gotoChar(1);
+    oracleEmit(Editor.reSearchForward("[0-9]\\{3\\}"));
+    oracleEmit(Editor.matchBeginning(0));
+    oracleEmit(Editor.matchEnd(0));
+
+    // Backward search.
+    Editor.gotoChar(Editor.pointMax());
+    oracleEmit(Editor.reSearchBackward("[0-9]+"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.matchEnd(0));
+    oracleEmit(Editor.reSearchBackward("[a-z]+@[a-z.]+"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.reSearchBackward("nosuchthing"));
+    oracleEmit(Editor.point());
+}

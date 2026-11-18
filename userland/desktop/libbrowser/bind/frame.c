@@ -1,0 +1,1355 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Initial about:blank HTML iframe contexts share their tab's heap and agent,
+ * with separate realms, globals and Documents. A connected element retains
+ * its collectible child; removal retires nested contexts synchronously.
+ */
+
+#include "bind/internal.h"
+#include "net/net.h"
+
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
+
+/* Bounds synchronous recursive retirement through nested child Documents. */
+#define FRAME_MAX_DEPTH 64U
+
+/* The calling thread's runner (bind_set_thread_runner): NULL on a page's own thread. */
+static _Thread_local void *frame_runner;
+
+static int frame_src_get(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+static int frame_src_set(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+static int frame_svg_document(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+static int frame_document(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int frame_global(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+
+/* Synchronous child accessors create only an initial, verified blank context. */
+static const struct bind_attribute frame_attributes[] = {
+	{ "src", frame_src_get, frame_src_set },
+	{ "contentDocument", frame_document, NULL },
+	{ "contentWindow", frame_global, NULL },
+	{ "name", bind_iframe_name_get, bind_iframe_name_set },
+	{ "frameBorder", bind_iframe_frame_border_get, bind_iframe_frame_border_set },
+	{ "scrolling", bind_iframe_scrolling_get, bind_iframe_scrolling_set },
+	{ "width", bind_iframe_width_get, bind_iframe_width_set },
+	{ "height", bind_iframe_height_get, bind_iframe_height_set },
+	{ "allow", bind_iframe_allow_get, bind_iframe_allow_set },
+	{ NULL, NULL, NULL }
+};
+
+/* SVG access reports only a current actual SVG resource owner. */
+static const struct bind_operation frame_operations[] = {
+	{ "getSVGDocument", 0, frame_svg_document },
+	{ NULL, 0, NULL }
+};
+
+/* HTML iframes retain the ordinary HTMLElement properties and methods. */
+const struct bind_interface bind_html_iframe_element_interface = {
+	"HTMLIFrameElement", BIND_HTML_ELEMENT, 0, NULL, frame_attributes, frame_operations, NULL
+};
+
+static int frame_loaded_document(struct vm_realm *realm, vm_value receiver, int tag, int svg, vm_value *result);
+static int frame_context(struct vm_realm *realm, vm_value this_value, struct bind_window **window);
+static int frame_create(struct vm_realm *caller, struct bind_window *parent, struct dom_element *element, struct bind_window **window);
+static int frame_tree(struct dom_document *document);
+static int frame_window_this(struct vm_realm *realm, vm_value this_value, struct bind_window **window);
+static int frame_origin(struct bind_window *window, struct wb_buffer *origin);
+static int frame_web_origin(const struct wb_buffer *origin);
+static void frame_removed(struct dom_document *document, struct dom_node *node);
+static void frame_remove_subtree(struct dom_node *root);
+
+/*
+ * Tells whether a frame's sandbox lets its document run scripts: no sandbox attribute, or one with the allow-scripts token.
+ */
+int
+bind_frame_scripts_allowed(
+	struct dom_element *element)
+{
+	struct vm_string *sandbox;
+	struct wb_buffer text;
+	const char *at;
+	int allowed;
+
+	sandbox = dom_attribute_ascii(element, "sandbox");
+	if (sandbox == NULL)
+		return 1;
+	wb_buffer_init(&text);
+	allowed = 0;
+	if (vm_string_to_utf8(sandbox, &text) == 0) {
+		at = strstr(wb_buffer_string(&text), "allow-scripts");
+		if (at != NULL && (at == wb_buffer_string(&text) || at[-1] == ' ') && (at[13] == '\0' || at[13] == ' '))
+			allowed = 1;
+	}
+	wb_buffer_release(&text);
+	return allowed;
+}
+
+/*
+ * Gives how a window sees another: the other's global, or (when the two are not of the same origin: of different
+ * origins, or either with an opaque one) the restricted view the viewer's prelude makes of it, which has postMessage
+ * and little else.
+ */
+int
+bind_window_view(
+	struct bind_window *viewer,
+	struct bind_window *target,
+	vm_value *result)
+{
+	struct bind_window *owner;
+	struct vm_realm *realm;
+	vm_value argument;
+	int status;
+
+	*result = vm_value_cell(target->realm->global);
+	if (viewer == target)
+		return 0;
+
+	/*
+	 * A frame whose document its parent cannot reach (of another origin, or of an opaque one) is seen through the one
+	 * proxy its element has, which shows postMessage and little else and stays the same as the frame goes from one
+	 * document to another.  The element keeps the proxy until it leaves its document, so that a released element or
+	 * proxy keeps no frame's document alive.  A frame the parent reaches is seen as its own global: that global belongs
+	 * to the frame's own realm, and outlives the parent's (an embedding may destroy the parent's realm while a script of
+	 * the frame, or the embedding, still holds it).
+	 */
+	owner = target->frame != NULL ? target->frame->node.document->view : NULL;
+	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && bind_window_reachable(viewer, owner) &&
+	    !bind_window_reachable(owner, target)) {
+		if (target->frame->frame_proxy != NULL) {
+			*result = vm_value_cell(target->frame->frame_proxy);
+			return 0;
+		}
+		status = bind_wrap(owner, &target->frame->node, &argument);
+		if (status != 0)
+			return status;
+		realm = owner->realm;
+		status = vm_call(realm, vm_value_cell(owner->frame_proxy_maker), VM_VALUE_UNDEFINED, &argument, 1, result);
+		if (status == VM_THROWN) {
+			realm->exception = VM_VALUE_UNDEFINED;
+			*result = vm_value_cell(target->realm->global);
+			return 0;
+		}
+		if (status == 0 && vm_value_is_object(*result))
+			target->frame->frame_proxy = vm_value_as_cell(*result);
+		return status;
+	}
+
+	/* A window of another origin (or of an opaque one) is seen only through a restricted view. */
+	if (bind_window_reachable(viewer, target) || viewer->window_wrapper == NULL)
+		return 0;
+	realm = viewer->realm;
+	argument = vm_value_cell(target->realm->global);
+	status = vm_call(realm, vm_value_cell(viewer->window_wrapper), VM_VALUE_UNDEFINED, &argument, 1, result);
+	if (status == VM_THROWN) {
+		realm->exception = VM_VALUE_UNDEFINED;
+		*result = vm_value_cell(target->realm->global);
+		return 0;
+	}
+	return status;
+}
+
+/*
+ * Tells whether one window's scripts may reach another's objects: not when either is a sandboxed frame of an opaque
+ * origin (unless they are the same window), nor when both have a web origin (a scheme, a host and a port) and the
+ * two differ.  Windows without such an origin (local files, about:blank, documents made by scripts) keep the file
+ * profile of one tab and reach each other.
+ */
+int
+bind_window_reachable(
+	struct bind_window *viewer,
+	struct bind_window *target)
+{
+	struct wb_buffer one;
+	struct wb_buffer other;
+	int reachable;
+	int error;
+
+	/* A window reaches itself; an opaque origin reaches no other. */
+	if (viewer == target)
+		return 1;
+	if (viewer->opaque || target->opaque)
+		return 0;
+
+	/* Both origins, serialized. */
+	wb_buffer_init(&one);
+	wb_buffer_init(&other);
+	error = frame_origin(viewer, &one);
+	if (error == 0)
+		error = frame_origin(target, &other);
+
+	/* Two web origins must be equal; an origin that is not a web one ("null", or none) does not separate. */
+	reachable = 1;
+	if (error != 0)
+		reachable = 0;
+	if (error == 0 && frame_web_origin(&one) && frame_web_origin(&other)) {
+		if (one.length != other.length || memcmp(one.data, other.data, one.length) != 0)
+			reachable = 0;
+	}
+
+	/* The copies are released on either outcome. */
+	wb_buffer_release(&one);
+	wb_buffer_release(&other);
+	return reachable;
+}
+
+/*
+ * Tells whether a document of a URL in a frame of a window is of another
+ * agent than the window's: both have a web origin and the two differ (the
+ * windows that reach each other are of one agent; an opaque origin's frame
+ * keeps the restricted view of the window's agent).
+ */
+int
+bind_frame_foreign(
+	struct bind_window *parent,
+	const char *location,
+	size_t length)
+{
+	struct wb_buffer one;
+	struct wb_buffer other;
+	struct net_url url;
+	int foreign;
+	int error;
+
+	/* An opaque origin is no web one. */
+	if (parent->opaque)
+		return 0;
+
+	/* Both origins, serialized. */
+	wb_buffer_init(&one);
+	wb_buffer_init(&other);
+	memset(&url, 0, sizeof(url));
+	error = frame_origin(parent, &one);
+	if (error == 0)
+		error = net_url_parse(location, length, NULL, &url);
+	if (error == 0)
+		error = net_url_component(&url, NET_URL_ORIGIN, &other);
+	foreign = 0;
+	if (error == 0 && frame_web_origin(&one) && frame_web_origin(&other)) {
+		if (one.length != other.length || memcmp(one.data, other.data, one.length) != 0)
+			foreign = 1;
+	}
+
+	/* The copies are released on either outcome. */
+	net_url_release(&url);
+	wb_buffer_release(&one);
+	wb_buffer_release(&other);
+	return foreign;
+}
+
+/*
+ * Tells whether a frame's sandbox leaves it an opaque origin, which no child global is exposed for: it has a sandbox
+ * attribute without the allow-same-origin token.
+ */
+int
+bind_frame_sandboxed(
+	struct dom_element *element)
+{
+	struct vm_string *sandbox;
+	struct wb_buffer text;
+	const char *at;
+	int sandboxed;
+
+	sandbox = dom_attribute_ascii(element, "sandbox");
+	if (sandbox == NULL)
+		return 0;
+	wb_buffer_init(&text);
+	sandboxed = 1;
+	if (vm_string_to_utf8(sandbox, &text) == 0) {
+		at = strstr(wb_buffer_string(&text), "allow-same-origin");
+		if (at != NULL && (at == wb_buffer_string(&text) || at[-1] == ' ') && (at[17] == '\0' || at[17] == ' '))
+			sandboxed = 0;
+	}
+	wb_buffer_release(&text);
+	return sandboxed;
+}
+
+/*
+ * Reports an object's actual loaded Document without creating a blank context.
+ */
+int
+bind_object_document(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int error;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The native branded helper finds only connected current resource owners. */
+	error = frame_loaded_document(realm, receiver, DOM_TAG_OBJECT, 0, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the actual loaded Document or null is available. */
+	return 0;
+}
+
+/*
+ * Reports an object's actual loaded SVG Document.
+ */
+int
+bind_object_svg_document(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int error;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Declared native content kind determines SVG availability. */
+	error = frame_loaded_document(realm, receiver, DOM_TAG_OBJECT, 1, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: this is the actual SVG resource owner or null. */
+	return 0;
+}
+
+/*
+ * Refreshes a managed child's viewport from its actual embedding content box.
+ *
+ * Empty hosts retain the supplied integer viewport contract; active layout hosts
+ * provide current used geometry without reading script-visible element properties.
+ */
+int
+bind_frame_viewport(
+	struct bind_window *window)
+{
+	struct bind_window *parent;
+	struct dom_element *frame;
+	struct vm_cell *roots[2];
+	struct bind_box box;
+	double width;
+	double height;
+	unsigned index;
+	int connected;
+	int found;
+	int status;
+
+	/* Primary hosts and retired managed contexts retain their embedding contract. */
+	if (!window->owned ||
+	    window->detached ||
+	    window->frame == NULL)
+		return 0;
+
+	/* Resolve the frame's actual current parent owner without consulting global aliases. */
+	frame = window->frame;
+	parent = frame->node.document->view;
+	if (parent == NULL ||
+	    parent->detached ||
+	    parent->host.node_box == NULL)
+		return 0;
+
+	/* Mere ownership by a Document does not make a detached frame rendered. */
+	connected = dom_is_inclusive_ancestor(&parent->document->node, &frame->node);
+	if (!connected)
+		return 0;
+
+	/* A host layout callback may allocate or retire the only connected frame edge. */
+	roots[0] = &window->realm->cell;
+	roots[1] = &frame->node.cell;
+	for (index = 0; index < 2U; index++) {
+		status = vm_heap_add_root(window->realm->heap, &roots[index]);
+		if (status != 0) {
+			/* Release only slots whose registration succeeded before the callback. */
+			while (index != 0) {
+				index--;
+				vm_heap_remove_root(window->realm->heap, &roots[index]);
+			}
+
+			/* Propagate the failed temporary ownership registration. */
+			return status;
+		}
+	}
+
+	/* No returned geometry is observed if the callback retired or reparented this context. */
+	memset(&box, 0, sizeof(box));
+	found = parent->host.node_box(parent->host.context, &frame->node, &box);
+	if (window->detached ||
+	    window->frame != frame ||
+	    frame->node.document->view != parent) {
+		vm_heap_remove_root(window->realm->heap, &roots[1]);
+		vm_heap_remove_root(window->realm->heap, &roots[0]);
+		return 0;
+	}
+
+	/* Missing layout boxes produce an actual zero-size child viewport. */
+	width = 0;
+	height = 0;
+	if (found) {
+		/* Borders and padding surround, rather than enlarge, the child's content viewport. */
+		width = box.width - box.border_left - box.border_right - box.padding_left - box.padding_right;
+		height = box.height - box.border_top - box.border_bottom - box.padding_top - box.padding_bottom;
+
+		/* A zoomed frame's document sees its size in its own, unzoomed, pixels. */
+		if (box.zoom > 0.0) {
+			width /= box.zoom;
+			height /= box.zoom;
+		}
+	}
+
+	/* Native negative content extents clamp to zero independently on each axis. */
+	if (width < 0)
+		width = 0;
+
+	/* Height has the same nonnegative content-box bound. */
+	if (height < 0)
+		height = 0;
+
+	/* Reject NaN, infinity and out-of-int extents before the existing integer conversion. */
+	status = 0;
+	if (!(width >= 0) ||
+	    !(height >= 0) ||
+	    width > INT_MAX ||
+	    height > INT_MAX) {
+		status = EOVERFLOW;
+	} else {
+		/* Exact zero stays zero; the established viewport contract uses integral CSS pixels. */
+		bind_window_set_viewport(window, (int)width, (int)height);
+	}
+
+	/* No managed ownership edge is registered beyond this one geometry observation. */
+	vm_heap_remove_root(window->realm->heap, &roots[1]);
+	vm_heap_remove_root(window->realm->heap, &roots[0]);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: later media cache lookups use the current actual child viewport. */
+	return 0;
+}
+
+/*
+ * Attaches a completed Window to its Document without a DOM-to-binding include.
+ */
+void
+bind_frames_attach(
+	struct bind_window *window)
+{
+	/* Managed Document.context already supplies the traced lifetime edge. */
+	window->document->view = window;
+	window->document->removed = frame_removed;
+	window->document->attribute_changed = bind_environment_attribute_mutation;
+
+	/* Succeeded: wrapper creation and removal can find the actual owner. */
+	return;
+}
+
+/*
+ * Retires every child context of a detached Window while keeping its Document.
+ */
+void
+bind_frames_detach(
+	struct bind_window *window)
+{
+	/* Each nested owner is detached before the enclosing Window can disappear. */
+	frame_remove_subtree(&window->document->node);
+
+	/* Succeeded: no connected element retains a retired child context. */
+	return;
+}
+
+/*
+ * Clears an explicit primary Window's Document hooks before its C record dies.
+ */
+void
+bind_frames_release(
+	struct bind_window *window)
+{
+	/* The primary embedder calls this while its DOM cells are still live. */
+	bind_window_detach(window);
+	window->document->view = NULL;
+	window->document->removed = NULL;
+	window->document->attribute_changed = NULL;
+
+	/* Succeeded: subsequent DOM removal cannot call the released primary host. */
+	return;
+}
+
+/* Sets the calling thread's runner: the embedder's thread of an iframe sets its own, a page's own thread none. */
+void
+bind_set_thread_runner(
+	void *runner)
+{
+	/* This thread's. */
+	frame_runner = runner;
+}
+
+/* Reports the calling thread's runner (NULL: a page's own thread). */
+void *
+bind_thread_runner(void)
+{
+	/* This thread's. */
+	return frame_runner;
+}
+
+/*
+ * Reports the runner an element's browsing context runs on: the element's
+ * own thread, or else that of the window of the element's document (NULL
+ * for the page's own thread).
+ */
+void *
+bind_element_runner(
+	const struct dom_element *element)
+{
+	const struct bind_window *window;
+	unsigned depth;
+
+	/* Up through the frames until one has a thread. */
+	for (depth = 0; element != NULL && depth <= FRAME_MAX_DEPTH; depth++) {
+		if (element->frame_thread != NULL)
+			return element->frame_thread;
+		window = element->node.document->view;
+		if (window == NULL)
+			return NULL;
+		element = window->frame;
+	}
+
+	/* The page's own thread. */
+	return NULL;
+}
+
+/* Reports the runner a window's tasks run on (NULL for the page's own thread). */
+void *
+bind_window_runner(
+	const struct bind_window *window)
+{
+	/* A top-level or retired window runs on the page's thread. */
+	if (window->frame == NULL)
+		return NULL;
+	return bind_element_runner(window->frame);
+}
+
+/*
+ * Reports the connected child window of an embedding element (an HTML iframe
+ * or object), or NULL when the node holds none.
+ */
+struct bind_window *
+bind_frame_child(
+	const struct dom_node *node)
+{
+	const struct dom_element *element;
+	const struct vm_realm *realm;
+
+	/* Only an HTML iframe or object holds a frame. */
+	if (node->type != DOM_ELEMENT)
+		return NULL;
+	element = (const struct dom_element *)node;
+	if (element->ns != DOM_NS_HTML)
+		return NULL;
+	if (element->tag != DOM_TAG_IFRAME && element->tag != DOM_TAG_OBJECT)
+		return NULL;
+
+	/* Its published context, if there is one. */
+	realm = (const struct vm_realm *)element->child_context;
+	if (realm == NULL)
+		return NULL;
+	return realm->host;
+}
+
+/*
+ * Points a frame's own document at another location, as the document's script
+ * does when it navigates: the frame element's source attribute stays, and the
+ * page loads the location into the frame at its next checkpoint.  Reports in
+ * *started whether this window is a connected frame's (a top-level window is
+ * navigated by its host).
+ */
+int
+bind_frame_navigate(
+	struct bind_window *window,
+	const char *location,
+	size_t length,
+	int *started)
+{
+	struct vm_string *string;
+
+	/* Only a connected frame can be pointed elsewhere. */
+	*started = 0;
+	if (window->detached || window->frame == NULL)
+		return 0;
+
+	/* The location is a string of the heap, which the element keeps alive. */
+	string = vm_string_from_utf8(window->realm->heap, location, length);
+	if (string == NULL)
+		return ENOMEM;
+	window->frame->child_navigation = string;
+
+	/* Succeeded: the frame's next scan loads the location. */
+	*started = 1;
+	return 0;
+}
+
+/*
+ * Reports the receiver Window's parent, or itself for a top-level context.
+ */
+int
+bind_frame_parent(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_object *global;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Borrowed getters must resolve the receiver's actual Window across realms. */
+	status = frame_window_this(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* The top-level window of a frame of another agent sees its parent through a proxy. */
+	if (window->remote_framed && !window->detached)
+		return bind_remote_relative(window, BIND_REMOTE_PARENT, result);
+
+	/* The parent relation remains readable from a saved detached Window. */
+	global = window->parent_global;
+	if (global == NULL)
+		global = window->realm->global;
+	*result = vm_value_cell(global);
+
+	/* A parent of another origin (or a frame of an opaque one) is seen only through the restricted view. */
+	if (window->frame != NULL && window->frame->node.document->view != NULL &&
+	    !bind_window_reachable(window, window->frame->node.document->view))
+		return bind_window_view(window, window->frame->node.document->view, result);
+
+	/* Succeeded: the receiver's parent identity is reported. */
+	return 0;
+}
+
+/*
+ * Reports the receiver Window's outermost ancestor.
+ */
+int
+bind_frame_top(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct bind_window *top;
+	struct vm_object *global;
+	int depth;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Validates a real Window without invoking user-defined document getters. */
+	status = frame_window_this(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* The top-level window of a frame of another agent sees its top through a proxy. */
+	if (window->remote_framed && !window->detached)
+		return bind_remote_relative(window, BIND_REMOTE_TOP, result);
+
+	/* A top-level context has no separate ancestor global. */
+	global = window->top_global;
+	if (global == NULL)
+		global = window->realm->global;
+	*result = vm_value_cell(global);
+
+	/* A top window of another origin (or seen from a frame of an opaque one) is seen only through the restricted view. */
+	top = window;
+	for (depth = 0; depth < 64 && top->frame != NULL && top->frame->node.document->view != NULL; depth++)
+		top = top->frame->node.document->view;
+	if (top != window && !bind_window_reachable(window, top))
+		return bind_window_view(window, top, result);
+
+	/* Succeeded: the outermost ancestor's identity is reported. */
+	return 0;
+}
+
+/*
+ * Reports the receiver Window itself for the frames attribute.
+ */
+int
+bind_frame_self(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The frames identity is the Window, not a parent alias or a new Array. */
+	status = frame_window_this(realm, this_value, &window);
+	if (status != 0)
+		return status;
+	*result = vm_value_cell(window->realm->global);
+
+	/* Succeeded: the receiver's frames identity is reported. */
+	return 0;
+}
+
+/*
+ * Reports whether a saved Window's browsing context has been retired.
+ */
+int
+bind_frame_closed(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The Window remains a valid receiver after its frame is removed. */
+	status = frame_window_this(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* Retirement changes state without destroying reachable script objects. */
+	*result = VM_VALUE_FALSE;
+	if (window->detached)
+		*result = VM_VALUE_TRUE;
+
+	/* Succeeded: the receiver's lifecycle state is reported. */
+	return 0;
+}
+
+/*
+ * Reports a child's connected iframe element, or null after retirement.
+ */
+int
+bind_frame_element(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Resolves the actual receiver rather than the borrowed getter's realm. */
+	status = frame_window_this(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* Top-level and retired contexts have no connected frame element. */
+	*result = VM_VALUE_NULL;
+	if (window->frame == NULL)
+		return 0;
+
+	/* The element is in the parent's Document, out of reach from another origin. */
+	if (window->frame->node.document->view == NULL || !bind_window_reachable(window, window->frame->node.document->view))
+		return 0;
+
+	/* The parent Document chooses the frame wrapper's original realm. */
+	status = bind_wrap(window, &window->frame->node, result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the connected frame's cached wrapper is reported. */
+	return 0;
+}
+
+/* Reports a connected iframe's child Document without loading foreign content. */
+static int
+frame_document(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Detached, inactive and unsupported sandbox contexts expose no Document. */
+	*result = VM_VALUE_NULL;
+	status = frame_context(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* An absent supported context has no child Document to wrap. */
+	if (window == NULL)
+		return 0;
+
+	/* A Document of another origin (or of an opaque one) is not reachable from the parent. */
+	if (!bind_window_reachable(bind_window_of(realm), window))
+		return 0;
+
+	/* Its own realm's wrapper was installed with its global document property. */
+	status = bind_wrap(window, &window->document->node, result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: a distinct initial child Document is reported. */
+	return 0;
+}
+
+/* Reports a connected iframe's distinct child global object. */
+static int
+frame_global(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct dom_node *node;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* No caller-realm alias is returned when there is no supported context. */
+	*result = VM_VALUE_NULL;
+
+	/* A frame of another agent is seen through its proxy. */
+	status = bind_this_node(realm, this_value, &node);
+	if (status != 0)
+		return status;
+	if (node->type == DOM_ELEMENT && ((struct dom_element *)node)->frame_remote != NULL)
+		return bind_remote_child(bind_window_of(realm), (struct dom_element *)node, result);
+	status = frame_context(realm, this_value, &window);
+	if (status != 0)
+		return status;
+
+	/* An absent supported context has no child Window to report. */
+	if (window == NULL)
+		return 0;
+
+	/* Publishes this child's own global, independently of the caller's realm (an opaque origin's through the parent's restricted view of it). */
+	*result = vm_value_cell(window->realm->global);
+	if (window->frame != NULL && window->frame->node.document->view != NULL)
+		return bind_window_view(window->frame->node.document->view, window, result);
+
+	/* Succeeded: a distinct initial child Window is reported. */
+	return 0;
+}
+
+/* Finds or creates an initial child only while its owning Document is active. */
+static int
+frame_context(
+	struct vm_realm *realm,
+	vm_value this_value,
+	struct bind_window **window)
+{
+	struct dom_node *node;
+	struct dom_element *element;
+	struct bind_window *parent;
+	struct vm_realm *child;
+	int connected;
+	int status;
+
+	/* The interface getter accepts only an actual HTML iframe element. */
+	*window = NULL;
+	status = bind_this_node(realm, this_value, &node);
+	if (status != 0)
+		return status;
+
+	/* Non-element nodes cannot own an HTML iframe context. */
+	if (node->type != DOM_ELEMENT) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* Foreign namespaces and unrelated HTMLElement receivers are not iframes. */
+	element = (struct dom_element *)node;
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_IFRAME) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* An inactive saved Document cannot create new browsing contexts. */
+	parent = node->document->view;
+	if (parent == NULL || parent->detached)
+		return 0;
+
+	/* Mere ownership by a Document does not connect a detached element. */
+	connected = dom_is_inclusive_ancestor(&node->document->node, node);
+	if (!connected)
+		return 0;
+
+	/* Repeated observation preserves the one published context's identity. */
+	if (element->child_context != NULL) {
+		child = (struct vm_realm *)element->child_context;
+		*window = child->host;
+		return 0;
+	}
+
+	/* An iframe the embedder gave no thread has no browsing context, and one that shows a frame of another agent none of this agent. */
+	if (element->frame_refused || element->frame_remote != NULL)
+		return 0;
+
+	/* Publishes only a complete initial context, propagating allocation failures. */
+	status = frame_create(realm, parent, element, window);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the connected element now owns its initial context. */
+	return 0;
+}
+
+/* Builds an initial blank tree under explicit ownership before context installation. */
+static int
+frame_create(
+	struct vm_realm *caller,
+	struct bind_window *parent,
+	struct dom_element *element,
+	struct bind_window **window)
+{
+	struct dom_document *document;
+	struct vm_cell *root;
+	int status;
+
+	/* Preserve the existing synchronous nesting exception. */
+	if (parent->context_depth >= FRAME_MAX_DEPTH) {
+		status = vm_throw_range_error(caller, "Maximum frame nesting depth exceeded.");
+		return status;
+	}
+
+	/* The context's thread first, where the embedder gives frames threads; one it refuses leaves the iframe without a context. */
+	if (parent->host.frame_attach != NULL && element->frame_thread == NULL) {
+		status = parent->host.frame_attach(parent->host.context, element);
+		if (status != 0) {
+			element->frame_refused = 1;
+			return 0;
+		}
+	}
+
+	/* Register the slot before allocating any part of the initial tree. */
+	root = NULL;
+	status = vm_heap_add_root(caller->heap, &root);
+	if (status != 0)
+		return status;
+	document = dom_document_create(caller->heap);
+	if (document == NULL) {
+		vm_heap_remove_root(caller->heap, &root);
+		return ENOMEM;
+	}
+
+	/* The protected Document owns each node as soon as it is attached. */
+	root = &document->node.cell;
+	document->quirks = DOM_QUIRKS;
+	status = frame_tree(document);
+	if (status == 0)
+		status = bind_frame_install(parent, element, document, window);
+	vm_heap_remove_root(caller->heap, &root);
+	if (status != 0)
+		return status;
+
+	/* Initial blank contexts are synchronously complete before observation returns. */
+	bind_window_set_ready_state(*window, "complete");
+
+	/* Succeeded: the actual initial blank pair is owned by the iframe. */
+	return 0;
+}
+
+/* Creates html/head/body without a parser or script-created replacement stream. */
+static int
+frame_tree(
+	struct dom_document *document)
+{
+	struct vm_string *name;
+	struct dom_element *html;
+	struct dom_element *head;
+	struct dom_element *body;
+
+	/* Each allocation is checked before adding the next owned node. */
+	name = vm_atom_from_ascii(document->heap, "html");
+	if (name == NULL)
+		return ENOMEM;
+
+	/* Adds the root only after its name has been allocated successfully. */
+	html = dom_element_create(document, DOM_NS_HTML, name, NULL);
+	if (html == NULL)
+		return ENOMEM;
+	dom_append_child(&document->node, &html->node);
+
+	/* The empty head precedes the empty body in the initial document. */
+	name = vm_atom_from_ascii(document->heap, "head");
+	if (name == NULL)
+		return ENOMEM;
+
+	/* Adds an empty head as the root's first child. */
+	head = dom_element_create(document, DOM_NS_HTML, name, NULL);
+	if (head == NULL)
+		return ENOMEM;
+	dom_append_child(&html->node, &head->node);
+
+	/* The body exists synchronously when script first observes the context. */
+	name = vm_atom_from_ascii(document->heap, "body");
+	if (name == NULL)
+		return ENOMEM;
+
+	/* Adds the synchronously accessible body after the empty head. */
+	body = dom_element_create(document, DOM_NS_HTML, name, NULL);
+	if (body == NULL)
+		return ENOMEM;
+	dom_append_child(&html->node, &body->node);
+
+	/* Succeeded: the canonical blank tree is complete. */
+	return 0;
+}
+
+/* Validates a Window through its immutable own document property and owner. */
+static int
+frame_window_this(
+	struct vm_realm *realm,
+	vm_value this_value,
+	struct bind_window **window)
+{
+	struct vm_object *object;
+	struct vm_property property;
+	struct dom_node *node;
+	vm_value key;
+	int object_value;
+	int found;
+	int status;
+
+	/* No property getter or user code runs while the receiver is branded. */
+	*window = NULL;
+	object_value = vm_value_is_object(this_value);
+	if (!object_value) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* Real Window.document is an own, immutable data property in this binding. */
+	object = (struct vm_object *)vm_value_as_cell(this_value);
+	key = vm_key_from_ascii(realm->heap, "document");
+	if (key == VM_VALUE_EMPTY)
+		return ENOMEM;
+	found = vm_object_get_own_ordinary(object, key, &property);
+	if (!found) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* An arbitrary accessor property cannot impersonate a real Window. */
+	if ((property.attributes & VM_PROPERTY_ACCESSOR) != 0) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* A fake object with somebody else's Document still fails global identity. */
+	node = bind_node_of(*property.value);
+	if (node == NULL || node->type != DOM_DOCUMENT) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* Saved detached windows retain their owner, but released primaries do not. */
+	*window = node->document->view;
+	if (*window == NULL) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* The Document must name this exact global, not merely a copied property. */
+	if ((*window)->realm->global != object) {
+		status = bind_throw_illegal(realm);
+		return status;
+	}
+
+	/* Succeeded: this receiver has a live retained Window record. */
+	return 0;
+}
+
+/* Removes browsing-context ownership before DOM unlinks the removed subtree. */
+static void
+frame_removed(
+	struct dom_document *document,
+	struct dom_node *node)
+{
+	UNUSED_PARAMETER(document);
+
+	/* Every iframe below a removed ancestor loses its connected context. */
+	frame_remove_subtree(node);
+
+	/* Succeeded: DOM may now unlink without retaining active child contexts. */
+	return;
+}
+
+/* Walks DOM iteratively and recursively retires only bounded child contexts. */
+static void
+frame_remove_subtree(
+	struct dom_node *root)
+{
+	struct dom_node *walk;
+	struct dom_element *element;
+	struct vm_realm *realm;
+	struct bind_window *window;
+	struct bind_window *owner;
+
+	/* The root itself may be the iframe whose connection is disappearing. */
+	walk = root;
+	while (walk != NULL) {
+		/* Ordinary nodes have no browsing context to retire. */
+		if (walk->type == DOM_ELEMENT) {
+			element = (struct dom_element *)walk;
+
+			/* Removal invalidates pending work even if this element is reinserted before completion. */
+			element->child_epoch++;
+			element->child_load_seen = 0;
+			element->child_source = NULL;
+			element->child_attribute = NULL;
+			element->child_navigation = NULL;
+			element->frame_proxy = NULL;
+			element->frame_refused = 0;
+
+			/* Its thread ends first (the embedder's), then its context. */
+			owner = element->node.document->view;
+			if ((element->frame_thread != NULL || element->frame_remote != NULL) && owner != NULL && owner->host.frame_detach != NULL)
+				owner->host.frame_detach(owner->host.context, element);
+
+			/* Only published child contexts participate in synchronous retirement. */
+			if (element->child_context != NULL) {
+				/* Clears connection ownership before descending into nested contexts. */
+				realm = (struct vm_realm *)element->child_context;
+				window = realm->host;
+				element->child_context = NULL;
+
+				/* A complete child host loses its connected element before detaching. */
+				if (window != NULL) {
+					window->frame = NULL;
+					owner = element->node.document->view;
+					if (owner != NULL)
+						window->realm->job_target = owner->realm;
+					bind_window_detach(window);
+				}
+			}
+		}
+
+		/* Context retirement never changes the enclosing DOM traversal links. */
+		walk = bind_following(walk, root);
+	}
+
+	/* Succeeded: every connected child edge in this subtree was retired. */
+	return;
+}
+
+/* Reflects iframe src against its actual Document base. */
+static int
+frame_src_get(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int error;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Brand before reading the native source attribute. */
+	error = bind_reflect_url_get(realm, receiver, DOM_TAG_IFRAME, "src", result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: src is the real reflected URL. */
+	return 0;
+}
+
+/* Reflects iframe src after one WebIDL scalar conversion. */
+static int
+frame_src_set(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int error;
+
+	/* Brand before any potentially reentrant argument conversion. */
+	error = bind_reflect_url_set(realm, receiver, DOM_TAG_IFRAME, "src", args, count, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: native src controls subsequent resource tasks. */
+	return 0;
+}
+
+/* Reports only a current SVG MIME resource loaded by this iframe. */
+static int
+frame_svg_document(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int error;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The interface brand and actual content kind are checked independently. */
+	error = frame_loaded_document(realm, receiver, DOM_TAG_IFRAME, 1, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the loaded SVG owner or null is available. */
+	return 0;
+}
+
+/* Finds an existing current native owner without constructing a replacement. */
+static int
+frame_loaded_document(
+	struct vm_realm *realm,
+	vm_value receiver,
+	int tag,
+	int svg,
+	vm_value *result)
+{
+	struct dom_node *node;
+	struct dom_element *element;
+	struct vm_realm *child;
+	struct bind_window *parent;
+	struct bind_window *window;
+	int connected;
+	int error;
+
+	/* Borrowing an accessor cannot forge an iframe or object interface. */
+	*result = VM_VALUE_NULL;
+	error = bind_this_node(realm, receiver, &node);
+	if (error != 0)
+		return error;
+	if (node->type != DOM_ELEMENT) {
+		error = bind_throw_illegal(realm);
+		return error;
+	}
+
+	/* Use actual namespace and tag, independent of public prototype mutation. */
+	element = (struct dom_element *)node;
+	if (element->ns != DOM_NS_HTML || element->tag != tag) {
+		error = bind_throw_illegal(realm);
+		return error;
+	}
+
+	/* Inactive Documents and disconnected nodes expose no active child. */
+	parent = node->document->view;
+	if (parent == NULL || parent->detached)
+		return 0;
+	connected = dom_is_inclusive_ancestor(&node->document->node, node);
+	if (!connected)
+		return 0;
+	if (bind_frame_sandboxed(element) || element->child_context == NULL)
+		return 0;
+
+	/* SVG availability follows the selected actual response MIME processing kind. */
+	child = (struct vm_realm *)element->child_context;
+	window = child->host;
+	if (window == NULL || window->detached)
+		return 0;
+	if (svg && window->document->content != DOM_CONTENT_SVG)
+		return 0;
+
+	/* A Document of another origin stays out of reach. */
+	if (!bind_window_reachable(parent, window))
+		return 0;
+	error = bind_wrap(window, &window->document->node, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: cached wrapping preserves actual owner identity. */
+	return 0;
+}
+
+/*
+ * Copies a window's origin, serialized, into origin: a frame's is its resource's (an initial about:blank or a
+ * srcdoc document has the origin of the document it was made from), a page's is its location's.
+ */
+static int
+frame_origin(
+	struct bind_window *window,
+	struct wb_buffer *origin)
+{
+	struct wb_buffer href;
+	struct net_url url;
+	int error;
+
+	/* A page's origin is the host's. */
+	if (!window->owned) {
+		error = 0;
+		if (window->host.location != NULL)
+			error = window->host.location(window->host.context, BIND_LOCATION_ORIGIN, origin);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A frame's URL, the inherited one for a blank or srcdoc document. */
+	wb_buffer_init(&href);
+	memset(&url, 0, sizeof(url));
+	error = bind_document_url(window->document, 1, &href);
+
+	/* Its origin. */
+	if (error == 0)
+		error = net_url_parse(wb_buffer_string(&href), href.length, NULL, &url);
+	if (error == 0)
+		error = net_url_component(&url, NET_URL_ORIGIN, origin);
+
+	/* The URL's copies are released on either outcome. */
+	net_url_release(&url);
+	wb_buffer_release(&href);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: origin holds the serialization. */
+	return 0;
+}
+
+/* Tells whether a serialized origin is a web one (scheme://host[:port]), not "null" or empty. */
+static int
+frame_web_origin(
+	const struct wb_buffer *origin)
+{
+	const char *separator;
+
+	/* An empty origin, or an opaque one, is not. */
+	if (origin->length == 0)
+		return 0;
+
+	/* A tuple origin names its scheme before "://". */
+	separator = strstr(wb_buffer_string(origin), "://");
+	if (separator == NULL)
+		return 0;
+
+	/* Succeeded: the origin is a web one. */
+	return 1;
+}

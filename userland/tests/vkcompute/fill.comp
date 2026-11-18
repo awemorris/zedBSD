@@ -1,0 +1,5 @@
+#version 450
+// data[x] = x * 3 + 7: the subset's canonical shader (multiplier 3, addend 7).
+layout(local_size_x = 32) in;
+layout(std430, set = 0, binding = 0) buffer Data { uint data[]; };
+void main() { uint x = gl_GlobalInvocationID.x; data[x] = x * 3u + 7u; }

@@ -1,0 +1,3 @@
+#!/bin/sh
+/bin/zwm /bin/zterm &
+/bin/zshell

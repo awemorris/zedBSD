@@ -1,0 +1,21 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 PC/AT scheduler-clock contract.
+ */
+
+#ifndef KERN_HAL_AMD64_CLOCK_H
+#define KERN_HAL_AMD64_CLOCK_H
+
+int
+prekern_bsp_timer_init(void);
+
+void
+clock_handler(void);
+
+#endif

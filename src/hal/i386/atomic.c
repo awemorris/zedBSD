@@ -1,0 +1,81 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The i386 atomic-operation implementation.
+ */
+
+#include <hal/hal.h>
+
+/*
+ * The serialization region's entry points, declared as the macros of
+ * <hal/atomic.h> declare them, so that a definition which drifts from the
+ * macros does not compile.
+ */
+HAL_ATOMIC_ENTER_DECLARE();
+
+/*
+ * An i386 has XCHG but no CMPXCHG.  This guard serializes the uncommon
+ * read-modify-write and 64-bit operations across CPUs.  IRQs are disabled
+ * before acquisition so an interrupt cannot recursively wait on the guard
+ * held by the interrupted context.
+ */
+static volatile unsigned atomic_guard;
+
+/*
+ * Acquires the i386 atomic-operation guard.
+ */
+uintptr_t
+hal_atomic_enter(
+	void)
+{
+	uintptr_t cookie;
+	bool enabled;
+	bool acquired;
+
+	/* Preserves the caller's interrupt state while acquiring the guard. */
+	enabled = hal_irq_disable();
+	cookie = 0U;
+	if (enabled)
+		cookie = 1U;
+
+	/* Waits until this CPU owns the atomic-operation guard. */
+	for (;;) {
+		acquired = hal_atomic_uint_try_acquire(&atomic_guard);
+		if (acquired)
+			break;
+		hal_atomic_relax();
+	}
+
+	/* Returns the saved interrupt-state cookie. */
+	return cookie;
+}
+
+/*
+ * Releases the i386 atomic-operation guard.
+ */
+void
+hal_atomic_leave(
+	uintptr_t cookie)
+{
+	unsigned previous;
+
+	/* Releases the guard and records its prior ownership state. */
+	previous = 0U;
+	__asm__ volatile("xchgl %0, %1"
+	    : "+r"(previous), "+m"(atomic_guard)
+	    :
+	    : "memory");
+
+	/* Rejects a release by a CPU which did not own the guard. */
+	if (previous != 1U)
+		__builtin_trap();
+
+	/* Restores interrupts only when they were enabled on entry. */
+	if (cookie != 0U)
+		hal_irq_enable();
+}

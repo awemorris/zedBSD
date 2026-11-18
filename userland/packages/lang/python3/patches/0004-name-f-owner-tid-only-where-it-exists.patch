@@ -1,0 +1,21 @@
+Name F_OWNER_TID only where the system has it.
+
+The fcntl module adds the struct f_owner_ex constants when F_GETOWN_EX is
+defined and takes F_OWNER_TID to come with it, as on Linux.  POSIX.1-2024
+has F_GETOWN_EX, F_SETOWN_EX, F_OWNER_PID and F_OWNER_PGRP but no
+F_OWNER_TID, which zedBSD's <fcntl.h> follows (a signal's owner is a
+process or a process group, not a thread), so the module asks for that one
+on its own.
+
+--- a/Modules/fcntlmodule.c
++++ b/Modules/fcntlmodule.c
+@@ -614,7 +614,9 @@
+     // since Linux 2.6.32
+     if (PyModule_AddIntMacro(m, F_GETOWN_EX)) return -1;
+     if (PyModule_AddIntMacro(m, F_SETOWN_EX)) return -1;
++#ifdef F_OWNER_TID
+     if (PyModule_AddIntMacro(m, F_OWNER_TID)) return -1;
++#endif
+     if (PyModule_AddIntMacro(m, F_OWNER_PID)) return -1;
+     if (PyModule_AddIntMacro(m, F_OWNER_PGRP)) return -1;
+ #endif

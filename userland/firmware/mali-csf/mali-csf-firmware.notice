@@ -1,0 +1,19 @@
+Firmware: Arm Mali CSF GPU firmware (mali_csffw.bin) from linux-firmware
+          20260410, the program of the GPU's Command Stream Frontend
+          microcontroller
+Hardware: Arm Mali-G310 (Valhall, arch 10) of the Amlogic S905X5M
+          (ODROID-C5), used by the mali driver (CONFIG_DRIVER_MALI_GPU)
+Files:    /lib/firmware/arm/mali/arch10.8/mali_csffw.bin
+          /lib/firmware/arm/mali/arch10.10/mali_csffw.bin
+          /lib/firmware/arm/mali/arch10.12/mali_csffw.bin
+          (one program; linux-firmware ships the same bytes under the three
+          names)
+Source:   linux-firmware tag 20260410 (commit dc85ccedc9c973682fbcf4d628ca61174bcc3120)
+
+Copyright 2023 Arm Ltd.  Licensed under the Arm End User Licence Agreement
+for the Mali firmware (LICENCE.mali_csffw): use and copying solely for
+applications used with Mali-based products, redistribution of the whole
+software with its notices and a copy of the licence, no use of Arm's names
+or trademarks to market applications; reverse engineering, decompilation
+and disassembly are not permitted except as the law allows; subject to
+U.K., EU and U.S. export control laws.

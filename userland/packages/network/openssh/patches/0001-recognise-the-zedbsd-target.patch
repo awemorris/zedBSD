@@ -1,0 +1,17 @@
+Teach config.sub the zedBSD operating system name.
+
+The configure script refuses a host triple whose operating system it does
+not recognise, so cross-building for zedBSD stops before anything is
+compiled.  Naming it alongside the other systems of its kind is the whole
+of the change; nothing else in the build reads the name.
+
+--- a/config.sub
++++ b/config.sub
+@@ -1739,6 +1739,7 @@
+ 	     | nindy* | vxsim* | vxworks* | ebmon* | hms* | mvs* \
+ 	     | clix* | riscos* | uniplus* | iris* | isc* | rtu* | xenix* \
+ 	     | mirbsd* | netbsd* | dicos* | openedition* | ose* \
++	     | zedbsd* \
+ 	     | bitrig* | openbsd* | secbsd* | solidbsd* | libertybsd* | os108* \
+ 	     | ekkobsd* | freebsd* | riscix* | lynxos* | os400* \
+ 	     | bosx* | nextstep* | cxux* | aout* | elf* | oabi* \

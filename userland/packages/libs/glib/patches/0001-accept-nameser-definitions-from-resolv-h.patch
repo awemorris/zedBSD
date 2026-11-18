@@ -1,0 +1,66 @@
+Accept name server definitions from <resolv.h> when <arpa/nameser.h> is absent.
+
+zedBSD's C library declares the name server constants (C_IN, T_SRV, the
+fixed sizes) in <resolv.h>, which <gio/gnetworking.h> already includes,
+and has no <arpa/nameser.h>.  The configure check required that header
+and stopped.  When the header is absent, the check now looks for C_IN in
+<resolv.h> instead, and both the res_query() link check and the generated
+header leave the include out.  HAVE_ARPA_NAMESER_H records which case
+applies, for the record lookups of the threaded resolver (0003).
+Systems that have <arpa/nameser.h> are configured exactly as before.
+
+--- a/gio/meson.build
++++ b/gio/meson.build
+@@ -17,8 +17,23 @@
+ gnetworking_h_conf = configuration_data()
+ 
+ gnetworking_h_nameser_compat_include = ''
++gnetworking_h_nameser_include = '#include <arpa/nameser.h>'
+ 
+-if host_system not in ['windows', 'android']
++# A C library may give the name server definitions in <resolv.h> itself and
++# have no <arpa/nameser.h> (zedBSD).  Then nothing more is included.
++have_arpa_nameser_h = host_system == 'windows' or cc.has_header('arpa/nameser.h')
++if not have_arpa_nameser_h
++  if not cc.compiles('''#include <sys/types.h>
++                        #include <resolv.h>
++                        int qclass = C_IN;''',
++                     name : 'C_IN in resolv.h (no arpa/nameser.h)')
++    error('Could not find required includes for ARPA C_IN')
++  endif
++  gnetworking_h_nameser_include = ''
++endif
++glib_conf.set('HAVE_ARPA_NAMESER_H', host_system != 'windows' and have_arpa_nameser_h)
++
++if host_system not in ['windows', 'android'] and have_arpa_nameser_h
+   # Don't check for C_IN on Android since it does not define it in public
+   # headers, we define it ourselves wherever necessary
+   if not cc.compiles('''#include <sys/types.h>
+@@ -47,7 +62,7 @@
+                       }'''
+   res_query_test_full = '''#include <sys/types.h>
+                            #include <netinet/in.h>
+-                           #include <arpa/nameser.h>
++                        ''' + gnetworking_h_nameser_include + '''
+                         ''' + res_query_test
+   if not cc.links(res_query_test_full, name : 'res_query()')
+     if cc.links(res_query_test_full, args : '-lresolv', name : 'res_query() in -lresolv')
+@@ -168,6 +183,7 @@
+   endif
+ endif
+ 
++gnetworking_h_conf.set('NAMESER_INCLUDE', gnetworking_h_nameser_include)
+ gnetworking_h_conf.set('NAMESER_COMPAT_INCLUDE', gnetworking_h_nameser_compat_include)
+ 
+ gnetworking_h = configure_file(input : 'gnetworking.h.in',
+--- a/gio/gnetworking.h.in
++++ b/gio/gnetworking.h.in
+@@ -46,7 +46,7 @@
+ #include <net/if.h>
+ 
+ #include <arpa/inet.h>
+-#include <arpa/nameser.h>
++@NAMESER_INCLUDE@
+ @NAMESER_COMPAT_INCLUDE@
+ 
+ #ifndef __GI_SCANNER__

@@ -1,0 +1,15 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+// CPU-only stress used to compare deferred primitive tags and source hints.
+// Run through the development remacs launcher with REMACS_OPT_LEVEL=2.
+func main() {
+    for (i in 0..50000) {
+        Editor.insert("abcdefghij");
+    }
+    for (i in 0..20000) {
+        Editor.gotoChar((i * 23) % Editor.pointMax() + 1);
+        Editor.charAfter(Editor.point());
+    }
+    print(Editor.bufferSize());
+    return 0;
+}

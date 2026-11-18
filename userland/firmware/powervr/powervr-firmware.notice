@@ -1,0 +1,14 @@
+Firmware: Imagination PowerVR Rogue GPU firmware, BVNC 36.50.54.182
+          (version 1.1.OS@6976702)
+Hardware: Imagination PowerVR BXE-4-32 of the StarFive JH7110 (VisionFive 2),
+          used by the powervr driver (CONFIG_DRIVER_POWERVR)
+Files:    /lib/firmware/powervr/rogue_36.50.54.182_v1.fw
+Source:   gitlab.freedesktop.org/imagination/linux-firmware branch powervr,
+          commit 8a58f81883f7be458daa34e418cc4079f995b279 (not in
+          kernel.org's linux-firmware)
+
+Copyright (c) 2023, Imagination Technologies Ltd.  Redistributed unmodified,
+in binary form only, with the copyright notice and the disclaimer of
+LICENSE.powervr; reverse engineering, decompilation and disassembly are not
+permitted, and the firmware is used only with products designed and licensed
+by Imagination Technologies.

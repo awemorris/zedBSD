@@ -1,0 +1,92 @@
+--- a/Configurations/50-zedbsd.conf
++++ b/Configurations/50-zedbsd.conf
+@@ -0,0 +1,65 @@
++# -*- mode: perl; -*-
++# zedBSD cross-build target for OpenSSL.
++#
++# zedBSD is an ELF system with a POSIX libc that already contains the pthread
++# and dlfcn interfaces, so no separate -lpthread or -ldl exists to link.  The
++# shared-library recipe is the plain GNU one: zedBSD's runtime loader reads
++# sysv hashes and has no symbol versioning, so the version-script and -z defs
++# variants cannot be used.
++my %targets = (
++    "zedbsd-generic" => {
++        inherit_from     => [ "BASE_unix" ],
++        template         => 1,
++        CC               => "clang",
++        CFLAGS           => picker(default => "-Wall",
++                                   debug   => "-O0 -g",
++                                   release => "-O2"),
++        # OPENSSL_NO_SECURE_MEMORY: the secure heap keeps key material in
++        # pages it locks with mlock(), which zedBSD does not provide.  With
++        # this set, OpenSSL uses ordinary allocation and does not claim the
++        # memory is locked.
++        cflags           => add_before("-include \$(SRCDIR)/os-dep/zedbsd.h",
++                                       "-DOPENSSL_NO_SECURE_MEMORY"),
++        cppflags         => threads("-D_REENTRANT"),
++        sys_id           => "ZEDBSD",
++        thread_scheme    => "pthreads",
++        dso_scheme       => "dlfcn",
++        shared_target    => "gnu-shared",
++        shared_cflag     => "-fPIC",
++        shared_extension => ".so",
++    },
++    "zedbsd-x86_64" => {
++        inherit_from     => [ "zedbsd-generic" ],
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "SIXTY_FOUR_BIT_LONG",
++        asm_arch         => 'x86_64',
++        perlasm_scheme   => "elf",
++    },
++    "zedbsd-aarch64" => {
++        inherit_from     => [ "zedbsd-generic" ],
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "SIXTY_FOUR_BIT_LONG",
++        asm_arch         => 'aarch64',
++        perlasm_scheme   => "linux64",
++    },
++    "zedbsd-riscv64" => {
++        inherit_from     => [ "zedbsd-generic" ],
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "SIXTY_FOUR_BIT_LONG RC4_CHAR",
++        perlasm_scheme   => "linux64",
++    },
++    "zedbsd-x86" => {
++        inherit_from     => [ "zedbsd-generic" ],
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "BN_LLONG",
++        asm_arch         => 'x86',
++        perlasm_scheme   => "elf",
++    },
++    # 32-bit ARM (the ZYBO's Cortex-A9), as linux-armv4 without assembly.
++    "zedbsd-armv7" => {
++        inherit_from     => [ "zedbsd-generic" ],
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "BN_LLONG RC4_CHAR",
++        perlasm_scheme   => "linux32",
++    },
++);
+--- a/os-dep/zedbsd.h
++++ b/os-dep/zedbsd.h
+@@ -0,0 +1,21 @@
++/*
++ * zedBSD platform adjustments for OpenSSL.
++ *
++ * Copyright (C) 2026 Awe Morris
++ * SPDX-License-Identifier: Zlib
++ *
++ * OpenSSL includes <sys/select.h> only for the systems it names by hand, and
++ * reaches for select() in its applications regardless.  zedBSD keeps the
++ * select interface in its POSIX location, so it is pulled in here the same
++ * way the Haiku target does.
++ */
++
++#include <sys/select.h>
++#include <sys/time.h>
++
++/*
++ * struct iovec lives in its POSIX home, <sys/uio.h>.  OpenSSL's datagram BIO
++ * expects it to arrive with the socket headers, as it does on the systems it
++ * was written for.
++ */
++#include <sys/uio.h>

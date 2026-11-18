@@ -1,0 +1,17 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_PREVIEW_SOURCES := \
+	userland/desktop/preview/main.c \
+	userland/desktop/preview/make.c \
+	userland/desktop/preview/decode.c \
+	userland/desktop/preview/scale.c \
+	userland/desktop/preview/fonts.c \
+	userland/desktop/preview/info.c \
+	userland/desktop/photos/exif.c \
+	userland/desktop/preview/linux/confine.c \
+	userland/desktop/picture/picture.c
+
+$(eval $(call KEILAND_LINUX_PROGRAM,keiland-preview,libexec,$(KEILAND_LINUX_PREVIEW_SOURCES),libpdf.so libtruetype.so libpng-compat.so libjpeg-compat.so libgif-compat.so libz-compat.so libkeiland-compat.a,-lm))

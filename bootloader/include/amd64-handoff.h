@@ -1,0 +1,404 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The handoff the amd64 loaders (the PC/AT BIOS loader and the UEFI loader)
+ * leave for the amd64 HAL's bootstrap.
+ */
+
+#ifndef KERN_BOOTLOADER_AMD64_HANDOFF_H
+#define KERN_BOOTLOADER_AMD64_HANDOFF_H
+
+#include "boot-parameter-handoff.h"
+#include "../../include/kern/boot.h"
+
+/*
+ * Values carried by the root-partition fields in the ZBL6 ABI.
+ */
+#define ZBL6_PARTITION_SCHEME_MBR	1U
+#define ZBL6_PARTITION_SCHEME_GPT	4U
+#define ZBL6_PARTITION_INDEX_UNKNOWN	0U
+
+/* The handoff's identity and the size of its first version. */
+#define ZBL6_HANDOFF_MAGIC		0x364c425a
+#define ZBL6_HANDOFF_VERSION		1
+#define ZBL6_HANDOFF_SIZE		24
+
+/* Where the assembly loaders store the first version's fields. */
+#define ZBL6_HANDOFF_MAGIC_OFFSET	0
+#define ZBL6_HANDOFF_VERSION_OFFSET	4
+#define ZBL6_HANDOFF_SIZE_OFFSET	6
+#define ZBL6_HANDOFF_BOOT_DRIVE_OFFSET	8
+#define ZBL6_HANDOFF_PARTITION_OFFSET	9
+#define ZBL6_HANDOFF_FLAGS_OFFSET	10
+#define ZBL6_HANDOFF_MEM_LOWER_OFFSET	12
+#define ZBL6_HANDOFF_MEM_UPPER_OFFSET	16
+#define ZBL6_HANDOFF_RESERVED_OFFSET	20
+#define ZBL6_HANDOFF_BOOT_SERIAL_OFFSET	20
+
+/*
+ * A legacy-BIOS loader retains the compact v1 memory description and
+ * may append a VBE linear-framebuffer descriptor when size and flags
+ * say so.
+ */
+#define ZBL6_HANDOFF_FB_SIZE			56
+#define ZBL6_HANDOFF_FRAMEBUFFER_BASE_OFFSET	24
+#define ZBL6_HANDOFF_FRAMEBUFFER_SIZE_OFFSET	32
+#define ZBL6_HANDOFF_FRAMEBUFFER_WIDTH_OFFSET	40
+#define ZBL6_HANDOFF_FRAMEBUFFER_HEIGHT_OFFSET	44
+#define ZBL6_HANDOFF_FRAMEBUFFER_STRIDE_OFFSET	48
+#define ZBL6_HANDOFF_FRAMEBUFFER_FORMAT_OFFSET	52
+
+/* The later versions and their sizes. */
+#define ZBL6_HANDOFF_V2_VERSION			2
+#define ZBL6_HANDOFF_V2_SIZE			88
+#define ZBL6_HANDOFF_V3_VERSION			3
+#define ZBL6_HANDOFF_V3_SIZE			96
+#define ZBL6_HANDOFF_V4_VERSION			4
+#define ZBL6_HANDOFF_V4_SIZE			100
+#define ZBL6_HANDOFF_V5_VERSION			5
+#define ZBL6_HANDOFF_V5_BIOS_SIZE 		(ZBL6_HANDOFF_FB_SIZE + KERN_BOOT_PARAMETER_RECORD_SIZE)
+#define ZBL6_HANDOFF_V5_UEFI_SIZE 		(ZBL6_HANDOFF_V4_SIZE + KERN_BOOT_PARAMETER_RECORD_SIZE)
+#define ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET	ZBL6_HANDOFF_FB_SIZE
+#define ZBL6_HANDOFF_V5_UEFI_PARAMETERS_OFFSET	ZBL6_HANDOFF_V4_SIZE
+
+#define ZBL6_HANDOFF_V7_VERSION			7
+#define ZBL6_HANDOFF_V7_UEFI_SIZE		(ZBL6_HANDOFF_V6_UEFI_SIZE + KERN_BOOT_PROVENANCE_SIZE)
+#define ZBL6_HANDOFF_V8_VERSION			8
+#define ZBL6_UEFI_RUNTIME_HANDOFF_SIZE		32
+#define ZBL6_HANDOFF_V8_UEFI_SIZE		(ZBL6_HANDOFF_V7_UEFI_SIZE + ZBL6_UEFI_RUNTIME_HANDOFF_SIZE)
+#define ZBL6_HANDOFF_V6_VERSION			6
+#define ZBL6_MEMORY_HANDOFF_SIZE		64
+#define ZBL6_HANDOFF_V6_BIOS_MEMORY_OFFSET	ZBL6_HANDOFF_V5_BIOS_SIZE
+#define ZBL6_HANDOFF_V6_UEFI_MEMORY_OFFSET	ZBL6_HANDOFF_V5_UEFI_SIZE
+#define ZBL6_HANDOFF_V6_BIOS_SIZE		(ZBL6_HANDOFF_V5_BIOS_SIZE + ZBL6_MEMORY_HANDOFF_SIZE)
+#define ZBL6_HANDOFF_V6_UEFI_SIZE		(ZBL6_HANDOFF_V5_UEFI_SIZE + ZBL6_MEMORY_HANDOFF_SIZE)
+/* Where the assembly loaders store the memory envelope's fields. */
+#define ZBL6_MEMORY_SOURCE_OFFSET		0
+#define ZBL6_MEMORY_FLAGS_OFFSET		4
+#define ZBL6_MEMORY_COUNT_OFFSET		8
+#define ZBL6_MEMORY_ENTRY_SIZE_OFFSET		12
+#define ZBL6_MEMORY_RANGES_OFFSET		16
+#define ZBL6_MEMORY_ALLOCATION_COUNT_OFFSET	24
+#define ZBL6_MEMORY_ALLOCATION_SIZE_OFFSET	28
+#define ZBL6_MEMORY_ALLOCATIONS_OFFSET		32
+#define ZBL6_MEMORY_CR3_OFFSET			40
+#define ZBL6_MEMORY_KERNEL_START_OFFSET		48
+#define ZBL6_MEMORY_KERNEL_END_OFFSET		56
+#define ZBL6_MEMORY_RANGE_V6_SIZE		32
+#define ZBL6_BOOT_ALLOCATION_SIZE		24
+#define ZBL6_MAX_MEMORY_RANGES			256
+#define ZBL6_MAX_BOOT_ALLOCATIONS		16
+/* The firmware a memory map came from, and its flags. */
+#define ZBL6_MEMORY_SOURCE_BIOS_E820		1
+#define ZBL6_MEMORY_SOURCE_UEFI			2
+#define ZBL6_MEMORY_MAP_COMPLETE		1
+#define ZBL6_RANGE_MIXED_ATTRIBUTES		1
+
+/* Who owns a boot allocation, and how long the kernel must keep it. */
+#define ZBL6_BOOT_OWNER_KERNEL			1
+#define ZBL6_BOOT_OWNER_LOADER			2
+#define ZBL6_BOOT_OWNER_BOOTSTRAP		3
+#define ZBL6_BOOT_OWNER_MEMORY_MAP		4
+#define ZBL6_BOOT_OWNER_STACK			5
+#define ZBL6_BOOT_KEEP				1
+#define ZBL6_BOOT_AFTER_HANDOFF			2
+#define ZBL6_BOOT_AFTER_PAGING			3
+#define ZBL6_BOOT_AFTER_INIT			4
+
+/* Where the framebuffer fields of the third version are. */
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET		64
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_WIDTH_OFFSET	80
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_HEIGHT_OFFSET	84
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_STRIDE_OFFSET	88
+
+/* What the handoff carries. */
+#define ZBL6_HANDOFF_FLAG_UEFI			(1U << 0)
+#define ZBL6_HANDOFF_FLAG_MEMORY_MAP		(1U << 1)
+#define ZBL6_HANDOFF_FLAG_ACPI_RSDP		(1U << 2)
+#define ZBL6_HANDOFF_FLAG_FRAMEBUFFER		(1U << 3)
+#define ZBL6_HANDOFF_FLAG_BOOT_UUID		(1U << 4)
+#define ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS	(1U << 5)
+#define ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS	(1U << 6)
+#define ZBL6_HANDOFF_FLAG_UEFI_RUNTIME		(1U << 7)
+
+/*
+ * The kernel window the UEFI loader gives the firmware's runtime services
+ * with SetVirtualAddressMap, and the HAL maps them in: one kernel PDPT slot
+ * below the device window, of which the first 64 MiB are used.
+ */
+#define ZBL6_UEFI_RUNTIME_VIRTUAL_BASE		0xfffffffe80000000ULL
+#define ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE		0x0000000004000000ULL
+
+/* The most bytes of runtime memory descriptors the version-eight handoff carries. */
+#define ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES		8192U
+
+/* The smallest UEFI memory descriptor: type, pad, physical, virtual, pages and attribute. */
+#define ZBL6_UEFI_MEMORY_DESCRIPTOR_MIN_SIZE	40U
+
+/* The framebuffer pixel layouts, and where the HAL maps the framebuffer. */
+#define ZBL6_FRAMEBUFFER_RGBX8888		1U
+#define ZBL6_FRAMEBUFFER_BGRX8888		2U
+#define ZBL6_FRAMEBUFFER_VIRTUAL_BASE		0xffffffffc2000000ULL
+
+/* The memory range types. */
+#define ZBL6_MEMORY_USABLE			1U
+#define ZBL6_MEMORY_RESERVED			2U
+#define ZBL6_MEMORY_ACPI_RECLAIM		3U
+#define ZBL6_MEMORY_ACPI_NVS			4U
+#define ZBL6_MEMORY_MMIO			5U
+#define ZBL6_MEMORY_BOOT_RECLAIM		6U
+
+#ifndef __ASSEMBLER__
+#include <stdint.h>
+
+/*
+ * The first, compact version of the handoff that the BIOS loaders build.
+ *
+ * It is written at a fixed low address and read once by the HAL's bootstrap.
+ */
+struct zbl6_handoff {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint8_t boot_drive;
+	uint8_t partition_index;
+	uint16_t flags;
+	uint32_t mem_lower_kib;
+	uint32_t mem_upper_kib;
+	uint32_t reserved;
+} __attribute__((packed));
+
+/* The BIOS handoff with the VBE linear framebuffer appended. */
+struct zbl6_handoff_framebuffer {
+	struct zbl6_handoff common;
+	uint64_t framebuffer_base;
+	uint64_t framebuffer_size;
+	uint32_t framebuffer_width;
+	uint32_t framebuffer_height;
+	uint32_t framebuffer_stride;
+	uint32_t framebuffer_format;
+} __attribute__((packed));
+
+/*
+ * The second version, which the UEFI loader builds.
+ *
+ * The UEFI versions preserve the historical MBR/index contract.  They
+ * identify the selected FAT by UUID and carries its actual MBR/GPT
+ * style with both partition-index bytes set to
+ * ZBL6_PARTITION_INDEX_UNKNOWN.
+ */
+struct zbl6_handoff_v2 {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint32_t flags;
+	uint8_t boot_drive;
+	uint8_t root_partition_scheme;
+	uint8_t root_partition_index;
+	uint8_t loader_partition_index;
+	uint32_t memory_range_count;
+	uint32_t memory_range_entry_size;
+	uint64_t memory_ranges;
+	uint64_t kernel_phys_start;
+	uint64_t kernel_phys_end;
+	uint64_t bootstrap_cr3;
+	uint64_t rsdp;
+	uint64_t reserved[3];
+} __attribute__((packed));
+
+/* The second version with the GOP framebuffer appended. */
+struct zbl6_handoff_v3 {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint32_t flags;
+	uint8_t boot_drive;
+	uint8_t root_partition_scheme;
+	uint8_t root_partition_index;
+	uint8_t loader_partition_index;
+	uint32_t memory_range_count;
+	uint32_t memory_range_entry_size;
+	uint64_t memory_ranges;
+	uint64_t kernel_phys_start;
+	uint64_t kernel_phys_end;
+	uint64_t bootstrap_cr3;
+	uint64_t rsdp;
+	uint64_t framebuffer_base;
+	uint64_t framebuffer_size;
+	uint32_t framebuffer_width;
+	uint32_t framebuffer_height;
+	uint32_t framebuffer_stride;
+	uint32_t framebuffer_format;
+} __attribute__((packed));
+
+/* The third version with the boot volume's serial number appended. */
+struct zbl6_handoff_v4 {
+	struct zbl6_handoff_v3 common;
+	uint32_t boot_volume_serial;
+} __attribute__((packed));
+
+/* The BIOS handoff with the boot parameter record appended. */
+struct zbl6_handoff_v5_bios {
+	struct zbl6_handoff_framebuffer common;
+	struct kern_boot_parameter_record parameters;
+} __attribute__((packed));
+
+/* The UEFI handoff with the boot parameter record appended. */
+struct zbl6_handoff_v5_uefi {
+	struct zbl6_handoff_v4 common;
+	struct kern_boot_parameter_record parameters;
+} __attribute__((packed));
+
+/* The framebuffer the HAL keeps from whichever handoff version described it. */
+struct zbl6_framebuffer {
+	uint64_t physical_base;
+	uint64_t size;
+	uint32_t width;
+	uint32_t height;
+	uint32_t stride;
+	uint32_t format;
+};
+
+/* One range of the earlier memory map, without firmware attributes. */
+struct zbl6_memory_range {
+	uint64_t base;
+	uint64_t size;
+	uint32_t type;
+	uint32_t flags;
+} __attribute__((packed));
+
+/*
+ * One range of the normalized memory map.
+ *
+ * Attributes retain the source firmware's full-width value.
+ */
+struct zbl6_memory_range_v6 {
+	uint64_t base;
+	uint64_t size;
+	uint32_t type;
+	uint32_t flags;
+	uint64_t attributes;
+} __attribute__((packed));
+
+/*
+ * One block of memory the loader handed to the kernel, with its owner and
+ * the point after which the kernel may reuse it.
+ */
+struct zbl6_boot_allocation {
+	uint64_t base;
+	uint64_t size;
+	uint32_t owner;
+	uint32_t lifetime;
+} __attribute__((packed));
+
+/*
+ * The memory envelope of the sixth version: where the normalized map and
+ * the boot allocations are, and where the kernel image was placed.
+ */
+struct zbl6_memory_handoff {
+	uint32_t source;
+	uint32_t flags;
+	uint32_t range_count;
+	uint32_t range_entry_size;
+	uint64_t ranges;
+	uint32_t allocation_count;
+	uint32_t allocation_entry_size;
+	uint64_t allocations;
+	uint64_t bootstrap_cr3;
+	uint64_t kernel_phys_start;
+	uint64_t kernel_phys_end;
+} __attribute__((packed));
+
+/* The BIOS handoff with the memory envelope appended. */
+struct zbl6_handoff_v6_bios {
+	struct zbl6_handoff_v5_bios prefix;
+	struct zbl6_memory_handoff memory;
+} __attribute__((packed));
+
+/* The UEFI handoff with the memory envelope appended. */
+struct zbl6_handoff_v6_uefi {
+	struct zbl6_handoff_v5_uefi prefix;
+	struct zbl6_memory_handoff memory;
+} __attribute__((packed));
+
+/* V7 retains the V6 memory offsets and appends copied source identities. */
+struct zbl6_handoff_v7_uefi {
+	struct zbl6_handoff_v5_uefi prefix;
+	struct zbl6_memory_handoff memory;
+	struct kern_boot_provenance provenance;
+} __attribute__((packed));
+
+/*
+ * Where the firmware's runtime services are after the loader gave them
+ * their kernel addresses.
+ *
+ * system_table is the physical address of the UEFI system table, and
+ * descriptors the physical address of a copy of the firmware's memory
+ * descriptors that carry the runtime attribute, each descriptor_size bytes
+ * long, with VirtualStart set inside the runtime window.  Every field is
+ * zero, and the runtime flag clear, when the firmware's runtime services
+ * were not moved into the window.
+ */
+struct zbl6_uefi_runtime_handoff {
+	uint64_t system_table;
+	uint64_t descriptors;
+	uint32_t descriptor_count;
+	uint32_t descriptor_size;
+	uint32_t descriptor_version;
+	uint32_t reserved;
+} __attribute__((packed));
+
+/* V8 retains the V7 layout and appends the firmware's runtime services. */
+struct zbl6_handoff_v8_uefi {
+	struct zbl6_handoff_v5_uefi prefix;
+	struct zbl6_memory_handoff memory;
+	struct kern_boot_provenance provenance;
+	struct zbl6_uefi_runtime_handoff runtime;
+} __attribute__((packed));
+
+_Static_assert(sizeof(struct zbl6_handoff_v7_uefi) == ZBL6_HANDOFF_V7_UEFI_SIZE, "ZBL6 V7 UEFI size");
+_Static_assert(sizeof(struct zbl6_uefi_runtime_handoff) == ZBL6_UEFI_RUNTIME_HANDOFF_SIZE, "ZBL6 UEFI runtime size");
+_Static_assert(sizeof(struct zbl6_handoff_v8_uefi) == ZBL6_HANDOFF_V8_UEFI_SIZE, "ZBL6 V8 UEFI size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v8_uefi, runtime) == ZBL6_HANDOFF_V7_UEFI_SIZE, "ZBL6 V8 runtime offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v7_uefi, provenance) == ZBL6_HANDOFF_V6_UEFI_SIZE, "ZBL6 V7 provenance offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, source) == ZBL6_MEMORY_SOURCE_OFFSET, "ZBL6 memory source offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, flags) == ZBL6_MEMORY_FLAGS_OFFSET, "ZBL6 memory flags offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, range_count) == ZBL6_MEMORY_COUNT_OFFSET, "ZBL6 memory range_count offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, range_entry_size) == ZBL6_MEMORY_ENTRY_SIZE_OFFSET, "ZBL6 memory range_entry_size offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, ranges) == ZBL6_MEMORY_RANGES_OFFSET, "ZBL6 memory ranges offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, allocation_count) == ZBL6_MEMORY_ALLOCATION_COUNT_OFFSET, "ZBL6 memory allocation_count offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, allocation_entry_size) == ZBL6_MEMORY_ALLOCATION_SIZE_OFFSET, "ZBL6 memory allocation_entry_size offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, allocations) == ZBL6_MEMORY_ALLOCATIONS_OFFSET, "ZBL6 memory allocations offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, bootstrap_cr3) == ZBL6_MEMORY_CR3_OFFSET, "ZBL6 memory bootstrap_cr3 offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, kernel_phys_start) == ZBL6_MEMORY_KERNEL_START_OFFSET, "ZBL6 memory kernel_phys_start offset");
+_Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, kernel_phys_end) == ZBL6_MEMORY_KERNEL_END_OFFSET, "ZBL6 memory kernel_phys_end offset");
+_Static_assert(sizeof(struct zbl6_memory_range_v6) == ZBL6_MEMORY_RANGE_V6_SIZE, "ZBL6 v6 memory range size");
+_Static_assert(sizeof(struct zbl6_boot_allocation) == ZBL6_BOOT_ALLOCATION_SIZE, "ZBL6 boot allocation size");
+_Static_assert(sizeof(struct zbl6_memory_handoff) == ZBL6_MEMORY_HANDOFF_SIZE, "ZBL6 memory envelope size");
+_Static_assert(sizeof(struct zbl6_handoff_v6_bios) == ZBL6_HANDOFF_V6_BIOS_SIZE, "ZBL6 BIOS v6 handoff size");
+_Static_assert(sizeof(struct zbl6_handoff_v6_uefi) == ZBL6_HANDOFF_V6_UEFI_SIZE, "ZBL6 UEFI v6 handoff size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v6_bios, memory) == ZBL6_HANDOFF_V6_BIOS_MEMORY_OFFSET, "ZBL6 BIOS memory offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v6_uefi, memory) == ZBL6_HANDOFF_V6_UEFI_MEMORY_OFFSET, "ZBL6 UEFI memory offset");
+_Static_assert(sizeof(struct zbl6_handoff) == ZBL6_HANDOFF_SIZE, "ZBL6 handoff size");
+_Static_assert(sizeof(struct zbl6_handoff_framebuffer) == ZBL6_HANDOFF_FB_SIZE, "ZBL6 BIOS framebuffer handoff size");
+_Static_assert(sizeof(struct zbl6_handoff_v2) == ZBL6_HANDOFF_V2_SIZE, "ZBL6 handoff v2 size");
+_Static_assert(sizeof(struct zbl6_handoff_v3) == ZBL6_HANDOFF_V3_SIZE, "ZBL6 handoff v3 size");
+_Static_assert(sizeof(struct zbl6_handoff_v4) == ZBL6_HANDOFF_V4_SIZE, "ZBL6 handoff v4 size");
+_Static_assert(sizeof(struct zbl6_handoff_v5_bios) == ZBL6_HANDOFF_V5_BIOS_SIZE, "ZBL6 BIOS v5 handoff size");
+_Static_assert(sizeof(struct zbl6_handoff_v5_uefi) == ZBL6_HANDOFF_V5_UEFI_SIZE, "ZBL6 UEFI v5 handoff size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v5_bios, parameters) == ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET, "ZBL6 BIOS v5 parameter offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v5_uefi, parameters) == ZBL6_HANDOFF_V5_UEFI_PARAMETERS_OFFSET, "ZBL6 UEFI v5 parameter offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_base) == ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET, "ZBL6 framebuffer base offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_width) == ZBL6_HANDOFF_V3_FRAMEBUFFER_WIDTH_OFFSET, "ZBL6 framebuffer width offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_height) == ZBL6_HANDOFF_V3_FRAMEBUFFER_HEIGHT_OFFSET, "ZBL6 framebuffer height offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_stride) == ZBL6_HANDOFF_V3_FRAMEBUFFER_STRIDE_OFFSET, "ZBL6 framebuffer stride offset");
+_Static_assert(sizeof(struct zbl6_memory_range) == 24, "ZBL6 memory range size");
+
+#endif
+
+#endif

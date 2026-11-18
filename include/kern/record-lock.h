@@ -1,0 +1,44 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_KERN_RECORD_LOCK_H
+#define KERN_KERN_RECORD_LOCK_H
+
+#include <stdint.h>
+
+struct file;
+struct inode;
+struct process;
+struct flock_record;
+
+int
+record_lock_fcntl(
+	struct process *owner,
+	struct file *file,
+	int command,
+	struct flock_record *request);
+
+int
+record_lock_flock(
+	struct process *owner,
+	struct file *file,
+	int operation);
+
+void
+record_lock_release_process_inode(
+	struct process *owner,
+	struct inode *inode);
+
+void
+record_lock_release_file(
+	struct file *file);
+
+void
+record_lock_inode_destroy(
+	struct inode *inode);
+
+#endif

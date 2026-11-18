@@ -1,0 +1,7 @@
+type=daemon
+command=/sbin/ntpdate
+arguments=-w pool.ntp.org
+after=networking
+restart=no
+required=NO
+late=yes

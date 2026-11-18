@@ -1,0 +1,87 @@
+# Settings' texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source, WS158 p004).
+# The pages' names and summaries (pages.c se_pages), drawn with kl_tr(page->name) and kl_tr(page->summary).
+msg	Settings
+msg	Change how {1} looks and works.
+msg	Wi-Fi
+msg	Join wireless networks and turn the radio on or off.
+msg	Ethernet
+msg	Wired connections and their addresses.
+msg	Bluetooth
+msg	Pair and connect wireless devices.
+msg	VPN
+msg	Connect securely to other networks.
+msg	Network
+msg	Manage connections and internet settings.
+msg	Appearance
+msg	The look of windows and the desktop.
+msg	Wallpaper
+msg	The picture behind your windows.
+msg	Notifications
+msg	Choose which applications may notify you.
+msg	Sound
+msg	Volume and the sound output.
+msg	Display
+msg	Arrange the displays and set their resolution and brightness.
+msg	Languages
+msg	The input method and the display language.
+msg	Storage
+msg	How the disks and folders are used, and the Trash.
+msg	Power
+msg	Sleep and the screen.
+msg	Keyboard
+msg	Key repeat and the layout.
+msg	Mouse
+msg	Pointer speed, acceleration and scrolling.
+msg	Touchpad
+msg	Printers
+msg	Add and manage printers.
+msg	Sharing
+msg	Remote Login and, later, cloud storage.
+msg	Users
+msg	Accounts on this computer.
+msg	Updates
+msg	Keep {1} up to date.
+msg	About
+msg	This computer and the version of {1}.
+# The search's header (search.c, a page of its own drawn by se_page_header).
+msg	Search Results
+# The input methods' choices on the Languages page (page-languages.c languages_choices).
+msg	Japanese
+msg	{1}'s input method: romaji to kana, converted a phrase at a time.
+msg	SKK
+msg	Emacs's SKK: an upper-case letter starts a word, Space converts it.
+msg	None (English)
+msg	The keys type as they are; no input method.
+# The Welcome's steps' headers and the keys it lists (welcome.c, ws164-p002), drawn with kl_tr through se_page_header and se_row_value.
+msg	Connect to a network
+msg	Join Wi-Fi now, or later in Settings.
+msg	Your network
+msg	The wired connection and its address.
+msg	Choose your look
+msg	A picture for the desktop, and how clear the windows are.
+msg	Languages and input
+msg	How you type, and the language of the desktop's words.
+msg	Keys to know
+msg	{1} is quick to use from the keyboard.
+msg	You are all set
+msg	Start using {1} opens Files at Today. The Welcome is in Settings > About whenever you want it again.
+msg	Open App Home (tap the key)
+msg	Wiseview: every window at a glance
+msg	Switch between windows
+msg	Lock the screen
+msg	Move between desktops
+msg	Switch the input language
+# The accent colours' names (page-look.c look_accent_names, ws179-p001), drawn with kl_tr(look_accent_names[chosen]).
+msg	Blue
+msg	Purple
+msg	Pink
+msg	Red
+msg	Orange
+msg	Yellow
+msg	Green
+msg	Graphite
+# The applications of the Notifications page (page-notifications.c notifications_apps, ws177-p026).
+msg	Mail
+msg	Calendar
+msg	Phone
+msg	Browser

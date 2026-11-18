@@ -1,0 +1,44 @@
+; zedBSD
+; Copyright (C) 2026 Awe Morris
+;
+; SPDX-License-Identifier: Zlib
+;
+; Refused: a geometry shader's located input array of seven elements, while
+; its input primitive (triangles) has three vertices.  Hand-written, since a
+; GLSL compiler refuses to declare it; regenerate.py assembles it with
+; spirv-as.
+               OpCapability Geometry
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Geometry %main "main" %out %v
+               OpExecutionMode %main Triangles
+               OpExecutionMode %main Invocations 1
+               OpExecutionMode %main OutputPoints
+               OpExecutionMode %main OutputVertices 1
+               OpDecorate %block Block
+               OpMemberDecorate %block 0 BuiltIn Position
+               OpDecorate %v Location 0
+       %void = OpTypeVoid
+   %function = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %vec4 = OpTypeVector %float 4
+       %uint = OpTypeInt 32 0
+        %int = OpTypeInt 32 1
+      %block = OpTypeStruct %vec4
+  %out_block = OpTypePointer Output %block
+        %out = OpVariable %out_block Output
+      %int_0 = OpConstant %int 0
+     %uint_7 = OpConstant %uint 7
+      %seven = OpTypeArray %vec4 %uint_7
+   %in_seven = OpTypePointer Input %seven
+          %v = OpVariable %in_seven Input
+    %in_vec4 = OpTypePointer Input %vec4
+   %out_vec4 = OpTypePointer Output %vec4
+       %main = OpFunction %void None %function
+      %entry = OpLabel
+     %vertex = OpAccessChain %in_vec4 %v %int_0
+   %position = OpLoad %vec4 %vertex
+     %target = OpAccessChain %out_vec4 %out %int_0
+               OpStore %target %position
+               OpEmitVertex
+               OpReturn
+               OpFunctionEnd

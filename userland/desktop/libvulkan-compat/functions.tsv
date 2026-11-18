@@ -1,0 +1,288 @@
+# Maintained Vulkan 1.4.309 prototypes from ws105/survey/vkprotos.sh; core 1.0 through 1.4 and WSI extension blocks.
+# block	name	return	params	param-names	kind	export
+# Layer/version enumeration also intercepts the missing-backend fallback required by the public contract.
+VK_VERSION_1_0	vkCreateInstance	VkResult	const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance	pCreateInfo, pAllocator, pInstance	I	y
+VK_VERSION_1_0	vkDestroyInstance	void	VkInstance instance, const VkAllocationCallbacks* pAllocator	instance, pAllocator	I	y
+VK_VERSION_1_0	vkEnumeratePhysicalDevices	VkResult	VkInstance instance, uint32_t* pPhysicalDeviceCount, VkPhysicalDevice* pPhysicalDevices	instance, pPhysicalDeviceCount, pPhysicalDevices	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceFeatures	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures* pFeatures	physicalDevice, pFeatures	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceFormatProperties	void	VkPhysicalDevice physicalDevice, VkFormat format, VkFormatProperties* pFormatProperties	physicalDevice, format, pFormatProperties	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceImageFormatProperties	VkResult	VkPhysicalDevice physicalDevice, VkFormat format, VkImageType type, VkImageTiling tiling, VkImageUsageFlags usage, VkImageCreateFlags flags, VkImageFormatProperties* pImageFormatProperties	physicalDevice, format, type, tiling, usage, flags, pImageFormatProperties	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceProperties	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties* pProperties	physicalDevice, pProperties	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceQueueFamilyProperties	void	VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties* pQueueFamilyProperties	physicalDevice, pQueueFamilyPropertyCount, pQueueFamilyProperties	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceMemoryProperties	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties* pMemoryProperties	physicalDevice, pMemoryProperties	F	y
+VK_VERSION_1_0	vkGetInstanceProcAddr	PFN_vkVoidFunction	VkInstance instance, const char* pName	instance, pName	I	y
+VK_VERSION_1_0	vkGetDeviceProcAddr	PFN_vkVoidFunction	VkDevice device, const char* pName	device, pName	I	y
+VK_VERSION_1_0	vkCreateDevice	VkResult	VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDevice* pDevice	physicalDevice, pCreateInfo, pAllocator, pDevice	I	y
+VK_VERSION_1_0	vkDestroyDevice	void	VkDevice device, const VkAllocationCallbacks* pAllocator	device, pAllocator	I	y
+VK_VERSION_1_0	vkEnumerateInstanceExtensionProperties	VkResult	const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties	pLayerName, pPropertyCount, pProperties	I	y
+VK_VERSION_1_0	vkEnumerateDeviceExtensionProperties	VkResult	VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties	physicalDevice, pLayerName, pPropertyCount, pProperties	I	y
+VK_VERSION_1_0	vkEnumerateInstanceLayerProperties	VkResult	uint32_t* pPropertyCount, VkLayerProperties* pProperties	pPropertyCount, pProperties	I	y
+VK_VERSION_1_0	vkEnumerateDeviceLayerProperties	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkLayerProperties* pProperties	physicalDevice, pPropertyCount, pProperties	F	y
+VK_VERSION_1_0	vkGetDeviceQueue	void	VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue	device, queueFamilyIndex, queueIndex, pQueue	I	y
+VK_VERSION_1_0	vkQueueSubmit	VkResult	VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence	queue, submitCount, pSubmits, fence	F	y
+VK_VERSION_1_0	vkQueueWaitIdle	VkResult	VkQueue queue	queue	F	y
+VK_VERSION_1_0	vkDeviceWaitIdle	VkResult	VkDevice device	device	F	y
+VK_VERSION_1_0	vkAllocateMemory	VkResult	VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory	device, pAllocateInfo, pAllocator, pMemory	F	y
+VK_VERSION_1_0	vkFreeMemory	void	VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator	device, memory, pAllocator	F	y
+VK_VERSION_1_0	vkMapMemory	VkResult	VkDevice device, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkMemoryMapFlags flags, void** ppData	device, memory, offset, size, flags, ppData	F	y
+VK_VERSION_1_0	vkUnmapMemory	void	VkDevice device, VkDeviceMemory memory	device, memory	F	y
+VK_VERSION_1_0	vkFlushMappedMemoryRanges	VkResult	VkDevice device, uint32_t memoryRangeCount, const VkMappedMemoryRange* pMemoryRanges	device, memoryRangeCount, pMemoryRanges	F	y
+VK_VERSION_1_0	vkInvalidateMappedMemoryRanges	VkResult	VkDevice device, uint32_t memoryRangeCount, const VkMappedMemoryRange* pMemoryRanges	device, memoryRangeCount, pMemoryRanges	F	y
+VK_VERSION_1_0	vkGetDeviceMemoryCommitment	void	VkDevice device, VkDeviceMemory memory, VkDeviceSize* pCommittedMemoryInBytes	device, memory, pCommittedMemoryInBytes	F	y
+VK_VERSION_1_0	vkBindBufferMemory	VkResult	VkDevice device, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize memoryOffset	device, buffer, memory, memoryOffset	F	y
+VK_VERSION_1_0	vkBindImageMemory	VkResult	VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize memoryOffset	device, image, memory, memoryOffset	F	y
+VK_VERSION_1_0	vkGetBufferMemoryRequirements	void	VkDevice device, VkBuffer buffer, VkMemoryRequirements* pMemoryRequirements	device, buffer, pMemoryRequirements	F	y
+VK_VERSION_1_0	vkGetImageMemoryRequirements	void	VkDevice device, VkImage image, VkMemoryRequirements* pMemoryRequirements	device, image, pMemoryRequirements	F	y
+VK_VERSION_1_0	vkGetImageSparseMemoryRequirements	void	VkDevice device, VkImage image, uint32_t* pSparseMemoryRequirementCount, VkSparseImageMemoryRequirements* pSparseMemoryRequirements	device, image, pSparseMemoryRequirementCount, pSparseMemoryRequirements	F	y
+VK_VERSION_1_0	vkGetPhysicalDeviceSparseImageFormatProperties	void	VkPhysicalDevice physicalDevice, VkFormat format, VkImageType type, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VkImageTiling tiling, uint32_t* pPropertyCount, VkSparseImageFormatProperties* pProperties	physicalDevice, format, type, samples, usage, tiling, pPropertyCount, pProperties	F	y
+VK_VERSION_1_0	vkQueueBindSparse	VkResult	VkQueue queue, uint32_t bindInfoCount, const VkBindSparseInfo* pBindInfo, VkFence fence	queue, bindInfoCount, pBindInfo, fence	F	y
+VK_VERSION_1_0	vkCreateFence	VkResult	VkDevice device, const VkFenceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkFence* pFence	device, pCreateInfo, pAllocator, pFence	F	y
+VK_VERSION_1_0	vkDestroyFence	void	VkDevice device, VkFence fence, const VkAllocationCallbacks* pAllocator	device, fence, pAllocator	F	y
+VK_VERSION_1_0	vkResetFences	VkResult	VkDevice device, uint32_t fenceCount, const VkFence* pFences	device, fenceCount, pFences	F	y
+VK_VERSION_1_0	vkGetFenceStatus	VkResult	VkDevice device, VkFence fence	device, fence	F	y
+VK_VERSION_1_0	vkWaitForFences	VkResult	VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout	device, fenceCount, pFences, waitAll, timeout	F	y
+VK_VERSION_1_0	vkCreateSemaphore	VkResult	VkDevice device, const VkSemaphoreCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSemaphore* pSemaphore	device, pCreateInfo, pAllocator, pSemaphore	F	y
+VK_VERSION_1_0	vkDestroySemaphore	void	VkDevice device, VkSemaphore semaphore, const VkAllocationCallbacks* pAllocator	device, semaphore, pAllocator	F	y
+VK_VERSION_1_0	vkCreateEvent	VkResult	VkDevice device, const VkEventCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkEvent* pEvent	device, pCreateInfo, pAllocator, pEvent	F	y
+VK_VERSION_1_0	vkDestroyEvent	void	VkDevice device, VkEvent event, const VkAllocationCallbacks* pAllocator	device, event, pAllocator	F	y
+VK_VERSION_1_0	vkGetEventStatus	VkResult	VkDevice device, VkEvent event	device, event	F	y
+VK_VERSION_1_0	vkSetEvent	VkResult	VkDevice device, VkEvent event	device, event	F	y
+VK_VERSION_1_0	vkResetEvent	VkResult	VkDevice device, VkEvent event	device, event	F	y
+VK_VERSION_1_0	vkCreateQueryPool	VkResult	VkDevice device, const VkQueryPoolCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkQueryPool* pQueryPool	device, pCreateInfo, pAllocator, pQueryPool	F	y
+VK_VERSION_1_0	vkDestroyQueryPool	void	VkDevice device, VkQueryPool queryPool, const VkAllocationCallbacks* pAllocator	device, queryPool, pAllocator	F	y
+VK_VERSION_1_0	vkGetQueryPoolResults	VkResult	VkDevice device, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, size_t dataSize, void* pData, VkDeviceSize stride, VkQueryResultFlags flags	device, queryPool, firstQuery, queryCount, dataSize, pData, stride, flags	F	y
+VK_VERSION_1_0	vkCreateBuffer	VkResult	VkDevice device, const VkBufferCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkBuffer* pBuffer	device, pCreateInfo, pAllocator, pBuffer	F	y
+VK_VERSION_1_0	vkDestroyBuffer	void	VkDevice device, VkBuffer buffer, const VkAllocationCallbacks* pAllocator	device, buffer, pAllocator	F	y
+VK_VERSION_1_0	vkCreateBufferView	VkResult	VkDevice device, const VkBufferViewCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkBufferView* pView	device, pCreateInfo, pAllocator, pView	F	y
+VK_VERSION_1_0	vkDestroyBufferView	void	VkDevice device, VkBufferView bufferView, const VkAllocationCallbacks* pAllocator	device, bufferView, pAllocator	F	y
+VK_VERSION_1_0	vkCreateImage	VkResult	VkDevice device, const VkImageCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImage* pImage	device, pCreateInfo, pAllocator, pImage	F	y
+VK_VERSION_1_0	vkDestroyImage	void	VkDevice device, VkImage image, const VkAllocationCallbacks* pAllocator	device, image, pAllocator	F	y
+VK_VERSION_1_0	vkGetImageSubresourceLayout	void	VkDevice device, VkImage image, const VkImageSubresource* pSubresource, VkSubresourceLayout* pLayout	device, image, pSubresource, pLayout	F	y
+VK_VERSION_1_0	vkCreateImageView	VkResult	VkDevice device, const VkImageViewCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImageView* pView	device, pCreateInfo, pAllocator, pView	F	y
+VK_VERSION_1_0	vkDestroyImageView	void	VkDevice device, VkImageView imageView, const VkAllocationCallbacks* pAllocator	device, imageView, pAllocator	F	y
+VK_VERSION_1_0	vkCreateShaderModule	VkResult	VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkShaderModule* pShaderModule	device, pCreateInfo, pAllocator, pShaderModule	F	y
+VK_VERSION_1_0	vkDestroyShaderModule	void	VkDevice device, VkShaderModule shaderModule, const VkAllocationCallbacks* pAllocator	device, shaderModule, pAllocator	F	y
+VK_VERSION_1_0	vkCreatePipelineCache	VkResult	VkDevice device, const VkPipelineCacheCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkPipelineCache* pPipelineCache	device, pCreateInfo, pAllocator, pPipelineCache	F	y
+VK_VERSION_1_0	vkDestroyPipelineCache	void	VkDevice device, VkPipelineCache pipelineCache, const VkAllocationCallbacks* pAllocator	device, pipelineCache, pAllocator	F	y
+VK_VERSION_1_0	vkGetPipelineCacheData	VkResult	VkDevice device, VkPipelineCache pipelineCache, size_t* pDataSize, void* pData	device, pipelineCache, pDataSize, pData	F	y
+VK_VERSION_1_0	vkMergePipelineCaches	VkResult	VkDevice device, VkPipelineCache dstCache, uint32_t srcCacheCount, const VkPipelineCache* pSrcCaches	device, dstCache, srcCacheCount, pSrcCaches	F	y
+VK_VERSION_1_0	vkCreateGraphicsPipelines	VkResult	VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkGraphicsPipelineCreateInfo* pCreateInfos, const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines	device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines	F	y
+VK_VERSION_1_0	vkCreateComputePipelines	VkResult	VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkComputePipelineCreateInfo* pCreateInfos, const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines	device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines	F	y
+VK_VERSION_1_0	vkDestroyPipeline	void	VkDevice device, VkPipeline pipeline, const VkAllocationCallbacks* pAllocator	device, pipeline, pAllocator	F	y
+VK_VERSION_1_0	vkCreatePipelineLayout	VkResult	VkDevice device, const VkPipelineLayoutCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkPipelineLayout* pPipelineLayout	device, pCreateInfo, pAllocator, pPipelineLayout	F	y
+VK_VERSION_1_0	vkDestroyPipelineLayout	void	VkDevice device, VkPipelineLayout pipelineLayout, const VkAllocationCallbacks* pAllocator	device, pipelineLayout, pAllocator	F	y
+VK_VERSION_1_0	vkCreateSampler	VkResult	VkDevice device, const VkSamplerCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSampler* pSampler	device, pCreateInfo, pAllocator, pSampler	F	y
+VK_VERSION_1_0	vkDestroySampler	void	VkDevice device, VkSampler sampler, const VkAllocationCallbacks* pAllocator	device, sampler, pAllocator	F	y
+VK_VERSION_1_0	vkCreateDescriptorSetLayout	VkResult	VkDevice device, const VkDescriptorSetLayoutCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDescriptorSetLayout* pSetLayout	device, pCreateInfo, pAllocator, pSetLayout	F	y
+VK_VERSION_1_0	vkDestroyDescriptorSetLayout	void	VkDevice device, VkDescriptorSetLayout descriptorSetLayout, const VkAllocationCallbacks* pAllocator	device, descriptorSetLayout, pAllocator	F	y
+VK_VERSION_1_0	vkCreateDescriptorPool	VkResult	VkDevice device, const VkDescriptorPoolCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDescriptorPool* pDescriptorPool	device, pCreateInfo, pAllocator, pDescriptorPool	F	y
+VK_VERSION_1_0	vkDestroyDescriptorPool	void	VkDevice device, VkDescriptorPool descriptorPool, const VkAllocationCallbacks* pAllocator	device, descriptorPool, pAllocator	F	y
+VK_VERSION_1_0	vkResetDescriptorPool	VkResult	VkDevice device, VkDescriptorPool descriptorPool, VkDescriptorPoolResetFlags flags	device, descriptorPool, flags	F	y
+VK_VERSION_1_0	vkAllocateDescriptorSets	VkResult	VkDevice device, const VkDescriptorSetAllocateInfo* pAllocateInfo, VkDescriptorSet* pDescriptorSets	device, pAllocateInfo, pDescriptorSets	F	y
+VK_VERSION_1_0	vkFreeDescriptorSets	VkResult	VkDevice device, VkDescriptorPool descriptorPool, uint32_t descriptorSetCount, const VkDescriptorSet* pDescriptorSets	device, descriptorPool, descriptorSetCount, pDescriptorSets	F	y
+VK_VERSION_1_0	vkUpdateDescriptorSets	void	VkDevice device, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites, uint32_t descriptorCopyCount, const VkCopyDescriptorSet* pDescriptorCopies	device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies	F	y
+VK_VERSION_1_0	vkCreateFramebuffer	VkResult	VkDevice device, const VkFramebufferCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkFramebuffer* pFramebuffer	device, pCreateInfo, pAllocator, pFramebuffer	F	y
+VK_VERSION_1_0	vkDestroyFramebuffer	void	VkDevice device, VkFramebuffer framebuffer, const VkAllocationCallbacks* pAllocator	device, framebuffer, pAllocator	F	y
+VK_VERSION_1_0	vkCreateRenderPass	VkResult	VkDevice device, const VkRenderPassCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkRenderPass* pRenderPass	device, pCreateInfo, pAllocator, pRenderPass	F	y
+VK_VERSION_1_0	vkDestroyRenderPass	void	VkDevice device, VkRenderPass renderPass, const VkAllocationCallbacks* pAllocator	device, renderPass, pAllocator	F	y
+VK_VERSION_1_0	vkGetRenderAreaGranularity	void	VkDevice device, VkRenderPass renderPass, VkExtent2D* pGranularity	device, renderPass, pGranularity	F	y
+VK_VERSION_1_0	vkCreateCommandPool	VkResult	VkDevice device, const VkCommandPoolCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkCommandPool* pCommandPool	device, pCreateInfo, pAllocator, pCommandPool	F	y
+VK_VERSION_1_0	vkDestroyCommandPool	void	VkDevice device, VkCommandPool commandPool, const VkAllocationCallbacks* pAllocator	device, commandPool, pAllocator	F	y
+VK_VERSION_1_0	vkResetCommandPool	VkResult	VkDevice device, VkCommandPool commandPool, VkCommandPoolResetFlags flags	device, commandPool, flags	F	y
+VK_VERSION_1_0	vkAllocateCommandBuffers	VkResult	VkDevice device, const VkCommandBufferAllocateInfo* pAllocateInfo, VkCommandBuffer* pCommandBuffers	device, pAllocateInfo, pCommandBuffers	F	y
+VK_VERSION_1_0	vkFreeCommandBuffers	void	VkDevice device, VkCommandPool commandPool, uint32_t commandBufferCount, const VkCommandBuffer* pCommandBuffers	device, commandPool, commandBufferCount, pCommandBuffers	F	y
+VK_VERSION_1_0	vkBeginCommandBuffer	VkResult	VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo* pBeginInfo	commandBuffer, pBeginInfo	F	y
+VK_VERSION_1_0	vkEndCommandBuffer	VkResult	VkCommandBuffer commandBuffer	commandBuffer	F	y
+VK_VERSION_1_0	vkResetCommandBuffer	VkResult	VkCommandBuffer commandBuffer, VkCommandBufferResetFlags flags	commandBuffer, flags	F	y
+VK_VERSION_1_0	vkCmdBindPipeline	void	VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline	commandBuffer, pipelineBindPoint, pipeline	F	y
+VK_VERSION_1_0	vkCmdSetViewport	void	VkCommandBuffer commandBuffer, uint32_t firstViewport, uint32_t viewportCount, const VkViewport* pViewports	commandBuffer, firstViewport, viewportCount, pViewports	F	y
+VK_VERSION_1_0	vkCmdSetScissor	void	VkCommandBuffer commandBuffer, uint32_t firstScissor, uint32_t scissorCount, const VkRect2D* pScissors	commandBuffer, firstScissor, scissorCount, pScissors	F	y
+VK_VERSION_1_0	vkCmdSetLineWidth	void	VkCommandBuffer commandBuffer, float lineWidth	commandBuffer, lineWidth	F	y
+VK_VERSION_1_0	vkCmdSetDepthBias	void	VkCommandBuffer commandBuffer, float depthBiasConstantFactor, float depthBiasClamp, float depthBiasSlopeFactor	commandBuffer, depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor	F	y
+VK_VERSION_1_0	vkCmdSetBlendConstants	void	VkCommandBuffer commandBuffer, const float blendConstants[4]	commandBuffer, blendConstants	F	y
+VK_VERSION_1_0	vkCmdSetDepthBounds	void	VkCommandBuffer commandBuffer, float minDepthBounds, float maxDepthBounds	commandBuffer, minDepthBounds, maxDepthBounds	F	y
+VK_VERSION_1_0	vkCmdSetStencilCompareMask	void	VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t compareMask	commandBuffer, faceMask, compareMask	F	y
+VK_VERSION_1_0	vkCmdSetStencilWriteMask	void	VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t writeMask	commandBuffer, faceMask, writeMask	F	y
+VK_VERSION_1_0	vkCmdSetStencilReference	void	VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t reference	commandBuffer, faceMask, reference	F	y
+VK_VERSION_1_0	vkCmdBindDescriptorSets	void	VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t firstSet, uint32_t descriptorSetCount, const VkDescriptorSet* pDescriptorSets, uint32_t dynamicOffsetCount, const uint32_t* pDynamicOffsets	commandBuffer, pipelineBindPoint, layout, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets	F	y
+VK_VERSION_1_0	vkCmdBindIndexBuffer	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType	commandBuffer, buffer, offset, indexType	F	y
+VK_VERSION_1_0	vkCmdBindVertexBuffers	void	VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer* pBuffers, const VkDeviceSize* pOffsets	commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets	F	y
+VK_VERSION_1_0	vkCmdDraw	void	VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance	commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance	F	y
+VK_VERSION_1_0	vkCmdDrawIndexed	void	VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance	commandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance	F	y
+VK_VERSION_1_0	vkCmdDrawIndirect	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride	commandBuffer, buffer, offset, drawCount, stride	F	y
+VK_VERSION_1_0	vkCmdDrawIndexedIndirect	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride	commandBuffer, buffer, offset, drawCount, stride	F	y
+VK_VERSION_1_0	vkCmdDispatch	void	VkCommandBuffer commandBuffer, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ	commandBuffer, groupCountX, groupCountY, groupCountZ	F	y
+VK_VERSION_1_0	vkCmdDispatchIndirect	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset	commandBuffer, buffer, offset	F	y
+VK_VERSION_1_0	vkCmdCopyBuffer	void	VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer, uint32_t regionCount, const VkBufferCopy* pRegions	commandBuffer, srcBuffer, dstBuffer, regionCount, pRegions	F	y
+VK_VERSION_1_0	vkCmdCopyImage	void	VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageCopy* pRegions	commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions	F	y
+VK_VERSION_1_0	vkCmdBlitImage	void	VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageBlit* pRegions, VkFilter filter	commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions, filter	F	y
+VK_VERSION_1_0	vkCmdCopyBufferToImage	void	VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkBufferImageCopy* pRegions	commandBuffer, srcBuffer, dstImage, dstImageLayout, regionCount, pRegions	F	y
+VK_VERSION_1_0	vkCmdCopyImageToBuffer	void	VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkBuffer dstBuffer, uint32_t regionCount, const VkBufferImageCopy* pRegions	commandBuffer, srcImage, srcImageLayout, dstBuffer, regionCount, pRegions	F	y
+VK_VERSION_1_0	vkCmdUpdateBuffer	void	VkCommandBuffer commandBuffer, VkBuffer dstBuffer, VkDeviceSize dstOffset, VkDeviceSize dataSize, const void* pData	commandBuffer, dstBuffer, dstOffset, dataSize, pData	F	y
+VK_VERSION_1_0	vkCmdFillBuffer	void	VkCommandBuffer commandBuffer, VkBuffer dstBuffer, VkDeviceSize dstOffset, VkDeviceSize size, uint32_t data	commandBuffer, dstBuffer, dstOffset, size, data	F	y
+VK_VERSION_1_0	vkCmdClearColorImage	void	VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout, const VkClearColorValue* pColor, uint32_t rangeCount, const VkImageSubresourceRange* pRanges	commandBuffer, image, imageLayout, pColor, rangeCount, pRanges	F	y
+VK_VERSION_1_0	vkCmdClearDepthStencilImage	void	VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout, const VkClearDepthStencilValue* pDepthStencil, uint32_t rangeCount, const VkImageSubresourceRange* pRanges	commandBuffer, image, imageLayout, pDepthStencil, rangeCount, pRanges	F	y
+VK_VERSION_1_0	vkCmdClearAttachments	void	VkCommandBuffer commandBuffer, uint32_t attachmentCount, const VkClearAttachment* pAttachments, uint32_t rectCount, const VkClearRect* pRects	commandBuffer, attachmentCount, pAttachments, rectCount, pRects	F	y
+VK_VERSION_1_0	vkCmdResolveImage	void	VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageResolve* pRegions	commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions	F	y
+VK_VERSION_1_0	vkCmdSetEvent	void	VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags stageMask	commandBuffer, event, stageMask	F	y
+VK_VERSION_1_0	vkCmdResetEvent	void	VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags stageMask	commandBuffer, event, stageMask	F	y
+VK_VERSION_1_0	vkCmdWaitEvents	void	VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent* pEvents, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask, uint32_t memoryBarrierCount, const VkMemoryBarrier* pMemoryBarriers, uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier* pBufferMemoryBarriers, uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier* pImageMemoryBarriers	commandBuffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers	F	y
+VK_VERSION_1_0	vkCmdPipelineBarrier	void	VkCommandBuffer commandBuffer, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask, VkDependencyFlags dependencyFlags, uint32_t memoryBarrierCount, const VkMemoryBarrier* pMemoryBarriers, uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier* pBufferMemoryBarriers, uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier* pImageMemoryBarriers	commandBuffer, srcStageMask, dstStageMask, dependencyFlags, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers	F	y
+VK_VERSION_1_0	vkCmdBeginQuery	void	VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t query, VkQueryControlFlags flags	commandBuffer, queryPool, query, flags	F	y
+VK_VERSION_1_0	vkCmdEndQuery	void	VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t query	commandBuffer, queryPool, query	F	y
+VK_VERSION_1_0	vkCmdResetQueryPool	void	VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount	commandBuffer, queryPool, firstQuery, queryCount	F	y
+VK_VERSION_1_0	vkCmdWriteTimestamp	void	VkCommandBuffer commandBuffer, VkPipelineStageFlagBits pipelineStage, VkQueryPool queryPool, uint32_t query	commandBuffer, pipelineStage, queryPool, query	F	y
+VK_VERSION_1_0	vkCmdCopyQueryPoolResults	void	VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, VkBuffer dstBuffer, VkDeviceSize dstOffset, VkDeviceSize stride, VkQueryResultFlags flags	commandBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset, stride, flags	F	y
+VK_VERSION_1_0	vkCmdPushConstants	void	VkCommandBuffer commandBuffer, VkPipelineLayout layout, VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void* pValues	commandBuffer, layout, stageFlags, offset, size, pValues	F	y
+VK_VERSION_1_0	vkCmdBeginRenderPass	void	VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin, VkSubpassContents contents	commandBuffer, pRenderPassBegin, contents	F	y
+VK_VERSION_1_0	vkCmdNextSubpass	void	VkCommandBuffer commandBuffer, VkSubpassContents contents	commandBuffer, contents	F	y
+VK_VERSION_1_0	vkCmdEndRenderPass	void	VkCommandBuffer commandBuffer	commandBuffer	F	y
+VK_VERSION_1_0	vkCmdExecuteCommands	void	VkCommandBuffer commandBuffer, uint32_t commandBufferCount, const VkCommandBuffer* pCommandBuffers	commandBuffer, commandBufferCount, pCommandBuffers	F	y
+VK_VERSION_1_1	vkEnumerateInstanceVersion	VkResult	uint32_t* pApiVersion	pApiVersion	I	y
+VK_VERSION_1_1	vkBindBufferMemory2	VkResult	VkDevice device, uint32_t bindInfoCount, const VkBindBufferMemoryInfo* pBindInfos	device, bindInfoCount, pBindInfos	F	y
+VK_VERSION_1_1	vkBindImageMemory2	VkResult	VkDevice device, uint32_t bindInfoCount, const VkBindImageMemoryInfo* pBindInfos	device, bindInfoCount, pBindInfos	F	y
+VK_VERSION_1_1	vkGetDeviceGroupPeerMemoryFeatures	void	VkDevice device, uint32_t heapIndex, uint32_t localDeviceIndex, uint32_t remoteDeviceIndex, VkPeerMemoryFeatureFlags* pPeerMemoryFeatures	device, heapIndex, localDeviceIndex, remoteDeviceIndex, pPeerMemoryFeatures	F	y
+VK_VERSION_1_1	vkCmdSetDeviceMask	void	VkCommandBuffer commandBuffer, uint32_t deviceMask	commandBuffer, deviceMask	F	y
+VK_VERSION_1_1	vkCmdDispatchBase	void	VkCommandBuffer commandBuffer, uint32_t baseGroupX, uint32_t baseGroupY, uint32_t baseGroupZ, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ	commandBuffer, baseGroupX, baseGroupY, baseGroupZ, groupCountX, groupCountY, groupCountZ	F	y
+VK_VERSION_1_1	vkEnumeratePhysicalDeviceGroups	VkResult	VkInstance instance, uint32_t* pPhysicalDeviceGroupCount, VkPhysicalDeviceGroupProperties* pPhysicalDeviceGroupProperties	instance, pPhysicalDeviceGroupCount, pPhysicalDeviceGroupProperties	F	y
+VK_VERSION_1_1	vkGetImageMemoryRequirements2	void	VkDevice device, const VkImageMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements	device, pInfo, pMemoryRequirements	F	y
+VK_VERSION_1_1	vkGetBufferMemoryRequirements2	void	VkDevice device, const VkBufferMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements	device, pInfo, pMemoryRequirements	F	y
+VK_VERSION_1_1	vkGetImageSparseMemoryRequirements2	void	VkDevice device, const VkImageSparseMemoryRequirementsInfo2* pInfo, uint32_t* pSparseMemoryRequirementCount, VkSparseImageMemoryRequirements2* pSparseMemoryRequirements	device, pInfo, pSparseMemoryRequirementCount, pSparseMemoryRequirements	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceFeatures2	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* pFeatures	physicalDevice, pFeatures	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceProperties2	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2* pProperties	physicalDevice, pProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceFormatProperties2	void	VkPhysicalDevice physicalDevice, VkFormat format, VkFormatProperties2* pFormatProperties	physicalDevice, format, pFormatProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceImageFormatProperties2	VkResult	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2* pImageFormatInfo, VkImageFormatProperties2* pImageFormatProperties	physicalDevice, pImageFormatInfo, pImageFormatProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceQueueFamilyProperties2	void	VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties2* pQueueFamilyProperties	physicalDevice, pQueueFamilyPropertyCount, pQueueFamilyProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceMemoryProperties2	void	VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties2* pMemoryProperties	physicalDevice, pMemoryProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceSparseImageFormatProperties2	void	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSparseImageFormatInfo2* pFormatInfo, uint32_t* pPropertyCount, VkSparseImageFormatProperties2* pProperties	physicalDevice, pFormatInfo, pPropertyCount, pProperties	F	y
+VK_VERSION_1_1	vkTrimCommandPool	void	VkDevice device, VkCommandPool commandPool, VkCommandPoolTrimFlags flags	device, commandPool, flags	F	y
+VK_VERSION_1_1	vkGetDeviceQueue2	void	VkDevice device, const VkDeviceQueueInfo2* pQueueInfo, VkQueue* pQueue	device, pQueueInfo, pQueue	I	y
+VK_VERSION_1_1	vkCreateSamplerYcbcrConversion	VkResult	VkDevice device, const VkSamplerYcbcrConversionCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSamplerYcbcrConversion* pYcbcrConversion	device, pCreateInfo, pAllocator, pYcbcrConversion	F	y
+VK_VERSION_1_1	vkDestroySamplerYcbcrConversion	void	VkDevice device, VkSamplerYcbcrConversion ycbcrConversion, const VkAllocationCallbacks* pAllocator	device, ycbcrConversion, pAllocator	F	y
+VK_VERSION_1_1	vkCreateDescriptorUpdateTemplate	VkResult	VkDevice device, const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDescriptorUpdateTemplate* pDescriptorUpdateTemplate	device, pCreateInfo, pAllocator, pDescriptorUpdateTemplate	F	y
+VK_VERSION_1_1	vkDestroyDescriptorUpdateTemplate	void	VkDevice device, VkDescriptorUpdateTemplate descriptorUpdateTemplate, const VkAllocationCallbacks* pAllocator	device, descriptorUpdateTemplate, pAllocator	F	y
+VK_VERSION_1_1	vkUpdateDescriptorSetWithTemplate	void	VkDevice device, VkDescriptorSet descriptorSet, VkDescriptorUpdateTemplate descriptorUpdateTemplate, const void* pData	device, descriptorSet, descriptorUpdateTemplate, pData	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceExternalBufferProperties	void	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalBufferInfo* pExternalBufferInfo, VkExternalBufferProperties* pExternalBufferProperties	physicalDevice, pExternalBufferInfo, pExternalBufferProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceExternalFenceProperties	void	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalFenceInfo* pExternalFenceInfo, VkExternalFenceProperties* pExternalFenceProperties	physicalDevice, pExternalFenceInfo, pExternalFenceProperties	F	y
+VK_VERSION_1_1	vkGetPhysicalDeviceExternalSemaphoreProperties	void	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalSemaphoreInfo* pExternalSemaphoreInfo, VkExternalSemaphoreProperties* pExternalSemaphoreProperties	physicalDevice, pExternalSemaphoreInfo, pExternalSemaphoreProperties	F	y
+VK_VERSION_1_1	vkGetDescriptorSetLayoutSupport	void	VkDevice device, const VkDescriptorSetLayoutCreateInfo* pCreateInfo, VkDescriptorSetLayoutSupport* pSupport	device, pCreateInfo, pSupport	F	y
+VK_VERSION_1_2	vkCmdDrawIndirectCount	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkBuffer countBuffer, VkDeviceSize countBufferOffset, uint32_t maxDrawCount, uint32_t stride	commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride	F	y
+VK_VERSION_1_2	vkCmdDrawIndexedIndirectCount	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkBuffer countBuffer, VkDeviceSize countBufferOffset, uint32_t maxDrawCount, uint32_t stride	commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride	F	y
+VK_VERSION_1_2	vkCreateRenderPass2	VkResult	VkDevice device, const VkRenderPassCreateInfo2* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkRenderPass* pRenderPass	device, pCreateInfo, pAllocator, pRenderPass	F	y
+VK_VERSION_1_2	vkCmdBeginRenderPass2	void	VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin, const VkSubpassBeginInfo* pSubpassBeginInfo	commandBuffer, pRenderPassBegin, pSubpassBeginInfo	F	y
+VK_VERSION_1_2	vkCmdNextSubpass2	void	VkCommandBuffer commandBuffer, const VkSubpassBeginInfo* pSubpassBeginInfo, const VkSubpassEndInfo* pSubpassEndInfo	commandBuffer, pSubpassBeginInfo, pSubpassEndInfo	F	y
+VK_VERSION_1_2	vkCmdEndRenderPass2	void	VkCommandBuffer commandBuffer, const VkSubpassEndInfo* pSubpassEndInfo	commandBuffer, pSubpassEndInfo	F	y
+VK_VERSION_1_2	vkResetQueryPool	void	VkDevice device, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount	device, queryPool, firstQuery, queryCount	F	y
+VK_VERSION_1_2	vkGetSemaphoreCounterValue	VkResult	VkDevice device, VkSemaphore semaphore, uint64_t* pValue	device, semaphore, pValue	F	y
+VK_VERSION_1_2	vkWaitSemaphores	VkResult	VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout	device, pWaitInfo, timeout	F	y
+VK_VERSION_1_2	vkSignalSemaphore	VkResult	VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo	device, pSignalInfo	F	y
+VK_VERSION_1_2	vkGetBufferDeviceAddress	VkDeviceAddress	VkDevice device, const VkBufferDeviceAddressInfo* pInfo	device, pInfo	F	y
+VK_VERSION_1_2	vkGetBufferOpaqueCaptureAddress	uint64_t	VkDevice device, const VkBufferDeviceAddressInfo* pInfo	device, pInfo	F	y
+VK_VERSION_1_2	vkGetDeviceMemoryOpaqueCaptureAddress	uint64_t	VkDevice device, const VkDeviceMemoryOpaqueCaptureAddressInfo* pInfo	device, pInfo	F	y
+VK_VERSION_1_3	vkGetPhysicalDeviceToolProperties	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pToolCount, VkPhysicalDeviceToolProperties* pToolProperties	physicalDevice, pToolCount, pToolProperties	F	y
+VK_VERSION_1_3	vkCreatePrivateDataSlot	VkResult	VkDevice device, const VkPrivateDataSlotCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkPrivateDataSlot* pPrivateDataSlot	device, pCreateInfo, pAllocator, pPrivateDataSlot	F	y
+VK_VERSION_1_3	vkDestroyPrivateDataSlot	void	VkDevice device, VkPrivateDataSlot privateDataSlot, const VkAllocationCallbacks* pAllocator	device, privateDataSlot, pAllocator	F	y
+VK_VERSION_1_3	vkSetPrivateData	VkResult	VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t data	device, objectType, objectHandle, privateDataSlot, data	F	y
+VK_VERSION_1_3	vkGetPrivateData	void	VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t* pData	device, objectType, objectHandle, privateDataSlot, pData	F	y
+VK_VERSION_1_3	vkCmdSetEvent2	void	VkCommandBuffer commandBuffer, VkEvent event, const VkDependencyInfo* pDependencyInfo	commandBuffer, event, pDependencyInfo	F	y
+VK_VERSION_1_3	vkCmdResetEvent2	void	VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags2 stageMask	commandBuffer, event, stageMask	F	y
+VK_VERSION_1_3	vkCmdWaitEvents2	void	VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent* pEvents, const VkDependencyInfo* pDependencyInfos	commandBuffer, eventCount, pEvents, pDependencyInfos	F	y
+VK_VERSION_1_3	vkCmdPipelineBarrier2	void	VkCommandBuffer commandBuffer, const VkDependencyInfo* pDependencyInfo	commandBuffer, pDependencyInfo	F	y
+VK_VERSION_1_3	vkCmdWriteTimestamp2	void	VkCommandBuffer commandBuffer, VkPipelineStageFlags2 stage, VkQueryPool queryPool, uint32_t query	commandBuffer, stage, queryPool, query	F	y
+VK_VERSION_1_3	vkQueueSubmit2	VkResult	VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence	queue, submitCount, pSubmits, fence	F	y
+VK_VERSION_1_3	vkCmdCopyBuffer2	void	VkCommandBuffer commandBuffer, const VkCopyBufferInfo2* pCopyBufferInfo	commandBuffer, pCopyBufferInfo	F	y
+VK_VERSION_1_3	vkCmdCopyImage2	void	VkCommandBuffer commandBuffer, const VkCopyImageInfo2* pCopyImageInfo	commandBuffer, pCopyImageInfo	F	y
+VK_VERSION_1_3	vkCmdCopyBufferToImage2	void	VkCommandBuffer commandBuffer, const VkCopyBufferToImageInfo2* pCopyBufferToImageInfo	commandBuffer, pCopyBufferToImageInfo	F	y
+VK_VERSION_1_3	vkCmdCopyImageToBuffer2	void	VkCommandBuffer commandBuffer, const VkCopyImageToBufferInfo2* pCopyImageToBufferInfo	commandBuffer, pCopyImageToBufferInfo	F	y
+VK_VERSION_1_3	vkCmdBlitImage2	void	VkCommandBuffer commandBuffer, const VkBlitImageInfo2* pBlitImageInfo	commandBuffer, pBlitImageInfo	F	y
+VK_VERSION_1_3	vkCmdResolveImage2	void	VkCommandBuffer commandBuffer, const VkResolveImageInfo2* pResolveImageInfo	commandBuffer, pResolveImageInfo	F	y
+VK_VERSION_1_3	vkCmdBeginRendering	void	VkCommandBuffer commandBuffer, const VkRenderingInfo* pRenderingInfo	commandBuffer, pRenderingInfo	F	y
+VK_VERSION_1_3	vkCmdEndRendering	void	VkCommandBuffer commandBuffer	commandBuffer	F	y
+VK_VERSION_1_3	vkCmdSetCullMode	void	VkCommandBuffer commandBuffer, VkCullModeFlags cullMode	commandBuffer, cullMode	F	y
+VK_VERSION_1_3	vkCmdSetFrontFace	void	VkCommandBuffer commandBuffer, VkFrontFace frontFace	commandBuffer, frontFace	F	y
+VK_VERSION_1_3	vkCmdSetPrimitiveTopology	void	VkCommandBuffer commandBuffer, VkPrimitiveTopology primitiveTopology	commandBuffer, primitiveTopology	F	y
+VK_VERSION_1_3	vkCmdSetViewportWithCount	void	VkCommandBuffer commandBuffer, uint32_t viewportCount, const VkViewport* pViewports	commandBuffer, viewportCount, pViewports	F	y
+VK_VERSION_1_3	vkCmdSetScissorWithCount	void	VkCommandBuffer commandBuffer, uint32_t scissorCount, const VkRect2D* pScissors	commandBuffer, scissorCount, pScissors	F	y
+VK_VERSION_1_3	vkCmdBindVertexBuffers2	void	VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer* pBuffers, const VkDeviceSize* pOffsets, const VkDeviceSize* pSizes, const VkDeviceSize* pStrides	commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides	F	y
+VK_VERSION_1_3	vkCmdSetDepthTestEnable	void	VkCommandBuffer commandBuffer, VkBool32 depthTestEnable	commandBuffer, depthTestEnable	F	y
+VK_VERSION_1_3	vkCmdSetDepthWriteEnable	void	VkCommandBuffer commandBuffer, VkBool32 depthWriteEnable	commandBuffer, depthWriteEnable	F	y
+VK_VERSION_1_3	vkCmdSetDepthCompareOp	void	VkCommandBuffer commandBuffer, VkCompareOp depthCompareOp	commandBuffer, depthCompareOp	F	y
+VK_VERSION_1_3	vkCmdSetDepthBoundsTestEnable	void	VkCommandBuffer commandBuffer, VkBool32 depthBoundsTestEnable	commandBuffer, depthBoundsTestEnable	F	y
+VK_VERSION_1_3	vkCmdSetStencilTestEnable	void	VkCommandBuffer commandBuffer, VkBool32 stencilTestEnable	commandBuffer, stencilTestEnable	F	y
+VK_VERSION_1_3	vkCmdSetStencilOp	void	VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, VkStencilOp failOp, VkStencilOp passOp, VkStencilOp depthFailOp, VkCompareOp compareOp	commandBuffer, faceMask, failOp, passOp, depthFailOp, compareOp	F	y
+VK_VERSION_1_3	vkCmdSetRasterizerDiscardEnable	void	VkCommandBuffer commandBuffer, VkBool32 rasterizerDiscardEnable	commandBuffer, rasterizerDiscardEnable	F	y
+VK_VERSION_1_3	vkCmdSetDepthBiasEnable	void	VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable	commandBuffer, depthBiasEnable	F	y
+VK_VERSION_1_3	vkCmdSetPrimitiveRestartEnable	void	VkCommandBuffer commandBuffer, VkBool32 primitiveRestartEnable	commandBuffer, primitiveRestartEnable	F	y
+VK_VERSION_1_3	vkGetDeviceBufferMemoryRequirements	void	VkDevice device, const VkDeviceBufferMemoryRequirements* pInfo, VkMemoryRequirements2* pMemoryRequirements	device, pInfo, pMemoryRequirements	F	y
+VK_VERSION_1_3	vkGetDeviceImageMemoryRequirements	void	VkDevice device, const VkDeviceImageMemoryRequirements* pInfo, VkMemoryRequirements2* pMemoryRequirements	device, pInfo, pMemoryRequirements	F	y
+VK_VERSION_1_3	vkGetDeviceImageSparseMemoryRequirements	void	VkDevice device, const VkDeviceImageMemoryRequirements* pInfo, uint32_t* pSparseMemoryRequirementCount, VkSparseImageMemoryRequirements2* pSparseMemoryRequirements	device, pInfo, pSparseMemoryRequirementCount, pSparseMemoryRequirements	F	y
+VK_VERSION_1_4	vkCmdSetLineStipple	void	VkCommandBuffer commandBuffer, uint32_t lineStippleFactor, uint16_t lineStipplePattern	commandBuffer, lineStippleFactor, lineStipplePattern	F	y
+VK_VERSION_1_4	vkMapMemory2	VkResult	VkDevice device, const VkMemoryMapInfo* pMemoryMapInfo, void** ppData	device, pMemoryMapInfo, ppData	F	y
+VK_VERSION_1_4	vkUnmapMemory2	VkResult	VkDevice device, const VkMemoryUnmapInfo* pMemoryUnmapInfo	device, pMemoryUnmapInfo	F	y
+VK_VERSION_1_4	vkCmdBindIndexBuffer2	void	VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, VkIndexType indexType	commandBuffer, buffer, offset, size, indexType	F	y
+VK_VERSION_1_4	vkGetRenderingAreaGranularity	void	VkDevice device, const VkRenderingAreaInfo* pRenderingAreaInfo, VkExtent2D* pGranularity	device, pRenderingAreaInfo, pGranularity	F	y
+VK_VERSION_1_4	vkGetDeviceImageSubresourceLayout	void	VkDevice device, const VkDeviceImageSubresourceInfo* pInfo, VkSubresourceLayout2* pLayout	device, pInfo, pLayout	F	y
+VK_VERSION_1_4	vkGetImageSubresourceLayout2	void	VkDevice device, VkImage image, const VkImageSubresource2* pSubresource, VkSubresourceLayout2* pLayout	device, image, pSubresource, pLayout	F	y
+VK_VERSION_1_4	vkCmdPushDescriptorSet	void	VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t set, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites	commandBuffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites	F	y
+VK_VERSION_1_4	vkCmdPushDescriptorSetWithTemplate	void	VkCommandBuffer commandBuffer, VkDescriptorUpdateTemplate descriptorUpdateTemplate, VkPipelineLayout layout, uint32_t set, const void* pData	commandBuffer, descriptorUpdateTemplate, layout, set, pData	F	y
+VK_VERSION_1_4	vkCmdSetRenderingAttachmentLocations	void	VkCommandBuffer commandBuffer, const VkRenderingAttachmentLocationInfo* pLocationInfo	commandBuffer, pLocationInfo	F	y
+VK_VERSION_1_4	vkCmdSetRenderingInputAttachmentIndices	void	VkCommandBuffer commandBuffer, const VkRenderingInputAttachmentIndexInfo* pInputAttachmentIndexInfo	commandBuffer, pInputAttachmentIndexInfo	F	y
+VK_VERSION_1_4	vkCmdBindDescriptorSets2	void	VkCommandBuffer commandBuffer, const VkBindDescriptorSetsInfo* pBindDescriptorSetsInfo	commandBuffer, pBindDescriptorSetsInfo	F	y
+VK_VERSION_1_4	vkCmdPushConstants2	void	VkCommandBuffer commandBuffer, const VkPushConstantsInfo* pPushConstantsInfo	commandBuffer, pPushConstantsInfo	F	y
+VK_VERSION_1_4	vkCmdPushDescriptorSet2	void	VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfo* pPushDescriptorSetInfo	commandBuffer, pPushDescriptorSetInfo	F	y
+VK_VERSION_1_4	vkCmdPushDescriptorSetWithTemplate2	void	VkCommandBuffer commandBuffer, const VkPushDescriptorSetWithTemplateInfo* pPushDescriptorSetWithTemplateInfo	commandBuffer, pPushDescriptorSetWithTemplateInfo	F	y
+VK_VERSION_1_4	vkCopyMemoryToImage	VkResult	VkDevice device, const VkCopyMemoryToImageInfo* pCopyMemoryToImageInfo	device, pCopyMemoryToImageInfo	F	y
+VK_VERSION_1_4	vkCopyImageToMemory	VkResult	VkDevice device, const VkCopyImageToMemoryInfo* pCopyImageToMemoryInfo	device, pCopyImageToMemoryInfo	F	y
+VK_VERSION_1_4	vkCopyImageToImage	VkResult	VkDevice device, const VkCopyImageToImageInfo* pCopyImageToImageInfo	device, pCopyImageToImageInfo	F	y
+VK_VERSION_1_4	vkTransitionImageLayout	VkResult	VkDevice device, uint32_t transitionCount, const VkHostImageLayoutTransitionInfo* pTransitions	device, transitionCount, pTransitions	F	y
+VK_KHR_surface	vkDestroySurfaceKHR	void	VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator	instance, surface, pAllocator	O	y
+VK_KHR_surface	vkGetPhysicalDeviceSurfaceSupportKHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, VkSurfaceKHR surface, VkBool32* pSupported	physicalDevice, queueFamilyIndex, surface, pSupported	O	y
+VK_KHR_surface	vkGetPhysicalDeviceSurfaceCapabilitiesKHR	VkResult	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities	physicalDevice, surface, pSurfaceCapabilities	O	y
+VK_KHR_surface	vkGetPhysicalDeviceSurfaceFormatsKHR	VkResult	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pSurfaceFormatCount, VkSurfaceFormatKHR* pSurfaceFormats	physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats	O	y
+VK_KHR_surface	vkGetPhysicalDeviceSurfacePresentModesKHR	VkResult	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pPresentModeCount, VkPresentModeKHR* pPresentModes	physicalDevice, surface, pPresentModeCount, pPresentModes	O	y
+VK_KHR_swapchain	vkCreateSwapchainKHR	VkResult	VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain	device, pCreateInfo, pAllocator, pSwapchain	O	y
+VK_KHR_swapchain	vkDestroySwapchainKHR	void	VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator	device, swapchain, pAllocator	O	y
+VK_KHR_swapchain	vkGetSwapchainImagesKHR	VkResult	VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages	device, swapchain, pSwapchainImageCount, pSwapchainImages	O	y
+VK_KHR_swapchain	vkAcquireNextImageKHR	VkResult	VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex	device, swapchain, timeout, semaphore, fence, pImageIndex	O	y
+VK_KHR_swapchain	vkQueuePresentKHR	VkResult	VkQueue queue, const VkPresentInfoKHR* pPresentInfo	queue, pPresentInfo	O	y
+VK_KHR_swapchain	vkGetDeviceGroupPresentCapabilitiesKHR	VkResult	VkDevice device, VkDeviceGroupPresentCapabilitiesKHR* pDeviceGroupPresentCapabilities	device, pDeviceGroupPresentCapabilities	O	y
+VK_KHR_swapchain	vkGetDeviceGroupSurfacePresentModesKHR	VkResult	VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR* pModes	device, surface, pModes	O	y
+VK_KHR_swapchain	vkGetPhysicalDevicePresentRectanglesKHR	VkResult	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pRectCount, VkRect2D* pRects	physicalDevice, surface, pRectCount, pRects	O	y
+VK_KHR_swapchain	vkAcquireNextImage2KHR	VkResult	VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex	device, pAcquireInfo, pImageIndex	O	y
+VK_KHR_display	vkGetPhysicalDeviceDisplayPropertiesKHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayPropertiesKHR* pProperties	physicalDevice, pPropertyCount, pProperties	O	y
+VK_KHR_display	vkGetPhysicalDeviceDisplayPlanePropertiesKHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayPlanePropertiesKHR* pProperties	physicalDevice, pPropertyCount, pProperties	O	y
+VK_KHR_display	vkGetDisplayPlaneSupportedDisplaysKHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t planeIndex, uint32_t* pDisplayCount, VkDisplayKHR* pDisplays	physicalDevice, planeIndex, pDisplayCount, pDisplays	O	y
+VK_KHR_display	vkGetDisplayModePropertiesKHR	VkResult	VkPhysicalDevice physicalDevice, VkDisplayKHR display, uint32_t* pPropertyCount, VkDisplayModePropertiesKHR* pProperties	physicalDevice, display, pPropertyCount, pProperties	O	y
+VK_KHR_display	vkCreateDisplayModeKHR	VkResult	VkPhysicalDevice physicalDevice, VkDisplayKHR display, const VkDisplayModeCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDisplayModeKHR* pMode	physicalDevice, display, pCreateInfo, pAllocator, pMode	O	y
+VK_KHR_display	vkGetDisplayPlaneCapabilitiesKHR	VkResult	VkPhysicalDevice physicalDevice, VkDisplayModeKHR mode, uint32_t planeIndex, VkDisplayPlaneCapabilitiesKHR* pCapabilities	physicalDevice, mode, planeIndex, pCapabilities	O	y
+VK_KHR_display	vkCreateDisplayPlaneSurfaceKHR	VkResult	VkInstance instance, const VkDisplaySurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface	instance, pCreateInfo, pAllocator, pSurface	O	y
+VK_KHR_display_swapchain	vkCreateSharedSwapchainsKHR	VkResult	VkDevice device, uint32_t swapchainCount, const VkSwapchainCreateInfoKHR* pCreateInfos, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchains	device, swapchainCount, pCreateInfos, pAllocator, pSwapchains	N	n
+VK_KHR_shared_presentable_image	vkGetSwapchainStatusKHR	VkResult	VkDevice device, VkSwapchainKHR swapchain	device, swapchain	N	n
+VK_KHR_get_surface_capabilities2	vkGetPhysicalDeviceSurfaceCapabilities2KHR	VkResult	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo, VkSurfaceCapabilities2KHR* pSurfaceCapabilities	physicalDevice, pSurfaceInfo, pSurfaceCapabilities	N	n
+VK_KHR_get_surface_capabilities2	vkGetPhysicalDeviceSurfaceFormats2KHR	VkResult	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo, uint32_t* pSurfaceFormatCount, VkSurfaceFormat2KHR* pSurfaceFormats	physicalDevice, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats	N	n
+VK_KHR_get_display_properties2	vkGetPhysicalDeviceDisplayProperties2KHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayProperties2KHR* pProperties	physicalDevice, pPropertyCount, pProperties	N	n
+VK_KHR_get_display_properties2	vkGetPhysicalDeviceDisplayPlaneProperties2KHR	VkResult	VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayPlaneProperties2KHR* pProperties	physicalDevice, pPropertyCount, pProperties	N	n
+VK_KHR_get_display_properties2	vkGetDisplayModeProperties2KHR	VkResult	VkPhysicalDevice physicalDevice, VkDisplayKHR display, uint32_t* pPropertyCount, VkDisplayModeProperties2KHR* pProperties	physicalDevice, display, pPropertyCount, pProperties	N	n
+VK_KHR_get_display_properties2	vkGetDisplayPlaneCapabilities2KHR	VkResult	VkPhysicalDevice physicalDevice, const VkDisplayPlaneInfo2KHR* pDisplayPlaneInfo, VkDisplayPlaneCapabilities2KHR* pCapabilities	physicalDevice, pDisplayPlaneInfo, pCapabilities	N	n
+VK_KHR_present_wait	vkWaitForPresentKHR	VkResult	VkDevice device, VkSwapchainKHR swapchain, uint64_t presentId, uint64_t timeout	device, swapchain, presentId, timeout	N	n
+VK_EXT_direct_mode_display	vkReleaseDisplayEXT	VkResult	VkPhysicalDevice physicalDevice, VkDisplayKHR display	physicalDevice, display	O	y
+VK_EXT_display_surface_counter	vkGetPhysicalDeviceSurfaceCapabilities2EXT	VkResult	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilities2EXT* pSurfaceCapabilities	physicalDevice, surface, pSurfaceCapabilities	N	n
+VK_EXT_display_control	vkDisplayPowerControlEXT	VkResult	VkDevice device, VkDisplayKHR display, const VkDisplayPowerInfoEXT* pDisplayPowerInfo	device, display, pDisplayPowerInfo	N	n
+VK_EXT_display_control	vkRegisterDeviceEventEXT	VkResult	VkDevice device, const VkDeviceEventInfoEXT* pDeviceEventInfo, const VkAllocationCallbacks* pAllocator, VkFence* pFence	device, pDeviceEventInfo, pAllocator, pFence	N	n
+VK_EXT_display_control	vkRegisterDisplayEventEXT	VkResult	VkDevice device, VkDisplayKHR display, const VkDisplayEventInfoEXT* pDisplayEventInfo, const VkAllocationCallbacks* pAllocator, VkFence* pFence	device, display, pDisplayEventInfo, pAllocator, pFence	N	n
+VK_EXT_display_control	vkGetSwapchainCounterEXT	VkResult	VkDevice device, VkSwapchainKHR swapchain, VkSurfaceCounterFlagBitsEXT counter, uint64_t* pCounterValue	device, swapchain, counter, pCounterValue	N	n
+VK_GOOGLE_display_timing	vkGetRefreshCycleDurationGOOGLE	VkResult	VkDevice device, VkSwapchainKHR swapchain, VkRefreshCycleDurationGOOGLE* pDisplayTimingProperties	device, swapchain, pDisplayTimingProperties	N	n
+VK_GOOGLE_display_timing	vkGetPastPresentationTimingGOOGLE	VkResult	VkDevice device, VkSwapchainKHR swapchain, uint32_t* pPresentationTimingCount, VkPastPresentationTimingGOOGLE* pPresentationTimings	device, swapchain, pPresentationTimingCount, pPresentationTimings	N	n
+VK_EXT_hdr_metadata	vkSetHdrMetadataEXT	void	VkDevice device, uint32_t swapchainCount, const VkSwapchainKHR* pSwapchains, const VkHdrMetadataEXT* pMetadata	device, swapchainCount, pSwapchains, pMetadata	N	n
+VK_EXT_headless_surface	vkCreateHeadlessSurfaceEXT	VkResult	VkInstance instance, const VkHeadlessSurfaceCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface	instance, pCreateInfo, pAllocator, pSurface	N	n
+VK_EXT_swapchain_maintenance1	vkReleaseSwapchainImagesEXT	VkResult	VkDevice device, const VkReleaseSwapchainImagesInfoEXT* pReleaseInfo	device, pReleaseInfo	N	n
+VK_EXT_acquire_drm_display	vkAcquireDrmDisplayEXT	VkResult	VkPhysicalDevice physicalDevice, int32_t drmFd, VkDisplayKHR display	physicalDevice, drmFd, display	O	y
+VK_EXT_acquire_drm_display	vkGetDrmDisplayEXT	VkResult	VkPhysicalDevice physicalDevice, int32_t drmFd, uint32_t connectorId, VkDisplayKHR* display	physicalDevice, drmFd, connectorId, display	O	y
+VK_KHR_wayland_surface	vkCreateWaylandSurfaceKHR	VkResult	VkInstance instance, const VkWaylandSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface	instance, pCreateInfo, pAllocator, pSurface	O	y
+VK_KHR_wayland_surface	vkGetPhysicalDeviceWaylandPresentationSupportKHR	VkBool32	VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, struct wl_display* display	physicalDevice, queueFamilyIndex, display	O	y
+VK_KHR_xcb_surface	vkCreateXcbSurfaceKHR	VkResult	VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface	instance, pCreateInfo, pAllocator, pSurface	N	n
+VK_KHR_xcb_surface	vkGetPhysicalDeviceXcbPresentationSupportKHR	VkBool32	VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t* connection, xcb_visualid_t visual_id	physicalDevice, queueFamilyIndex, connection, visual_id	N	n
+VK_KHR_xlib_surface	vkCreateXlibSurfaceKHR	VkResult	VkInstance instance, const VkXlibSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface	instance, pCreateInfo, pAllocator, pSurface	N	n
+VK_KHR_xlib_surface	vkGetPhysicalDeviceXlibPresentationSupportKHR	VkBool32	VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display* dpy, VisualID visualID	physicalDevice, queueFamilyIndex, dpy, visualID	N	n
+VK_EXT_acquire_xlib_display	vkAcquireXlibDisplayEXT	VkResult	VkPhysicalDevice physicalDevice, Display* dpy, VkDisplayKHR display	physicalDevice, dpy, display	N	n
+VK_EXT_acquire_xlib_display	vkGetRandROutputDisplayEXT	VkResult	VkPhysicalDevice physicalDevice, Display* dpy, RROutput rrOutput, VkDisplayKHR* pDisplay	physicalDevice, dpy, rrOutput, pDisplay	N	n

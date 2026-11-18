@@ -1,0 +1,52 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=intelbt-firmware
+package-version=23.50.26053.82122
+whence-block=BT_Solar_REL82122_23.50.26053.82122
+consumer=/sbin/bluetoothd (Intel bootloader load, plan/ws143/design.md section 3)
+installed-directory=/lib/firmware/intel
+installed-file=ibt-0040-0041.sfi
+installed-file=ibt-0040-0041.ddc
+installed-file=ibt-0041-0041.sfi
+installed-file=ibt-0041-0041.ddc
+installed-file=ibt-1040-0041.sfi
+installed-file=ibt-1040-0041.ddc
+installed-copy=ibt-0040-4150.sfi of ibt-0040-0041.sfi
+installed-copy=ibt-0040-4150.ddc of ibt-0040-0041.ddc
+installed-copy=ibt-1040-4150.sfi of ibt-1040-0041.sfi
+installed-copy=ibt-1040-4150.ddc of ibt-1040-0041.ddc
+installed-copy=ibt-0040-1050.sfi of ibt-0040-0041.sfi
+installed-copy=ibt-0040-1050.ddc of ibt-0040-0041.ddc
+installed-copy=ibt-1040-1050.sfi of ibt-1040-0041.sfi
+installed-copy=ibt-1040-1050.ddc of ibt-1040-0041.ddc
+installed-copy-reason=WHENCE links these names; the image builder installs files only, so each link is a copy of the same verified bytes
+installed-license=/usr/share/licenses/intelbt-firmware/LICENCE.ibt_firmware
+installed-whence=/usr/share/licenses/intelbt-firmware/WHENCE
+
+acquisition-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-tag=20260410
+acquisition-tag-object=4585dd5a5f0cee08990d754701d8866d9e9266e6
+acquisition-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-base-url=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
+acquisition-url-suffix=?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-file=intel/ibt-0040-0041.sfi size=720988 sha256=8dcfb3a7c1592c11c3e80505d21ee78dbde3de0c830d8e3e856371c37717b62c
+acquisition-file=intel/ibt-0040-0041.ddc size=9 sha256=fe272982577efdc289cfe3e8bedafca607c0b7d6c9df1aab1880e22ef930d077
+acquisition-file=intel/ibt-0041-0041.sfi size=713448 sha256=2d891022ded1d2d8b208cc5b7632f3098c761ae099024de971e4158dd5681a9c
+acquisition-file=intel/ibt-0041-0041.ddc size=9 sha256=fe272982577efdc289cfe3e8bedafca607c0b7d6c9df1aab1880e22ef930d077
+acquisition-file=intel/ibt-1040-0041.sfi size=720988 sha256=8dcfb3a7c1592c11c3e80505d21ee78dbde3de0c830d8e3e856371c37717b62c
+acquisition-file=intel/ibt-1040-0041.ddc size=9 sha256=fe272982577efdc289cfe3e8bedafca607c0b7d6c9df1aab1880e22ef930d077
+acquisition-license-path=LICENCE.ibt_firmware
+acquisition-license-size=2040
+acquisition-license-sha256=5181b0b51efc79d5acb2c9bb92042878fdbad97a92114d4ab5e32e2b5b52fce4
+acquisition-whence-path=WHENCE
+acquisition-whence-size=425450
+acquisition-whence-sha256=c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
+
+redistribution=unmodified-binary-only
+redistribution-notice=The Intel copyright notice and disclaimer must accompany the unmodified binaries; consult the exact installed LICENCE.ibt_firmware
+reverse-engineering=forbidden by the licence; bluetoothd reads only the HCI command frames the file is made of and the boot parameter of its 0xFC0E command
+patent-license=limited to use alone or with an OSI-approved open source operating system
+license=Intel binary firmware terms in the installed LICENCE.ibt_firmware file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

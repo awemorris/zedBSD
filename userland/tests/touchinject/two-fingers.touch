@@ -1,0 +1,14 @@
+# ws079-p012: two fingers down, a short swipe up together, one lifts, the
+# other moves while a new finger touches, a third finger in a frame of three
+# (split over two reports of two fingers: a "hybrid" USB touch screen), and
+# all three lift together.  The fingers lie in 0..1000.
+size 1000 1000 2
+# The reader opens the node meanwhile.
+wait 1500
+down 1 100 800; down 2 300 800
+swipe 0 -100 2 50
+up 1
+down 3 500 500; move 2 320 700
+down 4 600 600
+up 2; up 3; up 4
+hold 300

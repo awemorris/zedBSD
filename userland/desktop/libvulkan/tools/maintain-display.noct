@@ -1,0 +1,50 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+
+func lines(text) {
+    var result = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") {
+            Array.push(result, String.substring(text, start, i - start)); start = i + 1;
+        }
+    }
+    return result;
+}
+func guardName(line) {
+    // "// VK_EXT_display_control is a preprocessor guard. Do not pass it to API calls."
+    var end = String.indexOf(line, " is a preprocessor guard.");
+    if (!starts(line, "// VK_") || end < 0) { return ""; }
+    return String.substring(line, 3, end - 3);
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: maintain-display.noct VULKAN_CORE_1_4_309_H OUTPUT_HEADER"); }
+    var input = FileUtil.readText(args[0]);
+    if (String.indexOf(input, "#define VK_HEADER_VERSION 309\n") < 0) { System.error("expected the Vulkan-Headers 1.4.309 declaration data"); }
+    var source = lines(input);
+    var extensions = ["VK_EXT_display_surface_counter", "VK_EXT_display_control"];
+    var body = ""; var selected = false; var commands = 0; var blocks = 0;
+    for (i in 0..Array.size(source)) {
+        var line = source[i];
+        var guard = guardName(line);
+        if (guard != "") {
+            selected = false;
+            for (n in 0..Array.size(extensions)) {
+                if (guard == extensions[n]) { selected = true; blocks = blocks + 1; }
+            }
+        }
+        if (selected) {
+            if (starts(line, "VKAPI_ATTR ")) { commands = commands + 1; }
+            body = body + line + "\n";
+        }
+    }
+    if (blocks != 2 || commands != 5) {
+        System.error("unexpected selected declarations: " + blocks + " extensions, " + commands + " commands");
+    }
+    var preamble = "/*\n * Vulkan display-control and surface-counter declarations (ws113).\n * Copyright 2015-2025 The Khronos Group Inc.\n * SPDX-License-Identifier: Apache-2.0\n * See API-PROVENANCE.md and LICENSE-API for the declaration source.\n */\n\n#ifndef VULKAN_DISPLAY_CONTROL_H_\n#define VULKAN_DISPLAY_CONTROL_H_ 1\n\n#include \"vulkan_core.h\"\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
+    FileUtil.writeText(args[1], preamble + body + "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
+    print("maintained " + commands + " display-control and surface-counter commands");
+}

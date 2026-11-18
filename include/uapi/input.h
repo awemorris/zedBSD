@@ -1,0 +1,287 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_UAPI_INPUT_H
+#define KERN_UAPI_INPUT_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <uapi/ioctl.h>
+#include <uapi/time.h>
+
+#define KERN_EV_VERSION		0x010001
+#define EV_VERSION		KERN_EV_VERSION
+#define KERN_EVDEV_IOC_GROUP	'E'
+
+#define input_event_sec		time.tv_sec
+#define input_event_usec	time.tv_usec
+
+struct input_event {
+	struct timeval time;
+	uint16_t type;
+	uint16_t code;
+	int32_t value;
+};
+
+
+struct input_id {
+	uint16_t bustype;
+	uint16_t vendor;
+	uint16_t product;
+	uint16_t version;
+};
+
+struct input_absinfo {
+	int32_t value;
+	int32_t minimum;
+	int32_t maximum;
+	int32_t fuzz;
+	int32_t flat;
+	int32_t resolution;
+};
+
+#define EV_SYN		0x00
+#define EV_KEY		0x01
+#define EV_REL		0x02
+#define EV_ABS		0x03
+#define EV_MSC		0x04
+#define EV_SW		0x05
+#define EV_LED		0x11
+#define EV_SND		0x12
+#define EV_REP		0x14
+#define EV_MAX		0x1f
+
+#define SYN_REPORT	0
+#define SYN_CONFIG	1
+#define SYN_MT_REPORT	2
+#define SYN_DROPPED	3
+
+#define KEY_RESERVED	0
+#define KEY_ESC		1
+#define KEY_1		2
+#define KEY_2		3
+#define KEY_3		4
+#define KEY_4		5
+#define KEY_5		6
+#define KEY_6		7
+#define KEY_7		8
+#define KEY_8		9
+#define KEY_9		10
+#define KEY_0		11
+#define KEY_MINUS	12
+#define KEY_EQUAL	13
+#define KEY_BACKSPACE	14
+#define KEY_TAB		15
+#define KEY_Q		16
+#define KEY_W		17
+#define KEY_E		18
+#define KEY_R		19
+#define KEY_T		20
+#define KEY_Y		21
+#define KEY_U		22
+#define KEY_I		23
+#define KEY_O		24
+#define KEY_P		25
+#define KEY_LEFTBRACE	26
+#define KEY_RIGHTBRACE	27
+#define KEY_ENTER	28
+#define KEY_LEFTCTRL	29
+#define KEY_A		30
+#define KEY_S		31
+#define KEY_D		32
+#define KEY_F		33
+#define KEY_G		34
+#define KEY_H		35
+#define KEY_J		36
+#define KEY_K		37
+#define KEY_L		38
+#define KEY_SEMICOLON	39
+#define KEY_APOSTROPHE	40
+#define KEY_GRAVE	41
+#define KEY_LEFTSHIFT	42
+#define KEY_BACKSLASH	43
+#define KEY_Z		44
+#define KEY_X		45
+#define KEY_C		46
+#define KEY_V		47
+#define KEY_B		48
+#define KEY_N		49
+#define KEY_M		50
+#define KEY_COMMA	51
+#define KEY_DOT		52
+#define KEY_SLASH	53
+#define KEY_RIGHTSHIFT	54
+#define KEY_KPASTERISK	55
+#define KEY_LEFTALT	56
+#define KEY_SPACE	57
+#define KEY_CAPSLOCK	58
+#define KEY_F1		59
+#define KEY_F2		60
+#define KEY_F3		61
+#define KEY_F4		62
+#define KEY_F5		63
+#define KEY_F6		64
+#define KEY_F7		65
+#define KEY_F8		66
+#define KEY_F9		67
+#define KEY_F10		68
+#define KEY_NUMLOCK	69
+#define KEY_SCROLLLOCK	70
+#define KEY_KP7		71
+#define KEY_KP8		72
+#define KEY_KP9		73
+#define KEY_KPMINUS	74
+#define KEY_KP4		75
+#define KEY_KP5		76
+#define KEY_KP6		77
+#define KEY_KPPLUS	78
+#define KEY_KP1		79
+#define KEY_KP2		80
+#define KEY_KP3		81
+#define KEY_KP0		82
+#define KEY_KPDOT	83
+#define KEY_ZENKAKUHANKAKU	85
+#define KEY_102ND	86
+#define KEY_F11		87
+#define KEY_F12		88
+#define KEY_RO		89
+#define KEY_KATAKANA	90
+#define KEY_HIRAGANA	91
+#define KEY_HENKAN	92
+#define KEY_KATAKANAHIRAGANA	93
+#define KEY_MUHENKAN	94
+#define KEY_KPJPCOMMA	95
+#define KEY_KPENTER	96
+#define KEY_RIGHTCTRL	97
+#define KEY_KPSLASH	98
+#define KEY_SYSRQ	99
+#define KEY_RIGHTALT	100
+#define KEY_HOME	102
+#define KEY_UP		103
+#define KEY_PAGEUP	104
+#define KEY_LEFT	105
+#define KEY_RIGHT	106
+#define KEY_END		107
+#define KEY_DOWN	108
+#define KEY_PAGEDOWN	109
+#define KEY_INSERT	110
+#define KEY_DELETE	111
+#define KEY_POWER	116
+#define KEY_KPEQUAL	117
+#define KEY_PAUSE	119
+#define KEY_KPCOMMA	121
+#define KEY_HANGEUL	122
+#define KEY_HANJA	123
+#define KEY_YEN		124
+#define KEY_LEFTMETA	125
+#define KEY_RIGHTMETA	126
+#define KEY_COMPOSE	127
+#define KEY_F13		183
+#define KEY_F14		184
+#define KEY_F15		185
+#define KEY_F16		186
+#define KEY_F17		187
+#define KEY_F18		188
+#define KEY_F19		189
+#define KEY_F20		190
+#define KEY_F21		191
+#define KEY_F22		192
+#define KEY_F23		193
+#define KEY_F24		194
+#define KEY_MAX		0x2ff
+
+#define BTN_MOUSE	0x110
+#define BTN_LEFT	0x110
+#define BTN_RIGHT	0x111
+#define BTN_MIDDLE	0x112
+#define BTN_SIDE	0x113
+#define BTN_EXTRA	0x114
+#define BTN_DIGI	0x140
+#define BTN_TOOL_PEN	0x140
+#define BTN_TOOL_RUBBER	0x141
+#define BTN_TOOL_FINGER	0x145
+#define BTN_TOOL_QUINTTAP	0x148
+#define BTN_TOUCH	0x14a
+#define BTN_STYLUS	0x14b
+#define BTN_STYLUS2	0x14c
+#define BTN_TOOL_DOUBLETAP	0x14d
+#define BTN_TOOL_TRIPLETAP	0x14e
+#define BTN_TOOL_QUADTAP	0x14f
+
+/*
+ * EV_MSC codes.  MSC_TIMESTAMP is a touch screen's own scan time in
+ * microseconds (the HID Scan Time), wrapping at 2^32 and starting again at
+ * 0 after the screen has been silent for a second; it comes before the
+ * SYN_REPORT of each frame of a screen that has one.
+ */
+#define MSC_TIMESTAMP	0x05
+#define MSC_MAX		0x07
+
+#define REL_X		0x00
+#define REL_Y		0x01
+#define REL_HWHEEL	0x06
+#define REL_WHEEL	0x08
+#define REL_MAX		0x0f
+
+#define ABS_X		0x00
+#define ABS_Y		0x01
+#define ABS_PRESSURE	0x18
+#define ABS_DISTANCE	0x19
+#define ABS_TILT_X	0x1a
+#define ABS_TILT_Y	0x1b
+#define ABS_MT_SLOT		0x2f
+#define ABS_MT_POSITION_X	0x35
+#define ABS_MT_POSITION_Y	0x36
+#define ABS_MT_TRACKING_ID	0x39
+#define ABS_MAX		0x3f
+
+#define REP_DELAY	0x00
+#define REP_PERIOD	0x01
+
+#define INPUT_PROP_POINTER	0x00
+#define INPUT_PROP_DIRECT	0x01
+#define INPUT_PROP_BUTTONPAD	0x02
+#define INPUT_PROP_MAX		0x1f
+
+#define BUS_PCI		0x01
+#define BUS_USB		0x03
+#define BUS_BLUETOOTH	0x05
+#define BUS_VIRTUAL	0x06
+#define BUS_I2C		0x18
+#define BUS_HOST	0x19
+
+#define EVIOCGVERSION _IOR(KERN_EVDEV_IOC_GROUP, 0x01, int)
+#define EVIOCGID _IOR(KERN_EVDEV_IOC_GROUP, 0x02, struct input_id)
+#define EVIOCGREP _IOR(KERN_EVDEV_IOC_GROUP, 0x03, unsigned int[2])
+#define EVIOCSREP _IOW(KERN_EVDEV_IOC_GROUP, 0x03, unsigned int[2])
+#define EVIOCGNAME(length)                                                     \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x06, (length))
+#define EVIOCGPHYS(length)                                                     \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x07, (length))
+#define EVIOCGUNIQ(length)                                                     \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x08, (length))
+#define EVIOCGPROP(length)                                                     \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x09, (length))
+#define EVIOCGKEY(length)                                                      \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x18, (length))
+#define EVIOCGLED(length)                                                      \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP, 0x19, (length))
+#define EVIOCGBIT(event_type, length)                                          \
+	KERN_IOC(KERN_IOC_OUT, KERN_EVDEV_IOC_GROUP,                     \
+		   0x20 + (event_type), (length))
+#define EVIOCGABS(axis)                                                        \
+	_IOR(KERN_EVDEV_IOC_GROUP, 0x40 + (axis), struct input_absinfo)
+#define EVIOCGRAB _IOW(KERN_EVDEV_IOC_GROUP, 0x90, int)
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

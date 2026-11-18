@@ -1,0 +1,2736 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Device start and stop.
+ *
+ * The hardware bring-up sleeps, waits on timers and takes interrupts, none of
+ * which is safe in the boot device-probe context where PCI attach runs.  Attach
+ * therefore only registers the device here, and the kernel reports separately
+ * when regular threads and timed waits work.  Once both have happened -- in
+ * either order -- one start worker per device runs the bring-up, which ends by
+ * publishing the GPU node and serving its requests on the same thread.
+ */
+
+#include "i915.h"
+#include "device.h"
+#include "gt.h"
+#include "ggtt.h"
+#include "reset.h"
+#include "submit.h"
+#include "sync.h"
+#include "worker.h"
+#include "engine.h"
+#include "irq.h"
+#include "gt-power.h"
+#include "perf.h"
+#include "display/display.h"
+#include "display/run-log.h"
+#include "display/xd9-flip.h"
+#include "vk/vk.h"
+#include <kern/kcrt.h>
+#include <kern/sysctl.h>
+
+#include <drivers/generic/dma.h>
+#include <drivers/pci/pci-i915.h>
+#include <drivers/pci/pci.h>
+#include <kern/boot.h>
+#include <kern/clock.h>
+#include <kern/klog.h>
+#include <kern/lock.h>
+#include <kern/pmem.h>
+#include <kern/sched.h>
+#include <kern/thread.h>
+
+#include <uapi/errno.h>
+#include <uapi/sysctl.h>
+#include <stddef.h>
+
+#include "intel/gt-regs.h"
+
+/* The GPU addresses 39 bits of DMA space. */
+#define I915_START_DMA_MASK	((((uint64_t)1) << 39) - 1U)
+
+/* Gen12 has 32 fence registers. */
+#define I915_START_FENCES	32U
+
+/* How many forcewake domains the running GT holds awake, at most. */
+#define I915_START_DOMAINS	5U
+
+/* How many forcewake domains a running Gen9 GT holds awake. */
+#define I915_START_DOMAINS_GEN9	3U
+
+/* I915_GT_GEN8_MCR_SELECTOR and the Gen11+ multicast bit it starts with. */
+#define I915_MCR_SELECTOR	0x0fdcU
+#define I915_MCR_MULTICAST	0x80000000U
+
+/* How many of the newest trace records a dump examines. */
+#define I915_START_TRACE_DUMP	256U
+
+/* The display's interrupt summary control (GEN11_DISPLAY_INT_CTL). */
+#define I915_DISPLAY_INT_CTL	0x44200U
+
+/*
+ * The Gen9 display power well state (HSW_PWR_WELL_CTL2): power well 1
+ * powers pipe A, power well 2 pipes B and C.  Gen9 has three pipes.
+ */
+#define I915_GEN9_PWR_WELL_CTL2	0x45404U
+#define I915_GEN9_PW_1_STATE	(1U << 28)
+#define I915_GEN9_PW_2_STATE	(1U << 30)
+#define I915_GEN9_PIPES		3U
+
+/*
+ * The Gen9 eDP PSR and south display (PCH) interrupt registers the
+ * interrupt reset also silences.
+ *
+ * Values referenced: Linux v6.19 drivers/gpu/drm/i915/display/intel_psr_regs.h
+ * (EDP_PSR_IMR, EDP_PSR_IIR) and drivers/gpu/drm/i915/i915_reg.h (SDEIMR,
+ * SDEIIR, SDEIER).
+ */
+#define I915_GEN9_EDP_PSR_IMR	0x64834U
+#define I915_GEN9_EDP_PSR_IIR	0x64838U
+#define I915_GEN9_SDEIMR	0xc4004U
+#define I915_GEN9_SDEIIR	0xc4008U
+#define I915_GEN9_SDEIER	0xc400cU
+
+/*
+ * The devices that attached and the kernel's readiness.
+ *
+ * Attach adds a device to the pending list; the readiness report sets ready.
+ * Whichever comes second launches the start worker, and a launched device
+ * leaves the list, so each device is started exactly once.  With the boot
+ * parameter i915.start=manual the pending devices are held after readiness
+ * as well, until root asks for their start (hw.gpu.start).
+ */
+struct i915_start_registry {
+	/*
+	 * Protects every other field; initialized on first use.  It is taken
+	 * with interrupts disabled so that its holder cannot be preempted and
+	 * resume on another CPU while it holds it.
+	 */
+	struct spinlock lock;
+
+	/* Nonzero once the lock has been initialized. */
+	unsigned lock_ready;
+
+	/* Nonzero once the kernel has reported that timed waits work. */
+	unsigned ready;
+
+	/*
+	 * Nonzero when the boot parameter i915.start=manual holds the devices
+	 * for root's start.  Set with ready, because the boot parameters are
+	 * read only after the devices have attached.
+	 */
+	unsigned manual;
+
+	/* Nonzero once root has asked for the start; a later device then starts by itself. */
+	unsigned released;
+
+	/* The registered devices whose worker has not been launched yet. */
+	struct i915_device *pending;
+};
+
+/*
+ * The one start registry of the driver.
+ *
+ * It lives for the whole kernel lifetime.  Its zero value means no device has
+ * registered and the kernel has not reported readiness yet.
+ */
+static struct i915_start_registry i915_start_registry;
+
+/*
+ * The forcewake domains the running GT holds, in the order they are taken.
+ *
+ * The media domains are included because the workaround list writes video
+ * engine registers.  The table never changes.
+ */
+static const int i915_start_domains[I915_START_DOMAINS] = {
+	I915_FORCEWAKE_RENDER,
+	I915_FORCEWAKE_GT,
+	I915_FORCEWAKE_MEDIA_VDBOX0,
+	I915_FORCEWAKE_MEDIA_VDBOX2,
+	I915_FORCEWAKE_MEDIA_VEBOX0
+};
+
+/*
+ * The forcewake domains a running Gen9 GT holds, in the order they are taken.
+ *
+ * Gen9 has a single media domain for every media engine.  The table never
+ * changes.
+ */
+static const int i915_start_domains_gen9[I915_START_DOMAINS_GEN9] = {
+	I915_FORCEWAKE_RENDER,
+	I915_FORCEWAKE_GT,
+	I915_FORCEWAKE_MEDIA_GEN9
+};
+
+/*
+ * The test checkpoint after the start.
+ *
+ * The test build defines it to run the scenario it was built for on the
+ * started device, before the node is served.  It is weak so that a production
+ * kernel links without it and the call site is a null test.
+ */
+extern void drv_i915_test_after_start(struct i915_device *device) __attribute__((weak));
+
+static uint64_t i915_start_held(void);
+static int i915_start_release(void);
+
+/*
+ * The operations behind hw.gpu.start: how many devices are held for root's
+ * start, and the start itself.  The table never changes.
+ */
+static const struct kern_gpu_start_ops i915_start_ops = {
+	i915_start_held,
+	i915_start_release
+};
+
+static void i915_interim_display_irq_enable(void *context, int enabled);
+static void i915_interim_display_irq_nothing(void *context);
+static void i915_interim_display_irq_reset(void *context);
+static void i915_interim_irq_silence(struct i915_mmio *mmio, uint32_t imr, uint32_t iir, uint32_t ier);
+static void i915_interim_display_irq_handle(void *context, uint32_t master_ctl);
+
+/*
+ * The display interrupt hooks while the display is not connected.
+ *
+ * The reset keeps the display's interrupt summary off, so a display source
+ * the firmware left enabled cannot reach the vector; every other hook does
+ * nothing.  The table never changes.
+ */
+static const struct i915_irq_display_ops i915_interim_display_irq_ops = {
+	i915_interim_display_irq_enable,
+	i915_interim_display_irq_nothing,
+	i915_interim_display_irq_reset,
+	i915_interim_display_irq_nothing,
+	i915_interim_display_irq_handle,
+	i915_interim_display_irq_nothing
+};
+
+static void i915_start_registry_init(void);
+static int i915_start_held_locked(void);
+static int i915_boot_word(enum kern_boot_parameter_key key, const char *word);
+static int i915_boot_word_listed(enum kern_boot_parameter_key key, const char *word);
+static void i915_start_launch(void);
+static void i915_start_worker(void *argument);
+static void i915_attach_settled_locked(struct i915_device *device);
+static int i915_start_prepare(struct i915_device *device);
+static int i915_start_display(struct i915_device *device);
+static int i915_start_display_outputs(struct i915_device *device);
+static int i915_start_display_serve(struct i915_device *device);
+static int i915_start_registers(struct i915_device *device);
+static int i915_start_gt_info(struct i915_device *device);
+static int i915_start_memory(struct i915_device *device);
+static int i915_start_ggtt(struct i915_device *device);
+static int i915_start_aperture(struct i915_device *device);
+static int i915_start_interrupts(struct i915_device *device);
+static int i915_start_gt(struct i915_device *device);
+static int i915_start_gt_awake(struct i915_device *device);
+static int i915_start_gt_memory(struct i915_device *device);
+static void i915_start_pxp(struct i915_device *device);
+static int i915_start_publish(struct i915_device *device);
+static void i915_stop_gt(struct i915_device *device);
+static void i915_stop_hardware(struct i915_device *device);
+static int i915_gt_telemetry_read(void *context, struct gpu_telemetry_entry *entry);
+static int i915_rps_awake_get(void *context);
+static void i915_rps_awake_put(void *context);
+static void i915_log_park_sleep(struct i915_gt *gt);
+static int i915_forcewake_get_all(struct i915_gt *gt, unsigned *held);
+static void i915_forcewake_put_all(struct i915_gt *gt, unsigned held);
+static void i915_start_dump_trace(struct i915_gt *gt);
+static const int *i915_start_domain_list(const struct i915_gt *gt, unsigned *count);
+static unsigned i915_popcount32(uint32_t value);
+static unsigned i915_cpu_physical_bits(void);
+
+/*
+ * Records that the kernel can run the device bring-up.
+ *
+ * Called once from the boot path after regular threads, timer wakeups and the
+ * VFS are up.  It launches a start worker for every device that already
+ * attached and returns without waiting for any of them.
+ */
+void
+drv_i915_runtime_ready(void)
+{
+	struct i915_device *device;
+	unsigned held;
+	int manual;
+	int debug;
+	unsigned long enabled;
+
+	/* Makes sure the registry lock exists before it is taken. */
+	i915_start_registry_init();
+
+	/*
+	 * Reads whether root starts the devices (i915.start=manual) and whether
+	 * the display path is logged in detail (i915.debug=display).
+	 * i915.debug= lists its words with commas.  The video decode engine is
+	 * offered to Vulkan by default; i915.debug=video is still accepted and
+	 * changes nothing.
+	 */
+	manual = i915_boot_word(KERN_BOOT_PARAMETER_I915_START, "manual");
+	debug = i915_boot_word_listed(KERN_BOOT_PARAMETER_I915_DEBUG, "display");
+	drv_i915_lcd_debug_set(debug);
+	drv_i915_render_video_request(1);
+
+	/* Marks the kernel ready for every current and later device. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	i915_start_registry.ready = 1U;
+
+	/* Holds the attached devices for root under i915.start=manual. */
+	held = 0U;
+	if (manual) {
+		i915_start_registry.manual = 1U;
+
+		/*
+		 * A held device is no GPU node on its way until root starts it,
+		 * so the graphical login does not wait for it.
+		 */
+		for (device = i915_start_registry.pending;
+		     device != NULL;
+		     device = device->start_next) {
+			i915_attach_settled_locked(device);
+			held++;
+		}
+	}
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/* Tells root how to start the held devices. */
+	if (manual) {
+		kern_logf("i915: i915.start=manual: %u device(s) held; root starts them with: sysctl hw.gpu.start=1\n",
+		    held);
+	}
+
+	/* Notes the detailed display log. */
+	if (debug)
+		kern_logf("i915: i915.debug=display: the display path is logged in detail\n");
+
+	/* Starts the devices that attached before readiness, unless they are held. */
+	i915_start_launch();
+}
+
+/*
+ * Offers root the start of the devices i915.start=manual holds.
+ *
+ * Called once from the driver registration on the boot thread, before user
+ * space runs.  Without i915.start=manual nothing is ever held, and asking
+ * for the start fails with ENODEV.
+ */
+void
+drv_i915_device_start_ops_install(void)
+{
+	/* Makes sure the registry lock exists before the operations can take it. */
+	i915_start_registry_init();
+
+	/* Publishes the operations behind hw.gpu.start. */
+	kern_gpu_start_ops_set(&i915_start_ops);
+}
+
+/*
+ * Registers an attached device for a deferred start.
+ *
+ * The device is started by a worker once the kernel has reported readiness;
+ * if it already has, the worker is launched now.
+ */
+void
+drv_i915_device_schedule_start(
+	struct i915_device *device)
+{
+	int held;
+	unsigned long enabled;
+
+	/* Makes sure the registry lock exists before it is taken. */
+	i915_start_registry_init();
+
+	/* Queues the device for its start worker. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	device->start_next = i915_start_registry.pending;
+	i915_start_registry.pending = device;
+
+	/*
+	 * The device counts as a GPU node on its way until the node is
+	 * published or the start has failed, so the graphical login waits for
+	 * it rather than falling back to the console.  A device held for
+	 * root's start is counted when root starts it.
+	 */
+	held = i915_start_held_locked();
+	if (!held) {
+		device->attach_counted = 1U;
+		kern_gpu_attach_begin();
+	}
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/* Says what the start of the device waits for. */
+	if (held) {
+		kern_logf("i915: device 8086:%04x registered; held for root's start (sysctl hw.gpu.start=1)\n",
+		    (unsigned)device->product);
+	} else {
+		kern_logf("i915: device 8086:%04x registered; the start waits for kernel readiness\n",
+		    (unsigned)device->product);
+	}
+
+	/* Starts the device now when readiness came first. */
+	i915_start_launch();
+}
+
+/*
+ * Brings the hardware up and publishes the GPU node.
+ *
+ * Runs on the device's start worker.  The steps, in order: PCI and runtime
+ * PM, the register block and the GT fuses with a full GT reset, DMA, the
+ * GGTT and the display's data sources, the display noirq probe, interrupts,
+ * the display nogem probe, the GT (workarounds, memory, engines, default
+ * contexts), the protected-content context, then the display probe and the
+ * driver registration.  A step that
+ * fails names itself in device->stage; what the steps before it acquired is
+ * given back by the device stop.
+ */
+int
+drv_i915_device_start(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int error;
+
+	gt = &device->gt;
+
+	/* Prepares the trace, the locks and PCI access, and resumes the device. */
+	error = i915_start_prepare(device);
+	if (error != 0)
+		return error;
+
+	/* Maps the registers, reads the GT fuses and resets the GT. */
+	error = i915_start_registers(device);
+	if (error != 0)
+		return error;
+
+	/* Sets up 39-bit DMA, the GGTT, the aperture, bus mastering and the MSI vector. */
+	error = i915_start_memory(device);
+	if (error != 0)
+		return error;
+
+	/* Starts the display before the interrupts: its tables, the firmware check and its core. */
+	error = i915_start_display(device);
+	if (error != 0)
+		return error;
+
+	/* Installs the interrupt handler with the display half bound. */
+	error = i915_start_interrupts(device);
+	if (error != 0)
+		return error;
+
+	/* Builds the display's outputs and corrects what the firmware left unused. */
+	error = i915_start_display_outputs(device);
+	if (error != 0)
+		return error;
+
+	/* Programs the GT and records the default contexts. */
+	error = i915_start_gt(device);
+	if (error != 0)
+		return error;
+
+	/* Creates the protected-content context; its failure never stops the start. */
+	i915_start_pxp(device);
+
+	/* Serves the display: the hotplug path and the Type-C ports start, the start's references go back. */
+	error = i915_start_display_serve(device);
+	if (error != 0)
+		return error;
+
+	/* Dumps what the start did. */
+	i915_start_dump_trace(gt);
+
+	/* Keeps the GT awake, publishes the node and serves it until the device stops. */
+	error = i915_start_publish(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the GPU node was published and served. */
+	return 0;
+}
+
+/*
+ * Releases what the device start acquired, in reverse order.
+ *
+ * The engines are stopped and reset before the objects they point at are
+ * released.  A lease that cannot be given back safely is kept and reported.
+ */
+int
+drv_i915_device_stop(
+	struct i915_device *device)
+{
+	struct i915_device **link;
+	struct i915_gt *gt;
+	unsigned launched;
+	unsigned long enabled;
+
+	gt = &device->gt;
+
+	/* Makes sure the registry lock exists before it is taken. */
+	i915_start_registry_init();
+
+	/* Withdraws the device from the start list unless its worker was launched. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	launched = device->start_launched;
+
+	/* Finds the link that names the device in the pending list. */
+	link = &i915_start_registry.pending;
+	while (*link != NULL && *link != device)
+		link = &(*link)->start_next;
+
+	/* Unlinks a device that is still pending; its node will never be published. */
+	if (*link == device) {
+		*link = device->start_next;
+		device->start_next = NULL;
+		i915_attach_settled_locked(device);
+	}
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/*
+	 * XXX: a launched start may still be running; nothing tells the stop
+	 * when it has returned, so the device is kept.
+	 */
+	if (launched != 0U && device->start_returned == 0U)
+		return EBUSY;
+
+	/* Stops the request worker and frees its state. */
+	if (device->worker != NULL) {
+		drv_i915_worker_stop(device);
+		drv_i915_worker_destroy(device);
+	}
+
+	/* XXX: session objects left by closed or quarantined sessions are not freed yet. */
+
+	/* Stops the display's use of the hardware, the GT, and gives back the GT's objects. */
+	i915_stop_gt(device);
+
+	/* Releases the panel connector and the display records before the interrupts go. */
+	drv_i915_display_stop_outputs(device);
+
+	/* Gives back interrupts, the display, DMA, the GGTT and the register block. */
+	i915_stop_hardware(device);
+
+	/* Dumps what the stop did. */
+	i915_start_dump_trace(gt);
+
+	/* Succeeded: no hardware lease remains owned. */
+	return 0;
+}
+
+/*
+ * Lets the GT go idle for a park of the request worker.
+ *
+ * The worker's thread calls it once it has nothing running: the RPS
+ * evaluations stop (with the GT awake for their last writes) and the
+ * worker gives its hold on the GT back, so that nothing wakes the GT until
+ * drv_i915_device_unpark_gt().
+ */
+void
+drv_i915_device_park_gt(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned holds;
+	unsigned refs;
+	unsigned long flags;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Stops the RPS interrupts and work with the GT awake for their writes. */
+	drv_i915_device_worker_wake(device);
+	drv_i915_rps_stop(&gt->init.rps);
+
+	/* Notes when the park began and the RC6 time then. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &gt->parked_sleep_ns, &holds);
+	gt->parked_at_ns = drv_i915_perf_now();
+	gt->parked_forgets = drv_i915_rc6_residency_forgets(&gt->rc6_residency);
+
+	/* Gives the worker's hold back, which with the RPS stopped was the last, and marks the worker parked. */
+	drv_i915_device_worker_rest(device);
+	gt->forcewake_parked = 1U;
+
+	/* Reads what still holds the GT, for the log. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	refs = gt->awake_refs;
+	holds = gt->forcewake_held;
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+
+	/* Says that the GT may idle. */
+	kern_logf("i915: park: the GT may idle (RPS stopped, %u holders, %u forcewake domains held)\n", refs, holds);
+}
+
+/*
+ * Holds the running GT awake: the first holder wakes every forcewake
+ * domain, so the held register accessors work until the matching
+ * drv_i915_device_awake_put().
+ *
+ * Returns 0, or the forcewake's error with nothing held.  Safe from any
+ * thread; it does not sleep.
+ */
+int
+drv_i915_device_awake_get(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+	unsigned held;
+	int error;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Takes a hold under the lock that orders the holders: the first one wakes the domains and lets the RC6 account read the counter. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	/* Outside the running device's life there is no GT to wake. */
+	if (gt->awake_open == 0U) {
+		spin_unlock_irqrestore(&gt->awake_lock, flags);
+		return ENODEV;
+	}
+
+	/* Wakes every domain for the first holder. */
+	if (gt->awake_refs == 0U && gt->forcewake_held == 0U) {
+		error = i915_forcewake_get_all(gt, &held);
+
+		/* Gives back what a wake that failed part way took, and holds nothing. */
+		if (error != 0) {
+			i915_forcewake_put_all(gt, held);
+			spin_unlock_irqrestore(&gt->awake_lock, flags);
+			return error;
+		}
+
+		/* Records the domains held, and lets the RC6 account read the counter from now on. */
+		gt->forcewake_held = held;
+		drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+	}
+
+	/* Counts the holder, which keeps the domains until it lets go. */
+	gt->awake_refs++;
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+
+	/* Succeeded: the GT stays awake until the put. */
+	return 0;
+}
+
+/*
+ * Lets go of the running GT: the last holder samples the RC6 time and
+ * gives every forcewake domain back, so the GT can drop into RC6.
+ */
+void
+drv_i915_device_awake_put(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Drops a hold under the lock that orders the holders: the last one gives the domains back. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	/* A put without a hold has nothing to drop. */
+	if (gt->awake_refs == 0U) {
+		spin_unlock_irqrestore(&gt->awake_lock, flags);
+		return;
+	}
+
+	/* Uncounts the holder. */
+	gt->awake_refs--;
+
+	/* The last holder samples the RC6 time and gives the domains back. */
+	if (gt->awake_refs == 0U && gt->forcewake_held != 0U) {
+		drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
+		i915_forcewake_put_all(gt, gt->forcewake_held);
+		gt->forcewake_held = 0U;
+	}
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+}
+
+/*
+ * Reports whether the request worker holds the GT awake.  Only the
+ * worker's thread (which also starts and stops the device) asks.
+ */
+int
+drv_i915_device_worker_awake(
+	const struct i915_device *device)
+{
+	/* The worker holds the GT while its flag is set. */
+	if (device->gt.worker_awake != 0U)
+		return 1;
+
+	/* The worker does not hold the GT. */
+	return 0;
+}
+
+/*
+ * Makes the request worker a holder of the GT before it runs work.  A GT
+ * that does not wake is logged; the work then finds its registers asleep.
+ */
+void
+drv_i915_device_worker_wake(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int error;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Already a holder. */
+	if (gt->worker_awake != 0U)
+		return;
+
+	/* Wakes the GT for the worker; a device that never ran has nothing to wake. */
+	error = drv_i915_device_awake_get(device);
+	if (error == ENODEV)
+		return;
+	if (error != 0) {
+		kern_logf("i915: the GT did not wake for the worker (%d)\n", error);
+		return;
+	}
+
+	/* Records that the worker holds the GT. */
+	gt->worker_awake = 1U;
+}
+
+/*
+ * Ends the request worker's hold on the GT once it has had nothing to do
+ * for a while, and reports register accesses that found their domain
+ * asleep since the last report.
+ */
+void
+drv_i915_device_worker_rest(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	uint32_t refusals;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Not a holder. */
+	if (gt->worker_awake == 0U)
+		return;
+
+	/* Lets the GT rest unless the RPS holds it for a moment. */
+	gt->worker_awake = 0U;
+	drv_i915_device_awake_put(device);
+
+	/* Accesses a held accessor refused for want of a domain are a fault of the holds. */
+	refusals = gt->mmio.forcewake_refusals;
+	if (refusals != gt->refusals_reported) {
+		kern_logf("i915: %u register accesses found their forcewake domain asleep\n",
+		    (unsigned)(refusals - gt->refusals_reported));
+		gt->refusals_reported = refusals;
+	}
+}
+
+/*
+ * Wakes the GT again after a park: takes the forcewake domains back and
+ * starts the RPS evaluations.  It reports the forcewake's error, with the
+ * domains it could take held.
+ */
+int
+drv_i915_device_unpark_gt(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned held;
+	int error;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Makes the worker a holder of the GT again. */
+	gt->forcewake_parked = 0U;
+	error = drv_i915_device_awake_get(device);
+	if (error != 0) {
+		kern_logf("i915: unpark: forcewake failed (%d)\n", error);
+		return error;
+	}
+
+	/* Records that the worker holds the GT and which domains that holds. */
+	gt->worker_awake = 1U;
+	held = gt->forcewake_held;
+
+	/* Says how much of the park the GT slept. */
+	i915_log_park_sleep(gt);
+
+	/* Lets the GT frequency follow the load again. */
+	(void)drv_i915_rps_start(&gt->init.rps, &gt->irq, &gt->mmio);
+
+	/* Succeeded: the GT serves again. */
+	kern_logf("i915: unpark: the GT serves again (%u forcewake domains)\n", held);
+	return 0;
+}
+
+/*
+ * Takes the hardware down for a suspend, after the request worker parked.
+ *
+ * The display holds its wells, every interrupt source is masked and
+ * cleared (with the GT awake for the writes), and the display core goes
+ * down into DC9.  A display that does not reach DC9 is brought up again,
+ * the interrupts come back, and the refusal is reported.
+ */
+int
+drv_i915_device_suspend_hw(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned held;
+	int error;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Holds the display's wells for the rest of the suspend. */
+	drv_i915_display_suspend_begin(device);
+
+	/* Masks and clears every interrupt source, with the GT awake for the writes. */
+	if (gt->irq_installed != 0U) {
+		(void)i915_forcewake_get_all(gt, &held);
+		drv_i915_irq_reset(&gt->irq);
+		i915_forcewake_put_all(gt, held);
+	}
+
+	/* Takes the display core down into DC9; a refusal undoes the interrupts. */
+	error = drv_i915_display_suspend_end(device);
+	if (error != 0) {
+		/* Brings the interrupts back, with the GT awake for the writes. */
+		if (gt->irq_installed != 0U) {
+			(void)i915_forcewake_get_all(gt, &held);
+			drv_i915_irq_postinstall(&gt->irq);
+			i915_forcewake_put_all(gt, held);
+		}
+
+		/* Says why the suspend stops here. */
+		kern_logf("i915: suspend: the display did not go down (%d); the device runs on\n", error);
+		return error;
+	}
+
+	/* The GT loses its power in D3hot, and the RC6 counter with it. */
+	drv_i915_rc6_residency_forget(&gt->rc6_residency);
+
+	/* Succeeded: the device may go to D3hot. */
+	kern_logf("i915: suspend: the hardware is down (interrupts off, display in DC9)\n");
+	return 0;
+}
+
+/*
+ * Brings the hardware back after a resume, before the request worker
+ * leaves its park.
+ *
+ * The display core comes up again, the GGTT is written again, the GT
+ * resumes (engines, workarounds, MOCS, RC6) with the fence registers
+ * cleared as at the start, and the interrupts come back.  Every step is
+ * tried; the first failure is reported.
+ */
+int
+drv_i915_device_resume_hw(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned written;
+	unsigned held;
+	unsigned fence;
+	int first_error;
+	int error;
+
+	/* The GT the device runs. */
+	gt = &device->gt;
+
+	/* Brings the display core up again, with its DMC. */
+	first_error = drv_i915_display_resume_begin(device);
+
+	/* Writes every entry of the GGTT windows again. */
+	if (gt->mem_inited != 0U) {
+		written = drv_i915_gt_ggtt_restore(&gt->mem);
+		kern_logf("i915: resume: %u GGTT entries written again\n", written);
+	}
+
+	/* Resumes the GT with every domain awake. */
+	error = i915_forcewake_get_all(gt, &held);
+	if (error != 0 && first_error == 0)
+		first_error = error;
+
+	/* Resumes the engines, their workarounds, MOCS and RC6. */
+	if (gt->engines_resumed != 0U) {
+		error = drv_i915_gt_resume(&gt->engines, &gt->init, &gt->info, &gt->mmio, &gt->uncore_lock);
+		if (error != 0 && first_error == 0)
+			first_error = error;
+	}
+
+	/* Clears the fence registers, as the start did. */
+	for (fence = 0U; fence < I915_START_FENCES; fence++) {
+		drv_i915_raw_write32(&gt->mmio, 0x100000U + fence * 8U, 0U);
+		drv_i915_raw_write32(&gt->mmio, 0x100000U + fence * 8U + 4U, 0U);
+	}
+
+	/* Brings the interrupts back. */
+	if (gt->irq_installed != 0U)
+		drv_i915_irq_postinstall(&gt->irq);
+
+	/* Gives the domains back; the request worker takes them when it leaves its park. */
+	i915_forcewake_put_all(gt, held);
+
+	/* Lets DC6 be allowed again. */
+	drv_i915_display_resume_end(device);
+
+	/* Reports the first step that failed. */
+	if (first_error != 0) {
+		kern_logf("i915: resume: a step failed (%d)\n", first_error);
+		return first_error;
+	}
+
+	/* Succeeded: the device runs; the next presentation lights the output. */
+	kern_logf("i915: resume: the hardware is back\n");
+	return 0;
+}
+
+/*
+ * Tells the kernel that the device's GPU node is published or will never be.
+ *
+ * The graphical login stops waiting for the node once no device counts as
+ * attaching.  Only the first call for a device has an effect.
+ */
+void
+drv_i915_device_attach_settled(
+	struct i915_device *device)
+{
+	unsigned long enabled;
+
+	/* Makes sure the registry lock exists before it is taken. */
+	i915_start_registry_init();
+
+	/* Takes the device off the kernel's count of GPU nodes on their way. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	i915_attach_settled_locked(device);
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+}
+
+/* Initializes the registry lock the first time the registry is used. */
+static void
+i915_start_registry_init(void)
+{
+	/*
+	 * Attach and the readiness report both run on the boot thread before
+	 * any worker exists, so the first use cannot race with another.
+	 */
+	if (i915_start_registry.lock_ready != 0U)
+		return;
+
+	spin_init(&i915_start_registry.lock, LOCK_RANK_DEVICE, "i915 start");
+	i915_start_registry.lock_ready = 1U;
+}
+
+/* Reports whether root holds the pending devices; the caller holds the start registry lock. */
+static int
+i915_start_held_locked(void)
+{
+	/* Only i915.start=manual holds, and only until root has asked. */
+	if (i915_start_registry.manual == 0U)
+		return 0;
+	if (i915_start_registry.released != 0U)
+		return 0;
+
+	/* Succeeded: the devices wait for root. */
+	return 1;
+}
+
+/* Counts the devices held for root's start (hw.gpu.start read). */
+static uint64_t
+i915_start_held(void)
+{
+	struct i915_device *device;
+	uint64_t count;
+	int held;
+	unsigned long enabled;
+
+	/* Counts the pending devices while root holds them. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	count = 0U;
+	held = i915_start_held_locked();
+	if (held) {
+		/* Counts each pending device. */
+		for (device = i915_start_registry.pending;
+		     device != NULL;
+		     device = device->start_next)
+			count++;
+	}
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/* Reports the count. */
+	return count;
+}
+
+/*
+ * Starts the devices held for root's start (hw.gpu.start=1).
+ *
+ * Returns 0 once their start workers are launched, or ENODEV when no device
+ * is held: i915.start=manual was not given, no Intel display device
+ * attached, or root has already started them.
+ */
+static int
+i915_start_release(void)
+{
+	struct i915_device *device;
+	unsigned count;
+	int held;
+	unsigned long enabled;
+
+	/* Releases the held devices and counts them as GPU nodes on their way. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	count = 0U;
+	held = i915_start_held_locked();
+	if (held) {
+		/* Counts each pending device. */
+		for (device = i915_start_registry.pending;
+		     device != NULL;
+		     device = device->start_next)
+			count++;
+	}
+
+	/*
+	 * Released, the registry starts these and every later device by
+	 * itself.  Each device now counts on hw.gpu.attaching, so a graphical
+	 * login started afterwards waits for its node.
+	 */
+	if (count != 0U) {
+		i915_start_registry.released = 1U;
+		for (device = i915_start_registry.pending;
+		     device != NULL;
+		     device = device->start_next) {
+			device->attach_counted = 1U;
+			kern_gpu_attach_begin();
+		}
+	}
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/* Refuses a start with nothing held. */
+	if (count == 0U) {
+		kern_logf("i915: hw.gpu.start: no device is held for root's start\n");
+		return ENODEV;
+	}
+
+	/* Notes root's start in the log. */
+	kern_logf("i915: hw.gpu.start: root starts %u held device(s)\n", count);
+
+	/* Launches the start workers of the released devices. */
+	i915_start_launch();
+
+	/* Succeeded: the held devices are starting. */
+	return 0;
+}
+
+/* Reports whether a word-valued boot parameter was given as the word. */
+static int
+i915_boot_word(
+	enum kern_boot_parameter_key key,
+	const char *word)
+{
+	const struct kern_boot_parameters *parameters;
+	const char *value;
+	int different;
+
+	/* Without valid boot parameters nothing was given. */
+	parameters = kern_boot_parameters_current();
+	if (parameters == NULL)
+		return 0;
+
+	/* A parameter that was not given is not the word. */
+	value = kern_boot_parameters_value(parameters, key);
+	if (value == NULL)
+		return 0;
+
+	/* Compares the given word. */
+	different = kern_strcmp(value, word);
+	if (different != 0)
+		return 0;
+
+	/* Succeeded: the parameter is the word. */
+	return 1;
+}
+
+/*
+ * Reports whether a comma-separated word list boot parameter lists the word.
+ */
+static int
+i915_boot_word_listed(
+	enum kern_boot_parameter_key key,
+	const char *word)
+{
+	const struct kern_boot_parameters *parameters;
+	const char *value;
+	size_t start;
+	size_t end;
+	size_t length;
+	int different;
+
+	/* Without valid boot parameters nothing was given. */
+	parameters = kern_boot_parameters_current();
+	if (parameters == NULL)
+		return 0;
+
+	/* A parameter that was not given lists nothing. */
+	value = kern_boot_parameters_value(parameters, key);
+	if (value == NULL)
+		return 0;
+
+	/* Compares the word with each item of the list in turn. */
+	length = kern_strlen(word);
+	start = 0U;
+	for (;;) {
+		/* The item runs to the next comma or to the end of the value. */
+		end = start;
+		while (value[end] != '\0' && value[end] != ',')
+			end++;
+
+		/* The item is the word when it has the word's length and characters. */
+		if (end - start == length) {
+			different = kern_memcmp(value + start, word, length);
+			if (different == 0)
+				return 1;
+		}
+
+		/* The last item ends the list. */
+		if (value[end] == '\0')
+			break;
+
+		/* The next item starts after the comma. */
+		start = end + 1U;
+	}
+
+	/* No item is the word. */
+	return 0;
+}
+
+/* Launches a start worker for every pending device once the kernel is ready. */
+static void
+i915_start_launch(void)
+{
+	struct i915_device *device;
+	struct thread *thread;
+	int held;
+	int error;
+	unsigned long enabled;
+
+	/* Hands the pending devices to workers one at a time. */
+	for (;;) {
+		/* Takes the next device off the list, only once the kernel is ready and root does not hold it. */
+		enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+		held = i915_start_held_locked();
+		device = NULL;
+		if (i915_start_registry.ready != 0U &&
+		    i915_start_registry.pending != NULL &&
+		    !held) {
+			device = i915_start_registry.pending;
+			i915_start_registry.pending = device->start_next;
+			device->start_next = NULL;
+			device->start_launched = 1U;
+		}
+
+		spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+		/* Nothing is left to launch, the kernel is not ready yet, or root holds the devices. */
+		if (device == NULL)
+			return;
+
+		/* Creates the worker that runs this device's bring-up. */
+		error = kthread_create(i915_start_worker, device, SCHED_PRIORITY_DEFAULT, &thread);
+		if (error != 0) {
+			kern_logf("i915: device 8086:%04x: the start worker could not be created: %d\n",
+			    (unsigned)device->product,
+			    error);
+			drv_i915_device_attach_settled(device);
+			continue;
+		}
+
+		/* The worker reclaims itself when the bring-up returns. */
+		thread->detached = 1U;
+		thread_start(thread);
+	}
+}
+
+/* Runs one device's bring-up on its own worker. */
+static void
+i915_start_worker(
+	void *argument)
+{
+	struct i915_device *device;
+	int error;
+	unsigned long enabled;
+
+	/* The worker was created for exactly this device. */
+	device = argument;
+
+	/* Brings the device up; a failure names the step it stopped at. */
+	error = drv_i915_device_start(device);
+
+	/* Tells the device stop that the start no longer runs. */
+	enabled = spin_lock_irqsave(&i915_start_registry.lock);
+
+	device->start_returned = 1U;
+
+	/* A start that returned has either published and withdrawn its node or failed. */
+	i915_attach_settled_locked(device);
+
+	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+
+	/* Reports where a failed start stopped. */
+	if (error != 0) {
+		kern_logf("i915: device 8086:%04x start stopped at %s: %d\n",
+		    (unsigned)device->product,
+		    device->stage,
+		    error);
+		return;
+	}
+
+	kern_logf("i915: device 8086:%04x started\n", (unsigned)device->product);
+}
+
+/* Takes a counted device off hw.gpu.attaching; the caller holds the start registry lock. */
+static void
+i915_attach_settled_locked(
+	struct i915_device *device)
+{
+	/* A device that no longer counts has nothing to take off. */
+	if (device->attach_counted == 0U)
+		return;
+
+	/* The node is published or will never be; the login stops waiting for it. */
+	device->attach_counted = 0U;
+	kern_gpu_attach_end();
+}
+
+/* Prepares the trace, the locks and PCI access, and resumes the device to D0. */
+static int
+i915_start_prepare(
+	struct i915_device *device)
+{
+	struct i915_product_kind kind;
+	struct i915_gt *gt;
+	uint16_t product;
+	int available;
+	int error;
+
+	gt = &device->gt;
+
+	/* Starts an empty trace, the RC6 account, the awake bookkeeping and the device-owned locks. */
+	drv_i915_trace_init(&gt->trace);
+	spin_init(&gt->uncore_lock, LOCK_RANK_DEVICE, "i915 uncore");
+	drv_i915_rc6_residency_init(&gt->rc6_residency);
+	spin_init(&gt->awake_lock, LOCK_RANK_DEVICE, "i915 gt awake");
+	gt->awake_refs = 0U;
+	gt->worker_awake = 0U;
+	gt->awake_open = 0U;
+	gt->refusals_reported = 0U;
+	(void)mutex_init(&gt->sb_lock, LOCK_RANK_DEVICE, "i915 sideband");
+
+	/* Refuses a kernel whose waits have no monotonic counter to measure time with. */
+	device->stage = "time_base_anomaly";
+	available = drv_i915_time_base_ok();
+	if (available == 0)
+		return EIO;
+
+	/* Binds PCI configuration access; the MSI vector is not allocated yet. */
+	gt->pci_context.pci = device->pci;
+	gt->pci_context.msi_irq = -1;
+	drv_i915_pci_init(&gt->pci, drv_i915_pci_device_ops(), &gt->pci_context, &gt->trace);
+
+	/*
+	 * Tells the graphics and display versions, the engines and the
+	 * workaround rules from the device id, as the PCI driver matches it:
+	 * Tiger Lake, Rocket Lake, Alder Lake and Raptor Lake have a Gen12 GT,
+	 * Ice Lake a Gen11 one, Skylake to Comet Lake a Gen9 one.  The revision is the stepping some
+	 * Gen9 workarounds depend on.
+	 */
+	product = drv_i915_pci_read16(&gt->pci, 0x02U);
+	gt->info.revision = (unsigned)drv_i915_pci_read8(&gt->pci, 0x08U);
+	device->stage = "unknown_product";
+	error = drv_i915_product_kind(product, &kind);
+	if (error != 0) {
+		kern_logf("i915: display device: 8086:%04x is in no version table; not started\n", (unsigned)product);
+		return error;
+	}
+
+	/* Records the versions and the platform the product belongs to. */
+	gt->graphics_ver = kind.graphics_ver;
+	gt->display_ver = kind.display_ver;
+	gt->info.platform = kind.platform;
+	gt->info.platform_wa = kind.platform_wa;
+	gt->platform_engine_mask = kind.engine_mask;
+
+	/* Reports the product that was recognised. */
+	kern_logf("i915: display device: 8086:%04x rev 0x%02x -> graphics version %u, display version %u, %s\n",
+	    (unsigned)product,
+	    gt->info.revision,
+	    gt->graphics_ver,
+	    gt->display_ver,
+	    kind.name);
+
+	/*
+	 * Takes the PCI core's runtime PM hold and resumes the device to D0
+	 * before any driver work.  The resume leaves the hold taken even when it
+	 * fails, so the stop always gives it back.
+	 */
+	drv_i915_rpm_init_early(&gt->probe_pm, drv_i915_rpm_pci_probe_ops(), &gt->pci, &gt->trace);
+	error = drv_i915_rpm_get_sync(&gt->probe_pm);
+	gt->probe_pm_held = 1U;
+	kern_logf("i915: PM probe get_sync: cfg_vendor=0x%04x usage=%d active=%d resume_rc=%d\n",
+	    (unsigned)drv_i915_pci_read16(&gt->pci, 0x00U),
+	    drv_i915_rpm_usage(&gt->probe_pm),
+	    drv_i915_rpm_active(&gt->probe_pm),
+	    error);
+
+	/* Reports a device that did not resume. */
+	device->stage = "pci_probe_runtime_pm";
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the device is in D0 and its configuration space answers. */
+	return 0;
+}
+
+/*
+ * Starts the display before the interrupts; a start without a display
+ * skips it.
+ *
+ * A firmware display check that stops leaves the device without a display
+ * and the start continues.
+ */
+static int
+i915_start_display(
+	struct i915_device *device)
+{
+	int error;
+
+	/* The display, its tables, the firmware check, the display core and the DMC's load. */
+	error = drv_i915_display_start(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the display may bind its interrupt half. */
+	return 0;
+}
+
+/* Builds the display's outputs; a start without a display skips it. */
+static int
+i915_start_display_outputs(
+	struct i915_device *device)
+{
+	int error;
+
+	/* The ports, the panel's connector and the correction of the firmware's leftovers. */
+	error = drv_i915_display_outputs(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the outputs are known. */
+	return 0;
+}
+
+/* Serves the display; a start without a display skips it. */
+static int
+i915_start_display_serve(
+	struct i915_device *device)
+{
+	int error;
+
+	/* The hotplug path, the Type-C ports and the references given back. */
+	error = drv_i915_display_serve(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the display is served. */
+	return 0;
+}
+
+/* Maps the registers, reads the GT fuses and resets the whole GT. */
+static int
+i915_start_registers(
+	struct i915_device *device)
+{
+	const struct i915_mmio_range *ranges;
+	struct drv_pci_bar bar;
+	struct i915_gt *gt;
+	unsigned range_count;
+	uint32_t slice;
+	uint32_t dss;
+	int error;
+
+	gt = &device->gt;
+
+	/* Enables the device's memory decoding; the command word is restored at stop. */
+	device->stage = "pci_enable_device";
+	error = drv_i915_pci_enable_device(&gt->pci);
+	if (error != 0)
+		return error;
+
+	gt->pci_enabled = 1U;
+	kern_logf("i915: pci_enable_device ok (command=0x%04x)\n",
+	    (unsigned)drv_i915_pci_read16(&gt->pci, I915_PCI_COMMAND));
+
+	/* Prepares the device's runtime PM record; it is never enabled. */
+	drv_i915_rpm_init_early(&gt->rpm, drv_i915_rpm_device_ops(), device, &gt->trace);
+
+	/* Claims BAR0 and maps its lower half, the registers, uncached. */
+	device->stage = "pci_bar";
+	error = drv_pci_device_bar(device->pci, I915_GT_GEN4_GTTMMADR_BAR, &bar);
+	if (error != 0)
+		return error;
+
+	device->stage = "claim_bar";
+	error = drv_pci_device_claim_bar(device->pci, I915_GT_GEN4_GTTMMADR_BAR);
+	if (error != 0)
+		return error;
+
+	gt->bar_claimed = 1U;
+
+	device->stage = "map_bar";
+	error = drv_pci_device_map_bar_region(
+		device->pci,
+		I915_GT_GEN4_GTTMMADR_BAR,
+		0U,
+		(size_t)(bar.size / 2U),
+		DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
+		&gt->regs);
+	if (error != 0)
+		return error;
+
+	gt->regs_mapped = 1U;
+
+	/* Binds register access and the forcewake map of the graphics version to the mapping. */
+	gt->regs_window.base = gt->regs.address;
+	gt->regs_window.size = (unsigned long)gt->regs.size;
+	if (gt->graphics_ver == 9U) {
+		ranges = drv_i915_mmio_gen9_ranges(&range_count);
+	} else if (gt->graphics_ver == 11U) {
+		ranges = drv_i915_mmio_gen11_ranges(&range_count);
+	} else {
+		ranges = drv_i915_mmio_gen12_ranges(&range_count);
+	}
+
+	/* Opens the register window over the generation's ranges. */
+	drv_i915_mmio_init(&gt->mmio, drv_i915_mmio_window_ops(), &gt->regs_window, ranges, range_count, &gt->trace);
+	gt->mmio.graphics_ver = (int)gt->graphics_ver;
+	kern_logf("i915: uncore BAR mapped (%llu bytes)\n", (unsigned long long)gt->regs.size);
+
+	/* Reads the slice and DSS fuses, which sleep with the GT domain. */
+	device->stage = "forcewake_gt";
+	error = drv_i915_forcewake_get(&gt->mmio, I915_FORCEWAKE_GT);
+	if (error != 0)
+		return error;
+
+	slice = drv_i915_read32(&gt->mmio, 0x9138U);
+	dss = drv_i915_read32(&gt->mmio, 0x913cU);
+	(void)drv_i915_forcewake_put(&gt->mmio, I915_FORCEWAKE_GT);
+	kern_logf("i915: device_info: slice_fuse=0x%08x(%u) dss_fuse=0x%08x(%u DSS)\n",
+	    slice,
+	    i915_popcount32(slice & 0xffU),
+	    dss,
+	    i915_popcount32(dss));
+
+	/*
+	 * Points the replicated-register selector at multicast.
+	 * Gen9 has no multicast bit: its GT workaround list steers the selector
+	 * at the first enabled slice and subslice instead.
+	 */
+	if (gt->graphics_ver != 9U) {
+		drv_i915_write32(&gt->mmio, I915_MCR_SELECTOR, I915_MCR_MULTICAST);
+		drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_NOTE, "gt mmio:mcr_multicast", 0U, 0U);
+	}
+
+	/* Reads the clock, the SSEU, the steering mask and the engine set, which need GT and render awake. */
+	error = i915_start_gt_info(device);
+	if (error != 0)
+		return error;
+
+	/* Resets every engine, discarding whatever the firmware left running. */
+	device->stage = "gt_reset";
+	error = drv_i915_gt_reset_all(&gt->uncore_lock, &gt->mmio, I915_GT_RESET_ACK_US);
+	if (error != 0)
+		return error;
+
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_ACQUIRE, "sanitize:gt reset", 1U, 0U);
+	kern_logf("i915: sanitize: gt reset (all engines) ok\n");
+
+	/* Succeeded: registers answer and the GT is reset. */
+	return 0;
+}
+
+/* Reads the timestamp clock, the SSEU, the steering mask and the engine set. */
+static int
+i915_start_gt_info(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	uint32_t engine_mask;
+	unsigned index;
+	int error;
+
+	gt = &device->gt;
+
+	/* Takes the engine set the platform's product row lists. */
+	engine_mask = gt->platform_engine_mask;
+
+	/* Wakes GT and render: the fuse and clock registers read all-ones while asleep. */
+	device->stage = "forcewake_gt_init_mmio";
+	error = drv_i915_forcewake_get(&gt->mmio, I915_FORCEWAKE_GT);
+	if (error != 0)
+		return error;
+
+	error = drv_i915_forcewake_get(&gt->mmio, I915_FORCEWAKE_RENDER);
+	if (error != 0) {
+		(void)drv_i915_forcewake_put(&gt->mmio, I915_FORCEWAKE_GT);
+		return error;
+	}
+
+	/* Decodes the fuses for the platform's engine set (Alder Lake-P: RCS0|BCS0|VCS0|VCS2|VECS0). */
+	(void)drv_i915_gt_init_mmio(&gt->info, (int)gt->graphics_ver, engine_mask, &gt->mmio);
+	(void)drv_i915_forcewake_put(&gt->mmio, I915_FORCEWAKE_RENDER);
+	(void)drv_i915_forcewake_put(&gt->mmio, I915_FORCEWAKE_GT);
+
+	kern_logf("i915: gt_init_mmio: clock=%uHz period=%uns sseu(slice=0x%x dss=0x%x eu/ss=%u total=%u) l3bank=0x%x engine_mask=0x%x engines=%u fault=0x%x\n",
+	    gt->info.clock_frequency,
+	    gt->info.clock_period_ns,
+	    gt->info.sseu.slice_mask,
+	    gt->info.sseu.subslice_mask,
+	    gt->info.sseu.eu_per_subslice,
+	    gt->info.sseu.eu_total,
+	    gt->info.l3bank_mask,
+	    gt->info.engine_mask,
+	    gt->info.num_engines,
+	    gt->info.fault_reg);
+
+	/* Names every engine the fuses left. */
+	for (index = 0U; index < gt->info.num_engines; index++) {
+		kern_logf("i915: engine[%u] %s: class=%d inst=%d base=0x%05x reset_domain=0x%x ctx_size=%u caps=0x%x\n",
+		    index,
+		    gt->info.engines[index].name,
+		    gt->info.engines[index].class,
+		    gt->info.engines[index].instance,
+		    gt->info.engines[index].mmio_base,
+		    gt->info.engines[index].reset_domain,
+		    gt->info.engines[index].context_size,
+		    gt->info.engines[index].uabi_capabilities);
+	}
+
+	/* Succeeded: the GT information is known. */
+	return 0;
+}
+
+/* Sets up 39-bit DMA, the GGTT, the aperture, bus mastering and the MSI vector. */
+static int
+i915_start_memory(
+	struct i915_device *device)
+{
+	static const struct drv_dma_constraints constraints = {
+		39U,
+		0xffffffffU,
+		0U,
+		1
+	};
+	struct i915_gt *gt;
+	int error;
+
+	gt = &device->gt;
+
+	/*
+	 * Declares the GPU's own 39-bit DMA capability (dma_set_mask).  The PCI
+	 * bus default is a conservative 32 bits, which would bounce every page
+	 * the GPU addresses above 4 GiB.
+	 */
+	device->stage = "dma_device_create";
+	error = drv_dma_device_create(&constraints, &gt->dma_device);
+	if (error != 0)
+		return error;
+
+	gt->dma_created = 1U;
+
+	/* Records the requested mask and segment size in the DMA bookkeeping. */
+	drv_i915_dma_init(&gt->dma, drv_i915_dma_device_ops(), gt->dma_device, &gt->trace);
+	device->stage = "set_dma_info";
+	error = drv_i915_dma_set_info(&gt->dma, 39U, 0xffffffffU);
+	if (error != 0)
+		return error;
+
+	kern_logf("i915: dma_request: streaming_mask=0x%llx coherent_mask=0x%llx max_seg=0x%x\n",
+	    (unsigned long long)I915_START_DMA_MASK,
+	    (unsigned long long)I915_START_DMA_MASK,
+	    0xffffffffU);
+
+	/* Sizes and maps the GGTT table, and makes the scratch page every free entry points at. */
+	error = i915_start_ggtt(device);
+	if (error != 0)
+		return error;
+
+	/* Maps the CPU's view of the aperture and clears the fence registers. */
+	error = i915_start_aperture(device);
+	if (error != 0)
+		return error;
+
+	/* Enables bus mastering, only after the GGTT exists (pci_set_master). */
+	drv_i915_pci_set_bus_master(&gt->pci, 1);
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_ACQUIRE, "pci_set_master", drv_i915_pci_read16(&gt->pci, I915_PCI_COMMAND), 0U);
+	kern_logf("i915: pci_set_master ok (command=0x%04x)\n", (unsigned)drv_i915_pci_read16(&gt->pci, I915_PCI_COMMAND));
+
+	/* Allocates and programs the MSI vector; its handler is attached with the interrupts. */
+	device->stage = "pci_enable_msi";
+	error = drv_i915_pci_setup_msi(&gt->pci);
+	if (error != 0) {
+		kern_logf("i915: pci_enable_msi failed rc=%d\n", error);
+		return error;
+	}
+
+	gt->msi_kept = 1U;
+	kern_logf("i915: pci_enable_msi ok (vector programmed, msi_enabled=%d, handler unattached)\n",
+	    drv_i915_pci_msi_enabled(&gt->pci));
+
+	/* Succeeded: DMA, the GGTT and the MSI vector are ready. */
+	return 0;
+}
+
+/* Sizes and maps the GGTT table and makes the scratch page. */
+static int
+i915_start_ggtt(
+	struct i915_device *device)
+{
+	struct drv_dma_segment segment;
+	struct drv_pci_bar bar;
+	struct i915_gt *gt;
+	uint64_t table_bytes;
+	uint64_t window_bytes;
+	uint16_t gmch;
+	unsigned ggms;
+	unsigned segments;
+	void *scratch;
+	int encoded;
+	int error;
+
+	gt = &device->gt;
+
+	/* Reads the GGTT size from the graphics control word (BDW_GMCH_GGMS). */
+	gmch = drv_i915_pci_read16(&gt->pci, 0x50U);
+	ggms = ((unsigned)gmch >> 6) & 0x3U;
+	device->stage = "ggtt_disabled";
+	if (ggms == 0U)
+		return ENODEV;
+
+	/* The table fills the upper half of BAR0, at most. */
+	table_bytes = (uint64_t)(1U << ggms) << 20;
+	device->stage = "ggtt_bar";
+	error = drv_pci_device_bar(device->pci, I915_GT_GEN4_GTTMMADR_BAR, &bar);
+	if (error != 0)
+		return error;
+
+	window_bytes = bar.size / 2U;
+	if (table_bytes > window_bytes)
+		table_bytes = window_bytes;
+
+	/* Maps the table uncached. */
+	device->stage = "ggtt_map";
+	error = drv_pci_device_map_bar_region(
+		device->pci,
+		I915_GT_GEN4_GTTMMADR_BAR,
+		window_bytes,
+		(size_t)table_bytes,
+		DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
+		&gt->gtt);
+	if (error != 0)
+		return error;
+
+	gt->gtt_mapped = 1U;
+	gt->ggtt_entries = (unsigned)(table_bytes / 8U);
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_ACQUIRE, "ggtt_table_window", table_bytes, (uint64_t)gt->ggtt_entries);
+	kern_logf("i915: ggtt_probe: ggms=%u entries=%u (%llu MiB GPU VA window)\n",
+	    ggms,
+	    gt->ggtt_entries,
+	    (unsigned long long)((uint64_t)gt->ggtt_entries * I915_GT_PAGE_BYTES >> 20));
+
+	/*
+	 * Allocates the scratch page as an ordinary DMA-mapped page; its DMA
+	 * address encodes the scratch entry.  The table is not filled here.
+	 */
+	device->stage = "scratch_alloc";
+	error = drv_dma_vector_create(gt->dma_device, I915_GT_PAGE_BYTES, &gt->scratch);
+	if (error != 0)
+		return error;
+
+	gt->scratch_created = 1U;
+
+	/* One page must map as one contiguous segment. */
+	scratch = drv_dma_vector_address(gt->scratch);
+	segments = drv_dma_vector_count(gt->scratch);
+	device->stage = "scratch_layout";
+	if (scratch == NULL || segments != 1U)
+		return EINVAL;
+
+	/* Zeroes the page and finds its DMA address. */
+	kern_memset(scratch, 0, I915_GT_PAGE_BYTES);
+	device->stage = "scratch_segment";
+	error = drv_dma_vector_segment(gt->scratch, 0U, &segment);
+	if (error != 0)
+		return error;
+
+	/* Encodes the GGTT entry, refusing an address the GPU cannot reach rather than masking it. */
+	encoded = drv_i915_ggtt_pte_encode(drv_i915_dma_addr(segment.address), (uint64_t)segment.length, I915_START_DMA_MASK, &gt->scratch_pte);
+	device->stage = "scratch_pte_range";
+	if (encoded == 0)
+		return EINVAL;
+
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_MAP, "scratch_page", segment.address, gt->scratch_pte);
+	kern_logf("i915: scratch: cpu=0x%llx dma=0x%llx len=0x%llx ggtt_pte=0x%llx\n",
+	    (unsigned long long)(uintptr_t)scratch,
+	    (unsigned long long)segment.address,
+	    (unsigned long long)segment.length,
+	    (unsigned long long)gt->scratch_pte);
+
+	/* Succeeded: the table is mapped and the scratch entry is known. */
+	return 0;
+}
+
+/* Maps the CPU's write-combining view of the aperture and clears the fence registers. */
+static int
+i915_start_aperture(
+	struct i915_device *device)
+{
+	struct drv_pci_bar aperture;
+	struct i915_gt *gt;
+	uint64_t limit;
+	unsigned physical_bits;
+	unsigned fence;
+	void *view;
+	int error;
+
+	gt = &device->gt;
+
+	/* Records the GGTT address space (i915_address_space_init). */
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_NOTE, "address_space_init:GGTT", (uint64_t)gt->gtt.size * 512U, 0U);
+
+	/* A device without a GMADR BAR has no aperture to map. */
+	error = drv_pci_device_bar(device->pci, I915_GT_GEN4_GMADR_BAR, &aperture);
+	if (error == 0 && aperture.size != 0U) {
+		/* Checks that the aperture lies within the CPU's physical address range. */
+		physical_bits = i915_cpu_physical_bits();
+		limit = ~(uint64_t)0;
+		if (physical_bits < 64U)
+			limit = (((uint64_t)1) << physical_bits) - 1U;
+
+		gt->gmadr_base = aperture.bus_address;
+		gt->gmadr_size = aperture.size;
+		kern_logf("i915: ggtt_init_hw: gmadr=0x%llx mappable_end=0x%llx\n",
+		    (unsigned long long)gt->gmadr_base,
+		    (unsigned long long)gt->gmadr_size);
+
+		device->stage = "ggtt_aperture_range";
+		if (gt->gmadr_base > limit)
+			return EINVAL;
+		if (gt->gmadr_size - 1U > limit - gt->gmadr_base)
+			return EINVAL;
+
+		/*
+		 * Maps the whole aperture write-combining for the device's
+		 * lifetime (io_mapping_init_wc).  Only page tables back the view.
+		 */
+		drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_ACQUIRE, "ggtt_aperture_gmadr", gt->gmadr_base, gt->gmadr_size);
+		view = NULL;
+		error = kern_device_map(gt->gmadr_base, (size_t)gt->gmadr_size, KERN_DEVICE_WRITECOMBINE, &view);
+		device->stage = "ggtt_aperture_wc";
+		if (error != 0 || view == NULL) {
+			kern_logf("i915: ggtt_init_hw: WC aperture map(base=0x%llx size=0x%llx) failed rc=%d\n",
+			    (unsigned long long)gt->gmadr_base,
+			    (unsigned long long)gt->gmadr_size,
+			    error);
+			return EIO;
+		}
+
+		gt->aperture = view;
+		kern_logf("i915: ggtt_init_hw: WC aperture mapped base=0x%llx size=0x%llx va=%p attr=RW|WC\n",
+		    (unsigned long long)gt->gmadr_base,
+		    (unsigned long long)gt->gmadr_size,
+		    view);
+	}
+
+	/* Clears the 32 fence registers with the GT domain awake. */
+	device->stage = "forcewake_fences";
+	error = drv_i915_forcewake_get(&gt->mmio, I915_FORCEWAKE_GT);
+	if (error != 0)
+		return error;
+
+	for (fence = 0U; fence < I915_START_FENCES; fence++) {
+		drv_i915_raw_write32(&gt->mmio, 0x100000U + fence * 8U, 0U);
+		drv_i915_raw_write32(&gt->mmio, 0x100000U + fence * 8U + 4U, 0U);
+	}
+
+	(void)drv_i915_forcewake_put(&gt->mmio, I915_FORCEWAKE_GT);
+	drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_NOTE, "ggtt fences", I915_START_FENCES, 0U);
+	kern_logf("i915: ggtt_init_hw: %u fence registers initialized\n", I915_START_FENCES);
+
+	/* Succeeded: the aperture view exists and the fences are clear. */
+	return 0;
+}
+
+/* Attaches the interrupt handler and enables the GT interrupts. */
+static int
+i915_start_interrupts(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int enabled;
+	int error;
+
+	gt = &device->gt;
+
+	/* The handler needs the vector programmed with the memory setup. */
+	enabled = drv_i915_pci_msi_enabled(&gt->pci);
+	device->stage = "irq install";
+	if (gt->msi_kept == 0U || enabled == 0) {
+		kern_logf("i915: irq install: no MSI vector retained (msi_kept=%u) -- cannot attach a handler\n", gt->msi_kept);
+		return ENODEV;
+	}
+
+	/* Describes the interrupt device: the registers, the engines and the vector. */
+	gt->irq.m = &gt->mmio;
+	gt->irq.gt = &gt->info;
+	gt->irq.submission = I915_SUBMISSION_EXECLISTS;
+	gt->irq.msi_irq = gt->pci_context.msi_irq;
+
+	/*
+	 * Without a display the interim hooks only keep the display's
+	 * interrupt summary switched off, so a source the firmware left enabled
+	 * cannot storm the vector.  A display detects its PCH and binds its own
+	 * half in their place.
+	 */
+	gt->irq.display_ops = &i915_interim_display_irq_ops;
+	gt->irq.display_context = gt;
+	drv_i915_display_irq_prepare(device);
+
+	/* Resets every source, attaches the handler and enables the GT sources. */
+	error = drv_i915_irq_install(&gt->irq);
+	kern_logf("i915: irq install: rc=%d msi_irq=%d attached=%d gt_irqs=0x%x dmask=0x%x smask=0x%x reset_writes=%u post_writes=%u\n",
+	    error,
+	    gt->irq.msi_irq,
+	    gt->irq.handler_attached,
+	    gt->irq.gt_irqs,
+	    gt->irq.gt_dmask,
+	    gt->irq.gt_smask,
+	    gt->irq.reset_writes,
+	    gt->irq.postinstall_writes);
+	drv_i915_display_irq_log(device);
+	if (error != 0)
+		return error;
+
+	gt->irq_installed = 1U;
+
+	/* Gives the device a brief window to show that its vector reaches the handler. */
+	kern_usleep_range(20000U, 30000U);
+	kern_logf("i915: irq observed: count=%u handled=%u none=%u gt=%u display=%u last_master_ctl=0x%x gu_misc_iir=0x%x\n",
+	    gt->irq.irq_count,
+	    gt->irq.irq_handled_count,
+	    gt->irq.irq_none_count,
+	    gt->irq.gt_irq_count,
+	    gt->irq.display_irq_count,
+	    gt->irq.last_master_ctl,
+	    gt->irq.last_gu_misc_iir);
+
+	/* Succeeded: interrupts are delivered. */
+	return 0;
+}
+
+/*
+ * Builds and programs the GT.
+ *
+ * Every forcewake domain is held across the whole of it; on
+ * Gen12 that includes the media domains, because the workaround list writes
+ * video engine registers.
+ */
+static int
+i915_start_gt(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned held;
+	int error;
+
+	gt = &device->gt;
+
+	/* Wakes every domain the GT programming reaches. */
+	device->stage = "forcewake_gt_init";
+	error = i915_forcewake_get_all(gt, &held);
+	if (error != 0) {
+		i915_forcewake_put_all(gt, held);
+		return error;
+	}
+
+	/* Programs the GT with every domain awake. */
+	error = i915_start_gt_awake(device);
+
+	/* Lets the domains sleep again. */
+	i915_forcewake_put_all(gt, held);
+
+	/* Reports the step the GT programming stopped at. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the GT is initialized. */
+	return 0;
+}
+
+/* Programs the GT while the caller holds every forcewake domain. */
+static int
+i915_start_gt_awake(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned index;
+	int error;
+
+	gt = &device->gt;
+
+	/* Builds the workaround, whitelist, MOCS, RC6 and RPS tables. */
+	kern_memset(&gt->init, 0, sizeof(gt->init));
+	drv_i915_gt_init_tables(&gt->init, &gt->info, (int)gt->graphics_ver, &gt->sb_lock, &gt->mmio);
+	kern_logf("i915: gt tables: gt_wa=%u mocs(uc_index=%u entries=%u) rps(rp0=%u rp1=%u min=%u eff=%u pcode=%d) rc6_supported=%d\n",
+	    gt->init.gt_wa.count,
+	    gt->init.mocs.uc_index,
+	    gt->init.mocs.n_entries,
+	    gt->init.rps.rp0_freq,
+	    gt->init.rps.rp1_freq,
+	    gt->init.rps.min_freq,
+	    gt->init.rps.efficient_freq,
+	    gt->init.rps.pcode_ok,
+	    gt->init.rc6.supported);
+	drv_i915_wa_list_dump(&gt->init.gt_wa, "GT");
+
+	/* Dumps the render engine's lists, which are the ones that matter for drawing. */
+	for (index = 0U; index < gt->info.num_engines && index < I915_WA_ENGINES; index++) {
+		kern_logf("i915: gt tables %s: engine_wa=%u ctx_wa=%u whitelist=%u\n",
+		    gt->info.engines[index].name,
+		    gt->init.engine_wa[index].count,
+		    gt->init.ctx_wa[index].count,
+		    gt->init.whitelist[index].count);
+		if (gt->info.engines[index].class != I915_RENDER_CLASS)
+			continue;
+
+		drv_i915_wa_list_dump(&gt->init.engine_wa[index], "ENGINE");
+		drv_i915_wa_list_dump(&gt->init.ctx_wa[index], "CTX");
+		drv_i915_wa_list_dump(&gt->init.whitelist[index], "WHITELIST");
+	}
+
+	/* Creates the GT objects' window at the top of the GGTT, the scratch object and the kernel address space. */
+	error = i915_start_gt_memory(device);
+	if (error != 0)
+		return error;
+
+	/* Creates the status pages, execlists state and kernel contexts. */
+	device->stage = "engine init";
+	error = drv_i915_engines_init(&gt->engines, &gt->info, &gt->mem, &gt->ppgtt);
+	if (error != 0)
+		return error;
+
+	gt->engines_inited = 1U;
+
+	/* Programs the hardware. */
+	device->stage = "gt resume";
+	error = drv_i915_gt_resume(&gt->engines, &gt->init, &gt->info, &gt->mmio, &gt->uncore_lock);
+	kern_logf("i915: gt resume: rc=%d reset_engines=%d stop_cs_timeouts=%u engines_resumed=%u l3cc(rcs)=%u\n",
+	    error,
+	    gt->engines.reset_rc,
+	    gt->engines.stop_cs_timeouts,
+	    gt->engines.resumed,
+	    gt->engines.l3cc_writes_rcs);
+	kern_logf("i915: gt hw: pat=%d gt_wa(w=%u skip=%u ok=%u mismatch=%u noverify=%u) mocs(global=%u l3cc=%u) whitelist_writes=%u engines=%u\n",
+	    gt->init.pat_programmed,
+	    gt->init.gt_wa_applied.written,
+	    gt->init.gt_wa_applied.skipped_unchanged,
+	    gt->init.gt_wa_applied.verified,
+	    gt->init.gt_wa_applied.mismatched,
+	    gt->init.gt_wa_applied.not_verifiable,
+	    gt->init.mocs_global_writes,
+	    gt->init.mocs_l3cc_writes,
+	    gt->init.whitelist_writes,
+	    gt->init.engines_resumed);
+	kern_logf("i915: gt pm: rps_enabled=%d rc6_enabled=%d rc6_ctl=0x%x pg_enable=0x%x\n",
+	    gt->init.rps.enabled,
+	    gt->init.rc6.enabled,
+	    gt->init.rc6.ctl_enable,
+	    gt->init.rc6.pg_enable);
+	if (error != 0)
+		return error;
+
+	gt->engines_resumed = 1U;
+
+	/* Records the default context images from the GPU. */
+	device->stage = "record default contexts";
+	error = drv_i915_engines_record_defaults(&gt->defaults, &gt->engines, &gt->init, &gt->mem, &gt->ppgtt, &gt->mmio, &gt->uncore_lock, 200U);
+	gt->defaults_inited = 1U;
+	kern_logf("i915: record_defaults: rc=%d where=%s polls=%u timed_out=%d wedged=%d\n",
+	    error,
+	    gt->defaults.err_where != NULL ? gt->defaults.err_where : "-",
+	    gt->defaults.polls,
+	    gt->defaults.timed_out,
+	    gt->defaults.wedged);
+	if (error != 0)
+		return error;
+
+	/* Every later context starts from the recorded image. */
+	for (index = 0U; index < gt->engines.n; index++)
+		gt->engines.ge[index].default_state = gt->defaults.default_state[index];
+
+	/* Checks the engine workarounds from the GPU's own stores. */
+	device->stage = "verify workarounds";
+	error = drv_i915_engines_verify_workarounds(&gt->verify, &gt->engines, &gt->init, &gt->mem, &gt->mmio, 200U);
+	gt->verify_inited = 1U;
+	kern_logf("i915: verify_workarounds: rc=%d where=%s polls=%u timed_out=%d\n",
+	    error,
+	    gt->verify.err_where != NULL ? gt->verify.err_where : "-",
+	    gt->verify.polls,
+	    gt->verify.timed_out);
+	if (error != 0)
+		return error;
+
+	/* Creates the migration context; a failure is only logged. */
+	error = drv_i915_migrate_init(&gt->migrate, &gt->engines, &gt->mem);
+	gt->migrate_inited = 1U;
+	kern_logf("i915: migrate_init: rc=%d where=%s\n",
+	    error,
+	    gt->migrate.err_where != NULL ? gt->migrate.err_where : "-");
+
+	/* Succeeded: the GT is programmed and its default contexts exist. */
+	return 0;
+}
+
+/* Creates the GT objects' GGTT window, the scratch object and the kernel address space. */
+static int
+i915_start_gt_memory(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int error;
+
+	gt = &device->gt;
+
+	/* Opens the window at the top of the GGTT. */
+	device->stage = "gt scratch/kernel vm";
+	error = drv_i915_gt_mem_init(&gt->mem, gt->dma_device, I915_START_DMA_MASK, gt->gtt.address, gt->ggtt_entries, gt->scratch_pte, &gt->mmio);
+	if (error != 0)
+		return error;
+
+	gt->mem_inited = 1U;
+
+	/* Creates the GT scratch object. */
+	error = drv_i915_gt_init_scratch(&gt->mem, &gt->gt_scratch);
+	if (error != 0)
+		return error;
+
+	/* Creates the kernel contexts' address space. */
+	error = drv_i915_gt_ppgtt_create(&gt->mem, &gt->ppgtt);
+	if (error != 0)
+		return error;
+
+	kern_logf("i915: gt mem: ggtt window first=%u pages=%u (of %u) scratch ggtt=0x%llx ppgtt top_pd dma=0x%llx objects=%u\n",
+	    gt->mem.window_first,
+	    gt->mem.window_pages,
+	    gt->ggtt_entries,
+	    (unsigned long long)gt->gt_scratch->ggtt_offset,
+	    (unsigned long long)gt->ppgtt.top_pd_dma,
+	    gt->mem.objects_live);
+
+	/* Succeeded: the GT's memory is ready. */
+	return 0;
+}
+
+/* Creates the protected-content context; a failure is only logged. */
+static void
+i915_start_pxp(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int error;
+
+	gt = &device->gt;
+
+	/* Gen9 and Gen11 have no protected-content support: the context is not created. */
+	if (gt->graphics_ver < 12U) {
+		kern_logf("i915: pxp_init: skipped (no protected content before Gen12)\n");
+		return;
+	}
+
+	/* Creates the context on the video engine. */
+	error = drv_i915_pxp_init(&gt->pxp, &gt->engines, &gt->ppgtt, &gt->mem, 1);
+	gt->pxp_inited = 1U;
+	kern_logf("i915: pxp_init: rc=%d where=%s full=%d\n",
+	    error,
+	    gt->pxp.err_where != NULL ? gt->pxp.err_where : "-",
+	    gt->pxp.full_feature);
+}
+
+/*
+ * Makes the serving thread the GT's first holder and publishes the node.
+ *
+ * The worker keeps the GT awake while it has work and lets it rest when
+ * idle (drv_i915_device_worker_rest()); the RPS holds it around each
+ * frequency change.
+ */
+static int
+i915_start_publish(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+	int error;
+
+	gt = &device->gt;
+
+	/* The thread that serves the node holds the GT while it works; it rests the GT when idle. */
+	device->stage = "forcewake_resident";
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	gt->awake_open = 1U;
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+
+	/* Makes the serving thread the GT's first holder. */
+	error = drv_i915_device_awake_get(device);
+	if (error != 0)
+		return error;
+
+	/* Records that the worker holds the GT. */
+	gt->worker_awake = 1U;
+
+	/* The RPS holds the GT itself around each frequency change once the worker may rest. */
+	gt->init.rps.awake_get = i915_rps_awake_get;
+	gt->init.rps.awake_put = i915_rps_awake_put;
+	gt->init.rps.awake_context = device;
+
+	/* Lets the GT frequency follow the load from here on; without it the frequency stays requested. */
+	device->stage = "rps_start";
+	(void)drv_i915_rps_start(&gt->init.rps, &gt->irq, &gt->mmio);
+
+	/* Lists the GPU in hw.gputelemetry (what the RPS keeps, the RC6 time and the forcewake); a full list leaves it out. */
+	(void)kern_gpu_telemetry_register("i915", i915_gt_telemetry_read, device);
+
+	/* Creates the request worker's state. */
+	device->stage = "worker_create";
+	error = drv_i915_worker_create(device);
+	if (error != 0)
+		return error;
+
+	/* The panel the node's display drives, over the objects the start built. */
+	drv_i915_display_resident_deps(device);
+
+	/* Lets a test build run its scenario on the started device before anything is served. */
+	if (drv_i915_test_after_start != NULL)
+		drv_i915_test_after_start(device);
+
+	/*
+	 * Publishes the node and serves its requests on this thread until the
+	 * device stops; the node is withdrawn before this returns.
+	 */
+	device->stage = "gpu-publication";
+	error = drv_i915_worker_serve(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the node was published and served until the device stopped. */
+	return 0;
+}
+
+/* Stops the engines, then gives back the GT's objects. */
+static void
+i915_stop_gt(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+	unsigned held;
+	unsigned index;
+	int gpu_retained;
+	int error;
+
+	gt = &device->gt;
+
+	/* Stops the RPS interrupts and work with the GT awake for their writes. */
+	drv_i915_device_worker_wake(device);
+	drv_i915_rps_stop(&gt->init.rps);
+	gt->init.rps.awake_get = NULL;
+	gt->init.rps.awake_put = NULL;
+
+	/* Gives back the worker's hold, the last one, after the last RC6 sample; nothing wakes the GT from here on. */
+	drv_i915_device_worker_rest(device);
+
+	/* Closes the GT to holders: from here on nothing may wake it. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	gt->awake_open = 0U;
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+
+	/* Stops anything still scanned out and the hotplug path, and takes the display's references back. */
+	drv_i915_display_stop_serving(device);
+
+	/* Frees the protected-content context. */
+	if (gt->pxp_inited != 0U) {
+		drv_i915_pxp_fini(&gt->pxp, &gt->mem);
+		gt->pxp_inited = 0U;
+		kern_logf("i915: stop: pxp fini (VCS context + stream page released)\n");
+	}
+
+	/*
+	 * Stops the command streamers and resets the engines before the objects
+	 * they point at are released.
+	 */
+	if (gt->engines_resumed != 0U) {
+		error = i915_forcewake_get_all(gt, &held);
+		if (error == 0) {
+			for (index = 0U; index < gt->engines.n; index++)
+				drv_i915_execlists_quiesce(&gt->engines.ge[index], &gt->mmio);
+
+			error = drv_i915_gt_reset_all(&gt->uncore_lock, &gt->mmio, I915_GT_RESET_ACK_US);
+			kern_logf("i915: stop: engines stopped and reset (rc=%d) before release\n", error);
+		} else {
+			kern_logf("i915: stop: forcewake for the remove reset failed rc=%d\n", error);
+		}
+
+		i915_forcewake_put_all(gt, held);
+		gt->engines_resumed = 0U;
+	}
+
+	/* Frees the migration, workaround-check and default-context objects. */
+	if (gt->migrate_inited != 0U) {
+		drv_i915_migrate_fini(&gt->migrate, &gt->mem);
+		gt->migrate_inited = 0U;
+	}
+
+	if (gt->verify_inited != 0U) {
+		drv_i915_engines_verify_wa_release(&gt->verify, &gt->mem);
+		gt->verify_inited = 0U;
+	}
+
+	if (gt->defaults_inited != 0U) {
+		for (index = 0U; index < gt->engines.n; index++)
+			gt->engines.ge[index].default_state = NULL;
+
+		drv_i915_engines_defaults_release(&gt->defaults, &gt->mem);
+		gt->defaults_inited = 0U;
+	}
+
+	/* A kept buffer the GPU was not shown to be done with keeps the engines and every GT object. */
+	gpu_retained = drv_i915_display_gpu_retained(device);
+
+	/* Frees the engines' status pages and kernel contexts. */
+	if (gt->engines_inited != 0U && gpu_retained) {
+		kern_logf("i915: stop: engines NOT released (the GPU was not shown to be done with a kept buffer)\n");
+	} else if (gt->engines_inited != 0U) {
+		drv_i915_engines_release(&gt->engines, &gt->mem);
+		gt->engines_inited = 0U;
+		kern_logf("i915: stop: engines released (status pages, kernel contexts)\n");
+	}
+
+	/* Frees the kernel address space and every GT object, pointing the window back at scratch. */
+	if (gt->mem_inited != 0U && gpu_retained) {
+		kern_logf("i915: stop: the GPU was not shown to be done with a kept buffer -- the vm, its tables and every GT object stay (resources_retained=1)\n");
+	} else if (gt->mem_inited != 0U) {
+		drv_i915_gt_ppgtt_destroy(&gt->mem, &gt->ppgtt);
+		drv_i915_gt_mem_fini(&gt->mem);
+		gt->mem_inited = 0U;
+		kern_logf("i915: stop: GT objects released, GGTT window back to scratch (pte_writes=%u live=%u)\n",
+		    gt->mem.pte_writes,
+		    gt->mem.objects_live);
+	}
+}
+
+/* Gives back interrupts, the aperture, DMA, the GGTT, the registers and PCI. */
+static void
+i915_stop_hardware(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int sync_failed;
+	int kept;
+	int enabled;
+	int error;
+
+	gt = &device->gt;
+
+	/*
+	 * Resets the sources and detaches the handler, unless a pipe's
+	 * interrupt drain failed: the handler that did not finish may still
+	 * touch display registers, so it stays attached.
+	 */
+	sync_failed = drv_i915_display_irq_sync_failed(device);
+	if (gt->irq_installed != 0U && sync_failed) {
+		kern_logf("i915: stop: irq uninstall NOT run: a pipe interrupt drain failed earlier (irq_attached=1 resources_retained=1; irq_count=%u handled=%u none=%u)\n",
+		    gt->irq.irq_count,
+		    gt->irq.irq_handled_count,
+		    gt->irq.irq_none_count);
+	} else if (gt->irq_installed != 0U) {
+		drv_i915_irq_uninstall(&gt->irq);
+		gt->irq_installed = 0U;
+		kern_logf("i915: stop: irq uninstall (sources reset, handler detached; irq_count=%u handled=%u none=%u)\n",
+		    gt->irq.irq_count,
+		    gt->irq.irq_handled_count,
+		    gt->irq.irq_none_count);
+	}
+
+	/* Takes the rest of the display apart in reverse order. */
+	drv_i915_display_stop(device);
+
+	/* Frees the MSI vector. */
+	enabled = drv_i915_pci_msi_enabled(&gt->pci);
+	if (gt->msi_kept != 0U && enabled != 0) {
+		drv_i915_pci_teardown_msi(&gt->pci);
+		kern_logf("i915: stop: MSI resource released\n");
+	}
+
+	gt->msi_kept = 0U;
+
+	/* Unmaps the aperture view. */
+	if (gt->aperture != NULL) {
+		error = kern_device_unmap(gt->aperture, (size_t)gt->gmadr_size);
+		kern_logf("i915: stop: WC aperture unmap va=%p size=0x%llx rc=%d\n",
+		    gt->aperture,
+		    (unsigned long long)gt->gmadr_size,
+		    error);
+		gt->aperture = NULL;
+	}
+
+	/*
+	 * A scanout buffer may still be read by the display: its pages, the
+	 * scratch page behind its guard PTEs, the DMA device (IOMMU mappings),
+	 * the GGTT and bus mastering all stay as they are -- a leak is the safe
+	 * side.
+	 */
+	kept = drv_i915_display_abandoned(device);
+	if (!kept)
+		kept = sync_failed;
+	if (kept) {
+		kern_logf("i915: stop: a scanout buffer was ABANDONED -- DMA device, scratch page, BARs and bus mastering are kept\n");
+		return;
+	}
+
+	/* Frees the display. */
+	drv_i915_display_destroy(device);
+
+	/* Frees the scratch page and the DMA device. */
+	if (gt->scratch_created != 0U) {
+		(void)drv_dma_vector_free(gt->scratch);
+		gt->scratch_created = 0U;
+	}
+
+	if (gt->dma_created != 0U) {
+		(void)drv_dma_device_destroy(gt->dma_device);
+		gt->dma_device = NULL;
+		gt->dma_created = 0U;
+	}
+
+	/* Unmaps the table and the registers and returns BAR0. */
+	if (gt->gtt_mapped != 0U) {
+		drv_pci_device_unmap_bar(device->pci, &gt->gtt);
+		gt->gtt_mapped = 0U;
+	}
+
+	if (gt->regs_mapped != 0U) {
+		drv_pci_device_unmap_bar(device->pci, &gt->regs);
+		gt->regs_mapped = 0U;
+	}
+
+	if (gt->bar_claimed != 0U) {
+		drv_pci_device_release_bar(device->pci, I915_GT_GEN4_GTTMMADR_BAR);
+		gt->bar_claimed = 0U;
+	}
+
+	/* Restores the PCI command word the firmware left. */
+	if (gt->pci_enabled != 0U) {
+		drv_i915_pci_restore(&gt->pci);
+		gt->pci_enabled = 0U;
+	}
+
+	/* Gives back the PCI core's runtime PM hold last, after every register access. */
+	if (gt->probe_pm_held != 0U) {
+		drv_i915_rpm_put(&gt->probe_pm);
+		gt->probe_pm_held = 0U;
+		kern_logf("i915: stop: PCI probe runtime PM released (usage=%d)\n", drv_i915_rpm_usage(&gt->probe_pm));
+	}
+}
+
+/* Holds the GT awake for a frequency change of the RPS. */
+static int
+i915_rps_awake_get(
+	void *context)
+{
+	int error;
+
+	/* The device is the context; holds its GT awake. */
+	error = drv_i915_device_awake_get(context);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the GT is held awake. */
+	return 0;
+}
+
+/* Lets go of the GT after a frequency change of the RPS. */
+static void
+i915_rps_awake_put(
+	void *context)
+{
+	/* The device is the context. */
+	drv_i915_device_awake_put(context);
+}
+
+/*
+ * Fills one GPU's hw.gputelemetry entry: what the RPS keeps, the time the
+ * GT spent in RC6 (while the running device holds its domains; a parked
+ * GT's time is added when it wakes), and the forcewake domains held now
+ * and woken so far.
+ */
+static int
+i915_gt_telemetry_read(
+	void *context,
+	struct gpu_telemetry_entry *entry)
+{
+	struct i915_device *device;
+	struct i915_gt *gt;
+	uint64_t sleep_ns;
+	unsigned holds;
+	unsigned awake;
+	int error;
+
+	/* The device is the context. */
+	device = context;
+	gt = &device->gt;
+
+	/* The busy time and the frequencies. */
+	error = drv_i915_rps_telemetry_read(&gt->init.rps, entry);
+	if (error != 0)
+		return error;
+
+	/* The domains the running device holds awake for its own work, before this read wakes the GT. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	entry->awake_holds = holds;
+
+	/*
+	 * The RC6 time, read with the GT held awake for the moment of the
+	 * read; a resting GT is woken briefly, which ends its RC6 for that
+	 * moment only.  A device that is not running has no GT to wake.
+	 */
+	error = drv_i915_device_awake_get(device);
+	if (error == 0) {
+		error = drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &awake);
+		drv_i915_device_awake_put(device);
+
+		/* Takes the RC6 time of a read that succeeded. */
+		if (error == 0) {
+			entry->sleep_ns = sleep_ns;
+			entry->valid |= GPU_TELEMETRY_SLEEP;
+		}
+	}
+
+	/* How many wakes the driver asked for. */
+	entry->awake_wakes = gt->mmio.forcewake_wakes;
+	entry->valid |= GPU_TELEMETRY_AWAKE;
+
+	/* Succeeded: the entry is filled. */
+	return 0;
+}
+
+/* Logs how long the park that just ended lasted and how much of it the GT spent in RC6. */
+static void
+i915_log_park_sleep(
+	struct i915_gt *gt)
+{
+	uint64_t now;
+	uint64_t parked_ns;
+	uint64_t sleep_ns;
+	unsigned holds;
+	unsigned forgets;
+
+	/* The length of the park, by the driver's clock. */
+	now = drv_i915_perf_now();
+	parked_ns = 0U;
+	if (now > gt->parked_at_ns)
+		parked_ns = now - gt->parked_at_ns;
+
+	/* A park across a loss of power has no RC6 time to tell. */
+	forgets = drv_i915_rc6_residency_forgets(&gt->rc6_residency);
+	if (forgets != gt->parked_forgets) {
+		kern_logf("i915: unpark: the GT was parked %llu ms and powered down, which the RC6 time does not count\n",
+		    (unsigned long long)(parked_ns / 1000000U));
+		return;
+	}
+
+	/* The RC6 time the resume added. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	sleep_ns -= gt->parked_sleep_ns;
+
+	/* In milliseconds, which a park of seconds reads well in. */
+	kern_logf("i915: unpark: the GT was parked %llu ms and in RC6 %llu ms of it\n",
+	    (unsigned long long)(parked_ns / 1000000U), (unsigned long long)(sleep_ns / 1000000U));
+}
+
+/* Wakes every forcewake domain in order and reports how many are held. */
+static int
+i915_forcewake_get_all(
+	struct i915_gt *gt,
+	unsigned *held)
+{
+	const int *domains;
+	unsigned count;
+	int error;
+
+	/* Takes the domains of the graphics version one at a time, stopping at the first that fails. */
+	domains = i915_start_domain_list(gt, &count);
+	*held = 0U;
+	while (*held < count) {
+		error = drv_i915_forcewake_get(&gt->mmio, domains[*held]);
+		if (error != 0)
+			return error;
+
+		(*held)++;
+	}
+
+	/* Succeeded: every domain is awake. */
+	return 0;
+}
+
+/* Releases the first held forcewake domains, in reverse order. */
+static void
+i915_forcewake_put_all(
+	struct i915_gt *gt,
+	unsigned held)
+{
+	const int *domains;
+	unsigned count;
+
+	/* Puts back only what was taken, last first. */
+	domains = i915_start_domain_list(gt, &count);
+	while (held > 0U) {
+		held--;
+		(void)drv_i915_forcewake_put(&gt->mmio, domains[held]);
+	}
+}
+
+/* Names the forcewake domains the running GT of the device's graphics version holds. */
+static const int *
+i915_start_domain_list(
+	const struct i915_gt *gt,
+	unsigned *count)
+{
+	/* A Gen9 GT has one media domain. */
+	if (gt->graphics_ver == 9U) {
+		*count = I915_START_DOMAINS_GEN9;
+		return i915_start_domains_gen9;
+	}
+
+	/* A Gen12 GT has a domain for each media engine. */
+	*count = I915_START_DOMAINS;
+	return i915_start_domains;
+}
+
+/* Dumps the newest trace records and what was overwritten. */
+static void
+i915_start_dump_trace(
+	struct i915_gt *gt)
+{
+	static struct i915_trace_record records[I915_START_TRACE_DUMP];
+	uint32_t count;
+	uint32_t index;
+
+	/* Copies the newest records out of the ring. */
+	count = drv_i915_trace_snapshot(&gt->trace, records, I915_START_TRACE_DUMP);
+	kern_logf("i915: trace: %u records (dropped %u)\n", count, gt->trace.dropped);
+
+	/* Prints only failures and unimplemented steps; the rest is in the ring. */
+	for (index = 0U; index < count; index++) {
+		if (records[index].op != I915_TRACE_FAIL && records[index].op != I915_TRACE_UNIMPLEMENTED)
+			continue;
+
+		kern_logf("i915: trace #%u %s %s 0x%llx 0x%llx\n",
+		    records[index].sequence,
+		    drv_i915_trace_op_name(records[index].op),
+		    records[index].what != NULL ? records[index].what : "?",
+		    (unsigned long long)records[index].argument0,
+		    (unsigned long long)records[index].argument1);
+	}
+}
+
+
+/* Counts the set bits of a word. */
+static unsigned
+i915_popcount32(
+	uint32_t value)
+{
+	unsigned count;
+
+	/* Counts one bit per iteration. */
+	count = 0U;
+	while (value != 0U) {
+		count += value & 1U;
+		value >>= 1;
+	}
+
+	/* Reports the number of set bits. */
+	return count;
+}
+
+/* Reads the CPU's physical address width from CPUID 0x80000008. */
+static unsigned
+i915_cpu_physical_bits(void)
+{
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
+
+	/* Asks for the highest extended leaf. */
+	eax = 0x80000000U;
+	__asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+
+	/* Without the address-size leaf the architectural minimum of 36 bits applies. */
+	if (eax < 0x80000008U)
+		return 36U;
+
+	/* Reads the address-size leaf. */
+	eax = 0x80000008U;
+	__asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+
+	/* Reports the physical address bits. */
+	return (unsigned)(eax & 0xffU);
+}
+
+/*
+ * Keeps the display interrupts switched off while the display is not connected.
+ *
+ * Gen12 has a display summary control to turn off.  Gen9 has none: its
+ * display sources report straight into I915_GT_GEN8_MASTER_IRQ, so each one is
+ * masked, disabled and cleared instead: the eDP PSR, the pipes, the
+ * ports, the miscellaneous sources and the south display.  A pipe whose
+ * power well is down is not touched, and I915_GT_GEN8_MASTER_IRQ is not written.
+ */
+static void
+i915_interim_display_irq_reset(
+	void *context)
+{
+	struct i915_gt *gt;
+	uint32_t power;
+	unsigned pipe;
+
+	/* Only the summary: a device without a display acknowledges no display source. */
+	gt = context;
+	if (gt->graphics_ver != 9U) {
+		drv_i915_raw_write32(&gt->mmio, I915_DISPLAY_INT_CTL, 0U);
+		drv_i915_posting_read32(&gt->mmio, I915_DISPLAY_INT_CTL);
+		return;
+	}
+
+	/* Silences the eDP PSR source, which power well 1 holds. */
+	power = drv_i915_raw_read32(&gt->mmio, I915_GEN9_PWR_WELL_CTL2);
+	if ((power & I915_GEN9_PW_1_STATE) != 0U) {
+		drv_i915_raw_write32(&gt->mmio, I915_GEN9_EDP_PSR_IMR, 0xffffffffU);
+		drv_i915_raw_write32(&gt->mmio, I915_GEN9_EDP_PSR_IIR, 0xffffffffU);
+	}
+
+	/* Silences the pipe sources of every pipe whose power well is up. */
+	for (pipe = 0U; pipe < I915_GEN9_PIPES; pipe++) {
+		/* Pipe A needs power well 1, pipes B and C power well 2 as well. */
+		if ((power & I915_GEN9_PW_1_STATE) == 0U)
+			break;
+		if (pipe != 0U && (power & I915_GEN9_PW_2_STATE) == 0U)
+			break;
+
+		/* Silences the powered pipe's interrupt sources. */
+		i915_interim_irq_silence(&gt->mmio, I915_GT_GEN8_DE_PIPE_IMR(pipe), I915_GT_GEN8_DE_PIPE_IIR(pipe), I915_GT_GEN8_DE_PIPE_IER(pipe));
+	}
+
+	/* Silences the port and miscellaneous display sources, which are always powered. */
+	i915_interim_irq_silence(&gt->mmio, I915_GT_GEN8_DE_PORT_IMR, I915_GT_GEN8_DE_PORT_IIR, I915_GT_GEN8_DE_PORT_IER);
+	i915_interim_irq_silence(&gt->mmio, I915_GT_GEN8_DE_MISC_IMR, I915_GT_GEN8_DE_MISC_IIR, I915_GT_GEN8_DE_MISC_IER);
+
+	/* Silences the south display, whose hotplug would otherwise interrupt. */
+	i915_interim_irq_silence(&gt->mmio, I915_GEN9_SDEIMR, I915_GEN9_SDEIIR, I915_GEN9_SDEIER);
+}
+
+/* Masks, disables and clears one display interrupt register set. */
+static void
+i915_interim_irq_silence(
+	struct i915_mmio *mmio,
+	uint32_t imr,
+	uint32_t iir,
+	uint32_t ier)
+{
+	/* Masks every source, and flushes the mask. */
+	drv_i915_raw_write32(mmio, imr, 0xffffffffU);
+	drv_i915_posting_read32(mmio, imr);
+
+	/* Disables every source. */
+	drv_i915_raw_write32(mmio, ier, 0U);
+
+	/* Clears what is pending, twice because IIR can queue two events. */
+	drv_i915_raw_write32(mmio, iir, 0xffffffffU);
+	drv_i915_posting_read32(mmio, iir);
+	drv_i915_raw_write32(mmio, iir, 0xffffffffU);
+	drv_i915_posting_read32(mmio, iir);
+}
+
+/* Ignores the interrupt enable state while no display is connected. */
+static void
+i915_interim_display_irq_enable(
+	void *context,
+	int enabled)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(enabled);
+}
+
+/* Does nothing for a display hook while no display is connected. */
+static void
+i915_interim_display_irq_nothing(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+}
+
+/*
+ * Hands a Gen9 display interrupt to the flip display, the one display
+ * source a Gen9 node enables (display/xd9-flip.c); ignores any other,
+ * since the summary is off and none is expected.
+ */
+static void
+i915_interim_display_irq_handle(
+	void *context,
+	uint32_t master_ctl)
+{
+	struct i915_gt *gt;
+
+	/* Only a Gen9 node enables a display source. */
+	gt = context;
+	if (gt->graphics_ver != 9U)
+		return;
+
+	/* The flip display acknowledges its pipe's flip done. */
+	drv_i915_xd9_flip_irq(master_ctl);
+}

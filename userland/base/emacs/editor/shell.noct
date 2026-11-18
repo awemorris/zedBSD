@@ -1,0 +1,158 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// M-x shell: a comint-flavored shell buffer over the Process API.
+//
+// The *shell* buffer runs $SHELL -i on a pty. Output is appended at
+// the process mark; RET sends the text after the process mark as
+// input. C-c C-c sends SIGINT, C-c C-d sends EOF. The command loop
+// pumps output between keystrokes, so the buffer stays live while
+// you edit elsewhere.
+//
+
+func shellInit() {
+    // name -> {proc: handle, mark: marker, buf: name}
+    ShellSessions = {};
+    return 0;
+}
+
+// Start (or switch to) the shell buffer.
+func shellStart(ed) {
+    Editor.getBufferCreate("*shell*");
+    Editor.setBuffer("*shell*");
+    windowNoteBuffer();
+    setMode("Shell");
+
+    if (Dict.hasKey(ShellSessions, "*shell*")) {
+        var s = ShellSessions["*shell*"];
+        if (Process.isAlive(s.proc) == 1) {
+            return 0;
+        }
+    }
+
+    var sh = System.getEnv("SHELL");
+    if (sh == "") {
+        sh = "/bin/sh";
+    }
+    var h = Process.spawn([sh, "-i"]);
+    if (h < 0) {
+        ed.echoMessage = "Cannot start " + sh;
+        return 0;
+    }
+    Editor.gotoChar(Editor.pointMax());
+    var mk = Editor.pointMarker();
+    ShellSessions["*shell*"] = { proc: h, mark: mk, buf: "*shell*" };
+
+    localSetKey("RET", "shell-send-input");
+    localSetKey("C-c C-c", "shell-interrupt");
+    localSetKey("C-c C-d", "shell-send-eof");
+    ed.echoMessage = "Shell started";
+    return 0;
+}
+
+// Append process output at the process mark of a session.
+func shellAppendOutput(sess, text) {
+    var saved = Editor.bufferName();
+    var savedPoint = Editor.point();
+    Editor.setBuffer(sess.buf);
+
+    var atEnd = 0;
+    if (Editor.point() == Editor.markerPosition(sess.mark)) {
+        atEnd = 1;
+    }
+    Editor.gotoChar(Editor.markerPosition(sess.mark));
+    var filtered = shellFilterOutput(text);
+    if (Dict.hasKey(sess, "kind") && sess.kind == "gud") {
+        filtered = gudFilter(sess, filtered);
+    } else if (Dict.hasKey(sess, "kind") && sess.kind == "compile") {
+        filtered = compileFilter(sess, filtered);
+    }
+    Editor.insert(filtered);
+    Editor.setMarker(sess.mark, Editor.point());
+    var newMark = Editor.point();
+
+    Editor.setBuffer(saved);
+    if (saved == sess.buf) {
+        if (atEnd == 1) {
+            Editor.gotoChar(newMark);
+        } else {
+            Editor.gotoChar(savedPoint);
+        }
+    } else {
+        Editor.gotoChar(savedPoint);
+    }
+    return 0;
+}
+
+// Strip terminal control sequences from child output: the buffer gets
+// plain text, CR removed, ESC sequences dropped.
+func shellFilterOutput(s) {
+    var out = "";
+    var n = String.charCount(s);
+    var i = 0;
+    while (i < n) {
+        var cp = String.charCodeAt(s, i);
+        if (cp == 0x1B) {
+            // Skip an escape sequence: ESC [ ... final, or ESC x.
+            i = i + 1;
+            if (i < n && String.charAt(s, i) == "[") {
+                i = i + 1;
+                while (i < n) {
+                    var c2 = String.charCodeAt(s, i);
+                    i = i + 1;
+                    if (c2 >= 0x40 && c2 <= 0x7E) {
+                        break;
+                    }
+                }
+            } else {
+                i = i + 1;
+            }
+            continue;
+        }
+        if (cp == 0x0D) {
+            i = i + 1;
+            continue;
+        }
+        if (cp == 0x07) {
+            i = i + 1;
+            continue;
+        }
+        out = out + String.charAt(s, i);
+        i = i + 1;
+    }
+    return out;
+}
+
+// Pump pending output from every live session into its buffer.
+// Returns 1 when anything arrived (so the caller can redisplay).
+func shellPump(ed) {
+    var got = 0;
+    for (name, sess in ShellSessions) {
+        var text = Process.read(sess.proc, 0);
+        while (text != "") {
+            got = 1;
+            shellAppendOutput(sess, text);
+            text = Process.read(sess.proc, 0);
+        }
+    }
+    return got;
+}
+
+// Is any session alive? (Used to shorten the idle timeout.)
+func shellHasLive() {
+    for (name, sess in ShellSessions) {
+        if (Process.isAlive(sess.proc) == 1) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The session owning the current buffer, or 0.
+func shellCurrentSession() {
+    var name = Editor.bufferName();
+    if (Dict.hasKey(ShellSessions, name)) {
+        return ShellSessions[name];
+    }
+    return 0;
+}

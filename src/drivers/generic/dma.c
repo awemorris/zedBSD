@@ -1,0 +1,1216 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Generic no-IOMMU DMA implementation.
+ */
+
+#include <drivers/generic/dma.h>
+#include <drivers/generic/dma-range.h>
+#include <uapi/errno.h>
+#include <kern/io-stats.h>
+#include <kern/cache-memory.h>
+#include <kern/lock.h>
+#include <limits.h>
+#include <kern/pmem.h>
+#include "kern/kmem.h"
+#include "kern/panic.h"
+#include <kern/kcrt.h>
+
+/*
+ * One coherent allocation of a DMA device.
+ *
+ * Address is the CPU's view of the payload: the direct map for a device that
+ * snoops the CPU caches, an uncached mapping of its own for one that does
+ * not.  The view lives exactly as long as the memory.
+ */
+struct dma_allocation {
+	struct kern_pmem memory;
+	void *address;
+	size_t payload_size;
+	struct dma_allocation *next;
+};
+
+/* A DMA owner keeps its address window and locked allocation list alive. */
+struct drv_dma_device {
+	struct drv_dma_constraints constraints;
+	/* Immutable bus alias and inclusive backing limit, set before publication. */
+	uint64_t bus_offset;
+	uint64_t physical_limit;
+	struct spinlock lock;
+	struct dma_allocation *allocations;
+	unsigned active_operations;
+	unsigned vector_count;
+	unsigned destroying;
+};
+
+struct drv_dma_mapping {
+	struct drv_dma_segment segment;
+	enum drv_dma_direction direction;
+};
+
+struct drv_dma_vector {
+	struct drv_dma_device *device;
+	struct drv_dma_buffer contiguous;
+	void *address;
+	size_t size, charged;
+	unsigned count;
+	struct drv_dma_segment segments[DRV_DMA_VECTOR_MAX_SEGMENTS];
+};
+
+/*
+ * Weak
+ */
+extern int cache_memory_reserve(enum cache_memory_kind, size_t, int) __attribute__((weak));
+extern void cache_memory_commit(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_cancel(enum cache_memory_kind, size_t) __attribute__((weak));
+extern void cache_memory_release(enum cache_memory_kind, size_t) __attribute__((weak));
+extern size_t cache_memory_reclaim(size_t) __attribute__((weak));
+
+/*
+ * Uncached views for devices that do not snoop the CPU caches.
+ *
+ * Only architectures that have such devices provide them.  Where they are
+ * absent, a null test fails the coherent allocations of a non-coherent device
+ * with ENOTSUP instead of handing out cached memory the device would not see.
+ */
+extern int kern_pmem_map_uncached(const struct kern_pmem *run, void **mapped) __attribute__((weak));
+extern int kern_pmem_unmap_uncached(void *mapped, size_t size) __attribute__((weak));
+
+/*
+ * Forward declaration
+ */
+static int device_operation_begin(struct drv_dma_device *device, int allow_destroying);
+static int dma_vector_segments(struct drv_dma_vector *vector);
+static int dma_vector_backing_free(struct drv_dma_vector *vector);
+
+static void device_operation_end(struct drv_dma_device *device);
+static int address_fits(const struct drv_dma_device *device, uint64_t address, size_t size);
+static int allocation_map(const struct drv_dma_device *device, struct dma_allocation *allocation);
+static int allocation_release(const struct drv_dma_device *device, struct dma_allocation *allocation);
+static int is_power_of_two(uint64_t value);
+
+/*
+ * Implements the drv dma device create operation.
+ */
+int
+drv_dma_device_create(
+	const struct drv_dma_constraints *constraints,
+	struct drv_dma_device **result)
+{
+	struct drv_dma_device *device;
+
+	/* Checks the power of two result. */
+	if (constraints == NULL || result == NULL ||
+	    constraints->address_bits == 0 || constraints->address_bits > 64 ||
+	    constraints->max_segment_size == 0 ||
+	    (constraints->segment_boundary != 0 &&
+	     (!is_power_of_two(constraints->segment_boundary) ||
+	      constraints->max_segment_size > constraints->segment_boundary))) {
+		/* Failed. */
+		return EINVAL;
+	}
+
+	/* Handles the device availability. */
+	device = kern_malloc(sizeof(*device));
+	if (device == NULL)
+		return ENOMEM;
+	kern_memset(device, 0, sizeof(*device));
+	device->constraints = *constraints;
+	spin_init(&device->lock, LOCK_RANK_DEVICE, "DMA allocation list");
+	*result = device;
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Creates a DMA owner for a translated bus window before publishing it.
+ * Existing identity callers retain their original constraints layout.
+ */
+int
+drv_dma_device_create_window(
+	const struct drv_dma_constraints *constraints,
+	uint64_t bus_offset,
+	uint64_t physical_limit,
+	struct drv_dma_device **result)
+{
+	struct drv_dma_device *device;
+	uint64_t maximum;
+	int error;
+
+	/* Requires an address width before converting the bus mask. */
+	if (constraints == NULL || result == NULL)
+		return EINVAL;
+
+	/* Refuses a mask width that cannot be expressed as a bus address. */
+	if (constraints->address_bits == 0 || constraints->address_bits > 64U)
+		return EINVAL;
+
+	/* Converts the device address width to an inclusive bus limit. */
+	maximum = UINT64_MAX;
+	if (constraints->address_bits < 64U)
+		maximum = (UINT64_C(1) << constraints->address_bits) - 1U;
+
+	/* Refuses an alias that the device cannot address. */
+	if (bus_offset > maximum)
+		return EINVAL;
+
+	/* Preserves allocation boundaries when translating to the bus. */
+	if (constraints->segment_boundary != 0) {
+		/* Refuses aliases that shift a segment across a bus boundary. */
+		if (bus_offset % constraints->segment_boundary != 0)
+			return EINVAL;
+	}
+
+	/* Acquires the ordinary DMA owner without publishing an incomplete window. */
+	error = drv_dma_device_create(constraints, &device);
+	if (error != 0)
+		return error;
+
+	/* Makes the translated window immutable before any caller can allocate. */
+	device->bus_offset = bus_offset;
+	device->physical_limit = physical_limit;
+	*result = device;
+
+	/* Succeeded: the caller owns one fully configured DMA window. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma device destroy operation.
+ */
+int
+drv_dma_device_destroy(
+	struct drv_dma_device *device)
+{
+	unsigned long irq;
+
+	/* Handles the device availability. */
+	if (device == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&device->lock);
+
+	device->destroying = 1;
+
+	/* Handles the allocations availability. */
+	if (device->allocations != NULL || device->active_operations != 0 ||
+	    device->vector_count != 0) {
+		spin_unlock_irqrestore(&device->lock, irq);
+
+		/* Failed. */
+		return EBUSY;
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	kern_free(device);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma device address bits operation.
+ */
+unsigned
+drv_dma_device_address_bits(
+	const struct drv_dma_device *device)
+{
+	unsigned result;
+
+	/* Checks the device operation begin result. */
+	if (device == NULL ||
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
+		/* Succeeded. */
+		return 0;
+	}
+	result = device->constraints.address_bits;
+	device_operation_end((struct drv_dma_device *)device);
+
+	/* Returns the computed result. */
+	return result;
+}
+/*
+ * Implements the drv dma device max segment size operation.
+ */
+size_t
+drv_dma_device_max_segment_size(
+	const struct drv_dma_device *device)
+{
+	size_t result;
+
+	/* Checks the device operation begin result. */
+	if (device == NULL ||
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
+		/* Succeeded. */
+		return 0;
+	}
+	result = device->constraints.max_segment_size;
+	device_operation_end((struct drv_dma_device *)device);
+
+	/* Returns the computed result. */
+	return result;
+}
+/*
+ * Implements the drv dma device is coherent operation.
+ */
+int
+drv_dma_device_is_coherent(
+	const struct drv_dma_device *device)
+{
+	int result;
+
+	/* Checks the device operation begin result. */
+	if (device == NULL ||
+	    device_operation_begin((struct drv_dma_device *)device, 0) != 0) {
+		/* Succeeded. */
+		return 0;
+	}
+	result = device->constraints.coherent;
+	device_operation_end((struct drv_dma_device *)device);
+
+	/* Returns the computed result. */
+	return result;
+}
+
+/*
+ * Implements the drv dma alloc coherent operation.
+ */
+int
+drv_dma_alloc_coherent(
+	struct drv_dma_device *device,
+	size_t size,
+	size_t alignment,
+	struct drv_dma_buffer *buffer)
+{
+	struct dma_allocation *allocation;
+	unsigned long irq;
+	size_t allocation_bytes;
+	size_t page_size;
+	uint64_t maximum;
+	uint64_t boundary;
+	uint64_t bus_address;
+	int error;
+	int allocation_valid;
+	int release_error;
+
+	/* Handles the device availability. */
+	if (device == NULL || buffer == NULL || size == 0)
+		return EINVAL;
+	io_stats_record(IO_DMA_REQUEST, size);
+
+	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
+	if (error != 0)
+		return error;
+
+	/* Checks the current data size. */
+	if (size > device->constraints.max_segment_size) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return EINVAL;
+	}
+
+	/* Handles the allocation availability. */
+	allocation = kern_malloc(sizeof(*allocation));
+	if (allocation == NULL) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return ENOMEM;
+	}
+
+	kern_memset(allocation, 0, sizeof(*allocation));
+
+	/* Uses the architecture's smallest page for physical alignment. */
+	page_size = kern_page_size(1);
+	if (page_size == 0) {
+		kern_free(allocation);
+		device_operation_end(device);
+		return EINVAL;
+	}
+
+	/* Gives uncached mappings whole pages while preserving coherent-device sizes. */
+	allocation_bytes = size;
+	if (!device->constraints.coherent) {
+		/* Refuses a payload whose backing length cannot be rounded safely. */
+		if (size > SIZE_MAX - (page_size - 1U)) {
+			kern_free(allocation);
+			device_operation_end(device);
+			return EOVERFLOW;
+		}
+
+		/* Keeps the caller's payload size separate from the uncached backing. */
+		allocation_bytes = ((size + page_size - 1U) / page_size) * page_size;
+	}
+
+	/* Aligns the physical run for the page mapping and the device's requirement. */
+	if (alignment < page_size)
+		alignment = page_size;
+
+	/* Preserves the caller's alignment after translating to the bus alias. */
+	if (device->bus_offset % alignment != 0) {
+		kern_free(allocation);
+		device_operation_end(device);
+		return EINVAL;
+	}
+
+	/* Converts the bus mask into a CPU allocation limit without overflowing the alias. */
+	maximum = device->constraints.address_bits == 64U
+			  ? UINT64_MAX
+			  : ((UINT64_C(1) << device->constraints.address_bits) -
+			     1U);
+	maximum -= device->bus_offset;
+
+	/* Keeps backing inside the platform's reachable physical memory. */
+	if (device->physical_limit != 0 && maximum > device->physical_limit)
+		maximum = device->physical_limit;
+
+	/* Retains segment boundaries during the physical allocation. */
+	boundary = device->constraints.segment_boundary;
+
+	/*
+	 * A sub-page segment constrains the exposed payload, not unused
+	 * backing.
+	 */
+	if (boundary < page_size)
+		boundary = 0;
+
+	/* Checks the operation status. */
+	error = kern_pmem_alloc_limited(allocation_bytes, alignment, maximum,
+					(size_t)boundary,
+					&allocation->memory);
+
+	/* Validates backing before forming a potentially overflowing bus address. */
+	allocation_valid = 0;
+	bus_address = 0;
+	if (error == 0 &&
+	    allocation->memory.paddr <= maximum &&
+	    allocation->memory.size != 0) {
+		/* Checks the entire physical run against the platform's upper limit. */
+		if (allocation->memory.size - 1U <=
+		    maximum - allocation->memory.paddr) {
+			bus_address =
+			    allocation->memory.paddr + device->bus_offset;
+			allocation_valid =
+			    address_fits(device,
+					 bus_address,
+					 allocation->memory.size);
+		}
+	}
+
+	/* Rejects inaccessible backing or a payload crossing its bus boundary. */
+	if (error != 0 || !allocation_valid ||
+	    (device->constraints.segment_boundary != 0 &&
+	     size > device->constraints.segment_boundary -
+			allocation->memory.paddr %
+			    device->constraints.segment_boundary)) {
+		/* Releases any rejected run before its allocation owner disappears. */
+		if (allocation->memory.size != 0) {
+			release_error = kern_pmem_free(&allocation->memory);
+			if (release_error != 0)
+				__builtin_trap();
+		}
+
+		/* Returns without publishing an address the device cannot reach. */
+		kern_free(allocation);
+		device_operation_end(device);
+
+		/* Failed. */
+		return ENOMEM;
+	}
+
+	/* Retains the actual backing length for allocation accounting. */
+	allocation_bytes = allocation->memory.size;
+
+	/* Gives the CPU its view of the payload, uncached for a device that does not snoop. */
+	error = allocation_map(device, allocation);
+	if (error != 0) {
+		/* Checks the hal pmem free result. */
+		if (kern_pmem_free(&allocation->memory) != 0)
+			__builtin_trap();
+		kern_free(allocation);
+		device_operation_end(device);
+
+		/* Reports why no view could be made. */
+		return error;
+	}
+
+	/* Accounts mandatory backing before publishing device ownership. */
+	if (cache_memory_reserve != NULL) {
+		/* Checks the cache memory reserve result. */
+		if (cache_memory_reserve(CACHE_MEMORY_DMA,
+					 allocation->memory.size, 0) != 0) {
+			/* Gives the unaccounted memory back; failing to is fatal. */
+			error = allocation_release(device, allocation);
+			if (error != 0)
+				__builtin_trap();
+			kern_free(allocation);
+			device_operation_end(device);
+
+			/* Failed. */
+			return ENOMEM;
+		}
+	}
+
+	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->destroying) {
+		spin_unlock_irqrestore(&device->lock, irq);
+
+		/* Gives the memory of a destroyed device back; failing to is fatal. */
+		error = allocation_release(device, allocation);
+		if (error != 0)
+			__builtin_trap();
+
+		/* Handles the cache memory cancel availability. */
+		if (cache_memory_cancel != NULL)
+			cache_memory_cancel(CACHE_MEMORY_DMA, allocation_bytes);
+		kern_free(allocation);
+		device_operation_end(device);
+
+		/* Failed. */
+		return EBUSY;
+	}
+
+	allocation->payload_size = size;
+	allocation->next = device->allocations;
+	device->allocations = allocation;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	buffer->address = allocation->address;
+	buffer->device_address = bus_address;
+	buffer->size = size;
+	buffer->private_data[0] = (uintptr_t)allocation;
+	buffer->private_data[1] = 0;
+
+	/* Handles the cache memory commit availability. */
+	if (cache_memory_commit != NULL)
+		cache_memory_commit(CACHE_MEMORY_DMA, allocation->memory.size);
+	io_stats_record(IO_DMA_ALLOC, allocation->memory.size);
+	device_operation_end(device);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma free coherent operation.
+ */
+void
+drv_dma_free_coherent(
+	struct drv_dma_device *device,
+	struct drv_dma_buffer *buffer)
+{
+	struct dma_allocation **link, *allocation;
+	unsigned long irq;
+	int found = 0;
+	int release_error;
+	size_t released_size;
+
+	/* Handles the device availability. */
+	if (device == NULL || buffer == NULL || buffer->private_data[0] == 0)
+		return;
+
+	/* Checks the device operation begin result. */
+	if (device_operation_begin(device, 1) != 0)
+		return;
+	irq = spin_lock_irqsave(&device->lock);
+
+	allocation = (struct dma_allocation *)buffer->private_data[0];
+	/* Process each linked entry. */
+	for (link = &device->allocations; *link != NULL;
+	     link = &(*link)->next) {
+		/* Handles the link condition. */
+		if (*link == allocation) {
+			*link = allocation->next;
+			found = 1;
+			break;
+		}
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the found condition. */
+	if (found) {
+		released_size = allocation->memory.size;
+
+		/* Removes the view and returns the memory. */
+		release_error = allocation_release(device, allocation);
+		if (release_error == 0) {
+			/* Handles the cache memory release availability. */
+			if (cache_memory_release != NULL) {
+				cache_memory_release(CACHE_MEMORY_DMA,
+						     released_size);
+			}
+
+			io_stats_record(IO_DMA_FREE, released_size);
+		} else {
+			/*
+			 * Keeps failed retirement owned and retryable by the
+			 * caller.
+			 */
+			irq = spin_lock_irqsave(&device->lock);
+			allocation->next = device->allocations;
+			device->allocations = allocation;
+			spin_unlock_irqrestore(&device->lock, irq);
+			device_operation_end(device);
+
+			/* Returns the computed result. */
+			return;
+		}
+
+		kern_free(allocation);
+		kern_memset(buffer, 0, sizeof(*buffer));
+	}
+
+	device_operation_end(device);
+}
+
+/*
+ * Implements the drv dma map operation.
+ */
+int
+drv_dma_map(
+	struct drv_dma_device *device,
+	void *address,
+	size_t size,
+	enum drv_dma_direction direction,
+	struct drv_dma_mapping **result)
+{
+	uintptr_t base;
+	struct dma_allocation *allocation;
+	struct drv_dma_mapping *mapping;
+	unsigned long irq;
+	uintptr_t start = (uintptr_t)address;
+	int error;
+
+	/* Handles the device availability. */
+	if (device == NULL || address == NULL || size == 0 || result == NULL ||
+	    direction < DRV_DMA_TO_DEVICE || direction > DRV_DMA_BIDIRECTIONAL) {
+		/* Failed. */
+		return EINVAL;
+	}
+
+	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
+	if (error != 0)
+		return error;
+
+	/* Checks the current data size. */
+	if (size > device->constraints.max_segment_size) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return EINVAL;
+	}
+
+	/* Handles the mapping availability. */
+	mapping = kern_malloc(sizeof(*mapping));
+	if (mapping == NULL) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return ENOMEM;
+	}
+
+	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->destroying) {
+		spin_unlock_irqrestore(&device->lock, irq);
+		kern_free(mapping);
+		device_operation_end(device);
+
+		/* Failed. */
+		return EBUSY;
+	}
+
+	/* Process each linked entry. */
+	for (allocation = device->allocations; allocation != NULL;
+	     allocation = allocation->next) {
+		/* Handles the start condition. */
+		base = (uintptr_t)allocation->address;
+		if (start < base || start - base > allocation->payload_size ||
+		    size > allocation->payload_size - (start - base))
+			continue;
+		mapping->segment.address = allocation->memory.paddr +
+					   device->bus_offset + start - base;
+		mapping->segment.length = size;
+		mapping->direction = direction;
+		spin_unlock_irqrestore(&device->lock, irq);
+		*result = mapping;
+		device_operation_end(device);
+
+		/* Succeeded. */
+		return 0;
+	}
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	kern_free(mapping);
+	device_operation_end(device);
+
+	/* Failed. */
+	return ENOTSUP;
+}
+
+/*
+ * Gives the bus address a device uses for memory the caller owns.
+ *
+ * This is for memory outside the device's own coherent allocations whose
+ * physical address the caller knows, such as a buffer-cache page.
+ * Only a coherent device is served, because one that does not snoop the
+ * caches would need cache maintenance this call does not do; every other
+ * case, and a range outside the device's reach, fails, and the caller moves
+ * the data through its own bounce memory instead.  The caller keeps the
+ * memory until the device has finished with it.
+ *
+ * device_address_bits names how wide an address the device itself takes,
+ * when the caller knows it from the device's own specification; the DMA
+ * device's width is the bus's default for every device behind it and may be
+ * narrower.  Zero keeps that default.  The bus offset, the platform's
+ * physical limit and the segment boundary apply either way (2026-10-27 Q1).
+ */
+int
+drv_dma_physical_address(
+	struct drv_dma_device *device,
+	uint64_t paddr,
+	size_t size,
+	unsigned device_address_bits,
+	uint64_t *bus_address)
+{
+	unsigned address_bits;
+	int reachable;
+	int error;
+
+	/* Refuses a call that names no device or no output. */
+	if (device == NULL || bus_address == NULL)
+		return EINVAL;
+
+	/* Holds the device open against destruction while it is read. */
+	error = device_operation_begin(device, 0);
+	if (error != 0)
+		return error;
+
+	/* A device that does not snoop the caches is left to its bounce memory. */
+	if (!device->constraints.coherent) {
+		device_operation_end(device);
+		return EINVAL;
+	}
+
+	/* Takes the device's own address width when the caller names one. */
+	address_bits = device->constraints.address_bits;
+	if (device_address_bits != 0U)
+		address_bits = device_address_bits;
+
+	/* Translates the range under the width and every limit of the platform. */
+	reachable = drv_dma_range_bus_address(address_bits,
+					      device->constraints.max_segment_size,
+					      device->constraints.segment_boundary,
+					      device->bus_offset,
+					      device->physical_limit,
+					      paddr,
+					      size,
+					      bus_address);
+	device_operation_end(device);
+
+	/* A range the device cannot reach directly is refused. */
+	if (!reachable)
+		return EINVAL;
+
+	/* Succeeded: the device reaches the range at *bus_address. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma unmap operation.
+ */
+void
+drv_dma_unmap(
+	struct drv_dma_device *device,
+	struct drv_dma_mapping *mapping)
+{
+	(void)device;
+
+	/* Handles the mapping availability. */
+	if (mapping != NULL)
+		kern_free(mapping);
+}
+/*
+ * Implements the drv dma mapping segment count operation.
+ */
+unsigned
+drv_dma_mapping_segment_count(
+	const struct drv_dma_mapping *mapping)
+{
+	/* Returns the computed result. */
+	return mapping == NULL ? 0U : 1U;
+}
+/*
+ * Implements the drv dma mapping segment operation.
+ */
+int
+drv_dma_mapping_segment(
+	const struct drv_dma_mapping *mapping,
+	unsigned index,
+	struct drv_dma_segment *segment)
+{
+	/* Handles the mapping availability. */
+	if (mapping == NULL || segment == NULL || index != 0)
+		return EINVAL;
+	*segment = mapping->segment;
+	/* Succeeded. */
+	return 0;
+}
+/*
+ * Implements the drv dma sync for cpu operation.
+ */
+void
+drv_dma_sync_for_cpu(
+	struct drv_dma_device *device,
+	struct drv_dma_mapping *mapping)
+{
+	(void)device;
+	(void)mapping;
+}
+/*
+ * Implements the drv dma sync for device operation.
+ */
+void
+drv_dma_sync_for_device(
+	struct drv_dma_device *device,
+	struct drv_dma_mapping *mapping)
+{
+	(void)device;
+	(void)mapping;
+}
+
+/*
+ * Owns isolated DMA staging, never an arbitrary caller's reusable buffer.
+ */
+int
+drv_dma_vector_create(
+	struct drv_dma_device *device,
+	size_t size,
+	struct drv_dma_vector **result)
+{
+	struct drv_dma_vector *vector;
+	unsigned long irq;
+	int error;
+
+	/* Handles the result availability. */
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
+	/* Handles the device availability. */
+	if (device == NULL || size == 0 || size > DRV_DMA_VECTOR_MAX_SIZE)
+		return EINVAL;
+
+	/* Checks the operation status. */
+	error = device_operation_begin(device, 0);
+	if (error != 0)
+		return error;
+
+	/* Handles the vector availability. */
+	vector = kern_malloc(sizeof(*vector));
+	if (vector == NULL) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return ENOMEM;
+	}
+
+	kern_memset(vector, 0, sizeof(*vector));
+	vector->device = device;
+	vector->size = size;
+	vector->charged = sizeof(*vector);
+
+	/* Coherent storage already satisfies the device mask and boundaries. */
+	error = drv_dma_alloc_coherent(device, size, 64U, &vector->contiguous);
+	if (error == 0) {
+		vector->address = vector->contiguous.address;
+		error = dma_vector_segments(vector);
+	}
+
+	/* Checks the operation status. */
+	if (error != 0)
+		goto fail;
+
+	/* Handles the cache memory reserve availability. */
+	if (cache_memory_reserve != NULL) {
+		/* Checks the operation status. */
+		error = cache_memory_reserve(CACHE_MEMORY_DMA, vector->charged,
+					     0);
+		if (error != 0)
+			goto fail;
+	}
+
+	/* Handles the device condition. */
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->destroying || device->vector_count == UINT_MAX) {
+		spin_unlock_irqrestore(&device->lock, irq);
+
+		/* Handles the cache memory cancel availability. */
+		if (cache_memory_cancel != NULL)
+			cache_memory_cancel(CACHE_MEMORY_DMA, vector->charged);
+		error = EBUSY;
+		goto fail;
+	}
+
+	device->vector_count++;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Handles the cache memory commit availability. */
+	if (cache_memory_commit != NULL)
+		cache_memory_commit(CACHE_MEMORY_DMA, vector->charged);
+	io_stats_record(IO_DMA_ALLOC, vector->charged);
+	*result = vector;
+	device_operation_end(device);
+
+	/* Succeeded. */
+	return 0;
+
+fail:
+
+	/* Checks the dma vector backing free result. */
+	if (dma_vector_backing_free(vector) != 0)
+		KERN_FATAL("DMA vector allocation rollback failed");
+	kern_free(vector);
+	device_operation_end(device);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma vector free operation.
+ */
+int
+drv_dma_vector_free(
+	struct drv_dma_vector *vector)
+{
+	struct drv_dma_device *device;
+	unsigned long irq;
+	int error;
+
+	/* Handles the vector availability. */
+	if (vector == NULL)
+		return EINVAL;
+	device = vector->device;
+
+	/* Checks the operation status. */
+	error = device_operation_begin(device, 1);
+	if (error != 0)
+		return error;
+
+	/* Checks the operation status. */
+	error = dma_vector_backing_free(vector);
+	if (error != 0) {
+		device_operation_end(device);
+
+		/* Failed. */
+		return error;
+	}
+
+	/* Handles the cache memory release availability. */
+	if (cache_memory_release != NULL)
+		cache_memory_release(CACHE_MEMORY_DMA, vector->charged);
+	io_stats_record(IO_DMA_FREE, vector->charged);
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->vector_count == 0)
+		KERN_FATAL("DMA vector owner underflow");
+	device->vector_count--;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	kern_free(vector);
+	device_operation_end(device);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Implements the drv dma vector address operation.
+ */
+void *
+drv_dma_vector_address(
+	const struct drv_dma_vector *vector)
+{
+	/* Returns the computed result. */
+	return vector != NULL ? vector->address : NULL;
+}
+
+/*
+ * Implements the drv dma vector count operation.
+ */
+unsigned
+drv_dma_vector_count(
+	const struct drv_dma_vector *vector)
+{
+	/* Returns the computed result. */
+	return vector != NULL ? vector->count : 0;
+}
+
+/*
+ * Implements the drv dma vector segment operation.
+ */
+int
+drv_dma_vector_segment(
+	const struct drv_dma_vector *vector,
+	unsigned index,
+	struct drv_dma_segment *segment)
+{
+	/* Handles the vector availability. */
+	if (vector == NULL || segment == NULL || index >= vector->count)
+		return EINVAL;
+	*segment = vector->segments[index];
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * A DMA device is normally shared by every device on one bus.  In
+ * particular, two host controllers can allocate and release coherent
+ * buffers from IRQ and process context at the same time.  The
+ * spinlock protects only the device lifecycle and allocation-list
+ * metadata; the physical-memory allocator and heap allocator must
+ * never be entered while it is held.
+ */
+static int
+device_operation_begin(
+	struct drv_dma_device *device,
+	int allow_destroying)
+{
+	unsigned long irq;
+	int error = 0;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->destroying && !allow_destroying)
+		error = EBUSY;
+	else if (device->active_operations == UINT_MAX)
+		error = EOVERFLOW;
+	else
+		device->active_operations++;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Supports the device operation end operation. */
+static void
+device_operation_end(
+	struct drv_dma_device *device)
+{
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&device->lock);
+
+	/* Handles the device condition. */
+	if (device->active_operations == 0)
+		__builtin_trap();
+	device->active_operations--;
+
+	spin_unlock_irqrestore(&device->lock, irq);
+}
+
+/* Supports the address fits operation. */
+static int
+address_fits(
+	const struct drv_dma_device *device,
+	uint64_t address,
+	size_t size)
+{
+	uint64_t limit;
+
+	/* Checks the current data size. */
+	if (size == 0)
+		return 0;
+
+	/* Handles the device condition. */
+	if (device->constraints.address_bits >= 64U)
+		return (uint64_t)size - 1U <= UINT64_MAX - address;
+	limit = (uint64_t)1U << device->constraints.address_bits;
+
+	/* Returns the computed result. */
+	return address < limit && size <= limit - address;
+}
+
+/*
+ * Gives the CPU its view of an allocation's payload.
+ *
+ * A device that snoops the caches shares the direct map.  One that does not
+ * gets an uncached mapping, so neither side needs cache maintenance.
+ */
+static int
+allocation_map(
+	const struct drv_dma_device *device,
+	struct dma_allocation *allocation)
+{
+	int error;
+
+	/* Uses the direct map for a device that snoops the caches. */
+	if (device->constraints.coherent) {
+		allocation->address = kern_pmem_to_kernel(allocation->memory.paddr);
+		return 0;
+	}
+
+	/* Refuses coherent memory where no uncached view can be made. */
+	if (kern_pmem_map_uncached == NULL)
+		return ENOTSUP;
+
+	/* Maps the payload uncached. */
+	error = kern_pmem_map_uncached(&allocation->memory, &allocation->address);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the CPU reaches the payload at address. */
+	return 0;
+}
+
+/*
+ * Removes an allocation's uncached view and returns its memory.
+ *
+ * A refusal keeps both, so the owner can retry.
+ */
+static int
+allocation_release(
+	const struct drv_dma_device *device,
+	struct dma_allocation *allocation)
+{
+	int error;
+
+	/* Removes the uncached view of a device that does not snoop. */
+	if (!device->constraints.coherent) {
+		/* The view exists only where the uncached calls do. */
+		if (kern_pmem_unmap_uncached == NULL)
+			return ENOTSUP;
+
+		/* Unmaps the view; a refusal keeps it. */
+		error = kern_pmem_unmap_uncached(allocation->address, allocation->memory.size);
+		if (error != 0)
+			return error;
+	}
+
+	/* Returns the memory to the physical allocator. */
+	error = kern_pmem_free(&allocation->memory);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the allocation holds nothing any more. */
+	return 0;
+}
+
+/* Supports the is power of two operation. */
+static int
+is_power_of_two(
+	uint64_t value)
+{
+	/* Returns the computed result. */
+	return value != 0 && (value & (value - 1U)) == 0;
+}
+
+/* Splits every page by mask, maximum segment length and device boundaries. */
+static int
+dma_vector_segments(
+	struct drv_dma_vector *vector)
+{
+	struct drv_dma_device *device;
+	struct drv_dma_segment *previous;
+	uint64_t physical;
+	uint64_t boundary;
+	size_t offset, remaining, length;
+
+	device = vector->device;
+	boundary = device->constraints.segment_boundary;
+	vector->count = 0;
+	offset = 0;
+	/* Splits the contiguous run wherever a device limit requires it. */
+	while (offset < vector->size) {
+		physical = vector->contiguous.device_address + offset;
+		length = vector->size - offset;
+
+		/* Checks the current data length. */
+		remaining = vector->size - offset;
+		if (length > remaining)
+			length = remaining;
+
+		/* Checks the current data length. */
+		if (length > device->constraints.max_segment_size)
+			length = device->constraints.max_segment_size;
+
+		/* Handles the boundary condition. */
+		if (boundary != 0 && length > boundary - physical % boundary)
+			length = (size_t)(boundary - physical % boundary);
+
+		/* Checks the address fits result. */
+		if (!address_fits(device, physical, length))
+			return EOVERFLOW;
+
+		/* Handles the previous availability. */
+		previous = vector->count != 0
+				   ? &vector->segments[vector->count - 1U]
+				   : NULL;
+		if (previous != NULL &&
+		    previous->length <= UINT64_MAX - previous->address &&
+		    previous->address + previous->length == physical &&
+		    length <= device->constraints.max_segment_size -
+				      previous->length &&
+		    (boundary == 0 ||
+		     previous->address / boundary == physical / boundary)) {
+			previous->length += length;
+		} else {
+			/* Handles the vector condition. */
+			if (vector->count == DRV_DMA_VECTOR_MAX_SEGMENTS)
+				return E2BIG;
+			vector->segments[vector->count].address = physical;
+			vector->segments[vector->count++].length = length;
+		}
+
+		offset += length;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Supports the dma vector backing free operation. */
+static int
+dma_vector_backing_free(
+	struct drv_dma_vector *vector)
+{
+	/* Returns the coherent storage; a refused release keeps the vector. */
+	if (vector->contiguous.address != NULL) {
+		drv_dma_free_coherent(vector->device, &vector->contiguous);
+
+		/* Handles the address availability. */
+		if (vector->contiguous.address != NULL)
+			return EBUSY;
+	}
+
+	vector->address = NULL;
+
+	/* Succeeded. */
+	return 0;
+}

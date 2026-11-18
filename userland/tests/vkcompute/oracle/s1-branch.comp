@@ -1,0 +1,26 @@
+#version 450
+// Stage 1: divergent if and else, nested, with a store that only some invocations make.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Some { uint some[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint v = src[i];
+	uint r;
+	if ((v & 1u) != 0u) {
+		r = v * 3u + 1u;
+	} else {
+		r = v >> 1;
+	}
+	if (v % 3u == 0u) {
+		r = r + 100u;
+		if (v % 9u == 0u)
+			r = r ^ 255u;
+	}
+	o[i] = r;
+	if ((i & 7u) == 3u)
+		some[i] = v;
+}

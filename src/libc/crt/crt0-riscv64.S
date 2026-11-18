@@ -1,0 +1,145 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The 64-bit RISC-V start file of a static program, with the system call
+ * veneer and the signal restorer the static C library calls.
+ *
+ * The kernel enters _start with the stack pointer at the argument count,
+ * followed by the argument vector, its terminating null and the
+ * environment.  Nothing is addressed through the global pointer: every
+ * object is built without linker relaxation, so gp is left as the kernel
+ * set it.
+ */
+
+#include <hal/arch.h>
+
+	.text
+	.balign 16
+	.global _start
+	.type _start, %function
+_start:
+	/* No frame and no return address: a stack walk stops here. */
+	mv	s0, zero
+	mv	ra, zero
+
+	/* The argument count, the argument vector and the environment. */
+	mv	s1, sp
+	ld	s2, 0(s1)
+	addi	s3, s1, 8
+	slli	t0, s2, 3
+	add	s4, s3, t0
+	addi	s4, s4, 8
+
+	/* Sets the C library up. */
+	mv	a0, s2
+	mv	a1, s3
+	mv	a2, s4
+	call	__libc_init
+
+	/* Runs the program with the same three arguments. */
+	mv	a0, s2
+	mv	a1, s3
+	mv	a2, s4
+	call	main
+
+	/*
+	 * Leaves with main's status; exit runs the atexit handlers and
+	 * flushes the streams, and does not return.
+	 */
+	call	exit
+1:
+	ebreak
+	j	1b
+	.size _start, .-_start
+
+/*
+ * intptr_t __syscall6(number, a1, a2, a3, a4, a5, a6)
+ *
+ * The kernel takes the number in a7 and the arguments in a0 to a5, and
+ * returns the result in a0.
+ */
+	.balign 4
+	.global __syscall6
+	.type __syscall6, %function
+__syscall6:
+	mv	a7, a0
+	mv	a0, a1
+	mv	a1, a2
+	mv	a2, a3
+	mv	a3, a4
+	mv	a4, a5
+	mv	a5, a6
+	ecall
+	ret
+	.size __syscall6, .-__syscall6
+
+/*
+ * long __vfork_spawn(void (*entry)(void *), void *argument, void *stack_top);
+ *
+ * Starts a child that shares this address space until it execs or ends
+ * (the vfork system call, 169), and runs entry(argument) in the child on
+ * the stack below stack_top, so that the child never writes this
+ * thread's stack.  The caller resumes when the child has execed or
+ * ended, with the child's pid, or a negative errno.  entry must not
+ * return; if it does, the child exits with status 127.
+ */
+	.balign 4
+	.global __vfork_spawn
+	.hidden __vfork_spawn
+	.type __vfork_spawn, %function
+__vfork_spawn:
+	/* The child reads its entry, argument and stack from s1 to s3. */
+	addi	sp, sp, -32
+	sd	s1, 0(sp)
+	sd	s2, 8(sp)
+	sd	s3, 16(sp)
+	mv	s1, a0
+	mv	s2, a1
+	mv	s3, a2
+	li	a7, 169
+	ecall
+	bnez	a0, 1f
+
+	/* The child: its own stack before anything is written to one. */
+	andi	sp, s3, -16
+	li	s0, 0
+	mv	a0, s2
+	jalr	s1
+
+	/* entry returned: the child ends with 127 (exit is system call 1). */
+	li	a0, 127
+	li	a7, 1
+	ecall
+	ebreak
+
+	/* The parent, once the child execed or ended. */
+1:	ld	s1, 0(sp)
+	ld	s2, 8(sp)
+	ld	s3, 16(sp)
+	addi	sp, sp, 32
+	ret
+	.size __vfork_spawn, .-__vfork_spawn
+
+/*
+ * A signal handler returns here.  The stack pointer is back at the frame
+ * the kernel built, whose token and context the return request names.
+ * System call 80 is the signal return; it does not come back.
+ */
+	.balign 4
+	.global __signal_restorer
+	.type __signal_restorer, %function
+__signal_restorer:
+	/* Names the frame by its token and context, and asks for the return. */
+	lwu	a0, HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET(sp)
+	ld	a1, HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET(sp)
+	li	a7, 80
+	ecall
+	ebreak
+	.size __signal_restorer, .-__signal_restorer
+
+	.section .note.GNU-stack,"",%progbits

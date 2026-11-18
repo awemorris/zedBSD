@@ -1,0 +1,9 @@
+# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# The portable viewer installs the same converted model and textures under the FreeBSD prefix.
+KEILAND_MVIEW_SOURCES := userland/tests/mview/main.c userland/tests/mview/window.c \
+	userland/tests/mview/renderer.c userland/tests/mview/model.c \
+	userland/tests/mview/camera.c userland/tests/mview/input.c
+$(eval $(call KEILAND_FREEBSD_PROGRAM,mview,bin,$(KEILAND_MVIEW_SOURCES),libwayland-client.so libvulkan.so.1,-lm))
+$(eval $(call KEILAND_FREEBSD_DATA,share/mview/qs40/model.txt,userland/tests/mview/models/qs40/model.txt))
+KEILAND_MVIEW_TEXTURES := $(sort $(wildcard userland/tests/mview/models/qs40/tex/*.pam))
+$(foreach texture,$(KEILAND_MVIEW_TEXTURES),$(eval $(call KEILAND_FREEBSD_DATA,share/mview/qs40/tex/$(notdir $(texture)),$(texture))))

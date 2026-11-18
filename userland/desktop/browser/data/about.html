@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>About browser</title>
+<style>
+body { margin: 0; background: #eef1f6; color: #1f2633; font-family: sans-serif; font-size: 15px; line-height: 1.5; }
+.banner { background: #1d2b45; color: #ffffff; padding: 22px 0 18px; border-bottom: 4px solid #4f8cd6; }
+.banner .inner { width: 720px; margin: 0 auto; }
+.banner h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+.main { width: 720px; margin: 24px auto 40px; }
+.card { background: #ffffff; border: 1px solid #d3dae6; padding: 14px 22px 16px; margin: 0 0 16px; }
+.card h2 { margin: 0 0 8px; font-size: 19px; color: #1d2b45; }
+.card ul { margin: 6px 0; padding-left: 24px; }
+a { color: #2463b3; }
+code { background: #f0f2f6; padding: 0 3px; font-size: 13px; }
+@media (prefers-color-scheme: dark) {
+body { background: #1a1e25; color: #d9dee7; }
+.banner { background: #111723; }
+.card { background: #232933; border-color: #3a4351; }
+.card h2 { color: #dce6f7; }
+a { color: #82b4f5; }
+code { background: #2e3541; }
+}
+</style>
+</head>
+<body>
+<div class="banner">
+<div class="inner">
+<h1>About the engine</h1>
+</div>
+</div>
+<div class="main">
+<div class="card">
+<h2>What it is made of</h2>
+<ul>
+<li>An HTML5 tokenizer and tree builder, checked against the html5lib tests.</li>
+<li>A CSS parser with selectors, the cascade and computed styles.</li>
+<li>Block and inline layout with line breaking, including Japanese text.</li>
+<li>A display list painted by Vulkan on the GPU, with a CPU renderer that the tests compare it against.</li>
+<li>A JavaScript engine: a parser for the whole of ES2024 and a bytecode compiler and interpreter shared with the coming WebAssembly engine.</li>
+</ul>
+</div>
+<div class="card">
+<h2>What comes next</h2>
+<ul>
+<li>The built-in objects of JavaScript, then scripts in pages and the DOM.</li>
+<li>Floats, positioning, flexbox and grid.</li>
+<li>HTTP and HTTPS, images (PNG, JPEG, GIF) and WebAssembly.</li>
+</ul>
+</div>
+<p><a href="start.html">Back to the start page</a></p>
+</div>
+</body>
+</html>

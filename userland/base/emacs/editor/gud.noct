@@ -1,0 +1,238 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// gud: a small Grand Unified Debugger subset.
+//
+//  - M-x gdb (or M-x gud-lldb) prompts for the command line and runs
+//    the debugger on a pty in the *gud* buffer. The prompt buffer is
+//    the only special buffer; RET sends input like a shell.
+//  - Source following: gdb is run with --fullname and its \032\032
+//    annotations are parsed; lldb output is matched with a regex.
+//    The referenced file opens in the other window at the line.
+//  - In a source buffer, with a gud session live: C-a moves to the
+//    beginning of the line as usual, and a second C-a at the line
+//    start arms a prefix: C-b sets a breakpoint on the line, C-d
+//    deletes it.
+//
+
+func gudInit() {
+    GudSession = 0;      // the ShellSessions entry for *gud*, or 0
+    GudAcc = "";         // output accumulator for annotation parsing
+    return 0;
+}
+
+// Start a debugger; backend is "gdb" or "lldb".
+func gudStart(ed, backend) {
+    var deflt = "gdb --fullname";
+    if (backend == "lldb") {
+        deflt = "lldb";
+    }
+    var cmd = readFromMinibuffer(ed, "Run " + backend + " (like this): " + deflt + " ", fileCompleter);
+    if (Type.of(cmd) != "string") {
+        return 0;
+    }
+
+    Editor.getBufferCreate("*gud*");
+    Editor.setBuffer("*gud*");
+    windowNoteBuffer();
+    setMode("GUD");
+
+    // Build argv: the default command plus the typed argument line.
+    var argv = [];
+    if (backend == "gdb") {
+        Array.push(argv, "gdb");
+        Array.push(argv, "--fullname");
+    } else {
+        Array.push(argv, "lldb");
+    }
+    gudSplitArgs(cmd, argv);
+
+    var h = Process.spawn(argv);
+    if (h < 0) {
+        ed.echoMessage = "Cannot start " + backend;
+        return 0;
+    }
+    Editor.gotoChar(Editor.pointMax());
+    var mk = Editor.pointMarker();
+    var sess = { proc: h, mark: mk, buf: "*gud*", kind: "gud", backend: backend };
+    ShellSessions["*gud*"] = sess;
+    GudSession = sess;
+    GudAcc = "";
+
+    localSetKey("RET", "shell-send-input");
+    localSetKey("C-c C-c", "shell-interrupt");
+    ed.echoMessage = "Debugging with " + backend;
+    return 0;
+}
+
+// Split a whitespace-separated argument string into argv.
+func gudSplitArgs(s, argv) {
+    var tok = "";
+    var n = String.charCount(s);
+    for (i in 0..n) {
+        var c = String.charAt(s, i);
+        if (c == " ") {
+            if (tok != "") {
+                Array.push(argv, tok);
+                tok = "";
+            }
+        } else {
+            tok = tok + c;
+        }
+    }
+    if (tok != "") {
+        Array.push(argv, tok);
+    }
+    return 0;
+}
+
+// Filter debugger output: pick out source positions, drop annotation
+// lines from the display, and remember partial lines across reads.
+func gudFilter(sess, text) {
+    GudAcc = GudAcc + text;
+    var out = "";
+    while (true) {
+        var nl = String.indexOf(GudAcc, "\n");
+        if (nl < 0) {
+            break;
+        }
+        var line = String.substring(GudAcc, 0, nl);
+        GudAcc = String.substring(GudAcc, nl + 1, -1);
+        if (gudScanLine(sess, line) == 0) {
+            out = out + line + "\n";
+        }
+    }
+    // An annotation still being received is held back; ordinary
+    // partial output (like a prompt) is flushed.
+    if (GudAcc != "" && String.charCodeAt(GudAcc, 0) != 0x1A) {
+        out = out + GudAcc;
+        GudAcc = "";
+    }
+    return out;
+}
+
+// Returns 1 when the line was a source annotation (and was handled).
+func gudScanLine(sess, line) {
+    if (String.charCount(line) > 2 && String.charCodeAt(line, 0) == 0x1A) {
+        // gdb --fullname: \032\032FILE:LINE:CHAR:...
+        var body = String.substring(line, 2, -1);
+        var m = Regex.search("^([^:]+):([0-9]+):", body, 0);
+        if (Type.of(m) == "dict") {
+            var g = m.groups;
+            var file = String.substring(body, g[0].start, g[0].end - g[0].start);
+            var lno = Int.from(String.substring(body, g[1].start, g[1].end - g[1].start));
+            gudShowSource(file, lno);
+        }
+        return 1;
+    }
+    if (sess.backend == "lldb") {
+        // "... at /path/file.c:12:5" or "at file.c:12"
+        var m2 = Regex.search(" at ([^ :]+):([0-9]+)", line, 0);
+        if (Type.of(m2) == "dict") {
+            var g2 = m2.groups;
+            var file2 = String.substring(line, g2[0].start, g2[0].end - g2[0].start);
+            var lno2 = Int.from(String.substring(line, g2[1].start, g2[1].end - g2[1].start));
+            gudShowSource(file2, lno2);
+        }
+    }
+    return 0;
+}
+
+// Show file:line in the other window, keeping the gud window selected.
+func gudShowSource(file, line) {
+    var gudWin = SelWin;
+
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    if (Array.size(leaves) == 1) {
+        windowSplit("v");
+        leaves = [];
+        windowLeaves(WinRoot, leaves);
+    }
+    var target = 0;
+    for (w in leaves) {
+        if (!(w == gudWin)) {
+            target = w;
+        }
+    }
+    if (Type.of(target) != "dict") {
+        return 0;
+    }
+
+    windowSelect(target);
+    var name = Editor.fileNameNondirectory(file);
+    var fresh = !Dict.hasKey(Buffers, name);
+    Editor.getBufferCreate(name);
+    Editor.setBuffer(name);
+    windowNoteBuffer();
+    if (fresh == 1) {
+        Buf.fileName = file;
+        if (FileUtil.checkFileExists(file) == 1) {
+            Editor.insertFileContents(file);
+            Editor.setBufferModifiedP(0);
+        }
+    }
+    Editor.gotoChar(Editor.pointMin());
+    Editor.forwardLine(line - 1);
+    target.point = Editor.point();
+
+    windowSelect(gudWin);
+    return 0;
+}
+
+// Is a gud session live?
+func gudActive() {
+    if (Type.of(GudSession) != "dict") {
+        return 0;
+    }
+    return Process.isAlive(GudSession.proc);
+}
+
+// The C-a command: beginning-of-line, and at the line start with a
+// live gud session in a file buffer, arm the breakpoint prefix.
+func gudBeginningOfLine(ed) {
+    if (Editor.bolp() && gudActive() == 1 &&
+        Editor.bufferFileName() != "" && Editor.bufferName() != "*gud*") {
+        ed.echoMessage = "GUD: C-b = break here, C-d = clear here";
+        redisplay(ed);
+        var k = Term.readKey(10000);
+        ed.echoMessage = "";
+        if (k == (Term.CTRL | 0x62)) {
+            gudBreak(ed, 1);
+            return 0;
+        }
+        if (k == (Term.CTRL | 0x64)) {
+            gudBreak(ed, 0);
+            return 0;
+        }
+        if (k >= 0) {
+            dispatchKey(ed, k);
+        }
+        return 0;
+    }
+    beginningOfLine();
+    return 0;
+}
+
+// Send a break/clear command for the current source line.
+func gudBreak(ed, set) {
+    var file = Editor.fileNameNondirectory(Editor.bufferFileName());
+    var line = countLinesBefore(Editor.point()) + 1;
+    var cmd = "";
+    if (GudSession.backend == "gdb") {
+        if (set == 1) {
+            cmd = "break " + file + ":" + line;
+        } else {
+            cmd = "clear " + file + ":" + line;
+        }
+    } else {
+        if (set == 1) {
+            cmd = "breakpoint set -f " + file + " -l " + line;
+        } else {
+            cmd = "breakpoint clear -f " + file + " -l " + line;
+        }
+    }
+    Process.write(GudSession.proc, cmd + "\n");
+    ed.echoMessage = cmd;
+    return 0;
+}

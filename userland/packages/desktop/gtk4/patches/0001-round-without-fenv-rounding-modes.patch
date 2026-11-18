@@ -1,0 +1,57 @@
+Round CSS values without the fenv.h rounding modes when they are absent.
+
+The CSS round() function sets the floating-point rounding mode with
+fesetround() and rounds with nearbyint().  zedBSD's C library implements
+only round-to-nearest and does not define FE_UPWARD, FE_DOWNWARD or
+FE_TOWARDZERO.  Without them the four modes are computed with ceil(),
+floor(), trunc() and nearbyint(), which give the same results.  Systems
+with the macros are unchanged.  (A libc that adds the modes makes this
+patch unnecessary.)
+
+--- a/gtk/gtkcssnumbervalue.c
++++ b/gtk/gtkcssnumbervalue.c
+@@ -1849,8 +1849,10 @@
+ static double
+ _round (guint mode, double a, double b)
+ {
++#if defined(FE_UPWARD) && defined(FE_DOWNWARD) && defined(FE_TOWARDZERO)
+   int old_mode;
+   int modes[] = { FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO };
++#endif
+   double result;
+ 
+   if (b == 0)
+@@ -1880,12 +1882,33 @@
+         }
+     }
+ 
++#if defined(FE_UPWARD) && defined(FE_DOWNWARD) && defined(FE_TOWARDZERO)
+   old_mode = fegetround ();
+   fesetround (modes[mode]);
+ 
+   result = nearbyint (a/b) * b;
+ 
+   fesetround (old_mode);
++#else
++  /* A C library with only round-to-nearest (zedBSD): the same results
++   * from the functions that round one way each. */
++  switch (mode)
++    {
++    case ROUND_UP:
++      result = ceil (a/b) * b;
++      break;
++    case ROUND_DOWN:
++      result = floor (a/b) * b;
++      break;
++    case ROUND_TO_ZERO:
++      result = trunc (a/b) * b;
++      break;
++    case ROUND_NEAREST:
++    default:
++      result = nearbyint (a/b) * b;
++      break;
++    }
++#endif
+ 
+   return result;
+ }

@@ -1,0 +1,49 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("abcdefghij");
+    var m = Editor.makeMarker();
+    oracleEmit(Editor.markerPosition(m));
+    Editor.setMarker(m, 5);
+    oracleEmit(Editor.markerPosition(m));
+
+    // Insertion before the marker shifts it.
+    Editor.gotoChar(2);
+    Editor.insert("XY");
+    oracleEmit(Editor.markerPosition(m));
+
+    // Insertion exactly at the marker leaves it in place.
+    Editor.gotoChar(Editor.markerPosition(m));
+    Editor.insert("ZZ");
+    oracleEmit(Editor.markerPosition(m));
+
+    // Insertion after the marker does nothing.
+    Editor.gotoChar(Editor.markerPosition(m) + 3);
+    Editor.insert("Q");
+    oracleEmit(Editor.markerPosition(m));
+
+    // Deletion before the marker shifts it left.
+    Editor.deleteRegion(1, 3);
+    oracleEmit(Editor.markerPosition(m));
+
+    // Deletion spanning the marker collapses it to the region start.
+    var p = Editor.markerPosition(m);
+    Editor.deleteRegion(p - 1, p + 2);
+    oracleEmit(Editor.markerPosition(m));
+
+    // copy-marker and point-marker.
+    var c = Editor.copyMarker(m);
+    oracleEmit(Editor.markerPosition(c));
+    Editor.gotoChar(3);
+    var pm = Editor.pointMarker();
+    oracleEmit(Editor.markerPosition(pm));
+    Editor.insert("!");
+    oracleEmit(Editor.markerPosition(pm));
+    oracleEmit(Editor.bufferString());
+
+    // Clamping.
+    Editor.setMarker(m, 999);
+    oracleEmit(Editor.markerPosition(m));
+    Editor.setMarker(m, -5);
+    oracleEmit(Editor.markerPosition(m));
+}

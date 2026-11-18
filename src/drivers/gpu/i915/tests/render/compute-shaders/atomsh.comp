@@ -1,0 +1,57 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ATOMIC-SHARED: shared-memory atomics of a group of 64 -- a
+ * histogram, a sum, a maximum, a compare-exchange whoever wins, and a
+ * counter whose old values each invocation keeps -- between barriers;
+ * then the group's results go to memory.
+ */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer V { uint v[]; };
+layout(std430, set = 0, binding = 1) buffer R { uint results[]; };
+layout(std430, set = 0, binding = 2) buffer O { uint old[]; };
+
+shared uint bins[16];
+shared uint total;
+shared uint largest;
+shared uint first;
+shared uint counter;
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+    uint g = gl_WorkGroupID.x;
+    uint x = v[gl_GlobalInvocationID.x];
+
+    if (l < 16u)
+        bins[l] = 0u;
+    if (l == 0u) {
+        total = 0u;
+        largest = 0u;
+        first = 0u;
+        counter = 0u;
+    }
+    barrier();
+    atomicAdd(bins[x % 16u], 1u);
+    atomicAdd(total, x);
+    atomicMax(largest, x);
+    atomicCompSwap(first, 0u, l + 1u);
+    old[gl_GlobalInvocationID.x] = atomicAdd(counter, 1u);
+    barrier();
+    if (l < 16u)
+        results[g * 20u + l] = bins[l];
+    if (l == 0u) {
+        results[g * 20u + 16u] = total;
+        results[g * 20u + 17u] = largest;
+        results[g * 20u + 18u] = first;
+        results[g * 20u + 19u] = counter;
+    }
+}

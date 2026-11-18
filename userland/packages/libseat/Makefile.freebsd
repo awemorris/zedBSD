@@ -1,0 +1,40 @@
+# Native seatd-only MIT client, built outside the maintained source tree.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+KEILAND_FREEBSD_LIBSEAT_ARCHIVE := build/distfiles/seatd-0.9.3.tar.gz
+KEILAND_FREEBSD_LIBSEAT_SHA256 := 302564d54d8e28191fadfd734f2675ecb0c9e0615a58011b89ef15dfa4dbaa96
+KEILAND_FREEBSD_LIBSEAT_ROOT := $(KEILAND_FREEBSD_BUILD)/external/libseat
+KEILAND_FREEBSD_LIBSEAT_OPTIONS := --prefix=$(KEILAND_PREFIX) --libdir=lib \
+	-Dlibseat-logind=disabled -Dlibseat-seatd=enabled -Dlibseat-builtin=disabled \
+	-Dserver=disabled -Dexamples=disabled -Dman-pages=disabled \
+	-Ddefaultpath=/var/run/seatd.sock -Ddefault_library=shared -Dwerror=true
+
+$(KEILAND_FREEBSD_LIBSEAT_ARCHIVE):
+	@mkdir -p $(dir $@)
+	fetch -o $@.tmp https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.3.tar.gz
+	test "$$(sha256 -q $@.tmp)" = "$(KEILAND_FREEBSD_LIBSEAT_SHA256)"
+	mv $@.tmp $@
+
+# Grouped outputs give consumers the same verified library, public header and original notice.
+$(KEILAND_FREEBSD_BUILD)/lib/libseat.so.1 $(KEILAND_FREEBSD_BUILD)/include/libseat.h $(KEILAND_FREEBSD_BUILD)/share/licenses/libseat/LICENSE &: $(KEILAND_FREEBSD_LIBSEAT_ARCHIVE) userland/packages/libseat/Makefile.freebsd
+	test "$$(sha256 -q $<)" = "$(KEILAND_FREEBSD_LIBSEAT_SHA256)"
+	@mkdir -p $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src
+	tar -xf $< -C $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src
+	@if test -f $(KEILAND_FREEBSD_LIBSEAT_ROOT)/build/meson-private/coredata.dat; then \
+		CC="$(CC)" meson setup --reconfigure $(KEILAND_FREEBSD_LIBSEAT_ROOT)/build $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src/seatd-0.9.3 $(KEILAND_FREEBSD_LIBSEAT_OPTIONS); \
+	else \
+		CC="$(CC)" meson setup $(KEILAND_FREEBSD_LIBSEAT_ROOT)/build $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src/seatd-0.9.3 $(KEILAND_FREEBSD_LIBSEAT_OPTIONS); \
+	fi
+	meson compile -C $(KEILAND_FREEBSD_LIBSEAT_ROOT)/build seat
+	@mkdir -p $(KEILAND_FREEBSD_BUILD)/lib $(KEILAND_FREEBSD_BUILD)/include $(KEILAND_FREEBSD_BUILD)/share/licenses/libseat
+	install -m 0755 $(KEILAND_FREEBSD_LIBSEAT_ROOT)/build/libseat.so.1 $(KEILAND_FREEBSD_BUILD)/lib/libseat.so.1
+	install -m 0644 $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src/seatd-0.9.3/include/libseat.h $(KEILAND_FREEBSD_BUILD)/include/libseat.h
+	install -m 0644 $(KEILAND_FREEBSD_LIBSEAT_ROOT)/src/seatd-0.9.3/LICENSE $(KEILAND_FREEBSD_BUILD)/share/licenses/libseat/LICENSE
+
+KEILAND_FREEBSD_ALL += $(KEILAND_FREEBSD_BUILD)/lib/libseat.so.1 $(KEILAND_FREEBSD_BUILD)/share/licenses/libseat/LICENSE
+KEILAND_FREEBSD_INSTALL += lib/libseat.so.1 share/licenses/libseat/LICENSE
+
+.PHONY: install-libseat-header
+install-headers: install-libseat-header
+install-libseat-header: $(KEILAND_FREEBSD_BUILD)/include/libseat.h
+	@mkdir -p "$(DESTDIR)$(KEILAND_PREFIX)/include"
+	install -m 0644 $< "$(DESTDIR)$(KEILAND_PREFIX)/include/libseat.h"

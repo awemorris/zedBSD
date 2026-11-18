@@ -1,0 +1,19 @@
+#version 450
+// Stage 1: conversions between fp32 and 32-bit integers, and bit casts (six words per invocation).
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer A { uint a[]; };
+layout(std430, set = 0, binding = 1) readonly buffer F { float f[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Out { uint o[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint x = a[i];
+	float y = f[i];
+	o[i * 6u + 0u] = floatBitsToUint(float(int(x)));
+	o[i * 6u + 1u] = floatBitsToUint(float(x >> 8));
+	o[i * 6u + 2u] = uint(int(y));
+	o[i * 6u + 3u] = uint(abs(y));
+	o[i * 6u + 4u] = floatBitsToUint(y);
+	o[i * 6u + 5u] = floatBitsToUint(uintBitsToFloat((x & 0x00ffffffu) | 0x3f000000u) * 2.0);
+}

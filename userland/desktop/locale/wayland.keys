@@ -1,0 +1,22 @@
+# The compositor's texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source).
+# App Home's own entries (home.c home_add_app), drawn with kl_tr(app->name).
+msg	Lock Screen
+msg	Log Out
+# The network's details (network-info.c, a module the host tests build without libkeiland): the labels and the
+# words of the values, drawn with kl_tr in network.c.
+msg	Network
+msg	Wi-Fi
+msg	Ethernet
+msg	Interface
+msg	Status
+msg	Connected
+msg	Not connected
+msg	Network service not running
+msg	IPv4 address
+msg	Subnet mask
+msg	DNS
+msg	MAC address
+msg	MTU
+msg	Signal
+msg	Received
+msg	Sent

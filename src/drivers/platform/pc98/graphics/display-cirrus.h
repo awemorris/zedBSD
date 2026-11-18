@@ -1,0 +1,51 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD graphics NEC PC-9821 Core-Graph / Cirrus GD5440 display backend.
+ */
+
+#ifndef KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_CIRRUS_H
+#define KERN_DRIVERS_GRAPHICS_PC98_DISPLAY_CIRRUS_H
+
+#include "drivers/platform/pc98/graphics/display.h"
+#include "drivers/platform/pc98/graphics/display-gdc.h"
+
+#define PC98_DISPLAY_CIRRUS_WIDTH 640U
+#define PC98_DISPLAY_CIRRUS_HEIGHT 480U
+#define PC98_DISPLAY_CIRRUS_STRIDE_8 PC98_DISPLAY_CIRRUS_WIDTH
+/* NEC's path-8 stream fixes the 24-bit pitch at 2048 bytes (CR13/CR1B). */
+#define PC98_DISPLAY_CIRRUS_STRIDE_24 2048U
+#define PC98_DISPLAY_CIRRUS_VISIBLE_BYTES                                      \
+	(PC98_DISPLAY_CIRRUS_STRIDE_24 * PC98_DISPLAY_CIRRUS_HEIGHT)
+
+struct pc98_cirrus {
+	void *io_context;
+	uint8_t (*port_in8)(void *context, uint16_t port);
+	void (*port_out8)(void *context, uint16_t port, uint8_t value);
+	volatile uint8_t *framebuffer;
+	uint8_t saved_sleep;
+	uint8_t saved_window;
+	uint8_t saved_linear;
+	uint8_t saved_relay;
+	uint8_t bits_per_pixel;
+	uint8_t active;
+};
+
+/*
+ * framebuffer is the host's view of the board's linear aperture.  A
+ * target that maps physical memory one-to-one passes the aperture
+ * address itself; a hosted target passes whatever its memory manager
+ * returned for that physical range.
+ */
+void drv_pc98_cirrus_default(struct pc98_cirrus *backend, pc98_in8_fn port_in8,
+			     pc98_out8_fn port_out8, void *io_context,
+			     volatile uint8_t *framebuffer);
+int drv_pc98_cirrus_make_hal(struct pc98_display_backend *hal,
+			     struct pc98_cirrus *backend);
+
+#endif

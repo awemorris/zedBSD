@@ -1,0 +1,1955 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements Wayland WSI using private event queues and shared GPU image fds.
+ */
+
+#include "wsi-internal.h"
+
+#include <wayland-client.h>
+#include "userland/desktop/libwayland/keiland-gpu-buffer-v1-client-protocol.h"
+#include "userland/desktop/libwayland/keiland-game-v1-client-protocol.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+/*
+ * How long a FIFO present waits for the frame before it to be shown, in
+ * nanoseconds.  A compositor may hold a surface's frame callbacks for as
+ * long as it draws nothing (a sleep being entered, an output gone, a turn
+ * of the output); the frame then goes in unpaced, which replaces the image
+ * still queued and so frees it.  Only a broken connection loses the
+ * surface.  The wait stays well inside an application's acquire timeout,
+ * which waits for that image.
+ */
+#define WAYLAND_PACE_NS 1000000000ULL
+
+/* The initial native shared-image backend accepts these finite scanout extents. */
+#define WAYLAND_IMAGE_MIN_EXTENT 16U
+#define WAYLAND_IMAGE_MAX_EXTENT 4096U
+
+struct wayland_lease;
+
+/* Borrows the application's connection/surface, owning only wrappers and a queue. */
+struct wayland_surface {
+	struct vulkan_surface *surface;
+	struct wl_display *display;
+	struct wl_display *display_wrapper;
+	struct wl_surface *native;
+	struct wl_event_queue *queue;
+	struct wl_registry *registry;
+	struct kl_gpu_buffer_v1 *factory;
+	struct wayland_lease *active;
+	pthread_mutex_t mutex;
+	VkBool32 mutex_ready;
+	VkBool32 lost;
+	uint32_t factory_name;
+	uint32_t factory_version;
+
+	/* Written when a frame callback arrives, whichever thread ran it: a FIFO wait sleeps on it beside the connection. */
+	int progress_pipe[2];
+
+	/*
+	 * The compositor's game global (kl_game_v1) and the surface's game
+	 * object, NULL without them, with the global's name.  The compositor
+	 * lends a fullscreen surface the images its display shows (its game
+	 * mode); a chain that fits draws straight into them.
+	 */
+	struct kl_game_v1 *game_factory;
+	uint32_t game_name;
+	struct kl_game_surface_v1 *game;
+
+	/*
+	 * The images of the lend being sent (pending_serial, zero for none):
+	 * each one's fd, -1 until it came.  The lend event makes them the lend
+	 * offered.
+	 */
+	uint32_t pending_serial;
+	int pending_fds[VULKAN_WSI_LEND_MAX];
+
+	/*
+	 * The lend offered now (lend_serial, zero for none): its images' count,
+	 * size, format (a VkFormat), uses, layout, and each one's fd, which a
+	 * chain that fits imports.  declined is the last
+	 * lend this surface refused, which is not offered to a chain again.
+	 * The surface mutex guards all of them, as the listeners that write
+	 * them run under it.
+	 */
+	uint32_t lend_serial;
+	uint32_t lend_count;
+	uint32_t lend_width;
+	uint32_t lend_height;
+	uint32_t lend_format;
+	uint32_t lend_usage;
+	uint32_t lend_layout;
+	int lend_fds[VULKAN_WSI_LEND_MAX];
+	uint32_t declined;
+};
+
+/* A wl_buffer retains a capability on the server until its own protocol retirement. */
+struct wayland_image {
+	struct wayland_image *next;
+	struct wayland_lease *lease;
+	struct wl_buffer *buffer;
+	struct gpu_image_descriptor descriptor;
+	VkBool32 busy;
+};
+
+/* One frame callback denotes presentation progress, never GPU memory release. */
+struct wayland_frame {
+	struct wayland_frame *next;
+	struct wayland_lease *lease;
+	struct wl_callback *callback;
+	uint64_t sequence;
+};
+
+/* Owns one swapchain's imported protocol objects through replacement and teardown. */
+struct wayland_lease {
+	struct wayland_surface *surface;
+	struct wayland_image *images;
+	struct wayland_frame *frames;
+	uint64_t submitted;
+	_Alignas(8) uint64_t completed;
+	/* Whether the swapchain's images carry premultiplied alpha the compositor blends by. */
+	VkBool32 premultiplied;
+
+	/* The part of the next commit's image that changed (x, y, width, height), when one was named (BUG-221). */
+	VkBool32 damaged;
+	int32_t damage[4];
+};
+
+/* Callback names must be declared before the immutable listener and operation initializers below. */
+static VkBool32 wayland_display_supported(struct wl_display *display);
+static VkResult wayland_capabilities(struct vulkan_surface *surface, struct VkPhysicalDevice_T *physical, VkSurfaceCapabilitiesKHR *capabilities);
+static VkResult wayland_formats(struct vulkan_surface *surface, struct VkPhysicalDevice_T *physical, uint32_t *count, VkSurfaceFormatKHR *formats);
+static VkResult wayland_modes(struct vulkan_surface *surface, struct VkPhysicalDevice_T *physical, uint32_t *count, VkPresentModeKHR *modes);
+static VkResult wayland_claim(struct vulkan_surface *surface, struct VkDevice_T *device, void **result);
+static VkResult wayland_release(void *private_lease);
+static VkResult wayland_wait(void *private_lease, uint64_t sequence, uint64_t timeout);
+static void wayland_destroy(struct vulkan_surface *surface);
+static VkResult wayland_import(void *private_lease, int fd, const struct gpu_image_descriptor *descriptor, void **result);
+static VkResult wayland_present(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence);
+static VkResult wayland_present_sync(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence, int wait_fd, uint64_t wait_generation);
+static VkResult wayland_commit(void *private_lease, void *private_image, VkPresentModeKHR mode, uint64_t *sequence, int wait_fd, uint64_t wait_generation);
+static VkBool32 wayland_commit_early(void *private_lease);
+static VkResult wayland_composite_alpha(void *private_lease, VkCompositeAlphaFlagBitsKHR alpha);
+static VkResult wayland_progress(void *private_lease);
+static void wayland_damage(void *private_lease, int32_t x, int32_t y, int32_t width, int32_t height);
+static VkBool32 wayland_available(void *private_image);
+static void wayland_destroy_image(void *private_image);
+static VkResult wayland_dispatch(struct wayland_surface *surface);
+static VkResult wayland_sleep(struct wayland_surface *surface, int milliseconds);
+static VkResult wayland_surface_initialize(struct vulkan_surface *surface, const VkWaylandSurfaceCreateInfoKHR *info);
+static void wayland_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
+static void wayland_global_remove(void *data, struct wl_registry *registry, uint32_t name);
+static void wayland_buffer_release(void *data, struct wl_buffer *buffer);
+static void wayland_frame_done(void *data, struct wl_callback *callback, uint32_t milliseconds);
+static int wayland_wait_input(void *private_lease);
+static VkResult wayland_lend(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint32_t capacity, uint32_t *count, int *fds, uint64_t *serial);
+static VkResult wayland_lend_import(void *private_lease, int fd, const struct gpu_image_descriptor *descriptor, uint64_t serial, uint32_t index, void **result);
+static VkBool32 wayland_lend_changed(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint64_t serial);
+static void wayland_lend_refuse(void *private_lease, uint64_t serial);
+static void wayland_game_image(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd);
+static void wayland_game_lend(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t count, uint32_t width, uint32_t height, uint32_t format, uint32_t usage, uint32_t layout);
+static void wayland_game_withdraw(void *data, struct kl_game_surface_v1 *object, uint32_t serial);
+static VkResult wayland_image_make(struct wayland_lease *lease, int fd, const struct gpu_image_descriptor *descriptor, VkBool32 busy, struct wayland_image **result);
+static VkBool32 wayland_lend_fits(const struct wayland_surface *surface, const struct vulkan_wsi_lend_fit *fit);
+static void wayland_lend_decline(struct wayland_surface *surface);
+static void wayland_lend_forget(int *fds, uint32_t count);
+
+/* This immutable process-lifetime table selects shared-image operations for Wayland surfaces. */
+static const struct vulkan_wsi_platform_ops wayland_platform = {
+	wayland_capabilities, wayland_formats, wayland_modes,
+	wayland_claim, wayland_release, NULL, wayland_wait, wayland_destroy,
+	wayland_import, wayland_present, wayland_progress, wayland_available, wayland_destroy_image, NULL, wayland_present_sync, NULL, NULL,
+	wayland_commit_early, wayland_composite_alpha, wayland_damage, NULL,
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+	wayland_wait_input,
+	wayland_lend, wayland_lend_import, wayland_lend_changed, wayland_lend_refuse,
+	NULL
+};
+
+/* Registry discovery and buffer ownership are delivered only on the WSI queue. */
+static const struct wl_registry_listener wayland_registry_listener = {
+	wayland_global, wayland_global_remove
+};
+
+/* Buffer release publishes allocation availability only to WSI-owned image state. */
+static const struct wl_buffer_listener wayland_buffer_listener = {
+	wayland_buffer_release
+};
+
+/* Frame completion advances the owning lease's pacing sequence on the private queue. */
+static const struct wl_callback_listener wayland_frame_listener = {
+	wayland_frame_done
+};
+
+/* The compositor's lends of images reach only WSI-owned surface state, on the private queue. */
+static const struct kl_game_surface_v1_listener wayland_game_listener = {
+	wayland_game_image, wayland_game_lend, wayland_game_withdraw
+};
+
+/*
+ * Creates a standard surface while preserving the application's native queues.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkCreateWaylandSurfaceKHR(
+	VkInstance instance_handle,
+	const VkWaylandSurfaceCreateInfoKHR *info,
+	const VkAllocationCallbacks *allocator,
+	VkSurfaceKHR *result)
+{
+	struct VkInstance_T *instance;
+	struct vulkan_object *object;
+	struct vulkan_surface *surface;
+	VkResult error;
+
+	/* No partially constructed surface handle escapes on an early failure. */
+	if (result == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Resolves the enabled instance before borrowing any native object. */
+	*result = VK_NULL_HANDLE;
+	instance = vulkan_instance(instance_handle);
+	if (instance == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The creation record must exist before its native object references are read. */
+	if (info == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The application retains both native objects throughout this Vulkan surface. */
+	if (info->display == NULL || info->surface == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Only the selected standard Wayland creation record has defined semantics. */
+	if (info->sType != VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR || info->flags != 0U)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Instance creation must have enabled this platform's public extension. */
+	if ((instance->enabled_extensions & VULKAN_INSTANCE_WAYLAND) == 0U)
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	/* Allocation callbacks own the standard object and its platform-private storage. */
+	error = vulkan_object_alloc(
+		sizeof(*surface),
+		__alignof__(struct vulkan_surface),
+		VULKAN_OBJECT_SURFACE,
+		&instance->object,
+		NULL,
+		allocator,
+		VK_SYSTEM_ALLOCATION_SCOPE_OBJECT,
+		&object);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Establishes generic ownership before platform initialization can fail. */
+	surface = (struct vulkan_surface *)object;
+	surface->instance = instance;
+	surface->platform = &wayland_platform;
+
+	/* Failed native setup leaves all partial owners reachable by platform teardown. */
+	error = wayland_surface_initialize(surface, info);
+	if (error != VK_SUCCESS) {
+		wayland_destroy(surface);
+		vulkan_object_free(object);
+		return error;
+	}
+
+	/* Publishes only a fully initialized object in the common lifetime registry. */
+	error = vulkan_object_publish(object);
+	if (error != VK_SUCCESS) {
+		wayland_destroy(surface);
+		vulkan_object_free(object);
+		return error;
+	}
+
+	/* Instance teardown sees both Wayland and direct-display surface owners. */
+	error = vulkan_wsi_surface_publish(surface, result);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the application owns a registered Vulkan Wayland surface. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Queries the renderer's ability to supply native Wayland presentation images.
+ */
+VKAPI_ATTR VkBool32 VKAPI_CALL
+vkGetPhysicalDeviceWaylandPresentationSupportKHR(
+	VkPhysicalDevice physical_handle,
+	uint32_t family,
+	struct wl_display *display)
+{
+	struct VkPhysicalDevice_T *physical;
+	VkQueueFlags flags;
+	VkBool32 supported;
+	int error;
+
+	/* Resolves the physical device before inspecting its queue families. */
+	physical = vulkan_physical_device(physical_handle);
+	if (physical == NULL)
+		return VK_FALSE;
+
+	/* A real native connection and existing queue family are both required. */
+	if (display == NULL || family >= physical->queue_family_count)
+		return VK_FALSE;
+
+	/* A disconnected display cannot receive new image capabilities. */
+	error = wl_display_get_error(display);
+	if (error != 0)
+		return VK_FALSE;
+
+	/* The GPU must expose the shared-allocation contract used by this backend. */
+	if ((physical->object.context->capabilities & GPU_CAP_SHARE) == 0U)
+		return VK_FALSE;
+
+	/* Presentation requires a queue capable of recording image transfers. */
+	flags = physical->queue_families[family].queueFlags;
+	if ((flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT)) == 0U)
+		return VK_FALSE;
+
+	/* Discovers the image factory without dispatching application event queues. */
+	supported = wayland_display_supported(display);
+	if (supported == VK_FALSE)
+		return VK_FALSE;
+
+	/* Succeeded: this connection advertises the initial shared-image transport. */
+	return VK_TRUE;
+}
+
+/* Reports application-selected Wayland extents and the minimal opaque presentation contract. */
+static VkResult
+wayland_capabilities(
+	struct vulkan_surface *surface,
+	struct VkPhysicalDevice_T *physical,
+	VkSurfaceCapabilitiesKHR *capabilities)
+{
+	struct wayland_surface *native;
+	uint32_t maximum;
+	VkBool32 lost;
+	int error;
+
+	/* A fatal connection error invalidates every associated swapchain. */
+	native = surface->platform_private;
+	error = wl_display_get_error(native->display);
+	if (error != 0)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* A removed factory or expired watchdog remains terminal across later queries. */
+	lost = __atomic_load_n(&native->lost, __ATOMIC_ACQUIRE);
+	if (lost != VK_FALSE)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Only GPUs with the native allocation-sharing contract support this backend. */
+	if ((physical->object.context->capabilities & GPU_CAP_SHARE) == 0U)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* Intersects renderer image limits with the native export and scanout contract. */
+	maximum = physical->properties.limits.maxImageDimension2D;
+	if (maximum > WAYLAND_IMAGE_MAX_EXTENT)
+		maximum = WAYLAND_IMAGE_MAX_EXTENT;
+
+	/* An empty intersection cannot advertise a usable surface extent. */
+	if (maximum < WAYLAND_IMAGE_MIN_EXTENT)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* Reports only dimensions accepted by both the renderer and native backend. */
+	memset(capabilities, 0, sizeof(*capabilities));
+	capabilities->minImageCount = 3U;
+	capabilities->currentExtent.width = UINT32_MAX;
+	capabilities->currentExtent.height = UINT32_MAX;
+	capabilities->minImageExtent.width = WAYLAND_IMAGE_MIN_EXTENT;
+	capabilities->minImageExtent.height = WAYLAND_IMAGE_MIN_EXTENT;
+	capabilities->maxImageExtent.width = maximum;
+	capabilities->maxImageExtent.height = maximum;
+	capabilities->maxImageArrayLayers = 1U;
+	capabilities->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	capabilities->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	capabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	capabilities->supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+	    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+	    VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	/* A compositor that reads a buffer's alpha (kl_gpu_buffer_v1 revision three) also takes see-through images. */
+	if (native->factory_version >= 3U)
+		capabilities->supportedCompositeAlpha |= VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+
+	/* Succeeded: the caller can choose an extent inside the supported intersection. */
+	return VK_SUCCESS;
+}
+
+/* Enumerates the packed formats whose actual linear row layouts travel with the fd. */
+static VkResult
+wayland_formats(
+	struct vulkan_surface *surface,
+	struct VkPhysicalDevice_T *physical,
+	uint32_t *count,
+	VkSurfaceFormatKHR *formats)
+{
+	uint32_t capacity;
+
+	(void)surface;
+	(void)physical;
+
+	/* The caller must provide a count even when requesting only discovery. */
+	if (count == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* A discovery-only call reports both initial packed channel orders. */
+	if (formats == NULL) {
+		*count = 2U;
+		return VK_SUCCESS;
+	}
+
+	/* Copies the first format only when its output slot belongs to the caller. */
+	capacity = *count;
+	*count = 0U;
+	if (capacity > 0U) {
+		formats[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+		formats[0].colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		*count = 1U;
+	}
+
+	/* The second slot describes the alternate packed channel order. */
+	if (capacity > 1U) {
+		formats[1].format = VK_FORMAT_B8G8R8A8_UNORM;
+		formats[1].colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		*count = 2U;
+	}
+
+	/* A short output array contains a valid prefix of the native formats. */
+	if (capacity < 2U)
+		return VK_INCOMPLETE;
+
+	/* Succeeded: every initial Wayland surface format was copied. */
+	return VK_SUCCESS;
+}
+
+/* FIFO waits for frame progress; MAILBOX permits replacement of pending commits. */
+static VkResult
+wayland_modes(
+	struct vulkan_surface *surface,
+	struct VkPhysicalDevice_T *physical,
+	uint32_t *count,
+	VkPresentModeKHR *modes)
+{
+	uint32_t capacity;
+
+	(void)surface;
+	(void)physical;
+
+	/* The caller must provide a count even when requesting only discovery. */
+	if (count == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Both modes retain allocation ownership until wl_buffer.release. */
+	if (modes == NULL) {
+		*count = 2U;
+		return VK_SUCCESS;
+	}
+
+	/* Copies the FIFO mode only when its output slot belongs to the caller. */
+	capacity = *count;
+	*count = 0U;
+	if (capacity > 0U) {
+		modes[0] = VK_PRESENT_MODE_FIFO_KHR;
+		*count = 1U;
+	}
+
+	/* The second slot exposes replacement without waiting for an earlier frame. */
+	if (capacity > 1U) {
+		modes[1] = VK_PRESENT_MODE_MAILBOX_KHR;
+		*count = 2U;
+	}
+
+	/* A short output array contains a valid prefix of the native modes. */
+	if (capacity < 2U)
+		return VK_INCOMPLETE;
+
+	/* Succeeded: both supported Wayland presentation modes were copied. */
+	return VK_SUCCESS;
+}
+
+/* Creates independent swapchain bookkeeping without changing application surface state. */
+static VkResult
+wayland_claim(
+	struct vulkan_surface *surface,
+	struct VkDevice_T *device,
+	void **result)
+{
+	struct wayland_lease *lease;
+
+	(void)device;
+
+	/* No partial lease escapes if its allocation callback refuses ownership. */
+	*result = NULL;
+	lease = vulkan_allocate(&surface->object.allocator, sizeof(*lease), sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (lease == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Borrows native surface state without changing application mapping or roles. */
+	memset(lease, 0, sizeof(*lease));
+	lease->surface = surface->platform_private;
+	*result = lease;
+
+	/* Succeeded: this swapchain owns independent native bookkeeping. */
+	return VK_SUCCESS;
+}
+
+/* Retires this swapchain's protocol owners while leaving replacement chains intact. */
+static VkResult
+wayland_release(
+	void *private_lease)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+	struct wayland_frame *frame;
+	struct wayland_image *image;
+	int error;
+	int socket_error;
+
+	/* Preserves application mapping and configure state while retiring this lease. */
+	lease = private_lease;
+	surface = lease->surface;
+	pthread_mutex_lock(&surface->mutex);
+
+	/* The compositor holds its front allocation until replacement or surface destruction. */
+	if (surface->active == lease)
+		surface->active = NULL;
+
+	/* Suppresses queued frame callbacks before freeing their listener data. */
+	while (lease->frames != NULL) {
+		frame = lease->frames;
+		lease->frames = frame->next;
+		wl_callback_destroy(frame->callback);
+		vulkan_free(&surface->surface->object.allocator, frame);
+	}
+
+	/* Retires buffer protocol owners without unmapping the application's surface. */
+	while (lease->images != NULL) {
+		image = lease->images;
+		lease->images = image->next;
+		wl_buffer_destroy(image->buffer);
+		vulkan_free(&surface->surface->object.allocator, image);
+	}
+
+	/* Saves transport failure before any allocator callback can change errno. */
+	error = wl_display_flush(surface->display);
+	socket_error = errno;
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* Local lease ownership ends even when the peer can no longer receive its destructors. */
+	vulkan_free(&surface->surface->object.allocator, lease);
+	if (error < 0 && socket_error != EAGAIN)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Succeeded: protocol destructors were sent or retained by normal output backpressure. */
+	return VK_SUCCESS;
+}
+
+/* Waits for WSI frame progress while dispatching no application-owned queue. */
+static VkResult
+wayland_wait(
+	void *private_lease,
+	uint64_t sequence,
+	uint64_t timeout)
+{
+	struct wayland_lease *lease;
+	struct timespec started;
+	struct timespec now;
+	uint64_t elapsed;
+	uint64_t completed;
+	uint64_t left_ms;
+	VkResult error;
+	int remaining;
+	int status;
+
+	/* A monotonic deadline distinguishes compositor stalling from GPU completion. */
+	lease = private_lease;
+	status = clock_gettime(CLOCK_MONOTONIC, &started);
+	if (status != 0)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Polls private progress without busy waiting or dispatching application callbacks. */
+	for (;;) {
+		/* Receives releases and pacing updates owned by this surface's queue. */
+		error = wayland_progress(lease);
+		if (error != VK_SUCCESS)
+			return error;
+
+		/* Pacing completes only when this sequence's frame callback has arrived. */
+		completed = __atomic_load_n(&lease->completed, __ATOMIC_ACQUIRE);
+		if (completed >= sequence)
+			break;
+
+		/* Samples elapsed time only while the requested frame remains pending. */
+		status = clock_gettime(CLOCK_MONOTONIC, &now);
+		if (status != 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+
+		/* A finite deadline can expire without authorizing allocation reuse. */
+		elapsed = (uint64_t)(now.tv_sec - started.tv_sec) * 1000000000ULL;
+		elapsed += now.tv_nsec - started.tv_nsec;
+		if (timeout != UINT64_MAX && elapsed >= timeout)
+			return VK_TIMEOUT;
+
+		/*
+		 * Sleeps until the compositor writes to the connection or another
+		 * thread runs the frame callback (the progress pipe), at most until the
+		 * deadline: the frame callback always wakes the sleep, so nothing
+		 * else needs looking at meanwhile.  The deadline is taken a
+		 * millisecond late so that the sleep never ends before it.
+		 */
+		remaining = -1;
+		if (timeout != UINT64_MAX) {
+			left_ms = (timeout - elapsed) / 1000000ULL + 1ULL;
+			remaining = INT_MAX;
+			if (left_ms < (uint64_t)INT_MAX)
+				remaining = (int)left_ms;
+		}
+		error = wayland_sleep(lease->surface, remaining);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* Succeeded: the selected frame sequence completed on the private queue. */
+	return VK_SUCCESS;
+}
+
+/* Releases only WSI-owned wrappers, globals and event queue. */
+static void
+wayland_destroy(
+	struct vulkan_surface *generic)
+{
+	struct wayland_surface *surface;
+
+	/* An allocation failure before platform setup has no native owners to retire. */
+	surface = generic->platform_private;
+	if (surface == NULL)
+		return;
+
+	/* Ends the game object and global, and lets go of the lent images' fds. */
+	if (surface->game != NULL)
+		kl_game_surface_v1_destroy(surface->game);
+	if (surface->game_factory != NULL)
+		kl_game_v1_destroy(surface->game_factory);
+	wayland_lend_forget(surface->pending_fds, VULKAN_WSI_LEND_MAX);
+	wayland_lend_forget(surface->lend_fds, VULKAN_WSI_LEND_MAX);
+
+	/* Ends the image factory before retiring its registry and queue. */
+	if (surface->factory != NULL)
+		kl_gpu_buffer_v1_destroy(surface->factory);
+
+	/* Suppresses registry events before their surface listener data is freed. */
+	if (surface->registry != NULL)
+		wl_registry_destroy(surface->registry);
+
+	/* Drops only the WSI wrapper around the application's surface. */
+	if (surface->native != NULL)
+		wl_proxy_wrapper_destroy(surface->native);
+
+	/* The display wrapper owns a queue override, never the actual connection. */
+	if (surface->display_wrapper != NULL)
+		wl_proxy_wrapper_destroy(surface->display_wrapper);
+
+	/* All proxies assigned to this queue have now been retired. */
+	if (surface->queue != NULL)
+		wl_event_queue_destroy(surface->queue);
+
+	/* The progress pipe, when it was made. */
+	if (surface->progress_pipe[0] >= 0)
+		close(surface->progress_pipe[0]);
+	if (surface->progress_pipe[1] >= 0)
+		close(surface->progress_pipe[1]);
+
+	/* Failed mutex initialization must not be followed by mutex destruction. */
+	if (surface->mutex_ready != VK_FALSE)
+		pthread_mutex_destroy(&surface->mutex);
+
+	/* Clears the generic owner only after its platform storage is released. */
+	vulkan_free(&generic->object.allocator, surface);
+	generic->platform_private = NULL;
+
+	/* Succeeded: the application still owns its original connection and surface. */
+	return;
+}
+
+/* Sends a retained fd and immutable metadata without exposing GPU handles to the app. */
+static VkResult
+wayland_import(
+	void *private_lease,
+	int fd,
+	const struct gpu_image_descriptor *descriptor,
+	void **result)
+{
+	struct wayland_image *image;
+	VkResult error;
+
+	/* The buffer, available to the chain at once. */
+	*result = NULL;
+	error = wayland_image_make(private_lease, fd, descriptor, VK_FALSE, &image);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the native image is owned by this lease and initially available. */
+	*result = image;
+	return VK_SUCCESS;
+}
+
+/*
+ * Makes a lease's buffer of an image fd (which stays the caller's) and its
+ * description: available to the chain at once, or busy until the
+ * compositor releases it.
+ */
+static VkResult
+wayland_image_make(
+	struct wayland_lease *lease,
+	int fd,
+	const struct gpu_image_descriptor *descriptor,
+	VkBool32 busy,
+	struct wayland_image **result)
+{
+	struct wayland_surface *surface;
+	struct wayland_image *image;
+	struct wl_array metadata;
+	int status;
+
+	/* No partial image owner escapes if allocation fails before fd marshalling. */
+	*result = NULL;
+	surface = lease->surface;
+	image = vulkan_allocate(&surface->surface->object.allocator, sizeof(*image), sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (image == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* The lease retains immutable metadata for the lifetime of its native image; a lent one waits for its release. */
+	memset(image, 0, sizeof(*image));
+	image->lease = lease;
+	image->descriptor = *descriptor;
+	image->busy = busy;
+
+	/* The transport treats GPU metadata as opaque array bytes. */
+	metadata.size = sizeof(*descriptor);
+	metadata.alloc = metadata.size;
+	metadata.data = &image->descriptor;
+
+	/* Serializes native buffer construction with private-queue listener dispatch. */
+	pthread_mutex_lock(&surface->mutex);
+
+	/* The marshaller duplicates fd; the caller keeps its independent original. */
+	image->buffer = kl_gpu_buffer_v1_create_buffer(surface->factory, fd, &metadata);
+	if (image->buffer == NULL) {
+		pthread_mutex_unlock(&surface->mutex);
+		vulkan_free(&surface->surface->object.allocator, image);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Release notifications must reach initialized image state before any commit. */
+	status = wl_buffer_add_listener(image->buffer, &wayland_buffer_listener, image);
+	if (status != 0) {
+		wl_buffer_destroy(image->buffer);
+		pthread_mutex_unlock(&surface->mutex);
+		vulkan_free(&surface->surface->object.allocator, image);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* A see-through swapchain's buffer is blended by its premultiplied alpha. */
+	if (lease->premultiplied != VK_FALSE)
+		kl_gpu_buffer_v1_set_alpha(surface->factory, image->buffer, KL_GPU_BUFFER_V1_ALPHA_PREMULTIPLIED);
+
+	/* Partial-chain and ordinary teardown now find this buffer through its lease. */
+	image->next = lease->images;
+	lease->images = image;
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* Succeeded: the native image is owned by this lease. */
+	*result = image;
+	return VK_SUCCESS;
+}
+
+/* Commits a completed GPU image and separates frame pacing from allocation reuse. */
+static VkResult
+wayland_present(
+	void *private_lease,
+	void *private_image,
+	VkPresentModeKHR mode,
+	uint64_t *sequence)
+{
+	VkResult error;
+
+	/* No fence: the image is complete. */
+	error = wayland_commit(private_lease, private_image, mode, sequence, -1, 0U);
+	return error;
+}
+
+/*
+ * Commits a GPU image with the fence of its rendering when the compositor
+ * takes acquire fences (kl_gpu_buffer_v1 revision two); otherwise the
+ * caller waited for the fence and the image is complete.
+ */
+static VkResult
+wayland_present_sync(
+	void *private_lease,
+	void *private_image,
+	VkPresentModeKHR mode,
+	uint64_t *sequence,
+	int wait_fd,
+	uint64_t wait_generation)
+{
+	struct wayland_lease *lease;
+	VkResult error;
+
+	/* A revision-one compositor gets no fence. */
+	lease = private_lease;
+	if (lease->surface->factory_version < 2U)
+		wait_fd = -1;
+	error = wayland_commit(private_lease, private_image, mode, sequence, wait_fd, wait_generation);
+	return error;
+}
+
+/* Reports whether this surface's compositor takes acquire fences, so a commit may come before completion. */
+static VkBool32
+wayland_commit_early(
+	void *private_lease)
+{
+	struct wayland_lease *lease;
+
+	/* Revision two of the factory. */
+	lease = private_lease;
+	if (lease->surface->factory_version >= 2U)
+		return VK_TRUE;
+	return VK_FALSE;
+}
+
+/*
+ * Records a see-through alpha mode for the lease's images: the compositor
+ * is told, buffer by buffer, to blend them by their premultiplied alpha.
+ */
+static VkResult
+wayland_composite_alpha(
+	void *private_lease,
+	VkCompositeAlphaFlagBitsKHR alpha)
+{
+	struct wayland_lease *lease;
+
+	/* Only premultiplied alpha is advertised besides opaque, and only with revision three. */
+	lease = private_lease;
+	if (alpha != VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+		return VK_ERROR_INITIALIZATION_FAILED;
+	if (lease->surface->factory_version < 3U)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The images imported from now on are marked. */
+	lease->premultiplied = VK_TRUE;
+
+	/* Succeeded: the lease's buffers will carry their alpha. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Commits a GPU image, with its acquire fence when one is given, and
+ * separates frame pacing from allocation reuse.
+ */
+static VkResult
+wayland_commit(
+	void *private_lease,
+	void *private_image,
+	VkPresentModeKHR mode,
+	uint64_t *sequence,
+	int wait_fd,
+	uint64_t wait_generation)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+	struct wayland_image *image;
+	struct wayland_frame *frame;
+	VkResult error;
+	uint32_t surface_version;
+	int status;
+	int socket_error;
+
+	/* FIFO waits for an earlier frame; MAILBOX may replace pending commits immediately. */
+	lease = private_lease;
+	surface = lease->surface;
+	image = private_image;
+	if (mode == VK_PRESENT_MODE_FIFO_KHR) {
+		/* Paces on the earlier frame; a compositor that holds its callback past the wait takes this one unpaced. */
+		error = wayland_wait(lease, lease->submitted, WAYLAND_PACE_NS);
+		if (error == VK_TIMEOUT)
+			error = VK_SUCCESS;
+
+		/* A broken connection prevents submission of another frame. */
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* Allocates pacing state before changing the image's compositor ownership. */
+	frame = vulkan_allocate(&surface->surface->object.allocator, sizeof(*frame), sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (frame == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Listener data borrows the lease through the callback's lifetime. */
+	memset(frame, 0, sizeof(*frame));
+	frame->lease = lease;
+
+	/* Orders callback creation, image ownership and commit against private dispatch. */
+	pthread_mutex_lock(&surface->mutex);
+
+	/* Requests a frame callback without committing the surface yet. */
+	frame->callback = wl_surface_frame(surface->native);
+	if (frame->callback == NULL) {
+		pthread_mutex_unlock(&surface->mutex);
+		vulkan_free(&surface->surface->object.allocator, frame);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* The initialized listener must exist before the frame can reach the compositor. */
+	status = wl_callback_add_listener(frame->callback, &wayland_frame_listener, frame);
+	if (status != 0) {
+		wl_callback_destroy(frame->callback);
+		pthread_mutex_unlock(&surface->mutex);
+		vulkan_free(&surface->surface->object.allocator, frame);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Busy prevents acquire from handing storage back before compositor release. */
+	__atomic_store_n(&image->busy, VK_TRUE, __ATOMIC_RELEASE);
+
+	/* The submitted sequence names this pacing callback independently of buffer release. */
+	lease->submitted++;
+	frame->sequence = lease->submitted;
+	frame->next = lease->frames;
+	lease->frames = frame;
+
+	/* The fence the compositor waits for before it uses this commit. */
+	if (wait_fd >= 0)
+		kl_gpu_buffer_v1_set_acquire_fence(surface->factory, surface->native, wait_fd, wait_generation);
+
+	/*
+	 * Commits the GPU image with the part that changed as its damage, when
+	 * the application named it (BUG-221), else the whole surface; the
+	 * named part serves this commit alone.
+	 */
+	wl_surface_attach(surface->native, image->buffer, 0, 0);
+	surface_version = wl_proxy_get_version((struct wl_proxy *)surface->native);
+	if (lease->damaged && surface_version >= WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION) {
+		wl_surface_damage_buffer(surface->native, lease->damage[0], lease->damage[1], lease->damage[2], lease->damage[3]);
+	} else if (lease->damaged) {
+		/* An older surface: the same part in surface coordinates (the images are of scale one). */
+		wl_surface_damage(surface->native, lease->damage[0], lease->damage[1], lease->damage[2], lease->damage[3]);
+	} else {
+		wl_surface_damage(surface->native, 0, 0, INT32_MAX, INT32_MAX);
+	}
+	lease->damaged = VK_FALSE;
+	wl_surface_commit(surface->native);
+	surface->active = lease;
+	*sequence = lease->submitted;
+
+	/* Preserves socket failure while requests remain ordered under the surface mutex. */
+	status = wl_display_flush(surface->display);
+	socket_error = errno;
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* Backpressure is retryable, but loss of the native connection is terminal. */
+	if (status < 0 && socket_error != EAGAIN)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Succeeded: the compositor owns the committed image until buffer release. */
+	return VK_SUCCESS;
+}
+
+/* Serializes WSI callbacks without holding the Vulkan swapchain state mutex. */
+static VkResult
+wayland_progress(
+	void *private_lease)
+{
+	struct wayland_lease *lease;
+	VkResult error;
+
+	/* Serializes WSI listeners while leaving all application queues untouched. */
+	lease = private_lease;
+	pthread_mutex_lock(&lease->surface->mutex);
+
+	/* Dispatches private events and latches surface loss for future acquisition. */
+	error = wayland_dispatch(lease->surface);
+	if (error == VK_ERROR_SURFACE_LOST_KHR)
+		__atomic_store_n(&lease->surface->lost, VK_TRUE, __ATOMIC_RELEASE);
+
+	pthread_mutex_unlock(&lease->surface->mutex);
+
+	/* The terminal latch remains visible to later acquire and capability queries. */
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: private callbacks were dispatched without consuming application events. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Reports the connection's fd, which a blocked acquire waits on beside its
+ * wake pipe: an image the compositor sends back arrives there.
+ */
+static int
+wayland_wait_input(
+	void *private_lease)
+{
+	struct wayland_lease *lease;
+
+	/* The surface's connection. */
+	lease = private_lease;
+
+	/* Succeeded: its fd. */
+	return wl_display_get_fd(lease->surface->display);
+}
+
+/* Reports compositor ownership without reading or dispatching a socket under K/U state locks. */
+static VkBool32
+wayland_available(
+	void *private_image)
+{
+	struct wayland_image *image;
+	VkBool32 busy;
+
+	/* Buffer release publishes availability only after compositor use has ended. */
+	image = private_image;
+	busy = __atomic_load_n(&image->busy, __ATOMIC_ACQUIRE);
+	if (busy != VK_FALSE)
+		return VK_FALSE;
+
+	/* Succeeded: the compositor no longer retains this image for rendering or scanout. */
+	return VK_TRUE;
+}
+
+/* Retires one buffer protocol identity before its image group releases the native lease. */
+static void
+wayland_destroy_image(
+	void *private_image)
+{
+	struct wayland_image *image;
+	struct wayland_image **link;
+	struct wayland_surface *surface;
+
+	/* The group's surviving lease keeps listener serialization and allocator state alive. */
+	image = private_image;
+	surface = image->lease->surface;
+	pthread_mutex_lock(&surface->mutex);
+
+	/* Remove exactly this group-owned image without touching a replacement chain's buffers. */
+	link = &image->lease->images;
+	while (*link != image)
+		link = &(*link)->next;
+	*link = image->next;
+
+	/* Buffer destruction leaves the application surface mapped and the compositor's allocation alive. */
+	wl_buffer_destroy(image->buffer);
+
+	pthread_mutex_unlock(&surface->mutex);
+	vulkan_free(&surface->surface->object.allocator, image);
+
+	/* Succeeded: no local listener or protocol identity borrows this native image wrapper. */
+	return;
+}
+
+/* Reads only immediately available bytes using Wayland's coordinated multi-reader protocol. */
+static VkResult
+wayland_dispatch(
+	struct wayland_surface *surface)
+{
+	struct pollfd descriptor;
+	VkBool32 lost;
+	int status;
+	int flushed;
+
+	/* Drains this queue before preparing a read, as required by reader coordination. */
+	for (;;) {
+		/* A dispatch error makes the connection unusable before another read is prepared. */
+		status = wl_display_dispatch_queue_pending(surface->display, surface->queue);
+		if (status < 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+
+		/* Factory removal and watchdog expiry remain terminal without a socket error. */
+		lost = __atomic_load_n(&surface->lost, __ATOMIC_ACQUIRE);
+		if (lost != VK_FALSE)
+			return VK_ERROR_SURFACE_LOST_KHR;
+
+		/* A successful preparation owns one read intention until read or cancellation. */
+		status = wl_display_prepare_read_queue(surface->display, surface->queue);
+		if (status == 0)
+			break;
+
+		/* Pending private callbacks are retryable; other preparation failures are terminal. */
+		if (errno != EAGAIN)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	}
+
+	/* Output failure is resolved after the prepared read has been consumed or canceled. */
+	flushed = wl_display_flush(surface->display);
+
+	/* Polls only immediately available input so acquire timeout zero remains nonblocking. */
+	descriptor.fd = wl_display_get_fd(surface->display);
+	descriptor.events = POLLIN;
+	descriptor.revents = 0;
+	status = poll(&descriptor, 1U, 0);
+	if (status > 0 && (descriptor.revents & POLLIN) != 0) {
+		/* Reading consumes the preparation and queues events for each object's owner. */
+		status = wl_display_read_events(surface->display);
+		if (status < 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	} else {
+		/* Cancellation releases the preparation even when poll was interrupted. */
+		wl_display_cancel_read(surface->display);
+		if (status < 0 && errno != EINTR)
+			return VK_ERROR_SURFACE_LOST_KHR;
+
+		/* A disconnected or invalid socket cannot make future native progress. */
+		if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	}
+
+	/* Reads merely enqueued foreign events; only WSI callbacks run here. */
+	status = wl_display_dispatch_queue_pending(surface->display, surface->queue);
+	if (status < 0)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* A registry callback may have removed the factory during this dispatch. */
+	lost = __atomic_load_n(&surface->lost, __ATOMIC_ACQUIRE);
+	if (lost != VK_FALSE)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Propagates deferred transport failure after retiring the read intention. */
+	if (flushed < 0) {
+		status = wl_display_get_error(surface->display);
+		if (status != 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	}
+
+	/* Succeeded: all immediately available private progress has been delivered. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Sleeps on the connection for at most `milliseconds` (-1: without a
+ * limit) with a read of the surface's queue prepared through the sleep, or
+ * until a frame callback another thread ran writes the progress pipe, then
+ * reads what came and runs the queue's callbacks.  Another thread that
+ * reads the connection meanwhile (the application's own queue, an acquire)
+ * cannot take the compositor's answer away from this sleep: while this read
+ * is prepared, that thread's read waits for this one, which then takes the
+ * bytes and queues each event for its owner.
+ *
+ * Returns VK_SUCCESS, or VK_ERROR_SURFACE_LOST_KHR for a broken connection
+ * or a lost surface.
+ *
+ * Procedure referenced: libwayland (wayland-client.c,
+ * wl_display_prepare_read_queue, wl_display_read_events: the reader count
+ * that makes the last prepared reader read for all).
+ */
+static VkResult
+wayland_sleep(
+	struct wayland_surface *surface,
+	int milliseconds)
+{
+	struct pollfd descriptors[2];
+	struct pollfd descriptor;
+	unsigned char tokens[16];
+	VkBool32 lost;
+	int status;
+
+	/* Runs the queue's waiting callbacks until a read can be prepared on it. */
+	pthread_mutex_lock(&surface->mutex);
+	for (;;) {
+		status = wl_display_dispatch_queue_pending(surface->display, surface->queue);
+		if (status < 0) {
+			pthread_mutex_unlock(&surface->mutex);
+			return VK_ERROR_SURFACE_LOST_KHR;
+		}
+		status = wl_display_prepare_read_queue(surface->display, surface->queue);
+		if (status == 0)
+			break;
+		if (errno != EAGAIN) {
+			pthread_mutex_unlock(&surface->mutex);
+			return VK_ERROR_SURFACE_LOST_KHR;
+		}
+	}
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* The requests go out before the sleep, so the compositor can answer them. */
+	(void)wl_display_flush(surface->display);
+
+	/* Sleeps with the read prepared (or until a frame callback another thread ran), then reads or gives the read up. */
+	memset(descriptors, 0, sizeof(descriptors));
+	descriptors[0].fd = wl_display_get_fd(surface->display);
+	descriptors[0].events = POLLIN;
+	descriptors[1].fd = surface->progress_pipe[0];
+	descriptors[1].events = POLLIN;
+	status = poll(descriptors, 2U, milliseconds);
+	while (read(surface->progress_pipe[0], tokens, sizeof(tokens)) > 0)
+		continue;
+	descriptor = descriptors[0];
+	if (status > 0 && (descriptor.revents & POLLIN) != 0) {
+		status = wl_display_read_events(surface->display);
+		if (status < 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	} else {
+		wl_display_cancel_read(surface->display);
+		if (status < 0 && errno != EINTR)
+			return VK_ERROR_SURFACE_LOST_KHR;
+		if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+			return VK_ERROR_SURFACE_LOST_KHR;
+	}
+
+	/* Runs the callbacks of what was read, under the surface's lock as every dispatch is. */
+	pthread_mutex_lock(&surface->mutex);
+	status = wl_display_dispatch_queue_pending(surface->display, surface->queue);
+	lost = __atomic_load_n(&surface->lost, __ATOMIC_ACQUIRE);
+	pthread_mutex_unlock(&surface->mutex);
+	if (status < 0 || lost != VK_FALSE)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* Succeeded: the connection was waited on and its answer taken in. */
+	return VK_SUCCESS;
+}
+
+/* Discovers the private fd transport through a standard Wayland registry roundtrip. */
+static VkResult
+wayland_surface_initialize(
+	struct vulkan_surface *generic,
+	const VkWaylandSurfaceCreateInfoKHR *info)
+{
+	struct wayland_surface *surface;
+	uint32_t index;
+	int status;
+
+	/* Allocates the platform owner before creating any queue or proxy. */
+	surface = vulkan_allocate(&generic->object.allocator, sizeof(*surface), sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (surface == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Generic teardown can reach every partially initialized platform resource. */
+	memset(surface, 0, sizeof(*surface));
+	surface->progress_pipe[0] = -1;
+	surface->progress_pipe[1] = -1;
+	for (index = 0U; index < VULKAN_WSI_LEND_MAX; index++) {
+		surface->pending_fds[index] = -1;
+		surface->lend_fds[index] = -1;
+	}
+	generic->platform_private = surface;
+	surface->surface = generic;
+	surface->display = info->display;
+
+	/* Initializes listener serialization before any callback can borrow this object. */
+	status = pthread_mutex_init(&surface->mutex, NULL);
+	if (status != 0)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* The destructor may destroy this mutex only after successful initialization. */
+	surface->mutex_ready = VK_TRUE;
+
+	/* The pipe a FIFO wait wakes on when another thread ran the frame callback it waits for. */
+	status = pipe2(surface->progress_pipe, O_CLOEXEC | O_NONBLOCK);
+	if (status != 0) {
+		surface->progress_pipe[0] = -1;
+		surface->progress_pipe[1] = -1;
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Allocates the queue that separates native progress from application dispatch. */
+	surface->queue = wl_display_create_queue(info->display);
+	if (surface->queue == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Borrows the display identity through an independently owned queue override. */
+	surface->display_wrapper = wl_proxy_create_wrapper(info->display);
+	if (surface->display_wrapper == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Borrows the surface without changing its application-selected queue. */
+	surface->native = wl_proxy_create_wrapper(info->surface);
+	if (surface->native == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* New registry, buffer and callback proxies inherit only the WSI queue. */
+	wl_proxy_set_queue((struct wl_proxy *)surface->display_wrapper, surface->queue);
+	wl_proxy_set_queue((struct wl_proxy *)surface->native, surface->queue);
+
+	/* Creates a private registry proxy before installing its listener. */
+	surface->registry = wl_display_get_registry(surface->display_wrapper);
+	if (surface->registry == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Factory advertisements are interpreted only by WSI-owned listener data. */
+	status = wl_registry_add_listener(surface->registry, &wayland_registry_listener, surface);
+	if (status != 0)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* Completes registry discovery while application callbacks remain queued. */
+	status = wl_display_roundtrip_queue(surface->display, surface->queue);
+	if (status < 0)
+		return VK_ERROR_SURFACE_LOST_KHR;
+
+	/* A compositor without this native transport cannot import shared images. */
+	if (surface->factory == NULL)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* A compositor with a game mode lends the surface its images there; without the object the surface keeps its own. */
+	if (surface->game_factory != NULL) {
+		surface->game = kl_game_v1_get_game_surface(surface->game_factory, surface->native);
+		if (surface->game == NULL)
+			return VK_ERROR_OUT_OF_HOST_MEMORY;
+		status = kl_game_surface_v1_add_listener(surface->game, &wayland_game_listener, surface);
+		if (status != 0)
+			return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Succeeded: the surface owns a private queue and an advertised image factory. */
+	return VK_SUCCESS;
+}
+
+/* Binds exactly the private image factory required by this transport backend. */
+static void
+wayland_global(
+	void *data,
+	struct wl_registry *registry,
+	uint32_t name,
+	const char *interface,
+	uint32_t version)
+{
+	struct wayland_surface *surface;
+	int match;
+
+	/* The compositor's game global: one, at version one. */
+	surface = data;
+	match = strcmp(interface, "kl_game_v1");
+	if (match == 0) {
+		if (surface->game_factory != NULL)
+			return;
+		surface->game_factory = wl_registry_bind(registry, name, &kl_game_v1_interface, 1U);
+		if (surface->game_factory != NULL)
+			surface->game_name = name;
+		return;
+	}
+
+	/* Other advertised interfaces remain the application's concern. */
+	match = strcmp(interface, "kl_gpu_buffer_v1");
+	if (match != 0)
+		return;
+
+	/* Retains at most one factory for this surface. */
+	if (version < 1U || surface->factory != NULL)
+		return;
+
+	/* Revision three adds the buffer's alpha, two acquire fences; revision one commits completed images only. */
+	if (version > 3U)
+		version = 3U;
+
+	/* Binds the selected interface through the registry's inherited private queue. */
+	surface->factory = wl_registry_bind(registry, name, &kl_gpu_buffer_v1_interface, version);
+	if (surface->factory == NULL)
+		return;
+	surface->factory_version = version;
+
+	/* The global name identifies removal of this specific transport advertisement. */
+	surface->factory_name = name;
+
+	/* Succeeded: future buffer imports can use the negotiated native factory. */
+	return;
+}
+
+/* Factory removal makes future import unsupported instead of silently faking presentation. */
+static void
+wayland_global_remove(
+	void *data,
+	struct wl_registry *registry,
+	uint32_t name)
+{
+	struct wayland_surface *surface;
+
+	(void)registry;
+
+	/* Removal of this factory permanently prevents new imports on the surface. */
+	surface = data;
+	if (name == surface->factory_name)
+		__atomic_store_n(&surface->lost, VK_TRUE, __ATOMIC_RELEASE);
+
+	/* Succeeded: existing protocol owners can retire through ordinary teardown. */
+	return;
+}
+
+/* Allocation reuse follows release, not merely a frame callback or socket send. */
+static void
+wayland_buffer_release(
+	void *data,
+	struct wl_buffer *buffer)
+{
+	struct wayland_image *image;
+
+	(void)buffer;
+
+	/* The compositor has stopped using this allocation for rendering and scanout. */
+	image = data;
+	__atomic_store_n(&image->busy, VK_FALSE, __ATOMIC_RELEASE);
+
+	/* Wakes acquirers after publishing that no compositor still borrows this image. */
+	vulkan_wsi_image_notify();
+
+	/* Succeeded: a later acquire may hand this image back to the producer. */
+	return;
+}
+
+/* Records pacing progress and retires the one-shot callback independently of the buffer. */
+static void
+wayland_frame_done(
+	void *data,
+	struct wl_callback *callback,
+	uint32_t milliseconds)
+{
+	struct wayland_frame *frame;
+	struct wayland_frame **link;
+	struct wayland_lease *lease;
+	uint64_t completed;
+	unsigned char token;
+
+	(void)milliseconds;
+
+	/* Frame completion advances pacing independently of any image-release callback. */
+	frame = data;
+	lease = frame->lease;
+	completed = __atomic_load_n(&lease->completed, __ATOMIC_RELAXED);
+	if (frame->sequence > completed)
+		__atomic_store_n(&lease->completed, frame->sequence, __ATOMIC_RELEASE);
+
+	/* Wakes a FIFO wait sleeping in another thread (a full pipe is already a wake). */
+	token = 1;
+	(void)write(lease->surface->progress_pipe[1], &token, 1U);
+
+	/* Finds this one-shot callback in the lease while the private queue mutex is held. */
+	link = &lease->frames;
+	while (*link != NULL && *link != frame)
+		link = &(*link)->next;
+
+	/* Teardown must no longer visit this callback's listener data. */
+	if (*link == frame)
+		*link = frame->next;
+
+	/* Suppresses any queued event before returning callback storage to the allocator. */
+	wl_callback_destroy(callback);
+	vulkan_free(&lease->surface->surface->object.allocator, frame);
+
+	/* Succeeded: the lease records pacing progress without releasing an image. */
+	return;
+}
+
+/* Probes the private buffer factory without assigning any application proxy to a new queue. */
+static VkBool32
+wayland_display_supported(
+	struct wl_display *display)
+{
+	struct wayland_surface native;
+	VkBool32 supported;
+	int status;
+
+	/* Temporary native state owns discovery proxies but never the supplied connection. */
+	memset(&native, 0, sizeof(native));
+	native.display = display;
+	supported = VK_FALSE;
+
+	/* Allocates an isolated queue before creating any discovery proxy. */
+	native.queue = wl_display_create_queue(display);
+	if (native.queue == NULL)
+		goto cleanup;
+
+	/* A wrapper preserves the application's original display queue assignment. */
+	native.display_wrapper = wl_proxy_create_wrapper(display);
+	if (native.display_wrapper == NULL)
+		goto cleanup;
+
+	/* Registry children inherit this temporary discovery queue. */
+	wl_proxy_set_queue((struct wl_proxy *)native.display_wrapper, native.queue);
+
+	/* Every partial registry owner is reachable by the single forward cleanup path. */
+	native.registry = wl_display_get_registry(native.display_wrapper);
+	if (native.registry == NULL)
+		goto cleanup;
+
+	/* Captures only the image-factory advertisement needed by this transport. */
+	status = wl_registry_add_listener(native.registry, &wayland_registry_listener, &native);
+	if (status != 0)
+		goto cleanup;
+
+	/* Reads ordered globals without invoking application callbacks. */
+	status = wl_display_roundtrip_queue(display, native.queue);
+	if (status < 0)
+		goto cleanup;
+
+	/* A successful roundtrip alone does not establish native image support. */
+	if (native.factory != NULL)
+		supported = VK_TRUE;
+
+cleanup:
+	/* Retires the temporary bindings before discarding their discovery queue. */
+	if (native.factory != NULL)
+		kl_gpu_buffer_v1_destroy(native.factory);
+	if (native.game_factory != NULL)
+		kl_game_v1_destroy(native.game_factory);
+
+	/* Suppresses pending registry callbacks before stack-owned listener data expires. */
+	if (native.registry != NULL)
+		wl_registry_destroy(native.registry);
+
+	/* Only the wrapper's queue override is released; the application keeps the display. */
+	if (native.display_wrapper != NULL)
+		wl_proxy_wrapper_destroy(native.display_wrapper);
+
+	/* No live discovery proxy remains assigned to this temporary queue. */
+	if (native.queue != NULL)
+		wl_event_queue_destroy(native.queue);
+
+	/* Missing advertisements and failed discovery both refuse native support. */
+	if (supported == VK_FALSE)
+		return VK_FALSE;
+
+	/* Succeeded: the connection advertises the required shared-image factory. */
+	return VK_TRUE;
+}
+
+/*
+ * Names the part of the next commit's image that changed (BUG-221): the
+ * commit damages that part of the buffer alone.  Runs on the present
+ * worker before the commit, as the commit does.
+ */
+static void
+wayland_damage(
+	void *private_lease,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height)
+{
+	struct wayland_lease *lease;
+
+	/* The part, for the next commit; an empty one names none (a present that failed takes its part back). */
+	lease = private_lease;
+	lease->damage[0] = x;
+	lease->damage[1] = y;
+	lease->damage[2] = width;
+	lease->damage[3] = height;
+	lease->damaged = VK_FALSE;
+	if (width > 0 && height > 0)
+		lease->damaged = VK_TRUE;
+}
+
+/*
+ * Tells the compositor the chain a creation makes (the fit), and gives the
+ * images of the lend it offers now when that lend fits the chain: at most
+ * capacity of them, each one's fd (a duplicate, the caller's to close), and
+ * the lend's serial.  A lend that does not fit is declined.  Returns VK_SUCCESS, VK_ERROR_FEATURE_NOT_PRESENT when no lend
+ * fits, or VK_ERROR_OUT_OF_HOST_MEMORY.
+ */
+static VkResult
+wayland_lend(
+	void *private_lease,
+	const struct vulkan_wsi_lend_fit *fit,
+	uint32_t capacity,
+	uint32_t *count,
+	int *fds,
+	uint64_t *serial)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+	uint32_t chain_count;
+	uint32_t index;
+	VkBool32 fits;
+	VkResult error;
+
+	/* Nothing is given until a lend fits. */
+	lease = private_lease;
+	surface = lease->surface;
+	*count = 0U;
+	*serial = 0U;
+
+	/* A compositor without a game mode lends nothing. */
+	if (surface->game == NULL)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* The chain is told under the surface's lock, which the lend's listeners hold too. */
+	error = VK_ERROR_FEATURE_NOT_PRESENT;
+	pthread_mutex_lock(&surface->mutex);
+
+	/* The chain, its count zero when it cannot draw into lent images. */
+	chain_count = 0U;
+	if (fit->drawable != VK_FALSE)
+		chain_count = fit->count;
+	kl_game_surface_v1_chain(surface->game, (uint32_t)fit->format, (uint32_t)fit->usage, fit->extent.width, fit->extent.height, chain_count);
+
+	/* The lend offered now, if it fits; one that does not is declined. */
+	fits = wayland_lend_fits(surface, fit);
+	if (fits == VK_FALSE)
+		wayland_lend_decline(surface);
+	if (fits != VK_FALSE && surface->lend_count <= capacity) {
+		/* Each image's fd duplicated for the caller. */
+		error = VK_SUCCESS;
+		for (index = 0U; index < surface->lend_count; index++) {
+			fds[index] = fcntl(surface->lend_fds[index], F_DUPFD_CLOEXEC, 0);
+			if (fds[index] < 0) {
+				error = VK_ERROR_OUT_OF_HOST_MEMORY;
+				break;
+			}
+		}
+
+		/* A duplicate that failed lets go of the ones made before it. */
+		if (error != VK_SUCCESS) {
+			wayland_lend_forget(fds, index);
+		} else {
+			*count = surface->lend_count;
+			*serial = surface->lend_serial;
+		}
+	}
+
+	/* The requests go out at once. */
+	(void)wl_display_flush(surface->display);
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* No lend, or no memory for its fds. */
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the chain draws into the lend's images. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Makes the buffer of lent image index of the lend serial from its fd
+ * (which stays the caller's) and names it to the compositor: it is busy
+ * until the compositor releases it to the chain to draw into.
+ */
+static VkResult
+wayland_lend_import(
+	void *private_lease,
+	int fd,
+	const struct gpu_image_descriptor *descriptor,
+	uint64_t serial,
+	uint32_t index,
+	void **result)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+	struct wayland_image *image;
+	VkResult error;
+
+	/* No buffer without the game object. */
+	*result = NULL;
+	lease = private_lease;
+	surface = lease->surface;
+	if (surface->game == NULL)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* The buffer, busy until its release. */
+	error = wayland_image_make(lease, fd, descriptor, VK_TRUE, &image);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The compositor learns which of its images the buffer holds. */
+	pthread_mutex_lock(&surface->mutex);
+
+	kl_game_surface_v1_tag(surface->game, image->buffer, (uint32_t)serial, index);
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* Succeeded: the lease owns the lent image's buffer. */
+	*result = image;
+	return VK_SUCCESS;
+}
+
+/*
+ * Tells whether a chain is better made again: a lend that fits it is
+ * offered to a chain of its own images (serial zero), or the lend serial a
+ * lent chain draws into is no longer the one offered.  A lend that does not
+ * fit a chain of its own images is declined, once.
+ */
+static VkBool32
+wayland_lend_changed(
+	void *private_lease,
+	const struct vulkan_wsi_lend_fit *fit,
+	uint64_t serial)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+	VkBool32 changed;
+	VkBool32 fits;
+
+	/* Without the game object nothing is ever lent. */
+	lease = private_lease;
+	surface = lease->surface;
+	if (surface->game == NULL)
+		return VK_FALSE;
+
+	/* The lend state is read under the lock its listeners write it under. */
+	changed = VK_FALSE;
+	pthread_mutex_lock(&surface->mutex);
+
+	if (serial != 0U) {
+		/* A lent chain: its lend ended or another one replaced it. */
+		if (surface->lend_serial != (uint32_t)serial)
+			changed = VK_TRUE;
+	} else {
+		/* A chain of its own images: a lend that fits it is offered, else one offered is declined. */
+		fits = wayland_lend_fits(surface, fit);
+		if (fits != VK_FALSE)
+			changed = VK_TRUE;
+		else
+			wayland_lend_decline(surface);
+	}
+
+	pthread_mutex_unlock(&surface->mutex);
+
+	/* The chain is as good as it gets. */
+	if (changed == VK_FALSE)
+		return VK_FALSE;
+
+	/* Succeeded: the application should make the chain again. */
+	return VK_TRUE;
+}
+
+/*
+ * Refuses the lend serial after a chain made for it could not import its
+ * images: the compositor composes the surface, and the lend is not offered
+ * to a chain again.
+ */
+static void
+wayland_lend_refuse(
+	void *private_lease,
+	uint64_t serial)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+
+	/* Only with the game object, under the lock the lend's listeners hold. */
+	lease = private_lease;
+	surface = lease->surface;
+	if (surface->game == NULL)
+		return;
+	pthread_mutex_lock(&surface->mutex);
+
+	/* The lend offered now, declined once. */
+	if (surface->lend_serial == (uint32_t)serial)
+		wayland_lend_decline(surface);
+
+	pthread_mutex_unlock(&surface->mutex);
+}
+
+/*
+ * Takes one image of a lend being sent: its fd, now the surface's.  An
+ * image of a newer lend drops what an older one sent.
+ */
+static void
+wayland_game_image(
+	void *data,
+	struct kl_game_surface_v1 *object,
+	uint32_t serial,
+	uint32_t index,
+	int32_t fd)
+{
+	struct wayland_surface *surface;
+
+	/* An image beyond the most a chain takes is not kept. */
+	(void)object;
+	surface = data;
+	if (index >= VULKAN_WSI_LEND_MAX) {
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+
+	/* A newer lend's first image drops the older one's. */
+	if (surface->pending_serial != serial) {
+		wayland_lend_forget(surface->pending_fds, VULKAN_WSI_LEND_MAX);
+		surface->pending_serial = serial;
+	}
+
+	/* The image, replacing one sent before at its index. */
+	if (surface->pending_fds[index] >= 0)
+		close(surface->pending_fds[index]);
+	surface->pending_fds[index] = fd;
+}
+
+/*
+ * Takes a lend whose images were all sent: it becomes the one offered (the
+ * one before it goes).  A lend whose images did not all come is declined.
+ */
+static void
+wayland_game_lend(
+	void *data,
+	struct kl_game_surface_v1 *object,
+	uint32_t serial,
+	uint32_t count,
+	uint32_t width,
+	uint32_t height,
+	uint32_t format,
+	uint32_t usage,
+	uint32_t layout)
+{
+	struct wayland_surface *surface;
+	uint32_t index;
+	VkBool32 complete;
+
+	/* Every image of the lend came, and no more than a chain takes. */
+	(void)object;
+	surface = data;
+	complete = VK_FALSE;
+	if (serial != 0U && surface->pending_serial == serial && count != 0U && count <= VULKAN_WSI_LEND_MAX)
+		complete = VK_TRUE;
+	for (index = 0U; complete != VK_FALSE && index < count; index++) {
+		if (surface->pending_fds[index] < 0)
+			complete = VK_FALSE;
+	}
+
+	/* An incomplete lend is refused and its images let go. */
+	if (complete == VK_FALSE) {
+		wayland_lend_forget(surface->pending_fds, VULKAN_WSI_LEND_MAX);
+		surface->pending_serial = 0U;
+		if (serial != 0U && surface->game != NULL)
+			kl_game_surface_v1_decline(surface->game, serial);
+		return;
+	}
+
+	/* The lend before goes; this one's images move over (any beyond its count are let go). */
+	wayland_lend_forget(surface->lend_fds, VULKAN_WSI_LEND_MAX);
+	for (index = 0U; index < VULKAN_WSI_LEND_MAX; index++) {
+		surface->lend_fds[index] = surface->pending_fds[index];
+		surface->pending_fds[index] = -1;
+	}
+	wayland_lend_forget(surface->lend_fds + count, VULKAN_WSI_LEND_MAX - count);
+	surface->pending_serial = 0U;
+
+	/* Succeeded: the lend is offered to the chains made from now on. */
+	surface->lend_serial = serial;
+	surface->lend_count = count;
+	surface->lend_width = width;
+	surface->lend_height = height;
+	surface->lend_format = format;
+	surface->lend_usage = usage;
+	surface->lend_layout = layout;
+}
+
+/*
+ * Ends a lend: its images are no longer offered (a lent chain goes on
+ * drawing into them, composed as any other buffers, until it is made
+ * again).
+ */
+static void
+wayland_game_withdraw(
+	void *data,
+	struct kl_game_surface_v1 *object,
+	uint32_t serial)
+{
+	struct wayland_surface *surface;
+
+	/* The lend offered, if it is that one. */
+	(void)object;
+	surface = data;
+	if (surface->lend_serial == serial) {
+		wayland_lend_forget(surface->lend_fds, VULKAN_WSI_LEND_MAX);
+		surface->lend_serial = 0U;
+		surface->lend_count = 0U;
+	}
+
+	/* A lend still being sent goes too. */
+	if (surface->pending_serial == serial) {
+		wayland_lend_forget(surface->pending_fds, VULKAN_WSI_LEND_MAX);
+		surface->pending_serial = 0U;
+	}
+}
+
+/*
+ * Tells whether the lend offered now fits a chain, under the surface's
+ * lock: the chain draws into lent images, the lend was not declined, its
+ * images are linear and of the chain's extent, their format has the
+ * chain's channel order (the chain's format reads the same bytes), they
+ * allow the chain's uses, and they are as many as the chain asked for.
+ */
+static VkBool32
+wayland_lend_fits(
+	const struct wayland_surface *surface,
+	const struct vulkan_wsi_lend_fit *fit)
+{
+	VkBool32 order;
+
+	/* A lend offered and not declined, to a chain that can draw into it. */
+	if (surface->lend_serial == 0U || surface->declined == surface->lend_serial)
+		return VK_FALSE;
+	if (fit->drawable == VK_FALSE)
+		return VK_FALSE;
+
+	/* Linear images (the only layout imported so far; the import checks the kernel's own description) of the chain's extent. */
+	if (surface->lend_layout != KL_GAME_SURFACE_V1_LAYOUT_DESCRIBED && surface->lend_layout != GPU_IMAGE_LINEAR)
+		return VK_FALSE;
+	if (surface->lend_width != fit->extent.width || surface->lend_height != fit->extent.height)
+		return VK_FALSE;
+
+	/* The chain's format reads the lent bytes as they are: the same channel order, UNORM or SRGB. */
+	order = VK_FALSE;
+	if (surface->lend_format == (uint32_t)VK_FORMAT_B8G8R8A8_UNORM &&
+	    (fit->format == VK_FORMAT_B8G8R8A8_UNORM ||
+	     fit->format == VK_FORMAT_B8G8R8A8_SRGB))
+		order = VK_TRUE;
+	if (surface->lend_format == (uint32_t)VK_FORMAT_R8G8B8A8_UNORM &&
+	    (fit->format == VK_FORMAT_R8G8B8A8_UNORM ||
+	     fit->format == VK_FORMAT_R8G8B8A8_SRGB))
+		order = VK_TRUE;
+	if (order == VK_FALSE)
+		return VK_FALSE;
+
+	/* The chain's uses, and as many images as it asked for. */
+	if (((uint32_t)fit->usage & ~surface->lend_usage) != 0U)
+		return VK_FALSE;
+	if (fit->count > surface->lend_count)
+		return VK_FALSE;
+
+	/* Succeeded: the chain can draw into the lend's images. */
+	return VK_TRUE;
+}
+
+/* Declines the lend offered now, once, under the surface's lock: the compositor composes the surface instead. */
+static void
+wayland_lend_decline(
+	struct wayland_surface *surface)
+{
+	/* Nothing offered, or declined already. */
+	if (surface->lend_serial == 0U || surface->declined == surface->lend_serial)
+		return;
+
+	/* The refusal, sent at once. */
+	surface->declined = surface->lend_serial;
+	kl_game_surface_v1_decline(surface->game, surface->lend_serial);
+	(void)wl_display_flush(surface->display);
+}
+
+/* Closes the fds of a lend's images that are held (-1 marks one that is not), leaving them all -1. */
+static void
+wayland_lend_forget(
+	int *fds,
+	uint32_t count)
+{
+	uint32_t index;
+
+	/* Each fd held is closed. */
+	for (index = 0U; index < count; index++) {
+		if (fds[index] >= 0)
+			close(fds[index]);
+		fds[index] = -1;
+	}
+}

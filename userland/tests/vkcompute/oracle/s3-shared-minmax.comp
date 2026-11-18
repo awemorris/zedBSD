@@ -1,0 +1,33 @@
+#version 450
+// Stage 3: unsigned and signed atomicMin and atomicMax on shared memory.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint umin;
+shared uint umax;
+shared int smin;
+shared int smax;
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	uint v = src[gl_GlobalInvocationID.x];
+	if (l == 0u) {
+		umin = 0xffffffffu;
+		umax = 0u;
+		smin = 0x7fffffff;
+		smax = -0x7fffffff - 1;
+	}
+	barrier();
+	atomicMin(umin, v);
+	atomicMax(umax, v);
+	atomicMin(smin, int(v));
+	atomicMax(smax, int(v));
+	barrier();
+	if (l == 0u) {
+		o[gl_WorkGroupID.x * 4u + 0u] = umin;
+		o[gl_WorkGroupID.x * 4u + 1u] = umax;
+		o[gl_WorkGroupID.x * 4u + 2u] = uint(smin);
+		o[gl_WorkGroupID.x * 4u + 3u] = uint(smax);
+	}
+}

@@ -1,0 +1,15 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("日本語 text");
+    oracleEmit(Editor.pointMax());
+    Editor.gotoChar(2);
+    oracleEmit(Editor.charAfter(2));
+    oracleEmit(Editor.charBefore(2));
+    Editor.insert("挿入");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    Editor.deleteRegion(2, 5);
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.bufferSubstring(1, 3));
+}

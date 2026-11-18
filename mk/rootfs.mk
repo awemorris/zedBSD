@@ -1,0 +1,278 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+ROOTFS_DIRECTORIES := \
+	bin sbin lib etc var root home dev boot run \
+	usr/bin usr/sbin usr/libexec usr/share share var/empty etc/ssh etc/service.d etc/keiland
+
+ROOTFS_STICKY_DIRECTORIES := \
+	tmp shm
+
+ROOTFS_ACCOUNT_INPUTS := \
+	userland/base/etc/passwd \
+	userland/base/etc/group \
+	userland/base/etc/shadow \
+	userland/base/etc/passkey \
+	userland/base/etc/services \
+	userland/base/etc/hosts \
+	userland/base/etc/fstab \
+	userland/base/etc/rc.conf \
+	userland/base/etc/net.conf
+
+ROOTFS_ACCOUNT_FILES := \
+	--file /etc/passwd=userland/base/etc/passwd \
+	--file /etc/group=userland/base/etc/group \
+	--file /etc/shadow=userland/base/etc/shadow \
+	--file /etc/passkey=userland/base/etc/passkey \
+	--file /etc/services=userland/base/etc/services \
+	--file /etc/hosts=userland/base/etc/hosts \
+	--file /etc/fstab=userland/base/etc/fstab \
+	--file /etc/rc.conf=userland/base/etc/rc.conf \
+	--file /etc/net.conf=userland/base/etc/net.conf \
+	--mode /etc/passwd=0644 --mode /etc/group=0644 \
+	--mode /etc/shadow=0400 --mode /etc/passkey=0600 --mode /etc/services=0644 \
+	--mode /etc/hosts=0644 --mode /etc/fstab=0644 --mode /etc/rc.conf=0644 \
+	--mode /etc/net.conf=0644
+
+ROOTFS_SERVICE_INPUTS := \
+	$(wildcard userland/base/init/services/*) \
+	userland/base/init/make-homes \
+	userland/base/bootlog/service \
+	userland/base/netclock/service \
+	userland/base/audiod/audiod.service \
+	userland/base/volumed/volumed.service \
+	userland/base/bluetoothd/bluetoothd.service \
+	userland/desktop/sessiond/greeter.service
+
+ROOTFS_SERVICE_FILES := \
+	$(foreach s,$(wildcard userland/base/init/services/*),--file /etc/service.d/$(notdir $(s))=$(s) --mode /etc/service.d/$(notdir $(s))=0644) \
+	--file /usr/libexec/make-homes=userland/base/init/make-homes --mode /usr/libexec/make-homes=0755 \
+	--file /etc/service.d/bootlog=userland/base/bootlog/service --mode /etc/service.d/bootlog=0644 \
+	--file /etc/service.d/netclock=userland/base/netclock/service --mode /etc/service.d/netclock=0644 \
+	--file /etc/service.d/audiod=userland/base/audiod/audiod.service --mode /etc/service.d/audiod=0644 \
+	--file /etc/service.d/volumed=userland/base/volumed/volumed.service --mode /etc/service.d/volumed=0644 \
+	--file /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service --mode /etc/service.d/bluetoothd=0644 \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/service.d/greeter=userland/desktop/sessiond/greeter.service --mode /etc/service.d/greeter=0644) \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/keiland/session=userland/desktop/sessiond/session.sh --mode /etc/keiland/session=0755) \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/keiland/autologin=userland/desktop/sessiond/autologin --mode /etc/keiland/autologin=0644)
+
+ROOTFS_DYNAMIC_INPUTS := \
+	$(BUILD)/dynamic/libc.so \
+	$(BUILD)/dynamic/libm.so \
+	$(BUILD)/dynamic/libutil.so \
+	$(if $(wildcard $(BUILD)/dynamic/ld.so),$(BUILD)/dynamic/ld.so)
+
+ROOTFS_DYNAMIC_FILES := \
+	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
+	--file /lib/libm.so=$(BUILD)/dynamic/libm.so \
+	--file /lib/libutil.so=$(BUILD)/dynamic/libutil.so \
+	$(if $(wildcard $(BUILD)/dynamic/ld.so),--file /lib/ld.so=$(BUILD)/dynamic/ld.so --mode /lib/ld.so=0755) \
+	--mode /lib/libc.so=0755 \
+	--mode /lib/libm.so=0755 \
+	--mode /lib/libutil.so=0755
+
+ROOTFS_PACKAGE_LINKS ?= \
+	/usr/bin/noct=/bin/noct \
+	/usr/lib/libz.so=libz.so.1 \
+	/sbin/umount=mount \
+	$(if $(filter curl,$(CONFIG_USERLAND_PROGRAMS)),/usr/lib/libcurl.so=libcurl.so.4)
+
+include userland/desktop/wallpapers/Makefile
+
+# What the selected packages built from upstream releases put in the root.
+# Their lists are in their own Makefiles, which only their own makes read,
+# so each make writes them beside the package's stamp as records: the
+# --file, --subtree and --mode items, and the links
+# (userland/packages/external.mk).  The root reads the records of the
+# packages this build selects, and not one an earlier build left for a
+# package it does not.
+ROOTFS_PACKAGE_RECORD_DIRS := $(foreach d,$(filter userland/packages/%,$(PROGRAM_DIRS)),\
+	$(BUILD)/packages/$(notdir $(patsubst %/,%,$(d))))
+ROOTFS_PACKAGE_FILE_RECORDS := $(addsuffix /rootfs-files,$(ROOTFS_PACKAGE_RECORD_DIRS))
+ROOTFS_PACKAGE_LINK_RECORDS := $(addsuffix /rootfs-links,$(ROOTFS_PACKAGE_RECORD_DIRS))
+
+ROOTFS_CONFIG_STAMP := \
+	$(BUILD)/.rootfs-config
+
+# Files a configuration or a test puts into the root besides the platform's
+# and the packages', as --file DESTINATION=SOURCE and --mode DESTINATION=MODE
+# pairs.  They are put in last, so they take the place of a file of the
+# same name, and the root is made again when one of their sources changes.
+ROOTFS_EXTRA_FILES ?=
+ROOTFS_EXTRA_INPUTS := $(foreach item,$(ROOTFS_EXTRA_FILES),\
+	$(if $(findstring =,$(item)),$(wildcard $(lastword $(subst =, ,$(item))))))
+
+ROOTFS_TARGET_SYSROOT ?= \
+	$(BUILD)/sysroot
+
+ROOTFS_DEVELOPMENT ?= $(if $(CONFIG_ROOTFS_DEVELOPMENT),$(CONFIG_ROOTFS_DEVELOPMENT),y)
+ifeq ($(strip $(ROOTFS_TARGET_SYSROOT)),)
+override ROOTFS_DEVELOPMENT := n
+endif
+
+ifeq ($(ROOTFS_DEVELOPMENT),y)
+ROOTFS_DEVELOPMENT_INPUTS := \
+	$(ROOTFS_TARGET_SYSROOT)/.zedbsd-sysroot-complete
+define ROOTFS_INSTALL_DEVELOPMENT
+	umask 022; mkdir -p $(1)/usr/include $(1)/usr/lib
+	umask 022; cp -R $(ROOTFS_TARGET_SYSROOT)/usr/include/. $(1)/usr/include/
+	umask 022; cp -R $(ROOTFS_TARGET_SYSROOT)/usr/lib/. $(1)/usr/lib/
+	chmod -R u+w $(1)/usr/include $(1)/usr/lib
+endef
+else
+ROOTFS_DEVELOPMENT_INPUTS :=
+define ROOTFS_INSTALL_DEVELOPMENT
+	rm -rf $(1)/usr/include $(1)/usr/lib/pkgconfig $(1)/usr/share/pkgconfig
+	find $(1)/lib -maxdepth 1 \
+		\( \( -type l -name '*.so' \) -o \( -type f -name '*.a' \) \) \
+		-exec rm -f {} +
+	test ! -d $(1)/usr/lib || find $(1)/usr/lib -maxdepth 1 \
+		\( \( -type l -name '*.so' \) -o \( -type f -name '*.a' \) \) \
+		-exec rm -f {} +
+endef
+endif
+
+define ROOTFS_TREE_RULE
+$(call ROOTFS_TREE_RULE_AT,$(1),$(2),$(3),$(or $(4),$(BUILD)/rootfs))
+endef
+
+define ROOTFS_TREE_RULE_AT
+$(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
+	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS) $(ROOTFS_EXTRA_INPUTS)
+	@rm -rf $(4)
+	@umask 022; mkdir -p $(4) $(addprefix $(4)/,\
+ $(ROOTFS_DIRECTORIES) $(ROOTFS_STICKY_DIRECTORIES))
+	@chmod 0755 $(4) $(addprefix $(4)/,\
+ $(ROOTFS_DIRECTORIES))
+	@chmod 1777 $(addprefix $(4)/,\
+ $(ROOTFS_STICKY_DIRECTORIES))
+	@ln -s ../run $(4)/var/run
+	@umask 022; printf '%s\n' '$(1)' > $(4)/lib/arch.id
+	@umask 022; printf 'zedBSD ufs root v1\n' > $(4)/etc/zedbsd-root
+# What the packages installed in the build directory comes first, and the
+# files and modes the lists name come after it, so that a list (the
+# platform's, a package's or ROOTFS_EXTRA_FILES) decides a file both name.
+	@set -e; umask 022; \
+		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
+		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
+		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
+		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
+		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
+		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
+		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
+		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
+		for record in $(BUILD)/packages/*/mode; do \
+			test -f "$$$$record" || continue; \
+			read -r path mode < "$$$$record"; \
+			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
+		done; true
+# Every directory is 0755 (but the sticky ones) before the lists' modes,
+# so that a --mode a list gives a directory stays.
+	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
+		-prune -o -type d -exec chmod 0755 {} +
+	@set -e; umask 022; \
+		cfg_items=""; \
+		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
+			cfg_items="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("data","") + " " + d.get("files","") + " " + d.get("platform_files",""))')"; \
+		fi; \
+		package_items=""; \
+		for record in $$(ROOTFS_PACKAGE_FILE_RECORDS); do \
+			test -f "$$$$record" || continue; \
+			package_items="$$$$package_items $$$$(cat "$$$$record")"; \
+		done; \
+		for pass in file mode; do \
+			set -- $$$$cfg_items $(3) $$(PACKAGE_FILES) $$$$package_items $$(ROOTFS_EXTRA_FILES); while test $$$$# -gt 0; do \
+				option=$$$$1; specification=$$$$2; shift 2; \
+				path=$$$${specification%%=*}; value=$$$${specification#*=}; \
+				path=$$$${path#/}; \
+				test -n "$$$$path" || continue; \
+				destination=$(4)/$$$$path; \
+				case $$$$option in \
+				--file) test "$$$$pass" = file || continue; \
+					mkdir -p "$$$${destination%/*}"; cp -f "$$$$value" "$$$$destination" ;; \
+				--subtree) test "$$$$pass" = file || continue; \
+					test -d "$$$$value" || { \
+						echo "rootfs: --subtree names no directory: $$$$value" >&2; \
+						exit 2; }; \
+					mkdir -p "$$$$destination"; cp -RP "$$$$value/." "$$$$destination/" ;; \
+				--mode) test "$$$$pass" = mode || continue; \
+					test -e "$$$$destination" || { \
+						echo "rootfs: --mode names a file nothing installed: /$$$$path" >&2; \
+						exit 2; }; \
+					chmod "$$$$value" "$$$$destination" ;; \
+				*) echo "unknown rootfs option: $$$$option" >&2; exit 2 ;; \
+				esac; \
+			done; \
+		done
+	@set -e; umask 022; \
+		links=""; \
+		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
+			links="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("links",""))')"; \
+		fi; \
+		for record in $$(ROOTFS_PACKAGE_LINK_RECORDS); do \
+			test -f "$$$$record" || continue; \
+			links="$$$$links $$$$(cat "$$$$record")"; \
+		done; \
+		links="$$$$links $$(ROOTFS_PACKAGE_LINKS)"; \
+		for specification in $$$$links; do \
+			path=$$$${specification%%=*}; target=$$$${specification#*=}; \
+			path=$$$${path#/}; \
+			test -n "$$$$path" || continue; \
+			destination=$(4)/$$$$path; \
+			mkdir -p "$$$${destination%/*}"; ln -sfn "$$$$target" "$$$$destination"; \
+		done
+	@$$(call ROOTFS_INSTALL_DEVELOPMENT,$(4))
+	@umask 022; touch $$@
+endef
+
+.PHONY: FORCE_ROOTFS_CONFIG
+FORCE_ROOTFS_CONFIG:
+
+$(ROOTFS_CONFIG_STAMP): FORCE_ROOTFS_CONFIG
+	@mkdir -p $(dir $@)
+	@platform='$(PLATFORM)'; \
+	architecture='$(ARCHITECTURE)'; \
+	board='$(BOARD)'; \
+	programs='$(strip $(USERLAND_PROGRAMS))'; \
+	extra='$(strip $(ROOTFS_EXTRA_FILES))'; \
+	value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;extra=$$extra"; \
+	if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+		printf '%s\n' "$$value" > $@.tmp; \
+		mv $@.tmp $@; \
+	fi
+
+
+# The programs the packages put in the build directory (bin, sbin, usr/bin,
+# usr/sbin and usr/libexec) are copied by the root's rule itself, 0755 and
+# then the mode each one's package recorded (setuid, 0500).  The lists do
+# not name them: a --file or --mode of a list comes after the recorded mode
+# and would take its place, and only on a build directory that had them
+# when the build was read.  They stay the root's inputs, so that a program
+# made again makes the root again.
+ROOTFS_BIN_FILES := $(sort $(BUILD)/bin/sh $(wildcard $(BUILD)/bin/*))
+ROOTFS_BIN_INPUTS := $(ROOTFS_BIN_FILES)
+
+ROOTFS_SBIN_FILES := $(wildcard $(BUILD)/sbin/*)
+ROOTFS_SBIN_INPUTS := $(ROOTFS_SBIN_FILES)
+
+ROOTFS_USR_BIN_FILES := $(wildcard $(BUILD)/usr/bin/*)
+ROOTFS_USR_BIN_INPUTS := $(ROOTFS_USR_BIN_FILES)
+
+ROOTFS_USR_SBIN_FILES := $(wildcard $(BUILD)/usr/sbin/*)
+ROOTFS_USR_SBIN_INPUTS := $(ROOTFS_USR_SBIN_FILES)
+
+ROOTFS_LIBEXEC_FILES := $(wildcard $(BUILD)/usr/libexec/*)
+ROOTFS_LIBEXEC_INPUTS := $(ROOTFS_LIBEXEC_FILES)
+
+ROOTFS_INPUTS ?= $(ROOTFS_ACCOUNT_INPUTS) $(ROOTFS_SERVICE_INPUTS) $(ROOTFS_DYNAMIC_INPUTS) $(ROOTFS_BIN_INPUTS) $(ROOTFS_SBIN_INPUTS) $(ROOTFS_USR_BIN_INPUTS) $(ROOTFS_USR_SBIN_INPUTS) $(ROOTFS_LIBEXEC_INPUTS)
+ROOTFS_FILES  ?= $(ROOTFS_ACCOUNT_FILES) $(ROOTFS_SERVICE_FILES) $(ROOTFS_DYNAMIC_FILES)

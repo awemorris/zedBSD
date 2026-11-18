@@ -1,0 +1,20 @@
+Do not include <malloc.h> on zedBSD.
+
+The roaring bitmap code includes <malloc.h> everywhere but on Apple,
+FreeBSD and OpenBSD; its own comment says the header should never be
+needed, since <stdlib.h> declares posix_memalign().  zedBSD's C library
+has no <malloc.h> (it is not a standard header), so zedBSD joins the
+systems that leave it out.  (A libc that adds <malloc.h> makes this patch
+unnecessary.)
+
+--- a/gtk/roaring/roaring.h
++++ b/gtk/roaring/roaring.h
+@@ -58,7 +58,7 @@
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stdlib.h>  // will provide posix_memalign with _POSIX_C_SOURCE as defined above
+-#if !(defined(__APPLE__)) && !(defined(__FreeBSD__)) && !(defined(__OpenBSD__))
++#if !(defined(__APPLE__)) && !(defined(__FreeBSD__)) && !(defined(__OpenBSD__)) && !(defined(__ZEDBSD__))
+ #include <malloc.h>  // this should never be needed but there are some reports that it is needed.
+ #endif
+ 

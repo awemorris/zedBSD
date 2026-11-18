@@ -1,0 +1,58 @@
+{
+  "license": "Zlib",
+  "source": "Original zedBSD GLSL; compiled artifact of the same source",
+  "target_env": "vulkan1.1",
+  "target_spv": "spv1.0",
+  "compiler": "shaderc 2025.2-1\nspirv-tools 2025.1~rc1-1\nglslang 15.1.0+1.4.309.0-1\n\nTarget: SPIR-V 1.0",
+  "validator": "SPIRV-Tools v2025.1 unknown hash, 2025-03-18T14:15:19+00:00\nTargets:\n  SPIR-V 1.0\n  SPIR-V 1.1\n  SPIR-V 1.2\n  SPIR-V 1.3\n  SPIR-V 1.4\n  SPIR-V 1.5\n  SPIR-V 1.6\n  SPIR-V 1.2 (under OpenCL 2.2 Full Profile semantics)\n  SPIR-V 1.0 (under Vulkan 1.0 semantics)\n  SPIR-V 1.3 (under Vulkan 1.1 semantics)\n  SPIR-V 1.4 (under Vulkan 1.1 semantics)\n  SPIR-V 1.5 (under Vulkan 1.2 semantics)\n  SPIR-V 1.6 (under Vulkan 1.3 semantics) SPIR-V 1.6 (under Vulkan 1.4 semantics)",
+  "shaders": {
+    "mview.vert": {
+      "stage": "vertex",
+      "array": "mview_vertex_shader",
+      "source_sha256": "9829e31932337e7e693ebf6e3f265afbfa7cd916615703f915a966694f8608ff",
+      "binary": "mview.vert.spv",
+      "binary_sha256": "dd20bf4e65370880228f564460cd465887ed4f48f84e43838a385764a85c27ca",
+      "bytes": 3096
+    },
+    "mview.frag": {
+      "stage": "fragment",
+      "array": "mview_fragment_shader",
+      "source_sha256": "25786f18d92e4583867368f0c6c5aff1968d7699e5eb050ecc1049c90c1664d3",
+      "binary": "mview.frag.spv",
+      "binary_sha256": "5b8e8180064d0f375fd9b2cae5bb7a66cc45b781f18ed7535e0ae279da9ec2ac",
+      "bytes": 1292
+    },
+    "cutout.frag": {
+      "stage": "fragment",
+      "array": "mview_cutout_shader",
+      "source_sha256": "0a78a9b3c5afefa75e4f93a060d9c4c05c02d9d932aec11e49e7ee867f95fd77",
+      "binary": "cutout.frag.spv",
+      "binary_sha256": "cc78e1f184acd9924a60986ec4ba0949eda1ab8f1fef7b41553a308952cab153",
+      "bytes": 1400
+    },
+    "pixel.vert": {
+      "stage": "vertex",
+      "array": "mview_pixel_vertex_shader",
+      "source_sha256": "05fb4b9e3b7a2b321db888525290f1457bfd09c95d39a1ce736700551ca221e5",
+      "binary": "pixel.vert.spv",
+      "binary_sha256": "97fdd1d7e0b91d76fe5d4d267479557f55506a197be7b672e7b2838371df18a5",
+      "bytes": 2848
+    },
+    "pixel.frag": {
+      "stage": "fragment",
+      "array": "mview_pixel_fragment_shader",
+      "source_sha256": "c2b3746b389cc6eaf6940d8fc90e6c7a1b2c411fc166636632f0482f6fb6719d",
+      "binary": "pixel.frag.spv",
+      "binary_sha256": "34b99931bfb3bb83c834d99667b24f4394df3186531d40af07fee1d4f1cf8f75",
+      "bytes": 5084
+    },
+    "pixel-cutout.frag": {
+      "stage": "fragment",
+      "array": "mview_pixel_cutout_shader",
+      "source_sha256": "321747c78c1febbd3a3ee11a23760137ef277ee9151b7b5b45c2f4fd97a4189b",
+      "binary": "pixel-cutout.frag.spv",
+      "binary_sha256": "c852924ec942f0cf3055a595b5f39c5da785a45b729ec4b1b913e626a47d1073",
+      "bytes": 5168
+    }
+  }
+}

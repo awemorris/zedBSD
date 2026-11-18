@@ -1,0 +1,22 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    // Ring cap: pushing past the max drops the oldest.
+    KillRingMax = 3;
+    killNew("a");
+    killNew("b");
+    killNew("c");
+    killNew("d");
+    print(Array.size(KillRing));
+    print(currentKill(0));
+    print(currentKill(1));
+    print(currentKill(1));
+    // "a" fell off: one more rotation wraps to "d".
+    print(currentKill(1));
+
+    // Prepend joins at the front of the newest entry.
+    killNew("body");
+    killPrepend("head-");
+    killAppend("-tail");
+    print(currentKill(0));
+}

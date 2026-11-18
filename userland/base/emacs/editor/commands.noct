@@ -1,0 +1,838 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Editing commands. (impl=noct rows of napi.def)
+//
+// Logic functions keep the Emacs signature so they can be compared
+// against the oracle. Command wrappers taking the editor environment
+// dictionary live in keymap.noct.
+//
+
+func deleteChar(n) {
+    if (n >= 0) {
+        var target = Editor.point() + n;
+        if (target > Editor.pointMax()) {
+            target = Editor.pointMax();
+        }
+        Editor.deleteRegion(Editor.point(), target);
+    } else {
+        var start = Editor.point() + n;
+        if (start < Editor.pointMin()) {
+            start = Editor.pointMin();
+        }
+        Editor.deleteRegion(start, Editor.point());
+    }
+    return 0;
+}
+
+func newline(n) {
+    for (i in 0..n) {
+        Editor.insert("\n");
+    }
+    return 0;
+}
+
+func beginningOfLine() {
+    Editor.gotoChar(Editor.lineBeginningPosition());
+    return 0;
+}
+
+func endOfLine() {
+    Editor.gotoChar(Editor.lineEndPosition());
+    return 0;
+}
+
+// --- kill ring ---------------------------------------------------------
+//
+// Newest entry is the END of the array (Noct arrays only push/pop at
+// the end). KillYankIndex counts backward from the newest: 0 = newest.
+// The index persists across yanks and resets on a fresh kill, matching
+// the kill-ring-yank-pointer behavior.
+
+func killInit() {
+    KillRing = [];
+    KillRingMax = 120;
+    KillYankIndex = 0;
+    // The region of the last yank, for yank-pop. active=0 when the
+    // previous command was not a yank.
+    LastYank = { active: 0, start: 0, end: 0 };
+    return 0;
+}
+
+func killNew(s) {
+    Array.push(KillRing, s);
+    // Drop the oldest entry past kill-ring-max. The array is
+    // newest-at-the-end, so shift everything down by one.
+    if (Array.size(KillRing) > KillRingMax) {
+        var n = Array.size(KillRing);
+        for (i in 0..(n - 1)) {
+            KillRing[i] = KillRing[i + 1];
+        }
+        Array.pop(KillRing);
+    }
+    KillYankIndex = 0;
+    return 0;
+}
+
+// Append to the newest kill (consecutive C-k, forward kills).
+func killAppend(s) {
+    var n = Array.size(KillRing);
+    if (n == 0) {
+        return killNew(s);
+    }
+    KillRing[n - 1] = KillRing[n - 1] + s;
+    KillYankIndex = 0;
+    return 0;
+}
+
+// Prepend to the newest kill (backward kills, like M-DEL chains).
+func killPrepend(s) {
+    var n = Array.size(KillRing);
+    if (n == 0) {
+        return killNew(s);
+    }
+    KillRing[n - 1] = s + KillRing[n - 1];
+    KillYankIndex = 0;
+    return 0;
+}
+
+// Rotate the yank pointer by n and return the entry it lands on.
+func currentKill(n) {
+    var size = Array.size(KillRing);
+    if (size == 0) {
+        error("Kill ring is empty");
+    }
+    KillYankIndex = (KillYankIndex + n) % size;
+    if (KillYankIndex < 0) {
+        KillYankIndex = KillYankIndex + size;
+    }
+    return KillRing[size - 1 - KillYankIndex];
+}
+
+func killRegion(start, end) {
+    var text = bufferSubstring(start, end);
+    deleteRegion(start, end);
+    killNew(text);
+    return 0;
+}
+
+func copyRegionAsKill(start, end) {
+    killNew(bufferSubstring(start, end));
+    return 0;
+}
+
+// Kill to the end of the line; at the end of a line, kill the newline
+// instead. (No prefix-argument handling in v1.)
+func killLine() {
+    var start = point();
+    var stop = lineEndPosition();
+    if (start == stop) {
+        stop = stop + 1;
+        if (stop > pointMax()) {
+            error("End of buffer");
+        }
+    }
+    killRegion(start, stop);
+    return 0;
+}
+
+// The editor-loop variant: appends to the previous kill when the last
+// command was also a kill.
+func killLineAppend() {
+    var start = point();
+    var stop = lineEndPosition();
+    if (start == stop) {
+        stop = stop + 1;
+        if (stop > pointMax()) {
+            error("End of buffer");
+        }
+    }
+    var text = bufferSubstring(start, stop);
+    deleteRegion(start, stop);
+    killAppend(text);
+    return 0;
+}
+
+// Insert the current kill at point, leaving the mark at the start of
+// the inserted text.
+func yank() {
+    var text = currentKill(0);
+    var start = point();
+    pushMark(start);
+    insert(text);
+    LastYank.active = 1;
+    LastYank.start = start;
+    LastYank.end = point();
+    return 0;
+}
+
+// Replace the last yank with the next older ring entry.
+func yankPop() {
+    if (LastYank.active == 0) {
+        error("Previous command was not a yank");
+    }
+    var text = currentKill(1);
+    deleteRegion(LastYank.start, LastYank.end);
+    gotoChar(LastYank.start);
+    var start = point();
+    insert(text);
+    LastYank.start = start;
+    LastYank.end = point();
+    return 0;
+}
+
+// Invalidate yank-pop chaining; called by the command loop after any
+// command that is not a yank.
+func clearLastYank() {
+    LastYank.active = 0;
+    return 0;
+}
+
+// --- undo --------------------------------------------------------------
+//
+// Change records live in Buf.undoList ({t:"ins"|"del"|"bnd"}). Undoing
+// re-records its own edits, which is how redo works: a fresh undo after
+// an undo undoes the undo. UndoNext is the pending pointer into the
+// list, valid while consecutive undo commands continue a sequence.
+
+func undoInit() {
+    UndoNext = 0 - 1;
+    UndoInProgress = 0;
+    return 0;
+}
+
+// Insert a boundary unless one is already on top.
+func undoBoundary() {
+    var n = Array.size(Buf.undoList);
+    if (n > 0 && Buf.undoList[n - 1].t != "bnd") {
+        Array.push(Buf.undoList, { t: "bnd" });
+    }
+    Buf.lastBoundaryPoint = Buf.point;
+    return 0;
+}
+
+// Start a fresh undo sequence at the newest change group.
+func undoStart() {
+    undoBoundary();
+    UndoNext = Array.size(Buf.undoList) - 1;
+    while (UndoNext >= 0 && Buf.undoList[UndoNext].t == "bnd") {
+        UndoNext = UndoNext - 1;
+    }
+    return 0;
+}
+
+// Undo one change group from the pending pointer.
+func undoMore() {
+    if (UndoNext < 0) {
+        error("No further undo information");
+    }
+    UndoInProgress = 1;
+    while (UndoNext >= 0) {
+        var e = Buf.undoList[UndoNext];
+        UndoNext = UndoNext - 1;
+        if (e.t == "bnd") {
+            break;
+        }
+        if (e.t == "ins") {
+            deleteRegion(e.start, e.end);
+            gotoChar(e.start);
+        } else if (e.t == "del") {
+            // Reinsert and leave point before the text, at POS.
+            gotoChar(e.pos);
+            insert(e.text);
+            gotoChar(e.pos);
+        } else if (e.t == "pnt") {
+            gotoChar(e.pos);
+        }
+    }
+    UndoInProgress = 0;
+    return 0;
+}
+
+// A fresh undo command (the consecutive-undo continuation is the
+// editor loop's business, matching last-command in Emacs).
+func undo() {
+    undoStart();
+    undoMore();
+    return 0;
+}
+
+// --- word movement -----------------------------------------------------
+//
+// Word syntax with script-aware boundaries, matching observed GNU
+// Emacs behavior: a word breaks where the character class changes,
+// except that kanji followed by hiragana stays one word (Japanese
+// inflection). Classes: 1 Latin/digit, 2 kanji, 3 hiragana,
+// 4 katakana, 5 other word constituents; 0 is not a word character.
+
+func wordClass(cp) {
+    if (cp >= 0x30 && cp <= 0x39) { return 1; }
+    if (cp >= 0x41 && cp <= 0x5A) { return 1; }
+    if (cp >= 0x61 && cp <= 0x7A) { return 1; }
+    if (cp < 0x80) { return 0; }
+    if (cp >= 0x3000 && cp <= 0x303F) { return 0; }  // CJK punctuation
+    if (cp >= 0xFF01 && cp <= 0xFF0F) { return 0; }  // fullwidth punctuation
+    if (cp >= 0x3041 && cp <= 0x309F) { return 3; }  // hiragana
+    if (cp >= 0x30A1 && cp <= 0x30FF) { return 4; }  // katakana
+    if (cp >= 0x4E00 && cp <= 0x9FFF) { return 2; }  // kanji
+    if (cp >= 0x3400 && cp <= 0x4DBF) { return 2; }
+    if (cp >= 0xF900 && cp <= 0xFAFF) { return 2; }
+    if (cp >= 0x20000 && cp <= 0x2FFFF) { return 2; }
+    return 5;
+}
+
+func isWordChar(cp) {
+    return wordClass(cp) != 0;
+}
+
+// Does a word break between an earlier char of class a and a later
+// char of class b? Observed rule: scripts combine only going down
+// the kanji > katakana > hiragana hierarchy (Japanese morphology:
+// okurigana and particles attach to what precedes them).
+func wordBreakP(a, b) {
+    if (a == b) { return 0; }
+    if (a == 2 && (b == 3 || b == 4)) { return 0; }  // kanji + kana
+    if (a == 4 && b == 3) { return 0; }              // katakana + hiragana
+    return 1;
+}
+
+// Move over n words. Returns 1 when the full motion was possible.
+func forwardWord(n) {
+    var full = 1;
+    if (n >= 0) {
+        for (i in 0..n) {
+            while (!eobp() && !isWordChar(charAfter(point()))) {
+                forwardChar(1);
+            }
+            if (eobp()) {
+                full = 0;
+                break;
+            }
+            var cls = wordClass(charAfter(point()));
+            forwardChar(1);
+            while (!eobp()) {
+                var c2 = wordClass(charAfter(point()));
+                if (c2 == 0 || wordBreakP(cls, c2) == 1) {
+                    break;
+                }
+                cls = c2;
+                forwardChar(1);
+            }
+        }
+    } else {
+        for (i in 0..(0 - n)) {
+            while (!bobp() && !isWordChar(charBefore(point()))) {
+                backwardChar(1);
+            }
+            if (bobp()) {
+                full = 0;
+                break;
+            }
+            var cls = wordClass(charBefore(point()));
+            backwardChar(1);
+            while (!bobp()) {
+                var c2 = wordClass(charBefore(point()));
+                if (c2 == 0 || wordBreakP(c2, cls) == 1) {
+                    break;
+                }
+                cls = c2;
+                backwardChar(1);
+            }
+        }
+    }
+    return full;
+}
+
+func backwardWord(n) {
+    return forwardWord(0 - n);
+}
+
+func killWord(n) {
+    var s = point();
+    forwardWord(n);
+    var e = point();
+    killRegion(s, e);
+    return 0;
+}
+
+func backwardKillWord(n) {
+    return killWord(0 - n);
+}
+
+// --- literal search ----------------------------------------------------
+//
+// Nonincremental, like M-x search-forward. Success moves point (after
+// the match going forward, to its start going backward) and returns
+// the new point; failure returns 0 and leaves point alone.
+
+func searchForward(s) {
+    var n = String.charCount(s);
+    if (n == 0) {
+        return 0;
+    }
+    var hay = bufferSubstring(point(), pointMax());
+    var idx = String.indexOf(hay, s);
+    if (idx < 0) {
+        return 0;
+    }
+    gotoChar(point() + idx + n);
+    return point();
+}
+
+func searchBackward(s) {
+    var n = String.charCount(s);
+    if (n == 0) {
+        return 0;
+    }
+    var hay = bufferSubstring(pointMin(), point());
+    // Find the last occurrence before point.
+    var last = 0 - 1;
+    var base = 0;
+    while (true) {
+        var idx = String.indexOf(String.substring(hay, base, -1), s);
+        if (idx < 0) {
+            break;
+        }
+        last = base + idx;
+        base = base + idx + 1;
+    }
+    if (last < 0) {
+        return 0;
+    }
+    gotoChar(pointMin() + last);
+    return point();
+}
+
+// --- file name helpers -------------------------------------------------
+
+func fileNameNondirectory(f) {
+    var last = 0 - 1;
+    var base = 0;
+    while (true) {
+        var idx = String.indexOf(String.substring(f, base, -1), "/");
+        if (idx < 0) {
+            break;
+        }
+        last = base + idx;
+        base = base + idx + 1;
+    }
+    if (last < 0) {
+        return f;
+    }
+    return String.substring(f, last + 1, -1);
+}
+
+// --- regex search ------------------------------------------------------
+//
+// Patterns arrive in Emacs syntax; the upstream Regex.* engine uses
+// the common POSIX/Java syntax, so the escapedness of ( ) | { } is
+// swapped before compiling. Match data is buffer-1-based and read via
+// matchBeginning / matchEnd, like Emacs.
+
+func regexInit() {
+    // Buffer positions of the last match; group 0 is the whole match.
+    MatchData = [];
+    return 0;
+}
+
+func translateEmacsRegex(pat) {
+    var out = "";
+    var n = String.charCount(pat);
+    var i = 0;
+    while (i < n) {
+        var c = String.charAt(pat, i);
+        if (c == "\\" && i + 1 < n) {
+            var c2 = String.charAt(pat, i + 1);
+            if (c2 == "(" || c2 == ")" || c2 == "|" || c2 == "{" || c2 == "}") {
+                out = out + c2;
+            } else {
+                out = out + c + c2;
+            }
+            i = i + 2;
+            continue;
+        }
+        if (c == "(" || c == ")" || c == "|" || c == "{" || c == "}") {
+            out = out + "\\" + c;
+        } else {
+            out = out + c;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// Record match data from an engine result, offset to buffer positions.
+func regexSetMatchData(m, base) {
+    MatchData = [];
+    Array.push(MatchData, base + m.start);
+    Array.push(MatchData, base + m.end);
+    for (g in m.groups) {
+        if (g.start < 0) {
+            Array.push(MatchData, 0);
+            Array.push(MatchData, 0);
+        } else {
+            Array.push(MatchData, base + g.start);
+            Array.push(MatchData, base + g.end);
+        }
+    }
+    return 0;
+}
+
+func matchBeginning(n) {
+    if (n * 2 >= Array.size(MatchData)) {
+        return 0;
+    }
+    return MatchData[n * 2];
+}
+
+func matchEnd(n) {
+    if (n * 2 + 1 >= Array.size(MatchData)) {
+        return 0;
+    }
+    return MatchData[n * 2 + 1];
+}
+
+// Search the whole buffer text so that ^ and $ see true line
+// boundaries; only the starting offset moves.
+func reSearchForward(pat) {
+    var hay = bufferSubstring(pointMin(), pointMax());
+    var m = Regex.search(translateEmacsRegex(pat), hay, point() - 1);
+    if (Type.of(m) != "dict") {
+        return 0;
+    }
+    regexSetMatchData(m, 1);
+    gotoChar(matchEnd(0));
+    return point();
+}
+
+// The last match starting at or before point.
+func reSearchBackward(pat) {
+    var hay = bufferSubstring(pointMin(), pointMax());
+    var tpat = translateEmacsRegex(pat);
+    var limit = point() - 1;
+    var best = 0;
+    var from = 0;
+    while (true) {
+        var m = Regex.search(tpat, hay, from);
+        if (Type.of(m) != "dict") {
+            break;
+        }
+        if (m.start > limit) {
+            break;
+        }
+        best = m;
+        if (m.end > m.start) {
+            from = m.start + 1;
+        } else {
+            from = m.start + 1;
+        }
+    }
+    if (Type.of(best) != "dict") {
+        return 0;
+    }
+    regexSetMatchData(best, 1);
+    gotoChar(matchBeginning(0));
+    return point();
+}
+
+// --- editing commands --------------------------------------------------
+
+// Insert n newlines after point, leaving point before them.
+func openLine(n) {
+    var p = point();
+    for (i in 0..n) {
+        insert("\n");
+    }
+    gotoChar(p);
+    return 0;
+}
+
+// Interchange the characters around point, moving forward; at the end
+// of a line, interchange the two before point instead.
+func transposeChars() {
+    var p = point();
+    if (eolp()) {
+        if (p < pointMin() + 2) {
+            error("Beginning of buffer");
+        }
+        var t = bufferSubstring(p - 2, p);
+        var a = String.charAt(t, 0);
+        var b = String.charAt(t, 1);
+        deleteRegion(p - 2, p);
+        insert(b + a);
+        return 0;
+    }
+    if (p < pointMin() + 1) {
+        error("Beginning of buffer");
+    }
+    var t2 = bufferSubstring(p - 1, p + 1);
+    var a2 = String.charAt(t2, 0);
+    var b2 = String.charAt(t2, 1);
+    deleteRegion(p - 1, p + 1);
+    insert(b2 + a2);
+    return 0;
+}
+
+// Case-convert the next n words (or previous words when n < 0,
+// leaving point in place). kind: "up", "down", "cap".
+func caseWord(n, kind) {
+    var origin = point();
+    var s = origin;
+    var e = origin;
+    if (n >= 0) {
+        forwardWord(n);
+        e = point();
+    } else {
+        forwardWord(n);
+        s = point();
+    }
+    var text = bufferSubstring(s, e);
+    var out = "";
+    var len = String.charCount(text);
+    var prevWord = 0;
+    for (i in 0..len) {
+        var c = String.charAt(text, i);
+        var w = isWordChar(String.charCodeAt(text, i));
+        if (kind == "up") {
+            out = out + String.toUpperCase(c);
+        } else if (kind == "down") {
+            out = out + String.toLowerCase(c);
+        } else {
+            if (w == 1 && prevWord == 0) {
+                out = out + String.toUpperCase(c);
+            } else {
+                out = out + String.toLowerCase(c);
+            }
+        }
+        prevWord = w;
+    }
+    deleteRegion(s, e);
+    gotoChar(s);
+    insert(out);
+    if (n < 0) {
+        gotoChar(origin);
+    }
+    return 0;
+}
+
+func upcaseWord(n) {
+    return caseWord(n, "up");
+}
+
+func downcaseWord(n) {
+    return caseWord(n, "down");
+}
+
+func capitalizeWord(n) {
+    return caseWord(n, "cap");
+}
+
+// Kill the whole current line including its newline.
+func killWholeLine() {
+    var s = lineBeginningPosition();
+    var e = lineEndPosition();
+    if (e < pointMax()) {
+        e = e + 1;
+    }
+    if (s == e) {
+        return 0;
+    }
+    killRegion(s, e);
+    return 0;
+}
+
+// --- replace -----------------------------------------------------------
+
+// Replace every literal occurrence of "from" after point.
+func replaceString(from, to) {
+    var flen = String.charCount(from);
+    if (flen == 0) {
+        return 0;
+    }
+    while (searchForward(from)) {
+        deleteRegion(point() - flen, point());
+        insert(to);
+    }
+    return 0;
+}
+
+// Expand \\1..\\9 and \\& in a replacement, using the current
+// match data and the given group texts.
+func expandReplacement(to, whole, groups) {
+    var out = "";
+    var n = String.charCount(to);
+    var i = 0;
+    while (i < n) {
+        var c = String.charAt(to, i);
+        if (c == "\\" && i + 1 < n) {
+            var c2 = String.charAt(to, i + 1);
+            if (c2 == "&") {
+                out = out + whole;
+                i = i + 2;
+                continue;
+            }
+            var d = String.charCodeAt(to, i + 1) - 0x30;
+            if (d >= 1 && d <= 9) {
+                if (d <= Array.size(groups)) {
+                    out = out + groups[d - 1];
+                }
+                i = i + 2;
+                continue;
+            }
+            out = out + c2;
+            i = i + 2;
+            continue;
+        }
+        out = out + c;
+        i = i + 1;
+    }
+    return out;
+}
+
+// Collect the current match's group texts (buffer positions).
+func matchGroupTexts() {
+    var groups = [];
+    var g = 1;
+    while (g * 2 + 1 < Array.size(MatchData)) {
+        if (matchBeginning(g) == 0) {
+            Array.push(groups, "");
+        } else {
+            Array.push(groups, bufferSubstring(matchBeginning(g), matchEnd(g)));
+        }
+        g = g + 1;
+    }
+    return groups;
+}
+
+// Replace every match of an Emacs-syntax regexp after point.
+func replaceRegexp(pat, to) {
+    while (reSearchForward(pat)) {
+        var ms = matchBeginning(0);
+        var me = matchEnd(0);
+        var whole = bufferSubstring(ms, me);
+        var rep = expandReplacement(to, whole, matchGroupTexts());
+        deleteRegion(ms, me);
+        gotoChar(ms);
+        insert(rep);
+        if (me == ms) {
+            // An empty match: step forward to avoid looping.
+            if (eobp()) {
+                break;
+            }
+            forwardChar(1);
+        }
+    }
+    return 0;
+}
+
+// --- file name expansion -----------------------------------------------
+
+// Emacs minibuffer convention: a double slash restarts from the
+// root, and a slash-tilde restarts from home.
+func substituteInFileName(name) {
+    var n = String.charCount(name);
+    var cut = 0 - 1;
+    var kind = "";
+    var i = 0;
+    while (i < n - 1) {
+        var c = String.charAt(name, i);
+        var c2 = String.charAt(name, i + 1);
+        if (c == "/" && c2 == "/") {
+            cut = i + 1;
+            kind = "/";
+        }
+        if (c == "/" && c2 == "~") {
+            cut = i + 1;
+            kind = "~";
+        }
+        i = i + 1;
+    }
+    if (cut < 0) {
+        return name;
+    }
+    return String.substring(name, cut, -1);
+}
+
+// Expand ~/ and resolve a relative path against dir.
+func expandFileName(name, dir) {
+    name = substituteInFileName(name);
+    if (String.charCount(name) >= 1 && String.charAt(name, 0) == "~") {
+        var home = FileUtil.getHomeDirectory();
+        if (String.charCount(name) == 1) {
+            return home;
+        }
+        if (String.charAt(name, 1) == "/") {
+            return home + String.substring(name, 1, -1);
+        }
+    }
+    if (String.charCount(name) >= 1 && String.charAt(name, 0) == "/") {
+        return name;
+    }
+    if (dir == "") {
+        dir = FileUtil.getCurrentDirectory();
+    }
+    if (String.charCount(dir) > 0 &&
+        String.charAt(dir, String.charCount(dir) - 1) == "/") {
+        return dir + name;
+    }
+    return dir + "/" + name;
+}
+
+// Abbreviate the home directory prefix to ~/.
+func abbreviateFileName(name) {
+    var home = FileUtil.getHomeDirectory();
+    var hn = String.charCount(home);
+    if (hn > 0 && String.charCount(name) >= hn &&
+        String.substring(name, 0, hn) == home) {
+        if (String.charCount(name) == hn) {
+            return "~";
+        }
+        if (String.charAt(name, hn) == "/") {
+            return "~" + String.substring(name, hn, -1);
+        }
+    }
+    return name;
+}
+
+// The directory part of a path, with the trailing slash.
+func fileNameDirectory(name) {
+    var last = 0 - 1;
+    var n = String.charCount(name);
+    for (i in 0..n) {
+        if (String.charAt(name, i) == "/") {
+            last = i;
+        }
+    }
+    if (last < 0) {
+        return "";
+    }
+    return String.substring(name, 0, last + 1);
+}
+
+// The buffer's default directory: its file's directory, or cwd.
+func defaultDirectory() {
+    if (Dict.hasKey(Buf, "defaultDir") && Buf.defaultDir != "") {
+        return Buf.defaultDir;
+    }
+    var cwd = FileUtil.getCurrentDirectory();
+    if (cwd == "") {
+        return "/";
+    }
+    if (String.charAt(cwd, String.charCount(cwd) - 1) != "/") {
+        cwd = cwd + "/";
+    }
+    return cwd;
+}
+
+// switch-to-buffer(name): a name string switches; 0/nil goes to the
+// next buffer (Emacs's (switch-to-buffer nil) other-buffer behavior).
+func switchToBufferArg(name) {
+    if (Type.of(name) != "string" || name == "") {
+        nextBufferInWindow();
+        return 0;
+    }
+    Editor.getBufferCreate(name);
+    Editor.setBuffer(name);
+    windowNoteBuffer();
+    return 0;
+}

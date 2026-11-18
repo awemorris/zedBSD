@@ -1,0 +1,11 @@
+#version 450
+// Stage 3: atomicCompSwap on a storage buffer; exactly one invocation per slot finds the slot empty.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) buffer Slots { uint slot[16]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Old { uint old[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	old[i] = atomicCompSwap(slot[i & 15u], 0u, i + 1u);
+}

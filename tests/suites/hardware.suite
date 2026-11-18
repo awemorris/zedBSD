@@ -1,0 +1,10 @@
+# hardware: the scenarios that need the bare Latitude 5330 (machine: hardware), the person's hands among them.
+os.acpi.*
+os.power.battery-state
+apps.monitor.frame-rate
+apps.files.mount-usb
+desktop.touchpad.gestures
+os.power.ac-plug
+os.power.lid
+os.power.power-button
+os.power.shutdown

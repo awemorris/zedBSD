@@ -1,0 +1,4 @@
+type=daemon
+command=/sbin/bootlog
+restart=no
+required=NO

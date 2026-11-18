@@ -1,0 +1,105 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_X11_XLIB_H
+#define LIBC_X11_XLIB_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <X11/X.h>
+
+#define DefaultScreen(d) XDefaultScreen(d)
+#define RootWindow(d,s) XRootWindow((d),(s))
+#define DefaultRootWindow(d) XRootWindow((d),XDefaultScreen(d))
+#define BlackPixel(d,s) XBlackPixel((d),(s))
+#define WhitePixel(d,s) XWhitePixel((d),(s))
+#define ConnectionNumber(d) XConnectionNumber(d)
+
+typedef struct _XDisplay Display;
+typedef struct { void *ext_data; VisualID visualid; int class; unsigned long red_mask,green_mask,blue_mask; int bits_per_rgb,map_entries; } Visual;
+typedef struct _XGC *GC;
+typedef struct { short lbearing,rbearing,width,ascent,descent; unsigned short attributes; } XCharStruct;
+typedef struct { Font fid; unsigned direction,min_char_or_byte2,max_char_or_byte2,min_byte1,max_byte1; Bool all_chars_exist; unsigned default_char; int n_properties; void *properties; XCharStruct min_bounds,max_bounds; void *per_char; int ascent,descent; } XFontStruct;
+typedef struct { unsigned char byte1,byte2; } XChar2b;
+typedef struct { short x,y; unsigned short width,height; } XRectangle;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; } XAnyEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; int x,y,width,height,count; } XExposeEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window parent,window; } XMapRequestEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window event,window,above; int x,y,width,height,border_width; Bool override_redirect; } XConfigureEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window,root,subwindow; Time time; int x,y,x_root,y_root; unsigned int state,keycode; Bool same_screen; } XKeyEvent;
+
+/* The selections' events: SelectionClear (the owner lost it), SelectionRequest (to the owner), SelectionNotify (to the requestor). */
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; Atom selection; Time time; } XSelectionClearEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window owner,requestor; Atom selection,target,property; Time time; } XSelectionRequestEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window requestor; Atom selection,target,property; Time time; } XSelectionEvent;
+
+typedef XKeyEvent XButtonEvent;
+typedef XKeyEvent XMotionEvent;
+
+typedef union _XEvent { int type; XAnyEvent xany; XExposeEvent xexpose; XKeyEvent xkey; XButtonEvent xbutton; XMotionEvent xmotion; XMapRequestEvent xmaprequest; XConfigureEvent xconfigure; XSelectionClearEvent xselectionclear; XSelectionRequestEvent xselectionrequest; XSelectionEvent xselection; long pad[24]; } XEvent;
+
+Display *XOpenDisplay(const char *);
+int XCloseDisplay(Display *);
+int XDefaultScreen(Display *);
+int XConnectionNumber(Display *);
+Window XRootWindow(Display *,int);
+unsigned long XBlackPixel(Display *,int);
+unsigned long XWhitePixel(Display *,int);
+Window XCreateSimpleWindow(Display *,Window,int,int,unsigned int,unsigned int,unsigned int,unsigned long,unsigned long);
+Pixmap XCreatePixmap(Display *,Drawable,unsigned int,unsigned int,unsigned int);
+int XFreePixmap(Display *,Pixmap);
+int XCopyArea(Display *,Drawable,Drawable,GC,int,int,unsigned int,unsigned int,int,int);
+int XSelectInput(Display *,Window,long);
+int XMapWindow(Display *,Window);
+int XUnmapWindow(Display *,Window);
+int XDestroyWindow(Display *,Window);
+int XReparentWindow(Display *,Window,Window,int,int);
+int XMoveResizeWindow(Display *,Window,int,int,unsigned int,unsigned int);
+int XRaiseWindow(Display *,Window);
+int XSetInputFocus(Display *,Window,int,Time);
+int XGetInputFocus(Display *,Window *,int *);
+int XGetGeometry(Display *,Drawable,Window *,int *,int *,unsigned int *,unsigned int *,unsigned int *,unsigned int *);
+int XQueryTree(Display *,Window,Window *,Window *,Window **,unsigned int *);
+int XStoreName(Display *,Window,const char *);
+int XFetchName(Display *,Window,char **);
+int XFree(void *);
+GC XCreateGC(Display *,Drawable,unsigned long,void *);
+int XFreeGC(Display *,GC);
+int XSetForeground(Display *,GC,unsigned long);
+int XSetFont(Display *,GC,Font);
+Font XLoadFont(Display *,const char *);
+XFontStruct *XLoadQueryFont(Display *,const char *);
+int XFreeFont(Display *,XFontStruct *);
+char **XListFonts(Display *,const char *,int,int *);
+int XFreeFontNames(char **);
+int XFillRectangle(Display *,Drawable,GC,int,int,unsigned int,unsigned int);
+int XFillRectangles(Display *,Drawable,GC,XRectangle *,int);
+int XDrawLine(Display *,Drawable,GC,int,int,int,int);
+int XDrawString(Display *,Drawable,GC,int,int,const char *,int);
+int XDrawString16(Display *,Drawable,GC,int,int,const XChar2b *,int);
+int XNextEvent(Display *,XEvent *);
+int XPending(Display *);
+int XFlush(Display *);
+int XSync(Display *,Bool);
+KeySym XLookupKeysym(XKeyEvent *,int);
+Bool XQueryExtension(Display *,const char *,int *,int *,int *);
+Atom XInternAtom(Display *,const char *,Bool);
+int XSetSelectionOwner(Display *,Atom,Window,Time);
+Window XGetSelectionOwner(Display *,Atom);
+int XConvertSelection(Display *,Atom,Atom,Atom,Window,Time);
+int XChangeProperty(Display *,Window,Atom,Atom,int,int,const unsigned char *,int);
+int XGetWindowProperty(Display *,Window,Atom,long,long,Bool,Atom,Atom *,int *,unsigned long *,unsigned long *,unsigned char **);
+int XDeleteProperty(Display *,Window,Atom);
+int XSendEvent(Display *,Window,Bool,long,XEvent *);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

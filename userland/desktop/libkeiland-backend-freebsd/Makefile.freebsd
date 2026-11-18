@@ -1,0 +1,43 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_BACKEND_SOURCES := \
+	userland/desktop/libkeiland-backend/backend.c \
+	userland/desktop/libkeiland-backend/media/media.c \
+	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/libkeiland-backend/machine/machine.c \
+	userland/desktop/libkeiland-backend/machine/filesystems.c \
+	userland/desktop/libkeiland-backend/machine/users.c \
+	userland/desktop/libkeiland-backend/machine/mounts.c \
+	userland/desktop/libkeiland-backend-freebsd/mounts-freebsd.c \
+	userland/desktop/libkeiland-backend-freebsd/users-freebsd.c \
+	userland/desktop/libkeiland-backend/wpa/network-wpa.c \
+	userland/desktop/libkeiland-backend/wpa/network-config-wpa.c \
+	userland/desktop/libkeiland-backend-freebsd/network-link-freebsd.c \
+	userland/desktop/libkeiland-backend-freebsd/monitor-freebsd.c \
+	userland/desktop/libkeiland-backend-freebsd/audio-freebsd.c \
+	userland/desktop/libkeiland-backend-freebsd/audio-stream-freebsd.c \
+	userland/desktop/libkeiland-backend/audio/pump.c \
+	userland/desktop/libkeiland-backend/unsupported/power-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/events-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/account-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/backlight-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/volume-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/bluetooth-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/phone-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/sharing-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/notify-unsupported.c \
+	userland/desktop/libkeiland-backend/session/session-none.c \
+	userland/desktop/libkeiland-backend-freebsd/seat-freebsd.c \
+	userland/desktop/libkeiland-backend/evdev/input-evdev.c \
+	userland/desktop/libkeiland-backend/drm/display-drm.c \
+	userland/desktop/libkeiland-backend/peer/peer-getpeereid.c \
+	userland/desktop/libkeiland-backend-freebsd/peer-freebsd.c \
+	userland/desktop/libkeiland-backend/dmabuf/gpu-dmabuf.c \
+	userland/desktop/libkeiland-backend-freebsd/sync-freebsd.c
+
+$(eval $(call KEILAND_FREEBSD_STATIC,keiland-backend,libkeiland-backend.a,$(KEILAND_FREEBSD_BACKEND_SOURCES)))
+
+$(KEILAND_FREEBSD_BUILD)/obj/userland/desktop/libkeiland-backend-freebsd/seat-freebsd.o: $(KEILAND_FREEBSD_BUILD)/include/libseat.h

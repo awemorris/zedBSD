@@ -1,0 +1,267 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Windows: panes tiling the single (implicit) frame.
+//
+// The layout is a binary tree. An inner node is {split: "v"|"h",
+// a, b}; "v" stacks a above b, "h" puts a left of b. A leaf is
+// {win: w} where w = {buf, point, startLine, top, left, rows, cols}.
+// rows includes the window's own mode line. SelWin is the selected
+// leaf window; its point mirrors the current buffer's point.
+//
+
+func windowInit() {
+    SelWin = {
+        buf: "*scratch*",
+        point: 1,
+        startLine: 0,
+        top: 1,
+        left: 1,
+        rows: 1,
+        cols: 1
+    };
+    WinRoot = { win: SelWin };
+    return 0;
+}
+
+// Assign rectangles to every window for the current terminal size.
+func layoutWindows(node, top, left, rows, cols) {
+    if (Dict.hasKey(node, "win")) {
+        node.win.top = top;
+        node.win.left = left;
+        node.win.rows = rows;
+        node.win.cols = cols;
+        return 0;
+    }
+    var bias = 0;
+    if (Dict.hasKey(node, "bias")) { bias = node.bias; }
+    if (node.split == "v") {
+        var arows = rows / 2 + bias;
+        if (arows < 2) { arows = 2; }
+        if (arows > rows - 2) { arows = rows - 2; }
+        layoutWindows(node.a, top, left, arows, cols);
+        layoutWindows(node.b, top + arows, left, rows - arows, cols);
+    } else {
+        var acols = cols / 2 + bias;
+        if (acols < 4) { acols = 4; }
+        if (acols > cols - 4) { acols = cols - 4; }
+        layoutWindows(node.a, top, left, rows, acols);
+        layoutWindows(node.b, top, left + acols, rows, cols - acols);
+    }
+    return 0;
+}
+
+// Collect the leaf windows, left-to-right, top-to-bottom order.
+func windowLeaves(node, out) {
+    if (Dict.hasKey(node, "win")) {
+        Array.push(out, node.win);
+        return 0;
+    }
+    windowLeaves(node.a, out);
+    windowLeaves(node.b, out);
+    return 0;
+}
+
+// Find the tree node whose leaf is w. Returns 0 if absent.
+func windowFindLeafNode(node, w) {
+    if (Dict.hasKey(node, "win")) {
+        if (node.win == w) {
+            return node;
+        }
+        return 0;
+    }
+    var r = windowFindLeafNode(node.a, w);
+    if (Type.of(r) == "dict") {
+        return r;
+    }
+    return windowFindLeafNode(node.b, w);
+}
+
+// Find the parent of the node holding leaf w. Returns 0 at the root.
+func windowFindParent(node, w) {
+    if (Dict.hasKey(node, "win")) {
+        return 0;
+    }
+    if (Dict.hasKey(node.a, "win") && node.a.win == w) {
+        return node;
+    }
+    if (Dict.hasKey(node.b, "win") && node.b.win == w) {
+        return node;
+    }
+    var r = windowFindParent(node.a, w);
+    if (Type.of(r) == "dict") {
+        return r;
+    }
+    return windowFindParent(node.b, w);
+}
+
+// Split the selected window; dir is "v" (C-x 2) or "h" (C-x 3).
+// Returns 1 on success, 0 when the window is too small.
+func windowSplit(dir) {
+    if (dir == "v" && SelWin.rows < 6) {
+        return 0;
+    }
+    if (dir == "h" && SelWin.cols < 20) {
+        return 0;
+    }
+    var node = windowFindLeafNode(WinRoot, SelWin);
+    var other = {
+        buf: SelWin.buf,
+        point: SelWin.point,
+        startLine: SelWin.startLine,
+        top: 1, left: 1, rows: 1, cols: 1
+    };
+    // Turn the leaf node into a split in place.
+    Dict.remove(node, "win");
+    node.split = dir;
+    node.a = { win: SelWin };
+    node.b = { win: other };
+    return 1;
+}
+
+// C-x o: select the next window cyclically.
+func windowSelectNext() {
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    var n = Array.size(leaves);
+    var idx = 0;
+    for (i in 0..n) {
+        if (leaves[i] == SelWin) {
+            idx = i;
+        }
+    }
+    windowSelect(leaves[(idx + 1) % n]);
+    return 0;
+}
+
+// Make w the selected window and bring its buffer and point in.
+func windowSelect(w) {
+    SelWin.point = Editor.point();
+    SelWin = w;
+    Editor.getBufferCreate(w.buf);
+    Editor.setBuffer(w.buf);
+    var p = w.point;
+    if (p > Editor.pointMax()) {
+        p = Editor.pointMax();
+    }
+    if (p < 1) {
+        p = 1;
+    }
+    Editor.gotoChar(p);
+    return 0;
+}
+
+// C-x 0: delete the selected window. Returns 1 on success.
+func windowDelete() {
+    var parent = windowFindParent(WinRoot, SelWin);
+    if (Type.of(parent) != "dict") {
+        // Deeper nesting: find the parent by scanning inner nodes.
+        parent = windowFindParentDeep(WinRoot, 0, SelWin);
+    }
+    if (Type.of(parent) != "dict") {
+        return 0;    // Sole window.
+    }
+    var sibling = parent.a;
+    if (Dict.hasKey(parent.a, "win") && parent.a.win == SelWin) {
+        sibling = parent.b;
+    }
+    // The parent node becomes its surviving child, in place.
+    Dict.remove(parent, "split");
+    Dict.remove(parent, "a");
+    Dict.remove(parent, "b");
+    Dict.remove(parent, "win");
+    if (Dict.hasKey(sibling, "win")) {
+        parent.win = sibling.win;
+    } else {
+        parent.split = sibling.split;
+        parent.a = sibling.a;
+        parent.b = sibling.b;
+    }
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    windowSelect(leaves[0]);
+    return 1;
+}
+
+// Parent search that also descends into inner nodes whose child
+// subtree contains the leaf (windowFindParent only checks direct
+// children).
+func windowFindParentDeep(node, parent, w) {
+    if (Dict.hasKey(node, "win")) {
+        if (node.win == w) {
+            return parent;
+        }
+        return 0;
+    }
+    var r = windowFindParentDeep(node.a, node, w);
+    if (Type.of(r) == "dict") {
+        return r;
+    }
+    return windowFindParentDeep(node.b, node, w);
+}
+
+// C-x 1: the selected window becomes the only one.
+func windowDeleteOthers() {
+    WinRoot = { win: SelWin };
+    return 0;
+}
+
+// Keep the selected window's buffer field in sync after a
+// buffer-changing command, and repoint windows whose buffer died.
+func windowNoteBuffer() {
+    SelWin.buf = Editor.bufferName();
+    var leaves = [];
+    windowLeaves(WinRoot, leaves);
+    for (w in leaves) {
+        if (!Dict.hasKey(Buffers, w.buf)) {
+            w.buf = "*scratch*";
+            Editor.getBufferCreate("*scratch*");
+            w.point = 1;
+            w.startLine = 0;
+        }
+    }
+    return 0;
+}
+
+// Grow the selected window vertically by n rows, shrinking its
+// vertical sibling. (Only adjusts a direct v-split parent for now.)
+func windowEnlargeBias(dir, n) {
+    var parent = windowFindParentDeep(WinRoot, 0, SelWin);
+    if (Type.of(parent) != "dict" || parent.split != dir) {
+        return 0;
+    }
+    if (!Dict.hasKey(parent, "bias")) { parent.bias = 0; }
+    // Growing the first child adds bias; the second subtracts.
+    var sign = 1;
+    if (Dict.hasKey(parent.b, "win") && parent.b.win == SelWin) {
+        sign = 0 - 1;
+    }
+    parent.bias = parent.bias + sign * n;
+    return 0;
+}
+
+func windowEnlarge(n) {
+    return windowEnlargeBias("v", n);
+}
+
+func windowEnlargeHorizontally(n) {
+    return windowEnlargeBias("h", n);
+}
+
+// Switch the selected window to the next buffer in the registry.
+func nextBufferInWindow() {
+    var names = [];
+    for (name, b in Buffers) {
+        Array.push(names, name);
+    }
+    var cur = Editor.bufferName();
+    var n = Array.size(names);
+    var idx = 0;
+    for (i in 0..n) {
+        if (names[i] == cur) { idx = i; }
+    }
+    var target = names[(idx + 1) % n];
+    Editor.setBuffer(target);
+    windowNoteBuffer();
+    return 0;
+}

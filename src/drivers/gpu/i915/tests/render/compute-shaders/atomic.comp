@@ -1,0 +1,57 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ATOMIC-SSBO: storage buffer atomics -- a histogram, a sum into one word
+ * from every lane (Noct's reduction), the minimum, maximum, and, or, xor,
+ * exchange and compare-exchange -- without the old value, and one counter
+ * whose old values every invocation keeps.
+ */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer V { uint v[]; };
+layout(std430, set = 0, binding = 1) buffer H {
+    uint bins[16];
+    uint total;
+    int smin;
+    int smax;
+    uint umin;
+    uint umax;
+    uint band;
+    uint bor;
+    uint bxor;
+    uint swap;
+    uint cas;
+    uint count;
+};
+layout(std430, set = 0, binding = 2) buffer R { uint old[]; };
+
+layout(push_constant) uniform P { uint n; } p;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+
+    if (i < p.n) {
+        uint x = v[i];
+
+        atomicAdd(bins[x % 16u], 1u);
+        atomicAdd(total, x);
+        atomicMin(smin, int(x) - 1000);
+        atomicMax(smax, int(x) - 1000);
+        atomicMin(umin, x);
+        atomicMax(umax, x);
+        atomicAnd(band, x | 0xffff0000u);
+        atomicOr(bor, x);
+        atomicXor(bxor, x);
+        atomicExchange(swap, 7u);
+        atomicCompSwap(cas, 0u, 1u);
+        old[i] = atomicAdd(count, 1u);
+    }
+}

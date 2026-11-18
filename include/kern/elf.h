@@ -1,0 +1,133 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026, Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ELF
+ */
+
+#ifndef KERN_KERN_ELF_H
+#define KERN_KERN_ELF_H
+
+#include <stdint.h>
+
+#define EI_NIDENT	16
+#define EI_MAG0		0
+#define EI_MAG1		1
+#define EI_MAG2		2
+#define EI_MAG3		3
+#define EI_CLASS	4
+#define EI_DATA		5
+#define EI_VERSION	6
+#define ELFMAG0		0x7f
+#define ELFMAG1		'E'
+#define ELFMAG2		'L'
+#define ELFMAG3		'F'
+#define ELFCLASS32	1
+#define ELFCLASS64	2
+#define ELFDATA2LSB	1
+#define ELFDATA2MSB	2
+#define EV_CURRENT	1
+#define ET_EXEC		2
+#define ET_DYN		3
+#define EM_386		3
+#define EM_68K		4
+#define EM_MIPS		8
+#define EM_PPC		20
+#define EM_PPC64	21
+#define EM_ARM		40
+#define EM_SPARCV9	43
+#define EM_X86_64	62
+#define EM_AARCH64	183
+#define EM_RISCV	243
+
+/*
+ * The 32-bit ARM header flag that says the image passes floating-point
+ * values in the floating-point unit's registers, the only convention the
+ * armv7 port runs.
+ *
+ * Value referenced: LLVM 23.1 llvm/include/llvm/BinaryFormat/ELF.h
+ * (EF_ARM_ABI_FLOAT_HARD).
+ */
+#define EF_ARM_ABI_FLOAT_HARD	0x00000400U
+#define PT_NULL		0
+#define PT_LOAD		1
+#define PT_DYNAMIC	2
+#define PT_INTERP	3
+#define PT_PHDR		6
+#define PT_TLS		7
+#define PT_GNU_STACK	0x6474e551U
+#define PF_X		1U
+#define PF_W		2U
+#define PF_R		4U
+
+struct elf32_ehdr {
+	uint8_t e_ident[EI_NIDENT];
+	uint16_t e_type;
+	uint16_t e_machine;
+	uint32_t e_version;
+	uint32_t e_entry;
+	uint32_t e_phoff;
+	uint32_t e_shoff;
+	uint32_t e_flags;
+	uint16_t e_ehsize;
+	uint16_t e_phentsize;
+	uint16_t e_phnum;
+	uint16_t e_shentsize;
+	uint16_t e_shnum;
+	uint16_t e_shstrndx;
+};
+
+struct elf32_phdr {
+	uint32_t p_type;
+	uint32_t p_offset;
+	uint32_t p_vaddr;
+	uint32_t p_paddr;
+	uint32_t p_filesz;
+	uint32_t p_memsz;
+	uint32_t p_flags;
+	uint32_t p_align;
+};
+
+struct elf64_ehdr {
+	uint8_t e_ident[EI_NIDENT];
+	uint16_t e_type;
+	uint16_t e_machine;
+	uint32_t e_version;
+	uint64_t e_entry;
+	uint64_t e_phoff;
+	uint64_t e_shoff;
+	uint32_t e_flags;
+	uint16_t e_ehsize;
+	uint16_t e_phentsize;
+	uint16_t e_phnum;
+	uint16_t e_shentsize;
+	uint16_t e_shnum;
+	uint16_t e_shstrndx;
+};
+
+struct elf64_phdr {
+	uint32_t p_type;
+	uint32_t p_flags;
+	uint64_t p_offset;
+	uint64_t p_vaddr;
+	uint64_t p_paddr;
+	uint64_t p_filesz;
+	uint64_t p_memsz;
+	uint64_t p_align;
+};
+
+struct elf32_dyn {
+	int32_t d_tag;
+	uint32_t d_val;
+};
+
+struct elf64_dyn {
+	int64_t d_tag;
+	uint64_t d_val;
+};
+
+#endif

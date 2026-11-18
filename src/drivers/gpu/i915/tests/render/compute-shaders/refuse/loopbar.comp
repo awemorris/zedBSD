@@ -1,0 +1,29 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* REFUSE: a workgroup barrier in a loop only some invocations enter. */
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) buffer O { uint o[]; };
+
+shared uint s[64];
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+
+    s[l] = l;
+    if (l < 32u) {
+        for (uint k = 0u; k < 4u; k++) {
+            s[l] += 1u;
+            barrier();
+        }
+    }
+    o[gl_GlobalInvocationID.x] = s[l];
+}

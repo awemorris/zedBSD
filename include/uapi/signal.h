@@ -1,0 +1,226 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef KERN_UAPI_SIGNAL_H
+#define KERN_UAPI_SIGNAL_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <stddef.h>
+#include <uapi/types.h>
+
+#define NSIG	64
+#define SIGHUP	1
+#define SIGINT	2
+#define SIGQUIT	3
+#define SIGILL	4
+#define SIGTRAP	5
+#define SIGABRT	6
+#define SIGVTALRM	7
+#define SIGFPE	8
+#define SIGKILL	9
+#define SIGBUS	10
+#define SIGSEGV	11
+#define SIGPROF	12
+#define SIGPIPE	13
+#define SIGALRM	14
+#define SIGTERM	15
+#define SIGUSR1	16
+#define SIGUSR2	17
+#define SIGCHLD	18
+#define SIGCONT	19
+#define SIGSTOP	20
+#define SIGTSTP	21
+#define SIGTTIN	22
+#define SIGTTOU	23
+#define SIGURG	24
+#define SIGWINCH	25
+#define SIGIO	26
+#define SIGPOLL	SIGIO
+#define SIGXCPU	27
+#define SIGXFSZ	28
+/*
+ * Raised when a program asks the kernel for something that is not a system
+ * call at all, which a sandbox uses to stop a program that has been made to
+ * ask for the wrong thing.
+ */
+#define SIGSYS	29
+
+#define SIGRTMIN	30
+#define SIGRTMAX	62
+/*
+ * Implementation namespace: this is deliberately outside the public
+ * SIGRTMIN..SIGRTMAX interval.  libc uses it to turn SIGEV_THREAD timer
+ * expiry into work for its notification thread.
+ */
+#define __KERN_SIGEV_THREAD_SIGNAL	63
+#define SIG_BLOCK	0
+#define SIG_UNBLOCK	1
+#define SIG_SETMASK	2
+#define SA_RESTART	0x0001U
+#define SA_NOCLDSTOP	0x0002U
+#define SA_NOCLDWAIT	0x0004U
+#define SA_NODEFER	0x0008U
+#define SA_RESETHAND	0x0010U
+#define SA_SIGINFO	0x0020U
+/*
+ * Run the handler on the alternate stack installed by sigaltstack(2).
+ */
+#define SA_ONSTACK	0x0040U
+/*
+ * POSIX requires these to be usable as a sigaction disposition, so they carry
+ * the handler's type.  The kernel compares them as plain values and casts.
+ */
+#define SIG_DFL	((void (*)(int))0)
+#define SIG_IGN	((void (*)(int))1)
+
+/*
+ * si_code values are positive for kernel-generated events and non-positive
+ * for process-generated events.  All public signal records use fixed-width
+ * fields so their layout is identical in the ILP32 and LP64 ABIs.
+ */
+#define SI_USER	0
+#define SI_QUEUE	(-1)
+#define SI_TIMER	(-2)
+#define SI_KERNEL	0x80
+#define ILL_ILLOPC	1
+#define FPE_INTDIV	1
+#define SEGV_MAPERR	1
+#define SEGV_ACCERR	2
+#define BUS_ADRALN	1
+#define BUS_ADRERR	2
+#define TRAP_BRKPT	1
+
+/*
+ * The thread took the one instruction it was asked to take, and the
+ * thread reached a hardware debug point.  A debugger tells these apart
+ * from a breakpoint it planted, because it did not plant these.
+ */
+#define TRAP_TRACE	2
+#define TRAP_HWBKPT	3
+#define CLD_EXITED	1
+#define CLD_KILLED	2
+#define CLD_DUMPED	3
+#define CLD_TRAPPED	4
+#define CLD_STOPPED	5
+#define CLD_CONTINUED	6
+
+#define SIGEV_NONE	0
+#define SIGEV_SIGNAL	1
+#define SIGEV_THREAD	2
+
+#define SS_ONSTACK	0x0001
+#define SS_DISABLE	0x0002
+#define MINSIGSTKSZ	8192U
+#define SIGSTKSZ	32768U
+
+/*
+ * One bit per signal.  Signal 63 is reserved to libc and bit 63 is
+ * unused, leaving a fixed-width ABI with room for the classic and
+ * realtime sets.
+ */
+typedef uint64_t sigset_t;
+
+union sigval {
+	int32_t sival_int;
+	void *sival_ptr;
+	uint64_t __sival_pad;
+};
+
+/*
+ * pthread_attr_t is a libc type.  Giving its implementation tag a
+ * forward declaration lets sigevent expose the standard pointer type
+ * without making the kernel UAPI depend on the pthread header.
+ */
+struct __pthread_attr;
+
+struct sigevent {
+	int32_t sigev_notify;
+	int32_t sigev_signo;
+	union sigval sigev_value;
+	void (*sigev_notify_function)(union sigval);
+#ifndef KERN_USER_ABI_LP64
+	uint32_t __sigev_notify_function_pad;
+#endif
+	struct __pthread_attr *sigev_notify_attributes;
+#ifndef KERN_USER_ABI_LP64
+	uint32_t __sigev_notify_attributes_pad;
+#endif
+};
+
+typedef struct siginfo {
+	int32_t si_signo;
+	int32_t si_errno;
+	int32_t si_code;
+	uint32_t si_reserved0;
+	int32_t si_pid;
+	uint32_t si_uid;
+	int32_t si_status;
+	uint32_t si_reserved1;
+	uint64_t si_addr;
+	union sigval si_value;
+	uint64_t si_reserved[10];
+} siginfo_t;
+
+struct sigaltstack_record {
+	uapi_ptr_t ss_sp;
+#ifndef KERN_USER_ABI_LP64
+	uint32_t ss_pointer_pad;
+#endif
+	uint64_t ss_size;
+	int32_t ss_flags;
+	uint32_t ss_reserved;
+};
+
+/*
+ * mc_pc, mc_sp, and mc_retval describe the interrupted user context.
+ * The first ABI revision deliberately permits sigreturn to adopt only
+ * uc_sigmask; changing machine-context fields makes sigreturn fail
+ * with EINVAL.  This keeps privileged architecture state opaque to
+ * userland.
+ */
+typedef struct mcontext {
+	uint64_t mc_pc;
+	uint64_t mc_sp;
+	int64_t mc_retval;
+	uint64_t mc_reserved[5];
+} mcontext_t;
+
+typedef struct ucontext {
+	uint64_t uc_flags;
+	uint64_t uc_link;
+	sigset_t uc_sigmask;
+	mcontext_t uc_mcontext;
+	uint64_t uc_reserved[5];
+} ucontext_t;
+
+/*
+ * POSIX names the disposition sa_handler, a function pointer, and sa_sigaction
+ * for a handler that also receives siginfo_t.  The kernel and the C library
+ * need the same storage as a plain value, so all three share one 64-bit field.
+ * A pointer is narrower than that on an ILP32 target, which is why the union
+ * carries the value explicitly: the layout is the same for both ABIs.
+ */
+struct sigaction {
+	union {
+		void (*sa_handler)(int);
+		void (*sa_sigaction)(int, siginfo_t *, void *);
+		uint64_t __sa_handler_value;
+	};
+	sigset_t sa_mask;
+	uint32_t sa_flags;
+	uint32_t __sa_reserved;
+	uint64_t sa_restorer;
+};
+#ifdef __cplusplus
+}
+#endif
+
+#endif

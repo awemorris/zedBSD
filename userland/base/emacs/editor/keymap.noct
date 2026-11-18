@@ -1,0 +1,541 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// Command definitions and the global key bindings.
+//
+// Each command takes the editor environment dictionary as its single
+// argument. Commands are registered under their Emacs names; the global
+// map binds key descriptions to those names via kbd().
+//
+
+func initKeymapModule() {
+    keysInit();
+
+    // --- command definitions ---
+
+    defineCommand("forward-char", (_) => {
+        Editor.forwardChar(prefixNum(_, 1));
+    });
+    defineCommand("backward-char", (_) => {
+        Editor.backwardChar(prefixNum(_, 1));
+    });
+    defineCommand("next-line", (_) => {
+        Editor.forwardLine(prefixNum(_, 1));
+    });
+    defineCommand("previous-line", (_) => {
+        Editor.forwardLine(0 - prefixNum(_, 1));
+    });
+    defineCommand("beginning-of-line", (_) => {
+        gudBeginningOfLine(_);
+    });
+    defineCommand("end-of-line", (_) => {
+        endOfLine();
+    });
+    defineCommand("delete-char", (_) => {
+        deleteChar(prefixNum(_, 1));
+    });
+    defineCommand("delete-backward-char", (_) => {
+        deleteChar(0 - prefixNum(_, 1));
+    });
+    defineCommand("backward-delete-char", (_) => {
+        deleteChar(0 - prefixNum(_, 1));
+    });
+    defineCommand("next-buffer", (_) => {
+        nextBufferInWindow();
+    });
+    defineCommand("split-window-vertically", (_) => {
+        if (windowSplit("v") == 0) { _.echoMessage = "Window too small"; }
+    });
+    defineCommand("split-window-horizontally", (_) => {
+        if (windowSplit("h") == 0) { _.echoMessage = "Window too small"; }
+    });
+    defineCommand("kill-buffer-and-window", (_) => {
+        var name = Editor.bufferName();
+        Editor.killBuffer(name);
+        windowNoteBuffer();
+        windowDelete();
+    });
+    defineCommand("enlarge-window", (_) => {
+        windowEnlarge(prefixNum(_, 1));
+    });
+    defineCommand("enlarge-window-horizontally", (_) => {
+        windowEnlargeHorizontally(prefixNum(_, 1));
+    });
+    defineCommand("scroll-up", (_) => {
+        var size = Term.size();
+        Editor.forwardLine(size.rows - 4);
+    });
+    defineCommand("scroll-down", (_) => {
+        var size = Term.size();
+        Editor.forwardLine(0 - (size.rows - 4));
+    });
+    defineCommand("indent-for-tab-command", (_) => {
+        // v1: a literal tab character.
+        Editor.insert("\t");
+    });
+    defineCommand("newline", (_) => {
+        newline(prefixNum(_, 1));
+    });
+    defineCommand("open-line", (_) => {
+        Editor.openLine(prefixNum(_, 1));
+    });
+    defineCommand("transpose-chars", (_) => {
+        Editor.transposeChars();
+    });
+    defineCommand("upcase-word", (_) => {
+        Editor.upcaseWord(prefixNum(_, 1));
+    });
+    defineCommand("downcase-word", (_) => {
+        Editor.downcaseWord(prefixNum(_, 1));
+    });
+    defineCommand("capitalize-word", (_) => {
+        Editor.capitalizeWord(prefixNum(_, 1));
+    });
+    defineCommand("kill-whole-line", (_) => {
+        _.thisKill = 1;
+        Editor.killWholeLine();
+    });
+    defineCommand("recenter", (_) => {
+        var textRows = SelWin.rows - 1;
+        var pl = countLinesBefore(Editor.point());
+        SelWin.startLine = pl - textRows / 2;
+        if (SelWin.startLine < 0) {
+            SelWin.startLine = 0;
+        }
+    });
+    defineCommand("goto-line", (_) => {
+        var s = readFromMinibuffer(_, "Goto line: ", 0);
+        if (Type.of(s) != "string" || s == "") {
+            return 0;
+        }
+        Editor.pushMark(Editor.point());
+        Editor.gotoChar(Editor.pointMin());
+        Editor.forwardLine(Int.from(s) - 1);
+    });
+    defineCommand("beginning-of-buffer", (_) => {
+        Editor.pushMark(Editor.point());
+        Editor.gotoChar(Editor.pointMin());
+        _.echoMessage = "Mark set";
+    });
+    defineCommand("end-of-buffer", (_) => {
+        Editor.pushMark(Editor.point());
+        Editor.gotoChar(Editor.pointMax());
+        _.echoMessage = "Mark set";
+    });
+    defineCommand("scroll-up-command", (_) => {
+        var size = Term.size();
+        Editor.forwardLine(size.rows - 4);
+    });
+    defineCommand("scroll-down-command", (_) => {
+        var size = Term.size();
+        Editor.forwardLine(0 - (size.rows - 4));
+    });
+    defineCommand("save-buffer", (_) => {
+        var file = Editor.bufferFileName();
+        if (file == "") {
+            // A file-less buffer (e.g. *scratch*): ask like Emacs does.
+            var name = readFromMinibuffer(_, "File to save in: ", fileCompleter);
+            if (Type.of(name) != "string" || name == "") {
+                _.echoMessage = "Save cancelled";
+                return 0;
+            }
+            file = Editor.expandFileName(name, "");
+            Buf.fileName = file;
+        }
+        Editor.writeRegion(Editor.pointMin(), Editor.pointMax(), file);
+        Editor.setBufferModifiedP(0);
+        _.echoMessage = "Wrote " + file;
+    });
+    defineCommand("save-buffers-kill-terminal", (_) => {
+        _.running = 0;
+    });
+    defineCommand("find-file", (_) => {
+        var initial = Editor.abbreviateFileName(defaultDirectory());
+        var file = readFromMinibufferInit(_, "Find file: ", fileCompleter, initial);
+        if (Type.of(file) != "string" || file == "") {
+            return 0;
+        }
+        file = Editor.expandFileName(file, defaultDirectory());
+        // Visit in a buffer named after the file, like Emacs.
+        var name = Editor.fileNameNondirectory(file);
+        var fresh = !Dict.hasKey(Buffers, name);
+        Editor.getBufferCreate(name);
+        Editor.setBuffer(name);
+        if (fresh == 1) {
+            Buf.fileName = file;
+            Buf.defaultDir = Editor.fileNameDirectory(file);
+            if (FileUtil.checkFileExists(file) == 1) {
+                Editor.insertFileContents(file);
+                Editor.gotoChar(Editor.pointMin());
+                Editor.setBufferModifiedP(0);
+                _.echoMessage = Editor.abbreviateFileName(file);
+            } else {
+                _.echoMessage = "(New file)";
+            }
+        } else {
+            _.echoMessage = Editor.abbreviateFileName(file);
+        }
+    });
+    defineCommand("split-window-below", (_) => {
+        if (windowSplit("v") == 0) {
+            _.echoMessage = "Window too small for splitting";
+        }
+    });
+    defineCommand("split-window-right", (_) => {
+        if (windowSplit("h") == 0) {
+            _.echoMessage = "Window too small for splitting";
+        }
+    });
+    defineCommand("other-window", (_) => {
+        windowSelectNext();
+    });
+    defineCommand("delete-window", (_) => {
+        if (windowDelete() == 0) {
+            _.echoMessage = "Attempt to delete sole window";
+        }
+    });
+    defineCommand("delete-other-windows", (_) => {
+        windowDeleteOthers();
+    });
+    defineCommand("switch-to-buffer", (_) => {
+        var name = readFromMinibuffer(_, "Switch to buffer: ", bufferCompleter);
+        if (Type.of(name) != "string" || name == "") {
+            return 0;
+        }
+        switchToBufferArg(name);
+    });
+    defineCommand("kill-buffer", (_) => {
+        var name = readFromMinibuffer(_, "Kill buffer (default " + Editor.bufferName() + "): ", bufferCompleter);
+        if (Type.of(name) != "string") {
+            return 0;
+        }
+        if (name == "") {
+            name = Editor.bufferName();
+        }
+        Editor.killBuffer(name);
+        windowNoteBuffer();
+    });
+    defineCommand("isearch-forward", (_) => {
+        isearchMode(_, 1);
+    });
+    defineCommand("isearch-backward", (_) => {
+        isearchMode(_, 0 - 1);
+    });
+    defineCommand("search-forward", (_) => {
+        var s = readFromMinibuffer(_, "Search: ", 0);
+        if (Type.of(s) != "string" || s == "") {
+            return 0;
+        }
+        if (Editor.searchForward(s) == 0) {
+            _.echoMessage = "Search failed: \"" + s + "\"";
+        }
+    });
+    defineCommand("search-backward", (_) => {
+        var s = readFromMinibuffer(_, "Search backward: ", 0);
+        if (Type.of(s) != "string" || s == "") {
+            return 0;
+        }
+        if (Editor.searchBackward(s) == 0) {
+            _.echoMessage = "Search failed: \"" + s + "\"";
+        }
+    });
+    defineCommand("query-replace", (_) => {
+        var from = readFromMinibuffer(_, "Query replace: ", 0);
+        if (Type.of(from) != "string" || from == "") {
+            return 0;
+        }
+        var to = readFromMinibuffer(_, "Query replace " + from + " with: ", 0);
+        if (Type.of(to) != "string") {
+            return 0;
+        }
+        queryReplaceLoop(_, from, to, 0);
+    });
+    defineCommand("query-replace-regexp", (_) => {
+        var from = readFromMinibuffer(_, "Query replace regexp: ", 0);
+        if (Type.of(from) != "string" || from == "") {
+            return 0;
+        }
+        var to = readFromMinibuffer(_, "Query replace " + from + " with: ", 0);
+        if (Type.of(to) != "string") {
+            return 0;
+        }
+        queryReplaceLoop(_, from, to, 1);
+    });
+    defineCommand("replace-string", (_) => {
+        var from = readFromMinibuffer(_, "Replace string: ", 0);
+        if (Type.of(from) != "string" || from == "") {
+            return 0;
+        }
+        var to = readFromMinibuffer(_, "Replace " + from + " with: ", 0);
+        if (Type.of(to) != "string") {
+            return 0;
+        }
+        Editor.replaceString(from, to);
+    });
+    defineCommand("replace-regexp", (_) => {
+        var from = readFromMinibuffer(_, "Replace regexp: ", 0);
+        if (Type.of(from) != "string" || from == "") {
+            return 0;
+        }
+        var to = readFromMinibuffer(_, "Replace " + from + " with: ", 0);
+        if (Type.of(to) != "string") {
+            return 0;
+        }
+        Editor.replaceRegexp(from, to);
+    });
+    defineCommand("execute-extended-command", (_) => {
+        var name = readFromMinibuffer(_, "M-x ", commandCompleter);
+        if (Type.of(name) != "string" || name == "") {
+            return 0;
+        }
+        var fn = commandByName(name);
+        if (Type.of(fn) == "func") {
+            fn(_);
+        } else {
+            _.echoMessage = "No such command: " + name;
+        }
+    });
+    defineCommand("keyboard-quit", (_) => {
+        _.echoMessage = "Quit";
+    });
+    defineCommand("skk-mode", (_) => {
+        skkToggle(_);
+    });
+    defineCommand("shell", (_) => {
+        shellStart(_);
+    });
+    defineCommand("compile", (_) => {
+        var cmd = readFromMinibufferInit(_, "Compile command: ", 0, CompileCommand);
+        if (Type.of(cmd) != "string") {
+            return 0;
+        }
+        compileStart(_, cmd);
+    });
+    defineCommand("recompile", (_) => {
+        compileRecompile(_);
+    });
+    defineCommand("next-error", (_) => {
+        compileNextError(_);
+    });
+    defineCommand("previous-error", (_) => {
+        compilePreviousError(_);
+    });
+    defineCommand("gdb", (_) => {
+        gudStart(_, "gdb");
+    });
+    defineCommand("gud-lldb", (_) => {
+        gudStart(_, "lldb");
+    });
+    defineCommand("shell-send-input", (_) => {
+        var sess = shellCurrentSession();
+        if (Type.of(sess) != "dict") {
+            return 0;
+        }
+        Editor.gotoChar(Editor.pointMax());
+        var input = Editor.bufferSubstring(Editor.markerPosition(sess.mark),
+                                           Editor.pointMax());
+        Editor.insert("\n");
+        Editor.setMarker(sess.mark, Editor.point());
+        Process.write(sess.proc, input + "\n");
+    });
+    defineCommand("shell-interrupt", (_) => {
+        var sess = shellCurrentSession();
+        if (Type.of(sess) == "dict") {
+            Process.kill(sess.proc, 2);
+        }
+    });
+    defineCommand("shell-send-eof", (_) => {
+        var sess = shellCurrentSession();
+        if (Type.of(sess) == "dict") {
+            Process.write(sess.proc, "\u0004");
+        }
+    });
+    defineCommand("universal-argument", (_) => {
+        readPrefixArg(_, 0 - 1, 0);
+    });
+    defineCommand("negative-argument", (_) => {
+        readPrefixArg(_, 0 - 1, 1);
+    });
+    defineCommand("set-mark-command", (_) => {
+        if (_.hasPrefix == 1) {
+            if (popMark() == 0) {
+                _.echoMessage = "No mark set in this buffer";
+            }
+            return 0;
+        }
+        Editor.pushMark(Editor.point());
+        _.echoMessage = "Mark set";
+    });
+    defineCommand("exchange-point-and-mark", (_) => {
+        if (Editor.mark() == 0) {
+            _.echoMessage = "No mark set in this buffer";
+            return 0;
+        }
+        Editor.exchangePointAndMark();
+    });
+    defineCommand("kill-line", (_) => {
+        _.thisKill = 1;
+        var reps = prefixNum(_, 1);
+        for (i in 0..reps) {
+            if (_.lastWasKill == 1 || i > 0) {
+                killLineAppend();
+            } else {
+                Editor.killLine();
+            }
+        }
+    });
+    defineCommand("kill-region", (_) => {
+        if (Editor.mark() == 0) {
+            _.echoMessage = "The mark is not set now, so there is no region";
+            return 0;
+        }
+        _.thisKill = 1;
+        Editor.killRegion(Editor.regionBeginning(), Editor.regionEnd());
+    });
+    defineCommand("copy-region-as-kill", (_) => {
+        if (Editor.mark() == 0) {
+            _.echoMessage = "The mark is not set now, so there is no region";
+            return 0;
+        }
+        Editor.copyRegionAsKill(Editor.regionBeginning(), Editor.regionEnd());
+    });
+    defineCommand("kill-ring-save", (_) => {
+        // The Emacs name for M-w; same behavior as copy-region-as-kill.
+        var fn = commandByName("copy-region-as-kill");
+        fn(_);
+    });
+    defineCommand("append-next-kill", (_) => {
+        // Marking this command as a kill makes the NEXT kill append.
+        _.thisKill = 1;
+        _.echoMessage = "If the next command is a kill, it will append";
+    });
+    defineCommand("yank", (_) => {
+        Editor.yank();
+    });
+    defineCommand("forward-word", (_) => {
+        Editor.forwardWord(prefixNum(_, 1));
+    });
+    defineCommand("backward-word", (_) => {
+        Editor.backwardWord(prefixNum(_, 1));
+    });
+    defineCommand("kill-word", (_) => {
+        _.thisKill = 1;
+        var s = Editor.point();
+        Editor.forwardWord(1);
+        var e = Editor.point();
+        if (_.lastWasKill == 1) {
+            var text = Editor.bufferSubstring(s, e);
+            Editor.deleteRegion(s, e);
+            Editor.killAppend(text);
+        } else {
+            Editor.killRegion(s, e);
+        }
+    });
+    defineCommand("backward-kill-word", (_) => {
+        _.thisKill = 1;
+        var e = Editor.point();
+        Editor.backwardWord(1);
+        var s = Editor.point();
+        if (_.lastWasKill == 1) {
+            var text = Editor.bufferSubstring(s, e);
+            Editor.deleteRegion(s, e);
+            killPrepend(text);
+        } else {
+            Editor.killRegion(s, e);
+        }
+    });
+    defineCommand("undo", (_) => {
+        var reps = prefixNum(_, 1);
+        for (i in 0..reps) {
+            if (_.lastCommand == "undo" || i > 0) {
+                undoMore();
+            } else {
+                Editor.undo();
+            }
+        }
+        _.echoMessage = "Undo!";
+    });
+    defineCommand("yank-pop", (_) => {
+        if (_.lastCommand != "yank" && _.lastCommand != "yank-pop") {
+            _.echoMessage = "Previous command was not a yank";
+            return 0;
+        }
+        yankPop();
+    });
+
+    // --- global bindings ---
+
+    globalSetKey("C-f", "forward-char");
+    globalSetKey("C-b", "backward-char");
+    globalSetKey("C-n", "next-line");
+    globalSetKey("C-p", "previous-line");
+    globalSetKey("C-a", "beginning-of-line");
+    globalSetKey("C-e", "end-of-line");
+    globalSetKey("C-d", "delete-char");
+    globalSetKey("DEL", "delete-backward-char");
+    globalSetKey("RET", "newline");
+    globalSetKey("C-j", "newline");
+    globalSetKey("TAB", "indent-for-tab-command");
+    globalSetKey("RIGHT", "forward-char");
+    globalSetKey("LEFT", "backward-char");
+    globalSetKey("DOWN", "next-line");
+    globalSetKey("UP", "previous-line");
+    globalSetKey("HOME", "beginning-of-line");
+    globalSetKey("END", "end-of-line");
+    globalSetKey("C-g", "keyboard-quit");
+    globalSetKey("C-u", "universal-argument");
+    globalSetKey("M--", "negative-argument");
+    globalSetKey("C-o", "open-line");
+    globalSetKey("C-t", "transpose-chars");
+    globalSetKey("M-u", "upcase-word");
+    globalSetKey("M-l", "downcase-word");
+    globalSetKey("M-c", "capitalize-word");
+    globalSetKey("C-l", "recenter");
+    globalSetKey("M-g g", "goto-line");
+    globalSetKey("M-g M-n", "next-error");
+    globalSetKey("M-g n", "next-error");
+    globalSetKey("M-g M-p", "previous-error");
+    globalSetKey("M-g p", "previous-error");
+    globalSetKey("C-SPC", "set-mark-command");
+    globalSetKey("C-k", "kill-line");
+    globalSetKey("C-w", "kill-region");
+    globalSetKey("M-w", "kill-ring-save");
+    globalSetKey("C-M-w", "append-next-kill");
+    globalSetKey("C-y", "yank");
+    globalSetKey("M-y", "yank-pop");
+    globalSetKey("C-x C-x", "exchange-point-and-mark");
+    globalSetKey("M-<", "beginning-of-buffer");
+    globalSetKey("M->", "end-of-buffer");
+    globalSetKey("C-v", "scroll-up-command");
+    globalSetKey("M-v", "scroll-down-command");
+    globalSetKey("NEXT", "scroll-up-command");
+    globalSetKey("PRIOR", "scroll-down-command");
+    globalSetKey("M-f", "forward-word");
+    globalSetKey("M-b", "backward-word");
+    globalSetKey("M-d", "kill-word");
+    globalSetKey("M-DEL", "backward-kill-word");
+    globalSetKey("C-_", "undo");
+    globalSetKey("C-x u", "undo");
+    globalSetKey("C-s", "isearch-forward");
+    globalSetKey("C-r", "isearch-backward");
+    globalSetKey("C-x C-f", "find-file");
+    globalSetKey("C-x 2", "split-window-below");
+    globalSetKey("C-x 3", "split-window-right");
+    globalSetKey("C-x o", "other-window");
+    globalSetKey("C-x 0", "delete-window");
+    globalSetKey("C-x 1", "delete-other-windows");
+    globalSetKey("C-x b", "switch-to-buffer");
+    globalSetKey("C-x k", "kill-buffer");
+    globalSetKey("M-x", "execute-extended-command");
+    globalSetKey("M-%", "query-replace");
+    globalSetKey("C-x C-s", "save-buffer");
+    globalSetKey("C-x C-c", "save-buffers-kill-terminal");
+    globalSetKey("C-x C-j", "skk-mode");
+
+    return 0;
+}
+
+// Returns the global keymap, for the command loop.
+func makeGlobalMap() {
+    return GlobalMap;
+}

@@ -1,0 +1,41 @@
+#!/bin/sh
+# keiland-x11: starts an X11 application on the compositor (WS035 p070), the way Xwayland is started when it is
+# needed: xserver (rootless, each X top-level a Wiseman window; WS069 p008) is started once, by the
+# first X application, and every X application runs with DISPLAY=:0.  App Home runs it as: sh /usr/libexec/keiland-x11 COMMAND...
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+dir=${XDG_RUNTIME_DIR:-/tmp}
+pidfile=$dir/x11server.pid
+lock=$dir/x11server.lock
+
+# Whether the server this script started is still there.
+running() {
+	[ -f "$pidfile" ] || return 1
+	pid=$(cat "$pidfile")
+	ps -A -o pid,comm | awk -v pid="$pid" '{ name = $2; sub(".*/", "", name) } $1 == pid && name == "xserver" { found = 1 } END { exit !found }'
+}
+
+# One launcher at a time decides (the others wait for it, at most 10 s).
+i=0
+while ! mkdir "$lock" 2>/dev/null; do
+	i=$((i + 1))
+	[ $i -gt 100 ] && break
+	sleep 0.1
+done
+
+# The server when it is not running: its socket is made anew, and waited for (at most 10 s).
+if ! running; then
+	rm -f /tmp/.X11-unix/X0
+	/bin/xserver > "$dir/x11server.log" 2>&1 </dev/null &
+	echo $! > "$pidfile"
+	i=0
+	while [ ! -S /tmp/.X11-unix/X0 ] && [ $i -lt 100 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+fi
+rmdir "$lock" 2>/dev/null
+
+# The application on the server.
+DISPLAY=:0
+export DISPLAY
+exec "$@"

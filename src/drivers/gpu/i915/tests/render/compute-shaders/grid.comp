@@ -1,0 +1,26 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * GRID: one invocation writes the three group counts of an
+ * indirect dispatch at word `at` of G, so the dispatch after it reads counts
+ * the GPU wrote.
+ */
+#version 450
+
+layout(local_size_x = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer G { uint g[]; };
+
+layout(push_constant) uniform P { uint at; uint x; uint y; uint z; } p;
+
+void main()
+{
+    g[p.at] = p.x;
+    g[p.at + 1u] = p.y;
+    g[p.at + 2u] = p.z;
+}

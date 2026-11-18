@@ -1,0 +1,22 @@
+Declare ioctl() for the socket module on zedBSD.
+
+The socket module sets a socket's blocking mode with ioctl(FIONBIO) when
+<sys/ioctl.h> exists and FIONBIO is defined.  FIONBIO reaches it through
+other zedBSD headers that carry ioctl request numbers (<uapi/ioctl.h>), but
+ioctl() itself is declared only in <sys/ioctl.h>, which the
+module includes for a few named systems and otherwise only beside
+<netpacket/packet.h>.  zedBSD's build turns the latter off (its packet
+sockets do not use struct sockaddr_ll), so zedBSD is named with the systems
+that include <sys/ioctl.h> directly.
+
+--- a/Modules/socketmodule.c
++++ b/Modules/socketmodule.c
+@@ -203,7 +203,7 @@
+ # define USE_GETHOSTBYNAME_LOCK
+ #endif
+ 
+-#if defined(__APPLE__) || defined(__CYGWIN__) || defined(__NetBSD__)
++#if defined(__APPLE__) || defined(__CYGWIN__) || defined(__NetBSD__) || defined(__ZEDBSD__)
+ #  include <sys/ioctl.h>
+ #endif
+ 

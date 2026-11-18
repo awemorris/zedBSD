@@ -1,0 +1,42 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    oracleEmit(Editor.bufferName());
+    Editor.insert("in scratch");
+
+    // A second buffer has its own contents and point.
+    Editor.getBufferCreate("two");
+    Editor.setBuffer("two");
+    oracleEmit(Editor.bufferName());
+    oracleEmit(Editor.bufferString());
+    Editor.insert("in two");
+    Editor.gotoChar(4);
+    oracleEmit(Editor.point());
+
+    // Switching back preserves both.
+    Editor.setBuffer("*scratch*");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+    Editor.setBuffer("two");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.point());
+
+    // The mark is per-buffer.
+    Editor.setMark(2);
+    Editor.setBuffer("*scratch*");
+    oracleEmit(Editor.mark());
+    Editor.setBuffer("two");
+    oracleEmit(Editor.mark());
+
+    // file-name-nondirectory.
+    oracleEmit(Editor.fileNameNondirectory("/tmp/dir/file.txt"));
+    oracleEmit(Editor.fileNameNondirectory("plain.txt"));
+    oracleEmit(Editor.fileNameNondirectory("/tmp/trailing/"));
+
+    // kill-buffer removes it; recreation starts empty.
+    Editor.killBuffer("two");
+    Editor.getBufferCreate("two");
+    Editor.setBuffer("two");
+    oracleEmit(Editor.bufferString());
+    oracleEmit(Editor.bufferName());
+}

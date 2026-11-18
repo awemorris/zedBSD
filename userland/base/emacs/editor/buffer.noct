@@ -1,0 +1,774 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// The buffer: a gap buffer over Packed.uint8, in Noct.
+//
+// This layer used to be C. It is Noct on purpose: an editor's buffer
+// is the best JIT/GC workload the project has, and Packed.copy gives
+// the bulk moves a gap buffer needs.
+//
+// Conventions follow GNU Emacs:
+//  - Positions are 1-based character indices. pointMin() is 1,
+//    pointMax() is bufferSize() + 1.
+//  - Text is UTF-8; positions count characters, never bytes.
+//
+// Layout: bytes [0, gapStart) and [gapEnd, cap) hold text; the gap is
+// [gapStart, gapEnd). Logical byte offset i maps to physical offset
+// i < gapStart ? i : i + (gapEnd - gapStart).
+//
+
+func bufferInit() {
+    Buffers = {};
+    Buf = bufMake("*scratch*");
+    Buffers["*scratch*"] = Buf;
+    return 0;
+}
+
+// Create a detached buffer dictionary. Buf always points at the
+// current one; every existing buffer function works on Buf, so
+// switching buffers is just swapping that reference.
+func bufMake(name) {
+    return {
+        name: name,       // buffer name, unique in Buffers
+        data: Packed.uint8(4096),
+        cap: 4096,
+        gapStart: 0,      // physical byte offset where the gap begins
+        gapEnd: 4096,     // physical byte offset one past the gap
+        chars: 0,         // character count
+        point: 1,         // 1-based character position
+        cacheChar: 0,     // 0-based char index of the cache entry
+        cacheByte: 0,     // logical byte offset of that char
+        allAscii: 1,      // 1 while no multibyte text has been inserted
+        modified: 0,      // 1 after an unsaved change
+        textTick: 0,      // incremented for every text mutation
+        fileName: "",     // visited file, or ""
+        markers: [],      // live markers, adjusted on every edit
+        mark: 0,          // the mark marker, created on first set
+        undoList: [],     // change records; newest at the end
+        lastBoundaryPoint: 1,  // point when the last undo boundary was cut
+        markRing: [],     // older marks (markers); newest at the end
+        mode: "Fundamental",  // major mode name shown in the mode line
+        localMap: {}      // buffer-local keymap, consulted before the global map
+    };
+}
+
+// --- the buffer list ---------------------------------------------------
+
+func bufferName() {
+    return Buf.name;
+}
+
+func getBufferCreate(name) {
+    if (!Dict.hasKey(Buffers, name)) {
+        Buffers[name] = bufMake(name);
+    }
+    return name;
+}
+
+func setBuffer(name) {
+    if (!Dict.hasKey(Buffers, name)) {
+        error("No buffer named " + name);
+    }
+    Buf = Buffers[name];
+    // A pending undo pointer would index the wrong list.
+    UndoNext = 0 - 1;
+    return name;
+}
+
+func killBuffer(name) {
+    if (!Dict.hasKey(Buffers, name)) {
+        return 0;
+    }
+    var wasCurrent = (Buf.name == name);
+    Dict.remove(Buffers, name);
+    if (wasCurrent) {
+        getBufferCreate("*scratch*");
+        setBuffer("*scratch*");
+    }
+    return 0;
+}
+
+// --- byte-level helpers ------------------------------------------------
+
+// Bytes of text currently stored.
+func bufUsedBytes(): int {
+    return Buf.cap - (Buf.gapEnd - Buf.gapStart);
+}
+
+// Read the byte at a logical offset.
+func bufByteAt(i: int): int {
+    if (i < Buf.gapStart) {
+        return Buf.data[i];
+    }
+    return Buf.data[i + (Buf.gapEnd - Buf.gapStart)];
+}
+
+// Length in bytes of the UTF-8 sequence with this lead byte.
+func utf8Len(b: int): int {
+    if (b < 0x80) { return 1; }
+    if (b < 0xC0) { return 1; }   // Stray continuation: step one byte.
+    if (b < 0xE0) { return 2; }
+    if (b < 0xF0) { return 3; }
+    return 4;
+}
+
+// Move the gap so that it starts at the given logical byte offset.
+func bufMoveGap(pos: int): int {
+    var gapLen: int = Buf.gapEnd - Buf.gapStart;
+    if (pos == Buf.gapStart) {
+        return 0;
+    }
+    if (pos < Buf.gapStart) {
+        // Shift [pos, gapStart) right, behind the gap.
+        var n: int = Buf.gapStart - pos;
+        Packed.copy(Buf.data, Buf.gapEnd - n, Buf.data, pos, n);
+        Buf.gapStart = pos;
+        Buf.gapEnd = pos + gapLen;
+    } else {
+        // Shift [gapEnd, gapEnd + (pos - gapStart)) left, before the gap.
+        var n: int = pos - Buf.gapStart;
+        Packed.copy(Buf.data, Buf.gapStart, Buf.data, Buf.gapEnd, n);
+        Buf.gapStart = pos;
+        Buf.gapEnd = Buf.gapEnd + n;
+    }
+    return 0;
+}
+
+// Grow the buffer so the gap can hold at least "need" bytes.
+func bufEnsureGap(need: int): int {
+    var gapLen: int = Buf.gapEnd - Buf.gapStart;
+    if (gapLen >= need) {
+        return 0;
+    }
+    var newCap: int = Buf.cap * 2;
+    while (newCap - bufUsedBytes() < need) {
+        newCap = newCap * 2;
+    }
+    var newData = Packed.uint8(newCap);
+    // Text before the gap, then text after the gap at the tail.
+    Packed.copy(newData, 0, Buf.data, 0, Buf.gapStart);
+    var tail: int = Buf.cap - Buf.gapEnd;
+    Packed.copy(newData, newCap - tail, Buf.data, Buf.gapEnd, tail);
+    Buf.gapEnd = newCap - tail;
+    Buf.data = newData;
+    Buf.cap = newCap;
+    return 0;
+}
+
+// Logical byte offset of a 0-based character index, with a one-entry
+// cache. Scans forward from the cache when possible.
+//
+// This is the hottest loop in the buffer, so the dictionary fields are
+// hoisted into locals and the byte fetch is inlined: under the JIT,
+// locals live in temporaries while every Buf.x is a hash lookup.
+func bufCharToByte(ci: int): int {
+    // In an all-ASCII buffer, characters and bytes coincide. Emacs
+    // makes the same shortcut; it is what keeps large plain-text
+    // buffers O(1) to address.
+    if (Buf.allAscii == 1) {
+        return ci;
+    }
+    var c: int = 0;
+    var b: int = 0;
+    if (Buf.cacheChar <= ci) {
+        c = Buf.cacheChar;
+        b = Buf.cacheByte;
+    } else if (Buf.cacheChar - ci < ci) {
+        // The target is behind the cache but closer to it than to the
+        // start of the buffer: walk backward from the cache instead of
+        // rescanning from byte 0 (backward cursor motion in a large
+        // multibyte buffer is the common case here).
+        c = Buf.cacheChar;
+        b = Buf.cacheByte;
+        while (c > ci) {
+            b = bufPrevCharByte(b);
+            c = c - 1;
+        }
+        Buf.cacheChar = ci;
+        Buf.cacheByte = b;
+        return b;
+    }
+    var data = Buf.data;
+    var gs: int = Buf.gapStart;
+    var delta: int = Buf.gapEnd - gs;
+    // Byte-wise ranged-for over the remaining logical bytes, counting
+    // UTF-8 lead bytes.  This shape is ABCE-eligible (see
+    // docs/design/01-abce.md): at optimize level 2 the loop body runs
+    // without per-access bounds checks.
+    var used: int = bufUsedBytes();
+    var found: int = 0;
+    for (bb in b..used) {
+        var v: int = 0;
+        if (bb < gs) {
+            v = data[bb];
+        } else {
+            v = data[bb + delta];
+        }
+        if (v < 0x80 || v >= 0xC0) {
+            // bb is a character boundary with c characters before it.
+            if (c == ci) {
+                b = bb;
+                found = 1;
+                break;
+            }
+            c = c + 1;
+        }
+    }
+    if (found == 0) {
+        // The target lies at the end of the buffer.
+        b = used;
+    }
+    Buf.cacheChar = ci;
+    Buf.cacheByte = b;
+    return b;
+}
+
+// Step one character backward from logical byte offset b.
+// Returns the byte offset of the previous character's lead byte.
+func bufPrevCharByte(b: int): int {
+    if (Buf.allAscii == 1) {
+        return b - 1;
+    }
+    var data = Buf.data;
+    var gs: int = Buf.gapStart;
+    var delta: int = Buf.gapEnd - gs;
+    b = b - 1;
+    while (b > 0) {
+        var v: int = 0;
+        if (b < gs) {
+            v = data[b];
+        } else {
+            v = data[b + delta];
+        }
+        if (v < 0x80 || v >= 0xC0) {
+            break;
+        }
+        b = b - 1;
+    }
+    return b;
+}
+
+// A modification leaves everything before it untouched, so instead of
+// dropping the char/byte cache, re-anchor it at the modification
+// point (whose pair the caller just computed). Hammered edits at a
+// stable point then address the buffer in O(edit) instead of
+// rescanning the whole prefix.
+func bufCacheAnchor(charIndex: int, byteOffset: int): int {
+    if (Buf.cacheByte >= byteOffset) {
+        Buf.cacheChar = charIndex;
+        Buf.cacheByte = byteOffset;
+    }
+    return 0;
+}
+
+// --- Emacs primitives --------------------------------------------------
+
+func point(): int {
+    return Buf.point;
+}
+
+func pointMin(): int {
+    return 1;
+}
+
+func pointMax(): int {
+    return Buf.chars + 1;
+}
+
+func bufferSize(): int {
+    return Buf.chars;
+}
+
+func gotoChar(pos: int): int {
+    if (pos < 1) {
+        pos = 1;
+    }
+    if (pos > Buf.chars + 1) {
+        pos = Buf.chars + 1;
+    }
+    Buf.point = pos;
+    return pos;
+}
+
+func bobp(): int {
+    if (Buf.point == 1) { return 1; }
+    return 0;
+}
+
+func eobp(): int {
+    if (Buf.point == Buf.chars + 1) { return 1; }
+    return 0;
+}
+
+// Lead byte of the character at a 1-based position, or -1.
+func bufLeadByteAt(pos: int): int {
+    if (pos < 1 || pos > Buf.chars) {
+        return -1;
+    }
+    return bufByteAt(bufCharToByte(pos - 1));
+}
+
+func bolp(): int {
+    if (Buf.point == 1) { return 1; }
+    if (bufLeadByteAt(Buf.point - 1) == 0x0A) { return 1; }
+    return 0;
+}
+
+func eolp(): int {
+    var b: int = bufLeadByteAt(Buf.point);
+    if (b == -1 || b == 0x0A) { return 1; }
+    return 0;
+}
+
+func forwardChar(n: int): int {
+    gotoChar(Buf.point + n);
+    return 0;
+}
+
+func backwardChar(n: int): int {
+    gotoChar(Buf.point - n);
+    return 0;
+}
+
+// Move to the beginning of the line n lines forward.
+// Returns the count of lines that could not be moved.
+func forwardLine(n: int): int {
+    var shortfall: int = 0;
+    if (n == 0) {
+        // Precisely: move to the beginning of the current line.
+        Buf.point = lineBeginningPosition();
+        return 0;
+    }
+    if (n >= 0) {
+        for (i in 0..n) {
+            if (Buf.point > Buf.chars) {
+                // Already at the end of the buffer.
+                shortfall = n - i;
+                break;
+            }
+            Buf.point = lineEndPosition();
+            if (Buf.point > Buf.chars) {
+                // Reached a final line with no newline: moving onto
+                // its end counts as one line moved. (Observed GNU
+                // Emacs behavior via the oracle.)
+                shortfall = n - i - 1;
+                break;
+            }
+            Buf.point = Buf.point + 1;
+        }
+    } else {
+        Buf.point = lineBeginningPosition();
+        for (i in 0..(0 - n)) {
+            if (Buf.point == 1) {
+                shortfall = 0 - ((0 - n) - i);
+                break;
+            }
+            Buf.point = Buf.point - 1;
+            Buf.point = lineBeginningPosition();
+        }
+    }
+    return shortfall;
+}
+
+func lineBeginningPosition(): int {
+    var pos: int = Buf.point;
+    var b: int = bufCharToByte(pos - 1);
+    while (pos > 1) {
+        var pb: int = bufPrevCharByte(b);
+        if (bufByteAt(pb) == 0x0A) {
+            break;
+        }
+        b = pb;
+        pos = pos - 1;
+    }
+    Buf.cacheChar = pos - 1;
+    Buf.cacheByte = b;
+    return pos;
+}
+
+func lineEndPosition(): int {
+    var pos: int = Buf.point;
+    var b: int = bufCharToByte(pos - 1);
+    var data = Buf.data;
+    var gs: int = Buf.gapStart;
+    var delta: int = Buf.gapEnd - gs;
+    var chars: int = Buf.chars;
+    // Byte-wise ranged-for to the end of the buffer, stopping at the
+    // first newline lead byte.  ABCE-eligible (docs/design/01-abce.md):
+    // no per-access bounds checks at optimize level 2.
+    var used: int = bufUsedBytes();
+    var found: int = 0;
+    for (bb in b..used) {
+        var v: int = 0;
+        if (bb < gs) {
+            v = data[bb];
+        } else {
+            v = data[bb + delta];
+        }
+        if (v < 0x80 || v >= 0xC0) {
+            if (bb > b) {
+                // Finished the previous character.
+                pos = pos + 1;
+                b = bb;
+            }
+            if (v == 0x0A) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    if (found == 0 && used > b) {
+        // No newline: point moves past the final character.
+        pos = pos + 1;
+        b = used;
+    }
+    Buf.cacheChar = pos - 1;
+    Buf.cacheByte = b;
+    return pos;
+}
+
+// Text of a logical byte range as a string. The range must not span
+// the gap, so callers go through bufTextRange().
+func bufTextRange(byteStart: int, byteEnd: int) {
+    // Move the gap out of the range, then read one contiguous span.
+    if (Buf.gapStart > byteStart && Buf.gapStart < byteEnd) {
+        bufMoveGap(byteStart);
+    }
+    var phys: int = byteStart;
+    if (byteStart >= Buf.gapStart) {
+        phys = byteStart + (Buf.gapEnd - Buf.gapStart);
+    }
+    return Packed.toString(Buf.data, phys, byteEnd - byteStart);
+}
+
+func bufferString() {
+    return bufTextRange(0, bufUsedBytes());
+}
+
+func bufferSubstring(start: int, end: int) {
+    if (start > end) {
+        var t = start;
+        start = end;
+        end = t;
+    }
+    if (start < 1 || end > Buf.chars + 1) {
+        error("Position " + start + " out of range");
+    }
+    var bs: int = bufCharToByte(start - 1);
+    var be: int = bufCharToByte(end - 1);
+    return bufTextRange(bs, be);
+}
+
+// The character at/before a position as a Unicode codepoint, or 0.
+// Emacs characters are integers, so these are too.
+func charAfter(pos: int): int {
+    if (pos < 1 || pos > Buf.chars) {
+        return 0;
+    }
+    var b: int = bufCharToByte(pos - 1);
+    var lead: int = bufByteAt(b);
+    if (lead < 0x80) {
+        return lead;
+    }
+    var cp: int = 0;
+    var n: int = 0;
+    if (lead < 0xE0) {
+        cp = lead & 0x1F;
+        n = 1;
+    } else if (lead < 0xF0) {
+        cp = lead & 0x0F;
+        n = 2;
+    } else {
+        cp = lead & 0x07;
+        n = 3;
+    }
+    for (i in 0..n) {
+        cp = (cp << 6) | (bufByteAt(b + 1 + i) & 0x3F);
+    }
+    return cp;
+}
+
+func charBefore(pos: int): int {
+    if (pos <= 1 || pos > Buf.chars + 1) {
+        return 0;
+    }
+    return charAfter(pos - 1);
+}
+
+func charToString(ch: int) {
+    return String.chr(ch);
+}
+
+func insert(text) {
+    var nbytes: int = String.byteLength(text);
+    if (nbytes == 0) {
+        return 0;
+    }
+    var nchars: int = String.charCount(text);
+    if (nbytes != nchars) {
+        Buf.allAscii = 0;
+    }
+    Buf.modified = 1;
+    Buf.textTick = Buf.textTick + 1;
+
+    bufEnsureGap(nbytes);
+    var at: int = Buf.point;
+    var bi: int = bufCharToByte(Buf.point - 1);
+    bufMoveGap(bi);
+    Packed.fromString(Buf.data, Buf.gapStart, text);
+    Buf.gapStart = Buf.gapStart + nbytes;
+    Buf.chars = Buf.chars + nchars;
+    Buf.point = Buf.point + nchars;
+    bufCacheAnchor(at - 1, bi);
+    bufAdjustMarkersInsert(at, nchars);
+    bufUndoRecordPoint(at);
+    Array.push(Buf.undoList, { t: "ins", start: at, end: Buf.point });
+    return 0;
+}
+
+func deleteRegion(start: int, end: int) {
+    if (start > end) {
+        var t = start;
+        start = end;
+        end = t;
+    }
+    if (start < 1 || end > Buf.chars + 1) {
+        error("Position " + start + " out of range");
+    }
+    var deletedText = bufferSubstring(start, end);
+    var bs: int = bufCharToByte(start - 1);
+    var be: int = bufCharToByte(end - 1);
+
+    Buf.modified = 1;
+    Buf.textTick = Buf.textTick + 1;
+
+    // Deleting is just widening the gap over the range.
+    bufMoveGap(bs);
+    Buf.gapEnd = Buf.gapEnd + (be - bs);
+    Buf.chars = Buf.chars - (end - start);
+
+    if (Buf.point >= end) {
+        Buf.point = Buf.point - (end - start);
+    } else if (Buf.point > start) {
+        Buf.point = start;
+    }
+    bufCacheAnchor(start - 1, bs);
+    bufAdjustMarkersDelete(start, end);
+    bufUndoRecordPoint(Buf.point);
+    Array.push(Buf.undoList, { t: "del", text: deletedText, pos: start });
+    return 0;
+}
+
+// --- files and state -----------------------------------------------------
+
+func bufferModifiedP() {
+    return Buf.modified;
+}
+
+func setBufferModifiedP(flag: int): int {
+    Buf.modified = flag;
+    return flag;
+}
+
+func bufferFileName() {
+    return Buf.fileName;
+}
+
+// Insert a file's contents at point. Returns the character count.
+func insertFileContents(file) {
+    var text = FileUtil.readText(file);
+    var before: int = Buf.chars;
+    insert(text);
+    return Buf.chars - before;
+}
+
+// Write a region to a file. v1 always replaces the whole file.
+func writeRegion(start: int, end: int, file) {
+    FileUtil.writeText(file, bufferSubstring(start, end));
+    return 0;
+}
+
+// --- markers -----------------------------------------------------------
+//
+// A marker is a dictionary {pos} tracked in Buf.markers and adjusted
+// on every insertion and deletion. pos 0 means the marker points
+// nowhere, like a fresh (make-marker) in Emacs.
+
+func makeMarker() {
+    return { pos: 0 };
+}
+
+func setMarker(marker, pos: int) {
+    if (pos < 1) {
+        pos = 1;
+    }
+    if (pos > Buf.chars + 1) {
+        pos = Buf.chars + 1;
+    }
+    marker.pos = pos;
+    if (!Dict.hasKey(marker, "tracked")) {
+        marker.tracked = 1;
+        Array.push(Buf.markers, marker);
+    }
+    return marker;
+}
+
+func markerPosition(m): int {
+    return m.pos;
+}
+
+func copyMarker(m) {
+    var n = makeMarker();
+    if (m.pos != 0) {
+        setMarker(n, m.pos);
+    }
+    return n;
+}
+
+func pointMarker() {
+    var n = makeMarker();
+    setMarker(n, Buf.point);
+    return n;
+}
+
+// Insertion of n chars at position "at": markers after the insertion
+// point advance; a marker exactly at it stays (Emacs insertion-type
+// nil, the default).
+func bufAdjustMarkersInsert(at: int, n: int): int {
+    var count: int = Array.size(Buf.markers);
+    for (i in 0..count) {
+        var m = Buf.markers[i];
+        if (m.pos > at) {
+            m.pos = m.pos + n;
+        }
+    }
+    return 0;
+}
+
+// Deletion of [start, end): markers inside the region collapse to
+// start; markers after it shift left.
+func bufAdjustMarkersDelete(start: int, end: int): int {
+    var n: int = end - start;
+    var count: int = Array.size(Buf.markers);
+    for (i in 0..count) {
+        var m = Buf.markers[i];
+        if (m.pos >= end) {
+            m.pos = m.pos - n;
+        } else if (m.pos > start) {
+            m.pos = start;
+        }
+    }
+    return 0;
+}
+
+// --- the mark and the region -------------------------------------------
+//
+// The mark is a marker, so it follows edits. pos 0 = not set yet,
+// matching a nil mark in Emacs.
+
+func setMark(pos: int): int {
+    if (Type.of(Buf.mark) != "dict") {
+        Buf.mark = makeMarker();
+    }
+    setMarker(Buf.mark, pos);
+    return pos;
+}
+
+func mark(): int {
+    if (Type.of(Buf.mark) != "dict") {
+        return 0;
+    }
+    return markerPosition(Buf.mark);
+}
+
+func regionBeginning(): int {
+    var m: int = mark();
+    if (m == 0 || m > Buf.point) {
+        return Buf.point;
+    }
+    return m;
+}
+
+func regionEnd(): int {
+    var m: int = mark();
+    if (m == 0 || m < Buf.point) {
+        return Buf.point;
+    }
+    return m;
+}
+
+func exchangePointAndMark() {
+    var m: int = mark();
+    if (m == 0) {
+        return 0;
+    }
+    var p: int = Buf.point;
+    gotoChar(m);
+    setMark(p);
+    return 0;
+}
+
+// At the first change after a boundary, record where point stood when
+// the boundary was cut, so undo restores it. Observed GNU Emacs
+// behavior: the entry appears only when that position differs from a
+// per-change reference (the insertion position for inserts, point
+// after the deletion for deletes), and never while an undo is itself
+// running.
+func bufUndoRecordPoint(cmp: int): int {
+    if (UndoInProgress == 1) {
+        return 0;
+    }
+    var n: int = Array.size(Buf.undoList);
+    if (n > 0 && Buf.undoList[n - 1].t != "bnd") {
+        return 0;
+    }
+    if (Buf.lastBoundaryPoint != cmp) {
+        Array.push(Buf.undoList, { t: "pnt", pos: Buf.lastBoundaryPoint });
+    }
+    return 0;
+}
+
+// --- the mark ring -----------------------------------------------------
+
+// Set the mark at pos, pushing the previous mark onto the ring.
+func pushMark(pos: int): int {
+    if (Type.of(Buf.mark) == "dict" && markerPosition(Buf.mark) != 0) {
+        if (Array.size(Buf.markRing) >= 16) {
+            // Drop the oldest (front) entry.
+            var n: int = Array.size(Buf.markRing);
+            for (i in 0..(n - 1)) {
+                Buf.markRing[i] = Buf.markRing[i + 1];
+            }
+            Array.pop(Buf.markRing);
+        }
+        Array.push(Buf.markRing, copyMarker(Buf.mark));
+    }
+    setMark(pos);
+    return pos;
+}
+
+// C-u C-SPC: jump to the mark and rotate the ring. Returns 0 when
+// there is no mark to jump to.
+func popMark(): int {
+    var cur: int = mark();
+    if (cur == 0) {
+        return 0;
+    }
+    gotoChar(cur);
+    var n: int = Array.size(Buf.markRing);
+    if (n == 0) {
+        return 1;
+    }
+    var mk = Buf.markRing[n - 1];
+    Array.pop(Buf.markRing);
+    // The old mark cycles to the front of the ring.
+    Array.push(Buf.markRing, 0);
+    var i: int = Array.size(Buf.markRing) - 1;
+    while (i > 0) {
+        Buf.markRing[i] = Buf.markRing[i - 1];
+        i = i - 1;
+    }
+    Buf.markRing[0] = copyMarker(Buf.mark);
+    setMarker(Buf.mark, markerPosition(mk));
+    return 1;
+}

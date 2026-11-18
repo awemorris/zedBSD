@@ -1,0 +1,28 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("the quick brown fox");
+    oracleEmit(Editor.mark());
+    Editor.gotoChar(5);
+    Editor.setMark(5);
+    Editor.gotoChar(11);
+    oracleEmit(Editor.mark());
+    oracleEmit(Editor.regionBeginning());
+    oracleEmit(Editor.regionEnd());
+
+    // Point before the mark reverses the region bounds.
+    Editor.gotoChar(2);
+    oracleEmit(Editor.regionBeginning());
+    oracleEmit(Editor.regionEnd());
+
+    // The mark is a marker: edits move it.
+    Editor.gotoChar(1);
+    Editor.insert("!!");
+    oracleEmit(Editor.mark());
+
+    // exchange-point-and-mark swaps the two.
+    Editor.gotoChar(10);
+    Editor.exchangePointAndMark();
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.mark());
+}

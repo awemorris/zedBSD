@@ -1,0 +1,6 @@
+# The texts of 08-language.c in Japanese (domain language).  Installed as KEILAND_DATADIR/keiland/locale/ja/language.tr.
+msg	Language	言語
+msg	Hello	こんにちは
+msg	This window speaks the desktop's language: {1}.	このウインドウはデスクトップの言語で話します: {1}。
+msg	Catalogs used: {1}. Set aside: {2}.	使ったカタログ: {1}。捨てたカタログ: {2}。
+msg	Switch Language	言語を切り替える

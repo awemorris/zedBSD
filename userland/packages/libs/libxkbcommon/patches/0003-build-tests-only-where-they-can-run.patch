@@ -1,0 +1,32 @@
+Build the tests, fuzz targets and benchmarks only where they can run.
+
+The tests, the fuzz targets and the benchmarks are built with the
+library and run on the machine that builds them.  A cross build cannot
+run them, and building them for zedBSD stopped at the benchmark helper,
+which uses CLOCK_PROCESS_CPUTIME_ID, a clock zedBSD's C library does not
+have.  That part of meson.build is now used only when Meson can run the
+host's programs; a native build is unchanged.
+
+--- a/meson.build
++++ b/meson.build
+@@ -874,6 +874,9 @@
+                output: 'xkeyboard-config-test',
+                configuration: xkct_config)
+ 
++# Tests, fuzz targets and benchmarks, which run on the machine that builds
++# them; a cross build, which cannot run them, leaves them out.
++if meson.can_run_host_binaries()
+ # Tests
+ test_env = environment()
+ test_env.set('XKB_LOG_LEVEL', 'debug')
+@@ -1397,6 +1400,10 @@
+   )
+ endif
+ 
++else
++# The summary below reports this; no tests means none of these either.
++has_merge_modes_tests = false
++endif # meson.can_run_host_binaries()
+ 
+ # Documentation.
+ if get_option('enable-docs')

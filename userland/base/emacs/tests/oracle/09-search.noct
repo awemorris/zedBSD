@@ -1,0 +1,26 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func oracleTest() {
+    Editor.insert("the quick brown fox jumps over the lazy dog. fox again 日本語もある");
+    Editor.gotoChar(1);
+
+    oracleEmit(Editor.searchForward("fox"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.searchForward("fox"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.searchForward("fox"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.searchForward("missing"));
+    oracleEmit(Editor.point());
+
+    oracleEmit(Editor.searchBackward("the"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.searchBackward("the"));
+    oracleEmit(Editor.point());
+    oracleEmit(Editor.searchBackward("nothere"));
+
+    // Multibyte needle.
+    Editor.gotoChar(1);
+    oracleEmit(Editor.searchForward("日本語"));
+    oracleEmit(Editor.point());
+}

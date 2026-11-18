@@ -1,0 +1,20 @@
+Leave the symbol version script out on zedBSD.
+
+libxkbcommon links its library with a version script whenever the linker
+accepts one, which gives every exported symbol a version.  zedBSD's
+loader does not read symbol versions and its libraries carry none (the
+package contract checks for that), so on zedBSD the script is not used.
+Other systems are unchanged.
+
+--- a/meson.build
++++ b/meson.build
+@@ -308,7 +308,8 @@
+ 
+ # Supports -Wl,--version-script?
+ meson_test_map = meson.current_source_dir() / 'test/meson_test.map'
+-have_version_script = cc.links(
++# zedBSD's loader does not read symbol versions, so its libraries carry none.
++have_version_script = host_machine.system() != 'zedbsd' and cc.links(
+     'int main(void) { return 0; }',
+     args: f'-Wl,--version-script=@meson_test_map@',
+     name: '-Wl,--version-script',

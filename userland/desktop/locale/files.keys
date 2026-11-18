@@ -1,0 +1,17 @@
+# Files' texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source, WS158 p004).
+# The sidebar's places (places.c places_folders and places_add), drawn with kl_tr(place->label).
+msg	Today
+msg	Home
+msg	Desktop
+msg	Documents
+msg	Downloads
+msg	Pictures
+msg	Music
+msg	Movies
+msg	Recents
+msg	Trash
+msg	Computer
+# The sidebar's sections (ui.c ui_draw_sidebar), drawn with kl_tr(titles[section]).
+msg	Favorites
+msg	Locations
+msg	Devices

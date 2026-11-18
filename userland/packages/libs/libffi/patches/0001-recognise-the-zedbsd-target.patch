@@ -1,0 +1,60 @@
+Teach config.sub and libtool the zedBSD operating system name.
+
+The configure script refuses a host triple whose operating system it does
+not recognise, so cross-building for zedBSD stops before anything is
+compiled; config.sub names it alongside the other systems of its kind.
+libtool then decides from the same name how shared libraries are named
+and loaded, and for a name it does not know it builds no shared library
+at all (dynamic_linker=no).  zedBSD loads ordinary ELF shared objects by
+their SONAME through /lib/ld.so, which is the Linux naming scheme, so
+the two library-naming sections of the generated configure (C and C++)
+describe it that way.  Nothing else in the build reads the name.
+
+--- a/config.sub
++++ b/config.sub
+@@ -1735,6 +1735,7 @@
+ 	     | nindy* | vxsim* | vxworks* | ebmon* | hms* | mvs* \
+ 	     | clix* | riscos* | uniplus* | iris* | isc* | rtu* | xenix* \
+ 	     | mirbsd* | netbsd* | dicos* | openedition* | ose* \
++	     | zedbsd* \
+ 	     | bitrig* | openbsd* | secbsd* | solidbsd* | libertybsd* | os108* \
+ 	     | ekkobsd* | freebsd* | riscix* | lynxos* | os400* \
+ 	     | bosx* | nextstep* | cxux* | aout* | elf* | oabi* \
+--- a/configure
++++ b/configure
+@@ -13094,6 +13094,17 @@
+   dynamic_linker='NetBSD ld.elf_so'
+   ;;
+ 
++zedbsd*)
++  version_type=linux
++  need_lib_prefix=no
++  need_version=no
++  library_names_spec='$libname$release$shared_ext$versuffix $libname$release$shared_ext$major $libname$shared_ext'
++  soname_spec='$libname$release$shared_ext$major'
++  shlibpath_var=LD_LIBRARY_PATH
++  shlibpath_overrides_runpath=no
++  dynamic_linker='zedBSD ld.so'
++  ;;
++
+ netbsd*)
+   version_type=sunos
+   need_lib_prefix=no
+@@ -17098,6 +17109,17 @@
+   dynamic_linker='NetBSD ld.elf_so'
+   ;;
+ 
++zedbsd*)
++  version_type=linux
++  need_lib_prefix=no
++  need_version=no
++  library_names_spec='$libname$release$shared_ext$versuffix $libname$release$shared_ext$major $libname$shared_ext'
++  soname_spec='$libname$release$shared_ext$major'
++  shlibpath_var=LD_LIBRARY_PATH
++  shlibpath_overrides_runpath=no
++  dynamic_linker='zedBSD ld.so'
++  ;;
++
+ netbsd*)
+   version_type=sunos
+   need_lib_prefix=no

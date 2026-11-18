@@ -1,0 +1,131 @@
+// ws101-p011: the example of G3 (Noct's automatic parallelization on the GPU, the demonstration's scene S13).
+// An integer hash of every element of an array, a DOALL loop of 8 rounds of multiply, add, xor and logical shift
+// (32 operations an element), in the 32-bit arithmetic Noct's integers and the GPU share.  Run with --gpu (and at
+// an optimization level of 1 or more) Noct rewrites the loop for the GPU (its OpenGL ES backend, libGLESv2's
+// compute); without it, or when the rewrite declines, the same function runs on the CPU.
+//
+//   noct -O2 -j --gc-tenure-size=100000000 [--gpu] mix.nct [N] [ROUNDS] [time|notime]
+//
+// (Noct's garbage collector keeps 1 MiB of old objects on zedBSD unless told more: the two arrays of 16 MB need the
+// larger --gc-tenure-size.)  N (default 4000000) elements, ROUNDS (default 8) calls of the kernel over the same
+// input.  It prints, as lines "MIX key=value": the checksum of the output (the same on the CPU and the GPU), a
+// check of 1000 elements spread over the array against the scalar function (on the CPU, in this run), and with
+// "time" (the default; zedBSD's BeUI clock) the milliseconds of each call, the first, the median and the best of
+// the calls after the first (the first includes the GPU's set-up: the context, the shader's compile, the buffers).
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+// The kernel: output[i] = hash(input[i]) for every i below count.  Noct's GPU rewrite takes no local
+// variable in the loop (a `var` declines it to the CPU), so output[i] holds the value between the rounds.
+__accel func mix(input: rpackeduint32, output: rpackeduint32, count: int): void {
+    for (i in 0..count) {
+        output[i] = input[i] * 1664525 + 1013904223;
+        output[i] = output[i] ^ (output[i] >> 13);
+        output[i] = output[i] * 1540483477 + 374761393;
+        output[i] = output[i] ^ (output[i] >> 15);
+        output[i] = output[i] * 668265263 + 1246822519;
+        output[i] = output[i] ^ (output[i] >> 16);
+        output[i] = output[i] * 1654435761 + 1266489917;
+        output[i] = output[i] ^ (output[i] >> 11);
+        output[i] = output[i] * 1664525 + 1013904223;
+        output[i] = output[i] ^ (output[i] >> 13);
+        output[i] = output[i] * 1540483477 + 374761393;
+        output[i] = output[i] ^ (output[i] >> 15);
+        output[i] = output[i] * 668265263 + 1246822519;
+        output[i] = output[i] ^ (output[i] >> 16);
+        output[i] = output[i] * 1654435761 + 1266489917;
+        output[i] = output[i] ^ (output[i] >> 11);
+    }
+}
+
+// The same hash of one value, on the CPU (the check).
+func mix1(value) {
+    var x = value;
+    x = x * 1664525 + 1013904223;
+    x = x ^ (x >> 13);
+    x = x * 1540483477 + 374761393;
+    x = x ^ (x >> 15);
+    x = x * 668265263 + 1246822519;
+    x = x ^ (x >> 16);
+    x = x * 1654435761 + 1266489917;
+    x = x ^ (x >> 11);
+    x = x * 1664525 + 1013904223;
+    x = x ^ (x >> 13);
+    x = x * 1540483477 + 374761393;
+    x = x ^ (x >> 15);
+    x = x * 668265263 + 1246822519;
+    x = x ^ (x >> 16);
+    x = x * 1654435761 + 1266489917;
+    x = x ^ (x >> 11);
+    return x;
+}
+
+func main(args) {
+    var n = 4000000;
+    var rounds = 8;
+    var timed = true;
+    if (Array.size(args) >= 1) { n = Int.from(args[0]); }
+    if (Array.size(args) >= 2) { rounds = Int.from(args[1]); }
+    if (Array.size(args) >= 3 && args[2] == "notime") { timed = false; }
+
+    // The input: a scrambled index (not a ramp, so neighbouring outputs differ in every bit).
+    let input = Packed.uint32(n);
+    let output = Packed.uint32(n);
+    for (i in 0..n) {
+        input[i] = i * 747796405 + 891336453;
+    }
+    print("MIX n=" + n + " rounds=" + rounds);
+
+    // The calls, each timed.
+    var times = [];
+    for (r in 0..rounds) {
+        var start = 0;
+        if (timed) { start = BeUI.getMilliseconds(); }
+        mix(input, output, n);
+        if (timed) {
+            var elapsed = BeUI.getMilliseconds() - start;
+            times[r] = elapsed;
+            print("MIX call=" + r + " ms=" + elapsed);
+        }
+    }
+
+    // The checksum of the output: a sum weighted by the index, and a xor, both in 32 bits.
+    var sum = 0;
+    var folded = 0;
+    for (i in 0..n) {
+        sum = sum + output[i] * (i + 1);
+        folded = folded ^ output[i];
+    }
+    print("MIX checksum sum=" + sum + " xor=" + folded);
+
+    // 1000 elements spread over the array (and the last) against the scalar hash.
+    var wrong = 0;
+    var checked = 0;
+    var step = n / 1000;
+    if (step < 1) { step = 1; }
+    var i = 0;
+    while (i < n) {
+        if (output[i] != mix1(input[i])) { wrong = wrong + 1; }
+        checked = checked + 1;
+        i = i + step;
+    }
+    if (output[n - 1] != mix1(input[n - 1])) { wrong = wrong + 1; }
+    checked = checked + 1;
+    print("MIX check=" + checked + " wrong=" + wrong);
+
+    // The first call, and the median and the best of the others.
+    if (timed && rounds >= 2) {
+        var rest = [];
+        for (r in 1..rounds) { rest[r - 1] = times[r]; }
+        // Insertion sort of the few times.
+        for (a in 1..Array.size(rest)) {
+            var v = rest[a];
+            var b = a - 1;
+            while (b >= 0 && rest[b] > v) {
+                rest[b + 1] = rest[b];
+                b = b - 1;
+            }
+            rest[b + 1] = v;
+        }
+        print("MIX first_ms=" + times[0] + " median_ms=" + rest[Array.size(rest) / 2] + " best_ms=" + rest[0]);
+    }
+}

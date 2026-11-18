@@ -1,0 +1,46 @@
+Refuse DNS record lookups when <arpa/nameser.h> is absent.
+
+The threaded resolver parses the answers of res_query() itself, with the
+HEADER structure and the GETSHORT/GETLONG macros of <arpa/nameser.h>.
+zedBSD's C library has res_query() but not that header (0001), so the
+parser cannot be built.  Without the header, g_resolver_lookup_records()
+now reports G_RESOLVER_ERROR_INTERNAL with a message saying record
+lookups are not supported.  Host and service name lookups do not use
+this code and are unchanged.
+
+--- a/gio/gthreadedresolver.c
++++ b/gio/gthreadedresolver.c
+@@ -580,7 +580,7 @@
+ }
+ 
+ 
+-#if defined(G_OS_UNIX)
++#if defined(G_OS_UNIX) && defined(HAVE_ARPA_NAMESER_H)
+ 
+ #if defined __BIONIC__ && !defined BIND_4_COMPAT
+ /* Copy from bionic/libc/private/arpa_nameser_compat.h
+@@ -1275,7 +1275,7 @@
+ {
+   GList *records;
+ 
+-#if defined(G_OS_UNIX)
++#if defined(G_OS_UNIX) && defined(HAVE_ARPA_NAMESER_H)
+   gint len = 512;
+   gint herr;
+   GByteArray *answer;
+@@ -1340,6 +1340,15 @@
+ 
+ #endif  /* HAVE_RES_NQUERY */
+ 
++#elif defined(G_OS_UNIX)
++
++  /* Without <arpa/nameser.h> there is no DNS message parser here (zedBSD);
++   * host name lookups are unaffected, only record lookups are refused. */
++  records = NULL;
++  g_set_error (error, G_RESOLVER_ERROR, G_RESOLVER_ERROR_INTERNAL,
++               _("Error resolving “%s”: %s"), rrname,
++               _("DNS record lookups are not supported"));
++
+ #else
+ 
+   DNS_STATUS status;

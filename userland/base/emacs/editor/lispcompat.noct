@@ -1,0 +1,561 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+//
+// remacs Elisp compatibility scanner.
+//
+// Loads an Emacs Lisp file with every "this does not exist here" turned
+// from a fatal error into a record, so that one run names every gap in
+// the file instead of stopping at the first. This is the measuring
+// instrument for package compatibility work: port nothing, run the scan,
+// read what is missing.
+//
+// What the report is, and is not:
+//
+//   - It reports what the file *reached*. A function called only from
+//     inside a defun body that never runs is never seen. Top-level forms
+//     are most of what a package body is, which makes top-level coverage
+//     a useful approximation rather than a complete one.
+//   - A recorded name is a gap in remacs, not a defect in the package.
+//   - Counts are call sites reached, not importance. A name used once in
+//     a macro every other form expands to matters more than its count.
+//   - **A scan runs the file.** Top-level forms are evaluated, so a file
+//     with side effects has them: scanning GNU Emacs's own lisp/ left a
+//     "blessmail" script in the working directory, because that is what
+//     loading blessmail.el does. Scan a corpus from a directory you do
+//     not mind writing to.
+//
+// The recording itself lives in editor/lisp.noct (lispCompatNote), beside
+// the two places that discover a gap. This file is the driver: it reads
+// form by form, recovers from a form it cannot read, and formats.
+//
+
+func lispCompatBegin() {
+    LispCompat = 1;
+    LispMissing = {};
+    LispCompatErrors = [];
+    LispCompatForms = 0;
+    LispCompatOk = 0;
+    // The Lisp compiler is off during a scan. It is an optimization, it
+    // has nothing to say about what is missing, and a defun full of gaps
+    // is not something it should be asked to translate.
+    LispCompatSavedCompile = LispCompileEnabled;
+    LispCompileEnabled = 0;
+    return 0;
+}
+
+func lispCompatEnd() {
+    LispCompat = 0;
+    LispCompileEnabled = LispCompatSavedCompile;
+    return 0;
+}
+
+// --- scanning ----------------------------------------------------------
+
+// Evaluate the text one top-level form at a time. A form that fails to
+// read, or that dies while evaluating, is recorded and skipped -- the
+// scan then resumes at the next top-level form. Reading the whole file
+// up front (what lispEvalText does) cannot work here: the first piece of
+// syntax the reader does not know would end the scan with one finding.
+func lispCompatScanText(text) {
+    var st = { s: text, n: String.charCount(text), i: 0 };
+    while (true) {
+        LispErr = 0;
+        LispErrMsg = "";
+        lispSkipSpace(st);
+        if (st.i >= st.n) {
+            break;
+        }
+        var start = st.i;
+        var form = lispReadForm(st);
+        if (LispErr == 1) {
+            lispCompatFail(text, start, "read: " + LispErrMsg);
+            lispCompatResync(st, start);
+            continue;
+        }
+        LispCompatForms = LispCompatForms + 1;
+
+        // pcall, not a bare call: a gap that reaches a bridge primitive
+        // with an argument of the wrong type raises a Noct runtime error
+        // rather than a lispError, and that would end the scan.
+        var r = System.pcall(lispEval, form, LispGlobals);
+        if (r.ok == 0) {
+            lispCompatFail(text, start, "runtime: " + r.message);
+        } else if (LispErr == 1) {
+            lispCompatFail(text, start, LispErrMsg);
+        } else {
+            LispCompatOk = LispCompatOk + 1;
+        }
+
+        // Walk this form now and let it go, rather than keeping every
+        // form to walk at the end. A Lisp list is a cons chain, so a
+        // quoted list of 500 elements is a 500-deep nest of
+        // dictionaries; holding all of them at once builds an object
+        // graph deep enough to overflow the GC's recursive copy (see
+        // docs/design.md 13).
+        lispCompatWalk(form);
+    }
+    return 0;
+}
+
+func lispCompatScanFile(path) {
+    if (FileUtil.checkFileExists(path) == 0) {
+        return 0;
+    }
+    lispCompatScanText(FileUtil.readText(path));
+    return 1;
+}
+
+// --- static pass -------------------------------------------------------
+//
+// Evaluating the top level only sees what the top level reaches. Every
+// defun body is code that did not run, and that is where most of a
+// package's demands are: the dolist, the condition-case, the
+// save-excursion. Without a second pass the report would name ten gaps
+// for a file that needs sixty, and the priority order it implies would
+// be wrong.
+//
+// So: walk the form tree and record every head symbol that resolves to
+// nothing. This executes nothing, which is the point -- and also the
+// limit. It cannot know that a name is a local function or a variable
+// bound by a macro this Lisp does not have, so the places where a
+// symbol in head position is not a call are skipped by hand below.
+
+func lispCompatWalk(node) {
+    var t = Type.of(node);
+    if (t == "dict") {
+        // A quoted form is data, not code: '(a b c) says nothing about
+        // a function named "a".
+        if (Dict.hasKey(node, "q")) {
+            return 0;
+        }
+        if (Dict.hasKey(node, "dot")) {
+            return lispCompatWalk(node.dot);
+        }
+        // A bare symbol, or a vector (key sequences and the like).
+        return 0;
+    }
+    if (t != "array" || Array.size(node) == 0) {
+        return 0;
+    }
+
+    var head = node[0];
+    var name = "";
+    if (Type.of(head) == "dict" && Dict.hasKey(head, "sym")) {
+        name = head.sym;
+        if (lispIsCommand(name) == 0 && lispCompatIsSpecialForm(name) == 0) {
+            lispCompatNote("static", name);
+        }
+    }
+
+    // Positions inside these forms hold names and bindings rather than
+    // calls; walking them would invent findings.
+    var from = 1;
+    if (name == "defun" || name == "defmacro" || name == "cl-defun" ||
+        name == "cl-defmacro" || name == "defsubst") {
+        from = 3;                       // skip the name and the arglist
+    } else if (name == "lambda") {
+        from = 2;                       // skip the arglist
+    } else if (name == "let" || name == "let*") {
+        lispCompatWalkBindings(node);
+        from = 2;
+    } else if (name == "cond") {
+        lispCompatWalkClauses(node, 1);
+        return 0;
+    } else if (name == "condition-case") {
+        // (condition-case VAR BODY HANDLER...): a handler's head is a
+        // condition name, not a call -- "(error ...)" as a handler must
+        // not report a function named "error".
+        if (Array.size(node) > 2) {
+            lispCompatWalk(node[2]);
+        }
+        lispCompatWalkClauses(node, 3);
+        return 0;
+    } else if (name == "pcase" || name == "cl-case" || name == "cl-typecase") {
+        if (Array.size(node) > 1) {
+            lispCompatWalk(node[1]);
+        }
+        lispCompatWalkClauses(node, 2);
+        return 0;
+    } else if (name == "dolist" || name == "dotimes") {
+        // (dolist (VAR LIST [RESULT]) body...): the variable is a
+        // binding, the rest of the spec is code.
+        lispCompatWalkBindingSpec(node);
+        from = 2;
+    } else if (name == "cl-loop") {
+        return 0;                       // keyword soup, not a call tree
+    } else if (name == "setq" || name == "setq-local" || name == "setq-default") {
+        lispCompatWalkEvery(node, 2, 2);
+        return 0;
+    } else if (name == "defvar" || name == "defconst" || name == "defvar-local") {
+        from = 2;                       // skip the variable name
+    } else if (name == "interactive" || name == "declare") {
+        return 0;                       // a specification, not code
+    }
+
+    // A ranged-for whose start exceeds its end does not terminate, and
+    // "from" here can overshoot a short form: (defun f) is three
+    // elements less than the skip assumes.
+    var n = Array.size(node);
+    if (from < n) {
+        for (i in from..n) {
+            lispCompatWalk(node[i]);
+        }
+    }
+    return 0;
+}
+
+// (let ((v init) ...) body): only the inits are code.
+func lispCompatWalkBindings(node) {
+    if (Array.size(node) < 2 || Type.of(node[1]) != "array") {
+        return 0;
+    }
+    for (b in node[1]) {
+        if (Type.of(b) == "array" && Array.size(b) > 1) {
+            for (i in 1..Array.size(b)) {
+                lispCompatWalk(b[i]);
+            }
+        }
+    }
+    return 0;
+}
+
+// Clause forms -- cond, condition-case handlers, pcase, cl-case. Every
+// element of a clause is walked as code, but the clause itself is not
+// treated as a call, so "(cond (t x))" does not report a function named
+// "t" and "(condition-case e b (error h))" does not report "error".
+func lispCompatWalkClauses(node, from) {
+    var n = Array.size(node);
+    if (from >= n) {
+        return 0;
+    }
+    for (i in from..n) {
+        var clause = node[i];
+        if (Type.of(clause) != "array") {
+            continue;
+        }
+        for (c in clause) {
+            lispCompatWalk(c);
+        }
+    }
+    return 0;
+}
+
+// (dolist (VAR LIST [RESULT]) body...): VAR is a binding, the rest of
+// the spec is code.
+func lispCompatWalkBindingSpec(node) {
+    if (Array.size(node) < 2 || Type.of(node[1]) != "array") {
+        return 0;
+    }
+    var spec = node[1];
+    if (Array.size(spec) > 1) {
+        for (i in 1..Array.size(spec)) {
+            lispCompatWalk(spec[i]);
+        }
+    }
+    return 0;
+}
+
+// Walk every stride-th element from "from" onward: (setq v1 e1 v2 e2).
+func lispCompatWalkEvery(node, from, stride) {
+    var i = from;
+    while (i < Array.size(node)) {
+        lispCompatWalk(node[i]);
+        i = i + stride;
+    }
+    return 0;
+}
+
+// The special forms this evaluator does implement (editor/lisp.noct).
+// They resolve through no table, so lispIsCommand does not know them.
+func lispCompatIsSpecialForm(name) {
+    if (name == "quote" || name == "function" || name == "lambda" ||
+        name == "if" || name == "cond" || name == "progn" ||
+        name == "setq" || name == "defvar" || name == "defconst" ||
+        name == "defun" || name == "defmacro" || name == "let" ||
+        name == "let*" || name == "and" || name == "or" ||
+        name == "while" || name == "interactive" || name == "declare" ||
+        name == "catch" || name == "unwind-protect" ||
+        name == "condition-case") {
+        return 1;
+    }
+    return 0;
+}
+
+// Skip to the start of the next top-level form: the next line whose
+// first character is "(". Every Elisp file puts its top-level forms in
+// column 0, by a convention no package breaks, which makes this a
+// reliable place to pick the scan back up after a form the reader could
+// not finish.
+func lispCompatResync(st, start) {
+    // Restart from the form that failed, not from wherever the reader
+    // stopped. An unterminated list consumes everything to end of file,
+    // and resuming from there would quietly end the scan -- one missing
+    // parenthesis two hundred lines in would hide the remaining
+    // thousand, and the report would look complete.
+    st.i = start;
+    while (st.i < st.n) {
+        while (st.i < st.n && String.charAt(st.s, st.i) != "\n") {
+            st.i = st.i + 1;
+        }
+        if (st.i < st.n) {
+            st.i = st.i + 1;
+        }
+        if (st.i < st.n && String.charAt(st.s, st.i) == "(") {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+func lispCompatFail(text, pos, msg) {
+    Array.push(LispCompatErrors, { line: lispCompatLine(text, pos), msg: msg });
+    return 0;
+}
+
+func lispCompatLine(text, pos) {
+    var line = 1;
+    for (i in 0..pos) {
+        if (String.charAt(text, i) == "\n") {
+            line = line + 1;
+        }
+    }
+    return line;
+}
+
+// --- classification ----------------------------------------------------
+
+// Names that are special forms or macros in real Emacs rather than
+// functions. The split is worth making because the two are different
+// work: a missing function is a table entry, a missing special form is
+// surgery on the evaluator, and a missing macro needs defmacro and
+// backquote to exist first.
+func lispCompatSpecialSet() {
+    var names = [
+        "defmacro", "defsubst", "defalias", "defcustom", "defgroup",
+        "defface", "define-derived-mode", "define-minor-mode",
+        "define-globalized-minor-mode", "define-obsolete-function-alias",
+        "condition-case", "unwind-protect", "catch", "throw",
+        "save-excursion", "save-current-buffer", "save-restriction",
+        "save-match-data", "save-window-excursion", "with-current-buffer",
+        "with-temp-buffer", "with-output-to-string", "with-silent-modifications",
+        "when", "unless", "dolist", "dotimes", "push", "pop", "setf",
+        "incf", "decf", "prog1", "prog2", "ignore-errors", "declare",
+        "lambda", "let-alist", "if-let", "when-let", "pcase", "pcase-let",
+        "cl-defun", "cl-defmacro", "cl-case", "cl-loop", "cl-incf",
+        "cl-letf", "cl-destructuring-bind", "cl-multiple-value-bind",
+        "eval-when-compile", "eval-and-compile", "with-eval-after-load",
+        "add-to-list", "autoload", "require", "provide", "declare-function",
+        "defvar-local", "setq-default", "setq-local", "dlet"
+    ];
+    var d = {};
+    for (n in names) {
+        d[n] = 1;
+    }
+    return d;
+}
+
+// --- report ------------------------------------------------------------
+
+// Sort records by count descending, then name ascending, so the report
+// leads with what the file leans on hardest.
+func lispCompatSort(rows) {
+    var n = Array.size(rows);
+    // An empty list is turned away before the loop: "1..0" ran forever
+    // on the noct releases this may be run by (see docs/design.md §13).
+    if (n < 2) {
+        return rows;
+    }
+    for (i in 1..n) {
+        var cur = rows[i];
+        var j = i;
+        while (j > 0) {
+            var prev = rows[j - 1];
+            var swap = 0;
+            if (prev.count < cur.count) {
+                swap = 1;
+            } else if (prev.count == cur.count && prev.name > cur.name) {
+                swap = 1;
+            }
+            if (swap == 0) {
+                break;
+            }
+            rows[j] = prev;
+            j = j - 1;
+        }
+        rows[j] = cur;
+    }
+    return rows;
+}
+
+func lispCompatCollect(kind, special) {
+    var rows = [];
+    for (key, rec in LispMissing) {
+        if (rec.kind != kind) {
+            continue;
+        }
+        // ,x and ,@x are not real names: they are what the reader makes
+        // of an unquote inside a backquote it cannot expand. The
+        // backquote itself is already reported under syntax, so listing
+        // its wreckage here would only pad the report.
+        if (String.charAt(rec.name, 0) == ",") {
+            continue;
+        }
+        if (kind == "function") {
+            var isSpecial = Dict.hasKey(special, rec.name);
+            if (isSpecial) {
+                continue;
+            }
+        }
+        Array.push(rows, rec);
+    }
+    return lispCompatSort(rows);
+}
+
+// Special forms and macros, from both passes: whether the file reached
+// a defmacro at load time or only mentions one inside a defun body, the
+// work of implementing it is the same.
+func lispCompatCollectSpecial(special) {
+    var rows = [];
+    for (key, rec in LispMissing) {
+        if (rec.kind != "function" && rec.kind != "static") {
+            continue;
+        }
+        if (!Dict.hasKey(special, rec.name)) {
+            continue;
+        }
+        Array.push(rows, rec);
+    }
+    return lispCompatSort(lispCompatMerge(rows));
+}
+
+// One name is one gap, however many passes found it: "require" reached
+// at load time and "require" seen inside a defun body are the same
+// missing macro. Records are copied rather than merged in place, so
+// LispMissing keeps its per-pass counts and a second report does not
+// double them.
+func lispCompatMerge(rows) {
+    var byName = {};
+    var out = [];
+    for (r in rows) {
+        if (Dict.hasKey(byName, r.name)) {
+            // The larger, not the sum. The static pass walks the same
+            // tree the evaluation ran, so the two passes count the same
+            // occurrences; adding them would report two "require" forms
+            // as four.
+            var e = byName[r.name];
+            if (r.count > e.count) {
+                e.count = r.count;
+            }
+            continue;
+        }
+        var copy = { kind: r.kind, name: r.name, count: r.count };
+        byName[r.name] = copy;
+        Array.push(out, copy);
+    }
+    return out;
+}
+
+// Every name of one kind, as a set, for excluding it from another.
+func lispCompatNameSet(kind) {
+    var d = {};
+    for (key, rec in LispMissing) {
+        if (rec.kind == kind) {
+            d[rec.name] = 1;
+        }
+    }
+    return d;
+}
+
+// Names the static pass found that the evaluation never reached. Kept in
+// their own section because the evidence is weaker: a mention in code
+// that did not run is not proof the file needs it at run time.
+func lispCompatCollectStatic(special, seen) {
+    var rows = [];
+    for (key, rec in LispMissing) {
+        if (rec.kind != "static") {
+            continue;
+        }
+        if (Dict.hasKey(special, rec.name) || Dict.hasKey(seen, rec.name)) {
+            continue;
+        }
+        if (String.charAt(rec.name, 0) == ",") {
+            continue;
+        }
+        // Names the file went on to define itself. The walk runs form by
+        // form, so a call on line 50 to a defun on line 100 is recorded
+        // before that defun exists; by the end of the scan it does, and
+        // it was never a gap in remacs. Whole packages are written that
+        // way -- mew defines a hundred of its own helpers -- and leaving
+        // them in buries the real findings.
+        if (lispIsCommand(rec.name) == 1) {
+            continue;
+        }
+        Array.push(rows, rec);
+    }
+    return lispCompatSort(rows);
+}
+
+func lispCompatSection(lines, title, rows) {
+    if (Array.size(rows) == 0) {
+        return 0;
+    }
+    Array.push(lines, "");
+    Array.push(lines, title + " (" + Array.size(rows) + ")");
+    for (r in rows) {
+        var pad = "";
+        var w = String.charCount(r.name);
+        while (w + String.charCount(pad) < 40) {
+            pad = pad + " ";
+        }
+        Array.push(lines, "  " + r.name + pad + r.count);
+    }
+    return 0;
+}
+
+// The report as an array of lines, not one string. Two reasons: a Noct
+// string built by repeated "+" is capped (every concatenation goes
+// through a fixed 1KB buffer upstream and truncates in silence), and
+// lines are what a test wants to compare anyway.
+func lispCompatReport(path) {
+    var special = lispCompatSpecialSet();
+    var funcs = lispCompatCollect("function", special);
+    var vars = lispCompatCollect("variable", special);
+    var syntax = lispCompatCollect("syntax", special);
+    var forms = lispCompatCollectSpecial(special);
+    var stat = lispCompatCollectStatic(special, lispCompatNameSet("function"));
+
+    var lines = [];
+    Array.push(lines, "remacs elisp compatibility report");
+    Array.push(lines, "file: " + path);
+    Array.push(lines, "top-level forms: " + LispCompatForms
+                      + " read, " + LispCompatOk + " evaluated without error");
+
+    lispCompatSection(lines, "unsupported reader syntax", syntax);
+    lispCompatSection(lines, "missing special forms and macros", forms);
+    lispCompatSection(lines, "missing functions", funcs);
+    lispCompatSection(lines, "unbound variables", vars);
+    lispCompatSection(lines, "missing functions in code that did not run", stat);
+
+    var nerr = Array.size(LispCompatErrors);
+    if (nerr > 0) {
+        Array.push(lines, "");
+        Array.push(lines, "forms that did not complete (" + nerr + ")");
+        var shown = 0;
+        for (e in LispCompatErrors) {
+            if (shown >= 40) {
+                Array.push(lines, "  ... and " + (nerr - shown) + " more");
+                break;
+            }
+            Array.push(lines, "  " + path + ":" + e.line + ": " + e.msg);
+            shown = shown + 1;
+        }
+    }
+
+    var total = Array.size(funcs) + Array.size(vars)
+              + Array.size(syntax) + Array.size(forms) + Array.size(stat);
+    if (total == 0 && nerr == 0) {
+        Array.push(lines, "");
+        Array.push(lines, "Nothing missing: the file loaded on remacs as it stands.");
+    }
+    return lines;
+}

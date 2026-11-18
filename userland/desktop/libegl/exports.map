@@ -1,0 +1,54 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* The EGL calls, and the ones libGLESv2 finds its context and records its frame with. */
+{
+	global:
+		eglBindAPI;
+		eglChooseConfig;
+		eglCreateContext;
+		eglCreatePbufferSurface;
+		eglCreatePlatformWindowSurface;
+		eglCreatePlatformWindowSurfaceEXT;
+		eglCreateWindowSurface;
+		eglDestroyContext;
+		eglDestroySurface;
+		eglGetConfigAttrib;
+		eglGetConfigs;
+		eglGetCurrentContext;
+		eglGetCurrentDisplay;
+		eglGetCurrentSurface;
+		eglGetDisplay;
+		eglGetError;
+		eglGetPlatformDisplay;
+		eglGetPlatformDisplayEXT;
+		eglGetProcAddress;
+		eglInitialize;
+		eglMakeCurrent;
+		eglQueryAPI;
+		eglQueryContext;
+		eglQueryString;
+		eglQuerySurface;
+		eglReleaseThread;
+		eglSurfaceAttrib;
+		eglSwapBuffers;
+		eglSwapInterval;
+		eglTerminate;
+		eglWaitClient;
+		eglWaitGL;
+		eglWaitNative;
+		zegl_current_context;
+		zegl_depth_format;
+		zegl_frame_begin;
+		zegl_frame_flush;
+		zegl_frame_leave_pass;
+		zegl_frame_pass;
+		zegl_retire;
+		zegl_surface_settled;
+	local:
+		*;
+};

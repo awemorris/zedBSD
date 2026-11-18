@@ -1,0 +1,20 @@
+#version 450
+// Stage 2: a tree sum of 128 words in shared memory, a barrier between the levels.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 128) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint o[]; };
+shared uint s[128];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	s[l] = src[gl_GlobalInvocationID.x];
+	barrier();
+	for (uint stride = 64u; stride > 0u; stride = stride >> 1) {
+		if (l < stride)
+			s[l] = s[l] + s[l + stride];
+		barrier();
+	}
+	if (l == 0u)
+		o[gl_WorkGroupID.x] = s[0];
+}

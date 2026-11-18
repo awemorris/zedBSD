@@ -1,0 +1,36 @@
+require zedbuild;
+
+func main(args) {
+    var machine = "";
+    var positional = [];
+    var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--machine" && i + 1 < Array.size(args)) {
+            machine = args[i + 1]; i = i + 2;
+        } else { Array.push(positional, args[i]); i = i + 1; }
+    }
+    if ((machine != "pcat" && machine != "pc98") || Array.size(positional) != 2) {
+        zbFail("usage: finalize-bios-stage2.noct --machine pcat|pc98 INPUT OUTPUT");
+    }
+    if (positional[0] == positional[1]) { zbFail("input and output must differ"); }
+    var raw = zbReadFile(positional[0]);
+    if (Packed.size(raw) < 32) { zbFail("Stage 2 is shorter than its header"); }
+    if (zbU32LE(raw, 0) != 0x324c425a || zbU16LE(raw, 4) != 1 ||
+        zbU16LE(raw, 6) != 32) { zbFail("invalid ZBL2 template header"); }
+    var machineId = 1;
+    if (machine == "pc98") { machineId = 2; }
+    if (zbU16LE(raw, 14) != machineId) { zbFail("Stage 2 machine mismatch"); }
+    var entry = zbU32LE(raw, 16);
+    if (entry < 32 || entry >= Packed.size(raw)) { zbFail("invalid Stage 2 entry"); }
+    var sectors = (Packed.size(raw) + 511) / 512;
+    if (sectors < 1 || sectors > 127) { zbFail("Stage 2 must occupy 1..127 sectors"); }
+    var output = Packed.uint8(sectors * 512);
+    zbCopy(output, 0, raw, 0, Packed.size(raw));
+    zbPut32LE(output, 8, Packed.size(raw));
+    zbPut16LE(output, 12, sectors);
+    zbPut32LE(output, 20, 0);
+    zbPut32LE(output, 20, (0 - zbDwordSumLE(output)) & 4294967295);
+    if (zbDwordSumLE(output) != 0) { zbFail("internal Stage 2 checksum failure"); }
+    zbWriteFile(positional[1], output);
+}
+

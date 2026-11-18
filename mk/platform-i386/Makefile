@@ -1,0 +1,9 @@
+include mk/platform-i386/defaults.mk
+include mk/platform-i386/libc.mk
+include mk/platform-i386/sysroot.mk
+include mk/platform-i386/vmunix.mk
+include mk/platform-i386/firmware.mk
+include mk/platform-i386/bootloader.mk
+include mk/platform-i386/programs.mk
+include mk/platform-i386/rootfs.mk
+include mk/platform-i386/image.mk

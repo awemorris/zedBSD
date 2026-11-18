@@ -1,0 +1,44 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=brcmbt-firmware
+package-version=1.2-9+rpt4
+device=Raspberry Pi 4 Model B on-board BCM43455 (Cypress CYW43455) Bluetooth, HCI over the PL011 UART
+consumer=/sbin/bluetoothd (Broadcom patchram load, plan/ws215/phase001/phase.md B14 and section 4)
+installed-directory=/lib/firmware/brcm
+installed-file=BCM4345C0.hcd
+installed-license=/usr/share/licenses/brcmbt-firmware/LICENCE.cypress
+installed-copyright=/usr/share/licenses/brcmbt-firmware/bluez-firmware.copyright
+
+acquisition-repository=https://github.com/RPi-Distro/bluez-firmware
+acquisition-branch=bookworm
+acquisition-revision=adb4d55c8f193ff16ece74dd72fd6e8801632103
+acquisition-revision-date=2025-10-02
+acquisition-base-url=https://raw.githubusercontent.com/RPi-Distro/bluez-firmware/adb4d55c8f193ff16ece74dd72fd6e8801632103
+acquisition-file=debian/firmware/broadcom/BCM4345C0.hcd size=63806 sha256=51c45e77ddad91a19e96dc8fb75295b2087c279940df2634b23baf71b6dea42c
+acquisition-copyright-path=debian/copyright
+acquisition-copyright-size=23518
+acquisition-copyright-sha256=79576e5ea6740845bf71ce96ad4e31cd49797c8e1a259d64670f48554b8eb67c
+acquisition-copyright-stanza=Files: debian/firmware/broadcom/* / Copyright: Copyright (c) 2000-2003 Broadcom Corporation / License: CYPRESS-WIRELESS-CONNECTIVITY-DEVICES-DRIVER-END-USER-LICENSE-AGREEMENT
+upstream-link=debian/bluez-firmware.links names BCM4345C0.raspberrypi,4-model-b.hcd as a link to BCM4345C0.hcd; bluetoothd opens BCM4345C0.hcd, so only that name is installed
+
+license-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+license-tag=20260410
+license-tag-object=4585dd5a5f0cee08990d754701d8866d9e9266e6
+license-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+license-base-url=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
+license-url-suffix=?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+license-path=LICENCE.cypress
+license-size=8914
+license-sha256=ae0db6cc4db33941148df0f67de53e76a77b1b5a46b3165edb7040aa2750015f
+license-git-blob=070ef66f43421ab8913299953926bfdd8c7b7a91
+license-text-check=bluez-firmware's debian/firmware/broadcom/LICENSE.cypress (sha256 a92f031f19089fa63bd24ac4c5298ca1356670321b39c67024a961ee3285fff7) is the kernel.org cgit page of blob 070ef66f43421ab8913299953926bfdd8c7b7a91; its text without markup, and the License paragraph of debian/copyright without its DEP-5 indentation, equal this LICENCE.cypress except for one trailing empty line (ws215-p004, 2026-10-13)
+
+redistribution=object-code-only, solely for use with Cypress integrated circuit products
+redistribution-scope=selected only by the Raspberry Pi 4 image configuration, whose BCM43455 is a Cypress integrated circuit
+modification=forbidden by the licence; the installed bytes equal the verified upstream bytes
+reverse-engineering=forbidden by the licence; bluetoothd reads only the HCI command framing (opcode, length, parameters) the file is made of and sends each record unchanged
+export-control=the licence's Compliance With Law paragraph applies
+license=Cypress Wireless Connectivity Devices Driver End User License Agreement in the installed LICENCE.cypress file
+source-tree-blob=absent
+runtime-network-fetch=forbidden

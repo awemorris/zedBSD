@@ -1,0 +1,118 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Generic device DMA mapping interface
+ */
+
+#ifndef KERN_DRIVERS_DMA_H
+#define KERN_DRIVERS_DMA_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+struct drv_dma_device;
+struct drv_dma_mapping;
+struct drv_dma_vector;
+
+#define DRV_DMA_VECTOR_MAX_SEGMENTS 32U
+#define DRV_DMA_VECTOR_MAX_SIZE (64U * 1024U)
+
+enum drv_dma_direction {
+	DRV_DMA_TO_DEVICE,
+	DRV_DMA_FROM_DEVICE,
+	DRV_DMA_BIDIRECTIONAL
+};
+
+struct drv_dma_segment {
+	uint64_t address;
+	size_t length;
+};
+
+struct drv_dma_buffer {
+	void *address;
+	uint64_t device_address;
+	size_t size;
+	uintptr_t private_data[2];
+};
+
+struct drv_dma_constraints {
+	unsigned address_bits;
+	size_t max_segment_size;
+	/* Power-of-two byte boundary that a segment must not cross, or zero. */
+	uint64_t segment_boundary;
+	int coherent;
+};
+
+int drv_dma_device_create(const struct drv_dma_constraints *constraints,
+			  struct drv_dma_device **result);
+/*
+ * Creates an unpublished device whose bus addresses are physical addresses
+ * plus bus_offset. physical_limit is inclusive; zero adds no backing limit.
+ * The alias must preserve segment boundaries and allocation alignment.
+ * Identity callers keep using drv_dma_device_create with no layout change.
+ */
+int drv_dma_device_create_window(const struct drv_dma_constraints *constraints,
+				 uint64_t bus_offset, uint64_t physical_limit,
+				 struct drv_dma_device **result);
+/*
+ * Destroy closes the device to new allocations and mappings.  EBUSY means an
+ * operation or coherent allocation is still live; free the remaining buffers
+ * and retry.  A device is not reopened after destruction has begun.  As with
+ * other raw kernel object handles, its owner must prevent a brand-new API call
+ * from starting after a successful destroy.
+ */
+int drv_dma_device_destroy(struct drv_dma_device *device);
+
+unsigned drv_dma_device_address_bits(const struct drv_dma_device *device);
+size_t drv_dma_device_max_segment_size(const struct drv_dma_device *device);
+int drv_dma_device_is_coherent(const struct drv_dma_device *device);
+
+int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
+			   size_t alignment, struct drv_dma_buffer *buffer);
+
+/* Owned coherent staging with a CPU-contiguous view and bounded DMA segments.
+ * The caller excludes CPU mutation during DMA and retains this owner until
+ * hardware retirement. Query results do not outlive the owner. Free may fail
+ * while backing retirement is refused; retry with the same retained owner. */
+int drv_dma_vector_create(struct drv_dma_device *device, size_t size,
+	struct drv_dma_vector **result);
+int drv_dma_vector_free(struct drv_dma_vector *vector);
+void *drv_dma_vector_address(const struct drv_dma_vector *vector);
+unsigned drv_dma_vector_count(const struct drv_dma_vector *vector);
+int drv_dma_vector_segment(const struct drv_dma_vector *vector, unsigned index,
+	struct drv_dma_segment *segment);
+void drv_dma_free_coherent(struct drv_dma_device *device,
+			   struct drv_dma_buffer *buffer);
+
+int drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
+		enum drv_dma_direction direction,
+		struct drv_dma_mapping **result);
+void drv_dma_unmap(struct drv_dma_device *device,
+		   struct drv_dma_mapping *mapping);
+/*
+ * Gives the bus address of caller-owned memory the caller knows the physical
+ * address of.  Only a coherent device is served, and only for a range inside
+ * its reach; anything else fails and the caller uses bounce memory.
+ * device_address_bits is how wide an address the device itself takes (for
+ * example 64 for NVMe, whose PRP entries are 64-bit); zero takes the DMA
+ * device's own width.  The bus offset, the platform's physical limit and
+ * the segment boundary always apply.
+ */
+int drv_dma_physical_address(struct drv_dma_device *device, uint64_t paddr,
+			     size_t size, unsigned device_address_bits,
+			     uint64_t *bus_address);
+
+unsigned drv_dma_mapping_segment_count(const struct drv_dma_mapping *mapping);
+int drv_dma_mapping_segment(const struct drv_dma_mapping *mapping,
+			    unsigned index, struct drv_dma_segment *segment);
+void drv_dma_sync_for_cpu(struct drv_dma_device *device,
+			  struct drv_dma_mapping *mapping);
+void drv_dma_sync_for_device(struct drv_dma_device *device,
+			     struct drv_dma_mapping *mapping);
+
+#endif

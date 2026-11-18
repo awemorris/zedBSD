@@ -1,0 +1,115 @@
+Use guint where the Wayland color code used the BSD uint type.
+
+gdkwaylandcolor.c declares its tables and helpers with uint, which glibc
+and the BSDs define in <sys/types.h> but C and POSIX do not.  zedBSD's C
+library does not define it, so the file did not compile.  guint is the
+same type and is GLib's own spelling.  (A libc that adds uint makes this
+patch unnecessary.)
+
+--- a/gdk/wayland/gdkwaylandcolor.c
++++ b/gdk/wayland/gdkwaylandcolor.c
+@@ -5,7 +5,7 @@
+ 
+ typedef struct _ImageDescription ImageDescription;
+ 
+-static const uint primaries_map[] = {
++static const guint primaries_map[] = {
+   [WP_COLOR_MANAGER_V1_PRIMARIES_SRGB] = 1,
+   [WP_COLOR_MANAGER_V1_PRIMARIES_PAL_M] = 4,
+   [WP_COLOR_MANAGER_V1_PRIMARIES_PAL] = 5,
+@@ -18,14 +18,14 @@
+   [WP_COLOR_MANAGER_V1_PRIMARIES_ADOBE_RGB] = 0,
+ };
+ 
+-static uint
++static guint
+ wl_to_cicp_primaries (enum wp_color_manager_v1_primaries cp)
+ {
+   return primaries_map[cp];
+ }
+ 
+ static enum wp_color_manager_v1_primaries
+-cicp_to_wl_primaries (uint cp)
++cicp_to_wl_primaries (guint cp)
+ {
+   for (guint i = 0; i < G_N_ELEMENTS (primaries_map); i++)
+     if (primaries_map[i] == cp)
+@@ -34,7 +34,7 @@
+   return 0;
+ }
+ 
+-static const uint primaries_primaries[][8] = {
++static const guint primaries_primaries[][8] = {
+   [WP_COLOR_MANAGER_V1_PRIMARIES_SRGB] =         { 640000, 330000, 300000, 600000, 150000,  60000, 312700, 329000 },
+   [WP_COLOR_MANAGER_V1_PRIMARIES_PAL_M] =        { 670000, 330000, 210000, 710000, 140000,  80000, 310000, 316000 },
+   [WP_COLOR_MANAGER_V1_PRIMARIES_PAL] =          { 640000, 330000, 290000, 600000, 150000,  60000, 312700, 329000 },
+@@ -47,14 +47,14 @@
+   [WP_COLOR_MANAGER_V1_PRIMARIES_ADOBE_RGB] =    { 640000, 330000, 210000, 710000, 150000,  60000, 312700, 329000 },
+ };
+ 
+-static const uint *
++static const guint *
+ wl_primaries_to_primaries (enum wp_color_manager_v1_primaries primaries)
+ {
+   return primaries_primaries[primaries];
+ }
+ 
+ static gboolean
+-primaries_to_wl_primaries (const uint primaries[8],
++primaries_to_wl_primaries (const guint primaries[8],
+                            enum wp_color_manager_v1_primaries *out_primaries)
+ {
+   guint i, j;
+@@ -75,7 +75,7 @@
+   return FALSE;
+ }
+ 
+-static const uint transfer_map[] = {
++static const guint transfer_map[] = {
+   [WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886] = 1,
+   [WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22] = 4,
+   [WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA28] = 5,
+@@ -91,14 +91,14 @@
+   [WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_HLG] = 18,
+ };
+ 
+-static uint
++static guint
+ wl_to_cicp_transfer (enum wp_color_manager_v1_transfer_function tf)
+ {
+   return transfer_map[tf];
+ }
+ 
+ static enum wp_color_manager_v1_transfer_function
+-cicp_to_wl_transfer (uint tf)
++cicp_to_wl_transfer (guint tf)
+ {
+   for (guint i = 0; i < G_N_ELEMENTS (transfer_map); i++)
+     if (transfer_map[i] == tf)
+@@ -370,7 +370,7 @@
+     }
+   else
+     {
+-      const uint *p = wl_primaries_to_primaries (primaries);
++      const guint *p = wl_primaries_to_primaries (primaries);
+       wp_image_description_creator_params_v1_set_primaries (creator,
+                                                             p[0], p[1],
+                                                             p[2], p[3],
+@@ -618,7 +618,7 @@
+   desc->b_x = b_x; desc->r_y = b_y;
+   desc->w_x = w_x; desc->r_y = w_y;
+   desc->has_primaries = 1;
+-  if (primaries_to_wl_primaries ((uint[]) { r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y },
++  if (primaries_to_wl_primaries ((guint[]) { r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y },
+                                  &desc->primaries))
+     desc->has_primaries_named = 1;
+ }
+@@ -629,7 +629,7 @@
+                                  uint32_t primaries)
+ {
+   ImageDescription *desc = data;
+-  const uint *p;
++  const guint *p;
+ 
+   desc->primaries = primaries;
+   desc->has_primaries_named = 1;

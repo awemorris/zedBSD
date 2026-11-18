@@ -1,0 +1,23 @@
+#version 450
+// Stage 1: fp32 add, subtract, multiply, negate, abs, min, max, floor and compare on exact operands.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer A { float a[]; };
+layout(std430, set = 0, binding = 1) readonly buffer B { float b[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Out { float o[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	float x = a[i];
+	float y = b[i];
+	o[i * 10u + 0u] = x + y;
+	o[i * 10u + 1u] = x - y;
+	o[i * 10u + 2u] = x * y;
+	o[i * 10u + 3u] = -x;
+	o[i * 10u + 4u] = abs(x);
+	o[i * 10u + 5u] = min(x, y);
+	o[i * 10u + 6u] = max(x, y);
+	o[i * 10u + 7u] = floor(x);
+	o[i * 10u + 8u] = x > y ? 1.0 : 0.0;
+	o[i * 10u + 9u] = x * y + x;
+}

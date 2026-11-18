@@ -1,0 +1,26 @@
+Define static_assert when <assert.h> does not.
+
+C11 has <assert.h> define the static_assert macro, and libxkbcommon's
+sources use it.  zedBSD's C library does not define it yet, so keymap.h
+and others stopped.  Meson now checks whether <assert.h> provides it and,
+if not, has config.h, which every source file includes first, define it
+as the _Static_assert keyword.  Systems whose <assert.h> has it are
+unchanged.
+
+--- a/meson.build
++++ b/meson.build
+@@ -163,6 +163,14 @@
+ 
+ # config.h.
+ configh_data = configuration_data()
++# C11 has <assert.h> define static_assert; a C library that does not
++# (zedBSD) gets the keyword it stands for, through config.h, which every
++# source file includes first.
++if not cc.compiles('''#include <assert.h>
++                      static_assert(1, "static_assert");''',
++                   name: 'static_assert in assert.h')
++    configh_data.set('static_assert', '_Static_assert')
++endif
+ configh_data.set('EXIT_INVALID_USAGE', '2')
+ configh_data.set_quoted('LIBXKBCOMMON_VERSION', meson.project_version())
+ configh_data.set_quoted('LIBXKBCOMMON_TOOL_PATH', dir_libexec)

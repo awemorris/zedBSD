@@ -1,0 +1,30 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * ODD-BARRIER: a 5 x 3 group (15 invocations in two threads,
+ * the second's last channel off) writes its words to shared memory and,
+ * after the barrier, reads the one mirrored in the group.
+ */
+#version 450
+
+layout(local_size_x = 5, local_size_y = 3) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer V { uint v[]; };
+layout(std430, set = 0, binding = 1) buffer O { uint o[]; };
+
+shared uint mirror[15];
+
+void main()
+{
+    uint l = gl_LocalInvocationIndex;
+    uint g = gl_WorkGroupID.x * 15u + l;
+
+    mirror[l] = v[g] * 3u;
+    barrier();
+    o[g] = mirror[14u - l] + l;
+}

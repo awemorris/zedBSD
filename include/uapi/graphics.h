@@ -1,0 +1,163 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * /dev/graphics
+ */
+
+#ifndef KERN_UAPI_GRAPHICS_H
+#define KERN_UAPI_GRAPHICS_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <uapi/ioctl.h>
+#include <uapi/types.h>
+
+#define KERN_GRAPHICS_IOC_GROUP	'g'
+
+#define KERN_GRAPHICS_CAP_FILL	0x00000001U
+#define KERN_GRAPHICS_CAP_LINE	0x00000002U
+#define KERN_GRAPHICS_CAP_PATTERN	0x00000004U
+#define KERN_GRAPHICS_CAP_BLIT_INDEX8	0x00000008U
+#define KERN_GRAPHICS_CAP_BLIT_RGB24	0x00000010U
+#define KERN_GRAPHICS_CAP_BLIT_MONO1	0x00000020U
+#define KERN_GRAPHICS_CAP_FLUSH	0x00000040U
+#define KERN_GRAPHICS_CAP_GLYPH	0x00000080U
+
+#define KERN_GRAPHICS_FORMAT_INDEX8	1U
+#define KERN_GRAPHICS_FORMAT_RGB24	2U
+#define KERN_GRAPHICS_FORMAT_MONO1	3U
+#define KERN_GRAPHICS_GLYPH_MSB1	1U
+
+struct graphics_caps {
+	uint32_t capabilities;
+	uint32_t maximum_width;
+	uint32_t maximum_height;
+	uint32_t reserved;
+};
+
+struct graphics_mode {
+	uint32_t preferred_width;
+	uint32_t preferred_height;
+	uint32_t preferred_bits_per_pixel;
+	uint32_t width;
+	uint32_t height;
+	uint32_t bits_per_pixel;
+	uint32_t stride;
+	uint32_t capabilities;
+};
+
+struct graphics_mode_info {
+	uint32_t width;
+	uint32_t height;
+	uint32_t bits_per_pixel;
+	uint32_t stride;
+};
+
+struct graphics_mode_list {
+	uapi_ptr_t modes;
+	uint32_t capacity;
+	uint32_t count;
+	uint32_t reserved;
+};
+
+struct graphics_rect {
+	uint32_t x;
+	uint32_t y;
+	uint32_t width;
+	uint32_t height;
+};
+
+struct graphics_fill {
+	struct graphics_rect rect;
+	uint32_t color;
+	uint32_t reserved;
+};
+
+struct graphics_line {
+	uint32_t x0;
+	uint32_t y0;
+	uint32_t x1;
+	uint32_t y1;
+	uint32_t color;
+	uint32_t reserved;
+};
+
+struct graphics_pattern_fill {
+	struct graphics_rect rect;
+	uint32_t color;
+	uint32_t reserved;
+	uint64_t pattern;
+};
+
+struct graphics_blit {
+	uint32_t x;
+	uint32_t y;
+	uint32_t width;
+	uint32_t height;
+	uint32_t format;
+	uint32_t stride;
+	uapi_ptr_t pixels;
+	uapi_ptr_t palette;
+	uint32_t palette_count;
+	uint32_t foreground;
+	uint32_t background;
+	uint32_t reserved;
+	uint64_t pattern;
+};
+
+struct graphics_flush {
+	uapi_ptr_t rectangles;
+	uint32_t rectangle_count;
+};
+
+struct graphics_glyph {
+	uint32_t codepoint;
+	uapi_ptr_t bitmap;
+	uint32_t bitmap_capacity;
+	uint32_t width;
+	uint32_t height;
+	uint32_t stride;
+	int32_t bearing_x;
+	int32_t bearing_y;
+	uint32_t advance;
+	uint32_t format;
+	uint32_t bitmap_size;
+	uint32_t reserved;
+};
+
+#define KERN_GRAPHICS_GET_CAPS	\
+	_IOR(KERN_GRAPHICS_IOC_GROUP, 1, struct graphics_caps)
+#define KERN_GRAPHICS_ENTER	\
+	_IOWR(KERN_GRAPHICS_IOC_GROUP, 2, struct graphics_mode)
+#define KERN_GRAPHICS_GET_MODE	\
+	_IOR(KERN_GRAPHICS_IOC_GROUP, 3, struct graphics_mode)
+#define KERN_GRAPHICS_FILL_RECT	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 4, struct graphics_fill)
+#define KERN_GRAPHICS_DRAW_LINE	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 5, struct graphics_line)
+#define KERN_GRAPHICS_PATTERN_FILL	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 6, struct graphics_pattern_fill)
+#define KERN_GRAPHICS_BLIT	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 7, struct graphics_blit)
+#define KERN_GRAPHICS_BLIT_PATTERN	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 8, struct graphics_blit)
+#define KERN_GRAPHICS_FLUSH	\
+	_IOW(KERN_GRAPHICS_IOC_GROUP, 9, struct graphics_flush)
+#define KERN_GRAPHICS_GET_GLYPH	\
+	_IOWR(KERN_GRAPHICS_IOC_GROUP, 10, struct graphics_glyph)
+#define KERN_GRAPHICS_GET_MODES	\
+	_IOWR(KERN_GRAPHICS_IOC_GROUP, 11, struct graphics_mode_list)
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -1,0 +1,211 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * syscall
+ */
+
+#ifndef KERN_UAPI_SYSCALL_H
+#define KERN_UAPI_SYSCALL_H
+
+enum syscall_number {
+	KERN_SYS_exit = 1,
+	KERN_SYS_open = 2,
+	KERN_SYS_close = 3,
+	KERN_SYS_read = 4,
+	KERN_SYS_write = 5,
+	KERN_SYS_lseek = 6,
+	KERN_SYS_fstat = 7,
+	KERN_SYS_getdents = 8,
+	KERN_SYS_chdir = 9,
+	KERN_SYS_getcwd = 10,
+	KERN_SYS_mmap = 11,
+	KERN_SYS_munmap = 12,
+	KERN_SYS_mprotect = 13,
+	KERN_SYS_ioctl = 14,
+	KERN_SYS_clock_gettime = 15,
+	KERN_SYS_nanosleep = 16,
+	/*
+	 * Syscall numbers 17 and 18 were pre-release process-launch extensions
+	 * and remain intentionally unused.
+	 */
+	KERN_SYS_brk = 19,
+	KERN_SYS_socket = 20,
+	KERN_SYS_bind = 21,
+	KERN_SYS_connect = 22,
+	KERN_SYS_listen = 23,
+	KERN_SYS_accept = 24,
+	KERN_SYS_sendto = 25,
+	KERN_SYS_recvfrom = 26,
+	KERN_SYS_shutdown = 27,
+	KERN_SYS_getsockname = 28,
+	KERN_SYS_getpeername = 29,
+	KERN_SYS_setsockopt = 30,
+	KERN_SYS_getsockopt = 31,
+	KERN_SYS_fork = 32,
+	KERN_SYS_execve = 33,
+	KERN_SYS_waitpid = 34,
+	KERN_SYS_getpid = 35,
+	KERN_SYS_getppid = 36,
+	KERN_SYS_getpgrp = 37,
+	KERN_SYS_getpgid = 38,
+	KERN_SYS_setpgid = 39,
+	KERN_SYS_setsid = 40,
+	KERN_SYS_getsid = 41,
+	KERN_SYS_dup = 42,
+	KERN_SYS_dup2 = 43,
+	KERN_SYS_dup3 = 44,
+	KERN_SYS_fcntl = 45,
+	KERN_SYS_pipe = 46,
+	KERN_SYS_pipe2 = 47,
+	KERN_SYS_pread = 48,
+	KERN_SYS_pwrite = 49,
+	KERN_SYS_readv = 50,
+	KERN_SYS_writev = 51,
+	KERN_SYS_fsync = 52,
+	KERN_SYS_fdatasync = 53,
+	KERN_SYS_stat = 54,
+	KERN_SYS_lstat = 55,
+	KERN_SYS_truncate = 56,
+	KERN_SYS_ftruncate = 57,
+	KERN_SYS_mkdir = 58,
+	KERN_SYS_unlink = 59,
+	KERN_SYS_rmdir = 60,
+	KERN_SYS_rename = 61,
+	KERN_SYS_umask = 62,
+	KERN_SYS_getuid = 63,
+	KERN_SYS_geteuid = 64,
+	KERN_SYS_getgid = 65,
+	KERN_SYS_getegid = 66,
+	KERN_SYS_getgroups = 67,
+	KERN_SYS_setuid = 68,
+	KERN_SYS_seteuid = 69,
+	KERN_SYS_setgid = 70,
+	KERN_SYS_setegid = 71,
+	KERN_SYS_setgroups = 72,
+	KERN_SYS_setreuid = 73,
+	KERN_SYS_setregid = 74,
+	KERN_SYS_access = 75,
+	KERN_SYS_sigaction = 76,
+	KERN_SYS_sigprocmask = 77,
+	KERN_SYS_sigpending = 78,
+	KERN_SYS_kill = 79,
+	KERN_SYS_sigreturn = 80,
+	KERN_SYS_msync = 81,
+	KERN_SYS_openat = 82,
+	KERN_SYS_fstatat = 83,
+	KERN_SYS_mkdirat = 84,
+	KERN_SYS_unlinkat = 85,
+	KERN_SYS_renameat = 86,
+	KERN_SYS_chmod = 87,
+	KERN_SYS_fchmod = 88,
+	KERN_SYS_fchmodat = 89,
+	KERN_SYS_chown = 90,
+	KERN_SYS_fchown = 91,
+	KERN_SYS_lchown = 92,
+	KERN_SYS_fchownat = 93,
+	KERN_SYS_utimensat = 94,
+	KERN_SYS_futimens = 95,
+	KERN_SYS_faccessat = 96,
+	KERN_SYS_linkat = 97,
+	KERN_SYS_symlinkat = 98,
+	KERN_SYS_readlinkat = 99,
+	KERN_SYS_sigsuspend = 100,
+	KERN_SYS_clock_getres = 101,
+	KERN_SYS_clock_settime = 102,
+	KERN_SYS_sysctl = 103,
+	KERN_SYS_ppoll = 104,
+	KERN_SYS_pselect = 105,
+	KERN_SYS_sigaltstack = 106,
+	KERN_SYS_sigtimedwait = 107,
+	KERN_SYS_sigqueue = 108,
+	KERN_SYS_thread_create = 109,
+	KERN_SYS_thread_exit = 110,
+	KERN_SYS_thread_join = 111,
+	KERN_SYS_thread_detach = 112,
+	KERN_SYS_thread_self = 113,
+	KERN_SYS_thread_kill = 114,
+	KERN_SYS_thread_cancel = 115,
+	KERN_SYS_usync = 116,
+	KERN_SYS_socketpair = 117,
+	KERN_SYS_sendmsg = 118,
+	KERN_SYS_recvmsg = 119,
+	KERN_SYS_fchdir = 120,
+	KERN_SYS_mknodat = 121,
+	KERN_SYS_getrlimit = 122,
+	KERN_SYS_setrlimit = 123,
+	KERN_SYS_waitid = 124,
+	KERN_SYS_timer_create = 125,
+	KERN_SYS_timer_delete = 126,
+	KERN_SYS_timer_settime = 127,
+	KERN_SYS_timer_gettime = 128,
+	KERN_SYS_timer_getoverrun = 129,
+	KERN_SYS_mount = 130,
+	KERN_SYS_unmount = 131,
+	KERN_SYS_statvfs = 132,
+	KERN_SYS_fstatvfs = 133,
+	KERN_SYS_getxattr = 134,
+	KERN_SYS_lgetxattr = 135,
+	KERN_SYS_fgetxattr = 136,
+	KERN_SYS_setxattr = 137,
+	KERN_SYS_lsetxattr = 138,
+	KERN_SYS_fsetxattr = 139,
+	KERN_SYS_listxattr = 140,
+	KERN_SYS_llistxattr = 141,
+	KERN_SYS_flistxattr = 142,
+	KERN_SYS_removexattr = 143,
+	KERN_SYS_lremovexattr = 144,
+	KERN_SYS_fremovexattr = 145,
+	KERN_SYS_quotactl = 146,
+	KERN_SYS_snapshotctl = 147,
+	KERN_SYS_sched_yield = 148,
+	KERN_SYS_fexecve = 149,
+	KERN_SYS_times = 150,
+	KERN_SYS_sync = 151,
+	KERN_SYS_getpriority = 152,
+	KERN_SYS_setpriority = 153,
+	KERN_SYS_getrusage = 154,
+	KERN_SYS_getitimer = 155,
+	KERN_SYS_setitimer = 156,
+	KERN_SYS_getresuid = 157,
+	KERN_SYS_getresgid = 158,
+	KERN_SYS_setresuid = 159,
+	KERN_SYS_setresgid = 160,
+	KERN_SYS_getentropy = 161,
+	KERN_SYS_atomic = 162,
+	KERN_SYS_renameat2 = 163,
+	KERN_SYS_chroot = 164,
+	KERN_SYS_flock = 165,
+	KERN_SYS_setproctitle = 166,
+
+	/*
+	 * Reaps a child and reports what it spent.  waitpid answers what
+	 * happened to the child; this answers that and what it cost, which
+	 * cannot be asked afterwards because by then the child is gone.
+	 */
+	KERN_SYS_wait4 = 167,
+	KERN_SYS_ptrace = 168,
+
+	/*
+	 * Creates a child that runs in the caller's address space until it
+	 * replaces its image or exits; the calling thread waits until then
+	 * (vfork(2)).  The C library exports it as vfork() and builds
+	 * posix_spawn on it, running the child on a stack of its own.
+	 */
+	KERN_SYS_vfork = 169,
+
+	/*
+	 * Creates a child that starts, from its first instruction, in a
+	 * sandbox: a new address space with a static image, only the files
+	 * handed to it, no name space, and only the calls of its set
+	 * (sandbox.h; ws168-p002).  The calling thread returns once the
+	 * child is ready to run.
+	 */
+	KERN_SYS_sandbox_spawn = 170,
+};
+
+#endif

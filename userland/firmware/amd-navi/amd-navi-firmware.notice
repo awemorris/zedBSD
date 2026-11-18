@@ -1,0 +1,26 @@
+Firmware: AMD Navi10 GPU firmware from linux-firmware 20260410: the
+          security processor's secure OS, the display security
+          application, the system-management unit, the graphics pipe
+          (PFP, ME, CE), the compute processors (MEC, MEC2), the run-list
+          controller (RLC), the copy engines (SDMA0, SDMA1) and the
+          video engine (VCN 2.0)
+Hardware: AMD Radeon RX 5600 and RX 5700 (Navi10, RDNA1), used by the
+          amdrdna driver (CONFIG_DRIVER_PCI_AMDRDNA)
+Files:    /lib/firmware/amdgpu/navi10_sos.bin
+          /lib/firmware/amdgpu/navi10_asd.bin
+          /lib/firmware/amdgpu/navi10_smc.bin
+          /lib/firmware/amdgpu/navi10_pfp.bin
+          /lib/firmware/amdgpu/navi10_me.bin
+          /lib/firmware/amdgpu/navi10_ce.bin
+          /lib/firmware/amdgpu/navi10_mec.bin
+          /lib/firmware/amdgpu/navi10_mec2.bin
+          /lib/firmware/amdgpu/navi10_rlc.bin
+          /lib/firmware/amdgpu/navi10_sdma.bin
+          /lib/firmware/amdgpu/navi10_sdma1.bin
+          /lib/firmware/amdgpu/navi10_vcn.bin
+Source:   linux-firmware tag 20260410 (commit dc85ccedc9c973682fbcf4d628ca61174bcc3120)
+
+Copyright (C) Advanced Micro Devices, Inc.  Redistributed unmodified, in
+binary form only, with the copyright notice, the conditions and the
+disclaimer of LICENSE.amdgpu; reverse engineering, decompilation and
+disassembly are not permitted.

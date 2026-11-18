@@ -1,0 +1,462 @@
+﻿/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Architecture-independent boot parameters and boot-source ownership.
+ *
+ * This header is the public boot-interface ledger.  Declarations are
+ * appended or changed only after a recorded architecture/API
+ * decision, not as an implementation-refactoring convenience.
+ */
+
+#ifndef KERN_BOOT_H
+#define KERN_BOOT_H
+
+#define KERN_HANDOFF_MAGIC				0x48323842U
+#define KERN_HANDOFF_VERSION_MULTIBOOT			3U
+#define KERN_HANDOFF_VERSION_X68K			5U
+
+#define KERN_BOOT_SOURCE_SLOT_COUNT			4U
+
+#define KERN_BOOT_PARAMETERS_TEXT_MAX			3071
+#define KERN_BOOT_PARAMETERS_STORAGE_SIZE		(KERN_BOOT_PARAMETERS_TEXT_MAX + 1)
+#define KERN_BOOT_PARAMETERS_DEFAULT_TEXT		KERN_IMAGE_BOOT_PARAMETERS_TEXT
+#define KERN_BOOT_PARAMETERS_INIT_PATH_MAX		255U
+#define KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX		31U
+
+#define KERN_BOOT_PARAMETER_OFFSET_ABSENT		UINT16_MAX
+#define KERN_BOOT_PARAMETER_RECORD_MAGIC		0x31525042
+#define KERN_BOOT_PARAMETER_RECORD_VERSION		1
+#define KERN_BOOT_PARAMETER_RECORD_FLAG_TEXT		(1 << 0)
+#define KERN_BOOT_PARAMETER_RECORD_HEADER_SIZE		16
+#define KERN_BOOT_PARAMETER_RECORD_SIZE 		(KERN_BOOT_PARAMETER_RECORD_HEADER_SIZE + KERN_BOOT_PARAMETERS_STORAGE_SIZE)
+#define KERN_BOOT_PARAMETER_RECORD_MAGIC_OFFSET		0U
+#define KERN_BOOT_PARAMETER_RECORD_VERSION_OFFSET 	4U
+#define KERN_BOOT_PARAMETER_RECORD_SIZE_OFFSET		6U
+#define KERN_BOOT_PARAMETER_RECORD_FLAGS_OFFSET		8U
+#define KERN_BOOT_PARAMETER_RECORD_LENGTH_OFFSET	10U
+#define KERN_BOOT_PARAMETER_RECORD_RESERVED_OFFSET	12U
+#define KERN_BOOT_PARAMETER_RECORD_TEXT_OFFSET 		16U
+
+#define KERN_PARTITION_SCHEME_LBA			0U
+#define KERN_PARTITION_SCHEME_MBR			1U
+#define KERN_PARTITION_SCHEME_SUN			2U
+#define KERN_PARTITION_SCHEME_X68K			3U
+#define KERN_PARTITION_SCHEME_GPT			4U
+/* An Apple Partition Map; the index is the entry's number from 1, the map's own first. */
+#define KERN_PARTITION_SCHEME_APM			5U
+#define KERN_PARTITION_INDEX_UNKNOWN			0U
+
+#define KERN_BOOT_PARTITION_LBA_UNKNOWN			0xffffffffU
+
+#define KERN_IMAGE_BOOT_PARAMETERS_TEXT 		"overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile"
+
+/*
+ * Pixel formats a platform's boot framebuffer format value may name.  Each
+ * name lists the bytes of one pixel in increasing address order.  The
+ * first three use four bytes per pixel, one byte unused: red, green, blue,
+ * unused; blue, green, red, unused; or unused, red, green, blue.  The last
+ * is the reverse of the DRM format of the same name, which BGRX8888 here
+ * matches.  RGB332 uses one byte per pixel, an index into a palette the
+ * loader set before it left the firmware: red in bits 7-5, green in bits
+ * 4-2 and blue in bits 1-0, index i showing red ((i >> 5) & 7) * 255 / 7,
+ * green ((i >> 2) & 7) * 255 / 7 and blue (i & 3) * 255 / 3, rounded down.
+ */
+#define KERN_BOOT_FRAMEBUFFER_RGBX8888			1U
+#define KERN_BOOT_FRAMEBUFFER_BGRX8888			2U
+#define KERN_BOOT_FRAMEBUFFER_XRGB8888			3U
+#define KERN_BOOT_FRAMEBUFFER_RGB332			4U
+
+#define KERN_MEMORY_AVAILABLE				1U
+#define KERN_MEMORY_RESERVED				2U
+
+#define KERN_BOOT_PROVENANCE_VERSION			1U
+#define KERN_BOOT_PROVENANCE_SIZE			88U
+#define KERN_BOOT_SOURCE_SELECTOR_SIZE			46U
+
+#ifndef __ASSEMBLER__
+
+#include <stddef.h>
+#include <stdint.h>
+
+/* Declared by the name lookup; only pointers are used. */
+struct path;
+
+/*
+ * The FAT variants a boot source may be.
+ *
+ * This lives here, rather than with the file system in <kern/fat.h>, because
+ * the boot-source declarations below name it and the boot loader reads this
+ * header: an enumeration cannot be declared without its members, and the file
+ * system header carries the whole VFS with it.
+ */
+enum bootfat_type {
+	KERN_FAT12 = 12,
+	KERN_FAT16 = 16,
+	KERN_FAT32 = 32,
+};
+
+enum kern_boot_root_mode {
+	KERN_BOOT_ROOT_INVALID = 0,
+	KERN_BOOT_ROOT_NATIVE,
+	KERN_BOOT_ROOT_OVERLAY,
+};
+
+enum kern_boot_parameter_key {
+	KERN_BOOT_PARAMETER_BOOT0,
+	KERN_BOOT_PARAMETER_BOOT1,
+	KERN_BOOT_PARAMETER_BOOT2,
+	KERN_BOOT_PARAMETER_BOOT3,
+	KERN_BOOT_PARAMETER_ROOTPART,
+	KERN_BOOT_PARAMETER_OVERLAY_ROOT,
+	KERN_BOOT_PARAMETER_OVERLAY_DATA,
+	KERN_BOOT_PARAMETER_SWAP0,
+	KERN_BOOT_PARAMETER_SWAP1,
+	KERN_BOOT_PARAMETER_SWAP2,
+	KERN_BOOT_PARAMETER_SWAP3,
+	KERN_BOOT_PARAMETER_INIT,
+	KERN_BOOT_PARAMETER_KMSG,
+	KERN_BOOT_PARAMETER_LOGIN,
+	KERN_BOOT_PARAMETER_DISPLAY,
+	KERN_BOOT_PARAMETER_DISPLAY_MODE,
+	KERN_BOOT_PARAMETER_I915_START,
+	KERN_BOOT_PARAMETER_I915_DEBUG,
+	KERN_BOOT_PARAMETER_I915_GEN9,
+	KERN_BOOT_PARAMETER_DC8200_ZEROCOPY,
+	KERN_BOOT_PARAMETER_MAC0,
+	KERN_BOOT_PARAMETER_CPUPERF,
+	KERN_BOOT_PARAMETER_CPUPERF_HWP,
+	KERN_BOOT_PARAMETER_WATCHDOG,
+	KERN_BOOT_PARAMETER_WATCHDOG_STOP,
+#if defined(CONFIG_KERN_DESKTOP_BALANCER) && CONFIG_KERN_DESKTOP_BALANCER
+	KERN_BOOT_PARAMETER_DESKTOP_BALANCER,
+#endif
+	KERN_BOOT_PARAMETER_COUNT
+};
+
+enum kern_boot_source_failure_stage {
+	KERN_BOOT_SOURCE_FAILURE_NONE = 0,
+	KERN_BOOT_SOURCE_FAILURE_SELECTOR,
+	KERN_BOOT_SOURCE_FAILURE_RESOLVE,
+	KERN_BOOT_SOURCE_FAILURE_PARTITION,
+	KERN_BOOT_SOURCE_FAILURE_DUPLICATE,
+	KERN_BOOT_SOURCE_FAILURE_FILESYSTEM,
+	KERN_BOOT_SOURCE_FAILURE_MOUNT,
+};
+
+enum kern_boot_device_class {
+	KERN_DEV_FDD = 1,
+	KERN_DEV_IDE = 2,
+	KERN_DEV_SCSI = 3,
+	KERN_DEV_SD = 4,
+};
+
+enum kern_boot_device_flags {
+	KERN_DEV_PRESENT = 1U << 0,
+	KERN_DEV_HAS_GEOMETRY = 1U << 1,
+	KERN_DEV_BOOT_ORIGIN = 1U << 2,
+};
+
+struct kern_boot_handoff {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint8_t device_count;
+	uint8_t boot_bios_id;
+	uint8_t boot_partition_scheme;
+	uint8_t boot_partition_index;
+	uint32_t device_table;
+	uint32_t bios_gateway;
+	uint32_t boot_partition_lba;
+} __attribute__((packed));
+
+/*
+ * Values are offsets into storage so the structure remains
+ * self-contained when a host fixture or a future handoff path copies
+ * it.
+ */
+struct kern_boot_parameters {
+	char storage[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
+	uint16_t value_offset[KERN_BOOT_PARAMETER_COUNT];
+	unsigned unknown_count;
+	unsigned unknown_name_truncated;
+	char unknown_name[KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX + 1U];
+};
+
+struct kern_boot_parameter_record {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t size;
+	uint16_t flags;
+	uint16_t length;
+	uint32_t reserved;
+	char text[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
+} __attribute__((packed));
+
+/* Firmware-discovered boot device descriptor shared with the kernel. */
+struct kern_boot_device {
+	uint8_t device_class;
+	uint8_t display_index;
+	uint8_t bios_id;
+	uint8_t flags;
+	uint16_t sector_size;
+	uint16_t cylinders;
+	uint8_t heads;
+	uint8_t sectors;
+	uint8_t controller_location;
+	uint8_t reserved[5];
+} __attribute__((packed));
+
+struct kern_boot_source_reference {
+	unsigned slot;
+
+	/* Matches the stable kernel path limit without importing VFS internals. */
+	char relative[256U];
+};
+
+struct kern_boot_source_slot {
+	/* disk is borrowed from runtime_mount while runtime_mount is non-NULL. */
+	struct disk *disk;
+
+	/* Owned private mount until release or promotion. */
+	struct mount *mount;
+
+	/*
+	 * System-lifetime lookup anchor.  Normally identical to mount; after a
+	 * boot filesystem is promoted to the namespace root it remains a borrowed
+	 * pointer to that root mount while mount becomes NULL.
+	 */
+	struct mount *runtime_mount;
+	unsigned configured;
+	unsigned retained;
+	unsigned promoted;
+};
+
+struct kern_boot_source_context {
+	struct kern_boot_source_slot slot[KERN_BOOT_SOURCE_SLOT_COUNT];
+	unsigned failure_slot;
+	enum kern_boot_source_failure_stage failure_stage;
+	int cleanup_error;
+	/* Immutable once set.  Published contexts have system lifetime. */
+	unsigned runtime_published;
+};
+
+struct kern_boot_partition_identity {
+	uint32_t scheme;
+	uint32_t index;
+	uint64_t first_lba;
+	uint64_t block_count;
+	uint8_t signature[16];
+};
+
+struct kern_boot_provenance {
+	uint32_t version;
+	uint32_t config_matches;
+	struct kern_boot_partition_identity firmware;
+	struct kern_boot_partition_identity configuration;
+};
+
+/*
+ * Parse at most input_capacity readable bytes, including the terminating NUL.
+ * A NULL input with zero capacity denotes an empty parameter set.  On error,
+ * parameters is reset to an empty, safely inspectable result.
+ *
+ * EINVAL       invalid arguments, syntax, control data, or relative init path
+ * EILSEQ       a non-ASCII byte before the terminating NUL
+ * E2BIG        text exceeds 3071 bytes or lacks NUL at that maximum boundary
+ * EEXIST       a known name occurs more than once
+ * ENAMETOOLONG init path is 256 bytes or longer
+ */
+int
+kern_boot_parameters_parse(
+	struct kern_boot_parameters *parameters,
+	const char *input,
+	size_t input_capacity);
+
+const char *
+kern_boot_parameters_value(
+	const struct kern_boot_parameters *parameters,
+	enum kern_boot_parameter_key key);
+
+const char *
+kern_boot_parameters_boot(
+	const struct kern_boot_parameters *parameters,
+	unsigned index);
+
+const char *
+kern_boot_parameters_swap(
+	const struct kern_boot_parameters *parameters,
+	unsigned index);
+
+const char *
+kern_boot_parameters_rootpart(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_overlay_root(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_overlay_data(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_init_path(
+	const struct kern_boot_parameters *parameters);
+
+unsigned
+kern_boot_parameters_unknown_count(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_unknown_name(
+	const struct kern_boot_parameters *parameters,
+	int *truncated);
+
+/*
+ * Reports whether a whole token (for example kmsg=quiet) is in a boot
+ * parameter string, before the string is parsed.
+ */
+int
+kern_boot_parameters_token_present(
+	const char *text,
+	const char *token);
+
+/*
+ * Reads a display mode written WxH or WxH@R (the display.mode= boot
+ * parameter): 0 with the width and height in pixels and the
+ * refresh rate in hertz (0 when the text names none), or EINVAL.
+ */
+int
+kern_boot_display_mode_parse(
+	const char *text,
+	size_t length,
+	uint32_t *width,
+	uint32_t *height,
+	uint32_t *refresh_hz);
+
+/* Kernel-global parse-once instance consumed by init and later VFS phases. */
+int
+kern_boot_parameters_initialize(
+	const char *input,
+	size_t input_capacity);
+
+const struct kern_boot_parameters *
+kern_boot_parameters_current(
+	void);
+
+/*
+ * True only when the valid kernel-global instance was initialized from an
+ * actual parameter source.  This deliberately distinguishes an absent source
+ * (NULL, zero capacity) from a present but empty string.
+ */
+int
+kern_boot_parameters_source_present(
+	void);
+
+int
+kern_boot_provenance_set(
+	const struct kern_boot_provenance *record);
+
+const char *
+kern_boot_source_selector(
+	unsigned configuration);
+
+uint64_t
+kern_boot_config_matches(
+	void);
+
+int
+kern_boot_source_selector_validate(
+	const char *selector);
+
+int
+kern_boot_source_reference_parse(
+	const char *text,
+	struct kern_boot_source_reference *reference);
+
+int
+kern_boot_source_root_mode(
+	const char *rootpart,
+	const char *overlay_root,
+	const char *overlay_data,
+	enum kern_boot_root_mode *mode);
+
+int
+kern_boot_source_fat_type_supported(
+	enum bootfat_type type);
+
+const char *
+kern_boot_source_failure_stage_name(
+	enum kern_boot_source_failure_stage stage);
+
+void
+kern_boot_source_context_init(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_context_mount(
+	struct kern_boot_source_context *context,
+	const struct kern_boot_parameters *parameters,
+	struct disk *loader_origin,
+	const char *loader_origin_selector);
+
+int
+kern_boot_source_lookup(
+	struct kern_boot_source_context *context,
+	const char *text,
+	unsigned *slot_out,
+	struct path *path_out);
+
+int
+kern_boot_source_retain_slot(
+	struct kern_boot_source_context *context,
+	unsigned slot);
+
+/*
+ * Runtime bootN selectors require every configured private boot mount to
+ * survive root selection.  Retain is performed before root selection can
+ * release unused mounts; publication happens only after the root namespace
+ * and swap-control facade are ready.
+ */
+int
+kern_boot_source_retain_configured(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_publish_runtime(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_runtime_lookup(
+	struct kern_boot_source_context *context,
+	const char *text,
+	struct path *path_out);
+
+int
+kern_boot_source_find_disk(
+	const struct kern_boot_source_context *context,
+	const struct disk *disk,
+	unsigned *slot_out);
+
+int
+kern_boot_source_promote_root(
+	struct kern_boot_source_context *context,
+	unsigned slot,
+	struct mount **root_out);
+
+int
+kern_boot_source_release_unused(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_context_destroy(
+	struct kern_boot_source_context *context);
+
+#endif /* __ASSEMBLER__ */
+
+#endif

@@ -1,0 +1,14 @@
+#version 450
+// Stage 2: fp32 values exchanged through shared memory across a barrier.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Out { float o[]; };
+shared float s[64];
+void main()
+{
+	uint l = gl_LocalInvocationID.x;
+	s[l] = float(src[gl_GlobalInvocationID.x] & 1023u) * 0.5;
+	barrier();
+	o[gl_GlobalInvocationID.x] = s[l ^ 1u] + s[l ^ 32u] * 0.25;
+}

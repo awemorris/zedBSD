@@ -1,0 +1,3 @@
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# The portable Vulkan demo uses the same four sources on both operating systems.
+$(eval $(call KEILAND_LINUX_PROGRAM,vkdemo,bin,userland/tests/vkdemo/main.c userland/tests/vkdemo/renderer.c userland/tests/vkdemo/display.c userland/base/common/sha256.c,libvulkan.so.1,-lm))

@@ -1,0 +1,75 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_X11_X_H
+#define LIBC_X11_X_H
+
+#include <stdint.h>
+
+#define False 0
+#define True 1
+#define None 0L
+#define CurrentTime 0L
+#define RevertToParent 2
+#define Above 0
+#define ShiftMask (1U<<0)
+#define LockMask (1U<<1)
+#define ControlMask (1U<<2)
+#define Mod1Mask (1U<<3)
+#define PropModeReplace 0
+#define PropModePrepend 1
+#define PropModeAppend 2
+#define AnyPropertyType 0L
+#define NoEventMask 0L
+#define XA_PRIMARY ((Atom)1)
+#define XA_ATOM ((Atom)4)
+#define XA_STRING ((Atom)31)
+#define XA_WM_NAME ((Atom)39)
+#define XA_WM_CLASS ((Atom)67)
+#define KeyPress 2
+#define KeyRelease 3
+#define ButtonPress 4
+#define ButtonRelease 5
+#define MotionNotify 6
+#define Expose 12
+#define DestroyNotify 17
+#define UnmapNotify 18
+#define MapNotify 19
+#define MapRequest 20
+#define ReparentNotify 21
+#define ConfigureNotify 22
+#define ConfigureRequest 23
+#define SelectionClear 29
+#define SelectionRequest 30
+#define SelectionNotify 31
+#define CWStackMode (1U<<6)
+#define KeyPressMask (1L<<0)
+#define KeyReleaseMask (1L<<1)
+#define ButtonPressMask (1L<<2)
+#define ButtonReleaseMask (1L<<3)
+#define PointerMotionMask (1L<<6)
+#define ExposureMask (1L<<15)
+#define StructureNotifyMask (1L<<17)
+#define SubstructureNotifyMask (1L<<19)
+#define SubstructureRedirectMask (1L<<20)
+
+typedef uint32_t XID;
+typedef XID Window;
+typedef XID Drawable;
+typedef XID Font;
+typedef XID Pixmap;
+typedef XID Colormap;
+typedef XID Cursor;
+typedef XID VisualID;
+typedef uint32_t Atom;
+typedef uint32_t Time;
+typedef uint32_t KeySym;
+typedef uint8_t KeyCode;
+typedef int Bool;
+typedef unsigned long Mask;
+
+#endif

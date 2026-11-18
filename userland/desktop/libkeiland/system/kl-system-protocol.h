@@ -1,0 +1,1113 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The wire of Keiland's system extension (WS135, plan/ws135/design.md
+ * section 4.2; WS131 section 4): the opcodes of kl_system_manager_v1 and
+ * kl_system_settings_v1, and the values their events carry.  The
+ * compositor serves them and libkeiland speaks them; both include this
+ * header and neither the other's code (WS131 D4 (c)).
+ *
+ * kl_system_manager_v1 (a global, version 28; its objects are made at its version)
+ *   request 0 destroy
+ *   request 1 get_settings(new_id kl_system_settings_v1)
+ *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
+ *   request 3 get_audio(new_id kl_system_audio_v1)
+ *   request 4 get_power(new_id kl_system_power_v1)
+ *   request 5 get_devices(new_id kl_system_devices_v1)
+ *   request 6 get_monitor(new_id kl_system_monitor_v1, uint period_ms)    since version 2 (WS134 p012)
+ *   request 7 get_account(new_id kl_system_account_v1)    since version 4 (ws160-p002)
+ *   request 8 get_sharing(new_id kl_system_sharing_v1)    since version 7 (ws089-p025)
+ *   request 9 get_notify(new_id kl_system_notify_v1)      since version 13 (ws156-p002)
+ *   request 10 get_mail(new_id kl_system_mail_v1)         since version 15 (ws169-p002)
+ *   request 11 get_phone(new_id kl_system_phone_v1)       since version 16 (ws170-p004)
+ *   request 12 get_printers(new_id kl_system_printers_v1) since version 17 (ws145-p003)
+ *   request 13 get_displays(new_id kl_system_displays_v1) since version 18 (ws113-p005)
+ *   request 14 get_machine(new_id kl_system_machine_v1)   since version 21 (ws188-p002)
+ *   request 15 get_bluetooth(new_id kl_system_bluetooth_v1) since version 23 (ws143-p006)
+ *   event   0 capabilities(uint bits)              sent when it is bound
+ *
+ * kl_system_settings_v1
+ *   request 0 destroy
+ *   request 1 set(uint request, string key, string value)
+ *   request 2 reset(uint request, string key)       back to the default
+ *   event   0 value(string key, string value, uint flags)
+ *   event   1 done(uint serial)                     the values before it are one state
+ *   event   2 result(uint request, uint applied, uint saved)
+ *
+ * When made, a settings object hears every compositor setting's value and
+ * a done; afterwards each change made by anyone (a client, the system bar,
+ * audiod) comes to every settings object as its value and a done.  Every
+ * set and reset is answered by one result.
+ *
+ * kl_system_network_v1 (WS131 p010)
+ *   request 0 destroy
+ *   request 1 request(uint request, uint what, string ssid)   scan, join (ssid), disconnect, Wi-Fi on, off
+ *   request 2 save_key(uint request, string ssid, string key) saves the key, tells the daemon, joins
+ *   request 3 query_details(uint request)                      the links, the DNS servers, the saved networks
+ *   request 4 set_scanning(uint on)                            since version 3 (ws089-p021): the client shows the
+ *                                                              networks around (1) or no longer (0)
+ *   request 5 configure_wired(uint request, string interface, uint mode, string address, string netmask,
+ *                             string router, string dns1, string dns2)
+ *                                                              since version 6 (ws089-p022): a wired interface by
+ *                                                              DHCP (mode 1; the strings empty but the DNS servers,
+ *                                                              which may name static ones) or a static IPv4
+ *                                                              address (mode 2; router and DNS may be empty), kept
+ *                                                              by the network daemon for the next start too
+ *   event   0 state(uint reachable, uint connected, uint kind, string interface, string wired, uint wifi,
+ *                   string wifi_interface, string ssid)
+ *   event   1 access_point(string ssid, int rssi, uint secured)
+ *   event   2 scan_done()                           the access points before it are the whole scan
+ *   event   3 link(string name, uint flags, string address, string netmask, string hardware, uint mtu,
+ *                  uint received_high, uint received_low, uint sent_high, uint sent_low)
+ *   event   4 dns(string address)
+ *   event   5 saved_network(string ssid)
+ *   event   6 details_done()                        the links, servers and networks before it are the whole details
+ *   event   7 done(uint serial)
+ *   event   8 result(uint request, uint applied, uint saved)
+ *   event   9 wired(string name, uint mode, string router)    since version 6: after a wired interface's link in
+ *                                                              the details, how it is configured (KL_SYSTEM_WIRED_*)
+ *                                                              and the router it was given (empty when none)
+ *   event  10 link_speed(string name, uint mbps)  since version 12 (BUG-222): after an interface's link in the
+ *                                                              details, the speed its driver last heard, in Mb/s
+ *                                                              (not sent while it is not known)
+ *   event  11 link_inet6(string name, string address)  since version 35: after an interface's link in the
+ *                                                              details, one of its IPv6 addresses as
+ *                                                              "ADDRESS/LENGTH" (one event each, the global ones
+ *                                                              first)
+ *   event  12 link_router6(string name, string router)  since version 35: after an interface's link in the
+ *                                                              details, the router of its IPv6 default route
+ *                                                              (not sent when it has none)
+ *   One request of the network is outstanding at a time, the system bar's
+ *   included; another is answered busy.  query_details is no request of
+ *   the daemon's: every object that asked hears the next reading.  A join
+ *   (and save_key's join) is answered no_key, refused or unreachable for
+ *   its own failures.  set_scanning is no request and has no answer: the
+ *   compositor keeps the radios scanning while any object asked for it
+ *   (or the system bar's menu is open), and a new scan comes as the
+ *   access points and a scan_done; the object's going ends its asking, and
+ *   so does a minute without set_scanning(1) again (a client renews it
+ *   while it shows the networks).
+ *
+ * kl_system_sharing_v1 (ws089-p025: the Sharing page's Remote Login, sshd)
+ *   request 0 destroy
+ *   request 1 set_ssh(uint request, uint on)          turns Remote Login on (1) or off (0), now and at
+ *                                                     every start; the result follows the new state
+ *   request 2 query(uint request)                     reads the state again
+ *   event   0 state(uint available, uint enabled, uint running, uint port, uint allowed, string fingerprint)
+ *                                                     whether the system has it, starts it, runs it, its
+ *                                                     port, whether this user may change it (root or wheel),
+ *                                                     the host key's fingerprint ("SHA256:...", or empty)
+ *   event   1 done(uint serial)
+ *   event   2 result(uint request, uint applied, uint saved)
+ *   A new object hears the state last known and a done, and the state is
+ *   read again for it; every change comes to every object.
+ *
+ * kl_system_displays_v1 (ws113-p005: the Display page's two modes, places and brightness)
+ *   request 0 destroy
+ *   request 1 apply(uint request, uint serial, uint mode, string places)
+ *                                                     the mode (KL_SYSTEM_DISPLAYS_EXTENDED or _MIRROR)
+ *                                                     and, for the extended mode, places: lines
+ *                                                     "KEY X Y" (a display's key, which may hold
+ *                                                     spaces, and its signed place in the logical
+ *                                                     plane); a display not named keeps its place.
+ *                                                     serial is the snapshot the client saw
+ *   request 2 set_brightness(uint request, string key, uint percent)
+ *                                                     a built-in panel's light, 0 to 100
+ *   request 3 set_shown(uint request, string key, uint shown)   (since 19, ws113-p014)
+ *                                                     a display turned off (0) or on (1) in the
+ *                                                     extended mode; the anchor turned off moves to
+ *                                                     a display on
+ *   request 4 set_rotation(uint request, string key, uint rotation)   (since 34, ws217-p004)
+ *                                                     the angle the display's picture is turned by,
+ *                                                     clockwise in degrees (0, 90, 180 or 270; another
+ *                                                     number is invalid), applied at once and kept
+ *   request 5 bind_touch(uint request, string identity, string key)   (since 34; answered
+ *                                                     unsupported until ws217-p006)
+ *   request 6 listen_touch(uint request, string key)  (since 34; answered unsupported until ws217-p006)
+ *   request 7 set_resolution(uint request, string key, uint width, uint height, uint refresh_mhz)   (since 36)
+ *                                                     the display's mode: one of its modes offered
+ *                                                     (refresh_mhz 0: the refresh shown now, else the
+ *                                                     fastest of that size), shown at once and kept only
+ *                                                     when keep_resolution comes within the trial's time
+ *   request 8 keep_resolution(uint request, string key)    (since 36) the mode in its trial stays, and is
+ *                                                     written for the monitor
+ *   request 9 revert_resolution(uint request, string key)  (since 36) the mode in its trial goes back now
+ *   request 10 reset_resolution(uint request, string key)  (since 36) the display's default (the monitor's
+ *                                                     choice forgotten when kept), in a trial like a set
+ *   event   0 output(string key, string label, int x, int y, uint width, uint height, uint refresh_mhz,
+ *                    uint flags, uint brightness)     one display connected: KL_SYSTEM_DISPLAY_* flags, the
+ *                                                     light in percent (0 without one)
+ *   event   1 done(uint serial, uint mode)            the outputs before it are the whole snapshot
+ *   event   2 result(uint request, uint applied, uint saved)
+ *   event   3 rotation(string key, uint rotation)     (since 34) after a display's output: the angle
+ *                                                     the user chose for it, checked against what it may
+ *                                                     take (0 when it may not take the angle kept), not
+ *                                                     the angle shown when a game pauses the turn or the
+ *                                                     turn's images could not be made (rotations' why)
+ *   event   4 rotations(string key, uint mask, uint why)   (since 34) after rotation: the angles the
+ *                                                     display may be turned to now (KL_SYSTEM_ROTATION_*)
+ *                                                     and why the others may not, or why the angle chosen
+ *                                                     is not shown (KL_SYSTEM_ROTATE_WHY_*)
+ *   event   5 touch(string identity, string label, uint kind, string key)   (since 34; not sent until
+ *                                                     ws217-p006)
+ *   event   6 mode(string key, uint width, uint height, uint refresh_mhz, uint flags)   (since 36) after
+ *                                                     rotations: one mode the display offers
+ *                                                     (KL_SYSTEM_MODE_*: native is the recommended
+ *                                                     default, current the one shown), the larger first
+ *   event   7 resolution(string key, uint state, uint remaining_ms, uint why)   (since 36) after the
+ *                                                     modes: the display's trial (KL_SYSTEM_RESOLUTION_*:
+ *                                                     none, switching, trial, reverting), the time left
+ *                                                     to keep it when it was told, and why its mode
+ *                                                     cannot be chosen now (KL_SYSTEM_RESOLUTION_WHY_*)
+ *   A new object hears the snapshot (every display connected, then a
+ *   done); each change (a display plugged or unplugged, a choice applied,
+ *   the light changed by anyone or by the light keys) comes to every
+ *   object as a whole snapshot.  An apply whose serial is not the last
+ *   snapshot's is answered stale and changes nothing; places that overlap,
+ *   do not join or are out of range are answered invalid; a session not
+ *   active (the login screen, a locked one) is denied.  A choice applied
+ *   but not written to displays.conf is answered applied 1, saved 0.  The
+ *   light of a display without one is unsupported.  A display turned off
+ *   carries the flag OFF (also in the mirror, which shows it still); turning
+ *   off the last display on, or any in the mirror, is invalid; a key not
+ *   connected is not found.
+ *   Since 34 (ws217-p004): a set_rotation of a display not connected is
+ *   unavailable, of an angle the display may not take now unsupported
+ *   (nothing changes), outside an active session denied; one whose turn
+ *   could not be shown is failed, the choice as it was.
+ *   Since 36: a set_resolution or reset_resolution is answered when
+ *   the new mode shows (ok: the trial began, keep it within its time or it
+ *   goes back) or could not be shown (failed: the old mode is back); of a
+ *   display not connected unavailable, of a mode not offered or a display
+ *   whose mode cannot be chosen unsupported, beside another display no
+ *   room, during another change or a game busy, outside an active session
+ *   denied.  The mode shown already is answered ok at once, and written.
+ *   A keep_resolution or revert_resolution of a display not in its trial
+ *   is invalid; a keep's saved says the choice was written.
+ *
+ * kl_system_machine_v1 (ws188-p002, plan/ws188/phase001/phase.md section D1: what Settings reads of the computer)
+ *   request 0 destroy
+ *   request 1 query(uint request, uint what)          what: KL_SYSTEM_MACHINE_ABOUT, _FILESYSTEMS, _USERS,
+ *                                                     _LOGIN_LANGUAGE (0 or another bit is invalid)
+ *   event   0 parts(uint request, uint what)          the answer of request starts: the parts it holds
+ *   event   1 about(string system, string kernel, string architecture, string processor, string host, uint cpus)
+ *   event   2 filesystem(string path, uint total_high, uint total_low, uint available_high, uint available_low,
+ *                        uint used_high, uint used_low)
+ *   event   3 user(string name, string full_name, string home, uint flags)   KL_SYSTEM_MACHINE_USER_*
+ *   event   4 login_language(string code)             "en", "ja", or "" (no file, or another word)
+ *   event   5 result(uint request, uint applied, uint saved)
+ *   event   6 mount(string path, string type)         since version 22 (ws188-p004): a mounted file system a
+ *                                                     user may keep files on (the part _MOUNTS, a query of an
+ *                                                     object of version 21 asking it is invalid)
+ *   The compositor reads on a thread of its own (a file system's size or a directory service may wait),
+ *   one reading at a time; a query that comes during one waits for the next (at most 16 waiting, 4 of a
+ *   client; one more is answered busy), and a reading reads what its waiting queries asked together.  An
+ *   answer is parts, the events of the parts asked (one about, the file systems and the users each whole,
+ *   replacing the earlier list, none meaning there are none, one login_language), then result ok; nothing
+ *   else of the same client comes between them.  A failure is a result alone: busy, unavailable (the
+ *   client's queue has no room for the whole answer), invalid, failed (no thread).  The users are the
+ *   people's accounts and the client's own (SELF), whose home alone is sent; a name that does not fit is
+ *   left out, never cut.
+ *
+ * kl_system_audio_v1
+ *   request 0 destroy
+ *   request 1 set_volume(uint request, uint left, uint right, uint muted)
+ *   request 2 feedback(uint request)
+ *   event   0 state(uint reachable, uint device, uint rate, uint channels, uint left, uint right, uint muted)
+ *   event   1 done(uint serial)
+ *   event   2 result(uint request, uint applied, uint saved)
+ *
+ * kl_system_power_v1
+ *   request 0 destroy
+ *   request 1 action(uint request, uint action)              1 power off, 2 restart, 3 suspend
+ *   event   0 state(uint source, int percent, uint charging, uint actions)
+ *   event   1 done(uint serial)
+ *   event   2 result(uint request, uint applied, uint saved)
+ *
+ * kl_system_devices_v1 (WS132: the removable media, ws132-p004)
+ *   request 0 destroy
+ *   request 1 eject(uint request, string id)
+ *   request 2 mount(uint request, string id)                  since version 5
+ *   event   0 device(string id, uint kind, uint state, string name, string location)
+ *   event   1 done(uint serial)
+ *   event   2 result(uint request, uint applied, uint saved)
+ *   event   3 busy(uint request, string program)              since version 5: before a busy result, the program
+ *                                                             that keeps the volume from being ejected
+ *   event   4 volume(string id, string fs, uint bytes_high, uint bytes_low)
+ *                                                             since version 9 (ws132-p009): after each device, its
+ *                                                             file system ("fat", "ufs") and size in bytes, which
+ *                                                             a mount's confirmation shows
+ *   The devices are the volumes volumed lists (zedBSD): kind 1 (removable storage), state the
+ *   KL_SYSTEM_DEVICE_* bits (mounted; new: inserted and never mounted since), name the label (the
+ *   disk's name without one), location where it is mounted ("" when it is not).  Each object hears
+ *   the whole list and a done when it is made and whenever it changes (a device not in the list is
+ *   gone).  A mount puts the volume under /media (nosuid, noexec, the user its owner); an eject
+ *   unmounts it (busy while a program uses it).  Only the seat's user may (denied otherwise).
+ *
+ * kl_system_account_v1 (ws160-p002: the user's own account)
+ *   request 0 destroy
+ *   request 1 set_password(uint request, string current, string new)
+ *   event   0 result(uint request, uint applied, uint saved)
+ *   request 2 administer(uint request, string password, string operation)   since version 8 (ws089-p026)
+ *   event   1 refused(uint request, string reason)                         since version 8 (ws089-p026)
+ *   request 3 set_pin(uint request, string current, string pin)            since version 10 (ws163-p003)
+ *   event   2 enrolled(uint pin, uint keys)                                since version 11 (ws172-p002)
+ *   request 4 add_key(uint request, string password, string label, string pin)  since version 14 (ws172-p003)
+ *   request 5 remove_key(uint request, string password, string ref)       since version 14 (ws172-p003)
+ *   event   3 key(string ref, string label)                                since version 14 (ws172-p003)
+ *   event   4 touch(uint request)                                          since version 14 (ws172-p003)
+ *   request 6 key_info(uint request)                                       since version 25 (ws199-p001)
+ *   request 7 key_pin(uint request, string current, string pin)            since version 25
+ *   request 8 key_reset(uint request, string password)                     since version 25
+ *   request 9 key_cancel()                                                 since version 25
+ *   event   5 key_info(uint request, uint count, string name, uint pin, uint retries, uint min)  since version 25
+ *   event   6 replug(uint request)                                         since version 25
+ *   event   7 removed(uint request, uint count)                            since version 25
+ *   event   8 keys_changed()                                               since version 25
+ *   request 10 set_key_options(uint request, string password, uint key_pin, uint key_touch)  since version 25
+ *   event   9 options(uint key_pin, uint key_touch)                        since version 25
+ *   request 11 set_methods(uint request, string password, uint methods)    since version 26 (WS200)
+ *   event   10 methods(uint methods)                                       since version 26
+ *   The compositor changes the password of the user it runs as, through
+ *   the system (zedBSD: passwd; elsewhere unsupported), on a thread of its
+ *   own, and answers ok, denied (the current password is wrong), invalid
+ *   (the new one breaks the system's rules, or a password is empty or
+ *   longer than KL_SYSTEM_PASSWORD_MAX), unsupported, busy (one change is
+ *   under way) or failed.  Neither password is logged or kept.  The object
+ *   has no state, and so no done.
+ *   administer carries an administrator's change of the people's accounts
+ *   (docs/architecture/security.md): the caller's password and the
+ *   operation's lines (the operation, then its arguments, each ended by a
+ *   line end, at most KL_SYSTEM_OPERATION_MAX bytes), which the compositor
+ *   gives the system's tool (zedBSD: /usr/libexec/account-admin) on the
+ *   same thread, one change at a time.  A refusal comes as refused with
+ *   the tool's word (not-administrator, bad-password, ...) before the
+ *   result; the result is ok, or denied for not-administrator and
+ *   bad-password, invalid for the other refusals, unsupported, busy or
+ *   failed.  The manager's capabilities have KL_SYSTEM_CAPABILITY_ADMINISTER
+ *   where the system has the tool.
+ *   set_pin sets the six-digit PIN of the user the compositor runs as, or
+ *   removes it when pin is empty: the compositor passes both to the
+ *   session manager (zedBSD: sessiond's ENROLL pin or REMOVE pin, which
+ *   /sbin/passkey carries out in /etc/passkey; ws172-p002).  The result is
+ *   ok, denied (current is wrong; a refusal's word comes first as refused:
+ *   bad-secret, locked, ...), invalid (pin is not six digits), unsupported
+ *   (no session manager), busy (another request is under way) or failed.
+ *   Neither is logged or kept.  The manager's capabilities have
+ *   KL_SYSTEM_CAPABILITY_PIN where a session manager runs.
+ *   enrolled tells whether the user has a PIN and how many security keys
+ *   (version 11): sent when the object is made, as soon as the session
+ *   manager has answered, and again after each change.  Until it comes
+ *   neither is known.
+ *   add_key registers the security key plugged in for the user (version
+ *   14): its label (1 to KL_SYSTEM_KEY_LABEL_MAX bytes, no colon), the
+ *   key's own PIN, checked by the user's password (zedBSD: sessiond's
+ *   ENROLL fido2, /usr/libexec/passkey-fido2).  While the key waits to be
+ *   touched, touch(request) comes; then a refusal's word (bad-secret,
+ *   no-key, many-keys, key-locked, timeout, ...) and the result, as
+ *   set_pin's.  remove_key removes one by the reference key gave.  Before
+ *   each enrolled, an object of version 14 hears key(ref, label) for each
+ *   of the user's keys.  Neither secret is logged or kept.
+ *   The keys' own operations (version 25, ws199-p001; zedBSD: sessiond's
+ *   KEYINFO, KEYPIN and KEYRESET): key_info asks what the keys there are
+ *   (key_info(count, and for one key its name, whether it has a PIN, its
+ *   retries, its PIN's fewest characters), then the result); key_pin sets
+ *   the one key's first PIN (current empty) or changes it, checked by the
+ *   key alone; key_reset resets the key the user plugs in again, checked by
+ *   the user's password: replug(request) while the key is to be plugged in
+ *   again, touch(request) while it is to be touched, removed(request,
+ *   count) with this machine's registrations that went, then the result
+ *   (a refusal's word first, passkey's own: bad-key-pin, key-locked,
+ *   key-replug, no-pin, pin-set, pin-policy, not-allowed, canceled, ...).
+ *   key_cancel stops the key's operation under way (its result comes as a
+ *   refusal).  While the screen is locked they are answered busy.
+ *   keys_changed comes when a security key came or went (a FIDO node, a
+ *   reader's card), and after an unlock.  options tells, before each
+ *   enrolled, whether the user's key asks its PIN to sign in and its touch
+ *   to unlock; set_key_options sets them, checked by the user's password
+ *   (zedBSD: sessiond's SETOPTIONS), answered as set_pin.
+ *   methods tells, before each options, the methods the login and locked
+ *   screens take for the user (KL_SYSTEM_METHOD_* bits: the password, the
+ *   PIN, a security key; version 26, WS200); set_methods sets them,
+ *   checked by the user's password, the password or a key among them
+ *   (zedBSD: sessiond's SETMETHODS), answered as set_pin.  The console,
+ *   su, sudo and SSH always take the password.
+ *
+ * kl_system_monitor_v1 (WS134 p012, plan/ws134/design.md section 1.3)
+ *   request 0 destroy
+ *   request 1 ack(uint serial)                       the sample of that serial is taken
+ *   request 2 set_period(uint period_ms)             250 to 10000
+ *   event   0 info(uint cpu_count, string host, uint generation_high, uint generation_low)
+ *   event   1 device(uint kind, uint id_high, uint id_low, uint generation_high, uint generation_low, uint subkind,
+ *                    string name, string driver)
+ *   event   2 info_done(uint serial)               the info and devices before it are the whole info
+ *   event   3 cpu(uint index, uint user_high, uint user_low, uint system_high, uint system_low, uint idle_high,
+ *                 uint idle_low, uint other_high, uint other_low)
+ *   event   4 memory(uint total_high, uint total_low, uint free_high, uint free_low, uint cache_high, uint cache_low,
+ *                    uint reclaimable_high, uint reclaimable_low, uint swap_total_high, uint swap_total_low,
+ *                    uint swap_used_high, uint swap_used_low)
+ *   event   5 link(uint id_high, uint id_low, uint rx_high, uint rx_low, uint tx_high, uint tx_low, uint up)
+ *   event   6 disk(uint id_high, uint id_low, uint read_ops_high, uint read_ops_low, uint write_ops_high,
+ *                  uint write_ops_low, uint read_bytes_high, uint read_bytes_low, uint write_bytes_high,
+ *                  uint write_bytes_low, uint read_ns_high, uint read_ns_low, uint write_ns_high, uint write_ns_low,
+ *                  uint busy_ns_high, uint busy_ns_low)
+ *   event   7 gpu(uint id_high, uint id_low, uint time_high, uint time_low, uint busy_high, uint busy_low,
+ *                 uint memory_used_high, uint memory_used_low, uint memory_total_high, uint memory_total_low,
+ *                 uint cur_mhz, uint max_mhz, int milli_celsius, uint milli_watts)
+ *   event   8 sample_done(uint serial, uint time_high, uint time_low, uint valid_high, uint valid_low, uint cpu_hz,
+ *                         int cpu_milli_celsius)
+ *   The compositor samples the machine (libkeiland-backend's monitor area) on a thread of its own while a monitor
+ *   object exists, as often as the shortest period asked (at most 4 a second).  A sample is the counters (they only
+ *   grow; a client makes the rates) and the present values, its cpu, memory, link, disk and gpu events and a
+ *   sample_done; the info comes first and again when the devices change (info, a device a GPU, disk or link,
+ *   info_done).  A u64 travels as its high and low halves.  No sample is sent before the client acked the last
+ *   one, nor when the client's queue has no room for a whole one: a sample is sent whole or not at all, and one
+ *   skipped is not owed (the next counters cover it).
+ *
+ * Every object hears its first state and a done when it is made, and each
+ * change afterwards as the changed events and a done.
+ */
+
+#ifndef KEILAND_KL_SYSTEM_PROTOCOL_H
+#define KEILAND_KL_SYSTEM_PROTOCOL_H
+
+/* The interfaces' names and versions. */
+#define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
+#define KL_SYSTEM_MANAGER_VERSION 36U
+#define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
+
+/* kl_system_manager_v1's requests and event. */
+#define KL_SYSTEM_MANAGER_DESTROY		0U
+#define KL_SYSTEM_MANAGER_GET_SETTINGS		1U
+#define KL_SYSTEM_MANAGER_GET_NETWORK		2U
+#define KL_SYSTEM_MANAGER_GET_AUDIO		3U
+#define KL_SYSTEM_MANAGER_GET_POWER		4U
+#define KL_SYSTEM_MANAGER_GET_DEVICES		5U
+#define KL_SYSTEM_MANAGER_GET_MONITOR		6U
+#define KL_SYSTEM_MANAGER_GET_ACCOUNT		7U
+#define KL_SYSTEM_MANAGER_GET_SHARING		8U
+#define KL_SYSTEM_MANAGER_GET_NOTIFY		9U
+#define KL_SYSTEM_MANAGER_GET_MAIL		10U
+#define KL_SYSTEM_MANAGER_GET_PHONE		11U
+#define KL_SYSTEM_MANAGER_GET_PRINTERS		12U
+#define KL_SYSTEM_MANAGER_GET_DISPLAYS		13U
+#define KL_SYSTEM_MANAGER_GET_MACHINE		14U
+#define KL_SYSTEM_MANAGER_GET_BLUETOOTH		15U
+#define KL_SYSTEM_MANAGER_EVENT_CAPABILITIES	0U
+
+/* The capabilities' bits. */
+#define KL_SYSTEM_CAPABILITY_SETTINGS		0x1U
+#define KL_SYSTEM_CAPABILITY_NETWORK		0x2U
+#define KL_SYSTEM_CAPABILITY_AUDIO		0x4U
+#define KL_SYSTEM_CAPABILITY_POWER		0x8U
+#define KL_SYSTEM_CAPABILITY_DEVICES		0x10U
+#define KL_SYSTEM_CAPABILITY_MONITOR		0x20U
+#define KL_SYSTEM_CAPABILITY_ACCOUNT		0x40U
+#define KL_SYSTEM_CAPABILITY_SHARING		0x80U
+#define KL_SYSTEM_CAPABILITY_ADMINISTER		0x100U
+#define KL_SYSTEM_CAPABILITY_PIN		0x200U
+#define KL_SYSTEM_CAPABILITY_NOTIFY		0x400U
+#define KL_SYSTEM_CAPABILITY_MAIL		0x800U
+#define KL_SYSTEM_CAPABILITY_PHONE		0x1000U
+#define KL_SYSTEM_CAPABILITY_PRINTERS		0x2000U
+#define KL_SYSTEM_CAPABILITY_DISPLAYS		0x4000U
+#define KL_SYSTEM_CAPABILITY_MACHINE		0x8000U
+#define KL_SYSTEM_CAPABILITY_BLUETOOTH		0x10000U
+
+/* Since when the manager has get_sharing (ws089-p025), and the account administer and refused (ws089-p026). */
+#define KL_SYSTEM_SINCE_SHARING			7U
+#define KL_SYSTEM_SINCE_ADMINISTER		8U
+
+/* Since when the account has set_pin (ws163-p003), and enrolled (ws172-p002). */
+#define KL_SYSTEM_SINCE_PIN			10U
+#define KL_SYSTEM_SINCE_ENROLLED		11U
+
+/* Since when the manager has get_notify (ws156-p002). */
+#define KL_SYSTEM_SINCE_NOTIFY			13U
+
+/* Since when the account has add_key, remove_key, key and touch (ws172-p003). */
+#define KL_SYSTEM_SINCE_KEYS			14U
+
+/* Since when the manager has get_mail (ws169-p002). */
+#define KL_SYSTEM_SINCE_MAIL			15U
+
+/* Since when the manager has get_phone (ws170-p004). */
+#define KL_SYSTEM_SINCE_PHONE			16U
+
+/* Since when the manager has get_printers (ws145-p003). */
+#define KL_SYSTEM_SINCE_PRINTERS		17U
+
+/* Since when the printers have edit (ws177-p025). */
+#define KL_SYSTEM_SINCE_PRINTER_EDIT		24U
+
+/* The displays (ws113-p005). */
+#define KL_SYSTEM_SINCE_DISPLAYS		18U
+
+/* Since when the displays have set_shown (ws113-p014). */
+#define KL_SYSTEM_SINCE_SHOWN			19U
+
+/* Since when the displays have set_rotation, bind_touch and listen_touch and the events rotation, rotations and touch (ws217-p004). */
+#define KL_SYSTEM_SINCE_ROTATION		34U
+
+/* Since when the displays have set_resolution, keep_resolution, revert_resolution and reset_resolution and the events mode and resolution. */
+#define KL_SYSTEM_SINCE_RESOLUTION		36U
+
+/* Since when the mail object tells a reader whether it is allowed (ws177-p005). */
+#define KL_SYSTEM_SINCE_MAIL_ALLOWED		20U
+
+/* Since when the manager has get_machine (ws188-p002). */
+#define KL_SYSTEM_SINCE_MACHINE			21U
+
+/* Since when the computer's object reads the mounts (ws188-p004). */
+#define KL_SYSTEM_SINCE_MOUNTS			22U
+
+/* Since when the manager has get_bluetooth (ws143-p006). */
+#define KL_SYSTEM_SINCE_BLUETOOTH		23U
+
+/* Since when the account has key_info, key_pin, key_reset and key_cancel, and their events (ws199-p001). */
+#define KL_SYSTEM_SINCE_KEY_OPS			25U
+
+/* Since when the account has set_methods and methods (WS200). */
+#define KL_SYSTEM_SINCE_METHODS			26U
+
+/* Since when the phone has listen, sync, send_text, mark_read, link_set, watch_link and their events (ws197-p004a). */
+#define KL_SYSTEM_SINCE_PHONE_SYNC		27U
+
+/* Since when the notifications have post_lock (ws197-p004c). */
+#define KL_SYSTEM_SINCE_NOTIFY_LOCK		27U
+
+/* Since when the phone's syncs read the contacts and the calls, and the phone has link_contacts (ws197-p005). */
+#define KL_SYSTEM_SINCE_PHONE_CONTACTS		28U
+
+/* The interfaces' names (WS131 p010). */
+#define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
+#define KL_SYSTEM_AUDIO_NAME			"kl_system_audio_v1"
+#define KL_SYSTEM_POWER_NAME			"kl_system_power_v1"
+#define KL_SYSTEM_DEVICES_NAME			"kl_system_devices_v1"
+#define KL_SYSTEM_MONITOR_NAME			"kl_system_monitor_v1"
+#define KL_SYSTEM_ACCOUNT_NAME			"kl_system_account_v1"
+#define KL_SYSTEM_SHARING_NAME			"kl_system_sharing_v1"
+#define KL_SYSTEM_NOTIFY_NAME			"kl_system_notify_v1"
+#define KL_SYSTEM_MAIL_NAME			"kl_system_mail_v1"
+#define KL_SYSTEM_PHONE_NAME			"kl_system_phone_v1"
+#define KL_SYSTEM_PRINTERS_NAME			"kl_system_printers_v1"
+#define KL_SYSTEM_DISPLAYS_NAME			"kl_system_displays_v1"
+#define KL_SYSTEM_MACHINE_NAME			"kl_system_machine_v1"
+#define KL_SYSTEM_BLUETOOTH_NAME		"kl_system_bluetooth_v1"
+
+/*
+ * kl_system_bluetooth_v1's requests and events (ws143-p006,
+ * plan/ws143/phase006/phase.md section 5):
+ *   request 0 destroy
+ *   request 1 watch(uint on)          the state read often while some object watches (a page or a menu shown)
+ *   request 2 scan(uint on)           the devices around looked for while some object asks
+ *   request 3 power(uint request, uint on)
+ *   request 4 device(uint request, uint action, string address, uint type)   action: KL_SYSTEM_BT_PAIR and the others
+ *                                     (5, the user's phone paired, since the phone's messages, ws197-p004c)
+ *   event   0 state(uint reachable, uint state, uint flags, uint features, string address, string name)
+ *                                     flags: scanning, pairing, the user's switch on, this desktop answers the pairings' questions
+ *   event   1 device(string address, uint type, string name, uint kind, uint flags, int battery, int rssi)
+ *   event   2 done(uint serial)       the state and the devices before it are the whole state
+ *   event   3 result(uint request, uint applied, uint saved)
+ * Sent whole when the object is made and each time something changed.
+ * A pairing's questions are the compositor's own window's, never a
+ * client's: no client answers them.  The values are keiland.h's
+ * KL_BLUETOOTH_* (the same numbers as libkeiland-backend's).
+ */
+#define KL_SYSTEM_BLUETOOTH_DESTROY		0U
+#define KL_SYSTEM_BLUETOOTH_WATCH		1U
+#define KL_SYSTEM_BLUETOOTH_SCAN		2U
+#define KL_SYSTEM_BLUETOOTH_POWER		3U
+#define KL_SYSTEM_BLUETOOTH_DEVICE		4U
+#define KL_SYSTEM_BLUETOOTH_EVENT_STATE		0U
+#define KL_SYSTEM_BLUETOOTH_EVENT_DEVICE	1U
+#define KL_SYSTEM_BLUETOOTH_EVENT_DONE		2U
+#define KL_SYSTEM_BLUETOOTH_EVENT_RESULT	3U
+
+/* A device's actions, the state's flags, a device's flags, and the longest texts (with their NULs). */
+#define KL_SYSTEM_BT_PAIR			1U
+#define KL_SYSTEM_BT_FORGET			2U
+#define KL_SYSTEM_BT_CONNECT			3U
+#define KL_SYSTEM_BT_DISCONNECT			4U
+#define KL_SYSTEM_BT_SCANNING			0x1U
+#define KL_SYSTEM_BT_PAIRING			0x2U
+#define KL_SYSTEM_BT_POWERED			0x4U
+#define KL_SYSTEM_BT_ANSWERS			0x8U
+#define KL_SYSTEM_BT_PAIRED			0x1U
+#define KL_SYSTEM_BT_LEGACY			0x2U
+#define KL_SYSTEM_BT_CONNECTED			0x4U
+#define KL_SYSTEM_BT_ADDRESS_MAX		18U
+#define KL_SYSTEM_BT_NAME_MAX			64U
+#define KL_SYSTEM_BT_DEVICES_MAX		32U
+
+/*
+ * kl_system_machine_v1's requests and events (ws188-p002), the parts a
+ * query asks, a user's flags (a person's account, the client's own, an
+ * administrator's, allowed to control Wi-Fi), and the longest texts the
+ * events carry (with their NULs).
+ */
+#define KL_SYSTEM_MACHINE_DESTROY		0U
+#define KL_SYSTEM_MACHINE_QUERY			1U
+#define KL_SYSTEM_MACHINE_EVENT_PARTS		0U
+#define KL_SYSTEM_MACHINE_EVENT_ABOUT		1U
+#define KL_SYSTEM_MACHINE_EVENT_FILESYSTEM	2U
+#define KL_SYSTEM_MACHINE_EVENT_USER		3U
+#define KL_SYSTEM_MACHINE_EVENT_LOGIN_LANGUAGE	4U
+#define KL_SYSTEM_MACHINE_EVENT_RESULT		5U
+#define KL_SYSTEM_MACHINE_EVENT_MOUNT		6U
+#define KL_SYSTEM_MACHINE_ABOUT			0x1U
+#define KL_SYSTEM_MACHINE_FILESYSTEMS		0x2U
+#define KL_SYSTEM_MACHINE_USERS			0x4U
+#define KL_SYSTEM_MACHINE_LOGIN_LANGUAGE	0x8U
+#define KL_SYSTEM_MACHINE_MOUNTS		0x10U
+#define KL_SYSTEM_MACHINE_PARTS			0x1fU
+#define KL_SYSTEM_MACHINE_PARTS_21		0xfU
+#define KL_SYSTEM_MACHINE_USER_PERSON		0x1U
+#define KL_SYSTEM_MACHINE_USER_SELF		0x2U
+#define KL_SYSTEM_MACHINE_USER_ADMIN		0x4U
+#define KL_SYSTEM_MACHINE_USER_NETWORK		0x8U
+#define KL_SYSTEM_MACHINE_SYSTEM_MAX		128U
+#define KL_SYSTEM_MACHINE_KERNEL_MAX		160U
+#define KL_SYSTEM_MACHINE_ARCH_MAX		32U
+#define KL_SYSTEM_MACHINE_PROCESSOR_MAX		64U
+#define KL_SYSTEM_MACHINE_HOST_MAX		64U
+#define KL_SYSTEM_MACHINE_PATH_MAX		64U
+#define KL_SYSTEM_MACHINE_NAME_MAX		64U
+#define KL_SYSTEM_MACHINE_FULL_NAME_MAX		128U
+#define KL_SYSTEM_MACHINE_HOME_MAX		256U
+#define KL_SYSTEM_MACHINE_CODE_MAX		8U
+#define KL_SYSTEM_MACHINE_FILESYSTEMS_MAX	8U
+#define KL_SYSTEM_MACHINE_USERS_MAX		64U
+#define KL_SYSTEM_MACHINE_MOUNT_PATH_MAX	256U
+#define KL_SYSTEM_MACHINE_MOUNT_TYPE_MAX	32U
+#define KL_SYSTEM_MACHINE_MOUNTS_MAX		64U
+
+/*
+ * kl_system_displays_v1's requests and events (ws113-p005), the modes, a
+ * display's flags (built in, the desktop's anchor, shown now, with a light
+ * the compositor can set, held back by the limit of the displays shown at
+ * once, turned off by the user, ws113-p014), and the longest key and label an output carries and places a
+ * request carries (with their NULs).
+ */
+#define KL_SYSTEM_DISPLAYS_DESTROY		0U
+#define KL_SYSTEM_DISPLAYS_APPLY		1U
+#define KL_SYSTEM_DISPLAYS_SET_BRIGHTNESS	2U
+#define KL_SYSTEM_DISPLAYS_SET_SHOWN		3U
+#define KL_SYSTEM_DISPLAYS_SET_ROTATION		4U
+#define KL_SYSTEM_DISPLAYS_BIND_TOUCH		5U
+#define KL_SYSTEM_DISPLAYS_LISTEN_TOUCH		6U
+#define KL_SYSTEM_DISPLAYS_SET_RESOLUTION	7U
+#define KL_SYSTEM_DISPLAYS_KEEP_RESOLUTION	8U
+#define KL_SYSTEM_DISPLAYS_REVERT_RESOLUTION	9U
+#define KL_SYSTEM_DISPLAYS_RESET_RESOLUTION	10U
+#define KL_SYSTEM_DISPLAYS_EVENT_OUTPUT		0U
+#define KL_SYSTEM_DISPLAYS_EVENT_DONE		1U
+#define KL_SYSTEM_DISPLAYS_EVENT_RESULT		2U
+#define KL_SYSTEM_DISPLAYS_EVENT_ROTATION	3U
+#define KL_SYSTEM_DISPLAYS_EVENT_ROTATIONS	4U
+#define KL_SYSTEM_DISPLAYS_EVENT_TOUCH		5U
+#define KL_SYSTEM_DISPLAYS_EVENT_MODE		6U
+#define KL_SYSTEM_DISPLAYS_EVENT_RESOLUTION	7U
+#define KL_SYSTEM_DISPLAYS_EXTENDED		0U
+#define KL_SYSTEM_DISPLAYS_MIRROR		1U
+#define KL_SYSTEM_DISPLAY_INTERNAL		0x1U
+#define KL_SYSTEM_DISPLAY_ANCHOR		0x2U
+#define KL_SYSTEM_DISPLAY_SHOWN			0x4U
+#define KL_SYSTEM_DISPLAY_BACKLIGHT		0x8U
+#define KL_SYSTEM_DISPLAY_LIMITED		0x10U
+#define KL_SYSTEM_DISPLAY_OFF			0x20U
+#define KL_SYSTEM_DISPLAY_KEY_MAX		64U
+#define KL_SYSTEM_DISPLAY_LABEL_MAX		64U
+#define KL_SYSTEM_DISPLAY_PLACES_MAX		1024U
+
+/*
+ * The displays' angles (ws217-p004, since 34): the angles a display may be
+ * turned to, as a mask (bit for 0, 90, 180 and 270), and why it may not
+ * take the others or does not show the one chosen: its hardware cannot
+ * turn the picture (nothing can be turned), the quarter turns are not
+ * offered on this device, a game pauses the turn, the turn's images could
+ * not be made, or another display is shown beside it (an angle is chosen
+ * while it is shown alone).  libkeiland's KL_DISPLAY_ROTATION_* and
+ * KL_DISPLAY_ROTATE_WHY_* and the compositor's rotate.h carry the same
+ * bits.  The longest identity of a touch or pen device bind_touch names.
+ */
+#define KL_SYSTEM_ROTATION_0			0x1U
+#define KL_SYSTEM_ROTATION_90			0x2U
+#define KL_SYSTEM_ROTATION_180			0x4U
+#define KL_SYSTEM_ROTATION_270			0x8U
+#define KL_SYSTEM_ROTATE_WHY_SCANOUT		0x1U
+#define KL_SYSTEM_ROTATE_WHY_TURN		0x2U
+#define KL_SYSTEM_ROTATE_WHY_GAME		0x4U
+#define KL_SYSTEM_ROTATE_WHY_RESOURCE		0x8U
+#define KL_SYSTEM_ROTATE_WHY_ALONE		0x10U
+#define KL_SYSTEM_TOUCH_IDENTITY_MAX		96U
+
+/*
+ * The displays' modes (since 36): a mode's marks (the display's
+ * recommended default, the mode shown now), the states of a display's
+ * trial of a new mode (none, the switch running, the time to keep it, the
+ * way back running), why its mode cannot be chosen now (it offers one, it
+ * is shown beside another, a game is shown, it is not the display the
+ * desktop is on), and the most modes a display offers.  libkeiland's
+ * KL_DISPLAY_MODE_*, KL_DISPLAY_RESOLUTION_* and the compositor's
+ * resolution.h carry the same numbers.
+ */
+#define KL_SYSTEM_MODE_NATIVE			0x1U
+#define KL_SYSTEM_MODE_CURRENT			0x2U
+#define KL_SYSTEM_RESOLUTION_NONE		0U
+#define KL_SYSTEM_RESOLUTION_SWITCHING		1U
+#define KL_SYSTEM_RESOLUTION_TRIAL		2U
+#define KL_SYSTEM_RESOLUTION_REVERTING		3U
+#define KL_SYSTEM_RESOLUTION_WHY_FIXED		0x1U
+#define KL_SYSTEM_RESOLUTION_WHY_ALONE		0x2U
+#define KL_SYSTEM_RESOLUTION_WHY_GAME		0x4U
+#define KL_SYSTEM_RESOLUTION_WHY_ANCHOR		0x8U
+#define KL_SYSTEM_DISPLAY_MODES_MAX		64U
+
+/*
+ * kl_system_notify_v1's requests and events (ws156-p002,
+ * plan/ws156/phase001/phase.md section 2): post(request, replaces, app,
+ * title, body, flags), withdraw(request, id); posted(request, id),
+ * activated(id), closed(id, reason), result(request, applied, saved).
+ * Since version 27 (ws197-p004c): post_lock(request, replaces, app,
+ * title, body, flags, lock_text), a post with what the lock screen shows
+ * of it (at most 128 bytes; "" for nothing), answered as post.
+ */
+#define KL_SYSTEM_NOTIFY_DESTROY		0U
+#define KL_SYSTEM_NOTIFY_POST			1U
+#define KL_SYSTEM_NOTIFY_WITHDRAW		2U
+#define KL_SYSTEM_NOTIFY_POST_LOCK		3U
+#define KL_SYSTEM_NOTIFY_EVENT_POSTED		0U
+#define KL_SYSTEM_NOTIFY_EVENT_ACTIVATED	1U
+#define KL_SYSTEM_NOTIFY_EVENT_CLOSED		2U
+#define KL_SYSTEM_NOTIFY_EVENT_RESULT		3U
+
+/* A notification's flags, and why one closed (closed's reason). */
+#define KL_SYSTEM_NOTIFY_URGENT			0x1U
+#define KL_SYSTEM_NOTIFY_ACTION			0x2U
+#define KL_SYSTEM_NOTIFY_DISMISSED		1U
+#define KL_SYSTEM_NOTIFY_EXPIRED		2U
+#define KL_SYSTEM_NOTIFY_CLEARED		3U
+#define KL_SYSTEM_NOTIFY_WITHDRAWN		4U
+
+/*
+ * kl_system_mail_v1's requests and events (ws169-p002,
+ * plan/ws169/phase001/phase.md section 1):
+ *   request 0 destroy
+ *   request 1 arrived(uint request, string account, string from, string subject, string code)
+ *       the mail program tells of a new message (no body; code is a
+ *       sign-in code found in it, or empty); since ws177-p005 only a
+ *       client with a window of the mail program (app_id "mailer") is
+ *       heard, any other is answered INVALID
+ *   request 2 listen(uint request, string app)
+ *       a reader asks for the messages' arrivals under its name; only a
+ *       name the settings know (mail.codes.<app>) is taken
+ *   event   0 mail(string from, string subject, string code)
+ *       a message arrived, told to each listener whose mail.codes.<app>
+ *       setting is on when it arrives
+ *   event   1 result(uint request, uint applied, uint saved)
+ *   event   2 allowed(uint on)  (since 20, ws177-p005)
+ *       whether the user lets the reader hear the arrivals now: told once
+ *       its listen is taken, and again whenever its mail.codes.<app>
+ *       setting changes
+ */
+#define KL_SYSTEM_MAIL_DESTROY			0U
+#define KL_SYSTEM_MAIL_ARRIVED			1U
+#define KL_SYSTEM_MAIL_LISTEN			2U
+#define KL_SYSTEM_MAIL_EVENT_MAIL		0U
+#define KL_SYSTEM_MAIL_EVENT_RESULT		1U
+#define KL_SYSTEM_MAIL_EVENT_ALLOWED		2U
+
+/* The setting that lets a reader hear the arrivals, before the reader's name (mail.codes.browser). */
+#define KL_SYSTEM_MAIL_SETTING_PREFIX		"mail.codes."
+
+/*
+ * kl_system_phone_v1's requests and events (ws170-p004,
+ * plan/ws170/phase001/phase.md section 3):
+ *   request 0 destroy
+ *   request 1 send(uint request, uint channel, string to, string text)
+ *   request 2 call(uint request, uint channel, string to)
+ *   event   0 received(uint channel, string from, string text, uint time_high, uint time_low)
+ *       a message came (to every phone object of the user)
+ *   event   1 status(uint request, uint state)
+ *       a sent message's or a call's state (KL_SYSTEM_PHONE_*)
+ *   event   2 result(uint request, uint applied, uint saved)
+ *       the request taken (OK), or not: UNAVAILABLE without a backend
+ * Since version 27 (ws197-p004a, plan/ws197/phase004/phase.md section 4):
+ *   request 3 listen(uint on)
+ *       the program hears the items, the link and the drops (the phone
+ *       program only, app_id "phone"); on tells the link once
+ *   request 4 sync(uint request, uint what, int since_high, uint since_low, uint limit, string cursor, uint count)
+ *       a page of the synchronisation: items, page_end, done
+ *   request 5 send_text(uint request, uint channel, string to, array text)
+ *       a text of up to 8192 bytes: done, then status
+ *   request 6 mark_read(uint request, string handle)
+ *   request 7 link_set(uint request, string address, uint on, uint profiles)
+ *       the phone's switch and its profiles (no app_id is asked)
+ *   request 8 watch_link(uint on)
+ *       the link only (Settings; no app_id is asked)
+ *   event   3 item(uint request, uint what, string handle, string key, uint folder, uint direction, int time_high,
+ *                  uint time_low, uint zone, string datetime, string peer, string name, uint flags, array text)
+ *       one message of a page (its request), or one that came (request 0)
+ *   event   4 page_end(uint request, string cursor, uint more, uint count, uint skipped, uint capped)
+ *   event   5 link(uint backend, uint linked, uint messages, uint can_send, uint notify, uint owner, uint enabled,
+ *                  uint profiles, uint present, string address, string why)
+ *   event   6 dropped()
+ *       items that came were lost: synchronise again
+ *   event   7 done(uint request, uint code)
+ *       a request of version 27 answered (KL_SYSTEM_RESULT_*)
+ * Since version 28 (ws197-p005, plan/ws197/phase005/phase.md section 6):
+ *   sync's what may be 1 (the phone's contacts: since and limit 0) or 2
+ *       (its calls since a time: limit 0); an item's what says which.  A
+ *       contact's item: its key, how many numbers (folder), its first
+ *       number (peer), its name and its reduced vCard 3.0 (text).  A
+ *       call's: its key, its kind (folder: 0 received, 1 dialed, 2
+ *       missed), out for one dialed, its time and zone (0 the phone's, 2
+ *       this computer's, 3 when it came, partial), the phone's datetime,
+ *       the number, the name, and no text.  page_end's capped is bits: 1
+ *       a limit stopped it, 2 the contacts' count changed while they were
+ *       read, 4 a page's count is not to be trusted.
+ *   event   8 link_contacts(uint contacts, uint record, string contacts_why)
+ *       sent just before each link, which it belongs to: the contacts'
+ *       state (0 off, 1 connecting, 2 ready, 3 failed), whether the
+ *       phone's record is known (0 not known, 1 none, 2 there is one),
+ *       and why the contacts stopped
+ * The new events go to objects of version 27 only (link_contacts to
+ * those of 28); done, page_end, link and dropped are never lost (the
+ * compositor owes them until the client reads; a link owed is sent again
+ * with its link_contacts).  The backend is the desktop's setting
+ * phone.backend (0 none, 1 loopback, 2 bluetooth).
+ */
+#define KL_SYSTEM_PHONE_DESTROY			0U
+#define KL_SYSTEM_PHONE_SEND			1U
+#define KL_SYSTEM_PHONE_CALL			2U
+#define KL_SYSTEM_PHONE_LISTEN			3U
+#define KL_SYSTEM_PHONE_SYNC			4U
+#define KL_SYSTEM_PHONE_SEND_TEXT		5U
+#define KL_SYSTEM_PHONE_MARK_READ		6U
+#define KL_SYSTEM_PHONE_LINK_SET		7U
+#define KL_SYSTEM_PHONE_WATCH_LINK		8U
+#define KL_SYSTEM_PHONE_EVENT_RECEIVED		0U
+#define KL_SYSTEM_PHONE_EVENT_STATUS		1U
+#define KL_SYSTEM_PHONE_EVENT_RESULT		2U
+#define KL_SYSTEM_PHONE_EVENT_ITEM		3U
+#define KL_SYSTEM_PHONE_EVENT_PAGE_END		4U
+#define KL_SYSTEM_PHONE_EVENT_LINK		5U
+#define KL_SYSTEM_PHONE_EVENT_DROPPED		6U
+#define KL_SYSTEM_PHONE_EVENT_DONE		7U
+#define KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS	8U
+#define KL_SYSTEM_PHONE_EVENT_ITEM_MIME 9U
+#define KL_SYSTEM_SINCE_PHONE_MIME 30U
+/* Since version 32 (ws197-p010): request 9 send_mms(uint request, string to, fd mime), an MMS's MIME body in a regular file: done, then status as send_text's. */
+#define KL_SYSTEM_PHONE_SEND_MMS		9U
+#define KL_SYSTEM_SINCE_PHONE_MMS		32U
+/*
+ * Since version 33 (ws197-p006, the calls of the paired phone, HFP), for the phone program only:
+ *   request 10 control(uint request, uint ask, string argument)
+ *       a call's request (KL_SYSTEM_PHONE_ASK_*): done answers it
+ *   event 10 call(uint index, uint state, uint outgoing, string number, string name)
+ *       a call's change (KL_SYSTEM_PHONE_CALL_*, ENDED once); the calls there are are told at listen
+ *   event 11 hf(uint state, int service, int signal, int battery, int roam, int speaker, uint flags)
+ *       the hands-free unit's state (KL_SYSTEM_PHONE_HF_*), flags 1 voice recognition on, 2 calls can be held; told at listen
+ */
+#define KL_SYSTEM_PHONE_CONTROL			10U
+#define KL_SYSTEM_PHONE_EVENT_CALL		10U
+#define KL_SYSTEM_PHONE_EVENT_HF		11U
+#define KL_SYSTEM_SINCE_PHONE_CALLS		33U
+#define KL_SYSTEM_PHONE_ASK_DIAL		1U
+#define KL_SYSTEM_PHONE_ASK_VOICE		7U
+#define KL_SYSTEM_PHONE_CALL_ENDED		7U
+#define KL_SYSTEM_PHONE_HF_VOICE		1U
+#define KL_SYSTEM_PHONE_HF_HOLD			2U
+
+/* The channel of SMS (keiland.h's KL_PHONE_SMS) and what a sync asks for (KL_PHONE_MESSAGES, _CONTACTS and _CALLS). */
+#define KL_SYSTEM_PHONE_SMS			0U
+#define KL_SYSTEM_PHONE_MESSAGES		0U
+#define KL_SYSTEM_PHONE_CONTACTS		1U
+#define KL_SYSTEM_PHONE_CALLS			2U
+
+/* An item's flags (bits). */
+#define KL_SYSTEM_PHONE_ITEM_READ		0x1U
+#define KL_SYSTEM_PHONE_ITEM_PARTIAL		0x2U
+#define KL_SYSTEM_PHONE_ITEM_TRUNCATED		0x4U
+
+/* The lengths of the phone's texts on the wire with their NULs (keiland.h's KL_PHONE_*_MAX), and the longest texts. */
+#define KL_SYSTEM_PHONE_HANDLE_MAX		32U
+#define KL_SYSTEM_PHONE_KEY_MAX			20U
+#define KL_SYSTEM_PHONE_CURSOR_MAX		64U
+#define KL_SYSTEM_PHONE_PEER_MAX		132U
+#define KL_SYSTEM_PHONE_DATETIME_MAX		24U
+#define KL_SYSTEM_PHONE_ADDRESS_MAX		18U
+#define KL_SYSTEM_PHONE_WHY_MAX			32U
+#define KL_SYSTEM_PHONE_TO_MAX			33U
+#define KL_SYSTEM_PHONE_SEND_MAX		8192U
+#define KL_SYSTEM_PHONE_ITEM_TEXT_MAX		16384U
+
+/* A message's or call's state (status), and the channels (keiland.h's KL_PHONE_*). */
+#define KL_SYSTEM_PHONE_SENT			1U
+#define KL_SYSTEM_PHONE_DELIVERED		2U
+#define KL_SYSTEM_PHONE_FAILED			3U
+#define KL_SYSTEM_PHONE_ANSWERED		4U
+#define KL_SYSTEM_PHONE_NO_ANSWER		5U
+#define KL_SYSTEM_PHONE_CHANNELS		5U
+
+/* The desktop's setting that chooses the backend. */
+#define KL_SYSTEM_PHONE_SETTING			"phone.backend"
+#define KL_SYSTEM_PHONE_BACKEND_NONE		0
+#define KL_SYSTEM_PHONE_BACKEND_LOOPBACK	1
+#define KL_SYSTEM_PHONE_BACKEND_BLUETOOTH	2
+
+/*
+ * kl_system_printers_v1's requests and events (ws145-p003,
+ * plan/ws145/design.md section 3):
+ *   request 0 destroy
+ *   request 1 add(uint request, uint protocol, string host, uint port, string path)
+ *       path: the IPP path or the LPD queue ("" for the protocol's usual one)
+ *   request 2 remove(uint request, uint printer)
+ *   request 3 set_default(uint request, uint printer)
+ *   request 4 print(uint request, uint printer, string title, fd document)
+ *       printer 0: the default; the document is a PDF the client opened
+ *   request 5 cancel(uint request, uint job)
+ *   request 6 edit(uint request, uint printer, string name, string path)    since 24 (ws177-p025)
+ *       name: the printer's name ("" keeps it); path: the IPP path or the LPD queue ("" keeps it)
+ *   event   0 printer(uint id, uint protocol, string host, uint port, string path, string name, uint flags)
+ *   event   1 job(uint job, uint printer, uint state, string title, string detail)
+ *   event   2 done(uint serial)    the printers and jobs before it are the whole state
+ *   event   3 queued(uint request, uint job)    before print's result, when the job was taken
+ *   event   4 result(uint request, uint applied, uint saved)
+ * Sent whole when the object is made and each time something changed.
+ */
+#define KL_SYSTEM_PRINTERS_DESTROY		0U
+#define KL_SYSTEM_PRINTERS_ADD			1U
+#define KL_SYSTEM_PRINTERS_REMOVE		2U
+#define KL_SYSTEM_PRINTERS_SET_DEFAULT		3U
+#define KL_SYSTEM_PRINTERS_PRINT		4U
+#define KL_SYSTEM_PRINTERS_CANCEL		5U
+#define KL_SYSTEM_PRINTERS_EDIT			6U
+#define KL_SYSTEM_PRINTERS_EVENT_PRINTER	0U
+#define KL_SYSTEM_PRINTERS_EVENT_JOB		1U
+#define KL_SYSTEM_PRINTERS_EVENT_DONE		2U
+#define KL_SYSTEM_PRINTERS_EVENT_QUEUED		3U
+#define KL_SYSTEM_PRINTERS_EVENT_RESULT		4U
+
+/* The protocols, a printer's flags and a job's states (keiland.h's KL_PRINTER_* and KL_PRINT_*). */
+#define KL_SYSTEM_PRINTER_IPP			1U
+#define KL_SYSTEM_PRINTER_LPD			2U
+#define KL_SYSTEM_PRINTER_DEFAULT		0x1U
+#define KL_SYSTEM_PRINT_QUEUED			1U
+#define KL_SYSTEM_PRINT_SENDING			2U
+#define KL_SYSTEM_PRINT_WAITING			3U
+#define KL_SYSTEM_PRINT_DONE			4U
+#define KL_SYSTEM_PRINT_FAILED			5U
+#define KL_SYSTEM_PRINT_CANCELLED		6U
+
+/* kl_system_sharing_v1's requests and events (ws089-p025), and the longest fingerprint it carries. */
+#define KL_SYSTEM_SHARING_DESTROY		0U
+#define KL_SYSTEM_SHARING_SET_SSH		1U
+#define KL_SYSTEM_SHARING_QUERY			2U
+#define KL_SYSTEM_SHARING_EVENT_STATE		0U
+#define KL_SYSTEM_SHARING_EVENT_DONE		1U
+#define KL_SYSTEM_SHARING_EVENT_RESULT		2U
+
+/* kl_system_account_v1's requests and event, and the longest password it carries (without its NUL). */
+#define KL_SYSTEM_ACCOUNT_DESTROY		0U
+#define KL_SYSTEM_ACCOUNT_SET_PASSWORD		1U
+#define KL_SYSTEM_ACCOUNT_ADMINISTER		2U
+#define KL_SYSTEM_ACCOUNT_SET_PIN		3U
+#define KL_SYSTEM_ACCOUNT_ADD_KEY		4U
+#define KL_SYSTEM_ACCOUNT_REMOVE_KEY		5U
+#define KL_SYSTEM_ACCOUNT_KEY_INFO		6U
+#define KL_SYSTEM_ACCOUNT_KEY_PIN		7U
+#define KL_SYSTEM_ACCOUNT_KEY_RESET		8U
+#define KL_SYSTEM_ACCOUNT_KEY_CANCEL		9U
+#define KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS	10U
+#define KL_SYSTEM_ACCOUNT_SET_METHODS		11U
+#define KL_SYSTEM_ACCOUNT_EVENT_RESULT		0U
+#define KL_SYSTEM_ACCOUNT_EVENT_REFUSED		1U
+#define KL_SYSTEM_ACCOUNT_EVENT_ENROLLED	2U
+#define KL_SYSTEM_ACCOUNT_EVENT_KEY		3U
+#define KL_SYSTEM_ACCOUNT_EVENT_TOUCH		4U
+#define KL_SYSTEM_ACCOUNT_EVENT_KEY_INFO	5U
+#define KL_SYSTEM_ACCOUNT_EVENT_REPLUG		6U
+#define KL_SYSTEM_ACCOUNT_EVENT_REMOVED		7U
+#define KL_SYSTEM_ACCOUNT_EVENT_KEYS_CHANGED	8U
+#define KL_SYSTEM_ACCOUNT_EVENT_OPTIONS		9U
+#define KL_SYSTEM_ACCOUNT_EVENT_METHODS		10U
+#define KL_SYSTEM_KEY_NAME_MAX			63U
+#define KL_SYSTEM_KEY_LABEL_MAX			32U
+#define KL_SYSTEM_KEY_REF_MAX			16U
+#define KL_SYSTEM_PASSWORD_MAX			256U
+
+/* The longest operation administer carries, and the longest refusal's word (without their NULs). */
+#define KL_SYSTEM_OPERATION_MAX			1024U
+#define KL_SYSTEM_REASON_MAX			31U
+
+/* kl_system_network_v1's requests and events. */
+#define KL_SYSTEM_NETWORK_DESTROY		0U
+#define KL_SYSTEM_NETWORK_REQUEST		1U
+#define KL_SYSTEM_NETWORK_SAVE_KEY		2U
+#define KL_SYSTEM_NETWORK_QUERY_DETAILS		3U
+#define KL_SYSTEM_NETWORK_SET_SCANNING		4U
+#define KL_SYSTEM_NETWORK_CONFIGURE_WIRED	5U
+#define KL_SYSTEM_NETWORK_EVENT_STATE		0U
+#define KL_SYSTEM_NETWORK_EVENT_ACCESS_POINT	1U
+#define KL_SYSTEM_NETWORK_EVENT_SCAN_DONE	2U
+#define KL_SYSTEM_NETWORK_EVENT_LINK		3U
+#define KL_SYSTEM_NETWORK_EVENT_DNS		4U
+#define KL_SYSTEM_NETWORK_EVENT_SAVED		5U
+#define KL_SYSTEM_NETWORK_EVENT_DETAILS_DONE	6U
+#define KL_SYSTEM_NETWORK_EVENT_DONE		7U
+#define KL_SYSTEM_NETWORK_EVENT_RESULT		8U
+#define KL_SYSTEM_NETWORK_EVENT_WIRED		9U
+#define KL_SYSTEM_NETWORK_EVENT_LINK_SPEED	10U
+#define KL_SYSTEM_NETWORK_EVENT_LINK_INET6	11U
+#define KL_SYSTEM_NETWORK_EVENT_LINK_ROUTER6	12U
+
+/* Since when the network has configure_wired and wired (ws089-p022), link_speed (BUG-222), and link_inet6 and link_router6. */
+#define KL_SYSTEM_NETWORK_SINCE_WIRED		6U
+#define KL_SYSTEM_NETWORK_SINCE_LINK_SPEED	12U
+#define KL_SYSTEM_NETWORK_SINCE_INET6		35U
+
+/* How a wired interface is configured (configure_wired's mode and wired's). */
+#define KL_SYSTEM_WIRED_UNKNOWN			0U
+#define KL_SYSTEM_WIRED_DHCP			1U
+#define KL_SYSTEM_WIRED_STATIC			2U
+
+/* The network's requests (request's what; the backend's KL_BACKEND_NETWORK_REQUEST_* values). */
+#define KL_SYSTEM_NETWORK_SCAN			1U
+#define KL_SYSTEM_NETWORK_JOIN			2U
+#define KL_SYSTEM_NETWORK_DISCONNECT		3U
+#define KL_SYSTEM_NETWORK_WIFI_ON		4U
+#define KL_SYSTEM_NETWORK_WIFI_OFF		5U
+
+/* A link's flags. */
+#define KL_SYSTEM_LINK_UP			0x1U
+#define KL_SYSTEM_LINK_RUNNING			0x2U
+#define KL_SYSTEM_LINK_LOOPBACK			0x4U
+#define KL_SYSTEM_LINK_WIRELESS			0x8U
+
+/* kl_system_audio_v1's requests and events. */
+#define KL_SYSTEM_AUDIO_DESTROY			0U
+#define KL_SYSTEM_AUDIO_SET_VOLUME		1U
+#define KL_SYSTEM_AUDIO_FEEDBACK		2U
+#define KL_SYSTEM_AUDIO_EVENT_STATE		0U
+#define KL_SYSTEM_AUDIO_EVENT_DONE		1U
+#define KL_SYSTEM_AUDIO_EVENT_RESULT		2U
+
+/* kl_system_power_v1's requests and events, and its actions (the backend's KL_BACKEND_POWER_* values). */
+#define KL_SYSTEM_POWER_DESTROY			0U
+#define KL_SYSTEM_POWER_ACTION			1U
+#define KL_SYSTEM_POWER_EVENT_STATE		0U
+#define KL_SYSTEM_POWER_EVENT_DONE		1U
+#define KL_SYSTEM_POWER_EVENT_RESULT		2U
+#define KL_SYSTEM_POWER_POWEROFF		1U
+#define KL_SYSTEM_POWER_REBOOT			2U
+#define KL_SYSTEM_POWER_SUSPEND			3U
+
+/* kl_system_devices_v1's requests and events. */
+#define KL_SYSTEM_DEVICES_DESTROY		0U
+#define KL_SYSTEM_DEVICES_EJECT			1U
+#define KL_SYSTEM_DEVICES_MOUNT			2U
+#define KL_SYSTEM_DEVICES_EVENT_DEVICE		0U
+#define KL_SYSTEM_DEVICES_EVENT_DONE		1U
+#define KL_SYSTEM_DEVICES_EVENT_RESULT		2U
+#define KL_SYSTEM_DEVICES_EVENT_BUSY		3U
+#define KL_SYSTEM_DEVICES_EVENT_VOLUME		4U
+#define KL_SYSTEM_DEVICES_SINCE_MOUNT		5U
+#define KL_SYSTEM_DEVICES_SINCE_VOLUME		9U
+
+/* A device's kind and its state's bits (ws132-p004). */
+#define KL_SYSTEM_DEVICE_KIND_STORAGE		1U
+#define KL_SYSTEM_DEVICE_MOUNTED		0x1U
+#define KL_SYSTEM_DEVICE_NEW			0x2U
+
+/* kl_system_monitor_v1's requests and events (WS134 p012). */
+#define KL_SYSTEM_MONITOR_DESTROY		0U
+#define KL_SYSTEM_MONITOR_ACK			1U
+#define KL_SYSTEM_MONITOR_SET_PERIOD		2U
+#define KL_SYSTEM_MONITOR_EVENT_INFO		0U
+#define KL_SYSTEM_MONITOR_EVENT_DEVICE		1U
+#define KL_SYSTEM_MONITOR_EVENT_INFO_DONE	2U
+#define KL_SYSTEM_MONITOR_EVENT_CPU		3U
+#define KL_SYSTEM_MONITOR_EVENT_MEMORY		4U
+#define KL_SYSTEM_MONITOR_EVENT_LINK		5U
+#define KL_SYSTEM_MONITOR_EVENT_DISK		6U
+#define KL_SYSTEM_MONITOR_EVENT_GPU		7U
+#define KL_SYSTEM_MONITOR_EVENT_SAMPLE_DONE	8U
+
+/* A monitor device's kind (the device event's kind). */
+#define KL_SYSTEM_MONITOR_DEVICE_GPU		1U
+#define KL_SYSTEM_MONITOR_DEVICE_DISK		2U
+#define KL_SYSTEM_MONITOR_DEVICE_LINK		3U
+
+/* The bounds of a monitor's period, in milliseconds, and the period without one. */
+#define KL_SYSTEM_MONITOR_PERIOD_MIN		250U
+#define KL_SYSTEM_MONITOR_PERIOD_MAX		10000U
+#define KL_SYSTEM_MONITOR_PERIOD_DEFAULT	1000U
+
+/* kl_system_settings_v1's requests and events. */
+#define KL_SYSTEM_SETTINGS_DESTROY		0U
+#define KL_SYSTEM_SETTINGS_SET			1U
+#define KL_SYSTEM_SETTINGS_RESET		2U
+#define KL_SYSTEM_SETTINGS_EVENT_VALUE		0U
+#define KL_SYSTEM_SETTINGS_EVENT_DONE		1U
+#define KL_SYSTEM_SETTINGS_EVENT_RESULT		2U
+
+/* A value's flags: the resolver's default (not chosen), and not known yet (the value is empty). */
+#define KL_SYSTEM_SETTINGS_DEFAULT		0x1U
+#define KL_SYSTEM_SETTINGS_UNKNOWN		0x2U
+
+/* The results of a request (WS131 section 4.1). */
+#define KL_SYSTEM_RESULT_OK			0U
+#define KL_SYSTEM_RESULT_DENIED			1U
+#define KL_SYSTEM_RESULT_UNSUPPORTED		2U
+#define KL_SYSTEM_RESULT_BUSY			3U
+#define KL_SYSTEM_RESULT_INVALID		4U
+#define KL_SYSTEM_RESULT_UNAVAILABLE		5U
+#define KL_SYSTEM_RESULT_FAILED			6U
+#define KL_SYSTEM_RESULT_NOT_SAVED		7U
+
+/* A network join's own failures (WS131 p011): no key is saved, the network refused the key, the network is out of reach. */
+#define KL_SYSTEM_RESULT_NO_KEY			8U
+#define KL_SYSTEM_RESULT_REFUSED		9U
+#define KL_SYSTEM_RESULT_UNREACHABLE		10U
+
+/* A displays' apply made against a snapshot that is no longer the last (ws113-p005). */
+#define KL_SYSTEM_RESULT_STALE			11U
+
+/*
+ * The phone's own failures (ws197-p004a): the link or the connection was
+ * lost on the way, an answer did not come in time, a listing was too
+ * large, the compositor could not pass the items on (the client read too
+ * little), the phone's messages are not connected.
+ */
+#define KL_SYSTEM_RESULT_LOST			12U
+#define KL_SYSTEM_RESULT_TIMEOUT		13U
+#define KL_SYSTEM_RESULT_TOO_LARGE		14U
+#define KL_SYSTEM_RESULT_NO_ROOM		15U
+#define KL_SYSTEM_RESULT_NOT_CONNECTED		16U
+
+/* Since manager version 29, mediastorage owns photo/video persistence. */
+#define KL_SYSTEM_SINCE_MEDIA 29U
+#define KL_SYSTEM_MANAGER_GET_MEDIA 16U
+#define KL_SYSTEM_CAPABILITY_MEDIA 0x20000U
+#define KL_SYSTEM_MEDIA_NAME "kl_system_media_v1"
+#define KL_SYSTEM_MEDIA_DESTROY 0U
+#define KL_SYSTEM_MEDIA_LIST 1U
+#define KL_SYSTEM_MEDIA_ADD 2U
+#define KL_SYSTEM_MEDIA_APPLY 3U
+#define KL_SYSTEM_MEDIA_WATCH 4U
+#define KL_SYSTEM_MEDIA_NOTIFY 5U
+#define KL_SYSTEM_MEDIA_REMOVE 6U
+#define KL_SYSTEM_SINCE_MEDIA_REMOVE 31U
+#define KL_SYSTEM_MEDIA_EVENT_SNAPSHOT 0U
+#define KL_SYSTEM_MEDIA_EVENT_DONE 1U
+#define KL_SYSTEM_MEDIA_EVENT_CHANGED 2U
+#define KL_SYSTEM_MEDIA_PATHS_MAX 32768U
+
+#endif

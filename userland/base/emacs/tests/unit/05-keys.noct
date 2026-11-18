@@ -1,0 +1,43 @@
+// Copyright (C) 2026 Awe Morris
+// SPDX-License-Identifier: Zlib
+func main() {
+    keysInit();
+
+    // kbd parsing.
+    var ks = kbd("C-x C-s");
+    print(Array.size(ks));
+    print(ks[0] == (Term.CTRL | 0x78));
+    print(ks[1] == (Term.CTRL | 0x73));
+    print(kbd("M-f")[0] == (Term.META | 0x66));
+    print(kbd("a")[0]);
+    print(kbd("RET")[0]);
+    print(kbd("DEL")[0]);
+    print(kbd("SPC")[0]);
+    print(kbd("UP")[0] == Term.KEY_UP);
+    print(kbd("C-M-a")[0] == (Term.CTRL | Term.META | 0x61));
+
+    // describeKey round trip.
+    print(describeKey(Term.CTRL | 0x78));
+    print(describeKey(Term.META | 0x66));
+    print(describeKey(0x68));
+    print(describeKey(0x7F));
+    print(describeKey(0x0D));
+
+    // defineKey builds nested prefix maps.
+    defineCommand("test-cmd", (_) => { return 42; });
+    globalSetKey("C-c C-v x", "test-cmd");
+    var m1 = GlobalMap["" + (Term.CTRL | 0x63)];
+    print(Type.of(m1));
+    var m2 = m1["" + (Term.CTRL | 0x76)];
+    print(Type.of(m2));
+    print(m2["" + 0x78]);
+
+    // Registry lookup.
+    var fn = commandByName("test-cmd");
+    print(fn(0));
+    print(commandByName("nope") == 0);
+
+    // Rebinding a key replaces the old binding.
+    globalSetKey("C-c C-v x", "other");
+    print(m2["" + 0x78]);
+}

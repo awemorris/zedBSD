@@ -1,0 +1,262 @@
+Build GSocket without IP-level socket options.
+
+zedBSD's network stack implements no IP-level socket options (no IP_TTL,
+multicast loopback/TTL or group membership, nor their IPv6 counterparts),
+no SOCK_SEQPACKET and no FIONREAD, and its C library defines neither
+SOMAXCONN nor the BSD IN_MULTICAST() macro.  When the options are absent,
+the time-to-live and multicast calls report G_IO_ERROR_NOT_SUPPORTED (the
+getters keep their existing warning-and-zero behaviour), a
+sequenced-packet socket cannot be created, g_socket_get_available_bytes()
+reports -1 on a stream socket, SOMAXCONN falls back to the traditional 128
+for the listen-backlog property, and IN_MULTICAST() gets its usual
+definition.  The locals and the interface-address helper that only the
+group membership code uses are left out with it, so the build stays free
+of unused and uninitialized warnings.  Platforms that define the options
+are compiled exactly as before.
+
+--- a/gio/gsocket.c
++++ b/gio/gsocket.c
+@@ -71,6 +71,22 @@
+ #include "gioenums.h"
+ #include "gioerror.h"
+ #include "gnetworkingprivate.h"
++
++/* A stack may lack the IP-level socket options (zedBSD has none): then the
++ * time-to-live, multicast loopback/TTL and group membership calls report
++ * G_IO_ERROR_NOT_SUPPORTED instead of failing to build. */
++#if defined(IP_TTL) && defined(IPV6_UNICAST_HOPS) && \
++    defined(IP_MULTICAST_LOOP) && defined(IPV6_MULTICAST_LOOP) && \
++    defined(IP_MULTICAST_TTL) && defined(IPV6_MULTICAST_HOPS) && \
++    defined(IP_ADD_MEMBERSHIP) && defined(IPV6_JOIN_GROUP)
++#define G_SOCKET_HAVE_IP_OPTIONS 1
++#endif
++
++/* POSIX names the largest listen backlog SOMAXCONN; a C library without it
++ * gets the traditional value, which only bounds the property. */
++#ifndef SOMAXCONN
++#define SOMAXCONN 128
++#endif
+ #include "gsocketaddress.h"
+ #include "gsocketcontrolmessage.h"
+ #include "gcredentials.h"
+@@ -500,9 +516,11 @@
+       socket->priv->type = G_SOCKET_TYPE_DATAGRAM;
+       break;
+ 
++#ifdef SOCK_SEQPACKET
+      case SOCK_SEQPACKET:
+       socket->priv->type = G_SOCKET_TYPE_SEQPACKET;
+       break;
++#endif
+ 
+      default:
+       socket->priv->type = G_SOCKET_TYPE_INVALID;
+@@ -717,8 +735,14 @@
+       break;
+ 
+      case G_SOCKET_TYPE_SEQPACKET:
++#ifdef SOCK_SEQPACKET
+       native_type = SOCK_SEQPACKET;
+       break;
++#else
++      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                           _("Sequenced-packet sockets are not supported"));
++      return -1;
++#endif
+ 
+      default:
+       g_assert_not_reached ();
+@@ -1652,6 +1676,7 @@
+ 
+   g_return_val_if_fail (G_IS_SOCKET (socket), 0);
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_get_option (socket, IPPROTO_IP, IP_TTL,
+@@ -1664,6 +1689,11 @@
+     }
+   else
+     g_return_val_if_reached (0);
++#else
++  value = 0;
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -1693,6 +1723,7 @@
+ 
+   g_return_if_fail (G_IS_SOCKET (socket));
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_set_option (socket, IPPROTO_IP, IP_TTL,
+@@ -1707,6 +1738,10 @@
+     }
+   else
+     g_return_if_reached ();
++#else
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -1801,6 +1836,7 @@
+ 
+   g_return_val_if_fail (G_IS_SOCKET (socket), FALSE);
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_get_option (socket, IPPROTO_IP, IP_MULTICAST_LOOP,
+@@ -1813,6 +1849,11 @@
+     }
+   else
+     g_return_val_if_reached (FALSE);
++#else
++  value = 0;
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -1846,6 +1887,7 @@
+ 
+   loopback = !!loopback;
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_set_option (socket, IPPROTO_IP, IP_MULTICAST_LOOP,
+@@ -1860,6 +1902,10 @@
+     }
+   else
+     g_return_if_reached ();
++#else
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -1890,6 +1936,7 @@
+ 
+   g_return_val_if_fail (G_IS_SOCKET (socket), 0);
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_get_option (socket, IPPROTO_IP, IP_MULTICAST_TTL,
+@@ -1902,6 +1949,11 @@
+     }
+   else
+     g_return_val_if_reached (FALSE);
++#else
++  value = 0;
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -1932,6 +1984,7 @@
+ 
+   g_return_if_fail (G_IS_SOCKET (socket));
+ 
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   if (socket->priv->family == G_SOCKET_FAMILY_IPV4)
+     {
+       g_socket_set_option (socket, IPPROTO_IP, IP_MULTICAST_TTL,
+@@ -1946,6 +1999,10 @@
+     }
+   else
+     g_return_if_reached ();
++#else
++  g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                       _("IP socket options are not supported"));
++#endif
+ 
+   if (error)
+     {
+@@ -2402,7 +2459,7 @@
+ 
+   return ip_result;
+ }
+-#elif (defined(HAVE_SIOCGIFADDR) && (!(defined(HAVE_IP_MREQN) && !defined(__APPLE__)) || defined(IP_ADD_SOURCE_MEMBERSHIP)))
++#elif (defined(HAVE_SIOCGIFADDR) && ((defined(G_SOCKET_HAVE_IP_OPTIONS) && !(defined(HAVE_IP_MREQN) && !defined(__APPLE__))) || defined(IP_ADD_SOURCE_MEMBERSHIP)))
+ static gulong
+ g_socket_get_adapter_ipv4_addr (GSocket     *socket,
+                                 const char  *iface,
+@@ -2448,8 +2505,10 @@
+ 				    gboolean       join_group,
+ 				    GError       **error)
+ {
++#ifdef G_SOCKET_HAVE_IP_OPTIONS
+   const guint8 *native_addr;
+   gint optname, result;
++#endif
+ 
+   g_return_val_if_fail (G_IS_SOCKET (socket), FALSE);
+   g_return_val_if_fail (socket->priv->type == G_SOCKET_TYPE_DATAGRAM, FALSE);
+@@ -2459,6 +2518,14 @@
+   if (!check_socket (socket, error))
+     return FALSE;
+ 
++#ifndef G_SOCKET_HAVE_IP_OPTIONS
++  g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++               join_group ?
++               _("Error joining multicast group: %s") :
++               _("Error leaving multicast group: %s"),
++               _("IP socket options are not supported"));
++  return FALSE;
++#else
+   native_addr = g_inet_address_to_bytes (group);
+   if (g_inet_address_get_family (group) == G_SOCKET_FAMILY_IPV4)
+     {
+@@ -2556,6 +2623,7 @@
+     }
+ 
+   return TRUE;
++#endif
+ }
+ 
+ /**
+@@ -3288,12 +3356,16 @@
+     }
+   else
+     {
+-#ifdef G_OS_WIN32
++#if defined(G_OS_WIN32)
+       if (ioctlsocket (socket->priv->fd, FIONREAD, &avail) < 0)
+-#else
++        avail = -1;
++#elif defined(FIONREAD)
+       if (ioctl (socket->priv->fd, FIONREAD, &avail) < 0)
+-#endif
+         avail = -1;
++#else
++      /* Without FIONREAD (zedBSD) the count of queued bytes is unknown. */
++      avail = -1;
++#endif
+     }
+ #endif
+ 
+--- a/gio/ginetaddress.c
++++ b/gio/ginetaddress.c
+@@ -33,6 +33,11 @@
+ #include "glibintl.h"
+ #include "gnetworkingprivate.h"
+ 
++/* Not every C library defines the BSD class macro; this is its definition. */
++#ifndef IN_MULTICAST
++#define IN_MULTICAST(a) ((((guint32) (a)) & 0xf0000000) == 0xe0000000)
++#endif
++
+ struct _GInetAddressPrivate
+ {
+   GSocketFamily family;

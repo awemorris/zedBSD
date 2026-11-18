@@ -1,0 +1,29 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <compat/zlib/zlib.h> declares leave the library. */
+{
+	global:
+		zlibVersion;
+		inflateInit_;
+		inflateInit2_;
+		inflate;
+		inflateEnd;
+		inflateReset;
+		uncompress;
+		deflateInit_;
+		deflateInit2_;
+		deflate;
+		deflateEnd;
+		compressBound;
+		compress;
+		compress2;
+		adler32;
+		crc32;
+	local:
+		*;
+};

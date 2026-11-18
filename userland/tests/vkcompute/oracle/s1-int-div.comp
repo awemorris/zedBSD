@@ -1,0 +1,17 @@
+#version 450
+// Stage 1: 32-bit unsigned and signed division and remainder (four words per invocation).
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer A { uint a[]; };
+layout(std430, set = 0, binding = 1) readonly buffer B { uint b[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Out { uint o[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint x = a[i];
+	uint y = b[i];
+	o[i * 4u + 0u] = x / y;
+	o[i * 4u + 1u] = x % y;
+	o[i * 4u + 2u] = uint(int(x) / int(y));
+	o[i * 4u + 3u] = uint(int(x & 0x7fffffffu) % int(y & 0x7fffffffu));
+}

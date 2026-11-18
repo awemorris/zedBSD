@@ -1,0 +1,9 @@
+# smoke: a few minutes; every test image first (plan/tests.md §4).
+os.boot.session-up
+os.boot.kernel-log
+desktop.home.super-key
+apps.files.open-from-home
+apps.terminal.type-command
+apps.settings.open-from-home
+desktop.windows.move-by-title
+apps.textedit.type-save

@@ -1,0 +1,278 @@
+{
+  "source": {
+    "file": "qs40-r4.fbx",
+    "path": "userland/desktop/mview/models/qs40/source/qs40-r4.fbx",
+    "sha256": "e18d081ec9069624214ec890639831d453df83df05252105d261441736086d98",
+    "fbx_version": 7400
+  },
+  "converter": {
+    "path": "userland/desktop/mview/tools/fbx2mview.py",
+    "sha256": "e748072d35711222583722b6c08b3be6052fcf60f188e9251381ed9a7dac97e4"
+  },
+  "command": "python3 userland/desktop/mview/tools/fbx2mview.py userland/desktop/mview/models/qs40/source/qs40-r4.fbx userland/desktop/mview/models/qs40 --max-texture-side 1024 --date 2026-09-22",
+  "date": "2026-09-22",
+  "copyright": "the zedBSD project author (user); commit permitted",
+  "format": "mview 1, userland/desktop/mview/models/README.md",
+  "downscale": "an image whose longer side exceeds 1024 is resized so that side is 1024, keeping the aspect ratio (Pillow LANCZOS on RGBA); smaller images are kept at their size",
+  "uv": "v' = 1 - v: FBX has v = 0 at the image bottom, Vulkan samples row 0 at v = 0",
+  "model_txt_sha256": "39294a078a857ae17761e1d3859b64f6682f76366443012574b3c51b1cba6972",
+  "counts": {
+    "meshes": 4,
+    "vertices": 25861,
+    "triangles": 37000,
+    "materials": 16,
+    "textures": 13
+  },
+  "meshes": [
+    {
+      "name": "Body",
+      "geometry": "Body (merged).baked",
+      "control_points": 8239,
+      "polygons": 13480,
+      "fan_triangles": 13480,
+      "vertices": 8259,
+      "triangles": 13480,
+      "mirrored": false
+    },
+    {
+      "name": "Face",
+      "geometry": "Face (merged)(Clone).baked",
+      "control_points": 4043,
+      "polygons": 7076,
+      "fan_triangles": 7076,
+      "vertices": 4043,
+      "triangles": 7076,
+      "mirrored": false
+    },
+    {
+      "name": "Hair",
+      "geometry": "Hair001 (merged).baked",
+      "control_points": 10288,
+      "polygons": 12728,
+      "fan_triangles": 12728,
+      "vertices": 10368,
+      "triangles": 12728,
+      "mirrored": false
+    },
+    {
+      "name": "laukku_Tekstuuri_0",
+      "geometry": "laukku_Tekstuuri_0",
+      "control_points": 2868,
+      "polygons": 2247,
+      "fan_triangles": 3716,
+      "vertices": 3191,
+      "triangles": 3716,
+      "mirrored": false
+    }
+  ],
+  "textures": [
+    {
+      "index": 0,
+      "file": "tex/0.pam",
+      "source": "_10.png",
+      "source_png_sha256": "dc375769e28d015bc70c3cef6be1dec3794b5b2430a9bf173d60584105f68a8c",
+      "source_size": [
+        2048,
+        2048
+      ],
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "ccecfc8cebf283d6801aecdd547efc3c84ae156c21686610d07d9baf38971554"
+    },
+    {
+      "index": 1,
+      "file": "tex/1.pam",
+      "source": "_12c.png",
+      "source_png_sha256": "988dfc0a30bc63ac90a9c6bc4758343e3bc5d3e7fade4747c82cf4adfec92a77",
+      "source_size": [
+        2048,
+        2048
+      ],
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "55a6205afbd9ccc51855e21d2b8a5e965f8e61e49b5a1da4c2fd5de475af1dd5"
+    },
+    {
+      "index": 2,
+      "file": "tex/2.pam",
+      "source": "_13.png",
+      "source_png_sha256": "832bf3171808e420431cc31352dc320a8d1471e765d205822cb64f79867fc6cb",
+      "source_size": [
+        512,
+        512
+      ],
+      "size": [
+        512,
+        512
+      ],
+      "alpha": "opaque",
+      "pam_sha256": "b67371a214cf9b0df2704552b827e6fdeea88fdf85c2507fa04dd47beec25369"
+    },
+    {
+      "index": 3,
+      "file": "tex/3.pam",
+      "source": "_14.png",
+      "source_png_sha256": "569c3985b90c82d7e1ca9cfdc68c33558a109d512caf9ffc81608ee7ff79b7e0",
+      "source_size": [
+        1024,
+        1024
+      ],
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "f007539b70aa2414b6e432a6e409fe249d8089dcf4eaa1a17a13573515962de2"
+    },
+    {
+      "index": 4,
+      "file": "tex/4.pam",
+      "source": "_15.png",
+      "source_png_sha256": "c23632acce6e073fc8b7632446ea176fc58e60e9c660c0ab65c148a7865a32c9",
+      "source_size": [
+        1024,
+        2048
+      ],
+      "size": [
+        512,
+        1024
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "1746b4de0768468eab15394fc3343ab68f95640e67bb1f8cbec239a52082b40f"
+    },
+    {
+      "index": 5,
+      "file": "tex/5.pam",
+      "source": "_01.png",
+      "source_png_sha256": "2c80a4a3c10825836aaa1f9dc5547bd2d2b899384a4b224166bb5455e52393f7",
+      "source_size": [
+        512,
+        512
+      ],
+      "size": [
+        512,
+        512
+      ],
+      "alpha": "opaque",
+      "pam_sha256": "807982a6f8bbc727aa44b500de7d2a0d887574788cf90630f27b4cbab73bb2f3"
+    },
+    {
+      "index": 6,
+      "file": "tex/6.pam",
+      "source": "_02.png",
+      "source_png_sha256": "904786254a1b70fcbedd1461fb8d0e271e867e8c705c3966d41c0f880d84c180",
+      "source_size": [
+        1024,
+        512
+      ],
+      "size": [
+        1024,
+        512
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "fb6957d2fa7613b20f449b67edf2d0f4daf96fe121157b1634b18462e91f712a"
+    },
+    {
+      "index": 7,
+      "file": "tex/7.pam",
+      "source": "_03.png",
+      "source_png_sha256": "a9216e5a756b2e956f7d9400b1ff5b8eecacabbb523a0b78f087507a2e106098",
+      "source_size": [
+        1024,
+        512
+      ],
+      "size": [
+        1024,
+        512
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "e547ef88382ebd9b97c3f2e0ed930468221af837ca0ced2c0cdabaf9ba1c6958"
+    },
+    {
+      "index": 8,
+      "file": "tex/8.pam",
+      "source": "_04.png",
+      "source_png_sha256": "9f76031519144d07749694a149eacb7cd796f432a7941ffee757b588ae83dc7c",
+      "source_size": [
+        1024,
+        1024
+      ],
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha": "opaque",
+      "pam_sha256": "6fe5af7e6c034c7463ec6e153c38f2343ce0d649f7168fea922ebc4bcd1ed299"
+    },
+    {
+      "index": 9,
+      "file": "tex/9.pam",
+      "source": "_06.png",
+      "source_png_sha256": "46a0d95fb6d4e9f60167a20908e3512dba45bff71fd310b64472a7a232bdb421",
+      "source_size": [
+        1024,
+        512
+      ],
+      "size": [
+        1024,
+        512
+      ],
+      "alpha": "opaque",
+      "pam_sha256": "89b29c172a441c65565b54f3fe674ddd4497c2606aadd94cac309a658e68eabe"
+    },
+    {
+      "index": 10,
+      "file": "tex/10.pam",
+      "source": "_07.png",
+      "source_png_sha256": "52ebd2d638991abd826445d84efde9b2c4da334bde3796adb8c48ea51a5e3599",
+      "source_size": [
+        1024,
+        256
+      ],
+      "size": [
+        1024,
+        256
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "29050ccca74cbd8e7bf08147852ddec9dbf87a4a8d021c854ac88d65bb4e22ca"
+    },
+    {
+      "index": 11,
+      "file": "tex/11.pam",
+      "source": "_09.png",
+      "source_png_sha256": "aa5692f7ab3ada10a71fe6f32f85576c75695ebd3a9f8b14318c52719349be15",
+      "source_size": [
+        1024,
+        256
+      ],
+      "size": [
+        1024,
+        256
+      ],
+      "alpha": "cutout",
+      "pam_sha256": "7f324db457f9e66b4a0672644b74342b529aec9f89c93a0bcc9c84e2df7e4710"
+    },
+    {
+      "index": 12,
+      "file": "tex/12.pam",
+      "source": "_16.png",
+      "source_png_sha256": "cc28e759905daac3de85e6919b311f24f43aab6c81019918c3ee6ea74d38ec25",
+      "source_size": [
+        512,
+        1024
+      ],
+      "size": [
+        512,
+        1024
+      ],
+      "alpha": "opaque",
+      "pam_sha256": "39d5baa63c88fd729ade29cc2124196cad264cdc8b8b8061120b3127e3f4b37a"
+    }
+  ]
+}

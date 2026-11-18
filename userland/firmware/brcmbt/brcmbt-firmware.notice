@@ -1,0 +1,7 @@
+Firmware: Broadcom/Cypress BCM4345C0 Bluetooth patch file
+Hardware: The Bluetooth part of the Raspberry Pi 4's on-board BCM43455 (Cypress CYW43455)
+Files:    /lib/firmware/brcm/BCM4345C0.hcd
+Source:   RPi-Distro/bluez-firmware commit adb4d55c8f193ff16ece74dd72fd6e8801632103 (1.2-9+rpt4);
+          the license text from linux-firmware commit dc85ccedc9c973682fbcf4d628ca61174bcc3120
+
+Copyright (c) 2000-2003 Broadcom Corporation

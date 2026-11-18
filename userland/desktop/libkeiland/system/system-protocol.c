@@ -1,0 +1,598 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The interfaces of Keiland's system extension (libkeiland/system/kl-system-protocol.h;
+ * WS135 for the manager and the settings, WS131 p010 for the network, the
+ * sound, the power and the devices), described as wayland-scanner would
+ * make them, over libwayland's marshalling.  They are not static because
+ * the settings and the system both use them; exports.map keeps them
+ * inside the library.
+ */
+
+#include "system-protocol.h"
+
+#include "userland/desktop/libkeiland/system/kl-system-protocol.h"
+
+#include <stddef.h>
+
+/* The manager's get_* argument types: the new object each makes. */
+static const struct wl_interface *system_get_settings_types[] = {
+	&kl_system_settings_v1_interface,
+};
+static const struct wl_interface *system_get_network_types[] = {
+	&kl_system_network_v1_interface,
+};
+static const struct wl_interface *system_get_audio_types[] = {
+	&kl_system_audio_v1_interface,
+};
+static const struct wl_interface *system_get_power_types[] = {
+	&kl_system_power_v1_interface,
+};
+static const struct wl_interface *system_get_devices_types[] = {
+	&kl_system_devices_v1_interface,
+};
+static const struct wl_interface *system_get_monitor_types[] = {
+	&kl_system_monitor_v1_interface,
+	NULL,
+};
+static const struct wl_interface *system_get_account_types[] = {
+	&kl_system_account_v1_interface,
+};
+static const struct wl_interface *system_get_sharing_types[] = {
+	&kl_system_sharing_v1_interface,
+};
+static const struct wl_interface *system_get_notify_types[] = {
+	&kl_system_notify_v1_interface,
+};
+static const struct wl_interface *system_get_mail_types[] = {
+	&kl_system_mail_v1_interface,
+};
+static const struct wl_interface *system_get_phone_types[] = {
+	&kl_system_phone_v1_interface,
+};
+static const struct wl_interface *system_get_bluetooth_types[] = {
+	&kl_system_bluetooth_v1_interface,
+};
+
+static const struct wl_interface *system_get_printers_types[] = {
+	&kl_system_printers_v1_interface,
+};
+static const struct wl_interface *system_get_displays_types[] = {
+	&kl_system_displays_v1_interface,
+};
+static const struct wl_interface *system_get_machine_types[] = {
+	&kl_system_machine_v1_interface,
+};
+
+/* The manager creates the media object on the shared system queue. */
+static const struct wl_interface *system_get_media_types[] = {&kl_system_media_v1_interface};
+
+/* The arguments of messages that name no interface (at most sixteen, a monitor's disk's). */
+static const struct wl_interface *system_plain_types[] = {
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
+/* The requests of kl_system_manager_v1. */
+static const struct wl_message system_manager_requests[] = {
+    {"destroy", "", NULL},
+    {"get_settings", "n", system_get_settings_types},
+    {"get_network", "n", system_get_network_types},
+    {"get_audio", "n", system_get_audio_types},
+    {"get_power", "n", system_get_power_types},
+    {"get_devices", "n", system_get_devices_types},
+    {"get_monitor", "2nu", system_get_monitor_types},
+    {"get_account", "4n", system_get_account_types},
+    {"get_sharing", "7n", system_get_sharing_types},
+    {"get_notify", "13n", system_get_notify_types},
+    {"get_mail", "15n", system_get_mail_types},
+    {"get_phone", "16n", system_get_phone_types},
+    {"get_printers", "17n", system_get_printers_types},
+    {"get_displays", "18n", system_get_displays_types},
+    {"get_machine", "21n", system_get_machine_types},
+    {"get_bluetooth", "23n", system_get_bluetooth_types},
+    {"get_media", "29n", system_get_media_types},
+};
+
+/* The events of kl_system_manager_v1. */
+static const struct wl_message system_manager_events[] = {
+	{ "capabilities", "u", system_plain_types },
+};
+
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: seventeen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29; the phone's calls since 33; the displays' angles since 34; the network's IPv6 since 35; the displays' modes since 36) and one event.  It lives for the program. */
+const struct wl_interface kl_system_manager_v1_interface = {
+    KL_SYSTEM_MANAGER_NAME,
+    KL_SYSTEM_MANAGER_VERSION,
+    17,
+    system_manager_requests,
+    1,
+    system_manager_events};
+
+/* The requests of kl_system_settings_v1. */
+static const struct wl_message system_settings_requests[] = {
+	{ "destroy", "", NULL },
+	{ "set", "uss", system_plain_types },
+	{ "reset", "us", system_plain_types },
+};
+
+/* The events of kl_system_settings_v1. */
+static const struct wl_message system_settings_events[] = {
+	{ "value", "ssu", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_settings_v1: three requests and three events.  It lives for the program. */
+const struct wl_interface kl_system_settings_v1_interface = {
+	KL_SYSTEM_SETTINGS_NAME,
+	1,
+	3,
+	system_settings_requests,
+	3,
+	system_settings_events
+};
+
+/* The requests of kl_system_network_v1. */
+static const struct wl_message system_network_requests[] = {
+	{ "destroy", "", NULL },
+	{ "request", "uus", system_plain_types },
+	{ "save_key", "uss", system_plain_types },
+	{ "query_details", "u", system_plain_types },
+	{ "set_scanning", "3u", system_plain_types },
+	{ "configure_wired", "6ususssss", system_plain_types },
+};
+
+/* The events of kl_system_network_v1. */
+static const struct wl_message system_network_events[] = {
+	{ "state", "uuussuss", system_plain_types },
+	{ "access_point", "siu", system_plain_types },
+	{ "scan_done", "", NULL },
+	{ "link", "susssuuuuu", system_plain_types },
+	{ "dns", "s", system_plain_types },
+	{ "saved_network", "s", system_plain_types },
+	{ "details_done", "", NULL },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "wired", "6sus", system_plain_types },
+	{ "link_speed", "12su", system_plain_types },
+	{ "link_inet6", "35ss", system_plain_types },
+	{ "link_router6", "35ss", system_plain_types },
+};
+
+/* kl_system_network_v1, version 35: six requests (set_scanning since 3, configure_wired since 6) and thirteen events (wired since 6, link_speed since 12, link_inet6 and link_router6 since 35).  It lives for the program. */
+const struct wl_interface kl_system_network_v1_interface = {
+	KL_SYSTEM_NETWORK_NAME,
+	KL_SYSTEM_NETWORK_SINCE_INET6,
+	6,
+	system_network_requests,
+	13,
+	system_network_events
+};
+
+/* The requests of kl_system_audio_v1. */
+static const struct wl_message system_audio_requests[] = {
+	{ "destroy", "", NULL },
+	{ "set_volume", "uuuu", system_plain_types },
+	{ "feedback", "u", system_plain_types },
+};
+
+/* The events of kl_system_audio_v1. */
+static const struct wl_message system_audio_events[] = {
+	{ "state", "uuuuuuu", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_audio_v1: three requests and three events.  It lives for the program. */
+const struct wl_interface kl_system_audio_v1_interface = {
+	KL_SYSTEM_AUDIO_NAME,
+	1,
+	3,
+	system_audio_requests,
+	3,
+	system_audio_events
+};
+
+/* The requests of kl_system_power_v1. */
+static const struct wl_message system_power_requests[] = {
+	{ "destroy", "", NULL },
+	{ "action", "uu", system_plain_types },
+};
+
+/* The events of kl_system_power_v1. */
+static const struct wl_message system_power_events[] = {
+	{ "state", "uiuu", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_power_v1: two requests and three events.  It lives for the program. */
+const struct wl_interface kl_system_power_v1_interface = {
+	KL_SYSTEM_POWER_NAME,
+	1,
+	2,
+	system_power_requests,
+	3,
+	system_power_events
+};
+
+/* The requests of kl_system_devices_v1. */
+static const struct wl_message system_devices_requests[] = {
+	{ "destroy", "", NULL },
+	{ "eject", "us", system_plain_types },
+	{ "mount", "5us", system_plain_types },
+};
+
+/* The events of kl_system_devices_v1. */
+static const struct wl_message system_devices_events[] = {
+	{ "device", "suuss", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "busy", "5us", system_plain_types },
+	{ "volume", "9ssuu", system_plain_types },
+};
+
+/* kl_system_devices_v1: three requests and five events (ws132-p004: mount and busy since version 5; ws132-p009: volume since version 9).  It lives for the program. */
+const struct wl_interface kl_system_devices_v1_interface = {
+	KL_SYSTEM_DEVICES_NAME,
+	KL_SYSTEM_DEVICES_SINCE_VOLUME,
+	3,
+	system_devices_requests,
+	5,
+	system_devices_events
+};
+
+/* The requests of kl_system_account_v1 (ws160-p002). */
+static const struct wl_message system_account_requests[] = {
+	{ "destroy", "", NULL },
+	{ "set_password", "uss", system_plain_types },
+	{ "administer", "8uss", system_plain_types },
+	{ "set_pin", "10uss", system_plain_types },
+	{ "add_key", "14usss", system_plain_types },
+	{ "remove_key", "14uss", system_plain_types },
+	{ "key_info", "25u", system_plain_types },
+	{ "key_pin", "25uss", system_plain_types },
+	{ "key_reset", "25us", system_plain_types },
+	{ "key_cancel", "25", system_plain_types },
+	{ "set_key_options", "25usuu", system_plain_types },
+	{ "set_methods", "26usu", system_plain_types },
+};
+
+/* The events of kl_system_account_v1 (refused since version 8, ws089-p026; enrolled since 11, ws172-p002). */
+static const struct wl_message system_account_events[] = {
+	{ "result", "uuu", system_plain_types },
+	{ "refused", "8us", system_plain_types },
+	{ "enrolled", "11uu", system_plain_types },
+	{ "key", "14ss", system_plain_types },
+	{ "touch", "14u", system_plain_types },
+	{ "key_info", "25uusuuu", system_plain_types },
+	{ "replug", "25u", system_plain_types },
+	{ "removed", "25uu", system_plain_types },
+	{ "keys_changed", "25", system_plain_types },
+	{ "options", "25uu", system_plain_types },
+	{ "methods", "26u", system_plain_types },
+};
+
+/* kl_system_account_v1, made at the manager's version (26, WS200): twelve requests and eleven events.  It lives for the program. */
+const struct wl_interface kl_system_account_v1_interface = {
+	KL_SYSTEM_ACCOUNT_NAME,
+	KL_SYSTEM_SINCE_METHODS,
+	12,
+	system_account_requests,
+	11,
+	system_account_events
+};
+
+/* The requests of kl_system_monitor_v1 (WS134 p012). */
+static const struct wl_message system_monitor_requests[] = {
+	{ "destroy", "", NULL },
+	{ "ack", "u", system_plain_types },
+	{ "set_period", "u", system_plain_types },
+};
+
+/* The events of kl_system_monitor_v1. */
+static const struct wl_message system_monitor_events[] = {
+	{ "info", "usuu", system_plain_types },
+	{ "device", "uuuuuuss", system_plain_types },
+	{ "info_done", "u", system_plain_types },
+	{ "cpu", "uuuuuuuuu", system_plain_types },
+	{ "memory", "uuuuuuuuuuuu", system_plain_types },
+	{ "link", "uuuuuuu", system_plain_types },
+	{ "disk", "uuuuuuuuuuuuuuuu", system_plain_types },
+	{ "gpu", "uuuuuuuuuuuuiu", system_plain_types },
+	{ "sample_done", "uuuuuui", system_plain_types },
+};
+
+/* kl_system_monitor_v1: three requests and nine events.  It lives for the program. */
+const struct wl_interface kl_system_monitor_v1_interface = {
+	KL_SYSTEM_MONITOR_NAME,
+	1,
+	3,
+	system_monitor_requests,
+	9,
+	system_monitor_events
+};
+
+/* The requests of kl_system_sharing_v1 (ws089-p025). */
+static const struct wl_message system_sharing_requests[] = {
+	{ "destroy", "", NULL },
+	{ "set_ssh", "uu", system_plain_types },
+	{ "query", "u", system_plain_types },
+};
+
+/* The events of kl_system_sharing_v1. */
+static const struct wl_message system_sharing_events[] = {
+	{ "state", "uuuuus", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_sharing_v1, made at the manager's version (7): three requests and three events.  It lives for the program. */
+const struct wl_interface kl_system_sharing_v1_interface = {
+	KL_SYSTEM_SHARING_NAME,
+	KL_SYSTEM_SINCE_SHARING,
+	3,
+	system_sharing_requests,
+	3,
+	system_sharing_events
+};
+
+/* The requests of kl_system_notify_v1 (ws156-p002). */
+static const struct wl_message system_notify_requests[] = {
+	{ "destroy", "", NULL },
+	{ "post", "uusssu", system_plain_types },
+	{ "withdraw", "uu", system_plain_types },
+	{ "post_lock", "27uusssus", system_plain_types },
+};
+
+/* The events of kl_system_notify_v1. */
+static const struct wl_message system_notify_events[] = {
+	{ "posted", "uu", system_plain_types },
+	{ "activated", "u", system_plain_types },
+	{ "closed", "uu", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_notify_v1, made at the manager's version (13, post_lock since 27): four requests and four events.  It lives for the program. */
+const struct wl_interface kl_system_notify_v1_interface = {
+	KL_SYSTEM_NOTIFY_NAME,
+	KL_SYSTEM_SINCE_NOTIFY_LOCK,
+	4,
+	system_notify_requests,
+	4,
+	system_notify_events
+};
+
+/* The requests of kl_system_mail_v1 (ws169-p002). */
+static const struct wl_message system_mail_requests[] = {
+	{ "destroy", "", NULL },
+	{ "arrived", "ussss", system_plain_types },
+	{ "listen", "us", system_plain_types },
+};
+
+/* The events of kl_system_mail_v1. */
+static const struct wl_message system_mail_events[] = {
+	{ "mail", "sss", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "allowed", "20u", system_plain_types },
+};
+
+/* kl_system_mail_v1, made at the manager's version (15; allowed since 20, ws177-p005): three requests and three events.  It lives for the program. */
+const struct wl_interface kl_system_mail_v1_interface = {
+	KL_SYSTEM_MAIL_NAME,
+	KL_SYSTEM_SINCE_MAIL_ALLOWED,
+	3,
+	system_mail_requests,
+	3,
+	system_mail_events
+};
+
+/* The requests of kl_system_phone_v1 (ws170-p004; listen and the others since 27, ws197-p004a). */
+static const struct wl_message system_phone_requests[] = {
+	{ "destroy", "", NULL },
+	{ "send", "uuss", system_plain_types },
+	{ "call", "uus", system_plain_types },
+	{ "listen", "27u", system_plain_types },
+	{ "sync", "27uuiuusu", system_plain_types },
+	{ "send_text", "27uusa", system_plain_types },
+	{ "mark_read", "27us", system_plain_types },
+	{ "link_set", "27usuu", system_plain_types },
+	{ "watch_link", "27u", system_plain_types },
+	{ "send_mms", "32ush", system_plain_types },
+	{ "control", "33uus", system_plain_types },
+};
+
+/* The events of kl_system_phone_v1 (item and the others since 27, ws197-p004a; link_contacts since 28, ws197-p005). */
+static const struct wl_message system_phone_events[] = {
+	{ "received", "ussuu", system_plain_types },
+	{ "status", "uu", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "item", "27uussuuiuusssua", system_plain_types },
+	{ "page_end", "27usuuuu", system_plain_types },
+	{ "link", "27uuuuuuuuuss", system_plain_types },
+	{ "dropped", "27", system_plain_types },
+	{ "done", "27uu", system_plain_types },
+	{ "link_contacts", "28uus", system_plain_types },
+	{ "item_mime", "30uussuuiuusssuah", system_plain_types },
+	{ "call", "33uuuss", system_plain_types },
+	{ "hf", "33uiiiiiu", system_plain_types },
+};
+
+/* kl_system_phone_v1, made at the manager's version (16, its messages' syncs since 27, the contacts and calls since 28, received MIME since 30, send_mms since 32, the calls' control since 33): eleven requests and twelve events.  It lives for the program. */
+const struct wl_interface kl_system_phone_v1_interface = {
+	KL_SYSTEM_PHONE_NAME,
+	KL_SYSTEM_SINCE_PHONE_CALLS,
+	11,
+	system_phone_requests,
+	12,
+	system_phone_events
+};
+
+/* The requests of kl_system_printers_v1 (ws145-p003). */
+static const struct wl_message system_printers_requests[] = {
+	{ "destroy", "", NULL },
+	{ "add", "uusus", system_plain_types },
+	{ "remove", "uu", system_plain_types },
+	{ "set_default", "uu", system_plain_types },
+	{ "print", "uush", system_plain_types },
+	{ "cancel", "uu", system_plain_types },
+	{ "edit", "24uuss", system_plain_types },
+};
+
+/* The events of kl_system_printers_v1. */
+static const struct wl_message system_printers_events[] = {
+	{ "printer", "uusussu", system_plain_types },
+	{ "job", "uuuss", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "queued", "uu", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_printers_v1, made at the manager's version (17; edit since 24, ws177-p025): seven requests and five events.  It lives for the program. */
+const struct wl_interface kl_system_printers_v1_interface = {
+	KL_SYSTEM_PRINTERS_NAME,
+	KL_SYSTEM_SINCE_PRINTER_EDIT,
+	7,
+	system_printers_requests,
+	5,
+	system_printers_events
+};
+
+/* The requests of kl_system_bluetooth_v1 (ws143-p006). */
+static const struct wl_message system_bluetooth_requests[] = {
+	{ "destroy", "", NULL },
+	{ "watch", "u", system_plain_types },
+	{ "scan", "u", system_plain_types },
+	{ "power", "uu", system_plain_types },
+	{ "device", "uusu", system_plain_types },
+};
+
+/* The events of kl_system_bluetooth_v1. */
+static const struct wl_message system_bluetooth_events[] = {
+	{ "state", "uuuuss", system_plain_types },
+	{ "device", "susuuii", system_plain_types },
+	{ "done", "u", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+};
+
+/* kl_system_bluetooth_v1, made at the manager's version (23): five requests and four events.  It lives for the program. */
+const struct wl_interface kl_system_bluetooth_v1_interface = {
+	KL_SYSTEM_BLUETOOTH_NAME,
+	KL_SYSTEM_SINCE_BLUETOOTH,
+	5,
+	system_bluetooth_requests,
+	4,
+	system_bluetooth_events
+};
+
+/* The requests of kl_system_displays_v1 (ws113-p005). */
+static const struct wl_message system_displays_requests[] = {
+	{ "destroy", "", NULL },
+	{ "apply", "uuus", system_plain_types },
+	{ "set_brightness", "usu", system_plain_types },
+	{ "set_shown", "usu", system_plain_types },
+	{ "set_rotation", "usu", system_plain_types },
+	{ "bind_touch", "uss", system_plain_types },
+	{ "listen_touch", "us", system_plain_types },
+	{ "set_resolution", "usuuu", system_plain_types },
+	{ "keep_resolution", "us", system_plain_types },
+	{ "revert_resolution", "us", system_plain_types },
+	{ "reset_resolution", "us", system_plain_types },
+};
+
+/* The events of kl_system_displays_v1. */
+static const struct wl_message system_displays_events[] = {
+	{ "output", "ssiiuuuuu", system_plain_types },
+	{ "done", "uu", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "rotation", "su", system_plain_types },
+	{ "rotations", "suu", system_plain_types },
+	{ "touch", "ssus", system_plain_types },
+	{ "mode", "suuuu", system_plain_types },
+	{ "resolution", "suuu", system_plain_types },
+};
+
+/*
+ * kl_system_displays_v1, made at the manager's version (18; set_shown since
+ * 19, ws113-p014; set_rotation, bind_touch, listen_touch and the events
+ * rotation, rotations and touch since 34, ws217-p004; set_resolution,
+ * keep_resolution, revert_resolution, reset_resolution and the events mode
+ * and resolution since 36): eleven requests and eight events.  It lives
+ * for the program.
+ */
+const struct wl_interface kl_system_displays_v1_interface = {
+	KL_SYSTEM_DISPLAYS_NAME,
+	KL_SYSTEM_SINCE_RESOLUTION,
+	11,
+	system_displays_requests,
+	8,
+	system_displays_events
+};
+
+/* The requests of kl_system_machine_v1 (ws188-p002). */
+static const struct wl_message system_machine_requests[] = {
+	{ "destroy", "", NULL },
+	{ "query", "uu", system_plain_types },
+};
+
+/* The events of kl_system_machine_v1. */
+static const struct wl_message system_machine_events[] = {
+	{ "parts", "uu", system_plain_types },
+	{ "about", "sssssu", system_plain_types },
+	{ "filesystem", "suuuuuu", system_plain_types },
+	{ "user", "sssu", system_plain_types },
+	{ "login_language", "s", system_plain_types },
+	{ "result", "uuu", system_plain_types },
+	{ "mount", "22ss", system_plain_types },
+};
+
+/* kl_system_machine_v1, made at the manager's version (21, ws188-p002; the mounts since 22, ws188-p004): two requests and seven events.  It lives for the program. */
+const struct wl_interface kl_system_machine_v1_interface = {
+	KL_SYSTEM_MACHINE_NAME,
+	KL_SYSTEM_SINCE_MOUNTS,
+	2,
+	system_machine_requests,
+	7,
+	system_machine_events
+};
+
+/* The media object's bounded metadata and FD transport requests. */
+static const struct wl_message system_media_requests[] = {
+    {"destroy", "", NULL},
+    {"list", "u", system_plain_types},
+    {"add", "us", system_plain_types},
+    {"apply", "uh", system_plain_types},
+    {"watch", "u", system_plain_types},
+    {"notify", "", NULL},
+    {"remove", "2us", system_plain_types},
+};
+
+/* Each CLI response is a snapshot descriptor followed by its completion errno. */
+static const struct wl_message system_media_events[] = {
+    {"snapshot", "uh", system_plain_types},
+    {"done", "uu", system_plain_types},
+    {"changed", "u", system_plain_types},
+};
+
+/* Manager 29 provides media v1; manager 31 adds removal through media v2. */
+const struct wl_interface kl_system_media_v1_interface = {
+    KL_SYSTEM_MEDIA_NAME, 2, 7, system_media_requests, 3, system_media_events};

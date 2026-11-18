@@ -1,0 +1,33 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_FNMATCH_H
+#define LIBC_FNMATCH_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define FNM_NOMATCH 1
+
+#define FNM_PATHNAME 0x01
+#define FNM_NOESCAPE 0x02
+#define FNM_PERIOD 0x04
+
+#define FNM_FILE_NAME FNM_PATHNAME
+#define FNM_LEADING_DIR 0x08
+#define FNM_CASEFOLD 0x10
+/* POSIX.1-2024's name for matching without regard to case. */
+#define FNM_IGNORECASE FNM_CASEFOLD
+
+int fnmatch(const char *, const char *, int);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

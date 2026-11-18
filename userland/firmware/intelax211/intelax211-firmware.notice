@@ -1,0 +1,7 @@
+Firmware: Intel Wi-Fi 6E AX211 WiFi firmware (iwlwifi 89.735b75a4.0) and its PNVM
+Hardware: Intel Wi-Fi 6E AX211 (So with the Garfield RF module)
+Files:    /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode
+          /lib/firmware/intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm
+Source:   linux-firmware tag 20260410 (commit dc85ccedc9c973682fbcf4d628ca61174bcc3120)
+
+Copyright (c) 2006-2021, Intel Corporation.

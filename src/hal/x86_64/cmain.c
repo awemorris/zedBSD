@@ -1,0 +1,116 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The amd64 HAL bootstrap entry point.
+ */
+
+#include <hal/hal.h>
+#include "asm.h"
+#include "bsp.h"
+#include "space.h"
+#include "image.h"
+#include "descriptor.h"
+#include "irq.h"
+#include "clock.h"
+#include "percpu.h"
+#include "smp.h"
+#include "bsp-pcat/acpi.h"
+#include "bsp-pcat/lapic.h"
+#include "bsp-pcat/idle-suspend.h"
+
+/* The version, from VERSION (ws129-p003): the Makefile defines it on the command line. */
+#ifndef ZEDBSD_VERSION
+#error ZEDBSD_VERSION is not defined
+#endif
+
+void prekern_amd64_page_init(void);
+void prekern_amd64_range_page_init(void);
+void prekern_amd64_int_init(void);
+void kernel_entry(const void *handoff);
+
+/*
+ * Initializes the amd64 HAL and enters the kernel.
+ */
+void
+prekern_amd64_cmain(
+	const void *raw_boot_info)
+{
+	static struct amd64_acpi_info acpi;
+	const void *handoff;
+	hal_physaddr_t rsdp_address;
+	int error;
+
+	/* Establishes boot state, console output, and CPU-local facilities. */
+	prekern_bsp_boot_init(raw_boot_info);
+	prekern_pcat_cons_init();
+	amd64_cpu_init();
+	prekern_amd64_percpu_bootstrap();
+
+	hal_puts("\nzedBSD " ZEDBSD_VERSION "\n");
+	hal_puts("zedBSD amd64 HAL\n");
+	hal_puts("A64 ENTRY PASS\n");
+
+	/* Fixes where the image is before anything converts its addresses. */
+	prekern_amd64_image_init();
+
+	/* Establishes kernel paging and address-space management. */
+	prekern_amd64_page_init();
+	prekern_amd64_space_init();
+	prekern_amd64_range_page_init();
+
+	hal_puts("A64 PAGING PASS\n");
+
+	/* Installs the BSP descriptor and interrupt tables. */
+	amd64_descriptor_init();
+	prekern_amd64_int_init();
+	amd64_syscall_init();
+
+	hal_puts("A64 IDT READY\n");
+
+	/* Discovers the platform interrupt topology from ACPI. */
+	rsdp_address = prekern_bsp_acpi_rsdp();
+	error = prekern_amd64_acpi_discover(&acpi, rsdp_address);
+	if (error != HAL_OK)
+		HAL_FATAL("amd64 ACPI MADT discovery failed");
+
+	/* Keeps the firmware's low-power S0 idle state for suspend-to-idle (ws052-p006). */
+	prekern_amd64_idle_suspend_init(&acpi);
+
+	/* Enables the BSP local APIC before bringing up secondary CPUs. */
+	error = prekern_amd64_lapic_init(&acpi);
+	if (error != HAL_OK)
+		HAL_FATAL("amd64 Local APIC initialization failed");
+
+	prekern_amd64_smp_init(&acpi);
+
+	/* Retires loader ownership after the last boot discovery consumer. */
+	prekern_amd64_boot_memory_release();
+
+	/* Enables external interrupts, the scheduler clock, and console input. */
+	prekern_irq_init(&acpi);
+
+	error = prekern_bsp_timer_init();
+	if (error != HAL_OK)
+		HAL_FATAL("amd64 Local APIC timer initialization failed");
+
+	prekern_pcat_cons_irq_init();
+
+	hal_puts("A64 CONSOLE IRQ READY\n");
+	hal_puts("A64 IRQ READY\n");
+
+	/* Converts the board handoff and transfers control to the kernel. */
+	handoff = prekern_bsp_kernel_handoff(raw_boot_info);
+
+	/*
+	 * Call the kernel entry point.
+	 */
+	kernel_entry(handoff);
+
+	/* Treats an unexpected return from the kernel as fatal. */
+	HAL_FATAL("amd64 kernel_entry returned");
+}

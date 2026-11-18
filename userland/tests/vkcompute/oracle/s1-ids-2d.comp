@@ -1,0 +1,20 @@
+#version 450
+// Stage 1: the IDs of a 2D dispatch, ten words per invocation at the slot its global ID names.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+layout(local_size_x = 8, local_size_y = 4) in;
+layout(std430, set = 0, binding = 0) writeonly buffer Out { uint o[]; };
+void main()
+{
+	uvec3 g = gl_GlobalInvocationID;
+	uint slot = (g.z * 8u + g.y) * 24u + g.x;
+	o[slot * 10u + 0u] = g.x;
+	o[slot * 10u + 1u] = g.y;
+	o[slot * 10u + 2u] = g.z;
+	o[slot * 10u + 3u] = gl_LocalInvocationID.x;
+	o[slot * 10u + 4u] = gl_LocalInvocationID.y;
+	o[slot * 10u + 5u] = gl_LocalInvocationID.z;
+	o[slot * 10u + 6u] = gl_WorkGroupID.x;
+	o[slot * 10u + 7u] = gl_WorkGroupID.y;
+	o[slot * 10u + 8u] = gl_WorkGroupID.z;
+	o[slot * 10u + 9u] = gl_LocalInvocationIndex;
+}

@@ -1,0 +1,47 @@
+#!/bin/sh
+# zedBSD sshd startup: makes the machine's host key the first time, checks the configuration, starts the server.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+#
+# A host key cannot come with the image: every machine made from it would
+# then claim the same identity, and anyone holding the image would hold the
+# key.  The key is made here instead, on the machine, when it is missing.
+
+config=/etc/ssh/sshd_config
+keygen=/usr/bin/ssh-keygen
+sshd=/usr/sbin/sshd
+
+# Without a configuration the server has nothing to serve.
+if [ ! -f "$config" ]; then
+	echo "sshd-start: $config is missing" >&2
+	exit 1
+fi
+
+# The pre-authentication process moves its root here before it reads
+# anything from the network; nobody but root may write to it.
+if [ ! -d /var/empty ]; then
+	mkdir -p /var/empty
+fi
+chmod 0755 /var/empty
+
+# Makes the ed25519 host key when it is not there; a key put there on
+# purpose is kept.
+if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+	echo "sshd-start: making the ed25519 host key" >&2
+	if "$keygen" -q -A; then
+		chmod 0600 /etc/ssh/ssh_host_ed25519_key
+	else
+		echo "sshd-start: cannot make the ed25519 host key" >&2
+		exit 1
+	fi
+fi
+
+# A configuration the server would refuse is reported here, once, rather
+# than by a server that the service manager starts again and again.
+if "$sshd" -t -f "$config"; then
+	:
+else
+	echo "sshd-start: $config is not usable" >&2
+	exit 1
+fi
+
+exec "$sshd" "$@"

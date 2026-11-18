@@ -1,0 +1,1076 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#include "kern/console-device.h"
+#include "kern/cdev.h"
+#include "kern/clock.h"
+#include "kern/file.h"
+#include "kern/input-device.h"
+#include "kern/input-keymap.h"
+#include "kern/kmem.h"
+#include "kern/lock.h"
+#include "kern/poll.h"
+#include <kern/kcrt.h>
+#ifndef KERN_INPUT_OWNERSHIP_TEST
+#include "kern/sched.h"
+#include "kern/thread.h"
+#endif
+#include "kern/tty.h"
+#include "kern/uaccess.h"
+#include "kern/waitq.h"
+
+#include <uapi/console.h>
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
+#include "kern/text-display.h"
+
+#define CONSOLE_WRITE_MAX 512U
+#define CONSOLE_DISPATCH_EVENTS 64U
+#define CONSOLE_INPUT_SOURCES 8U
+#define CONSOLE_KEY_CAPABILITIES 128U
+#define CONSOLE_LOGICAL_KEYS 128U
+
+struct console_dispatch_event {
+	uint32_t translated;
+	unsigned device_id;
+	unsigned overflow;
+	unsigned repeat;
+};
+
+struct console_logical_key {
+	char symbol[KERN_KEY_SYMBOL_SIZE];
+	uint16_t key;
+};
+
+struct console_source_state {
+	struct input_device *source;
+	struct input_keymap_state keymap;
+	int resyncing;
+	uint16_t active[KEY_MAX + 1U];
+	struct console_logical_key logical[CONSOLE_LOGICAL_KEYS];
+};
+
+static struct console_dispatch_event dispatch_events[CONSOLE_DISPATCH_EVENTS];
+static unsigned dispatch_head, dispatch_tail, dispatch_used;
+static struct console_source_state console_sources[CONSOLE_INPUT_SOURCES];
+static struct spinlock input_lock;
+static struct wait_queue dispatch_waitq;
+#ifndef KERN_INPUT_OWNERSHIP_TEST
+static struct input_subscription console_subscription;
+#endif
+
+
+#ifndef KERN_INPUT_OWNERSHIP_TEST
+struct console_open {
+	unsigned vt;
+};
+
+#endif
+
+
+static struct console_source_state * console_source_find(struct input_device *source, int create);
+static uint32_t console_source_active_key(struct console_source_state *source, const struct input_report_event *item, uint32_t translated);
+static void console_dispatch_enqueue(uint32_t translated, unsigned device_id, unsigned repeat);
+static void console_input_subscriber(void *context, const struct input_report *report);
+
+#ifndef KERN_INPUT_OWNERSHIP_TEST
+static struct console_open *console_open_state(struct file *file);
+static unsigned console_file_vt(struct file *file);
+static int console_open_file(struct file *file);
+static int console_close_file(struct file *file);
+#define CONSOLE_BLANK_MAX	256U
+
+static void console_clear_span(unsigned row, unsigned column, unsigned count);
+static void console_deliver(uint32_t translated);
+static void console_dispatch_worker(void *argument);
+static ssize_t console_read(struct file *file, void *buffer, size_t size);
+static ssize_t console_write(struct file *file, const void *buffer, size_t size);
+static int console_write_at(uintptr_t argument);
+static int console_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+static int console_poll(struct file *file, short events, short *revents);
+static ssize_t vt_read(struct file *file, void *buffer, size_t size);
+static ssize_t vt_write(struct file *file, const void *buffer, size_t size);
+static int vt_poll(struct file *file, short events, short *revents);
+static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+#endif
+
+#ifndef KERN_INPUT_OWNERSHIP_TEST
+
+/* Reports the state behind an open console file. */
+static struct console_open *
+console_open_state(
+	struct file *file)
+{
+	/* Returns the computed result. */
+	return file != NULL ? file->f_data : NULL;
+}
+
+/* Reports which virtual terminal an open file belongs to. */
+static unsigned
+console_file_vt(
+	struct file *file)
+{
+	struct console_open *state = console_open_state(file);
+
+	/* Returns the computed result. */
+	return state != NULL ? state->vt : 0U;
+}
+
+/* Opens the console, or one of its virtual terminals. */
+static int
+console_open_file(
+	struct file *file)
+{
+	struct console_open *state = kern_malloc(sizeof(*state));
+
+	/* Handles the state availability. */
+	if (state == NULL)
+		return ENOMEM;
+	state->vt = 0;
+	file->f_data = state;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Releases the VT identity held by this console file. */
+static int
+console_close_file(
+	struct file *file)
+{
+	struct console_open *state;
+
+	/* No input stream is owned by an individual console descriptor. */
+	state = console_open_state(file);
+	if (state == NULL)
+		return 0;
+
+	/* Releases only this open file's terminal selection. */
+	kern_free(state);
+	file->f_data = NULL;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Records one thing the console's input source can report. */
+/*
+ * Clears a span of one row by writing spaces. The console interface has
+ * no separate clear operation.
+ */
+static void
+console_clear_span(
+	unsigned row,
+	unsigned column,
+	unsigned count)
+{
+	char blanks[CONSOLE_BLANK_MAX + 1U];
+	unsigned index;
+
+	/* Bounds the span to one write. */
+	if (count > CONSOLE_BLANK_MAX)
+		count = CONSOLE_BLANK_MAX;
+
+	/* Fills the span with spaces. */
+	for (index = 0; index < count; index++)
+		blanks[index] = ' ';
+	blanks[count] = '\0';
+	kern_text_write(row, column, KERN_TEXT_ATTRIB_NORMAL, blanks);
+}
+
+
+#endif
+
+/* Finds the input source one device is registered as. */
+static struct console_source_state *
+console_source_find(
+	struct input_device *source,
+	int create)
+{
+	unsigned index;
+	struct console_source_state *empty = NULL;
+
+	/* Process each remaining element. */
+	for (index = 0; index < CONSOLE_INPUT_SOURCES; index++) {
+		/* Handles the console sources condition. */
+		if (console_sources[index].source == source)
+			return &console_sources[index];
+
+		/* Handles the source availability. */
+		if (console_sources[index].source == NULL && empty == NULL)
+			empty = &console_sources[index];
+	}
+
+	/* Handles the empty availability. */
+	if (!create || empty == NULL)
+		return NULL;
+	empty->source = source;
+	drv_input_keymap_init(&empty->keymap);
+
+	/* Returns the computed result. */
+	return empty;
+}
+
+/* Asks whether a source still holds a key down. */
+static uint32_t
+console_source_active_key(
+	struct console_source_state *source,
+	const struct input_report_event *item,
+	uint32_t translated)
+{
+	struct console_logical_key *empty;
+	uint16_t *active = NULL;
+	unsigned index;
+
+	/* Handles the item condition. */
+	if (item->event.code <= KEY_MAX && item->event.code != KEY_RESERVED) {
+		active = &source->active[item->event.code];
+	} else if (item->symbol[0] != '\0') {
+		empty = NULL;
+
+		/* Process each remaining element. */
+		for (index = 0; index < CONSOLE_LOGICAL_KEYS; index++) {
+			/* Selects the matching value. */
+			if (kern_strcmp(source->logical[index].symbol,
+				   item->symbol) == 0) {
+				active = &source->logical[index].key;
+				break;
+			}
+
+			/* Handles the empty availability. */
+			if (source->logical[index].symbol[0] == '\0' &&
+			    empty == NULL)
+				empty = &source->logical[index];
+		}
+
+		/* Handles the active availability. */
+		if (active == NULL && item->event.value != 0 && empty != NULL) {
+			kern_memcpy(empty->symbol, item->symbol,
+			       sizeof(empty->symbol));
+			active = &empty->key;
+		}
+	}
+
+	/* Handles the active availability. */
+	if (active == NULL)
+		return translated;
+
+	/* Handles the item condition. */
+	if (item->event.value != 0)
+		*active = (uint16_t)(translated & INPUT_KEY_MASK);
+	else if (*active != 0)
+		translated = (translated & ~INPUT_KEY_MASK) | *active;
+
+	/* Handles the item condition. */
+	if (item->event.value == 0) {
+		*active = 0;
+		/* Handles the item condition. */
+		if (item->event.code == KEY_RESERVED) {
+			/* Process each remaining element. */
+			for (index = 0; index < CONSOLE_LOGICAL_KEYS; index++) {
+				/* Handles the source condition. */
+				if (&source->logical[index].key == active) {
+					kern_memset(&source->logical[index], 0,
+					       sizeof(source->logical[index]));
+					break;
+				}
+			}
+		}
+	}
+
+	/* Returns the computed result. */
+	return translated;
+}
+
+/* Puts one event on the queue the dispatcher serves. */
+static void
+console_dispatch_enqueue(
+	uint32_t translated,
+	unsigned device_id,
+	unsigned repeat)
+{
+	struct console_dispatch_event event;
+
+	kern_memset(&event, 0, sizeof(event));
+	event.translated = translated;
+	event.device_id = device_id;
+	event.repeat = repeat;
+
+	/* Handles the dispatch used condition. */
+	if (dispatch_used == CONSOLE_DISPATCH_EVENTS) {
+		event.overflow = 1;
+
+		/* Handles the dispatch events condition. */
+		if (dispatch_events[dispatch_tail].overflow != 0) {
+			event.overflow =
+				dispatch_events[dispatch_tail].overflow;
+		}
+
+		dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
+		dispatch_used--;
+	}
+
+	dispatch_events[dispatch_head] = event;
+	dispatch_head = (dispatch_head + 1U) % CONSOLE_DISPATCH_EVENTS;
+	dispatch_used++;
+}
+
+/* Translation is deliberately completed in this bounded callback.  The dispatch ring may lose old output under overload, but it can never lose a modifier transition from the per-source translation state. */
+static void
+console_input_subscriber(
+	void *context,
+	const struct input_report *report)
+{
+	const struct input_report_event *item_local;
+	struct kern_key_event key_event_local;
+	uint32_t translated_local;
+	const struct input_report_event *item_local1;
+	struct kern_key_event key_event_local2;
+	uint32_t translated_local3;
+	uint8_t caps, kana;
+	uint32_t modifiers;
+	struct console_source_state *source;
+	unsigned long irq;
+	size_t index;
+	int queued = 0;
+
+	(void)context;
+
+	/* Handles the report availability. */
+	if (report == NULL)
+		return;
+	irq = spin_lock_irqsave(&input_lock);
+
+	/* Handles the report condition. */
+	if ((report->flags & INPUT_REPORT_RESYNC_BEGIN) != 0) {
+		/* Handles the source availability. */
+		source = console_source_find(report->device, 1);
+		if (source != NULL) {
+			kern_memset(source, 0, sizeof(*source));
+			source->source = report->device;
+			drv_input_keymap_init(&source->keymap);
+			source->keymap.caps_lock =
+				(report->flags & INPUT_REPORT_LOCK_CAPS) != 0;
+			source->keymap.kana_lock =
+				(report->flags & INPUT_REPORT_LOCK_KANA) != 0;
+			source->resyncing = 1;
+		}
+
+		spin_unlock_irqrestore(&input_lock, irq);
+
+		/* Returns the computed result. */
+		return;
+	}
+
+	/* Handles the report condition. */
+	source = console_source_find(report->device, report->flags == 0);
+	if ((report->flags & INPUT_REPORT_SNAPSHOT) != 0) {
+		/* Handles the source availability. */
+		if (source != NULL && source->resyncing) {
+			/* Process each remaining element. */
+			for (index = 0; index < report->event_count; index++) {
+				/* Handles the item local condition. */
+				item_local = &report->events[index];
+				if (item_local->event.type != EV_KEY ||
+				    item_local->event.value != 1 ||
+				    item_local->symbol[0] == '\0')
+					continue;
+				kern_memset(&key_event_local, 0,
+				       sizeof(key_event_local));
+				kern_memcpy(key_event_local.symbol,
+				       item_local->symbol,
+				       sizeof(key_event_local.symbol));
+				key_event_local.flags = KERN_KEY_EVENT_PRESS;
+				caps = source->keymap.caps_lock;
+				kana = source->keymap.kana_lock;
+
+				/* Checks the drv input keymap translate result. */
+				if (drv_input_keymap_translate(
+					    &source->keymap, &key_event_local,
+					    &translated_local)) {
+					(void)console_source_active_key(
+						source, item_local,
+						translated_local);
+				}
+
+				source->keymap.caps_lock = caps;
+				source->keymap.kana_lock = kana;
+			}
+		}
+
+		spin_unlock_irqrestore(&input_lock, irq);
+
+		/* Returns the computed result. */
+		return;
+	}
+
+	/* Handles the report condition. */
+	if ((report->flags & INPUT_REPORT_RESYNC_END) != 0) {
+		/* Handles the source availability. */
+		if (source != NULL)
+			source->resyncing = 0;
+		spin_unlock_irqrestore(&input_lock, irq);
+
+		/* Returns the computed result. */
+		return;
+	}
+
+	/* Handles the source availability. */
+	if (source != NULL && !source->resyncing) {
+		/* Process each remaining element. */
+		for (index = 0; index < report->event_count; index++) {
+			/* Handles the item local1 condition. */
+			item_local1 = &report->events[index];
+			if (item_local1->event.type != EV_KEY)
+				continue;
+
+			/* Handles the item local1 condition. */
+			if (item_local1->symbol[0] != '\0') {
+				kern_memset(&key_event_local2, 0,
+				       sizeof(key_event_local2));
+				kern_memcpy(key_event_local2.symbol,
+				       item_local1->symbol,
+				       sizeof(key_event_local2.symbol));
+				key_event_local2.flags = item_local1->key_flags;
+			} else if (!drv_input_keymap_event_from_code(
+					   item_local1->event.code,
+					   item_local1->event.value,
+					   &key_event_local2)) {
+				continue;
+			}
+
+			/* Checks the drv input keymap translate result. */
+			if (!drv_input_keymap_translate(&source->keymap,
+							&key_event_local2,
+							&translated_local3))
+				continue;
+			translated_local3 = console_source_active_key(
+				source, item_local1, translated_local3);
+			console_dispatch_enqueue(translated_local3,
+						 report->device_id,
+						 item_local1->event.value == 2);
+			queued = 1;
+		}
+	}
+
+	/* Handles the source availability. */
+	if ((report->flags & INPUT_REPORT_DETACH) != 0 && source != NULL &&
+	    !source->resyncing) {
+		/* Process each remaining element. */
+		for (index = 0; index < CONSOLE_LOGICAL_KEYS; index++) {
+			/* Handles the source condition. */
+			if (source->logical[index].key == 0)
+				continue;
+			modifiers =
+				(source->keymap.left_shift ||
+						 source->keymap.right_shift
+					 ? INPUT_KEY_SHIFT
+					 : 0U) |
+				(source->keymap.left_control ||
+						 source->keymap.right_control
+					 ? INPUT_KEY_CTRL
+					 : 0U) |
+				(source->keymap.left_graph ||
+						 source->keymap.right_graph
+					 ? INPUT_KEY_GRAPH
+					 : 0U);
+			console_dispatch_enqueue(source->logical[index].key |
+							 modifiers |
+							 INPUT_KEY_RELEASE,
+						 report->device_id, 0);
+			queued = 1;
+		}
+	}
+
+	/* Handles the source availability. */
+	if ((report->flags & INPUT_REPORT_DETACH) != 0 && source != NULL)
+		kern_memset(source, 0, sizeof(*source));
+
+	/* Handles the queued condition. */
+	if (queued)
+		waitq_wake_all(&dispatch_waitq);
+
+	spin_unlock_irqrestore(&input_lock, irq);
+}
+
+#ifdef KERN_INPUT_OWNERSHIP_TEST
+/*
+ * Clears the ownership record the host tests inspect.
+ */
+void
+drv_console_input_ownership_test_reset(
+	void)
+{
+	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input test");
+	waitq_init(&dispatch_waitq, "console dispatch test");
+	dispatch_head = dispatch_tail = dispatch_used = 0;
+	kern_memset(console_sources, 0, sizeof(console_sources));
+}
+
+/*
+ * Publishes one ownership change for those tests.
+ */
+void
+drv_console_input_ownership_test_publish(
+	const struct input_report *report)
+{
+	console_input_subscriber(NULL, report);
+}
+
+/*
+ * Takes one recorded change back off for those tests.
+ */
+int
+drv_console_input_ownership_test_pop(
+	uint32_t *translated,
+	unsigned *device_id,
+	unsigned *repeat)
+{
+	struct console_dispatch_event event;
+	unsigned long irq = spin_lock_irqsave(&input_lock);
+
+	/* Handles the dispatch used condition. */
+	if (dispatch_used == 0) {
+		spin_unlock_irqrestore(&input_lock, irq);
+
+		/* Succeeded. */
+		return 0;
+	}
+
+	event = dispatch_events[dispatch_tail];
+	dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
+	dispatch_used--;
+
+	spin_unlock_irqrestore(&input_lock, irq);
+
+	/* Handles the translated availability. */
+	if (translated != NULL)
+		*translated = event.translated;
+	/* Handles the device id availability. */
+	if (device_id != NULL)
+		*device_id = event.device_id;
+	/* Handles the repeat availability. */
+	if (repeat != NULL)
+		*repeat = event.repeat;
+	/* Reports operation failure. */
+	return 1;
+}
+
+/*
+ * Reports the recorded state to those tests.
+ */
+int
+drv_console_input_ownership_test_state(
+	struct input_device *device,
+	unsigned code,
+	unsigned *caps,
+	unsigned *kana,
+	unsigned *shift,
+	uint16_t *active,
+	int *resyncing)
+{
+	struct console_source_state *source;
+	unsigned long irq = spin_lock_irqsave(&input_lock);
+
+	/* Handles the source availability. */
+	source = console_source_find(device, 0);
+	if (source == NULL || code > KEY_MAX) {
+		spin_unlock_irqrestore(&input_lock, irq);
+
+		/* Succeeded. */
+		return 0;
+	}
+
+	/* Handles the caps availability. */
+	if (caps != NULL)
+		*caps = source->keymap.caps_lock;
+	/* Handles the kana availability. */
+	if (kana != NULL)
+		*kana = source->keymap.kana_lock;
+	/* Handles the shift availability. */
+	if (shift != NULL) {
+		*shift =
+			source->keymap.left_shift || source->keymap.right_shift;
+	}
+
+	/* Handles the active availability. */
+	if (active != NULL)
+		*active = source->active[code];
+	/* Handles the resyncing availability. */
+	if (resyncing != NULL)
+		*resyncing = source->resyncing;
+
+	spin_unlock_irqrestore(&input_lock, irq);
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+#else
+
+/* Sends key presses through the ordinary TTY input discipline. */
+static void
+console_deliver(
+	uint32_t translated)
+{
+	/* Releases are tracked by evdev and must not become TTY characters. */
+	if ((translated & INPUT_KEY_RELEASE) != 0U)
+		return;
+
+	tty_console_input_event(translated);
+	poll_notify();
+}
+
+static void
+console_dispatch_worker(
+	void *argument)
+{
+	uint64_t sequence;
+	struct console_dispatch_event event;
+	unsigned long irq;
+
+	(void)argument;
+	/* Continue until the operation reaches a terminal state. */
+	for (;;) {
+		irq = spin_lock_irqsave(&input_lock);
+		/* Continue while the operation condition remains true. */
+		while (dispatch_used == 0) {
+			sequence = waitq_sequence(&dispatch_waitq);
+			(void)waitq_sleep(&dispatch_waitq, &input_lock,
+					  sequence, 0, 0);
+		}
+
+		event = dispatch_events[dispatch_tail];
+		dispatch_tail = (dispatch_tail + 1U) % CONSOLE_DISPATCH_EVENTS;
+		dispatch_used--;
+		spin_unlock_irqrestore(&input_lock, irq);
+		console_deliver(event.translated);
+	}
+}
+
+/*
+ * Keyboard input arrives through the evdev subscription that
+ * console_report() already services, so there is no polling worker
+ * and no console-owned keyboard device any more.
+ */
+
+
+/* Reads characters through the selected TTY discipline. */
+static ssize_t
+console_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	unsigned vt;
+	ssize_t result;
+
+	/* A reader (a login prompt) shows a quiet console (ws035-p097). */
+	kern_text_reveal();
+
+	/* Canonical and noncanonical reads share the same terminal owner. */
+	vt = console_file_vt(file);
+	result = tty_vt_read(vt, file, buffer, size);
+	if (result < 0)
+		return result;
+
+	/* Succeeded: reports the bytes delivered by the terminal. */
+	return result;
+}
+
+/* Writes characters to the console. */
+static ssize_t
+console_write(
+	struct file *file,
+	const void *buffer,
+	size_t size)
+{
+	ssize_t result =
+		tty_vt_write(console_file_vt(file), file, buffer, size);
+
+	/* Checks the operation result. */
+	if (result < 0)
+		return result;
+	kern_text_update_cursor();
+
+	/* Returns the computed result. */
+	return result;
+}
+
+/* Writes characters at one position of the console. */
+static int
+console_write_at(
+	uintptr_t argument)
+{
+	int function_result;
+	struct console_write_at request;
+	char text[CONSOLE_WRITE_MAX + 1U];
+	unsigned columns;
+	unsigned rows;
+	int error = copyin(argument, &request, sizeof(request));
+
+	/* Checks the operation status. */
+	if (error != 0)
+		return error;
+
+	kern_text_get_size(&columns, &rows);
+
+	/* Handles the request condition. */
+	if (request.row >= rows ||
+	    request.column >= columns ||
+	    request.length > CONSOLE_WRITE_MAX) {
+		/* Failed. */
+		return EINVAL;
+	}
+
+	/* Checks the operation status. */
+	error = copyin(request.address, text, request.length);
+	if (error != 0)
+		return error;
+	text[request.length] = '\0';
+
+	/* Computes the function result. */
+	kern_text_write(request.row, request.column,
+		       (uint8_t)request.attribute, text);
+	function_result = 0 != 0
+				  ? EIO
+				  : 0;
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Serves one control request against the console. */
+static int
+console_ioctl(
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument)
+{
+	struct console_size size;
+	int function_result;
+	struct console_cursor cursor_local;
+	struct console_cursor cursor_local1;
+	struct console_cursor cursor_local2;
+	struct console_row row;
+	struct console_position position;
+	unsigned cursor_row;
+	unsigned cursor_column;
+	int cursor_shown;
+	unsigned columns;
+	unsigned rows;
+	int error;
+
+	/* Every bound below comes from the live console geometry. */
+	kern_text_get_size(&columns, &rows);
+	size.rows = rows;
+	size.columns = columns;
+
+	/* Dispatch the selected operation case. */
+	switch (request) {
+	case KERN_CONSOLE_GET_SIZE:
+
+		/* Obtains the copyout result. */
+		function_result = copyout(&size, argument, sizeof(size));
+
+		/* Returns the computed result. */
+		return function_result;
+	case KERN_CONSOLE_CLEAR:
+		kern_text_clear();
+
+		/* Succeeded. */
+		return 0;
+	case KERN_CONSOLE_CLEAR_ROW:
+
+		/* Checks the operation status. */
+		error = copyin(argument, &row, sizeof(row));
+		if (error != 0)
+			return error;
+
+		/* Handles the row condition. */
+		if (row.row >= rows)
+			return EINVAL;
+		console_clear_span(row.row, 0U, columns);
+
+		/* Succeeded. */
+		return 0;
+	case KERN_CONSOLE_CLEAR_TO_EOL:
+
+		/* Checks the operation status. */
+		error = copyin(argument, &position, sizeof(position));
+		if (error != 0)
+			return error;
+
+		/* Computes the function result. */
+		if (position.row >= rows || position.column >= columns)
+			return EINVAL;
+		console_clear_span(position.row, position.column,
+				   columns - position.column);
+		function_result = 0;
+
+		/* Returns the computed result. */
+		return function_result;
+	case KERN_CONSOLE_GET_CURSOR:
+
+		kern_text_get_cursor(&cursor_row, &cursor_column, &cursor_shown);
+		cursor_local.row = cursor_row;
+		cursor_local.column = cursor_column;
+		cursor_local.visible = cursor_shown != 0;
+
+		/* Obtains the copyout result. */
+		function_result =
+			copyout(&cursor_local, argument, sizeof(cursor_local));
+
+		/* Returns the computed result. */
+		return function_result;
+	case KERN_CONSOLE_SET_CURSOR:
+
+		/* Checks the operation status. */
+		error = copyin(argument, &cursor_local1, sizeof(cursor_local1));
+		if (error != 0)
+			return error;
+
+		/* Computes the function result. */
+		function_result = kern_text_set_cursor(cursor_local1.row,
+						      cursor_local1.column)
+					  ? 0
+					  : EINVAL;
+
+		/* Returns the computed result. */
+		return function_result;
+	case KERN_CONSOLE_SHOW_CURSOR:
+
+		/* Checks the operation status. */
+		error = copyin(argument, &cursor_local2, sizeof(cursor_local2));
+		if (error != 0)
+			return error;
+		kern_text_show_cursor(cursor_local2.visible != 0);
+
+		/* Succeeded. */
+		return 0;
+	case KERN_CONSOLE_WRITE_AT:
+		/* Obtains the console write at result. */
+		function_result = console_write_at(argument);
+
+		/* Returns the computed result. */
+		return function_result;
+	case KERN_CONSOLE_ISATTY:
+		/* Succeeded. */
+		return 0;
+	default:
+		/* Obtains the tty vt ioctl result. */
+		function_result = tty_vt_ioctl(console_file_vt(file), file,
+					       request, argument);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+}
+
+/* Reports readiness through the selected TTY discipline. */
+static int
+console_poll(
+	struct file *file,
+	short events,
+	short *revents)
+{
+	unsigned vt;
+	int error;
+
+	/* Poll and read observe the same character stream. */
+	vt = console_file_vt(file);
+	error = tty_vt_poll(vt, file, events, revents);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reads characters typed at one virtual terminal. */
+static ssize_t
+vt_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	ssize_t function_result;
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+
+	/* Obtains the tty vt read result. */
+	function_result = tty_vt_read(vt, file, buffer, size);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/* Writes characters to one virtual terminal. */
+static ssize_t
+vt_write(
+	struct file *file,
+	const void *buffer,
+	size_t size)
+{
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+	ssize_t result = tty_vt_write(vt, file, buffer, size);
+
+	/* Checks the operation result. */
+	if (result >= 0)
+		kern_text_update_cursor();
+
+	/* Returns the computed result. */
+	return result;
+}
+
+/* Reports whether a virtual terminal has anything to read. */
+static int
+vt_poll(
+	struct file *file,
+	short events,
+	short *revents)
+{
+	int error;
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+
+	/* Obtains the tty vt poll result. */
+	error = tty_vt_poll(vt, file, events, revents);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+/* Serves one control request against a virtual terminal. */
+static int
+vt_ioctl(
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument)
+{
+	int error;
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+
+	/* Obtains the tty vt ioctl result. */
+	error = tty_vt_ioctl(vt, file, request, argument);
+
+	/* Returns the computed result. */
+	return error;
+}
+
+static const struct cdev_ops vt_ops = {
+	.read = vt_read,
+	.write = vt_write,
+	.ioctl = vt_ioctl,
+	.poll = vt_poll,
+};
+
+/*
+ * The controlling terminal, under its own name.
+ *
+ * Every operation resolves the caller's terminal afresh, because a process
+ * may gain or give one up while the descriptor is open, and two processes
+ * sharing this descriptor do not share a terminal.
+ */
+static const struct cdev_ops controlling_tty_ops = {
+	.open = tty_controlling_open,
+	.read = tty_controlling_read,
+	.write = tty_controlling_write,
+	.ioctl = tty_controlling_ioctl,
+	.poll = tty_controlling_poll,
+};
+
+static const struct cdev_ops console_ops = {
+	.open = console_open_file,
+	.close = console_close_file,
+	.read = console_read,
+	.write = console_write,
+	.ioctl = console_ioctl,
+	.poll = console_poll,
+};
+
+/*
+ * Publishes the console and its terminals as devices.
+ */
+int
+drv_console_device_register(
+	void)
+{
+	unsigned i_index_for;
+	struct thread *dispatcher = NULL;
+	int error;
+
+	/* Starts every queue, lock and keymap out empty. */
+	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
+	waitq_init(&dispatch_waitq, "console input dispatch");
+	dispatch_head = dispatch_tail = dispatch_used = 0;
+	kern_memset(console_sources, 0, sizeof(console_sources));
+	kern_memset(&console_subscription, 0, sizeof(console_subscription));
+
+	/* Checks the operation status. */
+	error = tty_console_init();
+	if (error != 0)
+		return error;
+
+	/* Checks the operation status. */
+	error = kthread_create(console_dispatch_worker, NULL,
+			       SCHED_PRIORITY_DEFAULT, &dispatcher);
+	if (error != 0)
+		goto fail;
+
+	/* Checks the operation status. */
+	error = cdev_register("console", 0x00010000U, &console_ops,
+			      (void *)(uintptr_t)1U);
+	if (error != 0)
+		goto fail;
+	/* Process each remaining element. */
+	for (i_index_for = 0; i_index_for < tty_vt_count(); i_index_for++) {
+		char name[] = "ttyv0";
+		name[4] = (char)('0' + i_index_for);
+
+		/* Checks the operation status. */
+		error = cdev_register(name, (dev_t)(0x00010010U + i_index_for),
+				      &vt_ops,
+				      (void *)(uintptr_t)(i_index_for + 1U));
+		if (error != 0)
+			goto fail;
+	}
+
+	/* Checks the operation status. */
+	error = cdev_register("tty", 0x00010020U, &controlling_tty_ops, NULL);
+	if (error != 0)
+		goto fail;
+
+	/* Checks the operation status. */
+	error = tty_pty_register();
+	if (error != 0)
+		goto fail;
+
+	/* Checks the operation status. */
+	error = drv_input_subscribe(&console_subscription,
+				    console_input_subscriber, NULL);
+	if (error != 0)
+		goto fail;
+	thread_start(dispatcher);
+
+	/* Succeeded. */
+	return 0;
+
+fail:
+	drv_input_unsubscribe(&console_subscription);
+
+	/* Handles the dispatcher availability. */
+	if (dispatcher != NULL)
+		(void)thread_abort_new(dispatcher);
+
+
+	/* Reports the failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+#endif

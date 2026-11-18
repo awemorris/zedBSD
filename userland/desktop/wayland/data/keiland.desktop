@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Keiland
+Comment=The Keiland desktop
+Exec=/opt/keiland/bin/wayland --session --glass --wallpaper=/opt/keiland/share/keiland/wallpaper.png
+Type=Application
+DesktopNames=Keiland

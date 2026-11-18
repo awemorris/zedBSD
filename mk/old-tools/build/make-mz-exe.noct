@@ -1,0 +1,42 @@
+require zedbuild;
+
+func main(args) {
+    var entry = 0;
+    var positional = [];
+    var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--entry") {
+            if (i + 1 >= Array.size(args)) { zbFail("--entry requires a value"); }
+            entry = zbParseNumber(args[i + 1]);
+            i = i + 2;
+        } else {
+            Array.push(positional, args[i]);
+            i = i + 1;
+        }
+    }
+    if (Array.size(positional) != 2) {
+        zbFail("usage: make-mz-exe.noct [--entry N] INPUT OUTPUT");
+    }
+    var image = zbReadFile(positional[0]);
+    var total = 64 + Packed.size(image);
+    var pages = (total + 511) / 512;
+    var tail = total % 512;
+    var output = Packed.uint8(total);
+    zbPut16LE(output, 0, 0x5a4d);
+    zbPut16LE(output, 2, tail);
+    zbPut16LE(output, 4, pages);
+    zbPut16LE(output, 6, 0);
+    zbPut16LE(output, 8, 4);
+    zbPut16LE(output, 10, 0x110);
+    zbPut16LE(output, 12, 0xffff);
+    zbPut16LE(output, 14, ((Packed.size(image) + 15) / 16) + 0x10);
+    zbPut16LE(output, 16, 0x0ffe);
+    zbPut16LE(output, 18, 0);
+    zbPut16LE(output, 20, entry);
+    zbPut16LE(output, 22, 0);
+    zbPut16LE(output, 24, 0x40);
+    zbPut16LE(output, 26, 0);
+    zbCopy(output, 64, image, 0, Packed.size(image));
+    zbWriteFile(positional[1], output);
+}
+

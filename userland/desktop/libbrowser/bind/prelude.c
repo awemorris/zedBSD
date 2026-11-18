@@ -1,0 +1,1916 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The parts of the web platform written in the page's own language
+ * (ws074-p230): AbortController, URL and URLSearchParams (over the browser's
+ * own URL parser), the session history (History, Location's navigation and
+ * the Navigation API, over the natives that change the document's URL and
+ * scroll to a fragment), and the smaller objects that scripts probe for
+ * (Intl, matchMedia, MessageChannel).  The source is
+ * prelude-source.inc, made from plan/ws074/phase230/prelude.js.
+ */
+
+#include "bind/internal.h"
+#include "css/css.h"
+#include "js/builtin.h"
+#include "net/net.h"
+#include "base/os-error.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "bind/prelude-source.inc"
+#include "bind/prelude-net.inc"
+
+/* The parts of a URL in the order the prelude reads them (enum net_url_part). */
+#define PRELUDE_URL_PARTS	11
+
+static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_navigate_frame(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_navigate_top(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_load_ended(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_fully_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_initial_blank(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_color_scheme(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_element(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_frame_proxy_maker(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_global(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_window_wrapper(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_is_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_animation_hook(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_hold(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_time(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_names(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_style(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_sheet_mark(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_sheet_adopt(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_rule_info(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_rule_replace(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
+
+/* parseURL(input, base): the parts of the URL as an array of strings, or null when it does not parse. */
+static int
+prelude_parse_url(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct net_url base;
+	struct net_url url;
+	struct wb_buffer text;
+	struct wb_buffer part;
+	struct vm_string *string;
+	vm_value parts[PRELUDE_URL_PARTS];
+	int have_base;
+	int index;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_NULL;
+
+	/* The input and the optional base as UTF-8. */
+	wb_buffer_init(&text);
+	wb_buffer_init(&part);
+	status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(js_argument(args, count, 0)), &text);
+	if (status != 0) {
+		wb_buffer_release(&text);
+		return status;
+	}
+	have_base = 0;
+	if (js_argument(args, count, 1) != VM_VALUE_UNDEFINED) {
+		status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(js_argument(args, count, 1)), &part);
+		if (status == 0)
+			status = net_url_parse(wb_buffer_string(&part), part.length, NULL, &base);
+		if (status != 0) {
+			wb_buffer_release(&text);
+			wb_buffer_release(&part);
+			return status == ENOMEM ? status : 0;
+		}
+		have_base = 1;
+	}
+
+	/* The parse. */
+	status = net_url_parse(wb_buffer_string(&text), text.length, have_base ? &base : NULL, &url);
+	if (have_base)
+		net_url_release(&base);
+	wb_buffer_release(&text);
+	wb_buffer_release(&part);
+	if (status != 0)
+		return status == ENOMEM ? status : 0;
+
+	/* Each part as a string. */
+	for (index = 0; index < PRELUDE_URL_PARTS && status == 0; index++) {
+		wb_buffer_init(&part);
+		status = net_url_component(&url, index, &part);
+		if (status == 0) {
+			string = vm_string_from_utf8(realm->heap, part.data == NULL ? "" : wb_buffer_string(&part), part.length);
+			if (string == NULL)
+				status = ENOMEM;
+			else
+				parts[index] = vm_value_cell(string);
+		}
+		wb_buffer_release(&part);
+	}
+	net_url_release(&url);
+	if (status != 0)
+		return status;
+	return js_builtin_array(realm, parts, PRELUDE_URL_PARTS, result);
+}
+
+/* setURL(href): changes the document's URL within the document; false when the host cannot. */
+static int
+prelude_set_url(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer href;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	wb_buffer_init(&href);
+
+	/* A frame's URL belongs to its frame, not to the page's host. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	if (window->owned) {
+		struct vm_string *url;
+
+		/* A loaded frame's document keeps the new URL in its own record. */
+		if (window->document->resource_url == NULL)
+			return 0;
+		status = prelude_utf8_argument(args, count, 0, &href, &present);
+		if (status == 0 && present) {
+			url = vm_string_from_utf8(window->document->heap, wb_buffer_string(&href), href.length);
+			if (url == NULL)
+				status = ENOMEM;
+			else
+				window->document->resource_url = url;
+		}
+		wb_buffer_release(&href);
+		if (status == ENOMEM)
+			return status;
+		*result = vm_value_boolean(status == 0 && present);
+		return 0;
+	}
+	if (window->host.url_set == NULL)
+		return 0;
+
+	/* The href as UTF-8. */
+	status = prelude_utf8_argument(args, count, 0, &href, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&href);
+		return status;
+	}
+
+	/* The host takes the new URL; a URL it cannot parse leaves the old one. */
+	status = window->host.url_set(window->host.context, wb_buffer_string(&href), href.length);
+	wb_buffer_release(&href);
+	if (status == ENOMEM)
+		return status;
+	if (status != 0)
+		return 0;
+
+	/* Succeeded: the document has the new URL. */
+	*result = vm_value_boolean(1);
+	return 0;
+}
+
+/* navigateFrame(url): points the window's own frame at the URL; whether it is a frame (a top-level window is not). */
+static int
+prelude_navigate_frame(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer location;
+	int present;
+	int started;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* The URL as UTF-8. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	wb_buffer_init(&location);
+	status = prelude_utf8_argument(args, count, 0, &location, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&location);
+		return status;
+	}
+
+	/* The frame loads it at its next scan. */
+	started = 0;
+	status = bind_frame_navigate(window, wb_buffer_string(&location), location.length, &started);
+	wb_buffer_release(&location);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: whether the frame was pointed at the URL. */
+	*result = vm_value_boolean(started);
+	return 0;
+}
+
+/*
+ * navigateTop(url, replace): asks the program to load the URL in place of
+ * a top-level window's document (a later request replaces an earlier one
+ * not yet carried out); whether the window is a top-level one (a frame's
+ * is not, nor a detached one's).
+ */
+static int
+prelude_navigate_top(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer location;
+	char *copy;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* Only a top-level window that is still shown asks. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	if (window == NULL || window->frame != NULL || window->detached)
+		return 0;
+
+	/* The URL as UTF-8. */
+	wb_buffer_init(&location);
+	status = prelude_utf8_argument(args, count, 0, &location, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&location);
+		return status;
+	}
+	copy = strdup(wb_buffer_string(&location));
+	wb_buffer_release(&location);
+	if (copy == NULL)
+		return ENOMEM;
+
+	/* The request, which the program takes (bind_take_navigation). */
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "navigate: %.200s\n", copy);
+	free(window->top_navigation);
+	window->top_navigation = copy;
+	window->top_navigation_replace = vm_to_boolean(js_argument(args, count, 1));
+	*result = vm_value_boolean(1);
+	return 0;
+}
+
+/*
+ * Takes the navigation a top-level window's script asked for: the URL
+ * (the caller frees it), or NULL for none; *replace says whether it takes
+ * the place of the current entry of the history.
+ */
+char *
+bind_take_navigation(
+	struct bind_window *window,
+	int *replace)
+{
+	char *location;
+
+	/* Nothing asked. */
+	*replace = 0;
+	if (window == NULL || window->top_navigation == NULL)
+		return NULL;
+
+	/* The request, handed over. */
+	location = window->top_navigation;
+	*replace = window->top_navigation_replace;
+	window->top_navigation = NULL;
+	window->top_navigation_replace = 0;
+	return location;
+}
+
+/* Tells whether a top-level window's script asked for a navigation the program has not taken yet. */
+int
+bind_navigation_pending(
+	const struct bind_window *window)
+{
+	return window != NULL && window->top_navigation != NULL;
+}
+
+/* loadEnded(): whether the window's load event has finished (a navigation before that replaces the current entry). */
+static int
+prelude_load_ended(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The window's flag. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(window->load_ended);
+	return 0;
+}
+
+/* fullyActive(): whether the window's document is the active one of a connected frame or of the top-level view (not a removed frame's). */
+static int
+prelude_fully_active(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A window that was detached with its removed frame is not. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(!window->detached && !window->unloading);
+	return 0;
+}
+
+/* initialBlank(): whether the window is a frame still on its initial about:blank document (no resource was loaded into it). */
+static int
+prelude_initial_blank(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int blank;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A top-level window has its page's resource; a frame without a loaded resource is blank. */
+	window = bind_window_of(realm);
+	blank = (window->parent_global != NULL || window->frame != NULL) && window->document->resource_url == NULL;
+	*result = vm_value_boolean(blank);
+	return 0;
+}
+
+/* colorScheme(): the view's color scheme, "light" or "dark" (matchMedia's prefers-color-scheme). */
+static int
+prelude_color_scheme(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *scheme;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The window's scheme as its keyword. */
+	window = bind_window_of(realm);
+	if (window->dark) {
+		scheme = vm_string_from_utf8(realm->heap, "dark", 4);
+	} else {
+		scheme = vm_string_from_utf8(realm->heap, "light", 5);
+	}
+	if (scheme == NULL)
+		return ENOMEM;
+
+	/* Succeeded: the keyword. */
+	*result = vm_value_cell(scheme);
+	return 0;
+}
+
+/* frameElement(): the frame element this window is in, or null; unlike the window's own property it works while the window is being made. */
+static int
+prelude_frame_element(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A top-level or retired window has none. */
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	if (window->frame == NULL)
+		return 0;
+
+	/* The element's wrapper. */
+	status = bind_wrap(window, &window->frame->node, result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the frame element. */
+	return 0;
+}
+
+/* scrollToFragment(fragment): scrolls to the element the fragment names; whether one was found. */
+static int
+prelude_scroll_fragment(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer fragment;
+	int present;
+	int found;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* The fragment as UTF-8. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	wb_buffer_init(&fragment);
+	status = prelude_utf8_argument(args, count, 0, &fragment, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&fragment);
+		return status;
+	}
+
+	/* The target, revealed and scrolled to. */
+	found = 0;
+	if (window->document != NULL)
+		status = bind_scroll_to_fragment(window, &fragment, &found);
+	wb_buffer_release(&fragment);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: whether the fragment named an element. */
+	*result = vm_value_boolean(found);
+	return 0;
+}
+
+/* fire(target, event): dispatches an event the browser fires (it is trusted); whether no listener canceled it. */
+static int
+prelude_fire(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct bind_listeners *listeners;
+	struct bind_event *event;
+	vm_value target;
+	int canceled;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* The target must be able to have listeners. */
+	window = bind_window_of(realm);
+	target = js_argument(args, count, 0);
+	status = bind_listeners_of(window, target, 0, &listeners);
+	if (status == EINVAL)
+		return bind_throw_illegal(realm);
+	if (status != 0)
+		return status;
+
+	/* The event, which must not be in a dispatch already. */
+	event = bind_event_of(js_argument(args, count, 1));
+	if (event == NULL)
+		return vm_throw_type_error(realm, "fire: parameter 2 is not of type 'Event'.");
+	if (event->dispatching || !event->initialized)
+		return bind_throw_dom(realm, "InvalidStateError", "The event is uninitialized or already being dispatched.");
+
+	/* The browser's event is trusted. */
+	event->trusted = 1;
+	status = bind_dispatch(window, target, js_argument(args, count, 1), &canceled);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: true unless a listener canceled it. */
+	*result = vm_value_boolean(!canceled);
+	return 0;
+}
+
+/* setHyperlinkFollower(function): the function bind_follow_hyperlink calls with a clicked link. */
+static int
+prelude_set_follower(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value follower;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* Only a function can follow links. */
+	*result = VM_VALUE_UNDEFINED;
+	follower = js_argument(args, count, 0);
+	if (!vm_value_is_callable(follower))
+		return vm_throw_type_error(realm, "setHyperlinkFollower: parameter 1 is not a function.");
+
+	/* Succeeded: the window keeps it (its trace marks it). */
+	window = bind_window_of(realm);
+	window->follow_hyperlink = vm_value_as_cell(follower);
+	return 0;
+}
+
+/* viewTransition(step): 1 captures the old state, 2 makes the new one and shows the tree, 0 ends the transition; true when it could be made. */
+static int
+prelude_view_transition(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double step;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_FALSE;
+	status = vm_to_number(realm, js_argument(args, count, 0), &step);
+	if (status != 0)
+		return status;
+	if (window->frame != NULL && window->host.view_transition == NULL) {
+		struct bind_window *parent;
+
+		/* A frame's document: its parent page makes the transition. */
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition != NULL &&
+		    parent->host.frame_view_transition(parent->host.context, window->frame, (int)step) != 0)
+			*result = VM_VALUE_TRUE;
+		return 0;
+	}
+	if (window->host.view_transition == NULL)
+		return 0;
+	if (window->host.view_transition(window->host.context, (int)step) != 0)
+		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* setFrameProxyMaker(function): the function that makes the window proxy of an <iframe> element of this window's document. */
+static int
+prelude_set_frame_proxy_maker(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value maker;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	maker = js_argument(args, count, 0);
+	if (!vm_value_is_callable(maker))
+		return vm_throw_type_error(realm, "setFrameProxyMaker: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->frame_proxy_maker = vm_value_as_cell(maker);
+	return 0;
+}
+
+/* The window of the document an <iframe> element shows now (NULL when it shows none). */
+static struct bind_window *
+prelude_frame_window(
+	struct vm_realm *realm,
+	const vm_value *args,
+	unsigned count)
+{
+	struct dom_node *node;
+	struct bind_window *window;
+	const struct vm_realm *child;
+
+	if (!vm_value_is_object(js_argument(args, count, 0)) || bind_this_node(realm, js_argument(args, count, 0), &node) != 0)
+		return NULL;
+	window = bind_window_of(realm);
+	if (node->type != DOM_ELEMENT || node->document != window->document)
+		return NULL;
+	child = (const struct vm_realm *)((struct dom_element *)node)->child_context;
+	if (child == NULL || child->host == NULL)
+		return NULL;
+	return child->host;
+}
+
+/* frameGlobal(element): the global of the document an <iframe> element shows now, or null. */
+static int
+prelude_frame_global(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = child != NULL && !child->detached ? vm_value_cell(child->realm->global) : VM_VALUE_NULL;
+	return 0;
+}
+
+/*
+ * frameOpaque(element): whether the document an <iframe> element shows is out of reach of the element's own
+ * window (an opaque origin, or another origin).
+ */
+static int
+prelude_frame_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = VM_VALUE_FALSE;
+	if (child != NULL && child->frame != NULL && child->frame->node.document->view != NULL)
+		*result = vm_value_boolean(!bind_window_reachable(child->frame->node.document->view, child));
+	return 0;
+}
+
+/* setWindowWrapper(function): the function that makes this window's restricted view of another window. */
+static int
+prelude_set_window_wrapper(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value wrapper;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	wrapper = js_argument(args, count, 0);
+	if (!vm_value_is_callable(wrapper))
+		return vm_throw_type_error(realm, "setWindowWrapper: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->window_wrapper = vm_value_as_cell(wrapper);
+	return 0;
+}
+
+/* isOpaque(): whether this window's document has an opaque origin (a sandboxed frame without allow-same-origin). */
+static int
+prelude_is_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	*result = vm_value_boolean(bind_window_of(realm)->opaque != 0);
+	return 0;
+}
+
+/* setAnimationHook(function): the function bind_animation_sync calls (op, element, name, delay, duration, iterations). */
+static int
+prelude_set_animation_hook(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value hook;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	hook = js_argument(args, count, 0);
+	if (!vm_value_is_callable(hook))
+		return vm_throw_type_error(realm, "setAnimationHook: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->animation_hook = vm_value_as_cell(hook);
+	return 0;
+}
+
+/*
+ * Tells the prelude about the animations of the elements after a layout: op 0 starts a round, 1 names an element that has an
+ * animation (its name, and its delay, duration and iteration count in milliseconds and times), 2 ends the round (the elements not named stop).
+ */
+int
+bind_animation_sync(
+	struct bind_window *window,
+	int op,
+	struct dom_element *element,
+	const struct vm_string *name,
+	double delay,
+	double duration,
+	double iterations)
+{
+	struct vm_realm *realm;
+	vm_value arguments[6];
+	vm_value returned;
+	int status;
+
+	realm = window->realm;
+	if (window->animation_hook == NULL || window->detached)
+		return 0;
+	arguments[0] = vm_value_int32(op);
+	arguments[1] = VM_VALUE_UNDEFINED;
+	arguments[2] = VM_VALUE_UNDEFINED;
+	if (element != NULL) {
+		status = bind_wrap(window, &element->node, &arguments[1]);
+		if (status != 0)
+			return status;
+	}
+	if (name != NULL)
+		arguments[2] = vm_value_cell((struct vm_cell *)name);
+	arguments[3] = vm_value_number(delay);
+	arguments[4] = vm_value_number(duration);
+	arguments[5] = vm_value_number(iterations);
+	status = vm_call(realm, vm_value_cell(window->animation_hook), VM_VALUE_UNDEFINED, arguments, 6, &returned);
+	if (status == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	return status;
+}
+
+/* frameHold(on): a document in a frame holds its painting (the page keeps showing the last one) or lets it go. */
+static int
+prelude_frame_hold(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double on;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_UNDEFINED;
+	status = vm_to_number(realm, js_argument(args, count, 0), &on);
+	if (status != 0)
+		return status;
+	if (window->frame != NULL) {
+		struct bind_window *parent;
+
+		/* The painting of the frame as it is now is the one that stays. */
+		parent = window->frame->node.document->view;
+		if (on != 0.0 && !window->frame_hold && parent != NULL && !parent->detached && parent->host.frame_capture != NULL)
+			parent->host.frame_capture(parent->host.context, window->frame);
+		window->frame_hold = on != 0.0;
+	}
+	return 0;
+}
+
+/* viewTransitionActive(on, types): tells the page whether a view transition is active and the strings of its types. */
+static int
+prelude_view_transition_active(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *types[8];
+	struct vm_object *list;
+	struct vm_string *string;
+	vm_value item;
+	vm_value length_value;
+	double length;
+	double on;
+	size_t used;
+	size_t index;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_UNDEFINED;
+	status = vm_to_number(realm, js_argument(args, count, 0), &on);
+	if (status != 0)
+		return status;
+	used = 0;
+	if (vm_value_is_object(js_argument(args, count, 1))) {
+		list = (struct vm_object *)vm_value_as_cell(js_argument(args, count, 1));
+		status = vm_get(realm, vm_value_cell(list), vm_value_cell(vm_atom_from_ascii(realm->heap, "length")), &length_value);
+		if (status != 0)
+			return status;
+		status = vm_to_number(realm, length_value, &length);
+		if (status != 0)
+			return status;
+		for (index = 0; index < (size_t)length && used < 8U; index++) {
+			status = vm_get(realm, vm_value_cell(list), vm_value_int32((int32_t)index), &item);
+			if (status != 0)
+				return status;
+			status = vm_to_string(realm, item, &string);
+			if (status != 0)
+				return status;
+			string = vm_atom(realm->heap, string);
+			if (string != NULL)
+				types[used++] = string;
+		}
+	}
+	if (window->host.view_transition_active != NULL)
+		window->host.view_transition_active(window->host.context, on != 0.0, types, used);
+	return 0;
+}
+
+/* viewTransitionDuration(): the milliseconds until the shown transition's animations have all ended. */
+static int
+prelude_view_transition_duration(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	window = bind_window_of(realm);
+	*result = vm_value_number(0.0);
+	if (window->frame != NULL && window->host.view_transition_duration == NULL) {
+		struct bind_window *parent;
+
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition_duration != NULL)
+			*result = vm_value_number(parent->host.frame_view_transition_duration(parent->host.context, window->frame));
+		return 0;
+	}
+	if (window->host.view_transition_duration != NULL)
+		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
+	return 0;
+}
+
+/* importModule(url, json): the namespace of the module at the URL, loaded for import(); a failure is thrown. */
+static int
+prelude_import_module(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer href;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	window = bind_window_of(realm);
+	if (window->host.import_module == NULL)
+		return vm_throw_error(realm, VM_ERROR_TYPE, "Failed to fetch dynamically imported module");
+	wb_buffer_init(&href);
+	status = prelude_utf8_argument(args, count, 0, &href, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&href);
+		return status;
+	}
+	status = window->host.import_module(window->host.context, wb_buffer_string(&href), js_argument(args, count, 1) == vm_value_boolean(1), result);
+	wb_buffer_release(&href);
+	return status;
+}
+
+/* animationOff(flag): a computed style is read without the value an @keyframes animation gives its filters and grid tracks. */
+static int
+prelude_animation_off(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	double flag;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 1U)
+		return 0;
+	status = vm_to_number(realm, args[0], &flag);
+	if (status != 0)
+		return status;
+	css_animation_off(flag != 0.0);
+	return 0;
+}
+
+/* viewTransitionTime(ms): sets how long the shown transition's animations have run. */
+static int
+prelude_view_transition_time(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double milliseconds;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 1U)
+		return 0;
+	window = bind_window_of(realm);
+	status = vm_to_number(realm, args[0], &milliseconds);
+	if (status != 0)
+		return status;
+
+	/* With a pseudo-element's kind and name, only that one's animations. */
+	if (count >= 3U) {
+		struct vm_string *name;
+		uint32_t pseudo;
+
+		status = vm_to_uint32(realm, args[1], &pseudo);
+		if (status != 0)
+			return status;
+		status = vm_to_string(realm, args[2], &name);
+		if (status != 0)
+			return status;
+		name = vm_atom(realm->heap, name);
+		if (name == NULL)
+			return ENOMEM;
+		if (window->host.view_transition_time_of != NULL)
+			window->host.view_transition_time_of(window->host.context, milliseconds, (int)pseudo, name);
+		return 0;
+	}
+	if (window->host.view_transition_time != NULL)
+		window->host.view_transition_time(window->host.context, milliseconds);
+	return 0;
+}
+
+/* viewTransitionNames(): the shown transition's names, "name flags" per line. */
+static int
+prelude_view_transition_names(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_units units;
+	struct vm_string *string;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	window = bind_window_of(realm);
+	wb_units_init(&units);
+	status = 0;
+	if (window->host.view_transition_names != NULL)
+		status = window->host.view_transition_names(window->host.context, &units);
+	if (status == 0) {
+		string = vm_string_from_units(realm->heap, units.data, units.length);
+		if (string == NULL)
+			status = ENOMEM;
+		else
+			*result = vm_value_cell(&string->cell);
+	}
+	wb_units_release(&units);
+	return status;
+}
+
+/* sheetMark(element): the style element is the holder of a constructed sheet, which has a sheet while detached. */
+static int
+prelude_sheet_mark(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node != NULL && node->type == DOM_ELEMENT)
+		((struct dom_element *)node)->constructed_sheet = 1;
+	return 0;
+}
+
+/* sheetAdopt(root, element...): the constructed sheets (their holders) the document or shadow root adopts, in order. */
+static int
+prelude_sheet_adopt(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *root;
+	struct dom_node *nodes[64];
+	struct dom_node *node;
+	size_t made;
+	unsigned index;
+
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	root = bind_node_of(js_argument(args, count, 0));
+	if (root == NULL)
+		return 0;
+	made = 0;
+	for (index = 1; index < count && made < 64U; index++) {
+		node = bind_node_of(args[index]);
+		if (node != NULL && node->type == DOM_ELEMENT)
+			nodes[made++] = node;
+	}
+	dom_adopted_set(root, nodes, made);
+	return 0;
+}
+
+/* viewTransitionStyle(pseudo, name, declarations): what a script's animation gives a view transition pseudo-element now. */
+static int
+prelude_view_transition_style(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *name;
+	struct wb_buffer text;
+	uint32_t pseudo;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 3U)
+		return 0;
+	window = bind_window_of(realm);
+	if (window->host.view_transition_style == NULL)
+		return 0;
+	status = vm_to_uint32(realm, args[0], &pseudo);
+	if (status != 0)
+		return status;
+	status = vm_to_string(realm, args[1], &name);
+	if (status != 0)
+		return status;
+	name = vm_atom(realm->heap, name);
+	if (name == NULL)
+		return ENOMEM;
+	wb_buffer_init(&text);
+	status = prelude_utf8_argument(args, count, 2U, &text, &present);
+	if (status == 0)
+		window->host.view_transition_style(window->host.context, (int)pseudo, name, wb_buffer_string(&text));
+	wb_buffer_release(&text);
+	return status;
+}
+
+/* ruleInfo(sheet, index): the rule of a sheet as "id type source", or undefined. */
+static int
+prelude_rule_info(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 2U)
+		return 0;
+	return bind_cssom_rule_info(realm, args[0], args + 1, count - 1U, result);
+}
+
+/* ruleReplace(sheet, index, text): replaces a rule of a sheet and gives its new identity. */
+static int
+prelude_rule_replace(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 3U)
+		return 0;
+	return bind_cssom_rule_replace(realm, args[0], args + 1, count - 1U, result);
+}
+
+/* setPopover(element, open): whether the popover of an element is showing (the page is styled again). */
+static int
+prelude_set_popover(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+	struct dom_element *element;
+	int open;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node == NULL || node->type != DOM_ELEMENT)
+		return 0;
+	element = (struct dom_element *)node;
+	open = js_argument(args, count, 1) == VM_VALUE_TRUE;
+	if ((element->popover_open != 0) != (open != 0)) {
+		/* What opens later is above (its number is its place in the top layer, counted for the process with an atomic). */
+		static int top_layer_order;
+		int order;
+
+		order = __atomic_add_fetch(&top_layer_order, 1, __ATOMIC_RELAXED);
+		element->popover_open = open ? order : 0;
+		dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
+	}
+	UNUSED_PARAMETER(realm);
+	return 0;
+}
+
+/* nodeRect(node): where a node's boxes are in the viewport as [x, y, width, height], or null without a box. */
+static int
+prelude_node_rect(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct dom_node *node;
+	struct vm_object *array;
+	struct bind_box box;
+	double scroll_x;
+	double scroll_y;
+	double part[4];
+	int index;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* Only a node of this window's document laid out by the host has a place. */
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node == NULL || window->host.node_box == NULL)
+		return 0;
+	memset(&box, 0, sizeof(box));
+	if (!window->host.node_box(window->host.context, node, &box))
+		return 0;
+
+	/* The page's place less the scroll. */
+	scroll_x = 0.0;
+	scroll_y = 0.0;
+	if (window->host.scroll != NULL)
+		window->host.scroll(window->host.context, &scroll_x, &scroll_y);
+	part[0] = box.x - scroll_x;
+	part[1] = box.y - scroll_y;
+	part[2] = box.width;
+	part[3] = box.height;
+
+	/* Succeeded: the four numbers. */
+	status = bind_array_create(realm, &array);
+	if (status != 0)
+		return status;
+	for (index = 0; index < 4; index++) {
+		status = vm_object_define(realm->heap, array, vm_value_int32(index), vm_value_number(part[index]), VM_PROPERTY_DEFAULT);
+		if (status != 0)
+			return status;
+	}
+	*result = vm_value_cell(array);
+	return 0;
+}
+
+/* A script request under way: its number, the script's callback (a heap root) and the host's handle. */
+struct bind_request_pending {
+	struct bind_request_pending *next;
+	struct bind_window *window;
+	unsigned long id;
+	struct vm_cell *callback;
+	void *handle;
+};
+
+/* Reads a string argument as UTF-8 (undefined and null are NULL: *present is 0). */
+static int
+prelude_utf8_argument(
+	const vm_value *args,
+	unsigned count,
+	unsigned index,
+	struct wb_buffer *out,
+	int *present)
+{
+	vm_value value;
+
+	/* Absent values read as no string. */
+	value = js_argument(args, count, index);
+	*present = vm_value_is_string(value);
+	if (!*present)
+		return 0;
+	return vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(value), out);
+}
+
+/* Ends a pending request: out of the window's list, its root dropped, freed. */
+static void
+prelude_request_end(
+	struct bind_request_pending *pending)
+{
+	struct bind_request_pending **link;
+
+	/* Found by pointer in the window's list. */
+	link = &pending->window->requests;
+	while (*link != NULL && *link != pending)
+		link = &(*link)->next;
+	if (*link == pending)
+		*link = pending->next;
+	vm_heap_remove_root(pending->window->realm->heap, &pending->callback);
+	free(pending);
+}
+
+/* A request ended: calls the script's callback with (error, status, url, headers, body). */
+static void
+prelude_request_done(
+	void *context,
+	int error,
+	int status,
+	const char *url,
+	const char *headers,
+	const unsigned char *bytes,
+	size_t length)
+{
+	struct bind_request_pending *pending;
+	struct bind_window *window;
+	struct vm_realm *realm;
+	vm_value arguments[5];
+	vm_value callback;
+	vm_value returned;
+	int result;
+
+	/* The record goes before the script runs, since the script may cancel others (not this one). */
+	pending = context;
+	window = pending->window;
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "request %lu: done error %d status %d bytes %lu %.200s\n", pending->id, error, status, (unsigned long)length, url == NULL ? "" : url);
+	realm = window->realm;
+	callback = vm_value_cell(pending->callback);
+	arguments[0] = vm_value_int32(error);
+	arguments[1] = vm_value_int32(status);
+	arguments[2] = VM_VALUE_UNDEFINED;
+	arguments[3] = VM_VALUE_UNDEFINED;
+	arguments[4] = VM_VALUE_UNDEFINED;
+	if (error == 0) {
+		arguments[2] = vm_value_cell(vm_string_from_utf8(realm->heap, url == NULL ? "" : url, url == NULL ? 0 : strlen(url)));
+		arguments[3] = vm_value_cell(vm_string_from_utf8(realm->heap, headers == NULL ? "" : headers, headers == NULL ? 0 : strlen(headers)));
+		arguments[4] = vm_value_cell(vm_string_from_utf8(realm->heap, bytes == NULL ? "" : (const char *)bytes, bytes == NULL ? 0 : length));
+	}
+	result = vm_call(realm, callback, vm_value_cell(realm->global), arguments, 5, &returned);
+	if (result == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+	} else if (result != 0 && getenv("BROWSER_STACK") != NULL) {
+		fprintf(stderr, "request callback stopped by error %d (%s)\n", result, wb_os_error_text(result));
+	}
+	prelude_request_end(pending);
+}
+
+/* send(method, url, headers, body, callback): starts a request; returns its number. */
+static int
+prelude_send(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_request request;
+	struct bind_request_pending *pending;
+	struct bind_window *window;
+	struct wb_buffer method;
+	struct wb_buffer href;
+	struct wb_buffer headers;
+	struct wb_buffer body;
+	vm_value callback;
+	void *handle;
+	unsigned long id;
+	int has_method;
+	int has_href;
+	int has_headers;
+	int has_body;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	callback = js_argument(args, count, 4);
+	if (!vm_value_is_callable(callback))
+		return vm_throw_type_error(realm, "A request needs a callback.");
+	wb_buffer_init(&method);
+	wb_buffer_init(&href);
+	wb_buffer_init(&headers);
+	wb_buffer_init(&body);
+	status = prelude_utf8_argument(args, count, 0, &method, &has_method);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 1, &href, &has_href);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 2, &headers, &has_headers);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 3, &body, &has_body);
+	pending = NULL;
+	if (status == 0 && (!has_href || window->host.request == NULL || window->detached))
+		status = EINVAL;
+	if (status == 0) {
+		pending = calloc(1, sizeof(*pending));
+		if (pending == NULL)
+			status = ENOMEM;
+	}
+	if (status == 0) {
+		pending->window = window;
+		id = ++window->next_request;
+		pending->id = id;
+		pending->callback = vm_value_as_cell(callback);
+		status = vm_heap_add_root(realm->heap, &pending->callback);
+		if (status != 0)
+			free(pending);
+	}
+
+	/* The window owns the record before the host can complete synchronously. */
+	if (status == 0) {
+		pending->next = window->requests;
+		window->requests = pending;
+		memset(&request, 0, sizeof(request));
+		request.method = has_method ? wb_buffer_string(&method) : "GET";
+		request.href = wb_buffer_string(&href);
+		request.headers = has_headers ? wb_buffer_string(&headers) : NULL;
+		request.body = has_body ? (const unsigned char *)(body.data == NULL ? "" : wb_buffer_string(&body)) : NULL;
+		request.body_length = body.length;
+		handle = NULL;
+		status = window->host.request(window->host.context, &request, prelude_request_done, pending, &handle);
+		if (getenv("BROWSER_NET_DUMP") != NULL)
+			fprintf(stderr, "request %lu: %s %.200s (body %lu) -> start %d\n", id, request.method, request.href, (unsigned long)body.length, status);
+
+		/* A request that did not start tells the script it failed (it did not finish yet). */
+		if (status != 0) {
+			for (pending = window->requests; pending != NULL && pending->id != id; pending = pending->next)
+				;
+			if (pending != NULL)
+				prelude_request_done(pending, status, 0, NULL, NULL, NULL, 0);
+			status = 0;
+		} else {
+			/* Still pending: the host's handle is kept for a cancel. */
+			for (pending = window->requests; pending != NULL && pending->id != id; pending = pending->next)
+				;
+			if (pending != NULL)
+				pending->handle = handle;
+		}
+		*result = vm_value_int32((int32_t)id);
+	}
+	wb_buffer_release(&method);
+	wb_buffer_release(&href);
+	wb_buffer_release(&headers);
+	wb_buffer_release(&body);
+	return status;
+}
+
+/* cancel(id): ends a request whose callback has not been called (the callback is dropped). */
+static int
+prelude_cancel(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_request_pending *pending;
+	struct bind_window *window;
+	unsigned long id;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	id = (unsigned long)vm_value_as_int32(js_argument(args, count, 0));
+	*result = VM_VALUE_UNDEFINED;
+	for (pending = window->requests; pending != NULL; pending = pending->next) {
+		if (pending->id != id)
+			continue;
+		if (pending->handle != NULL && window->host.request_cancel != NULL)
+			window->host.request_cancel(window->host.context, pending->handle);
+		prelude_request_end(pending);
+		break;
+	}
+	return 0;
+}
+
+/* syncGet(url): the final URL and text of a blocking GET as [url, text], or null. */
+static int
+prelude_sync_get(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer href;
+	struct wb_buffer bytes;
+	struct wb_buffer final_url;
+	vm_value parts[2];
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	wb_buffer_init(&href);
+	wb_buffer_init(&bytes);
+	wb_buffer_init(&final_url);
+	status = prelude_utf8_argument(args, count, 0, &href, &present);
+	if (status == 0 && present && window->host.fetch_sync != NULL)
+		status = window->host.fetch_sync(window->host.context, wb_buffer_string(&href), &bytes, &final_url);
+	else if (status == 0)
+		status = ENOSYS;
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "xhr: %.200s -> status %d bytes %lu\n", present ? wb_buffer_string(&href) : "", status, (unsigned long)bytes.length);
+	if (status == 0) {
+		parts[0] = vm_value_cell(vm_string_from_utf8(realm->heap, final_url.data == NULL ? "" : wb_buffer_string(&final_url), final_url.length));
+		parts[1] = vm_value_cell(vm_string_from_utf8(realm->heap, bytes.data == NULL ? "" : (const char *)bytes.data, bytes.length));
+		status = js_builtin_array(realm, parts, 2, result);
+	} else if (status != ENOMEM) {
+		status = 0;
+	}
+	wb_buffer_release(&href);
+	wb_buffer_release(&bytes);
+	wb_buffer_release(&final_url);
+	return status;
+}
+
+/* What a synchronous request's done callback copied: its error, status, final URL, header lines and body. */
+struct prelude_sync_result {
+	int error;
+	int status;
+	int copy_error;
+	struct wb_buffer url;
+	struct wb_buffer headers;
+	struct wb_buffer body;
+};
+
+/* A synchronous request ended: its response is copied before the host's buffers go. */
+static void
+prelude_sync_done(
+	void *context,
+	int error,
+	int status,
+	const char *url,
+	const char *headers,
+	const unsigned char *bytes,
+	size_t length)
+{
+	struct prelude_sync_result *got;
+
+	got = context;
+	got->error = error;
+	got->status = status;
+	if (error != 0)
+		return;
+	got->copy_error = wb_buffer_append_string(&got->url, url == NULL ? "" : url);
+	if (got->copy_error == 0)
+		got->copy_error = wb_buffer_append_string(&got->headers, headers == NULL ? "" : headers);
+	if (got->copy_error == 0 && length != 0U)
+		got->copy_error = wb_buffer_append(&got->body, bytes, length);
+}
+
+/*
+ * syncSend(method, url, headers, body): a blocking request with its method,
+ * header lines and body (undefined: none) as [status, url, headerLines,
+ * text], or null when no response came.
+ */
+static int
+prelude_sync_send(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct prelude_sync_result got;
+	struct bind_request request;
+	struct bind_window *window;
+	struct wb_buffer method;
+	struct wb_buffer href;
+	struct wb_buffer headers;
+	struct wb_buffer body;
+	struct vm_string *strings[3];
+	vm_value parts[4];
+	int has_method;
+	int has_href;
+	int has_headers;
+	int has_body;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	memset(&got, 0, sizeof(got));
+	wb_buffer_init(&got.url);
+	wb_buffer_init(&got.headers);
+	wb_buffer_init(&got.body);
+	wb_buffer_init(&method);
+	wb_buffer_init(&href);
+	wb_buffer_init(&headers);
+	wb_buffer_init(&body);
+
+	/* The arguments as UTF-8. */
+	status = prelude_utf8_argument(args, count, 0, &method, &has_method);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 1, &href, &has_href);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 2, &headers, &has_headers);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 3, &body, &has_body);
+	if (status == 0 && (!has_href || window->host.request_sync == NULL || window->detached))
+		status = ENOSYS;
+
+	/* The request, waited for; done copies the response into got. */
+	if (status == 0) {
+		memset(&request, 0, sizeof(request));
+		request.method = has_method ? wb_buffer_string(&method) : "GET";
+		request.href = wb_buffer_string(&href);
+		request.headers = has_headers ? wb_buffer_string(&headers) : NULL;
+		request.body = has_body ? (const unsigned char *)(body.data == NULL ? "" : wb_buffer_string(&body)) : NULL;
+		request.body_length = body.length;
+		got.error = ENOSYS;
+		status = window->host.request_sync(window->host.context, &request, prelude_sync_done, &got);
+		if (status == 0)
+			status = got.error != 0 ? got.error : got.copy_error;
+		if (getenv("BROWSER_NET_DUMP") != NULL)
+			fprintf(stderr, "sync request: %s %.200s (body %lu) -> error %d status %d bytes %lu\n", request.method, request.href,
+			    (unsigned long)body.length, status, got.status, (unsigned long)got.body.length);
+	}
+
+	/* The response as [status, url, headerLines, text]. */
+	if (status == 0) {
+		strings[0] = vm_string_from_utf8(realm->heap, got.url.data == NULL ? "" : wb_buffer_string(&got.url), got.url.length);
+		strings[1] = vm_string_from_utf8(realm->heap, got.headers.data == NULL ? "" : wb_buffer_string(&got.headers), got.headers.length);
+		strings[2] = vm_string_from_utf8(realm->heap, got.body.data == NULL ? "" : (const char *)got.body.data, got.body.length);
+		if (strings[0] == NULL || strings[1] == NULL || strings[2] == NULL) {
+			status = ENOMEM;
+		} else {
+			parts[0] = vm_value_int32(got.status);
+			parts[1] = vm_value_cell(strings[0]);
+			parts[2] = vm_value_cell(strings[1]);
+			parts[3] = vm_value_cell(strings[2]);
+			status = js_builtin_array(realm, parts, 4, result);
+		}
+	} else if (status != ENOMEM) {
+		/* No response: null, which the script reports as a network error. */
+		status = 0;
+	}
+	wb_buffer_release(&got.url);
+	wb_buffer_release(&got.headers);
+	wb_buffer_release(&got.body);
+	wb_buffer_release(&method);
+	wb_buffer_release(&href);
+	wb_buffer_release(&headers);
+	wb_buffer_release(&body);
+	return status;
+}
+
+/*
+ * Follows a hyperlink a script clicked (an a or area element, or SVG's a).
+ *
+ * The prelude's function navigates to the link's URL; an exception it throws
+ * is reported like a listener's.
+ */
+int
+bind_follow_hyperlink(
+	struct bind_window *window,
+	struct dom_element *element)
+{
+	struct vm_realm *realm;
+	vm_value argument;
+	vm_value returned;
+	int status;
+
+	/* Nothing follows links before the prelude sets its function. */
+	realm = window->realm;
+	if (window->follow_hyperlink == NULL)
+		return 0;
+
+	/* The element's object. */
+	status = bind_wrap(window, &element->node, &argument);
+	if (status != 0)
+		return status;
+
+	/* The function navigates. */
+	status = vm_call(realm, vm_value_cell(window->follow_hyperlink), VM_VALUE_UNDEFINED, &argument, 1, &returned);
+	if (status == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the link is followed. */
+	return 0;
+}
+
+/* Cancels the window's pending script requests with its host and forgets them (their callbacks are not called). */
+void
+bind_requests_cancel(
+	struct bind_window *window)
+{
+	struct bind_request_pending *pending;
+
+	/* Each host request, then the records. */
+	for (pending = window->requests; pending != NULL; pending = pending->next) {
+		if (pending->handle != NULL && window->host.request_cancel != NULL)
+			window->host.request_cancel(window->host.context, pending->handle);
+		pending->handle = NULL;
+	}
+	bind_requests_release(window);
+}
+
+/* Forgets the window's pending script requests (the page cancelled their host requests). */
+void
+bind_requests_release(
+	struct bind_window *window)
+{
+	struct bind_request_pending *next;
+	struct bind_request_pending *pending;
+
+	/* Each record's root and memory. */
+	pending = window->requests;
+	while (pending != NULL) {
+		next = pending->next;
+		vm_heap_remove_root(window->realm->heap, &pending->callback);
+		free(pending);
+		pending = next;
+	}
+	window->requests = NULL;
+}
+
+/* Runs a prelude source with its natives (the first argument) and the global object. */
+static int
+prelude_run(
+	struct bind_window *window,
+	const char *text,
+	size_t size,
+	vm_value first)
+{
+	struct vm_realm *realm;
+	struct vm_string *source;
+	vm_value function;
+	vm_value arguments[2];
+	vm_value ignored;
+	int status;
+
+	/* The source is a function of the natives and the global object. */
+	realm = window->realm;
+	source = vm_string_from_utf8(realm->heap, text, size);
+	if (source == NULL)
+		return ENOMEM;
+	status = js_builtin_evaluate(realm, source, 0, &function);
+	if (status != 0) {
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	arguments[0] = first;
+	arguments[1] = vm_value_cell(realm->global);
+	status = vm_call(realm, function, VM_VALUE_UNDEFINED, arguments, 2, &ignored);
+	if (status != 0) {
+		/* A failure of the prelude leaves the rest of the page working. */
+		if (getenv("BROWSER_NET_DUMP") != NULL && status == VM_THROWN)
+			bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return status == ENOMEM ? status : 0;
+	}
+	return 0;
+}
+
+/* Installs the prelude's objects on the window's global object. */
+int
+bind_install_prelude(
+	struct bind_window *window)
+{
+	struct vm_realm *realm;
+	struct vm_function *function;
+	struct vm_object *natives;
+	int status;
+
+	/* The page's own objects over the URL parser, the document's URL and scrolling, trusted dispatch, links and node places. */
+	realm = window->realm;
+	natives = vm_object_create(realm->heap, realm->object_prototype);
+	if (natives == NULL)
+		return ENOMEM;
+	status = js_builtin_function(realm, "parseURL", 2, prelude_parse_url, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "parseURL", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setURL", 1, prelude_set_url, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setURL", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "navigateFrame", 1, prelude_navigate_frame, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "navigateFrame", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "navigateTop", 2, prelude_navigate_top, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "navigateTop", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "loadEnded", 0, prelude_load_ended, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "loadEnded", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "fullyActive", 0, prelude_fully_active, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "fullyActive", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "initialBlank", 0, prelude_initial_blank, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "initialBlank", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "colorScheme", 0, prelude_color_scheme, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "colorScheme", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameElement", 0, prelude_frame_element, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameElement", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "scrollToFragment", 1, prelude_scroll_fragment, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "scrollToFragment", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "fire", 2, prelude_fire, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "fire", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setHyperlinkFollower", 1, prelude_set_follower, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setHyperlinkFollower", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "nodeRect", 1, prelude_node_rect, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "nodeRect", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "importModule", 2, prelude_import_module, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "importModule", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "animationOff", 1, prelude_animation_off, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "animationOff", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionTime", 3, prelude_view_transition_time, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionTime", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionNames", 0, prelude_view_transition_names, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionNames", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionStyle", 3, prelude_view_transition_style, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionStyle", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "sheetMark", 1, prelude_sheet_mark, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "sheetMark", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "sheetAdopt", 1, prelude_sheet_adopt, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "sheetAdopt", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "ruleInfo", 2, prelude_rule_info, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "ruleInfo", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "ruleReplace", 3, prelude_rule_replace, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "ruleReplace", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setFrameProxyMaker", 1, prelude_set_frame_proxy_maker, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setFrameProxyMaker", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameGlobal", 1, prelude_frame_global, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameGlobal", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameOpaque", 1, prelude_frame_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setWindowWrapper", 1, prelude_set_window_wrapper, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setWindowWrapper", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "isOpaque", 0, prelude_is_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "isOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setAnimationHook", 1, prelude_set_animation_hook, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setAnimationHook", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameHold", 1, prelude_frame_hold, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameHold", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionActive", 2, prelude_view_transition_active, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionActive", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionDuration", 1, prelude_view_transition_duration, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionDuration", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status != 0)
+		return status;
+	status = prelude_run(window, prelude_source, sizeof(prelude_source) - 1U, vm_value_cell(natives));
+	if (status != 0)
+		return status;
+
+	/* The network objects (fetch, XMLHttpRequest, Headers, ...) over three natives. */
+	natives = vm_object_create(realm->heap, realm->object_prototype);
+	if (natives == NULL)
+		return ENOMEM;
+	status = js_builtin_function(realm, "send", 5, prelude_send, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "send", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "cancel", 1, prelude_cancel, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "cancel", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "syncGet", 1, prelude_sync_get, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "syncGet", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status != 0)
+		return status;
+	status = js_builtin_function(realm, "syncSend", 4, prelude_sync_send, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "syncSend", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status != 0)
+		return status;
+	return prelude_run(window, prelude_net_source, sizeof(prelude_net_source) - 1U, vm_value_cell(natives));
+}

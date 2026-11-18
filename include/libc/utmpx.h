@@ -1,0 +1,66 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef LIBC_UTMPX_H
+#define LIBC_UTMPX_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <sys/time.h>
+#include <stdint.h>
+#include <sys/types.h>
+
+/*
+ * The kinds of record POSIX names.  LOGIN_PROCESS keeps the value it had;
+ * INIT_PROCESS takes the next free one (other systems number the two the
+ * other way round).
+ */
+#define EMPTY 0
+#define BOOT_TIME 2
+#define NEW_TIME 3
+#define OLD_TIME 4
+#define LOGIN_PROCESS 5
+#define INIT_PROCESS 6
+#define USER_PROCESS 7
+#define DEAD_PROCESS 8
+#define UT_LINESIZE 32
+#define UT_NAMESIZE 32
+#define UT_HOSTSIZE 64
+#define _PATH_UTMP "/var/run/utmp"
+
+struct utmpx {
+	int16_t ut_type;
+	int16_t ut_reserved0;
+	pid_t ut_pid;
+	int32_t ut_session;
+	char ut_id[8];
+	char ut_line[UT_LINESIZE];
+	char ut_user[UT_NAMESIZE];
+	char ut_host[UT_HOSTSIZE];
+	/*
+	 * When the record was made.  POSIX names one member of this type;
+	 * it was two here, which no software written against the interface
+	 * would find.
+	 */
+	struct timeval ut_tv;
+	uint32_t ut_reserved[8];
+};
+
+void setutxent(void);
+struct utmpx *getutxent(void);
+void endutxent(void);
+struct utmpx *getutxid(const struct utmpx *);
+struct utmpx *getutxline(const struct utmpx *);
+struct utmpx *pututxline(const struct utmpx *);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -1,0 +1,18 @@
+--- a/clang/lib/Driver/ToolChains/ZedBSD.cpp
++++ b/clang/lib/Driver/ToolChains/ZedBSD.cpp
+@@ -98,6 +98,15 @@
+   // and terminates.
+   CmdArgs.push_back("--eh-frame-hdr");
+ 
++  // Build the image in a mapping of the output file rather than in a private
++  // buffer that is written out at the end.  On this system the buffer arrives
++  // at the file as the right number of zero bytes, so every program linked
++  // that way is unrunnable and says nothing about why; writing through the
++  // mapping produces the image the machine can run.  Which of the two the
++  // linker takes is not a property of the program being linked, so the target
++  // states it here rather than leaving each caller to discover it.
++  CmdArgs.push_back("--mmap-output-file");
++
+   // The shared C library takes __rtld_exports from the loader, which is not
+   // one of the link's inputs.
+   CmdArgs.push_back("--allow-shlib-undefined");
