@@ -47,10 +47,8 @@
  */
 
 #include <hal/hal.h>
-#include "../asm.h"
-#include "../percpu.h"
-#include "../spin.h"
-#include "bsp.h"
+#include "mac-arch.h"
+#include "mac99.h"
 
 /* The controller's global registers. */
 #define OPENPIC_FEATURE			0x01000U
@@ -166,12 +164,12 @@ mac99_openpic_init(
 
 	/* Finds the controller in a device window. */
 	if (base == 0) {
-		hal_puts("PPC32 OPENPIC NONE\n");
+		hal_puts(MAC_ARCH_TAG " OPENPIC NONE\n");
 		return;
 	}
 	error = hal_space_map_device(base, OPENPIC_CPU0_END + 4U, HAL_SPACE_READ | HAL_SPACE_WRITE, &window);
 	if (error != HAL_OK) {
-		hal_printf("PPC32 OPENPIC %08x UNMAPPED\n", base);
+		hal_printf(MAC_ARCH_TAG " OPENPIC %08x UNMAPPED\n", base);
 		return;
 	}
 	openpic = window;
@@ -215,7 +213,7 @@ mac99_openpic_init(
 		openpic_write(OPENPIC_CPU0_END, 0);
 
 	/* Says the controller is ready. */
-	hal_printf("PPC32 OPENPIC %08x SOURCES %u\n", base, source_count);
+	hal_printf(MAC_ARCH_TAG " OPENPIC %08x SOURCES %u\n", base, source_count);
 }
 
 /*
@@ -260,7 +258,7 @@ void
 mac99_take_external(
 	void)
 {
-	struct ppc32_percpu *cpu;
+	mac_percpu_t *cpu;
 	hal_irq_handler_t handler;
 	hal_irq_ack_t acknowledge;
 	void *argument;
@@ -268,7 +266,7 @@ mac99_take_external(
 
 	/* Without a controller nothing can interrupt. */
 	if (openpic == NULL) {
-		hal_puts("unexpected ppc32 external interrupt\n");
+		hal_puts("unexpected " MAC_ARCH_NAME " external interrupt\n");
 		return;
 	}
 
@@ -280,14 +278,14 @@ mac99_take_external(
 	/* A vector past the sources is ended and reported. */
 	if (vector >= source_count) {
 		openpic_write(OPENPIC_CPU0_END, 0);
-		hal_printf("unexpected ppc32 OpenPIC vector %u\n", vector);
+		hal_printf("unexpected " MAC_ARCH_NAME " OpenPIC vector %u\n", vector);
 		return;
 	}
 
 	/* Refuses an interrupt inside another one. */
-	cpu = ppc32_percpu_current();
+	cpu = mac_percpu_current();
 	if (cpu->active_ack != HAL_IRQ_ACK_NONE)
-		HAL_FATAL("nested ppc32 IRQ acknowledgement");
+		HAL_FATAL("nested " MAC_ARCH_NAME " IRQ acknowledgement");
 
 	/* Counts the take; a source that storms is masked and ended without its handler. */
 	irq_watch[IRQ_WATCH_COUNTS + vector]++;
@@ -295,7 +293,7 @@ mac99_take_external(
 		hal_irq_mask((int)vector);
 		openpic_write(OPENPIC_CPU0_END, 0);
 		irq_watch[IRQ_WATCH_STORMS + vector / 32U] |= 1U << (vector % 32U);
-		hal_printf("PPC32 IRQ %u STORM: MASKED, ITS DRIVER POLLS\n", vector);
+		hal_printf(MAC_ARCH_TAG " IRQ %u STORM: MASKED, ITS DRIVER POLLS\n", vector);
 		return;
 	}
 
@@ -312,7 +310,7 @@ mac99_take_external(
 	/* No handler: the source is masked, ended and reported. */
 	hal_irq_mask((int)vector);
 	openpic_write(OPENPIC_CPU0_END, 0);
-	hal_printf("unexpected ppc32 IRQ %u\n", vector);
+	hal_printf("unexpected " MAC_ARCH_NAME " IRQ %u\n", vector);
 }
 
 /*
@@ -325,7 +323,7 @@ hal_irq_disable(
 	bool enabled;
 
 	/* The machine state's enable bit. */
-	enabled = ppc32_irq_save();
+	enabled = mac_irq_save();
 
 	/* Succeeded: whether interrupts were on. */
 	return enabled;
@@ -339,7 +337,7 @@ hal_irq_enable(
 	void)
 {
 	/* The machine state's enable bit. */
-	ppc32_irq_restore(true);
+	mac_irq_restore(true);
 }
 
 /*
@@ -355,7 +353,7 @@ hal_irq_mask(
 	/* Refuses a source the controller does not have. */
 	valid = valid_source(irq);
 	if (!valid)
-		HAL_FATAL("bad ppc32 IRQ mask");
+		HAL_FATAL("bad " MAC_ARCH_NAME " IRQ mask");
 
 	/* Sets the source's mask bit. */
 	value = openpic_read(source_register((unsigned)irq));
@@ -375,7 +373,7 @@ hal_irq_unmask(
 	/* Refuses a source the controller does not have. */
 	valid = valid_source(irq);
 	if (!valid)
-		HAL_FATAL("bad ppc32 IRQ unmask");
+		HAL_FATAL("bad " MAC_ARCH_NAME " IRQ unmask");
 
 	/* Clears the source's mask bit. */
 	value = openpic_read(source_register((unsigned)irq));
@@ -403,16 +401,16 @@ hal_irq_register(
 		return HAL_ERR_INVALID;
 
 	/* Refuses a source that already has a handler. */
-	enabled = ppc32_spin_lock(&slots_lock);
+	enabled = mac_spin_lock(&slots_lock);
 	if (slots[irq].handler != NULL) {
-		ppc32_spin_unlock(&slots_lock, enabled);
+		mac_spin_unlock(&slots_lock, enabled);
 		return HAL_ERR_BUSY;
 	}
 
 	/* Records the handler. */
 	slots[irq].handler = handler;
 	slots[irq].argument = argument;
-	ppc32_spin_unlock(&slots_lock, enabled);
+	mac_spin_unlock(&slots_lock, enabled);
 
 	/* Succeeded: the source is the handler's. */
 	return HAL_OK;
@@ -436,9 +434,9 @@ hal_irq_unregister(
 	valid = valid_source(irq);
 	if (!valid)
 		return HAL_ERR_INVALID;
-	enabled = ppc32_spin_lock(&slots_lock);
+	enabled = mac_spin_lock(&slots_lock);
 	if (slots[irq].handler != handler || slots[irq].argument != argument) {
-		ppc32_spin_unlock(&slots_lock, enabled);
+		mac_spin_unlock(&slots_lock, enabled);
 		return HAL_ERR_INVALID;
 	}
 
@@ -448,7 +446,7 @@ hal_irq_unregister(
 	/* Forgets the handler. */
 	slots[irq].handler = NULL;
 	slots[irq].argument = NULL;
-	ppc32_spin_unlock(&slots_lock, enabled);
+	mac_spin_unlock(&slots_lock, enabled);
 
 	/* Succeeded: the source has no handler. */
 	return HAL_OK;
@@ -462,16 +460,16 @@ void
 hal_irq_send_eoi(
 	hal_irq_ack_t acknowledge)
 {
-	struct ppc32_percpu *cpu;
+	mac_percpu_t *cpu;
 
 	/* Requires the acknowledgement of the interrupt being handled. */
-	cpu = ppc32_percpu_current();
+	cpu = mac_percpu_current();
 	if (acknowledge == HAL_IRQ_ACK_NONE || acknowledge != cpu->active_ack)
-		HAL_FATAL("invalid ppc32 IRQ acknowledgement");
+		HAL_FATAL("invalid " MAC_ARCH_NAME " IRQ acknowledgement");
 	cpu->active_ack = HAL_IRQ_ACK_NONE;
 
 	/* A source's acknowledgement ends it at the controller. */
-	if (acknowledge != PPC32_ACK_LOCAL)
+	if (acknowledge != MAC_ACK_LOCAL)
 		openpic_write(OPENPIC_CPU0_END, 0);
 }
 
@@ -717,7 +715,7 @@ storm_check(
 		return false;
 
 	/* A window that has passed starts again with this take. */
-	now = ppc32_read_timebase();
+	now = mac_read_timebase();
 	if (now - storm_start[source] >= window) {
 		storm_start[source] = now;
 		storm_takes[source] = 0;

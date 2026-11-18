@@ -33,6 +33,14 @@
 #define CACHE_LINE		128U
 
 /*
+ * An unconditional relative branch, b, and the bits of its offset.
+ *
+ * Values referenced: Power ISA Version 3.0B, Book I (the I-form branch).
+ */
+#define BRANCH_OPCODE		0x48000000U
+#define BRANCH_OFFSET_MASK	0x03fffffcU
+
+/*
  * The classification of one exception for the kernel.
  */
 struct int_fault {
@@ -42,6 +50,7 @@ struct int_fault {
 };
 
 static void classify(const struct ppc64_trap_frame *frame, struct int_fault *fault);
+static void copy_stub(uintptr_t place, uintptr_t vector, size_t words, size_t li_index);
 static int take_storage_fault(struct ppc64_trap_frame *frame);
 static void take_syscall(struct ppc64_trap_frame *frame);
 static void take_user_fault(struct ppc64_trap_frame *frame);
@@ -56,9 +65,12 @@ void
 ppc64_int_init(
 	void)
 {
+	const struct ppc64_board_info *board;
 	uint32_t *destination;
 	uintptr_t vector;
+	uintptr_t stub;
 	uintptr_t line;
+	uintptr_t shared_end;
 	size_t words;
 	size_t index;
 	size_t li_index;
@@ -68,18 +80,41 @@ ppc64_int_init(
 	li_index = (size_t)(ppc64_vector_stub_li - ppc64_vector_stub);
 
 	/* One copy per vector, its li loading the vector's offset. */
-	for (vector = PPC64_VECTOR_FIRST; vector < PPC64_VECTOR_END; vector += PPC64_VECTOR_STRIDE) {
-		destination = (uint32_t *)vector;
-		for (index = 0; index < words; index++)
-			destination[index] = ppc64_vector_stub[index];
-		destination[li_index] = ppc64_vector_stub_li[0] | (uint32_t)vector;
+	for (vector = PPC64_VECTOR_FIRST; vector < PPC64_VECTOR_END; vector += PPC64_VECTOR_STRIDE)
+		copy_stub(vector, vector, words, li_index);
+
+	/*
+	 * The block at 0xf00 holds four vectors 0x20 apart (the performance
+	 * monitor's and the vector, VSX and facility unavailable ones), too
+	 * close for a stub each: every one branches to a stub of its own
+	 * past the vectors.
+	 */
+	for (index = 0; index < PPC64_VECTOR_SHARED_COUNT; index++) {
+		vector = PPC64_VECTOR_SHARED_BLOCK + index * PPC64_VECTOR_SHARED_STRIDE;
+		stub = PPC64_VECTOR_SHARED_STUBS + index * PPC64_VECTOR_STRIDE;
+		copy_stub(stub, vector, words, li_index);
+		*(uint32_t *)vector = BRANCH_OPCODE | (uint32_t)((stub - vector) & BRANCH_OFFSET_MASK);
 	}
 
-	/* Pushes the copies to memory and drops stale instructions. */
-	for (line = PPC64_VECTOR_FIRST; line < PPC64_VECTOR_END; line += CACHE_LINE)
+	/*
+	 * A processor the kernel runs directly may take the hypervisor
+	 * decrementer's interrupt, which the HAL does not use; its vector
+	 * gets the stub that silences it.
+	 */
+	board = ppc64_board();
+	if (!board->under_hypervisor) {
+		destination = (uint32_t *)PPC64_VECTOR_HDECREMENTER;
+		words = (size_t)(ppc64_hdec_stub_end - ppc64_hdec_stub);
+		for (index = 0; index < words; index++)
+			destination[index] = ppc64_hdec_stub[index];
+	}
+
+	/* Pushes the copies to memory and drops stale instructions, the shared block's stubs too. */
+	shared_end = PPC64_VECTOR_SHARED_STUBS + PPC64_VECTOR_SHARED_COUNT * PPC64_VECTOR_STRIDE;
+	for (line = PPC64_VECTOR_FIRST; line < shared_end; line += CACHE_LINE)
 		__asm__ volatile("dcbst 0,%0" : : "r"(line) : "memory");
 	__asm__ volatile("sync" : : : "memory");
-	for (line = PPC64_VECTOR_FIRST; line < PPC64_VECTOR_END; line += CACHE_LINE)
+	for (line = PPC64_VECTOR_FIRST; line < shared_end; line += CACHE_LINE)
 		__asm__ volatile("icbi 0,%0" : : "r"(line) : "memory");
 	__asm__ volatile("sync\n\tisync" : : : "memory");
 	hal_puts("PPC64 TRAP READY\n");
@@ -140,6 +175,24 @@ ppc64_trap(
 
 	/* Anything else is the kernel's own fault. */
 	take_kernel_fault(frame);
+}
+
+/* Copies the vector stub to a place, its li loading a vector's offset. */
+static void
+copy_stub(
+	uintptr_t place,
+	uintptr_t vector,
+	size_t words,
+	size_t li_index)
+{
+	uint32_t *destination;
+	size_t index;
+
+	/* The stub's words, then its li patched with the offset. */
+	destination = (uint32_t *)place;
+	for (index = 0; index < words; index++)
+		destination[index] = ppc64_vector_stub[index];
+	destination[li_index] = ppc64_vector_stub_li[0] | (uint32_t)vector;
 }
 
 /*

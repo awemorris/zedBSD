@@ -6,11 +6,14 @@
  */
 
 /*
- * The board's parts the processor's code calls.
+ * The PowerPC Mac's shared parts, the same for the 32-bit and the 64-bit
+ * processor: what the firmware reported, the tick, the interrupt
+ * controller and the power manager, which each processor's board start
+ * and trap handling call.
  */
 
-#ifndef KERN_HAL_PPC32_MAC99_BSP_H
-#define KERN_HAL_PPC32_MAC99_BSP_H
+#ifndef KERN_HAL_POWERMAC_MAC99_H
+#define KERN_HAL_POWERMAC_MAC99_H
 
 #include <hal/hal.h>
 

@@ -25,8 +25,17 @@
  * hypervisor when idle.  A board that runs the processor directly gives
  * the table's place in RAM; the HAL fills it itself.  The kernel's
  * windows use the large page the processor offers: 64 KiB on the
- * partitions, 16 MiB on the PowerPC 970.
+ * partitions, 16 MiB on the PowerPC 970.  The segment lookaside buffer's
+ * size (32 entries on POWER8 and later, 64 on the 970) bounds how many
+ * segments of RAM the kernel maps.  The device windows are the
+ * 256 MiB blocks of the address space that hold the devices the kernel
+ * drives, which the HAL maps at their own addresses, uncached and
+ * guarded; the framebuffer is mapped by itself when it is in none of
+ * them.
  */
+/* The most device windows a board names. */
+#define PPC64_BOARD_WINDOWS_MAX	8U
+
 struct ppc64_board_info {
 	uint64_t memory_base;
 	uint64_t memory_size;
@@ -36,12 +45,15 @@ struct ppc64_board_info {
 	uint32_t under_hypervisor;
 	uint32_t htab_shift;
 	uint32_t large_page_shift;
+	uint32_t slb_entries;
 	uint64_t htab_base;
 	uint64_t framebuffer_address;
 	uint32_t framebuffer_width;
 	uint32_t framebuffer_height;
 	uint32_t framebuffer_linebytes;
 	uint32_t framebuffer_depth;
+	uint32_t window_count;
+	uint64_t windows[PPC64_BOARD_WINDOWS_MAX];
 };
 
 const struct ppc64_board_info *

@@ -10,8 +10,8 @@
  * directly.
  */
 
-#ifndef KERN_HAL_PPC32_MAC99_FRAMEBUFFER_H
-#define KERN_HAL_PPC32_MAC99_FRAMEBUFFER_H
+#ifndef KERN_HAL_POWERMAC_FRAMEBUFFER_H
+#define KERN_HAL_POWERMAC_FRAMEBUFFER_H
 
 #include <hal/types.h>
 

@@ -612,7 +612,7 @@ publish_ramdisk(
 	int error;
 
 	/* Finds the ramdisk's physical range; none means no boot device. */
-	initrd_range = hal_get_arch_handoff("ppc32.initrd");
+	initrd_range = hal_get_arch_handoff("mac99.initrd");
 	if (initrd_range == NULL)
 		return ENOENT;
 	physical = initrd_range[0];

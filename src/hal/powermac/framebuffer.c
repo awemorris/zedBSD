@@ -34,6 +34,7 @@
 #include <hal/hal.h>
 #include "font.h"
 #include "framebuffer.h"
+#include "mac-arch.h"
 
 /* The 8-bit system colour table: its entries, the cube's entries and step, the ramps' start and their ten levels. */
 #define MAC_TABLE_ENTRIES	256U
@@ -265,10 +266,10 @@ virt_framebuffer_describe(
 	/* Describes a shown screen. */
 	if (framebuffer_base == NULL)
 		return;
-	hal_printf("PPC32 FRAMEBUFFER %ux%u depth %u phys=%x\n",
+	hal_printf(MAC_ARCH_TAG " FRAMEBUFFER %ux%u depth %u phys=%x\n",
 		   framebuffer_width, framebuffer_height, framebuffer_depth, (uint32_t)(uintptr_t)framebuffer_base);
 	if (framebuffer_depth == 8U)
-		hal_printf("PPC32 PALETTE MAC SYSTEM TABLE, BLACK %u GREY %u WHITE %u\n",
+		hal_printf(MAC_ARCH_TAG " PALETTE MAC SYSTEM TABLE, BLACK %u GREY %u WHITE %u\n",
 			   framebuffer_index[0], framebuffer_index[7], framebuffer_index[15]);
 }
 

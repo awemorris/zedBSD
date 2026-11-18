@@ -493,6 +493,15 @@ pthread_create(
 	initial_stack &= ~(uintptr_t)15U;
 	initial_stack -= 16U;
 	*(uintptr_t *)initial_stack = 0U;
+#elif defined(__powerpc64__)
+	/*
+	 * The 64-bit PowerPC ELFv2 ABI: a function saves its return address
+	 * and its condition register in its caller's frame, so the entry
+	 * stack is a 32-byte minimum frame whose back chain is 0.
+	 */
+	initial_stack &= ~(uintptr_t)15U;
+	initial_stack -= 32U;
+	*(uintptr_t *)initial_stack = 0U;
 #endif
 
 	/* From here on the calling thread is no longer the only one. */

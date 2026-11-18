@@ -51,8 +51,9 @@ KERN_CFLAGS := \
 
 # HAL C Sources
 #
-# The framebuffer console, the decrementer's tick and the empty interrupt
-# controller are the pseries board's, which this board shares.
+# The PowerPC Mac's firmware reading, tick, interrupt controller, power
+# manager and console are shared with the 32-bit PowerPC Mac
+# (src/hal/powermac/).
 KERN_SOURCES += \
 	src/hal/ppc64/cpu.c \
 	src/hal/ppc64/int.c \
@@ -64,12 +65,13 @@ KERN_SOURCES += \
 	src/hal/ppc64/atomic.c \
 	src/hal/idle-suspend-unsupported.c \
 	src/hal/ppc64/bsp-macppc64/board.c \
-	src/hal/ppc64/bsp-macppc64/firmware.c \
-	src/hal/ppc64/bsp-pseries/irq.c \
-	src/hal/ppc64/bsp-pseries/clock.c \
-	src/hal/ppc64/bsp-pseries/framebuffer.c \
-	src/hal/ppc64/bsp-pseries/cons.c \
-	src/hal/ppc64/bsp-pseries/font.c
+	src/hal/powermac/firmware.c \
+	src/hal/powermac/irq.c \
+	src/hal/powermac/clock.c \
+	src/hal/powermac/pmu.c \
+	src/hal/powermac/framebuffer.c \
+	src/hal/powermac/cons.c \
+	src/hal/powermac/font.c
 
 # HAL Assembly Sources
 KERN_ASM += \
@@ -77,9 +79,27 @@ KERN_ASM += \
 
 # Kernel Sources
 #
-# The binding publishes no boot device and its console is the HAL's.
+# The PowerPC Mac's binding: the console on the firmware's framebuffer,
+# the PCI host bridge, the I/O controller's ATA channels, the power
+# manager's keyboard, the built-in Ethernet and the disk labels.
 KERN_SOURCES += \
-	src/kern/platform/hal-console.c
+	src/kern/platform/mac99.c \
+	src/drivers/platform/mac99/mac99-pci.c \
+	src/drivers/platform/mac99/mac99-ata.c \
+	src/drivers/platform/mac99/mac99-pmu.c \
+	src/drivers/platform/mac99/mac99-ethernet.c \
+	src/drivers/platform/mac99/mac99-i2c.c \
+	src/drivers/platform/mac99/mac99-fan.c \
+	src/drivers/platform/mac99/mac99-adt746x.c \
+	src/drivers/platform/mac99/mac99-adm1030.c \
+	src/drivers/ethernet/sungem.c \
+	src/drivers/ethernet/mii-phy.c \
+	src/drivers/generic/ata-pio.c \
+	src/drivers/generic/serial-console.c \
+	src/drivers/disklabel/apm.c \
+	src/drivers/disklabel/gpt.c \
+	src/drivers/disklabel/pcat.c \
+	src/drivers/disklabel/mbr.c
 
 VMUNIX_OBJS := \
 	$(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES)) \

@@ -31,13 +31,18 @@ static int board_display_error = HAL_ERR_UNSUPPORTED;
 static void describe_bringup(void);
 
 /*
- * The C entry, from entry.S on the firmware's translation and stack.
+ * The C entry, from entry.S on the firmware's translation and stack; the
+ * firmware passes nothing in r3 and r4 here.
  */
 void
 ppc64_cmain(
-	void)
+	uint64_t first_argument,
+	uint64_t second_argument)
 {
 	const struct ppc64_board_info *board;
+
+	UNUSED_PARAMETER(first_argument);
+	UNUSED_PARAMETER(second_argument);
 
 	/* The firmware's answers, while it can still give them. */
 	pseries_firmware_read();

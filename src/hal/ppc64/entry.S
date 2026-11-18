@@ -65,6 +65,10 @@ _start:
 	lis %r6,ppc64_firmware_entry@ha
 	std %r5,ppc64_firmware_entry@l(%r6)
 
+	/*
+	 * The C entry, with r3 and r4 still as the firmware or its loader
+	 * left them: on a Mac the initial ramdisk's address and size.
+	 */
 	lis %r1,ppc64_boot_stack_top@ha
 	addi %r1,%r1,ppc64_boot_stack_top@l
 	li %r0,0
@@ -164,6 +168,24 @@ ppc64_vector_stub_li:
 	li %r3,0
 	bctr
 ppc64_vector_stub_end:
+
+	/*
+	 * The stub copied to the hypervisor decrementer's vector when the
+	 * kernel runs the processor directly: the HAL does not use that
+	 * decrementer, so its interrupt only loads it with the largest count
+	 * and returns through the hypervisor's save registers.  r3 is kept in
+	 * the hypervisor's second scratch register meanwhile.
+	 */
+	.globl ppc64_hdec_stub
+	.globl ppc64_hdec_stub_end
+ppc64_hdec_stub:
+	mtspr 305,%r3
+	lis %r3,0x7fff
+	ori %r3,%r3,0xffff
+	mtspr 310,%r3
+	mfspr %r3,305
+	hrfid
+ppc64_hdec_stub_end:
 
 	/*
 	 * The common entry: the frame at r1 + 32, translation still off.

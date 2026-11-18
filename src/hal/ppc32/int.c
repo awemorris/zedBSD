@@ -13,7 +13,7 @@
  */
 
 #include <hal/hal.h>
-#include "bsp-mac99/bsp.h"
+#include "../powermac/mac99.h"
 #include "asm.h"
 #include "defs.h"
 #include "int.h"

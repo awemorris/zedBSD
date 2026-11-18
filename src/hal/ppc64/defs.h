@@ -26,15 +26,16 @@
 #define PPC64_SEGMENT_SHIFT		28
 
 /*
- * RAM the kernel maps, and the user range: 6 GiB from 4 GiB, segments
+ * The most RAM the kernel maps from address 0: 2 GiB, below the 970
+ * machines' device addresses.  The user range: 6 GiB from 4 GiB, segments
  * 0x10 to 0x27, above the 32-bit addresses as the 64-bit user layout
  * asks.  The kernel puts the break and the mapping area 4 GiB above the
  * range's start, which leaves 2 GiB for the mappings and the stack.  The
- * segments are loaded into the segment lookaside buffer at each switch;
- * with the kernel's three, they fill 27 of the 32 entries the smallest
- * buffer of these processors holds.
+ * segments are loaded into the segment lookaside buffer at each switch,
+ * after the kernel's RAM and window segments, which the board's buffer
+ * size bounds.
  */
-#define PPC64_RAM_LIMIT			0x20000000
+#define PPC64_RAM_LIMIT_MAX		0x80000000
 #define PPC64_USER_MINIMUM		0x100000000
 #define PPC64_USER_LIMIT		0x280000000
 #define PPC64_USER_SEGMENT_FIRST	0x10
@@ -70,10 +71,15 @@
 #define PPC64_VECTOR_ALIGNMENT		0x0600
 #define PPC64_VECTOR_PROGRAM		0x0700
 #define PPC64_VECTOR_DECREMENTER	0x0900
+#define PPC64_VECTOR_HDECREMENTER	0x0980
 #define PPC64_VECTOR_SYSCALL		0x0c00
 #define PPC64_VECTOR_TRACE		0x0d00
 #define PPC64_VECTOR_FIRST		0x0100
-#define PPC64_VECTOR_END		0x1000
+#define PPC64_VECTOR_END		0x1900
+#define PPC64_VECTOR_SHARED_BLOCK	0x0f00
+#define PPC64_VECTOR_SHARED_STRIDE	0x0020
+#define PPC64_VECTOR_SHARED_COUNT	4
+#define PPC64_VECTOR_SHARED_STUBS	0x2000
 #define PPC64_VECTOR_STRIDE		0x0080
 
 /* The data storage fault's status bits. */

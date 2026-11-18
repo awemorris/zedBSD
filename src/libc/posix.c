@@ -192,7 +192,7 @@ static int posix_spawn_fork(pid_t *result, const char *path, const posix_spawn_f
  */
 #if defined(__x86_64__) || defined(__aarch64__) || defined(__i386__) || \
     defined(__arm__) || (defined(__riscv) && __riscv_xlen == 64) || \
-    (defined(__powerpc__) && !defined(__powerpc64__))
+    defined(__powerpc__)
 #define SPAWN_VFORK 1
 #endif
 
@@ -5491,7 +5491,9 @@ uname(
 	static const char machine[] = "riscv64";
 #elif defined(__arm__)
 	static const char machine[] = "armv7";
-#elif defined(__powerpc__) && !defined(__powerpc64__)
+#elif defined(__powerpc64__)
+	static const char machine[] = "powerpc64";
+#elif defined(__powerpc__)
 	static const char machine[] = "powerpc";
 #else
 	static const char machine[] = "unknown";

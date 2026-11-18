@@ -336,4 +336,25 @@ typedef uint32_t Elf_Off;
 #define R_PPC_TPREL32 73
 #define R_PPC_DTPREL32 78
 
+/*
+ * 64-bit PowerPC (the ELFv2 ABI).  Every relocation is a RELA one.  A PLT
+ * slot is a doubleword the call stub loads the function's address from,
+ * bound now.  As on the 32-bit PowerPC every module's TLS is dynamic, so
+ * TPREL64 (initial exec) is refused.
+ *
+ * Values referenced: LLVM 23.1
+ * llvm/include/llvm/BinaryFormat/ELFRelocs/PowerPC64.def (R_PPC64_NONE,
+ * R_PPC64_GLOB_DAT, R_PPC64_JMP_SLOT, R_PPC64_RELATIVE, R_PPC64_ADDR64,
+ * R_PPC64_UADDR64, R_PPC64_DTPMOD64, R_PPC64_TPREL64, R_PPC64_DTPREL64).
+ */
+#define R_PPC64_NONE 0
+#define R_PPC64_GLOB_DAT 20
+#define R_PPC64_JMP_SLOT 21
+#define R_PPC64_RELATIVE 22
+#define R_PPC64_ADDR64 38
+#define R_PPC64_UADDR64 43
+#define R_PPC64_DTPMOD64 68
+#define R_PPC64_TPREL64 73
+#define R_PPC64_DTPREL64 78
+
 #endif

@@ -238,7 +238,11 @@ static_thread_pointer(
 #elif defined(__arm__)
 		__asm__ volatile("mrc p15, 0, %0, c13, c0, 3" : "=r"(pointer));
 		return pointer;
-#elif defined(__powerpc__) && !defined(__powerpc64__)
+#elif defined(__powerpc64__)
+		__asm__ volatile("mr %0, 13" : "=r"(pointer));
+		pointer -= KERN_TLS_TCB_RESERVE + 0x7000U;
+		return pointer;
+#elif defined(__powerpc__)
 		__asm__ volatile("mr %0, 2" : "=r"(pointer));
 		pointer -= KERN_TLS_TCB_RESERVE + 0x7000U;
 		return pointer;

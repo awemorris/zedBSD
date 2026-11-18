@@ -15,7 +15,7 @@
 
 #include <hal/hal.h>
 #include "asm.h"
-#include "bsp-mac99/bsp.h"
+#include "../powermac/mac99.h"
 #include "defs.h"
 #include "page.h"
 #include "space.h"

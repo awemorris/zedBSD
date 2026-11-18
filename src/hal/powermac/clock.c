@@ -17,9 +17,8 @@
  */
 
 #include <hal/hal.h>
-#include "../asm.h"
-#include "../percpu.h"
-#include "bsp.h"
+#include "mac-arch.h"
+#include "mac99.h"
 
 /* The tick's rate, in hertz, which never changes. */
 #define CLOCK_TICK_HZ	100U
@@ -56,11 +55,11 @@ mac99_clock_init(
 	/* The rate comes from the firmware. */
 	timebase_frequency = mac99_board()->timebase_frequency;
 	if (timebase_frequency == 0)
-		HAL_FATAL("ppc32 firmware reports no time base rate");
+		HAL_FATAL(MAC_ARCH_NAME " firmware reports no time base rate");
 	tick_interval = timebase_frequency / CLOCK_TICK_HZ;
 
 	/* The first tick one interval from now. */
-	next_deadline = ppc32_read_timebase() + tick_interval;
+	next_deadline = mac_read_timebase() + tick_interval;
 	arm();
 }
 
@@ -99,13 +98,13 @@ void
 mac99_clock_interrupt(
 	void)
 {
-	struct ppc32_percpu *cpu;
+	mac_percpu_t *cpu;
 	uint64_t now;
 
 	/* Counts the tick and arms the next one. */
-	cpu = ppc32_percpu_current();
+	cpu = mac_percpu_current();
 	cpu->timer_ticks++;
-	now = ppc32_read_timebase();
+	now = mac_read_timebase();
 	do {
 		next_deadline += tick_interval;
 	} while (next_deadline <= now);
@@ -113,11 +112,11 @@ mac99_clock_interrupt(
 
 	/* Refuses a tick inside another interrupt. */
 	if (cpu->active_ack != HAL_IRQ_ACK_NONE)
-		HAL_FATAL("nested ppc32 IRQ acknowledgement");
+		HAL_FATAL("nested " MAC_ARCH_NAME " IRQ acknowledgement");
 
 	/* The kernel ends the tick, which needs no controller, and schedules. */
-	cpu->active_ack = PPC32_ACK_LOCAL;
-	kernel_timer_handler(cpu->logical_id, PPC32_ACK_LOCAL);
+	cpu->active_ack = MAC_ACK_LOCAL;
+	kernel_timer_handler(cpu->logical_id, MAC_ACK_LOCAL);
 }
 
 /*
@@ -128,7 +127,7 @@ bool
 mac99_clock_ticked(
 	void)
 {
-	struct ppc32_percpu *cpu;
+	mac_percpu_t *cpu;
 	uint64_t deadline;
 	uint32_t decrementer;
 	bool masked;
@@ -136,13 +135,13 @@ mac99_clock_ticked(
 	uint64_t now;
 
 	/* A clock not started has nothing to wait for. */
-	cpu = ppc32_percpu_current();
+	cpu = mac_percpu_current();
 	if (tick_interval == 0)
 		return false;
 
 	/* Waits up to a tenth of a second for a tick, taken or due. */
-	masked = ppc32_irq_masked();
-	deadline = ppc32_read_timebase() + timebase_frequency / 10U;
+	masked = mac_irq_masked();
+	deadline = mac_read_timebase() + timebase_frequency / 10U;
 	do {
 		ticks = __atomic_load_n(&cpu->timer_ticks, __ATOMIC_RELAXED);
 		if (ticks != 0)
@@ -150,7 +149,7 @@ mac99_clock_ticked(
 		__asm__ volatile("mfdec %0" : "=r"(decrementer));
 		if (masked && (decrementer & 0x80000000U) != 0)
 			return true;
-		now = ppc32_read_timebase();
+		now = mac_read_timebase();
 	} while (now < deadline);
 
 	/* Failed: no tick in the time allowed. */
@@ -195,7 +194,7 @@ hal_rtc_read_counter(
 		return false;
 	if (timebase_frequency == 0)
 		return false;
-	*value = ppc32_read_timebase();
+	*value = mac_read_timebase();
 	*freq_hz = timebase_frequency;
 	return true;
 }
@@ -209,11 +208,11 @@ arm(
 	uint64_t left;
 
 	/* At least one count, at most what the register holds as positive. */
-	now = ppc32_read_timebase();
+	now = mac_read_timebase();
 	left = 1;
 	if (next_deadline > now)
 		left = next_deadline - now;
 	if (left > 0x7fffffffU)
 		left = 0x7fffffffU;
-	ppc32_write_decrementer((uint32_t)left);
+	mac_write_decrementer((uint32_t)left);
 }

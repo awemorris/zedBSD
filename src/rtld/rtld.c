@@ -50,6 +50,10 @@
 #define RTLD_MACHINE EM_PPC
 #define RTLD_DATA ELFDATA2MSB
 #define RTLD_RELATIVE R_PPC_RELATIVE
+#elif defined(HAL_ARCH_PPC64)
+#define RTLD_MACHINE EM_PPC64
+#define RTLD_DATA ELFDATA2MSB
+#define RTLD_RELATIVE R_PPC64_RELATIVE
 #else
 #error unsupported runtime-linker architecture
 #endif
@@ -60,7 +64,8 @@
  * computes) are 0x800 below the variable's place in its block, so that a
  * 12-bit signed immediate reaches twice as far; __tls_get_addr adds the
  * bias back.  On PowerPC they are 0x8000 below it, for a 16-bit signed
- * immediate.  The other processors have none.
+ * immediate, on both the 32-bit and the 64-bit one.  The other processors
+ * have none.
  *
  * Values referenced: LLVM 23.1 ld.lld, the value it writes into the GOT
  * entry of a TLS_DTPREL64 it resolves itself (the variable's offset less
@@ -69,7 +74,7 @@
  */
 #if defined(HAL_ARCH_RISCV64)
 #define RTLD_DTV_OFFSET ((uintptr_t)0x800U)
-#elif defined(HAL_ARCH_PPC32)
+#elif defined(HAL_ARCH_PPC32) || defined(HAL_ARCH_PPC64)
 #define RTLD_DTV_OFFSET ((uintptr_t)0x8000U)
 #else
 #define RTLD_DTV_OFFSET ((uintptr_t)0)
@@ -4807,6 +4812,11 @@ apply_value(
 	/* A NONE relocation has nothing to do. */
 	if (type == R_PPC_NONE)
 		return;
+#elif defined(HAL_ARCH_PPC64)
+
+	/* A NONE relocation has nothing to do. */
+	if (type == R_PPC64_NONE)
+		return;
 #endif
 
 	/* Checks the current offset. */
@@ -5227,6 +5237,69 @@ apply_value(
 		break;
 	default:
 		rtld_fatal("unsupported ppc32 relocation");
+	}
+#elif defined(HAL_ARCH_PPC64)
+
+	/*
+	 * Applies one 64-bit PowerPC relocation.  Every one is a RELA
+	 * relocation.  A GOT entry and a PLT slot both take the symbol's
+	 * address, its global entry point, which the call stub enters with
+	 * the address in r12: bound now.  Every module's TLS is dynamic, so
+	 * only the module and offset pair of the general-dynamic model is
+	 * accepted; an initial-exec TPREL64 falls to the refusal below.
+	 */
+	switch (type) {
+	case R_PPC64_NONE:
+		/* Nothing to apply. */
+		return;
+	case R_PPC64_RELATIVE:
+		/* A relative relocation names no symbol. */
+		if (symbol_index != 0)
+			rtld_fatal("invalid relative relocation");
+
+		/* The object's load address plus the addend. */
+		value = object->base + addend;
+		break;
+	case R_PPC64_ADDR64:
+	case R_PPC64_UADDR64:
+		/* The symbol's address plus the addend. */
+		symbol = resolve_relocation_symbol(object, symbol_index);
+		value = symbol + addend;
+		break;
+	case R_PPC64_GLOB_DAT:
+	case R_PPC64_JMP_SLOT:
+		/* The symbol's address plus the addend, bound now. */
+		symbol = resolve_relocation_symbol(object, symbol_index);
+		value = symbol + addend;
+		break;
+	case R_PPC64_DTPMOD64:
+		/* The module of the object itself, or of the symbol's owner. */
+		if (symbol_index == 0) {
+			tls_owner = object;
+		} else {
+			tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+		}
+
+		/* Refuses an owner without a TLS module. */
+		if (tls_owner == NULL || tls_owner->tls_module_id == 0)
+			rtld_fatal("TLS module is unavailable");
+
+		/* The owner's module number. */
+		value = tls_owner->tls_module_id;
+		break;
+	case R_PPC64_DTPREL64:
+		/* Finds the symbol and the module that owns it. */
+		tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+
+		/* Refuses a symbol without a TLS module. */
+		if (tls_symbol == NULL || tls_owner->tls_module_id == 0)
+			rtld_fatal("TLS symbol is unavailable");
+
+		/* The symbol's offset in its module's block, less the bias. */
+		value = (uintptr_t)tls_symbol->st_value + addend - RTLD_DTV_OFFSET;
+		break;
+	default:
+		rtld_fatal("unsupported ppc64 relocation");
 	}
 #endif
 	*where = value;

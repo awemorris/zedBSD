@@ -31,8 +31,8 @@
  */
 
 #include <hal/hal.h>
-#include "../asm.h"
-#include "bsp.h"
+#include "mac-arch.h"
+#include "mac99.h"
 
 /*
  * The VIA's registers, 0x200 bytes apart: port B, its direction, the
@@ -128,44 +128,44 @@ mac99_pmu_init(
 	/* A board without a PMU has no clock and no power control here. */
 	board = mac99_board();
 	if (board->pmu_base == 0) {
-		hal_puts("PPC32 PMU NONE\n");
+		hal_puts(MAC_ARCH_TAG " PMU NONE\n");
 		return;
 	}
 	error = hal_space_map_device(board->pmu_base, VIA_SIZE, HAL_SPACE_READ | HAL_SPACE_WRITE, &window);
 	if (error != HAL_OK) {
-		hal_printf("PPC32 PMU %08x UNMAPPED\n", board->pmu_base);
+		hal_printf(MAC_ARCH_TAG " PMU %08x UNMAPPED\n", board->pmu_base);
 		return;
 	}
 	via = window;
 
 	/* TREQ an output, high; TACK an input; the shift register's interrupt not to the processor. */
-	enabled = ppc32_irq_save();
+	enabled = mac_irq_save();
 	value = via_read(VIA_DIRB);
 	via_write(VIA_DIRB, (uint8_t)((value | VIA_B_TREQ) & ~VIA_B_TACK));
 	via_write(VIA_B, (uint8_t)(via_read(VIA_B) | VIA_B_TREQ));
 	via_write(VIA_IER, VIA_SR_FLAG);
-	ppc32_irq_restore(enabled);
+	mac_irq_restore(enabled);
 	if (board->pmu_gpio_interrupt == 0xffffffffU) {
-		hal_printf("PPC32 PMU %08x IRQ %u GPIO NONE\n", board->pmu_base, board->pmu_interrupt);
+		hal_printf(MAC_ARCH_TAG " PMU %08x IRQ %u GPIO NONE\n", board->pmu_base, board->pmu_interrupt);
 	} else {
-		hal_printf("PPC32 PMU %08x IRQ %u GPIO %08x IRQ %u\n", board->pmu_base, board->pmu_interrupt,
+		hal_printf(MAC_ARCH_TAG " PMU %08x IRQ %u GPIO %08x IRQ %u\n", board->pmu_base, board->pmu_interrupt,
 			   board->pmu_gpio, board->pmu_gpio_interrupt);
 	}
 
 	/* The clock: four bytes, most significant first, seconds since 1904. */
 	error = request(PMU_READ_RTC, NULL, 0, reply, sizeof(reply));
 	if (error != HAL_OK) {
-		hal_puts("PPC32 RTC NO ANSWER\n");
+		hal_puts(MAC_ARCH_TAG " RTC NO ANSWER\n");
 		return;
 	}
 	seconds = ((uint32_t)reply[0] << 24) | ((uint32_t)reply[1] << 16) | ((uint32_t)reply[2] << 8) | reply[3];
 	if (seconds <= PMU_RTC_EPOCH_OFFSET) {
-		hal_printf("PPC32 RTC %08x BEFORE 1970\n", seconds);
+		hal_printf(MAC_ARCH_TAG " RTC %08x BEFORE 1970\n", seconds);
 		return;
 	}
-	rtc_timebase = ppc32_read_timebase();
+	rtc_timebase = mac_read_timebase();
 	rtc_seconds = seconds - PMU_RTC_EPOCH_OFFSET;
-	hal_printf("PPC32 RTC %llu\n", rtc_seconds);
+	hal_printf(MAC_ARCH_TAG " RTC %llu\n", rtc_seconds);
 }
 
 /*
@@ -187,9 +187,9 @@ mac99_pmu_poweroff(
 	/* The command with its signature, then the wait. */
 	error = request(PMU_SHUTDOWN, signature, sizeof(signature), &reply, 1);
 	if (error != HAL_OK)
-		hal_puts("PPC32 PMU SHUTDOWN NO ANSWER\n");
+		hal_puts(MAC_ARCH_TAG " PMU SHUTDOWN NO ANSWER\n");
 	wait_ms(PMU_POWER_WAIT_MS);
-	hal_puts("PPC32 PMU STILL ON\n");
+	hal_puts(MAC_ARCH_TAG " PMU STILL ON\n");
 }
 
 /*
@@ -209,9 +209,9 @@ mac99_pmu_restart(
 	/* The command, then the wait. */
 	error = request(PMU_RESET, NULL, 0, NULL, 0);
 	if (error != HAL_OK)
-		hal_puts("PPC32 PMU RESET NO ANSWER\n");
+		hal_puts(MAC_ARCH_TAG " PMU RESET NO ANSWER\n");
 	wait_ms(PMU_POWER_WAIT_MS);
-	hal_puts("PPC32 PMU DID NOT RESTART\n");
+	hal_puts(MAC_ARCH_TAG " PMU DID NOT RESTART\n");
 }
 
 /*
@@ -230,7 +230,7 @@ hal_rtc_read_epoch_time(
 		return false;
 
 	/* Succeeded: the boot's reading and the whole seconds since. */
-	*unix_seconds = rtc_seconds + (ppc32_read_timebase() - rtc_timebase) / board->timebase_frequency;
+	*unix_seconds = rtc_seconds + (mac_read_timebase() - rtc_timebase) / board->timebase_frequency;
 	return true;
 }
 
@@ -251,13 +251,13 @@ request(
 	int error;
 
 	/* The command and its data, then the reply. */
-	enabled = ppc32_irq_save();
+	enabled = mac_irq_save();
 	error = send_byte(command);
 	for (index = 0; error == HAL_OK && index < length; index++)
 		error = send_byte(data[index]);
 	for (index = 0; error == HAL_OK && index < reply_length; index++)
 		error = receive_byte(&reply[index]);
-	ppc32_irq_restore(enabled);
+	mac_irq_restore(enabled);
 	return error;
 }
 
@@ -314,12 +314,12 @@ wait_flag(
 
 	/* Until the flag rises or the step's time is up. */
 	frequency = mac99_board()->timebase_frequency;
-	deadline = ppc32_read_timebase() + frequency * PMU_STEP_MS / 1000U;
+	deadline = mac_read_timebase() + frequency * PMU_STEP_MS / 1000U;
 	for (;;) {
 		flags = via_read(VIA_IFR);
 		if ((flags & VIA_SR_FLAG) != 0)
 			break;
-		now = ppc32_read_timebase();
+		now = mac_read_timebase();
 		if (now > deadline)
 			return HAL_ERR_TIMEOUT;
 	}
@@ -341,12 +341,12 @@ wait_tack_released(
 
 	/* Until the line is high or the step's time is up. */
 	frequency = mac99_board()->timebase_frequency;
-	deadline = ppc32_read_timebase() + frequency * PMU_STEP_MS / 1000U;
+	deadline = mac_read_timebase() + frequency * PMU_STEP_MS / 1000U;
 	for (;;) {
 		lines = via_read(VIA_B);
 		if ((lines & VIA_B_TACK) != 0)
 			break;
-		now = ppc32_read_timebase();
+		now = mac_read_timebase();
 		if (now > deadline)
 			return HAL_ERR_TIMEOUT;
 	}
@@ -388,8 +388,8 @@ wait_ms(
 	uint64_t now;
 
 	/* Until the time base passes the deadline. */
-	deadline = ppc32_read_timebase() + (uint64_t)mac99_board()->timebase_frequency * milliseconds / 1000U;
+	deadline = mac_read_timebase() + (uint64_t)mac99_board()->timebase_frequency * milliseconds / 1000U;
 	do {
-		now = ppc32_read_timebase();
+		now = mac_read_timebase();
 	} while (now < deadline);
 }

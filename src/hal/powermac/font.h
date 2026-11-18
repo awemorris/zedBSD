@@ -9,8 +9,8 @@
  * The board's console font (a copy of the PC/AT 8x16 VGA font).
  */
 
-#ifndef KERN_HAL_PPC32_MAC99_FONT_H
-#define KERN_HAL_PPC32_MAC99_FONT_H
+#ifndef KERN_HAL_POWERMAC_FONT_H
+#define KERN_HAL_POWERMAC_FONT_H
 
 #include <hal/types.h>
 

@@ -18,9 +18,9 @@
  * The two places a static TLS block can take next to its control block.
  *
  * In variant I the block follows the control block's reserve, which is
- * where the m68k and 32-bit PowerPC thread pointers (0x7000 bytes past the
- * block's start, see src/libc/m68k-read-tp.c and the ppc32 hardware
- * layer's task.c) expect it.  In variant II the block
+ * where the m68k and PowerPC thread pointers (0x7000 bytes past the
+ * block's start, see src/libc/m68k-read-tp.c and the PowerPC hardware
+ * layers' task.c) expect it.  In variant II the block
  * ends where the control block starts, as the x86 FS or GS base expects.
  */
 #define KERN_TLS_VARIANT_I	1
@@ -29,11 +29,11 @@
 /*
  * The placement the loader and the C library use on this processor.
  *
- * Only the m68k and the 32-bit PowerPC place the block after the reserve.
+ * Only the m68k and the PowerPC place the block after the reserve.
  * Every other processor keeps the x86 placement, which is what the C
  * library already gives a thread there.
  */
-#if defined(__m68k__) || (defined(__powerpc__) && !defined(__powerpc64__))
+#if defined(__m68k__) || defined(__powerpc__)
 #define KERN_TLS_STATIC_VARIANT	KERN_TLS_VARIANT_I
 #else
 #define KERN_TLS_STATIC_VARIANT	KERN_TLS_VARIANT_II

@@ -47,13 +47,19 @@
 /*
  * The bytes below the interrupted stack pointer that the user ABI lets a
  * function keep data in without moving the pointer: the System V amd64
- * red zone.  A signal frame pushed on the interrupted stack goes below
- * them, or it overwrites live locals of the interrupted function (a leaf
- * function built without -mno-red-zone, such as OpenSSL's, found them
- * zeroed after its handler returned).  The other user ABIs have none.
+ * red zone, and the 64-bit PowerPC ELFv2 one.  A signal frame pushed on
+ * the interrupted stack goes below them, or it overwrites live locals of
+ * the interrupted function (a leaf function built without -mno-red-zone,
+ * such as OpenSSL's, found them zeroed after its handler returned).  The
+ * other user ABIs have none.
+ *
+ * Value referenced: 64-bit ELF V2 ABI Specification, Power Architecture,
+ * Revision 1.5 (the 288-byte protected zone below the stack pointer).
  */
 #if defined(HAL_ARCH_X86_64)
 #define SIGNAL_USER_RED_ZONE 128U
+#elif defined(HAL_ARCH_PPC64)
+#define SIGNAL_USER_RED_ZONE 288U
 #else
 #define SIGNAL_USER_RED_ZONE 0U
 #endif

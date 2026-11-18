@@ -13,7 +13,8 @@
  * enters and removes its entries with hypervisor calls.  On a processor
  * the kernel runs directly, such as the PowerPC 970, the table is in RAM
  * the board set aside, and the HAL writes its entries and invalidates the
- * translation buffer itself.  RAM and the framebuffer are mapped at their
+ * translation buffer itself.  RAM, the device windows and the
+ * framebuffer are mapped at their
  * own addresses in the large page the processor offers (64 KiB in a
  * partition, 16 MiB on the 970), entered once and never removed.  The
  * user range, segments 0x10 to 0x27, uses 4 KiB pages: each space keeps
@@ -53,12 +54,10 @@
 #define SLB_LARGE_64K		0x110UL
 #define SLB_LARGE_16M		0x100UL
 #define SLB_RAM_FIRST		0U
-#define SLB_FRAMEBUFFER		2U
-#define SLB_USER_FIRST		3U
 
 /* The segment ids of the kernel's windows, of the kernel alone's user segments, and of user spaces. */
 #define VSID_RAM		0x100000UL
-#define VSID_FRAMEBUFFER	0x200000UL
+#define VSID_KERNEL_WINDOW	0x200000UL
 #define VSID_SYSTEM_USER	0x300000UL
 #define VSID_USER		0x1000000UL
 
@@ -75,12 +74,13 @@
 #define HPTE_FLAGS_MASK		0x7fUL
 #define HPTE_AVPN_MASK		0x3fffffffffffff80UL
 
-/* A hashed table entry's second word: a 64 KiB page, referenced, changed, uncached, coherent, the access. */
+/* A hashed table entry's second word: a 64 KiB page, referenced, changed, uncached, coherent, guarded, the access. */
 #define HPTE_LARGE_64K		0x1000UL
 #define HPTE_REFERENCED		0x100UL
 #define HPTE_CHANGED		0x80UL
 #define HPTE_UNCACHED		0x20UL
 #define HPTE_COHERENT		0x10UL
+#define HPTE_GUARDED		0x8UL
 #define HPTE_SUPERVISOR		0x0UL
 #define HPTE_READ_WRITE		0x2UL
 #define HPTE_READ_ONLY		0x3UL
@@ -141,6 +141,25 @@ static unsigned large_page_shift;
 static uint64_t slb_large;
 static uint64_t hpte_large_size;
 
+/*
+ * The kernel's segments beyond RAM, set once at boot: the device windows
+ * and the framebuffer's, by their segment number, and the first segment
+ * lookaside buffer entry the user segments take after them.  A device
+ * range in one of the window segments is reached at its own address.
+ */
+static uint64_t kernel_window_segments[PPC64_BOARD_WINDOWS_MAX + 1U];
+static unsigned kernel_window_count;
+static unsigned device_window_count;
+static unsigned slb_user_first;
+
+/*
+ * The RAM the kernel maps from address 0, set once at boot: its 256 MiB
+ * segments, which take the first segment lookaside buffer entries, and
+ * its end, which the page allocator manages up to.
+ */
+static unsigned ram_segment_count;
+static uint64_t ram_limit;
+
 /* The space selected now. */
 static hal_space_t current_space;
 
@@ -159,6 +178,9 @@ static int valid_attributes(uint32_t attr);
 static uint64_t *walk_leaf(struct ppc64_space *space, uintptr_t address, int create);
 static void load_user_segments(uint64_t first_vsid);
 static void choose_large_page(unsigned shift);
+static unsigned add_kernel_window(uint64_t esid);
+static void map_kernel_window(uint64_t address, uint64_t size, uint64_t storage);
+static int in_device_window(hal_physaddr_t paddr, size_t size);
 static void table_init(uint64_t base, uint32_t shift);
 static int enter(uint64_t vsid, uintptr_t address, unsigned page_shift, uint64_t second, int bolted, uint64_t *first_out);
 static int enter_by_hypervisor(uint64_t hash, uint64_t first, uint64_t second, uint64_t *first_out);
@@ -173,8 +195,8 @@ static uint64_t user_vsid(const struct ppc64_space *space, uintptr_t address);
 static void free_tables(struct ppc64_space *space);
 
 /*
- * Maps RAM and the framebuffer in large pages, loads the segment
- * lookaside buffer and turns translation on.  The board's firmware is not
+ * Maps RAM, the device windows and the framebuffer in large pages, loads
+ * the segment lookaside buffer and turns translation on.  The board's firmware is not
  * called after this; translation is off when it starts.
  */
 void
@@ -188,6 +210,9 @@ ppc64_space_init(
 	uint64_t address;
 	uint64_t first;
 	uint64_t esid;
+	unsigned index;
+	unsigned window_budget;
+	int framebuffer_in_window;
 	int error;
 
 	/* The table's groups: 128 bytes each. */
@@ -207,29 +232,58 @@ ppc64_space_init(
 		table_init(board->htab_base, board->htab_shift);
 	}
 
-	/* A clean buffer, then the two RAM segments and the framebuffer's. */
+	/*
+	 * The RAM the kernel maps: what the board has up to the limit, and
+	 * no more segments than the buffer holds beside the user's and the
+	 * windows'.
+	 */
+	memory_size = board->memory_size;
+	if (memory_size > PPC64_RAM_LIMIT_MAX)
+		memory_size = PPC64_RAM_LIMIT_MAX;
+	ram_segment_count = (unsigned)((memory_size + (1UL << PPC64_SEGMENT_SHIFT) - 1U) >> PPC64_SEGMENT_SHIFT);
+	if (ram_segment_count == 0)
+		ram_segment_count = 1;
+	window_budget = PPC64_USER_SEGMENT_COUNT + board->window_count + 1U;
+	if (board->window_count > PPC64_BOARD_WINDOWS_MAX || board->slb_entries <= window_budget)
+		HAL_FATAL("ppc64 board names too small a segment lookaside buffer");
+	if (ram_segment_count > board->slb_entries - window_budget)
+		ram_segment_count = board->slb_entries - window_budget;
+	if (memory_size > (uint64_t)ram_segment_count << PPC64_SEGMENT_SHIFT)
+		memory_size = (uint64_t)ram_segment_count << PPC64_SEGMENT_SHIFT;
+	ram_limit = memory_size;
+
+	/* A clean buffer, then the RAM segments. */
 	__asm__ volatile("slbia" : : : "memory");
-	for (esid = 0; esid < 2U; esid++) {
+	for (esid = 0; esid < ram_segment_count; esid++) {
 		__asm__ volatile("slbmte %0,%1" : : "r"(((VSID_RAM + esid) << 12) | SLB_KEY_USER | slb_large),
 				 "r"((esid << PPC64_SEGMENT_SHIFT) | SLB_VALID | (SLB_RAM_FIRST + esid)) : "memory");
 	}
 
-	/* The framebuffer's segment, when there is a framebuffer. */
+	/* The device windows' segments, then the framebuffer's when it is in none of them. */
+	kernel_window_count = 0;
+	for (index = 0; index < board->window_count && index < PPC64_BOARD_WINDOWS_MAX; index++) {
+		esid = board->windows[index] >> PPC64_SEGMENT_SHIFT;
+
+		/* A window over RAM's segments or the user range would hide them. */
+		if (esid < ram_segment_count || esid >= PPC64_USER_SEGMENT_FIRST)
+			continue;
+		(void)add_kernel_window(esid);
+	}
+	device_window_count = kernel_window_count;
 	framebuffer_base = board->framebuffer_address;
 	framebuffer_size = (uint64_t)board->framebuffer_linebytes * board->framebuffer_height;
+	framebuffer_in_window = 0;
 	if (framebuffer_base != 0) {
-		esid = framebuffer_base >> PPC64_SEGMENT_SHIFT;
-		__asm__ volatile("slbmte %0,%1" : : "r"((VSID_FRAMEBUFFER << 12) | SLB_KEY_USER | slb_large),
-				 "r"((esid << PPC64_SEGMENT_SHIFT) | SLB_VALID | SLB_FRAMEBUFFER) : "memory");
+		framebuffer_in_window = in_device_window(framebuffer_base, (size_t)framebuffer_size);
+		if (!framebuffer_in_window)
+			(void)add_kernel_window(framebuffer_base >> PPC64_SEGMENT_SHIFT);
 	}
 
-	/* The user segments with ids that map nothing. */
+	/* The user segments with ids that map nothing, after the kernel's. */
+	slb_user_first = ram_segment_count + kernel_window_count;
 	load_user_segments(VSID_SYSTEM_USER);
 
-	/* RAM, then the framebuffer, supervisor only. */
-	memory_size = board->memory_size;
-	if (memory_size > PPC64_RAM_LIMIT)
-		memory_size = PPC64_RAM_LIMIT;
+	/* RAM, supervisor only. */
 	for (address = 0; address < memory_size; address += large_page_size) {
 		error = enter(VSID_RAM + (address >> PPC64_SEGMENT_SHIFT), address, large_page_shift,
 			      address | HPTE_REFERENCED | HPTE_CHANGED | HPTE_COHERENT | HPTE_SUPERVISOR, 1, &first);
@@ -237,21 +291,33 @@ ppc64_space_init(
 			HAL_FATAL("ppc64 RAM window does not fit the hashed table");
 	}
 
-	/* Then the framebuffer, supervisor only. */
-	for (address = framebuffer_base & ~(large_page_size - 1U);
-	     framebuffer_base != 0 && address < framebuffer_base + framebuffer_size;
-	     address += large_page_size) {
-		error = enter(VSID_FRAMEBUFFER, address, large_page_shift,
-			      address | HPTE_REFERENCED | HPTE_CHANGED | HPTE_UNCACHED | HPTE_SUPERVISOR, 1, &first);
-		if (error != HAL_OK)
-			HAL_FATAL("ppc64 framebuffer window does not fit the hashed table");
+	/* Each device window whole, uncached and guarded, supervisor only. */
+	for (index = 0; index < device_window_count; index++) {
+		map_kernel_window(kernel_window_segments[index] << PPC64_SEGMENT_SHIFT, 1UL << PPC64_SEGMENT_SHIFT,
+				  HPTE_UNCACHED | HPTE_GUARDED);
 	}
+
+	/* Then the framebuffer by itself, uncached, when no window holds it. */
+	if (framebuffer_base != 0 && !framebuffer_in_window)
+		map_kernel_window(framebuffer_base, framebuffer_size, HPTE_UNCACHED);
 
 	/* Translation on, in the kernel's state. */
 	space_registry = NULL;
 	current_space = HAL_SPACE_SYS;
 	ppc64_write_msr(ppc64_read_msr() | PPC64_MSR_IR | PPC64_MSR_DR);
 	hal_puts("PPC64 PAGING PASS\n");
+}
+
+/*
+ * Reports the end of the RAM the kernel maps, which the page allocator
+ * manages up to.
+ */
+uint64_t
+ppc64_space_ram_limit(
+	void)
+{
+	/* Succeeded: the limit set at boot. */
+	return ram_limit;
 }
 
 /*
@@ -813,6 +879,7 @@ hal_space_map_device(
 	void **vaddr)
 {
 	bool ram;
+	int window;
 
 	/* Requires a destination, a non-empty range and no execution. */
 	if (vaddr == NULL || size == 0)
@@ -827,7 +894,14 @@ hal_space_map_device(
 		return HAL_OK;
 	}
 
-	/* Failed: notifying itself is not offered. */
+	/* A range inside a device window, as it is. */
+	window = in_device_window(paddr, size);
+	if (window) {
+		*vaddr = (void *)(uintptr_t)paddr;
+		return HAL_OK;
+	}
+
+	/* Anything else has no translation. */
 	return HAL_ERR_UNSUPPORTED;
 }
 
@@ -1030,11 +1104,88 @@ load_user_segments(
 		esid = PPC64_USER_SEGMENT_FIRST + index;
 		__asm__ volatile("slbie %0" : : "r"(esid << PPC64_SEGMENT_SHIFT) : "memory");
 		__asm__ volatile("slbmte %0,%1" : : "r"(((first_vsid + esid) << 12) | SLB_KEY_USER),
-				 "r"((esid << PPC64_SEGMENT_SHIFT) | SLB_VALID | (SLB_USER_FIRST + index)) : "memory");
+				 "r"((esid << PPC64_SEGMENT_SHIFT) | SLB_VALID | (slb_user_first + index)) : "memory");
 	}
 
 	/* Makes the new segments take effect. */
 	__asm__ volatile("isync" : : : "memory");
+}
+
+/*
+ * Gives a kernel window segment its segment lookaside buffer entry, once;
+ * reports its index among the kernel's windows.
+ */
+static unsigned
+add_kernel_window(
+	uint64_t esid)
+{
+	unsigned index;
+
+	/* A segment already given keeps its entry. */
+	for (index = 0; index < kernel_window_count; index++) {
+		if (kernel_window_segments[index] == esid)
+			return index;
+	}
+
+	/* The segment's entry, its id from the segment number, supervisor only. */
+	if (kernel_window_count > PPC64_BOARD_WINDOWS_MAX)
+		HAL_FATAL("ppc64 board names too many windows");
+	index = kernel_window_count;
+	kernel_window_segments[index] = esid;
+	__asm__ volatile("slbmte %0,%1" : : "r"(((VSID_KERNEL_WINDOW + esid) << 12) | SLB_KEY_USER | slb_large),
+			 "r"((esid << PPC64_SEGMENT_SHIFT) | SLB_VALID | (ram_segment_count + index)) : "memory");
+	kernel_window_count++;
+
+	/* Succeeded: the window's index. */
+	return index;
+}
+
+/* Maps a range of a kernel window segment at its own address in large pages. */
+static void
+map_kernel_window(
+	uint64_t address,
+	uint64_t size,
+	uint64_t storage)
+{
+	uint64_t large_page_size;
+	uint64_t page;
+	uint64_t first;
+	int error;
+
+	/* Each large page the range touches, supervisor only. */
+	large_page_size = 1UL << large_page_shift;
+	for (page = address & ~(large_page_size - 1U); page < address + size; page += large_page_size) {
+		error = enter(VSID_KERNEL_WINDOW + (page >> PPC64_SEGMENT_SHIFT), page, large_page_shift,
+			      page | HPTE_REFERENCED | HPTE_CHANGED | storage | HPTE_SUPERVISOR, 1, &first);
+		if (error != HAL_OK)
+			HAL_FATAL("ppc64 device window does not fit the hashed table");
+	}
+}
+
+/* Tells whether a range lies in one device window segment. */
+static int
+in_device_window(
+	hal_physaddr_t paddr,
+	size_t size)
+{
+	uint64_t esid;
+	unsigned index;
+
+	/* An empty range, or one across segments, is in no window. */
+	if (size == 0)
+		return 0;
+	esid = paddr >> PPC64_SEGMENT_SHIFT;
+	if (((paddr + size - 1U) >> PPC64_SEGMENT_SHIFT) != esid)
+		return 0;
+
+	/* One of the device windows' segments. */
+	for (index = 0; index < device_window_count; index++) {
+		if (kernel_window_segments[index] == esid)
+			return 1;
+	}
+
+	/* None holds it. */
+	return 0;
 }
 
 /* Sets the kernel's large page and its encodings from the board's choice. */

@@ -76,8 +76,8 @@
 
 #include <hal/hal.h>
 #include <kern/boot.h>
-#include "../asm.h"
-#include "bsp.h"
+#include "mac-arch.h"
+#include "mac99.h"
 #include "cons.h"
 #include "framebuffer.h"
 
@@ -191,7 +191,7 @@ static struct mac99_board_info board;
 static struct kern_boot_handoff kernel_handoff;
 static char boot_command_line[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 
-/* The initial ramdisk's physical address and size, handed over as "ppc32.initrd". */
+/* The initial ramdisk's physical address and size, handed over as "mac99.initrd". */
 static uint64_t initrd_range[2];
 
 /*
@@ -344,6 +344,7 @@ static void survey_append(const char *text, uint32_t length);
 static void survey_append_string(const char *text);
 static void survey_append_hex(uint32_t value);
 static uint32_t child_named(uint32_t parent, const char *wanted);
+static uint32_t find_expansion_host(void);
 static void firmware_mark(uint32_t chosen, const char *text);
 
 /*
@@ -383,7 +384,7 @@ mac99_firmware_read(
 	}
 
 	/* The PCI host bridge the expansion bus hangs from, and its devices' interrupt lines. */
-	node = finddevice("/pci@f2000000");
+	node = find_expansion_host();
 	if (node != FIRMWARE_FAILED && node != 0) {
 		pci_host = node;
 		length = getprop(node, "reg", cells, sizeof(cells));
@@ -490,7 +491,7 @@ mac99_kernel_handoff(
 
 /*
  * Returns one named architecture handoff object: "boot.command-line" is
- * the firmware's command line, "ppc32.initrd" the initial ramdisk's
+ * the firmware's command line, "mac99.initrd" the initial ramdisk's
  * address and size, "mac99.pci.base" the PCI host bridge's register
  * block and "mac99.pci.interrupts" the devices' interrupt lines, each
  * when there is one, and "mac99.ata" the ATA channels under the I/O
@@ -549,7 +550,7 @@ hal_get_arch_handoff(
 		return boot_command_line;
 
 	/* The initial ramdisk's address and size, when there is one. */
-	match = name_is(name, "ppc32.initrd");
+	match = name_is(name, "mac99.initrd");
 	if (match && board.ramdisk_size != 0)
 		return initrd_range;
 
@@ -686,7 +687,7 @@ firmware(
 		call.cells[index] = in[index];
 
 	/* The firmware answers in place. */
-	ppc32_firmware_call(&call);
+	mac_firmware_call(&call);
 	for (index = 0; index < returns; index++)
 		out[index] = call.cells[arguments + index];
 }
@@ -972,6 +973,8 @@ read_openpic(
 	controller = getprop_word(host, "interrupt-parent");
 	if (controller == 0) {
 		controller = finddevice("/pci@f2000000/mac-io/interrupt-controller");
+		if (controller == FIRMWARE_FAILED)
+			controller = finddevice("mac-io/interrupt-controller");
 		if (controller == FIRMWARE_FAILED)
 			return 0;
 	}
@@ -1905,4 +1908,33 @@ child_named(
 
 	/* No child has the name. */
 	return 0;
+}
+
+/*
+ * Finds the PCI host bridge the I/O controller hangs from: the 32-bit
+ * Mac's expansion bus at its fixed place, else the parent of the node
+ * the mac-io alias names (the 970 machines' AGP or HyperTransport host).
+ */
+static uint32_t
+find_expansion_host(
+	void)
+{
+	uint32_t node;
+	uint32_t parent;
+
+	/* The 32-bit Mac's expansion bus. */
+	node = finddevice("/pci@f2000000");
+	if (node != FIRMWARE_FAILED && node != 0)
+		return node;
+
+	/* Otherwise the I/O controller's parent. */
+	node = finddevice("mac-io");
+	if (node == FIRMWARE_FAILED || node == 0)
+		return FIRMWARE_FAILED;
+	firmware("parent", 1, 1, &node, &parent);
+	if (parent == 0)
+		return FIRMWARE_FAILED;
+
+	/* Succeeded: the host, or the firmware's failure value. */
+	return parent;
 }

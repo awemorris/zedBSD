@@ -16,8 +16,8 @@
 
 #include <hal/hal.h>
 #include "asm.h"
-#include "bsp-mac99/bsp.h"
-#include "bsp-mac99/cons.h"
+#include "../powermac/mac99.h"
+#include "../powermac/cons.h"
 #include "defs.h"
 
 static void cons_puts(const char *string);

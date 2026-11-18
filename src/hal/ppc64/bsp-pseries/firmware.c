@@ -88,10 +88,12 @@ pseries_firmware_read(
 
 	/*
 	 * The hypervisor keeps the hashed table and serves the idle wait; the
-	 * kernel's windows use 64 KiB pages.
+	 * kernel's windows use 64 KiB pages, and the segment lookaside buffer
+	 * is the 32 entries of POWER8 and later.
 	 */
 	board.under_hypervisor = 1;
 	board.large_page_shift = 16;
+	board.slb_entries = 32;
 
 	/* The display and the command line. */
 	read_display();

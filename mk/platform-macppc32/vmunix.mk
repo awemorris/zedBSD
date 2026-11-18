@@ -53,13 +53,13 @@ KERN_SOURCES += \
 	src/hal/ppc32/atomic.c \
 	src/hal/idle-suspend-unsupported.c \
 	src/hal/ppc32/bsp-mac99/board.c \
-	src/hal/ppc32/bsp-mac99/firmware.c \
-	src/hal/ppc32/bsp-mac99/irq.c \
-	src/hal/ppc32/bsp-mac99/clock.c \
-	src/hal/ppc32/bsp-mac99/pmu.c \
-	src/hal/ppc32/bsp-mac99/framebuffer.c \
-	src/hal/ppc32/bsp-mac99/cons.c \
-	src/hal/ppc32/bsp-mac99/font.c
+	src/hal/powermac/firmware.c \
+	src/hal/powermac/irq.c \
+	src/hal/powermac/clock.c \
+	src/hal/powermac/pmu.c \
+	src/hal/powermac/framebuffer.c \
+	src/hal/powermac/cons.c \
+	src/hal/powermac/font.c
 
 # HAL Assembly Sources
 KERN_ASM += \

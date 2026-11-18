@@ -146,7 +146,7 @@ static int read_headers(struct file_content_lease *lease, unsigned elf_class, st
 static int copy_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size);
 static int load_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size, uint32_t prot);
 #if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K) || \
-    defined(HAL_ARCH_PPC32)
+    defined(HAL_ARCH_PPC32) || defined(HAL_ARCH_PPC64)
 static int load_static_tls(struct file_content_lease *, struct vmspace *, const struct normalized_program *, uintptr_t *);
 #endif
 static int validate_and_load(struct file_content_lease *lease, struct vmspace *vm, unsigned elf_class, enum elf_load_role role, struct normalized_image *image);
@@ -880,7 +880,7 @@ load_segment_snapshot(
 }
 
 #if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K) || \
-    defined(HAL_ARCH_PPC32)
+    defined(HAL_ARCH_PPC32) || defined(HAL_ARCH_PPC64)
 /* Builds a private initial block and a VM-owned immutable thread template. */
 static int
 load_static_tls(
@@ -1080,7 +1080,12 @@ validate_and_load(
 
 	/* Validates every program header and gathers the layout. */
 	for (i = 0; i < header.phnum; i++) {
-		/* PT_PHDR must describe the table itself, read-only, once. */
+		/*
+		 * PT_PHDR must describe the table itself, read-only, once.  It
+		 * may cover more than the entries the header counts: ld.lld
+		 * sizes the table before it drops an empty load segment, and
+		 * keeps the room the dropped entry had.
+		 */
 		program = &programs[i];
 		if (program->type == PT_PHDR) {
 			expected_size =
@@ -1088,7 +1093,7 @@ validate_and_load(
 			phdr_count++;
 			if (phdr_count != 1 ||
 			    program->offset != header.phoff ||
-			    program->filesz != expected_size ||
+			    program->filesz < expected_size ||
 			    program->memsz < program->filesz ||
 			    (program->flags & PF_R) == 0 ||
 			    (program->flags & (PF_W | PF_X)) != 0 ||
@@ -1398,7 +1403,7 @@ validate_and_load(
 	/* The runtime linker owns dynamic TLS; static images start with a ready TP. */
 	if (tls != NULL && role == ELF_LOAD_MAIN && interp_count == 0) {
 #if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K) || \
-    defined(HAL_ARCH_PPC32)
+    defined(HAL_ARCH_PPC32) || defined(HAL_ARCH_PPC64)
 		error = load_static_tls(lease, vm, tls, &image->thread_pointer);
 #else
 		error = ENOEXEC;

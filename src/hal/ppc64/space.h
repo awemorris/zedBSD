@@ -38,6 +38,10 @@ void
 ppc64_space_init(
 	const struct ppc64_board_info *board);
 
+uint64_t
+ppc64_space_ram_limit(
+	void);
+
 int
 ppc64_space_reload(
 	uintptr_t address,

@@ -24,9 +24,9 @@
 #include "../page.h"
 #include "../space.h"
 #include "../task.h"
-#include "bsp.h"
-#include "cons.h"
-#include "framebuffer.h"
+#include "../../powermac/mac99.h"
+#include "../../powermac/cons.h"
+#include "../../powermac/framebuffer.h"
 
 /* The end of the image, from the linker script. */
 extern char __kernel_end[];

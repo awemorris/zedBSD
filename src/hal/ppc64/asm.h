@@ -146,5 +146,7 @@ ppc64_fp_restore(
 extern const uint32_t ppc64_vector_stub[];
 extern const uint32_t ppc64_vector_stub_li[];
 extern const uint32_t ppc64_vector_stub_end[];
+extern const uint32_t ppc64_hdec_stub[];
+extern const uint32_t ppc64_hdec_stub_end[];
 
 #endif

@@ -21,8 +21,8 @@
 #include "space.h"
 #include "spin.h"
 
-/* The most RAM the bitmap can describe: 1 GiB, what the supervisor's window holds. */
-#define PAGE_MAX_BYTES		(1024ULL * 1024ULL * 1024ULL)
+/* The most RAM the bitmap can describe: 2 GiB, the most the kernel maps. */
+#define PAGE_MAX_BYTES		(2048ULL * 1024ULL * 1024ULL)
 #define PAGE_MAX_PAGES		(PAGE_MAX_BYTES / PPC64_PAGE_SIZE)
 #define PAGE_BITMAP_WORDS	(PAGE_MAX_PAGES / 32U)
 
@@ -85,6 +85,7 @@ ppc64_page_init(
 	const struct ppc64_board_info *board;
 	uint64_t lowest;
 	uint64_t highest;
+	uint64_t ram_limit;
 
 	/* The one bank, kept page-aligned and within the window. */
 	board = ppc64_board();
@@ -94,8 +95,9 @@ ppc64_page_init(
 	highest = ((uint64_t)board->memory_base + board->memory_size) & ~((uint64_t)PPC64_PAGE_SIZE - 1U);
 	if (highest - lowest > PAGE_MAX_BYTES)
 		highest = lowest + PAGE_MAX_BYTES;
-	if (highest > PPC64_RAM_LIMIT)
-		highest = PPC64_RAM_LIMIT;
+	ram_limit = ppc64_space_ram_limit();
+	if (highest > ram_limit)
+		highest = ram_limit;
 	ram_base = lowest;
 	ram_pages = (uint32_t)((highest - lowest) / PPC64_PAGE_SIZE);
 

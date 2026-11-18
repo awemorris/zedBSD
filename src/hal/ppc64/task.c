@@ -10,18 +10,47 @@
  * the switch between them.
  *
  * A task's user context is the trap frame it entered the kernel with.  The
- * user's thread pointer is r2 of that frame, so a task's TLS is read and
+ * user's thread pointer is r13 of that frame, so a task's TLS is read and
  * written there; a task that has not yet entered user mode keeps it in the
  * task until it has a frame.
+ *
+ * The kernel's TLS value is the thread's control block.  The 64-bit
+ * PowerPC ELF ABI puts the thread pointer 0x7000 bytes past the start of
+ * the static TLS block, and the block follows the control block's
+ * KERN_TLS_TCB_RESERVE-byte reserve (variant I in uapi/tls.h), so r13
+ * holds the control block's address plus both.
+ *
+ * A function is entered at its global entry point with its own address
+ * in r12, from which it finds its TOC; the program's entry, a new
+ * thread's and a signal handler are entered so.
+ *
+ * Values referenced: 64-bit ELF V2 ABI Specification, Power
+ * Architecture, Revision 1.5 (the thread pointer in r13, 0x7000 past the
+ * TLS block's start; the global entry point's r12).
  */
 
 #include <hal/hal.h>
+#include <uapi/tls.h>
 #include "asm.h"
 #include "defs.h"
 #include "int.h"
 #include "percpu.h"
 #include "spin.h"
 #include "task.h"
+
+/*
+ * The ELFv2 minimum stack frame a signal handler is entered with below
+ * the kernel's frame head: the back chain, the condition register, the
+ * link register and the TOC slots.  The restorer reads the head that far
+ * above its stack pointer.
+ */
+#define SIGNAL_MINIMUM_FRAME	32U
+_Static_assert(
+	SIGNAL_MINIMUM_FRAME == HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET - HAL_TASK_SIGNAL_FRAME_TOKEN_OFFSET,
+	"the restorer reads the head above the handler's minimum frame");
+
+/* How far the thread pointer in r13 lies past the thread's control block. */
+#define TLS_THREAD_POINTER_OFFSET	(KERN_TLS_TCB_RESERVE + 0x7000U)
 
 /*
  * The byte a kernel stack is filled with before its task first runs.  The
@@ -449,9 +478,19 @@ hal_task_signal_enter(
 	task->signal_token[depth] = token;
 	task->signal_depth = depth + 1U;
 
-	/* Enters the handler with its three arguments and the restorer as the return. */
+	/*
+	 * Enters the handler at its global entry point with its address in
+	 * r12, from which it makes its own TOC, its three arguments and the
+	 * restorer as the return.  Its stack pointer is the ELFv2 minimum
+	 * frame below the kernel's frame head, whose condition register,
+	 * link register and TOC slots the handler may write; the restorer
+	 * finds the head above it (HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET).
+	 * r2 is left as the interrupted code had it; the frame kept under
+	 * the token gives it back on the return.
+	 */
 	frame->pc = handler;
-	frame->r[1] = stack;
+	frame->r[12] = handler;
+	frame->r[1] = stack - SIGNAL_MINIMUM_FRAME;
 	frame->r[3] = (uint64_t)(int64_t)signal_number;
 	frame->r[4] = information;
 	frame->r[5] = context;
@@ -671,8 +710,9 @@ ppc64_task_running(
 }
 
 /*
- * Sets a task's user thread pointer (r2), in the frame it returns to user
- * with, and keeps it for a task that has no frame yet.
+ * Sets a task's user thread pointer (r13) from its control block, in the
+ * frame it returns to user with, and keeps it for a task that has no frame
+ * yet.  A zero value leaves the task without a thread pointer.
  */
 void
 hal_task_set_tls(
@@ -681,6 +721,7 @@ hal_task_set_tls(
 {
 	struct ppc64_trap_frame *frame;
 	struct ppc64_task *task;
+	uintptr_t pointer;
 	bool enabled;
 
 	/* A missing task has no TLS. */
@@ -688,17 +729,23 @@ hal_task_set_tls(
 	if (task == NULL)
 		return;
 
-	/* Keeps the value and writes it where the next return to user reads it. */
+	/* The thread pointer the compiled accesses offset from, or none. */
+	pointer = 0;
+	if (value != 0)
+		pointer = value + TLS_THREAD_POINTER_OFFSET;
+
+	/* Keeps the value and writes the pointer where the next return to user reads it. */
 	enabled = ppc64_irq_save();
 	task->tls = value;
 	frame = task_frame(task);
 	if (frame != NULL)
-		frame->r[2] = value;
+		frame->r[13] = pointer;
 	ppc64_irq_restore(enabled);
 }
 
 /*
- * Reports a task's user thread pointer as it returns to user with it.
+ * Reports a task's control block, from the thread pointer it returns to
+ * user with.
  */
 uintptr_t
 hal_task_get_tls(
@@ -718,11 +765,14 @@ hal_task_get_tls(
 	enabled = ppc64_irq_save();
 	value = task->tls;
 	frame = task_frame(task);
-	if (frame != NULL)
-		value = frame->r[2];
+	if (frame != NULL) {
+		value = 0;
+		if (frame->r[13] >= TLS_THREAD_POINTER_OFFSET)
+			value = frame->r[13] - TLS_THREAD_POINTER_OFFSET;
+	}
 	ppc64_irq_restore(enabled);
 
-	/* Succeeded: the thread pointer. */
+	/* Succeeded: the control block, or 0 without a thread pointer. */
 	return value;
 }
 
@@ -867,10 +917,15 @@ ppc64_context_selftest(
 {
 	unsigned long *stack_pointer;
 
-	/* Builds a stack that dispatches into self_task(). */
-	stack_pointer = (unsigned long *)(self_stack + sizeof(self_stack));
+	/*
+	 * Builds a stack that dispatches into self_task(): an empty frame at
+	 * the top (its back chain 0), where self_task() saves its return
+	 * address and its caller's condition register as the ELFv2 ABI says,
+	 * so that they land inside the stack and not past its end.
+	 */
+	stack_pointer = (unsigned long *)(self_stack + sizeof(self_stack) - PPC64_FRAME_CALL);
 	stack_pointer -= PPC64_DISPATCH_WORDS;
-	hal_memset(stack_pointer, 0, PPC64_DISPATCH_WORDS * sizeof(*stack_pointer));
+	hal_memset(stack_pointer, 0, (PPC64_DISPATCH_WORDS * sizeof(*stack_pointer)) + PPC64_FRAME_CALL);
 	stack_pointer[PPC64_DISPATCH_LR] = (uintptr_t)self_task;
 	self_task_sp = (uintptr_t)stack_pointer;
 
@@ -1001,9 +1056,10 @@ reset_user_frame(
 	/* Clears every register. */
 	hal_memset(frame, 0, sizeof(*frame));
 
-	/* The entry, the stack, and the user's machine state. */
+	/* The entry, its address for the global entry point, the stack, and the user's machine state. */
 	frame->pc = entry;
 	frame->r[1] = user_stack_pointer;
+	frame->r[12] = entry;
 	frame->msr = PPC64_MSR_USER;
 }
 

@@ -21,7 +21,7 @@
  */
 
 #include <hal/hal.h>
-#include "../spin.h"
+#include "mac-arch.h"
 #include "cons.h"
 #include "framebuffer.h"
 
@@ -70,7 +70,7 @@ virt_cons_putc(
 	bool enabled;
 
 	/* Changes the grid and draws it as one step against handlers; keeps the copy while it has room. */
-	enabled = ppc32_spin_lock(&cons_lock);
+	enabled = mac_spin_lock(&cons_lock);
 
 	putc_locked(character);
 	virt_framebuffer_flush();
@@ -79,7 +79,7 @@ virt_cons_putc(
 		cons_log_length++;
 	}
 
-	ppc32_spin_unlock(&cons_lock, enabled);
+	mac_spin_unlock(&cons_lock, enabled);
 }
 
 /*
@@ -104,12 +104,12 @@ virt_cons_attach(
 	bool enabled;
 
 	/* Repaints every cell and the cursor. */
-	enabled = ppc32_spin_lock(&cons_lock);
+	enabled = mac_spin_lock(&cons_lock);
 
 	draw_all_locked();
 	virt_framebuffer_flush();
 
-	ppc32_spin_unlock(&cons_lock, enabled);
+	mac_spin_unlock(&cons_lock, enabled);
 }
 
 /* Draws one cell of the grid, a blank for one never written. */
