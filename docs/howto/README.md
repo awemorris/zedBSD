@@ -15,6 +15,10 @@ include both the expected success observation and a diagnostic path.
   toolchain bootstrap, target selection, parallel image builds, QEMU launch,
   and common failures.
 
+- [Booting a PowerPC Mac from a USB stick](powermac-boot.md): writing the
+  `macppc32` image, the Option-key picker and the Open Firmware prompt, the
+  fan warning, and the slow Xzed session.
+
 - [Programming a Keiland application](keiland-programming.md): the
   application, its window and titlebar, the immediate mode user interface and
   the main loop, the widgets, the menus, and the desktop's other services.

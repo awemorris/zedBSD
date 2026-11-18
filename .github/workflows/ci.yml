@@ -26,6 +26,8 @@ jobs:
             artifact: zedbsd-rpi5.img.gz
           - platform: vf2
             artifact: zedbsd-vf2.img.gz
+          - platform: macppc32
+            artifact: zedbsd-macppc32.img.gz
     env:
       CONFIGMK: config/config.${{ matrix.platform }}.mk
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,4 +112,5 @@ jobs:
             | Raspberry Pi 4 | Arm64 | Raspberry Pi 4 | `zedbsd-rpi4.img.gz`   | SD image    |
             | Raspberry Pi 5 | Arm64 | Raspberry Pi 5 | `zedbsd-rpi5.img.gz`   | SD image    |
             | VisionFive 2 | RISC-V  | VisionFive 2   | `zedbsd-vf2.img.gz`    | SD image    |
+            | macppc32     | PowerPC | PowerPC Mac (G3/G4) | `zedbsd-macppc32.img.gz` | USB image (see docs/howto/powermac-boot.md) |
           files: artifacts/*.img.gz
