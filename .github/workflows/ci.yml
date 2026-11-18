@@ -30,6 +30,8 @@ jobs:
             artifact: zedbsd-vf2.img.gz
           - platform: macppc32
             artifact: zedbsd-macppc32.img.gz
+          - platform: pc9821
+            artifact: zedbsd-pc9821.img.gz
     env:
       CONFIGMK: config/config.${{ matrix.platform }}.mk
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,11 +110,17 @@ jobs:
             zedBSD OS
             =========
 
+            Mainline:
             | Image        | CPU     | Machine        | File                   | Description |
             |--------------|---------|----------------|------------------------|-------------|
             | x86_64       | x86_64  | UEFI PC        | `zedbsd-x86_64.img.gz` | USB image   |
             | Raspberry Pi 4 | Arm64 | Raspberry Pi 4 | `zedbsd-rpi4.img.gz`   | SD image    |
             | Raspberry Pi 5 | Arm64 | Raspberry Pi 5 | `zedbsd-rpi5.img.gz`   | SD image    |
             | VisionFive 2 | RISC-V  | VisionFive 2   | `zedbsd-vf2.img.gz`    | SD image    |
+
+            Retro:
+            | Image        | CPU     | Machine        | File                   | Description |
+            |--------------|---------|----------------|------------------------|-------------|
+            | pc9821       | i386    | PC-9821        | `zedbsd-pc9821.img.gz` | CF image    |
             | macppc32     | PowerPC | PowerPC Mac (G3/G4) | `zedbsd-macppc32.img.gz` | USB image (see docs/howto/powermac-boot.md) |
           files: artifacts/*.img.gz
