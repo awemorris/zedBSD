@@ -30,4 +30,3 @@ USER_CFLAGS := \
 	-Wall \
 	-Wextra \
 	-Werror
-
