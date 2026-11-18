@@ -75,6 +75,7 @@ ROOTFS_DYNAMIC_FILES := \
 
 ROOTFS_PACKAGE_LINKS ?= \
 	/usr/bin/noct=/bin/noct \
+	/usr/bin/env=/bin/env \
 	/usr/lib/libz.so=libz.so.1 \
 	/sbin/umount=mount \
 	$(if $(filter curl,$(CONFIG_USERLAND_PROGRAMS)),/usr/lib/libcurl.so=libcurl.so.4)

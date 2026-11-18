@@ -7,8 +7,8 @@
 # key.  The key is made here instead, on the machine, when it is missing.
 
 config=/etc/ssh/sshd_config
-keygen=/usr/bin/ssh-keygen
-sshd=/usr/sbin/sshd
+keygen=/bin/ssh-keygen
+sshd=/sbin/sshd
 
 # Without a configuration the server has nothing to serve.
 if [ ! -f "$config" ]; then

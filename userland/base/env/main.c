@@ -12,7 +12,8 @@
  *
  * -i (or - alone) starts from an empty environment.  Without a utility the
  * resulting environment is written, one name=value to a line.  It is
- * installed as /usr/bin/env, the path that #! lines name; the shell has an
+ * installed as /bin/env and linked from /usr/bin/env, the path that #!
+ * lines name; the shell has an
  * env builtin of its own.
  *
  * The new environment is an array of env's own.  It becomes the process
