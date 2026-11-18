@@ -1709,13 +1709,17 @@ survey_tree(
 	}
 }
 
-/* Tells whether a node's name speaks of I2C, fans, temperatures, sensors or the power manager. */
+/*
+ * Tells whether a node's name speaks of I2C, fans, temperatures, sensors,
+ * the power manager, the processor or the system controller.
+ */
 static int
 survey_name_matches(
 	const char *name)
 {
 	static const char *const words[] = {
-		"i2c", "fan", "therm", "adt", "temp", "sensor", "pmu", "smu"
+		"i2c", "fan", "therm", "adt", "temp", "sensor", "pmu", "smu",
+		"PowerPC", "uni-n"
 	};
 	uint32_t index;
 	int found;
@@ -1814,6 +1818,21 @@ survey_node(
 		survey_append_string(" a=");
 		survey_append_hex(cells[0]);
 	}
+
+	/* A device's revision (the system controller's). */
+	length = getprop(node, "device-rev", cells, sizeof(cells));
+	if (length != FIRMWARE_FAILED && length >= 4U) {
+		survey_append_string(" rev=");
+		survey_append_hex(cells[0]);
+	}
+
+	/* The processor's power-saving hints: nap that needs the caches flushed, and a dynamic power step. */
+	length = getprop(node, "flush-on-lock", cells, sizeof(cells));
+	if (length != FIRMWARE_FAILED)
+		survey_append_string(" flush-on-lock");
+	length = getprop(node, "dynamic-power-step", cells, sizeof(cells));
+	if (length != FIRMWARE_FAILED)
+		survey_append_string(" dynamic-power-step");
 	survey_append_string("\n");
 }
 

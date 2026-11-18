@@ -12,9 +12,10 @@
  * sync orders every access; eieio orders device accesses, which the
  * uncached, guarded windows do not reorder further.
  *
- * The family is the PVR's version.  The idle wait sets MSR[POW] with the
- * power-saving state HID0 selects: doze on the 603, 750 and 7400, which
- * the 7450 family does not have; nap there.  HID0's doze bit is the high
+ * The family is the PVR's version.  The idle wait, while
+ * ppc32_idle_mode says so, sets MSR[POW] with the power-saving state HID0
+ * selects: doze on the 603, 750 and 7400, which the 7450 family does not
+ * have; nap there.  HID0's doze bit is the high
  * BAT enable on the 7455 and later, so it is never set on them for
  * idling.  The time base and the decrementer run in both states, so the
  * tick ends the wait.  The kernel issues no AltiVec data stream, so no
@@ -55,11 +56,30 @@
 #define HID0_NAP		0x00400000U
 #define HID0_SLEEP		0x00200000U
 
+/*
+ * HID0's dynamic power management: idle execution units are stopped from
+ * cycle to cycle, whether or not the processor naps.
+ *
+ * Value referenced: MPC7450UM, HID0[DPM] (bit 11 from the most
+ * significant end); Linux v6.12 arch/powerpc/kernel/cpu_setup_6xx.S
+ * (setup_745x_specifics() sets it on the 7450 family).
+ */
+#define HID0_DPM		0x00100000U
+
 /* MSR[POW], which enters the power-saving state HID0 selects. */
 #define MSR_POW			0x00040000U
 
 /* MSSCR0's L2 prefetch engine count on the 7450 family, its two least significant bits. */
 #define MSSCR0_L2PFE		0x00000003U
+
+/*
+ * The seconds after the first idle wait (early in the boot) from which
+ * the wait starts saving power by itself, whatever the command line said;
+ * 0 never.  A kernel
+ * built to find out how the power-saving state behaves on a machine sets
+ * it, so the machine boots and can be reached before it naps.
+ */
+#define IDLE_POWER_AFTER_SECONDS	0U
 
 /* The one processor's record. */
 static struct ppc32_percpu boot_cpu;
@@ -69,18 +89,32 @@ static uint32_t cpu_pvr;
 static bool cpu_7450_family;
 
 /*
- * The MSR bits the idle wait sets besides EE: MSR_POW when the processor
- * saves power while it waits, 0 when it only waits.  Read by
- * ppc32_cpu_idle(); set once by ppc32_cpu_power_init().
+ * The MSR bits the idle wait sets besides EE when it saves power: MSR_POW
+ * when the processor has a power-saving state, 0 when it only waits.
+ * Read by ppc32_cpu_idle(); set once by ppc32_cpu_power_init().
  */
 uint32_t ppc32_idle_power;
 
 /*
  * The MSSCR0 bits the idle wait clears while it naps: the L2 prefetch
- * engines on the 7450 family, 0 when it does not nap or on the others.
- * Read by ppc32_cpu_idle(); set once by ppc32_cpu_power_init().
+ * engines on the 7450 family, 0 on the others.  Read by
+ * ppc32_cpu_idle(); set once by ppc32_cpu_power_init().
  */
 uint32_t ppc32_idle_prefetch;
+
+/*
+ * Whether the idle wait saves power: 1 to enter the state HID0 selects, 0
+ * to only wait.  Set by ppc32_cpu_power_init() from the command line, and
+ * by hal_cpu_idle() once the delay below has passed; ppc32_cpu_idle()
+ * reads it at every wait.
+ */
+volatile uint32_t ppc32_idle_mode;
+
+/*
+ * The time base at the first idle wait, from which the delay above is
+ * counted; 0 until that wait.  Only hal_cpu_idle() uses it.
+ */
+static uint64_t idle_first_counter;
 
 static void port_io_fatal(void);
 
@@ -143,7 +177,9 @@ ppc32_cpu_has_high_bats(
 
 /*
  * Chooses the idle wait's power-saving state in HID0: nap on the 7450
- * family, doze on the others; none when asked not to save power.
+ * family, doze on the others.  HID0 selects it whether or not the wait
+ * uses it (the state is entered only with MSR[POW]); save_power says
+ * whether the wait starts out using it.
  */
 void
 ppc32_cpu_power_init(
@@ -160,23 +196,24 @@ ppc32_cpu_power_init(
 		hid0 &= ~(HID0_DOZE | HID0_NAP | HID0_SLEEP);
 	}
 
-	/* The state the wait enters. */
-	state = "OFF";
-	ppc32_idle_power = 0;
+	/* The state the wait enters when it saves power. */
+	ppc32_idle_power = MSR_POW;
 	ppc32_idle_prefetch = 0;
-	if (save_power) {
-		ppc32_idle_power = MSR_POW;
-		if (cpu_7450_family) {
-			hid0 |= HID0_NAP;
-			ppc32_idle_prefetch = MSSCR0_L2PFE;
-			state = "NAP";
-		} else {
-			hid0 |= HID0_DOZE;
-			state = "DOZE";
-		}
+	if (cpu_7450_family) {
+		hid0 |= HID0_NAP | HID0_DPM;
+		ppc32_idle_prefetch = MSSCR0_L2PFE;
+		state = "NAP";
+	} else {
+		hid0 |= HID0_DOZE;
+		state = "DOZE";
 	}
 	__asm__ volatile("sync\n\tmtspr 1008,%0\n\tisync" : : "r"(hid0) : "memory");
-	hal_printf("PPC32 IDLE %s HID0 %08x\n", state, hid0);
+
+	/* Whether the wait starts out saving power. */
+	ppc32_idle_mode = 0;
+	if (save_power)
+		ppc32_idle_mode = 1;
+	hal_printf("PPC32 IDLE %s %s HID0 %08x\n", state, save_power ? "ON" : "OFF", hid0);
 }
 
 /*
@@ -186,6 +223,21 @@ void
 hal_cpu_idle(
 	void)
 {
+	uint64_t counter;
+	uint64_t frequency;
+	bool counted;
+
+	/* After the delay, if there is one, the wait saves power from here on. */
+	if (IDLE_POWER_AFTER_SECONDS != 0U && ppc32_idle_mode == 0) {
+		counted = hal_rtc_read_counter(&counter, &frequency);
+		if (counted && idle_first_counter == 0)
+			idle_first_counter = counter;
+		if (counted &&
+		    frequency != 0 &&
+		    (counter - idle_first_counter) / frequency >= IDLE_POWER_AFTER_SECONDS)
+			ppc32_idle_mode = 1;
+	}
+
 	/* The wait opens the mask; the interrupt is taken before the return. */
 	ppc32_cpu_idle();
 }

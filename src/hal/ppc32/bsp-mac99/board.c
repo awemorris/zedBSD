@@ -13,9 +13,8 @@
  * board only sums up the bring-up.  Restarting and turning off go
  * through the power manager.
  *
- * The idle wait does not save power unless the firmware's command line
- * has the word ppc32.powersave=on (doze, or nap on the 7450 family): on
- * the PowerBook G4 the nap's wait has not come back.
+ * The idle wait saves power (doze, or nap on the 7450 family) unless the
+ * firmware's command line has the word ppc32.powersave=off.
  */
 
 #include <hal/hal.h>
@@ -48,6 +47,7 @@ ppc32_cmain(
 	const struct mac99_board_info *board;
 	const struct mac99_interrupt_route *routes;
 	unsigned route_count;
+	bool powersave_off;
 
 	/* The firmware's answers, while it can still give them. */
 	mac99_firmware_read(initrd_address, initrd_size);
@@ -67,8 +67,9 @@ ppc32_cmain(
 	if (board->pmu_gpio_interrupt != 0xffffffffU)
 		mac99_openpic_sense(board->pmu_gpio_interrupt, board->pmu_gpio_sense);
 
-	/* The idle wait's power saving, only when the command line turns it on. */
-	ppc32_cpu_power_init(mac99_boot_option("ppc32.powersave=on"));
+	/* The idle wait's power saving, unless the command line turns it off. */
+	powersave_off = mac99_boot_option("ppc32.powersave=off");
+	ppc32_cpu_power_init(!powersave_off);
 
 	/* The pages, below the image's end. */
 	ppc32_page_init((uint32_t)(uintptr_t)__kernel_end);

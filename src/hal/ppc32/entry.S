@@ -120,7 +120,18 @@ ppc32_exception_common:
 	mfxer %r0
 	stw %r0,PPC32_FRAME_CALL + PPC32_FRAME_XER(%r1)
 	mfsrr0 %r0
-	stw %r0,PPC32_FRAME_CALL + PPC32_FRAME_PC(%r1)
+	lis %r4,ppc32_idle_nap_loop@ha
+	addi %r4,%r4,ppc32_idle_nap_loop@l
+	cmplw %r0,%r4
+	blt 2f
+	lis %r4,ppc32_idle_nap_loop_end@ha
+	addi %r4,%r4,ppc32_idle_nap_loop_end@l
+	cmplw %r0,%r4
+	bge 2f
+	lis %r4,ppc32_idle_nap_exit@ha
+	addi %r4,%r4,ppc32_idle_nap_exit@l
+	mr %r0,%r4
+2:	stw %r0,PPC32_FRAME_CALL + PPC32_FRAME_PC(%r1)
 	mfsrr1 %r0
 	rlwinm %r0,%r0,0,14,12
 	stw %r0,PPC32_FRAME_CALL + PPC32_FRAME_MSR(%r1)
@@ -454,10 +465,14 @@ ppc32_tlbie:
 
 	/*
 	 * Waits for an interrupt in the power-saving state, then closes the
-	 * mask.  The state is MSR[POW] when ppc32_idle_power holds it (0
-	 * when the processor is not to save power).  The exception entry
-	 * clears the power-saving bit of the state it returns to, so the wait
-	 * ends at the first interrupt.  When ppc32_idle_prefetch holds MSSCR0
+	 * mask.  The state is MSR[POW] when ppc32_idle_mode is not 0 and
+	 * ppc32_idle_power holds it; otherwise the wait only opens the mask
+	 * once.  The power-saving state is entered from a loop that sets
+	 * MSR[POW] again and again and never clears it itself: the exception
+	 * entry, finding it interrupted the loop, returns to
+	 * ppc32_idle_nap_exit instead, with the power-saving bit cleared, so
+	 * the wait ends at the first interrupt and POW is never taken back
+	 * while the processor may still be entering the state.  When ppc32_idle_prefetch holds MSSCR0
 	 * bits (the 7450 family's L2 prefetch engines, which must be idle
 	 * before nap), the wait clears them, flushes the image's first line
 	 * four times so the engines drain, and restores MSSCR0 after the
@@ -467,6 +482,12 @@ ppc32_tlbie:
 	.type ppc32_cpu_idle,@function
 ppc32_cpu_idle:
 	mfmsr %r3
+	li %r5,0
+	li %r6,0
+	lis %r4,ppc32_idle_mode@ha
+	lwz %r4,ppc32_idle_mode@l(%r4)
+	cmpwi %r4,0
+	beq 1f
 	lis %r5,ppc32_idle_power@ha
 	lwz %r5,ppc32_idle_power@l(%r5)
 	lis %r6,ppc32_idle_prefetch@ha
@@ -488,9 +509,21 @@ ppc32_cpu_idle:
 	sync
 1:	ori %r4,%r3,PPC32_MSR_EE
 	or %r4,%r4,%r5
+	cmpwi %r5,0
+	beq 2f
+	.globl ppc32_idle_nap_loop
+ppc32_idle_nap_loop:
 	sync
 	mtmsr %r4
 	isync
+	b ppc32_idle_nap_loop
+	.globl ppc32_idle_nap_loop_end
+ppc32_idle_nap_loop_end:
+2:	sync
+	mtmsr %r4
+	isync
+	.globl ppc32_idle_nap_exit
+ppc32_idle_nap_exit:
 	mtmsr %r3
 	isync
 	cmpwi %r6,0
