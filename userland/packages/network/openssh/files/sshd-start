@@ -9,8 +9,8 @@
 
 
 config=/etc/ssh/sshd_config
-keygen=/usr/bin/ssh-keygen
-sshd=/usr/sbin/sshd
+keygen=/bin/ssh-keygen
+sshd=/sbin/sshd
 
 # The server refuses to start without a configuration, and says so in a way
 # that is harder to read than this.

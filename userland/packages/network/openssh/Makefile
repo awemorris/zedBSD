@@ -35,10 +35,10 @@ $(eval $(call EXTERNAL_SOURCE,openssh))
 # on the staged files rather than on anything inside the external tree.
 OPENSSH_CONFIGURED := $(EXT_openssh_BUILDDIR)/.zedbsd-configured
 OPENSSH_STAGED := $(EXT_openssh_STAGEDIR)/.zedbsd-staged
-OPENSSH_SSH := $(EXT_openssh_STAGEDIR)/usr/bin/ssh
-OPENSSH_SSHD := $(EXT_openssh_STAGEDIR)/usr/sbin/sshd
-OPENSSH_KEYGEN := $(EXT_openssh_STAGEDIR)/usr/bin/ssh-keygen
-OPENSSH_SCP := $(EXT_openssh_STAGEDIR)/usr/bin/scp
+OPENSSH_SSH := $(EXT_openssh_STAGEDIR)/bin/ssh
+OPENSSH_SSHD := $(EXT_openssh_STAGEDIR)/sbin/sshd
+OPENSSH_KEYGEN := $(EXT_openssh_STAGEDIR)/bin/ssh-keygen
+OPENSSH_SCP := $(EXT_openssh_STAGEDIR)/bin/scp
 OPENSSH_SFTP_SERVER := \
 	$(EXT_openssh_STAGEDIR)/usr/libexec/sftp-server
 OPENSSH_SESSION := \
@@ -79,7 +79,8 @@ $(OPENSSH_CONFIGURED): $(EXT_openssh_SRCSTAMP) \
 		. '$(EXTERNAL_CROSS_ENV)' && \
 		'$(EXT_openssh_SRCDIR)/configure' \
 			--host="$$CROSS_TRIPLE" \
-			--prefix=/usr --sysconfdir=/etc/ssh \
+			--prefix=/usr --bindir=/bin --sbindir=/sbin \
+			--sysconfdir=/etc/ssh \
 			--with-privsep-path=/var/empty \
 			--with-privsep-user=sshd \
 			--with-ssl-dir='$(OPENSSH_SSL_STAGE)/usr' \
@@ -141,10 +142,10 @@ PACKAGE_INPUTS += $(if $(filter openssh,$(USER_PROGRAMS)),\
 	$(OPENSSH_SERVICE) $(OPENSSH_START) \
 	$(OPENSSH_LICENSE))
 PACKAGE_FILES += $(if $(filter openssh,$(USER_PROGRAMS)),\
-	--file $(PACKAGE_BINDIR)/ssh=$(OPENSSH_SSH) \
-	--file /usr/sbin/sshd=$(OPENSSH_SSHD) \
-	--file $(PACKAGE_BINDIR)/ssh-keygen=$(OPENSSH_KEYGEN) \
-	--file $(PACKAGE_BINDIR)/scp=$(OPENSSH_SCP) \
+	--file /bin/ssh=$(OPENSSH_SSH) \
+	--file /sbin/sshd=$(OPENSSH_SSHD) \
+	--file /bin/ssh-keygen=$(OPENSSH_KEYGEN) \
+	--file /bin/scp=$(OPENSSH_SCP) \
 	--file /usr/libexec/sftp-server=$(OPENSSH_SFTP_SERVER) \
 	--file /usr/libexec/sshd-session=$(OPENSSH_SESSION) \
 	--file /usr/libexec/sshd-auth=$(OPENSSH_AUTH) \
@@ -153,5 +154,5 @@ PACKAGE_FILES += $(if $(filter openssh,$(USER_PROGRAMS)),\
 	--file /etc/service.d/sshd=$(OPENSSH_SERVICE) \
 	--file /usr/libexec/sshd-start=$(OPENSSH_START) \
 	--file /usr/share/licenses/openssh/LICENCE=$(OPENSSH_LICENSE) \
-	--mode /usr/sbin/sshd=0755 --mode /etc/ssh/sshd_config=0600 \
+	--mode /sbin/sshd=0755 --mode /etc/ssh/sshd_config=0600 \
 	--mode /usr/libexec/sshd-start=0755)

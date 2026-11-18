@@ -52,7 +52,7 @@
 #include "sshd.h"
 
 /* The sshd program the monitor starts its children from, unless its caller names another. */
-#define SSHD_PROGRAM		"/usr/sbin/sshd"
+#define SSHD_PROGRAM		"/sbin/sshd"
 
 /* The directory of the pseudo-terminals a login record may name. */
 #define SSHD_PTS_DIRECTORY	"/dev/pts/"
