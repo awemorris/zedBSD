@@ -27,6 +27,7 @@ from it.
 | m68k virt | QEMU's kernel loader | none | QEMU boot information |
 | SPARC V9 sun4u | OpenBoot (OpenBIOS in QEMU) | `sparcv9/` (two stages) | sun4u handoff, from the loader |
 | X68000 (m68k) | SCSI IPL ROM and IOCS | `x68k/` (two stages) | X68000 handoff, from the loader |
+| 68040 Macintosh (m68k) | Apple ROM, through the disk's Apple driver | `mac68k/` (two stages) | m68k boot information (Linux form), from the loader |
 
 `common/`, `include/` and `bios/` hold the parts the x86 loaders share: the
 boot-key override, the memory map, the FAT directory search, the logo, and
@@ -221,6 +222,29 @@ checks it, builds the X68000 handoff (`x68k/handoff.h`), and enters the
 kernel; IOCS is not called after that.  `src/hal/m68k/bsp-x68k/` checks the
 handoff and builds the kernel handoff.  QEMU has no X68000 machine;
 `make run` starts MAME instead.
+
+68040 Macintosh
+---------------
+
+`mac68k/` is a two-stage loader that runs on the Macintosh ROM.  The disk
+is Apple-partitioned; its driver is Apple's, installed by Apple's disk
+tools (zedBSD's image leaves the driver area empty).  The ROM reads the
+boot block (the first 1 KiB of the HFS partition `zedBSD`) through that
+driver and runs it.  The boot block finds the drive it came from in the
+ROM's drive queue, reads the second stage `zedboot` from the place the
+image's tool recorded, checks its CRC-32 and enters it wherever the ROM's
+heap put it (`zedboot` relocates itself).  The second stage takes the
+screen the ROM set up (an 8-bit screen gets the RGB332 colours), asks
+Gestalt for the machine, finds the physical RAM by translating the memory
+the ROM maps, reads `zedbsd.cfg` and the kernel through the File Manager
+(or the kernel from its recorded sectors), and writes the m68k boot
+information in the Linux form after the kernel's image.  It then leaves
+the ROM through a trampoline that runs at an address equal to its
+physical one: the trampoline turns the caches and translation off, moves
+the pages of the loader's buffers that lie where the kernel goes, places
+the kernel and its records, and enters the kernel.
+`src/hal/m68k/bsp-mac68k/bootinfo.c` reads the records.  QEMU's `q800`
+starts the same kernel directly with the same records.
 
 Building
 --------

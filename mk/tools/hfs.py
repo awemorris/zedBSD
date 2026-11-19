@@ -12,6 +12,11 @@ data.  One folder can be blessed (the master directory block's Finder
 information word 0), which is where Open Firmware looks for the file of
 type 'tbxi' when it boots "\\\\:tbxi".
 
+The boot blocks (the first two sectors, which a 68k Macintosh's ROM
+runs) are left zero for the caller.  Each file's data is one extent; its
+byte offset in the volume is left in the file's offset once the volume is
+laid out.
+
 Values referenced: Apple, Inside Macintosh: Files (1992), chapter 2
 "File Manager": the master directory block's fields and offsets, the
 volume bitmap, the B*-tree node descriptor, header record and map record,
@@ -68,6 +73,7 @@ class File:
         self.ident = None
         self.first_block = 0
         self.block_count = 0
+        self.offset = 0
 
 
 def mac_name(name):
@@ -326,6 +332,7 @@ def make_volume(size, root, name="zedBSD", blessed=None, when=None):
         if isinstance(child, File) and child.data:
             at = block_offset(child.first_block)
             volume[at:at + len(child.data)] = child.data
+            child.offset = at
 
     # The volume bitmap: every block used so far.
     bitmap_at = 3 * SECTOR

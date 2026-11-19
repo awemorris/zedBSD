@@ -19,6 +19,11 @@ include both the expected success observation and a diagnostic path.
   `macppc32` image, the Option-key picker and the Open Firmware prompt, the
   fan warning, and the slow Xzed session.
 
+- [Booting a 68040 Macintosh from a BlueSCSI disk](mac68k-boot.md): the
+  `mac68k` image on a BlueSCSI v2, installing Apple's disk driver with Apple
+  HD SC Setup or Drive Setup, the monitor and memory settings, and the
+  loader's messages.
+
 - [Programming a Keiland application](keiland-programming.md): the
   application, its window and titlebar, the immediate mode user interface and
   the main loop, the widgets, the menus, and the desktop's other services.

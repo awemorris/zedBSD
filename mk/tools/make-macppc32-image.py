@@ -47,32 +47,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import apm  # noqa: E402
 import hfs  # noqa: E402
 
-SECTOR = 512
-MAP_BLOCKS = 63
-FIRST_PARTITION = 1 + MAP_BLOCKS
-
-# Partition status: valid, allocated, in use, readable, writable; boot adds valid boot information.
-STATUS_DATA = 0x00000037
-STATUS_BOOT = 0x0000007F
+SECTOR = apm.SECTOR
+MAP_BLOCKS = apm.MAP_BLOCKS
+FIRST_PARTITION = apm.FIRST_PARTITION
+STATUS_DATA = apm.STATUS_DATA
+STATUS_BOOT = apm.STATUS_BOOT
 
 PT_LOAD = 1
-
-
-def ddm(total_sectors):
-    """The Driver Descriptor Map: signature, block size, block count, no drivers."""
-    block = bytearray(SECTOR)
-    struct.pack_into(">2sHIHHIH", block, 0, b"ER", SECTOR, total_sectors, 0, 0, 0, 0)
-    return bytes(block)
-
-
-def map_entry(map_count, start, count, name, kind, status):
-    """One partition map entry."""
-    block = bytearray(SECTOR)
-    struct.pack_into(">2sHIII32s32sIII", block, 0, b"PM", 0, map_count, start, count,
-                     name.encode("ascii"), kind.encode("ascii"), 0, count, status)
-    return bytes(block)
 
 
 def kernel_for_firmware(path):
@@ -157,24 +141,19 @@ def main():
     map_count = 1 + len(parts)
     total = FIRST_PARTITION + sum(len(p[3]) // SECTOR for p in parts)
 
-    # The image, written in place and published by a rename.
+    # The image: the map, then each partition.
+    pieces = [(0, apm.ddm(total)),
+              (1, apm.map_entry(map_count, 1, MAP_BLOCKS, "Apple", "Apple_partition_map", STATUS_DATA))]
+    start = FIRST_PARTITION
+    places = []
+    for index, (name, kind, status, data) in enumerate(parts):
+        count = len(data) // SECTOR
+        pieces.append((2 + index, apm.map_entry(map_count, start, count, name, kind, status)))
+        places.append((start, data))
+        start += count
+    pieces.extend(places)
     output = Path(args.output)
-    temporary = output.with_name(output.name + ".tmp")
-    with open(temporary, "wb") as handle:
-        handle.write(ddm(total))
-        handle.write(map_entry(map_count, 1, MAP_BLOCKS, "Apple", "Apple_partition_map", STATUS_DATA))
-        start = FIRST_PARTITION
-        places = []
-        for name, kind, status, data in parts:
-            count = len(data) // SECTOR
-            handle.write(map_entry(map_count, start, count, name, kind, status))
-            places.append((start, data))
-            start += count
-        for start, data in places:
-            handle.seek(start * SECTOR)
-            handle.write(data)
-        handle.truncate(total * SECTOR)
-    temporary.replace(output)
+    apm.write_disk(output, total, pieces)
     print(f"{output}: {total} sectors; " +
           ", ".join(f"{index + 2}={name}@{places[index][0]}" for index, (name, _, _, _) in enumerate(parts)))
 
