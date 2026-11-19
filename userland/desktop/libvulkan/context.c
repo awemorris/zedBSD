@@ -40,6 +40,7 @@
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264 1U
 #define VULKAN_NATIVE_CAPSET_SYNC_COMMAND 2U
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265 4U
+#define VULKAN_NATIVE_CAPSET_CORE11_QUERIES 8U
 
 /*
  * How many context mutexes the calling thread holds through
@@ -233,9 +234,14 @@ vulkan_context_open(
 	 * decode queue family of that codec exists and that it reads the
 	 * codec's structures on the video wire, the command bit its promise
 	 * that GPU_COMMAND runs at once (used only with the decoder's
-	 * notifications); unknown bits are ignored so a later renderer stays
-	 * usable.
+	 * notifications), the core 1.1 bit its promise that it answers the
+	 * Vulkan 1.1 feature and property queries (GPU_OP_GET_PHYSICAL_DEVICE_
+	 * FEATURES2 and _PROPERTIES2 with the 1.1 structures chained); unknown
+	 * bits are ignored so a later renderer stays usable.  A Venus host,
+	 * which has no native word, is a Vulkan 1.1 implementation and answers
+	 * those queries itself.
 	 */
+	context->core11_queries = VK_TRUE;
 	if (capset.bytes == VULKAN_NATIVE_CAPSET_BYTES) {
 		native_magic = vulkan_load_word(capset.data + 168);
 		native_flags = vulkan_load_word(capset.data + 172);
@@ -245,6 +251,9 @@ vulkan_context_open(
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265) != 0)
 			context->video_h265 = VK_TRUE;
+		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
+		    (native_flags & VULKAN_NATIVE_CAPSET_CORE11_QUERIES) == 0)
+			context->core11_queries = VK_FALSE;
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_SYNC_COMMAND) != 0 &&
 		    (context->capabilities & GPU_CAP_NOTIFICATION) != 0)

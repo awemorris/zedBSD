@@ -19,6 +19,14 @@
 #include <vulkan/vulkan_wayland.h>
 #include "include/libc/vulkan/vulkan_zedbsd.h"
 #include <uapi/gpu-op.h>
+#include "version.h"
+
+/*
+ * The highest Vulkan version the library implements: the instance's
+ * version, and the most a device names (version.c decides each device's
+ * version from its renderer's answers).
+ */
+#define VULKAN_LIBRARY_VERSION		VK_MAKE_VERSION(1, 0, 0)
 
 #if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
 /*
@@ -139,6 +147,12 @@ struct VkPhysicalDevice_T {
 	VkQueueFamilyProperties *queue_families;
 	uint32_t queue_family_count;
 	uint64_t supported_extensions;
+	/*
+	 * What the renderer reports of the Vulkan 1.1 core (reported VK_FALSE
+	 * when it was not asked or did not answer), and the version the device
+	 * names from it, which properties.apiVersion holds.
+	 */
+	struct vulkan_core11_facts core11;
 	/*
 	 * The video codec operations of each queue family, by family index.
 	 * They are asked of the renderer once, and only when its native word
@@ -590,6 +604,14 @@ struct vulkan_context {
 	 * returns (EAGAIN while earlier work of the session is queued).
 	 */
 	VkBool32 sync_command;
+	/*
+	 * The renderer answers vkGetPhysicalDeviceFeatures2 and
+	 * vkGetPhysicalDeviceProperties2 with the Vulkan 1.1 structures
+	 * chained (instance.c: physical_load_core11): a Venus host always
+	 * (it is Vulkan 1.1 or later), a native renderer when its native word
+	 * promises it.
+	 */
+	VkBool32 core11_queries;
 	uint64_t max_resource_bytes;
 	uint32_t capabilities;
 	uint64_t stream_handle;

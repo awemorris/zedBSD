@@ -11,6 +11,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "internal.h"
@@ -26,6 +27,12 @@ static VkResult instance_create_remote(struct vulkan_instance_context *link, con
 static VkResult instance_enumerate_remote(struct vulkan_instance_context *link);
 static VkResult physical_load(struct VkPhysicalDevice_T *physical);
 static VkResult physical_load_queues(struct VkPhysicalDevice_T *physical);
+static VkResult physical_load_core11(struct VkPhysicalDevice_T *physical);
+static void physical_core11_features(struct vulkan_reader *reader, struct vulkan_core11_facts *facts);
+static void physical_core11_properties(struct vulkan_reader *reader, struct vulkan_core11_facts *facts);
+static void physical_chain_request(struct vulkan_writer *writer, uint32_t outer, const uint32_t *types, uint32_t count);
+static void physical_chain_reply(struct vulkan_reader *reader, uint32_t outer, const uint32_t *types, uint32_t count);
+static void physical_version(struct VkPhysicalDevice_T *physical);
 static VkResult physical_load_video(struct VkPhysicalDevice_T *physical);
 static VkBool32 physical_video_promised(const struct VkPhysicalDevice_T *physical);
 static VkResult physical_query_begin(struct VkPhysicalDevice_T *physical, uint32_t opcode, struct vulkan_reader *reader);
@@ -62,8 +69,16 @@ vkCreateInstance(
 	if (pCreateInfo->pApplicationInfo != NULL && pCreateInfo->pApplicationInfo->apiVersion != 0)
 		version = pCreateInfo->pApplicationInfo->apiVersion;
 
-	/* This implementation exposes the complete 1.0 API, without promising later cores. */
-	if (VK_VERSION_MAJOR(version) != 1 || VK_VERSION_MINOR(version) != 0)
+	/*
+	 * A library of Vulkan 1.0 takes only 1.0; one of a later version takes
+	 * any apiVersion, the devices' own versions deciding what they offer.
+	 *
+	 * Procedure referenced: the Vulkan 1.1 specification (section 4.2,
+	 * VkApplicationInfo: an implementation of 1.1 or later does not
+	 * return VK_ERROR_INCOMPATIBLE_DRIVER for any apiVersion).
+	 */
+	if (VULKAN_LIBRARY_VERSION < VK_MAKE_VERSION(1, 1, 0) &&
+	    (VK_VERSION_MAJOR(version) != 1 || VK_VERSION_MINOR(version) != 0))
 		return VK_ERROR_INCOMPATIBLE_DRIVER;
 
 	/* Checks requested local extension and layer names before opening a GPU session. */
@@ -1136,7 +1151,8 @@ physical_load(
 	if (physical->properties.apiVersion < VK_MAKE_VERSION(1, 1, 0))
 		return VK_ERROR_INCOMPATIBLE_DRIVER;
 
-	/* Advertises the implemented public version and the local mapped-address guarantee. */
+	/* The local mapped-address guarantee; the public version is decided below from the renderer's answers. */
+	physical->core11.api_version = physical->properties.apiVersion;
 	physical->properties.apiVersion = VK_API_VERSION_1_0;
 	physical->properties.limits.minMemoryMapAlignment = 64;
 	physical->properties.deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0';
@@ -1151,6 +1167,12 @@ physical_load(
 	status = vulkan_reply_finish(physical->object.context, &reader, status);
 	if (status != VK_SUCCESS)
 		return status;
+
+	/* The Vulkan 1.1 facts, where the renderer answers their queries, and the version they decide. */
+	status = physical_load_core11(physical);
+	if (status != VK_SUCCESS)
+		return status;
+	physical_version(physical);
 
 	/* Retrieves original memory type indices before filtering unsupported cache behavior. */
 	status = physical_query_begin(physical, GPU_OP_GET_PHYSICAL_DEVICE_MEMORY_PROPERTIES, &reader);
@@ -1248,6 +1270,245 @@ physical_load(
 
 	/* Succeeded: the snapshot combines real renderer capability and real guest transport support. */
 	return VK_SUCCESS;
+}
+
+/*
+ * The structures of the Vulkan 1.1 features and properties chained to the
+ * *2 queries, first to last.
+ *
+ * Values referenced: the Vulkan 1.1 specification (VkStructureType of
+ * the 1.1 feature and property structures).
+ */
+static const uint32_t core11_feature_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES
+};
+static const uint32_t core11_property_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES
+};
+
+/* The number of entries of a table. */
+#define CORE11_COUNT(table)		((uint32_t)(sizeof(table) / sizeof((table)[0])))
+
+/*
+ * Asks the renderer for its Vulkan 1.1 features and properties, when it
+ * answers those queries (a Venus host, or a native renderer that promises
+ * it), into physical->core11.  A renderer not asked leaves the facts
+ * unreported; one that answers malformed loses the session.
+ */
+static VkResult
+physical_load_core11(
+	struct VkPhysicalDevice_T *physical)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkPhysicalDeviceFeatures features;
+	VkPhysicalDeviceProperties properties;
+	VkBool32 present;
+	VkResult status;
+
+	/* A renderer that does not answer the queries reports nothing of Vulkan 1.1. */
+	physical->core11.reported = VK_FALSE;
+	if (!physical->object.context->core11_queries)
+		return VK_SUCCESS;
+
+	/* The features: the 1.1 structures chained to VkPhysicalDeviceFeatures2. */
+	vulkan_writer_init_for_object(&writer, &physical->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2);
+	vulkan_write_u64(&writer, physical->object.wire_id);
+	physical_chain_request(&writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, core11_feature_types, CORE11_COUNT(core11_feature_types));
+	status = vulkan_command_execute(physical->object.context, &writer, 4096U, &reader, VK_FALSE);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS) {
+		present = vulkan_reply_pointer(&reader);
+		if (!present)
+			reader.error = VK_ERROR_DEVICE_LOST;
+		physical_chain_reply(&reader, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, core11_feature_types, CORE11_COUNT(core11_feature_types));
+		physical_core11_features(&reader, &physical->core11);
+		vulkan_decode_VkPhysicalDeviceFeatures(&reader, &features);
+	}
+
+	/* A malformed answer is the renderer's failure, not an absent feature. */
+	status = vulkan_reply_finish(physical->object.context, &reader, status);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* The properties: the 1.1 structures chained to VkPhysicalDeviceProperties2. */
+	vulkan_writer_init_for_object(&writer, &physical->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2);
+	vulkan_write_u64(&writer, physical->object.wire_id);
+	physical_chain_request(&writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, core11_property_types, CORE11_COUNT(core11_property_types));
+	status = vulkan_command_execute(physical->object.context, &writer, 4096U, &reader, VK_FALSE);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS) {
+		present = vulkan_reply_pointer(&reader);
+		if (!present)
+			reader.error = VK_ERROR_DEVICE_LOST;
+		physical_chain_reply(&reader, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, core11_property_types, CORE11_COUNT(core11_property_types));
+		physical_core11_properties(&reader, &physical->core11);
+		vulkan_decode_VkPhysicalDeviceProperties(&reader, &properties);
+	}
+
+	/* The same for the properties. */
+	status = vulkan_reply_finish(physical->object.context, &reader, status);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the renderer reported its Vulkan 1.1 facts. */
+	physical->core11.reported = VK_TRUE;
+	return VK_SUCCESS;
+}
+
+/*
+ * Reads the fields of the 1.1 feature structures, last of the chain
+ * first: shader draw parameters, sampler YCbCr conversion, protected
+ * memory, variable pointers, 16-bit storage, multiview.
+ */
+static void
+physical_core11_features(
+	struct vulkan_reader *reader,
+	struct vulkan_core11_facts *facts)
+{
+	/* Shader draw parameters, sampler YCbCr conversion and protected memory. */
+	facts->shader_draw_parameters = vulkan_read_u32(reader);
+	facts->sampler_ycbcr_conversion = vulkan_read_u32(reader);
+	facts->protected_memory = vulkan_read_u32(reader);
+
+	/* Variable pointers. */
+	facts->variable_pointers_storage_buffer = vulkan_read_u32(reader);
+	facts->variable_pointers = vulkan_read_u32(reader);
+
+	/* 16-bit storage. */
+	facts->storage_buffer_16bit = vulkan_read_u32(reader);
+	facts->uniform_storage_buffer_16bit = vulkan_read_u32(reader);
+	facts->storage_push_constant_16 = vulkan_read_u32(reader);
+	facts->storage_input_output_16 = vulkan_read_u32(reader);
+
+	/* Multiview. */
+	facts->multiview = vulkan_read_u32(reader);
+	facts->multiview_geometry_shader = vulkan_read_u32(reader);
+	facts->multiview_tessellation_shader = vulkan_read_u32(reader);
+}
+
+/*
+ * Reads the fields of the 1.1 property structures, last of the chain
+ * first: maintenance 3, protected memory, multiview, point clipping,
+ * subgroup.
+ */
+static void
+physical_core11_properties(
+	struct vulkan_reader *reader,
+	struct vulkan_core11_facts *facts)
+{
+	/* Maintenance 3 and protected memory. */
+	facts->max_per_set_descriptors = vulkan_read_u32(reader);
+	facts->max_memory_allocation_size = vulkan_read_u64(reader);
+	facts->protected_no_fault = vulkan_read_u32(reader);
+
+	/* Multiview and point clipping. */
+	facts->max_multiview_view_count = vulkan_read_u32(reader);
+	facts->max_multiview_instance_index = vulkan_read_u32(reader);
+	facts->point_clipping = vulkan_read_u32(reader);
+
+	/* The subgroup. */
+	facts->subgroup_size = vulkan_read_u32(reader);
+	facts->subgroup_stages = vulkan_read_u32(reader);
+	facts->subgroup_operations = vulkan_read_u32(reader);
+	facts->subgroup_quad_all_stages = vulkan_read_u32(reader);
+}
+
+/* Writes the output chain's headers of a *2 query: the outer structure, then each chained one. */
+static void
+physical_chain_request(
+	struct vulkan_writer *writer,
+	uint32_t outer,
+	const uint32_t *types,
+	uint32_t count)
+{
+	uint32_t index;
+
+	/* The outer structure, present. */
+	vulkan_write_u64(writer, 1U);
+	vulkan_write_u32(writer, outer);
+
+	/* Each chained structure, the last followed by an absent next. */
+	for (index = 0U; index < count; index++) {
+		vulkan_write_u64(writer, 1U);
+		vulkan_write_u32(writer, types[index]);
+	}
+	vulkan_write_u64(writer, 0U);
+}
+
+/* Checks the reply's chain headers of a *2 query against the request's. */
+static void
+physical_chain_reply(
+	struct vulkan_reader *reader,
+	uint32_t outer,
+	const uint32_t *types,
+	uint32_t count)
+{
+	uint64_t next;
+	uint32_t type;
+	uint32_t index;
+
+	/* The outer structure. */
+	type = vulkan_read_u32(reader);
+	if (type != outer)
+		reader->error = VK_ERROR_DEVICE_LOST;
+
+	/* Each chained structure in the same order, then the end of the chain. */
+	for (index = 0U; index < count; index++) {
+		next = vulkan_read_u64(reader);
+		type = vulkan_read_u32(reader);
+		if (next != 1U || type != types[index])
+			reader->error = VK_ERROR_DEVICE_LOST;
+	}
+	next = vulkan_read_u64(reader);
+	if (next != 0U)
+		reader->error = VK_ERROR_DEVICE_LOST;
+}
+
+/*
+ * Decides the device's public version from its Vulkan 1.1 facts, and
+ * says why a later version is not named when VULKAN_ZEDBSD_VERSION_LOG
+ * asks for it (the log of the version rule, for a person finding why a
+ * device names 1.0).
+ */
+static void
+physical_version(
+	struct VkPhysicalDevice_T *physical)
+{
+	const char *reasons[VULKAN_VERSION_REASONS];
+	const char *variable;
+	uint32_t version;
+	uint32_t count;
+	uint32_t index;
+
+	/* The rule, the same for every renderer. */
+	version = vulkan_version_decide(VULKAN_LIBRARY_VERSION, &physical->core11, reasons, VULKAN_VERSION_REASONS, &count);
+	physical->properties.apiVersion = version;
+
+	/* The reasons, on request. */
+	variable = getenv("VULKAN_ZEDBSD_VERSION_LOG");
+	if (variable == NULL || variable[0] == '\0')
+		return;
+	fprintf(stderr, "VULKAN VERSION device=\"%s\" renderer=%u.%u version=%u.%u reasons=%u\n",
+	    physical->properties.deviceName,
+	    VK_VERSION_MAJOR(physical->core11.api_version),
+	    VK_VERSION_MINOR(physical->core11.api_version),
+	    VK_VERSION_MAJOR(version),
+	    VK_VERSION_MINOR(version),
+	    count);
+	for (index = 0U; index < count && index < VULKAN_VERSION_REASONS; index++)
+		fprintf(stderr, "VULKAN VERSION reason: %s\n", reasons[index]);
 }
 
 /* Requests one fixed immutable physical output, including partial-array framing. */
