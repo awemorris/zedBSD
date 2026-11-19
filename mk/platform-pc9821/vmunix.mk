@@ -97,7 +97,7 @@ $(BUILD)/vmunix: $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a
 	@echo "  LD      vmunix"
 	@$(LD) -m elf_i386 --gc-sections -z max-page-size=512 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a -o $@
 	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || { $(NM) -u $@; exit 1; }
-	@$(PYTHON) mk/platform-pc9821/tools/patch-stage2.py $@
+	@$(PYTHON) mk/tools/patch-stage2.py $@
 
 $(BUILD)/%.o: %.c
 	@echo "  CC      $<"

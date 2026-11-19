@@ -7,7 +7,7 @@
 
 /*
  * Only the calls <compat/ssl/ssl.h> declares leave the library; the sslc_ names stay inside.  The map has no
- * version node: the checker of the shared libraries (tools/build/check-dynamic-elf.py) takes no symbol version
+ * version node: the checker of the shared libraries (mk/tools/check-dynamic-elf.py) takes no symbol version
  * definitions in a library, as in every other library of the system.
  */
 {

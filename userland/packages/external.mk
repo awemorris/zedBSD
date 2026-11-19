@@ -47,7 +47,7 @@ PYTHON ?= python3
 # The check a package runs on what it staged: that each dynamic ELF file is
 # one the system's loader takes (its machine, its role, the libraries it
 # needs).
-EXTERNAL_CHECK_DYNAMIC_ELF := $(EXTERNAL_ROOT)/mk/old-tools/build/check-dynamic-elf.py
+EXTERNAL_CHECK_DYNAMIC_ELF := $(EXTERNAL_ROOT)/mk/tools/check-dynamic-elf.py
 
 # Archives are architecture-independent, so every configured build
 # shares one distfiles directory.  Extracted trees and build

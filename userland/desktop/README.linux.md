@@ -10,7 +10,7 @@ Debian 13 / amd64 / glibc で検証した Linux 版。compositor、独自 Waylan
 make -j$(nproc) keiland-linux
 ```
 
-Debian 13 で要る package（apt の名前。dnf/yum・pacman の名前は `tools/build/keiland-prerequisites.sh` の表）:
+Debian 13 で要る package（apt の名前。dnf/yum・pacman の名前は `mk/tools/keiland-prerequisites.sh` の表）:
 
 ```sh
 sudo apt install build-essential libvulkan-dev linux-libc-dev python3 curl

@@ -1,4 +1,4 @@
-# Files' texts in Japanese (domain files, WS158 p004). tools/i18n/tr.py update keeps the translations.
+# Files' texts in Japanese (domain files, WS158 p004). mk/tools/tr.py update keeps the translations.
 # userland/desktop/locale/files.keys:3
 msg	Today	今日
 # userland/desktop/locale/files.keys:4, userland/desktop/files/ui.c:710

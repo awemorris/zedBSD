@@ -5,7 +5,7 @@ that the desktop and its applications say one thing one way.
 
 A translator checks a new text against this list before adding it, and adds
 a word here when a catalog uses it for the first time.
-`tools/i18n/tr.py check` checks the catalogs' form; this list is checked
+`mk/tools/tr.py check` checks the catalogs' form; this list is checked
 by review.
 
 ## Style

@@ -16,7 +16,7 @@ HOST_CC ?= cc
 IMAGE_HOST ?= $(BUILD)/zedimage-host
 
 # Host image tool
-$(IMAGE_HOST): mk/old-tools/build/zedimage-host.c
+$(IMAGE_HOST): mk/tools/zedimage-host.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
 
@@ -43,9 +43,9 @@ ROOT_MIB ?= 1024
 ROOT_INODES ?= 65536
 
 SWAP_IMAGE := $(BUILD)/native-swap-$(SWAP_MIB)m.img
-$(SWAP_IMAGE): mk/tools/make-swapfile.noct
+$(SWAP_IMAGE): mk/tools/make-swapfile.py
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
+	$(PYTHON) mk/tools/make-swapfile.py \
 		--size-mib $(SWAP_MIB) --label zedBSD-swap --output $@
 
 ZEDBSD_CONFIG_SRC := mk/platform-i386/zedbsd.cfg
@@ -69,7 +69,7 @@ $(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) $(P
 ROOT_IMAGE := $(BUILD)/i386-root-$(ROOT_MIB)m.ufs
 $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
+	$(PYTHON) mk/tools/make-rootfs.py \
 		--backend $(abspath $(IMAGE_HOST)) --force \
 		--profile i386 --output $@ --tree $(BUILD)/rootfs \
 		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)

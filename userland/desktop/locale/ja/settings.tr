@@ -1,4 +1,4 @@
-# Settings' texts in Japanese (domain settings, WS158 p004). tools/i18n/tr.py update keeps the translations.
+# Settings' texts in Japanese (domain settings, WS158 p004). mk/tools/tr.py update keeps the translations.
 # userland/desktop/locale/settings.keys:3, userland/desktop/settings/ui.c:580
 msg	Settings	設定
 # userland/desktop/locale/settings.keys:4

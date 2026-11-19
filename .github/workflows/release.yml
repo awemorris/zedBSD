@@ -7,7 +7,7 @@
 # of the final tag's commit (which may differ from the rc's only under docs/release/).  The user then makes it
 # the latest release by hand.  Neither path marks a release latest.
 #
-# The tag checks are tools/release/release-tag.sh; what the configuration says (the version, its name and
+# The tag checks are mk/tools/release/release-tag.py; what the configuration says (the version, its name and
 # whether the Windows zip is carried) is `make release-info`.  The notes are docs/release/zedbsd-<VERSION>.md.
 name: Release
 
@@ -55,7 +55,7 @@ jobs:
       - name: Check the tag against VERSION
         id: tag
         run: |
-          sh tools/release/release-tag.sh classify "$TAG" >> "$GITHUB_OUTPUT"
+          python3 mk/tools/release/release-tag.py classify "$TAG" >> "$GITHUB_OUTPUT"
           make -s ZEDBSD_CONFIG="$RELEASE_CONFIG" release-info | grep -v '^version=' >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -92,7 +92,7 @@ jobs:
         # the release.  The index goes into the image as /usr/share/licenses/INDEX.
         run: |
           mkdir -p artifacts
-          python3 tools/release/license-inventory.py --config "$RELEASE_CONFIG" \
+          python3 mk/tools/release/license-inventory.py --config "$RELEASE_CONFIG" \
             --markdown artifacts/LICENSES.md --index artifacts/INDEX
 
       - name: Build amd64
@@ -101,7 +101,7 @@ jobs:
           yes | make firmware-licenses
           make -j4 ZEDBSD_EXTRA_INPUTS="$PWD/artifacts/INDEX" \
             ZEDBSD_EXTRA_FILES="--file /usr/share/licenses/INDEX=$PWD/artifacts/INDEX"
-          python3 tools/release/license-inventory.py --config "$RELEASE_CONFIG" --rootfs build/amd64/rootfs
+          python3 mk/tools/release/license-inventory.py --config "$RELEASE_CONFIG" --rootfs build/amd64/rootfs
           gzip -9 -c build/amd64/hdd-image.img > "artifacts/zedbsd-$VERSION-amd64.img.gz"
 
       - name: Package the Windows zip
@@ -187,8 +187,8 @@ jobs:
       - name: Choose the rc and check it
         id: rc
         run: |
-          rc=$(sh tools/release/release-tag.sh rc "$TAG" "$FROM_RC")
-          sh tools/release/release-tag.sh promotable "$rc" "$TAG"
+          rc=$(python3 mk/tools/release/release-tag.py rc "$TAG" "$FROM_RC")
+          python3 mk/tools/release/release-tag.py promotable "$rc" "$TAG"
           echo "tag=$rc" >> "$GITHUB_OUTPUT"
 
       - name: Take the rc's assets

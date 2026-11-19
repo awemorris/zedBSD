@@ -10,7 +10,7 @@
 # ATA: partition 2 is an HFS boot partition with the kernel (\vmunix) and
 # the CHRP boot script (\ppc\bootinfo.txt, type tbxi, in the blessed
 # folder), partition 3 the UFS root made from the root tree, partition 4
-# swap (mk/platform-macppc32/tools/make-macppc32-image.py).
+# swap (mk/tools/make-macppc32-image.py).
 #
 
 DISK_IMAGE_ARTIFACT := $(BUILD)/hdd-image.img
@@ -20,9 +20,9 @@ ROOT_MIB ?= 1024
 SWAP_MIB ?= 64
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(BUILD)/rootfs/.stamp \
-		mk/platform-macppc32/tools/make-macppc32-image.py \
-		mk/platform-macppc32/tools/hfs.py
-	$(PYTHON) mk/platform-macppc32/tools/make-macppc32-image.py \
+		mk/tools/make-macppc32-image.py \
+		mk/tools/hfs.py
+	$(PYTHON) mk/tools/make-macppc32-image.py \
 		--kernel $(BUILD)/vmunix \
 		--root-tree $(BUILD)/rootfs \
 		--boot-mib $(MACPPC32_BOOT_MIB) \

@@ -1,4 +1,4 @@
-# The browser's texts in Japanese (domain browser). tools/i18n/tr.py update keeps the translations.
+# The browser's texts in Japanese (domain browser). mk/tools/tr.py update keeps the translations.
 # userland/desktop/locale/browser.keys:4
 msg	This page isn't responding	このページは応答していません
 # userland/desktop/locale/browser.keys:5

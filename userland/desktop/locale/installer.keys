@@ -1,4 +1,4 @@
-# The installer's texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source).
+# The installer's texts that reach kl_tr through a variable (mk/tools/tr.py reads this with the source).
 # Why a disk or its partitions cannot be chosen (disk.c inst_disk_refusal and inst_chosen_refusal, drawn with kl_tr(reason)).
 msg	The running system uses this disk.
 msg	This disk is read-only.

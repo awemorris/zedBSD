@@ -130,7 +130,7 @@ $(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S
 
 # Stage2: Sectors after MBR. Loads the PBR.
 $(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw
-	$(PYTHON) mk/platform-i386/tools/finalize-bios-stage2.py --machine pcat $< $@
+	$(PYTHON) mk/tools/finalize-bios-stage2.py --machine pcat $< $@
 
 $(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -157,10 +157,10 @@ $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
 
 # Final Stage: BIOS/DOS dual-purpose bootloader.
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin
-	$(PYTHON) mk/platform-i386/tools/make-mz-exe.py --entry 0x20 $< $@
+	$(PYTHON) mk/tools/make-mz-exe.py --entry 0x20 $< $@
 
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw
-	$(PYTHON) mk/platform-i386/tools/finalize-bios-stage2.py --machine pcat $< $@
+	$(PYTHON) mk/tools/finalize-bios-stage2.py --machine pcat $< $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@

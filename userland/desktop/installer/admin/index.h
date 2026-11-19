@@ -9,7 +9,7 @@
  * The installer's index (/opt/installer/index): the units an installed
  * system is made of, the boot files, and the set-user-ID and
  * set-group-ID files a unit may carry.  The build writes it
- * (tools/build/installer-units.py), one record a line, its fields
+ * (mk/tools/installer-units.py), one record a line, its fields
  * separated by TABs:
  *
  *   format  1

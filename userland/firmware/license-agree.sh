@@ -21,7 +21,7 @@
 # Nothing is written to the standard output, so make may run this from
 # $(shell).  The exit status is 0 when the license is accepted.
 #
-# Two modes serve a front end that asks in its own way (tools/menuconfig.py,
+# Two modes serve a front end that asks in its own way (mk/tools/menuconfig.py,
 # plan/ws233/phase002/phase.md) and never ask anything:
 #   pending  fetches and checks the license text as above when RECORD does not
 #            name it, and prints one line, PACKAGE NOTICE LICENSE-TEXT RECORD
