@@ -12,9 +12,10 @@ import tempfile
 from pathlib import Path
 
 SECTOR = 512
-HEADS = 8
+# PC-9801NS/20, PC-9801US and PC-9801UR address the fixed disk with 4 heads.
+HEADS = 4
 SECTORS_PER_TRACK = 17
-CYLINDER_SECTORS = HEADS * SECTORS_PER_TRACK  # 136 sectors
+CYLINDER_SECTORS = HEADS * SECTORS_PER_TRACK  # 68 sectors
 CYLINDER_BYTES = CYLINDER_SECTORS * SECTOR
 
 

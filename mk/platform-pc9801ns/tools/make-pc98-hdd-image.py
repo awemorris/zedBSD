@@ -13,9 +13,10 @@ import tempfile
 from pathlib import Path
 
 SECTOR = 512
-HEADS = 8
+# PC-9801NS/20, PC-9801US and PC-9801UR address the fixed disk with 4 heads.
+HEADS = 4
 SECTORS_PER_TRACK = 17
-CYLINDER_SECTORS = HEADS * SECTORS_PER_TRACK  # 136 sectors = 69632 bytes
+CYLINDER_SECTORS = HEADS * SECTORS_PER_TRACK  # 68 sectors = 34816 bytes
 CYLINDER_BYTES = CYLINDER_SECTORS * SECTOR
 
 
@@ -26,7 +27,7 @@ def run(*args: str) -> None:
 def pc98_partition_entry(mid: int, sid: int, cyl_start: int, cyl_end: int, name: str) -> bytes:
     start_chs = struct.pack("<BBH", 0, 0, cyl_start)
     data_chs = struct.pack("<BBH", 0, 0, cyl_start)
-    end_chs = struct.pack("<BBH", 16, 7, cyl_end - 1)
+    end_chs = struct.pack("<BBH", SECTORS_PER_TRACK - 1, HEADS - 1, cyl_end - 1)
     name_bytes = name.encode("ascii").ljust(16, b" ")[:16]
     return struct.pack("<BB2s4s4s4s16s", mid, sid, b"\x00\x00", start_chs, data_chs, end_chs, name_bytes)
 
@@ -103,8 +104,9 @@ def create(args: argparse.Namespace) -> None:
     temporary = Path(temp_name)
 
     try:
-        # Boot partition starts at cylinder 16 (LBA 2176, aligned to 136 and 8)
-        cyl_boot_start = 16
+        # Boot partition starts at cylinder 32 (LBA 2176, past LBA 2048 and
+        # aligned to 8 sectors)
+        cyl_boot_start = 32
         boot_start = cyl_boot_start * CYLINDER_SECTORS  # 2176
 
         raw_boot_blocks = args.fat_size_mib * 2048

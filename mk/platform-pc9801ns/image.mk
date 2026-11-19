@@ -27,9 +27,9 @@ $(BOOT_LOGO): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-
 	mv -f $@.tmp $@
 
 # The swap partition holds the swap image exactly, and a PC-98 partition is
-# whole cylinders (4 heads x 17 sectors = 68 sectors), so the size is a
-# multiple of 8704 KiB (17408 sectors, 256 cylinders).
-SWAP_MIB ?= 32
+# whole cylinders (4 heads x 17 sectors = 68 sectors), so the size in MiB
+# is a multiple of 17 (34816 sectors, 512 cylinders).
+SWAP_MIB ?= 34
 BOOT_MIB ?= 4
 ROOT_MIB ?= 128
 ROOT_INODES ?= 16384
