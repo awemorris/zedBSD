@@ -1,3 +1,10 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 OUTPUT_FORMAT(elf32-i386)
 ENTRY(text_start)
 
@@ -31,11 +38,11 @@ SECTIONS
 	. = ALIGN(4096);
 	__kernel_bss_start = .;
 	.bss (NOLOAD) : AT(ADDR(.bss) - 0x80000000) SUBALIGN(16) {
-		/*
-                 * CR3 and every page table must remain page-aligned without
-		 * raising the PT_LOAD file alignment above the loader's 512-byte
-		 * contract.  Place locore first at an explicit page boundary.
-                 */
+        /*
+         * CR3 and every page table must remain page-aligned without
+         * raising the PT_LOAD file alignment above the loader's 512-byte
+         * contract.  Place locore first at an explicit page boundary.
+         */
 		. = ALIGN(4096);
 		*/hal/i386/locore.o(.bss* COMMON)
 		*(.vfs_bss)

@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 keiland-linux:
 	@KEILAND_ASK=$(KEILAND_ASK) sh mk/tools/keiland-prerequisites.sh check linux
 	$(MAKE) -f userland/desktop/keiland-linux.mk all

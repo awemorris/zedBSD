@@ -1,4 +1,10 @@
-/* PC-98 single-image higher-half kernel. */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 OUTPUT_FORMAT(elf32-i386)
 ENTRY(text_start)
 

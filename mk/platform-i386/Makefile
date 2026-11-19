@@ -7,3 +7,6 @@ include mk/platform-i386/bootloader.mk
 include mk/platform-i386/programs.mk
 include mk/platform-i386/rootfs.mk
 include mk/platform-i386/image.mk
+
+.PHONY: toolchain-platform
+toolchain-platform: toolchain-llvm

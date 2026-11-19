@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 #
 # Additional kernel test features and drivers for the kernel build.
 #

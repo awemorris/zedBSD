@@ -10,6 +10,7 @@ MAKEFLAGS += -r
 
 all:        disk
 setup:      toolchain .WAIT libc sysroot bootloader firmware
+toolchain:  toolchain-platform
 bootloader: toolchain .WAIT bootloader-platform
 firmware:   toolchain .WAIT firmware-platform
 libc:       toolchain .WAIT libc-platform

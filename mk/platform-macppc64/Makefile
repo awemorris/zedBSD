@@ -7,3 +7,6 @@ include mk/platform-macppc64/bootloader.mk
 include mk/platform-macppc64/programs.mk
 include mk/platform-macppc64/rootfs.mk
 include mk/platform-macppc64/image.mk
+
+.PHONY: toolchain-platform
+toolchain-platform: toolchain-llvm

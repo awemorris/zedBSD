@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # How much of the build machine a nested build tool may use.
 #
 # make itself is told how many jobs to run by the caller's -j, but a build

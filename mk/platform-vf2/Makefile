@@ -8,5 +8,5 @@ include mk/platform-vf2/programs.mk
 include mk/platform-vf2/rootfs.mk
 include mk/platform-vf2/image.mk
 
-.PHONY: libc-platform sysroot-platform vmunix-platform rootfs-platform image-platform
-.PHONY: bootloader-platform firmware-platform
+.PHONY: toolchain-platform
+toolchain-platform: toolchain-llvm

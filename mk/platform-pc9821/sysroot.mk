@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# i386 sysroot build rules
+# pc9821 sysroot build rules
 #
 
 PLATFORM_PC9821_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))

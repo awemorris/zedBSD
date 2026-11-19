@@ -93,13 +93,13 @@ LLVM_DISTRIBUTION_COMPONENTS := clang;clang-resource-headers;lld;llvm-ar;llvm-ra
 LLVM_INSTALLED_TOOL_NAMES := clang clang++ ld.lld lld-link llvm-ar llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-readelf llvm-strip
 LLVM_INSTALLED_TOOLS := $(addprefix $(LLVM_INSTALL)/bin/,$(LLVM_INSTALLED_TOOL_NAMES))
 
-.PHONY: llvm-toolchain llvm-toolchain-cached toolchain-cache llvm-download llvm-source
+.PHONY: toolchain-llvm toolchain-llvm-cached llvm-download llvm-source
 
-llvm-toolchain: $(LLVM_INSTALLED_TOOLS)
+toolchain-llvm: $(LLVM_INSTALLED_TOOLS)
 	@'$(LLVM_INSTALL)/bin/clang' --version | grep -F 'clang version $(ZEDBSD_LLVM_VERSION)' >/dev/null
 	@'$(LLVM_INSTALL)/bin/ld.lld' --version | grep -F 'LLD $(ZEDBSD_LLVM_VERSION)' >/dev/null
 
-llvm-toolchain-cached:
+toolchain-llvm-cached:
 	@if [ -x "$(LLVM_INSTALL)/bin/clang" ]; then \
 		echo "LLVM toolchain already installed at $(LLVM_INSTALL)"; \
 	else \

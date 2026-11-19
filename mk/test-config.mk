@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 #
 # Add kernel test configuration options here. These options are not
 # part of the kernel configuration, but are used to enable/disable

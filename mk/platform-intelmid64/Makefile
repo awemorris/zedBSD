@@ -23,3 +23,6 @@ include mk/platform-x86_64/bootloader.mk
 include mk/platform-x86_64/programs.mk
 include mk/platform-x86_64/rootfs.mk
 include mk/platform-x86_64/image.mk
+
+.PHONY: toolchain-platform
+toolchain-platform: toolchain-llvm

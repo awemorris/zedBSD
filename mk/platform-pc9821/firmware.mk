@@ -1,3 +1,8 @@
-# No firmware is needed for x86_64, so we just define the variables to empty values
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+# No firmware is needed for pc9821.
 
 firmware-platform:
