@@ -68,9 +68,7 @@ def build(args: argparse.Namespace) -> None:
                 with args.swap_image.open('rb') as src:
                     while chunk := src.read(1024 * 1024):
                         image.write(chunk)
-        checker = Path(__file__).resolve().parents[3] / 'tools/build/check-ufs-image.py'
-        if not checker.is_file():
-            checker = Path(__file__).resolve().parents[3] / 'mk/old-tools/build/check-ufs-image.py'
+        checker = Path(__file__).resolve().parents[3] / 'mk/tools/check-ufs-image.py'
         run('python3', str(checker), str(args.ufs_root))
         hdd_checker = Path(__file__).with_name('check-rpi4-hdd-image.py')
         swap_check = [] if args.swap_image is None else ['--swap-image', str(args.swap_image)]

@@ -47,7 +47,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(ROOT / "mk" / "old-tools" / "build"))
+sys.path.insert(0, str(ROOT / "mk" / "tools"))
 
 import hfs  # noqa: E402
 
