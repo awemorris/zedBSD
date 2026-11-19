@@ -696,6 +696,8 @@ vulkan_core11_features(
 	/* Each structure wherever the caller chained it; its header is kept. */
 	facts = &physical->core11;
 	for (next = chain; next != NULL; next = next->pNext) {
+
+		/* The fields of a structure the library knows. */
 		switch (next->sType) {
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
 			multiview = (VkPhysicalDeviceMultiviewFeatures *)next;
@@ -757,6 +759,8 @@ vulkan_core11_properties(
 	/* Each structure wherever the caller chained it; its header is kept. */
 	facts = &physical->core11;
 	for (next = chain; next != NULL; next = next->pNext) {
+
+		/* The fields of a structure the library knows. */
 		switch (next->sType) {
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES:
 			subgroup = (VkPhysicalDeviceSubgroupProperties *)next;
@@ -813,6 +817,7 @@ vulkan_core11_device_check(
 	const VkPhysicalDeviceSamplerYcbcrConversionFeatures *conversion;
 	const VkPhysicalDeviceShaderDrawParametersFeatures *parameters;
 	const VkDeviceGroupDeviceCreateInfo *group;
+	struct VkPhysicalDevice_T *member;
 	VkResult status;
 	uint32_t index;
 
@@ -820,7 +825,11 @@ vulkan_core11_device_check(
 	facts = &physical->core11;
 	*features = NULL;
 	status = VK_SUCCESS;
-	for (next = info->pNext; next != NULL && status == VK_SUCCESS; next = next->pNext) {
+	for (next = info->pNext;
+	     next != NULL && status == VK_SUCCESS;
+	     next = next->pNext) {
+
+		/* What each record asks for, against what the device reports. */
 		switch (next->sType) {
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
 			*features = &((const VkPhysicalDeviceFeatures2 *)next)->features;
@@ -866,8 +875,9 @@ vulkan_core11_device_check(
 			group = (const VkDeviceGroupDeviceCreateInfo *)next;
 			if (group->physicalDeviceCount > 1)
 				status = VK_ERROR_INITIALIZATION_FAILED;
-			for (index = 0; index < group->physicalDeviceCount && status == VK_SUCCESS; index++) {
-				if (vulkan_physical_device(group->pPhysicalDevices[index]) != physical)
+			for (index = 0; index < group->physicalDeviceCount; index++) {
+				member = vulkan_physical_device(group->pPhysicalDevices[index]);
+				if (member != physical)
 					status = VK_ERROR_INITIALIZATION_FAILED;
 			}
 			break;
@@ -884,7 +894,7 @@ vulkan_core11_device_check(
 	if (*features != NULL && info->pEnabledFeatures != NULL)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
-	/* No queue is created protected. */
+	/* No queue is created protected (or with any other flag). */
 	for (index = 0; index < info->queueCreateInfoCount; index++) {
 		if (info->pQueueCreateInfos[index].flags != 0)
 			return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -962,6 +972,7 @@ core11_chain(
 
 	/* The next structure the renderer is to read. */
 	for (next = chain; next != NULL; next = next->pNext) {
+		/* Whether its type is one of those forwarded. */
 		known = VK_FALSE;
 		for (index = 0; index < count; index++) {
 			if (next->sType == types[index])
@@ -1000,7 +1011,7 @@ core11_device_self(
 	const VkPhysicalDeviceSamplerYcbcrConversionFeatures *conversion;
 	const VkPhysicalDeviceShaderDrawParametersFeatures *parameters;
 
-	/* The fields in their declared order, each a 32-bit word. */
+	/* The fields in their declared order, each a 32-bit word, by the structure's type. */
 	switch (record->sType) {
 	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
 		multiview = (const VkPhysicalDeviceMultiviewFeatures *)record;
