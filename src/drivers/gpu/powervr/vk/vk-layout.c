@@ -57,6 +57,8 @@ static int allocate_sets(struct powervr_vk_session *session, struct i915_wire_re
 static int free_sets(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int update_sets(struct powervr_vk_session *session, struct i915_wire_reader *reader);
 static int update_write(struct powervr_vk_session *session, struct i915_wire_reader *reader);
+static int update_copy(struct powervr_vk_session *session, const VkCopyDescriptorSet *copy);
+static bool set_place(const struct powervr_set_layout *layout, uint32_t *binding, uint32_t *element);
 static int slot_buffer(struct powervr_vk_descriptor_slot *slot, struct powervr_vk_object *buffer, uint64_t offset, uint64_t range);
 static void set_buffer(struct powervr_vk_session *session, struct powervr_vk_descriptor_set *set, uint32_t binding, uint32_t element, const VkDescriptorBufferInfo *info);
 static void set_image(struct powervr_vk_session *session, struct powervr_vk_descriptor_set *set, uint32_t binding, uint32_t element, uint64_t sampler_id, uint64_t view_id);
@@ -703,7 +705,7 @@ free_sets(
 
 /*
  * vkUpdateDescriptorSets: [device][n][n]{write}[m][m]{copy}, no reply
- * body.  Copies are read and refused.
+ * body: the writes, then the copies, each in order.
  */
 static int
 update_sets(
@@ -730,22 +732,126 @@ update_sets(
 			return error;
 	}
 
-	/* The copies, read. */
+	/* How many copies follow, behind the count's first form. */
 	(void)drv_i915_wire_read_u32(reader);
 	copies = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || copies > LAYOUT_ITEMS_MAX)
 		return EINVAL;
-	for (index = 0; index < copies; index++)
+
+	/* Applies each copy once it decoded: a later copy sees the earlier ones. */
+	for (index = 0; index < copies; index++) {
+		kern_memset(&copy, 0, sizeof(copy));
 		i915_vkc_dec_VkCopyDescriptorSet(reader, &session->arena, &copy);
-	if (reader->error != 0)
-		return EINVAL;
+		if (reader->error != 0)
+			return EINVAL;
+		error = update_copy(session, &copy);
+		if (error != 0)
+			return error;
+	}
 
-	/* A copy is not applied. */
-	if (copies != 0)
-		return ENOTSUP;
-
-	/* Succeeded: the writes are applied. */
+	/* Succeeded: the writes and the copies are applied. */
 	return 0;
+}
+
+/*
+ * Applies one descriptor copy: each of its descriptors, from the source
+ * set's binding and element on to the destination's (going on into the
+ * next bindings past a binding's last element), takes the source's bytes
+ * in the set's memory, and a storage buffer at element 0 the source's
+ * binding for the compute path.  A set that is not known, an element past
+ * the set's last binding, and a pair of bindings of different types are
+ * passed over, as a write's unknown set is.
+ *
+ * Procedure referenced: Vulkan 1.3 VkCopyDescriptorSet (srcSet,
+ * srcBinding, srcArrayElement, dstSet, dstBinding, dstArrayElement,
+ * descriptorCount) and the consecutive binding updates; Mesa 26.2.6
+ * src/imagination/vulkan/pvr_arch_descriptor_set.c (UpdateDescriptorSets:
+ * a binding's stride of bytes for each descriptor, copied from the source
+ * set's memory to the destination's).
+ */
+static int
+update_copy(
+	struct powervr_vk_session *session,
+	const VkCopyDescriptorSet *copy)
+{
+	const struct powervr_set_binding *from;
+	const struct powervr_set_binding *to;
+	struct powervr_vk_descriptor_set *source;
+	struct powervr_vk_descriptor_set *destination;
+	struct powervr_vk_descriptor_slot *slot;
+	uint32_t source_binding;
+	uint32_t source_element;
+	uint32_t destination_binding;
+	uint32_t destination_element;
+	uint32_t item;
+	int error;
+
+	/* The two sets (the decoded handles are the wire's identities). */
+	source = powervr_vk_payload(session, I915_VK_OBJ_DESCRIPTOR_SET, (uint64_t)(uintptr_t)copy->srcSet);
+	destination = powervr_vk_payload(session, I915_VK_OBJ_DESCRIPTOR_SET, (uint64_t)(uintptr_t)copy->dstSet);
+	if (source == NULL || destination == NULL || copy->descriptorCount > LAYOUT_ITEMS_MAX)
+		return 0;
+
+	/* Each descriptor, at the places the two layouts give it. */
+	for (item = 0; item < copy->descriptorCount; item++) {
+		source_binding = copy->srcBinding;
+		source_element = copy->srcArrayElement + item;
+		destination_binding = copy->dstBinding;
+		destination_element = copy->dstArrayElement + item;
+		if (!set_place(&source->layout, &source_binding, &source_element))
+			break;
+		if (!set_place(&destination->layout, &destination_binding, &destination_element))
+			break;
+		from = &source->layout.bindings[source_binding];
+		to = &destination->layout.bindings[destination_binding];
+		if (from->type != to->type || from->stride != to->stride)
+			continue;
+
+		/* The descriptor's bytes; the two places may be in one set. */
+		kern_memmove(&destination->bytes[to->offset + destination_element * to->stride],
+			     &source->bytes[from->offset + source_element * from->stride],
+			     to->stride);
+
+		/* The compute path's binding follows element 0 of a storage buffer binding. */
+		if (to->type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || destination_element != 0)
+			continue;
+		if (source_element == 0) {
+			slot = &source->slots[source_binding];
+			error = slot_buffer(&destination->slots[destination_binding], slot->buffer, slot->offset, slot->range);
+		} else {
+			error = slot_buffer(&destination->slots[destination_binding], NULL, 0, 0);
+		}
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the descriptors are copied. */
+	return 0;
+}
+
+/*
+ * Moves an element past its binding's last one on into the next bindings
+ * (a binding of no descriptors is passed over), as Vulkan's consecutive
+ * binding updates do.  False when it runs past the layout's last binding.
+ */
+static bool
+set_place(
+	const struct powervr_set_layout *layout,
+	uint32_t *binding,
+	uint32_t *element)
+{
+	/* Takes each whole binding the element is past. */
+	while (*binding < POWERVR_SET_BINDINGS_MAX && *element >= layout->bindings[*binding].count) {
+		*element -= layout->bindings[*binding].count;
+		*binding += 1U;
+	}
+
+	/* An element past the last binding names no descriptor. */
+	if (*binding >= POWERVR_SET_BINDINGS_MAX)
+		return false;
+
+	/* Succeeded: the binding holds the element. */
+	return true;
 }
 
 /*
@@ -753,8 +859,9 @@ update_sets(
  * memory and binds its storage buffers for the compute path:
  * [sType][pNext][set][binding][element][count][type][images]
  * {[sampler][view][layout]}[buffers]{VkDescriptorBufferInfo}[texel
- * views]{identity}.  Element 0 of each binding is the one the compute
- * path binds.
+ * views]{identity}.  The descriptors go from the element on into the
+ * next bindings past a binding's last element; element 0 of each storage
+ * buffer binding is the one the compute path binds.
  */
 static int
 update_write(
@@ -771,6 +878,8 @@ update_write(
 	uint64_t item;
 	uint32_t binding;
 	uint32_t element;
+	uint32_t place_binding;
+	uint32_t place_element;
 	uint32_t type;
 	int error;
 
@@ -794,8 +903,10 @@ update_write(
 		(void)drv_i915_wire_read_u32(reader);
 		if (reader->error != 0)
 			return EINVAL;
-		if (set != NULL)
-			set_image(session, set, binding, element + (uint32_t)item, sampler_id, view_id);
+		place_binding = binding;
+		place_element = element + (uint32_t)item;
+		if (set != NULL && set_place(&set->layout, &place_binding, &place_element))
+			set_image(session, set, place_binding, place_element, sampler_id, view_id);
 	}
 
 	/* The buffer descriptors; the storage buffers are bound from the element on. */
@@ -808,19 +919,20 @@ update_write(
 		if (reader->error != 0)
 			return EINVAL;
 
-		/* The buffer descriptor in the set's memory. */
-		if (set != NULL)
-			set_buffer(session, set, binding, element + (uint32_t)item, &buffer);
-
-		/* Only a storage buffer of a known set at a binding the set has; others stay unbound. */
-		if (set == NULL || type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || element != 0)
+		/* The buffer descriptor in the set's memory, at the place the layout gives it. */
+		place_binding = binding;
+		place_element = element + (uint32_t)item;
+		if (set == NULL || !set_place(&set->layout, &place_binding, &place_element))
 			continue;
-		if (binding + item >= POWERVR_VK_BINDINGS_MAX)
+		set_buffer(session, set, place_binding, place_element, &buffer);
+
+		/* Only element 0 of a storage buffer binding is bound; others stay unbound. */
+		if (type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || place_element != 0)
 			continue;
 
 		/* The binding writes this buffer's range from now on. */
 		bound = powervr_vk_object_find(session, I915_VK_OBJ_BUFFER, (uint64_t)(uintptr_t)buffer.buffer);
-		error = slot_buffer(&set->slots[binding + item], bound, buffer.offset, buffer.range);
+		error = slot_buffer(&set->slots[place_binding], bound, buffer.offset, buffer.range);
 		if (error != 0)
 			return error;
 	}

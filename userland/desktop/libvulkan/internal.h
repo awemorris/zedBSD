@@ -226,7 +226,9 @@ struct vulkan_queue_job {
  * submission is refusable when its transaction carries a recording whose
  * End waited for it: the executor turns down a submission naming a
  * command buffer whose End failed, before any of its work reaches the
- * GPU.  Every other command's refusal still loses the session.
+ * GPU.  A descriptor update is refusable too: it changes only the sets it
+ * names, and its call has no result, so the refusal is logged and the
+ * session goes on.  Every other command's refusal still loses the session.
  */
 struct vulkan_writer {
 	struct vulkan_allocator allocator;
