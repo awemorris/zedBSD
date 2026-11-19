@@ -117,8 +117,9 @@ powervr_vk_graphics_decode(
 		return error == ENOMEM ? ENOMEM : ENOTSUP;
 	}
 
-	/* A fragment shader that may discard makes its draws punch-through. */
+	/* A fragment shader that may discard makes its draws punch-through, one that writes its depth depth feedback. */
 	graphics->fixed.discards = graphics->fragment.discards != 0;
+	graphics->fixed.depth_feedback = graphics->fragment.depth_feedback != 0;
 
 	/* Succeeded: the pipeline is ready to draw with. */
 	return 0;

@@ -706,6 +706,18 @@ _Static_assert(GEN12_PIPELINE_SELECT_DWORD(2U) == 0x69041312U,
 #define GEN12_3DSTATE_PS_EXTRA_KILLS_PIXEL	(1U << 28)
 
 /*
+ * 3DSTATE_PS_EXTRA dword 1 bit 2 (Pixel Shader Has UAV): the pixel kernel
+ * has effects besides its render-target writes, so the pixel stage runs it
+ * for every pixel it passes.  Mesa sets it while an occlusion query is
+ * active, for a correct PS_DEPTH_COUNT.
+ *
+ * Values referenced: Mesa 25.0.7 src/intel/genxml/gen110.xml and
+ * gen90.xml (3DSTATE_PS_EXTRA); procedure referenced: Mesa 25.0.7
+ * src/intel/vulkan/genX_gfx_state.c (update_ps_extra_has_uav).
+ */
+#define GEN12_3DSTATE_PS_EXTRA_HAS_UAV		(1U << 2)
+
+/*
  * 3DSTATE_PS_EXTRA dword 1: bits 27:26 Pixel Shader Computed Depth Mode
  * (1, PSCDEPTH_ON: every render-target write carries the depth the kernel
  * computed), bit 29 oMask Present to Render Target (every write carries an

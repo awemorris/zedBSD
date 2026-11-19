@@ -52,7 +52,7 @@
  * view_port_count 12..15, pres_wclamp 16, pres_outselects 17,
  * pres_varying_word0 18, _word1 19, _word2 20, pres_ppp_ctrl 21,
  * pres_stream_out_size 22; STATE_ISPCTL scenable 16; STATE_ISPA objtype
- * 28..31 TRIANGLE 0, passtype 24..26 OPAQUE 0, TRANSLUCENT 1 and PUNCH_THROUGH 2,
+ * 28..31 TRIANGLE 0, passtype 24..26 OPAQUE 0, TRANSLUCENT 1, PUNCH_THROUGH 2 and DEPTH_FEEDBACK 5,
  * dwritedisable 21, dcmpmode 17..19 (the VkCompareOp values),
  * pointlinewidth 8..15; STATE_ISPDBSC scindex 0..15;
  * STATE_PDS_SIZEINFO1 pds_tempsize 0..3 in units of 4, usc_varyingsize
@@ -83,6 +83,7 @@
 #define ISPCTL_SCISSOR		(1U << 16)
 #define ISPA_TRANSLUCENT	(1U << 24)
 #define ISPA_PUNCH_THROUGH	(2U << 24)
+#define ISPA_DEPTH_FEEDBACK	(5U << 24)
 #define ISPA_PASS_MASK		(7U << 24)
 #define ISPA_NO_DEPTH_WRITE	(1U << 21)
 #define ISPA_COMPARE_SHIFT	17U
@@ -697,7 +698,7 @@ powervr_draw_scissor_words(
  * front face); src/imagination/vulkan/pvr_arch_pipeline.c (the pass type
  * opaque, translucent when the fragment shader blends;
  * pvr_fragment_state_save: punch-through when it discards, before the
- * others).
+ * others; depth feedback when it writes its depth, before punch-through).
  */
 int
 powervr_draw_ppp_build(
@@ -766,7 +767,9 @@ powervr_draw_ppp_build(
 	ispa |= compare << ISPA_COMPARE_SHIFT;
 	ispa |= LINE_WIDTH_ONE << ISPA_LINE_WIDTH_SHIFT;
 	ispa |= object_type(fixed->topology) << ISPA_OBJECT_SHIFT;
-	if (fixed->discards) {
+	if (fixed->depth_feedback) {
+		ispa |= ISPA_DEPTH_FEEDBACK;
+	} else if (fixed->discards) {
 		ispa |= ISPA_PUNCH_THROUGH;
 	} else if (fixed->blending) {
 		ispa |= ISPA_TRANSLUCENT;

@@ -221,15 +221,22 @@ enum powervr_ir_opcode {
 	POWERVR_IR_PIXEL_BLEND,
 
 	/*
-	 * Tells the depth and visibility unit whether the fragment stays:
-	 * source 0 a Boolean word, not zero when the shader discarded it.
-	 * Once, before the colour outputs, in a fragment shader that
-	 * discards (whose draws pass punch-through).
+	 * Tells the depth and visibility unit whether the fragment stays and
+	 * at what depth: with POWERVR_IR_FEEDBACK_DISCARD in immediate,
+	 * source 0 a Boolean word, not zero when the shader discarded it;
+	 * with POWERVR_IR_FEEDBACK_DEPTH, source 1 the depth the shader
+	 * computed, clamped to [0, 1].  Once, before the colour outputs, in a
+	 * fragment shader that discards (whose draws pass punch-through) or
+	 * writes its depth (whose draws pass depth feedback).
 	 */
 	POWERVR_IR_FEEDBACK,
 
 	POWERVR_IR_OPCODE_COUNT
 };
+
+/* What a POWERVR_IR_FEEDBACK gives: the discard (source 0), the depth (source 1). */
+#define POWERVR_IR_FEEDBACK_DISCARD	0x1U
+#define POWERVR_IR_FEEDBACK_DEPTH	0x2U
 
 /*
  * The blends of POWERVR_IR_PIXEL_BLEND, s the source colour and d the

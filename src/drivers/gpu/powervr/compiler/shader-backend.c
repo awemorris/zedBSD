@@ -329,6 +329,7 @@ static struct shader_machine_register destination_of(struct backend_select *sele
 static struct shader_machine_register operand_register(struct backend_select *select, const struct powervr_ir_operand *operand, unsigned *modifiers);
 static void select_word_into(struct backend_select *select, const struct powervr_ir_operand *operand, struct shader_machine_register reg);
 static struct shader_machine_register operand_plain(struct backend_select *select, const struct powervr_ir_operand *operand, unsigned allowed);
+static unsigned select_helper_guard(struct backend_select *select);
 static struct shader_machine_register scratch_register(struct backend_select *select);
 static int adjacent_words(const struct backend_select *select, const struct powervr_ir_instruction *instruction, struct shader_machine_register *reg);
 static int literal_register(struct backend_select *select, uint32_t bits, struct shader_machine_register *reg);
@@ -3585,10 +3586,12 @@ select_instruction(
 	struct shader_machine_register destination;
 	struct shader_machine_register source;
 	struct shader_machine_register condition;
+	struct shader_machine_register depth;
 	struct shader_machine_register a;
 	struct shader_machine_register b;
 	struct shader_machine_register c;
 	unsigned modifiers;
+	unsigned run;
 	unsigned ma;
 	unsigned mb;
 	unsigned mc;
@@ -4030,11 +4033,13 @@ select_instruction(
 			operation->source[0] = source;
 		}
 		select_address(select, instruction);
+		run = select_helper_guard(select);
 		operation = append(select, MACHINE_ATOMIC);
 		if (operation != NULL) {
 			operation->destination[0] = destination;
 			operation->source[0] = temp_register(TEMP_ADDRESS);
 			operation->variant = (uint8_t)instruction->immediate;
+			operation->condition = (uint8_t)run;
 		}
 		(void)append(select, MACHINE_WAIT);
 		break;
@@ -4061,10 +4066,12 @@ select_instruction(
 			operation->source[0] = source;
 		}
 		select_address(select, instruction);
+		run = select_helper_guard(select);
 		operation = append(select, MACHINE_STORE);
 		if (operation != NULL) {
 			operation->source[0] = temp_register(TEMP_STORE_DATA);
 			operation->source[1] = temp_register(TEMP_ADDRESS);
+			operation->condition = (uint8_t)run;
 		}
 		(void)append(select, MACHINE_WAIT);
 		break;
@@ -4381,15 +4388,35 @@ select_instruction(
 		 * e1_z1) and pco_schedule.c (a wdf after an instruction that
 		 * names a data return counter).
 		 */
+		/*
+		 * With the depth (Mesa's depthf in place of alphaf): the depth
+		 * the shader computed, through s0 and fte to the first write
+		 * port, under the same condition.
+		 */
 		if (select->program->stage != POWERVR_SHADER_FRAGMENT)
 			return ENOTSUP;
-		condition = operand_plain(select, &instruction->source[0], 0);
-		operation = append(select, MACHINE_TEST_ZERO);
-		if (operation != NULL)
-			operation->source[0] = condition;
-		operation = append(select, MACHINE_FEEDBACK);
-		if (operation != NULL)
-			operation->condition = POWERVR_USC_RUN_IF_PREDICATE;
+		depth = temp_register(TEMP_SCRATCH);
+		if ((instruction->immediate & POWERVR_IR_FEEDBACK_DEPTH) != 0)
+			depth = operand_plain(select, &instruction->source[1], 0);
+		run = POWERVR_USC_RUN_ENABLED;
+		if ((instruction->immediate & POWERVR_IR_FEEDBACK_DISCARD) != 0) {
+			condition = operand_plain(select, &instruction->source[0], 0);
+			operation = append(select, MACHINE_TEST_ZERO);
+			if (operation != NULL)
+				operation->source[0] = condition;
+			run = POWERVR_USC_RUN_IF_PREDICATE;
+		}
+		if ((instruction->immediate & POWERVR_IR_FEEDBACK_DEPTH) != 0) {
+			operation = append(select, MACHINE_DEPTH_FEEDBACK);
+			if (operation != NULL) {
+				operation->source[0] = depth;
+				operation->condition = run;
+			}
+		} else {
+			operation = append(select, MACHINE_FEEDBACK);
+			if (operation != NULL)
+				operation->condition = run;
+		}
 		(void)append(select, MACHINE_WAIT);
 		break;
 	case POWERVR_IR_PIXEL_SHARED:
@@ -4725,6 +4752,44 @@ operand_register(
  * Names the register an operand reads with only the allowed modifiers
  * left on it; the others are applied by a move into a scratch temporary.
  */
+/*
+ * Keeps a fragment shader's buffer store or atomic from its helper
+ * instances (the pixels of a 2 x 2 group the primitive does not cover,
+ * run only for derivatives), which Vulkan gives no side effects: p0 =
+ * the instance's vector mask is zero, which a helper's is, and the
+ * condition the memory operation then runs under (unless p0).  Other
+ * stages run every instance.
+ *
+ * Procedure referenced:
+ * Mesa 26.2.6 src/imagination/pco/pco_nir.c (nir_lower_helper_writes and
+ * the helper invocation lowered to the sample mask) and
+ * pco_nir_pvfio.c (lower_load_sample_mask: the sample mask from savmsk
+ * vm).
+ */
+static unsigned
+select_helper_guard(
+	struct backend_select *select)
+{
+	struct shader_machine_operation *operation;
+
+	/* Only a fragment shader has helper instances. */
+	if (select->program->stage != POWERVR_SHADER_FRAGMENT)
+		return POWERVR_USC_RUN_ENABLED;
+
+	/* The instance's vector mask, then p0 where it is zero. */
+	operation = append(select, MACHINE_SAVE_MASK);
+	if (operation != NULL) {
+		operation->destination[0] = temp_register(TEMP_SCRATCH);
+		operation->variant = POWERVR_USC_MASK_VECTOR;
+	}
+	operation = append(select, MACHINE_TEST_ZERO);
+	if (operation != NULL)
+		operation->source[0] = temp_register(TEMP_SCRATCH);
+
+	/* Succeeded: the operation runs where p0 does not hold. */
+	return POWERVR_USC_RUN_UNLESS_PREDICATE;
+}
+
 static struct shader_machine_register
 operand_plain(
 	struct backend_select *select,
@@ -5961,6 +6026,25 @@ shader_backend_group(
 		group->source[2].bank = POWERVR_USC_BANK_SPECIAL;
 		group->source[2].index = SPECIAL_SEVEN;
 		error = powervr_usc_visibility_test(0, 1, 0, &group->operation[POWERVR_USC_PHASE_BACKEND]);
+		break;
+	case MACHINE_DEPTH_FEEDBACK:
+		/*
+		 * The depth feedback: s0 reaches the first write port through the
+		 * source selector and fte, no predicate written, under the
+		 * overlap check.
+		 *
+		 * Values referenced:
+		 * Mesa 26.2.5 src/imagination/pco/pco_map.py (group_map O_DEPTHF:
+		 * s[0] the depth as w0, is[0] s0, is[4] fte, olchk; encode_map
+		 * O_DEPTHF: I_VISTEST_DEPTHF, pwen 0 and ifb 0).
+		 */
+		group->unit = POWERVR_USC_UNIT_MAIN;
+		group->overlap_check = 1;
+		group_register(&group->source[0], operation->source[0]);
+		group->mux_used = 1;
+		group->mux = 0;
+		group->internal[4] = SELECT_FTE;
+		error = powervr_usc_visibility_test(0, 0, 0, &group->operation[POWERVR_USC_PHASE_BACKEND]);
 		break;
 	case MACHINE_VERTEX_END:
 		group->unit = POWERVR_USC_UNIT_MAIN;
