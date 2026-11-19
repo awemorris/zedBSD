@@ -798,3 +798,220 @@ vulkan_reader_need(
 	/* Succeeded: every byte needed by the decoder belongs to this response. */
 	return VK_TRUE;
 }
+
+/* Writes the fields of one chained input structure of a forwarded chain. */
+typedef void (*wire_chain_self)(struct vulkan_writer *writer, const VkBaseInStructure *record);
+
+static void wire_chain(struct vulkan_writer *writer, const VkBaseInStructure *chain, const VkStructureType *types, uint32_t count, wire_chain_self self);
+static void wire_device_chain_self(struct vulkan_writer *writer, const VkBaseInStructure *record);
+static void wire_render_pass_chain_self(struct vulkan_writer *writer, const VkBaseInStructure *record);
+static void wire_u32_array(struct vulkan_writer *writer, const uint32_t *values, uint32_t count);
+
+/*
+ * The 1.1 feature structures a device creation forwards to a renderer
+ * that answers the Vulkan 1.1 queries, and the one render pass structure.
+ */
+static const VkStructureType wire_device_chain_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES
+};
+static const VkStructureType wire_render_pass_chain_types[] = {
+	VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO
+};
+
+/* The number of entries of a table. */
+#define WIRE_COUNT(table)		((uint32_t)(sizeof(table) / sizeof((table)[0])))
+
+/*
+ * Encodes the chain of a device creation: the 1.1 feature structures the
+ * caller chained, to a renderer that answers the Vulkan 1.1 queries (a
+ * renderer that does not gets an empty chain, and its device names 1.0).
+ */
+void
+vulkan_encode_device_chain(
+	struct vulkan_writer *writer,
+	const void *chain)
+{
+	/* A renderer without the 1.1 queries reads no chain. */
+	if (!writer->core11_chains) {
+		vulkan_write_u64(writer, 0U);
+		return;
+	}
+
+	/* The 1.1 feature structures in the caller's order. */
+	wire_chain(writer, chain, wire_device_chain_types, WIRE_COUNT(wire_device_chain_types), wire_device_chain_self);
+
+	/* Succeeded: the chain is encoded. */
+	return;
+}
+
+/*
+ * Encodes the chain of a render pass creation: the multiview views of each
+ * subpass, to a renderer that answers the Vulkan 1.1 queries.
+ */
+void
+vulkan_encode_render_pass_chain(
+	struct vulkan_writer *writer,
+	const void *chain)
+{
+	/* A renderer without the 1.1 queries reads no chain. */
+	if (!writer->core11_chains) {
+		vulkan_write_u64(writer, 0U);
+		return;
+	}
+
+	/* The multiview record, if the caller chained one. */
+	wire_chain(writer, chain, wire_render_pass_chain_types, WIRE_COUNT(wire_render_pass_chain_types), wire_render_pass_chain_self);
+
+	/* Succeeded: the chain is encoded. */
+	return;
+}
+
+/*
+ * Encodes the structures of a chain whose types are in types, others left
+ * out: each present one's header ([u64 1][u32 sType]), the end of the chain
+ * ([u64 0]), then the fields of each from the last to the first.
+ *
+ * Procedure referenced: venus-protocol docs/VK_EXT_command_serialization.txt
+ * (the encoding of a pNext chain), commit
+ * ca19b6358d7cc491bc3e4de76f04c6700876a8fa.
+ */
+static void
+wire_chain(
+	struct vulkan_writer *writer,
+	const VkBaseInStructure *chain,
+	const VkStructureType *types,
+	uint32_t count,
+	wire_chain_self self)
+{
+	const VkBaseInStructure *next;
+	VkBool32 known;
+	uint32_t index;
+
+	/* The next structure the renderer is to read. */
+	for (next = chain; next != NULL; next = next->pNext) {
+		/* Whether its type is one of those forwarded. */
+		known = VK_FALSE;
+		for (index = 0; index < count; index++) {
+			if (next->sType == types[index])
+				known = VK_TRUE;
+		}
+		if (known)
+			break;
+	}
+
+	/* The end of the chain. */
+	if (next == NULL) {
+		vulkan_write_u64(writer, 0U);
+		return;
+	}
+
+	/* Its header, the rest of the chain, then its fields. */
+	vulkan_write_u64(writer, 1U);
+	vulkan_write_u32(writer, (uint32_t)next->sType);
+	wire_chain(writer, next->pNext, types, count, self);
+	self(writer, next);
+
+	/* Succeeded: this structure and those after it are encoded. */
+	return;
+}
+
+/* Writes the fields of one 1.1 feature structure of a device creation. */
+static void
+wire_device_chain_self(
+	struct vulkan_writer *writer,
+	const VkBaseInStructure *record)
+{
+	const VkPhysicalDeviceMultiviewFeatures *multiview;
+	const VkPhysicalDevice16BitStorageFeatures *storage;
+	const VkPhysicalDeviceVariablePointersFeatures *pointers;
+	const VkPhysicalDeviceProtectedMemoryFeatures *protection;
+	const VkPhysicalDeviceSamplerYcbcrConversionFeatures *conversion;
+	const VkPhysicalDeviceShaderDrawParametersFeatures *parameters;
+
+	/* The fields in their declared order, each a 32-bit word, by the structure's type. */
+	switch (record->sType) {
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
+		multiview = (const VkPhysicalDeviceMultiviewFeatures *)record;
+		vulkan_write_u32(writer, multiview->multiview);
+		vulkan_write_u32(writer, multiview->multiviewGeometryShader);
+		vulkan_write_u32(writer, multiview->multiviewTessellationShader);
+		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
+		storage = (const VkPhysicalDevice16BitStorageFeatures *)record;
+		vulkan_write_u32(writer, storage->storageBuffer16BitAccess);
+		vulkan_write_u32(writer, storage->uniformAndStorageBuffer16BitAccess);
+		vulkan_write_u32(writer, storage->storagePushConstant16);
+		vulkan_write_u32(writer, storage->storageInputOutput16);
+		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
+		pointers = (const VkPhysicalDeviceVariablePointersFeatures *)record;
+		vulkan_write_u32(writer, pointers->variablePointersStorageBuffer);
+		vulkan_write_u32(writer, pointers->variablePointers);
+		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES:
+		protection = (const VkPhysicalDeviceProtectedMemoryFeatures *)record;
+		vulkan_write_u32(writer, protection->protectedMemory);
+		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES:
+		conversion = (const VkPhysicalDeviceSamplerYcbcrConversionFeatures *)record;
+		vulkan_write_u32(writer, conversion->samplerYcbcrConversion);
+		break;
+	default:
+		parameters = (const VkPhysicalDeviceShaderDrawParametersFeatures *)record;
+		vulkan_write_u32(writer, parameters->shaderDrawParameters);
+		break;
+	}
+
+	/* Succeeded: the fields are written. */
+	return;
+}
+
+/* Writes the fields of the multiview record of a render pass creation. */
+static void
+wire_render_pass_chain_self(
+	struct vulkan_writer *writer,
+	const VkBaseInStructure *record)
+{
+	const VkRenderPassMultiviewCreateInfo *multiview;
+
+	/* The view mask of each subpass, the view offset of each dependency, and the correlation masks. */
+	multiview = (const VkRenderPassMultiviewCreateInfo *)record;
+	vulkan_write_u32(writer, multiview->subpassCount);
+	wire_u32_array(writer, multiview->pViewMasks, multiview->subpassCount);
+	vulkan_write_u32(writer, multiview->dependencyCount);
+	wire_u32_array(writer, (const uint32_t *)multiview->pViewOffsets, multiview->dependencyCount);
+	vulkan_write_u32(writer, multiview->correlationMaskCount);
+	wire_u32_array(writer, multiview->pCorrelationMasks, multiview->correlationMaskCount);
+
+	/* Succeeded: the fields are written. */
+	return;
+}
+
+/* Writes an array of 32-bit words: its length (0 when absent), then each. */
+static void
+wire_u32_array(
+	struct vulkan_writer *writer,
+	const uint32_t *values,
+	uint32_t count)
+{
+	uint32_t index;
+
+	/* An absent array is an empty one. */
+	if (values == NULL) {
+		vulkan_write_u64(writer, 0U);
+		return;
+	}
+
+	/* The length, then the words. */
+	vulkan_write_u64(writer, count);
+	for (index = 0; index < count; index++)
+		vulkan_write_u32(writer, values[index]);
+
+	/* Succeeded: the array is written. */
+	return;
+}
