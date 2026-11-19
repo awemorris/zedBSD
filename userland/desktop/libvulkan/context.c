@@ -665,7 +665,8 @@ vulkan_kernel_error(
  * it does not take (EINVAL, ERANGE) VK_ERROR_INITIALIZATION_FAILED.
  * Pipelines are refused so by the project's decision; the other creates
  * follow the same rule, although their lists in the specification name
- * only the two memory results.
+ * only the two memory results.  A descriptor update has no result: its
+ * caller only logs the refusal.
  */
 static VkBool32
 vulkan_command_refused(
@@ -1086,10 +1087,11 @@ vulkan_context_transaction(
 	}
 
 	/*
-	 * A creating command (or a submission carrying ended recordings) the
-	 * renderer turned down for a shape it does not take, or for memory,
-	 * fails alone: the refused command left nothing behind, and the next
-	 * transaction starts its own reply stream.
+	 * A creating command (or a submission carrying ended recordings, or a
+	 * descriptor update) the renderer turned down for a shape it does not
+	 * take, or for memory, fails alone: the refused command left nothing
+	 * behind but the sets an update names, and the next transaction starts
+	 * its own reply stream.
 	 */
 	if (status != 0 && refusal != 0) {
 		ordinary = vulkan_command_refused(writer, refusal, &refused);

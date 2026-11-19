@@ -1060,6 +1060,22 @@ lower_kill(
 #define TMU_SF 41U
 #define TMU_SLOD 42U
 
+/*
+ * The operation field of the TMU's third configuration word (bits 20 to
+ * 23) for a regular lookup, which a word left out means.
+ * Values referenced: Mesa 26.2.6 src/broadcom/cle/v3d_packet.xml (TMU
+ * Config Parameter 2 of 7.1, the TMU Op enum's Regular 15) and
+ * src/broadcom/compiler/v3d_tex.c (p2_unpacked_default).
+ */
+#define TMU_OP_REGULAR (15U << 20)
+
+/*
+ * The result component each of a gather's four words lands in.
+ * Values referenced: Mesa 26.2.6 src/compiler/nir/nir_lower_tex.c
+ * (swizzle_tg4_broadcom: the result is the words swizzled 2, 3, 1, 0).
+ */
+static const uint32_t gather_component[4] = { 3U, 2U, 0U, 1U };
+
 /* The most TMU writes of one lookup: S, T, R, I, B and DREF. */
 #define TMU_WRITES 6U
 
@@ -1113,6 +1129,7 @@ lower_sample(
 	uint32_t start_number;
 	uint32_t texel[2];
 	uint32_t index;
+	uint32_t component;
 	uint32_t destination;
 	bool arrayed;
 	bool level;
@@ -1344,11 +1361,16 @@ lower_sample(
 	if (error != 0)
 		return error;
 
-	/* The third word only when it says something (an all-zero word is the default). */
+	/*
+	 * The third word only when it says something.  The word left out is
+	 * the regular lookup; a word written names its operation (bits 20 to
+	 * 23), and 0 there is a prefetch that returns nothing, so the reads
+	 * of the result would wait for ever.
+	 */
 	if (third != 0) {
 		kern_memset(&uniform, 0, sizeof(uniform));
 		uniform.kind = BCM2711_SHADER_CONSTANT;
-		uniform.bits = third;
+		uniform.bits = third | TMU_OP_REGULAR;
 		error = bcm2711_shader_uniform_append(compiler, &uniform);
 		if (error != 0)
 			return error;
@@ -1374,13 +1396,21 @@ lower_sample(
 	if (error != 0)
 		return error;
 
-	/* Every requested FIFO result word gets its own independently live physical register, readable by the next instruction. */
+	/*
+	 * Every requested FIFO result word gets its own independently live
+	 * physical register, readable by the next instruction.  A gather's
+	 * words come as the texels (i0, j0), (i1, j0), (i0, j1), (i1, j1):
+	 * Vulkan's order puts them in w, z, x and y.
+	 */
 	for (index = 0; index < 4; index++) {
+		component = index;
+		if (message == DRV_GPU_IR_TEXTURE_GATHER4 || message == DRV_GPU_IR_TEXTURE_GATHER4_COMPARE)
+			component = gather_component[index];
 		error = bcm2711_shader_register(compiler, &destination);
 		if (error != 0)
 			return error;
-		compiler->values[instruction->dst + index].number = destination;
-		compiler->values[instruction->dst + index].register_live = 1;
+		compiler->values[instruction->dst + component].number = destination;
+		compiler->values[instruction->dst + component].register_live = 1;
 		error = bcm2711_shader_signal(compiler, BCM2711_QPU_SIGNAL_TEXTURE, destination, 0);
 		if (error != 0)
 			return error;

@@ -130,8 +130,8 @@ struct drv_gpu_device {
 
 	/*
 	 * Backend opens past the admission and not yet listed, which a reset
-	 * waits for; the checked resets root asked for that set the device up
-	 * again.
+	 * waits for; the checked resets that set the device up again (root's,
+	 * and those a new open of a failed device nothing used started).
 	 */
 	unsigned opening;
 	uint32_t resets;
@@ -583,6 +583,8 @@ static uint64_t gpu_monitor_step(struct drv_gpu_device *device);
 static void gpu_monitor_close(struct gpu_session *session);
 static unsigned gpu_session_reclaim(struct drv_gpu_device *device, struct gpu_session *session);
 static int gpu_admit_open(struct drv_gpu_device *device, int root, int *service);
+static bool gpu_resettable(const struct drv_gpu_device *device);
+static void gpu_recover_unused(struct drv_gpu_device *device);
 static int gpu_reset_hardware(struct drv_gpu_device *device);
 static void gpu_open_done(struct drv_gpu_device *device);
 static unsigned gpu_device_fail(struct drv_gpu_device *device, const struct gpu_session *spared, int error);
@@ -1898,7 +1900,7 @@ gpu_open(
 		return error;
 	}
 
-	/* A failed device admits no new open but root's, which never reaches the hardware. */
+	/* A failed device admits no new open but root's, which never reaches the hardware, unless nothing uses it and it resets. */
 	service = 0;
 	error = gpu_admit_open(device, root, &service);
 	if (error != 0) {
@@ -1907,9 +1909,9 @@ gpu_open(
 	}
 
 	/*
-	 * Root's open of a failed device gets no backend session: it takes
-	 * only the driver's reports, the reset and close, so that opening the
-	 * node never touches the hardware nor starts its recovery.
+	 * Root's open of a failed device still in use (or whose reset failed)
+	 * gets no backend session: it takes only the driver's reports, the
+	 * reset and close.
 	 */
 	if (service != 0) {
 		irq = spin_lock_irqsave(&gpu_registry_lock);
@@ -10228,11 +10230,14 @@ gpu_session_reclaim(
 
 /*
  * Admits a new open of the device: a healthy device counts it as opening
- * (service 0).  A failed device refuses it with EIO, except root's, which
- * it admits without a backend session (service 1) so that root can read
- * the driver's reports and ask for the reset.  An open never starts a
- * reset; one arriving while a reset runs waits for its end.  Returns 0,
- * EIO, ENODEV once the device is withdrawn, or EINTR.
+ * (service 0).  A failed device that nothing uses any more (no open, no
+ * backend open in flight, no shared allocation) is reset for the open
+ * through the driver, once, and a checked reset makes it healthy again.
+ * A failed device still in use, or one whose reset failed, refuses the
+ * open with EIO, except root's, which it admits without a backend session
+ * (service 1) so that root can read the driver's reports and ask for the
+ * reset.  An open arriving while a reset runs waits for its end.  Returns
+ * 0, EIO, ENODEV once the device is withdrawn, or EINTR.
  */
 static int
 gpu_admit_open(
@@ -10242,24 +10247,40 @@ gpu_admit_open(
 {
 	uint64_t observed;
 	unsigned long irq;
+	bool tried;
+	bool unused;
 	int error;
 
 	/* An open arriving during a reset waits for its result instead of failing. */
 	*service = 0;
+	tried = false;
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
-	while (device->recovering != 0U && device->online != 0U) {
-		observed = waitq_sequence(&device->capacity_waitq);
-		error = waitq_sleep(
-			&device->capacity_waitq,
-			&gpu_registry_lock,
-			observed,
-			0U,
-			WAITQ_INTERRUPTIBLE);
-		if (error != 0 && error != EAGAIN) {
-			spin_unlock_irqrestore(&gpu_registry_lock, irq);
-			return error;
+	for (;;) {
+		while (device->recovering != 0U && device->online != 0U) {
+			observed = waitq_sequence(&device->capacity_waitq);
+			error = waitq_sleep(
+				&device->capacity_waitq,
+				&gpu_registry_lock,
+				observed,
+				0U,
+				WAITQ_INTERRUPTIBLE);
+			if (error != 0 && error != EAGAIN) {
+				spin_unlock_irqrestore(&gpu_registry_lock, irq);
+				return error;
+			}
 		}
+
+		/* A failed device that nothing uses any more, with a reset in its driver, is reset for this open once. */
+		unused = device->open_sessions == NULL && device->opening == 0U && device->shares == 0U;
+		if (tried || device->online == 0U || device->error == 0 || !unused || !gpu_resettable(device))
+			break;
+		tried = true;
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+		/* The reset, outside the lock; opens meanwhile wait for it. */
+		gpu_recover_unused(device);
+		irq = spin_lock_irqsave(&gpu_registry_lock);
 	}
 
 	/* A withdrawn device, a failed one, or a healthy one (isolated contexts do not stop the others). */
@@ -10284,6 +10305,80 @@ gpu_admit_open(
 
 	/* Succeeded: the open goes on, with or without a backend session. */
 	return 0;
+}
+
+/* Tells whether the driver can reset the device: a service reset or a recovery reset. */
+static bool
+gpu_resettable(
+	const struct drv_gpu_device *device)
+{
+	/* The service reset first, then the recovery reset, as gpu_reset_hardware takes them. */
+	if (device->ops->service != NULL && device->ops->service->reset != NULL)
+		return true;
+	if (device->ops->recovery != NULL && device->ops->recovery->reset != NULL)
+		return true;
+
+	/* Neither: the device stays failed until it is withdrawn. */
+	return false;
+}
+
+/*
+ * Resets a failed device that nothing uses any more, for the open that
+ * found it so: takes the device as root's reset does (new opens wait),
+ * resets the hardware through the driver and, when no fault came
+ * meanwhile, clears the failure and the quarantine.  A failed reset stops
+ * the hardware's use and leaves the device failed with the reset's error.
+ */
+static void
+gpu_recover_unused(
+	struct drv_gpu_device *device)
+{
+	const struct drv_gpu_recovery_ops *recovery;
+	uint64_t started;
+	uint64_t epoch;
+	unsigned long irq;
+	int failure;
+	int result;
+
+	/* Takes the device; the fault epoch tells a fault that comes during the reset. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	device->recovering = 1U;
+	epoch = device->fault_epoch;
+	failure = device->error;
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The driver's checked reset, timed for the log. */
+	started = sched_ticks();
+	result = gpu_reset_hardware(device);
+	kern_logf("gpu: gpu%u reset after a failure (%d) as nothing used it: result %d, %u ms\n",
+		  device->number,
+		  failure,
+		  result,
+		  (unsigned)kern_ticks_to_ms(sched_ticks() - started));
+
+	/* A failed reset: the hardware's use stops and the device stays failed with the reset's error. */
+	recovery = device->ops->recovery;
+	if (result != 0 && recovery != NULL && recovery->fault != NULL)
+		recovery->fault(device->private_data, result);
+	if (result != 0)
+		(void)gpu_device_fail(device, NULL, result);
+
+	/* The device's state, then the waiting opens. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	device->recovering = 0U;
+	if (result == 0) {
+		device->resets++;
+		if (device->fault_epoch == epoch && device->fault_epoch_overflow == 0U) {
+			device->error = 0;
+			device->quarantined = 0U;
+		}
+	}
+	gpu_capacity_changed_locked(device);
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 }
 
 /*

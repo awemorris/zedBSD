@@ -157,18 +157,25 @@ state. A request that binds a fence to new work (`GPU_FENCE_BIND`, and a
 that names a signal fence, once its wait fence has completed) fails with
 `ENODEV` on a failed device, whatever error the device recorded.
 
-A new open of a failed device fails with `EIO`, except root's. Opening never
-resets the hardware, so an open made only to read cannot change the device.
-Root's open of a failed device succeeds without a driver session: it does not
-reach the hardware, and it takes only `GPU_DIAGNOSE`, `GPU_DEVICE_RESET` and
-`close`; every other request fails with `EIO`. The device recovers only when
-root asks for it with `GPU_DEVICE_RESET` (the `gpu` command's `reset`): the
-kernel tells every other open of the loss and waits for them to close, resets
-the hardware through the driver, clears the recorded error on success and gives
-the asking open a driver session, after which it is an ordinary open. Old
-objects are never revived. A context the kernel isolated does not fail the
-device, so new opens still succeed; the storage it keeps is reclaimed by root's
-reset.
+A failed device comes back by itself once nothing uses it: when every open of
+the device has closed (no backend open is in flight and no allocation of the
+device is shared any more), the next open resets the hardware through the
+driver before it goes on. On success the recorded error is cleared and the
+open is an ordinary one; the kernel logs the reset. Each open tries this once:
+when the reset fails the device stays failed with the reset's error. Old
+objects are never revived.
+
+A new open of a failed device that is still in use (another open has not
+closed yet), or whose reset failed, fails with `EIO`, except root's. Root's
+open then succeeds without a driver session: it does not reach the hardware,
+and it takes only `GPU_DIAGNOSE`, `GPU_DEVICE_RESET` and `close`; every other
+request fails with `EIO`. Root can also recover a device that is still in use
+with `GPU_DEVICE_RESET` (the `gpu` command's `reset`): the kernel tells every
+other open of the loss and waits for them to close, resets the hardware
+through the driver, clears the recorded error on success and gives the asking
+open a driver session, after which it is an ordinary open. A context the
+kernel isolated does not fail the device, so new opens still succeed; the
+storage it keeps is reclaimed by a reset.
 
 An open that arrives while a reset of the same device runs waits for the
 result. The wait is interruptible, so a signal ends it with `EINTR`, and it

@@ -506,6 +506,15 @@ vkUpdateDescriptorSets(
 	for (index = 0; index < descriptorCopyCount && writer.error == VK_SUCCESS; index++)
 		vulkan_encode_VkCopyDescriptorSet(&writer, &pDescriptorCopies[index]);
 
+	/*
+	 * An update the executor turns down with an errno (a descriptor kind
+	 * or a copy it does not take, memory it has no room in) fails the call
+	 * alone: the command names no object it creates or frees, and the
+	 * session goes on.  The call has no result, so the refusal is only
+	 * logged; the sets keep what the updates before the refused one wrote.
+	 */
+	writer.refusable = VK_TRUE;
+
 	/* Submit the complete update without exposing application pointers to the renderer. */
 	status = vulkan_command_execute(owner->object.context, &writer, 4U, &reply, VK_FALSE);
 	vulkan_writer_finish(&writer);
