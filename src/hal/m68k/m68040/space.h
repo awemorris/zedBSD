@@ -40,5 +40,6 @@ struct m68040_space {
 
 void m68040_space_init(void);
 void m68040_space_memory_stats(uint32_t *spaces, uint32_t *tables);
+bool m68040_space_writable(uint32_t address, uint32_t size, bool supervisor);
 
 #endif

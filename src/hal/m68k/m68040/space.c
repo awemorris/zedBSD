@@ -18,6 +18,16 @@
  * bytes, a page table 256), which keeps the bookkeeping simple.  The port
  * is uniprocessor, so a space's operation runs with interrupts off and
  * flushes the one translation cache.
+ *
+ * The processor's table search reads memory, not the data cache, and sets
+ * the used and modified bits of a page descriptor in memory.  The kernel
+ * writes the tables through its copyback window, so every descriptor it
+ * writes is pushed to memory at once, and the line of a page descriptor
+ * is pushed before the kernel reads it, so that the read sees the bits
+ * the processor set.  A pushed line is also dropped from the cache.
+ *
+ * Values referenced: M68040 User's Manual (MC68040UM/AD), section 3 (the
+ * table search accesses memory directly; the used and modified updates).
  */
 
 #include <hal/hal.h>
@@ -30,9 +40,11 @@
 /* The flags of a user page: resident, copyback-cached. */
 #define USER_PAGE	(M68040_DESC_PAGE | M68040_DESC_CM_COPYBACK)
 
-/* The transparent windows: RAM up to 1 GiB, copyback; the device space, serialized. */
-#define RAM_WINDOW	(0x003f0000U | M68040_TT_ENABLE | M68040_TT_SUPERVISOR | M68040_TT_CM_COPYBACK)
-#define DEVICE_WINDOW	(0xff000000U | M68040_TT_ENABLE | M68040_TT_SUPERVISOR | M68040_TT_CM_SERIALIZED)
+/* The transparent windows of the board: RAM, copyback; the device space, serialized. */
+#define RAM_WINDOW	(((uint32_t)M68040_RAM_WINDOW_BASE << 24) | ((uint32_t)M68040_RAM_WINDOW_MASK << 16) | \
+			 M68040_TT_ENABLE | M68040_TT_SUPERVISOR | M68040_TT_CM_COPYBACK)
+#define DEVICE_WINDOW	(((uint32_t)M68040_DEVICE_WINDOW_BASE << 24) | ((uint32_t)M68040_DEVICE_WINDOW_MASK << 16) | \
+			 M68040_TT_ENABLE | M68040_TT_SUPERVISOR | M68040_TT_CM_SERIALIZED)
 
 /* The root the kernel alone selects: every entry invalid. */
 static uint32_t system_root[M68040_ROOT_ENTRIES] __attribute__((aligned(M68040_ROOT_BYTES)));
@@ -59,6 +71,8 @@ static struct m68040_table_page *detach_empty_tables(struct m68040_space *space)
 static void free_detached_tables(struct m68040_table_page *page);
 static uint32_t user_leaf(hal_physaddr_t physical, uint32_t attr);
 static void flush_space(hal_space_t handle);
+static void store_descriptor(uint32_t *slot, uint32_t value);
+static int device_window_covers(uint32_t physical, size_t size);
 
 /*
  * Turns translation on with the kernel alone selected.
@@ -97,9 +111,10 @@ hal_space_create(
 		return NULL;
 	}
 
-	/* Clears the root through the kernel's view of it. */
+	/* Clears the root through the kernel's view of it and pushes it to memory, where the processor reads it. */
 	space->root = hal_pmem_to_kernel(space->root_memory);
 	hal_memset(space->root, 0, M68040_ROOT_BYTES);
+	m68040_cache_push_page(space->root);
 	space->magic = M68040_SPACE_MAGIC;
 
 	/* Numbers the space and makes it live. */
@@ -253,7 +268,7 @@ hal_space_map(
 			for (rollback = 0; rollback < offset; rollback += M68040_PAGE_SIZE) {
 				leaf = walk_leaf(space, address + rollback, 0);
 				if (leaf != NULL)
-					*leaf = 0;
+					store_descriptor(leaf, 0);
 			}
 
 			/* Unlinks the tables left empty, then drops the stale translations and frees them. */
@@ -265,7 +280,7 @@ hal_space_map(
 		}
 
 		/* Writes the page's leaf. */
-		*leaf = user_leaf(paddr + offset, attr);
+		store_descriptor(leaf, user_leaf(paddr + offset, attr));
 	}
 
 	/* Code in the pages is fetched from memory, not from stale cache lines. */
@@ -313,7 +328,7 @@ hal_space_unmap(
 	for (offset = 0; offset < size; offset += M68040_PAGE_SIZE) {
 		leaf = walk_leaf(space, address + offset, 0);
 		if (leaf != NULL)
-			*leaf = 0;
+			store_descriptor(leaf, 0);
 	}
 
 	/* Unlinks the tables left empty, then drops the stale translations and frees them. */
@@ -382,7 +397,7 @@ hal_space_prot_query(
 			observed |= HAL_SPACE_PAGE_ACCESSED;
 		if ((old & M68040_DESC_MODIFIED) != 0)
 			observed |= HAL_SPACE_PAGE_DIRTY;
-		*leaf = user_leaf(old & M68040_PAGE_ADDRESS_MASK, attr) | (old & (M68040_DESC_USED | M68040_DESC_MODIFIED));
+		store_descriptor(leaf, user_leaf(old & M68040_PAGE_ADDRESS_MASK, attr) | (old & (M68040_DESC_USED | M68040_DESC_MODIFIED)));
 	}
 
 	/* Code in the pages is fetched from memory, not from stale cache lines. */
@@ -504,7 +519,7 @@ hal_space_clear_flags(
 		mask |= M68040_DESC_USED;
 	if ((flags & HAL_SPACE_PAGE_DIRTY) != 0)
 		mask |= M68040_DESC_MODIFIED;
-	*leaf &= ~mask;
+	store_descriptor(leaf, *leaf & ~mask);
 	flush_space(handle);
 	m68040_irq_restore(enabled);
 
@@ -564,11 +579,62 @@ hal_space_get_user_range(
 	uintptr_t *minimum,
 	uintptr_t *limit)
 {
-	/* Between the supervisor's RAM window and the sign bit. */
+	/* The board's user half, outside the supervisor's windows. */
 	if (minimum != NULL)
 		*minimum = M68040_USER_MINIMUM;
 	if (limit != NULL)
 		*limit = M68040_USER_LIMIT;
+}
+
+/*
+ * Reports whether a write to a range would complete now without a fault:
+ * a supervisor write inside the RAM window, or a write to resident,
+ * writable pages of the space selected now.
+ */
+bool
+m68040_space_writable(
+	uint32_t address,
+	uint32_t size,
+	bool supervisor)
+{
+	struct m68040_space *space;
+	uint32_t page;
+	uint32_t last;
+	uint32_t *leaf;
+
+	/* Refuses an empty range or one that wraps. */
+	if (size == 0 || size - 1U > 0xffffffffU - address)
+		return false;
+
+	/* The supervisor reaches the whole RAM window. */
+	if (supervisor && address + (size - 1U) < M68040_RAM_LIMIT)
+		return true;
+
+	/* Anything else goes through the tables of the space selected now. */
+	if (current_space == HAL_SPACE_SYS)
+		return false;
+	space = current_space;
+	page = address & ~(uint32_t)(M68040_PAGE_SIZE - 1U);
+	last = (address + (size - 1U)) & ~(uint32_t)(M68040_PAGE_SIZE - 1U);
+
+	/* Each page the range touches must be a resident, writable user page. */
+	for (;;) {
+		if (page < M68040_USER_MINIMUM || page >= M68040_USER_LIMIT)
+			return false;
+		leaf = walk_leaf(space, page, 0);
+		if (leaf == NULL)
+			return false;
+		if ((*leaf & M68040_DESC_TYPE_MASK) == 0)
+			return false;
+		if ((*leaf & M68040_DESC_WRITE_PROTECT) != 0)
+			return false;
+		if (page == last)
+			break;
+		page += M68040_PAGE_SIZE;
+	}
+
+	/* Succeeded: every page is resident and writable. */
+	return true;
 }
 
 /*
@@ -591,7 +657,7 @@ hal_space_map_device(
 		return HAL_ERR_INVALID;
 
 	/* The device space, serialized and never cached. */
-	if (paddr >= M68040_DEVICE_BASE && size <= (size_t)(0U - (uint32_t)paddr)) {
+	if (device_window_covers((uint32_t)paddr, size)) {
 		*vaddr = (void *)(uintptr_t)paddr;
 		return HAL_OK;
 	}
@@ -765,8 +831,9 @@ allocate_table(
 		return NULL;
 	}
 
-	/* Clears it and remembers the entry that points at it. */
+	/* Clears it in memory, where the processor reads it, and remembers the entry that points at it. */
 	hal_memset(hal_pmem_to_kernel(page->memory), 0, M68040_PAGE_SIZE);
+	m68040_cache_push_page(hal_pmem_to_kernel(page->memory));
 	page->parent = parent;
 	page->parent_index = index;
 	page->next = space->tables;
@@ -790,6 +857,7 @@ walk_leaf(
 {
 	struct m68040_table_page *page;
 	uint32_t *table;
+	uint32_t *leaf;
 	uint32_t entry;
 	unsigned index;
 
@@ -804,7 +872,7 @@ walk_leaf(
 		if (page == NULL)
 			return NULL;
 		entry = (uint32_t)page->memory | M68040_DESC_TABLE;
-		table[index] = entry;
+		store_descriptor(&table[index], entry);
 	}
 
 	/* The pointer entry, pointing at a page table. */
@@ -818,12 +886,16 @@ walk_leaf(
 		if (page == NULL)
 			return NULL;
 		entry = (uint32_t)page->memory | M68040_DESC_TABLE;
-		table[index] = entry;
+		store_descriptor(&table[index], entry);
 	}
 
-	/* Succeeded: the page's descriptor. */
+	/* The page's descriptor, read from memory from now on. */
 	table = hal_pmem_to_kernel(entry & M68040_PAGE_TABLE_ADDRESS_MASK);
-	return &table[(address >> M68040_PAGE_SHIFT) & (M68040_PAGE_ENTRIES - 1U)];
+	leaf = &table[(address >> M68040_PAGE_SHIFT) & (M68040_PAGE_ENTRIES - 1U)];
+	m68040_cache_push_line(leaf);
+
+	/* Succeeded: the page's descriptor. */
+	return leaf;
 }
 
 /* Reports whether a table has no resident entry. */
@@ -874,7 +946,7 @@ detach_empty_tables(
 			}
 
 			/* Unlinks it from its parent and from the space's list. */
-			page->parent[page->parent_index] = 0;
+			store_descriptor(&page->parent[page->parent_index], 0);
 			*link = page->next;
 			page->next = detached;
 			detached = page;
@@ -928,4 +1000,47 @@ flush_space(
 	/* A space not selected has nothing cached: selecting it flushes. */
 	if (handle == current_space || handle == HAL_SPACE_SYS)
 		m68040_flush_atc();
+}
+
+/*
+ * Writes one table descriptor and pushes its line to memory, where the
+ * processor's table search reads it.
+ */
+static void
+store_descriptor(
+	uint32_t *slot,
+	uint32_t value)
+{
+	/* The line is pushed right after the write, before anything else uses the tables. */
+	*slot = value;
+	m68040_cache_push_line(slot);
+}
+
+/*
+ * Reports whether a physical range lies in the supervisor's device window:
+ * every 16 MiB block it touches matches the window's base under its mask.
+ */
+static int
+device_window_covers(
+	uint32_t physical,
+	size_t size)
+{
+	uint32_t block;
+	uint32_t last_block;
+	uint32_t fixed;
+
+	/* Refuses a range that wraps past the top of the address space. */
+	if (size == 0 || size - 1U > (size_t)(0xffffffffU - physical))
+		return 0;
+
+	/* Compares the top byte of each block with the window's fixed bits. */
+	fixed = ~(uint32_t)M68040_DEVICE_WINDOW_MASK & 0xffU;
+	last_block = (physical + (uint32_t)(size - 1U)) >> 24;
+	for (block = physical >> 24; block <= last_block; block++) {
+		if ((block & fixed) != ((uint32_t)M68040_DEVICE_WINDOW_BASE & fixed))
+			return 0;
+	}
+
+	/* Succeeded: the whole range is in the window. */
+	return 1;
 }

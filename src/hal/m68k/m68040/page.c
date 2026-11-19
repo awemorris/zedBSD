@@ -8,21 +8,23 @@
 /*
  * The MC68040 physical page allocator.
  *
- * Memory is the board's one RAM bank, one bit per page, set when the page
- * is in use.  The first page, the kernel image with the boot information
- * after it, and the initial ramdisk are set at boot and never freed.
+ * Memory is the span from the board's lowest RAM bank to the end of its
+ * highest, one bit per page, set when the page is in use.  The pages
+ * between banks, the first page, the kernel image with the boot
+ * information after it, and the ranges the board keeps (an initial
+ * ramdisk) are set at boot and never freed.
  */
 
 #include <hal/hal.h>
 #include "asm.h"
-#include "../bsp-virt/bsp.h"
+#include "board.h"
 #include "defs.h"
 #include "page.h"
 #include "space.h"
 #include "spin.h"
 
-/* The most RAM the bitmap can describe: 1 GiB, what the supervisor's window holds. */
-#define PAGE_MAX_BYTES		(1024ULL * 1024ULL * 1024ULL)
+/* The most RAM the bitmap can describe: what the supervisor's window holds. */
+#define PAGE_MAX_BYTES		((uint64_t)M68040_RAM_LIMIT)
 #define PAGE_MAX_PAGES		(PAGE_MAX_BYTES / M68040_PAGE_SIZE)
 #define PAGE_BITMAP_WORDS	(PAGE_MAX_PAGES / 32U)
 
@@ -44,6 +46,13 @@ static uint32_t reserved_bitmap[PAGE_BITMAP_WORDS];
  */
 static uint64_t ram_base;
 static uint32_t ram_pages;
+
+/*
+ * The board's RAM banks, as it reported them, and how many there are.
+ * Set once by m68040_page_init() and constant afterwards.
+ */
+static const struct m68040_memory_bank *ram_banks;
+static unsigned ram_bank_count;
 
 /*
  * The pages that were never available and the pages allocated now, for
@@ -73,50 +82,81 @@ static int alloc_ram(size_t size, size_t alignment, hal_physaddr_t max_paddr, si
 static int free_ram(hal_physaddr_t *block, size_t size);
 
 /*
- * Builds the page bitmap from the device tree's memory and reservations.
+ * Builds the page bitmap from the board's RAM banks and reserved ranges.
  *
- * Every page starts in use; the RAM banks are released, then the kernel
- * image, the tree, the ramdisk and the reservations are taken again.
+ * Every page starts in use; the banks are released, then the first page,
+ * the kernel image with the boot information after it, and the board's
+ * reserved ranges are taken again.
  */
 void
 m68040_page_init(
 	uint32_t kernel_end)
 {
-	const struct virt_board_info *board;
 	uint64_t lowest;
 	uint64_t highest;
+	uint64_t bank_end;
+	uint32_t reserved_base;
+	uint32_t reserved_size;
+	unsigned index;
+	bool more;
 
-	/* The one bank, kept page-aligned and within the window. */
-	board = virt_board();
-	if (board->memory_size == 0)
-		HAL_FATAL("m68040 boot information gives no memory");
-	lowest = board->memory_base & ~((uint64_t)M68040_PAGE_SIZE - 1U);
-	highest = ((uint64_t)board->memory_base + board->memory_size) & ~((uint64_t)M68040_PAGE_SIZE - 1U);
+	/* The board must report some RAM. */
+	ram_bank_count = m68040_board_memory(&ram_banks);
+	if (ram_bank_count == 0)
+		HAL_FATAL("m68040 board reports no memory");
+
+	/* The span runs from the lowest bank's start to the highest bank's end. */
+	lowest = ram_banks[0].base;
+	highest = 0;
+	for (index = 0; index < ram_bank_count; index++) {
+		bank_end = (uint64_t)ram_banks[index].base + ram_banks[index].size;
+		if (ram_banks[index].base < lowest)
+			lowest = ram_banks[index].base;
+		if (bank_end > highest)
+			highest = bank_end;
+	}
+
+	/* Keeps the span page-aligned and within the supervisor's window. */
+	lowest &= ~((uint64_t)M68040_PAGE_SIZE - 1U);
+	highest &= ~((uint64_t)M68040_PAGE_SIZE - 1U);
 	if (highest - lowest > PAGE_MAX_BYTES)
 		highest = lowest + PAGE_MAX_BYTES;
 	if (highest > M68040_RAM_LIMIT)
 		highest = M68040_RAM_LIMIT;
+	if (highest <= lowest)
+		HAL_FATAL("m68040 memory lies outside the supervisor's window");
 	ram_base = lowest;
 	ram_pages = (uint32_t)((highest - lowest) / M68040_PAGE_SIZE);
 
-	/* Starts with every page unavailable, then releases the bank. */
+	/* Starts with every page unavailable, then releases each bank. */
 	hal_memset(page_bitmap, 0xff, sizeof(page_bitmap));
 	hal_memset(reserved_bitmap, 0xff, sizeof(reserved_bitmap));
 	reserved_pages = ram_pages;
 	allocated_pages = 0;
-	release_range(board->memory_base, board->memory_size);
+	for (index = 0; index < ram_bank_count; index++)
+		release_range(ram_banks[index].base, ram_banks[index].size);
 
 	/* Takes back the first page, the image and the boot information after it. */
 	reserve_range(0, (uint64_t)kernel_end);
-	if (board->ramdisk_size != 0)
-		reserve_range(board->ramdisk_base, board->ramdisk_size);
+
+	/* Takes back each range the board keeps for itself. */
+	index = 0;
+	for (;;) {
+		more = m68040_board_reserved(index, &reserved_base, &reserved_size);
+		if (!more)
+			break;
+		if (reserved_size != 0)
+			reserve_range(reserved_base, reserved_size);
+		index++;
+	}
 
 	/* The first allocation looks from the span's start. */
 	first_free_candidate = 0;
-	hal_printf("M68040 MEMORY base=%llx total=%llu MiB free=%llu MiB\n",
+	hal_printf("M68040 MEMORY base=%llx total=%llu MiB free=%llu MiB banks=%u\n",
 		   ram_base,
 		   (uint64_t)ram_pages * M68040_PAGE_SIZE / (1024U * 1024U),
-		   ((uint64_t)ram_pages - reserved_pages) * M68040_PAGE_SIZE / (1024U * 1024U));
+		   ((uint64_t)ram_pages - reserved_pages) * M68040_PAGE_SIZE / (1024U * 1024U),
+		   ram_bank_count);
 }
 
 /*
@@ -149,15 +189,21 @@ m68040_range_is_ram(
 	uint64_t physical,
 	uint64_t size)
 {
-	uint64_t end;
+	uint64_t bank_end;
+	unsigned index;
 
-	/* The range lies inside the managed span. */
-	end = ram_base + (uint64_t)ram_pages * M68040_PAGE_SIZE;
-	if (physical < ram_base || physical >= end)
-		return false;
-	if (end - physical < size)
-		return false;
-	return true;
+	/* Looks for the bank that holds the whole range. */
+	for (index = 0; index < ram_bank_count; index++) {
+		bank_end = (uint64_t)ram_banks[index].base + ram_banks[index].size;
+		if (physical < ram_banks[index].base || physical >= bank_end)
+			continue;
+		if (bank_end - physical < size)
+			return false;
+		return true;
+	}
+
+	/* No bank holds the range's start. */
+	return false;
 }
 
 /*
@@ -168,15 +214,21 @@ m68040_range_touches_ram(
 	uint64_t physical,
 	uint64_t size)
 {
-	uint64_t end;
+	uint64_t bank_end;
+	unsigned index;
 
-	/* The range and the span overlap. */
-	end = ram_base + (uint64_t)ram_pages * M68040_PAGE_SIZE;
-	if (physical >= end)
-		return false;
-	if (physical + size <= ram_base)
-		return false;
-	return true;
+	/* Looks for a bank the range overlaps. */
+	for (index = 0; index < ram_bank_count; index++) {
+		bank_end = (uint64_t)ram_banks[index].base + ram_banks[index].size;
+		if (physical >= bank_end)
+			continue;
+		if (physical + size <= ram_banks[index].base)
+			continue;
+		return true;
+	}
+
+	/* The range lies between and beside the banks. */
+	return false;
 }
 
 /*

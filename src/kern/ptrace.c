@@ -716,6 +716,77 @@ trace_fpregs_in(
 	to->reserved = 0;
 }
 
+#elif defined(__m68k__)
+
+/*
+ * Copies the integer registers outward, under the names a process sees.
+ */
+static void
+trace_gpregs_out(
+	const struct hal_gpregs *from,
+	struct reg *to)
+{
+	unsigned index;
+
+	/* The data and address registers, then the status and the next instruction. */
+	for (index = 0; index < 8U; index++)
+		to->r_d[index] = from->d[index];
+	for (index = 0; index < 8U; index++)
+		to->r_a[index] = from->a[index];
+	to->r_sr = from->sr;
+	to->r_pc = from->pc;
+}
+
+/*
+ * Copies the integer registers inward.  The status register is passed
+ * along, and the hardware layer keeps all of it but the condition codes.
+ */
+static void
+trace_gpregs_in(
+	const struct reg *from,
+	struct hal_gpregs *to)
+{
+	unsigned index;
+
+	/* The data and address registers, then the status and the next instruction. */
+	for (index = 0; index < 8U; index++)
+		to->d[index] = from->r_d[index];
+	for (index = 0; index < 8U; index++)
+		to->a[index] = from->r_a[index];
+	to->sr = from->r_sr;
+	to->pc = from->r_pc;
+}
+
+/*
+ * Copies the floating-point state outward.
+ */
+static void
+trace_fpregs_out(
+	const struct hal_fpregs *from,
+	struct fpreg *to)
+{
+	/* The registers, then the control, status and instruction address. */
+	kern_memcpy(to->fp_fp, from->fp, sizeof(to->fp_fp));
+	to->fp_fpcr = from->fpcr;
+	to->fp_fpsr = from->fpsr;
+	to->fp_fpiar = from->fpiar;
+}
+
+/*
+ * Copies the floating-point state inward.
+ */
+static void
+trace_fpregs_in(
+	const struct fpreg *from,
+	struct hal_fpregs *to)
+{
+	/* The registers, then the control, status and instruction address. */
+	kern_memcpy(to->fp, from->fp_fp, sizeof(to->fp));
+	to->fpcr = from->fp_fpcr;
+	to->fpsr = from->fp_fpsr;
+	to->fpiar = from->fp_fpiar;
+}
+
 #endif
 
 /*

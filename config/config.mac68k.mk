@@ -1,0 +1,4 @@
+PLATFORM := mac68k
+ARCHITECTURE := m68k
+BOARD := mac68k
+VARIANT :=
