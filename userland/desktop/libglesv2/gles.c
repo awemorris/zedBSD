@@ -77,6 +77,7 @@ static int gles_version_three(struct zegl_context *context);
 static int gles_color_buffer_float(struct gles_state *state);
 static unsigned gles_extension_count(const struct gles_state *state);
 static int gles_compute_offered(struct zegl_context *context, const VkPhysicalDeviceLimits *limits);
+static int gles_es31_minimums(struct gles_state *state);
 static unsigned gles_desktop_integers(struct gles_state *state, GLenum pname, GLint *values);
 static int gles_tess_integers(struct gles_state *state, GLenum pname, GLint *values);
 static unsigned gles_floats(struct zegl_context *context, struct gles_state *state, GLenum pname, GLfloat *values);
@@ -186,9 +187,16 @@ gles_state(
 	state->default_feedback.bound = 1;
 	state->feedback = &state->default_feedback;
 
-	/* Whether the context offers OpenGL ES 3.1's compute (ws101-p009), and its image units. */
+	/*
+	 * Whether the context offers OpenGL ES 3.1 (its compute, and the rest
+	 * of what 3.1 requires of the device), and its image units.
+	 */
 	state->compute = gles_compute_offered(context, &state->limits);
 	state->image_units = gles_image_units_offered(state);
+	if (state->compute && !gles_es31_minimums(state)) {
+		state->compute = 0;
+		state->image_units = gles_image_units_offered(state);
+	}
 
 	/* The colour attachments and draw buffers: the device's, at most the library's, at least one. */
 	state->color_attachments = GLES_COLOR_ATTACHMENTS;
@@ -2936,6 +2944,35 @@ gles_compute_offered(
 
 	/* Succeeded: whether it runs compute. */
 	return compute;
+}
+
+/*
+ * Reports whether a context of compute (gles_compute_offered()) has the
+ * rest of what OpenGL ES 3.1 requires of the device: image units (the
+ * image units, and a compute shader's image uniforms, at least 4), and a
+ * framebuffer object with nothing attached of up to 4 samples (the least
+ * GL_MAX_FRAMEBUFFER_SAMPLES).  The multisample textures need no more
+ * than one sample of each kind.  A context without them offers OpenGL ES
+ * 3.0, so the version it names is one whose minimums its states meet.
+ *
+ * Values referenced: Khronos OpenGL ES 3.1 specification, chapter 20
+ * (state tables: the minimums of MAX_FRAMEBUFFER_SAMPLES 4,
+ * MAX_COMPUTE_IMAGE_UNIFORMS 4 and MAX_IMAGE_UNITS 4).
+ */
+static int
+gles_es31_minimums(
+	struct gles_state *state)
+{
+	/* The image units (gles_image_units_offered(), set from the device's storage images). */
+	if (state->image_units < 4U)
+		return 0;
+
+	/* A framebuffer object with nothing attached of four samples. */
+	if (gles_framebuffer_default_samples_max(state) < 4U)
+		return 0;
+
+	/* Succeeded: the device meets OpenGL ES 3.1's minimums. */
+	return 1;
 }
 
 /* Writes one of desktop GL's integer states (libGL); returns how many values, 0 when the name is not one. */
