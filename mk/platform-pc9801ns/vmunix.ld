@@ -1,4 +1,3 @@
-/* PC-98 single-image higher-half kernel. */
 OUTPUT_FORMAT(elf32-i386)
 ENTRY(text_start)
 
@@ -32,9 +31,11 @@ SECTIONS
 	. = ALIGN(4096);
 	__kernel_bss_start = .;
 	.bss (NOLOAD) : AT(ADDR(.bss) - 0x80000000) SUBALIGN(16) {
-		/* CR3 and every page table must remain page-aligned without
+		/*
+                 * CR3 and every page table must remain page-aligned without
 		 * raising the PT_LOAD file alignment above the loader's 512-byte
-		 * contract.  Place locore first at an explicit page boundary. */
+		 * contract.  Place locore first at an explicit page boundary.
+                 */
 		. = ALIGN(4096);
 		*/hal/i386/locore.o(.bss* COMMON)
 		*(.vfs_bss)
@@ -52,12 +53,7 @@ SECTIONS
 	__kernel_phys_end = __kernel_vma_end - 0x80000000;
 
 	ASSERT(SIZEOF_HEADERS <= 512, "ELF headers exceed first sector")
-	ASSERT(__kernel_phys_start == 0x00100000,
-	       "PC-98 kernel must start at physical 1 MiB")
-	ASSERT(__kernel_phys_end < 0x00f00000,
-	       "PC-98 kernel reaches the 15 MiB memory hole")
-	ASSERT(text_start >= __kernel_vma_start &&
-	       text_start < __kernel_image_end,
-	       "PC-98 entry is not file-backed")
-
+	ASSERT(__kernel_phys_start == 0x00100000, "PC-98 kernel must start at physical 1 MiB")
+	ASSERT(__kernel_phys_end < 0x00f00000, "PC-98 kernel reaches the 15 MiB memory hole")
+	ASSERT(text_start >= __kernel_vma_start && text_start < __kernel_image_end, "PC-98 entry is not file-backed")
 }

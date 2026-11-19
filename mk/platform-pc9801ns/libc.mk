@@ -2,8 +2,8 @@
 # zedBSD i386 libc Makefile
 #
 
-PLATFORM_I386_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-REPO_ROOT           ?= $(abspath $(PLATFORM_I386_DIR)/../..)
+PLATFORM_PC9801NS_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT           ?= $(abspath $(PLATFORM_PC9801NS_DIR)/../..)
 
 LIBC_OUT_DIR := $(BUILD)/libc
 LIBC_OBJ_DIR := $(BUILD)/libc/obj

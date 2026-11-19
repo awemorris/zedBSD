@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# i386 sysroot build rules
+# pc9801ns sysroot build rules
 #
 
-PLATFORM_PC9821_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-REPO_ROOT ?= $(abspath $(PLATFORM_PC9821_DIR)/../..)
+PLATFORM_PC9801NS_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT ?= $(abspath $(PLATFORM_PC9801NS_DIR)/../..)
 
 SYSROOT     := $(BUILD)/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
@@ -39,7 +39,7 @@ $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
 
 # Complete sysroot by copying libraries from libc build and verifying with smoke link
 $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
-	@mkdir -p $(SYSROOT_LIB)/zedbsd/i386 $(SYSROOT_LIB)/zedbsd/pc9821 $(BUILD)/dynamic
+	@mkdir -p $(SYSROOT_LIB)/zedbsd/i386 $(SYSROOT_LIB)/zedbsd/pc9801ns $(BUILD)/dynamic
 	cp -f $(LIBC_OUT_DIR)/libc.a $(LIBC_OUT_DIR)/libc.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libm.a $(LIBC_OUT_DIR)/libm.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libutil.a $(LIBC_OUT_DIR)/libutil.so $(SYSROOT_LIB)/
@@ -49,8 +49,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libclang_rt.builtins.a $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/ld.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
-	cp -f mk/platform-pc9821/user.ld mk/platform-pc9821/vmunix.ld $(SYSROOT_LIB)/zedbsd/i386/
-	cp -f mk/platform-pc9821/user.ld mk/platform-pc9821/vmunix.ld $(SYSROOT_LIB)/zedbsd/pc9821/
+	cp -f mk/platform-pc9801ns/user.ld mk/platform-pc9801ns/vmunix.ld $(SYSROOT_LIB)/zedbsd/pc9801ns/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
 	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
 		-m32 -march=i386 -mno-red-zone -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 \
