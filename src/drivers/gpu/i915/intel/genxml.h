@@ -342,6 +342,23 @@ _Static_assert(GEN12_PIPELINE_SELECT_DWORD(2U) == 0x69041312U,
 #define GEN12_SGVS_INSTANCE_ID_ENABLE		(1U << 31)
 
 /*
+ * 3DSTATE_VF_SGVS_2 dword 1 (Gen11 and Gen12): extended parameter 0 into
+ * the component at bits 14:13 of the element at bits 5:0 (enable bit 15;
+ * bit 12 clear, the parameter the 3DPRIMITIVE gives), extended parameter 1
+ * into the component at bits 30:29 of the element at bits 21:16 (enable
+ * bit 31; bit 28 set, the draw's start instance location).
+ *
+ * Values referenced: Mesa 26.2.6 src/intel/genxml/gen110.xml
+ * (3DSTATE_VF_SGVS_2).
+ */
+#define GEN11_SGVS2_XP0_COMPONENT_SHIFT		13U
+#define GEN11_SGVS2_XP0_ENABLE			(1U << 15)
+#define GEN11_SGVS2_XP1_ELEMENT_SHIFT		16U
+#define GEN11_SGVS2_XP1_START_INSTANCE		(1U << 28)
+#define GEN11_SGVS2_XP1_COMPONENT_SHIFT		29U
+#define GEN11_SGVS2_XP1_ENABLE			(1U << 31)
+
+/*
  * Surface formats.
  *
  * Values referenced: Mesa 25.0.7 src/intel/genxml/gen120.xml (SURFACE_FORMAT).
@@ -1070,6 +1087,20 @@ _Static_assert(GEN12_PIPELINE_SELECT_DWORD(2U) == 0x69041312U,
 #define GEN12_3DPRIM_INSTANCE_COUNT		0x2438U
 #define GEN12_3DPRIM_START_INSTANCE		0x243CU
 #define GEN12_3DPRIM_BASE_VERTEX		0x2440U
+
+/*
+ * The extended parameters of 3DPRIMITIVE (Gen11 and Gen12): dword 0 bit
+ * 11 says three more dwords follow (parameters 0 to 2); an indirect draw
+ * takes parameter 0 from its register.
+ *
+ * Values referenced: Mesa 26.2.6 src/intel/genxml/gen110.xml
+ * (3DPRIMITIVE_EXTENDED: ten dwords, Extended Parameters Present, Extended
+ * Parameter 0 to 2) and src/intel/vulkan/genX_cmd_draw.c
+ * (GEN11_3DPRIM_XP0).
+ */
+#define GEN11_3DPRIMITIVE_EXTENDED		(1U << 11)
+#define GEN11_3DPRIMITIVE_EXTENDED_DWORDS	10U
+#define GEN11_3DPRIM_XP0			0x2690U
 
 /* The dwords of MI_LOAD_REGISTER_MEM: the header, the register, the address's two words. */
 #define GEN12_MI_LOAD_REGISTER_MEM_DWORDS	4U

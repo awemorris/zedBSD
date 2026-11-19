@@ -1344,6 +1344,7 @@ drv_i915_gfx_emit_vertex_input(
 	uint32_t topology;
 	uint32_t instanced;
 	uint32_t sgvs;
+	uint32_t sgvs2;
 	uint32_t l3_bypass;
 	uint64_t va;
 	int error;
@@ -1354,12 +1355,21 @@ drv_i915_gfx_emit_vertex_input(
 	if (count == 0U)
 		return EINVAL;
 
-	/* Finds the pipeline attribute of every location the kernel reads; a generated index has none. */
+	/*
+	 * Finds the pipeline attribute of every location the kernel reads; a
+	 * generated index has none.  gl_VertexIndex and gl_InstanceIndex: the
+	 * fetcher writes the zero-based number into component x of the element
+	 * (3DSTATE_VF_SGVS) and, from Gen11 on, the draw's base into component
+	 * y (3DSTATE_VF_SGVS_2: extended parameter 0, the first vertex or the
+	 * vertex offset, and the start instance), which the kernel adds.
+	 */
 	sgvs = 0U;
+	sgvs2 = 0U;
 	for (index = 0U; index < count; index++) {
-		/* gl_VertexIndex and gl_InstanceIndex: the fetcher writes component x of the element (3DSTATE_VF_SGVS). */
+		/* gl_VertexIndex. */
 		if (kernels->vs_inputs[index] == DRV_GPU_SHADER_LOCATION_VERTEX_INDEX) {
 			sgvs |= index | GEN12_SGVS_VERTEX_ID_ENABLE;
+			sgvs2 |= index | (1U << GEN11_SGVS2_XP0_COMPONENT_SHIFT) | GEN11_SGVS2_XP0_ENABLE;
 			order[index] = I915_GFX_NO_ATTRIBUTE;
 			continue;
 		}
@@ -1367,6 +1377,8 @@ drv_i915_gfx_emit_vertex_input(
 		/* gl_InstanceIndex likewise, its element named in the instance half of the dword. */
 		if (kernels->vs_inputs[index] == DRV_GPU_SHADER_LOCATION_INSTANCE_INDEX) {
 			sgvs |= (index << GEN12_SGVS_INSTANCE_ID_SHIFT) | GEN12_SGVS_INSTANCE_ID_ENABLE;
+			sgvs2 |= (index << GEN11_SGVS2_XP1_ELEMENT_SHIFT) | GEN11_SGVS2_XP1_START_INSTANCE |
+				 (1U << GEN11_SGVS2_XP1_COMPONENT_SHIFT) | GEN11_SGVS2_XP1_ENABLE;
 			order[index] = I915_GFX_NO_ATTRIBUTE;
 			continue;
 		}
@@ -1483,9 +1495,15 @@ drv_i915_gfx_emit_vertex_input(
 	drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DSTATE_VF_SGVS, GEN12_3DSTATE_VF_SGVS_DWORDS));
 	drv_i915_batch_emit(batch, sgvs);
 
-	/* Clears the extended system values, which Gen11 and Gen12 have. */
-	if (batch->graphics_ver != GEN9_GRAPHICS_VER)
-		drv_i915_batch_zero(batch, GEN12_CMD_3DSTATE_VF_SGVS_2, GEN12_3DSTATE_VF_SGVS_2_DWORDS);
+	/*
+	 * The draw's bases, which Gen11 and Gen12 have (Gen9 has no extended
+	 * parameters: its components y stay zero, so its indices start at 0).
+	 */
+	if (batch->graphics_ver != GEN9_GRAPHICS_VER) {
+		drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DSTATE_VF_SGVS_2, GEN12_3DSTATE_VF_SGVS_2_DWORDS));
+		drv_i915_batch_emit(batch, sgvs2);
+		drv_i915_batch_emit(batch, 0U);
+	}
 
 	/*
 	 * Steps an element once an instance when its binding's input rate is
@@ -2243,6 +2261,7 @@ drv_i915_gfx_emit_pixel_shader(
 	uint32_t push_enable;
 	uint32_t kills;
 	uint32_t barycentrics;
+	uint32_t statistics;
 	uint32_t source;
 	uint32_t outputs;
 	uint64_t scratch;
@@ -2297,9 +2316,22 @@ drv_i915_gfx_emit_pixel_shader(
 	if (kernels->ps_linear_barycentrics != 0U)
 		barycentrics |= GEN12_WM_BARYCENTRIC_LINEAR_PIXEL;
 
-	/* Programs WM: statistics, the barycentrics, line AA width 1.0. */
+	/*
+	 * Programs WM: statistics (which PS_DEPTH_COUNT, an occlusion query's
+	 * count, and PS_INVOCATION_COUNT follow) but for a rectangle of the
+	 * executor's own, the barycentrics, line AA width 1.0.
+	 *
+	 * Procedure referenced: Mesa 26.2.6
+	 * src/intel/blorp/blorp_genX_exec_brw.h (blorp's 3DSTATE_WM and
+	 * 3DSTATE_VF_STATISTICS with statistics off) and
+	 * src/intel/genxml/gen80.xml (3DSTATE_WM Statistics Enable, dword 1
+	 * bit 31).
+	 */
+	statistics = 1U << 31;
+	if (kernels->ps_no_statistics != 0U)
+		statistics = 0U;
 	drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DSTATE_WM, GEN12_3DSTATE_WM_DWORDS));
-	drv_i915_batch_emit(batch, (1U << 31) | barycentrics | (1U << 6));
+	drv_i915_batch_emit(batch, statistics | barycentrics | (1U << 6));
 
 	/* The sampler count is programmed in groups of four samplers. */
 	sampler_groups = (kernels->ps_samplers + 3U) / 4U;
@@ -2470,6 +2502,8 @@ drv_i915_gfx_emit_draw(
 {
 	uint32_t access;
 	uint32_t indirect;
+	uint32_t extended;
+	uint32_t base;
 
 	/* Points the pixel, the vertex and the geometry stage at their samplers and binding tables. */
 	drv_i915_batch_pointer(batch, GEN12_CMD_3DSTATE_SAMPLER_STATE_POINTERS_PS, I915_GFX_DYN_SAMPLER);
@@ -2516,8 +2550,31 @@ drv_i915_gfx_emit_draw(
 			drv_i915_batch_emit(batch, GEN12_3DPRIM_BASE_VERTEX);
 			drv_i915_batch_emit(batch, 0U);
 		}
+
+		/* From Gen11 on, extended parameter 0 too: the vertex offset, or the first vertex. */
+		if (batch->graphics_ver != GEN9_GRAPHICS_VER) {
+			if (primitive->random_access != 0)
+				i915_state_load_register(batch, GEN11_3DPRIM_XP0, primitive->indirect_va + 12U);
+			else
+				i915_state_load_register(batch, GEN11_3DPRIM_XP0, primitive->indirect_va + 8U);
+		}
 		indirect = GEN12_3DPRIMITIVE_INDIRECT;
 	}
+
+	/*
+	 * From Gen11 on the primitive carries the extended parameters the
+	 * fetcher writes into gl_VertexIndex's and gl_InstanceIndex's elements
+	 * (3DSTATE_VF_SGVS_2): parameter 0 the base a vertex index starts from
+	 * (an indexed draw's vertex offset, a draw's first vertex), parameter 1
+	 * the first instance (the fetcher takes the start instance location
+	 * itself), parameter 2 zero.
+	 */
+	extended = 0U;
+	if (batch->graphics_ver != GEN9_GRAPHICS_VER)
+		extended = GEN11_3DPRIMITIVE_EXTENDED;
+	base = primitive->start_vertex;
+	if (primitive->random_access != 0)
+		base = (uint32_t)primitive->base_vertex;
 
 	/*
 	 * Draws the primitive: the topology and the vertex access; the
@@ -2525,13 +2582,21 @@ drv_i915_gfx_emit_draw(
 	 * first of them; the base vertex (an indirect draw's come from the
 	 * registers).
 	 */
-	drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DPRIMITIVE, GEN12_3DPRIMITIVE_DWORDS) | indirect);
+	if (extended != 0U)
+		drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DPRIMITIVE, GEN11_3DPRIMITIVE_EXTENDED_DWORDS) | indirect | extended);
+	else
+		drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DPRIMITIVE, GEN12_3DPRIMITIVE_DWORDS) | indirect);
 	drv_i915_batch_emit(batch, primitive->topology | access);
 	drv_i915_batch_emit(batch, primitive->vertex_count);
 	drv_i915_batch_emit(batch, primitive->start_vertex);
 	drv_i915_batch_emit(batch, primitive->instance_count);
 	drv_i915_batch_emit(batch, primitive->start_instance);
 	drv_i915_batch_emit(batch, (uint32_t)primitive->base_vertex);
+	if (extended != 0U) {
+		drv_i915_batch_emit(batch, base);
+		drv_i915_batch_emit(batch, primitive->start_instance);
+		drv_i915_batch_emit(batch, 0U);
+	}
 
 	/* Flushes what the primitive wrote. */
 	drv_i915_batch_pipe_control(batch,

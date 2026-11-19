@@ -690,6 +690,7 @@ i915_blit_record(
 	 */
 	kern_memset(&kernels, 0, sizeof(kernels));
 	kernels.varyings = 1U;
+	kernels.ps_no_statistics = 1U;
 	kernels.ps_grf_start = kernel->dispatch_grf_start;
 	kernels.ps_samplers = kernel->sampler_count;
 	kernels.ps_flat_mask = kernel->input_flat_mask;
@@ -754,6 +755,7 @@ i915_blit_record_resolve(
 	/* Describes the resolve kernel for its packets: one attribute, its payload start and its four sampled images. */
 	kern_memset(&kernels, 0, sizeof(kernels));
 	kernels.varyings = 1U;
+	kernels.ps_no_statistics = 1U;
 	kernels.ps_grf_start = i915_blit_resolve_kernel->dispatch_grf_start;
 	kernels.ps_samplers = i915_blit_resolve_kernel->sampler_count;
 
@@ -1038,8 +1040,12 @@ i915_blit_build_batch(
 				    (GEN12_VFCOMP_STORE_SRC << 16));
 	}
 
-	/* Enables the vertex fetch statistics and clears the fetcher's other state. */
-	drv_i915_batch_emit(batch, (GEN12_CMD_3DSTATE_VF_STATISTICS << 16) | 1U);
+	/*
+	 * Keeps the vertex fetch statistics off (a rectangle of the executor's
+	 * own counts nothing, as its pixel stage does not), and clears the
+	 * fetcher's other state.
+	 */
+	drv_i915_batch_emit(batch, GEN12_CMD_3DSTATE_VF_STATISTICS << 16);
 	drv_i915_batch_zero(batch, GEN12_CMD_3DSTATE_VF, GEN12_3DSTATE_VF_DWORDS);
 	drv_i915_batch_zero(batch, GEN12_CMD_3DSTATE_VF_SGVS, GEN12_3DSTATE_VF_SGVS_DWORDS);
 
