@@ -303,6 +303,9 @@ struct powervr_shader_key {
  * instance index the first instance.  Discards is 1 for a fragment
  * program that may discard its fragment (it gives the depth and
  * visibility unit its feedback, so its draws pass punch-through).
+ * Depth_feedback is 1 for a fragment program that writes gl_FragDepth
+ * (it gives the depth with its feedback, so its draws pass depth
+ * feedback, before punch-through).
  * Stores is 1 for a program that writes buffer memory (a uniform or
  * storage buffer's words).
  *
@@ -334,6 +337,7 @@ struct powervr_shader_program {
 	uint32_t point_size_reg;
 	uint32_t point_coord_coefficient;
 	uint32_t discards;
+	uint32_t depth_feedback;
 	uint32_t stores;
 	uint32_t workgroup[3];
 	uint32_t shared_bytes;

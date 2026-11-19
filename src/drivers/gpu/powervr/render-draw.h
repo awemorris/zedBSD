@@ -104,7 +104,8 @@ struct powervr_draw_attribute {
  * static ones unless dynamic; the other dynamic flags name the state a
  * draw takes from the command buffer rather than from the pipeline.
  * Blending lives in the fragment key.  Discards is set once
- * the fragment shader is compiled, when it may discard its fragment.
+ * the fragment shader is compiled, when it may discard its fragment,
+ * and depth_feedback when it writes its depth.
  * rasterizer_discard is the pipeline's: its primitives reach no tile.
  */
 struct powervr_draw_fixed {
@@ -118,6 +119,7 @@ struct powervr_draw_fixed {
 	uint32_t depth_compare;
 	bool blending;
 	bool discards;
+	bool depth_feedback;
 	bool dynamic_viewport;
 	bool dynamic_scissor;
 	bool dynamic_blend_constants;

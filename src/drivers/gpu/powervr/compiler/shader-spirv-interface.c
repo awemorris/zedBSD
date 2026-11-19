@@ -154,6 +154,7 @@ static struct powervr_ir_operand pixel_pack_word(struct shader_spirv_reader *rea
 static uint32_t pixel_word_bits(const struct pixel_format *layout, uint32_t word, uint32_t channels);
 static uint32_t pixel_word_place(uint32_t word, uint32_t tile_request);
 static int fragment_only_tiles(const struct powervr_shader_program *program);
+static uint32_t fragment_depth(const struct shader_spirv_reader *reader);
 static void pixel_channel_place(const struct pixel_format *layout, uint32_t channel, uint32_t *word, uint32_t *shift, uint32_t *width);
 static int module_kills(const struct shader_spirv_reader *reader);
 static int compute_local(struct shader_spirv_reader *reader);
@@ -606,6 +607,11 @@ shader_spirv_reader_entry_epilogue(
 	uint32_t words;
 	uint32_t point_size;
 	uint32_t kept;
+	uint32_t depth;
+	uint32_t feedback;
+	struct powervr_ir_operand discard;
+	struct powervr_ir_operand clamped;
+	struct powervr_ir_operand bound;
 	int error;
 
 	/* A compute shader's body ends where its instance check does. */
@@ -615,15 +621,35 @@ shader_spirv_reader_entry_epilogue(
 	}
 
 	/*
-	 * The discard, before the colours, as the feedback that keeps or drops the fragment.
+	 * The discard and the depth the shader wrote, before the colours, as
+	 * the feedback that keeps or drops the fragment and gives its depth
+	 * (gl_FragDepth clamped to [0, 1]).
 	 *
 	 * Procedure referenced:
-	 * Mesa 26.2.5 src/imagination/pco/pco_nir_pvfio.c (lower_isp_fb:
-	 * the isp_feedback_pco before the first output store).
+	 * Mesa 26.2.5 src/imagination/pco/pco_nir_pvfio.c (lower_pfo: the
+	 * FRAG_RESULT_DEPTH store's value through fsat as the depth feedback
+	 * source; lower_isp_fb: the isp_feedback_pco of the discard and the
+	 * depth before the first output store).
 	 */
-	if (reader->discard != 0) {
-		word = shader_spirv_value_operand(reader->discard, 0);
-		shader_spirv_emit(reader, POWERVR_IR_FEEDBACK, 0, &word, NULL, NULL, 0, 0);
+	depth = fragment_depth(reader);
+	if (reader->discard != 0 || depth != 0) {
+		feedback = 0;
+		discard = shader_spirv_constant_operand(0U);
+		if (reader->discard != 0) {
+			feedback |= POWERVR_IR_FEEDBACK_DISCARD;
+			discard = shader_spirv_value_operand(reader->discard, 0);
+		}
+		clamped = shader_spirv_constant_operand(0U);
+		if (depth != 0) {
+			feedback |= POWERVR_IR_FEEDBACK_DEPTH;
+			word = shader_spirv_value_operand(depth, 0);
+			bound = shader_spirv_constant_operand(0U);
+			clamped = shader_spirv_emit_value(reader, POWERVR_IR_FLOAT_MAXIMUM, &word, &bound, NULL);
+			bound = shader_spirv_constant_operand(FLOAT_ONE);
+			clamped = shader_spirv_emit_value(reader, POWERVR_IR_FLOAT_MINIMUM, &clamped, &bound, NULL);
+			reader->program->depth_feedback = 1;
+		}
+		shader_spirv_emit(reader, POWERVR_IR_FEEDBACK, 0, &discard, &clamped, NULL, feedback, 0);
 	}
 
 	/* A point's size: the shader's, or one when it has none. */
@@ -714,6 +740,33 @@ shader_spirv_reader_entry_epilogue(
 
 	/* Reports what the hand-over came to. */
 	return reader->error;
+}
+
+/*
+ * Finds the value a fragment shader's gl_FragDepth output holds at the
+ * end: its variable's word, or 0 for a shader that has none (or is not a
+ * fragment shader).
+ */
+static uint32_t
+fragment_depth(
+	const struct shader_spirv_reader *reader)
+{
+	const struct shader_spirv_id *id;
+	uint32_t index;
+
+	/* Only a fragment shader's built-in output. */
+	if (reader->stage != POWERVR_SHADER_FRAGMENT)
+		return 0;
+	for (index = 1; index < reader->bound; index++) {
+		id = &reader->ids[index];
+		if (id->kind != ID_POINTER || id->variable != index || id->storage != STORAGE_OUTPUT)
+			continue;
+		if ((id->flags & FLAG_BUILT_IN) != 0 && id->builtin == BUILT_IN_FRAG_DEPTH)
+			return id->first;
+	}
+
+	/* None. */
+	return 0;
 }
 
 /* Says whether a fragment program's colours are all in tile buffers (and it has one). */
