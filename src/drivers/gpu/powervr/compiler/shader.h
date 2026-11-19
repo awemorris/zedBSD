@@ -303,9 +303,13 @@ struct powervr_shader_key {
  * instance index the first instance.  Discards is 1 for a fragment
  * program that may discard its fragment (it gives the depth and
  * visibility unit its feedback, so its draws pass punch-through).
- * Depth_feedback is 1 for a fragment program that writes gl_FragDepth
- * (it gives the depth with its feedback, so its draws pass depth
- * feedback, before punch-through).
+ * Depth_feedback is 1 for a fragment program that writes gl_FragDepth,
+ * or writes memory without early fragment tests (it gives the depth with
+ * its feedback, so its draws pass depth feedback, before punch-through).
+ * Uses_z is 1 for a fragment program that iterates the fragment's depth
+ * linearly from the coefficient set at z_coefficient (the depth feedback
+ * of a program that writes memory); the driver then has the TA keep each
+ * vertex's z and fills that set from it.
  * Stores is 1 for a program that writes buffer memory (a uniform or
  * storage buffer's words).
  *
@@ -332,6 +336,8 @@ struct powervr_shader_program {
 	uint32_t coefficients;
 	uint32_t w_coefficient;
 	uint32_t uses_w;
+	uint32_t z_coefficient;
+	uint32_t uses_z;
 	uint32_t vertex_index_reg;
 	uint32_t instance_index_reg;
 	uint32_t point_size_reg;

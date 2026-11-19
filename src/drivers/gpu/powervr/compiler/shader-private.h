@@ -165,6 +165,7 @@ struct shader_spirv_reader {
 	uint32_t result_value;
 	uint32_t result_words;
 	uint32_t discard;
+	uint32_t early_fragment_tests;
 	uint32_t local_ready;
 	uint32_t instance_check;
 	struct powervr_ir_operand local[4];

@@ -90,6 +90,7 @@
 #define ISPA_LINE_WIDTH_SHIFT	8U
 #define OUTPUT_RHW		(1U << 16)
 #define OUTPUT_POINT_SIZE	(1U << 18)
+#define OUTPUT_UNCLAMPED_Z	(1U << 21)
 #define CLIP_OUTSIDE		(1U << 31)
 #define CTRL_CULL_CW		1U
 #define CTRL_CULL_CCW		2U
@@ -475,6 +476,28 @@ powervr_draw_varyings_build(
 	}
 
 	/*
+	 * z next, one word without perspective, when the fragment iterates
+	 * its depth: in the iterated vertex it follows w when w is there.
+	 *
+	 * Procedure referenced:
+	 * Mesa 26.2.6 src/imagination/vulkan/pvr_arch_pipeline.c
+	 * (pvr_graphics_pipeline_setup_fragment_coeff_program: the z
+	 * iterator, Gouraud, 1D, at offset 1 when w is used and 0 when not)
+	 * and pvr_arch_cmd_buffer.c (the output select's
+	 * tsp_unclamped_z_pres when the fragment uses z).
+	 */
+	if (fragment->uses_z) {
+		source = 0;
+		if (fragment->uses_w)
+			source = 1;
+		iterators[count] = DOUTI_GOURAUD;
+		iterators[count] |= (uint64_t)(source * 2U) << DOUTI_F32_OFFSET_SHIFT;
+		iterators[count] |= (uint64_t)(source * 2U) << DOUTI_F16_OFFSET_SHIFT;
+		iterators[count] |= (uint64_t)(fragment->z_coefficient / 4U) << DOUTI_DEST_SHIFT;
+		count++;
+	}
+
+	/*
 	 * A point sprite's coordinates next, two words without perspective,
 	 * when the fragment reads them.
 	 *
@@ -501,8 +524,10 @@ powervr_draw_varyings_build(
 		if (output == NULL || output->components < input->components || input->components == 0 || input->components > 4)
 			return EINVAL;
 
-		/* The word in the iterated vertex: past x and y, z unused, w when read. */
-		source = output->reg - 3U;
+		/* The word in the iterated vertex: past x and y, z and w when read. */
+		source = output->reg - 2U;
+		if (!fragment->uses_z)
+			source--;
 		if (!fragment->uses_w)
 			source--;
 		iterators[count] = (uint64_t)(source * 2U) << DOUTI_F32_OFFSET_SHIFT;
@@ -531,6 +556,8 @@ powervr_draw_varyings_build(
 
 	/* The output select, the varying words, the fragment's coefficients. */
 	varyings->output_select = (vertex->vertex_outputs << 24) | (fragment->uses_w ? OUTPUT_RHW : 0U);
+	if (fragment->uses_z)
+		varyings->output_select |= OUTPUT_UNCLAMPED_Z;
 	if (vertex->point_size_reg != POWERVR_SHADER_NO_REG)
 		varyings->output_select |= OUTPUT_POINT_SIZE;
 	varyings->varying[0] = smooth | (flat << 8);

@@ -608,6 +608,7 @@ shader_spirv_reader_entry_epilogue(
 	uint32_t point_size;
 	uint32_t kept;
 	uint32_t depth;
+	uint32_t memory_depth;
 	uint32_t feedback;
 	struct powervr_ir_operand discard;
 	struct powervr_ir_operand clamped;
@@ -632,7 +633,37 @@ shader_spirv_reader_entry_epilogue(
 	 * depth before the first output store).
 	 */
 	depth = fragment_depth(reader);
-	if (reader->discard != 0 || depth != 0) {
+	memory_depth = 0;
+
+	/*
+	 * A fragment shader that writes memory and whose tests come after it
+	 * gives the iterated depth as its feedback too, so that its draws pass
+	 * depth feedback: the core then runs it for every fragment in the
+	 * draws' order, and none is dropped by the hidden surface removal
+	 * before its stores and atomics run.  The depth is the fragment's
+	 * position's z, iterated without perspective from a coefficient set
+	 * of its own after the others.
+	 *
+	 * Procedure referenced:
+	 * Mesa 26.2.6 src/imagination/pco/pco_nir_pvfio.c (lower_isp_fb: a
+	 * shader that writes memory and gives no depth takes the position's
+	 * z, noperspective, as the depth feedback source);
+	 * src/imagination/vulkan/pvr_arch_pipeline.c (pvr_fragment_state_save:
+	 * depth feedback unless the shader has early fragment tests).
+	 */
+	if (reader->stage == POWERVR_SHADER_FRAGMENT &&
+	    reader->program->stores != 0 &&
+	    depth == 0 &&
+	    reader->early_fragment_tests == 0) {
+		reader->program->uses_z = 1;
+		reader->program->z_coefficient = reader->program->coefficients;
+		reader->program->coefficients += 4U;
+		memory_depth = shader_spirv_new_value(reader, 1);
+		shader_spirv_emit(reader, POWERVR_IR_ITERATE, memory_depth, NULL, NULL, NULL, reader->program->z_coefficient, 0);
+		reader->shader->instructions[reader->shader->instruction_count - 1U].flags = POWERVR_IR_LINEAR;
+	}
+
+	if (reader->discard != 0 || depth != 0 || memory_depth != 0) {
 		feedback = 0;
 		discard = shader_spirv_constant_operand(0U);
 		if (reader->discard != 0) {
@@ -647,6 +678,11 @@ shader_spirv_reader_entry_epilogue(
 			clamped = shader_spirv_emit_value(reader, POWERVR_IR_FLOAT_MAXIMUM, &word, &bound, NULL);
 			bound = shader_spirv_constant_operand(FLOAT_ONE);
 			clamped = shader_spirv_emit_value(reader, POWERVR_IR_FLOAT_MINIMUM, &clamped, &bound, NULL);
+			reader->program->depth_feedback = 1;
+		}
+		if (memory_depth != 0) {
+			feedback |= POWERVR_IR_FEEDBACK_DEPTH;
+			clamped = shader_spirv_value_operand(memory_depth, 0);
 			reader->program->depth_feedback = 1;
 		}
 		shader_spirv_emit(reader, POWERVR_IR_FEEDBACK, 0, &discard, &clamped, NULL, feedback, 0);

@@ -47,6 +47,11 @@
  *   g-occlusion-mrt  the same with two colour targets: still one count a
  *                 pixel, not one a target
  *   g-fatomic     a fragment shader's buffer atomics
+ *   g-fdepthstore a fragment shader's atomics under the depth test that
+ *                 comes after it: three draws (middle, front, behind)
+ *                 each count every pixel, the hidden ones too
+ *   g-fearlystore the same with early fragment tests: the draw behind
+ *                 the front one never runs
  *   g-desccopy    descriptors of an array, one write running on into the next
  *                 binding, and a descriptor copy
  *   g-aniso       an anisotropic sampler reads texel centres exactly
@@ -287,6 +292,7 @@ static void gfx_check_mrt(struct oracle_check *check, const struct gfx_test *tes
 static void gfx_check_fill(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static void gfx_check_timestamp(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static void gfx_check_fatomic(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
+static void gfx_check_fdepthstore(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static void gfx_check_desccopy(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static void gfx_check_aniso(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static void gfx_check_cubearray(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
@@ -618,6 +624,25 @@ static const struct gfx_test gfx_tests[] = {
 		1U, { { 0U, GFX_STORAGE, 16U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
 		1U, { { GFX_SHADER(position_vert), GFX_SHADER(fatomic_frag), 0, 0.0f, 3U, NULL, 0U, 0U, 0 } },
 		0, 0U, gfx_check_fatomic, NULL
+	},
+	{
+		"g-fdepthstore",
+		1U, { { 0U, GFX_STORAGE, 16U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
+		3U, {
+			{ GFX_SHADER(position_vert), GFX_SHADER(fdepthstore_frag), 1, 0.5f, 3U, NULL, 0U, 1U, 0 },
+			{ GFX_SHADER(position_vert), GFX_SHADER(fdepthstore_frag), 1, 0.25f, 3U, NULL, 0U, 2U, 0 },
+			{ GFX_SHADER(position_vert), GFX_SHADER(fdepthstore_frag), 1, 0.75f, 3U, NULL, 0U, 3U, 0 }
+		},
+		0, 0U, gfx_check_fdepthstore, NULL
+	},
+	{
+		"g-fearlystore",
+		1U, { { 0U, GFX_STORAGE, 16U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
+		2U, {
+			{ GFX_SHADER(position_vert), GFX_SHADER(fearlystore_frag), 1, 0.25f, 3U, NULL, 0U, 2U, 0 },
+			{ GFX_SHADER(position_vert), GFX_SHADER(fearlystore_frag), 1, 0.75f, 3U, NULL, 0U, 3U, 0 }
+		},
+		0, 0U, gfx_check_fdepthstore, NULL
 	},
 	{
 		"g-desccopy",
@@ -3256,6 +3281,42 @@ gfx_check_fatomic(
 	/* The colour. */
 	for (index = 0U; index < GFX_PIXELS; index++)
 		oracle_expect(check, 0U, index, words[0][index], 7U);
+}
+
+/*
+ * g-fdepthstore and g-fearlystore: the front draw (number 2) wins every
+ * pixel.  With the depth test after the shader every draw counts every
+ * pixel, the one in the middle drawn first and the one behind drawn last
+ * too; with early fragment tests the one behind counts none.
+ */
+static void
+gfx_check_fdepthstore(
+	struct oracle_check *check,
+	const struct gfx_test *test,
+	uint32_t *const *words)
+{
+	uint32_t index;
+	uint32_t behind;
+
+	/* No draw is numbered 0. */
+	oracle_expect(check, 1U, 0U, words[1][0], 0U);
+
+	/* The middle draw (only in g-fdepthstore) and the front one count every pixel. */
+	if (test->draw_count == 3U)
+		oracle_expect(check, 1U, 1U, words[1][1], GFX_PIXELS);
+	else
+		oracle_expect(check, 1U, 1U, words[1][1], 0U);
+	oracle_expect(check, 1U, 2U, words[1][2], GFX_PIXELS);
+
+	/* The draw behind: every pixel after its shader ran, none when the test came first. */
+	behind = GFX_PIXELS;
+	if (test->draw_count == 2U)
+		behind = 0U;
+	oracle_expect(check, 1U, 3U, words[1][3], behind);
+
+	/* The colour of the front draw. */
+	for (index = 0U; index < GFX_PIXELS; index++)
+		oracle_expect(check, 0U, index, words[0][index], 2U);
 }
 
 /* g-desccopy: binding 1 holds the fourth buffer (the write that ran on), binding 2 the second (the copy). */

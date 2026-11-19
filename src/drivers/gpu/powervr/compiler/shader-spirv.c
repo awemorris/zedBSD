@@ -293,6 +293,10 @@ reader_declaration(
 			reader->program->workgroup[1] = words[4];
 			reader->program->workgroup[2] = words[5];
 		}
+
+		/* A fragment shader whose depth and stencil tests come before it runs. */
+		if (length >= 3 && words[1] == reader->entry && words[2] == MODE_EARLY_FRAGMENT_TESTS)
+			reader->early_fragment_tests = 1;
 		break;
 	case OP_DECORATE:
 		/* A decoration of an id, with its one value where it has one. */

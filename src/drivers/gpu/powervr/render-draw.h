@@ -31,8 +31,8 @@
 #define POWERVR_DRAW_BINDINGS		8U
 #define POWERVR_DRAW_ATTRIBUTES		POWERVR_SHADER_INPUTS
 
-/* The most iterators of a coefficient program (w and the varyings). */
-#define POWERVR_DRAW_ITERATORS		(POWERVR_SHADER_VARYINGS + 1U)
+/* The most iterators of a coefficient program (w, z, the point's coordinates and the varyings). */
+#define POWERVR_DRAW_ITERATORS		(POWERVR_SHADER_VARYINGS + 3U)
 
 /* The most data and code words of a coefficient program. */
 #define POWERVR_DRAW_COEFFICIENT_DATA	(POWERVR_DRAW_ITERATORS * 2U + 2U)
