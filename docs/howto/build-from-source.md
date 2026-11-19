@@ -69,10 +69,10 @@ make CONFIGMK=config/config.rpi5.mk llvm-toolchain-cached
 ```
 
 It downloads the archive of release `rev-0` of the zedBSD repository (the
-asset named in `mk/llvm/version.mk`) once to `build/releases/` and unpacks it;
+asset named in `mk/toolchain-llvm/version.mk`) once to `build/releases/` and unpacks it;
 when `build/llvm/bin/clang` is already there it does nothing.  On other hosts,
 or to build LLVM yourself from the official LLVM 23.1.0 source and the zedBSD
-patch in `mk/llvm/patches/`, run `make CONFIGMK=... toolchain` instead; it
+patch in `mk/toolchain-llvm/patches/`, run `make CONFIGMK=... toolchain` instead; it
 takes much longer.  The host Noct interpreter that runs the image scripts is
 built from source below `build/NoctLang/` by the first build that needs it
 (`make CONFIGMK=... toolchain-cached` does both at once).
