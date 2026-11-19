@@ -85,9 +85,9 @@ VARIANT_DEPS := $(BUILD)/bootloader/stage1-native.bin \
 		$(BUILD)/bootloader/BOOTZBSD.EXE
 
 $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) \
-		mk/platform-i386/tools/make-i386-hdd-image.py \
-		mk/platform-i386/tools/check-i386-hdd-image.py
-	$(PYTHON) mk/platform-i386/tools/make-i386-hdd-image.py --force \
+		mk/tools/make-x86-hdd-image.py \
+		mk/tools/check-x86-hdd-image.py
+	$(PYTHON) mk/tools/make-x86-hdd-image.py --force \
 		--variant bios \
 		--kernel $(BUILD)/vmunix \
 		--zedbsd-config $(ZEDBSD_CONFIG) \
@@ -106,7 +106,7 @@ image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
 
 .PHONY: check-disk-image
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) mk/platform-i386/tools/check-i386-hdd-image.py \
+	$(PYTHON) mk/tools/check-x86-hdd-image.py \
 		--variant bios \
 		--kernel $(BUILD)/vmunix \
 		--zedbsd-config $(ZEDBSD_CONFIG) \

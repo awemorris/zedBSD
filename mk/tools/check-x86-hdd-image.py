@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an x86_64 disk image for BIOS, UEFI, or Hybrid boot."""
+"""Validate an x86 (i386 or x86_64) disk image for BIOS, UEFI, or Hybrid boot."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ BIOS_BOOT_TYPE = uuid.UUID("21686148-6449-6e6f-744e-656564454649")
 
 
 def fail(message: str) -> None:
-    raise SystemExit(f"check-x86_64-hdd-image: {message}")
+    raise SystemExit(f"check-x86-hdd-image: {message}")
 
 
 def extract_fat_file(image_path: Path, offset_bytes: int, name: str) -> bytes:
@@ -89,6 +89,12 @@ def check_fat_serials_distinct(f, esp_offset: int, boot_offset: int) -> None:
 
 def check(args: argparse.Namespace) -> None:
     variant = "uefi" if args.variant == "native" else args.variant
+    if args.bootx64 is not None and args.bootia32 is not None:
+        fail("give either --bootx64 or --bootia32, not both")
+    if args.bootia32 is not None:
+        efi_loader, efi_name = args.bootia32, "BOOTIA32.EFI"
+    else:
+        efi_loader, efi_name = args.bootx64, "BOOTX64.EFI"
     size = args.image.stat().st_size
     if size % SECTOR:
         fail("image size is not sector-aligned")
@@ -218,7 +224,7 @@ def check(args: argparse.Namespace) -> None:
             check_fat_serials_distinct(f, s1 * SECTOR, s2 * SECTOR)
 
             # Check ESP files
-            same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/BOOTX64.EFI", args.bootx64)
+            same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/" + efi_name, efi_loader)
 
             # Check BOOT files
             same_fat_file(args.image, s2 * SECTOR, "vmunix", args.kernel)
@@ -303,7 +309,7 @@ def check(args: argparse.Namespace) -> None:
             check_fat_serials_distinct(f, s1 * SECTOR, s2 * SECTOR)
 
             # Check ESP files
-            same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/BOOTX64.EFI", args.bootx64)
+            same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/" + efi_name, efi_loader)
 
             # Check BOOT files (both BIOS & UEFI files)
             same_fat_file(args.image, s2 * SECTOR, "BOOTZBSD.EXE", args.bootzbsd)
@@ -314,11 +320,11 @@ def check(args: argparse.Namespace) -> None:
             if hasattr(args, "logo_vert") and args.logo_vert is not None and args.logo_vert.is_file():
                 same_fat_file(args.image, s2 * SECTOR, "logovert.ppm", args.logo_vert)
 
-    print(f"check-x86_64-hdd-image: {args.image} ({variant}): PASS")
+    print(f"check-x86-hdd-image: {args.image} ({variant}): PASS")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate x86_64 HDD image")
+    parser = argparse.ArgumentParser(description="Validate x86 HDD image")
     parser.add_argument("--variant", choices=("bios", "uefi", "hybrid", "native"),
                         default="uefi")
     parser.add_argument("--kernel", type=Path, required=True)
@@ -329,6 +335,7 @@ def main() -> None:
     parser.add_argument("--swap-image", "--swapfile", dest="swap_image",
                         type=Path, required=True)
     parser.add_argument("--bootx64", type=Path)
+    parser.add_argument("--bootia32", type=Path)
     parser.add_argument("--stage1", type=Path)
     parser.add_argument("--stage2", type=Path)
     parser.add_argument("--partition-pbr", type=Path)

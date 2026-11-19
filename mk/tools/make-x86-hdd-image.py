@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an x86_64 disk image for BIOS, UEFI, or Hybrid boot."""
+"""Build an x86 (i386 or x86_64) disk image for BIOS, UEFI, or Hybrid boot."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -112,6 +112,13 @@ def mkdir_fat(image_path: Path, partition_offset: int, dir_name: str) -> None:
     run("mmd", "-i", spec, f"::{dir_name}")
 
 
+def efi_loader_of(args: argparse.Namespace) -> tuple[Path | None, str]:
+    """Return the UEFI loader given and its file name on the ESP."""
+    if args.bootia32 is not None:
+        return args.bootia32, "BOOTIA32.EFI"
+    return args.bootx64, "BOOTX64.EFI"
+
+
 def create(args: argparse.Namespace) -> None:
     variant = "uefi" if args.variant == "native" else args.variant
 
@@ -124,9 +131,12 @@ def create(args: argparse.Namespace) -> None:
     if not args.zedbsd_config.is_file():
         raise SystemExit(f"missing zedbsd.cfg: {args.zedbsd_config}")
 
+    if args.bootx64 is not None and args.bootia32 is not None:
+        raise SystemExit("give either --bootx64 or --bootia32, not both")
+    efi_loader, efi_name = efi_loader_of(args)
     if variant in ("uefi", "hybrid"):
-        if args.bootx64 is None or not args.bootx64.is_file():
-            raise SystemExit(f"{variant} requires --bootx64")
+        if efi_loader is None or not efi_loader.is_file():
+            raise SystemExit(f"{variant} requires --bootx64 or --bootia32")
     if variant in ("bios", "hybrid"):
         for req, name in ((args.stage1, "--stage1"),
                           (args.stage2, "--stage2"),
@@ -206,6 +216,8 @@ def create(args: argparse.Namespace) -> None:
             copy_to_fat(temporary, boot_offset, args.zedbsd_config, "/zedbsd.cfg")
             if args.logo is not None and args.logo.is_file():
                 copy_to_fat(temporary, boot_offset, args.logo, "/logo.ppm")
+            if args.logo_vert is not None and args.logo_vert.is_file():
+                copy_to_fat(temporary, boot_offset, args.logo_vert, "/logovert.ppm")
 
         else:
             # UEFI or Hybrid
@@ -313,14 +325,14 @@ def create(args: argparse.Namespace) -> None:
             copy_sparse_file(temporary.open("r+b"), swap_start * SECTOR, args.swap_image)
 
             # Format ESP partition
-            esp_serial = (zlib.crc32(b"ESP") ^ zlib.crc32(args.bootx64.read_bytes())) & 0xFFFFFFFF
+            esp_serial = (zlib.crc32(b"ESP") ^ zlib.crc32(efi_loader.read_bytes())) & 0xFFFFFFFF
             if esp_serial == 0:
                 esp_serial = 0x55AD19EE
             esp_offset = esp_start * SECTOR
             format_fat(temporary, esp_offset, esp_start, esp_blocks, "ESP", esp_serial)
             mkdir_fat(temporary, esp_offset, "/EFI")
             mkdir_fat(temporary, esp_offset, "/EFI/BOOT")
-            copy_to_fat(temporary, esp_offset, args.bootx64, "/EFI/BOOT/BOOTX64.EFI")
+            copy_to_fat(temporary, esp_offset, efi_loader, "/EFI/BOOT/" + efi_name)
 
             # Format FAT32 BOOT partition
             boot_serial = (zlib.crc32(b"BOOT") ^ zlib.crc32(args.kernel.read_bytes())) & 0xFFFFFFFF
@@ -336,9 +348,11 @@ def create(args: argparse.Namespace) -> None:
             copy_to_fat(temporary, boot_offset, args.zedbsd_config, "/zedbsd.cfg")
             if args.logo is not None and args.logo.is_file():
                 copy_to_fat(temporary, boot_offset, args.logo, "/logo.ppm")
+            if args.logo_vert is not None and args.logo_vert.is_file():
+                copy_to_fat(temporary, boot_offset, args.logo_vert, "/logovert.ppm")
 
         # Run validation
-        checker = Path(__file__).with_name("check-i386-hdd-image.py")
+        checker = Path(__file__).with_name("check-x86-hdd-image.py")
         check_args = [sys.executable, str(checker), "--variant", variant,
                       "--kernel", str(args.kernel),
                       "--zedbsd-config", str(args.zedbsd_config),
@@ -346,6 +360,8 @@ def create(args: argparse.Namespace) -> None:
                       "--swap-image", str(args.swap_image)]
         if args.bootx64 is not None:
             check_args += ["--bootx64", str(args.bootx64)]
+        if args.bootia32 is not None:
+            check_args += ["--bootia32", str(args.bootia32)]
         if args.stage1 is not None:
             check_args += ["--stage1", str(args.stage1)]
         if args.stage2 is not None:
@@ -356,6 +372,8 @@ def create(args: argparse.Namespace) -> None:
             check_args += ["--bootzbsd", str(args.bootzbsd)]
         if args.logo is not None and args.logo.is_file():
             check_args += ["--logo", str(args.logo)]
+        if args.logo_vert is not None and args.logo_vert.is_file():
+            check_args += ["--logo-vert", str(args.logo_vert)]
         check_args.append(str(temporary))
         run(*check_args)
 
@@ -366,16 +384,20 @@ def create(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create x86_64 HDD image")
+    parser = argparse.ArgumentParser(description="Create x86 HDD image")
     parser.add_argument("--variant", choices=("bios", "uefi", "hybrid", "native"),
                         default="uefi")
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--zedbsd-config", type=Path, required=True)
     parser.add_argument("--logo", type=Path)
+    parser.add_argument("--logo-vert", type=Path)
     parser.add_argument("--ufs-root", type=Path, required=True)
     parser.add_argument("--swap-image", "--swapfile", dest="swap_image",
                         type=Path, required=True)
-    parser.add_argument("--bootx64", type=Path)
+    parser.add_argument("--bootx64", type=Path,
+                        help="x86_64 UEFI loader, installed as BOOTX64.EFI")
+    parser.add_argument("--bootia32", type=Path,
+                        help="i386 UEFI loader, installed as BOOTIA32.EFI")
     parser.add_argument("--stage1", type=Path)
     parser.add_argument("--stage2", type=Path)
     parser.add_argument("--partition-pbr", type=Path)
