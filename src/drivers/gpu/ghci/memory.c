@@ -66,17 +66,17 @@
 #define LOCAL_RUN_MAX			0x80000000ULL
 
 /*
- * The registers of the display controller (DISP or DISP2) the start reads
- * to find what a boot display reads of memory, at offsets from the block:
+ * The registers of the display controller (DISP2) the start reads to
+ * find what a boot display reads of memory, at offsets from the block:
  * DC_CAPS with its cursor-plane bit, CTRL with its ENABLE bit, STATUS
- * with its bit for a pending flip of plane 0 (DISP2 only), the image
- * being scanned out, the image a pending flip will take, its row pitch,
- * its size ([15:0] width, [31:16] height), and the cursor's image (DISP2
- * only), which is 64 rows 256 bytes apart.
+ * with its bit for a pending flip of plane 0, the image being scanned
+ * out, the image a pending flip will take, its row pitch, its size
+ * ([15:0] width, [31:16] height), and the cursor's image, which is 64
+ * rows 256 bytes apart.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (sections 13.1
- * and 13.2, the register tables and the cursor plane's image; section
- * 13.3, the handover).
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 13.2, the
+ * register table and the cursor plane's image; section 13.3, the
+ * handover).
  */
 #define DISPLAY_DC_CAPS			0x08U
 #define DISPLAY_DC_CAPS_CURSOR		(1U << 8)
@@ -704,15 +704,17 @@ host_view(
 
 /*
  * Finds what a boot display the firmware left running reads of local
- * memory, into the device's boot ranges: the display controller (DISP2,
- * or DISP) found enabled reads the image it scans out, and on DISP2 also
- * the image a pending flip of plane 0 will take and the cursor's image.
- * An image in host memory needs nothing of the driver: the boot memory
- * map already keeps it from the kernel's allocator.
+ * memory, into the device's boot ranges: the display controller (DISP2)
+ * found enabled reads the image it scans out, the image a pending flip
+ * of plane 0 will take and the cursor's image.  An image in host memory
+ * needs nothing of the driver: the boot memory map already keeps it from
+ * the kernel's allocator.  A DISP capability (ID 1) is not GHCI 1.0's
+ * and is not read.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.3, the boot framebuffer read from FB_BASE, FB_STRIDE and FB_SIZE
- * and its range kept).
+ * Procedure referenced: amaterrace-gpu 93a7ac06 ghci.md (section 13.3,
+ * the boot framebuffer of a DISP2 controller read from FB_BASE,
+ * FB_STRIDE and FB_SIZE and its range kept; section 13.1, DISP not
+ * defined).
  */
 static void
 boot_ranges(
@@ -728,16 +730,10 @@ boot_ranges(
 	uint64_t stride;
 	uint64_t height;
 	uint64_t frame;
-	int disp2;
 	int kept;
 
-	/* The display controller: DISP2, else DISP; without local memory, nothing to keep. */
-	disp2 = 1;
+	/* The display controller; without it or without local memory, nothing to keep. */
 	block = device->caps.block_offset[GHCI_EXTCAP_ID_DISP2];
-	if (block == 0U) {
-		disp2 = 0;
-		block = device->caps.block_offset[GHCI_EXTCAP_ID_DISP];
-	}
 	if (block == 0U || device->caps.local_bytes == 0U)
 		return;
 
@@ -763,10 +759,6 @@ boot_ranges(
 	} else if (frame != 0U) {
 		kern_logf("ghci: %s: boot framebuffer at %llx in host memory\n", device->name, (unsigned long long)address);
 	}
-
-	/* DISP has no pending flip to read and no cursor. */
-	if (!disp2)
-		return;
 
 	/* The image a pending flip of plane 0 will take at the next vsync. */
 	status = ghci_read(device, block + DISPLAY_STATUS);

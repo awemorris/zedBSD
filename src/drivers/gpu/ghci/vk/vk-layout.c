@@ -508,12 +508,14 @@ create_sampler(
 	desc.unnormalized = info.unnormalizedCoordinates != VK_FALSE ? 1U : 0U;
 
 	/*
-	 * Without the texture unit's bilinear filter no format has
-	 * FILTER_LINEAR, which a linear filter or mip mode needs, so the
-	 * sampler takes the nearest texel of the nearest level.
+	 * Without the texture unit's bilinear filter the sampler takes the
+	 * nearest texel of the nearest level: a linear filter or mip mode on
+	 * such a device is drawn as the nearest one (the formats Vulkan 1.0
+	 * requires to filter report FILTER_LINEAR there all the same).
 	 *
-	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
-	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR).
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section
+	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR, nearest sampling without
+	 * it).
 	 */
 	bilinear = ghci_caps_has(&session->device->caps, GHCI_HAS_TU_BILINEAR);
 	if (!bilinear) {

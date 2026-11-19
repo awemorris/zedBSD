@@ -111,13 +111,15 @@
 
 /*
  * CMD_QUERY_CAPS: the address and the size of the buffer the capability
- * block is written to are whole 64-byte lines.
+ * block is written to are whole 64-byte lines, and the size is at most
+ * the block's 768 bytes.
  *
- * Values referenced: amaterrace-gpu ea5d39c1 include/ghci_cmd.h
- * (GHCI_CMD_QUERY_CAPS 0x15) and rtl/gpu/cp/atg_cp_seq.v (CMD_QUERY_CAPS:
- * five dwords, dst_addr and dst_bytes on 64 bytes).
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 7.3,
+ * CMD_QUERY_CAPS: five dwords, dst_pa and dst_bytes on 64 bytes,
+ * dst_bytes at most 768).
  */
 #define GHCI_QUERY_CAPS_ALIGN		64U
+#define GHCI_QUERY_CAPS_BYTES_MAX	768U
 
 /* The vertex buffer bindings, the constant bank and its words per load. */
 #define GHCI_VERTEX_BINDINGS		16U
@@ -139,10 +141,12 @@
 #define GHCI_VM_FLAG_LOCAL		(1U << 5)
 
 /*
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 7.3, CMD_FENCE flags, CMD_BARRIER stages and flags,
- * CMD_DRAW_INDIRECT, CMD_WRITE_TIMESTAMP, CMD_BEGIN/END_QUERY,
- * CMD_COPY_BUFFER, CMD_BEGIN_RENDER_PASS, CMD_DISP_SET, CMD_FLIP).
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md
+ * (section 7.3, CMD_FENCE flags, CMD_BARRIER stages (VF 0x1 to MS
+ * 0x400) and flags, CMD_DRAW_INDIRECT (header flags[0] indexed, [1] the
+ * 8-dword form with a count buffer), CMD_WRITE_TIMESTAMP,
+ * CMD_BEGIN/END_QUERY, CMD_COPY_BUFFER, CMD_BEGIN_RENDER_PASS,
+ * CMD_DISP_SET, CMD_FLIP).
  */
 #define GHCI_FENCE_FLAG_IRQ		(1U << 0)
 #define GHCI_FENCE_FLAG_MEM_WRITE	(1U << 1)
@@ -153,6 +157,11 @@
 #define GHCI_STAGE_CS			(1U << 3)
 #define GHCI_STAGE_ROP			(1U << 4)
 #define GHCI_STAGE_BLT			(1U << 5)
+#define GHCI_STAGE_TCS			(1U << 6)
+#define GHCI_STAGE_TES			(1U << 7)
+#define GHCI_STAGE_GS			(1U << 8)
+#define GHCI_STAGE_TS			(1U << 9)
+#define GHCI_STAGE_MS			(1U << 10)
 #define GHCI_BARRIER_WAIT_IDLE		(1U << 0)
 #define GHCI_BARRIER_INVAL_ICACHE	(1U << 1)
 #define GHCI_BARRIER_INVAL_TEX		(1U << 2)
@@ -161,6 +170,7 @@
 #define GHCI_BARRIER_INVAL_DESCRIPTOR	(1U << 5)
 #define GHCI_BARRIER_FLUSH_L2		(1U << 6)
 #define GHCI_DRAW_INDIRECT_INDEXED	(1U << 0)
+#define GHCI_DRAW_INDIRECT_COUNT	(1U << 1)
 #define GHCI_TIMESTAMP_HOST		(1U << 0)
 #define GHCI_QUERY_INDEX_MASK		0x00FFFFFFU
 #define GHCI_QUERY_PRECISE		(1U << 24)
@@ -219,6 +229,65 @@
 #define GHCI_PSO_LOCAL_SIZE		0x38U
 #define GHCI_PSO_LDS_FLAGS		0x3CU
 #define GHCI_PSO_ATTRIBUTES		0x40U
+
+/*
+ * The pipeline state with the extended stages: dw8's flags[16] makes the
+ * record 256 bytes, the 128 of the pipeline state and the tessellation
+ * and geometry shader stages behind them; the topology PATCH_LIST, the
+ * geometry shader's input and output topologies, the tessellation
+ * domain and spacing; and the limits of their fields.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.2,
+ * GhciPipelineStateExt: dw32-37 the TCS, TES and GS code, dw38
+ * tess_state, dw39 gs_state, dw40 the registers, dw41-44 the geometry
+ * shader's spill ring, dw45-63 reserved; the topology 7 PATCH_LIST;
+ * section 7.3, CMD_BIND_PIPELINE, a 256-byte record on 64 bytes;
+ * section 12.10.4, max_output_vertices x output_stride_words at most
+ * 1024, a patch at most 16256 bytes from 0x220 on).
+ */
+#define GHCI_PSO_EXT_BYTES		256U
+#define GHCI_PSO_ALIGN			64U
+#define GHCI_PSO_FLAG_EXT_STAGES	(1U << 16)
+#define GHCI_PSO_TCS_CODE		0x80U
+#define GHCI_PSO_TES_CODE		0x88U
+#define GHCI_PSO_GS_CODE		0x90U
+#define GHCI_PSO_TESS_STATE		0x98U
+#define GHCI_PSO_GS_STATE		0x9CU
+#define GHCI_PSO_LIMITS_EXT		0xA0U
+#define GHCI_PSO_SPILL_VA		0xA4U
+#define GHCI_PSO_SPILL_BYTES		0xACU
+#define GHCI_PSO_SPILL_STRIDE		0xB0U
+#define GHCI_TOPOLOGY_PATCH_LIST	7U
+#define GHCI_GS_INPUT_POINTS		0U
+#define GHCI_GS_INPUT_LINES		1U
+#define GHCI_GS_INPUT_LINE_STRIP	2U
+#define GHCI_GS_INPUT_TRIANGLES		3U
+#define GHCI_GS_INPUT_TRIANGLE_STRIP	4U
+#define GHCI_GS_INPUT_RESERVED		5U
+#define GHCI_GS_INPUT_LINES_ADJ		6U
+#define GHCI_GS_INPUT_LINE_STRIP_ADJ	7U
+#define GHCI_GS_INPUT_TRIANGLES_ADJ	8U
+#define GHCI_GS_INPUT_TRIANGLE_STRIP_ADJ 9U
+#define GHCI_GS_OUTPUT_POINTS		0U
+#define GHCI_GS_OUTPUT_LINE_STRIP	1U
+#define GHCI_GS_OUTPUT_TRIANGLE_STRIP	2U
+#define GHCI_GS_VERTICES_MAX		256U
+#define GHCI_GS_INVOCATIONS_MAX		32U
+#define GHCI_GS_STREAMS_MAX		4U
+#define GHCI_GS_STRIDE_WORDS_MAX	127U
+#define GHCI_GS_OUTPUT_WORDS_MAX	1024U
+#define GHCI_TESS_DOMAIN_TRIANGLE	0U
+#define GHCI_TESS_DOMAIN_QUAD		1U
+#define GHCI_TESS_DOMAIN_ISOLINE	2U
+#define GHCI_TESS_SPACING_EQUAL		0U
+#define GHCI_TESS_SPACING_FRACTIONAL_EVEN 1U
+#define GHCI_TESS_SPACING_FRACTIONAL_ODD 2U
+#define GHCI_TESS_POINTS_MAX		32U
+#define GHCI_TESS_CP_STRIDE_MAX		127U
+#define GHCI_TESS_PATCH_STRIDE_MAX	127U
+#define GHCI_TESS_PATCH_UNIT		128U
+#define GHCI_TESS_PATCH_CP_FIRST	0x220U
+#define GHCI_TESS_PATCH_BYTES_MAX	16256U
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -357,6 +426,38 @@ struct ghci_pso {
 	uint32_t attribute_count;
 };
 
+/*
+ * The extended stages of a pipeline state, field by field, before they
+ * are packed behind its 128 bytes.  A stage whose code is 0 is absent:
+ * tessellation has both tcs_code and tes_code, a geometry shader
+ * gs_code.  The geometry shader's spill ring is spill_va (0: none).
+ */
+struct ghci_pso_ext {
+	uint64_t tcs_code;
+	uint64_t tes_code;
+	uint64_t gs_code;
+	uint32_t input_points;
+	uint32_t output_points;
+	uint32_t domain;
+	uint32_t spacing;
+	uint32_t clockwise;
+	uint32_t point_mode;
+	uint32_t cp_stride_words;
+	uint32_t patch_stride_128b;
+	uint32_t gs_input;
+	uint32_t gs_output;
+	uint32_t gs_vertices;
+	uint32_t gs_invocations;
+	uint32_t gs_streams;
+	uint32_t gs_stride_words;
+	uint32_t regs_tcs;
+	uint32_t regs_tes;
+	uint32_t regs_gs;
+	uint64_t spill_va;
+	uint32_t spill_bytes;
+	uint32_t spill_stride;
+};
+
 /* A texture descriptor, field by field. */
 struct ghci_texture_desc {
 	uint64_t base;
@@ -459,6 +560,7 @@ uint32_t ghci_cmd_copy_image_to_buffer(uint32_t *out, const struct ghci_transfer
 uint32_t ghci_cmd_disp_set(uint32_t *out, uint32_t wait_idle, uint32_t pairs, const uint32_t *offsets, const uint32_t *values);
 uint32_t ghci_cmd_flip(uint32_t *out, uint32_t display, uint32_t base_phys, uint32_t flags, uint32_t value, uint32_t record_phys);
 int ghci_pso_encode(uint8_t *out, const struct ghci_pso *pso);
+int ghci_pso_ext_encode(uint8_t *out, const struct ghci_pso *pso, const struct ghci_pso_ext *ext);
 int ghci_texture_desc_encode(uint8_t *out, const struct ghci_texture_desc *desc);
 int ghci_sampler_desc_encode(uint8_t *out, const struct ghci_sampler_desc *desc);
 int ghci_buffer_desc_encode(uint8_t *out, const struct ghci_buffer_desc *desc);

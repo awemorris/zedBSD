@@ -29,7 +29,7 @@
 /* The descriptor sets a table can be bound to. */
 #define DESCRIPTOR_SETS			4U
 
-/* The topologies the pipeline state accepts: POINT to TRIANGLE_STRIP. */
+/* The topologies the pipeline state accepts: POINT to TRIANGLE_STRIP, and PATCH_LIST with tessellation. */
 #define TOPOLOGY_MAX			4U
 
 /* The largest texture extent and mip count. */
@@ -56,7 +56,12 @@ static uint32_t pso_flags_word(const struct ghci_pso *pso);
 static uint32_t pso_raster_word(const struct ghci_pso *pso);
 static uint32_t pso_depth_stencil_word(const struct ghci_pso *pso);
 static uint32_t pso_blend_word(const struct ghci_pso *pso);
-static int pso_check(const struct ghci_pso *pso);
+static int pso_check(const struct ghci_pso *pso, int patches);
+static void pso_store(uint8_t *out, const struct ghci_pso *pso, uint32_t flags);
+static int pso_ext_check(const struct ghci_pso_ext *ext, int *tessellation);
+static int pso_ext_tess_check(const struct ghci_pso_ext *ext);
+static int pso_ext_gs_check(const struct ghci_pso_ext *ext);
+static void pso_ext_store(uint8_t *out, const struct ghci_pso_ext *ext);
 static void store_attachment(uint8_t *out, uint32_t offset, const struct ghci_rp_attachment *attachment);
 static uint32_t buffer_image(uint32_t *out, uint32_t opcode, uint64_t first_va, uint64_t second_va, uint32_t first_pitch, uint32_t second_pitch, const struct ghci_slice *image, const struct ghci_transfer *transfer);
 
@@ -244,7 +249,8 @@ ghci_cmd_bind_session(
 
 /*
  * Writes a QUERY_CAPS, which has the command processor write its
- * capability block to a buffer of whole 64-byte lines at a bus address.
+ * capability block to a buffer of whole 64-byte lines at a bus address,
+ * no larger than the block.
  */
 uint32_t
 ghci_cmd_query_caps(
@@ -252,8 +258,10 @@ ghci_cmd_query_caps(
 	uint64_t bus,
 	uint32_t bytes)
 {
-	/* Refuses a buffer that is empty or not in whole lines. */
+	/* Refuses a buffer that is empty, not in whole lines or larger than the block. */
 	if (bytes == 0U || (bytes % GHCI_QUERY_CAPS_ALIGN) != 0U)
+		return 0U;
+	if (bytes > GHCI_QUERY_CAPS_BYTES_MAX)
 		return 0U;
 	if ((bus % GHCI_QUERY_CAPS_ALIGN) != 0U)
 		return 0U;
@@ -526,6 +534,10 @@ ghci_cmd_draw_indirect(
 
 /*
  * Writes a DRAW_INDIRECT whose draw count is read from GPU memory.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md
+ * (section 7.3, CMD_DRAW_INDIRECT, 8 dwords with the header's flags[1]
+ * set; INDEXED in flags[0]).
  */
 uint32_t
 ghci_cmd_draw_indirect_count(
@@ -539,10 +551,10 @@ ghci_cmd_draw_indirect_count(
 {
 	uint32_t flags;
 
-	/* Marks an indexed draw in the header. */
-	flags = 0U;
+	/* Marks the form with a count buffer, and an indexed draw, in the header. */
+	flags = GHCI_DRAW_INDIRECT_COUNT;
 	if (indexed != 0U)
-		flags = GHCI_DRAW_INDIRECT_INDEXED;
+		flags |= GHCI_DRAW_INDIRECT_INDEXED;
 
 	/* Writes the buffer, offset, maximum count, stride and the count's address. */
 	out[0] = ghci_cmd_header(GHCI_OP_DRAW_INDIRECT, GHCI_DW_DRAW_INDIRECT_COUNT, flags);
@@ -1130,67 +1142,60 @@ ghci_pso_encode(
 	uint8_t *out,
 	const struct ghci_pso *pso)
 {
-	uint32_t index;
-	uint32_t word;
 	int error;
 
-	/* Refuses a field its place in the record does not hold. */
-	error = pso_check(pso);
+	/* Refuses a field its place in the record does not hold; a patch list needs the extended stages. */
+	error = pso_check(pso, 0);
 	if (error != 0)
 		return error;
 
 	/* Clears the record so that unused attributes read as format 0. */
 	clear_bytes(out, GHCI_PSO_BYTES);
 
-	/* Writes the four stage entry points. */
-	store64(out, GHCI_PSO_VS_CODE, pso->vs_code);
-	store64(out, GHCI_PSO_FS_CODE, pso->fs_code);
-	store64(out, GHCI_PSO_CS_CODE, pso->cs_code);
-	store64(out, GHCI_PSO_MS_CODE, pso->ms_code);
-
-	/* Writes the packed state words dw8 to dw11. */
-	store32(out, GHCI_PSO_FLAGS, pso_flags_word(pso));
-	store32(out, GHCI_PSO_RASTER, pso_raster_word(pso));
-	store32(out, GHCI_PSO_DEPTH_STENCIL, pso_depth_stencil_word(pso));
-	store32(out, GHCI_PSO_BLEND, pso_blend_word(pso));
-
-	/* Writes the default strides of bindings 0 to 3, one byte each. */
-	word = pso->strides[0] | (pso->strides[1] << 8) | (pso->strides[2] << 16) | (pso->strides[3] << 24);
-	store32(out, GHCI_PSO_STRIDES, word);
-
-	/* Writes the register counts of each stage and the varying count. */
-	word = pso->regs_vs | (pso->regs_fs << 8) | (pso->regs_cs << 16) | (pso->varyings << 24);
-	store32(out, GHCI_PSO_LIMITS, word);
-
-	/* Writes the compute workgroup size. */
-	word = pso->local_size[0] | (pso->local_size[1] << 10) | (pso->local_size[2] << 20);
-	store32(out, GHCI_PSO_LOCAL_SIZE, word);
-
-	/* Writes the shared memory size and the fragment flags. */
-	word = pso->lds_bytes;
-	if (pso->fs_centroid != 0U)
-		word |= 1U << 16;
-	if (pso->fs_depth_export != 0U)
-		word |= 1U << 17;
-	if (pso->fs_discard != 0U)
-		word |= 1U << 18;
-	store32(out, GHCI_PSO_LDS_FLAGS, word);
-
-	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 8.2, the attribute: [7:0] format, [11:8] binding,
-	 * [12] input rate, [31:13] offset).
-	 */
-	for (index = 0U; index < pso->attribute_count; index++) {
-		word = pso->attributes[index].format;
-		word |= pso->attributes[index].binding << 8;
-		if (pso->attributes[index].per_instance != 0U)
-			word |= 1U << 12;
-		word |= pso->attributes[index].offset << 13;
-		store32(out, GHCI_PSO_ATTRIBUTES + 4U * index, word);
-	}
+	/* Writes the record. */
+	pso_store(out, pso, 0U);
 
 	/* Succeeded: the record holds the pipeline state. */
+	return 0;
+}
+
+/*
+ * Packs a pipeline state with its extended stages into the 256 bytes the
+ * GPU reads: the 128 bytes of the pipeline state with flags[16] set, and
+ * the tessellation and geometry shader stages behind them.  The record
+ * has tessellation, a geometry shader or both, and draws patches exactly
+ * when it has tessellation.  Whether the device has the stages is the
+ * caller's to know (a GPU without them faults on the record).
+ */
+int
+ghci_pso_ext_encode(
+	uint8_t *out,
+	const struct ghci_pso *pso,
+	const struct ghci_pso_ext *ext)
+{
+	int tessellation;
+	int error;
+
+	/* Refuses extended stages whose fields their places do not hold. */
+	error = pso_ext_check(ext, &tessellation);
+	if (error != 0)
+		return error;
+
+	/* Refuses a pipeline state that draws patches without tessellation, or other primitives with it. */
+	error = pso_check(pso, tessellation);
+	if (error != 0)
+		return error;
+	if (tessellation && pso->topology != GHCI_TOPOLOGY_PATCH_LIST)
+		return EINVAL;
+
+	/* Clears the record so that the reserved words and unused attributes read as 0. */
+	clear_bytes(out, GHCI_PSO_EXT_BYTES);
+
+	/* Writes the pipeline state, marked as extended, and the extended stages. */
+	pso_store(out, pso, GHCI_PSO_FLAG_EXT_STAGES);
+	pso_ext_store(out, ext);
+
+	/* Succeeded: the record holds the pipeline state and its extended stages. */
 	return 0;
 }
 
@@ -1585,15 +1590,28 @@ pso_blend_word(
 	return word;
 }
 
-/* Refuses a pipeline state field that its place in the record does not hold. */
+/*
+ * Refuses a pipeline state field that its place in the record does not
+ * hold.  patches is 1 when the record has tessellation, whose topology is
+ * the patch list (and only then).
+ */
 static int
 pso_check(
-	const struct ghci_pso *pso)
+	const struct ghci_pso *pso,
+	int patches)
 {
 	uint32_t index;
 
+	/* The topology: a primitive, or the patch list of tessellation. */
+	if (pso->topology > TOPOLOGY_MAX) {
+		if (!patches)
+			return EINVAL;
+		if (pso->topology != GHCI_TOPOLOGY_PATCH_LIST)
+			return EINVAL;
+	}
+
 	/* The packed state words: each field within its bits. */
-	if (pso->topology > TOPOLOGY_MAX || pso->logic_op > 15U || pso->sample_mask > 15U)
+	if (pso->logic_op > 15U || pso->sample_mask > 15U)
 		return EINVAL;
 	if (pso->cull_mode > 3U || pso->polygon_mode > 2U || pso->line_width_fx4 > 0xFFU)
 		return EINVAL;
@@ -1638,6 +1656,259 @@ pso_check(
 
 	/* Succeeded: every field fits. */
 	return 0;
+}
+
+/* Writes the 128 bytes of a pipeline state, with flags added to dw8's. */
+static void
+pso_store(
+	uint8_t *out,
+	const struct ghci_pso *pso,
+	uint32_t flags)
+{
+	uint32_t index;
+	uint32_t word;
+
+	/* Writes the four stage entry points. */
+	store64(out, GHCI_PSO_VS_CODE, pso->vs_code);
+	store64(out, GHCI_PSO_FS_CODE, pso->fs_code);
+	store64(out, GHCI_PSO_CS_CODE, pso->cs_code);
+	store64(out, GHCI_PSO_MS_CODE, pso->ms_code);
+
+	/* Writes the packed state words dw8 to dw11. */
+	store32(out, GHCI_PSO_FLAGS, pso_flags_word(pso) | flags);
+	store32(out, GHCI_PSO_RASTER, pso_raster_word(pso));
+	store32(out, GHCI_PSO_DEPTH_STENCIL, pso_depth_stencil_word(pso));
+	store32(out, GHCI_PSO_BLEND, pso_blend_word(pso));
+
+	/* Writes the default strides of bindings 0 to 3, one byte each. */
+	word = pso->strides[0] | (pso->strides[1] << 8) | (pso->strides[2] << 16) | (pso->strides[3] << 24);
+	store32(out, GHCI_PSO_STRIDES, word);
+
+	/* Writes the register counts of each stage and the varying count. */
+	word = pso->regs_vs | (pso->regs_fs << 8) | (pso->regs_cs << 16) | (pso->varyings << 24);
+	store32(out, GHCI_PSO_LIMITS, word);
+
+	/* Writes the compute workgroup size. */
+	word = pso->local_size[0] | (pso->local_size[1] << 10) | (pso->local_size[2] << 20);
+	store32(out, GHCI_PSO_LOCAL_SIZE, word);
+
+	/* Writes the shared memory size and the fragment flags. */
+	word = pso->lds_bytes;
+	if (pso->fs_centroid != 0U)
+		word |= 1U << 16;
+	if (pso->fs_depth_export != 0U)
+		word |= 1U << 17;
+	if (pso->fs_discard != 0U)
+		word |= 1U << 18;
+	store32(out, GHCI_PSO_LDS_FLAGS, word);
+
+	/*
+	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
+	 * (section 8.2, the attribute: [7:0] format, [11:8] binding,
+	 * [12] input rate, [31:13] offset).
+	 */
+	for (index = 0U; index < pso->attribute_count; index++) {
+		word = pso->attributes[index].format;
+		word |= pso->attributes[index].binding << 8;
+		if (pso->attributes[index].per_instance != 0U)
+			word |= 1U << 12;
+		word |= pso->attributes[index].offset << 13;
+		store32(out, GHCI_PSO_ATTRIBUTES + 4U * index, word);
+	}
+}
+
+/*
+ * Refuses extended stages that are none, half of tessellation, or a
+ * field its place in the record does not hold, and reports whether they
+ * have tessellation.
+ */
+static int
+pso_ext_check(
+	const struct ghci_pso_ext *ext,
+	int *tessellation)
+{
+	int error;
+
+	/* Tessellation is both of its stages or neither. */
+	*tessellation = 0;
+	if (ext->tcs_code != 0U || ext->tes_code != 0U) {
+		if (ext->tcs_code == 0U || ext->tes_code == 0U)
+			return EINVAL;
+		*tessellation = 1;
+	}
+
+	/* Extended stages are tessellation, a geometry shader or both. */
+	if (!*tessellation && ext->gs_code == 0U)
+		return EINVAL;
+
+	/* The tessellation's fields, when it is there. */
+	if (*tessellation) {
+		error = pso_ext_tess_check(ext);
+		if (error != 0)
+			return error;
+	}
+
+	/* The geometry shader's fields, when it is there. */
+	if (ext->gs_code != 0U) {
+		error = pso_ext_gs_check(ext);
+		if (error != 0)
+			return error;
+	}
+
+	/* The spill ring: on 64 bytes, and no ring without its address. */
+	if ((ext->spill_va % GHCI_PSO_ALIGN) != 0U)
+		return EINVAL;
+	if (ext->spill_va == 0U && (ext->spill_bytes != 0U || ext->spill_stride != 0U))
+		return EINVAL;
+
+	/* Succeeded: every field fits. */
+	return 0;
+}
+
+/*
+ * Refuses tessellation fields their places in tess_state and dw40 do not
+ * hold, or a patch the shared memory of a patch does not hold.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.2,
+ * tess_state: [5:0] and [11:6] the control points 1..32, [13:12] the
+ * domain 0..2, [15:14] the spacing 0..2, [24:18] cp_stride_words 0..127,
+ * [31:25] patch_stride_128b 1..127, patch_stride_128b x 128 >= 0x220 +
+ * output points x cp_stride_words x 4; dw40 the registers 1..63;
+ * section 12.10.4, 0x220 + output points x cp_stride_words x 4 <= 16256).
+ */
+static int
+pso_ext_tess_check(
+	const struct ghci_pso_ext *ext)
+{
+	uint32_t patch_bytes;
+
+	/* The control points of a patch in and out. */
+	if (ext->input_points == 0U || ext->input_points > GHCI_TESS_POINTS_MAX)
+		return EINVAL;
+	if (ext->output_points == 0U || ext->output_points > GHCI_TESS_POINTS_MAX)
+		return EINVAL;
+
+	/* The domain, the spacing and the two flags. */
+	if (ext->domain > GHCI_TESS_DOMAIN_ISOLINE || ext->spacing > GHCI_TESS_SPACING_FRACTIONAL_ODD)
+		return EINVAL;
+	if (ext->clockwise > 1U || ext->point_mode > 1U)
+		return EINVAL;
+
+	/* The patch: the output control points from 0x220 within the patch's bytes and the most a patch has. */
+	if (ext->cp_stride_words > GHCI_TESS_CP_STRIDE_MAX)
+		return EINVAL;
+	if (ext->patch_stride_128b == 0U || ext->patch_stride_128b > GHCI_TESS_PATCH_STRIDE_MAX)
+		return EINVAL;
+	patch_bytes = GHCI_TESS_PATCH_CP_FIRST + ext->output_points * ext->cp_stride_words * 4U;
+	if (patch_bytes > GHCI_TESS_PATCH_BYTES_MAX)
+		return EINVAL;
+	if (ext->patch_stride_128b * GHCI_TESS_PATCH_UNIT < patch_bytes)
+		return EINVAL;
+
+	/* The registers of both stages. */
+	if (ext->regs_tcs == 0U || ext->regs_tcs > REGISTERS_MAX)
+		return EINVAL;
+	if (ext->regs_tes == 0U || ext->regs_tes > REGISTERS_MAX)
+		return EINVAL;
+
+	/* Succeeded: the tessellation's fields fit. */
+	return 0;
+}
+
+/*
+ * Refuses geometry shader fields their places in gs_state and dw40 do
+ * not hold, or an output larger than an invocation may emit.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.2,
+ * gs_state: [3:0] the input topology 0..9 but 5, [6:4] the output 0..2,
+ * [15:7] max_vertices 1..256, [21:16] invocations 1..32, [23:22] the
+ * streams less 1, [30:24] output_stride_words 1..127; dw40 the registers
+ * 1..63; section 12.10.4, max_output_vertices x output_stride_words at
+ * most 1024).
+ */
+static int
+pso_ext_gs_check(
+	const struct ghci_pso_ext *ext)
+{
+	/* The input and output topologies. */
+	if (ext->gs_input > GHCI_GS_INPUT_TRIANGLE_STRIP_ADJ || ext->gs_input == GHCI_GS_INPUT_RESERVED)
+		return EINVAL;
+	if (ext->gs_output > GHCI_GS_OUTPUT_TRIANGLE_STRIP)
+		return EINVAL;
+
+	/* The vertices, the invocations and the streams. */
+	if (ext->gs_vertices == 0U || ext->gs_vertices > GHCI_GS_VERTICES_MAX)
+		return EINVAL;
+	if (ext->gs_invocations == 0U || ext->gs_invocations > GHCI_GS_INVOCATIONS_MAX)
+		return EINVAL;
+	if (ext->gs_streams == 0U || ext->gs_streams > GHCI_GS_STREAMS_MAX)
+		return EINVAL;
+
+	/* An output vertex's words, and the words of all the vertices one invocation emits. */
+	if (ext->gs_stride_words == 0U || ext->gs_stride_words > GHCI_GS_STRIDE_WORDS_MAX)
+		return EINVAL;
+	if (ext->gs_vertices * ext->gs_stride_words > GHCI_GS_OUTPUT_WORDS_MAX)
+		return EINVAL;
+
+	/* The registers. */
+	if (ext->regs_gs == 0U || ext->regs_gs > REGISTERS_MAX)
+		return EINVAL;
+
+	/* Succeeded: the geometry shader's fields fit. */
+	return 0;
+}
+
+/*
+ * Writes the extended stages behind the 128 bytes of a pipeline state;
+ * an absent stage leaves its words 0.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.2,
+ * GhciPipelineStateExt: tess_state [16] the clockwise winding, [17]
+ * point mode; gs_state as pso_ext_gs_check() has it; dw40 [7:0] TCS,
+ * [15:8] TES, [23:16] GS registers).
+ */
+static void
+pso_ext_store(
+	uint8_t *out,
+	const struct ghci_pso_ext *ext)
+{
+	uint32_t word;
+
+	/* Writes the three stage entry points. */
+	store64(out, GHCI_PSO_TCS_CODE, ext->tcs_code);
+	store64(out, GHCI_PSO_TES_CODE, ext->tes_code);
+	store64(out, GHCI_PSO_GS_CODE, ext->gs_code);
+
+	/* Writes tess_state, for tessellation. */
+	if (ext->tcs_code != 0U) {
+		word = ext->input_points | (ext->output_points << 6) | (ext->domain << 12) | (ext->spacing << 14);
+		if (ext->clockwise != 0U)
+			word |= 1U << 16;
+		if (ext->point_mode != 0U)
+			word |= 1U << 17;
+		word |= (ext->cp_stride_words << 18) | (ext->patch_stride_128b << 25);
+		store32(out, GHCI_PSO_TESS_STATE, word);
+	}
+
+	/* Writes gs_state, for a geometry shader. */
+	if (ext->gs_code != 0U) {
+		word = ext->gs_input | (ext->gs_output << 4) | (ext->gs_vertices << 7) | (ext->gs_invocations << 16);
+		word |= ((ext->gs_streams - 1U) << 22) | (ext->gs_stride_words << 24);
+		store32(out, GHCI_PSO_GS_STATE, word);
+	}
+
+	/* Writes the registers of the stages there are. */
+	word = 0U;
+	if (ext->tcs_code != 0U)
+		word |= ext->regs_tcs | (ext->regs_tes << 8);
+	if (ext->gs_code != 0U)
+		word |= ext->regs_gs << 16;
+	store32(out, GHCI_PSO_LIMITS_EXT, word);
+
+	/* Writes the geometry shader's spill ring. */
+	store64(out, GHCI_PSO_SPILL_VA, ext->spill_va);
+	store32(out, GHCI_PSO_SPILL_BYTES, ext->spill_bytes);
+	store32(out, GHCI_PSO_SPILL_STRIDE, ext->spill_stride);
 }
 
 /* Stores one 16-byte attachment of a render pass description. */

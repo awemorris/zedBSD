@@ -14,10 +14,11 @@
  * reports nothing for has no feature, and no format is assumed.  The
  * driver then drops what it cannot do itself: an sRGB format without
  * EXT_CAP_FMT0's sRGB bit, a storage image the compiler cannot address,
- * the linear filter of a texture unit without the bilinear filter, and
- * the blits of a device without the blit engine are what the driver's
- * own shaders can do instead (sampled sources, colour attachment
- * destinations, no depth).
+ * and the blits of a device without the blit engine are what the
+ * driver's own shaders can do instead (sampled sources, colour
+ * attachment destinations, no depth).  A format Vulkan 1.0 requires to
+ * filter linearly says it does whenever it is sampled: where the texture
+ * unit cannot filter it, the sampler takes the nearest texel instead.
  */
 
 #include <stddef.h>
@@ -73,6 +74,17 @@
 #define ROW_DEPTH			(1U << 5)
 #define ROW_STORAGE			(1U << 6)
 
+/*
+ * The formats Vulkan 1.0 requires to be sampled with the linear filter on
+ * optimal tiling (of those the hardware takes), which the driver reports
+ * as filtering whenever they are sampled, and draws with the nearest
+ * texel where the texture unit has no filter for them.
+ *
+ * Values referenced: the Vulkan 1.0 specification (section 31.3.3, the
+ * required format support tables: SAMPLED_IMAGE_FILTER_LINEAR_BIT).
+ */
+#define ROW_FILTER_REQUIRED		(1U << 7)
+
 /* One format of the table: its VkFormat, its texel (or 4x4 block) bytes, and what kind of format it is. */
 struct format_row {
 	uint16_t format;
@@ -86,52 +98,52 @@ struct format_row {
  * 38, 41, 42, 43) is.  Storage comes from the specification's table
  * alone: the shader core writes storage images of these formats.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.5.1,
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.5.1,
  * the table of formats, and its notes on the packed 32-bit formats);
  * Vulkan 1.0 VkFormat (R5G6B5_UNORM_PACK16 is 4, A1R5G5B5_UNORM_PACK16
- * is 8, where section 8.5.1 says 84 and 86).
+ * is 8, as section 8.5.1 has them, where section 8.3's example says 84).
  */
 static const struct format_row format_rows[] = {
 	{ 3U, 2U, 0U },
-	{ 4U, 2U, 0U },
-	{ 8U, 2U, 0U },
-	{ 9U, 1U, 0U },
-	{ 10U, 1U, 0U },
+	{ 4U, 2U, ROW_FILTER_REQUIRED },
+	{ 8U, 2U, ROW_FILTER_REQUIRED },
+	{ 9U, 1U, ROW_FILTER_REQUIRED },
+	{ 10U, 1U, ROW_FILTER_REQUIRED },
 	{ 13U, 1U, ROW_INTEGER },
 	{ 14U, 1U, ROW_INTEGER },
-	{ 16U, 2U, 0U },
-	{ 17U, 2U, 0U },
+	{ 16U, 2U, ROW_FILTER_REQUIRED },
+	{ 17U, 2U, ROW_FILTER_REQUIRED },
 	{ 20U, 2U, ROW_INTEGER },
 	{ 21U, 2U, ROW_INTEGER },
-	{ 37U, 4U, ROW_STORAGE },
-	{ 38U, 4U, 0U },
+	{ 37U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 38U, 4U, ROW_FILTER_REQUIRED },
 	{ 41U, 4U, ROW_INTEGER | ROW_STORAGE },
 	{ 42U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 43U, 4U, ROW_SRGB },
-	{ 44U, 4U, 0U },
-	{ 50U, 4U, ROW_SRGB },
-	{ 51U, 4U, ROW_STORAGE },
-	{ 52U, 4U, 0U },
+	{ 43U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 44U, 4U, ROW_FILTER_REQUIRED },
+	{ 50U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 51U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 52U, 4U, ROW_FILTER_REQUIRED },
 	{ 55U, 4U, ROW_INTEGER | ROW_STORAGE },
 	{ 56U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 57U, 4U, ROW_SRGB },
-	{ 64U, 4U, 0U },
+	{ 57U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 64U, 4U, ROW_FILTER_REQUIRED },
 	{ 68U, 4U, ROW_INTEGER },
 	{ 70U, 2U, 0U },
 	{ 71U, 2U, 0U },
 	{ 74U, 2U, ROW_INTEGER },
 	{ 75U, 2U, ROW_INTEGER },
-	{ 76U, 2U, ROW_FLOAT | ROW_STORAGE },
+	{ 76U, 2U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
 	{ 77U, 4U, 0U },
 	{ 78U, 4U, 0U },
 	{ 81U, 4U, ROW_INTEGER },
 	{ 82U, 4U, ROW_INTEGER },
-	{ 83U, 4U, ROW_FLOAT | ROW_STORAGE },
+	{ 83U, 4U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
 	{ 91U, 8U, 0U },
 	{ 92U, 8U, 0U },
 	{ 95U, 8U, ROW_INTEGER | ROW_STORAGE },
 	{ 96U, 8U, ROW_INTEGER | ROW_STORAGE },
-	{ 97U, 8U, ROW_FLOAT | ROW_STORAGE },
+	{ 97U, 8U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
 	{ 98U, 4U, ROW_INTEGER | ROW_STORAGE },
 	{ 99U, 4U, ROW_INTEGER | ROW_STORAGE },
 	{ 100U, 4U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
@@ -144,8 +156,8 @@ static const struct format_row format_rows[] = {
 	{ 107U, 16U, ROW_INTEGER | ROW_STORAGE },
 	{ 108U, 16U, ROW_INTEGER | ROW_STORAGE },
 	{ 109U, 16U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
-	{ 122U, 4U, 0U },
-	{ 123U, 4U, 0U },
+	{ 122U, 4U, ROW_FILTER_REQUIRED },
+	{ 123U, 4U, ROW_FILTER_REQUIRED },
 	{ 124U, 2U, ROW_DEPTH },
 	{ 125U, 4U, ROW_DEPTH },
 	{ 126U, 4U, ROW_DEPTH },
@@ -289,12 +301,13 @@ ghci_vk_format_traits(
  * optimal and linear tiling (OPTIMAL's bits) and for buffers (at
  * Vulkan's positions), and drops what the driver cannot do: a format
  * outside the table, an sRGB format without EXT_CAP_FMT0's bit, a
- * storage image the compiler does not address, the linear filter of a
- * texture unit without the bilinear filter, and a blit the driver's
+ * storage image the compiler does not address, and a blit the driver's
  * shaders replace where the executor does not use the blit engine.  The
- * driver lays every image out in linear rows, so an image made with
- * optimal tiling is a linear one: optimal tiling has only what both
- * tilings have.
+ * linear filter is the texture unit's, but a sampled format Vulkan 1.0
+ * requires to filter has it in any case (the nearest texel where the
+ * texture unit has no filter).  The driver lays every image out in
+ * linear rows, so an image made with optimal tiling is a linear one:
+ * optimal tiling has only what both tilings have.
  */
 void
 ghci_vk_formats_from_bits(
@@ -311,6 +324,8 @@ ghci_vk_formats_from_bits(
 	unsigned index;
 	int blitter;
 	int bilinear;
+	int required;
+	int etc2;
 	int srgb;
 
 	/* A format the driver cannot write into a descriptor has no feature. */
@@ -342,6 +357,34 @@ ghci_vk_formats_from_bits(
 	bilinear = ghci_caps_has(caps, GHCI_HAS_TU_BILINEAR);
 	for (index = 0U; index < 2U && !bilinear; index++)
 		tilings[index] &= ~(uint32_t)HW_FILTER_LINEAR;
+
+	/*
+	 * A format Vulkan 1.0 requires to filter, and the ETC2 and EAC
+	 * formats where the device names textureCompressionETC2 (which
+	 * requires them to filter), filters whenever it is sampled: the
+	 * texture unit without a filter for it (no bilinear filter, or a
+	 * float format without the float filter) samples the nearest texel,
+	 * and the sampler asks for nothing else.
+	 *
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.2,
+	 * EXT_CAP_FMT0 [16] CAP_TU_BILINEAR, nearest sampling without it;
+	 * section 12.9, FP16 and FP32 textures sampled at the nearest texel
+	 * without CAP_TEX_FFILT); the Vulkan 1.0 specification (section
+	 * 31.3.3, textureCompressionETC2's formats filter linearly).
+	 */
+	etc2 = ghci_caps_has(caps, GHCI_HAS_ETC2);
+	required = 0;
+	if ((row->kind & ROW_FILTER_REQUIRED) != 0U) {
+		required = 1;
+	} else if (format >= (uint32_t)VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK && format <= (uint32_t)VK_FORMAT_EAC_R11G11_SNORM_BLOCK) {
+		/* Named with the sRGB bit too (the feature has sRGB formats). */
+		if (etc2 && srgb)
+			required = 1;
+	}
+	for (index = 0U; index < 2U && required; index++) {
+		if ((tilings[index] & HW_SAMPLE) != 0U)
+			tilings[index] |= HW_FILTER_LINEAR;
+	}
 
 	/* Without the executor's blit engine the blits are the driver's draws: a sampled source, a colour destination. */
 	for (index = 0U; index < 2U && !blitter; index++) {
@@ -388,8 +431,8 @@ ghci_vk_formats_make(
 	 * Each format of the table from its word: OPTIMAL, LINEAR, and the
 	 * buffer features moved to their Vulkan positions (bits 3 to 6).
 	 *
-	 * Values referenced: amaterrace-gpu ea5d39c1 rtl/gpu/cp/atg_cp_caps.v
-	 * (the format word: [8:0] OPTIMAL, [17:9] LINEAR, [21:18] the buffer
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.5,
+	 * the format word: [8:0] OPTIMAL, [17:9] LINEAR, [21:18] the buffer
 	 * features 3 to 6).
 	 */
 	for (index = 0U; index < sizeof(format_rows) / sizeof(format_rows[0]); index++) {

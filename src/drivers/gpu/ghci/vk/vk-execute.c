@@ -3862,8 +3862,7 @@ copy_image(
 
 	/*
 	 * A blit's filter, then the regions again.  Without the texture
-	 * unit's bilinear filter no format has FILTER_LINEAR, so a linear
-	 * blit is the nearest one.
+	 * unit's bilinear filter a linear blit is drawn as the nearest one.
 	 */
 	filter = 0U;
 	if (number == GPU_OP_CMD_BLIT_IMAGE && read32(reader) == (uint32_t)VK_FILTER_LINEAR)

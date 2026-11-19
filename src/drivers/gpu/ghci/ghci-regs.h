@@ -75,9 +75,9 @@
  * and the widths of its GPU and bus addresses, which size CP_HEAP and
  * place the ring before the processor runs.
  *
- * Values referenced: amaterrace-gpu ea5d39c1 include/ghci_regs.h
- * (BOOT_CAPS: [0] CP, [1] HW_WALKER, [2] PROT, [11:8] VA_BITS - 30,
- * [15:12] PA_BITS - 40).
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.0,
+ * BOOT_CAPS: [0] CAP_BOOT_CP, [1] CAP_BOOT_HW_WALKER, [2] CAP_BOOT_PROT,
+ * [11:8] VA_BITS - 30, [15:12] PA_BITS - 40).
  */
 #define GHCI_BOOT_CP			(1U << 0)
 #define GHCI_BOOT_HW_WALKER		(1U << 1)
@@ -91,13 +91,15 @@
 /*
  * The capability block CMD_QUERY_CAPS writes to memory: its identity,
  * its version and size, the words it carries and where the format table
- * starts.  A later version adds words behind these and keeps them.
+ * starts, and the bytes of the block of version 1, the most the command
+ * may be asked to write.  A later version adds words behind these and
+ * keeps them.
  *
- * Values referenced: amaterrace-gpu ea5d39c1 include/ghci_cmd.h (the
- * capability block's dword positions) and rtl/gpu/cp/atg_cp_caps.v
- * (BLOCK_ID "GCAP", BLOCK_INFO [15:0] version and [31:16] BLOCK_DWORDS,
- * the format word: [8:0] OPTIMAL, [17:9] LINEAR, [21:18] the buffer
- * features 3 to 6).
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.5,
+ * the capability block: word 0 BLOCK_ID "GCAP", word 1 [15:0] version
+ * and [31:16] the dwords, words 2 to 20, the format table from word 32,
+ * the format word's [8:0] OPTIMAL, [17:9] LINEAR and [21:18] the buffer
+ * features 3 to 6; section 7.3, CMD_QUERY_CAPS's dst_bytes at most 768).
  */
 #define GHCI_CAPS_ID_VALUE		0x50414347U
 #define GHCI_CAPS_VERSION_MASK		0xFFFFU
@@ -122,7 +124,10 @@
 #define GHCI_CAPS_WORD_FMT_FIRST	16U
 #define GHCI_CAPS_WORD_FMT_COUNT	17U
 #define GHCI_CAPS_WORD_EXTCAP_PRESENT	18U
-#define GHCI_CAPS_WORDS_KNOWN		19U
+#define GHCI_CAPS_WORD_SHADER_STAGES	19U
+#define GHCI_CAPS_WORD_STAGE_LIMITS	20U
+#define GHCI_CAPS_WORDS_KNOWN		21U
+#define GHCI_CAPS_BLOCK_BYTES		768U
 #define GHCI_CAPS_HEADER_DWORDS		32U
 #define GHCI_CAPS_FMT_OPTIMAL_MASK	0x1FFU
 #define GHCI_CAPS_FMT_LINEAR_SHIFT	9U
@@ -210,9 +215,9 @@
  * reads undefined texels, and without the filter between levels the
  * nearest level is sampled.
  *
- * Values referenced: amaterrace-gpu ea5d39c1 include/ghci_regs.h
- * (EXT_CAP_FMT0 [19] GHCI_EXT_FMT_TEX_ARRAY, [20] GHCI_EXT_FMT_TEX_3D,
- * [21] GHCI_EXT_FMT_TEX_CUBE, [22] GHCI_EXT_FMT_TEX_TRILINEAR) and
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.2,
+ * EXT_CAP_FMT0 [19] CAP_TEX_ARRAY, [20] CAP_TEX_3D, [21] CAP_TEX_CUBE,
+ * [22] CAP_TEX_TRILINEAR); amaterrace-gpu ea5d39c1
  * rtl/gpu/tu/atg_tu_addr.v (the layer, 3D and cube addressing and the
  * level chosen without ENABLE_TRILINEAR).
  */
@@ -220,6 +225,34 @@
 #define GHCI_FMT0_TEX_3D		(1U << 20)
 #define GHCI_FMT0_TEX_CUBE		(1U << 21)
 #define GHCI_FMT0_TEX_TRILINEAR		(1U << 22)
+
+/*
+ * The pipeline's optional shader stages and their limits, words 19 and
+ * 20 of the capability block: task and mesh shaders (copies of
+ * DEVICE_CAPS[27] and [28]), geometry shaders, tessellation and the
+ * geometry stream output; the most vertices a geometry shader emits and
+ * its invocations, and the control points of a patch and the largest
+ * tessellation level.  Geometry shaders and tessellation need 16 KiB of
+ * shared memory in a shader unit, and a GPU with less reports neither.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.4,
+ * word 19 SHADER_STAGES [0] CAP_TASK_SHADER, [1] CAP_MESH_SHADER, [2]
+ * CAP_GEOMETRY_SHADER, [3] CAP_TESSELLATION, [4] CAP_STREAM_OUT; word 20
+ * STAGE_LIMITS [8:0], [14:9], [20:15], [27:21]; CAP_LDS_SIZE_KB >= 16).
+ */
+#define GHCI_STAGE_TASK_SHADER		(1U << 0)
+#define GHCI_STAGE_MESH_SHADER		(1U << 1)
+#define GHCI_STAGE_GEOMETRY_SHADER	(1U << 2)
+#define GHCI_STAGE_TESSELLATION		(1U << 3)
+#define GHCI_STAGE_STREAM_OUT		(1U << 4)
+#define GHCI_LIMIT_GS_VERTICES_MASK	0x1FFU
+#define GHCI_LIMIT_GS_INVOCATIONS_SHIFT	9U
+#define GHCI_LIMIT_GS_INVOCATIONS_MASK	0x3FU
+#define GHCI_LIMIT_PATCH_SIZE_SHIFT	15U
+#define GHCI_LIMIT_PATCH_SIZE_MASK	0x3FU
+#define GHCI_LIMIT_TESS_LEVEL_SHIFT	21U
+#define GHCI_LIMIT_TESS_LEVEL_MASK	0x7FU
+#define GHCI_STAGES_LDS_BYTES_MIN	(16U * 1024U)
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -254,9 +287,12 @@
 #define GHCI_IRQ_HALTED			(1U << 6)
 
 /*
- * Values referenced: amaterrace-gpu 20bf888 docs/ghci.md
- * (section 3.5, FAULT_INFO kinds and units; bit 20 tells a write
- * page fault from a read one).
+ * FAULT_INFO's fields, its kinds and units, and the shader stages of a
+ * shader unit's fault.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.5,
+ * FAULT_INFO kinds and units, [19:16] SHADER_STAGE 0 VS to 7 GS; bit 20
+ * tells a write page fault from a read one).
  */
 #define GHCI_FAULT_KIND_MASK		0xFU
 #define GHCI_FAULT_UNIT_SHIFT		4U
@@ -286,10 +322,23 @@
 #define GHCI_UNIT_TU			4U
 #define GHCI_UNIT_ROP			5U
 #define GHCI_UNIT_BLT			6U
+#define GHCI_FAULT_STAGE_VS		0U
+#define GHCI_FAULT_STAGE_FS		1U
+#define GHCI_FAULT_STAGE_CS		2U
+#define GHCI_FAULT_STAGE_MS		3U
+#define GHCI_FAULT_STAGE_TS		4U
+#define GHCI_FAULT_STAGE_TCS		5U
+#define GHCI_FAULT_STAGE_TES		6U
+#define GHCI_FAULT_STAGE_GS		7U
 
 /*
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 4 and 4.1, the extended capability list).
+ * The extended capability list's IDs and where the list lies.  ID 1
+ * (DISP) is not defined in GHCI 1.0 and ID 4 (VEND) is reserved: the
+ * driver records them as any ID but uses neither.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 4, the
+ * IDs; section 4.1, the list at 0x100..0x13F, eight entries at most;
+ * section 13.1, DISP not defined).
  */
 #define GHCI_EXTCAP_ID_DISP		1U
 #define GHCI_EXTCAP_ID_DBG		2U
@@ -446,12 +495,15 @@
  * Where two words carry one fact, the one the driver had first stays the
  * authority: BOOT_CAPS for the walker, PROT and the address widths, the
  * list for the display, MEM for unified memory, and DEVICE_CAPS above
- * its mirrors in EXT_CAP_FEATURE and EXT_CAP_FMT0.  A copy that
- * disagrees is kept for the log: mismatches holds the DEVICE_CAPS bits
- * concerned, width_mismatch the address widths.  MAX_MRT is the
- * authority on the colour attachments; max_color is EXT_CAP_FMT0's copy
- * and fmt_limits FMT_LIMITS's, for the log.  A block the list does not
- * name has offset 0.
+ * its mirrors in EXT_CAP_FEATURE, EXT_CAP_FMT0 and SHADER_STAGES.  A
+ * copy that disagrees is kept for the log: mismatches holds the
+ * DEVICE_CAPS bits concerned, width_mismatch the address widths.
+ * MAX_MRT is the authority on the colour attachments; max_color is
+ * EXT_CAP_FMT0's copy and fmt_limits FMT_LIMITS's, for the log.  A block
+ * the list does not name has offset 0.  shader_stages and stage_limits
+ * are words 19 and 20 as the device wrote them; stages_dropped holds the
+ * stages of shader_stages the driver takes as absent because the shared
+ * memory is below what they need.
  */
 struct ghci_caps {
 	uint32_t boot_caps;
@@ -484,6 +536,9 @@ struct ghci_caps {
 	uint32_t prot_caps;
 	uint32_t perf_src;
 	uint32_t extcap_present;
+	uint32_t shader_stages;
+	uint32_t stage_limits;
+	uint32_t stages_dropped;
 	uint32_t format_count;
 	uint32_t formats[GHCI_CAPS_FORMATS];
 	uint32_t mismatches;
@@ -523,7 +578,10 @@ enum ghci_caps_flag {
 	GHCI_HAS_TEX_ARRAY,
 	GHCI_HAS_TEX_3D,
 	GHCI_HAS_TEX_CUBE,
-	GHCI_HAS_TEX_TRILINEAR
+	GHCI_HAS_TEX_TRILINEAR,
+	GHCI_HAS_GEOMETRY_SHADER,
+	GHCI_HAS_TESSELLATION,
+	GHCI_HAS_STREAM_OUT
 };
 
 int ghci_caps_identify(const uint32_t *window);
