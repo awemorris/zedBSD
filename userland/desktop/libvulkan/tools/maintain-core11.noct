@@ -1,0 +1,102 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+// Selects the Vulkan 1.1 core declarations (the VK_VERSION_1_1 block) that the
+// maintained headers do not declare yet, verbatim, into vulkan_core11.h.
+
+func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+func ends(text, suffix) {
+    var n = String.charCount(text); var m = String.charCount(suffix);
+    if (n < m) { return false; }
+    return String.substring(text, n - m, m) == suffix;
+}
+func lines(text) {
+    var result = []; var start = 0;
+    for (i in 0..String.charCount(text)) {
+        if (String.charAt(text, i) == "\n") {
+            Array.push(result, String.substring(text, start, i - start)); start = i + 1;
+        }
+    }
+    return result;
+}
+func guardName(line) {
+    // "// VK_VERSION_1_1 is a preprocessor guard. Do not pass it to API calls."
+    var end = String.indexOf(line, " is a preprocessor guard.");
+    if (!starts(line, "// VK_") || end < 0) { return ""; }
+    return String.substring(line, 3, end - 3);
+}
+// The macro a "#define NAME value" line defines.
+func defineName(line) {
+    var rest = String.substring(line, 8, -1);
+    var end = 0;
+    while (end < String.charCount(rest) && String.charAt(rest, end) != " " && String.charAt(rest, end) != "\t") { end = end + 1; }
+    return String.substring(rest, 0, end);
+}
+// Whether the maintained headers already declare what a line starts.
+func declared(existing, line) {
+    if (starts(line, "#define ")) {
+        var name = defineName(line);
+        return String.indexOf(existing, "#define " + name + " ") >= 0 || String.indexOf(existing, "#define " + name + "\t") >= 0;
+    }
+    return String.indexOf(existing, line + "\n") >= 0;
+}
+func main(args) {
+    if (Array.size(args) != 2) { System.error("usage: maintain-core11.noct VULKAN_CORE_1_4_309_H OUTPUT_HEADER"); }
+    var input = FileUtil.readText(args[0]);
+    if (String.indexOf(input, "#define VK_HEADER_VERSION 309\n") < 0) { System.error("expected the Vulkan-Headers 1.4.309 declaration data"); }
+    var existing = FileUtil.readText("include/libc/vulkan/vulkan_core.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h") + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h");
+    var source = lines(input);
+    var body = ""; var section = ""; var blank = true;
+    var inBlock = false; var skipBlock = false; var inCommand = false;
+    var selected = 0; var skipped = 0; var commands = 0; var types = 0;
+    for (i in 0..Array.size(source)) {
+        var line = source[i];
+        var guard = guardName(line);
+        if (guard != "") { section = guard; }
+        if (section != "VK_VERSION_1_1") { continue; }
+
+        // An enumeration or a structure: kept or dropped as a whole.
+        if (inBlock) {
+            if (!skipBlock) { body = body + line + "\n"; }
+            if (starts(line, "}")) { inBlock = false; }
+            continue;
+        }
+        if (starts(line, "typedef struct ") || starts(line, "typedef enum ")) {
+            if (!ends(line, " {")) { System.error("unexpected declaration: " + line); }
+            inBlock = true; skipBlock = declared(existing, line);
+            if (skipBlock) { skipped = skipped + 1; } else { selected = selected + 1; types = types + 1; body = body + line + "\n"; blank = false; }
+            continue;
+        }
+
+        // A command prototype, which no maintained header declares under its core name.
+        if (starts(line, "VKAPI_ATTR ")) { inCommand = true; commands = commands + 1; }
+        if (inCommand) {
+            body = body + line + "\n"; blank = false;
+            if (ends(line, ");")) { inCommand = false; }
+            continue;
+        }
+
+        // A one-line declaration: a type alias, a flags type, a handle or a macro.
+        if ((starts(line, "typedef ") && String.indexOf(line, "(VKAPI_PTR") < 0) || starts(line, "#define ") || starts(line, "VK_DEFINE_")) {
+            if (declared(existing, line)) { skipped = skipped + 1; continue; }
+            selected = selected + 1;
+        }
+
+        // Everything else (function pointer types, the prototype guards, comments) as it stands, one blank line at a time.
+        if (line == "") {
+            if (blank) { continue; }
+            blank = true;
+        } else {
+            blank = false;
+        }
+        body = body + line + "\n";
+    }
+    if (commands != 28 || types != 52 || skipped != 39) {
+        System.error("unexpected selected declarations: " + types + " enumerations and structures, " + selected + " declarations, " + skipped + " already declared, " + commands + " commands");
+    }
+    var preamble = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * The zedBSD selection, formatting and additions in this file are Zlib.\n */\n\n/*\n * This file is a derived work of the Khronos Vulkan-Headers\n * (the Vulkan 1.1 core).\n * The Vulkan API declarations it contains are:\n * Copyright 2015-2025 The Khronos Group Inc.\n *\n * SPDX-License-Identifier: Apache-2.0\n *\n * See API-PROVENANCE.md and LICENSE-API for the pinned declaration source.\n */\n\n#ifndef VULKAN_CORE11_H_\n#define VULKAN_CORE11_H_ 1\n\n#include \"vulkan_core.h\"\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
+    FileUtil.writeText(args[1], preamble + body + "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
+    print("maintained " + commands + " Vulkan 1.1 commands, " + types + " enumerations and structures, " + skipped + " declarations already maintained");
+}

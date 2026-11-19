@@ -839,6 +839,69 @@ vulkan_command_pending_refused(
 #include "commands-generated.inc"
 
 /*
+ * Records vkCmdDispatchBase.  A dispatch from the base 0 is an ordinary
+ * dispatch, which every renderer runs; another base goes to the renderer as
+ * its own command (only a device that names Vulkan 1.1 offers it).
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkCmdDispatchBase(
+	VkCommandBuffer commandBuffer,
+	uint32_t baseGroupX,
+	uint32_t baseGroupY,
+	uint32_t baseGroupZ,
+	uint32_t groupCountX,
+	uint32_t groupCountY,
+	uint32_t groupCountZ)
+{
+	struct VkCommandBuffer_T *command;
+	struct vulkan_writer writer;
+	VkBool32 active;
+
+	/* The base 0: the dispatch every renderer knows. */
+	if (baseGroupX == 0 && baseGroupY == 0 && baseGroupZ == 0) {
+		vkCmdDispatch(commandBuffer, groupCountX, groupCountY, groupCountZ);
+		return;
+	}
+
+	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	active = command_record_begin(command, &writer, GPU_OP_CMD_DISPATCH_BASE);
+	if (!active)
+		return;
+
+	/* The base, then the counts. */
+	vulkan_record_u32(&writer, baseGroupX);
+	vulkan_record_u32(&writer, baseGroupY);
+	vulkan_record_u32(&writer, baseGroupZ);
+	vulkan_record_u32(&writer, groupCountX);
+	vulkan_record_u32(&writer, groupCountY);
+	vulkan_record_u32(&writer, groupCountZ);
+
+	/* Retain this complete command independently of caller pointer lifetimes. */
+	command_record_finish(command, &writer);
+
+	/* Succeeded: the command is recorded or its first error is retained by the command buffer. */
+	return;
+}
+
+/*
+ * Sets the device mask of a command buffer.  The device group has one
+ * device, whose mask is 1, so every valid mask is the one already in force.
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkCmdSetDeviceMask(
+	VkCommandBuffer commandBuffer,
+	uint32_t deviceMask)
+{
+	/* Nothing changes on a group of one device. */
+	(void)commandBuffer;
+	(void)deviceMask;
+
+	/* Succeeded: the mask in force is the only one. */
+	return;
+}
+
+/*
  * Starts one ordinary recording call without losing an earlier encoding
  * failure.  The record is encoded straight after the recording's bytes:
  * the writer takes the recording's storage over until

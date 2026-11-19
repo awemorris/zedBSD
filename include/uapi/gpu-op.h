@@ -1773,8 +1773,55 @@ enum gpu_op {
 	GPU_OP_ENUMERATE_INSTANCE_VERSION = 137,
 
 	/*
-	 * vkGetPhysicalDeviceProperties2, asked only for the device's ID
-	 * properties (the device and driver UUIDs that pair shared memory).
+	 * vkCmdDispatchBase.  Number: VK_EXT_command_serialization.xml:176.
+	 * Arguments: [u32 baseGroupX][u32 baseGroupY][u32 baseGroupZ]
+	 * [u32 groupCountX][u32 groupCountY][u32 groupCountZ].
+	 * Sent by: libvulkan/commands.c: vkCmdDispatchBase, only with a
+	 * base other than 0 (a dispatch from 0 is GPU_OP_CMD_DISPATCH) and
+	 * only on a device that names Vulkan 1.1.
+	 * Decoded by: a Venus host.  A native renderer that promises the
+	 * Vulkan 1.1 queries (libvulkan/context.c
+	 * VULKAN_NATIVE_CAPSET_CORE11_QUERIES) decodes it too.
+	 */
+	GPU_OP_CMD_DISPATCH_BASE = 142,
+
+	/*
+	 * vkGetPhysicalDeviceFeatures2, asked for the Vulkan 1.1 features.
+	 * Number: VK_EXT_command_serialization.xml:186.
+	 * Arguments: [physical device][u64 1]
+	 * [u32 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2][u64 1] and the
+	 * headers of the chain, each [u32 sType][u64 1] but the last's
+	 * [u64 0]: MULTIVIEW_FEATURES, 16BIT_STORAGE_FEATURES,
+	 * VARIABLE_POINTERS_FEATURES, PROTECTED_MEMORY_FEATURES,
+	 * SAMPLER_YCBCR_CONVERSION_FEATURES, SHADER_DRAW_PARAMETERS_FEATURES.
+	 * Reply: [number][u64 1] then the same headers, the fields of each
+	 * structure from the last of the chain to the first (shader draw
+	 * parameters 1 u32, sampler YCbCr 1, protected memory 1, variable
+	 * pointers 2, 16-bit storage 4, multiview 3) and VkPhysicalDeviceFeatures
+	 * (no VkResult).
+	 * Sent by: libvulkan/instance.c: physical_load_core11, once at
+	 * discovery, to a Venus host and to a native renderer whose native word
+	 * promises the Vulkan 1.1 queries (bit 3, libvulkan/context.c
+	 * VULKAN_NATIVE_CAPSET_CORE11_QUERIES).
+	 * Decoded by: a Venus host.  No native executor yet: each GPU's lane
+	 * decodes it and the _PROPERTIES2 form below and sets the bit, and the
+	 * device names Vulkan 1.1 when the answers meet the rule
+	 * (libvulkan/version.c).
+	 */
+	GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2 = 147,
+
+	/*
+	 * vkGetPhysicalDeviceProperties2, asked for the device's ID
+	 * properties (the device and driver UUIDs that pair shared memory),
+	 * and in a second form for the Vulkan 1.1 properties: the headers of
+	 * SUBGROUP_PROPERTIES, POINT_CLIPPING_PROPERTIES, MULTIVIEW_PROPERTIES,
+	 * PROTECTED_MEMORY_PROPERTIES and MAINTENANCE_3_PROPERTIES chained as
+	 * GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2 chains its structures; the reply
+	 * carries their fields last to first (maintenance 3: u32 and u64,
+	 * protected memory: u32, multiview: two u32, point clipping: u32,
+	 * subgroup: four u32) and then VkPhysicalDeviceProperties.  The
+	 * second form is sent by libvulkan/instance.c: physical_load_core11 as
+	 * the features form is.
 	 * Number: VK_EXT_command_serialization.xml:188.
 	 * Arguments: [physical device][u64 1]
 	 * [u32 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2][u64 1]

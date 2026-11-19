@@ -1754,8 +1754,8 @@ vulkan_encode_VkDeviceCreateInfo(
 	/* Preserves declared field order using explicit protocol widths and nested encoders. */
 	vulkan_write_u32(writer, record->sType);
 
-	/* No advertised core 1.0 extension adds a chain to this record. */
-	vulkan_write_u64(writer, 0);
+	/* The Vulkan 1.1 feature structures, to a renderer that reads them. */
+	vulkan_encode_device_chain(writer, record->pNext);
 
 	/* Preserves declared field order using explicit protocol widths and nested encoders. */
 	vulkan_write_u32(writer, record->flags);
@@ -4567,8 +4567,8 @@ vulkan_encode_VkRenderPassCreateInfo(
 	/* Preserves declared field order using explicit protocol widths and nested encoders. */
 	vulkan_write_u32(writer, record->sType);
 
-	/* No advertised core 1.0 extension adds a chain to this record. */
-	vulkan_write_u64(writer, 0);
+	/* The Vulkan 1.1 multiview record, to a renderer that reads it. */
+	vulkan_encode_render_pass_chain(writer, record->pNext);
 
 	/* Preserves declared field order using explicit protocol widths and nested encoders. */
 	vulkan_write_u32(writer, record->flags);

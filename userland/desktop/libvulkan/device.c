@@ -37,6 +37,7 @@ vkCreateDevice(
 	struct VkQueue_T *queue;
 	struct vulkan_object *object;
 	const VkDeviceQueueCreateInfo *queue_info;
+	const VkPhysicalDeviceFeatures *features;
 	uint64_t extensions;
 	uint32_t count;
 	uint32_t family;
@@ -52,6 +53,11 @@ vkCreateDevice(
 	if (status != VK_SUCCESS)
 		return status;
 
+	/* The Vulkan 1.1 records chained to the creation, and the core features VkPhysicalDeviceFeatures2 carries. */
+	status = vulkan_core11_device_check(physical, pCreateInfo, &features);
+	if (status != VK_SUCCESS)
+		return status;
+
 	/* Uses the logical device's allocator, with the instance policy as its fallback. */
 	status = vulkan_object_alloc(sizeof(*device), __alignof__(struct VkDevice_T), VULKAN_OBJECT_DEVICE, &physical->object, physical->object.context, pAllocator, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE, &object);
 	if (status != VK_SUCCESS)
@@ -63,6 +69,8 @@ vkCreateDevice(
 	device->enabled_extensions = extensions;
 	if (pCreateInfo->pEnabledFeatures != NULL)
 		device->enabled_features = *pCreateInfo->pEnabledFeatures;
+	if (features != NULL)
+		device->enabled_features = *features;
 
 	/* A failed private mutex allocation cannot leave an exposed device handle. */
 	mutex_status = pthread_mutex_init(&device->mutex, NULL);
@@ -268,6 +276,7 @@ device_validate(
 	VkBool32 requested[sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)];
 	VkBool32 available[sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)];
 	const VkDeviceQueueCreateInfo *queue;
+	const VkBaseInStructure *chain;
 	uint64_t bits;
 	uint32_t total;
 	uint32_t index;
@@ -288,6 +297,12 @@ device_validate(
 	memset(requested, 0, sizeof(requested));
 	if (info->pEnabledFeatures != NULL)
 		memcpy(requested, info->pEnabledFeatures, sizeof(requested));
+
+	/* Or those of a VkPhysicalDeviceFeatures2 chained instead (core11.c checks there is one place only). */
+	for (chain = info->pNext; chain != NULL; chain = chain->pNext) {
+		if (chain->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+			memcpy(requested, &((const VkPhysicalDeviceFeatures2 *)chain)->features, sizeof(requested));
+	}
 
 	/* Compares requested bits against this device snapshot, preserving caller storage. */
 	memcpy(available, &physical->features, sizeof(available));
@@ -513,6 +528,7 @@ device_create_remote(
 	const VkDeviceCreateInfo *info)
 {
 	VkDeviceCreateInfo create;
+	const VkBaseInStructure *chain;
 	struct vulkan_writer writer;
 	struct vulkan_reader reader;
 	VkResult status;
@@ -521,11 +537,20 @@ device_create_remote(
 
 	/* Local presentation is implemented by this library rather than a native host surface. */
 	create = *info;
-	create.pNext = NULL;
 	create.enabledLayerCount = 0;
 	create.ppEnabledLayerNames = NULL;
 	create.enabledExtensionCount = 0;
 	create.ppEnabledExtensionNames = NULL;
+
+	/*
+	 * The core features go as pEnabledFeatures even when the caller chained
+	 * them in VkPhysicalDeviceFeatures2; of the chain, the encoder forwards
+	 * only the Vulkan 1.1 feature structures, to a renderer that reads them.
+	 */
+	for (chain = info->pNext; chain != NULL; chain = chain->pNext) {
+		if (chain->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+			create.pEnabledFeatures = &((const VkPhysicalDeviceFeatures2 *)chain)->features;
+	}
 
 	/* Preserves real caller feature bits, queue priorities, and family indices. */
 	vulkan_writer_init_for_object(&writer, &device->object);

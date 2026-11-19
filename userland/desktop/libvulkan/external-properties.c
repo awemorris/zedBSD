@@ -57,6 +57,9 @@ vkGetPhysicalDeviceFeatures2KHR(
 		}
 	}
 
+	/* The Vulkan 1.1 feature structures, from what the renderer reported. */
+	vulkan_core11_features(physical, pFeatures->pNext);
+
 	/* Succeeded: the wrapper preserves caller-owned chain links. */
 	return;
 }
@@ -97,6 +100,9 @@ vkGetPhysicalDeviceProperties2KHR(
 		output->deviceNodeMask = identity.deviceNodeMask;
 		output->deviceLUIDValid = identity.deviceLUIDValid;
 	}
+
+	/* The Vulkan 1.1 property structures, from what the renderer reported. */
+	vulkan_core11_properties(physical, pProperties->pNext);
 
 	/* Succeeded: compatible guest contexts observe the same implementation identity. */
 	return;

@@ -19,6 +19,14 @@
 #include <vulkan/vulkan_wayland.h>
 #include "include/libc/vulkan/vulkan_zedbsd.h"
 #include <uapi/gpu-op.h>
+#include "version.h"
+
+/*
+ * The highest Vulkan version the library implements: the instance's
+ * version, and the most a device names (version.c decides each device's
+ * version from its renderer's answers).
+ */
+#define VULKAN_LIBRARY_VERSION		VK_MAKE_VERSION(1, 1, 0)
 
 #if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
 /*
@@ -94,7 +102,8 @@ enum vulkan_object_kind {
 	VULKAN_OBJECT_DISPLAY,
 	VULKAN_OBJECT_DISPLAY_MODE,
 	VULKAN_OBJECT_VIDEO_SESSION,
-	VULKAN_OBJECT_VIDEO_SESSION_PARAMETERS
+	VULKAN_OBJECT_VIDEO_SESSION_PARAMETERS,
+	VULKAN_OBJECT_DESCRIPTOR_UPDATE_TEMPLATE
 };
 
 /* Retains the application callbacks used for one ownership lifetime. */
@@ -139,6 +148,12 @@ struct VkPhysicalDevice_T {
 	VkQueueFamilyProperties *queue_families;
 	uint32_t queue_family_count;
 	uint64_t supported_extensions;
+	/*
+	 * What the renderer reports of the Vulkan 1.1 core (reported VK_FALSE
+	 * when it was not asked or did not answer), and the version the device
+	 * names from it, which properties.apiVersion holds.
+	 */
+	struct vulkan_core11_facts core11;
 	/*
 	 * The video codec operations of each queue family, by family index.
 	 * They are asked of the renderer once, and only when its native word
@@ -224,6 +239,11 @@ struct vulkan_writer {
 	VkResult error;
 	VkBool32 refusable;
 	struct vulkan_queue_job *job;
+	/*
+	 * The renderer reads the Vulkan 1.1 structures chained to a device or
+	 * render pass creation (its context's core11_queries; core11.c).
+	 */
+	VkBool32 core11_chains;
 };
 
 /*
@@ -590,6 +610,14 @@ struct vulkan_context {
 	 * returns (EAGAIN while earlier work of the session is queued).
 	 */
 	VkBool32 sync_command;
+	/*
+	 * The renderer answers vkGetPhysicalDeviceFeatures2 and
+	 * vkGetPhysicalDeviceProperties2 with the Vulkan 1.1 structures
+	 * chained (instance.c: physical_load_core11): a Venus host always
+	 * (it is Vulkan 1.1 or later), a native renderer when its native word
+	 * promises it.
+	 */
+	VkBool32 core11_queries;
 	uint64_t max_resource_bytes;
 	uint32_t capabilities;
 	uint64_t stream_handle;
@@ -630,12 +658,20 @@ enum vulkan_entry_scope {
 	VULKAN_ENTRY_PHYSICAL
 };
 
+/*
+ * The core version a command belongs to: a command of Vulkan 1.1 is
+ * visible only where that version is in effect (dispatch.c).
+ */
+#define VULKAN_CORE_1_0			VK_MAKE_VERSION(1, 0, 0)
+#define VULKAN_CORE_1_1			VK_MAKE_VERSION(1, 1, 0)
+
 /* Describes a callable name without advertising unimplemented capabilities. */
 struct vulkan_entrypoint {
 	const char *name;
 	PFN_vkVoidFunction function;
 	uint32_t scope;
 	uint64_t extension;
+	uint32_t version;
 };
 
 /* Handles from standard public types are converted in exactly one place. */
@@ -927,6 +963,40 @@ VkBool32
 vulkan_device_extension(
 	struct VkDevice_T *device,
 	uint64_t bits);
+
+uint32_t
+vulkan_instance_version(
+	struct VkInstance_T *instance);
+
+void
+vulkan_core11_features(
+	struct VkPhysicalDevice_T *physical,
+	VkBaseOutStructure *chain);
+
+void
+vulkan_core11_properties(
+	struct VkPhysicalDevice_T *physical,
+	VkBaseOutStructure *chain);
+
+VkResult
+vulkan_core11_device_check(
+	struct VkPhysicalDevice_T *physical,
+	const VkDeviceCreateInfo *info,
+	const VkPhysicalDeviceFeatures **features);
+
+void
+vulkan_encode_device_chain(
+	struct vulkan_writer *writer,
+	const void *chain);
+
+void
+vulkan_encode_render_pass_chain(
+	struct vulkan_writer *writer,
+	const void *chain);
+
+uint32_t
+vulkan_device_version(
+	struct VkDevice_T *device);
 
 void
 vulkan_command_begin(

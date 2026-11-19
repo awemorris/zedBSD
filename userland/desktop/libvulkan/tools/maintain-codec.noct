@@ -163,6 +163,10 @@ func emit(records, handles, record, decode) {
         if (pointer && member == "pNext") {
             if (!decode && name == "VkImageCreateInfo") {
                 output = output + "\n\t/* WSI may request renderer-exportable image storage through a private chain. */\n\tvulkan_encode_image_external(writer, record->pNext);\n";
+            } else if (!decode && name == "VkDeviceCreateInfo") {
+                output = output + "\n\t/* The Vulkan 1.1 feature structures, to a renderer that reads them. */\n\tvulkan_encode_device_chain(writer, record->pNext);\n";
+            } else if (!decode && name == "VkRenderPassCreateInfo") {
+                output = output + "\n\t/* The Vulkan 1.1 multiview record, to a renderer that reads it. */\n\tvulkan_encode_render_pass_chain(writer, record->pNext);\n";
             } else if (!decode && name == "VkBufferCreateInfo") {
                 output = output + "\n\t/* Allocation sharing may request renderer-exportable buffer storage. */\n\tvulkan_encode_buffer_external(writer, record->pNext);\n";
             } else {

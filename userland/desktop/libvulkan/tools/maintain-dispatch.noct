@@ -19,10 +19,10 @@ func lines(text) {
 }
 func main(args) {
     if (Array.size(args) != 2) { System.error("usage: maintain-dispatch.noct PUBLIC_HEADER OUTPUT_DIRECTORY"); }
-    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h"));
+    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h") + FileUtil.readText("include/libc/vulkan/vulkan_core11.h"));
     var banner = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n";
     var table = banner + "/*\n * Maintained declaration metadata, see include/libc/vulkan/API-PROVENANCE.md.\n */\n\n";
-    var manifest = "name\tscope\textension\n"; var extension = "0"; var count = 0;
+    var manifest = "name\tscope\textension\tversion\n"; var extension = "0"; var version = "VULKAN_CORE_1_0"; var count = 0;
     for (i in 0..Array.size(source)) {
         var line = trim(source[i]);
         if (line == "#define VK_KHR_wayland_surface 1") { extension = "VULKAN_INSTANCE_WAYLAND"; }
@@ -45,6 +45,8 @@ func main(args) {
         if (line == "#define VK_EXT_display_surface_counter 1") { extension = "VULKAN_INSTANCE_SURFACE_COUNTER"; }
         if (line == "#define VK_EXT_display_control 1") { extension = "VULKAN_DEVICE_DISPLAY_CONTROL"; }
         if (line == "#define VK_KHR_get_display_properties2 1") { extension = "VULKAN_INSTANCE_DISPLAY_PROPERTIES2"; }
+        // The Vulkan 1.1 core, read last: its commands need no extension but the version.
+        if (line == "#define VK_VERSION_1_1 1") { extension = "0"; version = "VULKAN_CORE_1_1"; }
         var at = String.indexOf(line, "(VKAPI_PTR *PFN_vk");
         if (at < 0) { continue; }
         var rest = String.substring(line, at + 16, -1);
@@ -56,13 +58,13 @@ func main(args) {
         var scope = "VULKAN_ENTRY_INSTANCE";
         if (starts(arguments, "VkDevice ") || starts(arguments, "VkQueue ") || starts(arguments, "VkCommandBuffer ")) { scope = "VULKAN_ENTRY_DEVICE"; }
         if (scope == "VULKAN_ENTRY_INSTANCE" && starts(extension, "VULKAN_DEVICE_")) { scope = "VULKAN_ENTRY_PHYSICAL"; }
-        if (name == "vkCreateInstance" || name == "vkEnumerateInstanceExtensionProperties" || name == "vkEnumerateInstanceLayerProperties" || name == "vkGetInstanceProcAddr") { scope = "VULKAN_ENTRY_GLOBAL"; }
-        table = table + "\t{\"" + name + "\", (PFN_vkVoidFunction)" + name + ", " + scope + ", " + extension + "},\n";
-        manifest = manifest + name + "\t" + scope + "\t" + extension + "\n";
+        if (name == "vkCreateInstance" || name == "vkEnumerateInstanceExtensionProperties" || name == "vkEnumerateInstanceLayerProperties" || name == "vkEnumerateInstanceVersion" || name == "vkGetInstanceProcAddr") { scope = "VULKAN_ENTRY_GLOBAL"; }
+        table = table + "\t{\"" + name + "\", (PFN_vkVoidFunction)" + name + ", " + scope + ", " + extension + ", " + version + "},\n";
+        manifest = manifest + name + "\t" + scope + "\t" + extension + "\t" + version + "\n";
         count = count + 1;
     }
-    if (count != 204) { System.error("expected 204 public command records, got " + count); }
+    if (count != 232) { System.error("expected 232 public command records, got " + count); }
     FileUtil.writeText(args[1] + "/dispatch-table.inc", table);
     FileUtil.writeText(args[1] + "/api-commands.tsv", manifest);
-    print("maintained 204 dispatch records");
+    print("maintained 232 dispatch records");
 }
