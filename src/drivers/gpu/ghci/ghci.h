@@ -77,8 +77,9 @@
 #define GHCI_FENCE_PAGE_BYTES		GHCI_PAGE_BYTES
 
 /*
- * The buffer CMD_QUERY_CAPS writes the capability block to: a page, four
- * times the 768 bytes of the first version, read once at the start.
+ * The buffer CMD_QUERY_CAPS writes the capability block to: a page, read
+ * once at the start, of which the command is asked to write the 768
+ * bytes of the block (GHCI_CAPS_BLOCK_BYTES, the most it may be asked).
  */
 #define GHCI_CAPS_ANSWER_BYTES		GHCI_PAGE_BYTES
 #define GHCI_CAPS_ANSWER_DWORDS		(GHCI_CAPS_ANSWER_BYTES / 4U)

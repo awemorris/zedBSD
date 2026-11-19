@@ -11,12 +11,18 @@
  * format properties, and the list of what a Vulkan 1.0 device should have
  * and this one lacks.
  *
- * The device always calls itself Vulkan 1.0.  Where the hardware cannot
- * reach a minimum of Vulkan 1.0, the executor answers what the hardware
- * has, says so in the attach's log, and refuses the operation that would
- * need more when it is asked for.  Every answer depends on struct
- * ghci_caps (and the format table) only, through ghci_caps_has(), so a
- * host test asks each one of a profile directly.
+ * The device always calls itself Vulkan 1.0, which does not promise that
+ * it is a Vulkan 1.0 implementation.  Where the hardware cannot reach a
+ * minimum of Vulkan 1.0 that the answers cannot show as absent, the
+ * executor draws it in a way of its own (the linear filter as the
+ * nearest texel where the texture unit cannot filter); where it has none,
+ * the executor answers what the hardware has and refuses the operation
+ * that would need more when it is asked for.  Both are named in the
+ * attach's log.  The optional stages (the geometry shader and
+ * tessellation) are named only where the device has them and the
+ * compiler builds them.  Every answer depends on struct ghci_caps (and
+ * the format table) only, through ghci_caps_has(), so a host test asks
+ * each one of a profile directly.
  */
 
 #include <stddef.h>
@@ -103,6 +109,35 @@
 /* The nanoseconds of a second, for the timestamp's period. */
 #define NANOSECONDS			1000000000U
 
+/*
+ * The optional shader stages (GHCI_STAGE_* of the capability block) the
+ * shader compiler builds and the executor draws with: none yet, so no
+ * device names the geometry shader or tessellation.
+ */
+#define COMPILED_STAGES			0U
+
+/*
+ * The limits of the geometry shader and tessellation stages that the
+ * capability block does not carry: the same on every device that has
+ * the stages.  The control stage's total output and the evaluation
+ * stage's output are not given, and are Vulkan 1.0's least.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.4,
+ * the note on the stage limits not encoded in word 20); the Vulkan 1.0
+ * specification (section 31.2, Required Limits:
+ * maxTessellationControlTotalOutputComponents 2048,
+ * maxTessellationEvaluationOutputComponents 64).
+ */
+#define LIMIT_GS_INPUT_COMPONENTS	64U
+#define LIMIT_GS_OUTPUT_COMPONENTS	64U
+#define LIMIT_GS_TOTAL_COMPONENTS	1024U
+#define LIMIT_TCS_VERTEX_INPUT		64U
+#define LIMIT_TCS_VERTEX_OUTPUT		64U
+#define LIMIT_TCS_PATCH_OUTPUT		128U
+#define LIMIT_TCS_TOTAL_OUTPUT		2048U
+#define LIMIT_TES_INPUT_COMPONENTS	64U
+#define LIMIT_TES_OUTPUT_COMPONENTS	64U
+
 /* What one required format needs on optimal tiling (a format Vulkan 1.0 requires, and the features). */
 struct required_format {
 	uint32_t format;
@@ -145,6 +180,7 @@ ghci_vk_caps_features(
 	int blend;
 	int etc2;
 	int srgb;
+	uint32_t stages;
 
 	/* Every feature not named below is false. */
 	kern_memset(features, 0, sizeof(*features));
@@ -182,6 +218,13 @@ ghci_vk_caps_features(
 	srgb = ghci_caps_has(caps, GHCI_HAS_SRGB);
 	if (etc2 && srgb)
 		features->textureCompressionETC2 = VK_TRUE;
+
+	/* The geometry shader and tessellation, where the device has them and the compiler builds them. */
+	stages = ghci_vk_caps_stages(caps, COMPILED_STAGES);
+	if ((stages & GHCI_STAGE_GEOMETRY_SHADER) != 0U)
+		features->geometryShader = VK_TRUE;
+	if ((stages & GHCI_STAGE_TESSELLATION) != 0U)
+		features->tessellationShader = VK_TRUE;
 }
 
 /*
@@ -203,6 +246,7 @@ ghci_vk_caps_limits(
 	int array;
 	int volume;
 	int cube;
+	uint32_t stages;
 
 	/* What the capability block decides. */
 	kern_memset(limits, 0, sizeof(*limits));
@@ -263,7 +307,7 @@ ghci_vk_caps_limits(
 	limits->maxDescriptorSetStorageImages = LIMIT_SET_STORAGE_IMAGES;
 	limits->maxDescriptorSetInputAttachments = LIMIT_INPUT_ATTACHMENTS;
 
-	/* Vertex input, the varyings and the fragment outputs; no tessellation, no geometry. */
+	/* Vertex input, the varyings and the fragment outputs (the geometry and tessellation stages below). */
 	limits->maxVertexInputAttributes = LIMIT_ATTRIBUTES;
 	limits->maxVertexInputBindings = LIMIT_ATTRIBUTES;
 	limits->maxVertexInputAttributeOffset = LIMIT_ATTRIBUTE_OFFSET;
@@ -356,6 +400,10 @@ ghci_vk_caps_limits(
 	limits->optimalBufferCopyOffsetAlignment = LIMIT_ROW_ALIGN;
 	limits->optimalBufferCopyRowPitchAlignment = LIMIT_ROW_ALIGN;
 	limits->nonCoherentAtomSize = LIMIT_ROW_ALIGN;
+
+	/* The geometry and tessellation stages' limits, of the stages named (0 for the others). */
+	stages = ghci_vk_caps_stages(caps, COMPILED_STAGES);
+	ghci_vk_caps_stage_limits(caps, stages, limits);
 }
 
 /*
@@ -603,9 +651,10 @@ ghci_vk_caps_features_within(
 
 /*
  * Lists, for the attach's log, what Vulkan 1.0 requires and this device
- * lacks; the executor refuses the operations that would need it when
- * they are asked for.  Returns the number of names written to names (at
- * most capacity).
+ * lacks: the executor draws it in a way of its own where the name says
+ * so, and otherwise refuses the operations that would need it when they
+ * are asked for.  Returns the number of names written to names (at most
+ * capacity).
  */
 unsigned
 ghci_vk_caps_shortfalls(
@@ -653,17 +702,18 @@ ghci_vk_caps_shortfalls(
 	}
 
 	/*
-	 * Without the bilinear filter no format filters, where Vulkan
-	 * requires the linear filter of some.  (A GPU without the polygon
-	 * clipper loses the primitives that cross the near plane; that is
-	 * the build's choice and is not listed.)
+	 * Without the bilinear filter the formats Vulkan requires to filter
+	 * still say they do, and the linear filter is drawn as the nearest
+	 * texel.  (A GPU without the polygon clipper loses the primitives
+	 * that cross the near plane; that is the build's choice and is not
+	 * listed.)
 	 *
-	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section
 	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR).
 	 */
 	bilinear = ghci_caps_has(caps, GHCI_HAS_TU_BILINEAR);
 	if (!bilinear) {
-		found[count] = "linear texture filtering (CAP_TU_BILINEAR)";
+		found[count] = "linear texture filtering (CAP_TU_BILINEAR): drawn as the nearest texel";
 		count++;
 	}
 
@@ -690,7 +740,7 @@ ghci_vk_caps_shortfalls(
 	}
 	if (bilinear) {
 		if (!trilinear) {
-			found[count] = "linear filtering between mip levels (CAP_TEX_TRILINEAR)";
+			found[count] = "linear filtering between mip levels (CAP_TEX_TRILINEAR): drawn as the nearest level";
 			count++;
 		}
 	}
@@ -769,6 +819,82 @@ ghci_vk_caps_blitter(
 
 	/* Succeeded: the blitter takes the transfers. */
 	return 1;
+}
+
+/*
+ * Reports the optional shader stages the device names (GHCI_STAGE_*):
+ * the geometry shader and tessellation it has that are also in compiled,
+ * the stages the shader compiler builds.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.4,
+ * SHADER_STAGES [2] VkPhysicalDeviceFeatures::geometryShader and [3]
+ * tessellationShader).
+ */
+uint32_t
+ghci_vk_caps_stages(
+	const struct ghci_caps *caps,
+	uint32_t compiled)
+{
+	uint32_t stages;
+	int geometry;
+	int tessellation;
+
+	/* The stages the device has (none where its shared memory is below what they need). */
+	geometry = ghci_caps_has(caps, GHCI_HAS_GEOMETRY_SHADER);
+	tessellation = ghci_caps_has(caps, GHCI_HAS_TESSELLATION);
+	stages = 0U;
+	if (geometry)
+		stages |= GHCI_STAGE_GEOMETRY_SHADER;
+	if (tessellation)
+		stages |= GHCI_STAGE_TESSELLATION;
+
+	/* Succeeded: those the compiler also builds. */
+	return stages & compiled;
+}
+
+/*
+ * Fills the limits of the geometry shader and tessellation stages named
+ * in stages (GHCI_STAGE_*, as ghci_vk_caps_stages() reports them): word
+ * 20 of the capability block and the limits every such device shares.
+ * The limits of a stage not named are left as they are (0 from
+ * ghci_vk_caps_limits()).
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.4,
+ * STAGE_LIMITS [8:0] maxGeometryOutputVertices, [14:9]
+ * maxGeometryShaderInvocations, [20:15] maxTessellationPatchSize,
+ * [27:21] maxTessellationGenerationLevel).
+ */
+void
+ghci_vk_caps_stage_limits(
+	const struct ghci_caps *caps,
+	uint32_t stages,
+	VkPhysicalDeviceLimits *limits)
+{
+	uint32_t word;
+
+	/* The block's word of the stage limits. */
+	word = caps->stage_limits;
+
+	/* The geometry shader's: its vertices and invocations, and the components every such device has. */
+	if ((stages & GHCI_STAGE_GEOMETRY_SHADER) != 0U) {
+		limits->maxGeometryOutputVertices = word & GHCI_LIMIT_GS_VERTICES_MASK;
+		limits->maxGeometryShaderInvocations = (word >> GHCI_LIMIT_GS_INVOCATIONS_SHIFT) & GHCI_LIMIT_GS_INVOCATIONS_MASK;
+		limits->maxGeometryInputComponents = LIMIT_GS_INPUT_COMPONENTS;
+		limits->maxGeometryOutputComponents = LIMIT_GS_OUTPUT_COMPONENTS;
+		limits->maxGeometryTotalOutputComponents = LIMIT_GS_TOTAL_COMPONENTS;
+	}
+
+	/* Tessellation's: the patch size and the level, and the components every such device has. */
+	if ((stages & GHCI_STAGE_TESSELLATION) != 0U) {
+		limits->maxTessellationPatchSize = (word >> GHCI_LIMIT_PATCH_SIZE_SHIFT) & GHCI_LIMIT_PATCH_SIZE_MASK;
+		limits->maxTessellationGenerationLevel = (word >> GHCI_LIMIT_TESS_LEVEL_SHIFT) & GHCI_LIMIT_TESS_LEVEL_MASK;
+		limits->maxTessellationControlPerVertexInputComponents = LIMIT_TCS_VERTEX_INPUT;
+		limits->maxTessellationControlPerVertexOutputComponents = LIMIT_TCS_VERTEX_OUTPUT;
+		limits->maxTessellationControlPerPatchOutputComponents = LIMIT_TCS_PATCH_OUTPUT;
+		limits->maxTessellationControlTotalOutputComponents = LIMIT_TCS_TOTAL_OUTPUT;
+		limits->maxTessellationEvaluationInputComponents = LIMIT_TES_INPUT_COMPONENTS;
+		limits->maxTessellationEvaluationOutputComponents = LIMIT_TES_OUTPUT_COMPONENTS;
+	}
 }
 
 /*

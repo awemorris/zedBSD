@@ -1096,6 +1096,8 @@ int ghci_vk_caps_features_within(const struct ghci_caps *caps, const VkPhysicalD
 unsigned ghci_vk_caps_shortfalls(const struct ghci_caps *caps, const struct ghci_vk_formats *formats, const char **names, unsigned capacity);
 int ghci_vk_caps_blitter(const struct ghci_caps *caps);
 int ghci_vk_caps_presentable(const struct ghci_vk_formats *formats);
+uint32_t ghci_vk_caps_stages(const struct ghci_caps *caps, uint32_t compiled);
+void ghci_vk_caps_stage_limits(const struct ghci_caps *caps, uint32_t stages, VkPhysicalDeviceLimits *limits);
 
 /* vk-format.c: the formats the hardware takes, and their features. */
 int ghci_vk_format_size(uint32_t format, uint32_t *bytes, uint32_t *block);

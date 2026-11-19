@@ -21,7 +21,7 @@
 #include "ghci-regs.h"
 
 /* The pairs of a DEVICE_CAPS bit and a copy of it in another word. */
-#define MIRROR_PAIRS			3U
+#define MIRROR_PAIRS			5U
 
 /* The VA_BITS of the 2-level walk; a wider VA has the 3-level walk. */
 #define VA_BITS_32			32U
@@ -49,14 +49,17 @@ struct caps_mirror {
 /*
  * The DEVICE_CAPS bits and their mirrors.
  *
- * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section 3.2.2,
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.2,
  * EXT_CAP_FEATURE CAP_DUAL_SOURCE [8] and CAP_FP16 [28]; EXT_CAP_FMT0
- * CAP_FFILT_FP16 [10], which is CAP_TEX_FFILT).
+ * CAP_FFILT_FP16 [10], which is CAP_TEX_FFILT; section 3.2.4,
+ * SHADER_STAGES [0] and [1], which mirror DEVICE_CAPS[27] and [28]).
  */
 static const struct caps_mirror caps_mirrors[MIRROR_PAIRS] = {
 	{ GHCI_CAP_DUAL_SOURCE, GHCI_CAPS_WORD_FEATURE, GHCI_FEATURE_DUAL_SOURCE },
 	{ GHCI_CAP_FP16, GHCI_CAPS_WORD_FEATURE, GHCI_FEATURE_FP16 },
-	{ GHCI_CAP_TEX_FFILT, GHCI_CAPS_WORD_FMT0, GHCI_FMT0_FFILT_FP16 }
+	{ GHCI_CAP_TEX_FFILT, GHCI_CAPS_WORD_FMT0, GHCI_FMT0_FFILT_FP16 },
+	{ GHCI_CAP_TASK_SHADER, GHCI_CAPS_WORD_SHADER_STAGES, GHCI_STAGE_TASK_SHADER },
+	{ GHCI_CAP_MESH_SHADER, GHCI_CAPS_WORD_SHADER_STAGES, GHCI_STAGE_MESH_SHADER }
 };
 
 static uint32_t window_word(const uint32_t *window, uint32_t offset);
@@ -64,6 +67,8 @@ static void decode_memory(const uint32_t *window, struct ghci_caps *caps);
 static int block_layout(const uint32_t *words, uint32_t dwords, uint32_t *first, uint32_t *count);
 static void decode_words(const uint32_t *words, struct ghci_caps *caps);
 static void check_copies(struct ghci_caps *caps);
+static void check_stages(struct ghci_caps *caps);
+static uint32_t mirror_word(const struct ghci_caps *caps, uint32_t word);
 static int bit_disagrees(uint32_t authority, uint32_t copy);
 
 /*
@@ -117,8 +122,8 @@ ghci_caps_boot(
 	/*
 	 * The one capability register and the widths it encodes.
 	 *
-	 * Values referenced: amaterrace-gpu ea5d39c1 include/ghci_regs.h
-	 * (BOOT_CAPS [11:8] VA_BITS - 30, [15:12] PA_BITS - 40).
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.0,
+	 * BOOT_CAPS [11:8] VA_BITS - 30, [15:12] PA_BITS - 40).
 	 */
 	caps->boot_caps = window_word(window, GHCI_REG_BOOT_CAPS);
 	caps->va_bits = GHCI_BOOT_VA_BITS_BASE + ((caps->boot_caps >> GHCI_BOOT_VA_BITS_SHIFT) & GHCI_BOOT_BITS_MASK);
@@ -175,6 +180,9 @@ ghci_caps_block(
 
 	/* The copies of one fact in two words, for the log. */
 	check_copies(caps);
+
+	/* The optional stages the shared memory cannot hold, taken as absent. */
+	check_stages(caps);
 
 	/* The words past BOOT_CAPS now answer ghci_caps_has(); before, they read as absent. */
 	caps->block_read = 1;
@@ -302,6 +310,19 @@ ghci_caps_has(
 		/* The linear filter between two mip levels needs the filter within one. */
 		bit = caps->fmt0 & GHCI_FMT0_TEX_TRILINEAR;
 		if ((caps->fmt0 & GHCI_FMT0_TU_BILINEAR) == 0U)
+			bit = 0U;
+		break;
+	case GHCI_HAS_GEOMETRY_SHADER:
+		/* A stage the shared memory cannot hold is in stages_dropped, not here. */
+		bit = caps->shader_stages & ~caps->stages_dropped & GHCI_STAGE_GEOMETRY_SHADER;
+		break;
+	case GHCI_HAS_TESSELLATION:
+		bit = caps->shader_stages & ~caps->stages_dropped & GHCI_STAGE_TESSELLATION;
+		break;
+	case GHCI_HAS_STREAM_OUT:
+		/* The stream output of a geometry shader needs the geometry shader. */
+		bit = caps->shader_stages & GHCI_STAGE_STREAM_OUT;
+		if ((caps->shader_stages & ~caps->stages_dropped & GHCI_STAGE_GEOMETRY_SHADER) == 0U)
 			bit = 0U;
 		break;
 	default:
@@ -614,8 +635,8 @@ block_layout(
 	 * Version 1 or later; a later version keeps every word of version 1
 	 * where it is.  The size counts dwords in whole 64-byte lines.
 	 *
-	 * Values referenced: amaterrace-gpu ea5d39c1 rtl/gpu/cp/atg_cp_caps.v
-	 * (BLOCK_INFO: [15:0] version 1, [31:16] BLOCK_DWORDS 192).
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.5,
+	 * BLOCK_INFO: [15:0] version 1, [31:16] the dwords, 192).
 	 */
 	version = words[GHCI_CAPS_WORD_INFO] & GHCI_CAPS_VERSION_MASK;
 	size = words[GHCI_CAPS_WORD_INFO] >> GHCI_CAPS_DWORDS_SHIFT;
@@ -661,6 +682,8 @@ decode_words(
 	caps->prot_caps = words[GHCI_CAPS_WORD_PROT_CAPS];
 	caps->perf_src = words[GHCI_CAPS_WORD_PERF_SRC];
 	caps->extcap_present = words[GHCI_CAPS_WORD_EXTCAP_PRESENT];
+	caps->shader_stages = words[GHCI_CAPS_WORD_SHADER_STAGES];
+	caps->stage_limits = words[GHCI_CAPS_WORD_STAGE_LIMITS];
 	caps->fmt_limits = words[GHCI_CAPS_WORD_FMT_LIMITS] & GHCI_CAPS_FMT_LIMITS_MASK;
 
 	/* The identification for the log: the PCI-style IDs and the subsystem's two halves. */
@@ -724,11 +747,9 @@ check_copies(
 	if (differs)
 		caps->mismatches |= GHCI_CAP_UMA;
 
-	/* The mirrors of DEVICE_CAPS bits in EXT_CAP_FEATURE and EXT_CAP_FMT0. */
+	/* The mirrors of DEVICE_CAPS bits in EXT_CAP_FEATURE, EXT_CAP_FMT0 and SHADER_STAGES. */
 	for (pair = 0U; pair < MIRROR_PAIRS; pair++) {
-		mirror = caps->feature;
-		if (caps_mirrors[pair].word == GHCI_CAPS_WORD_FMT0)
-			mirror = caps->fmt0;
+		mirror = mirror_word(caps, caps_mirrors[pair].word);
 		differs = bit_disagrees(caps->device_caps & caps_mirrors[pair].device_bit, mirror & caps_mirrors[pair].mirror_bit);
 		if (differs)
 			caps->mismatches |= caps_mirrors[pair].device_bit;
@@ -737,7 +758,7 @@ check_copies(
 	/*
 	 * EXT_CAP_FEATURE's address widths against BOOT_CAPS's.
 	 *
-	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md
+	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md
 	 * (section 3.2.2, VA_BITS = 30 + [3:0], PA_BITS = 40 + [7:4]).
 	 */
 	va_bits = GHCI_FEATURE_VA_BITS_BASE + (caps->feature & GHCI_FEATURE_VA_BITS_MASK);
@@ -746,6 +767,48 @@ check_copies(
 		caps->width_mismatch = 1;
 	if (pa_bits != caps->pa_bits)
 		caps->width_mismatch = 1;
+}
+
+/*
+ * Takes as absent the geometry shader and tessellation of a device whose
+ * shader unit has less shared memory than they need, which the device
+ * should not report; the dropped bits stay in stages_dropped for the log.
+ *
+ * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.4,
+ * CAP_GEOMETRY_SHADER and CAP_TESSELLATION MUST report 0 where
+ * CAP_LDS_SIZE_KB < 16).
+ */
+static void
+check_stages(
+	struct ghci_caps *caps)
+{
+	/* Enough shared memory keeps every stage the device reports. */
+	caps->stages_dropped = 0U;
+	if (caps->lds_bytes >= GHCI_STAGES_LDS_BYTES_MIN)
+		return;
+
+	/* Less drops the stages that need it. */
+	caps->stages_dropped = caps->shader_stages & (GHCI_STAGE_GEOMETRY_SHADER | GHCI_STAGE_TESSELLATION);
+}
+
+/* Reads the decoded copy of a capability word that mirrors DEVICE_CAPS bits. */
+static uint32_t
+mirror_word(
+	const struct ghci_caps *caps,
+	uint32_t word)
+{
+	/* Picks the word by its position in the block. */
+	switch (word) {
+	case GHCI_CAPS_WORD_FMT0:
+		return caps->fmt0;
+	case GHCI_CAPS_WORD_SHADER_STAGES:
+		return caps->shader_stages;
+	default:
+		break;
+	}
+
+	/* Succeeded: EXT_CAP_FEATURE, the word of the other mirrors. */
+	return caps->feature;
 }
 
 /* Reports whether a copy of a bit says otherwise than its authority. */

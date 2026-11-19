@@ -339,8 +339,8 @@ ghci_cp_query_caps(
 	uint32_t index;
 	int error;
 
-	/* The command, for the whole buffer. */
-	written = ghci_cmd_query_caps(packet, device->caps_answer->bus, GHCI_CAPS_ANSWER_BYTES);
+	/* The command, for the block's bytes at the start of the buffer (the rest of it is not written). */
+	written = ghci_cmd_query_caps(packet, device->caps_answer->bus, GHCI_CAPS_BLOCK_BYTES);
 	if (written == 0U)
 		return EIO;
 
