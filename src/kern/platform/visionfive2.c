@@ -87,6 +87,7 @@
 #include <drivers/platform/visionfive2/vf2-syscon.h>
 #include <drivers/serial/ns16550.h>
 #include <kern/boot.h>
+#include <kern/device-io.h>
 #include <kern/disk.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
@@ -104,6 +105,30 @@
 
 /* The bytes of one pixel of the screen the hardware layer names. */
 #define VF2_PIXEL_BYTES		4U
+
+/*
+ * The watchdog the reboot arms as its fallback: its registers, the key
+ * that unlocks them, the bits that start the counter and let its expiry
+ * reset the SoC, and its count, one second of the 24 MHz oscillator (the
+ * SoC resets when the count runs out a second time).
+ *
+ * Values referenced:
+ * Linux v6.12 drivers/watchdog/starfive-wdt.c (starfive_wdt_jh7110_variant:
+ * load 0x0, control 0x8 with the enable in bit 0 and the reset enable in
+ * bit 1, interrupt clear 0xc, lock 0xc00 and its unlock key 0x1acce551;
+ * starfive_wdt_set_timeout: unlock, disable, load, enable, lock; the
+ * counter's clock is the oscillator) and
+ * arch/riscv/boot/dts/starfive/jh7110.dtsi (watchdog@13070000).
+ */
+#define VF2_WDT_LOAD		0x000U
+#define VF2_WDT_CONTROL		0x008U
+#define VF2_WDT_CLEAR		0x00cU
+#define VF2_WDT_LOCK		0xc00U
+#define VF2_WDT_UNLOCK_KEY	0x1acce551U
+#define VF2_WDT_ENABLE		0x1U
+#define VF2_WDT_RESET_ENABLE	0x2U
+#define VF2_WDT_COUNT		24000000U
+#define VF2_WDT_BLOCK_SIZE	0x1000U
 
 /* Marks a parameter that the kernel's platform interface passes but this board does not need. */
 #define UNUSED_PARAMETER(parameter)	((void)(parameter))
@@ -315,6 +340,20 @@ static struct drv_fdt soc_tree;
 static int soc_ready;
 
 /*
+ * The watchdog's registers, which the reboot arms before it asks the
+ * firmware for the reset.
+ *
+ * The firmware on the board (OpenSBI 1.2 of the vendor's) takes the
+ * system reset call and never returns from it, leaving every hart
+ * stopped; the watchdog's reset then restarts the SoC.  Mapped by
+ * prepare_reset_watchdog() on the boot CPU, with the watchdog's clocks on
+ * and its resets released, and kept for the life of the system; NULL
+ * when the tree has no watchdog or it could not be brought up, and the
+ * reboot then relies on the firmware alone.
+ */
+static volatile uint8_t *reset_watchdog;
+
+/*
  * The UART the firmware's console uses (/chosen/stdout-path), mapped by
  * probe_soc() on the boot CPU and kept for the life of the system;
  * console_uart_present says it was found, and neither changes afterwards.
@@ -338,6 +377,8 @@ static struct partition sd_partitions[PARTITION_MAX];
 static int publish_ramdisk(void);
 static void describe_framebuffer(void);
 static void probe_soc(void);
+static void prepare_reset_watchdog(const struct drv_fdt *fdt);
+static void arm_reset_watchdog(void);
 static void describe_clocks(void);
 static void describe_card_detect(const struct drv_fdt *fdt);
 static void attach_sd_card(void);
@@ -562,13 +603,17 @@ kern_platform_poweroff(
 }
 
 /*
- * Reboots the machine through the firmware.
+ * Reboots the machine through the firmware, with the watchdog armed to
+ * reset the SoC when the firmware's reset does not.
  */
 void
 kern_platform_reboot(
 	void)
 {
-	/* Halts in case the reset request returns. */
+	/* Arms the fallback first: the firmware's call may never return. */
+	arm_reset_watchdog();
+
+	/* Halts in case the reset request returns; the watchdog then resets the SoC. */
 	hal_reset();
 	for (;;)
 		hal_halt();
@@ -776,6 +821,9 @@ probe_soc(
 	/* Keeps the tree for the devices brought up after the disk registry is reset. */
 	soc_tree = fdt;
 	soc_ready = 1;
+
+	/* Readies the watchdog the reboot falls back on. */
+	prepare_reset_watchdog(&fdt);
 
 	/* Starts the PCIe root complexes and the USB and NVMe drivers behind them. */
 	error = drv_vf2_pcie_init(&fdt, VF2_DMA_DEFAULT_COHERENT);
@@ -1537,4 +1585,93 @@ start_console(
 	error = drv_boot_fb_register_backend();
 	if (error != 0 && error != ENODEV)
 		kern_logf("graphics: loader framebuffer not offered (%d)\n", error);
+}
+
+/*
+ * Brings the watchdog up as far as the reboot needs it: its bus and
+ * counter clocks on, its two resets released and its registers mapped,
+ * the counter left stopped.  A tree without it, or a step that fails,
+ * leaves reset_watchdog NULL and is logged.
+ */
+static void
+prepare_reset_watchdog(
+	const struct drv_fdt *fdt)
+{
+	struct drv_vf2_clock clock;
+	struct drv_vf2_reset reset;
+	static const char *const clock_names[2] = { "apb", "core" };
+	uint64_t address;
+	uint64_t size;
+	uint32_t node;
+	unsigned position;
+	void *mapped;
+	int error;
+
+	/* Finds the watchdog's node; a tree without one leaves the firmware alone to reboot. */
+	error = drv_fdt_find_compatible(fdt, "starfive,jh7110-wdt", DRV_FDT_NO_NODE, &node);
+	if (error != 0)
+		return;
+
+	/* Reads where its registers are. */
+	error = drv_fdt_reg(fdt, node, 0, &address, &size);
+	if (error != 0 || size < VF2_WDT_BLOCK_SIZE) {
+		kern_logf("visionfive2: watchdog registers unusable (%d)\n", error);
+		return;
+	}
+
+	/* Starts its bus and counter clocks and releases its two resets, in the tree's order. */
+	for (position = 0; position < 2U; position++) {
+		/* Starts the clock the name selects. */
+		error = drv_vf2_clock_lookup(fdt, node, clock_names[position], &clock);
+		if (error == 0)
+			error = drv_vf2_clock_enable(&clock);
+		if (error != 0) {
+			kern_logf("visionfive2: watchdog clock %s unavailable (%d)\n", clock_names[position], error);
+			return;
+		}
+
+		/* Releases the reset at the same position. */
+		error = drv_vf2_reset_lookup_index(fdt, node, position, &reset);
+		if (error == 0)
+			error = drv_vf2_reset_deassert(&reset);
+		if (error != 0) {
+			kern_logf("visionfive2: watchdog reset %u not released (%d)\n", position, error);
+			return;
+		}
+	}
+
+	/* Maps the registers as device memory. */
+	error = kern_device_map(address, VF2_WDT_BLOCK_SIZE, KERN_DEVICE_UNCACHED, &mapped);
+	if (error != 0) {
+		kern_logf("visionfive2: watchdog not mapped (%d)\n", error);
+		return;
+	}
+
+	/* Succeeded: the reboot can arm the watchdog. */
+	reset_watchdog = mapped;
+}
+
+/*
+ * Starts the watchdog so that its expiry resets the SoC about two
+ * seconds later, unless the firmware's reset comes first.
+ */
+static void
+arm_reset_watchdog(
+	void)
+{
+	/* A board whose watchdog did not come up reboots through the firmware alone. */
+	if (reset_watchdog == NULL)
+		return;
+
+	/* Unlocks the registers and stops the counter while it is set. */
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_LOCK), VF2_WDT_UNLOCK_KEY);
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_CONTROL), 0U);
+
+	/* Clears a pending expiry and loads one second's count. */
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_CLEAR), 1U);
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_LOAD), VF2_WDT_COUNT);
+
+	/* Starts the counter with the reset on expiry, then locks the registers again. */
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_CONTROL), VF2_WDT_ENABLE | VF2_WDT_RESET_ENABLE);
+	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_LOCK), ~VF2_WDT_UNLOCK_KEY);
 }

@@ -228,6 +228,16 @@ fork_region(
 	int map_error;
 	int error;
 
+	/*
+	 * A device mapping its driver keeps to the parent leaves the range
+	 * empty in the child.  Sharing it would keep the parent's storage
+	 * mapped until the child execs or exits, and the parent could not
+	 * free it meanwhile.
+	 */
+	if (source_region->device != NULL &&
+	    (source_region->device->attributes & VM_DEVICE_NO_FORK) != 0)
+		return 0;
+
 	/* Copies the region's layout into the child. */
 	error = vmspace_map_region(copy,
 			   source_region->start,

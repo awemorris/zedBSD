@@ -22,6 +22,14 @@
 #define VM_DEVICE_UNCACHED_RAM 2U
 /* MMIO whose user translations write-combine (only together with VM_DEVICE_MMIO). */
 #define VM_DEVICE_WRITE_COMBINE 4U
+/*
+ * The mapping belongs to the address space that made it: a fork leaves its
+ * range empty in the child, as Linux's VM_DONTCOPY does.  A driver asks for
+ * it where the storage is owned by one open session whose release must not
+ * wait for a forked child to exec or exit (a GPU allocation).  It is not a
+ * storage identity and combines with any of the bits above.
+ */
+#define VM_DEVICE_NO_FORK 8U
 
 struct file;
 

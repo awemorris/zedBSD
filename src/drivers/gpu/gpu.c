@@ -5235,6 +5235,13 @@ gpu_mmap(
 	if ((resource->mapping.attributes & DRV_GPU_MAPPING_UNCACHED_RAM) != 0)
 		attributes = VM_DEVICE_UNCACHED_RAM;
 
+	/*
+	 * The mapping stays with the process that made it.  A forked child
+	 * would otherwise keep the resource mapped until it execs, and this
+	 * session could not destroy the resource in the meantime.
+	 */
+	attributes |= VM_DEVICE_NO_FORK;
+
 	/* A successful VM owner consumes the release callback and independently retains the file. */
 	error = vm_device_create(
 		file,

@@ -56,6 +56,7 @@ vm_device_create(
 	struct vm_device_mapping **result)
 {
 	struct vm_device_mapping *mapping;
+	uint32_t storage;
 
 	/* Each successful object must retain both its session and terminal callback. */
 	if (file == NULL ||
@@ -87,15 +88,21 @@ vm_device_create(
 	if (bytes - 1U > UINTPTR_MAX - (uintptr_t)address)
 		return EOVERFLOW;
 
+	/* Rejects bits that name no storage identity, cache policy or fork rule. */
+	if ((attributes & ~(VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM | VM_DEVICE_WRITE_COMBINE | VM_DEVICE_NO_FORK)) != 0)
+		return EINVAL;
+
+	/* The fork rule says nothing about the storage, which the checks below judge alone. */
+	storage = attributes & ~VM_DEVICE_NO_FORK;
+
 	/* MMIO and Normal non-cacheable RAM are mutually exclusive storage identities. */
-	if ((attributes & ~(VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM | VM_DEVICE_WRITE_COMBINE)) != 0 ||
-	    (attributes & (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM)) == (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM))
+	if ((storage & (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM)) == (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM))
 		return EINVAL;
 
 	/* Write-combining is a cache policy of MMIO alone, on a port that has it. */
-	if ((attributes & VM_DEVICE_WRITE_COMBINE) != 0 && attributes != (VM_DEVICE_MMIO | VM_DEVICE_WRITE_COMBINE))
+	if ((storage & VM_DEVICE_WRITE_COMBINE) != 0 && storage != (VM_DEVICE_MMIO | VM_DEVICE_WRITE_COMBINE))
 		return EINVAL;
-	if ((attributes & VM_DEVICE_WRITE_COMBINE) != 0 && VM_DEVICE_WC_SUPPORTED == 0)
+	if ((storage & VM_DEVICE_WRITE_COMBINE) != 0 && VM_DEVICE_WC_SUPPORTED == 0)
 		return ENOTSUP;
 
 	/* The original device open grants only a nonempty subset of read and write. */

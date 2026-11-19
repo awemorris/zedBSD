@@ -466,6 +466,21 @@ static const struct crg_clock sys_clocks[] = {
 	{ 112, CLOCK_GATE | CLOCK_SHARED, 0, 0, 1,
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
 
+	/*
+	 * The watchdog's bus interface and its counter clock (the 24 MHz
+	 * oscillator), which the board's reboot arms as a fallback.
+	 *
+	 * Values referenced:
+	 * Linux v6.12 include/dt-bindings/clock/starfive,jh7110-crg.h
+	 * (JH7110_SYSCLK_WDT_APB 122, JH7110_SYSCLK_WDT_CORE 123) and
+	 * drivers/clk/starfive/clk-starfive-jh7110-sys.c (both gates, the
+	 * counter's fed by the oscillator).
+	 */
+	{ 122, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
+	{ 123, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
+
 	/* The audio PWM converter's bus interface. */
 	{ 157, CLOCK_GATE, 0, 0, 1,
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
