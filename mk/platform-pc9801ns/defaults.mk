@@ -2,9 +2,6 @@ override ARCHITECTURE             := i386
 override BOARD                    := pc98
 
 CONFIG_ROOTFS_DEVELOPMENT         := y
-CONFIG_BOOT_SPLASH                := n
-CONFIG_QUIET_BOOT                 := n
-CONFIG_GRAPHICAL_LOGIN            := y
 
 CONFIG_DRIVER_LOOP                := y
 CONFIG_DRIVER_FS_UFS              := y
