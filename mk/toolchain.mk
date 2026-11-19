@@ -7,7 +7,7 @@
 # Toolchain
 #
 
-include mk/llvm/llvm.mk
+include mk/toolchain-llvm/llvm.mk
 include mk/gcc/gcc.mk
 
 toolchain-cached: toolchain-llvm-cached

@@ -7,6 +7,6 @@
 
 ZEDBSD_REPO_ROOT := $(abspath ../..)
 
-include $(ZEDBSD_REPO_ROOT)/mk/llvm/llvm.mk
+include $(ZEDBSD_REPO_ROOT)/mk/toolchain-llvm/llvm.mk
 
-.DEFAULT_GOAL := build
+.DEFAULT_GOAL := toolchain-llvm
