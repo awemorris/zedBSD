@@ -11,20 +11,60 @@
  */
 
 #include <hal/hal.h>
-#include "../bsp-virt/bsp.h"
 #include "asm.h"
+#include "board.h"
 #include "defs.h"
 #include "int.h"
+#include "space.h"
 #include "task.h"
 
-/* The access-fault frame (format 7): the fault address and the special status word. */
-#define FRAME7_EFFECTIVE_ADDRESS	0
+/*
+ * The access-error frame (format 7), as offsets past its format word: the
+ * special status word, the three write-back status words, the fault
+ * address, and each write-back's address and data.
+ *
+ * Values referenced: M68040 User's Manual (MC68040UM/AD), section 8.4.6
+ * (the format $7 frame, the special status word, the write-back status
+ * format and data alignment, and the order the handler completes the
+ * write-backs in: 1, 2, then 3).
+ */
 #define FRAME7_SPECIAL_STATUS		4
+#define FRAME7_WB3_STATUS		6
+#define FRAME7_WB2_STATUS		8
+#define FRAME7_WB1_STATUS		10
+#define FRAME7_FAULT_ADDRESS		12
+#define FRAME7_WB3_ADDRESS		16
+#define FRAME7_WB3_DATA			20
+#define FRAME7_WB2_ADDRESS		24
+#define FRAME7_WB2_DATA			28
+#define FRAME7_WB1_ADDRESS		32
+#define FRAME7_WB1_DATA			36
 
-/* The special status word's read flag and transfer-modifier field. */
+/* The frame format of an access error. */
+#define FRAME_FORMAT_ACCESS		7U
+
+/* The special status word's fault flag, read flag and transfer-modifier field. */
+#define SSW_ATC				0x0400
 #define SSW_READ			0x0100
 #define SSW_TM_MASK			0x0007
 #define SSW_TM_CODE			0x0002
+
+/*
+ * A write-back status word: valid, the size (long, byte, word or line),
+ * the transfer type (normal or MOVE16) and the transfer modifier, which is
+ * the function code the write goes to.
+ */
+#define WB_VALID			0x80
+#define WB_SIZE_SHIFT			5
+#define WB_SIZE_MASK			0x3
+#define WB_SIZE_LONG			0
+#define WB_SIZE_BYTE			1
+#define WB_SIZE_WORD			2
+#define WB_TT_SHIFT			3
+#define WB_TT_MASK			0x3
+#define WB_TT_NORMAL			0
+#define WB_TM_MASK			0x7
+#define WB_TM_SUPERVISOR		0x4
 
 /*
  * The classification of one exception for the kernel.
@@ -45,6 +85,8 @@ static void take_syscall(struct m68040_trap_frame *frame);
 static void take_user_fault(struct m68040_trap_frame *frame);
 static void take_kernel_fault(struct m68040_trap_frame *frame);
 static void describe_frame(const struct m68040_trap_frame *frame);
+static void complete_writebacks(const struct m68040_trap_frame *frame);
+static void complete_writeback(uint16_t status, uint32_t address, uint32_t data, int memory_aligned);
 
 /*
  * Points the processor's exceptions at the HAL.
@@ -164,7 +206,7 @@ classify(
 	case M68040_VECTOR_ACCESS:
 		/* The format-7 frame names the address and the kind of access. */
 		fault->cause = HAL_TRAP_CAUSE_PAGE_FAULT;
-		fault->address = frame_long(frame, FRAME7_EFFECTIVE_ADDRESS);
+		fault->address = frame_long(frame, FRAME7_FAULT_ADDRESS);
 		status = frame_word(frame, FRAME7_SPECIAL_STATUS);
 		if ((status & SSW_TM_MASK) == SSW_TM_CODE) {
 			fault->mode = HAL_TRAP_MODE_EXEC;
@@ -208,7 +250,7 @@ take_interrupt(
 		m68040_task_enter_user_frame(frame);
 
 	/* The board finds the sources behind the level. */
-	virt_take_interrupt(level);
+	m68040_board_interrupt(level);
 
 	/* A user context goes back through the kernel's return path. */
 	if (from_user) {
@@ -271,6 +313,9 @@ take_user_fault(
 		HAL_FATAL("m68040 user fault handler failed");
 	}
 
+	/* The writes the fault held back go to memory now that their pages may be there. */
+	complete_writebacks(frame);
+
 	/* The kernel's return path, then the frame is no longer the task's context. */
 	kernel_user_return_handler();
 	m68040_task_leave_user_frame();
@@ -296,9 +341,11 @@ take_kernel_fault(
 					   (uintptr_t)frame_vector(frame),
 					   (uintptr_t)frame->format);
 
-	/* Handled: the return retries the instruction. */
-	if (handled == HAL_TRAP_RET_SUCCESS)
+	/* Handled: the held-back writes complete, and the return goes on. */
+	if (handled == HAL_TRAP_RET_SUCCESS) {
+		complete_writebacks(frame);
 		return;
+	}
 
 	/* Anything else stops the system with the frame on the console. */
 	describe_frame(frame);
@@ -330,4 +377,121 @@ describe_frame(
 	/* Then the address registers. */
 	hal_printf("a0=%x a1=%x a2=%x a3=%x\n", frame->a[0], frame->a[1], frame->a[2], frame->a[3]);
 	hal_printf("a4=%x a5=%x a6=%x\n", frame->a[4], frame->a[5], frame->a[6]);
+}
+
+
+/*
+ * Completes the writes an access error held back.  The processor leaves
+ * a faulted write and up to two later ones to the handler, which must
+ * write them once the fault is corrected; the return does not repeat
+ * them.  Only a translation fault is corrected by the kernel, and each
+ * write is made only when its destination is now writable, so that a
+ * fault the kernel answered with a signal does not fault again here.
+ */
+static void
+complete_writebacks(
+	const struct m68040_trap_frame *frame)
+{
+	uint16_t status;
+	uint16_t wb_status;
+	uint32_t wb_address;
+	uint32_t wb_data;
+
+	/* Only an access error's frame holds write-backs. */
+	if (frame_vector(frame) != M68040_VECTOR_ACCESS)
+		return;
+	if (((unsigned)frame->format >> 12) != FRAME_FORMAT_ACCESS)
+		return;
+
+	/* A physical bus error is not corrected by the kernel. */
+	status = frame_word(frame, FRAME7_SPECIAL_STATUS);
+	if ((status & SSW_ATC) == 0)
+		return;
+
+	/* The first write-back, which is the faulted write when it is valid. */
+	wb_status = frame_word(frame, FRAME7_WB1_STATUS);
+	wb_address = frame_long(frame, FRAME7_WB1_ADDRESS);
+	wb_data = frame_long(frame, FRAME7_WB1_DATA);
+	complete_writeback(wb_status, wb_address, wb_data, 1);
+
+	/* The second, held before translation. */
+	wb_status = frame_word(frame, FRAME7_WB2_STATUS);
+	wb_address = frame_long(frame, FRAME7_WB2_ADDRESS);
+	wb_data = frame_long(frame, FRAME7_WB2_DATA);
+	complete_writeback(wb_status, wb_address, wb_data, 0);
+
+	/* The third, held in the integer unit. */
+	wb_status = frame_word(frame, FRAME7_WB3_STATUS);
+	wb_address = frame_long(frame, FRAME7_WB3_ADDRESS);
+	wb_data = frame_long(frame, FRAME7_WB3_DATA);
+	complete_writeback(wb_status, wb_address, wb_data, 0);
+}
+
+/*
+ * Completes one held-back write.  The first write-back's data is aligned
+ * as on the memory bus; the others' is aligned in the register, the byte
+ * or the word in the low bits.
+ */
+static void
+complete_writeback(
+	uint16_t status,
+	uint32_t address,
+	uint32_t data,
+	int memory_aligned)
+{
+	uint32_t size;
+	uint32_t value;
+	uint32_t function_code;
+	unsigned rotate;
+	bool supervisor;
+	bool writable;
+
+	/* A slot with no pending write has nothing to do. */
+	if ((status & WB_VALID) == 0)
+		return;
+
+	/* A MOVE16 or a whole line is restarted by the instruction, not written here. */
+	if (((status >> WB_TT_SHIFT) & WB_TT_MASK) != WB_TT_NORMAL)
+		return;
+
+	/* The size in bytes. */
+	switch ((status >> WB_SIZE_SHIFT) & WB_SIZE_MASK) {
+	case WB_SIZE_LONG:
+		size = 4U;
+		break;
+	case WB_SIZE_BYTE:
+		size = 1U;
+		break;
+	case WB_SIZE_WORD:
+		size = 2U;
+		break;
+	default:
+		return;
+	}
+
+	/*
+	 * Turns bus-aligned data into register-aligned data: the byte of the
+	 * address's lane goes to the top, then the value moves to the low bits.
+	 */
+	value = data;
+	if (memory_aligned) {
+		rotate = (address & 3U) * 8U;
+		if (rotate != 0)
+			value = (data << rotate) | (data >> (32U - rotate));
+		value >>= 32U - size * 8U;
+	}
+
+	/* Writes only where the write cannot fault again. */
+	function_code = status & WB_TM_MASK;
+	supervisor = false;
+	if ((function_code & WB_TM_SUPERVISOR) != 0)
+		supervisor = true;
+	writable = m68040_space_writable(address, size, supervisor);
+	if (!writable) {
+		hal_printf("m68040 write-back to %x dropped\n", address);
+		return;
+	}
+
+	/* Writes the value in the space the processor would have written it in. */
+	m68040_write_as(address, value, size, function_code);
 }

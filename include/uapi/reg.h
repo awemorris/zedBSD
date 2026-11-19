@@ -192,6 +192,34 @@ struct fpreg {
 	uint32_t fp_reserved;
 };
 
+#elif defined(__m68k__)
+
+/*
+ * The integer registers of the 680x0 processor: the eight data registers,
+ * the eight address registers (a7 is the user stack pointer and a6 the
+ * frame pointer), the status register, and the address of the next
+ * instruction.  Of the status register a debugger may change only the
+ * condition codes.
+ */
+struct reg {
+	uint32_t r_d[8];
+	uint32_t r_a[8];
+	uint32_t r_sr;
+	uint32_t r_pc;
+};
+
+/*
+ * The floating-point state: the eight registers in the 96-bit extended
+ * memory format (three words each), then the control, status and
+ * instruction address registers.
+ */
+struct fpreg {
+	uint32_t fp_fp[8][3];
+	uint32_t fp_fpcr;
+	uint32_t fp_fpsr;
+	uint32_t fp_fpiar;
+};
+
 #else
 
 #error "this architecture does not describe its registers yet"

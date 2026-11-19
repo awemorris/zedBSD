@@ -13,6 +13,10 @@
 # tools are installed under build/gcc with the target's prefix
 # (m68k-elf-gcc, m68k-elf-ld, ...).
 #
+# GCC is patched (patches/) so that the freestanding target's C types are
+# those of zedBSD's other 32-bit ports: size_t, ptrdiff_t, intptr_t and
+# the 32-bit fixed-width types are int types, not long ones.
+#
 
 GCC_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 include $(GCC_DIR)/version.mk
@@ -54,6 +58,7 @@ GCC_DISTFILE := $(GCC_DISTDIR)/$(ZEDBSD_GCC_ARCHIVE_NAME)
 GMP_DISTFILE := $(GCC_DISTDIR)/$(ZEDBSD_GMP_ARCHIVE_NAME)
 MPFR_DISTFILE := $(GCC_DISTDIR)/$(ZEDBSD_MPFR_ARCHIVE_NAME)
 MPC_DISTFILE := $(GCC_DISTDIR)/$(ZEDBSD_MPC_ARCHIVE_NAME)
+GCC_PATCHES := $(sort $(wildcard $(GCC_DIR)/patches/*.patch))
 
 # The host build: optimized without debug information, documentation not
 # made (makeinfo is not needed).
@@ -130,13 +135,15 @@ gcc-download:
 binutils-source: $(BINUTILS_SOURCE)/.extracted
 gcc-source: $(GCC_SOURCE)/.extracted
 
-# The extracted sources are named by the archives' hashes, not by file
-# times, as the LLVM source is: a source that matches is used as it is, and
-# the archives are fetched only when a source has to be made again.  A new
-# source is extracted beside the old one and then takes its place.
+# The extracted sources are named by the archives' and the patches'
+# hashes, not by file times, as the LLVM source is: a source that matches
+# is used as it is, and the archives are fetched only when a source has to
+# be made again.  A new source is extracted and patched beside the old one
+# and then takes its place.
 BINUTILS_SOURCE_ID := $(ZEDBSD_BINUTILS_ARCHIVE_SHA256)
 GCC_SOURCE_ID := $(ZEDBSD_GCC_ARCHIVE_SHA256) $(ZEDBSD_GMP_ARCHIVE_SHA256) \
-	$(ZEDBSD_MPFR_ARCHIVE_SHA256) $(ZEDBSD_MPC_ARCHIVE_SHA256)
+	$(ZEDBSD_MPFR_ARCHIVE_SHA256) $(ZEDBSD_MPC_ARCHIVE_SHA256) \
+	$(foreach patch,$(GCC_PATCHES),$(firstword $(shell sha256sum $(patch))))
 
 # The binutils source is made again when its archive's hash changed.
 ifneq ($(shell cat $(BINUTILS_SOURCE)/.extracted 2>/dev/null),$(BINUTILS_SOURCE_ID))
@@ -172,6 +179,7 @@ $(GCC_SOURCE)/.extracted:
 	tar -xf $(GMP_DISTFILE) --strip-components=1 -C $(GCC_SOURCE).new/gmp
 	tar -xf $(MPFR_DISTFILE) --strip-components=1 -C $(GCC_SOURCE).new/mpfr
 	tar -xf $(MPC_DISTFILE) --strip-components=1 -C $(GCC_SOURCE).new/mpc
+	for patch in $(GCC_PATCHES); do patch -d $(GCC_SOURCE).new -p1 < $$patch || exit 1; done
 	echo '$(GCC_SOURCE_ID)' > $(GCC_SOURCE).new/.extracted
 	rm -rf $(GCC_SOURCE)
 	mv $(GCC_SOURCE).new $(GCC_SOURCE)

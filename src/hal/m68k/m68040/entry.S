@@ -165,15 +165,73 @@ m68040_cache_push_all:
 	rts
 	.size m68040_cache_push_all,.-m68040_cache_push_all
 
-	/* Turns the instruction and data caches on. */
+	/*
+	 * Pushes the data cache line that holds the address at the argument
+	 * to memory and drops it.  The address is physical, which the
+	 * supervisor's window makes the same as the kernel's.
+	 */
+	.globl m68040_cache_push_line
+	.type m68040_cache_push_line,@function
+m68040_cache_push_line:
+	move.l 4(%sp),%a0
+	nop
+	cpushl %dc,(%a0)
+	rts
+	.size m68040_cache_push_line,.-m68040_cache_push_line
+
+	/* Pushes the data cache lines of the page that holds the address at the argument. */
+	.globl m68040_cache_push_page
+	.type m68040_cache_push_page,@function
+m68040_cache_push_page:
+	move.l 4(%sp),%a0
+	nop
+	cpushp %dc,(%a0)
+	rts
+	.size m68040_cache_push_page,.-m68040_cache_push_page
+
+	/*
+	 * Turns the instruction and data caches on.  Any line the loader left
+	 * dirty is pushed to memory first, then both caches are emptied.
+	 */
 	.globl m68040_cache_enable
 	.type m68040_cache_enable,@function
 m68040_cache_enable:
+	nop
+	cpusha %bc
 	cinva %bc
 	move.l #0x80008000,%d0
 	movec %d0,%cacr
 	rts
 	.size m68040_cache_enable,.-m68040_cache_enable
+
+	/*
+	 * Writes a value as the processor would have written it, to the
+	 * address at the first argument in the address space the function
+	 * code at the fourth argument names (the transfer modifier of a
+	 * pending write-back: 1 user data, 5 supervisor data): the value is
+	 * the second argument, and the third is its size in bytes (1, 2 or
+	 * 4).  The destination function code is put back afterwards.
+	 */
+	.globl m68040_write_as
+	.type m68040_write_as,@function
+m68040_write_as:
+	move.l 4(%sp),%a0
+	move.l 8(%sp),%d0
+	movec %dfc,%a1
+	move.l 16(%sp),%d1
+	movec %d1,%dfc
+	cmp.l #1,12(%sp)
+	bne.s 1f
+	moves.b %d0,(%a0)
+	bra.s 3f
+1:	cmp.l #2,12(%sp)
+	bne.s 2f
+	moves.w %d0,(%a0)
+	bra.s 3f
+2:	moves.l %d0,(%a0)
+3:	movec %a1,%dfc
+	rts
+	.size m68040_write_as,.-m68040_write_as
 
 	/*
 	 * Saves the floating-point unit's internal state and its registers to

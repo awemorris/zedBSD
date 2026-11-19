@@ -16,8 +16,7 @@
 
 #include <hal/hal.h>
 #include "asm.h"
-#include "../bsp-virt/bsp.h"
-#include "../bsp-virt/cons.h"
+#include "board.h"
 #include "defs.h"
 
 static void cons_puts(const char *string);
@@ -140,9 +139,8 @@ hal_putc(
 		return;
 	}
 
-	/* The board's terminal line and its screen. */
-	virt_tty_putc((char)c);
-	virt_cons_putc(c);
+	/* The board's early console. */
+	m68040_board_putc(c);
 }
 
 /*

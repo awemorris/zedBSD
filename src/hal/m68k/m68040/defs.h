@@ -75,13 +75,44 @@
 #define M68040_TT_CM_SERIALIZED		0x40
 
 /*
- * The supervisor's windows: RAM from 0 up to 1 GiB, and the device space
- * at the top 16 MiB.  The user half lies between them.
+ * The supervisor's windows and the user half, by board.  A window is the
+ * top byte of an address compared under a mask (a mask bit set ignores
+ * that address bit), as the transparent translation registers compare it,
+ * so a window is a set of 16 MiB blocks.  RAM starts at physical 0 and is
+ * reached at its own addresses, up to M68040_RAM_LIMIT.
  */
+#if defined(HAL_BOARD_MAC68K)
+
+/*
+ * The Macintosh: RAM in the first 256 MiB; the devices in the blocks that
+ * match 0x50 under the mask 0xa9 (0x50, 0x51, 0x58, 0x59, 0x70, 0x71,
+ * 0x78, 0x79, 0xd0, 0xd1, 0xd8, 0xd9, 0xf0, 0xf1, 0xf8 and 0xf9), which
+ * hold the I/O at 0x50000000 and the on-board video at 0xf9000000; the
+ * user half between the two, below the I/O.
+ */
+#define M68040_RAM_WINDOW_BASE		0x00
+#define M68040_RAM_WINDOW_MASK		0x0f
+#define M68040_RAM_LIMIT		0x10000000
+#define M68040_DEVICE_WINDOW_BASE	0x50
+#define M68040_DEVICE_WINDOW_MASK	0xa9
+#define M68040_USER_MINIMUM		0x10000000
+#define M68040_USER_LIMIT		0x50000000
+
+#else
+
+/*
+ * The emulators' virt board: RAM up to 1 GiB, the devices in the top
+ * 16 MiB, and the user half between them.
+ */
+#define M68040_RAM_WINDOW_BASE		0x00
+#define M68040_RAM_WINDOW_MASK		0x3f
 #define M68040_RAM_LIMIT		0x40000000
-#define M68040_DEVICE_BASE		0xff000000
+#define M68040_DEVICE_WINDOW_BASE	0xff
+#define M68040_DEVICE_WINDOW_MASK	0x00
 #define M68040_USER_MINIMUM		0x40000000
 #define M68040_USER_LIMIT		0x80000000
+
+#endif
 
 /* The status register's fields. */
 #define M68040_SR_SUPERVISOR		0x2000

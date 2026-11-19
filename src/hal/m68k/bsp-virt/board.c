@@ -17,6 +17,7 @@
 
 #include <hal/hal.h>
 #include "../m68040/asm.h"
+#include "../m68040/board.h"
 #include "../m68040/int.h"
 #include "../m68040/page.h"
 #include "../m68040/space.h"
@@ -33,6 +34,9 @@
 
 /* Why the display could not be shown, or HAL_OK when it is. */
 static int board_display_error = HAL_ERR_UNSUPPORTED;
+
+/* The one RAM bank the boot information gives, filled when the pages are built. */
+static struct m68040_memory_bank board_bank;
 
 static void describe_bringup(void);
 
@@ -90,6 +94,76 @@ virt_tty_putc(
 	if (base == 0)
 		return;
 	*(volatile uint32_t *)(uintptr_t)(base + TTY_PUT_CHAR) = (uint8_t)character;
+}
+
+/*
+ * Reports the board's RAM: the one bank of the boot information.
+ */
+unsigned
+m68040_board_memory(
+	const struct m68040_memory_bank **banks)
+{
+	const struct virt_board_info *board;
+
+	/* The bank the boot information gave. */
+	board = virt_board();
+	board_bank.base = board->memory_base;
+	board_bank.size = board->memory_size;
+	*banks = &board_bank;
+
+	/* No memory reported means no bank. */
+	if (board_bank.size == 0)
+		return 0;
+
+	/* Succeeded: one bank. */
+	return 1;
+}
+
+/*
+ * Reports a range the board keeps out of the page allocator: the initial
+ * ramdisk, the only one.
+ */
+bool
+m68040_board_reserved(
+	unsigned index,
+	uint32_t *base,
+	uint32_t *size)
+{
+	const struct virt_board_info *board;
+
+	/* There is one range at most. */
+	if (index != 0)
+		return false;
+
+	/* Succeeded: the ramdisk, empty when the loader placed none. */
+	board = virt_board();
+	*base = board->ramdisk_base;
+	*size = board->ramdisk_size;
+	return true;
+}
+
+/*
+ * Serves the interrupt sources behind a level.
+ */
+void
+m68040_board_interrupt(
+	unsigned level)
+{
+	/* The interrupt controller of the level. */
+	virt_take_interrupt(level);
+}
+
+/*
+ * Writes one character to the early console: the terminal line and the
+ * screen.
+ */
+void
+m68040_board_putc(
+	int character)
+{
+	/* Both outputs get every character. */
+	virt_tty_putc((char)character);
+	virt_cons_putc(character);
 }
 
 /*

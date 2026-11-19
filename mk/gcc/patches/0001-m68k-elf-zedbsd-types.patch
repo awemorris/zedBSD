@@ -1,0 +1,29 @@
+diff -ruN a/gcc/config/m68k/zedbsd-types.h b/gcc/config/m68k/zedbsd-types.h
+--- a/gcc/config/m68k/zedbsd-types.h	1970-01-01 09:00:00.000000000 +0900
++++ b/gcc/config/m68k/zedbsd-types.h	2026-11-20 01:11:28.822485416 +0900
+@@ -0,0 +1,13 @@
++/* The C types of zedBSD's 32-bit ports on the freestanding m68k ELF target.
++
++   zedBSD brings its own C library, whose 32-bit ports all take size_t,
++   ptrdiff_t, intptr_t and the 32-bit fixed-width types as int types, not
++   long ones.  The target's stdint types come from glibc-stdint.h for the
++   same reason; this file makes size_t and ptrdiff_t match them, as the
++   m68k Linux target does.  The type sizes and the ABI are unchanged.  */
++
++#undef  SIZE_TYPE
++#define SIZE_TYPE "unsigned int"
++
++#undef  PTRDIFF_TYPE
++#define PTRDIFF_TYPE "int"
+diff -ruN a/gcc/config.gcc b/gcc/config.gcc
+--- a/gcc/config.gcc	2026-11-20 01:11:28.782485504 +0900
++++ b/gcc/config.gcc	2026-11-20 01:11:28.822485416 +0900
+@@ -2385,7 +2385,7 @@
+ 		default_cf_cpu=5206
+ 		;;
+ 	esac
+-	tm_file="${tm_file} m68k/m68k-none.h m68k/m68kelf.h elfos.h newlib-stdint.h m68k/m68kemb.h m68k/m68020-elf.h"
++	tm_file="${tm_file} m68k/m68k-none.h m68k/m68kelf.h elfos.h glibc-stdint.h m68k/m68kemb.h m68k/m68020-elf.h m68k/zedbsd-types.h"
+ 	tm_defines="${tm_defines} MOTOROLA=1"
+ 	tmake_file="m68k/t-floatlib m68k/t-m68kbare m68k/t-m68kelf"
+ 	# Add multilibs for targets other than fido.
