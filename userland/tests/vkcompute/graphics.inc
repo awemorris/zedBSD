@@ -42,6 +42,10 @@
  *   g-fill        vkCmdFillBuffer and vkCmdUpdateBuffer into a buffer
  *   g-timestamp   two timestamps around a draw, copied with
  *                 vkCmdCopyQueryPoolResults
+ *   g-occlusion   an occlusion query of a draw over the whole target
+ *                 counts its pixels, precisely when the device can
+ *   g-occlusion-mrt  the same with two colour targets: still one count a
+ *                 pixel, not one a target
  *   g-fatomic     a fragment shader's buffer atomics
  *   g-desccopy    descriptors of an array, one write running on into the next
  *                 binding, and a descriptor copy
@@ -294,6 +298,10 @@ static void gfx_write_fill(struct vkcompute *run, const struct gfx_test *test, s
 static VkResult gfx_prepare_timestamp(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
 static void gfx_first_timestamp(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
 static void gfx_last_timestamp(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
+static VkResult gfx_prepare_occlusion(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
+static void gfx_begin_occlusion(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
+static void gfx_end_occlusion(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
+static void gfx_check_occlusion(struct oracle_check *check, const struct gfx_test *test, uint32_t *const *words);
 static VkResult gfx_prepare_desccopy(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
 static void gfx_upload_cubes(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
 static VkResult gfx_prepare_formats(struct vkcompute *run, const struct gfx_test *test, struct gfx_objects *objects);
@@ -331,6 +339,9 @@ static uint32_t gfx_count_color(const uint32_t *pixels, uint32_t color, int *oth
 
 /* The writes of all four channels, and a blend of one attachment. */
 #define GFX_RGBA	(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+
+/* Whether the occlusion query of the check being run counts precisely (set when it begins). */
+static int gfx_occlusion_precise;
 
 /* The colour mrt.frag and dualsrc.frag blend to, as R8G8B8A8_UNORM bytes: (0.2, 0.4, 0.6, 1.0). */
 #define GFX_BLENDED_WORD	0xff996633U
@@ -401,6 +412,25 @@ static const struct gfx_options gfx_timestamp_options = {
 	.prepare = gfx_prepare_timestamp,
 	.before_pass = gfx_first_timestamp,
 	.after_pass = gfx_last_timestamp
+};
+static const struct gfx_options gfx_occlusion_options = {
+	.prepare = gfx_prepare_occlusion,
+	.before_pass = gfx_begin_occlusion,
+	.after_pass = gfx_end_occlusion
+};
+static const struct gfx_options gfx_occlusion_mrt_options = {
+	.color_format = VK_FORMAT_R8G8B8A8_UNORM,
+	.color_count = 2U,
+	.blend_given = 1,
+	.blend = {
+		{ VK_TRUE, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
+		  VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, GFX_RGBA },
+		{ VK_TRUE, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD,
+		  VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD, GFX_RGBA }
+	},
+	.prepare = gfx_prepare_occlusion,
+	.before_pass = gfx_begin_occlusion,
+	.after_pass = gfx_end_occlusion
 };
 static const struct gfx_options gfx_desccopy_options = {
 	.prepare = gfx_prepare_desccopy
@@ -570,6 +600,18 @@ static const struct gfx_test gfx_tests[] = {
 		1U, { { 0U, GFX_STORAGE, 64U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
 		1U, { { GFX_SHADER(position_vert), GFX_SHADER(two_frag), 0, 0.0f, 3U, NULL, 0U, 0U, 0 } },
 		0, 2U, gfx_check_timestamp, &gfx_timestamp_options
+	},
+	{
+		"g-occlusion",
+		1U, { { 0U, GFX_STORAGE, 64U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
+		1U, { { GFX_SHADER(position_vert), GFX_SHADER(two_frag), 0, 0.0f, 3U, NULL, 0U, 0U, 0 } },
+		0, 1U, gfx_check_occlusion, &gfx_occlusion_options
+	},
+	{
+		"g-occlusion-mrt",
+		1U, { { 0U, GFX_STORAGE, 64U, 0U, VK_SHADER_STAGE_FRAGMENT_BIT, 0U } },
+		1U, { { GFX_SHADER(position_vert), GFX_SHADER(mrt_frag), 0, 0.0f, 3U, NULL, 0U, 0U, 0 } },
+		0, 2U, gfx_check_occlusion, &gfx_occlusion_mrt_options
 	},
 	{
 		"g-fatomic",
@@ -2622,6 +2664,75 @@ gfx_last_timestamp(
 	gfx_memory_barrier(objects->command);
 }
 
+/* g-occlusion and g-occlusion-mrt: the pool of one occlusion query. */
+static VkResult
+gfx_prepare_occlusion(
+	struct vkcompute *run,
+	const struct gfx_test *test,
+	struct gfx_objects *objects)
+{
+	VkQueryPoolCreateInfo pool_info;
+	VkResult status;
+
+	UNUSED_PARAMETER(test);
+
+	/* The pool. */
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	pool_info.queryType = VK_QUERY_TYPE_OCCLUSION;
+	pool_info.queryCount = 1;
+	objects->failed_call = "vkCreateQueryPool (occlusion)";
+	status = vkCreateQueryPool(run->device, &pool_info, NULL, &objects->queries);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the pool. */
+	return VK_SUCCESS;
+}
+
+/* g-occlusion and g-occlusion-mrt: resets the query and begins it, precise when the device can, before the pass. */
+static void
+gfx_begin_occlusion(
+	struct vkcompute *run,
+	const struct gfx_test *test,
+	struct gfx_objects *objects)
+{
+	VkPhysicalDeviceFeatures features;
+	VkQueryControlFlags control;
+
+	UNUSED_PARAMETER(test);
+
+	/* Precise counts where the device has them (the device was made with every feature it reports). */
+	vkGetPhysicalDeviceFeatures(run->physical, &features);
+	control = 0U;
+	gfx_occlusion_precise = 0;
+	if (features.occlusionQueryPrecise) {
+		control = VK_QUERY_CONTROL_PRECISE_BIT;
+		gfx_occlusion_precise = 1;
+	}
+
+	/* The reset, then the begin. */
+	vkCmdResetQueryPool(objects->command, objects->queries, 0, 1);
+	vkCmdBeginQuery(objects->command, objects->queries, 0, control);
+}
+
+/* g-occlusion and g-occlusion-mrt: ends the query after the pass and copies it, 64-bit with availability, into the buffer. */
+static void
+gfx_end_occlusion(
+	struct vkcompute *run,
+	const struct gfx_test *test,
+	struct gfx_objects *objects)
+{
+	UNUSED_PARAMETER(run);
+	UNUSED_PARAMETER(test);
+
+	/* The end, then the copy of the record. */
+	vkCmdEndQuery(objects->command, objects->queries, 0);
+	vkCmdCopyQueryPoolResults(objects->command, objects->queries, 0, 1, objects->buffers[0], 0U, 16U,
+				  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WAIT_BIT);
+	gfx_memory_barrier(objects->command);
+}
+
 /*
  * g-desccopy: four buffers of one word each (gfx_block_word(20 + n, 0));
  * binding 0's three elements written with the first three in one write; a
@@ -3076,6 +3187,39 @@ gfx_check_timestamp(
 	/* The draw. */
 	for (index = 0U; index < GFX_PIXELS; index++)
 		oracle_expect(check, 0U, index, words[0][index], test->push_word);
+}
+
+/*
+ * g-occlusion and g-occlusion-mrt: the query available and its count, the
+ * target's pixels once each however many colour targets the draw writes
+ * (any count but 0 without precise queries: word 16 is 1 when it is
+ * nonzero), and the draw's colours (2, or g-mrt-blend's two targets).
+ */
+static void
+gfx_check_occlusion(
+	struct oracle_check *check,
+	const struct gfx_test *test,
+	uint32_t *const *words)
+{
+	uint32_t index;
+
+	/* The availability, then the count: exact when precise. */
+	oracle_expect(check, 1U, 2U, words[1][2], 1U);
+	oracle_expect(check, 1U, 3U, words[1][3], 0U);
+	if (gfx_occlusion_precise) {
+		oracle_expect(check, 1U, 0U, words[1][0], GFX_PIXELS);
+		oracle_expect(check, 1U, 1U, words[1][1], 0U);
+	} else {
+		oracle_expect(check, 1U, 16U, (words[1][0] | words[1][1]) != 0U ? 1U : 0U, 1U);
+	}
+
+	/* The draw: colour 2 everywhere, or the two targets of g-mrt-blend. */
+	if (test->push_word == 2U) {
+		gfx_check_mrt(check, test, words);
+		return;
+	}
+	for (index = 0U; index < GFX_PIXELS; index++)
+		oracle_expect(check, 0U, index, words[0][index], 2U);
 }
 
 /* g-fatomic: every pixel counted once, every column's bit set, colour 7. */

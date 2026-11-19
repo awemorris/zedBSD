@@ -130,6 +130,14 @@ struct i915_gfx_kernels {
 	/* Bit n: fragment input n is Flat, set up as the provoking vertex's value (0 for a rectangle). */
 	uint32_t ps_flat_mask;
 
+	/*
+	 * Nonzero for a rectangle of the executor's own (a copy, a fill or a
+	 * resolve): the pixel stage keeps its statistics off, so the pixels
+	 * it draws are not counted by an occlusion query (PS_DEPTH_COUNT)
+	 * the commands around it are in.
+	 */
+	uint32_t ps_no_statistics;
+
 	/* Bit n: fragment input n is gl_PointCoord, the point sprite's texture coordinate (0 for a rectangle). */
 	uint32_t ps_point_sprite_mask;
 

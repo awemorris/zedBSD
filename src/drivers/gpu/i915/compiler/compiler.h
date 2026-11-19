@@ -48,13 +48,22 @@
  * and its SampleMask input and output, OpImageQueryLod (the sampler's LOD
  * message), a geometry shader's invocations past one (3DSTATE_GS
  * Instance Control) and gl_PointSize (its VUE header, as a vertex
- * shader's), and the storage images, lowered to a storage buffer of their
+ * shader's), the storage images, lowered to a storage buffer of their
  * texels and a pushed block of their views' shapes (the backend has no
- * typed surface message of its own).
+ * typed surface message of its own), and the size of a uniform texel
+ * buffer (textureSize of a samplerBuffer): the sampler's resinfo of level
+ * 0 on its SURFTYPE_BUFFER surface, whose first value is the element
+ * count.
+ *
+ * Procedure referenced: Mesa 26.2.6
+ * src/intel/compiler/brw/brw_nir_lower_texture.c (the size of a buffer
+ * as resinfo of level 0 on its surface) and brw_from_nir.cpp (the level
+ * a buffer's message needs).
  */
 #define I915_SHADER_SPIRV_FEATURES	(DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH | DRV_GPU_SPIRV_FEATURE_SAMPLE_MASK | \
 					 DRV_GPU_SPIRV_FEATURE_QUERY_LOD | DRV_GPU_SPIRV_FEATURE_GEOMETRY_INVOCATIONS | \
-					 DRV_GPU_SPIRV_FEATURE_GEOMETRY_POINT_SIZE | DRV_GPU_SPIRV_FEATURE_LOWER_STORAGE_IMAGES)
+					 DRV_GPU_SPIRV_FEATURE_GEOMETRY_POINT_SIZE | DRV_GPU_SPIRV_FEATURE_LOWER_STORAGE_IMAGES | \
+					 DRV_GPU_SPIRV_FEATURE_TEXEL_BUFFER_SIZE)
 
 /*
  * The arrays of descriptors the compiler lowers: each element is a sampled

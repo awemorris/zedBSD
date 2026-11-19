@@ -676,6 +676,7 @@ static void i915_compile_release_temporaries(struct i915_compile_state *state);
 static void i915_compile_release(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_instruction(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_load_input(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static int i915_compile_input_based(uint32_t location);
 static void i915_compile_load_push(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
 static void i915_compile_load_block(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
 static void i915_compile_load_pulled(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t block, uint32_t payload_inputs);
@@ -1641,7 +1642,8 @@ i915_compile_forwarding(
 			state->forward[inst->dst] = COMPILE_FORWARD_PUSH;
 		if (inst->op == DRV_GPU_IR_CONST)
 			state->forward[inst->dst] = COMPILE_FORWARD_IMM;
-		if (inst->op == DRV_GPU_IR_LOAD_INPUT && ir->stage == DRV_GPU_STAGE_VERTEX && inst->component <= 3U)
+		if (inst->op == DRV_GPU_IR_LOAD_INPUT && ir->stage == DRV_GPU_STAGE_VERTEX && inst->component <= 3U &&
+		    !i915_compile_input_based(inst->location))
 			state->forward[inst->dst] = COMPILE_FORWARD_INPUT;
 	}
 
@@ -2661,6 +2663,23 @@ i915_compile_instruction(
 	}
 }
 
+/*
+ * Reports whether a vertex shader's input is a number the fetcher gives
+ * from zero, to which the draw's base is added (gl_VertexIndex and
+ * gl_InstanceIndex): 1 or 0.
+ */
+static int
+i915_compile_input_based(
+	uint32_t location)
+{
+	/* The vertex and the instance index. */
+	if (location == DRV_GPU_SHADER_LOCATION_VERTEX_INDEX || location == DRV_GPU_SHADER_LOCATION_INSTANCE_INDEX)
+		return 1;
+
+	/* Succeeded: an attribute. */
+	return 0;
+}
+
 /* Lowers an input load: a payload register, or an interpolation over the input's plane. */
 static void
 i915_compile_load_input(
@@ -2728,6 +2747,23 @@ i915_compile_load_input(
 
 	/* Gives the loaded value its register. */
 	dst = i915_compile_define(state, inst->dst, 1U);
+
+	/*
+	 * gl_VertexIndex and gl_InstanceIndex: the fetcher's zero-based vertex
+	 * or instance number (component x of the element) plus the draw's
+	 * first vertex (its vertex offset for an indexed draw) or first
+	 * instance, which the fetcher writes into component y (vk-state.c).
+	 *
+	 * Procedure referenced: Mesa 26.2.6 src/intel/compiler/brw/brw_compiler.c
+	 * (vertex_id_zero_based) and src/intel/vulkan/genX_cmd_draw.c (the
+	 * base vertex and the base instance as extended parameters 0 and 1).
+	 */
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX && inst->component == 0U && i915_compile_input_based(inst->location)) {
+		drv_i915_eu_alu2(code, I915_EU_ADD, drv_i915_eu_grf_d(dst),
+				 drv_i915_eu_grf_d(payload_inputs + 4U * rank),
+				 drv_i915_eu_grf_d(payload_inputs + 4U * rank + 1U));
+		return;
+	}
 
 	/* An attribute component of a vertex is a payload register of its own. */
 	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
