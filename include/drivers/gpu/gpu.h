@@ -127,9 +127,11 @@ struct drv_gpu_report {
  * recovery fault, and has closed), and opens a new session for the asking
  * open after it.  It returns zero only after checked hardware
  * reinitialization.  The core prefers it to the recovery reset, which it
- * calls for the same request when the backend has no service reset; the
- * core never resets a device on its own, and a failed device admits no
- * new open but root's, which has no backend session until a reset.
+ * calls for the same request when the backend has no service reset.  The
+ * core also calls it, with the same contract, for the first new open of a
+ * failed device once every open has closed and nothing of the device is
+ * shared; a failed device still in use admits no new open but root's,
+ * which has no backend session until a reset.
  *
  * Diagnose fills one piece of a report (struct drv_gpu_report); the core
  * calls it piece after piece into its own buffer and copies each piece to
