@@ -278,3 +278,41 @@ the two video capability queries. The instance extensions are always offered;
 `VK_EXT_swapchain_maintenance1` is offered with `VK_KHR_swapchain` and needs
 `VK_EXT_surface_maintenance1` and `VK_KHR_get_physical_device_properties2` on
 the instance. Core Vulkan remains 1.0.
+
+## Vulkan 1.1 core declarations
+
+`vulkan_core11.h` selects the `VK_VERSION_1_1` block verbatim from the same input
+as the video selection above: Khronos Vulkan-Headers 1.4.309 as packaged by Debian
+(`libvulkan-dev` 1.4.309.0-1), `/usr/include/vulkan/vulkan_core.h`, SHA-256
+`39f358bb99f7be5206524d119de4a5b5ab5c515c329c2857ff395d37e6387b4c`. It leaves
+out what the maintained headers already declare (39 declarations: the external
+memory and fence types, the properties2 and memory-requirements2 structures,
+`VK_LUID_SIZE`, which `vulkan_external.h` selected from 1.3.269) and keeps the
+rest: `VK_VERSION_1_1`, `VK_API_VERSION_1_1`, the two handles, 52 enumerations
+and structures, their flags types and aliases, the 28 function-pointer types
+and the 28 command prototypes. The enumerations it adds carry the enumerators
+of the 1.4.309 registry, as shared registry enum data; they do not advertise
+support. Declaration license: Apache-2.0, copyright 2015–2025 The Khronos Group
+Inc. (`LICENSE-API`). The independent selection tool `tools/maintain-core11.noct`
+is Zlib.
+
+```sh
+timeout 90 build/NoctLang/build-static/noct \
+  userland/desktop/libvulkan/tools/maintain-core11.noct \
+  /usr/include/vulkan/vulkan_core.h include/libc/vulkan/vulkan_core11.h
+```
+
+`vulkan.h` includes `vulkan_core11.h` after `vulkan_core.h`. `tools/maintain-dispatch.noct`
+reads it last and gives each record the core version it belongs to
+(`VULKAN_CORE_1_0` or `VULKAN_CORE_1_1`): the 28 commands bring the dispatch
+table from 204 to 232 records. A command of Vulkan 1.1 resolves only where that
+version is in effect: through an instance whose application asked for 1.1 or
+later (at most the library's version, `vkEnumerateInstanceVersion`), and through
+a device whose physical device names 1.1 (`libvulkan/version.c` decides that from
+what the renderer reports). `tools/maintain-codec.noct` now encodes the chains of
+`VkDeviceCreateInfo` and `VkRenderPassCreateInfo` through `core11.c`, which
+forwards the 1.1 feature structures and the multiview record to a renderer that
+answers the Vulkan 1.1 queries. The host test of the ABI compares every
+structure's size, alignment and field offsets and every enumerator of the block
+with the Khronos header on LP64 and ILP32 (68 structures, 280 fields, 137
+constants).

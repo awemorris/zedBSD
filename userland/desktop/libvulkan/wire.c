@@ -678,8 +678,10 @@ vulkan_writer_init_for_object(
 		writer->allocator = object->allocator;
 
 		/* The public OPAQUE declaration uses only this renderer's negotiated native type. */
-		if (object->context != NULL)
+		if (object->context != NULL) {
 			writer->external_memory_type = object->context->external_memory_type;
+			writer->core11_chains = object->context->core11_queries;
+		}
 	}
 
 	/* Succeeded: subsequent transport allocations share this command policy. */

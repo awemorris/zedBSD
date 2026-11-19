@@ -1773,6 +1773,19 @@ enum gpu_op {
 	GPU_OP_ENUMERATE_INSTANCE_VERSION = 137,
 
 	/*
+	 * vkCmdDispatchBase.  Number: VK_EXT_command_serialization.xml:176.
+	 * Arguments: [u32 baseGroupX][u32 baseGroupY][u32 baseGroupZ]
+	 * [u32 groupCountX][u32 groupCountY][u32 groupCountZ].
+	 * Sent by: libvulkan/commands.c: vkCmdDispatchBase, only with a
+	 * base other than 0 (a dispatch from 0 is GPU_OP_CMD_DISPATCH) and
+	 * only on a device that names Vulkan 1.1.
+	 * Decoded by: a Venus host.  A native renderer that promises the
+	 * Vulkan 1.1 queries (libvulkan/context.c
+	 * VULKAN_NATIVE_CAPSET_CORE11_QUERIES) decodes it too.
+	 */
+	GPU_OP_CMD_DISPATCH_BASE = 142,
+
+	/*
 	 * vkGetPhysicalDeviceFeatures2, asked for the Vulkan 1.1 features.
 	 * Number: VK_EXT_command_serialization.xml:186.
 	 * Arguments: [physical device][u64 1]

@@ -7,12 +7,13 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Exposes the platform-independent Vulkan and direct-display declarations. */
+/* Exposes the platform-independent Vulkan (1.0 and 1.1 core) and direct-display declarations. */
 
 #ifndef KERN_VULKAN_H
 #define KERN_VULKAN_H
 
 #include "vulkan_core.h"
+#include "vulkan_core11.h"
 #include "vulkan_video.h"
 #include "vulkan_display_control.h"
 

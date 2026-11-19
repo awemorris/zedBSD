@@ -13,6 +13,7 @@ LIBVULKAN_SOURCES := \
 	userland/desktop/libvulkan/dispatch.c \
 	userland/desktop/libvulkan/instance.c \
 	userland/desktop/libvulkan/version.c \
+	userland/desktop/libvulkan/core11.c \
 	userland/desktop/libvulkan/device.c \
 	userland/desktop/libvulkan/external-properties.c \
 	userland/desktop/libvulkan/external-fence.c \
