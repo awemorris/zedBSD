@@ -1069,6 +1069,13 @@ lower_kill(
  */
 #define TMU_OP_REGULAR (15U << 20)
 
+/*
+ * The result component each of a gather's four words lands in.
+ * Values referenced: Mesa 26.2.6 src/compiler/nir/nir_lower_tex.c
+ * (swizzle_tg4_broadcom: the result is the words swizzled 2, 3, 1, 0).
+ */
+static const uint32_t gather_component[4] = { 3U, 2U, 0U, 1U };
+
 /* The most TMU writes of one lookup: S, T, R, I, B and DREF. */
 #define TMU_WRITES 6U
 
@@ -1122,6 +1129,7 @@ lower_sample(
 	uint32_t start_number;
 	uint32_t texel[2];
 	uint32_t index;
+	uint32_t component;
 	uint32_t destination;
 	bool arrayed;
 	bool level;
@@ -1388,13 +1396,21 @@ lower_sample(
 	if (error != 0)
 		return error;
 
-	/* Every requested FIFO result word gets its own independently live physical register, readable by the next instruction. */
+	/*
+	 * Every requested FIFO result word gets its own independently live
+	 * physical register, readable by the next instruction.  A gather's
+	 * words come as the texels (i0, j0), (i1, j0), (i0, j1), (i1, j1):
+	 * Vulkan's order puts them in w, z, x and y.
+	 */
 	for (index = 0; index < 4; index++) {
+		component = index;
+		if (message == DRV_GPU_IR_TEXTURE_GATHER4 || message == DRV_GPU_IR_TEXTURE_GATHER4_COMPARE)
+			component = gather_component[index];
 		error = bcm2711_shader_register(compiler, &destination);
 		if (error != 0)
 			return error;
-		compiler->values[instruction->dst + index].number = destination;
-		compiler->values[instruction->dst + index].register_live = 1;
+		compiler->values[instruction->dst + component].number = destination;
+		compiler->values[instruction->dst + component].register_live = 1;
 		error = bcm2711_shader_signal(compiler, BCM2711_QPU_SIGNAL_TEXTURE, destination, 0);
 		if (error != 0)
 			return error;
