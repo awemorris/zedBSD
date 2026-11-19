@@ -23,16 +23,16 @@ ROOT_INODES ?= 65536
 ROOT_IMAGE := $(BUILD)/ufs-root.img
 $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
+	$(PYTHON) mk/tools/make-rootfs.py \
 		--backend $(abspath $(IMAGE_HOST)) --force \
 		--profile aarch64 --output $@ --tree $(BUILD)/rootfs \
 		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
 SWAP_MIB ?= 64
 SWAP_IMAGE := $(BUILD)/swap.img
-$(SWAP_IMAGE): mk/tools/make-swapfile.noct
+$(SWAP_IMAGE): mk/tools/make-swapfile.py
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
+	$(PYTHON) mk/tools/make-swapfile.py \
 		--size-mib $(SWAP_MIB) --output $@
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
