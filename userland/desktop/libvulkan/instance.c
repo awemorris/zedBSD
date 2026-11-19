@@ -64,7 +64,7 @@ vkCreateInstance(
 	int directory_status;
 	size_t length;
 
-	/* Accepts the default 1.0 request while refusing a later public core version. */
+	/* The application's version, 1.0 when it names none. */
 	version = VK_API_VERSION_1_0;
 	if (pCreateInfo->pApplicationInfo != NULL && pCreateInfo->pApplicationInfo->apiVersion != 0)
 		version = pCreateInfo->pApplicationInfo->apiVersion;

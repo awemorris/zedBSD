@@ -26,7 +26,7 @@
  * version, and the most a device names (version.c decides each device's
  * version from its renderer's answers).
  */
-#define VULKAN_LIBRARY_VERSION		VK_MAKE_VERSION(1, 0, 0)
+#define VULKAN_LIBRARY_VERSION		VK_MAKE_VERSION(1, 1, 0)
 
 #if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
 /*
