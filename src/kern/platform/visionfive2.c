@@ -18,6 +18,11 @@
  * root as it does there.  An SD card booted without a ramdisk carries its
  * root as a UFS partition of its own, which the boot parameters name.
  * Halting, rebooting and powering off go through the hardware layer.
+ * The firmware turns the power off by writing the PMIC over an I2C
+ * controller it leaves to the operating system, so the boot sets that
+ * controller up; a board without it stops every hart instead and waits
+ * for its power to be removed.  The reboot arms the watchdog first, in
+ * case the firmware's reset does not come.
  *
  * The screen the firmware left on, when the loader handed one over, is
  * the hardware layer's: it draws the console there.  The binding only
@@ -129,6 +134,91 @@
 #define VF2_WDT_RESET_ENABLE	0x2U
 #define VF2_WDT_COUNT		24000000U
 #define VF2_WDT_BLOCK_SIZE	0x1000U
+
+/*
+ * The I2C controller the PMIC is on, a Synopsys DesignWare APB I2C core:
+ * the registers the board sets it up and reads the PMIC through, and
+ * their bits.
+ *
+ * Values referenced:
+ * Linux v6.12 drivers/i2c/busses/i2c-designware-core.h (the register
+ * offsets below; IC_CON's master bit 0, standard speed 1 in bits 1 and 2,
+ * restart enable bit 5 and slave disable bit 6; IC_DATA_CMD's read bit 8
+ * and stop bit 9; IC_STATUS's receive FIFO not empty bit 3; the transmit abort bit 6 of IC_RAW_INTR_STAT; the
+ * component type 0x44570140; the receive hold in bits 16 to 23 of
+ * IC_SDA_HOLD).
+ */
+#define VF2_I2C_CON			0x00U
+#define VF2_I2C_TAR			0x04U
+#define VF2_I2C_DATA_CMD		0x10U
+#define VF2_I2C_SS_SCL_HCNT		0x14U
+#define VF2_I2C_SS_SCL_LCNT		0x18U
+#define VF2_I2C_INTR_MASK		0x30U
+#define VF2_I2C_RAW_INTR_STAT		0x34U
+#define VF2_I2C_CLR_INTR		0x40U
+#define VF2_I2C_ENABLE			0x6cU
+#define VF2_I2C_STATUS			0x70U
+#define VF2_I2C_SDA_HOLD		0x7cU
+#define VF2_I2C_TX_ABRT_SOURCE		0x80U
+#define VF2_I2C_ENABLE_STATUS		0x9cU
+#define VF2_I2C_COMP_TYPE		0xfcU
+#define VF2_I2C_COMP_TYPE_VALUE		0x44570140U
+#define VF2_I2C_CON_MASTER		0x01U
+#define VF2_I2C_CON_SPEED_STANDARD	0x02U
+#define VF2_I2C_CON_RESTART_ENABLE	0x20U
+#define VF2_I2C_CON_SLAVE_DISABLE	0x40U
+#define VF2_I2C_DATA_CMD_READ		0x100U
+#define VF2_I2C_DATA_CMD_STOP		0x200U
+#define VF2_I2C_STATUS_RX_NOT_EMPTY	0x08U
+#define VF2_I2C_INTR_TX_ABORT		0x40U
+#define VF2_I2C_SDA_HOLD_RX_MASK	0xffff0000U
+#define VF2_I2C_BLOCK_SIZE		0x1000U
+
+/*
+ * The standard mode (100 kHz) timing the SCL counts are worked out from,
+ * in nanoseconds: the high time with the hold of a start, the low time,
+ * and the fall time assumed when the tree gives none; and the counts'
+ * register limit.  The counts are the controller clock times the time
+ * plus the line's fall time, less 3 for the high count and 1 for the low
+ * count, as the controller adds those cycles itself.
+ *
+ * Values referenced:
+ * Linux v6.12 drivers/i2c/busses/i2c-designware-master.c
+ * (i2c_dw_set_timings_master: 4000 ns and 4700 ns, a 300 ns fall time by
+ * default) and i2c-designware-common.c (i2c_dw_scl_hcnt with its
+ * default rule, less 3; i2c_dw_scl_lcnt, less 1),
+ * i2c-designware-platdrv.c (the data hold time in clock cycles, rounded
+ * to the nearest) and i2c-designware-core.h (the counts kept as 16-bit
+ * values).
+ */
+#define VF2_I2C_SS_HIGH_NS		4000U
+#define VF2_I2C_SS_LOW_NS		4700U
+#define VF2_I2C_DEFAULT_FALL_NS		300U
+#define VF2_I2C_HCNT_LESS		3U
+#define VF2_I2C_LCNT_LESS		1U
+#define VF2_I2C_COUNT_MAX		0xffffU
+
+/* How long one step of a PMIC transfer may take before it counts as failed, in microseconds. */
+#define VF2_I2C_STEP_US			10000U
+
+/* The largest 7-bit I2C address. */
+#define VF2_I2C_ADDRESS_MAX		0x7fU
+
+/* Nanoseconds in a second, for turning times into clock cycles. */
+#define VF2_NS_PER_SECOND		1000000000U
+
+/*
+ * The PMIC register the firmware's power-off and reset write: bit 7
+ * turns every output off, and the firmware's cold reboot sets bit 6 with
+ * it.  The board only reads it, to check that the PMIC answers.
+ *
+ * Values referenced:
+ * Linux v6.12 include/linux/mfd/axp20x.h (AXP15060_PWR_DISABLE_DOWN_SEQ
+ * 0x32) and drivers/mfd/axp20x.c (axp20x_power_off: AXP20X_OFF, bit 7);
+ * OpenSBI v1.3 platform/generic/starfive/jh7110.c (AXP15060_POWER_REG
+ * 0x32, AXP15060_POWER_OFF_BIT bit 7, AXP15060_RESET_BIT bit 6).
+ */
+#define VF2_PMIC_POWER_REGISTER		0x32U
 
 /* Marks a parameter that the kernel's platform interface passes but this board does not need. */
 #define UNUSED_PARAMETER(parameter)	((void)(parameter))
@@ -343,15 +433,52 @@ static int soc_ready;
  * The watchdog's registers, which the reboot arms before it asks the
  * firmware for the reset.
  *
- * The firmware on the board (OpenSBI 1.2 of the vendor's) takes the
- * system reset call and never returns from it, leaving every hart
- * stopped; the watchdog's reset then restarts the SoC.  Mapped by
+ * The firmware on the board (OpenSBI 1.2 of the vendor's) resets the
+ * board through the PMIC, over the bus prepare_pmic_bus() sets up; when
+ * that bus is not set up its call never returns, leaving every hart
+ * stopped, and the watchdog's reset then restarts the SoC.  Mapped by
  * prepare_reset_watchdog() on the boot CPU, with the watchdog's clocks on
  * and its resets released, and kept for the life of the system; NULL
  * when the tree has no watchdog or it could not be brought up, and the
  * reboot then relies on the firmware alone.
  */
 static volatile uint8_t *reset_watchdog;
+
+/*
+ * The I2C controller the PMIC is on, set up as the firmware's power-off
+ * needs it, and the PMIC's address on it.
+ *
+ * The firmware turns the power off by writing the PMIC over this bus,
+ * but its I2C code only names the PMIC and enables the controller: the
+ * controller's mode and SCL counts are left to the operating system, and
+ * so is its reset, which U-Boot asserts when it hands over.  Without the
+ * controller set up, the firmware's call never returns.
+ *
+ * Values referenced:
+ * OpenSBI v1.3 platform/generic/starfive/jh7110.c (pm_system_reset: the
+ * I2C bus clock turned on when it reads 0, the device power domains off,
+ * then the PMIC register read and written back; sbi_hart_hang on any
+ * failure) and lib/utils/i2c/dw_i2c.c (the transfers write only IC_ENABLE,
+ * IC_TAR and IC_DATA_CMD); StarFive's VisionFive 2 OpenSBI tree
+ * (JH7110_VisionFive2_devel, the same code on its 1.2); U-Boot
+ * drivers/i2c/designware_i2c.c (designware_i2c_remove asserts the reset
+ * and stops the clock, run before the OS starts by DM_FLAG_OS_PREPARE).
+ */
+struct vf2_pmic_bus {
+	volatile uint8_t *registers;
+	uint32_t pmic_address;
+	uint32_t high_count;
+	uint32_t low_count;
+	uint32_t hold_count;
+};
+
+/*
+ * The PMIC's bus as prepare_pmic_bus() found and set it up on the boot
+ * CPU, kept for the life of the system; registers is NULL when the tree
+ * has no PMIC or its bus could not be brought up, and the power-off then
+ * stops the harts without asking the firmware.
+ */
+static struct vf2_pmic_bus pmic_bus;
 
 /*
  * The UART the firmware's console uses (/chosen/stdout-path), mapped by
@@ -379,6 +506,11 @@ static void describe_framebuffer(void);
 static void probe_soc(void);
 static void prepare_reset_watchdog(const struct drv_fdt *fdt);
 static void arm_reset_watchdog(void);
+static void prepare_pmic_bus(const struct drv_fdt *fdt);
+static int configure_pmic_bus(void);
+static int read_pmic(uint32_t pmic_register, uint32_t *value);
+static int stop_pmic_bus(void);
+static int wait_pmic_bus(uint32_t offset, uint32_t mask, uint32_t wanted);
 static void describe_clocks(void);
 static void describe_card_detect(const struct drv_fdt *fdt);
 static void attach_sd_card(void);
@@ -590,16 +722,33 @@ kern_platform_halt(
 }
 
 /*
- * Turns the power off through the firmware, halting if that returns.
+ * Turns the power off through the firmware, which writes the PMIC, once
+ * the PMIC's bus is set up for it.  Without the bus, or when the
+ * firmware's call returns, every hart stops with interrupts off, and the
+ * board waits in that state for its power to be removed.
  */
 int
 kern_platform_poweroff(
 	void)
 {
-	/* The hardware layer's power-off does not return when the firmware can turn the power off. */
-	hal_poweroff();
-	for (;;)
-		hal_halt();
+	int error;
+
+	/* Sets the bus up again in case it was changed since the boot, and checks it answers. */
+	error = ENODEV;
+	if (pmic_bus.registers != NULL)
+		error = configure_pmic_bus();
+
+	/* Asks the firmware to turn the power off; it does not return when it can. */
+	if (error == 0) {
+		kern_logf("visionfive2: turning the power off; if it stays on, the board is stopped and the power can be removed\n");
+		hal_poweroff();
+	} else {
+		kern_logf("visionfive2: the power cannot be turned off from here (%d); the board is stopped and the power can be removed\n",
+			  error);
+	}
+
+	/* Stops every hart for good: the firmware's call either never runs or did not return. */
+	hal_cpu_panic_all();
 }
 
 /*
@@ -824,6 +973,9 @@ probe_soc(
 
 	/* Readies the watchdog the reboot falls back on. */
 	prepare_reset_watchdog(&fdt);
+
+	/* Readies the PMIC's bus the firmware turns the power off through. */
+	prepare_pmic_bus(&fdt);
 
 	/* Starts the PCIe root complexes and the USB and NVMe drivers behind them. */
 	error = drv_vf2_pcie_init(&fdt, VF2_DMA_DEFAULT_COHERENT);
@@ -1690,4 +1842,347 @@ arm_reset_watchdog(
 	/* Starts the counter with the reset on expiry, then locks the registers again. */
 	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_CONTROL), VF2_WDT_ENABLE | VF2_WDT_RESET_ENABLE);
 	kern_mmio_write32((volatile uint32_t *)(reset_watchdog + VF2_WDT_LOCK), ~VF2_WDT_UNLOCK_KEY);
+}
+
+/*
+ * Brings the PMIC's I2C controller up for the firmware's power-off: its
+ * pins, its clock and its reset as the tree names them, its registers
+ * mapped, and the controller set up as a standard mode master.  The PMIC
+ * is then read once, to show in the log that it answers.  A tree without
+ * the PMIC, or a step that fails, leaves pmic_bus.registers NULL and is
+ * logged.
+ */
+static void
+prepare_pmic_bus(
+	const struct drv_fdt *fdt)
+{
+	struct drv_vf2_clock clock;
+	struct drv_vf2_reset reset;
+	uint64_t address;
+	uint64_t size;
+	uint64_t rate;
+	uint64_t high;
+	uint64_t low;
+	uint64_t hold;
+	uint32_t pmic;
+	uint32_t bus;
+	uint32_t pmic_address;
+	uint32_t sda_fall_ns;
+	uint32_t scl_fall_ns;
+	uint32_t hold_ns;
+	uint32_t value;
+	unsigned changed;
+	void *mapped;
+	int error;
+
+	/* Finds the PMIC; a tree without one leaves the power-off to stop the harts. */
+	error = drv_fdt_find_compatible(fdt, "x-powers,axp15060", DRV_FDT_NO_NODE, &pmic);
+	if (error != 0)
+		return;
+
+	/* Reads its 7-bit address on the bus, a single cell. */
+	pmic_address = drv_fdt_node_cells(fdt, pmic, "reg", VF2_I2C_ADDRESS_MAX + 1U);
+	if (pmic_address > VF2_I2C_ADDRESS_MAX) {
+		kern_logf("visionfive2: PMIC address not found\n");
+		return;
+	}
+
+	/* Finds the bus it sits on, which the tree must enable. */
+	error = drv_fdt_parent(fdt, pmic, &bus);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus not found (%d)\n", error);
+		return;
+	}
+	if (!drv_fdt_node_enabled(fdt, bus)) {
+		kern_logf("visionfive2: PMIC bus disabled in the device tree\n");
+		return;
+	}
+
+	/* Reads where the controller's registers are, refusing a block too small for them. */
+	error = drv_fdt_reg(fdt, bus, 0, &address, &size);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus registers not found (%d)\n", error);
+		return;
+	}
+	if (size < VF2_I2C_BLOCK_SIZE) {
+		kern_logf("visionfive2: PMIC bus registers too small (%llu bytes)\n", (unsigned long long)size);
+		return;
+	}
+
+	/* Puts the bus's two lines on the controller; a tree that names no pins keeps the firmware's. */
+	changed = 0;
+	error = drv_vf2_pinctrl_apply_default(fdt, bus, &changed);
+	if (error != 0 && error != ENOENT) {
+		kern_logf("visionfive2: PMIC bus pins not set (%d)\n", error);
+		return;
+	}
+
+	/* Finds the controller's clock, which also runs its SCL counts. */
+	error = drv_vf2_clock_lookup(fdt, bus, "ref", &clock);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus clock not found (%d)\n", error);
+		return;
+	}
+
+	/* Starts it. */
+	error = drv_vf2_clock_enable(&clock);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus clock not started (%d)\n", error);
+		return;
+	}
+
+	/* Reads its rate, which the counts are worked out from. */
+	error = drv_vf2_clock_get_rate(&clock, &rate);
+	if (error != 0 || rate == 0) {
+		kern_logf("visionfive2: PMIC bus clock rate unknown (%d)\n", error);
+		return;
+	}
+
+	/* Finds the controller's reset. */
+	error = drv_vf2_reset_lookup_index(fdt, bus, 0, &reset);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus reset not found (%d)\n", error);
+		return;
+	}
+
+	/* Releases it; U-Boot asserted it when it handed over. */
+	error = drv_vf2_reset_deassert(&reset);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus reset not released (%d)\n", error);
+		return;
+	}
+
+	/* Reads the lines' fall times and the data hold time the board's tree gives. */
+	sda_fall_ns = drv_fdt_node_cells(fdt, bus, "i2c-sda-falling-time-ns", VF2_I2C_DEFAULT_FALL_NS);
+	scl_fall_ns = drv_fdt_node_cells(fdt, bus, "i2c-scl-falling-time-ns", VF2_I2C_DEFAULT_FALL_NS);
+	hold_ns = drv_fdt_node_cells(fdt, bus, "i2c-sda-hold-time-ns", 0U);
+
+	/* Converts the high time, with the data line's fall, to clock cycles, rounded to the nearest. */
+	high = (rate * ((uint64_t)VF2_I2C_SS_HIGH_NS + sda_fall_ns) + VF2_NS_PER_SECOND / 2U) / VF2_NS_PER_SECOND;
+
+	/* Converts the low time, with the clock line's fall, the same way. */
+	low = (rate * ((uint64_t)VF2_I2C_SS_LOW_NS + scl_fall_ns) + VF2_NS_PER_SECOND / 2U) / VF2_NS_PER_SECOND;
+
+	/* Converts the data hold time the same way; 0 keeps the controller's own. */
+	hold = (rate * (uint64_t)hold_ns + VF2_NS_PER_SECOND / 2U) / VF2_NS_PER_SECOND;
+
+	/* Refuses counts the registers cannot hold, which a wrong rate would give. */
+	if (high <= VF2_I2C_HCNT_LESS || high > VF2_I2C_COUNT_MAX + VF2_I2C_HCNT_LESS) {
+		kern_logf("visionfive2: PMIC bus high count out of range at %llu Hz\n", (unsigned long long)rate);
+		return;
+	}
+	if (low <= VF2_I2C_LCNT_LESS || low > VF2_I2C_COUNT_MAX + VF2_I2C_LCNT_LESS) {
+		kern_logf("visionfive2: PMIC bus low count out of range at %llu Hz\n", (unsigned long long)rate);
+		return;
+	}
+	if (hold > VF2_I2C_COUNT_MAX) {
+		kern_logf("visionfive2: PMIC bus hold count out of range at %llu Hz\n", (unsigned long long)rate);
+		return;
+	}
+
+	/* Maps the registers as device memory. */
+	error = kern_device_map(address, VF2_I2C_BLOCK_SIZE, KERN_DEVICE_UNCACHED, &mapped);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus not mapped (%d)\n", error);
+		return;
+	}
+
+	/* Records the bus for the setup below and the power-off. */
+	pmic_bus.registers = mapped;
+	pmic_bus.pmic_address = pmic_address;
+	pmic_bus.high_count = (uint32_t)(high - VF2_I2C_HCNT_LESS);
+	pmic_bus.low_count = (uint32_t)(low - VF2_I2C_LCNT_LESS);
+	pmic_bus.hold_count = (uint32_t)hold;
+
+	/* Sets the controller up. */
+	error = configure_pmic_bus();
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC bus at %llx not set up (%d)\n", (unsigned long long)address, error);
+		pmic_bus.registers = NULL;
+		(void)kern_device_unmap(mapped, VF2_I2C_BLOCK_SIZE);
+		return;
+	}
+
+	/* Reads the register the firmware's power-off writes, to show the PMIC answers. */
+	error = read_pmic(VF2_PMIC_POWER_REGISTER, &value);
+	if (error != 0) {
+		kern_logf("visionfive2: PMIC at %llx address %02x does not answer (%d)\n",
+			  (unsigned long long)address, (unsigned)pmic_address, error);
+		pmic_bus.registers = NULL;
+		(void)kern_device_unmap(mapped, VF2_I2C_BLOCK_SIZE);
+		return;
+	}
+
+	/* Succeeded: the power-off can go through the firmware. */
+	kern_logf("visionfive2: PMIC at %llx address %02x, bus clock %llu Hz, SCL counts %u/%u, hold %u, "
+		  "%u pin fields set, power register %02x\n",
+		  (unsigned long long)address, (unsigned)pmic_address, (unsigned long long)rate,
+		  (unsigned)pmic_bus.high_count, (unsigned)pmic_bus.low_count, (unsigned)pmic_bus.hold_count,
+		  changed, (unsigned)value);
+}
+
+/*
+ * Sets the PMIC's controller up as a standard mode master with its
+ * interrupts masked, and leaves it disabled: a transfer, the firmware's
+ * included, names the PMIC and enables it.
+ *
+ * Returns 0, ENODEV when the controller does not read as a DesignWare I2C
+ * core, or ETIMEDOUT when it does not stop.
+ */
+static int
+configure_pmic_bus(
+	void)
+{
+	volatile uint8_t *registers;
+	uint32_t value;
+	int error;
+
+	/* Refuses a controller that does not read back as the core: unclocked or held in reset. */
+	registers = pmic_bus.registers;
+	value = kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_COMP_TYPE));
+	if (value != VF2_I2C_COMP_TYPE_VALUE)
+		return ENODEV;
+
+	/* Stops it, since its mode and counts are written only while it is off. */
+	error = stop_pmic_bus();
+	if (error != 0)
+		return error;
+
+	/* Makes it a master of the standard mode, with 7-bit addresses and repeated starts. */
+	value = VF2_I2C_CON_MASTER | VF2_I2C_CON_SPEED_STANDARD | VF2_I2C_CON_RESTART_ENABLE | VF2_I2C_CON_SLAVE_DISABLE;
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_CON), value);
+
+	/* Sets the SCL high and low counts. */
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_SS_SCL_HCNT), pmic_bus.high_count);
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_SS_SCL_LCNT), pmic_bus.low_count);
+
+	/* Sets the data hold the tree gives, keeping the receive hold. */
+	if (pmic_bus.hold_count != 0) {
+		value = kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_SDA_HOLD));
+		value = (value & VF2_I2C_SDA_HOLD_RX_MASK) | pmic_bus.hold_count;
+		kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_SDA_HOLD), value);
+	}
+
+	/* Masks every interrupt: the transfers poll. */
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_INTR_MASK), 0U);
+
+	/* Clears what earlier transfers left raised. */
+	(void)kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_CLR_INTR));
+
+	/* Succeeded: the controller is set up and off. */
+	return 0;
+}
+
+/*
+ * Reads one register of the PMIC: the register number written, then one
+ * byte read with a stop, polled.  The controller is left disabled.
+ *
+ * Returns 0, EIO when the PMIC did not acknowledge, or ETIMEDOUT when a
+ * step did not finish.
+ */
+static int
+read_pmic(
+	uint32_t pmic_register,
+	uint32_t *value)
+{
+	volatile uint8_t *registers;
+	uint32_t raised;
+	uint32_t abort_source;
+	int error;
+
+	/* Stops the controller while the PMIC's address is set. */
+	registers = pmic_bus.registers;
+	error = stop_pmic_bus();
+	if (error != 0)
+		return error;
+
+	/* Names the PMIC and clears what earlier transfers left raised. */
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_TAR), pmic_bus.pmic_address);
+	(void)kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_CLR_INTR));
+
+	/* Starts the controller. */
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_ENABLE), 1U);
+
+	/* Writes the register number, then asks for one byte with a stop after it. */
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_DATA_CMD), pmic_register);
+	kern_mmio_write32((volatile uint32_t *)(registers + VF2_I2C_DATA_CMD), VF2_I2C_DATA_CMD_READ | VF2_I2C_DATA_CMD_STOP);
+
+	/* Waits for the byte. */
+	error = wait_pmic_bus(VF2_I2C_STATUS, VF2_I2C_STATUS_RX_NOT_EMPTY, VF2_I2C_STATUS_RX_NOT_EMPTY);
+	if (error != 0) {
+		/* Tells an unacknowledged transfer from a stalled one. */
+		raised = kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_RAW_INTR_STAT));
+		abort_source = kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_TX_ABRT_SOURCE));
+		(void)kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_CLR_INTR));
+		(void)stop_pmic_bus();
+		if ((raised & VF2_I2C_INTR_TX_ABORT) != 0) {
+			kern_logf("visionfive2: PMIC transfer aborted (source %08x)\n", (unsigned)abort_source);
+			return EIO;
+		}
+		return error;
+	}
+
+	/* Takes the byte. */
+	*value = kern_mmio_read32((volatile uint32_t *)(registers + VF2_I2C_DATA_CMD)) & 0xffU;
+
+	/* Stops the controller again, as the firmware expects to find it. */
+	return stop_pmic_bus();
+}
+
+/*
+ * Disables the PMIC's controller and waits until it says it is off.
+ *
+ * Returns 0 or ETIMEDOUT.
+ */
+static int
+stop_pmic_bus(
+	void)
+{
+	/* Asks it to stop. */
+	kern_mmio_write32((volatile uint32_t *)(pmic_bus.registers + VF2_I2C_ENABLE), 0U);
+
+	/* Waits for its status to follow. */
+	return wait_pmic_bus(VF2_I2C_ENABLE_STATUS, 1U, 0U);
+}
+
+/*
+ * Waits, spinning on the counter, until the masked bits of one of the
+ * PMIC controller's registers read as wanted.
+ *
+ * Returns 0, or ETIMEDOUT after VF2_I2C_STEP_US or when there is no
+ * counter to time the wait by.
+ */
+static int
+wait_pmic_bus(
+	uint32_t offset,
+	uint32_t mask,
+	uint32_t wanted)
+{
+	uint64_t frequency;
+	uint64_t start;
+	uint64_t now;
+	uint64_t limit;
+	uint32_t value;
+	bool counted;
+
+	/* Notes when the wait started, and how many counts it may last. */
+	counted = hal_rtc_read_counter(&start, &frequency);
+	if (!counted)
+		return ETIMEDOUT;
+	limit = frequency * VF2_I2C_STEP_US / 1000000U;
+
+	/* Reads the register until it matches or the time runs out. */
+	for (;;) {
+		/* Succeeded: the bits read as wanted. */
+		value = kern_mmio_read32((volatile uint32_t *)(pmic_bus.registers + offset));
+		if ((value & mask) == wanted)
+			return 0;
+
+		/* Gives up once the step's time has passed. */
+		counted = hal_rtc_read_counter(&now, &frequency);
+		if (!counted)
+			return ETIMEDOUT;
+		if (now - start > limit)
+			return ETIMEDOUT;
+	}
 }

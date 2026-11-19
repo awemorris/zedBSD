@@ -481,6 +481,20 @@ static const struct crg_clock sys_clocks[] = {
 	{ 123, CLOCK_GATE, 0, 0, 1,
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
 
+	/*
+	 * The bus interface of the I2C controller the PMIC is on, which also
+	 * runs the controller's SCL counts; the board readies the controller
+	 * for the firmware's power-off.
+	 *
+	 * Values referenced:
+	 * Linux v6.12 include/dt-bindings/clock/starfive,jh7110-crg.h
+	 * (JH7110_SYSCLK_I2C5_APB 143) and
+	 * drivers/clk/starfive/clk-starfive-jh7110-sys.c (a gate below
+	 * apb_bus).
+	 */
+	{ 143, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 11, NULL } } },
+
 	/* The audio PWM converter's bus interface. */
 	{ 157, CLOCK_GATE, 0, 0, 1,
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
