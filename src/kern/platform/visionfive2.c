@@ -1614,26 +1614,42 @@ prepare_reset_watchdog(
 
 	/* Reads where its registers are. */
 	error = drv_fdt_reg(fdt, node, 0, &address, &size);
-	if (error != 0 || size < VF2_WDT_BLOCK_SIZE) {
-		kern_logf("visionfive2: watchdog registers unusable (%d)\n", error);
+	if (error != 0) {
+		kern_logf("visionfive2: watchdog registers not found (%d)\n", error);
+		return;
+	}
+
+	/* Refuses a block too small for the lock register. */
+	if (size < VF2_WDT_BLOCK_SIZE) {
+		kern_logf("visionfive2: watchdog registers too small (%llu bytes)\n", (unsigned long long)size);
 		return;
 	}
 
 	/* Starts its bus and counter clocks and releases its two resets, in the tree's order. */
 	for (position = 0; position < 2U; position++) {
-		/* Starts the clock the name selects. */
+		/* Finds the clock the name selects. */
 		error = drv_vf2_clock_lookup(fdt, node, clock_names[position], &clock);
-		if (error == 0)
-			error = drv_vf2_clock_enable(&clock);
 		if (error != 0) {
-			kern_logf("visionfive2: watchdog clock %s unavailable (%d)\n", clock_names[position], error);
+			kern_logf("visionfive2: watchdog clock %s not found (%d)\n", clock_names[position], error);
 			return;
 		}
 
-		/* Releases the reset at the same position. */
+		/* Starts it. */
+		error = drv_vf2_clock_enable(&clock);
+		if (error != 0) {
+			kern_logf("visionfive2: watchdog clock %s not started (%d)\n", clock_names[position], error);
+			return;
+		}
+
+		/* Finds the reset at the same position. */
 		error = drv_vf2_reset_lookup_index(fdt, node, position, &reset);
-		if (error == 0)
-			error = drv_vf2_reset_deassert(&reset);
+		if (error != 0) {
+			kern_logf("visionfive2: watchdog reset %u not found (%d)\n", position, error);
+			return;
+		}
+
+		/* Releases it. */
+		error = drv_vf2_reset_deassert(&reset);
 		if (error != 0) {
 			kern_logf("visionfive2: watchdog reset %u not released (%d)\n", position, error);
 			return;
