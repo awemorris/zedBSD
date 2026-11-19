@@ -10,7 +10,7 @@
 # ATA: partition 2 is an HFS boot partition with the kernel (\vmunix) and
 # the CHRP boot script (\ppc\bootinfo.txt, type tbxi, in the blessed
 # folder), partition 3 the UFS root made from the root tree, partition 4
-# swap (mk/platform-macppc32/tools/make-macppc32-image.py, the PowerPC
+# swap (mk/tools/make-macppc32-image.py, the PowerPC
 # Mac's image tool).  Open Firmware is handed the kernel's 32-bit ELF
 # container (vmunix.elf32), which the tool reads.
 #
@@ -22,9 +22,9 @@ ROOT_MIB ?= 1024
 SWAP_MIB ?= 64
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix.elf32 $(BUILD)/rootfs/.stamp \
-		mk/platform-macppc32/tools/make-macppc32-image.py \
-		mk/platform-macppc32/tools/hfs.py
-	$(PYTHON) mk/platform-macppc32/tools/make-macppc32-image.py \
+		mk/tools/make-macppc32-image.py \
+		mk/tools/hfs.py
+	$(PYTHON) mk/tools/make-macppc32-image.py \
 		--kernel $(BUILD)/vmunix.elf32 \
 		--root-tree $(BUILD)/rootfs \
 		--boot-mib $(MACPPC64_BOOT_MIB) \

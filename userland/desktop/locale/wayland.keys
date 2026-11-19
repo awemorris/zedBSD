@@ -1,4 +1,4 @@
-# The compositor's texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source).
+# The compositor's texts that reach kl_tr through a variable (mk/tools/tr.py reads this with the source).
 # App Home's own entries (home.c home_add_app), drawn with kl_tr(app->name).
 msg	Lock Screen
 msg	Log Out

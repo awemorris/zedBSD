@@ -1,4 +1,4 @@
-# Files' texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source, WS158 p004).
+# Files' texts that reach kl_tr through a variable (mk/tools/tr.py reads this with the source, WS158 p004).
 # The sidebar's places (places.c places_folders and places_add), drawn with kl_tr(place->label).
 msg	Today
 msg	Home

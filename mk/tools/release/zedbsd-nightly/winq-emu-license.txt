@@ -1,0 +1,32 @@
+WINQ-EMU launcher and installer (winq-emu.ico)
+==============================================
+
+winq-emu.ico is the launcher icon of WINQ-EMU:
+https://github.com/cmspam/winq-emu/blob/d14088845e9db1a49727ba8f2cc9a7117e5d8189/launcher/winq-emu.ico
+
+The "License" section of that project's README.md states:
+
+  - QEMU: GPL-2.0
+  - virglrenderer: MIT
+  - Launcher/installer: MIT
+
+The repository gives no separate copyright line for the launcher. The MIT
+license reads:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -441,4 +441,4 @@ chosen in the firmware's boot menu.
 | Installer | [`userland/desktop/installer/`](../../userland/desktop/installer/) |
 | install-admin | [`userland/desktop/installer/admin/`](../../userland/desktop/installer/admin/) |
 | Image rules | [`platform/amd64/installer-image.mk`](../../platform/amd64/installer-image.mk), [`platform/amd64/installer-items`](../../platform/amd64/installer-items) |
-| Manifest, units, index, live root | [`tools/build/`](../../tools/build/) (`installer-manifest.py`, `installer-units.py`, `installer-live.py`, `installer-root-size.py`) |
+| Manifest, units, index, live root | [`mk/tools/`](../../mk/tools/) (`installer-manifest.py`, `installer-units.py`, `installer-live.py`, `installer-root-size.py`) |

@@ -22,7 +22,7 @@ its progress text only to the debug port (a failure is still shown).
 through the transition's quiet entry, which draws none either, so the logo
 stays until the kernel takes the screen.  Both stay in the parameter record;
 the kernel ignores `logo=` and reads `kmsg=`.  The images put
-`tools/build/make-boot-logo.py`'s logo on the ESP as `/logo.ppm`.
+`mk/tools/make-boot-splash.py`'s logo on the ESP as `/logo.ppm`.
 
 Two keys change one boot without editing the file.  The loader reads
 the firmware's extended console input (`EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL`)

@@ -1,4 +1,4 @@
-/* Host-side binary-format backend for the Noct build scripts. */
+/* Host-side binary-format backend for the image build scripts (mk/tools). */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
@@ -951,8 +951,8 @@ disk_create_native(
 /*
  * Parses a byte count that may carry an M suffix, meaning MiB.
  *
- * The Noct build scripts compute in 32-bit integers, so a size beyond
- * 2 GiB reaches this program as a count of MiB instead.
+ * The build scripts pass the image sizes they have in MiB this way, and a
+ * caller whose integers are 32-bit can name a size beyond 2 GiB with it.
  */
 static uint64_t
 parse_size_bytes(
@@ -1018,9 +1018,9 @@ static void disk_create_variant(struct diskopt *o){
         fail("selected amd64 disk layout requires machine pcat");
     /*
      * The payload partition holds everything the loader reads at boot, so
-     * its capacity follows what was actually built.  make-bios-hdd-image
-     * measures the inputs and states the geometry, which is also what it
-     * gives the checker, so one place decides it.
+     * its capacity follows what was actually built.  The caller measures
+     * the inputs and states the geometry, which is also what it gives the
+     * checker, so one place decides it.
      */
     if(o->ufs_root||o->fragment_kernel)
         fail("selected disk layout received a legacy mode override");
@@ -1093,7 +1093,7 @@ ufs_command(
 		fail("unsupported UFS argument");
 	}
 
-	/* Reads the size; one ending in M is in MiB, since the build scripts' integers are 32-bit. */
+	/* Reads the size; one ending in M is in MiB. */
 	size = parse_size_bytes(argv[2]);
 	if (size > SIZE_MAX || size > UFS_IMAGE_MAX_BYTES)
 		fail("UFS image exceeds producer limit");

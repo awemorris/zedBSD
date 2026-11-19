@@ -13,7 +13,7 @@ HOST_CC ?= cc
 IMAGE_HOST ?= $(BUILD)/zedimage-host
 
 # Host image tool
-$(IMAGE_HOST): mk/old-tools/build/zedimage-host.c
+$(IMAGE_HOST): mk/tools/zedimage-host.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
 

@@ -1,4 +1,4 @@
-# The installer's texts in Japanese (domain installer). tools/i18n/tr.py update keeps the translations.
+# The installer's texts in Japanese (domain installer). mk/tools/tr.py update keeps the translations.
 # userland/desktop/locale/installer.keys:3
 msg	The running system uses this disk.	動作中のシステムがこのディスクを使っています。
 # userland/desktop/locale/installer.keys:4

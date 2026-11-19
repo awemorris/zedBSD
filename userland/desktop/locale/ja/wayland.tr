@@ -1,4 +1,4 @@
-# The compositor's texts in Japanese (domain wayland, WS158). tools/i18n/tr.py update keeps the translations.
+# The compositor's texts in Japanese (domain wayland, WS158). mk/tools/tr.py update keeps the translations.
 # userland/desktop/locale/wayland.keys:3
 msg	Lock Screen	画面をロック
 # userland/desktop/locale/wayland.keys:4, userland/desktop/wayland/power-dialog.c:546

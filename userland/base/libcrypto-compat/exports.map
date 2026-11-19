@@ -8,7 +8,7 @@
 /*
  * The calls <compat/crypto/*.h> declares, then the library's own inner interface (the cryc_ names, which
  * libssl-compat.so links against and nothing else may).  The map has no version node: the checker of the
- * shared libraries (tools/build/check-dynamic-elf.py) takes no symbol version definitions in a library, as in
+ * shared libraries (mk/tools/check-dynamic-elf.py) takes no symbol version definitions in a library, as in
  * every other library of the system.
  */
 {

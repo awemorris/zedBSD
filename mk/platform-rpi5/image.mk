@@ -13,7 +13,7 @@ HOST_CC ?= cc
 IMAGE_HOST ?= $(BUILD)/zedimage-host
 
 # Host image tool
-$(IMAGE_HOST): mk/old-tools/build/zedimage-host.c
+$(IMAGE_HOST): mk/tools/zedimage-host.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
 
@@ -38,10 +38,10 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.py
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
 		$(SWAP_IMAGE) $(BUILD)/config.txt $(BUILD)/cmdline.txt \
 		$(RPI5_BOOT_FIRMWARE_CACHE_FILES) \
-		mk/platform-rpi5/tools/make-rpi4-ufs-root-hdd-image.py \
-		mk/platform-rpi5/tools/make-rpi4-hdd-image.py \
-		mk/platform-rpi5/tools/check-rpi4-hdd-image.py
-	$(PYTHON) mk/platform-rpi5/tools/make-rpi4-ufs-root-hdd-image.py --force \
+		mk/tools/make-rpi4-ufs-root-hdd-image.py \
+		mk/tools/make-rpi4-hdd-image.py \
+		mk/tools/check-rpi4-hdd-image.py
+	$(PYTHON) mk/tools/make-rpi4-ufs-root-hdd-image.py --force \
 		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
 		--swap-image $(SWAP_IMAGE) \
 		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \
@@ -54,7 +54,7 @@ image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
 image-rpi5: image-platform
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) mk/platform-rpi5/tools/check-rpi4-hdd-image.py \
+	$(PYTHON) mk/tools/check-rpi4-hdd-image.py \
 		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
 		--swap-image $(SWAP_IMAGE) \
 		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \

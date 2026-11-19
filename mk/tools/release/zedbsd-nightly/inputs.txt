@@ -1,0 +1,24 @@
+# Pinned inputs for the zedbsd-nightly base archive.
+# Format: <file name> <SHA-256> <URL>. Each file is downloaded once into the
+# cache directory and must match its digest before anything reads it.
+# The MSYS2 packages are the exact UCRT64 packages whose DLLs are bundled
+# (matched by SHA-256 of each DLL); the QEMU release supplies the firmware
+# license texts, and the firmware in share/ is identical to its pc-bios/.
+qemu-11.0.0.tar.xz c04ca36012653f32d11c674d370cf52a710e7d3f18c2d8b63e4932052a4854d6 https://download.qemu.org/qemu-11.0.0.tar.xz
+virglrenderer-e80354b8-COPYING 3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402 https://raw.githubusercontent.com/awemorris/virglrenderer/e80354b8f5a0dedc62374b905a181874682659cc/COPYING
+mingw-w64-ucrt-x86_64-bzip2-1.0.8-3-any.pkg.tar.zst 932da2c63b23e6a4448757eb36fb198a9e51121874408270afe2c91bada513c7 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-bzip2-1.0.8-3-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-dtc-1.7.2-3-any.pkg.tar.zst c6c7c77ef7934c949dff43d9853b593123e1d5ac1d2a3ab4c2b8134df162537d https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-dtc-1.7.2-3-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-gcc-libs-15.2.0-14-any.pkg.tar.zst 0d5492221473ff2456941572a6c03358798161e7ddc8239850a3922027253ef4 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-libs-15.2.0-14-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-gettext-runtime-1.0-1-any.pkg.tar.zst ba693dda4ac375af76ce481ff3a6e7481286546cc7dc6d56c7021dae34084157 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gettext-runtime-1.0-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-glib2-2.88.0-1-any.pkg.tar.zst 9fe5e3b252cc6f83613d3f8fe50d5e2ab0759a2d627b56bfe7d25cc3e45c875f https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-glib2-2.88.0-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-libepoxy-1.5.10-7-any.pkg.tar.zst c6c6994e8ec49071f06cc1fae475406bdf17603d4687ad0bcac2e11078cfd7c8 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libepoxy-1.5.10-7-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-libffi-3.5.2-1-any.pkg.tar.zst 36ddb7f89c020e1a1a56b3633069a5f9ace10b312c4a81a78198ee5d5d175c47 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libffi-3.5.2-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-libiconv-1.19-1-any.pkg.tar.zst 9a500f38c2b91808741c62fae746b3e9110b33a1ecf5c30fa0c66dbedddf7e16 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libiconv-1.19-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-libslirp-4.9.1-2-any.pkg.tar.zst 3f168db0ee754b0eb67d5bf22bb080e40f9f9aec5e35ba5fcbba5d8417539267 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libslirp-4.9.1-2-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r14.g4761eabdd-1-any.pkg.tar.zst a91f0255e9829840e16e05ccbf19d1c22c3cf6fdb93fce60f25b41babe46ea81 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r14.g4761eabdd-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-ncurses-6.6-4-any.pkg.tar.zst 88331fe78470ef2c5e0280652fee5e10b6dcaa35f8037725c359407f2702309c https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-ncurses-6.6-4-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-pcre2-10.47-1-any.pkg.tar.zst 839bc4642f94c44e94e331c9092c6d186b1edc54dfdf6a81cb2062f638417023 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-pcre2-10.47-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-pixman-0.46.4-1-any.pkg.tar.zst 4ceca9d787155e7cd7255832a4731a6e6ae03f581080a42150af3e8f564768b4 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-pixman-0.46.4-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-SDL2-2.32.10-1-any.pkg.tar.zst 9e77124b14bedaafbfb44ac26e5fb43890184db23292cebf2251b2178fad6693 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-SDL2-2.32.10-1-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-zlib-1.3.2-2-any.pkg.tar.zst 841401182976d2f9e17e5c0ebaac51f2a8014140ea53d67625e91c8fb3c85ea0 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-zlib-1.3.2-2-any.pkg.tar.zst
+mingw-w64-ucrt-x86_64-zstd-1.5.7-1-any.pkg.tar.zst a05acb75b5f31d1dc27727662c6b60e6cd822fbb1b74261610ff3011de6fadc8 https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-zstd-1.5.7-1-any.pkg.tar.zst

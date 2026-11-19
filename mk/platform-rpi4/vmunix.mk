@@ -113,18 +113,18 @@ VMUNIX_OBJS := \
 .PHONY: vmunix-platform
 vmunix-platform: $(BUILD)/vmunix
 
-$(BUILD)/kernel.elf: $(VMUNIX_OBJS) mk/platform-rpi4/vmunix.ld mk/platform-rpi4/tools/check-arm64-vmunix.py
+$(BUILD)/kernel.elf: $(VMUNIX_OBJS) mk/platform-rpi4/vmunix.ld mk/tools/check-arm64-vmunix.py
 	@echo "  LD      kernel.elf"
 	@mkdir -p $(dir $@)
 	@$(LD) -m aarch64elf --gc-sections -z max-page-size=4096 -T mk/platform-rpi4/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
 	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || { $(NM) -u $@; exit 1; }
-	@$(PYTHON) mk/platform-rpi4/tools/check-arm64-vmunix.py --elf $@
+	@$(PYTHON) mk/tools/check-arm64-vmunix.py --elf $@
 
-$(BUILD)/vmunix: $(BUILD)/kernel.elf mk/platform-rpi4/tools/check-arm64-vmunix.py
+$(BUILD)/vmunix: $(BUILD)/kernel.elf mk/tools/check-arm64-vmunix.py
 	@echo "  OBJCOPY kernel.elf vmunix"
 	@mkdir -p $(dir $@)
 	@$(OBJCOPY) -O binary $< $@
-	@$(PYTHON) mk/platform-rpi4/tools/check-arm64-vmunix.py --elf $< --image $@
+	@$(PYTHON) mk/tools/check-arm64-vmunix.py --elf $< --image $@
 
 $(BUILD)/%.o: %.c
 	@echo "  CC      $<"

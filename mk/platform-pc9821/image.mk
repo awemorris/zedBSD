@@ -16,7 +16,7 @@ HOST_CC ?= cc
 IMAGE_HOST ?= $(BUILD)/zedimage-host
 
 # Host image tool
-$(IMAGE_HOST): mk/old-tools/build/zedimage-host.c
+$(IMAGE_HOST): mk/tools/zedimage-host.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
 
@@ -77,9 +77,9 @@ BOOTLOADER_DEPS := $(BUILD)/bootloader/stage1.bin \
 		   $(BUILD)/bootloader/BOOTZBSD.EXE
 
 $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(BOOTLOADER_DEPS) $(BOOT_CONFIG_STAMP) \
-		mk/platform-pc9821/tools/make-pc98-hdd-image.py \
-		mk/platform-pc9821/tools/check-pc98-hdd-image.py
-	$(PYTHON) mk/platform-pc9821/tools/make-pc98-hdd-image.py --force \
+		mk/tools/make-pc98-hdd-image.py \
+		mk/tools/check-pc98-hdd-image.py
+	$(PYTHON) mk/tools/make-pc98-hdd-image.py --force --heads 8 \
 		--kernel $(BUILD)/vmunix \
 		--zedbsd-config $(ZEDBSD_CONFIG) \
 		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \
@@ -95,7 +95,7 @@ $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(BOOTLOADER_DEPS) $(BOOT_CONFIG_STAMP) \
 image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) mk/platform-pc9821/tools/check-pc98-hdd-image.py \
+	$(PYTHON) mk/tools/check-pc98-hdd-image.py --heads 8 \
 		--kernel $(BUILD)/vmunix \
 		--zedbsd-config $(ZEDBSD_CONFIG) \
 		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \

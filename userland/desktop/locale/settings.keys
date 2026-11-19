@@ -1,4 +1,4 @@
-# Settings' texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source, WS158 p004).
+# Settings' texts that reach kl_tr through a variable (mk/tools/tr.py reads this with the source, WS158 p004).
 # The pages' names and summaries (pages.c se_pages), drawn with kl_tr(page->name) and kl_tr(page->summary).
 msg	Settings
 msg	Change how {1} looks and works.
