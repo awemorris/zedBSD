@@ -1060,6 +1060,15 @@ lower_kill(
 #define TMU_SF 41U
 #define TMU_SLOD 42U
 
+/*
+ * The operation field of the TMU's third configuration word (bits 20 to
+ * 23) for a regular lookup, which a word left out means.
+ * Values referenced: Mesa 26.2.6 src/broadcom/cle/v3d_packet.xml (TMU
+ * Config Parameter 2 of 7.1, the TMU Op enum's Regular 15) and
+ * src/broadcom/compiler/v3d_tex.c (p2_unpacked_default).
+ */
+#define TMU_OP_REGULAR (15U << 20)
+
 /* The most TMU writes of one lookup: S, T, R, I, B and DREF. */
 #define TMU_WRITES 6U
 
@@ -1344,11 +1353,16 @@ lower_sample(
 	if (error != 0)
 		return error;
 
-	/* The third word only when it says something (an all-zero word is the default). */
+	/*
+	 * The third word only when it says something.  The word left out is
+	 * the regular lookup; a word written names its operation (bits 20 to
+	 * 23), and 0 there is a prefetch that returns nothing, so the reads
+	 * of the result would wait for ever.
+	 */
 	if (third != 0) {
 		kern_memset(&uniform, 0, sizeof(uniform));
 		uniform.kind = BCM2711_SHADER_CONSTANT;
-		uniform.bits = third;
+		uniform.bits = third | TMU_OP_REGULAR;
 		error = bcm2711_shader_uniform_append(compiler, &uniform);
 		if (error != 0)
 			return error;
