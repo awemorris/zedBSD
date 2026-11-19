@@ -1,0 +1,9 @@
+include mk/platform-pc9801ns/defaults.mk
+include mk/platform-pc9801ns/libc.mk
+include mk/platform-pc9801ns/sysroot.mk
+include mk/platform-pc9801ns/vmunix.mk
+include mk/platform-pc9801ns/firmware.mk
+include mk/platform-pc9801ns/bootloader.mk
+include mk/platform-pc9801ns/programs.mk
+include mk/platform-pc9801ns/rootfs.mk
+include mk/platform-pc9801ns/image.mk
