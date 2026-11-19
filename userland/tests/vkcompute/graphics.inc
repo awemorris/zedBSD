@@ -3190,10 +3190,15 @@ gfx_check_timestamp(
 }
 
 /*
- * g-occlusion and g-occlusion-mrt: the query available and its count, the
- * target's pixels once each however many colour targets the draw writes
- * (any count but 0 without precise queries: word 16 is 1 when it is
- * nonzero), and the draw's colours (2, or g-mrt-blend's two targets).
+ * g-occlusion and g-occlusion-mrt: the query available and its count, and
+ * the draw's colours (2, or g-mrt-blend's two targets).  A precise count is
+ * the target's pixels, or the pixels times the colour targets the shader
+ * writes: Intel's Gen12 counts PS_DEPTH_COUNT once for each render-target
+ * write message, and Mesa's anv and iris give the same (on the Latitude
+ * 5330's Alder Lake, Debian's Mesa 25.2.6 anv counted 8192 for a 64 x 64
+ * draw writing two targets, 4096 writing one of the two).
+ * Without precise queries any count but 0 passes (word 16 is 1 when it is
+ * nonzero).
  */
 static void
 gfx_check_occlusion(
@@ -3201,13 +3206,23 @@ gfx_check_occlusion(
 	const struct gfx_test *test,
 	uint32_t *const *words)
 {
+	uint32_t expected;
+	uint32_t targets;
 	uint32_t index;
 
-	/* The availability, then the count: exact when precise. */
+	/* The colour targets the draw's shader writes. */
+	targets = 1U;
+	if (test->options != NULL && test->options->color_count == 2U)
+		targets = 2U;
+
+	/* The availability, then the count: the pixels, or the pixels once for each target written, when precise. */
 	oracle_expect(check, 1U, 2U, words[1][2], 1U);
 	oracle_expect(check, 1U, 3U, words[1][3], 0U);
 	if (gfx_occlusion_precise) {
-		oracle_expect(check, 1U, 0U, words[1][0], GFX_PIXELS);
+		expected = GFX_PIXELS;
+		if (words[1][0] == GFX_PIXELS * targets)
+			expected = GFX_PIXELS * targets;
+		oracle_expect(check, 1U, 0U, words[1][0], expected);
 		oracle_expect(check, 1U, 1U, words[1][1], 0U);
 	} else {
 		oracle_expect(check, 1U, 16U, (words[1][0] | words[1][1]) != 0U ? 1U : 0U, 1U);

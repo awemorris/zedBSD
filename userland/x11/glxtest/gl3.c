@@ -619,7 +619,13 @@ gl3_conditional(void)
 	gl3_quad(gl3_outputs, gl3_outputs_rect, gl3_outputs_colour, 0.0f, 0.0f, 1.0f, 1.0f, GL3_RED);
 	glEndQuery(GL_SAMPLES_PASSED);
 
-	/* Their counts (the draw's is all the texels when the device counts exactly, at least some otherwise). */
+	/*
+	 * Their counts: the draw's is at least one and at most the texels, or
+	 * the texels once for each of the two targets the shader writes, as
+	 * Intel's Gen12 counts (once for each render-target write message;
+	 * Debian's Mesa 25.2.6 on the Latitude 5330's Alder Lake does the
+	 * same).
+	 */
 	counted = 1U;
 	glGetQueryObjectuiv(queries[0], GL_QUERY_RESULT, &counted);
 	counts &= gl3_expect("samples-none", (long)counted, 0L);
@@ -628,6 +634,8 @@ gl3_conditional(void)
 	printf("GLXTEST GL3 samples-passed=%d of %d\n", (int)signed_count, GL3_SIDE * GL3_SIDE);
 	within = 0;
 	if (signed_count > 0 && signed_count <= GL3_SIDE * GL3_SIDE)
+		within = 1;
+	if (signed_count == 2 * GL3_SIDE * GL3_SIDE)
 		within = 1;
 	counts &= gl3_expect("samples-some", (long)within, 1L);
 	gl3_outcomes[5] = counts;
