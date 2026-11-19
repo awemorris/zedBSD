@@ -65,7 +65,7 @@ programs, and `mk/config.mk` lists every setting with its description.
 On an x86_64 Linux host, install the prebuilt LLVM below `build/llvm/`:
 
 ```sh
-make CONFIGMK=config/config.rpi5.mk llvm-toolchain-cached
+make CONFIGMK=config/config.rpi5.mk toolchain-cached
 ```
 
 It downloads the archive of release `rev-0` of the zedBSD repository (the
@@ -73,9 +73,12 @@ asset named in `mk/toolchain-llvm/version.mk`) once to `build/releases/` and unp
 when `build/llvm/bin/clang` is already there it does nothing.  On other hosts,
 or to build LLVM yourself from the official LLVM 23.1.0 source and the zedBSD
 patch in `mk/toolchain-llvm/patches/`, run `make CONFIGMK=... toolchain` instead; it
-takes much longer.  The host Noct interpreter that runs the image scripts is
-built from source below `build/NoctLang/` by the first build that needs it
-(`make CONFIGMK=... toolchain-cached` does both at once).
+takes much longer.  The image scripts below `mk/tools/` run with the host's
+`python3`.
+
+The m68k platform (`mac68k`) is built with GCC and binutils instead of LLVM:
+`make CONFIGMK=... toolchain` builds them from the official GNU sources
+(`mk/gcc/version.mk`) into `build/gcc/`.
 
 ## 4. Build the sysroot
 
