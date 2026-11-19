@@ -29,3 +29,12 @@ override ZEDBSD_MPFR_ARCHIVE_SHA256 := b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a
 override ZEDBSD_MPC_ARCHIVE_NAME := mpc-1.3.1.tar.gz
 override ZEDBSD_MPC_ARCHIVE_URL := https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 override ZEDBSD_MPC_ARCHIVE_SHA256 := ab642492f5cf882b74aa0cb730cd410a81edcdbec895183ce930e706c1c759b8
+
+# The prebuilt toolchain (build/gcc of an x86_64 Linux host), a release
+# asset that "make toolchain-gcc-cached" fetches instead of building.  The
+# patch level names the patches (patches/) the asset was built with; a
+# change of the patches or the configuration needs a new asset.
+override ZEDBSD_GCC_PATCH_LEVEL := zedbsd1
+override ZEDBSD_GCC_CACHE_TAG := rev-0
+override ZEDBSD_GCC_CACHE_ASSET := zedbsd-gcc-14.4.0-zedbsd1-m68k-elf-x86_64-linux.tar.gz
+override ZEDBSD_GCC_CACHE_SHA256 := c7da75fc175592fdfe39f7228dc33ede4ff6beca18b781da0d826df6aef086c5

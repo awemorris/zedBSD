@@ -64,9 +64,12 @@ GCC_PATCHES := $(sort $(wildcard $(GCC_DIR)/patches/*.patch))
 # made (makeinfo is not needed).
 GCC_HOST_FLAGS := CFLAGS=-O2 CXXFLAGS=-O2 MAKEINFO=true
 
+# The configure options.  The prefix is given apart from them, so that
+# what the toolchain is built from does not name the directory it is
+# installed in: the installed tools find each other relative to their own
+# place, and a prebuilt toolchain extracted in another tree matches.
 BINUTILS_CONFIGURE_OPTIONS := \
 	--target=$(GCC_TARGET) \
-	--prefix=$(GCC_INSTALL) \
 	--disable-nls \
 	--disable-werror \
 	--disable-gdb \
@@ -81,7 +84,6 @@ BINUTILS_CONFIGURE_OPTIONS := \
 
 GCC_CONFIGURE_OPTIONS := \
 	--target=$(GCC_TARGET) \
-	--prefix=$(GCC_INSTALL) \
 	$(GCC_TARGET_OPTIONS) \
 	--enable-languages=c \
 	--without-headers \
@@ -190,18 +192,71 @@ $(GCC_SOURCE)/.extracted:
 GCC_BUILD_ID := $(BINUTILS_SOURCE_ID) $(GCC_SOURCE_ID) \
 	$(BINUTILS_CONFIGURE_OPTIONS) $(GCC_CONFIGURE_OPTIONS) $(GCC_HOST_FLAGS)
 
-# The toolchain is built again when its sources or configuration changed.
+# The toolchain is built again, from its sources, only when its sources
+# or configuration changed: an installed toolchain that matches (built
+# here, or extracted from the prebuilt archive) needs no sources.
 ifneq ($(shell cat $(GCC_INSTALL)/.zedbsd-$(GCC_TARGET) 2>/dev/null),$(GCC_BUILD_ID))
-$(GCC_INSTALL)/.zedbsd-$(GCC_TARGET): gcc-source-stale
+$(GCC_INSTALL)/.zedbsd-$(GCC_TARGET): gcc-source-stale $(BINUTILS_SOURCE)/.extracted $(GCC_SOURCE)/.extracted
 endif
 
-$(GCC_INSTALL)/.zedbsd-$(GCC_TARGET): $(BINUTILS_SOURCE)/.extracted $(GCC_SOURCE)/.extracted
+$(GCC_INSTALL)/.zedbsd-$(GCC_TARGET):
 	rm -rf $(GCC_BUILD)
 	mkdir -p $(GCC_BUILD)/binutils $(GCC_BUILD)/gcc $(GCC_INSTALL)
-	cd $(GCC_BUILD)/binutils && $(BINUTILS_SOURCE)/configure $(BINUTILS_CONFIGURE_OPTIONS) $(GCC_HOST_FLAGS)
+	cd $(GCC_BUILD)/binutils && $(BINUTILS_SOURCE)/configure --prefix=$(GCC_INSTALL) $(BINUTILS_CONFIGURE_OPTIONS) $(GCC_HOST_FLAGS)
 	$(GCC_SUBMAKE) -C $(GCC_BUILD)/binutils
 	$(GCC_SUBMAKE) -C $(GCC_BUILD)/binutils install
-	cd $(GCC_BUILD)/gcc && PATH='$(GCC_BIN)':"$$PATH" $(GCC_SOURCE)/configure $(GCC_CONFIGURE_OPTIONS) $(GCC_HOST_FLAGS)
+	cd $(GCC_BUILD)/gcc && PATH='$(GCC_BIN)':"$$PATH" $(GCC_SOURCE)/configure --prefix=$(GCC_INSTALL) $(GCC_CONFIGURE_OPTIONS) $(GCC_HOST_FLAGS)
 	$(GCC_SUBMAKE) -C $(GCC_BUILD)/gcc all-gcc all-target-libgcc
 	$(GCC_SUBMAKE) -C $(GCC_BUILD)/gcc install-gcc install-target-libgcc
 	echo '$(GCC_BUILD_ID)' > $@
+
+#
+# The prebuilt toolchain
+#
+# build/gcc of an x86_64 Linux host, as a release asset (version.mk).
+# "toolchain-gcc-cached" fetches it, checks its SHA-256 and that it was
+# built from the sources and configuration this tree names (its stamp),
+# and puts it in place of build/gcc; "toolchain-gcc-cache-archive" makes
+# the asset from this tree's build/gcc.
+#
+
+GCC_CACHE_URL := https://github.com/awemorris/zedBSD/releases/download/$(ZEDBSD_GCC_CACHE_TAG)/$(ZEDBSD_GCC_CACHE_ASSET)
+GCC_CACHE_ARCHIVE := $(REPO_ROOT)/build/releases/$(ZEDBSD_GCC_CACHE_ASSET)
+GCC_STAMP := $(GCC_INSTALL)/.zedbsd-$(GCC_TARGET)
+
+.PHONY: toolchain-gcc-cached toolchain-gcc-cache-archive
+
+toolchain-gcc-cached:
+	@if [ "$$(cat '$(GCC_STAMP)' 2>/dev/null)" = '$(GCC_BUILD_ID)' ]; then \
+		echo "GCC toolchain already installed at $(GCC_INSTALL)"; \
+	else \
+		mkdir -p '$(dir $(GCC_CACHE_ARCHIVE))' && \
+		if [ ! -f '$(GCC_CACHE_ARCHIVE)' ]; then \
+			echo "Downloading GCC cache $(ZEDBSD_GCC_CACHE_ASSET)..." && \
+			curl --fail --location --output '$(GCC_CACHE_ARCHIVE).part' '$(GCC_CACHE_URL)' && \
+			mv '$(GCC_CACHE_ARCHIVE).part' '$(GCC_CACHE_ARCHIVE)' || exit 1; \
+		fi && \
+		echo '$(ZEDBSD_GCC_CACHE_SHA256)  $(GCC_CACHE_ARCHIVE)' | sha256sum -c - && \
+		echo "Extracting GCC cache..." && \
+		rm -rf '$(GCC_INSTALL).new' && \
+		mkdir -p '$(GCC_INSTALL).new' && \
+		tar -xzf '$(GCC_CACHE_ARCHIVE)' --strip-components=1 -C '$(GCC_INSTALL).new' && \
+		if [ "$$(cat '$(GCC_INSTALL).new/.zedbsd-$(GCC_TARGET)' 2>/dev/null)" != '$(GCC_BUILD_ID)' ]; then \
+			echo "$(ZEDBSD_GCC_CACHE_ASSET) was not built from this tree's GCC sources and configuration" >&2; \
+			exit 1; \
+		fi && \
+		rm -rf '$(GCC_INSTALL)' && \
+		mv '$(GCC_INSTALL).new' '$(GCC_INSTALL)'; \
+	fi
+	@'$(GCC_BIN)/$(GCC_TARGET)-gcc' -dumpversion | grep -Fx '$(ZEDBSD_GCC_VERSION)' >/dev/null
+	@'$(GCC_BIN)/$(GCC_TARGET)-ld' --version | grep -F '$(ZEDBSD_BINUTILS_VERSION)' >/dev/null
+
+# The archive holds the directory gcc/ with ordered names, no owners and
+# fixed times, compressed without a name or a time.
+toolchain-gcc-cache-archive: toolchain-gcc
+	@mkdir -p '$(dir $(GCC_CACHE_ARCHIVE))'
+	tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
+		-C '$(dir $(GCC_INSTALL))' -cf - '$(notdir $(GCC_INSTALL))' | \
+		gzip -n -9 > '$(GCC_CACHE_ARCHIVE).part'
+	mv '$(GCC_CACHE_ARCHIVE).part' '$(GCC_CACHE_ARCHIVE)'
+	@sha256sum '$(GCC_CACHE_ARCHIVE)'
