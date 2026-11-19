@@ -2264,6 +2264,7 @@ drv_i915_gfx_emit_pixel_shader(
 	uint32_t statistics;
 	uint32_t source;
 	uint32_t outputs;
+	uint32_t uav;
 	uint64_t scratch;
 
 	/* Reads the varyings in pairs of slots, at least one pair. */
@@ -2389,9 +2390,14 @@ drv_i915_gfx_emit_pixel_shader(
 	if (kernels->ps_omask != 0U)
 		outputs |= GEN12_3DSTATE_PS_EXTRA_OMASK;
 
-	/* Programs PS_EXTRA: valid, whether the kernel discards, what its payload and its writes carry, and reads attributes. */
+	/* A draw while an occlusion query is active declares a UAV, so the query counts each pixel once. */
+	uav = 0U;
+	if (kernels->ps_has_uav != 0U)
+		uav = GEN12_3DSTATE_PS_EXTRA_HAS_UAV;
+
+	/* Programs PS_EXTRA: valid, whether the kernel discards, what its payload and its writes carry, the UAV, and reads attributes. */
 	drv_i915_batch_emit(batch, GEN12_CMD_HEADER(GEN12_CMD_3DSTATE_PS_EXTRA, GEN12_3DSTATE_PS_EXTRA_DWORDS));
-	drv_i915_batch_emit(batch, (1U << 31) | kills | source | outputs | (has_varyings << 8));
+	drv_i915_batch_emit(batch, (1U << 31) | kills | source | outputs | uav | (has_varyings << 8));
 }
 
 /*

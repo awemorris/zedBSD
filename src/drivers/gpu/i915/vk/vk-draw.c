@@ -560,6 +560,10 @@ drv_i915_gfx_draw(
 	/* Takes the pipeline's kernels and their push data layouts. */
 	drv_i915_gfx_pipeline_kernels(state->pipeline, &kernels);
 
+	/* A draw while an occlusion query is active has its pixel stage declare a UAV. */
+	if (work->occlusion_queries != 0U)
+		kernels.ps_has_uav = 1U;
+
 	/* Refuses a geometry stage the draw cannot run: its input primitive. */
 	if (kernels.gs_code != NULL) {
 		error = i915_draw_geometry_check(state->pipeline, &kernels);

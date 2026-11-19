@@ -138,6 +138,13 @@ struct i915_gfx_kernels {
 	 */
 	uint32_t ps_no_statistics;
 
+	/*
+	 * Nonzero for a draw recorded while an occlusion query is active: the
+	 * pixel stage declares a UAV (3DSTATE_PS_EXTRA Pixel Shader Has UAV),
+	 * as Mesa does for a correct PS_DEPTH_COUNT.
+	 */
+	uint32_t ps_has_uav;
+
 	/* Bit n: fragment input n is gl_PointCoord, the point sprite's texture coordinate (0 for a rectangle). */
 	uint32_t ps_point_sprite_mask;
 

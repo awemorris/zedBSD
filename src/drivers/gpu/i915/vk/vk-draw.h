@@ -75,6 +75,13 @@ struct i915_gfx_session {
 	 */
 	int transfer_pending;
 
+	/*
+	 * How many occlusion queries the recorded operations have begun and
+	 * not ended: a draw recorded while one is active has its pixel stage
+	 * declare a UAV (i915_gfx_kernels.ps_has_uav).
+	 */
+	uint32_t occlusion_queries;
+
 	/* When the submission in progress started, for the frame timing. */
 	uint64_t submit_start;
 

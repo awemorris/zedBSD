@@ -717,6 +717,13 @@ drv_i915_gfx_query_execute(
 		drv_i915_batch_emit(space.batch, (uint32_t)(va >> 32));
 		drv_i915_batch_emit(space.batch, 0U);
 		drv_i915_batch_emit(space.batch, 0U);
+
+		/* Notes the queries active for the draws recorded after it. */
+		if (op->kind == I915_GFX_OP_QUERY_BEGIN) {
+			work->occlusion_queries++;
+		} else if (work->occlusion_queries != 0U) {
+			work->occlusion_queries--;
+		}
 	}
 
 	/* An end or a timestamp makes the query available; a reset makes each of its range unavailable. */
