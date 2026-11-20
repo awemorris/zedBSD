@@ -64,6 +64,15 @@ static void command_encode_render_clear(struct vulkan_writer *writer, const VkAt
 static void command_buffers_local_free(uint32_t count, VkCommandBuffer *buffers);
 static void command_buffer_initial(struct VkCommandBuffer_T *command);
 static void command_buffer_release(struct vulkan_object *object);
+static VkResult command_allocate_native(struct VkDevice_T *device, struct vulkan_command_pool *pool, const VkCommandBufferAllocateInfo *info, VkCommandBuffer *buffers);
+static VkResult command_record_start(struct VkCommandBuffer_T *command, size_t start);
+static void command_event_add(struct VkCommandBuffer_T *command, uint64_t event, enum vulkan_event_action action);
+static VkBool32 command_event_local(VkCommandBuffer commandBuffer, enum vulkan_event_action action, VkEvent event);
+static VkBool32 command_wait_local(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent *pEvents, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask, uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers, uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers, uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers);
+static VkBool32 command_execute_local(VkCommandBuffer commandBuffer, uint32_t commandBufferCount, const VkCommandBuffer *pCommandBuffers);
+static VkSubpassContents command_contents(struct VkCommandBuffer_T *command, VkSubpassContents contents);
+static void command_pass_keep(struct VkCommandBuffer_T *command, const VkRenderPassBeginInfo *info, VkFramebuffer framebuffer);
+static VkBool32 command_next_subpass_local(VkCommandBuffer commandBuffer);
 
 /*
  * Creates a normal command pool with the requested queue family and allocation flags.
@@ -227,13 +236,10 @@ vkAllocateCommandBuffers(
 	struct vulkan_command_pool *pool;
 	struct VkCommandBuffer_T *command;
 	struct vulkan_object *object;
-	struct vulkan_writer writer;
-	struct vulkan_reader reader;
 	VkCommandBuffer *buffers;
+	VkBool32 local;
 	uint32_t count;
 	uint32_t index;
-	uint64_t returned;
-	uint64_t identity;
 	size_t bytes;
 	VkResult status;
 
@@ -283,40 +289,20 @@ vkAllocateCommandBuffers(
 		return status;
 	}
 
-	/* Sends the exact pool, level, and output identities for this dynamic batch. */
-	vulkan_writer_init_for_object(&writer, &pool->object);
-	vulkan_command_begin(&writer, GPU_OP_ALLOCATE_COMMAND_BUFFERS);
-	vulkan_write_u64(&writer, owner->object.wire_id);
-	vulkan_write_u64(&writer, 1);
-	vulkan_encode_VkCommandBufferAllocateInfo(&writer, pAllocateInfo);
-	vulkan_write_u64(&writer, count);
-	for (index = 0; index < count; index++) {
-		command = (struct VkCommandBuffer_T *)buffers[index];
-		vulkan_write_u64(&writer, command->object.wire_id);
-	}
-
-	/* The native API either allocates the whole batch or frees all partial native allocations. */
-	status = vulkan_command_execute(owner->object.context, &writer, (size_t)count * 8 + 16, &reader, VK_TRUE);
-	vulkan_writer_finish(&writer);
-	if (status == VK_SUCCESS) {
-		/* Requires exactly this batch count before accepting any returned identity. */
-		returned = vulkan_read_u64(&reader);
-		if (returned != count)
-			reader.error = VK_ERROR_DEVICE_LOST;
-
-		/* Rejects foreign native identity mappings before exposing caller handles. */
-		for (index = 0;
-		     index < count && reader.error == VK_SUCCESS;
-		     index++) {
-			command = (struct VkCommandBuffer_T *)buffers[index];
-			identity = vulkan_read_u64(&reader);
-			if (identity != command->object.wire_id)
-				reader.error = VK_ERROR_DEVICE_LOST;
-		}
-	}
+	/*
+	 * A native driver's secondary command buffers are the library's alone
+	 * (vkCmdExecuteCommands copies their records); others are the
+	 * renderer's too.
+	 */
+	local = VK_FALSE;
+	if (owner->object.context->native && pAllocateInfo->level == VK_COMMAND_BUFFER_LEVEL_SECONDARY)
+		local = VK_TRUE;
+	for (index = 0; index < count; index++)
+		((struct VkCommandBuffer_T *)buffers[index])->local = local;
+	if (!local)
+		status = command_allocate_native(owner, pool, pAllocateInfo, buffers);
 
 	/* No unsuccessful batch leaves a reachable local command buffer. */
-	status = vulkan_reply_finish(owner->object.context, &reader, status);
 	if (status != VK_SUCCESS) {
 		command_buffers_local_free(count, buffers);
 		vulkan_free(&pool->object.allocator, buffers);
@@ -358,35 +344,44 @@ vkFreeCommandBuffers(
 	struct vulkan_writer writer;
 	struct vulkan_reader reader;
 	uint32_t index;
+	uint32_t native;
 	VkResult status;
 
 	/* Native free consumes exactly the selected command-buffer array, including allowed nulls. */
 	owner = vulkan_device(device);
 	pool = (struct vulkan_command_pool *)vulkan_nondispatchable_object((uint64_t)commandPool);
 
-	/* The batches the command buffers still send go before the free. */
+	/* The batches the command buffers still send go before the free; the library's own are not the renderer's. */
+	native = 0U;
 	for (index = 0; index < commandBufferCount; index++) {
 		command = (struct VkCommandBuffer_T *)pCommandBuffers[index];
 		if (command != NULL)
 			command_sent_wait(command);
+		if (command == NULL || !command->local)
+			native++;
 	}
 
-	vulkan_writer_init_for_object(&writer, &pool->object);
-	vulkan_command_begin(&writer, GPU_OP_FREE_COMMAND_BUFFERS);
-	vulkan_write_u64(&writer, owner->object.wire_id);
-	vulkan_write_u64(&writer, pool->object.wire_id);
-	vulkan_write_u32(&writer, commandBufferCount);
-	vulkan_write_u64(&writer, commandBufferCount);
-	for (index = 0; index < commandBufferCount; index++) {
-		vulkan_encode_handle(&writer, (uint64_t)(uintptr_t)pCommandBuffers[index]);
-	}
+	/* The renderer's command buffers, the nulls among them. */
+	if (native != 0U) {
+		vulkan_writer_init_for_object(&writer, &pool->object);
+		vulkan_command_begin(&writer, GPU_OP_FREE_COMMAND_BUFFERS);
+		vulkan_write_u64(&writer, owner->object.wire_id);
+		vulkan_write_u64(&writer, pool->object.wire_id);
+		vulkan_write_u32(&writer, native);
+		vulkan_write_u64(&writer, native);
+		for (index = 0; index < commandBufferCount; index++) {
+			command = (struct VkCommandBuffer_T *)pCommandBuffers[index];
+			if (command == NULL || !command->local)
+				vulkan_encode_handle(&writer, (uint64_t)(uintptr_t)pCommandBuffers[index]);
+		}
 
-	/* A failed native free must not let surviving local commands reuse uncertain native ownership. */
-	status = vulkan_command_execute(owner->object.context, &writer, 4, &reader, VK_FALSE);
-	vulkan_writer_finish(&writer);
-	status = vulkan_reply_finish(owner->object.context, &reader, status);
-	if (status != VK_SUCCESS)
-		vulkan_context_error(owner->object.context, VK_ERROR_DEVICE_LOST);
+		/* A failed native free must not let surviving local commands reuse uncertain native ownership. */
+		status = vulkan_command_execute(owner->object.context, &writer, 4, &reader, VK_FALSE);
+		vulkan_writer_finish(&writer);
+		status = vulkan_reply_finish(owner->object.context, &reader, status);
+		if (status != VK_SUCCESS)
+			vulkan_context_error(owner->object.context, VK_ERROR_DEVICE_LOST);
+	}
 
 	/* Releases only the requested local objects after native consumption or terminal session loss. */
 	for (index = 0; index < commandBufferCount; index++) {
@@ -425,15 +420,29 @@ vkBeginCommandBuffer(
 	if (command->end_pending != VK_FALSE)
 		(void)command_pending_send(command);
 
-	/* Begin discards the earlier recording's bytes and failure. */
+	/* Begin discards the earlier recording's bytes, records, event actions and failure. */
 	command->recording.bytes = 0;
 	command->recording.error = VK_SUCCESS;
+	command->record_count = 0U;
+	command->event_count = 0U;
 
 	/* The discarded recording's swapchain-image writes are never submitted. */
 	vulkan_content_clear(command);
 
 	/* The framebuffers the discarded recording made. */
 	command_framebuffers_release(command);
+
+	/* The library's own secondary command buffer records with no renderer's Begin. */
+	if (command->local) {
+		command->head_bytes = 0;
+		command->head_replies = 0;
+		command->reset_pending = VK_FALSE;
+		command->error = VK_SUCCESS;
+		command->state = VULKAN_COMMAND_RECORDING;
+
+		/* Succeeded: following recording calls keep their records. */
+		return VK_SUCCESS;
+	}
 
 	/* Primary buffers never dereference their ignored inheritance pointer. */
 	begin = *pBeginInfo;
@@ -509,8 +518,20 @@ vkEndCommandBuffer(
 	VkResult status;
 	size_t limit;
 
-	/* Prepares the sole result-bearing record after every deferred void command. */
+	/* The library's own secondary command buffer ends with its records kept, or its failure. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
+	if (command->local) {
+		if (command->error != VK_SUCCESS) {
+			command->state = VULKAN_COMMAND_INVALID;
+			return command->error;
+		}
+		command->state = VULKAN_COMMAND_EXECUTABLE;
+
+		/* Succeeded: vkCmdExecuteCommands may copy its records. */
+		return VK_SUCCESS;
+	}
+
+	/* Prepares the sole result-bearing record after every deferred void command. */
 	command_sent_wait(command);
 	prior = command->error;
 	vulkan_writer_init_for_object(&writer, &command->object);
@@ -1010,6 +1031,18 @@ command_record_finish(
 	if (status != VK_SUCCESS)
 		command->recording.bytes = start;
 
+	/* The library's own secondary command buffer keeps every record, and where it starts. */
+	if (command->local) {
+		if (status == VK_SUCCESS)
+			status = command_record_start(command, start);
+		if (status != VK_SUCCESS) {
+			command->recording.bytes = start;
+			command->error = status;
+			command->state = VULKAN_COMMAND_INVALID;
+		}
+		return;
+	}
+
 	/* Leave space for the final result-bearing End record. */
 	limit = command_batch_limit(command);
 
@@ -1405,6 +1438,20 @@ command_buffer_release(
 	/* The framebuffers the recording made. */
 	command_framebuffers_release(command);
 
+	/* Where the records start, and the event actions. */
+	free(command->record_starts);
+	command->record_starts = NULL;
+	command->record_count = 0U;
+	command->record_capacity = 0U;
+	free(command->events);
+	command->events = NULL;
+	command->event_count = 0U;
+	command->event_capacity = 0U;
+	free(command->pass_clears);
+	command->pass_clears = NULL;
+	command->pass_clear_count = 0U;
+	command->pass_clear_capacity = 0U;
+
 	/* The recording's own storage. */
 	command->recording.allocator = object->allocator;
 	vulkan_writer_finish(&command->recording);
@@ -1546,6 +1593,10 @@ command_encode_render_begin(
 	if (status != VK_SUCCESS && writer->error == VK_SUCCESS)
 		writer->error = status;
 
+	/* What moving to the next subpass of a render pass the library split begins again with. */
+	if (status == VK_SUCCESS && command->object.context->native)
+		command_pass_keep(command, info, framebuffer);
+
 	/* Preserves the standard render area and ordinary object identities in protocol order. */
 	vulkan_write_u32(writer, info->sType);
 	vulkan_write_u64(writer, 0);
@@ -1684,6 +1735,8 @@ command_buffer_initial(
 	command->head_replies = 0;
 	command->reset_pending = VK_FALSE;
 	command->end_pending = VK_FALSE;
+	command->record_count = 0U;
+	command->event_count = 0U;
 	command->error = VK_SUCCESS;
 	command->state = VULKAN_COMMAND_INITIAL;
 
@@ -1745,4 +1798,393 @@ command_draw_indirect_count(
 
 	/* Retain this complete command independently of caller pointer lifetimes. */
 	command_record_finish(command, &writer);
+}
+
+/*
+ * Allocates a batch's command buffers in the renderer: the pool, the level
+ * and the output identities (the local objects of buffers, already
+ * reserved).
+ */
+static VkResult
+command_allocate_native(
+	struct VkDevice_T *device,
+	struct vulkan_command_pool *pool,
+	const VkCommandBufferAllocateInfo *info,
+	VkCommandBuffer *buffers)
+{
+	struct VkCommandBuffer_T *command;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint64_t returned;
+	uint64_t identity;
+	uint32_t count;
+	uint32_t index;
+	VkResult status;
+
+	/* Sends the exact pool, level, and output identities for this dynamic batch. */
+	count = info->commandBufferCount;
+	vulkan_writer_init_for_object(&writer, &pool->object);
+	vulkan_command_begin(&writer, GPU_OP_ALLOCATE_COMMAND_BUFFERS);
+	vulkan_write_u64(&writer, device->object.wire_id);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferAllocateInfo(&writer, info);
+	vulkan_write_u64(&writer, count);
+	for (index = 0; index < count; index++) {
+		command = (struct VkCommandBuffer_T *)buffers[index];
+		vulkan_write_u64(&writer, command->object.wire_id);
+	}
+
+	/* The native API either allocates the whole batch or frees all partial native allocations. */
+	status = vulkan_command_execute(device->object.context, &writer, (size_t)count * 8 + 16, &reader, VK_TRUE);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS) {
+		/* Requires exactly this batch count before accepting any returned identity. */
+		returned = vulkan_read_u64(&reader);
+		if (returned != count)
+			reader.error = VK_ERROR_DEVICE_LOST;
+
+		/* Rejects foreign native identity mappings before exposing caller handles. */
+		for (index = 0;
+		     index < count && reader.error == VK_SUCCESS;
+		     index++) {
+			command = (struct VkCommandBuffer_T *)buffers[index];
+			identity = vulkan_read_u64(&reader);
+			if (identity != command->object.wire_id)
+				reader.error = VK_ERROR_DEVICE_LOST;
+		}
+	}
+
+	/* Refused, or succeeded: the renderer made every one. */
+	return vulkan_reply_finish(device->object.context, &reader, status);
+}
+
+/* Keeps where one more record of the library's own secondary command buffer starts. */
+static VkResult
+command_record_start(
+	struct VkCommandBuffer_T *command,
+	size_t start)
+{
+	size_t *starts;
+	uint32_t capacity;
+
+	/* Room for one more, doubled when full. */
+	if (command->record_count == command->record_capacity) {
+		capacity = 64U;
+		if (command->record_capacity != 0U)
+			capacity = command->record_capacity * 2U;
+		if (capacity <= command->record_capacity)
+			return VK_ERROR_OUT_OF_HOST_MEMORY;
+		starts = realloc(command->record_starts, (size_t)capacity * sizeof(*starts));
+		if (starts == NULL)
+			return VK_ERROR_OUT_OF_HOST_MEMORY;
+		command->record_starts = starts;
+		command->record_capacity = capacity;
+	}
+
+	/* Succeeded: the record is known. */
+	command->record_starts[command->record_count] = start;
+	command->record_count++;
+	return VK_SUCCESS;
+}
+
+/*
+ * Keeps one action on a native driver's event in the recording's order,
+ * under the same state and earlier-failure checks as every vkCmd* call.
+ */
+static void
+command_event_add(
+	struct VkCommandBuffer_T *command,
+	uint64_t event,
+	enum vulkan_event_action action)
+{
+	struct vulkan_event_record *events;
+	uint32_t capacity;
+
+	/* An earlier failure stays; a recording that is not active fails. */
+	if (command->error != VK_SUCCESS)
+		return;
+	if (command->state != VULKAN_COMMAND_RECORDING) {
+		command->error = VK_ERROR_INITIALIZATION_FAILED;
+		command->state = VULKAN_COMMAND_INVALID;
+		return;
+	}
+
+	/* Room for one more, doubled when full. */
+	if (command->event_count == command->event_capacity) {
+		capacity = 8U;
+		if (command->event_capacity != 0U)
+			capacity = command->event_capacity * 2U;
+		events = NULL;
+		if (capacity > command->event_capacity)
+			events = realloc(command->events, (size_t)capacity * sizeof(*events));
+		if (events == NULL) {
+			command->error = VK_ERROR_OUT_OF_HOST_MEMORY;
+			command->state = VULKAN_COMMAND_INVALID;
+			return;
+		}
+		command->events = events;
+		command->event_capacity = capacity;
+	}
+
+	/* Succeeded: the submission will read it. */
+	command->events[command->event_count].event = event;
+	command->events[command->event_count].action = action;
+	command->event_count++;
+}
+
+/*
+ * Records vkCmdSetEvent or vkCmdResetEvent for a native driver, whose
+ * events are the library's: the recording keeps the action and the
+ * renderer is told nothing; the batch's completion changes the event
+ * (core12.c).  Returns false for a Venus host, whose events are its own.
+ */
+static VkBool32
+command_event_local(
+	VkCommandBuffer commandBuffer,
+	enum vulkan_event_action action,
+	VkEvent event)
+{
+	struct VkCommandBuffer_T *command;
+
+	/* A Venus host records the command itself. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	if (!command->object.context->native)
+		return VK_FALSE;
+
+	/* Succeeded: the action is kept, or the recording holds its failure. */
+	command_event_add(command, (uint64_t)event, action);
+	return VK_TRUE;
+}
+
+/*
+ * Records vkCmdWaitEvents for a native driver: the recording keeps the
+ * waits, which hold the batch back until the events are set (core12.c),
+ * and the renderer gets a pipeline barrier of the same stages and memory
+ * barriers, which orders the commands after the wait behind those before
+ * it in submission order, the sets among them.  Returns false for a Venus
+ * host.
+ *
+ * XXX Inside a render pass the barrier is one the renderer may refuse.
+ *
+ * Procedure referenced: the Vulkan 1.0 specification (section 6.5,
+ * vkCmdWaitEvents: its first synchronization scope is the event's set and
+ * the commands before it in srcStageMask, its second the commands after it
+ * in dstStageMask, with the memory barriers as those of
+ * vkCmdPipelineBarrier).
+ */
+static VkBool32
+command_wait_local(
+	VkCommandBuffer commandBuffer,
+	uint32_t eventCount,
+	const VkEvent *pEvents,
+	VkPipelineStageFlags srcStageMask,
+	VkPipelineStageFlags dstStageMask,
+	uint32_t memoryBarrierCount,
+	const VkMemoryBarrier *pMemoryBarriers,
+	uint32_t bufferMemoryBarrierCount,
+	const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+	uint32_t imageMemoryBarrierCount,
+	const VkImageMemoryBarrier *pImageMemoryBarriers)
+{
+	struct VkCommandBuffer_T *command;
+	uint32_t index;
+
+	/* A Venus host records the command itself. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	if (!command->object.context->native)
+		return VK_FALSE;
+
+	/* Each event waited for. */
+	for (index = 0; index < eventCount; index++)
+		command_event_add(command, (uint64_t)pEvents[index], VULKAN_EVENT_WAIT);
+
+	/* The barrier. */
+	vkCmdPipelineBarrier(
+		commandBuffer,
+		srcStageMask,
+		dstStageMask,
+		0,
+		memoryBarrierCount,
+		pMemoryBarriers,
+		bufferMemoryBarrierCount,
+		pBufferMemoryBarriers,
+		imageMemoryBarrierCount,
+		pImageMemoryBarriers);
+
+	/* Succeeded: the waits and the barrier are recorded, or the recording holds its failure. */
+	return VK_TRUE;
+}
+
+/*
+ * Records vkCmdExecuteCommands for a native driver, whose secondary
+ * command buffers are the library's: each secondary's records are copied
+ * into this recording in order, each as this command buffer's, with its
+ * event actions, as if recorded here.  Returns false for a Venus host,
+ * which executes its own secondary command buffers.
+ */
+static VkBool32
+command_execute_local(
+	VkCommandBuffer commandBuffer,
+	uint32_t commandBufferCount,
+	const VkCommandBuffer *pCommandBuffers)
+{
+	struct VkCommandBuffer_T *command;
+	struct VkCommandBuffer_T *secondary;
+	struct vulkan_writer writer;
+	const uint8_t *record;
+	uint32_t opcode;
+	uint32_t index;
+	uint32_t item;
+	size_t end;
+	size_t start;
+
+	/* A Venus host records the command itself. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	if (!command->object.context->native)
+		return VK_FALSE;
+
+	/* Each secondary in order. */
+	for (index = 0; index < commandBufferCount; index++) {
+		secondary = (struct VkCommandBuffer_T *)pCommandBuffers[index];
+		if (secondary == NULL || !secondary->local) {
+			if (command->error == VK_SUCCESS) {
+				command->error = VK_ERROR_INITIALIZATION_FAILED;
+				command->state = VULKAN_COMMAND_INVALID;
+			}
+			return VK_TRUE;
+		}
+
+		/* Each record: its header made this command buffer's, its body as it is. */
+		for (item = 0; item < secondary->record_count; item++) {
+			start = secondary->record_starts[item];
+			end = secondary->recording.bytes;
+			if (item + 1U < secondary->record_count)
+				end = secondary->record_starts[item + 1U];
+			record = secondary->recording.data + start;
+			opcode = (uint32_t)record[0] | (uint32_t)record[1] << 8 | (uint32_t)record[2] << 16 | (uint32_t)record[3] << 24;
+			if (!command_record_begin(command, &writer, opcode))
+				return VK_TRUE;
+			vulkan_write_bytes(&writer, record + 16, end - start - 16U);
+			command_record_finish(command, &writer);
+		}
+
+		/* Its event actions, after this command buffer's earlier ones. */
+		for (item = 0; item < secondary->event_count; item++)
+			command_event_add(command, secondary->events[item].event, secondary->events[item].action);
+	}
+
+	/* The secondaries' swapchain-image writes become this command buffer's. */
+	vulkan_content_note_secondaries(command, commandBufferCount, pCommandBuffers);
+
+	/* Succeeded: the records are copied, or the recording holds its failure. */
+	return VK_TRUE;
+}
+
+/*
+ * Gives the subpass contents a render pass is begun or advanced with: a
+ * native driver's secondary command buffers are copied into the primary,
+ * so there its subpasses are always inline.
+ */
+static VkSubpassContents
+command_contents(
+	struct VkCommandBuffer_T *command,
+	VkSubpassContents contents)
+{
+	/* A Venus host executes its own secondary command buffers. */
+	if (!command->object.context->native)
+		return contents;
+
+	/* Succeeded: inline. */
+	return VK_SUBPASS_CONTENTS_INLINE;
+}
+
+/*
+ * Keeps the render pass a native driver's recording begins, for
+ * vkCmdNextSubpass: the render pass, the renderer's framebuffer, the area
+ * and a copy of the clear values, in subpass 0.  A failure to copy the
+ * clear values is the recording's.
+ */
+static void
+command_pass_keep(
+	struct VkCommandBuffer_T *command,
+	const VkRenderPassBeginInfo *info,
+	VkFramebuffer framebuffer)
+{
+	VkClearValue *clears;
+
+	/* Room for the clear values (the move to the next subpass begins with the copy itself). */
+	if (info->clearValueCount > command->pass_clear_capacity) {
+		clears = realloc(command->pass_clears, (size_t)info->clearValueCount * sizeof(*clears));
+		if (clears == NULL) {
+			command->error = VK_ERROR_OUT_OF_HOST_MEMORY;
+			command->state = VULKAN_COMMAND_INVALID;
+			return;
+		}
+		command->pass_clears = clears;
+		command->pass_clear_capacity = info->clearValueCount;
+	}
+	if (info->clearValueCount != 0U && info->pClearValues != command->pass_clears)
+		memcpy(command->pass_clears, info->pClearValues, (size_t)info->clearValueCount * sizeof(*command->pass_clears));
+
+	/* Succeeded: the begin is kept. */
+	command->pass_begun = info->renderPass;
+	command->pass_framebuffer = framebuffer;
+	command->pass_area = info->renderArea;
+	command->pass_clear_count = info->clearValueCount;
+	command->pass_subpass = 0U;
+}
+
+/*
+ * Records vkCmdNextSubpass of a render pass the library split for a
+ * native driver: the end of the subpass's render pass, the barrier of the
+ * dependencies on the next subpass, and the begin of the next subpass's
+ * render pass with the same framebuffer, area and clear values.  Returns
+ * false for a render pass the renderer keeps whole (a Venus host's).
+ */
+static VkBool32
+command_next_subpass_local(
+	VkCommandBuffer commandBuffer)
+{
+	struct VkCommandBuffer_T *command;
+	const struct vulkan_subpass_barrier *barrier;
+	VkRenderPassBeginInfo begin;
+	VkMemoryBarrier memory;
+	VkRenderPass original;
+	uint32_t next;
+	uint32_t index;
+
+	/* A render pass the renderer keeps whole. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	if (!command->object.context->native)
+		return VK_FALSE;
+	next = command->pass_subpass + 1U;
+	barrier = vulkan_render_pass_barrier(command->pass_begun, next);
+	if (barrier == NULL)
+		return VK_FALSE;
+
+	/* The end of this subpass's render pass, and the barrier. */
+	vkCmdEndRenderPass(commandBuffer);
+	if (barrier->source != 0U && barrier->destination != 0U) {
+		memset(&memory, 0, sizeof(memory));
+		memory.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memory.srcAccessMask = barrier->source_access;
+		memory.dstAccessMask = barrier->destination_access;
+		vkCmdPipelineBarrier(commandBuffer, barrier->source, barrier->destination, 0, 1U, &memory, 0U, NULL, 0U, NULL);
+	}
+
+	/* The next subpass's render pass, which the render pass's begin is kept as. */
+	original = command->pass_begun;
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	vulkan_render_pass_part(original, next, &begin.renderPass, &index);
+	begin.framebuffer = command->pass_framebuffer;
+	begin.renderArea = command->pass_area;
+	begin.clearValueCount = command->pass_clear_count;
+	begin.pClearValues = command->pass_clears;
+	vkCmdBeginRenderPass(commandBuffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
+	command->pass_begun = original;
+	command->pass_subpass = next;
+
+	/* Succeeded: the next subpass is recorded, or the recording holds its failure. */
+	return VK_TRUE;
 }

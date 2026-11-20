@@ -54,6 +54,7 @@ func encodeScalar(handles, records, type, expression, indent) {
     }
     if (type == "VkClearAttachment") { return indent + "command_encode_clear_attachment(&writer, &" + expression + ");\n"; }
     if (has(records, type)) { return indent + "vulkan_encode_" + type + "(&writer, &" + expression + ");\n"; }
+    if (type == "VkSubpassContents") { return indent + "vulkan_record_u32(&writer, command_contents(command, " + expression + "));\n"; }
     if (type == "VkImageLayout") { return indent + "vulkan_record_u32(&writer, vulkan_wire_image_layout(" + expression + "));\n"; }
     // The words go through the inline writers (vulkan_record_u32, vulkan_record_u64); a float through vulkan_write_float.
     var writer = "vulkan_record_u32";
@@ -70,6 +71,16 @@ func writtenImage(command) {
         ["vkCmdClearColorImage", "image"], ["vkCmdClearDepthStencilImage", "image"]
     ];
     for (i in 0..Array.size(written)) { if (written[i][0] == command) { return written[i][1]; } }
+    return "";
+}
+
+// The call a command makes first that a native driver leaves to the library (events, secondary command buffers, subpasses); "" for the rest.
+func libraryHook(command) {
+    if (command == "vkCmdSetEvent") { return "\n\t/* A native driver's events are the library's: the recording keeps the set. */\n\tif (command_event_local(commandBuffer, VULKAN_EVENT_SET, event))\n\t\treturn;\n"; }
+    if (command == "vkCmdResetEvent") { return "\n\t/* A native driver's events are the library's: the recording keeps the reset. */\n\tif (command_event_local(commandBuffer, VULKAN_EVENT_RESET, event))\n\t\treturn;\n"; }
+    if (command == "vkCmdWaitEvents") { return "\n\t/* A native driver's events are the library's: the recording keeps the waits, with a barrier. */\n\tif (command_wait_local(commandBuffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers))\n\t\treturn;\n"; }
+    if (command == "vkCmdNextSubpass") { return "\n\t/* A native driver's render pass of several subpasses is one render pass for each: the next is begun. */\n\tif (command_next_subpass_local(commandBuffer))\n\t\treturn;\n"; }
+    if (command == "vkCmdExecuteCommands") { return "\n\t/* A native driver's secondary command buffers are the library's: their records are copied in. */\n\tif (command_execute_local(commandBuffer, commandBufferCount, pCommandBuffers))\n\t\treturn;\n"; }
     return "";
 }
 
@@ -129,6 +140,8 @@ func main(args) {
         output = output + "\tstruct VkCommandBuffer_T *command;\n\tstruct vulkan_writer writer;\n\tVkBool32 active;\n";
         if (loop) { output = output + "\tuint32_t index;\n"; }
         if (array) { output = output + "\tuint64_t count;\n"; }
+        var hook = libraryHook(name);
+        if (hook != "") { output = output + hook; hooks = hooks + 1; }
         output = output + "\n\t/* Preserves the first recording failure for vkEndCommandBuffer to report. */\n\tcommand = (struct VkCommandBuffer_T *)commandBuffer;\n\tactive = command_record_begin(command, &writer, " + opName(name) + ");\n\tif (!active)\n\t\treturn;\n";
         var scalars = false;
         for (j in 1..Array.size(parameters)) {
@@ -168,7 +181,7 @@ func main(args) {
         count = count + 1;
     }
     if (count != 44) { System.error("expected forty-four Vulkan 1.0 recording commands, got " + count); }
-    if (hooks != 7) { System.error("expected seven swapchain-content hooks, got " + hooks); }
+    if (hooks != 12) { System.error("expected twelve hooks (seven swapchain-content, five library), got " + hooks); }
     FileUtil.writeText(args[1], output);
     print("maintained forty-four standard recording entry points");
 }

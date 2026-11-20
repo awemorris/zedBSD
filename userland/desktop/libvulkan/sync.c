@@ -57,6 +57,7 @@ static int64_t timing_offset = INT64_MIN;
 static VkResult sync_create(struct VkDevice_T *device, enum vulkan_object_kind kind, uint32_t opcode, uint32_t destroy_opcode, uint32_t structure, VkFlags flags, const VkAllocationCallbacks *allocator, struct vulkan_sync **result);
 static void sync_destroy(struct VkDevice_T *device, struct vulkan_sync *sync, uint32_t opcode, const VkAllocationCallbacks *allocator);
 static VkResult sync_event_operation(VkDevice device, VkEvent event, uint32_t opcode);
+static VkResult sync_event_local(struct VkDevice_T *device, const VkAllocationCallbacks *allocator, struct vulkan_sync **result);
 static struct vulkan_notification *sync_notification_find(struct vulkan_context *context, uint64_t sequence);
 static VkResult sync_notifications_reap(struct vulkan_context *context, unsigned *retired);
 static VkResult sync_notifications_reap_if(struct vulkan_context *context, unsigned *retired, int force);
@@ -342,8 +343,20 @@ vkCreateEvent(
 	uint64_t handle;
 	VkResult status;
 
-	/* Keep event state native so command buffers observe later host changes. */
+	/* A native driver's event is the library's (core12.c). */
 	owner = vulkan_device(device);
+	if (owner->object.context->native) {
+		status = sync_event_local(owner, pAllocator, &sync);
+		if (status != VK_SUCCESS)
+			return status;
+		handle = vulkan_nondispatchable_handle(&sync->object);
+		*pEvent = (VkEvent)(uintptr_t)handle;
+
+		/* Succeeded: the library's event begins reset. */
+		return VK_SUCCESS;
+	}
+
+	/* Keep event state native so command buffers observe later host changes. */
 	status = sync_create(owner, VULKAN_OBJECT_EVENT, GPU_OP_CREATE_EVENT, GPU_OP_DESTROY_EVENT, VK_STRUCTURE_TYPE_EVENT_CREATE_INFO, pCreateInfo->flags, pAllocator, &sync);
 	if (status != VK_SUCCESS)
 		return status;
@@ -371,6 +384,13 @@ vkDestroyEvent(
 	/* Honor the effective destruction allocator, including null-handle cleanup. */
 	owner = vulkan_device(device);
 	sync = vulkan_sync_object((uint64_t)(uintptr_t)event);
+
+	/* A native driver's event is the library's alone. */
+	if (sync != NULL && sync->library_event != NULL) {
+		vulkan_event_destroy(sync);
+		vulkan_object_free_with_allocator(&sync->object, pAllocator);
+		return;
+	}
 	sync_destroy(owner, sync, GPU_OP_DESTROY_EVENT, pAllocator);
 
 	/* Succeeded: the application no longer owns this event. */
@@ -385,7 +405,13 @@ vkGetEventStatus(
 	VkDevice device,
 	VkEvent event)
 {
+	struct vulkan_sync *sync;
 	VkResult status;
+
+	/* A native driver's event is the library's. */
+	sync = vulkan_sync_object((uint64_t)(uintptr_t)event);
+	if (sync != NULL && sync->library_event != NULL)
+		return vulkan_event_status(sync);
 
 	/* Preserve EVENT_SET and EVENT_RESET as the event's meaningful answers. */
 	status = sync_event_operation(device, event, GPU_OP_GET_EVENT_STATUS);
@@ -404,7 +430,13 @@ vkSetEvent(
 	VkDevice device,
 	VkEvent event)
 {
+	struct vulkan_sync *sync;
 	VkResult status;
+
+	/* A native driver's event is the library's; batches held back for it go now. */
+	sync = vulkan_sync_object((uint64_t)(uintptr_t)event);
+	if (sync != NULL && sync->library_event != NULL)
+		return vulkan_event_host(sync, VK_TRUE);
 
 	/* Execute this short host operation independently of GPU fence waiters. */
 	status = sync_event_operation(device, event, GPU_OP_SET_EVENT);
@@ -423,7 +455,13 @@ vkResetEvent(
 	VkDevice device,
 	VkEvent event)
 {
+	struct vulkan_sync *sync;
 	VkResult status;
+
+	/* A native driver's event is the library's. */
+	sync = vulkan_sync_object((uint64_t)(uintptr_t)event);
+	if (sync != NULL && sync->library_event != NULL)
+		return vulkan_event_host(sync, VK_FALSE);
 
 	/* Keep host reset visible to the same event used by command buffers. */
 	status = sync_event_operation(device, event, GPU_OP_RESET_EVENT);
@@ -2534,4 +2572,44 @@ sync_event_operation(
 
 	/* Succeeded: the event operation completed or reported its actual state. */
 	return status;
+}
+
+/*
+ * Creates a native driver's event, which is the library's alone: a local
+ * object with no renderer's identity.
+ */
+static VkResult
+sync_event_local(
+	struct VkDevice_T *device,
+	const VkAllocationCallbacks *allocator,
+	struct vulkan_sync **result)
+{
+	struct vulkan_object *object;
+	struct vulkan_sync *sync;
+	VkResult status;
+
+	/* The local object. */
+	status = vulkan_object_alloc(sizeof(struct vulkan_sync), sizeof(uint64_t), VULKAN_OBJECT_EVENT, &device->object, device->object.context, allocator, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT, &object);
+	if (status != VK_SUCCESS)
+		return status;
+	sync = (struct vulkan_sync *)object;
+
+	/* Its state, reset. */
+	status = vulkan_event_create(sync);
+	if (status != VK_SUCCESS) {
+		vulkan_object_free(object);
+		return status;
+	}
+
+	/* Published once complete. */
+	status = vulkan_object_publish(object);
+	if (status != VK_SUCCESS) {
+		vulkan_event_destroy(sync);
+		vulkan_object_free(object);
+		return status;
+	}
+
+	/* Succeeded: the event exists. */
+	*result = sync;
+	return VK_SUCCESS;
 }

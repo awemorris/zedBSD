@@ -74,6 +74,12 @@ struct vulkan_sync {
 	 * or a fence.  Set at creation, freed at destruction.
 	 */
 	struct vulkan_timeline *timeline;
+	/*
+	 * A native driver's event, which is the library's (core12.c), NULL
+	 * for a Venus host's event or another object.  Set at creation, freed
+	 * at destruction.
+	 */
+	struct vulkan_event *library_event;
 };
 
 /* These helpers never acquire a device mutex; their caller already owns it. */
@@ -105,11 +111,20 @@ VkResult vulkan_external_fence_acquire_locked(struct VkDevice_T *device, struct 
 int vulkan_external_fence_descriptor(struct vulkan_sync *sync);
 void vulkan_external_fence_finish(struct vulkan_sync *sync);
 
-/* Timeline semaphores, which the library makes of binary ones (core12.c). */
+/*
+ * Timeline semaphores, which the library makes of binary ones, and a
+ * native driver's events, which are the library's; a submission that
+ * names either, or goes to a queue with batches held back, goes through
+ * the library (core12.c).
+ */
 VkResult vulkan_timeline_create(struct VkDevice_T *device, struct vulkan_sync *sync, const VkSemaphoreCreateInfo *info);
 void vulkan_timeline_destroy(struct vulkan_sync *sync);
-VkBool32 vulkan_timeline_named(uint32_t count, const VkSubmitInfo *submits);
-VkResult vulkan_timeline_submit(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence);
+VkResult vulkan_event_create(struct vulkan_sync *sync);
+void vulkan_event_destroy(struct vulkan_sync *sync);
+VkResult vulkan_event_status(struct vulkan_sync *sync);
+VkResult vulkan_event_host(struct vulkan_sync *sync, VkBool32 set);
+VkBool32 vulkan_library_sync_named(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits);
+VkResult vulkan_library_sync_submit(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence);
 
 /* Clock sampling and cooperative pauses are performed without Vulkan locks. */
 VkResult vulkan_sync_clock(uint64_t *nanoseconds);
