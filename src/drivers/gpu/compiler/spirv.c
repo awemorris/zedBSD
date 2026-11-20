@@ -260,6 +260,27 @@
 #define OP_EXECUTION_MODE_ID 331U
 #define OP_GROUP_NON_UNIFORM_ELECT 333U
 
+/* The group operations of a subgroup (spirv-subgroup.inc). */
+#define OP_GROUP_NON_UNIFORM_ALL 334U
+#define OP_GROUP_NON_UNIFORM_ANY 335U
+#define OP_GROUP_NON_UNIFORM_ALL_EQUAL 336U
+#define OP_GROUP_NON_UNIFORM_BROADCAST 337U
+#define OP_GROUP_NON_UNIFORM_BROADCAST_FIRST 338U
+#define OP_GROUP_NON_UNIFORM_BALLOT 339U
+#define OP_GROUP_NON_UNIFORM_INVERSE_BALLOT 340U
+#define OP_GROUP_NON_UNIFORM_BALLOT_BIT_EXTRACT 341U
+#define OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT 342U
+#define OP_GROUP_NON_UNIFORM_BALLOT_FIND_LSB 343U
+#define OP_GROUP_NON_UNIFORM_BALLOT_FIND_MSB 344U
+#define OP_GROUP_NON_UNIFORM_SHUFFLE 345U
+#define OP_GROUP_NON_UNIFORM_SHUFFLE_XOR 346U
+#define OP_GROUP_NON_UNIFORM_SHUFFLE_UP 347U
+#define OP_GROUP_NON_UNIFORM_SHUFFLE_DOWN 348U
+#define OP_GROUP_NON_UNIFORM_IADD 349U
+#define OP_GROUP_NON_UNIFORM_LOGICAL_XOR 364U
+#define OP_GROUP_NON_UNIFORM_QUAD_BROADCAST 365U
+#define OP_GROUP_NON_UNIFORM_QUAD_SWAP 366U
+
 /* Opcodes of geometry shaders (spirv-geometry.inc). */
 #define OP_EMIT_VERTEX 218U
 #define OP_END_PRIMITIVE 219U
@@ -339,6 +360,16 @@
 #define BUILTIN_NUM_SUBGROUPS 38U
 #define BUILTIN_SUBGROUP_ID 40U
 #define BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID 41U
+
+/*
+ * The ballots of the invocations of a subgroup at, from, after, up to and
+ * before the invocation (any stage).
+ */
+#define BUILTIN_SUBGROUP_EQ_MASK 4416U
+#define BUILTIN_SUBGROUP_GE_MASK 4417U
+#define BUILTIN_SUBGROUP_GT_MASK 4418U
+#define BUILTIN_SUBGROUP_LE_MASK 4419U
+#define BUILTIN_SUBGROUP_LT_MASK 4420U
 
 /* The view a multiview draw renders (SPV_KHR_multiview). */
 #define BUILTIN_VIEW_INDEX 4440U
@@ -1305,6 +1336,17 @@ static int drv_gpu_spirv_semantics(struct drv_gpu_spirv_parser *parser, uint32_t
 static void drv_gpu_spirv_fence(struct drv_gpu_spirv_parser *parser, uint32_t fences);
 static int drv_gpu_spirv_lower_barrier(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
 static int drv_gpu_spirv_lower_elect(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_invocation_scope(struct drv_gpu_spirv_parser *parser, uint32_t scope_id);
+static int drv_gpu_spirv_group_scope(struct drv_gpu_spirv_parser *parser, uint32_t scope_id, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_group_same(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t value_id, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_group_constant(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t bits);
+static int drv_gpu_spirv_lower_group(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_lower_ballot(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_lower_ballot_read(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_lower_ballot_bit(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_lower_group_arithmetic(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_group_identity(struct drv_gpu_spirv_parser *parser, uint32_t opcode, uint32_t type_id, uint32_t *bits);
+static int drv_gpu_spirv_subgroup_builtin(uint32_t builtin);
 static int drv_gpu_spirv_declare_view_index(struct drv_gpu_spirv_parser *parser, struct drv_gpu_spirv_id *record, uint32_t opcode, uint32_t offset);
 static uint32_t drv_gpu_spirv_group_component(struct drv_gpu_spirv_parser *parser, uint32_t component);
 static int drv_gpu_spirv_geometry_mode(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
@@ -3006,6 +3048,14 @@ drv_gpu_spirv_declare_variable(
 			return error;
 	} else if (storage == SC_INPUT &&
 		   record->has_builtin != 0U &&
+		   drv_gpu_spirv_subgroup_builtin(record->builtin) != 0) {
+		/*
+		 * A graphics stage's subgroup built-in: a load reads the
+		 * constants of a subgroup of one invocation.
+		 */
+		record->ptr_kind = PTR_SYSTEM;
+	} else if (storage == SC_INPUT &&
+		   record->has_builtin != 0U &&
 		   record->builtin == BUILTIN_VIEW_INDEX) {
 		error = drv_gpu_spirv_declare_view_index(parser,
 							 record,
@@ -4182,6 +4232,35 @@ drv_gpu_spirv_lower(
 		/* Succeeded: the election is lowered. */
 		return 0;
 
+	case OP_GROUP_NON_UNIFORM_ALL:
+	case OP_GROUP_NON_UNIFORM_ANY:
+	case OP_GROUP_NON_UNIFORM_ALL_EQUAL:
+	case OP_GROUP_NON_UNIFORM_BROADCAST:
+	case OP_GROUP_NON_UNIFORM_BROADCAST_FIRST:
+	case OP_GROUP_NON_UNIFORM_BALLOT:
+	case OP_GROUP_NON_UNIFORM_INVERSE_BALLOT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_BIT_EXTRACT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_LSB:
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_MSB:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_XOR:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_UP:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_DOWN:
+	case OP_GROUP_NON_UNIFORM_QUAD_BROADCAST:
+	case OP_GROUP_NON_UNIFORM_QUAD_SWAP:
+		/* A vote, a broadcast, a ballot or a shuffle of one invocation. */
+		error = drv_gpu_spirv_lower_group(parser,
+						  word,
+						  count,
+						  opcode,
+						  offset);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the group operation is lowered. */
+		return 0;
+
 	case OP_EMIT_VERTEX:
 	case OP_END_PRIMITIVE:
 		/*
@@ -4808,6 +4887,21 @@ drv_gpu_spirv_lower(
 
 	default:
 		break;
+	}
+
+	/* The arithmetic of a subgroup of one invocation. */
+	if (opcode >= OP_GROUP_NON_UNIFORM_IADD &&
+	    opcode <= OP_GROUP_NON_UNIFORM_LOGICAL_XOR) {
+		error = drv_gpu_spirv_lower_group_arithmetic(parser,
+							     word,
+							     count,
+							     opcode,
+							     offset);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the arithmetic is lowered. */
+		return 0;
 	}
 
 	/*
@@ -17186,6 +17280,9 @@ drv_gpu_spirv_result(
 
 /* The compute part of the parser. */
 #include "spirv-compute.inc"
+
+/* The group operations of a subgroup. */
+#include "spirv-subgroup.inc"
 
 /* The geometry part of the parser. */
 #include "spirv-geometry.inc"

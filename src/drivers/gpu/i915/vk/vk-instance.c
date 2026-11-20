@@ -430,7 +430,7 @@ static void
 i915_instance_core11(
 	struct i915_vkc_core11 *core11)
 {
-	/* What every executor starts from: the subgroup of one invocation in compute shaders. */
+	/* What every executor starts from: the subgroup of one invocation. */
 	i915_vkc_core11_defaults(core11);
 
 	/* Multiview, with the geometry stage. */

@@ -112,6 +112,13 @@ static int reader_texture_size(struct shader_spirv_reader *reader, const uint32_
 static struct powervr_ir_operand sine(struct shader_spirv_reader *reader, struct powervr_ir_operand x, uint32_t quarter);
 static int same_operand(const struct powervr_ir_operand *a, const struct powervr_ir_operand *b);
 static int reader_elect(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
+static int group_scope(struct shader_spirv_reader *reader, uint32_t scope_id);
+static int group_same(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t value_id);
+static int group_constant(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t bits);
+static int reader_group(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
+static int reader_ballot(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
+static int reader_ballot_bit(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
+static int reader_group_arithmetic(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static int reader_barrier(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static int reader_atomic(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static struct powervr_ir_operand memory_load(struct shader_spirv_reader *reader, const struct powervr_ir_operand *address, const struct powervr_ir_operand *offset, uint32_t flags);
@@ -300,6 +307,49 @@ shader_spirv_reader_instruction(
 			return error;
 
 		/* Succeeded: the election is read. */
+		return 0;
+	case OP_GROUP_NON_UNIFORM_ALL:
+	case OP_GROUP_NON_UNIFORM_ANY:
+	case OP_GROUP_NON_UNIFORM_ALL_EQUAL:
+	case OP_GROUP_NON_UNIFORM_BROADCAST:
+	case OP_GROUP_NON_UNIFORM_BROADCAST_FIRST:
+	case OP_GROUP_NON_UNIFORM_BALLOT:
+	case OP_GROUP_NON_UNIFORM_INVERSE_BALLOT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_BIT_EXTRACT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT:
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_LSB:
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_MSB:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_XOR:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_UP:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_DOWN:
+		error = reader_group(reader, words, length);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the vote, broadcast, ballot or shuffle is read. */
+		return 0;
+	case OP_GROUP_NON_UNIFORM_IADD:
+	case OP_GROUP_NON_UNIFORM_FADD:
+	case OP_GROUP_NON_UNIFORM_IMUL:
+	case OP_GROUP_NON_UNIFORM_FMUL:
+	case OP_GROUP_NON_UNIFORM_SMIN:
+	case OP_GROUP_NON_UNIFORM_UMIN:
+	case OP_GROUP_NON_UNIFORM_FMIN:
+	case OP_GROUP_NON_UNIFORM_SMAX:
+	case OP_GROUP_NON_UNIFORM_UMAX:
+	case OP_GROUP_NON_UNIFORM_FMAX:
+	case OP_GROUP_NON_UNIFORM_BITWISE_AND:
+	case OP_GROUP_NON_UNIFORM_BITWISE_OR:
+	case OP_GROUP_NON_UNIFORM_BITWISE_XOR:
+	case OP_GROUP_NON_UNIFORM_LOGICAL_AND:
+	case OP_GROUP_NON_UNIFORM_LOGICAL_OR:
+	case OP_GROUP_NON_UNIFORM_LOGICAL_XOR:
+		error = reader_group_arithmetic(reader, words, length);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the group arithmetic is read. */
 		return 0;
 	case OP_ATOMIC_LOAD:
 	case OP_ATOMIC_STORE:
@@ -3638,6 +3688,404 @@ reader_elect(
 
 	/* Succeeded: the result is true. */
 	return reader->error;
+}
+
+/* Refuses a group operation of a scope other than the subgroup, named by a constant. */
+static int
+group_scope(
+	struct shader_spirv_reader *reader,
+	uint32_t scope_id)
+{
+	struct powervr_ir_operand scope;
+	int error;
+
+	/* The execution scope, a constant. */
+	error = shader_spirv_operand_word(reader, scope_id, 0, &scope);
+	if (error != 0)
+		return error;
+	if (scope.kind != POWERVR_IR_OPERAND_CONSTANT || scope.constant != SCOPE_SUBGROUP)
+		return ENOTSUP;
+
+	/* Succeeded: the operation is the subgroup's. */
+	return 0;
+}
+
+/*
+ * Gives the result words[2], of the type words[1], the words of the value
+ * value_id: an operation of a subgroup of one invocation that answers the
+ * invocation's own value.
+ */
+static int
+group_same(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t value_id)
+{
+	struct powervr_ir_operand *source;
+	struct powervr_ir_operand *operands;
+	uint32_t count;
+	uint32_t words_count;
+	uint32_t at;
+	int error;
+
+	/* The value's words, as many as the result's type has. */
+	if (words[2] >= reader->bound)
+		return EINVAL;
+	error = shader_spirv_id_operands(reader, value_id, &source, &count);
+	if (error != 0)
+		return error;
+	words_count = shader_spirv_scalar_count(reader, words[1]);
+	if (count != words_count)
+		return EINVAL;
+
+	/* The result reads them. */
+	error = shader_spirv_result_begin(reader, words[2], words[1], count, &operands);
+	if (error != 0)
+		return error;
+	for (at = 0; at < count; at++)
+		operands[at] = source[at];
+
+	/* Succeeded: the result is the invocation's value. */
+	return 0;
+}
+
+/* Gives the result words[2], of the type words[1], the constant bits in every word. */
+static int
+group_constant(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t bits)
+{
+	struct powervr_ir_operand *operands;
+	uint32_t count;
+	uint32_t at;
+	int error;
+
+	/* The result's words, each the constant. */
+	if (words[2] >= reader->bound)
+		return EINVAL;
+	count = shader_spirv_scalar_count(reader, words[1]);
+	if (count == 0)
+		return EINVAL;
+	error = shader_spirv_result_begin(reader, words[2], words[1], count, &operands);
+	if (error != 0)
+		return error;
+	for (at = 0; at < count; at++)
+		operands[at] = shader_spirv_constant_operand(bits);
+
+	/* Succeeded: the result is the constant. */
+	return 0;
+}
+
+/*
+ * Reads a vote, a broadcast, a ballot or a shuffle of the subgroup scope.
+ * A subgroup is one invocation, so a vote is its predicate (AllEqual
+ * true), a broadcast and a shuffle its own value (any other invocation an
+ * id could name is past the subgroup, which leaves the result undefined),
+ * a ballot the predicate in bit 0 of the first word, a count of a ballot
+ * its bit 0 (none before it for an exclusive scan) and the lowest and
+ * highest bit of a ballot 0, the subgroup's only bit.
+ *
+ * Values referenced:
+ * The Khronos SPIR-V 1.6 specification, section 3.52.21 (non-uniform
+ * instructions); Vulkan 1.3, section 9.25 (subgroup operations).
+ */
+static int
+reader_group(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t length)
+{
+	uint32_t opcode;
+	int error;
+
+	/* The result type, the result, the scope and the operand. */
+	if (length < 5 || words[1] >= reader->bound)
+		return EINVAL;
+	error = group_scope(reader, words[3]);
+	if (error != 0)
+		return error;
+
+	/* Decides the result by the operation. */
+	opcode = words[0] & 0xffffU;
+	switch (opcode) {
+	case OP_GROUP_NON_UNIFORM_ALL:
+	case OP_GROUP_NON_UNIFORM_ANY:
+	case OP_GROUP_NON_UNIFORM_BROADCAST_FIRST:
+		/* The predicate, or the value, of the only invocation. */
+		if (length != 5)
+			return EINVAL;
+		error = group_same(reader, words, words[4]);
+		break;
+	case OP_GROUP_NON_UNIFORM_ALL_EQUAL:
+		/* One invocation's value equals itself. */
+		if (length != 5)
+			return EINVAL;
+		error = group_constant(reader, words, TRUE_WORD);
+		break;
+	case OP_GROUP_NON_UNIFORM_BROADCAST:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_XOR:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_UP:
+	case OP_GROUP_NON_UNIFORM_SHUFFLE_DOWN:
+		/* The value of the invocation the id, mask or delta names: the only one. */
+		if (length != 6)
+			return EINVAL;
+		error = group_same(reader, words, words[4]);
+		break;
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_LSB:
+	case OP_GROUP_NON_UNIFORM_BALLOT_FIND_MSB:
+		/* The subgroup's only bit, bit 0. */
+		if (length != 5)
+			return EINVAL;
+		error = group_constant(reader, words, 0);
+		break;
+	case OP_GROUP_NON_UNIFORM_BALLOT_BIT_EXTRACT:
+		/* One bit of a ballot, at an index known at run time. */
+		error = reader_ballot_bit(reader, words, length);
+		break;
+	default:
+		/* The ballot, its inverse and its count. */
+		error = reader_ballot(reader, words, length);
+		break;
+	}
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the result is the operation of the one invocation. */
+	return reader->error;
+}
+
+/*
+ * Reads OpGroupNonUniformBallot (the predicate in bit 0 of the first
+ * word), OpGroupNonUniformInverseBallot (whether bit 0 of the first word
+ * is set) and OpGroupNonUniformBallotBitCount (bit 0 for a reduction and
+ * an inclusive scan, 0 for an exclusive scan).
+ */
+static int
+reader_ballot(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t length)
+{
+	struct powervr_ir_operand *operands;
+	struct powervr_ir_operand predicate;
+	struct powervr_ir_operand first;
+	struct powervr_ir_operand one;
+	struct powervr_ir_operand zero;
+	struct powervr_ir_operand bit;
+	uint32_t opcode;
+	uint32_t count;
+	uint32_t at;
+	int error;
+
+	/* A ballot: the predicate's bit, then three clear words. */
+	opcode = words[0] & 0xffffU;
+	one = shader_spirv_constant_operand(1);
+	zero = shader_spirv_constant_operand(0);
+	if (opcode == OP_GROUP_NON_UNIFORM_BALLOT) {
+		count = shader_spirv_scalar_count(reader, words[1]);
+		if (length != 5 || count != 4)
+			return EINVAL;
+		error = shader_spirv_operand_word(reader, words[4], 0, &predicate);
+		if (error != 0)
+			return error;
+		bit = shader_spirv_emit_value(reader, POWERVR_IR_SELECT, &predicate, &one, &zero);
+		error = shader_spirv_result_begin(reader, words[2], words[1], 4, &operands);
+		if (error != 0)
+			return error;
+		operands[0] = bit;
+		for (at = 1; at < 4; at++)
+			operands[at] = zero;
+
+		/* Succeeded: the ballot holds the invocation's bit. */
+		return reader->error;
+	}
+
+	/* A count of an exclusive scan counts no invocation before the only one. */
+	if (opcode == OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT) {
+		if (length != 6)
+			return EINVAL;
+		if (words[4] == GROUP_OPERATION_EXCLUSIVE_SCAN) {
+			error = group_constant(reader, words, 0);
+			if (error != 0)
+				return error;
+
+			/* Succeeded: no bit is counted. */
+			return 0;
+		}
+		if (words[4] != GROUP_OPERATION_REDUCE && words[4] != GROUP_OPERATION_INCLUSIVE_SCAN)
+			return ENOTSUP;
+	} else if (opcode != OP_GROUP_NON_UNIFORM_INVERSE_BALLOT || length != 5) {
+		return EINVAL;
+	}
+
+	/* The invocation's bit, bit 0 of the ballot's first word. */
+	error = shader_spirv_operand_word(reader, words[length - 1], 0, &first);
+	if (error != 0)
+		return error;
+	bit = shader_spirv_emit_value(reader, POWERVR_IR_BIT_AND, &first, &one, NULL);
+	if (opcode == OP_GROUP_NON_UNIFORM_INVERSE_BALLOT)
+		bit = shader_spirv_emit_value(reader, POWERVR_IR_INTEGER_NOT_EQUAL, &bit, &zero, NULL);
+	error = shader_spirv_result_begin(reader, words[2], words[1], 1, &operands);
+	if (error != 0)
+		return error;
+	operands[0] = bit;
+
+	/* Succeeded: the result reads the invocation's bit. */
+	return reader->error;
+}
+
+/*
+ * Reads OpGroupNonUniformBallotBitExtract: whether the ballot's bit at
+ * the index is set, the word the index names chosen among the four and
+ * the bit shifted down from it.
+ */
+static int
+reader_ballot_bit(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t length)
+{
+	struct powervr_ir_operand *operands;
+	struct powervr_ir_operand *ballot;
+	struct powervr_ir_operand index;
+	struct powervr_ir_operand which;
+	struct powervr_ir_operand shift;
+	struct powervr_ir_operand chosen;
+	struct powervr_ir_operand number;
+	struct powervr_ir_operand matched;
+	struct powervr_ir_operand bit;
+	struct powervr_ir_operand one;
+	struct powervr_ir_operand zero;
+	uint32_t count;
+	uint32_t at;
+	int error;
+
+	/* The result type, the result, the scope, the ballot's four words and the index. */
+	if (length != 6)
+		return EINVAL;
+	error = shader_spirv_id_operands(reader, words[4], &ballot, &count);
+	if (error != 0)
+		return error;
+	if (count != 4)
+		return EINVAL;
+	error = shader_spirv_operand_word(reader, words[5], 0, &index);
+	if (error != 0)
+		return error;
+
+	/* The word the index names and the bit's place in it. */
+	number = shader_spirv_constant_operand(5);
+	which = shader_spirv_emit_value(reader, POWERVR_IR_SHIFT_RIGHT, &index, &number, NULL);
+	number = shader_spirv_constant_operand(31);
+	shift = shader_spirv_emit_value(reader, POWERVR_IR_BIT_AND, &index, &number, NULL);
+
+	/* Chooses the word: the first unless the index names a later one. */
+	chosen = ballot[0];
+	for (at = 1; at < 4; at++) {
+		number = shader_spirv_constant_operand(at);
+		matched = shader_spirv_emit_value(reader, POWERVR_IR_INTEGER_EQUAL, &which, &number, NULL);
+		chosen = shader_spirv_emit_value(reader, POWERVR_IR_SELECT, &matched, &ballot[at], &chosen);
+	}
+
+	/* The bit, shifted down to bit 0, and whether it is set. */
+	one = shader_spirv_constant_operand(1);
+	zero = shader_spirv_constant_operand(0);
+	bit = shader_spirv_emit_value(reader, POWERVR_IR_SHIFT_RIGHT, &chosen, &shift, NULL);
+	bit = shader_spirv_emit_value(reader, POWERVR_IR_BIT_AND, &bit, &one, NULL);
+	bit = shader_spirv_emit_value(reader, POWERVR_IR_INTEGER_NOT_EQUAL, &bit, &zero, NULL);
+	error = shader_spirv_result_begin(reader, words[2], words[1], 1, &operands);
+	if (error != 0)
+		return error;
+	operands[0] = bit;
+
+	/* Succeeded: the result is the ballot's bit at the index. */
+	return reader->error;
+}
+
+/*
+ * Reads the group arithmetic of the subgroup scope.  A subgroup is one
+ * invocation, so a reduction, an inclusive scan and a clustered
+ * reduction are the invocation's value (a cluster past the subgroup is
+ * undefined) and an exclusive scan the operation's identity, every word
+ * of the result the same.
+ */
+static int
+reader_group_arithmetic(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t length)
+{
+	uint32_t opcode;
+	uint32_t bits;
+	int error;
+
+	/* The result type, the result, the scope, the group operation, the value and maybe the cluster's size. */
+	if (length < 6 || words[1] >= reader->bound)
+		return EINVAL;
+	error = group_scope(reader, words[3]);
+	if (error != 0)
+		return error;
+	if (words[4] == GROUP_OPERATION_CLUSTERED_REDUCE) {
+		if (length != 7)
+			return EINVAL;
+	} else if (length != 6) {
+		return EINVAL;
+	}
+
+	/* A reduction, a scan of the value itself, or a clustered reduction. */
+	if (words[4] == GROUP_OPERATION_REDUCE ||
+	    words[4] == GROUP_OPERATION_INCLUSIVE_SCAN ||
+	    words[4] == GROUP_OPERATION_CLUSTERED_REDUCE) {
+		error = group_same(reader, words, words[5]);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the result is the invocation's value. */
+		return 0;
+	}
+
+	/* Refuses a partitioned operation. */
+	if (words[4] != GROUP_OPERATION_EXCLUSIVE_SCAN)
+		return ENOTSUP;
+
+	/* The identity of the operation, of its one type (32-bit integers and floats, Booleans). */
+	opcode = words[0] & 0xffffU;
+	switch (opcode) {
+	case OP_GROUP_NON_UNIFORM_IMUL:
+		bits = 1;
+		break;
+	case OP_GROUP_NON_UNIFORM_FMUL:
+		bits = FLOAT_ONE;
+		break;
+	case OP_GROUP_NON_UNIFORM_SMIN:
+		bits = 0x7fffffffU;
+		break;
+	case OP_GROUP_NON_UNIFORM_SMAX:
+		bits = 0x80000000U;
+		break;
+	case OP_GROUP_NON_UNIFORM_UMIN:
+	case OP_GROUP_NON_UNIFORM_BITWISE_AND:
+	case OP_GROUP_NON_UNIFORM_LOGICAL_AND:
+		bits = 0xffffffffU;
+		break;
+	case OP_GROUP_NON_UNIFORM_FMIN:
+		bits = FLOAT_INFINITY;
+		break;
+	case OP_GROUP_NON_UNIFORM_FMAX:
+		bits = FLOAT_INFINITY | FLOAT_SIGN;
+		break;
+	default:
+		/* Addition, the unsigned maximum, or and exclusive or: 0. */
+		bits = 0;
+		break;
+	}
+	error = group_constant(reader, words, bits);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the result is the identity. */
+	return 0;
 }
 
 /*

@@ -89,6 +89,9 @@
 /* The execution scope of a subgroup (SPIR-V spec, section 3.27, Scope). */
 #define SCOPE_SUBGROUP 3U
 
+/* The memory scope of one invocation (SPIR-V spec, section 3.27, Scope). */
+#define SCOPE_INVOCATION 4U
+
 /*
  * Records one execution mode of the entry point.
  *
@@ -278,7 +281,7 @@ drv_gpu_spirv_compute_declared(
 
 /*
  * Records a compute shader's built-in input variable: one of the five the
- * dispatch gives every invocation, or one of the four of the invocation's
+ * dispatch gives every invocation, or one of the nine of the invocation's
  * subgroup.  Any other built-in is refused.
  */
 static int
@@ -301,6 +304,11 @@ drv_gpu_spirv_declare_system(
 	case BUILTIN_NUM_SUBGROUPS:
 	case BUILTIN_SUBGROUP_ID:
 	case BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID:
+	case BUILTIN_SUBGROUP_EQ_MASK:
+	case BUILTIN_SUBGROUP_GE_MASK:
+	case BUILTIN_SUBGROUP_GT_MASK:
+	case BUILTIN_SUBGROUP_LE_MASK:
+	case BUILTIN_SUBGROUP_LT_MASK:
 		break;
 	default:
 		error = drv_gpu_spirv_refuse(
@@ -410,13 +418,16 @@ drv_gpu_spirv_lower_load_system(
 	uint32_t index;
 	int error;
 
-	/* The built-ins are integer scalars and vectors of at most three. */
-	if (components > 3U) {
+	/*
+	 * The built-ins are integer scalars and vectors of at most three, and
+	 * the subgroup's ballots of four.
+	 */
+	if (components > 4U) {
 		error = drv_gpu_spirv_refuse(
 		    parser,
 		    opcode,
 		    offset,
-		    "load of a compute built-in wider than three components");
+		    "load of a built-in wider than four components");
 		return error;
 	}
 
@@ -457,8 +468,9 @@ drv_gpu_spirv_lower_load_system(
  * plus the local one; the group counts are words in memory the dispatch
  * places (the system storage buffer), and so is the first group of a
  * dispatch with a base (the DISPATCH_BASE feature).  A subgroup is one
- * invocation: its size is 1, the invocation is its first, and the group has
- * as many subgroups as invocations.  The view is a LOAD_SYSTEM the driver
+ * invocation: its size is 1, the invocation is its first, the group has
+ * as many subgroups as invocations, and its ballots hold the invocation's
+ * bit alone.  The view is a LOAD_SYSTEM the driver
  * binds to the view it compiles the shader for
  * (drv_gpu_shader_ir_bind_view()).
  */
@@ -514,6 +526,23 @@ drv_gpu_spirv_system_component(
 		value =
 		    drv_gpu_spirv_load_system(parser,
 					      DRV_GPU_IR_SYSTEM_LOCAL_INDEX);
+		return value;
+
+	case BUILTIN_SUBGROUP_EQ_MASK:
+	case BUILTIN_SUBGROUP_GE_MASK:
+	case BUILTIN_SUBGROUP_LE_MASK:
+		/*
+		 * The invocation's own bit, the first of the first word: the
+		 * one invocation is at, from and up to itself.
+		 */
+		value = drv_gpu_spirv_integer_constant(parser,
+						       component == 0U ? 1U : 0U);
+		return value;
+
+	case BUILTIN_SUBGROUP_GT_MASK:
+	case BUILTIN_SUBGROUP_LT_MASK:
+		/* No invocation of the subgroup is after or before it. */
+		value = drv_gpu_spirv_integer_constant(parser, 0U);
 		return value;
 
 	case BUILTIN_NUM_SUBGROUPS:
@@ -714,6 +743,33 @@ drv_gpu_spirv_lower_elect(
 	record->constant = BOOL_TRUE_BITS;
 
 	/* Succeeded: the election is lowered. */
+	return 0;
+}
+
+/*
+ * Reports whether a memory scope, named by a constant, is the subgroup's or
+ * the invocation's: memory one invocation alone reaches, since a subgroup
+ * here is one invocation.
+ */
+static int
+drv_gpu_spirv_invocation_scope(
+	struct drv_gpu_spirv_parser *parser,
+	uint32_t scope_id)
+{
+	struct drv_gpu_spirv_id *scope;
+
+	/* A scope that is not a constant is taken as wide. */
+	scope = drv_gpu_spirv_id(parser, scope_id);
+	if (scope == NULL || scope->kind != ID_CONSTANT)
+		return 0;
+
+	/* The subgroup's and the invocation's memory are the invocation's. */
+	if (scope->constant == SCOPE_SUBGROUP)
+		return 1;
+	if (scope->constant == SCOPE_INVOCATION)
+		return 1;
+
+	/* Succeeded: a wider scope. */
 	return 0;
 }
 
@@ -1375,6 +1431,7 @@ drv_gpu_spirv_lower_barrier(
 	struct drv_gpu_spirv_id *scope;
 	uint32_t fences;
 	uint32_t level;
+	int narrow;
 	int error;
 
 	/*
@@ -1383,6 +1440,15 @@ drv_gpu_spirv_lower_barrier(
 	if (opcode == OP_MEMORY_BARRIER) {
 		if (count < 3U)
 			return EINVAL;
+
+		/*
+		 * A barrier of the subgroup's memory orders nothing: the
+		 * subgroup is one invocation, which sees its own accesses in
+		 * order.
+		 */
+		narrow = drv_gpu_spirv_invocation_scope(parser, word[1]);
+		if (narrow != 0)
+			return 0;
 
 		/* Reads the fences the semantics ask for. */
 		error = drv_gpu_spirv_semantics(parser,
@@ -1435,6 +1501,14 @@ drv_gpu_spirv_lower_barrier(
 	 * channels of a thread run together.
 	 */
 	if (scope->constant != SCOPE_WORKGROUP) {
+		/*
+		 * The subgroup's memory needs no fence: the subgroup is one
+		 * invocation.
+		 */
+		narrow = drv_gpu_spirv_invocation_scope(parser, word[2]);
+		if (narrow != 0)
+			return 0;
+
 		drv_gpu_spirv_fence(parser, fences);
 		if (parser->error != 0)
 			return parser->error;

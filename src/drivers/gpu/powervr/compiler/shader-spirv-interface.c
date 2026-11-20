@@ -492,6 +492,29 @@ shader_spirv_reader_entry_prologue(
 			continue;
 		}
 
+		/*
+		 * A subgroup is one invocation in every stage: its size 1, the
+		 * invocation its first, and its ballots the invocation's bit
+		 * (bit 0 of the first word) alone, from and up to it and none
+		 * before or after it.
+		 */
+		if (builtin == BUILT_IN_SUBGROUP_SIZE ||
+		    builtin == BUILT_IN_SUBGROUP_LOCAL_INVOCATION_ID ||
+		    (builtin >= BUILT_IN_SUBGROUP_EQ_MASK && builtin <= BUILT_IN_SUBGROUP_LT_MASK)) {
+			for (component = 0; component < words; component++) {
+				word = shader_spirv_constant_operand(0);
+				if (builtin == BUILT_IN_SUBGROUP_SIZE)
+					word = shader_spirv_constant_operand(1);
+				if (component == 0 &&
+				    (builtin == BUILT_IN_SUBGROUP_EQ_MASK ||
+				     builtin == BUILT_IN_SUBGROUP_GE_MASK ||
+				     builtin == BUILT_IN_SUBGROUP_LE_MASK))
+					word = shader_spirv_constant_operand(1);
+				shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first + component, &word, NULL, NULL, 0, 0);
+			}
+			continue;
+		}
+
 		/* A fragment's built-in inputs. */
 		if (reader->stage == POWERVR_SHADER_FRAGMENT) {
 			error = fragment_built_in(reader, id, words);
@@ -509,13 +532,9 @@ shader_spirv_reader_entry_prologue(
 		if (builtin == BUILT_IN_LOCAL_INVOCATION_INDEX || builtin == BUILT_IN_SUBGROUP_ID) {
 			/* The local index; each invocation is a subgroup of its own, so its subgroup's id too. */
 			shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first, &reader->local[3], NULL, NULL, 0, 0);
-		} else if (builtin == BUILT_IN_SUBGROUP_SIZE || builtin == BUILT_IN_SUBGROUP_LOCAL_INVOCATION_ID || builtin == BUILT_IN_NUM_SUBGROUPS) {
-			/* A subgroup is one invocation: its size 1, the invocation its first, as many as the workgroup's invocations. */
-			word = shader_spirv_constant_operand(0);
-			if (builtin == BUILT_IN_SUBGROUP_SIZE)
-				word = shader_spirv_constant_operand(1);
-			if (builtin == BUILT_IN_NUM_SUBGROUPS)
-				word = shader_spirv_constant_operand(reader->program->workgroup[0] * reader->program->workgroup[1] * reader->program->workgroup[2]);
+		} else if (builtin == BUILT_IN_NUM_SUBGROUPS) {
+			/* A subgroup is one invocation: as many subgroups as the workgroup's invocations. */
+			word = shader_spirv_constant_operand(reader->program->workgroup[0] * reader->program->workgroup[1] * reader->program->workgroup[2]);
 			shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first, &word, NULL, NULL, 0, 0);
 		} else if (builtin == BUILT_IN_LOCAL_INVOCATION_ID) {
 			for (component = 0; component < words && component < 3; component++)

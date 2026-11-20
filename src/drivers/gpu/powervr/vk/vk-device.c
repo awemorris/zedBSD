@@ -432,7 +432,7 @@ features2(
 
 /*
  * Fills the device's Vulkan 1.1 answers: the subgroup of one invocation
- * in compute programs; multiview, each view of a subpass rendered by jobs
+ * every executor starts from, which the compiler lowers too; multiview, each view of a subpass rendered by jobs
  * of its own at the attachments' layers of the view, the programs reading
  * the view as a shared register word (no geometry or tessellation stage);
  * instances numbered as without multiview; a set's descriptors bounded by

@@ -347,8 +347,9 @@ features2_query(
 /*
  * Fills the device's Vulkan 1.1 answers.
  *
- * The subgroup is one invocation, in the compute programs of a 7.1 (a 4.2
- * has no compute queue, so no stage and no operation).  Multiview renders
+ * The subgroup is one invocation, in the vertex, fragment and compute
+ * programs of a 7.1 and the vertex and fragment programs of a 4.2 (which
+ * has no compute queue).  Multiview renders
  * each view of a subpass into its layer as a native pass of its own, with
  * the view a uniform of the programs (no geometry or tessellation stage);
  * instances are numbered as without multiview.  A set's descriptors are
@@ -360,14 +361,15 @@ bcm2711_vulkan_device_core11(
 	const struct bcm2711_vulkan_session *session,
 	struct i915_vkc_core11 *core11)
 {
+	bool compute;
+
 	/* What every executor starts from. */
 	i915_vkc_core11_defaults(core11);
 
-	/* A 4.2 runs no compute program, so no subgroup either. */
-	if (!compute_engine(session)) {
-		core11->subgroup.supportedStages = 0;
-		core11->subgroup.supportedOperations = 0;
-	}
+	/* A 4.2 runs no compute program. */
+	compute = compute_engine(session);
+	if (!compute)
+		core11->subgroup.supportedStages &= ~VK_SHADER_STAGE_COMPUTE_BIT;
 
 	/* Multiview, the views drawn one after another. */
 	core11->multiview.multiview = VK_TRUE;

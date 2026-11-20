@@ -456,8 +456,10 @@ i915_vkc_reply_float(
  * No 1.1 feature is on: multiview, the 16-bit storage, variable pointers,
  * protected memory, sampler YCbCr conversion and shader draw parameters are
  * each the executor's own to turn on when it does them.  A subgroup is one
- * invocation of a compute shader with the basic operations, which the
- * shared SPIR-V frontend lowers for every backend; points are clipped
+ * invocation of a vertex, fragment or compute shader with every operation
+ * but the quad ones (a quad is four invocations), which the shared SPIR-V
+ * frontend and the PowerVR compiler lower for every backend; points are
+ * clipped
  * against every clip plane; no view of multiview and no protected memory.
  * The executor sets maxPerSetDescriptors and maxMemoryAllocationSize.
  */
@@ -468,10 +470,23 @@ i915_vkc_core11_defaults(
 	/* Every feature off and every limit zero. */
 	kern_memset(core11, 0, sizeof(*core11));
 
-	/* The subgroup of one invocation the shared frontend lowers in compute shaders. */
+	/* The subgroup of one invocation the compilers lower in these stages. */
 	core11->subgroup.subgroupSize = 1U;
-	core11->subgroup.supportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
-	core11->subgroup.supportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT;
+	core11->subgroup.supportedStages = VK_SHADER_STAGE_VERTEX_BIT |
+					   VK_SHADER_STAGE_FRAGMENT_BIT |
+					   VK_SHADER_STAGE_COMPUTE_BIT;
+
+	/*
+	 * Every operation of one invocation: the votes, the ballots, the
+	 * shuffles, the arithmetic and the clusters, but not the quads.
+	 */
+	core11->subgroup.supportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT |
+					       VK_SUBGROUP_FEATURE_VOTE_BIT |
+					       VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
+					       VK_SUBGROUP_FEATURE_BALLOT_BIT |
+					       VK_SUBGROUP_FEATURE_SHUFFLE_BIT |
+					       VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT |
+					       VK_SUBGROUP_FEATURE_CLUSTERED_BIT;
 	core11->subgroup.quadOperationsInAllStages = VK_FALSE;
 
 	/* Points are clipped like any other primitive. */
