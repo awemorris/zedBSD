@@ -207,6 +207,17 @@ bcm2711_vulkan_native_job_step(
 			}
 		}
 
+		/* A fill or update of a buffer's bytes runs on the CPU after every earlier pass, as a buffer copy does. */
+		if (event->opcode == GPU_OP_CMD_FILL_BUFFER || event->opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+			error = bcm2711_vulkan_buffer_write_run(event->record);
+			if (error != 0) {
+				job->prepare_failed = true;
+				return error;
+			}
+			event = event->next;
+			continue;
+		}
+
 		/* Exact coherent buffer transfers execute only after every preceding native pass has retired and published its output. */
 		if (tiled == ENOTSUP &&
 		    (event->opcode == GPU_OP_CMD_COPY_BUFFER ||

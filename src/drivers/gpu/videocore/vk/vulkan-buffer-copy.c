@@ -58,6 +58,10 @@ static int decode_copy(struct bcm2711_vulkan_session *session, struct i915_wire_
 static int resolve_resources(const struct bcm2711_vulkan_buffer_copy *copy, struct bcm2711_vulkan_object *device, struct bcm2711_vulkan_resource *resources[2], void *cpu[2]);
 static int release_copy(struct bcm2711_vulkan_command_node *node);
 static bool written_box(const struct bcm2711_vulkan_buffer_copy *copy, uint32_t box[4]);
+static int write_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, struct i915_wire_reader *reader);
+static int decode_write(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_buffer_write *write);
+static int write_range(const struct bcm2711_vulkan_buffer_write *write, const struct bcm2711_vulkan_resource *buffer, uint64_t *bytes);
+static int release_write(struct bcm2711_vulkan_command_node *node);
 #if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 static int prepare_plane(const VkBufferImageCopy *region, const struct bcm2711_vulkan_resource *image, uint32_t buffer_slot, uint32_t image_slot, struct copy_span spans[2]);
 #endif
@@ -85,6 +89,19 @@ bcm2711_vulkan_buffer_copy_dispatch(
 	/* The route handles core byte copies, image uploads and readback with their actual reply-free client framing. */
 	(void)reply;
 	*handled = 0;
+
+	/* A fill or an update of a buffer's bytes is recorded as its own kind of transfer. */
+	if (opcode == GPU_OP_CMD_FILL_BUFFER || opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+		*handled = 1;
+		if (requested != 0)
+			return EINVAL;
+		error = write_dispatch(session, opcode, reader);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the fill or update is recorded, or its refusal is the recording's. */
+		return 0;
+	}
 	if (opcode != GPU_OP_CMD_COPY_BUFFER &&
 	    opcode != GPU_OP_CMD_COPY_BUFFER_TO_IMAGE &&
 	    opcode != GPU_OP_CMD_COPY_IMAGE_TO_BUFFER)
@@ -416,6 +433,119 @@ bcm2711_vulkan_buffer_copy_run(
 	}
 
 	/* Succeeded: selected raw bytes changed with no channel conversion, native launch or false DMA completion. */
+	return 0;
+}
+
+/*
+ * Validates a recorded fill or update: its buffer is of the device, bound
+ * and a transfer destination, and its range is whole words inside the
+ * buffer (Vulkan 1.0, vkCmdFillBuffer and vkCmdUpdateBuffer: dstOffset a
+ * multiple of 4, a size a multiple of 4 or, for a fill, VK_WHOLE_SIZE).
+ */
+int
+bcm2711_vulkan_buffer_write_validate(
+	const struct bcm2711_vulkan_record *record,
+	struct bcm2711_vulkan_object *device)
+{
+	const struct bcm2711_vulkan_buffer_write *write;
+	const struct bcm2711_vulkan_resource *buffer;
+	struct bcm2711_vulkan_object *object;
+	uint64_t bytes;
+	int error;
+
+	/* A fill or an update naming a live buffer. */
+	if (record == NULL || device == NULL)
+		return EINVAL;
+	if (record->opcode != GPU_OP_CMD_FILL_BUFFER && record->opcode != GPU_OP_CMD_UPDATE_BUFFER)
+		return EINVAL;
+	write = (const struct bcm2711_vulkan_buffer_write *)record;
+	object = record->objects[0];
+	if (object == NULL ||
+	    object->kind != I915_VK_OBJ_BUFFER ||
+	    object->payload == NULL)
+		return EINVAL;
+
+	/* The buffer is the device's, bound, and written by transfers. */
+	buffer = object->payload;
+	if (buffer->device != device ||
+	    buffer->memory == NULL ||
+	    (buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0)
+		return EINVAL;
+
+	/* The range: whole words inside the buffer. */
+	error = write_range(write, buffer, &bytes);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the write may run. */
+	return 0;
+}
+
+/*
+ * Writes a recorded fill's word or update's bytes into its buffer's
+ * coherent memory once every earlier native pass has retired.
+ */
+int
+bcm2711_vulkan_buffer_write_run(
+	const struct bcm2711_vulkan_record *record)
+{
+	const struct bcm2711_vulkan_buffer_write *write;
+	struct bcm2711_vulkan_resource *buffer;
+	struct bcm2711_v3d_view *view;
+	uint32_t pattern[64];
+	uint32_t address;
+	uint64_t bytes;
+	uint64_t done;
+	uint64_t piece;
+	uint32_t index;
+	uint8_t *destination;
+	void *cpu;
+	int error;
+
+	/* The buffer, still as it was validated. */
+	if (record == NULL ||
+	    record->objects[0] == NULL ||
+	    record->objects[0]->payload == NULL)
+		return EINVAL;
+	write = (const struct bcm2711_vulkan_buffer_write *)record;
+	buffer = record->objects[0]->payload;
+	error = bcm2711_vulkan_buffer_write_validate(record, buffer->device);
+	if (error != 0)
+		return error;
+
+	/* Its coherent memory and the bytes the write covers. */
+	error = bcm2711_vulkan_resource_backing(buffer, 0, buffer->bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+	if (!view->buffer->uncached)
+		return ENOTSUP;
+	error = write_range(write, buffer, &bytes);
+	if (error != 0)
+		return error;
+	destination = (uint8_t *)cpu + write->offset;
+
+	/* An update's bytes as they were recorded. */
+	if (record->opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+		kern_memcpy(destination, write->bytes, (size_t)bytes);
+	} else {
+		/* A fill's word, a run of them at a time. */
+		for (index = 0; index < 64U; index++)
+			pattern[index] = write->data;
+
+		/* Every word of the range. */
+		for (done = 0; done < bytes; done += piece) {
+			piece = bytes - done;
+			if (piece > sizeof(pattern))
+				piece = sizeof(pattern);
+			kern_memcpy(destination + done, pattern, (size_t)piece);
+		}
+	}
+
+	/* The bytes are out before the next CPU read or native launch; the snapshots of the memory learn of an unknown extent. */
+	kern_io_write_barrier();
+	bcm2711_v3d_memory_written(view->buffer, address - view->address, NULL);
+
+	/* Succeeded: the range holds the fill's word or the update's bytes. */
 	return 0;
 }
 
@@ -1131,4 +1261,201 @@ convert_row(
 		to[pixel * 4U + 2U] = (uint8_t)(word >> 16);
 		to[pixel * 4U + 3U] = (uint8_t)(word >> 24);
 	}
+}
+
+/*
+ * Records one vkCmdFillBuffer or vkCmdUpdateBuffer in a recording primary:
+ * the whole command is read, then validated, the buffer retained and the
+ * record appended; a refusal becomes the recording's (End reports it).
+ */
+static int
+write_dispatch(
+	struct bcm2711_vulkan_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader)
+{
+	struct bcm2711_vulkan_object *object;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_buffer_write *write;
+	uint64_t identity;
+	uint64_t charge;
+	int error;
+	int released;
+
+	/* The recording primary the command belongs to. */
+	identity = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	if (object == NULL)
+		return EINVAL;
+	command = object->payload;
+	if (command->pending != 0 || command->state != BCM2711_VULKAN_COMMAND_RECORDING)
+		return EBUSY;
+
+	/* The record, with the whole command read into it. */
+	write = kern_calloc(1, sizeof(*write));
+	if (write == NULL)
+		return ENOMEM;
+	write->record.opcode = opcode;
+	write->record.node.release = release_write;
+	error = decode_write(session, reader, write);
+	if (error != 0) {
+		released = release_write(&write->record.node);
+		(void)released;
+		return error;
+	}
+
+	/* An earlier refusal of the recording stands; this command is read and dropped. */
+	if (command->recording_error != 0) {
+		released = release_write(&write->record.node);
+		if (released != 0)
+			return released;
+		return 0;
+	}
+
+	/* What the record costs the recording: itself and an update's bytes. */
+	charge = sizeof(*write);
+	if (write->bytes != NULL)
+		charge += write->size;
+
+	/* Valid outside a render pass, within the recording's budget, its buffer retained. */
+	error = bcm2711_vulkan_buffer_write_validate(&write->record, command->owner.device);
+	if (error == 0 && command->render_open)
+		error = EINVAL;
+	if (error == 0 && charge > BCM2711_VULKAN_RECORD_BYTES - command->recorded_bytes)
+		error = ENOMEM;
+	if (error == 0) {
+		error = bcm2711_vulkan_object_retain(write->record.objects[0]);
+		if (error == 0)
+			write->retained = true;
+	}
+
+	/* A refusal is the recording's; the record goes. */
+	if (error != 0) {
+		kern_logf("v3d: vk: command %u refused while recording (%d)\n", (unsigned)opcode, error);
+		command->recording_error = error;
+		released = release_write(&write->record.node);
+		if (released != 0)
+			return released;
+		return 0;
+	}
+
+	/* The record at the end of the primary's work. */
+	if (command->last == NULL) {
+		command->first = &write->record.node;
+	} else {
+		command->last->next = &write->record.node;
+	}
+	command->last = &write->record.node;
+	command->recorded_bytes += (uint32_t)charge;
+
+	/* Succeeded: the fill or update is recorded. */
+	return 0;
+}
+
+/*
+ * Reads a fill's buffer, offset, size and word, or an update's buffer,
+ * offset, size and bytes (the size again, then the bytes padded to a
+ * word), as libvulkan writes them.
+ */
+static int
+decode_write(
+	struct bcm2711_vulkan_session *session,
+	struct i915_wire_reader *reader,
+	struct bcm2711_vulkan_buffer_write *write)
+{
+	uint64_t identity;
+	uint64_t count;
+
+	/* The buffer and the range. */
+	identity = drv_i915_wire_read_u64(reader);
+	write->record.objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, identity);
+	write->offset = drv_i915_wire_read_u64(reader);
+	write->size = drv_i915_wire_read_u64(reader);
+
+	/* A fill's word. */
+	if (write->record.opcode == GPU_OP_CMD_FILL_BUFFER) {
+		write->data = drv_i915_wire_read_u32(reader);
+		if (reader->error != 0)
+			return EINVAL;
+
+		/* Succeeded: the fill is read. */
+		return 0;
+	}
+
+	/* An update's bytes: as many as its size, no more than Vulkan allows. */
+	count = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+	if (count != write->size || count == 0 || count > BCM2711_VULKAN_BUFFER_UPDATE_BYTES)
+		return EINVAL;
+	write->bytes = kern_malloc((size_t)count);
+	if (write->bytes == NULL)
+		return ENOMEM;
+	i915_vkc_read_bytes(reader, write->bytes, (size_t)count);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Succeeded: the update is read. */
+	return 0;
+}
+
+/*
+ * Gives the bytes a fill or update writes: whole words from its offset,
+ * inside the buffer; a fill of VK_WHOLE_SIZE covers the rest of the
+ * buffer rounded down to a word.
+ */
+static int
+write_range(
+	const struct bcm2711_vulkan_buffer_write *write,
+	const struct bcm2711_vulkan_resource *buffer,
+	uint64_t *bytes)
+{
+	uint64_t room;
+
+	/* The offset: a word inside the buffer. */
+	if ((write->offset & 3U) != 0 || write->offset >= buffer->bytes)
+		return EINVAL;
+	room = buffer->bytes - write->offset;
+
+	/* A fill to the end of the buffer. */
+	if (write->record.opcode == GPU_OP_CMD_FILL_BUFFER && write->size == VK_WHOLE_SIZE) {
+		*bytes = room & ~(uint64_t)3U;
+
+		/* Succeeded: the rest of the buffer's words. */
+		return 0;
+	}
+
+	/* Whole words, at least one, inside the buffer. */
+	if (write->size == 0 || (write->size & 3U) != 0 || write->size > room)
+		return EINVAL;
+	*bytes = write->size;
+
+	/* Succeeded: the recorded range. */
+	return 0;
+}
+
+/* Releases a fill or update record: its buffer, if retained, and its bytes. */
+static int
+release_write(
+	struct bcm2711_vulkan_command_node *node)
+{
+	struct bcm2711_vulkan_buffer_write *write;
+	int error;
+
+	/* The buffer, retained once. */
+	write = (struct bcm2711_vulkan_buffer_write *)node;
+	error = 0;
+	if (write->retained)
+		error = bcm2711_vulkan_object_release(write->record.objects[0]);
+
+	/* The bytes and the record go even if the buffer's release failed. */
+	kern_free(write->bytes);
+	kern_free(write);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the record holds nothing. */
+	return 0;
 }

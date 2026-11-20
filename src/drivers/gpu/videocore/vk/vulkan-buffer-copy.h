@@ -26,8 +26,28 @@ struct bcm2711_vulkan_buffer_copy {
 	bool retained[2];
 };
 
+/* The most bytes one vkCmdUpdateBuffer writes (Vulkan 1.0, vkCmdUpdateBuffer: dataSize at most 65536). */
+#define BCM2711_VULKAN_BUFFER_UPDATE_BYTES 65536U
+
+/*
+ * One recorded vkCmdFillBuffer or vkCmdUpdateBuffer: the destination
+ * buffer (record.objects[0], retained while retained is true), the range
+ * as recorded (a fill's size may be VK_WHOLE_SIZE), the fill's word, and
+ * the update's own copy of its bytes (NULL for a fill).
+ */
+struct bcm2711_vulkan_buffer_write {
+	struct bcm2711_vulkan_record record;
+	uint64_t offset;
+	uint64_t size;
+	uint32_t data;
+	uint8_t *bytes;
+	bool retained;
+};
+
 int bcm2711_vulkan_buffer_copy_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 int bcm2711_vulkan_buffer_copy_validate(const struct bcm2711_vulkan_record *record, struct bcm2711_vulkan_object *device);
 int bcm2711_vulkan_buffer_copy_run(const struct bcm2711_vulkan_record *record);
+int bcm2711_vulkan_buffer_write_validate(const struct bcm2711_vulkan_record *record, struct bcm2711_vulkan_object *device);
+int bcm2711_vulkan_buffer_write_run(const struct bcm2711_vulkan_record *record);
 
 #endif
