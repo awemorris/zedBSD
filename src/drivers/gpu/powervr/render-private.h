@@ -52,10 +52,13 @@
 
 /*
  * The most a session holds, the largest allocation, and how many native
- * commands one session may have in flight.
+ * commands one session may have in flight.  The largest allocation is the
+ * 1 GiB Vulkan 1.1 asks a device to allow (maxMemoryAllocationSize); each
+ * is one physically contiguous run, which may not be found when memory is
+ * fragmented (the allocation then fails as out of device memory).
  */
 #define POWERVR_RENDER_RESOURCES	256U
-#define POWERVR_RENDER_MAX_BYTES	0x10000000ULL
+#define POWERVR_RENDER_MAX_BYTES	0x40000000ULL
 #define POWERVR_RENDER_PENDING		64U
 
 /*

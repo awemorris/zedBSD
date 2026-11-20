@@ -437,9 +437,8 @@ features2(
  * the view as a shared register word (no geometry or tessellation stage);
  * instances numbered as without multiview; a set's descriptors bounded by
  * the per-set limits, which together stay below 1024.  An allocation is
- * one physically contiguous run of at most POWERVR_RENDER_MAX_BYTES, so
- * that is the largest allocation (below what Vulkan 1.1 asks for, so
- * libvulkan names 1.0 for the device until allocations may be larger).
+ * one physically contiguous run of at most POWERVR_RENDER_MAX_BYTES (the
+ * whole heap), the largest allocation.
  */
 static void
 device_core11(
