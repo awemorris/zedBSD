@@ -479,6 +479,7 @@ submit(
 	/* The fence completes at the submission's last point, which may already be reached. */
 	fence = powervr_vk_payload(session, I915_VK_OBJ_FENCE, fence_id);
 	if (error == 0 && fence != NULL) {
+		fence->submitted = true;
 		fence->kind = session->owner->last_kind;
 		fence->value = session->owner->last_value;
 		reached = powervr_session_point_reached(session->owner, fence->kind, fence->value);
@@ -654,6 +655,7 @@ reset_fences(
 		fence = powervr_vk_payload(session, I915_VK_OBJ_FENCE, identity);
 		if (fence != NULL) {
 			fence->signaled = false;
+			fence->submitted = false;
 			fence->kind = POWERVR_POINT_NONE;
 			fence->value = 0;
 		}
@@ -690,10 +692,14 @@ fence_status(
 	/* Finished render jobs give their memory back. */
 	powervr_render_jobs_reap(session->owner->render, session->owner, 0);
 
-	/* Signaled once its point is reached; a lost session's work never completes. */
+	/*
+	 * Signaled once its point is reached; a lost session's work never
+	 * completes.  A fence not submitted since it was made or reset has no
+	 * point and stays unsignaled.
+	 */
 	result = (uint32_t)VK_NOT_READY;
 	fence = powervr_vk_payload(session, I915_VK_OBJ_FENCE, identity);
-	if (fence != NULL && !fence->signaled) {
+	if (fence != NULL && !fence->signaled && fence->submitted) {
 		reached = powervr_session_point_reached(session->owner, fence->kind, fence->value);
 		if (reached)
 			fence->signaled = true;

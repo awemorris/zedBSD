@@ -347,11 +347,13 @@ struct powervr_vk_command_buffer {
 };
 
 /*
- * A VkFence: whether it is signaled, and else the completion point of the
- * submission that will signal it (kind POWERVR_POINT_NONE when none).
+ * A VkFence: whether it is signaled, whether a submission named it since
+ * it was made or reset, and the completion point of that submission
+ * (kind POWERVR_POINT_NONE when none).
  */
 struct powervr_vk_fence {
 	bool signaled;
+	bool submitted;
 	unsigned kind;
 	uint32_t value;
 };
