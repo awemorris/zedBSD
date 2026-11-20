@@ -420,8 +420,6 @@ ghci_vk_caps_memory(
 	uint64_t local_bytes,
 	VkPhysicalDeviceMemoryProperties *memory)
 {
-	(void)caps;
-
 	/* Two heaps on a discrete GPU: local memory first, then host memory. */
 	kern_memset(memory, 0, sizeof(*memory));
 	if (local_bytes != 0U) {
@@ -434,7 +432,7 @@ ghci_vk_caps_memory(
 		memory->memoryHeapCount = 2U;
 		memory->memoryHeaps[0].size = local_bytes;
 		memory->memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
-		memory->memoryHeaps[1].size = GHCI_VK_HEAP_SIZE;
+		memory->memoryHeaps[1].size = ghci_vk_caps_heap_bytes(caps);
 		memory->memoryHeaps[1].flags = 0U;
 		return;
 	}
@@ -446,8 +444,28 @@ ghci_vk_caps_memory(
 	    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	memory->memoryTypes[0].heapIndex = 0U;
 	memory->memoryHeapCount = 1U;
-	memory->memoryHeaps[0].size = GHCI_VK_HEAP_SIZE;
+	memory->memoryHeaps[0].size = ghci_vk_caps_heap_bytes(caps);
 	memory->memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+}
+
+/*
+ * Reports the size of the host memory heap and the largest allocation
+ * (maxMemoryAllocationSize, maxResourceSize): GHCI_VK_HEAP_SIZE on a GPU
+ * of 32 address bits or more, a quarter of the address space of a
+ * narrower one, whose session must also hold the executor's own memory.
+ * An allocation is one run of memory, so a large one may still fail for
+ * want of a run that long.
+ */
+uint64_t
+ghci_vk_caps_heap_bytes(
+	const struct ghci_caps *caps)
+{
+	/* A narrow address space. */
+	if (caps->va_bits < 32U)
+		return (1ULL << caps->va_bits) / 4U;
+
+	/* Succeeded: the heap of every wider GPU. */
+	return GHCI_VK_HEAP_SIZE;
 }
 
 /* Fills the one queue family: one queue that draws, computes and copies, with 64-bit timestamps. */
@@ -611,7 +629,7 @@ ghci_vk_caps_image_format(
 		properties->sampleCounts = ghci_vk_caps_sample_counts(caps);
 
 	/* The largest image is the largest allocation. */
-	properties->maxResourceSize = GHCI_VK_HEAP_SIZE;
+	properties->maxResourceSize = ghci_vk_caps_heap_bytes(caps);
 
 	/* Succeeded: such an image may be made. */
 	return (uint32_t)VK_SUCCESS;

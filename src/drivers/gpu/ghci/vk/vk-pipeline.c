@@ -212,7 +212,8 @@ struct attribute_request {
  * One pipeline's create, decoded out of the command's scratch: its
  * stages, its fixed-function state and the objects it names.  refusal is
  * the reason a pipeline the hardware cannot run is refused (NULL for
- * none).
+ * none).  dispatch_base says that a compute pipeline was made for
+ * vkCmdDispatchBase.
  */
 struct pipeline_request {
 	uint32_t bind_point;
@@ -243,6 +244,7 @@ struct pipeline_request {
 	uint64_t layout;
 	uint64_t render_pass;
 	uint32_t subpass;
+	uint32_t dispatch_base;
 };
 
 /* The programs of a pipeline while it is made. */
@@ -1101,6 +1103,8 @@ decode_compute(
 	if (error != 0)
 		return error;
 	request->layout = (uint64_t)(uintptr_t)info.layout;
+	if ((info.flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0U)
+		request->dispatch_base = 1U;
 
 	/* Succeeded: the request holds the record. */
 	return 0;
@@ -1216,6 +1220,7 @@ pipeline_build(
 		pipeline->render_pass = request->render_pass;
 		pipeline->subpass = request->subpass;
 		pipeline->samples = subpass.samples;
+		pipeline->dispatch_base = request->dispatch_base;
 		pipeline_state(session, request, pipeline);
 	}
 
@@ -1384,6 +1389,8 @@ pipeline_compile_with(
 	options->robust_buffer_access = device->robust != 0 ? 1U : 0U;
 	options->dynamic_count = layout->dynamic_count;
 	kern_memcpy(options->dynamic, layout->dynamic, sizeof(options->dynamic));
+	options->dispatch_base = request->dispatch_base;
+	options->multiview = subpass->view_mask != 0U ? 1U : 0U;
 
 	/* The attribute of each location: its format's components and whether it is an integer one. */
 	kind = DRV_GPU_STAGE_COMPUTE;

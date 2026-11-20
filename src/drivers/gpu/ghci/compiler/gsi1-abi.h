@@ -35,8 +35,14 @@
  * The constant bank: 512 words.  c0-c23 hold push-constant bytes 0-95
  * (the c operands), c24-c31 the hardware's mirror of the four tables'
  * addresses (set s's low word at 24 + 2 s, its high word above), c32-c39
- * push-constant bytes 96-127 (read with lwc), and from c40 the dynamic
- * offsets of the pipeline layout, one word each in the layout's order.
+ * push-constant bytes 96-127 (read with lwc), from c40 the dynamic
+ * offsets of the pipeline layout, one word each in the layout's order
+ * (32 at most), c72-c74 the first workgroup of a vkCmdDispatchBase (x, y,
+ * z; read by a compute program made for it), and c75 the view of a
+ * multiview subpass being drawn (gl_ViewIndex; read by a graphics
+ * program made for such a subpass).  CMD_DISPATCH has no first
+ * workgroup and a render pass draws one layer, so the driver loads these
+ * words itself.
  *
  * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.4
  * "Descriptor Tables, Push Constants & Shader Resource Binding", the
@@ -49,6 +55,8 @@
 #define GSI1_ABI_BANK_PUSH_HIGH		32U
 #define GSI1_ABI_PUSH_HIGH_WORDS	8U
 #define GSI1_ABI_BANK_DYNAMIC		40U
+#define GSI1_ABI_BANK_DISPATCH_BASE	72U
+#define GSI1_ABI_BANK_VIEW		75U
 #define GSI1_ABI_PUSH_BYTES		128U
 
 /*

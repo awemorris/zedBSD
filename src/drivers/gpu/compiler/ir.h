@@ -104,7 +104,8 @@
 /*
  * The view a multiview draw renders (gl_ViewIndex) in a graphics stage.  The
  * driver binds it to a constant before the backend sees the IR
- * (drv_gpu_shader_ir_bind_view()), so no backend reads it.
+ * (drv_gpu_shader_ir_bind_view()), or the backend reads it from a value
+ * the driver sets for each view (a uniform, a constant-bank word).
  */
 #define DRV_GPU_IR_SYSTEM_VIEW_INDEX 9U
 #define DRV_GPU_IR_SYSTEM_COUNT 10U

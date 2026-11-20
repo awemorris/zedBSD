@@ -450,7 +450,7 @@ allocate_memory(
 	result = (uint32_t)VK_SUCCESS;
 	if (type >= memory_types(session) || bytes == 0U)
 		result = (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
-	else if (bytes > GHCI_VK_HEAP_SIZE)
+	else if (bytes > ghci_vk_caps_heap_bytes(&session->device->caps))
 		result = (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
 
 	/*
@@ -730,7 +730,7 @@ create_buffer(
 
 	/* No sparse buffer, and one no larger than the heap. */
 	result = (uint32_t)VK_SUCCESS;
-	if (info.size == 0U || info.size > GHCI_VK_HEAP_SIZE)
+	if (info.size == 0U || info.size > ghci_vk_caps_heap_bytes(&session->device->caps))
 		result = (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
 	else if ((info.flags & (VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT | VK_BUFFER_CREATE_SPARSE_ALIASED_BIT)) != 0U)
 		result = (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT;
@@ -847,7 +847,7 @@ image_admit(
 		return (uint32_t)VK_ERROR_FORMAT_NOT_SUPPORTED;
 	bound = ((uint64_t)info->extent.width * info->samples * bytes + GHCI_LAYOUT_ALIGN) * 2U;
 	bound *= (uint64_t)info->extent.height * info->extent.depth * info->arrayLayers;
-	if (bound > GHCI_VK_HEAP_SIZE * 2U)
+	if (bound > ghci_vk_caps_heap_bytes(&session->device->caps) * 2U)
 		return (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
 
 	/* The record and the linear layout. */
@@ -866,7 +866,7 @@ image_admit(
 			     block,
 			     &image->layout);
 	image->bytes = ghci_layout_size(&image->layout);
-	if (image->bytes > GHCI_VK_HEAP_SIZE)
+	if (image->bytes > ghci_vk_caps_heap_bytes(&session->device->caps))
 		return (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
 
 	/* Succeeded: the image may be made. */

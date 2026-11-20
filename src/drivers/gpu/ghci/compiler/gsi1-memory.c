@@ -30,6 +30,8 @@
 
 #include "gsi1-private.h"
 
+#include "drivers/gpu/compiler/spirv.h"
+
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
@@ -50,6 +52,7 @@ static int lower_shared(struct gsi1_lowering *lowering, const struct drv_gpu_sha
 static int shared_atomic_address(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t *address);
 static int lower_sync(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction);
 static int atomic_sub(uint32_t operation, uint32_t *sub);
+static int lower_system_word(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
 static int storage_binding(struct gsi1_lowering *lowering, uint32_t uniform, const struct gsi1_binding **binding);
 static int predicate_begin(struct gsi1_lowering *lowering, uint32_t predicate, uint32_t *save);
 static void predicate_end(struct gsi1_lowering *lowering, uint32_t save);
@@ -803,6 +806,12 @@ lower_storage(
 	if (instruction->op == DRV_GPU_IR_LOAD_STORAGE && dst == GSI1_NO_OPERAND)
 		return 0;
 
+	/* The first workgroup of vkCmdDispatchBase, from its bank words. */
+	if (instruction->location < lowering->ir->uniform_count && lowering->ir->uniforms[instruction->location].set == DRV_GPU_IR_SYSTEM_SET) {
+		error = lower_system_word(lowering, instruction, dst);
+		return error;
+	}
+
 	/* The buffer. */
 	binding = NULL;
 	error = storage_binding(lowering, instruction->location, &binding);
@@ -1184,6 +1193,40 @@ atomic_sub(
 	}
 
 	/* Succeeded: the sub-operation. */
+	return 0;
+}
+
+/*
+ * Lowers a read of the system buffer past the group counts (which are
+ * special operands): the three words of the first workgroup a program
+ * made for vkCmdDispatchBase reads at bytes 12, 16 and 20 are bank words
+ * 72 to 74 (lwc).  Anything else of the buffer is refused.
+ */
+static int
+lower_system_word(
+	struct gsi1_lowering *lowering,
+	const struct drv_gpu_shader_ir_inst *instruction,
+	uint32_t dst)
+{
+	uint32_t offset;
+	int known;
+	int error;
+
+	/* A load at a known offset of the first workgroup's words. */
+	known = 0;
+	offset = 0U;
+	if (instruction->op == DRV_GPU_IR_LOAD_STORAGE && instruction->component == 0U)
+		known = gsi1_value_constant(lowering, instruction->src[0], &offset);
+	if (known == 0 || offset < DRV_GPU_SPIRV_SYSTEM_BYTES || offset >= DRV_GPU_SPIRV_SYSTEM_BASE_BYTES || (offset & 3U) != 0U) {
+		error = gsi1_refuse(lowering, ENOTSUP, "an access to the system buffer GSI1 does not have");
+		return error;
+	}
+
+	/* lwc reads word zero plus the immediate. */
+	gsi1_emit(lowering, gsi1_encode_i(GSI1_OP_LOAD, GSI1_F3_LWC, dst, GSI1_ZERO,
+		(int32_t)(GSI1_ABI_BANK_DISPATCH_BASE + (offset - DRV_GPU_SPIRV_SYSTEM_BYTES) / 4U), 0U));
+
+	/* Succeeded: the word is in the destination. */
 	return 0;
 }
 

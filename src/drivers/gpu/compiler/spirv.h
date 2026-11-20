@@ -147,8 +147,8 @@ struct drv_gpu_compile_diagnostic {
 /*
  * gl_ViewIndex in a graphics stage, as a LOAD_SYSTEM of
  * DRV_GPU_IR_SYSTEM_VIEW_INDEX that the driver binds to the view it
- * compiles the shader for with drv_gpu_shader_ir_bind_view() (refused
- * otherwise).
+ * compiles the shader for with drv_gpu_shader_ir_bind_view(), or that its
+ * backend reads from a value set for each view (refused otherwise).
  */
 #define DRV_GPU_SPIRV_FEATURE_VIEW_INDEX 0x40000U
 
