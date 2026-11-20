@@ -580,6 +580,7 @@ static int execute_copy_images(struct nvrtx_vk_session *session, struct nvrtx_vk
 static int execute_buffer_image(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_buffer_surface(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
 static int execute_cpu_copy(struct nvrtx_vk_session *session, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
+static int execute_cpu_stencil(struct nvrtx_vk_session *session, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
 static int execute_clear_image(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_quad(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct execute_quad *quad);
 static int execute_image_target(const struct nvrtx_vk_image *image, uint32_t level, uint32_t layer, uint32_t format, struct nvrtx_exec_target *target);
@@ -591,6 +592,7 @@ static int execute_depth_target(struct nvrtx_vk_session *session, struct nvrtx_v
 static int execute_resolve(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_image *source, uint32_t source_layer, int32_t sx, int32_t sy, const struct nvrtx_vk_image *destination, uint32_t level, uint32_t layer, int32_t dx, int32_t dy, uint32_t width, uint32_t height);
 static int execute_resolve_images(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_resolve_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state);
+static int execute_resolve_depth(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, int32_t x0, int32_t y0, int32_t x1, int32_t y1);
 static int execute_clear_depth_image(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_uniforms(const struct execute_state *state, const struct nvrtx_vk_program *program, uint32_t group, uint8_t *push, size_t *at);
 static int execute_copy_buffer(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, const struct nvrtx_vk_record *record);
@@ -4027,7 +4029,10 @@ execute_depth_remap(
 		return 0;
 	}
 
-	/* D32_SFLOAT_S8_UINT: words; its depth the first, its stencil (a buffer's copy of it not done) in the second. */
+	/*
+	 * D32_SFLOAT_S8_UINT: words; its depth the first, its stencil in the
+	 * second (a buffer's copy of it is the CPU's, execute_depth_buffer()).
+	 */
 	copy->component_bytes = 4U;
 	copy->source_components = 2U;
 	copy->destination_components = 2U;
@@ -4123,6 +4128,30 @@ execute_depth_buffer(
 	regions = record->regions;
 	for (index = 0U; index < record->region_count; index++) {
 		region = &regions[index];
+
+		/*
+		 * D32_SFLOAT_S8_UINT's stencil, a byte of each 8-byte texel, which
+		 * the copy engine's remap (four components at most) cannot pick:
+		 * by the CPU once the work before has run.
+		 */
+		if (image->format == VK_FORMAT_D32_SFLOAT_S8_UINT && region->imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			error = execute_region_surfaces(image, &region->imageSubresource, 0, 1, &surfaces);
+			if (error == 0)
+				error = execute_drain(session, execute);
+			row = region->bufferRowLength;
+			if (row == 0U)
+				row = region->imageExtent.width;
+			rows = region->bufferImageHeight;
+			if (rows == 0U)
+				rows = region->imageExtent.height;
+			for (surface = 0U; error == 0 && surface < surfaces.count; surface++)
+				error = execute_cpu_stencil(session, buffer, image, region, surfaces.first + surface,
+							    region->bufferOffset + (uint64_t)row * rows * surface, to_image);
+			if (error != 0)
+				return error;
+			state->target_written = false;
+			continue;
+		}
 
 		/* The aspect's remap and the buffer's texel. */
 		kern_memset(&copy, 0, sizeof(copy));
@@ -4660,6 +4689,81 @@ execute_cpu_copy(
 }
 
 /*
+ * Copies the stencil of one surface of a D32_SFLOAT_S8_UINT image between
+ * the image and a buffer's bytes by the CPU through the BAR1 window (the
+ * GPU is idle: the work before has run): the region's rows of the layer,
+ * the buffer's rows from offset at its row length, one byte a texel.  The
+ * image's texel is the depth word, then the word whose low byte is the
+ * stencil (ZF32_X24S8).  EINVAL for a region outside the image or the
+ * buffer.
+ */
+static int
+execute_cpu_stencil(
+	struct nvrtx_vk_session *session,
+	const struct nvrtx_vk_buffer *buffer,
+	const struct nvrtx_vk_image *image,
+	const VkBufferImageCopy *region,
+	uint32_t layer,
+	uint64_t offset,
+	bool to_image)
+{
+	uint8_t *buffer_cpu;
+	uint8_t *image_cpu;
+	uint8_t *texel;
+	uint8_t *byte;
+	uint64_t level_offset;
+	uint32_t level_width;
+	uint32_t level_height;
+	uint32_t level_pitch;
+	uint32_t row_pixels;
+	uint32_t x;
+	uint32_t y;
+	int error;
+
+	/* The two views and the surface's place in the image. */
+	error = nvrtx_vk_buffer_cpu(session, buffer, &buffer_cpu);
+	if (error == 0)
+		error = nvrtx_vk_image_cpu(session, image, &image_cpu);
+	if (error == 0)
+		error = nvrtx_vk_image_surface(image, region->imageSubresource.mipLevel, layer, &level_offset, &level_width, &level_height, &level_pitch);
+	if (error != 0)
+		return error;
+	if (!execute_region_inside(region->imageOffset.x, region->imageOffset.y, region->imageExtent.width, region->imageExtent.height,
+				   level_width, level_height))
+		return EINVAL;
+
+	/* The rows, within the buffer. */
+	row_pixels = region->bufferRowLength;
+	if (row_pixels == 0U)
+		row_pixels = region->imageExtent.width;
+	if (offset > buffer->size ||
+	    (uint64_t)(region->imageExtent.height - 1U) * row_pixels + region->imageExtent.width > buffer->size - offset)
+		return EINVAL;
+
+	/* Each texel's stencil byte, where its GOB keeps it (a tiled image), or in its row. */
+	for (y = 0U; y < region->imageExtent.height; y++) {
+		for (x = 0U; x < region->imageExtent.width; x++) {
+			if (image->tiled) {
+				texel = image_cpu + level_offset + execute_gob_offset(level_pitch, ((uint32_t)region->imageOffset.x + x) * 8U + 4U,
+										   (uint32_t)region->imageOffset.y + y);
+			} else {
+				texel = image_cpu + level_offset + (uint64_t)((uint32_t)region->imageOffset.y + y) * level_pitch +
+				    (uint64_t)((uint32_t)region->imageOffset.x + x) * 8U + 4U;
+			}
+			byte = buffer_cpu + offset + (uint64_t)y * row_pixels + x;
+			if (to_image) {
+				*texel = *byte;
+			} else {
+				*byte = *texel;
+			}
+		}
+	}
+
+	/* Succeeded: the stencil is copied. */
+	return 0;
+}
+
+/*
  * Reports where a byte of a block-linear surface in one-GOB blocks lies: its
  * GOB (rows of GOBs, pitch bytes a row wide), then its 16-byte piece within
  * the GOB and its place in the piece.
@@ -5085,11 +5189,123 @@ execute_resolve_pass(
 		resolved = true;
 	}
 
+	/* The depth attachment's sample 0, when the subpass resolves it. */
+	if (pass->depth != 0U && pass->depth_resolve != VK_ATTACHMENT_UNUSED) {
+		error = execute_resolve_depth(session, execute, state, x0, y0, x1, y1);
+		if (error != 0)
+			return error;
+		resolved = true;
+	}
+
 	/* Succeeded: what follows reads the resolved pixels. */
 	if (resolved) {
 		state->target_written = false;
 		execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
 	}
+	return 0;
+}
+
+/*
+ * Resolves sample 0 of the pass's depth attachment (four samples a pixel)
+ * into its attachment of one sample over the rectangle, whole texels (the
+ * device reports no independent resolve, so a format of depth and stencil
+ * has both resolved): after the pass's work, the copy engine copies each
+ * pixel row from its row of samples 0 and 1, a texel of two samples read
+ * and its first sample written.  In the 2x2 sample layout, sample s of
+ * pixel (x, y) is at (2x + (s & 1), 2y + (s >> 1)).
+ *
+ * XXX: the views' first layer only (a multiview or layered pass resolves
+ * layer 0); one copy a row.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/nil/image.rs (the 2X2
+ * sample layout).
+ */
+static int
+execute_resolve_depth(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_execute *execute,
+	struct execute_state *state,
+	int32_t x0,
+	int32_t y0,
+	int32_t x1,
+	int32_t y1)
+{
+	const struct nvrtx_vk_render_pass *pass;
+	const struct nvrtx_vk_framebuffer *framebuffer;
+	const struct nvrtx_vk_view *source_view;
+	const struct nvrtx_vk_view *destination_view;
+	const struct nvrtx_vk_image *source;
+	const struct nvrtx_vk_image *destination;
+	const struct nvrtx_exec_depth_format *depth;
+	struct nvrtx_exec_rect_copy copy;
+	uint64_t source_va;
+	uint64_t destination_va;
+	uint64_t source_offset;
+	uint64_t destination_offset;
+	uint32_t source_width;
+	uint32_t source_height;
+	uint32_t source_pitch;
+	uint32_t destination_width;
+	uint32_t destination_height;
+	uint32_t destination_pitch;
+	uint32_t index;
+	uint8_t *cpu;
+	int32_t y;
+	int error;
+
+	/* The two views, of one depth format, four samples into one. */
+	pass = state->pass;
+	framebuffer = state->framebuffer;
+	if (pass->depth_attachment >= framebuffer->view_count || pass->depth_resolve >= framebuffer->view_count)
+		return EINVAL;
+	source_view = framebuffer->views[pass->depth_attachment]->payload;
+	destination_view = framebuffer->views[pass->depth_resolve]->payload;
+	source = source_view->image->payload;
+	destination = destination_view->image->payload;
+	depth = nvrtx_exec_depth_format_find(source->format);
+	if (depth == NULL || source->samples != 4U || destination->samples > 1U || destination->format != source->format)
+		return EINVAL;
+	error = nvrtx_vk_image_address(source, &source_va, &cpu);
+	if (error == 0)
+		error = nvrtx_vk_image_address(destination, &destination_va, &cpu);
+	if (error == 0)
+		error = nvrtx_vk_image_surface(source, 0U, source_view->base_layer, &source_offset, &source_width, &source_height,
+					       &source_pitch);
+	if (error == 0)
+		error = nvrtx_vk_image_surface(destination, destination_view->base_level, destination_view->base_layer, &destination_offset,
+					       &destination_width, &destination_height, &destination_pitch);
+	if (error != 0)
+		return error;
+	if (x1 > (int32_t)source_width || x1 > (int32_t)destination_width || y1 > (int32_t)source_height ||
+	    y1 > (int32_t)destination_height)
+		return EINVAL;
+
+	/* A texel of two samples read, the first written: components of up to four bytes. */
+	kern_memset(&copy, 0, sizeof(copy));
+	for (index = 0U; index < 4U; index++)
+		copy.remap[index] = NVRTX_EXEC_COPY_KEEP;
+	copy.component_bytes = depth->bytes > 4U ? 4U : depth->bytes;
+	copy.destination_components = depth->bytes / copy.component_bytes;
+	copy.source_components = copy.destination_components * 2U;
+	for (index = 0U; index < copy.destination_components; index++)
+		copy.remap[index] = index;
+	copy.width = (uint32_t)(x1 - x0);
+	copy.height = 1U;
+
+	/* The pass's work before the copies. */
+	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
+
+	/* Each row: pixel row y from sample row 2y, its texels of two samples from x0 on. */
+	for (y = y0; y < y1; y++) {
+		error = execute_surface_room(session, execute, state);
+		if (error != 0)
+			return error;
+		execute_depth_side(&copy.source, source_va, source_offset, source_pitch, source_height * 2U, x0, y * 2);
+		execute_depth_side(&copy.destination, destination_va, destination_offset, destination_pitch, destination_height, x0, y);
+		execute->at = nvrtx_exec_copy_rect(execute->cpu + EXECUTE_PUSH_AT, execute->at, &copy);
+	}
+
+	/* Succeeded: sample 0 is in the attachment of one sample. */
 	return 0;
 }
 

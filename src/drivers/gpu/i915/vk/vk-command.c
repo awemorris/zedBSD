@@ -234,6 +234,11 @@ static int i915_execute_clear_attachment(struct i915_render_session *session, co
 static int i915_execute_image_copy(struct i915_render_session *session, const struct i915_gfx_op *op);
 static int i915_execute_image_blit(struct i915_render_session *session, const struct i915_gfx_op *op);
 static int i915_execute_image_resolve(struct i915_render_session *session, const struct i915_gfx_op *op);
+static int i915_execute_depth_resolve(struct i915_render_session *session, const struct i915_gfx_draw_state *state);
+static int i915_execute_color_resolve(struct i915_render_session *session, const struct i915_gfx_draw_state *state);
+static int i915_resolve_samples(struct i915_render_session *session, const struct i915_gfx_image *src, const struct i915_gfx_surface *dst_surface, const struct i915_gfx_rect *src_rect, const struct i915_gfx_rect *dst_rect);
+static uint8_t *i915_resolve_plane(const struct i915_gfx_view *view, int stencil, uint32_t *pitch, uint32_t *texel_bytes);
+static uint64_t i915_ytile_offset(uint32_t pitch, uint32_t x_bytes, uint32_t y);
 static int i915_format_integer(uint32_t format);
 static int i915_draw_refusal_skipped(const struct i915_render_session *session, uint64_t sends, int error);
 static int i915_fill_samples(struct i915_render_session *session, const struct i915_gfx_image *image, const struct i915_gfx_surface *surface, const struct i915_gfx_rect *rect, const uint32_t words[4]);
@@ -1676,7 +1681,7 @@ i915_record_begin_pass(
 		return EINVAL;
 	}
 
-	/* Records the render pass and the framebuffer; the render area is decoded and not kept. */
+	/* Records the render pass, the framebuffer and the render area. */
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
@@ -1684,6 +1689,10 @@ i915_record_begin_pass(
 	identity = drv_i915_wire_read_u64(reader);
 	op->u.begin.framebuffer = drv_i915_object_lookup(session, I915_VK_OBJ_FRAMEBUFFER, identity);
 	i915_vkc_dec_VkRect2D(reader, &session->arena, &area);
+	op->u.begin.area.x = area.offset.x;
+	op->u.begin.area.y = area.offset.y;
+	op->u.begin.area.w = area.extent.width;
+	op->u.begin.area.h = area.extent.height;
 
 	/* Decodes the number of clear values, at most sixty-four. */
 	(void)drv_i915_wire_read_u32(reader);
@@ -3755,11 +3764,9 @@ i915_execute_image_resolve(
 {
 	const VkImageCopy *region;
 	const struct i915_gfx_image *src;
-	struct i915_gfx_surface samples[4];
 	struct i915_gfx_surface dst_surface;
 	struct i915_gfx_rect src_rect;
 	struct i915_gfx_rect dst_rect;
-	uint32_t sample;
 	int error;
 
 	/* Refuses a resolve whose images do not exist. */
@@ -3772,19 +3779,10 @@ i915_execute_image_resolve(
 	if (src->samples <= 1U || op->u.image_copy.dst->samples > 1U)
 		return EINVAL;
 
-	/* Describes the source's sample 0 and the destination's level and layer. */
-	error = i915_image_surface(src, 0U, 0U, &samples[0]);
-	if (error != 0)
-		return EINVAL;
+	/* Describes the destination's level and layer. */
 	error = i915_image_surface(op->u.image_copy.dst, region->dstSubresource.mipLevel, region->dstSubresource.baseArrayLayer, &dst_surface);
 	if (error != 0)
 		return EINVAL;
-
-	/* Every further sample is the slice below the one before; a two-sample image names each twice. */
-	for (sample = 1U; sample < 4U; sample++) {
-		samples[sample] = samples[0];
-		samples[sample].va += (uint64_t)(sample % src->samples) * src->slice_rows * src->pitch;
-	}
 
 	/* The two rectangles are the extent at each side's offset. */
 	src_rect.x = region->srcOffset.x;
@@ -3800,20 +3798,112 @@ i915_execute_image_resolve(
 	if (region->extent.width == 0U || region->extent.height == 0U)
 		return 0;
 
-	/* An integer format's sample 0, copied: a mean of integers read as floats is no value of theirs. */
-	if (i915_format_integer(src->format) != 0) {
-		error = drv_i915_gfx_rect(session, &dst_surface, &dst_rect, &samples[0], &src_rect, NULL, 0);
-		if (error != 0)
-			return error;
-		return 0;
+	/* Resolves the rectangle. */
+	return i915_resolve_samples(session, src, &dst_surface, &src_rect, &dst_rect);
+}
+
+/*
+ * Resolves a rectangle of a multisampled colour image (layer 0) into a
+ * rectangle of the same size of a surface: the mean of the samples, or an
+ * integer format's sample 0 copied (a mean of integers read as floats is
+ * no value of theirs).
+ */
+static int
+i915_resolve_samples(
+	struct i915_render_session *session,
+	const struct i915_gfx_image *src,
+	const struct i915_gfx_surface *dst_surface,
+	const struct i915_gfx_rect *src_rect,
+	const struct i915_gfx_rect *dst_rect)
+{
+	struct i915_gfx_surface samples[4];
+	uint32_t sample;
+	int error;
+
+	/* The source's sample 0; every further sample the slice below the one before, a two-sample image naming each twice. */
+	error = i915_image_surface(src, 0U, 0U, &samples[0]);
+	if (error != 0)
+		return EINVAL;
+	for (sample = 1U; sample < 4U; sample++) {
+		samples[sample] = samples[0];
+		samples[sample].va += (uint64_t)(sample % src->samples) * src->slice_rows * src->pitch;
 	}
 
-	/* Resolves the rectangle. */
-	error = drv_i915_gfx_resolve(session, &dst_surface, &dst_rect, samples, &src_rect);
-	if (error != 0)
-		return error;
+	/* An integer format's sample 0, copied. */
+	if (i915_format_integer(src->format) != 0)
+		return drv_i915_gfx_rect(session, dst_surface, dst_rect, &samples[0], src_rect, NULL, 0);
 
-	/* Succeeded: the region is resolved. */
+	/* Succeeded or not: the mean. */
+	return drv_i915_gfx_resolve(session, dst_surface, dst_rect, samples, src_rect);
+}
+
+/*
+ * Resolves each colour attachment of the pass that names a resolve
+ * attachment into it over the render area (the framebuffer's extent clips
+ * it), at the end of the subpass, after the pass's draws in the batch.
+ *
+ * XXX: the views' first layer only (a multisampled image has one).
+ */
+static int
+i915_execute_color_resolve(
+	struct i915_render_session *session,
+	const struct i915_gfx_draw_state *state)
+{
+	const struct i915_gfx_pass *pass;
+	const struct i915_gfx_framebuffer *framebuffer;
+	const struct i915_gfx_view *source;
+	const struct i915_gfx_view *target;
+	struct i915_gfx_surface dst_surface;
+	struct i915_gfx_rect rect;
+	uint32_t index;
+	uint32_t right;
+	uint32_t bottom;
+	int error;
+
+	/* A pass without resolve attachments has nothing to do. */
+	pass = state->pass;
+	framebuffer = state->framebuffer;
+	if (pass == NULL || framebuffer == NULL)
+		return 0;
+
+	/* The render area within the framebuffer; an empty one resolves nothing. */
+	rect = state->area;
+	if (rect.x < 0)
+		rect.x = 0;
+	if (rect.y < 0)
+		rect.y = 0;
+	right = (uint32_t)state->area.x + state->area.w;
+	bottom = (uint32_t)state->area.y + state->area.h;
+	if (right > framebuffer->width)
+		right = framebuffer->width;
+	if (bottom > framebuffer->height)
+		bottom = framebuffer->height;
+	if ((uint32_t)rect.x >= right || (uint32_t)rect.y >= bottom)
+		return 0;
+	rect.w = right - (uint32_t)rect.x;
+	rect.h = bottom - (uint32_t)rect.y;
+
+	/* Each colour attachment that names one. */
+	for (index = 0U; index < pass->color_count && index < I915_GFX_MAX_COLOR_ATTACHMENTS; index++) {
+		if (pass->color_attachments[index] == VK_ATTACHMENT_UNUSED || pass->color_resolves[index] == VK_ATTACHMENT_UNUSED)
+			continue;
+		if (pass->color_attachments[index] >= framebuffer->view_count || pass->color_resolves[index] >= framebuffer->view_count)
+			return EINVAL;
+		source = framebuffer->views[pass->color_attachments[index]];
+		target = framebuffer->views[pass->color_resolves[index]];
+		if (source == NULL || target == NULL || source->image == NULL || target->image == NULL)
+			return EINVAL;
+		if (source->image->samples <= 1U || target->image->samples > 1U)
+			return EINVAL;
+		error = i915_attachment_surface(target, &dst_surface);
+		if (error != 0)
+			return EINVAL;
+		error = i915_resolve_samples(session, source->image, &dst_surface, &rect, &rect);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every resolve attachment holds its colour attachment's resolve. */
 	return 0;
 }
 
@@ -4098,6 +4188,183 @@ i915_execute_draw(
 }
 
 /*
+ * Resolves sample 0 of the pass's depth/stencil attachment into its
+ * attachment of one sample over the render area (the framebuffer's extent
+ * clips it), when the pass names a resolve: what the batch holds runs
+ * first, then the CPU copies each pixel's sample 0 of the planes the
+ * resolve names (the depth's whole texel, the stencil's byte) between the
+ * two Y-tiled planes.
+ *
+ * In the interleaved layout of a multisampled depth or stencil plane,
+ * sample s of pixel (x, y) is at x' = (x & ~1) * 2 + (s & 1) * 2 + (x & 1)
+ * and, with four samples, y' = (y & ~1) * 2 + (s & 2) + (y & 1) (two:
+ * y' = y), so sample 0 is at x' = (x & ~1) * 2 + (x & 1), y' as with s 0.
+ *
+ * XXX: the views' first layer only (the multisampled image has one layer;
+ * a multiview pass resolves view 0).
+ *
+ * Values referenced: Mesa 26.2.6 src/intel/blorp/blorp_blit.c (the
+ * encode_msaa of the interleaved layout), src/intel/isl/isl_tiled_memcpy.c
+ * (the Y tile: 128 bytes by 32 rows, in 16-byte columns of 32 rows).
+ */
+static int
+i915_execute_depth_resolve(
+	struct i915_render_session *session,
+	const struct i915_gfx_draw_state *state)
+{
+	const struct i915_gfx_pass *pass;
+	const struct i915_gfx_framebuffer *framebuffer;
+	const struct i915_gfx_view *source;
+	const struct i915_gfx_view *target;
+	struct i915_gfx_session *work;
+	const uint8_t *from;
+	uint8_t *to;
+	uint32_t from_pitch;
+	uint32_t to_pitch;
+	uint32_t bytes;
+	uint32_t target_bytes;
+	uint32_t right;
+	uint32_t bottom;
+	uint32_t left;
+	uint32_t top;
+	uint32_t x;
+	uint32_t y;
+	uint32_t sample_x;
+	uint32_t sample_y;
+	int aspect;
+	int error;
+
+	/* A pass without a resolve of its depth/stencil attachment has nothing to do. */
+	pass = state->pass;
+	framebuffer = state->framebuffer;
+	if (pass == NULL || framebuffer == NULL || pass->depth_resolve == VK_ATTACHMENT_UNUSED)
+		return 0;
+
+	/* Refuses views the framebuffer does not have. */
+	if (pass->depth_attachment >= framebuffer->view_count || pass->depth_resolve >= framebuffer->view_count)
+		return EINVAL;
+	source = framebuffer->views[pass->depth_attachment];
+	target = framebuffer->views[pass->depth_resolve];
+	if (source == NULL || target == NULL || source->image == NULL || target->image == NULL)
+		return EINVAL;
+	if (source->image->samples != 2U && source->image->samples != 4U)
+		return EINVAL;
+
+	/* The render area within the framebuffer and both images; an empty one resolves nothing. */
+	left = state->area.x < 0 ? 0U : (uint32_t)state->area.x;
+	top = state->area.y < 0 ? 0U : (uint32_t)state->area.y;
+	right = left + state->area.w;
+	bottom = top + state->area.h;
+	if (right > framebuffer->width)
+		right = framebuffer->width;
+	if (bottom > framebuffer->height)
+		bottom = framebuffer->height;
+	if (right > source->image->width)
+		right = source->image->width;
+	if (bottom > source->image->height)
+		bottom = source->image->height;
+	if (right > target->image->width)
+		right = target->image->width;
+	if (bottom > target->image->height)
+		bottom = target->image->height;
+	if (left >= right || top >= bottom)
+		return 0;
+
+	/* Runs what the batch holds, so that the pass's samples are in memory. */
+	work = drv_i915_gfx_session_get(session);
+	if (work == NULL)
+		return ENOSPC;
+	if (work->ops_pending != 0U) {
+		error = drv_i915_gfx_flush(session, work);
+		if (error != 0)
+			return error;
+	}
+
+	/* Each aspect the resolve names: its plane's sample 0 of each pixel, whole texels. */
+	for (aspect = 0; aspect < 2; aspect++) {
+		if ((aspect == 0 && pass->depth_resolve_depth == 0U) || (aspect == 1 && pass->depth_resolve_stencil == 0U))
+			continue;
+		from = i915_resolve_plane(source, aspect, &from_pitch, &bytes);
+		to = i915_resolve_plane(target, aspect, &to_pitch, &target_bytes);
+		if (from == NULL || to == NULL || bytes != target_bytes) {
+			kern_logf("i915: vk: depth/stencil resolve refused: a plane without storage\n");
+			return EINVAL;
+		}
+		for (y = top; y < bottom; y++) {
+			sample_y = y;
+			if (source->image->samples == 4U)
+				sample_y = (y & ~1U) * 2U + (y & 1U);
+			for (x = left; x < right; x++) {
+				sample_x = (x & ~1U) * 2U + (x & 1U);
+				kern_memcpy(to + i915_ytile_offset(to_pitch, x * bytes, y),
+					    from + i915_ytile_offset(from_pitch, sample_x * bytes, sample_y),
+					    bytes);
+			}
+		}
+	}
+
+	/* Succeeded: sample 0 is in the attachment of one sample. */
+	return 0;
+}
+
+/*
+ * Reports the CPU view of the first layer of a depth/stencil view's depth
+ * plane (stencil 0) or stencil plane (nonzero), its pitch and its texel's
+ * bytes; NULL for a plane the image does not have or that has no storage.
+ * A D32_SFLOAT_S8_UINT depth plane holds 4-byte texels, the stencil plane
+ * bytes (vk-image.c lays both out).
+ */
+static uint8_t *
+i915_resolve_plane(
+	const struct i915_gfx_view *view,
+	int stencil,
+	uint32_t *pitch,
+	uint32_t *texel_bytes)
+{
+	const struct i915_gfx_image *image;
+	uint64_t offset;
+	uint64_t rows;
+
+	/* The stencil plane, which follows the depth plane. */
+	image = view->image;
+	if (stencil) {
+		if (image->stencil == 0U)
+			return NULL;
+		*pitch = image->stencil_pitch;
+		*texel_bytes = 1U;
+		rows = image->stencil_slice_rows;
+		offset = image->stencil_offset + (uint64_t)view->base_layer * image->stencil_pitch * image->stencil_slice_rows;
+		return drv_i915_gfx_memory_cpu(image->memory, image->offset + offset, (uint64_t)image->stencil_pitch * rows);
+	}
+
+	/* The depth plane: a stencil-only image has none. */
+	if (image->format == VK_FORMAT_S8_UINT)
+		return NULL;
+	*pitch = image->pitch;
+	*texel_bytes = drv_i915_gfx_format_bytes(image->format);
+	if (image->format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+		*texel_bytes = 4U;
+	rows = ((image->sample_height + 31U) & ~31U);
+	offset = (uint64_t)view->base_layer * image->pitch * image->slice_rows;
+	return drv_i915_gfx_memory_cpu(image->memory, image->offset + offset, (uint64_t)image->pitch * rows);
+}
+
+/*
+ * Reports the offset of byte x_bytes of row y in a Y-tiled plane of `pitch`
+ * bytes (a whole number of tiles): tiles of 128 bytes by 32 rows, 4 KiB,
+ * row after row of them, each tile 16-byte columns of 32 rows.
+ */
+static uint64_t
+i915_ytile_offset(
+	uint32_t pitch,
+	uint32_t x_bytes,
+	uint32_t y)
+{
+	return (uint64_t)(y / 32U) * pitch * 32U + (uint64_t)(x_bytes / 128U) * 4096U +
+	    (uint64_t)((x_bytes % 128U) / 16U) * 512U + (uint64_t)(y % 32U) * 16U + x_bytes % 16U;
+}
+
+/*
  * Runs a recorded vkCmdDrawIndirect or vkCmdDrawIndexedIndirect: one draw
  * for each record, `stride` apart, each taking its counts and firsts from
  * the buffer when it runs (after what came before has written them).
@@ -4379,6 +4646,7 @@ i915_command_buffer_execute(
 		case I915_GFX_OP_BEGIN_PASS:
 			state.pass = op->u.begin.pass;
 			state.framebuffer = op->u.begin.framebuffer;
+			state.area = op->u.begin.area;
 			error = i915_execute_clear(session, op);
 			break;
 		case I915_GFX_OP_COPY_IMAGE:
@@ -4394,6 +4662,9 @@ i915_command_buffer_execute(
 			error = i915_execute_clear_image(session, op);
 			break;
 		case I915_GFX_OP_END_PASS:
+			error = i915_execute_color_resolve(session, &state);
+			if (error == 0)
+				error = i915_execute_depth_resolve(session, &state);
 			state.pass = NULL;
 			state.framebuffer = NULL;
 			break;

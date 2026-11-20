@@ -397,6 +397,13 @@ struct nvrtx_vk_render_pass {
 
 	/* The views the subpass renders (VkRenderPassMultiviewCreateInfo); zero for a pass of one view. */
 	uint32_t view_mask;
+
+	/*
+	 * The attachment of one sample the depth attachment's sample 0 is
+	 * resolved into at the end of the subpass (both aspects of a format of
+	 * two), or VK_ATTACHMENT_UNUSED.
+	 */
+	uint32_t depth_resolve;
 };
 
 /* A VkFramebuffer: its size, its layers (a layered pass draws into each) and the views of its attachments in order, held. */

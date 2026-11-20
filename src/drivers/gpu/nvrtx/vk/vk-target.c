@@ -126,11 +126,10 @@ target_create_pass(
 
 	/* Refuses by name a pass of another shape. */
 	error = 0;
+	resolve.target = VK_ATTACHMENT_UNUSED;
 	supported = target_pass_supported(&info);
-	if (supported != 0 && i915_vkc_depth_resolve(&info, resolves, 0U, &resolve) != 0)
-		supported = 0;
-	if (supported != 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
-		kern_logf("nvrtx: vk: vkCreateRenderPass2 refused: no resolve of depth or stencil\n");
+	if (supported != 0 && i915_vkc_depth_resolve(&info, resolves, 0U, &resolve) != 0) {
+		kern_logf("nvrtx: vk: vkCreateRenderPass2 refused: a resolve of depth or stencil other than sample 0\n");
 		supported = 0;
 	}
 	if (supported == 0) {
@@ -153,8 +152,10 @@ target_create_pass(
 		subpass = &info.pSubpasses[0];
 		for (index = 0U; pass != NULL && index < NVRTX_EXEC_COLOURS; index++)
 			pass->resolves[index] = VK_ATTACHMENT_UNUSED;
-		if (pass != NULL)
+		if (pass != NULL) {
 			pass->samples = target_pass_samples(&info);
+			pass->depth_resolve = resolve.target;
+		}
 		for (index = 0U; pass != NULL && index < subpass->colorAttachmentCount; index++) {
 			attachment = subpass->pColorAttachments[index].attachment;
 			pass->colour_attachments[index] = attachment;

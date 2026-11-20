@@ -446,11 +446,28 @@ struct i915_gfx_pass {
 	uint32_t color_attachments[I915_GFX_MAX_COLOR_ATTACHMENTS];
 
 	/*
+	 * The attachment of one sample each colour attachment is resolved into
+	 * at the end of the subpass (pResolveAttachments), or
+	 * VK_ATTACHMENT_UNUSED.
+	 */
+	uint32_t color_resolves[I915_GFX_MAX_COLOR_ATTACHMENTS];
+
+	/*
 	 * The views the subpass renders (VkRenderPassMultiviewCreateInfo):
 	 * bit v renders view v into layer v of each attachment's view; zero
 	 * for a pass of one view, which renders the framebuffer's layers.
 	 */
 	uint32_t view_mask;
+
+	/*
+	 * The resolve of sample 0 of the depth/stencil attachment at the end
+	 * of the subpass (VkSubpassDescriptionDepthStencilResolve): the
+	 * attachment of one sample it is written to, or VK_ATTACHMENT_UNUSED,
+	 * and whether its depth and its stencil are resolved.
+	 */
+	uint32_t depth_resolve;
+	uint32_t depth_resolve_depth;
+	uint32_t depth_resolve_stencil;
 };
 
 /*
@@ -827,6 +844,9 @@ struct i915_gfx_op {
 
 			/* A colour clear is RGBA float bits; a depth clear is word 0. */
 			uint32_t clear_words[I915_GFX_MAX_ATTACHMENTS][4];
+
+			/* The render area. */
+			struct i915_gfx_rect area;
 		} begin;
 
 		/* The pipeline a bind names. */
@@ -1015,9 +1035,10 @@ struct i915_gfx_op {
  * execution.
  */
 struct i915_gfx_draw_state {
-	/* The render pass and the framebuffer in progress. */
+	/* The render pass and the framebuffer in progress, and its render area. */
 	struct i915_gfx_pass *pass;
 	struct i915_gfx_framebuffer *framebuffer;
+	struct i915_gfx_rect area;
 
 	/* The bound graphics pipeline. */
 	struct i915_gfx_pipeline *pipeline;
