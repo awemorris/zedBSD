@@ -443,8 +443,24 @@ elf64_ph_next:
 /* ------------------------------------------------------------------ */
 
 load_all_segments:
+	/*
+	 * Each step between the ELF check and the final handoff reports its
+	 * completion on the text screen, so a stop on real hardware shows the
+	 * last step that finished and, during the copy, the last 256 KiB block.
+	 */
 	call enable_a20_pc98
+	mov si, offset msg_a20
+	call puts
+	call enable_dma_high_pc98
+	mov si, offset msg_dma_high
+	call puts
 	call unreal_fs
+	mov si, offset msg_unreal
+	call puts
+	call check_a20
+	mov si, offset msg_a20_checked
+	call puts
+	call check_load_memory
 	mov word ptr [ph_cursor], offset ph_table
 	mov ax, word ptr [ph_load_count]
 	mov word ptr [ph_remaining], ax
@@ -460,6 +476,9 @@ load_ph_loop:
 	mov dword ptr [load_destination], eax
 	mov eax, dword ptr [si + 8]
 	mov dword ptr [load_remaining], eax
+	mov al, 'C'
+	mov edi, dword ptr [load_destination]
+	call progress_begin
 
 load_file_loop:
 	mov eax, dword ptr [load_remaining]
@@ -467,6 +486,12 @@ load_file_loop:
 	jz zero_bss
 	mov eax, dword ptr [load_file_sector]
 	call fat16_read_file_sector
+
+	/*
+	 * A firmware disk call may pass through protected mode and leave FS
+	 * with a real-mode limit; restore the flat limit before each copy.
+	 */
+	call unreal_fs
 	mov ecx, 512
 	cmp dword ptr [load_remaining], ecx
 	jae 1f
@@ -481,8 +506,11 @@ copy_sector_loop:
 	jz copy_sector_tail
 
 copy_sector_dword:
+	/* Store one dword and read it back, so missing memory stops here. */
 	mov eax, dword ptr es:[bx]
 	mov dword ptr fs:[edi], eax
+	cmp dword ptr fs:[edi], eax
+	jne fatal_write_verify
 	add bx, 4
 	add edi, 4
 	dec ecx
@@ -496,12 +524,15 @@ copy_sector_tail:
 copy_sector_byte:
 	mov al, byte ptr es:[bx]
 	mov byte ptr fs:[edi], al
+	cmp byte ptr fs:[edi], al
+	jne fatal_write_verify
 	inc bx
 	inc edi
 	dec ecx
 	jnz copy_sector_byte
 
 copy_sector_done:
+	call progress_update
 	mov eax, dword ptr [copy_count]
 	add dword ptr [load_destination], eax
 	sub dword ptr [load_remaining], eax
@@ -509,34 +540,50 @@ copy_sector_done:
 	jmp load_file_loop
 
 zero_bss:
+	call unreal_fs
 	mov si, word ptr [ph_cursor]
 	mov ecx, dword ptr [si + 12]
 	sub ecx, dword ptr [si + 8]
 	mov edi, dword ptr [si + 4]
 	add edi, dword ptr [si + 8]
+	mov al, 'Z'
+	call progress_begin
 
-zero_bss_loop:
+	/*
+	 * Clear the dword-sized part first.  The zero value is set before the
+	 * count is tested so that the test sees the count, not the zeroing.
+	 */
 	mov edx, ecx
-	shr ecx, 2
 	xor eax, eax
+	shr ecx, 2
 	jz zero_bss_tail
 
 zero_bss_dword:
 	mov dword ptr fs:[edi], eax
+	cmp dword ptr fs:[edi], eax
+	jne fatal_write_verify
 	add edi, 4
-	dec ecx
+	test edi, 0x3ffff
+	jnz 1f
+	call progress_update
+1:	dec ecx
 	jnz zero_bss_dword
 
 zero_bss_tail:
 	mov ecx, edx
 	and ecx, 3
-	jz next_ph
+	jz zero_bss_done
 
 zero_bss_byte:
 	mov byte ptr fs:[edi], 0
+	cmp byte ptr fs:[edi], 0
+	jne fatal_write_verify
 	inc edi
 	dec ecx
 	jnz zero_bss_byte
+
+zero_bss_done:
+	call progress_update
 
 next_ph:
 	add word ptr [ph_cursor], PH_RECORD_SIZE
@@ -1639,12 +1686,19 @@ pc98_disk_fail:
 	popad
 	jmp fatal_disk
 
-/* Match the proven PC-98 loader sequence before touching >= 1 MiB. */
+/* Open the A20 gate through both PC-98 gate ports. */
 enable_a20_pc98:
 	xor al, al
 	out 0xf2, al
 	mov al, 0x02
 	out 0xf6, al
+	ret
+
+/*
+ * Allow DMA above 1 MiB on machines with the access-control port, clear a
+ * stale coprocessor busy latch, and give the bus a short settle delay.
+ */
+enable_dma_high_pc98:
 	mov dx, 0x0439
 	in al, dx
 	and al, 0xfb
@@ -1652,6 +1706,129 @@ enable_a20_pc98:
 	xor al, al
 	out 0xf8, al
 	out 0x5f, al
+	ret
+
+/*
+ * Prove that 1 MiB is not an alias of address 0 with the flat FS segment.
+ * The interrupt vector at 0 is restored whatever the result.
+ */
+check_a20:
+	cli
+	mov eax, dword ptr fs:[0]
+	mov edx, eax
+	not edx
+	mov ebx, 0x00100000
+	mov dword ptr fs:[ebx], edx
+	mov ecx, dword ptr fs:[0]
+	mov dword ptr fs:[0], eax
+	sti
+	cmp ecx, eax
+	jne fatal_a20
+	cmp dword ptr fs:[ebx], edx
+	jne fatal_write_verify_ebx
+	ret
+
+/*
+ * Compare each ELF32 load range with the extended memory the BIOS reports
+ * below 16 MiB, and show where that memory ends.
+ */
+check_load_memory:
+	cmp byte ptr [elf_class], ELFCLASS32
+	jne 3f
+	push ds
+	xor ax, ax
+	mov ds, ax
+	movzx edx, byte ptr [0x0401]
+	pop ds
+	shl edx, 17
+	add edx, 0x00100000
+	mov dword ptr [extended_memory_end], edx
+	/* Show the memory end in 64 KiB units with three digits (100 = 16 MiB). */
+	mov al, 'M'
+	call putc
+	mov eax, edx
+	shr eax, 16
+	mov cx, 3
+	call put_hex
+	mov al, ' '
+	call putc
+	mov si, offset ph_table
+	mov cx, word ptr [ph_load_count]
+
+1:	mov ebx, dword ptr [si + 4]
+	add ebx, dword ptr [si + 12]
+	cmp ebx, dword ptr [extended_memory_end]
+	ja fatal_memory_small
+	add si, PH_RECORD_SIZE
+	loop 1b
+3:	ret
+
+/*
+ * AL is the phase letter and EDI the first address of the phase.  Show the
+ * letter and that address, and arm the next 256 KiB boundary.
+ */
+progress_begin:
+	call putc
+	mov eax, edi
+	call put_progress_address
+	mov eax, edi
+	and eax, 0xfffc0000
+	add eax, 0x00040000
+	mov dword ptr [progress_next], eax
+	ret
+
+/*
+ * EDI is the first address not yet written and checked.  Show every 256 KiB
+ * boundary that the phase has passed.
+ */
+progress_update:
+	push eax
+
+1:	cmp edi, dword ptr [progress_next]
+	jb 2f
+	mov eax, dword ptr [progress_next]
+	call put_progress_address
+	add dword ptr [progress_next], 0x00040000
+	jmp 1b
+2:	pop eax
+	ret
+
+/* Show EAX in 64 KiB units as two hex digits and a space. */
+put_progress_address:
+	push eax
+	push cx
+	shr eax, 16
+	mov cx, 2
+	call put_hex
+	mov al, ' '
+	call putc
+	pop cx
+	pop eax
+	ret
+
+/* Show the low CX hex digits of EAX, most significant first. */
+put_hex:
+	pushad
+	mov edx, eax
+	mov bx, 8
+	sub bx, cx
+	shl bx, 2
+	push cx
+	mov cl, bl
+	rol edx, cl
+	pop cx
+
+1:	rol edx, 4
+	mov al, dl
+	and al, 0x0f
+	cmp al, 10
+	jb 2f
+	add al, 'A' - 10
+	jmp 3f
+2:	add al, '0'
+3:	call putc
+	loop 1b
+	popad
 	ret
 
 /* Give FS a flat hidden descriptor while returning to real mode. */
@@ -2144,6 +2321,42 @@ fatal_stage2_checksum:
 
 fatal_disk:
 	mov al, 'D'
+	jmp fatal
+
+fatal_a20:
+	mov al, 'A'
+	jmp fatal
+
+/* EDI is the address whose stored value did not read back. */
+fatal_write_verify:
+	mov ebx, edi
+
+/* EBX is the address whose stored value did not read back. */
+fatal_write_verify_ebx:
+	mov al, 'W'
+	jmp fatal_address
+
+/* EBX is the end of the load range beyond the reported memory. */
+fatal_memory_small:
+	mov al, 'X'
+
+/* Show the error letter, then EBX as eight hex digits. */
+fatal_address:
+	push ax
+	mov si, offset msg_error
+	call puts
+	pop ax
+	call putc
+	mov al, ' '
+	call putc
+	mov eax, ebx
+	mov cx, 8
+	call put_hex
+	mov al, '\n'
+	call putc
+	cli
+1:	hlt
+	jmp 1b
 
 fatal:
 	push ax
@@ -2167,6 +2380,10 @@ msg_vmunix:		.asciz "VF "
 msg_elf32:		.asciz "E3 "
 msg_elf64:		.asciz "E6 "
 msg_loaded:		.asciz "LD "
+msg_a20:		.asciz "A2 "
+msg_dma_high:		.asciz "DA "
+msg_unreal:		.asciz "UR "
+msg_a20_checked:	.asciz "AC "
 msg_go:			.asciz "GO\n"
 msg_error:		.asciz "ERR "
 config_name:		.ascii "BOOTZBSDCFG"
@@ -2272,6 +2489,8 @@ load_file_sector:	.long 0
 load_destination:	.long 0
 load_remaining:		.long 0
 copy_count:		.long 0
+progress_next:		.long 0
+extended_memory_end:	.long 0
 disk_lba:		.long 0
 gateway_request:	.long 0
 gateway_saved_esp:	.long 0
