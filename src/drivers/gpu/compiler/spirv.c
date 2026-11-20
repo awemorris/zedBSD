@@ -1843,9 +1843,10 @@ drv_gpu_shader_ir_free(
  * Binds gl_ViewIndex to one view: every LOAD_SYSTEM of the view becomes
  * the integer constant `view`.
  *
- * A multiview draw renders each view of its subpass with the shader
- * compiled for that view, so a backend never reads the view at run time.
- * An IR that does not read the view is left as it is.
+ * A driver that renders each view of a multiview subpass with the shader
+ * compiled for that view, or a shader outside multiview (view 0), binds
+ * it here; then the backend never reads the view at run time.  An IR
+ * that does not read the view is left as it is.
  */
 void
 drv_gpu_shader_ir_bind_view(

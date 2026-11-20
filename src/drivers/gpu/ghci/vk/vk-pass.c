@@ -12,9 +12,10 @@
  * needs (the formats and samples of its attachments) and which
  * attachments it names, and for each attachment its format, samples,
  * load and store operations and the first and last subpass that uses
- * it.  A framebuffer keeps its views by identity and its size.  The
- * submission turns each subpass into a render pass description of the
- * hardware (vk-execute.c).
+ * it, and the views of a multiview pass.  A framebuffer keeps its views
+ * by identity and its size.  The submission turns each subpass into a
+ * render pass description of the hardware (vk-execute.c), drawing a
+ * multiview pass once per view.
  */
 
 #include <stddef.h>
@@ -40,6 +41,7 @@ static int create_render_pass(struct ghci_vk_session *session, uint32_t requeste
 static uint32_t pass_build(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, struct ghci_vk_render_pass *pass);
 static int pass_subpass(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, uint32_t index, struct ghci_vk_render_pass *pass);
 static int pass_reference(const VkRenderPassCreateInfo *info, const VkAttachmentReference *reference, uint32_t index, struct ghci_vk_render_pass *pass, uint32_t *attachment);
+static int pass_views(const VkRenderPassCreateInfo *info, struct ghci_vk_render_pass *pass);
 static int create_framebuffer(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int destroy_pass_object(struct ghci_vk_session *session, enum ghci_vk_kind kind, struct i915_wire_reader *reader);
 static int granularity(struct ghci_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply, uint32_t requested);
@@ -252,6 +254,13 @@ pass_build(
 			return UINT32_MAX;
 	}
 
+	/* The views of a multiview pass. */
+	error = pass_views(info, pass);
+	if (error == ENOTSUP)
+		return (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT;
+	if (error != 0)
+		return UINT32_MAX;
+
 	/* Succeeded: the pass is whole. */
 	return (uint32_t)VK_SUCCESS;
 }
@@ -349,6 +358,50 @@ pass_subpass(
 	}
 
 	/* Succeeded: the subpass is whole. */
+	return 0;
+}
+
+/*
+ * Reads the views of a multiview pass (VkRenderPassMultiviewCreateInfo)
+ * into the pass and each subpass.  The submission draws the whole pass
+ * once per view, so every subpass draws the same views, at most
+ * GHCI_VK_VIEWS_MAX of them, and reads no input attachment (which would
+ * have to be read at the view's layer).  Returns 0, ENOTSUP for a pass
+ * the submission cannot draw so, or EINVAL for a malformed record.
+ */
+static int
+pass_views(
+	const VkRenderPassCreateInfo *info,
+	struct ghci_vk_render_pass *pass)
+{
+	const VkRenderPassMultiviewCreateInfo *multiview;
+	uint32_t mask;
+	uint32_t index;
+
+	/* A pass of one view. */
+	multiview = i915_vkc_render_pass_multiview(info);
+	if (multiview == NULL || multiview->subpassCount == 0U)
+		return 0;
+
+	/* A mask for each subpass. */
+	if (multiview->subpassCount != info->subpassCount || multiview->pViewMasks == NULL)
+		return EINVAL;
+
+	/* The same views in each, which the device draws, and no input attachment. */
+	mask = multiview->pViewMasks[0];
+	for (index = 0U; index < info->subpassCount; index++) {
+		if (multiview->pViewMasks[index] != mask)
+			return ENOTSUP;
+		if (mask != 0U && pass->references[index].input_count != 0U)
+			return ENOTSUP;
+	}
+	if ((mask >> GHCI_VK_VIEWS_MAX) != 0U)
+		return ENOTSUP;
+
+	/* Succeeded: the pass and its subpasses draw the views. */
+	pass->view_mask = mask;
+	for (index = 0U; index < info->subpassCount; index++)
+		pass->subpasses[index].view_mask = mask;
 	return 0;
 }
 

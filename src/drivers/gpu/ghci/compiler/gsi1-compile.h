@@ -163,6 +163,18 @@ struct ghci_gsi1_options {
 	uint32_t input_attachment_format[GHCI_GSI1_INPUT_ATTACHMENTS];
 	uint32_t input_attachment_samples[GHCI_GSI1_INPUT_ATTACHMENTS];
 
+	/*
+	 * A compute program of a pipeline made for vkCmdDispatchBase: its
+	 * workgroups count from the first one in bank words 72 to 74.
+	 */
+	uint32_t dispatch_base;
+
+	/*
+	 * A graphics program of a multiview subpass: gl_ViewIndex is bank word
+	 * 75, which the executor loads before each view.  Otherwise it is 0.
+	 */
+	uint32_t multiview;
+
 	/* The pipeline layout's dynamic buffers, in the order of its dynamic offsets (bank word 40 + index). */
 	uint32_t dynamic_count;
 	struct ghci_gsi1_dynamic dynamic[GHCI_GSI1_DYNAMIC_OFFSETS];

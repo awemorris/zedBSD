@@ -76,9 +76,9 @@ ghci_vk_command_route(
 {
 	int error;
 
-	/* The recorded commands of Vulkan 1.0. */
+	/* The recorded commands of Vulkan 1.0, and vkCmdDispatchBase. */
 	*handled = 1;
-	if (opcode >= GPU_OP_CMD_BIND_PIPELINE && opcode <= GPU_OP_CMD_EXECUTE_COMMANDS) {
+	if ((opcode >= GPU_OP_CMD_BIND_PIPELINE && opcode <= GPU_OP_CMD_EXECUTE_COMMANDS) || opcode == GPU_OP_CMD_DISPATCH_BASE) {
 		error = record(session, opcode, requested, reader);
 		if (error != 0)
 			return error;
@@ -640,6 +640,10 @@ record_arguments(
 	case GPU_OP_CMD_DISPATCH_INDIRECT:
 		/* [buffer][u64 offset]. */
 		ghci_vk_skip(reader, 16U);
+		break;
+	case GPU_OP_CMD_DISPATCH_BASE:
+		/* [base x][base y][base z][x][y][z]. */
+		ghci_vk_skip(reader, 24U);
 		break;
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:

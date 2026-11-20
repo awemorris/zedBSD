@@ -73,8 +73,18 @@
 /* The completions the service retires in one pass under the interrupt's lock. */
 #define GHCI_VK_DONE_BATCH		32U
 
-/* The size of the memory heap the device reports, and the largest allocation. */
-#define GHCI_VK_HEAP_SIZE		(256ULL << 20)
+/*
+ * The size of the host memory heap the device reports, and the largest
+ * allocation, on a GPU of 32 address bits or more; a narrower one
+ * reports a quarter of its address space (ghci_vk_caps_heap_bytes()).
+ */
+#define GHCI_VK_HEAP_SIZE		(1ULL << 30)
+
+/*
+ * The views a multiview subpass may draw (maxMultiviewViewCount): view v
+ * draws into layer base + v of each attachment.
+ */
+#define GHCI_VK_VIEWS_MAX		8U
 
 /*
  * The memory types.  A unified GPU has one, device local, host visible
@@ -735,9 +745,10 @@ struct ghci_vk_static_state {
 
 /*
  * What a pipeline knows of its subpass: the colour attachments' formats,
- * the depth attachment's, the samples, and the input attachments'
- * formats and samples by InputAttachmentIndex.  The render pass's record
- * gives it; without one the pipeline's own state does.
+ * the depth attachment's, the samples, the input attachments' formats
+ * and samples by InputAttachmentIndex, and the views it draws (a bit per
+ * view; 0 without multiview).  The render pass's record gives it;
+ * without one the pipeline's own state does.
  */
 struct ghci_vk_subpass {
 	uint32_t color_count;
@@ -746,6 +757,7 @@ struct ghci_vk_subpass {
 	uint32_t samples;
 	uint32_t input_format[GHCI_GSI1_INPUT_ATTACHMENTS];
 	uint32_t input_samples[GHCI_GSI1_INPUT_ATTACHMENTS];
+	uint32_t view_mask;
 };
 
 /*
@@ -780,9 +792,11 @@ struct ghci_vk_pass_references {
 
 /*
  * A VkRenderPass: what each subpass is to a pipeline, the attachments
- * each names, and the attachments.
+ * each names, the attachments, and the views of a multiview pass (every
+ * subpass draws the same ones; 0 without multiview).
  */
 struct ghci_vk_render_pass {
+	uint32_t view_mask;
 	uint32_t subpass_count;
 	struct ghci_vk_subpass *subpasses;
 	struct ghci_vk_pass_references *references;
@@ -825,8 +839,10 @@ struct ghci_vk_query_pool {
  * render_pass and subpass are what it was made with, and dynamic_base
  * and dynamic_sets its layout's places of each set's dynamic offsets.
  * fan says that the topology is a triangle fan, which the record draws
- * as triangles from an index list the executor makes.  charged is what
- * the record and its runs take of the session's budget.
+ * as triangles from an index list the executor makes.  dispatch_base
+ * says that a compute pipeline reads the first workgroup of
+ * vkCmdDispatchBase from the bank.  charged is what the record and its
+ * runs take of the session's budget.
  */
 struct ghci_vk_pipeline {
 	uint32_t bind_point;
@@ -851,6 +867,7 @@ struct ghci_vk_pipeline {
 	uint64_t layout;
 	uint64_t render_pass;
 	uint32_t subpass;
+	uint32_t dispatch_base;
 	struct ghci_vk_static_state state;
 	uint64_t charged;
 };
@@ -1088,6 +1105,7 @@ int ghci_vk_stream_execute(struct ghci_vk_session *session, const void *wire, ui
 void ghci_vk_caps_features(const struct ghci_caps *caps, VkPhysicalDeviceFeatures *features);
 void ghci_vk_caps_limits(const struct ghci_caps *caps, VkPhysicalDeviceLimits *limits);
 void ghci_vk_caps_memory(const struct ghci_caps *caps, uint64_t local_bytes, VkPhysicalDeviceMemoryProperties *memory);
+uint64_t ghci_vk_caps_heap_bytes(const struct ghci_caps *caps);
 void ghci_vk_caps_family(const struct ghci_caps *caps, VkQueueFamilyProperties *family);
 uint32_t ghci_vk_caps_sample_counts(const struct ghci_caps *caps);
 void ghci_vk_caps_format(const struct ghci_vk_formats *formats, uint32_t format, VkFormatProperties *properties);

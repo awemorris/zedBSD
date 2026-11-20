@@ -83,6 +83,7 @@ static void extend_body(struct gsi1_lowering *lowering, const uint32_t *first_de
 static int lower_all(struct gsi1_lowering *lowering);
 static int define_destination(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t *dst);
 static int lower(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
+static int lower_system(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
 static int lower_float(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
 static int lower_float_unary(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
 static int lower_conversion(struct gsi1_lowering *lowering, const struct drv_gpu_shader_ir_inst *instruction, uint32_t dst);
@@ -123,6 +124,7 @@ ghci_gsi1_compile(
 {
 	struct drv_gpu_shader_ir *ir;
 	struct drv_gpu_compile_diagnostic parse_diagnostic;
+	uint32_t features;
 	int error;
 
 	/* A refused compile never leaves an old output pointer live. */
@@ -139,21 +141,21 @@ ghci_gsi1_compile(
 		return EINVAL;
 
 	/*
-	 * Parses the stage with the frontend's GHCI features, and arrays of
-	 * combined image samplers and of buffers: each element is a uniform of
-	 * its own, which takes its own slots or resource table entry.
+	 * Parses the stage with the frontend's GHCI features, arrays of
+	 * combined image samplers and of buffers (each element is a uniform of
+	 * its own, which takes its own slots or resource table entry),
+	 * gl_ViewIndex, and the first workgroup of vkCmdDispatchBase for a
+	 * pipeline made for it.
 	 */
 	ir = NULL;
 	parse_diagnostic.opcode = 0U;
 	parse_diagnostic.word_offset = 0U;
 	parse_diagnostic.reason = NULL;
-	error = drv_gpu_shader_parse_features(words,
-					      word_count,
-					      stage,
-					      DRV_GPU_SPIRV_FEATURES_GHCI | DRV_GPU_SPIRV_FEATURE_SAMPLER_ARRAYS |
-					      DRV_GPU_SPIRV_FEATURE_BUFFER_ARRAYS,
-					      &ir,
-					      &parse_diagnostic);
+	features = DRV_GPU_SPIRV_FEATURES_GHCI | DRV_GPU_SPIRV_FEATURE_SAMPLER_ARRAYS | DRV_GPU_SPIRV_FEATURE_BUFFER_ARRAYS |
+		   DRV_GPU_SPIRV_FEATURE_VIEW_INDEX;
+	if (options != NULL && options->dispatch_base != 0U)
+		features |= DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE;
+	error = drv_gpu_shader_parse_features(words, word_count, stage, features, &ir, &parse_diagnostic);
 	if (error != 0) {
 		if (diagnostic != NULL) {
 			diagnostic->instruction = parse_diagnostic.word_offset;
@@ -163,6 +165,10 @@ ghci_gsi1_compile(
 		/* Reports why the stage could not be parsed. */
 		return error;
 	}
+
+	/* gl_ViewIndex outside a multiview subpass is view 0; inside one, the program reads it from the bank. */
+	if (options == NULL || options->multiview == 0U)
+		drv_gpu_shader_ir_bind_view(ir, 0U);
 
 	/* Optimizes and lowers the parsed program. */
 	error = compile_parsed(ir, options, program, diagnostic);
@@ -2216,10 +2222,7 @@ lower(
 		error = gsi1_texture_lower(lowering, instruction, dst);
 		break;
 	case DRV_GPU_IR_LOAD_SYSTEM:
-		/* A built-in GSI1 has an operand for needs no instruction. */
-		error = 0;
-		if (dst != GSI1_NO_OPERAND)
-			error = gsi1_refuse(lowering, ENOTSUP, "a built-in value GSI1 does not have");
+		error = lower_system(lowering, instruction, dst);
 		break;
 	default:
 		error = gsi1_memory_lower(lowering, instruction, dst);
@@ -2232,6 +2235,34 @@ lower(
 
 	/* Succeeded: the instruction is lowered. */
 	return 0;
+}
+
+/*
+ * Lowers a built-in value: one GSI1 has an operand for needs no
+ * instruction, and gl_ViewIndex of a multiview subpass is the bank word
+ * the executor loads before each view (lwc).
+ */
+static int
+lower_system(
+	struct gsi1_lowering *lowering,
+	const struct drv_gpu_shader_ir_inst *instruction,
+	uint32_t dst)
+{
+	int error;
+
+	/* A built-in read through its special operand. */
+	if (dst == GSI1_NO_OPERAND)
+		return 0;
+
+	/* The view, from its bank word. */
+	if (instruction->component == DRV_GPU_IR_SYSTEM_VIEW_INDEX && lowering->ir->stage != DRV_GPU_STAGE_COMPUTE) {
+		gsi1_emit(lowering, gsi1_encode_i(GSI1_OP_LOAD, GSI1_F3_LWC, dst, GSI1_ZERO, (int32_t)GSI1_ABI_BANK_VIEW, 0U));
+		return 0;
+	}
+
+	/* Any other built-in. */
+	error = gsi1_refuse(lowering, ENOTSUP, "a built-in value GSI1 does not have");
+	return error;
 }
 
 /* Lowers the two-source float operations: add, subtract, multiply, minimum, maximum and the half pack. */

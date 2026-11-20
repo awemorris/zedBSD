@@ -15,7 +15,12 @@
  * vertex and index buffers, and the hardware tables and constant bank
  * words of ghci_vk_layout_tables), render passes become one render pass
  * description per subpass, and transfers, queries, events and clears
- * become the blitter's, the query unit's and the fence's packets.  Each
+ * become the blitter's, the query unit's and the fence's packets.  The
+ * hardware draws one layer of each attachment, so a multiview render pass
+ * is drawn once per view: its commands are converted again for each
+ * view, with each attachment at the view's layer, the view in its bank
+ * word (compiler/gsi1-abi.h), the command buffer's state as the pass
+ * began, and its queries at their view's place.  Each
  * command buffer starts with nothing bound: the processor keeps its
  * binds per session, and another submission of the session may change
  * them.
@@ -223,13 +228,20 @@ struct buffer_state {
  * bits and the stencil in the first two), and the description the
  * current subpass began with and its bytes in temporary memory (which
  * the GPU reads only once the submission is placed, so an end in the
- * middle of the subpass may still make it store everything).
+ * middle of the subpass may still make it store everything).  A
+ * multiview pass draws view `view` (0 otherwise), the `ordinal`-th of
+ * its views, and then the views of views_left; replay_at is the place in
+ * the recording after its begin, where each view starts again.
  */
 struct pass_state {
 	int active;
 	const struct ghci_vk_render_pass *pass;
 	const struct ghci_vk_framebuffer *framebuffer;
 	uint32_t subpass;
+	uint32_t view;
+	uint32_t ordinal;
+	uint32_t views_left;
+	size_t replay_at;
 	uint32_t area[4];
 	uint32_t clear[CLEAR_VALUES_MAX][4];
 	uint32_t clear_count;
@@ -300,9 +312,10 @@ struct event_write {
  * packets and temporary memory, the state of the command buffer being
  * walked and its render pass (pass_at is the dword its begin starts at),
  * the queries begun outside a render pass and not ended yet (query_at is
- * the dword the first of them begins at), the hardware tables of the
- * bind being made, the events written, and the first error, which
- * refuses the submission.
+ * the dword the first of them begins at), the command buffer's state as
+ * a multiview pass began (view_state, which each view starts from), the
+ * hardware tables of the bind being made, the events written, and the
+ * first error, which refuses the submission.
  */
 struct exec {
 	struct ghci_vk_session *session;
@@ -315,6 +328,7 @@ struct exec {
 	uint32_t pass_at;
 	uint32_t queries;
 	uint32_t query_at;
+	struct buffer_state view_state;
 	struct ghci_vk_tables tables;
 	struct event_write events[EVENTS_MAX];
 	uint32_t event_count;
@@ -354,6 +368,7 @@ static int indirect_check(struct exec *exec, uint64_t offset, uint64_t remaining
 static int indices_check(struct exec *exec, uint32_t count, uint32_t first);
 static void dispatch(struct exec *exec, uint32_t number, struct i915_wire_reader *reader);
 static int dispatch_prepare(struct exec *exec);
+static int dispatch_base(struct exec *exec, const uint32_t *base);
 static void barrier(struct exec *exec, uint32_t number, struct i915_wire_reader *reader);
 static void barriers_read(struct i915_wire_reader *reader, uint32_t *source, uint32_t *destination);
 static uint32_t stages_of(struct exec *exec, uint32_t vulkan);
@@ -364,6 +379,10 @@ static int framebuffer_check(struct exec *exec, const struct ghci_vk_render_pass
 static void subpass_begin(struct exec *exec, const struct pass_clear *clear);
 static void subpass_store_all(struct exec *exec);
 static void subpass_end(struct exec *exec);
+static int pass_views_check(struct exec *exec);
+static void pass_next_view(struct exec *exec, struct i915_wire_reader *reader);
+static uint32_t lowest_view(uint32_t mask);
+static uint64_t view_layer(const struct exec *exec, const struct ghci_vk_image_view *view);
 static void layers_clear(struct exec *exec, const struct pass_clear *clear, uint32_t first, uint32_t count, const uint32_t *area);
 static int view_of(struct exec *exec, uint32_t attachment, const struct ghci_vk_image_view **view);
 static uint32_t pass_load(const struct ghci_vk_pass_attachment *attachment, uint32_t subpass, uint32_t load);
@@ -767,6 +786,7 @@ command_convert(
 		break;
 	case GPU_OP_CMD_DISPATCH:
 	case GPU_OP_CMD_DISPATCH_INDIRECT:
+	case GPU_OP_CMD_DISPATCH_BASE:
 		dispatch(exec, number, reader);
 		break;
 	case GPU_OP_CMD_COPY_BUFFER:
@@ -845,6 +865,10 @@ command_convert(
 			break;
 		}
 		subpass_end(exec);
+		if (exec->pass.views_left != 0U) {
+			pass_next_view(exec, reader);
+			break;
+		}
 		exec->pass.active = 0;
 		break;
 	case GPU_OP_CMD_EXECUTE_COMMANDS:
@@ -1547,6 +1571,7 @@ draw_prepare(
 	struct ghci_vk_pipeline *pipeline;
 	struct buffer_state *state;
 	uint32_t words[GHCI_DW_BIND_INDEX_BUFFER];
+	uint32_t view_words[3U + 1U];
 	int error;
 
 	/* Within a render pass, with a graphics pipeline bound. */
@@ -1585,6 +1610,10 @@ draw_prepare(
 	error = tables_place(exec, BIND_GRAPHICS);
 	if (error != 0)
 		return error;
+
+	/* The view of a multiview pass, in its bank word (the driver's own programs between draws may load the bank). */
+	if (exec->pass.pass->view_mask != 0U)
+		put(exec, view_words, ghci_cmd_load_const(view_words, GSI1_ABI_BANK_VIEW, 1U, &exec->pass.view));
 
 	/* Succeeded: the draw may be placed. */
 	return 0;
@@ -2212,8 +2241,13 @@ dispatch_prepare(
 }
 
 /*
- * vkCmdDispatch: [x][y][z]; vkCmdDispatchIndirect: [buffer][u64 offset],
- * skipped without CAP_INDIRECT_DRAW and shader units.
+ * vkCmdDispatch: [x][y][z]; vkCmdDispatchBase: [base x][base y][base z]
+ * [x][y][z]; vkCmdDispatchIndirect: [buffer][u64 offset], skipped without
+ * CAP_INDIRECT_DRAW and shader units.  CMD_DISPATCH counts the workgroups
+ * from 0, so a pipeline made for vkCmdDispatchBase reads the first one
+ * from the bank, which each of its dispatches loads (0 but for
+ * vkCmdDispatchBase); a first workgroup other than 0 needs such a
+ * pipeline.
  */
 static void
 dispatch(
@@ -2222,6 +2256,7 @@ dispatch(
 	struct i915_wire_reader *reader)
 {
 	uint32_t words[GHCI_DW_DISPATCH_INDIRECT];
+	uint32_t base[3];
 	uint32_t groups[3];
 	uint64_t identity;
 	uint64_t offset;
@@ -2232,13 +2267,22 @@ dispatch(
 	int error;
 
 	/* The arguments. */
-	if (number == GPU_OP_CMD_DISPATCH) {
+	kern_memset(base, 0, sizeof(base));
+	if (number == GPU_OP_CMD_DISPATCH || number == GPU_OP_CMD_DISPATCH_BASE) {
+		if (number == GPU_OP_CMD_DISPATCH_BASE) {
+			base[0] = read32(reader);
+			base[1] = read32(reader);
+			base[2] = read32(reader);
+		}
 		groups[0] = read32(reader);
 		groups[1] = read32(reader);
 		groups[2] = read32(reader);
 		if (reader->error != 0)
 			return;
 		error = dispatch_prepare(exec);
+		if (error != 0)
+			return;
+		error = dispatch_base(exec, base);
 		if (error != 0)
 			return;
 		put(exec, words, ghci_cmd_dispatch(words, groups[0], groups[1], groups[2]));
@@ -2266,7 +2310,38 @@ dispatch(
 	error = dispatch_prepare(exec);
 	if (error != 0)
 		return;
+	error = dispatch_base(exec, base);
+	if (error != 0)
+		return;
 	put(exec, words, ghci_cmd_dispatch_indirect(words, va, (uint32_t)offset));
+}
+
+/*
+ * Loads the first workgroup of a dispatch into the bank for a pipeline
+ * made for vkCmdDispatchBase.  Returns 0, or EINVAL for a first workgroup
+ * other than 0 with any other pipeline (the submission is refused).
+ */
+static int
+dispatch_base(
+	struct exec *exec,
+	const uint32_t *base)
+{
+	struct ghci_vk_pipeline *pipeline;
+	uint32_t words[3U + 3U];
+
+	/* A pipeline that counts from 0 takes only a first workgroup of 0. */
+	pipeline = exec->state->binds[BIND_COMPUTE].pipeline;
+	if (!pipeline->dispatch_base) {
+		if ((base[0] | base[1] | base[2]) != 0U) {
+			refuse(exec, EINVAL, "a vkCmdDispatchBase with a pipeline not made for it");
+			return EINVAL;
+		}
+		return 0;
+	}
+
+	/* Succeeded: the first workgroup is in its bank words. */
+	put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_DISPATCH_BASE, 3U, base));
+	return 0;
 }
 
 /*
@@ -2499,7 +2574,119 @@ begin_pass(
 	exec->pass.pass = pass->as.render_pass;
 	exec->pass.framebuffer = &framebuffer->as.framebuffer;
 	exec->pass.subpass = 0U;
+	exec->pass.view = 0U;
+	exec->pass.ordinal = 0U;
+	exec->pass.views_left = 0U;
+
+	/* A multiview pass: its first view, the views after it, and where and with what state each starts again. */
+	if (exec->pass.pass->view_mask != 0U) {
+		if (pass_views_check(exec) != 0)
+			return;
+		exec->pass.view = lowest_view(exec->pass.pass->view_mask);
+		exec->pass.views_left = exec->pass.pass->view_mask & ~(1U << exec->pass.view);
+		exec->pass.replay_at = reader->offset;
+		exec->view_state = *exec->state;
+	}
 	subpass_begin(exec, NULL);
+}
+
+/*
+ * Checks a multiview pass's framebuffer: one layer (the views name the
+ * layers), and each attachment's view with a layer for the last view.
+ * Returns 0, or EINVAL (the submission is refused).
+ */
+static int
+pass_views_check(
+	struct exec *exec)
+{
+	const struct ghci_vk_image_view *view;
+	uint32_t last;
+	uint32_t at;
+
+	/* The framebuffer of one layer. */
+	if (exec->pass.framebuffer->layers != 1U) {
+		refuse(exec, EINVAL, "a multiview render pass begun with a framebuffer of layers");
+		return EINVAL;
+	}
+
+	/* Each view has the layer of the last view. */
+	last = 0U;
+	while ((exec->pass.pass->view_mask >> last) > 1U)
+		last++;
+	for (at = 0U; at < exec->pass.framebuffer->attachment_count; at++) {
+		if (view_of(exec, at, &view) != 0)
+			return EINVAL;
+		if (view->layers <= last) {
+			refuse(exec, EINVAL, "a multiview render pass whose attachment has no layer for a view");
+			return EINVAL;
+		}
+	}
+
+	/* Succeeded: every view draws into its layers. */
+	return 0;
+}
+
+/*
+ * Draws a multiview pass's next view: its commands from the begin again
+ * (the reader goes back there), with the command buffer's state as the
+ * pass began (everything bound again), from the first subpass.  The log
+ * keeps what it showed of the buffer.
+ *
+ * Procedure referenced: amaterrace-gpu 2dc77d7a (branch agent/p4-linux2)
+ * drivers/mesa/ghci/vulkan/ghcivk_cmd_draw.c (a multiview pass drawn once
+ * per view, each attachment at layer base + view, the view in a bank
+ * word); the bank word and the replay of the recording are this
+ * executor's own.
+ */
+static void
+pass_next_view(
+	struct exec *exec,
+	struct i915_wire_reader *reader)
+{
+	int logged;
+
+	/* The next view. */
+	exec->pass.view = lowest_view(exec->pass.views_left);
+	exec->pass.views_left &= ~(1U << exec->pass.view);
+	exec->pass.ordinal++;
+
+	/* The state as the pass began, and the recording after the begin. */
+	logged = exec->state->logged;
+	*exec->state = exec->view_state;
+	exec->state->logged = logged;
+	buffer_state_dirty(exec->state);
+	reader->offset = exec->pass.replay_at;
+
+	/* The first subpass; a wait inside this view cuts the submission where it begins. */
+	exec->pass_at = exec->submission->used;
+	exec->pass.subpass = 0U;
+	subpass_begin(exec, NULL);
+}
+
+/* Reports the lowest view of a mask that has one. */
+static uint32_t
+lowest_view(
+	uint32_t mask)
+{
+	uint32_t view;
+
+	/* The first bit set. */
+	view = 0U;
+	while (view < 31U && (mask & (1U << view)) == 0U)
+		view++;
+
+	/* Succeeded: the view. */
+	return view;
+}
+
+/* Reports the bytes from a view's first layer to the layer of the view being drawn (0 without multiview). */
+static uint64_t
+view_layer(
+	const struct exec *exec,
+	const struct ghci_vk_image_view *view)
+{
+	/* Succeeded: the view's layer. */
+	return (uint64_t)exec->pass.view * view->layer_stride;
 }
 
 /* Reads a tagged clear value: [u32 0][u32 2][u64 4][4 words] or [u32 1][float depth][u32 stencil]. */
@@ -2594,7 +2781,7 @@ subpass_begin(
 		store = pass_store(attachment, exec->pass.subpass, attachment->store);
 		if (index != 0U && references->resolve[index] != VK_ATTACHMENT_UNUSED)
 			store = (uint32_t)VK_ATTACHMENT_STORE_OP_STORE;
-		desc.colors[index].va = view->va;
+		desc.colors[index].va = view->va + view_layer(exec, view);
 		desc.colors[index].row_pitch = view->row_pitch;
 		desc.colors[index].format = attachment->format;
 		desc.colors[index].ops = load | (store << 2);
@@ -2614,7 +2801,7 @@ subpass_begin(
 		if (error != 0)
 			return;
 		attachment = &exec->pass.pass->attachments[at];
-		desc.depth_stencil.va = view->va;
+		desc.depth_stencil.va = view->va + view_layer(exec, view);
 		desc.depth_stencil.row_pitch = view->row_pitch;
 		desc.depth_stencil.format = attachment->format;
 		load = pass_load(attachment, exec->pass.subpass, attachment->load);
@@ -2646,7 +2833,7 @@ subpass_begin(
 		if (error != 0)
 			return;
 		(void)ghci_vk_format_traits(exec->pass.pass->attachments[at].format, &traits);
-		desc.resolve.va = view->va;
+		desc.resolve.va = view->va + view_layer(exec, view);
 		desc.resolve.row_pitch = view->row_pitch;
 		desc.resolve.format = exec->pass.pass->attachments[at].format;
 		desc.resolve.ops = (traits & GHCI_VK_FORMAT_INTEGER) != 0U ? 3U : 0U;
@@ -2765,7 +2952,7 @@ subpass_end(
 			}
 			kern_memset(&target, 0, sizeof(target));
 			target.format = exec->pass.pass->attachments[references->resolve[index]].format;
-			target.va = destination->va;
+			target.va = destination->va + view_layer(exec, destination);
 			target.pitch = destination->row_pitch;
 			target.width = destination->width;
 			target.height = destination->height;
@@ -2773,16 +2960,20 @@ subpass_end(
 			push[GHCI_VK_META_RESOLVE_DX] = 0U;
 			push[GHCI_VK_META_RESOLVE_DY] = 0U;
 			meta_sampler(0U, &sampler);
+			if (exec->pass.view != 0U) {
+				skip_command(exec, "a resolve of colour attachment 1 to 7 of a view past the first without the blitter");
+				continue;
+			}
 			meta_draw(exec, kind, source->single, &sampler, &target, exec->pass.area, push, GHCI_VK_META_RESOLVE_WORDS);
 			continue;
 		}
 		(void)ghci_vk_format_traits(format, &traits);
 		kern_memset(&transfer, 0, sizeof(transfer));
-		transfer.src.va = source->va;
+		transfer.src.va = source->va + view_layer(exec, source);
 		transfer.src.pitch = source->row_pitch;
 		transfer.src.x = exec->pass.area[0];
 		transfer.src.y = exec->pass.area[1];
-		transfer.dst.va = destination->va;
+		transfer.dst.va = destination->va + view_layer(exec, destination);
 		transfer.dst.pitch = destination->row_pitch;
 		transfer.dst.x = exec->pass.area[0];
 		transfer.dst.y = exec->pass.area[1];
@@ -2936,7 +3127,7 @@ layers_clear(
 			if (error != 0)
 				return;
 			target.format = attachment->format;
-			target.va = view->va + (uint64_t)layer * view->layer_stride;
+			target.va = view->va + (uint64_t)layer * view->layer_stride + view_layer(exec, view);
 			target.pitch = view->row_pitch;
 			target.width = view->width;
 			target.height = view->height;
@@ -2979,7 +3170,7 @@ layers_clear(
 		if (error != 0)
 			return;
 		target.format = attachment->format;
-		target.va = view->va + (uint64_t)layer * view->layer_stride;
+		target.va = view->va + (uint64_t)layer * view->layer_stride + view_layer(exec, view);
 		target.pitch = view->row_pitch;
 		target.width = view->width;
 		target.height = view->height;
@@ -5368,6 +5559,16 @@ query(
 	}
 	if (reader->error != 0)
 		return;
+
+	/* Inside a multiview pass, each view's query is the one after the last view's. */
+	if (exec->pass.active && exec->pass.pass->view_mask != 0U &&
+	    (number == GPU_OP_CMD_BEGIN_QUERY || number == GPU_OP_CMD_END_QUERY || number == GPU_OP_CMD_WRITE_TIMESTAMP)) {
+		if (first > UINT32_MAX - exec->pass.ordinal) {
+			refuse(exec, EINVAL, "a query of a pool the session does not have, or past it");
+			return;
+		}
+		first += exec->pass.ordinal;
+	}
 
 	/* A pool of the session and queries in it. */
 	if (object == NULL || first > object->as.query_pool.count || count > object->as.query_pool.count - first) {
