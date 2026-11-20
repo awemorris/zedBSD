@@ -21,6 +21,7 @@ static void *(*allocator_alloc)(size_t size);
 static void (*allocator_free)(void *p);
 
 static void put_unsigned(uint64_t value, unsigned base, int upper, int width, int zero);
+static bool cpuid_supported(void);
 
 /*
  * Counts bytes in a terminated string.
@@ -425,8 +426,12 @@ hal_entropy_fill(
 	unsigned attempt;
 	size_t chunk;
 
-	/* Queries whether this processor implements RDRAND. */
+	/* A 386 or an early 486 has no CPUID, and so no RDRAND either. */
 	bytes = buffer;
+	if (!cpuid_supported())
+		return false;
+
+	/* Queries whether this processor implements RDRAND. */
 	eax = 1;
 	__asm__ volatile("cpuid"
 	    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
@@ -461,6 +466,40 @@ hal_entropy_fill(
 
 	/* Reports a completely filled entropy buffer. */
 	return true;
+}
+
+/*
+ * Tests whether the processor implements CPUID.
+ *
+ * Software can toggle EFLAGS.ID (bit 21) only on a processor that has
+ * CPUID; on a 386 and on early 486s the bit stays as it was.  EFLAGS is
+ * restored before returning.
+ */
+static bool
+cpuid_supported(
+	void)
+{
+	uint32_t original;
+	uint32_t toggled;
+
+	/* Flips the ID bit and reads back what the processor kept. */
+	__asm__ volatile(
+	    "pushfl\n\t"
+	    "popl %0\n\t"
+	    "movl %0, %1\n\t"
+	    "xorl $0x00200000, %1\n\t"
+	    "pushl %1\n\t"
+	    "popfl\n\t"
+	    "pushfl\n\t"
+	    "popl %1\n\t"
+	    "pushl %0\n\t"
+	    "popfl"
+	    : "=&r"(original), "=&r"(toggled)
+	    :
+	    : "cc", "memory");
+
+	/* Reports CPUID when the bit changed. */
+	return ((original ^ toggled) & 0x00200000U) != 0U;
 }
 
 /*
