@@ -159,13 +159,14 @@ struct overlay_materialization_transaction {
 /*
  * The driver's inode slots, OVERLAY_INODE_MAX of them (about 3 MiB).
  *
- * drv_overlayfs_init() allocates the table with kern_calloc() when the
- * filesystem type is registered, before any overlay can be mounted, and it
- * lives until shutdown; it is not part of the kernel image, whose size is
- * limited.  The type is registered only with the table, so every overlay
- * inode has it.
+ * The first overlay mount allocates the table with kern_calloc(), before it
+ * makes any inode, and it lives until shutdown; it is not part of the kernel
+ * image, whose size is limited.  A machine that never mounts an overlay (a
+ * small one with its root on a native partition) does not give up the
+ * memory.  overlay_inodes_lock serializes the allocation.
  */
 static struct overlay_inode_slot *overlay_inodes;
+static struct mutex overlay_inodes_lock;
 
 #ifndef KERN_OVERLAY_CONTENT_HOST_TEST
 typedef char overlay_record_path_must_fit[
@@ -344,6 +345,7 @@ static OVERLAY_HIGH int overlay_directory_fsync(struct file *file);
 static OVERLAY_HIGH int overlay_cleanup_temps(struct path *directory,
     unsigned depth, unsigned *visited, unsigned *deleted);
 static OVERLAY_HIGH int overlay_mount_impl(struct mount *mountp);
+static OVERLAY_HIGH int overlay_inodes_prepare(void);
 static OVERLAY_HIGH int overlay_sync_mount(struct mount *mountp);
 static OVERLAY_HIGH int overlay_statvfs(struct mount *mountp,
     struct statvfs *result);
@@ -429,18 +431,46 @@ drv_overlayfs_init(
 {
 	int error;
 
-	/* Allocates the inode slots, all free, before anything can be mounted. */
-	overlay_inodes = kern_calloc(OVERLAY_INODE_MAX, sizeof(*overlay_inodes));
-	if (overlay_inodes == NULL)
-		return ENOMEM;
-
-	/* Reports why the registration failed, and gives the slots back. */
-	error = filesystem_register(&overlay_filesystem_type);
-	if (error != 0) {
-		kern_free(overlay_inodes);
-		overlay_inodes = NULL;
+	/* Prepares the lock the first mount allocates the inode slots under. */
+	error = mutex_init(&overlay_inodes_lock, LOCK_RANK_VFS_TRANSACTION,
+	    "overlay inode slots");
+	if (error != 0)
 		return error;
+
+	/* Reports why the registration failed. */
+	error = filesystem_register(&overlay_filesystem_type);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Allocates the inode slots, all free, unless an earlier mount did.
+ */
+static OVERLAY_HIGH int
+overlay_inodes_prepare(
+	void)
+{
+	struct overlay_inode_slot *table;
+	int error;
+
+	/* Allocates the table once, under the lock. */
+	error = 0;
+	mutex_lock(&overlay_inodes_lock);
+	if (overlay_inodes == NULL) {
+		table = kern_calloc(OVERLAY_INODE_MAX, sizeof(*table));
+		if (table == NULL)
+			error = ENOMEM;
+		else
+			overlay_inodes = table;
 	}
+	mutex_unlock(&overlay_inodes_lock);
+
+	/* Reports why the table could not be allocated. */
+	if (error != 0)
+		return error;
 
 	/* Succeeded. */
 	return 0;
@@ -5667,6 +5697,11 @@ overlay_mount_impl(
 	supported = overlay_layers_supported(args);
 	if (!supported)
 		return EOPNOTSUPP;
+
+	/* The inode slots exist before the mount makes its first inode. */
+	error = overlay_inodes_prepare();
+	if (error != 0)
+		return error;
 
 	/* Records the layers with the root identity and loads the journal. */
 	state = kern_calloc(1, sizeof(*state));
