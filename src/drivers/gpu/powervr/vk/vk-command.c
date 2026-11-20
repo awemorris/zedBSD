@@ -33,6 +33,7 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/powervr/compute-program.h"
+#include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
@@ -108,6 +109,7 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_BIND_PIPELINE:
 	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_BASE:
 	case GPU_OP_CMD_PIPELINE_BARRIER:
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 	case GPU_OP_CMD_NEXT_SUBPASS:
@@ -167,10 +169,11 @@ powervr_vk_command_reset(
 	for (index = 0; index < command->record_count; index++)
 		record_drop(&command->records[index]);
 
-	/* No record, no error, the initial state. */
+	/* No record, no error, no render pass instance, the initial state. */
 	command->record_count = 0;
 	command->state = POWERVR_VK_COMMAND_INITIAL;
 	command->error = 0;
+	command->views = 0;
 }
 
 /* vkCreateCommandPool: [device][present][VkCommandPoolCreateInfo] and the create's tail -> the create's reply. */
@@ -571,7 +574,7 @@ record(
 		refused = record_pipeline(session, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_BIND_DESCRIPTOR_SETS) {
 		refused = record_sets(session, reader, &entry);
-	} else if (opcode == GPU_OP_CMD_DISPATCH) {
+	} else if (opcode == GPU_OP_CMD_DISPATCH || opcode == GPU_OP_CMD_DISPATCH_BASE) {
 		refused = record_dispatch(reader, &entry);
 	} else if (opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 		refused = powervr_vk_record_begin_pass(session, reader, &entry);
@@ -626,6 +629,17 @@ record(
 	/* A barrier changes nothing a submission runs. */
 	if (opcode == GPU_OP_CMD_PIPELINE_BARRIER)
 		return 0;
+
+	/*
+	 * The views of a multiview render pass instance, from its begin to its
+	 * end: an occlusion query inside it takes a query for each view.
+	 */
+	if (opcode == GPU_OP_CMD_BEGIN_RENDER_PASS)
+		command->views = (uint32_t)__builtin_popcount(((const struct powervr_pass *)entry.objects[0]->payload)->view_mask);
+	else if (opcode == GPU_OP_CMD_END_RENDER_PASS)
+		command->views = 0;
+	else if (powervr_vk_query_recorded(opcode))
+		powervr_vk_query_views(&entry, command->views);
 
 	/* Appends it; one that cannot be kept fails the recording. */
 	error = record_append(command, &entry);
@@ -752,12 +766,23 @@ record_sets(
 	return 0;
 }
 
-/* vkCmdDispatch: [x][y][z] workgroups. */
+/* vkCmdDispatch: [x][y][z] workgroups; vkCmdDispatchBase: [first x][first y][first z] before them. */
 static int
 record_dispatch(
 	struct i915_wire_reader *reader,
 	struct powervr_vk_record *entry)
 {
+	/*
+	 * vkCmdDispatchBase's first workgroup, which is kept as a dispatch's
+	 * values 4 to 6 (zero for vkCmdDispatch).
+	 */
+	if (entry->opcode == GPU_OP_CMD_DISPATCH_BASE) {
+		entry->values[4] = drv_i915_wire_read_u32(reader);
+		entry->values[5] = drv_i915_wire_read_u32(reader);
+		entry->values[6] = drv_i915_wire_read_u32(reader);
+		entry->opcode = GPU_OP_CMD_DISPATCH;
+	}
+
 	/* The three counts. */
 	entry->values[0] = drv_i915_wire_read_u32(reader);
 	entry->values[1] = drv_i915_wire_read_u32(reader);

@@ -57,6 +57,7 @@ static int create_framebuffer(struct powervr_vk_session *session, struct i915_wi
 static int framebuffer_view(struct powervr_vk_session *session, uint64_t identity, struct powervr_vk_object **held, struct powervr_pass_view *view);
 static int framebuffer_destroy(struct powervr_vk_session *session, void *payload);
 static void read_clear(struct i915_wire_reader *reader, struct powervr_pass_clear *value);
+static int pass_views(const VkRenderPassCreateInfo *info, struct powervr_pass *pass);
 
 /*
  * Runs a render pass or framebuffer command; *handled stays clear for
@@ -127,11 +128,13 @@ create_pass(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The pass, kept in its supported shape. */
+	/* The pass, kept in its supported shape, with its subpass's views. */
 	pass = kern_calloc(1, sizeof(*pass));
 	error = ENOMEM;
 	if (pass != NULL)
 		error = powervr_pass_build(&info, pass);
+	if (error == 0)
+		error = pass_views(&info, pass);
 	if (error == ENOBUFS && info.subpassCount != 1) {
 		kern_logf("powervr: render pass: %u subpasses not supported\n", (unsigned)info.subpassCount);
 	} else if (error == ENOBUFS) {
@@ -146,6 +149,34 @@ create_pass(
 	powervr_vk_create_reply(session, reply, I915_VK_OBJ_RENDER_PASS, identity, pass, powervr_vk_free_payload, error);
 
 	/* Succeeded: the reply carries the create's result. */
+	return 0;
+}
+
+/*
+ * Keeps the views a multiview render pass's one subpass renders, at most
+ * the device's (maxMultiviewViewCount); ENOTSUP for another shape.
+ */
+static int
+pass_views(
+	const VkRenderPassCreateInfo *info,
+	struct powervr_pass *pass)
+{
+	const VkRenderPassMultiviewCreateInfo *multiview;
+
+	/* None renders one view. */
+	pass->view_mask = 0;
+	multiview = i915_vkc_render_pass_multiview(info);
+	if (multiview == NULL || multiview->subpassCount == 0)
+		return 0;
+
+	/* The one subpass's mask. */
+	if (multiview->subpassCount != 1 || multiview->pViewMasks == NULL)
+		return ENOTSUP;
+	if ((multiview->pViewMasks[0] >> POWERVR_PASS_VIEWS) != 0)
+		return ENOTSUP;
+	pass->view_mask = multiview->pViewMasks[0];
+
+	/* Succeeded: the views are kept. */
 	return 0;
 }
 
@@ -253,6 +284,7 @@ framebuffer_view(
 	view->shape.level_count = 1;
 	view->shape.base_layer = image_view->base_layer;
 	view->shape.layer_count = 1;
+	view->layers = image_view->layer_count;
 	view->shape.linear = image->shape.linear;
 
 	/* The framebuffer holds the view (and through it the image). */
@@ -454,6 +486,8 @@ static void state_sets(struct draw_state *state, const struct powervr_vk_record 
 static void state_stencil(uint32_t values[2], const struct powervr_vk_record *entry);
 static int draw_add(struct powervr_render_job *job, const struct draw_state *state, const struct powervr_vk_record *entry);
 static int job_refused(int error, const char *step, const struct powervr_render_job *job);
+static uint32_t view_number(uint32_t views, uint32_t index);
+static int view_framebuffer(const struct powervr_pass_framebuffer *framebuffer, uint32_t view, struct powervr_pass_framebuffer *layered);
 
 /*
  * Turns a command buffer's render pass instances into render jobs, in
@@ -469,6 +503,12 @@ static int job_refused(int error, const char *step, const struct powervr_render_
  * outside an instance and draws without a pipeline (EINVAL), and what
  * the jobs do not take yet (ENOTSUP); a job's registers made before a
  * refusal stay with the job for the caller to let go.
+ *
+ * A multiview instance is built once for each view of its subpass, in
+ * order of the views: from its begin to its end again with the state the
+ * records had set at the begin, each time in jobs of the view (its
+ * attachments at their views' layers plus the view, its draws' programs
+ * reading the view as gl_ViewIndex).
  */
 int
 powervr_vk_render_jobs(
@@ -481,9 +521,16 @@ powervr_vk_render_jobs(
 	const struct powervr_vk_framebuffer *framebuffer;
 	const struct begin_data *begin;
 	const struct clear_data *clear;
+	const struct powervr_pass *pass;
 	struct powervr_render_job *job;
 	struct draw_state state;
+	struct draw_state begun;
+	struct powervr_pass_framebuffer layered;
 	uint32_t index;
+	uint32_t begin_index;
+	uint32_t views;
+	uint32_t view;
+	uint32_t slot;
 	bool dropped;
 	int error;
 
@@ -491,23 +538,47 @@ powervr_vk_render_jobs(
 	if (command == NULL || count == NULL || (room != 0 && jobs == NULL))
 		return EINVAL;
 
-	/* Each record in order. */
+	/* Each record in order, a multiview instance's again for each view. */
 	*count = 0;
 	job = NULL;
 	dropped = false;
+	begin_index = 0;
+	views = 0;
+	view = 0;
+	slot = 0;
 	kern_memset(&state, 0, sizeof(state));
-	for (index = 0; index < command->record_count; index++) {
+	kern_memset(&begun, 0, sizeof(begun));
+	index = 0;
+	while (index < command->record_count) {
 		entry = &command->records[index];
 		if (entry->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
-			/* A new instance, built in the next job. */
+			/* A new instance (or its next view), built in the next job. */
 			if (job != NULL)
 				return EINVAL;
 			if (*count == room)
 				return E2BIG;
 			job = &jobs[*count];
 			begin = entry->data;
+			pass = entry->objects[0]->payload;
 			framebuffer = entry->objects[1]->payload;
-			error = powervr_render_job_begin(entry->objects[0]->payload, &framebuffer->state, &begin->area, begin->clears, begin->clear_count, job);
+
+			/* The first view of an instance keeps the state its records start from. */
+			if (begin_index != index || views == 0) {
+				begin_index = index;
+				views = pass->view_mask;
+				slot = 0;
+				begun = state;
+			}
+			view = 0;
+			if (views != 0)
+				view = view_number(views, slot);
+			error = view_framebuffer(&framebuffer->state, view, &layered);
+			if (error != 0) {
+				kern_logf("powervr: render pass: view %u has no layer in an attachment\n", (unsigned)view);
+				return error;
+			}
+			error = powervr_render_job_begin(pass, &layered, &begin->area, begin->clears, begin->clear_count, job);
+			job->view = view;
 			dropped = false;
 			if (error == EPERM) {
 				kern_logf("powervr: render pass: partial render area with depth store not supported\n");
@@ -558,12 +629,22 @@ powervr_vk_render_jobs(
 			job = NULL;
 			if (!dropped)
 				(*count)++;
+
+			/* A multiview instance's next view, from its begin with the state of then. */
+			if (views != 0 && slot + 1U < (uint32_t)__builtin_popcount(views)) {
+				slot++;
+				state = begun;
+				index = begin_index;
+				continue;
+			}
+			views = 0;
 		} else {
 			/* State the draws read. */
 			error = state_apply(&state, entry);
 			if (error != 0)
 				return error;
 		}
+		index++;
 	}
 
 	/* An instance left open is a client error. */
@@ -571,6 +652,49 @@ powervr_vk_render_jobs(
 		return EINVAL;
 
 	/* Succeeded: the jobs. */
+	return 0;
+}
+
+/* The view number index (from zero) of a multiview mask names: its bit, counting the set bits from the lowest. */
+static uint32_t
+view_number(
+	uint32_t views,
+	uint32_t index)
+{
+	uint32_t view;
+
+	/* Drops the lower set bits, then takes the lowest one left. */
+	for (view = 0; view < index && views != 0; view++)
+		views &= views - 1U;
+	if (views == 0)
+		return 0;
+
+	/* Succeeded: the view's number. */
+	return (uint32_t)__builtin_ctz(views);
+}
+
+/*
+ * A framebuffer's attachments at one view of a multiview render pass:
+ * each view's layer plus the view.  EINVAL when a view has no such layer
+ * (Vulkan has the views hold more layers than the highest view).
+ */
+static int
+view_framebuffer(
+	const struct powervr_pass_framebuffer *framebuffer,
+	uint32_t view,
+	struct powervr_pass_framebuffer *layered)
+{
+	uint32_t index;
+
+	/* The framebuffer as it is, and each attachment one layer on for each view. */
+	*layered = *framebuffer;
+	for (index = 0; index < layered->view_count && view != 0; index++) {
+		if (view >= layered->views[index].layers)
+			return EINVAL;
+		layered->views[index].shape.base_layer += view;
+	}
+
+	/* Succeeded: the attachments of the view. */
 	return 0;
 }
 

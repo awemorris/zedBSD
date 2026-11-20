@@ -216,6 +216,7 @@ struct submission {
 	const struct powervr_vk_descriptor_set *sets[POWERVR_VK_SETS_MAX];
 	uint32_t set_offsets[POWERVR_VK_SETS_MAX][POWERVR_DRAW_DYNAMIC_OFFSETS];
 	uint32_t set_offset_counts[POWERVR_VK_SETS_MAX];
+	uint32_t base[3];
 };
 
 static int submit(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -246,6 +247,7 @@ static int run_job(struct submission *build, struct powervr_render_job *job);
 static void jobs_free(struct powervr_render_job *jobs, uint32_t count);
 static int order_after(struct submission *build, unsigned kind);
 static int settle(struct submission *build);
+static uint32_t instance_views(const struct powervr_vk_record *begin);
 static uint32_t instance_jobs(const struct powervr_vk_command_buffer *command, uint32_t begin);
 
 /*
@@ -843,25 +845,31 @@ build_command_buffer(
 	uint32_t draws;
 	uint32_t opcode;
 	uint32_t in_instance;
+	uint32_t views;
 	uint32_t next_job;
 	uint32_t index;
 	uint32_t set;
 	uint64_t started;
 	int error;
 
-	/* The jobs each instance takes: one, and one more for each further run of POWERVR_RENDER_DRAWS draws. */
+	/*
+	 * The jobs each instance takes: one, and one more for each further run
+	 * of POWERVR_RENDER_DRAWS draws, for each view of a multiview instance.
+	 */
 	begins = 0;
 	expected = 0;
 	draws = 0;
+	views = 1;
 	for (index = 0; index < command->record_count; index++) {
 		opcode = command->records[index].opcode;
 		if (opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 			begins++;
 			draws = 0;
+			views = instance_views(&command->records[index]);
 		} else if (opcode == GPU_OP_CMD_DRAW || opcode == GPU_OP_CMD_DRAW_INDEXED) {
 			draws++;
 		} else if (opcode == GPU_OP_CMD_END_RENDER_PASS) {
-			expected += draws == 0 ? 1U : (draws + POWERVR_RENDER_DRAWS - 1U) / POWERVR_RENDER_DRAWS;
+			expected += (draws == 0 ? 1U : (draws + POWERVR_RENDER_DRAWS - 1U) / POWERVR_RENDER_DRAWS) * views;
 		}
 	}
 
@@ -905,6 +913,10 @@ build_command_buffer(
 			state = entry->data;
 			kern_memcpy(&build->push[state->push_offset], state->push, state->push_bytes);
 		} else if (entry->opcode == GPU_OP_CMD_DISPATCH) {
+			/* The counts, and the first workgroup the record keeps after them. */
+			build->base[0] = entry->values[4];
+			build->base[1] = entry->values[5];
+			build->base[2] = entry->values[6];
 			error = build_dispatch(build, entry->values);
 		} else if (entry->opcode == GPU_OP_CMD_COPY_BUFFER || entry->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || entry->opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER ||
 		    entry->opcode == GPU_OP_CMD_COPY_IMAGE || entry->opcode == GPU_OP_CMD_BLIT_IMAGE || entry->opcode == GPU_OP_CMD_RESOLVE_IMAGE ||
@@ -1092,6 +1104,8 @@ dispatch_kernels(
 	uint8_t *code)
 {
 	uint32_t values[POWERVR_SHADER_REQUESTS * 4U];
+	struct powervr_shader_key key;
+	const struct powervr_shader_key *keyed;
 	struct powervr_ir_shader *shader;
 	uint32_t kernel_groups[3];
 	uint64_t need;
@@ -1102,8 +1116,16 @@ dispatch_kernels(
 	uint32_t index;
 	int error;
 
+	/* A dispatch from a first workgroup past zero has its program add it to the workgroup ids. */
+	keyed = NULL;
+	if (build->base[0] != 0 || build->base[1] != 0 || build->base[2] != 0) {
+		kern_memset(&key, 0, sizeof(key));
+		key.forms = POWERVR_SHADER_FORM_DISPATCH_BASE;
+		keyed = &key;
+	}
+
 	/* What the shader asks for. */
-	error = powervr_shader_read(pipeline->words, pipeline->word_count, POWERVR_SHADER_COMPUTE, NULL, workspace, program, &shader);
+	error = powervr_shader_read(pipeline->words, pipeline->word_count, POWERVR_SHADER_COMPUTE, keyed, workspace, program, &shader);
 	if (error != 0)
 		return error;
 
@@ -1166,7 +1188,7 @@ dispatch_kernels(
 		}
 
 		/* The program with its shared words as constants. */
-		error = powervr_shader_compile_inline(pipeline->words, pipeline->word_count, POWERVR_SHADER_COMPUTE, NULL, values, program->shareds, workspace, program, code, QUEUE_USC_ROOM);
+		error = powervr_shader_compile_inline(pipeline->words, pipeline->word_count, POWERVR_SHADER_COMPUTE, keyed, values, program->shareds, workspace, program, code, QUEUE_USC_ROOM);
 		if (error == ENOSPC || error == E2BIG)
 			kern_logf("powervr: vk: the compute shader is larger than the executor's room (%u bytes)\n", QUEUE_USC_ROOM);
 		if (error != 0) {
@@ -1286,6 +1308,11 @@ build_shared(
 			/* Set per workgroup; one deep in y and z. */
 			if (POWERVR_DIAGNOSTICS)
 				kern_logf("powervr: vk: dispatch: workgroup id in shared word %u\n", (unsigned)request->shared);
+			break;
+		case POWERVR_SHADER_REQUEST_WORKGROUP_BASE:
+			/* The dispatch's first workgroup (vkCmdDispatchBase). */
+			for (word = 0; word < request->words && word < 3U; word++)
+				values[request->shared + word] = build->base[word];
 			break;
 		case POWERVR_SHADER_REQUEST_NUM_WORKGROUPS:
 			if (POWERVR_DIAGNOSTICS)
@@ -1922,7 +1949,29 @@ jobs_free(
 	kern_free(jobs);
 }
 
-/* Counts the jobs the instance beginning at a record takes: one, and one more for each further run of POWERVR_RENDER_DRAWS draws. */
+/* The views a render pass instance renders, from its begin record: those of its multiview subpass, or one. */
+static uint32_t
+instance_views(
+	const struct powervr_vk_record *begin)
+{
+	const struct powervr_pass *pass;
+	uint32_t views;
+
+	/* The pass the begin holds. */
+	pass = begin->objects[0]->payload;
+	views = (uint32_t)__builtin_popcount(pass->view_mask);
+	if (views == 0)
+		return 1;
+
+	/* Succeeded: the views. */
+	return views;
+}
+
+/*
+ * Counts the jobs the instance beginning at a record takes: one, and one
+ * more for each further run of POWERVR_RENDER_DRAWS draws, for each view
+ * of a multiview instance.
+ */
 static uint32_t
 instance_jobs(
 	const struct powervr_vk_command_buffer *command,
@@ -1947,5 +1996,5 @@ instance_jobs(
 	jobs = 1;
 	if (draws != 0)
 		jobs = (draws + POWERVR_RENDER_DRAWS - 1U) / POWERVR_RENDER_DRAWS;
-	return jobs;
+	return jobs * instance_views(&command->records[begin]);
 }

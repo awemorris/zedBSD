@@ -83,8 +83,9 @@ struct powervr_pass_attachment {
 /*
  * A VkRenderPass of one subpass: its attachments, the subpass's colour
  * attachments, the resolve attachment of each (POWERVR_PASS_UNUSED for
- * none), its depth attachment, and the samples of its colour and depth
- * attachments (1 or 4).
+ * none), its depth attachment, the samples of its colour and depth
+ * attachments (1 or 4), and the subpass's views under multiview (bit n:
+ * view n; 0 for one view).
  */
 struct powervr_pass {
 	uint32_t attachment_count;
@@ -94,11 +95,20 @@ struct powervr_pass {
 	uint32_t resolves[POWERVR_PASS_COLORS];
 	uint32_t depth;
 	uint32_t samples;
+	uint32_t view_mask;
 };
 
-/* One attachment of a framebuffer: the image view's shape (its format, layout, address, level and layer). */
+/* The most views a multiview subpass renders (maxMultiviewViewCount): view masks of bits 0 to 7. */
+#define POWERVR_PASS_VIEWS		8U
+
+/*
+ * One attachment of a framebuffer: the image view's shape (its format,
+ * layout, address, level and layer), and the layers of the view, of which
+ * a multiview render pass renders its views'.
+ */
 struct powervr_pass_view {
 	struct powervr_view_shape shape;
+	uint32_t layers;
 };
 
 /* A VkFramebuffer: its extent and layers, and its attachments. */
@@ -246,11 +256,14 @@ struct powervr_render_visibility {
  * it.  The kick takes it as it is; a job whose draws count for queries
  * hands its visibility to the kick, which reports it.  Samples is the
  * samples a pixel its attachments and draws have (1 or 4; 0 is taken as
- * 1).
+ * 1).  View is the view of a multiview render pass the job renders (the
+ * draws' gl_ViewIndex; 0 without multiview), each attachment at its
+ * view's layer plus the view.
  */
 struct powervr_render_job {
 	struct powervr_render_area area;
 	bool continued;
+	uint32_t view;
 	uint32_t width;
 	uint32_t height;
 	uint32_t samples;

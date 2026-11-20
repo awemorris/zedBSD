@@ -180,6 +180,19 @@ powervr_data_resolve(
 				return EINVAL;
 			error = load_add(loads, room, count, POWERVR_DATA_LOAD_DMA, request->shared, 4, state->blend_address);
 			break;
+		case POWERVR_SHADER_REQUEST_VIEW_INDEX:
+			/* The view the draw renders. */
+			if (request->words != 1)
+				return EINVAL;
+			values[0] = state->view;
+			error = write_words(loads, room, count, request->shared, values, 1);
+			break;
+		case POWERVR_SHADER_REQUEST_WORKGROUP_BASE:
+			/* The dispatch's first workgroup, up to three words. */
+			if (request->words > 3)
+				return EINVAL;
+			error = write_words(loads, room, count, request->shared, state->workgroup_base, request->words);
+			break;
 		case POWERVR_SHADER_REQUEST_COMPUTED:
 			/* The program's shared program writes these words itself. */
 			error = 0;

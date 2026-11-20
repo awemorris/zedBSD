@@ -74,6 +74,13 @@
 #define CAPSET_NATIVE_FLAGS_AT		172U
 #define CAPSET_NATIVE_MAGIC		0x5a4e4154U
 
+/*
+ * The native flag of the Vulkan 1.1 queries: the executor answers them and
+ * reads the 1.1 chains of a device and a render pass creation
+ * (VULKAN_NATIVE_CAPSET_CORE11_QUERIES).
+ */
+#define CAPSET_NATIVE_CORE11		0x8U
+
 /* The timelines a frame or a job may name (0 is the context's own). */
 #define RUNTIME_TIMELINES		64U
 
@@ -190,10 +197,10 @@ powervr_render_frame(
 
 /*
  * Reports the protocol's capset: wire 1, XML 1.3.269, timelines, the
- * vendor suffix and its flags; and, for a session whose video engine
- * decodes a codec libvulkan knows, when the reply holds it, the native
- * record that promises the video decode family.  Without one the capset
- * is the plain one, as before there was video.
+ * vendor suffix and its flags; and, when the reply holds it, the native
+ * record that promises the answers to the Vulkan 1.1 queries and, for a
+ * session whose video engine decodes a codec libvulkan knows, the video
+ * decode family.
  */
 static int
 runtime_capset(
@@ -221,11 +228,11 @@ runtime_capset(
 	put32(capset->data, CAPSET_FLAGS_AT, CAPSET_VENDOR_FLAGS);
 	capset->bytes = CAPSET_BYTES;
 
-	/* The native record, only for video libvulkan can use and a reply with room for it. */
+	/* The native record, in a reply with room for it: the Vulkan 1.1 queries and the video libvulkan can use. */
 	video = powervr_video_capset_flags(session->video_operations);
-	if (video != 0 && capset->capacity >= CAPSET_NATIVE_BYTES) {
+	if (capset->capacity >= CAPSET_NATIVE_BYTES) {
 		put32(capset->data, CAPSET_NATIVE_MAGIC_AT, CAPSET_NATIVE_MAGIC);
-		put32(capset->data, CAPSET_NATIVE_FLAGS_AT, video);
+		put32(capset->data, CAPSET_NATIVE_FLAGS_AT, video | CAPSET_NATIVE_CORE11);
 		capset->bytes = CAPSET_NATIVE_BYTES;
 	}
 

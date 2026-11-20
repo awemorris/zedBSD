@@ -27,6 +27,7 @@
 
 #include "drivers/gpu/powervr/render-private.h"
 #include "drivers/gpu/powervr/compute-program.h"
+#include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/video-state.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
@@ -77,7 +78,10 @@ static int device_token;
 static int create_instance(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int enumerate(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int properties(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static int identity(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int properties2(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static void identity(struct i915_wire_writer *reply, const VkPhysicalDeviceProperties *record);
+static int features2(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static void device_core11(struct i915_vkc_core11 *core11);
 static VkPhysicalDeviceProperties *device_record(struct powervr_vk_session *session);
 static void limits(VkPhysicalDeviceLimits *limit);
 static int features(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -137,6 +141,9 @@ powervr_vk_device_route(
 	case GPU_OP_GET_PHYSICAL_DEVICE_FEATURES:
 		error = features(session, reader, reply);
 		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2:
+		error = features2(session, reader, reply);
+		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_FORMAT_PROPERTIES:
 		error = format(session, reader, reply);
 		break;
@@ -153,7 +160,7 @@ powervr_vk_device_route(
 		error = properties(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2:
-		error = identity(session, reader, reply);
+		error = properties2(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_PROPERTIES:
 		error = families(session, reader, reply);
@@ -298,22 +305,67 @@ properties(
 }
 
 /*
- * vkGetPhysicalDeviceProperties2, asked for the device's ID properties
- * only: [physical][u64 1][PROPERTIES_2 sType][u64 1][ID_PROPERTIES sType]
- * [u64 0] -> [u64 1], the two headers, the device and driver UUIDs, the
- * LUID (none), the node mask, the LUID-valid word and the properties.
- * The UUIDs pair an exported allocation with its importer: every session
- * of the device reports the same ones.  ENOTSUP for another chain.
- *
- * Procedure referenced: zedBSD src/drivers/gpu/bcm2711/vk/vulkan-query.c
- * (identity_query); include/uapi/gpu-op.h
- * (GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2).
+ * vkGetPhysicalDeviceProperties2 in either of its forms: [physical]
+ * [present][PROPERTIES_2 header][the chain's headers] -> the device's
+ * identity (identity()) or its Vulkan 1.1 properties.  ENOTSUP for
+ * another chain.
  */
 static int
-identity(
+properties2(
 	struct powervr_vk_session *session,
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
+{
+	VkPhysicalDeviceProperties *record;
+	struct i915_vkc_core11 core11;
+	int form;
+	int error;
+
+	/* The physical device, then the output chain, which says which form is asked for. */
+	(void)drv_i915_wire_read_u64(reader);
+	error = i915_vkc_read_properties2(reader, &form);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
+
+	/* The ordinary properties, as the plain query gives them. */
+	record = device_record(session);
+	if (record == NULL)
+		return ENOMEM;
+
+	/* The identity, which the export and import of memory name. */
+	if (form == I915_VKC_PROPERTIES2_IDENTITY) {
+		identity(reply, record);
+
+		/* Succeeded: the identity every session of the device reports. */
+		return 0;
+	}
+
+	/* The Vulkan 1.1 properties, then the record. */
+	device_core11(&core11);
+	i915_vkc_reply_core11_properties(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceProperties(reply, record);
+
+	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	return 0;
+}
+
+/*
+ * The identity form of vkGetPhysicalDeviceProperties2 (only the ID
+ * properties chained): [u64 1], the two headers, the device and driver
+ * UUIDs, the LUID (none), the node mask, the LUID-valid word and the
+ * properties.  The UUIDs pair an exported allocation with its importer:
+ * every session of the device reports the same ones.
+ *
+ * Procedure referenced: zedBSD src/drivers/gpu/videocore/vk/vulkan-query.c
+ * (identity_query); include/uapi/gpu-op.h
+ * (GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2).
+ */
+static void
+identity(
+	struct i915_wire_writer *reply,
+	const VkPhysicalDeviceProperties *record)
 {
 	static const uint8_t device_uuid[VK_UUID_SIZE] = {
 		'z', 'e', 'd', 'B', 'S', 'D', '-', 'p', 'o', 'w', 'e', 'r', 'v', 'r', 'b', 'x'
@@ -322,29 +374,6 @@ identity(
 		'z', 'e', 'd', 'B', 'S', 'D', '-', 'p', 'v', 'r', '-', 'v', 'k', '-', '0', '1'
 	};
 	static const uint8_t luid[VK_LUID_SIZE] = { 0 };
-	VkPhysicalDeviceProperties *record;
-	uint64_t present;
-	uint64_t chained;
-	uint64_t last;
-	uint32_t outer;
-	uint32_t inner;
-
-	/* The physical device and the output chain: properties2, then the ID properties, then nothing. */
-	(void)drv_i915_wire_read_u64(reader);
-	present = drv_i915_wire_read_u64(reader);
-	outer = drv_i915_wire_read_u32(reader);
-	chained = drv_i915_wire_read_u64(reader);
-	inner = drv_i915_wire_read_u32(reader);
-	last = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1)
-		return EINVAL;
-	if (outer != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 || chained != 1 || inner != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES || last != 0)
-		return ENOTSUP;
-
-	/* The ordinary properties, as the plain query gives them. */
-	record = device_record(session);
-	if (record == NULL)
-		return ENOMEM;
 
 	/* The two headers, the identity (no Windows adapter: no LUID), then the properties. */
 	drv_i915_wire_reply_u64(reply, 1);
@@ -361,9 +390,72 @@ identity(
 	drv_i915_wire_reply_u32(reply, 0);
 	drv_i915_wire_reply_u32(reply, VK_FALSE);
 	i915_vkc_enc_VkPhysicalDeviceProperties(reply, record);
+}
 
-	/* Succeeded: the identity every session of the device reports. */
+/*
+ * vkGetPhysicalDeviceFeatures2 with the Vulkan 1.1 features chained:
+ * [physical][output chain] -> [present][chain][1.1 fields]
+ * [VkPhysicalDeviceFeatures].
+ */
+static int
+features2(
+	struct powervr_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	VkPhysicalDeviceFeatures *record;
+	struct i915_vkc_core11 core11;
+	int error;
+
+	/* The physical device, then the output chain of the 1.1 feature structures. */
+	(void)drv_i915_wire_read_u64(reader);
+	error = i915_vkc_read_features2(reader);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
+
+	/* The record of the features the device has. */
+	record = powervr_vk_arena_take(session, sizeof(*record));
+	if (record == NULL)
+		return ENOMEM;
+	device_features(record);
+
+	/* The 1.1 features, then the record. */
+	device_core11(&core11);
+	i915_vkc_reply_core11_features(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, record);
+
+	/* Succeeded: the features are reported. */
 	return 0;
+}
+
+/*
+ * Fills the device's Vulkan 1.1 answers: the subgroup of one invocation
+ * in compute programs; multiview, each view of a subpass rendered by jobs
+ * of its own at the attachments' layers of the view, the programs reading
+ * the view as a shared register word (no geometry or tessellation stage);
+ * instances numbered as without multiview; a set's descriptors bounded by
+ * the per-set limits, which together stay below 1024.  An allocation is
+ * one physically contiguous run of at most POWERVR_RENDER_MAX_BYTES, so
+ * that is the largest allocation (below what Vulkan 1.1 asks for, so
+ * libvulkan names 1.0 for the device until allocations may be larger).
+ */
+static void
+device_core11(
+	struct i915_vkc_core11 *core11)
+{
+	/* What every executor starts from. */
+	i915_vkc_core11_defaults(core11);
+
+	/* Multiview, the views rendered one after another. */
+	core11->multiview.multiview = VK_TRUE;
+	core11->multiview_limits.maxMultiviewViewCount = POWERVR_PASS_VIEWS;
+	core11->multiview_limits.maxMultiviewInstanceIndex = (1U << 27) - 1U;
+
+	/* The descriptors of one set and the largest allocation. */
+	core11->maintenance3.maxPerSetDescriptors = 1024U;
+	core11->maintenance3.maxMemoryAllocationSize = POWERVR_RENDER_MAX_BYTES;
 }
 
 /* Fills a cleared record from the scratch (too large for the stack) with the device's properties; NULL when none is left. */
@@ -1139,6 +1231,7 @@ create_device(
 {
 	VkDeviceCreateInfo info;
 	VkPhysicalDeviceFeatures offered;
+	struct i915_vkc_core11 core11;
 	const VkBool32 *wanted;
 	const VkBool32 *has;
 	uint64_t present;
@@ -1162,6 +1255,13 @@ create_device(
 			drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 			return 0;
 		}
+	}
+
+	/* No Vulkan 1.1 feature the device does not report (libvulkan refuses it first). */
+	device_core11(&core11);
+	if (i915_vkc_core11_check_device(&info, &core11) != 0) {
+		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT);
+		return 0;
 	}
 
 	/* No optional feature the device does not have (the record is VkBool32 words only). */
