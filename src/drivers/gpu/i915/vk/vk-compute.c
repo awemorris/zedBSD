@@ -52,6 +52,8 @@
 #include "../intel/genxml-gen9.h"
 #include "../intel/genxml-gen11.h"
 
+#include "../../compiler/spirv.h"
+
 /*
  * PIPE_CONTROL's Stall At Pixel Scoreboard (gen120.xml, bit 33: bit 1 of
  * the flags dword): with the command streamer stall, the stalling flush
@@ -250,6 +252,7 @@ drv_i915_gfx_dispatch_write_gen(
 	uint32_t thread_bytes;
 	uint32_t index;
 	uint64_t counts_va;
+	uint32_t system_bytes;
 	int error;
 
 	/* The kernel the dispatch runs. */
@@ -284,13 +287,23 @@ drv_i915_gfx_dispatch_write_gen(
 		descriptor[6] |= GEN12_IDD_BARRIER_ENABLE;
 	descriptor[7] = binary->cross_thread_regs;
 
-	/* The group counts gl_NumWorkGroups reads: in the slot, or an indirect dispatch's where the walker reads them. */
+	/*
+	 * The group counts gl_NumWorkGroups reads: in the slot, or an indirect
+	 * dispatch's where the walker reads them.  A pipeline made for
+	 * vkCmdDispatchBase reads the dispatch's first group after them.
+	 */
 	counts_va = slot_va + I915_GFX_DYNAMIC_HEAP + I915_GFX_DYN_GROUP_COUNTS;
 	if (grid->indirect_va != 0U) {
 		counts_va = grid->indirect_va;
 	} else {
 		kern_memcpy(dynamic + I915_GFX_DYN_GROUP_COUNTS, grid->groups, I915_COMPUTE_GROUP_COUNT_BYTES);
+		kern_memcpy(dynamic + I915_GFX_DYN_GROUP_COUNTS + I915_COMPUTE_GROUP_COUNT_BYTES, grid->base, I915_COMPUTE_GROUP_COUNT_BYTES);
 	}
+
+	/* The bytes of the system buffer the kernel may read. */
+	system_bytes = I915_COMPUTE_GROUP_COUNT_BYTES;
+	if (pipeline->dispatch_base != 0U)
+		system_bytes = DRV_GPU_SPIRV_SYSTEM_BASE_BYTES;
 
 	/* Sees the compute bind point's sets where the push data looks for the graphics ones. */
 	view = *state;
@@ -312,7 +325,7 @@ drv_i915_gfx_dispatch_write_gen(
 	/* Points the system storage buffer at the group counts: their address and their bytes. */
 	address[0] = (uint32_t)counts_va;
 	address[1] = (uint32_t)(counts_va >> 32);
-	address[2] = I915_COMPUTE_GROUP_COUNT_BYTES;
+	address[2] = system_bytes;
 	for (index = 0U; index < binary->block_count; index++) {
 		block = &binary->blocks[index];
 		if (block->set == DRV_GPU_IR_SYSTEM_SET && block->address != 0U) {

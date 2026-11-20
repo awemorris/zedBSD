@@ -197,6 +197,15 @@ struct i915_shader_binary {
 	uint32_t uses_kill;
 
 	/*
+	 * Fragment: nonzero when the kernel writes memory (a storage buffer or
+	 * image store, an atomic), and nonzero for the EarlyFragmentTests
+	 * execution mode; the draw chooses when the depth and stencil tests run
+	 * by them (3DSTATE_WM Early Depth/Stencil Control).
+	 */
+	uint32_t writes_memory;
+	uint32_t early_fragment_tests;
+
+	/*
 	 * Fragment: nonzero when the kernel writes a second colour (Location 0
 	 * Index 1) with one dual-source render-target write.
 	 */

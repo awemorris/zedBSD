@@ -97,6 +97,13 @@
  */
 #define RUNTIME_NATIVE_SYNC_COMMAND	0x2U
 
+/*
+ * The native flag of the Vulkan 1.1 queries: the executor answers them and
+ * reads the 1.1 chains of a device and a render pass creation
+ * (VULKAN_NATIVE_CAPSET_CORE11_QUERIES).
+ */
+#define RUNTIME_NATIVE_CORE11		0x8U
+
 /* The timelines a queue may name (1 to 63; 0 is the context's own). */
 #define RUNTIME_TIMELINES		64U
 
@@ -444,11 +451,11 @@ runtime_capset(
 
 	/*
 	 * The native record, when the reply holds it: commands run at once on
-	 * the caller's thread, and the H.264 and H.265 video decode family when
+	 * the caller's thread, the Vulkan 1.1 queries are answered, and the H.264 and H.265 video decode family when
 	 * there is one.
 	 */
 	if (capset->capacity >= RUNTIME_NATIVE_CAPSET_BYTES) {
-		flags = RUNTIME_NATIVE_SYNC_COMMAND;
+		flags = RUNTIME_NATIVE_SYNC_COMMAND | RUNTIME_NATIVE_CORE11;
 		video = nvrtx_node_video_available(node);
 		if (video) {
 			flags |= RUNTIME_NATIVE_VIDEO_H264;

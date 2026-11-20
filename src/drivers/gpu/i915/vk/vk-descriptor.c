@@ -40,8 +40,6 @@
 /* How many writes, copies and descriptors of one kind one update may carry. */
 #define I915_GFX_MAX_UPDATE_ITEMS	64U
 
-/* How many descriptors (array elements of every binding) one set holds at most. */
-#define I915_GFX_MAX_SET_DESCRIPTORS	512U
 
 static int i915_gfx_update_write(struct i915_render_session *session, struct i915_wire_reader *reader);
 static void i915_gfx_update_copy(struct i915_render_session *session, const VkCopyDescriptorSet *copy);

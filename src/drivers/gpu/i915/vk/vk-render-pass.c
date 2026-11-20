@@ -50,6 +50,7 @@ drv_i915_gfx_create_render_pass(
 {
 	VkRenderPassCreateInfo info;
 	const VkSubpassDescription *subpass;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	struct i915_gfx_pass *pass;
 	uint64_t identity;
 	uint32_t index;
@@ -111,6 +112,12 @@ drv_i915_gfx_create_render_pass(
 		} else {
 			pass->depth_attachment = VK_ATTACHMENT_UNUSED;
 		}
+
+		/* Records the views the subpass renders, one layer each (none without multiview). */
+		multiview = i915_vkc_render_pass_multiview(&info);
+		pass->view_mask = 0U;
+		if (multiview != NULL && multiview->pViewMasks != NULL)
+			pass->view_mask = multiview->pViewMasks[0];
 	}
 
 	/* Publishes the pass and answers; a refused or failed pass is reported there. */
@@ -185,6 +192,8 @@ static int
 i915_gfx_render_pass_supported(
 	const VkRenderPassCreateInfo *info)
 {
+	const VkRenderPassMultiviewCreateInfo *multiview;
+
 	/* Only one subpass. */
 	if (info->subpassCount != 1U)
 		return 0;
@@ -196,6 +205,15 @@ i915_gfx_render_pass_supported(
 	/* Only as many colour attachments in the one subpass as there are render targets. */
 	if (info->pSubpasses[0].colorAttachmentCount > I915_GFX_MAX_COLOR_ATTACHMENTS)
 		return 0;
+
+	/* Only the views the device reports (maxMultiviewViewCount), named for the one subpass. */
+	multiview = i915_vkc_render_pass_multiview(info);
+	if (multiview != NULL && multiview->subpassCount != 0U) {
+		if (multiview->subpassCount != 1U || multiview->pViewMasks == NULL)
+			return 0;
+		if ((multiview->pViewMasks[0] >> I915_GFX_MAX_VIEWS) != 0U)
+			return 0;
+	}
 
 	/* Succeeded: the pass has the supported shape. */
 	return 1;

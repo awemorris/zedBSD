@@ -6445,6 +6445,17 @@ i915_compile_describe(
 	if (state->uses_kill != 0)
 		binary->uses_kill = 1U;
 
+	/* A fragment kernel that writes memory, and one of early tests, decide when the draw tests depth. */
+	if (state->ir->stage == DRV_GPU_STAGE_FRAGMENT) {
+		for (index = 0U; index < state->ir->instruction_count; index++) {
+			if (state->ir->instructions[index].op == DRV_GPU_IR_STORE_STORAGE ||
+			    state->ir->instructions[index].op == DRV_GPU_IR_ATOMIC ||
+			    state->ir->instructions[index].op == DRV_GPU_IR_IMAGE_WRITE)
+				binary->writes_memory = 1U;
+		}
+		binary->early_fragment_tests = state->ir->early_fragment_tests;
+	}
+
 	/* A fragment kernel that writes dual source has the blend take its second colour. */
 	if (state->uses_second_color != 0)
 		binary->dual_source = 1U;

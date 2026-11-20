@@ -35,7 +35,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static int i915_pipeline_compile_stage(const struct i915_gfx_shader *shader, enum drv_gpu_shader_stage stage, const struct i915_shader_binary *producer, unsigned graphics_ver, struct i915_shader_binary **result);
+static int i915_pipeline_compile_stage(const struct i915_gfx_shader *shader, enum drv_gpu_shader_stage stage, const struct i915_shader_binary *producer, unsigned graphics_ver, uint32_t features, uint32_t view, uint32_t *reads_view, struct i915_shader_binary **result);
+static int i915_pipeline_prepare_view(struct i915_render_session *session, struct i915_gfx_pipeline *pipeline, uint32_t view, uint32_t *reads_view);
+static uint32_t i915_pipeline_first_view(uint32_t view_mask);
 static unsigned i915_pipeline_graphics_ver(const struct i915_render_session *session);
 static int i915_pipeline_geometry_inputs(const struct drv_gpu_shader_ir *ir, const struct i915_shader_binary *producer);
 static int i915_pipeline_kernels_fit(const struct i915_gfx_pipeline *pipeline);
@@ -61,10 +63,78 @@ drv_i915_gfx_pipeline_prepare(
 	struct i915_render_session *session,
 	struct i915_gfx_pipeline *pipeline)
 {
+	struct i915_gfx_pipeline *variant;
+	uint32_t first;
+	uint32_t view;
+	uint32_t reads_view;
+	uint32_t ignored;
+	int error;
+
+	/* The pipeline's own kernels render the subpass's first view (view 0 without multiview). */
+	first = i915_pipeline_first_view(pipeline->view_mask);
+	error = i915_pipeline_prepare_view(session, pipeline, first, &reads_view);
+	if (error != 0)
+		return error;
+
+	/* Kernels that do not read gl_ViewIndex render every view. */
+	if (reads_view == 0U)
+		return 0;
+
+	/* Each other view of the subpass gets a copy of the pipeline with kernels for that view. */
+	for (view = first + 1U; view < I915_GFX_MAX_VIEWS; view++) {
+		/* A view the subpass does not render needs no kernels. */
+		if ((pipeline->view_mask & (1U << view)) == 0U)
+			continue;
+
+		/* The copy shares the pipeline's shaders and state and owns no kernels yet. */
+		variant = kern_calloc(1U, sizeof(*variant));
+		if (variant == NULL) {
+			drv_i915_gfx_pipeline_release(pipeline);
+			return ENOMEM;
+		}
+		*variant = *pipeline;
+		kern_memset(variant->view_pipelines, 0, sizeof(variant->view_pipelines));
+		variant->kernel_owner = NULL;
+		variant->kernel_window = 0U;
+		variant->kernel_generation = 0U;
+		variant->vs_binary = NULL;
+		variant->gs_binary = NULL;
+		variant->fs_binary = NULL;
+		variant->kernels_ready = 0;
+
+		/* Compiles the copy's kernels for the view. */
+		error = i915_pipeline_prepare_view(session, variant, view, &ignored);
+		if (error != 0) {
+			kern_free(variant);
+			drv_i915_gfx_pipeline_release(pipeline);
+			return error;
+		}
+		pipeline->view_pipelines[view] = variant;
+	}
+
+	/* Succeeded: every view of the subpass has its kernels. */
+	return 0;
+}
+
+/*
+ * Compiles a pipeline's kernels for one view of its subpass (the value its
+ * stages read as gl_ViewIndex) and says whether any stage reads it.
+ */
+static int
+i915_pipeline_prepare_view(
+	struct i915_render_session *session,
+	struct i915_gfx_pipeline *pipeline,
+	uint32_t view,
+	uint32_t *reads_view)
+{
 	const struct i915_shader_binary *geometry;
+	uint32_t stage_reads;
 	int fits;
 	int error;
 	unsigned graphics_ver;
+
+	/* No stage has read the view yet. */
+	*reads_view = 0U;
 
 	/* The kernels are compiled for the session's GT. */
 	graphics_ver = i915_pipeline_graphics_ver(session);
@@ -78,27 +148,30 @@ drv_i915_gfx_pipeline_prepare(
 		return EINVAL;
 
 	/* Compiles the vertex stage. */
-	error = i915_pipeline_compile_stage(pipeline->vertex, DRV_GPU_STAGE_VERTEX, NULL, graphics_ver, &pipeline->vs_binary);
+	error = i915_pipeline_compile_stage(pipeline->vertex, DRV_GPU_STAGE_VERTEX, NULL, graphics_ver, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &pipeline->vs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
 	}
+	*reads_view |= stage_reads;
 
 	/* Compiles the geometry stage, when there is one, against the vertex kernel's VUE. */
 	if (pipeline->geometry != NULL) {
-		error = i915_pipeline_compile_stage(pipeline->geometry, DRV_GPU_STAGE_GEOMETRY, pipeline->vs_binary, graphics_ver, &pipeline->gs_binary);
+		error = i915_pipeline_compile_stage(pipeline->geometry, DRV_GPU_STAGE_GEOMETRY, pipeline->vs_binary, graphics_ver, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &pipeline->gs_binary);
 		if (error != 0) {
 			drv_i915_gfx_pipeline_release(pipeline);
 			return error;
 		}
+		*reads_view |= stage_reads;
 	}
 
 	/* Compiles the fragment stage. */
-	error = i915_pipeline_compile_stage(pipeline->fragment, DRV_GPU_STAGE_FRAGMENT, NULL, graphics_ver, &pipeline->fs_binary);
+	error = i915_pipeline_compile_stage(pipeline->fragment, DRV_GPU_STAGE_FRAGMENT, NULL, graphics_ver, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &pipeline->fs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
 	}
+	*reads_view |= stage_reads;
 
 	/* Refuses kernels the draw path cannot place or connect, naming the geometry kernel's numbers when there is one. */
 	fits = i915_pipeline_kernels_fit(pipeline);
@@ -180,6 +253,8 @@ drv_i915_gfx_compute_prepare(
 	struct i915_render_session *session,
 	struct i915_gfx_pipeline *pipeline)
 {
+	uint32_t features;
+	uint32_t reads_view;
 	int fits;
 	int error;
 	unsigned graphics_ver;
@@ -191,8 +266,13 @@ drv_i915_gfx_compute_prepare(
 	if (pipeline->compute == NULL)
 		return EINVAL;
 
+	/* A pipeline made for vkCmdDispatchBase numbers its groups from the dispatch's base. */
+	features = 0U;
+	if (pipeline->dispatch_base != 0U)
+		features = DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE;
+
 	/* Compiles the compute stage. */
-	error = i915_pipeline_compile_stage(pipeline->compute, DRV_GPU_STAGE_COMPUTE, NULL, graphics_ver, &pipeline->cs_binary);
+	error = i915_pipeline_compile_stage(pipeline->compute, DRV_GPU_STAGE_COMPUTE, NULL, graphics_ver, features, 0U, &reads_view, &pipeline->cs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
@@ -242,6 +322,17 @@ void
 drv_i915_gfx_pipeline_release(
 	struct i915_gfx_pipeline *pipeline)
 {
+	uint32_t view;
+
+	/* Releases and frees each view's copy, whose kernels are its own. */
+	for (view = 0U; view < I915_GFX_MAX_VIEWS; view++) {
+		if (pipeline->view_pipelines[view] == NULL)
+			continue;
+		drv_i915_gfx_pipeline_release(pipeline->view_pipelines[view]);
+		kern_free(pipeline->view_pipelines[view]);
+		pipeline->view_pipelines[view] = NULL;
+	}
+
 	/* Frees every binary and the compute threads' table; a stage never compiled has none. */
 	drv_i915_shader_binary_free(pipeline->vs_binary);
 	drv_i915_shader_binary_free(pipeline->gs_binary);
@@ -400,6 +491,10 @@ drv_i915_gfx_pipeline_kernels(
 	/* Takes whether the pixel kernel discards, which the pixel stage must be told. */
 	kernels->ps_kills = fragment->uses_kill;
 
+	/* Takes whether it writes memory and whether it asks for its tests first, which decide when depth is tested. */
+	kernels->ps_writes_memory = fragment->writes_memory;
+	kernels->ps_early_tests = fragment->early_fragment_tests;
+
 	/* Takes the scratch memory each kernel spills to; the draw places the buffers. */
 	kernels->vs_scratch_bytes = vertex->scratch_bytes;
 	kernels->ps_scratch_bytes = fragment->scratch_bytes;
@@ -419,6 +514,9 @@ i915_pipeline_compile_stage(
 	enum drv_gpu_shader_stage stage,
 	const struct i915_shader_binary *producer,
 	unsigned graphics_ver,
+	uint32_t features,
+	uint32_t view,
+	uint32_t *reads_view,
 	struct i915_shader_binary **result)
 {
 	struct drv_gpu_shader_ir *ir;
@@ -431,11 +529,12 @@ i915_pipeline_compile_stage(
 	 * compiler lowers beyond the shared profile and the arrays of
 	 * descriptors, each element of which the draw and the dispatch bind.
 	 */
+	*reads_view = 0U;
 	kern_memset(&diagnostic, 0, sizeof(diagnostic));
 	error = drv_gpu_shader_parse_features(shader->words,
 					      shader->word_count,
 					      stage,
-					      I915_SHADER_SPIRV_FEATURES | I915_SHADER_SPIRV_FEATURES_ARRAYS,
+					      I915_SHADER_SPIRV_FEATURES | I915_SHADER_SPIRV_FEATURES_ARRAYS | features,
 					      &ir,
 					      &diagnostic);
 	if (error != 0) {
@@ -463,6 +562,13 @@ i915_pipeline_compile_stage(
 		drv_gpu_shader_ir_free(ir);
 		return EINVAL;
 	}
+
+	/*
+	 * gl_ViewIndex reads the view the kernel is compiled for (0 outside a
+	 * multiview subpass, as the API says).
+	 */
+	*reads_view = ir->uses_view_index;
+	drv_gpu_shader_ir_bind_view(ir, view);
 
 	/* A geometry shader reads only locations the vertex kernel writes. */
 	if (stage == DRV_GPU_STAGE_GEOMETRY) {
@@ -837,4 +943,21 @@ i915_pipeline_graphics_ver(
 
 	/* Every other GT the driver runs is Gen12. */
 	return 12U;
+}
+
+/* Returns the lowest view of a subpass's view mask; view 0 for a pass of one view. */
+static uint32_t
+i915_pipeline_first_view(
+	uint32_t view_mask)
+{
+	uint32_t view;
+
+	/* The lowest bit set. */
+	for (view = 0U; view < I915_GFX_MAX_VIEWS; view++) {
+		if ((view_mask & (1U << view)) != 0U)
+			return view;
+	}
+
+	/* A pass of one view renders view 0. */
+	return 0U;
 }

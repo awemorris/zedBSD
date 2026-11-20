@@ -435,6 +435,8 @@ i915_gfx_decode_pipeline(
 	VkPipelineRasterizationStateCreateInfo raster;
 	VkPipelineMultisampleStateCreateInfo multisample;
 	VkPipelineDepthStencilStateCreateInfo depth;
+	struct i915_gfx_pass *pass;
+	uint64_t pass_id;
 	uint64_t present;
 	int viewport_given;
 	int scissor_given;
@@ -577,9 +579,17 @@ i915_gfx_decode_pipeline(
 		kern_logf("i915: vk: XXX pipeline has neither a scissor nor a dynamic scissor; its draws use an empty one\n");
 	}
 
-	/* Skips the layout, the render pass, the subpass and the base pipeline and index. */
+	/*
+	 * Skips the layout, takes the views of the render pass's subpass (its
+	 * kernels are compiled for each view that reads gl_ViewIndex), and
+	 * skips the subpass and the base pipeline and index.
+	 */
 	(void)drv_i915_wire_read_u64(reader);
-	(void)drv_i915_wire_read_u64(reader);
+	pass_id = drv_i915_wire_read_u64(reader);
+	pass = drv_i915_object_lookup(session, I915_VK_OBJ_RENDER_PASS, pass_id);
+	pipeline->view_mask = 0U;
+	if (pass != NULL)
+		pipeline->view_mask = pass->view_mask;
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u32(reader);
@@ -964,6 +974,11 @@ i915_gfx_decode_compute(
 
 	/* The pipeline is bound at the compute bind point. */
 	pipeline->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
+
+	/* A pipeline made for vkCmdDispatchBase numbers its groups from the dispatch's base. */
+	pipeline->dispatch_base = 0U;
+	if ((info.flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0U)
+		pipeline->dispatch_base = 1U;
 
 	/* Refuses a stage that is not the compute stage. */
 	if (info.stage.stage != VK_SHADER_STAGE_COMPUTE_BIT) {

@@ -258,6 +258,7 @@
 #define OP_ATOMIC_OR 241U
 #define OP_ATOMIC_XOR 242U
 #define OP_EXECUTION_MODE_ID 331U
+#define OP_GROUP_NON_UNIFORM_ELECT 333U
 
 /* Opcodes of geometry shaders (spirv-geometry.inc). */
 #define OP_EMIT_VERTEX 218U
@@ -328,6 +329,19 @@
 #define BUILTIN_LOCAL_INVOCATION_ID 27U
 #define BUILTIN_GLOBAL_INVOCATION_ID 28U
 #define BUILTIN_LOCAL_INVOCATION_INDEX 29U
+
+/*
+ * The built-ins of a compute shader's subgroup.  A subgroup here is one
+ * invocation, so they read as constants or as the invocation's place in its
+ * workgroup.
+ */
+#define BUILTIN_SUBGROUP_SIZE 36U
+#define BUILTIN_NUM_SUBGROUPS 38U
+#define BUILTIN_SUBGROUP_ID 40U
+#define BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID 41U
+
+/* The view a multiview draw renders (SPV_KHR_multiview). */
+#define BUILTIN_VIEW_INDEX 4440U
 
 /* The built-ins of a geometry shader. */
 #define BUILTIN_PRIMITIVE_ID 7U
@@ -1290,6 +1304,9 @@ static int drv_gpu_spirv_lower_shared(struct drv_gpu_spirv_parser *parser, const
 static int drv_gpu_spirv_semantics(struct drv_gpu_spirv_parser *parser, uint32_t semantics_id, uint32_t *fences, uint32_t opcode, uint32_t offset);
 static void drv_gpu_spirv_fence(struct drv_gpu_spirv_parser *parser, uint32_t fences);
 static int drv_gpu_spirv_lower_barrier(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_lower_elect(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static int drv_gpu_spirv_declare_view_index(struct drv_gpu_spirv_parser *parser, struct drv_gpu_spirv_id *record, uint32_t opcode, uint32_t offset);
+static uint32_t drv_gpu_spirv_group_component(struct drv_gpu_spirv_parser *parser, uint32_t component);
 static int drv_gpu_spirv_geometry_mode(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
 static int drv_gpu_spirv_geometry_declared(struct drv_gpu_spirv_parser *parser);
 static int drv_gpu_spirv_declare_geometry_input(struct drv_gpu_spirv_parser *parser, struct drv_gpu_spirv_id *record, uint32_t opcode, uint32_t offset);
@@ -1819,6 +1836,44 @@ drv_gpu_shader_ir_free(
 	/*
 	 * Succeeded: the parsed shader and its lists have no remaining owner.
 	 */
+	return;
+}
+
+/*
+ * Binds gl_ViewIndex to one view: every LOAD_SYSTEM of the view becomes
+ * the integer constant `view`.
+ *
+ * A multiview draw renders each view of its subpass with the shader
+ * compiled for that view, so a backend never reads the view at run time.
+ * An IR that does not read the view is left as it is.
+ */
+void
+drv_gpu_shader_ir_bind_view(
+	struct drv_gpu_shader_ir *ir,
+	uint32_t view)
+{
+	struct drv_gpu_shader_ir_inst *inst;
+	uint32_t index;
+
+	/* A shader that does not read the view is the same for every view. */
+	if (ir == NULL || ir->uses_view_index == 0U)
+		return;
+
+	/* Turns each read of the view into the constant. */
+	for (index = 0U; index < ir->instruction_count; index++) {
+		/* Leaves every other instruction alone. */
+		inst = &ir->instructions[index];
+		if (inst->op != DRV_GPU_IR_LOAD_SYSTEM ||
+		    inst->component != DRV_GPU_IR_SYSTEM_VIEW_INDEX)
+			continue;
+
+		/* The read of the view becomes the view's number. */
+		inst->op = DRV_GPU_IR_ICONST;
+		inst->component = 0U;
+		inst->immediate = view;
+	}
+
+	/* Succeeded: the IR renders the one view. */
 	return;
 }
 
@@ -2946,6 +3001,15 @@ drv_gpu_spirv_declare_variable(
 						     record,
 						     opcode,
 						     offset);
+		if (error != 0)
+			return error;
+	} else if (storage == SC_INPUT &&
+		   record->has_builtin != 0U &&
+		   record->builtin == BUILTIN_VIEW_INDEX) {
+		error = drv_gpu_spirv_declare_view_index(parser,
+							 record,
+							 opcode,
+							 offset);
 		if (error != 0)
 			return error;
 	} else if (storage == SC_INPUT &&
@@ -4102,6 +4166,19 @@ drv_gpu_spirv_lower(
 		/*
 		 * Succeeded: this instruction has a complete scalar lowering.
 		 */
+		return 0;
+
+	case OP_GROUP_NON_UNIFORM_ELECT:
+		/* subgroupElect(): the one invocation of its subgroup. */
+		error = drv_gpu_spirv_lower_elect(parser,
+						  word,
+						  count,
+						  opcode,
+						  offset);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the election is lowered. */
 		return 0;
 
 	case OP_EMIT_VERTEX:

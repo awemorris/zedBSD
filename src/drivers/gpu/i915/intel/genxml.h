@@ -234,6 +234,18 @@ _Static_assert(GEN12_PIPELINE_SELECT_DWORD(2U) == 0x69041312U,
 #define GEN12_WM_BARYCENTRIC_LINEAR_PIXEL	(1U << 14)
 
 /*
+ * 3DSTATE_WM dword 1 bits 22:21, Early Depth/Stencil Control: NORMAL (0)
+ * lets the hardware test before the shader when it can, PSEXEC (1) runs
+ * the shader for every fragment and tests after it, PREPS (2) tests before
+ * the shader and kills the fragments that fail.
+ *
+ * Values referenced: Mesa 25.0.7 src/intel/genxml/gen80.xml (3DSTATE_WM
+ * Early Depth/Stencil Control, EDSC_NORMAL, EDSC_PSEXEC, EDSC_PREPS).
+ */
+#define GEN12_WM_EDSC_PSEXEC			(1U << 21)
+#define GEN12_WM_EDSC_PREPS			(2U << 21)
+
+/*
  * 3DSTATE_CLIP dword 2 bit 8, Non-Perspective Barycentric Enable: the
  * clipper passes on what the linear barycentrics need; it is set when the
  * pixel kernel interpolates without perspective.

@@ -116,6 +116,10 @@ static int device_identity(struct nvrtx_vk_session *session, struct i915_wire_re
 static VkPhysicalDeviceProperties *device_describe(struct nvrtx_vk_session *session);
 static void device_limits(VkPhysicalDeviceLimits *limits);
 static int device_features(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static VkPhysicalDeviceFeatures *device_feature_record(struct nvrtx_vk_session *session);
+static int device_features2(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int device_properties2(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static void device_core11(struct nvrtx_vk_session *session, struct i915_vkc_core11 *core11);
 static int device_memory(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int device_families(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_format_features(uint32_t format, VkFormatProperties *properties);
@@ -162,6 +166,9 @@ nvrtx_vk_device_route(
 	case GPU_OP_GET_PHYSICAL_DEVICE_FEATURES:
 		error = device_features(session, reader, reply);
 		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2:
+		error = device_features2(session, reader, reply);
+		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_FORMAT_PROPERTIES:
 		error = device_format(reader, reply);
 		break;
@@ -172,7 +179,7 @@ nvrtx_vk_device_route(
 		error = device_properties(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2:
-		error = device_identity(session, reader, reply);
+		error = device_properties2(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_PROPERTIES:
 		error = device_families(session, reader, reply);
@@ -324,12 +331,57 @@ device_properties(
 }
 
 /*
- * vkGetPhysicalDeviceProperties2 with only the ID properties chained, which
- * libvulkan asks before it exports or imports memory by fd: [physical]
- * [present][PROPERTIES_2 header][ID_PROPERTIES header] -> the two headers,
- * the device's and the driver's UUIDs, an invalid LUID, then the
- * properties.  Both sides of a share ask the same device, so the UUIDs are
- * fixed words of this executor.
+ * vkGetPhysicalDeviceProperties2 in either of its forms: [physical]
+ * [present][PROPERTIES_2 header][the chain's headers] -> the device's
+ * identity (device_identity()) or its Vulkan 1.1 properties.
+ */
+static int
+device_properties2(
+	struct nvrtx_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct i915_vkc_core11 core11;
+	VkPhysicalDeviceProperties *properties;
+	int form;
+	int error;
+
+	/* The physical device, then the output chain, which says which form is asked for. */
+	(void)drv_i915_wire_read_u64(reader);
+	error = i915_vkc_read_properties2(reader, &form);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
+
+	/* The identity, which the export and import of memory name. */
+	if (form == I915_VKC_PROPERTIES2_IDENTITY) {
+		error = device_identity(session, reader, reply);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the identity is reported. */
+		return 0;
+	}
+
+	/* The Vulkan 1.1 properties, then the record. */
+	properties = device_describe(session);
+	if (properties == NULL)
+		return ENOMEM;
+	device_core11(session, &core11);
+	i915_vkc_reply_core11_properties(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
+
+	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	return 0;
+}
+
+/*
+ * The identity form of vkGetPhysicalDeviceProperties2 (only the ID
+ * properties chained), which libvulkan asks before it exports or imports
+ * memory by fd: the two headers, the device's and the driver's UUIDs, an
+ * invalid LUID, then the properties.  Both sides of a share ask the same
+ * device, so the UUIDs are fixed words of this executor.
  */
 static int
 device_identity(
@@ -345,24 +397,8 @@ device_identity(
 	};
 	static const uint8_t luid[VK_LUID_SIZE] = { 0 };
 	VkPhysicalDeviceProperties *properties;
-	uint64_t present;
-	uint64_t chained;
-	uint64_t last;
-	uint32_t outer;
-	uint32_t inner;
 
-	/* The physical device, then the two headers of the output chain. */
-	(void)drv_i915_wire_read_u64(reader);
-	present = drv_i915_wire_read_u64(reader);
-	outer = drv_i915_wire_read_u32(reader);
-	chained = drv_i915_wire_read_u64(reader);
-	inner = drv_i915_wire_read_u32(reader);
-	last = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1U)
-		return EINVAL;
-	if (outer != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 || chained != 1U ||
-	    inner != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES || last != 0U)
-		return ENOTSUP;
+	UNUSED_PARAMETER(reader);
 
 	/* The record. */
 	properties = device_describe(session);
@@ -612,10 +648,67 @@ device_features(
 	if (reader->error != 0)
 		return EINVAL;
 
+	/* The record of the device's features. */
+	features = device_feature_record(session);
+	if (features == NULL)
+		return ENOMEM;
+
+	/* Replies the present word and the record. */
+	drv_i915_wire_reply_u64(reply, 1U);
+	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
+
+	/* Succeeded: the features are reported. */
+	return 0;
+}
+
+/*
+ * vkGetPhysicalDeviceFeatures2 with the Vulkan 1.1 features chained:
+ * [physical][output chain] -> [present][chain][1.1 fields]
+ * [VkPhysicalDeviceFeatures].
+ */
+static int
+device_features2(
+	struct nvrtx_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct i915_vkc_core11 core11;
+	VkPhysicalDeviceFeatures *features;
+	int error;
+
+	/* The physical device, then the output chain of the 1.1 feature structures. */
+	(void)drv_i915_wire_read_u64(reader);
+	error = i915_vkc_read_features2(reader);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
+
+	/* The record of the device's features. */
+	features = device_feature_record(session);
+	if (features == NULL)
+		return ENOMEM;
+
+	/* The 1.1 features, then the record. */
+	device_core11(session, &core11);
+	i915_vkc_reply_core11_features(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
+
+	/* Succeeded: the features are reported. */
+	return 0;
+}
+
+/* A cleared record of the device's core features from the session's scratch; NULL when it is full. */
+static VkPhysicalDeviceFeatures *
+device_feature_record(
+	struct nvrtx_vk_session *session)
+{
+	VkPhysicalDeviceFeatures *features;
+
 	/* A cleared record: every optional feature off but those the executor has. */
 	features = nvrtx_vk_arena_take(session, sizeof(*features));
 	if (features == NULL)
-		return ENOMEM;
+		return NULL;
 	features->imageCubeArray = VK_TRUE;
 	features->geometryShader = VK_TRUE;
 	features->multiDrawIndirect = VK_TRUE;
@@ -631,12 +724,42 @@ device_features(
 	features->occlusionQueryPrecise = VK_TRUE;
 	features->vertexPipelineStoresAndAtomics = VK_TRUE;
 
-	/* Replies the present word and the record. */
-	drv_i915_wire_reply_u64(reply, 1U);
-	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
+	/* Succeeded: the record lives until the command returns. */
+	return features;
+}
 
-	/* Succeeded: the features are reported. */
-	return 0;
+/*
+ * Fills the device's Vulkan 1.1 answers: the subgroup of one invocation
+ * every executor starts from; multiview, each view of a subpass drawn into
+ * its layer with programs compiled for it (vk-execute.c: execute_views),
+ * the geometry stage among them, instances numbered as without multiview;
+ * a set's descriptors are bounded by the per-set limits (each binding at
+ * most NVRTX_VK_ELEMENTS_MAX), which together stay below 1024; an
+ * allocation may take the whole of the larger heap.
+ */
+static void
+device_core11(
+	struct nvrtx_vk_session *session,
+	struct i915_vkc_core11 *core11)
+{
+	/* What every executor starts from. */
+	i915_vkc_core11_defaults(core11);
+
+	/* Multiview, with the geometry stage. */
+	core11->multiview.multiview = VK_TRUE;
+	core11->multiview.multiviewGeometryShader = VK_TRUE;
+	core11->multiview_limits.maxMultiviewViewCount = NVRTX_VK_VIEWS_MAX;
+	core11->multiview_limits.maxMultiviewInstanceIndex = (1U << 27) - 1U;
+
+	/*
+	 * The descriptors of one set, and the largest allocation: the larger
+	 * heap's size, the video memory the CPU's window reaches or the system
+	 * memory heap (an allocation of either type is taken whole).
+	 */
+	core11->maintenance3.maxPerSetDescriptors = 1024U;
+	core11->maintenance3.maxMemoryAllocationSize = nvrtx_vk_heap_bytes(session->owner);
+	if (core11->maintenance3.maxMemoryAllocationSize < NVRTX_VK_SYSTEM_HEAP_BYTES)
+		core11->maintenance3.maxMemoryAllocationSize = NVRTX_VK_SYSTEM_HEAP_BYTES;
 }
 
 /*
@@ -1031,12 +1154,13 @@ device_create(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
+	struct i915_vkc_core11 core11;
 	VkDeviceCreateInfo info;
 	uint64_t present;
 	uint64_t identity;
 	int error;
 
-	/* The physical device, then the create info when present; nothing of it is kept. */
+	/* The physical device, then the create info when present; only its 1.1 features are checked. */
 	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
@@ -1049,6 +1173,12 @@ device_create(
 	identity = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0)
 		return EINVAL;
+
+	/* Refuses a Vulkan 1.1 feature the device does not report (libvulkan refuses it first). */
+	device_core11(session, &core11);
+	error = i915_vkc_core11_check_device(&info, &core11);
+	if (error != 0)
+		return error;
 
 	/* Remembers the device. */
 	error = device_remember(session, I915_VK_OBJ_DEVICE, identity);

@@ -80,6 +80,7 @@ static int record_draw(struct i915_wire_reader *reader, struct nvrtx_vk_record *
 static int record_draw_indexed(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_draw_indirect(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_dispatch(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
+static int record_dispatch_base(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_copy(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_update_buffer(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_fill_buffer(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
@@ -163,6 +164,7 @@ nvrtx_vk_record_route(
 	case GPU_OP_CMD_DRAW_INDIRECT:
 	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_BASE:
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
 	case GPU_OP_CMD_BLIT_IMAGE:
@@ -333,6 +335,9 @@ record_decode(
 		break;
 	case GPU_OP_CMD_DISPATCH:
 		error = record_dispatch(reader, record);
+		break;
+	case GPU_OP_CMD_DISPATCH_BASE:
+		error = record_dispatch_base(reader, record);
 		break;
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
@@ -1955,4 +1960,30 @@ record_wide(
 	low = record_word(bytes);
 	high = record_word(bytes + 4U);
 	return low | (high << 32);
+}
+
+/*
+ * vkCmdDispatchBase: [base x][base y][base z][groups x][groups y][groups z];
+ * the counts in values[0] to [2] as a dispatch's, the base in values[3]
+ * to [5].
+ */
+static int
+record_dispatch_base(
+	struct i915_wire_reader *reader,
+	struct nvrtx_vk_record *record)
+{
+	/* The base. */
+	record->values[3] = drv_i915_wire_read_u32(reader);
+	record->values[4] = drv_i915_wire_read_u32(reader);
+	record->values[5] = drv_i915_wire_read_u32(reader);
+
+	/* The three counts. */
+	record->values[0] = drv_i915_wire_read_u32(reader);
+	record->values[1] = drv_i915_wire_read_u32(reader);
+	record->values[2] = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Succeeded: the dispatch is recorded. */
+	return 0;
 }

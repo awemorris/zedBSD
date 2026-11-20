@@ -26,6 +26,7 @@
 #include "vk-internal.h"
 
 #include <libc/vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_core11.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -47,5 +48,51 @@ void i915_vkc_read_float(struct i915_wire_reader *reader, float *destination);
 void i915_vkc_skip_external_chain(struct i915_wire_reader *reader);
 void i915_vkc_reply_bytes(struct i915_wire_writer *writer, const void *source, size_t bytes);
 void i915_vkc_reply_float(struct i915_wire_writer *writer, const float *source);
+
+/*
+ * The forms of a vkGetPhysicalDeviceProperties2 query: the device's
+ * identity (VkPhysicalDeviceIDProperties chained) or its Vulkan 1.1
+ * properties (the five structures of i915_vkc_reply_core11_properties()).
+ */
+#define I915_VKC_PROPERTIES2_IDENTITY	1
+#define I915_VKC_PROPERTIES2_CORE11	2
+
+/*
+ * What an executor answers to the Vulkan 1.1 feature and property queries
+ * (GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2 and the Vulkan 1.1 form of
+ * GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2).
+ *
+ * One instance describes one physical device; the executor fills it from
+ * what its hardware and its compilers really do each time it answers, from
+ * i915_vkc_core11_defaults() and then its own values.  libvulkan names
+ * Vulkan 1.1 for the device only when the answers meet the version's
+ * requirements (multiview, the basic subgroup operations in compute and
+ * the 1.1 limits), so an executor that cannot do multiview yet reports it
+ * FALSE and its device stays at 1.0.  The sType and pNext of the members
+ * are not used.
+ */
+struct i915_vkc_core11 {
+	VkPhysicalDeviceMultiviewFeatures multiview;
+	VkPhysicalDevice16BitStorageFeatures storage_16bit;
+	VkPhysicalDeviceVariablePointersFeatures variable_pointers;
+	VkPhysicalDeviceProtectedMemoryFeatures protected_memory;
+	VkPhysicalDeviceSamplerYcbcrConversionFeatures sampler_ycbcr_conversion;
+	VkPhysicalDeviceShaderDrawParametersFeatures shader_draw_parameters;
+	VkPhysicalDeviceSubgroupProperties subgroup;
+	VkPhysicalDevicePointClippingProperties point_clipping;
+	VkPhysicalDeviceMultiviewProperties multiview_limits;
+	VkPhysicalDeviceProtectedMemoryProperties protected_memory_limits;
+	VkPhysicalDeviceMaintenance3Properties maintenance3;
+};
+
+void i915_vkc_core11_defaults(struct i915_vkc_core11 *core11);
+int i915_vkc_read_features2(struct i915_wire_reader *reader);
+int i915_vkc_read_properties2(struct i915_wire_reader *reader, int *form);
+void i915_vkc_reply_core11_features(struct i915_wire_writer *writer, const struct i915_vkc_core11 *core11);
+void i915_vkc_reply_core11_properties(struct i915_wire_writer *writer, const struct i915_vkc_core11 *core11);
+void i915_vkc_read_device_chain(struct i915_wire_reader *reader, struct i915_wire_arena *arena, const void **chain);
+void i915_vkc_read_render_pass_chain(struct i915_wire_reader *reader, struct i915_wire_arena *arena, const void **chain);
+int i915_vkc_core11_check_device(const VkDeviceCreateInfo *info, const struct i915_vkc_core11 *core11);
+const VkRenderPassMultiviewCreateInfo *i915_vkc_render_pass_multiview(const VkRenderPassCreateInfo *info);
 
 #endif

@@ -52,6 +52,14 @@
 #define I915_CAPSET_NATIVE_VIDEO_H265	4U
 
 /*
+ * Bit 3 of the native word: the executor answers the Vulkan 1.1 feature
+ * and property queries and reads the 1.1 chains of a device and a render
+ * pass creation and vkCmdDispatchBase (libvulkan/context.c
+ * VULKAN_NATIVE_CAPSET_CORE11_QUERIES).
+ */
+#define I915_CAPSET_NATIVE_CORE11	8U
+
+/*
  * Whether Vulkan video decode is offered.
  *
  * It is written once by the boot path before any device attaches and only
@@ -343,14 +351,14 @@ i915_render_capset_fill(
 	kern_logf("i915: vk: XXX capset declares vendor flags 7 for the connectivity check (contracts not implemented beyond the happy path)\n");
 
 	/*
-	 * A device that offers video decode appends the native word.  An older
-	 * libvulkan reads no vendor suffix from a 176-byte record, so the
-	 * record grows only when there is something to say.
+	 * Appends the native word: the Vulkan 1.1 queries are answered, and a
+	 * device that offers video decode says so.
 	 */
+	vk->capset[168U / 4U] = I915_CAPSET_NATIVE_TAG;
+	vk->capset[172U / 4U] = I915_CAPSET_NATIVE_CORE11;
+	vk->capset_bytes = 176U;
 	if (vk->video) {
-		vk->capset[168U / 4U] = I915_CAPSET_NATIVE_TAG;
-		vk->capset[172U / 4U] = I915_CAPSET_NATIVE_VIDEO_H264 | I915_CAPSET_NATIVE_VIDEO_H265;
-		vk->capset_bytes = 176U;
+		vk->capset[172U / 4U] |= I915_CAPSET_NATIVE_VIDEO_H264 | I915_CAPSET_NATIVE_VIDEO_H265;
 		kern_logf("i915: vk: capset declares H.264 and H.265 video decode\n");
 	}
 }

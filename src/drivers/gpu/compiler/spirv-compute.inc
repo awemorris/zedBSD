@@ -37,6 +37,9 @@
  * The execution modes the parser interprets (Khronos SPIR-V spec, section 3.6).
  */
 #define EXECUTION_MODE_LOCAL_SIZE 17U
+
+/* A fragment shader's tests before it runs (SPIR-V spec, section 3.6). */
+#define EXECUTION_MODE_EARLY_FRAGMENT_TESTS 9U
 #define EXECUTION_MODE_LOCAL_SIZE_ID 38U
 
 /*
@@ -82,6 +85,9 @@
  * Scope).
  */
 #define SCOPE_WORKGROUP 2U
+
+/* The execution scope of a subgroup (SPIR-V spec, section 3.27, Scope). */
+#define SCOPE_SUBGROUP 3U
 
 /*
  * Records one execution mode of the entry point.
@@ -133,6 +139,13 @@ drv_gpu_spirv_declare_execution_mode(
 		parser->ir->local_size[0] = word[3];
 		parser->ir->local_size[1] = word[4];
 		parser->ir->local_size[2] = word[5];
+		return 0;
+	}
+
+	/* EarlyFragmentTests: the driver runs the tests before the shader. */
+	if (opcode == OP_EXECUTION_MODE &&
+	    word[2] == EXECUTION_MODE_EARLY_FRAGMENT_TESTS) {
+		parser->ir->early_fragment_tests = 1U;
 		return 0;
 	}
 
@@ -265,7 +278,8 @@ drv_gpu_spirv_compute_declared(
 
 /*
  * Records a compute shader's built-in input variable: one of the five the
- * dispatch gives every invocation.  Any other built-in is refused.
+ * dispatch gives every invocation, or one of the four of the invocation's
+ * subgroup.  Any other built-in is refused.
  */
 static int
 drv_gpu_spirv_declare_system(
@@ -283,6 +297,10 @@ drv_gpu_spirv_declare_system(
 	case BUILTIN_LOCAL_INVOCATION_ID:
 	case BUILTIN_GLOBAL_INVOCATION_ID:
 	case BUILTIN_LOCAL_INVOCATION_INDEX:
+	case BUILTIN_SUBGROUP_SIZE:
+	case BUILTIN_NUM_SUBGROUPS:
+	case BUILTIN_SUBGROUP_ID:
+	case BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID:
 		break;
 	default:
 		error = drv_gpu_spirv_refuse(
@@ -296,6 +314,38 @@ drv_gpu_spirv_declare_system(
 	/*
 	 * A load of it reads the dispatch's values, not an interface location.
 	 */
+	record->ptr_kind = PTR_SYSTEM;
+
+	/* Succeeded: the built-in is known. */
+	return 0;
+}
+
+/*
+ * Records gl_ViewIndex, an input of a graphics stage (a compute shader's is
+ * refused with its other unknown built-ins): a load reads the view the
+ * driver compiles the shader for.  Refused unless the driver binds the view
+ * (the VIEW_INDEX feature).
+ */
+static int
+drv_gpu_spirv_declare_view_index(
+	struct drv_gpu_spirv_parser *parser,
+	struct drv_gpu_spirv_id *record,
+	uint32_t opcode,
+	uint32_t offset)
+{
+	int error;
+
+	/* A driver that renders one view only has no view to bind. */
+	if ((parser->features & DRV_GPU_SPIRV_FEATURE_VIEW_INDEX) == 0U) {
+		error = drv_gpu_spirv_refuse(parser,
+					     opcode,
+					     offset,
+					     "gl_ViewIndex (multiview is not "
+					     "lowered)");
+		return error;
+	}
+
+	/* A load reads the bound view, not an interface location. */
 	record->ptr_kind = PTR_SYSTEM;
 
 	/* Succeeded: the built-in is known. */
@@ -397,14 +447,20 @@ drv_gpu_spirv_lower_load_system(
 }
 
 /*
- * Returns the IR value of one component of a compute built-in, or of a
- * geometry shader's gl_PrimitiveIDIn or gl_InvocationID.
+ * Returns the IR value of one component of a compute built-in, of a
+ * geometry shader's gl_PrimitiveIDIn or gl_InvocationID, or of the view a
+ * multiview draw renders.
  *
  * The invocation's place in its group and the group's place in the dispatch
  * are the thread's payload (LOAD_SYSTEM), as is a geometry invocation's
  * input primitive; the global invocation is the group's first invocation
  * plus the local one; the group counts are words in memory the dispatch
- * places (the system storage buffer).
+ * places (the system storage buffer), and so is the first group of a
+ * dispatch with a base (the DISPATCH_BASE feature).  A subgroup is one
+ * invocation: its size is 1, the invocation is its first, and the group has
+ * as many subgroups as invocations.  The view is a LOAD_SYSTEM the driver
+ * binds to the view it compiles the shader for
+ * (drv_gpu_shader_ir_bind_view()).
  */
 static uint32_t
 drv_gpu_spirv_system_component(
@@ -440,9 +496,43 @@ drv_gpu_spirv_system_component(
 
 	case BUILTIN_WORKGROUP_ID:
 		/* The group's place in the dispatch along the axis. */
-		value = drv_gpu_spirv_load_system(parser,
-						  DRV_GPU_IR_SYSTEM_GROUP_ID_X +
-						      component);
+		value = drv_gpu_spirv_group_component(parser, component);
+		return value;
+
+	case BUILTIN_SUBGROUP_SIZE:
+		/* A subgroup is one invocation. */
+		value = drv_gpu_spirv_integer_constant(parser, 1U);
+		return value;
+
+	case BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID:
+		/* The invocation is the first, and only, of its subgroup. */
+		value = drv_gpu_spirv_integer_constant(parser, 0U);
+		return value;
+
+	case BUILTIN_SUBGROUP_ID:
+		/* Each invocation is a subgroup of its own: its linear place. */
+		value =
+		    drv_gpu_spirv_load_system(parser,
+					      DRV_GPU_IR_SYSTEM_LOCAL_INDEX);
+		return value;
+
+	case BUILTIN_NUM_SUBGROUPS:
+		/* As many subgroups as the group has invocations. */
+		size = parser->ir->local_size[0] *
+		       parser->ir->local_size[1] *
+		       parser->ir->local_size[2];
+		value = drv_gpu_spirv_integer_constant(parser, size);
+		return value;
+
+	case BUILTIN_VIEW_INDEX:
+		/*
+		 * The view the draw renders: bound to a constant when the driver
+		 * compiles the shader for one view.
+		 */
+		parser->ir->uses_view_index = 1U;
+		value =
+		    drv_gpu_spirv_load_system(parser,
+					      DRV_GPU_IR_SYSTEM_VIEW_INDEX);
 		return value;
 
 	case BUILTIN_PRIMITIVE_ID:
@@ -470,9 +560,7 @@ drv_gpu_spirv_system_component(
 		 * The group's place along the axis, and the group's size along
 		 * it.
 		 */
-		group = drv_gpu_spirv_load_system(parser,
-						  DRV_GPU_IR_SYSTEM_GROUP_ID_X +
-						      component);
+		group = drv_gpu_spirv_group_component(parser, component);
 		size = parser->ir->local_size[component];
 
 		/*
@@ -527,6 +615,106 @@ drv_gpu_spirv_system_component(
 
 	/* Succeeded: the group count along the axis. */
 	return value;
+}
+
+/*
+ * Returns the group's place in the dispatch along one axis: the thread's
+ * payload, plus the dispatch's first group along the axis when the parse
+ * lowers vkCmdDispatchBase (the DISPATCH_BASE feature), which is the word
+ * of the system storage buffer after the three group counts.
+ */
+static uint32_t
+drv_gpu_spirv_group_component(
+	struct drv_gpu_spirv_parser *parser,
+	uint32_t component)
+{
+	struct drv_gpu_shader_ir_inst *inst;
+	uint32_t group;
+	uint32_t base;
+	uint32_t place;
+	uint32_t uniform;
+	uint32_t value;
+
+	/* The group's place the hardware counts from zero. */
+	group = drv_gpu_spirv_load_system(parser,
+					  DRV_GPU_IR_SYSTEM_GROUP_ID_X +
+					      component);
+
+	/* A dispatch without a base starts at group zero. */
+	if ((parser->features & DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE) == 0U)
+		return group;
+
+	/* The dispatch's first group along the axis, read by every channel. */
+	uniform = drv_gpu_spirv_system_uniform(parser);
+	place = drv_gpu_spirv_integer_constant(parser,
+					       (3U + component) *
+						   SYSTEM_GROUP_COUNT_BYTES);
+	base = drv_gpu_spirv_new_value(parser);
+	inst = drv_gpu_spirv_emit(parser,
+				  DRV_GPU_IR_LOAD_STORAGE,
+				  base,
+				  place,
+				  0U);
+
+	/*
+	 * The load reads the system buffer; a failed emit has latched the
+	 * error.
+	 */
+	if (inst != NULL)
+		inst->location = uniform;
+
+	/* The group's place in the whole dispatch. */
+	value = drv_gpu_spirv_emit_value(parser, DRV_GPU_IR_IADD, group, base);
+
+	/* Succeeded: the group's place counted from the dispatch's base. */
+	return value;
+}
+
+/*
+ * Lowers OpGroupNonUniformElect of the subgroup scope: true, since every
+ * invocation is the only one, and so the first, of its subgroup.
+ */
+static int
+drv_gpu_spirv_lower_elect(
+	struct drv_gpu_spirv_parser *parser,
+	const uint32_t *word,
+	uint32_t count,
+	uint32_t opcode,
+	uint32_t offset)
+{
+	struct drv_gpu_spirv_id *scope;
+	struct drv_gpu_spirv_id *record;
+	int error;
+
+	/* The result type, the result and the execution scope. */
+	if (count != 4U)
+		return EINVAL;
+
+	/* Resolves the execution scope. */
+	scope = drv_gpu_spirv_id(parser, word[3]);
+	if (scope == NULL)
+		return EINVAL;
+
+	/* Only the subgroup scope, named by a constant, is lowered. */
+	if (scope->kind != ID_CONSTANT || scope->constant != SCOPE_SUBGROUP) {
+		error = drv_gpu_spirv_refuse(parser,
+					     opcode,
+					     offset,
+					     "election of a scope other than "
+					     "the subgroup");
+		return error;
+	}
+
+	/* The result is the Boolean constant true. */
+	record = drv_gpu_spirv_id(parser, word[2]);
+	if (record == NULL)
+		return EINVAL;
+	record->kind = ID_CONSTANT;
+	record->type = word[1];
+	record->constant = BOOL_TRUE_BITS;
+
+	/* Succeeded: the election is lowered. */
+	return 0;
 }
 
 /* Emits a LOAD_SYSTEM of one built-in value and returns it. */
