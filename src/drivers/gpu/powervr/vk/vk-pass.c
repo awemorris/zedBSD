@@ -58,6 +58,7 @@ static int framebuffer_view(struct powervr_vk_session *session, uint64_t identit
 static int framebuffer_destroy(struct powervr_vk_session *session, void *payload);
 static void read_clear(struct i915_wire_reader *reader, struct powervr_pass_clear *value);
 static int pass_views(const VkRenderPassCreateInfo *info, struct powervr_pass *pass);
+static int pass_granularity(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 
 /*
  * Runs a render pass or framebuffer command; *handled stays clear for
@@ -92,6 +93,9 @@ powervr_vk_pass_route(
 		break;
 	case GPU_OP_DESTROY_FRAMEBUFFER:
 		error = powervr_vk_destroy_plain(session, reader, I915_VK_OBJ_FRAMEBUFFER);
+		break;
+	case GPU_OP_GET_RENDER_AREA_GRANULARITY:
+		error = pass_granularity(reader, reply);
 		break;
 	default:
 		*handled = 0;
@@ -974,3 +978,38 @@ read_clear(
 	for (word = 0; word < 4; word++)
 		value->words[word] = drv_i915_wire_read_u32(reader);
 }
+
+/*
+ * vkGetRenderAreaGranularity: [device][render pass][present] ->
+ * [present][VkExtent2D].  A render area may start at any pixel (the begin
+ * takes any offset), so the answer is one pixel by one; the granularity
+ * is a hint of efficiency only.
+ *
+ * Values referenced: the Vulkan 1.0 specification (section 7.4,
+ * vkGetRenderAreaGranularity: the granularity is the size of the render
+ * area's alignment that gives the best efficiency).
+ */
+static int
+pass_granularity(
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	VkExtent2D extent;
+
+	/* The device, the pass and the output's presence word. */
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* One pixel by one. */
+	extent.width = 1U;
+	extent.height = 1U;
+	drv_i915_wire_reply_u64(reply, 1U);
+	i915_vkc_enc_VkExtent2D(reply, &extent);
+
+	/* Succeeded: the reply carries the granularity. */
+	return 0;
+}
+
