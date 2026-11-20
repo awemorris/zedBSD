@@ -435,7 +435,8 @@ struct amdrdna_vk_descriptor_set {
  * for none), the attachment it is resolved into at the pass's end
  * (VK_ATTACHMENT_UNUSED for none), format and load operation; whether it
  * writes a depth attachment, its number, format and load operation (the
- * stencil's its own).
+ * stencil's its own); and the subpass's views under multiview (bit n:
+ * view n, drawn into layer n of each attachment's view; 0 for one view).
  */
 struct amdrdna_vk_render_pass {
 	uint32_t samples;
@@ -449,7 +450,11 @@ struct amdrdna_vk_render_pass {
 	uint32_t depth_load_op;
 	uint32_t stencil_load_op;
 	uint32_t depth_attachment;
+	uint32_t view_mask;
 };
+
+/* The most views a multiview subpass renders (maxMultiviewViewCount): view masks of bits 0 to 7. */
+#define AMDRDNA_VK_VIEWS_MAX		8U
 
 /* The attachments a render pass and a framebuffer have: the colour ones and a depth one. */
 #define AMDRDNA_VK_ATTACHMENTS_MAX	(AMDRDNA_VK_COLOURS_MAX + 1U)
@@ -533,6 +538,10 @@ struct amdrdna_vk_blend {
  * scissor, the depth test, write and compare (VkCompareOp) and the
  * stencil test of both faces (floats as their bits).  dynamic has a bit
  * (1 << VkDynamicState) for each state a command buffer sets instead.
+ * views holds, for a pipeline of a multiview pass whose programs read
+ * gl_ViewIndex, a copy for each further view of the pass with the
+ * programs compiled for it (NULL for view 0, which is the pipeline itself,
+ * and for every view when the programs do not read it).
  */
 struct amdrdna_vk_pipeline {
 	void *code_token;
@@ -563,6 +572,7 @@ struct amdrdna_vk_pipeline {
 	uint32_t depth_compare;
 	uint32_t stencil_test;
 	struct amdrdna_vk_stencil_face stencil[2];
+	struct amdrdna_vk_pipeline *views[AMDRDNA_VK_VIEWS_MAX];
 };
 
 /* The regions one copy, blit or clear records. */

@@ -74,6 +74,8 @@ struct pipeline_build {
 	const struct amdrdna_vk_shader *fragment_module;
 	const struct amdrdna_vk_shader *kernel_module;
 	uint32_t colour_exports;
+	uint32_t view_mask;
+	uint32_t dispatch_base;
 };
 
 static int pipeline_create(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool kernel);
@@ -86,6 +88,7 @@ static void pipeline_decode_viewport(struct amdrdna_vk_session *session, struct 
 static void pipeline_decode_blend(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_pipeline *pipeline);
 static void pipeline_decode_dynamic(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_pipeline *pipeline);
 static int pipeline_compile(struct amdrdna_vk_session *session, struct amdrdna_vk_pipeline *pipeline, struct pipeline_build *build);
+static int pipeline_compile_view(struct amdrdna_vk_session *session, struct amdrdna_vk_pipeline *pipeline, struct pipeline_build *build, uint32_t view);
 static int pipeline_compile_stage(const struct amdrdna_vk_shader *module, enum drv_gpu_shader_stage stage, const struct amdrdna_gfx10_compile_options *options, struct amdrdna_vk_program *program);
 static int pipeline_bindings(const struct amdrdna_gfx10_program *program);
 static uint32_t pipeline_colour_exports(const struct amdrdna_vk_render_pass *pass, bool alpha_to_coverage);
@@ -309,6 +312,10 @@ pipeline_decode_kernel(
 	if (layout != NULL)
 		pipeline->push_bytes = layout->push_bytes;
 
+	/* A pipeline for vkCmdDispatchBase counts its workgroups from the dispatch's base. */
+	if ((info.flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0U)
+		build->dispatch_base = 1U;
+
 	/* The compute stage of a known module, without specialization constants. */
 	if (info.stage.stage != VK_SHADER_STAGE_COMPUTE_BIT)
 		return ENOTSUP;
@@ -481,8 +488,10 @@ pipeline_decode(
 	if (layout != NULL)
 		pipeline->push_bytes = layout->push_bytes;
 	pass = amdrdna_vk_payload(session, I915_VK_OBJ_RENDER_PASS, pass_id);
-	if (pass != NULL)
+	if (pass != NULL) {
 		build->colour_exports = pipeline_colour_exports(pass, pipeline->alpha_to_coverage != 0U);
+		build->view_mask = pass->view_mask;
+	}
 
 	/* Points, lines and triangles without adjacency or patches. */
 	if (pipeline->topology > VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN && refused == 0)
@@ -754,6 +763,50 @@ pipeline_compile(
 	struct amdrdna_vk_pipeline *pipeline,
 	struct pipeline_build *build)
 {
+	struct amdrdna_vk_pipeline *variant;
+	uint32_t view;
+	int error;
+
+	/* The programs for view 0 (or without multiview). */
+	error = pipeline_compile_view(session, pipeline, build, 0U);
+	if (error != 0)
+		return error;
+
+	/* A pipeline of a multiview pass whose programs read gl_ViewIndex has the programs of each further view. */
+	if (pipeline->vertex.compiled->reads_view == 0U && pipeline->fragment.compiled->reads_view == 0U)
+		return 0;
+	for (view = 1U; view < AMDRDNA_VK_VIEWS_MAX; view++) {
+		if ((build->view_mask & (1U << view)) == 0U)
+			continue;
+		variant = kern_malloc(sizeof(*variant));
+		if (variant == NULL)
+			return ENOMEM;
+		*variant = *pipeline;
+		variant->code_token = NULL;
+		variant->vertex.compiled = NULL;
+		variant->fragment.compiled = NULL;
+		kern_memset(variant->views, 0, sizeof(variant->views));
+		pipeline->views[view] = variant;
+		error = pipeline_compile_view(session, variant, build, view);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every view has its programs. */
+	return 0;
+}
+
+/*
+ * Compiles a graphics pipeline's programs for one view (its gl_ViewIndex)
+ * and copies them into a run of the executor's GPU memory of their own.
+ */
+static int
+pipeline_compile_view(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_pipeline *pipeline,
+	struct pipeline_build *build,
+	uint32_t view)
+{
 	struct amdrdna_gfx10_compile_options options;
 	uint8_t *cpu;
 	uint64_t va;
@@ -765,11 +818,12 @@ pipeline_compile(
 	/*
 	 * The fragment program, then the vertex program with what the
 	 * fragment program reads of it; both with arrays of descriptors (a
-	 * draw writes the element each binding names).
+	 * draw writes the element each binding names), for the view.
 	 */
 	kern_memset(&options, 0, sizeof(options));
 	options.descriptor_arrays = 1U;
 	options.color_exports = build->colour_exports;
+	options.view = view;
 	error = pipeline_compile_stage(build->fragment_module, DRV_GPU_STAGE_FRAGMENT, &options, &pipeline->fragment);
 	if (error != 0)
 		return error;
@@ -857,9 +911,10 @@ pipeline_compile_kernel(
 	uint64_t va;
 	int error;
 
-	/* The program, with arrays of descriptors, whose bindings a dispatch can bind. */
+	/* The program, with arrays of descriptors, whose bindings a dispatch can bind (and for vkCmdDispatchBase). */
 	kern_memset(&options, 0, sizeof(options));
 	options.descriptor_arrays = 1U;
+	options.dispatch_base = build->dispatch_base;
 	error = pipeline_compile_stage(build->kernel_module, DRV_GPU_STAGE_COMPUTE, &options, &pipeline->kernel);
 	if (error != 0)
 		return error;
@@ -992,8 +1047,15 @@ pipeline_destroy(
 	void *payload)
 {
 	struct amdrdna_vk_pipeline *pipeline;
+	uint32_t view;
 
 	pipeline = payload;
+
+	/* The programs of the further views of a multiview pass. */
+	for (view = 0U; view < AMDRDNA_VK_VIEWS_MAX; view++) {
+		if (pipeline->views[view] != NULL)
+			(void)pipeline_destroy(session, pipeline->views[view]);
+	}
 
 	/* The run, when the programs were copied, and the compiled programs. */
 	if (pipeline->code_token != NULL)

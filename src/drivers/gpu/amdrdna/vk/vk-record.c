@@ -130,6 +130,7 @@ amdrdna_vk_record_route(
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_BASE:
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
 	case GPU_OP_CMD_BLIT_IMAGE:
@@ -290,6 +291,7 @@ record_decode(
 		error = record_draw_indexed(reader, record);
 		break;
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_BASE:
 		error = record_dispatch(reader, record);
 		break;
 	case GPU_OP_CMD_COPY_BUFFER:
@@ -773,6 +775,17 @@ record_dispatch(
 	struct i915_wire_reader *reader,
 	struct amdrdna_vk_record *record)
 {
+	/*
+	 * vkCmdDispatchBase's first workgroup, which is kept as a dispatch's
+	 * values 3 to 5 (zero for vkCmdDispatch).
+	 */
+	if (record->opcode == GPU_OP_CMD_DISPATCH_BASE) {
+		record->values[3] = drv_i915_wire_read_u32(reader);
+		record->values[4] = drv_i915_wire_read_u32(reader);
+		record->values[5] = drv_i915_wire_read_u32(reader);
+		record->opcode = GPU_OP_CMD_DISPATCH;
+	}
+
 	/* The three counts. */
 	record->values[0] = drv_i915_wire_read_u32(reader);
 	record->values[1] = drv_i915_wire_read_u32(reader);

@@ -77,6 +77,13 @@
 #define RUNTIME_NATIVE_MAGIC		0x5a4e4154U
 #define RUNTIME_NATIVE_SYNC_COMMAND	2U
 
+/*
+ * The native flag of the Vulkan 1.1 queries: the executor answers them and
+ * reads the 1.1 chains of a device and a render pass creation
+ * (VULKAN_NATIVE_CAPSET_CORE11_QUERIES).
+ */
+#define RUNTIME_NATIVE_CORE11		8U
+
 /* The native word's flags of H.264 and H.265 decode on the GPU's video engine (Vulkan Video), set while the engine is up. */
 #define RUNTIME_NATIVE_H264_DECODE	1U
 #define RUNTIME_NATIVE_H265_DECODE	4U
@@ -321,7 +328,7 @@ runtime_capset(
 
 	/* The native flags: H.264 and H.265 decode only while the video engine takes work. */
 	node = private_data;
-	native = RUNTIME_NATIVE_SYNC_COMMAND;
+	native = RUNTIME_NATIVE_SYNC_COMMAND | RUNTIME_NATIVE_CORE11;
 	video = amdrdna_vcn_available(node->device);
 	if (video)
 		native |= RUNTIME_NATIVE_H264_DECODE | RUNTIME_NATIVE_H265_DECODE;

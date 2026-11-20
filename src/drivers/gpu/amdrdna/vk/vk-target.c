@@ -41,7 +41,7 @@ static uint32_t target_pass_samples(const VkRenderPassCreateInfo *info);
 static int target_create_framebuffer(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int target_granularity(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int target_framebuffer_destroy(struct amdrdna_vk_session *session, void *payload);
-static int target_attachment_view(const struct amdrdna_vk_view *view);
+static int target_attachment_view(const struct amdrdna_vk_view *view, uint32_t layers);
 
 /*
  * Runs a render pass or framebuffer command; *handled stays clear for an
@@ -103,6 +103,7 @@ target_create_pass(
 {
 	VkRenderPassCreateInfo info;
 	const VkSubpassDescription *subpass;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	struct amdrdna_vk_render_pass *pass;
 	uint64_t identity;
 	uint32_t attachment;
@@ -149,6 +150,9 @@ target_create_pass(
 		}
 		if (pass != NULL)
 			pass->colour_count = subpass->colorAttachmentCount;
+		multiview = i915_vkc_render_pass_multiview(&info);
+		if (pass != NULL && multiview != NULL && multiview->subpassCount != 0U)
+			pass->view_mask = multiview->pViewMasks[0];
 		if (pass != NULL && subpass->pDepthStencilAttachment != NULL) {
 			attachment = subpass->pDepthStencilAttachment->attachment;
 			if (attachment != VK_ATTACHMENT_UNUSED) {
@@ -217,6 +221,7 @@ target_pass_supported(
 	const VkRenderPassCreateInfo *info)
 {
 	const VkSubpassDescription *subpass;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	uint32_t attachment;
 	uint32_t resolve;
 	uint32_t samples;
@@ -232,6 +237,15 @@ target_pass_supported(
 		return 0;
 	if (info->attachmentCount != 0U && info->pAttachments == NULL)
 		return 0;
+
+	/* Only the views the device reports (maxMultiviewViewCount), named for the one subpass. */
+	multiview = i915_vkc_render_pass_multiview(info);
+	if (multiview != NULL && multiview->subpassCount != 0U) {
+		if (multiview->subpassCount != 1U || multiview->pViewMasks == NULL)
+			return 0;
+		if ((multiview->pViewMasks[0] >> AMDRDNA_VK_VIEWS_MAX) != 0U)
+			return 0;
+	}
 
 	/* No inputs, at most the colour targets there are. */
 	subpass = &info->pSubpasses[0];
@@ -312,8 +326,10 @@ target_create_framebuffer(
 	VkFramebufferCreateInfo info;
 	struct amdrdna_vk_framebuffer *framebuffer;
 	struct amdrdna_vk_object *views[AMDRDNA_VK_ATTACHMENTS_MAX];
+	const struct amdrdna_vk_render_pass *pass;
 	uint64_t identity;
 	uint64_t view_id;
+	uint32_t layers;
 	uint32_t index;
 	uint32_t held;
 	int error;
@@ -326,6 +342,15 @@ target_create_framebuffer(
 	identity = amdrdna_vk_create_tail(reader);
 	if (reader->error != 0)
 		return EINVAL;
+
+	/*
+	 * The layers each view has: one, or under a multiview pass more than
+	 * its highest view.
+	 */
+	layers = 1U;
+	pass = amdrdna_vk_payload(session, I915_VK_OBJ_RENDER_PASS, (uint64_t)(uintptr_t)info.renderPass);
+	if (pass != NULL && pass->view_mask != 0U)
+		layers = 32U - (uint32_t)__builtin_clz(pass->view_mask);
 
 	/* At most the attachments a pass has, known views, of a size an image may have. */
 	error = 0;
@@ -349,7 +374,7 @@ target_create_framebuffer(
 		}
 
 		/* Only a view the colour target or the depth unit writes: never a plane, nor one or two bytes a texel. */
-		error = target_attachment_view(views[index]->payload);
+		error = target_attachment_view(views[index]->payload, layers);
 	}
 
 	/* The framebuffer holds its views. */
@@ -446,14 +471,16 @@ target_framebuffer_destroy(
 
 /*
  * Reports whether a view may be an attachment: one of one layer (of a 2D
- * image: a framebuffer has one layer) in a format the colour unit draws
+ * image: a framebuffer has one layer), or of at least layers layers for a
+ * multiview pass, which draws each view into its layer, in a format the colour unit draws
  * into or a depth format, of an image of four-byte pixels or of a storage
  * format (whose copies are moves).  Returns 0, or ENOTSUP for a view the
  * colour target and the depth unit do not write.
  */
 static int
 target_attachment_view(
-	const struct amdrdna_vk_view *view)
+	const struct amdrdna_vk_view *view,
+	uint32_t layers)
 {
 	const struct amdrdna_vk_image *image;
 	uint32_t texel_bytes;
@@ -462,13 +489,15 @@ target_attachment_view(
 	bool depth;
 	bool moved;
 
-	/* An image the executor draws into, one layer of it. */
+	/* An image the executor draws into, one layer of it (a multiview pass's views' layers). */
 	image = view->image->payload;
 	moved = amdrdna_vk_image_moved(image);
 	storage = amdrdna_vk_format_storage(image->format, &texel_bytes);
 	if (moved && !storage)
 		return ENOTSUP;
-	if (view->layer_count != 1U || (view->type != VK_IMAGE_VIEW_TYPE_2D && view->type != VK_IMAGE_VIEW_TYPE_2D_ARRAY))
+	if (view->layer_count < layers || (layers == 1U && view->layer_count != 1U))
+		return ENOTSUP;
+	if (view->type != VK_IMAGE_VIEW_TYPE_2D && view->type != VK_IMAGE_VIEW_TYPE_2D_ARRAY)
 		return ENOTSUP;
 
 	/* Seen in a format the colour target or the depth unit writes. */

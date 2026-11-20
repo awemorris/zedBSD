@@ -405,6 +405,8 @@ static int execute_kernel_resources(const struct amdrdna_gfx10_program *program,
 static int execute_part(struct amdrdna_vk_execute *execute, uint32_t bytes, uint8_t **cpu, uint64_t *va);
 static int execute_begin_pass(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
 static int execute_draw(struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
+static int execute_views(struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
+static int execute_view_targets(struct execute_state *state, uint32_t view);
 static int execute_draw_fixed(struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_pipeline *pipeline, const uint32_t *viewport, const int32_t *scissor);
 static void execute_draw_dynamic(const struct execute_state *state, const struct amdrdna_vk_pipeline *pipeline, uint32_t *bias, uint32_t *constants, struct amdrdna_vk_depth_stencil *depth);
 static int execute_clear_attachments(struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
@@ -1137,7 +1139,7 @@ execute_record(
 		execute_bind_dynamic(state, record);
 		break;
 	case GPU_OP_CMD_CLEAR_ATTACHMENTS:
-		error = execute_clear_attachments(execute, state, record);
+		error = execute_views(execute, state, record);
 		break;
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 		error = execute_begin_pass(session, execute, state, record);
@@ -1149,7 +1151,7 @@ execute_record(
 		break;
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
-		error = execute_draw(execute, state, record);
+		error = execute_views(execute, state, record);
 		break;
 	case GPU_OP_CMD_DISPATCH:
 		error = execute_dispatch(execute, state, record);
@@ -1541,11 +1543,11 @@ execute_dispatch(
 	if (record->values[0] == 0U || record->values[1] == 0U || record->values[2] == 0U)
 		return 0;
 
-	/* The three counts, then the table. */
-	error = execute_part(execute, 3U * 4U, &groups, &groups_va);
+	/* The three counts and the first workgroup (DRV_GPU_SPIRV_SYSTEM_BASE_BYTES), then the table. */
+	error = execute_part(execute, DRV_GPU_SPIRV_SYSTEM_BASE_BYTES, &groups, &groups_va);
 	if (error != 0)
 		return error;
-	execute_put_words(groups, 0U, record->values, 3U);
+	execute_put_words(groups, 0U, record->values, 6U);
 	error = execute_table(execute, pipeline->kernel.compiled, true, &table, &table_va);
 	if (error == 0)
 		error = execute_kernel_resources(pipeline->kernel.compiled, state, groups_va, table);
@@ -1565,8 +1567,8 @@ execute_dispatch(
  * Writes a kernel's resource table as execute_resources() writes a draw
  * program's, from the sets bound at the compute bind point; the storage
  * buffer of the system set (the compiler's for the workgroup counts) reads
- * the three counts at groups_va.  A binding with nothing bound refuses the
- * dispatch.
+ * the three counts at groups_va and the dispatch's first workgroup after
+ * them.  A binding with nothing bound refuses the dispatch.
  */
 static int
 execute_kernel_resources(
@@ -1590,7 +1592,7 @@ execute_kernel_resources(
 	for (index = 0U; index < program->storage_used; index++) {
 		binding = &program->storage[index];
 		if (binding->set == DRV_GPU_IR_SYSTEM_SET) {
-			amdrdna_gfx10_raw_buffer_descriptor(groups_va, 3U * 4U, words);
+			amdrdna_gfx10_raw_buffer_descriptor(groups_va, DRV_GPU_SPIRV_SYSTEM_BASE_BYTES, words);
 		} else {
 			set = state->kernel_sets[binding->set];
 			if (set == NULL)
@@ -1694,6 +1696,7 @@ execute_begin_pass(
 	uint32_t cleared;
 	uint32_t attachment;
 	uint32_t index;
+	uint32_t views;
 	bool clear_depth;
 	bool clear_stencil;
 	int32_t x1;
@@ -1798,14 +1801,120 @@ execute_begin_pass(
 	if (state->area.offset.x < 0 || state->area.offset.y < 0 || x1 <= state->area.offset.x || y1 <= state->area.offset.y)
 		return 0;
 
-	/* The quads. */
-	error = execute_clear_quads(execute, state, pass->colour_attachments, record->colours, cleared, clear_depth, clear_stencil,
-				    record->values[4], record->count, state->area.offset.x, state->area.offset.y, x1, y1);
-	if (error != 0)
-		return error;
+	/* The quads, in each view's layer of a multiview pass. */
+	views = pass->view_mask;
+	if (views == 0U)
+		views = 1U;
+	for (index = 0U; index < AMDRDNA_VK_VIEWS_MAX; index++) {
+		if ((views & (1U << index)) == 0U)
+			continue;
+		if (pass->view_mask != 0U) {
+			error = execute_view_targets(state, index);
+			if (error != 0)
+				return error;
+			state->target_written = false;
+		}
+		error = execute_clear_quads(execute, state, pass->colour_attachments, record->colours, cleared, clear_depth, clear_stencil,
+					    record->values[4], record->count, state->area.offset.x, state->area.offset.y, x1, y1);
+		if (error != 0)
+			return error;
+	}
 
 	/* Succeeded: the pass draws into its targets; the draws write them again. */
 	state->target_written = false;
+	return 0;
+}
+
+/*
+ * Runs a draw or a clear of the attachments: once, or under a multiview
+ * pass once for each view of the subpass, its colour targets at their
+ * views' layers plus the view and the draw with the pipeline's programs
+ * of the view (amdrdna_vk_pipeline views).  Each view's instances are
+ * numbered as without multiview.
+ */
+static int
+execute_views(
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	const struct amdrdna_vk_record *record)
+{
+	const struct amdrdna_vk_pipeline *pipeline;
+	uint32_t view;
+	int error;
+
+	/* Outside a multiview pass, the record as it is. */
+	if (!state->in_pass || state->pass == NULL || state->pass->view_mask == 0U) {
+		if (record->opcode == GPU_OP_CMD_CLEAR_ATTACHMENTS)
+			error = execute_clear_attachments(execute, state, record);
+		else
+			error = execute_draw(execute, state, record);
+		return error;
+	}
+
+	/* Each view: its targets, its programs, the record. */
+	pipeline = state->pipeline;
+	error = 0;
+	for (view = 0U; view < AMDRDNA_VK_VIEWS_MAX && error == 0; view++) {
+		if ((state->pass->view_mask & (1U << view)) == 0U)
+			continue;
+		error = execute_view_targets(state, view);
+		if (error != 0)
+			break;
+		state->target_written = false;
+		if (pipeline != NULL && pipeline->views[view] != NULL)
+			state->pipeline = pipeline->views[view];
+		if (record->opcode == GPU_OP_CMD_CLEAR_ATTACHMENTS)
+			error = execute_clear_attachments(execute, state, record);
+		else
+			error = execute_draw(execute, state, record);
+		state->pipeline = pipeline;
+	}
+
+	/* The next record writes its targets again. */
+	state->target_written = false;
+	return error;
+}
+
+/*
+ * Points the colour targets of a multiview pass at one view: each at its
+ * attachment view's first level of its layer plus the view (the
+ * framebuffer's views have a layer for each view).  The depth target is
+ * one layer (depth images have one), which only view 0 may draw.
+ */
+static int
+execute_view_targets(
+	struct execute_state *state,
+	uint32_t view)
+{
+	const struct amdrdna_vk_render_pass *pass;
+	const struct amdrdna_vk_view *image_view;
+	const struct amdrdna_vk_image *image;
+	uint32_t attachment;
+	uint32_t index;
+	int error;
+
+	/* A depth target of one layer has no layer for a view past 0. */
+	pass = state->pass;
+	if (state->depth_on && view != 0U)
+		return ENOTSUP;
+
+	/* Each colour target at the view's layer. */
+	for (index = 0U; index < pass->colour_count; index++) {
+		attachment = pass->colour_attachments[index];
+		if (attachment == VK_ATTACHMENT_UNUSED)
+			continue;
+		error = execute_pass_view(state->framebuffer, attachment, &image_view);
+		if (error != 0)
+			return error;
+		if (view >= image_view->layer_count)
+			return EINVAL;
+		image = image_view->image->payload;
+		error = execute_slice_target(image, image_view->format, image_view->base_level, image_view->base_layer + view, &state->targets[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the targets are the view's. */
 	return 0;
 }
 
@@ -3069,6 +3178,8 @@ execute_occlusion(
 {
 	const struct amdrdna_vk_query_pool *pool;
 	uint64_t address;
+	uint32_t views;
+	uint32_t query;
 
 	pool = record->objects[0]->payload;
 	address = pool->va + (uint64_t)record->first * pool->stride;
@@ -3086,6 +3197,21 @@ execute_occlusion(
 	/* An end: the counts at its end, one query fewer open, the counting off after the last. */
 	amdrdna_vk_pm4_event_address(&execute->pm4, AMDRDNA_PM4_EVENT_DEPTH_COUNTS, AMDRDNA_PM4_EVENT_INDEX_DEPTH_COUNTS,
 				     address + AMDRDNA_VK_QUERY_BACKEND_BYTES / 2U);
+
+	/*
+	 * In a multiview pass the query takes one query of the pool for each
+	 * view: the views' draws counted in the first, each further one begins
+	 * and ends at once, counting nothing.
+	 */
+	if (state->in_pass && state->pass != NULL) {
+		views = (uint32_t)__builtin_popcount(state->pass->view_mask);
+		for (query = 1U; query < views && record->first + query < pool->count; query++) {
+			address = pool->va + (uint64_t)(record->first + query) * pool->stride;
+			amdrdna_vk_pm4_event_address(&execute->pm4, AMDRDNA_PM4_EVENT_DEPTH_COUNTS, AMDRDNA_PM4_EVENT_INDEX_DEPTH_COUNTS, address);
+			amdrdna_vk_pm4_event_address(&execute->pm4, AMDRDNA_PM4_EVENT_DEPTH_COUNTS, AMDRDNA_PM4_EVENT_INDEX_DEPTH_COUNTS,
+						     address + AMDRDNA_VK_QUERY_BACKEND_BYTES / 2U);
+		}
+	}
 	if (state->occlusion_queries != 0U)
 		state->occlusion_queries--;
 	if (state->occlusion_queries == 0U)
