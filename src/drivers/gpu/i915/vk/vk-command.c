@@ -239,6 +239,11 @@ static int i915_draw_refusal_skipped(const struct i915_render_session *session, 
 static int i915_fill_samples(struct i915_render_session *session, const struct i915_gfx_image *image, const struct i915_gfx_surface *surface, const struct i915_gfx_rect *rect, const uint32_t words[4]);
 static void i915_sample_rect(const struct i915_gfx_image *image, struct i915_gfx_rect *rect);
 static int i915_execute_buffer_copy(struct i915_render_session *session, const struct i915_gfx_op *op);
+static int i915_execute_views(struct i915_render_session *session, struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
+static int i915_execute_view_op(struct i915_render_session *session, struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
+static void i915_view_framebuffer(const struct i915_gfx_framebuffer *framebuffer, uint32_t view, struct i915_gfx_framebuffer *copy, struct i915_gfx_view *views);
+static int i915_execute_query_views(struct i915_render_session *session, const struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
+static uint32_t i915_view_count(uint32_t view_mask);
 static int i915_execute_draw(struct i915_render_session *session, const struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
 static void i915_execute_bind_pipeline(struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
 static void i915_execute_bind_set(struct i915_gfx_draw_state *state, const struct i915_gfx_op *op);
@@ -326,9 +331,11 @@ drv_i915_gfx_rec_dispatch(
 
 	/*
 	 * Leaves an opcode outside the recording ranges to its own module: the
-	 * vkCmd* of the protocol, and zedBSD's video coding commands.
+	 * vkCmd* of the protocol, vkCmdDispatchBase of Vulkan 1.1, and zedBSD's
+	 * video coding commands.
 	 */
 	if ((opcode < GPU_OP_RESET_COMMAND_BUFFER || opcode > GPU_OP_CMD_EXECUTE_COMMANDS) &&
+	    opcode != GPU_OP_CMD_DISPATCH_BASE &&
 	    (opcode < GPU_OP_CMD_BEGIN_VIDEO_CODING || opcode > GPU_OP_CMD_DECODE_VIDEO)) {
 		*handled = 0;
 		return 0;
@@ -2421,6 +2428,16 @@ i915_record_command(
 		op->u.dispatch.groups[1] = drv_i915_wire_read_u32(reader);
 		op->u.dispatch.groups[2] = drv_i915_wire_read_u32(reader);
 		break;
+	case GPU_OP_CMD_DISPATCH_BASE:
+		/* vkCmdDispatchBase: [base x][base y][base z][groups x][groups y][groups z]. */
+		op = i915_command_op(cmdbuf, I915_GFX_OP_DISPATCH);
+		op->u.dispatch.base[0] = drv_i915_wire_read_u32(reader);
+		op->u.dispatch.base[1] = drv_i915_wire_read_u32(reader);
+		op->u.dispatch.base[2] = drv_i915_wire_read_u32(reader);
+		op->u.dispatch.groups[0] = drv_i915_wire_read_u32(reader);
+		op->u.dispatch.groups[1] = drv_i915_wire_read_u32(reader);
+		op->u.dispatch.groups[2] = drv_i915_wire_read_u32(reader);
+		break;
 	case GPU_OP_CMD_DISPATCH_INDIRECT:
 		/* vkCmdDispatchIndirect: [buffer][offset]. */
 		op = i915_command_op(cmdbuf, I915_GFX_OP_DISPATCH_INDIRECT);
@@ -2810,8 +2827,19 @@ i915_execute_clear(
 		if (layers > view_layers)
 			layers = view_layers;
 
-		/* Clears each layer through a view of that one layer. */
+		/*
+		 * Clears each layer through a view of that one layer: the layers
+		 * of the framebuffer, or of a multiview pass the layer of each
+		 * view the subpass renders.
+		 */
+		if (pass->view_mask != 0U)
+			layers = view_layers;
 		for (layer = 0U; layer < layers; layer++) {
+			/* A layer no view of a multiview pass renders keeps its contents. */
+			if (pass->view_mask != 0U &&
+			    (layer >= I915_GFX_MAX_VIEWS || (pass->view_mask & (1U << layer)) == 0U))
+				continue;
+
 			layer_view = *framebuffer->views[index];
 			layer_view.base_layer += layer;
 			layer_view.layer_count = 1U;
@@ -4387,12 +4415,12 @@ i915_command_buffer_execute(
 			kern_memcpy(state.push + op->u.push.offset, op->u.push.bytes, op->u.push.size);
 			break;
 		case I915_GFX_OP_CLEAR_ATTACHMENT:
-			error = i915_execute_clear_attachment(session, &state, op);
+			error = i915_execute_views(session, &state, op);
 			break;
 		case I915_GFX_OP_DRAW:
 		case I915_GFX_OP_DRAW_INDEXED:
 			sends = session->gpu_sends;
-			error = i915_execute_draw(session, &state, op);
+			error = i915_execute_views(session, &state, op);
 			error = i915_draw_refusal_skipped(session, sends, error);
 			break;
 		case I915_GFX_OP_BIND_INDEX_BUFFER:
@@ -4416,9 +4444,13 @@ i915_command_buffer_execute(
 			error = i915_execute_buffer_copy(session, op);
 			break;
 		case I915_GFX_OP_QUERY_BEGIN:
-		case I915_GFX_OP_QUERY_END:
 		case I915_GFX_OP_QUERY_RESET:
 			error = drv_i915_gfx_query_execute(session, op);
+			break;
+		case I915_GFX_OP_QUERY_END:
+			error = drv_i915_gfx_query_execute(session, op);
+			if (error == 0)
+				error = i915_execute_query_views(session, &state, op);
 			break;
 		case I915_GFX_OP_SET_STENCIL:
 			i915_execute_set_stencil(&state, op);
@@ -4432,7 +4464,7 @@ i915_command_buffer_execute(
 			break;
 		case I915_GFX_OP_DRAW_INDIRECT:
 			sends = session->gpu_sends;
-			error = i915_execute_draw_indirect(session, &state, op);
+			error = i915_execute_views(session, &state, op);
 			error = i915_draw_refusal_skipped(session, sends, error);
 			break;
 		case I915_GFX_OP_FILL_BUFFER:
@@ -4777,9 +4809,21 @@ i915_execute_dispatch(
 	if (groups[0] == 0U || groups[1] == 0U || groups[2] == 0U)
 		return 0;
 
-	/* Records the dispatch of the counts into the submission's batch. */
+	/*
+	 * Refuses a dispatch from a base other than zero with a pipeline that
+	 * was not made for one (the API's rule), whose groups would count from
+	 * zero.
+	 */
+	if (state->compute_pipeline->dispatch_base == 0U &&
+	    (op->u.dispatch.base[0] != 0U ||
+	     op->u.dispatch.base[1] != 0U ||
+	     op->u.dispatch.base[2] != 0U))
+		return EINVAL;
+
+	/* Records the dispatch of the counts from the base into the submission's batch. */
 	kern_memset(&grid, 0, sizeof(grid));
 	kern_memcpy(grid.groups, groups, sizeof(grid.groups));
+	kern_memcpy(grid.base, op->u.dispatch.base, sizeof(grid.base));
 	error = drv_i915_gfx_dispatch(session, state, &grid);
 	if (error != 0)
 		return error;
@@ -4860,4 +4904,191 @@ i915_dispatch_ready(
 
 	/* Succeeded: the dispatch can run. */
 	return 0;
+}
+
+/*
+ * Runs a draw, an indirect draw or a vkCmdClearAttachments rectangle once
+ * for each view of a multiview subpass.
+ *
+ * Each view renders into its own layer of every attachment (the view's
+ * number past the attachment view's first layer) with the pipeline's
+ * kernels for that view (their gl_ViewIndex).  The state is changed only
+ * while the view runs.  Outside a multiview subpass the operation runs
+ * once, as it is.
+ */
+static int
+i915_execute_views(
+	struct i915_render_session *session,
+	struct i915_gfx_draw_state *state,
+	const struct i915_gfx_op *op)
+{
+	struct i915_gfx_view views[I915_GFX_MAX_ATTACHMENTS];
+	struct i915_gfx_framebuffer copy;
+	struct i915_gfx_framebuffer *framebuffer;
+	struct i915_gfx_pipeline *pipeline;
+	uint32_t view;
+	int error;
+
+	/* A pass of one view runs the operation once. */
+	if (state->pass == NULL || state->pass->view_mask == 0U || state->framebuffer == NULL) {
+		error = i915_execute_view_op(session, state, op);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the operation ran once. */
+		return 0;
+	}
+
+	/* Each view of the subpass, its layer and its kernels, then the state as it was. */
+	framebuffer = state->framebuffer;
+	pipeline = state->pipeline;
+	error = 0;
+	for (view = 0U; view < I915_GFX_MAX_VIEWS && error == 0; view++) {
+		/* A view the subpass does not render. */
+		if ((state->pass->view_mask & (1U << view)) == 0U)
+			continue;
+
+		/* The view's layer of each attachment, and the kernels compiled for it. */
+		i915_view_framebuffer(framebuffer, view, &copy, views);
+		state->framebuffer = &copy;
+		if (pipeline != NULL && pipeline->view_pipelines[view] != NULL)
+			state->pipeline = pipeline->view_pipelines[view];
+
+		/* The operation for the view. */
+		error = i915_execute_view_op(session, state, op);
+
+		/* The state as the command buffer left it. */
+		state->framebuffer = framebuffer;
+		state->pipeline = pipeline;
+	}
+
+	/* Reports a view that failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every view of the subpass ran the operation. */
+	return 0;
+}
+
+/* Runs one draw, indirect draw or attachment clear for the state as it is. */
+static int
+i915_execute_view_op(
+	struct i915_render_session *session,
+	struct i915_gfx_draw_state *state,
+	const struct i915_gfx_op *op)
+{
+	int error;
+
+	/* The operation by its kind. */
+	switch (op->kind) {
+	case I915_GFX_OP_DRAW_INDIRECT:
+		error = i915_execute_draw_indirect(session, state, op);
+		break;
+	case I915_GFX_OP_CLEAR_ATTACHMENT:
+		error = i915_execute_clear_attachment(session, state, op);
+		break;
+	default:
+		error = i915_execute_draw(session, state, op);
+		break;
+	}
+
+	/* Reports why the operation failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the operation ran. */
+	return 0;
+}
+
+/*
+ * Makes the framebuffer one view of a multiview subpass renders: each
+ * attachment's view narrowed to the one layer `view` past its first.
+ */
+static void
+i915_view_framebuffer(
+	const struct i915_gfx_framebuffer *framebuffer,
+	uint32_t view,
+	struct i915_gfx_framebuffer *copy,
+	struct i915_gfx_view *views)
+{
+	uint32_t index;
+
+	/* The framebuffer's extent, one layer deep. */
+	*copy = *framebuffer;
+	copy->layers = 1U;
+
+	/* Each attachment's layer of the view. */
+	for (index = 0U; index < framebuffer->view_count && index < I915_GFX_MAX_ATTACHMENTS; index++) {
+		/* An attachment without a view stays without one. */
+		if (framebuffer->views[index] == NULL)
+			continue;
+
+		/* The one layer of the view. */
+		views[index] = *framebuffer->views[index];
+		views[index].base_layer += view;
+		views[index].layer_count = 1U;
+		copy->views[index] = &views[index];
+	}
+}
+
+/*
+ * Ends the queries a query of a multiview subpass takes beyond its own: a
+ * query in a subpass of N views uses N consecutive queries, and the views'
+ * draws all count in the first, so each of the others is begun and ended
+ * at once and holds zero (the API allows any split of the total).
+ */
+static int
+i915_execute_query_views(
+	struct i915_render_session *session,
+	const struct i915_gfx_draw_state *state,
+	const struct i915_gfx_op *op)
+{
+	struct i915_gfx_op extra;
+	uint32_t count;
+	uint32_t index;
+	int error;
+
+	/* A query outside a multiview subpass takes one query. */
+	if (state->pass == NULL || state->pass->view_mask == 0U)
+		return 0;
+
+	/* Each further query of the views: begun and ended with nothing drawn between. */
+	count = i915_view_count(state->pass->view_mask);
+	for (index = 1U; index < count; index++) {
+		/* Begins the query. */
+		extra = *op;
+		extra.kind = I915_GFX_OP_QUERY_BEGIN;
+		extra.u.query.first = op->u.query.first + index;
+		extra.u.query.count = 1U;
+		error = drv_i915_gfx_query_execute(session, &extra);
+		if (error != 0)
+			return error;
+
+		/* Ends it, which makes it available with zero. */
+		extra.kind = I915_GFX_OP_QUERY_END;
+		error = drv_i915_gfx_query_execute(session, &extra);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every query of the views is available. */
+	return 0;
+}
+
+/* Returns the number of views a view mask names. */
+static uint32_t
+i915_view_count(
+	uint32_t view_mask)
+{
+	uint32_t count;
+
+	/* Counts the bits. */
+	count = 0U;
+	while (view_mask != 0U) {
+		count += view_mask & 1U;
+		view_mask >>= 1;
+	}
+
+	/* Succeeded: the number of views. */
+	return count;
 }

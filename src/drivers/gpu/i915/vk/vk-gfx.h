@@ -54,10 +54,25 @@ struct i915_wire_writer;
  */
 #define I915_GFX_MAX_BINDINGS		72U
 #define I915_GFX_MAX_LAYOUT_BINDINGS	32U
+
+/*
+ * How many descriptors (array elements of every binding) one set holds at
+ * most: maxPerSetDescriptors, which Vulkan 1.1 requires to be 1024 or more.
+ * A set allocates its descriptors past the first of each binding as it
+ * needs them.
+ */
+#define I915_GFX_MAX_SET_DESCRIPTORS	1024U
 #define I915_GFX_MAX_DYNAMIC_BUFFERS	8U
 
 /* How many attachments one render pass and one framebuffer hold, and how many of them one subpass draws colour into. */
 #define I915_GFX_MAX_ATTACHMENTS	8U
+
+/*
+ * The views a multiview render pass may render (maxMultiviewViewCount):
+ * bits 0 to 7 of a subpass's view mask, each view one layer of the
+ * attachments.
+ */
+#define I915_GFX_MAX_VIEWS		8U
 #define I915_GFX_MAX_COLOR_ATTACHMENTS	4U
 
 /* How many rectangles one vkCmdClearAttachments records. */
@@ -429,6 +444,13 @@ struct i915_gfx_pass {
 	uint32_t depth_attachment;
 	uint32_t color_count;
 	uint32_t color_attachments[I915_GFX_MAX_COLOR_ATTACHMENTS];
+
+	/*
+	 * The views the subpass renders (VkRenderPassMultiviewCreateInfo):
+	 * bit v renders view v into layer v of each attachment's view; zero
+	 * for a pass of one view, which renders the framebuffer's layers.
+	 */
+	uint32_t view_mask;
 };
 
 /*
@@ -688,6 +710,25 @@ struct i915_gfx_pipeline {
 	uint32_t *thread_ids;
 	uint32_t threads;
 	uint32_t right_mask;
+
+	/*
+	 * A compute pipeline created with VK_PIPELINE_CREATE_DISPATCH_BASE_BIT:
+	 * its groups count from the base of a vkCmdDispatchBase, which the
+	 * dispatch places after the group counts.
+	 */
+	uint32_t dispatch_base;
+
+	/*
+	 * The views of the subpass a graphics pipeline is created for (its
+	 * render pass's view_mask), and for each view other than the first a
+	 * copy of the pipeline whose kernels read that view as gl_ViewIndex;
+	 * NULL where the pipeline's own kernels serve (its first view, and
+	 * every view when no stage reads gl_ViewIndex).  The copies share the
+	 * pipeline's shaders and state and own only their kernels; they are
+	 * released and freed with it.
+	 */
+	uint32_t view_mask;
+	struct i915_gfx_pipeline *view_pipelines[I915_GFX_MAX_VIEWS];
 };
 
 /*
@@ -866,9 +907,13 @@ struct i915_gfx_op {
 			uint32_t value;
 		} stencil;
 
-		/* A dispatch of groups x by y by z workgroups. */
+		/*
+		 * A dispatch of groups x by y by z workgroups, numbered from the
+		 * base (vkCmdDispatchBase; zero for vkCmdDispatch).
+		 */
 		struct {
 			uint32_t groups[3];
+			uint32_t base[3];
 		} dispatch;
 
 		/* A dispatch whose three group counts are in a buffer at an offset (vkCmdDispatchIndirect). */

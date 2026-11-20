@@ -145,6 +145,32 @@ struct drv_gpu_compile_diagnostic {
 #define DRV_GPU_SPIRV_FEATURE_TEXEL_BUFFER_SIZE 0x20000U
 
 /*
+ * gl_ViewIndex in a graphics stage, as a LOAD_SYSTEM of
+ * DRV_GPU_IR_SYSTEM_VIEW_INDEX that the driver binds to the view it
+ * compiles the shader for with drv_gpu_shader_ir_bind_view() (refused
+ * otherwise).
+ */
+#define DRV_GPU_SPIRV_FEATURE_VIEW_INDEX 0x40000U
+
+/*
+ * vkCmdDispatchBase: gl_WorkGroupID (and gl_GlobalInvocationID) count from
+ * the dispatch's first group, which the dispatch places in the system
+ * storage buffer (DRV_GPU_IR_SYSTEM_SET) as three words after the three
+ * group counts.  For a pipeline created with
+ * VK_PIPELINE_CREATE_DISPATCH_BASE_BIT; without it the groups count from
+ * zero.
+ */
+#define DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE 0x80000U
+
+/*
+ * The bytes of the system storage buffer: the three group counts, and for
+ * a pipeline with the DISPATCH_BASE feature the three words of the first
+ * group after them.
+ */
+#define DRV_GPU_SPIRV_SYSTEM_BYTES 12U
+#define DRV_GPU_SPIRV_SYSTEM_BASE_BYTES 24U
+
+/*
  * The bit of the binding of a lowered storage image's shape: the uniform
  * block of eight words -- the view's width, height and slices (a 3D
  * image's depth, an array's or a cube's layers, six to a cube), the 32-bit
@@ -171,6 +197,7 @@ struct drv_gpu_compile_diagnostic {
 int drv_gpu_shader_parse(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, struct drv_gpu_shader_ir **out, struct drv_gpu_compile_diagnostic *diagnostic);
 int drv_gpu_shader_parse_features(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t features, struct drv_gpu_shader_ir **out, struct drv_gpu_compile_diagnostic *diagnostic);
 void drv_gpu_shader_ir_free(struct drv_gpu_shader_ir *ir);
+void drv_gpu_shader_ir_bind_view(struct drv_gpu_shader_ir *ir, uint32_t view);
 int drv_gpu_spirv_lower_storage_images(const uint32_t *words, size_t word_count, uint32_t **out, size_t *out_count, struct drv_gpu_compile_diagnostic *diagnostic);
 
 #endif /* DRIVERS_GPU_COMPILER_SPIRV_H */

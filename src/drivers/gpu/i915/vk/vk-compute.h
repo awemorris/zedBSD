@@ -31,12 +31,14 @@ struct i915_gfx_pipeline;
 struct i915_render_session;
 
 /*
- * The grid of one dispatch: its three group counts (vkCmdDispatch), or,
- * when indirect_va is not zero, the GPU address of the three counts a
- * vkCmdDispatchIndirect reads when it runs (groups unused).
+ * The grid of one dispatch: its three group counts (vkCmdDispatch) and
+ * the first group of a vkCmdDispatchBase (zero otherwise), or, when
+ * indirect_va is not zero, the GPU address of the three counts a
+ * vkCmdDispatchIndirect reads when it runs (groups and base unused).
  */
 struct i915_gfx_grid {
 	uint32_t groups[3];
+	uint32_t base[3];
 	uint64_t indirect_va;
 };
 

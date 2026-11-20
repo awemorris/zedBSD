@@ -100,7 +100,14 @@
  */
 #define DRV_GPU_IR_SYSTEM_PRIMITIVE_ID 7U
 #define DRV_GPU_IR_SYSTEM_INVOCATION_ID 8U
-#define DRV_GPU_IR_SYSTEM_COUNT 9U
+
+/*
+ * The view a multiview draw renders (gl_ViewIndex) in a graphics stage.  The
+ * driver binds it to a constant before the backend sees the IR
+ * (drv_gpu_shader_ir_bind_view()), so no backend reads it.
+ */
+#define DRV_GPU_IR_SYSTEM_VIEW_INDEX 9U
+#define DRV_GPU_IR_SYSTEM_COUNT 10U
 
 /*
  * The operations of an ATOMIC instruction, as its `immediate`: the value
@@ -895,6 +902,12 @@ struct drv_gpu_shader_ir {
 	uint32_t uses_end_primitive;
 	uint32_t uses_primitive_id;
 	uint32_t writes_layer;
+
+	/*
+	 * Any graphics stage: nonzero when the shader reads gl_ViewIndex, so
+	 * a multiview draw needs one compilation of it for each view.
+	 */
+	uint32_t uses_view_index;
 };
 
 #endif /* DRIVERS_GPU_COMPILER_IR_H */

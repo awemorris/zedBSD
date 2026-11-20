@@ -1095,7 +1095,7 @@ static void i915_vkc_dec_VkDeviceCreateInfo(struct i915_wire_reader *r, struct i
 	if (r->error != 0)
 		return;
 	record->sType = (__typeof__(record->sType))drv_i915_wire_read_u32(r);
-	(void)drv_i915_wire_read_u64(r);   /* pNext: no chain on this record */
+	i915_vkc_read_device_chain(r, a, &record->pNext);   /* pNext: the Vulkan 1.1 chain libvulkan forwards */
 	record->flags = (__typeof__(record->flags))drv_i915_wire_read_u32(r);
 	record->queueCreateInfoCount = (__typeof__(record->queueCreateInfoCount))drv_i915_wire_read_u32(r);
 	count = drv_i915_wire_read_u64(r);
@@ -2518,7 +2518,7 @@ static void i915_vkc_dec_VkRenderPassCreateInfo(struct i915_wire_reader *r, stru
 	if (r->error != 0)
 		return;
 	record->sType = (__typeof__(record->sType))drv_i915_wire_read_u32(r);
-	(void)drv_i915_wire_read_u64(r);   /* pNext: no chain on this record */
+	i915_vkc_read_render_pass_chain(r, a, &record->pNext);   /* pNext: the Vulkan 1.1 chain libvulkan forwards */
 	record->flags = (__typeof__(record->flags))drv_i915_wire_read_u32(r);
 	record->attachmentCount = (__typeof__(record->attachmentCount))drv_i915_wire_read_u32(r);
 	count = drv_i915_wire_read_u64(r);
