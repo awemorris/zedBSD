@@ -129,6 +129,16 @@ walk_records(
 				return error;
 			selected = true;
 			break;
+		case GPU_OP_CMD_FILL_BUFFER:
+		case GPU_OP_CMD_UPDATE_BUFFER:
+			/* A fill or update of a buffer's bytes runs on the CPU outside any render pass. */
+			if (state->pass != NULL)
+				return EINVAL;
+			error = bcm2711_vulkan_buffer_write_validate(record, command->owner.device);
+			if (error != 0)
+				return error;
+			selected = true;
+			break;
 		case GPU_OP_CMD_COPY_IMAGE:
 		case GPU_OP_CMD_BLIT_IMAGE:
 		case GPU_OP_CMD_RESOLVE_IMAGE:
