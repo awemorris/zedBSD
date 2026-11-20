@@ -2354,7 +2354,6 @@ execute_draw(
 						 pipeline->raster_discard, pipeline->polygon_mode, pipeline->depth_clamp);
 		execute->at = nvrtx_exec_alpha_coverage(push, execute->at, pipeline->alpha_coverage);
 		execute->at = nvrtx_exec_sample_mask(push, execute->at, pipeline->sample_mask);
-		execute->at = nvrtx_exec_early_tests(push, execute->at, pipeline->early_tests);
 	}
 	execute_draw_state(execute, state, known);
 	if ((changes & EXECUTE_PIPELINE_BLEND) != 0U) {
@@ -2375,6 +2374,13 @@ execute_draw(
 		if ((changes & EXECUTE_PIPELINE_GEOMETRY_PROGRAM) != 0U)
 			execute->at = nvrtx_exec_geometry_program(push, execute->at, pipeline->geometry.va, pipeline->geometry.gprs);
 	}
+
+	/*
+	 * Whether the depth and stencil tests run before the pixel program,
+	 * after the programs (binding them all sets the tests after it).
+	 */
+	if (changes == EXECUTE_PIPELINE_ALL || (changes & EXECUTE_PIPELINE_RASTER) != 0U)
+		execute->at = nvrtx_exec_early_tests(push, execute->at, pipeline->early_tests);
 
 	/*
 	 * The layer's source, after the programs (binding them all sets layer 0
