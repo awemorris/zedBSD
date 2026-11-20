@@ -78,20 +78,24 @@
 
 /*
  * The usages a depth image is made with: a depth attachment, sampled
- * (its depth or its stencil), and copied and blitted from and to.
+ * (its depth or its stencil, also as an input attachment), and copied and
+ * blitted from and to.
  */
 #define RESOURCE_DEPTH_USAGES		(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | \
-					 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+					 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | \
+					 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
 
 /*
  * The usages an image of AMDRDNA_VK_SAMPLES_MAX samples may have: drawn
- * into as a colour or a depth attachment, sampled (its samples fetched),
+ * into as a colour or a depth attachment, sampled (its samples fetched,
+ * also as an input attachment),
  * resolved from (a transfer source) and named as a transfer destination
  * (no copy into it is recorded).
  */
 #define RESOURCE_SAMPLED_USAGES		(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | \
 					 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | \
-					 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)
+					 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | \
+					 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
 
 /*
  * A buffer view's offset alignment (minTexelBufferOffsetAlignment) and
