@@ -2918,6 +2918,7 @@ draw_place(
 	state.push_address = general + DRAW_PUSH;
 	state.blend_address = general + DRAW_BLEND;
 	kern_memcpy(state.tile_buffer_addresses, memory->tile_buffer_addresses, sizeof(state.tile_buffer_addresses));
+	state.view = job->view;
 
 	/* The two shared register programs. */
 	error = draw_shared(&graphics->vertex, vertex_usc, &state, memory, pds_slot + DRAW_PDS_VSHARED_CODE, pds_slot + DRAW_PDS_VSHARED_DATA, &vertex_shared_words);

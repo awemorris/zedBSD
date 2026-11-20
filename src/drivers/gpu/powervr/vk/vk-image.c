@@ -870,6 +870,7 @@ view_build(
 		view->layer_bytes = image->layout.layer_bytes;
 		view->base_level = 0;
 		view->base_layer = 0;
+		view->layer_count = 1;
 		return 0;
 	}
 
@@ -907,6 +908,7 @@ view_build(
 	view->layer_bytes = shape.layout->layer_bytes;
 	view->base_level = info->subresourceRange.baseMipLevel;
 	view->base_layer = info->subresourceRange.baseArrayLayer;
+	view->layer_count = shape.layer_count;
 
 	/* Succeeded: the view is filled. */
 	return 0;

@@ -132,6 +132,7 @@ int
 bcm2711_vulkan_native_draw_create(
 	struct bcm2711_v3d_space *space,
 	const struct bcm2711_vulkan_prepared_event *event,
+	uint32_t view,
 	uint64_t *available,
 	const struct bcm2711_vulkan_native_draw *earlier,
 	struct bcm2711_vulkan_native_draw_pool *pool,
@@ -174,6 +175,7 @@ bcm2711_vulkan_native_draw_create(
 	created->pool = pool;
 	created->space = space;
 	created->earlier = earlier;
+	created->view = view;
 	created->vertices = event->draw[0];
 	created->instances = event->draw[1];
 	created->first = event->draw[2];
@@ -272,7 +274,7 @@ bcm2711_vulkan_native_meta_draw_create(
 	kern_memcpy(event->viewport, meta->viewport, sizeof(event->viewport));
 
 	/* Native upload copies every shader, scalar, source texel and vertex before the temporary description retires. */
-	error = bcm2711_vulkan_native_draw_create(space, event, available, NULL, NULL, draw);
+	error = bcm2711_vulkan_native_draw_create(space, event, 0, available, NULL, NULL, draw);
 	kern_free(event);
 	if (error != 0)
 		return error;
@@ -907,6 +909,12 @@ prepare_programs(
 			return error;
 		if (program->uniform_count == 0)
 			write_word(destination, 0U);
+
+		/* The view the stream was written with zero for, of a multiview pass's draw. */
+		for (index = 0; index < program->uniform_count && draw->view != 0; index++) {
+			if (program->uniforms[index].kind == BCM2711_SHADER_VIEW_INDEX)
+				write_word(destination + index * 4U, draw->view);
+		}
 		kern_dcache_clean_range(destination, (size_t)bytes);
 		draw->uniform_words[stage] = destination;
 		shader->programs[stage].binary = program;

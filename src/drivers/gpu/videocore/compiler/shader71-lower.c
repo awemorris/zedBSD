@@ -343,7 +343,9 @@ lower_instruction(
 	 * their own (the analysis admitted them for the stage).
 	 */
 	handled = 0;
-	error = bcm2711_shader_compute_lower(compiler, instruction, &handled);
+	error = 0;
+	if (instruction->op != DRV_GPU_IR_LOAD_SYSTEM || instruction->component != DRV_GPU_IR_SYSTEM_VIEW_INDEX)
+		error = bcm2711_shader_compute_lower(compiler, instruction, &handled);
 	if (error != 0)
 		return error;
 	if (handled != 0) {
@@ -458,12 +460,21 @@ lower_instruction(
 	scalar->number = destination;
 	scalar->register_live = 1;
 
-	/* Draw-time push and block words use checked descriptor identities instead of embedding device addresses. */
-	if (instruction->op == DRV_GPU_IR_LOAD_PUSH || instruction->op == DRV_GPU_IR_LOAD_UBO) {
+	/*
+	 * Draw-time push and block words use checked descriptor identities
+	 * instead of embedding device addresses; the view of a multiview pass
+	 * is a draw-time word too.
+	 */
+	if (instruction->op == DRV_GPU_IR_LOAD_PUSH || instruction->op == DRV_GPU_IR_LOAD_UBO || instruction->op == DRV_GPU_IR_LOAD_SYSTEM) {
 		kern_memset(&uniform, 0, sizeof(uniform));
 		uniform.kind = BCM2711_SHADER_PUSH;
 		uniform.offset = instruction->immediate;
-		if (instruction->op == DRV_GPU_IR_LOAD_UBO) {
+		if (instruction->op == DRV_GPU_IR_LOAD_SYSTEM) {
+			if (instruction->component != DRV_GPU_IR_SYSTEM_VIEW_INDEX)
+				return EINVAL;
+			uniform.kind = BCM2711_SHADER_VIEW_INDEX;
+			uniform.offset = 0;
+		} else if (instruction->op == DRV_GPU_IR_LOAD_UBO) {
 			block = &compiler->ir->uniforms[instruction->location];
 			uniform.kind = BCM2711_SHADER_BLOCK;
 			uniform.set = block->set;

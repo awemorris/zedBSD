@@ -39,7 +39,8 @@
  */
 #define AMDRDNA_GFX10_SPIRV_FEATURES	(DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH | DRV_GPU_SPIRV_FEATURE_STENCIL_EXPORT | \
 					 DRV_GPU_SPIRV_FEATURE_SAMPLE_MASK | DRV_GPU_SPIRV_FEATURE_QUERY_LOD | \
-					 DRV_GPU_SPIRV_FEATURE_STORAGE_IMAGE | DRV_GPU_SPIRV_FEATURE_COMPUTE_IMAGES)
+					 DRV_GPU_SPIRV_FEATURE_STORAGE_IMAGE | DRV_GPU_SPIRV_FEATURE_COMPUTE_IMAGES | \
+					 DRV_GPU_SPIRV_FEATURE_VIEW_INDEX)
 
 /*
  * The arrays of descriptors: each element is a binding of its own (struct
@@ -101,6 +102,9 @@ struct amdrdna_gfx10_program {
 	uint32_t vgpr_count;
 	uint32_t sgpr_count;
 	uint32_t user_sgprs;
+
+	/* Whether the program reads gl_ViewIndex (compiled for the view of its options). */
+	uint32_t reads_view;
 
 	/* A compute program's workgroup size, shared memory bytes and whether it waits at a workgroup barrier. */
 	uint32_t local_size[3];
@@ -229,7 +233,10 @@ struct amdrdna_gfx10_program {
  * (AMDRDNA_GFX10_SPIRV_FEATURES_ARRAYS, refused otherwise); and how a
  * pixel program exports each colour location (AMDRDNA_GFX10_COLOUR_*, 4
  * bits a location from location 0; 0, four 16-bit floats, for every one
- * unless said).
+ * unless said); the view of a multiview pass a graphics program is
+ * compiled for (its gl_ViewIndex; 0 outside multiview); and a compute
+ * program for vkCmdDispatchBase (DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE: its
+ * workgroups count from the base after the counts in the system buffer).
  */
 struct amdrdna_gfx10_compile_options {
 	uint32_t pass_primitive_number;
@@ -237,6 +244,8 @@ struct amdrdna_gfx10_compile_options {
 	uint32_t primitive_culling;
 	uint32_t descriptor_arrays;
 	uint32_t color_exports;
+	uint32_t view;
+	uint32_t dispatch_base;
 };
 
 /*

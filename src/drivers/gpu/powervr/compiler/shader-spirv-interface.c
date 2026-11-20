@@ -423,6 +423,7 @@ shader_spirv_reader_entry_prologue(
 	struct shader_spirv_reader *reader)
 {
 	struct powervr_ir_operand group;
+	struct powervr_ir_operand base;
 	struct powervr_ir_operand size;
 	struct powervr_ir_operand word;
 	struct shader_spirv_id *id;
@@ -430,6 +431,8 @@ shader_spirv_reader_entry_prologue(
 	uint32_t component;
 	uint32_t words;
 	uint32_t request;
+	uint32_t base_request;
+	uint32_t sum;
 	uint32_t builtin;
 	uint32_t invocations;
 	uint32_t point_size;
@@ -479,6 +482,16 @@ shader_spirv_reader_entry_prologue(
 			continue;
 		}
 
+		/* The view a multiview render renders, a word the draw's shared registers hold. */
+		if (builtin == BUILT_IN_VIEW_INDEX && (reader->stage == POWERVR_SHADER_VERTEX || reader->stage == POWERVR_SHADER_FRAGMENT)) {
+			error = shader_spirv_request_add(reader, POWERVR_SHADER_REQUEST_VIEW_INDEX, 0, 0, 0, 1, &request);
+			if (error != 0)
+				return error;
+			word = shader_spirv_shared_word(reader, request, 0);
+			shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first, &word, NULL, NULL, 0, 0);
+			continue;
+		}
+
 		/* A fragment's built-in inputs. */
 		if (reader->stage == POWERVR_SHADER_FRAGMENT) {
 			error = fragment_built_in(reader, id, words);
@@ -493,8 +506,17 @@ shader_spirv_reader_entry_prologue(
 		error = compute_local(reader);
 		if (error != 0)
 			return error;
-		if (builtin == BUILT_IN_LOCAL_INVOCATION_INDEX) {
+		if (builtin == BUILT_IN_LOCAL_INVOCATION_INDEX || builtin == BUILT_IN_SUBGROUP_ID) {
+			/* The local index; each invocation is a subgroup of its own, so its subgroup's id too. */
 			shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first, &reader->local[3], NULL, NULL, 0, 0);
+		} else if (builtin == BUILT_IN_SUBGROUP_SIZE || builtin == BUILT_IN_SUBGROUP_LOCAL_INVOCATION_ID || builtin == BUILT_IN_NUM_SUBGROUPS) {
+			/* A subgroup is one invocation: its size 1, the invocation its first, as many as the workgroup's invocations. */
+			word = shader_spirv_constant_operand(0);
+			if (builtin == BUILT_IN_SUBGROUP_SIZE)
+				word = shader_spirv_constant_operand(1);
+			if (builtin == BUILT_IN_NUM_SUBGROUPS)
+				word = shader_spirv_constant_operand(reader->program->workgroup[0] * reader->program->workgroup[1] * reader->program->workgroup[2]);
+			shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first, &word, NULL, NULL, 0, 0);
 		} else if (builtin == BUILT_IN_LOCAL_INVOCATION_ID) {
 			for (component = 0; component < words && component < 3; component++)
 				shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first + component, &reader->local[component], NULL, NULL, 0, 0);
@@ -503,8 +525,23 @@ shader_spirv_reader_entry_prologue(
 			error = shader_spirv_request_add(reader, builtin == BUILT_IN_NUM_WORKGROUPS ? POWERVR_SHADER_REQUEST_NUM_WORKGROUPS : POWERVR_SHADER_REQUEST_WORKGROUP_ID, 0, 0, 0, 3, &request);
 			if (error != 0)
 				return error;
+			base_request = 0;
+			if (builtin != BUILT_IN_NUM_WORKGROUPS && reader->key != NULL && (reader->key->forms & POWERVR_SHADER_FORM_DISPATCH_BASE) != 0) {
+				error = shader_spirv_request_add(reader, POWERVR_SHADER_REQUEST_WORKGROUP_BASE, 0, 0, 0, 3, &base_request);
+				if (error != 0)
+					return error;
+				base_request++;
+			}
 			for (component = 0; component < words && component < 3; component++) {
 				group = shader_spirv_shared_word(reader, request, component);
+
+				/* A dispatch's ids count from its first workgroup. */
+				if (base_request != 0) {
+					base = shader_spirv_shared_word(reader, base_request - 1U, component);
+					sum = shader_spirv_new_value(reader, 1);
+					shader_spirv_emit(reader, POWERVR_IR_INTEGER_ADD, sum, &group, &base, NULL, 0, 0);
+					group = shader_spirv_value_operand(sum, 0);
+				}
 				if (builtin != BUILT_IN_GLOBAL_INVOCATION_ID) {
 					shader_spirv_emit(reader, POWERVR_IR_MOVE, id->first + component, &group, NULL, NULL, 0, 0);
 					continue;

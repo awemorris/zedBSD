@@ -226,6 +226,7 @@ struct powervr_vk_image_view {
 	uint64_t layer_bytes;
 	uint32_t base_level;
 	uint32_t base_layer;
+	uint32_t layer_count;
 	uint64_t words[2];
 };
 
@@ -315,8 +316,10 @@ struct powervr_vk_command_pool {
 
 /*
  * One recorded command: a bound pipeline, bound sets from first (objects
- * i is set first + i), a dispatch's counts in values, or a draw's counts
- * and the words of a dynamic state set in values (vk-draw.c).
+ * i is set first + i), a dispatch's counts in values 0 to 2 and its first
+ * workgroup in values 4 to 6 (zero but for vkCmdDispatchBase), or a
+ * draw's counts and the words of a dynamic state set in values
+ * (vk-draw.c).
  */
 struct powervr_vk_record {
 	uint32_t opcode;
@@ -324,12 +327,14 @@ struct powervr_vk_record {
 	struct powervr_vk_object *objects[POWERVR_VK_SETS_MAX];
 	uint32_t object_count;
 	uint32_t first;
-	uint32_t values[4];
+	uint32_t values[8];
 };
 
 /*
  * A VkCommandBuffer: its pool (only compared), its state, its records in
- * order (a growing array) and the first error its recording met.
+ * order (a growing array), the first error its recording met, and the
+ * views of the multiview render pass instance being recorded (0 outside
+ * one or for one view).
  */
 struct powervr_vk_command_buffer {
 	const void *pool;
@@ -338,6 +343,7 @@ struct powervr_vk_command_buffer {
 	uint32_t record_count;
 	uint32_t record_capacity;
 	int error;
+	uint32_t views;
 };
 
 /*
@@ -394,6 +400,7 @@ int powervr_vk_record_query(struct powervr_vk_session *session, uint32_t opcode,
 void powervr_vk_query_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
 void powervr_vk_query_report(struct powervr_vk_session *session, int32_t status);
 bool powervr_vk_query_occlusion(const struct powervr_vk_object *pool);
+void powervr_vk_query_views(struct powervr_vk_record *entry, uint32_t views);
 int powervr_vk_query_visibility(struct powervr_render_job *job, const struct powervr_vk_object *pool, uint32_t query, uint32_t *visibility);
 void powervr_vk_query_visibility_start(struct powervr_render_job *job);
 void powervr_vk_query_visibility_drop(struct powervr_render_job *job);

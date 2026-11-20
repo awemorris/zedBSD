@@ -111,6 +111,7 @@ static int compare_depth(struct shader_spirv_reader *reader, const struct shader
 static int reader_texture_size(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static struct powervr_ir_operand sine(struct shader_spirv_reader *reader, struct powervr_ir_operand x, uint32_t quarter);
 static int same_operand(const struct powervr_ir_operand *a, const struct powervr_ir_operand *b);
+static int reader_elect(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static int reader_barrier(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static int reader_atomic(struct shader_spirv_reader *reader, const uint32_t *words, uint32_t length);
 static struct powervr_ir_operand memory_load(struct shader_spirv_reader *reader, const struct powervr_ir_operand *address, const struct powervr_ir_operand *offset, uint32_t flags);
@@ -292,6 +293,13 @@ shader_spirv_reader_instruction(
 		 * next instruction, and a load of workgroup memory goes around
 		 * the caches.
 		 */
+		return 0;
+	case OP_GROUP_NON_UNIFORM_ELECT:
+		error = reader_elect(reader, words, length);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the election is read. */
 		return 0;
 	case OP_ATOMIC_LOAD:
 	case OP_ATOMIC_STORE:
@@ -3596,6 +3604,40 @@ same_operand(
 	if (a->kind == POWERVR_IR_OPERAND_CONSTANT)
 		return a->constant == b->constant;
 	return 1;
+}
+
+/*
+ * Reads OpGroupNonUniformElect of the subgroup scope: true, since every
+ * invocation is the only one, and so the first, of its subgroup (a
+ * subgroup is one invocation).  Another scope is refused.
+ */
+static int
+reader_elect(
+	struct shader_spirv_reader *reader,
+	const uint32_t *words,
+	uint32_t length)
+{
+	struct powervr_ir_operand *operands;
+	struct powervr_ir_operand scope;
+	int error;
+
+	/* The result type, the result and the execution scope, a constant. */
+	if (length != 4 || words[2] >= reader->bound)
+		return EINVAL;
+	error = shader_spirv_operand_word(reader, words[3], 0, &scope);
+	if (error != 0)
+		return error;
+	if (scope.kind != POWERVR_IR_OPERAND_CONSTANT || scope.constant != SCOPE_SUBGROUP)
+		return ENOTSUP;
+
+	/* The result is the Boolean true. */
+	error = shader_spirv_result_begin(reader, words[2], words[1], 1, &operands);
+	if (error != 0)
+		return error;
+	operands[0] = shader_spirv_constant_operand(TRUE_WORD);
+
+	/* Succeeded: the result is true. */
+	return reader->error;
 }
 
 /*

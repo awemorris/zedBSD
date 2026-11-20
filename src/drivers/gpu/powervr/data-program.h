@@ -69,8 +69,9 @@ struct powervr_data_load {
  * What the bound state gives the shared register requests: each set's
  * layout and the device address of its memory, the device addresses of
  * the push constants' bytes and of the four blend constants, a compute
- * task's workgroup id and workgroup count, and the device addresses of
- * the render's tile buffers (0 for one the render has not got).
+ * task's workgroup id and workgroup count, the device addresses of the
+ * render's tile buffers (0 for one the render has not got), the view a
+ * multiview render's draw renders, and a dispatch's first workgroup.
  */
 struct powervr_data_state {
 	const struct powervr_set_layout *layouts[POWERVR_DATA_SETS];
@@ -80,6 +81,8 @@ struct powervr_data_state {
 	uint32_t workgroup_id[3];
 	uint32_t workgroups[3];
 	uint64_t tile_buffer_addresses[POWERVR_SHADER_TILE_BUFFERS];
+	uint32_t view;
+	uint32_t workgroup_base[3];
 };
 
 /*

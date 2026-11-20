@@ -56,6 +56,13 @@ struct bcm2711_vulkan_occlusion_pool *bcm2711_vulkan_occlusion_record(const stru
 /* Runs a reset (the queries' samples cleared, unavailable) or an end (available) after every earlier pass. */
 void bcm2711_vulkan_occlusion_run(const struct bcm2711_vulkan_record *record);
 
+/*
+ * Runs the end of a query in a multiview render pass of views views: the
+ * query, which counts every view, and the views - 1 queries after it,
+ * which count nothing, become available.
+ */
+void bcm2711_vulkan_occlusion_end_views(const struct bcm2711_vulkan_record *record, uint32_t views);
+
 /* Adds a completed pass's counter to its query. */
 void bcm2711_vulkan_occlusion_add(struct bcm2711_vulkan_occlusion_pool *pool, uint32_t query, uint32_t samples);
 

@@ -349,8 +349,12 @@ build_compute(
 	uint32_t index;
 	int error;
 
-	/* No derivative or chained pipeline, and one compute stage. */
-	if (info->flags != 0 || info->basePipelineHandle != VK_NULL_HANDLE)
+	/*
+	 * No derivative or chained pipeline, and one compute stage.  A
+	 * pipeline for vkCmdDispatchBase is like any other: every program
+	 * counts its workgroups from the job's first one.
+	 */
+	if ((info->flags & ~(VkPipelineCreateFlags)VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 || info->basePipelineHandle != VK_NULL_HANDLE)
 		return ENOTSUP;
 	if (info->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT)
 		return EINVAL;

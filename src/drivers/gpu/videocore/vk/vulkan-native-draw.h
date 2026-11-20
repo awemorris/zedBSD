@@ -100,6 +100,8 @@ struct bcm2711_vulkan_native_draw {
 	 * moved to zero, zero when the vertices are read in place.
 	 */
 	uint32_t vertex_base;
+	/* The view of a multiview pass the draw renders (its programs' gl_ViewIndex), zero outside multiview. */
+	uint32_t view;
 	/* All draws use the same immutable sixteen float (0,0,0,1) defaults. */
 	struct bcm2711_native_storage *defaults;
 	uint64_t bytes;
@@ -157,8 +159,9 @@ int bcm2711_vulkan_native_meta_draw_create(struct bcm2711_v3d_space *space, cons
 /*
  * Controller serialization and prior queue visibility are required; available is the remaining padded job budget.
  * Earlier draws must belong to this same pass and remain alive until the entire pass retires; NULL gives an independent draw.
+ * view is the view of a multiview pass the draw renders (zero outside multiview).
  */
-int bcm2711_vulkan_native_draw_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint64_t *available, const struct bcm2711_vulkan_native_draw *earlier, struct bcm2711_vulkan_native_draw_pool *pool, struct bcm2711_vulkan_native_draw **draw);
+int bcm2711_vulkan_native_draw_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint32_t view, uint64_t *available, const struct bcm2711_vulkan_native_draw *earlier, struct bcm2711_vulkan_native_draw_pool *pool, struct bcm2711_vulkan_native_draw **draw);
 
 /* Frees a pass pool's chunks and releases its upload chunks; every draw from it has been released and its DMA retired. */
 int bcm2711_vulkan_native_draw_pool_release(struct bcm2711_vulkan_native_draw_pool *pool);

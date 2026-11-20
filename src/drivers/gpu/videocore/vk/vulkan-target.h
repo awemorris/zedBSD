@@ -19,6 +19,9 @@
 /* The most attachments a pass has: its colour attachments and a depth/stencil one. */
 #define BCM2711_VULKAN_PASS_ATTACHMENTS (BCM2711_VULKAN_PASS_COLOURS + 1U)
 
+/* The most views a multiview subpass renders (maxMultiviewViewCount): view masks of bits 0 to 7. */
+#define BCM2711_VULKAN_VIEWS 8U
+
 /*
  * One single-subpass pass retains its device and exact attachment lifecycle until dependent pipelines and targets retire.
  *
@@ -30,6 +33,9 @@
  * X8_D24, D16 or D32_SFLOAT) at depth_attachment, which the subpass uses.
  * The subpass names every attachment once.  Every attachment has samples
  * samples a pixel (1 or 4).
+ *
+ * view_mask is the subpass's views under multiview (bit n: view n, drawn
+ * into layer n of each attachment's view), zero for a pass of one view.
  */
 struct bcm2711_vulkan_pass {
 	struct bcm2711_vulkan_input_owner owner;
@@ -42,6 +48,7 @@ struct bcm2711_vulkan_pass {
 	bool depth;
 	VkAttachmentDescription depth_stencil;
 	uint32_t depth_attachment;
+	uint32_t view_mask;
 	uint32_t count;
 	VkSubpassDependency dependencies[BCM2711_VULKAN_PASS_DEPENDENCIES];
 };

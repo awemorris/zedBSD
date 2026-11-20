@@ -12,6 +12,7 @@
 #include "drivers/gpu/videocore/vk/vulkan-pipeline-record.h"
 
 static int structure_header(struct i915_wire_reader *reader, VkStructureType expected);
+static int structure_flags(struct i915_wire_reader *reader, VkStructureType expected, uint32_t allowed, uint32_t *flags);
 static int shader_stages(struct i915_wire_reader *reader, struct bcm2711_vulkan_pipeline_record *record);
 static int vertex_state(struct i915_wire_reader *reader, struct bcm2711_vulkan_pipeline_record *record);
 static int assembly_viewport(struct i915_wire_reader *reader, struct bcm2711_vulkan_pipeline_record *record);
@@ -78,15 +79,20 @@ bcm2711_vulkan_pipeline_decode_compute(
 	VkPipelineShaderStageCreateInfo *stage;
 	uint64_t bytes;
 	uint64_t present;
+	uint32_t flags;
 	int error;
 	int name;
 
-	/* The record and its stage begin with ordinary chainless zero-flag headers. */
+	/*
+	 * The record and its stage begin with ordinary chainless headers; the
+	 * record may be for vkCmdDispatchBase, the stage has no flag.
+	 */
 	kern_memset(record, 0, sizeof(*record));
-	error = structure_header(reader, VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
+	error = structure_flags(reader, VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, VK_PIPELINE_CREATE_DISPATCH_BASE_BIT, &flags);
 	if (error != 0)
 		return error;
 	record->info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	record->info.flags = flags;
 	error = structure_header(reader, VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
 	if (error != 0)
 		return error;
@@ -127,19 +133,34 @@ structure_header(
 	struct i915_wire_reader *reader,
 	VkStructureType expected)
 {
-	uint32_t structure;
 	uint32_t flags;
+	int error;
+
+	/* No flag is admitted. */
+	error = structure_flags(reader, expected, 0, &flags);
+	return error;
+}
+
+/* Reads a structure's header like structure_header(), admitting the flags of allowed, which flags receives. */
+static int
+structure_flags(
+	struct i915_wire_reader *reader,
+	VkStructureType expected,
+	uint32_t allowed,
+	uint32_t *flags)
+{
+	uint32_t structure;
 	uint64_t chain;
 
 	/* Every admitted nested state uses the client's standard fixed-width header, with no advertised extension chain. */
 	structure = drv_i915_wire_read_u32(reader);
 	chain = drv_i915_wire_read_u64(reader);
-	flags = drv_i915_wire_read_u32(reader);
+	*flags = drv_i915_wire_read_u32(reader);
 	if (reader->error != 0)
 		return EINVAL;
 	if (structure != (uint32_t)expected ||
 	    chain != 0 ||
-	    flags != 0)
+	    (*flags & ~allowed) != 0)
 		return ENOTSUP;
 
 	/* Succeeded: the expected ordinary structure body follows. */

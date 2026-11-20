@@ -253,6 +253,35 @@ powervr_vk_record_query(
 }
 
 /*
+ * Has a recorded begin or end of an occlusion query inside a multiview
+ * render pass instance of views views name the query and the views - 1
+ * after it (inside the pool): Vulkan gives such a query a query of the
+ * pool for each view.  The draws of every view count in the first; the
+ * others count nothing, and all of them become available at the end.
+ */
+void
+powervr_vk_query_views(
+	struct powervr_vk_record *entry,
+	uint32_t views)
+{
+	const struct query_pool *pool;
+
+	/* A begin or an end of an occlusion query. */
+	if (views <= 1U || entry->object_count == 0 || entry->objects[0] == NULL)
+		return;
+	if (entry->opcode != GPU_OP_CMD_BEGIN_QUERY && entry->opcode != GPU_OP_CMD_END_QUERY)
+		return;
+	pool = entry->objects[0]->payload;
+	if (pool->type != VK_QUERY_TYPE_OCCLUSION)
+		return;
+
+	/* The views' queries, as many as the pool has from the first. */
+	entry->values[1] = views;
+	if (entry->values[1] > pool->count - entry->values[0])
+		entry->values[1] = pool->count - entry->values[0];
+}
+
+/*
  * Runs one recorded query command in its submission's order: a reset
  * makes its queries unavailable and not ready, a begin opens its query
  * (not ready until a decode reports), an end makes its query available

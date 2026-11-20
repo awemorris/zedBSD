@@ -66,7 +66,17 @@ enum powervr_shader_request_kind {
 	 * attachments the pixel output registers have no room for
 	 * (powervr_shader_pixel_places).
 	 */
-	POWERVR_SHADER_REQUEST_TILE_BUFFER
+	POWERVR_SHADER_REQUEST_TILE_BUFFER,
+
+	/* One word: the view of a multiview render the draw renders (gl_ViewIndex; 0 without multiview). */
+	POWERVR_SHADER_REQUEST_VIEW_INDEX,
+
+	/*
+	 * Three words: the dispatch's first workgroup along x, y and z, which
+	 * a compute program keyed POWERVR_SHADER_FORM_DISPATCH_BASE adds to
+	 * its workgroup ids (vkCmdDispatchBase).
+	 */
+	POWERVR_SHADER_REQUEST_WORKGROUP_BASE
 };
 
 /*
@@ -264,6 +274,14 @@ struct powervr_shader_blend {
  * varyings; without it the point size is dropped.
  */
 #define POWERVR_SHADER_FORM_POINT_SIZE		0x40U
+
+/*
+ * Not a form of a graphics program: a compute program of a dispatch that
+ * starts past workgroup 0 (vkCmdDispatchBase) adds the dispatch's first
+ * workgroup (POWERVR_SHADER_REQUEST_WORKGROUP_BASE) to each workgroup id
+ * it reads.
+ */
+#define POWERVR_SHADER_FORM_DISPATCH_BASE	0x80U
 
 /*
  * Which primitives' fragments gl_FrontFacing calls front: those the

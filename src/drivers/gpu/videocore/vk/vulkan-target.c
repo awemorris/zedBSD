@@ -39,6 +39,7 @@ static int depth_attachment(VkAttachmentDescription *attachment);
 static int depth_layout(VkImageLayout layout);
 static int depth_edge_layout(VkImageLayout layout);
 static int build_depth(struct bcm2711_vulkan_framebuffer *framebuffer, struct bcm2711_vulkan_object *device);
+static bool view_layers(const struct bcm2711_vulkan_pass *pass, const struct bcm2711_vulkan_image_view *view);
 static int granularity(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void target_reply(struct i915_wire_writer *reply, VkResult status, uint64_t identity);
 
@@ -108,7 +109,8 @@ bcm2711_vulkan_target_dispatch(
  * Checks compatibility of the implemented single-subpass passes independently of load/store and layouts.
  *
  * Both have the same colour slots, each used or not alike and of the same
- * format, and the same depth/stencil attachment, or neither has one.
+ * format, the same depth/stencil attachment, or neither has one, and the
+ * same views.
  */
 int
 bcm2711_vulkan_pass_compatible(
@@ -120,7 +122,7 @@ bcm2711_vulkan_pass_compatible(
 	/* All admitted passes have one subpass and no optional attachments; both have the same samples. */
 	if (first == NULL || second == NULL)
 		return EINVAL;
-	if (first->colour_count != second->colour_count || first->samples != second->samples)
+	if (first->colour_count != second->colour_count || first->samples != second->samples || first->view_mask != second->view_mask)
 		return EINVAL;
 
 	/* Each colour slot alike. */
@@ -262,7 +264,8 @@ decode_pass(
 {
 	VkAttachmentDescription attachments[BCM2711_VULKAN_PASS_ATTACHMENTS];
 	VkSubpassDependency *dependency;
-	uint64_t chain;
+	VkRenderPassCreateInfo chained;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	uint64_t array;
 	uint32_t structure;
 	uint32_t flags;
@@ -270,15 +273,19 @@ decode_pass(
 	uint32_t index;
 	int error;
 
-	/* At most four colour attachments and a depth/stencil one, each read before the subpass that names them; none needs a 7.1. */
+	/*
+	 * At most four colour attachments and a depth/stencil one, each read
+	 * before the subpass that names them; none needs a 7.1.  The chain is
+	 * the multiview record libvulkan forwards, or nothing.
+	 */
+	kern_memset(&chained, 0, sizeof(chained));
 	structure = drv_i915_wire_read_u32(reader);
-	chain = drv_i915_wire_read_u64(reader);
+	i915_vkc_read_render_pass_chain(reader, &session->arena, &chained.pNext);
 	flags = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 ||
 	    structure != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO ||
-	    chain != 0 ||
 	    flags != 0 ||
 	    count > BCM2711_VULKAN_PASS_ATTACHMENTS ||
 	    array != count)
@@ -314,6 +321,17 @@ decode_pass(
 	error = decode_subpass(reader, attachments, pass);
 	if (error != 0)
 		return error;
+
+	/* The one subpass's views, at most the device's (maxMultiviewViewCount); none renders one view. */
+	multiview = i915_vkc_render_pass_multiview(&chained);
+	pass->view_mask = 0;
+	if (multiview != NULL && multiview->subpassCount != 0) {
+		if (multiview->subpassCount != 1 || multiview->pViewMasks == NULL)
+			return ENOTSUP;
+		if ((multiview->pViewMasks[0] >> BCM2711_VULKAN_VIEWS) != 0)
+			return ENOTSUP;
+		pass->view_mask = multiview->pViewMasks[0];
+	}
 
 	/* Each external dependency is retained for conservative whole-job ordering and cache visibility during native execution. */
 	count = drv_i915_wire_read_u32(reader);
@@ -667,6 +685,8 @@ build_colour(
 		return EINVAL;
 	if (framebuffer->width > image->width || framebuffer->height > image->height)
 		return EINVAL;
+	if (!view_layers(pass, view))
+		return EINVAL;
 
 	/* The framebuffer keeps the view, and through it the image, until it retires. */
 	error = bcm2711_vulkan_object_retain(framebuffer->colours[slot]);
@@ -929,6 +949,8 @@ build_depth(
 		return EINVAL;
 	if (framebuffer->width > image->width || framebuffer->height > image->height)
 		return EINVAL;
+	if (!view_layers(pass, view))
+		return EINVAL;
 
 	/* The framebuffer keeps the view, and through it the image, until it retires. */
 	error = bcm2711_vulkan_object_retain(framebuffer->depth);
@@ -937,6 +959,30 @@ build_depth(
 
 	/* Succeeded: the caller owns the view's edge. */
 	return 0;
+}
+
+/*
+ * Reports whether an attachment's view has a layer for each view of the
+ * pass (under multiview, more layers than the mask's highest view).
+ */
+static bool
+view_layers(
+	const struct bcm2711_vulkan_pass *pass,
+	const struct bcm2711_vulkan_image_view *view)
+{
+	uint32_t highest;
+
+	/* A pass of one view renders the view's first layer. */
+	if (pass->view_mask == 0)
+		return true;
+
+	/* The highest view the mask names. */
+	highest = 31U - (uint32_t)__builtin_clz(pass->view_mask);
+	if (view->layers <= highest)
+		return false;
+
+	/* Succeeded: every view has its layer. */
+	return true;
 }
 
 /* Recognizes only the native colour image layouts admitted by this finite graphics path. */

@@ -163,6 +163,34 @@ bcm2711_vulkan_occlusion_run(
 	return;
 }
 
+/*
+ * Runs the end of a query in a multiview render pass: the query and the
+ * views - 1 after it become available.  The draws of every view counted into
+ * the first; Vulkan leaves how the views' samples spread over the queries
+ * to the implementation, so the others hold none.
+ */
+void
+bcm2711_vulkan_occlusion_end_views(
+	const struct bcm2711_vulkan_record *record,
+	uint32_t views)
+{
+	struct bcm2711_vulkan_occlusion_pool *pool;
+	uint32_t query;
+
+	/* An end of an occlusion query; recording bounded its first query to the pool. */
+	pool = bcm2711_vulkan_occlusion_record(record);
+	if (pool == NULL || record->opcode != GPU_OP_CMD_END_QUERY)
+		return;
+
+	/* The queries of the views after the first, then the first, whose samples are all in. */
+	for (query = record->first + 1U; query < record->first + views && query < pool->count; query++)
+		__atomic_store_n(&pool->available[query], 1U, __ATOMIC_RELEASE);
+	__atomic_store_n(&pool->available[record->first], 1U, __ATOMIC_RELEASE);
+
+	/* Succeeded: the views' queries are available. */
+	return;
+}
+
 /* Adds a completed pass's counter to its query. */
 void
 bcm2711_vulkan_occlusion_add(

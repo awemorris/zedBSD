@@ -711,6 +711,7 @@ amdrdna_gfx10_compile(
 	struct drv_gpu_shader_optimize_options optimize_options;
 	struct drv_gpu_compile_diagnostic parse_diagnostic;
 	uint32_t features;
+	uint32_t reads_view;
 	int error;
 
 	/* A refused compile never leaves an old output pointer live. */
@@ -733,6 +734,8 @@ amdrdna_gfx10_compile(
 	features = AMDRDNA_GFX10_SPIRV_FEATURES;
 	if (options != NULL && options->descriptor_arrays != 0U)
 		features |= AMDRDNA_GFX10_SPIRV_FEATURES_ARRAYS;
+	if (options != NULL && options->dispatch_base != 0U)
+		features |= DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE;
 	error = drv_gpu_shader_parse_features(words, word_count, stage, features, &ir, &parse_diagnostic);
 	if (error != 0) {
 		if (diagnostic != NULL) {
@@ -743,6 +746,10 @@ amdrdna_gfx10_compile(
 		/* Reports why the stage could not be parsed. */
 		return error;
 	}
+
+	/* gl_ViewIndex is the view the program is compiled for. */
+	reads_view = ir->uses_view_index;
+	drv_gpu_shader_ir_bind_view(ir, options != NULL ? options->view : 0U);
 
 	/* Optimizes a private copy: every block runs (nothing is skipped), and the known bits fold. */
 	kern_memset(&optimize_options, 0, sizeof(optimize_options));
@@ -776,6 +783,7 @@ amdrdna_gfx10_compile(
 	/* Reports the lowering's refusal. */
 	if (error != 0)
 		return error;
+	(*program)->reads_view = reads_view;
 
 	/* Succeeded: the caller owns the program. */
 	return 0;

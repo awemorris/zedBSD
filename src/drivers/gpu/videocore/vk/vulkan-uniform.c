@@ -321,6 +321,10 @@ prepare_word(
 		/* Zero here; the native draw writes it once it knows how its vertices are fetched. */
 		*word = 0;
 		break;
+	case BCM2711_SHADER_VIEW_INDEX:
+		/* Zero here; the native draw of a multiview pass writes its view. */
+		*word = 0;
+		break;
 	default:
 		return ENOTSUP;
 	}

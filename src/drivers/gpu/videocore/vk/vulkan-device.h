@@ -21,6 +21,7 @@ struct bcm2711_vulkan_root {
 
 int bcm2711_vulkan_device_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 void bcm2711_vulkan_device_features(const struct bcm2711_vulkan_session *session, VkPhysicalDeviceFeatures *features);
+void bcm2711_vulkan_device_core11(const struct bcm2711_vulkan_session *session, struct i915_vkc_core11 *core11);
 int bcm2711_vulkan_query_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 
 #endif
