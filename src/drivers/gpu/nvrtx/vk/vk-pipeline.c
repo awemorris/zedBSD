@@ -933,6 +933,9 @@ pipeline_compile_view(
 		return error;
 	*reads_view |= stage_reads;
 
+	/* Whether the fragment program's tests run before it. */
+	pipeline->early_tests = build->fragment->early_fragment_tests;
+
 	/* A geometry program, of the primitives the topology gives. */
 	geometry_bytes = 0U;
 	pipeline->point_size = pipeline_writes_point_size(build->vertex);

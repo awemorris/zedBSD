@@ -533,6 +533,9 @@ struct nvrtx_vk_pipeline {
 	uint32_t raster_discard;
 	uint32_t polygon_mode;
 	uint32_t depth_clamp;
+
+	/* Nonzero when the fragment program asks for the tests before it (EarlyFragmentTests). */
+	uint32_t early_tests;
 	uint32_t depth_bias_enable;
 	uint32_t depth_bias[3];
 	uint32_t depth_test;

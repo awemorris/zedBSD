@@ -166,6 +166,12 @@ struct nvrtx_sm75_binary {
 
 	/* A geometry program's input primitive's vertices (1, 2, 3, 4 or 6; 0 for another program). */
 	uint32_t vertices_in;
+
+	/*
+	 * A fragment program of the EarlyFragmentTests mode: the draw runs the
+	 * depth and stencil tests before it (0 for another program).
+	 */
+	uint32_t early_fragment_tests;
 };
 
 /*

@@ -90,6 +90,17 @@
 #define M_SET_RT_LAYER				0x15ccU
 
 /*
+ * Whether the depth and stencil tests run before the fragment program
+ * (the API's EarlyFragmentTests): SET_API_MANDATED_EARLY_Z, bit 0.  Without
+ * it a program that writes memory runs for every fragment and the tests
+ * follow it.
+ *
+ * Values referenced: Mesa 25.0.7 src/nouveau/headers/nvidia/classes/cl9097.h
+ * (NV9097_SET_API_MANDATED_EARLY_Z 0x0210, ENABLE 0:0).
+ */
+#define M_SET_API_MANDATED_EARLY_Z		0x0210U
+
+/*
  * The samples a pixel keeps, the same for each pixel of a 2x2 quad
  * (SET_SAMPLE_MASK_X0_Y0, _X1_Y0, _X0_Y1, _X1_Y1, 16 bits each).
  *
@@ -1785,6 +1796,29 @@ nvrtx_exec_layer_source(
 	at = exec_set(push, at, M_SET_RT_LAYER, from_program != 0U ? V_RT_LAYER_FROM_PROGRAM : 0U);
 
 	/* Succeeded: the layer's source is written. */
+	return at;
+}
+
+/*
+ * Writes whether the depth and stencil tests run before the fragment
+ * program: the program's EarlyFragmentTests mode.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_shader.c (a
+ * fragment shader's state sets SET_API_MANDATED_EARLY_Z to its
+ * early_fragment_tests).
+ */
+size_t
+nvrtx_exec_early_tests(
+	uint8_t *push,
+	size_t at,
+	uint32_t early)
+{
+	/* Before the program, or after it. */
+	at = exec_set(push, at, M_SET_API_MANDATED_EARLY_Z, early != 0U ? 1U : 0U);
+
+	/* Succeeded: the tests' place is written. */
 	return at;
 }
 

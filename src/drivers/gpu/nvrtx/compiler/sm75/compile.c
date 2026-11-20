@@ -640,6 +640,7 @@ nvrtx_sm75_prepare(
 	binary->local_size[2] = ir->local_size[2];
 	binary->shared_bytes = ir->shared_bytes;
 	binary->vertices_in = ir->vertices_in;
+	binary->early_fragment_tests = ir->early_fragment_tests;
 	binary->barrier_count = 0U;
 	if (ir->uses_barrier != 0U)
 		binary->barrier_count = 1U;

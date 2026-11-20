@@ -2354,6 +2354,7 @@ execute_draw(
 						 pipeline->raster_discard, pipeline->polygon_mode, pipeline->depth_clamp);
 		execute->at = nvrtx_exec_alpha_coverage(push, execute->at, pipeline->alpha_coverage);
 		execute->at = nvrtx_exec_sample_mask(push, execute->at, pipeline->sample_mask);
+		execute->at = nvrtx_exec_early_tests(push, execute->at, pipeline->early_tests);
 	}
 	execute_draw_state(execute, state, known);
 	if ((changes & EXECUTE_PIPELINE_BLEND) != 0U) {
@@ -2661,7 +2662,7 @@ execute_pipeline_changes(
 	    held->point_size != pipeline->point_size || held->layer != pipeline->layer || held->alpha_coverage != pipeline->alpha_coverage ||
 	    held->sample_mask != pipeline->sample_mask ||
 	    held->raster_discard != pipeline->raster_discard || held->polygon_mode != pipeline->polygon_mode ||
-	    held->depth_clamp != pipeline->depth_clamp)
+	    held->depth_clamp != pipeline->depth_clamp || held->early_tests != pipeline->early_tests)
 		changes |= EXECUTE_PIPELINE_RASTER;
 
 	/* The blend of each colour target and the logic operation. */
