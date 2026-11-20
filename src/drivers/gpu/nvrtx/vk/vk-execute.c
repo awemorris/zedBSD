@@ -554,6 +554,7 @@ static uint32_t execute_view_layers(uint32_t view_mask);
 static bool execute_layer_drawn(const struct execute_state *state, uint32_t layer);
 static int execute_query_views(struct nvrtx_vk_execute *execute, const struct execute_state *state, const struct nvrtx_vk_query_place *place);
 static int execute_draw_indirect(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
+static int execute_dispatch_indirect(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static uint32_t execute_pipeline_changes(const struct nvrtx_vk_pipeline *held, const struct nvrtx_vk_pipeline *pipeline);
 static bool execute_same_words(const uint32_t *left, const uint32_t *right, size_t count);
 static int execute_draw_constants(struct nvrtx_vk_execute *execute, const struct execute_state *state, const struct execute_stage_words *words, uint32_t first_instance, bool known);
@@ -1251,6 +1252,9 @@ execute_record(
 	case GPU_OP_CMD_DISPATCH:
 	case GPU_OP_CMD_DISPATCH_BASE:
 		error = execute_dispatch(execute, state, record);
+		break;
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+		error = execute_dispatch_indirect(session, execute, state, record);
 		break;
 	case GPU_OP_CMD_PIPELINE_BARRIER:
 		execute_after_dispatch(execute, state);
@@ -2477,6 +2481,52 @@ execute_draw(
 
 	/* Succeeded: the draw is written. */
 	return 0;
+}
+
+/*
+ * Runs an indirect dispatch: the work before it has run (it may have
+ * written the counts), then the counts, read by the CPU, are dispatched
+ * as a direct dispatch from the base 0.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_dispatch.c
+ * (nvk_CmdDispatchIndirect: the three counts of the
+ * VkDispatchIndirectCommand give the grid; here the CPU reads them once
+ * the work before is done, as for the indirect draws).
+ */
+static int
+execute_dispatch_indirect(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_execute *execute,
+	struct execute_state *state,
+	const struct nvrtx_vk_record *record)
+{
+	const struct nvrtx_vk_buffer *buffer;
+	struct nvrtx_vk_record direct;
+	uint32_t counts[3];
+	uint8_t *cpu;
+	int error;
+
+	/* The work before has run; the buffer's view. */
+	buffer = record->objects[0]->payload;
+	error = execute_drain(session, execute);
+	if (error == 0)
+		error = nvrtx_vk_buffer_cpu(session, buffer, &cpu);
+	if (error != 0)
+		return error;
+
+	/* The counts as a direct dispatch. */
+	kern_memcpy(counts, cpu + record->offsets[0], sizeof(counts));
+	direct = *record;
+	direct.opcode = GPU_OP_CMD_DISPATCH;
+	direct.values[0] = counts[0];
+	direct.values[1] = counts[1];
+	direct.values[2] = counts[2];
+	direct.values[3] = 0U;
+	direct.values[4] = 0U;
+	direct.values[5] = 0U;
+
+	/* Succeeded, or refused: dispatched as a direct dispatch. */
+	return execute_dispatch(execute, state, &direct);
 }
 
 /*

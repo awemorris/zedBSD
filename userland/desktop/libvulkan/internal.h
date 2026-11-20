@@ -353,6 +353,19 @@ struct vulkan_command_framebuffer {
 	VkFramebuffer framebuffer;
 };
 
+/* What a recording does with an event of a native driver, which the library keeps (core12.c). */
+enum vulkan_event_action {
+	VULKAN_EVENT_SET,
+	VULKAN_EVENT_RESET,
+	VULKAN_EVENT_WAIT
+};
+
+/* One action on an event (its VkEvent handle) a recording made, in recording order. */
+struct vulkan_event_record {
+	uint64_t event;
+	enum vulkan_event_action action;
+};
+
 struct VkCommandBuffer_T {
 	struct vulkan_object object;
 	struct vulkan_command_pool *pool;
@@ -407,6 +420,38 @@ struct VkCommandBuffer_T {
 	uint32_t batch_next;
 	uint32_t sent_pending;
 	VkResult sent_error;
+	/*
+	 * A native driver's secondary command buffer is the library's alone
+	 * (local): the renderer never sees it, its records stay in recording,
+	 * each from one of record_starts (record_count of them), and
+	 * vkCmdExecuteCommands copies them into the primary's recording.
+	 */
+	VkBool32 local;
+	size_t *record_starts;
+	uint32_t record_count;
+	uint32_t record_capacity;
+	/*
+	 * The actions on a native driver's events the recording made, in
+	 * order (event_count of them), which its submission reads; those of
+	 * the secondaries it executed included.
+	 */
+	struct vulkan_event_record *events;
+	uint32_t event_count;
+	uint32_t event_capacity;
+	/*
+	 * The render pass begun last, for vkCmdNextSubpass of a native
+	 * driver's render pass the library split (resources.c): the render
+	 * pass, the renderer's framebuffer it was begun with, the render
+	 * area, the clear values (pass_clear_count of them, in storage of
+	 * pass_clear_capacity) and the subpass it is in.
+	 */
+	VkRenderPass pass_begun;
+	VkFramebuffer pass_framebuffer;
+	VkRect2D pass_area;
+	VkClearValue *pass_clears;
+	uint32_t pass_clear_count;
+	uint32_t pass_clear_capacity;
+	uint32_t pass_subpass;
 };
 
 /* Keeps one allocation alive independently of its active mapped view. */
@@ -665,7 +710,8 @@ struct vulkan_context {
 	/*
 	 * The renderer is a native driver (its capset carries the native
 	 * word), not a Venus host: objects a native driver need not keep, as
-	 * the pipeline caches, are the library's own (pipeline.c).
+	 * the pipeline caches, the events and the secondary command buffers,
+	 * are the library's own (pipeline.c, core12.c, commands.c).
 	 */
 	VkBool32 native;
 	uint64_t max_resource_bytes;
@@ -919,6 +965,30 @@ const VkAttachmentDescription *
 vulkan_render_pass_attachment(
 	VkRenderPass render_pass,
 	uint32_t index);
+
+/*
+ * The barrier the move into a subpass of a render pass the library split
+ * makes (resources.c): the stages, accesses and flags of the dependencies
+ * of earlier subpasses on it.
+ */
+struct vulkan_subpass_barrier {
+	VkPipelineStageFlags source;
+	VkPipelineStageFlags destination;
+	VkAccessFlags source_access;
+	VkAccessFlags destination_access;
+};
+
+void
+vulkan_render_pass_part(
+	VkRenderPass render_pass,
+	uint32_t subpass,
+	VkRenderPass *part,
+	uint32_t *index);
+
+const struct vulkan_subpass_barrier *
+vulkan_render_pass_barrier(
+	VkRenderPass render_pass,
+	uint32_t subpass);
 
 /* Both ordinary and WSI command recording use one backend layout conversion. */
 uint32_t

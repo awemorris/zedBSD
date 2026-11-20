@@ -846,6 +846,8 @@ pipeline_encode_graphics(
 	VkBool32 depth;
 	VkBool32 tessellate;
 	VkPipelineMultisampleStateCreateInfo multisample;
+	VkRenderPass part;
+	uint32_t subpass;
 	uint32_t stage;
 	VkResult error;
 
@@ -998,8 +1000,11 @@ pipeline_encode_graphics(
 	if (info->pDynamicState != NULL)
 		vulkan_encode_VkPipelineDynamicStateCreateInfo(writer, info->pDynamicState);
 	vulkan_encode_handle(writer, (uint64_t)info->layout);
-	vulkan_encode_handle(writer, (uint64_t)info->renderPass);
-	vulkan_write_u32(writer, info->subpass);
+
+	/* The subpass as the renderer knows it: of its own render pass, when the library split the render pass. */
+	vulkan_render_pass_part(info->renderPass, info->subpass, &part, &subpass);
+	vulkan_encode_handle(writer, (uint64_t)part);
+	vulkan_write_u32(writer, subpass);
 	vulkan_encode_handle(writer, (uint64_t)base);
 	vulkan_write_u32(writer, (uint32_t)base_index);
 

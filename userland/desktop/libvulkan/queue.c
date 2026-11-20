@@ -92,10 +92,14 @@ vkQueueSubmit(
 	struct VkQueue_T *owner;
 	VkResult status;
 
-	/* A submission naming timeline semaphores goes through the library's timelines (core12.c). */
+	/*
+	 * A submission naming timeline semaphores or a native driver's events,
+	 * or to a queue whose batches are held back, goes through the
+	 * library (core12.c).
+	 */
 	owner = vulkan_queue(queue);
-	if (vulkan_timeline_named(submitCount, pSubmits))
-		return vulkan_timeline_submit(owner, submitCount, pSubmits, fence);
+	if (vulkan_library_sync_named(owner, submitCount, pSubmits))
+		return vulkan_library_sync_submit(owner, submitCount, pSubmits, fence);
 
 	/* Public and WSI submitters share the same ownership and payload transaction. */
 	status = vulkan_queue_submit(owner, submitCount, pSubmits, fence);

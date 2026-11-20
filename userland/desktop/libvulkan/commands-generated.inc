@@ -1366,6 +1366,10 @@ vkCmdSetEvent(
 	struct vulkan_writer writer;
 	VkBool32 active;
 
+	/* A native driver's events are the library's: the recording keeps the set. */
+	if (command_event_local(commandBuffer, VULKAN_EVENT_SET, event))
+		return;
+
 	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
 	active = command_record_begin(command, &writer, GPU_OP_CMD_SET_EVENT);
@@ -1395,6 +1399,10 @@ vkCmdResetEvent(
 	struct VkCommandBuffer_T *command;
 	struct vulkan_writer writer;
 	VkBool32 active;
+
+	/* A native driver's events are the library's: the recording keeps the reset. */
+	if (command_event_local(commandBuffer, VULKAN_EVENT_RESET, event))
+		return;
 
 	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
@@ -1435,6 +1443,10 @@ vkCmdWaitEvents(
 	VkBool32 active;
 	uint32_t index;
 	uint64_t count;
+
+	/* A native driver's events are the library's: the recording keeps the waits, with a barrier. */
+	if (command_wait_local(commandBuffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers))
+		return;
 
 	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
@@ -1866,7 +1878,7 @@ vkCmdBeginRenderPass(
 		command_encode_render_begin(command, &writer, pRenderPassBegin);
 
 	/* Preserves argument order with explicit scalar widths and owned handle translation. */
-	vulkan_record_u32(&writer, contents);
+	vulkan_record_u32(&writer, command_contents(command, contents));
 
 	/* Retain this complete command independently of caller pointer lifetimes. */
 	command_record_finish(command, &writer);
@@ -1887,6 +1899,10 @@ vkCmdNextSubpass(
 	struct vulkan_writer writer;
 	VkBool32 active;
 
+	/* A native driver's render pass of several subpasses is one render pass for each: the next is begun. */
+	if (command_next_subpass_local(commandBuffer))
+		return;
+
 	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
 	active = command_record_begin(command, &writer, GPU_OP_CMD_NEXT_SUBPASS);
@@ -1894,7 +1910,7 @@ vkCmdNextSubpass(
 		return;
 
 	/* Preserves argument order with explicit scalar widths and owned handle translation. */
-	vulkan_record_u32(&writer, contents);
+	vulkan_record_u32(&writer, command_contents(command, contents));
 
 	/* Retain this complete command independently of caller pointer lifetimes. */
 	command_record_finish(command, &writer);
@@ -1941,6 +1957,10 @@ vkCmdExecuteCommands(
 	VkBool32 active;
 	uint32_t index;
 	uint64_t count;
+
+	/* A native driver's secondary command buffers are the library's: their records are copied in. */
+	if (command_execute_local(commandBuffer, commandBufferCount, pCommandBuffers))
+		return;
 
 	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;

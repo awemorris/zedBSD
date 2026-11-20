@@ -12,7 +12,9 @@
  * 1.2 the library makes from those of 1.0: render passes of 1.2's form,
  * imageless framebuffers (resources.c), the host's query reset, timeline
  * semaphores and the buffer device addresses it does not offer yet.  The
- * indirect draws with a count go to the renderer (commands.c).
+ * indirect draws with a count go to the renderer (commands.c).  A native
+ * driver's events, which the library keeps, are held back with the same
+ * batches as the timelines.
  */
 
 #include <pthread.h>
@@ -77,6 +79,26 @@ struct vulkan_timeline {
 	struct VkDevice_T *device;
 	uint64_t value;
 	struct core12_signal *signals;
+};
+
+/* A set or reset of an event by a submitted batch, which takes effect when the batch completes. */
+struct core12_event_change {
+	struct core12_event_change *next;
+	VkBool32 set;
+	struct VkQueue_T *queue;
+	struct core12_fence *fence;
+};
+
+/*
+ * An event of a native driver, the library's alone: whether it is set (by
+ * the host, or by batches that completed) and the changes submitted
+ * batches will make, oldest first.  The renderer has no event; a wait for
+ * it is a barrier in the recording, and the batch that holds the wait
+ * goes to the renderer once the event is set or will be by then.
+ */
+struct vulkan_event {
+	VkBool32 set;
+	struct core12_event_change *changes;
 };
 
 /*
@@ -185,7 +207,14 @@ static VkResult core12_check_flag(VkBool32 requested, VkBool32 reported);
 static struct VkQueue_T *core12_query_queue(struct VkDevice_T *device);
 static struct vulkan_timeline *core12_timeline_of(VkSemaphore semaphore);
 static void core12_fence_release(struct core12_fence *fence);
+static VkResult core12_fence_check(struct core12_fence *fence);
 static VkResult core12_refresh(struct vulkan_timeline *timeline);
+static struct vulkan_event *core12_event_of(uint64_t handle);
+static VkResult core12_event_refresh(struct vulkan_event *event);
+static VkBool32 core12_event_earlier(const VkSubmitInfo *submit, uint32_t buffer, uint32_t action, uint64_t handle, VkBool32 *set);
+static VkResult core12_events_ready(struct VkQueue_T *queue, const VkSubmitInfo *submit, enum core12_ready *ready, struct core12_fence **fence);
+static VkBool32 core12_batch_changes(const VkSubmitInfo *submit);
+static VkResult core12_changes_add(struct VkQueue_T *queue, const VkSubmitInfo *submit, struct core12_fence *fence);
 static VkBool32 core12_queue_held(struct VkQueue_T *queue);
 static const VkTimelineSemaphoreSubmitInfo *core12_batch_values(const VkSubmitInfo *submit);
 static VkResult core12_batch_ready(struct VkQueue_T *queue, const VkSubmitInfo *submit, enum core12_ready *ready, struct core12_fence **fence);
@@ -461,17 +490,30 @@ vulkan_timeline_destroy(
 	free(timeline);
 }
 
-/* Tells whether a submission waits for or signals a timeline semaphore. */
+/*
+ * Tells whether a submission goes through the library: it waits for or
+ * signals a timeline semaphore, a command buffer of it acts on a native
+ * driver's event, or batches of its queue are held back (it goes after
+ * them).
+ */
 VkBool32
-vulkan_timeline_named(
+vulkan_library_sync_named(
+	struct VkQueue_T *queue,
 	uint32_t count,
 	const VkSubmitInfo *submits)
 {
+	struct VkCommandBuffer_T *command;
+	VkBool32 held;
 	uint32_t index;
 	uint32_t item;
 
-	/* Every semaphore of every batch. */
+	/* Every semaphore and command buffer of every batch. */
 	for (index = 0; index < count; index++) {
+		for (item = 0; item < submits[index].commandBufferCount; item++) {
+			command = (struct VkCommandBuffer_T *)submits[index].pCommandBuffers[item];
+			if (command != NULL && command->event_count != 0U)
+				return VK_TRUE;
+		}
 		for (item = 0; item < submits[index].waitSemaphoreCount; item++) {
 			if (core12_timeline_of(submits[index].pWaitSemaphores[item]) != NULL)
 				return VK_TRUE;
@@ -482,13 +524,23 @@ vulkan_timeline_named(
 		}
 	}
 
-	/* Binary semaphores only. */
-	return VK_FALSE;
+	/*
+	 * Binary semaphores only: through the library still when the queue's
+	 * batches are held back.  Only a submission to the queue holds one
+	 * back, and the application keeps the queue to this thread.
+	 */
+	pthread_mutex_lock(&core12_timeline_mutex);
+	held = core12_queue_held(queue);
+	pthread_mutex_unlock(&core12_timeline_mutex);
+
+	/* Succeeded: held back batches, or the renderer's alone. */
+	return held;
 }
 
 /*
- * Submits batches that wait for or signal timeline semaphores.  The
- * renderer knows binary semaphores only, so the library sends each batch
+ * Submits batches that wait for or signal timeline semaphores, or act on
+ * a native driver's events.  The renderer knows binary semaphores only,
+ * so the library sends each batch
  * without its timeline semaphores once the values it waits for are
  * reached, or will be by a batch sent before it on the same queue (a queue
  * runs its batches in order), or by a batch of another queue, whose
@@ -496,15 +548,26 @@ vulkan_timeline_named(
  * been submitted to signal yet is held back, with every later batch of its
  * queue, until a host signal or a submission signals it.  A batch that
  * signals a timeline is followed by a fence of the library's, whose
- * completion gives the timeline its value.
+ * completion gives the timeline its value.  Events are alike: a batch
+ * that waits for an event goes once the event is set, or will be by a
+ * batch sent before it on the same queue (or by an earlier command of the
+ * batch), or after the batch of another queue that sets it, and is held
+ * back otherwise until the host sets it; a batch that sets or resets
+ * events is followed by a fence of the library's, whose completion
+ * changes them.
+ *
+ * XXX A held-back batch waits from its start: commands recorded before
+ * the wait also wait for the host's set.
  *
  * Procedure referenced: the Vulkan 1.2 specification (section 7.4.2,
  * Semaphore Waiting: a wait may be submitted before the signal it waits
  * for; section 7.4.1, Semaphore Signaling: the value is set when the batch
- * completes).
+ * completes; section 7.5, Events: an event set by the host or by an
+ * earlier command in submission order releases vkCmdWaitEvents, whose
+ * dependency covers the stages and barriers it names).
  */
 VkResult
-vulkan_timeline_submit(
+vulkan_library_sync_submit(
 	struct VkQueue_T *queue,
 	uint32_t count,
 	const VkSubmitInfo *submits,
@@ -637,6 +700,100 @@ vkSignalSemaphore(
 
 	/* Succeeded: the semaphore has the value. */
 	return VK_SUCCESS;
+}
+
+/* Makes a native driver's event the library's, reset. */
+VkResult
+vulkan_event_create(
+	struct vulkan_sync *sync)
+{
+	struct vulkan_event *event;
+
+	/* Reset, no change pending. */
+	event = calloc(1, sizeof(*event));
+	if (event == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	sync->library_event = event;
+
+	/* Succeeded: the event exists. */
+	return VK_SUCCESS;
+}
+
+/* Forgets a native driver's event when it is destroyed. */
+void
+vulkan_event_destroy(
+	struct vulkan_sync *sync)
+{
+	struct vulkan_event *event;
+	struct core12_event_change *change;
+
+	/* None (a Venus host's event). */
+	if (sync == NULL || sync->library_event == NULL)
+		return;
+
+	/* Its changes (the application waited for their batches before destroying it). */
+	pthread_mutex_lock(&core12_timeline_mutex);
+	event = sync->library_event;
+	sync->library_event = NULL;
+	while (event->changes != NULL) {
+		change = event->changes;
+		event->changes = change->next;
+		core12_fence_release(change->fence);
+		free(change);
+	}
+	pthread_mutex_unlock(&core12_timeline_mutex);
+	free(event);
+}
+
+/* Gives a native driver's event's state: VK_EVENT_SET or VK_EVENT_RESET, or a failure. */
+VkResult
+vulkan_event_status(
+	struct vulkan_sync *sync)
+{
+	struct vulkan_event *event;
+	VkResult status;
+
+	/* The state, after the batches that completed since it was last read. */
+	event = sync->library_event;
+	pthread_mutex_lock(&core12_timeline_mutex);
+	status = core12_event_refresh(event);
+	if (status == VK_SUCCESS) {
+		status = VK_EVENT_RESET;
+		if (event->set)
+			status = VK_EVENT_SET;
+	}
+	pthread_mutex_unlock(&core12_timeline_mutex);
+
+	/* Refused (a device lost), or succeeded: the state. */
+	return status;
+}
+
+/*
+ * Sets or resets a native driver's event from the host, after the
+ * changes of the batches that completed before; batches held back for it
+ * go to the renderer once it is set.
+ */
+VkResult
+vulkan_event_host(
+	struct vulkan_sync *sync,
+	VkBool32 set)
+{
+	struct vulkan_event *event;
+	VkResult status;
+
+	/* The state, the held-back batches sent. */
+	event = sync->library_event;
+	pthread_mutex_lock(&core12_timeline_mutex);
+	status = core12_event_refresh(event);
+	if (status == VK_SUCCESS) {
+		event->set = set;
+		if (set)
+			core12_flush();
+	}
+	pthread_mutex_unlock(&core12_timeline_mutex);
+
+	/* Refused (a device lost), or succeeded: the event has the state. */
+	return status;
 }
 
 /*
@@ -1007,22 +1164,26 @@ vulkan_render_pass2_encode(
 	const VkRenderPassCreateInfo2 *info,
 	const VkRenderPassCreateInfo *converted)
 {
-	const VkAttachmentDescription2 *attachment;
+	const VkAttachmentDescription *attachment;
 	const VkSubpassDescription2 *subpass;
 	const VkSubpassDescriptionDepthStencilResolve *resolve;
 	const VkSubpassDependency *dependency;
 	uint32_t index;
+	int32_t offset;
 
 	/* The record's header and flags; its own chain is not sent. */
 	vulkan_write_u32(writer, info->sType);
 	vulkan_write_u64(writer, 0U);
 	vulkan_write_u32(writer, info->flags);
 
-	/* The attachments. */
-	vulkan_write_u32(writer, info->attachmentCount);
-	vulkan_write_u64(writer, info->pAttachments != NULL ? info->attachmentCount : 0U);
-	for (index = 0; info->pAttachments != NULL && index < info->attachmentCount; index++) {
-		attachment = &info->pAttachments[index];
+	/*
+	 * The attachments, of the 1.0 form (the same fields; the stencil's
+	 * own layouts in the layout of both aspects).
+	 */
+	vulkan_write_u32(writer, converted->attachmentCount);
+	vulkan_write_u64(writer, converted->pAttachments != NULL ? converted->attachmentCount : 0U);
+	for (index = 0; converted->pAttachments != NULL && index < converted->attachmentCount; index++) {
+		attachment = &converted->pAttachments[index];
 		vulkan_write_u32(writer, VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2);
 		vulkan_write_u64(writer, 0U);
 		vulkan_write_u32(writer, attachment->flags);
@@ -1071,11 +1232,17 @@ vulkan_render_pass2_encode(
 			vulkan_write_bytes(writer, subpass->pPreserveAttachments, (size_t)subpass->preserveAttachmentCount * sizeof(uint32_t));
 	}
 
-	/* The dependencies, with the masks of their 1.0 form. */
-	vulkan_write_u32(writer, info->dependencyCount);
-	vulkan_write_u64(writer, info->pDependencies != NULL ? info->dependencyCount : 0U);
-	for (index = 0; info->pDependencies != NULL && index < info->dependencyCount; index++) {
+	/*
+	 * The dependencies of the 1.0 form, with the view offsets of the 1.2
+	 * record when it has them (a subpass of a split render pass has none).
+	 */
+	vulkan_write_u32(writer, converted->dependencyCount);
+	vulkan_write_u64(writer, converted->pDependencies != NULL ? converted->dependencyCount : 0U);
+	for (index = 0; converted->pDependencies != NULL && index < converted->dependencyCount; index++) {
 		dependency = &converted->pDependencies[index];
+		offset = 0;
+		if (info->pDependencies != NULL && index < info->dependencyCount)
+			offset = info->pDependencies[index].viewOffset;
 		vulkan_write_u32(writer, VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2);
 		vulkan_write_u64(writer, 0U);
 		vulkan_write_u32(writer, dependency->srcSubpass);
@@ -1085,7 +1252,7 @@ vulkan_render_pass2_encode(
 		vulkan_write_u32(writer, dependency->srcAccessMask);
 		vulkan_write_u32(writer, dependency->dstAccessMask);
 		vulkan_write_u32(writer, dependency->dependencyFlags);
-		vulkan_write_u32(writer, (uint32_t)info->pDependencies[index].viewOffset);
+		vulkan_write_u32(writer, (uint32_t)offset);
 	}
 
 	/* The correlated view masks. */
@@ -1568,6 +1735,28 @@ core12_fence_release(
 }
 
 /*
+ * Tells whether a batch's fence has signaled: VK_SUCCESS when it has,
+ * VK_NOT_READY when not yet, else the failure.  The caller holds the
+ * timeline mutex.
+ */
+static VkResult
+core12_fence_check(
+	struct core12_fence *fence)
+{
+	VkResult status;
+
+	/* Asked once more until it signals. */
+	if (fence->signaled)
+		return VK_SUCCESS;
+	status = vkGetFenceStatus((VkDevice)fence->device, fence->fence);
+	if (status == VK_SUCCESS)
+		fence->signaled = VK_TRUE;
+
+	/* Succeeded, not yet, or refused. */
+	return status;
+}
+
+/*
  * Gives a timeline the values of its batches that completed: each signal
  * whose fence signaled raises the value and is forgotten.  The caller
  * holds the timeline mutex.
@@ -1584,16 +1773,12 @@ core12_refresh(
 	link = &timeline->signals;
 	while (*link != NULL) {
 		signal = *link;
-		if (!signal->fence->signaled) {
-			status = vkGetFenceStatus((VkDevice)signal->fence->device, signal->fence->fence);
-			if (status == VK_SUCCESS)
-				signal->fence->signaled = VK_TRUE;
-			else if (status != VK_NOT_READY)
-				return status;
-		}
+		status = core12_fence_check(signal->fence);
+		if (status != VK_SUCCESS && status != VK_NOT_READY)
+			return status;
 
 		/* Not yet. */
-		if (!signal->fence->signaled) {
+		if (status == VK_NOT_READY) {
 			link = &signal->next;
 			continue;
 		}
@@ -1607,6 +1792,240 @@ core12_refresh(
 	}
 
 	/* Succeeded: the value is current. */
+	return VK_SUCCESS;
+}
+
+/* Gives the library's state of a native driver's event, NULL for none. */
+static struct vulkan_event *
+core12_event_of(
+	uint64_t handle)
+{
+	struct vulkan_sync *sync;
+
+	/* The library's record of the event. */
+	sync = vulkan_sync_object(handle);
+	if (sync == NULL)
+		return NULL;
+
+	/* Succeeded: its state, if the library keeps it. */
+	return sync->library_event;
+}
+
+/*
+ * Gives an event the changes of its batches that completed, oldest first,
+ * each forgotten once made.  The caller holds the timeline mutex.
+ */
+static VkResult
+core12_event_refresh(
+	struct vulkan_event *event)
+{
+	struct core12_event_change **link;
+	struct core12_event_change *change;
+	VkResult status;
+
+	/* Each pending change, its fence asked once. */
+	link = &event->changes;
+	while (*link != NULL) {
+		change = *link;
+		status = core12_fence_check(change->fence);
+		if (status != VK_SUCCESS && status != VK_NOT_READY)
+			return status;
+
+		/* Not yet. */
+		if (status == VK_NOT_READY) {
+			link = &change->next;
+			continue;
+		}
+
+		/* Completed: the event has its state. */
+		event->set = change->set;
+		*link = change->next;
+		core12_fence_release(change->fence);
+		free(change);
+	}
+
+	/* Succeeded: the state is current. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Tells whether a batch sets or resets an event before one of its actions
+ * (the action of that index in the command buffer of that index), and in
+ * *set the last such change.
+ */
+static VkBool32
+core12_event_earlier(
+	const VkSubmitInfo *submit,
+	uint32_t buffer,
+	uint32_t action,
+	uint64_t handle,
+	VkBool32 *set)
+{
+	struct VkCommandBuffer_T *command;
+	const struct vulkan_event_record *record;
+	VkBool32 found;
+	uint32_t index;
+	uint32_t item;
+	uint32_t last;
+
+	/* The command buffers before it, then its own actions before it. */
+	found = VK_FALSE;
+	for (index = 0; index <= buffer; index++) {
+		command = (struct VkCommandBuffer_T *)submit->pCommandBuffers[index];
+		last = command->event_count;
+		if (index == buffer)
+			last = action;
+		for (item = 0; item < last; item++) {
+			record = &command->events[item];
+			if (record->event != handle || record->action == VULKAN_EVENT_WAIT)
+				continue;
+			found = VK_TRUE;
+			*set = record->action == VULKAN_EVENT_SET;
+		}
+	}
+
+	/* Succeeded: whether one was found. */
+	return found;
+}
+
+/*
+ * Tells how a batch's waits for events can be met: now (each event is
+ * set, or set by an earlier command of the batch or by a batch sent before
+ * it on the same queue), after the fence of another queue's batch that
+ * sets one (*fence), or not yet (only the host can set one).
+ */
+static VkResult
+core12_events_ready(
+	struct VkQueue_T *queue,
+	const VkSubmitInfo *submit,
+	enum core12_ready *ready,
+	struct core12_fence **fence)
+{
+	struct VkCommandBuffer_T *command;
+	const struct vulkan_event_record *record;
+	struct core12_event_change *last;
+	struct vulkan_event *event;
+	VkBool32 set;
+	VkResult status;
+	uint32_t index;
+	uint32_t item;
+
+	/* Each wait of each command buffer. */
+	*ready = CORE12_READY;
+	*fence = NULL;
+	for (index = 0; index < submit->commandBufferCount; index++) {
+		command = (struct VkCommandBuffer_T *)submit->pCommandBuffers[index];
+		for (item = 0; item < command->event_count; item++) {
+			record = &command->events[item];
+			if (record->action != VULKAN_EVENT_WAIT)
+				continue;
+			event = core12_event_of(record->event);
+			if (event == NULL)
+				continue;
+
+			/* Set before it in the batch. */
+			set = VK_FALSE;
+			if (core12_event_earlier(submit, index, item, record->event, &set) && set)
+				continue;
+			status = core12_event_refresh(event);
+			if (status != VK_SUCCESS)
+				return status;
+
+			/*
+			 * A submitted batch's change comes last: a set of this
+			 * queue's is before it, another queue's is waited for.
+			 */
+			last = event->changes;
+			while (last != NULL && last->next != NULL)
+				last = last->next;
+			if (last != NULL && last->set && last->queue == queue)
+				continue;
+			if (last != NULL && last->set) {
+				*ready = CORE12_AFTER_FENCE;
+				*fence = last->fence;
+				return VK_SUCCESS;
+			}
+
+			/* Set now (and no submitted batch resets it), or only the host can. */
+			if (last == NULL && event->set)
+				continue;
+			*ready = CORE12_NOT_YET;
+			return VK_SUCCESS;
+		}
+	}
+
+	/* Succeeded: the waits can be met. */
+	return VK_SUCCESS;
+}
+
+/* Tells whether a batch sets or resets a native driver's event. */
+static VkBool32
+core12_batch_changes(
+	const VkSubmitInfo *submit)
+{
+	struct VkCommandBuffer_T *command;
+	uint32_t index;
+	uint32_t item;
+
+	/* Each action of each command buffer. */
+	for (index = 0; index < submit->commandBufferCount; index++) {
+		command = (struct VkCommandBuffer_T *)submit->pCommandBuffers[index];
+		for (item = 0; item < command->event_count; item++) {
+			if (command->events[item].action != VULKAN_EVENT_WAIT)
+				return VK_TRUE;
+		}
+	}
+
+	/* None. */
+	return VK_FALSE;
+}
+
+/*
+ * Adds the sets and resets of a sent batch, in order, to their events'
+ * changes, each made when the batch's fence signals.  The caller holds the
+ * timeline mutex and a reference to the fence.
+ */
+static VkResult
+core12_changes_add(
+	struct VkQueue_T *queue,
+	const VkSubmitInfo *submit,
+	struct core12_fence *fence)
+{
+	struct VkCommandBuffer_T *command;
+	const struct vulkan_event_record *record;
+	struct core12_event_change *change;
+	struct core12_event_change **link;
+	struct vulkan_event *event;
+	uint32_t index;
+	uint32_t item;
+
+	/* Each set and reset of each command buffer. */
+	for (index = 0; index < submit->commandBufferCount; index++) {
+		command = (struct VkCommandBuffer_T *)submit->pCommandBuffers[index];
+		for (item = 0; item < command->event_count; item++) {
+			record = &command->events[item];
+			if (record->action == VULKAN_EVENT_WAIT)
+				continue;
+			event = core12_event_of(record->event);
+			if (event == NULL)
+				continue;
+			change = calloc(1, sizeof(*change));
+			if (change == NULL)
+				return VK_ERROR_OUT_OF_HOST_MEMORY;
+			change->set = record->action == VULKAN_EVENT_SET;
+			change->queue = queue;
+			change->fence = fence;
+			fence->references++;
+
+			/* After the changes submitted before it. */
+			link = &event->changes;
+			while (*link != NULL)
+				link = &(*link)->next;
+			*link = change;
+		}
+	}
+
+	/* Succeeded: the changes are known. */
 	return VK_SUCCESS;
 }
 
@@ -1701,14 +2120,20 @@ core12_batch_ready(
 		}
 	}
 
-	/* Succeeded: the batch can go now. */
+	/* The events it waits for. */
+	status = core12_events_ready(queue, submit, ready, fence);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the batch can go now, after a fence, or not yet. */
 	return VK_SUCCESS;
 }
 
 /*
  * Sends one batch to the renderer without its timeline semaphores (fence
- * is the submission's, for its last batch), then, if it signals timelines,
- * a fence of the library's that tells when it completes.
+ * is the submission's, for its last batch), then, if it signals timelines
+ * or sets or resets events, a fence of the library's that tells when it
+ * completes.
  */
 static VkResult
 core12_batch_send(
@@ -1725,6 +2150,7 @@ core12_batch_send(
 	VkSemaphore *semaphores;
 	VkPipelineStageFlags *stages;
 	VkBool32 signals;
+	VkBool32 changes;
 	VkResult status;
 	uint32_t index;
 	uint32_t waits;
@@ -1770,7 +2196,8 @@ core12_batch_send(
 	status = vulkan_queue_submit(queue, 1U, &binary, fence);
 	free(stages);
 	free(semaphores);
-	if (status != VK_SUCCESS || !signals)
+	changes = core12_batch_changes(submit);
+	if (status != VK_SUCCESS || (!signals && !changes))
 		return status;
 
 	/* The library's fence after it, which signals when it completes. */
@@ -1810,6 +2237,10 @@ core12_batch_send(
 		signal->next = timeline->signals;
 		timeline->signals = signal;
 	}
+
+	/* Each event it sets or resets, in order. */
+	if (status == VK_SUCCESS)
+		status = core12_changes_add(queue, submit, completion);
 	core12_fence_release(completion);
 	pthread_cond_broadcast(&core12_timeline_cond);
 

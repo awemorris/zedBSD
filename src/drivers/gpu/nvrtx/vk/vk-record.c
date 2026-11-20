@@ -80,6 +80,7 @@ static int record_draw(struct i915_wire_reader *reader, struct nvrtx_vk_record *
 static int record_draw_indexed(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_draw_indirect(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_dispatch(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
+static int record_dispatch_indirect(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_dispatch_base(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_copy(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_update_buffer(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
@@ -164,6 +165,7 @@ nvrtx_vk_record_route(
 	case GPU_OP_CMD_DRAW_INDIRECT:
 	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
 	case GPU_OP_CMD_DISPATCH_BASE:
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
@@ -335,6 +337,9 @@ record_decode(
 		break;
 	case GPU_OP_CMD_DISPATCH:
 		error = record_dispatch(reader, record);
+		break;
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+		error = record_dispatch_indirect(session, reader, record);
 		break;
 	case GPU_OP_CMD_DISPATCH_BASE:
 		error = record_dispatch_base(reader, record);
@@ -922,6 +927,48 @@ record_dispatch(
 		return EINVAL;
 
 	/* Succeeded: the dispatch is recorded. */
+	return 0;
+}
+
+/*
+ * vkCmdDispatchIndirect: [buffer][offset], where the group counts are
+ * (a VkDispatchIndirectCommand, read when it runs).
+ *
+ * Values referenced: the Vulkan 1.0 specification (section 27.1,
+ * vkCmdDispatchIndirect: the offset a multiple of 4, the 12 bytes of
+ * VkDispatchIndirectCommand within the buffer).
+ */
+static int
+record_dispatch_indirect(
+	struct nvrtx_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct nvrtx_vk_record *record)
+{
+	const struct nvrtx_vk_buffer *buffer;
+	uint64_t identity;
+	int error;
+
+	/* The buffer and where the counts are. */
+	identity = drv_i915_wire_read_u64(reader);
+	record->offsets[0] = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+	if ((record->offsets[0] & 3U) != 0U)
+		return ERANGE;
+
+	/* The record holds the buffer, which must be known. */
+	error = record_hold(session, record, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && record->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* The counts within the buffer. */
+	buffer = record->objects[0]->payload;
+	if (record->offsets[0] > buffer->size || buffer->size - record->offsets[0] < (uint64_t)sizeof(VkDispatchIndirectCommand))
+		return ERANGE;
+
+	/* Succeeded: the dispatch is recorded; its counts are read when it runs. */
 	return 0;
 }
 
