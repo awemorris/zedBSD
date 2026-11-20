@@ -208,6 +208,11 @@ struct powervr_draw_dynamic {
  * framebuffer with its own pipeline for the job's attachments, the
  * scissor the rectangle, the colours and depth in the push constants
  * (POWERVR_DRAW_CLEAR_*), writing only the attachments the mask names.
+ *
+ * An indirect draw (indirect not NULL: the executor's buffer, and the
+ * place of its record in it) takes its counts, its first vertex or index
+ * and vertex offset, and its first instance from the record once the
+ * work before it has finished; until then they are not the draw's.
  */
 struct powervr_render_draw {
 	const void *pipeline;
@@ -223,6 +228,8 @@ struct powervr_render_draw {
 	uint32_t instances;
 	uint32_t first_instance;
 	uint32_t vertex_offset;
+	const void *indirect;
+	uint64_t indirect_offset;
 	VkViewport viewport;
 	VkRect2D scissor;
 	struct powervr_draw_dynamic dynamic;

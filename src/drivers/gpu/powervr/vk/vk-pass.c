@@ -647,7 +647,7 @@ powervr_vk_render_jobs(
 				if (error != 0)
 					return job_refused(error, "clear", job);
 			}
-		} else if (entry->opcode == GPU_OP_CMD_DRAW || entry->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		} else if (powervr_vk_draw_recorded(entry)) {
 			/* A draw inside the instance. */
 			if (job == NULL)
 				return EINVAL;
@@ -952,19 +952,38 @@ draw_add(
 		}
 	}
 
-	/* The counts: a draw's first vertex, an indexed draw's index buffer at its first index and its vertex offset. */
-	draw->count = entry->values[0];
-	draw->instances = entry->values[1];
-	draw->first_instance = entry->values[3];
-	if (entry->opcode == GPU_OP_CMD_DRAW) {
-		draw->vertex_offset = entry->values[2];
+	/*
+	 * An indirect draw: its buffer and record, its counts read when it
+	 * runs (powervr_vk_draw_indirect_read), an indexed one's index buffer
+	 * at its start until then.
+	 */
+	if (entry->opcode == GPU_OP_CMD_DRAW_INDIRECT || entry->opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT) {
+		draw->indirect = entry->objects[0]->payload;
+		draw->indirect_offset = (uint64_t)entry->values[0] | ((uint64_t)entry->values[1] << 32);
+		draw->count = 1;
+		draw->instances = 1;
+		if (entry->opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT) {
+			if (state->index_bytes == 0)
+				return EINVAL;
+			draw->indexed = true;
+			draw->index_bytes = state->index_bytes;
+			draw->index_address = state->index_address;
+		}
 	} else {
-		if (state->index_bytes == 0)
-			return EINVAL;
-		draw->indexed = true;
-		draw->index_bytes = state->index_bytes;
-		draw->index_address = state->index_address + (uint64_t)entry->values[2] * state->index_bytes;
-		draw->vertex_offset = entry->first;
+		/* The counts: a draw's first vertex, an indexed draw's index buffer at its first index and its vertex offset. */
+		draw->count = entry->values[0];
+		draw->instances = entry->values[1];
+		draw->first_instance = entry->values[3];
+		if (entry->opcode == GPU_OP_CMD_DRAW) {
+			draw->vertex_offset = entry->values[2];
+		} else {
+			if (state->index_bytes == 0)
+				return EINVAL;
+			draw->indexed = true;
+			draw->index_bytes = state->index_bytes;
+			draw->index_address = state->index_address + (uint64_t)entry->values[2] * state->index_bytes;
+			draw->vertex_offset = entry->first;
+		}
 	}
 
 	/* An empty draw is no draw. */

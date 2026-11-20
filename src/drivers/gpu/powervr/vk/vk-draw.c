@@ -711,3 +711,99 @@ record_dynamic(
 	/* Succeeded: the state is recorded. */
 	return 0;
 }
+
+/*
+ * Says whether a record adds a draw to its render pass instance's job:
+ * vkCmdDraw and vkCmdDrawIndexed, and their indirect forms of one draw
+ * (one of none adds nothing).
+ */
+bool
+powervr_vk_draw_recorded(
+	const struct powervr_vk_record *entry)
+{
+	/* The direct draws. */
+	if (entry->opcode == GPU_OP_CMD_DRAW || entry->opcode == GPU_OP_CMD_DRAW_INDEXED)
+		return true;
+
+	/* The indirect ones of a draw. */
+	if (entry->opcode == GPU_OP_CMD_DRAW_INDIRECT || entry->opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT)
+		return entry->values[2] != 0;
+
+	/* Anything else. */
+	return false;
+}
+
+/* Says whether a job has an indirect draw. */
+bool
+powervr_vk_draw_indirect_has(
+	const struct powervr_render_job *job)
+{
+	uint32_t index;
+
+	/* Each draw. */
+	for (index = 0; index < job->draw_count; index++) {
+		if (job->draws[index].indirect != NULL)
+			return true;
+	}
+
+	/* None. */
+	return false;
+}
+
+/*
+ * Reads each indirect draw's record from its buffer (through the buffer's
+ * uncached view; the caller has waited for the work before the job):
+ * vkCmdDrawIndirect's vertex count, instance count, first vertex and
+ * first instance, vkCmdDrawIndexedIndirect's index count, instance count,
+ * first index (moving the index buffer's address on), vertex offset and
+ * first instance.  A draw whose record counts no vertex or no instance
+ * is taken out of the job.  EIO for a buffer without a view.
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (VkDrawIndirectCommand: vertexCount, instanceCount, firstVertex,
+ * firstInstance; VkDrawIndexedIndirectCommand: indexCount,
+ * instanceCount, firstIndex, vertexOffset, firstInstance).
+ */
+int
+powervr_vk_draw_indirect_read(
+	struct powervr_render_job *job)
+{
+	struct powervr_render_draw *draw;
+	volatile const uint32_t *words;
+	volatile uint8_t *view;
+	uint32_t index;
+	uint32_t kept;
+	int error;
+
+	/* Each draw, the empty ones dropped. */
+	kept = 0;
+	for (index = 0; index < job->draw_count; index++) {
+		draw = &job->draws[index];
+		if (draw->indirect != NULL) {
+			error = powervr_vk_buffer_view(draw->indirect, &view);
+			if (error != 0)
+				return error;
+			words = (volatile const uint32_t *)(const void *)(view + draw->indirect_offset);
+			draw->count = words[0];
+			draw->instances = words[1];
+			if (draw->indexed) {
+				draw->index_address += (uint64_t)words[2] * draw->index_bytes;
+				draw->vertex_offset = words[3];
+				draw->first_instance = words[4];
+			} else {
+				draw->vertex_offset = words[2];
+				draw->first_instance = words[3];
+			}
+			draw->indirect = NULL;
+			if (draw->count == 0 || draw->instances == 0)
+				continue;
+		}
+		if (kept != index)
+			kern_memcpy(&job->draws[kept], draw, sizeof(*draw));
+		kept++;
+	}
+	job->draw_count = kept;
+
+	/* Succeeded: the job's draws have their counts. */
+	return 0;
+}

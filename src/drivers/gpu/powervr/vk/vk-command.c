@@ -66,6 +66,7 @@ static int record_pipeline(struct powervr_vk_session *session, struct i915_wire_
 static int record_sets(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_dispatch(struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_dispatch_indirect(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+static int record_draw_indirect(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_buffer_write(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_barrier(struct powervr_vk_session *session, struct i915_wire_reader *reader);
 static int record_hold(struct powervr_vk_session *session, struct powervr_vk_record *entry, enum i915_vk_object_kind kind, uint64_t identity);
@@ -146,6 +147,8 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_PUSH_CONSTANTS:
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
 	case GPU_OP_CMD_RESET_QUERY_POOL:
 	case GPU_OP_CMD_BEGIN_QUERY:
 	case GPU_OP_CMD_END_QUERY:
@@ -592,6 +595,8 @@ record(
 		refused = record_dispatch(reader, &entry);
 	} else if (opcode == GPU_OP_CMD_DISPATCH_INDIRECT) {
 		refused = record_dispatch_indirect(session, reader, &entry);
+	} else if (opcode == GPU_OP_CMD_DRAW_INDIRECT || opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT) {
+		refused = record_draw_indirect(session, opcode, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_FILL_BUFFER || opcode == GPU_OP_CMD_UPDATE_BUFFER) {
 		refused = record_buffer_write(session, opcode, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) {
@@ -908,6 +913,65 @@ record_dispatch_indirect(
 	entry->values[1] = (uint32_t)(offset >> 32);
 
 	/* Succeeded: the dispatch is recorded; its counts are read when it runs. */
+	return 0;
+}
+
+/*
+ * vkCmdDrawIndirect and vkCmdDrawIndexedIndirect: [buffer][offset][draw
+ * count][stride].  The record holds the buffer as object 0 and keeps the
+ * offset (values 0 and 1, low word first) and the draw count (value 2, 0
+ * or 1: the device reports a maxDrawIndirectCount of 1); the draw's
+ * counts are read from the buffer when its render pass instance runs
+ * (powervr_vk_draw_indirect_read).  ENOENT for an unknown buffer; EINVAL
+ * for an offset not of whole words or a record past the buffer's end;
+ * ENOTSUP for more than one draw.
+ *
+ * Values referenced: the Vulkan 1.0 specification (vkCmdDrawIndirect,
+ * vkCmdDrawIndexedIndirect: VkDrawIndirectCommand of 16 bytes,
+ * VkDrawIndexedIndirectCommand of 20, the offset a multiple of 4,
+ * drawCount at most maxDrawIndirectCount).
+ */
+static int
+record_draw_indirect(
+	struct powervr_vk_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader,
+	struct powervr_vk_record *entry)
+{
+	const struct powervr_vk_buffer *buffer;
+	uint64_t identity;
+	uint64_t offset;
+	uint64_t bytes;
+	uint32_t draws;
+	int error;
+
+	/* The buffer, where the record is, the draws and their stride. */
+	identity = drv_i915_wire_read_u64(reader);
+	offset = drv_i915_wire_read_u64(reader);
+	draws = drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* The record holds the known buffer. */
+	error = record_hold(session, entry, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && entry->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* One draw at most, whole words, within the buffer. */
+	if (draws > 1U)
+		return ENOTSUP;
+	bytes = opcode == GPU_OP_CMD_DRAW_INDIRECT ? sizeof(VkDrawIndirectCommand) : sizeof(VkDrawIndexedIndirectCommand);
+	buffer = entry->objects[0]->payload;
+	if ((offset & 3U) != 0U || (draws != 0 && (offset > buffer->size || buffer->size - offset < bytes)))
+		return EINVAL;
+	entry->values[0] = (uint32_t)offset;
+	entry->values[1] = (uint32_t)(offset >> 32);
+	entry->values[2] = draws;
+
+	/* Succeeded: the draw is recorded; its counts are read when it runs. */
 	return 0;
 }
 

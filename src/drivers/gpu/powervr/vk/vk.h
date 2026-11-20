@@ -443,6 +443,13 @@ void powervr_vk_graphics_free(struct powervr_vk_graphics *graphics);
 int powervr_vk_record_draw(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 int powervr_vk_record_set_offsets(struct powervr_vk_record *entry, const uint32_t *offsets, uint32_t count);
 
+/* Says whether a record adds a draw to its render pass instance's job: a draw, or an indirect one of one draw (vk-draw.c). */
+bool powervr_vk_draw_recorded(const struct powervr_vk_record *entry);
+
+/* Whether a job has indirect draws, and their counts read from their buffers once the work before them has finished (vk-draw.c). */
+bool powervr_vk_draw_indirect_has(const struct powervr_render_job *job);
+int powervr_vk_draw_indirect_read(struct powervr_render_job *job);
+
 /* A command buffer emptied of its records (vk-command.c). */
 void powervr_vk_command_reset(struct powervr_vk_command_buffer *command);
 
