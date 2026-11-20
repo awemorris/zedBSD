@@ -499,6 +499,8 @@ load_file_loop:
 1:	mov dword ptr [copy_count], ecx
 	xor bx, bx
 	mov edi, dword ptr [load_destination]
+	cli
+	call exception_hooks_install
 
 copy_sector_loop:
 	mov edx, ecx
@@ -532,6 +534,8 @@ copy_sector_byte:
 	jnz copy_sector_byte
 
 copy_sector_done:
+	call exception_hooks_remove
+	sti
 	call progress_update
 	mov eax, dword ptr [copy_count]
 	add dword ptr [load_destination], eax
@@ -548,6 +552,8 @@ zero_bss:
 	add edi, dword ptr [si + 8]
 	mov al, 'Z'
 	call progress_begin
+	cli
+	call exception_hooks_install
 
 	/*
 	 * Clear the dword-sized part first.  The zero value is set before the
@@ -583,6 +589,8 @@ zero_bss_byte:
 	jnz zero_bss_byte
 
 zero_bss_done:
+	call exception_hooks_remove
+	sti
 	call progress_update
 
 next_ph:
@@ -1714,13 +1722,27 @@ enable_dma_high_pc98:
  */
 check_a20:
 	cli
+	call exception_hooks_install
 	mov eax, dword ptr fs:[0]
+	push eax
+	mov si, offset msg_a20_read_low
+	call puts
+	pop eax
 	mov edx, eax
 	not edx
 	mov ebx, 0x00100000
+	push eax
+	mov si, offset msg_a20_write_high
+	call puts
+	pop eax
 	mov dword ptr fs:[ebx], edx
+	push eax
+	mov si, offset msg_a20_written_high
+	call puts
+	pop eax
 	mov ecx, dword ptr fs:[0]
 	mov dword ptr fs:[0], eax
+	call exception_hooks_remove
 	sti
 	cmp ecx, eax
 	jne fatal_a20
@@ -1831,20 +1853,147 @@ put_hex:
 	popad
 	ret
 
-/* Give FS a flat hidden descriptor while returning to real mode. */
+/*
+ * Give FS a flat hidden descriptor while returning to real mode.
+ *
+ * A 386 decodes the instructions after a write to CR0 before the write
+ * takes effect, so a jump follows each write and discards the prefetched
+ * ones.  The real-mode interrupt table cannot serve an NMI while PE is set,
+ * so NMI is masked through the PC-98 NMI ports (0x50 masks, 0x52 unmasks)
+ * for that window.  The first call shows a mark after each step.
+ */
 unreal_fs:
+	pushf
 	cli
+	out 0x50, al
 	lgdt [gdt_pointer]
-	mov eax, cr0
+	cmp byte ptr [unreal_marks], 0
+	je 1f
+	mov si, offset msg_unreal_gdt
+	call puts
+1:	mov eax, cr0
 	or eax, 1
 	mov cr0, eax
-	mov ax, 0x10
+	jmp 2f
+2:	mov ax, 0x10
 	mov fs, ax
 	mov eax, cr0
 	and eax, 0xfffffffe
 	mov cr0, eax
-	sti
+	jmp 3f
+3:	cmp byte ptr [unreal_marks], 0
+	je 4f
+	mov si, offset msg_unreal_real
+	call puts
+4:	out 0x52, al
+	cmp byte ptr [unreal_marks], 0
+	je 5f
+	mov si, offset msg_unreal_nmi
+	call puts
+	mov byte ptr [unreal_marks], 0
+5:	popf
 	ret
+
+/*
+ * Point the #UD (06h), #SS (0Ch) and #GP (0Dh) vectors at the loader's
+ * handlers.  The caller has interrupts disabled for as long as the hooks
+ * are installed, since 0Ch and 0Dh are also the vectors of IRQ4 and IRQ5.
+ */
+exception_hooks_install:
+	push es
+	push ax
+	xor ax, ax
+	mov es, ax
+	mov ax, word ptr es:[0x06 * 4]
+	mov word ptr [saved_vector_06], ax
+	mov ax, word ptr es:[0x06 * 4 + 2]
+	mov word ptr [saved_vector_06 + 2], ax
+	mov ax, word ptr es:[0x0c * 4]
+	mov word ptr [saved_vector_0c], ax
+	mov ax, word ptr es:[0x0c * 4 + 2]
+	mov word ptr [saved_vector_0c + 2], ax
+	mov ax, word ptr es:[0x0d * 4]
+	mov word ptr [saved_vector_0d], ax
+	mov ax, word ptr es:[0x0d * 4 + 2]
+	mov word ptr [saved_vector_0d + 2], ax
+	mov word ptr es:[0x06 * 4], offset exception_06
+	mov word ptr es:[0x06 * 4 + 2], cs
+	mov word ptr es:[0x0c * 4], offset exception_0c
+	mov word ptr es:[0x0c * 4 + 2], cs
+	mov word ptr es:[0x0d * 4], offset exception_0d
+	mov word ptr es:[0x0d * 4 + 2], cs
+	pop ax
+	pop es
+	ret
+
+/* Put back the vectors exception_hooks_install replaced. */
+exception_hooks_remove:
+	push es
+	push ax
+	xor ax, ax
+	mov es, ax
+	mov ax, word ptr [saved_vector_06]
+	mov word ptr es:[0x06 * 4], ax
+	mov ax, word ptr [saved_vector_06 + 2]
+	mov word ptr es:[0x06 * 4 + 2], ax
+	mov ax, word ptr [saved_vector_0c]
+	mov word ptr es:[0x0c * 4], ax
+	mov ax, word ptr [saved_vector_0c + 2]
+	mov word ptr es:[0x0c * 4 + 2], ax
+	mov ax, word ptr [saved_vector_0d]
+	mov word ptr es:[0x0d * 4], ax
+	mov ax, word ptr [saved_vector_0d + 2]
+	mov word ptr es:[0x0d * 4 + 2], ax
+	pop ax
+	pop es
+	ret
+
+/*
+ * A CPU exception while the hooks are installed: show EX, the vector and
+ * the CS:IP the exception pushed, then stop.
+ */
+exception_06:
+	push ax
+	mov al, 0x06
+	jmp exception_report
+
+exception_0c:
+	push ax
+	mov al, 0x0c
+	jmp exception_report
+
+exception_0d:
+	push ax
+	mov al, 0x0d
+
+exception_report:
+	cli
+	mov bp, sp
+	push cs
+	pop ds
+	push ax
+	mov al, 'E'
+	call putc
+	mov al, 'X'
+	call putc
+	pop ax
+	movzx eax, al
+	mov cx, 2
+	call put_hex
+	mov al, ' '
+	call putc
+	movzx eax, word ptr ss:[bp + 4]
+	mov cx, 4
+	call put_hex
+	mov al, ':'
+	call putc
+	movzx eax, word ptr ss:[bp + 2]
+	mov cx, 4
+	call put_hex
+	mov al, '\n'
+	call putc
+1:	hlt
+	jmp 1b
 
 /* ------------------------------------------------------------------ */
 
@@ -2384,6 +2533,12 @@ msg_a20:		.asciz "A2 "
 msg_dma_high:		.asciz "DA "
 msg_unreal:		.asciz "UR "
 msg_a20_checked:	.asciz "AC "
+msg_unreal_gdt:		.asciz "U1 "
+msg_unreal_real:	.asciz "U2 "
+msg_unreal_nmi:		.asciz "U3 "
+msg_a20_read_low:	.asciz "R0 "
+msg_a20_write_high:	.asciz "W1 "
+msg_a20_written_high:	.asciz "W2 "
 msg_go:			.asciz "GO\n"
 msg_error:		.asciz "ERR "
 config_name:		.ascii "BOOTZBSDCFG"
@@ -2446,6 +2601,11 @@ sense_cylinders:	.word 0
 bios_si:		.word 0
 bios_di:		.word 0
 text_cursor:		.word 0
+unreal_marks:		.byte 1
+.balign 4
+saved_vector_06:	.long 0
+saved_vector_0c:	.long 0
+saved_vector_0d:	.long 0
 file_first_cluster:	.word 0
 fat_offset:		.word 0
 fat_offset32:		.word 0
