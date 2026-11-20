@@ -33,10 +33,16 @@
 /* The most instructions one of the quad programs has. */
 #define AMDRDNA_QUAD_IR_INSTRUCTIONS	128U
 
-/* What amdrdna_quad_depth_ir() writes a texel's bits as: a 32-bit float depth, a 16-bit normalized depth, the stencil. */
+/*
+ * What amdrdna_quad_depth_ir() writes a texel's bits as: a 32-bit float
+ * depth, a 16-bit normalized depth, the stencil; with
+ * AMDRDNA_QUAD_SAMPLE_ZERO added, the texel is sample 0 of an image of
+ * samples (a render pass's resolve of its depth and stencil).
+ */
 #define AMDRDNA_QUAD_DEPTH_32		0U
 #define AMDRDNA_QUAD_DEPTH_16		1U
 #define AMDRDNA_QUAD_STENCIL		2U
+#define AMDRDNA_QUAD_SAMPLE_ZERO	4U
 
 /*
  * A colour target: a 2D image of four-byte pixels at address (256-byte

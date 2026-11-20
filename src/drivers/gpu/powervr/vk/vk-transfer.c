@@ -40,6 +40,7 @@
 #include <uapi/errno.h>
 #include <uapi/gpu-op.h>
 
+#include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/transfer-job.h"
 #include "drivers/gpu/powervr/transfer-program.h"
 #include "drivers/gpu/powervr/vk/vk.h"
@@ -570,7 +571,7 @@ blit_run(
 
 /*
  * Checks a resolve's images and regions: a source of four samples and a
- * destination of one, flat images of the same format, each region's
+ * destination of one, flat images of the same colour format, each region's
  * layers as many on each side at level 0 of the source, its rectangles
  * not negative and inside both images.  The format must be one the
  * resolve's program takes (powervr_transfer_resolve_samples: an average
@@ -603,7 +604,7 @@ resolve_regions(
 	destination = entry->objects[1]->payload;
 	if (source->layout.samples != 4U || destination->layout.samples == 4U)
 		return EINVAL;
-	if (source->format != destination->format)
+	if (source->format != destination->format || (source->format->kind & POWERVR_FORMAT_COLOR) == 0)
 		return EINVAL;
 	if (source->shape.volume || destination->shape.volume || source->plane_count != 0 || destination->plane_count != 0)
 		return ENOTSUP;
@@ -710,6 +711,53 @@ resolve_run(
 
 	/* Succeeded: the region is resolved. */
 	return 0;
+}
+
+/*
+ * Resolves sample 0 of a render job's depth target (its stencil with it,
+ * whole texels) into the job's resolve surface over the job's area, as
+ * resolve_run does a region of an integer format: the transfer's blit of
+ * the area onto the same area, which reads sample 0's raw texel
+ * (powervr_transfer_resolve_samples), ordered after the job by the
+ * firmware and left running.  The depth target's view is read as the
+ * transfer reads a layer: its layer's place, one level and one layer.
+ *
+ * Procedure referenced: Mesa 26.2.6
+ * src/imagination/vulkan/pvr_arch_cmd_buffer.c
+ * (pvr_resolve_unemitted_resolve_attachments: the depth and stencil
+ * attachment resolved into its resolve attachment over the render area
+ * by the transfer, PVR_RESOLVE_SAMPLE0 for
+ * VK_RESOLVE_MODE_SAMPLE_ZERO_BIT, serialized after the fragment work).
+ */
+int
+powervr_vk_transfer_depth_resolve(
+	struct powervr_vk_session *session,
+	const struct powervr_render_job *job)
+{
+	struct powervr_transfer_request request;
+	struct powervr_view_shape view;
+
+	/* Refuses missing input and a job that resolves nothing. */
+	if (session == NULL || job == NULL || !job->depth_resolve || job->depth_view.layout == NULL)
+		return EINVAL;
+
+	/* The depth target's layer as the source. */
+	view = job->depth_view;
+	view.address += (uint64_t)view.base_layer * view.layout->layer_bytes;
+	view.base_layer = 0;
+	view.layer_count = 1;
+	view.base_level = 0;
+	view.level_count = 1;
+	view.image_levels = 1;
+
+	/* The area onto the same area. */
+	kern_memset(&request, 0, sizeof(request));
+	request.kind = POWERVR_TRANSFER_BLIT;
+	request.destination = job->depth_resolve_surface;
+	request.area = job->area;
+	request.source_area = job->area;
+	request.source = &view;
+	return run_one(session, &request, false);
 }
 
 /*

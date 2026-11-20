@@ -476,6 +476,13 @@ device_core12(
 {
 	/* The shaders' features, the limits and the name. */
 	i915_vkc_core12_defaults(core12, "zedBSD powervr");
+
+	/*
+	 * XXX: a subpass's end resolves sample 0 of the depth and stencil (the
+	 * transfer after the render, vk-transfer.c), but the values read out of
+	 * the depth the ISP stored of four samples are not yet each pixel's
+	 * sample 0, so no resolve mode is reported.
+	 */
 }
 
 /* Fills a cleared record from the scratch (too large for the stack) with the device's properties; NULL when none is left. */

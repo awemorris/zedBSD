@@ -429,6 +429,9 @@ int powervr_vk_record_transfer(struct powervr_vk_session *session, uint32_t opco
 /* Runs a recorded transfer command on the session's transfer context, region by region. */
 int powervr_vk_transfer_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
 
+/* Resolves sample 0 of a render job's depth target into its resolve attachment over the job's area, after the job (render-pass.h). */
+int powervr_vk_transfer_depth_resolve(struct powervr_vk_session *session, const struct powervr_render_job *job);
+
 /* Copies rows of 32-bit words between two linear places, each of its own pitch, on the transfer context (a video decode's output). */
 int powervr_vk_transfer_rows(struct powervr_vk_session *session, uint64_t source, uint32_t source_pitch, uint64_t destination, uint32_t destination_pitch, uint32_t row_bytes, uint32_t rows);
 

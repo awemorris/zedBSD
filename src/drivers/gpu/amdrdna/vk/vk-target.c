@@ -135,12 +135,14 @@ target_create_pass(
 	/* Refuses by name a pass of another shape. */
 	error = 0;
 	supported = target_pass_supported(&info);
+	/*
+	 * A resolve of the depth attachment's sample 0 (its depth attachment of
+	 * samples in a depth format, which the shape above has, into one of one
+	 * sample of its format) is drawn at the pass's end.
+	 */
+	resolve.target = VK_ATTACHMENT_UNUSED;
 	if (supported != 0 && i915_vkc_depth_resolve(&info, resolves, 0U, &resolve) != 0)
 		supported = 0;
-	if (supported != 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
-		kern_logf("amdrdna: vk: vkCreateRenderPass2 refused: no resolve of depth or stencil\n");
-		supported = 0;
-	}
 	if (supported == 0) {
 		kern_logf("amdrdna: vk: vkCreateRenderPass refused: %u subpasses, %u attachments\n",
 			  info.subpassCount,
@@ -153,8 +155,10 @@ target_create_pass(
 	if (error == 0) {
 		pass = kern_calloc(1U, sizeof(*pass));
 		subpass = &info.pSubpasses[0];
-		if (pass != NULL)
+		if (pass != NULL) {
 			pass->samples = target_pass_samples(&info);
+			pass->depth_resolve_attachment = resolve.target;
+		}
 		for (index = 0U; pass != NULL && index < subpass->colorAttachmentCount; index++) {
 			attachment = subpass->pColorAttachments[index].attachment;
 			pass->colour_attachments[index] = attachment;

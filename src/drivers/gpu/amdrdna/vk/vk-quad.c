@@ -62,6 +62,7 @@ static void quad_ir_store(struct drv_gpu_shader_ir_inst *list, uint32_t *count, 
 static void quad_ir_move(struct drv_gpu_shader_ir_inst *list, uint32_t *count, uint32_t dst, uint32_t src);
 static void quad_ir_two(struct drv_gpu_shader_ir_inst *list, uint32_t *count, enum drv_gpu_shader_ir_op op, uint32_t dst, uint32_t first, uint32_t second);
 static void quad_ir_fetch(struct drv_gpu_shader_ir_inst *list, uint32_t *count, uint32_t base, uint32_t x, uint32_t y);
+static void quad_ir_fetch_sample_zero(struct drv_gpu_shader_ir_inst *list, uint32_t *count, uint32_t base, uint32_t x, uint32_t y);
 static void quad_ir_texture_input(struct amdrdna_quad_ir *program);
 
 /*
@@ -347,11 +348,18 @@ amdrdna_quad_resolve_ir(
  * 32-bit float depth is written as its bits; a 16-bit normalized one
  * raised a quarter of a step, so that the depth unit's conversion back
  * gives the same integer; a stencil value replaces the stencil (the
- * draw's stencil test replaces it by the reference).
+ * draw's stencil test replaces it by the reference).  With
+ * AMDRDNA_QUAD_SAMPLE_ZERO in mode the image is a usampler2DMS and the
+ * fetch reads its sample 0 (texelFetch(bits, ivec2(texcoord), 0) of a
+ * multisampled image), its parameters x, y, a zero and the sample, as the
+ * frontend passes a multisampled image's fetch.
  *
  * Procedure referenced: Mesa 25.0.7 src/amd/vulkan/meta/radv_meta_blit2d.c
  * (build_nir_copy_fragment_shader_depth and _stencil: a texel fetched
- * and written as FRAG_RESULT_DEPTH or FRAG_RESULT_STENCIL).
+ * and written as FRAG_RESULT_DEPTH or FRAG_RESULT_STENCIL) and
+ * radv_meta_resolve_fs.c (build_depth_stencil_resolve_fragment_shader:
+ * sample 0 of the source fetched for VK_RESOLVE_MODE_SAMPLE_ZERO_BIT and
+ * written as the depth or the stencil).
  */
 void
 amdrdna_quad_depth_ir(
@@ -361,34 +369,49 @@ amdrdna_quad_depth_ir(
 	struct drv_gpu_shader_ir_inst *list;
 	struct drv_gpu_shader_ir *ir;
 	uint32_t count;
+	uint32_t texel;
+	uint32_t next;
+	bool sample_zero;
 
 	/* Starts empty, the instructions appended in order. */
 	kern_memset(program, 0, sizeof(*program));
 	list = program->instructions;
 	ir = &program->ir;
 	count = 0U;
+	sample_zero = (mode & AMDRDNA_QUAD_SAMPLE_ZERO) != 0U;
+	mode &= ~AMDRDNA_QUAD_SAMPLE_ZERO;
 
-	/* v0, v1 = the coordinate; v2, v3 = it as integers; v7..v10 = the texel fetched with v4..v6. */
+	/*
+	 * v0, v1 = the coordinate; v2, v3 = it as integers; the texel fetched
+	 * with v4..v6 into v7..v10, or sample 0 with v4..v7 into v8..v11.
+	 */
 	quad_ir_load(list, &count, 0U, DRV_GPU_IR_LOAD_INPUT, 0U, 0U, 0U);
 	quad_ir_load(list, &count, 1U, DRV_GPU_IR_LOAD_INPUT, 0U, 1U, 0U);
 	quad_ir_two(list, &count, DRV_GPU_IR_F2I, 2U, 0U, 0U);
 	quad_ir_two(list, &count, DRV_GPU_IR_F2I, 3U, 1U, 0U);
-	quad_ir_fetch(list, &count, 4U, 2U, 3U);
-	ir->value_count = 11U;
+	if (sample_zero) {
+		quad_ir_fetch_sample_zero(list, &count, 4U, 2U, 3U);
+		texel = 4U + QUAD_FETCH_PARAMETERS + 1U;
+	} else {
+		quad_ir_fetch(list, &count, 4U, 2U, 3U);
+		texel = 4U + QUAD_FETCH_PARAMETERS;
+	}
+	next = texel + 4U;
+	ir->value_count = next;
 
 	/* The texel's bits as the depth, raised and scaled for a 16-bit depth, or as the stencil reference. */
 	if (mode == AMDRDNA_QUAD_DEPTH_32) {
-		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_DEPTH, 0U, 7U);
+		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_DEPTH, 0U, texel);
 	} else if (mode == AMDRDNA_QUAD_DEPTH_16) {
-		quad_ir_two(list, &count, DRV_GPU_IR_U2F, 11U, 7U, 0U);
-		quad_ir_load(list, &count, 12U, DRV_GPU_IR_CONST, 0U, 0U, QUAD_FLOAT_QUARTER);
-		quad_ir_two(list, &count, DRV_GPU_IR_FADD, 13U, 11U, 12U);
-		quad_ir_load(list, &count, 14U, DRV_GPU_IR_CONST, 0U, 0U, QUAD_FLOAT_STEP_16);
-		quad_ir_two(list, &count, DRV_GPU_IR_FMUL, 15U, 13U, 14U);
-		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_DEPTH, 0U, 15U);
-		ir->value_count = 16U;
+		quad_ir_two(list, &count, DRV_GPU_IR_U2F, next, texel, 0U);
+		quad_ir_load(list, &count, next + 1U, DRV_GPU_IR_CONST, 0U, 0U, QUAD_FLOAT_QUARTER);
+		quad_ir_two(list, &count, DRV_GPU_IR_FADD, next + 2U, next, next + 1U);
+		quad_ir_load(list, &count, next + 3U, DRV_GPU_IR_CONST, 0U, 0U, QUAD_FLOAT_STEP_16);
+		quad_ir_two(list, &count, DRV_GPU_IR_FMUL, next + 4U, next + 2U, next + 3U);
+		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_DEPTH, 0U, next + 4U);
+		ir->value_count = next + 5U;
 	} else {
-		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_STENCIL, 0U, 7U);
+		quad_ir_store(list, &count, DRV_GPU_IR_LOCATION_FRAG_STENCIL, 0U, texel);
 	}
 
 	/* The program: the coordinate in, the image read, no colour out. */
@@ -553,6 +576,40 @@ quad_ir_fetch(
 	instruction->immediate = 0U;
 	instruction->component = DRV_GPU_IR_TEXTURE_LD;
 	instruction->image_shape = DRV_GPU_IR_IMAGE_2D;
+}
+
+/*
+ * Appends the fetch of sample 0 of the texel at the integers x and y of
+ * the image of samples at binding 0: its four parameters (x, y, a zero
+ * and the sample, 0) copied together into base .. base + 3, its four
+ * channels into base + 4 .. base + 7.
+ */
+static void
+quad_ir_fetch_sample_zero(
+	struct drv_gpu_shader_ir_inst *list,
+	uint32_t *count,
+	uint32_t base,
+	uint32_t x,
+	uint32_t y)
+{
+	struct drv_gpu_shader_ir_inst *instruction;
+
+	/* The parameters together: x, y, a zero, sample 0. */
+	quad_ir_move(list, count, base, x);
+	quad_ir_move(list, count, base + 1U, y);
+	quad_ir_load(list, count, base + 2U, DRV_GPU_IR_ICONST, 0U, 0U, 0U);
+	quad_ir_load(list, count, base + 3U, DRV_GPU_IR_ICONST, 0U, 0U, 0U);
+
+	/* The fetch of a multisampled image. */
+	instruction = &list[(*count)++];
+	instruction->op = DRV_GPU_IR_TEXTURE;
+	instruction->dst = base + QUAD_FETCH_PARAMETERS + 1U;
+	instruction->src[0] = base;
+	instruction->src[1] = QUAD_FETCH_PARAMETERS + 1U;
+	instruction->location = 0U;
+	instruction->immediate = 0U;
+	instruction->component = DRV_GPU_IR_TEXTURE_LD;
+	instruction->image_shape = DRV_GPU_IR_IMAGE_2D | DRV_GPU_IR_IMAGE_MULTISAMPLED;
 }
 
 /* Makes a fragment program read the coordinate at location 0 and the image at binding 0. */

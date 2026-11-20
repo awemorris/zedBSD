@@ -23,6 +23,7 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/powervr/render-pass.h"
+#include "drivers/gpu/powervr/transfer-program.h"
 #include "drivers/gpu/powervr/vk/vk-draw.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
@@ -57,6 +58,7 @@ static int create_framebuffer(struct powervr_vk_session *session, struct i915_wi
 static int framebuffer_view(struct powervr_vk_session *session, uint64_t identity, struct powervr_vk_object **held, struct powervr_pass_view *view);
 static int framebuffer_destroy(struct powervr_vk_session *session, void *payload);
 static void read_clear(struct i915_wire_reader *reader, struct powervr_pass_clear *value);
+static int pass_depth_resolve(struct powervr_pass *pass, const struct i915_vkc_depth_resolve *resolve);
 static int pass_views(const VkRenderPassCreateInfo *info, struct powervr_pass *pass);
 static int pass_granularity(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 
@@ -153,10 +155,8 @@ create_pass(
 		error = pass_views(&info, pass);
 	if (error == 0)
 		error = i915_vkc_depth_resolve(&info, resolves, 0U, &resolve);
-	if (error == 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
-		kern_logf("powervr: render pass: no resolve of depth or stencil\n");
-		error = ENOTSUP;
-	}
+	if (error == 0 && resolve.target != VK_ATTACHMENT_UNUSED)
+		error = pass_depth_resolve(pass, &resolve);
 	if (error == ENOBUFS && info.subpassCount != 1) {
 		kern_logf("powervr: render pass: %u subpasses not supported\n", (unsigned)info.subpassCount);
 	} else if (error == ENOBUFS) {
@@ -171,6 +171,35 @@ create_pass(
 	powervr_vk_create_reply(session, reply, I915_VK_OBJ_RENDER_PASS, identity, pass, powervr_vk_free_payload, error);
 
 	/* Succeeded: the reply carries the create's result. */
+	return 0;
+}
+
+/*
+ * Keeps the subpass's resolve of sample 0 of its depth attachment (its
+ * stencil with it: i915_vkc_depth_resolve() takes both aspects of a format
+ * of both or neither): a depth attachment of four samples, a target of one
+ * sample of its format, which the transfer resolves (as raw texels,
+ * powervr_transfer_resolve_samples()); ENOTSUP for another.
+ */
+static int
+pass_depth_resolve(
+	struct powervr_pass *pass,
+	const struct i915_vkc_depth_resolve *resolve)
+{
+	const struct powervr_format *format;
+
+	/* The pass's own depth attachment, of four samples, into one of one sample. */
+	if (resolve->source != pass->depth || resolve->target >= pass->attachment_count || pass->samples != 4U ||
+	    pass->attachments[resolve->target].samples != 1U)
+		return EINVAL;
+	format = powervr_format_find(pass->attachments[resolve->target].format);
+	if (format == NULL || powervr_transfer_resolve_samples(format) != 1U) {
+		kern_logf("powervr: render pass: no resolve of depth or stencil of format %u\n", (unsigned)pass->attachments[resolve->target].format);
+		return ENOTSUP;
+	}
+	pass->depth_resolve = resolve->target;
+
+	/* Succeeded: the resolve is kept. */
 	return 0;
 }
 
