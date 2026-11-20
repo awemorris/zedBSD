@@ -21,7 +21,8 @@
 #define NATIVE_EXECUTE_WRITTEN_BOXES 4U
 
 static int validate_pass(struct bcm2711_vulkan_native_pass *pass);
-static void resolve_copy(const struct bcm2711_vulkan_native_pass *pass);
+static void resolve_copy(const struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_native_storage *scratch, void *cpu, uint32_t pitch, uint32_t texel);
+static int validate_resolve(const struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int validate_target(const struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int clear_target(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int clear_rects(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
@@ -180,8 +181,10 @@ bcm2711_vulkan_native_pass_finish(
 	int error)
 {
 	struct bcm2711_vulkan_native_draw *draw;
+	struct bcm2711_vulkan_native_target *target;
 	struct bcm2711_buffer *output;
 	uint64_t offset;
+	uint32_t box[4];
 	uint32_t index;
 
 	/* Snapshots the unit filled are valid for later passes from now on. */
@@ -197,6 +200,17 @@ bcm2711_vulkan_native_pass_finish(
 	/* Launched or not, the render area of each output may have changed, so snapshots and copies of it are stale. */
 	for (index = 0; index < pass->state.targets; index++)
 		target_written(pass, index, error);
+
+	/* A colour slot's resolve attachment changed in the render area. */
+	for (index = 0; index < pass->state.targets; index++) {
+		if (pass->targets[index].resolve == NULL)
+			continue;
+		box[0] = (uint32_t)pass->area.offset.x;
+		box[1] = (uint32_t)pass->area.offset.y;
+		box[2] = box[0] + pass->area.extent.width;
+		box[3] = box[1] + pass->area.extent.height;
+		bcm2711_v3d_memory_written(pass->targets[index].resolve->buffer, (uint64_t)pass->targets[index].resolve_address - pass->targets[index].resolve->address, box);
+	}
 
 	/* A stored depth/stencil image too: a later sampling of its depth or stencil converts it again. */
 	if (pass->depth != NULL && pass->state.depth_store != 0)
@@ -238,7 +252,17 @@ bcm2711_vulkan_native_pass_finish(
 
 	/* A resolve stored into the pass's raster: the render area's rows into the attachment's layer. */
 	if (pass->resolve_scratch != NULL)
-		resolve_copy(pass);
+		resolve_copy(pass, pass->resolve_scratch, pass->resolve_cpu, pass->resolve_pitch, pass->resolve_texel);
+
+	/* Each colour slot's resolve, likewise, and its layer's transition. */
+	for (index = 0; index < pass->state.targets; index++) {
+		target = &pass->targets[index];
+		if (target->resolve == NULL)
+			continue;
+		if (target->resolve_scratch != NULL)
+			resolve_copy(pass, target->resolve_scratch, target->resolve_cpu, target->resolve_pitch, target->resolve_texel);
+		bcm2711_vulkan_image_set_level_layout(target->resolve_image, target->resolve_level, target->resolve_layer, target->resolve_final_layout);
+	}
 
 	/* The depth/stencil attachment's layer's transition is committed with it. */
 	if (pass->depth_target != NULL)
@@ -252,13 +276,18 @@ bcm2711_vulkan_native_pass_finish(
 
 /*
  * Copies the render area of a resolve the tiles stored into the pass's
- * raster of one sample (whole tiles) into the resolve attachment's layer,
- * through its coherent alias, leaving the layer outside the area as it was.
- * The pass has completed, so the raster holds what the tiles stored.
+ * raster of one sample (whole tiles) scratch into the resolve attachment's
+ * layer, through its coherent alias cpu (both pitch bytes a row, texel a
+ * pixel), leaving the layer outside the area as it was.  The pass has
+ * completed, so the raster holds what the tiles stored.
  */
 static void
 resolve_copy(
-	const struct bcm2711_vulkan_native_pass *pass)
+	const struct bcm2711_vulkan_native_pass *pass,
+	const struct bcm2711_native_storage *scratch,
+	void *cpu,
+	uint32_t pitch,
+	uint32_t texel)
 {
 	const uint8_t *source;
 	uint8_t *destination;
@@ -267,14 +296,14 @@ resolve_copy(
 	uint32_t row;
 
 	/* The raster as the tiles stored it. */
-	source = pass->resolve_scratch->view->buffer->address;
-	kern_dcache_invalidate_range(source, (size_t)pass->resolve_pitch * pass->state.height);
+	source = scratch->view->buffer->address;
+	kern_dcache_invalidate_range(source, (size_t)pitch * pass->state.height);
 
 	/* Each row of the render area. */
-	bytes = pass->area.extent.width * pass->resolve_texel;
+	bytes = pass->area.extent.width * texel;
 	for (row = 0; row < pass->area.extent.height; row++) {
-		offset = (uint64_t)((uint32_t)pass->area.offset.y + row) * pass->resolve_pitch + (uint32_t)pass->area.offset.x * pass->resolve_texel;
-		destination = (uint8_t *)pass->resolve_cpu + offset;
+		offset = (uint64_t)((uint32_t)pass->area.offset.y + row) * pitch + (uint32_t)pass->area.offset.x * texel;
+		destination = (uint8_t *)cpu + offset;
 		kern_memcpy(destination, source + offset, bytes);
 	}
 }
@@ -313,6 +342,9 @@ validate_pass(
 		return EINVAL;
 	for (index = 0; index < pass->state.targets; index++) {
 		error = validate_target(pass, index);
+		if (error != 0)
+			return error;
+		error = validate_resolve(pass, index);
 		if (error != 0)
 			return error;
 	}
@@ -383,10 +415,16 @@ validate_pass(
 			return EINVAL;
 	}
 
-	/* Every command/pool/state/overflow allocation remains live before the native runner's final mapping checks. */
+	/* Every command/pool/state/overflow allocation, and the counters and resolve rasters, remain live before the native runner's final mapping checks. */
 	expected = BCM2711_VULKAN_PASS_LISTS;
 	if (pass->occlusion != NULL)
 		expected++;
+	if (pass->resolve_scratch != NULL)
+		expected++;
+	for (index = 0; index < pass->state.targets; index++) {
+		if (pass->targets[index].resolve_scratch != NULL)
+			expected++;
+	}
 	if (pass->count != expected || pass->job.kind != BCM2711_V3D_JOB_CL)
 		return EINVAL;
 	for (index = 0; index < pass->count; index++) {
@@ -619,6 +657,69 @@ validate_target(
 		return EINVAL;
 
 	/* Succeeded: the target can be cleared and drawn into. */
+	return 0;
+}
+
+/*
+ * Checks one colour slot's resolve attachment before the launch: its
+ * layer's current layout, its live coherent mapping, and the interval the
+ * tiles store into (the layer, or the pass's raster of a smaller render
+ * area, whose rows the finish copies into the layer).
+ */
+static int
+validate_resolve(
+	const struct bcm2711_vulkan_native_pass *pass,
+	uint32_t slot)
+{
+	const struct bcm2711_vulkan_native_target *target;
+	const struct bcm2711_native_pass_target *native;
+	struct bcm2711_buffer *buffer;
+	VkImageLayout current;
+	uint64_t offset;
+
+	/* A slot that resolves nothing. */
+	target = &pass->targets[slot];
+	native = &pass->state.target[slot];
+	if (target->resolve == NULL) {
+		if (native->resolved != 0)
+			return EINVAL;
+		return 0;
+	}
+
+	/* The layer starts in the layout the pass names, unless the pass discards its contents. */
+	if (target->resolve_image == NULL || target->resolve_cpu == NULL || native->resolved == 0)
+		return EINVAL;
+	current = bcm2711_vulkan_image_level_layout(target->resolve_image, target->resolve_level, target->resolve_layer);
+	if (target->resolve_initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && target->resolve_initial_layout != current)
+		return EINVAL;
+
+	/* The attachment's RAM stays coherent, mapped and held, and covers every row of the layer. */
+	buffer = target->resolve->buffer;
+	if (target->resolve->quarantined ||
+	    target->resolve->references == 0 ||
+	    buffer == NULL ||
+	    !buffer->uncached ||
+	    buffer->address == NULL ||
+	    target->resolve_address < target->resolve->address)
+		return EIO;
+	offset = (uint64_t)target->resolve_address - target->resolve->address;
+	if (offset > target->resolve->bytes ||
+	    target->resolve_bytes > target->resolve->bytes - offset ||
+	    (uint8_t *)buffer->address + offset != target->resolve_cpu ||
+	    target->resolve_texel == 0 ||
+	    target->resolve_pitch < pass->state.width * target->resolve_texel ||
+	    (uint64_t)target->resolve_pitch * pass->state.height > target->resolve_bytes)
+		return EINVAL;
+
+	/* The tiles store into the layer itself, or into the raster of the pass's own. */
+	if (target->resolve_scratch == NULL) {
+		if (native->resolved_output != target->resolve_address)
+			return EINVAL;
+	} else if (native->resolved_output != target->resolve_scratch->view->address) {
+		return EINVAL;
+	}
+
+	/* Succeeded: the tiles can store the resolve. */
 	return 0;
 }
 

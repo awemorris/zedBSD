@@ -16,10 +16,12 @@
 
 /*
  * A pass's storages: its three lists, tile pool, tile state and four
- * overflow reserves, and an occlusion pass's counters after them.
+ * overflow reserves, and after them an occlusion pass's counters and the
+ * rasters its resolves of a smaller render area store into (one for the
+ * depth/stencil attachment, one for each colour target).
  */
 #define BCM2711_VULKAN_PASS_LISTS 9U
-#define BCM2711_VULKAN_PASS_STORAGE 11U
+#define BCM2711_VULKAN_PASS_STORAGE (BCM2711_VULKAN_PASS_LISTS + 2U + BCM2711_NATIVE_PASS_TARGETS)
 
 /*
  * One colour target of a native pass: the view of its image's backing,
@@ -34,6 +36,17 @@
  * clears rects of the target (inside the render area) to rect_clear on
  * the CPU before it loads its tiles; a clear of the whole target is a tile
  * clear instead, and none clears no rectangle.
+ *
+ * A target the render pass resolves (the last native pass of a subpass
+ * with pResolveAttachments) has resolve set: the view of the resolve
+ * attachment's backing, held like output, its image, mip level and array
+ * layer, and the layouts the pass moves that layer between.  The tiles
+ * store the samples' average into the layer at resolve_address
+ * (resolve_bytes long, resolve_pitch a row, resolve_texel bytes a pixel);
+ * a render area smaller than the framebuffer is stored into
+ * resolve_scratch, a raster of one sample as large as the framebuffer,
+ * from which the finish copies the area into the layer through its
+ * coherent alias resolve_cpu.
  */
 struct bcm2711_vulkan_native_target {
 	struct bcm2711_v3d_view *output;
@@ -52,6 +65,18 @@ struct bcm2711_vulkan_native_target {
 	VkRect2D rects[BCM2711_VULKAN_CLEAR_RECTS];
 	uint32_t rect_count;
 	uint32_t rect_clear[4];
+	struct bcm2711_v3d_view *resolve;
+	struct bcm2711_vulkan_resource *resolve_image;
+	uint32_t resolve_level;
+	uint32_t resolve_layer;
+	VkImageLayout resolve_initial_layout;
+	VkImageLayout resolve_final_layout;
+	struct bcm2711_native_storage *resolve_scratch;
+	uint32_t resolve_address;
+	uint32_t resolve_bytes;
+	void *resolve_cpu;
+	uint32_t resolve_pitch;
+	uint32_t resolve_texel;
 };
 
 /*

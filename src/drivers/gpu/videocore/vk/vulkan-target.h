@@ -16,8 +16,11 @@
 /* The most colour attachments a subpass draws into (the fragment outputs' locations 0 to 3). */
 #define BCM2711_VULKAN_PASS_COLOURS 4U
 
-/* The most attachments a pass has: its colour attachments and a depth/stencil one. */
-#define BCM2711_VULKAN_PASS_ATTACHMENTS (BCM2711_VULKAN_PASS_COLOURS + 1U)
+/*
+ * The most attachments a pass has: its colour attachments and their
+ * resolve attachments, and a depth/stencil one and its resolve attachment.
+ */
+#define BCM2711_VULKAN_PASS_ATTACHMENTS (BCM2711_VULKAN_PASS_COLOURS * 2U + 2U)
 
 /* The most views a multiview subpass renders (maxMultiviewViewCount): view masks of bits 0 to 7. */
 #define BCM2711_VULKAN_VIEWS 8U
@@ -36,6 +39,11 @@
  * depth_resolve set (from vkCreateRenderPass2) also stores sample 0 of its
  * depth/stencil attachment, both aspects of a D24S8 one, into the
  * attachment of one sample in its format at depth_resolve_attachment.
+ * In a pass of four samples, a colour slot with colour_resolve set (7.1
+ * only) also resolves the slot's attachment at the end of the subpass into
+ * the attachment of one sample in its format at
+ * colour_resolve_attachment, described by colour_resolved (the subpass's
+ * pResolveAttachments).
  *
  * view_mask is the subpass's views under multiview (bit n: view n, drawn
  * into layer n of each attachment's view), zero for a pass of one view.
@@ -48,6 +56,9 @@ struct bcm2711_vulkan_pass {
 	bool colour_used[BCM2711_VULKAN_PASS_COLOURS];
 	VkAttachmentDescription colours[BCM2711_VULKAN_PASS_COLOURS];
 	uint32_t colour_attachment[BCM2711_VULKAN_PASS_COLOURS];
+	bool colour_resolve[BCM2711_VULKAN_PASS_COLOURS];
+	VkAttachmentDescription colour_resolved[BCM2711_VULKAN_PASS_COLOURS];
+	uint32_t colour_resolve_attachment[BCM2711_VULKAN_PASS_COLOURS];
 	bool depth;
 	VkAttachmentDescription depth_stencil;
 	uint32_t depth_attachment;
@@ -63,14 +74,16 @@ struct bcm2711_vulkan_pass {
  * One framebuffer retains its pass and attachment views independently of their public handles and memory identities.
  *
  * colours holds the view of each of the pass's colour slots (NULL for an
- * unused one), and depth the depth/stencil attachment's view when the
- * pass has one, otherwise NULL, and depth_resolve the view its depth/stencil
- * attachment is resolved into when the pass resolves it, otherwise NULL;
- * each is retained.
+ * unused one), resolves the view each colour slot is resolved into
+ * (NULL for a slot that resolves nothing), and depth the depth/stencil
+ * attachment's view when the pass has one, otherwise NULL, and
+ * depth_resolve the view its depth/stencil attachment is resolved into
+ * when the pass resolves it, otherwise NULL; each is retained.
  */
 struct bcm2711_vulkan_framebuffer {
 	struct bcm2711_vulkan_input_owner owner;
 	struct bcm2711_vulkan_object *colours[BCM2711_VULKAN_PASS_COLOURS];
+	struct bcm2711_vulkan_object *resolves[BCM2711_VULKAN_PASS_COLOURS];
 	struct bcm2711_vulkan_object *depth;
 	struct bcm2711_vulkan_object *depth_resolve;
 	uint32_t width;

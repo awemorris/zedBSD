@@ -49,8 +49,12 @@
 #define BCM2711_VULKAN_CLEAR_LAYER_SHIFT 8U
 #define BCM2711_VULKAN_CLEAR_LAYERS_SHIFT 16U
 
-/* The words a record holds: the push constants', and a clear's values and rectangles. */
-#define BCM2711_VULKAN_RECORD_WORDS 36U
+/*
+ * The words a record holds: the push constants', a clear's values and
+ * rectangles, and a begin's clear values (four words for each of a pass's
+ * attachments).
+ */
+#define BCM2711_VULKAN_RECORD_WORDS 40U
 
 /* Events one chunk of a recording holds. */
 #define BCM2711_VULKAN_RECORD_CHUNK 128U

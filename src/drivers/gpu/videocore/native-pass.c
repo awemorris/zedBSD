@@ -808,8 +808,12 @@ single_target(
 {
 	const struct bcm2711_native_pass_target *target;
 
-	/* One used target of one sample. */
-	if (state->targets != 1 || state->target[0].output == 0 || state->msaa != 0 || state->target[0].resolve != 0)
+	/* One used target of one sample, which resolves nothing. */
+	if (state->targets != 1 ||
+	    state->target[0].output == 0 ||
+	    state->msaa != 0 ||
+	    state->target[0].resolve != 0 ||
+	    state->target[0].resolved != 0)
 		return EINVAL;
 
 	/* Of the RGBA8 output format, 8-bit internal type and 32 bits a pixel, four bytes a raster pixel. */
