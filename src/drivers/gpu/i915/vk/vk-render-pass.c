@@ -115,11 +115,12 @@ i915_gfx_render_pass_make(
 	int error;
 
 	/* Decides whether the pass has the one shape the executor supports, and the resolve it can do. */
+	resolve.target = VK_ATTACHMENT_UNUSED;
+	resolve.depth = 0U;
+	resolve.stencil = 0U;
 	supported = i915_gfx_render_pass_supported(info);
-	if (supported != 0 && i915_vkc_depth_resolve(info, resolves, 0U, &resolve) != 0)
-		supported = 0;
-	if (supported != 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
-		kern_logf("i915: vk: XXX vkCreateRenderPass2 refused: no resolve of depth or stencil\n");
+	if (supported != 0 && i915_vkc_depth_resolve(info, resolves, 0U, &resolve) != 0) {
+		kern_logf("i915: vk: vkCreateRenderPass2 refused: a resolve of depth or stencil other than sample 0\n");
 		supported = 0;
 	}
 
@@ -171,6 +172,11 @@ i915_gfx_render_pass_make(
 		pass->view_mask = 0U;
 		if (multiview != NULL && multiview->pViewMasks != NULL)
 			pass->view_mask = multiview->pViewMasks[0];
+
+		/* Records the resolve of the depth/stencil attachment's sample 0, if any. */
+		pass->depth_resolve = resolve.target;
+		pass->depth_resolve_depth = resolve.depth;
+		pass->depth_resolve_stencil = resolve.stencil;
 	}
 
 	/* Publishes the pass and answers; a refused or failed pass is reported there. */
