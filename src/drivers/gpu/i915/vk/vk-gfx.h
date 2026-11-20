@@ -446,6 +446,13 @@ struct i915_gfx_pass {
 	uint32_t color_attachments[I915_GFX_MAX_COLOR_ATTACHMENTS];
 
 	/*
+	 * The attachment of one sample each colour attachment is resolved into
+	 * at the end of the subpass (pResolveAttachments), or
+	 * VK_ATTACHMENT_UNUSED.
+	 */
+	uint32_t color_resolves[I915_GFX_MAX_COLOR_ATTACHMENTS];
+
+	/*
 	 * The views the subpass renders (VkRenderPassMultiviewCreateInfo):
 	 * bit v renders view v into layer v of each attachment's view; zero
 	 * for a pass of one view, which renders the framebuffer's layers.

@@ -154,8 +154,12 @@ i915_gfx_render_pass_make(
 		/* Records the colour attachments the subpass writes, if any. */
 		subpass = &info->pSubpasses[0];
 		pass->color_count = subpass->colorAttachmentCount;
-		for (index = 0U; index < subpass->colorAttachmentCount; index++)
+		for (index = 0U; index < subpass->colorAttachmentCount; index++) {
 			pass->color_attachments[index] = subpass->pColorAttachments[index].attachment;
+			pass->color_resolves[index] = VK_ATTACHMENT_UNUSED;
+			if (subpass->pResolveAttachments != NULL)
+				pass->color_resolves[index] = subpass->pResolveAttachments[index].attachment;
+		}
 		pass->color_attachment = VK_ATTACHMENT_UNUSED;
 		if (subpass->colorAttachmentCount != 0U)
 			pass->color_attachment = subpass->pColorAttachments[0].attachment;
