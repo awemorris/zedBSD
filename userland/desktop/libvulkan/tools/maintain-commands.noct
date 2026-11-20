@@ -144,11 +144,11 @@ func main(args) {
             if (type == "void") { output = output + "\tvulkan_write_bytes(&writer, " + member + ", (size_t)count);\n"; continue; }
             if (length == "1") {
                 var encoder = "vulkan_encode_" + type;
-                var extra = "";
+                var extra = ""; var before = "";
                 if (member == "pColor") { encoder = "command_encode_color"; }
                 if (member == "pDepthStencil") { encoder = "command_encode_depth_ranges"; extra = ", rangeCount, pRanges"; }
-                if (member == "pRenderPassBegin") { encoder = "command_encode_render_begin"; }
-                output = output + "\n\t/* Does not inspect a record whose presence marker is absent. */\n\tif (count != 0)\n\t\t" + encoder + "(&writer, " + member + extra + ");\n";
+                if (member == "pRenderPassBegin") { encoder = "command_encode_render_begin"; before = "command, "; }
+                output = output + "\n\t/* Does not inspect a record whose presence marker is absent. */\n\tif (count != 0)\n\t\t" + encoder + "(" + before + "&writer, " + member + extra + ");\n";
             } else {
                 output = output + "\n\t/* Copies only complete caller elements while the command remains encodable. */\n\tfor (index = 0;\n\t     index < count && writer.error == VK_SUCCESS;\n\t     index++) {\n\t\t/* Uses declared element widths rather than native array padding. */\n" + encodeScalar(handles, records, type, member + "[index]", "\t\t") + "\t}\n";
             }

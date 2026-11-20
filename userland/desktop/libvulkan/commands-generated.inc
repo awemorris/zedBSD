@@ -1863,7 +1863,7 @@ vkCmdBeginRenderPass(
 
 	/* Does not inspect a record whose presence marker is absent. */
 	if (count != 0)
-		command_encode_render_begin(&writer, pRenderPassBegin);
+		command_encode_render_begin(command, &writer, pRenderPassBegin);
 
 	/* Preserves argument order with explicit scalar widths and owned handle translation. */
 	vulkan_record_u32(&writer, contents);

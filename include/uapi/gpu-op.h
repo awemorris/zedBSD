@@ -1888,6 +1888,44 @@ enum gpu_op {
 	GPU_OP_GET_PHYSICAL_DEVICE_EXTERNAL_BUFFER_PROPERTIES = 161,
 
 	/*
+	 * vkCmdDrawIndirectCount and vkCmdDrawIndexedIndirectCount.
+	 * Number: venus-protocol vn_protocol_driver_defines.h (Mesa 26.2.6),
+	 * VK_COMMAND_TYPE_vkCmdDrawIndirectCount_EXT and
+	 * VK_COMMAND_TYPE_vkCmdDrawIndexedIndirectCount_EXT.
+	 * Arguments: [buffer][u64 offset][count buffer][u64 count offset]
+	 * [u32 maxDrawCount][u32 stride].
+	 * Sent by: libvulkan/commands.c: vkCmdDrawIndirectCount and
+	 * vkCmdDrawIndexedIndirectCount, on a device whose renderer reports
+	 * drawIndirectCount (the application may not call them otherwise).
+	 * Decoded by: a Venus host.  A native renderer that reports the feature
+	 * in its Vulkan 1.2 answers decodes them too.
+	 */
+	GPU_OP_CMD_DRAW_INDIRECT_COUNT = 165,
+	GPU_OP_CMD_DRAW_INDEXED_INDIRECT_COUNT = 166,
+
+	/*
+	 * vkCreateRenderPass2, for a render pass one of whose subpasses
+	 * resolves depth or stencil (VkSubpassDescriptionDepthStencilResolve
+	 * chained to its VkSubpassDescription2, the one record of the chains
+	 * that is sent); every other render pass of vkCreateRenderPass2 is sent
+	 * in its Vulkan 1.0 form as GPU_OP_CREATE_RENDER_PASS.
+	 * Number: venus-protocol vn_protocol_driver_defines.h (Mesa 26.2.6),
+	 * VK_COMMAND_TYPE_vkCreateRenderPass2_EXT.
+	 * Arguments: [device][u64 1][VkRenderPassCreateInfo2][u64 0]
+	 * [u64 1][render pass], the records as Venus encodes them; image
+	 * layouts are those of Vulkan 1.0 (libvulkan/wire.c:
+	 * vulkan_wire_image_layout).
+	 * Reply: [number][VkResult][u64 1][render pass].
+	 * Sent by: libvulkan/resources.c: vkCreateRenderPass2, only to a
+	 * renderer whose Vulkan 1.2 answers report the depth and stencil
+	 * resolve modes asked for.
+	 * Decoded by: a Venus host.  A native renderer that promises the
+	 * Vulkan 1.2 queries (libvulkan/context.c
+	 * VULKAN_NATIVE_CAPSET_CORE12_QUERIES) decodes it too.
+	 */
+	GPU_OP_CREATE_RENDER_PASS2 = 167,
+
+	/*
 	 * vkSetReplyCommandStreamMESA (the command's name in the cited XML):
 	 * selects where the replies of the stream go.
 	 * Number: VK_EXT_command_serialization.xml:553.

@@ -709,7 +709,17 @@ vulkan_encode_handle(
 }
 
 /*
- * Keeps presentable ordinary images in a renderer-supported preservation layout.
+ * Keeps presentable ordinary images in a renderer-supported preservation
+ * layout, and gives the layouts of one aspect of a depth and stencil image
+ * (Vulkan 1.1 and 1.2) as the Vulkan 1.0 layout that allows the same use of
+ * both aspects, so every renderer reads layouts of Vulkan 1.0 only.
+ *
+ * Values referenced: the Vulkan 1.2 specification (section 12.4, Image
+ * Layouts: DEPTH_ATTACHMENT_OPTIMAL and STENCIL_ATTACHMENT_OPTIMAL allow
+ * what DEPTH_STENCIL_ATTACHMENT_OPTIMAL allows of their aspect, the
+ * READ_ONLY ones what DEPTH_STENCIL_READ_ONLY_OPTIMAL allows; the two
+ * mixed layouts of Vulkan 1.1 allow an attachment of one aspect and reads
+ * of the other, which only GENERAL allows of both).
  */
 uint32_t
 vulkan_wire_image_layout(
@@ -717,6 +727,14 @@ vulkan_wire_image_layout(
 {
 	/* Direct-display WSI owns presentation while the renderer owns ordinary images. */
 	if (layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+		return VK_IMAGE_LAYOUT_GENERAL;
+
+	/* The layouts of one aspect, as the layout of both. */
+	if (layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || layout == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL)
+		return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	if (layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL || layout == VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL)
+		return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+	if (layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL || layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL)
 		return VK_IMAGE_LAYOUT_GENERAL;
 
 	/* Succeeded: all other standard image layouts retain their declared meaning. */
@@ -809,9 +827,12 @@ static void wire_u32_array(struct vulkan_writer *writer, const uint32_t *values,
 
 /*
  * The 1.1 feature structures a device creation forwards to a renderer
- * that answers the Vulkan 1.1 queries, and the one render pass structure.
+ * that answers the Vulkan 1.1 queries and the 1.2 one to a renderer that
+ * answers the 1.2 queries (core11.c makes the chain), and the one render
+ * pass structure.
  */
 static const VkStructureType wire_device_chain_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES,
 	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
 	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
@@ -932,9 +953,16 @@ wire_device_chain_self(
 	const VkPhysicalDeviceProtectedMemoryFeatures *protection;
 	const VkPhysicalDeviceSamplerYcbcrConversionFeatures *conversion;
 	const VkPhysicalDeviceShaderDrawParametersFeatures *parameters;
+	VkPhysicalDeviceVulkan12Features *core12;
+	uint32_t index;
 
 	/* The fields in their declared order, each a 32-bit word, by the structure's type. */
 	switch (record->sType) {
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+		core12 = (VkPhysicalDeviceVulkan12Features *)record;
+		for (index = 0U; index < VULKAN_CORE12_FEATURE_COUNT; index++)
+			vulkan_write_u32(writer, *vulkan_core12_feature(core12, index));
+		break;
 	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
 		multiview = (const VkPhysicalDeviceMultiviewFeatures *)record;
 		vulkan_write_u32(writer, multiview->multiview);

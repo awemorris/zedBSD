@@ -35,11 +35,30 @@
 #define CORE11_ALLOCATION_BYTES		(UINT64_C(1) << 30)
 #define CORE11_SUBGROUP_BASIC		0x00000001U
 
+/*
+ * The least values Vulkan 1.2 requires of the properties a renderer
+ * reports: a depth and a stencil resolve that take sample 0, and a single
+ * sample of an integer colour attachment in a framebuffer.
+ *
+ * Values referenced: the Vulkan 1.2 specification (section 40.1, Required
+ * Limits: supportedDepthResolveModes and supportedStencilResolveModes
+ * include VK_RESOLVE_MODE_SAMPLE_ZERO_BIT, framebufferIntegerColorSampleCounts
+ * includes VK_SAMPLE_COUNT_1_BIT; section 39.1, Feature Requirements:
+ * subgroupBroadcastDynamicId, uniformBufferStandardLayout and
+ * shaderSubgroupExtendedTypes, which the renderer's shaders carry, and
+ * imagelessFramebuffer, separateDepthStencilLayouts, hostQueryReset and
+ * timelineSemaphore, which this library makes).
+ */
+#define CORE12_RESOLVE_SAMPLE_ZERO	0x00000001U
+#define CORE12_SAMPLE_COUNT_1		0x00000001U
+
 /* The versions the rule names. */
 #define VERSION_1_0			VK_MAKE_VERSION(1, 0, 0)
 #define VERSION_1_1			VK_MAKE_VERSION(1, 1, 0)
+#define VERSION_1_2			VK_MAKE_VERSION(1, 2, 0)
 
 static void reason_add(const char **reasons, uint32_t capacity, uint32_t *count, const char *reason);
+static void version_core12_reasons(const struct vulkan_core11_facts *facts, const struct vulkan_core12_facts *core12, const char **reasons, uint32_t capacity, uint32_t *count);
 
 /*
  * Decides the version a physical device names: the highest of the
@@ -53,6 +72,7 @@ uint32_t
 vulkan_version_decide(
 	uint32_t library,
 	const struct vulkan_core11_facts *facts,
+	const struct vulkan_core12_facts *core12,
 	const char **reasons,
 	uint32_t capacity,
 	uint32_t *count)
@@ -98,8 +118,63 @@ vulkan_version_decide(
 	if (*count != 0U)
 		return VERSION_1_0;
 
-	/* Succeeded: the device names Vulkan 1.1. */
-	return VERSION_1_1;
+	/* A library of Vulkan 1.1 names nothing later. */
+	if (library < VERSION_1_2)
+		return VERSION_1_1;
+
+	/* Any requirement of Vulkan 1.2 unmet keeps the device at Vulkan 1.1. */
+	version_core12_reasons(facts, core12, reasons, capacity, count);
+	if (*count != 0U)
+		return VERSION_1_1;
+
+	/* Succeeded: the device names Vulkan 1.2. */
+	return VERSION_1_2;
+}
+
+/*
+ * Gives the reasons a device that meets Vulkan 1.1 does not name 1.2: the
+ * renderer's own version, its answers to the 1.2 queries, the features of
+ * Vulkan 1.2 that its shaders carry and the limits 1.2 raises.
+ */
+static void
+version_core12_reasons(
+	const struct vulkan_core11_facts *facts,
+	const struct vulkan_core12_facts *core12,
+	const char **reasons,
+	uint32_t capacity,
+	uint32_t *count)
+{
+	const VkPhysicalDeviceVulkan12Features *features;
+	const VkPhysicalDeviceVulkan12Properties *properties;
+
+	/* The renderer's own version and its answers to the 1.2 queries. */
+	if (facts->api_version < VERSION_1_2)
+		reason_add(reasons, capacity, count, "the renderer's apiVersion is below 1.2");
+	if (!core12->reported) {
+		reason_add(reasons, capacity, count, "the renderer does not answer the Vulkan 1.2 feature and property queries");
+		return;
+	}
+
+	/* The features Vulkan 1.2 requires of the renderer's shaders. */
+	features = &core12->features;
+	if (!features->subgroupBroadcastDynamicId)
+		reason_add(reasons, capacity, count, "no subgroupBroadcastDynamicId (a feature Vulkan 1.2 requires)");
+	if (!features->uniformBufferStandardLayout)
+		reason_add(reasons, capacity, count, "no uniformBufferStandardLayout (a feature Vulkan 1.2 requires)");
+	if (!features->shaderSubgroupExtendedTypes)
+		reason_add(reasons, capacity, count, "no shaderSubgroupExtendedTypes (a feature Vulkan 1.2 requires)");
+
+	/* The limits Vulkan 1.2 adds. */
+	properties = &core12->properties;
+	if ((properties->supportedDepthResolveModes & CORE12_RESOLVE_SAMPLE_ZERO) == 0U)
+		reason_add(reasons, capacity, count, "no depth resolve of sample 0");
+	if ((properties->supportedStencilResolveModes & CORE12_RESOLVE_SAMPLE_ZERO) == 0U)
+		reason_add(reasons, capacity, count, "no stencil resolve of sample 0");
+	if ((properties->framebufferIntegerColorSampleCounts & CORE12_SAMPLE_COUNT_1) == 0U)
+		reason_add(reasons, capacity, count, "framebufferIntegerColorSampleCounts without 1 sample");
+
+	/* Succeeded: every reason is counted. */
+	return;
 }
 
 /* Adds one reason to the list while it has room; the count goes on regardless. */

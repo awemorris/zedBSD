@@ -7,8 +7,8 @@
 
 /*
  * The Vulkan version a physical device names: the facts a renderer reports
- * of the later cores, and the rule that turns them into a version with the
- * reasons the next version is not named.  Nothing here talks to a renderer,
+ * of the later cores (1.1 and 1.2), and the rule that turns them into a
+ * version with the reasons the next version is not named.  Nothing here talks to a renderer,
  * so a host test asks the rule directly.
  */
 
@@ -58,6 +58,23 @@ struct vulkan_core11_facts {
 	uint64_t max_memory_allocation_size;
 };
 
-uint32_t vulkan_version_decide(uint32_t library, const struct vulkan_core11_facts *facts, const char **reasons, uint32_t capacity, uint32_t *count);
+/*
+ * What a renderer reports of the Vulkan 1.2 core: its
+ * VkPhysicalDeviceVulkan12Features and VkPhysicalDeviceVulkan12Properties,
+ * chained to vkGetPhysicalDeviceFeatures2 and vkGetPhysicalDeviceProperties2.
+ * reported is VK_FALSE when the renderer did not answer those queries; the
+ * structures are then zero.  The sType and pNext of the structures are not
+ * used.  The features the library makes itself (imageless framebuffers,
+ * separate depth and stencil layouts, the host's query reset and timeline
+ * semaphores) are not the renderer's to report and the rule does not read
+ * them here.
+ */
+struct vulkan_core12_facts {
+	VkBool32 reported;
+	VkPhysicalDeviceVulkan12Features features;
+	VkPhysicalDeviceVulkan12Properties properties;
+};
+
+uint32_t vulkan_version_decide(uint32_t library, const struct vulkan_core11_facts *facts, const struct vulkan_core12_facts *core12, const char **reasons, uint32_t capacity, uint32_t *count);
 
 #endif

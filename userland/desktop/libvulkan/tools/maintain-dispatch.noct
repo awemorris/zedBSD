@@ -19,7 +19,7 @@ func lines(text) {
 }
 func main(args) {
     if (Array.size(args) != 2) { System.error("usage: maintain-dispatch.noct PUBLIC_HEADER OUTPUT_DIRECTORY"); }
-    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h") + FileUtil.readText("include/libc/vulkan/vulkan_core11.h"));
+    var source = lines(FileUtil.readText(args[0]) + FileUtil.readText("include/libc/vulkan/vulkan_wayland.h") + FileUtil.readText("include/libc/vulkan/vulkan_external.h") + FileUtil.readText("include/libc/vulkan/vulkan_video.h") + FileUtil.readText("include/libc/vulkan/vulkan_display_control.h") + FileUtil.readText("include/libc/vulkan/vulkan_core11.h") + FileUtil.readText("include/libc/vulkan/vulkan_core12.h"));
     var banner = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n";
     var table = banner + "/*\n * Maintained declaration metadata, see include/libc/vulkan/API-PROVENANCE.md.\n */\n\n";
     var manifest = "name\tscope\textension\tversion\n"; var extension = "0"; var version = "VULKAN_CORE_1_0"; var count = 0;
@@ -45,8 +45,9 @@ func main(args) {
         if (line == "#define VK_EXT_display_surface_counter 1") { extension = "VULKAN_INSTANCE_SURFACE_COUNTER"; }
         if (line == "#define VK_EXT_display_control 1") { extension = "VULKAN_DEVICE_DISPLAY_CONTROL"; }
         if (line == "#define VK_KHR_get_display_properties2 1") { extension = "VULKAN_INSTANCE_DISPLAY_PROPERTIES2"; }
-        // The Vulkan 1.1 core, read last: its commands need no extension but the version.
+        // The Vulkan 1.1 and 1.2 cores, read last: their commands need no extension but the version.
         if (line == "#define VK_VERSION_1_1 1") { extension = "0"; version = "VULKAN_CORE_1_1"; }
+        if (line == "#define VK_VERSION_1_2 1") { extension = "0"; version = "VULKAN_CORE_1_2"; }
         var at = String.indexOf(line, "(VKAPI_PTR *PFN_vk");
         if (at < 0) { continue; }
         var rest = String.substring(line, at + 16, -1);
@@ -63,8 +64,8 @@ func main(args) {
         manifest = manifest + name + "\t" + scope + "\t" + extension + "\t" + version + "\n";
         count = count + 1;
     }
-    if (count != 232) { System.error("expected 232 public command records, got " + count); }
+    if (count != 245) { System.error("expected 245 public command records, got " + count); }
     FileUtil.writeText(args[1] + "/dispatch-table.inc", table);
     FileUtil.writeText(args[1] + "/api-commands.tsv", manifest);
-    print("maintained 232 dispatch records");
+    print("maintained 245 dispatch records");
 }

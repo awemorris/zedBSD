@@ -147,9 +147,10 @@ vkCmdWriteTimestamp2KHR(
 /*
  * Submits synchronization2 batches as Vulkan 1.0 batches.
  *
- * The device has no timeline semaphores and no device groups, so a
- * semaphore's value and a command buffer's device mask carry nothing the
- * 1.0 submission could lose.
+ * A semaphore's value goes in a VkTimelineSemaphoreSubmitInfo chained to
+ * its batch (a binary semaphore's is ignored).  The device has no device
+ * groups, so a command buffer's device mask carries nothing the 1.0
+ * submission could lose.
  */
 VKAPI_ATTR VkResult VKAPI_CALL
 vkQueueSubmit2KHR(
@@ -159,6 +160,8 @@ vkQueueSubmit2KHR(
 	VkFence fence)
 {
 	VkSubmitInfo *infos;
+	VkTimelineSemaphoreSubmitInfo *timelines;
+	uint64_t *values;
 	VkSemaphore *semaphores;
 	VkPipelineStageFlags *stages;
 	VkCommandBuffer *commands;
@@ -190,11 +193,14 @@ vkQueueSubmit2KHR(
 	}
 
 	/*
-	 * Holds the 1.0 batches and their arrays in one block: the batches, the
-	 * semaphores, the command buffers, then one wait stage per semaphore.
-	 * The 32-bit stages come last so every 64-bit array stays aligned.
+	 * Holds the 1.0 batches and their arrays in one block: the batches, their
+	 * timeline records, the semaphores' values, the semaphores, the command
+	 * buffers, then one wait stage per semaphore.  The 32-bit stages come
+	 * last so every 64-bit array stays aligned.
 	 */
 	bytes = (size_t)submitCount * sizeof(*infos);
+	bytes += (size_t)submitCount * sizeof(*timelines);
+	bytes += semaphore_count * sizeof(*values);
 	bytes += semaphore_count * sizeof(*semaphores);
 	bytes += command_count * sizeof(*commands);
 	bytes += semaphore_count * sizeof(*stages);
@@ -202,9 +208,11 @@ vkQueueSubmit2KHR(
 	if (block == NULL)
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-	/* Carves the block into its four arrays. */
+	/* Carves the block into its six arrays. */
 	infos = (VkSubmitInfo *)block;
-	semaphores = (VkSemaphore *)(block + (size_t)submitCount * sizeof(*infos));
+	timelines = (VkTimelineSemaphoreSubmitInfo *)(block + (size_t)submitCount * sizeof(*infos));
+	values = (uint64_t *)(timelines + submitCount);
+	semaphores = (VkSemaphore *)(values + semaphore_count);
 	commands = (VkCommandBuffer *)(semaphores + semaphore_count);
 	stages = (VkPipelineStageFlags *)(commands + command_count);
 
@@ -214,14 +222,25 @@ vkQueueSubmit2KHR(
 		memset(&infos[index], 0, sizeof(infos[index]));
 		infos[index].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
+		/* The semaphores' values, in arrays parallel to the semaphores. */
+		memset(&timelines[index], 0, sizeof(timelines[index]));
+		timelines[index].sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+		timelines[index].waitSemaphoreValueCount = pSubmits[index].waitSemaphoreInfoCount;
+		timelines[index].pWaitSemaphoreValues = values;
+		timelines[index].signalSemaphoreValueCount = pSubmits[index].signalSemaphoreInfoCount;
+		timelines[index].pSignalSemaphoreValues = values + pSubmits[index].waitSemaphoreInfoCount;
+		infos[index].pNext = &timelines[index];
+
 		/* The batch waits for each semaphore before the stages that semaphore names. */
 		infos[index].waitSemaphoreCount = pSubmits[index].waitSemaphoreInfoCount;
 		infos[index].pWaitSemaphores = semaphores;
 		infos[index].pWaitDstStageMask = stages;
 		for (item = 0; item < pSubmits[index].waitSemaphoreInfoCount; item++) {
 			semaphores[item] = pSubmits[index].pWaitSemaphoreInfos[item].semaphore;
+			values[item] = pSubmits[index].pWaitSemaphoreInfos[item].value;
 			stages[item] = sync2_stages(pSubmits[index].pWaitSemaphoreInfos[item].stageMask, VK_FALSE);
 		}
+		values += pSubmits[index].waitSemaphoreInfoCount;
 
 		/* Moves past the wait arrays this batch used. */
 		semaphores += pSubmits[index].waitSemaphoreInfoCount;
@@ -242,8 +261,11 @@ vkQueueSubmit2KHR(
 		 */
 		infos[index].signalSemaphoreCount = pSubmits[index].signalSemaphoreInfoCount;
 		infos[index].pSignalSemaphores = semaphores;
-		for (item = 0; item < pSubmits[index].signalSemaphoreInfoCount; item++)
+		for (item = 0; item < pSubmits[index].signalSemaphoreInfoCount; item++) {
 			semaphores[item] = pSubmits[index].pSignalSemaphoreInfos[item].semaphore;
+			values[item] = pSubmits[index].pSignalSemaphoreInfos[item].value;
+		}
+		values += pSubmits[index].signalSemaphoreInfoCount;
 
 		/* Moves past the signal array this batch used. */
 		semaphores += pSubmits[index].signalSemaphoreInfoCount;

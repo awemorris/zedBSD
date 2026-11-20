@@ -69,6 +69,11 @@ struct vulkan_sync {
 	 */
 	struct vulkan_sync_event_fence *event_fences;
 	uint32_t event_fence_count;
+	/*
+	 * A timeline semaphore's state (core12.c), NULL for a binary semaphore
+	 * or a fence.  Set at creation, freed at destruction.
+	 */
+	struct vulkan_timeline *timeline;
 };
 
 /* These helpers never acquire a device mutex; their caller already owns it. */
@@ -99,6 +104,12 @@ VkResult vulkan_external_fence_prepare_locked(struct VkDevice_T *device, struct 
 VkResult vulkan_external_fence_acquire_locked(struct VkDevice_T *device, struct vulkan_sync *sync);
 int vulkan_external_fence_descriptor(struct vulkan_sync *sync);
 void vulkan_external_fence_finish(struct vulkan_sync *sync);
+
+/* Timeline semaphores, which the library makes of binary ones (core12.c). */
+VkResult vulkan_timeline_create(struct VkDevice_T *device, struct vulkan_sync *sync, const VkSemaphoreCreateInfo *info);
+void vulkan_timeline_destroy(struct vulkan_sync *sync);
+VkBool32 vulkan_timeline_named(uint32_t count, const VkSubmitInfo *submits);
+VkResult vulkan_timeline_submit(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence);
 
 /* Clock sampling and cooperative pauses are performed without Vulkan locks. */
 VkResult vulkan_sync_clock(uint64_t *nanoseconds);

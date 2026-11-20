@@ -57,8 +57,9 @@ vkGetPhysicalDeviceFeatures2KHR(
 		}
 	}
 
-	/* The Vulkan 1.1 feature structures, from what the renderer reported. */
+	/* The Vulkan 1.1 and 1.2 feature structures, from what the renderer reported. */
 	vulkan_core11_features(physical, pFeatures->pNext);
+	vulkan_core12_features(physical, pFeatures->pNext);
 
 	/* Succeeded: the wrapper preserves caller-owned chain links. */
 	return;
@@ -74,6 +75,7 @@ vkGetPhysicalDeviceProperties2KHR(
 	VkBaseOutStructure *next;
 	VkPhysicalDeviceIDProperties identity;
 	VkPhysicalDeviceIDProperties *output;
+	VkPhysicalDeviceVulkan11Properties *core11;
 	VkResult status;
 
 	/* Ordinary public properties retain the implemented guest API version and limits. */
@@ -82,8 +84,9 @@ vkGetPhysicalDeviceProperties2KHR(
 
 	/* Fills recognized identity records while preserving the application chain. */
 	for (next = pProperties->pNext; next != NULL; next = next->pNext) {
-		/* Only the enabled external-capability output has local interpretation. */
-		if (next->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES)
+		/* The identity: VkPhysicalDeviceIDProperties, or its fields in VkPhysicalDeviceVulkan11Properties. */
+		if (next->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES &&
+		    next->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES)
 			continue;
 
 		/* A failed native query never supplies a made-up compatible UUID. */
@@ -93,6 +96,15 @@ vkGetPhysicalDeviceProperties2KHR(
 			memset(&identity, 0, sizeof(identity));
 
 		/* Copies only result fields, preserving the application's header and chain. */
+		if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES) {
+			core11 = (VkPhysicalDeviceVulkan11Properties *)next;
+			memcpy(core11->deviceUUID, identity.deviceUUID, VK_UUID_SIZE);
+			memcpy(core11->driverUUID, identity.driverUUID, VK_UUID_SIZE);
+			memcpy(core11->deviceLUID, identity.deviceLUID, VK_LUID_SIZE);
+			core11->deviceNodeMask = identity.deviceNodeMask;
+			core11->deviceLUIDValid = identity.deviceLUIDValid;
+			continue;
+		}
 		output = (VkPhysicalDeviceIDProperties *)next;
 		memcpy(output->deviceUUID, identity.deviceUUID, VK_UUID_SIZE);
 		memcpy(output->driverUUID, identity.driverUUID, VK_UUID_SIZE);
@@ -101,8 +113,9 @@ vkGetPhysicalDeviceProperties2KHR(
 		output->deviceLUIDValid = identity.deviceLUIDValid;
 	}
 
-	/* The Vulkan 1.1 property structures, from what the renderer reported. */
+	/* The Vulkan 1.1 and 1.2 property structures, from what the renderer reported. */
 	vulkan_core11_properties(physical, pProperties->pNext);
+	vulkan_core12_properties(physical, pProperties->pNext);
 
 	/* Succeeded: compatible guest contexts observe the same implementation identity. */
 	return;

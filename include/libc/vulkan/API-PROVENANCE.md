@@ -316,3 +316,34 @@ answers the Vulkan 1.1 queries. The host test of the ABI compares every
 structure's size, alignment and field offsets and every enumerator of the block
 with the Khronos header on LP64 and ILP32 (68 structures, 280 fields, 137
 constants).
+
+## Vulkan 1.2 core declarations
+
+`vulkan_core12.h` selects the `VK_VERSION_1_2` block verbatim from the same input
+as the Vulkan 1.1 selection above: Khronos Vulkan-Headers 1.4.309 as packaged by
+Debian (`libvulkan-dev` 1.4.309.0-1), `/usr/include/vulkan/vulkan_core.h`, SHA-256
+`39f358bb99f7be5206524d119de4a5b5ab5c515c329c2857ff395d37e6387b4c`. None of its
+declarations was in the maintained headers yet; it keeps `VK_VERSION_1_2`,
+`VK_API_VERSION_1_2`, the two size constants, 58 enumerations and structures with
+their flags types and aliases, the 13 function-pointer types and the 13 command
+prototypes. The enumerations carry the enumerators of the 1.4.309 registry, as
+shared registry enum data; they do not advertise support. Declaration license:
+Apache-2.0, copyright 2015–2025 The Khronos Group Inc. (`LICENSE-API`). The
+independent selection tool `tools/maintain-core12.noct` is Zlib.
+
+```sh
+timeout 90 build/NoctLang/build-static/noct \
+  userland/desktop/libvulkan/tools/maintain-core12.noct \
+  /usr/include/vulkan/vulkan_core.h include/libc/vulkan/vulkan_core12.h
+```
+
+`vulkan.h` includes `vulkan_core12.h` after `vulkan_core11.h`.
+`tools/maintain-dispatch.noct` reads it last and gives its commands the version
+column `VULKAN_CORE_1_2`: the 13 commands bring the dispatch table from 232 to
+245 records. A command of Vulkan 1.2 resolves only where that version is in
+effect, as for 1.1 (`libvulkan/version.c` decides a device's version).
+`tools/maintain-resources.noct` no longer writes `vkCreateFramebuffer` and
+`vkDestroyFramebuffer`: `resources.c` keeps an imageless framebuffer in the
+library and makes the renderer's framebuffer of the views named when a render
+pass begins (`tools/maintain-commands.noct` passes the command buffer to the
+begin encoder for that).
