@@ -662,6 +662,12 @@ struct vulkan_context {
 	 * native word promises it.
 	 */
 	VkBool32 core12_queries;
+	/*
+	 * The renderer is a native driver (its capset carries the native
+	 * word), not a Venus host: objects a native driver need not keep, as
+	 * the pipeline caches, are the library's own (pipeline.c).
+	 */
+	VkBool32 native;
 	uint64_t max_resource_bytes;
 	uint32_t capabilities;
 	uint64_t stream_handle;

@@ -34,6 +34,8 @@ static void pipeline_encode_rasterization(struct vulkan_writer *writer, const Vk
 static void pipeline_encode_depth(struct vulkan_writer *writer, const VkPipelineDepthStencilStateCreateInfo *info, const VkPipelineDynamicStateCreateInfo *dynamic);
 static void pipeline_encode_blend(struct vulkan_writer *writer, const VkPipelineColorBlendStateCreateInfo *info, const VkPipelineDynamicStateCreateInfo *dynamic);
 static VkResult pipeline_lost(struct VkDevice_T *device);
+static VkResult pipeline_local_cache(struct VkDevice_T *device, const VkAllocationCallbacks *allocator, uint64_t *result);
+static VkResult pipeline_local_cache_data(struct VkDevice_T *device, size_t *size, void *data);
 
 /*
  * Creates a native cache whose opaque bytes remain owned by its Vulkan device.
@@ -60,6 +62,17 @@ vkCreatePipelineCache(
 	/* Refuses a cache request whose layout cannot be encoded as a Vulkan cache record. */
 	if (info->sType != VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO)
 		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* A native driver's cache is the library's own; the initial data is not needed by anything. */
+	if (device->object.context->native) {
+		error = pipeline_local_cache(device, allocator, &handle);
+		if (error != VK_SUCCESS)
+			return error;
+		*result = (VkPipelineCache)handle;
+
+		/* Succeeded: the cache exists in the library. */
+		return VK_SUCCESS;
+	}
 	error = pipeline_single_create(
 		device,
 		VULKAN_OBJECT_PIPELINE_CACHE,
@@ -86,6 +99,7 @@ vkDestroyPipelineCache(
 	const VkAllocationCallbacks *allocator)
 {
 	struct VkDevice_T *device;
+	struct vulkan_object *object;
 
 	/* Null destruction is valid even when no cache was created. */
 	if (cache == VK_NULL_HANDLE)
@@ -93,6 +107,15 @@ vkDestroyPipelineCache(
 	device = vulkan_device(device_handle);
 	if (device == NULL)
 		return;
+
+	/* The library's own cache of a native driver has no renderer's object. */
+	if (device->object.context->native) {
+		object = pipeline_object(device, (uint64_t)cache, VULKAN_OBJECT_PIPELINE_CACHE);
+		if (object == NULL)
+			return;
+		vulkan_object_free_with_allocator(object, allocator);
+		return;
+	}
 	pipeline_destroy(
 		device,
 		(uint64_t)cache,
@@ -132,6 +155,16 @@ vkGetPipelineCacheData(
 	cache = pipeline_object(device, (uint64_t)handle, VULKAN_OBJECT_PIPELINE_CACHE);
 	if (cache == NULL)
 		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The library's own cache holds its header only. */
+	if (device->object.context->native) {
+		error = pipeline_local_cache_data(device, size, data);
+		if (error != VK_SUCCESS)
+			return error;
+
+		/* Succeeded: the header is written, or its size given. */
+		return VK_SUCCESS;
+	}
 	capacity = 0U;
 	if (data != NULL)
 		capacity = *size;
@@ -221,6 +254,18 @@ vkMergePipelineCaches(
 	cache = pipeline_object(device, (uint64_t)destination, VULKAN_OBJECT_PIPELINE_CACHE);
 	if (cache == NULL)
 		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The library's own caches hold nothing to merge; each source is still checked. */
+	if (device->object.context->native) {
+		for (index = 0U; index < count; index++) {
+			source = pipeline_object(device, (uint64_t)sources[index], VULKAN_OBJECT_PIPELINE_CACHE);
+			if (source == NULL || source == cache)
+				return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		/* Succeeded: the destination holds what it held. */
+		return VK_SUCCESS;
+	}
 
 	/* Serializing the complete wire transaction also serializes native cache updates. */
 	vulkan_writer_init_for_object(&writer, cache);
@@ -1173,4 +1218,80 @@ pipeline_lost(
 
 	/* The caller must report a terminal error rather than expose a foreign native handle. */
 	return VK_ERROR_DEVICE_LOST;
+}
+
+/*
+ * Makes a pipeline cache of the library's own for a native driver: an
+ * object with no renderer's identity, so a pipeline created with it names
+ * no cache to the driver.
+ */
+static VkResult
+pipeline_local_cache(
+	struct VkDevice_T *device,
+	const VkAllocationCallbacks *allocator,
+	uint64_t *result)
+{
+	struct vulkan_object *object;
+	VkResult error;
+
+	/* The local object alone. */
+	error = vulkan_object_alloc(
+		sizeof(*object),
+		sizeof(uint64_t),
+		VULKAN_OBJECT_PIPELINE_CACHE,
+		&device->object,
+		device->object.context,
+		allocator,
+		VK_SYSTEM_ALLOCATION_SCOPE_OBJECT,
+		&object);
+	if (error != VK_SUCCESS)
+		return error;
+	*result = vulkan_nondispatchable_handle(object);
+
+	/* Succeeded: the cache exists. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Gives the data of a library's own pipeline cache: the header of version
+ * one alone (its size, the version, the device's vendor and device IDs and
+ * its pipelineCacheUUID), with the standard two-call sizing.
+ *
+ * Values referenced: the Vulkan 1.0 specification (section 9.6,
+ * vkGetPipelineCacheData: the header of VK_PIPELINE_CACHE_HEADER_VERSION_ONE,
+ * 16 + VK_UUID_SIZE bytes, and VK_INCOMPLETE for a buffer too small).
+ */
+static VkResult
+pipeline_local_cache_data(
+	struct VkDevice_T *device,
+	size_t *size,
+	void *data)
+{
+	uint8_t header[16U + VK_UUID_SIZE];
+	uint32_t words[4];
+
+	/* The header's words, then the UUID. */
+	words[0] = (uint32_t)sizeof(header);
+	words[1] = (uint32_t)VK_PIPELINE_CACHE_HEADER_VERSION_ONE;
+	words[2] = device->physical->properties.vendorID;
+	words[3] = device->physical->properties.deviceID;
+	memcpy(header, words, sizeof(words));
+	memcpy(header + sizeof(words), device->physical->properties.pipelineCacheUUID, VK_UUID_SIZE);
+
+	/* A size query. */
+	if (data == NULL) {
+		*size = sizeof(header);
+		return VK_SUCCESS;
+	}
+
+	/* A buffer too small for the header gets nothing. */
+	if (*size < sizeof(header)) {
+		*size = 0U;
+		return VK_INCOMPLETE;
+	}
+	memcpy(data, header, sizeof(header));
+	*size = sizeof(header);
+
+	/* Succeeded: the header is written. */
+	return VK_SUCCESS;
 }
