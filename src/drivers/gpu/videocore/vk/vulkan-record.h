@@ -70,6 +70,12 @@ struct bcm2711_vulkan_record {
 	uint32_t words[BCM2711_VULKAN_RECORD_WORDS];
 	uint64_t offsets[BCM2711_VULKAN_VERTEX_BINDINGS];
 	VkRect2D area;
+	/*
+	 * A draw recorded by vkCmdDrawIndirect or vkCmdDrawIndexedIndirect: its
+	 * buffer in objects[0] and the record's offset in offsets[0], its
+	 * counts read when the draw is prepared.
+	 */
+	bool indirect;
 	/* Image transfers preserve their explicit execution layout and fully consumed semantic refusal. */
 	VkImageLayout layout;
 	int semantic_error;

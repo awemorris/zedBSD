@@ -758,7 +758,7 @@ device_properties(
 		limits->maxFragmentCombinedOutputResources = BCM2711_NATIVE_PASS_TARGETS;
 	}
 	limits->maxDrawIndexedIndexValue = 0xffffffffU;
-	limits->maxDrawIndirectCount = 0;
+	limits->maxDrawIndirectCount = 1;
 	limits->maxViewports = 1;
 	limits->maxViewportDimensions[0] = VULKAN_IMAGE_SIDE;
 	limits->maxViewportDimensions[1] = VULKAN_IMAGE_SIDE;
