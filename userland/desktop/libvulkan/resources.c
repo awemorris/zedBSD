@@ -27,24 +27,39 @@ struct vulkan_render_pass {
 	 * renderer's as one render pass of one subpass for each (parts,
 	 * part_count of them, 0 when not split): the first is this object
 	 * itself, the others render passes of the library's.  barriers[k] is
-	 * the barrier the move into subpass k makes.
+	 * the barrier the move into subpass k makes.  Each part has only the
+	 * attachments its subpass uses: member_counts[k] of them, the indices
+	 * of this render pass's attachments at members[k * attachment_count],
+	 * in the order the part has them.
 	 */
 	uint32_t part_count;
 	VkRenderPass *parts;
 	struct vulkan_subpass_barrier *barriers;
+	uint32_t *member_counts;
+	uint32_t *members;
 };
 
 /*
  * The Vulkan 1.0 record (and the 1.2 one, info2, when the render pass
  * resolves depth or stencil) of one subpass of a split render pass, with
- * the arrays it points to, owned until render_pass_part_free.
+ * the arrays it points to, owned until render_pass_part_free: the
+ * attachments the subpass uses, its references renumbered to them (map
+ * gives an attachment's index in the part, VK_ATTACHMENT_UNUSED when the
+ * part does not have it) and its dependencies.
  */
 struct render_pass_part {
 	VkRenderPassCreateInfo info;
 	VkRenderPassCreateInfo2 info2;
 	VkRenderPassMultiviewCreateInfo multiview;
+	VkSubpassDescription subpass;
+	VkSubpassDescription2 subpass2;
+	VkSubpassDescriptionDepthStencilResolve resolve;
+	VkAttachmentReference2 resolve_reference;
 	VkAttachmentDescription *attachments;
 	VkSubpassDependency *dependencies;
+	VkAttachmentReference *references;
+	VkAttachmentReference2 *references2;
+	uint32_t *map;
 };
 
 static VkResult resource_allocate(struct VkDevice_T *device, enum vulkan_object_kind kind, size_t bytes, const VkAllocationCallbacks *allocator, struct vulkan_object **result);
@@ -67,14 +82,25 @@ struct vulkan_framebuffer {
 	uint32_t width;
 	uint32_t height;
 	uint32_t layers;
+	/*
+	 * For a render pass the library split: the framebuffer of each part
+	 * (part_count of them, 0 otherwise), of the views of the attachments
+	 * the part has; the first is this object itself.
+	 */
+	uint32_t part_count;
+	VkFramebuffer *parts;
 };
 
 static VkResult render_pass_metadata(struct vulkan_render_pass *pass, const VkRenderPassCreateInfo *info);
 static void render_pass_free(struct vulkan_render_pass *pass);
 static VkResult render_pass_send(struct VkDevice_T *owner, struct vulkan_object *object, const VkRenderPassCreateInfo *info, const VkRenderPassCreateInfo2 *info2);
 static VkResult render_pass_split(struct VkDevice_T *owner, struct vulkan_render_pass *pass, const VkRenderPassCreateInfo *info, const VkRenderPassCreateInfo2 *info2, const VkAllocationCallbacks *allocator);
-static VkImageLayout render_pass_used(const VkSubpassDescription *subpass, uint32_t attachment);
-static VkResult render_pass_part_make(const VkRenderPassCreateInfo *info, const VkRenderPassCreateInfo2 *info2, uint32_t index, VkImageLayout *before, struct render_pass_part *part, struct vulkan_subpass_barrier *barrier);
+static VkImageLayout render_pass_used(const VkRenderPassCreateInfo *info, const VkRenderPassCreateInfo2 *info2, uint32_t subpass, uint32_t attachment);
+static VkResult render_pass_part_make(const VkRenderPassCreateInfo *info, const VkRenderPassCreateInfo2 *info2, uint32_t index, VkImageLayout *before, struct render_pass_part *part, struct vulkan_subpass_barrier *barrier, uint32_t *members, uint32_t *member_count);
+static void render_pass_part_subpass(struct render_pass_part *part, const VkSubpassDescription *subpass, const VkSubpassDescription2 *subpass2);
+static void render_pass_part_reference(const uint32_t *map, uint32_t *attachment);
+static VkBool32 render_pass_stencil(VkFormat format);
+static VkResult framebuffer_parts(struct VkDevice_T *owner, struct vulkan_framebuffer *framebuffer, const VkFramebufferCreateInfo *info, VkImageView *views, const VkAllocationCallbacks *allocator);
 static void render_pass_part_free(struct render_pass_part *part);
 
 #include "resources-generated.inc"
@@ -159,10 +185,14 @@ vkCreateFramebuffer(
 {
 	struct VkDevice_T *owner;
 	struct vulkan_framebuffer *framebuffer;
+	struct vulkan_render_pass *pass;
 	struct vulkan_object *object;
 	struct vulkan_writer writer;
+	VkFramebufferCreateInfo create;
+	VkImageView *views;
 	VkResult status;
 	uint64_t handle;
+	uint32_t index;
 
 	/* Reserves local ownership before any renderer creation can have side effects. */
 	owner = vulkan_device(device);
@@ -179,19 +209,50 @@ vkCreateFramebuffer(
 	framebuffer->height = pCreateInfo->height;
 	framebuffer->layers = pCreateInfo->layers;
 
-	/* An ordinary framebuffer is the renderer's. */
-	if (!framebuffer->imageless) {
-		vulkan_writer_init_for_object(&writer, object);
-		vulkan_command_begin(&writer, GPU_OP_CREATE_FRAMEBUFFER);
-		vulkan_write_u64(&writer, owner->object.wire_id);
-		vulkan_write_u64(&writer, 1);
-		vulkan_encode_VkFramebufferCreateInfo(&writer, pCreateInfo);
-		status = vulkan_object_create_complete(owner, object, &writer, GPU_OP_DESTROY_FRAMEBUFFER);
-		vulkan_writer_finish(&writer);
-		if (status != VK_SUCCESS) {
+	/* An imageless framebuffer is the library's alone. */
+	if (framebuffer->imageless) {
+		handle = vulkan_nondispatchable_handle(object);
+		*pFramebuffer = (VkFramebuffer)(uintptr_t)handle;
+		return VK_SUCCESS;
+	}
+
+	/*
+	 * An ordinary framebuffer is the renderer's: of all the views, or,
+	 * for a render pass the library split, of the views of the first
+	 * part's attachments, with a framebuffer for each later part.
+	 */
+	pass = (struct vulkan_render_pass *)vulkan_nondispatchable_object((uint64_t)pCreateInfo->renderPass);
+	create = *pCreateInfo;
+	views = NULL;
+	if (pass != NULL && pass->part_count > 1U) {
+		views = calloc((size_t)pass->attachment_count + 1U, sizeof(*views));
+		if (views == NULL) {
 			vulkan_object_free(object);
-			return status;
+			return VK_ERROR_OUT_OF_HOST_MEMORY;
 		}
+		for (index = 0; index < pass->member_counts[0]; index++)
+			views[index] = pCreateInfo->pAttachments[pass->members[index]];
+		create.pNext = NULL;
+		create.attachmentCount = pass->member_counts[0];
+		create.pAttachments = views;
+	}
+	vulkan_writer_init_for_object(&writer, object);
+	vulkan_command_begin(&writer, GPU_OP_CREATE_FRAMEBUFFER);
+	vulkan_write_u64(&writer, owner->object.wire_id);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFramebufferCreateInfo(&writer, &create);
+	status = vulkan_object_create_complete(owner, object, &writer, GPU_OP_DESTROY_FRAMEBUFFER);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS && views != NULL) {
+		status = framebuffer_parts(owner, framebuffer, pCreateInfo, views, pAllocator);
+		if (status != VK_SUCCESS)
+			(void)vulkan_object_destroy_remote(owner, object, GPU_OP_DESTROY_FRAMEBUFFER);
+	}
+	free(views);
+	if (status != VK_SUCCESS) {
+		vulkan_free(&object->allocator, framebuffer->parts);
+		vulkan_object_free(object);
+		return status;
 	}
 
 	/* Changes caller output only after local and native creation succeeded. */
@@ -213,6 +274,7 @@ vkDestroyFramebuffer(
 	const VkAllocationCallbacks *pAllocator)
 {
 	struct vulkan_framebuffer *record;
+	uint32_t index;
 
 	/* A null handle has nothing. */
 	record = (struct vulkan_framebuffer *)vulkan_nondispatchable_object((uint64_t)framebuffer);
@@ -228,6 +290,15 @@ vkDestroyFramebuffer(
 		vulkan_object_free(&record->object);
 		return;
 	}
+
+	/* The later parts' framebuffers, of a render pass the library split. */
+	for (index = 1U; index < record->part_count; index++)
+		vkDestroyFramebuffer(device, record->parts[index], pAllocator);
+	if (pAllocator != NULL) {
+		record->object.allocator.callbacks = *pAllocator;
+		record->object.allocator.has_callbacks = VK_TRUE;
+	}
+	vulkan_free(&record->object.allocator, record->parts);
 
 	/* Consumes native and local ownership. */
 	resource_destroy(vulkan_device(device), (uint64_t)framebuffer, GPU_OP_DESTROY_FRAMEBUFFER, pAllocator);
@@ -941,6 +1012,53 @@ vulkan_render_pass_barrier(
 	return &pass->barriers[subpass];
 }
 
+/*
+ * Gives the attachments of the render pass of one subpass of a render pass
+ * the library split, as indices of the render pass's attachments in the
+ * order that part has them (*count of them); false for a render pass the
+ * renderer keeps whole.
+ */
+VkBool32
+vulkan_render_pass_members(
+	VkRenderPass render_pass,
+	uint32_t subpass,
+	const uint32_t **members,
+	uint32_t *count)
+{
+	struct vulkan_render_pass *pass;
+
+	/* None, unless split. */
+	pass = (struct vulkan_render_pass *)vulkan_nondispatchable_object((uint64_t)render_pass);
+	if (pass == NULL || subpass >= pass->part_count)
+		return VK_FALSE;
+
+	/* Succeeded: the part's attachments. */
+	*members = &pass->members[(size_t)subpass * pass->attachment_count];
+	*count = pass->member_counts[subpass];
+	return VK_TRUE;
+}
+
+/*
+ * Gives the framebuffer of a framebuffer for the render pass of one
+ * subpass of a render pass the library split; the framebuffer itself for
+ * its first subpass and for a render pass the renderer keeps whole.
+ */
+VkFramebuffer
+vulkan_framebuffer_part(
+	VkFramebuffer framebuffer,
+	uint32_t subpass)
+{
+	struct vulkan_framebuffer *record;
+
+	/* As it is, unless split. */
+	record = (struct vulkan_framebuffer *)vulkan_nondispatchable_object((uint64_t)framebuffer);
+	if (record == NULL || subpass >= record->part_count)
+		return framebuffer;
+
+	/* Succeeded: the part's framebuffer. */
+	return record->parts[subpass];
+}
+
 /* Preallocates the common ownership record and a never-reused native identity. */
 static VkResult
 resource_allocate(
@@ -1164,6 +1282,8 @@ render_pass_free(
 	struct vulkan_render_pass *pass)
 {
 	/* Arrays have independent nullable ownership during partial metadata allocation. */
+	vulkan_free(&pass->object.allocator, pass->members);
+	vulkan_free(&pass->object.allocator, pass->member_counts);
 	vulkan_free(&pass->object.allocator, pass->barriers);
 	vulkan_free(&pass->object.allocator, pass->parts);
 	vulkan_free(&pass->object.allocator, pass->depth_stencil);
@@ -1236,21 +1356,29 @@ render_pass_send(
  * Gives a native driver a render pass of several subpasses as one render
  * pass of one subpass for each: the first is the object itself (which the
  * framebuffers and the begin name), the others the library's, and moving
- * to the next subpass ends one and begins the next (commands.c).  An
- * attachment is loaded as the render pass says in the first subpass that
- * uses it and stored as it says in the last, loaded and stored in every
- * other, so nothing between subpasses is lost; its layout is the one each
- * subpass uses it in.  A dependency between two subpasses is a barrier
- * between their render passes.
+ * to the next subpass ends one and begins the next (commands.c).  Each
+ * part has only the attachments its subpass uses, as the drivers want a
+ * subpass to name every attachment of its render pass, and a framebuffer
+ * of the render pass has one of those views for each part
+ * (framebuffer_parts).  An attachment is loaded as the render pass says
+ * in the first subpass that uses it and stored as it says in the last,
+ * loaded and stored in every other, so nothing between subpasses is lost;
+ * its layout is the one each subpass uses it in, and after its last the
+ * final one.  A dependency between two subpasses is a barrier between
+ * their render passes.
  *
  * XXX A tiling GPU stores and loads every attachment between subpasses,
  * where one render pass would keep them in its tile memory.
  *
+ * XXX An attachment no subpass uses is in no part, so it is not moved to
+ * its final layout.
+ *
  * Procedure referenced: the Vulkan 1.0 specification (section 7.1, Render
  * Pass Creation: loadOp applies in the first subpass that uses the
  * attachment, storeOp at the end of the last, layout transitions to each
- * subpass's layout and finally finalLayout; VkSubpassDependency, the
- * stages and accesses of a dependency between two subpasses).
+ * subpass's layout and finally finalLayout, a preserved attachment keeps
+ * its contents; VkSubpassDependency, the stages and accesses of a
+ * dependency between two subpasses).
  */
 static VkResult
 render_pass_split(
@@ -1267,26 +1395,31 @@ render_pass_split(
 	uint32_t count;
 	size_t bytes;
 
-	/* The parts' handles and barriers, and each attachment's layout before the next subpass. */
+	/* The parts' handles, barriers and attachments, and each attachment's layout before the next subpass. */
 	count = info->subpassCount;
 	bytes = (size_t)count * sizeof(*pass->parts);
 	pass->parts = vulkan_allocate(&pass->object.allocator, bytes, __alignof__(VkRenderPass), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 	bytes = (size_t)count * sizeof(*pass->barriers);
 	pass->barriers = vulkan_allocate(&pass->object.allocator, bytes, __alignof__(struct vulkan_subpass_barrier), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	bytes = (size_t)count * sizeof(*pass->member_counts);
+	pass->member_counts = vulkan_allocate(&pass->object.allocator, bytes, __alignof__(uint32_t), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	bytes = ((size_t)count * info->attachmentCount + 1U) * sizeof(*pass->members);
+	pass->members = vulkan_allocate(&pass->object.allocator, bytes, __alignof__(uint32_t), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 	before = calloc((size_t)info->attachmentCount + 1U, sizeof(*before));
-	if (pass->parts == NULL || pass->barriers == NULL || before == NULL) {
+	if (pass->parts == NULL || pass->barriers == NULL || pass->member_counts == NULL || pass->members == NULL || before == NULL) {
 		free(before);
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
 	}
 	memset(pass->parts, 0, (size_t)count * sizeof(*pass->parts));
 	memset(pass->barriers, 0, (size_t)count * sizeof(*pass->barriers));
+	memset(pass->member_counts, 0, (size_t)count * sizeof(*pass->member_counts));
 	for (index = 0; index < info->attachmentCount; index++)
 		before[index] = info->pAttachments[index].initialLayout;
 
 	/* Each subpass's render pass, in order; the first is the object's own. */
 	status = VK_SUCCESS;
 	for (index = 0; index < count && status == VK_SUCCESS; index++) {
-		status = render_pass_part_make(info, info2, index, before, &part, &pass->barriers[index]);
+		status = render_pass_part_make(info, info2, index, before, &part, &pass->barriers[index], &pass->members[(size_t)index * info->attachmentCount], &pass->member_counts[index]);
 		if (status != VK_SUCCESS)
 			break;
 		if (index == 0U) {
@@ -1315,26 +1448,43 @@ render_pass_split(
 	return VK_SUCCESS;
 }
 
-/* Gives the layout a subpass uses an attachment in, VK_IMAGE_LAYOUT_UNDEFINED when it does not use it. */
+/*
+ * Gives the layout a subpass uses an attachment in, VK_IMAGE_LAYOUT_UNDEFINED
+ * when it does not use it (a reference is never in that layout): as a
+ * colour, resolve, depth and stencil or input attachment, or, in the 1.2
+ * record, as the attachment its depth and stencil resolve to.
+ */
 static VkImageLayout
 render_pass_used(
-	const VkSubpassDescription *subpass,
+	const VkRenderPassCreateInfo *info,
+	const VkRenderPassCreateInfo2 *info2,
+	uint32_t subpass,
 	uint32_t attachment)
 {
+	const VkSubpassDescription *description;
+	const VkSubpassDescriptionDepthStencilResolve *resolve;
 	uint32_t index;
 
 	/* Its colour, resolve, depth and stencil, and input attachments. */
-	for (index = 0; index < subpass->colorAttachmentCount; index++) {
-		if (subpass->pColorAttachments[index].attachment == attachment)
-			return subpass->pColorAttachments[index].layout;
-		if (subpass->pResolveAttachments != NULL && subpass->pResolveAttachments[index].attachment == attachment)
-			return subpass->pResolveAttachments[index].layout;
+	description = &info->pSubpasses[subpass];
+	for (index = 0; index < description->colorAttachmentCount; index++) {
+		if (description->pColorAttachments[index].attachment == attachment)
+			return description->pColorAttachments[index].layout;
+		if (description->pResolveAttachments != NULL && description->pResolveAttachments[index].attachment == attachment)
+			return description->pResolveAttachments[index].layout;
 	}
-	if (subpass->pDepthStencilAttachment != NULL && subpass->pDepthStencilAttachment->attachment == attachment)
-		return subpass->pDepthStencilAttachment->layout;
-	for (index = 0; index < subpass->inputAttachmentCount; index++) {
-		if (subpass->pInputAttachments[index].attachment == attachment)
-			return subpass->pInputAttachments[index].layout;
+	if (description->pDepthStencilAttachment != NULL && description->pDepthStencilAttachment->attachment == attachment)
+		return description->pDepthStencilAttachment->layout;
+	for (index = 0; index < description->inputAttachmentCount; index++) {
+		if (description->pInputAttachments[index].attachment == attachment)
+			return description->pInputAttachments[index].layout;
+	}
+
+	/* The attachment its depth and stencil resolve to. */
+	if (info2 != NULL) {
+		resolve = vulkan_render_pass2_resolve(&info2->pSubpasses[subpass]);
+		if (resolve != NULL && resolve->pDepthStencilResolveAttachment->attachment == attachment)
+			return resolve->pDepthStencilResolveAttachment->layout;
 	}
 
 	/* Not used. */
@@ -1344,7 +1494,8 @@ render_pass_used(
 /*
  * Makes the records of one subpass's render pass (index) of a render pass
  * the library splits, and the barrier into it; before holds each
- * attachment's layout before it and is moved past it.
+ * attachment's layout before it and is moved past it.  members receives
+ * the indices of the attachments the part has, member_count their number.
  */
 static VkResult
 render_pass_part_make(
@@ -1353,69 +1504,79 @@ render_pass_part_make(
 	uint32_t index,
 	VkImageLayout *before,
 	struct render_pass_part *part,
-	struct vulkan_subpass_barrier *barrier)
+	struct vulkan_subpass_barrier *barrier,
+	uint32_t *members,
+	uint32_t *member_count)
 {
 	const VkRenderPassMultiviewCreateInfo *multiview;
+	const VkSubpassDescription *subpass;
 	const VkSubpassDependency *dependency;
 	const VkBaseInStructure *next;
 	VkAttachmentDescription *attachment;
 	VkImageLayout layout;
-	VkImageLayout ahead;
+	size_t references;
 	uint32_t first;
 	uint32_t last;
 	uint32_t item;
 	uint32_t other;
 
-	/* Room for the attachments and dependencies. */
+	/* Room for the attachments, the renumbering, the references and the dependencies. */
 	memset(part, 0, sizeof(*part));
+	subpass = &info->pSubpasses[index];
+	references = (size_t)subpass->inputAttachmentCount + 2U * (size_t)subpass->colorAttachmentCount + 1U;
 	part->attachments = calloc((size_t)info->attachmentCount + 1U, sizeof(*part->attachments));
+	part->map = calloc((size_t)info->attachmentCount + 1U, sizeof(*part->map));
 	part->dependencies = calloc((size_t)info->dependencyCount + 1U, sizeof(*part->dependencies));
-	if (part->attachments == NULL || part->dependencies == NULL) {
+	part->references = calloc(references, sizeof(*part->references));
+	if (info2 != NULL)
+		part->references2 = calloc(references, sizeof(*part->references2));
+	if (part->attachments == NULL || part->map == NULL || part->dependencies == NULL || part->references == NULL ||
+	    (info2 != NULL && part->references2 == NULL)) {
 		render_pass_part_free(part);
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
 	}
 
-	/* Each attachment: loaded in its first subpass, stored in its last, kept in the others. */
+	/*
+	 * Each attachment the subpass uses, in their order: loaded in its
+	 * first subpass, stored in its last, kept in the others; from the
+	 * layout before it to the one the subpass uses it in, or after its
+	 * last subpass the final one.
+	 */
+	*member_count = 0U;
 	for (item = 0; item < info->attachmentCount; item++) {
-		attachment = &part->attachments[item];
-		*attachment = info->pAttachments[item];
-		first = info->subpassCount;
-		last = 0U;
-		ahead = VK_IMAGE_LAYOUT_UNDEFINED;
+		part->map[item] = VK_ATTACHMENT_UNUSED;
+		layout = render_pass_used(info, info2, index, item);
+		if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
+			continue;
+		first = index;
+		last = index;
 		for (other = 0; other < info->subpassCount; other++) {
-			layout = render_pass_used(&info->pSubpasses[other], item);
-			if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
+			if (render_pass_used(info, info2, other, item) == VK_IMAGE_LAYOUT_UNDEFINED)
 				continue;
-			if (first == info->subpassCount)
+			if (other < first)
 				first = other;
-			if (other >= index && ahead == VK_IMAGE_LAYOUT_UNDEFINED)
-				ahead = layout;
 			last = other;
 		}
-		if (first == info->subpassCount) {
-			first = 0U;
-			last = info->subpassCount - 1U;
-		}
+		attachment = &part->attachments[*member_count];
+		*attachment = info->pAttachments[item];
 		if (index != first) {
 			attachment->loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-			attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			if (render_pass_stencil(attachment->format))
+				attachment->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		}
 		if (index != last) {
 			attachment->storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-			attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+			if (render_pass_stencil(attachment->format))
+				attachment->stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
 		}
-
-		/* The layout before, the one this subpass uses (else the next use's, or the last), the final one after its last use. */
 		attachment->initialLayout = before[item];
-		layout = render_pass_used(&info->pSubpasses[index], item);
-		if (index >= last)
+		if (index == last)
 			layout = info->pAttachments[item].finalLayout;
-		else if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
-			layout = before[item];
-		if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
-			layout = ahead != VK_IMAGE_LAYOUT_UNDEFINED ? ahead : info->pAttachments[item].finalLayout;
 		attachment->finalLayout = layout;
 		before[item] = layout;
+		part->map[item] = *member_count;
+		members[*member_count] = item;
+		(*member_count)++;
 	}
 
 	/*
@@ -1446,13 +1607,16 @@ render_pass_part_make(
 		part->info.dependencyCount++;
 	}
 
-	/* The 1.0 record: the subpass alone, its preserved attachments kept by the loads and stores. */
+	/* The subpass, its references renumbered (and in the 1.2 record). */
+	render_pass_part_subpass(part, subpass, info2 != NULL ? &info2->pSubpasses[index] : NULL);
+
+	/* The 1.0 record: the subpass alone, with its attachments. */
 	part->info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	part->info.flags = info->flags;
-	part->info.attachmentCount = info->attachmentCount;
+	part->info.attachmentCount = *member_count;
 	part->info.pAttachments = part->attachments;
 	part->info.subpassCount = 1U;
-	part->info.pSubpasses = &info->pSubpasses[index];
+	part->info.pSubpasses = &part->subpass;
 	part->info.pDependencies = part->dependencies;
 
 	/* Its views, when the render pass has them. */
@@ -1474,8 +1638,10 @@ render_pass_part_make(
 	if (info2 != NULL) {
 		part->info2 = *info2;
 		part->info2.pNext = NULL;
+		part->info2.attachmentCount = *member_count;
+		part->info2.pAttachments = NULL;
 		part->info2.subpassCount = 1U;
-		part->info2.pSubpasses = &info2->pSubpasses[index];
+		part->info2.pSubpasses = &part->subpass2;
 		part->info2.dependencyCount = part->info.dependencyCount;
 		part->info2.pDependencies = NULL;
 	}
@@ -1484,13 +1650,205 @@ render_pass_part_make(
 	return VK_SUCCESS;
 }
 
+/*
+ * Copies a subpass into a part's records with its references renumbered
+ * to the part's attachments (subpass2, its 1.2 record, too when not
+ * NULL).  The part has no attachment the subpass preserves, which so
+ * keeps its contents.
+ */
+static void
+render_pass_part_subpass(
+	struct render_pass_part *part,
+	const VkSubpassDescription *subpass,
+	const VkSubpassDescription2 *subpass2)
+{
+	const VkSubpassDescriptionDepthStencilResolve *resolve;
+	VkAttachmentReference *reference;
+	VkAttachmentReference2 *reference2;
+	uint32_t count;
+	uint32_t index;
+
+	/* The 1.0 record: its input, colour, resolve and depth and stencil references, in that order in the part's storage. */
+	part->subpass = *subpass;
+	part->subpass.preserveAttachmentCount = 0U;
+	part->subpass.pPreserveAttachments = NULL;
+	reference = part->references;
+	count = subpass->inputAttachmentCount;
+	if (subpass->pInputAttachments != NULL && count != 0U) {
+		memcpy(reference, subpass->pInputAttachments, (size_t)count * sizeof(*reference));
+		part->subpass.pInputAttachments = reference;
+		reference += count;
+	}
+	count = subpass->colorAttachmentCount;
+	if (subpass->pColorAttachments != NULL && count != 0U) {
+		memcpy(reference, subpass->pColorAttachments, (size_t)count * sizeof(*reference));
+		part->subpass.pColorAttachments = reference;
+		reference += count;
+	}
+	if (subpass->pResolveAttachments != NULL && count != 0U) {
+		memcpy(reference, subpass->pResolveAttachments, (size_t)count * sizeof(*reference));
+		part->subpass.pResolveAttachments = reference;
+		reference += count;
+	}
+	if (subpass->pDepthStencilAttachment != NULL) {
+		*reference = *subpass->pDepthStencilAttachment;
+		part->subpass.pDepthStencilAttachment = reference;
+		reference++;
+	}
+	for (index = 0; part->references + index < reference; index++)
+		render_pass_part_reference(part->map, &part->references[index].attachment);
+
+	/* The 1.2 record, the same way, and the attachment its depth and stencil resolve to. */
+	if (subpass2 == NULL)
+		return;
+	part->subpass2 = *subpass2;
+	part->subpass2.pNext = NULL;
+	part->subpass2.preserveAttachmentCount = 0U;
+	part->subpass2.pPreserveAttachments = NULL;
+	reference2 = part->references2;
+	count = subpass2->inputAttachmentCount;
+	if (subpass2->pInputAttachments != NULL && count != 0U) {
+		memcpy(reference2, subpass2->pInputAttachments, (size_t)count * sizeof(*reference2));
+		part->subpass2.pInputAttachments = reference2;
+		reference2 += count;
+	}
+	count = subpass2->colorAttachmentCount;
+	if (subpass2->pColorAttachments != NULL && count != 0U) {
+		memcpy(reference2, subpass2->pColorAttachments, (size_t)count * sizeof(*reference2));
+		part->subpass2.pColorAttachments = reference2;
+		reference2 += count;
+	}
+	if (subpass2->pResolveAttachments != NULL && count != 0U) {
+		memcpy(reference2, subpass2->pResolveAttachments, (size_t)count * sizeof(*reference2));
+		part->subpass2.pResolveAttachments = reference2;
+		reference2 += count;
+	}
+	if (subpass2->pDepthStencilAttachment != NULL) {
+		*reference2 = *subpass2->pDepthStencilAttachment;
+		part->subpass2.pDepthStencilAttachment = reference2;
+		reference2++;
+	}
+	for (index = 0; part->references2 + index < reference2; index++) {
+		part->references2[index].pNext = NULL;
+		render_pass_part_reference(part->map, &part->references2[index].attachment);
+	}
+	resolve = vulkan_render_pass2_resolve(subpass2);
+	if (resolve != NULL) {
+		part->resolve = *resolve;
+		part->resolve.pNext = NULL;
+		part->resolve_reference = *resolve->pDepthStencilResolveAttachment;
+		part->resolve_reference.pNext = NULL;
+		render_pass_part_reference(part->map, &part->resolve_reference.attachment);
+		part->resolve.pDepthStencilResolveAttachment = &part->resolve_reference;
+		part->subpass2.pNext = &part->resolve;
+	}
+}
+
+/*
+ * Tells whether an attachment format has a stencil aspect: only then does
+ * a split change the attachment's stencil load and store (a format
+ * without one keeps those it was given, which drivers check).
+ */
+static VkBool32
+render_pass_stencil(
+	VkFormat format)
+{
+	/* The standard formats with stencil. */
+	switch (format) {
+	case VK_FORMAT_S8_UINT:
+	case VK_FORMAT_D16_UNORM_S8_UINT:
+	case VK_FORMAT_D24_UNORM_S8_UINT:
+	case VK_FORMAT_D32_SFLOAT_S8_UINT:
+		return VK_TRUE;
+	default:
+		return VK_FALSE;
+	}
+}
+
+/* Renumbers a reference of a subpass to its index among the part's attachments. */
+static void
+render_pass_part_reference(
+	const uint32_t *map,
+	uint32_t *attachment)
+{
+	/* An unused reference stays unused. */
+	if (*attachment == VK_ATTACHMENT_UNUSED)
+		return;
+
+	/* Succeeded: the part's index. */
+	*attachment = map[*attachment];
+}
+
 /* Frees the arrays of a subpass's records. */
 static void
 render_pass_part_free(
 	struct render_pass_part *part)
 {
 	/* Each, nullable. */
+	free(part->references2);
+	free(part->references);
 	free(part->dependencies);
+	free(part->map);
 	free(part->attachments);
 	memset(part, 0, sizeof(*part));
+}
+
+/*
+ * Makes the framebuffers of the parts after the first of a framebuffer
+ * whose render pass the library split: each of the views of the
+ * attachments that part has (views has room for all of them), for that
+ * part's render pass.  The first part is the framebuffer object itself.
+ */
+static VkResult
+framebuffer_parts(
+	struct VkDevice_T *owner,
+	struct vulkan_framebuffer *framebuffer,
+	const VkFramebufferCreateInfo *info,
+	VkImageView *views,
+	const VkAllocationCallbacks *allocator)
+{
+	struct vulkan_render_pass *pass;
+	VkFramebufferCreateInfo create;
+	const uint32_t *members;
+	VkResult status;
+	uint32_t index;
+	uint32_t item;
+	size_t bytes;
+
+	/* Room for the parts' framebuffers. */
+	pass = (struct vulkan_render_pass *)vulkan_nondispatchable_object((uint64_t)info->renderPass);
+	bytes = (size_t)pass->part_count * sizeof(*framebuffer->parts);
+	framebuffer->parts = vulkan_allocate(&framebuffer->object.allocator, bytes, __alignof__(VkFramebuffer), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (framebuffer->parts == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memset(framebuffer->parts, 0, bytes);
+	framebuffer->parts[0] = (VkFramebuffer)(uintptr_t)vulkan_nondispatchable_handle(&framebuffer->object);
+	framebuffer->part_count = 1U;
+
+	/* Each later part's, of its views, for its render pass. */
+	status = VK_SUCCESS;
+	for (index = 1U; index < pass->part_count && status == VK_SUCCESS; index++) {
+		members = &pass->members[(size_t)index * pass->attachment_count];
+		for (item = 0; item < pass->member_counts[index]; item++)
+			views[item] = info->pAttachments[members[item]];
+		create = *info;
+		create.pNext = NULL;
+		create.renderPass = pass->parts[index];
+		create.attachmentCount = pass->member_counts[index];
+		create.pAttachments = views;
+		status = vkCreateFramebuffer((VkDevice)owner, &create, allocator, &framebuffer->parts[index]);
+		if (status == VK_SUCCESS)
+			framebuffer->part_count = index + 1U;
+	}
+
+	/* A failure takes back the parts made after the first, which the caller destroys. */
+	if (status != VK_SUCCESS) {
+		for (index = 1U; index < framebuffer->part_count; index++)
+			vkDestroyFramebuffer((VkDevice)owner, framebuffer->parts[index], allocator);
+		framebuffer->part_count = 0U;
+		return status;
+	}
+
+	/* Succeeded: every part has its framebuffer. */
+	return VK_SUCCESS;
 }
