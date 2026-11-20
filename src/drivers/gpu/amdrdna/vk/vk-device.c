@@ -821,6 +821,10 @@ device_core12(
 {
 	/* The shaders' features, the limits and the name. */
 	i915_vkc_core12_defaults(core12, "zedBSD amdrdna");
+
+	/* The end of a subpass resolves sample 0 of the depth and stencil (vk-execute.c). */
+	core12->properties.supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	core12->properties.supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
 }
 
 /*

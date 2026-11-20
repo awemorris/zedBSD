@@ -450,6 +450,7 @@ struct amdrdna_vk_render_pass {
 	uint32_t depth_load_op;
 	uint32_t stencil_load_op;
 	uint32_t depth_attachment;
+	uint32_t depth_resolve_attachment;
 	uint32_t view_mask;
 };
 

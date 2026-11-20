@@ -135,10 +135,13 @@
  * program, the three that write a texel's bits as a 32-bit float depth, a
  * 16-bit normalized depth or the stencil (in amdrdna_quad_depth_ir()'s
  * order), the three that pack the bits of one, two or four texels
- * into a colour pixel (a texel of 32, 16 or 8 bits), and the one-colour
+ * into a colour pixel (a texel of 32, 16 or 8 bits), the one-colour
  * program again for each other export of a colour
  * (AMDRDNA_GFX10_COLOUR_R .. _SINT8 in order: a target of 32-bit or
- * integer channels, which takes the colour's words as they are).
+ * integer channels, which takes the colour's words as they are), and the
+ * three that write sample 0 of an image of samples as a 32-bit float
+ * depth, a 16-bit normalized depth or the stencil (a pass's resolve of
+ * its depth attachment).
  */
 #define EXECUTE_QUAD_VERTEX		0U
 #define EXECUTE_QUAD_TEXTURED		1U
@@ -151,7 +154,8 @@
 #define EXECUTE_QUAD_PACK_2		8U
 #define EXECUTE_QUAD_PACK_4		9U
 #define EXECUTE_QUAD_COLOUR_WIDE	10U
-#define EXECUTE_QUAD_PROGRAMS		(EXECUTE_QUAD_COLOUR_WIDE + AMDRDNA_GFX10_COLOUR_KINDS - 1U)
+#define EXECUTE_QUAD_SAMPLE_ZERO	(EXECUTE_QUAD_COLOUR_WIDE + AMDRDNA_GFX10_COLOUR_KINDS - 1U)
+#define EXECUTE_QUAD_PROGRAMS		(EXECUTE_QUAD_SAMPLE_ZERO + 3U)
 
 /* The bytes of a pixel the packing programs write: four texels of 8 bits, two of 16, or one of 32. */
 #define EXECUTE_PACK_BYTES		4U
@@ -463,6 +467,7 @@ static int execute_image_target(const struct amdrdna_vk_image *image, uint32_t f
 static int execute_slice_target(const struct amdrdna_vk_image *image, uint32_t format, uint32_t level, uint32_t slice, struct amdrdna_vk_target *target);
 static int execute_resolve_images(struct amdrdna_vk_execute *execute, const struct amdrdna_vk_record *record);
 static int execute_pass_resolves(struct amdrdna_vk_execute *execute, struct execute_state *state);
+static int execute_pass_depth_resolve(struct amdrdna_vk_execute *execute, struct execute_state *state, int32_t x1, int32_t y1);
 static int execute_resolve_quad(struct amdrdna_vk_execute *execute, const struct amdrdna_vk_image *source, uint32_t layer, int32_t source_x, int32_t source_y, const struct amdrdna_vk_target *target, int32_t x, int32_t y, uint32_t width, uint32_t height);
 static bool execute_region_inside(int32_t x, int32_t y, uint32_t width, uint32_t height, uint32_t image_width, uint32_t image_height);
 static void execute_full_viewport(uint32_t *viewport, int32_t x0, int32_t y0, int32_t x1, int32_t y1);
@@ -808,13 +813,19 @@ execute_programs(
 		amdrdna_quad_pack_ir(program, 1U << (index - EXECUTE_QUAD_PACK_1));
 		error = execute_compile(program, NULL, &execute->quad[index]);
 	}
-	for (index = EXECUTE_QUAD_COLOUR_WIDE; error == 0 && index < EXECUTE_QUAD_PROGRAMS; index++) {
+	for (index = EXECUTE_QUAD_COLOUR_WIDE; error == 0 && index < EXECUTE_QUAD_SAMPLE_ZERO; index++) {
 		if (execute->quad[index].compiled != NULL)
 			continue;
 		kern_memset(&options, 0, sizeof(options));
 		options.color_exports = AMDRDNA_GFX10_COLOUR_R + (index - EXECUTE_QUAD_COLOUR_WIDE);
 		amdrdna_quad_fragment_ir(program, 0);
 		error = execute_compile(program, &options, &execute->quad[index]);
+	}
+	for (index = EXECUTE_QUAD_SAMPLE_ZERO; error == 0 && index < EXECUTE_QUAD_PROGRAMS; index++) {
+		if (execute->quad[index].compiled != NULL)
+			continue;
+		amdrdna_quad_depth_ir(program, (AMDRDNA_QUAD_DEPTH_32 + (index - EXECUTE_QUAD_SAMPLE_ZERO)) | AMDRDNA_QUAD_SAMPLE_ZERO);
+		error = execute_compile(program, NULL, &execute->quad[index]);
 	}
 	kern_free(program);
 	if (error != 0)
@@ -5094,8 +5105,8 @@ execute_resolve_images(
 /*
  * Resolves the pass that ended: each colour attachment with a resolve
  * attachment, over the render area (within the targets), into the
- * resolve attachment's view; then what follows reads what the quads
- * wrote.  Nothing for a pass without a resolve or without a target.
+ * resolve attachment's view, and the depth attachment's sample 0 when the
+ * subpass resolves it; then what follows reads what the quads wrote.  Nothing for a pass without a resolve or without a target.
  *
  * Procedure referenced: the Vulkan 1.3 specification (VkSubpassDescription:
  * pResolveAttachments resolved at the end of the subpass, over the render
@@ -5150,6 +5161,14 @@ execute_pass_resolves(
 		resolved++;
 	}
 
+	/* The depth attachment's sample 0, when the subpass resolves it. */
+	if (pass->depth != 0U && pass->depth_resolve_attachment != VK_ATTACHMENT_UNUSED) {
+		error = execute_pass_depth_resolve(execute, state, x1, y1);
+		if (error != 0)
+			return error;
+		resolved++;
+	}
+
 	/* What follows reads the resolved images; a later pass writes its targets again. */
 	if (resolved != 0U) {
 		execute_barrier(execute);
@@ -5157,6 +5176,95 @@ execute_pass_resolves(
 	}
 
 	/* Succeeded: the pass's attachments are resolved. */
+	return 0;
+}
+
+/*
+ * Resolves sample 0 of the pass's depth attachment (its depth, and its
+ * stencil when its format has one: the device reports no independent
+ * resolve) into the resolve attachment over the render area up to
+ * (x1, y1): for each aspect a quad over the area of the resolve
+ * attachment's depth surface fetches sample 0's bits of the attachment's
+ * texel and exports them as the depth or as the stencil reference, as a
+ * copy between depth images does.  Returns 0, or EINVAL for views that
+ * are not a depth image of samples and one of one sample of its format.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/amd/vulkan/meta/radv_meta_resolve_fs.c
+ * (radv_depth_stencil_resolve_rendering_fs: the depth, then the stencil,
+ * each drawn into the destination's aspect by a fragment program that
+ * fetches the source's sample 0 for VK_RESOLVE_MODE_SAMPLE_ZERO_BIT).
+ */
+static int
+execute_pass_depth_resolve(
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	int32_t x1,
+	int32_t y1)
+{
+	const struct amdrdna_vk_render_pass *pass;
+	const struct amdrdna_vk_view *source_view;
+	const struct amdrdna_vk_view *destination_view;
+	const struct amdrdna_vk_image *source;
+	const struct amdrdna_vk_image *destination;
+	struct amdrdna_vk_target surface;
+	struct execute_quad quad;
+	uint32_t aspect;
+	int error;
+
+	/* The two views: a depth image of samples, into one of one sample of its format. */
+	pass = state->pass;
+	error = execute_pass_view(state->framebuffer, pass->depth_attachment, &source_view);
+	if (error == 0)
+		error = execute_pass_view(state->framebuffer, pass->depth_resolve_attachment, &destination_view);
+	if (error != 0)
+		return error;
+	source = source_view->image->payload;
+	destination = destination_view->image->payload;
+	if (!source->depth || !destination->depth || source->samples <= 1U || destination->samples > 1U ||
+	    source->format != destination->format)
+		return EINVAL;
+	if (x1 > (int32_t)destination->width || y1 > (int32_t)destination->height || x1 > (int32_t)source->width ||
+	    y1 > (int32_t)source->height)
+		return EINVAL;
+
+	/* The resolve attachment's depth surface, drawn into by quads of no colour over the area. */
+	error = execute_depth_target(destination, &surface);
+	if (error != 0)
+		return error;
+	kern_memset(&quad, 0, sizeof(quad));
+	quad.target.width = destination->width;
+	quad.target.height = destination->height;
+	quad.target.samples = 1U;
+	quad.colour_off = true;
+	quad.described = true;
+	quad.filter = VK_FILTER_NEAREST;
+	quad.x0 = state->area.offset.x;
+	quad.y0 = state->area.offset.y;
+	quad.x1 = x1;
+	quad.y1 = y1;
+	quad.u0 = quad.x0;
+	quad.v0 = quad.y0;
+	quad.u1 = x1;
+	quad.v1 = y1;
+
+	/* A quad for the depth, then one for the stencil when the format has it. */
+	for (aspect = VK_IMAGE_ASPECT_DEPTH_BIT; aspect <= VK_IMAGE_ASPECT_STENCIL_BIT; aspect <<= 1) {
+		if (aspect == VK_IMAGE_ASPECT_STENCIL_BIT && !source->stencil)
+			continue;
+		error = amdrdna_vk_depth_descriptor(source, aspect, true, NULL, quad.source_words);
+		if (error != 0)
+			return error;
+		quad.program = EXECUTE_QUAD_SAMPLE_ZERO + (execute_depth_program(destination, aspect) - EXECUTE_QUAD_DEPTH_32);
+		quad.depth_write = (aspect == VK_IMAGE_ASPECT_DEPTH_BIT);
+		quad.stencil_write = (aspect == VK_IMAGE_ASPECT_STENCIL_BIT);
+		error = amdrdna_vk_state_depth_target(&execute->pm4, &surface);
+		if (error == 0)
+			error = execute_quad(execute, &quad);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: sample 0 is in the resolve attachment. */
 	return 0;
 }
 
