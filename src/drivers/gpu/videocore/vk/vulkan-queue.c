@@ -752,6 +752,12 @@ execution_step(
 	execution = (struct queue_execution *)base;
 	*done = false;
 	ran = false;
+
+	/* After an execution of the session failed, nothing more runs: the device is lost. */
+	if (execution->session->lost) {
+		base->engine = false;
+		return ECANCELED;
+	}
 	while (execution->cursor < execution->owner.action_count) {
 		action = &execution->owner.actions[execution->cursor];
 
@@ -839,6 +845,7 @@ execution_end(
 		publish_completion(&execution->owner);
 	} else {
 		publish_failure(&execution->owner);
+		execution->session->lost = true;
 	}
 
 	/* Whole uncertain primary jobs transfer to controller quarantine before the payload edges retire. */

@@ -541,7 +541,6 @@ validate_targets(
 		if (target->resolved != 0 &&
 		    (state->msaa == 0 ||
 		     target->resolve != 0 ||
-		     target->resolved_output == 0 ||
 		     target->resolved_pitch < state->width * target->texel ||
 		     target->resolved_pitch > 0xfffffU ||
 		     (target->resolved_pitch & 63U) != 0))
