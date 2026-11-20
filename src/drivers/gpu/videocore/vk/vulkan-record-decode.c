@@ -12,6 +12,9 @@
 #include "drivers/gpu/videocore/vk/vulkan-occlusion.h"
 #include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
+/* A begin keeps four words of clear values for each attachment a pass has. */
+_Static_assert(BCM2711_VULKAN_PASS_ATTACHMENTS * 4U <= BCM2711_VULKAN_RECORD_WORDS, "a begin's clear values fit in a record's words");
+
 static int decode_clear(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_depth_clear(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_sets(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);

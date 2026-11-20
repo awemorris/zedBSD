@@ -39,8 +39,12 @@
 #define NATIVE_PASS_DEPTH_BYTES (16U * 1024U)
 #define NATIVE_PASS_AUX_DEPTH_BYTES (8U * 1024U)
 
-/* The most native intervals a pass names: three lists, four targets, pool, tile state, copy source and depth image. */
-#define NATIVE_PASS_SPANS 12U
+/*
+ * The most native intervals a pass names: three lists, four targets and
+ * their four resolve attachments, pool, tile state, copy source, depth
+ * image and its resolve attachment.
+ */
+#define NATIVE_PASS_SPANS 16U
 
 /* A temporary half-open interval exists only while all independent native owners are checked before list publication. */
 struct native_pass_span {
@@ -205,6 +209,8 @@ bcm2711_native_pass_measure(
 			continue;
 		loads += state->target[index].load;
 		stores += state->target[index].store;
+		if (state->target[index].resolved != 0)
+			stores++;
 	}
 	loads += state->depth_load;
 	stores += state->depth_store + state->depth_resolve;
@@ -373,6 +379,16 @@ validate_images(
 		if (error != 0)
 			return error;
 		count++;
+
+		/* Its resolve attachment's raster of one sample holds every row the resolving store writes. */
+		if (target->resolved != 0) {
+			if ((uint64_t)target->resolved_pitch * state->height > target->resolved_bytes)
+				return ENOSPC;
+			error = prepare_span(target->resolved_output, target->resolved_bytes, 64U, &spans[count]);
+			if (error != 0)
+				return error;
+			count++;
+		}
 	}
 
 	/* A copy source supplies every row the loads of the selected tiles can read. */
@@ -484,7 +500,7 @@ validate_targets(
 
 		/* An unused slot loads and stores nothing. */
 		if (target->output == 0) {
-			if (target->load != 0 || target->store != 0 || target->resolve != 0)
+			if (target->load != 0 || target->store != 0 || target->resolve != 0 || target->resolved != 0)
 				return EINVAL;
 			continue;
 		}
@@ -513,6 +529,21 @@ validate_targets(
 		    target->pitch < state->width * samples * target->texel ||
 		    target->pitch > 0xfffffU ||
 		    (target->pitch & 63U) != 0)
+			return EINVAL;
+
+		/*
+		 * A resolve attachment (averaged, or sample 0) of a target that
+		 * holds its samples: a raster of one sample with the target's pitch
+		 * limits.
+		 */
+		if (target->resolved > 2U)
+			return EINVAL;
+		if (target->resolved != 0 &&
+		    (state->msaa == 0 ||
+		     target->resolve != 0 ||
+		     target->resolved_pitch < state->width * target->texel ||
+		     target->resolved_pitch > 0xfffffU ||
+		     (target->resolved_pitch & 63U) != 0))
 			return EINVAL;
 	}
 
@@ -1006,6 +1037,19 @@ encode_tile(
 		else if (target->resolve == 2U)
 			decimate = 0;
 		write_raster(bytes + cursor, 29, index, target->format, decimate, target->pitch, target->output);
+		cursor += 13U;
+		stores++;
+	}
+
+	/* Each resolved target then stores its samples' average (or sample 0) into its resolve attachment. */
+	for (index = 0; index < state->targets; index++) {
+		target = &state->target[index];
+		if (target->output == 0 || target->resolved == 0)
+			continue;
+		decimate = 1U;
+		if (target->resolved == 2U)
+			decimate = 0;
+		write_raster(bytes + cursor, 29, index, target->format, decimate, target->resolved_pitch, target->resolved_output);
 		cursor += 13U;
 		stores++;
 	}

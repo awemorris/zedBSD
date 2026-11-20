@@ -36,6 +36,8 @@ static int colour_layout(VkImageLayout layout);
 static int colour_attachment(const VkAttachmentDescription *attachment);
 static int decode_attachment(struct i915_wire_reader *reader, VkAttachmentDescription *attachment);
 static int decode_subpass(struct i915_wire_reader *reader, const VkAttachmentDescription *attachments, struct bcm2711_vulkan_pass *pass);
+static int colour_resolve(const VkAttachmentDescription *attachments, uint32_t slot, uint32_t attachment, VkImageLayout layout, uint32_t *named, struct bcm2711_vulkan_pass *pass);
+static int pass_samples(const VkAttachmentDescription *attachments, struct bcm2711_vulkan_pass *pass);
 static int build_colour(struct bcm2711_vulkan_framebuffer *framebuffer, struct bcm2711_vulkan_object *device, uint32_t slot);
 static int release_views(struct bcm2711_vulkan_framebuffer *framebuffer, uint32_t count);
 static int depth_attachment(VkAttachmentDescription *attachment);
@@ -130,7 +132,7 @@ bcm2711_vulkan_pass_compatible(
 {
 	uint32_t slot;
 
-	/* All admitted passes have one subpass and no optional attachments; both have the same samples. */
+	/* All admitted passes have one subpass; both have the same samples. */
 	if (first == NULL || second == NULL)
 		return EINVAL;
 	if (first->colour_count != second->colour_count || first->samples != second->samples || first->view_mask != second->view_mask)
@@ -141,6 +143,10 @@ bcm2711_vulkan_pass_compatible(
 		if (first->colour_used[slot] != second->colour_used[slot])
 			return EINVAL;
 		if (first->colour_used[slot] && first->colours[slot].format != second->colours[slot].format)
+			return EINVAL;
+		if (first->colour_resolve[slot] != second->colour_resolve[slot])
+			return EINVAL;
+		if (first->colour_resolve[slot] && first->colour_resolved[slot].format != second->colour_resolved[slot].format)
 			return EINVAL;
 	}
 
@@ -227,6 +233,7 @@ create_target(
 		if (error == 0) {
 			framebuffer->owner.parent = record.framebuffer.owner.parent;
 			kern_memcpy(framebuffer->colours, record.framebuffer.colours, sizeof(framebuffer->colours));
+			kern_memcpy(framebuffer->resolves, record.framebuffer.resolves, sizeof(framebuffer->resolves));
 			framebuffer->depth = record.framebuffer.depth;
 			framebuffer->depth_resolve = record.framebuffer.depth_resolve;
 		}
@@ -314,18 +321,6 @@ decode_pass(
 			return error;
 	}
 
-	/* Every attachment has one sample, or every one four; a pass without any takes its pipelines'. */
-	pass->samples = 0;
-	if (count != 0) {
-		pass->samples = attachments[0].samples;
-		if (pass->samples != VK_SAMPLE_COUNT_1_BIT && pass->samples != VK_SAMPLE_COUNT_4_BIT)
-			return ENOTSUP;
-	}
-	for (index = 1; index < count; index++) {
-		if (attachments[index].samples != pass->samples)
-			return ENOTSUP;
-	}
-
 	/* The one subpass, which names every attachment. */
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
@@ -336,6 +331,15 @@ decode_pass(
 	error = decode_subpass(reader, attachments, pass);
 	if (error != 0)
 		return error;
+
+	/* The pass's samples; a pass without attachments takes its pipelines'.  Only a 7.1 resolves colour. */
+	error = pass_samples(attachments, pass);
+	if (error != 0)
+		return error;
+	for (index = 0; index < pass->colour_count; index++) {
+		if (pass->colour_resolve[index] && !bcm2711_vulkan_engine_71(session))
+			return ENOTSUP;
+	}
 
 	/* The one subpass's views, at most the device's (maxMultiviewViewCount); none renders one view. */
 	multiview = i915_vkc_render_pass_multiview(&chained);
@@ -412,18 +416,18 @@ decode_pass2(
 	if (error != 0)
 		return error;
 
-	/* Every attachment but the resolve's has four samples. */
-	pass->attachment_count = info.attachmentCount;
-	pass->samples = VK_SAMPLE_COUNT_4_BIT;
-	for (index = 0; index < info.attachmentCount; index++) {
-		if (index != resolve.target && info.pAttachments[index].samples != VK_SAMPLE_COUNT_4_BIT)
-			return ENOTSUP;
-	}
-
 	/* The one subpass, which names every attachment. */
+	pass->attachment_count = info.attachmentCount;
 	error = pass2_subpass(&info, &resolve, pass);
 	if (error != 0)
 		return error;
+
+	/* Every attachment but the resolves' has four samples. */
+	error = pass_samples(info.pAttachments, pass);
+	if (error != 0)
+		return error;
+	if (pass->samples != VK_SAMPLE_COUNT_4_BIT || info.pAttachments[resolve.target].samples != VK_SAMPLE_COUNT_1_BIT)
+		return ENOTSUP;
 
 	/* The one subpass's views, at most the device's (maxMultiviewViewCount); none renders one view. */
 	multiview = i915_vkc_render_pass_multiview(&info);
@@ -453,7 +457,8 @@ decode_pass2(
 
 /*
  * Takes the one subpass of a render pass of vkCreateRenderPass2 into pass:
- * what decode_subpass() takes, the depth/stencil attachment resolved, and
+ * what decode_subpass() takes (with its colour resolves), the depth/stencil
+ * attachment resolved, and
  * resolve's target, an attachment of one sample in its format in a
  * depth/stencil layout during the pass and around it.
  */
@@ -470,12 +475,11 @@ pass2_subpass(
 	uint32_t slot;
 	int error;
 
-	/* A graphics subpass without input, colour resolve or preserved attachments, which resolves its depth/stencil attachment. */
+	/* A graphics subpass without input or preserved attachments, which resolves its depth/stencil attachment. */
 	subpass = &info->pSubpasses[0];
 	if (subpass->flags != 0 ||
 	    subpass->pipelineBindPoint != VK_PIPELINE_BIND_POINT_GRAPHICS ||
 	    subpass->inputAttachmentCount != 0 ||
-	    subpass->pResolveAttachments != NULL ||
 	    subpass->preserveAttachmentCount != 0 ||
 	    subpass->colorAttachmentCount > BCM2711_VULKAN_PASS_COLOURS ||
 	    subpass->pDepthStencilAttachment == NULL ||
@@ -500,6 +504,13 @@ pass2_subpass(
 		pass->colour_used[slot] = true;
 		pass->colours[slot] = info->pAttachments[attachment];
 		pass->colour_attachment[slot] = attachment;
+	}
+
+	/* Each colour slot's resolve attachment, when the subpass has them. */
+	for (slot = 0; subpass->pResolveAttachments != NULL && slot < subpass->colorAttachmentCount; slot++) {
+		error = colour_resolve(info->pAttachments, slot, subpass->pResolveAttachments[slot].attachment, subpass->pResolveAttachments[slot].layout, &named, pass);
+		if (error != 0)
+			return error;
 	}
 
 	/* The depth/stencil attachment, which is the resolve's source. */
@@ -576,9 +587,10 @@ pass_dependency(
 
 /*
  * Decodes the pass's one subpass: its colour slots (up to four, each an
- * attachment or unused) and its depth/stencil attachment, with no input,
- * resolve or preserved attachment.  Every attachment is named once, a
- * colour one in the colour attachment layout.
+ * attachment or unused), the resolve attachments of the slots when it has
+ * them, and its depth/stencil attachment, with no input or preserved
+ * attachment.  Every attachment is named once, a colour one or a resolve
+ * one in the colour attachment layout.
  */
 static int
 decode_subpass(
@@ -640,10 +652,21 @@ decode_subpass(
 		pass->colour_attachment[slot] = attachment;
 	}
 
-	/* No resolve attachments. */
+	/* The resolve attachments: none, or one for each colour slot (unused or an attachment). */
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || array != 0)
+	if (reader->error != 0)
+		return EINVAL;
+	if (array != 0 && array != count)
 		return ENOTSUP;
+	for (slot = 0; slot < array; slot++) {
+		attachment = drv_i915_wire_read_u32(reader);
+		layout = drv_i915_wire_read_u32(reader);
+		if (reader->error != 0)
+			return EINVAL;
+		error = colour_resolve(attachments, slot, attachment, layout, &named, pass);
+		if (error != 0)
+			return error;
+	}
 
 	/* The depth/stencil attachment, when the subpass has one. */
 	array = drv_i915_wire_read_u64(reader);
@@ -683,6 +706,92 @@ decode_subpass(
 		return ENOTSUP;
 
 	/* Succeeded: the subpass's slots and depth/stencil attachment are in the pass. */
+	return 0;
+}
+
+/*
+ * Takes the resolve attachment of one colour slot (an entry of
+ * pResolveAttachments): unused, or an attachment of one sample in the
+ * format of the slot's own, which the slot uses, not named before, in the
+ * colour attachment layout during the subpass.  pass_samples() checks
+ * that the slot's attachment has four samples.
+ */
+static int
+colour_resolve(
+	const VkAttachmentDescription *attachments,
+	uint32_t slot,
+	uint32_t attachment,
+	VkImageLayout layout,
+	uint32_t *named,
+	struct bcm2711_vulkan_pass *pass)
+{
+	int error;
+
+	/* An unused entry resolves nothing. */
+	if (attachment == VK_ATTACHMENT_UNUSED)
+		return 0;
+
+	/* The slot draws into an attachment, which this one resolves. */
+	if (slot >= pass->colour_count || !pass->colour_used[slot])
+		return EINVAL;
+	if (attachment >= pass->attachment_count || (*named & (1U << attachment)) != 0)
+		return ENOTSUP;
+	if (layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+		return ENOTSUP;
+	error = colour_attachment(&attachments[attachment]);
+	if (error != 0)
+		return error;
+	if (attachments[attachment].samples != VK_SAMPLE_COUNT_1_BIT || attachments[attachment].format != pass->colours[slot].format)
+		return EINVAL;
+
+	/* Succeeded: the slot resolves into the attachment. */
+	*named |= 1U << attachment;
+	pass->colour_resolve[slot] = true;
+	pass->colour_resolved[slot] = attachments[attachment];
+	pass->colour_resolve_attachment[slot] = attachment;
+	return 0;
+}
+
+/*
+ * Finds a pass's samples a pixel from its attachments: every attachment
+ * but a resolve's has the same, one or four, and a pass that resolves has
+ * four; a pass without attachments has zero (it takes its pipelines').
+ */
+static int
+pass_samples(
+	const VkAttachmentDescription *attachments,
+	struct bcm2711_vulkan_pass *pass)
+{
+	uint32_t resolves;
+	uint32_t index;
+
+	/* The attachments that are resolves'. */
+	resolves = 0;
+	for (index = 0; index < pass->colour_count; index++) {
+		if (pass->colour_resolve[index])
+			resolves |= 1U << pass->colour_resolve_attachment[index];
+	}
+	if (pass->depth_resolve)
+		resolves |= 1U << pass->depth_resolve_attachment;
+
+	/* The others' samples, all the same. */
+	pass->samples = 0;
+	for (index = 0; index < pass->attachment_count; index++) {
+		if ((resolves & (1U << index)) != 0)
+			continue;
+		if (pass->samples == 0)
+			pass->samples = attachments[index].samples;
+		if (attachments[index].samples != pass->samples)
+			return ENOTSUP;
+	}
+	if (pass->samples != 0 && pass->samples != VK_SAMPLE_COUNT_1_BIT && pass->samples != VK_SAMPLE_COUNT_4_BIT)
+		return ENOTSUP;
+
+	/* Only a pass of four samples resolves. */
+	if (resolves != 0 && pass->samples != VK_SAMPLE_COUNT_4_BIT)
+		return EINVAL;
+
+	/* Succeeded: the pass's samples are known. */
 	return 0;
 }
 
@@ -789,6 +898,8 @@ decode_framebuffer(
 	for (slot = 0; slot < pass->colour_count; slot++) {
 		if (pass->colour_used[slot])
 			framebuffer->colours[slot] = views[pass->colour_attachment[slot]];
+		if (pass->colour_resolve[slot])
+			framebuffer->resolves[slot] = views[pass->colour_resolve_attachment[slot]];
 	}
 	if (pass->depth)
 		framebuffer->depth = views[pass->depth_attachment];
@@ -877,7 +988,7 @@ build_framebuffer(
 	return 0;
 }
 
-/* Checks one colour slot's view against the pass and the framebuffer's extent, then retains it. */
+/* Checks one colour slot's view, and its resolve's, against the pass and the framebuffer's extent, then retains them. */
 static int
 build_colour(
 	struct bcm2711_vulkan_framebuffer *framebuffer,
@@ -888,6 +999,7 @@ build_colour(
 	struct bcm2711_vulkan_image_view *view;
 	struct bcm2711_vulkan_resource *image;
 	int error;
+	int retired;
 
 	/* Immutable same-device parents supply the actual bound image format and extent. */
 	pass = framebuffer->owner.parent->payload;
@@ -911,11 +1023,38 @@ build_colour(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the caller owns the view's edge. */
+	/* A resolved slot's view: a colour attachment image of one sample in the slot's format. */
+	if (framebuffer->resolves[slot] == NULL)
+		return 0;
+	view = framebuffer->resolves[slot]->payload;
+	image = view->owner.parent->payload;
+	error = 0;
+	if (view->owner.device != device ||
+	    pass->colour_resolved[slot].format != view->format ||
+	    view->format != image->format ||
+	    image->memory == NULL ||
+	    image->samples != VK_SAMPLE_COUNT_1_BIT ||
+	    (image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 ||
+	    framebuffer->width > image->width ||
+	    framebuffer->height > image->height ||
+	    !view_layers(pass, view))
+		error = EINVAL;
+	if (error == 0)
+		error = bcm2711_vulkan_object_retain(framebuffer->resolves[slot]);
+
+	/* A refused resolve view gives the slot's own view back. */
+	if (error != 0) {
+		retired = bcm2711_vulkan_object_release(framebuffer->colours[slot]);
+		if (retired != 0)
+			return retired;
+		return error;
+	}
+
+	/* Succeeded: the caller owns the views' edges. */
 	return 0;
 }
 
-/* Releases the colour views of the first count slots, keeping the first native error. */
+/* Releases the colour views, and their resolves', of the first count slots, keeping the first native error. */
 static int
 release_views(
 	struct bcm2711_vulkan_framebuffer *framebuffer,
@@ -928,6 +1067,11 @@ release_views(
 	/* Every retained view retires even when an earlier one failed. */
 	first = 0;
 	for (slot = 0; slot < count && slot < BCM2711_VULKAN_PASS_COLOURS; slot++) {
+		if (framebuffer->resolves[slot] != NULL) {
+			retired = bcm2711_vulkan_object_release(framebuffer->resolves[slot]);
+			if (retired != 0 && first == 0)
+				first = retired;
+		}
 		if (framebuffer->colours[slot] == NULL)
 			continue;
 		retired = bcm2711_vulkan_object_release(framebuffer->colours[slot]);

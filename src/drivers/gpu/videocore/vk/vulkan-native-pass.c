@@ -27,6 +27,7 @@
 static int prepare_clear(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_record *record, uint32_t subresource);
 static int prepare_target(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *begin, bool split);
 static int prepare_colour(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record, uint32_t slot, bool continued, bool split);
+static int prepare_colour_resolve(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record, uint32_t slot);
 static int prepare_target_clear(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int prepare_depth(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record, bool continued, bool split);
 static int prepare_depth_resolve(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record);
@@ -453,6 +454,11 @@ bcm2711_vulkan_native_pass_release(
 
 	/* The independent framebuffer holds remain through all referenced native-input retirement. */
 	for (index = 0; index < BCM2711_NATIVE_PASS_TARGETS; index++) {
+		if (owned->targets[index].resolve != NULL) {
+			error = bcm2711_v3d_memory_release(owned->space, owned->targets[index].resolve);
+			if (first == 0 && error != 0)
+				first = error;
+		}
 		if (owned->targets[index].output == NULL)
 			continue;
 		error = bcm2711_v3d_memory_release(owned->space, owned->targets[index].output);
@@ -569,6 +575,15 @@ prepare_target(
 	/* A resolved depth/stencil attachment is resolved by the last native pass of the render pass. */
 	if (description->depth_resolve && !split) {
 		error = prepare_depth_resolve(pass, description, framebuffer, record);
+		if (error != 0)
+			return error;
+	}
+
+	/* So is each resolved colour slot. */
+	for (slot = 0; slot < description->colour_count && !split; slot++) {
+		if (!description->colour_used[slot] || !description->colour_resolve[slot])
+			continue;
+		error = prepare_colour_resolve(pass, description, framebuffer, record, slot);
 		if (error != 0)
 			return error;
 	}
@@ -924,6 +939,112 @@ prepare_depth_resolve(
 	return 0;
 }
 
+/*
+ * Prepares the resolve of one colour slot at the end of the render pass:
+ * the tiles store the samples' average of each pixel (sample 0 of an
+ * integer format's, as Mesa's v3dv resolves an integer attachment) into
+ * the mip level and layer of the resolve attachment the framebuffer's view
+ * names (its view's, under multiview).  A tile store writes whole tiles,
+ * so a render area smaller than the framebuffer is stored into a raster
+ * of the pass's own (prepare_lists) and copied from there on the CPU (the
+ * finish), which leaves the attachment outside the render area as it was.
+ */
+static int
+prepare_colour_resolve(
+	struct bcm2711_vulkan_native_pass *pass,
+	const struct bcm2711_vulkan_pass *description,
+	const struct bcm2711_vulkan_framebuffer *framebuffer,
+	const struct bcm2711_vulkan_record *record,
+	uint32_t slot)
+{
+	const struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_colour_target colour;
+	struct bcm2711_vulkan_native_target *target;
+	struct bcm2711_native_pass_target *native;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_image_level level;
+	struct bcm2711_v3d_view *view;
+	uint32_t address;
+	void *cpu;
+	int error;
+
+	/* The slot's samples are in the tile buffer. */
+	target = &pass->targets[slot];
+	native = &pass->state.target[slot];
+	if (pass->state.msaa == 0 || target->output == NULL || target->image == NULL)
+		return EINVAL;
+
+	/* The framebuffer's resolve view of the slot names a colour attachment image of one sample in the slot's format. */
+	if (framebuffer->resolves[slot] == NULL ||
+	    framebuffer->resolves[slot]->kind != I915_VK_OBJ_IMAGE_VIEW ||
+	    framebuffer->resolves[slot]->payload == NULL)
+		return EINVAL;
+	image_view = framebuffer->resolves[slot]->payload;
+	if (image_view->owner.parent == NULL || image_view->owner.parent->kind != I915_VK_OBJ_IMAGE)
+		return EINVAL;
+	image = image_view->owner.parent->payload;
+	if (image == NULL ||
+	    image->samples != VK_SAMPLE_COUNT_1_BIT ||
+	    (image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 ||
+	    image->format != description->colour_resolved[slot].format ||
+	    image->format != target->image->format ||
+	    image->bytes > 0xffffffffU)
+		return EINVAL;
+	error = bcm2711_vulkan_colour_target(image->format, &colour);
+	if (error != 0)
+		return error;
+
+	/* The view's mip level of its layer, at least as large as the framebuffer. */
+	error = bcm2711_vulkan_image_level(image, image_view->base_level, &level);
+	if (error != 0)
+		return error;
+	if (framebuffer->width > level.width || framebuffer->height > level.height || level.bytes > 0xffffffffU)
+		return EINVAL;
+	if (image_view->base_layer + pass->view >= bcm2711_vulkan_image_layers(image))
+		return EINVAL;
+	level.offset += (uint64_t)(image_view->base_layer + pass->view) * image->layer_stride;
+
+	/* Its coherent storage is held through the pass's retirement, like the slot's own. */
+	error = bcm2711_vulkan_resource_backing(image, level.offset, level.bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+	if (view->references == 0 || view->references == 0xffffffffU)
+		return EOVERFLOW;
+	bcm2711_v3d_memory_retain(view);
+	target->resolve = view;
+	target->resolve_image = image;
+	target->resolve_level = image_view->base_level;
+	target->resolve_layer = image_view->base_layer + pass->view;
+	target->resolve_initial_layout = description->colour_resolved[slot].initialLayout;
+	target->resolve_final_layout = description->colour_resolved[slot].finalLayout;
+	target->resolve_address = address;
+	target->resolve_bytes = (uint32_t)level.bytes;
+	target->resolve_cpu = cpu;
+	target->resolve_pitch = level.pitch;
+	target->resolve_texel = native->texel;
+
+	/* The tiles store the average, or an integer format's sample 0, into the layer. */
+	native->resolved = 1;
+	if (colour.integer)
+		native->resolved = 2;
+	native->resolved_output = address;
+	native->resolved_pitch = level.pitch;
+	native->resolved_bytes = (uint32_t)level.bytes;
+
+	/* A smaller render area: the CPU copies it from the pass's raster into the layer (the raster is made with the lists). */
+	if (record->area.offset.x != 0 ||
+	    record->area.offset.y != 0 ||
+	    record->area.extent.width != framebuffer->width ||
+	    record->area.extent.height != framebuffer->height) {
+		if (cpu == NULL)
+			return EINVAL;
+		native->resolved_output = 0;
+	}
+
+	/* Succeeded: the tiles store the resolve. */
+	return 0;
+}
+
 /* Selects a colour target's native tile clear only when no sample outside the render area needs preservation. */
 static int
 prepare_target_clear(
@@ -1097,6 +1218,14 @@ select_boxes(
 	if (pass->state.depth_store != 0 && pass->state.depth_load == 0)
 		return;
 
+	/* A resolve attachment takes every tile's samples, drawn into or not. */
+	if (pass->state.depth_resolve != 0)
+		return;
+	for (slot = 0; slot < pass->state.targets; slot++) {
+		if (pass->state.target[slot].resolved != 0)
+			return;
+	}
+
 	/* Each draw's window, as the tiles it covers inside the pass's rectangle. */
 	for (draw = pass->first; draw != NULL; draw = draw->next) {
 		/* A window with no pixel draws nothing. */
@@ -1233,6 +1362,18 @@ prepare_lists(
 		pass->resolve_scratch = storage;
 		pass->state.depth_resolve_output = storage->view->address;
 		pass->state.depth_resolve_bytes = (uint32_t)storage->view->bytes;
+	}
+
+	/* Likewise each colour slot's resolve of a smaller render area, with its resolve attachment's pitch. */
+	for (index = 0; index < pass->state.targets; index++) {
+		if (pass->targets[index].resolve == NULL || pass->state.target[index].resolved_output != 0)
+			continue;
+		error = allocate_storage(pass, (uint64_t)pass->targets[index].resolve_pitch * pass->state.height, BCM2711_NATIVE_STORAGE_ZEROED, remaining, &storage);
+		if (error != 0)
+			return error;
+		pass->targets[index].resolve_scratch = storage;
+		pass->state.target[index].resolved_output = storage->view->address;
+		pass->state.target[index].resolved_bytes = (uint32_t)storage->view->bytes;
 	}
 
 	/*

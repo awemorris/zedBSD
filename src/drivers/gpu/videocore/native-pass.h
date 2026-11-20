@@ -50,6 +50,12 @@
  * store writes a raster of one sample (and nothing is loaded), the
  * samples' average (resolve 1) or, for an integer format, sample 0
  * (resolve 2).
+ *
+ * A target of a multisampled pass with resolved set (7.1 only) also
+ * stores, after its own store if any, the samples' average (resolved 1)
+ * or, for an integer format, sample 0 (resolved 2) into the raster of one
+ * sample at resolved_output with resolved_pitch: the resolve attachment of
+ * a render pass's colour attachment.
  */
 struct bcm2711_native_pass_target {
 	uint32_t output;
@@ -58,6 +64,10 @@ struct bcm2711_native_pass_target {
 	uint32_t load;
 	uint32_t store;
 	uint32_t resolve;
+	uint32_t resolved;
+	uint32_t resolved_output;
+	uint32_t resolved_pitch;
+	uint32_t resolved_bytes;
 	uint32_t format;
 	uint32_t type;
 	uint32_t bpp;

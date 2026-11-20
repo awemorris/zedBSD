@@ -36,6 +36,12 @@ struct bcm2711_vulkan_session {
 	struct bcm2711_vulkan_object *buckets[BCM2711_VULKAN_OBJECT_BUCKETS];
 	uint32_t live_objects;
 	bool closing;
+	/*
+	 * An execution of the session failed: the device is lost (Vulkan's
+	 * VK_ERROR_DEVICE_LOST, which lasts), so every later execution ends
+	 * without running and its fence and semaphores report the loss.
+	 */
+	bool lost;
 	/* A legacy synchronous frame is executing: it cannot accept a QueueSubmit. */
 	bool synchronous;
 	/* The opcode of the last command the decoder refused, for the refusal line. */
