@@ -1658,14 +1658,23 @@ vm_object_sync_range_buffer(
 		/* MS_INVALIDATE retires a page nothing references any more. */
 		if (first_error == 0 && (flags & MS_INVALIDATE) != 0) {
 			/*
-			 * Traps unless nothing refers to the page any more:
-			 * no mapping, no holder and no pin.
+			 * Traps if a mapping or a holder other than a pin came
+			 * back while this pass owned the page.
 			 */
 			if (page->mappings != NULL ||
 			    page->mapping_count != 0 ||
-			    page->hold_count != 0 ||
-			    page->pin_count != 0)
+			    page->hold_count != page->pin_count)
 				HAL_FATAL("invalid VM invalidate retire candidate");
+
+			/*
+			 * A pin taken while this pass owned the page belongs to
+			 * a copy that waits for the write-back to end (a
+			 * copy-on-write fault does this), and the page may not
+			 * be dropped from under it.  The page has just been
+			 * written and stays in service, clean.
+			 */
+			if (page->pin_count != 0)
+				continue;
 
 			/* Moves it to the list this call frees on the way out. */
 			vm_object_page_index_remove(object, page);

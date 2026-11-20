@@ -170,14 +170,20 @@ retry:
 	/* A cached page is held once it is not busy and still current. */
 	page = vm_object_find_page(object, offset);
 	if (page != NULL) {
-		while ((page->flags & VM_OBJECT_PAGE_BUSY) != 0) {
+		/*
+		 * Waits out a busy page, then looks it up again: nothing holds
+		 * the page across the sleep, and the owner of the busy state
+		 * (a write-back that invalidates, for one) may take it out of
+		 * the index and free its descriptor meanwhile.
+		 */
+		if ((page->flags & VM_OBJECT_PAGE_BUSY) != 0) {
 			sequence = waitq_sequence(&object->page_waitq);
 			error = waitq_sleep(&object->page_waitq, &object->lock,
 			    sequence, 0, 0);
-			if (error != 0 && error != EAGAIN) {
-				spin_unlock_irqrestore(&object->lock, irq);
+			spin_unlock_irqrestore(&object->lock, irq);
+			if (error != 0 && error != EAGAIN)
 				return error;
-			}
+			goto retry;
 		}
 
 		if ((object->flags & (VM_OBJECT_RESIZING |
