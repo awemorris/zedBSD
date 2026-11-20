@@ -551,9 +551,10 @@ device_limits(
 	 * table holds them (the compiler loads the descriptors that do not fit
 	 * in SGPRs at their use): 16 sampled images (with the uniform texel
 	 * buffers) with their samplers, 12 uniform buffers, storage buffers (4
-	 * reported), 8 storage images (with the storage texel buffers); no
-	 * input attachment, which the compiler does not take; with the eight
-	 * colour attachments, 48 resources a stage.  A set holds six stages'.
+	 * reported), 8 storage images (with the storage texel buffers), 4
+	 * input attachments (read as sampled images: XXX they share the 16);
+	 * with the eight colour attachments, 48 resources a stage.  A set
+	 * holds six stages'.
 	 */
 	limits->maxBoundDescriptorSets = 4U;
 	limits->maxPerStageDescriptorSamplers = 16U;
@@ -561,7 +562,7 @@ device_limits(
 	limits->maxPerStageDescriptorStorageBuffers = 4U;
 	limits->maxPerStageDescriptorSampledImages = 16U;
 	limits->maxPerStageDescriptorStorageImages = AMDRDNA_VK_STORAGE_IMAGES_MAX;
-	limits->maxPerStageDescriptorInputAttachments = 0U;
+	limits->maxPerStageDescriptorInputAttachments = 4U;
 	limits->maxPerStageResources = 48U;
 	limits->maxDescriptorSetSamplers = 96U;
 	limits->maxDescriptorSetUniformBuffers = 72U;
@@ -570,7 +571,7 @@ device_limits(
 	limits->maxDescriptorSetStorageBuffersDynamic = 4U;
 	limits->maxDescriptorSetSampledImages = 96U;
 	limits->maxDescriptorSetStorageImages = 6U * AMDRDNA_VK_STORAGE_IMAGES_MAX;
-	limits->maxDescriptorSetInputAttachments = 0U;
+	limits->maxDescriptorSetInputAttachments = 4U;
 
 	/* Vertex input as a pipeline takes it (AMDRDNA_VK_VERTEX_ATTRIBUTES_MAX, _BINDINGS_MAX), and the stage interfaces. */
 	limits->maxVertexInputAttributes = AMDRDNA_VK_VERTEX_ATTRIBUTES_MAX;

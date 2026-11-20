@@ -813,7 +813,7 @@ layout_update_write(
 		return EINVAL;
 	set = nvrtx_vk_payload(session, I915_VK_OBJ_DESCRIPTOR_SET, set_id);
 
-	/* The image descriptors, from the element on: each combined image sampler is bound. */
+	/* The image descriptors, from the element on: each combined image sampler, sampled image and input attachment is bound. */
 	for (item = 0U; item < count; item++) {
 		sampler_id = drv_i915_wire_read_u64(reader);
 		view_id = drv_i915_wire_read_u64(reader);
@@ -827,15 +827,23 @@ layout_update_write(
 			slot = layout_element(set, binding, element + (uint32_t)item);
 		if (slot == NULL)
 			continue;
-		if (type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+		if (type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+		    type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE &&
+		    type != VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
 			if (!layout_type_buffer(type))
 				kern_logf("nvrtx: vk: vkUpdateDescriptorSets: descriptors of type %u are not bound\n", (unsigned)type);
 			continue;
 		}
 
-		/* The binding samples this view with this sampler from now on. */
+		/*
+		 * The binding samples this view with this sampler from now on;
+		 * a sampled image or an input attachment (which the shader
+		 * fetches from) has the view alone.
+		 */
 		view = nvrtx_vk_object_find(session, I915_VK_OBJ_IMAGE_VIEW, view_id);
-		sampler = nvrtx_vk_object_find(session, I915_VK_OBJ_SAMPLER, sampler_id);
+		sampler = NULL;
+		if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+			sampler = nvrtx_vk_object_find(session, I915_VK_OBJ_SAMPLER, sampler_id);
 		error = layout_slot_set(slot, view, sampler);
 		if (error != 0)
 			return error;

@@ -269,10 +269,8 @@ target_pass_supported(
 			return 0;
 	}
 
-	/* No inputs, at most the colour targets there are. */
+	/* At most the colour targets there are (the input attachments are read as images by the shader). */
 	subpass = &info->pSubpasses[0];
-	if (subpass->inputAttachmentCount != 0U)
-		return 0;
 	if (subpass->colorAttachmentCount > AMDRDNA_VK_COLOURS_MAX)
 		return 0;
 	if (subpass->colorAttachmentCount != 0U && subpass->pColorAttachments == NULL)
