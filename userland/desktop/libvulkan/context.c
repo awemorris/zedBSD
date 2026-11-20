@@ -249,9 +249,12 @@ vulkan_context_open(
 	 */
 	context->core11_queries = VK_TRUE;
 	context->core12_queries = VK_TRUE;
+	context->native = VK_FALSE;
 	if (capset.bytes == VULKAN_NATIVE_CAPSET_BYTES) {
 		native_magic = vulkan_load_word(capset.data + 168);
 		native_flags = vulkan_load_word(capset.data + 172);
+		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC)
+			context->native = VK_TRUE;
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264) != 0)
 			context->video_h264 = VK_TRUE;

@@ -513,8 +513,23 @@ external_buffer_properties(
 	VkBool32 present;
 	uint32_t native_type;
 
-	/* Encodes the requested flags and usage exactly, translating only the handle type. */
+	/*
+	 * A native driver's memory is shared by the kernel's allocation share,
+	 * whatever the buffer: exported and imported by the context's handle
+	 * type, answered here.
+	 */
 	native_type = external_native_type(physical->object.context);
+	if (physical->object.context->native) {
+		properties->externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+		properties->exportFromImportedHandleTypes = native_type;
+		properties->compatibleHandleTypes = native_type;
+		external_memory_profile(properties, native_type);
+
+		/* Succeeded: the buffer's memory is shared as any memory is. */
+		return VK_SUCCESS;
+	}
+
+	/* Encodes the requested flags and usage exactly, translating only the handle type. */
 	vulkan_writer_init_for_object(&writer, &physical->object);
 	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_EXTERNAL_BUFFER_PROPERTIES);
 	vulkan_write_u64(&writer, physical->object.wire_id);
@@ -567,8 +582,27 @@ external_image_properties(
 	VkBool32 present;
 	uint32_t native_type;
 
-	/* Input geometry and usage remain application-selected native Vulkan parameters. */
+	/*
+	 * A native driver's image may have the memory of its 1.0 limits shared
+	 * by the kernel's allocation share: its limits are the 1.0 query's, its
+	 * memory exported and imported by the context's handle type.
+	 */
 	native_type = external_native_type(physical->object.context);
+	if (physical->object.context->native) {
+		memset(external, 0, sizeof(*external));
+		status = vkGetPhysicalDeviceImageFormatProperties((VkPhysicalDevice)physical, info->format, info->type, info->tiling, info->usage, info->flags, properties);
+		if (status != VK_SUCCESS)
+			return status;
+		external->externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+		external->exportFromImportedHandleTypes = native_type;
+		external->compatibleHandleTypes = native_type;
+		external_memory_profile(external, native_type);
+
+		/* Succeeded: the image's limits and its memory's sharing are answered. */
+		return VK_SUCCESS;
+	}
+
+	/* Input geometry and usage remain application-selected native Vulkan parameters. */
 	vulkan_writer_init_for_object(&writer, &physical->object);
 	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_IMAGE_FORMAT_PROPERTIES2);
 	vulkan_write_u64(&writer, physical->object.wire_id);

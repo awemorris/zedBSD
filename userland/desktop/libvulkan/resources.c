@@ -548,6 +548,18 @@ vkGetImageSparseMemoryRequirements(
 	VkBool32 present;
 	VkResult status;
 
+	/*
+	 * A device without sparse residency of images made no image with
+	 * VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT, so no image has requirements
+	 * (Vulkan 1.0, vkGetImageSparseMemoryRequirements: zero for an image
+	 * made without that flag); the renderer is not asked.
+	 */
+	owner = vulkan_device(device);
+	if (!owner->physical->features.sparseResidencyImage2D && !owner->physical->features.sparseResidencyImage3D) {
+		*pSparseMemoryRequirementCount = 0;
+		return;
+	}
+
 	/* A count-only call never reads an uninitialized input count. */
 	capacity = 0;
 	if (pSparseMemoryRequirements != NULL) {
@@ -568,7 +580,6 @@ vkGetImageSparseMemoryRequirements(
 	}
 
 	/* Requests the actual resource's sparse requirements, including the zero-count case. */
-	owner = vulkan_device(device);
 	vulkan_writer_init_for_object(&writer, &owner->object);
 	vulkan_command_begin(&writer, GPU_OP_GET_IMAGE_SPARSE_MEMORY_REQUIREMENTS);
 	vulkan_write_u64(&writer, owner->object.wire_id);
@@ -733,6 +744,18 @@ vkGetPhysicalDeviceSparseImageFormatProperties(
 	VkBool32 present;
 	VkResult status;
 
+	/*
+	 * A device without sparse residency of images has no format that
+	 * supports it (Vulkan 1.0, vkGetPhysicalDeviceSparseImageFormatProperties:
+	 * zero when VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT is not supported for the
+	 * arguments); the renderer is not asked.
+	 */
+	physical = vulkan_physical_device(physicalDevice);
+	if (!physical->features.sparseResidencyImage2D && !physical->features.sparseResidencyImage3D) {
+		*pPropertyCount = 0;
+		return;
+	}
+
 	/* Count-only enumeration does not consume the caller's output count as input. */
 	capacity = 0;
 	if (pProperties != NULL) {
@@ -753,7 +776,6 @@ vkGetPhysicalDeviceSparseImageFormatProperties(
 	}
 
 	/* Sends every format, usage, and sample-count input without guessing support. */
-	physical = vulkan_physical_device(physicalDevice);
 	vulkan_writer_init_for_object(&writer, &physical->object);
 	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_SPARSE_IMAGE_FORMAT_PROPERTIES);
 	vulkan_write_u64(&writer, physical->object.wire_id);
