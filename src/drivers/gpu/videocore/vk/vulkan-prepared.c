@@ -233,6 +233,10 @@ prepare_event(
 		event->occlusion = state->occlusion;
 		event->occlusion_query = state->occlusion_query;
 		kern_memcpy(event->draw, record->words, sizeof(event->draw));
+		if (record->indirect && record->count != 0) {
+			event->indirect = record->objects[0]->payload;
+			event->indirect_offset = record->offsets[0];
+		}
 		if (record->opcode == GPU_OP_CMD_DRAW_INDEXED) {
 			event->indices = state->indices;
 			event->index_offset = state->index_offset;

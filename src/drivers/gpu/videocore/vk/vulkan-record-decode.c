@@ -101,6 +101,26 @@ bcm2711_vulkan_record_decode(
 		for (index = 0; index < 5; index++)
 			record->words[index] = drv_i915_wire_read_u32(reader);
 		break;
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
+		/*
+		 * The buffer, the record's offset, the draw count (0 or 1: the
+		 * device reports a maxDrawIndirectCount of 1) and the stride.  It
+		 * is kept as a draw of one vertex and instance (or of none), its
+		 * counts read from the buffer when the draw is prepared.
+		 */
+		identity = drv_i915_wire_read_u64(reader);
+		record->offsets[0] = drv_i915_wire_read_u64(reader);
+		record->count = drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		record->objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, identity);
+		if (record->count > 1U)
+			return EINVAL;
+		record->indirect = true;
+		record->words[0] = record->count;
+		record->words[1] = record->count;
+		record->opcode = record->opcode == GPU_OP_CMD_DRAW_INDIRECT ? GPU_OP_CMD_DRAW : GPU_OP_CMD_DRAW_INDEXED;
+		break;
 	case GPU_OP_CMD_END_RENDER_PASS:
 		break;
 	case GPU_OP_CMD_DISPATCH:

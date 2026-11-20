@@ -161,6 +161,9 @@ int bcm2711_vulkan_native_meta_draw_create(struct bcm2711_v3d_space *space, cons
  * Earlier draws must belong to this same pass and remain alive until the entire pass retires; NULL gives an independent draw.
  * view is the view of a multiview pass the draw renders (zero outside multiview).
  */
+/* Reads an indirect draw's counts from its buffer into the prepared draw, once the work before it has retired. */
+int bcm2711_vulkan_native_draw_indirect(struct bcm2711_vulkan_prepared_event *event);
+
 int bcm2711_vulkan_native_draw_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint32_t view, uint64_t *available, const struct bcm2711_vulkan_native_draw *earlier, struct bcm2711_vulkan_native_draw_pool *pool, struct bcm2711_vulkan_native_draw **draw);
 
 /* Frees a pass pool's chunks and releases its upload chunks; every draw from it has been released and its DMA retired. */

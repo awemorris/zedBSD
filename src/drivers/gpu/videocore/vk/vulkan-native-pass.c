@@ -981,6 +981,13 @@ collect_draws(
 		if (event->pass != begin->pass)
 			return EINVAL;
 
+		/* An indirect draw's counts, read now that the work before the pass has retired (the job owns its prepared events). */
+		if (event->opcode != GPU_OP_CMD_END_QUERY) {
+			error = bcm2711_vulkan_native_draw_indirect((struct bcm2711_vulkan_prepared_event *)event);
+			if (error != 0)
+				return error;
+		}
+
 		/* A query's end runs once the pass has completed; zero vertices or instances perform no GPU reads and therefore allocate no owners. */
 		if (event->opcode == GPU_OP_CMD_END_QUERY || event->draw[0] == 0 || event->draw[1] == 0) {
 			event = event->next;

@@ -7,6 +7,7 @@
 
 /* Complete FIFO draw preparation owns cached GPU inputs without launching a native command list. */
 #include <kern/dcache.h>
+#include <kern/device-io.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
@@ -235,6 +236,76 @@ bcm2711_vulkan_native_draw_create(
 	*draw = created;
 
 	/* Succeeded: all inputs remain owned by this root or the caller's retained same-pass prefix. */
+	return 0;
+}
+
+/*
+ * Reads an indirect draw's record from its buffer's uncached storage into
+ * the prepared draw's words, the work before it having retired (a pass's
+ * draws are prepared at FIFO execution): vkCmdDrawIndirect's vertex
+ * count, instance count, first vertex and first instance,
+ * vkCmdDrawIndexedIndirect's index count, instance count, first index,
+ * vertex offset and first instance.  The record is read once; a draw of
+ * no vertex or instance then draws nothing.  EINVAL for counts whose
+ * first element plus count overflow, or indices past the index buffer
+ * (recording checked a direct draw's; the vertex fetch's maximum index
+ * keeps the vertices inside their buffers).
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (VkDrawIndirectCommand: vertexCount, instanceCount, firstVertex,
+ * firstInstance; VkDrawIndexedIndirectCommand: indexCount,
+ * instanceCount, firstIndex, vertexOffset, firstInstance).
+ */
+int
+bcm2711_vulkan_native_draw_indirect(
+	struct bcm2711_vulkan_prepared_event *event)
+{
+	struct bcm2711_v3d_view *view;
+	const uint32_t *words;
+	uint64_t bytes;
+	uint64_t needed;
+	uint32_t address;
+	uint32_t count;
+	uint32_t index;
+	void *cpu;
+	int error;
+
+	/* A direct draw, or a record already read. */
+	if (event == NULL)
+		return EINVAL;
+	if (event->indirect == NULL)
+		return 0;
+
+	/* The record's words in their current uncached storage. */
+	count = event->opcode == GPU_OP_CMD_DRAW_INDEXED ? 5U : 4U;
+	error = bcm2711_vulkan_resource_backing(event->indirect, event->indirect_offset, count * 4U, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+	kern_io_read_barrier();
+	words = cpu;
+	for (index = 0; index < count; index++)
+		event->draw[index] = words[index];
+	event->indirect = NULL;
+
+	/* Nothing drawn needs no further check. */
+	if (event->draw[0] == 0 || event->draw[1] == 0)
+		return 0;
+
+	/* The first element and instance plus their counts stay representable. */
+	if (event->draw[0] > 0xffffffffU - event->draw[2] || event->draw[1] > 0xffffffffU - event->draw[count - 1U])
+		return EINVAL;
+
+	/* An indexed draw's indices inside the index buffer from its bound offset. */
+	if (event->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		if (event->indices == NULL || event->index_offset > event->indices->bytes)
+			return EINVAL;
+		bytes = event->indices->bytes - event->index_offset;
+		needed = ((uint64_t)event->draw[2] + event->draw[0]) * (event->index_type == VK_INDEX_TYPE_UINT32 ? 4U : 2U);
+		if (needed > bytes)
+			return EINVAL;
+	}
+
+	/* Succeeded: the draw has its counts. */
 	return 0;
 }
 

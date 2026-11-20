@@ -24,7 +24,7 @@ static int validate_pass(struct bcm2711_vulkan_command_buffer *command, const st
 static int validate_viewport(const struct bcm2711_vulkan_record *record);
 static int validate_attachments(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_pipeline(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
-static int validate_indirect(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
+static int validate_indirect(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record, uint64_t bytes);
 static int validate_query(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 
 /*
@@ -51,7 +51,10 @@ bcm2711_vulkan_record_validate(
 			return EINVAL;
 		break;
 	case GPU_OP_CMD_DISPATCH_INDIRECT:
-		error = validate_indirect(command, record);
+		/* A dispatch runs outside a render pass. */
+		if (command->render_open)
+			return EINVAL;
+		error = validate_indirect(command, record, 12U);
 		break;
 	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
 		error = validate_sets(command, record);
@@ -128,6 +131,10 @@ bcm2711_vulkan_record_validate(
 			return EOVERFLOW;
 		if (record->opcode == GPU_OP_CMD_DRAW_INDEXED && record->words[1] > 0xffffffffU - record->words[4])
 			return EOVERFLOW;
+
+		/* An indirect draw's record (VkDrawIndirectCommand of 16 bytes, VkDrawIndexedIndirectCommand of 20) in its buffer. */
+		if (record->indirect && record->count != 0)
+			error = validate_indirect(command, record, record->opcode == GPU_OP_CMD_DRAW ? 16U : 20U);
 		break;
 	default:
 		return ENOTSUP;
@@ -572,18 +579,15 @@ validate_pipeline(
 	return 0;
 }
 
-/* Checks an indirect dispatch: outside a render pass, its three aligned counts inside a bound indirect buffer of the device. */
+/* Checks an indirect dispatch's or draw's record: bytes at an aligned offset inside a bound indirect buffer of the device. */
 static int
 validate_indirect(
 	struct bcm2711_vulkan_command_buffer *command,
-	const struct bcm2711_vulkan_record *record)
+	const struct bcm2711_vulkan_record *record,
+	uint64_t bytes)
 {
 	const struct bcm2711_vulkan_resource *resource;
 	int error;
-
-	/* A dispatch runs outside a render pass. */
-	if (command->render_open)
-		return EINVAL;
 
 	/* The buffer belongs to the device, is bound and was created for indirect reads. */
 	error = same_device(record->objects[0], command->owner.device);
@@ -595,13 +599,13 @@ validate_indirect(
 	if (resource->memory == NULL || (resource->usage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT) == 0)
 		return EINVAL;
 
-	/* Three words at a four-byte aligned offset, inside the buffer; the counts are read when the dispatch runs. */
+	/* The record at a four-byte aligned offset, inside the buffer; the counts are read when it runs. */
 	if ((record->offsets[0] & 3U) != 0 ||
 	    record->offsets[0] > resource->bytes ||
-	    resource->bytes - record->offsets[0] < 12U)
+	    resource->bytes - record->offsets[0] < bytes)
 		return EINVAL;
 
-	/* Succeeded: the dispatch can read its counts at execution. */
+	/* Succeeded: the dispatch or draw can read its counts at execution. */
 	return 0;
 }
 

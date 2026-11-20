@@ -49,6 +49,13 @@ struct bcm2711_vulkan_prepared_event {
 	 * a dispatch's compute-stage words.
 	 */
 	uint32_t draw[5];
+	/*
+	 * An indirect draw's buffer (NULL for a direct draw) and its record's
+	 * offset: draw holds one vertex and instance until the record is read
+	 * when the draw is prepared (bcm2711_vulkan_native_draw_indirect).
+	 */
+	struct bcm2711_vulkan_resource *indirect;
+	uint64_t indirect_offset;
 	/* A direct dispatch's first workgroup along x, y and z (vkCmdDispatchBase; zero for vkCmdDispatch). */
 	uint32_t base[3];
 	/* A draw's active occlusion query: its pool (NULL for none) and query. */
