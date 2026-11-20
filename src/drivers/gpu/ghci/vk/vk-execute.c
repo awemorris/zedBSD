@@ -2632,8 +2632,8 @@ pass_views_check(
  * pass began (everything bound again), from the first subpass.  The log
  * keeps what it showed of the buffer.
  *
- * Procedure referenced: amaterrace-gpu 2dc77d7a (branch agent/p4-linux2)
- * drivers/mesa/ghci/vulkan/ghcivk_cmd_draw.c (a multiview pass drawn once
+ * Procedure referenced: lumiere-gpu drivers/mesa/ghci/vulkan/ghcivk_cmd_draw.c
+ * (the Linux GHCI driver: a multiview pass drawn once
  * per view, each attachment at layer base + view, the view in a bank
  * word); the bank word and the replay of the recording are this
  * executor's own.
