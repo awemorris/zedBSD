@@ -735,7 +735,7 @@ device_feature_record(
  * the geometry stage among them, instances numbered as without multiview;
  * a set's descriptors are bounded by the per-set limits (each binding at
  * most NVRTX_VK_ELEMENTS_MAX), which together stay below 1024; an
- * allocation may take the whole video memory heap.
+ * allocation may take the whole of the larger heap.
  */
 static void
 device_core11(
@@ -751,9 +751,15 @@ device_core11(
 	core11->multiview_limits.maxMultiviewViewCount = NVRTX_VK_VIEWS_MAX;
 	core11->multiview_limits.maxMultiviewInstanceIndex = (1U << 27) - 1U;
 
-	/* The descriptors of one set and the largest allocation. */
+	/*
+	 * The descriptors of one set, and the largest allocation: the larger
+	 * heap's size, the video memory the CPU's window reaches or the system
+	 * memory heap (an allocation of either type is taken whole).
+	 */
 	core11->maintenance3.maxPerSetDescriptors = 1024U;
 	core11->maintenance3.maxMemoryAllocationSize = nvrtx_vk_heap_bytes(session->owner);
+	if (core11->maintenance3.maxMemoryAllocationSize < NVRTX_VK_SYSTEM_HEAP_BYTES)
+		core11->maintenance3.maxMemoryAllocationSize = NVRTX_VK_SYSTEM_HEAP_BYTES;
 }
 
 /*
