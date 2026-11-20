@@ -125,6 +125,18 @@
 #define COMMAND_MOVE_THROUGH_CACHE	0x60300000U
 
 /*
+ * The memory fill's control word fields: the source is the packet's own
+ * word (2 at bits 30:29), the destination written through the level-2
+ * cache (3 at bits 21:20).
+ *
+ * Values referenced: Linux v6.19 drivers/gpu/drm/amd/amdgpu/nvd.h
+ * (PACKET3_DMA_DATA_SRC_SEL: 2 is the data word, PACKET3_DMA_DATA_DST_SEL)
+ * and Mesa 25.3.6 src/amd/vulkan/radv_cp_dma.c (radv_cs_emit_cp_dma: a
+ * clear's source is the data word).
+ */
+#define COMMAND_FILL_THROUGH_CACHE	0x40300000U
+
+/*
  * The indirect buffer's control word: the size in dwords (19:0), the
  * valid bit a compute queue needs (23) and the context (27:24); and the
  * low address word's dword alignment.
@@ -490,6 +502,36 @@ amdrdna_pm4_move_cached(
 
 	/* Succeeded: seven words. */
 	return count;
+}
+
+/*
+ * Writes a packet that has the command processor fill bytes at an address
+ * of a session's space with a word, through the level-2 cache, and wait
+ * until the fill is done.  The bytes are whole words.  Reports the words
+ * written.
+ *
+ * Procedure referenced: Mesa 25.3.6 src/amd/vulkan/radv_cp_dma.c
+ * (radv_cs_emit_cp_dma, radv_cp_dma_fill_memory: the data word in the
+ * source's place).
+ */
+unsigned
+amdrdna_pm4_fill_cached(
+	uint32_t *words,
+	uint64_t destination,
+	uint32_t value,
+	uint32_t bytes)
+{
+	/* The move's packet with the word as its source. */
+	words[0] = amdrdna_pm4_header(AMDRDNA_PM4_OP_MOVE, 6U, false);
+	words[1] = COMMAND_MOVE_SYNC | COMMAND_FILL_THROUGH_CACHE;
+	words[2] = value;
+	words[3] = 0U;
+	words[4] = (uint32_t)destination;
+	words[5] = (uint32_t)(destination >> 32);
+	words[6] = bytes & COMMAND_MOVE_COUNT_MASK;
+
+	/* Succeeded: seven words. */
+	return AMDRDNA_PM4_MOVE_WORDS;
 }
 
 /*

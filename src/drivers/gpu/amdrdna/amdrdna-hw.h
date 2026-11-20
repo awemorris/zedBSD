@@ -2345,6 +2345,13 @@ amdrdna_pm4_move_cached(
 	uint32_t bytes);
 
 unsigned
+amdrdna_pm4_fill_cached(
+	uint32_t *words,
+	uint64_t destination,
+	uint32_t value,
+	uint32_t bytes);
+
+unsigned
 amdrdna_pm4_fetcher_write_register(
 	uint32_t *words,
 	uint32_t index,

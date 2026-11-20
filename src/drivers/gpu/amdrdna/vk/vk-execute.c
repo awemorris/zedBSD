@@ -401,6 +401,11 @@ static bool execute_kernel_binds(const struct amdrdna_vk_record *record);
 static void execute_bind_kernel(struct execute_state *state, const struct amdrdna_vk_record *record);
 static bool execute_graphics_only(uint32_t opcode);
 static int execute_dispatch(struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
+static int execute_wait(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute);
+static int execute_read_back(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record, uint32_t *values);
+static int execute_indirect(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
+static int execute_buffer_write(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
+static int execute_query_copy(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
 static int execute_kernel_resources(const struct amdrdna_gfx10_program *program, const struct execute_state *state, uint64_t groups_va, uint8_t *table);
 static int execute_part(struct amdrdna_vk_execute *execute, uint32_t bytes, uint8_t **cpu, uint64_t *va);
 static int execute_begin_pass(struct amdrdna_vk_session *session, struct amdrdna_vk_execute *execute, struct execute_state *state, const struct amdrdna_vk_record *record);
@@ -1156,6 +1161,18 @@ execute_record(
 	case GPU_OP_CMD_DISPATCH:
 		error = execute_dispatch(execute, state, record);
 		break;
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+		error = execute_indirect(session, execute, state, record);
+		break;
+	case GPU_OP_CMD_FILL_BUFFER:
+	case GPU_OP_CMD_UPDATE_BUFFER:
+		error = execute_buffer_write(session, execute, state, record);
+		break;
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
+		error = execute_query_copy(session, execute, state, record);
+		break;
 	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
 	case GPU_OP_CMD_BLIT_IMAGE:
@@ -1442,6 +1459,8 @@ execute_graphics_only(
 	case GPU_OP_CMD_END_RENDER_PASS:
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
 	case GPU_OP_CMD_COPY_IMAGE:
 	case GPU_OP_CMD_BLIT_IMAGE:
 	case GPU_OP_CMD_COPY_BUFFER_TO_IMAGE:
@@ -1560,6 +1579,302 @@ execute_dispatch(
 	execute_barrier(execute);
 
 	/* Succeeded: the dispatch is written. */
+	return 0;
+}
+
+/*
+ * Puts the indirect buffer so far on its queue after a barrier that
+ * leaves everything it wrote in memory, and waits until the newest runs
+ * of both queues have ended.  The caller starts the next buffer
+ * (execute_start), whose target is written anew.  Returns the error of
+ * the putting or of a run that did not end.
+ */
+static int
+execute_wait(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_execute *execute)
+{
+	int error;
+
+	/* The work so far on its queue, then both queues' newest runs ended. */
+	error = execute_flush(session, execute);
+	if (error == 0)
+		error = amdrdna_vk_gpu_wait(session->owner, &execute->last[0]);
+	if (error == 0)
+		error = amdrdna_vk_gpu_wait(session->owner, &execute->last[1]);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the GPU has done the work before. */
+	return 0;
+}
+
+/*
+ * Reads an indirect command's record (record->count bytes of its buffer,
+ * object 0, at offsets[0]) into values once the work before has written
+ * it: a move of the bytes into a part of the tables (through the level-2
+ * cache, so memory outside the CPU's window is read the same way), the
+ * buffer so far run to its end, the bytes copied out, and the next buffer
+ * started (its target written anew).
+ */
+static int
+execute_read_back(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	const struct amdrdna_vk_record *record,
+	uint32_t *values)
+{
+	uint8_t *staged;
+	uint64_t staged_va;
+	uint64_t va;
+	uint8_t *cpu;
+	int error;
+
+	/* The buffer's address and a part to move the record into. */
+	error = amdrdna_vk_buffer_address(record->objects[0]->payload, &va, &cpu);
+	if (error == 0)
+		error = execute_part(execute, record->count, &staged, &staged_va);
+	if (error != 0)
+		return error;
+
+	/* What wrote the record has finished; the move; the run to its end. */
+	execute_barrier(execute);
+	amdrdna_vk_pm4_move(&execute->pm4, va + record->offsets[0], staged_va, record->count);
+	if (execute->pm4.full)
+		return ENOSPC;
+	error = execute_wait(session, execute);
+	if (error != 0)
+		return error;
+
+	/* The record, then the next buffer. */
+	kern_memcpy(values, staged, record->count);
+	error = execute_start(session, execute);
+	if (error != 0)
+		return error;
+	state->target_written = false;
+
+	/* Succeeded: the record's counts. */
+	return 0;
+}
+
+/*
+ * Runs vkCmdDrawIndirect, vkCmdDrawIndexedIndirect or
+ * vkCmdDispatchIndirect: the counts read from the buffer once the work
+ * before has written them (execute_read_back), then the draw or the
+ * dispatch they give, as the direct command runs.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/amd/vulkan/radv_cmd_buffer.c
+ * (radv_CmdDrawIndirect, radv_CmdDispatchIndirect: the record's counts
+ * give one draw's or dispatch's parameters, the command processor reading
+ * them; here the CPU reads them once the work before is done).
+ */
+static int
+execute_indirect(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	const struct amdrdna_vk_record *record)
+{
+	struct amdrdna_vk_record direct;
+	uint32_t values[5];
+	int error;
+
+	/* A draw in a pass with a pipeline, a dispatch with a compute pipeline; a draw of no record draws nothing. */
+	if (record->opcode == GPU_OP_CMD_DISPATCH_INDIRECT) {
+		if (state->kernel_pipeline == NULL)
+			return EINVAL;
+	} else if (!state->in_pass || state->pipeline == NULL) {
+		return EINVAL;
+	}
+	if (record->values[0] == 0U)
+		return 0;
+
+	/* The record's counts. */
+	kern_memset(values, 0, sizeof(values));
+	error = execute_read_back(session, execute, state, record, values);
+	if (error != 0)
+		return error;
+
+	/* The direct command of them (a dispatch's first workgroup 0). */
+	kern_memset(&direct, 0, sizeof(direct));
+	kern_memcpy(direct.values, values, sizeof(values));
+	if (record->opcode == GPU_OP_CMD_DISPATCH_INDIRECT) {
+		direct.opcode = GPU_OP_CMD_DISPATCH;
+		direct.values[3] = 0U;
+		direct.values[4] = 0U;
+		return execute_dispatch(execute, state, &direct);
+	}
+	direct.opcode = GPU_OP_CMD_DRAW;
+	if (record->opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT)
+		direct.opcode = GPU_OP_CMD_DRAW_INDEXED;
+	return execute_views(execute, state, &direct);
+}
+
+/*
+ * Runs vkCmdFillBuffer or vkCmdUpdateBuffer after what the work before
+ * wrote: a fill by the command processor's fills of the word (at most
+ * AMDRDNA_VK_MOVE_MAX bytes each); an update's bytes put in a part of the
+ * tables and moved from there, in one buffer with room for them (the
+ * buffer so far run first when it has none); then the barrier after it.
+ */
+static int
+execute_buffer_write(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	const struct amdrdna_vk_record *record)
+{
+	uint8_t *staged;
+	uint64_t staged_va;
+	uint64_t address;
+	uint64_t bytes;
+	uint64_t va;
+	uint8_t *cpu;
+	uint32_t step;
+	int error;
+
+	/* Where the bytes go. */
+	error = amdrdna_vk_buffer_address(record->objects[0]->payload, &va, &cpu);
+	if (error != 0)
+		return error;
+	address = va + record->offsets[0];
+	bytes = record->offsets[1];
+
+	/* An update's bytes in one buffer with room for them. */
+	staged = NULL;
+	staged_va = 0U;
+	if (record->opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+		if (execute->tables + bytes + EXECUTE_TABLE_ALIGN > EXECUTE_TABLES_BYTES ||
+		    execute->pm4.count + EXECUTE_RECORD_WORDS > EXECUTE_BUFFER_WORDS) {
+			error = execute_flush(session, execute);
+			if (error == 0)
+				error = execute_start(session, execute);
+			if (error != 0)
+				return error;
+		}
+		error = execute_part(execute, (uint32_t)bytes, &staged, &staged_va);
+		if (error != 0)
+			return error;
+		kern_memcpy(staged, record->regions, (size_t)bytes);
+	}
+
+	/* What the work before wrote has finished. */
+	execute_barrier(execute);
+
+	/* The update's move, or the fills, a buffer near its end run first. */
+	if (record->opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+		amdrdna_vk_pm4_move(&execute->pm4, staged_va, address, (uint32_t)bytes);
+	} else {
+		while (bytes != 0U) {
+			if (execute->pm4.count + AMDRDNA_PM4_MOVE_WORDS > EXECUTE_BUFFER_WORDS - EXECUTE_RECORD_WORDS) {
+				error = execute_flush(session, execute);
+				if (error == 0)
+					error = execute_start(session, execute);
+				if (error != 0)
+					return error;
+			}
+			step = AMDRDNA_VK_MOVE_MAX & ~3U;
+			if (bytes < step)
+				step = (uint32_t)bytes;
+			amdrdna_vk_pm4_fill(&execute->pm4, address, record->values[0], step);
+			address += step;
+			bytes -= step;
+		}
+	}
+
+	/* What follows reads what it wrote; the target is written anew. */
+	execute_barrier(execute);
+	state->target_written = false;
+	if (execute->pm4.full)
+		return ENOSPC;
+
+	/* Succeeded: the write is in the buffer. */
+	return 0;
+}
+
+/*
+ * Runs vkCmdCopyQueryPoolResults: once the work before has run to its end
+ * (which ends the queries it ended), each query's record as
+ * vkGetQueryPoolResults lays it out (amdrdna_vk_query_record) is put in a
+ * part of the tables and moved to its place in the buffer: the result when
+ * the query is available or partial results are asked for, and the
+ * availability word when asked for; then the barrier after it.
+ *
+ * XXX A query not available when the copy runs is not waited for, even
+ * with VK_QUERY_RESULT_WAIT_BIT: the work before it has ended, so such a
+ * query is one no submitted work ends.
+ *
+ * Procedure referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: without VK_QUERY_RESULT_PARTIAL_BIT the
+ * result of an unavailable query is not written, the availability word
+ * is) and Mesa 25.0.7 src/amd/vulkan/radv_query.c
+ * (radv_CmdCopyQueryPoolResults).
+ */
+static int
+execute_query_copy(
+	struct amdrdna_vk_session *session,
+	struct amdrdna_vk_execute *execute,
+	struct execute_state *state,
+	const struct amdrdna_vk_record *record)
+{
+	const struct amdrdna_vk_query_pool *pool;
+	uint8_t *staged;
+	uint64_t staged_va;
+	uint64_t address;
+	uint64_t value;
+	uint64_t va;
+	uint8_t *cpu;
+	uint8_t *at;
+	uint32_t available;
+	uint32_t flags;
+	uint32_t width;
+	uint32_t bytes;
+	uint32_t index;
+	int error;
+
+	/* No query, nothing to copy. */
+	if (record->count == 0U)
+		return 0;
+	pool = record->objects[0]->payload;
+	flags = record->values[0];
+	width = 4U;
+	if ((flags & VK_QUERY_RESULT_64_BIT) != 0U)
+		width = 8U;
+
+	/* The work before run to its end; the next buffer. */
+	error = execute_wait(session, execute);
+	if (error == 0)
+		error = execute_start(session, execute);
+	if (error != 0)
+		return error;
+	state->target_written = false;
+
+	/* The buffer's address and a part for the records (16 bytes at most each). */
+	error = amdrdna_vk_buffer_address(record->objects[1]->payload, &va, &cpu);
+	if (error == 0)
+		error = execute_part(execute, record->count * 16U, &staged, &staged_va);
+	if (error != 0)
+		return error;
+
+	/* Each query's record, and the moves of what is written of it. */
+	for (index = 0U; index < record->count; index++) {
+		amdrdna_vk_query_value(pool, record->first + index, &value, &available);
+		at = staged + (size_t)index * 16U;
+		bytes = amdrdna_vk_query_record(value, available, flags, at);
+		address = va + record->offsets[0] + (uint64_t)index * record->offsets[1];
+		if (available != 0U || (flags & VK_QUERY_RESULT_PARTIAL_BIT) != 0U)
+			amdrdna_vk_pm4_move(&execute->pm4, staged_va + (uint64_t)index * 16U, address, bytes);
+		else if ((flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0U)
+			amdrdna_vk_pm4_move(&execute->pm4, staged_va + (uint64_t)index * 16U + width, address + width, width);
+	}
+
+	/* What follows reads what it wrote. */
+	execute_barrier(execute);
+	if (execute->pm4.full)
+		return ENOSPC;
+
+	/* Succeeded: the records are moved. */
 	return 0;
 }
 
