@@ -34,6 +34,7 @@ static int pass_attachment(const VkAttachmentDescription *description, struct po
 static int target_surface(const struct powervr_view_shape *view, struct powervr_render_surface *surface);
 static uint32_t view_samples(const struct powervr_view_shape *view);
 static bool area_covers(const struct powervr_render_area *area, const VkClearRect *rect);
+static int job_depth_clear_draw(struct powervr_render_job *job);
 static int job_clear_draws(struct powervr_render_job *job, const struct powervr_pass_clear_attachment *attachments, uint32_t count, const VkClearRect *rects, uint32_t rect_count);
 static int clear_values(const struct powervr_render_job *job, const struct powervr_pass_clear_attachment *attachments, uint32_t count, uint32_t *mask, uint8_t push[POWERVR_DRAW_PUSH_BYTES], uint32_t *stencil);
 static bool clear_rect_clip(const struct powervr_render_area *area, const VkClearRect *rect, VkRect2D *clipped);
@@ -152,7 +153,8 @@ powervr_pass_build(
  * takes a partial area (the pixel back end clips to it); so does a depth
  * attachment, whose store writes whole tiles: the job marks it partial
  * and the depth is loaded before it is stored, as Mesa does
- * (render-depth.c).  A depth view of a level
+ * (render-depth.c), and cleared over the area by a draw when its load
+ * operation is CLEAR (job_depth_clear_draw).  A depth view of a level
  * other than 0 is not taken yet (ENOTSUP).  A cleared attachment without
  * its clear value is refused (EINVAL).  A depth attachment the pass
  * resolves is stored whatever its store operations, and the job keeps its
@@ -311,6 +313,13 @@ powervr_render_job_begin(
 		job->depth.partial = false;
 		if (area->x != 0 || area->y != 0 || area->width != view->width || area->height != view->height)
 			job->depth.partial = true;
+
+		/* Such a load replaces the background's clear: the area is cleared by a draw instead. */
+		if (job->depth.partial) {
+			error = job_depth_clear_draw(job);
+			if (error != 0)
+				return error;
+		}
 	}
 
 	/* Succeeded: the job is started. */
@@ -321,7 +330,8 @@ powervr_render_job_begin(
  * Applies vkCmdClearAttachments to a job.
  *
  * A clear of the whole render area of layer 0 before any draw is the
- * attachments' load clear.  Any other clear (part of the area, or after
+ * attachments' load clear, but for a depth target of an area short of
+ * it.  Any other clear (part of the area, or after
  * draws) becomes a clear draw for each rectangle, in the job's order of
  * draws (job_clear_draws).  A colour index past the subpass's, an
  * unused attachment and a stencil clear of a depth target without one
@@ -347,11 +357,19 @@ powervr_render_job_clear(
 	if (job == NULL || (count != 0 && attachments == NULL) || (rect_count != 0 && rects == NULL))
 		return EINVAL;
 
-	/* A load clear only before any draw, over the whole area of layer 0. */
+	/*
+	 * A load clear only before any draw, over the whole area of layer 0,
+	 * and not of a depth target the ZLS loads for an area short of it
+	 * (its load replaces the background's clear).
+	 */
 	whole = rect_count != 0 && job->draw_count == 0;
 	for (rect = 0; rect < rect_count && whole; rect++) {
 		covers = area_covers(&job->area, &rects[rect]);
 		if (!covers)
+			whole = false;
+	}
+	for (index = 0; index < count && whole; index++) {
+		if (job->depth.partial && (attachments[index].aspects & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0)
 			whole = false;
 	}
 
@@ -543,6 +561,50 @@ area_covers(
 
 	/* It covers it. */
 	return true;
+}
+
+/*
+ * Clears a job's depth target over its render area by a clear draw when
+ * the area is short of the target: the ZLS then loads the depth (and
+ * stencil) to keep what lies outside the area, and the load replaces the
+ * background's clear.  Only the aspects whose load operation is CLEAR
+ * are drawn, with the clear values the job keeps; the draw is the job's
+ * first.
+ *
+ * Procedure referenced: Mesa 26.2.6
+ * src/imagination/vulkan/pvr_arch_cmd_buffer.c
+ * (pvr_perform_start_of_render_attachment_clear: a cleared depth or
+ * stencil attachment whose render area is not tile aligned cleared over
+ * the area by pvr_clear_attachments_render_init).
+ */
+static int
+job_depth_clear_draw(
+	struct powervr_render_job *job)
+{
+	struct powervr_pass_clear_attachment clear;
+	VkClearRect rect;
+
+	/* The cleared aspects and their values. */
+	__builtin_memset(&clear, 0, sizeof(clear));
+	if (job->depth.load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
+		clear.aspects |= VK_IMAGE_ASPECT_DEPTH_BIT;
+	if (job->depth.stencil_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
+		clear.aspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	if (clear.aspects == 0)
+		return 0;
+	clear.value.is_depth = true;
+	clear.value.words[0] = job->depth.clear_depth;
+	clear.value.words[1] = job->depth.clear_stencil;
+
+	/* The render area of layer 0 (each job renders one view or layer). */
+	__builtin_memset(&rect, 0, sizeof(rect));
+	rect.rect.offset.x = (int32_t)job->area.x;
+	rect.rect.offset.y = (int32_t)job->area.y;
+	rect.rect.extent.width = job->area.width;
+	rect.rect.extent.height = job->area.height;
+	rect.baseArrayLayer = 0;
+	rect.layerCount = 1;
+	return job_clear_draws(job, &clear, 1, &rect, 1);
 }
 
 /*

@@ -846,9 +846,8 @@ powervr_render_job_run(
  * stores) is the attachment itself.  A smaller one would have the ZLS
  * write whole tiles past its memory: the job renders from the session's
  * scratch buffer instead, linear rows of the edges rounded up to the
- * tile (four samples: twice the rows of twice the length, as the ZLS
- * scales the edges by two for them), its texels copied in by a transfer
- * before the render when the
+ * tile (four samples: each pixel's four samples together, four times the
+ * bytes), its texels copied in by a transfer before the render when the
  * ZLS loads them (*copy_back tells the caller to copy them back after
  * the render when it stores them).  Both transfers are ordered with the
  * render by the firmware: the render's 3D waits for the copy in, the
@@ -971,35 +970,49 @@ depth_scratch_copy(
 	struct powervr_view_shape view;
 	const struct powervr_render_depth *from;
 	const struct powervr_render_depth *to;
+	const struct powervr_format *format;
 	uint32_t texel;
-	uint32_t scale;
 	int error;
 
 	/*
 	 * The source as a view of its own layout and the destination as a
 	 * surface, each of the attachment's edges, rows of its physical
-	 * width.  Four samples are copied as one sample of edges twice as
-	 * long: a twiddled image keeps each texel's four samples together,
-	 * which is the twiddled order of the doubled edges, and the ZLS reads
-	 * and writes the doubled edges.
+	 * width.  Four samples are copied as one texel of a raw format four
+	 * times as wide a pixel: both the twiddled image (texel n's samples
+	 * at 4n to 4n + 3) and the ZLS's linear rows of four samples (a
+	 * pixel's four samples together, rows of the scratch's width in
+	 * pixels) keep each pixel's samples together; the linear rows are
+	 * not two rows of doubled length a pixel row, which the board's
+	 * resolves of sample 0 showed.
+	 *
+	 * Procedure referenced: Mesa 26.2.6
+	 * src/imagination/vulkan/pvr_arch_cmd_buffer.c
+	 * (pvr_sub_cmd_gfx_align_ds_subtiles: the buffer's rows the aligned
+	 * width in pixels, the image of four samples copied to and from it
+	 * sample to sample).
 	 */
 	from = into_scratch ? image : scratch;
 	to = into_scratch ? scratch : image;
-	texel = image->format->texel_bytes;
-	scale = image->samples == 4U ? 2U : 1U;
+	format = image->format;
+	if (image->samples == 4U) {
+		format = powervr_transfer_raw_format(image->format->texel_bytes * 4U);
+		if (format == NULL)
+			return ENOTSUP;
+	}
+	texel = format->texel_bytes;
 	kern_memset(&layout, 0, sizeof(layout));
-	layout.row_pitch = from->physical_width * scale * texel;
-	layout.padded_width = from->physical_width * scale;
-	layout.padded_height = from->physical_height * scale;
+	layout.row_pitch = from->physical_width * texel;
+	layout.padded_width = from->physical_width;
+	layout.padded_height = from->physical_height;
 	layout.padded_depth = 1;
 	layout.layer_bytes = from->layer_bytes;
 	layout.bytes = from->layer_bytes;
 	kern_memset(&view, 0, sizeof(view));
-	view.format = image->format;
+	view.format = format;
 	view.layout = &layout;
 	view.address = from->address;
-	view.width = image->width * scale;
-	view.height = image->height * scale;
+	view.width = image->width;
+	view.height = image->height;
 	view.image_levels = 1;
 	view.level_count = 1;
 	view.layer_count = 1;
@@ -1008,16 +1021,16 @@ depth_scratch_copy(
 	/* The copy of the attachment's edges, from the origin. */
 	kern_memset(&request, 0, sizeof(request));
 	request.kind = POWERVR_TRANSFER_COPY;
-	request.destination.format = image->format;
+	request.destination.format = format;
 	request.destination.address = to->address;
-	request.destination.width = image->width * scale;
-	request.destination.height = image->height * scale;
+	request.destination.width = image->width;
+	request.destination.height = image->height;
 	request.destination.linear = !to->twiddled;
-	request.destination.row_pitch = to->physical_width * scale * texel;
-	request.destination.padded_width = to->physical_width * scale;
+	request.destination.row_pitch = to->physical_width * texel;
+	request.destination.padded_width = to->physical_width;
 	request.source = &view;
-	request.area.width = image->width * scale;
-	request.area.height = image->height * scale;
+	request.area.width = image->width;
+	request.area.height = image->height;
 	error = powervr_transfer_run_async(render, session, &request);
 	if (error != 0)
 		return error;
