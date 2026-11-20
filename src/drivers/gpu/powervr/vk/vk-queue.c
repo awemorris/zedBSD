@@ -873,7 +873,7 @@ build_command_buffer(
 			begins++;
 			draws = 0;
 			views = instance_views(&command->records[index]);
-		} else if (opcode == GPU_OP_CMD_DRAW || opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		} else if (powervr_vk_draw_recorded(&command->records[index])) {
 			draws++;
 		} else if (opcode == GPU_OP_CMD_END_RENDER_PASS) {
 			expected += (draws == 0 ? 1U : (draws + POWERVR_RENDER_DRAWS - 1U) / POWERVR_RENDER_DRAWS) * views;
@@ -1986,6 +1986,15 @@ run_job(
 	if (error != 0)
 		return error;
 
+	/* Indirect draws read their counts once all the work before them has finished. */
+	if (powervr_vk_draw_indirect_has(job)) {
+		error = order_after(build, POWERVR_POINT_NONE);
+		if (error == 0)
+			error = powervr_vk_draw_indirect_read(job);
+		if (error != 0)
+			return error;
+	}
+
 	/* The job on the session's render context (counted as sent even when it fails); a synchronous submission waits for it. */
 	build->sent++;
 	registers = job->visibility != NULL ? job->visibility->count : 0U;
@@ -2071,7 +2080,7 @@ instance_jobs(
 		opcode = command->records[index].opcode;
 		if (opcode == GPU_OP_CMD_END_RENDER_PASS)
 			break;
-		if (opcode == GPU_OP_CMD_DRAW || opcode == GPU_OP_CMD_DRAW_INDEXED)
+		if (powervr_vk_draw_recorded(&command->records[index]))
 			draws++;
 	}
 
