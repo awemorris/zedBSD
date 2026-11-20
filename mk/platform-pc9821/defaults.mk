@@ -223,50 +223,5 @@ CONFIG_USERLAND_PROGRAMS          += \
 	write \
 	xargs \
 	zcat \
-	browser \
-	calendar \
-	files \
-	imageview \
-	ime \
-	dict \
-	skk-dict \
-	libGL \
-	libbrowser \
-	libcrypto-compat \
-	libssl-compat \
-	libegl \
-	libgif-compat \
-	libglesv2 \
-	libjpeg-compat \
-	libkeiland \
-	libmedia \
-	libpdf \
-	libpng-compat \
-	libtruetype \
-	libvulkan \
-	libwayland-egl \
-	libwayland \
-	mailer \
-	mediastorage \
-	monitor \
-	music \
-	notes \
-	pdfviewer \
-	phone \
-	photos \
-	preview \
-	printd \
-	sessiond \
-	settings \
-	terminal \
-	textedit \
-	videoplayer \
-	wayland \
-	wallpapers\
-	xserver \
 	rtl8822b-firmware \
-	hand-hershey \
-	noto-color-emoji \
-	ca-certificates \
-	mview \
-	zgears
+	ca-certificates
