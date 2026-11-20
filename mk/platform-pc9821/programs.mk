@@ -15,7 +15,7 @@ USER_CPPFLAGS := \
 USER_CFLAGS := \
 	$(CFLAGS) \
 	-m32 \
-	-march=i386 \
+	-march=i486 \
 	-fno-pic \
 	-fno-pie \
 	-fno-stack-protector \

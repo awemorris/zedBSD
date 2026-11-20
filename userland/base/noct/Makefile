@@ -16,7 +16,7 @@ REPO_HASH ?= d6f0f9b4f7debb4a3c8dd3ba0415665a94d561ae
 BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 
 ARCH ?= $(strip \
-	$(if $(filter i386 pc98 pc9821 pc9801 pc9801ns,$(PLATFORM)),i386,\
+	$(if $(filter i386 pc9821 pc9801ns,$(PLATFORM)),i386,\
 	$(if $(filter arm64 rpi4 rpi5,$(PLATFORM)),arm64,\
 	$(if $(filter riscv64 vf2,$(PLATFORM)),riscv64,\
 	$(if $(filter ppc32 macppc32,$(PLATFORM)),ppc32,\

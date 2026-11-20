@@ -8,11 +8,18 @@ REPO_ROOT           ?= $(abspath $(PLATFORM_PC9801NS_DIR)/../..)
 LIBC_OUT_DIR := $(BUILD)/libc
 LIBC_OBJ_DIR := $(BUILD)/libc/obj
 
+# The i386SX of this machine has no floating-point unit, so its programs use
+# the software-float ABI, and the C library carries the compiler's
+# floating-point helpers, which the static and the shared C library both
+# need: a program reaches them through -lc.
+LIBC_SOURCES += src/libc/compiler-runtime.c
+
 # Static flags
 I386_LIBC_STATIC_CFLAGS := \
 	--target=i386-unknown-zedbsd \
 	-m32 \
 	-march=i386 \
+	-msoft-float \
 	-mno-red-zone \
 	-DHAL_ARCH_I386 \
 	-DKERN_USER_ABI_ILP32 \
@@ -40,7 +47,7 @@ I386_LIBC_STATIC_CFLAGS := \
 # Dynamic flags (shared library)
 I386_LIBC_DYNAMIC_CFLAGS := \
 	--target=i386-unknown-zedbsd \
-	-m32 -march=i386 -mno-red-zone \
+	-m32 -march=i386 -msoft-float -mno-red-zone \
 	-DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 -DKERN_DYNAMIC_LIBC \
 	-nostdinc -Iinclude/libc -Iinclude -Isrc -I. \
 	-ffreestanding -fPIC -fno-builtin \
@@ -54,8 +61,10 @@ COMPILER_RT_SOURCES := \
 	$(LIBM_SOURCES) \
 	src/libc/float-parse.c
 
+# No atomic.c: the i386 has no compare-and-swap, so the compiler calls the
+# __atomic_* functions for every atomic operation, and the C library's
+# runtime gives them.  atomic.c would call itself.
 LLVM_BUILTIN_NAMES := \
-	atomic.c \
 	absvdi2.c absvsi2.c absvti2.c \
 	addvdi3.c addvsi3.c addvti3.c \
 	ashldi3.c ashlti3.c ashrdi3.c ashrti3.c \
