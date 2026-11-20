@@ -158,6 +158,33 @@ powervr_vk_buffer_address(
 }
 
 /*
+ * Reports the kernel's uncached view of a bound buffer's first byte; EIO
+ * when it is not bound or its memory has no view.
+ */
+int
+powervr_vk_buffer_view(
+	const struct powervr_vk_buffer *buffer,
+	volatile uint8_t **view)
+{
+	const struct powervr_vk_memory *memory;
+	const struct powervr_resource *storage;
+
+	/* A buffer bound to memory with a buffer behind it. */
+	if (buffer->memory == NULL)
+		return EIO;
+	memory = buffer->memory->payload;
+	storage = memory->storage;
+	if (storage == NULL || storage->buffer == NULL || storage->buffer->view == NULL)
+		return EIO;
+
+	/* The memory's view moved by the buffer's offset. */
+	*view = storage->buffer->view + buffer->offset;
+
+	/* Succeeded: the buffer's view. */
+	return 0;
+}
+
+/*
  * vkAllocateMemory: [device][present][sType][chain] with, when chain is
  * 1, [extension sType][next][value], then [size][type][allocator]
  * [present][identity] -> [result][present][identity].  The extension

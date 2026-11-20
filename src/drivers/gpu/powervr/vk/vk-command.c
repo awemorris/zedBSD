@@ -44,6 +44,14 @@
 #define COMMAND_RECORDS_FIRST		16U
 #define COMMAND_RECORDS_MAX		4096U
 
+/*
+ * The most bytes one vkCmdUpdateBuffer writes.
+ *
+ * Value referenced: the Vulkan 1.0 specification (vkCmdUpdateBuffer:
+ * dataSize at most 65536).
+ */
+#define COMMAND_UPDATE_BYTES		65536U
+
 static int create_pool(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int destroy_pool(struct powervr_vk_session *session, struct i915_wire_reader *reader);
 static int reset_pool(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -57,6 +65,8 @@ static int record(struct powervr_vk_session *session, uint32_t opcode, struct i9
 static int record_pipeline(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_sets(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_dispatch(struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+static int record_dispatch_indirect(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+static int record_buffer_write(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 static int record_barrier(struct powervr_vk_session *session, struct i915_wire_reader *reader);
 static int record_hold(struct powervr_vk_session *session, struct powervr_vk_record *entry, enum i915_vk_object_kind kind, uint64_t identity);
 static int record_append(struct powervr_vk_command_buffer *command, const struct powervr_vk_record *entry);
@@ -143,6 +153,10 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_END_VIDEO_CODING:
 	case GPU_OP_CMD_CONTROL_VIDEO_CODING:
 	case GPU_OP_CMD_DECODE_VIDEO:
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+	case GPU_OP_CMD_FILL_BUFFER:
+	case GPU_OP_CMD_UPDATE_BUFFER:
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
 		error = record(session, opcode, reader);
 		break;
 	default:
@@ -576,6 +590,12 @@ record(
 		refused = record_sets(session, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_DISPATCH || opcode == GPU_OP_CMD_DISPATCH_BASE) {
 		refused = record_dispatch(reader, &entry);
+	} else if (opcode == GPU_OP_CMD_DISPATCH_INDIRECT) {
+		refused = record_dispatch_indirect(session, reader, &entry);
+	} else if (opcode == GPU_OP_CMD_FILL_BUFFER || opcode == GPU_OP_CMD_UPDATE_BUFFER) {
+		refused = record_buffer_write(session, opcode, reader, &entry);
+	} else if (opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) {
+		refused = powervr_vk_record_query_copy(session, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 		refused = powervr_vk_record_begin_pass(session, reader, &entry);
 	} else if (opcode == GPU_OP_CMD_CLEAR_ATTACHMENTS) {
@@ -842,6 +862,134 @@ record_barrier(
 		return EINVAL;
 
 	/* Succeeded: the barrier is read. */
+	return 0;
+}
+
+/*
+ * vkCmdDispatchIndirect: [buffer][offset].  The record holds the buffer
+ * as object 0 and keeps the offset (values 0 and 1, low word first); the
+ * counts are read when it runs.  ENOENT for an unknown buffer; EINVAL for
+ * an offset not of whole words or a record past the buffer's end, which
+ * fail the recording.
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (vkCmdDispatchIndirect: the offset a multiple of 4, the 12 bytes of
+ * VkDispatchIndirectCommand within the buffer).
+ */
+static int
+record_dispatch_indirect(
+	struct powervr_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct powervr_vk_record *entry)
+{
+	const struct powervr_vk_buffer *buffer;
+	uint64_t identity;
+	uint64_t offset;
+	int error;
+
+	/* The buffer and where the counts are. */
+	identity = drv_i915_wire_read_u64(reader);
+	offset = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* The record holds the known buffer. */
+	error = record_hold(session, entry, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && entry->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* Whole words, the record within the buffer. */
+	buffer = entry->objects[0]->payload;
+	if ((offset & 3U) != 0U || offset > buffer->size || buffer->size - offset < sizeof(VkDispatchIndirectCommand))
+		return EINVAL;
+	entry->values[0] = (uint32_t)offset;
+	entry->values[1] = (uint32_t)(offset >> 32);
+
+	/* Succeeded: the dispatch is recorded; its counts are read when it runs. */
+	return 0;
+}
+
+/*
+ * vkCmdFillBuffer: [buffer][offset][size][word]; vkCmdUpdateBuffer:
+ * [buffer][offset][size][size again]{bytes, padded to a word}.  The
+ * record holds the buffer as object 0 and keeps the offset (values 0 and
+ * 1, low word first), the bytes written (values 2 and 3; a fill of
+ * VK_WHOLE_SIZE the rest of the buffer in whole words), a fill's word
+ * (value 4) and an update's bytes (its data).  ENOENT for an unknown
+ * buffer; EINVAL for an offset or size not of whole words, nothing
+ * written, bytes past the buffer's end, or a buffer not written by
+ * transfers, which fail the recording.
+ *
+ * Values referenced: the Vulkan 1.0 specification (vkCmdFillBuffer,
+ * vkCmdUpdateBuffer: dstOffset and size multiples of 4, dataSize at most
+ * 65536, VK_WHOLE_SIZE rounded down to a multiple of 4,
+ * VK_BUFFER_USAGE_TRANSFER_DST_BIT).
+ */
+static int
+record_buffer_write(
+	struct powervr_vk_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader,
+	struct powervr_vk_record *entry)
+{
+	const struct powervr_vk_buffer *buffer;
+	uint64_t identity;
+	uint64_t offset;
+	uint64_t size;
+	uint64_t count;
+	uint8_t *bytes;
+	int error;
+
+	/* The buffer and the range. */
+	identity = drv_i915_wire_read_u64(reader);
+	offset = drv_i915_wire_read_u64(reader);
+	size = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* A fill's word, or an update's bytes (as many as its size, no more than Vulkan allows). */
+	if (opcode == GPU_OP_CMD_FILL_BUFFER) {
+		entry->values[4] = drv_i915_wire_read_u32(reader);
+		if (reader->error != 0)
+			return EINVAL;
+	} else {
+		count = drv_i915_wire_read_u64(reader);
+		if (reader->error != 0 || count != size || count == 0U || count > COMMAND_UPDATE_BYTES)
+			return EINVAL;
+		bytes = kern_malloc((size_t)count);
+		if (bytes == NULL)
+			return ENOMEM;
+		entry->data = bytes;
+		i915_vkc_read_bytes(reader, bytes, (size_t)count);
+		if (reader->error != 0)
+			return EINVAL;
+	}
+
+	/* The record holds the known buffer, written by transfers. */
+	error = record_hold(session, entry, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && entry->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+	buffer = entry->objects[0]->payload;
+	if ((buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0U)
+		return EINVAL;
+
+	/* Whole words inside the buffer; a fill to its end takes the rest of its words. */
+	if ((offset & 3U) != 0U || offset >= buffer->size)
+		return EINVAL;
+	if (opcode == GPU_OP_CMD_FILL_BUFFER && size == VK_WHOLE_SIZE)
+		size = (buffer->size - offset) & ~(uint64_t)3U;
+	if (size == 0U || (size & 3U) != 0U || size > buffer->size - offset)
+		return EINVAL;
+	entry->values[0] = (uint32_t)offset;
+	entry->values[1] = (uint32_t)(offset >> 32);
+	entry->values[2] = (uint32_t)size;
+	entry->values[3] = (uint32_t)(size >> 32);
+
+	/* Succeeded: the write is recorded. */
 	return 0;
 }
 

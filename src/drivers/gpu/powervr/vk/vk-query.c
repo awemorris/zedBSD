@@ -253,6 +253,176 @@ powervr_vk_record_query(
 }
 
 /*
+ * Records vkCmdCopyQueryPoolResults: [pool][first][count][buffer][offset]
+ * [stride][flags].  The record holds the pool as object 0 and the buffer
+ * as object 1, and keeps the first query and the count (values 0 and 1),
+ * the offset and the stride (values 2 and 3, 4 and 5, low word first) and
+ * the flags (value 6).  EINVAL when the arguments did not decode; ENOENT
+ * for an unknown pool or buffer; EINVAL for queries outside the pool, a
+ * buffer not written by transfers, an offset or a stride not of whole
+ * words (of eight bytes for 64-bit results), records closer than one
+ * record, or records past the buffer's end, which fail the recording.
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: dstOffset and stride multiples of 4, or of
+ * 8 with VK_QUERY_RESULT_64_BIT; VK_BUFFER_USAGE_TRANSFER_DST_BIT; the
+ * records within the buffer).
+ */
+int
+powervr_vk_record_query_copy(
+	struct powervr_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct powervr_vk_record *entry)
+{
+	struct powervr_vk_object *objects[2];
+	const struct powervr_vk_buffer *buffer;
+	const struct query_pool *pool;
+	uint64_t identities[2];
+	uint64_t offset;
+	uint64_t stride;
+	uint64_t last;
+	uint32_t first;
+	uint32_t count;
+	uint32_t flags;
+	uint32_t width;
+	uint32_t bytes;
+	uint32_t index;
+	int error;
+
+	/* The arguments. */
+	identities[0] = drv_i915_wire_read_u64(reader);
+	first = drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u32(reader);
+	identities[1] = drv_i915_wire_read_u64(reader);
+	offset = drv_i915_wire_read_u64(reader);
+	stride = drv_i915_wire_read_u64(reader);
+	flags = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* A pool and a buffer of the session. */
+	objects[0] = powervr_vk_object_find(session, I915_VK_OBJ_QUERY_POOL, identities[0]);
+	objects[1] = powervr_vk_object_find(session, I915_VK_OBJ_BUFFER, identities[1]);
+	if (objects[0] == NULL || objects[1] == NULL)
+		return ENOENT;
+	pool = objects[0]->payload;
+	buffer = objects[1]->payload;
+
+	/* Queries inside the pool, a buffer written by transfers. */
+	if (first > pool->count || count > pool->count - first)
+		return EINVAL;
+	if ((buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0U)
+		return EINVAL;
+
+	/* Records of whole words, apart by a record at least, within the buffer. */
+	width = (flags & VK_QUERY_RESULT_64_BIT) != 0U ? 8U : 4U;
+	bytes = width;
+	if ((flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0U)
+		bytes += width;
+	if ((offset & (width - 1U)) != 0U || (stride & (width - 1U)) != 0U)
+		return EINVAL;
+	if (count > 1U && stride < bytes)
+		return EINVAL;
+	if (count != 0U) {
+		if (stride > buffer->size)
+			return EINVAL;
+		last = offset + (uint64_t)(count - 1U) * stride;
+		if (offset > buffer->size || last > buffer->size || bytes > buffer->size - last)
+			return EINVAL;
+	}
+
+	/* The record holds the pool and the buffer while it may run. */
+	for (index = 0; index < 2U; index++) {
+		error = powervr_vk_object_retain(objects[index]);
+		if (error != 0)
+			return error;
+		entry->objects[index] = objects[index];
+		entry->object_count = index + 1U;
+	}
+	entry->values[0] = first;
+	entry->values[1] = count;
+	entry->values[2] = (uint32_t)offset;
+	entry->values[3] = (uint32_t)(offset >> 32);
+	entry->values[4] = (uint32_t)stride;
+	entry->values[5] = (uint32_t)(stride >> 32);
+	entry->values[6] = flags;
+
+	/* Succeeded: the copy is recorded. */
+	return 0;
+}
+
+/*
+ * Runs a recorded vkCmdCopyQueryPoolResults once the session's earlier
+ * work has finished (the caller waits): an occlusion pool's finished jobs
+ * report first; then each query's record as vkGetQueryPoolResults lays it
+ * out is written into the buffer through its uncached view: the result
+ * when the query is available or partial results are asked for, the
+ * availability word when asked for.  EIO for a buffer without a view.
+ *
+ * XXX A query not available when the copy runs is not waited for, even
+ * with VK_QUERY_RESULT_WAIT_BIT: the work before it has finished, so such
+ * a query is one no submitted work ends.
+ *
+ * Procedure referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: without VK_QUERY_RESULT_PARTIAL_BIT the
+ * result of an unavailable query is not written, the availability word
+ * is).
+ */
+int
+powervr_vk_query_copy_run(
+	struct powervr_vk_session *session,
+	const struct powervr_vk_record *entry)
+{
+	uint8_t record[POWERVR_VIDEO_QUERY_RECORD_MAX + OCCLUSION_RECORD_MAX];
+	const struct query_pool *pool;
+	volatile uint8_t *view;
+	volatile uint8_t *at;
+	uint64_t offset;
+	uint64_t stride;
+	uint32_t record_bytes;
+	uint32_t flags;
+	uint32_t width;
+	uint32_t query;
+	uint32_t index;
+	uint32_t from;
+	bool ready;
+	int error;
+
+	/* The pool, the buffer's view, where the records go. */
+	pool = entry->objects[0]->payload;
+	error = powervr_vk_buffer_view(entry->objects[1]->payload, &view);
+	if (error != 0)
+		return error;
+	offset = (uint64_t)entry->values[2] | ((uint64_t)entry->values[3] << 32);
+	stride = (uint64_t)entry->values[4] | ((uint64_t)entry->values[5] << 32);
+	flags = entry->values[6];
+	width = (flags & VK_QUERY_RESULT_64_BIT) != 0U ? 8U : 4U;
+
+	/* An occlusion pool's finished jobs report. */
+	if (pool->type == VK_QUERY_TYPE_OCCLUSION)
+		powervr_render_jobs_reap(session->owner->render, session->owner, 1);
+
+	/* Each query's record, what of it is written. */
+	for (query = entry->values[0]; query < entry->values[0] + entry->values[1]; query++) {
+		if (pool->type == VK_QUERY_TYPE_OCCLUSION) {
+			record_bytes = occlusion_record(pool, query, flags, record, &ready);
+		} else {
+			record_bytes = powervr_video_query_record(pool->status[query], pool->available[query], flags, record);
+			ready = pool->available[query] != 0;
+		}
+		from = 0U;
+		if (!ready && (flags & VK_QUERY_RESULT_PARTIAL_BIT) == 0U)
+			from = record_bytes > width ? width : record_bytes;
+		at = view + offset + (uint64_t)(query - entry->values[0]) * stride;
+		for (index = from; index < record_bytes; index++)
+			at[index] = record[index];
+	}
+
+	/* Succeeded: the records are written. */
+	return 0;
+}
+
+/*
  * Has a recorded begin or end of an occlusion query inside a multiview
  * render pass instance of views views name the query and the views - 1
  * after it (inside the pool): Vulkan gives such a query a query of the

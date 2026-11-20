@@ -246,6 +246,7 @@ static int run_flush(struct submission *build);
 static int run_job(struct submission *build, struct powervr_render_job *job);
 static void jobs_free(struct powervr_render_job *jobs, uint32_t count);
 static int order_after(struct submission *build, unsigned kind);
+static int run_on_cpu(struct submission *build, const struct powervr_vk_record *entry);
 static int settle(struct submission *build);
 static uint32_t instance_views(const struct powervr_vk_record *begin);
 static uint32_t instance_jobs(const struct powervr_vk_command_buffer *command, uint32_t begin);
@@ -933,6 +934,14 @@ build_command_buffer(
 				error = powervr_vk_transfer_run(build->session, entry);
 				powervr_timing_add(POWERVR_TIMING_TRANSFER, started);
 			}
+		} else if (entry->opcode == GPU_OP_CMD_DISPATCH_INDIRECT || entry->opcode == GPU_OP_CMD_FILL_BUFFER ||
+		    entry->opcode == GPU_OP_CMD_UPDATE_BUFFER || entry->opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) {
+			/* Work the CPU does: the dispatches before it run first and the session's earlier work finishes. */
+			error = run_flush(build);
+			if (error == 0)
+				error = order_after(build, POWERVR_POINT_NONE);
+			if (error == 0)
+				error = run_on_cpu(build, entry);
 		} else if (powervr_vk_query_recorded(entry->opcode)) {
 			/* A query's reset, begin or end, at once: the decodes it brackets run when they are reached. */
 			powervr_vk_query_run(build->session, entry);
@@ -1860,6 +1869,68 @@ order_after(
 		powervr_stage_ok(POWERVR_STAGE_COMPUTE);
 
 	/* Succeeded: the earlier work finished. */
+	return 0;
+}
+
+/*
+ * Runs a record the CPU does once the session's earlier work has
+ * finished (the caller waits): vkCmdDispatchIndirect reads its counts
+ * from its buffer and adds the dispatch they give (from workgroup 0);
+ * vkCmdFillBuffer and vkCmdUpdateBuffer write their words through the
+ * buffer's uncached view; vkCmdCopyQueryPoolResults writes its records
+ * (powervr_vk_query_copy_run).  The work after it is added after it.
+ * EIO for a buffer without a view, EINVAL for counts past the device's
+ * maxComputeWorkGroupCount.
+ */
+static int
+run_on_cpu(
+	struct submission *build,
+	const struct powervr_vk_record *entry)
+{
+	const uint8_t *bytes;
+	volatile uint32_t *words;
+	volatile uint8_t *view;
+	uint32_t groups[3];
+	uint64_t offset;
+	uint64_t size;
+	uint64_t index;
+	int error;
+
+	/* A copy of query results. */
+	if (entry->opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS)
+		return powervr_vk_query_copy_run(build->session, entry);
+
+	/* The buffer's view at the record's offset. */
+	error = powervr_vk_buffer_view(entry->objects[0]->payload, &view);
+	if (error != 0)
+		return error;
+	offset = (uint64_t)entry->values[0] | ((uint64_t)entry->values[1] << 32);
+	words = (volatile uint32_t *)(void *)(view + offset);
+
+	/* An indirect dispatch: its counts, within the device's limits, as a dispatch from workgroup 0. */
+	if (entry->opcode == GPU_OP_CMD_DISPATCH_INDIRECT) {
+		for (index = 0; index < 3U; index++)
+			groups[index] = words[index];
+		if (groups[0] > POWERVR_VK_COMPUTE_GROUPS_X || groups[1] > POWERVR_VK_COMPUTE_GROUPS_Y || groups[2] > POWERVR_VK_COMPUTE_GROUPS_Z)
+			return EINVAL;
+		build->base[0] = 0;
+		build->base[1] = 0;
+		build->base[2] = 0;
+		return build_dispatch(build, groups);
+	}
+
+	/* A fill's word or an update's words, one aligned store each. */
+	size = (uint64_t)entry->values[2] | ((uint64_t)entry->values[3] << 32);
+	bytes = entry->data;
+	for (index = 0; index < size / 4U; index++) {
+		if (entry->opcode == GPU_OP_CMD_FILL_BUFFER)
+			words[index] = entry->values[4];
+		else
+			words[index] = (uint32_t)bytes[index * 4U] | ((uint32_t)bytes[index * 4U + 1U] << 8) |
+			    ((uint32_t)bytes[index * 4U + 2U] << 16) | ((uint32_t)bytes[index * 4U + 3U] << 24);
+	}
+
+	/* Succeeded: the record ran. */
 	return 0;
 }
 
