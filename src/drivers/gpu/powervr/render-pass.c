@@ -124,7 +124,8 @@ powervr_pass_build(
 	if (pass->samples == 0)
 		pass->samples = 1;
 
-	/* The resolve references: each of one sample and its colour attachment's format, its colour attachment of four. */
+	/* The resolve references: each of one sample and its colour attachment's format, its colour attachment of four; the depth's is the caller's. */
+	pass->depth_resolve = POWERVR_PASS_UNUSED;
 	for (index = 0; index < POWERVR_PASS_COLORS; index++)
 		pass->resolves[index] = POWERVR_PASS_UNUSED;
 	for (index = 0; subpass->pResolveAttachments != NULL && index < subpass->colorAttachmentCount; index++) {
@@ -153,7 +154,10 @@ powervr_pass_build(
  * and the depth is loaded before it is stored, as Mesa does
  * (render-depth.c).  A depth view of a level
  * other than 0 is not taken yet (ENOTSUP).  A cleared attachment without
- * its clear value is refused (EINVAL).
+ * its clear value is refused (EINVAL).  A depth attachment the pass
+ * resolves is stored whatever its store operations, and the job keeps its
+ * view and its resolve attachment's surface (vk-transfer.c resolves it
+ * after the job).
  *
  * Procedure referenced:
  * Mesa 26.2.5 src/imagination/vulkan/pvr_arch_cmd_buffer.c
@@ -281,6 +285,28 @@ powervr_render_job_begin(
 			job->depth.clear_stencil = clears[pass->depth].words[1] & 0xffU;
 		}
 
+		/*
+		 * Its resolve attachment: a depth view of one sample, of the same
+		 * format.  The transfer reads sample 0 out of the stored depth (and
+		 * stencil), which is stored whatever its store operation.
+		 */
+		if (pass->depth_resolve != POWERVR_PASS_UNUSED) {
+			if (pass->samples != 4U)
+				return EINVAL;
+			job->depth_view = *view;
+			view = &framebuffer->views[pass->depth_resolve].shape;
+			if (view->format == NULL || view->format->vk_format != attachment->format || view_samples(view) != 1U)
+				return EINVAL;
+			error = target_surface(view, &job->depth_resolve_surface);
+			if (error != 0)
+				return error;
+			job->depth_resolve = true;
+			job->depth.store_op = VK_ATTACHMENT_STORE_OP_STORE;
+			if ((job->depth.format->kind & POWERVR_FORMAT_STENCIL) != 0)
+				job->depth.stencil_store_op = VK_ATTACHMENT_STORE_OP_STORE;
+			view = &framebuffer->views[pass->depth].shape;
+		}
+
 		/* An area short of the depth view (as Mesa's pvr_is_render_area_tile_aligned): the depth outside it is kept by a load before the store. */
 		job->depth.partial = false;
 		if (area->x != 0 || area->y != 0 || area->width != view->width || area->height != view->height)
@@ -400,7 +426,8 @@ powervr_render_job_continue(
 		next->colors[index].load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
 	}
 
-	/* The depth target likewise, and its stencil. */
+	/* The depth target likewise, and its stencil; its resolve the last job's. */
+	job->depth_resolve = false;
 	if (job->depth.present) {
 		job->depth.store_op = VK_ATTACHMENT_STORE_OP_STORE;
 		next->depth.load_op = VK_ATTACHMENT_LOAD_OP_LOAD;

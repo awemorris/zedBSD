@@ -83,9 +83,10 @@ struct powervr_pass_attachment {
 /*
  * A VkRenderPass of one subpass: its attachments, the subpass's colour
  * attachments, the resolve attachment of each (POWERVR_PASS_UNUSED for
- * none), its depth attachment, the samples of its colour and depth
- * attachments (1 or 4), and the subpass's views under multiview (bit n:
- * view n; 0 for one view).
+ * none), its depth attachment and the attachment its sample 0 is resolved
+ * into (depth and stencil alike, POWERVR_PASS_UNUSED for none), the
+ * samples of its colour and depth attachments (1 or 4), and the subpass's
+ * views under multiview (bit n: view n; 0 for one view).
  */
 struct powervr_pass {
 	uint32_t attachment_count;
@@ -94,6 +95,7 @@ struct powervr_pass {
 	uint32_t colors[POWERVR_PASS_COLORS];
 	uint32_t resolves[POWERVR_PASS_COLORS];
 	uint32_t depth;
+	uint32_t depth_resolve;
 	uint32_t samples;
 	uint32_t view_mask;
 };
@@ -258,7 +260,10 @@ struct powervr_render_visibility {
  * samples a pixel its attachments and draws have (1 or 4; 0 is taken as
  * 1).  View is the view of a multiview render pass the job renders (the
  * draws' gl_ViewIndex; 0 without multiview), each attachment at its
- * view's layer plus the view.
+ * view's layer plus the view.  A job whose depth target is resolved has
+ * depth_resolve set, the depth target's view (of four samples) and the
+ * surface of one sample its sample 0 goes to over the area once the job
+ * has run (only the instance's last job of each view resolves).
  */
 struct powervr_render_job {
 	struct powervr_render_area area;
@@ -270,6 +275,9 @@ struct powervr_render_job {
 	uint32_t color_count;
 	struct powervr_render_target colors[POWERVR_PASS_COLORS];
 	struct powervr_render_depth depth;
+	bool depth_resolve;
+	struct powervr_view_shape depth_view;
+	struct powervr_render_surface depth_resolve_surface;
 	uint32_t draw_count;
 	struct powervr_render_draw draws[POWERVR_RENDER_DRAWS];
 	struct powervr_render_visibility *visibility;

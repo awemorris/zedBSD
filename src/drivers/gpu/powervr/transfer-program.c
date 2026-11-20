@@ -617,14 +617,19 @@ static const struct resolve_pack resolve_packs[] = {
  * Says how many samples of each pixel the resolve's program reads of a
  * format: four, averaged, for a float or normalised colour format the
  * program packs (resolve_pack_find); one, sample 0, for an integer colour
- * format of a raw format's size, moved as raw texels; 0 for a format the
- * transfer does not resolve.
+ * format or a depth format (a render pass's resolve of sample 0, its
+ * stencil with it) of a raw format's size, moved as raw texels; 0 for a
+ * format the transfer does not resolve.
  *
  * Procedure referenced: Mesa 26.2.6 src/imagination/vulkan/rogue/
  * pvr_blit.c (pvr_copy_or_resolve_image_region: PVR_RESOLVE_BLEND, but
  * PVR_RESOLVE_SAMPLE0 for an integer format, whose blend is not
- * defined); the Vulkan 1.3 specification, vkCmdResolveImage (an integer
- * format's pixel takes a single sample's value).
+ * defined) and pvr_arch_cmd_buffer.c
+ * (pvr_resolve_unemitted_resolve_attachments: a subpass's depth and
+ * stencil resolved by the transfer, PVR_RESOLVE_SAMPLE0 for
+ * VK_RESOLVE_MODE_SAMPLE_ZERO_BIT); the Vulkan 1.3 specification,
+ * vkCmdResolveImage (an integer format's pixel takes a single sample's
+ * value).
  */
 unsigned
 powervr_transfer_resolve_samples(
@@ -640,15 +645,14 @@ powervr_transfer_resolve_samples(
 	if (averaged)
 		return RESOLVE_SAMPLES;
 
-	/* Not an integer colour format: not resolved. */
+	/* Neither an integer colour format nor a depth format: not resolved. */
 	if (format == NULL)
 		return 0;
-	if ((format->kind & POWERVR_FORMAT_COLOR) == 0)
-		return 0;
-	if ((format->kind & POWERVR_FORMAT_INTEGER) == 0)
+	if ((format->kind & POWERVR_FORMAT_DEPTH) == 0 &&
+	    ((format->kind & POWERVR_FORMAT_COLOR) == 0 || (format->kind & POWERVR_FORMAT_INTEGER) == 0))
 		return 0;
 
-	/* An integer colour format of a raw format's size: its sample 0 as raw texels. */
+	/* Of a raw format's size: its sample 0 as raw texels. */
 	raw = powervr_transfer_raw_format(format->texel_bytes);
 	if (raw == NULL)
 		return 0;

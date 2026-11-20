@@ -1997,6 +1997,12 @@ run_job(
 		powervr_vk_query_visibility_drop(job);
 	if (error == 0)
 		error = settle(build);
+
+	/* Its depth target's sample 0 into the resolve attachment, after it. */
+	if (error == 0 && job->depth_resolve) {
+		build->sent++;
+		error = powervr_vk_transfer_depth_resolve(build->session, job);
+	}
 	if (error == ETIMEDOUT)
 		build->session->abandoned = true;
 	if (error != 0) {
