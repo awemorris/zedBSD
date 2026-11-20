@@ -16,9 +16,11 @@
  * The one heap the physical query reports, and the budget every live
  * allocation declaration of all sessions shares.  Each physical run is
  * charged once, however many declarations (an export and its imports) hold
- * it.
+ * it.  One allocation may take all of it, which Vulkan 1.1 needs to be at
+ * least 1 GiB (maxMemoryAllocationSize); the GPU's 4 GiB address space
+ * holds it with the kernel's own mappings.
  */
-#define BCM2711_VULKAN_MEMORY_BUDGET (512ULL << 20)
+#define BCM2711_VULKAN_MEMORY_BUDGET (1024ULL << 20)
 
 struct bcm2711_buffer;
 struct bcm2711_v3d_view;

@@ -21,18 +21,24 @@
 #include "drivers/gpu/videocore/vk/vulkan-video.h"
 
 /*
- * The native word after the vendor suffix ("TANZ" read little endian), and
- * its decode bit: H.264 (bit 0) on the Pi 4's firmware decoder, H.265 (bit
- * 2) on the Pi 5's HEVC decoder.
+ * The decode bit of the native word: H.264 (bit 0) on the Pi 4's firmware
+ * decoder, H.265 (bit 2) on the Pi 5's HEVC decoder.
  */
-#define VULKAN_NATIVE_MAGIC 0x5a4e4154U
 #if CONFIG_DRIVER_RPI5_GPU
 #define VULKAN_NATIVE_VIDEO_DECODE 4U
 #else
 #define VULKAN_NATIVE_VIDEO_DECODE 1U
 #endif
-#define VULKAN_NATIVE_CAPSET_BYTES 176U
 #endif
+
+/*
+ * The native word after the vendor suffix ("TANZ" read little endian), and
+ * its bit 3: the executor answers the Vulkan 1.1 queries and reads the 1.1
+ * chains of a device and a render pass creation.
+ */
+#define VULKAN_NATIVE_MAGIC 0x5a4e4154U
+#define VULKAN_NATIVE_CORE11 8U
+#define VULKAN_NATIVE_CAPSET_BYTES 176U
 
 #define VULKAN_CAPSET_ID 4U
 #define VULKAN_CAPSET_BYTES 168U
@@ -90,6 +96,7 @@ runtime_capset(
 	struct gpu_capset *capset)
 {
 	struct bcm2711_render_session *session;
+	uint32_t flags;
 	int error;
 
 	/* Only this controller's completed Vulkan namespace may negotiate its implemented protocol. */
@@ -125,21 +132,23 @@ runtime_capset(
 	capset_word(capset->data, 164, VULKAN_VENDOR_FLAGS);
 	capset->bytes = VULKAN_CAPSET_BYTES;
 
-#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/*
-	 * A session asked while the decoder is there is promised video
-	 * decode, for its life: the native word follows the vendor suffix.
+	 * The native word follows the vendor suffix: the Vulkan 1.1 queries,
+	 * and video decode for a session asked while the decoder is there,
+	 * which is promised it for its life.
 	 */
 	if (session->vulkan != NULL && capset->capacity >= VULKAN_NATIVE_CAPSET_BYTES) {
+		flags = VULKAN_NATIVE_CORE11;
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		if (!bcm2711_vulkan_video_session(session->vulkan) && bcm2711_vulkan_video_available())
 			bcm2711_vulkan_video_promise(session->vulkan);
-		if (bcm2711_vulkan_video_session(session->vulkan)) {
-			capset_word(capset->data, 168, VULKAN_NATIVE_MAGIC);
-			capset_word(capset->data, 172, VULKAN_NATIVE_VIDEO_DECODE);
-			capset->bytes = VULKAN_NATIVE_CAPSET_BYTES;
-		}
-	}
+		if (bcm2711_vulkan_video_session(session->vulkan))
+			flags |= VULKAN_NATIVE_VIDEO_DECODE;
 #endif
+		capset_word(capset->data, 168, VULKAN_NATIVE_MAGIC);
+		capset_word(capset->data, 172, flags);
+		capset->bytes = VULKAN_NATIVE_CAPSET_BYTES;
+	}
 
 	mutex_unlock(&session->device->mutex);
 

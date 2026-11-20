@@ -28,6 +28,7 @@
 
 static int release_job(struct bcm2711_vulkan_native_job *job);
 static int retire_closed_sessions(struct bcm2711_render_device *controller);
+static uint32_t view_number(uint32_t views, uint32_t index);
 
 /*
  * Prepares an independently pending primary graph before any native allocation or worker acceptance.
@@ -97,12 +98,16 @@ bcm2711_vulkan_native_job_step(
 	struct bcm2711_vulkan_native_job *job;
 	const struct bcm2711_vulkan_prepared_event *event;
 	const struct bcm2711_vulkan_prepared_event *next;
+	const struct bcm2711_vulkan_prepared_event *end;
 	struct bcm2711_v3d_job_result completion;
 	uint64_t remaining;
 	uint64_t bytes;
 	uint32_t region;
 	uint32_t level;
 	uint32_t layer;
+	uint32_t views;
+	uint32_t view;
+	bool last;
 	int tiled;
 	int error;
 	int further;
@@ -316,12 +321,31 @@ bcm2711_vulkan_native_job_step(
 		 * session's mark only while they are built.
 		 */
 		controller->space.builder = session->owner;
+		end = NULL;
+		last = true;
 		if (tiled == 0) {
 			error = 0;
 			next = event->next;
 		} else if (event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS || event->opcode == GPU_OP_CMD_CLEAR_ATTACHMENTS) {
-			/* A clear of the attachments continues its render pass in a native pass of its own. */
-			error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
+			/*
+			 * A clear of the attachments continues its render pass in a
+			 * native pass of its own.  A multiview render pass renders each
+			 * view in a native pass of its own, region counting them: the
+			 * views of the mask in order, all from the same event.
+			 */
+			views = bcm2711_vulkan_native_pass_views(event);
+			view = 0;
+			if (views != 0)
+				view = view_number(views, region);
+			error = bcm2711_vulkan_native_pass_create(&controller->space, event, view, &remaining, &job->pass, &end);
+			next = end;
+			if (views != 0 && region + 1U < (uint32_t)__builtin_popcount(views)) {
+				last = false;
+				next = event;
+				region++;
+			} else {
+				region = 0;
+			}
 		} else if (event->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 			/* A colour image clear writes one level of one layer (or slice) a pass, region counting its passes. */
 			error = bcm2711_vulkan_native_clear_create(&controller->space, event, region, &remaining, &job->pass);
@@ -398,7 +422,9 @@ bcm2711_vulkan_native_job_step(
 		}
 
 		/* The pass's occlusion counts reach their queries, and the queries it ended become available. */
-		bcm2711_vulkan_native_pass_counted(job->pass, event, next);
+		if (end == NULL)
+			end = next;
+		bcm2711_vulkan_native_pass_counted(job->pass, event, end, last);
 
 		/* Confirmed DMA retirement permits this resident pass budget and its mappings to be reused by the next FIFO pass. */
 		bytes = job->pass->bytes;
@@ -601,6 +627,24 @@ retire_closed_sessions(
 
 	/* Succeeded: every closed namespace and its internally retained renderer descriptor has retired. */
 	return 0;
+}
+
+/* The view number index (from zero) of a multiview mask names: its bit, counting the set bits from the lowest. */
+static uint32_t
+view_number(
+	uint32_t views,
+	uint32_t index)
+{
+	uint32_t view;
+
+	/* Drops the lower set bits, then takes the lowest one left. */
+	for (view = 0; view < index && views != 0; view++)
+		views &= views - 1U;
+	if (views == 0)
+		return 0;
+
+	/* Succeeded: the view's number. */
+	return (uint32_t)__builtin_ctz(views);
 }
 
 /* The dispatch of a prepared vkCmdDispatch as a CSD job. */

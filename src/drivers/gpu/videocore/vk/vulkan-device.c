@@ -237,6 +237,7 @@ create_device(
 {
 	VkDeviceCreateInfo info;
 	VkPhysicalDeviceFeatures supported;
+	struct i915_vkc_core11 core11;
 	const VkBool32 *have;
 	const VkBool32 *want;
 	uint32_t feature;
@@ -301,6 +302,13 @@ create_device(
 				return 0;
 			}
 		}
+	}
+
+	/* A Vulkan 1.1 feature the device does not report fails like a core one (libvulkan refuses it first). */
+	bcm2711_vulkan_device_core11(session, &core11);
+	if (i915_vkc_core11_check_device(&info, &core11) != 0) {
+		reply_identity(reply, VK_ERROR_FEATURE_NOT_PRESENT, 0);
+		return 0;
 	}
 
 	/* Retained physical ownership survives later withdrawal of the physical wire namespace. */

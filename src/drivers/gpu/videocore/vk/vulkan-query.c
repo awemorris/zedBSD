@@ -59,7 +59,9 @@ static int fixed_query(struct bcm2711_vulkan_session *session, uint32_t opcode, 
 static int queue_properties(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int format_query(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int image_query(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static int identity_query(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static void identity_query(struct i915_wire_writer *reply, const VkPhysicalDeviceProperties *properties);
+static int properties2_query(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int features2_query(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_properties(const struct bcm2711_vulkan_session *session, VkPhysicalDeviceProperties *properties);
 static void format_properties(const struct bcm2711_vulkan_session *session, VkFormat format, VkFormatProperties *properties);
 static void set_float(float *destination, uint32_t bits);
@@ -82,6 +84,7 @@ bcm2711_vulkan_query_dispatch(
 	/* Other typed routers retain ownership of opcodes outside physical-device discovery. */
 	*handled = 0;
 	if (opcode != GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2 &&
+	    opcode != GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2 &&
 	    (opcode < GPU_OP_GET_PHYSICAL_DEVICE_FEATURES ||
 	     opcode > GPU_OP_GET_PHYSICAL_DEVICE_MEMORY_PROPERTIES))
 		return 0;
@@ -89,13 +92,23 @@ bcm2711_vulkan_query_dispatch(
 	if (requested != 1)
 		return EINVAL;
 
-	/* The device's identity, which an exported allocation carries to its importer. */
+	/* The device's identity, which an exported allocation carries to its importer, or its Vulkan 1.1 properties. */
 	if (opcode == GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2) {
-		error = identity_query(session, reader, reply);
+		error = properties2_query(session, reader, reply);
 		if (error != 0)
 			return error;
 
-		/* Succeeded: the identity and the properties are in the reply. */
+		/* Succeeded: the chain's structures and the properties are in the reply. */
+		return 0;
+	}
+
+	/* The Vulkan 1.1 features. */
+	if (opcode == GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2) {
+		error = features2_query(session, reader, reply);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the chain's structures and the features are in the reply. */
 		return 0;
 	}
 
@@ -197,48 +210,30 @@ fixed_query(
 }
 
 /*
- * Answers the properties query whose chain asks for the device's identity
- * (VkPhysicalDeviceIDProperties) and nothing else: libvulkan stamps the
- * identity into every allocation it exports as an opaque fd, and an
- * importer checks it against its own.  The identities are
- * fixed: the device's names this one V3D, the driver's this driver.
+ * vkGetPhysicalDeviceProperties2 in either of its forms: [physical]
+ * [present][PROPERTIES_2 header][the chain's headers] -> the device's
+ * identity (identity_query()) or its Vulkan 1.1 properties.
  */
 static int
-identity_query(
+properties2_query(
 	struct bcm2711_vulkan_session *session,
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	static const uint8_t device_uuid[VK_UUID_SIZE] = {
-		'z', 'e', 'd', 'B', 'S', 'D', '-', 'b', 'c', 'm', '2', '7', '1', '1', 'v', '3'
-	};
-	static const uint8_t driver_uuid[VK_UUID_SIZE] = {
-		'z', 'e', 'd', 'B', 'S', 'D', '-', 'v', '3', 'd', '-', 'v', 'k', '-', '0', '1'
-	};
-	static const uint8_t luid[VK_LUID_SIZE] = {0};
 	struct bcm2711_vulkan_object *physical;
 	VkPhysicalDeviceProperties *properties;
+	struct i915_vkc_core11 core11;
 	uint64_t identity;
-	uint64_t present;
-	uint64_t chained;
-	uint64_t last;
-	uint32_t outer;
-	uint32_t inner;
+	int form;
+	int error;
 
-	/* The physical device and the output chain's shape: properties2, then the ID properties, then nothing. */
+	/* The physical device, then the output chain, which says which form is asked for. */
 	identity = drv_i915_wire_read_u64(reader);
-	present = drv_i915_wire_read_u64(reader);
-	outer = drv_i915_wire_read_u32(reader);
-	chained = drv_i915_wire_read_u64(reader);
-	inner = drv_i915_wire_read_u32(reader);
-	last = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1)
-		return EINVAL;
-	if (outer != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 ||
-	    chained != 1 ||
-	    inner != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES ||
-	    last != 0)
-		return ENOTSUP;
+	error = i915_vkc_read_properties2(reader, &form);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
 	physical = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PHYSICAL_DEVICE, identity);
 	if (physical == NULL)
 		return EINVAL;
@@ -248,6 +243,43 @@ identity_query(
 	if (properties == NULL)
 		return ENOMEM;
 	device_properties(session, properties);
+
+	/* The identity, which the export and import of memory name. */
+	if (form == I915_VKC_PROPERTIES2_IDENTITY) {
+		identity_query(reply, properties);
+
+		/* Succeeded: the identity every context of this device reports. */
+		return 0;
+	}
+
+	/* The Vulkan 1.1 properties, then the record. */
+	bcm2711_vulkan_device_core11(session, &core11);
+	i915_vkc_reply_core11_properties(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
+
+	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	return 0;
+}
+
+/*
+ * The identity form of vkGetPhysicalDeviceProperties2 (only
+ * VkPhysicalDeviceIDProperties chained): libvulkan stamps the identity into
+ * every allocation it exports as an opaque fd, and an importer checks it
+ * against its own.  The identities are fixed: the device's names this one
+ * V3D, the driver's this driver.
+ */
+static void
+identity_query(
+	struct i915_wire_writer *reply,
+	const VkPhysicalDeviceProperties *properties)
+{
+	static const uint8_t device_uuid[VK_UUID_SIZE] = {
+		'z', 'e', 'd', 'B', 'S', 'D', '-', 'b', 'c', 'm', '2', '7', '1', '1', 'v', '3'
+	};
+	static const uint8_t driver_uuid[VK_UUID_SIZE] = {
+		'z', 'e', 'd', 'B', 'S', 'D', '-', 'v', '3', 'd', '-', 'v', 'k', '-', '0', '1'
+	};
+	static const uint8_t luid[VK_LUID_SIZE] = {0};
 
 	/* The chain's two headers, the identity (no Windows adapter: no LUID), then the properties. */
 	drv_i915_wire_reply_u64(reply, 1);
@@ -265,8 +297,86 @@ identity_query(
 	drv_i915_wire_reply_u32(reply, VK_FALSE);
 	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
 
-	/* Succeeded: the identity every context of this device reports. */
+	/* Succeeded: the identity is in the reply. */
+	return;
+}
+
+/*
+ * vkGetPhysicalDeviceFeatures2 with the Vulkan 1.1 features chained:
+ * [physical][output chain] -> [present][chain][1.1 fields]
+ * [VkPhysicalDeviceFeatures].
+ */
+static int
+features2_query(
+	struct bcm2711_vulkan_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct bcm2711_vulkan_object *physical;
+	VkPhysicalDeviceFeatures *features;
+	struct i915_vkc_core11 core11;
+	uint64_t identity;
+	int error;
+
+	/* The physical device, then the output chain of the 1.1 feature structures. */
+	identity = drv_i915_wire_read_u64(reader);
+	error = i915_vkc_read_features2(reader);
+	if (error != 0) {
+		reader->error = 1;
+		return error;
+	}
+	physical = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PHYSICAL_DEVICE, identity);
+	if (physical == NULL)
+		return EINVAL;
+
+	/* The record of the core features, as the plain query gives it. */
+	features = i915_vkc_array(reader, &session->arena, 1, sizeof(*features));
+	if (features == NULL)
+		return ENOMEM;
+	bcm2711_vulkan_device_features(session, features);
+
+	/* The 1.1 features, then the record. */
+	bcm2711_vulkan_device_core11(session, &core11);
+	i915_vkc_reply_core11_features(reply, &core11);
+	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
+
+	/* Succeeded: the features are reported. */
 	return 0;
+}
+
+/*
+ * Fills the device's Vulkan 1.1 answers.
+ *
+ * The subgroup is one invocation, in the compute programs of a 7.1 (a 4.2
+ * has no compute queue, so no stage and no operation).  Multiview renders
+ * each view of a subpass into its layer as a native pass of its own, with
+ * the view a uniform of the programs (no geometry or tessellation stage);
+ * instances are numbered as without multiview.  A set's descriptors are
+ * bounded by the per-set limits, which together stay below 1024, and one
+ * allocation may take the whole heap.
+ */
+void
+bcm2711_vulkan_device_core11(
+	const struct bcm2711_vulkan_session *session,
+	struct i915_vkc_core11 *core11)
+{
+	/* What every executor starts from. */
+	i915_vkc_core11_defaults(core11);
+
+	/* A 4.2 runs no compute program, so no subgroup either. */
+	if (!compute_engine(session)) {
+		core11->subgroup.supportedStages = 0;
+		core11->subgroup.supportedOperations = 0;
+	}
+
+	/* Multiview, the views drawn one after another. */
+	core11->multiview.multiview = VK_TRUE;
+	core11->multiview_limits.maxMultiviewViewCount = BCM2711_VULKAN_VIEWS;
+	core11->multiview_limits.maxMultiviewInstanceIndex = (1U << 27) - 1U;
+
+	/* The descriptors of one set and the largest allocation. */
+	core11->maintenance3.maxPerSetDescriptors = 1024U;
+	core11->maintenance3.maxMemoryAllocationSize = BCM2711_VULKAN_MEMORY_BUDGET;
 }
 
 /* Enumerates one graphics/transfer family while preserving count-only and actual output-array framing. */

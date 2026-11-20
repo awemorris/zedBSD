@@ -844,6 +844,10 @@ graphics_shape(
 	/* Each kind of operation by the stage. */
 	switch (instruction->op) {
 	case DRV_GPU_IR_LOAD_SYSTEM:
+		/* The view a multiview pass renders is a uniform of any graphics program. */
+		if (instruction->component == DRV_GPU_IR_SYSTEM_VIEW_INDEX)
+			break;
+		return bcm2711_shader_fail(compiler, ENOTSUP, "workgroup operation in a graphics program");
 	case DRV_GPU_IR_LOAD_SHARED:
 	case DRV_GPU_IR_STORE_SHARED:
 	case DRV_GPU_IR_BARRIER:
@@ -890,8 +894,13 @@ storage_check(
 {
 	const struct drv_gpu_shader_ir_uniform *uniform;
 
-	/* A built-in value of a compute invocation; the primitive id belongs to geometry. */
+	/*
+	 * A built-in value of a compute invocation, or the view of a graphics
+	 * one; the primitive id belongs to geometry.
+	 */
 	if (instruction->op == DRV_GPU_IR_LOAD_SYSTEM) {
+		if (instruction->component == DRV_GPU_IR_SYSTEM_VIEW_INDEX && compiler->ir->stage != DRV_GPU_STAGE_COMPUTE)
+			return 0;
 		if (instruction->component > DRV_GPU_IR_SYSTEM_GROUP_ID_Z)
 			return ENOTSUP;
 		return 0;

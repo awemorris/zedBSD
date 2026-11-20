@@ -49,6 +49,8 @@ struct bcm2711_vulkan_prepared_event {
 	 * a dispatch's compute-stage words.
 	 */
 	uint32_t draw[5];
+	/* A direct dispatch's first workgroup along x, y and z (vkCmdDispatchBase; zero for vkCmdDispatch). */
+	uint32_t base[3];
 	/* A draw's active occlusion query: its pool (NULL for none) and query. */
 	struct bcm2711_vulkan_occlusion_pool *occlusion;
 	uint32_t occlusion_query;

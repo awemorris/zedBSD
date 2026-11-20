@@ -357,7 +357,11 @@ compute_word(
 		*word = groups[uniform->bits];
 		break;
 	case BCM2711_SHADER_GROUP_BASE:
-		/* The whole dispatch is one CSD job, starting at workgroup zero. */
+		/* The whole dispatch is one CSD job, starting at the dispatch's first workgroup (zero but for vkCmdDispatchBase). */
+		if (uniform->bits > 2)
+			return EINVAL;
+		if (event->opcode == GPU_OP_CMD_DISPATCH)
+			*word = event->base[uniform->bits];
 		break;
 	case BCM2711_SHADER_SHARED_BASE:
 		*word = arena;

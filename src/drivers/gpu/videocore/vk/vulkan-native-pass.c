@@ -64,6 +64,7 @@ int
 bcm2711_vulkan_native_pass_create(
 	struct bcm2711_v3d_space *space,
 	const struct bcm2711_vulkan_prepared_event *begin,
+	uint32_t view,
 	uint64_t *available,
 	struct bcm2711_vulkan_native_pass **pass,
 	const struct bcm2711_vulkan_prepared_event **next)
@@ -101,6 +102,7 @@ bcm2711_vulkan_native_pass_create(
 		return ENOMEM;
 	created->space = space;
 	created->job.kind = BCM2711_V3D_JOB_CL;
+	created->view = view;
 
 	/* Complete output ownership precedes every draw or command-storage allocation; a pass a clear ends stores everything. */
 	stage = "target";
@@ -147,6 +149,36 @@ bcm2711_vulkan_native_pass_create(
 
 	/* Succeeded: every possible device reference belongs to this root or its linked independent draw roots. */
 	return 0;
+}
+
+/*
+ * The views of the render pass a native pass begins at begin: the
+ * multiview mask of the render pass its begin record names, zero for one
+ * view or for an event of no render pass.
+ */
+uint32_t
+bcm2711_vulkan_native_pass_views(
+	const struct bcm2711_vulkan_prepared_event *begin)
+{
+	const struct bcm2711_vulkan_record *record;
+	const struct bcm2711_vulkan_pass *description;
+
+	/* The render pass the begin record names. */
+	if (begin == NULL || begin->pass == NULL)
+		return 0;
+	if (begin->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS && begin->opcode != GPU_OP_CMD_CLEAR_ATTACHMENTS)
+		return 0;
+	record = begin->pass;
+	if (record->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS ||
+	    record->objects[0] == NULL ||
+	    record->objects[0]->kind != I915_VK_OBJ_RENDER_PASS)
+		return 0;
+	description = record->objects[0]->payload;
+	if (description == NULL)
+		return 0;
+
+	/* Succeeded: the subpass's views. */
+	return description->view_mask;
 }
 
 /*
@@ -603,9 +635,9 @@ prepare_colour(
 		return error;
 	if (framebuffer->width > level.width || framebuffer->height > level.height || level.bytes > 0xffffffffU)
 		return EINVAL;
-	if (image_view->base_layer >= bcm2711_vulkan_image_layers(image))
+	if (image_view->base_layer + pass->view >= bcm2711_vulkan_image_layers(image))
 		return EINVAL;
-	level.offset += (uint64_t)image_view->base_layer * image->layer_stride;
+	level.offset += (uint64_t)(image_view->base_layer + pass->view) * image->layer_stride;
 
 	/* Actual coherent logical image storage provides a native interval and CPU clear alias protected by its independent view hold. */
 	error = bcm2711_vulkan_resource_backing(image, level.offset, level.bytes, &view, &address, &cpu);
@@ -628,7 +660,7 @@ prepare_colour(
 	 */
 	target->image = image;
 	target->level = image_view->base_level;
-	target->layer = image_view->base_layer;
+	target->layer = image_view->base_layer + pass->view;
 	target->width = level.width;
 	target->height = level.height;
 	target->initial_layout = attachment->initialLayout;
@@ -716,8 +748,8 @@ prepare_depth(
 	    image->bytes > 0xffffffffU)
 		return EINVAL;
 
-	/* The tiles load and store the array layer the framebuffer's view names, as an image of its own. */
-	error = bcm2711_vulkan_image_level_view(image, 0, image_view->base_layer, &layer_view);
+	/* The tiles load and store the array layer the framebuffer's view names (its view's, under multiview), as an image of its own. */
+	error = bcm2711_vulkan_image_level_view(image, 0, image_view->base_layer + pass->view, &layer_view);
 	if (error != 0)
 		return error;
 
@@ -766,7 +798,7 @@ prepare_depth(
 
 	/* The layer's layout is checked and committed like the colour target's, whether or not the tiles move it. */
 	pass->depth_target = image;
-	pass->depth_layer = image_view->base_layer;
+	pass->depth_layer = image_view->base_layer + pass->view;
 	pass->depth_initial_layout = attachment->initialLayout;
 	pass->depth_final_layout = attachment->finalLayout;
 	if (continued)
@@ -864,7 +896,7 @@ collect_draws(
 			return error;
 
 		/* Complete native draw preparation occurs at FIFO execution after preceding GPU output becomes CPU-visible. */
-		error = bcm2711_vulkan_native_draw_create(pass->space, event, remaining, pass->first, &pass->draw_pool, &draw);
+		error = bcm2711_vulkan_native_draw_create(pass->space, event, pass->view, remaining, pass->first, &pass->draw_pool, &draw);
 		if (error != 0)
 			return error;
 		draw->occlusion = counter;
@@ -1808,12 +1840,14 @@ void
 bcm2711_vulkan_native_pass_counted(
 	struct bcm2711_vulkan_native_pass *pass,
 	const struct bcm2711_vulkan_prepared_event *first,
-	const struct bcm2711_vulkan_prepared_event *end)
+	const struct bcm2711_vulkan_prepared_event *end,
+	bool last)
 {
 	const struct bcm2711_vulkan_prepared_event *event;
 	const uint8_t *counters;
 	uint32_t samples;
 	uint32_t index;
+	uint32_t views;
 
 	/* The counters, as the device stored them. */
 	if (pass != NULL && pass->occlusion != NULL) {
@@ -1828,9 +1862,18 @@ bcm2711_vulkan_native_pass_counted(
 		}
 	}
 
-	/* The ends among the pass's events. */
+	/* A query of a multiview pass is complete once the last view has counted into it. */
+	if (!last)
+		return;
+
+	/* The ends among the pass's events, with the queries of the other views under multiview. */
+	views = (uint32_t)__builtin_popcount(bcm2711_vulkan_native_pass_views(first));
 	for (event = first; event != NULL && event != end; event = event->next) {
-		if (event->opcode == GPU_OP_CMD_END_QUERY)
+		if (event->opcode != GPU_OP_CMD_END_QUERY)
+			continue;
+		if (views > 1U)
+			bcm2711_vulkan_occlusion_end_views(event->record, views);
+		else
 			bcm2711_vulkan_occlusion_run(event->record);
 	}
 

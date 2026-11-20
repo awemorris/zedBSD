@@ -112,6 +112,12 @@ struct bcm2711_vulkan_native_pass {
 	uint32_t depth_rect_count;
 	uint32_t depth_value;
 	uint32_t depth_mask;
+	/*
+	 * The view of a multiview render pass this native pass renders: each
+	 * attachment's layer is its view's first layer plus the view, and the
+	 * draws' programs read it as gl_ViewIndex (zero outside multiview).
+	 */
+	uint32_t view;
 	/* Single-use execution refuses replay and preserves the last native DMA-retirement result. */
 	bool executed;
 	bool retired;
@@ -124,15 +130,27 @@ struct bcm2711_vulkan_native_pass {
 	uint64_t sync_generation;
 };
 
-/* Earlier queue writes must have completed and become CPU-visible; next borrows the event after this pass's END from the enclosing prepared primary. */
-int bcm2711_vulkan_native_pass_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *begin, uint64_t *available, struct bcm2711_vulkan_native_pass **pass, const struct bcm2711_vulkan_prepared_event **next);
+/*
+ * Earlier queue writes must have completed and become CPU-visible; next borrows the event after this pass's END from the enclosing prepared primary.
+ * view is the view of a multiview render pass the pass renders, zero outside multiview.
+ */
+int bcm2711_vulkan_native_pass_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *begin, uint32_t view, uint64_t *available, struct bcm2711_vulkan_native_pass **pass, const struct bcm2711_vulkan_prepared_event **next);
+
+/*
+ * The views of the render pass a native pass begins at begin (a begin or a
+ * clear of the attachments) renders: its multiview mask, or zero for one
+ * view.
+ */
+uint32_t bcm2711_vulkan_native_pass_views(const struct bcm2711_vulkan_prepared_event *begin);
 
 /*
  * After a pass has completed: adds its occlusion counters to their queries
- * and makes available the queries whose end lies among the events from
- * first up to end (the events the pass ran).
+ * and, when it renders the last view of its render pass (last), makes
+ * available the queries whose end lies among the events from first up to
+ * end (the events the pass ran), with the further queries of each view
+ * after the first under multiview.
  */
-void bcm2711_vulkan_native_pass_counted(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *first, const struct bcm2711_vulkan_prepared_event *end);
+void bcm2711_vulkan_native_pass_counted(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *first, const struct bcm2711_vulkan_prepared_event *end, bool last);
 
 /* A depth/stencil image clear writes the cleared aspects of every pixel through the image's coherent alias, after the work before it. */
 int bcm2711_vulkan_native_depth_clear_run(const struct bcm2711_vulkan_record *record);

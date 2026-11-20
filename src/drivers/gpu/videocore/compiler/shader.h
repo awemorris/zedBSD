@@ -19,12 +19,16 @@
  * profile: arrays of descriptors (of storage images too), a compute
  * program's storage images (images in a compute shader, of which the
  * analysis takes the storage ones' accesses and size queries; a graphics
- * program's are refused), and a fragment program's gl_FragDepth.  Every
- * parse of a program for this backend asks for the same.
+ * program's are refused), a fragment program's gl_FragDepth, and
+ * gl_ViewIndex, which a graphics program reads as a uniform
+ * (BCM2711_SHADER_VIEW_INDEX) instead of the frontend's bound constant, so
+ * one program serves every view.  Every parse of a program for this backend
+ * asks for the same.
  */
 #define BCM2711_SHADER_SPIRV_FEATURES (DRV_GPU_SPIRV_FEATURE_SAMPLER_ARRAYS | DRV_GPU_SPIRV_FEATURE_BUFFER_ARRAYS | \
 				       DRV_GPU_SPIRV_FEATURE_STORAGE_IMAGE | DRV_GPU_SPIRV_FEATURE_COMPUTE_IMAGES | \
-				       DRV_GPU_SPIRV_FEATURE_IMAGE_ARRAYS | DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH)
+				       DRV_GPU_SPIRV_FEATURE_IMAGE_ARRAYS | DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH | \
+				       DRV_GPU_SPIRV_FEATURE_VIEW_INDEX)
 
 /* Thirty-two scalar interface words leave room for expression registers in a two-thread shader. */
 #define BCM2711_SHADER_INTERFACE_WORDS 32U
@@ -84,6 +88,9 @@ enum bcm2711_shader_uniform_kind {
 	 */
 	BCM2711_SHADER_VERTEX_BASE,
 	BCM2711_SHADER_INSTANCE_BASE,
+
+	/* Graphics: the view a multiview pass renders (gl_ViewIndex; 0 outside multiview). */
+	BCM2711_SHADER_VIEW_INDEX,
 
 	/*
 	 * The size of the view of combined image sampler (set, binding,

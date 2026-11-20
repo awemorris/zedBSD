@@ -257,6 +257,7 @@ prepare_event(
 		kern_memcpy(event->push[0], state->push[0], sizeof(event->push[0]));
 		if (record->opcode == GPU_OP_CMD_DISPATCH) {
 			kern_memcpy(event->draw, record->words, 3U * sizeof(event->draw[0]));
+			kern_memcpy(event->base, &record->words[3], sizeof(event->base));
 		} else {
 			event->vertices[0] = record->objects[0]->payload;
 			event->offsets[0] = record->offsets[0];

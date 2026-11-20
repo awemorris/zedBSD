@@ -517,6 +517,11 @@ validate_uniforms(
 			if (program->stage != BCM2711_SHADER_COORDINATE && program->stage != BCM2711_SHADER_VERTEX)
 				return EINVAL;
 			break;
+		case BCM2711_SHADER_VIEW_INDEX:
+			/* The pass supplies the view of a graphics program. */
+			if (program->stage == BCM2711_SHADER_COMPUTE)
+				return EINVAL;
+			break;
 		case BCM2711_SHADER_CONSTANT:
 		case BCM2711_SHADER_VIEWPORT_X:
 		case BCM2711_SHADER_VIEWPORT_Y:

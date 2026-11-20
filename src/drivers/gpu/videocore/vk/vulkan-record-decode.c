@@ -104,9 +104,21 @@ bcm2711_vulkan_record_decode(
 	case GPU_OP_CMD_END_RENDER_PASS:
 		break;
 	case GPU_OP_CMD_DISPATCH:
-		/* The workgroup counts along x, y and z. */
+		/* The workgroup counts along x, y and z; the first workgroup is zero. */
 		for (index = 0; index < 3; index++)
 			record->words[index] = drv_i915_wire_read_u32(reader);
+		break;
+	case GPU_OP_CMD_DISPATCH_BASE:
+		/*
+		 * vkCmdDispatchBase: the first workgroup along x, y and z, then
+		 * the counts.  It is kept as a dispatch whose words 3 to 5 hold
+		 * the first workgroup.
+		 */
+		for (index = 0; index < 3; index++)
+			record->words[3U + index] = drv_i915_wire_read_u32(reader);
+		for (index = 0; index < 3; index++)
+			record->words[index] = drv_i915_wire_read_u32(reader);
+		record->opcode = GPU_OP_CMD_DISPATCH;
 		break;
 	case GPU_OP_CMD_DISPATCH_INDIRECT:
 		/* The buffer holding the three counts, and their offset in it. */
