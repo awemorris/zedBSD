@@ -893,7 +893,12 @@ instance_create_remote(
 	VkBool32 present;
 	VkResult status;
 
-	/* Preserves application identity while using Vulkan 1.1 internally for Venus queues. */
+	/*
+	 * Preserves application identity while using Vulkan 1.1 internally for
+	 * Venus queues, or 1.2 with a renderer that answers the Vulkan 1.2
+	 * queries, so a Venus host offers the 1.2 commands (vkCreateRenderPass2)
+	 * the library sends it.
+	 */
 	memset(&application, 0, sizeof(application));
 	if (info->pApplicationInfo != NULL)
 		application = *info->pApplicationInfo;
@@ -902,6 +907,8 @@ instance_create_remote(
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	application.pNext = NULL;
 	application.apiVersion = VK_MAKE_VERSION(1, 1, 0);
+	if (link->context->core12_queries)
+		application.apiVersion = VK_MAKE_VERSION(1, 2, 0);
 	create = *info;
 	create.pNext = NULL;
 	create.pApplicationInfo = &application;

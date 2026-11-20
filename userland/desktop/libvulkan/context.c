@@ -238,8 +238,9 @@ vulkan_context_open(
 	 * notifications), the core 1.1 bit its promise that it answers the
 	 * Vulkan 1.1 feature and property queries (GPU_OP_GET_PHYSICAL_DEVICE_
 	 * FEATURES2 and _PROPERTIES2 with the 1.1 structures chained), the core
-	 * 1.2 bit its promise of the same with the 1.2 structures, of the 1.2
-	 * feature structure on a device creation and of vkCreateRenderPass2
+	 * 1.2 bit its promise of the same with the 1.2 structures, of an
+	 * instance created for Vulkan 1.2, of the 1.2 feature structure on a
+	 * device creation and of vkCreateRenderPass2
 	 * (GPU_OP_CREATE_RENDER_PASS2) for the render passes that resolve depth
 	 * or stencil; unknown bits are ignored so a later renderer stays
 	 * usable.  A Venus host, which has no native word, is a Vulkan 1.1
