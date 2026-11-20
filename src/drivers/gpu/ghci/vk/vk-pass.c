@@ -39,6 +39,8 @@
 #define PASS_GRANULARITY		1U
 
 static int create_render_pass(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool version2);
+static void *pass2_counted(struct ghci_vk_session *session, struct i915_wire_reader *reader, const void *array, uint32_t count, size_t element);
+static void pass2_count(struct ghci_vk_session *session, struct i915_wire_reader *reader, VkRenderPassCreateInfo *info);
 static uint32_t pass_build(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, struct ghci_vk_render_pass *pass);
 static int pass_subpass(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, uint32_t index, struct ghci_vk_render_pass *pass);
 static int pass_reference(const VkRenderPassCreateInfo *info, const VkAttachmentReference *reference, uint32_t index, struct ghci_vk_render_pass *pass, uint32_t *attachment);
@@ -149,8 +151,10 @@ create_render_pass(
 	resolves = NULL;
 	handle = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
-	if (present == 1U && version2)
+	if (present == 1U && version2) {
 		i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+		pass2_count(session, reader, &info);
+	}
 	else if (present == 1U)
 		i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
 	identity = ghci_vk_create_tail(reader);
@@ -235,6 +239,62 @@ create_render_pass(
 
 	/* Succeeded: the render pass exists. */
 	return 0;
+}
+
+/*
+ * Gives the arrays of a render pass the shared codec read in its Vulkan
+ * 1.0 form (i915_vkc_read_render_pass2, whose arrays are as long as their
+ * counts) the decoded lengths the executor's checks read: each is copied
+ * into an array of ghci_vk_decode_array().
+ */
+static void
+pass2_count(
+	struct ghci_vk_session *session,
+	struct i915_wire_reader *reader,
+	VkRenderPassCreateInfo *info)
+{
+	VkSubpassDescription *subpasses;
+	uint32_t index;
+
+	/* The attachments and the subpasses. */
+	info->pAttachments = pass2_counted(session, reader, info->pAttachments, info->attachmentCount, sizeof(*info->pAttachments));
+	subpasses = pass2_counted(session, reader, info->pSubpasses, info->subpassCount, sizeof(*info->pSubpasses));
+	info->pSubpasses = subpasses;
+
+	/* Each subpass's input, colour and resolve attachments. */
+	for (index = 0U; subpasses != NULL && index < info->subpassCount; index++) {
+		subpasses[index].pInputAttachments = pass2_counted(session, reader, subpasses[index].pInputAttachments,
+			subpasses[index].inputAttachmentCount, sizeof(VkAttachmentReference));
+		subpasses[index].pColorAttachments = pass2_counted(session, reader, subpasses[index].pColorAttachments,
+			subpasses[index].colorAttachmentCount, sizeof(VkAttachmentReference));
+		subpasses[index].pResolveAttachments = pass2_counted(session, reader, subpasses[index].pResolveAttachments,
+			subpasses[index].colorAttachmentCount, sizeof(VkAttachmentReference));
+	}
+}
+
+/* Copies count elements of array into an array of ghci_vk_decode_array(); NULL for an absent one. */
+static void *
+pass2_counted(
+	struct ghci_vk_session *session,
+	struct i915_wire_reader *reader,
+	const void *array,
+	uint32_t count,
+	size_t element)
+{
+	void *counted;
+
+	/* An absent array stays absent. */
+	if (array == NULL || count == 0U)
+		return NULL;
+
+	/* The copy, with its length kept before it. */
+	counted = ghci_vk_decode_array(reader, &session->arena, count, element);
+	if (counted == NULL)
+		return NULL;
+	kern_memcpy(counted, array, (size_t)count * element);
+
+	/* Succeeded: the array's length is the executor's to check. */
+	return counted;
 }
 
 /*
