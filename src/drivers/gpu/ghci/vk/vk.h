@@ -463,10 +463,12 @@ struct ghci_vk_retired {
  * the last work it placed in the ring, and the submissions it holds back
  * (holds, oldest first; hold_serial is the serial of the last one held
  * and hold_count how many are held; failed_timelines has a bit for each
- * timeline whose next context fence reports held work that failed).  It
- * lives from vkCreateDevice to vkDestroyDevice (or the node session's
- * close).  next, last, submitted, hold_serial, hold_count and
- * failed_timelines change under irq_lock; the rest belongs to
+ * timeline whose next context fence reports held work that failed; lost
+ * is set once held work failed, and stays: every later submission,
+ * fence, job marker and context fence of the device fails).  It lives
+ * from vkCreateDevice to vkDestroyDevice (or the node session's close).
+ * next, last, submitted, hold_serial, hold_count, failed_timelines and
+ * lost change under irq_lock; the rest belongs to
  * whoever holds the session's hold_lock.  meta are the driver's transfer
  * programs placed in its code heap at their first use, which go with the
  * heap.
@@ -486,6 +488,7 @@ struct ghci_vk_device {
 	uint64_t hold_serial;
 	unsigned hold_count;
 	uint64_t failed_timelines;
+	int lost;
 };
 
 /*

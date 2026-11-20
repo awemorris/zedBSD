@@ -571,11 +571,20 @@ nvrtx_vk_gpu_wait(
 	struct nvrtx_node *node;
 	uint64_t waited;
 	bool passed;
+	bool lost;
 	int held;
 	int error;
 
 	session = owner;
 	node = session->node;
+
+	/*
+	 * The session's runs are lost: no wait succeeds, also for a run that
+	 * ended (the loss is sticky, and a later run was never put on the GPU).
+	 */
+	lost = vk_node_lost(session);
+	if (lost)
+		return EIO;
 
 	/* A run that ended is no wait. */
 	passed = vk_node_passed(session, ticket->fence);
@@ -617,7 +626,17 @@ nvrtx_vk_node_run_wait(
 {
 	uint64_t waited;
 	bool passed;
+	bool lost;
 	int error;
+
+	/*
+	 * The session's runs are lost: no wait succeeds, also for a run that
+	 * ended (the loss is sticky; a marker behind a frame that was never put
+	 * on the GPU names the last run that was).
+	 */
+	lost = vk_node_lost(session);
+	if (lost)
+		return EIO;
 
 	/* A run that ended is no wait. */
 	passed = vk_node_passed(session, fence);

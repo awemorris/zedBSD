@@ -328,7 +328,7 @@ node_reserve(
  * Commits a reserved marker to the last submission of its timeline's
  * device, placed or held back: it completes when that work has finished
  * (or a reset ended it, or the held work failed), at once when there is
- * none.
+ * none; with an error when the device is lost.
  */
 static int
 node_commit(
@@ -346,12 +346,14 @@ node_commit(
 	unsigned index;
 	int passed;
 	int held;
+	int lost;
 	int error;
 
 	/* The marker the token names, bound under the interrupt's lock. */
 	device = private_data;
 	session = session_of(opaque);
 	passed = 0;
+	lost = 0;
 	irq = spin_lock_irqsave(&device->irq_lock);
 
 	error = ghci_jobs_index(&session->jobs, token, &index);
@@ -372,6 +374,15 @@ node_commit(
 		if (held)
 			session->marker_device[index] = owner;
 		error = ghci_jobs_commit(&session->jobs, index, completion, ticket.seq, ticket.generation, &passed);
+
+		/* A marker of a lost device fails, at the next retirement when it waits, else now. */
+		lost = 0;
+		if (owner != NULL)
+			lost = owner->lost;
+		if (error == 0 && lost && !passed) {
+			session->jobs.markers[index].state = GHCI_JOB_FAILED;
+			session->marker_device[index] = NULL;
+		}
 	}
 
 	spin_unlock_irqrestore(&device->irq_lock, irq);
@@ -380,8 +391,10 @@ node_commit(
 	if (error != 0)
 		return error;
 
-	/* Work that has already finished completes the marker now; the rest is the service thread's. */
-	if (passed)
+	/* Work that has already finished completes the marker now (with an error on a lost device); the rest is the service thread's. */
+	if (passed && lost)
+		drv_gpu_complete(completion, EIO);
+	else if (passed)
 		drv_gpu_complete(completion, 0);
 	else
 		ghci_service_wake(device, GHCI_WORK_RECLAIM);

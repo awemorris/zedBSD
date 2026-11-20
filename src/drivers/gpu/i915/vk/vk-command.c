@@ -55,12 +55,10 @@
 /* How many operations the list of a command buffer holds when it is first allocated. */
 #define I915_GFX_FIRST_OPS	64U
 
-/* How many command buffers one vkAllocateCommandBuffers creates, and one vkQueueSubmit runs. */
+/* How many command buffers one vkAllocateCommandBuffers creates, and one vkQueueSubmit runs on the video family. */
 #define I915_GFX_MAX_ALLOCATE	16U
 #define I915_GFX_MAX_SUBMITTED	32U
 
-/* How many submissions one vkQueueSubmit carries. */
-#define I915_GFX_MAX_SUBMITS	8U
 
 /* How many regions one image copy, clear or blit records. */
 #define I915_GFX_MAX_REGIONS	16U
@@ -179,6 +177,37 @@ struct i915_command_forget {
 	const void *object;
 	unsigned count;
 };
+
+/* What one walk of a vkQueueSubmit's command buffers does with each (i915_queue_submit_walk). */
+enum i915_submit_walk_pass {
+	I915_SUBMIT_WALK_CHECK = 0,
+	I915_SUBMIT_WALK_LIST,
+	I915_SUBMIT_WALK_EXECUTE
+};
+
+/*
+ * The walks of one vkQueueSubmit's command buffers: what the check found,
+ * the operation lists of a video submission, and the first failure of the
+ * execution.  It lives on the stack of the submission.
+ */
+struct i915_submit_walk {
+	struct i915_render_session *session;
+	enum i915_submit_walk_pass pass;
+
+	/* The command buffers named, and those unknown, invalid or overflowed. */
+	uint32_t total;
+	uint32_t unknown;
+	uint32_t stale;
+	uint32_t overflow;
+
+	/* A video submission's operation lists. */
+	const struct i915_gfx_op *lists[I915_GFX_MAX_SUBMITTED];
+	uint32_t counts[I915_GFX_MAX_SUBMITTED];
+	uint32_t listed;
+
+	/* The execution's first failure. */
+	int error;
+};
 static struct i915_gfx_op *i915_command_op_at(struct i915_gfx_cmdbuf *cmdbuf, uint32_t place);
 static int i915_command_grow(struct i915_gfx_cmdbuf *cmdbuf);
 static int i915_record_image_copy(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf, struct i915_wire_reader *reader, enum i915_gfx_op_kind kind);
@@ -257,6 +286,8 @@ static int i915_execute_dispatch_indirect(struct i915_render_session *session, c
 static int i915_dispatch_ready(const struct i915_gfx_draw_state *state);
 static int i915_command_buffer_execute(struct i915_render_session *session, struct i915_gfx_cmdbuf *cmdbuf);
 static int i915_queue_submit(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static void i915_queue_submit_walk(struct i915_wire_reader *reader, uint64_t submits, struct i915_submit_walk *walk);
+static void i915_queue_submit_visit(struct i915_submit_walk *walk, struct i915_gfx_cmdbuf *cmdbuf);
 
 /*
  * Routes a command pool, command buffer, recording or queue submission
@@ -4795,9 +4826,12 @@ i915_command_buffer_execute(
  * [count]{[sType][pNext][present][count]{wait}[count]{stage}[present]
  * [count]{buffer}[present][count]{signal}}[fence] -> [result].
  *
- * The command buffers are recorded in submission order into one batch,
+ * The submissions are decoded twice: the first walk checks every command
+ * buffer, the second records them in submission order into one batch,
  * which runs to its end before the reply; the fence is signalled once all
- * of them succeeded.
+ * of them succeeded.  A command buffer that is unknown, or whose objects
+ * were destroyed (it is invalid), loses the device before anything runs:
+ * its work cannot be done, and a reply of success would hide that.
  * XXX: the waits and signals are decoded and not acted on: every earlier
  * submission has finished, so there is nothing to wait for.
  */
@@ -4807,80 +4841,30 @@ i915_queue_submit(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	struct i915_gfx_cmdbuf *cmdbufs[I915_GFX_MAX_SUBMITTED];
-	const struct i915_gfx_op *lists[I915_GFX_MAX_SUBMITTED];
-	uint32_t counts[I915_GFX_MAX_SUBMITTED];
-	struct i915_gfx_cmdbuf *cmdbuf;
+	struct i915_submit_walk walk;
+	struct i915_wire_reader start;
 	struct i915_vk_fence *fence;
 	uint64_t identity;
 	uint64_t sends;
 	uint32_t family;
 	uint64_t submits;
-	uint64_t submit;
-	uint64_t count;
-	uint64_t item;
-	uint32_t total;
-	uint32_t index;
 	uint32_t result;
 	int end_error;
 	int error;
 
-	/* Decodes the queue, whose family decides where the submission runs, and the number of submissions, at most eight. */
+	/* Decodes the queue, whose family decides where the submission runs, and the number of submissions. */
 	identity = drv_i915_wire_read_u64(reader);
 	family = drv_i915_render_queue_family(session, identity);
 	(void)drv_i915_wire_read_u32(reader);
 	submits = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || submits > I915_GFX_MAX_SUBMITS)
+	if (reader->error != 0)
 		return EINVAL;
 
-	/* Collects the command buffers of every submission, in order. */
-	total = 0U;
-	for (submit = 0U; submit < submits; submit++) {
-		/* Decodes the submission's sType and pNext. */
-		(void)drv_i915_wire_read_u32(reader);
-		(void)drv_i915_wire_read_u64(reader);
-
-		/* Decodes the wait semaphores. */
-		(void)drv_i915_wire_read_u32(reader);
-		count = drv_i915_wire_read_u64(reader);
-		for (item = 0U; reader->error == 0 && item < count; item++)
-			(void)drv_i915_wire_read_u64(reader);
-
-		/* Decodes their stages. */
-		count = drv_i915_wire_read_u64(reader);
-		for (item = 0U; reader->error == 0 && item < count; item++)
-			(void)drv_i915_wire_read_u32(reader);
-
-		/* Decodes the number of command buffers, at most thirty-two. */
-		(void)drv_i915_wire_read_u32(reader);
-		count = drv_i915_wire_read_u64(reader);
-		if (reader->error != 0 || count > I915_GFX_MAX_SUBMITTED)
-			return EINVAL;
-
-		/* Keeps every known command buffer while there is room. */
-		for (item = 0U; item < count; item++) {
-			identity = drv_i915_wire_read_u64(reader);
-			cmdbuf = drv_i915_object_lookup(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
-
-			/* A buffer whose objects were destroyed does not run. */
-			if (cmdbuf != NULL && cmdbuf->stale) {
-				kern_logf("i915: vk: vkQueueSubmit: a command buffer whose objects were destroyed is not run\n");
-				cmdbuf = NULL;
-			}
-
-			/* A known one is kept while there is room. */
-			if (cmdbuf != NULL && total < I915_GFX_MAX_SUBMITTED) {
-				cmdbufs[total] = cmdbuf;
-				total++;
-			}
-		}
-
-		/* Decodes the signal semaphores. */
-		(void)drv_i915_wire_read_u32(reader);
-		count = drv_i915_wire_read_u64(reader);
-		for (item = 0U; reader->error == 0 && item < count; item++)
-			(void)drv_i915_wire_read_u64(reader);
-	}
+	/* Checks every command buffer of every submission, keeping where they start for the second walk. */
+	start = *reader;
+	kern_memset(&walk, 0, sizeof(walk));
+	walk.session = session;
+	i915_queue_submit_walk(reader, submits, &walk);
 
 	/* Decodes the fence. */
 	identity = drv_i915_wire_read_u64(reader);
@@ -4889,31 +4873,48 @@ i915_queue_submit(
 		return EINVAL;
 
 	/*
+	 * A command buffer the session does not know, or one whose objects
+	 * were destroyed, cannot run: the device is lost before anything runs.
+	 */
+	if (walk.unknown != 0U || walk.stale != 0U) {
+		kern_logf("i915: vk: vkQueueSubmit: %u unknown command buffers and %u whose objects were destroyed: the device is lost\n",
+			  walk.unknown,
+			  walk.stale);
+		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_DEVICE_LOST);
+		return 0;
+	}
+
+	/*
 	 * A command buffer whose recording did not fit, whose End answered out
 	 * of host memory, turns the submission down with the same result
 	 * before anything runs.
 	 */
-	for (index = 0U; index < total; index++) {
-		if (cmdbufs[index]->overflow != 0) {
-			drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
-			return 0;
-		}
+	if (walk.overflow != 0U) {
+		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
+		return 0;
 	}
 
 	/*
 	 * A submission on the video decode family runs in the video part, with
-	 * the render batch open for its query resets.
+	 * the render batch open for its query resets; its command buffers are
+	 * checked together before any runs, so they are listed first.
+	 * XXX: at most thirty-two command buffers; more turn it down.
 	 */
 	sends = session->gpu_sends;
 	if (family == 1U) {
-		for (index = 0U; index < total; index++) {
-			lists[index] = cmdbufs[index]->ops;
-			counts[index] = cmdbufs[index]->op_count;
+		if (walk.total > I915_GFX_MAX_SUBMITTED) {
+			kern_logf("i915: vk: vkQueueSubmit: %u video command buffers, more than %u\n",
+				  walk.total,
+				  I915_GFX_MAX_SUBMITTED);
+			drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
+			return 0;
 		}
+		walk.pass = I915_SUBMIT_WALK_LIST;
+		i915_queue_submit_walk(&start, submits, &walk);
 		error = drv_i915_gfx_submit_begin(session);
 		result = i915_command_result(error);
 		if (error == 0)
-			result = drv_i915_video_submit(session, lists, counts, total);
+			result = drv_i915_video_submit(session, walk.lists, walk.counts, walk.listed);
 		end_error = drv_i915_gfx_submit_end(session);
 		if (result == 0U && end_error != 0)
 			result = i915_command_result(end_error);
@@ -4928,9 +4929,11 @@ i915_queue_submit(
 	/* Opens the batch the command buffers are recorded into. */
 	error = drv_i915_gfx_submit_begin(session);
 
-	/* Records the command buffers in order until one fails. */
-	for (index = 0U; index < total && error == 0; index++)
-		error = i915_command_buffer_execute(session, cmdbufs[index]);
+	/* Records the command buffers in order, walking the submissions again, until one fails. */
+	walk.pass = I915_SUBMIT_WALK_EXECUTE;
+	walk.error = error;
+	i915_queue_submit_walk(&start, submits, &walk);
+	error = walk.error;
 
 	/*
 	 * Runs what was recorded, also after a failure, so every operation
@@ -4961,6 +4964,97 @@ i915_queue_submit(
 
 	/* Succeeded: the command was decoded; the reply carries the submission's result. */
 	return 0;
+}
+
+/*
+ * Decodes the submissions of a vkQueueSubmit up to its fence and hands
+ * each command buffer to the walk's pass: the check counts what cannot
+ * run, the list collects the operation lists, and the execution records
+ * each into the batch until one fails.  A decode failure is left in the
+ * reader.
+ */
+static void
+i915_queue_submit_walk(
+	struct i915_wire_reader *reader,
+	uint64_t submits,
+	struct i915_submit_walk *walk)
+{
+	struct i915_gfx_cmdbuf *cmdbuf;
+	uint64_t identity;
+	uint64_t submit;
+	uint64_t count;
+	uint64_t item;
+
+	/* Each submission in order. */
+	for (submit = 0U; reader->error == 0 && submit < submits; submit++) {
+		/* Decodes the submission's sType and pNext. */
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u64(reader);
+
+		/* Decodes the wait semaphores. */
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; reader->error == 0 && item < count; item++)
+			(void)drv_i915_wire_read_u64(reader);
+
+		/* Decodes their stages. */
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; reader->error == 0 && item < count; item++)
+			(void)drv_i915_wire_read_u32(reader);
+
+		/* Hands each command buffer to the pass. */
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; reader->error == 0 && item < count; item++) {
+			identity = drv_i915_wire_read_u64(reader);
+			if (reader->error != 0)
+				break;
+			cmdbuf = drv_i915_object_lookup(walk->session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+			i915_queue_submit_visit(walk, cmdbuf);
+		}
+
+		/* Decodes the signal semaphores. */
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; reader->error == 0 && item < count; item++)
+			(void)drv_i915_wire_read_u64(reader);
+	}
+}
+
+/* Hands one command buffer of a submission to the walk's pass (i915_queue_submit_walk). */
+static void
+i915_queue_submit_visit(
+	struct i915_submit_walk *walk,
+	struct i915_gfx_cmdbuf *cmdbuf)
+{
+	/* The check: counts it, and what keeps it from running. */
+	if (walk->pass == I915_SUBMIT_WALK_CHECK) {
+		if (walk->total < UINT32_MAX)
+			walk->total++;
+		if (cmdbuf == NULL) {
+			walk->unknown++;
+			return;
+		}
+		if (cmdbuf->stale)
+			walk->stale++;
+		if (cmdbuf->overflow != 0)
+			walk->overflow++;
+		return;
+	}
+
+	/* The list: keeps its operations (the check found every buffer known, and room for all). */
+	if (walk->pass == I915_SUBMIT_WALK_LIST) {
+		if (walk->listed < I915_GFX_MAX_SUBMITTED) {
+			walk->lists[walk->listed] = cmdbuf->ops;
+			walk->counts[walk->listed] = cmdbuf->op_count;
+			walk->listed++;
+		}
+		return;
+	}
+
+	/* The execution: records it into the batch, unless an earlier one failed. */
+	if (walk->error == 0)
+		walk->error = i915_command_buffer_execute(walk->session, cmdbuf);
 }
 
 /* Keeps a dynamic stencil mask or reference for the faces it names (bit 0 front, bit 1 back). */
