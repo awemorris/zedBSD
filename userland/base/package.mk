@@ -111,7 +111,7 @@ STANDALONE_PLATFORM_DIR = $(strip \
 STANDALONE_TARGET_TRIPLE = $(strip \
 	$(if $(filter rpi4 rpi5 arm64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),aarch64-unknown-zedbsd,\
 	$(if $(filter vf2 riscv64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),riscv64-unknown-zedbsd,\
-	$(if $(filter i386 pcat pc98 pc9821 pc9801 pc9801ns,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),i386-unknown-zedbsd,\
+	$(if $(filter i386 pc9821 pc9801ns,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),i386-unknown-zedbsd,\
 	$(if $(filter sun4u sparcv9,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),sparc64-unknown-zedbsd,\
 	$(if $(filter macppc32 ppc32,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),powerpc-unknown-zedbsd,\
 	$(if $(filter macppc64 ppc64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),powerpc64-unknown-zedbsd,\
@@ -119,10 +119,11 @@ STANDALONE_TARGET_TRIPLE = $(strip \
 STANDALONE_ARCH_CFLAGS = $(strip \
 	$(if $(filter rpi4 rpi5 arm64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-march=armv8-a -mno-outline-atomics -DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64,\
 	$(if $(filter vf2 riscv64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-march=rv64gc -mabi=lp64d -mno-relax -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64,\
-	$(if $(filter i386 pcat pc98 pc9821 pc9801 pc9801ns,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i386 -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
+	$(if $(filter i386 pc9801ns,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i386 -msoft-float -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
+	$(if $(filter pc9821,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i486 -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
 	$(if $(filter macppc32 ppc32,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-mcpu=ppc -DHAL_ARCH_PPC32 -DKERN_USER_ABI_PPC32,\
 	$(if $(filter macppc64 ppc64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-mcpu=970 -mno-altivec -DHAL_ARCH_PPC64 -DKERN_USER_ABI_PPC64 -DKERN_USER_ABI_LP64,\
-	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64))))))
+	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64)))))))
 
 # Where the platform's build puts what the packages make: the top-level
 # build's directory (BUILD), or build/PLATFORM for a package made on its own.

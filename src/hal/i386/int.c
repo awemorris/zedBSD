@@ -62,6 +62,14 @@ trap_cause(
 	/* Instruction and breakpoint traps. */
 	if (vector == 6)
 		return HAL_TRAP_CAUSE_ILLEGAL_INSN;
+
+	/*
+	 * Device not available: raised only by an x87 instruction on a
+	 * processor without a floating-point unit, as the task code never sets
+	 * CR0.TS, so the instruction cannot run here.
+	 */
+	if (vector == 7)
+		return HAL_TRAP_CAUSE_ILLEGAL_INSN;
 	if (vector == 3)
 		return HAL_TRAP_CAUSE_BREAKPOINT;
 	if (vector == 17)

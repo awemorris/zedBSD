@@ -1,0 +1,176 @@
+--- a/llvm/lib/Target/X86/X86.td
++++ b/llvm/lib/Target/X86/X86.td
+@@ -52,8 +52,16 @@
+ def FeatureCMOV    : SubtargetFeature<"cmov","HasCMOV", "true",
+                                       "Enable conditional move instructions">;
+ 
++// The i486 added BSWAP, CMPXCHG and XADD.  The i386 has none of them, so
++// without this feature byte swaps are expanded into shifts and rotates, and
++// atomic operations become calls to the __atomic_* runtime functions.
++def FeatureI486Ops : SubtargetFeature<"i486-ops", "HasI486Ops", "true",
++                                      "Enable the BSWAP, CMPXCHG and XADD instructions of the i486">;
++
++// Every processor with CMPXCHG8B also has the i486 instructions.
+ def FeatureCX8     : SubtargetFeature<"cx8", "HasCX8", "true",
+-                                      "Support CMPXCHG8B instructions">;
++                                      "Support CMPXCHG8B instructions",
++                                      [FeatureI486Ops]>;
+ 
+ def FeatureCRC32   : SubtargetFeature<"crc32", "HasCRC32", "true",
+                                       "Enable SSE 4.2 CRC32 instruction (used when SSE4.2 is supported but function is GPR only)">;
+@@ -1895,7 +1903,7 @@
+ 
+ def : Proc<"i386",            [FeatureX87],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+-def : Proc<"i486",            [FeatureX87],
++def : Proc<"i486",            [FeatureX87, FeatureI486Ops],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+ def : Proc<"i586",            [FeatureX87, FeatureCX8],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+@@ -2240,11 +2248,13 @@
+ def : Proc<"geode",           [FeatureX87, FeatureCX8, FeatureMMX, FeaturePRFCHW],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+ 
+-def : Proc<"winchip-c6",      [FeatureX87, FeatureMMX],
++def : Proc<"winchip-c6",      [FeatureX87, FeatureI486Ops, FeatureMMX],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+-def : Proc<"winchip2",        [FeatureX87, FeatureMMX, FeaturePRFCHW],
++def : Proc<"winchip2",        [FeatureX87, FeatureI486Ops, FeatureMMX,
++                               FeaturePRFCHW],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+-def : Proc<"c3",              [FeatureX87, FeatureMMX, FeaturePRFCHW],
++def : Proc<"c3",              [FeatureX87, FeatureI486Ops, FeatureMMX,
++                               FeaturePRFCHW],
+                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;
+ def : Proc<"c3-2",            [FeatureX87, FeatureCX8, FeatureMMX,
+                                FeatureSSE1, FeatureFXSR, FeatureCMOV],
+--- a/llvm/lib/Target/X86/X86ISelLowering.cpp
++++ b/llvm/lib/Target/X86/X86ISelLowering.cpp
+@@ -165,12 +165,18 @@
+       addBypassSlowDiv(64, 32);
+   }
+ 
++  // Without CMPXCHG and XADD (an i386) a compare-and-swap or a fetch-and-op
++  // that returns the old value has no instruction, so every atomic operation
++  // goes to the __atomic_* runtime, which then serializes the loads and the
++  // stores with the rest.
+   if (Subtarget.canUseCMPXCHG16B())
+     setMaxAtomicSizeInBitsSupported(128);
+   else if (Subtarget.canUseCMPXCHG8B())
+     setMaxAtomicSizeInBitsSupported(64);
+-  else
++  else if (Subtarget.hasI486Ops())
+     setMaxAtomicSizeInBitsSupported(32);
++  else
++    setMaxAtomicSizeInBitsSupported(0);
+ 
+   setMaxDivRemBitWidthSupported(Subtarget.is64Bit() ? 128 : 64);
+ 
+@@ -493,6 +499,10 @@
+   if (!Subtarget.hasMOVBE())
+     setOperationAction(ISD::BSWAP          , MVT::i16  , Expand);
+ 
++  // BSWAP came with the i486.
++  if (!Subtarget.hasI486Ops())
++    setOperationAction(ISD::BSWAP          , MVT::i32  , Expand);
++
+   // X86 wants to expand cmov itself.
+   for (auto VT : { MVT::f32, MVT::f64, MVT::f80, MVT::f128 }) {
+     setOperationAction(ISD::SELECT, VT, Custom);
+--- /dev/null
++++ b/llvm/test/CodeGen/X86/i386-no-i486-ops.ll
+@@ -0,0 +1,94 @@
++; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=i386 | FileCheck %s --check-prefixes=CHECK,I386
++; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=i386 -O0 | FileCheck %s --check-prefixes=CHECK,I386
++; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=i486 | FileCheck %s --check-prefixes=CHECK,I486
++; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=i386 -mattr=+i486-ops | FileCheck %s --check-prefixes=CHECK,I486
++; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=pentium4 | FileCheck %s --check-prefixes=CHECK,I486
++
++; The i386 has no BSWAP, CMPXCHG or XADD: byte swaps are expanded and atomic
++; operations call the __atomic_* runtime.
++
++define i32 @swap32(i32 %x) {
++; CHECK-LABEL: swap32:
++; I386-NOT: bswap
++; I486: bswapl
++  %r = call i32 @llvm.bswap.i32(i32 %x)
++  ret i32 %r
++}
++
++define i64 @swap64(i64 %x) {
++; CHECK-LABEL: swap64:
++; I386-NOT: bswap
++; I486: bswapl
++  %r = call i64 @llvm.bswap.i64(i64 %x)
++  ret i64 %r
++}
++
++define i16 @swap16(i16 %x) {
++; CHECK-LABEL: swap16:
++; CHECK: rolw $8
++  %r = call i16 @llvm.bswap.i16(i16 %x)
++  ret i16 %r
++}
++
++define i32 @cas32(ptr %p, i32 %old, i32 %new) {
++; CHECK-LABEL: cas32:
++; I386: calll __atomic_compare_exchange_4
++; I386-NOT: cmpxchg
++; I486: lock cmpxchgl
++  %pair = cmpxchg ptr %p, i32 %old, i32 %new seq_cst seq_cst
++  %r = extractvalue { i32, i1 } %pair, 0
++  ret i32 %r
++}
++
++define i32 @add32(ptr %p, i32 %v) {
++; CHECK-LABEL: add32:
++; I386: calll __atomic_fetch_add_4
++; I386-NOT: xadd
++; I486: lock xaddl
++  %r = atomicrmw add ptr %p, i32 %v seq_cst
++  ret i32 %r
++}
++
++define i8 @or8(ptr %p, i8 %v) {
++; CHECK-LABEL: or8:
++; I386: calll __atomic_fetch_or_1
++; I386-NOT: cmpxchg
++; I486: lock cmpxchgb
++  %r = atomicrmw or ptr %p, i8 %v seq_cst
++  ret i8 %r
++}
++
++define i32 @max32(ptr %p, i32 %v) {
++; CHECK-LABEL: max32:
++; I386: calll __atomic_compare_exchange_4
++; I386-NOT: cmpxchg
++; I486: lock cmpxchgl
++  %r = atomicrmw max ptr %p, i32 %v seq_cst
++  ret i32 %r
++}
++
++define i32 @xchg32(ptr %p, i32 %v) {
++; CHECK-LABEL: xchg32:
++; I386: calll __atomic_exchange_4
++; I486: xchgl
++  %r = atomicrmw xchg ptr %p, i32 %v seq_cst
++  ret i32 %r
++}
++
++define i32 @load32(ptr %p) {
++; CHECK-LABEL: load32:
++; I386: calll __atomic_load_4
++  %r = load atomic i32, ptr %p acquire, align 4
++  ret i32 %r
++}
++
++define void @store32(ptr %p, i32 %v) {
++; CHECK-LABEL: store32:
++; I386: calll __atomic_store_4
++  store atomic i32 %v, ptr %p release, align 4
++  ret void
++}
++
++declare i16 @llvm.bswap.i16(i16)
++declare i32 @llvm.bswap.i32(i32)
++declare i64 @llvm.bswap.i64(i64)

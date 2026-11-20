@@ -16,6 +16,7 @@ USER_CFLAGS := \
 	$(CFLAGS)\
 	-m32 \
 	-march=i386 \
+	-msoft-float \
 	-fno-pic \
 	-fno-pie \
 	-fno-stack-protector \

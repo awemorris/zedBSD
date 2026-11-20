@@ -53,7 +53,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f mk/platform-i386/user.ld mk/platform-i386/vmunix.ld $(SYSROOT_LIB)/zedbsd/i386/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
 	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-m32 -march=i386 -mno-red-zone -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 \
+		-m32 -march=i386 -msoft-float -mno-red-zone -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 \
 		-nostdinc -isystem $(SYSROOT_INC) \
 		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o

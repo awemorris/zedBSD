@@ -85,6 +85,13 @@
 #define INT_UNDEF		(0xffffffff)
 
 /*
+ * CR0 Flags
+ */
+#define CR0_MP			(0x00000002)	/* Monitor Coprocessor */
+#define CR0_EM			(0x00000004)	/* Emulate Coprocessor */
+#define CR0_TS			(0x00000008)	/* Task Switched */
+
+/*
  * EFLAGS
  */
 #define EFLAGS_CF		(0x000001)	/* Carry*/

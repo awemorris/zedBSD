@@ -17,7 +17,7 @@ LIBC_OBJ_DIR := $(BUILD)/libc/obj
 I386_LIBC_STATIC_CFLAGS := \
 	--target=i386-unknown-zedbsd \
 	-m32 \
-	-march=i386 \
+	-march=i486 \
 	-mno-red-zone \
 	-DHAL_ARCH_I386 \
 	-DKERN_USER_ABI_ILP32 \
@@ -45,7 +45,7 @@ I386_LIBC_STATIC_CFLAGS := \
 # Dynamic flags (shared library)
 I386_LIBC_DYNAMIC_CFLAGS := \
 	--target=i386-unknown-zedbsd \
-	-m32 -march=i386 -mno-red-zone \
+	-m32 -march=i486 -mno-red-zone \
 	-DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 -DKERN_DYNAMIC_LIBC \
 	-nostdinc -Iinclude/libc -Iinclude -Isrc -I. \
 	-ffreestanding -fPIC -fno-builtin \

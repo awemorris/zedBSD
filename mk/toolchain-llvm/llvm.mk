@@ -81,7 +81,8 @@ include $(REPO_ROOT)/mk/build-jobs.mk
 
 LLVM_DISTDIR := $(LLVM_DIR)/distfiles
 LLVM_DISTFILE := $(LLVM_DISTDIR)/$(ZEDBSD_LLVM_ARCHIVE_NAME)
-LLVM_PATCH := $(LLVM_DIR)/patches/0001-add-zedbsd-x86-target.patch
+# The patches, applied in the order of their names.
+LLVM_PATCHES := $(sort $(wildcard $(LLVM_DIR)/patches/*.patch))
 LLVM_SOURCE := $(REPO_ROOT)/build/llvm-source
 LLVM_BUILD := $(REPO_ROOT)/build/llvm-build
 LLVM_INSTALL := $(REPO_ROOT)/build/llvm
@@ -121,11 +122,12 @@ $(LLVM_DISTFILE):
 
 llvm-source: $(LLVM_SOURCE)/.patched
 
-# The extracted source is named by the archive's hash and the patch's hash,
+# The extracted source is named by the archive's hash and the patches' hashes,
 # not by file times: a source that matches is used as it is, and the archive
 # is fetched only when the source has to be made again.  A new source is
 # extracted and patched beside the old one and then takes its place.
-LLVM_SOURCE_ID := $(ZEDBSD_LLVM_ARCHIVE_SHA256) $(firstword $(shell sha256sum $(LLVM_PATCH)))
+LLVM_SOURCE_ID := $(ZEDBSD_LLVM_ARCHIVE_SHA256) \
+	$(foreach patch,$(LLVM_PATCHES),$(firstword $(shell sha256sum $(patch))))
 ifneq ($(shell cat $(LLVM_SOURCE)/.patched 2>/dev/null),$(LLVM_SOURCE_ID))
 $(LLVM_SOURCE)/.patched: llvm-source-stale
 endif
@@ -141,7 +143,9 @@ $(LLVM_SOURCE)/.patched:
 	rm -rf $(LLVM_SOURCE).new
 	mkdir -p $(LLVM_SOURCE).new
 	tar -xf $(LLVM_DISTFILE) --strip-components=1 -C $(LLVM_SOURCE).new
-	patch -d $(LLVM_SOURCE).new -p1 < $(LLVM_PATCH)
+	for patch in $(LLVM_PATCHES); do \
+		patch -d $(LLVM_SOURCE).new -p1 < $$patch || exit 1; \
+	done
 	echo '$(LLVM_SOURCE_ID)' > $(LLVM_SOURCE).new/.patched
 	rm -rf $(LLVM_SOURCE)
 	mv $(LLVM_SOURCE).new $(LLVM_SOURCE)
