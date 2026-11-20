@@ -347,11 +347,13 @@ struct powervr_vk_command_buffer {
 };
 
 /*
- * A VkFence: whether it is signaled, and else the completion point of the
- * submission that will signal it (kind POWERVR_POINT_NONE when none).
+ * A VkFence: whether it is signaled, whether a submission named it since
+ * it was made or reset, and the completion point of that submission
+ * (kind POWERVR_POINT_NONE when none).
  */
 struct powervr_vk_fence {
 	bool signaled;
+	bool submitted;
 	unsigned kind;
 	uint32_t value;
 };
@@ -398,6 +400,8 @@ struct powervr_render_job;
 bool powervr_vk_query_recorded(uint32_t opcode);
 int powervr_vk_record_query(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
 void powervr_vk_query_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
+int powervr_vk_record_query_copy(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+int powervr_vk_query_copy_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
 void powervr_vk_query_report(struct powervr_vk_session *session, int32_t status);
 bool powervr_vk_query_occlusion(const struct powervr_vk_object *pool);
 void powervr_vk_query_views(struct powervr_vk_record *entry, uint32_t views);
@@ -444,6 +448,7 @@ int powervr_vk_memory_buffer(struct powervr_vk_session *session, uint64_t identi
 
 /* A buffer's device address, from its memory (vk-memory.c). */
 int powervr_vk_buffer_address(const struct powervr_vk_buffer *buffer, uint64_t *address);
+int powervr_vk_buffer_view(const struct powervr_vk_buffer *buffer, volatile uint8_t **view);
 
 /* An image's device address, from its memory (vk-image.c). */
 int powervr_vk_image_address(const struct powervr_vk_image *image, uint64_t *address);
