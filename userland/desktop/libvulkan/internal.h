@@ -137,6 +137,22 @@ struct VkInstance_T {
 	pthread_mutex_t mutex;
 };
 
+/* The number of VkBool32 fields of VkPhysicalDeviceVulkan12Features. */
+#define VULKAN_CORE12_FEATURE_COUNT	47U
+
+/*
+ * The feature records a device creation tells its renderer of, made by
+ * core11.c: vulkan_core12_device_chain from what the caller chained.  It
+ * lives on the creating call's stack until the creation is encoded.
+ */
+struct vulkan_device_chain {
+	VkPhysicalDeviceMultiviewFeatures multiview;
+	VkPhysicalDevice16BitStorageFeatures storage;
+	VkPhysicalDeviceVariablePointersFeatures pointers;
+	VkPhysicalDeviceShaderDrawParametersFeatures parameters;
+	VkPhysicalDeviceVulkan12Features core12;
+};
+
 /* Caches one renderer physical device owned by its public instance. */
 struct VkPhysicalDevice_T {
 	struct vulkan_object object;
@@ -154,6 +170,11 @@ struct VkPhysicalDevice_T {
 	 * names from it, which properties.apiVersion holds.
 	 */
 	struct vulkan_core11_facts core11;
+	/*
+	 * What the renderer reports of the Vulkan 1.2 core (reported VK_FALSE
+	 * when it was not asked or did not answer).
+	 */
+	struct vulkan_core12_facts core12;
 	/*
 	 * The video codec operations of each queue family, by family index.
 	 * They are asked of the renderer once, and only when its native word
@@ -322,10 +343,22 @@ struct vulkan_handoff_ring {
 #define VULKAN_CONTENT_IMAGES 8U
 
 /* Tracks a command buffer whose storage is owned by its allocating pool. */
+/*
+ * A framebuffer a recording made for a render pass begun with an imageless
+ * framebuffer (resources.c: vulkan_framebuffer_for_begin); the recording
+ * owns it until it is discarded.
+ */
+struct vulkan_command_framebuffer {
+	struct vulkan_command_framebuffer *next;
+	VkFramebuffer framebuffer;
+};
+
 struct VkCommandBuffer_T {
 	struct vulkan_object object;
 	struct vulkan_command_pool *pool;
 	VkCommandBufferLevel level;
+	/* The framebuffers the recording made for imageless framebuffers, freed when it is discarded. */
+	struct vulkan_command_framebuffer *framebuffers;
 	struct vulkan_writer recording;
 	/* Where the record being encoded straight into recording begins. */
 	size_t record_start;
@@ -620,6 +653,15 @@ struct vulkan_context {
 	 * promises it.
 	 */
 	VkBool32 core11_queries;
+	/*
+	 * The renderer answers the same queries with the Vulkan 1.2 structures
+	 * chained (instance.c: physical_load_core12), reads the Vulkan 1.2
+	 * feature structure chained to a device creation and creates the render
+	 * passes of vkCreateRenderPass2 that resolve depth or stencil: a Venus
+	 * host whose device is Vulkan 1.2 or later, a native renderer when its
+	 * native word promises it.
+	 */
+	VkBool32 core12_queries;
 	uint64_t max_resource_bytes;
 	uint32_t capabilities;
 	uint64_t stream_handle;
@@ -661,11 +703,12 @@ enum vulkan_entry_scope {
 };
 
 /*
- * The core version a command belongs to: a command of Vulkan 1.1 is
- * visible only where that version is in effect (dispatch.c).
+ * The core version a command belongs to: a command of Vulkan 1.1 or 1.2
+ * is visible only where that version is in effect (dispatch.c).
  */
 #define VULKAN_CORE_1_0			VK_MAKE_VERSION(1, 0, 0)
 #define VULKAN_CORE_1_1			VK_MAKE_VERSION(1, 1, 0)
+#define VULKAN_CORE_1_2			VK_MAKE_VERSION(1, 2, 0)
 
 /* Describes a callable name without advertising unimplemented capabilities. */
 struct vulkan_entrypoint {
@@ -985,6 +1028,58 @@ vulkan_core11_device_check(
 	struct VkPhysicalDevice_T *physical,
 	const VkDeviceCreateInfo *info,
 	const VkPhysicalDeviceFeatures **features);
+
+VkBool32 *
+vulkan_core12_feature(
+	VkPhysicalDeviceVulkan12Features *features,
+	uint32_t index);
+
+void
+vulkan_core12_features(
+	struct VkPhysicalDevice_T *physical,
+	VkBaseOutStructure *chain);
+
+void
+vulkan_core12_properties(
+	struct VkPhysicalDevice_T *physical,
+	VkBaseOutStructure *chain);
+
+VkResult
+vulkan_core12_device_check(
+	struct VkPhysicalDevice_T *physical,
+	const VkDeviceCreateInfo *info);
+
+VkResult
+vulkan_render_pass_create(
+	struct VkDevice_T *owner,
+	const VkRenderPassCreateInfo *info,
+	const VkRenderPassCreateInfo2 *info2,
+	const VkAllocationCallbacks *allocator,
+	VkRenderPass *result);
+
+void
+vulkan_render_pass2_encode(
+	struct vulkan_writer *writer,
+	const VkRenderPassCreateInfo2 *info,
+	const VkRenderPassCreateInfo *converted);
+
+VkResult
+vulkan_framebuffer_for_begin(
+	struct VkDevice_T *device,
+	const VkRenderPassBeginInfo *info,
+	VkFramebuffer *result,
+	VkBool32 *made);
+
+void
+vulkan_framebuffer_release(
+	struct VkDevice_T *device,
+	VkFramebuffer framebuffer);
+
+const void *
+vulkan_core12_device_chain(
+	struct VkPhysicalDevice_T *physical,
+	const VkDeviceCreateInfo *info,
+	struct vulkan_device_chain *storage);
 
 void
 vulkan_encode_device_chain(

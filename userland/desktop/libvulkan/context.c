@@ -41,6 +41,7 @@
 #define VULKAN_NATIVE_CAPSET_SYNC_COMMAND 2U
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265 4U
 #define VULKAN_NATIVE_CAPSET_CORE11_QUERIES 8U
+#define VULKAN_NATIVE_CAPSET_CORE12_QUERIES 16U
 
 /*
  * How many context mutexes the calling thread holds through
@@ -236,12 +237,17 @@ vulkan_context_open(
 	 * that GPU_COMMAND runs at once (used only with the decoder's
 	 * notifications), the core 1.1 bit its promise that it answers the
 	 * Vulkan 1.1 feature and property queries (GPU_OP_GET_PHYSICAL_DEVICE_
-	 * FEATURES2 and _PROPERTIES2 with the 1.1 structures chained); unknown
-	 * bits are ignored so a later renderer stays usable.  A Venus host,
-	 * which has no native word, is a Vulkan 1.1 implementation and answers
-	 * those queries itself.
+	 * FEATURES2 and _PROPERTIES2 with the 1.1 structures chained), the core
+	 * 1.2 bit its promise of the same with the 1.2 structures, of the 1.2
+	 * feature structure on a device creation and of vkCreateRenderPass2
+	 * (GPU_OP_CREATE_RENDER_PASS2) for the render passes that resolve depth
+	 * or stencil; unknown bits are ignored so a later renderer stays
+	 * usable.  A Venus host, which has no native word, is a Vulkan 1.1
+	 * implementation and answers those queries itself, and the 1.2 ones
+	 * when its device is Vulkan 1.2 (instance.c asks only then).
 	 */
 	context->core11_queries = VK_TRUE;
+	context->core12_queries = VK_TRUE;
 	if (capset.bytes == VULKAN_NATIVE_CAPSET_BYTES) {
 		native_magic = vulkan_load_word(capset.data + 168);
 		native_flags = vulkan_load_word(capset.data + 172);
@@ -254,6 +260,9 @@ vulkan_context_open(
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_CORE11_QUERIES) == 0)
 			context->core11_queries = VK_FALSE;
+		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
+		    (native_flags & VULKAN_NATIVE_CAPSET_CORE12_QUERIES) == 0)
+			context->core12_queries = VK_FALSE;
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_SYNC_COMMAND) != 0 &&
 		    (context->capabilities & GPU_CAP_NOTIFICATION) != 0)

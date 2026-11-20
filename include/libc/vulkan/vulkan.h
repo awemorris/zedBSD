@@ -14,6 +14,7 @@
 
 #include "vulkan_core.h"
 #include "vulkan_core11.h"
+#include "vulkan_core12.h"
 #include "vulkan_video.h"
 #include "vulkan_display_control.h"
 

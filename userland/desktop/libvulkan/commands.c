@@ -10,6 +10,7 @@
  */
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include "internal.h"
 
@@ -56,7 +57,9 @@ static void command_batch_sent(struct vulkan_sender_item *item, VkResult status)
 static void command_encode_color(struct vulkan_writer *writer, const VkClearColorValue *color);
 static void command_encode_depth_ranges(struct vulkan_writer *writer, const VkClearDepthStencilValue *clear, uint32_t count, const VkImageSubresourceRange *ranges);
 static void command_encode_clear_attachment(struct vulkan_writer *writer, const VkClearAttachment *attachment);
-static void command_encode_render_begin(struct vulkan_writer *writer, const VkRenderPassBeginInfo *info);
+static void command_encode_render_begin(struct VkCommandBuffer_T *command, struct vulkan_writer *writer, const VkRenderPassBeginInfo *info);
+static void command_framebuffers_release(struct VkCommandBuffer_T *command);
+static void command_draw_indirect_count(VkCommandBuffer commandBuffer, uint32_t opcode, VkBuffer buffer, VkDeviceSize offset, VkBuffer countBuffer, VkDeviceSize countBufferOffset, uint32_t maxDrawCount, uint32_t stride);
 static void command_encode_render_clear(struct vulkan_writer *writer, const VkAttachmentDescription *attachment, const VkClearValue *clear);
 static void command_buffers_local_free(uint32_t count, VkCommandBuffer *buffers);
 static void command_buffer_initial(struct VkCommandBuffer_T *command);
@@ -428,6 +431,9 @@ vkBeginCommandBuffer(
 
 	/* The discarded recording's swapchain-image writes are never submitted. */
 	vulkan_content_clear(command);
+
+	/* The framebuffers the discarded recording made. */
+	command_framebuffers_release(command);
 
 	/* Primary buffers never dereference their ignored inheritance pointer. */
 	begin = *pBeginInfo;
@@ -882,6 +888,42 @@ vkCmdDispatchBase(
 
 	/* Succeeded: the command is recorded or its first error is retained by the command buffer. */
 	return;
+}
+
+/*
+ * Records vkCmdDrawIndirectCount, which the renderer runs (only a device
+ * whose renderer reports drawIndirectCount offers it).
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkCmdDrawIndirectCount(
+	VkCommandBuffer commandBuffer,
+	VkBuffer buffer,
+	VkDeviceSize offset,
+	VkBuffer countBuffer,
+	VkDeviceSize countBufferOffset,
+	uint32_t maxDrawCount,
+	uint32_t stride)
+{
+	/* The renderer's command. */
+	command_draw_indirect_count(commandBuffer, GPU_OP_CMD_DRAW_INDIRECT_COUNT, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
+}
+
+/*
+ * Records vkCmdDrawIndexedIndirectCount, which the renderer runs (only a
+ * device whose renderer reports drawIndirectCount offers it).
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkCmdDrawIndexedIndirectCount(
+	VkCommandBuffer commandBuffer,
+	VkBuffer buffer,
+	VkDeviceSize offset,
+	VkBuffer countBuffer,
+	VkDeviceSize countBufferOffset,
+	uint32_t maxDrawCount,
+	uint32_t stride)
+{
+	/* The renderer's command. */
+	command_draw_indirect_count(commandBuffer, GPU_OP_CMD_DRAW_INDEXED_INDIRECT_COUNT, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 }
 
 /*
@@ -1360,6 +1402,9 @@ command_buffer_release(
 		vulkan_writer_finish(&command->batches[index].part);
 	}
 
+	/* The framebuffers the recording made. */
+	command_framebuffers_release(command);
+
 	/* The recording's own storage. */
 	command->recording.allocator = object->allocator;
 	vulkan_writer_finish(&command->recording);
@@ -1466,21 +1511,46 @@ command_encode_clear_attachment(
 	return;
 }
 
-/* Encodes render-pass begin using attachment metadata to interpret only meaningful clear values. */
+/*
+ * Encodes render-pass begin using attachment metadata to interpret only
+ * meaningful clear values.  An imageless framebuffer is begun as the
+ * renderer's framebuffer of the views named now, which the recording keeps.
+ */
 static void
 command_encode_render_begin(
+	struct VkCommandBuffer_T *command,
 	struct vulkan_writer *writer,
 	const VkRenderPassBeginInfo *info)
 {
+	struct vulkan_command_framebuffer *entry;
 	const VkAttachmentDescription *attachment;
 	const VkClearValue *clear;
+	VkFramebuffer framebuffer;
+	VkBool32 made;
+	VkResult status;
 	uint32_t index;
+
+	/* The framebuffer to begin with, kept by the recording when it is made for it. */
+	status = vulkan_framebuffer_for_begin(command->pool->device, info, &framebuffer, &made);
+	if (status == VK_SUCCESS && made) {
+		entry = malloc(sizeof(*entry));
+		if (entry == NULL) {
+			vulkan_framebuffer_release(command->pool->device, framebuffer);
+			status = VK_ERROR_OUT_OF_HOST_MEMORY;
+		} else {
+			entry->framebuffer = framebuffer;
+			entry->next = command->framebuffers;
+			command->framebuffers = entry;
+		}
+	}
+	if (status != VK_SUCCESS && writer->error == VK_SUCCESS)
+		writer->error = status;
 
 	/* Preserves the standard render area and ordinary object identities in protocol order. */
 	vulkan_write_u32(writer, info->sType);
 	vulkan_write_u64(writer, 0);
 	vulkan_encode_handle(writer, (uint64_t)info->renderPass);
-	vulkan_encode_handle(writer, (uint64_t)info->framebuffer);
+	vulkan_encode_handle(writer, (uint64_t)framebuffer);
 	vulkan_encode_VkRect2D(writer, &info->renderArea);
 	vulkan_write_u32(writer, info->clearValueCount);
 	vulkan_write_u64(writer, info->clearValueCount);
@@ -1620,6 +1690,59 @@ command_buffer_initial(
 	/* The discarded recording's swapchain-image writes are never submitted. */
 	vulkan_content_clear(command);
 
+	/* The framebuffers the discarded recording made. */
+	command_framebuffers_release(command);
+
 	/* Succeeded: this command buffer is ready for a fresh standard Begin operation. */
 	return;
+}
+
+/* Destroys the framebuffers a recording made for imageless framebuffers. */
+static void
+command_framebuffers_release(
+	struct VkCommandBuffer_T *command)
+{
+	struct vulkan_command_framebuffer *entry;
+
+	/* Each, newest first. */
+	while (command->framebuffers != NULL) {
+		entry = command->framebuffers;
+		command->framebuffers = entry->next;
+		vulkan_framebuffer_release(command->pool->device, entry->framebuffer);
+		free(entry);
+	}
+}
+
+/* Records one of the indirect draws whose count the renderer reads from a buffer. */
+static void
+command_draw_indirect_count(
+	VkCommandBuffer commandBuffer,
+	uint32_t opcode,
+	VkBuffer buffer,
+	VkDeviceSize offset,
+	VkBuffer countBuffer,
+	VkDeviceSize countBufferOffset,
+	uint32_t maxDrawCount,
+	uint32_t stride)
+{
+	struct VkCommandBuffer_T *command;
+	struct vulkan_writer writer;
+	VkBool32 active;
+
+	/* Preserves the first recording failure for vkEndCommandBuffer to report. */
+	command = (struct VkCommandBuffer_T *)commandBuffer;
+	active = command_record_begin(command, &writer, opcode);
+	if (!active)
+		return;
+
+	/* The draws' buffer, the count's buffer, the most draws and their stride. */
+	vulkan_record_handle(&writer, (uint64_t)buffer);
+	vulkan_record_u64(&writer, offset);
+	vulkan_record_handle(&writer, (uint64_t)countBuffer);
+	vulkan_record_u64(&writer, countBufferOffset);
+	vulkan_record_u32(&writer, maxDrawCount);
+	vulkan_record_u32(&writer, stride);
+
+	/* Retain this complete command independently of caller pointer lifetimes. */
+	command_record_finish(command, &writer);
 }

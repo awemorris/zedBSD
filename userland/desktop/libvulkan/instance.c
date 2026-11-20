@@ -30,6 +30,8 @@ static VkResult physical_load_queues(struct VkPhysicalDevice_T *physical);
 static VkResult physical_load_core11(struct VkPhysicalDevice_T *physical);
 static void physical_core11_features(struct vulkan_reader *reader, struct vulkan_core11_facts *facts);
 static void physical_core11_properties(struct vulkan_reader *reader, struct vulkan_core11_facts *facts);
+static VkResult physical_load_core12(struct VkPhysicalDevice_T *physical);
+static void physical_core12_properties(struct vulkan_reader *reader, VkPhysicalDeviceVulkan12Properties *properties);
 static void physical_chain_request(struct vulkan_writer *writer, uint32_t outer, const uint32_t *types, uint32_t count);
 static void physical_chain_reply(struct vulkan_reader *reader, uint32_t outer, const uint32_t *types, uint32_t count);
 static void physical_version(struct VkPhysicalDevice_T *physical);
@@ -1168,8 +1170,11 @@ physical_load(
 	if (status != VK_SUCCESS)
 		return status;
 
-	/* The Vulkan 1.1 facts, where the renderer answers their queries, and the version they decide. */
+	/* The Vulkan 1.1 and 1.2 facts, where the renderer answers their queries, and the version they decide. */
 	status = physical_load_core11(physical);
+	if (status != VK_SUCCESS)
+		return status;
+	status = physical_load_core12(physical);
 	if (status != VK_SUCCESS)
 		return status;
 	physical_version(physical);
@@ -1295,6 +1300,17 @@ static const uint32_t core11_property_types[] = {
 	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES
 };
 
+/*
+ * The structures of the Vulkan 1.2 features and properties chained to the
+ * *2 queries: one of each.
+ */
+static const uint32_t core12_feature_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+};
+static const uint32_t core12_property_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES
+};
+
 /* The number of entries of a table. */
 #define CORE11_COUNT(table)		((uint32_t)(sizeof(table) / sizeof((table)[0])))
 
@@ -1365,6 +1381,172 @@ physical_load_core11(
 	/* Succeeded: the renderer reported its Vulkan 1.1 facts. */
 	physical->core11.reported = VK_TRUE;
 	return VK_SUCCESS;
+}
+
+/*
+ * Asks the renderer for its Vulkan 1.2 features and properties into
+ * physical->core12, when it answers the Vulkan 1.1 queries, its own
+ * version is 1.2 or later and it answers the 1.2 queries (a Venus host,
+ * or a native renderer that promises it).  A renderer not asked leaves
+ * the facts unreported; one that answers malformed loses the session.
+ */
+static VkResult
+physical_load_core12(
+	struct VkPhysicalDevice_T *physical)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkPhysicalDeviceFeatures features;
+	VkPhysicalDeviceProperties properties;
+	VkBool32 *flag;
+	VkBool32 present;
+	VkResult status;
+	uint32_t index;
+
+	/* A renderer that is not asked reports nothing of Vulkan 1.2. */
+	memset(&physical->core12, 0, sizeof(physical->core12));
+	if (!physical->core11.reported || physical->core11.api_version < VK_MAKE_VERSION(1, 2, 0))
+		return VK_SUCCESS;
+	if (!physical->object.context->core12_queries)
+		return VK_SUCCESS;
+
+	/* The features: VkPhysicalDeviceVulkan12Features chained to VkPhysicalDeviceFeatures2. */
+	vulkan_writer_init_for_object(&writer, &physical->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2);
+	vulkan_write_u64(&writer, physical->object.wire_id);
+	physical_chain_request(&writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, core12_feature_types, CORE11_COUNT(core12_feature_types));
+	status = vulkan_command_execute(physical->object.context, &writer, 4096U, &reader, VK_FALSE);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS) {
+		present = vulkan_reply_pointer(&reader);
+		if (!present)
+			reader.error = VK_ERROR_DEVICE_LOST;
+		physical_chain_reply(&reader, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, core12_feature_types, CORE11_COUNT(core12_feature_types));
+		for (index = 0U; index < VULKAN_CORE12_FEATURE_COUNT; index++) {
+			flag = vulkan_core12_feature(&physical->core12.features, index);
+			*flag = vulkan_read_u32(&reader);
+		}
+		vulkan_decode_VkPhysicalDeviceFeatures(&reader, &features);
+	}
+
+	/* A malformed answer is the renderer's failure, not an absent feature. */
+	status = vulkan_reply_finish(physical->object.context, &reader, status);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* The properties: VkPhysicalDeviceVulkan12Properties chained to VkPhysicalDeviceProperties2. */
+	vulkan_writer_init_for_object(&writer, &physical->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2);
+	vulkan_write_u64(&writer, physical->object.wire_id);
+	physical_chain_request(&writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, core12_property_types, CORE11_COUNT(core12_property_types));
+	status = vulkan_command_execute(physical->object.context, &writer, 4096U, &reader, VK_FALSE);
+	vulkan_writer_finish(&writer);
+	if (status == VK_SUCCESS) {
+		present = vulkan_reply_pointer(&reader);
+		if (!present)
+			reader.error = VK_ERROR_DEVICE_LOST;
+		physical_chain_reply(&reader, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, core12_property_types, CORE11_COUNT(core12_property_types));
+		physical_core12_properties(&reader, &physical->core12.properties);
+		vulkan_decode_VkPhysicalDeviceProperties(&reader, &properties);
+	}
+
+	/* The same for the properties. */
+	status = vulkan_reply_finish(physical->object.context, &reader, status);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the renderer reported its Vulkan 1.2 facts. */
+	physical->core12.reported = VK_TRUE;
+	return VK_SUCCESS;
+}
+
+/*
+ * Reads the fields of VkPhysicalDeviceVulkan12Properties in their
+ * declared order: the driver's identity, the float controls, the limits
+ * of descriptor indexing, the depth and stencil resolve, the min and max
+ * filter, the timeline semaphore and the integer colour samples.
+ *
+ * Values referenced: the Vulkan 1.2 specification (section 40.1,
+ * VkPhysicalDeviceVulkan12Properties); a character array is its length
+ * and its bytes, as the device name of VkPhysicalDeviceProperties is.
+ */
+static void
+physical_core12_properties(
+	struct vulkan_reader *reader,
+	VkPhysicalDeviceVulkan12Properties *properties)
+{
+	uint64_t count;
+
+	/* The driver's identity: its number, name, information and conformance. */
+	properties->driverID = (VkDriverId)vulkan_read_u32(reader);
+	count = vulkan_read_u64(reader);
+	if (count != VK_MAX_DRIVER_NAME_SIZE)
+		reader->error = VK_ERROR_DEVICE_LOST;
+	vulkan_read_bytes(reader, properties->driverName, VK_MAX_DRIVER_NAME_SIZE);
+	properties->driverName[VK_MAX_DRIVER_NAME_SIZE - 1] = '\0';
+	count = vulkan_read_u64(reader);
+	if (count != VK_MAX_DRIVER_INFO_SIZE)
+		reader->error = VK_ERROR_DEVICE_LOST;
+	vulkan_read_bytes(reader, properties->driverInfo, VK_MAX_DRIVER_INFO_SIZE);
+	properties->driverInfo[VK_MAX_DRIVER_INFO_SIZE - 1] = '\0';
+	properties->conformanceVersion.major = (uint8_t)vulkan_read_u32(reader);
+	properties->conformanceVersion.minor = (uint8_t)vulkan_read_u32(reader);
+	properties->conformanceVersion.subminor = (uint8_t)vulkan_read_u32(reader);
+	properties->conformanceVersion.patch = (uint8_t)vulkan_read_u32(reader);
+
+	/* The float controls. */
+	properties->denormBehaviorIndependence = (VkShaderFloatControlsIndependence)vulkan_read_u32(reader);
+	properties->roundingModeIndependence = (VkShaderFloatControlsIndependence)vulkan_read_u32(reader);
+	properties->shaderSignedZeroInfNanPreserveFloat16 = vulkan_read_u32(reader);
+	properties->shaderSignedZeroInfNanPreserveFloat32 = vulkan_read_u32(reader);
+	properties->shaderSignedZeroInfNanPreserveFloat64 = vulkan_read_u32(reader);
+	properties->shaderDenormPreserveFloat16 = vulkan_read_u32(reader);
+	properties->shaderDenormPreserveFloat32 = vulkan_read_u32(reader);
+	properties->shaderDenormPreserveFloat64 = vulkan_read_u32(reader);
+	properties->shaderDenormFlushToZeroFloat16 = vulkan_read_u32(reader);
+	properties->shaderDenormFlushToZeroFloat32 = vulkan_read_u32(reader);
+	properties->shaderDenormFlushToZeroFloat64 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTEFloat16 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTEFloat32 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTEFloat64 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTZFloat16 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTZFloat32 = vulkan_read_u32(reader);
+	properties->shaderRoundingModeRTZFloat64 = vulkan_read_u32(reader);
+
+	/* The limits of descriptor indexing. */
+	properties->maxUpdateAfterBindDescriptorsInAllPools = vulkan_read_u32(reader);
+	properties->shaderUniformBufferArrayNonUniformIndexingNative = vulkan_read_u32(reader);
+	properties->shaderSampledImageArrayNonUniformIndexingNative = vulkan_read_u32(reader);
+	properties->shaderStorageBufferArrayNonUniformIndexingNative = vulkan_read_u32(reader);
+	properties->shaderStorageImageArrayNonUniformIndexingNative = vulkan_read_u32(reader);
+	properties->shaderInputAttachmentArrayNonUniformIndexingNative = vulkan_read_u32(reader);
+	properties->robustBufferAccessUpdateAfterBind = vulkan_read_u32(reader);
+	properties->quadDivergentImplicitLod = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindSamplers = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindUniformBuffers = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindStorageBuffers = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindSampledImages = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindStorageImages = vulkan_read_u32(reader);
+	properties->maxPerStageDescriptorUpdateAfterBindInputAttachments = vulkan_read_u32(reader);
+	properties->maxPerStageUpdateAfterBindResources = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindSamplers = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindUniformBuffers = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindStorageBuffers = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindSampledImages = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindStorageImages = vulkan_read_u32(reader);
+	properties->maxDescriptorSetUpdateAfterBindInputAttachments = vulkan_read_u32(reader);
+
+	/* The depth and stencil resolve, the min and max filter, the timeline and the integer samples. */
+	properties->supportedDepthResolveModes = vulkan_read_u32(reader);
+	properties->supportedStencilResolveModes = vulkan_read_u32(reader);
+	properties->independentResolveNone = vulkan_read_u32(reader);
+	properties->independentResolve = vulkan_read_u32(reader);
+	properties->filterMinmaxSingleComponentFormats = vulkan_read_u32(reader);
+	properties->filterMinmaxImageComponentMapping = vulkan_read_u32(reader);
+	properties->maxTimelineSemaphoreValueDifference = vulkan_read_u64(reader);
+	properties->framebufferIntegerColorSampleCounts = vulkan_read_u32(reader);
 }
 
 /*
@@ -1493,7 +1675,7 @@ physical_version(
 	uint32_t index;
 
 	/* The rule, the same for every renderer. */
-	version = vulkan_version_decide(VULKAN_LIBRARY_VERSION, &physical->core11, reasons, VULKAN_VERSION_REASONS, &count);
+	version = vulkan_version_decide(VULKAN_LIBRARY_VERSION, &physical->core11, &physical->core12, reasons, VULKAN_VERSION_REASONS, &count);
 	physical->properties.apiVersion = version;
 
 	/* The reasons, on request. */

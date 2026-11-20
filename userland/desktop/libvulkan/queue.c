@@ -92,8 +92,12 @@ vkQueueSubmit(
 	struct VkQueue_T *owner;
 	VkResult status;
 
-	/* Public and WSI submitters share the same ownership and payload transaction. */
+	/* A submission naming timeline semaphores goes through the library's timelines (core12.c). */
 	owner = vulkan_queue(queue);
+	if (vulkan_timeline_named(submitCount, pSubmits))
+		return vulkan_timeline_submit(owner, submitCount, pSubmits, fence);
+
+	/* Public and WSI submitters share the same ownership and payload transaction. */
 	status = vulkan_queue_submit(owner, submitCount, pSubmits, fence);
 	if (status != VK_SUCCESS)
 		return status;

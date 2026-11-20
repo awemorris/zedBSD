@@ -28,6 +28,23 @@ static void resource_destroy(struct VkDevice_T *device, uint64_t handle, uint32_
 static VkResult resource_bind(struct VkDevice_T *device, uint64_t resource, VkDeviceMemory memory, VkDeviceSize offset, uint32_t opcode);
 static void resource_dedicated_requirements(void *next);
 static void resource_requirements(struct VkDevice_T *device, uint64_t resource, uint32_t opcode, VkMemoryRequirements *requirements);
+/*
+ * One framebuffer.  An ordinary one is the renderer's.  An imageless one
+ * (Vulkan 1.2) is the library's alone: it keeps the render pass and the
+ * size it was made for, and each render pass begun with it makes the
+ * renderer's framebuffer of the views named then
+ * (vulkan_framebuffer_for_begin).
+ */
+struct vulkan_framebuffer {
+	struct vulkan_object object;
+	VkBool32 imageless;
+	VkRenderPass render_pass;
+	uint32_t attachment_count;
+	uint32_t width;
+	uint32_t height;
+	uint32_t layers;
+};
+
 static VkResult render_pass_metadata(struct vulkan_render_pass *pass, const VkRenderPassCreateInfo *info);
 static void render_pass_free(struct vulkan_render_pass *pass);
 
@@ -43,7 +60,24 @@ vkCreateRenderPass(
 	const VkAllocationCallbacks *pAllocator,
 	VkRenderPass *pRenderPass)
 {
-	struct VkDevice_T *owner;
+	/* The Vulkan 1.0 record goes to the renderer as it is. */
+	return vulkan_render_pass_create(vulkan_device(device), pCreateInfo, NULL, pAllocator, pRenderPass);
+}
+
+/*
+ * Creates a render pass from its Vulkan 1.0 record, which the library keeps,
+ * sent to the renderer as GPU_OP_CREATE_RENDER_PASS, or, when info2 is not
+ * NULL, as the Vulkan 1.2 record GPU_OP_CREATE_RENDER_PASS2 (core12.c
+ * makes both records of vkCreateRenderPass2).
+ */
+VkResult
+vulkan_render_pass_create(
+	struct VkDevice_T *owner,
+	const VkRenderPassCreateInfo *info,
+	const VkRenderPassCreateInfo2 *info2,
+	const VkAllocationCallbacks *allocator,
+	VkRenderPass *result)
+{
 	struct vulkan_render_pass *pass;
 	struct vulkan_object *object;
 	struct vulkan_writer writer;
@@ -51,14 +85,13 @@ vkCreateRenderPass(
 	uint64_t handle;
 
 	/* Allocates all local metadata before a native render-pass object can be created. */
-	owner = vulkan_device(device);
-	status = resource_allocate(owner, VULKAN_OBJECT_RENDER_PASS, sizeof(*pass), pAllocator, &object);
+	status = resource_allocate(owner, VULKAN_OBJECT_RENDER_PASS, sizeof(*pass), allocator, &object);
 	if (status != VK_SUCCESS)
 		return status;
 
 	/* Copies the exact caller attachment definitions without hardcoded scene formats. */
 	pass = (struct vulkan_render_pass *)object;
-	status = render_pass_metadata(pass, pCreateInfo);
+	status = render_pass_metadata(pass, info);
 	if (status != VK_SUCCESS) {
 		render_pass_free(pass);
 		return status;
@@ -66,10 +99,17 @@ vkCreateRenderPass(
 
 	/* Encodes attachment layouts through the common direct-display preservation mapping. */
 	vulkan_writer_init_for_object(&writer, object);
-	vulkan_command_begin(&writer, GPU_OP_CREATE_RENDER_PASS);
-	vulkan_write_u64(&writer, owner->object.wire_id);
-	vulkan_write_u64(&writer, 1);
-	vulkan_encode_VkRenderPassCreateInfo(&writer, pCreateInfo);
+	if (info2 == NULL) {
+		vulkan_command_begin(&writer, GPU_OP_CREATE_RENDER_PASS);
+		vulkan_write_u64(&writer, owner->object.wire_id);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkRenderPassCreateInfo(&writer, info);
+	} else {
+		vulkan_command_begin(&writer, GPU_OP_CREATE_RENDER_PASS2);
+		vulkan_write_u64(&writer, owner->object.wire_id);
+		vulkan_write_u64(&writer, 1);
+		vulkan_render_pass2_encode(&writer, info2, info);
+	}
 	status = vulkan_object_create_complete(owner, object, &writer, GPU_OP_DESTROY_RENDER_PASS);
 	vulkan_writer_finish(&writer);
 	if (status != VK_SUCCESS) {
@@ -79,10 +119,164 @@ vkCreateRenderPass(
 
 	/* Publishes only a complete native render pass with matching immutable local metadata. */
 	handle = vulkan_nondispatchable_handle(object);
-	*pRenderPass = (VkRenderPass)(uintptr_t)handle;
+	*result = (VkRenderPass)(uintptr_t)handle;
 
 	/* Succeeded: arbitrary graphics pipelines and clear commands can consult this render pass. */
 	return VK_SUCCESS;
+}
+
+/*
+ * Creates a framebuffer: the renderer's, or the library's alone when it is
+ * imageless.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkCreateFramebuffer(
+	VkDevice device,
+	const VkFramebufferCreateInfo *pCreateInfo,
+	const VkAllocationCallbacks *pAllocator,
+	VkFramebuffer *pFramebuffer)
+{
+	struct VkDevice_T *owner;
+	struct vulkan_framebuffer *framebuffer;
+	struct vulkan_object *object;
+	struct vulkan_writer writer;
+	VkResult status;
+	uint64_t handle;
+
+	/* Reserves local ownership before any renderer creation can have side effects. */
+	owner = vulkan_device(device);
+	status = resource_allocate(owner, VULKAN_OBJECT_FRAMEBUFFER, sizeof(*framebuffer), pAllocator, &object);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* What a render pass begun with it needs. */
+	framebuffer = (struct vulkan_framebuffer *)object;
+	framebuffer->imageless = (pCreateInfo->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT) != 0U;
+	framebuffer->render_pass = pCreateInfo->renderPass;
+	framebuffer->attachment_count = pCreateInfo->attachmentCount;
+	framebuffer->width = pCreateInfo->width;
+	framebuffer->height = pCreateInfo->height;
+	framebuffer->layers = pCreateInfo->layers;
+
+	/* An ordinary framebuffer is the renderer's. */
+	if (!framebuffer->imageless) {
+		vulkan_writer_init_for_object(&writer, object);
+		vulkan_command_begin(&writer, GPU_OP_CREATE_FRAMEBUFFER);
+		vulkan_write_u64(&writer, owner->object.wire_id);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkFramebufferCreateInfo(&writer, pCreateInfo);
+		status = vulkan_object_create_complete(owner, object, &writer, GPU_OP_DESTROY_FRAMEBUFFER);
+		vulkan_writer_finish(&writer);
+		if (status != VK_SUCCESS) {
+			vulkan_object_free(object);
+			return status;
+		}
+	}
+
+	/* Changes caller output only after local and native creation succeeded. */
+	handle = vulkan_nondispatchable_handle(object);
+	*pFramebuffer = (VkFramebuffer)(uintptr_t)handle;
+
+	/* Succeeded: the framebuffer exists. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Destroys a framebuffer: the renderer's with it, an imageless one in the
+ * library only.
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkDestroyFramebuffer(
+	VkDevice device,
+	VkFramebuffer framebuffer,
+	const VkAllocationCallbacks *pAllocator)
+{
+	struct vulkan_framebuffer *record;
+
+	/* A null handle has nothing. */
+	record = (struct vulkan_framebuffer *)vulkan_nondispatchable_object((uint64_t)framebuffer);
+	if (record == NULL)
+		return;
+
+	/* An imageless framebuffer has no renderer's object. */
+	if (record->imageless) {
+		if (pAllocator != NULL) {
+			record->object.allocator.callbacks = *pAllocator;
+			record->object.allocator.has_callbacks = VK_TRUE;
+		}
+		vulkan_object_free(&record->object);
+		return;
+	}
+
+	/* Consumes native and local ownership. */
+	resource_destroy(vulkan_device(device), (uint64_t)framebuffer, GPU_OP_DESTROY_FRAMEBUFFER, pAllocator);
+
+	/* Succeeded: the framebuffer is gone. */
+	return;
+}
+
+/*
+ * Gives the framebuffer a render pass begins with: the one named, or, for
+ * an imageless framebuffer, a new framebuffer of the renderer's with the
+ * views of the VkRenderPassAttachmentBeginInfo chained to the begin, which
+ * *made says the caller must destroy (vulkan_framebuffer_release) once
+ * the recording that names it is discarded.
+ *
+ * Procedure referenced: the Vulkan 1.2 specification (section 8.3,
+ * VkRenderPassAttachmentBeginInfo: the attachments of an imageless
+ * framebuffer are the views it names when the render pass begins).
+ */
+VkResult
+vulkan_framebuffer_for_begin(
+	struct VkDevice_T *device,
+	const VkRenderPassBeginInfo *info,
+	VkFramebuffer *result,
+	VkBool32 *made)
+{
+	struct vulkan_framebuffer *record;
+	const VkBaseInStructure *next;
+	const VkRenderPassAttachmentBeginInfo *attachments;
+	VkFramebufferCreateInfo create;
+
+	/* An ordinary framebuffer as it is. */
+	*result = info->framebuffer;
+	*made = VK_FALSE;
+	record = (struct vulkan_framebuffer *)vulkan_nondispatchable_object((uint64_t)info->framebuffer);
+	if (record == NULL || !record->imageless)
+		return VK_SUCCESS;
+
+	/* The views named at the begin. */
+	attachments = NULL;
+	for (next = info->pNext; next != NULL; next = next->pNext) {
+		if (next->sType == VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO)
+			attachments = (const VkRenderPassAttachmentBeginInfo *)next;
+	}
+	if (attachments == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The renderer's framebuffer of them, for the render pass begun. */
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	create.renderPass = info->renderPass;
+	create.attachmentCount = attachments->attachmentCount;
+	create.pAttachments = attachments->pAttachments;
+	create.width = record->width;
+	create.height = record->height;
+	create.layers = record->layers;
+	*made = VK_TRUE;
+
+	/* Refused, or succeeded: the framebuffer to begin with. */
+	return vkCreateFramebuffer((VkDevice)device, &create, NULL, result);
+}
+
+/* Destroys a framebuffer vulkan_framebuffer_for_begin made. */
+void
+vulkan_framebuffer_release(
+	struct VkDevice_T *device,
+	VkFramebuffer framebuffer)
+{
+	/* The renderer's and the library's records of it. */
+	vkDestroyFramebuffer((VkDevice)device, framebuffer, NULL);
 }
 
 /*

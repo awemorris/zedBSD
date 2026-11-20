@@ -26,8 +26,7 @@ func main(args) {
         ["Image", "IMAGE", "struct vulkan_image"],
         ["ImageView", "IMAGE_VIEW", "struct vulkan_object"],
         ["ShaderModule", "SHADER_MODULE", "struct vulkan_object"],
-        ["Sampler", "SAMPLER", "struct vulkan_object"],
-        ["Framebuffer", "FRAMEBUFFER", "struct vulkan_object"]
+        ["Sampler", "SAMPLER", "struct vulkan_object"]
     ];
     var output = "/* -*- mode: c; c-file-style: \"linux\"; tab-width: 8; -*- */\n\n/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * SPDX-License-Identifier: Zlib\n */\n\n/* Maintained ordinary resource wrappers; input structures use the common typed codec. */\n";
     for (i in 0..Array.size(objects)) {
@@ -41,5 +40,5 @@ func main(args) {
         output = output + "\n\t/* Changes caller output only after local and native creation succeeded. */\n\thandle = vulkan_nondispatchable_handle(object);\n\t*p" + name + " = (Vk" + name + ")(uintptr_t)handle;\n\n\t/* Succeeded: the public handle owns one real native resource. */\n\treturn VK_SUCCESS;\n}\n\n/*\n * Destroys one ordinary Vk" + name + " with the command's compatible callback policy.\n */\nVKAPI_ATTR void VKAPI_CALL\nvkDestroy" + name + "(\n\tVkDevice device,\n\tVk" + name + " " + "resource" + ",\n\tconst VkAllocationCallbacks *pAllocator)\n{\n\t/* Consumes native and local ownership without imposing GPU-specific publication rules. */\n\tresource_destroy(vulkan_device(device), (uint64_t)" + "resource" + ", " + opName("vkDestroy" + name) + ", pAllocator);\n\n\t/* Succeeded: a null handle is ignored and ordinary ownership is released. */\n\treturn;\n}\n";
     }
     FileUtil.writeText(args[0], output);
-    print("maintained fourteen ordinary resource creation/destruction entry points");
+    print("maintained twelve ordinary resource creation/destruction entry points");
 }

@@ -53,8 +53,11 @@ vkCreateDevice(
 	if (status != VK_SUCCESS)
 		return status;
 
-	/* The Vulkan 1.1 records chained to the creation, and the core features VkPhysicalDeviceFeatures2 carries. */
+	/* The Vulkan 1.1 and 1.2 records chained to the creation, and the core features VkPhysicalDeviceFeatures2 carries. */
 	status = vulkan_core11_device_check(physical, pCreateInfo, &features);
+	if (status != VK_SUCCESS)
+		return status;
+	status = vulkan_core12_device_check(physical, pCreateInfo);
 	if (status != VK_SUCCESS)
 		return status;
 
@@ -528,6 +531,7 @@ device_create_remote(
 	const VkDeviceCreateInfo *info)
 {
 	VkDeviceCreateInfo create;
+	struct vulkan_device_chain records;
 	const VkBaseInStructure *chain;
 	struct vulkan_writer writer;
 	struct vulkan_reader reader;
@@ -544,13 +548,16 @@ device_create_remote(
 
 	/*
 	 * The core features go as pEnabledFeatures even when the caller chained
-	 * them in VkPhysicalDeviceFeatures2; of the chain, the encoder forwards
-	 * only the Vulkan 1.1 feature structures, to a renderer that reads them.
+	 * them in VkPhysicalDeviceFeatures2; the chain is the library's own: the
+	 * Vulkan 1.1 feature structures asked for and the renderer's part of the
+	 * Vulkan 1.2 features, which the encoder forwards to a renderer that
+	 * reads them.
 	 */
 	for (chain = info->pNext; chain != NULL; chain = chain->pNext) {
 		if (chain->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
 			create.pEnabledFeatures = &((const VkPhysicalDeviceFeatures2 *)chain)->features;
 	}
+	create.pNext = vulkan_core12_device_chain(device->physical, info, &records);
 
 	/* Preserves real caller feature bits, queue priorities, and family indices. */
 	vulkan_writer_init_for_object(&writer, &device->object);

@@ -269,7 +269,8 @@ vkWaitForFences(
 }
 
 /*
- * Creates one unsignaled native binary semaphore with no acquisition payload.
+ * Creates one unsignaled native binary semaphore with no acquisition
+ * payload, or a timeline semaphore (Vulkan 1.2), which the library keeps.
  */
 VKAPI_ATTR VkResult VKAPI_CALL
 vkCreateSemaphore(
@@ -288,6 +289,13 @@ vkCreateSemaphore(
 	status = sync_create(owner, VULKAN_OBJECT_SEMAPHORE, GPU_OP_CREATE_SEMAPHORE, GPU_OP_DESTROY_SEMAPHORE, VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, pCreateInfo->flags, pAllocator, &sync);
 	if (status != VK_SUCCESS)
 		return status;
+
+	/* A timeline semaphore is the library's; the renderer's binary one is never used then. */
+	status = vulkan_timeline_create(owner, sync, pCreateInfo);
+	if (status != VK_SUCCESS) {
+		sync_destroy(owner, sync, GPU_OP_DESTROY_SEMAPHORE, pAllocator);
+		return status;
+	}
 
 	/* Expose the standard non-dispatchable handle rather than its wire identity. */
 	handle = vulkan_nondispatchable_handle(&sync->object);
@@ -312,6 +320,7 @@ vkDestroySemaphore(
 	/* Honor compatible destruction callbacks while consuming this semaphore. */
 	owner = vulkan_device(device);
 	sync = vulkan_sync_object((uint64_t)(uintptr_t)semaphore);
+	vulkan_timeline_destroy(sync);
 	sync_destroy(owner, sync, GPU_OP_DESTROY_SEMAPHORE, pAllocator);
 
 	/* Succeeded: the semaphore's local and native ownership is consumed. */
