@@ -337,7 +337,8 @@ ghci_vk_frame_new(
  * already written; a context fence of a timeline waits for the work its
  * device placed or holds until now (none when the frame destroyed the
  * device), and ends with an error when held work of the device failed
- * since the timeline's last context fence that reported it.
+ * since the timeline's last context fence that reported it, or the
+ * device is lost.
  * Returns 0, or EIO for a session the GPU core stopped or isolated, and
  * then frees the record.
  */
@@ -371,6 +372,8 @@ ghci_vk_frame_queue(
 		frame->failed = 1;
 		device->failed_timelines &= ~((uint64_t)1U << frame->timeline);
 	}
+	if (device != NULL && device->lost)
+		frame->failed = 1;
 	if (!stopped) {
 		position = &session->frames;
 		while (*position != NULL)
@@ -515,8 +518,10 @@ ghci_vk_holds_advance(
 /*
  * Ends every submission a device holds back with an error: its VkFence
  * is lost, the job markers and frames behind it fail, and its memory
- * goes back (after its last piece, for one placed in part).  The caller
- * holds the session's hold_lock.
+ * goes back (after its last piece, for one placed in part).  The device
+ * is lost from then on: what it is given later fails too, so that a wait
+ * after the failure (vkQueueWaitIdle behind a submission with no fence)
+ * does not succeed.  The caller holds the session's hold_lock.
  */
 void
 ghci_vk_holds_fail(
@@ -563,6 +568,7 @@ ghci_vk_holds_fail(
 
 	session->hold_count -= device->hold_count;
 	device->hold_count = 0U;
+	device->lost = 1;
 	for (timeline = 1U; timeline < GHCI_VK_TIMELINES; timeline++) {
 		if (session->timeline_device[timeline] == device)
 			device->failed_timelines |= (uint64_t)1U << timeline;
@@ -622,6 +628,7 @@ queue_submit(
 	uint64_t handle;
 	int recorded;
 	int placed;
+	int lost;
 	uint64_t count;
 	uint64_t index;
 	uint64_t signal;
@@ -655,6 +662,13 @@ queue_submit(
 	error = submission_check(session, submits, count, device, &recorded);
 	if (error != 0)
 		return error;
+
+	/* A lost device runs nothing more. */
+	lost = __atomic_load_n(&device->lost, __ATOMIC_ACQUIRE);
+	if (lost) {
+		ghci_vk_reply_result(reply, requested, (uint32_t)VK_ERROR_DEVICE_LOST);
+		return 0;
+	}
 
 	/* The recorded commands made into packets (none for buffers that record nothing). */
 	kern_memset(&submission, 0, sizeof(submission));
@@ -934,7 +948,7 @@ reset_fences(
 /*
  * vkGetFenceStatus: [device][fence] -> [result]: VK_SUCCESS signaled,
  * VK_NOT_READY not yet (or held back), VK_ERROR_DEVICE_LOST for work a
- * reset ended or held work that failed.  A fence of held work first lets
+ * reset ended, held work that failed, or a fence of a lost device.  A fence of held work first lets
  * the device's held submissions go as far as they may (on the client's
  * thread, which may wait for the ring's room), so that a client that
  * polls its fence places what the service thread could not.
@@ -950,6 +964,7 @@ fence_status(
 	struct ghci_vk_object *object;
 	uint64_t identity;
 	uint32_t result;
+	int lost;
 
 	/* The device and the fence. */
 	(void)drv_i915_wire_read_u64(reader);
@@ -964,9 +979,12 @@ fence_status(
 	if (object->as.fence.held)
 		(void)ghci_vk_holds_advance(session, object->device, 1);
 
-	/* Signaled on the host, by its submission's ticket, or not yet. */
+	/* Signaled on the host, by its submission's ticket, or not yet; nothing on a lost device. */
 	result = (uint32_t)VK_NOT_READY;
-	if (object->as.fence.lost) {
+	lost = 0;
+	if (object->device != NULL)
+		lost = __atomic_load_n(&object->device->lost, __ATOMIC_ACQUIRE);
+	if (object->as.fence.lost || lost) {
 		result = (uint32_t)VK_ERROR_DEVICE_LOST;
 	} else if (object->as.fence.signaled) {
 		result = (uint32_t)VK_SUCCESS;

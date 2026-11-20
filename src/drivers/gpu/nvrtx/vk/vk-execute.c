@@ -524,6 +524,14 @@ struct execute_surfaces {
 	uint32_t count;
 };
 
+/*
+ * The sampler of an image the shader only fetches from (a sampled image or
+ * an input attachment, whose descriptor names no sampler): no filter, level
+ * 0, which a fetch does not read.  Its words are made at its first use, the
+ * same each time.
+ */
+static struct nvrtx_vk_sampler execute_no_sampler;
+
 static int execute_open(struct nvrtx_vk_session *session, struct nvrtx_vk_execute **execute);
 static int execute_programs(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
 static int execute_compile(struct nvrtx_draw_ir *program, uint32_t shader_model, uint8_t *cpu, uint32_t *gprs, uint32_t *bytes);
@@ -3063,7 +3071,7 @@ execute_textures(
 		if (slot == NULL)
 			return EINVAL;
 
-		/* A uniform texel buffer's view (no sampler), or an image view and its sampler. */
+		/* A uniform texel buffer's view (no sampler), or an image view and its sampler (none for one the shader fetches from). */
 		texel = NULL;
 		view = NULL;
 		sampler = NULL;
@@ -3071,10 +3079,12 @@ execute_textures(
 			texel = slot->texel->payload;
 			named = texel;
 		} else {
-			if (slot->view == NULL || slot->sampler == NULL)
+			if (slot->view == NULL)
 				return EINVAL;
 			view = slot->view->payload;
-			sampler = slot->sampler->payload;
+			sampler = &execute_no_sampler;
+			if (slot->sampler != NULL)
+				sampler = slot->sampler->payload;
 			named = view;
 		}
 

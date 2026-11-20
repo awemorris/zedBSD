@@ -277,9 +277,7 @@ target_pass_supported(
 		}
 	}
 
-	/* No inputs, at most four colour attachments. */
-	if (subpass->inputAttachmentCount != 0U)
-		return 0;
+	/* At most four colour attachments (the input attachments are read as images by the shader). */
 	if (subpass->colorAttachmentCount > NVRTX_EXEC_COLOURS)
 		return 0;
 	if (subpass->colorAttachmentCount != 0U && subpass->pColorAttachments == NULL)

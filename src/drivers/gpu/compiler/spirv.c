@@ -1169,6 +1169,7 @@ struct drv_gpu_spirv_parser {
 static int drv_gpu_spirv_parse_module(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t features, struct drv_gpu_shader_ir **out, struct drv_gpu_compile_diagnostic *diagnostic);
 static int drv_gpu_spirv_inline(const uint32_t *words, size_t word_count, uint32_t **out, size_t *out_count, struct drv_gpu_compile_diagnostic *diagnostic);
 static int drv_gpu_spirv_parse_lowered(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t features, struct drv_gpu_shader_ir **out, struct drv_gpu_compile_diagnostic *diagnostic);
+static int drv_gpu_spirv_parse_inputs(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t features, struct drv_gpu_shader_ir **out, struct drv_gpu_compile_diagnostic *diagnostic);
 static int drv_gpu_spirv_pass_declarations(struct drv_gpu_spirv_parser *parser);
 static int drv_gpu_spirv_declare(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
 static int drv_gpu_spirv_declare_entry_point(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
@@ -1470,6 +1471,21 @@ drv_gpu_shader_parse_features(
 	uint32_t *inlined;
 	size_t inlined_count;
 
+	/* A backend that reads input attachments as images has them rewritten first. */
+	if ((features & DRV_GPU_SPIRV_FEATURE_LOWER_INPUT_ATTACHMENTS) != 0U) {
+		error = drv_gpu_spirv_parse_inputs(words,
+						   word_count,
+						   stage,
+						   features,
+						   out,
+						   diagnostic);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the IR is the caller's. */
+		return 0;
+	}
+
 	/* A backend without image instructions has its storage images lowered first. */
 	if ((features & DRV_GPU_SPIRV_FEATURE_LOWER_STORAGE_IMAGES) != 0U) {
 		error = drv_gpu_spirv_parse_lowered(words,
@@ -1532,6 +1548,49 @@ drv_gpu_shader_parse_features(
 						   out,
 						   diagnostic);
 		kern_free(inlined);
+	}
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the IR is the caller's. */
+	return 0;
+}
+
+/*
+ * Parses a module whose input attachments are rewritten as sampled images
+ * first (drv_gpu_spirv_lower_input_attachments), with the other features;
+ * a module without one is parsed as it is.
+ */
+static int
+drv_gpu_spirv_parse_inputs(
+	const uint32_t *words,
+	size_t word_count,
+	enum drv_gpu_shader_stage stage,
+	uint32_t features,
+	struct drv_gpu_shader_ir **out,
+	struct drv_gpu_compile_diagnostic *diagnostic)
+{
+	uint32_t *lowered;
+	size_t lowered_count;
+	uint32_t rest;
+	int error;
+
+	/* Rewrites the input attachments. */
+	error = drv_gpu_spirv_lower_input_attachments(words,
+						      word_count,
+						      &lowered,
+						      &lowered_count,
+						      diagnostic);
+	if (error != 0)
+		return error;
+
+	/* Parses the module as rewritten, or as it is, with the rest of the features. */
+	rest = features & ~DRV_GPU_SPIRV_FEATURE_LOWER_INPUT_ATTACHMENTS;
+	if (lowered == NULL) {
+		error = drv_gpu_shader_parse_features(words, word_count, stage, rest, out, diagnostic);
+	} else {
+		error = drv_gpu_shader_parse_features(lowered, lowered_count, stage, rest, out, diagnostic);
+		kern_free(lowered);
 	}
 	if (error != 0)
 		return error;
@@ -17301,3 +17360,6 @@ drv_gpu_spirv_result(
 
 /* The lowering of storage images to storage and uniform buffers. */
 #include "spirv-lower-image.inc"
+
+/* The lowering of input attachments to sampled images. */
+#include "spirv-lower-input.inc"

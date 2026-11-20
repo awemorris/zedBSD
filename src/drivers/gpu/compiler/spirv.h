@@ -163,6 +163,16 @@ struct drv_gpu_compile_diagnostic {
 #define DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE 0x80000U
 
 /*
+ * Input attachments read as sampled images: each image of Dim SubpassData
+ * becomes a 2D sampled image whose descriptor (the image view) is read as
+ * a sampled image's, and subpassLoad a fetch at the fragment's pixel, by
+ * a rewrite of the module before the parse
+ * (drv_gpu_spirv_lower_input_attachments).  For a driver that runs each
+ * subpass as a render pass of its own (refused otherwise).
+ */
+#define DRV_GPU_SPIRV_FEATURE_LOWER_INPUT_ATTACHMENTS 0x100000U
+
+/*
  * The bytes of the system storage buffer: the three group counts, and for
  * a pipeline with the DISPATCH_BASE feature the three words of the first
  * group after them.
@@ -199,5 +209,6 @@ int drv_gpu_shader_parse_features(const uint32_t *words, size_t word_count, enum
 void drv_gpu_shader_ir_free(struct drv_gpu_shader_ir *ir);
 void drv_gpu_shader_ir_bind_view(struct drv_gpu_shader_ir *ir, uint32_t view);
 int drv_gpu_spirv_lower_storage_images(const uint32_t *words, size_t word_count, uint32_t **out, size_t *out_count, struct drv_gpu_compile_diagnostic *diagnostic);
+int drv_gpu_spirv_lower_input_attachments(const uint32_t *words, size_t word_count, uint32_t **out, size_t *out_count, struct drv_gpu_compile_diagnostic *diagnostic);
 
 #endif /* DRIVERS_GPU_COMPILER_SPIRV_H */

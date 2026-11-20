@@ -816,7 +816,7 @@ layout_update_write(
 		if (reader->error != 0)
 			return EINVAL;
 
-		/* An element of a known set's binding, as a combined image sampler or a storage image. */
+		/* An element of a known set's binding, as a combined image sampler, a sampled image, an input attachment or a storage image. */
 		slot = NULL;
 		if (set != NULL)
 			slot = layout_slot_after(set, binding, element + (uint32_t)item);
@@ -829,14 +829,18 @@ layout_update_write(
 				return error;
 			continue;
 		}
-		if (type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+		if (type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+		    type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE &&
+		    type != VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
 			kern_logf("amdrdna: vk: vkUpdateDescriptorSets: descriptors of type %u are not bound\n", (unsigned)type);
 			continue;
 		}
 
-		/* The element samples this view with this sampler from now on. */
+		/* The element samples this view with this sampler from now on (a sampled image or an input attachment: the view alone). */
 		view = amdrdna_vk_object_find(session, I915_VK_OBJ_IMAGE_VIEW, view_id);
-		sampler = amdrdna_vk_object_find(session, I915_VK_OBJ_SAMPLER, sampler_id);
+		sampler = NULL;
+		if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+			sampler = amdrdna_vk_object_find(session, I915_VK_OBJ_SAMPLER, sampler_id);
 		error = layout_slot_set(slot, view, sampler);
 		if (error != 0)
 			return error;

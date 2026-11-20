@@ -272,6 +272,13 @@ static const struct descriptor_storage_format descriptor_storage_formats[] = {
 #define SAMPLER_BORDER_WHITE		2U
 #define SAMPLER_COMPARE_MASK		7U
 
+/*
+ * The sampler of an image the shader only fetches from (a sampled image or
+ * an input attachment, whose descriptor names no sampler): no filter,
+ * level 0, which a fetch does not read.
+ */
+static const struct amdrdna_vk_sampler descriptor_no_sampler;
+
 static void descriptor_fill(uint64_t address, uint32_t width, uint32_t height, uint32_t code, bool alternate, uint32_t channels, const uint32_t *swizzle, uint32_t *words);
 static uint32_t descriptor_select(uint32_t swizzle, uint32_t channel, bool alternate, uint32_t channels);
 static uint32_t sampler_clamp(uint32_t mode);
@@ -615,8 +622,10 @@ amdrdna_vk_sampler_descriptor(
  * of layers reads them from its first (the descriptor's address that
  * layer's), a view of a 3D image its depth, a view of an image of samples
  * its samples and its layers from the image's start.
- * Returns 0, EINVAL for a binding without both or a view the descriptor
- * cannot read, or EIO for an image without storage.
+ * A binding without a sampler (a sampled image or an input attachment)
+ * takes the sampler of none.  Returns 0, EINVAL for a binding without a
+ * view or a view the descriptor cannot read, or EIO for an image without
+ * storage.
  */
 int
 amdrdna_vk_texture_descriptors(
@@ -626,6 +635,7 @@ amdrdna_vk_texture_descriptors(
 {
 	const struct amdrdna_vk_view *view;
 	const struct amdrdna_vk_image *image;
+	const struct amdrdna_vk_sampler *sampler;
 	struct amdrdna_vk_image plane;
 	uint64_t va;
 	uint8_t *cpu;
@@ -633,11 +643,14 @@ amdrdna_vk_texture_descriptors(
 	uint32_t aspect;
 	int error;
 
-	/* The view's image, and the sampler. */
-	if (slot->view == NULL || slot->sampler == NULL)
+	/* The view's image, and the sampler (none for an image the shader fetches from). */
+	if (slot->view == NULL)
 		return EINVAL;
 	view = slot->view->payload;
 	image = view->image->payload;
+	sampler = &descriptor_no_sampler;
+	if (slot->sampler != NULL)
+		sampler = slot->sampler->payload;
 
 	/* A depth image: the aspect the view reads (its depth when it names both), as the shaders sample it. */
 	if (image->depth) {
@@ -647,7 +660,7 @@ amdrdna_vk_texture_descriptors(
 		error = amdrdna_vk_depth_descriptor(image, aspect, false, view->swizzle, image_words);
 		if (error != 0)
 			return error;
-		amdrdna_vk_sampler_descriptor(slot->sampler->payload, sampler_words);
+		amdrdna_vk_sampler_descriptor(sampler, sampler_words);
 		return 0;
 	}
 
@@ -669,7 +682,7 @@ amdrdna_vk_texture_descriptors(
 			return error;
 		amdrdna_vk_image_descriptor_samples(image_words, image->samples, view->type == VK_IMAGE_VIEW_TYPE_2D_ARRAY, view->base_layer,
 						    view->layer_count);
-		amdrdna_vk_sampler_descriptor(slot->sampler->payload, sampler_words);
+		amdrdna_vk_sampler_descriptor(sampler, sampler_words);
 		return 0;
 	}
 	va += (uint64_t)view->base_layer * image->slice_bytes;
@@ -687,7 +700,7 @@ amdrdna_vk_texture_descriptors(
 	if (view->type == VK_IMAGE_VIEW_TYPE_3D)
 		slices = image->slices;
 	amdrdna_vk_image_descriptor_slices(image_words, view->type, slices);
-	amdrdna_vk_sampler_descriptor(slot->sampler->payload, sampler_words);
+	amdrdna_vk_sampler_descriptor(sampler, sampler_words);
 
 	/* Succeeded: the binding's descriptors are written. */
 	return 0;

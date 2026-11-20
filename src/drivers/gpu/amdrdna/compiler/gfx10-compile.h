@@ -35,12 +35,13 @@
  * its FragStencilRefEXT output, its SampleMask input and output,
  * OpImageQueryLod, the storage images and storage texel buffers
  * (OpImageRead, OpImageWrite and the atomics of an R32_UINT or R32_SINT
- * texel), and images in a compute program.
+ * texel), images in a compute program, and the input attachments, read
+ * as sampled images (DRV_GPU_SPIRV_FEATURE_LOWER_INPUT_ATTACHMENTS).
  */
 #define AMDRDNA_GFX10_SPIRV_FEATURES	(DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH | DRV_GPU_SPIRV_FEATURE_STENCIL_EXPORT | \
 					 DRV_GPU_SPIRV_FEATURE_SAMPLE_MASK | DRV_GPU_SPIRV_FEATURE_QUERY_LOD | \
 					 DRV_GPU_SPIRV_FEATURE_STORAGE_IMAGE | DRV_GPU_SPIRV_FEATURE_COMPUTE_IMAGES | \
-					 DRV_GPU_SPIRV_FEATURE_VIEW_INDEX)
+					 DRV_GPU_SPIRV_FEATURE_VIEW_INDEX | DRV_GPU_SPIRV_FEATURE_LOWER_INPUT_ATTACHMENTS)
 
 /*
  * The arrays of descriptors: each element is a binding of its own (struct

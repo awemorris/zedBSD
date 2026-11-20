@@ -586,11 +586,13 @@ pass_dependency(
 }
 
 /*
- * Decodes the pass's one subpass: its colour slots (up to four, each an
- * attachment or unused), the resolve attachments of the slots when it has
- * them, and its depth/stencil attachment, with no input or preserved
- * attachment.  Every attachment is named once, a colour one or a resolve
- * one in the colour attachment layout.
+ * Decodes the pass's one subpass: its input attachments, which the
+ * shader reads as images (they take no slot), its colour slots (up to
+ * four, each an attachment or unused), the resolve attachments of the
+ * slots when it has them, and its depth/stencil attachment, with no
+ * preserved attachment.  Every attachment is named: once as a colour, a
+ * resolve or the depth/stencil one (a colour or a resolve one in the
+ * colour attachment layout), or as an input one.
  */
 static int
 decode_subpass(
@@ -605,9 +607,10 @@ decode_subpass(
 	uint32_t layout;
 	uint32_t slot;
 	uint32_t named;
+	uint32_t inputs;
 	int error;
 
-	/* A graphics subpass without input attachments. */
+	/* A graphics subpass. */
 	flags = drv_i915_wire_read_u32(reader);
 	attachment = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
@@ -615,9 +618,22 @@ decode_subpass(
 	if (reader->error != 0 ||
 	    flags != 0 ||
 	    attachment != VK_PIPELINE_BIND_POINT_GRAPHICS ||
-	    count != 0 ||
-	    array != 0)
+	    array != count)
 		return ENOTSUP;
+
+	/* Its input attachments: attachments of the pass (or unused), which take no slot. */
+	inputs = 0;
+	for (slot = 0; slot < count; slot++) {
+		attachment = drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		if (reader->error != 0)
+			return EINVAL;
+		if (attachment == VK_ATTACHMENT_UNUSED)
+			continue;
+		if (attachment >= pass->attachment_count)
+			return ENOTSUP;
+		inputs |= 1U << attachment;
+	}
 
 	/* The colour slots, each naming a colour attachment not named before, or unused. */
 	count = drv_i915_wire_read_u32(reader);
@@ -694,7 +710,7 @@ decode_subpass(
 	}
 
 	/* Every attachment is one the subpass names. */
-	if (named != (1U << pass->attachment_count) - 1U)
+	if ((named | inputs) != (1U << pass->attachment_count) - 1U)
 		return ENOTSUP;
 
 	/* No attachment is preserved through the single subpass. */

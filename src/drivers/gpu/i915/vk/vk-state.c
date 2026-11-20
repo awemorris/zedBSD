@@ -191,6 +191,13 @@ static const uint32_t i915_gfx_eot_only_gen9[4] = {
 };
 
 /*
+ * The sampler state of a texture the shader only fetches from (ld), whose
+ * descriptor names no sampler: nearest, repeat, level 0, which ld does not
+ * read.
+ */
+static const struct i915_gfx_sampler i915_state_no_sampler;
+
+/*
  * SAMPLER_STATE texture coordinate modes, indexed by VkSamplerAddressMode:
  * REPEAT is WRAP, then MIRROR, CLAMP, CLAMP_BORDER and MIRROR_ONCE.
  */
@@ -3319,19 +3326,19 @@ i915_state_write_textures(
 			continue;
 		}
 
-		/* Refuses a draw whose set and binding lack the view or the sampler. */
+		/*
+		 * Refuses a draw whose set and binding lack the view.  One
+		 * without a sampler (a sampled image or an input attachment the
+		 * shader fetches from, with ld) takes the sampler state of none.
+		 */
 		if (descriptor == NULL ||
-		    descriptor->view == NULL ||
-		    descriptor->sampler == NULL) {
-			missing = "no sampler";
-			if (descriptor == NULL) {
+		    descriptor->view == NULL) {
+			missing = "no view";
+			if (descriptor == NULL)
 				missing = "no set bound";
-			} else if (descriptor->view == NULL) {
-				missing = "no view";
-			}
 
-			/* Says which of the three is missing. */
-			kern_logf("i915: vk: draw refused: %s shader: set %u binding %u element %u has no image view and sampler (%s)\n",
+			/* Says which of the two is missing. */
+			kern_logf("i915: vk: draw refused: %s shader: set %u binding %u element %u has no image view (%s)\n",
 				  textures->stage,
 				  set_index,
 				  binding,
@@ -3343,6 +3350,8 @@ i915_state_write_textures(
 		/* Describes the levels the texture's view shows. */
 		view = descriptor->view;
 		sampler = descriptor->sampler;
+		if (sampler == NULL)
+			sampler = &i915_state_no_sampler;
 		range.view_type = view->view_type;
 		range.base_level = view->base_level;
 		range.level_count = view->level_count;
