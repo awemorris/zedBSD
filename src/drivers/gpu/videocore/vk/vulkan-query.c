@@ -223,6 +223,7 @@ properties2_query(
 	struct bcm2711_vulkan_object *physical;
 	VkPhysicalDeviceProperties *properties;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	uint64_t identity;
 	int form;
 	int error;
@@ -252,12 +253,16 @@ properties2_query(
 		return 0;
 	}
 
-	/* The Vulkan 1.1 properties, then the record. */
+	/* The Vulkan 1.1 or 1.2 properties, then the record. */
 	bcm2711_vulkan_device_core11(session, &core11);
-	i915_vkc_reply_core11_properties(reply, &core11);
+	bcm2711_vulkan_device_core12(session, &core12);
+	if (form == I915_VKC_PROPERTIES2_CORE12)
+		i915_vkc_reply_core12_properties(reply, &core12);
+	else
+		i915_vkc_reply_core11_properties(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
 
-	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	/* Succeeded: the properties are reported. */
 	return 0;
 }
 
@@ -315,12 +320,14 @@ features2_query(
 	struct bcm2711_vulkan_object *physical;
 	VkPhysicalDeviceFeatures *features;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	uint64_t identity;
+	int form;
 	int error;
 
-	/* The physical device, then the output chain of the 1.1 feature structures. */
+	/* The physical device, then the output chain of the 1.1 or 1.2 feature structures. */
 	identity = drv_i915_wire_read_u64(reader);
-	error = i915_vkc_read_features2(reader);
+	error = i915_vkc_read_features2(reader, &form);
 	if (error != 0) {
 		reader->error = 1;
 		return error;
@@ -335,9 +342,13 @@ features2_query(
 		return ENOMEM;
 	bcm2711_vulkan_device_features(session, features);
 
-	/* The 1.1 features, then the record. */
+	/* The 1.1 or 1.2 features, then the record. */
 	bcm2711_vulkan_device_core11(session, &core11);
-	i915_vkc_reply_core11_features(reply, &core11);
+	bcm2711_vulkan_device_core12(session, &core12);
+	if (form == I915_VKC_FEATURES2_CORE12)
+		i915_vkc_reply_core12_features(reply, &core12);
+	else
+		i915_vkc_reply_core11_features(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
 
 	/* Succeeded: the features are reported. */
@@ -379,6 +390,27 @@ bcm2711_vulkan_device_core11(
 	/* The descriptors of one set and the largest allocation. */
 	core11->maintenance3.maxPerSetDescriptors = 1024U;
 	core11->maintenance3.maxMemoryAllocationSize = BCM2711_VULKAN_MEMORY_BUDGET;
+}
+
+/*
+ * Fills the device's Vulkan 1.2 answers: those every executor starts from,
+ * under its name, and on a 7.1 the resolve of a multisampled depth/stencil
+ * attachment's sample 0, which the tiles store with the attachment
+ * (native71-pass.c), both aspects of a D24S8 one together.
+ */
+void
+bcm2711_vulkan_device_core12(
+	const struct bcm2711_vulkan_session *session,
+	struct i915_vkc_core12 *core12)
+{
+	/* The shaders' features, the limits and the name. */
+	i915_vkc_core12_defaults(core12, "zedBSD v3d");
+
+	/* A 7.1 resolves sample 0 of the depth and stencil. */
+	if (compute_engine(session)) {
+		core12->properties.supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+		core12->properties.supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	}
 }
 
 /* Enumerates one graphics/transfer family while preserving count-only and actual output-array framing. */
@@ -673,8 +705,8 @@ device_properties(
 	uint32_t layout;
 	bool compute;
 
-	/* The private 1.1 version is a transport requirement; optional features and unimplemented stages remain absent. */
-	properties->apiVersion = VK_MAKE_VERSION(1, 1, 0);
+	/* The private 1.2 version is a transport requirement; optional features and unimplemented stages remain absent. */
+	properties->apiVersion = VK_MAKE_VERSION(1, 2, 0);
 	properties->driverVersion = 1;
 	properties->vendorID = 0x14e4;
 	properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;

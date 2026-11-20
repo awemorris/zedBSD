@@ -29,6 +29,7 @@ static int prepare_target(struct bcm2711_vulkan_native_pass *pass, const struct 
 static int prepare_colour(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record, uint32_t slot, bool continued, bool split);
 static int prepare_target_clear(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int prepare_depth(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record, bool continued, bool split);
+static int prepare_depth_resolve(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_pass *description, const struct bcm2711_vulkan_framebuffer *framebuffer, const struct bcm2711_vulkan_record *record);
 static int prepare_attachments(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_record *clear);
 static int prepare_depth_clear(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_record *clear, uint32_t aspects, bool whole);
 static uint32_t cut_rect(const struct bcm2711_vulkan_native_pass *pass, const uint32_t *rect, VkRect2D *rects, uint32_t count);
@@ -472,6 +473,11 @@ bcm2711_vulkan_native_pass_release(
 		if (first == 0 && error != 0)
 			first = error;
 	}
+	if (owned->resolve != NULL) {
+		error = bcm2711_v3d_memory_release(owned->space, owned->resolve);
+		if (first == 0 && error != 0)
+			first = error;
+	}
 
 	/* Only the consumed CPU root disappears; uncertain failed-unmap storage remains native-space owned. */
 	kern_free(owned);
@@ -556,6 +562,13 @@ prepare_target(
 	/* A depth/stencil attachment is cleared, loaded and stored in the tile buffer. */
 	if (description->depth) {
 		error = prepare_depth(pass, description, framebuffer, record, continued, split);
+		if (error != 0)
+			return error;
+	}
+
+	/* A resolved depth/stencil attachment is resolved by the last native pass of the render pass. */
+	if (description->depth_resolve && !split) {
+		error = prepare_depth_resolve(pass, description, framebuffer, record);
 		if (error != 0)
 			return error;
 	}
@@ -824,6 +837,90 @@ prepare_depth(
 	pass->state.depth_bytes = (uint32_t)layer_view.bytes;
 
 	/* Succeeded: the tiles move the attachment through its retained image. */
+	return 0;
+}
+
+/*
+ * Prepares the resolve of the depth/stencil attachment at the end of the
+ * render pass: the tiles store sample 0 of each pixel into the layer of the
+ * resolve attachment the framebuffer's view names (its view's, under
+ * multiview).  A tile store writes whole tiles, so a render area smaller
+ * than the framebuffer is stored into a raster of the pass's own
+ * (prepare_lists) and copied from there on the CPU (the finish), which
+ * leaves the attachment outside the render area as it was.
+ */
+static int
+prepare_depth_resolve(
+	struct bcm2711_vulkan_native_pass *pass,
+	const struct bcm2711_vulkan_pass *description,
+	const struct bcm2711_vulkan_framebuffer *framebuffer,
+	const struct bcm2711_vulkan_record *record)
+{
+	const struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_resource layer_view;
+	struct bcm2711_v3d_view *view;
+	const VkAttachmentDescription *attachment;
+	uint32_t address;
+	void *cpu;
+	int error;
+
+	/* The framebuffer's resolve view names an image of one sample in the attachment's format. */
+	attachment = &description->depth_stencil;
+	if (pass->state.depth == 0 ||
+	    pass->state.msaa == 0 ||
+	    framebuffer->depth_resolve == NULL ||
+	    framebuffer->depth_resolve->kind != I915_VK_OBJ_IMAGE_VIEW ||
+	    framebuffer->depth_resolve->payload == NULL)
+		return EINVAL;
+	image_view = framebuffer->depth_resolve->payload;
+	if (image_view->owner.parent == NULL || image_view->owner.parent->kind != I915_VK_OBJ_IMAGE)
+		return EINVAL;
+	image = image_view->owner.parent->payload;
+	if (image == NULL ||
+	    image->samples != VK_SAMPLE_COUNT_1_BIT ||
+	    image->format != attachment->format ||
+	    image->bytes > 0xffffffffU)
+		return EINVAL;
+
+	/* The layer the framebuffer's view names, as an image of its own, its layout checked and committed at the pass's ends. */
+	error = bcm2711_vulkan_image_level_view(image, 0, image_view->base_layer + pass->view, &layer_view);
+	if (error != 0)
+		return error;
+	pass->resolve_target = image;
+	pass->resolve_layer = image_view->base_layer + pass->view;
+	pass->resolve_initial_layout = description->depth_resolved.initialLayout;
+	pass->resolve_final_layout = description->depth_resolved.finalLayout;
+
+	/* Its coherent storage is held through the pass's retirement, like the attachment's. */
+	error = bcm2711_vulkan_resource_backing(&layer_view, 0, layer_view.bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+	if (view->references == 0 || view->references == 0xffffffffU)
+		return EOVERFLOW;
+	bcm2711_v3d_memory_retain(view);
+	pass->resolve = view;
+	pass->state.depth_resolve = 1;
+	pass->state.depth_resolve_output = address;
+	pass->state.depth_resolve_pitch = layer_view.pitch;
+	pass->state.depth_resolve_bytes = (uint32_t)layer_view.bytes;
+
+	/* A smaller render area: the CPU copies it from the pass's raster into the layer (the raster is made with the lists). */
+	pass->resolve_address = address;
+	pass->resolve_bytes = (uint32_t)layer_view.bytes;
+	pass->resolve_cpu = cpu;
+	pass->resolve_pitch = layer_view.pitch;
+	pass->resolve_texel = attachment->format == VK_FORMAT_D16_UNORM ? 2U : 4U;
+	if (record->area.offset.x != 0 ||
+	    record->area.offset.y != 0 ||
+	    record->area.extent.width != framebuffer->width ||
+	    record->area.extent.height != framebuffer->height) {
+		if (cpu == NULL)
+			return EINVAL;
+		pass->state.depth_resolve_output = 0;
+	}
+
+	/* Succeeded: the tiles store the resolve. */
 	return 0;
 }
 
@@ -1116,6 +1213,20 @@ prepare_lists(
 		return error;
 	pass->state.state = storage->view->address;
 	pass->state.state_bytes = (uint32_t)storage->view->bytes;
+
+	/*
+	 * The raster of one sample a resolve of a smaller render area stores
+	 * into (prepare_depth_resolve), as large as the framebuffer, with the
+	 * pitch of the resolve attachment's layer.
+	 */
+	if (pass->state.depth_resolve != 0 && pass->state.depth_resolve_output == 0) {
+		error = allocate_storage(pass, (uint64_t)pass->resolve_pitch * pass->state.height, BCM2711_NATIVE_STORAGE_ZEROED, remaining, &storage);
+		if (error != 0)
+			return error;
+		pass->resolve_scratch = storage;
+		pass->state.depth_resolve_output = storage->view->address;
+		pass->state.depth_resolve_bytes = (uint32_t)storage->view->bytes;
+	}
 
 	/*
 	 * The occlusion counters, one zeroed group that the tile buffer adds

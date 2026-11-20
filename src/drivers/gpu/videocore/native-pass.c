@@ -653,10 +653,11 @@ validate_depth(
 {
 	uint32_t magnitude;
 
-	/* No attachment, D24S8, X8_D24, D16 or D32; loads and stores are Boolean. */
+	/* No attachment, D24S8, X8_D24, D16 or D32; loads and stores are Boolean; no resolve on a 4.2. */
 	if (state->depth > 4U ||
 	    state->depth_load > 1 ||
-	    state->depth_store > 1)
+	    state->depth_store > 1 ||
+	    state->depth_resolve != 0)
 		return EINVAL;
 
 	/* Without an attachment nothing is loaded or stored and the default clear values stand. */

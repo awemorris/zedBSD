@@ -148,10 +148,10 @@ create_instance(
 			version = info.pApplicationInfo->apiVersion;
 	}
 
-	/* The private queue transport uses version 1.1, without a formal Vulkan conformance claim. */
+	/* The private queue transport takes versions up to 1.2, without a formal Vulkan conformance claim. */
 	major = version >> 22;
 	minor = (version >> 12) & 0x3ffU;
-	if (major != 1 || minor > 1) {
+	if (major != 1 || minor > 2) {
 		reply_identity(reply, VK_ERROR_INCOMPATIBLE_DRIVER, 0);
 		return 0;
 	}
@@ -238,6 +238,7 @@ create_device(
 	VkDeviceCreateInfo info;
 	VkPhysicalDeviceFeatures supported;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	const VkBool32 *have;
 	const VkBool32 *want;
 	uint32_t feature;
@@ -304,9 +305,10 @@ create_device(
 		}
 	}
 
-	/* A Vulkan 1.1 feature the device does not report fails like a core one (libvulkan refuses it first). */
+	/* A Vulkan 1.1 or 1.2 feature the device does not report fails like a core one (libvulkan refuses it first). */
 	bcm2711_vulkan_device_core11(session, &core11);
-	if (i915_vkc_core11_check_device(&info, &core11) != 0) {
+	bcm2711_vulkan_device_core12(session, &core12);
+	if (i915_vkc_core11_check_device(&info, &core11) != 0 || i915_vkc_core12_check_device(&info, &core12) != 0) {
 		reply_identity(reply, VK_ERROR_FEATURE_NOT_PRESENT, 0);
 		return 0;
 	}

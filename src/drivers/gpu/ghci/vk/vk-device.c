@@ -30,7 +30,7 @@
  * The version on the wire (1.1, which libvulkan requires and shows
  * applications as 1.0) and the driver's version.
  */
-#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 1, 0)
+#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 2, 0)
 #define DEVICE_DRIVER_VERSION		1U
 
 /* The one queue family. */
@@ -46,6 +46,7 @@ static void device_record(struct ghci_vk_session *session, VkPhysicalDevicePrope
 static int features(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int features2(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_core11(struct ghci_vk_session *session, struct i915_vkc_core11 *core11);
+static void device_core12(struct i915_vkc_core12 *core12);
 static int memory_properties(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int families(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int format(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -269,6 +270,7 @@ properties2(
 	struct i915_wire_writer *reply)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	VkPhysicalDeviceProperties *record;
 	int form;
 	int error;
@@ -289,18 +291,22 @@ properties2(
 		return 0;
 	}
 
-	/* The Vulkan 1.1 properties, then the ordinary ones. */
+	/* The Vulkan 1.1 or 1.2 properties, then the ordinary ones. */
 	record = ghci_vk_arena_take(session, sizeof(*record));
 	if (record == NULL)
 		return ENOMEM;
 	device_record(session, record);
 	device_core11(session, &core11);
+	device_core12(&core12);
 	if (requested != 0U) {
-		i915_vkc_reply_core11_properties(reply, &core11);
+		if (form == I915_VKC_PROPERTIES2_CORE12)
+			i915_vkc_reply_core12_properties(reply, &core12);
+		else
+			i915_vkc_reply_core11_properties(reply, &core11);
 		i915_vkc_enc_VkPhysicalDeviceProperties(reply, record);
 	}
 
-	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	/* Succeeded: the properties are reported. */
 	return 0;
 }
 
@@ -437,20 +443,26 @@ features2(
 	struct i915_wire_writer *reply)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	VkPhysicalDeviceFeatures record;
+	int form;
 	int error;
 
-	/* The physical device, then the output chain of the 1.1 feature structures. */
+	/* The physical device, then the output chain of the 1.1 or 1.2 feature structures. */
 	(void)drv_i915_wire_read_u64(reader);
-	error = i915_vkc_read_features2(reader);
+	error = i915_vkc_read_features2(reader, &form);
 	if (error != 0)
 		return error;
 
-	/* The 1.1 features, then the device's features. */
+	/* The 1.1 or 1.2 features, then the device's features. */
 	ghci_vk_caps_features(&session->device->caps, &record);
 	device_core11(session, &core11);
+	device_core12(&core12);
 	if (requested != 0U) {
-		i915_vkc_reply_core11_features(reply, &core11);
+		if (form == I915_VKC_FEATURES2_CORE12)
+			i915_vkc_reply_core12_features(reply, &core12);
+		else
+			i915_vkc_reply_core11_features(reply, &core11);
 		i915_vkc_enc_VkPhysicalDeviceFeatures(reply, &record);
 	}
 
@@ -483,6 +495,19 @@ device_core11(
 	/* The descriptors of one set and the largest allocation. */
 	core11->maintenance3.maxPerSetDescriptors = 1024U;
 	core11->maintenance3.maxMemoryAllocationSize = ghci_vk_caps_heap_bytes(&session->device->caps);
+}
+
+/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name, and the resolve of sample 0. */
+static void
+device_core12(
+	struct i915_vkc_core12 *core12)
+{
+	/* The shaders' features, the limits and the name. */
+	i915_vkc_core12_defaults(core12, "zedBSD ghci");
+
+	/* Sample 0 of a depth/stencil attachment, which the driver's copy program resolves at the end of its subpass. */
+	core12->properties.supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	core12->properties.supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
 }
 
 /* vkGetPhysicalDeviceMemoryProperties: [physical][u64 1][u64 32][u64 16] -> [u64 1][properties]. */
@@ -817,6 +842,7 @@ device_admit(
 	const VkDeviceCreateInfo *info)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	uint64_t decoded;
 	uint32_t index;
 	int within;
@@ -832,7 +858,7 @@ device_admit(
 			return (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	/* Only the features the device offers, Vulkan 1.1's too. */
+	/* Only the features the device offers, Vulkan 1.1's and 1.2's too. */
 	if (info->pEnabledFeatures != NULL) {
 		within = ghci_vk_caps_features_within(&session->device->caps, info->pEnabledFeatures);
 		if (!within)
@@ -840,6 +866,9 @@ device_admit(
 	}
 	device_core11(session, &core11);
 	if (i915_vkc_core11_check_device(info, &core11) != 0)
+		return (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT;
+	device_core12(&core12);
+	if (i915_vkc_core12_check_device(info, &core12) != 0)
 		return (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT;
 
 	/* Succeeded: the device may be made. */

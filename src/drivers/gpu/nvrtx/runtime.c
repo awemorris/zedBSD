@@ -104,6 +104,13 @@
  */
 #define RUNTIME_NATIVE_CORE11		0x8U
 
+/*
+ * The native flag of the Vulkan 1.2 queries: the executor answers them,
+ * reads the 1.2 chain of a device creation and vkCreateRenderPass2
+ * (VULKAN_NATIVE_CAPSET_CORE12_QUERIES).
+ */
+#define RUNTIME_NATIVE_CORE12		0x10U
+
 /* The timelines a queue may name (1 to 63; 0 is the context's own). */
 #define RUNTIME_TIMELINES		64U
 
@@ -455,7 +462,7 @@ runtime_capset(
 	 * there is one.
 	 */
 	if (capset->capacity >= RUNTIME_NATIVE_CAPSET_BYTES) {
-		flags = RUNTIME_NATIVE_SYNC_COMMAND | RUNTIME_NATIVE_CORE11;
+		flags = RUNTIME_NATIVE_SYNC_COMMAND | RUNTIME_NATIVE_CORE11 | RUNTIME_NATIVE_CORE12;
 		video = nvrtx_node_video_available(node);
 		if (video) {
 			flags |= RUNTIME_NATIVE_VIDEO_H264;

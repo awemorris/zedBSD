@@ -117,6 +117,17 @@ struct bcm2711_native_pass {
 	uint32_t depth_pitch;
 	uint32_t depth_bytes;
 	/*
+	 * The resolve of a multisampled depth/stencil attachment (7.1 only):
+	 * depth_resolve set stores, after the attachment's own store, sample 0
+	 * of each pixel's depth (and stencil, for D24S8) into the raster image
+	 * of one sample at depth_resolve_output with depth_resolve_pitch, in
+	 * the attachment's memory format.
+	 */
+	uint32_t depth_resolve;
+	uint32_t depth_resolve_output;
+	uint32_t depth_resolve_pitch;
+	uint32_t depth_resolve_bytes;
+	/*
 	 * The tile boxes (first x, first y, last x, last y, inclusive, inside
 	 * the rectangle above) whose tiles the pass changes: only
 	 * the supertiles that meet one of them are rendered.  A tile no box

@@ -40,7 +40,7 @@
 #define NATIVE_PASS_AUX_DEPTH_BYTES (8U * 1024U)
 
 /* The most native intervals a pass names: three lists, four targets, pool, tile state, copy source and depth image. */
-#define NATIVE_PASS_SPANS 11U
+#define NATIVE_PASS_SPANS 12U
 
 /* A temporary half-open interval exists only while all independent native owners are checked before list publication. */
 struct native_pass_span {
@@ -64,7 +64,7 @@ static void write_half(uint8_t *bytes, uint32_t half);
 static void write_config(uint8_t *bytes, uint32_t low, uint32_t high);
 static void write_raster(uint8_t *bytes, uint8_t opcode, uint32_t buffer, uint32_t format, uint32_t decimate, uint32_t pitch, uint32_t address);
 static uint32_t rows(const struct bcm2711_native_pass *state, const struct bcm2711_native_pass_target *target);
-static void write_depth(uint8_t *bytes, uint8_t opcode, const struct bcm2711_native_pass *state);
+static void write_depth(uint8_t *bytes, uint8_t opcode, const struct bcm2711_native_pass *state, uint32_t decimate, uint32_t pitch, uint32_t output);
 static int validate_depth(const struct bcm2711_native_pass *state);
 static uint32_t encode_targets(const struct bcm2711_native_pass *state, uint8_t *bytes);
 static void encode_render(const struct bcm2711_native_pass *state, const struct bcm2711_native_pass_image *tile, const struct bcm2711_native_pass_sizes *sizes, uint8_t *bytes);
@@ -207,7 +207,7 @@ bcm2711_native_pass_measure(
 		stores += state->target[index].store;
 	}
 	loads += state->depth_load;
-	stores += state->depth_store;
+	stores += state->depth_store + state->depth_resolve;
 
 	/* One generic list has its loads, the draws' state and at least one store (the NONE store when nothing is stored). */
 	measured.bin = 14U + draws * BCM2711_NATIVE_BIN_BYTES;
@@ -390,6 +390,16 @@ validate_images(
 		if ((uint64_t)state->depth_pitch * state->height * (state->msaa + 1U) > state->depth_bytes)
 			return ENOSPC;
 		error = prepare_span(state->depth_output, state->depth_bytes, 64U, &spans[count]);
+		if (error != 0)
+			return error;
+		count++;
+	}
+
+	/* A resolved depth/stencil attachment's raster of one sample holds every row the stores write. */
+	if (state->depth_resolve != 0) {
+		if ((uint64_t)state->depth_resolve_pitch * state->height > state->depth_resolve_bytes)
+			return ENOSPC;
+		error = prepare_span(state->depth_resolve_output, state->depth_resolve_bytes, 64U, &spans[count]);
 		if (error != 0)
 			return error;
 		count++;
@@ -691,18 +701,25 @@ write_raster(
  * Encodes one raster load or store of the depth/stencil tile buffer: Z and
  * stencil for a D24S8 image, Z alone for an X8_D24 one, both in the d24s8
  * memory format (43), Z alone for a D16 one in the d16 format (42) and for
- * a D32_SFLOAT one in the d32f format (40).
+ * a D32_SFLOAT one in the d32f format (40).  decimate is the samples the
+ * raster at output with pitch holds: 3 all four (2x2 blocks), 0 sample 0
+ * alone (a store of one sample a pixel).
  *
  * Values referenced: Mesa 25.3.6 src/broadcom/cle/v3d_packet.xml (Load and
  * Store Tile Buffer General, buffers Z 9 and Z+Stencil 11, Output Image
- * Format d24s8 43) and vulkan/v3dvx_cmd_buffer.c (the depth/stencil loads
- * and stores, which use the image's D24S8 render-target type).
+ * Format d24s8 43, Decimate Mode sample 0 0 and all samples 3) and
+ * vulkan/v3dvx_cmd_buffer.c (the depth/stencil loads and stores, which use
+ * the image's D24S8 render-target type, and the depth/stencil resolve of
+ * sample 0 stored from the tile buffer).
  */
 static void
 write_depth(
 	uint8_t *bytes,
 	uint8_t opcode,
-	const struct bcm2711_native_pass *state)
+	const struct bcm2711_native_pass *state,
+	uint32_t decimate,
+	uint32_t pitch,
+	uint32_t output)
 {
 	uint32_t buffer;
 	uint32_t format;
@@ -723,9 +740,9 @@ write_depth(
 
 	/* The buffer, the memory format and the raster byte stride, then the image's address. */
 	bytes[0] = opcode;
-	write_word(bytes + 1, buffer | ((state->msaa * 3U) << 10) | (format << 12) | (state->depth_pitch << 28));
-	write_word(bytes + 5, state->depth_pitch >> 4);
-	write_word(bytes + 9, state->depth_output);
+	write_word(bytes + 1, buffer | (decimate << 10) | (format << 12) | (pitch << 28));
+	write_word(bytes + 5, pitch >> 4);
+	write_word(bytes + 9, output);
 
 	/* Succeeded: the complete packet references only the owned depth/stencil image. */
 	return;
@@ -950,7 +967,7 @@ encode_tile(
 
 	/* A loaded depth/stencil attachment fills the tile's depth and stencil before any fragment is tested. */
 	if (state->depth_load != 0) {
-		write_depth(bytes + cursor, 30, state);
+		write_depth(bytes + cursor, 30, state, state->msaa * 3U, state->depth_pitch, state->depth_output);
 		cursor += 13U;
 	}
 
@@ -966,7 +983,14 @@ encode_tile(
 	/* A stored depth/stencil attachment is written first, as Mesa orders the stores. */
 	stores = 0;
 	if (state->depth_store != 0) {
-		write_depth(bytes + cursor, 29, state);
+		write_depth(bytes + cursor, 29, state, state->msaa * 3U, state->depth_pitch, state->depth_output);
+		cursor += 13U;
+		stores++;
+	}
+
+	/* A resolved depth/stencil attachment then stores sample 0 of each pixel into its raster of one sample. */
+	if (state->depth_resolve != 0) {
+		write_depth(bytes + cursor, 29, state, 0, state->depth_resolve_pitch, state->depth_resolve_output);
 		cursor += 13U;
 		stores++;
 	}
@@ -1009,17 +1033,28 @@ validate_depth(
 {
 	uint32_t magnitude;
 
-	/* No attachment, D24S8, X8_D24, D16 or D32; loads and stores are Boolean. */
+	/* No attachment, D24S8, X8_D24, D16 or D32; loads, stores and the resolve are Boolean. */
 	if (state->depth > 4U ||
 	    state->depth_load > 1 ||
-	    state->depth_store > 1)
+	    state->depth_store > 1 ||
+	    state->depth_resolve > 1)
 		return EINVAL;
 
-	/* Without an attachment nothing is loaded or stored and the default clear values stand. */
+	/* Without an attachment nothing is loaded, stored or resolved and the default clear values stand. */
 	if (state->depth == 0) {
-		if (state->depth_load != 0 || state->depth_store != 0)
+		if (state->depth_load != 0 || state->depth_store != 0 || state->depth_resolve != 0)
 			return EINVAL;
 		return 0;
+	}
+
+	/* Only the samples of a multisampled pass are resolved, into a raster of one sample with the pitch limits of the attachment's. */
+	if (state->depth_resolve != 0) {
+		if (state->msaa == 0 ||
+		    (state->depth == 3U && state->depth_resolve_pitch < state->width * 2U) ||
+		    (state->depth != 3U && state->depth_resolve_pitch < state->width * 4U) ||
+		    state->depth_resolve_pitch > 0xfffffU ||
+		    (state->depth_resolve_pitch & 63U) != 0)
+			return EINVAL;
 	}
 
 	/* The clear values: depth in zero through one (either signed zero), stencil eight-bit. */

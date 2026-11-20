@@ -52,7 +52,7 @@ struct clear_data {
 	VkClearRect rects[POWERVR_PASS_CLEAR_RECTS];
 };
 
-static int create_pass(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int create_pass(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool version2);
 static int create_framebuffer(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int framebuffer_view(struct powervr_vk_session *session, uint64_t identity, struct powervr_vk_object **held, struct powervr_pass_view *view);
 static int framebuffer_destroy(struct powervr_vk_session *session, void *payload);
@@ -79,7 +79,10 @@ powervr_vk_pass_route(
 	*handled = 1;
 	switch (opcode) {
 	case GPU_OP_CREATE_RENDER_PASS:
-		error = create_pass(session, reader, reply);
+		error = create_pass(session, reader, reply, false);
+		break;
+	case GPU_OP_CREATE_RENDER_PASS2:
+		error = create_pass(session, reader, reply, true);
 		break;
 	case GPU_OP_DESTROY_RENDER_PASS:
 		error = powervr_vk_destroy_plain(session, reader, I915_VK_OBJ_RENDER_PASS);
@@ -105,15 +108,20 @@ powervr_vk_pass_route(
 
 /*
  * vkCreateRenderPass: [device][present][VkRenderPassCreateInfo] and the
- * create's tail -> the create's reply.  A shape the executor does not
- * take is VK_ERROR_OUT_OF_HOST_MEMORY with a log line.
+ * create's tail -> the create's reply; with version2, vkCreateRenderPass2
+ * (GPU_OP_CREATE_RENDER_PASS2), whose record is read in its Vulkan 1.0
+ * form with the resolves of its depth and stencil aside.  A shape the
+ * executor does not take is VK_ERROR_OUT_OF_HOST_MEMORY with a log line.
  */
 static int
 create_pass(
 	struct powervr_vk_session *session,
 	struct i915_wire_reader *reader,
-	struct i915_wire_writer *reply)
+	struct i915_wire_writer *reply,
+	bool version2)
 {
+	const VkSubpassDescriptionDepthStencilResolve *resolves;
+	struct i915_vkc_depth_resolve resolve;
 	VkRenderPassCreateInfo info;
 	struct powervr_pass *pass;
 	uint64_t identity;
@@ -121,9 +129,13 @@ create_pass(
 
 	/* The create info behind the device and its presence word. */
 	kern_memset(&info, 0, sizeof(info));
+	resolves = NULL;
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
-	i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
+	if (version2)
+		i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+	else
+		i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
 	identity = powervr_vk_create_tail(reader);
 	if (reader->error != 0)
 		return EINVAL;
@@ -135,6 +147,12 @@ create_pass(
 		error = powervr_pass_build(&info, pass);
 	if (error == 0)
 		error = pass_views(&info, pass);
+	if (error == 0)
+		error = i915_vkc_depth_resolve(&info, resolves, 0U, &resolve);
+	if (error == 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
+		kern_logf("powervr: render pass: no resolve of depth or stencil\n");
+		error = ENOTSUP;
+	}
 	if (error == ENOBUFS && info.subpassCount != 1) {
 		kern_logf("powervr: render pass: %u subpasses not supported\n", (unsigned)info.subpassCount);
 	} else if (error == ENOBUFS) {

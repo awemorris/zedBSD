@@ -18,6 +18,7 @@
  * multiview pass once per view.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -37,7 +38,9 @@
 /* The render area granularity: any area is drawn as it is. */
 #define PASS_GRANULARITY		1U
 
-static int create_render_pass(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int create_render_pass(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool version2);
+static void *pass2_counted(struct ghci_vk_session *session, struct i915_wire_reader *reader, const void *array, uint32_t count, size_t element);
+static void pass2_count(struct ghci_vk_session *session, struct i915_wire_reader *reader, VkRenderPassCreateInfo *info);
 static uint32_t pass_build(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, struct ghci_vk_render_pass *pass);
 static int pass_subpass(struct ghci_vk_session *session, const VkRenderPassCreateInfo *info, uint32_t index, struct ghci_vk_render_pass *pass);
 static int pass_reference(const VkRenderPassCreateInfo *info, const VkAttachmentReference *reference, uint32_t index, struct ghci_vk_render_pass *pass, uint32_t *attachment);
@@ -66,7 +69,10 @@ ghci_vk_pass_route(
 	*handled = 1;
 	switch (opcode) {
 	case GPU_OP_CREATE_RENDER_PASS:
-		error = create_render_pass(session, requested, reader, reply);
+		error = create_render_pass(session, requested, reader, reply, false);
+		break;
+	case GPU_OP_CREATE_RENDER_PASS2:
+		error = create_render_pass(session, requested, reader, reply, true);
 		break;
 	case GPU_OP_DESTROY_RENDER_PASS:
 		error = destroy_pass_object(session, GHCI_VK_RENDER_PASS, reader);
@@ -109,8 +115,10 @@ ghci_vk_pass_release(
 }
 
 /*
- * vkCreateRenderPass: the create form with VkRenderPassCreateInfo.  A
- * pass the device cannot draw (more colour attachments than it has, a
+ * vkCreateRenderPass: the create form with VkRenderPassCreateInfo; with
+ * version2, vkCreateRenderPass2 (GPU_OP_CREATE_RENDER_PASS2), whose record
+ * is read in its Vulkan 1.0 form with the resolves of its depth and
+ * stencil aside.  A pass the device cannot draw (more colour attachments than it has, a
  * sample count it does not take) is answered
  * VK_ERROR_FEATURE_NOT_PRESENT; one past the executor's bounds
  * VK_ERROR_OUT_OF_HOST_MEMORY; a reference to an attachment the pass
@@ -121,8 +129,11 @@ create_render_pass(
 	struct ghci_vk_session *session,
 	uint32_t requested,
 	struct i915_wire_reader *reader,
-	struct i915_wire_writer *reply)
+	struct i915_wire_writer *reply,
+	bool version2)
 {
+	const VkSubpassDescriptionDepthStencilResolve *resolves;
+	struct i915_vkc_depth_resolve resolve;
 	VkRenderPassCreateInfo info;
 	struct ghci_vk_render_pass *pass;
 	struct ghci_vk_object *device;
@@ -132,13 +143,19 @@ create_render_pass(
 	uint64_t identity;
 	uint64_t charged;
 	uint32_t result;
+	uint32_t index;
 	int error;
 
 	/* The device, the create info and the tail. */
 	kern_memset(&info, 0, sizeof(info));
+	resolves = NULL;
 	handle = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
-	if (present == 1U)
+	if (present == 1U && version2) {
+		i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+		pass2_count(session, reader, &info);
+	}
+	else if (present == 1U)
 		i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
 	identity = ghci_vk_create_tail(reader);
 	if (reader->error != 0 || present != 1U)
@@ -152,6 +169,17 @@ create_render_pass(
 		return EINVAL;
 	if ((info.attachmentCount != 0U && info.pAttachments == NULL) || info.subpassCount == 0U || info.pSubpasses == NULL)
 		return EINVAL;
+
+	/* Each subpass's resolve of its depth and stencil is one the executor does. */
+	for (index = 0U; index < info.subpassCount; index++) {
+		error = i915_vkc_depth_resolve(&info, resolves, index, &resolve);
+		if (error == EINVAL)
+			return EINVAL;
+		if (error != 0) {
+			ghci_vk_reply_created(reply, requested, (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT, identity);
+			return 0;
+		}
+	}
 
 	/* The record, within the bounds and the session's budget. */
 	if (info.attachmentCount > PASS_ATTACHMENTS_MAX || info.subpassCount > PASS_SUBPASSES_MAX) {
@@ -192,6 +220,12 @@ create_render_pass(
 		return 0;
 	}
 
+	/* The attachment each subpass resolves its depth and stencil into (VK_ATTACHMENT_UNUSED for none). */
+	for (index = 0U; index < info.subpassCount; index++) {
+		(void)i915_vkc_depth_resolve(&info, resolves, index, &resolve);
+		pass->references[index].depth_resolve = resolve.target;
+	}
+
 	/* The object. */
 	error = ghci_vk_object_add(session, GHCI_VK_RENDER_PASS, identity, device->device, &object);
 	if (error != 0) {
@@ -205,6 +239,62 @@ create_render_pass(
 
 	/* Succeeded: the render pass exists. */
 	return 0;
+}
+
+/*
+ * Gives the arrays of a render pass the shared codec read in its Vulkan
+ * 1.0 form (i915_vkc_read_render_pass2, whose arrays are as long as their
+ * counts) the decoded lengths the executor's checks read: each is copied
+ * into an array of ghci_vk_decode_array().
+ */
+static void
+pass2_count(
+	struct ghci_vk_session *session,
+	struct i915_wire_reader *reader,
+	VkRenderPassCreateInfo *info)
+{
+	VkSubpassDescription *subpasses;
+	uint32_t index;
+
+	/* The attachments and the subpasses. */
+	info->pAttachments = pass2_counted(session, reader, info->pAttachments, info->attachmentCount, sizeof(*info->pAttachments));
+	subpasses = pass2_counted(session, reader, info->pSubpasses, info->subpassCount, sizeof(*info->pSubpasses));
+	info->pSubpasses = subpasses;
+
+	/* Each subpass's input, colour and resolve attachments. */
+	for (index = 0U; subpasses != NULL && index < info->subpassCount; index++) {
+		subpasses[index].pInputAttachments = pass2_counted(session, reader, subpasses[index].pInputAttachments,
+			subpasses[index].inputAttachmentCount, sizeof(VkAttachmentReference));
+		subpasses[index].pColorAttachments = pass2_counted(session, reader, subpasses[index].pColorAttachments,
+			subpasses[index].colorAttachmentCount, sizeof(VkAttachmentReference));
+		subpasses[index].pResolveAttachments = pass2_counted(session, reader, subpasses[index].pResolveAttachments,
+			subpasses[index].colorAttachmentCount, sizeof(VkAttachmentReference));
+	}
+}
+
+/* Copies count elements of array into an array of ghci_vk_decode_array(); NULL for an absent one. */
+static void *
+pass2_counted(
+	struct ghci_vk_session *session,
+	struct i915_wire_reader *reader,
+	const void *array,
+	uint32_t count,
+	size_t element)
+{
+	void *counted;
+
+	/* An absent array stays absent. */
+	if (array == NULL || count == 0U)
+		return NULL;
+
+	/* The copy, with its length kept before it. */
+	counted = ghci_vk_decode_array(reader, &session->arena, count, element);
+	if (counted == NULL)
+		return NULL;
+	kern_memcpy(counted, array, (size_t)count * element);
+
+	/* Succeeded: the array's length is the executor's to check. */
+	return counted;
 }
 
 /*

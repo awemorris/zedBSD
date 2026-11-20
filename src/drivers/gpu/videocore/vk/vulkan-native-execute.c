@@ -7,6 +7,7 @@
 
 /* FIFO execution clears only the exact colour render area before supervised native bin/render launch; callback completion never retires uncertain DMA. */
 #include <kern/clock.h>
+#include <kern/dcache.h>
 #include <kern/device-io.h>
 #include <kern/klog.h>
 #include <kern/kcrt.h>
@@ -20,6 +21,7 @@
 #define NATIVE_EXECUTE_WRITTEN_BOXES 4U
 
 static int validate_pass(struct bcm2711_vulkan_native_pass *pass);
+static void resolve_copy(const struct bcm2711_vulkan_native_pass *pass);
 static int validate_target(const struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int clear_target(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
 static int clear_rects(struct bcm2711_vulkan_native_pass *pass, uint32_t slot);
@@ -199,6 +201,8 @@ bcm2711_vulkan_native_pass_finish(
 	/* A stored depth/stencil image too: a later sampling of its depth or stencil converts it again. */
 	if (pass->depth != NULL && pass->state.depth_store != 0)
 		bcm2711_v3d_memory_written(pass->depth->buffer, (uint64_t)pass->state.depth_output - pass->depth->address, NULL);
+	if (pass->resolve != NULL)
+		bcm2711_v3d_memory_written(pass->resolve->buffer, (uint64_t)pass->resolve_address - pass->resolve->address, NULL);
 
 	/* The storage buffers the draws' vertex programs may have stored into. */
 	for (draw = pass->first; draw != NULL; draw = draw->next) {
@@ -232,12 +236,47 @@ bcm2711_vulkan_native_pass_finish(
 			bcm2711_vulkan_image_set_level_layout(pass->targets[index].image, pass->targets[index].level, pass->targets[index].layer, pass->targets[index].final_layout);
 	}
 
+	/* A resolve stored into the pass's raster: the render area's rows into the attachment's layer. */
+	if (pass->resolve_scratch != NULL)
+		resolve_copy(pass);
+
 	/* The depth/stencil attachment's layer's transition is committed with it. */
 	if (pass->depth_target != NULL)
 		bcm2711_vulkan_image_set_level_layout(pass->depth_target, 0, pass->depth_layer, pass->depth_final_layout);
+	if (pass->resolve_target != NULL)
+		bcm2711_vulkan_image_set_level_layout(pass->resolve_target, 0, pass->resolve_layer, pass->resolve_final_layout);
 
 	/* Succeeded: native bin/render completion and output visibility were proved by the existing IRQ/cache runner. */
 	return 0;
+}
+
+/*
+ * Copies the render area of a resolve the tiles stored into the pass's
+ * raster of one sample (whole tiles) into the resolve attachment's layer,
+ * through its coherent alias, leaving the layer outside the area as it was.
+ * The pass has completed, so the raster holds what the tiles stored.
+ */
+static void
+resolve_copy(
+	const struct bcm2711_vulkan_native_pass *pass)
+{
+	const uint8_t *source;
+	uint8_t *destination;
+	uint64_t offset;
+	uint32_t bytes;
+	uint32_t row;
+
+	/* The raster as the tiles stored it. */
+	source = pass->resolve_scratch->view->buffer->address;
+	kern_dcache_invalidate_range(source, (size_t)pass->resolve_pitch * pass->state.height);
+
+	/* Each row of the render area. */
+	bytes = pass->area.extent.width * pass->resolve_texel;
+	for (row = 0; row < pass->area.extent.height; row++) {
+		offset = (uint64_t)((uint32_t)pass->area.offset.y + row) * pass->resolve_pitch + (uint32_t)pass->area.offset.x * pass->resolve_texel;
+		destination = (uint8_t *)pass->resolve_cpu + offset;
+		kern_memcpy(destination, source + offset, bytes);
+	}
 }
 
 /* Verifies all complete independently owned intervals and exact CPU target bounds before clear or launch. */
@@ -284,6 +323,11 @@ validate_pass(
 		if (pass->depth_initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->depth_initial_layout != current)
 			return EINVAL;
 	}
+	if (pass->resolve_target != NULL) {
+		current = bcm2711_vulkan_image_level_layout(pass->resolve_target, 0, pass->resolve_layer);
+		if (pass->resolve_initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->resolve_initial_layout != current)
+			return EINVAL;
+	}
 
 	/* The framebuffer has the bounded raster geometry. */
 	if (pass->state.width == 0 ||
@@ -312,6 +356,18 @@ validate_pass(
 		if (offset > pass->depth->bytes ||
 		    pass->state.depth_bytes > pass->depth->bytes - offset ||
 		    bytes > pass->state.depth_bytes)
+			return EINVAL;
+	}
+
+	/* A resolve's image of one sample stays mapped and covers every row its stores (or the copy from the pass's raster) write. */
+	if (pass->resolve != NULL) {
+		if (pass->resolve->quarantined || pass->resolve->references == 0)
+			return EIO;
+		offset = (uint64_t)pass->resolve_address - pass->resolve->address;
+		bytes = (uint64_t)pass->state.depth_resolve_pitch * pass->state.height;
+		if (offset > pass->resolve->bytes ||
+		    pass->resolve_bytes > pass->resolve->bytes - offset ||
+		    bytes > pass->resolve_bytes)
 			return EINVAL;
 	}
 

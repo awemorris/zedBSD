@@ -20,6 +20,7 @@ struct i915_wire_reader;
 struct i915_wire_writer;
 
 int drv_i915_gfx_create_render_pass(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+int drv_i915_gfx_create_render_pass2(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 int drv_i915_gfx_create_framebuffer(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 
 #endif

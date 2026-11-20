@@ -76,6 +76,7 @@
 #define I915_VK_COMMAND_DESTROY_FRAMEBUFFER		81U
 #define I915_VK_COMMAND_CREATE_RENDER_PASS		82U
 #define I915_VK_COMMAND_DESTROY_RENDER_PASS		83U
+#define I915_VK_COMMAND_CREATE_RENDER_PASS2		167U
 
 static int i915_gfx_destroy_plain(struct i915_render_session *session, struct i915_wire_reader *reader, enum i915_vk_object_kind kind);
 
@@ -215,6 +216,9 @@ drv_i915_gfx_obj_dispatch(
 		break;
 	case I915_VK_COMMAND_DESTROY_RENDER_PASS:
 		error = i915_gfx_destroy_plain(session, reader, I915_VK_OBJ_RENDER_PASS);
+		break;
+	case I915_VK_COMMAND_CREATE_RENDER_PASS2:
+		error = drv_i915_gfx_create_render_pass2(session, reader, reply);
 		break;
 	default:
 		/* Not an object command: another module owns the opcode. */

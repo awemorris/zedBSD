@@ -786,6 +786,7 @@ struct ghci_vk_pass_references {
 	uint32_t color[GHCI_VK_COLOR_ATTACHMENTS];
 	uint32_t resolve[GHCI_VK_COLOR_ATTACHMENTS];
 	uint32_t depth;
+	uint32_t depth_resolve;
 	uint32_t input_count;
 	uint32_t input[GHCI_GSI1_INPUT_ATTACHMENTS];
 };

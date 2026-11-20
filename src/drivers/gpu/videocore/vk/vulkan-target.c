@@ -23,9 +23,12 @@ union target_record {
 	struct bcm2711_vulkan_framebuffer framebuffer;
 };
 
-static int create_target(struct bcm2711_vulkan_session *session, enum i915_vk_object_kind kind, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int create_target(struct bcm2711_vulkan_session *session, enum i915_vk_object_kind kind, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool version2);
 static int destroy_target(struct bcm2711_vulkan_session *session, enum i915_vk_object_kind kind, struct i915_wire_reader *reader);
 static int decode_pass(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_pass *pass);
+static int decode_pass2(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_pass *pass);
+static int pass2_subpass(const VkRenderPassCreateInfo *info, const struct i915_vkc_depth_resolve *resolve, struct bcm2711_vulkan_pass *pass);
+static int pass_dependency(const VkSubpassDependency *dependency);
 static int decode_framebuffer(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_framebuffer *framebuffer);
 static int build_framebuffer(struct bcm2711_vulkan_framebuffer *framebuffer, struct bcm2711_vulkan_object *device);
 static int release_target(struct bcm2711_vulkan_session *session, void *payload);
@@ -39,6 +42,7 @@ static int depth_attachment(VkAttachmentDescription *attachment);
 static int depth_layout(VkImageLayout layout);
 static int depth_edge_layout(VkImageLayout layout);
 static int build_depth(struct bcm2711_vulkan_framebuffer *framebuffer, struct bcm2711_vulkan_object *device);
+static int build_depth_resolve(struct bcm2711_vulkan_framebuffer *framebuffer, struct bcm2711_vulkan_object *device);
 static bool view_layers(const struct bcm2711_vulkan_pass *pass, const struct bcm2711_vulkan_image_view *view);
 static int granularity(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void target_reply(struct i915_wire_writer *reply, VkResult status, uint64_t identity);
@@ -56,12 +60,14 @@ bcm2711_vulkan_target_dispatch(
 	int *handled)
 {
 	enum i915_vk_object_kind kind;
+	bool version2;
 	bool create;
 	int error;
 
 	/* Target discovery and lifecycle remain separate from subsequent command-buffer/native draw execution. */
 	*handled = 1;
 	create = false;
+	version2 = false;
 	switch (opcode) {
 	case GPU_OP_GET_RENDER_AREA_GRANULARITY:
 		if (requested != 1)
@@ -72,6 +78,11 @@ bcm2711_vulkan_target_dispatch(
 		return 0;
 	case GPU_OP_CREATE_RENDER_PASS:
 		create = true;
+		kind = I915_VK_OBJ_RENDER_PASS;
+		break;
+	case GPU_OP_CREATE_RENDER_PASS2:
+		create = true;
+		version2 = true;
 		kind = I915_VK_OBJ_RENDER_PASS;
 		break;
 	case GPU_OP_DESTROY_RENDER_PASS:
@@ -95,7 +106,7 @@ bcm2711_vulkan_target_dispatch(
 	if (create && requested != 1)
 		return EINVAL;
 	if (create)
-		error = create_target(session, kind, reader, reply);
+		error = create_target(session, kind, reader, reply, version2);
 	else
 		error = destroy_target(session, kind, reader);
 	if (error != 0)
@@ -149,7 +160,8 @@ create_target(
 	struct bcm2711_vulkan_session *session,
 	enum i915_vk_object_kind kind,
 	struct i915_wire_reader *reader,
-	struct i915_wire_writer *reply)
+	struct i915_wire_writer *reply,
+	bool version2)
 {
 	union target_record record;
 	struct bcm2711_vulkan_input_owner *payload;
@@ -170,7 +182,9 @@ create_target(
 	if (reader->error != 0 || present != 1)
 		return EINVAL;
 	kern_memset(&record, 0, sizeof(record));
-	if (kind == I915_VK_OBJ_RENDER_PASS)
+	if (kind == I915_VK_OBJ_RENDER_PASS && version2)
+		error = decode_pass2(session, reader, &record.pass);
+	else if (kind == I915_VK_OBJ_RENDER_PASS)
 		error = decode_pass(session, reader, &record.pass);
 	else
 		error = decode_framebuffer(session, reader, &record.framebuffer);
@@ -214,6 +228,7 @@ create_target(
 			framebuffer->owner.parent = record.framebuffer.owner.parent;
 			kern_memcpy(framebuffer->colours, record.framebuffer.colours, sizeof(framebuffer->colours));
 			framebuffer->depth = record.framebuffer.depth;
+			framebuffer->depth_resolve = record.framebuffer.depth_resolve;
 		}
 	}
 
@@ -352,26 +367,210 @@ decode_pass(
 		dependency->dependencyFlags = drv_i915_wire_read_u32(reader);
 		if (reader->error != 0)
 			return EINVAL;
-		if (dependency->srcSubpass == VK_SUBPASS_EXTERNAL) {
-			if (dependency->dstSubpass != 0)
-				return ENOTSUP;
-		} else {
-			if (dependency->srcSubpass != 0 || dependency->dstSubpass != VK_SUBPASS_EXTERNAL)
-				return ENOTSUP;
-		}
-
-		/* Preserve only supported stage/access semantics, including BY_REGION as a conservatively stronger whole-target dependency. */
-		if (dependency->srcStageMask == 0 || dependency->dstStageMask == 0)
-			return EINVAL;
-		if ((dependency->srcStageMask & ~VULKAN_PASS_STAGES) != 0 || (dependency->dstStageMask & ~VULKAN_PASS_STAGES) != 0)
-			return ENOTSUP;
-		if ((dependency->srcAccessMask & ~VULKAN_PASS_ACCESS) != 0 || (dependency->dstAccessMask & ~VULKAN_PASS_ACCESS) != 0)
-			return ENOTSUP;
-		if ((dependency->dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0)
-			return ENOTSUP;
+		error = pass_dependency(dependency);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: the pass retains every supported attachment and dependency field without a command-arena pointer. */
+	return 0;
+}
+
+/*
+ * Decodes a render pass of vkCreateRenderPass2 (GPU_OP_CREATE_RENDER_PASS2),
+ * which libvulkan sends only for a subpass that resolves its depth and
+ * stencil: the shape decode_pass() takes, and the resolve of its
+ * multisampled depth/stencil attachment's sample 0 into one more
+ * attachment of one sample (7.1 only).
+ */
+static int
+decode_pass2(
+	struct bcm2711_vulkan_session *session,
+	struct i915_wire_reader *reader,
+	struct bcm2711_vulkan_pass *pass)
+{
+	const VkSubpassDescriptionDepthStencilResolve *resolves;
+	const VkRenderPassMultiviewCreateInfo *multiview;
+	struct i915_vkc_depth_resolve resolve;
+	VkRenderPassCreateInfo info;
+	uint32_t index;
+	int error;
+
+	/* The record in its Vulkan 1.0 form, with the resolve aside. */
+	i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* One subpass, at most the attachments a pass has, on a 7.1. */
+	if (info.flags != 0 ||
+	    info.subpassCount != 1 ||
+	    info.attachmentCount > BCM2711_VULKAN_PASS_ATTACHMENTS ||
+	    info.attachmentCount == 0 ||
+	    !bcm2711_vulkan_engine_71(session))
+		return ENOTSUP;
+	error = i915_vkc_depth_resolve(&info, resolves, 0, &resolve);
+	if (error != 0)
+		return error;
+
+	/* Every attachment but the resolve's has four samples. */
+	pass->attachment_count = info.attachmentCount;
+	pass->samples = VK_SAMPLE_COUNT_4_BIT;
+	for (index = 0; index < info.attachmentCount; index++) {
+		if (index != resolve.target && info.pAttachments[index].samples != VK_SAMPLE_COUNT_4_BIT)
+			return ENOTSUP;
+	}
+
+	/* The one subpass, which names every attachment. */
+	error = pass2_subpass(&info, &resolve, pass);
+	if (error != 0)
+		return error;
+
+	/* The one subpass's views, at most the device's (maxMultiviewViewCount); none renders one view. */
+	multiview = i915_vkc_render_pass_multiview(&info);
+	pass->view_mask = 0;
+	if (multiview != NULL && multiview->subpassCount != 0) {
+		if (multiview->subpassCount != 1 || multiview->pViewMasks == NULL)
+			return ENOTSUP;
+		if ((multiview->pViewMasks[0] >> BCM2711_VULKAN_VIEWS) != 0)
+			return ENOTSUP;
+		pass->view_mask = multiview->pViewMasks[0];
+	}
+
+	/* The external dependencies, as decode_pass() takes them. */
+	if (info.dependencyCount > BCM2711_VULKAN_PASS_DEPENDENCIES)
+		return ENOTSUP;
+	pass->count = info.dependencyCount;
+	for (index = 0; index < info.dependencyCount; index++) {
+		pass->dependencies[index] = info.pDependencies[index];
+		error = pass_dependency(&pass->dependencies[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the pass retains its attachments, its resolve and its dependencies. */
+	return 0;
+}
+
+/*
+ * Takes the one subpass of a render pass of vkCreateRenderPass2 into pass:
+ * what decode_subpass() takes, the depth/stencil attachment resolved, and
+ * resolve's target, an attachment of one sample in its format in a
+ * depth/stencil layout during the pass and around it.
+ */
+static int
+pass2_subpass(
+	const VkRenderPassCreateInfo *info,
+	const struct i915_vkc_depth_resolve *resolve,
+	struct bcm2711_vulkan_pass *pass)
+{
+	const VkSubpassDescription *subpass;
+	VkAttachmentDescription resolved;
+	uint32_t attachment;
+	uint32_t named;
+	uint32_t slot;
+	int error;
+
+	/* A graphics subpass without input, colour resolve or preserved attachments, which resolves its depth/stencil attachment. */
+	subpass = &info->pSubpasses[0];
+	if (subpass->flags != 0 ||
+	    subpass->pipelineBindPoint != VK_PIPELINE_BIND_POINT_GRAPHICS ||
+	    subpass->inputAttachmentCount != 0 ||
+	    subpass->pResolveAttachments != NULL ||
+	    subpass->preserveAttachmentCount != 0 ||
+	    subpass->colorAttachmentCount > BCM2711_VULKAN_PASS_COLOURS ||
+	    subpass->pDepthStencilAttachment == NULL ||
+	    resolve->target == VK_ATTACHMENT_UNUSED)
+		return ENOTSUP;
+
+	/* The colour slots, each naming a colour attachment not named before, or unused. */
+	pass->colour_count = subpass->colorAttachmentCount;
+	named = 1U << resolve->target;
+	for (slot = 0; slot < subpass->colorAttachmentCount; slot++) {
+		attachment = subpass->pColorAttachments[slot].attachment;
+		if (attachment == VK_ATTACHMENT_UNUSED)
+			continue;
+		if (attachment >= pass->attachment_count || (named & (1U << attachment)) != 0)
+			return ENOTSUP;
+		if (subpass->pColorAttachments[slot].layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+			return ENOTSUP;
+		error = colour_attachment(&info->pAttachments[attachment]);
+		if (error != 0)
+			return error;
+		named |= 1U << attachment;
+		pass->colour_used[slot] = true;
+		pass->colours[slot] = info->pAttachments[attachment];
+		pass->colour_attachment[slot] = attachment;
+	}
+
+	/* The depth/stencil attachment, which is the resolve's source. */
+	attachment = subpass->pDepthStencilAttachment->attachment;
+	if (attachment != resolve->source || (named & (1U << attachment)) != 0)
+		return ENOTSUP;
+	error = depth_layout(subpass->pDepthStencilAttachment->layout);
+	if (error != 0)
+		return error;
+	pass->depth = true;
+	pass->depth_stencil = info->pAttachments[attachment];
+	pass->depth_attachment = attachment;
+	error = depth_attachment(&pass->depth_stencil);
+	if (error != 0)
+		return error;
+	named |= 1U << attachment;
+
+	/* The resolve's target: written whole, from a layout before the pass that may be undefined, to one of the pass's or a transfer's. */
+	resolved = info->pAttachments[resolve->target];
+	if (resolved.flags != 0 || !bcm2711_vulkan_depth_format(resolved.format))
+		return ENOTSUP;
+	if (resolved.initialLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+		error = depth_edge_layout(resolved.initialLayout);
+		if (error != 0)
+			return error;
+	}
+	error = depth_edge_layout(resolved.finalLayout);
+	if (error != 0)
+		return error;
+	pass->depth_resolve = true;
+	pass->depth_resolved = resolved;
+	pass->depth_resolve_attachment = resolve->target;
+
+	/* Every attachment is one the subpass names. */
+	if (named != (1U << pass->attachment_count) - 1U)
+		return ENOTSUP;
+
+	/* Succeeded: the subpass's slots, depth/stencil attachment and resolve are in the pass. */
+	return 0;
+}
+
+/*
+ * Checks one external dependency of a pass's single subpass: from outside
+ * into it or from it to outside, with the stages and accesses the
+ * conservative whole-job ordering covers (BY_REGION as a stronger
+ * whole-target dependency).
+ */
+static int
+pass_dependency(
+	const VkSubpassDependency *dependency)
+{
+	/* Into the subpass or out of it. */
+	if (dependency->srcSubpass == VK_SUBPASS_EXTERNAL) {
+		if (dependency->dstSubpass != 0)
+			return ENOTSUP;
+	} else {
+		if (dependency->srcSubpass != 0 || dependency->dstSubpass != VK_SUBPASS_EXTERNAL)
+			return ENOTSUP;
+	}
+
+	/* Preserve only supported stage/access semantics, including BY_REGION as a conservatively stronger whole-target dependency. */
+	if (dependency->srcStageMask == 0 || dependency->dstStageMask == 0)
+		return EINVAL;
+	if ((dependency->srcStageMask & ~VULKAN_PASS_STAGES) != 0 || (dependency->dstStageMask & ~VULKAN_PASS_STAGES) != 0)
+		return ENOTSUP;
+	if ((dependency->srcAccessMask & ~VULKAN_PASS_ACCESS) != 0 || (dependency->dstAccessMask & ~VULKAN_PASS_ACCESS) != 0)
+		return ENOTSUP;
+	if ((dependency->dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0)
+		return ENOTSUP;
+
+	/* Succeeded: the dependency is one the native pass keeps. */
 	return 0;
 }
 
@@ -593,6 +792,8 @@ decode_framebuffer(
 	}
 	if (pass->depth)
 		framebuffer->depth = views[pass->depth_attachment];
+	if (pass->depth_resolve)
+		framebuffer->depth_resolve = views[pass->depth_resolve_attachment];
 
 	/* The extent is the single-layer one native passes render. */
 	if (framebuffer->width == 0 ||
@@ -646,6 +847,23 @@ build_framebuffer(
 		error = build_depth(framebuffer, device);
 		if (error != 0) {
 			retired = release_views(framebuffer, pass->colour_count);
+			if (retired != 0)
+				return retired;
+			retired = bcm2711_vulkan_object_release(framebuffer->owner.parent);
+			if (retired != 0)
+				return retired;
+			return error;
+		}
+	}
+
+	/* The resolve's view, when the pass resolves, last; failure unwinds the depth/stencil and colour views and the pass. */
+	if (framebuffer->depth_resolve != NULL) {
+		error = build_depth_resolve(framebuffer, device);
+		if (error != 0) {
+			retired = release_views(framebuffer, pass->colour_count);
+			if (retired != 0)
+				return retired;
+			retired = bcm2711_vulkan_object_release(framebuffer->depth);
 			if (retired != 0)
 				return retired;
 			retired = bcm2711_vulkan_object_release(framebuffer->owner.parent);
@@ -779,6 +997,11 @@ release_target(
 		error = release_views(framebuffer, BCM2711_VULKAN_PASS_COLOURS);
 		if (framebuffer->depth != NULL) {
 			retired = bcm2711_vulkan_object_release(framebuffer->depth);
+			if (retired != 0 && error == 0)
+				error = retired;
+		}
+		if (framebuffer->depth_resolve != NULL) {
+			retired = bcm2711_vulkan_object_release(framebuffer->depth_resolve);
 			if (retired != 0 && error == 0)
 				error = retired;
 		}
@@ -954,6 +1177,43 @@ build_depth(
 
 	/* The framebuffer keeps the view, and through it the image, until it retires. */
 	error = bcm2711_vulkan_object_retain(framebuffer->depth);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the view's edge. */
+	return 0;
+}
+
+/* Checks the view a depth/stencil attachment is resolved into against the pass and the framebuffer's extent, then retains it. */
+static int
+build_depth_resolve(
+	struct bcm2711_vulkan_framebuffer *framebuffer,
+	struct bcm2711_vulkan_object *device)
+{
+	struct bcm2711_vulkan_pass *pass;
+	struct bcm2711_vulkan_image_view *view;
+	struct bcm2711_vulkan_resource *image;
+	int error;
+
+	/* The same-device view's image has the pass's depth format, one sample, attachment usage, memory and size. */
+	pass = framebuffer->owner.parent->payload;
+	view = framebuffer->depth_resolve->payload;
+	image = view->owner.parent->payload;
+	if (view->owner.device != device)
+		return EINVAL;
+	if (pass->depth_resolved.format != view->format ||
+	    view->stencil ||
+	    image->memory == NULL ||
+	    image->samples != VK_SAMPLE_COUNT_1_BIT ||
+	    (image->usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0)
+		return EINVAL;
+	if (framebuffer->width > image->width || framebuffer->height > image->height)
+		return EINVAL;
+	if (!view_layers(pass, view))
+		return EINVAL;
+
+	/* The framebuffer keeps the view, and through it the image, until it retires. */
+	error = bcm2711_vulkan_object_retain(framebuffer->depth_resolve);
 	if (error != 0)
 		return error;
 
