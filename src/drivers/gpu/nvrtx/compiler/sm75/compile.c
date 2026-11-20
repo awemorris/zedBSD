@@ -118,11 +118,8 @@ nvrtx_sm75_compile_ir(
 /*
  * Compiles one stage of a SPIR-V module for a shader model.
  *
- * The module is parsed by the shared frontend, optimized, and lowered; a
- * program the lowering refuses after the optimizer rewrote it is lowered
- * again from the parsed one, which keeps the parsed program's outcome.
- * Returns 0 with the program, or the frontend's or the lowering's error
- * with the diagnostic filled.
+ * Returns as nvrtx_sm75_compile_stage_view() of no further feature and
+ * view 0.
  */
 int
 nvrtx_sm75_compile_stage_sm(
@@ -130,6 +127,41 @@ nvrtx_sm75_compile_stage_sm(
 	size_t word_count,
 	enum drv_gpu_shader_stage stage,
 	uint32_t sm,
+	struct nvrtx_sm75_binary **binary,
+	struct nvrtx_sm75_diagnostic *diagnostic)
+{
+	uint32_t reads_view;
+	int error;
+
+	/* The stage with the shared profile's features. */
+	error = nvrtx_sm75_compile_stage_view(words, word_count, stage, sm, 0U, 0U, &reads_view, binary, diagnostic);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the program. */
+	return 0;
+}
+
+/*
+ * Compiles one stage of a SPIR-V module for a shader model, with the
+ * frontend's `features` beyond NVRTX_SM75_SPIRV_FEATURES and gl_ViewIndex
+ * bound to `view`.
+ *
+ * The module is parsed by the shared frontend, optimized, and lowered; a
+ * program the lowering refuses after the optimizer rewrote it is lowered
+ * again from the parsed one, which keeps the parsed program's outcome.
+ * Returns 0 with the program, or the frontend's or the lowering's error
+ * with the diagnostic filled.
+ */
+int
+nvrtx_sm75_compile_stage_view(
+	const uint32_t *words,
+	size_t word_count,
+	enum drv_gpu_shader_stage stage,
+	uint32_t sm,
+	uint32_t features,
+	uint32_t view,
+	uint32_t *reads_view,
 	struct nvrtx_sm75_binary **binary,
 	struct nvrtx_sm75_diagnostic *diagnostic)
 {
@@ -155,7 +187,8 @@ nvrtx_sm75_compile_stage_sm(
 	/* Parses the module's stage. */
 	ir = NULL;
 	parse_diagnostic.reason = NULL;
-	error = drv_gpu_shader_parse_features(words, word_count, stage, NVRTX_SM75_SPIRV_FEATURES, &ir, &parse_diagnostic);
+	*reads_view = 0U;
+	error = drv_gpu_shader_parse_features(words, word_count, stage, NVRTX_SM75_SPIRV_FEATURES | features, &ir, &parse_diagnostic);
 	if (error != 0) {
 		if (diagnostic != NULL) {
 			diagnostic->instruction = parse_diagnostic.word_offset;
@@ -165,6 +198,10 @@ nvrtx_sm75_compile_stage_sm(
 		/* Reports the frontend's refusal. */
 		return error;
 	}
+
+	/* gl_ViewIndex reads the view the program is compiled for. */
+	*reads_view = ir->uses_view_index;
+	drv_gpu_shader_ir_bind_view(ir, view);
 
 	/* Optimizes a private copy: every block runs (there are no skipped blocks), and the known bits fold. */
 	kern_memset(&options, 0, sizeof(options));

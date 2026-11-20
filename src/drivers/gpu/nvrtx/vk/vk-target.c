@@ -95,6 +95,7 @@ target_create_pass(
 {
 	VkRenderPassCreateInfo info;
 	const VkSubpassDescription *subpass;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	struct nvrtx_vk_render_pass *pass;
 	uint64_t identity;
 	uint32_t attachment;
@@ -151,6 +152,11 @@ target_create_pass(
 			pass->colour_attachment = pass->colour_attachments[0];
 			pass->format = pass->formats[0];
 			pass->load_op = pass->load_ops[0];
+		}
+		if (pass != NULL) {
+			multiview = i915_vkc_render_pass_multiview(&info);
+			if (multiview != NULL && multiview->pViewMasks != NULL)
+				pass->view_mask = multiview->pViewMasks[0];
 		}
 		if (pass != NULL && subpass->pDepthStencilAttachment != NULL) {
 			attachment = subpass->pDepthStencilAttachment->attachment;
@@ -210,6 +216,7 @@ target_pass_supported(
 {
 	const VkSubpassDescription *subpass;
 	const VkAttachmentDescription *resolved;
+	const VkRenderPassMultiviewCreateInfo *multiview;
 	uint32_t attachment;
 	uint32_t resolve;
 	uint32_t samples;
@@ -221,6 +228,15 @@ target_pass_supported(
 		return 0;
 	if (info->attachmentCount > NVRTX_VK_ATTACHMENTS_MAX)
 		return 0;
+
+	/* Only the views the device reports (maxMultiviewViewCount), named for the one subpass. */
+	multiview = i915_vkc_render_pass_multiview(info);
+	if (multiview != NULL && multiview->subpassCount != 0U) {
+		if (multiview->subpassCount != 1U || multiview->pViewMasks == NULL)
+			return 0;
+		if ((multiview->pViewMasks[0] >> NVRTX_VK_VIEWS_MAX) != 0U)
+			return 0;
+	}
 
 	/* Every attachment of one or four samples, all alike. */
 	samples = 0U;

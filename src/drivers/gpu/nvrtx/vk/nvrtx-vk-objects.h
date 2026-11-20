@@ -362,6 +362,13 @@ struct nvrtx_vk_descriptor_set {
 #define NVRTX_VK_ATTACHMENTS_MAX	(NVRTX_EXEC_COLOURS + 1U)
 
 /*
+ * The views a multiview render pass may render (maxMultiviewViewCount):
+ * bits 0 to 7 of its subpass's view mask, view v drawn into layer v of each
+ * attachment's view.
+ */
+#define NVRTX_VK_VIEWS_MAX		8U
+
+/*
  * A VkRenderPass of one subpass writing at most four colour attachments
  * and at most one depth attachment: how many colour attachments the
  * subpass names (colour, 0 for none) and for each its number among the
@@ -387,6 +394,9 @@ struct nvrtx_vk_render_pass {
 	uint32_t stencil_load_op;
 	uint32_t samples;
 	uint32_t resolves[NVRTX_EXEC_COLOURS];
+
+	/* The views the subpass renders (VkRenderPassMultiviewCreateInfo); zero for a pass of one view. */
+	uint32_t view_mask;
 };
 
 /* A VkFramebuffer: its size, its layers (a layered pass draws into each) and the views of its attachments in order, held. */
@@ -544,6 +554,22 @@ struct nvrtx_vk_pipeline {
 	uint32_t dynamic;
 	uint32_t viewport[6];
 	VkRect2D scissor;
+
+	/*
+	 * A compute pipeline made for vkCmdDispatchBase: its program counts
+	 * the groups from the base the dispatch places after the group counts.
+	 */
+	uint32_t dispatch_base;
+
+	/*
+	 * The views of the subpass a graphics pipeline is made for, and for
+	 * each view past the first a pipeline of the same state whose programs
+	 * read that view as gl_ViewIndex (NULL where this one's programs serve:
+	 * its first view, and every view when no program reads gl_ViewIndex).
+	 * They are destroyed with it.
+	 */
+	uint32_t view_mask;
+	struct nvrtx_vk_pipeline *views[NVRTX_VK_VIEWS_MAX];
 };
 
 /* The objects one record holds at most: a bind's sets, or its vertex buffers. */

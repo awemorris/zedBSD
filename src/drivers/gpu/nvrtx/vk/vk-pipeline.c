@@ -45,6 +45,7 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h"
+#include "drivers/gpu/compiler/spirv.h"
 #include "drivers/gpu/nvrtx/compiler/sm75/sm75.h"
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
@@ -100,7 +101,9 @@ static void pipeline_decode_dynamic(struct nvrtx_vk_session *session, struct i91
 static void pipeline_stencil_face(const VkStencilOpState *state, struct nvrtx_exec_stencil_face *face);
 static int pipeline_compile(struct nvrtx_vk_session *session, struct nvrtx_vk_pipeline *pipeline, struct pipeline_build *build);
 static int pipeline_compile_kernel(struct nvrtx_vk_session *session, struct nvrtx_vk_pipeline *pipeline, struct pipeline_build *build);
-static int pipeline_compile_stage(const struct nvrtx_vk_shader *module, enum drv_gpu_shader_stage stage, uint32_t shader_model, struct nvrtx_sm75_binary **binary);
+static int pipeline_compile_stage(const struct nvrtx_vk_shader *module, enum drv_gpu_shader_stage stage, uint32_t shader_model, uint32_t features, uint32_t view, uint32_t *reads_view, struct nvrtx_sm75_binary **binary);
+static int pipeline_compile_view(struct nvrtx_vk_session *session, struct nvrtx_vk_pipeline *pipeline, struct pipeline_build *build, uint32_t view, uint32_t *reads_view);
+static uint32_t pipeline_first_view(uint32_t view_mask);
 static int pipeline_kernel_sources(struct nvrtx_vk_kernel *kernel, const struct nvrtx_sm75_binary *binary);
 static int pipeline_program(struct nvrtx_vk_program *program, const struct nvrtx_sm75_binary *binary, uint8_t *cpu, uint64_t va);
 static uint32_t pipeline_program_bytes(const struct nvrtx_sm75_binary *binary);
@@ -318,6 +321,10 @@ pipeline_decode_kernel(
 	/* A compute pipeline (the push constants a program reads are its own business). */
 	pipeline->compute = true;
 
+	/* One made for vkCmdDispatchBase numbers its groups from the dispatch's base. */
+	if ((info.flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0U)
+		pipeline->dispatch_base = 1U;
+
 	/* The compute stage of a known module, without specialization constants. */
 	if (info.stage.stage != VK_SHADER_STAGE_COMPUTE_BIT)
 		return ENOTSUP;
@@ -354,8 +361,10 @@ pipeline_decode(
 	VkPipelineMultisampleStateCreateInfo multisample;
 	VkPipelineDepthStencilStateCreateInfo depth;
 	const struct nvrtx_vk_pipeline_layout *layout;
+	const struct nvrtx_vk_render_pass *pass;
 	uint64_t present;
 	uint64_t layout_id;
+	uint64_t pass_id;
 	uint32_t index;
 	uint32_t full;
 	int refused;
@@ -490,9 +499,16 @@ pipeline_decode(
 	if (present != 0U)
 		pipeline_decode_dynamic(session, reader, pipeline);
 
-	/* The layout (its push constant bytes); the render pass, the subpass and the base pipeline are not used. */
+	/*
+	 * The layout (its push constant bytes), the views of the render pass's
+	 * subpass (the programs are compiled for each view that reads
+	 * gl_ViewIndex); the subpass and the base pipeline are not used.
+	 */
 	layout_id = drv_i915_wire_read_u64(reader);
-	(void)drv_i915_wire_read_u64(reader);
+	pass_id = drv_i915_wire_read_u64(reader);
+	pass = nvrtx_vk_payload(session, I915_VK_OBJ_RENDER_PASS, pass_id);
+	if (pass != NULL)
+		pipeline->view_mask = pass->view_mask;
 	(void)drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u32(reader);
@@ -826,12 +842,12 @@ pipeline_compile(
 	struct nvrtx_vk_pipeline *pipeline,
 	struct pipeline_build *build)
 {
-	uint8_t *cpu;
-	uint64_t va;
-	uint32_t vertex_bytes;
-	uint32_t fragment_bytes;
-	uint32_t geometry_bytes;
-	uint32_t shader_model;
+	struct nvrtx_vk_pipeline *variant;
+	struct pipeline_build variant_build;
+	uint32_t first;
+	uint32_t view;
+	uint32_t reads_view;
+	uint32_t ignored;
 	int error;
 
 	/* A compute pipeline has its one program. */
@@ -840,24 +856,92 @@ pipeline_compile(
 		return error;
 	}
 
-	/* Compiles the two programs for the owner's shader model. */
-	shader_model = nvrtx_vk_shader_model(session->owner);
-	error = pipeline_compile_stage(build->vertex_module, DRV_GPU_STAGE_VERTEX, shader_model, &build->vertex);
+	/* The pipeline's own programs render the subpass's first view (view 0 without multiview). */
+	first = pipeline_first_view(pipeline->view_mask);
+	error = pipeline_compile_view(session, pipeline, build, first, &reads_view);
 	if (error != 0)
 		return error;
 
-	error = pipeline_compile_stage(build->fragment_module, DRV_GPU_STAGE_FRAGMENT, shader_model, &build->fragment);
+	/* Programs that do not read gl_ViewIndex render every view. */
+	if (reads_view == 0U)
+		return 0;
+
+	/* Each other view of the subpass gets a pipeline of the same state with programs for that view. */
+	for (view = first + 1U; view < NVRTX_VK_VIEWS_MAX; view++) {
+		/* A view the subpass does not render needs no programs. */
+		if ((pipeline->view_mask & (1U << view)) == 0U)
+			continue;
+
+		/* The copy owns no run and no copies yet. */
+		variant = kern_calloc(1U, sizeof(*variant));
+		if (variant == NULL)
+			return ENOMEM;
+		*variant = *pipeline;
+		variant->code_token = NULL;
+		kern_memset(variant->views, 0, sizeof(variant->views));
+
+		/* Its programs for the view, from the same modules. */
+		kern_memset(&variant_build, 0, sizeof(variant_build));
+		variant_build.vertex_module = build->vertex_module;
+		variant_build.fragment_module = build->fragment_module;
+		variant_build.geometry_module = build->geometry_module;
+		error = pipeline_compile_view(session, variant, &variant_build, view, &ignored);
+		pipeline_build_free(&variant_build);
+		if (error != 0) {
+			(void)pipeline_destroy(session, variant);
+			return error;
+		}
+		pipeline->views[view] = variant;
+	}
+
+	/* Succeeded: every view of the subpass has its programs. */
+	return 0;
+}
+
+/*
+ * Compiles a graphics pipeline's programs for one view of its subpass (the
+ * value they read as gl_ViewIndex) into a run of the executor's GPU memory,
+ * and says whether any of them reads it.
+ */
+static int
+pipeline_compile_view(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_pipeline *pipeline,
+	struct pipeline_build *build,
+	uint32_t view,
+	uint32_t *reads_view)
+{
+	uint8_t *cpu;
+	uint64_t va;
+	uint32_t vertex_bytes;
+	uint32_t fragment_bytes;
+	uint32_t geometry_bytes;
+	uint32_t shader_model;
+	uint32_t stage_reads;
+	int error;
+
+	/* Compiles the two programs for the owner's shader model. */
+	*reads_view = 0U;
+	shader_model = nvrtx_vk_shader_model(session->owner);
+	error = pipeline_compile_stage(build->vertex_module, DRV_GPU_STAGE_VERTEX, shader_model, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &build->vertex);
 	if (error != 0)
 		return error;
+	*reads_view |= stage_reads;
+
+	error = pipeline_compile_stage(build->fragment_module, DRV_GPU_STAGE_FRAGMENT, shader_model, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &build->fragment);
+	if (error != 0)
+		return error;
+	*reads_view |= stage_reads;
 
 	/* A geometry program, of the primitives the topology gives. */
 	geometry_bytes = 0U;
 	pipeline->point_size = pipeline_writes_point_size(build->vertex);
 	pipeline->layer = pipeline_writes_attribute(build->vertex, NVRTX_SM75_ATTR_LAYER);
 	if (build->geometry_module != NULL) {
-		error = pipeline_compile_stage(build->geometry_module, DRV_GPU_STAGE_GEOMETRY, shader_model, &build->geometry);
+		error = pipeline_compile_stage(build->geometry_module, DRV_GPU_STAGE_GEOMETRY, shader_model, DRV_GPU_SPIRV_FEATURE_VIEW_INDEX, view, &stage_reads, &build->geometry);
 		if (error != 0)
 			return error;
+		*reads_view |= stage_reads;
 		if (build->geometry->vertices_in != pipeline_topology_vertices(pipeline->topology)) {
 			kern_logf("nvrtx: vk: a geometry program of %u input vertices (the topology %u gives %u)\n",
 				  build->geometry->vertices_in, pipeline->topology, pipeline_topology_vertices(pipeline->topology));
@@ -905,14 +989,21 @@ pipeline_compile_kernel(
 {
 	struct nvrtx_sm75_binary *binary;
 	struct nvrtx_vk_kernel *kernel;
+	uint32_t shader_model;
+	uint32_t features;
+	uint32_t reads_view;
 	uint32_t invocations;
 	uint32_t bytes;
 	uint8_t *cpu;
 	uint64_t va;
 	int error;
 
-	/* The program. */
-	error = pipeline_compile_stage(build->kernel_module, DRV_GPU_STAGE_COMPUTE, nvrtx_vk_shader_model(session->owner), &build->kernel);
+	/* The program; one made for vkCmdDispatchBase counts its groups from the base. */
+	features = 0U;
+	if (pipeline->dispatch_base != 0U)
+		features = DRV_GPU_SPIRV_FEATURE_DISPATCH_BASE;
+	shader_model = nvrtx_vk_shader_model(session->owner);
+	error = pipeline_compile_stage(build->kernel_module, DRV_GPU_STAGE_COMPUTE, shader_model, features, 0U, &reads_view, &build->kernel);
 	if (error != 0)
 		return error;
 	binary = build->kernel;
@@ -994,12 +1085,19 @@ pipeline_kernel_sources(
 	return 0;
 }
 
-/* Compiles one module for a stage; the reason of a refusal is shown. */
+/*
+ * Compiles one module for a stage, with the frontend's features beyond the
+ * compiler's own and gl_ViewIndex read as `view`; the reason of a refusal
+ * is shown.
+ */
 static int
 pipeline_compile_stage(
 	const struct nvrtx_vk_shader *module,
 	enum drv_gpu_shader_stage stage,
 	uint32_t shader_model,
+	uint32_t features,
+	uint32_t view,
+	uint32_t *reads_view,
 	struct nvrtx_sm75_binary **binary)
 {
 	struct nvrtx_sm75_diagnostic diagnostic;
@@ -1007,7 +1105,7 @@ pipeline_compile_stage(
 
 	/* Compiled for the shader model asked for. */
 	kern_memset(&diagnostic, 0, sizeof(diagnostic));
-	error = nvrtx_sm75_compile_stage_sm(module->words, module->word_count, stage, shader_model, binary, &diagnostic);
+	error = nvrtx_sm75_compile_stage_view(module->words, module->word_count, stage, shader_model, features, view, reads_view, binary, &diagnostic);
 	if (error != 0) {
 		kern_logf("nvrtx: vk: a stage %u module of %u words did not compile (%d at %u: %s)\n",
 			  (unsigned)stage,
@@ -1128,8 +1226,15 @@ pipeline_destroy(
 	void *payload)
 {
 	struct nvrtx_vk_pipeline *pipeline;
+	uint32_t view;
 
 	pipeline = payload;
+
+	/* The pipelines of the other views, each with its run. */
+	for (view = 0U; view < NVRTX_VK_VIEWS_MAX; view++) {
+		if (pipeline->views[view] != NULL)
+			(void)pipeline_destroy(session, pipeline->views[view]);
+	}
 
 	/* The run, when the programs were copied. */
 	if (pipeline->code_token != NULL)
@@ -1229,4 +1334,21 @@ pipeline_writes_attribute(
 
 	/* Succeeded: whether it is set. */
 	return (binary->sph[bit / 32U] >> (bit % 32U)) & 1U;
+}
+
+/* Returns the lowest view of a subpass's view mask; view 0 for a pass of one view. */
+static uint32_t
+pipeline_first_view(
+	uint32_t view_mask)
+{
+	uint32_t view;
+
+	/* The lowest bit set. */
+	for (view = 0U; view < NVRTX_VK_VIEWS_MAX; view++) {
+		if ((view_mask & (1U << view)) != 0U)
+			return view;
+	}
+
+	/* A pass of one view renders view 0. */
+	return 0U;
 }

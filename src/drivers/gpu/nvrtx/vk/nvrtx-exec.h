@@ -280,6 +280,7 @@ size_t nvrtx_exec_draw_indexed(uint8_t *push, size_t at, uint32_t topology, uint
 size_t nvrtx_exec_index_buffer(uint8_t *push, size_t at, uint64_t address, uint64_t bytes, uint32_t type);
 size_t nvrtx_exec_sample_mask(uint8_t *push, size_t at, uint32_t mask);
 size_t nvrtx_exec_layer_source(uint8_t *push, size_t at, uint32_t from_program);
+size_t nvrtx_exec_layer(uint8_t *push, size_t at, uint32_t layer);
 size_t nvrtx_exec_raster(uint8_t *push, size_t at, uint32_t cull_mode, uint32_t front_face, uint32_t point_size, uint32_t discard, uint32_t polygon_mode, uint32_t depth_clamp);
 size_t nvrtx_exec_logic_op(uint8_t *push, size_t at, uint32_t enable, uint32_t op);
 size_t nvrtx_exec_alpha_coverage(uint8_t *push, size_t at, uint32_t enable);

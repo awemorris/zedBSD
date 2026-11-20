@@ -202,6 +202,14 @@ int nvrtx_sm75_compile_ir(const struct drv_gpu_shader_ir *ir, struct nvrtx_sm75_
 /* Compiles a SPIR-V module's stage for a shader model (NVRTX_SM_TURING, _AMPERE or _ADA); ENOTSUP for another. */
 int nvrtx_sm75_compile_stage_sm(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t sm, struct nvrtx_sm75_binary **binary, struct nvrtx_sm75_diagnostic *diagnostic);
 
+/*
+ * Compiles a SPIR-V module's stage for a shader model as
+ * nvrtx_sm75_compile_stage_sm(), with the frontend's `features` beyond
+ * NVRTX_SM75_SPIRV_FEATURES and gl_ViewIndex read as `view`; *reads_view
+ * says whether the stage reads it.
+ */
+int nvrtx_sm75_compile_stage_view(const uint32_t *words, size_t word_count, enum drv_gpu_shader_stage stage, uint32_t sm, uint32_t features, uint32_t view, uint32_t *reads_view, struct nvrtx_sm75_binary **binary, struct nvrtx_sm75_diagnostic *diagnostic);
+
 /* Compiles a parsed program for a shader model, as nvrtx_sm75_compile_stage_sm(). */
 int nvrtx_sm75_compile_ir_sm(const struct drv_gpu_shader_ir *ir, uint32_t sm, struct nvrtx_sm75_binary **binary, struct nvrtx_sm75_diagnostic *diagnostic);
 

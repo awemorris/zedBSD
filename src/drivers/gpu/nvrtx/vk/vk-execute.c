@@ -63,6 +63,7 @@
 #include <uapi/errno.h>
 #include <uapi/gpu-op.h>
 
+#include "drivers/gpu/compiler/spirv.h"
 #include "drivers/gpu/nvrtx/nvrtx-compute.h"
 #include "drivers/gpu/nvrtx/nvrtx-gsp.h"
 #include "drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h"
@@ -426,6 +427,12 @@ struct execute_state {
 	int32_t known_y0;
 	int32_t known_x1;
 	int32_t known_y1;
+
+	/*
+	 * In a multiview pass, the view the draw being written renders: its
+	 * layer of the layered target, which SET_RT_LAYER names.
+	 */
+	uint32_t view;
 };
 
 /*
@@ -542,6 +549,10 @@ static int execute_end_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_ex
 static void execute_shadow_copy(const struct nvrtx_exec_target *to, const struct nvrtx_exec_target *from, int32_t x0, int32_t y0,
 				int32_t x1, int32_t y1, struct execute_quad *quad);
 static int execute_draw(struct nvrtx_vk_execute *execute, struct execute_state *state, bool indexed, const uint32_t *values);
+static int execute_views(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
+static uint32_t execute_view_layers(uint32_t view_mask);
+static bool execute_layer_drawn(const struct execute_state *state, uint32_t layer);
+static int execute_query_views(struct nvrtx_vk_execute *execute, const struct execute_state *state, const struct nvrtx_vk_query_place *place);
 static int execute_draw_indirect(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static uint32_t execute_pipeline_changes(const struct nvrtx_vk_pipeline *held, const struct nvrtx_vk_pipeline *pipeline);
 static bool execute_same_words(const uint32_t *left, const uint32_t *right, size_t count);
@@ -1233,13 +1244,12 @@ execute_record(
 		break;
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
-		error = execute_draw(execute, state, record->opcode == GPU_OP_CMD_DRAW_INDEXED, record->values);
-		break;
 	case GPU_OP_CMD_DRAW_INDIRECT:
 	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
-		error = execute_draw_indirect(session, execute, state, record);
+		error = execute_views(session, execute, state, record);
 		break;
 	case GPU_OP_CMD_DISPATCH:
+	case GPU_OP_CMD_DISPATCH_BASE:
 		error = execute_dispatch(execute, state, record);
 		break;
 	case GPU_OP_CMD_PIPELINE_BARRIER:
@@ -1269,6 +1279,8 @@ execute_record(
 		graphics = nvrtx_vk_video_query_place(record, &place);
 		if (graphics) {
 			error = execute_query(session, execute, state, record->opcode, &place);
+			if (error == 0 && record->opcode == GPU_OP_CMD_END_QUERY)
+				error = execute_query_views(execute, state, &place);
 			break;
 		}
 		execute->kept.valid = false;
@@ -1480,6 +1492,7 @@ execute_dispatch(
 	uint64_t qmd_va;
 	uint64_t va;
 	uint64_t range;
+	uint32_t groups_bytes;
 	uint32_t entry;
 	uint32_t index;
 	uint32_t size;
@@ -1490,6 +1503,11 @@ execute_dispatch(
 	if (state->kernel == NULL)
 		return EINVAL;
 	kernel = &state->kernel->kernel;
+
+	/* A dispatch from a base other than zero needs a pipeline made for one (the API's rule). */
+	if (state->kernel->dispatch_base == 0U &&
+	    (record->values[3] != 0U || record->values[4] != 0U || record->values[5] != 0U))
+		return EINVAL;
 	if (record->values[0] == 0U || record->values[1] == 0U || record->values[2] == 0U)
 		return 0;
 
@@ -1501,9 +1519,15 @@ execute_dispatch(
 	nvrtx_put32(root, EXECUTE_GROUPS_AT, record->values[0]);
 	nvrtx_put32(root, EXECUTE_GROUPS_AT + 4U, record->values[1]);
 	nvrtx_put32(root, EXECUTE_GROUPS_AT + 8U, record->values[2]);
+	nvrtx_put32(root, EXECUTE_GROUPS_AT + 12U, record->values[3]);
+	nvrtx_put32(root, EXECUTE_GROUPS_AT + 16U, record->values[4]);
+	nvrtx_put32(root, EXECUTE_GROUPS_AT + 20U, record->values[5]);
+	groups_bytes = EXECUTE_GROUPS_BYTES;
+	if (state->kernel->dispatch_base != 0U)
+		groups_bytes = DRV_GPU_SPIRV_SYSTEM_BASE_BYTES;
 	for (index = 0U; index < kernel->storage_count; index++) {
 		va = root_va + EXECUTE_GROUPS_AT;
-		range = EXECUTE_GROUPS_BYTES;
+		range = groups_bytes;
 		if (kernel->storage[index].set != NVRTX_VK_SYSTEM_SET) {
 			error = execute_storage(state->kernel_sets, (const uint32_t (*)[NVRTX_VK_BINDINGS_MAX])state->kernel_dynamic, &kernel->storage[index], &va, &range);
 			if (error != 0)
@@ -1812,6 +1836,8 @@ execute_begin_pass(
 	layers = framebuffer->layers;
 	if (layers == 0U)
 		layers = 1U;
+	if (pass->view_mask != 0U)
+		layers = execute_view_layers(pass->view_mask);
 	if (layers > 1U) {
 		if (colour && state->target.block_linear == 0U)
 			return ENOTSUP;
@@ -1869,8 +1895,10 @@ execute_begin_pass(
 	if (state->area.offset.x < 0 || state->area.offset.y < 0 || x1 <= state->area.offset.x || y1 <= state->area.offset.y)
 		return 0;
 
-	/* Each layer's clears, with room for them (the target written again in a new push buffer). */
+	/* Each layer's clears, with room for them (the target written again in a new push buffer); a multiview pass's views' layers. */
 	for (layer = 0U; layer < layers; layer++) {
+		if (!execute_layer_drawn(state, layer))
+			continue;
 		error = execute_surface_room(session, execute, state);
 		if (error != 0)
 			return error;
@@ -2347,8 +2375,13 @@ execute_draw(
 			execute->at = nvrtx_exec_geometry_program(push, execute->at, pipeline->geometry.va, pipeline->geometry.gprs);
 	}
 
-	/* The layer's source, after the programs (binding them all sets layer 0 from the state). */
-	if ((changes & EXECUTE_PIPELINE_RASTER) != 0U)
+	/*
+	 * The layer's source, after the programs (binding them all sets layer 0
+	 * from the state); in a multiview pass the view's layer, every draw.
+	 */
+	if (state->pass != NULL && state->pass->view_mask != 0U)
+		execute->at = nvrtx_exec_layer(push, execute->at, state->view);
+	else if ((changes & EXECUTE_PIPELINE_RASTER) != 0U)
 		execute->at = nvrtx_exec_layer_source(push, execute->at, pipeline->layer);
 
 	/* The vertex input, when the pipeline's or a bound vertex buffer changed. */
@@ -3428,6 +3461,8 @@ execute_clear_attachments(
 	uint32_t format;
 	uint32_t layer;
 	uint32_t layers;
+	uint32_t layer_first;
+	uint32_t layer_count;
 	uint32_t colour[4];
 	bool depth;
 	bool stencil;
@@ -3498,7 +3533,16 @@ execute_clear_attachments(
 		layers = state->target.layers;
 		if (layers == 0U)
 			layers = 1U;
-		for (layer = rects[index].baseArrayLayer; layer < layers && layer - rects[index].baseArrayLayer < rects[index].layerCount; layer++) {
+		layer_first = rects[index].baseArrayLayer;
+		layer_count = rects[index].layerCount;
+		if (state->pass != NULL && state->pass->view_mask != 0U) {
+			/* In a multiview pass a rectangle clears the layer of each view the subpass renders. */
+			layer_first = 0U;
+			layer_count = layers;
+		}
+		for (layer = layer_first; layer < layers && layer - layer_first < layer_count; layer++) {
+			if (!execute_layer_drawn(state, layer))
+				continue;
 			error = execute_surface_room(session, execute, state);
 			if (error != 0)
 				return error;
@@ -4972,7 +5016,9 @@ execute_resolve_pass(
 			return EINVAL;
 		source = framebuffer->views[attachment]->payload;
 		destination = framebuffer->views[resolve]->payload;
-		for (layer = 0U; layer < framebuffer->layers || layer == 0U; layer++) {
+		for (layer = 0U; layer < framebuffer->layers || layer == 0U || layer < state->target.layers; layer++) {
+			if (!execute_layer_drawn(state, layer))
+				continue;
 			error = execute_resolve(session, execute, state, source->image->payload, source->base_layer + layer, x0, y0,
 						destination->image->payload, destination->base_level, destination->base_layer + layer, x0, y0,
 						(uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
@@ -5451,4 +5497,155 @@ execute_full_viewport(
 	viewport[3] = nvrtx_exec_float(y1 - y0);
 	viewport[4] = 0U;
 	viewport[5] = EXECUTE_FLOAT_ONE;
+}
+
+/*
+ * Runs a draw or an indirect draw once for each view of a multiview
+ * subpass: each with the pipeline's programs for the view (their
+ * gl_ViewIndex) into the view's layer of the layered target.  Outside a
+ * multiview pass the draw runs once.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (a draw repeated for each bit of the render's view mask, SET_RT_LAYER
+ * naming the view's layer).
+ */
+static int
+execute_views(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_execute *execute,
+	struct execute_state *state,
+	const struct nvrtx_vk_record *record)
+{
+	const struct nvrtx_vk_pipeline *pipeline;
+	uint32_t view;
+	bool indexed;
+	bool indirect;
+	int error;
+
+	/* The kind of draw. */
+	indexed = false;
+	if (record->opcode == GPU_OP_CMD_DRAW_INDEXED)
+		indexed = true;
+	indirect = false;
+	if (record->opcode == GPU_OP_CMD_DRAW_INDIRECT || record->opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT)
+		indirect = true;
+
+	/* Outside a multiview pass, the draw once. */
+	if (state->pass == NULL || state->pass->view_mask == 0U || state->pipeline == NULL) {
+		if (indirect) {
+			error = execute_draw_indirect(session, execute, state, record);
+		} else {
+			error = execute_draw(execute, state, indexed, record->values);
+		}
+		return error;
+	}
+
+	/* Each view of the subpass, its programs and its layer, then the pipeline as bound. */
+	pipeline = state->pipeline;
+	error = 0;
+	for (view = 0U; view < NVRTX_VK_VIEWS_MAX && error == 0; view++) {
+		/* A view the subpass does not render. */
+		if ((state->pass->view_mask & (1U << view)) == 0U)
+			continue;
+
+		/* The view's programs and layer. */
+		if (pipeline->views[view] != NULL)
+			state->pipeline = pipeline->views[view];
+		state->view = view;
+		if (indirect) {
+			error = execute_draw_indirect(session, execute, state, record);
+		} else {
+			error = execute_draw(execute, state, indexed, record->values);
+		}
+		state->pipeline = pipeline;
+	}
+
+	/* Reports a view that failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every view of the subpass is drawn. */
+	return 0;
+}
+
+/* Returns the layers of a multiview target: up to the subpass's last view. */
+static uint32_t
+execute_view_layers(
+	uint32_t view_mask)
+{
+	uint32_t layers;
+	uint32_t view;
+
+	/* One past the highest view. */
+	layers = 1U;
+	for (view = 0U; view < NVRTX_VK_VIEWS_MAX; view++) {
+		if ((view_mask & (1U << view)) != 0U)
+			layers = view + 1U;
+	}
+
+	/* Succeeded: the target's layers. */
+	return layers;
+}
+
+/* Returns whether the pass in progress draws a layer: any layer, or in a multiview pass a layer of one of its views. */
+static bool
+execute_layer_drawn(
+	const struct execute_state *state,
+	uint32_t layer)
+{
+	/* A pass of one view draws each of its layers. */
+	if (state->pass == NULL || state->pass->view_mask == 0U)
+		return true;
+
+	/* A multiview pass draws its views' layers. */
+	if (layer < NVRTX_VK_VIEWS_MAX && (state->pass->view_mask & (1U << layer)) != 0U)
+		return true;
+
+	/* Succeeded: a layer no view draws. */
+	return false;
+}
+
+/*
+ * Ends the queries an occlusion query of a multiview subpass takes beyond
+ * its own: a query in a subpass of N views uses N consecutive queries, and
+ * the views' draws all count in the first, so each of the others is begun
+ * and ended at once (zero) and made available.
+ */
+static int
+execute_query_views(
+	struct nvrtx_vk_execute *execute,
+	const struct execute_state *state,
+	const struct nvrtx_vk_query_place *place)
+{
+	uint8_t *push;
+	uint64_t reports;
+	uint32_t view;
+	uint32_t index;
+
+	/* A query outside a multiview pass takes one query. */
+	if (state->pass == NULL || state->pass->view_mask == 0U)
+		return 0;
+
+	/* Each further query of the views, from the second view on. */
+	push = execute->cpu + EXECUTE_PUSH_AT;
+	index = 0U;
+	for (view = 0U; view < NVRTX_VK_VIEWS_MAX; view++) {
+		/* A view the subpass does not render takes no query. */
+		if ((state->pass->view_mask & (1U << view)) == 0U)
+			continue;
+
+		/* The first view's query is the one the command named. */
+		index++;
+		if (index == 1U)
+			continue;
+
+		/* Begun and ended with nothing drawn between, then available. */
+		reports = place->reports + (uint64_t)(index - 1U) * place->stride;
+		execute->at = nvrtx_exec_query_occlusion(push, execute->at, reports, true);
+		execute->at = nvrtx_exec_query_occlusion(push, execute->at, reports + EXECUTE_QUERY_REPORT_BYTES, false);
+		execute->at = nvrtx_exec_query_available(push, execute->at, place->available + (uint64_t)(index - 1U) * 4U, 1U, true);
+	}
+
+	/* Succeeded: every query of the views is available. */
+	return 0;
 }

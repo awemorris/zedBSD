@@ -1789,6 +1789,29 @@ nvrtx_exec_layer_source(
 }
 
 /*
+ * Writes the layer of a layered target the primitives after it go to,
+ * whatever the programs write: the view of a multiview draw.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (SET_RT_LAYER with V the view's index and control V_SELECTS_LAYER for
+ * each view of the render's view mask).
+ */
+size_t
+nvrtx_exec_layer(
+	uint8_t *push,
+	size_t at,
+	uint32_t layer)
+{
+	/* The layer, the method's own value (control 0). */
+	at = exec_set(push, at, M_SET_RT_LAYER, layer & 0xffffU);
+
+	/* Succeeded: the layer is written. */
+	return at;
+}
+
+/*
  * Writes the samples a pixel keeps (VkPipelineMultisampleStateCreateInfo's
  * pSampleMask, low 16 bits): the same mask for each pixel of the 2x2 quad.
  *
