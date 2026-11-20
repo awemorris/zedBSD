@@ -107,6 +107,14 @@
 #define EXECUTE_STAGE_GEOMETRY		2U
 
 /*
+ * The words a buffer's copy of D32_SFLOAT_S8_UINT's stencil passes through
+ * (a word a texel, the stencil its low byte; execute_stencil_buffer()),
+ * past the constant buffers 0, to the run's end.
+ */
+#define EXECUTE_STENCIL_AT		(1680U * 1024U)
+#define EXECUTE_STENCIL_BYTES		(EXECUTE_RUN_BYTES - EXECUTE_STENCIL_AT)
+
+/*
  * The headers and the samplers of one push buffer, each eight words.
  *
  * Value referenced: Mesa 25.3.6
@@ -572,6 +580,7 @@ static int execute_transfer(struct nvrtx_vk_session *session, struct nvrtx_vk_ex
 static int execute_decode(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_depth_remap(uint32_t format, uint32_t aspects, uint32_t way, struct nvrtx_exec_rect_copy *copy, uint32_t *buffer_texel);
 static int execute_depth_buffer(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_image *image, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_record *record, bool to_image);
+static int execute_stencil_buffer(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_exec_copy_side *image_side, const struct nvrtx_exec_copy_side *buffer_side, uint32_t width, uint32_t height, bool to_image);
 static int execute_depth_images(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static void execute_depth_side(struct nvrtx_exec_copy_side *side, uint64_t va, uint64_t offset, uint32_t pitch, uint32_t rows, int32_t x, int32_t y);
 static int execute_video_copy(struct nvrtx_vk_execute *execute, const struct nvrtx_vk_image *image, uint64_t image_va, const struct nvrtx_vk_buffer *buffer, uint64_t buffer_va, const struct nvrtx_vk_record *record);
@@ -580,7 +589,6 @@ static int execute_copy_images(struct nvrtx_vk_session *session, struct nvrtx_vk
 static int execute_buffer_image(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_buffer_surface(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
 static int execute_cpu_copy(struct nvrtx_vk_session *session, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
-static int execute_cpu_stencil(struct nvrtx_vk_session *session, const struct nvrtx_vk_buffer *buffer, const struct nvrtx_vk_image *image, const VkBufferImageCopy *region, uint32_t layer, uint64_t offset, bool to_image);
 static int execute_clear_image(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_quad(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, const struct execute_quad *quad);
 static int execute_image_target(const struct nvrtx_vk_image *image, uint32_t level, uint32_t layer, uint32_t format, struct nvrtx_exec_target *target);
@@ -3953,9 +3961,9 @@ execute_region_surfaces(
  * stencil one byte), an image its whole texels, of which a copy into it
  * writes only the aspect's components and leaves the rest as they are.
  * Between images the aspects named are copied texel by texel.  ENOTSUP
- * for a buffer's copy of D32_SFLOAT_S8_UINT's stencil (its byte lies past
- * the four components the engine remaps), EINVAL for aspects the format
- * does not have or a buffer's copy of both.
+ * for a buffer's copy of D32_SFLOAT_S8_UINT's stencil (a byte of the second
+ * word, which no one remap picks: execute_stencil_buffer()), EINVAL for
+ * aspects the format does not have or a buffer's copy of both.
  *
  * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_copy.c
  * (nvk_CmdCopyBufferToImage2 and nvk_CmdCopyImageToBuffer2: the remaps
@@ -4031,7 +4039,7 @@ execute_depth_remap(
 
 	/*
 	 * D32_SFLOAT_S8_UINT: words; its depth the first, its stencil in the
-	 * second (a buffer's copy of it is the CPU's, execute_depth_buffer()).
+	 * second (a buffer's copy of it is execute_stencil_buffer()'s).
 	 */
 	copy->component_bytes = 4U;
 	copy->source_components = 2U;
@@ -4115,6 +4123,7 @@ execute_depth_buffer(
 	uint32_t height;
 	uint32_t pitch;
 	bool inside;
+	bool stencil;
 	int error;
 
 	/* The two storages. */
@@ -4129,36 +4138,16 @@ execute_depth_buffer(
 	for (index = 0U; index < record->region_count; index++) {
 		region = &regions[index];
 
-		/*
-		 * D32_SFLOAT_S8_UINT's stencil, a byte of each 8-byte texel, which
-		 * the copy engine's remap (four components at most) cannot pick:
-		 * by the CPU once the work before has run.
-		 */
-		if (image->format == VK_FORMAT_D32_SFLOAT_S8_UINT && region->imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT) {
-			error = execute_region_surfaces(image, &region->imageSubresource, 0, 1, &surfaces);
-			if (error == 0)
-				error = execute_drain(session, execute);
-			row = region->bufferRowLength;
-			if (row == 0U)
-				row = region->imageExtent.width;
-			rows = region->bufferImageHeight;
-			if (rows == 0U)
-				rows = region->imageExtent.height;
-			for (surface = 0U; error == 0 && surface < surfaces.count; surface++)
-				error = execute_cpu_stencil(session, buffer, image, region, surfaces.first + surface,
-							    region->bufferOffset + (uint64_t)row * rows * surface, to_image);
+		/* The aspect's remap and the buffer's texel; D32_SFLOAT_S8_UINT's stencil a byte by two copies. */
+		kern_memset(&copy, 0, sizeof(copy));
+		stencil = (image->format == VK_FORMAT_D32_SFLOAT_S8_UINT && region->imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT);
+		texel = 1U;
+		if (!stencil) {
+			error = execute_depth_remap(image->format, region->imageSubresource.aspectMask,
+						    to_image ? EXECUTE_DEPTH_TO_IMAGE : EXECUTE_DEPTH_FROM_IMAGE, &copy, &texel);
 			if (error != 0)
 				return error;
-			state->target_written = false;
-			continue;
 		}
-
-		/* The aspect's remap and the buffer's texel. */
-		kern_memset(&copy, 0, sizeof(copy));
-		error = execute_depth_remap(image->format, region->imageSubresource.aspectMask,
-					    to_image ? EXECUTE_DEPTH_TO_IMAGE : EXECUTE_DEPTH_FROM_IMAGE, &copy, &texel);
-		if (error != 0)
-			return error;
 
 		/* Its layers; the buffer's rows (a row length of zero the region's width), every layer inside the buffer. */
 		error = execute_region_surfaces(image, &region->imageSubresource, 0, 1, &surfaces);
@@ -4196,6 +4185,13 @@ execute_depth_buffer(
 				return error;
 			execute_depth_side(&image_side, image_va, offset, pitch, height, region->imageOffset.x, region->imageOffset.y);
 			execute_depth_side(&buffer_side, buffer_va, region->bufferOffset + surface_bytes * surface, row * texel, 0U, 0, 0);
+			if (stencil) {
+				error = execute_stencil_buffer(session, execute, state, &image_side, &buffer_side, region->imageExtent.width,
+							       region->imageExtent.height, to_image);
+				if (error != 0)
+					return error;
+				continue;
+			}
 			copy.source = buffer_side;
 			copy.destination = image_side;
 			if (!to_image) {
@@ -4209,6 +4205,119 @@ execute_depth_buffer(
 	}
 
 	/* Succeeded: the regions are copied. */
+	return 0;
+}
+
+/*
+ * Copies D32_SFLOAT_S8_UINT's stencil between a rectangle of a surface of
+ * the image (image_side, its origin the rectangle's) and a buffer's bytes
+ * (buffer_side, pitch linear, a byte a texel, the rectangle at its start)
+ * by the copy engine in two copies through the run's words (a word a
+ * texel), as many texels at a time as they hold: out of the image the
+ * texels' second words into the words, then each word's low byte into
+ * the buffer; into the image the bytes into the words' low bytes, then
+ * the words into the texels' second words, their depth words not written.
+ * The engine's copies run one after another, each after the one before
+ * has written.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_copy.c
+ * (nvk_CmdCopyBufferToImage2 and nvk_CmdCopyImageToBuffer2: the stencil
+ * of D32_SFLOAT_S8_UINT through a temporary image of R32_UINT, its byte
+ * the low byte of the texel's second word).
+ */
+static int
+execute_stencil_buffer(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_execute *execute,
+	struct execute_state *state,
+	const struct nvrtx_exec_copy_side *image_side,
+	const struct nvrtx_exec_copy_side *buffer_side,
+	uint32_t width,
+	uint32_t height,
+	bool to_image)
+{
+	struct nvrtx_exec_rect_copy first;
+	struct nvrtx_exec_rect_copy second;
+	struct nvrtx_exec_copy_side image_part;
+	struct nvrtx_exec_copy_side buffer_part;
+	struct nvrtx_exec_copy_side words;
+	uint32_t across;
+	uint32_t down;
+	uint32_t index;
+	uint32_t x;
+	uint32_t y;
+	int error;
+
+	/* The texels the words hold at a time: a row's (or the most of one), as many rows as fit. */
+	across = width;
+	if (across > EXECUTE_STENCIL_BYTES / 4U)
+		across = EXECUTE_STENCIL_BYTES / 4U;
+
+	/* Each piece of the rectangle. */
+	for (y = 0U; y < height; y += down) {
+		down = EXECUTE_STENCIL_BYTES / (across * 4U);
+		if (down > height - y)
+			down = height - y;
+		for (x = 0U; x < width; x += across) {
+			error = execute_surface_room(session, execute, state);
+			if (error != 0)
+				return error;
+
+			/* The piece on each side, and the words in rows of its texels. */
+			image_part = *image_side;
+			image_part.x += x;
+			image_part.y += y;
+			buffer_part = *buffer_side;
+			buffer_part.x += x;
+			buffer_part.y += y;
+			kern_memset(&words, 0, sizeof(words));
+			words.address = execute->va + EXECUTE_STENCIL_AT;
+			words.pitch = (width - x < across ? width - x : across) * 4U;
+
+			/* The two copies, out of the image or into it. */
+			kern_memset(&first, 0, sizeof(first));
+			kern_memset(&second, 0, sizeof(second));
+			for (index = 0U; index < 4U; index++) {
+				first.remap[index] = NVRTX_EXEC_COPY_KEEP;
+				second.remap[index] = NVRTX_EXEC_COPY_KEEP;
+			}
+			if (to_image) {
+				first.source = buffer_part;
+				first.destination = words;
+				first.component_bytes = 1U;
+				first.source_components = 1U;
+				first.destination_components = 4U;
+				first.remap[0] = 0U;
+				second.source = words;
+				second.destination = image_part;
+				second.component_bytes = 4U;
+				second.source_components = 1U;
+				second.destination_components = 2U;
+				second.remap[1] = 0U;
+			} else {
+				first.source = image_part;
+				first.destination = words;
+				first.component_bytes = 4U;
+				first.source_components = 2U;
+				first.destination_components = 1U;
+				first.remap[0] = 1U;
+				second.source = words;
+				second.destination = buffer_part;
+				second.component_bytes = 1U;
+				second.source_components = 4U;
+				second.destination_components = 1U;
+				second.remap[0] = 0U;
+			}
+			first.width = words.pitch / 4U;
+			first.height = down;
+			second.width = first.width;
+			second.height = down;
+			execute->at = nvrtx_exec_copy_rect(execute->cpu + EXECUTE_PUSH_AT, execute->at, &first);
+			execute->at = nvrtx_exec_copy_rect(execute->cpu + EXECUTE_PUSH_AT, execute->at, &second);
+		}
+	}
+
+	/* Succeeded: the stencil is copied. */
 	return 0;
 }
 
@@ -4685,81 +4794,6 @@ execute_cpu_copy(
 	}
 
 	/* Succeeded: the region is copied. */
-	return 0;
-}
-
-/*
- * Copies the stencil of one surface of a D32_SFLOAT_S8_UINT image between
- * the image and a buffer's bytes by the CPU through the BAR1 window (the
- * GPU is idle: the work before has run): the region's rows of the layer,
- * the buffer's rows from offset at its row length, one byte a texel.  The
- * image's texel is the depth word, then the word whose low byte is the
- * stencil (ZF32_X24S8).  EINVAL for a region outside the image or the
- * buffer.
- */
-static int
-execute_cpu_stencil(
-	struct nvrtx_vk_session *session,
-	const struct nvrtx_vk_buffer *buffer,
-	const struct nvrtx_vk_image *image,
-	const VkBufferImageCopy *region,
-	uint32_t layer,
-	uint64_t offset,
-	bool to_image)
-{
-	uint8_t *buffer_cpu;
-	uint8_t *image_cpu;
-	uint8_t *texel;
-	uint8_t *byte;
-	uint64_t level_offset;
-	uint32_t level_width;
-	uint32_t level_height;
-	uint32_t level_pitch;
-	uint32_t row_pixels;
-	uint32_t x;
-	uint32_t y;
-	int error;
-
-	/* The two views and the surface's place in the image. */
-	error = nvrtx_vk_buffer_cpu(session, buffer, &buffer_cpu);
-	if (error == 0)
-		error = nvrtx_vk_image_cpu(session, image, &image_cpu);
-	if (error == 0)
-		error = nvrtx_vk_image_surface(image, region->imageSubresource.mipLevel, layer, &level_offset, &level_width, &level_height, &level_pitch);
-	if (error != 0)
-		return error;
-	if (!execute_region_inside(region->imageOffset.x, region->imageOffset.y, region->imageExtent.width, region->imageExtent.height,
-				   level_width, level_height))
-		return EINVAL;
-
-	/* The rows, within the buffer. */
-	row_pixels = region->bufferRowLength;
-	if (row_pixels == 0U)
-		row_pixels = region->imageExtent.width;
-	if (offset > buffer->size ||
-	    (uint64_t)(region->imageExtent.height - 1U) * row_pixels + region->imageExtent.width > buffer->size - offset)
-		return EINVAL;
-
-	/* Each texel's stencil byte, where its GOB keeps it (a tiled image), or in its row. */
-	for (y = 0U; y < region->imageExtent.height; y++) {
-		for (x = 0U; x < region->imageExtent.width; x++) {
-			if (image->tiled) {
-				texel = image_cpu + level_offset + execute_gob_offset(level_pitch, ((uint32_t)region->imageOffset.x + x) * 8U + 4U,
-										   (uint32_t)region->imageOffset.y + y);
-			} else {
-				texel = image_cpu + level_offset + (uint64_t)((uint32_t)region->imageOffset.y + y) * level_pitch +
-				    (uint64_t)((uint32_t)region->imageOffset.x + x) * 8U + 4U;
-			}
-			byte = buffer_cpu + offset + (uint64_t)y * row_pixels + x;
-			if (to_image) {
-				*texel = *byte;
-			} else {
-				*byte = *texel;
-			}
-		}
-	}
-
-	/* Succeeded: the stencil is copied. */
 	return 0;
 }
 
