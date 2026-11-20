@@ -844,9 +844,10 @@ prepare_depth(
  * Prepares the resolve of the depth/stencil attachment at the end of the
  * render pass: the tiles store sample 0 of each pixel into the layer of the
  * resolve attachment the framebuffer's view names (its view's, under
- * multiview).  A tile store writes whole tiles, so only a render area of
- * the whole framebuffer is resolved this way; a smaller one is refused by
- * name (ENOTSUP).
+ * multiview).  A tile store writes whole tiles, so a render area smaller
+ * than the framebuffer is stored into a raster of the pass's own
+ * (prepare_lists) and copied from there on the CPU (the finish), which
+ * leaves the attachment outside the render area as it was.
  */
 static int
 prepare_depth_resolve(
@@ -882,15 +883,6 @@ prepare_depth_resolve(
 	    image->bytes > 0xffffffffU)
 		return EINVAL;
 
-	/* Whole tiles are stored: only a render area of the whole framebuffer. */
-	if (record->area.offset.x != 0 ||
-	    record->area.offset.y != 0 ||
-	    record->area.extent.width != framebuffer->width ||
-	    record->area.extent.height != framebuffer->height) {
-		kern_logf("videocore: vk: XXX a depth/stencil resolve of a render area smaller than the framebuffer refused\n");
-		return ENOTSUP;
-	}
-
 	/* The layer the framebuffer's view names, as an image of its own, its layout checked and committed at the pass's ends. */
 	error = bcm2711_vulkan_image_level_view(image, 0, image_view->base_layer + pass->view, &layer_view);
 	if (error != 0)
@@ -912,6 +904,21 @@ prepare_depth_resolve(
 	pass->state.depth_resolve_output = address;
 	pass->state.depth_resolve_pitch = layer_view.pitch;
 	pass->state.depth_resolve_bytes = (uint32_t)layer_view.bytes;
+
+	/* A smaller render area: the CPU copies it from the pass's raster into the layer (the raster is made with the lists). */
+	pass->resolve_address = address;
+	pass->resolve_bytes = (uint32_t)layer_view.bytes;
+	pass->resolve_cpu = cpu;
+	pass->resolve_pitch = layer_view.pitch;
+	pass->resolve_texel = attachment->format == VK_FORMAT_D16_UNORM ? 2U : 4U;
+	if (record->area.offset.x != 0 ||
+	    record->area.offset.y != 0 ||
+	    record->area.extent.width != framebuffer->width ||
+	    record->area.extent.height != framebuffer->height) {
+		if (cpu == NULL)
+			return EINVAL;
+		pass->state.depth_resolve_output = 0;
+	}
 
 	/* Succeeded: the tiles store the resolve. */
 	return 0;
@@ -1206,6 +1213,20 @@ prepare_lists(
 		return error;
 	pass->state.state = storage->view->address;
 	pass->state.state_bytes = (uint32_t)storage->view->bytes;
+
+	/*
+	 * The raster of one sample a resolve of a smaller render area stores
+	 * into (prepare_depth_resolve), as large as the framebuffer, with the
+	 * pitch of the resolve attachment's layer.
+	 */
+	if (pass->state.depth_resolve != 0 && pass->state.depth_resolve_output == 0) {
+		error = allocate_storage(pass, (uint64_t)pass->resolve_pitch * pass->state.height, BCM2711_NATIVE_STORAGE_ZEROED, remaining, &storage);
+		if (error != 0)
+			return error;
+		pass->resolve_scratch = storage;
+		pass->state.depth_resolve_output = storage->view->address;
+		pass->state.depth_resolve_bytes = (uint32_t)storage->view->bytes;
+	}
 
 	/*
 	 * The occlusion counters, one zeroed group that the tile buffer adds
