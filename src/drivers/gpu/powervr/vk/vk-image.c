@@ -48,7 +48,8 @@
 				 VK_IMAGE_USAGE_SAMPLED_BIT | \
 				 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | \
 				 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | \
-				 VK_IMAGE_USAGE_STORAGE_BIT)
+				 VK_IMAGE_USAGE_STORAGE_BIT | \
+				 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
 
 /*
  * Whether a sampler has asked for a border colour other than transparent
