@@ -392,15 +392,25 @@ bcm2711_vulkan_device_core11(
 	core11->maintenance3.maxMemoryAllocationSize = BCM2711_VULKAN_MEMORY_BUDGET;
 }
 
-/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name. */
+/*
+ * Fills the device's Vulkan 1.2 answers: those every executor starts from,
+ * under its name, and on a 7.1 the resolve of a multisampled depth/stencil
+ * attachment's sample 0, which the tiles store with the attachment
+ * (native71-pass.c), both aspects of a D24S8 one together.
+ */
 void
 bcm2711_vulkan_device_core12(
 	const struct bcm2711_vulkan_session *session,
 	struct i915_vkc_core12 *core12)
 {
-	/* Every engine alike: the shaders' features, the limits and the name. */
-	(void)session;
+	/* The shaders' features, the limits and the name. */
 	i915_vkc_core12_defaults(core12, "zedBSD v3d");
+
+	/* A 7.1 resolves sample 0 of the depth and stencil. */
+	if (compute_engine(session)) {
+		core12->properties.supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+		core12->properties.supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	}
 }
 
 /* Enumerates one graphics/transfer family while preserving count-only and actual output-array framing. */

@@ -32,7 +32,10 @@
  * index.  A pass with depth set also has a depth/stencil attachment (D24S8,
  * X8_D24, D16 or D32_SFLOAT) at depth_attachment, which the subpass uses.
  * The subpass names every attachment once.  Every attachment has samples
- * samples a pixel (1 or 4).
+ * samples a pixel (1 or 4) but a resolve's: a pass of four samples with
+ * depth_resolve set (from vkCreateRenderPass2) also stores sample 0 of its
+ * depth/stencil attachment, both aspects of a D24S8 one, into the
+ * attachment of one sample in its format at depth_resolve_attachment.
  *
  * view_mask is the subpass's views under multiview (bit n: view n, drawn
  * into layer n of each attachment's view), zero for a pass of one view.
@@ -48,6 +51,9 @@ struct bcm2711_vulkan_pass {
 	bool depth;
 	VkAttachmentDescription depth_stencil;
 	uint32_t depth_attachment;
+	bool depth_resolve;
+	VkAttachmentDescription depth_resolved;
+	uint32_t depth_resolve_attachment;
 	uint32_t view_mask;
 	uint32_t count;
 	VkSubpassDependency dependencies[BCM2711_VULKAN_PASS_DEPENDENCIES];
@@ -58,12 +64,15 @@ struct bcm2711_vulkan_pass {
  *
  * colours holds the view of each of the pass's colour slots (NULL for an
  * unused one), and depth the depth/stencil attachment's view when the
- * pass has one, otherwise NULL; each is retained.
+ * pass has one, otherwise NULL, and depth_resolve the view its depth/stencil
+ * attachment is resolved into when the pass resolves it, otherwise NULL;
+ * each is retained.
  */
 struct bcm2711_vulkan_framebuffer {
 	struct bcm2711_vulkan_input_owner owner;
 	struct bcm2711_vulkan_object *colours[BCM2711_VULKAN_PASS_COLOURS];
 	struct bcm2711_vulkan_object *depth;
+	struct bcm2711_vulkan_object *depth_resolve;
 	uint32_t width;
 	uint32_t height;
 };

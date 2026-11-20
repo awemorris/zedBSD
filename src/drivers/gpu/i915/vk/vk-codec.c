@@ -1153,8 +1153,9 @@ i915_vkc_read_render_pass2(
  * aspects say, into the resolve attachment.
  *
  * Returns ENOTSUP for a resolve the executors do not do (a mode other than
- * sample 0) and EINVAL for one Vulkan does not allow: no multisampled depth
- * attachment, or a target of several samples or of another format.
+ * sample 0, or one aspect alone of a format of both) and EINVAL for one
+ * Vulkan does not allow: no multisampled depth attachment, or a target of
+ * several samples or of another format.
  *
  * Values referenced: the Vulkan 1.2 specification (section 8.1,
  * VkSubpassDescriptionDepthStencilResolve and its valid usage).
@@ -1210,6 +1211,15 @@ i915_vkc_depth_resolve(
 	    (format == VK_FORMAT_S8_UINT || format == VK_FORMAT_D16_UNORM_S8_UINT ||
 	     format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT))
 		resolve->stencil = 1U;
+
+	/*
+	 * A format of both aspects resolves both or neither: the executors
+	 * report no independent resolve (independentResolveNone and
+	 * independentResolve false), so a resolve writes whole texels.
+	 */
+	if ((format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) &&
+	    resolve->depth != resolve->stencil)
+		return ENOTSUP;
 
 	/* A resolve of no aspect is none. */
 	if (resolve->depth == 0U && resolve->stencil == 0U)

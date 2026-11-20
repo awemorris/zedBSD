@@ -79,6 +79,16 @@ struct bcm2711_vulkan_native_pass {
 	uint32_t depth_layer;
 	VkImageLayout depth_initial_layout;
 	VkImageLayout depth_final_layout;
+	/*
+	 * The attachment a resolved depth/stencil attachment's sample 0 is
+	 * stored into, held and committed like the depth/stencil attachment's
+	 * own; NULL for a pass that resolves none.
+	 */
+	struct bcm2711_v3d_view *resolve;
+	struct bcm2711_vulkan_resource *resolve_target;
+	uint32_t resolve_layer;
+	VkImageLayout resolve_initial_layout;
+	VkImageLayout resolve_final_layout;
 	struct bcm2711_vulkan_native_draw *first;
 	struct bcm2711_vulkan_native_draw *last;
 	/* The chunks the pass's draws come from, freed after every draw is released. */

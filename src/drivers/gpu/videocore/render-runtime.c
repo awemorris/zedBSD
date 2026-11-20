@@ -34,10 +34,13 @@
 /*
  * The native word after the vendor suffix ("TANZ" read little endian), and
  * its bit 3: the executor answers the Vulkan 1.1 queries and reads the 1.1
- * chains of a device and a render pass creation.
+ * chains of a device and a render pass creation; bit 4: the same for the
+ * Vulkan 1.2 queries, the 1.2 chain of a device creation and
+ * vkCreateRenderPass2.
  */
 #define VULKAN_NATIVE_MAGIC 0x5a4e4154U
 #define VULKAN_NATIVE_CORE11 8U
+#define VULKAN_NATIVE_CORE12 16U
 #define VULKAN_NATIVE_CAPSET_BYTES 176U
 
 #define VULKAN_CAPSET_ID 4U
@@ -133,12 +136,12 @@ runtime_capset(
 	capset->bytes = VULKAN_CAPSET_BYTES;
 
 	/*
-	 * The native word follows the vendor suffix: the Vulkan 1.1 queries,
+	 * The native word follows the vendor suffix: the Vulkan 1.1 and 1.2 queries,
 	 * and video decode for a session asked while the decoder is there,
 	 * which is promised it for its life.
 	 */
 	if (session->vulkan != NULL && capset->capacity >= VULKAN_NATIVE_CAPSET_BYTES) {
-		flags = VULKAN_NATIVE_CORE11;
+		flags = VULKAN_NATIVE_CORE11 | VULKAN_NATIVE_CORE12;
 #if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		if (!bcm2711_vulkan_video_session(session->vulkan) && bcm2711_vulkan_video_available())
 			bcm2711_vulkan_video_promise(session->vulkan);

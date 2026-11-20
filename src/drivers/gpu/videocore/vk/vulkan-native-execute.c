@@ -199,6 +199,8 @@ bcm2711_vulkan_native_pass_finish(
 	/* A stored depth/stencil image too: a later sampling of its depth or stencil converts it again. */
 	if (pass->depth != NULL && pass->state.depth_store != 0)
 		bcm2711_v3d_memory_written(pass->depth->buffer, (uint64_t)pass->state.depth_output - pass->depth->address, NULL);
+	if (pass->resolve != NULL)
+		bcm2711_v3d_memory_written(pass->resolve->buffer, (uint64_t)pass->state.depth_resolve_output - pass->resolve->address, NULL);
 
 	/* The storage buffers the draws' vertex programs may have stored into. */
 	for (draw = pass->first; draw != NULL; draw = draw->next) {
@@ -235,6 +237,8 @@ bcm2711_vulkan_native_pass_finish(
 	/* The depth/stencil attachment's layer's transition is committed with it. */
 	if (pass->depth_target != NULL)
 		bcm2711_vulkan_image_set_level_layout(pass->depth_target, 0, pass->depth_layer, pass->depth_final_layout);
+	if (pass->resolve_target != NULL)
+		bcm2711_vulkan_image_set_level_layout(pass->resolve_target, 0, pass->resolve_layer, pass->resolve_final_layout);
 
 	/* Succeeded: native bin/render completion and output visibility were proved by the existing IRQ/cache runner. */
 	return 0;
@@ -284,6 +288,11 @@ validate_pass(
 		if (pass->depth_initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->depth_initial_layout != current)
 			return EINVAL;
 	}
+	if (pass->resolve_target != NULL) {
+		current = bcm2711_vulkan_image_level_layout(pass->resolve_target, 0, pass->resolve_layer);
+		if (pass->resolve_initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->resolve_initial_layout != current)
+			return EINVAL;
+	}
 
 	/* The framebuffer has the bounded raster geometry. */
 	if (pass->state.width == 0 ||
@@ -312,6 +321,18 @@ validate_pass(
 		if (offset > pass->depth->bytes ||
 		    pass->state.depth_bytes > pass->depth->bytes - offset ||
 		    bytes > pass->state.depth_bytes)
+			return EINVAL;
+	}
+
+	/* A resolve's image of one sample stays mapped and covers every row its stores write. */
+	if (pass->resolve != NULL) {
+		if (pass->resolve->quarantined || pass->resolve->references == 0)
+			return EIO;
+		offset = (uint64_t)pass->state.depth_resolve_output - pass->resolve->address;
+		bytes = (uint64_t)pass->state.depth_resolve_pitch * pass->state.height;
+		if (offset > pass->resolve->bytes ||
+		    pass->state.depth_resolve_bytes > pass->resolve->bytes - offset ||
+		    bytes > pass->state.depth_resolve_bytes)
 			return EINVAL;
 	}
 
