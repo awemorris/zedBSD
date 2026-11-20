@@ -143,6 +143,22 @@ bcm2711_vulkan_record_decode(
 			record->count = drv_i915_wire_read_u32(reader);
 		record->objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUERY_POOL, identity);
 		break;
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
+		/*
+		 * The pool, the first query and the count, the buffer, where the
+		 * records go and how far apart (offsets 0 and 1), and the
+		 * VkQueryResultFlags, which words[0] keeps.
+		 */
+		identity = drv_i915_wire_read_u64(reader);
+		record->first = drv_i915_wire_read_u32(reader);
+		record->count = drv_i915_wire_read_u32(reader);
+		record->objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUERY_POOL, identity);
+		identity = drv_i915_wire_read_u64(reader);
+		record->offsets[0] = drv_i915_wire_read_u64(reader);
+		record->offsets[1] = drv_i915_wire_read_u64(reader);
+		record->words[0] = drv_i915_wire_read_u32(reader);
+		record->objects[1] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, identity);
+		break;
 	default:
 		return ENOTSUP;
 	}

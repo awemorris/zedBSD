@@ -6,6 +6,7 @@
  */
 
 /* Private Vulkan discovery describes the finite Keiland graphics path, without unimplemented optional features. */
+#include <kern/device-io.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
@@ -18,6 +19,7 @@
 #include "drivers/gpu/videocore/vk/vulkan-memory.h"
 #include "drivers/gpu/videocore/vk/vulkan-occlusion.h"
 #include "drivers/gpu/videocore/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
 #include "drivers/gpu/videocore/native-pass.h"
 #include "drivers/gpu/videocore/bcm2711-private.h"
 #include "drivers/gpu/videocore/render-device.h"

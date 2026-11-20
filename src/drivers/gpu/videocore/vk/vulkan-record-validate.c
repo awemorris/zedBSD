@@ -112,6 +112,7 @@ bcm2711_vulkan_record_validate(
 	case GPU_OP_CMD_BEGIN_QUERY:
 	case GPU_OP_CMD_END_QUERY:
 	case GPU_OP_CMD_RESET_QUERY_POOL:
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
 		error = validate_query(command, record);
 		break;
 	case GPU_OP_CMD_DRAW:
@@ -605,9 +606,10 @@ validate_indirect(
 }
 
 /*
- * Validates an occlusion query's begin, end or reset: a pool of the device,
- * queries inside it, a reset outside a render pass, and a begin's control
- * flags (only VK_QUERY_CONTROL_PRECISE_BIT).  Which query is active is the
+ * Validates an occlusion query's begin, end, reset or copy of results: a
+ * pool of the device, queries inside it, a reset or a copy outside a
+ * render pass (a copy's buffer as bcm2711_vulkan_occlusion_copy_validate
+ * says), and a begin's control flags (only VK_QUERY_CONTROL_PRECISE_BIT).  Which query is active is the
  * draw walk's to check.
  */
 static int
@@ -623,12 +625,15 @@ validate_query(
 		return EINVAL;
 
 	/* The queries lie inside the pool. */
-	if (record->count == 0U || record->first > pool->count || record->count > pool->count - record->first)
+	if ((record->count == 0U && record->opcode != GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) ||
+	    record->first > pool->count || record->count > pool->count - record->first)
 		return EINVAL;
 
-	/* A reset is a transfer outside any render pass; a begin counts exactly whatever it asks. */
-	if (record->opcode == GPU_OP_CMD_RESET_QUERY_POOL && command->render_open)
+	/* A reset and a copy are transfers outside any render pass; a begin counts exactly whatever it asks. */
+	if ((record->opcode == GPU_OP_CMD_RESET_QUERY_POOL || record->opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) && command->render_open)
 		return EINVAL;
+	if (record->opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS)
+		return bcm2711_vulkan_occlusion_copy_validate(record);
 	if (record->opcode == GPU_OP_CMD_BEGIN_QUERY && (record->words[0] & ~(uint32_t)VK_QUERY_CONTROL_PRECISE_BIT) != 0U)
 		return EINVAL;
 

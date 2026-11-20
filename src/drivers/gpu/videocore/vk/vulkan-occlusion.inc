@@ -18,6 +18,8 @@ static int occlusion_results(struct bcm2711_vulkan_session *session, struct i915
 static int occlusion_release(struct bcm2711_vulkan_session *session, void *payload);
 static void occlusion_reply_refusal(struct i915_wire_writer *reply, VkResult result);
 static struct bcm2711_vulkan_occlusion_pool *occlusion_pool(struct bcm2711_vulkan_session *session, uint64_t identity);
+static void occlusion_copy(const struct bcm2711_vulkan_occlusion_pool *pool, const struct bcm2711_vulkan_record *record);
+static uint32_t occlusion_record_bytes(uint32_t flags);
 
 /* The vkGetQueryPoolResults flags the reply honours: 64-bit words and the availability word. */
 #define OCCLUSION_RESULT_64		0x1U
@@ -107,7 +109,7 @@ bcm2711_vulkan_occlusion_named(
 }
 
 /*
- * The occlusion pool a recorded begin, end or reset names.  Those records
+ * The occlusion pool a recorded begin, end, reset or copy names.  Those records
  * keep the pool in their first object; the video's query records keep
  * theirs elsewhere and leave it empty.
  */
@@ -117,11 +119,12 @@ bcm2711_vulkan_occlusion_record(
 {
 	const struct bcm2711_vulkan_object *object;
 
-	/* One of the three query commands. */
+	/* One of the four query commands. */
 	if (record == NULL ||
 	    (record->opcode != GPU_OP_CMD_BEGIN_QUERY &&
 	     record->opcode != GPU_OP_CMD_END_QUERY &&
-	     record->opcode != GPU_OP_CMD_RESET_QUERY_POOL))
+	     record->opcode != GPU_OP_CMD_RESET_QUERY_POOL &&
+	     record->opcode != GPU_OP_CMD_COPY_QUERY_POOL_RESULTS))
 		return NULL;
 
 	/* Whose first object is an occlusion pool. */
@@ -134,9 +137,11 @@ bcm2711_vulkan_occlusion_record(
 }
 
 /*
- * Runs a reset or an end in the native job, after every earlier pass: a
- * reset clears its queries' samples and makes them unavailable; an end
- * makes its query available (every draw before it has been counted).
+ * Runs a reset, an end or a copy in the native job, after every earlier
+ * pass: a reset clears its queries' samples and makes them unavailable;
+ * an end makes its query available (every draw before it has been
+ * counted); a copy writes its queries' records into its buffer
+ * (occlusion_copy).
  */
 void
 bcm2711_vulkan_occlusion_run(
@@ -157,6 +162,8 @@ bcm2711_vulkan_occlusion_run(
 	} else if (record->opcode == GPU_OP_CMD_END_QUERY) {
 		/* The samples are written before a reader can see the query available. */
 		__atomic_store_n(&pool->available[record->first], 1U, __ATOMIC_RELEASE);
+	} else if (record->opcode == GPU_OP_CMD_COPY_QUERY_POOL_RESULTS) {
+		occlusion_copy(pool, record);
 	}
 
 	/* Succeeded: the command ran. */
@@ -205,6 +212,143 @@ bcm2711_vulkan_occlusion_add(
 
 	/* Succeeded: the query counts the pass's samples. */
 	return;
+}
+
+/*
+ * Checks a recorded vkCmdCopyQueryPoolResults (objects 0 the pool, 1 the
+ * buffer, offsets 0 and 1 where the records go and how far apart, words[0]
+ * the flags): a buffer of the pool's device, bound and written by
+ * transfers; the offset and the stride of whole words (of eight bytes for
+ * 64-bit results), records apart by a record at least, all within the
+ * buffer.
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: dstOffset and stride multiples of 4, or of
+ * 8 with VK_QUERY_RESULT_64_BIT; the buffer's VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+ * the records within the buffer).
+ */
+int
+bcm2711_vulkan_occlusion_copy_validate(
+	const struct bcm2711_vulkan_record *record)
+{
+	const struct bcm2711_vulkan_occlusion_pool *pool;
+	const struct bcm2711_vulkan_resource *buffer;
+	uint64_t last;
+	uint32_t width;
+	uint32_t bytes;
+
+	/* A copy of an occlusion pool's results into a buffer. */
+	pool = bcm2711_vulkan_occlusion_record(record);
+	if (pool == NULL || record->opcode != GPU_OP_CMD_COPY_QUERY_POOL_RESULTS)
+		return EINVAL;
+	if (record->objects[1] == NULL || record->objects[1]->kind != I915_VK_OBJ_BUFFER || record->objects[1]->payload == NULL)
+		return EINVAL;
+
+	/* The pool's device's buffer, bound, written by transfers. */
+	buffer = record->objects[1]->payload;
+	if (buffer->device != pool->device || buffer->memory == NULL || (buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0)
+		return EINVAL;
+
+	/* Whole words, records apart by a record at least, within the buffer. */
+	width = 4U;
+	if ((record->words[0] & OCCLUSION_RESULT_64) != 0U)
+		width = 8U;
+	bytes = occlusion_record_bytes(record->words[0]);
+	if ((record->offsets[0] & (width - 1U)) != 0U || (record->offsets[1] & (width - 1U)) != 0U)
+		return EINVAL;
+	if (record->count > 1U && record->offsets[1] < bytes)
+		return EINVAL;
+	if (record->count != 0U) {
+		if (record->offsets[1] > buffer->bytes)
+			return EINVAL;
+		last = record->offsets[0] + (uint64_t)(record->count - 1U) * record->offsets[1];
+		if (record->offsets[0] > buffer->bytes || last > buffer->bytes || bytes > buffer->bytes - last)
+			return EINVAL;
+	}
+
+	/* Succeeded: the copy may run. */
+	return 0;
+}
+
+/*
+ * Writes a copy's records into its buffer's coherent memory, as
+ * vkGetQueryPoolResults lays them out: each query's samples when it is
+ * available or partial results are asked for, then its availability word
+ * when asked for, each a word of 4 or 8 bytes.  A buffer that is no longer
+ * as validated is not written.
+ *
+ * XXX A query not available when the copy runs is not waited for, even
+ * with VK_QUERY_RESULT_WAIT_BIT: every pass before the copy has run, so
+ * such a query is one no recorded work ends.
+ *
+ * Procedure referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: without VK_QUERY_RESULT_PARTIAL_BIT the
+ * result of an unavailable query is not written, the availability word
+ * is).
+ */
+static void
+occlusion_copy(
+	const struct bcm2711_vulkan_occlusion_pool *pool,
+	const struct bcm2711_vulkan_record *record)
+{
+	struct bcm2711_vulkan_resource *buffer;
+	struct bcm2711_v3d_view *view;
+	uint64_t words[2];
+	uint32_t address;
+	uint32_t width;
+	uint32_t query;
+	uint32_t index;
+	uint8_t *at;
+	void *cpu;
+	int error;
+
+	/* The buffer, still as validated, and its coherent memory. */
+	if (bcm2711_vulkan_occlusion_copy_validate(record) != 0)
+		return;
+	buffer = record->objects[1]->payload;
+	error = bcm2711_vulkan_resource_backing(buffer, 0, buffer->bytes, &view, &address, &cpu);
+	if (error != 0 || !view->buffer->uncached)
+		return;
+	width = 4U;
+	if ((record->words[0] & OCCLUSION_RESULT_64) != 0U)
+		width = 8U;
+
+	/* Each query's record. */
+	for (query = 0U; query < record->count; query++) {
+		words[1] = __atomic_load_n(&pool->available[record->first + query], __ATOMIC_ACQUIRE);
+		words[0] = pool->samples[record->first + query];
+		at = (uint8_t *)cpu + record->offsets[0] + (uint64_t)query * record->offsets[1];
+		if (words[1] != 0U || (record->words[0] & VK_QUERY_RESULT_PARTIAL_BIT) != 0U) {
+			for (index = 0U; index < width; index++)
+				at[index] = (uint8_t)(words[0] >> (8U * index));
+		}
+		if ((record->words[0] & OCCLUSION_RESULT_AVAILABILITY) != 0U) {
+			for (index = 0U; index < width; index++)
+				at[width + index] = (uint8_t)(words[1] >> (8U * index));
+		}
+	}
+
+	/* The bytes are out before the next CPU read or native launch; the snapshots of the memory learn of an unknown extent. */
+	kern_io_write_barrier();
+	bcm2711_v3d_memory_written(view->buffer, address - view->address, NULL);
+}
+
+/* Gives the bytes of one query's record: its result, and its availability when asked for. */
+static uint32_t
+occlusion_record_bytes(
+	uint32_t flags)
+{
+	uint32_t width;
+
+	/* A word of 4 or 8 bytes, twice with the availability. */
+	width = 4U;
+	if ((flags & OCCLUSION_RESULT_64) != 0U)
+		width = 8U;
+	if ((flags & OCCLUSION_RESULT_AVAILABILITY) != 0U)
+		return 2U * width;
+
+	/* Succeeded: the result alone. */
+	return width;
 }
 
 /*
