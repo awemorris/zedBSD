@@ -33,6 +33,7 @@
 #include "vk-codec.inc"
 
 static int i915_gfx_render_pass_supported(const VkRenderPassCreateInfo *info);
+static int i915_gfx_render_pass_make(struct i915_render_session *session, struct i915_wire_writer *reply, const VkRenderPassCreateInfo *info, const VkSubpassDescriptionDepthStencilResolve *resolves, uint64_t identity);
 
 /*
  * Creates a VkRenderPass: vkCreateRenderPass, a generic create.
@@ -49,14 +50,7 @@ drv_i915_gfx_create_render_pass(
 	struct i915_wire_writer *reply)
 {
 	VkRenderPassCreateInfo info;
-	const VkSubpassDescription *subpass;
-	const VkRenderPassMultiviewCreateInfo *multiview;
-	struct i915_gfx_pass *pass;
 	uint64_t identity;
-	uint32_t index;
-	uint32_t color_count;
-	int supported;
-	int error;
 
 	/* Decodes the create info behind the device and its presence marker. */
 	kern_memset(&info, 0, sizeof(info));
@@ -67,8 +61,67 @@ drv_i915_gfx_create_render_pass(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Decides whether the pass has the one shape the executor supports. */
-	supported = i915_gfx_render_pass_supported(&info);
+	/* Makes the pass and answers. */
+	return i915_gfx_render_pass_make(session, reply, &info, NULL, identity);
+}
+
+/*
+ * Creates a VkRenderPass of Vulkan 1.2 that resolves its depth or stencil:
+ * vkCreateRenderPass2 (GPU_OP_CREATE_RENDER_PASS2), a generic create whose
+ * record is read in its Vulkan 1.0 form with the resolves aside.
+ */
+int
+drv_i915_gfx_create_render_pass2(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	const VkSubpassDescriptionDepthStencilResolve *resolves;
+	VkRenderPassCreateInfo info;
+	uint64_t identity;
+
+	/* Decodes the create info behind the device and its presence marker. */
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+	identity = drv_i915_gfx_create_tail(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Makes the pass and answers. */
+	return i915_gfx_render_pass_make(session, reply, &info, resolves, identity);
+}
+
+/*
+ * Makes a render pass from its Vulkan 1.0 record and the resolves of its
+ * depth and stencil (NULL for none), publishes it under identity and
+ * answers; a pass of a shape the executor does not draw is refused by name.
+ */
+static int
+i915_gfx_render_pass_make(
+	struct i915_render_session *session,
+	struct i915_wire_writer *reply,
+	const VkRenderPassCreateInfo *info,
+	const VkSubpassDescriptionDepthStencilResolve *resolves,
+	uint64_t identity)
+{
+	struct i915_vkc_depth_resolve resolve;
+	const VkSubpassDescription *subpass;
+	const VkRenderPassMultiviewCreateInfo *multiview;
+	struct i915_gfx_pass *pass;
+	uint32_t index;
+	uint32_t color_count;
+	int supported;
+	int error;
+
+	/* Decides whether the pass has the one shape the executor supports, and the resolve it can do. */
+	supported = i915_gfx_render_pass_supported(info);
+	if (supported != 0 && i915_vkc_depth_resolve(info, resolves, 0U, &resolve) != 0)
+		supported = 0;
+	if (supported != 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
+		kern_logf("i915: vk: XXX vkCreateRenderPass2 refused: no resolve of depth or stencil\n");
+		supported = 0;
+	}
 
 	/* Refuses any other pass by name, and allocates a supported one. */
 	pass = NULL;
@@ -76,12 +129,12 @@ drv_i915_gfx_create_render_pass(
 	if (supported == 0) {
 		/* The colour attachment count is reported only when a subpass exists. */
 		color_count = 0U;
-		if (info.subpassCount != 0U)
-			color_count = info.pSubpasses[0].colorAttachmentCount;
+		if (info->subpassCount != 0U)
+			color_count = info->pSubpasses[0].colorAttachmentCount;
 
 		kern_logf("i915: vk: XXX vkCreateRenderPass refused: %u subpasses, %u attachments, %u colour attachments\n",
-			  info.subpassCount,
-			  info.attachmentCount,
+			  info->subpassCount,
+			  info->attachmentCount,
 			  color_count);
 		error = ENOTSUP;
 	} else {
@@ -90,15 +143,15 @@ drv_i915_gfx_create_render_pass(
 
 	/* Keeps each attachment's format and load operation. */
 	if (pass != NULL) {
-		pass->attachment_count = info.attachmentCount;
-		for (index = 0U; index < info.attachmentCount; index++) {
-			pass->attachments[index].format = info.pAttachments[index].format;
-			pass->attachments[index].load_op = info.pAttachments[index].loadOp;
-			pass->attachments[index].stencil_load_op = info.pAttachments[index].stencilLoadOp;
+		pass->attachment_count = info->attachmentCount;
+		for (index = 0U; index < info->attachmentCount; index++) {
+			pass->attachments[index].format = info->pAttachments[index].format;
+			pass->attachments[index].load_op = info->pAttachments[index].loadOp;
+			pass->attachments[index].stencil_load_op = info->pAttachments[index].stencilLoadOp;
 		}
 
 		/* Records the colour attachments the subpass writes, if any. */
-		subpass = &info.pSubpasses[0];
+		subpass = &info->pSubpasses[0];
 		pass->color_count = subpass->colorAttachmentCount;
 		for (index = 0U; index < subpass->colorAttachmentCount; index++)
 			pass->color_attachments[index] = subpass->pColorAttachments[index].attachment;
@@ -114,7 +167,7 @@ drv_i915_gfx_create_render_pass(
 		}
 
 		/* Records the views the subpass renders, one layer each (none without multiview). */
-		multiview = i915_vkc_render_pass_multiview(&info);
+		multiview = i915_vkc_render_pass_multiview(info);
 		pass->view_mask = 0U;
 		if (multiview != NULL && multiview->pViewMasks != NULL)
 			pass->view_mask = multiview->pViewMasks[0];

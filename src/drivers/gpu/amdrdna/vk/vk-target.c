@@ -35,7 +35,7 @@
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
 
-static int target_create_pass(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int target_create_pass(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply, bool version2);
 static int target_pass_supported(const VkRenderPassCreateInfo *info);
 static uint32_t target_pass_samples(const VkRenderPassCreateInfo *info);
 static int target_create_framebuffer(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -64,7 +64,10 @@ amdrdna_vk_target_route(
 	*handled = 1;
 	switch (opcode) {
 	case GPU_OP_CREATE_RENDER_PASS:
-		error = target_create_pass(session, reader, reply);
+		error = target_create_pass(session, reader, reply, false);
+		break;
+	case GPU_OP_CREATE_RENDER_PASS2:
+		error = target_create_pass(session, reader, reply, true);
 		break;
 	case GPU_OP_DESTROY_RENDER_PASS:
 		error = amdrdna_vk_destroy_plain(session, reader, I915_VK_OBJ_RENDER_PASS);
@@ -93,14 +96,19 @@ amdrdna_vk_target_route(
 
 /*
  * vkCreateRenderPass: [device][present][VkRenderPassCreateInfo] and the
- * create's tail -> the create's reply.
+ * create's tail -> the create's reply; with version2, vkCreateRenderPass2
+ * (GPU_OP_CREATE_RENDER_PASS2), whose record is read in its Vulkan 1.0
+ * form with the resolves of its depth and stencil aside.
  */
 static int
 target_create_pass(
 	struct amdrdna_vk_session *session,
 	struct i915_wire_reader *reader,
-	struct i915_wire_writer *reply)
+	struct i915_wire_writer *reply,
+	bool version2)
 {
+	const VkSubpassDescriptionDepthStencilResolve *resolves;
+	struct i915_vkc_depth_resolve resolve;
 	VkRenderPassCreateInfo info;
 	const VkSubpassDescription *subpass;
 	const VkRenderPassMultiviewCreateInfo *multiview;
@@ -113,9 +121,13 @@ target_create_pass(
 
 	/* The create info behind the device and its presence word. */
 	kern_memset(&info, 0, sizeof(info));
+	resolves = NULL;
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
-	i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
+	if (version2)
+		i915_vkc_read_render_pass2(reader, &session->arena, &info, &resolves);
+	else
+		i915_vkc_dec_VkRenderPassCreateInfo(reader, &session->arena, &info);
 	identity = amdrdna_vk_create_tail(reader);
 	if (reader->error != 0)
 		return EINVAL;
@@ -123,6 +135,12 @@ target_create_pass(
 	/* Refuses by name a pass of another shape. */
 	error = 0;
 	supported = target_pass_supported(&info);
+	if (supported != 0 && i915_vkc_depth_resolve(&info, resolves, 0U, &resolve) != 0)
+		supported = 0;
+	if (supported != 0 && resolve.target != VK_ATTACHMENT_UNUSED) {
+		kern_logf("amdrdna: vk: vkCreateRenderPass2 refused: no resolve of depth or stencil\n");
+		supported = 0;
+	}
 	if (supported == 0) {
 		kern_logf("amdrdna: vk: vkCreateRenderPass refused: %u subpasses, %u attachments\n",
 			  info.subpassCount,

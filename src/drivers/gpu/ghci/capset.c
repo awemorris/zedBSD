@@ -26,7 +26,10 @@
  * Vulkan 1.1 queries answered (VULKAN_NATIVE_CAPSET_CORE11_QUERIES: the
  * executor answers vkGetPhysicalDeviceFeatures2 and Properties2 with the
  * 1.1 structures, and reads the 1.1 chains of a device's and a render
- * pass's creation and vkCmdDispatchBase).
+ * pass's creation and vkCmdDispatchBase) and the Vulkan 1.2 ones
+ * (VULKAN_NATIVE_CAPSET_CORE12_QUERIES: the same with
+ * VkPhysicalDeviceVulkan12Features and Properties, the 1.2 chain of a
+ * device's creation and vkCreateRenderPass2).
  *
  * Values referenced: zedBSD userland/desktop/libvulkan/context.c
  * (vulkan_context_open: the capset id 4 and the words it reads).
@@ -44,7 +47,7 @@
 #define CAPSET_VENDOR_MAGIC		0x5a424453U
 #define CAPSET_VENDOR_FLAGS		7U
 #define CAPSET_NATIVE_MAGIC		0x5a4e4154U
-#define CAPSET_NATIVE_FLAGS		8U
+#define CAPSET_NATIVE_FLAGS		24U
 
 static void put32(uint8_t *bytes, uint32_t at, uint32_t value);
 
@@ -72,7 +75,7 @@ ghci_capset_fill(
 	put32(data, CAPSET_VENDOR_MAGIC_AT, CAPSET_VENDOR_MAGIC);
 	put32(data, CAPSET_VENDOR_FLAGS_AT, CAPSET_VENDOR_FLAGS);
 
-	/* The native renderer's own word: no optional queue family, the Vulkan 1.1 queries. */
+	/* The native renderer's own word: no optional queue family, the Vulkan 1.1 and 1.2 queries. */
 	put32(data, CAPSET_NATIVE_MAGIC_AT, CAPSET_NATIVE_MAGIC);
 	put32(data, CAPSET_NATIVE_FLAGS_AT, CAPSET_NATIVE_FLAGS);
 }

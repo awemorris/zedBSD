@@ -81,6 +81,13 @@
  */
 #define CAPSET_NATIVE_CORE11		0x8U
 
+/*
+ * The native flag of the Vulkan 1.2 queries: the executor answers them,
+ * reads the 1.2 chain of a device creation and vkCreateRenderPass2
+ * (VULKAN_NATIVE_CAPSET_CORE12_QUERIES).
+ */
+#define CAPSET_NATIVE_CORE12		0x10U
+
 /* The timelines a frame or a job may name (0 is the context's own). */
 #define RUNTIME_TIMELINES		64U
 
@@ -232,7 +239,7 @@ runtime_capset(
 	video = powervr_video_capset_flags(session->video_operations);
 	if (capset->capacity >= CAPSET_NATIVE_BYTES) {
 		put32(capset->data, CAPSET_NATIVE_MAGIC_AT, CAPSET_NATIVE_MAGIC);
-		put32(capset->data, CAPSET_NATIVE_FLAGS_AT, video | CAPSET_NATIVE_CORE11);
+		put32(capset->data, CAPSET_NATIVE_FLAGS_AT, video | CAPSET_NATIVE_CORE11 | CAPSET_NATIVE_CORE12);
 		capset->bytes = CAPSET_NATIVE_BYTES;
 	}
 

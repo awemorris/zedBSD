@@ -27,6 +27,7 @@
 
 #include <libc/vulkan/vulkan_core.h>
 #include <libc/vulkan/vulkan_core11.h>
+#include <libc/vulkan/vulkan_core12.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -51,11 +52,21 @@ void i915_vkc_reply_float(struct i915_wire_writer *writer, const float *source);
 
 /*
  * The forms of a vkGetPhysicalDeviceProperties2 query: the device's
- * identity (VkPhysicalDeviceIDProperties chained) or its Vulkan 1.1
- * properties (the five structures of i915_vkc_reply_core11_properties()).
+ * identity (VkPhysicalDeviceIDProperties chained), its Vulkan 1.1
+ * properties (the five structures of i915_vkc_reply_core11_properties())
+ * or its Vulkan 1.2 properties (VkPhysicalDeviceVulkan12Properties).
  */
 #define I915_VKC_PROPERTIES2_IDENTITY	1
 #define I915_VKC_PROPERTIES2_CORE11	2
+#define I915_VKC_PROPERTIES2_CORE12	3
+
+/*
+ * The forms of a vkGetPhysicalDeviceFeatures2 query: the Vulkan 1.1
+ * features (the six structures of i915_vkc_reply_core11_features()) or
+ * the Vulkan 1.2 features (VkPhysicalDeviceVulkan12Features).
+ */
+#define I915_VKC_FEATURES2_CORE11	1
+#define I915_VKC_FEATURES2_CORE12	2
 
 /*
  * What an executor answers to the Vulkan 1.1 feature and property queries
@@ -85,14 +96,50 @@ struct i915_vkc_core11 {
 	VkPhysicalDeviceMaintenance3Properties maintenance3;
 };
 
+/*
+ * What an executor answers to the Vulkan 1.2 feature and property queries
+ * (the Vulkan 1.2 forms of GPU_OP_GET_PHYSICAL_DEVICE_FEATURES2 and
+ * _PROPERTIES2), filled as struct i915_vkc_core11 is, from
+ * i915_vkc_core12_defaults() and then the executor's own values.
+ * libvulkan names Vulkan 1.2 for the device only when the answers meet the
+ * version's requirements; among them a depth and a stencil resolve of
+ * sample 0 (supportedDepthResolveModes and supportedStencilResolveModes),
+ * which only an executor that does that resolve at the end of a subpass
+ * (i915_vkc_read_render_pass2()) reports.  The sType and pNext of the
+ * members are not used.
+ */
+struct i915_vkc_core12 {
+	VkPhysicalDeviceVulkan12Features features;
+	VkPhysicalDeviceVulkan12Properties properties;
+};
+
 void i915_vkc_core11_defaults(struct i915_vkc_core11 *core11);
-int i915_vkc_read_features2(struct i915_wire_reader *reader);
+void i915_vkc_core12_defaults(struct i915_vkc_core12 *core12, const char *driver_name);
+int i915_vkc_read_features2(struct i915_wire_reader *reader, int *form);
 int i915_vkc_read_properties2(struct i915_wire_reader *reader, int *form);
 void i915_vkc_reply_core11_features(struct i915_wire_writer *writer, const struct i915_vkc_core11 *core11);
 void i915_vkc_reply_core11_properties(struct i915_wire_writer *writer, const struct i915_vkc_core11 *core11);
+void i915_vkc_reply_core12_features(struct i915_wire_writer *writer, const struct i915_vkc_core12 *core12);
+void i915_vkc_reply_core12_properties(struct i915_wire_writer *writer, const struct i915_vkc_core12 *core12);
 void i915_vkc_read_device_chain(struct i915_wire_reader *reader, struct i915_wire_arena *arena, const void **chain);
 void i915_vkc_read_render_pass_chain(struct i915_wire_reader *reader, struct i915_wire_arena *arena, const void **chain);
 int i915_vkc_core11_check_device(const VkDeviceCreateInfo *info, const struct i915_vkc_core11 *core11);
+int i915_vkc_core12_check_device(const VkDeviceCreateInfo *info, const struct i915_vkc_core12 *core12);
+/*
+ * The resolve of a subpass's depth and stencil (i915_vkc_depth_resolve()):
+ * sample 0 of the multisampled source attachment's depth, stencil or both
+ * written into the single-sample target attachment, at the end of the
+ * subpass.  target is VK_ATTACHMENT_UNUSED for a subpass without one.
+ */
+struct i915_vkc_depth_resolve {
+	uint32_t source;
+	uint32_t target;
+	uint32_t depth;
+	uint32_t stencil;
+};
+
+void i915_vkc_read_render_pass2(struct i915_wire_reader *reader, struct i915_wire_arena *arena, VkRenderPassCreateInfo *info, const VkSubpassDescriptionDepthStencilResolve **resolves);
 const VkRenderPassMultiviewCreateInfo *i915_vkc_render_pass_multiview(const VkRenderPassCreateInfo *info);
+int i915_vkc_depth_resolve(const VkRenderPassCreateInfo *info, const VkSubpassDescriptionDepthStencilResolve *resolves, uint32_t subpass, struct i915_vkc_depth_resolve *resolve);
 
 #endif

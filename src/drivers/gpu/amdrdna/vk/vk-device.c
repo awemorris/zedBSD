@@ -60,7 +60,7 @@
 #define DEVICE_TIMESTAMP_BITS		64U
 
 /* The version and driver version the device reports (libvulkan needs a native 1.1). */
-#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 1, 0)
+#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 2, 0)
 #define DEVICE_DRIVER_VERSION		1U
 
 /* The timelines a queue may complete jobs on: 1 to 63 (0 is the context's own). */
@@ -174,6 +174,7 @@ static VkPhysicalDeviceFeatures *device_feature_record(struct amdrdna_vk_session
 static int device_features2(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int device_properties2(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_core11(struct amdrdna_vk_session *session, struct i915_vkc_core11 *core11);
+static void device_core12(struct i915_vkc_core12 *core12);
 static int device_memory(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int device_families(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_format_features(uint32_t format, bool video, VkFormatProperties *properties);
@@ -406,6 +407,7 @@ device_properties2(
 	struct i915_wire_writer *reply)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	VkPhysicalDeviceProperties *properties;
 	int form;
 	int error;
@@ -428,15 +430,19 @@ device_properties2(
 		return 0;
 	}
 
-	/* The Vulkan 1.1 properties, then the record. */
+	/* The Vulkan 1.1 or 1.2 properties, then the record. */
 	properties = device_describe(session);
 	if (properties == NULL)
 		return ENOMEM;
 	device_core11(session, &core11);
-	i915_vkc_reply_core11_properties(reply, &core11);
+	device_core12(&core12);
+	if (form == I915_VKC_PROPERTIES2_CORE12)
+		i915_vkc_reply_core12_properties(reply, &core12);
+	else
+		i915_vkc_reply_core11_properties(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
 
-	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	/* Succeeded: the properties are reported. */
 	return 0;
 }
 
@@ -722,12 +728,14 @@ device_features2(
 	struct i915_wire_writer *reply)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	VkPhysicalDeviceFeatures *features;
+	int form;
 	int error;
 
-	/* The physical device, then the output chain of the 1.1 feature structures. */
+	/* The physical device, then the output chain of the 1.1 or 1.2 feature structures. */
 	(void)drv_i915_wire_read_u64(reader);
-	error = i915_vkc_read_features2(reader);
+	error = i915_vkc_read_features2(reader, &form);
 	if (error != 0) {
 		reader->error = 1;
 		return error;
@@ -738,9 +746,13 @@ device_features2(
 	if (features == NULL)
 		return ENOMEM;
 
-	/* The 1.1 features, then the record. */
+	/* The 1.1 or 1.2 features, then the record. */
 	device_core11(session, &core11);
-	i915_vkc_reply_core11_features(reply, &core11);
+	device_core12(&core12);
+	if (form == I915_VKC_FEATURES2_CORE12)
+		i915_vkc_reply_core12_features(reply, &core12);
+	else
+		i915_vkc_reply_core11_features(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, features);
 
 	/* Succeeded: the features are reported. */
@@ -800,6 +812,15 @@ device_core11(
 	device = amdrdna_vk_heap_bytes(session->owner, false);
 	host = amdrdna_vk_heap_bytes(session->owner, true);
 	core11->maintenance3.maxMemoryAllocationSize = device > host ? device : host;
+}
+
+/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name. */
+static void
+device_core12(
+	struct i915_vkc_core12 *core12)
+{
+	/* The shaders' features, the limits and the name. */
+	i915_vkc_core12_defaults(core12, "zedBSD amdrdna");
 }
 
 /*
@@ -1383,12 +1404,13 @@ device_create(
 	struct i915_wire_writer *reply)
 {
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	VkDeviceCreateInfo info;
 	uint64_t present;
 	uint64_t identity;
 	int error;
 
-	/* The physical device, then the create info when present; only its 1.1 features are checked. */
+	/* The physical device, then the create info when present; only its 1.1 and 1.2 features are checked. */
 	kern_memset(&info, 0, sizeof(info));
 	(void)drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
@@ -1402,9 +1424,13 @@ device_create(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Refuses a Vulkan 1.1 feature the device does not report (libvulkan refuses it first). */
+	/* Refuses a Vulkan 1.1 or 1.2 feature the device does not report (libvulkan refuses it first). */
 	device_core11(session, &core11);
 	error = i915_vkc_core11_check_device(&info, &core11);
+	if (error != 0)
+		return error;
+	device_core12(&core12);
+	error = i915_vkc_core12_check_device(&info, &core12);
 	if (error != 0)
 		return error;
 

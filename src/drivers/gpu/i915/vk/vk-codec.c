@@ -23,9 +23,21 @@
 
 /*
  * The most structures one chain of a device creation carries: the six
- * Vulkan 1.1 feature structures libvulkan forwards, each at most once.
+ * Vulkan 1.1 feature structures and VkPhysicalDeviceVulkan12Features
+ * libvulkan forwards, each at most once.
  */
-#define VKC_DEVICE_CHAIN_DEPTH	6U
+#define VKC_DEVICE_CHAIN_DEPTH	7U
+
+/*
+ * The VkBool32 fields of VkPhysicalDeviceVulkan12Features, from
+ * samplerMirrorClampToEdge to subgroupBroadcastDynamicId, which the wire
+ * carries one word each in their declared order (libvulkan/internal.h
+ * VULKAN_CORE12_FEATURE_COUNT).
+ */
+#define VKC_CORE12_FEATURES	47U
+_Static_assert(offsetof(VkPhysicalDeviceVulkan12Features, subgroupBroadcastDynamicId) -
+	       offsetof(VkPhysicalDeviceVulkan12Features, samplerMirrorClampToEdge) ==
+	       (VKC_CORE12_FEATURES - 1U) * sizeof(VkBool32), "the Vulkan 1.2 features are 47 words in a row");
 
 /* The number of entries of a table. */
 #define VKC_COUNT(table)	((uint32_t)(sizeof(table) / sizeof((table)[0])))
@@ -52,12 +64,28 @@ static const uint32_t vkc_core11_property_types[] = {
 	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES
 };
 
+/* The one structure libvulkan chains to its Vulkan 1.2 feature query (physical_load_core12). */
+static const uint32_t vkc_core12_feature_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+};
+
+/* The one structure libvulkan chains to its Vulkan 1.2 property query. */
+static const uint32_t vkc_core12_property_types[] = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES
+};
+
 static int vkc_read_query_chain(struct i915_wire_reader *reader, uint32_t outer, uint32_t *types, uint32_t capacity, uint32_t *count);
 static int vkc_chain_is(const uint32_t *types, uint32_t count, const uint32_t *expected, uint32_t expected_count);
 static void vkc_reply_chain(struct i915_wire_writer *writer, uint32_t outer, const uint32_t *types, uint32_t count);
 static void vkc_read_device_record(struct i915_wire_reader *reader, struct i915_wire_arena *arena, const void **chain, uint32_t depth);
 static const uint32_t *vkc_read_u32_array(struct i915_wire_reader *reader, struct i915_wire_arena *arena, uint32_t count);
 static int vkc_feature_refused(VkBool32 requested, VkBool32 supported);
+static VkBool32 *vkc_core12_flag(VkPhysicalDeviceVulkan12Features *features, uint32_t index);
+static void vkc_reply_text(struct i915_wire_writer *writer, const char *text, size_t bytes);
+static uint32_t vkc_read_count(struct i915_wire_reader *reader, uint32_t count, int optional);
+static void vkc_read_reference2(struct i915_wire_reader *reader, VkAttachmentReference *reference);
+static const VkAttachmentReference *vkc_read_references2(struct i915_wire_reader *reader, struct i915_wire_arena *arena, uint32_t count, int optional);
+static void vkc_read_subpass2(struct i915_wire_reader *reader, struct i915_wire_arena *arena, VkSubpassDescription *subpass, uint32_t *view_mask, VkSubpassDescriptionDepthStencilResolve *resolve);
 
 /*
  * Reads one little-endian wire word.
@@ -494,14 +522,68 @@ i915_vkc_core11_defaults(
 }
 
 /*
- * Reads the output chain of a Vulkan 1.1 feature query (after the physical
- * device): VkPhysicalDeviceFeatures2 with the six 1.1 feature structures.
+ * Fills the Vulkan 1.2 answers every executor starts from.
+ *
+ * The three features Vulkan 1.2 asks of the shaders are on, as the shared
+ * SPIR-V frontend and the PowerVR compiler give them: a broadcast from a
+ * dynamic invocation (one invocation, whose own value it is), the
+ * subgroup operations on the 16-bit integers the shaders have (the 8-bit,
+ * 64-bit and half-float types have no feature of theirs here, so their
+ * operations are never compiled), and uniform buffers in the standard
+ * layout (the compilers place every member at its Offset and ArrayStride
+ * decorations, whatever layout they came from).  Every other feature is
+ * the executor's own to turn on.  The driver is named driver_name with no
+ * registered identity and no conformance; no float control is promised;
+ * no descriptor is updated after it is bound; no depth or stencil resolve
+ * (an executor that resolves sample 0 sets the modes); a framebuffer's
+ * integer colour attachment may have one sample.
+ *
+ * Values referenced: the Vulkan 1.2 specification (section 40.1, Required
+ * Limits: framebufferIntegerColorSampleCounts includes
+ * VK_SAMPLE_COUNT_1_BIT; the descriptor indexing limits apply only with
+ * its features).
+ */
+void
+i915_vkc_core12_defaults(
+	struct i915_vkc_core12 *core12,
+	const char *driver_name)
+{
+	size_t length;
+
+	/* Every feature off and every limit zero. */
+	kern_memset(core12, 0, sizeof(*core12));
+
+	/* The three features of the compilers that Vulkan 1.2 requires. */
+	core12->features.subgroupBroadcastDynamicId = VK_TRUE;
+	core12->features.shaderSubgroupExtendedTypes = VK_TRUE;
+	core12->features.uniformBufferStandardLayout = VK_TRUE;
+
+	/* The driver's name, cut to its field with the terminator kept. */
+	length = kern_strlen(driver_name);
+	if (length > VK_MAX_DRIVER_NAME_SIZE - 1U)
+		length = VK_MAX_DRIVER_NAME_SIZE - 1U;
+	kern_memcpy(core12->properties.driverName, driver_name, length);
+
+	/* No promise about denormals and rounding, for any width alike. */
+	core12->properties.denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+	core12->properties.roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+
+	/* One sample of an integer colour attachment. */
+	core12->properties.framebufferIntegerColorSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+}
+
+/*
+ * Reads the output chain of a vkGetPhysicalDeviceFeatures2 query (after
+ * the physical device) and says which form it is: VkPhysicalDeviceFeatures2
+ * with the six 1.1 feature structures, or with
+ * VkPhysicalDeviceVulkan12Features (I915_VKC_FEATURES2_*).
  *
  * Returns ENOTSUP for any other chain and EINVAL for a malformed one.
  */
 int
 i915_vkc_read_features2(
-	struct i915_wire_reader *reader)
+	struct i915_wire_reader *reader,
+	int *form)
 {
 	uint32_t types[VKC_DEVICE_CHAIN_DEPTH + 2U];
 	uint32_t count;
@@ -509,23 +591,32 @@ i915_vkc_read_features2(
 	int known;
 
 	/* The chain's headers. */
+	*form = 0;
 	error = vkc_read_query_chain(reader, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, types, VKC_COUNT(types), &count);
 	if (error != 0)
 		return error;
 
-	/* Only the chain libvulkan sends is answered. */
+	/* The Vulkan 1.2 features. */
+	known = vkc_chain_is(types, count, vkc_core12_feature_types, VKC_COUNT(vkc_core12_feature_types));
+	if (known) {
+		*form = I915_VKC_FEATURES2_CORE12;
+		return 0;
+	}
+
+	/* The Vulkan 1.1 features; any other chain is not answered. */
 	known = vkc_chain_is(types, count, vkc_core11_feature_types, VKC_COUNT(vkc_core11_feature_types));
 	if (!known)
 		return ENOTSUP;
 
 	/* Succeeded: the query is for the Vulkan 1.1 features. */
+	*form = I915_VKC_FEATURES2_CORE11;
 	return 0;
 }
 
 /*
  * Reads the output chain of a vkGetPhysicalDeviceProperties2 query (after
- * the physical device) and says which form it is: the device's identity or
- * its Vulkan 1.1 properties (I915_VKC_PROPERTIES2_*).
+ * the physical device) and says which form it is: the device's identity,
+ * its Vulkan 1.1 or its Vulkan 1.2 properties (I915_VKC_PROPERTIES2_*).
  *
  * Returns ENOTSUP for any other chain and EINVAL for a malformed one.
  */
@@ -550,6 +641,13 @@ i915_vkc_read_properties2(
 	known = vkc_chain_is(types, count, identity, VKC_COUNT(identity));
 	if (known) {
 		*form = I915_VKC_PROPERTIES2_IDENTITY;
+		return 0;
+	}
+
+	/* The Vulkan 1.2 properties. */
+	known = vkc_chain_is(types, count, vkc_core12_property_types, VKC_COUNT(vkc_core12_property_types));
+	if (known) {
+		*form = I915_VKC_PROPERTIES2_CORE12;
 		return 0;
 	}
 
@@ -628,6 +726,114 @@ i915_vkc_reply_core11_properties(
 	drv_i915_wire_reply_u32(writer, core11->subgroup.supportedStages);
 	drv_i915_wire_reply_u32(writer, core11->subgroup.supportedOperations);
 	drv_i915_wire_reply_u32(writer, core11->subgroup.quadOperationsInAllStages);
+}
+
+/*
+ * Writes the reply of a Vulkan 1.2 feature query up to the core features:
+ * the present word, the chain's headers, then each VkBool32 of
+ * VkPhysicalDeviceVulkan12Features in its declared order.  The caller
+ * writes VkPhysicalDeviceFeatures after it.
+ */
+void
+i915_vkc_reply_core12_features(
+	struct i915_wire_writer *writer,
+	const struct i915_vkc_core12 *core12)
+{
+	VkPhysicalDeviceVulkan12Features features;
+	uint32_t index;
+
+	/* The present word and the headers. */
+	drv_i915_wire_reply_u64(writer, 1U);
+	vkc_reply_chain(writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, vkc_core12_feature_types, VKC_COUNT(vkc_core12_feature_types));
+
+	/* Every feature, one word each. */
+	features = core12->features;
+	for (index = 0U; index < VKC_CORE12_FEATURES; index++)
+		drv_i915_wire_reply_u32(writer, *vkc_core12_flag(&features, index));
+}
+
+/*
+ * Writes the reply of a Vulkan 1.2 property query up to the core
+ * properties: the present word, the chain's headers, then the fields of
+ * VkPhysicalDeviceVulkan12Properties in their declared order, a character
+ * array as its length and its bytes and each part of the conformance
+ * version as a word (libvulkan/instance.c: physical_core12_properties).
+ * The caller writes VkPhysicalDeviceProperties after it.
+ */
+void
+i915_vkc_reply_core12_properties(
+	struct i915_wire_writer *writer,
+	const struct i915_vkc_core12 *core12)
+{
+	const VkPhysicalDeviceVulkan12Properties *properties;
+
+	/* The present word and the headers. */
+	properties = &core12->properties;
+	drv_i915_wire_reply_u64(writer, 1U);
+	vkc_reply_chain(writer, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, vkc_core12_property_types, VKC_COUNT(vkc_core12_property_types));
+
+	/* The driver's identity: its number, name, information and conformance. */
+	drv_i915_wire_reply_u32(writer, (uint32_t)properties->driverID);
+	vkc_reply_text(writer, properties->driverName, sizeof(properties->driverName));
+	vkc_reply_text(writer, properties->driverInfo, sizeof(properties->driverInfo));
+	drv_i915_wire_reply_u32(writer, properties->conformanceVersion.major);
+	drv_i915_wire_reply_u32(writer, properties->conformanceVersion.minor);
+	drv_i915_wire_reply_u32(writer, properties->conformanceVersion.subminor);
+	drv_i915_wire_reply_u32(writer, properties->conformanceVersion.patch);
+
+	/* The float controls. */
+	drv_i915_wire_reply_u32(writer, (uint32_t)properties->denormBehaviorIndependence);
+	drv_i915_wire_reply_u32(writer, (uint32_t)properties->roundingModeIndependence);
+	drv_i915_wire_reply_u32(writer, properties->shaderSignedZeroInfNanPreserveFloat16);
+	drv_i915_wire_reply_u32(writer, properties->shaderSignedZeroInfNanPreserveFloat32);
+	drv_i915_wire_reply_u32(writer, properties->shaderSignedZeroInfNanPreserveFloat64);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormPreserveFloat16);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormPreserveFloat32);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormPreserveFloat64);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormFlushToZeroFloat16);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormFlushToZeroFloat32);
+	drv_i915_wire_reply_u32(writer, properties->shaderDenormFlushToZeroFloat64);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTEFloat16);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTEFloat32);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTEFloat64);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTZFloat16);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTZFloat32);
+	drv_i915_wire_reply_u32(writer, properties->shaderRoundingModeRTZFloat64);
+
+	/* The limits of descriptor indexing. */
+	drv_i915_wire_reply_u32(writer, properties->maxUpdateAfterBindDescriptorsInAllPools);
+	drv_i915_wire_reply_u32(writer, properties->shaderUniformBufferArrayNonUniformIndexingNative);
+	drv_i915_wire_reply_u32(writer, properties->shaderSampledImageArrayNonUniformIndexingNative);
+	drv_i915_wire_reply_u32(writer, properties->shaderStorageBufferArrayNonUniformIndexingNative);
+	drv_i915_wire_reply_u32(writer, properties->shaderStorageImageArrayNonUniformIndexingNative);
+	drv_i915_wire_reply_u32(writer, properties->shaderInputAttachmentArrayNonUniformIndexingNative);
+	drv_i915_wire_reply_u32(writer, properties->robustBufferAccessUpdateAfterBind);
+	drv_i915_wire_reply_u32(writer, properties->quadDivergentImplicitLod);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindSamplers);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindUniformBuffers);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindStorageBuffers);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindSampledImages);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindStorageImages);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageDescriptorUpdateAfterBindInputAttachments);
+	drv_i915_wire_reply_u32(writer, properties->maxPerStageUpdateAfterBindResources);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindSamplers);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindUniformBuffers);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindStorageBuffers);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindSampledImages);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindStorageImages);
+	drv_i915_wire_reply_u32(writer, properties->maxDescriptorSetUpdateAfterBindInputAttachments);
+
+	/* The depth and stencil resolve, the min and max filter, the timeline and the integer samples. */
+	drv_i915_wire_reply_u32(writer, properties->supportedDepthResolveModes);
+	drv_i915_wire_reply_u32(writer, properties->supportedStencilResolveModes);
+	drv_i915_wire_reply_u32(writer, properties->independentResolveNone);
+	drv_i915_wire_reply_u32(writer, properties->independentResolve);
+	drv_i915_wire_reply_u32(writer, properties->filterMinmaxSingleComponentFormats);
+	drv_i915_wire_reply_u32(writer, properties->filterMinmaxImageComponentMapping);
+	drv_i915_wire_reply_u64(writer, properties->maxTimelineSemaphoreValueDifference);
+	drv_i915_wire_reply_u32(writer, properties->framebufferIntegerColorSampleCounts);
 }
 
 /*
@@ -765,6 +971,255 @@ i915_vkc_core11_check_device(
 }
 
 /*
+ * Checks that a device creation turns on no Vulkan 1.2 feature the executor
+ * did not report (in the VkPhysicalDeviceVulkan12Features libvulkan
+ * forwards).
+ *
+ * Returns ENOTSUP for such a feature (libvulkan refuses it first; this is
+ * the executor's own guard).
+ */
+int
+i915_vkc_core12_check_device(
+	const VkDeviceCreateInfo *info,
+	const struct i915_vkc_core12 *core12)
+{
+	const VkBaseInStructure *chain;
+	VkPhysicalDeviceVulkan12Features requested;
+	VkPhysicalDeviceVulkan12Features supported;
+	uint32_t index;
+	int refused;
+
+	/* Compares each Vulkan 1.2 feature of the chain with the report. */
+	refused = 0;
+	supported = core12->features;
+	for (chain = info->pNext; chain != NULL; chain = chain->pNext) {
+		/* Only the structure of the Vulkan 1.2 features. */
+		if (chain->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
+			continue;
+		requested = *(const VkPhysicalDeviceVulkan12Features *)chain;
+		for (index = 0U; index < VKC_CORE12_FEATURES; index++)
+			refused |= vkc_feature_refused(*vkc_core12_flag(&requested, index), *vkc_core12_flag(&supported, index));
+	}
+
+	/* Refuses a feature the executor does not do. */
+	if (refused != 0)
+		return ENOTSUP;
+
+	/* Succeeded: every requested 1.2 feature was reported. */
+	return 0;
+}
+
+/*
+ * Reads a render pass creation of Vulkan 1.2 (GPU_OP_CREATE_RENDER_PASS2,
+ * after the device and its presence word) into its Vulkan 1.0 form: the
+ * attachments, the subpasses and the dependencies as
+ * VkRenderPassCreateInfo has them, with the subpasses' view masks, the
+ * dependencies' view offsets and the correlated view masks in a
+ * VkRenderPassMultiviewCreateInfo chained to it when a subpass has a view
+ * mask; the aspects of the input attachments are not kept.  resolves is
+ * set to one VkSubpassDescriptionDepthStencilResolve for each subpass (a
+ * subpass without one has a NULL pDepthStencilResolveAttachment), or NULL
+ * when no subpass resolves its depth or stencil.  Every record lives in the
+ * command's arena; a malformed record latches the reader's error.
+ *
+ * The records are those libvulkan encodes (core12.c:
+ * vulkan_render_pass2_encode), as Venus encodes them.
+ */
+void
+i915_vkc_read_render_pass2(
+	struct i915_wire_reader *reader,
+	struct i915_wire_arena *arena,
+	VkRenderPassCreateInfo *info,
+	const VkSubpassDescriptionDepthStencilResolve **resolves)
+{
+	VkAttachmentDescription *attachments;
+	VkSubpassDescription *subpasses;
+	VkSubpassDependency *dependencies;
+	VkSubpassDescriptionDepthStencilResolve *resolve;
+	VkRenderPassMultiviewCreateInfo *multiview;
+	uint32_t *view_masks;
+	int32_t *view_offsets;
+	uint32_t *correlations;
+	uint32_t index;
+	uint32_t count;
+	int resolved;
+	int views;
+
+	/* The record's header and flags; its own chain is not sent. */
+	kern_memset(info, 0, sizeof(*info));
+	*resolves = NULL;
+	info->sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2 || drv_i915_wire_read_u64(reader) != 0U)
+		reader->error = 1;
+	info->flags = drv_i915_wire_read_u32(reader);
+
+	/* The attachments, each [sType][0] and the fields of VkAttachmentDescription. */
+	info->attachmentCount = drv_i915_wire_read_u32(reader);
+	count = vkc_read_count(reader, info->attachmentCount, 1);
+	attachments = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*attachments));
+	if (attachments == NULL)
+		return;
+	for (index = 0U; index < count; index++) {
+		if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2 || drv_i915_wire_read_u64(reader) != 0U)
+			reader->error = 1;
+		attachments[index].flags = drv_i915_wire_read_u32(reader);
+		attachments[index].format = (VkFormat)drv_i915_wire_read_u32(reader);
+		attachments[index].samples = (VkSampleCountFlagBits)drv_i915_wire_read_u32(reader);
+		attachments[index].loadOp = (VkAttachmentLoadOp)drv_i915_wire_read_u32(reader);
+		attachments[index].storeOp = (VkAttachmentStoreOp)drv_i915_wire_read_u32(reader);
+		attachments[index].stencilLoadOp = (VkAttachmentLoadOp)drv_i915_wire_read_u32(reader);
+		attachments[index].stencilStoreOp = (VkAttachmentStoreOp)drv_i915_wire_read_u32(reader);
+		attachments[index].initialLayout = (VkImageLayout)drv_i915_wire_read_u32(reader);
+		attachments[index].finalLayout = (VkImageLayout)drv_i915_wire_read_u32(reader);
+	}
+	info->pAttachments = count != 0U ? attachments : NULL;
+
+	/* The subpasses, with their view masks and resolves aside. */
+	info->subpassCount = drv_i915_wire_read_u32(reader);
+	count = vkc_read_count(reader, info->subpassCount, 0);
+	subpasses = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*subpasses));
+	view_masks = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*view_masks));
+	resolve = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*resolve));
+	if (subpasses == NULL || view_masks == NULL || resolve == NULL)
+		return;
+	resolved = 0;
+	views = 0;
+	for (index = 0U; index < count; index++) {
+		vkc_read_subpass2(reader, arena, &subpasses[index], &view_masks[index], &resolve[index]);
+		if (resolve[index].pDepthStencilResolveAttachment != NULL)
+			resolved = 1;
+		if (view_masks[index] != 0U)
+			views = 1;
+	}
+	info->pSubpasses = subpasses;
+
+	/* The dependencies, each [sType][0], the fields of VkSubpassDependency and its view offset. */
+	info->dependencyCount = drv_i915_wire_read_u32(reader);
+	count = vkc_read_count(reader, info->dependencyCount, 1);
+	dependencies = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*dependencies));
+	view_offsets = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*view_offsets));
+	if (dependencies == NULL || view_offsets == NULL)
+		return;
+	for (index = 0U; index < count; index++) {
+		if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2 || drv_i915_wire_read_u64(reader) != 0U)
+			reader->error = 1;
+		dependencies[index].srcSubpass = drv_i915_wire_read_u32(reader);
+		dependencies[index].dstSubpass = drv_i915_wire_read_u32(reader);
+		dependencies[index].srcStageMask = drv_i915_wire_read_u32(reader);
+		dependencies[index].dstStageMask = drv_i915_wire_read_u32(reader);
+		dependencies[index].srcAccessMask = drv_i915_wire_read_u32(reader);
+		dependencies[index].dstAccessMask = drv_i915_wire_read_u32(reader);
+		dependencies[index].dependencyFlags = drv_i915_wire_read_u32(reader);
+		view_offsets[index] = (int32_t)drv_i915_wire_read_u32(reader);
+	}
+	info->pDependencies = count != 0U ? dependencies : NULL;
+
+	/* The correlated view masks. */
+	count = drv_i915_wire_read_u32(reader);
+	count = vkc_read_count(reader, count, 1);
+	correlations = i915_vkc_array(reader, arena, count != 0U ? count : 1U, sizeof(*correlations));
+	if (correlations == NULL)
+		return;
+	for (index = 0U; index < count; index++)
+		correlations[index] = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return;
+
+	/* The views of the subpasses in the record Vulkan 1.0 gives them. */
+	if (views) {
+		multiview = i915_vkc_array(reader, arena, 1U, sizeof(*multiview));
+		if (multiview == NULL)
+			return;
+		multiview->sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
+		multiview->subpassCount = info->subpassCount;
+		multiview->pViewMasks = view_masks;
+		multiview->dependencyCount = info->dependencyCount;
+		multiview->pViewOffsets = info->dependencyCount != 0U ? view_offsets : NULL;
+		multiview->correlationMaskCount = count;
+		multiview->pCorrelationMasks = count != 0U ? correlations : NULL;
+		info->pNext = multiview;
+	}
+
+	/* Succeeded: the resolves, when a subpass has one. */
+	if (resolved)
+		*resolves = resolve;
+}
+
+/*
+ * Says what a subpass of a render pass of Vulkan 1.2 resolves of its depth
+ * and stencil (resolves from i915_vkc_read_render_pass2(), NULL for none):
+ * nothing (target VK_ATTACHMENT_UNUSED), or sample 0 of the depth
+ * attachment's depth, stencil or both, as the modes and the format's
+ * aspects say, into the resolve attachment.
+ *
+ * Returns ENOTSUP for a resolve the executors do not do (a mode other than
+ * sample 0) and EINVAL for one Vulkan does not allow: no multisampled depth
+ * attachment, or a target of several samples or of another format.
+ *
+ * Values referenced: the Vulkan 1.2 specification (section 8.1,
+ * VkSubpassDescriptionDepthStencilResolve and its valid usage).
+ */
+int
+i915_vkc_depth_resolve(
+	const VkRenderPassCreateInfo *info,
+	const VkSubpassDescriptionDepthStencilResolve *resolves,
+	uint32_t subpass,
+	struct i915_vkc_depth_resolve *resolve)
+{
+	const VkSubpassDescriptionDepthStencilResolve *record;
+	const VkSubpassDescription *description;
+	const VkAttachmentDescription *source;
+	const VkAttachmentDescription *target;
+	VkFormat format;
+
+	/* No resolve, unless the subpass names one. */
+	resolve->source = VK_ATTACHMENT_UNUSED;
+	resolve->target = VK_ATTACHMENT_UNUSED;
+	resolve->depth = 0U;
+	resolve->stencil = 0U;
+	if (resolves == NULL || subpass >= info->subpassCount)
+		return 0;
+	record = &resolves[subpass];
+	if (record->pDepthStencilResolveAttachment == NULL || record->pDepthStencilResolveAttachment->attachment == VK_ATTACHMENT_UNUSED)
+		return 0;
+
+	/* Only sample 0, or nothing, of each aspect. */
+	if (record->depthResolveMode != VK_RESOLVE_MODE_NONE && record->depthResolveMode != VK_RESOLVE_MODE_SAMPLE_ZERO_BIT)
+		return ENOTSUP;
+	if (record->stencilResolveMode != VK_RESOLVE_MODE_NONE && record->stencilResolveMode != VK_RESOLVE_MODE_SAMPLE_ZERO_BIT)
+		return ENOTSUP;
+
+	/* A multisampled depth attachment and a target of one sample in its format. */
+	description = &info->pSubpasses[subpass];
+	if (description->pDepthStencilAttachment == NULL || description->pDepthStencilAttachment->attachment >= info->attachmentCount)
+		return EINVAL;
+	if (record->pDepthStencilResolveAttachment->attachment >= info->attachmentCount)
+		return EINVAL;
+	source = &info->pAttachments[description->pDepthStencilAttachment->attachment];
+	target = &info->pAttachments[record->pDepthStencilResolveAttachment->attachment];
+	if (source->samples == VK_SAMPLE_COUNT_1_BIT || target->samples != VK_SAMPLE_COUNT_1_BIT || target->format != source->format)
+		return EINVAL;
+
+	/* The aspects the format has and the modes ask for. */
+	format = source->format;
+	resolve->source = description->pDepthStencilAttachment->attachment;
+	resolve->target = record->pDepthStencilResolveAttachment->attachment;
+	if (record->depthResolveMode == VK_RESOLVE_MODE_SAMPLE_ZERO_BIT && format != VK_FORMAT_S8_UINT)
+		resolve->depth = 1U;
+	if (record->stencilResolveMode == VK_RESOLVE_MODE_SAMPLE_ZERO_BIT &&
+	    (format == VK_FORMAT_S8_UINT || format == VK_FORMAT_D16_UNORM_S8_UINT ||
+	     format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT))
+		resolve->stencil = 1U;
+
+	/* A resolve of no aspect is none. */
+	if (resolve->depth == 0U && resolve->stencil == 0U)
+		resolve->target = VK_ATTACHMENT_UNUSED;
+
+	/* Succeeded: the subpass's resolve is described. */
+	return 0;
+}
+
+/*
  * Returns the multiview record of a render pass creation, or NULL for a
  * render pass of one view.
  */
@@ -895,8 +1350,10 @@ vkc_read_device_record(
 	VkPhysicalDeviceProtectedMemoryFeatures *protection;
 	VkPhysicalDeviceSamplerYcbcrConversionFeatures *conversion;
 	VkPhysicalDeviceShaderDrawParametersFeatures *parameters;
+	VkPhysicalDeviceVulkan12Features *core12;
 	const void *next;
 	uint64_t present;
+	uint32_t index;
 	uint32_t type;
 
 	/* The end of the chain. */
@@ -979,6 +1436,16 @@ vkc_read_device_record(
 		parameters->shaderDrawParameters = drv_i915_wire_read_u32(reader);
 		*chain = parameters;
 		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+		core12 = i915_vkc_array(reader, arena, 1U, sizeof(*core12));
+		if (core12 == NULL)
+			return;
+		core12->sType = type;
+		core12->pNext = (void *)(uintptr_t)next;
+		for (index = 0U; index < VKC_CORE12_FEATURES; index++)
+			*vkc_core12_flag(core12, index) = drv_i915_wire_read_u32(reader);
+		*chain = core12;
+		break;
 	default:
 		/* A structure libvulkan does not forward. */
 		reader->error = 1;
@@ -1035,4 +1502,180 @@ vkc_feature_refused(
 
 	/* Succeeded: the feature is supported. */
 	return 0;
+}
+
+/* Returns one VkBool32 of VkPhysicalDeviceVulkan12Features by its place (VKC_CORE12_FEATURES). */
+static VkBool32 *
+vkc_core12_flag(
+	VkPhysicalDeviceVulkan12Features *features,
+	uint32_t index)
+{
+	/* The features follow one another from the first. */
+	return (VkBool32 *)((char *)features + offsetof(VkPhysicalDeviceVulkan12Features, samplerMirrorClampToEdge) + (size_t)index * sizeof(VkBool32));
+}
+
+/* Writes a character array of a fixed size as its length and its bytes. */
+static void
+vkc_reply_text(
+	struct i915_wire_writer *writer,
+	const char *text,
+	size_t bytes)
+{
+	/* The length, then the bytes and their padding. */
+	drv_i915_wire_reply_u64(writer, bytes);
+	i915_vkc_reply_bytes(writer, text, bytes);
+}
+
+/*
+ * Reads the length of an array whose count came before it: count, or 0
+ * for an absent array when optional is nonzero.  Any other length latches
+ * the reader's error and reads as 0.
+ */
+static uint32_t
+vkc_read_count(
+	struct i915_wire_reader *reader,
+	uint32_t count,
+	int optional)
+{
+	uint64_t length;
+
+	/* The length, as libvulkan writes it. */
+	length = drv_i915_wire_read_u64(reader);
+	if (length == count)
+		return count;
+	if (length == 0U && optional)
+		return 0U;
+
+	/* Another length is malformed. */
+	reader->error = 1;
+	return 0U;
+}
+
+/* Reads one VkAttachmentReference2, [sType][0][attachment][layout][aspects], keeping its 1.0 fields. */
+static void
+vkc_read_reference2(
+	struct i915_wire_reader *reader,
+	VkAttachmentReference *reference)
+{
+	/* The header. */
+	if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2 || drv_i915_wire_read_u64(reader) != 0U)
+		reader->error = 1;
+
+	/* The attachment and its layout; the aspects, which only an input attachment names, are not kept. */
+	reference->attachment = drv_i915_wire_read_u32(reader);
+	reference->layout = (VkImageLayout)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u32(reader);
+}
+
+/*
+ * Reads an array of VkAttachmentReference2 of count references (or none
+ * when optional and absent) into the arena; NULL for none.
+ */
+static const VkAttachmentReference *
+vkc_read_references2(
+	struct i915_wire_reader *reader,
+	struct i915_wire_arena *arena,
+	uint32_t count,
+	int optional)
+{
+	VkAttachmentReference *references;
+	uint32_t length;
+	uint32_t index;
+
+	/* The length; an absent or empty array is none. */
+	length = vkc_read_count(reader, count, optional);
+	if (length == 0U)
+		return NULL;
+
+	/* Each reference. */
+	references = i915_vkc_array(reader, arena, length, sizeof(*references));
+	if (references == NULL)
+		return NULL;
+	for (index = 0U; index < length; index++)
+		vkc_read_reference2(reader, &references[index]);
+
+	/* Succeeded: the references live until the command returns. */
+	return references;
+}
+
+/*
+ * Reads one VkSubpassDescription2: its header and the resolve of depth and
+ * stencil chained to it (into resolve; none leaves its attachment NULL),
+ * then its fields into subpass and its view mask.
+ */
+static void
+vkc_read_subpass2(
+	struct i915_wire_reader *reader,
+	struct i915_wire_arena *arena,
+	VkSubpassDescription *subpass,
+	uint32_t *view_mask,
+	VkSubpassDescriptionDepthStencilResolve *resolve)
+{
+	VkAttachmentReference2 *target;
+	VkAttachmentReference reference;
+	VkAttachmentReference *depth;
+	uint32_t *preserved;
+	uint64_t present;
+	uint32_t index;
+	uint32_t count;
+
+	/* The header. */
+	kern_memset(subpass, 0, sizeof(*subpass));
+	kern_memset(resolve, 0, sizeof(*resolve));
+	resolve->sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE;
+	if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2)
+		reader->error = 1;
+
+	/* The one chained record sent: the resolve, [sType][0][depth mode][stencil mode][1][reference]. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		if (drv_i915_wire_read_u32(reader) != VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE || drv_i915_wire_read_u64(reader) != 0U)
+			reader->error = 1;
+		resolve->depthResolveMode = (VkResolveModeFlagBits)drv_i915_wire_read_u32(reader);
+		resolve->stencilResolveMode = (VkResolveModeFlagBits)drv_i915_wire_read_u32(reader);
+		if (drv_i915_wire_read_u64(reader) != 1U)
+			reader->error = 1;
+		vkc_read_reference2(reader, &reference);
+		target = i915_vkc_array(reader, arena, 1U, sizeof(*target));
+		if (target == NULL)
+			return;
+		target->sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+		target->attachment = reference.attachment;
+		target->layout = reference.layout;
+		resolve->pDepthStencilResolveAttachment = target;
+	}
+
+	/* The flags, the bind point and the view mask. */
+	subpass->flags = drv_i915_wire_read_u32(reader);
+	subpass->pipelineBindPoint = (VkPipelineBindPoint)drv_i915_wire_read_u32(reader);
+	*view_mask = drv_i915_wire_read_u32(reader);
+
+	/* The input, colour and resolve attachments. */
+	subpass->inputAttachmentCount = drv_i915_wire_read_u32(reader);
+	subpass->pInputAttachments = vkc_read_references2(reader, arena, subpass->inputAttachmentCount, 1);
+	subpass->colorAttachmentCount = drv_i915_wire_read_u32(reader);
+	subpass->pColorAttachments = vkc_read_references2(reader, arena, subpass->colorAttachmentCount, 1);
+	subpass->pResolveAttachments = vkc_read_references2(reader, arena, subpass->colorAttachmentCount, 1);
+
+	/* The depth and stencil attachment. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		depth = i915_vkc_array(reader, arena, 1U, sizeof(*depth));
+		if (depth == NULL)
+			return;
+		vkc_read_reference2(reader, depth);
+		subpass->pDepthStencilAttachment = depth;
+	}
+
+	/* The preserved attachments. */
+	subpass->preserveAttachmentCount = drv_i915_wire_read_u32(reader);
+	count = vkc_read_count(reader, subpass->preserveAttachmentCount, 1);
+	if (count == 0U)
+		return;
+	preserved = i915_vkc_array(reader, arena, count, sizeof(*preserved));
+	if (preserved == NULL)
+		return;
+	for (index = 0U; index < count; index++)
+		preserved[index] = drv_i915_wire_read_u32(reader);
+	subpass->pPreserveAttachments = preserved;
 }

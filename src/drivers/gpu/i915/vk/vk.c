@@ -60,6 +60,13 @@
 #define I915_CAPSET_NATIVE_CORE11	8U
 
 /*
+ * Bit 4 of the native word of the Vulkan 1.2 queries: the executor answers them,
+ * reads the 1.2 chain of a device creation and vkCreateRenderPass2
+ * (VULKAN_NATIVE_CAPSET_CORE12_QUERIES).
+ */
+#define I915_CAPSET_NATIVE_CORE12	16U
+
+/*
  * Whether Vulkan video decode is offered.
  *
  * It is written once by the boot path before any device attaches and only
@@ -351,11 +358,11 @@ i915_render_capset_fill(
 	kern_logf("i915: vk: XXX capset declares vendor flags 7 for the connectivity check (contracts not implemented beyond the happy path)\n");
 
 	/*
-	 * Appends the native word: the Vulkan 1.1 queries are answered, and a
+	 * Appends the native word: the Vulkan 1.1 and 1.2 queries are answered, and a
 	 * device that offers video decode says so.
 	 */
 	vk->capset[168U / 4U] = I915_CAPSET_NATIVE_TAG;
-	vk->capset[172U / 4U] = I915_CAPSET_NATIVE_CORE11;
+	vk->capset[172U / 4U] = I915_CAPSET_NATIVE_CORE11 | I915_CAPSET_NATIVE_CORE12;
 	vk->capset_bytes = 176U;
 	if (vk->video) {
 		vk->capset[172U / 4U] |= I915_CAPSET_NATIVE_VIDEO_H264 | I915_CAPSET_NATIVE_VIDEO_H265;

@@ -46,7 +46,7 @@
 #define DEVICE_F32_2048			0x45000000U
 
 /* The version the device reports (libvulkan needs a native 1.1) and the driver's version. */
-#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 1, 0)
+#define DEVICE_API_VERSION		VK_MAKE_VERSION(1, 2, 0)
 #define DEVICE_DRIVER_VERSION		1U
 
 /*
@@ -82,6 +82,7 @@ static int properties2(struct powervr_vk_session *session, struct i915_wire_read
 static void identity(struct i915_wire_writer *reply, const VkPhysicalDeviceProperties *record);
 static int features2(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void device_core11(struct i915_vkc_core11 *core11);
+static void device_core12(struct i915_vkc_core12 *core12);
 static VkPhysicalDeviceProperties *device_record(struct powervr_vk_session *session);
 static void limits(VkPhysicalDeviceLimits *limit);
 static int features(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -318,6 +319,7 @@ properties2(
 {
 	VkPhysicalDeviceProperties *record;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	int form;
 	int error;
 
@@ -342,12 +344,16 @@ properties2(
 		return 0;
 	}
 
-	/* The Vulkan 1.1 properties, then the record. */
+	/* The Vulkan 1.1 or 1.2 properties, then the record. */
 	device_core11(&core11);
-	i915_vkc_reply_core11_properties(reply, &core11);
+	device_core12(&core12);
+	if (form == I915_VKC_PROPERTIES2_CORE12)
+		i915_vkc_reply_core12_properties(reply, &core12);
+	else
+		i915_vkc_reply_core11_properties(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceProperties(reply, record);
 
-	/* Succeeded: the Vulkan 1.1 properties are reported. */
+	/* Succeeded: the properties are reported. */
 	return 0;
 }
 
@@ -405,11 +411,13 @@ features2(
 {
 	VkPhysicalDeviceFeatures *record;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
+	int form;
 	int error;
 
-	/* The physical device, then the output chain of the 1.1 feature structures. */
+	/* The physical device, then the output chain of the 1.1 or 1.2 feature structures. */
 	(void)drv_i915_wire_read_u64(reader);
-	error = i915_vkc_read_features2(reader);
+	error = i915_vkc_read_features2(reader, &form);
 	if (error != 0) {
 		reader->error = 1;
 		return error;
@@ -421,9 +429,13 @@ features2(
 		return ENOMEM;
 	device_features(record);
 
-	/* The 1.1 features, then the record. */
+	/* The 1.1 or 1.2 features, then the record. */
 	device_core11(&core11);
-	i915_vkc_reply_core11_features(reply, &core11);
+	device_core12(&core12);
+	if (form == I915_VKC_FEATURES2_CORE12)
+		i915_vkc_reply_core12_features(reply, &core12);
+	else
+		i915_vkc_reply_core11_features(reply, &core11);
 	i915_vkc_enc_VkPhysicalDeviceFeatures(reply, record);
 
 	/* Succeeded: the features are reported. */
@@ -455,6 +467,15 @@ device_core11(
 	/* The descriptors of one set and the largest allocation. */
 	core11->maintenance3.maxPerSetDescriptors = 1024U;
 	core11->maintenance3.maxMemoryAllocationSize = POWERVR_RENDER_MAX_BYTES;
+}
+
+/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name. */
+static void
+device_core12(
+	struct i915_vkc_core12 *core12)
+{
+	/* The shaders' features, the limits and the name. */
+	i915_vkc_core12_defaults(core12, "zedBSD powervr");
 }
 
 /* Fills a cleared record from the scratch (too large for the stack) with the device's properties; NULL when none is left. */
@@ -1231,6 +1252,7 @@ create_device(
 	VkDeviceCreateInfo info;
 	VkPhysicalDeviceFeatures offered;
 	struct i915_vkc_core11 core11;
+	struct i915_vkc_core12 core12;
 	const VkBool32 *wanted;
 	const VkBool32 *has;
 	uint64_t present;
@@ -1256,9 +1278,10 @@ create_device(
 		}
 	}
 
-	/* No Vulkan 1.1 feature the device does not report (libvulkan refuses it first). */
+	/* No Vulkan 1.1 or 1.2 feature the device does not report (libvulkan refuses it first). */
 	device_core11(&core11);
-	if (i915_vkc_core11_check_device(&info, &core11) != 0) {
+	device_core12(&core12);
+	if (i915_vkc_core11_check_device(&info, &core11) != 0 || i915_vkc_core12_check_device(&info, &core12) != 0) {
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT);
 		return 0;
 	}
