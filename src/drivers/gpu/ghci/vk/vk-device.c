@@ -497,13 +497,17 @@ device_core11(
 	core11->maintenance3.maxMemoryAllocationSize = ghci_vk_caps_heap_bytes(&session->device->caps);
 }
 
-/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name. */
+/* Fills the device's Vulkan 1.2 answers: those every executor starts from, under its name, and the resolve of sample 0. */
 static void
 device_core12(
 	struct i915_vkc_core12 *core12)
 {
 	/* The shaders' features, the limits and the name. */
 	i915_vkc_core12_defaults(core12, "zedBSD ghci");
+
+	/* Sample 0 of a depth/stencil attachment, which the driver's copy program resolves at the end of its subpass. */
+	core12->properties.supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	core12->properties.supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
 }
 
 /* vkGetPhysicalDeviceMemoryProperties: [physical][u64 1][u64 32][u64 16] -> [u64 1][properties]. */

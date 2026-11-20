@@ -166,12 +166,12 @@ create_render_pass(
 	if ((info.attachmentCount != 0U && info.pAttachments == NULL) || info.subpassCount == 0U || info.pSubpasses == NULL)
 		return EINVAL;
 
-	/* No subpass resolves its depth or stencil. */
+	/* Each subpass's resolve of its depth and stencil is one the executor does. */
 	for (index = 0U; index < info.subpassCount; index++) {
 		error = i915_vkc_depth_resolve(&info, resolves, index, &resolve);
 		if (error == EINVAL)
 			return EINVAL;
-		if (error != 0 || resolve.target != VK_ATTACHMENT_UNUSED) {
+		if (error != 0) {
 			ghci_vk_reply_created(reply, requested, (uint32_t)VK_ERROR_FEATURE_NOT_PRESENT, identity);
 			return 0;
 		}
@@ -214,6 +214,12 @@ create_render_pass(
 		ghci_vk_budget_give(session, charged);
 		ghci_vk_reply_created(reply, requested, result, identity);
 		return 0;
+	}
+
+	/* The attachment each subpass resolves its depth and stencil into (VK_ATTACHMENT_UNUSED for none). */
+	for (index = 0U; index < info.subpassCount; index++) {
+		(void)i915_vkc_depth_resolve(&info, resolves, index, &resolve);
+		pass->references[index].depth_resolve = resolve.target;
 	}
 
 	/* The object. */

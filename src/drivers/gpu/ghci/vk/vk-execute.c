@@ -397,6 +397,7 @@ static int transfer_allowed(struct exec *exec);
 static int has_blitter(struct exec *exec);
 static int meta_run(struct exec *exec, const struct ghci_vk_meta_dispatch *dispatch);
 static int meta_copy(struct exec *exec, const struct ghci_vk_meta_copy *copy);
+static void subpass_resolve_depth(struct exec *exec, const struct ghci_vk_pass_references *references, int barrier_placed);
 static int meta_bytes(struct exec *exec, uint64_t source, uint64_t destination, uint64_t bytes, uint32_t element);
 static int meta_fill(struct exec *exec, uint64_t destination, uint64_t bytes, uint32_t data);
 static void copy_buffer(struct exec *exec, struct i915_wire_reader *reader);
@@ -2983,6 +2984,85 @@ subpass_end(
 		transfer.resolve_mode = (traits & GHCI_VK_FORMAT_INTEGER) != 0U ? 3U : 0U;
 		transfer.samples = exec->pass.pass->attachments[references->color[index]].samples;
 		put(exec, words, ghci_cmd_resolve_image(words, &transfer));
+	}
+
+	/* The resolve of the depth/stencil attachment's sample 0. */
+	if (references->depth_resolve != VK_ATTACHMENT_UNUSED && references->depth != VK_ATTACHMENT_UNUSED)
+		subpass_resolve_depth(exec, references, barrier_placed);
+}
+
+/*
+ * Resolves the current subpass's depth/stencil attachment into the
+ * attachment of one sample its subpass names, over the render area of the
+ * view: sample 0 of each pixel (the first texel of the pixel's samples in
+ * the linear multisampled layout) copied by the driver's copy program,
+ * whole texels (the executor reports no independent resolve, so both
+ * aspects of a combined format are resolved together), D32S8's depth and
+ * stencil as its two parts.  The pass's writes reach memory first.
+ *
+ * Values referenced: amaterrace-gpu ghci.md (section 12.11: sample s of
+ * pixel (x, y) at y * pitch + (x * samples + s) * texel bytes; section
+ * 8.5.2: D32S8 is depth in [31:0] and stencil in [39:32]).
+ */
+static void
+subpass_resolve_depth(
+	struct exec *exec,
+	const struct ghci_vk_pass_references *references,
+	int barrier_placed)
+{
+	const struct ghci_vk_image_view *source;
+	const struct ghci_vk_image_view *destination;
+	struct ghci_vk_meta_copy copy;
+	uint32_t words[GHCI_DW_RESOLVE_IMAGE];
+	uint32_t elements[2];
+	uint32_t skips[2];
+	uint32_t texel_bytes;
+	uint32_t block;
+	uint32_t parts;
+	uint32_t part;
+	uint32_t format;
+	uint32_t samples;
+
+	/* The two views. */
+	if (view_of(exec, references->depth, &source) != 0 || view_of(exec, references->depth_resolve, &destination) != 0)
+		return;
+	format = exec->pass.pass->attachments[references->depth].format;
+	samples = exec->pass.pass->attachments[references->depth].samples;
+	(void)ghci_vk_format_size(format, &texel_bytes, &block);
+
+	/* The texel as one part, or D32S8's depth word and stencil byte. */
+	parts = 1U;
+	elements[0] = texel_bytes;
+	skips[0] = 0U;
+	if (format == (uint32_t)VK_FORMAT_D32_SFLOAT_S8_UINT) {
+		parts = 2U;
+		elements[0] = 4U;
+		elements[1] = 1U;
+		skips[1] = 4U;
+	}
+
+	/* The samples the pass wrote reach memory before the copy program reads them. */
+	if (!barrier_placed)
+		put(exec, words, ghci_cmd_barrier(words, GHCI_STAGE_ROP, GHCI_STAGE_CS, GHCI_BARRIER_WAIT_IDLE | GHCI_BARRIER_FLUSH_L1_DATA));
+	else
+		put(exec, words, ghci_cmd_barrier(words, GHCI_STAGE_ROP | GHCI_STAGE_BLT | GHCI_STAGE_FS, GHCI_STAGE_CS, GHCI_BARRIER_WAIT_IDLE | GHCI_BARRIER_FLUSH_L1_DATA));
+
+	/* Each part: sample 0 of each pixel of the area's rows into the pixel of one sample. */
+	for (part = 0U; part < parts; part++) {
+		kern_memset(&copy, 0, sizeof(copy));
+		copy.source = source->va + view_layer(exec, source) + (uint64_t)exec->pass.area[1] * source->row_pitch +
+			(uint64_t)exec->pass.area[0] * samples * texel_bytes + skips[part];
+		copy.destination = destination->va + view_layer(exec, destination) + (uint64_t)exec->pass.area[1] * destination->row_pitch +
+			(uint64_t)exec->pass.area[0] * texel_bytes + skips[part];
+		copy.source_step[0] = samples * texel_bytes;
+		copy.source_step[1] = source->row_pitch;
+		copy.destination_step[0] = texel_bytes;
+		copy.destination_step[1] = destination->row_pitch;
+		copy.element_bytes = elements[part];
+		copy.per_row = exec->pass.area[2];
+		copy.rows = exec->pass.area[3];
+		copy.slices = 1U;
+		(void)meta_copy(exec, &copy);
 	}
 }
 
