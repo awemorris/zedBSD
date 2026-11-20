@@ -229,7 +229,6 @@ static void render_pass2_release(struct render_pass2_form *form);
 static VkAttachmentReference *render_pass2_references(const VkAttachmentReference2 *references, uint32_t count, VkAttachmentReference *storage);
 static void render_pass2_dependency(const VkSubpassDependency2 *dependency, VkSubpassDependency *converted);
 static VkPipelineStageFlags render_pass2_stages(VkPipelineStageFlags2 stages, VkBool32 source);
-static const VkSubpassDescriptionDepthStencilResolve *render_pass2_resolve(const VkSubpassDescription2 *subpass);
 static void render_pass2_encode_reference(struct vulkan_writer *writer, const VkAttachmentReference2 *reference);
 static void render_pass2_encode_references(struct vulkan_writer *writer, const VkAttachmentReference2 *references, uint32_t count);
 
@@ -1203,7 +1202,7 @@ vulkan_render_pass2_encode(
 	for (index = 0; index < info->subpassCount; index++) {
 		subpass = &info->pSubpasses[index];
 		vulkan_write_u32(writer, VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2);
-		resolve = render_pass2_resolve(subpass);
+		resolve = vulkan_render_pass2_resolve(subpass);
 		if (resolve != NULL) {
 			vulkan_write_u64(writer, 1U);
 			vulkan_write_u32(writer, VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE);
@@ -1493,7 +1492,7 @@ render_pass2_convert(
 			views = VK_TRUE;
 
 		/* A resolve of depth or stencil the 1.0 form cannot carry. */
-		resolve = render_pass2_resolve(subpass);
+		resolve = vulkan_render_pass2_resolve(subpass);
 		if (resolve != NULL)
 			form->resolves = VK_TRUE;
 	}
@@ -1627,8 +1626,8 @@ render_pass2_stages(
 }
 
 /* Finds the resolve of depth or stencil a subpass does, NULL when it does none. */
-static const VkSubpassDescriptionDepthStencilResolve *
-render_pass2_resolve(
+const VkSubpassDescriptionDepthStencilResolve *
+vulkan_render_pass2_resolve(
 	const VkSubpassDescription2 *subpass)
 {
 	const VkBaseInStructure *next;

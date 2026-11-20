@@ -1562,6 +1562,9 @@ command_encode_clear_attachment(
  * Encodes render-pass begin using attachment metadata to interpret only
  * meaningful clear values.  An imageless framebuffer is begun as the
  * renderer's framebuffer of the views named now, which the recording keeps.
+ * A render pass the library split is begun as its first part, and moving
+ * to the next subpass begins the next part (pass_moving): with the
+ * framebuffer of that part and the clear values of its attachments.
  */
 static void
 command_encode_render_begin(
@@ -1572,13 +1575,30 @@ command_encode_render_begin(
 	struct vulkan_command_framebuffer *entry;
 	const VkAttachmentDescription *attachment;
 	const VkClearValue *clear;
+	const uint32_t *members;
+	VkRenderPass original;
 	VkFramebuffer framebuffer;
+	VkBool32 split;
 	VkBool32 made;
 	VkResult status;
+	uint32_t subpass;
+	uint32_t count;
 	uint32_t index;
+	uint32_t item;
 
-	/* The framebuffer to begin with, kept by the recording when it is made for it. */
-	status = vulkan_framebuffer_for_begin(command->pool->device, info, &framebuffer, &made);
+	/* The next part of the render pass begun, which is kept. */
+	if (command->pass_moving) {
+		original = command->pass_begun;
+		subpass = command->pass_subpass;
+		framebuffer = vulkan_framebuffer_part(command->pass_framebuffer, subpass);
+		status = VK_SUCCESS;
+		made = VK_FALSE;
+	} else {
+		/* The framebuffer to begin with, kept by the recording when it is made for it. */
+		original = info->renderPass;
+		subpass = 0U;
+		status = vulkan_framebuffer_for_begin(command->pool->device, info, &framebuffer, &made);
+	}
 	if (status == VK_SUCCESS && made) {
 		entry = malloc(sizeof(*entry));
 		if (entry == NULL) {
@@ -1594,8 +1614,13 @@ command_encode_render_begin(
 		writer->error = status;
 
 	/* What moving to the next subpass of a render pass the library split begins again with. */
-	if (status == VK_SUCCESS && command->object.context->native)
+	if (status == VK_SUCCESS && command->object.context->native && !command->pass_moving)
 		command_pass_keep(command, info, framebuffer);
+
+	/* The attachments of the part begun, of a render pass the library split; else all. */
+	split = vulkan_render_pass_members(original, subpass, &members, &count);
+	if (!split)
+		count = info->clearValueCount;
 
 	/* Preserves the standard render area and ordinary object identities in protocol order. */
 	vulkan_write_u32(writer, info->sType);
@@ -1603,19 +1628,20 @@ command_encode_render_begin(
 	vulkan_encode_handle(writer, (uint64_t)info->renderPass);
 	vulkan_encode_handle(writer, (uint64_t)framebuffer);
 	vulkan_encode_VkRect2D(writer, &info->renderArea);
-	vulkan_write_u32(writer, info->clearValueCount);
-	vulkan_write_u64(writer, info->clearValueCount);
+	vulkan_write_u32(writer, count);
+	vulkan_write_u64(writer, count);
 
 	/* A valid begin may contain ignored clear entries beyond the last clear attachment. */
 	for (index = 0;
-	     index < info->clearValueCount && writer->error == VK_SUCCESS;
+	     index < count && writer->error == VK_SUCCESS;
 	     index++) {
-		attachment = vulkan_render_pass_attachment(info->renderPass, index);
+		item = split ? members[index] : index;
+		attachment = vulkan_render_pass_attachment(original, item);
 		clear = NULL;
 
 		/* Defers caller clear storage access until a real attachment can make it meaningful. */
-		if (attachment != NULL)
-			clear = &info->pClearValues[index];
+		if (attachment != NULL && item < info->clearValueCount)
+			clear = &info->pClearValues[item];
 		command_encode_render_clear(writer, attachment, clear);
 	}
 
@@ -2172,7 +2198,11 @@ command_next_subpass_local(
 		vkCmdPipelineBarrier(commandBuffer, barrier->source, barrier->destination, 0, 1U, &memory, 0U, NULL, 0U, NULL);
 	}
 
-	/* The next subpass's render pass, which the render pass's begin is kept as. */
+	/*
+	 * The next subpass's render pass, which the render pass's begin is
+	 * kept as: the begin encodes that part's framebuffer and clear values
+	 * (command_encode_render_begin).
+	 */
 	original = command->pass_begun;
 	memset(&begin, 0, sizeof(begin));
 	begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -2181,9 +2211,10 @@ command_next_subpass_local(
 	begin.renderArea = command->pass_area;
 	begin.clearValueCount = command->pass_clear_count;
 	begin.pClearValues = command->pass_clears;
-	vkCmdBeginRenderPass(commandBuffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
-	command->pass_begun = original;
 	command->pass_subpass = next;
+	command->pass_moving = VK_TRUE;
+	vkCmdBeginRenderPass(commandBuffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
+	command->pass_moving = VK_FALSE;
 
 	/* Succeeded: the next subpass is recorded, or the recording holds its failure. */
 	return VK_TRUE;

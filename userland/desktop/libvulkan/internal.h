@@ -452,6 +452,8 @@ struct VkCommandBuffer_T {
 	uint32_t pass_clear_count;
 	uint32_t pass_clear_capacity;
 	uint32_t pass_subpass;
+	/* True while vkCmdNextSubpass begins the next subpass's render pass. */
+	VkBool32 pass_moving;
 };
 
 /* Keeps one allocation alive independently of its active mapped view. */
@@ -989,6 +991,23 @@ const struct vulkan_subpass_barrier *
 vulkan_render_pass_barrier(
 	VkRenderPass render_pass,
 	uint32_t subpass);
+
+VkBool32
+vulkan_render_pass_members(
+	VkRenderPass render_pass,
+	uint32_t subpass,
+	const uint32_t **members,
+	uint32_t *count);
+
+VkFramebuffer
+vulkan_framebuffer_part(
+	VkFramebuffer framebuffer,
+	uint32_t subpass);
+
+/* The resolve of depth or stencil a subpass of a 1.2 render pass does, NULL when none (core12.c). */
+const VkSubpassDescriptionDepthStencilResolve *
+vulkan_render_pass2_resolve(
+	const VkSubpassDescription2 *subpass);
 
 /* Both ordinary and WSI command recording use one backend layout conversion. */
 uint32_t
