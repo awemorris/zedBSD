@@ -37,6 +37,9 @@
  * The execution modes the parser interprets (Khronos SPIR-V spec, section 3.6).
  */
 #define EXECUTION_MODE_LOCAL_SIZE 17U
+
+/* A fragment shader's tests before it runs (SPIR-V spec, section 3.6). */
+#define EXECUTION_MODE_EARLY_FRAGMENT_TESTS 9U
 #define EXECUTION_MODE_LOCAL_SIZE_ID 38U
 
 /*
@@ -136,6 +139,13 @@ drv_gpu_spirv_declare_execution_mode(
 		parser->ir->local_size[0] = word[3];
 		parser->ir->local_size[1] = word[4];
 		parser->ir->local_size[2] = word[5];
+		return 0;
+	}
+
+	/* EarlyFragmentTests: the driver runs the tests before the shader. */
+	if (opcode == OP_EXECUTION_MODE &&
+	    word[2] == EXECUTION_MODE_EARLY_FRAGMENT_TESTS) {
+		parser->ir->early_fragment_tests = 1U;
 		return 0;
 	}
 

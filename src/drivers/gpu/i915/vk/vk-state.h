@@ -145,6 +145,14 @@ struct i915_gfx_kernels {
 	 */
 	uint32_t ps_has_uav;
 
+	/*
+	 * Nonzero when the pixel kernel writes memory, and nonzero for its
+	 * EarlyFragmentTests mode (3DSTATE_WM Early Depth/Stencil Control and
+	 * 3DSTATE_PS_EXTRA Pixel Shader Has UAV).
+	 */
+	uint32_t ps_writes_memory;
+	uint32_t ps_early_tests;
+
 	/* Bit n: fragment input n is gl_PointCoord, the point sprite's texture coordinate (0 for a rectangle). */
 	uint32_t ps_point_sprite_mask;
 

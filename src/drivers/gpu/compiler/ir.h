@@ -908,6 +908,15 @@ struct drv_gpu_shader_ir {
 	 * a multiview draw needs one compilation of it for each view.
 	 */
 	uint32_t uses_view_index;
+
+	/*
+	 * Fragment: nonzero for the EarlyFragmentTests execution mode, which
+	 * runs the depth and stencil tests before the shader, so a fragment
+	 * they fail never runs it (its memory writes included).  Without it a
+	 * shader that writes memory runs for every fragment the tests later
+	 * reject too.
+	 */
+	uint32_t early_fragment_tests;
 };
 
 #endif /* DRIVERS_GPU_COMPILER_IR_H */

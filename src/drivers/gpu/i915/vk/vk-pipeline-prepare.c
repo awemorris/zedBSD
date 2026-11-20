@@ -491,6 +491,10 @@ drv_i915_gfx_pipeline_kernels(
 	/* Takes whether the pixel kernel discards, which the pixel stage must be told. */
 	kernels->ps_kills = fragment->uses_kill;
 
+	/* Takes whether it writes memory and whether it asks for its tests first, which decide when depth is tested. */
+	kernels->ps_writes_memory = fragment->writes_memory;
+	kernels->ps_early_tests = fragment->early_fragment_tests;
+
 	/* Takes the scratch memory each kernel spills to; the draw places the buffers. */
 	kernels->vs_scratch_bytes = vertex->scratch_bytes;
 	kernels->ps_scratch_bytes = fragment->scratch_bytes;
