@@ -58,7 +58,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
 	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
 		-m32 -nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/i386/user.ld \
+		-Wl,-T,$(SYSROOT_LIB)/zedbsd/pc9801ns/user.ld \
 		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
 		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
 		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \

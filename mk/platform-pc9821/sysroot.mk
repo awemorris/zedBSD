@@ -49,7 +49,6 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libclang_rt.builtins.a $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/ld.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
-	cp -f mk/platform-pc9821/user.ld mk/platform-pc9821/vmunix.ld $(SYSROOT_LIB)/zedbsd/i386/
 	cp -f mk/platform-pc9821/user.ld mk/platform-pc9821/vmunix.ld $(SYSROOT_LIB)/zedbsd/pc9821/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
 	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
@@ -59,7 +58,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
 	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
 		-m32 -nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/i386/user.ld \
+		-Wl,-T,$(SYSROOT_LIB)/zedbsd/pc9821/user.ld \
 		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
 		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
 		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \

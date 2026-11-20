@@ -13,7 +13,7 @@ USER_CPPFLAGS := \
 	-DKERN_USER_ABI_ILP32
 
 USER_CFLAGS := \
-	$(CFLAGS)\
+	$(CFLAGS) \
 	-m32 \
 	-march=i386 \
 	-fno-pic \
@@ -29,4 +29,3 @@ USER_CFLAGS := \
 	-Wall \
 	-Wextra \
 	-Werror
-

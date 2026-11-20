@@ -86,7 +86,7 @@ $(info   rpi4   (architecture: arm64,   board: rpi4))
 $(info   vf2    (architecture: riscv64, board: vf2))
 $(info   i386   (architecture: i386,    board: pcat))
 $(info   pc9821 (architecture: i386,    board: pc98))
-$(info   pc9801 (architecture: i386,    board: pc98))
+$(info   pc9801ns (architecture: i386,    board: pc98))
 override PLATFORM := $(shell printf 'Enter platform: ' >/dev/tty; IFS= read -r p </dev/tty && printf '%s\n' "$$p")
 endif
 
