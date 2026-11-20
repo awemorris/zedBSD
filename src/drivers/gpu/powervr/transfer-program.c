@@ -1645,8 +1645,9 @@ powervr_transfer_regs_build(
 	/*
 	 * A copy stores the destination as the raw format of its texels.  A
 	 * clear writes the colour packed for the format's own pack mode, or,
-	 * for a format no packed clear fills, the texel's bits as the raw
-	 * format of its size.
+	 * for a format no packed clear fills and for a depth format (which the
+	 * pixel back end stores only as raw texels), the texel's bits as the
+	 * raw format of its size.
 	 */
 	destination = job->destination;
 	if (destination.format == NULL)
@@ -1656,7 +1657,9 @@ powervr_transfer_regs_build(
 		if (destination.format == NULL)
 			return ENOTSUP;
 	} else if (job->kind == POWERVR_TRANSFER_CLEAR) {
-		error = powervr_transfer_clear_colour(destination.format, job->colour, regs->usc_clear);
+		error = ENOTSUP;
+		if ((destination.format->kind & POWERVR_FORMAT_DEPTH) == 0)
+			error = powervr_transfer_clear_colour(destination.format, job->colour, regs->usc_clear);
 		if (error == ENOTSUP) {
 			error = powervr_format_texel_words(destination.format, job->colour, regs->usc_clear);
 			destination.format = powervr_transfer_raw_format(destination.format->texel_bytes);

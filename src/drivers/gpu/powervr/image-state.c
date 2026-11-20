@@ -1213,9 +1213,11 @@ powervr_format_is_unorm8x4(
  * channels round to the nearest step (clamped), half floats as
  * powervr_format_clear_words, 11- and 10-bit unsigned floats cut towards
  * zero (negative values and -0 to 0, values past the largest finite to
- * it), integers keep their low bits; the packed depth and stencil takes
- * the depth's float and the stencil's integer as its first two words.  Formats without such a packing
- * are not taken (ENOTSUP).
+ * it), integers keep their low bits; a depth format takes the depth's
+ * float as its first word (D32_SFLOAT its bits, D16_UNORM a 16-bit
+ * normalised value), and the packed depth and stencil the depth's float
+ * and the stencil's integer as its first two words.  Formats without such
+ * a packing are not taken (ENOTSUP).
  *
  * Procedure referenced: the Vulkan 1.4 specification, "Fixed-Point Data
  * Conversions" (the conversion of a float to an unsigned and a signed
@@ -1223,7 +1225,8 @@ powervr_format_is_unorm8x4(
  * "Unsigned 10-Bit Floating-Point Numbers" (their exponent and mantissa
  * fields), and the formats' bit layouts ("Packed Formats":
  * A2B10G10R10 red in bits 0..9, B10G11R11 red in bits 0..10;
- * "Depth/Stencil Formats": D24_UNORM_S8_UINT the depth in bits 0..23).
+ * "Depth/Stencil Formats": D24_UNORM_S8_UINT the depth in bits 0..23,
+ * D16_UNORM a 16-bit normalised depth, D32_SFLOAT a 32-bit float one).
  */
 int
 powervr_format_texel_words(
@@ -1261,6 +1264,12 @@ powervr_format_texel_words(
 		return 0;
 	case VK_FORMAT_D24_UNORM_S8_UINT:
 		packed[0] = unorm_from_float(colour[0], 0xFFFFFFU) | (colour[1] << 24);
+		return 0;
+	case VK_FORMAT_D16_UNORM:
+		packed[0] = unorm_from_float(colour[0], 0xFFFFU);
+		return 0;
+	case VK_FORMAT_D32_SFLOAT:
+		packed[0] = colour[0];
 		return 0;
 	default:
 		break;
