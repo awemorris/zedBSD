@@ -704,6 +704,8 @@ int amdrdna_vk_image_plane(const struct amdrdna_vk_image *image, uint32_t plane,
 int amdrdna_vk_image_part(const struct amdrdna_vk_image *image, uint32_t aspect, uint32_t level, struct amdrdna_vk_image *part);
 int amdrdna_vk_image_slice(const struct amdrdna_vk_image *image, uint32_t level, uint32_t slice, struct amdrdna_vk_image *part);
 void amdrdna_vk_query_reset(struct amdrdna_vk_query_pool *pool, uint32_t first, uint32_t count);
+void amdrdna_vk_query_value(const struct amdrdna_vk_query_pool *pool, uint32_t query, uint64_t *value, uint32_t *available);
+uint32_t amdrdna_vk_query_record(uint64_t value, uint32_t available, uint32_t flags, uint8_t *record);
 int amdrdna_vk_buffer_address(const struct amdrdna_vk_buffer *buffer, uint64_t *va, uint8_t **cpu);
 int amdrdna_vk_image_address(const struct amdrdna_vk_image *image, uint64_t *va, uint8_t **cpu);
 

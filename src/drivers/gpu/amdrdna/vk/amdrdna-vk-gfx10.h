@@ -1012,6 +1012,7 @@ void amdrdna_vk_pm4_wait_value(struct amdrdna_vk_pm4 *pm4, uint64_t address, uin
 void amdrdna_vk_pm4_cache_acquire(struct amdrdna_vk_pm4 *pm4, uint32_t caches);
 void amdrdna_vk_pm4_fetcher_sync(struct amdrdna_vk_pm4 *pm4);
 void amdrdna_vk_pm4_move(struct amdrdna_vk_pm4 *pm4, uint64_t source, uint64_t destination, uint32_t bytes);
+void amdrdna_vk_pm4_fill(struct amdrdna_vk_pm4 *pm4, uint64_t destination, uint32_t value, uint32_t bytes);
 void amdrdna_vk_pm4_draw(struct amdrdna_vk_pm4 *pm4, uint32_t vertex_count, uint32_t instance_count);
 void amdrdna_vk_pm4_draw_indexed(struct amdrdna_vk_pm4 *pm4, uint64_t indices, uint32_t index_room, uint32_t index_count, uint32_t instance_count);
 void amdrdna_vk_pm4_dispatch(struct amdrdna_vk_pm4 *pm4, uint32_t x, uint32_t y, uint32_t z);

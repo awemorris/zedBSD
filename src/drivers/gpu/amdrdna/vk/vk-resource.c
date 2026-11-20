@@ -143,8 +143,6 @@ static int resource_image_destroy(struct amdrdna_vk_session *session, void *payl
 static int resource_view_destroy(struct amdrdna_vk_session *session, void *payload);
 static int resource_create_query_pool(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int resource_query_results(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static uint32_t resource_query_record(uint64_t value, uint32_t available, uint32_t flags, uint8_t *record);
-static void resource_query_value(const struct amdrdna_vk_query_pool *pool, uint32_t query, uint64_t *value, uint32_t *available);
 static int resource_query_pool_destroy(struct amdrdna_vk_session *session, void *payload);
 static void resource_reply_zeros(struct i915_wire_writer *reply, uint64_t bytes);
 
@@ -1753,7 +1751,7 @@ resource_query_pool_destroy(
 /*
  * vkGetQueryPoolResults: [device][pool][first][count][data size][bytes]
  * [stride][flags] -> [result][bytes]{bytes}.  Each query's record
- * (resource_query_record) at its stride, zeros between and after the
+ * (amdrdna_vk_query_record) at its stride, zeros between and after the
  * records.  VK_NOT_READY when a query of the range is unavailable.  A
  * result status pool's statuses are final once the submissions that wrote
  * them ran, so a wait has nothing to wait for; an occlusion or timestamp
@@ -1803,7 +1801,7 @@ resource_query_results(
 		return EINVAL;
 
 	/* The bytes of one record, as its flags lay it out. */
-	record_bytes = resource_query_record(0U, 0U, flags, record);
+	record_bytes = amdrdna_vk_query_record(0U, 0U, flags, record);
 
 	/* An unknown pool, a range past it, or records that do not fit the reply or their stride. */
 	pool = amdrdna_vk_payload(session, I915_VK_OBJ_QUERY_POOL, identity);
@@ -1836,7 +1834,7 @@ resource_query_results(
 	/* VK_NOT_READY when any query of the range is unavailable. */
 	result = (uint32_t)VK_SUCCESS;
 	for (query = first; query < first + count; query++) {
-		resource_query_value(pool, query, &value, &available);
+		amdrdna_vk_query_value(pool, query, &value, &available);
 		if (available == 0U)
 			result = (uint32_t)VK_NOT_READY;
 	}
@@ -1848,8 +1846,8 @@ resource_query_results(
 	/* Each record, then zeros to the next record's start (or the data's end). */
 	written = 0U;
 	for (query = first; query < first + count; query++) {
-		resource_query_value(pool, query, &value, &available);
-		record_bytes = resource_query_record(value, available, flags, record);
+		amdrdna_vk_query_value(pool, query, &value, &available);
+		record_bytes = amdrdna_vk_query_record(value, available, flags, record);
 		drv_i915_wire_reply_bytes(reply, record, record_bytes);
 		end = written + stride;
 		if (end > bytes)
@@ -1878,8 +1876,8 @@ resource_query_results(
  * backends, the valid bit 63 of both counts, the sum of end less start;
  * the timestamp case's value against its not-ready marker).
  */
-static void
-resource_query_value(
+void
+amdrdna_vk_query_value(
 	const struct amdrdna_vk_query_pool *pool,
 	uint32_t query,
 	uint64_t *value,
@@ -1933,8 +1931,8 @@ resource_query_value(
  * one result of a result status, occlusion or timestamp query, then the
  * availability word).
  */
-static uint32_t
-resource_query_record(
+uint32_t
+amdrdna_vk_query_record(
 	uint64_t value,
 	uint32_t available,
 	uint32_t flags,

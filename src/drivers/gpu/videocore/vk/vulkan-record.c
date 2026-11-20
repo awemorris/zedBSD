@@ -75,6 +75,7 @@ bcm2711_vulkan_record_dispatch(
 	case GPU_OP_CMD_BEGIN_QUERY:
 	case GPU_OP_CMD_END_QUERY:
 	case GPU_OP_CMD_RESET_QUERY_POOL:
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
 		/* An occlusion query's commands; another pool's are the video's. */
 		if (!bcm2711_vulkan_occlusion_named(session, reader)) {
 			*handled = 0;

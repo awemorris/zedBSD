@@ -52,6 +52,14 @@
 #define RECORD_COPY_REGIONS_MAX		4096U
 #define RECORD_SLICE_REGIONS_MAX	4096U
 
+/*
+ * The most bytes one vkCmdUpdateBuffer writes.
+ *
+ * Value referenced: the Vulkan 1.0 specification (vkCmdUpdateBuffer:
+ * dataSize at most 65536).
+ */
+#define RECORD_UPDATE_BYTES		65536U
+
 static int record_decode(struct amdrdna_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct amdrdna_vk_record *record, uint8_t *push);
 static int record_hold(struct amdrdna_vk_session *session, struct amdrdna_vk_record *record, enum i915_vk_object_kind kind, uint64_t identity);
 static int record_pipeline(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
@@ -67,6 +75,9 @@ static int record_copy(struct amdrdna_vk_session *session, uint32_t opcode, stru
 static int record_clear(struct amdrdna_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
 static int record_query_reset(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
 static int record_timestamp(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
+static int record_indirect(struct amdrdna_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
+static int record_buffer_write(struct amdrdna_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
+static int record_query_copy(struct amdrdna_vk_session *session, struct i915_wire_reader *reader, struct amdrdna_vk_record *record);
 static int record_colour(struct i915_wire_reader *reader, uint32_t *words);
 static int record_barrier(struct amdrdna_vk_session *session, struct i915_wire_reader *reader);
 static int record_push(struct i915_wire_reader *reader, struct amdrdna_vk_record *record, uint8_t *bytes);
@@ -146,6 +157,12 @@ amdrdna_vk_record_route(
 	case GPU_OP_CMD_END_RENDER_PASS:
 	case GPU_OP_CMD_RESET_QUERY_POOL:
 	case GPU_OP_CMD_WRITE_TIMESTAMP:
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+	case GPU_OP_CMD_FILL_BUFFER:
+	case GPU_OP_CMD_UPDATE_BUFFER:
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
 		break;
 	default:
 		/* The video coding and query commands are recorded too (vk-video.inc decodes them). */
@@ -323,6 +340,18 @@ record_decode(
 		break;
 	case GPU_OP_CMD_WRITE_TIMESTAMP:
 		error = record_timestamp(session, reader, record);
+		break;
+	case GPU_OP_CMD_DRAW_INDIRECT:
+	case GPU_OP_CMD_DRAW_INDEXED_INDIRECT:
+	case GPU_OP_CMD_DISPATCH_INDIRECT:
+		error = record_indirect(session, opcode, reader, record);
+		break;
+	case GPU_OP_CMD_FILL_BUFFER:
+	case GPU_OP_CMD_UPDATE_BUFFER:
+		error = record_buffer_write(session, opcode, reader, record);
+		break;
+	case GPU_OP_CMD_COPY_QUERY_POOL_RESULTS:
+		error = record_query_copy(session, reader, record);
 		break;
 	default:
 		error = 0;
@@ -1637,6 +1666,224 @@ record_query_reset(
 	record->count = count;
 
 	/* Succeeded: the reset is recorded. */
+	return 0;
+}
+
+/*
+ * vkCmdDrawIndirect, vkCmdDrawIndexedIndirect: [buffer][offset][draw
+ * count][stride]; vkCmdDispatchIndirect: [buffer][offset].  The buffer is
+ * the record's object 0, the offset its offsets[0], a draw's count its
+ * values[0] and stride its values[1] (a dispatch's count 1).  ERANGE (the
+ * recording fails) for an offset not of whole words, a count over the
+ * device's maxDrawIndirectCount (1), or a record past the buffer's end.
+ * The counts are read when the record runs.
+ *
+ * Values referenced: the Vulkan 1.0 specification (vkCmdDrawIndirect,
+ * vkCmdDrawIndexedIndirect, vkCmdDispatchIndirect: VkDrawIndirectCommand
+ * of 16 bytes, VkDrawIndexedIndirectCommand of 20,
+ * VkDispatchIndirectCommand of 12, the offset a multiple of 4, drawCount
+ * at most maxDrawIndirectCount).
+ */
+static int
+record_indirect(
+	struct amdrdna_vk_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader,
+	struct amdrdna_vk_record *record)
+{
+	const struct amdrdna_vk_buffer *buffer;
+	uint64_t identity;
+	uint32_t bytes;
+	int error;
+
+	/* The buffer, where the record is, and a draw's count and stride. */
+	identity = drv_i915_wire_read_u64(reader);
+	record->offsets[0] = drv_i915_wire_read_u64(reader);
+	record->values[0] = 1U;
+	if (opcode != GPU_OP_CMD_DISPATCH_INDIRECT) {
+		record->values[0] = drv_i915_wire_read_u32(reader);
+		record->values[1] = drv_i915_wire_read_u32(reader);
+	}
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Whole words and one record at most. */
+	bytes = (uint32_t)sizeof(VkDispatchIndirectCommand);
+	if (opcode == GPU_OP_CMD_DRAW_INDIRECT)
+		bytes = (uint32_t)sizeof(VkDrawIndirectCommand);
+	if (opcode == GPU_OP_CMD_DRAW_INDEXED_INDIRECT)
+		bytes = (uint32_t)sizeof(VkDrawIndexedIndirectCommand);
+	if ((record->offsets[0] & 3U) != 0U || record->values[0] > 1U)
+		return ERANGE;
+	record->count = bytes;
+
+	/* The record holds the buffer, which must be known. */
+	error = record_hold(session, record, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && record->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* The record within the buffer. */
+	buffer = record->objects[0]->payload;
+	if (record->values[0] != 0U && (record->offsets[0] > buffer->size || bytes > buffer->size - record->offsets[0]))
+		return ERANGE;
+
+	/* Succeeded: the command is recorded; its counts are read when it runs. */
+	return 0;
+}
+
+/*
+ * vkCmdFillBuffer: [buffer][offset][size][word]; vkCmdUpdateBuffer:
+ * [buffer][offset][size][size again]{bytes, padded to a word}.  The
+ * buffer is the record's object 0, the offset its offsets[0], the bytes
+ * written its offsets[1] (a fill of VK_WHOLE_SIZE the rest of the buffer
+ * in whole words), a fill's word its values[0] and an update's bytes the
+ * record's regions.  ERANGE (the recording fails) for an offset or size
+ * not of whole words, nothing written, or bytes past the buffer's end.
+ *
+ * Values referenced: the Vulkan 1.0 specification (vkCmdFillBuffer,
+ * vkCmdUpdateBuffer: dstOffset and size multiples of 4, dataSize at most
+ * 65536, VK_WHOLE_SIZE rounded down to a multiple of 4).
+ */
+static int
+record_buffer_write(
+	struct amdrdna_vk_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader,
+	struct amdrdna_vk_record *record)
+{
+	const struct amdrdna_vk_buffer *buffer;
+	uint64_t identity;
+	uint64_t offset;
+	uint64_t size;
+	uint64_t count;
+	uint8_t *bytes;
+	int error;
+
+	/* The buffer and the range. */
+	identity = drv_i915_wire_read_u64(reader);
+	offset = drv_i915_wire_read_u64(reader);
+	size = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* A fill's word, or an update's bytes (as many as its size, no more than Vulkan allows). */
+	if (opcode == GPU_OP_CMD_FILL_BUFFER) {
+		record->values[0] = drv_i915_wire_read_u32(reader);
+		if (reader->error != 0)
+			return EINVAL;
+	} else {
+		count = drv_i915_wire_read_u64(reader);
+		if (reader->error != 0 || count != size || count == 0U || count > RECORD_UPDATE_BYTES)
+			return EINVAL;
+		bytes = kern_malloc((size_t)count);
+		if (bytes == NULL)
+			return ENOMEM;
+		record->regions = bytes;
+		i915_vkc_read_bytes(reader, bytes, (size_t)count);
+		if (reader->error != 0)
+			return EINVAL;
+	}
+
+	/* The record holds the buffer, which must be known. */
+	error = record_hold(session, record, I915_VK_OBJ_BUFFER, identity);
+	if (error == 0 && record->object_count != 1U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* Whole words inside the buffer; a fill to its end takes the rest of its words. */
+	buffer = record->objects[0]->payload;
+	if ((offset & 3U) != 0U || offset >= buffer->size)
+		return ERANGE;
+	if (opcode == GPU_OP_CMD_FILL_BUFFER && size == VK_WHOLE_SIZE)
+		size = (buffer->size - offset) & ~(uint64_t)3U;
+	if (size == 0U || (size & 3U) != 0U || size > buffer->size - offset)
+		return ERANGE;
+	record->offsets[0] = offset;
+	record->offsets[1] = size;
+
+	/* Succeeded: the write is recorded. */
+	return 0;
+}
+
+/*
+ * vkCmdCopyQueryPoolResults: [pool][first][count][buffer][offset][stride]
+ * [flags].  The pool is the record's object 0, the buffer its object 1,
+ * the first query and the count kept, the offset its offsets[0], the
+ * stride its offsets[1] and the flags its values[0].  ENOENT for an
+ * unknown pool or buffer, ERANGE (the recording fails) for queries
+ * outside the pool, an offset or stride not of whole words (of eight
+ * bytes for 64-bit results), or records past the buffer's end.
+ *
+ * Values referenced: the Vulkan 1.0 specification
+ * (vkCmdCopyQueryPoolResults: dstOffset and stride multiples of 4, or of
+ * 8 with VK_QUERY_RESULT_64_BIT; the records within the buffer).
+ */
+static int
+record_query_copy(
+	struct amdrdna_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct amdrdna_vk_record *record)
+{
+	const struct amdrdna_vk_query_pool *pool;
+	const struct amdrdna_vk_buffer *buffer;
+	uint64_t pool_identity;
+	uint64_t buffer_identity;
+	uint64_t last;
+	uint32_t width;
+	uint32_t bytes;
+	int error;
+
+	/* The pool, the range, the buffer, where the records go and the flags. */
+	pool_identity = drv_i915_wire_read_u64(reader);
+	record->first = drv_i915_wire_read_u32(reader);
+	record->count = drv_i915_wire_read_u32(reader);
+	buffer_identity = drv_i915_wire_read_u64(reader);
+	record->offsets[0] = drv_i915_wire_read_u64(reader);
+	record->offsets[1] = drv_i915_wire_read_u64(reader);
+	record->values[0] = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* The record holds the known pool and buffer. */
+	error = record_hold(session, record, I915_VK_OBJ_QUERY_POOL, pool_identity);
+	if (error == 0 && record->object_count != 1U)
+		error = ENOENT;
+	if (error == 0)
+		error = record_hold(session, record, I915_VK_OBJ_BUFFER, buffer_identity);
+	if (error == 0 && record->object_count != 2U)
+		error = ENOENT;
+	if (error != 0)
+		return error;
+
+	/* Queries the pool has. */
+	pool = record->objects[0]->payload;
+	if (record->first > pool->count || record->count > pool->count - record->first)
+		return ERANGE;
+
+	/* Records of whole words, apart by a record at least, within the buffer. */
+	width = 4U;
+	if ((record->values[0] & VK_QUERY_RESULT_64_BIT) != 0U)
+		width = 8U;
+	bytes = width;
+	if ((record->values[0] & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0U)
+		bytes += width;
+	if ((record->offsets[0] & (width - 1U)) != 0U || (record->offsets[1] & (width - 1U)) != 0U)
+		return ERANGE;
+	if (record->count > 1U && record->offsets[1] < bytes)
+		return ERANGE;
+	buffer = record->objects[1]->payload;
+	if (record->count != 0U) {
+		if (record->offsets[1] > buffer->size)
+			return ERANGE;
+		last = record->offsets[0] + (uint64_t)(record->count - 1U) * record->offsets[1];
+		if (record->offsets[0] > buffer->size || last > buffer->size || bytes > buffer->size - last)
+			return ERANGE;
+	}
+
+	/* Succeeded: the copy is recorded. */
 	return 0;
 }
 

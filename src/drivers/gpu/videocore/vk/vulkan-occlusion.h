@@ -53,8 +53,15 @@ bool bcm2711_vulkan_occlusion_named(struct bcm2711_vulkan_session *session, cons
 /* The occlusion pool a recorded begin, end or reset names, or NULL for any other record. */
 struct bcm2711_vulkan_occlusion_pool *bcm2711_vulkan_occlusion_record(const struct bcm2711_vulkan_record *record);
 
-/* Runs a reset (the queries' samples cleared, unavailable) or an end (available) after every earlier pass. */
+/*
+ * Runs a reset (the queries' samples cleared, unavailable), an end
+ * (available) or a copy of results (into its buffer) after every earlier
+ * pass.
+ */
 void bcm2711_vulkan_occlusion_run(const struct bcm2711_vulkan_record *record);
+
+/* Checks a recorded copy of results: its buffer, the device's and bound, and its records within it. */
+int bcm2711_vulkan_occlusion_copy_validate(const struct bcm2711_vulkan_record *record);
 
 /*
  * Runs the end of a query in a multiview render pass of views views: the
