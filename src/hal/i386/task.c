@@ -28,10 +28,25 @@ static size_t task_stack_bytes;
 static uint8_t initial_fpregs[512] __attribute__((aligned(16)));
 static volatile unsigned task_registry_lock;
 
+/*
+ * Whether the processor has an x87 floating-point unit.  A build whose
+ * programs use the software-float ABI (HAL_I386_FPU_OPTIONAL) runs on an
+ * i386 that may have none (no 387 in its socket): then CR0.EM is set, so that
+ * an x87 instruction raises the device-not-available exception, and a task
+ * has no floating-point state to save or restore.  Any other build requires
+ * the unit.
+ */
+static bool fpu_present;
+
 static struct task_info *i386_task_init_primary(void);
 static void tasklist_add(struct task_info *task);
 static void tasklist_del(struct task_info *task);
 static void set_initial_resume_frame(struct task_info *task, void (*start)(void *), void *arg, void *user_sp);
+#if defined(HAL_I386_FPU_OPTIONAL)
+static bool fpu_detect(void);
+#endif
+static void fpu_save(void *save_area);
+static void fpu_restore(void *save_area);
 
 /*
  * Initializes the public HAL task subsystem.
@@ -71,11 +86,20 @@ i386_task_init_primary(
 	task->run_cpu = 0;
 	task->target_cpu = 0;
 
+	/* Finds whether the processor has a floating-point unit at all. */
+#if defined(HAL_I386_FPU_OPTIONAL)
+	fpu_present = fpu_detect();
+#else
+	fpu_present = true;
+#endif
+
 	/* Captures the processor's initialized floating-point state. */
-	__asm__ volatile("fninit" : : : "memory");
-	asm_fnsave(initial_fpregs);
+	if (fpu_present) {
+		__asm__ volatile("fninit" : : : "memory");
+		asm_fnsave(initial_fpregs);
+	}
 	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
-	asm_frstor(task->fpregs);
+	fpu_restore(task->fpregs);
 
 	/* Publishes the bootstrap task as the current task. */
 	tasklist_add(task);
@@ -121,7 +145,7 @@ i386_task_init_secondary(
 
 	/* Restores the common initialized floating-point state. */
 	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
-	asm_frstor(task->fpregs);
+	fpu_restore(task->fpregs);
 
 	/* Publishes the secondary bootstrap task as the current task. */
 	tasklist_add(task);
@@ -251,8 +275,8 @@ hal_task_fork_current(
 	child->tls = running_task->tls;
 
 	/* Snapshots the parent's live floating-point state into the child. */
-	asm_fnsave(running_task->fpregs);
-	asm_frstor(running_task->fpregs);
+	fpu_save(running_task->fpregs);
+	fpu_restore(running_task->fpregs);
 	hal_memcpy(child->fpregs, running_task->fpregs, sizeof(child->fpregs));
 
 	/* Returns the completed child task. */
@@ -337,7 +361,7 @@ hal_task_exec_current(
 		running_task->fpregs,
 		initial_fpregs,
 		sizeof(initial_fpregs));
-	asm_frstor(running_task->fpregs);
+	fpu_restore(running_task->fpregs);
 	hal_space_switch(new_space);
 
 	/* Reports a completed executable replacement. */
@@ -457,8 +481,8 @@ hal_task_signal_enter(
 	/* Saves the interrupted integer and floating-point signal state. */
 	depth = running_task->signal_depth;
 	running_task->signal_frame[depth] = *frame;
-	asm_fnsave(running_task->signal_fpregs[depth]);
-	asm_frstor(running_task->signal_fpregs[depth]);
+	fpu_save(running_task->signal_fpregs[depth]);
+	fpu_restore(running_task->signal_fpregs[depth]);
 
 	/* Publishes the token and new nested signal depth. */
 	running_task->signal_token[depth] = token;
@@ -506,7 +530,7 @@ hal_task_signal_return(
 	/* Restores the saved user frame and reports its return register. */
 	*frame = running_task->signal_frame[depth];
 	*value = (intptr_t)(int32_t)frame->regs.eax;
-	asm_frstor(running_task->signal_fpregs[depth]);
+	fpu_restore(running_task->signal_fpregs[depth]);
 
 	/* Clears the consumed token and publishes the reduced depth. */
 	running_task->signal_token[depth] = 0;
@@ -591,8 +615,8 @@ hal_task_context_switch(
 	}
 
 	/* Saves floating-point state and dispatches the assembly context switch. */
-	asm_fnsave(from->fpregs);
-	asm_frstor(to->fpregs);
+	fpu_save(from->fpregs);
+	fpu_restore(to->fpregs);
 	i386_percpu_set_tls(hal_cpu_current(), to->tls);
 	asm_task_dispatch(&from->resume_esp, &to->resume_esp);
 }
@@ -903,4 +927,82 @@ set_initial_resume_frame(
 		frame->initial.user.esp = (uint32_t)user_sp;
 		frame->initial.user.ss = SEG_USER_DATA | SEG_RPL_3;
 	}
+}
+
+#if defined(HAL_I386_FPU_OPTIONAL)
+/*
+ * Finds whether an x87 floating-point unit answers, and sets CR0 to match.
+ *
+ * The no-wait FNINIT, FNSTSW and FNSTCW reach a unit only when CR0.EM is
+ * clear, and without a unit they store nothing.  A unit after FNINIT has a
+ * zero status word and the control word 0x037f, of which the bits that do
+ * not depend on the unit's generation read 0x003f.
+ */
+static bool
+fpu_detect(
+	void)
+{
+	uint32_t cr0;
+	uint16_t status;
+	uint16_t control;
+	bool present;
+
+	/* Lets an x87 instruction reach the unit, if there is one. */
+	__asm__ volatile("movl %%cr0, %0" : "=r"(cr0));
+	cr0 &= ~(uint32_t)(CR0_EM | CR0_TS);
+	__asm__ volatile("movl %0, %%cr0" : : "r"(cr0) : "memory");
+
+	/* Initializes the unit and reads back its status and control words. */
+	status = 0xffffU;
+	control = 0xffffU;
+	__asm__ volatile("fninit\n\tfnstsw %0\n\tfnstcw %1"
+	    : "+m"(status), "+m"(control)
+	    :
+	    : "memory");
+
+	/* A unit answered only when both words read as an initialized unit's. */
+	present = false;
+	if (status == 0U && (control & 0x103fU) == 0x003fU)
+		present = true;
+
+	/*
+	 * Without a unit, EM makes every x87 instruction raise the
+	 * device-not-available exception, which reaches a user task as an
+	 * illegal instruction, and a clear MP keeps WAIT from raising it.
+	 */
+	if (!present) {
+		cr0 |= CR0_EM;
+		cr0 &= ~(uint32_t)CR0_MP;
+		__asm__ volatile("movl %0, %%cr0" : : "r"(cr0) : "memory");
+	}
+
+	/* Reports whether the processor has a floating-point unit. */
+	return present;
+}
+#endif
+
+/* Saves the floating-point state into an area, when there is a unit. */
+static void
+fpu_save(
+	void *save_area)
+{
+	/* Leaves the area as it is on a processor without a unit. */
+	if (!fpu_present)
+		return;
+
+	/* Saves the state, which also reinitializes the unit. */
+	asm_fnsave(save_area);
+}
+
+/* Restores the floating-point state from an area, when there is a unit. */
+static void
+fpu_restore(
+	void *save_area)
+{
+	/* Has nothing to load on a processor without a unit. */
+	if (!fpu_present)
+		return;
+
+	/* Loads the state. */
+	asm_frstor(save_area);
 }

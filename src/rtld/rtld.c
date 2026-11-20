@@ -408,6 +408,23 @@ static void object_tables_release(const struct rtld_object_tables *tables);
 static void object_reserve_needed(struct rtld_object *object);
 static void object_clear(struct rtld_object *object);
 
+#if defined(HAL_ARCH_I386) && !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+/*
+ * The loader's own atomic runtime, for a loader built for the i386 itself.
+ *
+ * The i386 has no CMPXCHG, so the compiler calls the __atomic_* functions
+ * for the loader's atomic loads, stores and exchanges.  The C library's
+ * runtime is not mapped while the loader relocates itself, so the loader
+ * carries the three it uses.  An aligned 4-byte MOV and an XCHG are atomic on
+ * every x86, and the loader's atomic objects are the loader's own, so no lock
+ * is needed.  The functions are hidden: a program's calls still reach the C
+ * library's runtime.
+ */
+uint32_t rtld_atomic_load_4(const volatile void *object, int order) __asm__("__atomic_load_4") __attribute__((visibility("hidden")));
+void rtld_atomic_store_4(volatile void *object, uint32_t value, int order) __asm__("__atomic_store_4") __attribute__((visibility("hidden")));
+uint32_t rtld_atomic_exchange_4(volatile void *object, uint32_t value, int order) __asm__("__atomic_exchange_4") __attribute__((visibility("hidden")));
+#endif
+
 /*
  * The function a debugger stops on.  It does nothing: being called is the
  * whole of what it says.  It is kept from being optimised away or folded
@@ -419,6 +436,78 @@ _rtld_debug_state(void)
 {
 	__asm__ volatile("" ::: "memory");
 }
+
+#if defined(HAL_ARCH_I386) && !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+/*
+ * Loads a 4-byte atomic object of the loader.
+ */
+uint32_t
+rtld_atomic_load_4(
+	const volatile void *object,
+	int order)
+{
+	const volatile uint32_t *word;
+	uint32_t value;
+
+	(void)order;
+
+	word = object;
+
+	/* Reads the word, keeping later accesses after the read. */
+	value = *word;
+	__asm__ volatile("" ::: "memory");
+
+	/* Reports the value the object held. */
+	return value;
+}
+
+/*
+ * Stores a 4-byte atomic object of the loader.
+ */
+void
+rtld_atomic_store_4(
+	volatile void *object,
+	uint32_t value,
+	int order)
+{
+	volatile uint32_t *word;
+
+	(void)order;
+
+	word = object;
+
+	/* Writes the word with XCHG, which orders every access around it. */
+	__asm__ volatile("xchgl %0, %1"
+	    : "+r"(value), "+m"(*word)
+	    :
+	    : "memory");
+}
+
+/*
+ * Exchanges a 4-byte atomic object of the loader with a value.
+ */
+uint32_t
+rtld_atomic_exchange_4(
+	volatile void *object,
+	uint32_t value,
+	int order)
+{
+	volatile uint32_t *word;
+
+	(void)order;
+
+	word = object;
+
+	/* Swaps the word and the value; XCHG locks the bus by itself. */
+	__asm__ volatile("xchgl %0, %1"
+	    : "+r"(value), "+m"(*word)
+	    :
+	    : "memory");
+
+	/* Reports the value the object held before. */
+	return value;
+}
+#endif
 
 /* Announces that the list is about to change, and then that it has. */
 static void
@@ -532,6 +621,7 @@ const struct __rtld_exports __rtld_exports = {
     .dladdr = __rtld_dladdr,
     .dl_iterate_phdr = __rtld_dl_iterate_phdr,
 };
+
 
 static intptr_t syscall6(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5);
 static void *tls_map(size_t size);
