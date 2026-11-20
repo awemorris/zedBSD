@@ -460,7 +460,7 @@ features2(
 
 /*
  * Fills the device's Vulkan 1.1 answers: the subgroup of one invocation
- * every executor starts from (compute only); multiview, a render pass of
+ * every executor starts from; multiview, a render pass of
  * views drawn once per view into each attachment's layer of the view,
  * with gl_ViewIndex in the constant bank (vk-execute.c), instances
  * numbered as without multiview; a set layout holds 4096 descriptors
