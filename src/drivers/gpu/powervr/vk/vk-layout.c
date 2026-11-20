@@ -171,6 +171,8 @@ create_shader(
 	const char *reason;
 	uint32_t *lowered;
 	size_t lowered_count;
+	uint32_t *inputs;
+	size_t inputs_count;
 	size_t code_count;
 	uint64_t identity;
 	uint32_t index;
@@ -194,6 +196,35 @@ create_shader(
 	}
 
 	/*
+	 * The input attachments, rewritten as sampled images read at the
+	 * fragment's pixel (each subpass runs as a render pass of its own);
+	 * a module the rewrite refuses keeps its words, and the compiler
+	 * refuses its input attachments as before.
+	 */
+	inputs = NULL;
+	inputs_count = 0;
+	code = info.pCode;
+	code_count = info.codeSize / 4U;
+	if (error == 0) {
+		kern_memset(&diagnostic, 0, sizeof(diagnostic));
+		error = drv_gpu_spirv_lower_input_attachments(info.pCode, info.codeSize / 4U, &inputs, &inputs_count, &diagnostic);
+		if (error == ENOTSUP) {
+			reason = "?";
+			if (diagnostic.reason != NULL)
+				reason = diagnostic.reason;
+			kern_logf("powervr: vk: a shader module's input attachments are not lowered (%s; opcode %u at word %u)\n",
+				  reason,
+				  diagnostic.opcode,
+				  diagnostic.word_offset);
+			error = 0;
+		}
+		if (inputs != NULL) {
+			code = inputs;
+			code_count = inputs_count;
+		}
+	}
+
+	/*
 	 * The storage images, lowered to buffers of their texels and blocks
 	 * of their shapes (the compiler has no image instructions); a module
 	 * the lowering does not rewrite keeps its words, and the compiler
@@ -201,11 +232,9 @@ create_shader(
 	 */
 	lowered = NULL;
 	lowered_count = 0;
-	code = info.pCode;
-	code_count = info.codeSize / 4U;
 	if (error == 0) {
 		kern_memset(&diagnostic, 0, sizeof(diagnostic));
-		error = drv_gpu_spirv_lower_storage_images(info.pCode, info.codeSize / 4U, &lowered, &lowered_count, &diagnostic);
+		error = drv_gpu_spirv_lower_storage_images(code, code_count, &lowered, &lowered_count, &diagnostic);
 		if (error == ENOTSUP) {
 			reason = "?";
 			if (diagnostic.reason != NULL)
@@ -237,6 +266,8 @@ create_shader(
 	}
 	if (lowered != NULL)
 		kern_free(lowered);
+	if (inputs != NULL)
+		kern_free(inputs);
 
 	/* Whether the compiler reads a compute entry from it, in a workspace of its own. */
 	if (error == 0) {
@@ -313,6 +344,10 @@ create_set_layout(
 		bindings[index].binding = info.pBindings[index].binding;
 		bindings[index].type = info.pBindings[index].descriptorType;
 		bindings[index].count = info.pBindings[index].descriptorCount;
+
+		/* An input attachment is a sampled image to the shader (its module is rewritten so) and in the set. */
+		if (bindings[index].type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT)
+			bindings[index].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	}
 
 	/* The layout keeps its count and the bindings' places in a set's memory. */

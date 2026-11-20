@@ -83,8 +83,15 @@ powervr_pass_build(
 	subpass = &info->pSubpasses[0];
 	if (subpass->pipelineBindPoint != VK_PIPELINE_BIND_POINT_GRAPHICS || subpass->colorAttachmentCount > POWERVR_PASS_COLORS)
 		return ENOBUFS;
-	if (subpass->inputAttachmentCount != 0 || subpass->preserveAttachmentCount != 0)
+	if (subpass->preserveAttachmentCount != 0)
 		return ENOBUFS;
+
+	/* Its input attachments, which the shader reads as sampled images, take no part in the pass. */
+	for (index = 0; index < subpass->inputAttachmentCount; index++) {
+		reference = subpass->pInputAttachments[index].attachment;
+		if (reference != VK_ATTACHMENT_UNUSED && reference >= info->attachmentCount)
+			return EINVAL;
+	}
 
 	/* Each attachment's format and operations. */
 	pass->attachment_count = info->attachmentCount;
