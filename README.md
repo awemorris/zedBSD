@@ -46,19 +46,23 @@ Main targets:
 |          | rpi4   | Raspberry Pi Foundation | Raspberry Pi 4     | Armv8       | Arm Cortex-A72   | VideoCore        | VideoCore VI     |
 | x86_64   | pcat   | Generic                 | PC/AT              | x86_64      | Generic          | Intel/NVIDIA/AMD | Intel/NVIDIA/AMD |
 
-Retro targets:
+Retro and minor PC targets:
 
 | Arch     | BSP        | Vendor                  | Board Name                  |
 |----------|------------|-------------------------|-----------------------------|
 | i686     | pcat       | Generic                 | PC/AT                       |
-| i386     | pc9821     | NEC                     | PC-9821 / PC-9801 (32-bit)  |
+| i386     | pc9821     | NEC                     | PC-9821V13/S5               |
+| i386     | pc9801ns   | NEC                     | PC-9801NS/20                |
 | ppc32    | mac99      | Apple                   | PowerBook G4                |
 | ppc64    | macppc64   | Apple                   | PowerMac G5                 |
-| ppc64    | power8     | IBM                     | Power8 S814L                |
+| ppc64    | pseries    | IBM                     | Power8 S814L                |
+| armv7    | zybo       | Digilent                | Zyzo Z7                     |
 | sparcv9  | sun4u      | Sun Microsystems        | Sun Blade 150               |
-| armv7    | armv7-virt | qemu                    | qemu                        |
+| m68k     | mac68k     | Apple                   | Macintosh (68k)             |
+| mips     | jz4770     | Ingenic                 | JZ4770 SoC                  |
+| riscv32  | virt       | qemu                    | qemu                        |
 
-Note that our retro PC targets are for portability demonstration only. 
+Note that our retro and minor targets are for portability demonstration only. 
 
 ---
 
