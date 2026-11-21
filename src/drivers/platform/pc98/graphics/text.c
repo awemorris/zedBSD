@@ -22,6 +22,7 @@
  */
 
 #include <kern/device-io.h>
+#include <kern/kcrt.h>
 #include <kern/lock.h>
 #include <kern/text-display.h>
 #include <stddef.h>
@@ -45,6 +46,14 @@
 	    TEXT_VRAM_PHYSICAL))
 #define TEXT_ATTRIBUTE_VRAM \
 	((volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + \
+	    TEXT_VRAM_PHYSICAL + 0x00002000U))
+
+/*
+ * The attribute plane seen as one 16-bit word per cell; the attribute is
+ * the low byte, and the high byte has no meaning.
+ */
+#define TEXT_ATTRIBUTE_VRAM_WORDS \
+	((volatile uint16_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + \
 	    TEXT_VRAM_PHYSICAL + 0x00002000U))
 
 #define TEXT_COLUMNS		80U
@@ -113,6 +122,7 @@ static void publish_cell_locked(unsigned row, unsigned column);
 static void redraw_locked(void);
 static void cursor_locked(void);
 static void scroll_locked(void);
+static void move_vram_words(volatile uint16_t *destination, volatile const uint16_t *source, unsigned count);
 static void newline_locked(void);
 static void putc_locked(int character);
 static void put_byte_locked(int byte);
@@ -604,21 +614,61 @@ scroll_locked(
 	void)
 {
 	unsigned index;
+	unsigned column;
 
-	/* Shifts both stored planes up by one row. */
-	for (index = 0; index < TEXT_CELLS - TEXT_COLUMNS; index++) {
-		text_codes[index] = text_codes[index + TEXT_COLUMNS];
-		text_attributes[index] = text_attributes[index + TEXT_COLUMNS];
-	}
+	/* Shifts the stored characters up by one row. */
+	kern_memmove(&text_codes[0], &text_codes[TEXT_COLUMNS],
+		     (TEXT_CELLS - TEXT_COLUMNS) * sizeof(text_codes[0]));
 
-	/* Empties the last row. */
+	/* Shifts the stored attributes up by one row. */
+	kern_memmove(&text_attributes[0], &text_attributes[TEXT_COLUMNS],
+		     (TEXT_CELLS - TEXT_COLUMNS) * sizeof(text_attributes[0]));
+
+	/* Empties the last stored row. */
 	for (index = TEXT_CELLS - TEXT_COLUMNS; index < TEXT_CELLS; index++) {
 		text_codes[index] = (uint16_t)' ';
 		text_attributes[index] = KERN_TEXT_ATTRIB_NORMAL;
 	}
 
-	/* Repaints the whole grid after the shift. */
-	redraw_locked();
+	/* Leaves text memory alone while another driver owns the screen. */
+	if (!text_ready)
+		return;
+
+	/*
+	 * Moves the rows already on the screen up in text memory itself,
+	 * which already holds them in the hardware form; only the exposed
+	 * row is written cell by cell.
+	 */
+	move_vram_words(&TEXT_CODE_VRAM[0], &TEXT_CODE_VRAM[TEXT_COLUMNS],
+			TEXT_CELLS - TEXT_COLUMNS);
+	move_vram_words(&TEXT_ATTRIBUTE_VRAM_WORDS[0],
+			&TEXT_ATTRIBUTE_VRAM_WORDS[TEXT_COLUMNS],
+			TEXT_CELLS - TEXT_COLUMNS);
+
+	/* Publishes the emptied last row. */
+	for (column = 0; column < TEXT_COLUMNS; column++)
+		publish_cell_locked(TEXT_ROWS - 1U, column);
+}
+
+/*
+ * Moves words in text memory towards lower addresses.
+ *
+ * A string move does it in one instruction per plane; a loop of separate
+ * loads and stores costs several times more on a 386 without a cache.
+ * Moving forwards is correct for an overlapping range only while the
+ * destination lies below the source, which a scroll up guarantees.
+ */
+static void
+move_vram_words(
+	volatile uint16_t *destination,
+	volatile const uint16_t *source,
+	unsigned count)
+{
+	/* Copies the words in ascending address order. */
+	__asm__ volatile("cld\n\trep movsw"
+			 : "+D"(destination), "+S"(source), "+c"(count)
+			 :
+			 : "memory");
 }
 
 /* Advances the cursor to the start of the next line. */

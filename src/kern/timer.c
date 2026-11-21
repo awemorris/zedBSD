@@ -59,6 +59,15 @@ struct timer_notification {
 static struct process_timer process_timers[PROCESS_TIMER_MAX];
 static struct spinlock process_timer_lock;
 
+/*
+ * How many slots of process_timers have an owner.
+ *
+ * It lets the clock tick skip the scan of the slots while no process has
+ * a timer, which is how a system spends most ticks.  It changes only
+ * with an owner, under process_timer_lock, and is read under it.
+ */
+static unsigned process_timer_owned;
+
 static int overrun_add(int current, uint64_t additional);
 static int timespec_to_units(const struct timespec *value, uint64_t units_per_second, uint64_t *result);
 static void units_to_timespec(uint64_t value, uint64_t units_per_second, struct timespec *result);
@@ -76,6 +85,7 @@ process_timer_init(
 	void)
 {
 	kern_memset(process_timers, 0, sizeof(process_timers));
+	process_timer_owned = 0;
 	spin_init(&process_timer_lock, LOCK_RANK_PROCESS_TREE, "process timers");
 }
 
@@ -160,6 +170,7 @@ process_timer_create(
 
 	/* Publishes the timer, which holds a reference on its owner. */
 	process_timers[slot].owner = owner;
+	process_timer_owned++;
 	process_timers[slot].clock = clock;
 	process_timers[slot].event = event;
 	process_ref(owner);
@@ -192,6 +203,7 @@ process_timer_delete(
 	if (error == 0) {
 		release = process_timers[slot].owner;
 		process_timers[slot].owner = NULL;
+		process_timer_owned--;
 		process_timers[slot].armed = 0;
 		process_timers[slot].notification_pending = 0;
 		process_timers[slot].notification_retry = 0;
@@ -484,13 +496,13 @@ process_timer_tick(
 	unsigned index;
 	unsigned long irq;
 	int already_outstanding;
+	int realtime_read;
 	int error;
 
 	now_realtime = 0;
+	realtime_read = 0;
 	cursor = 0;
 	next = UINT64_MAX;
-
-	(void)realtime_units(&now_realtime);
 
 	/*
 	 * A fixed-size stack batch bounds IRQ-off time and stack use, while
@@ -503,6 +515,10 @@ process_timer_tick(
 
 		/* Collects a batch of notifications under the lock. */
 		irq = spin_lock_irqsave(&process_timer_lock);
+
+		/* With no timer in any slot, there is nothing to scan. */
+		if (process_timer_owned == 0)
+			cursor = PROCESS_TIMER_MAX;
 		for (; cursor < PROCESS_TIMER_MAX && count < 16U; cursor++) {
 			timer = &process_timers[cursor];
 			missed = 0;
@@ -510,6 +526,17 @@ process_timer_tick(
 				continue;
 			already_outstanding = timer->notification_pending ||
 			    timer->notification_retry;
+
+			/*
+			 * Reads the realtime clock once per tick, for the first
+			 * armed timer that runs on it: the conversion divides
+			 * 64-bit numbers, which a 32-bit CPU does in software.
+			 */
+			if (timer->armed && timer->realtime_absolute &&
+			    !realtime_read) {
+				(void)realtime_units(&now_realtime);
+				realtime_read = 1;
+			}
 
 			/* Counts the expiries since the last tick and re-arms. */
 			if (timer->armed) {
@@ -688,6 +715,7 @@ process_timer_cleanup(
 	for (slot = 0; slot < PROCESS_TIMER_MAX; slot++) {
 		if (process_timers[slot].owner == owner) {
 			process_timers[slot].owner = NULL;
+			process_timer_owned--;
 			process_timers[slot].armed = 0;
 			process_timers[slot].notification_pending = 0;
 			process_timers[slot].notification_retry = 0;

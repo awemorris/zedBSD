@@ -35,6 +35,12 @@
 #define CONS_TEXT_VRAM		((volatile uint16_t *)0x800a0000)
 #define CONS_ATTRIBUTE_VRAM	((volatile uint8_t *)0x800a2000)
 
+/*
+ * The attribute plane seen as one 16-bit word per cell; the attribute is
+ * the low byte, and the high byte has no meaning.
+ */
+#define CONS_ATTRIBUTE_VRAM_WORDS	((volatile uint16_t *)0x800a2000)
+
 #define CONS_COLUMNS		80U
 #define CONS_ROWS		25U
 
@@ -197,6 +203,7 @@ static void update_cursor_locked(void);
 static void clear_row_locked(unsigned row);
 static void clear_locked(void);
 static void scroll_locked(void);
+static void move_vram_words(volatile uint16_t *destination, volatile const uint16_t *source, unsigned count);
 static void newline_locked(void);
 static void putc_locked(int character);
 static void put_byte_locked(int byte);
@@ -448,28 +455,40 @@ static void
 scroll_locked(
 	void)
 {
-	unsigned row;
-	unsigned column;
-	unsigned destination;
-	unsigned source;
-
 	/* Suppresses text-memory writes during graphics ownership. */
 	if (output_suspended)
 		return;
 
 	/* Copies every row up one position, characters and attributes. */
-	for (row = 1; row < CONS_ROWS; row++) {
-		for (column = 0; column < CONS_COLUMNS; column++) {
-			destination = (row - 1U) * CONS_COLUMNS + column;
-			source = row * CONS_COLUMNS + column;
-			CONS_TEXT_VRAM[destination] = CONS_TEXT_VRAM[source];
-			CONS_ATTRIBUTE_VRAM[destination * 2U] =
-			    CONS_ATTRIBUTE_VRAM[source * 2U];
-		}
-	}
+	move_vram_words(&CONS_TEXT_VRAM[0], &CONS_TEXT_VRAM[CONS_COLUMNS],
+			(CONS_ROWS - 1U) * CONS_COLUMNS);
+	move_vram_words(&CONS_ATTRIBUTE_VRAM_WORDS[0],
+			&CONS_ATTRIBUTE_VRAM_WORDS[CONS_COLUMNS],
+			(CONS_ROWS - 1U) * CONS_COLUMNS);
 
 	/* Blanks the row exposed at the bottom. */
 	clear_row_locked(CONS_ROWS - 1U);
+}
+
+/*
+ * Moves words in text memory towards lower addresses.
+ *
+ * A string move does it in one instruction per plane; a loop of separate
+ * loads and stores costs several times more on a 386 without a cache.
+ * Moving forwards is correct for an overlapping range only while the
+ * destination lies below the source, which a scroll up guarantees.
+ */
+static void
+move_vram_words(
+	volatile uint16_t *destination,
+	volatile const uint16_t *source,
+	unsigned count)
+{
+	/* Copies the words in ascending address order. */
+	__asm__ volatile("cld\n\trep movsw"
+			 : "+D"(destination), "+S"(source), "+c"(count)
+			 :
+			 : "memory");
 }
 
 /* Advances the cursor to the start of the next line. */

@@ -31,7 +31,9 @@ HAL_ATOMIC_ENTER_DECLARE();
  * so the two kinds of operation exclude each other, and the region's IRQ mask
  * keeps an interrupt handler out of an operation it interrupted.  The memory
  * order arguments need nothing more: entering and leaving the region are full
- * barriers.
+ * barriers.  The 4-byte load is the exception: one aligned load is already
+ * indivisible against every operation of the region, which the kernel issues
+ * most often, so it reads the word directly.
  *
  * Only the functions the kernel calls are here; a new one is added when the
  * kernel's link names it as undefined.  The C names differ from the names the
@@ -76,13 +78,21 @@ hal_atomic_enter(
 	void)
 {
 	uintptr_t cookie;
-	bool enabled;
+	uint32_t flags;
 	bool acquired;
 
-	/* Preserves the caller's interrupt state while acquiring the guard. */
-	enabled = hal_irq_disable();
+	/*
+	 * Preserves the caller's interrupt state while acquiring the guard.
+	 * EFLAGS is read and IF cleared in line: every lock and atomic
+	 * operation of the kernel enters here, and on a 386 the calls cost
+	 * more than the work.
+	 */
+	__asm__ volatile("pushfl\n\tpopl %0\n\tcli"
+			 : "=r"(flags)
+			 :
+			 : "memory");
 	cookie = 0U;
-	if (enabled)
+	if ((flags & EFLAGS_IF) != 0)
 		cookie = 1U;
 
 	/* Waits until this CPU owns the atomic-operation guard. */
@@ -119,7 +129,7 @@ hal_atomic_leave(
 
 	/* Restores interrupts only when they were enabled on entry. */
 	if (cookie != 0U)
-		hal_irq_enable();
+		__asm__ volatile("sti" : : : "memory");
 }
 
 #if !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
@@ -132,17 +142,23 @@ hal_atomic_runtime_load_4(
 	int order)
 {
 	const volatile uint32_t *word;
-	uintptr_t cookie;
 	uint32_t value;
 
 	UNUSED_PARAMETER(order);
 
 	word = object;
 
-	/* Reads the object while no other atomic operation can touch it. */
-	cookie = hal_atomic_enter();
+	/*
+	 * Reads the object with one plain load.  An aligned 4-byte load is a
+	 * single bus access on every x86, so it sees the whole value before
+	 * or after any operation of the serialization region, which writes
+	 * the word with one store; and x86 keeps loads in program order, so
+	 * the load acquires.  The barriers keep the compiler from moving
+	 * other accesses across it.
+	 */
+	__asm__ volatile("" : : : "memory");
 	value = *word;
-	hal_atomic_leave(cookie);
+	__asm__ volatile("" : : : "memory");
 
 	/* Reports the value the object held. */
 	return value;

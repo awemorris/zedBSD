@@ -74,11 +74,19 @@ bool
 hal_irq_disable(
 	void)
 {
+	uint32_t flags;
 	bool enabled;
 
-	/* Captures IF before clearing it on the current CPU. */
-	enabled = (asm_get_eflags() & EFLAGS_IF) != 0;
-	asm_cli();
+	/*
+	 * Captures IF and clears it in line: the kernel's locks and atomic
+	 * operations come here on every use, and two more calls cost a 386
+	 * without a cache more than the instructions themselves.
+	 */
+	__asm__ volatile("pushfl\n\tpopl %0\n\tcli"
+			 : "=r"(flags)
+			 :
+			 : "memory");
+	enabled = (flags & EFLAGS_IF) != 0;
 
 	/* Returns whether interrupts were enabled on entry. */
 	return enabled;
@@ -91,8 +99,8 @@ void
 hal_irq_enable(
 	void)
 {
-	/* Sets IF on the current CPU. */
-	asm_sti();
+	/* Sets IF on the current CPU, in line for the same reason. */
+	__asm__ volatile("sti" : : : "memory");
 }
 
 /*
