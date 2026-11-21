@@ -107,6 +107,10 @@ CONFIG_DRIVER_FS_OVERLAYFS        ?= n
 # [Kernel Buffer Cache Size]
 CONFIG_BUF_CACHE_KIB              ?= 0
 
+# [Small Memory]
+#  - Description: Size the kernel's static tables for a machine with a few MiB of memory.
+CONFIG_KERN_SMALL_MEMORY          ?= n
+
 ################################################
 # Network
 ################################################

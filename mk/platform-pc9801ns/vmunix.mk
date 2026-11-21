@@ -17,6 +17,7 @@ KERN_CPPFLAGS := \
 	-DKERN_UAPI_NATIVE \
 	-DKERN_ATOMIC_SERIALIZED \
 	-DHAL_I386_FPU_OPTIONAL \
+	-DI386_TICK_HZ=40U \
 	-DZEDBSD_VERSION=\"$(VERSION)\" \
 	$(KERN_CPPFLAGS) \
 	$(CONFIG_CPPFLAGS)
@@ -84,8 +85,13 @@ KERN_SOURCES += \
 	src/drivers/platform/pc98/pc98-busmouse.c \
 	src/drivers/platform/pc98/pc98-keyboard.c \
 	src/drivers/disklabel/mbr.c \
-	src/drivers/disklabel/pc98.c \
+	src/drivers/disklabel/pc98.c
+
+# The LGY98 driver's NIC core.
+ifneq ($(filter y,$(CONFIG_DRIVER_LGY98)),)
+KERN_SOURCES += \
 	src/drivers/ethernet/dp8390.c
+endif
 
 VMUNIX_OBJS := \
 	$(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM)) \
