@@ -597,3 +597,10 @@ CONFIG_USERLAND_PROGRAMS          ?=
 #  - Description: Link the programs statically: no run-time loader and
 #    no shared C library at run time (a small machine without a cache).
 CONFIG_USERLAND_STATIC            ?= n
+
+# [Single Binary]
+#  - Description: The packages whose programs are linked into one program
+#    (crunch), each command's name a link to it, so that the commands
+#    share one text in memory and one file on the disk.  The packages are
+#    selected as well; a set-user-ID program stays a program of its own.
+CONFIG_USERLAND_SINGLEBINARY      ?=

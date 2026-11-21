@@ -62,6 +62,8 @@ DESTDIR ?=
 INSTALL ?= install
 STANDALONE_CONFIG ?= $(REPO_ROOT)/config.mk
 comma := ,
+standalone_nothing :=
+standalone_space := $(standalone_nothing) $(standalone_nothing)
 
 # make's own default compiler is not the target's: the tree's clang takes its place.
 ifeq ($(origin CC),default)
@@ -84,6 +86,11 @@ NM := $(REPO_ROOT)/build/llvm/bin/llvm-nm
 endif
 
 AR ?= $(REPO_ROOT)/build/llvm/bin/llvm-ar
+
+# A caller that names no objcopy gets the tree's llvm-objcopy.
+ifeq ($(strip $(OBJCOPY)),)
+OBJCOPY := $(REPO_ROOT)/build/llvm/bin/llvm-objcopy
+endif
 
 # Acquisition and patch preparation must also work in a freshly cloned source
 # tree, before menuconfig has produced config.mk.  Compilation and installation
@@ -147,6 +154,35 @@ STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 # Whether the programs are linked statically (the configuration's
 # CONFIG_USERLAND_STATIC, which the top-level build passes).
 STANDALONE_STATIC ?= n
+
+# The packages whose programs are made into one program, the single
+# program of userland/base/crunch (the configuration's
+# CONFIG_USERLAND_SINGLEBINARY, which the top-level build passes), and
+# whether this package is one of them.
+STANDALONE_SINGLEBINARY ?=
+STANDALONE_SINGLE_PACKAGE := $(if $(filter $(notdir $(CURDIR)),$(STANDALONE_SINGLEBINARY)),y,n)
+
+# The programs of this package that go into the single program, which the declarations collect.
+STANDALONE_SINGLE_PROGRAMS :=
+
+#
+# Whether a program goes into the single program: (1) type, (2) mode.  A
+# program of a package named there goes in when it runs with its caller's
+# rights (0755): the single program's file has one mode for all of its
+# commands, so a set-user-ID program stays a program of its own.
+#
+standalone_in_single = $(if $(filter program,$(1)),$(if $(filter y,$(STANDALONE_SINGLE_PACKAGE)),$(if $(filter 0755,$(2)),y)))
+
+# The name a program's main takes in the single program.
+standalone_single_entry = crunch_main_$(subst -,_,$(subst .,_,$(1)))
+
+#
+# A program in the single program is compiled with a section for each
+# function and datum, so that the link keeps only what is reached and
+# folds the copies of the sources several programs compile (the shared
+# command and pager code, the ssh modules) into one.
+#
+STANDALONE_SINGLE_CFLAGS = -ffunction-sections -fdata-sections
 
 # A program: freestanding, against the sysroot; position-independent
 # unless it is linked statically.
@@ -305,7 +341,7 @@ STANDALONE_SO_LIST_$(1) := $(foreach req,$(5),$(call standalone_required_so,$(re
 
 # The object compile flags of the type.
 ifeq ($(7),program)
-STANDALONE_CFLAGS_$(1) = $$(STANDALONE_PROGRAM_CFLAGS) $(call standalone_extra_cflags,$(1),,$(5))
+STANDALONE_CFLAGS_$(1) = $$(STANDALONE_PROGRAM_CFLAGS) $(call standalone_extra_cflags,$(1),,$(5))$(if $(call standalone_in_single,$(7),$(6)), $$(STANDALONE_SINGLE_CFLAGS))
 else ifeq ($(7),shared-library)
 STANDALONE_CFLAGS_$(1) = $$(STANDALONE_SHLIB_CFLAGS)
 else
@@ -345,19 +381,56 @@ $$(STANDALONE_OBJECTS_STAMP_$(1)): FORCE
 	$$(Q)if cmp -s $$@.tmp $$@; then rm -f $$@.tmp; else mv -f $$@.tmp $$@; fi
 
 # A program: linked against the C library (libc.so, or its archives when
-# static), with its mode recorded for the root.
-ifeq ($(7),program)
+# static), with its mode recorded for the root.  A package's Makefile may
+# give one of its programs more objects and link options (the single
+# program's), in STANDALONE_LINK_OBJECTS_name and STANDALONE_LINK_FLAGS_name
+# before the declaration.
+ifeq ($(7)$(call standalone_in_single,$(7),$(6)),program)
 STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,LD,$(10)/$(1))
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
-	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) \
+	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) $$(STANDALONE_LINK_FLAGS_$(1)) \
 		"$$(STANDALONE_PROGRAM_CRT)" \
-		$$(STANDALONE_OBJECTS_$(1)) \
+		$$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) \
 		-L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" \
 		$(call standalone_program_required_libs,$$(STANDALONE_SO_LIST_$(1))) $$(STANDALONE_PROGRAM_LIBS) \
 		-o $$@
 	$$(Q)printf '%s %s\n' "/$(10)/$(1)" "$(6)" > "$$(STANDALONE_WORK_DIR_$(1))/mode"
+endif
+
+#
+# A program in the single program: its objects, with every global they
+# define renamed to carry the program's name and main renamed to the entry
+# the single program's table calls, in an archive.  What two programs name
+# alike stays each one's own, and each object keeps its own sections (and
+# the record of which ones have their address taken), so that the single
+# program's link can keep only what is reached and fold what is alike.  An
+# object's name in the archive is its path with the slashes made dashes,
+# since two sources may have the same file name (vi's command.c and the
+# shared one).  The
+# program's own file and mode record, left by a build that made it on its
+# own, are removed, so that the root has the link in their place.  The
+# package's record names it to the single program.
+#
+ifeq ($(call standalone_in_single,$(7),$(6)),y)
+STANDALONE_OUTPUT_$(1) = $$(STANDALONE_WORK_DIR_$(1))/single.a
+STANDALONE_SINGLE_PROGRAMS += $(1)
+STANDALONE_SINGLE_RECORD_$(1) := $$(subst $$(standalone_space),:,$$(strip $(1) $(10) $(5)))
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1))
+	$$(call standalone_log,AR,$(1) (single))
+	$$(Q)rm -rf "$$(STANDALONE_WORK_DIR_$(1))/single" "$$(STANDALONE_BUILD_DIR)/$(10)/$(1)" "$$(STANDALONE_WORK_DIR_$(1))/mode" $$@
+	$$(Q)mkdir -p "$$(STANDALONE_WORK_DIR_$(1))/single"
+	$$(Q)$$(NM) -g --defined-only $$(STANDALONE_OBJECTS_$(1)) | \
+		awk 'NF == 3 { print $$$$3 }' | sort -u | \
+		awk '{ if ($$$$1 == "main") print "main $(call standalone_single_entry,$(1))"; else print $$$$1 " $(call standalone_single_entry,$(1))__" $$$$1 }' \
+		> "$$(STANDALONE_WORK_DIR_$(1))/single/names"
+	$$(Q)set -e; for object in $$(STANDALONE_OBJECTS_$(1)); do \
+		renamed="$$(STANDALONE_WORK_DIR_$(1))/single/$$$$(printf '%s' "$$$${object#$$(STANDALONE_OBJ_DIR_$(1))/}" | tr / -)"; \
+		$$(OBJCOPY) --redefine-syms="$$(STANDALONE_WORK_DIR_$(1))/single/names" "$$$$object" "$$$$renamed"; \
+		$$(AR) rc $$@ "$$$$renamed"; \
+	done
+	$$(Q)$$(AR) s $$@
 endif
 
 # A shared library: in the dynamic directory, and a copy among the libraries.
@@ -421,8 +494,8 @@ endif
 .PHONY: standalone-install-$(1)
 standalone-install-$(1): standalone-build-$(1)
 
-# A program goes to its directory with its mode.
-ifeq ($(7),program)
+# A program goes to its directory with its mode (one in the single program goes with it).
+ifeq ($(7)$(call standalone_in_single,$(7),$(6)),program)
 	$$(Q)$$(INSTALL) -d "$$(DESTDIR)$$(call standalone_bindir,$(10))"
 	$$(Q)$$(INSTALL) -m "$(6)" "$$(STANDALONE_OUTPUT_$(1))" "$$(DESTDIR)$$(call standalone_bindir,$(10))/$(1)"
 endif
@@ -522,5 +595,23 @@ all: build
 
 # The sources are prepared before anything a declaration adds to build.
 build: patch
+
+#
+# The record of the programs this package puts in the single program,
+# which its make (userland/base/crunch) reads: a word for each program,
+# its name, its directory and its requirements joined by colons.  It is
+# written every time and replaced only when it changes, from what the
+# declarations collect.
+#
+STANDALONE_SINGLE_RECORD := $(STANDALONE_BUILD_DIR)/packages/$(notdir $(CURDIR))/single-programs
+
+# A package named for the single program writes its record.
+ifeq ($(STANDALONE_SINGLE_PACKAGE),y)
+build: $(STANDALONE_SINGLE_RECORD)
+$(STANDALONE_SINGLE_RECORD): FORCE
+	$(Q)mkdir -p "$(@D)"
+	$(Q)printf '%s\n' $(foreach program,$(STANDALONE_SINGLE_PROGRAMS),'$(STANDALONE_SINGLE_RECORD_$(program))') > $@.tmp
+	$(Q)if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+endif
 
 endif
