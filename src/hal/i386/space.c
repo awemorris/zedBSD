@@ -18,7 +18,7 @@
 #include "space.h"
 
 #define I386_SHOOTDOWN_REQUESTS (I386_APIC_MAX_CPUS * 4U)
-#define current_space current_spaces[hal_cpu_current()]
+#define current_space current_spaces[i386_cpu_index()]
 
 struct i386_shootdown_request {
 	volatile unsigned active;

@@ -12,6 +12,7 @@
 #include <hal/hal.h>
 
 #include "defs.h"
+#include "smp.h"
 
 /*
  * The serialization region's entry points, declared as the macros of
@@ -71,6 +72,14 @@ static bool runtime_bytes_equal(const volatile uint8_t *left, const volatile uin
 static volatile unsigned atomic_guard;
 
 /*
+ * The cookie bits: interrupts were enabled on entry, and the region took
+ * the guard.  The guard is needed only once a second CPU may run; until
+ * then the IRQ mask alone excludes every other operation.
+ */
+#define ATOMIC_COOKIE_IF	1U
+#define ATOMIC_COOKIE_GUARD	2U
+
+/*
  * Acquires the i386 atomic-operation guard.
  */
 uintptr_t
@@ -93,7 +102,11 @@ hal_atomic_enter(
 			 : "memory");
 	cookie = 0U;
 	if ((flags & EFLAGS_IF) != 0)
-		cookie = 1U;
+		cookie = ATOMIC_COOKIE_IF;
+
+	/* Nothing else can run while only this CPU does. */
+	if (!i386_smp_started)
+		return cookie;
 
 	/* Waits until this CPU owns the atomic-operation guard. */
 	for (;;) {
@@ -102,6 +115,7 @@ hal_atomic_enter(
 			break;
 		hal_atomic_relax();
 	}
+	cookie |= ATOMIC_COOKIE_GUARD;
 
 	/* Returns the saved interrupt-state cookie. */
 	return cookie;
@@ -116,19 +130,24 @@ hal_atomic_leave(
 {
 	unsigned previous;
 
-	/* Releases the guard and records its prior ownership state. */
-	previous = 0U;
-	__asm__ volatile("xchgl %0, %1"
-	    : "+r"(previous), "+m"(atomic_guard)
-	    :
-	    : "memory");
+	/* Releases the guard the region took, and checks it was held. */
+	if ((cookie & ATOMIC_COOKIE_GUARD) != 0U) {
+		previous = 0U;
+		__asm__ volatile("xchgl %0, %1"
+		    : "+r"(previous), "+m"(atomic_guard)
+		    :
+		    : "memory");
 
-	/* Rejects a release by a CPU which did not own the guard. */
-	if (previous != 1U)
-		__builtin_trap();
+		/* Rejects a release by a CPU which did not own the guard. */
+		if (previous != 1U)
+			__builtin_trap();
+	} else {
+		/* Keeps the region's accesses before the end of the region. */
+		__asm__ volatile("" : : : "memory");
+	}
 
 	/* Restores interrupts only when they were enabled on entry. */
-	if (cookie != 0U)
+	if ((cookie & ATOMIC_COOKIE_IF) != 0U)
 		__asm__ volatile("sti" : : : "memory");
 }
 

@@ -43,6 +43,7 @@ extern uint8_t i386_ap_trampoline_target[];
 static struct cpu_state cpus[I386_APIC_MAX_CPUS];
 static unsigned cpu_count = 1;
 static volatile unsigned configured;
+volatile unsigned i386_smp_started;
 static struct hal_cpu_mask ready_mask;
 
 extern void i386_ap_high_entry(void);
@@ -188,6 +189,15 @@ hal_cpu_start_others(
 {
 	hal_cpu_id_t cpu;
 	int result;
+
+	/*
+	 * The atomic region takes its guard from now on, before a second
+	 * CPU can enter it.
+	 */
+	if (cpu_count > 1) {
+		i386_smp_started = 1;
+		__asm__ volatile("" : : : "memory");
+	}
 
 	/* Starts secondary CPUs in logical-ID order. */
 	for (cpu = 1; cpu < cpu_count; cpu++) {
