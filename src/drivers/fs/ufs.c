@@ -1071,7 +1071,7 @@ static int j3_close(struct mount *mountp, struct ufs_mount_state *ms, int commit
 static int j3_hidden(const struct inode *directory, const struct componentname *component);
 static int ufs_probe(struct disk *disk);
 static int ufs_quota_rebuild(struct mount *mountp);
-static int ufs_quota_load(struct mount *mountp, struct inode *root);
+static int ufs_quota_load(struct mount *mountp, struct inode *root, int *configured);
 static int snapshot_disk_submit(struct disk *disk, struct bio *bio);
 static int snapshot_disk_publish(struct ufs_mount_state *ms);
 static int snapshot_disk_remove(struct ufs_mount_state *ms);
@@ -18082,11 +18082,15 @@ ufs_quota_rebuild(
 	return 0;
 }
 
-/* Reads the quota configuration the root inode carries. */
+/*
+ * Reads the quota configuration the root inode carries.  *configured
+ * tells whether the volume has one at all.
+ */
 static int
 ufs_quota_load(
 	struct mount *mountp,
-	struct inode *root)
+	struct inode *root,
+	int *configured)
 {
 	struct ufs_mount_state *ms;
 	uint8_t *buffer;
@@ -18096,11 +18100,13 @@ ufs_quota_load(
 
 	/* Takes the mount state this call runs against. */
 	ms = state(mountp);
+	*configured = 0;
 
 	/* Asks how long the stored quota configuration is. */
 	length = ufs_getxattr(root, UFS_QUOTA_XATTR, NULL, 0);
 	if (length == -ENODATA)
 		return 0;
+	*configured = 1;
 
 	/* Failed: reports why the attribute could not be read. */
 	if (length < 0)
@@ -18625,6 +18631,7 @@ ufs_mount_steps(
 		total_nffree = 0;
 	uint32_t cg;
 	int summaries_rebuilt = 0;
+	int quota_configured;
 	int free_bit;
 	int difference;
 	int cached;
@@ -18817,11 +18824,7 @@ ufs_mount_steps(
 		}
 	}
 
-	/* Publishes the rebuilt summaries. */
-	if (error == 0) {
-		*step = "rebuilding the quota usage";
-		error = ufs_quota_rebuild(mountp);
-	}
+	/* Puts the first group back in the mount's group buffer. */
 	if (error == 0)
 		error = load_cg_locked(mountp, 0);
 	if (error != 0) {
@@ -18916,10 +18919,28 @@ ufs_mount_steps(
 	}
 
 	/* Loads the quota configuration and recovers any orphaned inodes. */
+	quota_configured = 0;
 	if (error == 0) {
 		*step = "loading the quota configuration";
-		error = ufs_quota_load(mountp, root);
+		error = ufs_quota_load(mountp, root, &quota_configured);
 	}
+
+	/*
+	 * Counts every inode's usage only for a volume that has a quota
+	 * configuration: the usage is not stored, so counting walks every
+	 * inode block, which on a slow machine is a large part of the mount.
+	 * A volume without one is left uncounted; it takes no charges, and
+	 * a configuration set on it takes effect from the next mount, which
+	 * counts it (as BSD runs quotacheck on a quiet volume before quotaon).
+	 */
+	if (error == 0 && quota_configured) {
+		*step = "rebuilding the quota usage";
+		error = ufs_quota_rebuild(mountp);
+		if (error == 0)
+			error = load_cg_locked(mountp, 0);
+	}
+	if (error == 0 && !quota_configured)
+		quota_set_counted(&ms->quota, 0);
 
 	/* The orphans after the quota, which their retirement credits. */
 	if (error == 0) {

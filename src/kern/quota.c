@@ -49,6 +49,28 @@ quota_state_init(
 	kern_memset(state, 0, sizeof(*state));
 	(void)mutex_init(&state->lock, LOCK_RANK_DEVICE, "filesystem quota");
 	state->grace_seconds = QUOTA_DEFAULT_GRACE_SECONDS;
+
+	/* The filesystem counts the usage unless it says it has not. */
+	state->counted = 1;
+}
+
+/*
+ * Records whether the usage was counted from the filesystem.
+ *
+ * Called while the mount is still private, before any charge.  An
+ * uncounted state takes no charges and refuses to turn enforcement on.
+ */
+void
+quota_set_counted(
+	struct quota_state *state,
+	int counted)
+{
+	/* Ignores a missing state. */
+	if (state == NULL)
+		return;
+
+	/* Records the setting. */
+	state->counted = counted != 0;
 }
 
 /*
@@ -63,6 +85,13 @@ quota_enable(
 	/* Rejects a missing state or an unknown type. */
 	if (state == NULL || type < QUOTA_USER || type >= QUOTA_TYPES)
 		return EINVAL;
+
+	/*
+	 * Enforcement needs the usage, which an uncounted volume does not
+	 * have until a mount counts it.
+	 */
+	if (enabled && !state->counted)
+		return EBUSY;
 
 	/* Records the setting. */
 	mutex_lock(&state->lock);
@@ -261,6 +290,10 @@ quota_reserve(
 		return EINVAL;
 	kern_memset(charge, 0, sizeof(*charge));
 
+	/* An uncounted volume records no usage; the inactive charge undoes nothing. */
+	if (!state->counted)
+		return 0;
+
 	/* Finds or creates both records and checks the enforced limits. */
 	mutex_lock(&state->lock);
 
@@ -356,6 +389,10 @@ quota_release(
 	if (state == NULL)
 		return EINVAL;
 
+	/* An uncounted volume recorded no usage to give back. */
+	if (!state->counted)
+		return 0;
+
 	/* An enforced record must exist and hold at least the released amount. */
 	mutex_lock(&state->lock);
 
@@ -411,6 +448,10 @@ quota_transfer_begin(
 	if (state == NULL || transfer == NULL)
 		return EINVAL;
 	kern_memset(transfer, 0, sizeof(*transfer));
+
+	/* An uncounted volume recorded no usage to move. */
+	if (!state->counted)
+		return 0;
 
 	/* A transfer to the same owner changes nothing. */
 	if (old_uid == new_uid && old_gid == new_gid)
