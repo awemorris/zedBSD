@@ -191,7 +191,8 @@ KERN_SOURCES += \
 	src/kern/net/packet-socket.c \
 	src/kern/net/unix-socket.c \
 	src/kern/net/net-device.c \
-	src/kern/net/checksum.c
+	src/kern/net/checksum.c \
+	src/kern/net/route-socket.c
 endif
 
 # [IPv4 Stack]
@@ -220,8 +221,7 @@ KERN_SOURCES += \
 	src/kern/net/ipv6-ioctl.c \
 	src/kern/net/icmp6.c \
 	src/kern/net/nd6.c \
-	src/kern/net/mld6.c \
-	src/kern/net/route-socket.c
+	src/kern/net/mld6.c
 endif
 
 # [Ethernet Stack]
@@ -1394,6 +1394,11 @@ endif
 #
 # Settings, debugging and tests
 #
+
+# [Small Memory]
+ifneq ($(filter y,$(CONFIG_KERN_SMALL_MEMORY)),)
+KERN_CPPFLAGS += -DCONFIG_KERN_SMALL_MEMORY=1
+endif
 
 # [Kernel Buffer Cache Size]
 KERN_CPPFLAGS += -DCONFIG_BUF_CACHE_KIB=$(if $(strip $(CONFIG_BUF_CACHE_KIB)),$(CONFIG_BUF_CACHE_KIB),0)
