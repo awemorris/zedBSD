@@ -278,9 +278,96 @@ class UFS:
 
 
 
+JOURNAL_NAME = '.ufs-journal'
+JOURNAL_HEADER_MAGIC = 0x334a555a
+JOURNAL_LOCATOR_MAGIC = 0x4c334a5a
+JOURNAL_VERSION = 2
+JOURNAL_LOCATOR_OFFSET = 1220
+
+
+def journal_digest(data):
+    """The checksum the journal's records carry (FNV-1a, 32 bits)."""
+    value = 2166136261
+    for byte in data:
+        value = ((value ^ byte) * 16777619) & 0xffffffff
+    return value
+
+
+def check_journal(fs):
+    """Checks the batched journal an image names, as the kernel's mount
+    reads it: the locator, the header it names, and the root directory's
+    journal file, whose blocks are the header's extents in order."""
+    locator = fs.sb[JOURNAL_LOCATOR_OFFSET:JOURNAL_LOCATOR_OFFSET + 28]
+    if fs.u32(locator, 0) != JOURNAL_LOCATOR_MAGIC:
+        return
+    if fs.u32(locator, 4) != JOURNAL_VERSION:
+        raise ValueError('journal locator: bad version')
+    if fs.u32(locator, 24) != journal_digest(locator[:24]):
+        raise ValueError('journal locator: bad checksum')
+    fragment = fs.u64(locator, 8)
+    nonce = fs.u64(locator, 16)
+    header = memoryview(fs.data)[fragment * fs.fsize:fragment * fs.fsize + fs.bsize]
+    block_sectors = fs.bsize // 512
+    if len(header) != fs.bsize or fs.u32(header, 0) != JOURNAL_HEADER_MAGIC:
+        raise ValueError('journal header: bad magic')
+    if fs.u32(header, 4) != JOURNAL_VERSION or fs.u64(header, 8) != nonce:
+        raise ValueError('journal header: not the located journal')
+    if fs.u32(header, 52) != journal_digest(header[:52]):
+        raise ValueError('journal header: bad checksum')
+    if (fs.u32(header, 40), fs.u32(header, 44)) != (block_sectors, block_sectors):
+        raise ValueError('journal header: bad block size')
+    count = fs.u32(header, 36)
+    if count == 0 or 64 + count * 16 > fs.bsize:
+        raise ValueError('journal header: bad extent count')
+    if fs.u32(header, 48) != journal_digest(header[64:64 + count * 16]):
+        raise ValueError('journal header: bad extent checksum')
+    total = fs.u64(header, 24)
+    if fs.u32(header, 32) != (total - block_sectors) // 2:
+        raise ValueError('journal header: bad slot size')
+    sectors = []
+    for index in range(count):
+        lba = fs.u64(header, 64 + index * 16)
+        length = fs.u32(header, 64 + index * 16 + 8)
+        if length == 0 or (lba + length) * 512 > fs.fragments * fs.fsize:
+            raise ValueError('journal header: bad extent')
+        sectors.extend(range(lba, lba + length, block_sectors))
+    if len(sectors) * block_sectors != total:
+        raise ValueError('journal header: extents do not cover the journal')
+    found = [entry for entry in fs.entries(ROOT) if entry[0] == JOURNAL_NAME]
+    if len(found) != 1:
+        raise ValueError('journal file missing from the root directory')
+    raw = fs.inode(found[0][1])
+    if fs.u64(raw, 16) != total * 512 or fs.u64(raw, 112) != fragment:
+        raise ValueError('journal file does not hold the located journal')
+    blocks = [block * fs.fsize // 512 for block in fs.blocks(found[0][1])]
+    if blocks != sectors:
+        raise ValueError('journal file blocks differ from the header extents')
+    if journal_wanted_sectors(fs, total) != total:
+        raise ValueError('journal size differs from what the first mount wants')
+
+
+def journal_wanted_sectors(fs, present):
+    """The journal size the kernel's mount wants (j3_wanted_sectors): the
+    size recorded in the superblock, cut to an eighth of the room (the free
+    blocks and the journal's own) in whole MiB, in whole blocks."""
+    request = fs.sb[1248:1264]
+    if (fs.u32(request, 0) == 0x52334a5a and fs.u32(request, 4) == 1 and
+            fs.u32(request, 12) == journal_digest(request[:12])):
+        mib = min(fs.u32(request, 8), 1024)
+    else:
+        raise ValueError('journal size request missing')
+    size = mib << 20
+    room = fs.u64(fs.sb, 1016) * fs.bsize + present * 512
+    if size > room // 8:
+        size = (room // 8) & ~((1 << 20) - 1)
+    size -= size % fs.bsize
+    return size // 512
+
+
 def check(path):
     fs = UFS(pathlib.Path(path).read_bytes())
     fs.validate()
+    check_journal(fs)
     marker = fs.read_file(fs.lookup('/etc/zedbsd-root'))
     if marker != b'zedBSD ufs root v1\n':
         raise ValueError('bad root marker')
