@@ -1645,6 +1645,14 @@ inet6_create(
 	int protocol,
 	struct socket **result)
 {
+#if defined(CONFIG_KERN_NET) && !defined(CONFIG_KERN_NET_IPV6)
+	(void)type;
+	(void)protocol;
+	(void)result;
+
+	/* A kernel built without the IPv6 stack makes no AF_INET6 socket. */
+	return EAFNOSUPPORT;
+#else
 	struct inet_socket *inet;
 	int error;
 
@@ -1667,6 +1675,7 @@ inet6_create(
 
 	/* Succeeded: the IPv6 socket. */
 	return 0;
+#endif
 }
 
 /* Finds the live interface an IPv4 address is configured on (EADDRNOTAVAIL: none). */

@@ -1204,7 +1204,7 @@ kern_boot_source_context_destroy(
  * Slot 0 falls back to the loader's origin partition when no selector
  * names it.  Each partition must be a FAT16 or FAT32 partition that no
  * earlier slot uses.  On failure the context records the failing slot
- * and stage and is destroyed.
+ * and stage and is destroyed.  A kernel built without FAT mounts none.
  */
 int
 kern_boot_source_context_mount(
@@ -1213,6 +1213,42 @@ kern_boot_source_context_mount(
 	struct disk *loader_origin,
 	const char *loader_origin_selector)
 {
+#if !CONFIG_DRIVER_FS_FAT
+	const char *selector;
+	unsigned slot;
+	int error;
+
+	(void)loader_origin;
+	(void)loader_origin_selector;
+
+	/* Rejects a missing operand or a context that is published. */
+	if (context == NULL || parameters == NULL)
+		return EINVAL;
+	if (context->runtime_published)
+		return EBUSY;
+
+	context->failure_stage = KERN_BOOT_SOURCE_FAILURE_NONE;
+	context->cleanup_error = 0;
+
+	/*
+	 * A kernel built without FAT mounts no boot slot.  Slot 0, which would
+	 * come from the loader's origin, is left out, and the system runs
+	 * without /boot/boot0; a slot the parameters name is refused, because
+	 * something on the system asked for its files.
+	 */
+	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++) {
+		selector = kern_boot_parameters_boot(parameters, slot);
+		if (selector == NULL)
+			continue;
+
+		error = context_fail(context, slot,
+		    KERN_BOOT_SOURCE_FAILURE_FILESYSTEM, EOPNOTSUPP);
+		return error;
+	}
+
+	/* Succeeded: no slot is mounted. */
+	return 0;
+#else
 	struct disk *disk;
 	const char *selector;
 	enum bootfat_type fat_type;
@@ -1328,6 +1364,7 @@ kern_boot_source_context_mount(
 
 	/* Reports the mounted sources. */
 	return 0;
+#endif
 }
 
 /*

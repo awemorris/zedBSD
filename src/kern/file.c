@@ -3343,6 +3343,7 @@ file_format_reserve_locked(
 	struct mount *mountp;
 	struct backing_claim *claim;
 	int unsupported;
+	int fat;
 	int flags;
 	int error;
 
@@ -3359,10 +3360,12 @@ file_format_reserve_locked(
 	/* Requires canonical physical backing and an extent provider. */
 	inode = file->f_inode;
 	mountp = inode->i_mount;
+	fat = 0;
+	if (mountp != NULL)
+		fat = drv_fat_is_filesystem_type(mountp->m_type);
 	if (mountp == NULL || mountp->m_type == NULL ||
 	    mountp->m_type->file_extents == NULL ||
-	    (mountp->m_type->file_backing_identity == NULL &&
-	    mountp->m_type != &drv_fat_filesystem_type) ||
+	    (mountp->m_type->file_backing_identity == NULL && !fat) ||
 	    mountp->m_disk == NULL || file_vm_inode(file) != inode)
 		return EOPNOTSUPP;
 

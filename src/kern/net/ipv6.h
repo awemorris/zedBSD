@@ -18,8 +18,12 @@
 
 #include "in6.h"
 
+#include "kern/net/packet-buf.h"
+
 #include <stddef.h>
 #include <stdint.h>
+
+#include <uapi/errno.h>
 
 struct net_device;
 struct packet_buf;
@@ -111,6 +115,196 @@ struct ipv6_way {
 	unsigned mtu;
 };
 
+#if defined(CONFIG_KERN_NET) && !defined(CONFIG_KERN_NET_IPV6)
+/*
+ * Stand-ins for a kernel built without the IPv6 stack.
+ *
+ * The IPv4 sockets (udp.c, tcp.c, icmp.c, inet-socket.c) are shared with
+ * AF_INET6, and the IPv6 side of their decisions names these functions.
+ * Such a kernel makes no AF_INET6 socket (inet6_create refuses it), so
+ * that side never runs; the stand-ins let it compile and give the answers
+ * of a stack that is not there: no protocol to register with, no route,
+ * no address, no IPv6 request, and a packet handed to it is dropped.
+ * Host tests define no CONFIG_KERN_NET and see the declarations.
+ */
+
+/* Accepts a transport's input function that nothing will call. */
+static inline int
+ipv6_protocol_register(
+	uint8_t next_header,
+	ipv6_input_fn input)
+{
+	(void)next_header;
+	(void)input;
+
+	/* Nothing to register with. */
+	return 0;
+}
+
+/* Drops a packet there is no IPv6 layer to send. */
+static inline int
+ipv6_output(
+	struct net_device *device,
+	const struct in6_addr *source,
+	const struct in6_addr *destination,
+	uint8_t next_header,
+	unsigned hop_limit,
+	struct packet_buf *packet)
+{
+	(void)device;
+	(void)source;
+	(void)destination;
+	(void)next_header;
+	(void)hop_limit;
+
+	/* The packet is consumed, as by the real output. */
+	packet_buf_free(packet);
+	return EAFNOSUPPORT;
+}
+
+/* Reports that no IPv6 destination has a route. */
+static inline int
+ipv6_route_source(
+	struct net_device *device,
+	const struct in6_addr *destination,
+	struct in6_addr *source,
+	unsigned *mtu)
+{
+	(void)device;
+	(void)destination;
+	(void)source;
+	(void)mtu;
+
+	/* No route without the stack. */
+	return EAFNOSUPPORT;
+}
+
+/* Reports that no IPv6 destination has a way out. */
+static inline int
+ipv6_route_way(
+	struct net_device *device,
+	const struct in6_addr *destination,
+	struct net_device **output,
+	struct ipv6_way *way)
+{
+	(void)device;
+	(void)destination;
+	(void)output;
+	(void)way;
+
+	/* No route without the stack. */
+	return EAFNOSUPPORT;
+}
+
+/* Drops a packet there is no IPv6 layer to send. */
+static inline int
+ipv6_output_way(
+	struct net_device *device,
+	const struct in6_addr *source,
+	const struct in6_addr *destination,
+	const struct ipv6_way *way,
+	uint8_t next_header,
+	struct packet_buf *packet)
+{
+	(void)device;
+	(void)source;
+	(void)destination;
+	(void)way;
+	(void)next_header;
+
+	/* The packet is consumed, as by the real output. */
+	packet_buf_free(packet);
+	return EAFNOSUPPORT;
+}
+
+/* Reports that no interface has an IPv6 address. */
+static inline int
+ipv6_address_state(
+	struct net_device *device,
+	const struct in6_addr *address,
+	unsigned *flags)
+{
+	(void)device;
+	(void)address;
+	(void)flags;
+
+	/* No address without the stack. */
+	return EADDRNOTAVAIL;
+}
+
+/* Reports that no IPv6 address is this host's. */
+static inline int
+ipv6_address_is_local(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* No address without the stack. */
+	return 0;
+}
+
+/* Ignores a link MTU change there is no IPv6 state to follow. */
+static inline void
+ipv6_device_mtu_changed(
+	struct net_device *device)
+{
+	(void)device;
+}
+
+/* Refuses an IPv6 request. */
+static inline int
+ipv6_ioctl(
+	unsigned long command,
+	uintptr_t argument)
+{
+	(void)command;
+	(void)argument;
+
+	/* No IPv6 request is served. */
+	return EAFNOSUPPORT;
+}
+
+/* Reports that an IPv6 request is not a query, since none is served. */
+static inline int
+ipv6_ioctl_is_query(
+	unsigned long command)
+{
+	(void)command;
+
+	/* No IPv6 request is served. */
+	return 0;
+}
+
+/* Reports that no request is IPv6's, so inet_ioctl answers every one. */
+static inline int
+ipv6_ioctl_handles(
+	unsigned long command)
+{
+	(void)command;
+
+	/* No IPv6 request is served. */
+	return 0;
+}
+
+/* Drops an ICMPv6 message there is no IPv6 layer to send. */
+static inline int
+icmp6_send(
+	struct net_device *device,
+	const struct in6_addr *source,
+	const struct in6_addr *destination,
+	unsigned hop_limit,
+	struct packet_buf *packet)
+{
+	(void)device;
+	(void)source;
+	(void)destination;
+	(void)hop_limit;
+
+	/* The packet is consumed, as by the real send. */
+	packet_buf_free(packet);
+	return EAFNOSUPPORT;
+}
+#else
 /* ipv6.c */
 int ipv6_init(void);
 int ipv6_protocol_register(uint8_t next_header, ipv6_input_fn input);
@@ -142,6 +336,8 @@ void ipv6_timer_run(void);
 uint64_t ipv6_timer_next_deadline(void);
 void ipv6_purge_device(struct net_device *device);
 uint64_t ipv6_now_ms(void);
+int icmp6_send(struct net_device *device, const struct in6_addr *source, const struct in6_addr *destination, unsigned hop_limit, struct packet_buf *packet);
+#endif
 
 /* ipv6-frag.c (ipv6_fragment_input consumes the packet unless it returns 0) */
 void ipv6_fragment_init(void);
@@ -153,7 +349,6 @@ void ipv6_fragment_purge_device(struct net_device *device);
 /* icmp6.c (icmp6_error consumes the packet; its l3_offset is the invoking packet's header) */
 void icmp6_init(void);
 int icmp6_input(struct packet_buf *packet, const struct in6_addr *source, const struct in6_addr *destination);
-int icmp6_send(struct net_device *device, const struct in6_addr *source, const struct in6_addr *destination, unsigned hop_limit, struct packet_buf *packet);
 void icmp6_error(struct packet_buf *packet, uint8_t type, uint8_t code, uint32_t data);
 unsigned icmp6_path_mtu(const struct in6_addr *destination, unsigned link_mtu);
 void icmp6_path_mtu_purge(void);

@@ -155,6 +155,7 @@ kern_swap_source_prepare_file(
 	struct backing_claim_extent *claim_extents;
 	ssize_t header_bytes;
 	int unsupported;
+	int fat;
 	int error;
 	unsigned index;
 
@@ -181,12 +182,17 @@ kern_swap_source_prepare_file(
 		goto out;
 	}
 
+	/* FAT gives its files a backing identity of its own. */
+	fat = 0;
+	if (file->f_inode->i_mount != NULL)
+		fat = drv_fat_is_filesystem_type(file->f_inode->i_mount->m_type);
+
 	if (file->f_inode->i_mount == NULL ||
 	    file->f_inode->i_mount->m_disk == NULL ||
 	    file->f_inode->i_mount->m_type == NULL ||
 	    file->f_inode->i_mount->m_type->file_extents == NULL ||
 	    (file->f_inode->i_mount->m_type->file_backing_identity == NULL &&
-	    file->f_inode->i_mount->m_type != &drv_fat_filesystem_type)) {
+	    !fat)) {
 		error = EOPNOTSUPP;
 		goto out;
 	}

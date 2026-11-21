@@ -81,6 +81,14 @@
 #define VFS_LEGACY_NULL_AUTOROOT 1
 #endif
 
+/*
+ * An overlay root stacks OverlayFS on two loop disks, so a kernel mounts
+ * one only when both are built.
+ */
+#if CONFIG_DRIVER_FS_OVERLAYFS && CONFIG_DRIVER_LOOP
+#define VFS_OVERLAY_ROOT 1
+#endif
+
 #if defined(HAL_ARCH_ARM64)
 #define LEGACY_ROOTFS_IMAGE_PRIMARY "/rootfs.img"
 #define LEGACY_ROOTFS_IMAGE_UNIFIED "/rootfs.rp4"
@@ -112,10 +120,13 @@ static unsigned vfs_boot_slot_published[KERN_BOOT_SOURCE_SLOT_COUNT]
  *
  * It is made once at boot and kept for the system's lifetime, like the boot
  * slots' mounts; NULL means the ESP is a boot slot's partition, or is not
- * shown.  It lives in .vfs_bss with the other boot-time VFS state.
+ * shown.  It lives in .vfs_bss with the other boot-time VFS state.  A
+ * kernel built without FAT shows no ESP and has none.
  */
+#if CONFIG_DRIVER_FS_FAT
 static struct mount *vfs_efi_mount
 	__attribute__((section(".vfs_bss")));
+#endif
 
 /*
  * The whole disks the boot-time scan reads partition tables from.
@@ -137,6 +148,7 @@ struct vfs_disk_range {
 	uint64_t last;
 };
 
+#if defined(VFS_OVERLAY_ROOT)
 struct vfs_overlay_setup {
 	struct path lower_file_path;
 	struct path upper_file_path;
@@ -149,6 +161,7 @@ struct vfs_overlay_setup {
 	struct mount *lower_mount;
 	struct mount *upper_mount;
 };
+#endif
 
 #if defined(VFS_LEGACY_NULL_AUTOROOT) && defined(HAL_ARCH_ARM64)
 struct vfs_legacy_overlay_setup {
@@ -195,9 +208,11 @@ static VFS_HIGH int vfs_mount_legacy_arm_overlay(struct disk *boot_partition, st
 #endif
 static VFS_HIGH int vfs_mount_legacy_root(struct disk *boot_partition, struct disk *boot_physical, struct disk **root_disk_out, struct mount **root_out);
 #endif
+#if defined(VFS_OVERLAY_ROOT)
 static void vfs_overlay_setup_init(struct vfs_overlay_setup *setup);
 static int vfs_overlay_setup_cleanup(struct vfs_overlay_setup *setup);
 static void vfs_overlay_setup_release_transient(struct vfs_overlay_setup *setup);
+#endif
 static VFS_HIGH int vfs_mount_overlay_root(const struct kern_boot_parameters *parameters, struct mount **root_out);
 static VFS_HIGH int vfs_resolve_native_root(const char *selector, struct disk **root_disk_out);
 static VFS_HIGH int vfs_mount_native_root(struct disk *disk, struct mount **root_out);
@@ -215,11 +230,13 @@ VFS_HIGH int
 kern_vfs_root_image_info(struct root_image_info *result)
 {
 	struct mount *root;
+#if defined(VFS_OVERLAY_ROOT)
 	struct path lower;
 	struct file *backing;
 	struct stat status;
 	unsigned flags;
 	int error, close_error;
+#endif
 
 	if (result == NULL)
 		return EINVAL;
@@ -229,6 +246,11 @@ kern_vfs_root_image_info(struct root_image_info *result)
 	if (root == NULL)
 		return ENXIO;
 
+#if !defined(VFS_OVERLAY_ROOT)
+	/* A kernel without OverlayFS or loop disks has no mounted root image. */
+	mount_release(root);
+	return 0;
+#else
 	/* Retain the lower path before inspecting its loop attachment. */
 	error = drv_overlay_lower_root_ref(root, &lower);
 	if (error == EOPNOTSUPP) {
@@ -276,6 +298,7 @@ kern_vfs_root_image_info(struct root_image_info *result)
 	path_release(&lower);
 	mount_release(root);
 	return error;
+#endif
 }
 
 /*
@@ -380,14 +403,18 @@ kern_vfs_init(
 
 	/* Initializes mounts while preserving devices published during discovery. */
 	mount_reset();
+#if CONFIG_DRIVER_LOOP
 	(void)drv_loop_init();
+#endif
 	kern_boot_source_context_init(&boot_sources);
 	partition_reset();
+#if CONFIG_DRIVER_FS_FAT
 	error = filesystem_register(&drv_fat_filesystem_type);
 	if (error != 0) {
 		error = vfs_fail("register FAT", error);
 		return error;
 	}
+#endif
 
 	error = filesystem_register(&drv_ufs_filesystem_type);
 	if (error != 0) {
@@ -407,11 +434,13 @@ kern_vfs_init(
 		return error;
 	}
 
+#if CONFIG_DRIVER_FS_OVERLAYFS
 	error = drv_overlayfs_init();
 	if (error != 0) {
 		error = vfs_fail("register overlayfs", error);
 		return error;
 	}
+#endif
 
 	drv_input_core_init();
 
@@ -1218,12 +1247,14 @@ vfs_publish_boot_directory(
  * since a partition is mounted only once (BUG-065) and both names then
  * share one FAT state.  Otherwise the ESP is mounted privately here for
  * the system's lifetime, and an fstab line may adopt it.  Every failure is
- * logged and leaves the ESP unshown; the system boots either way.
+ * logged and leaves the ESP unshown; the system boots either way.  A
+ * kernel built without FAT shows no ESP.
  */
 static void
 vfs_publish_efi_system_partition(
 	void)
 {
+#if CONFIG_DRIVER_FS_FAT
 	struct kern_boot_source_slot *slot;
 	struct mount *mountp;
 	struct disk *disk;
@@ -1307,6 +1338,7 @@ vfs_publish_efi_system_partition(
 		VFS_LOG("vfs: ESP published at /boot/efi\n");
 	else
 		VFS_LOG("vfs: ESP (boot%u) published at /boot/efi\n", index);
+#endif
 }
 
 /*
@@ -1937,6 +1969,7 @@ vfs_mount_legacy_root(
 }
 #endif
 
+#if defined(VFS_OVERLAY_ROOT)
 /* Clears an overlay setup. */
 static void
 vfs_overlay_setup_init(
@@ -2186,6 +2219,23 @@ fail:
 	/* Succeeded. */
 	return 0;
 }
+#else
+/* Refuses an overlay root, which a kernel without OverlayFS or loop disks cannot stack. */
+static VFS_HIGH int
+vfs_mount_overlay_root(
+	const struct kern_boot_parameters *parameters,
+	struct mount **root_out)
+{
+	int error;
+
+	(void)parameters;
+	(void)root_out;
+
+	/* Reports the root mode this kernel was built without. */
+	error = vfs_fail("mount overlay root", EOPNOTSUPP);
+	return error;
+}
+#endif
 
 /* Resolves the rootpart selector to a referenced partition. */
 static VFS_HIGH int

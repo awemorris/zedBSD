@@ -164,6 +164,84 @@ struct in6_candidate {
 	int outgoing;
 };
 
+#if defined(CONFIG_KERN_NET) && !defined(CONFIG_KERN_NET_IPV6)
+/*
+ * Stand-ins for a kernel built without the IPv6 stack.
+ *
+ * The IPv4 sockets share their code with AF_INET6, and only its IPv6 side
+ * tests IPv6 addresses.  Such a kernel makes no AF_INET6 socket, so the
+ * tests are never asked; each stand-in answers no.  Host tests define no
+ * CONFIG_KERN_NET and see the declarations of in6.c.
+ */
+
+/* Answers no: no IPv6 address is compared. */
+static inline int
+in6_equal(
+	const struct in6_addr *left,
+	const struct in6_addr *right)
+{
+	(void)left;
+	(void)right;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+
+/* Answers no: no IPv6 address is tested. */
+static inline int
+in6_is_unspecified(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+
+/* Answers no: no IPv6 address is tested. */
+static inline int
+in6_is_loopback(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+
+/* Answers no: no IPv6 address is tested. */
+static inline int
+in6_is_multicast(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+
+/* Answers no: no IPv6 address is tested. */
+static inline int
+in6_is_linklocal(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+
+/* Answers no: no IPv6 address is tested. */
+static inline int
+in6_is_v4mapped(
+	const struct in6_addr *address)
+{
+	(void)address;
+
+	/* Never asked without the stack. */
+	return 0;
+}
+#else
 /* The address tests (in6.c). */
 int in6_equal(const struct in6_addr *left, const struct in6_addr *right);
 int in6_is_unspecified(const struct in6_addr *address);
@@ -171,6 +249,7 @@ int in6_is_loopback(const struct in6_addr *address);
 int in6_is_multicast(const struct in6_addr *address);
 int in6_is_linklocal(const struct in6_addr *address);
 int in6_is_v4mapped(const struct in6_addr *address);
+#endif
 unsigned in6_scope(const struct in6_addr *address);
 unsigned in6_common_prefix(const struct in6_addr *left, const struct in6_addr *right);
 int in6_prefix_match(const struct in6_addr *address, const struct in6_addr *prefix, unsigned prefixlen);
