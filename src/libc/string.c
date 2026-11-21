@@ -811,6 +811,19 @@ string_copy_words(
 	const string_word *source,
 	size_t words)
 {
+#if defined(__i386__)
+	/*
+	 * Moves the words with one string move.  On a 386 without a cache a
+	 * loop refetches its instructions over the bus on every pass, which a
+	 * string move does not.  It moves front to back and reads each word
+	 * before it stores it, which memmove relies on when the destination
+	 * lies below the source.
+	 */
+	__asm__ volatile("cld\n\trep movsl"
+			 : "+D"(destination), "+S"(source), "+c"(words)
+			 :
+			 : "memory");
+#else
 	string_word first;
 	string_word second;
 	string_word third;
@@ -841,6 +854,7 @@ string_copy_words(
 		source++;
 		words--;
 	}
+#endif
 }
 
 /* Copies aligned words front to back from a source that is not word aligned. */
@@ -850,6 +864,19 @@ string_copy_unaligned_words(
 	const string_unaligned_word *source,
 	size_t words)
 {
+#if defined(__i386__)
+	/*
+	 * Moves the words with one string move, which reads at any alignment.
+	 * On a 386 without a cache a loop refetches its instructions over the
+	 * bus on every pass, which a string move does not.  It moves front to
+	 * back and reads each word before it stores it, which memmove relies
+	 * on when the destination lies below the source.
+	 */
+	__asm__ volatile("cld\n\trep movsl"
+			 : "+D"(destination), "+S"(source), "+c"(words)
+			 :
+			 : "memory");
+#else
 	string_word first;
 	string_word second;
 	string_word third;
@@ -880,6 +907,7 @@ string_copy_unaligned_words(
 		source++;
 		words--;
 	}
+#endif
 }
 
 /* Copies aligned words back to front from the ends of an aligned source. */
@@ -1013,6 +1041,16 @@ string_fill_words(
 	string_word pattern,
 	size_t words)
 {
+#if defined(__i386__)
+	/*
+	 * Stores the pattern with one string store, for the same reason as the
+	 * word copies.
+	 */
+	__asm__ volatile("cld\n\trep stosl"
+			 : "+D"(destination), "+c"(words)
+			 : "a"(pattern)
+			 : "memory");
+#else
 	/* Stores a run of words a pass. */
 	while (words >= STRING_WORD_RUN) {
 		destination[0] = pattern;
@@ -1029,4 +1067,5 @@ string_fill_words(
 		destination++;
 		words--;
 	}
+#endif
 }

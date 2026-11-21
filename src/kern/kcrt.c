@@ -39,19 +39,37 @@
 #include <kern/kcrt.h>
 
 /*
- * The kernel on amd64 copies long ranges of RAM with the HAL's string move.
- * A host test of this file (KERN_KCRT_NATIVE) has no HAL and keeps the word
- * loop.
+ * The kernel on amd64 and on the i386 copies long ranges of RAM with the
+ * HAL's string move.  A host test of this file (KERN_KCRT_NATIVE) has no
+ * HAL and keeps the word loop.
  */
-#if defined(HAL_ARCH_X86_64) && !defined(KERN_KCRT_NATIVE)
+#if (defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)) && \
+    !defined(KERN_KCRT_NATIVE)
 #define KCRT_STRING_MOVE 1
 #include <hal/hal.h>
 
+#if defined(HAL_ARCH_I386)
+/*
+ * The length from which kern_memcpy_ram() copies with the HAL's string move
+ * on the i386.  A 386 without a cache refetches a loop's instructions over
+ * the bus on every pass, while a string move starts in a few cycles, so the
+ * move wins from a few words.
+ */
+#define KCRT_STRING_MOVE_MIN ((size_t)32)
+
+/*
+ * The i386 also fills long ranges with the HAL's string store, from the
+ * same length and for the same reason.
+ */
+#define KCRT_STRING_FILL 1
+#define KCRT_STRING_FILL_MIN ((size_t)32)
+#else
 /*
  * The length from which kern_memcpy_ram() copies with the HAL's string move
  * on amd64.  Below it the move's start-up cost outweighs its rate.
  */
 #define KCRT_STRING_MOVE_MIN ((size_t)256)
+#endif
 #endif
 
 /* The widest field width honoured; a larger width is cut to this. */
@@ -340,6 +358,16 @@ kern_memset(
 	unsigned char byte;
 	kcrt_word pattern;
 	size_t index;
+
+#if defined(KCRT_STRING_FILL)
+	/* A long fill is one string store. */
+	if (count >= KCRT_STRING_FILL_MIN) {
+		hal_memset(destination, value, count);
+
+		/* Reports the destination as memset() does. */
+		return destination;
+	}
+#endif
 
 	to = destination;
 	byte = (unsigned char)value;

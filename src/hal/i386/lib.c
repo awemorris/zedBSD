@@ -43,6 +43,10 @@ hal_strlen(
 
 /*
  * Fills a byte-oriented memory range.
+ *
+ * The range is stored four bytes a string step and its last bytes one at a
+ * time: on a 386 without a cache, a string store costs a fraction of a
+ * loop of separate stores, and page tables are cleared a page at a time.
  */
 void *
 hal_memset(
@@ -50,15 +54,28 @@ hal_memset(
 	int c,
 	size_t n)
 {
-	uint8_t *p;
+	uint32_t pattern;
+	size_t words;
+	size_t bytes;
+	void *p;
 
-	/* Fills every requested byte with the converted value. */
+	/* Repeats the byte value across a 32-bit word. */
+	pattern = (uint8_t)c;
+	pattern |= pattern << 8;
+	pattern |= pattern << 16;
+
+	/* Stores the whole words, then the bytes left over. */
 	p = s;
-	while (n != 0U) {
-		*p = (uint8_t)c;
-		p++;
-		n--;
-	}
+	words = n / 4U;
+	bytes = n % 4U;
+	__asm__ volatile("cld\n\trep stosl"
+			 : "+D"(p), "+c"(words)
+			 : "a"(pattern)
+			 : "memory");
+	__asm__ volatile("rep stosb"
+			 : "+D"(p), "+c"(bytes)
+			 : "a"(pattern)
+			 : "memory");
 
 	/* Returns the original destination pointer. */
 	return s;
@@ -75,13 +92,12 @@ hal_memset16(
 {
 	uint16_t *p;
 
-	/* Fills every requested 16-bit element. */
+	/* Fills every requested 16-bit element with one string store. */
 	p = s;
-	while (n != 0U) {
-		*p = c;
-		p++;
-		n--;
-	}
+	__asm__ volatile("cld\n\trep stosw"
+			 : "+D"(p), "+c"(n)
+			 : "a"(c)
+			 : "memory");
 
 	/* Returns the original destination pointer. */
 	return s;
@@ -98,13 +114,12 @@ hal_memset32(
 {
 	uint32_t *p;
 
-	/* Fills every requested 32-bit element. */
+	/* Fills every requested 32-bit element with one string store. */
 	p = s;
-	while (n != 0U) {
-		*p = c;
-		p++;
-		n--;
-	}
+	__asm__ volatile("cld\n\trep stosl"
+			 : "+D"(p), "+c"(n)
+			 : "a"(c)
+			 : "memory");
 
 	/* Returns the original destination pointer. */
 	return s;
@@ -112,6 +127,9 @@ hal_memset32(
 
 /*
  * Copies a non-overlapping byte range.
+ *
+ * The range is moved four bytes a string step and its last bytes one at a
+ * time, for the same reason as hal_memset().
  */
 void *
 hal_memcpy(
@@ -119,18 +137,24 @@ hal_memcpy(
 	const void *src,
 	size_t n)
 {
-	uint8_t *destination;
-	const uint8_t *source;
+	void *destination;
+	const void *source;
+	size_t words;
+	size_t bytes;
 
-	/* Copies every requested byte in increasing address order. */
+	/* Moves the whole words, then the bytes left over, in increasing address order. */
 	destination = dest;
 	source = src;
-	while (n != 0U) {
-		*destination = *source;
-		destination++;
-		source++;
-		n--;
-	}
+	words = n / 4U;
+	bytes = n % 4U;
+	__asm__ volatile("cld\n\trep movsl"
+			 : "+D"(destination), "+S"(source), "+c"(words)
+			 :
+			 : "memory");
+	__asm__ volatile("rep movsb"
+			 : "+D"(destination), "+S"(source), "+c"(bytes)
+			 :
+			 : "memory");
 
 	/* Returns the original destination pointer. */
 	return dest;
