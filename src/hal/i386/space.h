@@ -9,8 +9,8 @@
  * The private i386 page-table and address-space contract.
  */
 
-#ifndef KERN_HAL_I386_SPACE_H
-#define KERN_HAL_I386_SPACE_H
+#ifndef I386_SPACE_H
+#define I386_SPACE_H
 
 #include <hal/hal.h>
 #include "asm.h"

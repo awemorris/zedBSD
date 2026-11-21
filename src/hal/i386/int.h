@@ -9,8 +9,8 @@
  * The i386 interrupt-frame and assembly-handler contract.
  */
 
-#ifndef _SYS_ARCH_X86_INT_H_
-#define _SYS_ARCH_X86_INT_H_
+#ifndef HAL_I386_INT_H
+#define HAL_I386_INT_H
 
 #include <hal/types.h>
 

@@ -9,8 +9,8 @@
  * The private i386 SMP startup and notification contract.
  */
 
-#ifndef KERN_HAL_I386_SMP_H
-#define KERN_HAL_I386_SMP_H
+#ifndef HAL_I386_SMP_H
+#define HAL_I386_SMP_H
 
 #include "apic-topology.h"
 

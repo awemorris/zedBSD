@@ -9,8 +9,8 @@
  * The i386 board bootstrap contract.
  */
 
-#ifndef KERN_HAL_I386_BSP_H
-#define KERN_HAL_I386_BSP_H
+#ifndef HAL_I386_BSP_H
+#define HAL_I386_BSP_H
 
 void bsp_boot_init(const void *raw_boot_info);
 

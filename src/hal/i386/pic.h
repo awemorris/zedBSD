@@ -11,8 +11,8 @@
  * The 8259 pair uses different ports on PC-98 and PC/AT systems.
  */
 
-#ifndef _SYS_ARCH_X86_PIC_H_
-#define _SYS_ARCH_X86_PIC_H_
+#ifndef HAL_I86_PIC_H
+#define HAL_I86_PIC_H
 
 #include <hal/types.h>
 

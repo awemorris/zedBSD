@@ -9,8 +9,8 @@
  * The board-provided i386 interval-timer contract.
  */
 
-#ifndef _SYS_ARCH_X86_CLOCK_H_
-#define _SYS_ARCH_X86_CLOCK_H_
+#ifndef HAL_I386_CLOCK_H
+#define HAL_I386_CLOCK_H
 
 #include <hal/hal.h>
 

@@ -9,8 +9,8 @@
  * The private i386 per-CPU descriptor and TSS contract.
  */
 
-#ifndef KERN_HAL_I386_PERCPU_H
-#define KERN_HAL_I386_PERCPU_H
+#ifndef HAL_I386_PERCPU_H
+#define HAL_I386_PERCPU_H
 
 #include <hal/hal.h>
 

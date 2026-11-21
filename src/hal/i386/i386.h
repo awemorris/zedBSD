@@ -12,8 +12,8 @@
  * interfaces are declared by their owning private headers.
  */
 
-#ifndef SYS_HAL_I386_ASM_H
-#define SYS_HAL_I386_ASM_H
+#ifndef HAL_I386_I386_H
+#define HAL_I386_I386_H
 
 #include <hal/types.h>
 #include "defs.h"
