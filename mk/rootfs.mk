@@ -94,6 +94,11 @@ ROOTFS_PACKAGE_RECORD_DIRS := $(foreach d,$(filter userland/packages/%,$(PROGRAM
 ROOTFS_PACKAGE_FILE_RECORDS := $(addsuffix /rootfs-files,$(ROOTFS_PACKAGE_RECORD_DIRS))
 ROOTFS_PACKAGE_LINK_RECORDS := $(addsuffix /rootfs-links,$(ROOTFS_PACKAGE_RECORD_DIRS))
 
+# The links of the commands to the single program (userland/base/crunch).
+ifneq ($(strip $(CONFIG_USERLAND_SINGLEBINARY)),)
+ROOTFS_PACKAGE_LINK_RECORDS += $(BUILD)/packages/crunch/rootfs-links
+endif
+
 ROOTFS_CONFIG_STAMP := \
 	$(BUILD)/.rootfs-config
 

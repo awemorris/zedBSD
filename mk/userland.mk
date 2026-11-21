@@ -15,6 +15,12 @@ endif
 # to configure an interface, so they come with it.
 override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net ifconfig route dhcpc)
 
+# The packages whose programs are linked into the single program are
+# selected as well, and the package that links it comes with them.
+ifneq ($(strip $(CONFIG_USERLAND_SINGLEBINARY)),)
+override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) $(CONFIG_USERLAND_SINGLEBINARY) crunch)
+endif
+
 ALL_PROGRAM_MAKEFILES := $(sort \
 	$(wildcard userland/firmware/*/Makefile) \
 	$(wildcard userland/base/*/Makefile) \
@@ -46,7 +52,7 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
 # given on the command line as a relative path would name a directory in
 # the source tree.
 SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))" \
-	STANDALONE_STATIC="$(CONFIG_USERLAND_STATIC)"
+	STANDALONE_STATIC="$(CONFIG_USERLAND_STATIC)" STANDALONE_SINGLEBINARY="$(strip $(CONFIG_USERLAND_SINGLEBINARY))"
 
 # What a package built from an upstream release (userland/packages/) is told
 # besides: the programs this build selects, the platform's defaults among
@@ -122,6 +128,9 @@ programs: libc $(PROGRAM_STAMPS)
 #
 # Special Dependency Rules
 #
+
+# The single program is linked after every package that puts a program in it.
+$(BUILD)/packages/crunch/.stamp: $(filter $(foreach p,$(CONFIG_USERLAND_SINGLEBINARY),$(BUILD)/packages/$(p)/.stamp),$(PROGRAM_STAMPS))
 
 # Base dependencies
 $(BUILD)/packages/sh/.stamp $(BUILD)/packages/net/.stamp: $(BUILD)/packages/libedit/.stamp
