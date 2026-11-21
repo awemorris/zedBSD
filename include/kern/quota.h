@@ -41,6 +41,13 @@ struct quota_state {
 	struct quota_record records[QUOTA_TYPES][QUOTA_MAX_RECORDS];
 	uint64_t grace_seconds;
 	unsigned enabled[QUOTA_TYPES];
+	/*
+	 * Whether the usage was counted from the filesystem.  A volume with
+	 * no quota configuration is not counted at mount; until a later mount
+	 * counts it, charges record nothing and enforcement cannot be turned
+	 * on.  Set only while the mount is private.
+	 */
+	unsigned counted;
 };
 
 struct quota_charge {
@@ -67,6 +74,11 @@ struct quota_transfer {
 void
 quota_state_init(
 	struct quota_state *state);
+
+void
+quota_set_counted(
+	struct quota_state *state,
+	int counted);
 
 int
 quota_enable(
