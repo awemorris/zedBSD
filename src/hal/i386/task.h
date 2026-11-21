@@ -9,8 +9,8 @@
  * The private i386 task-context and signal-frame contract.
  */
 
-#ifndef KERN_HAL_I386_TASK_H
-#define KERN_HAL_I386_TASK_H
+#ifndef HAL_I386_TASK_H
+#define HAL_I386_TASK_H
 
 #include <hal/hal.h>
 #include "asm.h"

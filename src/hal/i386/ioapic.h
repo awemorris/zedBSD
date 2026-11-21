@@ -9,8 +9,8 @@
  * The private i386 I/O-APIC contract.
  */
 
-#ifndef KERN_HAL_I386_IOAPIC_H
-#define KERN_HAL_I386_IOAPIC_H
+#ifndef HAL_I386_IOAPIC_H
+#define HAL_I386_IOAPIC_H
 
 #include "apic-topology.h"
 

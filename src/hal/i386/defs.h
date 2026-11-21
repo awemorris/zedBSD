@@ -9,8 +9,8 @@
  * The private i386 machine constants and source helpers.
  */
 
-#ifndef SYS_HAL_I386_I386_H
-#define SYS_HAL_I386_I386_H
+#ifndef HAL_I386_DEFS_H
+#define HAL_I386_DEFS_H
 
 /*
  * Local Clock Interval

@@ -12,8 +12,8 @@
  * assembler-visible constants.
  */
 
-#ifndef _SYS_ARCH_X86_ASM_H_
-#define _SYS_ARCH_X86_ASM_H_
+#ifndef HAL_I386_ASM_H
+#define HAL_I386_ASM_H
 
 #include "defs.h"
 

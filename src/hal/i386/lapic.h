@@ -9,8 +9,8 @@
  * The private i386 local-APIC contract.
  */
 
-#ifndef KERN_HAL_I386_LAPIC_H
-#define KERN_HAL_I386_LAPIC_H
+#ifndef HAL_I386_LAPIC_H
+#define HAL_I386_LAPIC_H
 
 #include <hal/hal.h>
 

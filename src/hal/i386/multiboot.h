@@ -9,8 +9,8 @@
  * The GRUB Multiboot information contract used by the i386 BSP.
  */
 
-#ifndef KERN_HAL_I386_MULTIBOOT_H
-#define KERN_HAL_I386_MULTIBOOT_H
+#ifndef HAL_I386_MULTIBOOT_H
+#define HAL_I386_MULTIBOOT_H
 
 #include <hal/types.h>
 

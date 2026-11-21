@@ -46,18 +46,13 @@ KERN_CFLAGS := \
 
 # HAL C Sources
 KERN_SOURCES += \
-	src/hal/x86/rtc.c \
+	src/hal/cpu-up.c \
 	src/hal/x86/boot-parameters.c \
 	src/hal/x86/io.c \
-	src/hal/i386/smp.c \
 	src/hal/i386/percpu.c \
 	src/hal/i386/lib.c \
 	src/hal/i386/atomic.c \
 	src/hal/i386/irq.c \
-	src/hal/i386/mps.c \
-	src/hal/i386/acpi.c \
-	src/hal/i386/lapic.c \
-	src/hal/i386/ioapic.c \
 	src/hal/i386/page.c \
 	src/hal/i386/space.c \
 	src/hal/i386/int.c \
@@ -74,7 +69,6 @@ KERN_SOURCES += \
 KERN_ASM += \
 	src/hal/i386/bsp-pc98/boot-header.S \
 	src/hal/i386/locore.S \
-	src/hal/i386/ap-trampoline.S \
 	src/hal/i386/trap.S \
 	src/hal/i386/dispatch.S
 
