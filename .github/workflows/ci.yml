@@ -32,6 +32,8 @@ jobs:
             artifact: zedbsd-macppc32.img.gz
           - platform: pc9821
             artifact: zedbsd-pc9821.img.gz
+          - platform: pc9801ns
+            artifact: zedbsd-pc9801ns.img.gz
     env:
       CONFIGMK: config/config.${{ matrix.platform }}.mk
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,7 +62,9 @@ jobs:
           make --version | head -n 1
 
       - name: Install the pinned toolchain from its cache
-        run: make CONFIGMK="$CONFIGMK" toolchain-cached
+        run: |
+          make CONFIGMK="$CONFIGMK" toolchain-cached
+          make CONFIGMK="$CONFIGMK" toolchain
 
       - name: Accept the firmware licenses
         run: yes | make CONFIGMK="$CONFIGMK" firmware-licenses
