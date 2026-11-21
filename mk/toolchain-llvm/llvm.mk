@@ -100,17 +100,34 @@ toolchain-llvm: $(LLVM_INSTALLED_TOOLS)
 	@'$(LLVM_INSTALL)/bin/clang' --version | grep -F 'clang version $(ZEDBSD_LLVM_VERSION)' >/dev/null
 	@'$(LLVM_INSTALL)/bin/ld.lld' --version | grep -F 'LLD $(ZEDBSD_LLVM_VERSION)' >/dev/null
 
+# The cached install records the asset it came from.  An install of another
+# asset (an older patch level) is replaced: the archive is fetched, checked
+# against its digest, extracted beside the old install and then takes its
+# place.
+LLVM_CACHE_STAMP := $(LLVM_INSTALL)/.zedbsd-cache
+
 toolchain-llvm-cached:
-	@if [ -x "$(LLVM_INSTALL)/bin/clang" ]; then \
-		echo "LLVM toolchain already installed at $(LLVM_INSTALL)"; \
+	@if [ -x "$(LLVM_INSTALL)/bin/clang" ] && \
+	    [ "$$(cat '$(LLVM_CACHE_STAMP)' 2>/dev/null)" = '$(ZEDBSD_LLVM_CACHE_ASSET)' ]; then \
+		echo "LLVM toolchain $(ZEDBSD_LLVM_CACHE_ASSET) already installed at $(LLVM_INSTALL)"; \
 	else \
-		mkdir -p $(dir $(LLVM_CACHE_ARCHIVE)) $(LLVM_INSTALL); \
+		set -e; \
+		mkdir -p $(dir $(LLVM_CACHE_ARCHIVE)); \
 		if [ ! -f "$(LLVM_CACHE_ARCHIVE)" ]; then \
 			echo "Downloading LLVM cache $(ZEDBSD_LLVM_CACHE_ASSET)..."; \
-			curl --fail --location --output "$(LLVM_CACHE_ARCHIVE)" "$(LLVM_CACHE_URL)"; \
+			curl --fail --location --output "$(LLVM_CACHE_ARCHIVE).tmp" "$(LLVM_CACHE_URL)"; \
+			mv -f "$(LLVM_CACHE_ARCHIVE).tmp" "$(LLVM_CACHE_ARCHIVE)"; \
 		fi; \
+		echo '$(ZEDBSD_LLVM_CACHE_SHA256)  $(LLVM_CACHE_ARCHIVE)' | sha256sum -c -; \
 		echo "Extracting LLVM cache..."; \
-		tar -xzf "$(LLVM_CACHE_ARCHIVE)" -C $(dir $(LLVM_INSTALL)); \
+		rm -rf "$(LLVM_INSTALL).new"; \
+		mkdir -p "$(LLVM_INSTALL).new"; \
+		tar -xzf "$(LLVM_CACHE_ARCHIVE)" -C "$(LLVM_INSTALL).new"; \
+		printf '%s\n' '$(ZEDBSD_LLVM_CACHE_ASSET)' > "$(LLVM_INSTALL).new/llvm/.zedbsd-cache"; \
+		rm -rf "$(LLVM_INSTALL).old"; \
+		if [ -e "$(LLVM_INSTALL)" ]; then mv "$(LLVM_INSTALL)" "$(LLVM_INSTALL).old"; fi; \
+		mv "$(LLVM_INSTALL).new/llvm" "$(LLVM_INSTALL)"; \
+		rm -rf "$(LLVM_INSTALL).new" "$(LLVM_INSTALL).old"; \
 	fi
 
 llvm-download: $(LLVM_DISTFILE)
