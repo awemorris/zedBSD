@@ -53,11 +53,7 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.py
 	@mkdir -p $(dir $@)
 	$(PYTHON) mk/tools/make-swapfile.py --size-mib $(SWAP_MIB) --label zedBSD-swap --output $@
 
-ifeq ($(VARIANT),bios)
-ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-bios.cfg
-else
-ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
-endif
+ZEDBSD_CONFIG_SRC := mk/platform-x86_64/zedbsd.cfg
 
 BOOT_CONFIG_STAMP := $(BUILD)/.boot-config-$(VARIANT)-splash_$(CONFIG_BOOT_SPLASH)-login_$(CONFIG_GRAPHICAL_LOGIN)-quiet_$(CONFIG_QUIET_BOOT)
 $(BOOT_CONFIG_STAMP):
@@ -104,21 +100,8 @@ $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) $(BOOT_C
 	$(PYTHON) mk/tools/make-x86-hdd-image.py --force --variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO) --logo-vert $(BOOT_LOGO_VERT)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) $(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) $(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) $(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) $(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) $(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) $(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) --fat-size-mib $(BOOT_MIB) $@
 
 .PHONY: image-platform check-disk-image
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 
 .PHONY: check-disk-image
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) mk/tools/check-x86-hdd-image.py \
-		--variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) \
-		--kernel $(BUILD)/vmunix \
-		--zedbsd-config $(ZEDBSD_CONFIG) \
-		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO) --logo-vert $(BOOT_LOGO_VERT)) \
-		--ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		$(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) \
-		$(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) \
-		$(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) \
-		$<
+	$(PYTHON) mk/tools/check-x86-hdd-image.py --variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO) --logo-vert $(BOOT_LOGO_VERT)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) $(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) $(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) $(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) $(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) $(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) $(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) $<

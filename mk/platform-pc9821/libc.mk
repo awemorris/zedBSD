@@ -7,6 +7,8 @@
 # zedBSD i386 libc Makefile
 #
 
+include mk/libc.mk
+
 PLATFORM_I386_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT           ?= $(abspath $(PLATFORM_I386_DIR)/../..)
 
@@ -115,10 +117,7 @@ $(LIBC_OBJ_DIR)/dynamic/syscall.o: src/libc/syscall-i386.S
 
 $(LIBC_OUT_DIR)/libc.so: $(LIBC_DYNAMIC_OBJS) src/libc/interpose.list
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both \
-		-Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list \
-		-z now -z relro -z separate-code -z stack-size=0x100000 \
-		$(LIBC_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both -Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list -z now -z relro -z separate-code -z stack-size=0x100000 $(LIBC_DYNAMIC_OBJS) -o $@
 
 #
 # Static & dynamic libm
@@ -140,9 +139,7 @@ $(LIBM_DYNAMIC_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 
 $(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 -shared -soname libm.so --hash-style=both \
-		-z now -z relro -z separate-code \
-		$(LIBM_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf_i386 -shared -soname libm.so --hash-style=both -z now -z relro -z separate-code $(LIBM_DYNAMIC_OBJS) -o $@
 
 #
 # Static & dynamic libutil
@@ -164,9 +161,7 @@ $(LIBUTIL_DYNAMIC_OBJS): src/libc/libutil.c
 
 $(LIBC_OUT_DIR)/libutil.so: $(LIBUTIL_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 -shared -soname libutil.so --hash-style=both \
-		-z now -z relro -z separate-code \
-		$(LIBUTIL_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf_i386 -shared -soname libutil.so --hash-style=both -z now -z relro -z separate-code $(LIBUTIL_DYNAMIC_OBJS) -o $@
 
 #
 # Compiler runtime & LLVM builtins
@@ -225,8 +220,7 @@ $(LIBC_OUT_DIR)/ld.so: $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start \
-		--hash-style=sysv -z now -z relro -z separate-code $^ -o $@
+	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv -z now -z relro -z separate-code $^ -o $@
 
 LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.a \

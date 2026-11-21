@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/kernel.mk
+
 KERN_CPPFLAGS := \
 	-nostdlib \
 	-nostdinc \

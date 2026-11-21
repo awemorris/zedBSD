@@ -7,6 +7,8 @@
 # PowerPC Mac (64-bit) kernel rules
 #
 
+include mk/kernel.mk
+
 # The compiler's target: big-endian 64-bit PowerPC with the ELFv2 ABI.
 MACPPC64_TARGET_FLAGS := --target=powerpc64-unknown-zedbsd
 

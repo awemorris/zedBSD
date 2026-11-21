@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 override ARCHITECTURE             := riscv64
 override BOARD                    := vf2
 

@@ -3,9 +3,7 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# Vision Five 2 (RISC-V 64) rootfs Makefile
-#
+include mk/rootfs.mk
 
 ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 ARCH_FILES  ?= $(ROOTFS_FILES)

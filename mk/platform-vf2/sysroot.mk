@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# Vision Five 2 (RISC-V 64) sysroot build rules
-#
-
 PLATFORM_VF2_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT        ?= $(abspath $(PLATFORM_VF2_DIR)/../..)
 
@@ -52,19 +48,8 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f mk/platform-vf2/user.ld mk/platform-vf2/vmunix.ld $(SYSROOT_LIB)/zedbsd/riscv64/
 	cp -f mk/platform-vf2/user.ld mk/platform-vf2/vmunix.ld $(SYSROOT_LIB)/zedbsd/vf2/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
-	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-march=rv64gc -mabi=lp64d -mno-relax -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 \
-		-nostdinc -isystem $(SYSROOT_INC) \
-		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/riscv64/user.ld \
-		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
-		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
-		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
-		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
-		-o $(SYSROOT)/smoke.elf
+	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) -march=rv64gc -mabi=lp64d -mno-relax -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 -nostdinc -isystem $(SYSROOT_INC) -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
+	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) -nostdlib -static -Wl,--build-id=none -Wl,-T,$(SYSROOT_LIB)/zedbsd/riscv64/user.ld $(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o -Wl,--start-group $(SYSROOT_LIB)/libc.a $(SYSROOT_LIB)/libzedbsd-compiler-rt.a $(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group -o $(SYSROOT)/smoke.elf
 	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'RISC-V' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \

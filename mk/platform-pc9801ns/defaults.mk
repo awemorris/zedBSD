@@ -7,9 +7,7 @@ override ARCHITECTURE             := i386
 override BOARD                    := pc98
 
 CONFIG_KERN_SMALL_MEMORY          := y
-
 CONFIG_ROOTFS_DEVELOPMENT         := y
-
 CONFIG_DRIVER_FS_UFS              := y
 CONFIG_KERN_NET                   := y
 CONFIG_KERN_NET_ETHERNET          := y

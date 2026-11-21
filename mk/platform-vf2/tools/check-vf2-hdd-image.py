@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
+
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 """Validate a VisionFive 2 (riscv64) UEFI GPT disk image and boot payloads."""
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
 

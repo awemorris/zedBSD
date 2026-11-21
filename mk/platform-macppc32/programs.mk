@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/userland.mk
+
 USER_CPPFLAGS := \
 	$(CPPFLAGS) \
 	-Iinclude \

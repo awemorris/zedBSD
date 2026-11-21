@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 """Wrap a U-Boot command script in a legacy image header (boot.scr).
 
   make-uboot-script.py SCRIPT.cmd OUTPUT.scr
@@ -13,7 +19,6 @@ legacy_img_hdr, IH_MAGIC 0x27051956, IH_OS_LINUX 5, IH_ARCH_RISCV 26,
 IH_TYPE_SCRIPT 6, IH_COMP_NONE 0, IH_NMLEN 32) and cmd/source.c (the
 length table before the script).
 """
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
 

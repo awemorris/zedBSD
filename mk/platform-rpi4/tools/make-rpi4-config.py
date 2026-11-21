@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+
 # zedBSD
 # Copyright (C) 2026 Awe Morris
 #
 # SPDX-License-Identifier: Zlib
+
 """Writes the Raspberry Pi 4's config.txt for the build's configuration (ws215-p003).
 
 The source (platform/arm64/config.txt) routes the PL011 to the serial pins and

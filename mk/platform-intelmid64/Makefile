@@ -14,6 +14,11 @@
 # The PCI bus of the SoC has functions at every slot and fixed BARs.
 KERN_CPPFLAGS += -DPCI_INTEL_MID_QUIRKS
 
+include mk/toolchain-llvm/llvm.mk
+.PHONY: toolchain-platform toolchain-cached-platform
+toolchain-platform: toolchain-llvm
+toolchain-platform-cached: toolchain-llvm-cached
+
 include mk/platform-intelmid64/defaults.mk
 include mk/platform-x86_64/libc.mk
 include mk/platform-x86_64/sysroot.mk
@@ -24,5 +29,6 @@ include mk/platform-x86_64/programs.mk
 include mk/platform-x86_64/rootfs.mk
 include mk/platform-x86_64/image.mk
 
-.PHONY: toolchain-platform
-toolchain-platform: toolchain-llvm
+# Rebuild tracking: objects follow their flags and headers.  It refers to
+# the object lists and the flags the files above define, so it comes last.
+include mk/tracking.mk

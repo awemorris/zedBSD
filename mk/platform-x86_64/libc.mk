@@ -1,7 +1,9 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
 #
-# zedBSD x86_64 libc Makefile
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-#
+# SPDX-License-Identifier: Zlib
+
+include mk/libc.mk
 
 PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT           ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)

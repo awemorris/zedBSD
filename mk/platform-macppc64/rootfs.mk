@@ -3,9 +3,7 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# rootfs Makefile
-#
+include mk/rootfs.mk
 
 MACPPC64_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 MACPPC64_ARCH_FILES  ?= $(ROOTFS_FILES)

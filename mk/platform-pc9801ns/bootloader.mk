@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# PC-98 bootloader build rules
-#
-
 BIOS_LOADER := bootloader/pc98
 
 .PHONY: bootloader-platform

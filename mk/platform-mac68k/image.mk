@@ -64,16 +64,8 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(MAC68K_BOOT_BLOCK) $(MAC68K_STAGE2) \
 		$(MAC68K_DRIVER_DUMP) \
 		mk/tools/make-mac68k-image.py \
 		mk/tools/apm.py \
-		mk/tools/hfs.py \
-		mk/tools/ufs_format.py
-	$(PYTHON) mk/tools/make-mac68k-image.py \
-		--kernel $(BUILD)/vmunix \
-		--boot-block $(MAC68K_BOOT_BLOCK) \
-		--stage2 $(MAC68K_STAGE2) \
-		--config mk/platform-mac68k/zedbsd.cfg \
-		--root-tree $(MAC68K_ROOT_TREE) \
-		$(MAC68K_IMAGE_OPTIONS) \
-		--output $@
+		mk/tools/hfs.py mk/tools/ufs_format.py
+	$(PYTHON) mk/tools/make-mac68k-image.py --kernel $(BUILD)/vmunix --boot-block $(MAC68K_BOOT_BLOCK) --stage2 $(MAC68K_STAGE2) --config mk/platform-mac68k/zedbsd.cfg --root-tree $(MAC68K_ROOT_TREE) $(MAC68K_IMAGE_OPTIONS) --output $@
 
 .PHONY: disk-image image-platform image-mac68k
 

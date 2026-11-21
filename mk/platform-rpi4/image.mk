@@ -23,17 +23,13 @@ ROOT_INODES ?= 65536
 ROOT_IMAGE := $(BUILD)/ufs-root.img
 $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(PYTHON) mk/tools/make-rootfs.py \
-		--backend $(abspath $(IMAGE_HOST)) --force \
-		--profile aarch64 --output $@ --tree $(BUILD)/rootfs \
-		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
+	$(PYTHON) mk/tools/make-rootfs.py --backend $(abspath $(IMAGE_HOST)) --force --profile aarch64 --output $@ --tree $(BUILD)/rootfs --size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
 SWAP_MIB ?= 64
 SWAP_IMAGE := $(BUILD)/swap.img
 $(SWAP_IMAGE): mk/tools/make-swapfile.py
 	@mkdir -p $(dir $@)
-	$(PYTHON) mk/tools/make-swapfile.py \
-		--size-mib $(SWAP_MIB) --output $@
+	$(PYTHON) mk/tools/make-swapfile.py --size-mib $(SWAP_MIB) --output $@
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
 		$(SWAP_IMAGE) $(BUILD)/config.txt $(BUILD)/cmdline.txt \
@@ -41,11 +37,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
 		mk/tools/make-rpi4-ufs-root-hdd-image.py \
 		mk/tools/make-rpi4-hdd-image.py \
 		mk/tools/check-rpi4-hdd-image.py
-	$(PYTHON) mk/tools/make-rpi4-ufs-root-hdd-image.py --force \
-		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \
-		--board rpi4 --firmware-dir $(RPI4_BOOT_FIRMWARE_DIR) $@
+	$(PYTHON) mk/tools/make-rpi4-ufs-root-hdd-image.py --force --kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) --config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt --board rpi4 --firmware-dir $(RPI4_BOOT_FIRMWARE_DIR) $@
 
 .PHONY: disk-image check-disk-image image-rpi4
 
@@ -53,8 +45,4 @@ disk-image: $(DISK_IMAGE_ARTIFACT)
 image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) mk/tools/check-rpi4-hdd-image.py \
-		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \
-		--board rpi4 $<
+	$(PYTHON) mk/tools/check-rpi4-hdd-image.py --kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) --config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt --board rpi4 $<

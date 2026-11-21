@@ -99,11 +99,20 @@ export
 toolchain:
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-platform 
 
+toolchain-cached:
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-cached-platform 
+
 bootloader: toolchain
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile bootloader-platform
 
-firmware:   toolchain
+firmware: toolchain
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-platform
+
+firmware-licenses:
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-platform
+
+firmware-licenses-pending:
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-pending-platform
 
 libc: toolchain
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile libc-platform

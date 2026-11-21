@@ -52,19 +52,8 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
 	cp -f mk/platform-macppc32/user.ld mk/platform-macppc32/vmunix.ld $(SYSROOT_LIB)/zedbsd/ppc32/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
-	$(CC) --target=powerpc-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-mcpu=ppc -mno-red-zone -DHAL_ARCH_PPC32 -DKERN_USER_ABI_PPC32 \
-		-nostdinc -isystem $(SYSROOT_INC) \
-		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=powerpc-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/ppc32/user.ld \
-		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
-		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
-		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
-		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
-		-o $(SYSROOT)/smoke.elf
+	$(CC) --target=powerpc-unknown-zedbsd --sysroot=$(SYSROOT) -mcpu=ppc -mno-red-zone -DHAL_ARCH_PPC32 -DKERN_USER_ABI_PPC32 -nostdinc -isystem $(SYSROOT_INC) -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
+	$(CC) --target=powerpc-unknown-zedbsd --sysroot=$(SYSROOT) -nostdlib -static -Wl,--build-id=none -Wl,-T,$(SYSROOT_LIB)/zedbsd/ppc32/user.ld $(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o -Wl,--start-group $(SYSROOT_LIB)/libc.a $(SYSROOT_LIB)/libzedbsd-compiler-rt.a $(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group -o $(SYSROOT)/smoke.elf
 	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -E 'PowerPC' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \

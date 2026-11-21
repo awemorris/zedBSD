@@ -2,4 +2,5 @@
 
 firmware-platform:
 
-firmware-licenses:
+firmware-licenses-platform:
+	$(MAKE) -f mk/userland.mk firmware-licenses

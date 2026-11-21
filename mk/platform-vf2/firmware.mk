@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Awe Morris
 #
 # SPDX-License-Identifier: Zlib
-#
 
 #
 # VisionFive 2 device trees
@@ -55,4 +54,9 @@ $(VF2_DTB_DIR)/%.dtb:
 download: visionfive2-dtb
 visionfive2-dtb: $(VF2_DTBS)
 
+.PHONY: firmware-platform firmware-licenses-platform
 firmware-platform: $(VF2_DTBS)
+
+.PHONY: firmware-licenses-platform
+firmware-licenses-platform:
+	$(MAKE) -f mk/userland.mk firmware-licenses

@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# x86_64 sysroot build rules
-#
-
 PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)
 

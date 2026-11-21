@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 """Check BOOTRISCV64.EFI and the loader ELF it was made from.
 
   check-bootriscv64.py --elf LOADER.elf BOOTRISCV64.EFI
@@ -9,7 +15,6 @@ entry in the code and the zero-filled data inside .data's memory size.  The
 ELF must hold only R_RISCV_RELATIVE dynamic relocations, which the image's
 entry applies, and no undefined symbol.
 """
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
 

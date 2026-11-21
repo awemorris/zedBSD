@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/kernel.mk
+
 PLATFORM_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT    ?= $(abspath $(PLATFORM_DIR)/../..)
 

@@ -67,18 +67,12 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 $(BUILD)/bootloader/bios-zedbsd-config.i386.o: bootloader/uefi/zedbsd-config.c \
 	bootloader/uefi/zedbsd-config.h bootloader/include/boot-parameter-handoff.h include/kern/boot.h
 	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. -c $< -o $@
 
 $(BUILD)/bootloader/bios-fat-directory.i386.o: bootloader/bios/fat-directory.c \
 	bootloader/bios/fat-directory.h
 	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. -c $< -o $@
 
 PC98_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
 	$(BUILD)/bootloader/bios-fat-directory.i386.o

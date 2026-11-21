@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 """Turn the linked riscv64 loader into BOOTRISCV64.EFI.
 
   make-bootriscv64.py --elf LOADER.elf --binary LOADER.bin OUTPUT
@@ -14,7 +20,6 @@ The header names two sections: .text (the code and the read-only data) and
 zero-filled data).  It carries no base relocations: the image applies its
 own relocations at its entry.
 """
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
 

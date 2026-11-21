@@ -3,9 +3,7 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# x86_64 rootfs Makefile
-#
+include mk/rootfs.mk
 
 X86_64_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 X86_64_ARCH_FILES  ?= $(ROOTFS_FILES)

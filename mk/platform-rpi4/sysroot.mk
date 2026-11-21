@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# rpi4 (ARM64) sysroot build rules
-#
-
 PLATFORM_RPI4_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI4_DIR)/../..)
 
@@ -54,19 +50,8 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f mk/platform-rpi4/user.ld mk/platform-rpi4/vmunix.ld $(SYSROOT_LIB)/zedbsd/rpi4/
 	cp -f mk/platform-rpi4/user.ld mk/platform-rpi4/vmunix.ld $(SYSROOT_LIB)/zedbsd/aarch64/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
-	$(CC) --target=aarch64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-march=armv8-a -mno-outline-atomics -DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64 \
-		-nostdinc -isystem $(SYSROOT_INC) \
-		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=aarch64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/arm64/user.ld \
-		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
-		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
-		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
-		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
-		-o $(SYSROOT)/smoke.elf
+	$(CC) --target=aarch64-unknown-zedbsd --sysroot=$(SYSROOT) -march=armv8-a -mno-outline-atomics -DHAL_ARCH_ARM64 -DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64 -nostdinc -isystem $(SYSROOT_INC) -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
+	$(CC) --target=aarch64-unknown-zedbsd --sysroot=$(SYSROOT) -nostdlib -static -Wl,--build-id=none -Wl,-T,$(SYSROOT_LIB)/zedbsd/arm64/user.ld $(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o -Wl,--start-group $(SYSROOT_LIB)/libc.a $(SYSROOT_LIB)/libzedbsd-compiler-rt.a $(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group -o $(SYSROOT)/smoke.elf
 	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'AArch64' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \

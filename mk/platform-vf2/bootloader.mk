@@ -1,3 +1,7 @@
+#
+# PC-98 bootloader build rules
+#
+
 EFI_DIR := $(BUILD)/uefi
 
 EFI_CFLAGS := \

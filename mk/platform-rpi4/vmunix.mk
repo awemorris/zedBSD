@@ -1,9 +1,9 @@
-#
-# zedBSD rpi4 (ARM64) bootstrap rules.
+# zedBSD
 # Copyright (C) 2026 Awe Morris
 #
 # SPDX-License-Identifier: Zlib
-#
+
+include mk/kernel.mk
 
 PLATFORM_RPI4_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI4_DIR)/../..)

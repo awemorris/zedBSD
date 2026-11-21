@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 """Build a VisionFive 2 (riscv64) UEFI GPT disk image.
 
 Layout:
@@ -9,7 +15,6 @@ Layout:
   Partition 4: UFS Root (FreeBSD UFS type, PARTLABEL=zedBSD-root)
   Partition 5: Swap (FreeBSD Swap type, PARTLABEL=zedBSD-swap)
 """
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
 

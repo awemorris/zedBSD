@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# PC-98 disk image build rules
-#
-
 PLATFORM_PC9801NS_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_PC9801NS_DIR)/../..)
 

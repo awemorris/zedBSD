@@ -1,6 +1,7 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
 #
-# zedBSD i386 libc Makefile
-#
+# SPDX-License-Identifier: Zlib
 
 include mk/libc.mk
 

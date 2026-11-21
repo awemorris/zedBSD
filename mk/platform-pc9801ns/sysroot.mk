@@ -3,10 +3,6 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# pc9801ns sysroot build rules
-#
-
 PLATFORM_PC9801NS_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_PC9801NS_DIR)/../..)
 

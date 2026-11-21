@@ -3,9 +3,7 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# Raspberry Pi 4 rootfs Makefile
-#
+include mk/rootfs.mk
 
 RPI4_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 RPI4_ARCH_FILES  ?= $(ROOTFS_FILES)

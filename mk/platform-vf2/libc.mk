@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/libc.mk
+
 PLATFORM_VF2_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_VF2_DIR)/../..)
 
@@ -152,10 +154,7 @@ LIBC_DYNAMIC_OBJS := $(LIBC_DYNAMIC_C_OBJS) \
 
 $(LIBC_OUT_DIR)/libc.so: $(LIBC_DYNAMIC_OBJS) src/libc/interpose.list
 	@mkdir -p $(dir $@)
-	$(LD) -m elf64lriscv -shared -soname libc.so --hash-style=both \
-		-Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list \
-		-z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
-		$(LIBC_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf64lriscv -shared -soname libc.so --hash-style=both -Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 $(LIBC_DYNAMIC_OBJS) -o $@
 
 #
 # Static & dynamic libm
@@ -177,9 +176,7 @@ $(LIBM_DYNAMIC_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 
 $(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf64lriscv -shared -soname libm.so --hash-style=both \
-		-z now -z relro -z separate-code -z max-page-size=4096 \
-		$(LIBM_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf64lriscv -shared -soname libm.so --hash-style=both -z now -z relro -z separate-code -z max-page-size=4096 $(LIBM_DYNAMIC_OBJS) -o $@
 
 #
 # Static & dynamic libutil
@@ -201,9 +198,7 @@ $(LIBUTIL_DYNAMIC_OBJS): src/libc/libutil.c
 
 $(LIBC_OUT_DIR)/libutil.so: $(LIBUTIL_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf64lriscv -shared -soname libutil.so --hash-style=both \
-		-z now -z relro -z separate-code -z max-page-size=4096 \
-		$(LIBUTIL_DYNAMIC_OBJS) -o $@
+	$(LD) -m elf64lriscv -shared -soname libutil.so --hash-style=both -z now -z relro -z separate-code -z max-page-size=4096 $(LIBUTIL_DYNAMIC_OBJS) -o $@
 
 #
 # Compiler runtime & LLVM builtins
@@ -262,8 +257,7 @@ $(LIBC_OUT_DIR)/ld.so: $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o
 	@mkdir -p $(dir $@)
-	$(LD) -m elf64lriscv -shared -Bsymbolic -e _rtld_start \
-		--hash-style=sysv -z now -z relro -z separate-code -z max-page-size=4096 $^ -o $@
+	$(LD) -m elf64lriscv -shared -Bsymbolic -e _rtld_start --hash-style=sysv -z now -z relro -z separate-code -z max-page-size=4096 $^ -o $@
 
 LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.a \

@@ -24,13 +24,7 @@ SWAP_MIB ?= 64
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix.elf32 $(BUILD)/rootfs/.stamp \
 		mk/tools/make-macppc32-image.py \
 		mk/tools/hfs.py
-	$(PYTHON) mk/tools/make-macppc32-image.py \
-		--kernel $(BUILD)/vmunix.elf32 \
-		--root-tree $(BUILD)/rootfs \
-		--boot-mib $(MACPPC64_BOOT_MIB) \
-		--root-mib $(ROOT_MIB) \
-		--swap-mib $(SWAP_MIB) \
-		--output $@
+	$(PYTHON) mk/tools/make-macppc32-image.py --kernel $(BUILD)/vmunix.elf32 --root-tree $(BUILD)/rootfs --boot-mib $(MACPPC64_BOOT_MIB) --root-mib $(ROOT_MIB) --swap-mib $(SWAP_MIB) --output $@
 
 .PHONY: disk-image image-platform image-macppc64
 

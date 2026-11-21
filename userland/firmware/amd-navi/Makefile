@@ -44,7 +44,7 @@ AMD_NAVI_FIRMWARE_FILES ?= \
 AMD_NAVI_FIRMWARE_ZEDBSD_URL ?=
 # The fixture does not ask about the license unless it sets this to y.
 AMD_NAVI_FIRMWARE_LICENSE_PROMPT ?= n
-AMD_NAVI_FIRMWARE_FETCH ?= curl --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
+AMD_NAVI_FIRMWARE_FETCH ?= curl --verbose --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
 else
 # Production callers cannot replace the source, accepted bytes, verifier, or
 # installed mapping from the command line while the static manifest continues
@@ -69,7 +69,7 @@ override AMD_NAVI_FIRMWARE_FILES := \
 	WHENCE|WHENCE|425450|c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
 override AMD_NAVI_FIRMWARE_ZEDBSD_URL := $(if $(ZEDBSD_FIRMWARE_REPOSITORY_URL),$(ZEDBSD_FIRMWARE_REPOSITORY_URL)/amd-navi)
 override AMD_NAVI_FIRMWARE_LICENSE_PROMPT := y
-override AMD_NAVI_FIRMWARE_FETCH := curl --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
+override AMD_NAVI_FIRMWARE_FETCH := curl --verbose --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
 endif
 
 override AMD_NAVI_FIRMWARE_TAG := 20260410

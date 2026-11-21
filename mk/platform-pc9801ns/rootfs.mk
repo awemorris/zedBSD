@@ -3,12 +3,7 @@
 #
 # SPDX-License-Identifier: Zlib
 
-#
-# pc9801ns rootfs Makefile
-#
-
 include mk/rootfs.mk
-include mk/libc.mk
 
 PC9801NS_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 PC9801NS_ARCH_FILES  ?= $(ROOTFS_FILES)

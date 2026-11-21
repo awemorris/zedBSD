@@ -7,6 +7,8 @@
 # pc9821 rootfs Makefile
 #
 
+include mk/rootfs.mk
+
 PC9821_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 PC9821_ARCH_FILES  ?= $(ROOTFS_FILES)
 

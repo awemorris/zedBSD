@@ -109,7 +109,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	ed \
 	efiboot \
 	egrep \
-	emacs \
 	env \
 	etc \
 	expand \

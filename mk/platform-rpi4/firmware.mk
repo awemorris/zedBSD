@@ -62,9 +62,12 @@ $(error rpi4-boot-firmware: the firmware license was not accepted; see above)
 endif
 endif
 
-firmware-licenses: rpi4-boot-firmware-license
+.PHONY: firmware-licenses-platform
+firmware-licenses-platform: rpi4-boot-firmware-license
+	$(MAKE) -f mk/userland.mk firmware-licenses
 
-firmware-licenses-pending: rpi4-boot-firmware-license-pending
+.PHONY: firmware-licenses-pending-platform
+firmware-licenses-pending-platform: rpi5-boot-firmware-license-pending
 
 .PHONY: rpi4-boot-firmware-license
 rpi4-boot-firmware-license:

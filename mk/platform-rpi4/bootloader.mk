@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 RPI4_BOOT_COMMAND_LINE := login=$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),graphical,console)$(if $(or $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),$(filter n,$(CONFIG_BOOT_KERNEL_MESSAGES))), kmsg=quiet)
 
 # The boot files follow the configuration: they are written every time and
@@ -16,10 +21,7 @@ $(BUILD)/bcm2711-rpi-4-b.dtb: $(RPI4_BOOT_FIRMWARE_DTB)
 
 $(BUILD)/config.txt: mk/platform-rpi4/config.txt mk/platform-rpi4/tools/make-rpi4-config.py FORCE_BOOT_FILES
 	@mkdir -p $(dir $@)
-	$(PYTHON) mk/platform-rpi4/tools/make-rpi4-config.py --source mk/platform-rpi4/config.txt \
-		--bluetooth $(if $(filter y,$(CONFIG_DRIVER_RPI4_BT)),y,n) \
-		--serial $(if $(filter y,$(CONFIG_RPI4_SERIAL_CONSOLE)),y,n) \
-		--output $@.tmp
+	$(PYTHON) mk/platform-rpi4/tools/make-rpi4-config.py --source mk/platform-rpi4/config.txt --bluetooth $(if $(filter y,$(CONFIG_DRIVER_RPI4_BT)),y,n) --serial $(if $(filter y,$(CONFIG_RPI4_SERIAL_CONSOLE)),y,n) --output $@.tmp
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
 
 RPI4_FIRMWARE_FILES := \

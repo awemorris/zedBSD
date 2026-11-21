@@ -1,9 +1,9 @@
-#
-# zedBSD amd64/PC-AT bootstrap rules.
+# zedBSD
 # Copyright (C) 2026 Awe Morris
 #
 # SPDX-License-Identifier: Zlib
-#
+
+include mk/kernel.mk
 
 KERN_CPPFLAGS := \
 	-nostdlib \
