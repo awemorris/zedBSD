@@ -122,7 +122,7 @@ $(foreach d,$(ALL_PROGRAM_DIRS),$(eval $(call PROGRAM_RULE,$(d))))
 
 .PHONY: packages
 
-programs: libc $(PROGRAM_STAMPS)
+programs: $(PROGRAM_STAMPS)
 
 
 #

@@ -18,10 +18,18 @@ CONFIG_DRIVER_HID                 := y
 CONFIG_DRIVER_GRAPHICS            := y
 CONFIG_DRIVER_GRAPHICS_PC98       := y
 
+#
+# Userland
+#
+
+# Choose y to combine apps into a single binary.
+USE_SINGLE_BINARY                 := y
+
+# User static link.
 CONFIG_USERLAND_STATIC            := y
-CONFIG_USERLAND_PROGRAMS          += \
-	ca-certificates
-CONFIG_USERLAND_SINGLEBINARY      += \
+
+# Base programs.
+BASE_PROGS := \
 	awk \
 	basename \
 	batch \
@@ -123,3 +131,13 @@ CONFIG_USERLAND_SINGLEBINARY      += \
 	whoami \
 	xargs \
 	zcat
+
+PACKAGE_PROGS := \
+	ca-certificates
+
+ifneq ($(USE_SINGLE_BINARY),y)
+CONFIG_USERLAND_PROGRAMS          := $(BASE_PROGS) $(PACKAGE_PROGS)
+else
+CONFIG_USERLAND_PROGRAMS          := $(PACKAGE_PROGS)
+CONFIG_USERLAND_SINGLEBINARY      := $(BASE_PROGS)
+endif

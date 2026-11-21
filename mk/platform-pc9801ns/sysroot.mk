@@ -24,6 +24,7 @@ sysroot-platform: $(SYSROOT_COMPLETE_STAMP)
 
 # Install public headers into sysroot
 $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
+	@echo 'Installing public headers into sysroot...'
 	@mkdir -p $(SYSROOT_INC)
 	@for header in $(PUBLIC_HEADERS); do \
 		case "$$header" in \
@@ -39,6 +40,7 @@ $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
 
 # Complete sysroot by copying libraries from libc build and verifying with smoke link
 $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
+	@echo 'Copying libraries from libc build into sysroot...'
 	@mkdir -p $(SYSROOT_LIB)/zedbsd/i386 $(SYSROOT_LIB)/zedbsd/pc9801ns $(BUILD)/dynamic
 	cp -f $(LIBC_OUT_DIR)/libc.a $(LIBC_OUT_DIR)/libc.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libm.a $(LIBC_OUT_DIR)/libm.so $(SYSROOT_LIB)/
@@ -51,19 +53,8 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
 	cp -f mk/platform-pc9801ns/user.ld mk/platform-pc9801ns/vmunix.ld $(SYSROOT_LIB)/zedbsd/pc9801ns/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
-	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-m32 -march=i386 -msoft-float -mno-red-zone -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 \
-		-nostdinc -isystem $(SYSROOT_INC) \
-		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-m32 -nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/pc9801ns/user.ld \
-		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
-		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
-		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
-		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
-		-o $(SYSROOT)/smoke.elf
+	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) -m32 -march=i386 -msoft-float -mno-red-zone -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32 -nostdinc -isystem $(SYSROOT_INC) -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
+	$(CC) --target=i386-unknown-zedbsd --sysroot=$(SYSROOT) -m32 -nostdlib -static -Wl,--build-id=none -Wl,-T,$(SYSROOT_LIB)/zedbsd/pc9801ns/user.ld $(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o -Wl,--start-group $(SYSROOT_LIB)/libc.a $(SYSROOT_LIB)/libzedbsd-compiler-rt.a $(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group -o $(SYSROOT)/smoke.elf
 	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -E 'Intel (80)?386' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \

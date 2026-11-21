@@ -32,6 +32,14 @@
 # compiled again.  V=1 shows every command.
 #
 
+# The top-level build reads a package's Makefile from the repository root
+# and sets TOPLEVEL_BUILD.  A make that hands its whole environment down
+# hands that variable to the packages' own makes as well, which run in the
+# packages' directories: there it does not hold.
+ifneq ($(CURDIR),$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..))
+TOPLEVEL_BUILD :=
+endif
+
 # The package's own make only: the top-level build reads none of this.
 ifndef TOPLEVEL_BUILD
 
@@ -396,12 +404,7 @@ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
 $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,LD,$(10)/$(1))
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
-	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) $$(STANDALONE_LINK_FLAGS_$(1)) \
-		"$$(STANDALONE_PROGRAM_CRT)" \
-		$$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) \
-		-L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" \
-		$(call standalone_program_required_libs,$$(STANDALONE_SO_LIST_$(1))) $$(STANDALONE_PROGRAM_LIBS) \
-		-o $$@
+	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) $$(STANDALONE_LINK_FLAGS_$(1)) "$$(STANDALONE_PROGRAM_CRT)" $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) -L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" $(call standalone_program_required_libs,$$(STANDALONE_SO_LIST_$(1))) $$(STANDALONE_PROGRAM_LIBS) -o $$@
 	$$(Q)printf '%s %s\n' "/$(10)/$(1)" "$(6)" > "$$(STANDALONE_WORK_DIR_$(1))/mode"
 endif
 
@@ -445,13 +448,7 @@ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_DYNAMIC_DIR)/$(2).so
 $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,SHLIB,$(2).so)
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_LIB_DIR)"
-	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) \
-		$$(STANDALONE_OBJECTS_$(1)) \
-		-Wl,-soname,"$(2).so" \
-		$$(if $$(wildcard exports.map),-Wl$$(comma)--version-script=exports.map) \
-		-L"$$(STANDALONE_DYNAMIC_DIR)" -L"$$(STANDALONE_SYSROOT)/usr/lib" \
-		$(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -l:libm.so \
-		-o $$@
+	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) $$(STANDALONE_OBJECTS_$(1)) -Wl,-soname,"$(2).so" $$(if $$(wildcard exports.map),-Wl$$(comma)--version-script=exports.map) -L"$$(STANDALONE_DYNAMIC_DIR)" -L"$$(STANDALONE_SYSROOT)/usr/lib" $(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -l:libm.so -o $$@
 	$$(Q)cp -f $$@ "$$(STANDALONE_LIB_DIR)/$(2).so"
 endif
 

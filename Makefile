@@ -8,24 +8,18 @@
 MAKEFLAGS += -r
 .SUFFIXES:
 
-all:        disk
-setup:      toolchain .WAIT libc sysroot bootloader firmware
-toolchain:  toolchain-platform
-bootloader: toolchain .WAIT bootloader-platform
-firmware:   toolchain .WAIT firmware-platform
-libc:       toolchain .WAIT libc-platform
-sysroot:    libc .WAIT sysroot-platform
-vmunix:     sysroot .WAIT vmunix-platform
-userland:   sysroot .WAIT programs
-rootfs:     vmunix userland .WAIT rootfs-platform
-disk:       vmunix rootfs firmware bootloader .WAIT image-platform
+all: disk
+
+world: disk
 
 help:
-	@echo "The zedBSD Build System"
+	@echo "zedBSD Build System"
+	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  setup      - Setup the build environment."
+	@echo "  world      - Everything."
+	@echo "  toolchain  - Setup the build environment."
 	@echo "  vmunix     - Build the kernel image."
 	@echo "  userland   - Build the userland."
 	@echo "  disk       - Build the boot disk image."
@@ -100,26 +94,34 @@ $(info BOARD:        $(BOARD))
 # Deterimine the build directory.
 BUILD := build/$(PLATFORM)
 
-# Toolchain. (targets: toolchain, toolchain-cached)
-include mk/toolchain.mk
+export
 
-# Kernel sources.
-include mk/kernel.mk
+toolchain:
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-platform 
 
-# libc sources.
-include mk/libc.mk
+bootloader: toolchain
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile bootloader-platform
 
-# Userland build rules. (target: programs)
-include mk/userland.mk
+firmware:   toolchain
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-platform
 
-# Rootfs build rules. (target: rootfs)
-include mk/rootfs.mk
+libc: toolchain
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile libc-platform
 
-# Platform build rules (targets: libc-platform, sysroot-platform, firmware-platform, bootloader-platform, vmunix-platform, rootfs-platform, image-platform)
-include mk/platform-$(PLATFORM)/Makefile
+sysroot: libc
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile sysroot-platform
 
-# Rebuild tracking: objects follow their flags and headers.
-include mk/tracking.mk
+vmunix: sysroot
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile vmunix-platform
+
+userland: sysroot
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile programs
+
+rootfs: vmunix userland
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile rootfs-platform
+
+disk: vmunix rootfs firmware bootloader
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile image-platform
 
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
 include mk/foreign.mk

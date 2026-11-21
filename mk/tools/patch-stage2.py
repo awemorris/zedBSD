@@ -67,6 +67,6 @@ struct.pack_into("<I", image, HEADER_OFFSET + 16, checksum)
 path.write_bytes(image)
 
 margin = KERNEL_LIMIT - (p_paddr + p_memsz)
-print(f"{path}: {len(image)} bytes, checksum {checksum:08x}")
+print(f"  {path}: {len(image)} bytes, checksum {checksum:08x}")
 print(f"  kernel: {p_filesz:#8x} file / {p_memsz:#8x} mem at "
       f"{p_paddr:#x} (margin {margin:#x})")

@@ -95,8 +95,7 @@ EXTERNAL_CROSS_DIR := $(EXTERNAL_BUILD_DIR)/packages/toolchain
 EXTERNAL_CROSS_ENV := $(EXTERNAL_CROSS_DIR)/environment.sh
 EXTERNAL_CROSS_STAMP := $(EXTERNAL_CROSS_DIR)/.zedbsd-cross-toolchain
 EXTERNAL_GEN_CROSS := $(EXTERNAL_TOOLS)/gen-cross-toolchain.sh
-EXTERNAL_CROSS_INPUTS := $(EXTERNAL_GEN_CROSS) \
-	$(EXTERNAL_SYSROOT)/.zedbsd-sysroot-complete
+EXTERNAL_CROSS_INPUTS := $(EXTERNAL_GEN_CROSS) $(EXTERNAL_SYSROOT)/.zedbsd-sysroot-complete
 
 # The shared libraries the wrappers link against (BUG-081).  The packages are
 # built once for every build directory, so the libraries they link against
@@ -122,9 +121,7 @@ $(EXTERNAL_LINK_DIR)/%.so: $(EXTERNAL_LINK_SOURCE)/%.so
 
 $(EXTERNAL_CROSS_STAMP): $(EXTERNAL_CROSS_INPUTS) \
 	| $(addprefix $(EXTERNAL_LINK_DIR)/,$(EXTERNAL_LINK_LIBS))
-	$(EXTERNAL_GEN_CROSS) '$(EXTERNAL_TRIPLE)' \
-		'$(EXTERNAL_LLVM_BIN)' '$(EXTERNAL_SYSROOT)' \
-		'$(EXTERNAL_LINK_DIR)' '$(EXTERNAL_CROSS_DIR)'
+	$(EXTERNAL_GEN_CROSS) '$(EXTERNAL_TRIPLE)' '$(EXTERNAL_LLVM_BIN)' '$(EXTERNAL_SYSROOT)' '$(EXTERNAL_LINK_DIR)' '$(EXTERNAL_CROSS_DIR)'
 	@touch '$@'
 
 .PHONY: packages-cross-toolchain
