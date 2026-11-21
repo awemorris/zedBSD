@@ -40,10 +40,12 @@ static int next_space_id;
 static uint32_t space_count;
 static uint32_t page_table_count;
 static volatile unsigned count_lock;
-static volatile unsigned shootdown_pool_lock;
 static volatile unsigned space_registry_lock;
 static struct i386_space *space_registry;
+#if !defined(HAL_CPU_UP)
+static volatile unsigned shootdown_pool_lock;
 static struct i386_shootdown_request shootdowns[I386_SHOOTDOWN_REQUESTS];
+#endif
 
 static bool raw_lock_enter(volatile unsigned *lock);
 static void raw_lock_leave(volatile unsigned *lock, bool enabled);
@@ -62,7 +64,9 @@ static int valid_user_range(uintptr_t vaddr, size_t size);
 static uint32_t pte_flags(uint32_t attr);
 static uint32_t pte_replace_preserve_ad(uint32_t *entry, uint32_t replacement);
 static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+#if !defined(HAL_CPU_UP)
 static void service_shootdowns(hal_cpu_id_t cpu);
+#endif
 
 /*
  * Initializes bootstrap-CPU address-space and shootdown state.
@@ -74,11 +78,15 @@ i386_space_init(
 	/* Captures the kernel page directory and clears per-CPU state. */
 	system_cr3 = asm_get_cr3();
 	hal_memset(current_spaces, 0, sizeof(current_spaces));
+#if !defined(HAL_CPU_UP)
 	hal_memset(shootdowns, 0, sizeof(shootdowns));
+#endif
 
 	/* Initializes locks, registries, and the bootstrap current space. */
 	count_lock = 0;
+#if !defined(HAL_CPU_UP)
 	shootdown_pool_lock = 0;
+#endif
 	space_registry_lock = 0;
 	space_registry = NULL;
 	__atomic_store_n(&current_space, HAL_SPACE_SYS, __ATOMIC_RELEASE);
@@ -200,7 +208,9 @@ hal_space_destroy(
 			break;
 
 		/* Services reciprocal invalidations before retrying the lifetime wait. */
+#if !defined(HAL_CPU_UP)
 		service_shootdowns(hal_cpu_current());
+#endif
 		__asm__ volatile("pause");
 	}
 
@@ -831,6 +841,7 @@ hal_space_clear_flags(
 	return HAL_OK;
 }
 
+#if !defined(HAL_CPU_UP)
 /*
  * Services pending TLB shootdowns on the current CPU.
  */
@@ -842,6 +853,7 @@ i386_tlb_interrupt(
 	service_shootdowns(hal_cpu_current());
 	hal_irq_send_eoi(IRQ_MAX + 2U);
 }
+#endif
 
 /*
  * Flushes all translations for one address space.
@@ -1094,7 +1106,9 @@ space_lock_enter(
 			return enabled;
 
 		/* Services reciprocal invalidations before retrying the space lock. */
+#if !defined(HAL_CPU_UP)
 		service_shootdowns(hal_cpu_current());
+#endif
 		__asm__ volatile("pause");
 	}
 }
@@ -1389,6 +1403,7 @@ shootdown(
 	void *vaddr,
 	size_t size)
 {
+#if !defined(HAL_CPU_UP)
 	struct i386_shootdown_request *request;
 	struct hal_cpu_mask ready;
 	hal_cpu_id_t sender;
@@ -1397,7 +1412,22 @@ shootdown(
 	unsigned pending;
 	bool pool_enabled;
 	int result;
+#endif
 
+	/*
+	 * While only this CPU runs, the local flush is the whole shootdown:
+	 * no other CPU can hold a translation of the space.
+	 */
+	if (!i386_smp_started) {
+		(void)vaddr;
+		(void)size;
+		if (handle == HAL_SPACE_SYS ||
+		    __atomic_load_n(&current_space, __ATOMIC_ACQUIRE) == handle)
+			asm_flash_tlb();
+		return;
+	}
+
+#if !defined(HAL_CPU_UP)
 	/* Captures the sender and initializes request-allocation state. */
 	sender = hal_cpu_current();
 	request = NULL;
@@ -1474,8 +1504,10 @@ shootdown(
 	/* Retires the fully acknowledged request after a memory barrier. */
 	hal_mb();
 	request->active = 0U;
+#endif
 }
 
+#if !defined(HAL_CPU_UP)
 /* Services every pending shootdown request for one CPU. */
 static void
 service_shootdowns(
@@ -1510,3 +1542,4 @@ service_shootdowns(
 		raw_lock_leave(&request->lock, enabled);
 	}
 }
+#endif

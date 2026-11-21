@@ -30,10 +30,18 @@ enum irq_mode {
 };
 
 static struct irq_service_info irq_service[IRQ_MAX + 1];
+/*
+ * A uniprocessor build (HAL_CPU_UP) routes every IRQ through the legacy
+ * PIC and has no APIC code; its APIC mode is a constant zero.
+ */
+#if defined(HAL_CPU_UP)
+#define apic_mode 0
+#else
 static struct i386_apic_topology topology;
 static int apic_mode;
 static volatile unsigned calibration_active;
 static volatile unsigned calibration_stage;
+#endif
 static uint32_t timer_ticks;
 
 /*
@@ -45,7 +53,9 @@ static uint32_t spurious_count[IRQ_MAX + 1];
 
 static int service_active(const struct irq_service_info *service);
 static hal_irq_ack_t begin_ack(int irq);
+#if !defined(HAL_CPU_UP)
 static void imcr_to_apic(void);
+#endif
 
 /*
  * Initializes the i386 IRQ service registry and legacy controller.
@@ -591,6 +601,10 @@ int
 i386_interrupt_select(
 	void)
 {
+#if defined(HAL_CPU_UP)
+	/* Keeps the legacy PIC: a uniprocessor build has no APIC code. */
+	return HAL_ERR_UNSUPPORTED;
+#else
 	int error;
 
 	/* Discovers the board's available processor and interrupt topology. */
@@ -654,6 +668,7 @@ i386_interrupt_select(
 
 	/* Reports a completed APIC selection. */
 	return HAL_OK;
+#endif
 }
 
 /*
@@ -663,6 +678,10 @@ int
 i386_interrupt_calibration_tick(
 	void)
 {
+#if defined(HAL_CPU_UP)
+	/* Has no local APIC timer to calibrate. */
+	return 0;
+#else
 	/* Leaves ordinary timer ticks for normal IRQ dispatch. */
 	if (!calibration_active || apic_mode || calibration_stage >= 2U)
 		return 0;
@@ -680,6 +699,7 @@ i386_interrupt_calibration_tick(
 
 	/* Reports that calibration consumed this timer interrupt. */
 	return 1;
+#endif
 }
 
 /*
@@ -747,11 +767,13 @@ i386_interrupt_mask(
 	int irq)
 {
 	/* Programs the selected APIC or legacy PIC path. */
+#if !defined(HAL_CPU_UP)
 	if (apic_mode) {
 		i386_ioapic_mask(irq);
-	} else {
-		pic_set_irq_mask(irq, 1);
+		return;
 	}
+#endif
+	pic_set_irq_mask(irq, 1);
 }
 
 /*
@@ -762,11 +784,13 @@ i386_interrupt_unmask(
 	int irq)
 {
 	/* Programs the selected APIC or legacy PIC path. */
+#if !defined(HAL_CPU_UP)
 	if (apic_mode) {
 		i386_ioapic_unmask(irq);
-	} else {
-		pic_set_irq_mask(irq, 0);
+		return;
 	}
+#endif
+	pic_set_irq_mask(irq, 0);
 }
 
 /*
@@ -777,11 +801,13 @@ i386_interrupt_eoi(
 	int irq)
 {
 	/* Signals the selected local APIC or legacy PIC path. */
+#if !defined(HAL_CPU_UP)
 	if (apic_mode) {
 		i386_lapic_eoi();
-	} else {
-		pic_send_eoi(irq);
+		return;
 	}
+#endif
+	pic_send_eoi(irq);
 }
 
 /*
@@ -792,8 +818,12 @@ i386_interrupt_route(
 	int irq,
 	hal_cpu_id_t cpu)
 {
+#if !defined(HAL_CPU_UP)
 	uint8_t apic_id;
 	int result;
+#else
+	UNUSED_PARAMETER(irq);
+#endif
 
 	/* Supports only the bootstrap CPU while the legacy PIC is active. */
 	if (!apic_mode) {
@@ -802,6 +832,7 @@ i386_interrupt_route(
 			return HAL_OK;
 		return HAL_ERR_UNSUPPORTED;
 	}
+#if !defined(HAL_CPU_UP)
 
 	/* Resolves the logical CPU to its firmware local-APIC identifier. */
 	result = i386_smp_apic_id(cpu, &apic_id);
@@ -815,6 +846,7 @@ i386_interrupt_route(
 
 	/* Returns the route-programming result. */
 	return result;
+#endif
 }
 
 /*
@@ -869,6 +901,7 @@ begin_ack(
 	return (hal_irq_ack_t)(unsigned)(irq + 1);
 }
 
+#if !defined(HAL_CPU_UP)
 /* Routes legacy external interrupts through the APIC fabric. */
 static void
 imcr_to_apic(
@@ -878,3 +911,4 @@ imcr_to_apic(
 	asm_outb(0x22U, 0x70U);
 	asm_outb(0x23U, 0x01U);
 }
+#endif

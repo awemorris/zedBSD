@@ -159,10 +159,12 @@ int_handler(
 		/* Delivers the scheduler notification for the current CPU. */
 		kernel_cpu_notify_handler(hal_cpu_current(), IRQ_MAX + 2U);
 		is_handled = 1;
+#if !defined(HAL_CPU_UP)
 	} else if (int_num == INT_CPU_TLB) {
 		/* Services pending remote TLB invalidations. */
 		i386_tlb_interrupt();
 		is_handled = 1;
+#endif
 	} else if (int_num == INT_CPU_PANIC) {
 		/* Parks this CPU after a remote panic request. */
 		hal_cpu_park();

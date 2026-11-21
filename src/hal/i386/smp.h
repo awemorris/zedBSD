@@ -14,8 +14,16 @@
 
 #include "apic-topology.h"
 
-/* Nonzero once the boot CPU starts another CPU; never cleared. */
+/*
+ * Nonzero once the boot CPU starts another CPU; never cleared.  A
+ * uniprocessor build (HAL_CPU_UP) has no other CPU and no APIC code, and
+ * the value is a constant zero.
+ */
+#if defined(HAL_CPU_UP)
+#define i386_smp_started 0U
+#else
 extern volatile unsigned i386_smp_started;
+#endif
 
 /*
  * The current CPU's logical ID: the boot CPU's, 0, without asking the
