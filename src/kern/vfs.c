@@ -1441,6 +1441,7 @@ vfs_scan_physical_disks(
 	const char *boot_name;
 	unsigned physical_count;
 	unsigned skipped;
+	unsigned empty;
 	unsigned i;
 	int geometry_error;
 	int partition_error;
@@ -1516,11 +1517,16 @@ vfs_scan_physical_disks(
 			continue;
 		}
 
+		/*
+		 * Publishes the entries that hold blocks.  A table with fixed
+		 * slots (PC-98 has sixteen) reports its unused ones as empty
+		 * entries, so they are counted into one line after the loop
+		 * rather than named one per line on a slow console.
+		 */
+		empty = 0;
 		for (slot = 0; slot < count; slot++) {
 			if (entries[slot].p_block_count == 0) {
-				VFS_LOG("vfs: %s partition %u has zero blocks; "
-				    "not published\n", physical[i]->d_name,
-				    entries[slot].p_index + 1U);
+				empty++;
 				continue;
 			}
 
@@ -1580,6 +1586,11 @@ vfs_scan_physical_disks(
 			if (matches)
 				*loader_boot_partition = entries[slot].p_disk;
 		}
+
+		/* Says how many entries held no blocks and were not published. */
+		if (empty != 0)
+			VFS_LOG("vfs: %s: %u partition entries have zero blocks; "
+			    "not published\n", physical[i]->d_name, empty);
 
 		disk_release(physical[i]);
 		physical[i] = NULL;

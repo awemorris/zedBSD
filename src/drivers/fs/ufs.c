@@ -17986,6 +17986,7 @@ ufs_quota_rebuild(
 	struct mount *mountp)
 {
 	uint64_t fragment;
+	uint64_t loaded;
 	uint64_t blocks;
 	uint8_t *raw;
 	uint16_t mode;
@@ -17998,6 +17999,12 @@ ufs_quota_rebuild(
 
 	ms = state(mountp);
 	error = 0;
+
+	/*
+	 * No inode block is staged yet.  Fragment zero holds the boot area,
+	 * never an inode block, so it cannot be mistaken for a staged one.
+	 */
+	loaded = 0;
 
 	/* Takes the staging each inode block is read into. */
 	block = kern_malloc(ms->super.bsize);
@@ -18023,10 +18030,17 @@ ufs_quota_rebuild(
 			fragment = cgstart(&ms->super, cg) + ms->super.iblkno +
 				(index / ms->super.inopb) * ms->super.frag;
 
-			/* Reads the block the inode lives in. */
-			error = read_block(mountp, fragment, block);
-			if (error != 0)
-				break;
+			/*
+			 * Reads the block the inode lives in, once for all the
+			 * inodes it holds: this walk only reads, so the staged
+			 * copy stays what the disk holds.
+			 */
+			if (fragment != loaded) {
+				error = read_block(mountp, fragment, block);
+				if (error != 0)
+					break;
+				loaded = fragment;
+			}
 			raw = block +
 				(index % ms->super.inopb) * UFS_DINODE_SIZE;
 
@@ -18387,6 +18401,7 @@ orphan_scan_locked(
 	uint8_t *raw;
 	uint64_t number;
 	uint64_t fragment;
+	uint64_t loaded;
 	uint32_t cg;
 	uint32_t index;
 	uint16_t links;
@@ -18400,6 +18415,12 @@ orphan_scan_locked(
 	 */
 	ms = state(mountp);
 	map_bytes = ((size_t)ms->super.ipg + 7U) / 8U;
+
+	/*
+	 * No inode block is staged yet.  Fragment zero holds the boot area,
+	 * never an inode block, so it cannot be mistaken for a staged one.
+	 */
+	loaded = 0;
 
 	/* Walks every cylinder group looking for unlinked inodes. */
 	for (cg = 0; cg < ms->super.ncg; cg++) {
@@ -18434,10 +18455,18 @@ orphan_scan_locked(
 
 			fragment = cgstart(&ms->super, cg) + ms->super.iblkno + (index / ms->super.inopb) * ms->super.frag;
 
-			/* Reads the block the inode lives in. */
-			error = read_block(mountp, fragment, scan->block);
-			if (error != 0)
-				return error;
+			/*
+			 * Reads the block the inode lives in, once for the run of
+			 * inodes it holds.  The private mount has no other writer,
+			 * and a recovery below drops the staged copy, so every
+			 * dinode tested is still what the disk holds.
+			 */
+			if (fragment != loaded) {
+				error = read_block(mountp, fragment, scan->block);
+				if (error != 0)
+					return error;
+				loaded = fragment;
+			}
 
 			/* Takes the raw inode out of that block. */
 			raw = scan->block + (index % ms->super.inopb) * UFS_DINODE_SIZE;
@@ -18455,6 +18484,9 @@ orphan_scan_locked(
 			error = orphan_recover_one(mountp, (uint32_t)number, raw, &scan->inode);
 			if (error != 0)
 				return error;
+
+			/* The recovery wrote inodes; the next one is read afresh. */
+			loaded = 0;
 		}
 	}
 
