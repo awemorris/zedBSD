@@ -1,4 +1,0 @@
-PLATFORM := rpi5
-ARCHITECTURE := arm64
-BOARD := rpi5
-VARIANT :=

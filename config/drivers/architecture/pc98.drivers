@@ -1,8 +1,0 @@
-# key|kind|label|platforms|default|choices
--|fixed|PC-98 IDE controller|pc98|y|
--|fixed|PC-98 keyboard and text console|pc98|y|
--|fixed|PC-98 bus mouse|pc98|y|
--|fixed|PC-98 and MBR disk labels|pc98|y|
--|fixed|PC-98 8259 interrupt controller and 8253 timer|pc98|y|
-CONFIG_DRIVER_GRAPHICS|bool|Cirrus Core Graph graphics|pc98|y|
-CONFIG_DRIVER_LGY98|bool|LGY-98 Ethernet adapter|pc98|n|

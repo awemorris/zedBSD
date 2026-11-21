@@ -1,4 +1,0 @@
-PLATFORM := macppc32
-ARCHITECTURE := ppc32
-BOARD := mac99
-VARIANT :=

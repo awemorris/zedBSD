@@ -73,11 +73,11 @@
  * DTP_OFFSET of the 32-bit PowerPC ELF ABI's TLS section).
  */
 #if defined(HAL_ARCH_RISCV64)
-#define RTLD_DTV_OFFSET ((uintptr_t)0x800U)
+#define RTLD_DTV_OFFSET		((uintptr_t)0x800U)
 #elif defined(HAL_ARCH_PPC32) || defined(HAL_ARCH_PPC64)
-#define RTLD_DTV_OFFSET ((uintptr_t)0x8000U)
+#define RTLD_DTV_OFFSET		((uintptr_t)0x8000U)
 #else
-#define RTLD_DTV_OFFSET ((uintptr_t)0)
+#define RTLD_DTV_OFFSET		((uintptr_t)0)
 #endif
 
 /*
@@ -86,8 +86,9 @@
  * so a page is never moved, only linked after the last.  The pages go
  * with the object.
  */
-#define RTLD_TLSDESC_CHUNK \
-	((RTLD_PAGE_SIZE - 2U * sizeof(void *)) / sizeof(struct __tls_index))
+
+#define RTLD_TLSDESC_CHUNK	((RTLD_PAGE_SIZE - 2U * sizeof(void *)) / sizeof(struct __tls_index))
+
 struct rtld_tlsdesc_chunk {
 	struct rtld_tlsdesc_chunk *next;
 	uintptr_t used;
@@ -160,6 +161,7 @@ struct rtld_object {
 	const char *runpath;
 	struct rtld_object *loader_parent;
 	unsigned relative_done;
+
 	/* The writable load segment the last relocation target fell in. */
 	uintptr_t relocation_window_start;
 	uintptr_t relocation_window_end;
@@ -182,6 +184,7 @@ struct rtld_object {
 	uintptr_t tls_module_id;
 	unsigned active;
 	unsigned unloading;
+
 	/*
 	 * Keeps the object mapped until the process ends: one loaded at
 	 * startup, one whose DT_FLAGS_1 holds DF_1_NODELETE, or one opened
@@ -255,8 +258,8 @@ struct rtld_symbol_name {
 	unsigned hashed;
 };
 
-#define RTLD_HANDLE_CHUNK 64U
-#define RTLD_HANDLE_MAGIC 0x5a444c48U
+#define RTLD_HANDLE_CHUNK	64U
+#define RTLD_HANDLE_MAGIC	0x5a444c48U
 
 struct rtld_handle {
 	uint32_t magic;
@@ -318,32 +321,41 @@ struct rtld_tls_chunk {
 static struct rtld_object_chunk object_chunk_first;
 static struct rtld_object_chunk *object_chunk_last = &object_chunk_first;
 static unsigned object_count;
+
 /* How many objects have been added and removed over the process's life. */
 static unsigned long long rtld_object_generation;
 static unsigned long long rtld_object_removals;
+
 static struct rtld_object *main_object;
 static struct rtld_object *interpreter_object;
+
 /*
  * The initialized objects, oldest first: the order their finalizers run
  * in backwards.  Changed under the loader lock only.
  */
 static struct rtld_object *initialization_head;
 static struct rtld_object *initialization_tail;
+
 /* The number of the last dlsym() walk (lookup_mark); under the loader lock only. */
 static uint32_t lookup_generation;
+
 /* Program tables of objects gone, for reuse; under the loader lock only. */
 static struct rtld_program_table *program_tables_free;
+
 static unsigned startup_initialized;
 static unsigned process_finalized;
+
 /* The handle table: the static first chunk and the last one linked. */
 static struct rtld_handle_chunk handle_chunk_first;
 static struct rtld_handle_chunk *handle_chunk_last = &handle_chunk_first;
+
 static uint32_t next_handle_generation = 1;
 static volatile uint32_t loader_lock_word;
 static uintptr_t loader_lock_owner;
 static unsigned loader_lock_depth;
 static char loader_error[KERN_RTLD_DLERROR_SIZE];
 static unsigned loader_error_pending;
+
 /*
  * The TLS module table: the static first chunk and the last one linked.
  * tls_module_count is the highest id ever given; it grows under the loader
@@ -368,13 +380,16 @@ static uint64_t tls_generation;
  * object that arrives later through dlopen() cannot join that block and keeps
  * a separately allocated one reached through __tls_get_addr.
  */
+
 static uintptr_t static_tls_distance;
 static void *static_tls_template;
 static size_t static_tls_template_size;
 static size_t static_tls_alignment = 1;
+
 #if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)
 static unsigned static_tls_sealed;
 #endif
+
 static struct __rtld_tcb *rtld_threads;
 static uint32_t next_object_generation = 1;
 
@@ -681,6 +696,7 @@ static int bounded_string(const char *string, size_t capacity, size_t *length_ou
 static void validate_verneed(struct rtld_object *object);
 static void register_tls_module(struct rtld_object *object);
 static void load_dependencies(struct rtld_object *object);
+
 /*
  * Supports the environment lookup operation.
  *
@@ -915,8 +931,7 @@ __rtld_thread_free(
 	/* Handles the tcb availability. */
 	if (tcb == NULL)
 		return;
-	current = syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS,
-			   0, 0, 0, 0, 0);
+	current = syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 
 	/* Handles an operation failure. */
 	if (!raw_error(current) && (uintptr_t)current == (uintptr_t)tcb)

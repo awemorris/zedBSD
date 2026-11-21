@@ -39,28 +39,29 @@ Our current targets are the following:
 
 Main targets:
 
-| Arch     | BSP    | Vendor                  | Board Name         | CPU Arch    | CPU Model        | GPU Arch         | GPU Model        |
-|----------|--------|-------------------------|--------------------|-------------|------------------|------------------|------------------|
-| riscv64  | vf2    | StarFive                | Vision Five 2      | RV64GC      | StarFive JH7110  | PowerVR Rogue    | IMG BXE-4-32 MC1 |
-| arm64    | rpi5   | Raspberry Pi Foundation | Raspberry Pi 5     | Armv8       | Arm Cortex-A76   | VideoCore        | VideoCore VII    |
-|          | rpi4   | Raspberry Pi Foundation | Raspberry Pi 4     | Armv8       | Arm Cortex-A72   | VideoCore        | VideoCore VI     |
-| x86_64   | pcat   | Generic                 | PC/AT              | x86_64      | Generic          | Intel/NVIDIA/AMD | Intel/NVIDIA/AMD |
+| Name     | HAL CPU  | HAL BSP  | Vendor       | Board Name     | CPU Arch  | CPU Model        | GPU Arch         | GPU Model        |
+|----------|----------|----------|--------------|----------------|-----------|------------------|------------------|------------------|
+| vf2      | riscv64  | vf2      | StarFive     | Vision Five 2  | RV64GC    | StarFive JH7110  | PowerVR Rogue    | IMG BXE-4-32 MC1 |
+| rpi5     | arm64    | rpi5     | Raspberry Pi | Raspberry Pi 5 | Armv8     | Arm Cortex-A76   | VideoCore        | VideoCore VII    |
+| rpi4     | arm64    | rpi4     | Raspberry Pi | Raspberry Pi 4 | Armv8     | Arm Cortex-A72   | VideoCore        | VideoCore VI     |
+| x86_64   | x86_64   | pcat     | Generic      | PC             | x86_64    | Intel/AMD        | Intel/NVIDIA/AMD | Intel/NVIDIA/AMD |
 
 Retro and minor PC targets:
 
-| Arch     | BSP        | Vendor                  | Board Name                  |
-|----------|------------|-------------------------|-----------------------------|
-| i686     | pcat       | Generic                 | PC/AT                       |
-| i386     | pc9821     | NEC                     | PC-9821V13/S5               |
-| i386     | pc9801ns   | NEC                     | PC-9801NS/20                |
-| ppc32    | mac99      | Apple                   | PowerBook G4                |
-| ppc64    | macppc64   | Apple                   | PowerMac G5                 |
-| ppc64    | pseries    | IBM                     | Power8 S814L                |
-| armv7    | zybo       | Digilent                | Zyzo Z7                     |
-| sparcv9  | sun4u      | Sun Microsystems        | Sun Blade 150               |
-| m68k     | mac68k     | Apple                   | Macintosh (68k)             |
-| mips     | jz4770     | Ingenic                 | JZ4770 SoC                  |
-| riscv32  | virt       | qemu                    | qemu                        |
+| Name         | HAL CPU  | HAL BSP    | Vendor                  | Board Name                  |
+|--------------|----------|------------|-------------------------|-----------------------------|
+| i686         | i686     | pcat       | -                       | PC/AT                       |
+| i386         | i386     | pcat       | -                       | PC/AT                       |
+| pc9821       | i386     | pc9821     | NEC                     | PC-9821V13/S5               |
+| pc9801ns     | i386     | pc9801ns   | NEC                     | PC-9801NS/20                |
+| macppc32     | ppc32    | mac99      | Apple                   | PowerBook G4                |
+| macppc64     | ppc64    | macppc64   | Apple                   | PowerMac G5                 |
+| power8       | ppc64    | pseries    | IBM                     | Power8 S814L                |
+| zybo         | armv7    | zybo       | Digilent                | Zyzo Z7                     |
+| sun4u        | sparcv9  | sun4u      | Sun Microsystems        | Sun Blade 150               |
+| mac68k       | m68k     | mac68k     | Apple                   | Macintosh (68k)             |
+| jz4770       | mips     | jz4770     | Ingenic                 | JZ4770 SoC                  |
+| riscv32-virt | riscv32  | virt     | qemu                    | qemu                        |
 
 Note that our retro and minor targets are for portability demonstration only. 
 
