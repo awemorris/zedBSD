@@ -144,16 +144,39 @@ STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 # Compile and link flags
 ################################################
 
-# A program: position-independent, freestanding, against the sysroot.
+# Whether the programs are linked statically (the configuration's
+# CONFIG_USERLAND_STATIC, which the top-level build passes).
+STANDALONE_STATIC ?= n
+
+# A program: freestanding, against the sysroot; position-independent
+# unless it is linked statically.
 STANDALONE_PROGRAM_CFLAGS = \
 	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
 	$(STANDALONE_ARCH_CFLAGS) \
 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-	-ffreestanding -fno-stack-protector -fPIC -O2 \
+	-ffreestanding -fno-stack-protector $(STANDALONE_PROGRAM_PIC) -O2 \
 	-Wall -Wextra -Werror
 
-# A program's link: a PIE that loads /lib/libc.so through /lib/ld.so.
+# A statically linked program: position-dependent, started by crt0.o, and
+# linked with the C library's archives; no run-time loader.
+ifeq ($(STANDALONE_STATIC),y)
+STANDALONE_PROGRAM_PIC = -fno-pic -fno-pie
+STANDALONE_PROGRAM_LDFLAGS = \
+	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
+	$(STANDALONE_ARCH_CFLAGS) \
+	-nostdlib -static -Wl,--gc-sections \
+	-Wl,-z,separate-code,-z,stack-size=0x100000
+STANDALONE_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt0.o
+STANDALONE_PROGRAM_LIBS = \
+	-L"$(STANDALONE_LIB_DIR)" -L"$(STANDALONE_SYSROOT)/usr/lib" -Wl,--start-group \
+	-l:libm.a -l:libc.a -l:libzedbsd-compiler-rt.a -l:libclang_rt.builtins.a \
+	-Wl,--end-group
+endif
+
+# A dynamically linked program: a PIE that loads /lib/libc.so through /lib/ld.so.
+ifneq ($(STANDALONE_STATIC),y)
+STANDALONE_PROGRAM_PIC = -fPIC
 STANDALONE_PROGRAM_LDFLAGS = \
 	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
 	$(STANDALONE_ARCH_CFLAGS) \
@@ -161,6 +184,9 @@ STANDALONE_PROGRAM_LDFLAGS = \
 	-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
 	-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 	-Wl,--dynamic-linker=/lib/ld.so
+STANDALONE_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt1.o
+STANDALONE_PROGRAM_LIBS = -l:libm.so -l:libc.so
+endif
 
 # A shared library's objects.
 STANDALONE_SHLIB_CFLAGS = \
@@ -247,6 +273,16 @@ endef
 # The link options of the required libraries that exist (a command for the recipe's shell).
 standalone_required_libs = $$$$(for so in $(1); do test -f "$(STANDALONE_DYNAMIC_DIR)/$$$$so" && printf ' -l:%s' "$$$$so"; done)
 
+# The same for a statically linked program: the libraries' archives.
+standalone_required_archives = $$$$(for so in $(1); do a=$$$${so%.so}.a; test -f "$(STANDALONE_LIB_DIR)/$$$$a" && printf ' -l:%s' "$$$$a"; done)
+
+# The required libraries of a program: archives when it is linked statically.
+ifeq ($(STANDALONE_STATIC),y)
+standalone_program_required_libs = $(call standalone_required_archives,$(1))
+else
+standalone_program_required_libs = $(call standalone_required_libs,$(1))
+endif
+
 ################################################
 # The rules of one package
 ################################################
@@ -308,17 +344,18 @@ $$(STANDALONE_OBJECTS_STAMP_$(1)): FORCE
 	$$(Q)printf '%s\n' '$$(STANDALONE_OBJECTS_$(1))' > $$@.tmp
 	$$(Q)if cmp -s $$@.tmp $$@; then rm -f $$@.tmp; else mv -f $$@.tmp $$@; fi
 
-# A program: linked against libc.so, with its mode recorded for the root.
+# A program: linked against the C library (libc.so, or its archives when
+# static), with its mode recorded for the root.
 ifeq ($(7),program)
 STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
 $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,LD,$(10)/$(1))
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
 	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) \
-		"$$(STANDALONE_SYSROOT)/usr/lib/crt1.o" \
+		"$$(STANDALONE_PROGRAM_CRT)" \
 		$$(STANDALONE_OBJECTS_$(1)) \
 		-L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" \
-		$(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libm.so -l:libc.so \
+		$(call standalone_program_required_libs,$$(STANDALONE_SO_LIST_$(1))) $$(STANDALONE_PROGRAM_LIBS) \
 		-o $$@
 	$$(Q)printf '%s %s\n' "/$(10)/$(1)" "$(6)" > "$$(STANDALONE_WORK_DIR_$(1))/mode"
 endif
@@ -337,6 +374,17 @@ $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_ST
 		$(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -l:libm.so \
 		-o $$@
 	$$(Q)cp -f $$@ "$$(STANDALONE_LIB_DIR)/$(2).so"
+endif
+
+# A shared library's archive of the same objects, which a statically linked program takes.
+ifeq ($(7)$(STANDALONE_STATIC),shared-libraryy)
+STANDALONE_ARCHIVE_$(1) = $$(STANDALONE_LIB_DIR)/$(2).a
+$$(STANDALONE_ARCHIVE_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1))
+	$$(call standalone_log,AR,$(2).a)
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)rm -f $$@
+	$$(Q)$$(AR) rcs $$@ $$(STANDALONE_OBJECTS_$(1))
+standalone-build-$(1): $$(STANDALONE_ARCHIVE_$(1))
 endif
 
 # A static library, when it has sources.

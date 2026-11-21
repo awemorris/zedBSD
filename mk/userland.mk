@@ -45,7 +45,8 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
 # absolute: a nested make runs in its package's directory, where a BUILD=
 # given on the command line as a relative path would name a directory in
 # the source tree.
-SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
+SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))" \
+	STANDALONE_STATIC="$(CONFIG_USERLAND_STATIC)"
 
 # What a package built from an upstream release (userland/packages/) is told
 # besides: the programs this build selects, the platform's defaults among

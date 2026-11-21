@@ -592,3 +592,8 @@ include mk/test-config.mk
 ################################################
 
 CONFIG_USERLAND_PROGRAMS          ?=
+
+# [Static Programs]
+#  - Description: Link the programs statically: no run-time loader and
+#    no shared C library at run time (a small machine without a cache).
+CONFIG_USERLAND_STATIC            ?= n
