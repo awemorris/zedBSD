@@ -55,7 +55,8 @@ static bool space_lock_enter(struct i386_space *space);
 static void space_lock_leave(struct i386_space *space, bool enabled);
 static struct i386_page_table *find_table(struct i386_space *space, uintptr_t vaddr);
 static struct i386_page_table *create_table(struct i386_space *space, uintptr_t vaddr);
-static struct i386_page_table *detach_empty_tables(struct i386_space *space);
+static struct i386_page_table *detach_empty_tables(struct i386_space *space, uintptr_t vaddr, size_t size);
+static int table_has_present(const struct i386_page_table *table, unsigned start);
 static void free_detached_tables(struct i386_page_table *table);
 static int valid_user_range(uintptr_t vaddr, size_t size);
 static uint32_t pte_flags(uint32_t attr);
@@ -395,7 +396,7 @@ hal_space_map(
 			}
 
 			/* Detaches empty parents before choosing the invalidation scope. */
-			detached = detach_empty_tables(space);
+			detached = detach_empty_tables(space, vaddr, offset);
 
 			/* Flushes all translations if parent tables were detached. */
 			if (detached != NULL) {
@@ -683,7 +684,7 @@ hal_space_unmap(
 	}
 
 	/* Detaches empty parent tables before acknowledging invalidation. */
-	detached = detach_empty_tables(space);
+	detached = detach_empty_tables(space, vaddr, size);
 
 	/* Flushes all translations if a parent table was detached. */
 	if (detached != NULL) {
@@ -1185,39 +1186,64 @@ create_table(
 	return table;
 }
 
-/* Detaches empty page tables while retaining storage for shootdown. */
+/*
+ * Detaches the page tables of a cleared interval that hold no present PTE,
+ * retaining their storage for the shootdown.  Only the tables covering the
+ * interval can have become empty: the PTEs of the others did not change.
+ * The rollback of a failed map passes an empty interval when nothing was
+ * installed, and then nothing is detached.
+ */
 static struct i386_page_table *
 detach_empty_tables(
-	struct i386_space *space)
+	struct i386_space *space,
+	uintptr_t vaddr,
+	size_t size)
 {
 	struct i386_page_table **link;
 	struct i386_page_table *detached;
 	struct i386_page_table *table;
-	unsigned index;
+	uintptr_t first;
+	uintptr_t last;
+	uintptr_t pde;
+	unsigned start;
 
 	/* Initializes the live-list cursor and detached-list result. */
 	link = &space->page_tables;
 	detached = NULL;
+	if (size == 0)
+		return NULL;
 
-	/* Examines every attached page table for present PTEs. */
+	/* Names the directory entries the interval covers. */
+	first = vaddr >> 22;
+	last = (vaddr + size - 1U) >> 22;
+
+	/* Examines every attached page table of the interval for present PTEs. */
 	while (*link != NULL) {
 		table = *link;
+		pde = table->vaddr >> 22;
 
-		/* Searches this table for its first present PTE. */
-		for (index = 0; index < 1024U; index++) {
-			/* Stops after finding a present mapping. */
-			if ((table->pte[index] & PTE_PRESENT) != 0U)
-				break;
+		/* Retains a table outside the interval. */
+		if (pde < first || pde > last) {
+			link = &table->next;
+			continue;
 		}
 
+		/*
+		 * Looks first at the cleared entries' neighbours, where a
+		 * table that is still in use most likely has its mappings.
+		 */
+		start = 0U;
+		if (pde == first)
+			start = (unsigned)(vaddr >> 12) & 1023U;
+
 		/* Retains a nonempty table and advances its live-list link. */
-		if (index != 1024U) {
+		if (table_has_present(table, start)) {
 			link = &table->next;
 			continue;
 		}
 
 		/* Clears the parent PDE and prepends the table for later release. */
-		space->pdt[table->vaddr >> 22] = 0;
+		space->pdt[pde] = 0;
 		*link = table->next;
 		table->next = detached;
 		detached = table;
@@ -1225,6 +1251,33 @@ detach_empty_tables(
 
 	/* Returns the detached tables in reverse discovery order. */
 	return detached;
+}
+
+/*
+ * Reports whether a page table holds a present PTE, looking from one index
+ * to the end of the table and then from its start.
+ */
+static int
+table_has_present(
+	const struct i386_page_table *table,
+	unsigned start)
+{
+	unsigned index;
+
+	/* Searches from the start index to the end of the table. */
+	for (index = start; index < 1024U; index++) {
+		if ((table->pte[index] & PTE_PRESENT) != 0U)
+			return 1;
+	}
+
+	/* Searches the entries before the start index. */
+	for (index = 0; index < start; index++) {
+		if ((table->pte[index] & PTE_PRESENT) != 0U)
+			return 1;
+	}
+
+	/* Every PTE is clear. */
+	return 0;
 }
 
 /* Releases a list of detached page tables. */
