@@ -20,6 +20,11 @@
 #include "../irq.h"
 #include "../pic.h"
 
+/* The timer's count is 16 bits, which bounds how slow the tick can be. */
+#if (1193182U + I386_TICK_HZ / 2U) / I386_TICK_HZ > 65535U
+#error "I386_TICK_HZ is slower than the PC/AT interval timer can count"
+#endif
+
 static uint8_t cmos_read(uint8_t index, void *context);
 
 /*
@@ -31,7 +36,7 @@ bsp_timer_init(
 {
 	uint16_t divisor;
 
-	/* Programs channel zero for the fixed 100 Hz periodic rate. */
+	/* Programs channel zero for the fixed periodic rate. */
 	divisor = (uint16_t)((1193182U + I386_TICK_HZ / 2U) /
 	    I386_TICK_HZ);
 	asm_outb(0x43U, 0x34U);

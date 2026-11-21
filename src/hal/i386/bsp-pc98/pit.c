@@ -26,6 +26,11 @@
 #define PC98_PIT_CLOCK_8MHZ	1996800U
 #define PC98_PIT_CLOCK_5MHZ	2457600U
 
+/* The timer's count is 16 bits, which bounds how slow the tick can be. */
+#if (PC98_PIT_CLOCK_5MHZ + I386_TICK_HZ / 2U) / I386_TICK_HZ > 65535U
+#error "I386_TICK_HZ is slower than the PC-98 interval timer can count"
+#endif
+
 /*
  * Programs the PC-98 interval timer and enables its IRQ.
  */

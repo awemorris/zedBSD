@@ -16,9 +16,15 @@
 
 /*
  * The tick's rate, in hertz: the one PIT of the machine interrupts every
- * CPU's scheduler at this rate, which never changes.
+ * CPU's scheduler at this rate, which never changes.  A build may set
+ * another rate on the compiler's command line.  The PIT divides its input
+ * clock by a 16-bit count, so the slowest rate is about 19 Hz on PC/AT
+ * (1.193182 MHz) and 38 Hz on PC-98 (2.4576 MHz); a slower one does not
+ * build.
  */
+#ifndef I386_TICK_HZ
 #define I386_TICK_HZ	100U
+#endif
 
 void bsp_timer_init(void);
 void clock_handler(void);	/* tick, from irq.c */
