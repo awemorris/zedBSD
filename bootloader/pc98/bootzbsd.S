@@ -96,6 +96,14 @@ stage2_checksum_loop:
 	mov ss, ax
 	mov esp, 0x9000
 	sti
+
+	/*
+	 * The first message comes after the checksum: putc advances
+	 * text_cursor, which lies inside the image the checksum covers.
+	 */
+	mov si, offset msg_init
+	call puts
+
 	push ds
 	xor ax, ax
 	mov ds, ax
@@ -2519,6 +2527,7 @@ fatal:
 1:	hlt
 	jmp 1b
 
+msg_init:		.asciz "Booting zedBSD... "
 msg_start:		.asciz "S4 "
 msg_mbr:		.asciz "MB "
 msg_partition:		.asciz "P1 "
