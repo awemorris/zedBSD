@@ -14,6 +14,8 @@
 
 #include <hal/types.h>
 
+#include "defs.h"
+
 /*
  * Interrupt Stackframe
  */
@@ -64,12 +66,12 @@ void i386_int_load(void);
 /*
  * trap.S
  */
-extern void *_asm_fault_int_handler_tbl[32];
+extern void *_asm_fault_int_handler_tbl[INT_FAULT_COUNT];
 extern void *_asm_irq_int_handler_tbl[16];
 extern void *_asm_syscall_int_handler(void);
 extern void *_asm_cpu_notify_handler(void);
 extern void *_asm_cpu_panic_handler(void);
 extern void *_asm_cpu_tlb_handler(void);
-extern void *_asm_undefined_int_handler(void);
+extern uint8_t _asm_vector_stubs[256 * VECTOR_STUB_SIZE];
 
 #endif

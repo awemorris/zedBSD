@@ -18,7 +18,8 @@
 
 void pic_init(void);
 void pic_set_irq_mask(int irq_num, int mask);
-int pic_get_irq_in_service(void);
+int pic_irq_in_service(int irq_num);
+void pic_complete_spurious(int irq_num);
 void pic_send_eoi(int irq_num);
 
 #endif

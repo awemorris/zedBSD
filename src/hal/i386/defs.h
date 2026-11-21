@@ -82,7 +82,8 @@
 #define INT_CPU_PANIC		(0xd1)
 #define INT_CPU_TLB		(0xd2)
 #define INT_IRQ_BASE		(0xe0)
-#define INT_UNDEF		(0xffffffff)
+#define INT_FAULT_COUNT		(0x14)
+#define VECTOR_STUB_SIZE	(16)
 
 /*
  * CR0 Flags

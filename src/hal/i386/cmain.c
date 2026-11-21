@@ -18,7 +18,7 @@
 #include "irq.h"
 #include "space.h"
 
-/* The version, from VERSION (ws129-p003): the Makefile defines it on the command line. */
+/* The version, from VERSION: the Makefile defines it on the command line. */
 #ifndef ZEDBSD_VERSION
 #error ZEDBSD_VERSION is not defined
 #endif

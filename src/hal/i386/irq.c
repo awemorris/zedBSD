@@ -36,6 +36,13 @@ static volatile unsigned calibration_active;
 static volatile unsigned calibration_stage;
 static uint32_t timer_ticks;
 
+/*
+ * Spurious deliveries counted per legacy line.  A debugger reads them;
+ * nothing else does.  Updated only in interrupt context on the CPU that
+ * took the delivery.
+ */
+static uint32_t spurious_count[IRQ_MAX + 1];
+
 static int service_active(const struct irq_service_info *service);
 static hal_irq_ack_t begin_ack(int irq);
 static void imcr_to_apic(void);
@@ -679,7 +686,10 @@ i386_interrupt_uses_apic(
 }
 
 /*
- * Validates one delivered IRQ against the active controller.
+ * Reports whether one delivered IRQ is a real request.
+ *
+ * The 8259 answers an acknowledge cycle whose request has gone with the
+ * vector of its lowest-priority line and leaves that line out of service.
  */
 int
 i386_interrupt_validate(
@@ -689,13 +699,36 @@ i386_interrupt_validate(
 
 	/* APIC vectors already identify the delivered IRQ directly. */
 	if (apic_mode)
-		return irq;
+		return 1;
 
-	/* Reads the legacy controller's in-service IRQ. */
-	in_service = pic_get_irq_in_service();
+	/* Asks the legacy controller whether it marked the line. */
+	in_service = pic_irq_in_service(irq);
+	if (!in_service)
+		return 0;
 
-	/* Returns the legacy in-service result. */
-	return in_service;
+	/* Succeeded: the controller has the line in service. */
+	return 1;
+}
+
+/*
+ * Discards one spurious legacy delivery.
+ *
+ * The delivery is counted and the cascade is completed where the master
+ * marked it, so the interrupted code resumes as if nothing happened.
+ */
+void
+i386_interrupt_spurious(
+	int irq)
+{
+	/* Ignores IRQ numbers outside the configured controller range. */
+	if (irq < 0 || irq > IRQ_MAX)
+		return;
+
+	/* Counts the delivery for a debugger to read. */
+	spurious_count[irq]++;
+
+	/* Clears the cascade mark a spurious slave delivery leaves behind. */
+	pic_complete_spurious(irq);
 }
 
 /*

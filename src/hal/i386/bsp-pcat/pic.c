@@ -20,10 +20,19 @@
 #define SLAVE_COMMAND 0xa0U
 #define SLAVE_DATA 0xa1U
 
+#define CASCADE_IRQ 2U
+
+/* The 8259 command that reads the in-service register next. */
+#define PIC_READ_ISR 0x0bU
+
+/* The 8259 specific end-of-interrupt command. */
+#define PIC_SPECIFIC_EOI 0x60U
+
+/* The mask each controller holds, written under disabled interrupts. */
 static uint8_t master_mask;
 static uint8_t slave_mask;
 
-static int highest(uint8_t value);
+static uint8_t read_in_service(uint16_t command_port);
 
 /*
  * Initializes and masks both PC/AT interrupt controllers.
@@ -35,13 +44,13 @@ pic_init(
 	/* Programs the master controller and its slave-cascade input. */
 	asm_outb(MASTER_COMMAND, 0x11U);
 	asm_outb(MASTER_DATA, INT_IRQ_BASE);
-	asm_outb(MASTER_DATA, 1U << 2);
+	asm_outb(MASTER_DATA, 1U << CASCADE_IRQ);
 	asm_outb(MASTER_DATA, 0x01U);
 
 	/* Programs the slave controller and its master-cascade identity. */
 	asm_outb(SLAVE_COMMAND, 0x11U);
 	asm_outb(SLAVE_DATA, INT_IRQ_BASE + 8U);
-	asm_outb(SLAVE_DATA, 2U);
+	asm_outb(SLAVE_DATA, CASCADE_IRQ);
 	asm_outb(SLAVE_DATA, 0x01U);
 
 	/* Masks every IRQ at both controllers in hardware order. */
@@ -82,7 +91,7 @@ pic_set_irq_mask(
 			slave_mask |= (uint8_t)(1U << bit);
 		} else {
 			slave_mask &= (uint8_t)~(1U << bit);
-			master_mask &= (uint8_t)~(1U << 2);
+			master_mask &= (uint8_t)~(1U << CASCADE_IRQ);
 			asm_outb(MASTER_DATA, master_mask);
 		}
 		asm_outb(SLAVE_DATA, slave_mask);
@@ -90,36 +99,66 @@ pic_set_irq_mask(
 }
 
 /*
- * Reports the highest-priority PC/AT IRQ currently in service.
+ * Reports whether one PC/AT IRQ is in service at its controller.
+ *
+ * A delivery whose line is not in service is a spurious interrupt: the
+ * request went away before the acknowledge cycle, and the controller
+ * answered with its lowest-priority vector without marking it.
  */
 int
-pic_get_irq_in_service(
-	void)
+pic_irq_in_service(
+	int irq)
 {
 	uint8_t in_service;
-	int master;
-	int slave;
 
-	/* Reads the master controller's in-service register. */
-	asm_outb(MASTER_COMMAND, 0x0bU);
-	in_service = asm_inb(MASTER_COMMAND);
-	master = highest(in_service);
+	/* Ignores IRQ numbers outside the cascaded controllers. */
+	if (irq < 0 || irq > 15)
+		return 0;
 
-	/* Returns a non-cascade master IRQ directly. */
-	if (master != 2)
-		return master;
+	/* Reads the register of the controller that owns the line. */
+	if (irq < 8) {
+		in_service = read_in_service(MASTER_COMMAND);
+	} else {
+		in_service = read_in_service(SLAVE_COMMAND);
+	}
 
-	/* Reads the slave controller's in-service register. */
-	asm_outb(SLAVE_COMMAND, 0x0bU);
-	in_service = asm_inb(SLAVE_COMMAND);
-	slave = highest(in_service);
+	/* Reports the line's in-service bit. */
+	if ((in_service & (1U << ((unsigned)irq & 7U))) != 0)
+		return 1;
 
-	/* Treats an empty slave register as the master cascade IRQ. */
-	if (slave < 0)
-		return 2;
+	/* Reports a line the controller did not mark. */
+	return 0;
+}
 
-	/* Returns the slave IRQ in the combined numbering space. */
-	return slave + 8;
+/*
+ * Completes the cascade of a spurious PC/AT delivery.
+ *
+ * A spurious slave interrupt still marks the cascade line in service at
+ * the master, and that mark is cleared once no slave IRQ remains in
+ * service.  A spurious master interrupt marks nothing.
+ */
+void
+pic_complete_spurious(
+	int irq)
+{
+	uint8_t master_in_service;
+	uint8_t slave_in_service;
+
+	/* Leaves the master's own spurious deliveries alone. */
+	if (irq < 8)
+		return;
+
+	/* Samples both controllers to see whether the cascade stays busy. */
+	master_in_service = read_in_service(MASTER_COMMAND);
+	slave_in_service = read_in_service(SLAVE_COMMAND);
+
+	/*
+	 * Clears only the cascade mark, by a specific end of interrupt, so a
+	 * master IRQ nested under the cascade stays in service.
+	 */
+	if ((master_in_service & (1U << CASCADE_IRQ)) != 0 &&
+	    slave_in_service == 0)
+		asm_outb(MASTER_COMMAND, PIC_SPECIFIC_EOI | CASCADE_IRQ);
 }
 
 /*
@@ -135,20 +174,17 @@ pic_send_eoi(
 	asm_outb(MASTER_COMMAND, 0x20U);
 }
 
-/* Finds the highest set bit in one in-service register. */
-static int
-highest(
-	uint8_t value)
+/* Reads one controller's in-service register. */
+static uint8_t
+read_in_service(
+	uint16_t command_port)
 {
-	int result;
+	uint8_t in_service;
 
-	/* Counts right shifts through the highest asserted bit. */
-	result = -1;
-	while (value != 0) {
-		result++;
-		value >>= 1;
-	}
+	/* Selects the in-service register and reads it back. */
+	asm_outb(command_port, PIC_READ_ISR);
+	in_service = asm_inb(command_port);
 
-	/* Returns the bit index or negative one for an empty register. */
-	return result;
+	/* Returns the controller's in-service bits. */
+	return in_service;
 }
