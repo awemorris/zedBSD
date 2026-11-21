@@ -378,6 +378,19 @@ pmem_alloc_unlocked(
 
 	/* Searches for an aligned free run meeting every constraint. */
 	for (start_index = 0; start_index <= page_end; start_index++) {
+		/*
+		 * Steps over a map word whose 32 pages are all claimed: no
+		 * candidate inside it can start a free run.  Testing those
+		 * pages one bit at a time made every allocation walk the
+		 * claimed low memory, which on a slow CPU cost more than the
+		 * work the page was allocated for.
+		 */
+		if ((start_index & 31U) == 0 &&
+		    pagemap_tbl[start_index >> 5] == UINT32_MAX) {
+			start_index += 31U;
+			continue;
+		}
+
 		/* Skips candidates which do not meet the requested alignment. */
 		if ((start_index & (align_pages - 1U)) != 0)
 			continue;
