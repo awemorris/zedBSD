@@ -43,6 +43,8 @@ int i386_interrupt_uses_apic(void);
 
 int i386_interrupt_validate(int irq);
 
+void i386_interrupt_spurious(int irq);
+
 void i386_interrupt_mask(int irq);
 
 void i386_interrupt_unmask(int irq);

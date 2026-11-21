@@ -123,20 +123,15 @@ int_handler(
 
 	/* Dispatches the vector according to its reserved interrupt class. */
 	if (int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX) {
-		/* Validates that hardware, rather than a user INT, raised the IRQ. */
+		/* Asks the active controller whether the line is in service. */
 		irq_num = int_num - INT_IRQ_BASE;
 		in_service = i386_interrupt_validate(irq_num);
 
-		/* Rejects a vector which the active controller did not report. */
-		if (in_service == -1) {
+		/* Discards a spurious delivery or serves a real one. */
+		if (!in_service) {
+			i386_interrupt_spurious(irq_num);
 			is_handled = 1;
-			hal_printf(
-				"\nIRQ not in service (pic_isr=%02X, int=%02X)\n",
-				in_service,
-				int_num);
-			HAL_FATAL("IRQ error");
 		} else {
-			/* Delivers the validated IRQ to the registered service. */
 			irq_handler(irq_num);
 			is_handled = 1;
 		}
@@ -171,7 +166,7 @@ int_handler(
 	} else if (int_num == INT_CPU_PANIC) {
 		/* Parks this CPU after a remote panic request. */
 		hal_cpu_park();
-	} else if (int_num >= 0 && int_num <= 0x1f) {
+	} else if (int_num >= 0 && int_num < INT_FAULT_COUNT) {
 		/* Handles processor-defined fault vectors. */
 		handle_fault(fp);
 		is_handled = 1;
@@ -179,7 +174,7 @@ int_handler(
 
 	/* Rejects every vector outside the installed dispatch classes. */
 	if (!is_handled) {
-		hal_printf("\nIRQ handler not installed (int %02X)\n", int_num);
+		hal_printf("\nunexpected interrupt vector %02X\n", int_num);
 		HAL_FATAL("IRQ error");
 	}
 
@@ -218,12 +213,16 @@ create_idt(
 {
 	int i;
 
-	/* Installs the undefined-vector handler in every table entry. */
-	for (i = 0; i < 256; i++)
-		set_idt_entry(i, 0, _asm_undefined_int_handler);
+	/* Gives every vector a stub that reports its own number. */
+	for (i = 0; i < 256; i++) {
+		set_idt_entry(
+			i,
+			0,
+			&_asm_vector_stubs[i * VECTOR_STUB_SIZE]);
+	}
 
 	/* Installs the processor-fault entry stubs. */
-	for (i = 0; i < 32; i++)
+	for (i = 0; i < INT_FAULT_COUNT; i++)
 		set_idt_entry(i, 0, _asm_fault_int_handler_tbl[i]);
 
 	/* Installs the legacy IRQ entry stubs. */

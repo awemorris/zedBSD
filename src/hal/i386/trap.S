@@ -234,18 +234,28 @@ EXT_C(_asm_syscall_int_handler):
 	jmp general_int_handler;
 
 /*
- * Undefined Interrupt
+ * Per-vector entry stubs.
+ *
+ * Every vector enters through the stub at its own index until a dedicated
+ * handler replaces it, so the dispatcher can name a vector it did not
+ * expect.  Each stub starts on a VECTOR_STUB_SIZE boundary.
  */
-.global EXT_C(_asm_undefined_int_handler)
-EXT_C(_asm_undefined_int_handler):
-	movl $(INT_UNDEF), -8(%esp)
-	jmp general_int_handler
+	.balign	VECTOR_STUB_SIZE
+.global EXT_C(_asm_vector_stubs)
+EXT_C(_asm_vector_stubs):
+	.set	stub_vector, 0
+	.rept	256
+	.balign	VECTOR_STUB_SIZE
+	movl	$stub_vector, -8(%esp)
+	jmp	general_int_handler
+	.set	stub_vector, stub_vector + 1
+	.endr
 
 
 /*
  * Interrupt Handler Table
  *
- * void *asm_fault_int_handler_tbl[32];
+ * void *asm_fault_int_handler_tbl[INT_FAULT_COUNT];
  */
 	.section .rodata
 .global EXT_C(_asm_fault_int_handler_tbl)
@@ -270,18 +280,6 @@ EXT_C(_asm_fault_int_handler_tbl):
 	.long	fault_0x11
 	.long	fault_0x12
 	.long	fault_0x13
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x14
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x15
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x16
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x17
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x18
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x19
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1a
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1b
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1c
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1d
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1e
-	.long	EXT_C(_asm_undefined_int_handler)	# 0x1f
 
 /*
  * IRQ Handler Table
