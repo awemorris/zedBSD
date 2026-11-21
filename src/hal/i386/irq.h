@@ -14,6 +14,8 @@
 
 #include <hal/hal.h>
 
+#include "apic-topology.h"
+
 #define IRQ_MAX		(15)
 
 /* Both boards put the interval timer on IRQ 0 and the keyboard on 1. */
@@ -27,8 +29,13 @@ struct irq_service_info {
 	hal_task_t waiter;
 	hal_irq_ack_t acknowledge;
 	unsigned pending;
-	unsigned in_flight[HAL_CPU_MAX];
-	unsigned in_handler[HAL_CPU_MAX];
+	/*
+	 * Per processor, for as many as the i386 HAL brings up: the topology
+	 * discovery stops at I386_APIC_MAX_CPUS, so hal_cpu_current() is
+	 * always below it.
+	 */
+	unsigned in_flight[I386_APIC_MAX_CPUS];
+	unsigned in_handler[I386_APIC_MAX_CPUS];
 	struct hal_cpu_mask requested;
 };
 

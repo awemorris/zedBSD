@@ -23937,6 +23937,14 @@ j3_open(
 
 	/* Makes the journal again when there is none, it has another size, or its file no longer holds it. */
 	if (!matches) {
+		/*
+		 * Says beforehand what the mount is doing: the file's blocks are
+		 * allocated and written one by one, which on a slow disk and
+		 * processor takes long enough to look like a hang.
+		 */
+		kern_logf("ufs: %s: making the batched journal (%llu KiB); the mount waits until every block of it is allocated\n",
+			  mountp->m_disk->d_name,
+			  (unsigned long long)(wanted * SECTOR_SIZE / 1024U));
 		error = j3_make(mountp, ms, root, wanted);
 		if (error != 0)
 			return error;

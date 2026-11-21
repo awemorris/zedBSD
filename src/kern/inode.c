@@ -52,13 +52,26 @@ extern int vm_object_cache_discard_inode(struct inode *inode) __attribute__((wea
 extern int vm_object_discard_mount_refs(struct mount *, struct inode *, unsigned *)
     __attribute__((weak));
 
+/*
+ * The inodes kept in static memory for the filesystems without storage of
+ * their own; more come from the heap.  A kernel for a machine of a few MiB
+ * keeps fewer, since each is about 330 bytes whether used or not.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define INODE_COMMON_MAX 64U
+#else
 #define INODE_COMMON_MAX 512U
+#endif
 /*
  * The inode cache's slots.  A tmpfs file keeps its inode for as long as the
  * file exists, so this is also the ceiling on the files all tmpfs mounts
- * hold together (BUG-029).  A 32-bit machine keeps a smaller table.
+ * hold together (BUG-029).  A 32-bit machine keeps a smaller table, and a
+ * machine of a few MiB, whose memory holds no more files than that, a
+ * smaller one still.
  */
-#if defined(HAL_ARCH_I386)
+#if CONFIG_KERN_SMALL_MEMORY
+#define INODE_CACHE_MAX 1024U
+#elif defined(HAL_ARCH_I386)
 #define INODE_CACHE_MAX 4096U
 #else
 #define INODE_CACHE_MAX 16384U

@@ -44,7 +44,16 @@ static int file_substitute_descriptor(struct inode *inode, int flags,
 #include <uapi/unistd.h>
 #include <uapi/fcntl.h>
 
+/*
+ * The open file descriptions of the whole system.  A kernel for a machine
+ * of a few MiB keeps fewer: each is about 180 bytes of static memory, and
+ * such a machine runs a handful of processes.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define FILE_MAX 256U
+#else
 #define FILE_MAX 2048U
+#endif
 
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 
@@ -3343,6 +3352,7 @@ file_format_reserve_locked(
 	struct mount *mountp;
 	struct backing_claim *claim;
 	int unsupported;
+	int fat;
 	int flags;
 	int error;
 
@@ -3359,10 +3369,12 @@ file_format_reserve_locked(
 	/* Requires canonical physical backing and an extent provider. */
 	inode = file->f_inode;
 	mountp = inode->i_mount;
+	fat = 0;
+	if (mountp != NULL)
+		fat = drv_fat_is_filesystem_type(mountp->m_type);
 	if (mountp == NULL || mountp->m_type == NULL ||
 	    mountp->m_type->file_extents == NULL ||
-	    (mountp->m_type->file_backing_identity == NULL &&
-	    mountp->m_type != &drv_fat_filesystem_type) ||
+	    (mountp->m_type->file_backing_identity == NULL && !fat) ||
 	    mountp->m_disk == NULL || file_vm_inode(file) != inode)
 		return EOPNOTSUPP;
 

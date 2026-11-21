@@ -15,7 +15,15 @@
 #include "kern/disk.h"
 
 #define PARTITION_MAX		16U
+/*
+ * The partitions all disks publish together.  A kernel for a machine of a
+ * few MiB keeps two disks' worth.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define PARTITION_POOL_MAX	32U
+#else
 #define PARTITION_POOL_MAX	64U
+#endif
 /* A GPT name is 36 UTF-16 code units, or at most 108 UTF-8 bytes. */
 #define PARTITION_LABEL_MAX	109U
 #define PARTITION_UUID_MAX	64U

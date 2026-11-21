@@ -20,7 +20,15 @@
 #include <kern/waitq.h>
 
 #define DISK_NAME_MAX	32U
+/*
+ * The disks the registry holds at once, partitions included.  A kernel for
+ * a machine of a few MiB, with one or two disks, keeps fewer.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define DISK_MAX	32U
+#else
 #define DISK_MAX	80U
+#endif
 #define DISK_IDENTITY_TEXT_MAX	64U
 
 #define DISK_READ_ONLY	0x00000001U

@@ -30,7 +30,16 @@
 
 #define CONSOLE_WRITE_MAX 512U
 #define CONSOLE_DISPATCH_EVENTS 64U
+/*
+ * The input devices the console reads keys from at once.  A kernel for a
+ * machine of a few MiB, with a keyboard and perhaps a second one, keeps
+ * fewer.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define CONSOLE_INPUT_SOURCES 4U
+#else
 #define CONSOLE_INPUT_SOURCES 8U
+#endif
 #define CONSOLE_KEY_CAPABILITIES 128U
 #define CONSOLE_LOGICAL_KEYS 128U
 

@@ -18,6 +18,28 @@
 
 extern const struct filesystem_type drv_fat_filesystem_type;
 
+/*
+ * Tells whether a filesystem type is FAT's.
+ *
+ * A kernel built without FAT has no FAT mount, so there the answer is
+ * always no and nothing names the absent type.
+ */
+static inline int
+drv_fat_is_filesystem_type(
+	const struct filesystem_type *type)
+{
+#if CONFIG_DRIVER_FS_FAT
+	/* The type is FAT's own. */
+	if (type == &drv_fat_filesystem_type)
+		return 1;
+#else
+	(void)type;
+#endif
+
+	/* Any other type, or none. */
+	return 0;
+}
+
 int drv_fat_probe_type(struct disk *disk, enum bootfat_type *type);
 
 typedef file_extent_cb fat_extent_cb;

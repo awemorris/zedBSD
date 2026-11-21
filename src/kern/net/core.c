@@ -65,7 +65,18 @@ static struct packet_buf *input_dequeue(void);
 static unsigned poll_devices(void);
 static int work_pending(void);
 static void network_worker(void *argument);
+#if CONFIG_KERN_NET_WIFI
 static void wlan_retirement_worker(void *argument);
+#endif
+
+/*
+ * The routing socket.
+ *
+ * route-socket.c is built with the IPv6 stack.  The declaration is weak so
+ * that a kernel built without it links, and the test at its call is real:
+ * such a kernel has no PF_ROUTE family.
+ */
+extern int route_socket_init(void) __attribute__((weak));
 
 static const struct net_device_ops loopback_ops = {
     .open = loopback_open,
@@ -164,7 +175,9 @@ net_init(
 	spin_init(&input_lock, LOCK_RANK_NETWORK, "network input");
 	packet_buf_pool_init();
 	net_device_registry_init();
+#if CONFIG_KERN_NET_WIFI
 	wlan_core_init();
+#endif
 	error = loopback_init();
 	if (error != 0)
 		return error;
@@ -191,9 +204,14 @@ net_init(
 	error = packet_socket_init();
 	if (error != 0)
 		return error;
-	error = route_socket_init();
-	if (error != 0)
-		return error;
+
+	/* The routing socket, when the kernel has one. */
+	if (route_socket_init != NULL) {
+		error = route_socket_init();
+		if (error != 0)
+			return error;
+	}
+
 	error = unix_socket_init();
 	if (error != 0)
 		return error;
@@ -209,9 +227,11 @@ net_init(
 	error = icmp_init();
 	if (error != 0)
 		return error;
+#if CONFIG_KERN_NET_IPV6
 	error = ipv6_init();
 	if (error != 0)
 		return error;
+#endif
 	error = udp_init();
 	if (error != 0)
 		return error;
@@ -219,6 +239,7 @@ net_init(
 	if (error != 0)
 		return error;
 
+#if CONFIG_KERN_NET_WIFI
 	/*
 	 * Retirement may wait in a driver while the packet worker progresses.
 	 * Create both threads before starting either.
@@ -235,6 +256,14 @@ net_init(
 	}
 
 	thread_start(worker);
+#else
+	/* Creates the packet worker; a kernel without WLAN has no retirement thread. */
+	error = kthread_create(network_worker, NULL, SCHED_PRIORITY_DEFAULT,
+			       &worker_thread);
+	if (error != 0)
+		return error;
+
+#endif
 	irq = spin_lock_irqsave(&input_lock);
 
 	worker = worker_thread;
@@ -303,6 +332,7 @@ net_shutdown_for_boot(
 		sched_yield();
 	}
 
+#if CONFIG_KERN_NET_WIFI
 	/* Retires the WLAN stations behind the same limit. */
 	last_error = 0;
 	for (;;) {
@@ -324,6 +354,8 @@ net_shutdown_for_boot(
 		}
 		sched_yield();
 	}
+
+#endif
 
 	/* Drops the queued packets. */
 	for (;;) {
@@ -385,6 +417,7 @@ net_loopback_ref(void)
 	return device;
 }
 
+#if CONFIG_KERN_NET_WIFI
 /*
  * Runs the WLAN station retirement poll.
  *
@@ -414,6 +447,7 @@ wlan_retirement_worker(void *argument)
 		sched_sleep(deadline);
 	}
 }
+#endif
 
 /* Advances the producer generation, skipping zero; the caller holds the lock. */
 static void
@@ -591,11 +625,16 @@ work_pending(
 		net_device_release(device);
 	}
 
+#if CONFIG_KERN_NET_WIFI
 	/* Otherwise the WLAN layer decides. */
 	pending = wlan_work_pending();
 
 	/* Reports the WLAN answer. */
 	return pending;
+#else
+	/* Without WLAN nothing else is work. */
+	return 0;
+#endif
 }
 
 /* Runs the network worker: timers, device polls, and queued input. */
@@ -608,8 +647,12 @@ network_worker(
 	unsigned long irq;
 	unsigned long sleep_irq;
 	uint64_t deadline;
+#if CONFIG_KERN_NET_WIFI
 	uint64_t wlan_deadline;
+#endif
+#if CONFIG_KERN_NET_IPV6
 	uint64_t ipv6_deadline;
+#endif
 	uint64_t observed;
 	int error;
 
@@ -619,8 +662,12 @@ network_worker(
 	for (;;) {
 		/* Runs the timers and polls the devices. */
 		tcp_timer_run();
+#if CONFIG_KERN_NET_IPV6
 		ipv6_timer_run();
+#endif
+#if CONFIG_KERN_NET_WIFI
 		wlan_timer_run(clock_ticks());
+#endif
 		work = poll_devices();
 
 		/* Handles queued input within the remaining budget. */
@@ -659,14 +706,18 @@ network_worker(
 		observed = worker_generation;
 		spin_unlock_irqrestore(&input_lock, sleep_irq);
 		deadline = tcp_timer_next_deadline();
+#if CONFIG_KERN_NET_IPV6
 		ipv6_deadline = ipv6_timer_next_deadline();
 		if (ipv6_deadline != 0 &&
 		    (deadline == 0 || ipv6_deadline < deadline))
 			deadline = ipv6_deadline;
+#endif
+#if CONFIG_KERN_NET_WIFI
 		wlan_deadline = wlan_timer_next_deadline();
 		if (wlan_deadline != 0 &&
 		    (deadline == 0 || wlan_deadline < deadline))
 			deadline = wlan_deadline;
+#endif
 
 		/*
 		 * Every producer advances this generation while holding

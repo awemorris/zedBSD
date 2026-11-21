@@ -39,9 +39,14 @@
  * The hash table's size: 2^16 buckets.  The cache holds an eighth of memory
  * in page-sized lines (16384 lines for 512 MiB, 65536 for 2 GiB), and a lookup
  * walks one chain under the cache lock on every cached read and file fault,
- * so the chains must stay short (BUG-033).
+ * so the chains must stay short (BUG-033).  A kernel for a machine of a
+ * few MiB caches a few hundred lines, which 2^10 buckets keep as short.
  */
+#if CONFIG_KERN_SMALL_MEMORY
+#define BUF_HASH_BITS		10U
+#else
 #define BUF_HASH_BITS		16U
+#endif
 #define BUF_HASH_BUCKETS	(1U << BUF_HASH_BITS)
 #define BUF_MIN_BYTES		(1024U * 1024U)
 #define BUF_SLAB_BYTES		KERN_PAGE_SIZE

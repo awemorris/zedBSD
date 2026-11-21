@@ -20,6 +20,7 @@
 
 #include "kern/block-identity.h"
 #include "kern/fat.h"
+#include "kern/klog.h"
 #include "kern/namei.h"
 
 #include <uapi/errno.h>
@@ -87,7 +88,9 @@ static int parameter_seconds(enum kern_boot_parameter_key key, const char *value
 static int display_mode_number(const char *text, size_t length, size_t *position, uint32_t maximum, uint32_t *value);
 static size_t skip_separators(const char *text, size_t position, size_t length);
 static int selector_text(const char *text, size_t maximum, int device_name);
+#if CONFIG_DRIVER_FS_FAT
 static int context_fail(struct kern_boot_source_context *context, unsigned slot, enum kern_boot_source_failure_stage stage, int error);
+#endif
 static int runtime_mount_lookup(struct kern_boot_source_slot *source, const char *relative, struct path *result);
 
 /* Copies boot provenance before firmware storage can be reclaimed. */
@@ -1204,7 +1207,8 @@ kern_boot_source_context_destroy(
  * Slot 0 falls back to the loader's origin partition when no selector
  * names it.  Each partition must be a FAT16 or FAT32 partition that no
  * earlier slot uses.  On failure the context records the failing slot
- * and stage and is destroyed.
+ * and stage and is destroyed.  A kernel built without FAT mounts none
+ * and says which named slots it left out.
  */
 int
 kern_boot_source_context_mount(
@@ -1213,6 +1217,42 @@ kern_boot_source_context_mount(
 	struct disk *loader_origin,
 	const char *loader_origin_selector)
 {
+#if !CONFIG_DRIVER_FS_FAT
+	const char *selector;
+	unsigned slot;
+
+	(void)loader_origin;
+	(void)loader_origin_selector;
+
+	/* Rejects a missing operand or a context that is published. */
+	if (context == NULL || parameters == NULL)
+		return EINVAL;
+	if (context->runtime_published)
+		return EBUSY;
+
+	context->failure_stage = KERN_BOOT_SOURCE_FAILURE_NONE;
+	context->cleanup_error = 0;
+
+	/*
+	 * A kernel built without FAT mounts no boot slot, and the system runs
+	 * without /boot/bootN.  The loader names its own partition as boot0,
+	 * so a named slot is not an error here; it is said once, and anything
+	 * that reads a file of the slot (a bootN: swap file or overlay image)
+	 * fails where it resolves the file.
+	 */
+	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++) {
+		selector = kern_boot_parameters_boot(parameters, slot);
+		if (selector == NULL)
+			continue;
+
+		kern_logf("boot: boot%u=%s is not mounted; the kernel is built without FAT\n",
+			  slot,
+			  selector);
+	}
+
+	/* Succeeded: no slot is mounted. */
+	return 0;
+#else
 	struct disk *disk;
 	const char *selector;
 	enum bootfat_type fat_type;
@@ -1328,6 +1368,7 @@ kern_boot_source_context_mount(
 
 	/* Reports the mounted sources. */
 	return 0;
+#endif
 }
 
 /*
@@ -1771,6 +1812,7 @@ selector_text(
 	return 0;
 }
 
+#if CONFIG_DRIVER_FS_FAT
 /* Records a mount failure in the context, destroys it, and passes the error. */
 static int
 context_fail(
@@ -1791,6 +1833,7 @@ context_fail(
 	/* Succeeded. */
 	return 0;
 }
+#endif
 
 /* Looks a relative path up in a slot's runtime mount. */
 static int

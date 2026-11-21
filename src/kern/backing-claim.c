@@ -1152,6 +1152,7 @@ inode_key(
 	struct backing_range volume;
 	struct disk *disk;
 	uint64_t object;
+	int fat;
 	int error;
 
 	/* Rejects anything but a regular file. */
@@ -1166,9 +1167,10 @@ inode_key(
 		return EOPNOTSUPP;
 
 	/* Production filesystems provide their own stable object identity. */
+	fat = drv_fat_is_filesystem_type(inode->i_mount->m_type);
 	if (inode->i_mount->m_type->file_backing_identity != NULL) {
 		error = inode->i_mount->m_type->file_backing_identity(inode, &disk, &object);
-	} else if (inode->i_mount->m_type != &drv_fat_filesystem_type) {
+	} else if (!fat) {
 		return EOPNOTSUPP;
 	} else if (drv_fat_file_backing_identity != NULL) {
 		error = drv_fat_file_backing_identity(inode, &disk, &object);

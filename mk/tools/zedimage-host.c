@@ -74,6 +74,28 @@ static void add_tree(struct image *im,const char *path,uint32_t parent){
 static uint32_t ufs_digest(const uint8_t *bytes, size_t length);
 static uint32_t journal_default_mib(uint64_t bytes);
 static void journal_request(uint8_t *super, uint32_t mib);
+static uint32_t image_free_blocks(struct image *im);
+static uint32_t journal_meta_blocks(uint32_t blocks);
+static uint32_t journal_wanted_blocks(uint32_t mib, uint32_t free_blocks);
+static uint32_t journal_settle_blocks(uint32_t mib, uint32_t free_blocks);
+static void journal_file(struct image *im, uint32_t ino, uint32_t blocks);
+
+/*
+ * The batched journal the kernel keeps in the root directory's
+ * `.ufs-journal` (src/drivers/fs/ufs.c): the name, the magic numbers of
+ * its header and of the superblock's locator, their version, where the
+ * locator lives, the header's fixed bytes and extent entries, and the
+ * fewest blocks a journal is made with.
+ */
+#define JOURNAL_NAME			".ufs-journal"
+#define JOURNAL_HEADER_MAGIC		0x334a555aU
+#define JOURNAL_LOCATOR_MAGIC		0x4c334a5aU
+#define JOURNAL_VERSION			2U
+#define JOURNAL_LOCATOR_OFFSET		1220U
+#define JOURNAL_HEADER_FIXED		64U
+#define JOURNAL_EXTENT_ENTRY		16U
+#define JOURNAL_MIN_BLOCKS		8U
+#define JOURNAL_SECTORS_PER_BLOCK	(BLOCK / 512U)
 
 /*
  * The journal size a volume gets by default: the ext4 (e2fsprogs) table
@@ -120,6 +142,230 @@ journal_request(
 	/* Seals the words above with the checksum the journal's records use. */
 	sum = ufs_digest(record, 12);
 	p32(record + 12, sum);
+}
+
+/*
+ * Counts the whole free blocks of the image, as the cylinder groups'
+ * summaries will.
+ */
+static uint32_t
+image_free_blocks(
+	struct image *im)
+{
+	uint32_t cg;
+	uint32_t nd;
+	uint32_t f;
+	uint32_t j;
+	uint32_t count;
+	int all;
+
+	/* Counts every aligned run of fragments of which none is used. */
+	count = 0;
+	for (cg = 0; cg < im->ncg; cg++) {
+		nd = cg_ndblk(im, cg);
+		for (f = 0; f + FRAGS <= nd; f += FRAGS) {
+			all = 1;
+			for (j = 0; j < FRAGS; j++) {
+				if (im->used_frag[cg][f + j])
+					all = 0;
+			}
+			if (all)
+				count++;
+		}
+	}
+
+	/* Reports the free blocks. */
+	return count;
+}
+
+/*
+ * Counts the indirect blocks a file of BLOCKS data blocks needs, as
+ * write_inode() will allocate them.
+ */
+static uint32_t
+journal_meta_blocks(
+	uint32_t blocks)
+{
+	uint32_t pointers;
+	uint32_t rest;
+
+	/* The first twelve blocks are named in the inode itself. */
+	pointers = BLOCK / 8U;
+	if (blocks <= 12U)
+		return 0;
+	rest = blocks - 12U;
+
+	/* The next ones through one single indirect block. */
+	if (rest <= pointers)
+		return 1;
+	rest -= pointers;
+
+	/* The rest through a double indirect block and its single ones. */
+	if (rest > pointers * pointers)
+		fail("journal too large for the image producer");
+
+	/* Reports the indirect blocks. */
+	return 2U + (rest + pointers - 1U) / pointers;
+}
+
+/*
+ * Works out the journal's blocks the way the kernel's mount does
+ * (j3_wanted_sectors): the size recorded in the superblock, cut to an
+ * eighth of the room in whole MiB, where the room is the free blocks and
+ * the journal's own; none when that leaves JOURNAL_MIN_BLOCKS or fewer.
+ */
+static uint32_t
+journal_wanted_blocks(
+	uint32_t mib,
+	uint32_t free_blocks)
+{
+	uint64_t bytes;
+	uint64_t room;
+
+	/* Takes the recorded size, cut to an eighth of the room. */
+	bytes = (uint64_t)mib << 20;
+	room = (uint64_t)free_blocks * BLOCK;
+	if (bytes > room / 8U)
+		bytes = (room / 8U) & ~((UINT64_C(1) << 20) - 1U);
+
+	/* Rounds the size down to whole blocks. */
+	bytes -= bytes % BLOCK;
+
+	/* A journal of a few blocks is not kept at all. */
+	if (bytes / BLOCK <= JOURNAL_MIN_BLOCKS)
+		return 0;
+
+	/* Reports the size in blocks. */
+	return (uint32_t)(bytes / BLOCK);
+}
+
+/*
+ * Finds the journal size that the kernel will want again once the
+ * journal is in the image.  FREE_BLOCKS are the image's free blocks
+ * without the journal; with it, the room the kernel measures is those
+ * less the file's indirect blocks.  Reports 0 when no size agrees, and
+ * the kernel then makes the journal itself at the first mount.
+ */
+static uint32_t
+journal_settle_blocks(
+	uint32_t mib,
+	uint32_t free_blocks)
+{
+	uint32_t blocks;
+	uint32_t again;
+	uint32_t meta;
+	unsigned tries;
+
+	/* Starts from the size wanted with every free block counted. */
+	blocks = journal_wanted_blocks(mib, free_blocks);
+
+	/* Follows the size until the room it leaves wants the same size. */
+	for (tries = 0; tries < 8U && blocks != 0U; tries++) {
+		meta = journal_meta_blocks(blocks);
+		if (meta + blocks > free_blocks)
+			return 0;
+		again = journal_wanted_blocks(mib, free_blocks - meta);
+		if (again == blocks)
+			return blocks;
+		blocks = again;
+	}
+
+	/* No size agreed. */
+	return 0;
+}
+
+/*
+ * Writes the journal file and names it in the superblock, as the kernel's
+ * j3_make() does at a first mount: the file's blocks, its inode, a header
+ * listing the blocks' extents and having applied nothing, both slots'
+ * commit records empty, and the locator.
+ */
+static void
+journal_file(
+	struct image *im,
+	uint32_t ino,
+	uint32_t blocks)
+{
+	uint32_t *fragments;
+	uint8_t *header;
+	uint8_t *entry;
+	uint8_t *locator;
+	uint64_t total;
+	uint64_t slot;
+	uint64_t nonce;
+	uint64_t lba;
+	uint64_t start;
+	uint32_t count;
+	uint32_t extents;
+	uint32_t n;
+
+	/*
+	 * Allocates the data blocks one after another, before the indirect
+	 * blocks, so that they run together on the disk.  They stay zero, so
+	 * neither slot's commit record seals anything.
+	 */
+	fragments = calloc(blocks, sizeof(*fragments));
+	if (!fragments)
+		die("calloc journal");
+	for (n = 0; n < blocks; n++)
+		fragments[n] = alloc_block(im, NULL, 0);
+	write_inode(im, ino, IFREG | 0600, 1, (uint64_t)blocks * BLOCK, fragments, blocks);
+
+	/* Lays the slots out as j3_geometry() will. */
+	total = (uint64_t)blocks * JOURNAL_SECTORS_PER_BLOCK;
+	slot = (total - JOURNAL_SECTORS_PER_BLOCK) / 2U;
+
+	/* Gives the journal an identity, as the kernel derives one. */
+	nonce = UINT64_C(0x9e3779b97f4a7c15) ^ im->fragments ^ ((uint64_t)fragments[0] << 20);
+
+	/* Writes the header's fixed words into the first block. */
+	header = im->data + (size_t)fragments[0] * FRAG;
+	p32(header, JOURNAL_HEADER_MAGIC);
+	p32(header + 4, JOURNAL_VERSION);
+	p64(header + 8, nonce);
+	p64(header + 16, 0);
+	p64(header + 24, total);
+	p32(header + 32, (uint32_t)slot);
+	p32(header + 40, JOURNAL_SECTORS_PER_BLOCK);
+	p32(header + 44, JOURNAL_SECTORS_PER_BLOCK);
+
+	/* Lists the blocks as extents, merging those that follow each other. */
+	extents = 0;
+	start = (uint64_t)fragments[0] * 2U;
+	count = JOURNAL_SECTORS_PER_BLOCK;
+	for (n = 1; n <= blocks; n++) {
+		lba = 0;
+		if (n < blocks)
+			lba = (uint64_t)fragments[n] * 2U;
+		if (n < blocks && lba == start + count) {
+			count += JOURNAL_SECTORS_PER_BLOCK;
+			continue;
+		}
+		if (JOURNAL_HEADER_FIXED + (extents + 1U) * JOURNAL_EXTENT_ENTRY > BLOCK)
+			fail("journal has more extents than its header holds");
+		entry = header + JOURNAL_HEADER_FIXED + extents * JOURNAL_EXTENT_ENTRY;
+		p64(entry, start);
+		p32(entry + 8, count);
+		extents++;
+		start = lba;
+		count = JOURNAL_SECTORS_PER_BLOCK;
+	}
+
+	/* Seals the extent list, then the fixed words. */
+	p32(header + 36, extents);
+	p32(header + 48, ufs_digest(header + JOURNAL_HEADER_FIXED, (size_t)extents * JOURNAL_EXTENT_ENTRY));
+	p32(header + 52, ufs_digest(header, 52));
+
+	/* Names the header in the superblock's locator. */
+	locator = im->data + 65536 + JOURNAL_LOCATOR_OFFSET;
+	memset(locator, 0, 28);
+	p32(locator, JOURNAL_LOCATOR_MAGIC);
+	p32(locator + 4, JOURNAL_VERSION);
+	p64(locator + 8, fragments[0]);
+	p64(locator + 16, nonce);
+	p32(locator + 24, ufs_digest(locator, 24));
+
+	free(fragments);
 }
 
 static void
@@ -201,6 +447,8 @@ create_ufs(const char *root, const char *out, size_t size, int profile,
 {
     struct image im = {0};
     uint32_t cg, nd, i, etc;
+    uint32_t journal_ino;
+    uint32_t journal_blocks;
     size_t child;
     int marker_found;
     FILE *file;
@@ -278,7 +526,36 @@ create_ufs(const char *root, const char *out, size_t size, int profile,
     }
     if (!marker_found)
         add_file_data(&im, etc, "zedbsd-root", marker, sizeof(marker)-1, 0644);
+
+    /*
+     * Names the batched journal's file in the root directory, so that the
+     * directory is written with it.  A volume with the tail journal keeps
+     * no batched one.
+     */
+    journal_ino = 0;
+    if (!profile && im.journal_mib != 0) {
+        for (child = 0; child < im.nodes[2].n; child++) {
+            if (!strcmp(im.nodes[2].v[child].name, JOURNAL_NAME))
+                fail("the tree holds the journal's name");
+        }
+        journal_ino = alloc_ino(&im);
+        add_child(&im, 2, JOURNAL_NAME, journal_ino, 8);
+    }
     finish_dirs(&im);
+
+    /*
+     * Makes the batched journal of the size the kernel will want at the
+     * first mount, so that the mount uses it instead of making it block by
+     * block.  Without an agreed size the name is still there and the kernel
+     * fills the file at the first mount, as it would have made it.
+     */
+    journal_blocks = 0;
+    if (journal_ino != 0)
+        journal_blocks = journal_settle_blocks(im.journal_mib, image_free_blocks(&im));
+    if (journal_ino != 0 && journal_blocks != 0)
+        journal_file(&im, journal_ino, journal_blocks);
+    else if (journal_ino != 0)
+        write_inode(&im, journal_ino, IFREG | 0600, 1, 0, NULL, 0);
     finish_cg(&im);
     if (profile)
         ufs_tail(&im);
