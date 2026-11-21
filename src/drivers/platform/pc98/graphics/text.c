@@ -13,8 +13,9 @@
  * The hardware keeps characters and attributes in two planes, and a
  * character is a 16-bit code rather than a byte, so this layer holds its
  * own cell arrays and publishes both planes together. A JIS X 0208 glyph
- * occupies two cells; the second carries the same code with the high bit
- * set, which is how the hardware knows it is the right half.
+ * occupies two cells; the second carries the same code with bit 7 of its
+ * low byte set, which is how the hardware knows it is the right half.
+ * Bytes written one at a time are read as UTF-8.
  *
  * The cell arrays are the source of truth, so a graphics mode can take
  * the screen and give it back without losing what was on it.
@@ -50,8 +51,14 @@
 #define TEXT_ROWS		25U
 #define TEXT_CELLS		(TEXT_COLUMNS * TEXT_ROWS)
 
-/* The right half of a two-cell glyph carries the code with bit 15 set. */
-#define TEXT_WIDE_SECOND	0x8000U
+/*
+ * The right half of a two-cell glyph carries the code with bit 7 of the
+ * low byte (the row byte) set.
+ *
+ * Procedure referenced: FreeBSD 11.4 sys/pc98/cbus/scterm-sck.c
+ * (the two-cell store in the kanji output path).
+ */
+#define TEXT_WIDE_SECOND	0x0080U
 
 /* The uPD7220 status and command ports, and its cursor-address command. */
 #define GDC_STATUS		0x0060U
@@ -84,6 +91,15 @@ static int text_cursor_visible = 1;
 static int text_ready;
 
 /*
+ * The UTF-8 sequence that single-byte writes have begun, held under
+ * text_lock: the scalar so far, the continuation bytes still expected,
+ * and the smallest scalar the sequence's length may encode.
+ */
+static uint32_t utf8_scalar;
+static unsigned utf8_remaining;
+static uint32_t utf8_minimum;
+
+/*
  * Whether the console has left the display for good (a GPU flipped its
  * first image there): nothing is written to text memory or the cursor
  * again, by a write or a resume, while the cell arrays keep following the
@@ -99,6 +115,7 @@ static void cursor_locked(void);
 static void scroll_locked(void);
 static void newline_locked(void);
 static void putc_locked(int character);
+static void put_byte_locked(int byte);
 static void put_code_locked(uint16_t code, unsigned width, uint8_t attribute);
 static uint32_t utf8_codepoint(const char **input, const char *end);
 static uint16_t unicode_to_pc98(uint32_t codepoint, unsigned *width);
@@ -185,9 +202,9 @@ drv_pc98_text_putc(
 {
 	unsigned long irq;
 
-	/* Renders one byte under the layer lock. */
+	/* Renders one byte of UTF-8 under the layer lock. */
 	irq = spin_lock_irqsave(&text_lock);
-	putc_locked(character);
+	put_byte_locked(character & 0xff);
 	spin_unlock_irqrestore(&text_lock, irq);
 }
 
@@ -701,6 +718,79 @@ putc_locked(
 	put_code_locked((uint16_t)(uint8_t)character, 1U,
 			KERN_TEXT_ATTRIB_NORMAL);
 	cursor_locked();
+}
+
+/*
+ * Feeds one byte of UTF-8 written a byte at a time.
+ *
+ * A malformed, overlong or surrogate sequence is shown as one question
+ * mark, and a byte that interrupts a sequence ends it.
+ */
+static void
+put_byte_locked(
+	int byte)
+{
+	unsigned width;
+	uint16_t code;
+
+	/* Ends an unfinished sequence that a new character interrupts. */
+	if (utf8_remaining != 0U && (byte & 0xc0) != 0x80) {
+		utf8_remaining = 0;
+		putc_locked('?');
+	}
+
+	/* Writes an ASCII byte or a control character directly. */
+	if (byte < 0x80) {
+		putc_locked(byte);
+		return;
+	}
+
+	/* Adds a continuation byte to the open sequence. */
+	if ((byte & 0xc0) == 0x80) {
+		/* Shows a continuation byte without a sequence as a stray. */
+		if (utf8_remaining == 0U) {
+			putc_locked('?');
+			return;
+		}
+
+		/* Waits for the rest of the sequence. */
+		utf8_scalar = (utf8_scalar << 6) | (uint32_t)(byte & 0x3f);
+		utf8_remaining--;
+		if (utf8_remaining != 0U)
+			return;
+
+		/* Refuses an overlong form, a surrogate or a scalar too large. */
+		if (utf8_scalar < utf8_minimum ||
+		    utf8_scalar > 0x10ffffU ||
+		    (utf8_scalar >= 0xd800U && utf8_scalar <= 0xdfffU)) {
+			putc_locked('?');
+			return;
+		}
+
+		/* Shows the completed character in the cells it needs. */
+		code = unicode_to_pc98(utf8_scalar, &width);
+		put_code_locked(code, width, KERN_TEXT_ATTRIB_NORMAL);
+		cursor_locked();
+		return;
+	}
+
+	/* Opens a sequence of the length the lead byte announces. */
+	if ((byte & 0xe0) == 0xc0) {
+		utf8_scalar = (uint32_t)(byte & 0x1f);
+		utf8_remaining = 1;
+		utf8_minimum = 0x80U;
+	} else if ((byte & 0xf0) == 0xe0) {
+		utf8_scalar = (uint32_t)(byte & 0x0f);
+		utf8_remaining = 2;
+		utf8_minimum = 0x800U;
+	} else if ((byte & 0xf8) == 0xf0) {
+		utf8_scalar = (uint32_t)(byte & 0x07);
+		utf8_remaining = 3;
+		utf8_minimum = 0x10000U;
+	} else {
+		/* A byte that cannot start a sequence is a stray. */
+		putc_locked('?');
+	}
 }
 
 /*
