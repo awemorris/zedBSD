@@ -21,7 +21,10 @@
  * words keep the same values as with the atomic accesses, so a lock held
  * when the other CPUs start is released the usual way.  On a port without
  * native atomics every atomic access is a call into a serialized region of
- * the HAL, several of them for each lock and release.
+ * the HAL, several of them for each lock and release.  A build with
+ * KERN_LOCK_DEBUG traps when a spinlock is taken or released with
+ * interrupts enabled while only one CPU runs, which the plain accesses
+ * rely on.
  */
 
 #include <kern/lock.h>
@@ -121,6 +124,13 @@ spin_trylock(
 	 * lock is held by this CPU, which traps as a recursive acquisition.
 	 */
 	if (lock_one_cpu) {
+#if defined(KERN_LOCK_DEBUG)
+		/* Traps on a caller that left interrupts enabled. */
+		if (hal_irq_disable()) {
+			hal_irq_enable();
+			__builtin_trap();
+		}
+#endif
 		__asm__ volatile("" : : : "memory");
 		if (lock->held.value != 0) {
 			if (lock->owner_valid && lock->owner_cpu == 0)
@@ -205,6 +215,13 @@ spin_unlock(
 
 	/* With one CPU, plain accesses under the caller's disabled interrupts. */
 	if (lock_one_cpu) {
+#if defined(KERN_LOCK_DEBUG)
+		/* Traps on a caller that left interrupts enabled. */
+		if (hal_irq_disable()) {
+			hal_irq_enable();
+			__builtin_trap();
+		}
+#endif
 		__asm__ volatile("" : : : "memory");
 		if (lock->held.value == 0 ||
 		    !lock->owner_valid ||
