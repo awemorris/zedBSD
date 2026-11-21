@@ -50,9 +50,14 @@
 
 /*
  * Nonzero while only the boot CPU (CPU 0) runs; cleared before the
- * others start, and never set again.
+ * others start, and never set again.  A uniprocessor build (HAL_CPU_UP)
+ * has only CPU 0, and the value is a constant.
  */
+#if defined(HAL_CPU_UP)
+#define lock_one_cpu 1
+#else
 static int lock_one_cpu = 1;
+#endif
 
 static int mutex_take_free(struct mutex *mutex);
 static unsigned mutex_exchange(struct mutex *mutex, unsigned next, int release);
@@ -71,9 +76,11 @@ void
 lock_cpus_start(
 	void)
 {
+#if !defined(HAL_CPU_UP)
 	/* Lets the next lock and release see the change before another CPU runs. */
 	lock_one_cpu = 0;
 	__asm__ volatile("" : : : "memory");
+#endif
 }
 
 /*
