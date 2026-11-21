@@ -132,6 +132,12 @@ STANDALONE_ARCH_CFLAGS = $(strip \
 	$(if $(filter macppc64 ppc64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-mcpu=970 -mno-altivec -DHAL_ARCH_PPC64 -DKERN_USER_ABI_PPC64 -DKERN_USER_ABI_LP64,\
 	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64)))))))
 
+# The optimization of the packages' code: size first on the platforms whose
+# machines are slow and short of memory, speed first elsewhere.
+STANDALONE_OPT_CFLAGS = $(strip \
+	$(if $(filter pc9801ns,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-Os,\
+	-O2))
+
 # Where the platform's build puts what the packages make: the top-level
 # build's directory (BUILD), or build/PLATFORM for a package made on its own.
 STANDALONE_BUILD_DIR = $(if $(BUILD),$(abspath $(BUILD)),$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR))
@@ -191,7 +197,7 @@ STANDALONE_PROGRAM_CFLAGS = \
 	$(STANDALONE_ARCH_CFLAGS) \
 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-	-ffreestanding -fno-stack-protector $(STANDALONE_PROGRAM_PIC) -O2 \
+	-ffreestanding -fno-stack-protector $(STANDALONE_PROGRAM_PIC) $(STANDALONE_OPT_CFLAGS) \
 	-Wall -Wextra -Werror
 
 # A statically linked program: position-dependent, started by crt0.o, and
@@ -231,7 +237,7 @@ STANDALONE_SHLIB_CFLAGS = \
 	-fPIC \
 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-	-O2 -Wall -Wextra -Werror
+	$(STANDALONE_OPT_CFLAGS) -Wall -Wextra -Werror
 
 # A shared library's link.
 STANDALONE_SHLIB_LDFLAGS = \
@@ -243,7 +249,7 @@ STANDALONE_SHLIB_LDFLAGS = \
 
 # A static library's objects take the caller's flags (the top-level build's).
 STANDALONE_LIB_CFLAGS = \
-	$(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
+	$(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE $(STANDALONE_OPT_CFLAGS) -Wall -Wextra -Werror \
 	-I"$(REPO_ROOT)"
 
 ################################################
