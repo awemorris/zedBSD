@@ -989,7 +989,7 @@ vmspace_prepare_cow_copy(
 	}
 
 	/* Copies the shared page and publishes the copy as resident and dirty. */
-	kern_memcpy((void *)hal_pmem_to_kernel(fresh->pmem.paddr), (const void *)hal_pmem_to_kernel(old->pmem.paddr),
+	kern_memcpy_ram((void *)hal_pmem_to_kernel(fresh->pmem.paddr), (const void *)hal_pmem_to_kernel(old->pmem.paddr),
 	    PAGE_SIZE);
 	irq = spin_lock_irqsave(&fresh->state_lock);
 
