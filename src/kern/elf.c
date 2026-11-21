@@ -10,9 +10,12 @@
  *
  * A 32-bit or 64-bit image is read through a file content lease, its
  * headers are normalized into one representation, and every PT_LOAD
- * segment is validated before anything is mapped.  Immutable full text
- * pages retain a pinned cache snapshot; writable data and mutable files
- * are copied while the content lease is held.  A position
+ * segment is validated before anything is mapped.  Full read-only pages
+ * of a file that cannot change while it runs, one on read-only media or one
+ * whose writers are refused as exec text, are mapped from the page cache
+ * through a snapshot, which pins each page as it is first touched; writable
+ * data and files some holder may write are copied while the content lease is
+ * held.  A position
  * independent main program and an interpreter are placed at a load bias
  * found in the free address space.
  */
@@ -1363,12 +1366,14 @@ validate_and_load(
 
 		/*
 		 * The executable file may be modified as soon as its content
-		 * lease is released.  Build anonymous private pages while the
-		 * lease is held, rather than leaving PT_LOAD as a later file
-		 * fault which could splice bytes from a newer image.  The
-		 * temporary mapping is writable but never executable.  Immutable
-		 * full text pages replace its interior with pinned cache mappings;
-		 * final protection is published after private edges are copied.
+		 * lease is released, unless a snapshot keeps it from changing.
+		 * Build anonymous private pages while the lease is held, rather
+		 * than leaving PT_LOAD as a later file fault which could splice
+		 * bytes from a newer image.  The temporary mapping is writable
+		 * but never executable.  Full read-only pages of a file that
+		 * cannot change replace its interior with a snapshot of the page
+		 * cache, read as they are touched; final protection is published
+		 * after private edges are copied.
 		 */
 		error = vmspace_map_anon_fixed_noreplace(vm, map_start, map_end - map_start,
 		    HAL_SPACE_READ | HAL_SPACE_WRITE, NULL);

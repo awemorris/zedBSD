@@ -1233,6 +1233,124 @@ inode_truncate_transaction(
 }
 
 /*
+ * Takes write access to a regular file.  A file an exec image maps is
+ * refused with ETXTBSY, so that the image never sees its pages change.
+ */
+int
+inode_write_access_begin(
+	struct inode *inode)
+{
+	unsigned long irq;
+	int error;
+
+	/* Only a regular file's content is mapped by an exec image. */
+	if (inode == NULL || inode->i_type != INODE_REG)
+		return 0;
+
+	/* Counts the writer unless an image maps the file. */
+	error = 0;
+	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	if (inode->i_exec_text != 0)
+		error = ETXTBSY;
+	else if (inode->i_write_access == UINT_MAX)
+		error = ENFILE;
+	else
+		inode->i_write_access++;
+
+	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
+
+	/* Reports the refusal. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Gives back write access taken with inode_write_access_begin().
+ */
+void
+inode_write_access_end(
+	struct inode *inode)
+{
+	unsigned long irq;
+
+	/* Other inode types took nothing. */
+	if (inode == NULL || inode->i_type != INODE_REG)
+		return;
+
+	/* Counts the writer down; the last one lets exec images map the file. */
+	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	if (inode->i_write_access == 0)
+		HAL_FATAL("inode write access underflow");
+	inode->i_write_access--;
+
+	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
+}
+
+/*
+ * Marks a regular file as mapped by an exec image.  A file some holder may
+ * write is refused with ETXTBSY; the caller then copies the image instead.
+ */
+int
+inode_exec_text_begin(
+	struct inode *inode)
+{
+	unsigned long irq;
+	int error;
+
+	/* Only a regular file can back an exec image. */
+	if (inode == NULL || inode->i_type != INODE_REG)
+		return EINVAL;
+
+	/* Counts the image unless a writer holds the file. */
+	error = 0;
+	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	if (inode->i_write_access != 0)
+		error = ETXTBSY;
+	else if (inode->i_exec_text == UINT_MAX)
+		error = EOVERFLOW;
+	else
+		inode->i_exec_text++;
+
+	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
+
+	/* Reports the refusal. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Ends an exec image's mapping of a file; its writers may then open it.
+ */
+void
+inode_exec_text_end(
+	struct inode *inode)
+{
+	unsigned long irq;
+
+	/* Ignores a missing inode. */
+	if (inode == NULL)
+		return;
+
+	/* Counts the image down; the last one lets writers open the file. */
+	irq = spin_lock_irqsave(&inode->i_vm_lock);
+
+	if (inode->i_exec_text == 0)
+		HAL_FATAL("inode exec text underflow");
+	inode->i_exec_text--;
+
+	spin_unlock_irqrestore(&inode->i_vm_lock, irq);
+}
+
+/*
  * Truncates a file under a growth limit with a credential.
  */
 int

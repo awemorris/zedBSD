@@ -163,8 +163,11 @@ struct file_io {
  * lock until end.  This is intended for multi-read consumers such as
  * exec image loading, not ordinary read(2), whose shared lease is
  * carried by struct file_io. file_exec_snapshot_begin may instead select a
- * shared content gate and cache pin for an immutable direct input; that lease
- * holds no inode I/O mutex across reads. Both forms use the same pread/end API.
+ * shared lease and cache pin for a direct input that cannot change while the
+ * lease is held: one on read-only media, under a shared content gate, or one
+ * the lease marks as exec text, which refuses writers with ETXTBSY.  That
+ * lease holds no inode I/O mutex across reads. Both forms use the same
+ * pread/end API.
  */
 struct file_content_lease {
 	struct vm_object *read_object;
@@ -177,6 +180,7 @@ struct file_content_lease {
 	off_t size;
 	unsigned held_content_inode_io;
 	unsigned held_visible_gate;
+	unsigned held_exec_text;
 	unsigned active;
 	unsigned transferred;
 };
@@ -244,6 +248,8 @@ struct file {
 	/* Published under the regular inode I/O lock; final close releases it. */
 	struct backing_claim *f_format_claim;
 	uint64_t f_format_size;
+	/* The inode this open holds write access to; final close gives it back. */
+	struct inode *f_write_access;
 };
 
 int file_format_reserve(struct file *, uint64_t);
@@ -343,7 +349,12 @@ file_content_lease_begin(
 /* Immutable direct inputs may use a shared cache lease; others retain copy semantics. */
 int file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease);
 
-/* Immutable full cache pages; references may outlive the loader's input lease. */
+/*
+ * Immutable full cache pages; references may outlive the loader's input lease.
+ * The input lease keeps the content from changing, and each page is pinned
+ * the first time it is mapped, so that every later mapping of the same
+ * offset gets the same page.  A slot stays empty until then.
+ */
 struct file_exec_snapshot {
 	refcount_t refs;
 	struct file_content_lease input;
@@ -351,10 +362,13 @@ struct file_exec_snapshot {
 	size_t length;
 	size_t memory_bytes;
 	size_t page_count;
+	struct spinlock lock;
 	struct vm_object_page *pages[];
 };
 int file_exec_snapshot_create(struct file_content_lease *input, off_t offset,
     size_t length, struct file_exec_snapshot **result);
+int file_exec_snapshot_keep(struct file_exec_snapshot *snapshot, size_t index,
+    struct vm_object_page *page);
 void file_exec_snapshot_ref(struct file_exec_snapshot *snapshot);
 void file_exec_snapshot_put(struct file_exec_snapshot *snapshot);
 

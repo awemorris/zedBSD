@@ -341,6 +341,14 @@ struct inode {
 	uint64_t i_vm_content_generation;
 	off_t i_vm_content_start;
 	off_t i_vm_content_end;
+
+	/*
+	 * The exec images that map this file's pages, and the opens and
+	 * truncations that may change its content.  Each excludes the
+	 * other; i_vm_lock protects both counts.
+	 */
+	unsigned i_exec_text;
+	unsigned i_write_access;
 	struct mutex i_lock;
 	nlink_t i_linkcount;
 	mode_t i_mode;
@@ -561,6 +569,32 @@ inode_truncate_limited(
 	off_t size,
 	uint64_t growth_limit,
 	int *limit_exceeded);
+
+/*
+ * Takes write access to a regular file, refusing one an exec image maps
+ * with ETXTBSY; other inode types take nothing.
+ */
+int
+inode_write_access_begin(
+	struct inode *inode);
+
+/* Gives back write access taken with inode_write_access_begin(). */
+void
+inode_write_access_end(
+	struct inode *inode);
+
+/*
+ * Marks a regular file as mapped by an exec image, refusing one that some
+ * holder may write with ETXTBSY.
+ */
+int
+inode_exec_text_begin(
+	struct inode *inode);
+
+/* Ends an exec image's mapping of a file. */
+void
+inode_exec_text_end(
+	struct inode *inode);
 
 /*
  * Credential-aware mutation additionally clears executable set-id state

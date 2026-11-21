@@ -1229,7 +1229,7 @@ exec_target_resolve(
 			return error;
 	}
 
-	error = file_content_lease_begin(target->file, &target->lease);
+	error = file_exec_snapshot_begin(target->file, &target->lease);
 	if (error != 0)
 		goto fail;
 	if (reopenable_path) {
@@ -1331,7 +1331,7 @@ exec_target_resolve(
 		file_content_lease_end(&target->lease);
 		(void)file_close(target->file);
 		target->file = interpreter;
-		error = file_content_lease_begin(target->file,
+		error = file_exec_snapshot_begin(target->file,
 						 &target->lease);
 		if (error != 0)
 			goto fail;
