@@ -109,7 +109,8 @@ static int wait_selectable(void);
 static int wait_drq(void);
 static uint16_t inw(uint16_t port);
 static int identify_is_cfa(const uint16_t data[256]);
-static void outw(uint16_t port, uint16_t value);
+static void read_sector_data(uint16_t *buffer);
+static void write_sector_data(const uint16_t *buffer);
 static int setup_transfer(const struct ide_unit *unit, uint64_t lba, uint32_t count);
 static int pio_read(struct disk *dev, uint64_t lba, uint32_t count, void *buffer);
 static int pio_write(struct disk *dev, uint64_t lba, uint32_t count, const void *buffer);
@@ -617,13 +618,45 @@ identify_is_cfa(
 	       (data[IDE_ID_COMMAND_SET_2] & 0xc004U) == IDE_ID_CFA_FEATURE;
 }
 
-/* Supports the outw operation. */
+/*
+ * Reads one sector's 256 data words with a single string instruction.
+ *
+ * A word loop in C spends several instructions per word besides the port
+ * read, which on a 386SX without a cache costs more than the ISA cycle
+ * itself; REP INSW leaves only the bus cycle.  Linux libata moves PIO data
+ * the same way (ata_sff_data_xfer(): ioread16_rep/iowrite16_rep on the data
+ * port).
+ */
 static void
-outw(
-	uint16_t port,
-	uint16_t value)
+read_sector_data(
+	uint16_t *buffer)
 {
-	__asm__ volatile("outw %0, %w1" : : "a"(value), "Nd"(port));
+	uint32_t words;
+
+	/* Moves the sector from the data port into the buffer. */
+	words = 256U;
+	__asm__ volatile("rep insw"
+			 : "+D"(buffer), "+c"(words)
+			 : "d"((uint16_t)IDE_DATA)
+			 : "memory");
+}
+
+/*
+ * Writes one sector's 256 data words with a single string instruction, for
+ * the same reason as read_sector_data().
+ */
+static void
+write_sector_data(
+	const uint16_t *buffer)
+{
+	uint32_t words;
+
+	/* Moves the sector from the buffer to the data port. */
+	words = 256U;
+	__asm__ volatile("rep outsw"
+			 : "+S"(buffer), "+c"(words)
+			 : "d"((uint16_t)IDE_DATA)
+			 : "memory");
 }
 
 /* Program the address registers for one chunk.  LBA28 when the drive supports it, CHS in the drive's native geometry otherwise. */
@@ -676,7 +709,6 @@ pio_read(
 	uint32_t count,
 	void *buffer)
 {
-	unsigned word;
 	uint32_t chunk;
 	uint32_t sector;
 	struct ide_unit *unit = dev->d_data;
@@ -698,9 +730,10 @@ pio_read(
 			/* Checks the wait drq result. */
 			if (!wait_drq())
 				return EIO;
-			/* Process each element required by the operation. */
-			for (word = 0; word < 256; word++)
-				*out++ = inw(IDE_DATA);
+
+			/* Takes the sector the drive has ready. */
+			read_sector_data(out);
+			out += 256;
 		}
 
 		lba += chunk;
@@ -719,7 +752,6 @@ pio_write(
 	uint32_t count,
 	const void *buffer)
 {
-	unsigned word;
 	uint32_t chunk;
 	uint32_t sector;
 	struct ide_unit *unit = dev->d_data;
@@ -739,9 +771,10 @@ pio_write(
 			/* Checks the wait drq result. */
 			if (!wait_drq())
 				return EIO;
-			/* Process each element required by the operation. */
-			for (word = 0; word < 256; word++)
-				outw(IDE_DATA, *in++);
+
+			/* Hands the drive the sector it asked for. */
+			write_sector_data(in);
+			in += 256;
 		}
 
 		failure_stage = "wait write completion";
