@@ -51,10 +51,14 @@
  * The fixed kernel heap.  A small allocation that does not fit falls back
  * to a whole physical page, so on a machine with memory to spare the heap
  * is sized to keep page tables' records and similar small objects out of
- * that fallback.  Smaller machines keep the old size.
+ * that fallback.  Smaller machines keep the old size, and a machine of a
+ * few MiB half of it: the heap holds about 120 KiB at a shell prompt there,
+ * and what does not fit still comes from whole pages.
  */
 #if defined(__x86_64__)
 #define KERNEL_HEAP_SIZE (4U * 1024U * 1024U)
+#elif CONFIG_KERN_SMALL_MEMORY
+#define KERNEL_HEAP_SIZE (256U * 1024U)
 #else
 #define KERNEL_HEAP_SIZE (512U * 1024U)
 #endif
