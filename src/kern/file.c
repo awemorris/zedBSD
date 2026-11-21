@@ -412,6 +412,19 @@ file_openat_cred(
 	}
 
 	/*
+	 * Write access is taken before anything changes: a file an exec
+	 * image maps is refused, and nothing is truncated.
+	 */
+	if ((flags & O_ACCMODE) != O_RDONLY && inode->i_type == INODE_REG) {
+		error = inode_write_access_begin(inode);
+		if (error != 0) {
+			path_release(&found);
+			goto fail_file;
+		}
+		file->f_write_access = inode;
+	}
+
+	/*
 	 * Truncation and set-id removal are one inode content transaction.
 	 * A metadata failure must fail open before the backend is changed.
 	 */
@@ -420,6 +433,8 @@ file_openat_cred(
 		error = inode_truncate_limited_cred(inode, 0, UINT64_MAX, cred,
 		    NULL);
 		if (error != 0) {
+			inode_write_access_end(file->f_write_access);
+			file->f_write_access = NULL;
 			path_release(&found);
 			goto fail_file;
 		}
@@ -438,9 +453,11 @@ file_openat_cred(
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
+			if (file->f_write_access != NULL)
+				inode_write_access_end(file->f_write_access);
+			file->f_write_access = NULL;
 			path_release(&file->f_path);
-			file_free(file);
-			return error;
+			goto fail_file;
 		}
 	}
 
@@ -510,6 +527,15 @@ file_open_resolved(
 	file = file_alloc();
 	if (file == NULL)
 		return ENFILE;
+	if ((flags & O_ACCMODE) != O_RDONLY &&
+	    resolved->p_inode->i_type == INODE_REG) {
+		error = inode_write_access_begin(resolved->p_inode);
+		if (error != 0) {
+			file_free(file);
+			return error;
+		}
+		file->f_write_access = resolved->p_inode;
+	}
 	path_set(&file->f_path, resolved->p_mount, resolved->p_inode);
 	file->f_inode = resolved->p_inode;
 	file->f_vm_inode = resolved->p_inode;
@@ -519,6 +545,8 @@ file_open_resolved(
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
+			if (file->f_write_access != NULL)
+				inode_write_access_end(file->f_write_access);
 			path_release(&file->f_path);
 			file_free(file);
 			return error;
@@ -854,12 +882,20 @@ fail_file:
 	return 0;
 }
 
-/* Selects a shared immutable-input lease without weakening mutable snapshots. */
+/*
+ * Selects a shared lease for an exec input whose content cannot change while
+ * it is held.  A file on read-only media cannot change at all; a file on a
+ * writable mount is kept from changing by marking it as exec text, which
+ * refuses every open for writing and every truncation with ETXTBSY until the
+ * lease ends.  A file some holder may already write, and any other input,
+ * takes the exclusive lease, whose loader copies the image.
+ */
 int
 file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 {
 	struct inode *inode;
 	struct mount *mountp;
+	int immutable;
 	int error;
 
 	/* All unsupported identities retain the existing exclusive snapshot protocol. */
@@ -870,14 +906,42 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 	    file->f_ops->pread == NULL ||
 	    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY ||
 	    file->f_backing_claim != NULL || file->f_format_claim != NULL ||
-	    mountp == NULL || (mountp->m_flags & MOUNT_READ_ONLY) == 0 ||
-	    mountp->m_disk == NULL || (mountp->m_disk->d_flags & DISK_READ_ONLY) == 0 ||
+	    (inode->i_flags & (INODE_LOOPFILE | INODE_SWAPFILE)) != 0 ||
+	    mountp == NULL || mountp->m_disk == NULL ||
 	    disk_cache_acquire == NULL || disk_cache_release == NULL ||
 	    !file_vm_content_available())
 		return file_content_lease_begin(file, lease);
+
+	/* Read-only media keep the content; any other file may be written. */
+	immutable = 0;
+	if ((mountp->m_flags & MOUNT_READ_ONLY) != 0 &&
+	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)
+		immutable = 1;
+
+	/* A writable file maps only while no holder may write it. */
+	if (!immutable) {
+		if (vm_object_cache_pin == NULL || vm_object_cache_unpin == NULL ||
+		    vm_object_read_coherent == NULL)
+			return file_content_lease_begin(file, lease);
+		error = inode_exec_text_begin(inode);
+		if (error != 0)
+			return file_content_lease_begin(file, lease);
+	}
+
+	/* The lease remembers the exec text mark it gives back at its end. */
 	kern_memset(lease, 0, sizeof(*lease));
-	if (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)
-		return inode->i_size < 0 ? EIO : EFBIG;
+	if (!immutable)
+		lease->held_exec_text = 1;
+
+	/* A size the loader cannot address gives the mark back at once. */
+	if (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX) {
+		error = inode->i_size < 0 ? EIO : EFBIG;
+		if (lease->held_exec_text)
+			inode_exec_text_end(inode);
+		kern_memset(lease, 0, sizeof(*lease));
+		return error;
+	}
+
 	file_ref(file);
 	error = disk_cache_acquire(mountp->m_disk, &lease->read_disk);
 	if (error != 0)
@@ -885,9 +949,17 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 	if (vm_object_cache_prepare != NULL)
 		vm_object_cache_prepare(file);
 
-	/* Shared readers coexist; wait only when a replacement already owns the inode. */
+	/*
+	 * Shared readers coexist; wait only when a replacement already owns
+	 * the inode.  Exec text needs no content gate: no holder may write
+	 * the file while it is marked, so no content transaction can begin.
+	 */
 	for (;;) {
 		mutex_lock(&inode->i_io_lock);
+		if (lease->held_exec_text) {
+			error = 0;
+			break;
+		}
 		error = vm_object_content_read_begin(inode);
 		if (error != EBUSY && error != EAGAIN)
 			break;
@@ -899,7 +971,8 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 
 	if (error == 0 && (inode->i_size < 0 || (uint64_t)inode->i_size > SIZE_MAX)) {
 		error = inode->i_size < 0 ? EIO : EFBIG;
-		vm_object_content_read_end(inode);
+		if (!lease->held_exec_text)
+			vm_object_content_read_end(inode);
 	}
 
 	if (error == 0) {
@@ -923,6 +996,8 @@ file_exec_snapshot_begin(struct file *file, struct file_content_lease *lease)
 fail:
 	if (lease->read_disk != NULL)
 		disk_cache_release(lease->read_disk);
+	if (lease->held_exec_text)
+		inode_exec_text_end(inode);
 	kern_memset(lease, 0, sizeof(*lease));
 	(void)file_close(file);
 
@@ -934,7 +1009,11 @@ fail:
 	return 0;
 }
 
-/* Captures full canonical pages before an executable mapping becomes visible. */
+/*
+ * Opens a snapshot of full canonical pages before an executable mapping
+ * becomes visible.  No page is read here: the snapshot's own lease keeps
+ * the content from changing, and each page is kept as it is first mapped.
+ */
 int
 file_exec_snapshot_create(
 	struct file_content_lease *input,
@@ -943,8 +1022,7 @@ file_exec_snapshot_create(
 	struct file_exec_snapshot **result)
 {
 	struct file_exec_snapshot *snapshot;
-	struct vm_object_page *page;
-	size_t count, bytes, index;
+	size_t count, bytes;
 	int error;
 
 	if (result == NULL)
@@ -972,6 +1050,7 @@ file_exec_snapshot_create(
 
 	cache_memory_commit(CACHE_MEMORY_FILE_META, bytes);
 	refcount_init(&snapshot->refs, 1);
+	spin_init(&snapshot->lock, LOCK_RANK_VM_OBJECT, "exec snapshot");
 	snapshot->memory_bytes = bytes;
 	snapshot->offset = offset;
 	snapshot->length = length;
@@ -985,19 +1064,8 @@ file_exec_snapshot_create(
 		goto fail;
 	}
 
-	/* Persistent page pins prevent reclaim from replacing captured source bytes. */
-	for (index = 0; index < count; index++) {
-		error = vm_object_fault(snapshot->input.read_object,
-		    offset + (off_t)(index * KERN_PAGE_SIZE), &page);
-		if (error != 0)
-			goto fail;
-		error = vm_object_page_pin(page);
-		vm_object_fault_release(page);
-		if (error != 0)
-			goto fail;
-		snapshot->pages[snapshot->page_count++] = page;
-	}
-
+	/* Every slot starts empty; the calloc left them NULL. */
+	snapshot->page_count = count;
 	*result = snapshot;
 	return 0;
 
@@ -1007,6 +1075,64 @@ fail:
 	/* Reports the failure. */
 	if (error != 0)
 		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Keeps the page a snapshot mapping is about to map at one slot.  The first
+ * mapping of the slot pins the page; a later one must bring the same page.
+ * The caller holds the page through a fault of the snapshot's read object.
+ * Reports EAGAIN when another page was kept first, so that the caller looks
+ * the offset up again and finds the kept one.
+ */
+int
+file_exec_snapshot_keep(
+	struct file_exec_snapshot *snapshot,
+	size_t index,
+	struct vm_object_page *page)
+{
+	struct vm_object_page *kept;
+	unsigned long irq;
+	int error;
+
+	/* Rejects a missing page or a slot outside the snapshot. */
+	if (snapshot == NULL || page == NULL || index >= snapshot->page_count)
+		return EINVAL;
+
+	/* Takes nothing when the slot already keeps this page. */
+	irq = spin_lock_irqsave(&snapshot->lock);
+
+	kept = snapshot->pages[index];
+
+	spin_unlock_irqrestore(&snapshot->lock, irq);
+
+	if (kept == page)
+		return 0;
+	if (kept != NULL)
+		return EAGAIN;
+
+	/* Pins the page before publishing it, outside the snapshot lock. */
+	error = vm_object_page_pin(page);
+	if (error != 0)
+		return error;
+
+	/* Publishes the pin unless another mapping kept a page first. */
+	irq = spin_lock_irqsave(&snapshot->lock);
+
+	kept = snapshot->pages[index];
+	if (kept == NULL)
+		snapshot->pages[index] = page;
+
+	spin_unlock_irqrestore(&snapshot->lock, irq);
+
+	/* Gives the extra pin back when the slot was taken meanwhile. */
+	if (kept != NULL) {
+		vm_object_page_unpin(page);
+		if (kept != page)
+			return EAGAIN;
+	}
 
 	/* Succeeded. */
 	return 0;
@@ -1028,8 +1154,10 @@ file_exec_snapshot_put(struct file_exec_snapshot *snapshot)
 
 	if (snapshot == NULL || !refcount_put(&snapshot->refs))
 		return;
-	for (index = 0; index < snapshot->page_count; index++)
-		vm_object_page_unpin(snapshot->pages[index]);
+	for (index = 0; index < snapshot->page_count; index++) {
+		if (snapshot->pages[index] != NULL)
+			vm_object_page_unpin(snapshot->pages[index]);
+	}
 	file_content_lease_end(&snapshot->input);
 	cache_memory_release(CACHE_MEMORY_FILE_META, snapshot->memory_bytes);
 	kern_free(snapshot);
@@ -1098,11 +1226,14 @@ file_content_lease_end(
 
 	/* A shared lease only has to release what it pinned in the cache. */
 	if (lease->shared_read) {
-		vm_object_content_read_end(lease->content_inode);
+		if (!lease->held_exec_text)
+			vm_object_content_read_end(lease->content_inode);
 		if (lease->read_object != NULL)
 			vm_object_cache_unpin(lease->read_object);
 		if (lease->read_disk != NULL)
 			disk_cache_release(lease->read_disk);
+		if (lease->held_exec_text)
+			inode_exec_text_end(lease->content_inode);
 		if (lease->transferred)
 			inode_touch(file->f_inode, INODE_ATTR_ATIME);
 		kern_memset(lease, 0, sizeof(*lease));
@@ -2649,6 +2780,10 @@ file_close(
 		backing_claim_release(file->f_format_claim);
 		file->f_format_claim = NULL;
 	}
+
+	/* Lets an exec image map the file once no open may write it. */
+	if (file->f_write_access != NULL)
+		inode_write_access_end(file->f_write_access);
 
 	if (file->f_path.p_inode != NULL)
 		path_release(&file->f_path);

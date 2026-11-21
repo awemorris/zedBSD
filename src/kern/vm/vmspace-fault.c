@@ -609,13 +609,16 @@ retry:
 		if (error != 0)
 			goto remove_placeholder;
 
-		/* A snapshot mapping must get the page the snapshot pinned. */
+		/*
+		 * A snapshot keeps the page its offset is first mapped with,
+		 * and maps that page every later time.
+		 */
 		if (region->snapshot != NULL) {
-			if (object_page != region->snapshot->pages[
-			    (size_t)(object_offset - region->snapshot->offset) / PAGE_SIZE]) {
-				error = EIO;
+			error = file_exec_snapshot_keep(region->snapshot,
+			    (size_t)(object_offset - region->snapshot->offset) / PAGE_SIZE,
+			    object_page);
+			if (error != 0)
 				goto remove_placeholder;
-			}
 		}
 
 		/* A snapshot's or a private region's page is copied on its first write. */
@@ -1389,7 +1392,7 @@ vmspace_fault_around_page_locked(
 	if (offset < 0)
 		return 0;
 
-	/* A snapshot maps only the pages it pinned, from its read object. */
+	/* A snapshot maps only the pages it keeps, from its read object. */
 	index = 0;
 	if (region->snapshot != NULL) {
 		if (offset < region->snapshot->offset ||
@@ -1411,10 +1414,13 @@ vmspace_fault_around_page_locked(
 	error = vm_object_fault_resident(object, offset, &object_page);
 	if (error != 0)
 		return 0;
-	if (region->snapshot != NULL &&
-	    object_page != region->snapshot->pages[index]) {
-		vm_object_fault_release(object_page);
-		return 0;
+	if (region->snapshot != NULL) {
+		error = file_exec_snapshot_keep(region->snapshot, index,
+		    object_page);
+		if (error != 0) {
+			vm_object_fault_release(object_page);
+			return 0;
+		}
 	}
 
 	/* Builds the mapping descriptor. */

@@ -5279,13 +5279,22 @@ sys_truncate_call(
 		else
 			error = EINVAL;
 	} else {
+		/*
+		 * A path holds no write access of its own, so it takes it for
+		 * the call: a file an exec image maps is refused.
+		 */
 		error = 0;
 		if (!by_fd)
 			error = vfs_access(inode, cred, W_OK);
-		if (error == 0)
+		if (error == 0 && !by_fd)
+			error = inode_write_access_begin(inode);
+		if (error == 0) {
 			error = inode_truncate_limited_cred(inode, length,
 			    resource_limit_current(process, RLIMIT_FSIZE),
 			    cred, &limit_exceeded);
+			if (!by_fd)
+				inode_write_access_end(inode);
+		}
 	}
 
 	/* Signals a caller that hit the size limit, and releases the file. */
