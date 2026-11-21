@@ -104,16 +104,30 @@ __timer_sigev_thread_fork_child(
 				    (uintptr_t)&timer_previous_action, 0, 0);
 	}
 
-	/* Process each element required by the operation. */
+	/*
+	 * Process each element required by the operation.  A slot already
+	 * free is left as it is: where the processor has no atomic
+	 * instructions every atomic store is a library call that takes a
+	 * lock, and most processes never use a timer.
+	 */
 	for (slot = 0; slot < LIBC_TIMER_MAX; slot++) {
-		__atomic_store_n(&timer_slots[slot].state, TIMER_SLOT_FREE,
-				 __ATOMIC_RELAXED);
-		__atomic_store_n(&timer_slots[slot].pending, 0,
-				 __ATOMIC_RELAXED);
-		__atomic_store_n(&timer_slots[slot].handler_refs, 0,
-				 __ATOMIC_RELAXED);
-		__atomic_store_n(&timer_slots[slot].public_id, 0,
-				 __ATOMIC_RELAXED);
+		if (__atomic_load_n(&timer_slots[slot].state,
+				    __ATOMIC_RELAXED) != TIMER_SLOT_FREE ||
+		    __atomic_load_n(&timer_slots[slot].pending,
+				    __ATOMIC_RELAXED) != 0 ||
+		    __atomic_load_n(&timer_slots[slot].handler_refs,
+				    __ATOMIC_RELAXED) != 0 ||
+		    __atomic_load_n(&timer_slots[slot].public_id,
+				    __ATOMIC_RELAXED) != 0) {
+			__atomic_store_n(&timer_slots[slot].state,
+					 TIMER_SLOT_FREE, __ATOMIC_RELAXED);
+			__atomic_store_n(&timer_slots[slot].pending, 0,
+					 __ATOMIC_RELAXED);
+			__atomic_store_n(&timer_slots[slot].handler_refs, 0,
+					 __ATOMIC_RELAXED);
+			__atomic_store_n(&timer_slots[slot].public_id, 0,
+					 __ATOMIC_RELAXED);
+		}
 		timer_slots[slot].kernel_id = 0;
 		timer_slots[slot].generation =
 		    (timer_slots[slot].generation + 1U) &

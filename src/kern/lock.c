@@ -12,6 +12,19 @@
  * release by another CPU trap immediately.  A mutex is a spinlock-guarded
  * ownership flag whose waiters sleep on a wait queue; mutex_wait() lets the
  * holder sleep on a condition while temporarily yielding the mutex.
+ *
+ * Until a second CPU starts (lock_cpus_start()), no other CPU can touch a
+ * lock, and the words are read and written with plain accesses: a spinlock
+ * is only ever taken with interrupts disabled, which alone excludes the
+ * interrupt handlers and the preemption of the holder, and a mutex's
+ * locked word is changed with interrupts disabled for the change.  The
+ * words keep the same values as with the atomic accesses, so a lock held
+ * when the other CPUs start is released the usual way.  On a port without
+ * native atomics every atomic access is a call into a serialized region of
+ * the HAL, several of them for each lock and release.  A build with
+ * KERN_LOCK_DEBUG traps when a spinlock is taken or released with
+ * interrupts enabled while only one CPU runs, which the plain accesses
+ * rely on.
  */
 
 #include <kern/lock.h>
@@ -38,11 +51,40 @@
 #define MUTEX_HELD      1U
 #define MUTEX_CONTENDED 2U
 
+/*
+ * Nonzero while only the boot CPU (CPU 0) runs; cleared before the
+ * others start, and never set again.  A uniprocessor build (HAL_CPU_UP)
+ * has only CPU 0, and the value is a constant.
+ */
+#if defined(HAL_CPU_UP)
+#define lock_one_cpu 1
+#else
+static int lock_one_cpu = 1;
+#endif
+
 static int mutex_take_free(struct mutex *mutex);
+static unsigned mutex_exchange(struct mutex *mutex, unsigned next, int release);
+static struct thread *mutex_owner(struct mutex *mutex);
+static void mutex_set_owner(struct mutex *mutex, struct thread *owner);
 static int mutex_spin_take(struct mutex *mutex);
 static void mutex_sleep_take(struct mutex *mutex, unsigned flags, int *error);
 static void mutex_sleep_give_up(struct mutex *mutex);
 static void mutex_check_owner(struct mutex *mutex, struct thread *thread);
+
+/*
+ * Makes the locks use atomic accesses from now on: called by the boot CPU
+ * before any other CPU starts.
+ */
+void
+lock_cpus_start(
+	void)
+{
+#if !defined(HAL_CPU_UP)
+	/* Lets the next lock and release see the change before another CPU runs. */
+	lock_one_cpu = 0;
+	__asm__ volatile("" : : : "memory");
+#endif
+}
 
 /*
  * Initializes an unlocked spinlock.
@@ -75,6 +117,32 @@ spin_trylock(
 	unsigned held;
 	unsigned owner_valid;
 	int acquired;
+
+	/*
+	 * With one CPU, plain accesses: the caller has interrupts disabled,
+	 * so nothing else runs between the look and the take, and a held
+	 * lock is held by this CPU, which traps as a recursive acquisition.
+	 */
+	if (lock_one_cpu) {
+#if defined(KERN_LOCK_DEBUG)
+		/* Traps on a caller that left interrupts enabled. */
+		if (hal_irq_disable()) {
+			hal_irq_enable();
+			__builtin_trap();
+		}
+#endif
+		__asm__ volatile("" : : : "memory");
+		if (lock->held.value != 0) {
+			if (lock->owner_valid && lock->owner_cpu == 0)
+				__builtin_trap();
+			return 0;
+		}
+		lock->held.value = 1;
+		lock->owner_cpu = 0;
+		lock->owner_valid = 1;
+		__asm__ volatile("" : : : "memory");
+		return 1;
+	}
 
 	/*
 	 * Traps on a recursive acquisition by the owning CPU, and reports a
@@ -144,6 +212,26 @@ spin_unlock(
 {
 	unsigned cpu;
 	unsigned held;
+
+	/* With one CPU, plain accesses under the caller's disabled interrupts. */
+	if (lock_one_cpu) {
+#if defined(KERN_LOCK_DEBUG)
+		/* Traps on a caller that left interrupts enabled. */
+		if (hal_irq_disable()) {
+			hal_irq_enable();
+			__builtin_trap();
+		}
+#endif
+		__asm__ volatile("" : : : "memory");
+		if (lock->held.value == 0 ||
+		    !lock->owner_valid ||
+		    lock->owner_cpu != 0)
+			__builtin_trap();
+		lock->owner_valid = 0;
+		lock->held.value = 0;
+		__asm__ volatile("" : : : "memory");
+		return;
+	}
 
 	/* Traps unless this CPU is the recorded owner. */
 	cpu = hal_cpu_current();
@@ -242,14 +330,14 @@ mutex_trylock(
 		return 0;
 
 	/* Traps on a recursive acquisition. */
-	owner = __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED);
+	owner = mutex_owner(mutex);
 	if (owner == thread)
 		__builtin_trap();
 
 	/* Takes ownership only while the mutex is free. */
 	acquired = mutex_take_free(mutex);
 	if (acquired)
-		__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+		mutex_set_owner(mutex, thread);
 
 	/* Reports whether the mutex was acquired. */
 	return acquired;
@@ -277,7 +365,7 @@ mutex_owned(
 	 * and a thread that reads anything else does not.  Assertions call
 	 * this on hot paths.
 	 */
-	owner = __atomic_load_n(&mutex->owner, __ATOMIC_ACQUIRE);
+	owner = mutex_owner(mutex);
 
 	/* Reports whether the sampled owner is the caller. */
 	owned = 0;
@@ -313,14 +401,14 @@ mutex_lock_interruptible(
 		return EINVAL;
 
 	/* Traps on a recursive acquisition. */
-	owner = __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED);
+	owner = mutex_owner(mutex);
 	if (owner == thread)
 		__builtin_trap();
 
 	/* Takes a free mutex, or one that its holder lets go of soon. */
 	acquired = mutex_spin_take(mutex);
 	if (acquired) {
-		__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+		mutex_set_owner(mutex, thread);
 		return 0;
 	}
 
@@ -341,7 +429,7 @@ mutex_lock_interruptible(
 		return EINTR;
 
 	/* Takes ownership. */
-	__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+	mutex_set_owner(mutex, thread);
 
 	/* Succeeded: the caller holds the mutex. */
 	return 0;
@@ -371,14 +459,14 @@ mutex_lock(
 		return;
 
 	/* Traps on a recursive acquisition. */
-	owner = __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED);
+	owner = mutex_owner(mutex);
 	if (owner == thread)
 		__builtin_trap();
 
 	/* Takes a free mutex, or one that its holder lets go of soon. */
 	acquired = mutex_spin_take(mutex);
 	if (acquired) {
-		__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+		mutex_set_owner(mutex, thread);
 		return;
 	}
 
@@ -395,7 +483,7 @@ mutex_lock(
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
 	/* Takes ownership. */
-	__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+	mutex_set_owner(mutex, thread);
 }
 
 /*
@@ -424,8 +512,8 @@ mutex_unlock(
 	 * Releases ownership.  The exchange tells whether a thread may be
 	 * asleep for the mutex (MUTEX_CONTENDED).
 	 */
-	__atomic_store_n(&mutex->owner, NULL, __ATOMIC_RELAXED);
-	previous = __atomic_exchange_n(&mutex->locked, MUTEX_FREE, __ATOMIC_RELEASE);
+	mutex_set_owner(mutex, NULL);
+	previous = mutex_exchange(mutex, MUTEX_FREE, 1);
 
 	/* A contended mutex hands the release to one sleeper. */
 	if (previous == MUTEX_CONTENDED) {
@@ -471,8 +559,8 @@ mutex_wait(
 	mutex_check_owner(mutex, thread);
 
 	/* Yields the mutex, waking one sleeper, before sleeping on the condition. */
-	__atomic_store_n(&mutex->owner, NULL, __ATOMIC_RELAXED);
-	previous = __atomic_exchange_n(&mutex->locked, MUTEX_FREE, __ATOMIC_RELEASE);
+	mutex_set_owner(mutex, NULL);
+	previous = mutex_exchange(mutex, MUTEX_FREE, 1);
 	if (previous == MUTEX_CONTENDED)
 		waitq_wake_one(&mutex->waiters);
 	error = waitq_sleep(condition, &mutex->guard, observed, deadline, flags);
@@ -484,7 +572,7 @@ mutex_wait(
 	spin_unlock_irqrestore(&mutex->guard, irq);
 
 	/* Takes ownership back. */
-	__atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+	mutex_set_owner(mutex, thread);
 
 	/* Reports why the condition wait failed. */
 	if (error != 0)
@@ -502,7 +590,21 @@ mutex_take_free(
 	struct mutex *mutex)
 {
 	unsigned expected;
+	bool enabled;
 	int taken;
+
+	/* With one CPU, the look and the change run with interrupts disabled. */
+	if (lock_one_cpu) {
+		enabled = hal_irq_disable();
+		taken = 0;
+		if (mutex->locked == MUTEX_FREE) {
+			mutex->locked = MUTEX_HELD;
+			taken = 1;
+		}
+		if (enabled)
+			hal_irq_enable();
+		return taken;
+	}
 
 	/* Free becomes held, and nothing else does. */
 	expected = MUTEX_FREE;
@@ -538,14 +640,21 @@ mutex_spin_take(
 	 * a single CPU the holder is off the CPU until this thread sleeps.
 	 */
 	limit = MUTEX_SPIN_LIMIT;
-	cpus = hal_cpu_count();
-	if (cpus <= 1)
+	if (lock_one_cpu) {
 		limit = 0;
+	} else {
+		cpus = hal_cpu_count();
+		if (cpus <= 1)
+			limit = 0;
+	}
 
 	/* Takes the mutex as soon as a look finds it free. */
 	spins = 0;
 	for (;;) {
-		locked = __atomic_load_n(&mutex->locked, __ATOMIC_RELAXED);
+		if (lock_one_cpu)
+			locked = *(volatile unsigned *)&mutex->locked;
+		else
+			locked = __atomic_load_n(&mutex->locked, __ATOMIC_RELAXED);
 		if (locked == MUTEX_FREE) {
 			acquired = mutex_take_free(mutex);
 			if (acquired)
@@ -587,7 +696,7 @@ mutex_sleep_take(
 	*error = 0;
 	for (;;) {
 		sequence = waitq_sequence(&mutex->waiters);
-		previous = __atomic_exchange_n(&mutex->locked, MUTEX_CONTENDED, __ATOMIC_ACQUIRE);
+		previous = mutex_exchange(mutex, MUTEX_CONTENDED, 0);
 		if (previous == MUTEX_FREE)
 			break;
 
@@ -639,12 +748,79 @@ mutex_check_owner(
 	unsigned locked;
 
 	/* Traps on a mutex that is not held. */
-	locked = __atomic_load_n(&mutex->locked, __ATOMIC_RELAXED);
+	if (lock_one_cpu)
+		locked = *(volatile unsigned *)&mutex->locked;
+	else
+		locked = __atomic_load_n(&mutex->locked, __ATOMIC_RELAXED);
 	if (locked == MUTEX_FREE)
 		__builtin_trap();
 
 	/* Traps on a mutex another thread holds. */
-	owner = __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED);
+	owner = mutex_owner(mutex);
 	if (owner != thread)
 		__builtin_trap();
+}
+
+/*
+ * Exchanges a mutex's locked word, with release ordering when release is
+ * nonzero and acquire ordering otherwise, and returns the old value.
+ */
+static unsigned
+mutex_exchange(
+	struct mutex *mutex,
+	unsigned next,
+	int release)
+{
+	unsigned previous;
+	bool enabled;
+
+	/* With one CPU, the look and the change run with interrupts disabled. */
+	if (lock_one_cpu) {
+		enabled = hal_irq_disable();
+		previous = mutex->locked;
+		mutex->locked = next;
+		if (enabled)
+			hal_irq_enable();
+		return previous;
+	}
+
+	/* Exchanges the word atomically. */
+	if (release)
+		previous = __atomic_exchange_n(&mutex->locked, next, __ATOMIC_RELEASE);
+	else
+		previous = __atomic_exchange_n(&mutex->locked, next, __ATOMIC_ACQUIRE);
+	return previous;
+}
+
+/*
+ * Reads a mutex's owner without the guard.
+ */
+static struct thread *
+mutex_owner(
+	struct mutex *mutex)
+{
+	/* With one CPU, one aligned load sees a whole value. */
+	if (lock_one_cpu)
+		return *(struct thread *volatile *)&mutex->owner;
+
+	/* Reads the owner atomically. */
+	return __atomic_load_n(&mutex->owner, __ATOMIC_ACQUIRE);
+}
+
+/*
+ * Writes a mutex's owner.
+ */
+static void
+mutex_set_owner(
+	struct mutex *mutex,
+	struct thread *owner)
+{
+	/* With one CPU, one aligned store writes a whole value. */
+	if (lock_one_cpu) {
+		*(struct thread *volatile *)&mutex->owner = owner;
+		return;
+	}
+
+	/* Writes the owner atomically. */
+	__atomic_store_n(&mutex->owner, owner, __ATOMIC_RELAXED);
 }

@@ -15,9 +15,10 @@
 #include "defs.h"
 #include "int.h"
 #include "percpu.h"
+#include "smp.h"
 #include "task.h"
 
-#define running_task running_tasks[hal_cpu_current()]
+#define running_task running_tasks[i386_cpu_index()]
 
 extern uint32_t tss_area[26];
 

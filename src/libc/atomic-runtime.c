@@ -82,6 +82,7 @@ static intptr_t atomic_call(unsigned operation, const volatile void *object, voi
 static volatile unsigned *atomic_lock_word(const volatile void *object);
 static void atomic_lock_take(volatile unsigned *word);
 static void atomic_lock_give(volatile unsigned *word);
+static bool atomic_word_operation(unsigned operation, volatile uint32_t *object, void *first, void *second);
 static void atomic_bytes_copy(volatile unsigned char *destination, const volatile unsigned char *source, size_t size);
 static bool atomic_bytes_equal(const volatile unsigned char *left, const volatile unsigned char *right, size_t size);
 #endif
@@ -97,6 +98,25 @@ zed_atomic_load(
 	int order)
 {
 	(void)order;
+#if defined(HAL_ARCH_I386)
+	/*
+	 * Reads an aligned word with one load.  One aligned 4-byte load is a
+	 * single bus access on every x86, and every operation of this runtime
+	 * writes such a word with one store (atomic_call()), so the load sees
+	 * the whole value before or after it; x86 keeps loads in order, so it
+	 * acquires.  The barriers keep the compiler from moving other
+	 * accesses across it.
+	 */
+	if (size == 4 && ((uintptr_t)object & 3U) == 0) {
+		uint32_t word;
+
+		__asm__ volatile("" : : : "memory");
+		word = *(const volatile uint32_t *)object;
+		__asm__ volatile("" : : : "memory");
+		*(uint32_t *)result = word;
+		return;
+	}
+#endif
 	(void)atomic_call(KERN_ATOMIC_LOAD, object, result, NULL, size);
 }
 
@@ -502,6 +522,20 @@ atomic_call(
 	/* Performs the operation while no other thread of the process can touch the object. */
 	atomic_lock_take(word);
 
+	/*
+	 * An aligned word is read and written whole, so that a plain load
+	 * (zed_atomic_load()) never sees a part of a store.
+	 */
+	if (size == 4 && ((uintptr_t)object & 3U) == 0) {
+		equal = atomic_word_operation(operation,
+					      (volatile uint32_t *)bytes, first,
+					      second);
+		atomic_lock_give(word);
+		if (equal)
+			return 1;
+		return 0;
+	}
+
 	/* Applies the operation the caller named. */
 	switch (operation) {
 	case KERN_ATOMIC_LOAD:
@@ -606,6 +640,55 @@ atomic_lock_give(
 	/* Refuses to give back a word that was not held: the runtime's own error. */
 	if (previous != 1U)
 		__builtin_trap();
+}
+
+/*
+ * Performs an operation on an aligned word while its lock word is held,
+ * reading and writing the word whole; the operands are as atomic_call()
+ * names them.  Reports whether a comparison stored the desired value.
+ */
+static bool
+atomic_word_operation(
+	unsigned operation,
+	volatile uint32_t *object,
+	void *first,
+	void *second)
+{
+	uint32_t current;
+	uint32_t operand;
+
+	/* Applies the operation the caller named. */
+	current = *object;
+	switch (operation) {
+	case KERN_ATOMIC_LOAD:
+		/* Copies the word out to the result. */
+		__builtin_memcpy(first, &current, sizeof(current));
+		return false;
+	case KERN_ATOMIC_STORE:
+		/* Writes the value. */
+		__builtin_memcpy(&operand, first, sizeof(operand));
+		*object = operand;
+		return false;
+	case KERN_ATOMIC_EXCHANGE:
+		/* Copies the old word out, and then writes the value. */
+		__builtin_memcpy(&operand, first, sizeof(operand));
+		__builtin_memcpy(second, &current, sizeof(current));
+		*object = operand;
+		return false;
+	case KERN_ATOMIC_COMPARE_EXCHANGE:
+		/* Writes the desired value over the expected one, or reports the word found. */
+		__builtin_memcpy(&operand, first, sizeof(operand));
+		if (current == operand) {
+			__builtin_memcpy(&operand, second, sizeof(operand));
+			*object = operand;
+			return true;
+		}
+		__builtin_memcpy(first, &current, sizeof(current));
+		return false;
+	default:
+		/* The public entries name only the four operations above. */
+		__builtin_trap();
+	}
 }
 
 /* Copies an object's bytes while its lock word is held. */

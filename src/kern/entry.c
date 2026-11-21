@@ -31,6 +31,7 @@
 #include "kern/kernel.h"
 #include "kern/kmem.h"
 #include "kern/klog.h"
+#include "kern/lock.h"
 #include "kern/net.h"
 #include "kern/page.h"
 #include "kern/platform.h"
@@ -372,6 +373,8 @@ kernel_entry(
 	if (thread_prepare_secondaries(hal_cpu_count()) != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary thread allocation failed");
+	if (hal_cpu_count() > 1)
+		lock_cpus_start();
 	if (hal_cpu_start_others() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__, "secondary CPU startup failed");
 	if (sched_wait_others_online() != 0)

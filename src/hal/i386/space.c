@@ -18,7 +18,7 @@
 #include "space.h"
 
 #define I386_SHOOTDOWN_REQUESTS (I386_APIC_MAX_CPUS * 4U)
-#define current_space current_spaces[hal_cpu_current()]
+#define current_space current_spaces[i386_cpu_index()]
 
 struct i386_shootdown_request {
 	volatile unsigned active;
@@ -40,10 +40,12 @@ static int next_space_id;
 static uint32_t space_count;
 static uint32_t page_table_count;
 static volatile unsigned count_lock;
-static volatile unsigned shootdown_pool_lock;
 static volatile unsigned space_registry_lock;
 static struct i386_space *space_registry;
+#if !defined(HAL_CPU_UP)
+static volatile unsigned shootdown_pool_lock;
 static struct i386_shootdown_request shootdowns[I386_SHOOTDOWN_REQUESTS];
+#endif
 
 static bool raw_lock_enter(volatile unsigned *lock);
 static void raw_lock_leave(volatile unsigned *lock, bool enabled);
@@ -55,13 +57,16 @@ static bool space_lock_enter(struct i386_space *space);
 static void space_lock_leave(struct i386_space *space, bool enabled);
 static struct i386_page_table *find_table(struct i386_space *space, uintptr_t vaddr);
 static struct i386_page_table *create_table(struct i386_space *space, uintptr_t vaddr);
-static struct i386_page_table *detach_empty_tables(struct i386_space *space);
+static struct i386_page_table *detach_empty_tables(struct i386_space *space, uintptr_t vaddr, size_t size);
+static int table_has_present(const struct i386_page_table *table, unsigned start);
 static void free_detached_tables(struct i386_page_table *table);
 static int valid_user_range(uintptr_t vaddr, size_t size);
 static uint32_t pte_flags(uint32_t attr);
 static uint32_t pte_replace_preserve_ad(uint32_t *entry, uint32_t replacement);
 static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+#if !defined(HAL_CPU_UP)
 static void service_shootdowns(hal_cpu_id_t cpu);
+#endif
 
 /*
  * Initializes bootstrap-CPU address-space and shootdown state.
@@ -73,11 +78,15 @@ i386_space_init(
 	/* Captures the kernel page directory and clears per-CPU state. */
 	system_cr3 = asm_get_cr3();
 	hal_memset(current_spaces, 0, sizeof(current_spaces));
+#if !defined(HAL_CPU_UP)
 	hal_memset(shootdowns, 0, sizeof(shootdowns));
+#endif
 
 	/* Initializes locks, registries, and the bootstrap current space. */
 	count_lock = 0;
+#if !defined(HAL_CPU_UP)
 	shootdown_pool_lock = 0;
+#endif
 	space_registry_lock = 0;
 	space_registry = NULL;
 	__atomic_store_n(&current_space, HAL_SPACE_SYS, __ATOMIC_RELEASE);
@@ -199,7 +208,9 @@ hal_space_destroy(
 			break;
 
 		/* Services reciprocal invalidations before retrying the lifetime wait. */
+#if !defined(HAL_CPU_UP)
 		service_shootdowns(hal_cpu_current());
+#endif
 		__asm__ volatile("pause");
 	}
 
@@ -395,7 +406,7 @@ hal_space_map(
 			}
 
 			/* Detaches empty parents before choosing the invalidation scope. */
-			detached = detach_empty_tables(space);
+			detached = detach_empty_tables(space, vaddr, offset);
 
 			/* Flushes all translations if parent tables were detached. */
 			if (detached != NULL) {
@@ -683,7 +694,7 @@ hal_space_unmap(
 	}
 
 	/* Detaches empty parent tables before acknowledging invalidation. */
-	detached = detach_empty_tables(space);
+	detached = detach_empty_tables(space, vaddr, size);
 
 	/* Flushes all translations if a parent table was detached. */
 	if (detached != NULL) {
@@ -830,6 +841,7 @@ hal_space_clear_flags(
 	return HAL_OK;
 }
 
+#if !defined(HAL_CPU_UP)
 /*
  * Services pending TLB shootdowns on the current CPU.
  */
@@ -841,6 +853,7 @@ i386_tlb_interrupt(
 	service_shootdowns(hal_cpu_current());
 	hal_irq_send_eoi(IRQ_MAX + 2U);
 }
+#endif
 
 /*
  * Flushes all translations for one address space.
@@ -1093,7 +1106,9 @@ space_lock_enter(
 			return enabled;
 
 		/* Services reciprocal invalidations before retrying the space lock. */
+#if !defined(HAL_CPU_UP)
 		service_shootdowns(hal_cpu_current());
+#endif
 		__asm__ volatile("pause");
 	}
 }
@@ -1185,39 +1200,64 @@ create_table(
 	return table;
 }
 
-/* Detaches empty page tables while retaining storage for shootdown. */
+/*
+ * Detaches the page tables of a cleared interval that hold no present PTE,
+ * retaining their storage for the shootdown.  Only the tables covering the
+ * interval can have become empty: the PTEs of the others did not change.
+ * The rollback of a failed map passes an empty interval when nothing was
+ * installed, and then nothing is detached.
+ */
 static struct i386_page_table *
 detach_empty_tables(
-	struct i386_space *space)
+	struct i386_space *space,
+	uintptr_t vaddr,
+	size_t size)
 {
 	struct i386_page_table **link;
 	struct i386_page_table *detached;
 	struct i386_page_table *table;
-	unsigned index;
+	uintptr_t first;
+	uintptr_t last;
+	uintptr_t pde;
+	unsigned start;
 
 	/* Initializes the live-list cursor and detached-list result. */
 	link = &space->page_tables;
 	detached = NULL;
+	if (size == 0)
+		return NULL;
 
-	/* Examines every attached page table for present PTEs. */
+	/* Names the directory entries the interval covers. */
+	first = vaddr >> 22;
+	last = (vaddr + size - 1U) >> 22;
+
+	/* Examines every attached page table of the interval for present PTEs. */
 	while (*link != NULL) {
 		table = *link;
+		pde = table->vaddr >> 22;
 
-		/* Searches this table for its first present PTE. */
-		for (index = 0; index < 1024U; index++) {
-			/* Stops after finding a present mapping. */
-			if ((table->pte[index] & PTE_PRESENT) != 0U)
-				break;
+		/* Retains a table outside the interval. */
+		if (pde < first || pde > last) {
+			link = &table->next;
+			continue;
 		}
 
+		/*
+		 * Looks first at the cleared entries' neighbours, where a
+		 * table that is still in use most likely has its mappings.
+		 */
+		start = 0U;
+		if (pde == first)
+			start = (unsigned)(vaddr >> 12) & 1023U;
+
 		/* Retains a nonempty table and advances its live-list link. */
-		if (index != 1024U) {
+		if (table_has_present(table, start)) {
 			link = &table->next;
 			continue;
 		}
 
 		/* Clears the parent PDE and prepends the table for later release. */
-		space->pdt[table->vaddr >> 22] = 0;
+		space->pdt[pde] = 0;
 		*link = table->next;
 		table->next = detached;
 		detached = table;
@@ -1225,6 +1265,33 @@ detach_empty_tables(
 
 	/* Returns the detached tables in reverse discovery order. */
 	return detached;
+}
+
+/*
+ * Reports whether a page table holds a present PTE, looking from one index
+ * to the end of the table and then from its start.
+ */
+static int
+table_has_present(
+	const struct i386_page_table *table,
+	unsigned start)
+{
+	unsigned index;
+
+	/* Searches from the start index to the end of the table. */
+	for (index = start; index < 1024U; index++) {
+		if ((table->pte[index] & PTE_PRESENT) != 0U)
+			return 1;
+	}
+
+	/* Searches the entries before the start index. */
+	for (index = 0; index < start; index++) {
+		if ((table->pte[index] & PTE_PRESENT) != 0U)
+			return 1;
+	}
+
+	/* Every PTE is clear. */
+	return 0;
 }
 
 /* Releases a list of detached page tables. */
@@ -1336,6 +1403,7 @@ shootdown(
 	void *vaddr,
 	size_t size)
 {
+#if !defined(HAL_CPU_UP)
 	struct i386_shootdown_request *request;
 	struct hal_cpu_mask ready;
 	hal_cpu_id_t sender;
@@ -1344,7 +1412,22 @@ shootdown(
 	unsigned pending;
 	bool pool_enabled;
 	int result;
+#endif
 
+	/*
+	 * While only this CPU runs, the local flush is the whole shootdown:
+	 * no other CPU can hold a translation of the space.
+	 */
+	if (!i386_smp_started) {
+		(void)vaddr;
+		(void)size;
+		if (handle == HAL_SPACE_SYS ||
+		    __atomic_load_n(&current_space, __ATOMIC_ACQUIRE) == handle)
+			asm_flash_tlb();
+		return;
+	}
+
+#if !defined(HAL_CPU_UP)
 	/* Captures the sender and initializes request-allocation state. */
 	sender = hal_cpu_current();
 	request = NULL;
@@ -1421,8 +1504,10 @@ shootdown(
 	/* Retires the fully acknowledged request after a memory barrier. */
 	hal_mb();
 	request->active = 0U;
+#endif
 }
 
+#if !defined(HAL_CPU_UP)
 /* Services every pending shootdown request for one CPU. */
 static void
 service_shootdowns(
@@ -1457,3 +1542,4 @@ service_shootdowns(
 		raw_lock_leave(&request->lock, enabled);
 	}
 }
+#endif

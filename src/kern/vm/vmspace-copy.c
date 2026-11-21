@@ -735,10 +735,10 @@ copy_backing(
 			mapped = (uint8_t *)hal_pmem_to_kernel(stack_pages[0].memory.paddr) +
 			    (user_address & (PAGE_SIZE - 1U));
 			if (to_user) {
-				kern_memcpy(mapped, bytes, size);
+				kern_memcpy_ram(mapped, bytes, size);
 				vm_private_page_mark_dirty(stack_pages[0].owner.private_page);
 			} else {
-				kern_memcpy(bytes, mapped, size);
+				kern_memcpy_ram(bytes, mapped, size);
 			}
 			vmspace_unpin_user_pages(stack_pages, 1U);
 			return 0;
@@ -787,11 +787,11 @@ copy_backing(
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
 			mapped = (uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + offset;
 			if (to_user) {
-				kern_memcpy(mapped, bytes, chunk);
+				kern_memcpy_ram(mapped, bytes, chunk);
 				vm_private_page_mark_dirty(
 				    page->owner.private_page);
 			} else {
-				kern_memcpy(bytes, mapped, chunk);
+				kern_memcpy_ram(bytes, mapped, chunk);
 			}
 
 			/* Copies through whichever backing the pin holds. */
