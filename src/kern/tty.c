@@ -47,7 +47,15 @@
 #define TTY_RECORDS 8U
 #define TTY_INPUT_MAX 512U
 #define TTY_VT_COUNT 4U
+/*
+ * The bytes each virtual terminal keeps of what it showed.  A kernel for a
+ * machine of a few MiB keeps a quarter.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define TTY_VT_HISTORY 2048U
+#else
 #define TTY_VT_HISTORY 8192U
+#endif
 #define TTY_ECHO_MAX (TTY_LINE_MAX * 6U + 4U)
 #define TTY_VDISABLE ((cc_t)0xffU)
 

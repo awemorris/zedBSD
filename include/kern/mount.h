@@ -34,7 +34,15 @@
 #define KERN_PATH_MAX		PATH_MAX
 #endif
 
+/*
+ * The mounts at once, private ones included.  A kernel for a machine of a
+ * few MiB keeps fewer.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define MOUNT_MAX		16U
+#else
 #define MOUNT_MAX		64U
+#endif
 #define MOUNT_READ_ONLY		0x00000001U
 #define MOUNT_NOSUID		0x00000002U
 /* The same bit as MNT_WRITETHRU: writes reach the device synchronously. */

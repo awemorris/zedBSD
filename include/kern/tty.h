@@ -160,10 +160,12 @@ tty_controlling_poll(
  * and tabs, each with an SSH session, needs more than 8, or a new Terminal
  * fails with ENOSPC.  Each pair is about 7 KiB of the
  * kernel's static memory, so the 32-bit boards with little memory (PC-98,
- * X68000, i386) keep fewer.
+ * X68000, i386) keep fewer, and a machine of a few MiB fewer still.
  */
 #ifndef TTY_PTY_MAX
-#if defined(KERN_USER_ABI_LP64)
+#if CONFIG_KERN_SMALL_MEMORY
+#define TTY_PTY_MAX 4U
+#elif defined(KERN_USER_ABI_LP64)
 #define TTY_PTY_MAX 64U
 #else
 #define TTY_PTY_MAX 16U

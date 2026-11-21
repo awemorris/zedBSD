@@ -44,7 +44,16 @@ static int file_substitute_descriptor(struct inode *inode, int flags,
 #include <uapi/unistd.h>
 #include <uapi/fcntl.h>
 
+/*
+ * The open file descriptions of the whole system.  A kernel for a machine
+ * of a few MiB keeps fewer: each is about 180 bytes of static memory, and
+ * such a machine runs a handful of processes.
+ */
+#if CONFIG_KERN_SMALL_MEMORY
+#define FILE_MAX 256U
+#else
 #define FILE_MAX 2048U
+#endif
 
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 
