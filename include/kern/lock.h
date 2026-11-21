@@ -109,6 +109,9 @@ spin_unlock_irqrestore(
 	struct spinlock *lock,
 	unsigned long enabled);
 
+void
+lock_cpus_start(void);
+
 int
 mutex_init(
 	struct mutex *mutex,
