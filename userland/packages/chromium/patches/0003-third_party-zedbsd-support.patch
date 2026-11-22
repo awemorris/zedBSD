@@ -290,3 +290,399 @@
  /******************************************************************************
  ** This file is an amalgamation of many separate C source files from SQLite
  ** version 3.54.1.  By combining all the individual C code files into this
+--- a/third_party/webrtc/rtc_base/BUILD.gn
++++ b/third_party/webrtc/rtc_base/BUILD.gn
+@@ -915,6 +915,9 @@
+   if (is_android) {
+     deps += [ ":ifaddrs_android" ]
+   }
++  if (is_zedbsd) {
++    deps += [ ":ifaddrs_zedbsd" ]
++  }
+   if (is_win) {
+     deps += [
+       ":win32",
+@@ -938,6 +941,9 @@
+   if (is_android) {
+     deps += [ ":ifaddrs_android" ]
+   }
++  if (is_zedbsd) {
++    deps += [ ":ifaddrs_zedbsd" ]
++  }
+   if (is_win) {
+     deps += [
+       ":win32",
+@@ -1107,6 +1113,9 @@
+   if (is_android) {
+     deps += [ ":ifaddrs_android" ]
+   }
++  if (is_zedbsd) {
++    deps += [ ":ifaddrs_zedbsd" ]
++  }
+   if (is_win) {
+     deps += [ ":win32" ]
+   }
+@@ -1182,6 +1191,15 @@
+   ]
+ }
+ 
++if (is_zedbsd) {
++  rtc_library("ifaddrs_zedbsd") {
++    sources = [
++      "ifaddrs_zedbsd.cc",
++      "ifaddrs_zedbsd.h",
++    ]
++  }
++}
++
+ if (is_android) {
+   rtc_library("ifaddrs_android") {
+     sources = [
+@@ -1234,6 +1252,9 @@
+   if (is_android) {
+     deps += [ ":ifaddrs_android" ]
+   }
++  if (is_zedbsd) {
++    deps += [ ":ifaddrs_zedbsd" ]
++  }
+ 
+   if (is_ios || is_mac) {
+     sources += [ "mac_ifaddrs_converter.cc" ]
+--- a/third_party/webrtc/rtc_base/ifaddrs_converter.h
++++ b/third_party/webrtc/rtc_base/ifaddrs_converter.h
+@@ -14,6 +14,8 @@
+ // IWYU pragma: begin_exports
+ #if defined(WEBRTC_ANDROID)
+ #include "rtc_base/ifaddrs_android.h"
++#elif defined(__ZEDBSD__)
++#include "rtc_base/ifaddrs_zedbsd.h"
+ #elif defined(WEBRTC_POSIX)
+ #include <ifaddrs.h>
+ #endif  // WEBRTC_ANDROID
+--- /dev/null
++++ b/third_party/webrtc/rtc_base/ifaddrs_zedbsd.cc
+@@ -0,0 +1,156 @@
++/*
++ *  Copyright 2026 The WebRTC Project Authors and zedBSD Authors.
++ *  All rights reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#include "rtc_base/ifaddrs_zedbsd.h"
++
++#include <errno.h>
++#include <net/if.h>
++#include <netinet/in.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++#include <array>
++#include <cstdint>
++
++namespace webrtc {
++
++namespace {
++
++// As many interfaces as one SIOCGIFCONF lists here.
++constexpr size_t kMaxInterfaces = 32;
++
++// One entry with its own copies of the name and the two addresses, or null.
++struct ifaddrs* NewEntry(const char* name,
++                         unsigned int flags,
++                         const struct sockaddr* address,
++                         const struct sockaddr* netmask,
++                         socklen_t length) {
++  struct ifaddrs* entry =
++      static_cast<struct ifaddrs*>(calloc(1, sizeof(struct ifaddrs)));
++  if (entry == nullptr) {
++    return nullptr;
++  }
++  entry->ifa_flags = flags;
++  entry->ifa_name = strdup(name);
++  entry->ifa_addr = static_cast<struct sockaddr*>(malloc(length));
++  entry->ifa_netmask = static_cast<struct sockaddr*>(malloc(length));
++  if (entry->ifa_name == nullptr || entry->ifa_addr == nullptr ||
++      entry->ifa_netmask == nullptr) {
++    freeifaddrs(entry);
++    return nullptr;
++  }
++  memcpy(entry->ifa_addr, address, length);
++  memcpy(entry->ifa_netmask, netmask, length);
++  return entry;
++}
++
++// The IPv6 netmask of a prefix length.
++void PrefixToMask(uint32_t prefix_length, struct sockaddr_in6* mask) {
++  memset(mask, 0, sizeof(*mask));
++  mask->sin6_family = AF_INET6;
++  for (uint32_t i = 0; i < 16; i++) {
++    uint32_t bits = prefix_length > i * 8 ? prefix_length - i * 8 : 0;
++    mask->sin6_addr.s6_addr[i] =
++        bits >= 8 ? 0xff : static_cast<uint8_t>(0xff00 >> bits);
++  }
++}
++
++}  // namespace
++
++int getifaddrs(struct ifaddrs** result) {
++  *result = nullptr;
++  int fd = socket(AF_INET, SOCK_DGRAM, 0);
++  if (fd < 0) {
++    return -1;
++  }
++
++  std::array<struct ifreq, kMaxInterfaces> names = {};
++  struct ifconf list = {};
++  list.ifc_len = sizeof(names);
++  list.ifc_buf = reinterpret_cast<uintptr_t>(names.data());
++  if (ioctl(fd, SIOCGIFCONF, &list) != 0) {
++    int error = errno;
++    close(fd);
++    errno = error;
++    return -1;
++  }
++  size_t count = list.ifc_len / sizeof(names[0]);
++
++  struct ifaddrs** tail = result;
++  for (size_t i = 0; i < count && i < names.size(); i++) {
++    char name[IFNAMSIZ + 1] = {};
++    memcpy(name, names[i].ifr_name, IFNAMSIZ);
++
++    struct ifreq request = {};
++    memcpy(request.ifr_name, name, IFNAMSIZ);
++    if (ioctl(fd, SIOCGIFFLAGS, &request) != 0) {
++      continue;
++    }
++    unsigned int flags = static_cast<unsigned int>(request.ifr_flags);
++
++    // The IPv4 address, if the interface has one.
++    if (ioctl(fd, SIOCGIFADDR, &request) == 0) {
++      struct sockaddr_in address;
++      memcpy(&address, &request.ifr_addr, sizeof(address));
++      struct sockaddr_in netmask = {};
++      netmask.sin_family = AF_INET;
++      if (ioctl(fd, SIOCGIFNETMASK, &request) == 0) {
++        memcpy(&netmask, &request.ifr_addr, sizeof(netmask));
++      }
++      struct ifaddrs* entry = NewEntry(
++          name, flags, reinterpret_cast<const struct sockaddr*>(&address),
++          reinterpret_cast<const struct sockaddr*>(&netmask), sizeof(address));
++      if (entry != nullptr) {
++        *tail = entry;
++        tail = &entry->ifa_next;
++      }
++    }
++
++    // The IPv6 addresses.
++    struct in6_ifaddrs addresses = {};
++    memcpy(addresses.ifa_name, name, IFNAMSIZ);
++    if (ioctl(fd, SIOCGIFADDRS_IN6, &addresses) != 0) {
++      continue;
++    }
++    for (uint32_t j = 0; j < addresses.ifa_count && j < IN6_IFADDRS_MAX; j++) {
++      struct sockaddr_in6 address = {};
++      address.sin6_family = AF_INET6;
++      address.sin6_addr = addresses.ifa_list[j].ife_addr;
++      struct sockaddr_in6 netmask;
++      PrefixToMask(addresses.ifa_list[j].ife_prefixlen, &netmask);
++      struct ifaddrs* entry = NewEntry(
++          name, flags, reinterpret_cast<const struct sockaddr*>(&address),
++          reinterpret_cast<const struct sockaddr*>(&netmask), sizeof(address));
++      if (entry != nullptr) {
++        *tail = entry;
++        tail = &entry->ifa_next;
++      }
++    }
++  }
++  close(fd);
++  return 0;
++}
++
++void freeifaddrs(struct ifaddrs* addrs) {
++  while (addrs != nullptr) {
++    struct ifaddrs* next = addrs->ifa_next;
++    free(addrs->ifa_name);
++    free(addrs->ifa_addr);
++    free(addrs->ifa_netmask);
++    free(addrs);
++    addrs = next;
++  }
++}
++
++}  // namespace webrtc
+--- /dev/null
++++ b/third_party/webrtc/rtc_base/ifaddrs_zedbsd.h
+@@ -0,0 +1,36 @@
++/*
++ *  Copyright 2026 The WebRTC Project Authors and zedBSD Authors.
++ *  All rights reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#ifndef RTC_BASE_IFADDRS_ZEDBSD_H_
++#define RTC_BASE_IFADDRS_ZEDBSD_H_
++
++#include <sys/socket.h>  // no-presubmit-check
++
++// Implementation of getifaddrs for zedBSD, whose C library has none: the
++// interfaces come from SIOCGIFCONF and their addresses from SIOCGIFADDR,
++// SIOCGIFNETMASK and SIOCGIFADDRS_IN6.  The list holds the members that
++// WebRTC reads.
++struct ifaddrs {
++  struct ifaddrs* ifa_next;
++  char* ifa_name;
++  unsigned int ifa_flags;
++  struct sockaddr* ifa_addr;
++  struct sockaddr* ifa_netmask;
++};
++
++namespace webrtc {
++
++int getifaddrs(struct ifaddrs** result);
++void freeifaddrs(struct ifaddrs* addrs);
++
++}  // namespace webrtc
++
++#endif  // RTC_BASE_IFADDRS_ZEDBSD_H_
+--- a/third_party/webrtc/rtc_base/net_test_helpers.cc
++++ b/third_party/webrtc/rtc_base/net_test_helpers.cc
+@@ -21,6 +21,8 @@
+ #if defined(WEBRTC_POSIX)
+ #if defined(WEBRTC_ANDROID)
+ #include "rtc_base/ifaddrs_android.h"
++#elif defined(__ZEDBSD__)
++#include "rtc_base/ifaddrs_zedbsd.h"
+ #else
+ #include <ifaddrs.h>
+ #endif
+--- a/third_party/webrtc/rtc_base/physical_socket_server.cc
++++ b/third_party/webrtc/rtc_base/physical_socket_server.cc
+@@ -422,7 +422,7 @@
+     ecn_send_options_ = value;
+     value = dscp_ + (ecn_send_options_ & kEcnMask);
+   }
+-#if defined(WEBRTC_POSIX)
++#if defined(WEBRTC_POSIX) && !defined(__ZEDBSD__)
+   if (sopt == IPV6_TCLASS) {
+     // Set the IPv4 option in all cases to support dual-stack sockets.
+     // Don't bother checking the return code, as this is expected to fail if
+@@ -598,6 +598,8 @@
+   if (timestamp || ecn) {
+     struct cmsghdr* cmsg;
+     for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
++#if !defined(__ZEDBSD__)
++      // zedBSD delivers neither the traffic class nor the receive time.
+       if (ecn) {
+ #if defined(WEBRTC_MAC)
+         // When IP_RECVTOS is enabled on an IPv4 socket, macOS/iOS delivers the
+@@ -623,6 +625,7 @@
+             (Timestamp::Seconds(ts.tv_sec) + TimeDelta::Micros(ts.tv_usec))
+                 .us();
+       }
++#endif  // !defined(__ZEDBSD__)
+     }
+   }
+   if (out_addr) {
+@@ -765,7 +768,7 @@
+       *slevel = IPPROTO_IP;
+       *sopt = IP_DONTFRAGMENT;
+       break;
+-#elif defined(WEBRTC_MAC) || defined(BSD)
++#elif defined(WEBRTC_MAC) || defined(BSD) || defined(__ZEDBSD__)
+       RTC_LOG(LS_WARNING) << "Socket::OPT_DONTFRAGMENT not supported.";
+       return -1;
+ #elif defined(WEBRTC_POSIX)
+@@ -786,7 +789,7 @@
+       *sopt = TCP_NODELAY;
+       break;
+     case OPT_DSCP:
+-#if defined(WEBRTC_POSIX)
++#if defined(WEBRTC_POSIX) && !defined(__ZEDBSD__)
+       if (family_ == AF_INET6) {
+         *slevel = IPPROTO_IPV6;
+         *sopt = IPV6_TCLASS;
+@@ -800,7 +803,7 @@
+       return -1;
+ #endif
+     case OPT_SEND_ECN:
+-#if defined(WEBRTC_POSIX)
++#if defined(WEBRTC_POSIX) && !defined(__ZEDBSD__)
+       if (family_ == AF_INET6) {
+         *slevel = IPPROTO_IPV6;
+         *sopt = IPV6_TCLASS;
+@@ -814,7 +817,7 @@
+       return -1;
+ #endif
+     case OPT_RECV_ECN:
+-#if defined(WEBRTC_POSIX)
++#if defined(WEBRTC_POSIX) && !defined(__ZEDBSD__)
+       if (family_ == AF_INET6) {
+         *slevel = IPPROTO_IPV6;
+         *sopt = IPV6_RECVTCLASS;
+@@ -833,6 +836,14 @@
+       *slevel = SOL_SOCKET;
+       *sopt = SO_KEEPALIVE;
+       break;
++#if defined(__ZEDBSD__)
++    case OPT_TCP_KEEPCNT:
++    case OPT_TCP_KEEPIDLE:
++    case OPT_TCP_KEEPINTVL:
++      // zedBSD's TCP keeps the probes' count and times to itself.
++      RTC_LOG(LS_WARNING) << "Socket::OPT_TCP_KEEP* not supported.";
++      return -1;
++#else
+     case OPT_TCP_KEEPCNT:
+       *slevel = IPPROTO_TCP;
+       *sopt = TCP_KEEPCNT;
+@@ -849,6 +860,7 @@
+       *slevel = IPPROTO_TCP;
+       *sopt = TCP_KEEPINTVL;
+       break;
++#endif  // defined(__ZEDBSD__)
+     case OPT_TCP_USER_TIMEOUT:
+ #if defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
+       *slevel = IPPROTO_TCP;
+@@ -899,12 +911,14 @@
+   ioctlsocket(s_, FIONBIO, &argp);
+ #elif defined(WEBRTC_POSIX)
+   fcntl(s_, F_SETFL, fcntl(s_, F_GETFL, 0) | O_NONBLOCK);
++#if !defined(__ZEDBSD__)
+   int value = 1;
+   // Attempt to get receive packet timestamp from the socket.
+   if (::setsockopt(s_, SOL_SOCKET, SO_TIMESTAMP, &value, sizeof(value)) != 0) {
+     RTC_DLOG(LS_ERROR) << "::setsockopt failed. errno: " << LAST_SYSTEM_ERROR;
+   }
+ #endif
++#endif
+ 
+ #if defined(WEBRTC_IOS)
+   // iOS may kill sockets when the app is moved to the background
+--- a/third_party/webrtc/rtc_base/platform_thread.cc
++++ b/third_party/webrtc/rtc_base/platform_thread.cc
+@@ -50,10 +50,10 @@
+ #if defined(WEBRTC_WIN)
+   return SetThreadPriority(GetCurrentThread(),
+                            Win32PriorityFromThreadPriority(priority)) != FALSE;
+-#elif defined(WEBRTC_FUCHSIA) || \
++#elif defined(WEBRTC_FUCHSIA) || defined(__ZEDBSD__) || \
+     (defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__))
+-  // Setting thread priorities is not supported in NaCl, Fuchsia or Emscripten
+-  // without pthreads.
++  // Setting thread priorities is not supported in NaCl, Fuchsia, zedBSD or
++  // Emscripten without pthreads.
+   return true;
+ #elif defined(WEBRTC_CHROMIUM_BUILD) && defined(WEBRTC_LINUX)
+   // TODO(tommi): Switch to the same mechanism as Chromium uses for changing
