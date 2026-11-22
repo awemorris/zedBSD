@@ -1152,6 +1152,10 @@ void kwl_glass_draw(struct kwl_server *server, struct kwl_list *command, struct 
 void kwl_glass_draw_drag_badge(struct kwl_server *server, struct kwl_list *command);
 void kwl_glass_draw_drag_mark(struct kwl_server *server, struct kwl_list *command, unsigned state);
 void kwl_glass_draw_head(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count);
+
+/* The admin action's dialog over everything on the output, and the darkening of a head of the extended desktop meanwhile (admin-ask.c). */
+void kwl_admin_ask_draw(struct kwl_server *server, struct kwl_list *command);
+void kwl_admin_ask_draw_head(struct kwl_server *server, struct kwl_list *command);
 void kwl_compose_cursor(struct kwl_server *server, struct kwl_list *command);
 void kwl_compose_count_draw(struct kwl_server *server, VkPipeline pipeline, VkDescriptorSet set, unsigned shape);
 

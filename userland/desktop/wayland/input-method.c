@@ -925,6 +925,7 @@ kwl_ime_popup_draw(
 {
 	struct kwl_ime *ime;
 	unsigned i;
+	int showing;
 
 	/* Only while a text input is served. */
 	ime = server->ime;
@@ -933,6 +934,11 @@ kwl_ime_popup_draw(
 	if (!ime->activated)
 		return;
 	if (ime->active == NULL)
+		return;
+
+	/* Nothing of the input method's shows while the admin dialog does (admin-ask.c). */
+	showing = kwl_admin_ask_showing();
+	if (showing)
 		return;
 
 	/* Each popup. */
@@ -2110,8 +2116,14 @@ ime_keyboard_key(
 {
 	struct kwl_ime *ime;
 	int taken;
+	int held;
 
 	ime = server->ime;
+
+	/* The input method's keys go nowhere while the admin dialog shows (admin-ask.c). */
+	held = kwl_admin_ask_holds(server);
+	if (held)
+		return;
 
 	/* A key past the remembered range goes as it is. */
 	if (key >= KWL_IME_KEYS) {

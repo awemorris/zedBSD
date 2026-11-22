@@ -648,8 +648,8 @@ scanout_lendable(
  * Tells whether anything is drawn over a fullscreen window: the edges'
  * gestures and what they show (App Home, Wiseview, the keyboard, the
  * corner's hint), the switcher, a menu, the network's and the volume's
- * popups, the power dialog, the lock, the system bar, an animation or a
- * transition, and any popup or sub-surface shown.
+ * popups, the power dialog, the admin dialog, the lock, the system bar, an
+ * animation or a transition, and any popup or sub-surface shown.
  */
 static int
 scanout_overlay(
@@ -685,6 +685,11 @@ scanout_overlay(
 	if (showing)
 		return 1;
 	showing = kwl_power_dialog_showing(server);
+	if (showing)
+		return 1;
+
+	/* The admin dialog, which nothing a client draws may bypass (admin-ask.c). */
+	showing = kwl_admin_ask_showing();
 	if (showing)
 		return 1;
 

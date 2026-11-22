@@ -6,8 +6,9 @@
  */
 
 /*
- * The admin actions in the compositor: kl_system_admin_v1's objects, and
- * the relay of their requests to the session manager.
+ * The admin actions in the compositor: kl_system_admin_v1's objects, the
+ * relay of their requests to the session manager, and the dialog that
+ * asks the person at the screen.
  *
  * An admin action is a program the system's definition names, run as
  * root by the session manager (sessiond) once the person at the screen
@@ -39,15 +40,38 @@
  * it ends, to forget what it was allowed.  The screen's lock refuses a
  * request waiting for its window or its dialog.
  *
- * The dialog itself is not drawn yet: where it would show, the request is
- * refused as unsupported and cancelled, unless the test build gives the
- * place its own answer (admin_ask_test_show).
+ * The dialog is drawn by the compositor alone, over everything it draws
+ * (the input method's candidates are not drawn while it shows), with
+ * every other display darkened, the compositor's own arrow for the cursor
+ * and no direct scanout: what a client draws cannot cover it or pass for
+ * it.  It says what the definition says (its title and message), which
+ * window asked, and has Allow and Cancel, Cancel chosen first.  While it
+ * shows, every input's entry gives the input to it and to no client: the
+ * grabs, a drag and the fingers and pens down are let go and the clients
+ * lose the keyboard and the pointer when it opens, and get them back when
+ * it closes.  It takes no press and no key until ADMIN_ARM_MS after its
+ * first frame has opened (a click meant for what was there before is not
+ * an Allow), and a press counts only when it starts after that and ends
+ * on the same button.  It is cancelled after ADMIN_DIALOG_MS, by Esc, by
+ * the lock and by the power button.  A client whose request the person
+ * cancelled is answered no without a dialog for ADMIN_AGAIN_MS, unless
+ * the person pressed in its window within ADMIN_PRESSED_MS (they asked
+ * again).  The plain look, which has no text to draw it with, shows no
+ * dialog: its requests are refused as unsupported.
  */
 
 #include "kwl.h"
+#include "glass.h"
+#include "data.h"
+#include "extras.h"
+#include "popup.h"
+#include "tablet.h"
+#include "touch.h"
 
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
+
+#include <keiland/keiland.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -60,6 +84,41 @@
 /* How long a request waits for its window to have the keyboard, and the dialog for the person's answer (milliseconds). */
 #define ADMIN_FRONT_MS		5000U
 #define ADMIN_DIALOG_MS		60000U
+
+/*
+ * The dialog's darkening to open (milliseconds), how long after its first
+ * frame has opened it takes no press or key, how long a client the person
+ * said no to is answered no at once, and how recent a press in its window
+ * lets it ask again.
+ */
+#define ADMIN_OPEN_MS		200U
+#define ADMIN_ARM_MS		500U
+#define ADMIN_AGAIN_MS		10000U
+#define ADMIN_PRESSED_MS	2000U
+
+/* How dark the dialog makes every display. */
+#define ADMIN_DARK		0.55f
+
+/* The card's size and corners, the buttons' size, gap and corners, the focus ring's width, and the text's inner margin. */
+#define ADMIN_CARD_WIDTH	520
+#define ADMIN_CARD_HEIGHT	300
+#define ADMIN_CARD_RADIUS	24.0f
+#define ADMIN_BUTTON_WIDTH	160
+#define ADMIN_BUTTON_HEIGHT	40
+#define ADMIN_BUTTON_GAP	16
+#define ADMIN_BUTTON_RADIUS	14.0f
+#define ADMIN_RING		3
+#define ADMIN_MARGIN		32
+
+/* The most lines the message wraps into, and the distance between two. */
+#define ADMIN_LINES		4U
+#define ADMIN_LINE_STEP		22
+
+/* The choices: Allow and Cancel, a place on the card on neither, and a place outside it. */
+#define ADMIN_ALLOW		0
+#define ADMIN_CANCEL		1
+#define ADMIN_NONE		(-1)
+#define ADMIN_OUTSIDE		(-2)
 
 /* The longest string a run may carry, with its NUL; a longer one is malformed. */
 #define ADMIN_WIRE_TEXT_MAX	1024U
@@ -109,26 +168,51 @@ struct admin_request {
 };
 
 /*
- * The admin actions' state, the event loop's: the request under way
- * (stage ADMIN_IDLE for none), the number the next request to the
- * manager gets (it skips 0, which numbers no request), and the timer that
- * wakes the loop when a stage's wait ends.
+ * The dialog of the request under way, shown while its stage is
+ * ADMIN_SHOWN.
+ *
+ * open is set from the dialog's opening to its closing, and is what keeps
+ * every input from the clients; opened_ms is when it opened (its
+ * darkening's clock) and first_ms when its first frame was drawn (0
+ * before), from which it is armed.  focus is the keys' choice (Cancel
+ * first), pressed the button a press started on after it was armed
+ * (ADMIN_NONE for none), and armed_drawn whether a frame showed it armed.
+ * who is the window that asked, as the dialog names it.  The message's
+ * lines are where its text wraps (bytes from its start and their
+ * lengths), found once at the first frame; logged is set once the
+ * dialog's places were logged.
  */
-static struct {
-	struct admin_request current;
-	uint32_t next_id;
-	struct kwl_timer timer;
-} admin_state;
+struct admin_view {
+	unsigned open;
+	uint64_t opened_ms;
+	uint64_t first_ms;
+	int focus;
+	int pressed;
+	unsigned armed_drawn;
+	char who[KWL_TITLE_MAX];
+	unsigned wrapped;
+	unsigned line_count;
+	size_t line_start[ADMIN_LINES];
+	size_t line_length[ADMIN_LINES];
+	unsigned logged;
+};
 
 /*
- * The test build's dialog.
- *
- * The test build defines it to stand for the dialog: it returns 1 when
- * the dialog shows (its answer comes later through kwl_admin_decide), or
- * 0 when it cannot.  It is weak so that the compositor links without it,
- * and where it is absent no dialog shows yet.
+ * The admin actions' state, the event loop's: the compositor, the
+ * request under way (stage ADMIN_IDLE for none) and its dialog, the
+ * number the next request to the manager gets (it skips 0, which numbers
+ * no request), the timer that wakes the loop when a stage's wait ends,
+ * and the client the person last said no to and when (0 for none).
  */
-extern int admin_ask_test_show(struct kwl_server *server, const char *title, const char *message, unsigned how, unsigned display) __attribute__((weak));
+static struct {
+	struct kwl_server *server;
+	struct admin_request current;
+	struct admin_view view;
+	uint32_t next_id;
+	struct kwl_timer timer;
+	uint64_t refused_client;
+	uint64_t refused_ms;
+} admin_state;
 
 static int admin_decode(const unsigned char *bytes, size_t size, size_t *offset, char *text, size_t room);
 static uint32_t admin_word(const unsigned char *bytes, size_t offset);
@@ -148,6 +232,20 @@ static void admin_cancel(struct kwl_server *server, const char *why);
 static void admin_abandon(struct kwl_server *server, const char *why);
 static void admin_clear(void);
 static void admin_wake(struct kwl_server *server);
+static int admin_said_no(const struct kwl_client *client);
+static void admin_open(struct kwl_server *server);
+static void admin_close(void);
+static void admin_who(const struct admin_request *request, char *who, size_t size);
+static void admin_answer(struct kwl_server *server, int choice, const char *via);
+static int admin_armed(void);
+static uint64_t admin_arm_ms(void);
+static float admin_progress(void);
+static void admin_card(const struct kwl_server *server, int32_t *card);
+static void admin_button_rect(const int32_t *card, int choice, int32_t *rect);
+static int admin_hit(const struct kwl_server *server, int32_t x, int32_t y);
+static void admin_wrap(struct kwl_server *server, const char *text, int32_t limit);
+static void admin_draw_button(struct kwl_server *server, struct kwl_list *command, const int32_t *rect, int choice, int lit, float opacity);
+static void admin_draw_middle(struct kwl_server *server, struct kwl_list *command, enum glass_size size, int32_t middle, int32_t baseline, const char *text, const float *ink);
 
 /*
  * Makes an admin object for the manager's get_admin.  Returns 0, or
@@ -199,11 +297,13 @@ kwl_admin_request(
 	size_t offset;
 	int available;
 	int showing;
+	int said_no;
 	int valid;
 	int error;
 
 	/* The object goes; what it asked goes with it (kwl_admin_gone). */
 	server = object->client->server;
+	admin_state.server = server;
 	current = &admin_state.current;
 	if (opcode == KL_SYSTEM_ADMIN_DESTROY) {
 		if (size != 0U)
@@ -288,6 +388,13 @@ kwl_admin_request(
 		return 0;
 	}
 
+	/* A client the person just said no to hears no again, unless the person pressed in its window since. */
+	said_no = admin_said_no(object->client);
+	if (said_no) {
+		admin_refuse_object(object, number, KL_SYSTEM_ADMIN_NO, "said-no");
+		return 0;
+	}
+
 	/* The request under way (the name and the words were found within their bounds): it waits for its window to have the keyboard. */
 	memset(current, 0, sizeof(*current));
 	current->stage = ADMIN_FRONT;
@@ -356,6 +463,16 @@ kwl_admin_tick(
 			admin_refuse(KL_SYSTEM_ADMIN_TIMEOUT, "timeout");
 			return;
 		}
+
+		/* The darkening opens frame by frame, from before the first frame to the end of the opening. */
+		if (admin_state.view.first_ms == 0U || now < admin_state.view.opened_ms + ADMIN_OPEN_MS)
+			server->dirty = 1;
+
+		/* The frame that shows the dialog armed is drawn when it is. */
+		if (!admin_state.view.armed_drawn &&
+		    admin_state.view.first_ms != 0U &&
+		    now >= admin_arm_ms())
+			server->dirty = 1;
 	}
 
 	/* The next pass comes when the wait ends. */
@@ -511,6 +628,338 @@ kwl_admin_available(
 
 	/* Succeeded: actions may be asked. */
 	return 1;
+}
+
+/* Tells whether the dialog shows: while it does, no client has the keyboard, the pointer or any other input. */
+int
+kwl_admin_ask_showing(
+	void)
+{
+	/* Open from its opening to its closing. */
+	if (admin_state.view.open)
+		return 1;
+	return 0;
+}
+
+/*
+ * Takes a button while the dialog shows: a press on a button once the
+ * dialog is armed holds it, and its release there takes it; any other
+ * button, press or release does nothing.  Returns 1 when the button was
+ * the dialog's (every one while it shows and the screen is not locked).
+ */
+int
+kwl_admin_ask_button(
+	struct kwl_server *server,
+	uint32_t button,
+	uint32_t state)
+{
+	int choice;
+	int armed;
+	int hit;
+
+	/* Only while it shows; the lock screen has the buttons once the screen is locked. */
+	if (!admin_state.view.open || server->locked)
+		return 0;
+
+	/* Only the left button (a finger's tap and a pen's touch are one) acts. */
+	if (button != KWL_BUTTON_LEFT)
+		return 1;
+	hit = admin_hit(server, server->pointer_x, server->pointer_y);
+
+	/* A release on the button its press started on takes it. */
+	if (state == 0U) {
+		choice = admin_state.view.pressed;
+		admin_state.view.pressed = ADMIN_NONE;
+		server->dirty = 1;
+		if (choice >= 0 && hit == choice)
+			admin_answer(server, choice, "press");
+		return 1;
+	}
+
+	/* A press before the dialog is armed is no press of its. */
+	armed = admin_armed();
+	if (!armed)
+		return 1;
+
+	/* A press on a button holds it. */
+	if (hit >= 0) {
+		admin_state.view.pressed = hit;
+		server->dirty = 1;
+	}
+
+	/* Succeeded: the button was the dialog's. */
+	return 1;
+}
+
+/*
+ * Takes a key while the dialog shows: once it is armed, Esc cancels, Tab
+ * and the arrows move the keys' choice, Enter and Space take it; a
+ * release, a key repeating and a key before it is armed do nothing.
+ * Returns 1 when the key was the dialog's (every one while it shows and
+ * the screen is not locked).
+ */
+int
+kwl_admin_ask_key(
+	struct kwl_server *server,
+	uint32_t key,
+	uint32_t state)
+{
+	int armed;
+
+	/* Only while it shows; the lock screen has the keys once the screen is locked. */
+	if (!admin_state.view.open || server->locked)
+		return 0;
+
+	/* Only a key pressed once the dialog is armed acts (one held from before it, or repeating, does not). */
+	if (state != 1U)
+		return 1;
+	armed = admin_armed();
+	if (!armed)
+		return 1;
+
+	/* Esc cancels. */
+	if (key == KEY_ESC) {
+		admin_answer(server, ADMIN_CANCEL, "escape");
+		return 1;
+	}
+
+	/* Enter and Space take the keys' choice. */
+	if (key == KEY_ENTER || key == KEY_KPENTER || key == KEY_SPACE) {
+		admin_answer(server, admin_state.view.focus, "key");
+		return 1;
+	}
+
+	/* Tab and the arrows move between the two. */
+	if (key == KEY_TAB ||
+	    key == KEY_LEFT ||
+	    key == KEY_RIGHT ||
+	    key == KEY_UP ||
+	    key == KEY_DOWN) {
+		admin_state.view.focus = ADMIN_CANCEL - admin_state.view.focus;
+		server->dirty = 1;
+	}
+
+	/* Succeeded: the key was the dialog's. */
+	return 1;
+}
+
+/*
+ * Takes the pointer's motion while the dialog shows (the button under it
+ * is drawn lit).  Returns 1 when it was the dialog's.
+ */
+int
+kwl_admin_ask_motion(
+	struct kwl_server *server)
+{
+	/* Only while it shows and the screen is not locked. */
+	if (!admin_state.view.open || server->locked)
+		return 0;
+
+	/* Succeeded: the next frame lights what is under the pointer. */
+	server->dirty = 1;
+	return 1;
+}
+
+/*
+ * Tells whether an input that only a client would hear (a wheel, a touch
+ * pad's scroll and gestures, a pen's tablet events, a virtual keyboard's
+ * keys) is to go nowhere: the dialog shows and the screen is not locked.
+ * Returns 1 or 0.
+ */
+int
+kwl_admin_ask_holds(
+	struct kwl_server *server)
+{
+	/* The dialog's input, not the lock screen's. */
+	if (!admin_state.view.open || server->locked)
+		return 0;
+	return 1;
+}
+
+/* Cancels the dialog for the power button: the person's own act comes first, and the power dialog shows after. */
+void
+kwl_admin_ask_power(
+	struct kwl_server *server)
+{
+	/* Only a dialog that shows. */
+	if (!admin_state.view.open)
+		return;
+
+	/* The request is cancelled; the client hears no. */
+	kwl_admin_decide(server, 0U, "power");
+}
+
+/*
+ * Draws the dialog over everything the compositor draws on its output but
+ * the cursor: the darkened screen and the card with the definition's
+ * title and message, the window that asked, and Allow and Cancel, both
+ * faint until it is armed and the keys' choice ringed.  Nothing shows on
+ * the lock or the login screen, or with the screen off.
+ */
+void
+kwl_admin_ask_draw(
+	struct kwl_server *server,
+	struct kwl_list *command)
+{
+	static const float dark_ink[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+	static const float soft_ink[4] = { 0.30f, 0.36f, 0.46f, 1.0f };
+	const struct admin_request *current;
+	const char *name;
+	struct glass_shape shape;
+	char line[KL_BACKEND_ADMIN_TEXT];
+	char asked[KWL_TITLE_MAX + 64U];
+	int32_t card[4];
+	int32_t rect[4];
+	int32_t middle;
+	uint64_t now;
+	unsigned index;
+	float dark[4];
+	float ink[4];
+	float soft[4];
+	float progress;
+	float opacity;
+	int armed;
+	int hover;
+	int choice;
+	int lit;
+
+	/* Only while it shows, and only over the desktop. */
+	if (!admin_state.view.open)
+		return;
+	if (server->locked || server->greeter || server->screen_off)
+		return;
+	current = &admin_state.current;
+
+	/* Its first frame starts its clock to be armed. */
+	now = kwl_milliseconds();
+	if (admin_state.view.first_ms == 0U)
+		admin_state.view.first_ms = now;
+
+	/* Drawn in the output's own places, over everything: nothing of a layer, a window's cover or a backdrop. */
+	server->layer_on = 0;
+	server->cover_count = 0U;
+	server->draw_section = KWL_SECTION_OTHER;
+	kwl_backdrop_reset(server);
+
+	/* The whole screen darkened, as far as the dialog has opened. */
+	progress = admin_progress();
+	dark[0] = 0.0f;
+	dark[1] = 0.0f;
+	dark[2] = 0.0f;
+	dark[3] = ADMIN_DARK * progress;
+	glass_draw_solid(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, 0.0f, dark);
+
+	/* The card's frosted glass in the middle. */
+	admin_card(server, card);
+	glass_shape_init(&shape, (float)card[0], (float)card[1], (float)card[2], (float)card[3]);
+	shape.mode = MODE_GLASS;
+	shape.radius = ADMIN_CARD_RADIUS;
+	shape.soft = 1.0f;
+	shape.color[0] = 1.0f;
+	shape.color[1] = 1.0f;
+	shape.color[2] = 1.0f;
+	shape.color[3] = 0.80f;
+	shape.edge = 0.70f;
+	shape.opacity = progress;
+	glass_shape_draw(server, command, &shape);
+
+	/* The message's lines, found once the glyphs can be measured. */
+	if (!admin_state.view.wrapped)
+		admin_wrap(server, current->message, ADMIN_CARD_WIDTH - 2 * ADMIN_MARGIN);
+
+	/* The inks, fading in with the card. */
+	memcpy(ink, dark_ink, sizeof(ink));
+	memcpy(soft, soft_ink, sizeof(soft));
+	ink[3] = progress;
+	soft[3] = progress;
+	middle = card[0] + card[2] / 2;
+
+	/* What is asked, then the definition's title. */
+	admin_draw_middle(server, command, SIZE_BAR, middle, card[1] + 36, kl_tr("Administrator permission"), soft);
+	admin_draw_middle(server, command, SIZE_SIGN, middle, card[1] + 72, current->title, ink);
+
+	/* The message, line by line. */
+	for (index = 0U; index < admin_state.view.line_count; index++) {
+		memcpy(line, current->message + admin_state.view.line_start[index], admin_state.view.line_length[index]);
+		line[admin_state.view.line_length[index]] = '\0';
+		admin_draw_middle(server, command, SIZE_BAR, middle, card[1] + 106 + (int32_t)index * ADMIN_LINE_STEP, line, ink);
+	}
+
+	/* The window that asked. */
+	(void)kl_tr_format(asked, sizeof(asked), kl_tr("Asked by {1}"), admin_state.view.who, (const char *)NULL);
+	admin_draw_middle(server, command, SIZE_BAR, middle, card[1] + 106 + (int32_t)ADMIN_LINES * ADMIN_LINE_STEP + 4, asked, soft);
+
+	/* The buttons, faint until armed: the one under the pointer or pressed lit, the keys' choice ringed. */
+	armed = admin_armed();
+	opacity = progress;
+	if (!armed)
+		opacity = progress * 0.45f;
+	hover = admin_hit(server, server->pointer_x, server->pointer_y);
+	for (choice = ADMIN_ALLOW; choice <= ADMIN_CANCEL; choice++) {
+		lit = 0;
+		if (armed &&
+		    (choice == hover ||
+		     choice == admin_state.view.pressed))
+			lit = 1;
+		admin_button_rect(card, choice, rect);
+		if (choice == admin_state.view.focus) {
+			glass_draw_solid(
+				server,
+				command,
+				(float)(rect[0] - ADMIN_RING),
+				(float)(rect[1] - ADMIN_RING),
+				(float)(rect[2] + 2 * ADMIN_RING),
+				(float)(rect[3] + 2 * ADMIN_RING),
+				ADMIN_BUTTON_RADIUS + (float)ADMIN_RING,
+				ink);
+		}
+		admin_draw_button(server, command, rect, choice, lit, opacity);
+	}
+
+	/* A frame that shows it armed was drawn. */
+	if (armed)
+		admin_state.view.armed_drawn = 1U;
+
+	/* The places, once, for the tests that press them. */
+	if (!admin_state.view.logged) {
+		admin_state.view.logged = 1U;
+		printf("KWL ADMIN card x=%d y=%d width=%d height=%d\n", card[0], card[1], card[2], card[3]);
+		for (choice = ADMIN_ALLOW; choice <= ADMIN_CANCEL; choice++) {
+			admin_button_rect(card, choice, rect);
+			name = "cancel";
+			if (choice == ADMIN_ALLOW)
+				name = "allow";
+			printf("KWL ADMIN button=%s x=%d y=%d width=%d height=%d\n", name, rect[0], rect[1], rect[2], rect[3]);
+		}
+	}
+}
+
+/*
+ * Darkens a head of the extended desktop while the dialog shows (heads.c
+ * draws each head in its own pass): the dialog itself is on the output,
+ * and no display shows a client's picture undimmed meanwhile.
+ */
+void
+kwl_admin_ask_draw_head(
+	struct kwl_server *server,
+	struct kwl_list *command)
+{
+	float dark[4];
+
+	/* Only while it shows over the desktop, in a head's pass. */
+	if (!admin_state.view.open)
+		return;
+	if (server->locked || server->greeter || server->screen_off)
+		return;
+	if (server->view_width == 0U)
+		return;
+
+	/* The head's whole part of the plane, as dark as the output. */
+	dark[0] = 0.0f;
+	dark[1] = 0.0f;
+	dark[2] = 0.0f;
+	dark[3] = ADMIN_DARK * admin_progress();
+	glass_draw_solid(server, command, (float)server->view_x, (float)server->view_y, (float)server->view_width, (float)server->view_height, 0.0f, dark);
 }
 
 /*
@@ -778,7 +1227,7 @@ admin_show(
 {
 	struct admin_request *current;
 	uint32_t payload[1];
-	int shown;
+	int showing;
 	int error;
 
 	/* A request withdrawn meanwhile: the manager forgets it. */
@@ -796,26 +1245,34 @@ admin_show(
 		return;
 	}
 
+	/* The plain look has no text to draw the dialog with: no dialog there. */
+	if (!server->glass) {
+		admin_cancel(server, "unsupported");
+		admin_refuse(KL_SYSTEM_ADMIN_UNSUPPORTED, "no-dialog");
+		return;
+	}
+
+	/* Another dialog that came meanwhile (the power button's, a pairing's) keeps the screen. */
+	showing = kwl_bluetooth_ask_showing();
+	if (!showing)
+		showing = kwl_power_dialog_showing(server);
+	if (showing) {
+		admin_cancel(server, "busy");
+		admin_refuse(KL_SYSTEM_ADMIN_BUSY, "busy-dialog");
+		return;
+	}
+
 	/* What the dialog says, and whether its allow lends a connection. */
 	current->how = answer->how;
 	current->display = answer->display;
 	(void)snprintf(current->title, sizeof(current->title), "%s", answer->title);
 	(void)snprintf(current->message, sizeof(current->message), "%s", answer->message);
 
-	/* The dialog's place: shown by the test build's stand-in, or not yet. */
-	shown = 0;
-	if (admin_ask_test_show != NULL)
-		shown = admin_ask_test_show(server, current->title, current->message, current->how, current->display);
-	if (!shown) {
-		admin_cancel(server, "unsupported");
-		admin_refuse(KL_SYSTEM_ADMIN_UNSUPPORTED, "no-dialog");
-		return;
-	}
-
-	/* The dialog shows: its time runs, and the client hears asking. */
+	/* The dialog shows: its time runs, it takes the input, and the client hears asking. */
 	current->stage = ADMIN_SHOWN;
 	current->due_ms = kwl_milliseconds() + ADMIN_DIALOG_MS;
-	printf("KWL ADMIN show id=%u how=consent display=%u\n", current->id, current->display);
+	admin_open(server);
+	printf("KWL ADMIN show id=%u how=consent display=%u who=%s\n", current->id, current->display, admin_state.view.who);
 	payload[0] = current->number;
 	error = kwl_emit(current->object->client, current->object->id, KL_SYSTEM_ADMIN_EVENT_ASKING, payload, sizeof(payload));
 	if (error != 0)
@@ -875,7 +1332,8 @@ admin_allow(
 		return;
 	}
 
-	/* Succeeded: STARTED or FAILED is awaited. */
+	/* Succeeded: the dialog, if one showed, goes, and STARTED or FAILED is awaited. */
+	admin_close();
 	current->stage = ADMIN_ALLOWED;
 	printf("KWL ADMIN allowed id=%u display=%u\n", current->id, current->display);
 }
@@ -1107,7 +1565,8 @@ static void
 admin_clear(
 	void)
 {
-	/* The state of none. */
+	/* The dialog, if one shows, goes with the request; then the state of none. */
+	admin_close();
 	memset(&admin_state.current, 0, sizeof(admin_state.current));
 	admin_state.current.stage = ADMIN_IDLE;
 }
@@ -1119,6 +1578,7 @@ admin_wake(
 {
 	struct admin_request *current;
 	uint64_t due;
+	uint64_t arm;
 
 	/* Only the window's wait and the dialog's have an end here (the manager's is the backend's). */
 	current = &admin_state.current;
@@ -1126,6 +1586,399 @@ admin_wake(
 	if (current->stage == ADMIN_FRONT || current->stage == ADMIN_SHOWN)
 		due = current->due_ms;
 
+	/* A dialog drawn but not yet armed wakes the loop to draw it armed. */
+	if (current->stage == ADMIN_SHOWN &&
+	    admin_state.view.first_ms != 0U &&
+	    !admin_state.view.armed_drawn) {
+		arm = admin_arm_ms();
+		if (arm < due)
+			due = arm;
+	}
+
 	/* The pass at that time. */
 	kwl_timer_wake_at(server, &admin_state.timer, "admin", due);
+}
+
+/*
+ * Tells whether a client is to hear no at once: the person said no to its
+ * request less than ADMIN_AGAIN_MS ago, and has not pressed in its window
+ * in the last ADMIN_PRESSED_MS.  Returns 1 or 0.
+ */
+static int
+admin_said_no(
+	const struct kwl_client *client)
+{
+	uint64_t now;
+
+	/* Only the client the person said no to. */
+	if (admin_state.refused_client == 0U || admin_state.refused_client != client->number)
+		return 0;
+
+	/* Only for a while after. */
+	now = kwl_milliseconds();
+	if (now - admin_state.refused_ms >= ADMIN_AGAIN_MS)
+		return 0;
+
+	/* A press of the person's in its window just now asked again. */
+	if (client->pressed_ms != 0U && now - client->pressed_ms < ADMIN_PRESSED_MS)
+		return 0;
+
+	/* Succeeded: no, at once. */
+	return 1;
+}
+
+/*
+ * Opens the dialog of the request under way: what holds the input lets go
+ * of it (while the clients still hear the releases), then the clients lose
+ * the keyboard and the pointer to the dialog.
+ */
+static void
+admin_open(
+	struct kwl_server *server)
+{
+	struct admin_view *view;
+
+	/* A popup's grab, a drag and drop, a window's move or resize, the fingers and the pens let go. */
+	kwl_popup_dismiss_grab(server);
+	if (server->dnd_active)
+		kwl_data_drag_cancel(server);
+	kwl_seat_grabs_end(server);
+	kwl_touch_cancel(server, "admin");
+	kwl_tablet_cancel(server);
+
+	/* The dialog from now, Cancel chosen, naming the window that asked. */
+	view = &admin_state.view;
+	memset(view, 0, sizeof(*view));
+	view->open = 1U;
+	view->opened_ms = kwl_milliseconds();
+	view->focus = ADMIN_CANCEL;
+	view->pressed = ADMIN_NONE;
+	admin_who(&admin_state.current, view->who, sizeof(view->who));
+
+	/* No client has the keyboard or the pointer while it shows (seat.c), and the cursor is the compositor's arrow. */
+	kwl_seat_focus(server);
+	kwl_seat_pointer_update(server);
+	kwl_cursor_frame(server, 0U);
+	server->dirty = 1;
+}
+
+/* Closes the dialog, if it shows: the window on top gets the keyboard back, and the pointer comes back with its next motion. */
+static void
+admin_close(
+	void)
+{
+	struct kwl_server *server;
+
+	/* Only a dialog that shows. */
+	if (!admin_state.view.open)
+		return;
+
+	/* The dialog goes. */
+	memset(&admin_state.view, 0, sizeof(admin_state.view));
+	admin_state.view.pressed = ADMIN_NONE;
+	printf("KWL ADMIN closed id=%u\n", admin_state.current.id);
+
+	/* The keyboard's focus as it would be without it. */
+	server = admin_state.server;
+	kwl_seat_focus(server);
+	server->dirty = 1;
+}
+
+/* Writes the name the dialog gives the window that asked: its title, or else its application's ID. */
+static void
+admin_who(
+	const struct admin_request *request,
+	char *who,
+	size_t size)
+{
+	struct kwl_object *surface;
+
+	/* Nothing known. */
+	(void)snprintf(who, size, "?");
+	if (request->object == NULL)
+		return;
+
+	/* The surface it named. */
+	surface = kwl_find(request->object->client, request->surface);
+	if (surface == NULL || surface->kind != KWL_SURFACE || surface->dead)
+		return;
+
+	/* Its title, else its application's ID. */
+	if (surface->title[0] != '\0') {
+		(void)snprintf(who, size, "%s", surface->title);
+	} else if (surface->app_id[0] != '\0') {
+		(void)snprintf(who, size, "%s", surface->app_id);
+	}
+}
+
+/*
+ * Answers the dialog by the person's choice: Allow sends the ALLOW;
+ * Cancel says no, and the client is answered no at once for a while.
+ */
+static void
+admin_answer(
+	struct kwl_server *server,
+	int choice,
+	const char *via)
+{
+	/* Allowed. */
+	if (choice == ADMIN_ALLOW) {
+		kwl_admin_decide(server, 1U, via);
+		return;
+	}
+
+	/* No: remembered for the client's next request. */
+	admin_state.refused_client = admin_state.current.client;
+	admin_state.refused_ms = kwl_milliseconds();
+	kwl_admin_decide(server, 0U, via);
+}
+
+/* Tells whether the dialog takes presses and keys: ADMIN_ARM_MS after its first frame has opened.  Returns 1 or 0. */
+static int
+admin_armed(
+	void)
+{
+	uint64_t now;
+
+	/* Not before the time. */
+	now = kwl_milliseconds();
+	if (now < admin_arm_ms())
+		return 0;
+	return 1;
+}
+
+/* Gives when the dialog is armed: ADMIN_ARM_MS after the end of its first frame's opening, never before that frame. */
+static uint64_t
+admin_arm_ms(
+	void)
+{
+	/* No frame yet. */
+	if (admin_state.view.first_ms == 0U)
+		return UINT64_MAX;
+
+	/* From the first frame, the opening and the wait. */
+	return admin_state.view.first_ms + ADMIN_OPEN_MS + ADMIN_ARM_MS;
+}
+
+/* Tells how far the dialog's darkening has opened (0 to 1). */
+static float
+admin_progress(
+	void)
+{
+	uint64_t elapsed;
+	float t;
+
+	/* The time since it opened, over the opening's. */
+	elapsed = kwl_milliseconds() - admin_state.view.opened_ms;
+	t = (float)elapsed / (float)ADMIN_OPEN_MS;
+	if (t > 1.0f)
+		t = 1.0f;
+	return t;
+}
+
+/* Gives the card's rectangle (x, y, width, height), in the middle of the output. */
+static void
+admin_card(
+	const struct kwl_server *server,
+	int32_t *card)
+{
+	/* In the middle. */
+	card[0] = ((int32_t)server->width - ADMIN_CARD_WIDTH) / 2;
+	card[1] = ((int32_t)server->height - ADMIN_CARD_HEIGHT) / 2;
+	card[2] = ADMIN_CARD_WIDTH;
+	card[3] = ADMIN_CARD_HEIGHT;
+}
+
+/* Gives a button's rectangle: Allow at the left and Cancel at the right, under the words. */
+static void
+admin_button_rect(
+	const int32_t *card,
+	int choice,
+	int32_t *rect)
+{
+	int32_t middle;
+
+	/* At the bottom of the card. */
+	middle = card[0] + card[2] / 2;
+	rect[1] = card[1] + card[3] - 24 - ADMIN_BUTTON_HEIGHT;
+	rect[2] = ADMIN_BUTTON_WIDTH;
+	rect[3] = ADMIN_BUTTON_HEIGHT;
+
+	/* The two side by side. */
+	rect[0] = middle - ADMIN_BUTTON_GAP / 2 - ADMIN_BUTTON_WIDTH;
+	if (choice == ADMIN_CANCEL)
+		rect[0] = middle + ADMIN_BUTTON_GAP / 2;
+}
+
+/* Tells which button a point is on (ADMIN_ALLOW, ADMIN_CANCEL), or ADMIN_NONE on the card, or ADMIN_OUTSIDE. */
+static int
+admin_hit(
+	const struct kwl_server *server,
+	int32_t x,
+	int32_t y)
+{
+	int32_t card[4];
+	int32_t rect[4];
+	int choice;
+
+	/* Each button. */
+	admin_card(server, card);
+	for (choice = ADMIN_ALLOW; choice <= ADMIN_CANCEL; choice++) {
+		admin_button_rect(card, choice, rect);
+		if (x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3])
+			return choice;
+	}
+
+	/* The card, or outside it. */
+	if (x >= card[0] && x < card[0] + card[2] && y >= card[1] && y < card[1] + card[3])
+		return ADMIN_NONE;
+	return ADMIN_OUTSIDE;
+}
+
+/*
+ * Finds where the message wraps to fit limit pixels: at its last space
+ * that fits, else at the last character that fits (a text without spaces,
+ * such as Japanese), at most ADMIN_LINES lines (the last one takes the
+ * rest and is cut where it is drawn).
+ */
+static void
+admin_wrap(
+	struct kwl_server *server,
+	const char *text,
+	int32_t limit)
+{
+	struct admin_view *view;
+	char piece[KL_BACKEND_ADMIN_TEXT];
+	size_t length;
+	size_t start;
+	size_t end;
+	size_t next;
+	size_t space;
+	int32_t width;
+
+	/* No line yet. */
+	view = &admin_state.view;
+	view->wrapped = 1U;
+	view->line_count = 0U;
+	length = strnlen(text, sizeof(piece) - 1U);
+
+	/* Each line from where the last one ended. */
+	start = 0U;
+	while (start < length && view->line_count < ADMIN_LINES) {
+		/* A line starts after the spaces that ended the last. */
+		while (start < length && text[start] == ' ')
+			start++;
+		if (start >= length)
+			break;
+
+		/* The last line takes the rest. */
+		if (view->line_count == ADMIN_LINES - 1U) {
+			view->line_start[view->line_count] = start;
+			view->line_length[view->line_count] = length - start;
+			view->line_count++;
+			break;
+		}
+
+		/* The line grows a character at a time while it fits, noting its last space. */
+		end = start;
+		space = 0U;
+		while (end < length) {
+			next = end + 1U;
+			while (next < length && ((unsigned char)text[next] & 0xC0U) == 0x80U)
+				next++;
+			memcpy(piece, text + start, next - start);
+			piece[next - start] = '\0';
+			width = glass_text_width(server, SIZE_BAR, piece);
+			if (width > limit)
+				break;
+			if (text[end] == ' ')
+				space = end;
+			end = next;
+		}
+
+		/* Cut inside the text: at its last space when there is one. */
+		if (end < length && space > start)
+			end = space;
+
+		/* A character wider than the line still takes a line of its own. */
+		if (end == start) {
+			end = start + 1U;
+			while (end < length && ((unsigned char)text[end] & 0xC0U) == 0x80U)
+				end++;
+		}
+
+		/* The line. */
+		view->line_start[view->line_count] = start;
+		view->line_length[view->line_count] = end - start;
+		view->line_count++;
+		start = end;
+	}
+}
+
+/* Draws a button: Allow in the accent with its ink, Cancel white glass with dark words; lit a little brighter. */
+static void
+admin_draw_button(
+	struct kwl_server *server,
+	struct kwl_list *command,
+	const int32_t *rect,
+	int choice,
+	int lit,
+	float opacity)
+{
+	float fill[4];
+	float ink[4];
+	const char *text;
+	int32_t width;
+	unsigned kept;
+
+	/* Allow: the accent the user chose, as it is; Cancel: white with dark words. */
+	kept = server->keep_colours;
+	if (choice == ADMIN_ALLOW) {
+		kwl_accent_colour(server, 0, KWL_ACCENT_FILL, 0.92f * opacity, fill);
+		kwl_accent_colour(server, 0, KWL_ACCENT_INK, opacity, ink);
+		kept = kwl_accent_as_is(server);
+		text = kl_tr("Allow");
+	} else {
+		fill[0] = 1.0f;
+		fill[1] = 1.0f;
+		fill[2] = 1.0f;
+		fill[3] = 0.85f * opacity;
+		ink[0] = 0.10f;
+		ink[1] = 0.14f;
+		ink[2] = 0.22f;
+		ink[3] = opacity;
+		text = kl_tr("Cancel");
+	}
+
+	/* Lit: more opaque. */
+	if (lit)
+		fill[3] = fill[3] + (opacity - fill[3]) * 0.45f;
+
+	/* The button and its words in its middle. */
+	glass_draw_solid(server, command, (float)rect[0], (float)rect[1], (float)rect[2], (float)rect[3], ADMIN_BUTTON_RADIUS, fill);
+	width = glass_text_width(server, SIZE_SEARCH, text);
+	glass_draw_text(server, command, SIZE_SEARCH, rect[0] + (rect[2] - width) / 2, rect[1] + rect[3] / 2 + 7, text, rect[2] - 24, ink);
+	kwl_accent_done(server, kept);
+}
+
+/* Draws a line of text centred on middle, cut to the card's inside. */
+static void
+admin_draw_middle(
+	struct kwl_server *server,
+	struct kwl_list *command,
+	enum glass_size size,
+	int32_t middle,
+	int32_t baseline,
+	const char *text,
+	const float *ink)
+{
+	int32_t width;
+	int32_t limit;
+
+	/* Its width, no wider than the card's inside. */
+	limit = ADMIN_CARD_WIDTH - 2 * ADMIN_MARGIN;
+	width = glass_text_width(server, size, text);
+	if (width > limit)
+		width = limit;
+	glass_draw_text(server, command, size, middle - width / 2, baseline, text, limit, ink);
 }

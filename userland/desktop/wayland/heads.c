@@ -1687,6 +1687,9 @@ heads_record_extended(
 		kwl_popup_draw(server, command);
 	}
 
+	/* The head darkened while the admin dialog shows on the output (admin-ask.c). */
+	kwl_admin_ask_draw_head(server, command);
+
 	/* The cursor where it reaches the head, and what the head shows kept for the next frame's choice. */
 	kwl_compose_cursor(server, command);
 	head->showed = heads_shows(server, head);
@@ -1706,8 +1709,8 @@ heads_record_extended(
 /*
  * Tells what a head shows besides its wallpaper: its windows (the frame's
  * list) and the pointer within a cursor's reach of it, App Home's
- * background, and its bar, as a mask (1 the windows, 2 the pointer, 4 App
- * Home, 8 the bar).
+ * background, its bar, and the darkening of the admin dialog, as a mask
+ * (1 the windows, 2 the pointer, 4 App Home, 8 the bar, 16 the darkening).
  */
 static unsigned
 heads_shows(
@@ -1721,6 +1724,7 @@ heads_shows(
 	int64_t left;
 	int64_t top;
 	float home;
+	int showing;
 
 	/* Its windows in the frame being made. */
 	compose = server->compose;
@@ -1762,6 +1766,11 @@ heads_shows(
 	    !server->locked &&
 	    !server->screen_off)
 		shows |= 8U;
+
+	/* The admin dialog's darkening, which opens frame by frame (admin-ask.c). */
+	showing = kwl_admin_ask_showing();
+	if (showing)
+		shows |= 16U;
 
 	/* Succeeded: the mask. */
 	return shows;
