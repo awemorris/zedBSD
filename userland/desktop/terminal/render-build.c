@@ -34,7 +34,7 @@ static uint32_t build_utf8_next(const char *text, size_t *at);
 static float *build_quad(float *vertex, const struct terminal_font *font, float x, float y, float width, float height, unsigned slot, uint32_t foreground, uint32_t background);
 
 /*
- * The colour themes of View > Theme (ws128-p006), by TERMINAL_THEME_*:
+ * The colour themes of View > Theme, by TERMINAL_THEME_*:
  * the dark one the terminal always had, a light one and white on black.
  */
 static const struct terminal_theme build_themes[TERMINAL_THEMES] = {
@@ -53,7 +53,7 @@ int
 terminal_build_open(
 	struct terminal_build *build)
 {
-	/* Every cell's two triangles (four rows more, for a view between lines and the padding, ws081-p011) and the cursor's. */
+	/* Every cell's two triangles (four rows more, for a view between lines and the padding) and the cursor's. */
 	memset(build, 0, sizeof(*build));
 	build->capacity = ((size_t)TERMINAL_MAX_COLUMNS * (TERMINAL_MAX_ROWS + 4U) + 1U) * TERMINAL_QUAD_VERTICES;
 
@@ -136,7 +136,7 @@ terminal_build_frame(
 	/* The blank glyph (a space), which empty cells and the right halves of wide characters use. */
 	blank = terminal_font_slot(font, ' ');
 
-	/* The theme's colours, and the text the search bar looks for (ws128-p006). */
+	/* The theme's colours, and the text the search bar looks for. */
 	theme = terminal_build_theme(window);
 	query_count = 0;
 	if (window != NULL && window->search_open)
@@ -157,12 +157,12 @@ terminal_build_frame(
 	if (!store)
 		keep = 0;
 
-	/* The cursor's line, which the window shows only when the view reaches it (ws035-p114). */
+	/* The cursor's line, which the window shows only when the view reaches it. */
 	cursor_line = screen->scrolled + screen->cursor_row;
 
 	/*
-	 * The rows the view shows, moved down by its offset within a line
-	 * (ws081-p011): the rows that meet the window, of the lines the
+	 * The rows the view shows, moved down by its offset within a line:
+	 * the rows that meet the window, of the lines the
 	 * terminal keeps (past either end nothing is drawn).
 	 */
 	first_row = 0;
@@ -237,8 +237,8 @@ terminal_build_frame(
 
 			/*
 			 * A character whose right half is the next cell is drawn once,
-			 * two cells wide, and the right half is not drawn on its own
-			 * (ws128-p009).  A left half whose right half was written over
+			 * two cells wide, and the right half is not drawn on its own.
+			 * A left half whose right half was written over
 			 * is drawn in its one cell.
 			 */
 			wide = 0;
@@ -279,7 +279,7 @@ terminal_build_frame(
 			if (selected || inside)
 				background = theme->selection;
 
-			/* A match of the search is marked, the one found most strongly (ws128-p006). */
+			/* A match of the search is marked, the one found most strongly. */
 			current = 0;
 			if (window != NULL &&
 			    window->search_found &&
@@ -333,10 +333,10 @@ terminal_build_frame(
 	/* What follows the rows is built every frame. */
 	first = (size_t)(vertex - start) / TERMINAL_VERTEX_FLOATS;
 
-	/* The search bar over the last row, while it is open (ws128-p006). */
+	/* The search bar over the last row, while it is open. */
 	vertex = build_search_bar(build, screen, font, window, theme, vertex);
 
-	/* The input method's text being composed, over the cells from the cursor (BUG-155), or from the search bar's caret while it is open (ws090-p022). */
+	/* The input method's text being composed, over the cells from the cursor, or from the search bar's caret while it is open. */
 	vertex = build_preedit(build, screen, font, window, vertex, first_row, last_row);
 	build_range_add(build, first, (size_t)(vertex - start) / TERMINAL_VERTEX_FLOATS - first);
 
@@ -639,7 +639,7 @@ build_preedit(
 }
 
 /*
- * Writes the vertices of the search bar (ws128-p006) over the grid's last
+ * Writes the vertices of the search bar over the grid's last
  * row while it is open: "Find:", the text looked for, a block where the
  * next character goes, and "not found" when the text is nowhere.  Returns
  * where the next quad goes.

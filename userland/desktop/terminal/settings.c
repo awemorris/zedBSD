@@ -6,8 +6,8 @@
  */
 
 /*
- * The terminal's own settings, kept from one run to the next (ws128-p009),
- * through the desktop's settings (libkeiland's kl_settings_*, WS135): the
+ * The terminal's own settings, kept from one run to the next,
+ * through the desktop's settings (libkeiland's kl_settings_*): the
  * keys terminal.ambiguous-wide (0 or 1: View > Treat Ambiguous-Width
  * Characters as Wide), terminal.font-size (the font's size in pixels, 8 to
  * 32: View > Zoom and Text Size), terminal.theme (0 dark, 1 light, 2
@@ -18,7 +18,7 @@
  *
  * The windows and tabs of the terminal that changed it follow at once;
  * another terminal reads it when it starts (an application's own setting
- * is not told to other processes, WS135 D3).
+ * is not told to other processes).
  */
 
 #include "terminal.h"

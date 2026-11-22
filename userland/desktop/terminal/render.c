@@ -125,7 +125,7 @@ terminal_renderer_open(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The window's surface (libkeiland's, WS131 p018). */
+	/* The window's surface (libkeiland's). */
 	renderer->operation = "kl_window_vulkan_surface";
 	failed = kl_window_vulkan_surface(window->kui, renderer->instance, &renderer->surface);
 	if (failed != 0)
@@ -213,7 +213,7 @@ terminal_renderer_resize(
 
 /*
  * Draws the grid, and over it the input method's text being composed at
- * the cursor (the window's, BUG-155), presents it, and waits for the frame
+ * the cursor (the window's), presents it, and waits for the frame
  * to finish.
  *
  * Returns VK_ERROR_OUT_OF_DATE_KHR when the swapchain no longer matches

@@ -14,7 +14,7 @@
  * size.  The run ends when the last tab's connection ends or the window is
  * closed.
  *
- * Each tab of the window (tabs.c, ws035-p086: the titlebar's tabs) is a
+ * Each tab of the window (tabs.c: the titlebar's tabs) is a
  * connection of its own with its own grid; the keys go to the active
  * tab's, and every connection is read so none of them waits.  A tab whose
  * connection ends closes; the last one ends the run.
@@ -78,14 +78,14 @@ struct run_state {
 
 	/*
 	 * Whether Ambiguous-width characters are wide (View > Treat
-	 * Ambiguous-Width Characters as Wide, ws128-p009): every tab's grid
+	 * Ambiguous-Width Characters as Wide): every tab's grid
 	 * follows it, and the settings file keeps it for the next run.
 	 */
 	int ambiguous_wide;
 
 	/*
 	 * The font's size the settings file keeps (0: none yet; View > Zoom and
-	 * Text Size keep theirs) and the colour theme (View > Theme), ws128-p006.
+	 * Text Size keep theirs) and the colour theme (View > Theme).
 	 */
 	unsigned kept_pixels;
 	unsigned theme;
@@ -110,7 +110,7 @@ static struct terminal_window run_window;
 static struct terminal_display *run_display;
 
 /*
- * The touch screen (touch.c, ws081-p011): the fingers' gestures and
+ * The touch screen (touch.c): the fingers' gestures and
  * scroller, made with the window (without them fingers do nothing).
  */
 static struct terminal_touch run_touch;
@@ -161,13 +161,13 @@ static char run_paste[RUN_PASTE_MAX];
 static char run_received[RUN_CLIPBOARD_MAX];
 
 /*
- * The pointer's selection (ws035-p093): whether the left button is held
+ * The pointer's selection: whether the left button is held
  * for a selection, or was pressed inside the range (a move then drags the
  * text out), where and with which serial, the press before (for double and
  * triple clicks: its time, its cell and how many clicks it made), and the
  * cell a drag of the range started at.  A cell is a column and a line
- * (screen.c numbers lines so they follow the text into the scrollback,
- * ws035-p114).
+ * (screen.c numbers lines so they follow the text into the
+ * scrollback).
  */
 static int run_selecting;
 static int run_drag_armed;
@@ -186,7 +186,7 @@ static unsigned long run_anchor_line;
  * tap's press and release at once, with the same time (a button pressed
  * by a hand is held for some milliseconds).  A press soon after a tap may
  * be a double tap or a tap-and-drag, which the compositor gives as the
- * tap's click and then a held press (BUG-276); run_tap_drag says the press
+ * tap's click and then a held press; run_tap_drag says the press
  * held now came that way, so that its first move off the cell makes it the
  * drag of characters the user meant, not a double click's drag by words.
  */
@@ -194,8 +194,8 @@ static int run_last_tap;
 static int run_tap_drag;
 
 /*
- * A tap on the selected range (BUG-276, the user: "with a range selected,
- * the first tap of a double tap takes the selection away"): the click of a
+ * A tap on the selected range (with a range selected, the first tap of
+ * a double tap takes the selection away): the click of a
  * touch pad's tap does not clear the range at once but at run_tap_clear_at
  * (0: nothing waits), so that the tap-and-drag that may follow drags the
  * range out as a pressed pad does.  run_tap_second says the press held
@@ -206,7 +206,7 @@ static uint64_t run_tap_clear_at;
 static int run_tap_second;
 
 /*
- * The unit a held selection grows by (ws035-p111): 1 a cell (a click), 2 a
+ * The unit a held selection grows by: 1 a cell (a click), 2 a
  * word (a double click), 3 a line (a triple click); the word or line the
  * double or triple click chose, which a drag keeps selected while it adds
  * whole words or lines on the side the pointer goes; and whether the drag
@@ -218,7 +218,7 @@ static unsigned long run_unit_to[2];
 static int run_unit_moved;
 
 /*
- * The edge scrolling of a held selection (ws035-p114): where the pointer
+ * The edge scrolling of a held selection: where the pointer
  * last was while the button selects, which way the view scrolls because
  * the pointer is past the grid's top (1, back into the scrollback) or
  * bottom (-1, toward the live screen) or 0 while it is on the grid, and
@@ -236,14 +236,14 @@ static uint64_t run_edge_at;
 /* How long a tap's click on the range waits for a tap-and-drag before it clears the range: the compositor's tap-drag time (touchpad.c TAP_DRAG_MS) and a margin. */
 #define RUN_TAP_DRAG_MS	350U
 
-/* How often a selection held past the grid's edge scrolls, in milliseconds, and the most lines one step scrolls (ws035-p114). */
+/* How often a selection held past the grid's edge scrolls, in milliseconds, and the most lines one step scrolls. */
 #define RUN_EDGE_MS		60U
 #define RUN_EDGE_LINES		8U
 
-/* How many lines one notch of the wheel scrolls the view (ws035-p114). */
+/* How many lines one notch of the wheel scrolls the view. */
 #define RUN_WHEEL_LINES	3
 
-/* The window's title as last set: the active tab's (OSC 0 or 2), or the program's (ws035-p091). */
+/* The window's title as last set: the active tab's (OSC 0 or 2), or the program's. */
 static char run_window_title[TERMINAL_TITLE];
 static size_t run_paste_length;
 
@@ -252,7 +252,7 @@ static char run_primary[RUN_CLIPBOARD_MAX];
 static size_t run_paste_written;
 
 /*
- * Whether the active connection reads a secret (ws095-p006): its echo off
+ * Whether the active connection reads a secret: its echo off
  * on a whole line, as a password prompt has it.  The window's text input is off
  * meanwhile, so the input method composes nothing and the keys go as they are.
  */
@@ -444,7 +444,7 @@ run_start(
 	printf("ZTERM SETTINGS run=%s ambiguous_wide=%d font_size=%u theme=%u copy_on_select=%d\n", options->token, run->ambiguous_wide, settings.font_size, settings.theme,
 	       run_copy_on_select);
 
-	/* The font's size: the one given on the command line, else the one kept, else the default (ws128-p006). */
+	/* The font's size: the one given on the command line, else the one kept, else the default. */
 	pixels = options->pixels;
 	if (!options->pixels_given && settings.font_size != 0U)
 		pixels = settings.font_size;
@@ -556,11 +556,11 @@ run_loop(
 		timeout = 1000;
 		now = terminal_clock();
 
-		/* The fingers' next round, when it comes first (ws081-p011). */
+		/* The fingers' next round, when it comes first. */
 		if (run_touch_due >= 0 && run_touch_due < timeout)
 			timeout = run_touch_due;
 
-		/* A tap's click on the range clears it when no tap-and-drag came in time (BUG-276). */
+		/* A tap's click on the range clears it when no tap-and-drag came in time. */
 		if (run_tap_clear_at != 0U) {
 			if (run_tap_clear_at <= now)
 				timeout = 0;
@@ -568,7 +568,7 @@ run_loop(
 				timeout = (int)(run_tap_clear_at - now);
 		}
 
-		/* A selection held past the grid's edge scrolls on its own time, even while the pointer rests (ws035-p114). */
+		/* A selection held past the grid's edge scrolls on its own time, even while the pointer rests. */
 		if (run_selecting && run_edge != 0) {
 			if (run_edge_at <= now)
 				timeout = 0;
@@ -690,17 +690,17 @@ run_loop(
 		if (run_window.drop_pending)
 			run_drop_paste();
 
-		/* The fingers scroll the view, and their taps and long presses become the pointer's presses (ws081-p011). */
+		/* The fingers scroll the view, and their taps and long presses become the pointer's presses. */
 		run_touch_round();
 
-		/* The pointer selects, or drags the selected text out (ws035-p093); a tap's wait on the range ends in time (BUG-276). */
+		/* The pointer selects, or drags the selected text out; a tap's wait on the range ends in time. */
 		run_pointer();
 		run_tap_expire(terminal_clock());
 
-		/* The search bar's text and steps find their matches (ws128-p006). */
+		/* The search bar's text and steps find their matches. */
 		run_search(options);
 
-		/* The wheel and Shift+Page Up or Down scroll the view, and a selection past the edge scrolls it (ws035-p114). */
+		/* The wheel and Shift+Page Up or Down scroll the view, and a selection past the edge scrolls it. */
 		run_scroll();
 		run_edge_scroll(terminal_clock());
 
@@ -711,7 +711,7 @@ run_loop(
 			run_screen->changed = 1;
 		}
 
-		/* A key typed shows the live screen again, where the shell answers it (ws035-p114), on whole lines. */
+		/* A key typed shows the live screen again, where the shell answers it, on whole lines. */
 		if (run_window.input_length != 0U &&
 		    (run_screen->view != 0U ||
 		     run_screen->view_offset != 0)) {
@@ -750,7 +750,7 @@ run_loop(
 		terminal_menu_refresh(&run_window, &state);
 		run_tabs_show(options);
 
-		/* The input method's text being composed changed: drawn again at the cursor (BUG-155). */
+		/* The input method's text being composed changed: drawn again at the cursor. */
 		if (run_window.preedit_changed) {
 			run_window.preedit_changed = 0;
 			run_screen->changed = 1;
@@ -1280,7 +1280,7 @@ run_zoom(
 	if (error != 0)
 		return 0;
 
-	/* The size the menus show and Zoom In and Out step from, kept for the next run (ws128-p006). */
+	/* The size the menus show and Zoom In and Out step from, kept for the next run. */
 	run->pixels = pixels;
 	run->kept_pixels = pixels;
 	error = run_save_settings(run);
@@ -1336,7 +1336,7 @@ run_ambiguous_wide(
 	fflush(stdout);
 }
 
-/* Keeps the run's settings for the next run (ws128-p009, ws128-p006); returns 0 or an errno value. */
+/* Keeps the run's settings for the next run; returns 0 or an errno value. */
 static int
 run_save_settings(
 	const struct run_state *run)
@@ -1361,7 +1361,7 @@ run_save_settings(
 }
 
 /*
- * Draws the window in a colour theme (View > Theme, ws128-p006), kept for
+ * Draws the window in a colour theme (View > Theme), kept for
  * the next run.
  */
 static void
@@ -1388,7 +1388,7 @@ run_theme(
 /*
  * Opens the search bar (Edit > Find, step 0), or takes a step to the
  * next older (1) or newer (-1) match of the text looked for last; a step
- * without a text opens the bar instead (ws128-p006).
+ * without a text opens the bar instead.
  */
 static void
 run_find(
@@ -1407,7 +1407,7 @@ run_find(
 }
 
 /*
- * Finds the search bar's text (ws128-p006): a text that changed is looked
+ * Finds the search bar's text: a text that changed is looked
  * for back from the bottom of the window, a step goes on from the match
  * shown; a match found is brought into the window and marked.
  */
@@ -1525,7 +1525,7 @@ run_start_paste(void)
 }
 
 /*
- * Pastes the primary selection into the shell (a middle click, ws035-p100):
+ * Pastes the primary selection into the shell (a middle click):
  * line breaks become carriage returns, as the Enter key sends them.
  */
 static void
@@ -1893,7 +1893,7 @@ run_paste_begin(
 	run_paste_written = 0;
 }
 
-/* Takes the pointer's events: the left button selects, or drags the selected text out (ws035-p093). */
+/* Takes the pointer's events: the left button selects, or drags the selected text out. */
 static void
 run_pointer(void)
 {
@@ -1947,14 +1947,14 @@ run_pointer_press(
 	run_click_column = column;
 	run_click_line = line;
 
-	/* The pointer is on the grid where it pressed: no edge scrolls yet (ws035-p114). */
+	/* The pointer is on the grid where it pressed: no edge scrolls yet. */
 	run_pointer_x = event->x;
 	run_pointer_y = event->y;
 	run_edge = 0;
 
 	/*
 	 * Shift and a click extend the selection there from where the last
-	 * one started (any earlier press set that place; ws035-p111).
+	 * one started (any earlier press set that place).
 	 */
 	extend = 0;
 	if ((event->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U && run_clicks > 0U)
@@ -1969,7 +1969,7 @@ run_pointer_press(
 	}
 
 	/*
-	 * A press while a tap's click on the range waits (BUG-276): on the
+	 * A press while a tap's click on the range waits: on the
 	 * range it may drag it out (a tap-and-drag) or end a double tap;
 	 * elsewhere the wait ends and the range goes as the tap meant.
 	 */
@@ -2000,7 +2000,7 @@ run_pointer_press(
 		return;
 	}
 
-	/* A second press soon after a tap may be a tap-and-drag: decided by its first move (BUG-276). */
+	/* A second press soon after a tap may be a tap-and-drag: decided by its first move. */
 	run_tap_drag = 0;
 	if (again && run_clicks == 1U && run_last_tap)
 		run_tap_drag = 1;
@@ -2156,7 +2156,7 @@ run_pointer_motion(
 
 	/*
 	 * A tap-and-drag that leaves its cell is a drag of characters from the
-	 * tapped cell, not a double click's drag by words (BUG-276: a touch
+	 * tapped cell, not a double click's drag by words (a touch
 	 * pad's tap then a finger moved, where a hand would press the pad).
 	 */
 	if (run_tap_drag) {
@@ -2175,7 +2175,7 @@ run_pointer_motion(
 	/*
 	 * Past the grid's top the view scrolls back into the scrollback, past
 	 * its bottom toward the live screen: a step at once, then one every
-	 * RUN_EDGE_MS while the pointer stays there (ws035-p114).
+	 * RUN_EDGE_MS while the pointer stays there.
 	 */
 	top = (int32_t)TERMINAL_PADDING;
 	bottom = top + (int32_t)(run_screen->rows * run_font.cell_height);
@@ -2194,7 +2194,7 @@ run_pointer_motion(
 
 /*
  * Extends the held selection to the cell nearest the pointer's last place:
- * by words or lines after a double or triple click (ws035-p111), else a
+ * by words or lines after a double or triple click, else a
  * cell at a time.
  */
 static void
@@ -2221,7 +2221,7 @@ run_select_to_pointer(void)
 /*
  * Scrolls the view a step while a held selection's pointer is past the
  * grid's top or bottom, and runs the selection onto the line the edge
- * then shows (ws035-p114).  The farther past the edge, the more lines a
+ * then shows.  The farther past the edge, the more lines a
  * step scrolls.
  */
 static void
@@ -2265,7 +2265,7 @@ run_edge_scroll(
 	run_view_log("edge");
 }
 
-/* Scrolls the view as the wheel's notches and Shift+Page Up or Down asked (ws035-p114). */
+/* Scrolls the view as the wheel's notches and Shift+Page Up or Down asked. */
 static void
 run_scroll(void)
 {
@@ -2303,10 +2303,10 @@ static void
 run_pointer_release(
 	const struct terminal_pointer_event *event)
 {
-	/* The edge stops scrolling with the button's release (ws035-p114). */
+	/* The edge stops scrolling with the button's release. */
 	run_edge = 0;
 
-	/* A release at the press's own time ends a touch pad's tap (BUG-276); a held press is a hand's. */
+	/* A release at the press's own time ends a touch pad's tap; a held press is a hand's. */
 	run_last_tap = 0;
 	if (event->time == run_click_time)
 		run_last_tap = 1;
@@ -2315,7 +2315,7 @@ run_pointer_release(
 	/*
 	 * A click inside the range clears it, and a Shift click later extends
 	 * from there.  A touch pad's tap waits first for the tap-and-drag that
-	 * may follow (BUG-276); the second tap of a double tap on the range
+	 * may follow; the second tap of a double tap on the range
 	 * selects the word, as a double click does.
 	 */
 	if (run_drag_armed) {
@@ -2361,7 +2361,7 @@ run_pointer_release(
 		run_selected_log("drag");
 }
 
-/* Clears the range a tap on it left waiting, once no tap-and-drag came in time (BUG-276). */
+/* Clears the range a tap on it left waiting, once no tap-and-drag came in time. */
 static void
 run_tap_expire(
 	uint64_t now)
@@ -2386,7 +2386,7 @@ run_range_clear(void)
 	run_anchor_line = run_click_line;
 }
 
-/* Selects the word under a cell, as a double click does (the second tap of a double tap on the range, BUG-276). */
+/* Selects the word under a cell, as a double click does (the second tap of a double tap on the range). */
 static void
 run_select_word(
 	unsigned column,
@@ -2425,7 +2425,7 @@ run_cell(
 {
 	unsigned row;
 
-	/* From the grid's padded top left, with the text moved by the view's offset within a line (ws081-p011), a cell's size at a time. */
+	/* From the grid's padded top left, with the text moved by the view's offset within a line, a cell's size at a time. */
 	x -= (int32_t)TERMINAL_PADDING;
 	y -= (int32_t)TERMINAL_PADDING + run_screen->view_offset;
 	if (x < 0)
@@ -2441,7 +2441,7 @@ run_cell(
 	if (row >= run_screen->rows)
 		row = run_screen->rows - 1U;
 
-	/* Succeeded: the line on that row, in the scrollback when the view is back (ws035-p114). */
+	/* Succeeded: the line on that row, in the scrollback when the view is back. */
 	*line = terminal_screen_view_line(run_screen, row);
 }
 
@@ -2502,7 +2502,7 @@ run_word_character(
 	uint32_t codepoint;
 	const char *found;
 
-	/* A line no longer kept has no words (ws035-p114). */
+	/* A line no longer kept has no words. */
 	cell = terminal_screen_line_cell(run_screen, column, line);
 	if (cell == NULL)
 		return 0;
@@ -2535,7 +2535,7 @@ run_selected_log(
 	printf("ZTERM SELECT how=%s from=%lu,%lu to=%lu,%lu bytes=%lu\n", how, run_screen->range_from[0], run_screen->range_from[1], run_screen->range_to[0], run_screen->range_to[1], (unsigned long)length);
 	fflush(stdout);
 
-	/* The selected text is the primary selection (ws035-p100). */
+	/* The selected text is the primary selection. */
 	terminal_primary_set(&run_window, run_primary, length);
 
 	/* And the clipboard's, when the run copies a selection at once. */
@@ -2546,7 +2546,7 @@ run_selected_log(
 /*
  * Logs where the view is: how it moved, how many lines back from the live
  * screen it is, how many lines the scrollback keeps and how many have
- * ever scrolled off (ws035-p114).
+ * ever scrolled off.
  */
 static void
 run_view_log(
@@ -2558,10 +2558,10 @@ run_view_log(
 }
 
 /*
- * Runs the fingers for one round (ws081-p011): gives them the screen's
+ * Runs the fingers for one round: gives them the screen's
  * view, takes their events, sets the view they moved to, and queues the
  * pointer's presses, releases and motions they made for run_pointer.  A
- * long press's hold (ws081-p014) is a press held on the selection (which a
+ * long press's hold is a press held on the selection (which a
  * drag then takes out), elsewhere a double click held (the word under the
  * finger, grown by words).
  */
@@ -2653,8 +2653,7 @@ run_touch_queue(
 /*
  * Tells the input method where the cursor's cell is on the window (surface
  * pixels), or the search bar's caret while it is open, so that its
- * candidate list opens beside the text being composed (BUG-155,
- * ws090-p022); libkeiland sends only a change.
+ * candidate list opens beside the text being composed; libkeiland sends only a change.
  */
 static void
 run_text_cursor(void)
@@ -2667,7 +2666,7 @@ run_text_cursor(void)
 	x = (int)TERMINAL_PADDING + (int)(run_screen->cursor_column * run_font.cell_width);
 	y = (int)TERMINAL_PADDING + (int)((run_screen->cursor_row + run_screen->view) * run_font.cell_height) + run_screen->view_offset;
 
-	/* While the search bar is open: its caret's cell on the last row, where the composed text shows (ws090-p022). */
+	/* While the search bar is open: its caret's cell on the last row, where the composed text shows. */
 	if (run_window.search_open && run_screen->rows != 0U) {
 		column = terminal_search_bar_column(run_window.search_query, run_window.search_length, run_screen->ambiguous_wide);
 		x = (int)TERMINAL_PADDING + (int)(column * run_font.cell_width);

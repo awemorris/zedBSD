@@ -10,7 +10,7 @@
  *
  * The compositor draws them (in the window's title bar, or in the system bar
  * while the window is docked) from the table given to libkeiland's window
- * (kl_window_set_menu, WS131 p018).  A choice arrives among the window's
+ * (kl_window_set_menu).  A choice arrives among the window's
  * inputs as a KL_WINDOW_ACTION input (window.c), queued for the main loop,
  * which then tells the actions' states (Copy and Paste enabled, the font's
  * size checked, Fullscreen and Treat Ambiguous-Width Characters as Wide
@@ -69,7 +69,7 @@
 #define MENU_SIZE_LARGE		42U
 #define MENU_SIZE_HUGE		43U
 
-/* View > Theme and its themes (ws128-p006). */
+/* View > Theme and its themes. */
 #define MENU_THEME		44U
 #define MENU_THEME_DARK		45U
 #define MENU_THEME_LIGHT	46U
@@ -350,11 +350,11 @@ menu_state(
 	menu_action_state(window, TERMINAL_ACTION_SIZE_LARGE, 1, menu_same(state->pixels, TERMINAL_PIXELS_LARGE));
 	menu_action_state(window, TERMINAL_ACTION_SIZE_HUGE, 1, menu_same(state->pixels, TERMINAL_PIXELS_HUGE));
 
-	/* Fullscreen while the window is, and Treat Ambiguous-Width Characters as Wide while it is on (ws128-p009). */
+	/* Fullscreen while the window is, and Treat Ambiguous-Width Characters as Wide while it is on. */
 	menu_action_state(window, TERMINAL_ACTION_FULLSCREEN, 1, state->fullscreen);
 	menu_action_state(window, TERMINAL_ACTION_AMBIGUOUS_WIDE, 1, state->ambiguous_wide);
 
-	/* The theme's radio item: the light one, the contrast one, or the dark one for any other (ws128-p006). */
+	/* The theme's radio item: the light one, the contrast one, or the dark one for any other. */
 	dark = 0;
 	light = 0;
 	contrast = 0;

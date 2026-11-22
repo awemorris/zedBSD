@@ -6,8 +6,8 @@
  */
 
 /*
- * The window of terminal: a window of libkeiland's application (WS131
- * p018, kl_app; ws090-p011 before), whose frames the drawing shows
+ * The window of terminal: a window of libkeiland's application
+ * (kl_app), whose frames the drawing shows
  * (display.h).  The application waits for the window system and the tabs'
  * connections together: each connection learns from the application's
  * events what it has for the main loop (connection.h).
@@ -17,15 +17,15 @@
  * character the window system says it types, or keys.c's for the key)
  * and kept until the main loop writes them to the shell, and a held key's
  * repeats (which the application makes after the compositor's events are
- * in, BUG-111) are typed the same way.  The pointer's presses, releases
- * and motions are kept for the selection (ws035-p093), the wheel as
- * notches of the view's scroll (ws035-p114), and the fingers for touch.c
- * (ws081-p011).  The menus' choices (menu.c), the tabs' (tabs.c), a drop
+ * in) are typed the same way.  The pointer's presses, releases
+ * and motions are kept for the selection, the wheel as
+ * notches of the view's scroll, and the fingers for touch.c.
+ * The menus' choices (menu.c), the tabs' (tabs.c), a drop
  * waiting, the end of a drag and the selections' changes come as inputs
  * too (clipboard.c, primary.c: the window's own clipboard and primary
  * selection).
  *
- * The window asks for the input method's text (BUG-155): what it commits
+ * The window asks for the input method's text: what it commits
  * goes to the shell like typed keys, and what it composes is kept for the
  * renderer to show at the cursor.
  */
@@ -39,17 +39,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The evdev codes of Page Up and Page Down, which with Shift scroll the view (ws035-p114). */
+/* The evdev codes of Page Up and Page Down, which with Shift scroll the view. */
 #define WINDOW_KEY_PAGEUP	104U
 #define WINDOW_KEY_PAGEDOWN	109U
 
-/* F11, which makes the window fullscreen or ends it when the compositor's menu did not take it (BUG-194). */
+/* F11, which makes the window fullscreen or ends it when the compositor's menu did not take it. */
 #define WINDOW_KEY_F11		87U
 
 /* F12, which opens the settings when the compositor's menu did not take it. */
 #define WINDOW_KEY_F12		88U
 
-/* The keys the search bar answers itself (ws128-p006): Escape, Backspace, Enter and the keypad's Enter. */
+/* The keys the search bar answers itself: Escape, Backspace, Enter and the keypad's Enter. */
 #define WINDOW_KEY_ESCAPE	1U
 #define WINDOW_KEY_BACKSPACE	14U
 #define WINDOW_KEY_ENTER	28U
@@ -141,7 +141,7 @@ terminal_window_open(
 	/*
 	 * Every pixel the terminal draws is opaque (the pass clears to the
 	 * theme's background, and each cell's colour has alpha 1): the
-	 * compositor need not draw what is under the window (ws270-p007).
+	 * compositor need not draw what is under the window.
 	 */
 	(void)kl_window_set_opaque(window->kui, 1);
 
@@ -151,14 +151,14 @@ terminal_window_open(
 
 	/*
 	 * The input method's text, asked for for good: the whole window is
-	 * where the shell's text is typed (BUG-155).  Nothing is composed yet.
+	 * where the shell's text is typed.  Nothing is composed yet.
 	 */
 	window->preedit[0] = '\0';
 	window->preedit_begin = -1;
 	window->preedit_end = -1;
 	kl_window_text_input(window->kui, 1);
 
-	/* Text and file names dropped on the window are pasted into the shell (ws035-p088). */
+	/* Text and file names dropped on the window are pasted into the shell. */
 	(void)kl_window_accept_drops(window->kui, KL_DROP_TEXT | KL_DROP_URIS);
 
 	/* What the window's making left queued (its size is already known). */
@@ -399,7 +399,7 @@ window_event(
 		window_pointer_event(window, TERMINAL_POINTER_MOTION, event);
 		break;
 	case KL_WINDOW_BUTTON:
-		/* The middle button's press pastes the primary selection (ws035-p100). */
+		/* The middle button's press pastes the primary selection. */
 		if (event->code == WINDOW_BUTTON_MIDDLE) {
 			if (event->pressed)
 				window_pointer_event(window, TERMINAL_POINTER_MIDDLE, event);
@@ -417,7 +417,7 @@ window_event(
 
 		break;
 	case KL_WINDOW_AXIS:
-		/* A touch pad's fingers scroll as fingers do, with libkeiland's scroller (ws090-p019); a wheel by notches. */
+		/* A touch pad's fingers scroll as fingers do, with libkeiland's scroller; a wheel by notches. */
 		if (event->axis_source == KL_AXIS_SOURCE_FINGER) {
 			window_pad_push(window, TERMINAL_TOUCH_PAD, event);
 		} else {
@@ -543,14 +543,14 @@ window_press(
 	int text;
 	int keypad;
 
-	/* While the search bar is open the keys edit what it looks for (ws128-p006). */
+	/* While the search bar is open the keys edit what it looks for. */
 	key = event->code;
 	if (window->search_open) {
 		window_search_key(window, event);
 		return;
 	}
 
-	/* Shift with Page Up scrolls the view a page back instead of typing (ws035-p114). */
+	/* Shift with Page Up scrolls the view a page back instead of typing. */
 	shift = 0;
 	if ((window->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U)
 		shift = 1;
@@ -633,7 +633,7 @@ window_text_commit(
 {
 	size_t length;
 
-	/* The text's bytes; while the search bar is open it is what the bar looks for (ws128-p006). */
+	/* The text's bytes; while the search bar is open it is what the bar looks for. */
 	length = strlen(text);
 	if (window->search_open) {
 		window_search_append(window, text, length);
@@ -691,7 +691,7 @@ window_key_text(
 }
 
 /*
- * Answers a key while the search bar is open (ws128-p006): Escape closes
+ * Answers a key while the search bar is open: Escape closes
  * it, Enter finds the next older match (Shift+Enter the next newer),
  * Backspace takes back the last character, and a key that types a
  * printable character adds it.  Nothing goes to the shell.
@@ -848,8 +848,8 @@ window_text_preedit(
 
 /*
  * The wheel turns: each notch toward the user (down) goes forward toward
- * the live screen, away from the user back into the scrollback
- * (ws035-p114); a distance short of a notch waits for the rest.
+ * the live screen, away from the user back into the scrollback;
+ * a distance short of a notch waits for the rest.
  */
 static void
 window_wheel(
@@ -935,7 +935,7 @@ window_touch_push(
 }
 
 /*
- * Queues a touch pad's scrolling among the touch inputs (ws090-p019), in
+ * Queues a touch pad's scrolling among the touch inputs, in
  * their order: the move (as a wheel scrolls) at the compositor's time, or
  * the fingers' lift.
  */
