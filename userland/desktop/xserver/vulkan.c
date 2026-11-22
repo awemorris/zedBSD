@@ -6,26 +6,25 @@
  */
 
 /*
- * Showing a desktop window through standard Vulkan (WS069 p011).
+ * Showing a surface of the backend through standard Vulkan.
  *
- * Each desktop window has a swapchain on its wl_surface.  A frame copies
- * the window's pixels into a host-visible staging buffer and from there
- * into the swapchain image it acquired, which is then presented.  Nothing
- * waits: when the last copy is still running or no image is free, the
- * frame is left for a later pass, as a wl_shm window waits for a buffer
- * the desktop has released.
+ * Each surface shown this way has a swapchain on the VkSurfaceKHR the
+ * backend makes for it.  A frame copies the window's pixels into a
+ * host-visible staging buffer and from there into the swapchain image it
+ * acquired, which is then presented.  Nothing waits: when the last copy is
+ * still running or no image is free, the frame is left for a later tick,
+ * as the backend's own present waits for a frame the system has released.
  *
- * The instance and the device are shared by the connection's windows and
- * made with the first one, whose surface decides the queue family.
+ * The instance (with the WSI extension the backend's surfaces need) and
+ * the device are shared by the server's windows and made with the first
+ * one, whose surface decides the queue family.  Only the Vulkan API is
+ * used here; the system's window is the backend's.
  */
 
 #include "userland/desktop/xserver/internal.h"
 
-#define VK_USE_PLATFORM_WAYLAND_KHR 1
 #include <vulkan/vulkan.h>
-#include <wayland-client.h>
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,8 +38,8 @@
 #define VULKAN_OPAQUE		0xff000000U
 
 /*
- * The connection's Vulkan: the instance, the device and its queue, and
- * the memory types, made with the first window.
+ * The server's Vulkan: the instance, the device and its queue, and the
+ * memory types, made with the first window.
  */
 struct x11_vulkan {
 	VkInstance instance;
@@ -93,64 +92,66 @@ static VkResult vulkan_record(struct x11_vulkan_window *window, uint32_t image);
 static void vulkan_barrier(VkCommandBuffer command, VkImage image, VkImageLayout from, VkImageLayout to, VkAccessFlags source, VkAccessFlags target);
 
 /*
- * Opens the swapchain of a desktop window's wl_surface, making the
- * connection's Vulkan with the first window.  Returns NULL when Vulkan
- * cannot show it (the window then uses wl_shm).
+ * Opens the swapchain of a surface, on a VkSurfaceKHR the backend makes,
+ * making the server's Vulkan with the first one.  Returns NULL when Vulkan
+ * cannot show it (the backend's present then does).
  */
 struct x11_vulkan_window *
 x11_vulkan_window_open(
-	struct x11_vulkan **shared,
-	struct wl_display *display,
-	struct wl_surface *surface,
+	struct x11server *server,
+	struct x11_surface *surface,
 	unsigned width,
 	unsigned height)
 {
-	VkWaylandSurfaceCreateInfoKHR create;
 	struct x11_vulkan_window *window;
 	struct x11_vulkan *vulkan;
 	VkBool32 supported;
 	VkResult error;
 	int status;
 
+	/* A backend that makes no Vulkan surface shows its windows itself. */
+	if (server->ops->vulkan_surface == NULL)
+		return NULL;
+
 	/* The window. */
 	window = calloc(1U, sizeof(*window));
 	if (window == NULL)
 		return NULL;
 
-	/* The connection's Vulkan: the instance now, the device with the surface below. */
-	vulkan = *shared;
+	/* The server's Vulkan: the instance now, the device with the surface below. */
+	vulkan = server->vulkan;
 	if (vulkan == NULL) {
-		vulkan = x11_vulkan_open();
+		vulkan = x11_vulkan_open(server->vulkan_wsi);
 		if (vulkan == NULL) {
 			free(window);
 			return NULL;
 		}
 
-		/* Kept for the connection's later windows. */
-		*shared = vulkan;
+		/* Kept for the server's later windows. */
+		server->vulkan = vulkan;
 	}
 
 	/* The window keeps it. */
 	window->vulkan = vulkan;
 
-	/* The surface of the window's wl_surface. */
-	memset(&create, 0, sizeof(create));
-	create.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
-	create.display = display;
-	create.surface = surface;
-	error = vkCreateWaylandSurfaceKHR(vulkan->instance, &create, NULL, &window->surface);
-	if (error != VK_SUCCESS) {
+	/* The Vulkan surface of the backend's window. */
+	status = server->ops->vulkan_surface(server->backend, surface, (void *)vulkan->instance, &window->surface);
+	if (status != 0) {
+		window->surface = VK_NULL_HANDLE;
 		x11_vulkan_window_close(window);
 		return NULL;
 	}
 
-	/* The device, chosen by the first surface; a later surface must be presentable by its family. */
+	/* The device, chosen by the first surface. */
 	if (vulkan->device == VK_NULL_HANDLE) {
 		error = vulkan_device(vulkan, window->surface);
 		if (error != VK_SUCCESS) {
 			x11_vulkan_window_close(window);
 			return NULL;
 		}
+
+		/* A line in the log that windows are shown through Vulkan. */
+		x11_log(server, "X11SERVER VULKAN device ready family=%u", (unsigned)vulkan->family);
 	}
 
 	/* A later surface must be presentable by that family too. */
@@ -180,11 +181,12 @@ x11_vulkan_window_open(
 }
 
 /*
- * Makes the connection's instance (with the surface extensions a Wayland
- * window needs).  Returns NULL without Vulkan.
+ * Makes the server's instance, with the surface extension and the WSI
+ * extension the backend's surfaces need.  Returns NULL without Vulkan.
  */
 struct x11_vulkan *
-x11_vulkan_open(void)
+x11_vulkan_open(
+	const char *wsi)
 {
 	VkApplicationInfo application;
 	VkInstanceCreateInfo create;
@@ -199,7 +201,7 @@ x11_vulkan_open(void)
 
 	/* The instance. */
 	extensions[0] = VK_KHR_SURFACE_EXTENSION_NAME;
-	extensions[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+	extensions[1] = wsi;
 	memset(&application, 0, sizeof(application));
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	application.pApplicationName = "xserver";
@@ -308,7 +310,7 @@ x11_vulkan_window_present(
 	if (error != VK_SUCCESS)
 		return -1;
 
-	/* Succeeded: the frame is the desktop's. */
+	/* Succeeded: the frame is the system's. */
 	return 0;
 }
 
@@ -382,7 +384,7 @@ x11_vulkan_window_close(
 }
 
 /*
- * Ends the connection's Vulkan (every window closed first).
+ * Ends the server's Vulkan (every window closed first).
  */
 void
 x11_vulkan_close(
@@ -471,10 +473,9 @@ vulkan_device(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Its queue and memory types, and a line in the log that windows are shown through Vulkan. */
+	/* Its queue and memory types. */
 	vkGetDeviceQueue(vulkan->device, vulkan->family, 0U, &vulkan->queue);
 	vkGetPhysicalDeviceMemoryProperties(vulkan->physical, &vulkan->memory);
-	fprintf(stderr, "X11SERVER VULKAN device ready family=%u\n", (unsigned)vulkan->family);
 
 	/* Succeeded: the device can show windows. */
 	return VK_SUCCESS;
@@ -536,7 +537,7 @@ vulkan_swapchain(
 	window->extent.width = width;
 	window->extent.height = height;
 
-	/* MAILBOX when the surface offers it: a present then never waits for the desktop's last frame, which would hold every client. */
+	/* MAILBOX when the surface offers it: a present then never waits for the system's last frame, which would hold every client. */
 	mode = VK_PRESENT_MODE_FIFO_KHR;
 	count = 8U;
 	error = vkGetPhysicalDeviceSurfacePresentModesKHR(vulkan->physical, window->surface, &count, modes);

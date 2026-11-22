@@ -8,18 +8,21 @@
 /*
  * The types and functions the modules of xserver share.
  *
- * server.c keeps the clients' connections, protocol.c answers their
- * requests, window.c keeps the windows, pixmaps and graphics contexts and
- * draws into them, rootless.c shows each top-level window as a window of
- * the desktop through wayland.c (whose pixels vulkan.c shows through a
- * swapchain when it can), and keymap.c, glyphs.c and glx.c are the
- * keyboard's table, the core font and the GLX extension.
+ * These are the core's modules, none of which does input or output of its
+ * own.  server.c keeps the server's life and its clients' connections
+ * (their bytes come and go through the transport), protocol.c answers
+ * their requests, window.c keeps the windows, pixmaps and graphics
+ * contexts and draws into them, rootless.c shows each top-level window as
+ * a surface of the backend (whose pixels vulkan.c shows through a
+ * swapchain when it can), selection.c keeps atoms, properties and
+ * selections, and keymap.c, glyphs.c and glx.c are the keyboard's table,
+ * the core font and the GLX extension.
  */
 
 #ifndef KEILAND_X11SERVER_INTERNAL_H
 #define KEILAND_X11SERVER_INTERNAL_H
 
-#include "userland/desktop/xserver/x11server.h"
+#include "userland/desktop/xserver/x11backend.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -31,9 +34,16 @@
 #define X11_MAX_FONTS		32U
 #define X11_MAX_PIXMAPS		16U
 
-/* The most bytes of requests a client may have waiting, and of replies and events not yet sent to it. */
-#define X11_INPUT_CAP		(1024U * 1024U)
+/*
+ * The most bytes of input a client may have waiting (its transport holds
+ * back more than that, so only a client that breaks the protocol reaches
+ * it), and of replies and events not yet taken from it.
+ */
+#define X11_INPUT_CAP		(16U * 1024U * 1024U)
 #define X11_OUTPUT_CAP		(4U * 1024U * 1024U)
+
+/* The most bytes of one client's requests one tick handles before it lets the caller run again. */
+#define X11_TICK_BYTES		(256U * 1024U)
 
 /* How many of a client's last requests the stuck-client report shows. */
 #define X11_HISTORY		16U
@@ -49,8 +59,8 @@
 /*
  * Atoms, properties and selections (selection.c, ws035-p087): how many
  * names are given numbers and the longest, the first number given, how
- * many properties are kept, how many selections, and how many desktop
- * requests for an X client's text may wait.
+ * many properties are kept, how many selections, and how many of the
+ * backend's requests for an X client's text may wait.
  */
 #define X11_MAX_ATOMS		64U
 #define X11_ATOM_NAME		64U
@@ -90,11 +100,6 @@
 #define X11_BAD_ID_CHOICE	14U
 #define X11_BAD_LENGTH		16U
 
-/* The modifier bits of a key or button event's state. */
-#define X11_SHIFT_MASK		(1U << 0)
-#define X11_CONTROL_MASK	(1U << 2)
-#define X11_ALT_MASK		(1U << 3)
-
 /* The keycodes of the keys that have no character (the ASCII keys are their character plus 8). */
 #define X11_KEYCODE_UP		0xe0U
 #define X11_KEYCODE_DOWN	0xe1U
@@ -112,25 +117,33 @@
 #define X11_GLYPHS_CACHED	128U
 #define X11_GLYPH_DRAWN_MAX	48U
 
-/* The types other modules keep behind pointers: the font's face, the desktop's connection and its windows. */
+/* The types other modules keep behind pointers: the font's face, and Vulkan's state and a window's swapchain. */
 struct truetype_face;
-struct x11_wayland;
-struct x11_wayland_window;
 struct x11_vulkan;
 struct x11_vulkan_window;
-struct wl_display;
-struct wl_surface;
 
 /*
  * One client's connection.
  *
- * A slot is free while fd is -1.  The input buffer holds what has been
- * read and not yet answered (a request can arrive in pieces); the output
- * buffer holds replies and events the socket has not taken yet, sent when
- * it becomes writable.
+ * A slot is free while id is 0.  The input buffer holds what the
+ * transport has handed in and not yet been answered (a request can arrive
+ * in pieces); the output buffer holds replies and events the transport has
+ * not taken yet.
  */
 struct x11_client {
-	int fd;
+	/* The number the transport knows the client by: its slot in the low byte, a generation above. */
+	uint32_t id;
+
+	/*
+	 * The number of a client of this slot the core closed and has not yet
+	 * told the transport about (0: none).  The slot is not given to a new
+	 * client until the transport has heard.
+	 */
+	uint32_t closed;
+
+	/* Bytes of input handled since the transport was last told, and whether it has been told of output waiting. */
+	size_t consumed;
+	int output_told;
 
 	/* Nonzero for a most-significant-byte-first client, and once its setup is answered. */
 	int order;
@@ -151,15 +164,15 @@ struct x11_client {
 	size_t output_capacity;
 
 	/*
-	 * Nonzero once the connection cannot take what is sent to it (it
-	 * failed, or its client stopped reading past X11_OUTPUT_CAP): the
-	 * dispatch closes it after the pass, not in the middle of a request.
+	 * Nonzero once the connection cannot take what is sent to it (its
+	 * client stopped reading past X11_OUTPUT_CAP): the tick closes it
+	 * after its pass, not in the middle of a request.
 	 */
 	int broken;
 
-	/* The last request handled and when (monotonic milliseconds), for the stuck-client report. */
+	/* The last request handled and when (the server's milliseconds), for the stuck-client report. */
 	uint8_t last_opcode;
-	uint64_t last_ms;
+	uint32_t last_ms;
 
 	/* The last requests handled (opcode, length and sequence number, oldest first from history_next), for the same report. */
 	uint8_t history_opcode[X11_HISTORY];
@@ -170,7 +183,7 @@ struct x11_client {
 
 /*
  * One window: its place in the tree, its size, its own pixels, and, for a
- * top-level window, the desktop's window that shows it.
+ * top-level window, the backend's surface that shows it.
  *
  * Windows live in the server's table in stacking order, bottom first; the
  * root window is the first and has no pixels.
@@ -202,13 +215,18 @@ struct x11_window {
 	char icon_path[160];
 
 	/*
-	 * A mapped top-level window's desktop window, the size and title it
-	 * was last given, whether it must be drawn whole next time, and the
-	 * window with its children drawn over it.
+	 * A mapped top-level window's surface, the swapchain its pixels are
+	 * shown through (NULL: the backend's present shows them), the size,
+	 * place and title the surface was last given, whether it must be
+	 * drawn whole next time, and the window with its children drawn over
+	 * it.
 	 */
-	struct x11_wayland_window *surface;
+	struct x11_surface *surface;
+	struct x11_vulkan_window *swapchain;
 	uint16_t surface_width;
 	uint16_t surface_height;
+	int16_t surface_x;
+	int16_t surface_y;
 	int surface_fresh;
 	char surface_title[64];
 	uint32_t *composite;
@@ -229,8 +247,8 @@ struct x11_property {
 
 /*
  * One selection (selection.c): its atom, the owner window (0 for none; the
- * root window while the desktop's text is CLIPBOARD's), the owner's client
- * slot (X11_NO_CLIENT for the desktop) and when it was taken.
+ * root window while the backend's text is the selection's), the owner's
+ * client slot (X11_NO_CLIENT for the backend) and when it was taken.
  */
 struct x11_selection {
 	uint32_t atom;
@@ -281,12 +299,11 @@ struct x11_glyph {
 };
 
 /*
- * The core font: the TrueType file in memory, its face, the ASCII glyphs
- * drawn so far, and the coverage a glyph is drawn into before it becomes
- * bits.  The face is NULL when there is no font.
+ * The core font: the face over the TrueType file the caller keeps in
+ * memory, the ASCII glyphs drawn so far, and the coverage a glyph is drawn
+ * into before it becomes bits.  The face is NULL when there is no font.
  */
 struct x11_glyphs {
-	void *data;
 	struct truetype_face *face;
 	struct x11_glyph cache[X11_GLYPHS_CACHED];
 	uint8_t cached[X11_GLYPHS_CACHED];
@@ -294,73 +311,45 @@ struct x11_glyphs {
 };
 
 /*
- * One pointer event from the desktop, in the root window's coordinates:
- * where the pointer is, and at most one button that changed.
- */
-struct x11_pointer_frame {
-	int x;
-	int y;
-	uint32_t time;
-
-	/* The buttons held before the frame (X's bits: 1 left, 2 middle, 4 right). */
-	uint16_t buttons_before;
-
-	/* The button that changed (1, 2 or 3; 0 for a move), whether it went down, and the buttons after. */
-	uint8_t button;
-	int pressed;
-	uint16_t buttons_after;
-};
-
-/*
- * What wayland.c tells the server: a key, the pointer, a window entered,
- * a window given a size, a window asked to close, the desktop's selection
- * changed (whether it has text), and a client asking for the text of the
- * X client that owns CLIPBOARD (a descriptor to write it into, which the
- * callee owns); the same two for the primary selection and PRIMARY
- * (ws035-p103).
- */
-struct x11_wayland_callbacks {
-	void (*key)(void *context, uint8_t keycode, int pressed, uint32_t time, uint16_t state);
-	void (*pointer)(void *context, const struct x11_pointer_frame *frame);
-	void (*enter)(void *context, uint32_t window, int keyboard);
-	void (*configure)(void *context, uint32_t window, int width, int height);
-	void (*close)(void *context, uint32_t window);
-	void (*selection)(void *context, int text);
-	void (*selection_send)(void *context, int fd);
-	void (*primary)(void *context, int text);
-	void (*primary_send)(void *context, int fd);
-};
-
-/*
- * The server: the listening socket, the connection to the desktop, the
- * clients and their resources, what has changed and not been shown, and
- * the pointer's and keyboard's state.
+ * The server: the backend, the clients and their resources, what has
+ * changed and not been shown, and the pointer's and keyboard's state.
  */
 struct x11server {
-	/* The listening socket and its path (unlinked at the end). */
-	int listener;
-	char socket_path[108];
-
 	/* The root window's size. */
 	unsigned width;
 	unsigned height;
 
-	/* The connection to the desktop, and the core font. */
-	struct x11_wayland *wayland;
+	/* The backend's functions and their context. */
+	const struct x11_backend_ops *ops;
+	void *backend;
+
+	/*
+	 * Vulkan's state, made with the first swapchain (NULL until then), the
+	 * WSI extension the backend's surfaces need, and whether windows are
+	 * shown through the backend's present instead (Vulkan was not asked
+	 * for, or failed once).
+	 */
+	struct x11_vulkan *vulkan;
+	const char *vulkan_wsi;
+	int cpu_present;
+
+	/* The core font. */
 	struct x11_glyphs glyphs;
 
-	/* Nonzero once the desktop's connection is lost: the caller ends the server. */
-	int stopped;
+	/* Where log lines go. */
+	void (*log)(void *context, const char *line);
+	void *log_context;
 
-	/* The top-level windows the desktop asked to close, handled after its events. */
+	/* The server's time (milliseconds, from the last tick), and the generation the next client's number carries. */
+	uint32_t now;
+	uint32_t generation;
+
+	/* The top-level windows the backend asked to close, handled at the next tick. */
 	uint32_t closing[X11_MAX_WINDOWS];
 	unsigned closing_count;
 
-	/* The client slot of each client descriptor x11server_pollfds gave (by descriptor index). */
-	unsigned poll_clients[X11SERVER_POLLFDS_MAX];
-
-	/* When the stuck-client report last looked (monotonic milliseconds). */
-	uint64_t report_ms;
+	/* When the stuck-client report last looked (the server's milliseconds). */
+	uint32_t report_ms;
 
 	/* The clients and their resources. */
 	struct x11_client clients[X11_MAX_CLIENTS];
@@ -392,16 +381,16 @@ struct x11server {
 	/*
 	 * Atoms, properties and selections (selection.c): the names given
 	 * numbers (X11_ATOM_FIRST_DYNAMIC on), the properties kept, the
-	 * selections, the desktop's requests for CLIPBOARD's X text waiting for
-	 * the owner's answer (their descriptors, oldest first), and the atoms
-	 * the server uses itself.
+	 * selections, the backend's requests for an X owner's text waiting
+	 * for the owner's answer (the backend's numbers, oldest first), and
+	 * the atoms the server uses itself.
 	 */
 	char atom_names[X11_MAX_ATOMS][X11_ATOM_NAME];
 	unsigned atom_count;
 	struct x11_property properties[X11_MAX_PROPERTIES];
 	struct x11_selection selections[X11_MAX_SELECTIONS];
 	unsigned selection_count;
-	int pending_sends[X11_PENDING_SENDS];
+	uint32_t pending_sends[X11_PENDING_SENDS];
 	unsigned pending_count;
 	uint32_t atom_clipboard;
 	uint32_t atom_utf8;
@@ -423,11 +412,11 @@ struct x11server {
 	uint16_t motion_buttons;
 };
 
-/* server.c: the clients' connections. */
+/* server.c: the clients' connections, and the log. */
 struct x11_client *x11_client_of(struct x11server *server, unsigned owner);
 void x11_client_send(struct x11server *server, struct x11_client *client, const void *bytes, size_t length);
 void x11_client_close(struct x11server *server, unsigned index);
-uint64_t x11_now_ms(void);
+void x11_log(struct x11server *server, const char *format, ...);
 
 /* protocol.c: requests, replies and events. */
 int x11_setup_reply(struct x11server *server, struct x11_client *client);
@@ -473,54 +462,26 @@ unsigned x11_request_get_selection_owner(struct x11server *server, unsigned inde
 unsigned x11_request_convert_selection(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_send_event(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 void x11_selection_forget_window(struct x11server *server, uint32_t window);
-void x11_selection_wayland(void *context, int text);
-void x11_selection_send(void *context, int fd);
-void x11_selection_primary(void *context, int text);
-void x11_selection_primary_send(void *context, int fd);
 
-/* rootless.c: the top-level windows as desktop windows, and the desktop's input. */
+/* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);
 void x11_rootless_closing(struct x11server *server);
 void x11_rootless_flush_motion(struct x11server *server);
-void x11_rootless_forget(struct x11_window *window);
+void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 
-/* What the desktop's events call in the server: rootless.c's handlers, given to wayland.c when the connection opens. */
-extern const struct x11_wayland_callbacks x11_rootless_callbacks;
-
-/* wayland.c: the connection to the desktop and its windows. */
-int x11_wayland_open(struct x11_wayland **result, const char *display, int shm, const struct x11_wayland_callbacks *callbacks, void *context);
-int x11_wayland_fd(const struct x11_wayland *wayland);
-int x11_wayland_dispatch(struct x11_wayland *wayland, int readable);
-void x11_wayland_close(struct x11_wayland *wayland);
-struct x11_wayland_window *x11_wayland_window_open(struct x11_wayland *wayland, uint32_t id, const char *title, const char *app_id, unsigned width, unsigned height);
-int x11_wayland_window_present(struct x11_wayland_window *window, const uint32_t *pixels, int x, int y, int width, int height);
-int x11_wayland_window_resize(struct x11_wayland_window *window, unsigned width, unsigned height);
-void x11_wayland_window_move(struct x11_wayland_window *window, int x, int y);
-void x11_wayland_window_title(struct x11_wayland_window *window, const char *title);
-void x11_wayland_window_close(struct x11_wayland_window *window);
-int x11_wayland_selection_own(struct x11_wayland *wayland);
-void x11_wayland_selection_drop(struct x11_wayland *wayland);
-int x11_wayland_selection_has_text(const struct x11_wayland *wayland);
-int x11_wayland_selection_read(struct x11_wayland *wayland, char **text, size_t *length);
-int x11_wayland_primary_own(struct x11_wayland *wayland);
-void x11_wayland_primary_drop(struct x11_wayland *wayland);
-int x11_wayland_primary_has_text(const struct x11_wayland *wayland);
-int x11_wayland_primary_read(struct x11_wayland *wayland, char **text, size_t *length);
-
-/* vulkan.c: a desktop window shown through a Vulkan swapchain. */
-struct x11_vulkan *x11_vulkan_open(void);
+/* vulkan.c: a surface shown through a Vulkan swapchain. */
+struct x11_vulkan *x11_vulkan_open(const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
-struct x11_vulkan_window *x11_vulkan_window_open(struct x11_vulkan **shared, struct wl_display *display, struct wl_surface *surface, unsigned width, unsigned height);
+struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);
 int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *pixels);
 int x11_vulkan_window_resize(struct x11_vulkan_window *window, unsigned width, unsigned height);
 void x11_vulkan_window_close(struct x11_vulkan_window *window);
 
-/* keymap.c: the keyboard's table. */
-uint8_t x11_keymap_keycode(uint16_t code, int shifted, int caps_lock);
+/* keymap.c: the keyboard's table (the evdev side, x11_keymap_keycode, is in x11backend.h). */
 uint32_t x11_keymap_keysym(uint32_t keycode);
 
 /* glyphs.c: the core font. */
-int x11_glyphs_open(struct x11_glyphs *glyphs, const char *path);
+int x11_glyphs_open(struct x11_glyphs *glyphs, const uint8_t *bytes, size_t size, const char *fallback_path);
 int x11_glyph(struct x11_glyphs *glyphs, uint32_t codepoint, struct x11_glyph *glyph);
 void x11_glyphs_close(struct x11_glyphs *glyphs);
 

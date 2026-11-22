@@ -14,8 +14,8 @@
  * size, place and title in step, hands it pixels or asks it for a Vulkan
  * surface to show them through, and passes the clipboard across.  The
  * backend calls the core with what its system reports: keys, the
- * pointer, a window entered, given a size or asked to close, and the
- * system's clipboard.  zedBSD's backend is the Wayland desktop
+ * pointer, a window entered, given a size, asked to close or minimized,
+ * and the system's clipboard.  zedBSD's backend is the Wayland desktop
  * (wayland.c).
  */
 
@@ -27,13 +27,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The kind of a surface: a top-level X window of the rootless server. */
+/*
+ * The kind of a surface: a decorated top-level X window of the rootless
+ * server, an override-redirect one (a menu or a tooltip: no decoration,
+ * never activated), or the one window of the whole root window.
+ */
 #define X11_SURFACE_TOPLEVEL	0U
+#define X11_SURFACE_POPUP	1U
+#define X11_SURFACE_ROOT	2U
 
-/* What an update of a surface changes: its size, its place on the root window, its title. */
+/* The state of a surface: minimized (ICCCM's Iconic). */
+#define X11_SURFACE_ICONIC	(1U << 0)
+
+/* What an update of a surface changes: its size, its place on the root window, its title, its owner, its state. */
 #define X11_SURFACE_CHANGED_SIZE	(1U << 0)
 #define X11_SURFACE_CHANGED_POSITION	(1U << 1)
 #define X11_SURFACE_CHANGED_TITLE	(1U << 2)
+#define X11_SURFACE_CHANGED_OWNER	(1U << 3)
+#define X11_SURFACE_CHANGED_FLAGS	(1U << 4)
 
 /* The selections the clipboard passes across: X's CLIPBOARD and PRIMARY. */
 #define X11_SELECTION_CLIPBOARD	0U
@@ -49,8 +60,10 @@ struct x11_surface;
 
 /*
  * What a surface shows: its kind, its X window's place on the root window
- * and size (X's pixels), its title (UTF-8) and the X client's class (NULL:
- * none; the backend names it itself).
+ * and size (X's pixels), its title (UTF-8), the X client's class (NULL:
+ * none; the backend names it itself), the surface of the top-level window
+ * it is transient for (WM_TRANSIENT_FOR; NULL: none) and its state
+ * (X11_SURFACE_ICONIC).
  */
 struct x11_surface_info {
 	unsigned kind;
@@ -60,6 +73,8 @@ struct x11_surface_info {
 	unsigned height;
 	const char *title;
 	const char *class_name;
+	struct x11_surface *owner;
+	unsigned flags;
 };
 
 /*
@@ -127,6 +142,7 @@ void x11server_backend_pointer(struct x11server *server, const struct x11_pointe
 void x11server_backend_enter(struct x11server *server, uint32_t window, int keyboard);
 void x11server_backend_configure(struct x11server *server, uint32_t window, int width, int height);
 void x11server_backend_close(struct x11server *server, uint32_t window);
+void x11server_backend_state(struct x11server *server, uint32_t window, int iconic);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
 void x11server_backend_clipboard_request(struct x11server *server, unsigned selection, uint32_t request);
 
