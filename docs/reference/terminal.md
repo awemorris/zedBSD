@@ -101,8 +101,10 @@ more).
 | Next, previous tab | Ctrl+Tab and Ctrl+Page Down, Ctrl+Shift+Tab and Ctrl+Page Up | the desktop's titlebar |
 | Settings | Shell > Settings..., F12 | section 3 |
 
-A shell that exits closes its tab. Shift+Page Up and Shift+Page Down scroll
-the tab's history.
+A window has at most ten tabs (Shell > New Tab does nothing past them). A
+shell that exits closes its tab. Shift+Page Up and Shift+Page Down scroll the
+tab's history. mikuterm has its own keys for the tabs on Windows
+([mikuterm](mikuterm.md), section 5).
 
 ## 5. Menus
 
