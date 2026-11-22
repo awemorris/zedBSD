@@ -9,11 +9,11 @@
  * The types and functions the modules of xserver share.
  *
  * These are the core's modules, none of which does input or output of its
- * own.  server.c keeps the server's life and its clients' connections
+ * own.  client.c keeps the server's life and its clients' connections
  * (their bytes come and go through the transport), protocol.c answers
  * their requests, window.c keeps the windows, pixmaps and graphics
  * contexts and draws into them, rootless.c shows each top-level window as
- * a surface of the backend (whose pixels vulkan.c shows through a
+ * a surface of the backend (whose pixels present-vulkan.c shows through a
  * swapchain when it can), selection.c keeps atoms, properties and
  * selections, and keymap.c, glyphs.c and glx.c are the keyboard's table,
  * the core font and the GLX extension.
@@ -412,7 +412,7 @@ struct x11server {
 	uint16_t motion_buttons;
 };
 
-/* server.c: the clients' connections, and the log. */
+/* client.c: the clients' connections, and the log. */
 struct x11_client *x11_client_of(struct x11server *server, unsigned owner);
 void x11_client_send(struct x11server *server, struct x11_client *client, const void *bytes, size_t length);
 void x11_client_close(struct x11server *server, unsigned index);
@@ -469,7 +469,7 @@ void x11_rootless_closing(struct x11server *server);
 void x11_rootless_flush_motion(struct x11server *server);
 void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 
-/* vulkan.c: a surface shown through a Vulkan swapchain. */
+/* present-vulkan.c: a surface shown through a Vulkan swapchain. */
 struct x11_vulkan *x11_vulkan_open(const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
 struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);
