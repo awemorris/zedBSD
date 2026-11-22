@@ -37,7 +37,7 @@
 # hands that variable to the packages' own makes as well, which run in the
 # packages' directories: there it does not hold.
 ifneq ($(CURDIR),$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..))
-TOPLEVEL_BUILD :=
+override TOPLEVEL_BUILD :=
 endif
 
 # The package's own make only: the top-level build reads none of this.
