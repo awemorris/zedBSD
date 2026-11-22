@@ -39,6 +39,9 @@
 /* The font that draws what the monospaced font has no glyph for (CJK), unless told otherwise. */
 #define MAIN_FALLBACK_FONT	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
 
+/* The colour emoji font, which draws in colour what neither of them has (the desktop's text draws from it too). */
+#define MAIN_EMOJI_FONT		KEILAND_DATADIR "/fonts/keiland-emoji.ttf"
+
 /* The grid the window opens with. */
 #define MAIN_COLUMNS		90U
 #define MAIN_ROWS		28U
@@ -109,6 +112,7 @@ main(
 	run.font = options.font;
 	run.companion = KEILAND_FONT_FALLBACK_MONO;
 	run.fallback = options.fallback;
+	run.emoji = MAIN_EMOJI_FONT;
 	run.pixels = options.pixels;
 	run.pixels_given = options.pixels_given;
 	run.scale = 96U;

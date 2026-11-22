@@ -10,9 +10,10 @@
  * (render-build.c) painted into a frame of 0xAARRGGBB words.  Each quad is
  * a rectangle on whole pixels; a pixel inside it takes the texel of the
  * glyph atlas under its centre (nearest, as the GPU's sampler) and the
- * colour the cell shader makes of it, the background mixed toward the
- * foreground by the texel's coverage, the frame cleared to the theme's
- * background first.
+ * colour the cell shader makes of it: the background mixed toward the
+ * foreground by the texel's coverage, or for a colour glyph (a quad whose
+ * foreground has no alpha) the texel's premultiplied colours over the
+ * background, the frame cleared to the theme's background first.
  *
  * Only what changed is painted again.  The build keeps a row the same as
  * in the frame before where it was, so a quad outside the parts built is
@@ -446,8 +447,9 @@ cpu_paint(
 /*
  * Paints one quad within the rows from top to bottom: each pixel the
  * atlas's texel under its centre, the background mixed toward the
- * foreground by the texel's coverage (cell.frag), rounded as a UNORM
- * target rounds.
+ * foreground by the texel's coverage, or for a colour glyph the texel's
+ * premultiplied colours over the background (cell.frag), rounded as a
+ * UNORM target rounds.
  */
 static void
 cpu_paint_quad(
@@ -463,6 +465,8 @@ cpu_paint_quad(
 	unsigned cover;
 	unsigned channel;
 	unsigned mixed[3];
+	unsigned colour[3];
+	int coloured;
 	int left;
 	int right;
 	int upper;
@@ -487,6 +491,11 @@ cpu_paint_quad(
 		foreground[channel] = cpu_byte(quad[4U + channel]);
 		background[channel] = cpu_byte(quad[8U + channel]);
 	}
+
+	/* A foreground without alpha marks a colour glyph's quad. */
+	coloured = 0;
+	if (quad[7] < 0.5f)
+		coloured = 1;
 
 	/* Only the rows asked for and the frame's columns. */
 	if (upper < top)
@@ -516,9 +525,27 @@ cpu_paint_quad(
 			texel = cpu->atlas + (size_t)atlas_y * cpu->atlas_pitch + (size_t)atlas_x * 4U;
 			cover = texel[3];
 
-			/* The background toward the foreground by the coverage. */
-			for (channel = 0U; channel < 3U; channel++)
-				mixed[channel] = (background[channel] * (255U - cover) + foreground[channel] * cover + 127U) / 255U;
+			/* The colour the cell shader makes of the texel, by the quad's mode. */
+			if (coloured) {
+				/* A colour glyph's premultiplied colours (the texel's bytes are blue, green, red). */
+				colour[0] = texel[2];
+				colour[1] = texel[1];
+				colour[2] = texel[0];
+
+				/* Each channel: the glyph's colour over what its alpha leaves of the background. */
+				for (channel = 0U; channel < 3U; channel++)
+					mixed[channel] = (colour[channel] * 255U + background[channel] * (255U - cover) + 127U) / 255U;
+			} else {
+				/* Each channel: the background toward the foreground by the coverage. */
+				for (channel = 0U; channel < 3U; channel++)
+					mixed[channel] = (background[channel] * (255U - cover) + foreground[channel] * cover + 127U) / 255U;
+			}
+
+			/* The pixel, never past a byte (a colour above its alpha would be). */
+			for (channel = 0U; channel < 3U; channel++) {
+				if (mixed[channel] > 255U)
+					mixed[channel] = 255U;
+			}
 			row[x] = 0xff000000U | (mixed[0] << 16) | (mixed[1] << 8) | mixed[2];
 		}
 	}

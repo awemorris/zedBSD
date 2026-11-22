@@ -807,7 +807,8 @@ build_utf8_next(
 /*
  * Writes the six vertices of one quad showing a slot of the atlas (as wide
  * as the quad: two slots side by side for a wide character), and returns
- * where the next quad goes.
+ * where the next quad goes.  The foreground's alpha tells the drawing how
+ * to read the slot: 1 for a coverage, 0 for a colour glyph.
  */
 static float *
 build_quad(
@@ -831,6 +832,8 @@ build_quad(
 	float v;
 	float slot_width;
 	float slot_height;
+	float mode;
+	int colour;
 
 	/* Where the slot is in the atlas, in texture coordinates. */
 	per_row = font->atlas_width / font->cell_width;
@@ -838,6 +841,12 @@ build_quad(
 	v = (float)((slot / per_row) * font->cell_height) / (float)font->atlas_height;
 	slot_width = width / (float)font->atlas_width;
 	slot_height = (float)font->cell_height / (float)font->atlas_height;
+
+	/* How the slot is read: its colours for a colour glyph, else a coverage between the cell's colours. */
+	mode = 1.0f;
+	colour = terminal_font_colour(font, slot);
+	if (colour)
+		mode = 0.0f;
 
 	/* Each corner: position and atlas place, then the two colours. */
 	for (index = 0U; index < TERMINAL_QUAD_VERTICES; index++) {
@@ -848,7 +857,7 @@ build_quad(
 		vertex[4] = (float)((foreground >> 16) & 0xffU) / 255.0f;
 		vertex[5] = (float)((foreground >> 8) & 0xffU) / 255.0f;
 		vertex[6] = (float)(foreground & 0xffU) / 255.0f;
-		vertex[7] = 1.0f;
+		vertex[7] = mode;
 		vertex[8] = (float)((background >> 16) & 0xffU) / 255.0f;
 		vertex[9] = (float)((background >> 8) & 0xffU) / 255.0f;
 		vertex[10] = (float)(background & 0xffU) / 255.0f;
