@@ -25,7 +25,7 @@
  * desktop's requests for it are handed to the core, numbered by their
  * descriptors, which the core's answer writes and closes.
  *
- * The primary selection (ws035-p103) is bridged the same way with X's
+ * The primary selection is bridged the same way with X's
  * PRIMARY, through the desktop's zwp_primary_selection_device_manager_v1
  * when it has one.
  */
