@@ -4,7 +4,7 @@ The licenses of mikuterm and what it brings
 mikuterm.exe is Awe Morris's own work under the zlib license
 (zedBSD-LICENSE.txt): the terminal, libkeiland, libtruetype, the PNG and
 zlib readers, the SSH client and libcrypto-compat.  Copyright (C) 2026
-Awe Morris.
+Awe Morris.  mikuterm's icon is Awe Morris's too, under the same license.
 
 The terminal's table of East Asian widths is derived from the Unicode
 Character Database (Unicode-License-V3.txt).
