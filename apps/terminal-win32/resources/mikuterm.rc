@@ -7,7 +7,9 @@
 
 /*
  * mikuterm.exe's resources: its manifest (for a toolchain whose linker does
- * not make one: MIKUTERM_MANIFEST_RESOURCE) and its version.  The
+ * not make one: MIKUTERM_MANIFEST_RESOURCE), its icon (id 1, the first
+ * icon, which Windows shows for the program and libkeiland gives its
+ * windows; made by make-icon.py) and its version.  The
  * version's numbers come from the build (mikuterm-version.h, written from
  * the project's version).
  */
@@ -19,6 +21,8 @@
 #ifdef MIKUTERM_MANIFEST_RESOURCE
 1 24 "mikuterm.manifest"
 #endif
+
+1 ICON "mikuterm.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION MIKUTERM_VERSION_MAJOR, MIKUTERM_VERSION_MINOR, MIKUTERM_VERSION_PATCH, 0

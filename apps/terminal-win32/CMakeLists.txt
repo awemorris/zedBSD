@@ -242,7 +242,7 @@ set(MIKUTERM_SYSTEM_LIBRARIES
 add_executable(mikuterm WIN32 ${MIKUTERM_SOURCES})
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh ${MIKUTERM_SYSTEM_LIBRARIES})
 set_source_files_properties(${MIKUTERM_DIR}/resources/mikuterm.rc PROPERTIES
-	OBJECT_DEPENDS ${MIKUTERM_DIR}/resources/mikuterm.manifest)
+	OBJECT_DEPENDS "${MIKUTERM_DIR}/resources/mikuterm.manifest;${MIKUTERM_DIR}/resources/mikuterm.ico")
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_DIR}/resources)
 
 #
