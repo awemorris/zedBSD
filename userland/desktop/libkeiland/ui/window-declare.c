@@ -565,7 +565,9 @@ kl_window_popup_menu(
 		window->popup = NULL;
 	}
 
-	/* The compositor shows it at the press. */
+	/* The compositor shows it at the press, in its logical units. */
+	x = keiui_window_units_point(window, x);
+	y = keiui_window_units_point(window, y);
 	window->popup = kl_menu_popup(service, window->popup_menu, window->surface, x, y, window->seat, window->press_serial, &declare_popup_listener, window);
 	if (window->popup == NULL)
 		return errno;
@@ -584,6 +586,7 @@ kl_window_set_glass(
 	const struct kl_glass_panel *panels,
 	size_t count)
 {
+	struct kl_glass_panel units[KL_GLASS_PANELS_MAX];
 	int same;
 	int error;
 
@@ -614,8 +617,9 @@ kl_window_set_glass(
 			return 0;
 	}
 
-	/* The new panels, kept to send only what changes. */
-	error = kl_glass_set_panels(window->glass, panels, count);
+	/* The new panels in the compositor's logical units, kept as given to send only what changes. */
+	keiui_window_units_panels(window, panels, count, units);
+	error = kl_glass_set_panels(window->glass, units, count);
 	if (error != 0)
 		return error;
 	if (count != 0U)

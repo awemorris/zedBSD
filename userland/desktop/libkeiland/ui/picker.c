@@ -74,10 +74,18 @@ struct kl_media_picker {
 	struct kl_glass_panel panels[PICKER_PANELS];
 	size_t panel_count;
 
-	/* The frame: its pixels and size, the canvas over them, the style, the frame asked for, and whether another is due. */
+	/*
+	 * The frame: its pixels and size, the scale it is drawn at (the
+	 * window's, which follows the compositor's) and its size in the
+	 * canvas's units, the canvas over them, the style, the frame asked
+	 * for, and whether another is due.
+	 */
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
+	int units_width;
+	int units_height;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_style style;
@@ -407,6 +415,7 @@ picker_draw(
 {
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
 	int again;
 	int status;
 
@@ -414,11 +423,16 @@ picker_draw(
 	if (picker->window == NULL || !picker->window->configured)
 		return;
 
-	/* The frame's size: the window's (a new canvas when it changed). */
+	/* The frame's size in pixels and its scale: the window's (a new canvas when either changed). */
 	(void)kl_window_present_resize(picker->window, &width, &height);
-	if (width != picker->width || height != picker->height || !picker->canvas_made) {
+	scale = kl_window_scale(picker->window);
+	if (width != picker->width ||
+	    height != picker->height ||
+	    scale != picker->scale ||
+	    !picker->canvas_made) {
 		picker->width = width;
 		picker->height = height;
+		picker->scale = scale;
 		status = picker_canvas(picker);
 		if (status != 0)
 			return;
@@ -427,8 +441,8 @@ picker_draw(
 	/* The library's list, when it came. */
 	picker_list_poll(picker);
 
-	/* The frame and its input. */
-	again = keiui_picker_frame(&picker->model, picker->ui, &picker->style, (int)picker->width, (int)picker->height, kl_clock_us());
+	/* The frame and its input, laid out in the canvas's units. */
+	again = keiui_picker_frame(&picker->model, picker->ui, &picker->style, picker->units_width, picker->units_height, kl_clock_us());
 	picker->dirty = again;
 
 	/* An answer closes the window. */
@@ -457,6 +471,8 @@ static int
 picker_canvas(
 	struct kl_media_picker *picker)
 {
+	struct kl_rect whole;
+	struct kl_rect units;
 	uint32_t *pixels;
 	size_t count;
 	int status;
@@ -478,6 +494,17 @@ picker_canvas(
 		return -1;
 	picker->canvas_made = 1;
 	picker->style.canvas = &picker->canvas;
+
+	/* Drawn at the window's scale, the input taken at it, and the frame's size in the canvas's units. */
+	kl_canvas_set_scale(&picker->canvas, picker->scale);
+	kl_ui_set_scale(picker->ui, picker->scale);
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = (int)picker->width;
+	whole.height = (int)picker->height;
+	kl_canvas_logical(&picker->canvas, &whole, &units);
+	picker->units_width = units.width;
+	picker->units_height = units.height;
 
 	/* Succeeded: the frame can be drawn. */
 	return 0;
@@ -641,12 +668,16 @@ picker_glass_panels(
 	if (picker->glass == NULL)
 		return;
 
-	/* The window's panel; a sheet's reaches a radius above its top, so that its upper corners are square under the title bar. */
+	/*
+	 * The window's panel, in the canvas's units (the compositor's logical
+	 * ones); a sheet's reaches a radius above its top, so that its upper
+	 * corners are square under the title bar.
+	 */
 	memset(panels, 0, sizeof(panels));
 	panels[0].x = 0;
 	panels[0].y = 0;
-	panels[0].width = (int32_t)picker->width;
-	panels[0].height = (int32_t)picker->height;
+	panels[0].width = (int32_t)picker->units_width;
+	panels[0].height = (int32_t)picker->units_height;
 	panels[0].radius = PICKER_GLASS_RADIUS;
 	panels[0].kind = KL_GLASS_CARD;
 	if (picker->sheet != NULL) {
@@ -655,7 +686,7 @@ picker_glass_panels(
 	}
 
 	/* The card on it, where the view draws it. */
-	count = 1U + keiui_picker_panels((int)picker->width, (int)picker->height, &card, 1U);
+	count = 1U + keiui_picker_panels(picker->units_width, picker->units_height, &card, 1U);
 	if (count == PICKER_PANELS) {
 		panels[1].x = card.x;
 		panels[1].y = card.y;

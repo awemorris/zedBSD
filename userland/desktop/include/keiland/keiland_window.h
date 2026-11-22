@@ -212,8 +212,28 @@ void kl_window_size(const struct kl_window *window, uint32_t *width, uint32_t *h
  * pixels, and a program draws its text and widgets this much larger (a
  * kl_canvas's kl_canvas_set_scale).  A window's options' width and height
  * are at KL_SCALE_BASE.  KL_WINDOW_SCALE tells a change.
+ *
+ * KL_VERSION 114: on Wayland a window is drawn at 100 % and the compositor
+ * enlarges it, until the program calls kl_window_follow_scale (any time
+ * after the window is open): from then on kl_window_scale reports the
+ * compositor's scale for the window, kl_window_size,
+ * kl_window_present_resize and kl_window_configure_take report sizes in
+ * pixels, the input's places and the wheel's distances, the keyboard's
+ * inset and the desktop's place are in pixels, and kl_window_text_cursor,
+ * kl_window_popup_menu and kl_window_set_glass take pixels; the frames are
+ * shown pixel for pixel.  It returns 0, EINVAL, or ENOTSUP under a
+ * compositor that does not tell the scale (the window stays at 100 %).  A
+ * program that follows the scale draws its text and widgets at it (a
+ * kl_canvas's kl_canvas_set_scale, kl_ui_set_scale) and takes its scale
+ * again at each KL_WINDOW_SCALE.  A window's minimum size and its options'
+ * width and height stay at KL_SCALE_BASE.  A program that shows its own
+ * frames and does not defer its configures sends its first frame of a new
+ * size after kl_window_size reports it; one that defers them acknowledges
+ * with kl_window_configure_ack before that frame, which shows it at the
+ * new logical size.
  */
 unsigned kl_window_scale(const struct kl_window *window);
+int kl_window_follow_scale(struct kl_window *window);
 int kl_window_present_resize(struct kl_window *window, uint32_t *width, uint32_t *height);
 int kl_window_present(struct kl_window *window, const uint32_t *pixels, size_t stride);
 int kl_window_present_part(struct kl_window *window, const uint32_t *pixels, size_t stride, const struct kl_rect *part);

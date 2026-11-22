@@ -446,6 +446,7 @@ void keiui_ui_select_begin(struct kl_ui *ui, uint32_t id, uint32_t index, int ki
 
 /* Takes the fingers' selection's mode away (ui.c; the widget keeps its selection). */
 void keiui_ui_select_end(struct kl_ui *ui);
+unsigned keiui_ui_scale(const struct kl_ui *ui);
 
 /* Notes that the widget in the mode was drawn in the frame being drawn, at its rectangle and text box, with its style (ui.c). */
 void keiui_ui_select_drawn(struct kl_ui *ui, const struct kl_rect *rect, const struct kl_rect *box, const struct kl_style *style);

@@ -441,6 +441,7 @@
 		kl_window_set_title;
 		kl_window_size;
 		kl_window_scale;
+		kl_window_follow_scale;
 		kl_window_present_resize;
 		kl_window_present;
 		kl_window_present_part;
@@ -549,6 +550,7 @@
 		kl_ui_text;
 		kl_ui_text_wanted;
 		kl_ui_window_input;
+		kl_ui_set_scale;
 		kl_ui_window_text;
 		kl_button;
 		kl_button_width;
