@@ -250,9 +250,6 @@ static const char *const page_appearance_labels[] = { "Text size", "Size", "Them
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
 
-/* What each effect is called where a card says when its settings take effect. */
-static const char *const page_effect_titles[2] = { "From the next connection", "From the next start" };
-
 static int page_frame(uint32_t width, uint32_t height, unsigned scale);
 static double page_units(double pixels);
 static int page_pixels(int units);
@@ -294,6 +291,7 @@ static void page_set_aside(const char *text, size_t length);
 static int page_key_text(const struct kl_window_event *event);
 static void page_pane(unsigned pane);
 static void page_log(const char *what, const char *detail);
+static const char *page_connection(void);
 
 /*
  * Makes the settings tab's page the first time it is opened: the widgets'
@@ -1129,6 +1127,7 @@ page_items(
 	const struct kl_theme *theme;
 	struct kl_rect card;
 	struct kl_rect control;
+	char title[64];
 	unsigned effect;
 	unsigned index;
 	unsigned rows;
@@ -1159,12 +1158,19 @@ page_items(
 		if (rows == 0U)
 			continue;
 
+		/* The card's title: when its settings take effect. */
+		if (effect == TERMINAL_EFFECT_START) {
+			(void)snprintf(title, sizeof(title), "From the next start");
+		} else {
+			(void)snprintf(title, sizeof(title), "From the next %s", page_connection());
+		}
+
 		/* The card and its fields. */
 		card.x = left;
 		card.y = y;
 		card.width = width;
 		card.height = PAGE_CARD_TITLE + (int)rows * PAGE_ROW + PAGE_CARD_FOOT;
-		y = page_card(&card, page_effect_titles[effect], NULL);
+		y = page_card(&card, title, NULL);
 		for (index = 0U; index < page.program->item_count; index++) {
 			item = &page.program->items[index];
 			if (item->pane != pane || item->effect != effect)
@@ -1473,15 +1479,21 @@ page_items_save(
 		saved++;
 		effects |= 1U << item->effect;
 		page_log("saved", item->keyword);
+
+		/* The field shows the value as kept (the program may have written it out in full). */
+		error = page.program->item_get(page.program->data, item->keyword, value, sizeof(value));
+		if (error == 0)
+			kl_field_set(&page.items[index], value);
 	}
 
 	/* What was kept and when it takes effect. */
+	(void)snprintf(text, sizeof(text), "Saved. It takes effect from the next %s.", page_connection());
 	if (saved == 0U) {
 		page_say(&page.items_message, 0, "Nothing changed.");
 	} else if ((effects & (1U << TERMINAL_EFFECT_START)) != 0U) {
 		page_say(&page.items_message, 0, "Saved. A setting of the next start takes effect when the program starts again.");
 	} else {
-		page_say(&page.items_message, 0, "Saved. It takes effect from the next connection.");
+		page_say(&page.items_message, 0, text);
 	}
 }
 
@@ -2341,4 +2353,16 @@ page_log(
 	/* The line. */
 	printf("ZTERM SETTINGS %s %s\n", what, detail);
 	fflush(stdout);
+}
+
+/* Names what a setting of the next connection waits for: the program's word, else "connection". */
+static const char *
+page_connection(void)
+{
+	/* The program's own word. */
+	if (page.program->connection != NULL)
+		return page.program->connection;
+
+	/* A connection, the word of a program whose tabs connect somewhere. */
+	return "connection";
 }

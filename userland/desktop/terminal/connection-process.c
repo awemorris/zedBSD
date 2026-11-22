@@ -22,6 +22,9 @@
 /* The shell run when no command is given. */
 #define PROCESS_SHELL		"/bin/sh"
 
+/* The terminal's type the shells are given unless the program chooses another. */
+#define PROCESS_TERM		"xterm"
+
 /*
  * One tab's process: the connection the main loop holds and the process
  * it stands for.  It lives until the connection is closed.
@@ -53,7 +56,8 @@ static const struct terminal_connection_ops process_ops = {
 
 /*
  * Makes a connector that starts a shell for each tab, or the shell running
- * a command (NULL for an interactive shell).
+ * a command (NULL for an interactive shell), with TERM=xterm until the
+ * program sets another term.
  */
 void
 terminal_process_connector_init(
@@ -63,6 +67,7 @@ terminal_process_connector_init(
 	/* The connector opens process connections with the command. */
 	memset(process, 0, sizeof(*process));
 	process->command = command;
+	(void)snprintf(process->term, sizeof(process->term), "%s", PROCESS_TERM);
 	process->connector.open = process_open;
 	process->connector.operation = "kl_process_start";
 	process->connector.data = process;
@@ -87,8 +92,9 @@ process_open(
 	size_t size,
 	struct terminal_connection **connection)
 {
-	static const char *const environment[] = { "TERM=xterm", NULL };
 	struct terminal_process_connector *connector;
+	const char *environment[2];
+	char term[TERMINAL_TERM_MAX + 5U];
 	struct process_connection *made;
 	struct kl_process_options process_options;
 	const char *arguments[4];
@@ -106,6 +112,11 @@ process_open(
 		arguments[2] = connector->command;
 		arguments[3] = NULL;
 	}
+
+	/* The terminal's type in the shell's environment, as the connector has it now. */
+	(void)snprintf(term, sizeof(term), "TERM=%s", connector->term);
+	environment[0] = term;
+	environment[1] = NULL;
 
 	/* The connection's memory. */
 	made = malloc(sizeof(*made));

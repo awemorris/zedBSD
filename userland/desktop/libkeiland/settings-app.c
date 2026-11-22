@@ -135,8 +135,14 @@ settings_app_load(
 		if (differs != 0 || key->name[prefix_length] != '.')
 			continue;
 
-		/* Puts the table's default into effect. */
-		(void)snprintf(fallback, sizeof(fallback), "%d", key->fallback);
+		/* The table's default: none (empty) for a path or a text, the number of a number's. */
+		if (key->type == KL_SETTINGS_TYPE_PATH || key->type == KL_SETTINGS_TYPE_TEXT) {
+			fallback[0] = '\0';
+		} else {
+			(void)snprintf(fallback, sizeof(fallback), "%d", key->fallback);
+		}
+
+		/* Puts the default into effect. */
 		settings_cache_set(cache, key->name, fallback, KL_SETTINGS_DEFAULT, 1U);
 	}
 
@@ -293,14 +299,16 @@ app_parse_line(
 	if (key == NULL || key->resolver != KL_SETTINGS_RESOLVER_APP)
 		return;
 
-	/* An opener as it is, when it is one; a number moved into its range. */
-	if (key->type == KL_SETTINGS_TYPE_OPENER) {
-		/* An opener that is not well formed is passed over. */
+	/* An opener, a path or a text as it is; a number moved into its range. */
+	if (key->type == KL_SETTINGS_TYPE_OPENER ||
+	    key->type == KL_SETTINGS_TYPE_PATH ||
+	    key->type == KL_SETTINGS_TYPE_TEXT) {
+		/* A value that is not well formed is passed over. */
 		error = kl_settings_key_check(key, raw);
 		if (error != 0)
 			return;
 
-		/* Takes the opener as it is. */
+		/* Takes the value as it is. */
 		(void)snprintf(clean, sizeof(clean), "%s", raw);
 	} else {
 		/* A value that is not a number is passed over. */
