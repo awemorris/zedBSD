@@ -145,7 +145,9 @@ mikuterm_connections_wait(
 		/* No thread runs, or the time is up. */
 		running = connection_threads;
 		now = kl_clock_us() / 1000U;
-		if (running == 0U || now >= deadline || !connection_cond_made)
+		if (running == 0U ||
+		    now >= deadline ||
+		    !connection_cond_made)
 			break;
 		(void)kl_cond_wait_for(&connection_threads_ended, &connection_registry, (uint32_t)(deadline - now));
 	}
@@ -200,6 +202,8 @@ session_post(
 		kl_mutex_unlock(&session->lock);
 		return;
 	}
+
+	/* The post is this call's; the tab clears the mark when it takes it. */
 	session->posted = 1;
 
 	kl_mutex_unlock(&session->lock);
@@ -471,9 +475,13 @@ connection_open(
 
 		kl_mutex_unlock(&connection_registry);
 
+
+		/* The session goes with the thread that did not start. */
 		connection_free(session);
 		return error;
 	}
+
+	/* The thread runs on its own. */
 	(void)kl_thread_detach(thread);
 
 	/* The tab's first title, until the remote side sets one. */
@@ -577,6 +585,8 @@ connection_write(
 			size = room;
 			session->input_full = 1;
 		}
+
+		/* The bytes that fit. */
 		memcpy(session->input + session->input_length, bytes, size);
 		session->input_length += size;
 		*written = size;
@@ -790,6 +800,8 @@ connection_edit(
 				session->escape = SESSION_ESCAPE_INSIDE;
 			continue;
 		}
+
+		/* The rest of an escape sequence ends at its final byte. */
 		if (session->escape == SESSION_ESCAPE_INSIDE) {
 			if (byte >= 0x40U && byte <= 0x7eU)
 				session->escape = SESSION_ESCAPE_NONE;
@@ -836,6 +848,7 @@ connection_edit(
 				session_keep_line_locked(session);
 				(void)session_put_locked(session, session->prompt, strlen(session->prompt));
 			}
+
 			break;
 		default:
 			/* Other control characters are not text. */

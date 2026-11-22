@@ -29,9 +29,13 @@
 
 /*
  * The initial P-array of Blowfish: the first 18 32-bit words of the
- * hexadecimal fractional part of pi (3.243F6A88 85A308D3 ...), as Schneier
- * 1993 specifies.  Computed for this file from pi (Machin's formula in
- * integer arithmetic), not copied from a table.
+ * hexadecimal fractional part of pi (3.243F6A88 85A308D3 ...).
+ *
+ * Values referenced: B. Schneier, "Description of a New Variable-Length
+ * Key, 64-Bit Block Cipher (Blowfish)", Fast Software Encryption 1993 (the
+ * P-array and the S-boxes start as the fractional part of pi).  The words
+ * were computed for this file from pi (Machin's formula in integer
+ * arithmetic), not copied from a table.
  */
 static const uint32_t blowfish_pi_p[SSH_BLOWFISH_P] = {
 	0x243F6A88U, 0x85A308D3U, 0x13198A2EU, 0x03707344U,
@@ -313,9 +317,11 @@ static const uint32_t blowfish_pi_s[SSH_BLOWFISH_SBOXES][SSH_BLOWFISH_ENTRIES] =
 };
 
 /*
- * The text bcrypt_pbkdf(3)'s hash encrypts, 32 bytes read as eight
- * big-endian words.  Values referenced: OpenBSD bcrypt_pbkdf(3), the
- * constant text of its bcrypt hash.
+ * The text bcrypt_pbkdf's hash encrypts, 32 bytes read as eight
+ * big-endian words.
+ *
+ * Value referenced: OpenBSD 5.5 src/lib/libutil/bcrypt_pbkdf.c
+ * (bcrypt_hash, the text it encrypts).
  */
 static const char bcrypt_text[BCRYPT_WORDS * 4U + 1U] = "OxychromaticBlowfishSwatDynamite";
 
@@ -404,8 +410,10 @@ ssh_blowfish_clear(
 /*
  * Derives out_size bytes from the passphrase and the salt.
  *
- * Values referenced: OpenBSD bcrypt_pbkdf(3).  Each output block is
- * numbered from 1: its salt hash is SHA-512 of the salt followed by the
+ * Procedure referenced: OpenBSD 5.5 src/lib/libutil/bcrypt_pbkdf.c
+ * (bcrypt_pbkdf), the key derivation of bcrypt_pbkdf(3).
+ *
+ * Each output block is numbered from 1: its salt hash is SHA-512 of the salt followed by the
  * block number as a big-endian 32-bit integer, its first bcrypt hash is
  * made with the SHA-512 of the passphrase and that salt hash, and each of
  * the other rounds - 1 hashes with the SHA-512 of the hash before; the
@@ -656,8 +664,12 @@ blowfish_expand(
  * Computes one bcrypt hash of bcrypt_pbkdf(3) into out (32 bytes) from the
  * SHA-512 of the passphrase and a SHA-512 salt hash.
  *
- * Values referenced: OpenBSD bcrypt_pbkdf(3).  The state is pi with the
- * salted expansion of the passphrase hash, then 64 times the plain
+ * Procedure referenced: OpenBSD 5.5 src/lib/libutil/bcrypt_pbkdf.c
+ * (bcrypt_hash); the expansions are EksBlowfishSetup's of N. Provos and
+ * D. Mazieres, "A Future-Adaptable Password Scheme", USENIX 1999.
+ *
+ * The state is pi with the salted expansion of the passphrase hash, then
+ * 64 times the plain
  * expansion of the salt hash followed by that of the passphrase hash; the
  * text "OxychromaticBlowfishSwatDynamite" as eight big-endian words is
  * encrypted 64 times as four blocks; the words are written out

@@ -240,7 +240,9 @@ ssh_client_feed(
 	}
 
 	/* Tells the engine of the end once every byte before it is given. */
-	if (client->peer_closed && client->receive_size == 0 && !client->end_told) {
+	if (client->peer_closed &&
+	    client->receive_size == 0 &&
+	    !client->end_told) {
 		error = ssh_engine_input(client->engine, client->receive, 0, &taken);
 		if (error != 0)
 			return error;

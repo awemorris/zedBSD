@@ -18,5 +18,5 @@ The fonts in share\fonts:
   keiland-fallback.ttf
       Droid Sans Fallback (DroidSansFallback-LICENSE.txt, Apache License 2.0)
   keiland-emoji.ttf
-      Noto Color Emoji 2.047 (NotoColorEmoji-OFL-1.1.txt, SIL Open Font
-      License 1.1)
+      Noto Color Emoji 2.047, Copyright 2022 Google Inc.
+      (NotoColorEmoji-OFL-1.1.txt, SIL Open Font License 1.1)

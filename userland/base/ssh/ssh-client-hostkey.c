@@ -248,7 +248,9 @@ client_ask_new_host(
 		while (*word == ' ' || *word == '\t')
 			word++;
 		length = strlen(word);
-		while (length > 0U && (word[length - 1U] == ' ' || word[length - 1U] == '\t'))
+		while (length > 0U &&
+		       (word[length - 1U] == ' ' ||
+		        word[length - 1U] == '\t'))
 			length--;
 		memmove(answer, word, length);
 		answer[length] = '\0';

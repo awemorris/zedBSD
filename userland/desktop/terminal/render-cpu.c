@@ -182,6 +182,8 @@ terminal_cpu_draw(
 		cpu_quad_band(quad, &top, &bottom);
 		cpu_band_add(cpu, top, bottom);
 	}
+
+	/* The next frame compares its quads with this many of this frame's. */
 	cpu->previous_count = vertex_count;
 
 	/* The whole frame, cleared and painted. */
@@ -546,6 +548,8 @@ cpu_paint_quad(
 				if (mixed[channel] > 255U)
 					mixed[channel] = 255U;
 			}
+
+			/* The opaque pixel. */
 			row[x] = 0xff000000U | (mixed[0] << 16) | (mixed[1] << 8) | mixed[2];
 		}
 	}

@@ -613,7 +613,9 @@ small_letter(
 		return 1;
 
 	/* The Latin-1 letters from a-grave to thorn, but the division sign. */
-	if (code_point >= 0xe0U && code_point <= 0xfeU && code_point != LATIN1_DIVISION)
+	if (code_point >= 0xe0U &&
+	    code_point <= 0xfeU &&
+	    code_point != LATIN1_DIVISION)
 		return 1;
 
 	/* No letter, or one without a capital. */
@@ -628,6 +630,7 @@ shortcut_key_name(
 	size_t size)
 {
 	size_t length;
+	int small;
 
 	/* The function keys. */
 	name[0] = '\0';
@@ -704,7 +707,8 @@ shortcut_key_name(
 
 	/* A Latin-1 character (a small letter in capitals) or a Unicode keysym, as its character. */
 	if (keysym >= 0xa0U && keysym <= 0xffU) {
-		if (small_letter(keysym))
+		small = small_letter(keysym);
+		if (small)
 			keysym -= LETTER_CASE_STEP;
 		length = utf8_encode(keysym, name);
 		name[length] = '\0';

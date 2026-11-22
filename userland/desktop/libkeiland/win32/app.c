@@ -851,6 +851,8 @@ app_launch_line(
 			free(bytes);
 			return E2BIG;
 		}
+
+		/* Any other failure is passed on. */
 		if (error != 0) {
 			free(bytes);
 			return error;
@@ -887,12 +889,16 @@ app_launch_line(
 		free(interpreter);
 		return ENOMEM;
 	}
+
+	/* The line, as wide characters. */
 	*line = calloc(APP_LINE_UNITS, sizeof(**line));
 	if (*line == NULL) {
 		free(command);
 		free(interpreter);
 		return ENOMEM;
 	}
+
+	/* The interpreter runs the command. */
 	written = _snwprintf(*line, APP_LINE_UNITS, L"\"%ls\" /d /s /c \"%ls\"", interpreter, command);
 	free(command);
 	if (written < 0 || (size_t)written >= APP_LINE_UNITS) {
@@ -987,6 +993,8 @@ app_environment(
 			variables[count] = walk;
 			count++;
 		}
+
+		/* The next variable. */
 		length = wcslen(walk);
 		walk += length + 1U;
 	}
@@ -1009,6 +1017,8 @@ app_environment(
 		length = wcslen(variables[index]);
 		units += length + 1U;
 	}
+
+	/* The block, every kept variable and the last NUL. */
 	*block = calloc(units, sizeof(**block));
 	if (*block == NULL)
 		goto end;
@@ -1020,6 +1030,8 @@ app_environment(
 		memcpy(written, variables[index], (length + 1U) * sizeof(*written));
 		written += length + 1U;
 	}
+
+	/* The block ends with an empty one. */
 	written[0] = L'\0';
 	error = 0;
 

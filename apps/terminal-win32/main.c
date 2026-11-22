@@ -208,7 +208,9 @@ mikuterm_font(
 
 	/* A path from a drive or a server. */
 	length = strlen(name);
-	if (name[0] == '\\' || (name[0] != '\0' && name[1] == ':')) {
+	if (name[0] == '\\' ||
+	    (name[0] != '\0' &&
+	     name[1] == ':')) {
 		if (length + 1U > size)
 			return ENAMETOOLONG;
 		memcpy(path, name, length + 1U);
@@ -310,6 +312,8 @@ main_ended(
 	} else {
 		printf("ZTERM FAILED run=mikuterm operation=%s result=%d errno=%d\n", result->operation, result->result, result->error);
 	}
+
+	/* The line is out before the program ends. */
 	fflush(stdout);
 }
 

@@ -717,7 +717,9 @@ ssh_key_put_private_passphrase(
 		return EINVAL;
 
 	/* Refuses a salt bcrypt_pbkdf does not take. */
-	if (salt == NULL || salt_size == 0U || salt_size > SSH_BCRYPT_SALT_MAX)
+	if (salt == NULL ||
+	    salt_size == 0U ||
+	    salt_size > SSH_BCRYPT_SALT_MAX)
 		return EINVAL;
 
 	/* Refuses no rounds, and more than a reader of the file takes. */
@@ -1171,6 +1173,8 @@ private_put_file(
 		ssh_buf_put_cstring(&body, "none");
 		ssh_buf_put_cstring(&body, "none");
 	}
+
+	/* The KDF's options (empty without a passphrase), and the count of keys, one. */
 	ssh_buf_put_string(&body, options.data, options.size);
 	ssh_buf_put_u32(&body, 1);
 

@@ -191,6 +191,8 @@ ssh_client_run(
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s", strerror(ENOMEM));
 		return ENOMEM;
 	}
+
+	/* The session's starting state from the arguments. */
 	client_session_setup(session, client, args);
 
 	/* Opens the engine for the login and the session. */
@@ -218,7 +220,9 @@ ssh_client_run(
 	}
 
 	/* Tells the user the connection is over when the session ran on a terminal. */
-	if (session->authenticated && session->pty && !session->reported)
+	if (session->authenticated &&
+	    session->pty &&
+	    !session->reported)
 		ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Connection to %s closed.", client->host_name);
 
 	/* Takes the exit value: the command's status, or 255 for a signal, a failure or no status. */
@@ -330,6 +334,8 @@ client_session_setup(
 		session->want_session = 0;
 		session->input_end = 1;
 	}
+
+	/* -n alone reads no input either. */
 	if (args->null_stdin)
 		session->input_end = 1;
 
@@ -409,6 +415,8 @@ client_open_engine(
 			return error;
 		}
 	}
+
+	/* The command to run instead of a shell. */
 	options.command = command;
 	options.command_size = size;
 
@@ -576,7 +584,9 @@ client_session_run(
 		/* Gives up on a server that has not identified itself within ConnectTimeout. */
 		wait_ms = CLIENT_SESSION_POLL_MS;
 		identified = ssh_engine_identified(client->engine);
-		if (session->deadline != 0 && !identified && !session->closed) {
+		if (session->deadline != 0 &&
+		    !identified &&
+		    !session->closed) {
 			if (now >= session->deadline)
 				return ETIMEDOUT;
 			if (session->deadline - now < wait_ms)

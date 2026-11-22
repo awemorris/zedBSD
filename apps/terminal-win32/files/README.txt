@@ -68,9 +68,9 @@ the tab.
 
 F12 (Shell > Settings...) opens the settings in a tab of their own, and F12
 on that tab goes back to the tab you came from.  X in a new tab's list of
-hosts opens them as well.  The sidebar has four panes (Ctrl+Page Down and
-Ctrl+Page Up move between them; Tab moves between a pane's fields and
-buttons):
+hosts opens them as well.  The sidebar has four panes (Ctrl+Down or
+Ctrl+Page Down shows the next one, Ctrl+Up or Ctrl+Page Up the one before;
+Tab moves between a pane's fields and buttons):
 
   Hosts       ssh\config, edited in place.  Save writes it and checks it as
               a connection reads it, naming a line it cannot use.  It takes

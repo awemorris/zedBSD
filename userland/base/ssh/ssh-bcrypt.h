@@ -7,17 +7,12 @@
 
 /*
  * bcrypt_pbkdf, the key derivation of OpenSSH's encrypted private key
- * files (OpenSSH PROTOCOL.key, kdfname "bcrypt"), and the Blowfish cipher
- * it is built on.
+ * files (kdfname "bcrypt"), and the Blowfish cipher it is built on.
  *
- * Blowfish is B. Schneier's 64-bit block cipher ("Description of a New
- * Variable-Length Key, 64-Bit Block Cipher (Blowfish)", Fast Software
- * Encryption 1993); its initial P-array and S-boxes are the hexadecimal
- * digits of the fractional part of pi.  bcrypt's key schedule
- * (EksBlowfishSetup, N. Provos and D. Mazieres, "A Future-Adaptable
- * Password Scheme", USENIX 1999) adds the salted expansion.
- * bcrypt_pbkdf is OpenBSD's bcrypt_pbkdf(3) (T. Unangst, 2013): PBKDF2's
- * shape with SHA-512 and a bcrypt-based hash in the place of HMAC.
+ * Blowfish is a 64-bit block cipher whose initial P-array and S-boxes are
+ * the hexadecimal digits of the fractional part of pi; bcrypt's key
+ * schedule adds the salted expansion.  bcrypt_pbkdf has PBKDF2's shape,
+ * with SHA-512 and a bcrypt-based hash in the place of HMAC.
  * Neither is in the crypto library's interface (OpenSSL has no
  * bcrypt_pbkdf), so this part is plain C on top of ssh_sha512.
  *
