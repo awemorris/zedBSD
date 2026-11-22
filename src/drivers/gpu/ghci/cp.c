@@ -1441,8 +1441,6 @@ record_fault(
 	record.fault_address |= (uint64_t)high << 32;
 	record.session_active = ghci_read(device, GHCI_REG_SESSION_ACTIVE);
 	record.rptr = ghci_read(device, GHCI_REG_RING_RPTR);
-	record.cp_pc = ghci_read(device, GHCI_REG_DIAG_CP_PC);
-	record.cp_status = ghci_read(device, GHCI_REG_DIAG_CP_STATUS);
 	record.fence = ghci_fence_read(device);
 
 	/*
@@ -1515,22 +1513,22 @@ log_registers(
 {
 	uint32_t status;
 	uint32_t fault_info;
-	uint32_t cp_pc;
-	uint32_t cp_status;
+	uint32_t address_low;
+	uint32_t address_high;
 	uint32_t rptr;
 
-	/* The state, the fault, and the processor's place. */
+	/* The state, the fault and its address, and where in the ring the processor is. */
 	status = ghci_read(device, GHCI_REG_STATUS);
 	fault_info = ghci_read(device, GHCI_REG_FAULT_INFO);
-	cp_pc = ghci_read(device, GHCI_REG_DIAG_CP_PC);
-	cp_status = ghci_read(device, GHCI_REG_DIAG_CP_STATUS);
+	address_low = ghci_read(device, GHCI_REG_FAULT_ADDR_LO);
+	address_high = ghci_read(device, GHCI_REG_FAULT_ADDR_HI);
 	rptr = ghci_read(device, GHCI_REG_RING_RPTR);
-	kern_logf("ghci: %s: %s (status %08x, fault %08x, cp pc %08x status %08x, rptr %u)\n",
+	kern_logf("ghci: %s: %s (status %08x, fault %08x at %08x%08x, rptr %u)\n",
 	    device->name,
 	    what,
 	    (unsigned)status,
 	    (unsigned)fault_info,
-	    (unsigned)cp_pc,
-	    (unsigned)cp_status,
+	    (unsigned)address_high,
+	    (unsigned)address_low,
 	    (unsigned)rptr);
 }

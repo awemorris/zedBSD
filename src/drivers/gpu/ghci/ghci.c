@@ -9,8 +9,8 @@
  * The GHCI device: what every GHCI GPU has in common, whatever its bus.
  *
  * The start identifies the GPU from its registers and reads BOOT_CAPS
- * and the extended capability list, resets it, checks SCRATCH, starts
- * its local memory, its display and the ring (cp.c), has the command
+ * and the MEM window, resets it, starts its local memory, its display
+ * and the ring (cp.c), has the command
  * processor write its capability block and reads it, and registers the
  * device with the GPU core, which publishes /dev/gpuN named
  * "ghci:<PCI vendor>:<PCI device>".  The detach undoes it in the reverse
@@ -48,7 +48,6 @@
 
 static int identify(struct ghci_device *device);
 static int reset_device(struct ghci_device *device);
-static int check_scratch(struct ghci_device *device);
 static int read_boot_caps(struct ghci_device *device);
 static int read_block(struct ghci_device *device);
 static void log_caps(struct ghci_device *device);
@@ -102,18 +101,13 @@ ghci_device_start(
 	if (error != 0)
 		return error;
 
-	/* BOOT_CAPS, the list and MEM: what the ring and CP_HEAP need; a GPU without a command processor is left alone. */
+	/* BOOT_CAPS and MEM: what the ring and the page tables need; a GPU without a command processor is left alone. */
 	error = read_boot_caps(device);
 	if (error != 0)
 		return error;
 
 	/* Resets the GPU and waits for its memory; whatever a kernel before this one left running stops. */
 	error = reset_device(device);
-	if (error != 0)
-		return error;
-
-	/* The window answers writes as a register file should. */
-	error = check_scratch(device);
 	if (error != 0)
 		return error;
 
@@ -583,34 +577,9 @@ reset_device(
 	return 0;
 }
 
-/* Writes two patterns to SCRATCH and reads each back. */
-static int
-check_scratch(
-	struct ghci_device *device)
-{
-	uint32_t first;
-	uint32_t second;
-
-	/* Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 14, the SCRATCH check). */
-	ghci_write(device, GHCI_REG_SCRATCH, GHCI_SCRATCH_FIRST);
-	first = ghci_read(device, GHCI_REG_SCRATCH);
-	ghci_write(device, GHCI_REG_SCRATCH, GHCI_SCRATCH_SECOND);
-	second = ghci_read(device, GHCI_REG_SCRATCH);
-
-	/* A window that does not keep what is written is not a working GPU. */
-	if (first != GHCI_SCRATCH_FIRST || second != GHCI_SCRATCH_SECOND) {
-		kern_logf("ghci: %s: SCRATCH reads %08x and %08x\n", device->name, (unsigned)first, (unsigned)second);
-		return EIO;
-	}
-
-	/* Succeeded: the window answers. */
-	return 0;
-}
-
 /*
  * Reads what the register window says before the processor runs, from a
- * copy of its first 1 KiB: BOOT_CAPS, the extended capability list and
- * the MEM block.  A GPU without a command processor (a display alone)
+ * copy of its first 512 bytes: BOOT_CAPS and the MEM window.  A GPU without a command processor (a display alone)
  * has no ring to write its display through and no capability block, so
  * the driver leaves it alone.
  */
@@ -628,15 +597,18 @@ read_boot_caps(
 	if (window == NULL)
 		return ENOMEM;
 
-	/* Every word of the first 1 KiB, the window GHCI 1.0 uses. */
+	/* Every word of the first 512 bytes, the control-path registers of GHCI 1.0. */
 	for (offset = 0U; offset < GHCI_WINDOW_BYTES; offset += 4U)
 		window[offset / 4U] = ghci_read(device, offset);
 
-	/* BOOT_CAPS, the list and the memory configuration. */
+	/* BOOT_CAPS and the memory configuration; reserved address widths fail the attach. */
 	error = ghci_caps_boot(window, &device->caps);
 	kern_free(window);
 	if (error != 0) {
-		kern_logf("ghci: %s: capabilities not read (%d)\n", device->name, error);
+		kern_logf("ghci: %s: capabilities not read (%d, BOOT_CAPS %08x)\n",
+		    device->name,
+		    error,
+		    (unsigned)ghci_read(device, GHCI_REG_BOOT_CAPS));
 		return error;
 	}
 
@@ -649,7 +621,7 @@ read_boot_caps(
 		return ENODEV;
 	}
 
-	/* Succeeded: the ring and CP_HEAP can be set. */
+	/* Succeeded: the ring can be set. */
 	return 0;
 }
 
@@ -677,8 +649,16 @@ read_block(
 		return EIO;
 	}
 
-	/* The block's identity, size and words. */
+	/* The block's identity, size and words; widths that disagree with BOOT_CAPS fail the attach. */
 	error = ghci_caps_block(words, GHCI_CAPS_ANSWER_DWORDS, &device->caps);
+	if (error == ENODEV) {
+		kern_logf("ghci: %s: EXT_CAP_FEATURE's address widths (%08x) are reserved or differ from BOOT_CAPS's (%08x)\n",
+		    device->name,
+		    (unsigned)words[GHCI_CAPS_WORD_FEATURE],
+		    (unsigned)device->caps.boot_caps);
+		kern_free(words);
+		return ENODEV;
+	}
 	if (error != 0) {
 		kern_logf("ghci: %s: capability block not readable (id %08x, info %08x)\n",
 		    device->name,
@@ -701,13 +681,18 @@ static void
 log_caps(
 	struct ghci_device *device)
 {
+	int has_display;
+
+	/* A display the device has is driven by commands, which the driver does not serve yet. */
+	has_display = ghci_caps_has(&device->caps, GHCI_HAS_DISPLAY);
+	if (has_display)
+		kern_logf("ghci: %s: display commands not served; the GPU's display is not used\n", device->name);
+
 	/* A copy that disagrees with the word the driver keeps is only logged. */
 	if (device->caps.mismatches != 0U)
-		kern_logf("ghci: %s: DEVICE_CAPS bits %08x disagree with BOOT_CAPS, the list, MEM or their mirrors; those used\n",
+		kern_logf("ghci: %s: DEVICE_CAPS bits %08x disagree with BOOT_CAPS, MEM or their mirrors; those used\n",
 		    device->name,
 		    (unsigned)device->caps.mismatches);
-	if (device->caps.width_mismatch)
-		kern_logf("ghci: %s: EXT_CAP_FEATURE's address widths differ from BOOT_CAPS's; BOOT_CAPS used\n", device->name);
 	if (device->caps.max_color != device->caps.max_mrt)
 		kern_logf("ghci: %s: EXT_CAP_FMT0 says %u colour attachments, MAX_MRT %u; MAX_MRT used\n",
 		    device->name,

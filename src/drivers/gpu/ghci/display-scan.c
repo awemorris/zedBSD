@@ -161,13 +161,21 @@ static int idle_frame_take(struct ghci_device *device);
 static void scan_give_back(struct ghci_device *device, struct ghci_allocation *memory);
 
 /*
- * Finds the display controller of the DISP2 capability, before the
- * command processor runs: a boot display it finds running keeps running,
- * and a controller found dark is reset and left dark.
+ * Starts the display, before the command processor runs.
  *
- * Returns 0, also for a device without a display (display.present stays
- * 0); a capability the driver cannot use is logged and leaves the device
- * without a display.
+ * A GHCI 1.0 display is driven by commands through the display service
+ * queues; it has no register window of its own.  The driver does not
+ * serve those commands yet, so every device is started without a
+ * display (display.present stays 0) and a boot display the firmware left
+ * running keeps showing its framebuffer.  The code below the return
+ * drives the display controller of the earlier DISP2 window and is kept
+ * for the command path that replaces it.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.1, no
+ * display window in 0x000..0x1FF; section 13.2, the display commands and
+ * service queues).
+ *
+ * Returns 0.
  */
 int
 ghci_display_attach(
@@ -186,14 +194,14 @@ ghci_display_attach(
 	kern_memset(display, 0, sizeof(*display));
 	waitq_init(&display->flip_wake, "ghci flip");
 
-	/* A GPU without DISP2 in its list has no display; DISP alone is not served. */
-	has_display = ghci_caps_has(&device->caps, GHCI_HAS_DISPLAY);
+	/* No GHCI 1.0 device has a display window: the display is not served. */
+	has_display = 0;
+	registers = 0U;
+	version = 0U;
 	if (!has_display)
 		return 0;
 
-	/* The capability's window of 256 bytes, of the one version the driver knows. */
-	registers = device->caps.block_offset[GHCI_EXTCAP_ID_DISP2];
-	version = device->caps.block_version[GHCI_EXTCAP_ID_DISP2];
+	/* The controller's window of 256 bytes, of the one version the driver knows. */
 	if (version != GHCI_DC_BLOCK_VERSION) {
 		kern_logf("ghci: %s: DISP2 version %u is not known; no display\n", device->name, (unsigned)version);
 		return 0;

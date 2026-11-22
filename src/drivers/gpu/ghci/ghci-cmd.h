@@ -38,6 +38,9 @@
 #define GHCI_OP_SESSION_CLOSE		0x13U
 #define GHCI_OP_BIND_SESSION		0x14U
 #define GHCI_OP_QUERY_CAPS		0x15U
+#define GHCI_OP_FAULT_LOG_SETUP		0x16U
+#define GHCI_OP_VM_QUERY_PT_MEM		0x17U
+#define GHCI_OP_MMU_ENABLE		0x18U
 #define GHCI_OP_BIND_PIPELINE		0x20U
 #define GHCI_OP_BIND_VERTEX_BUFFERS	0x21U
 #define GHCI_OP_BIND_INDEX_BUFFER	0x22U
@@ -72,14 +75,19 @@
 #define GHCI_OP_FLIP			0x51U
 
 /*
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 7.2, the size of each command in dwords).
+ * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md (section 7.2,
+ * the size of each command in dwords); lumiere-gpu 78d1b6b7 ghci.md
+ * (section 7.2, CMD_VM_MAP 16, CMD_VM_UNMAP 12, CMD_SESSION_OPEN 6,
+ * CMD_FAULT_LOG_SETUP 7, CMD_VM_QUERY_PT_MEM 5, CMD_MMU_ENABLE 6).
  */
-#define GHCI_DW_VM_MAP			10U
-#define GHCI_DW_VM_UNMAP		8U
-#define GHCI_DW_SESSION_OPEN		4U
+#define GHCI_DW_VM_MAP			16U
+#define GHCI_DW_VM_UNMAP		12U
+#define GHCI_DW_SESSION_OPEN		6U
 #define GHCI_DW_SESSION_CLOSE		2U
 #define GHCI_DW_BIND_SESSION		2U
+#define GHCI_DW_FAULT_LOG_SETUP		7U
+#define GHCI_DW_VM_QUERY_PT_MEM		5U
+#define GHCI_DW_MMU_ENABLE		6U
 #define GHCI_DW_QUERY_CAPS		5U
 #define GHCI_DW_BIND_PIPELINE		3U
 #define GHCI_DW_BIND_INDEX_BUFFER	4U
@@ -111,15 +119,17 @@
 
 /*
  * CMD_QUERY_CAPS: the address and the size of the buffer the capability
- * block is written to are whole 64-byte lines, and the size is at most
- * the block's 768 bytes.
+ * block is written to are whole 64-byte lines, at least one; the driver
+ * asks for no more than the largest block, 1152 bytes (32 + 255 dwords,
+ * in whole lines).
  *
- * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 7.3,
- * CMD_QUERY_CAPS: five dwords, dst_pa and dst_bytes on 64 bytes,
- * dst_bytes at most 768).
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+ * CMD_QUERY_CAPS: five dwords, dst_pa on 64 bytes, dst_bytes >= 64 in
+ * whole 64 bytes, min(dst_bytes, 4 * CAP_DWORDS) bytes written; section
+ * 3.2.5, FMT_COUNT at most 255).
  */
 #define GHCI_QUERY_CAPS_ALIGN		64U
-#define GHCI_QUERY_CAPS_BYTES_MAX	768U
+#define GHCI_QUERY_CAPS_BYTES_MAX	1152U
 
 /* The vertex buffer bindings, the constant bank and its words per load. */
 #define GHCI_VERTEX_BINDINGS		16U
@@ -139,6 +149,54 @@
 #define GHCI_VM_FLAG_COHERENT		(1U << 3)
 #define GHCI_VM_FLAG_WC			(1U << 4)
 #define GHCI_VM_FLAG_LOCAL		(1U << 5)
+
+/*
+ * The records the page-table commands write to host memory: CMD_VM_MAP's
+ * completion (32 bytes on 32), CMD_VM_UNMAP's (a 16-byte header and
+ * 16-byte entries of the intermediate tables it gave back, in a buffer
+ * of whole 64 bytes, at least one), CMD_VM_QUERY_PT_MEM's sizes (64
+ * bytes on 64), and the 32-byte fault records of the fault log ring
+ * (on 32 bytes, a power of two of at least two of them).
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+ * GhciVmMapComp: status, used_bytes, required_bytes, required_align;
+ * GhciVmUnmapComp: status, freed_count, written_count, required_bytes and
+ * {pa, bytes} entries; GhciVmPtMemInfo at 0x08 init_pt_bytes, 0x0C
+ * init_pt_align, 0x10 table_page_bytes, 0x14 table_page_align;
+ * CMD_FAULT_LOG_SETUP flags [0] ENABLE and [8] COMP_WRITE; section 10,
+ * GhciFaultRecord: seq, fault_addr, timestamp, session_id,
+ * fault_info_word).
+ */
+#define GHCI_MAP_COMP_BYTES		32U
+#define GHCI_MAP_OK			0U
+#define GHCI_MAP_NEED_PT_MEM		1U
+#define GHCI_MAP_COLLISION		2U
+#define GHCI_MAP_INVALID_SESSION	3U
+#define GHCI_MAP_COMP_STATUS		0x00U
+#define GHCI_MAP_COMP_USED		0x04U
+#define GHCI_MAP_COMP_REQUIRED		0x08U
+#define GHCI_MAP_COMP_ALIGN		0x0CU
+#define GHCI_UNMAP_COMP_ALIGN		64U
+#define GHCI_UNMAP_OK			0U
+#define GHCI_UNMAP_NEED_BUF		1U
+#define GHCI_UNMAP_INVALID_SESSION	2U
+#define GHCI_UNMAP_COMP_STATUS		0x00U
+#define GHCI_UNMAP_COMP_FREED		0x04U
+#define GHCI_UNMAP_COMP_WRITTEN		0x08U
+#define GHCI_UNMAP_COMP_REQUIRED	0x0CU
+#define GHCI_UNMAP_COMP_ENTRIES		0x10U
+#define GHCI_UNMAP_ENTRY_BYTES		16U
+#define GHCI_PT_INFO_BYTES		64U
+#define GHCI_PT_INFO_INIT_BYTES		0x08U
+#define GHCI_PT_INFO_INIT_ALIGN		0x0CU
+#define GHCI_PT_INFO_TABLE_BYTES	0x10U
+#define GHCI_PT_INFO_TABLE_ALIGN	0x14U
+#define GHCI_FAULT_LOG_ENABLE		(1U << 0)
+#define GHCI_FAULT_RECORD_BYTES		32U
+#define GHCI_FAULT_RECORD_SEQ		0x00U
+#define GHCI_FAULT_RECORD_ADDRESS	0x08U
+#define GHCI_FAULT_RECORD_SESSION	0x18U
+#define GHCI_FAULT_RECORD_INFO		0x1CU
 
 /*
  * Values referenced: amaterrace-gpu 93a7ac06 ghci.md
@@ -520,11 +578,31 @@ struct ghci_render_pass_desc {
 	uint64_t clear_table;
 };
 
+/*
+ * What one CMD_VM_MAP says: the session, the access flags, the GPU
+ * address, the bus or local address and the bytes of the pages, the
+ * memory given for intermediate page tables (none when pt_bytes is 0),
+ * and where the completion record is written.
+ */
+struct ghci_map_args {
+	uint32_t session;
+	uint32_t flags;
+	uint64_t va;
+	uint64_t bus;
+	uint64_t bytes;
+	uint64_t pt;
+	uint32_t pt_bytes;
+	uint64_t comp;
+};
+
 uint32_t ghci_cmd_header(uint32_t opcode, uint32_t dwords, uint32_t flags);
 uint32_t ghci_cmd_nop(uint32_t *out, uint32_t dwords);
-uint32_t ghci_cmd_vm_map(uint32_t *out, uint32_t session, uint32_t flags, uint64_t va, uint64_t bus, uint64_t bytes);
-uint32_t ghci_cmd_vm_unmap(uint32_t *out, uint32_t session, uint64_t va, uint64_t bytes);
-uint32_t ghci_cmd_session_open(uint32_t *out, uint32_t session, uint32_t flags);
+uint32_t ghci_cmd_vm_map(uint32_t *out, const struct ghci_map_args *args);
+uint32_t ghci_cmd_vm_unmap(uint32_t *out, uint32_t session, uint64_t va, uint64_t bytes, uint64_t comp, uint32_t comp_bytes);
+uint32_t ghci_cmd_session_open(uint32_t *out, uint32_t session, uint32_t flags, uint64_t root, uint32_t root_bytes);
+uint32_t ghci_cmd_fault_log_setup(uint32_t *out, uint64_t ring, uint32_t entries);
+uint32_t ghci_cmd_vm_query_pt_mem(uint32_t *out, uint64_t bus, uint32_t bytes);
+uint32_t ghci_cmd_mmu_enable(uint32_t *out, uint64_t root, uint32_t root_bytes);
 uint32_t ghci_cmd_session_close(uint32_t *out, uint32_t session);
 uint32_t ghci_cmd_bind_session(uint32_t *out, uint32_t session);
 uint32_t ghci_cmd_query_caps(uint32_t *out, uint64_t bus, uint32_t bytes);
