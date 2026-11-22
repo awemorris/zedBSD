@@ -29,20 +29,28 @@ own path, never from the current directory).
 | --- | --- | --- |
 | `mikuterm.exe` | the ZIP | the program |
 | `README.txt` | the ZIP | the user's guide |
-| `config\mikuterm.conf` | the user, and the settings tab in place of a keyword's line | the settings (section 3); the ZIP has a commented sample |
-| `config\state.conf` | mikuterm | what the View menu and the settings tab chose at once: `FontSize`, `Theme`, `AmbiguousWide`, `CopyOnSelect` |
-| `ssh\config` | the user (also from the settings tab) | the hosts, in `ssh_config(5)` form (section 4) |
-| `ssh\id_ed25519` | the user, or the settings tab's Make Key | the private key (section 4.3) |
-| `ssh\known_hosts` | mikuterm | the hosts' keys the user accepted (section 6) |
-| `fonts\` | the user | the user's fonts, found before `share\fonts\` |
-| `share\fonts\` | the ZIP | `keiland.ttf`, `keiland-bold.ttf`, `keiland-mono.ttf` (Mahora), `keiland-fallback-mono.ttf` (JetBrains Mono), `keiland-fallback.ttf` (Droid Sans Fallback), `keiland-emoji.ttf` (Noto Color Emoji) |
-| `share\licenses\` | the ZIP | the licenses of the program and of each font |
+| `config/mikuterm.conf` | the user, and the settings tab in place of a keyword's line | the settings (section 3); the ZIP has a commented sample |
+| `config/state.conf` | mikuterm | what the View menu and the settings tab chose at once: `FontSize`, `Theme`, `AmbiguousWide`, `CopyOnSelect` |
+| `ssh/config` | the user (also from the settings tab) | the hosts, in `ssh_config(5)` form (section 4) |
+| `ssh/id_ed25519` | the user, or the settings tab's Make Key | the private key (section 4.3) |
+| `ssh/known_hosts` | mikuterm | the hosts' keys the user accepted (section 6) |
+| `fonts/` | the user | the user's fonts, found before `share/fonts/` |
+| `share/fonts/` | the ZIP | `keiland.ttf`, `keiland-bold.ttf`, `keiland-mono.ttf` (Mahora), `keiland-fallback-mono.ttf` (JetBrains Mono), `keiland-fallback.ttf` (Droid Sans Fallback), `keiland-emoji.ttf` (Noto Color Emoji) |
+| `share/licenses/` | the ZIP | the licenses of the program and of each font |
+
+mikuterm names a path with `/` between its folders wherever it shows one (the
+settings tab, a tab's messages and questions, the problems of
+`config/mikuterm.conf`): a file of the folder by its path inside it
+(`ssh/known_hosts`), any other by its whole path (`C:/Users/me/known_hosts`).
+Windows takes `/` and `\` alike, so a path shown opens the same file when it is
+typed or pasted; this document writes paths the same way. The paths mikuterm
+opens are its own and are not changed by how they are shown.
 
 A folder mikuterm cannot write in still runs: the View menu's choices are not
 kept and a host's accepted key is accepted for that connection only (the tab
 says so).
 
-## 3. `config\mikuterm.conf`
+## 3. `config/mikuterm.conf`
 
 One `Keyword value` (or `Keyword=value`) a line, keywords in any case, `#`
 starting a comment, a value in double quotes may hold spaces; the first line
@@ -51,19 +59,25 @@ of a keyword counts. A line that cannot be used is named in the first tab
 
 | Keyword | Value | Default |
 | --- | --- | --- |
-| `Font` | a font file in `fonts\` or `share\fonts\`, or a full path | `keiland-mono.ttf` |
+| `Font` | a font file in `fonts/` or `share/fonts/`, or a full path | `keiland-mono.ttf` |
 | `FontFallback` | the font for the characters `Font` has not (one file) | `keiland-fallback.ttf` |
 | `FontSize` | pixels at 96 dpi, 8 to 32 | 16 |
 | `Columns`, `Rows` | the grid the window opens with (1 to 240, 1 to 100) | 90, 28 |
 | `Theme` | `dark`, `light`, `contrast` | `dark` |
 | `AmbiguousWide` | `yes`, `no`: East Asian Ambiguous characters take two cells | `no` |
 | `Term` | the `TERM` sent to the host | `xterm-256color` |
-| `Connect` | the host the first tab connects to (a `Host` of `ssh\config`, or `[user@]host[:port]`) | none: the first tab lists the hosts |
+| `Connect` | the host the first tab connects to (a `Host` of `ssh/config`, or `[user@]host[:port]`) | none: the first tab lists the hosts |
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
-| `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh\config`'s wins) | 15 |
-| `WslPort` | the port on `localhost` of the sshd in WSL, for a distribution without a `Host wsl-NAME` in `ssh\config` (1 to 65535) | 2222 |
+| `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh/config`'s wins) | 15 |
+| `WslPort` | the port on `localhost` of the sshd in WSL, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 2222 |
 
-`config\state.conf` has the same form and only `FontSize`, `Theme`,
+A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
+server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
+root of the current drive (`/Windows/...`, `\Windows\...`) or a drive without
+a separator after it (`C:x.ttf`) among them, is a name in `fonts/` or
+`share/fonts/`.
+
+`config/state.conf` has the same form and only `FontSize`, `Theme`,
 `AmbiguousWide` and `CopyOnSelect`; its values win over `mikuterm.conf`'s.
 Deleting it returns to `mikuterm.conf`.
 
@@ -74,7 +88,7 @@ comment is kept as it was, a keyword without a line is added at the end, and
 an empty value removes the line so the default holds. A value is checked as
 the file would be read before it is written.
 
-## 4. `ssh\config`
+## 4. `ssh/config`
 
 ### 4.1 Keywords
 
@@ -89,7 +103,7 @@ zedBSD's `ssh`:
 - Accepted only with a value that changes nothing (for example
   `HashKnownHosts no`, `ForwardAgent no`).
 - Anything else, `Match`, `Include` and `ProxyJump` among them, is an error:
-  the tab shows `ssh\config: line N: ...` and does not connect. A
+  the tab shows `ssh/config: line N: ...` and does not connect. A
   `~/.ssh/config` copied from Linux may need such lines taken out.
 
 `Host` patterns (`*`, `?`, `!`) select the lines that apply. The names
@@ -99,11 +113,11 @@ without a pattern character are the list a new tab shows.
 
 | Written | Means |
 | --- | --- |
-| `~/.ssh/X` | `<folder>\ssh\X` |
-| `~/X` | `<folder>\X` |
-| `X`, `dir/X` | `<folder>\ssh\X`, `<folder>\ssh\dir\X` |
-| `C:\...`, `\\server\...` | as written |
-| `/...` | no file on Windows (`/dev/null` keeps nothing, section 6) |
+| `~/.ssh/X` | `<folder>/ssh/X` |
+| `~/X` | `<folder>/X` |
+| `X`, `dir/X` | `<folder>/ssh/X`, `<folder>/ssh/dir/X` |
+| `C:/...`, `//server/share/...` (or with `\`) | as written |
+| any other `/...` (`//name` with no `/` after it too) | no file on Windows (`/dev/null` keeps nothing, section 6) |
 
 The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
 `UserKnownHostsFile ~/.ssh/known_hosts`, and `GlobalKnownHostsFile
@@ -141,7 +155,7 @@ Hosts:
 
 - The first line is the program's name and version. A notice of
   `mikuterm.conf`'s problems (the first tab's) comes under it.
-- `Hosts:` lists the names of `ssh\config`'s `Host` lines (the ones without
+- `Hosts:` lists the names of `ssh/config`'s `Host` lines (the ones without
   `*`, `?` or `!`, each once, at most 32), numbered from 1, shown as
   `USER@NAME` when the host's settings give a `User`; then `[w] WSL` and
   `[x] Settings`.
@@ -156,7 +170,7 @@ Hosts:
   puts the chosen row's text back.
 - Enter opens the chosen row, or the row whose text the line is; any other
   line is a host typed by hand, `[user@]host[:port]` (an IPv6 address in
-  brackets), or a `Host` of `ssh\config` by name. An empty line does
+  brackets), or a `Host` of `ssh/config` by name. An empty line does
   nothing. A name that starts with a digit, `w` or `x` is typed after
   Ctrl+U.
 - `[x] Settings` opens the settings tab beside this one (section 7); this
@@ -170,7 +184,7 @@ Hosts:
   is shown) or does not answer in time, the hosts' screen says so.
 - A distribution chosen is started with `wsl.exe -d NAME -e whoami` (at most
   60 seconds; it also starts an sshd systemd runs in it) and reached by SSH:
-  through `ssh\config`'s `Host wsl-NAME` (the name in any case) with all that
+  through `ssh/config`'s `Host wsl-NAME` (the name in any case) with all that
   Host's settings, or else at `localhost` on `WslPort`. The user is the
   Host's `User`, else the user `whoami` answered, else `login as:` asks. The
   distributions of WSL 2 share one network, so each needs its own port (and
@@ -194,7 +208,7 @@ OpenSSH's `ssh` where it has the same question:
 `NAME` is the host as known_hosts names it (`host`, or `[host]:port` for a
 port other than 22, in lower case); `ADDRESS` is the address reached, in the
 same form. A file inside the folder is shown by its path in the folder
-(`ssh\known_hosts`).
+(`ssh/known_hosts`).
 
 While a question asks for a secret (a passphrase, the password), the tab's input does not
 echo and the window's input method is off. A password a program on the host
@@ -226,7 +240,7 @@ A connection that ends normally closes its tab. One that fails shows why
 - Written: when the user accepts a key (or `StrictHostKeyChecking` is
   `accept-new` or `no`), one line is appended to the user's file:
   `NAME ssh-ed25519 KEY`, the name in lower case, never hashed
-  (`HashKnownHosts yes` is an error in `ssh\config`). The line is written in
+  (`HashKnownHosts yes` is an error in `ssh/config`). The line is written in
   one write, so two mikuterm windows appending at once keep both lines whole.
   A file whose last line has no line feed gets one before the new line. A
   missing file is created, and a missing directory one level above it too.
@@ -249,37 +263,48 @@ of libkeiland's widgets with a sidebar of four panes; Ctrl+Down or Ctrl+Page
 Down shows the next pane and Ctrl+Up or Ctrl+Page Up the one before, Tab moves
 between a pane's controls. Ctrl+Up and Ctrl+Down are the keys that work in
 zedBSD's terminal as well, whose desktop takes Ctrl+Page Up and Ctrl+Page Down
-for the titlebar's tabs. The page
-is drawn at the screen's pixels (it does not follow the screen's scale).
+for the titlebar's tabs. The page follows the window's scale (the monitor's
+dpi), as the grid does.
+
+Each card's rows put their labels in one column, as wide as the pane's widest
+label (within a least and a most), and the row's field, switch or buttons right
+after it; a field is at most 420 units (pixels at 100 %) wide, so a wide window
+does not stretch it.
 
 | Pane | Setting | Takes effect | Kept in |
 | --- | --- | --- | --- |
-| Hosts | `ssh\config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh\config` |
-| Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config\state.conf` |
-| Appearance | `Font`, `FontFallback` (a file in `fonts\` or `share\fonts\`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config\mikuterm.conf` |
-| Behavior | copy-on-select | at once | `config\state.conf` |
-| Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config\mikuterm.conf` |
-| Behavior | `Connect` | the next start | `config\mikuterm.conf` |
-| Keys | a new key, a key's public key, `ssh\known_hosts` | at once | `ssh\` |
+| Hosts | `ssh/config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh/config` |
+| Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
+| Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
+| Behavior | copy-on-select | at once | `config/state.conf` |
+| Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config/mikuterm.conf` |
+| Behavior | `Connect` | the next start | `config/mikuterm.conf` |
+| Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
 
 Keys pane:
 
-- Name: the key's file name in `ssh\` (letters, digits, `.`, `_`, `-`; not
+- Name: the key's file name in `ssh/` (letters, digits, `.`, `_`, `-`; not
   starting with `.` or ending with `.pub`; `id_ed25519` by default). When a
   key of the name is there, its public key line and SHA256 fingerprint are
   shown (from `NAME.pub`, or from the private key file's public half), with
   Copy Public Key.
 - Otherwise Comment (`user@computer` by default), Passphrase and Again, and
   Make Key: a new `ssh-ed25519` key from the system's random generator
-  (`BCryptGenRandom`), written as `ssh\NAME` (OpenSSH's private key format;
+  (`BCryptGenRandom`), written as `ssh/NAME` (OpenSSH's private key format;
   with a passphrase encrypted with `aes256-ctr` under the `bcrypt` KDF, a
-  16-byte salt and 24 rounds, as `ssh-keygen` writes it) and `ssh\NAME.pub`
+  16-byte salt and 24 rounds, as `ssh-keygen` writes it) and `ssh/NAME.pub`
   (the one-line public key). A file of either name that is there is never
   written over. The private key file is made with a protected access list
   that gives only the user who runs mikuterm access to it.
-- Known hosts: each line of `ssh\known_hosts` with its names, key type and
+- Known hosts: each line of `ssh/known_hosts` with its names, key type and
   fingerprint, and a button that removes the line (asked once more); the
   file is written whole without it.
+
+zedBSD's terminal has the same tab with its own files and settings in place
+of the folder's: `~/.ssh/`, and Font, Fallback font, Columns, Rows and TERM
+kept in the desktop's settings ([Terminal](terminal.md), section 3). The
+settings that only connections have (`ConnectTimeout`, `WslPort`, `Connect`)
+are mikuterm's alone.
 
 ## 8. Menus
 
@@ -300,7 +325,7 @@ opens the settings.
 ## 9. Licenses
 
 `mikuterm.exe` is Awe Morris's work under the zlib license. The fonts in
-`share\fonts\` are their authors' works under their own licenses (SIL Open
-Font License 1.1, Apache License 2.0, Mahora's), each in `share\licenses\`.
+`share/fonts/` are their authors' works under their own licenses (SIL Open
+Font License 1.1, Apache License 2.0, Mahora's), each in `share/licenses/`.
 The terminal's East Asian width table derives from the Unicode Character
 Database (`Unicode-License-V3.txt`).

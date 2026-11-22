@@ -9,7 +9,8 @@
  * The client side of one SSH connection as a state machine that does no
  * I/O: the transport (RFC 4253), the user authentication (RFC 4252: "none",
  * then "publickey" with each identity, then "password"), and one session
- * channel (RFC 4254 6) with or without a pseudo-terminal.
+ * channel (RFC 4254 6) with or without a pseudo-terminal, and the X11
+ * connections the server forwards on it (RFC 4254 6.3).
  *
  * The caller owns the socket, the clock, the files and the user.  It
  * feeds the bytes it reads with ssh_engine_input (none at all, size 0,
@@ -41,6 +42,25 @@
  * ssh_engine_consumed, so the server stops when the caller falls behind
  * and the caller never holds more than one and a half windows
  * (SSH_CHANNEL_WINDOW).
+ *
+ * X11 forwarding (options x11): the session asks for it with x11-req
+ * after its terminal and before the shell or the command, giving the
+ * caller's fake MIT-MAGIC-COOKIE-1, which the server hands its X clients
+ * (through xauth) and the caller's X server checks.  The answer comes as
+ * SSH_ENGINE_X11_REPLY; a refusal ends nothing.  Once the server accepted
+ * it, each "x11" channel the server opens for an X client is shown as
+ * SSH_ENGINE_X11_OPEN and waits for ssh_engine_x11_answer; before that
+ * answer, on a connection that did not ask, and after the session channel
+ * closed, the open is refused (administratively prohibited).  An X11
+ * channel carries its bytes both ways with the channel calls below
+ * (ssh_engine_channel_write, ssh_engine_channel_consumed,
+ * ssh_engine_channel_eof, ssh_engine_channel_close); its window is
+ * SSH_ENGINE_X11_WINDOW and, as for the session, given back only for what
+ * the caller reported used, so a caller that passes the bytes on to an X
+ * server reports them as the server takes them and the X client stops
+ * when the server falls behind.  When the session channel closes while
+ * X11 channels are open, the connection stays until the last of them
+ * closed (as OpenSSH's client waits for forwarded connections to end).
  */
 
 #ifndef SSH_SSH_CLIENT_ENGINE_H
@@ -67,6 +87,18 @@
 /* The longest text of an event's reason. */
 #define SSH_ENGINE_REASON_MAX		(SSH_TRANSPORT_REASON_MAX + SSH_ENGINE_METHODS_MAX)
 
+/* The number of the session channel in the channel calls and events (the first channel opened). */
+#define SSH_ENGINE_SESSION_CHANNEL	0U
+
+/* The window of an X11 channel (128 KiB): what the caller holds of one is at most one and a half of it. */
+#define SSH_ENGINE_X11_WINDOW		(128U * 1024U)
+
+/* The length of the fake MIT-MAGIC-COOKIE-1 in hexadecimal digits (16 bytes). */
+#define SSH_ENGINE_X11_COOKIE_DIGITS	32U
+
+/* The longest originator address of an X11 channel kept for its event (a longer one is cut). */
+#define SSH_ENGINE_ADDRESS_MAX		64U
+
 /* What an event says. */
 enum ssh_engine_event_kind {
 	/*
@@ -92,10 +124,11 @@ enum ssh_engine_event_kind {
 	SSH_ENGINE_STARTED = 5,
 
 	/*
-	 * Data of the session (bytes, size; stream 0 for the output, 1 for the
+	 * Data of a channel (channel: SSH_ENGINE_SESSION_CHANNEL or an X11
+	 * channel; bytes, size; stream 0 for the output, 1 for the session's
 	 * error output).  The bytes stay valid until the next ssh_engine_next
 	 * or ssh_engine_close; the caller reports them used with
-	 * ssh_engine_consumed.
+	 * ssh_engine_consumed (the session) or ssh_engine_channel_consumed.
 	 */
 	SSH_ENGINE_DATA = 6,
 
@@ -103,7 +136,8 @@ enum ssh_engine_event_kind {
 	 * The session channel closed: exit_status is the command's status (-1
 	 * when the server sent none), exit_signal the signal that ended it
 	 * (empty when none), reason why the session failed (empty when it did
-	 * not).  The connection then ends with SSH_ENGINE_CLOSED.
+	 * not).  The connection then ends with SSH_ENGINE_CLOSED, at once, or
+	 * when the last X11 channel closed while any is open.
 	 */
 	SSH_ENGINE_EXIT = 7,
 
@@ -127,7 +161,32 @@ enum ssh_engine_event_kind {
 	 * passphrases did not open the file before.  The caller answers with
 	 * ssh_engine_passphrase.
 	 */
-	SSH_ENGINE_PASSPHRASE = 9
+	SSH_ENGINE_PASSPHRASE = 9,
+
+	/*
+	 * The server answered x11-req: accepted 1, or 0 with reason the line
+	 * OpenSSH's client shows ("X11 forwarding request failed on channel
+	 * 0"); the session goes on either way.
+	 */
+	SSH_ENGINE_X11_REPLY = 10,
+
+	/*
+	 * The server opens an X11 channel (channel) for an X client at
+	 * address and port (the originator, RFC 4254 6.3.2: text made safe,
+	 * cut to SSH_ENGINE_ADDRESS_MAX).  The caller answers with
+	 * ssh_engine_x11_answer; until then the channel carries nothing.
+	 */
+	SSH_ENGINE_X11_OPEN = 11,
+
+	/* The server sends no more data on an X11 channel (channel). */
+	SSH_ENGINE_CHANNEL_EOF = 12,
+
+	/*
+	 * An X11 channel (channel) closed both ways; its number may be given
+	 * to a later channel.  Bytes of it not yet reported used no longer
+	 * need reporting.
+	 */
+	SSH_ENGINE_CHANNEL_CLOSED = 13
 };
 
 /* What to do with a host key after looking it up (ssh_engine_host_decide). */
@@ -160,6 +219,7 @@ struct ssh_engine;
  */
 struct ssh_engine_event {
 	enum ssh_engine_event_kind kind;
+	uint32_t channel;
 	const uint8_t *bytes;
 	size_t size;
 	unsigned stream;
@@ -171,6 +231,9 @@ struct ssh_engine_event {
 	int error;
 	uint32_t code;
 	char reason[SSH_ENGINE_REASON_MAX];
+	int accepted;
+	char address[SSH_ENGINE_ADDRESS_MAX + 1];
+	unsigned port;
 };
 
 /*
@@ -197,7 +260,12 @@ struct ssh_engine_identity {
  * with exec; NULL or size 0 starts the shell.  alive_interval is
  * ssh_config(5)'s ServerAliveInterval in seconds (0 for none) and
  * alive_count its ServerAliveCountMax.  now_ms is the time of a monotonic
- * clock in milliseconds.
+ * clock in milliseconds.  x11 1 asks for X11 forwarding on the session
+ * (session must be 1) with x11_cookie, the fake MIT-MAGIC-COOKIE-1 as
+ * SSH_ENGINE_X11_COOKIE_DIGITS hexadecimal digits; x11_single 1 asks the
+ * server to forward one X client only (RFC 4254 6.3.1 "single
+ * connection"; OpenSSH's client asks for any number, 0) and refuses a
+ * second X11 channel.
  */
 struct ssh_engine_options {
 	const char *user;
@@ -219,6 +287,9 @@ struct ssh_engine_options {
 	unsigned alive_interval;
 	unsigned alive_count;
 	uint64_t now_ms;
+	int x11;
+	const char *x11_cookie;
+	int x11_single;
 };
 
 /*
@@ -303,6 +374,44 @@ int ssh_engine_write(struct ssh_engine *engine, const uint8_t *bytes, size_t siz
 
 /* Reports size bytes of SSH_ENGINE_DATA used, so that the window may be given back. */
 void ssh_engine_consumed(struct ssh_engine *engine, size_t size);
+
+/*
+ * Answers SSH_ENGINE_X11_OPEN for channel: accept 1 opens it (its window
+ * SSH_ENGINE_X11_WINDOW), 0 refuses it (connect failed) and frees its
+ * number.  Returns 0, EINVAL when channel waits for no answer, or EPIPE
+ * after the connection ended.
+ */
+int ssh_engine_x11_answer(struct ssh_engine *engine, uint32_t channel, int accept);
+
+/*
+ * Sends bytes on a channel: SSH_ENGINE_SESSION_CHANNEL as
+ * ssh_engine_write, or an open X11 channel; *written receives how many of
+ * size bytes went (0 while the server's window or the output is full, and
+ * after this side's EOF or close or the server's close).  Returns 0,
+ * EINVAL (no such channel), or EPIPE after the connection ended.
+ */
+int ssh_engine_channel_write(struct ssh_engine *engine, uint32_t channel, const uint8_t *bytes, size_t size, size_t *written);
+
+/*
+ * Reports size bytes of SSH_ENGINE_DATA of channel used, as
+ * ssh_engine_consumed does for the session: the window is given back only
+ * for what was reported.  A channel no longer open is ignored.
+ */
+void ssh_engine_channel_consumed(struct ssh_engine *engine, uint32_t channel, size_t size);
+
+/*
+ * Says that this side sends no more data on channel
+ * (SSH_ENGINE_SESSION_CHANNEL as ssh_engine_eof).  Returns 0, EINVAL (no
+ * such channel) or EPIPE.
+ */
+int ssh_engine_channel_eof(struct ssh_engine *engine, uint32_t channel);
+
+/*
+ * Closes an X11 channel (not the session's): the server's close coming
+ * back ends it with SSH_ENGINE_CHANNEL_CLOSED, and data arriving before
+ * that is dropped.  Returns 0, EINVAL (not an open X11 channel) or EPIPE.
+ */
+int ssh_engine_channel_close(struct ssh_engine *engine, uint32_t channel);
 
 /*
  * Gives the terminal's new size, sent at once when the session has its

@@ -83,7 +83,9 @@ struct terminal_page_item {
  * the program takes a setting of the next connection at once).  comment
  * is the comment a new key gets (user@host).  font names the font the
  * terminal draws with, for a program without a Font setting (NULL: none
- * shown).  data is the program's own, given to every call.
+ * shown).  connection is the word for what a setting of the next
+ * connection waits for ("tab" for a program whose tabs are shells; NULL:
+ * "connection").  data is the program's own, given to every call.
  */
 struct terminal_page_program {
 	const char *config_path;
@@ -103,6 +105,7 @@ struct terminal_page_program {
 	int (*item_set)(void *data, const char *keyword, const char *value, char *why, size_t size);
 	const char *comment;
 	const char *font;
+	const char *connection;
 	void *data;
 };
 

@@ -10,7 +10,8 @@
  * library's known_hosts check answers: the names a host goes by in
  * known_hosts ([host]:port for a port other than 22, in lower case), the
  * line that holds the key a changed host had, the other names the same
- * key is known by, and how a file of the folder is named on the screen.
+ * key is known by, which paths are Windows' own and how a path is named on
+ * the screen.
  *
  * The known_hosts text is OpenSSH's (sshd(8) SSH_KNOWN_HOSTS FILE
  * FORMAT): one "[marker] names key-type key [comment]" a line.  As the
@@ -28,6 +29,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 
 /* What a hashed name is shown as, since the name itself cannot be read back. */
 #define KNOWN_HASHED_NAME	"(a hashed name)"
@@ -220,9 +222,77 @@ mikuterm_known_hosts_scan(
 }
 
 /*
- * Writes how a file of the folder is named to the user: its path inside
- * the folder ("ssh\known_hosts") when it is there, its whole path
- * otherwise, with backslashes either way.
+ * Tells whether a path is a Windows path from a drive or a server (1) or
+ * not (0): a drive's letter, its colon and a separator (C:\..., C:/...);
+ * two backslashes (\\server\...); or two slashes, a server's name and a
+ * separator after it (//server/share/..., as mikuterm shows a server's
+ * path).  Two slashes with no name, or no separator after the name, are a
+ * POSIX path from the root ("//etc" is "/etc"), not a server's.
+ */
+int
+mikuterm_path_absolute(
+	const char *path)
+{
+	size_t index;
+
+	/* A drive's letter, its colon and a separator. */
+	if (((path[0] >= 'A' &&
+	      path[0] <= 'Z') ||
+	     (path[0] >= 'a' &&
+	      path[0] <= 'z')) &&
+	    path[1] == ':' &&
+	    (path[2] == '\\' ||
+	     path[2] == '/'))
+		return 1;
+
+	/* A server's share, written with backslashes. */
+	if (path[0] == '\\' && path[1] == '\\')
+		return 1;
+
+	/* With slashes: the server's name runs to the second separator, which must be there. */
+	if (path[0] != '/' || path[1] != '/')
+		return 0;
+	for (index = 2U; path[index] != '\0'; index++) {
+		/* The separator after the name. */
+		if (path[index] == '/' || path[index] == '\\')
+			return index > 2U;
+	}
+
+	/* A name with nothing after it is not a server's path. */
+	return 0;
+}
+
+/*
+ * Tells where a path's directory ends: the place of its last separator (a
+ * slash or a backslash, as Windows takes either), or 0 when it has none or
+ * only the first character is one (a path with no directory to make).
+ */
+size_t
+mikuterm_path_directory(
+	const wchar_t *path)
+{
+	size_t directory;
+	size_t index;
+
+	/* The last separator. */
+	directory = 0U;
+	for (index = 0U; path[index] != L'\0'; index++) {
+		/* A separator of either kind. */
+		if (path[index] == L'/' || path[index] == L'\\')
+			directory = index;
+	}
+
+	/* Succeeded: where the directory ends. */
+	return directory;
+}
+
+/*
+ * Writes a path as the user is shown it, the one way every path mikuterm
+ * shows goes: its part inside the folder ("ssh/known_hosts") when it is
+ * there, as it is otherwise (a name already inside the folder, such as
+ * "ssh/config", or a path elsewhere on Windows), with slashes between its
+ * names either way.  Windows takes a slash as a backslash, so a path shown
+ * can be opened as it reads; the path mikuterm opens is not changed.
  */
 void
 mikuterm_path_shown(
@@ -247,12 +317,12 @@ mikuterm_path_shown(
 	     path[folder_length] == '/'))
 		inside = path + folder_length + 1U;
 
-	/* That part, with Windows' separators. */
+	/* That part, with slashes. */
 	(void)snprintf(shown, size, "%s", inside);
 	for (index = 0U; shown[index] != '\0'; index++) {
-		/* A slash is a backslash. */
-		if (shown[index] == '/')
-			shown[index] = '\\';
+		/* A backslash is a slash. */
+		if (shown[index] == '\\')
+			shown[index] = '/';
 	}
 }
 

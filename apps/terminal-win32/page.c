@@ -128,11 +128,11 @@ mikuterm_page_init(
 	/* The tab's program. */
 	memset(&page_state.program, 0, sizeof(page_state.program));
 	page_state.program.config_path = page_state.config;
-	page_state.program.config_shown = "ssh\\config";
+	page_state.program.config_shown = "ssh/config";
 	page_state.program.key_directory = page_state.keys;
-	page_state.program.key_directory_shown = "ssh\\";
+	page_state.program.key_directory_shown = "ssh/";
 	page_state.program.known_hosts_path = page_state.known_hosts;
-	page_state.program.known_hosts_shown = "ssh\\known_hosts";
+	page_state.program.known_hosts_shown = "ssh/known_hosts";
 	page_state.program.read = page_read;
 	page_state.program.replace = page_replace;
 	page_state.program.create = page_create;
@@ -384,7 +384,7 @@ page_item_set(
 		if (error == 0)
 			exists = mikuterm_file_exists(path);
 		if (!exists) {
-			(void)snprintf(why, size, "there is no such font in fonts\\ or share\\fonts\\");
+			(void)snprintf(why, size, "there is no such font in fonts/ or share/fonts/");
 			return EINVAL;
 		}
 	}
@@ -397,7 +397,7 @@ page_item_set(
 	text_size = 0U;
 	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &text_size);
 	if (error != 0 && error != ENOENT) {
-		(void)snprintf(why, size, "config\\mikuterm.conf could not be read (errno %d)", error);
+		(void)snprintf(why, size, "config/mikuterm.conf could not be read (errno %d)", error);
 		return error;
 	}
 
@@ -412,7 +412,7 @@ page_item_set(
 	error = mikuterm_file_replace(path, made, made_size);
 	free(made);
 	if (error != 0) {
-		(void)snprintf(why, size, "config\\mikuterm.conf could not be written (errno %d)", error);
+		(void)snprintf(why, size, "config/mikuterm.conf could not be written (errno %d)", error);
 		return error;
 	}
 

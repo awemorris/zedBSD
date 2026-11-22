@@ -192,9 +192,10 @@ wWinMain(
 }
 
 /*
- * Finds a font named in the settings: a Windows path as it is, else the
- * user's fonts\ folder, else the program's share\fonts\.  Returns 0 or
- * ENAMETOOLONG.
+ * Finds a font named in the settings: a Windows path from a drive or a
+ * server (mikuterm_path_absolute: C:/..., //server/share/..., or with
+ * backslashes) as it is, else the user's fonts\ folder, else the
+ * program's share\fonts\.  Returns 0 or ENAMETOOLONG.
  */
 int
 mikuterm_font(
@@ -204,14 +205,14 @@ mikuterm_font(
 {
 	char inside[MIKUTERM_PATH_MAX];
 	size_t length;
+	int absolute;
 	int exists;
 	int error;
 
 	/* A path from a drive or a server. */
 	length = strlen(name);
-	if (name[0] == '\\' ||
-	    (name[0] != '\0' &&
-	     name[1] == ':')) {
+	absolute = mikuterm_path_absolute(name);
+	if (absolute) {
 		if (length + 1U > size)
 			return ENAMETOOLONG;
 		memcpy(path, name, length + 1U);
@@ -243,6 +244,7 @@ main_read_conf(
 	struct mikuterm_conf *conf)
 {
 	char path[MIKUTERM_PATH_MAX];
+	char shown[sizeof(MAIN_CONF)];
 	char *text;
 	size_t size;
 	int error;
@@ -258,7 +260,8 @@ main_read_conf(
 	if (error == ENOENT)
 		return;
 	if (error != 0) {
-		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
+		mikuterm_path_shown(MAIN_CONF, shown, sizeof(shown));
+		(void)snprintf(conf->problems, sizeof(conf->problems), "%s could not be read (errno %d).\r\n", shown, error);
 		return;
 	}
 

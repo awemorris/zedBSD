@@ -302,6 +302,36 @@ ssh_client_apply_args(
 }
 
 /*
+ * Refuses the settings that ask for what the program does not do.
+ */
+int
+ssh_client_check_settings(
+	const struct ssh_config *config,
+	char *error)
+{
+	/* X11 forwarding is not done. */
+	if (config->forward_x11) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "ForwardX11 yes is not supported");
+		return EINVAL;
+	}
+
+	/* The trust of X11 forwarding and its time limit mean nothing without it. */
+	if (config->forward_x11_trusted) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "ForwardX11Trusted yes is not supported");
+		return EINVAL;
+	}
+
+	/* A time limit on X11 channels is refused too (0 is no limit). */
+	if (config->forward_x11_timeout != 0) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "ForwardX11Timeout is not supported");
+		return EINVAL;
+	}
+
+	/* Succeeded: every setting is one the program acts on or leaves off. */
+	return 0;
+}
+
+/*
  * Adds one setting to the list, refusing more than the list holds.
  */
 static int
