@@ -27,13 +27,14 @@
  *
  * What the packets read (tables, descriptions, clear colours, index
  * lists, data) is written to temporary memory of the device's data heap,
- * which goes back once the submission's ticket has passed.  A
- * submission never grows a heap (a growth maps a block and waits for the
- * GPU): the end of each primary command buffer converts it once without
- * placing anything, which places the transfer programs it needs and
- * makes its temporary memory ready (ghci_vk_execute_prepare()); a
- * submission that finds no room ready is refused with
- * VK_ERROR_OUT_OF_DEVICE_MEMORY.
+ * which goes back once the submission's ticket has passed.  The end of
+ * each primary command buffer makes ready what its submissions take
+ * (ghci_vk_execute_prepare()): the transfer programs it needs are
+ * placed, and room for its temporary memory is made in the data heap,
+ * so that a submission seldom grows a heap (a growth maps a block, and
+ * the map waits for the work placed before it).  A submission that
+ * finds no room ready, because more of them are in flight than were
+ * made ready, grows the heap and waits for that map.
  *
  * A command that cannot be run as recorded is refused in one of two
  * ways: a draw or a dispatch whose pipeline, sets, buffers or dynamic
@@ -335,11 +336,10 @@ struct event_write {
  * the dword the first of them begins at), the command buffer's state as
  * a multiview pass began (view_state, which each view starts from), the
  * hardware tables of the bind being made, the events written, and the
- * first error, which refuses the submission.  grow says that the
- * conversion may grow the executor heaps, which waits for the GPU (the
- * end of a command buffer and a clear of new memory may, a submission
- * may not), and quiet that the log shows nothing of it (the conversion
- * at the end of a command buffer, which its submission repeats).
+ * first error, which refuses the submission.  quiet says that the log
+ * shows nothing of it (the conversion at the end of a command buffer),
+ * and skipped that a command was skipped (a buffer with one is not
+ * baked, so that its submissions show the skip).
  */
 struct exec {
 	struct ghci_vk_session *session;
@@ -356,11 +356,14 @@ struct exec {
 	struct ghci_vk_tables tables;
 	struct event_write events[EVENTS_MAX];
 	uint32_t event_count;
-	int grow;
 	int quiet;
+	int skipped;
 	int error;
 };
 
+static int buffer_bake(struct ghci_vk_session *session, struct ghci_vk_command_buffer *commands, const struct exec *exec, struct ghci_vk_submission *measured);
+static void buffer_prepare(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_vk_command_buffer *commands, struct ghci_vk_submission *measured);
+static void buffer_place(struct exec *exec, struct ghci_vk_object *object);
 static int buffer_convert(struct exec *exec, struct ghci_vk_object *object, int secondary);
 static void buffer_state_reset(struct buffer_state *state);
 static void buffer_state_dirty(struct buffer_state *state);
@@ -495,14 +498,6 @@ ghci_vk_execute(
 	exec->device = device;
 	exec->submission = submission;
 
-	/*
-	 * A submission takes only the executor heap room that is there: a
-	 * growth would map a block and wait for the map's record, which comes
-	 * only after the work placed before it, and vkQueueSubmit does not
-	 * wait for the GPU.
-	 */
-	exec->grow = 0;
-
 	/* The head: what the host wrote is seen. */
 	put(exec, words, ghci_cmd_barrier(words, 0U, 0U, GHCI_VK_HEAD_FLAGS));
 
@@ -514,7 +509,7 @@ ghci_vk_execute(
 				exec->error = EINVAL;
 				break;
 			}
-			(void)buffer_convert(exec, object, 0);
+			buffer_place(exec, object);
 		}
 	}
 
@@ -586,9 +581,6 @@ ghci_vk_execute_clear(
 	exec->submission = submission;
 	exec->state = state;
 
-	/* The allocation that asks for the clear may wait for the GPU, so the heaps may grow for it. */
-	exec->grow = 1;
-
 	/* The head: what the host wrote is seen. */
 	flags = GHCI_BARRIER_INVAL_ICACHE | GHCI_BARRIER_INVAL_TEX | GHCI_BARRIER_INVAL_L1_DATA | GHCI_BARRIER_INVAL_DESCRIPTOR;
 	put(exec, barrier_words, ghci_cmd_barrier(barrier_words, 0U, 0U, flags));
@@ -624,24 +616,18 @@ ghci_vk_execute_clear(
 }
 
 /*
- * Makes ready, as a primary command buffer's recording ends, the
- * executor heap room its submissions take (vkEndCommandBuffer may wait
- * for the GPU; vkQueueSubmit does not).  The buffer is converted as its
- * submission will convert it, with heaps that may grow: the driver's
- * transfer programs it needs are placed in the code heap, and its
- * temporary memory is taken of the data heap.  That is the buffer's
- * demand (PREPARED_COPIES times it for a buffer recorded for
- * simultaneous use, which may be in flight that many times), which
- * counts toward the device's prepared bytes until the buffer is recorded
- * again or freed.  While the buffer's runs are still taken, the further
- * copies of them and the other executable buffers' prepared bytes (in
- * chunks) are taken too, beside what the submissions in flight hold;
- * then everything goes back, and the data heap has the room ready.  A
- * submission that finds none (more in flight than prepared) is refused
- * with VK_ERROR_OUT_OF_DEVICE_MEMORY instead of waiting.  A conversion
- * the submission would refuse prepares what it took before the refusal,
- * and the submission reports the refusal.  Nothing reaches the log or
- * the ring.
+ * Makes ready, as a primary command buffer's recording ends, what its
+ * submissions take (vkEndCommandBuffer may wait for the GPU, and a
+ * submission seldom does).  The buffer is converted as its submission
+ * will convert it: the driver's transfer programs it needs are placed in
+ * the code heap, and its temporary memory is taken of the data heap.
+ * When the packets do not depend on what runs before the buffer in a
+ * submission (no event set or waited for, no cut, nothing skipped or
+ * refused), the buffer keeps them and the runs they read, and its
+ * submissions place those packets as they are (buffer_bake()).
+ * Otherwise the runs go back and the room is made ready for the
+ * submissions to convert it again (buffer_prepare()).  Nothing reaches
+ * the log or the ring.
  */
 void
 ghci_vk_execute_prepare(
@@ -651,20 +637,10 @@ ghci_vk_execute_prepare(
 {
 	struct ghci_vk_command_buffer *commands;
 	struct ghci_vk_submission measured;
-	struct ghci_vk_temp *runs;
 	struct exec *exec;
-	uint64_t demand;
-	uint64_t others;
-	uint64_t chunks;
-	uint64_t room;
-	uint32_t copies;
-	uint32_t capacity;
-	uint32_t copy;
-	uint32_t index;
-	uint32_t taken;
-	int error;
+	int baked;
 
-	/* The conversion's record: heaps that may grow, and nothing in the log. */
+	/* The conversion's record: nothing of it in the log. */
 	commands = &object->as.commands;
 	exec = kern_calloc(1U, sizeof(*exec));
 	if (exec == NULL)
@@ -673,66 +649,50 @@ ghci_vk_execute_prepare(
 	exec->session = session;
 	exec->device = device;
 	exec->submission = &measured;
-	exec->grow = 1;
 	exec->quiet = 1;
 
 	/* The buffer converted as its submission will be: its programs placed, its temporary memory taken. */
 	(void)buffer_convert(exec, object, 0);
+
+	/* Packets that stand on their own are the buffer's, with what they read. */
+	baked = buffer_bake(session, commands, exec, &measured);
 	kern_free(exec);
-
-	/*
-	 * The buffer's demand joins the device's prepared bytes; the buffer
-	 * gives it back when it is recorded again or freed.
-	 */
-	copies = 1U;
-	if (commands->simultaneous)
-		copies = PREPARED_COPIES;
-	demand = measured.temp_bytes * copies;
-	commands->demand = demand;
-	device->prepared += demand;
-	others = device->prepared - demand;
-
-	/* The records of the runs taken beside the buffer's own: its further copies, and chunks for the others. */
-	chunks = (others + TEMP_CHUNK_BYTES - 1U) / TEMP_CHUNK_BYTES;
-	if (chunks > PREPARED_CHUNKS_MAX)
-		chunks = PREPARED_CHUNKS_MAX;
-	capacity = (copies - 1U) * measured.temp_count + (uint32_t)chunks;
-	runs = NULL;
-	if (capacity != 0U) {
-		runs = kern_calloc(capacity, sizeof(*runs));
-		if (runs == NULL) {
-			ghci_vk_submission_end(device, &measured, NULL, 0);
-			return;
-		}
+	if (baked) {
+		ghci_vk_submission_end(device, &measured, NULL, 0);
+		return;
 	}
 
-	/* The buffer's further copies: the same runs again, while the first copy's are still taken. */
-	taken = 0U;
-	error = 0;
-	for (copy = 1U; copy < copies && error == 0; copy++) {
-		for (index = 0U; index < measured.temp_count; index++) {
-			error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, measured.temps[index].bytes, DESC_ALIGN, 1, &runs[taken].block, &runs[taken].offset);
-			if (error != 0)
-				break;
-			taken++;
-		}
-	}
-
-	/* The other executable buffers' prepared bytes, in chunks. */
-	room = 0U;
-	while (error == 0 && room < others && taken < capacity) {
-		error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, TEMP_CHUNK_BYTES, DESC_ALIGN, 1, &runs[taken].block, &runs[taken].offset);
-		if (error != 0)
-			break;
-		taken++;
-		room += TEMP_CHUNK_BYTES;
-	}
-
-	/* Every run is room again, ready for the submissions. */
-	for (index = 0U; index < taken; index++)
-		ghci_vk_heap_give(runs[index].block, runs[index].offset);
-	kern_free(runs);
+	/* The others: the room made ready for the submissions to convert the buffer again. */
+	buffer_prepare(session, device, commands, &measured);
 	ghci_vk_submission_end(device, &measured, NULL, 0);
+}
+
+/*
+ * Lets a command buffer's baked packets go: the runs they read go back
+ * once the device's last submission has passed (a submission in flight
+ * may still read them), and the packets' room and budget are freed.
+ */
+void
+ghci_vk_execute_unbake(
+	struct ghci_vk_device *device,
+	struct ghci_vk_command_buffer *commands)
+{
+	uint32_t index;
+
+	/* The runs, after the work placed until now. */
+	for (index = 0U; index < commands->baked_temp_count; index++)
+		ghci_vk_heap_retire(device, commands->baked_temps[index].block, commands->baked_temps[index].offset, NULL);
+
+	/* The packets and their budget. */
+	if (commands->baked_charged != 0U)
+		ghci_vk_budget_give(device->session, commands->baked_charged);
+	kern_free(commands->baked_words);
+	kern_free(commands->baked_temps);
+	commands->baked_words = NULL;
+	commands->baked_used = 0U;
+	commands->baked_temps = NULL;
+	commands->baked_temp_count = 0U;
+	commands->baked_charged = 0U;
 }
 
 /*
@@ -804,6 +764,180 @@ ghci_vk_submission_written(
 		object->as.event.written = *ticket;
 		object->as.event.gpu_written = 1;
 	}
+}
+
+/*
+ * Keeps a primary command buffer's packets from the conversion at its
+ * end (measured, with the record of that conversion in exec) when they
+ * stand on their own: the conversion refused nothing and skipped
+ * nothing, wrote and waited for no event, and made no cut (the device
+ * held no submission), so that a submission would make the same packets.
+ * The packets and the runs they read become the buffer's, and measured
+ * keeps nothing of them.  Returns 1 when the buffer is baked, 0 when it
+ * is not (measured is as it was).
+ */
+static int
+buffer_bake(
+	struct ghci_vk_session *session,
+	struct ghci_vk_command_buffer *commands,
+	const struct exec *exec,
+	struct ghci_vk_submission *measured)
+{
+	uint64_t charge;
+	int error;
+
+	/* A conversion refused, or one with a skip its submissions show. */
+	if (exec->error != 0)
+		return 0;
+	if (exec->skipped)
+		return 0;
+
+	/* Packets that depend on the events or the cuts of their submission. */
+	if (exec->event_count != 0U)
+		return 0;
+	if (measured->cut_count != 0U)
+		return 0;
+	if (measured->wait_count != 0U)
+		return 0;
+
+	/* The packets' room, taken of the session's budget. */
+	charge = (uint64_t)measured->capacity * 4U;
+	error = ghci_vk_budget_take(session, charge);
+	if (error != 0)
+		return 0;
+
+	/*
+	 * The packets and the runs are the buffer's now: the submission's
+	 * end gives back nothing of them, and the buffer lets them go when
+	 * it is recorded again, reset or freed (ghci_vk_execute_unbake()).
+	 */
+	commands->baked_words = measured->words;
+	commands->baked_used = measured->used;
+	commands->baked_temps = measured->temps;
+	commands->baked_temp_count = measured->temp_count;
+	commands->baked_charged = charge;
+	measured->words = NULL;
+	measured->used = 0U;
+	measured->capacity = 0U;
+	measured->temps = NULL;
+	measured->temp_count = 0U;
+	measured->temp_capacity = 0U;
+	measured->temp_bytes = 0U;
+
+	/* Succeeded: the buffer's submissions place its packets. */
+	return 1;
+}
+
+/*
+ * Makes the data heap room ready for the submissions that convert a
+ * command buffer again (measured is the conversion at its end, whose
+ * runs are still taken).  The runs' bytes are the buffer's demand
+ * (PREPARED_COPIES times them for a buffer recorded for simultaneous
+ * use, which may be in flight that many times), which counts toward the
+ * device's prepared bytes until the buffer is recorded again or freed.
+ * While the buffer's runs are still taken, the further copies of them
+ * and the other executable buffers' prepared bytes (in chunks) are taken
+ * too, beside what the submissions in flight hold; then everything but
+ * measured's runs goes back, and the data heap has the room ready.  A
+ * submission that finds none (more in flight than prepared) grows the
+ * heap.
+ */
+static void
+buffer_prepare(
+	struct ghci_vk_session *session,
+	struct ghci_vk_device *device,
+	struct ghci_vk_command_buffer *commands,
+	struct ghci_vk_submission *measured)
+{
+	struct ghci_vk_temp *runs;
+	uint64_t demand;
+	uint64_t others;
+	uint64_t chunks;
+	uint64_t room;
+	uint32_t copies;
+	uint32_t capacity;
+	uint32_t copy;
+	uint32_t index;
+	uint32_t taken;
+	int error;
+
+	/*
+	 * The buffer's demand joins the device's prepared bytes; the buffer
+	 * gives it back when it is recorded again or freed.
+	 */
+	copies = 1U;
+	if (commands->simultaneous)
+		copies = PREPARED_COPIES;
+	demand = measured->temp_bytes * copies;
+	commands->demand = demand;
+	device->prepared += demand;
+	others = device->prepared - demand;
+
+	/* The records of the runs taken beside the buffer's own: its further copies, and chunks for the others. */
+	chunks = (others + TEMP_CHUNK_BYTES - 1U) / TEMP_CHUNK_BYTES;
+	if (chunks > PREPARED_CHUNKS_MAX)
+		chunks = PREPARED_CHUNKS_MAX;
+	capacity = (copies - 1U) * measured->temp_count + (uint32_t)chunks;
+	if (capacity == 0U)
+		return;
+	runs = kern_calloc(capacity, sizeof(*runs));
+	if (runs == NULL)
+		return;
+
+	/* The buffer's further copies: the same runs again, while the first copy's are still taken. */
+	taken = 0U;
+	error = 0;
+	for (copy = 1U; copy < copies && error == 0; copy++) {
+		for (index = 0U; index < measured->temp_count; index++) {
+			error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, measured->temps[index].bytes, DESC_ALIGN, &runs[taken].block, &runs[taken].offset);
+			if (error != 0)
+				break;
+			taken++;
+		}
+	}
+
+	/* The other executable buffers' prepared bytes, in chunks. */
+	room = 0U;
+	while (error == 0 && room < others && taken < capacity) {
+		error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, TEMP_CHUNK_BYTES, DESC_ALIGN, &runs[taken].block, &runs[taken].offset);
+		if (error != 0)
+			break;
+		taken++;
+		room += TEMP_CHUNK_BYTES;
+	}
+
+	/* Every run taken here is room again, ready for the submissions. */
+	for (index = 0U; index < taken; index++)
+		ghci_vk_heap_give(runs[index].block, runs[index].offset);
+	kern_free(runs);
+}
+
+/*
+ * Places one primary command buffer of a submission: its baked packets
+ * as they are when it has them and the submission makes no cut (the
+ * device holds nothing and the submission waits for no event: a held
+ * submission is cut into pieces the ring has room for), otherwise its
+ * conversion.
+ */
+static void
+buffer_place(
+	struct exec *exec,
+	struct ghci_vk_object *object)
+{
+	struct ghci_vk_command_buffer *commands;
+
+	/* A buffer converted again: not baked, or in a submission that may be cut. */
+	commands = &object->as.commands;
+	if (commands->baked_words == NULL ||
+	    exec->device->holds != NULL ||
+	    exec->submission->waiting != 0U) {
+		(void)buffer_convert(exec, object, 0);
+		return;
+	}
+
+	/* The baked packets, after the ones before them (a buffer that made none places nothing). */
+	if (commands->baked_used != 0U)
+		put(exec, commands->baked_words, commands->baked_used);
 }
 
 /*
@@ -1043,6 +1177,9 @@ skip_command(
 {
 	struct ghci_vk *vk;
 
+	/* The buffer is not baked: its submissions convert it, and show the skip. */
+	exec->skipped = 1;
+
 	/* One line per command buffer, none for the conversion at its end. */
 	if (exec->state->logged)
 		return;
@@ -1104,17 +1241,13 @@ table_address(
 
 /*
  * Reports the error a transfer program that could not be placed refuses
- * the submission with: no room ready (ENOSPC) and no memory (ENOMEM) as
- * they are, anything else a lost session or device (EIO).
+ * the submission with: no memory (ENOMEM) as it is, anything else a lost
+ * session or device (EIO).
  */
 static int
 meta_error(
 	int error)
 {
-	/* Out of room ready in the code heap. */
-	if (error == ENOSPC)
-		return ENOSPC;
-
 	/* Out of memory for the heap. */
 	if (error == ENOMEM)
 		return ENOMEM;
@@ -1341,13 +1474,10 @@ temp_take(
 		chunk = TEMP_CHUNK_BYTES;
 		while (chunk < bytes)
 			chunk <<= 1;
-		error = ghci_vk_heap_take(exec->session, exec->device, GHCI_VK_HEAP_DATA, (uint32_t)chunk, DESC_ALIGN, exec->grow, &exec->chunk_block, &exec->chunk_offset);
+		error = ghci_vk_heap_take(exec->session, exec->device, GHCI_VK_HEAP_DATA, (uint32_t)chunk, DESC_ALIGN, &exec->chunk_block, &exec->chunk_offset);
 		if (error != 0) {
 			exec->chunk_block = NULL;
-			if (error == ENOSPC && !exec->grow) {
-				/* The room made ready at the end of the command buffers is in use. */
-				refuse(exec, ENOSPC, "no temporary memory ready for a submission");
-			} else if (error == ENOMEM || error == ENOSPC) {
+			if (error == ENOMEM || error == ENOSPC) {
 				/* The heap could not grow. */
 				refuse(exec, ENOMEM, "no temporary memory for a submission");
 			} else {
@@ -3924,7 +4054,7 @@ meta_run(
 		return exec->error;
 
 	/* The program, in the device's code heap; a program the compiler refuses skips the transfer. */
-	error = ghci_vk_meta_pipeline(exec->session, exec->device, dispatch->kind, exec->grow, &pipeline);
+	error = ghci_vk_meta_pipeline(exec->session, exec->device, dispatch->kind, &pipeline);
 	if (error == ENOTSUP) {
 		skip_command(exec, "a transfer whose program the compiler refuses");
 		return ENOTSUP;
@@ -4608,7 +4738,7 @@ meta_draw(
 	int error;
 
 	/* The programs, in the device's code heap; programs the compiler refuses skip the transfer. */
-	error = ghci_vk_meta_pipeline(exec->session, exec->device, kind, exec->grow, &pipeline);
+	error = ghci_vk_meta_pipeline(exec->session, exec->device, kind, &pipeline);
 	if (error == ENOTSUP) {
 		skip_command(exec, "a transfer whose program the compiler refuses");
 		return;

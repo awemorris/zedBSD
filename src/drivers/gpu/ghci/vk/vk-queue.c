@@ -670,21 +670,10 @@ queue_submit(
 		return 0;
 	}
 
-	/*
-	 * The recorded commands made into packets (none for buffers that
-	 * record nothing).  Without the executor heap room the command
-	 * buffers' ends made ready, the submission is refused with
-	 * VK_ERROR_OUT_OF_DEVICE_MEMORY rather than waiting for the GPU to
-	 * map more.
-	 */
+	/* The recorded commands made into packets (none for buffers that record nothing). */
 	kern_memset(&submission, 0, sizeof(submission));
 	if (recorded) {
 		error = ghci_vk_execute(session, device, submits, count, &submission);
-		if (error == ENOSPC) {
-			ghci_vk_submission_end(device, &submission, NULL, 0);
-			ghci_vk_reply_result(reply, requested, (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY);
-			return 0;
-		}
 		if (error != 0) {
 			ghci_vk_submission_end(device, &submission, NULL, 0);
 			return error;
@@ -864,7 +853,7 @@ create_sync(
 	block = NULL;
 	offset = 0U;
 	if (kind == GHCI_VK_EVENT) {
-		error = ghci_vk_heap_take(session, device->device, GHCI_VK_HEAP_DATA, EVENT_BYTES, EVENT_BYTES, 1, &block, &offset);
+		error = ghci_vk_heap_take(session, device->device, GHCI_VK_HEAP_DATA, EVENT_BYTES, EVENT_BYTES, &block, &offset);
 		result = ghci_vk_result(error);
 	}
 
@@ -1913,7 +1902,7 @@ create_query_pool(
 		result = (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY;
 	if (result == (uint32_t)VK_SUCCESS) {
 		bytes = info.queryCount * QUERY_SLOT_BYTES;
-		error = ghci_vk_heap_take(session, device->device, GHCI_VK_HEAP_DATA, bytes, QUERY_SLOT_BYTES, 1, &block, &offset);
+		error = ghci_vk_heap_take(session, device->device, GHCI_VK_HEAP_DATA, bytes, QUERY_SLOT_BYTES, &block, &offset);
 		result = ghci_vk_result(error);
 	}
 

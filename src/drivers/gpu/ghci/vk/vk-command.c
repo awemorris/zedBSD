@@ -124,14 +124,19 @@ ghci_vk_command_route(
 	return 0;
 }
 
-/* Lets a command buffer's recording go, and takes the room its end made ready out of its device's count. */
+/*
+ * Lets a command buffer's recording go, with the packets its end baked,
+ * and takes the room its end made ready out of its device's count.
+ */
 void
 ghci_vk_commands_release(
 	struct ghci_vk_object *object)
 {
-	/* The room made ready for its submissions. */
-	if (object->device != NULL)
+	/* The room made ready for its submissions, and the packets baked for them. */
+	if (object->device != NULL) {
 		object->device->prepared -= object->as.commands.demand;
+		ghci_vk_execute_unbake(object->device, &object->as.commands);
+	}
 	object->as.commands.demand = 0U;
 
 	/* The recorded bytes. */
@@ -438,8 +443,8 @@ begin_buffer(
 /*
  * vkEndCommandBuffer: [buffer] -> [result]: VK_SUCCESS, or
  * VK_ERROR_OUT_OF_HOST_MEMORY for a recording that could not be kept.
- * A primary buffer's submissions find their executor heap room made
- * ready here (ghci_vk_execute_prepare()).
+ * A primary buffer's packets are baked, or its submissions' executor
+ * heap room made ready, here (ghci_vk_execute_prepare()).
  */
 static int
 end_buffer(
@@ -469,10 +474,10 @@ end_buffer(
 		result = (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY;
 
 	/*
-	 * A primary buffer's submissions take the executor heap room made
-	 * ready now, where a wait for the GPU is allowed (a secondary one is
-	 * converted within the primary that executes it, whose end prepares
-	 * it).
+	 * A primary buffer is converted now, where a wait for the GPU is
+	 * allowed: its packets are baked, or the executor heap room its
+	 * submissions take is made ready (a secondary one is converted
+	 * within the primary that executes it, whose end prepares it).
 	 */
 	if (!object->as.commands.failed && object->as.commands.level == (uint32_t)VK_COMMAND_BUFFER_LEVEL_PRIMARY)
 		ghci_vk_execute_prepare(session, object->device, object);
@@ -513,7 +518,7 @@ reset_buffer(
 /*
  * Empties a command buffer's recording (its room stays for the next
  * one); the data heap room its end made ready no longer counts toward
- * its device's.
+ * its device's, and the packets it baked go.
  */
 static void
 buffer_reset(
@@ -525,6 +530,7 @@ buffer_reset(
 	commands = &object->as.commands;
 	object->device->prepared -= commands->demand;
 	commands->demand = 0U;
+	ghci_vk_execute_unbake(object->device, commands);
 
 	/* No command, no failure, the initial state. */
 	commands->used = 0U;

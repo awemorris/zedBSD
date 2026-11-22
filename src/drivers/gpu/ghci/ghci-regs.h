@@ -60,6 +60,28 @@
 /* MEM_WINDOW_CTRL[0]: the host-visible local window is open. */
 #define GHCI_MEM_WINDOW_ENABLE		(1U << 0)
 
+/*
+ * The BOOT_DISP window of a PCIe device: whether a boot display the
+ * firmware set up is running (ACTIVE) and finished (DONE), its image's
+ * GhciFormat, size and rows, and the image's offset in local memory.
+ * The driver reads it before any display command, which may take the
+ * display over and clear it.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3,
+ * BOOT_DISP_STATUS [0] ACTIVE, [1] DONE at 0x140, FORMAT 0x144, WIDTH
+ * 0x148, HEIGHT 0x14C, STRIDE 0x150, FB_OFFSET 0x158 as two words, the
+ * low first; include/ghci_regs.h, the same offsets).
+ */
+#define GHCI_REG_BOOT_DISP_STATUS	0x140U
+#define GHCI_REG_BOOT_DISP_FORMAT	0x144U
+#define GHCI_REG_BOOT_DISP_WIDTH	0x148U
+#define GHCI_REG_BOOT_DISP_HEIGHT	0x14CU
+#define GHCI_REG_BOOT_DISP_STRIDE	0x150U
+#define GHCI_REG_BOOT_DISP_FB_OFFSET	0x158U
+#define GHCI_BOOT_DISP_ACTIVE		(1U << 0)
+#define GHCI_BOOT_DISP_DONE		(1U << 1)
+#define GHCI_BOOT_DISP_FORMAT_MASK	0xFFU
+
 /* The bytes of the window the driver reads: the registers and the windows. */
 #define GHCI_WINDOW_BYTES		0x200U
 
@@ -221,14 +243,36 @@
 #define GHCI_FMT0_SRGB			(1U << 9)
 
 /*
- * Whether the display has a cursor plane: word 23 says it, and
- * EXT_CAP_FEATURE's bits 13 and 14 are reserved.
+ * What the display can do, from word 23 (EXT_CAP_FEATURE's bits 13 and
+ * 14 are reserved): arbitrary timings within the limits (or only the
+ * fixed modes of CMD_DISP_QUERY_MODES), the cursor plane, a sink's
+ * sense, the DDC bus, the displays and the fixed modes; words 24 and 25
+ * the largest active and total size, words 28 and 29 the least porches
+ * and syncs, each a byte; and FMT_SCANOUT, bit 22 of a format's word.
  *
  * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.2,
  * EXT_CAP_FEATURE [13] and [14] reserved; section 3.2.5 and section 13.1,
- * word 23 DISP_PCLK_INFO [18] HAS_CURSOR).
+ * word 23 DISP_PCLK_INFO [15:0] the clock's tolerance in ppm, [16]
+ * ARBITRARY_PCLK, [18] HAS_CURSOR, [19] HAS_SENSE, [20] HAS_I2C, [23:21]
+ * DISPLAY_COUNT, [31:24] FIXED_MODE_COUNT; words 24 and 25 [15:0] active
+ * and [31:16] total; words 28 and 29 [7:0] front porch, [15:8] sync,
+ * [23:16] back porch; the format word's [22] FMT_SCANOUT).
  */
+#define GHCI_DISP_INFO_ARBITRARY	(1U << 16)
 #define GHCI_DISP_INFO_HAS_CURSOR	(1U << 18)
+#define GHCI_DISP_INFO_HAS_SENSE	(1U << 19)
+#define GHCI_DISP_INFO_HAS_I2C		(1U << 20)
+#define GHCI_DISP_INFO_COUNT_SHIFT	21U
+#define GHCI_DISP_INFO_COUNT_MASK	0x7U
+#define GHCI_DISP_INFO_FIXED_SHIFT	24U
+#define GHCI_DISP_INFO_FIXED_MASK	0xFFU
+#define GHCI_DISP_LIMIT_ACTIVE_MASK	0xFFFFU
+#define GHCI_DISP_LIMIT_TOTAL_SHIFT	16U
+#define GHCI_DISP_BLANK_FRONT_SHIFT	0U
+#define GHCI_DISP_BLANK_SYNC_SHIFT	8U
+#define GHCI_DISP_BLANK_BACK_SHIFT	16U
+#define GHCI_DISP_BLANK_MASK		0xFFU
+#define GHCI_FMT_SCANOUT		(1U << 22)
 
 /*
  * The VA width is VA_BITS_ENC + 30, the float filters of EXT_CAP_FMT0,
@@ -374,93 +418,17 @@
 #define GHCI_FAULT_STAGE_GS		7U
 
 /*
- * The registers of the display controller of the DISP2 window, at
- * offsets from the window (256 bytes), with their fields.  GHCI 1.0 has
- * no such window: its display is driven by commands, which the driver
- * does not serve yet, so no device reaches the code that uses these.
+ * The DDC registers of the display controller of the earlier DISP2
+ * window, which only the HDMI transmitter's setup (adv7511.c) names.  No
+ * GHCI 1.0 device has them: its DDC transfers are CMD_DISP_I2C_XFER, and
+ * the display does not set a transmitter up.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md
- * (section 13.2, the DISP2 registers, DISP_IRQ_STATUS and DC_CAPS).
+ * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 13.2,
+ * the DISP2 registers I2C_CTRL, I2C_DATA and I2C_STATUS).
  */
-#define GHCI_DC_WINDOW			0x100U
-#define GHCI_DC_BLOCK_VERSION		1U
-#define GHCI_DC_ID			0x00U
-#define GHCI_DC_VERSION			0x04U
-#define GHCI_DC_CAPS			0x08U
-#define GHCI_DC_CTRL			0x10U
-#define GHCI_DC_STATUS			0x14U
-#define GHCI_DC_IRQ_STATUS		0x18U
-#define GHCI_DC_IRQ_ENABLE		0x1CU
-#define GHCI_DC_FB_BASE			0x20U
-#define GHCI_DC_FB_NEXT			0x24U
-#define GHCI_DC_FB_STRIDE		0x28U
-#define GHCI_DC_FB_SIZE			0x2CU
-#define GHCI_DC_H_ACTIVE		0x30U
-#define GHCI_DC_H_FP			0x34U
-#define GHCI_DC_H_SYNC			0x38U
-#define GHCI_DC_H_BP			0x3CU
-#define GHCI_DC_V_ACTIVE		0x40U
-#define GHCI_DC_V_FP			0x44U
-#define GHCI_DC_V_SYNC			0x48U
-#define GHCI_DC_V_BP			0x4CU
-#define GHCI_DC_SYNC_POL		0x50U
-#define GHCI_DC_FRAME_COUNT		0x54U
-#define GHCI_DC_PCLK_SEL		0x58U
 #define GHCI_DC_I2C_CTRL		0x60U
 #define GHCI_DC_I2C_DATA		0x64U
 #define GHCI_DC_I2C_STATUS		0x68U
-#define GHCI_DC_CONNECTED		0x6CU
-#define GHCI_DC_MODE_INDEX		0x80U
-#define GHCI_DC_MODE_H0			0x84U
-#define GHCI_DC_MODE_H1			0x88U
-#define GHCI_DC_MODE_V0			0x8CU
-#define GHCI_DC_MODE_V1			0x90U
-#define GHCI_DC_MODE_CLOCK		0x94U
-#define GHCI_DC_MODE_FLAGS		0x98U
-#define GHCI_DC_CURSOR_BASE		0xA0U
-#define GHCI_DC_CURSOR_POS		0xA4U
-#define GHCI_DC_CURSOR_CTRL		0xA8U
-#define GHCI_DC_TAKEN0			0xB0U
-#define GHCI_DC_TAKEN1			0xB4U
-#define GHCI_DC_CAPS_TMDS		(1U << 1)
-#define GHCI_DC_CAPS_TRANSMITTER	(1U << 2)
-#define GHCI_DC_CAPS_BGRA8		(1U << 4)
-#define GHCI_DC_CAPS_RGBA8		(1U << 5)
-#define GHCI_DC_CAPS_CURSOR		(1U << 8)
-#define GHCI_DC_CAPS_MODES_SHIFT	9U
-#define GHCI_DC_CAPS_MODES_MASK		0x7U
-#define GHCI_DC_CAPS_SENSE		(1U << 12)
-#define GHCI_DC_CTRL_ENABLE		(1U << 0)
-#define GHCI_DC_CTRL_RESET		(1U << 1)
-#define GHCI_DC_CTRL_FORMAT_SHIFT	4U
-#define GHCI_DC_CTRL_FORMAT_MASK	0x3U
-#define GHCI_DC_CTRL_OUTPUT_HDMI	(1U << 6)
-#define GHCI_DC_FMT_BGRA8		0U
-#define GHCI_DC_FMT_RGBA8		1U
-#define GHCI_DC_ST_RUNNING		(1U << 0)
-#define GHCI_DC_ST_UNDERFLOW		(1U << 1)
-#define GHCI_DC_ST_IDLE			(1U << 2)
-#define GHCI_DC_ST_READ_ERROR		(1U << 3)
-#define GHCI_DC_ST_RECORD_ERROR		(1U << 4)
-#define GHCI_DC_ST_BAD_WRITE		(1U << 5)
-#define GHCI_DC_ST_CONNECTED		(1U << 28)
-#define GHCI_DC_ST_PENDING0		(1U << 29)
-#define GHCI_DC_ST_PENDING1		(1U << 30)
-#define GHCI_DC_ST_RECORD		(1U << 31)
-#define GHCI_DC_IRQ_VSYNC		(1U << 0)
-#define GHCI_DC_IRQ_FLIP_DONE		(1U << 1)
-#define GHCI_DC_IRQ_CURSOR_DONE		(1U << 2)
-#define GHCI_DC_IRQ_HOTPLUG		(1U << 3)
-#define GHCI_DC_IRQ_UNDERFLOW		(1U << 4)
-#define GHCI_DC_IRQ_ERROR		(1U << 5)
-#define GHCI_DC_IRQ_ALL			0x3FU
-#define GHCI_DC_SIZE_HEIGHT_SHIFT	16U
-#define GHCI_DC_MODE_PCLK_SHIFT		4U
-#define GHCI_DC_MODE_PCLK_MASK		0xFU
-#define GHCI_DC_MODE_SYNC_MASK		0x3U
-#define GHCI_DC_TAKEN_CANCELLED		(1U << 31)
-#define GHCI_DC_CURSOR_SIZE		64U
-#define GHCI_DC_RECORD_BYTES		16U
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -491,7 +459,9 @@
  *
  * Two reads fill it.  BOOT_CAPS and the MEM window come from the
  * register window before the processor runs (boot_caps, va_bits,
- * pa_bits, the local memory, the firmware's part of it and HOST_LIMIT);
+ * pa_bits, the local memory, the firmware's part of it and HOST_LIMIT,
+ * and the boot display a PCIe device's firmware left: boot_disp_status
+ * and its image's format, size, rows and offset in local memory);
  * everything else comes from the capability block CMD_QUERY_CAPS writes
  * once the ring runs (block_read is then 1).  formats holds the block's
  * format table word of each GhciFormat below format_count; a later one
@@ -508,7 +478,8 @@
  * FMT_LIMITS's, for the log.  shader_stages and stage_limits are words 19
  * and 20 as the device wrote them; stages_dropped holds the stages of
  * shader_stages the driver takes as absent because the shared memory is
- * below what they need.
+ * below what they need.  disp_info and the display words after it are
+ * words 21 to 25, 28 and 29 as the device wrote them.
  */
 struct ghci_caps {
 	uint32_t boot_caps;
@@ -520,6 +491,12 @@ struct ghci_caps {
 	uint64_t fw_bytes;
 	uint64_t window_bytes;
 	uint64_t host_limit;
+	uint32_t boot_disp_status;
+	uint32_t boot_disp_format;
+	uint32_t boot_disp_width;
+	uint32_t boot_disp_height;
+	uint32_t boot_disp_stride;
+	uint64_t boot_disp_offset;
 	int block_read;
 	uint32_t block_version_read;
 	uint32_t device_caps;
@@ -539,6 +516,12 @@ struct ghci_caps {
 	uint32_t cache_config;
 	uint32_t prot_caps;
 	uint32_t disp_info;
+	uint32_t disp_clock_min;
+	uint32_t disp_clock_max;
+	uint32_t disp_limits_h;
+	uint32_t disp_limits_v;
+	uint32_t disp_blank_h;
+	uint32_t disp_blank_v;
 	uint32_t shader_stages;
 	uint32_t stage_limits;
 	uint32_t stages_dropped;

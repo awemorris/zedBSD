@@ -29,10 +29,11 @@
  * (pipeline state records and programs) is mapped executable, the data
  * heap (scratch, events, query pools, a submission's temporary memory)
  * is not.  A run that work in the ring may still read goes back once
- * that work's ticket has passed.  A heap grows only where the caller may
- * wait for the GPU (a map waits for its record): when an object is made,
- * and when a command buffer ends; a submission takes only the room that
- * is there.
+ * that work's ticket has passed.  A heap grows when no block has room;
+ * the growth maps a block, and the map waits for its record, which
+ * comes after the work placed before it.  The end of a command buffer
+ * makes ready the room its submissions take, so a submission grows a
+ * heap only when more of them are in flight than were made ready.
  */
 
 #include <stddef.h>
@@ -176,14 +177,12 @@ ghci_vk_memory_blob(
 /*
  * Takes bytes of one of a device's executor heaps (code or data),
  * aligned to alignment (a power of two).  Runs let go whose tickets have
- * passed go back first.  When no block has room, grow says whether the
- * heap grows: a new block is mapped into the device's session, and the
- * map waits for its record, which comes only once the work placed in
- * the ring before it has run.  A submission's conversion never grows
- * the heap (it does not wait for the GPU); its room is made ready when
- * the command buffer ends (ghci_vk_execute_prepare()).  Returns 0 with
- * the block and the offset in it, ENOSPC when no block has room and the
- * heap may not grow, or the error of the growth (ENOSPC, ENOMEM, EIO).
+ * passed go back first.  When no block has room, the heap grows: a new
+ * block is mapped into the device's session, and the map waits for its
+ * record, which comes only once the work placed in the ring before it
+ * has run (a delay, never a stop: the ring holds nothing that waits for
+ * the host).  Returns 0 with the block and the offset in it, or the
+ * error of the growth (ENOSPC, ENOMEM, EIO).
  */
 int
 ghci_vk_heap_take(
@@ -192,7 +191,6 @@ ghci_vk_heap_take(
 	enum ghci_vk_heap heap,
 	uint32_t bytes,
 	uint32_t alignment,
-	int grow,
 	struct ghci_vk_heap_block **block,
 	uint32_t *offset)
 {
@@ -211,10 +209,6 @@ ghci_vk_heap_take(
 				return 0;
 			}
 		}
-
-		/* No block has room, and the caller may not wait for a map. */
-		if (!grow)
-			return ENOSPC;
 
 		/* No block has room: one more, large enough. */
 		error = heap_grow(session, device, heap, bytes + alignment);

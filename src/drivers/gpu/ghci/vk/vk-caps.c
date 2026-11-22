@@ -51,10 +51,18 @@
 #define LIMIT_PUSH_BYTES		128U
 #define LIMIT_ALLOCATIONS		4096U
 #define LIMIT_SAMPLERS			4000U
-#define LIMIT_SETS			4U
+#define LIMIT_SETS			GHCI_VK_SETS
 #define LIMIT_STAGE_SLOTS		16U
 #define LIMIT_STAGE_STORAGE_IMAGES	8U
 #define LIMIT_SET_SLOTS			96U
+
+/*
+ * The texture and sampler slots of one stage: the vertex and fragment
+ * programs of a pipeline share the 64 of each table (the compiler gives
+ * a binding both read one slot), so each stage may name half of them.
+ */
+#define LIMIT_STAGE_TEXTURE_SLOTS	(GHCI_GSI1_TEXTURE_SLOTS / 2U)
+#define LIMIT_STAGE_SAMPLER_SLOTS	(GHCI_GSI1_SAMPLER_SLOTS / 2U)
 #define LIMIT_ATTRIBUTES		16U
 #define LIMIT_ATTRIBUTE_OFFSET		524287U
 #define LIMIT_BINDING_STRIDE		4095U
@@ -291,10 +299,10 @@ ghci_vk_caps_limits(
 
 	/* Descriptors: the slots and set 2's table. */
 	limits->maxBoundDescriptorSets = LIMIT_SETS;
-	limits->maxPerStageDescriptorSamplers = LIMIT_STAGE_SLOTS;
+	limits->maxPerStageDescriptorSamplers = LIMIT_STAGE_SAMPLER_SLOTS;
 	limits->maxPerStageDescriptorUniformBuffers = LIMIT_STAGE_SLOTS;
 	limits->maxPerStageDescriptorStorageBuffers = LIMIT_STAGE_SLOTS;
-	limits->maxPerStageDescriptorSampledImages = LIMIT_STAGE_SLOTS;
+	limits->maxPerStageDescriptorSampledImages = LIMIT_STAGE_TEXTURE_SLOTS;
 	limits->maxPerStageDescriptorStorageImages = LIMIT_STAGE_STORAGE_IMAGES;
 	limits->maxPerStageDescriptorInputAttachments = LIMIT_INPUT_ATTACHMENTS;
 	limits->maxPerStageResources = LIMIT_STAGE_RESOURCES;
