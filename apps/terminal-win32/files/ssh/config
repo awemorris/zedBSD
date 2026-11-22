@@ -1,6 +1,6 @@
 # The hosts mikuterm connects to, in OpenSSH's ssh_config form.
-# ~/.ssh/ is this folder's ssh\ (keys, known_hosts); a path without a folder
-# is in ssh\ too.  Match, Include and ProxyJump are not supported.
+# ~/.ssh/ is this folder's ssh/ (keys, known_hosts); a path without a folder
+# is in ssh/ too.  Match, Include and ProxyJump are not supported.
 #
 # A host:
 #

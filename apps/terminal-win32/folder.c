@@ -36,7 +36,6 @@ static char folder_path[MIKUTERM_PATH_MAX];
 static int folder_wide(const char *path, wchar_t **wide);
 static int folder_error(DWORD error);
 static int folder_write(const wchar_t *path, DWORD access, DWORD disposition, const void *bytes, size_t size);
-static int folder_absolute(const char *path);
 static int folder_parent_make(const wchar_t *path);
 static int folder_private(PSECURITY_DESCRIPTOR *descriptor);
 
@@ -136,8 +135,9 @@ mikuterm_path(
  * UserKnownHostsFile): ~/.ssh/X is the folder's ssh\X and ~/X the
  * folder's X, so a configuration written for OpenSSH keeps its meaning; a
  * name without a directory, or relative, is in ssh\; a Windows path
- * (C:\..., \\server\...) is taken as it is.  A path from the root of a
- * POSIX system (/etc/ssh/ssh_known_hosts) names nothing on Windows: ENOENT.
+ * (mikuterm_path_absolute: C:\..., \\server\..., //server/...) is taken
+ * as it is.  Any other path from the root of a POSIX system
+ * (/etc/ssh/ssh_known_hosts) names nothing on Windows: ENOENT.
  * Returns 0, ENOENT or ENAMETOOLONG.
  */
 int
@@ -157,7 +157,7 @@ mikuterm_ssh_path(
 	int error;
 
 	/* A Windows path as it is. */
-	absolute = folder_absolute(written);
+	absolute = mikuterm_path_absolute(written);
 	if (absolute) {
 		length = strlen(written);
 		if (length + 1U > size)
@@ -626,29 +626,6 @@ folder_write(
 	return 0;
 }
 
-/* Tells whether a path is a Windows path from a drive or a server (1) or not (0). */
-static int
-folder_absolute(
-	const char *path)
-{
-	/* A drive's letter, its colon and a separator. */
-	if (((path[0] >= 'A' &&
-	      path[0] <= 'Z') ||
-	     (path[0] >= 'a' &&
-	      path[0] <= 'z')) &&
-	    path[1] == ':' &&
-	    (path[2] == '\\' ||
-	     path[2] == '/'))
-		return 1;
-
-	/* A server's share. */
-	if (path[0] == '\\' && path[1] == '\\')
-		return 1;
-
-	/* Anything else is not. */
-	return 0;
-}
-
 /*
  * Makes the directory a file's path is in, when its own parent is there.
  * Returns 0 (also when it was there already), ENOENT, EACCES, ENOMEM or
@@ -659,25 +636,23 @@ folder_parent_make(
 	const wchar_t *path)
 {
 	wchar_t *parent;
-	wchar_t *separator;
+	size_t directory;
 	size_t length;
 	BOOL made;
 	DWORD error;
 
-	/* The path up to its last separator. */
+	/* The path up to its last separator, a slash or a backslash. */
+	directory = mikuterm_path_directory(path);
+	if (directory == 0U)
+		return ENOENT;
 	length = wcslen(path);
 	parent = malloc((length + 1U) * sizeof(*parent));
 	if (parent == NULL)
 		return ENOMEM;
 	memcpy(parent, path, (length + 1U) * sizeof(*parent));
-	separator = wcsrchr(parent, L'\\');
-	if (separator == NULL || separator == parent) {
-		free(parent);
-		return ENOENT;
-	}
 
 	/* The path cut at its last separator. */
-	*separator = L'\0';
+	parent[directory] = L'\0';
 
 	/* The directory; one already there is as good. */
 	made = CreateDirectoryW(parent, NULL);

@@ -156,6 +156,13 @@ client_read_config(
 		return error;
 	}
 
+	/* Refuses a setting of the file that the program does not act on. */
+	error = ssh_client_check_settings(config, error_text);
+	if (error != 0) {
+		fprintf(stderr, "ssh: %s: %s\n", path, error_text);
+		return error;
+	}
+
 	/* Succeeded: the file's settings are applied. */
 	return 0;
 }
@@ -181,6 +188,13 @@ client_settle(
 	/* Applies the command line first: the first value of a keyword wins. */
 	ssh_config_init(&client->config);
 	error = ssh_client_apply_args(args, &client->config, error_text);
+	if (error != 0) {
+		fprintf(stderr, "ssh: %s\n", error_text);
+		return error;
+	}
+
+	/* Refuses a setting of the command line that the program does not act on. */
+	error = ssh_client_check_settings(&client->config, error_text);
 	if (error != 0) {
 		fprintf(stderr, "ssh: %s\n", error_text);
 		return error;

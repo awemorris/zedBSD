@@ -17,7 +17,10 @@
  *
  * Its settings' tab (settings-page.c) edits the user's ~/.ssh/config,
  * makes keys in ~/.ssh (the private key 0600) and lists ~/.ssh/known_hosts;
- * the files are written here with POSIX calls (main_page_*).
+ * the files are written here with POSIX calls (main_page_*).  The tab also
+ * keeps the terminal's own settings of the next start (the fonts, the
+ * grid) and of the next tab (the shells' TERM) in the desktop's settings
+ * (terminal.*, main_item_*), which a command line's option wins over.
  *
  * Every outcome is one line on standard output: ZTERM DONE on a normal end
  * (with the reason), ZTERM FAILED naming what failed otherwise.
@@ -67,9 +70,33 @@
 #define MAIN_PATH_MAX		1024U
 #define MAIN_COMMENT_MAX	320U
 
-/* The grid the window opens with. */
+/* The grid the window opens with (the desktop's settings' defaults of terminal.columns and terminal.rows). */
 #define MAIN_COLUMNS		90U
 #define MAIN_ROWS		28U
+
+/* The shells' terminal type unless the user chose another (the process connector's). */
+#define MAIN_TERM		"xterm"
+
+/* The application whose settings the terminal's are, and its keys of the next start and of the next tab. */
+#define MAIN_SETTINGS_APP	"terminal"
+#define MAIN_KEY_FONT		"terminal.font"
+#define MAIN_KEY_FALLBACK	"terminal.fallback-font"
+#define MAIN_KEY_COLUMNS	"terminal.columns"
+#define MAIN_KEY_ROWS		"terminal.rows"
+#define MAIN_KEY_TERM		"terminal.term"
+
+/* Where a font named without a directory is looked for. */
+#define MAIN_FONT_DIRECTORY	KEILAND_DATADIR "/fonts/"
+
+/* The terminal's own settings in the settings' tab. */
+enum main_item {
+	MAIN_ITEM_NONE,
+	MAIN_ITEM_FONT,
+	MAIN_ITEM_FALLBACK,
+	MAIN_ITEM_COLUMNS,
+	MAIN_ITEM_ROWS,
+	MAIN_ITEM_TERM
+};
 
 /* The program started for a new window when the terminal was not run by a path. */
 #define MAIN_PROGRAM		KEILAND_BINDIR "/terminal"
@@ -90,15 +117,31 @@ struct main_options {
 	const char *token;
 	unsigned pixels;
 	int pixels_given;
+	int font_given;
+	int font_kept;
+	int fallback_given;
 	unsigned columns;
 	unsigned rows;
+	int columns_given;
+	int rows_given;
 	unsigned timeout;
 };
 
 /*
+ * The settings kept for the next start that the command line did not
+ * override: the font files' paths (empty: the terminal's own).  Read once
+ * before the run; the options point into it for the run's life.
+ */
+struct main_kept {
+	char font[KL_SETTINGS_VALUE_MAX];
+	char fallback[KL_SETTINGS_VALUE_MAX];
+};
+
+/*
  * What the settings' tab is given: the user's SSH files' paths, the
- * comment of a new key (user@host) and the functions that read and write
- * them.  Set once before the run, for its whole life.
+ * comment of a new key (user@host), the functions that read and write
+ * them, and the connector whose shells' TERM the tab changes.  Set once
+ * before the run, for its whole life.
  */
 struct main_page {
 	char ssh[MAIN_PATH_MAX];
@@ -107,13 +150,38 @@ struct main_page {
 	char known_hosts[MAIN_PATH_MAX];
 	char comment[MAIN_COMMENT_MAX];
 	struct terminal_page_program program;
+	struct terminal_process_connector *connector;
 };
 
 /* The settings' tab's files (the main thread's). */
 static struct main_page main_page;
 
+/* The fonts kept for the next start, which the options point into (the main thread's, set before the run). */
+static struct main_kept main_kept;
+
+/*
+ * The terminal's own settings in the tab, by their keys in the desktop's
+ * settings: the fonts and the grid (the next start), then the shells'
+ * TERM (the next tab).
+ */
+static const struct terminal_page_item main_items[] = {
+	{ MAIN_KEY_FONT, "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
+	{ MAIN_KEY_FALLBACK, "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
+	{ MAIN_KEY_COLUMNS, "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
+	{ MAIN_KEY_ROWS, "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
+	{ MAIN_KEY_TERM, "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION }
+};
+
 static int main_parse(int argc, char **argv, struct main_options *options);
-static int main_page_init(const struct main_options *options);
+static void main_kept_read(struct main_options *options, struct terminal_process_connector *connector);
+static int main_page_init(struct terminal_process_connector *connector);
+static int main_item_get(void *data, const char *keyword, char *value, size_t size);
+static int main_item_set(void *data, const char *keyword, const char *value, char *why, size_t size);
+static int main_item_font(const char *value, char *path, size_t size, char *why, size_t why_size);
+static unsigned main_item_kind(const char *keyword);
+static int main_item_number(const char *value, unsigned maximum, unsigned *number, char *text, size_t size, char *why, size_t why_size);
+static int main_item_term(const char *value, char *why, size_t why_size);
+static int main_item_keep(const char *keyword, const char *value, const char *fallback, char *why, size_t why_size);
 static int main_page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
 static int main_page_replace(void *data, const char *path, const void *bytes, size_t size);
 static int main_page_create(void *data, const char *path, const void *bytes, size_t size, int secret);
@@ -152,6 +220,9 @@ main(
 	/* Each tab a shell on a pseudo-terminal, or the shell running the command. */
 	terminal_process_connector_init(&connector, options.command);
 
+	/* The settings kept for the next start and the next tab, where the command line chose nothing. */
+	main_kept_read(&options, &connector);
+
 	/* The terminal's window, fonts and grid, drawn with its own Vulkan. */
 	memset(&run, 0, sizeof(run));
 	run.application = "terminal";
@@ -159,6 +230,7 @@ main(
 	run.title = "Terminal";
 	run.present = KL_PRESENT_NONE;
 	run.font = options.font;
+	run.font_default = NULL;
 	run.companion = KEILAND_FONT_FALLBACK_MONO;
 	run.fallback = options.fallback;
 	run.emoji = MAIN_EMOJI_FONT;
@@ -172,8 +244,12 @@ main(
 	run.about = MAIN_ABOUT;
 	run.connector = &connector.connector;
 
+	/* A kept font that cannot be opened gives way to the terminal's own (one given on the command line does not). */
+	if (options.font_kept)
+		run.font_default = MAIN_FONT;
+
 	/* The settings' tab, with the user's SSH files (none without a home directory). */
-	status = main_page_init(&options);
+	status = main_page_init(&connector);
 	if (status == 0) {
 		run.page = &main_page.program;
 		run.page_font = MAIN_PAGE_FONT;
@@ -241,6 +317,7 @@ main_parse(
 		value = main_value(argv[index], "--font=");
 		if (value != NULL) {
 			options->font = value;
+			options->font_given = 1;
 			continue;
 		}
 
@@ -248,6 +325,7 @@ main_parse(
 		value = main_value(argv[index], "--fallback-font=");
 		if (value != NULL) {
 			options->fallback = value;
+			options->fallback_given = 1;
 			continue;
 		}
 
@@ -267,6 +345,7 @@ main_parse(
 			status = main_number(value, TERMINAL_MAX_COLUMNS, &options->columns);
 			if (status != 0)
 				return -1;
+			options->columns_given = 1;
 			continue;
 		}
 
@@ -276,6 +355,7 @@ main_parse(
 			status = main_number(value, TERMINAL_MAX_ROWS, &options->rows);
 			if (status != 0)
 				return -1;
+			options->rows_given = 1;
 			continue;
 		}
 
@@ -425,13 +505,14 @@ main_ended(
 
 /*
  * Fills what the settings' tab is given: the paths of ~/.ssh/config,
- * ~/.ssh/ and ~/.ssh/known_hosts, the comment user@host of a new key and
- * the font the terminal draws with.  Returns 0, or ENOENT without a home
- * directory (the terminal then has no settings' tab).
+ * ~/.ssh/ and ~/.ssh/known_hosts, the comment user@host of a new key, the
+ * terminal's own settings and the connector whose TERM they change.
+ * Returns 0, or ENOENT without a home directory (the terminal then has no
+ * settings' tab).
  */
 static int
 main_page_init(
-	const struct main_options *options)
+	struct terminal_process_connector *connector)
 {
 	const struct passwd *user;
 	const char *home;
@@ -481,13 +562,444 @@ main_page_init(
 	main_page.program.create = main_page_create;
 	main_page.program.exists = main_page_exists;
 	main_page.program.check = NULL;
-	main_page.program.items = NULL;
-	main_page.program.item_count = 0U;
+	main_page.program.items = main_items;
+	main_page.program.item_count = sizeof(main_items) / sizeof(main_items[0]);
+	main_page.program.item_get = main_item_get;
+	main_page.program.item_set = main_item_set;
 	main_page.program.comment = main_page.comment;
-	main_page.program.font = options->font;
+	main_page.program.font = NULL;
+	main_page.program.connection = "tab";
 	main_page.program.data = &main_page;
+	main_page.connector = connector;
 
 	/* Succeeded: the tab has the user's files. */
+	return 0;
+}
+
+/*
+ * Takes the settings kept for the next start (the fonts, the grid) where
+ * the command line chose nothing, and the shells' TERM kept for the
+ * tabs; without the desktop's settings the defaults stay.
+ */
+static void
+main_kept_read(
+	struct main_options *options,
+	struct terminal_process_connector *connector)
+{
+	struct kl_settings *settings;
+	char term[TERMINAL_TERM_MAX];
+	int number;
+	int error;
+
+	/* The terminal's settings; its own keys need no display. */
+	memset(&main_kept, 0, sizeof(main_kept));
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL)
+		return;
+
+	/* The font file, unless --font chose one. */
+	error = kl_settings_get(settings, MAIN_KEY_FONT, main_kept.font, sizeof(main_kept.font), NULL);
+	if (error == 0 && main_kept.font[0] != '\0' && !options->font_given) {
+		options->font = main_kept.font;
+		options->font_kept = 1;
+	}
+
+	/* The fallback font file, unless --fallback-font chose one. */
+	error = kl_settings_get(settings, MAIN_KEY_FALLBACK, main_kept.fallback, sizeof(main_kept.fallback), NULL);
+	if (error == 0 && main_kept.fallback[0] != '\0' && !options->fallback_given)
+		options->fallback = main_kept.fallback;
+
+	/* The columns, unless --columns chose them (the table's default, 90, when none are kept). */
+	number = kl_settings_get_int(settings, MAIN_KEY_COLUMNS, (int)MAIN_COLUMNS);
+	if (number >= 1 && number <= (int)TERMINAL_MAX_COLUMNS && !options->columns_given)
+		options->columns = (unsigned)number;
+
+	/* The rows, unless --rows chose them. */
+	number = kl_settings_get_int(settings, MAIN_KEY_ROWS, (int)MAIN_ROWS);
+	if (number >= 1 && number <= (int)TERMINAL_MAX_ROWS && !options->rows_given)
+		options->rows = (unsigned)number;
+
+	/* The shells' TERM, when one well formed is kept. */
+	error = kl_settings_get(settings, MAIN_KEY_TERM, term, sizeof(term), NULL);
+	if (error == 0 && term[0] != '\0') {
+		error = main_item_term(term, NULL, 0U);
+		if (error == 0)
+			(void)snprintf(connector->term, sizeof(connector->term), "%s", term);
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* What the run takes, in the log. */
+	printf("ZTERM SETTINGS run=%s font=%s fallback=%s columns=%u rows=%u term=%s\n", options->token, options->font, options->fallback != NULL ? options->fallback : "none",
+	       options->columns, options->rows, connector->term);
+	fflush(stdout);
+}
+
+/*
+ * Gives a setting of the tab's own as it is kept now (the terminal's
+ * default when none is: its fonts' paths, the grid's 90 and 28, xterm).
+ * Returns 0, or an errno value of the desktop's settings.
+ */
+static int
+main_item_get(
+	void *data,
+	const char *keyword,
+	char *value,
+	size_t size)
+{
+	struct kl_settings *settings;
+	const char *fallback;
+	unsigned kind;
+	int error;
+
+	(void)data;
+
+	/* The default shown for a text setting kept empty: the terminal's own fonts and TERM. */
+	kind = main_item_kind(keyword);
+	switch (kind) {
+	case MAIN_ITEM_FONT:
+		fallback = MAIN_FONT;
+		break;
+	case MAIN_ITEM_FALLBACK:
+		fallback = MAIN_FALLBACK_FONT;
+		break;
+	case MAIN_ITEM_TERM:
+		fallback = MAIN_TERM;
+		break;
+	default:
+		fallback = "";
+		break;
+	}
+
+	/* The terminal's settings. */
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL)
+		return errno;
+
+	/* The value kept (a number's default is the table's). */
+	error = kl_settings_get(settings, keyword, value, size, NULL);
+	if (error != 0) {
+		kl_settings_close(settings);
+		return error;
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* An empty text is the terminal's own. */
+	if (value[0] == '\0')
+		(void)snprintf(value, size, "%s", fallback);
+
+	/* Succeeded: the value. */
+	return 0;
+}
+
+/*
+ * Keeps a setting of the tab's own after checking it: a font that the
+ * terminal can open (a name alone is a file of the desktop's fonts), a
+ * grid within the terminal's, a TERM of a terminal type's characters
+ * (which the next tab's shell takes at once).  An empty value, or the
+ * default, takes the kept value away.  Returns 0, or EINVAL with why set,
+ * or an errno value of the desktop's settings with why set.
+ */
+static int
+main_item_set(
+	void *data,
+	const char *keyword,
+	const char *value,
+	char *why,
+	size_t size)
+{
+	struct main_page *page;
+	char kept[KL_SETTINGS_VALUE_MAX];
+	const char *fallback;
+	unsigned number;
+	unsigned kind;
+	int error;
+
+	/* Which setting it is; a keyword not the terminal's is refused. */
+	page = data;
+	kind = main_item_kind(keyword);
+	if (kind == MAIN_ITEM_NONE) {
+		(void)snprintf(why, size, "not a setting of the terminal");
+		return EINVAL;
+	}
+
+	/*
+	 * The value as it is kept, checked, and the default that takes no
+	 * line: a font's full path, the grid's number, the TERM as it is.
+	 */
+	error = 0;
+	kept[0] = '\0';
+	fallback = NULL;
+	switch (kind) {
+	case MAIN_ITEM_FONT:
+		fallback = MAIN_FONT;
+		if (value[0] != '\0')
+			error = main_item_font(value, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_FALLBACK:
+		fallback = MAIN_FALLBACK_FONT;
+		if (value[0] != '\0')
+			error = main_item_font(value, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_COLUMNS:
+		fallback = "90";
+		if (value[0] != '\0')
+			error = main_item_number(value, TERMINAL_MAX_COLUMNS, &number, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_ROWS:
+		fallback = "28";
+		if (value[0] != '\0')
+			error = main_item_number(value, TERMINAL_MAX_ROWS, &number, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_TERM:
+	default:
+		fallback = MAIN_TERM;
+		if (value[0] != '\0')
+			error = main_item_term(value, why, size);
+		if (value[0] != '\0' && error == 0)
+			(void)snprintf(kept, sizeof(kept), "%s", value);
+		break;
+	}
+
+	/* A value refused is not kept. */
+	if (error != 0)
+		return error;
+
+	/* Kept, or taken away (empty, or the default). */
+	error = main_item_keep(keyword, kept, fallback, why, size);
+	if (error != 0)
+		return error;
+
+	/* The next tab's shell takes the TERM at once (xterm when it was taken away). */
+	if (kind == MAIN_ITEM_TERM && kept[0] == '\0') {
+		(void)snprintf(page->connector->term, sizeof(page->connector->term), "%s", MAIN_TERM);
+	} else if (kind == MAIN_ITEM_TERM) {
+		(void)snprintf(page->connector->term, sizeof(page->connector->term), "%s", kept);
+	}
+
+	/* Succeeded: the next start, or the next tab, takes it. */
+	return 0;
+}
+
+/* Tells which of the terminal's settings a keyword is (MAIN_ITEM_NONE for another). */
+static unsigned
+main_item_kind(
+	const char *keyword)
+{
+	int differs;
+
+	/* The font. */
+	differs = strcmp(keyword, MAIN_KEY_FONT);
+	if (differs == 0)
+		return MAIN_ITEM_FONT;
+
+	/* The fallback font. */
+	differs = strcmp(keyword, MAIN_KEY_FALLBACK);
+	if (differs == 0)
+		return MAIN_ITEM_FALLBACK;
+
+	/* The columns. */
+	differs = strcmp(keyword, MAIN_KEY_COLUMNS);
+	if (differs == 0)
+		return MAIN_ITEM_COLUMNS;
+
+	/* The rows. */
+	differs = strcmp(keyword, MAIN_KEY_ROWS);
+	if (differs == 0)
+		return MAIN_ITEM_ROWS;
+
+	/* The shells' TERM. */
+	differs = strcmp(keyword, MAIN_KEY_TERM);
+	if (differs == 0)
+		return MAIN_ITEM_TERM;
+
+	/* None of the terminal's. */
+	return MAIN_ITEM_NONE;
+}
+
+/*
+ * Writes a font's full path into path (a name alone is a file of the
+ * desktop's fonts) after opening it as the terminal would.  Returns 0, or
+ * EINVAL with why set.
+ */
+static int
+main_item_font(
+	const char *value,
+	char *path,
+	size_t size,
+	char *why,
+	size_t why_size)
+{
+	struct terminal_font *font;
+	const char *slash;
+	int written;
+	int error;
+
+	/* A full path as it is, a name in the desktop's fonts, anything else refused. */
+	slash = strchr(value, '/');
+	if (value[0] == '/') {
+		written = snprintf(path, size, "%s", value);
+	} else if (slash == NULL) {
+		written = snprintf(path, size, "%s%s", MAIN_FONT_DIRECTORY, value);
+	} else {
+		(void)snprintf(why, why_size, "a font is a full path or a file name in %s", MAIN_FONT_DIRECTORY);
+		return EINVAL;
+	}
+
+	/* A path too long to keep is refused. */
+	if (written < 0 || (size_t)written >= size) {
+		(void)snprintf(why, why_size, "the path is too long");
+		return EINVAL;
+	}
+
+	/* The font, opened at the default size as the next start would. */
+	font = malloc(sizeof(*font));
+	if (font == NULL) {
+		(void)snprintf(why, why_size, "no memory to read the font");
+		return EINVAL;
+	}
+
+	/* A file the terminal cannot draw with is refused. */
+	error = terminal_font_open(font, path, NULL, MAIN_FONT_PIXELS);
+	if (error != 0) {
+		free(font);
+		(void)snprintf(why, why_size, "%s is not a font the terminal can open (%s)", path, strerror(error));
+		return EINVAL;
+	}
+
+	/* It opened; it is not needed any more. */
+	terminal_font_close(font);
+	free(font);
+
+	/* Succeeded: the font's full path. */
+	return 0;
+}
+
+/* Reads a grid's size, 1 to maximum, and writes it as kept into text; returns 0, or EINVAL with why set. */
+static int
+main_item_number(
+	const char *value,
+	unsigned maximum,
+	unsigned *number,
+	char *text,
+	size_t size,
+	char *why,
+	size_t why_size)
+{
+	int status;
+
+	/* A whole number within the grid's limit, not 0. */
+	status = main_number(value, maximum, number);
+	if (status != 0 || *number == 0U) {
+		(void)snprintf(why, why_size, "a number from 1 to %u", maximum);
+		return EINVAL;
+	}
+
+	/* Succeeded: the number, and its text as it is kept. */
+	(void)snprintf(text, size, "%u", *number);
+	return 0;
+}
+
+/*
+ * Checks a terminal type's name: letters, digits, '.', '_', '+' and '-',
+ * not empty and short enough for the environment's TERM.  Returns 0, or
+ * EINVAL with why set (when why is given).
+ */
+static int
+main_item_term(
+	const char *value,
+	char *why,
+	size_t why_size)
+{
+	size_t length;
+	size_t index;
+	char character;
+
+	/* A name of a sensible length. */
+	length = strlen(value);
+	if (length == 0U || length >= TERMINAL_TERM_MAX) {
+		if (why != NULL)
+			(void)snprintf(why, why_size, "a terminal type of 1 to %u characters", TERMINAL_TERM_MAX - 1U);
+		return EINVAL;
+	}
+
+	/* Each character one a terminal type's name has. */
+	for (index = 0U; index < length; index++) {
+		/* A letter or a digit. */
+		character = value[index];
+		if ((character >= 'a' && character <= 'z') ||
+		    (character >= 'A' && character <= 'Z') ||
+		    (character >= '0' && character <= '9'))
+			continue;
+
+		/* Or one of the four signs. */
+		if (character == '.' ||
+		    character == '_' ||
+		    character == '+' ||
+		    character == '-')
+			continue;
+
+		/* Any other character refuses the name. */
+		if (why != NULL)
+			(void)snprintf(why, why_size, "a terminal type has letters, digits, '.', '_', '+' and '-'");
+		return EINVAL;
+	}
+
+	/* Succeeded: a terminal type's name. */
+	return 0;
+}
+
+/*
+ * Keeps a setting in the desktop's settings: value, or the default (no
+ * line) when value is empty or the same as fallback.  Returns 0, or an
+ * errno value with why set.
+ */
+static int
+main_item_keep(
+	const char *keyword,
+	const char *value,
+	const char *fallback,
+	char *why,
+	size_t why_size)
+{
+	struct kl_settings *settings;
+	int differs;
+	int error;
+
+	/* The terminal's settings. */
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL) {
+		error = errno;
+		(void)snprintf(why, why_size, "the settings could not be opened (%s)", strerror(error));
+		return error;
+	}
+
+	/* Whether the value is the default: none given, or the same as it. */
+	differs = 0;
+	if (value[0] != '\0')
+		differs = strcmp(value, fallback);
+
+	/* The default takes the line away; another value is written. */
+	if (differs == 0) {
+		error = kl_settings_reset(settings, keyword, NULL);
+	} else {
+		error = kl_settings_set(settings, keyword, value, NULL);
+	}
+
+	/* A failure leaves the old setting. */
+	if (error != 0) {
+		kl_settings_close(settings);
+		(void)snprintf(why, why_size, "it could not be kept (%s)", strerror(error));
+		return error;
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* Succeeded: the setting is kept. */
 	return 0;
 }
 

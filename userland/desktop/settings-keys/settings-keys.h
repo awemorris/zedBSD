@@ -33,6 +33,7 @@
 #define KL_SETTINGS_TYPE_BOOL		2U
 #define KL_SETTINGS_TYPE_PATH		3U
 #define KL_SETTINGS_TYPE_OPENER		4U
+#define KL_SETTINGS_TYPE_TEXT		5U
 
 /* A key a client reads but never sets (the compositor's report). */
 #define KL_SETTINGS_KEY_READ_ONLY	0x1U
@@ -50,7 +51,9 @@
 /*
  * One setting: its name, its resolver, its type, the range of a number
  * (minimum to maximum; 0 and 1 for a Boolean), the default of a number its
- * resolver gives when nothing else does, and its flags.
+ * resolver gives when nothing else does, and its flags.  A path (absolute)
+ * and a text (any well-formed value) have no range and no default: an
+ * application's is empty until it is given one.
  *
  * The rows live in settings-keys.c's constant table for the program's life.
  */

@@ -21,7 +21,7 @@ port of its own (2222, so that it does not meet a server on Windows' port 22).
   ssh-keygen -t ed25519 -f id_ed25519
   ```
 
-  Put `id_ed25519` into mikuterm's `ssh\` folder. Keep `id_ed25519.pub` for
+  Put `id_ed25519` into mikuterm's `ssh/` folder. Keep `id_ed25519.pub` for
   the next step.
 
 ## 1. The SSH server in WSL
@@ -51,14 +51,14 @@ Check it listens: `ss -ltn | grep 2222` shows a line with `:2222`.
 ## 2. The distribution in mikuterm
 
 Nothing is needed for one distribution whose sshd listens on 2222: mikuterm
-connects to `localhost` on `WslPort` (2222 unless `config\mikuterm.conf` or
+connects to `localhost` on `WslPort` (2222 unless `config/mikuterm.conf` or
 the settings' Behavior pane says otherwise) as the distribution's default
 user.
 
 All the distributions of WSL 2 share one network, so two cannot listen on the
 same port. For a second distribution, give its sshd another port (2223) and
 add a Host named `wsl-` and the distribution's name to mikuterm's
-`ssh\config`:
+`ssh/config`:
 
 ```
 Host wsl-Debian
@@ -69,7 +69,7 @@ Host wsl-Debian
 A `User` there is used instead of the distribution's default user.
 
 To open a distribution in the first tab whenever mikuterm starts, give it such
-a Host and add to `config\mikuterm.conf`:
+a Host and add to `config/mikuterm.conf`:
 
 ```
 Connect wsl-Ubuntu-24.04
@@ -83,7 +83,7 @@ Up and Down) and Enter: mikuterm lists the distributions `wsl -l -q` lists.
 ```
 WSL distributions:
  [1] Ubuntu-24.04  (localhost:2222)
- [2] Debian  (ssh\config: wsl-Debian)
+ [2] Debian  (ssh/config: wsl-Debian)
  [b] Back
 ```
 
@@ -108,7 +108,7 @@ and type `yes` when they are the same.
 
 **Success:** the tab shows `Warning: Permanently added '[localhost]:2222'
 (ED25519) to the list of known hosts.` and WSL's shell prompt;
-`ssh\known_hosts` has a line starting with `[localhost]:2222 ssh-ed25519`.
+`ssh/known_hosts` has a line starting with `[localhost]:2222 ssh-ed25519`.
 The next connection goes straight to the prompt.
 
 ## When it does not work
@@ -118,6 +118,6 @@ The next connection goes straight to the prompt.
 | `WSL is not installed: Windows has no wsl.exe.` | WSL is not enabled on this Windows: `wsl --install` in an administrator's PowerShell. |
 | `WSL: ...` or `WSL has no distribution` | wsl.exe's own words: install a distribution (`wsl --install -d Ubuntu-24.04`). |
 | `ssh: connect to host localhost port 2222: Connection refused` (or `Connection timed out`), then `NAME needs an sshd listening on port 2222` | sshd is not running in the distribution, or it listens on another port: open the WSL shell, start sshd (step 1) and check `ss -ltn` there; or set `WslPort`, or the distribution's Host, to the port it listens on. If WSL's networking mode is not the default NAT mode, check that its localhost forwarding is on (`localhostForwarding` in `.wslconfig`). |
-| `me@localhost's password:` | The key was not accepted: check `~/.ssh/authorized_keys` (the `.pub` line, mode 600) and that `ssh\id_ed25519` is the matching private key. |
-| `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` | WSL's host keys were made again (a reinstalled distribution): delete the line the warning names from `ssh\known_hosts` and connect again. |
-| `ssh\config: line N: ...` | A keyword mikuterm does not support (for example `Include`): remove the line. |
+| `me@localhost's password:` | The key was not accepted: check `~/.ssh/authorized_keys` (the `.pub` line, mode 600) and that `ssh/id_ed25519` is the matching private key. |
+| `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` | WSL's host keys were made again (a reinstalled distribution): delete the line the warning names from `ssh/known_hosts` and connect again. |
+| `ssh/config: line N: ...` | A keyword mikuterm does not support (for example `Include`): remove the line. |

@@ -23,15 +23,13 @@
 /* The global request that closes the door to further sessions (OpenSSH PROTOCOL 2.2). */
 #define GLOBAL_NO_MORE_SESSIONS		"no-more-sessions@openssh.com"
 
-/* The local window level below which consumed bytes are given back to the peer: half of the full window. */
-#define CHANNEL_WINDOW_HALF		(SSH_CHANNEL_WINDOW / 2U)
-
 /* The most a window may hold: 2^32 - 1 (RFC 4254 5.2). */
 #define CHANNEL_WINDOW_LIMIT		0xffffffffU
 
 /* The text sent with a channel open failure for each reason; the language tag is empty. */
 #define OPEN_FAILURE_PROHIBITED_TEXT	"administratively prohibited"
 #define OPEN_FAILURE_SHORTAGE_TEXT	"resource shortage"
+#define OPEN_FAILURE_CONNECT_TEXT	"connect failed"
 
 /* One row of the table of request names: the name on the wire and the type it stands for. */
 struct request_name {
@@ -69,6 +67,8 @@ static void reset_slot(struct ssh_channel *channel);
 static int slot_in_table(const struct ssh_channels *channels, const struct ssh_channel *channel);
 static int read_message_number(struct ssh_reader *reader, unsigned first, unsigned second, unsigned *message);
 static void put_open_failure(struct ssh_buf *out, uint32_t recipient, uint32_t reason, const char *text);
+static int read_open(struct ssh_reader *reader, const uint8_t **type, size_t *type_size, uint32_t *sender, uint32_t *window, uint32_t *packet);
+static int put_refusal(struct ssh_buf *out, uint32_t recipient, uint32_t reason, const char *text);
 static void record_error(struct ssh_buf *out, int error);
 static int name_is(const uint8_t *name, size_t size, const char *text);
 static enum ssh_channel_request_type find_request_type(const uint8_t *name, size_t size);
@@ -137,6 +137,7 @@ ssh_channel_open_session(
 	/* Starts the channel: waiting for the peer's answer, with the whole window offered. */
 	slot->state = SSH_CHANNEL_OPENING;
 	slot->local_window = SSH_CHANNEL_WINDOW;
+	slot->window_size = SSH_CHANNEL_WINDOW;
 	slot->user = NULL;
 
 	/* Writes the open request: type, our number, the window and the largest data packet we accept. */
@@ -177,7 +178,6 @@ ssh_channel_accept_open(
 	struct ssh_channel *slot;
 	const uint8_t *type;
 	size_t type_size;
-	unsigned message;
 	uint32_t sender;
 	uint32_t window;
 	uint32_t packet;
@@ -189,16 +189,9 @@ ssh_channel_accept_open(
 
 	/* Reads the framing: message number, type, sender, window, packet size. */
 	ssh_reader_init(&reader, payload, size);
-	error = read_message_number(&reader, SSH_MSG_CHANNEL_OPEN, 0, &message);
+	error = read_open(&reader, &type, &type_size, &sender, &window, &packet);
 	if (error != 0)
 		return error;
-	ssh_reader_get_string(&reader, &type, &type_size);
-	sender = ssh_reader_get_u32(&reader);
-	window = ssh_reader_get_u32(&reader);
-	packet = ssh_reader_get_u32(&reader);
-	error = ssh_reader_error(&reader);
-	if (error != 0)
-		return EINVAL;
 
 	/* Does nothing more when the output has already failed. */
 	error = ssh_buf_error(out);
@@ -245,6 +238,7 @@ ssh_channel_accept_open(
 	slot->state = SSH_CHANNEL_OPEN;
 	slot->remote_id = sender;
 	slot->local_window = SSH_CHANNEL_WINDOW;
+	slot->window_size = SSH_CHANNEL_WINDOW;
 	slot->remote_window = window;
 	slot->remote_packet = packet;
 	if (slot->remote_packet > SSH_CHANNEL_PACKET)
@@ -267,6 +261,147 @@ ssh_channel_accept_open(
 
 	/* Succeeded: the channel is open and the confirmation is queued. */
 	*channel = slot;
+	return 0;
+}
+
+/*
+ * Reads a CHANNEL_OPEN from the peer whose answer this side gives later.
+ *
+ * As in ssh_channel_accept_open, the framing is read before anything
+ * else, a refusal answers at once, and nothing of the table changes for a
+ * malformed message.
+ */
+int
+ssh_channel_take_open(
+	struct ssh_channels *channels,
+	const uint8_t *payload,
+	size_t size,
+	const char *type,
+	uint32_t window_size,
+	struct ssh_buf *out,
+	struct ssh_channel **channel,
+	const uint8_t **data,
+	size_t *data_size)
+{
+	struct ssh_reader reader;
+	struct ssh_channel *slot;
+	const uint8_t *name;
+	size_t name_size;
+	uint32_t sender;
+	uint32_t window;
+	uint32_t packet;
+	int is_type;
+	int error;
+
+	/* Starts with no channel and no data. */
+	*channel = NULL;
+	*data = NULL;
+	*data_size = 0;
+
+	/* Refuses a window this side cannot keep up, or no type at all. */
+	if (type == NULL || window_size < 1 || window_size > SSH_CHANNEL_WINDOW)
+		return EINVAL;
+
+	/* Reads the framing: message number, type, sender, window, packet size. */
+	ssh_reader_init(&reader, payload, size);
+	error = read_open(&reader, &name, &name_size, &sender, &window, &packet);
+	if (error != 0)
+		return error;
+
+	/* Does nothing more when the output has already failed. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Only the type asked for is taken; every other type gets the same refusal as on the server side. */
+	is_type = name_is(name, name_size, type);
+	if (is_type == 0) {
+		error = put_refusal(out, sender, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, OPEN_FAILURE_PROHIBITED_TEXT);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A peer that accepts no data at all cannot be sent anything: a protocol fault. */
+	if (packet < 1)
+		return EPROTO;
+
+	/* Refuses the open when every slot is in use. */
+	slot = take_free_slot(channels);
+	if (slot == NULL) {
+		error = put_refusal(out, sender, SSH_OPEN_RESOURCE_SHORTAGE, OPEN_FAILURE_SHORTAGE_TEXT);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Keeps the peer's side; the channel waits for this side's answer, with the window it will offer. */
+	slot->state = SSH_CHANNEL_ANSWERING;
+	slot->remote_id = sender;
+	slot->local_window = window_size;
+	slot->window_size = window_size;
+	slot->remote_window = window;
+	slot->remote_packet = packet;
+	if (slot->remote_packet > SSH_CHANNEL_PACKET)
+		slot->remote_packet = SSH_CHANNEL_PACKET;
+	slot->user = NULL;
+
+	/* Succeeded: the slot waits, and the type's own data points into the payload. */
+	*channel = slot;
+	*data = reader.data + reader.offset;
+	*data_size = ssh_reader_left(&reader);
+	return 0;
+}
+
+/*
+ * Answers an open taken by ssh_channel_take_open.
+ */
+int
+ssh_channel_answer_open(
+	struct ssh_channels *channels,
+	struct ssh_channel *channel,
+	int accept,
+	struct ssh_buf *out)
+{
+	int in_table;
+	int error;
+
+	/* Only a slot of this table that waits for its answer is answered. */
+	if (channel == NULL)
+		return EINVAL;
+	in_table = slot_in_table(channels, channel);
+	if (in_table == 0 || channel->state != SSH_CHANNEL_ANSWERING)
+		return EINVAL;
+
+	/* Does nothing when the output has already failed. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* A refusal tells the peer the connection could not be made, and frees the slot. */
+	if (!accept) {
+		put_open_failure(out, channel->remote_id, SSH_OPEN_CONNECT_FAILED, OPEN_FAILURE_CONNECT_TEXT);
+		error = ssh_buf_error(out);
+		if (error != 0)
+			return error;
+		reset_slot(channel);
+		return 0;
+	}
+
+	/* Writes the confirmation: the peer's number, ours, our window and our packet size. */
+	ssh_buf_put_u8(out, SSH_MSG_CHANNEL_OPEN_CONFIRMATION);
+	ssh_buf_put_u32(out, channel->remote_id);
+	ssh_buf_put_u32(out, channel->local_id);
+	ssh_buf_put_u32(out, channel->window_size);
+	ssh_buf_put_u32(out, SSH_CHANNEL_PACKET);
+
+	/* Leaves the channel waiting when the confirmation could not be queued. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the channel is open both ways. */
+	channel->state = SSH_CHANNEL_OPEN;
 	return 0;
 }
 
@@ -548,8 +683,7 @@ ssh_channel_send_room(
 /*
  * Tells the channel that the program has consumed size received bytes
  * (written them on), and, when the local window has fallen below half of
- * SSH_CHANNEL_WINDOW, appends WINDOW_ADJUST bringing it back to
- * SSH_CHANNEL_WINDOW.
+ * window_size, appends WINDOW_ADJUST bringing it back to window_size.
  *
  * Telling it that nothing was consumed (size 0) changes nothing, and a
  * channel that is not open needs no more room.
@@ -572,7 +706,7 @@ ssh_channel_consumed(
 		return;
 
 	/* The window is still more than half full: the peer has room. */
-	if (channel->local_window >= CHANNEL_WINDOW_HALF)
+	if (channel->local_window >= channel->window_size / 2U)
 		return;
 
 	/* Does nothing when the output has already failed. */
@@ -581,7 +715,7 @@ ssh_channel_consumed(
 		return;
 
 	/* Works out how much brings the window back to its full size. */
-	amount = SSH_CHANNEL_WINDOW - channel->local_window;
+	amount = channel->window_size - channel->local_window;
 
 	/* Writes the adjustment. */
 	ssh_buf_put_u8(out, SSH_MSG_CHANNEL_WINDOW_ADJUST);
@@ -594,7 +728,7 @@ ssh_channel_consumed(
 		return;
 
 	/* The peer now has the full window again. */
-	channel->local_window = SSH_CHANNEL_WINDOW;
+	channel->local_window = channel->window_size;
 }
 
 /*
@@ -1287,6 +1421,7 @@ reset_slot(
 	channel->local_window = 0;
 	channel->remote_window = 0;
 	channel->remote_packet = 0;
+	channel->window_size = 0;
 	channel->eof_sent = 0;
 	channel->eof_received = 0;
 	channel->close_sent = 0;
@@ -1362,6 +1497,66 @@ put_open_failure(
 	ssh_buf_put_u32(out, reason);
 	ssh_buf_put_cstring(out, text);
 	ssh_buf_put_string(out, NULL, 0);
+}
+
+/*
+ * Reads the framing of a CHANNEL_OPEN up to the packet size (RFC 4254
+ * 5.1): the type, the sender's number, its window and its packet size.
+ * Returns 0 or EINVAL.
+ */
+static int
+read_open(
+	struct ssh_reader *reader,
+	const uint8_t **type,
+	size_t *type_size,
+	uint32_t *sender,
+	uint32_t *window,
+	uint32_t *packet)
+{
+	unsigned message;
+	int error;
+
+	/* Reads the number, then the fields every open has. */
+	error = read_message_number(reader, SSH_MSG_CHANNEL_OPEN, 0, &message);
+	if (error != 0)
+		return error;
+	ssh_reader_get_string(reader, type, type_size);
+	*sender = ssh_reader_get_u32(reader);
+	*window = ssh_reader_get_u32(reader);
+	*packet = ssh_reader_get_u32(reader);
+
+	/* Reports a message too short for them. */
+	error = ssh_reader_error(reader);
+	if (error != 0)
+		return EINVAL;
+
+	/* Succeeded: the fields are read. */
+	return 0;
+}
+
+/*
+ * Appends CHANNEL_OPEN_FAILURE for a refused open and returns 0, or the
+ * error recorded in out.
+ */
+static int
+put_refusal(
+	struct ssh_buf *out,
+	uint32_t recipient,
+	uint32_t reason,
+	const char *text)
+{
+	int error;
+
+	/* Writes the refusal. */
+	put_open_failure(out, recipient, reason, text);
+
+	/* Reports an output that could not take it. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the refusal is queued. */
+	return 0;
 }
 
 /*
