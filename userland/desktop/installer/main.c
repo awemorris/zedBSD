@@ -12,6 +12,10 @@
  * error (the session's log): "INSTALLER READY", each screen shown, and
  * the place of every control of a screen when it changes.
  *
+ * It writes disks, so it runs as root: the desktop starts it through
+ * klsudo (the admin action "installer", whose dialog the person answers),
+ * and an installer started as anyone else starts itself that way.
+ *
  *   installer [--display=NAME] [--width=N] [--height=N]
  */
 
@@ -47,6 +51,7 @@
 #define MAIN_RESIZE_WAIT_US	250000U
 
 static int main_parse(int argc, char **argv, const char **display, unsigned *width, unsigned *height);
+static void main_elevate(void);
 static int main_number(const char *text, unsigned *value);
 static int main_loop(struct inst_app *app);
 static void main_event(struct inst_app *app, const struct kl_window_event *event);
@@ -86,6 +91,9 @@ main(
 		fprintf(stderr, "usage: installer [--display=NAME] [--width=N] [--height=N]\n");
 		return 2;
 	}
+
+	/* Root, or started again as root through klsudo. */
+	main_elevate();
 
 	/* A write to a closed pipe or socket does not end the installer. */
 	(void)signal(SIGPIPE, SIG_IGN);
@@ -167,6 +175,31 @@ main(
 	if (status != 0)
 		return 1;
 	return 0;
+}
+
+/*
+ * Starts the installer again through klsudo when it does not run as root:
+ * klsudo asks the person in the desktop's dialog and starts the admin
+ * action "installer" (this program, as root, on a connection the
+ * compositor lends it).  Returns only as root; exits when klsudo cannot
+ * be started.
+ */
+static void
+main_elevate(void)
+{
+	static char *const argument[] = { (char *)"klsudo", (char *)"-n", (char *)INST_ACTION, NULL };
+	uid_t effective;
+
+	/* Root goes on. */
+	effective = geteuid();
+	if (effective == 0)
+		return;
+
+	/* klsudo in this program's place; its status becomes this program's. */
+	inst_log("ELEVATE uid=%ld through %s", (long)effective, INST_KLSUDO);
+	(void)execv(INST_KLSUDO, argument);
+	fprintf(stderr, "INSTALLER FAILED operation=klsudo error=%d\n", errno);
+	exit(127);
 }
 
 /* Writes one line of the log: "INSTALLER " and the words, on standard error. */

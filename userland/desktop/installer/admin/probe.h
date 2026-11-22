@@ -42,7 +42,7 @@
 #define PROBE_DEVICES_MAX	96U
 
 /* Where the helper mounts a FAT read-only to look into it. */
-#define PROBE_MOUNT_POINT	"/run/install-admin/probe"
+#define PROBE_MOUNT_POINT	"/run/installer-helper/probe"
 
 /* One block device: what the kernel says of it and how the system uses it. */
 struct probe_device {

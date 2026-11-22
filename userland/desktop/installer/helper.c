@@ -6,14 +6,16 @@
  */
 
 /*
- * The installer's helper, install-admin, as the installer sees it: a probe
- * that answers and ends (while no session runs), and a session that lives
- * from the first write until the installer ends it, its requests one at a
- * time.  Each runs as a process of the application (kl_process): its lines
- * come as the process's output; each line goes to the flow (flow.c) with
- * the request it answers, and the line that ends a request ("end" of a
- * probe, "DONE" or "FAIL" of the others) frees the helper for the next.
- * The helper's standard error is the installer's, the session's log.
+ * The installer's helper, installer-helper, as the installer sees it: a
+ * process that answers one request and ends (a probe, the releases, a
+ * download; while no session runs), and a session that lives from the
+ * first write until the installer ends it, its requests one at a time.
+ * Each runs as a child process of the application (kl_process), root as
+ * the installer is: its lines come as the process's output; each line
+ * goes to the flow (flow.c) with the request it answers, and the line
+ * that ends a session's request ("DONE" or "FAIL") frees the helper for
+ * the next.  A download is stopped by closing its input.  The helper's
+ * standard error is the installer's, the session's log.
  */
 
 #include "installer.h"
@@ -23,7 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int helper_spawn(struct inst_app *app, const char *verb, int input, struct kl_process **process);
+static int helper_spawn(struct inst_app *app, const char *verb, const char *word, int input, struct kl_process **process);
+static int helper_once(struct inst_app *app, enum inst_job job, const char *verb, const char *word, int input);
 static void helper_read(struct inst_app *app, struct kl_process *process);
 static void helper_line(struct inst_app *app, char *line);
 static void helper_ended(struct inst_app *app, struct kl_process *process);
@@ -58,15 +61,80 @@ inst_helper_probe(
 	}
 
 	/* A probe of its own. */
-	error = helper_spawn(app, "probe", 0, &helper->probe);
+	error = helper_once(app, INST_JOB_PROBE, "probe", NULL, 0);
 	if (error != 0)
 		return error;
-	helper->job = INST_JOB_PROBE;
-	helper->line_long = 0;
-	inst_log("HELPER probe");
 
 	/* Succeeded: the probe runs. */
 	return 0;
+}
+
+/*
+ * Asks the helper for the releases offered.  Returns 0 when asked, EBUSY
+ * while another request is answered or a session runs, or the error of
+ * starting the helper.
+ */
+int
+inst_helper_releases(
+	struct inst_app *app)
+{
+	int error;
+
+	/* Not while the session holds the helper's lock. */
+	if (app->helper.session != NULL)
+		return EBUSY;
+
+	/* A helper of its own, stopped by closing its input. */
+	error = helper_once(app, INST_JOB_RELEASES, "releases", NULL, 1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the list is asked for. */
+	return 0;
+}
+
+/*
+ * Asks the helper to download the system of a release.  Returns 0 when
+ * asked, EBUSY while another request is answered or a session runs, or
+ * the error of starting the helper.
+ */
+int
+inst_helper_download(
+	struct inst_app *app,
+	const char *tag)
+{
+	int error;
+
+	/* Not while the session holds the helper's lock. */
+	if (app->helper.session != NULL)
+		return EBUSY;
+
+	/* A helper of its own, stopped by closing its input. */
+	error = helper_once(app, INST_JOB_DOWNLOAD, "download", tag, 1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the download runs. */
+	return 0;
+}
+
+/* Stops the list of the releases or the download that runs: its input closes. */
+void
+inst_helper_stop(
+	struct inst_app *app)
+{
+	struct inst_helper *helper;
+
+	/* Only a list or a download is stopped. */
+	helper = &app->helper;
+	if (helper->once == NULL)
+		return;
+	if (helper->job != INST_JOB_RELEASES && helper->job != INST_JOB_DOWNLOAD)
+		return;
+
+	/* The end of its input, which the helper takes as a stop. */
+	(void)kl_process_close_input(helper->once);
+	inst_log("HELPER stop job=%d", (int)helper->job);
 }
 
 /*
@@ -113,7 +181,7 @@ inst_helper_request(
 
 	/* The session, when none runs. */
 	if (helper->session == NULL) {
-		error = helper_spawn(app, "session", 1, &helper->session);
+		error = helper_spawn(app, "session", NULL, 1, &helper->session);
 		if (error != 0)
 			return error;
 		helper->session_open = 1;
@@ -192,25 +260,59 @@ inst_helper_busy(
 }
 
 /*
- * Starts the helper with a verb as a process of the application, its
- * output read by the line and, when asked, its input written.  Returns 0
- * or an errno value.
+ * Starts a helper that answers one request and ends, unless another
+ * request is answered.  Returns 0, EBUSY, or the error of starting it.
+ */
+static int
+helper_once(
+	struct inst_app *app,
+	enum inst_job job,
+	const char *verb,
+	const char *word,
+	int input)
+{
+	struct inst_helper *helper;
+	int error;
+
+	/* One request at a time. */
+	helper = &app->helper;
+	if (helper->job != INST_JOB_NONE || helper->once != NULL)
+		return EBUSY;
+
+	/* The helper, with its verb and its word. */
+	error = helper_spawn(app, verb, word, input, &helper->once);
+	if (error != 0)
+		return error;
+	helper->job = job;
+	helper->line_long = 0;
+	inst_log("HELPER %s%s%s", verb, word != NULL ? " " : "", word != NULL ? word : "");
+
+	/* Succeeded: the helper runs. */
+	return 0;
+}
+
+/*
+ * Starts the helper with a verb (and a word after it, when given) as a
+ * process of the application, its output read by the line and, when
+ * asked, its input written.  Returns 0 or an errno value.
  */
 static int
 helper_spawn(
 	struct inst_app *app,
 	const char *verb,
+	const char *word,
 	int input,
 	struct kl_process **process)
 {
 	struct kl_process_options options;
-	const char *argument[3];
+	const char *argument[4];
 	int error;
 
-	/* The helper and its verb; the output read, the input when asked, the error the installer's. */
+	/* The helper, its verb and its word; the output read, the input when asked, the error the installer's. */
 	argument[0] = INST_HELPER;
 	argument[1] = verb;
-	argument[2] = NULL;
+	argument[2] = word;
+	argument[3] = NULL;
 	memset(&options, 0, sizeof(options));
 	options.argv = argument;
 	options.streams = KL_PROCESS_OUTPUT;
@@ -304,10 +406,10 @@ helper_ended(
 	job = helper->job;
 	kl_process_close(process);
 
-	/* The probe of its own. */
-	if (process == helper->probe) {
-		inst_log("HELPER probe-end status=%d", status);
-		helper->probe = NULL;
+	/* A helper that answered one request. */
+	if (process == helper->once) {
+		inst_log("HELPER once-end status=%d job=%d", status, (int)job);
+		helper->once = NULL;
 		helper->job = INST_JOB_NONE;
 		inst_flow_ended(app, job, status);
 		return;
@@ -345,8 +447,8 @@ helper_terminal(
 	if (same == 0)
 		return 1;
 
-	/* A probe ends with its "end". */
-	if (job == INST_JOB_PROBE) {
+	/* A probe and a list of the releases end with their "end". */
+	if (job == INST_JOB_PROBE || job == INST_JOB_RELEASES) {
 		same = strcmp(line, "end");
 		if (same == 0)
 			return 1;

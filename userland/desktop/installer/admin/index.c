@@ -6,9 +6,9 @@
  */
 
 /*
- * The installer's index, read (index.h).  The text is checked against the
- * SHA-256 the helper was built with before it is believed, and read once,
- * from the copy that was checked.
+ * The installer's index, read (index.h).  The text comes from the
+ * downloaded system, which was checked whole against the release's
+ * SHA-256 before anything of it was read (payload.h), and is read once.
  */
 
 #include "index.h"
@@ -547,7 +547,7 @@ index_read_unit(
 	if (error != 0)
 		return EINVAL;
 
-	/* A unit's name is a file name of /opt/installer/units. */
+	/* A unit's name is a file name of the system's units/. */
 	slash = strchr(unit->name, '/');
 	if (slash != NULL || unit->name[0] == '.')
 		return EINVAL;
@@ -583,7 +583,7 @@ index_read_boot(
 	if (error != 0)
 		return EINVAL;
 
-	/* A boot file's name is a file name of /opt/installer/boot. */
+	/* A boot file's name is a file name of the system's boot/. */
 	slash = strchr(boot->name, '/');
 	if (slash != NULL || boot->name[0] == '.')
 		return EINVAL;

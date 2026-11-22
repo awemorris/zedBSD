@@ -7,11 +7,15 @@
 
 /*
  * The installer: a wizard of one window that puts the system on a disk of
- * this computer.  It runs as the live session's user and has no rights of
- * its own; what it learns of the disks and every write it asks for go
- * through its helper, install-admin, which it starts as a process and
- * talks to through its standard input and output, a line at a time (admin/plan.h, admin/probe.h,
- * admin/session.h).  The files share this header: main.c (the window,
+ * this computer.  It runs as root: the desktop starts it so once the
+ * person has allowed it (klsudo, the admin action "installer"), and it
+ * starts itself through klsudo when it is started as anyone else.  What
+ * it learns of the disks, the releases it offers, the download of the
+ * system and every write it asks for go through its helper,
+ * installer-helper, which it starts as a child process and talks to
+ * through its standard input and output, a line at a time (admin/plan.h,
+ * admin/probe.h, admin/payload.h, admin/session.h): the installer itself
+ * never opens a disk, and stays answering while the helper works.  The files share this header: main.c (the window,
  * its input and the log the tests read), helper.c (the helper's
  * processes and their lines), catalog.c (the index of what can be
  * installed and the choice of it), disk.c (the disks as the probe told
@@ -28,13 +32,20 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-/* The helper, the index of what it installs, and the files of the image. */
-#define INST_HELPER		"/usr/libexec/install-admin"
+/* The helper, the index of the system it downloaded, klsudo and the files of the running system. */
+#define INST_HELPER		"/usr/libexec/installer-helper"
 #ifndef INST_INDEX
-#define INST_INDEX		"/opt/installer/index"
+#define INST_INDEX		"/run/installer-helper/index"
 #endif
+#define INST_KLSUDO		"/bin/klsudo"
+#define INST_ACTION		"installer"
 #define INST_OS_RELEASE		"/etc/os-release"
 #define INST_PASSWD		"/etc/passwd"
+
+/* The most releases offered, and the longest tag and date of one (with its NUL). */
+#define INST_RELEASES_MAX	32U
+#define INST_TAG_MAX		128U
+#define INST_DATE_MAX		32U
 
 /* The most disks, partitions, units, items and licences the installer keeps. */
 #define INST_DISKS_MAX		32U
@@ -75,9 +86,10 @@
 #define INST_SWAPFILE_MAX	((2ULL << 30) - 4096ULL)
 #define INST_ROOT_SPARE		INST_GIB
 
-/* The screens, in the order of the wizard (S7a between S7 and S8). */
+/* The screens, in the order of the wizard (S1a between S1 and S2, S7a between S7 and S8). */
 enum inst_screen {
 	INST_S1 = 0,
+	INST_S1A,
 	INST_S2,
 	INST_S3,
 	INST_S4,
@@ -120,7 +132,16 @@ enum inst_job {
 	INST_JOB_PROBE,
 	INST_JOB_EDIT,
 	INST_JOB_INSTALL,
-	INST_JOB_CANCEL
+	INST_JOB_CANCEL,
+	INST_JOB_RELEASES,
+	INST_JOB_DOWNLOAD
+};
+
+/* A release offered: its tag, its publication date and the size of its system. */
+struct inst_release {
+	char tag[INST_TAG_MAX];
+	char date[INST_DATE_MAX];
+	uint64_t bytes;
 };
 
 /*
@@ -245,13 +266,14 @@ struct inst_tuple {
 };
 
 /*
- * The helper's processes: a probe that answers and ends, and the session
- * that lives from the first write until the installer ends it (its input
- * open until then), bound to a disk.  One request is answered at a time;
- * the line being read, and whether the rest of a line too long is dropped.
+ * The helper's processes: one that answers a request and ends (a probe,
+ * the releases, a download), and the session that lives from the first
+ * write until the installer ends it (its input open until then), bound
+ * to a disk.  One request is answered at a time; the line being read, and
+ * whether the rest of a line too long is dropped.
  */
 struct inst_helper {
-	struct kl_process *probe;
+	struct kl_process *once;
 	struct kl_process *session;
 	int session_open;
 	uint32_t session_disk;
@@ -315,7 +337,24 @@ struct inst_app {
 	int probe_state;
 	char probe_message[INST_MESSAGE_MAX];
 
-	/* The catalog. */
+	/*
+	 * S1a: the releases offered and their state (0 none, 1 asked, 2 read,
+	 * 3 failed), the one chosen (-1 none); the download's state (the same
+	 * words), the tag it is of, its step, its bytes and what went wrong.
+	 */
+	struct inst_release release[INST_RELEASES_MAX];
+	unsigned release_count;
+	int releases_state;
+	int release_chosen;
+	char releases_message[INST_MESSAGE_MAX];
+	int download_state;
+	char download_tag[INST_TAG_MAX];
+	char download_step[16];
+	uint64_t download_done;
+	uint64_t download_total;
+	char download_message[INST_MESSAGE_MAX];
+
+	/* The catalog, read from the downloaded system. */
 	struct inst_catalog catalog;
 
 	/* S2: the disk chosen (its registration number, 0 for none). */
@@ -420,6 +459,9 @@ void inst_redraw(struct inst_app *app);
 
 /* helper.c */
 int inst_helper_probe(struct inst_app *app);
+int inst_helper_releases(struct inst_app *app);
+int inst_helper_download(struct inst_app *app, const char *tag);
+void inst_helper_stop(struct inst_app *app);
 int inst_helper_request(struct inst_app *app, uint32_t disk, enum inst_job job, const char *request);
 void inst_helper_end_session(struct inst_app *app);
 void inst_helper_ready(struct inst_app *app, struct kl_process *process, unsigned ready);
@@ -474,6 +516,8 @@ void inst_choose_swap(struct inst_app *app, const struct inst_part *part);
 void inst_item_toggle(struct inst_app *app, unsigned item);
 void inst_start_over(struct inst_app *app);
 void inst_probe_again(struct inst_app *app);
+void inst_releases_again(struct inst_app *app);
+void inst_release_choose(struct inst_app *app, unsigned release);
 void inst_reboot(struct inst_app *app);
 const char *inst_screen_word(enum inst_screen screen);
 int inst_user_refusal(const struct inst_app *app, const char **reason);
