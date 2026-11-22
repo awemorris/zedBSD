@@ -7,6 +7,10 @@
 # Userland Build Rules
 #
 
+include mk/config.mk
+include mk/platform-$(PLATFORM)/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
 ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
 CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
 endif

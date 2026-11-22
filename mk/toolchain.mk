@@ -8,7 +8,7 @@
 #
 
 include mk/toolchain-llvm/llvm.mk
-include mk/gcc/gcc.mk
+include mk/toolchain-gcc/gcc.mk
 
 # The prebuilt compiler of the platform: GCC's for the platforms built
 # with GCC (their defaults.mk sets PLATFORM_TOOLCHAIN := gcc), LLVM's for

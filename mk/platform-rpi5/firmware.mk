@@ -62,7 +62,7 @@ endif
 
 .PHONY: firmware-licenses-platform
 firmware-licenses-platform: rpi5-boot-firmware-license
-	$(MAKE) -f mk/userland.mk firmware-licenses
+	$(MAKE) -f mk/userland.mk firmware-licenses PLATFORM=$(PLATFORM) BUILD=$(BUILD) ZEDBSD_CONFIGMK=$(ZEDBSD_CONFIGMK) TOPLEVEL_BUILD=$(TOPLEVEL_BUILD)
 
 .PHONY: firmware-licenses-pending-platform
 firmware-licenses-pending-platform: rpi5-boot-firmware-license-pending
