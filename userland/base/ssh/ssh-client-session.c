@@ -218,7 +218,9 @@ ssh_client_run(
 	}
 
 	/* Tells the user the connection is over when the session ran on a terminal. */
-	if (session->authenticated && session->pty && !session->reported)
+	if (session->authenticated &&
+	    session->pty &&
+	    !session->reported)
 		ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Connection to %s closed.", client->host_name);
 
 	/* Takes the exit value: the command's status, or 255 for a signal, a failure or no status. */
@@ -576,7 +578,9 @@ client_session_run(
 		/* Gives up on a server that has not identified itself within ConnectTimeout. */
 		wait_ms = CLIENT_SESSION_POLL_MS;
 		identified = ssh_engine_identified(client->engine);
-		if (session->deadline != 0 && !identified && !session->closed) {
+		if (session->deadline != 0 &&
+		    !identified &&
+		    !session->closed) {
 			if (now >= session->deadline)
 				return ETIMEDOUT;
 			if (session->deadline - now < wait_ms)

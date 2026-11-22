@@ -145,7 +145,9 @@ mikuterm_connections_wait(
 		/* No thread runs, or the time is up. */
 		running = connection_threads;
 		now = kl_clock_us() / 1000U;
-		if (running == 0U || now >= deadline || !connection_cond_made)
+		if (running == 0U ||
+		    now >= deadline ||
+		    !connection_cond_made)
 			break;
 		(void)kl_cond_wait_for(&connection_threads_ended, &connection_registry, (uint32_t)(deadline - now));
 	}

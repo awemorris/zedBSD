@@ -224,7 +224,9 @@ keiui_win32_tabs_layout(
 	/* Writes nothing without the strip and the places to write. */
 	if (strip == NULL || new_place == NULL)
 		return 0;
-	if (strip->count != 0U && (places == NULL || closable == NULL))
+	if (strip->count != 0U &&
+	    (places == NULL ||
+	     closable == NULL))
 		return strip->left;
 
 	/* The lengths at the window's dpi. */
@@ -260,7 +262,9 @@ keiui_win32_tabs_layout(
 	}
 
 	/* Too many even at the least: as many as fit. */
-	if (width == least && strip->count != 0U && (int64_t)strip->count * ((int64_t)least + (int64_t)gap) > room) {
+	if (width == least &&
+	    strip->count != 0U &&
+	    (int64_t)strip->count * ((int64_t)least + (int64_t)gap) > room) {
 		shown = (unsigned)(room / ((int64_t)least + (int64_t)gap));
 		if (shown > strip->count)
 			shown = strip->count;
@@ -268,7 +272,9 @@ keiui_win32_tabs_layout(
 
 	/* The first tab shown: the first one, or the one that ends the shown run at the active tab. */
 	first = 0U;
-	if (strip->active < strip->count && shown != 0U && strip->active >= shown)
+	if (strip->active < strip->count &&
+	    shown != 0U &&
+	    strip->active >= shown)
 		first = strip->active - shown + 1U;
 
 	/* Each tab, side by side from the strip's left. */

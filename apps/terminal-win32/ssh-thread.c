@@ -303,7 +303,9 @@ thread_choose(
 			continue;
 
 		/* X is the settings: the tab becomes the settings' tab. */
-		if ((answer[0] == 'x' || answer[0] == 'X') && answer[1] == '\0') {
+		if ((answer[0] == 'x' ||
+		     answer[0] == 'X') &&
+		    answer[1] == '\0') {
 			session_settings(session);
 			free(hosts);
 			return ECANCELED;
@@ -311,7 +313,9 @@ thread_choose(
 
 		/* A number of the list is its host. */
 		number = strtoul(answer, &end, 10);
-		if (*end == '\0' && number >= 1UL && number <= hosts->count)
+		if (*end == '\0' &&
+		    number >= 1UL &&
+		    number <= hosts->count)
 			(void)snprintf(answer, sizeof(answer), "%s", hosts->names[number - 1UL]);
 
 		/* The host, the user and the port typed. */
@@ -417,7 +421,10 @@ thread_parse_target(
 	/* The port, a number from 1 to 65535. */
 	if (colon != NULL) {
 		port = strtoul(colon + 1, &end, 10);
-		if (colon[1] == '\0' || *end != '\0' || port == 0UL || port > 65535UL)
+		if (colon[1] == '\0' ||
+		    *end != '\0' ||
+		    port == 0UL ||
+		    port > 65535UL)
 			return EINVAL;
 		target->port = (uint16_t)port;
 	}
@@ -1330,7 +1337,9 @@ thread_known_hosts_write(
 	size = 0U;
 	error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &old, &size);
 	unended = 0;
-	if (error == 0 && size != 0U && old[size - 1U] != '\n')
+	if (error == 0 &&
+	    size != 0U &&
+	    old[size - 1U] != '\n')
 		unended = 1;
 	free(old);
 	if (unended)
@@ -1858,7 +1867,9 @@ thread_passphrase_answer(
 
 	/* The engine opens the key with it at once; an empty one passes the key over. */
 	error = ssh_engine_passphrase(link->engine, link->asked_identity, answer);
-	if (error != 0 || answer[0] == '\0' || !keep)
+	if (error != 0 ||
+	    answer[0] == '\0' ||
+	    !keep)
 		return;
 
 	/* Keeps the passphrase that opened the key until the user signs out of Windows. */

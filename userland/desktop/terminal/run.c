@@ -401,6 +401,8 @@ terminal_run(
 	result->result = run.result;
 	result->error = error;
 	result->reason = run.reason;
+
+	/* The program hears how the run ended. */
 	if (options->ended != NULL)
 		options->ended(options->data, result);
 
@@ -705,7 +707,9 @@ run_loop(
 		run_edge_scroll(terminal_clock());
 
 		/* A key typed ends the selection (Edit > Select All, or the pointer's range). */
-		if (run_window.input_length != 0U && (run_screen->selected || run_screen->range)) {
+		if (run_window.input_length != 0U &&
+		    (run_screen->selected ||
+		     run_screen->range)) {
 			run_screen->selected = 0;
 			run_screen->range = 0;
 			run_screen->changed = 1;
@@ -786,6 +790,8 @@ run_loop(
 		if (status != 0)
 			error = EIO;
 		terminal_window_frame_shown(&run_window, asked, error);
+
+		/* A drawing out of date: the size is taken again, unless that keeps failing. */
 		if (status == EAGAIN) {
 			stale++;
 			if (stale > RUN_STALE_LIMIT)
@@ -1879,6 +1885,8 @@ run_paste_begin(
 		} else {
 			run_paste[at] = text[index];
 		}
+
+		/* Moves past the byte written. */
 		at++;
 	}
 
@@ -2002,7 +2010,9 @@ run_pointer_press(
 
 	/* A second press soon after a tap may be a tap-and-drag: decided by its first move. */
 	run_tap_drag = 0;
-	if (again && run_clicks == 1U && run_last_tap)
+	if (again &&
+	    run_clicks == 1U &&
+	    run_last_tap)
 		run_tap_drag = 1;
 
 	/* How many clicks, up to three (a fourth starts again at one). */
@@ -2140,7 +2150,10 @@ run_pointer_motion(
 	if (run_drag_armed) {
 		dx = event->x - run_press_x;
 		dy = event->y - run_press_y;
-		if (dx > -RUN_DRAG_DISTANCE && dx < RUN_DRAG_DISTANCE && dy > -RUN_DRAG_DISTANCE && dy < RUN_DRAG_DISTANCE)
+		if (dx > -RUN_DRAG_DISTANCE &&
+		    dx < RUN_DRAG_DISTANCE &&
+		    dy > -RUN_DRAG_DISTANCE &&
+		    dy < RUN_DRAG_DISTANCE)
 			return;
 		run_drag_armed = 0;
 		length = terminal_screen_text(run_screen, text, sizeof(text));
@@ -2213,7 +2226,9 @@ run_select_to_pointer(void)
 	}
 
 	/* A cell at a time; the pressed cell alone selects nothing yet. */
-	if (column == run_anchor_column && line == run_anchor_line && !run_screen->range)
+	if (column == run_anchor_column &&
+	    line == run_anchor_line &&
+	    !run_screen->range)
 		return;
 	run_range(run_anchor_column, run_anchor_line, column, line);
 }
@@ -2509,7 +2524,9 @@ run_word_character(
 
 	/* A blank or a space parts words. */
 	codepoint = cell->codepoint;
-	if (codepoint == 0U || codepoint == ' ' || codepoint == '\t')
+	if (codepoint == 0U ||
+	    codepoint == ' ' ||
+	    codepoint == '\t')
 		return 0;
 
 	/* Any other character but the shell's punctuation is a word's. */
@@ -2752,6 +2769,8 @@ run_tab_settings(
 		errno = ENOMEM;
 		return -1;
 	}
+
+	/* An empty grid of the window's size. */
 	terminal_screen_init(screen, run->columns, run->rows);
 
 	/* The tab, at the end, with its ID; the tab it came from is kept. */
@@ -2881,6 +2900,8 @@ run_page_frame(
 	if (status != 0)
 		error = EIO;
 	terminal_window_frame_shown(&run_window, asked, error);
+
+	/* A drawing out of date is remade, and the page drawn again. */
 	if (status == EAGAIN) {
 		run_window.resized = 1;
 		terminal_page_shown(&run_window);

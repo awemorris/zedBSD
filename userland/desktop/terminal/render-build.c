@@ -152,7 +152,9 @@ terminal_build_frame(
 	build->range_count = 0U;
 	keep = build_rows_usable(build, screen, font, theme, blank);
 	store = 1;
-	if (query_count != 0U || (window != NULL && window->search_found))
+	if (query_count != 0U ||
+	    (window != NULL &&
+	     window->search_found))
 		store = 0;
 	if (!store)
 		keep = 0;
@@ -213,7 +215,9 @@ terminal_build_frame(
 		base = terminal_screen_line_cell(screen, 0U, line);
 		kept = NULL;
 		index = row + 2;
-		if (base != NULL && index >= 0 && index < (int)TERMINAL_RENDER_ROWS)
+		if (base != NULL &&
+		    index >= 0 &&
+		    index < (int)TERMINAL_RENDER_ROWS)
 			kept = &build->rows[index];
 		if (keep && kept != NULL) {
 			same = build_row_same(build, kept, &state, base, screen->columns, (unsigned)index);
@@ -450,7 +454,9 @@ build_row_range(
 	/* None. */
 	state->range_from = 1U;
 	state->range_to = 0U;
-	if (!screen->range || line < screen->range_from[1] || line > screen->range_to[1])
+	if (!screen->range ||
+	    line < screen->range_from[1] ||
+	    line > screen->range_to[1])
 		return;
 
 	/* The whole line, but from the range's first cell on its first line and up to its last on its last. */

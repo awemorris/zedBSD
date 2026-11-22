@@ -1392,7 +1392,9 @@ window_key(
 		(void)keiui_win32_utf8_from_utf16(units, count, input->text, sizeof(input->text), NULL);
 
 	/* A press with Control types no character: its text is the one the key types without Control. */
-	if (input->pressed && count == 0U && (input->modifiers & KL_MOD_CTRL) != 0U)
+	if (input->pressed &&
+	    count == 0U &&
+	    (input->modifiers & KL_MOD_CTRL) != 0U)
 		window_control_text(wparam, flags.scan, input->text, sizeof(input->text));
 }
 

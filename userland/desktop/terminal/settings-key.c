@@ -85,7 +85,9 @@ terminal_key_name_valid(
 			continue;
 		if (byte >= '0' && byte <= '9')
 			continue;
-		if (byte == '.' || byte == '_' || byte == '-')
+		if (byte == '.' ||
+		    byte == '_' ||
+		    byte == '-')
 			continue;
 		return EINVAL;
 	}
@@ -553,7 +555,9 @@ key_field_end(
 	size_t end)
 {
 	/* Up to the white space. */
-	while (at < end && text[at] != ' ' && text[at] != '\t')
+	while (at < end &&
+	       text[at] != ' ' &&
+	       text[at] != '\t')
 		at++;
 
 	/* Reports the field's end. */
@@ -568,7 +572,9 @@ key_blank_end(
 	size_t end)
 {
 	/* Past the white space. */
-	while (at < end && (text[at] == ' ' || text[at] == '\t'))
+	while (at < end &&
+	       (text[at] == ' ' ||
+	        text[at] == '\t'))
 		at++;
 
 	/* Reports where the next field starts. */

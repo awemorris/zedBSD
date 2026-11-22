@@ -613,7 +613,9 @@ small_letter(
 		return 1;
 
 	/* The Latin-1 letters from a-grave to thorn, but the division sign. */
-	if (code_point >= 0xe0U && code_point <= 0xfeU && code_point != LATIN1_DIVISION)
+	if (code_point >= 0xe0U &&
+	    code_point <= 0xfeU &&
+	    code_point != LATIN1_DIVISION)
 		return 1;
 
 	/* No letter, or one without a capital. */

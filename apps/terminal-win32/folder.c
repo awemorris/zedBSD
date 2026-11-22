@@ -618,9 +618,13 @@ folder_absolute(
 	const char *path)
 {
 	/* A drive's letter, its colon and a separator. */
-	if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+	if (((path[0] >= 'A' &&
+	      path[0] <= 'Z') ||
+	     (path[0] >= 'a' &&
+	      path[0] <= 'z')) &&
 	    path[1] == ':' &&
-	    (path[2] == '\\' || path[2] == '/'))
+	    (path[2] == '\\' ||
+	     path[2] == '/'))
 		return 1;
 
 	/* A server's share. */

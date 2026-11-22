@@ -115,7 +115,9 @@ mikuterm_address_name(
 		*colon = '\0';
 	start = text;
 	length = strlen(text);
-	if (length >= 2U && text[0] == '[' && text[length - 1U] == ']') {
+	if (length >= 2U &&
+	    text[0] == '[' &&
+	    text[length - 1U] == ']') {
 		text[length - 1U] = '\0';
 		start = text + 1;
 	}
@@ -319,7 +321,9 @@ known_skip_blanks(
 	const char *end)
 {
 	/* Each space or tab. */
-	while (at < end && (*at == ' ' || *at == '\t'))
+	while (at < end &&
+	       (*at == ' ' ||
+	        *at == '\t'))
 		at++;
 
 	/* Succeeded: the first other character. */
@@ -333,7 +337,9 @@ known_skip_word(
 	const char *end)
 {
 	/* Each character that is not a space or a tab. */
-	while (at < end && *at != ' ' && *at != '\t')
+	while (at < end &&
+	       *at != ' ' &&
+	       *at != '\t')
 		at++;
 
 	/* Succeeded: the end of the word. */

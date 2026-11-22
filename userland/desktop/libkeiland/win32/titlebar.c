@@ -376,7 +376,9 @@ kl_window_set_menu(
 	int error;
 
 	/* A window, and a table that fits. */
-	if (window == NULL || (count != 0U && entries == NULL))
+	if (window == NULL ||
+	    (count != 0U &&
+	     entries == NULL))
 		return EINVAL;
 	if (count > KEIUI_WIN32_MENU_ITEMS)
 		return E2BIG;
@@ -420,7 +422,9 @@ kl_window_popup_menu(
 	int error;
 
 	/* A window and a table that fits. */
-	if (window == NULL || entries == NULL || count == 0U)
+	if (window == NULL ||
+	    entries == NULL ||
+	    count == 0U)
 		return EINVAL;
 	if (count > KEIUI_WIN32_MENU_ITEMS)
 		return E2BIG;
@@ -464,7 +468,9 @@ kl_window_set_tabs(
 	size_t index;
 
 	/* A window, and tabs that fit, each with an ID. */
-	if (window == NULL || (count != 0U && tabs == NULL))
+	if (window == NULL ||
+	    (count != 0U &&
+	     tabs == NULL))
 		return EINVAL;
 	if (count > KEIUI_WIN32_TABS)
 		return E2BIG;

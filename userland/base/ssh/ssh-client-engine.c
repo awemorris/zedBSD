@@ -493,7 +493,9 @@ ssh_engine_tick(
 	}
 
 	/* Calls again no later than the next keepalive. */
-	if (engine->alive_interval != 0 && engine->phase == ENGINE_PHASE_CONNECTED && engine->alive_due < *wake_ms)
+	if (engine->alive_interval != 0 &&
+	    engine->phase == ENGINE_PHASE_CONNECTED &&
+	    engine->alive_due < *wake_ms)
 		*wake_ms = engine->alive_due;
 
 	/* Moves waiting messages into the transport. */
@@ -773,7 +775,9 @@ ssh_engine_write(
 		return EPIPE;
 
 	/* Nothing goes before the session started, or after the input ended. */
-	if (engine->channel == NULL || !engine->started || engine->eof_wanted)
+	if (engine->channel == NULL ||
+	    !engine->started ||
+	    engine->eof_wanted)
 		return 0;
 	if (engine->channel->state != SSH_CHANNEL_OPEN || engine->channel->eof_sent)
 		return 0;
@@ -782,7 +786,9 @@ ssh_engine_write(
 	while (*written < size) {
 		room = ssh_channel_send_room(engine->channel);
 		(void)ssh_transport_pending(&engine->transport, &pending);
-		if (room == 0 || engine->backlog.size > 0 || pending >= ENGINE_OUTPUT_HIGH)
+		if (room == 0 ||
+		    engine->backlog.size > 0 ||
+		    pending >= ENGINE_OUTPUT_HIGH)
 			break;
 
 		/* Sends one piece the window takes. */
@@ -822,7 +828,9 @@ ssh_engine_consumed(
 	engine->unconsumed -= size;
 
 	/* A closed connection or channel takes no window back. */
-	if (engine->phase == ENGINE_PHASE_CLOSED || engine->channel == NULL || size == 0)
+	if (engine->phase == ENGINE_PHASE_CLOSED ||
+	    engine->channel == NULL ||
+	    size == 0)
 		return;
 
 	/* Waits while the caller still holds half a window or more: the window refills whole. */
@@ -863,7 +871,10 @@ ssh_engine_resize(
 	engine->height = height;
 
 	/* Only a session with a terminal on an open channel has a window to change (RFC 4254 6.7). */
-	if (!engine->pty || engine->pty_refused || engine->channel == NULL || !engine->started)
+	if (!engine->pty ||
+	    engine->pty_refused ||
+	    engine->channel == NULL ||
+	    !engine->started)
 		return 0;
 	if (engine->channel->state != SSH_CHANNEL_OPEN)
 		return 0;
@@ -1663,7 +1674,9 @@ engine_auth_next(
 
 	/* Offers the next identity that can be used while the server offers publickey. */
 	offered = engine_method_offered(engine, "publickey");
-	while (engine->pubkey && offered && engine->identity_next < engine->identity_count) {
+	while (engine->pubkey &&
+	       offered &&
+	       engine->identity_next < engine->identity_count) {
 		error = engine_send_query(engine);
 		if (error == 0)
 			return 0;
@@ -1933,7 +1946,9 @@ engine_take_data(
 		return EPROTO;
 
 	/* Drops data of a closing channel and of a type other than the error output, giving its window back unless the caller holds half a window. */
-	if (channel->close_sent || (extended != 0 && extended != SSH_EXTENDED_DATA_STDERR)) {
+	if (channel->close_sent ||
+	    (extended != 0 &&
+	     extended != SSH_EXTENDED_DATA_STDERR)) {
 		if (engine->unconsumed >= SSH_CHANNEL_WINDOW / 2U)
 			return 0;
 		ssh_buf_reset(&engine->out);
@@ -2185,7 +2200,9 @@ engine_send_eof(
 	int error;
 
 	/* Waits for the end of the input and a running session. */
-	if (!engine->eof_wanted || !engine->started || engine->channel == NULL)
+	if (!engine->eof_wanted ||
+	    !engine->started ||
+	    engine->channel == NULL)
 		return 0;
 	if (engine->channel->eof_sent || engine->channel->close_sent)
 		return 0;

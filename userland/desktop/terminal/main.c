@@ -441,7 +441,9 @@ main_page_init(
 	/* The home directory: the environment's, else the user's entry. */
 	home = getenv("HOME");
 	user = getpwuid(getuid());
-	if ((home == NULL || home[0] == '\0') && user != NULL)
+	if ((home == NULL ||
+	     home[0] == '\0') &&
+	    user != NULL)
 		home = user->pw_dir;
 	if (home == NULL || home[0] == '\0')
 		return ENOENT;

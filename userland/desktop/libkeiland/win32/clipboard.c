@@ -97,7 +97,9 @@ kl_window_select(
 	char *copy;
 
 	/* A window, and text. */
-	if (window == NULL || (text == NULL && length != 0U))
+	if (window == NULL ||
+	    (text == NULL &&
+	     length != 0U))
 		return;
 	app = window->app;
 

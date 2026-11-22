@@ -457,7 +457,9 @@ conf_line(
 
 	/* A keyword mikuterm does not know (state.conf's file passes over the user's keywords). */
 	status = conf_keyword(keyword, &found);
-	if (status != 0 || (state && !conf_names[found].state)) {
+	if (status != 0 ||
+	    (state &&
+	     !conf_names[found].state)) {
 		*why = "unknown keyword";
 		return EINVAL;
 	}
@@ -525,7 +527,10 @@ conf_split(
 
 	/* The keyword: up to a space, a tab or '='. */
 	keyword_length = 0U;
-	while (text[index] != '\0' && text[index] != ' ' && text[index] != '\t' && text[index] != '=') {
+	while (text[index] != '\0' &&
+	       text[index] != ' ' &&
+	       text[index] != '\t' &&
+	       text[index] != '=') {
 		if (keyword_length + 1U >= keyword_size) {
 			*why = "unknown keyword";
 			return EINVAL;
@@ -556,7 +561,9 @@ conf_split(
 		*end = '\0';
 	} else {
 		end = start + strlen(start);
-		while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+		while (end > start &&
+		       (end[-1] == ' ' ||
+		        end[-1] == '\t'))
 			end--;
 		*end = '\0';
 	}

@@ -573,7 +573,9 @@ EVP_CipherInit_ex(
 	}
 
 	/* AES-256-CTR is set up on its own. */
-	if (cipher == &aes256_ctr_object || (cipher == NULL && ctx->cipher == &aes256_ctr_object)) {
+	if (cipher == &aes256_ctr_object ||
+	    (cipher == NULL &&
+	     ctx->cipher == &aes256_ctr_object)) {
 		done = cipher_ctr_init(ctx, cipher, key, iv, enc);
 		return done;
 	}

@@ -403,7 +403,9 @@ terminal_renderer_page(
 		return error;
 
 	/* The page's image and buffers at the frame's size. */
-	if (renderer->page == VK_NULL_HANDLE || renderer->page_width != width || renderer->page_height != height) {
+	if (renderer->page == VK_NULL_HANDLE ||
+	    renderer->page_width != width ||
+	    renderer->page_height != height) {
 		error = render_page_make(renderer, width, height);
 		if (error != VK_SUCCESS)
 			return error;

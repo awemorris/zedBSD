@@ -717,7 +717,9 @@ ssh_key_put_private_passphrase(
 		return EINVAL;
 
 	/* Refuses a salt bcrypt_pbkdf does not take. */
-	if (salt == NULL || salt_size == 0U || salt_size > SSH_BCRYPT_SALT_MAX)
+	if (salt == NULL ||
+	    salt_size == 0U ||
+	    salt_size > SSH_BCRYPT_SALT_MAX)
 		return EINVAL;
 
 	/* Refuses no rounds, and more than a reader of the file takes. */
