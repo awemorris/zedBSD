@@ -456,6 +456,7 @@ void x11_expose(struct x11server *server, struct x11_window *window);
 void x11_configure_notify(struct x11server *server, struct x11_window *window);
 void x11_destroy_notify(struct x11server *server, unsigned owner, uint32_t event_window, uint32_t window);
 void x11_event_swap(uint8_t *event);
+void x11_move_descendants(struct x11server *server, uint32_t parent, int dx, int dy);
 
 /* window.c: windows, pixmaps, graphics contexts and drawing. */
 struct x11_window *x11_window_find(struct x11server *server, uint32_t id);

@@ -131,6 +131,7 @@ static unsigned protocol_list_extensions(struct x11server *server, struct x11_cl
 static unsigned protocol_big_requests(struct x11server *server, struct x11_client *client, const uint8_t *request);
 static void protocol_expose_one(struct x11server *server, struct x11_window *window);
 static void protocol_expose_children(struct x11server *server, uint32_t parent);
+static int protocol_id_chosen(const struct x11_client *client, uint32_t id);
 static void protocol_swap16(uint8_t *bytes);
 static void protocol_swap32(uint8_t *bytes);
 static void protocol_gc_values(struct x11_gc *gc, const struct x11_client *client, const uint8_t *request, size_t length, size_t offset, uint32_t mask);
@@ -583,6 +584,21 @@ x11_expose(
 }
 
 /*
+ * Moves every descendant of a window by the window's move (their places
+ * are kept on the root window).
+ */
+void
+x11_move_descendants(
+	struct x11server *server,
+	uint32_t parent,
+	int dx,
+	int dy)
+{
+	/* The tree below the window. */
+	protocol_move_descendants(server, parent, dx, dy);
+}
+
+/*
  * Turns an event (32 bytes, as a client sent it in SendEvent) from one
  * byte order to the other, field by field as the core protocol lays out
  * each event.  An event the core does not define is left as it is.
@@ -817,6 +833,7 @@ protocol_create_window(
 	uint32_t id;
 	size_t offset;
 	unsigned bit;
+	int chosen;
 	int msb;
 
 	/* The fixed part must be there, and the table must have room. */
@@ -827,8 +844,11 @@ protocol_create_window(
 	if (server->window_count == X11_MAX_WINDOWS)
 		return X11_BAD_ALLOC;
 
-	/* An id in use is refused. */
+	/* An id outside the client's range, or in use, is refused. */
 	id = x11_read32(request + 4, msb);
+	chosen = protocol_id_chosen(client, id);
+	if (!chosen)
+		return X11_BAD_ID_CHOICE;
 	window = x11_window_find(server, id);
 	if (window != NULL)
 		return X11_BAD_ID_CHOICE;
@@ -1400,6 +1420,7 @@ protocol_open_font(
 {
 	struct x11_font *font;
 	uint16_t name_length;
+	int chosen;
 	int msb;
 
 	/* The name must fit the request, and the table must have room. */
@@ -1411,6 +1432,11 @@ protocol_open_font(
 		return X11_BAD_LENGTH;
 	if (server->font_count == X11_MAX_FONTS)
 		return X11_BAD_ALLOC;
+
+	/* An id outside the client's range is refused. */
+	chosen = protocol_id_chosen(&server->clients[index], x11_read32(request + 4, msb));
+	if (!chosen)
+		return X11_BAD_ID_CHOICE;
 
 	/* The font. */
 	font = &server->fonts[server->font_count];
@@ -1509,6 +1535,7 @@ protocol_create_pixmap(
 	size_t length)
 {
 	struct x11_pixmap *pixmap;
+	int chosen;
 	int msb;
 
 	/* The fixed part must be there, and the table must have room. */
@@ -1517,6 +1544,11 @@ protocol_create_pixmap(
 		return X11_BAD_LENGTH;
 	if (server->pixmap_count == X11_MAX_PIXMAPS)
 		return X11_BAD_ALLOC;
+
+	/* An id outside the client's range is refused. */
+	chosen = protocol_id_chosen(&server->clients[index], x11_read32(request + 4, msb));
+	if (!chosen)
+		return X11_BAD_ID_CHOICE;
 
 	/* The pixmap. */
 	pixmap = &server->pixmaps[server->pixmap_count];
@@ -1574,6 +1606,7 @@ protocol_create_gc(
 {
 	struct x11_client *client;
 	struct x11_gc *gc;
+	int chosen;
 
 	/* The fixed part must be there, and the table must have room. */
 	client = &server->clients[index];
@@ -1581,6 +1614,11 @@ protocol_create_gc(
 		return X11_BAD_LENGTH;
 	if (server->gc_count == X11_MAX_GCS)
 		return X11_BAD_ALLOC;
+
+	/* An id outside the client's range is refused. */
+	chosen = protocol_id_chosen(client, x11_read32(request + 4, client->order));
+	if (!chosen)
+		return X11_BAD_ID_CHOICE;
 
 	/* The context and its values. */
 	gc = &server->gcs[server->gc_count];
@@ -2328,6 +2366,27 @@ protocol_expose_children(
 		protocol_expose_one(server, child);
 		protocol_expose_children(server, child->id);
 	}
+}
+
+/*
+ * Tells whether an id is one a client may choose: inside the range its
+ * setup gave (its base under the 22 bits of the mask), and not 0.
+ */
+static int
+protocol_id_chosen(
+	const struct x11_client *client,
+	uint32_t id)
+{
+	/* None is never an id. */
+	if (id == 0U)
+		return 0;
+
+	/* The bits above the mask must be the client's base. */
+	if ((id & ~(uint32_t)0x003fffffU) != client->base)
+		return 0;
+
+	/* Succeeded: the client's own. */
+	return 1;
 }
 
 /* Reverses the two bytes of a 16-bit field. */
