@@ -53,9 +53,6 @@ static const uint8_t ssh_crypto_zero_secret[SSH_X25519_SIZE] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-static int ssh_x25519_make_public(const uint8_t *private_key, uint8_t *public_key);
-static int ssh_x25519_make_pair(uint8_t *private_key, uint8_t *public_key);
-static int ssh_x25519_agree(const uint8_t *private_key, const uint8_t *peer_public, uint8_t *shared);
 static int ssh_hybrid_combine(const uint8_t *k_pq, const uint8_t *k_cl, uint8_t *k);
 
 /*
@@ -514,6 +511,169 @@ cleanup:
 }
 
 /*
+ * Computes the X25519 public key of a 32-byte private key.
+ */
+int
+ssh_x25519_public(
+	const uint8_t *private_key,
+	uint8_t *public_key)
+{
+	EVP_PKEY *key;
+	size_t public_size;
+	int status;
+
+	/* Makes the key from the private bytes; the library computes the public half. */
+	key = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, private_key, SSH_X25519_SIZE);
+	if (key == NULL)
+		return EIO;
+
+	/* Reads the public half out of the key. */
+	public_size = SSH_X25519_SIZE;
+	status = EVP_PKEY_get_raw_public_key(key, public_key, &public_size);
+
+	/* Frees the key, which holds the private bytes and wipes them. */
+	EVP_PKEY_free(key);
+
+	/* Refuses a public key the library did not give in full. */
+	if (status != 1)
+		return EIO;
+	if (public_size != SSH_X25519_SIZE)
+		return EIO;
+
+	/* Succeeded: public_key holds the public key. */
+	return 0;
+}
+
+/*
+ * Makes an X25519 key pair from 32 random bytes: the private key (secret)
+ * and its public key.  Wipes both on a failure.
+ */
+int
+ssh_x25519_pair(
+	uint8_t *private_key,
+	uint8_t *public_key)
+{
+	int error;
+
+	/* Draws the private key from the random generator. */
+	error = ssh_random(private_key, SSH_X25519_SIZE);
+	if (error != 0) {
+		ssh_wipe(public_key, SSH_X25519_SIZE);
+		return error;
+	}
+
+	/* Computes the public key of the private key. */
+	error = ssh_x25519_public(private_key, public_key);
+	if (error != 0) {
+		ssh_wipe(private_key, SSH_X25519_SIZE);
+		ssh_wipe(public_key, SSH_X25519_SIZE);
+		return error;
+	}
+
+	/* Succeeded: both halves are written. */
+	return 0;
+}
+
+/*
+ * Computes the X25519 shared secret of a private key and a peer's public
+ * point, as the 32 bytes the library gives.
+ *
+ * The peer's point is refused with EINVAL when the library refuses it at
+ * import or at the derivation, and when the result is all zero, which this
+ * function checks itself so that it does not depend on the library.
+ * Returns 0, EINVAL, ENOMEM or EIO; shared is wiped on an error.
+ */
+int
+ssh_x25519_shared(
+	const uint8_t *private_key,
+	const uint8_t *peer_public,
+	uint8_t *shared)
+{
+	EVP_PKEY *own;
+	EVP_PKEY *peer;
+	EVP_PKEY_CTX *context;
+	size_t shared_size;
+	int zero;
+	int status;
+	int error;
+
+	/* Starts with nothing allocated. */
+	own = NULL;
+	peer = NULL;
+	context = NULL;
+	error = 0;
+
+	/* Makes our key from the private bytes. */
+	own = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, private_key, SSH_X25519_SIZE);
+	if (own == NULL) {
+		error = EIO;
+		goto cleanup;
+	}
+
+	/* Imports the peer's point; a point the library refuses is a bad value of the peer. */
+	peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, peer_public, SSH_X25519_SIZE);
+	if (peer == NULL) {
+		error = EINVAL;
+		goto cleanup;
+	}
+
+	/* Makes the context the derivation runs in. */
+	context = EVP_PKEY_CTX_new(own, NULL);
+	if (context == NULL) {
+		error = ENOMEM;
+		goto cleanup;
+	}
+
+	/* Prepares the derivation. */
+	status = EVP_PKEY_derive_init(context);
+	if (status != 1) {
+		error = EIO;
+		goto cleanup;
+	}
+
+	/* Sets the peer's point; a refusal here is a bad value of the peer. */
+	status = EVP_PKEY_derive_set_peer(context, peer);
+	if (status != 1) {
+		error = EINVAL;
+		goto cleanup;
+	}
+
+	/* Derives the shared secret; the library fails the derivation of an all-zero result, which is a bad value of the peer. */
+	shared_size = SSH_X25519_SIZE;
+	status = EVP_PKEY_derive(context, shared, &shared_size);
+	if (status != 1) {
+		error = EINVAL;
+		goto cleanup;
+	}
+
+	/* Refuses a shared secret of an unexpected size. */
+	if (shared_size != SSH_X25519_SIZE) {
+		error = EIO;
+		goto cleanup;
+	}
+
+	/* Refuses an all-zero result (a point of small order) even when the library let it through. */
+	zero = ssh_ct_equal(shared, ssh_crypto_zero_secret, SSH_X25519_SIZE);
+	if (zero != 0)
+		error = EINVAL;
+
+cleanup:
+	/* Frees the context and both keys; ours holds the private bytes and is wiped. */
+	EVP_PKEY_CTX_free(context);
+	EVP_PKEY_free(peer);
+	EVP_PKEY_free(own);
+
+	/* Leaves no secret behind after a failure. */
+	if (error != 0) {
+		ssh_wipe(shared, SSH_X25519_SIZE);
+		return error;
+	}
+
+	/* Succeeded: shared holds the 32 bytes. */
+	return 0;
+}
+
+/*
  * Starts the client's half of mlkem768x25519-sha256 (draft-ietf-sshm-
  * mlkem-hybrid-kex-10 2.1, 2.3.3) and writes C_INIT
  * (SSH_HYBRID_INIT_SIZE bytes) to c_init.
@@ -587,7 +747,7 @@ ssh_hybrid_client_start(
 	}
 
 	/* Makes the X25519 pair and writes its public key as the second part of C_INIT (C_PK1). */
-	error = ssh_x25519_make_pair(client->x25519_private, c_init + SSH_MLKEM768_PUBLIC);
+	error = ssh_x25519_pair(client->x25519_private, c_init + SSH_MLKEM768_PUBLIC);
 	if (error != 0)
 		goto cleanup;
 
@@ -700,12 +860,12 @@ ssh_hybrid_server(
 	}
 
 	/* Makes the server's X25519 pair and writes its public key as the second part of the reply (S_PK1). */
-	error = ssh_x25519_make_pair(x25519_private, s_reply + SSH_MLKEM768_CIPHERTEXT);
+	error = ssh_x25519_pair(x25519_private, s_reply + SSH_MLKEM768_CIPHERTEXT);
 	if (error != 0)
 		goto cleanup;
 
 	/* Computes K_CL from the server's private key and the client's point C_PK1, refusing a point of small order. */
-	error = ssh_x25519_agree(x25519_private, c_init + SSH_MLKEM768_PUBLIC, k_cl);
+	error = ssh_x25519_shared(x25519_private, c_init + SSH_MLKEM768_PUBLIC, k_cl);
 	if (error != 0)
 		goto cleanup;
 
@@ -804,7 +964,7 @@ ssh_hybrid_client_finish(
 	}
 
 	/* Computes K_CL from the client's private key and the server's point S_PK1, refusing a point of small order. */
-	error = ssh_x25519_agree(client->x25519_private, s_reply + SSH_MLKEM768_CIPHERTEXT, k_cl);
+	error = ssh_x25519_shared(client->x25519_private, s_reply + SSH_MLKEM768_CIPHERTEXT, k_cl);
 	if (error != 0)
 		goto cleanup;
 
@@ -1039,169 +1199,6 @@ cleanup:
 	}
 
 	/* Succeeded: tag holds the 16 bytes. */
-	return 0;
-}
-
-/*
- * Computes the X25519 public key of a 32-byte private key.
- */
-static int
-ssh_x25519_make_public(
-	const uint8_t *private_key,
-	uint8_t *public_key)
-{
-	EVP_PKEY *key;
-	size_t public_size;
-	int status;
-
-	/* Makes the key from the private bytes; the library computes the public half. */
-	key = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, private_key, SSH_X25519_SIZE);
-	if (key == NULL)
-		return EIO;
-
-	/* Reads the public half out of the key. */
-	public_size = SSH_X25519_SIZE;
-	status = EVP_PKEY_get_raw_public_key(key, public_key, &public_size);
-
-	/* Frees the key, which holds the private bytes and wipes them. */
-	EVP_PKEY_free(key);
-
-	/* Refuses a public key the library did not give in full. */
-	if (status != 1)
-		return EIO;
-	if (public_size != SSH_X25519_SIZE)
-		return EIO;
-
-	/* Succeeded: public_key holds the public key. */
-	return 0;
-}
-
-/*
- * Makes an X25519 key pair from 32 random bytes: the private key (secret)
- * and its public key.  Wipes both on a failure.
- */
-static int
-ssh_x25519_make_pair(
-	uint8_t *private_key,
-	uint8_t *public_key)
-{
-	int error;
-
-	/* Draws the private key from the random generator. */
-	error = ssh_random(private_key, SSH_X25519_SIZE);
-	if (error != 0) {
-		ssh_wipe(public_key, SSH_X25519_SIZE);
-		return error;
-	}
-
-	/* Computes the public key of the private key. */
-	error = ssh_x25519_make_public(private_key, public_key);
-	if (error != 0) {
-		ssh_wipe(private_key, SSH_X25519_SIZE);
-		ssh_wipe(public_key, SSH_X25519_SIZE);
-		return error;
-	}
-
-	/* Succeeded: both halves are written. */
-	return 0;
-}
-
-/*
- * Computes the X25519 shared secret of a private key and a peer's public
- * point, as the 32 bytes the library gives.
- *
- * The peer's point is refused with EINVAL when the library refuses it at
- * import or at the derivation, and when the result is all zero, which this
- * function checks itself so that it does not depend on the library.
- * Returns 0, EINVAL, ENOMEM or EIO; shared is wiped on an error.
- */
-static int
-ssh_x25519_agree(
-	const uint8_t *private_key,
-	const uint8_t *peer_public,
-	uint8_t *shared)
-{
-	EVP_PKEY *own;
-	EVP_PKEY *peer;
-	EVP_PKEY_CTX *context;
-	size_t shared_size;
-	int zero;
-	int status;
-	int error;
-
-	/* Starts with nothing allocated. */
-	own = NULL;
-	peer = NULL;
-	context = NULL;
-	error = 0;
-
-	/* Makes our key from the private bytes. */
-	own = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, private_key, SSH_X25519_SIZE);
-	if (own == NULL) {
-		error = EIO;
-		goto cleanup;
-	}
-
-	/* Imports the peer's point; a point the library refuses is a bad value of the peer. */
-	peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, peer_public, SSH_X25519_SIZE);
-	if (peer == NULL) {
-		error = EINVAL;
-		goto cleanup;
-	}
-
-	/* Makes the context the derivation runs in. */
-	context = EVP_PKEY_CTX_new(own, NULL);
-	if (context == NULL) {
-		error = ENOMEM;
-		goto cleanup;
-	}
-
-	/* Prepares the derivation. */
-	status = EVP_PKEY_derive_init(context);
-	if (status != 1) {
-		error = EIO;
-		goto cleanup;
-	}
-
-	/* Sets the peer's point; a refusal here is a bad value of the peer. */
-	status = EVP_PKEY_derive_set_peer(context, peer);
-	if (status != 1) {
-		error = EINVAL;
-		goto cleanup;
-	}
-
-	/* Derives the shared secret; the library fails the derivation of an all-zero result, which is a bad value of the peer. */
-	shared_size = SSH_X25519_SIZE;
-	status = EVP_PKEY_derive(context, shared, &shared_size);
-	if (status != 1) {
-		error = EINVAL;
-		goto cleanup;
-	}
-
-	/* Refuses a shared secret of an unexpected size. */
-	if (shared_size != SSH_X25519_SIZE) {
-		error = EIO;
-		goto cleanup;
-	}
-
-	/* Refuses an all-zero result (a point of small order) even when the library let it through. */
-	zero = ssh_ct_equal(shared, ssh_crypto_zero_secret, SSH_X25519_SIZE);
-	if (zero != 0)
-		error = EINVAL;
-
-cleanup:
-	/* Frees the context and both keys; ours holds the private bytes and is wiped. */
-	EVP_PKEY_CTX_free(context);
-	EVP_PKEY_free(peer);
-	EVP_PKEY_free(own);
-
-	/* Leaves no secret behind after a failure. */
-	if (error != 0) {
-		ssh_wipe(shared, SSH_X25519_SIZE);
-		return error;
-	}
-
-	/* Succeeded: shared holds the 32 bytes. */
 	return 0;
 }
 
