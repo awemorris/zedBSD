@@ -8,7 +8,7 @@
 /*
  * The client side of one SSH connection as a state machine without I/O:
  * the service request, the user authentication, the session channel with
- * its terminal, and the keepalives.  The order of the login and of the
+ * its terminal, the X11 channels the server forwards, and the keepalives.  The order of the login and of the
  * session is the one the ssh program follows; the difference is that
  * every wait is a state the engine returns from.
  */
@@ -51,6 +51,21 @@
 
 /* The description of the DISCONNECT this side sends at the end of a session. */
 #define ENGINE_BYE		"disconnected by user"
+
+/*
+ * The X11 forwarding request and channel (RFC 4254 6.3.1, 6.3.2) and the
+ * authentication protocol whose cookie it carries (the X Window System
+ * protocol's MIT-MAGIC-COOKIE-1).
+ */
+#define ENGINE_X11_REQUEST	"x11-req"
+#define ENGINE_X11_CHANNEL	"x11"
+#define ENGINE_X11_PROTOCOL	"MIT-MAGIC-COOKIE-1"
+
+/* The X screen forwarded (the display's first). */
+#define ENGINE_X11_SCREEN	0U
+
+/* The words of a refused x11-req, followed by the channel's number (OpenSSH's client's). */
+#define ENGINE_X11_FAILED	"X11 forwarding request failed on channel "
 
 /*
  * The opcodes of the terminal modes a terminal without settings sends,
@@ -141,7 +156,23 @@ enum engine_request {
 /* What a channel request waiting for its reply was. */
 enum engine_reply_kind {
 	ENGINE_REPLY_PTY = 0,
-	ENGINE_REPLY_START = 1
+	ENGINE_REPLY_START = 1,
+	ENGINE_REPLY_X11 = 2
+};
+
+/* Where X11 forwarding is. */
+enum engine_x11 {
+	/* Not asked for (or not yet: the session has not opened). */
+	ENGINE_X11_NONE = 0,
+
+	/* x11-req is sent; its answer is awaited. */
+	ENGINE_X11_ASKED = 1,
+
+	/* The server accepted it: X11 channels are taken. */
+	ENGINE_X11_ACCEPTED = 2,
+
+	/* The server refused it. */
+	ENGINE_X11_REFUSED = 3
 };
 
 /*
@@ -175,7 +206,12 @@ struct engine_identity {
  * channels and channel are the session channel (NULL before it is open
  * and after its close went both ways); replies the kinds of the channel
  * requests waiting for a reply; unconsumed the bytes of SSH_ENGINE_DATA
- * handed out that the caller has not reported used.  pty_refused,
+ * handed out that the caller has not reported used.  x11 is 1 when
+ * X11 forwarding is wanted, x11_cookie its fake cookie, x11_single 1 for
+ * one X client only, x11_state where the request is, x11_taken how many
+ * X11 channels the server opened, and held the bytes of each X11 channel
+ * (by its number) handed out and not reported used.  session_over is 1
+ * once the session channel closed both ways.  pty_refused,
  * started, eof_wanted, have_exit, exit_status, exit_signal and
  * session_reason are what the session came to.  events (event_count of them from event_first) wait to
  * be taken; closed_queued is 1 once SSH_ENGINE_CLOSED is among them or
@@ -223,6 +259,13 @@ struct ssh_engine {
 	enum engine_reply_kind replies[ENGINE_REPLIES_MAX];
 	unsigned reply_count;
 	size_t unconsumed;
+	int x11;
+	char x11_cookie[SSH_ENGINE_X11_COOKIE_DIGITS + 1];
+	int x11_single;
+	enum engine_x11 x11_state;
+	unsigned x11_taken;
+	size_t held[SSH_CHANNEL_MAX];
+	int session_over;
 	int pty_refused;
 	int started;
 	int eof_wanted;
@@ -271,6 +314,15 @@ static int engine_take_end(struct ssh_engine *engine);
 static int engine_take_request(struct ssh_engine *engine);
 static int engine_take_reply(struct ssh_engine *engine);
 static int engine_refuse_open(struct ssh_engine *engine);
+static int engine_take_open(struct ssh_engine *engine);
+static int engine_send_x11_request(struct ssh_engine *engine);
+static struct ssh_channel *engine_x11_channel(struct ssh_engine *engine, uint32_t number);
+static int engine_send_data(struct ssh_engine *engine, struct ssh_channel *channel, const uint8_t *bytes, size_t size, size_t *written);
+static void engine_give_window(struct ssh_engine *engine, struct ssh_channel *channel, size_t *held, size_t size);
+static int engine_channels_left(const struct ssh_engine *engine);
+static void engine_finish(struct ssh_engine *engine);
+static void engine_copy_address(char *destination, const uint8_t *source, size_t size);
+static void engine_append_number(char *text, size_t capacity, unsigned number);
 static int engine_send_eof(struct ssh_engine *engine);
 static int engine_keep_alive(struct ssh_engine *engine);
 static int engine_put_mode(struct ssh_buf *out, unsigned opcode, uint32_t value);
@@ -759,9 +811,6 @@ ssh_engine_write(
 	size_t size,
 	size_t *written)
 {
-	size_t pending;
-	size_t room;
-	size_t chunk;
 	int error;
 
 	/* Starts with nothing sent. */
@@ -776,34 +825,11 @@ ssh_engine_write(
 	    !engine->started ||
 	    engine->eof_wanted)
 		return 0;
-	if (engine->channel->state != SSH_CHANNEL_OPEN || engine->channel->eof_sent)
-		return 0;
 
-	/* Sends while there is input, room in the window and in the output. */
-	while (*written < size) {
-		room = ssh_channel_send_room(engine->channel);
-		(void)ssh_transport_pending(&engine->transport, &pending);
-		if (room == 0 ||
-		    engine->backlog.size > 0 ||
-		    pending >= ENGINE_OUTPUT_HIGH)
-			break;
-
-		/* Sends one piece the window takes. */
-		chunk = size - *written;
-		if (chunk > room)
-			chunk = room;
-		ssh_buf_reset(&engine->out);
-		error = ssh_channel_put_data(engine->channel, 0, bytes + *written, chunk, &engine->out);
-		if (error == 0)
-			error = engine_send_out(engine);
-		if (error != 0) {
-			engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
-			return EPIPE;
-		}
-
-		/* Steps over what went. */
-		*written += chunk;
-	}
+	/* Sends what the session's window and the output take. */
+	error = engine_send_data(engine, engine->channel, bytes, size, written);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: *written bytes are on their way. */
 	return 0;
@@ -817,31 +843,203 @@ ssh_engine_consumed(
 	struct ssh_engine *engine,
 	size_t size)
 {
+	/* Gives back the session's window for what the caller used. */
+	engine_give_window(engine, engine->channel, &engine->unconsumed, size);
+}
+
+/*
+ * Answers SSH_ENGINE_X11_OPEN.
+ */
+int
+ssh_engine_x11_answer(
+	struct ssh_engine *engine,
+	uint32_t channel,
+	int accept)
+{
+	struct ssh_channel *slot;
 	int error;
 
-	/* Counts what the caller used of what it holds (never more than it holds). */
-	if (size > engine->unconsumed)
-		size = engine->unconsumed;
-	engine->unconsumed -= size;
+	/* Nothing goes after the end. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
 
-	/* A closed connection or channel takes no window back. */
-	if (engine->phase == ENGINE_PHASE_CLOSED ||
-	    engine->channel == NULL ||
-	    size == 0)
-		return;
+	/* Refuses an answer for a channel that waits for none. */
+	if (channel >= SSH_CHANNEL_MAX)
+		return EINVAL;
+	slot = &engine->channels.channel[channel];
+	if (slot->state != SSH_CHANNEL_ANSWERING)
+		return EINVAL;
 
-	/* Waits while the caller still holds half a window or more: the window refills whole. */
-	if (engine->unconsumed >= SSH_CHANNEL_WINDOW / 2U)
-		return;
-
-	/* Gives the window back when half of it is used (ssh_channel_consumed decides). */
+	/* Confirms the channel, or refuses it and frees its number. */
 	ssh_buf_reset(&engine->out);
-	ssh_channel_consumed(engine->channel, size, &engine->out);
-	if (engine->out.size == 0)
-		return;
-	error = engine_send_out(engine);
-	if (error != 0)
+	error = ssh_channel_answer_open(&engine->channels, slot, accept, &engine->out);
+	if (error == 0)
+		error = engine_send_out(engine);
+	if (error != 0) {
 		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return 0;
+	}
+
+	/* The caller holds nothing of the channel yet. */
+	engine->held[channel] = 0;
+
+	/* A refused channel may have been the last one after the session. */
+	if (!accept)
+		engine_finish(engine);
+
+	/* Succeeded: the answer is on its way. */
+	return 0;
+}
+
+/*
+ * Sends bytes on a channel.
+ */
+int
+ssh_engine_channel_write(
+	struct ssh_engine *engine,
+	uint32_t channel,
+	const uint8_t *bytes,
+	size_t size,
+	size_t *written)
+{
+	struct ssh_channel *slot;
+	int error;
+
+	/* Starts with nothing sent. */
+	*written = 0;
+
+	/* The session's channel is written as the user's input. */
+	if (channel == SSH_ENGINE_SESSION_CHANNEL) {
+		error = ssh_engine_write(engine, bytes, size, written);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Nothing goes after the end. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+
+	/* Refuses a number that is no X11 channel. */
+	slot = engine_x11_channel(engine, channel);
+	if (slot == NULL)
+		return EINVAL;
+
+	/* Sends what the channel's window and the output take. */
+	error = engine_send_data(engine, slot, bytes, size, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: *written bytes are on their way. */
+	return 0;
+}
+
+/*
+ * Reports data of a channel used.
+ */
+void
+ssh_engine_channel_consumed(
+	struct ssh_engine *engine,
+	uint32_t channel,
+	size_t size)
+{
+	struct ssh_channel *slot;
+
+	/* The session's data is counted as before. */
+	if (channel == SSH_ENGINE_SESSION_CHANNEL) {
+		ssh_engine_consumed(engine, size);
+		return;
+	}
+
+	/* A channel that is no longer there takes nothing back. */
+	slot = engine_x11_channel(engine, channel);
+	if (slot == NULL)
+		return;
+
+	/* Gives back the channel's window for what the caller used. */
+	engine_give_window(engine, slot, &engine->held[channel], size);
+}
+
+/*
+ * Says that this side sends no more data on a channel.
+ */
+int
+ssh_engine_channel_eof(
+	struct ssh_engine *engine,
+	uint32_t channel)
+{
+	struct ssh_channel *slot;
+	int error;
+
+	/* The session's end of input is the user's. */
+	if (channel == SSH_ENGINE_SESSION_CHANNEL) {
+		error = ssh_engine_eof(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Nothing goes after the end. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+
+	/* Refuses a number that is no X11 channel. */
+	slot = engine_x11_channel(engine, channel);
+	if (slot == NULL)
+		return EINVAL;
+
+	/* An EOF goes once, and not after this side's close. */
+	if (slot->state != SSH_CHANNEL_OPEN || slot->eof_sent)
+		return 0;
+
+	/* Sends it. */
+	ssh_buf_reset(&engine->out);
+	ssh_channel_put_eof(slot, &engine->out);
+	error = engine_send_out(engine);
+	if (error != 0) {
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return EPIPE;
+	}
+
+	/* Succeeded: the server knows this side sends no more. */
+	return 0;
+}
+
+/*
+ * Closes an X11 channel.
+ */
+int
+ssh_engine_channel_close(
+	struct ssh_engine *engine,
+	uint32_t channel)
+{
+	struct ssh_channel *slot;
+	int error;
+
+	/* Nothing goes after the end. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+
+	/* Refuses a number that is no X11 channel (the session's included). */
+	slot = engine_x11_channel(engine, channel);
+	if (slot == NULL)
+		return EINVAL;
+
+	/* A close goes once; the server's coming back ends the channel. */
+	if (slot->close_sent)
+		return 0;
+
+	/* Sends it. */
+	ssh_buf_reset(&engine->out);
+	ssh_channel_put_close(slot, &engine->out);
+	error = engine_send_out(engine);
+	if (error != 0) {
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return EPIPE;
+	}
+
+	/* Succeeded: the channel is closing. */
+	return 0;
 }
 
 /*
@@ -1107,6 +1305,15 @@ engine_check_options(
 	if (options->modes_size > 0 && options->modes == NULL)
 		return EINVAL;
 
+	/* X11 forwarding needs the session it is asked on, and its cookie in hexadecimal. */
+	if (options->x11) {
+		if (!options->session || options->x11_cookie == NULL)
+			return EINVAL;
+		length = strspn(options->x11_cookie, "0123456789abcdefABCDEF");
+		if (length != SSH_ENGINE_X11_COOKIE_DIGITS || options->x11_cookie[length] != '\0')
+			return EINVAL;
+	}
+
 	/* The options can be acted on. */
 	return 0;
 }
@@ -1176,6 +1383,15 @@ engine_copy_options(
 	/* The keepalives. */
 	engine->alive_interval = options->alive_interval;
 	engine->alive_count = options->alive_count;
+
+	/* X11 forwarding and its cookie. */
+	if (options->x11) {
+		engine->x11 = 1;
+		engine_copy_text(engine->x11_cookie, sizeof(engine->x11_cookie), options->x11_cookie);
+		engine->x11_single = 0;
+		if (options->x11_single)
+			engine->x11_single = 1;
+	}
 
 	/* Succeeded: the options are the engine's. */
 	return 0;
@@ -1829,7 +2045,7 @@ engine_take_session(
 		/* The answer to a keepalive: the server is alive, which receiving it already noted. */
 		break;
 	case SSH_MSG_CHANNEL_OPEN:
-		error = engine_refuse_open(engine);
+		error = engine_take_open(engine);
 		break;
 	case SSH_MSG_CHANNEL_OPEN_CONFIRMATION:
 	case SSH_MSG_CHANNEL_OPEN_FAILURE:
@@ -1907,6 +2123,16 @@ engine_opened(
 		engine->reply_count++;
 	}
 
+	/* Asks for X11 forwarding before the shell or the command starts (RFC 4254 6.3.1). */
+	if (engine->x11) {
+		error = engine_send_x11_request(engine);
+		if (error != 0)
+			return error;
+		engine->replies[engine->reply_count] = ENGINE_REPLY_X11;
+		engine->reply_count++;
+		engine->x11_state = ENGINE_X11_ASKED;
+	}
+
 	/* Tells the server no other session will be opened on this connection (OpenSSH PROTOCOL 2.2). */
 	ssh_buf_reset(&engine->out);
 	ssh_channel_put_no_more_sessions(&engine->out);
@@ -1941,8 +2167,10 @@ engine_take_data(
 	struct ssh_engine_event *event;
 	struct ssh_channel *channel;
 	const uint8_t *data;
+	size_t *held;
 	size_t size;
 	uint32_t extended;
+	int dropped;
 	int error;
 
 	/* Reads the data and takes it from the window. */
@@ -1950,11 +2178,24 @@ engine_take_data(
 	if (error != 0)
 		return EPROTO;
 
-	/* Drops data of a closing channel and of a type other than the error output, giving its window back unless the caller holds half a window. */
-	if (channel->close_sent ||
-	    (extended != 0 &&
-	     extended != SSH_EXTENDED_DATA_STDERR)) {
-		if (engine->unconsumed >= SSH_CHANNEL_WINDOW / 2U)
+	/* What the caller holds of the channel: the session's count, or the X11 channel's. */
+	held = &engine->unconsumed;
+	if (channel != engine->channel)
+		held = &engine->held[channel->local_id];
+
+	/* Data of a closing channel is dropped, and extended data but the session's error output. */
+	dropped = 0;
+	if (channel->close_sent) {
+		dropped = 1;
+	} else if (extended != 0 && channel != engine->channel) {
+		dropped = 1;
+	} else if (extended != 0 && extended != SSH_EXTENDED_DATA_STDERR) {
+		dropped = 1;
+	}
+
+	/* Gives the window of dropped data back unless the caller holds half a window. */
+	if (dropped) {
+		if (*held >= channel->window_size / 2U)
 			return 0;
 		ssh_buf_reset(&engine->out);
 		ssh_channel_consumed(channel, size, &engine->out);
@@ -1971,9 +2212,10 @@ engine_take_data(
 		return 0;
 
 	/* Hands the bytes out, counted until the caller reports them used; they point into payload until the next call. */
-	engine->unconsumed += size;
+	*held += size;
 	event = engine_event(engine, SSH_ENGINE_DATA);
 	if (event != NULL) {
+		event->channel = channel->local_id;
 		event->bytes = data;
 		event->size = size;
 		event->stream = 0;
@@ -1987,7 +2229,9 @@ engine_take_data(
 
 /*
  * Takes CHANNEL_EOF or CHANNEL_CLOSE; a close that went both ways ends
- * the session (SSH_ENGINE_EXIT) and the connection.
+ * an X11 channel (SSH_ENGINE_CHANNEL_CLOSED) or the session
+ * (SSH_ENGINE_EXIT), and the connection once no channel is left after
+ * the session.
  */
 static int
 engine_take_end(
@@ -1995,6 +2239,7 @@ engine_take_end(
 {
 	struct ssh_engine_event *event;
 	struct ssh_channel *channel;
+	uint32_t number;
 	int freed;
 	int error;
 
@@ -2003,9 +2248,15 @@ engine_take_end(
 	if (error != 0)
 		return EPROTO;
 
-	/* An EOF only says the server sends no more data. */
-	if (!channel->close_received)
+	/* An EOF only says the server sends no more data: the caller hears it of an X11 channel. */
+	if (!channel->close_received) {
+		if (channel == engine->channel)
+			return 0;
+		event = engine_event(engine, SSH_ENGINE_CHANNEL_EOF);
+		if (event != NULL)
+			event->channel = channel->local_id;
 		return 0;
+	}
 
 	/* Answers the server's CLOSE with this side's (RFC 4254 5.3). */
 	if (!channel->close_sent) {
@@ -2017,10 +2268,24 @@ engine_take_end(
 	}
 
 	/* Frees the channel when both sides have closed it. */
+	number = channel->local_id;
 	freed = ssh_channel_closed(&engine->channels, channel);
-	if (!freed || channel != engine->channel)
+	if (!freed)
 		return 0;
+
+	/* An X11 channel ends alone; the connection ends with it when it was the last after the session. */
+	if (channel != engine->channel) {
+		engine->held[number] = 0;
+		event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
+		if (event != NULL)
+			event->channel = number;
+		engine_finish(engine);
+		return 0;
+	}
+
+	/* The session is over. */
 	engine->channel = NULL;
+	engine->session_over = 1;
 
 	/* Tells how the session ended. */
 	event = engine_event(engine, SSH_ENGINE_EXIT);
@@ -2032,8 +2297,8 @@ engine_take_end(
 		engine_copy_text(event->reason, sizeof(event->reason), engine->session_reason);
 	}
 
-	/* Ends the connection with the session, as the ssh program does. */
-	engine_end(engine, 0, SSH_DISCONNECT_BY_APPLICATION, ENGINE_BYE);
+	/* Ends the connection with the session, as the ssh program does, unless X11 channels remain. */
+	engine_finish(engine);
 
 	/* Succeeded: the session is over. */
 	return 0;
@@ -2059,14 +2324,14 @@ engine_take_request(
 	if (channel == NULL)
 		return EPROTO;
 
-	/* Keeps how the command ended. */
-	if (request.type == SSH_CREQ_EXIT_STATUS) {
+	/* Keeps how the command ended (only the session's channel says it). */
+	if (request.type == SSH_CREQ_EXIT_STATUS && channel == engine->channel) {
 		engine->have_exit = 1;
 		engine->exit_status = (int)(request.status & 0x7fffffffU);
 	}
 
 	/* Keeps the signal that ended the command. */
-	if (request.type == SSH_CREQ_EXIT_SIGNAL)
+	if (request.type == SSH_CREQ_EXIT_SIGNAL && channel == engine->channel)
 		engine_copy_text(engine->exit_signal, sizeof(engine->exit_signal), request.name);
 
 	/* Refuses whatever wants a reply: a client offers nothing on request (OpenSSH's keepalives among them). */
@@ -2103,8 +2368,8 @@ engine_take_reply(
 	if (error != 0)
 		return EPROTO;
 
-	/* Refuses a reply nothing waits for. */
-	if (engine->reply_count == 0)
+	/* Refuses a reply nothing waits for: only the session's requests want one. */
+	if (engine->reply_count == 0 || channel != engine->channel)
 		return EPROTO;
 
 	/* Takes the oldest request off the list. */
@@ -2117,6 +2382,24 @@ engine_take_reply(
 	if (kind == ENGINE_REPLY_PTY) {
 		if (!success)
 			engine->pty_refused = 1;
+		return 0;
+	}
+
+	/* X11 forwarding: the caller hears the answer, and the session goes on either way. */
+	if (kind == ENGINE_REPLY_X11) {
+		engine->x11_state = ENGINE_X11_REFUSED;
+		if (success)
+			engine->x11_state = ENGINE_X11_ACCEPTED;
+		event = engine_event(engine, SSH_ENGINE_X11_REPLY);
+		if (event != NULL) {
+			event->accepted = success;
+			if (!success) {
+				engine_copy_text(event->reason, sizeof(event->reason), ENGINE_X11_FAILED);
+				engine_append_number(event->reason, sizeof(event->reason), channel->local_id);
+			}
+		}
+
+		/* Reports that the reply was handled. */
 		return 0;
 	}
 
@@ -2161,7 +2444,8 @@ engine_take_reply(
 
 /*
  * Refuses a channel the server opens (RFC 4254 5.1: OPEN_FAILURE with the
- * server's channel number): a client offers no channel.
+ * server's channel number): a client offers no channel but the X11 ones
+ * it asked for.
  */
 static int
 engine_refuse_open(
@@ -2373,4 +2657,331 @@ engine_give_up_key(
 
 	/* Succeeded: the next method is on its way, or the end is queued. */
 	return 0;
+}
+
+/*
+ * Takes a CHANNEL_OPEN from the server: an "x11" channel once X11
+ * forwarding was accepted and while the session is open (one only when
+ * asked for one), shown to the caller as SSH_ENGINE_X11_OPEN; any other
+ * open is refused.
+ */
+static int
+engine_take_open(
+	struct ssh_engine *engine)
+{
+	struct ssh_engine_event *event;
+	struct ssh_channel *channel;
+	struct ssh_reader reader;
+	const uint8_t *data;
+	const uint8_t *address;
+	size_t data_size;
+	size_t address_size;
+	uint32_t port;
+	int error;
+
+	/* Refuses every open while no X11 channel may come: before the answer, without the request, after the session. */
+	if (engine->x11_state != ENGINE_X11_ACCEPTED || engine->channel == NULL) {
+		error = engine_refuse_open(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Refuses a second X11 channel when one X client only was asked for. */
+	if (engine->x11_single && engine->x11_taken > 0) {
+		error = engine_refuse_open(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Takes an "x11" open into a slot that waits for the caller's answer; another type, or a full table, is refused. */
+	ssh_buf_reset(&engine->out);
+	error = ssh_channel_take_open(&engine->channels, engine->payload.data, engine->payload.size, ENGINE_X11_CHANNEL, SSH_ENGINE_X11_WINDOW, &engine->out, &channel, &data, &data_size);
+	if (error == EINVAL || error == EPROTO)
+		return EPROTO;
+	if (error != 0)
+		return error;
+
+	/* Sends the refusal of an open that was not taken. */
+	if (channel == NULL) {
+		if (engine->out.size == 0)
+			return 0;
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Reads the originator of the X client (RFC 4254 6.3.2). */
+	ssh_reader_init(&reader, data, data_size);
+	ssh_reader_get_string(&reader, &address, &address_size);
+	port = ssh_reader_get_u32(&reader);
+	error = ssh_reader_error(&reader);
+	if (error != 0)
+		return EPROTO;
+
+	/* Counts the X client; the caller holds nothing of it yet. */
+	engine->x11_taken++;
+	engine->held[channel->local_id] = 0;
+
+	/* Asks the caller. */
+	event = engine_event(engine, SSH_ENGINE_X11_OPEN);
+	if (event != NULL) {
+		event->channel = channel->local_id;
+		engine_copy_address(event->address, address, address_size);
+		event->port = port;
+	}
+
+	/* Succeeded: the open waits for the caller's answer. */
+	return 0;
+}
+
+/*
+ * Sends x11-req on the session channel (RFC 4254 6.3.1): a reply wanted,
+ * single connection as asked, the protocol MIT-MAGIC-COOKIE-1 with the
+ * caller's fake cookie, and the first screen.  Returns 0 or an error of
+ * sending.
+ */
+static int
+engine_send_x11_request(
+	struct ssh_engine *engine)
+{
+	int error;
+
+	/* Builds the request in the secret buffer (the cookie stands for the X server's key). */
+	ssh_buf_reset(&engine->out);
+	ssh_buf_put_u8(&engine->out, SSH_MSG_CHANNEL_REQUEST);
+	ssh_buf_put_u32(&engine->out, engine->channel->remote_id);
+	ssh_buf_put_cstring(&engine->out, ENGINE_X11_REQUEST);
+	ssh_buf_put_bool(&engine->out, 1);
+	ssh_buf_put_bool(&engine->out, engine->x11_single);
+	ssh_buf_put_cstring(&engine->out, ENGINE_X11_PROTOCOL);
+	ssh_buf_put_cstring(&engine->out, engine->x11_cookie);
+	ssh_buf_put_u32(&engine->out, ENGINE_X11_SCREEN);
+
+	/* Sends it. */
+	error = engine_send_out(engine);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request is on its way. */
+	return 0;
+}
+
+/*
+ * Returns the X11 channel numbered number while it is open or closing,
+ * or NULL (the session's, one waiting for its answer, a free number).
+ */
+static struct ssh_channel *
+engine_x11_channel(
+	struct ssh_engine *engine,
+	uint32_t number)
+{
+	struct ssh_channel *channel;
+
+	/* Finds the channel that carries data. */
+	channel = ssh_channel_find(&engine->channels, number);
+	if (channel == NULL)
+		return NULL;
+
+	/* The session's channel is not an X11 one. */
+	if (channel == engine->channel)
+		return NULL;
+
+	/* Reports the X11 channel. */
+	return channel;
+}
+
+/*
+ * Sends bytes on an open channel while there is room in its window and
+ * in the output; *written receives how many went (0 after this side's EOF
+ * or close).  Returns 0, or EPIPE when the connection ended on a failure
+ * of sending.
+ */
+static int
+engine_send_data(
+	struct ssh_engine *engine,
+	struct ssh_channel *channel,
+	const uint8_t *bytes,
+	size_t size,
+	size_t *written)
+{
+	size_t pending;
+	size_t room;
+	size_t chunk;
+	int error;
+
+	/* Nothing goes on a channel that is not open, or after this side's EOF. */
+	*written = 0;
+	if (channel->state != SSH_CHANNEL_OPEN || channel->eof_sent)
+		return 0;
+
+	/* Sends while there is input, room in the window and in the output. */
+	while (*written < size) {
+		room = ssh_channel_send_room(channel);
+		(void)ssh_transport_pending(&engine->transport, &pending);
+		if (room == 0 ||
+		    engine->backlog.size > 0 ||
+		    pending >= ENGINE_OUTPUT_HIGH)
+			break;
+
+		/* Sends one piece the window takes. */
+		chunk = size - *written;
+		if (chunk > room)
+			chunk = room;
+		ssh_buf_reset(&engine->out);
+		error = ssh_channel_put_data(channel, 0, bytes + *written, chunk, &engine->out);
+		if (error == 0)
+			error = engine_send_out(engine);
+		if (error != 0) {
+			engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+			return EPIPE;
+		}
+
+		/* Steps over what went. */
+		*written += chunk;
+	}
+
+	/* Succeeded: *written bytes are on their way. */
+	return 0;
+}
+
+/*
+ * Counts size bytes of what the caller holds of a channel (*held) as
+ * used, and gives the channel's window back once the caller holds less
+ * than half of it and half of the window is used (ssh_channel_consumed
+ * decides).  channel may be NULL after it closed.
+ */
+static void
+engine_give_window(
+	struct ssh_engine *engine,
+	struct ssh_channel *channel,
+	size_t *held,
+	size_t size)
+{
+	int error;
+
+	/* Counts what the caller used of what it holds (never more than it holds). */
+	if (size > *held)
+		size = *held;
+	*held -= size;
+
+	/* A closed connection or channel takes no window back. */
+	if (engine->phase == ENGINE_PHASE_CLOSED ||
+	    channel == NULL ||
+	    size == 0)
+		return;
+
+	/* Waits while the caller still holds half a window or more: the window refills whole. */
+	if (*held >= channel->window_size / 2U)
+		return;
+
+	/* Gives the window back when half of it is used. */
+	ssh_buf_reset(&engine->out);
+	ssh_channel_consumed(channel, size, &engine->out);
+	if (engine->out.size == 0)
+		return;
+	error = engine_send_out(engine);
+	if (error != 0)
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+}
+
+/* Reports whether any channel is in use: 1, or 0 when every slot is free. */
+static int
+engine_channels_left(
+	const struct ssh_engine *engine)
+{
+	unsigned index;
+
+	/* Looks for a slot in any state but free. */
+	for (index = 0; index < SSH_CHANNEL_MAX; index++) {
+		if (engine->channels.channel[index].state != SSH_CHANNEL_FREE)
+			return 1;
+	}
+
+	/* Reports that no channel is left. */
+	return 0;
+}
+
+/*
+ * Ends the connection, as the ssh program does, once the session is over
+ * and no X11 channel is left.
+ */
+static void
+engine_finish(
+	struct ssh_engine *engine)
+{
+	int left;
+
+	/* Waits for the session. */
+	if (!engine->session_over)
+		return;
+
+	/* Waits for the X11 channels the session leaves. */
+	left = engine_channels_left(engine);
+	if (left)
+		return;
+
+	/* Says goodbye. */
+	engine_end(engine, 0, SSH_DISCONNECT_BY_APPLICATION, ENGINE_BYE);
+}
+
+/*
+ * Copies size bytes of an originator address into destination (capacity
+ * SSH_ENGINE_ADDRESS_MAX + 1) as text: cut, and every byte that is not a
+ * printable ASCII character written as '?'.
+ */
+static void
+engine_copy_address(
+	char *destination,
+	const uint8_t *source,
+	size_t size)
+{
+	size_t index;
+
+	/* Cuts what does not fit. */
+	if (size > SSH_ENGINE_ADDRESS_MAX)
+		size = SSH_ENGINE_ADDRESS_MAX;
+
+	/* Copies each byte, made safe. */
+	for (index = 0; index < size; index++) {
+		destination[index] = '?';
+		if (source[index] >= 0x20U && source[index] < 0x7fU)
+			destination[index] = (char)source[index];
+	}
+
+	/* Ends the text. */
+	destination[size] = '\0';
+}
+
+/* Appends number in decimal to the NUL-terminated text (capacity bytes), cut to the room. */
+static void
+engine_append_number(
+	char *text,
+	size_t capacity,
+	unsigned number)
+{
+	char digits[16];
+	size_t count;
+	size_t used;
+
+	/* Writes the digits from the last. */
+	count = 0;
+	do {
+		digits[count] = (char)('0' + number % 10U);
+		count++;
+		number /= 10U;
+	} while (number != 0);
+
+	/* Appends them in order while there is room. */
+	used = strlen(text);
+	while (count > 0 && used + 1U < capacity) {
+		count--;
+		text[used] = digits[count];
+		used++;
+	}
+
+	/* Ends the text. */
+	text[used] = '\0';
 }

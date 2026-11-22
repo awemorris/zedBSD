@@ -76,7 +76,8 @@ enum ssh_request_tty {
  * "/etc/ssh/ssh_host_ed25519_key", permit_root PROHIBIT_PASSWORD
  * (OpenSSH's default; the image's file sets yes), password and pubkey 1,
  * permit_empty 0, max_auth_tries 6, login_grace_time 120 seconds,
- * max_sessions SSH_CHANNEL_MAX, max_startups 10 (connections not yet
+ * max_sessions 10 (OpenSSH's; at most SSH_CHANNEL_MAX take effect),
+ * max_startups 10 (connections not yet
  * authenticated), authorized_keys_file ".ssh/authorized_keys" (relative
  * to the home directory; %h and %u expand to the home and the user),
  * strict_modes 1, sftp_command "" (no sftp subsystem), client_alive
@@ -114,7 +115,9 @@ struct sshd_config {
  * "/etc/ssh/ssh_known_hosts", batch_mode 0, connect_timeout 0 (none),
  * server_alive_interval 0, server_alive_count 3, request_tty AUTO,
  * password and pubkey 1, log_level 1 (INFO; 0 QUIET, 2 VERBOSE, 3 DEBUG),
- * host_name "" (the name given).
+ * host_name "" (the name given), forward_x11 0, forward_x11_trusted 0,
+ * forward_x11_timeout 0 (seconds; 0 for none, where OpenSSH's default is
+ * 20 minutes: the program that forwards X11 decides what the time means).
  */
 struct ssh_config {
 	uint32_t set_mask;
@@ -134,6 +137,9 @@ struct ssh_config {
 	int password;
 	int pubkey;
 	int log_level;
+	int forward_x11;
+	int forward_x11_trusted;
+	unsigned forward_x11_timeout;
 };
 
 /* Fills config with sshd's defaults (host_key_count 0: the default key is added by sshd_config_finish when no HostKey line gave one). */
@@ -176,8 +182,10 @@ void ssh_config_init(struct ssh_config *config);
  * GlobalKnownHostsFile, BatchMode, ConnectTimeout, ServerAliveInterval,
  * ServerAliveCountMax, RequestTTY, PasswordAuthentication,
  * PubkeyAuthentication, LogLevel (QUIET, FATAL, ERROR as 0; INFO 1;
- * VERBOSE 2; DEBUG, DEBUG1 to DEBUG3 as 3).  Errors as
- * sshd_config_parse.  Returns 0, EINVAL or EMSGSIZE.
+ * VERBOSE 2; DEBUG, DEBUG1 to DEBUG3 as 3), ForwardX11, ForwardX11Trusted
+ * (yes/no), ForwardX11Timeout (a time as LoginGraceTime's).  Which of
+ * them a program acts on is the program's: one that does not forward X11
+ * refuses the settings that ask for it.  Errors as sshd_config_parse.  Returns 0, EINVAL or EMSGSIZE.
  */
 int ssh_config_parse(struct ssh_config *config, const char *text, size_t size, const char *host, char *error);
 
