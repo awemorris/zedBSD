@@ -245,8 +245,11 @@ Shell > Settings... (F12) opens the settings as a tab of their own, or
 chooses it when it is open; F12 on it goes back to the tab it was opened
 from. `[x] Settings` on a new tab's launch screen (section 5) opens it, or
 chooses it, the same way, and the launch screen's tab stays. The tab is a page
-of libkeiland's widgets with a sidebar of four panes; Ctrl+Page Down and
-Ctrl+Page Up move between the panes, Tab between a pane's controls. The page
+of libkeiland's widgets with a sidebar of four panes; Ctrl+Down or Ctrl+Page
+Down shows the next pane and Ctrl+Up or Ctrl+Page Up the one before, Tab moves
+between a pane's controls. Ctrl+Up and Ctrl+Down are the keys that work in
+zedBSD's terminal as well, whose desktop takes Ctrl+Page Up and Ctrl+Page Down
+for the titlebar's tabs. The page
 is drawn at the screen's pixels (it does not follow the screen's scale).
 
 | Pane | Setting | Takes effect | Kept in |

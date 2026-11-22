@@ -179,6 +179,8 @@ main(
 		run.page_font = MAIN_PAGE_FONT;
 		run.page_fallback = MAIN_PAGE_FALLBACK;
 	}
+
+	/* The program's own answers to the run. */
 	run.new_window = main_new_window;
 	run.ended = main_ended;
 	run.data = &options;
@@ -441,7 +443,9 @@ main_page_init(
 	/* The home directory: the environment's, else the user's entry. */
 	home = getenv("HOME");
 	user = getpwuid(getuid());
-	if ((home == NULL || home[0] == '\0') && user != NULL)
+	if ((home == NULL ||
+	     home[0] == '\0') &&
+	    user != NULL)
 		home = user->pw_dir;
 	if (home == NULL || home[0] == '\0')
 		return ENOENT;
@@ -517,6 +521,8 @@ main_page_read(
 		close(descriptor);
 		return error;
 	}
+
+	/* A file larger than the caller takes is refused. */
 	if (status.st_size < 0 || (unsigned long long)status.st_size > (unsigned long long)limit) {
 		close(descriptor);
 		return EFBIG;
@@ -528,6 +534,8 @@ main_page_read(
 		close(descriptor);
 		return ENOMEM;
 	}
+
+	/* Its bytes, until the end or the size. */
 	got = 0U;
 	while (got < (size_t)status.st_size) {
 		count = read(descriptor, bytes + got, (size_t)status.st_size - got);
@@ -537,6 +545,8 @@ main_page_read(
 			break;
 		got += (size_t)count;
 	}
+
+	/* The file closes once it is read, and the text ends as a C string. */
 	close(descriptor);
 	bytes[got] = '\0';
 
@@ -681,6 +691,8 @@ main_page_write(
 				error = errno;
 			break;
 		}
+
+		/* Moves past what was written. */
 		at += count;
 		size -= (size_t)count;
 	}
@@ -691,6 +703,8 @@ main_page_write(
 		if (error != 0)
 			error = errno;
 	}
+
+	/* The file closes either way. */
 	close(descriptor);
 
 	/* A file left half written goes. */

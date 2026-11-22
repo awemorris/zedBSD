@@ -1,4 +1,11 @@
 /*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * The parts of the ssh program that its files share: the command line as
  * read, the state of one connection, and the functions each file offers
  * the others.

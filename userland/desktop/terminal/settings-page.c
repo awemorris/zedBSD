@@ -83,11 +83,16 @@
 #define PAGE_AREA_MIN		220
 #define PAGE_NOTE_LINES	4
 
-/* The evdev codes of the keys the page answers itself: C, V and X with Control, Page Up and Page Down with Control. */
+/*
+ * The evdev codes of the keys the page answers itself: C, V and X with
+ * Control, and Up, Down, Page Up and Page Down with Control (the panes).
+ */
 #define PAGE_KEY_X		45U
 #define PAGE_KEY_C		46U
 #define PAGE_KEY_V		47U
+#define PAGE_KEY_UP		103U
 #define PAGE_KEY_PAGEUP	104U
+#define PAGE_KEY_DOWN		108U
 #define PAGE_KEY_PAGEDOWN	109U
 
 /* The spaces a tab of the ssh_config is shown as (the text area draws no tab). */
@@ -283,6 +288,8 @@ terminal_page_open(
 		page.ui = NULL;
 		return ENOMEM;
 	}
+
+	/* The scroll is made: the page releases it when it closes. */
 	page.scroll_made = 1;
 
 	/* The text; a font that cannot be read leaves the page without words, which the log tells. */
@@ -483,21 +490,38 @@ terminal_page_draw(
 	if (scrolled)
 		page.moving = 1;
 
-	/* The keys no widget took: Control with Page Up and Down shows the pane before or after, the others scroll the pane. */
+	/*
+	 * The keys no widget took: Control with Up or Page Up shows the pane
+	 * before, Control with Down or Page Down the pane after, the others
+	 * scroll the pane.  Up and Down are there for the desktops whose
+	 * titlebar takes Control with Page Up and Down for its tabs.
+	 */
 	for (;;) {
 		taken = kl_ui_take(page.ui, &event);
 		if (!taken)
 			break;
+
+		/* Only the keys move to another pane or scroll this one. */
 		if (event.kind != KL_EVENT_KEY)
 			continue;
-		if ((event.modifiers & KL_MOD_CTRL) != 0U && event.code == PAGE_KEY_PAGEUP) {
+
+		/* Control with Up or Page Up shows the pane before. */
+		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
+		    (event.code == PAGE_KEY_UP ||
+		     event.code == PAGE_KEY_PAGEUP)) {
 			page_pane((page.pane + TERMINAL_PANES - 1U) % TERMINAL_PANES);
 			continue;
 		}
-		if ((event.modifiers & KL_MOD_CTRL) != 0U && event.code == PAGE_KEY_PAGEDOWN) {
+
+		/* Control with Down or Page Down shows the pane after. */
+		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
+		    (event.code == PAGE_KEY_DOWN ||
+		     event.code == PAGE_KEY_PAGEDOWN)) {
 			page_pane((page.pane + 1U) % TERMINAL_PANES);
 			continue;
 		}
+
+		/* Any other key scrolls the pane. */
 		taken = kl_scroll_key(&page.scroll, event.code, event.modifiers, PAGE_SCROLL_LINE, now);
 		if (taken)
 			page.moving = 1;
@@ -595,15 +619,21 @@ terminal_page_copy_text(
 		if (field->secret)
 			return 0U;
 		page_selection(field->text, field->caret, field->anchor, &from, &to);
+
+		/* Copies the selection, cut at the buffer's size. */
 		if (to - from > size - 1U)
 			to = from + size - 1U;
 		memcpy(text, field->text + from, to - from);
 	} else {
 		page_selection(area->text, area->caret, area->anchor, &from, &to);
+
+		/* Copies the selection, cut at the buffer's size. */
 		if (to - from > size - 1U)
 			to = from + size - 1U;
 		memcpy(text, area->text + from, to - from);
 	}
+
+	/* The copy ends as a C string. */
 	text[to - from] = '\0';
 
 	/* Succeeded: the selection's text. */
@@ -661,10 +691,15 @@ page_frame(
 	uint32_t *pixels;
 	int error;
 
-	/* The same size and scale keep the frame. */
+	/* A scale of 0 is 100 %. */
 	if (scale == 0U)
 		scale = KL_SCALE_BASE;
-	if (page.canvas_made && page.frame_width == width && page.frame_height == height && page.scale == scale)
+
+	/* The same size and scale keep the frame. */
+	if (page.canvas_made &&
+	    page.frame_width == width &&
+	    page.frame_height == height &&
+	    page.scale == scale)
 		return 0;
 
 	/* The old canvas goes; a new frame of the size. */
@@ -672,8 +707,12 @@ page_frame(
 		kl_canvas_release(&page.canvas);
 		page.canvas_made = 0;
 	}
+
+	/* A window without an area has no frame. */
 	if (width == 0U || height == 0U)
 		return ENOMEM;
+
+	/* The frame's pixels. */
 	pixels = realloc(page.pixels, (size_t)width * height * sizeof(uint32_t));
 	if (pixels == NULL)
 		return ENOMEM;
@@ -811,8 +850,10 @@ page_hosts(
 
 	(void)window;
 
-	/* The file, the first time. */
+	/* The colours and sizes of the page's widgets. */
 	theme = page.style.theme;
+
+	/* The file, the first time. */
 	if (!page.config_read)
 		page_config_read();
 
@@ -828,7 +869,7 @@ page_hosts(
 	(void)snprintf(subtitle, sizeof(subtitle), "%s", page.program->config_shown);
 	y = page_card(&card, "Hosts (ssh_config)", subtitle);
 
-	/* The text, or why it cannot be edited here. */
+	/* The text, or why it cannot be edited here; the area draws its placeholder on one line. */
 	control.x = card.x + 20;
 	control.y = y;
 	control.width = card.width - 40;
@@ -836,8 +877,10 @@ page_hosts(
 	if (page.config_large) {
 		(void)page_note(y, control.x, control.width, "The file is too large to edit here: edit it with a text editor.", theme->text_secondary);
 	} else {
-		(void)kl_text_area(page.ui, &page.style, PAGE_ID_CONFIG, &control, &page.config, "Host myserver\n    HostName myserver.example.org\n    User me");
+		(void)kl_text_area(page.ui, &page.style, PAGE_ID_CONFIG, &control, &page.config, "Host myserver, then its HostName, User and other lines");
 	}
+
+	/* Moves down past the area. */
 	y += area_height + 12;
 
 	/* Save and Revert. */
@@ -850,6 +893,8 @@ page_hosts(
 	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_SAVE, &control, "Save", flags);
 	if (pressed)
 		page_config_save();
+
+	/* Revert, beside Save, reads the file again. */
 	control.x += control.width + 8;
 	control.width = kl_button_width(&page.style, "Revert");
 	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_REVERT, &control, "Revert", 0U);
@@ -857,6 +902,8 @@ page_hosts(
 		page_config_read();
 		page_say(&page.config_message, 0, "The file was read again.");
 	}
+
+	/* Moves down past the buttons. */
 	y += control.height + 12;
 
 	/* When it takes effect, and the last word. */
@@ -927,6 +974,8 @@ page_appearance(
 			page_action(window, page_size_actions[index]);
 		control.x += control.width + 6;
 	}
+
+	/* The theme's row under the sizes. */
 	y += PAGE_ROW;
 
 	/* The theme, the one in use marked. */
@@ -943,6 +992,8 @@ page_appearance(
 			page_action(window, page_theme_actions[index]);
 		control.x += control.width + 6;
 	}
+
+	/* The switch's row under the themes. */
 	y += PAGE_ROW;
 
 	/* The ambiguous width: a switch. */
@@ -964,6 +1015,8 @@ page_appearance(
 		(void)page_note(y + PAGE_ROW, card.x + 20, card.width - 40, "The font is chosen with --font when the terminal starts.", theme->text_secondary);
 		return card.y + card.height;
 	}
+
+	/* The program's own settings of the look. */
 	y = page_items(TERMINAL_PANE_APPEARANCE, y, left, width);
 
 	/* Reports the pane's bottom. */
@@ -1032,8 +1085,10 @@ page_items(
 	int shown;
 	int y;
 
-	/* The fields' values, the first time. */
+	/* The colours and sizes of the page's widgets. */
 	theme = page.style.theme;
+
+	/* The fields' values, the first time. */
 	if (!page.items_read)
 		page_items_read();
 
@@ -1048,6 +1103,8 @@ page_items(
 			if (item->pane == pane && item->effect == effect)
 				rows++;
 		}
+
+		/* An effect without settings in the pane has no card. */
 		if (rows == 0U)
 			continue;
 
@@ -1063,6 +1120,8 @@ page_items(
 				continue;
 			y = page_field_row(y, card.x, card.width, item->label, PAGE_ID_ITEM + index, &page.items[index], item->keyword);
 		}
+
+		/* The next card goes under this one. */
 		y = card.y + card.height + PAGE_GAP;
 		shown = 1;
 	}
@@ -1121,6 +1180,8 @@ page_keys(
 		card.height = PAGE_CARD_SUBTITLED + rows * PAGE_ROW + 8 + theme->control_height + 12 +
 		    page_note_height(width - 40, "A passphrase is optional; with one, the key file is encrypted as ssh-keygen encrypts it.");
 	}
+
+	/* Room for the last word, and the card drawn with its subtitle. */
 	card.height += page_note_height(width - 40, page.key_message.text) + PAGE_CARD_FOOT;
 	(void)snprintf(subtitle, sizeof(subtitle), "In %s", page.program->key_directory_shown);
 	y = page_card(&card, "SSH key (ed25519)", subtitle);
@@ -1143,6 +1204,8 @@ page_keys(
 			page_say(&page.key_message, 0, "The public key is on the clipboard: add it to the server's ~/.ssh/authorized_keys.");
 			page_log("key-copy", page.key_shown);
 		}
+
+		/* Moves down past Copy. */
 		y = control.y + control.height + 8;
 	} else {
 		/* No key of the name: its comment, an optional passphrase twice, and Make Key. */
@@ -1157,6 +1220,8 @@ page_keys(
 		y = control.y + control.height + 4;
 		y = page_note(y, card.x + 20, card.width - 40, "A passphrase is optional; with one, the key file is encrypted as ssh-keygen encrypts it.", theme->text_secondary);
 	}
+
+	/* The last word of the key's card. */
 	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.key_message);
 
 	/* known_hosts under it. */
@@ -1185,8 +1250,10 @@ page_known(
 	int confirm;
 	int y;
 
-	/* The file, the first time. */
+	/* The colours and sizes of the page's widgets. */
 	theme = page.style.theme;
+
+	/* The file, the first time. */
 	if (!page.known_read)
 		page_known_read();
 
@@ -1228,6 +1295,8 @@ page_known(
 			page.remove_line = line->line;
 			page.dirty = 1;
 		}
+
+		/* The next line's row. */
 		y += PAGE_ROW;
 	}
 
@@ -1251,6 +1320,8 @@ page_known(
 			page.remove_line = 0U;
 			page.dirty = 1;
 		}
+
+		/* Moves down past the question; Reload starts at the left again. */
 		y += confirm;
 		control.x = card.x + 20;
 	}
@@ -1263,6 +1334,8 @@ page_known(
 		page_known_read();
 		page_say(&page.known_message, 0, "known_hosts was read again.");
 	}
+
+	/* The last word under the buttons. */
 	y = control.y + control.height + 6;
 	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.known_message);
 
@@ -1335,6 +1408,8 @@ page_items_save(
 			page_log("save-failed", item->keyword);
 			return;
 		}
+
+		/* Counts the saved item and the effect it has. */
 		saved++;
 		effects |= 1U << item->effect;
 		page_log("saved", item->keyword);
@@ -1367,10 +1442,14 @@ page_config_read(void)
 		kl_text_area_set(&page.config, "");
 		return;
 	}
+
+	/* A file too large for the area is not edited here. */
 	if (error == EFBIG) {
 		page.config_large = 1;
 		return;
 	}
+
+	/* Any other failure is told, and the area is left empty. */
 	if (error != 0) {
 		kl_text_area_set(&page.config, "");
 		(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
@@ -1410,21 +1489,32 @@ page_config_shown(
 	at = 0U;
 	page.config_crlf = 0;
 	for (index = 0U; index < size; index++) {
-		if (bytes[index] == '\r' && index + 1U < size && bytes[index + 1U] == '\n') {
+		/* A CR before an LF is dropped, and the file is marked as one with CR LF. */
+		if (bytes[index] == '\r' &&
+		    index + 1U < size &&
+		    bytes[index + 1U] == '\n') {
 			page.config_crlf = 1;
 			continue;
 		}
+
+		/* A text too long for the area is not edited here. */
 		if (at + PAGE_TAB_SPACES >= KL_TEXT_AREA_MAX) {
 			free(shown);
 			return EFBIG;
 		}
+
+		/* A tab shows as spaces. */
 		if (bytes[index] == '\t') {
 			for (space = 0U; space < PAGE_TAB_SPACES; space++)
 				shown[at++] = ' ';
 			continue;
 		}
+
+		/* Any other byte as it is. */
 		shown[at++] = bytes[index];
 	}
+
+	/* The text ends as a C string. */
 	shown[at] = '\0';
 
 	/* Succeeded: the area shows it. */
@@ -1454,6 +1544,8 @@ page_config_save(void)
 		page_say(&page.config_message, 1, "There is no memory to save the file.");
 		return;
 	}
+
+	/* Each LF becomes CR LF again when the file had them. */
 	size = 0U;
 	for (index = 0U; index < page.config.length; index++) {
 		if (page.config.text[index] == '\n' && page.config_crlf)
@@ -1475,6 +1567,8 @@ page_config_save(void)
 	report[0] = '\0';
 	if (page.program->check != NULL)
 		(void)page.program->check(page.program->data, page.config.text, page.config.length, report, sizeof(report));
+
+	/* A problem the program found is told; the file stays saved. */
 	if (report[0] != '\0') {
 		(void)snprintf(text, sizeof(text), "Saved, but: %s", report);
 		page_say(&page.config_message, 1, text);
@@ -1908,6 +2002,8 @@ page_commit(
 			while (piece > 0U && ((unsigned char)text[piece] & 0xc0U) == 0x80U)
 				piece--;
 		}
+
+		/* One piece of the text, as one commit. */
 		memcpy(event.text, text, piece);
 		event.text[piece] = '\0';
 		(void)kl_ui_text(page.ui, &event);
@@ -1937,7 +2033,9 @@ page_key(
 	held = event->modifiers & (KL_MOD_CTRL | KL_MOD_ALT | KL_MOD_SHIFT | KL_MOD_SUPER);
 	if (!event->pressed || held != KL_MOD_CTRL)
 		return 0;
-	if (event->code != PAGE_KEY_C && event->code != PAGE_KEY_X && event->code != PAGE_KEY_V)
+	if (event->code != PAGE_KEY_C &&
+	    event->code != PAGE_KEY_X &&
+	    event->code != PAGE_KEY_V)
 		return 0;
 
 	/* Without a field with the keyboard the key is no one's. */
@@ -1950,6 +2048,8 @@ page_key(
 		page_action(window, TERMINAL_ACTION_COPY);
 		return 1;
 	}
+
+	/* Paste is the run's too. */
 	if (event->code == PAGE_KEY_V) {
 		page_action(window, TERMINAL_ACTION_PASTE);
 		return 1;

@@ -13,7 +13,7 @@
  * characters whose East Asian Width is Ambiguous (Greek, Cyrillic, circles,
  * box drawing and the like, which CJK fonts and programs draw full width)
  * take two only while the View menu's "Treat Ambiguous-Width Characters as
- * Wide" is on (ws128-p009), and one otherwise, as before.  The Ambiguous
+ * Wide" is on, and one otherwise, as before.  The Ambiguous
  * characters come from the Unicode data (ambiguous.h, made by
  * ambiguous-gen.py) and are found by a binary search over their ranges, so
  * the width costs a few comparisons per character.

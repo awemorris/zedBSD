@@ -129,6 +129,8 @@ terminal_settings_save(
 				   wide,
 				   copy);
 	}
+
+	/* A text that did not fit is refused. */
 	if (written < 0 || (size_t)written >= sizeof(text))
 		return EINVAL;
 

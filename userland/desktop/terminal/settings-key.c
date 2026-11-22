@@ -85,7 +85,9 @@ terminal_key_name_valid(
 			continue;
 		if (byte >= '0' && byte <= '9')
 			continue;
-		if (byte == '.' || byte == '_' || byte == '-')
+		if (byte == '.' ||
+		    byte == '_' ||
+		    byte == '-')
 			continue;
 		return EINVAL;
 	}
@@ -129,6 +131,7 @@ terminal_key_make(
 	struct ssh_key key;
 	struct ssh_buf file;
 	struct ssh_buf public_line;
+	size_t passphrase_length;
 	int exists;
 	int error;
 
@@ -144,7 +147,8 @@ terminal_key_make(
 	}
 
 	/* A passphrase a reader of the file takes. */
-	if (strlen(passphrase) > SSH_KEY_PASSPHRASE_MAX) {
+	passphrase_length = strlen(passphrase);
+	if (passphrase_length > SSH_KEY_PASSPHRASE_MAX) {
 		key_why(why, why_size, "The passphrase is too long.");
 		return EINVAL;
 	}
@@ -553,7 +557,9 @@ key_field_end(
 	size_t end)
 {
 	/* Up to the white space. */
-	while (at < end && text[at] != ' ' && text[at] != '\t')
+	while (at < end &&
+	       text[at] != ' ' &&
+	       text[at] != '\t')
 		at++;
 
 	/* Reports the field's end. */
@@ -568,7 +574,9 @@ key_blank_end(
 	size_t end)
 {
 	/* Past the white space. */
-	while (at < end && (text[at] == ' ' || text[at] == '\t'))
+	while (at < end &&
+	       (text[at] == ' ' ||
+	        text[at] == '\t'))
 		at++;
 
 	/* Reports where the next field starts. */

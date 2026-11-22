@@ -15,12 +15,12 @@
  * character shows the replacement glyph's slot instead.
  *
  * A character the grid gives two cells (East Asian wide, or Ambiguous with
- * View > Treat Ambiguous-Width Characters as Wide, ws128-p009) is drawn
+ * View > Treat Ambiguous-Width Characters as Wide) is drawn
  * into two slots side by side, in a frame two cells wide: a glyph made for
  * two cells fills it, a narrower one is centred in it, and box drawing and
  * block elements are drawn twice as wide so their lines still meet the
  * next cell's.  A character the font has no glyph for is drawn from its
- * companion, the monospaced fallback (ws090-p020: the signs and the box
+ * companion, the monospaced fallback (the signs and the box
  * drawing Mahora Mono lacks), and one neither has (CJK) from the fallback
  * font when there is one.  The cell's line is fixed (FONT_LINE_*), not the
  * font's.
@@ -48,7 +48,7 @@
 /*
  * A cell's line, in thousandths of the size: how far it reaches above the
  * baseline and below it.  It is the line JetBrains Mono gave the terminal
- * before Mahora Mono (ws090-p020), kept whatever fonts are installed, so
+ * before Mahora Mono, kept whatever fonts are installed, so
  * that the grid keeps its spacing and the fallback's box drawing fills
  * its cells.
  */
@@ -126,7 +126,7 @@ terminal_font_open(
 		return error;
 	}
 
-	/* Its companion, the monospaced fallback, for the signs and the box drawing it lacks (ws090-p020; no bold is drawn). */
+	/* Its companion, the monospaced fallback, for the signs and the box drawing it lacks (no bold is drawn). */
 	if (companion != NULL)
 		(void)truetype_open_companions(font->face, NULL, companion);
 
@@ -830,6 +830,8 @@ font_draw_colour(
 			row[origin_x + (unsigned)target_x] = image.pixels[(size_t)y * (size_t)image.width + (size_t)x];
 		}
 	}
+
+	/* The glyph's picture is in the atlas now. */
 	free(image.pixels);
 
 	/* The frame's slots hold colours: the quads that show them say so. */

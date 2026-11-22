@@ -280,7 +280,10 @@ keiui_win32_command_line(
 	int error;
 
 	/* The arguments with a program, and room for the line. */
-	if (argv == NULL || argv[0] == NULL || line == NULL || size == 0U)
+	if (argv == NULL ||
+	    argv[0] == NULL ||
+	    line == NULL ||
+	    size == 0U)
 		return EINVAL;
 
 	/* A program's name cannot hold a double quote. */
@@ -292,7 +295,9 @@ keiui_win32_command_line(
 	space = strchr(argv[0], ' ');
 	tab = strchr(argv[0], '\t');
 	quoted = 0;
-	if (argv[0][0] == '\0' || space != NULL || tab != NULL)
+	if (argv[0][0] == '\0' ||
+	    space != NULL ||
+	    tab != NULL)
 		quoted = 1;
 
 	/* The program's name, without the escapes of the other arguments. */
@@ -736,6 +741,8 @@ line_argument(
 			if (error != 0)
 				return error;
 		}
+
+		/* Succeeded: the argument is on the line. */
 		return 0;
 	}
 

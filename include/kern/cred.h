@@ -117,16 +117,34 @@ vfs_clear_setid_on_write(
 	struct inode *inode,
 	const struct ucred *cred);
 
-/*
- * Dirty MAP_SHARED pages have no meaningful writer credential.  Clearing
- *
- * privilege bits before their first backend writeback closes the interval in
- *
- * which exec could observe changed contents with stale set-id metadata.
- */
 int
 vfs_clear_setid_on_content_change(
 	struct inode *inode);
+
+/*
+ * The set-id bits are judged when the content changes: a write by its
+ * writer's credential, a store through a shared mapping (which has none) as
+ * an unprivileged one.  A write-back of the page cache clears them only for
+ * the stores that no later mode change with set-id bits has accepted, so the
+ * bits a privileged chmod set after a write survive its write-back.
+ */
+void
+vfs_note_mapped_store(
+	struct inode *inode);
+
+int
+vfs_clear_setid_on_writeback(
+	struct inode *inode);
+
+unsigned
+vfs_setid_accept_begin(
+	struct inode *inode,
+	mode_t mode);
+
+void
+vfs_setid_accept_abort(
+	struct inode *inode,
+	unsigned pending);
 
 ssize_t
 vfs_getxattr(

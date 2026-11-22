@@ -13,7 +13,7 @@
  * cursor motion, erasing, colours, UTF-8; with the scrolling region, line
  * and character insertion and deletion, the cursor's visibility, 256 and
  * direct colours, and OSC strings added for the programs a shell runs:
- * OSC 0 and 2 set the title (the tab's, ws035-p091), the others are
+ * OSC 0 and 2 set the title (the tab's), the others are
  * dropped.
  */
 
@@ -32,7 +32,7 @@
 /*
  * The final bytes of the control sequences that move the cursor or edit
  * the grid, and so cancel a pending wrap; SGR, the modes and the reports
- * keep it, as on xterm (ws128-p010).
+ * keep it, as on xterm.
  */
 #define SCREEN_WRAP_CANCELS	"ABCDEFGHJKLMPSTXadefru`@"
 
@@ -113,7 +113,7 @@ terminal_screen_init(
 
 /*
  * Sets whether Ambiguous-width characters written from now on take two
- * cells (ws128-p009).
+ * cells.
  *
  * The cells already on the screen and in the scrollback keep the width
  * they were written with, so nothing shown moves; only new output follows
@@ -192,7 +192,7 @@ terminal_screen_resize(
 
 	/*
 	 * The rows were laid out again, so a range on them no longer names the
-	 * same text, and the view returns to the live screen (ws035-p114).
+	 * same text, and the view returns to the live screen.
 	 */
 	screen->range = 0;
 	screen->view = 0U;
@@ -235,7 +235,7 @@ terminal_screen_cell(
 }
 
 /*
- * Returns the cell at a column of a line (ws035-p114): a line of the
+ * Returns the cell at a column of a line: a line of the
  * scrollback or of the screen, numbered from the first line the screen
  * ever showed.  Returns NULL for a line the terminal no longer keeps or
  * does not show yet, and for a column past the grid.
@@ -280,7 +280,7 @@ terminal_screen_line_cell(
 }
 
 /*
- * Gives the line a row of the window shows (ws035-p114): the screen's row
+ * Gives the line a row of the window shows: the screen's row
  * when the view is on the live screen, a line of the scrollback when it is
  * back.
  */
@@ -306,7 +306,7 @@ terminal_screen_scroll_view(
 	unsigned old_view;
 	unsigned step;
 
-	/* Whole lines from here: the fingers' offset within a line goes (ws081-p011). */
+	/* Whole lines from here: the fingers' offset within a line goes. */
 	if (screen->view_offset != 0) {
 		screen->view_offset = 0;
 		screen->changed = 1;
@@ -340,7 +340,7 @@ terminal_screen_scroll_view(
 
 /*
  * Tells whether a cell of a line is in the range selected with the pointer
- * (ws035-p093; lines since ws035-p114).
+ * (lines that follow the text into the scrollback).
  */
 int
 terminal_screen_in_range(
@@ -370,8 +370,8 @@ terminal_screen_in_range(
  * Writes the grid's text as UTF-8, a line per row without its trailing
  * spaces and without the empty rows at the bottom, into a buffer (cut at
  * its size): the range selected with the pointer when there is one and
- * the whole screen is not selected (its lines may be in the scrollback,
- * ws035-p114), else the whole grid.  Returns the number of bytes written,
+ * the whole screen is not selected (its lines may be in the scrollback),
+ * else the whole grid.  Returns the number of bytes written,
  * without a terminator.
  */
 size_t
@@ -1080,7 +1080,7 @@ screen_reverse_index(
 /*
  * Moves the rows from top to bottom up by count, blanking the rows that
  * open at the bottom.  With keep, the whole screen scrolling up keeps the
- * rows that leave its top in the scrollback (ws035-p114).
+ * rows that leave its top in the scrollback.
  */
 static void
 screen_scroll_up(
@@ -1143,7 +1143,7 @@ screen_scroll_down(
 	if (count > bottom - top + 1U)
 		count = bottom - top + 1U;
 
-	/* The text moves under a range on the region, which is dropped (ws035-p114). */
+	/* The text moves under a range on the region, which is dropped. */
 	screen_range_moved(screen, top, bottom);
 
 	/* The rows that stay move down, starting from the bottom. */
@@ -1157,7 +1157,7 @@ screen_scroll_down(
 
 /*
  * Keeps a row that is leaving the top of the screen as the newest line of
- * the scrollback (ws035-p114); a full scrollback drops its oldest line.
+ * the scrollback; a full scrollback drops its oldest line.
  */
 static void
 screen_keep_line(
@@ -1206,7 +1206,7 @@ screen_keep_line(
 /*
  * Drops the range selected with the pointer when it has a line in a part of
  * the screen whose text moves without its line numbers (a region scrolled,
- * lines inserted or deleted; ws035-p114).
+ * lines inserted or deleted).
  */
 static void
 screen_range_moved(
@@ -1231,7 +1231,7 @@ screen_range_moved(
 /*
  * Empties the grid for the alternate screen (? 1049, ? 47, ? 1047): the
  * default colours, the cursor home and the whole grid scrolling, with the
- * scrollback kept and the view on the live screen (ws035-p114).
+ * scrollback kept and the view on the live screen.
  */
 static void
 screen_clear_grid(
@@ -1334,7 +1334,7 @@ screen_put(
 
 	/*
 	 * A wide character takes two cells, and so does an Ambiguous one while
-	 * the setting is on (ws128-p009).  The width is decided here, once, and
+	 * the setting is on.  The width is decided here, once, and
 	 * kept in the cells: a later change of the setting leaves the
 	 * characters already placed as they are.
 	 */
@@ -1382,8 +1382,8 @@ screen_put(
 	/*
 	 * The cursor moves past it.  A character that ends in the last column
 	 * leaves the cursor there and the wrap pending, so a program that fills
-	 * the row and then writes CR LF (Emacs's menu bar and mode line,
-	 * BUG-150) moves down one row, not two, and a full last row does not
+	 * the row and then writes CR LF (Emacs's menu bar and mode line)
+	 * moves down one row, not two, and a full last row does not
 	 * scroll the screen.
 	 */
 	if (screen->cursor_column + width >= screen->columns) {

@@ -376,7 +376,9 @@ kl_window_set_menu(
 	int error;
 
 	/* A window, and a table that fits. */
-	if (window == NULL || (count != 0U && entries == NULL))
+	if (window == NULL ||
+	    (count != 0U &&
+	     entries == NULL))
 		return EINVAL;
 	if (count > KEIUI_WIN32_MENU_ITEMS)
 		return E2BIG;
@@ -420,7 +422,9 @@ kl_window_popup_menu(
 	int error;
 
 	/* A window and a table that fits. */
-	if (window == NULL || entries == NULL || count == 0U)
+	if (window == NULL ||
+	    entries == NULL ||
+	    count == 0U)
 		return EINVAL;
 	if (count > KEIUI_WIN32_MENU_ITEMS)
 		return E2BIG;
@@ -464,7 +468,9 @@ kl_window_set_tabs(
 	size_t index;
 
 	/* A window, and tabs that fit, each with an ID. */
-	if (window == NULL || (count != 0U && tabs == NULL))
+	if (window == NULL ||
+	    (count != 0U &&
+	     tabs == NULL))
 		return EINVAL;
 	if (count > KEIUI_WIN32_TABS)
 		return E2BIG;
@@ -1869,6 +1875,8 @@ titlebar_tabs_layout(
 		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U)
 			strip.active = index;
 	}
+
+	/* The new-tab button when the window asked for one. */
 	strip.new_button = 0;
 	if ((window->tab_options & KL_TABS_NEW_BUTTON) != 0U)
 		strip.new_button = 1;
@@ -1884,6 +1892,8 @@ titlebar_tabs_layout(
 		window->control_places[0] = window->menu_place;
 		window->control_place_count = 1U;
 	}
+
+	/* The window's controls, after the menu. */
 	place = &window->control_places[window->control_place_count];
 	place->x = left;
 	place->y = 0;

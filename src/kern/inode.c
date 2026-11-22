@@ -837,10 +837,12 @@ inode_setattr(
 		INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW;
 	struct stat requested;
 	struct inode_time now;
+	unsigned accepted_store;
 	int held_io;
 	int error;
 
 	held_io = 0;
+	accepted_store = 0;
 
 	if (i == NULL || s == NULL || (mask & ~valid) != 0)
 		return EINVAL;
@@ -920,13 +922,28 @@ inode_setattr(
 		goto out;
 	}
 
+	/*
+	 * A mode with set-id bits accepts the content stored through
+	 * mappings so far, so their later write-back leaves the new bits.
+	 * Under i_io_lock, a write-back sees the store either accepted or
+	 * pending, never between.
+	 */
+	if ((mask & INODE_ATTR_MODE) != 0)
+		accepted_store = vfs_setid_accept_begin(i, requested.st_mode);
+
+	/* Commits the attributes; a failure leaves the stores unaccepted. */
 	error = i->i_op->setattr(i, &requested, mask);
-	if (error != 0)
+	if (error != 0) {
+		vfs_setid_accept_abort(i, accepted_store);
 		goto out;
+	}
+
 	if ((mask & INODE_ATTR_MODE) != 0 && posix_acl_chmod != NULL) {
 		error = posix_acl_chmod(i, requested.st_mode);
-		if (error != 0)
+		if (error != 0) {
+			vfs_setid_accept_abort(i, accepted_store);
 			goto out;
+		}
 	}
 
 	/* Mirrors the committed attributes into the cached fields. */

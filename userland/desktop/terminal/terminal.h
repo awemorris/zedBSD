@@ -50,7 +50,7 @@ struct terminal_connection;
 #define TERMINAL_MAX_COLUMNS	240U
 #define TERMINAL_MAX_ROWS	100U
 
-/* How many lines that scrolled off the top of the screen the terminal keeps to scroll back to (ws035-p114). */
+/* How many lines that scrolled off the top of the screen the terminal keeps to scroll back to. */
 #define TERMINAL_HISTORY	1000U
 
 /* How many numeric parameters one control sequence keeps. */
@@ -71,7 +71,7 @@ struct terminal_connection;
 #define TERMINAL_SELECTION	0x3a5a98U
 
 /*
- * The colour themes of View > Theme (ws128-p006): the dark one the
+ * The colour themes of View > Theme: the dark one the
  * terminal always had (TERMINAL_FOREGROUND on TERMINAL_BACKGROUND), a light
  * one, and white on black.  The cells keep the dark theme's colours for
  * the text's default ones; the drawing puts the theme's in their place.
@@ -81,7 +81,7 @@ struct terminal_connection;
 #define TERMINAL_THEME_CONTRAST	2U
 #define TERMINAL_THEMES		3U
 
-/* The longest text Edit > Find looks for, in bytes and in characters (ws128-p006). */
+/* The longest text Edit > Find looks for, in bytes and in characters. */
 #define TERMINAL_SEARCH_BYTES	128U
 #define TERMINAL_SEARCH_LENGTH	64U
 
@@ -101,10 +101,10 @@ struct terminal_connection;
 #define TERMINAL_TABS		8U
 #define TERMINAL_TAB_TITLE	64U
 
-/* How many pointer events wait for the main loop at most (ws035-p093). */
+/* How many pointer events wait for the main loop at most. */
 #define TERMINAL_POINTER_EVENTS	32U
 
-/* How many touch inputs wait for the main loop at most (ws081-p011). */
+/* How many touch inputs wait for the main loop at most. */
 #define TERMINAL_TOUCH_EVENTS	256U
 
 /* The kinds of pointer events the main loop takes: the left button pressed or released, a motion. */
@@ -159,7 +159,7 @@ enum terminal_action {
 };
 
 /*
- * The colours of a theme (ws128-p006), as 0xRRGGBB: the text's default
+ * The colours of a theme, as 0xRRGGBB: the text's default
  * foreground and background, the selection's background, a match's
  * background and the current match's, the text on a match, and the
  * search bar's background.
@@ -270,7 +270,7 @@ struct terminal_screen {
 	/*
 	 * Nonzero while a character written in the last column has left the
 	 * cursor there with its wrap still to come (the right margin of xterm
-	 * and the VT100, terminfo's am and xenl; ws128-p010, BUG-150).  The
+	 * and the VT100, terminfo's am and xenl).  The
 	 * next printed character wraps first; a carriage return, a line feed,
 	 * a move or an edit cancels the wrap, and SGR and the modes keep it.
 	 */
@@ -302,7 +302,7 @@ struct terminal_screen {
 
 	/*
 	 * Whether Ambiguous-width characters written from now on take two cells
-	 * (View > Treat Ambiguous-Width Characters as Wide, ws128-p009).  Cells
+	 * (View > Treat Ambiguous-Width Characters as Wide).  Cells
 	 * already written keep their width.
 	 */
 	int ambiguous_wide;
@@ -315,7 +315,7 @@ struct terminal_screen {
 
 	/*
 	 * The OSC string being read (its first TERMINAL_OSC - 1 bytes), and the
-	 * title OSC 0 or 2 last set (ws035-p091; empty until one is set).
+	 * title OSC 0 or 2 last set (empty until one is set).
 	 */
 	char osc[TERMINAL_OSC];
 	unsigned osc_length;
@@ -333,17 +333,17 @@ struct terminal_screen {
 	int selected;
 
 	/*
-	 * A range selected with the pointer (ws035-p093): whether there is one,
+	 * A range selected with the pointer: whether there is one,
 	 * and its first and last cells (column, line) in reading order.  A line
 	 * is numbered from the first the screen ever showed, so the range stays
-	 * on its text while the text scrolls (ws035-p114).
+	 * on its text while the text scrolls.
 	 */
 	int range;
 	unsigned long range_from[2];
 	unsigned long range_to[2];
 
 	/*
-	 * The scrollback (ws035-p114): the lines that scrolled off the top of
+	 * The scrollback: the lines that scrolled off the top of
 	 * the whole screen, a ring of TERMINAL_HISTORY lines of
 	 * TERMINAL_MAX_COLUMNS cells each, where the oldest line is in the
 	 * ring and how many are kept.  scrolled counts every line that ever
@@ -351,7 +351,7 @@ struct terminal_screen {
 	 * oldest line kept is line scrolled - history_count.  view is how many
 	 * lines back from the live screen the window shows (0: the live
 	 * screen); new output keeps a view that is back on the same text.
-	 * view_offset (ws081-p011) moves the text down by that many pixels
+	 * view_offset moves the text down by that many pixels
 	 * within a line while the fingers scroll it smoothly (negative past the
 	 * live screen, a line or more past the oldest line kept); the wheel and
 	 * the keys set it back to 0.
@@ -365,7 +365,7 @@ struct terminal_screen {
 };
 
 /*
- * One pointer event for the main loop (ws035-p093): its kind
+ * One pointer event for the main loop: its kind
  * (TERMINAL_POINTER_*), where it was in the surface, in pixels, its time in
  * milliseconds and its serial (a press's starts a drag).
  */
@@ -393,7 +393,7 @@ struct terminal_font {
 	struct truetype_face *face;
 
 	/*
-	 * The fallback font (ws128-p009), which draws the characters the face
+	 * The fallback font, which draws the characters the face
 	 * has no glyph for (CJK): its file, kept in memory, and its face (NULL
 	 * without one).  It is drawn at the face's size.
 	 */
@@ -445,7 +445,7 @@ struct terminal_font {
 	/*
 	 * The first of the two slots side by side that hold the replacement
 	 * character two cells wide, which a wide character shows when the
-	 * atlas is full (ws128-p009).
+	 * atlas is full.
 	 */
 	unsigned wide_replacement;
 
@@ -573,7 +573,7 @@ struct terminal_build {
 };
 
 /*
- * The window: libkeiland's application and its window (WS131 p018: the
+ * The window: libkeiland's application and its window (the
  * connection, the toplevel, the seat's input, the key repeat, the menus,
  * the tabs, the selections and drag and drop; the drawing shows the frames
  * on it), and what its input has left for the main loop.
@@ -583,11 +583,11 @@ struct terminal_window {
 	struct kl_app *app;
 	struct kl_window *kui;
 
-	/* The touch inputs not yet taken by the main loop, oldest first (ws081-p011; a full queue drops the newest). */
+	/* The touch inputs not yet taken by the main loop, oldest first (a full queue drops the newest). */
 	struct terminal_touch_event touches[TERMINAL_TOUCH_EVENTS];
 	unsigned touch_count;
 
-	/* Where the pointer is over the surface (pixels), and its events not yet taken by the main loop (ws035-p093). */
+	/* Where the pointer is over the surface (pixels), and its events not yet taken by the main loop. */
 	int32_t pointer_x;
 	int32_t pointer_y;
 	struct terminal_pointer_event pointer_events[TERMINAL_POINTER_EVENTS];
@@ -620,7 +620,7 @@ struct terminal_window {
 	size_t input_length;
 
 	/*
-	 * The input method's text being composed (BUG-155, text-input-v3
+	 * The input method's text being composed (text-input-v3
 	 * through libkeiland's window): shown over the cells from the cursor
 	 * until it is committed (its bytes then go to the shell like typed
 	 * keys) or replaced; empty for none.  preedit_begin and preedit_end
@@ -641,8 +641,8 @@ struct terminal_window {
 	char last_commit[KL_WINDOW_TEXT_MAX];
 
 	/*
-	 * The view's scrolling the main loop has not yet carried out
-	 * (ws035-p114): wheel notches and Shift+Page Up or Down pages, each
+	 * The view's scrolling the main loop has not yet carried out:
+	 * wheel notches and Shift+Page Up or Down pages, each
 	 * positive going back into the scrollback and negative toward the live
 	 * screen; wheel is the wheel's distance not yet a whole notch.
 	 */
@@ -653,11 +653,11 @@ struct terminal_window {
 	/* Whether the compositor last configured the window fullscreen. */
 	int fullscreen;
 
-	/* The colour theme the window is drawn in (TERMINAL_THEME_*, ws128-p006). */
+	/* The colour theme the window is drawn in (TERMINAL_THEME_*). */
 	unsigned theme;
 
 	/*
-	 * Edit > Find (ws128-p006): whether the search bar is open (the keys
+	 * Edit > Find: whether the search bar is open (the keys
 	 * then edit the text looked for instead of going to the shell), the
 	 * text (UTF-8, search_length bytes), whether it changed since the main
 	 * loop last looked, and a step the main loop has yet to take (1 to the
@@ -706,7 +706,7 @@ struct terminal_window {
 	uint32_t actions[TERMINAL_ACTIONS];
 	unsigned action_count;
 
-	/* A drop on the window waiting for the main loop to paste it (clipboard.c, ws035-p088). */
+	/* A drop on the window waiting for the main loop to paste it (clipboard.c). */
 	int drop_pending;
 
 	/*

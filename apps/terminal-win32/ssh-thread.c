@@ -1024,7 +1024,10 @@ thread_parse_target(
 	/* The port, a number from 1 to 65535. */
 	if (colon != NULL) {
 		port = strtoul(colon + 1, &end, 10);
-		if (colon[1] == '\0' || *end != '\0' || port == 0UL || port > 65535UL)
+		if (colon[1] == '\0' ||
+		    *end != '\0' ||
+		    port == 0UL ||
+		    port > 65535UL)
 			return EINVAL;
 		target->port = (uint16_t)port;
 	}
@@ -1172,10 +1175,14 @@ thread_settings(
 		error = ssh_config_parse(&link->config, text, size, link->target->host, error_text);
 		free(text);
 	}
+
+	/* A file that cannot be read gives the reason. */
 	if (error != 0) {
 		(void)snprintf(link->reason, sizeof(link->reason), "ssh\\config: %s", error_text);
 		return THREAD_FAILED;
 	}
+
+	/* What the file did not say takes the defaults. */
 	ssh_config_defaults(&link->config);
 
 	/* What was typed wins over the file. */
@@ -1678,6 +1685,8 @@ thread_host_ask(
 	} else {
 		(void)snprintf(line, sizeof(line), "The authenticity of host '%s (%s)' can't be established.\r\n", link->known_name, address);
 	}
+
+	/* Tells whose key it is, then its fingerprint. */
 	session_say(link->session, line);
 	(void)snprintf(line, sizeof(line), "ED25519 key fingerprint is %s.\r\n", link->fingerprint);
 	session_say(link->session, line);
@@ -1772,6 +1781,8 @@ thread_host_revoked(
 	} else {
 		(void)snprintf(line, sizeof(line), "The ED25519 host key for %s is marked as revoked.\r\n", link->known_name);
 	}
+
+	/* What that may mean. */
 	session_say(link->session, line);
 	session_say(link->session, "Someone may be using a stolen key to pretend to be this host.\r\n");
 }
@@ -1937,7 +1948,9 @@ thread_known_hosts_write(
 	size = 0U;
 	error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &old, &size);
 	unended = 0;
-	if (error == 0 && size != 0U && old[size - 1U] != '\n')
+	if (error == 0 &&
+	    size != 0U &&
+	    old[size - 1U] != '\n')
 		unended = 1;
 	free(old);
 	if (unended)
@@ -1947,6 +1960,8 @@ thread_known_hosts_write(
 
 	kl_mutex_unlock(&known_hosts_lock);
 
+
+	/* The line is written or not; its buffer goes. */
 	ssh_buf_free(&line);
 
 	/* A file that did not take the line. */
@@ -2031,6 +2046,8 @@ thread_from_tab(
 	written = 0U;
 	if (session->input_length != 0U && !closing)
 		(void)ssh_engine_write(link->engine, session->input, session->input_length, &written);
+
+	/* The keys taken leave the buffer, and a full buffer has room again. */
 	if (written != 0U) {
 		memmove(session->input, session->input + written, session->input_length - written);
 		session->input_length -= written;
@@ -2168,6 +2185,8 @@ thread_feed(
 			link->received_start = link->received_end;
 			break;
 		}
+
+		/* What the engine took is gone from the buffer; none taken waits for more. */
 		link->received_start += taken;
 		if (taken == 0U)
 			break;
@@ -2402,6 +2421,8 @@ thread_passphrase(
 		(void)ssh_engine_passphrase(link->engine, identity, NULL);
 		return;
 	}
+
+	/* The key's file. */
 	path = link->identity_paths[identity];
 
 	/* The passphrase kept for the Windows session, the first time the key is asked for in this attempt. */
@@ -2465,7 +2486,9 @@ thread_passphrase_answer(
 
 	/* The engine opens the key with it at once; an empty one passes the key over. */
 	error = ssh_engine_passphrase(link->engine, link->asked_identity, answer);
-	if (error != 0 || answer[0] == '\0' || !keep)
+	if (error != 0 ||
+	    answer[0] == '\0' ||
+	    !keep)
 		return;
 
 	/* Keeps the passphrase that opened the key until the user signs out of Windows. */
