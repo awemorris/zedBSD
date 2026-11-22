@@ -164,7 +164,7 @@ PasswordAuthentication, PubkeyAuthentication and LogLevel.  Match, Include,
 ProxyJump and the other keywords it does not know are errors that name their
 line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is
 this folder's ssh/, ~/ is this folder, a name without a folder is in ssh/,
-and a full path (C:/... or C:\...) is taken as it is.
+and a full path (C:/... or //server/share/...) is taken as it is.
 
 ssh/known_hosts has one line a host, as OpenSSH writes it ("[host]:port" for
 a port other than 22).  mikuterm does not write hashed names (HashKnownHosts

@@ -110,8 +110,8 @@ without a pattern character are the list a new tab shows.
 | `~/.ssh/X` | `<folder>/ssh/X` |
 | `~/X` | `<folder>/X` |
 | `X`, `dir/X` | `<folder>/ssh/X`, `<folder>/ssh/dir/X` |
-| `C:/...` (or `C:\...`), `\\server\share\...` | as written |
-| `/...` | no file on Windows (`/dev/null` keeps nothing, section 6) |
+| `C:/...`, `//server/share/...` (or with `\`) | as written |
+| any other `/...` (`//name` with no `/` after it too) | no file on Windows (`/dev/null` keeps nothing, section 6) |
 
 The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
 `UserKnownHostsFile ~/.ssh/known_hosts`, and `GlobalKnownHostsFile

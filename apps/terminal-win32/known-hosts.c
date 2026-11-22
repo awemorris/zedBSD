@@ -10,7 +10,8 @@
  * library's known_hosts check answers: the names a host goes by in
  * known_hosts ([host]:port for a port other than 22, in lower case), the
  * line that holds the key a changed host had, the other names the same
- * key is known by, and how a path is named on the screen.
+ * key is known by, which paths are Windows' own and how a path is named on
+ * the screen.
  *
  * The known_hosts text is OpenSSH's (sshd(8) SSH_KNOWN_HOSTS FILE
  * FORMAT): one "[marker] names key-type key [comment]" a line.  As the
@@ -217,6 +218,47 @@ mikuterm_known_hosts_scan(
 		if (!names_match && same_key)
 			known_other_add(scan, path, number, &parsed);
 	}
+}
+
+/*
+ * Tells whether a path is a Windows path from a drive or a server (1) or
+ * not (0): a drive's letter, its colon and a separator (C:\..., C:/...);
+ * two backslashes (\\server\...); or two slashes, a server's name and a
+ * separator after it (//server/share/..., as mikuterm shows a server's
+ * path).  Two slashes with no name, or no separator after the name, are a
+ * POSIX path from the root ("//etc" is "/etc"), not a server's.
+ */
+int
+mikuterm_path_absolute(
+	const char *path)
+{
+	size_t index;
+
+	/* A drive's letter, its colon and a separator. */
+	if (((path[0] >= 'A' &&
+	      path[0] <= 'Z') ||
+	     (path[0] >= 'a' &&
+	      path[0] <= 'z')) &&
+	    path[1] == ':' &&
+	    (path[2] == '\\' ||
+	     path[2] == '/'))
+		return 1;
+
+	/* A server's share, written with backslashes. */
+	if (path[0] == '\\' && path[1] == '\\')
+		return 1;
+
+	/* With slashes: the server's name runs to the second separator, which must be there. */
+	if (path[0] != '/' || path[1] != '/')
+		return 0;
+	for (index = 2U; path[index] != '\0'; index++) {
+		/* The separator after the name. */
+		if (path[index] == '/' || path[index] == '\\')
+			return index > 2U;
+	}
+
+	/* A name with nothing after it is not a server's path. */
+	return 0;
 }
 
 /*
