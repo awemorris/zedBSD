@@ -52,6 +52,7 @@ struct kwl_object *kwl_popup_focus(struct kwl_server *server, struct kwl_object 
 struct kwl_object *kwl_popup_chain_at(struct kwl_server *server);
 struct kwl_object *kwl_popup_root(struct kwl_object *surface);
 int kwl_popup_button(struct kwl_server *server, uint32_t button, uint32_t state);
+void kwl_popup_dismiss_grab(struct kwl_server *server);
 
 /* What popup.c needs from the compositor and the shell. */
 void kwl_compose_surface_quad(struct kwl_server *server, struct kwl_list *command, const struct kwl_object *surface, const struct kwl_import *import, int32_t x, int32_t y);

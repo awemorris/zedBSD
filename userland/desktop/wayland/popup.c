@@ -703,6 +703,22 @@ kwl_popup_button(
 }
 
 /*
+ * Closes the popups that hold the grab (popup_done) and ends the grab, for
+ * the compositor's own dialog that takes every input (admin-ask.c).
+ */
+void
+kwl_popup_dismiss_grab(
+	struct kwl_server *server)
+{
+	/* Nothing holds the grab. */
+	if (server->popup_grab == NULL)
+		return;
+
+	/* The grab's client's popups close. */
+	popup_dismiss(server);
+}
+
+/*
  * Finds the surface of the grab's chain under the pointer (the client's
  * shown popups, the latest first, then the toplevel's body); NULL outside
  * them all, or without a grab.

@@ -1033,6 +1033,13 @@ struct kwl_client {
 	 */
 	unsigned admin_asked;
 	unsigned admin_lent;
+	/*
+	 * When the person last pressed a button, a key or a finger in one of
+	 * the client's windows (0: never): an admin dialog the person said no
+	 * to is not shown again for a while unless they pressed there since
+	 * (admin-ask.c).
+	 */
+	uint64_t pressed_ms;
 };
 
 /* The drawings one KWL PERF window keeps the times of (five seconds at 60 frames and the quiet pictures, with room). */
@@ -2724,7 +2731,7 @@ int kwl_bluetooth_bar_answer(int *error);
 int kwl_bluetooth_answer(uint32_t id, unsigned yes);
 int kwl_bluetooth_cancel(void);
 
-/* The admin actions: the objects, the relay to the session manager and the dialog's place (admin-ask.c). */
+/* The admin actions: the objects, the relay to the session manager and the dialog (admin-ask.c). */
 int kwl_admin_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_admin_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_admin_tick(struct kwl_server *server);
@@ -2733,6 +2740,12 @@ void kwl_admin_client_gone(struct kwl_client *client);
 void kwl_admin_answer(void *data, struct kl_backend_admin_answer *answer);
 void kwl_admin_decide(struct kwl_server *server, unsigned allow, const char *via);
 int kwl_admin_available(struct kwl_server *server);
+int kwl_admin_ask_showing(void);
+int kwl_admin_ask_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_admin_ask_key(struct kwl_server *server, uint32_t key, uint32_t state);
+int kwl_admin_ask_motion(struct kwl_server *server);
+int kwl_admin_ask_holds(struct kwl_server *server);
+void kwl_admin_ask_power(struct kwl_server *server);
 
 /* The pairing's window (bluetooth-ask.c, ws143-p006). */
 void kwl_bluetooth_ask_take(struct kwl_server *server, const struct kl_backend_bluetooth_question *question);

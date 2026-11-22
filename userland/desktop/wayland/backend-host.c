@@ -324,6 +324,9 @@ kwl_backend_power_button(
 		return;
 	}
 
+	/* An admin dialog is cancelled: the person's own act comes first (admin-ask.c). */
+	kwl_admin_ask_power(server);
+
 	/* The power dialog over the desktop. */
 	kwl_power_dialog_open(server, "button");
 }

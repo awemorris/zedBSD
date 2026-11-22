@@ -4117,6 +4117,9 @@ compose_record(
 
 		/* The input method's candidate window over the windows and their popups, in both looks (input-method.c). */
 		kwl_ime_popup_draw(server, command);
+
+		/* The admin action's dialog over everything drawn, the candidates included (admin-ask.c). */
+		kwl_admin_ask_draw(server, command);
 	}
 
 	/* Captures scene pixels before the cursor can contaminate the reusable background. */
@@ -4217,8 +4220,24 @@ compose_cursor(
 	struct kwl_import alpha;
 	int32_t hotspot_x;
 	int32_t hotspot_y;
+	int showing;
 	int hidden;
 	int shown;
+
+	/*
+	 * While the admin dialog shows (admin-ask.c), the cursor is the
+	 * compositor's arrow, its tip at the pointer, and nothing of a client's:
+	 * no drag's icon, no cursor of a client's, no hidden cursor.  The cursor
+	 * plane shows the same arrow (kwl_compose_cursor_source).
+	 */
+	showing = kwl_admin_ask_showing();
+	if (showing) {
+		if (server->pointer_unmoved || server->compose->cursor_plane.shown)
+			return;
+		if (server->arrow != NULL)
+			compose_quad(server, command, server->arrow, server->pointer_x, server->pointer_y);
+		return;
+	}
 
 	/*
 	 * A drag and drop's icon under the cursor (its surface's corner at the
@@ -4327,6 +4346,7 @@ kwl_compose_cursor_source(
 {
 	const struct kwl_import *found;
 	struct kwl_object *surface;
+	int showing;
 	int hidden;
 	int shown;
 
@@ -4334,6 +4354,15 @@ kwl_compose_cursor_source(
 	*image = NULL;
 	*hotspot_x = 0;
 	*hotspot_y = 0;
+
+	/* The compositor's arrow alone while the admin dialog shows (admin-ask.c). */
+	showing = kwl_admin_ask_showing();
+	if (showing) {
+		if (server->pointer_unmoved)
+			return 0;
+		*image = server->arrow;
+		return server->arrow != NULL ? 1 : 0;
+	}
 
 	/* A drag's icon and marks are composed with the cursor. */
 	if (server->dnd_active)

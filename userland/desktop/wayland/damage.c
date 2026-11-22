@@ -712,6 +712,9 @@ hover_record_usable(
 	open = kwl_bluetooth_ask_showing();
 	if (open)
 		return 0;
+	open = kwl_admin_ask_showing();
+	if (open)
+		return 0;
 	open = kwl_arrange_showing(server);
 	if (open)
 		return 0;

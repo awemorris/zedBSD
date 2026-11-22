@@ -1007,6 +1007,7 @@ apply_touchpad_actions(
 	unsigned index;
 	int moved;
 	int taken;
+	int held;
 
 	/* Each action in order. */
 	actions = &pad->actions;
@@ -1036,6 +1037,11 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_SCROLL:
+			/* Two fingers' scrolling goes nowhere while the admin dialog shows (admin-ask.c). */
+			held = kwl_admin_ask_holds(server);
+			if (held)
+				break;
+
 			/* On the lock screen two fingers up may open it: their own way, the scrolling's direction turned back (ws187-p002). */
 			if (server->locked) {
 				down_um = (int64_t)action->vertical * KWL_TOUCHPAD_NOTCH_UM;
@@ -1055,6 +1061,11 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_GESTURE:
+			/* A gesture is nothing's while the admin dialog shows (admin-ask.c). */
+			held = kwl_admin_ask_holds(server);
+			if (held)
+				break;
+
 			/* On the lock screen a touch's end may be a gesture up far enough to open it (ws187-p002). */
 			if (server->locked)
 				lock_pad_gesture(server, action);
