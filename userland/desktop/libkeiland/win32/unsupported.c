@@ -12,7 +12,9 @@
  * stubs' generator of the Windows build's tests; do not edit.
  */
 
+#ifndef KEILAND_WIN32_NO_VULKAN
 #include <vulkan/vulkan.h>
+#endif
 
 #include <keiland/keiland.h>
 #include "userland/desktop/libkeiland/ui/chooser.h"

@@ -20,13 +20,22 @@
  * that the extended frame would show there.
  */
 
+#ifndef KEILAND_WIN32_NO_VULKAN
 #include <vulkan/vulkan.h>
+#endif
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
 #include "userland/desktop/libkeiland/win32/frame.h"
 
-/* Vulkan's Win32 surface, which needs <windows.h>'s types. */
+/*
+ * Vulkan's Win32 surface, which needs <windows.h>'s types.  A build
+ * without Vulkan's headers (KEILAND_WIN32_NO_VULKAN, for a program that
+ * draws on the processor alone) has no surface and no instance
+ * extensions.
+ */
+#ifndef KEILAND_WIN32_NO_VULKAN
 #include <vulkan/vulkan_win32.h>
+#endif
 
 #include <errno.h>
 #include <string.h>
@@ -182,6 +191,8 @@ kl_window_present_parts(
 	return 0;
 }
 
+#ifndef KEILAND_WIN32_NO_VULKAN
+
 /*
  * Makes a Vulkan surface over the window's content, for the program's
  * instance (which enabled kl_window_vulkan_extensions' extensions).
@@ -269,6 +280,27 @@ kl_window_vulkan_extensions(
 	/* Succeeded. */
 	return 0;
 }
+
+#else
+
+/*
+ * Names no instance extensions: this build has no Vulkan, as a system
+ * without the Vulkan loader, and returns EIO (EINVAL for NULL arguments).
+ */
+int
+kl_window_vulkan_extensions(
+	const char *const **names,
+	uint32_t *count)
+{
+	/* Somewhere to put the names. */
+	if (names == NULL || count == NULL)
+		return EINVAL;
+
+	/* No instance can be made for this build's windows. */
+	return EIO;
+}
+
+#endif
 
 /* Paints the content: the last frame shown on the CPU, or nothing (the program's Vulkan draws there). */
 void

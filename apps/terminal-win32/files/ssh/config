@@ -1,0 +1,18 @@
+# The hosts mikuterm connects to, in OpenSSH's ssh_config form.
+# ~/.ssh/ is this folder's ssh\ (keys, known_hosts); a path without a folder
+# is in ssh\ too.  Match, Include and ProxyJump are not supported.
+#
+# A host:
+#
+#Host server
+#	HostName server.example.org
+#	User me
+#	IdentityFile ~/.ssh/id_ed25519
+#
+# WSL: run sshd inside WSL on a port of its own (for example 2222) and
+# connect to it through WSL's localhost forwarding:
+#
+#Host wsl
+#	HostName 127.0.0.1
+#	Port 2222
+#	User me

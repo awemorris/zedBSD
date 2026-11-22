@@ -1,0 +1,22 @@
+The licenses of mikuterm and what it brings
+===========================================
+
+mikuterm.exe is Awe Morris's own work under the zlib license
+(zedBSD-LICENSE.txt): the terminal, libkeiland, libtruetype, the PNG and
+zlib readers, the SSH client and libcrypto-compat.  Copyright (C) 2026
+Awe Morris.
+
+The terminal's table of East Asian widths is derived from the Unicode
+Character Database (Unicode-License-V3.txt).
+
+The fonts in share\fonts:
+
+  keiland.ttf, keiland-bold.ttf, keiland-mono.ttf
+      Mahora (Mahora-LICENSE.txt)
+  keiland-fallback-mono.ttf
+      JetBrains Mono (JetBrainsMono-OFL.txt, SIL Open Font License 1.1)
+  keiland-fallback.ttf
+      Droid Sans Fallback (DroidSansFallback-LICENSE.txt, Apache License 2.0)
+  keiland-emoji.ttf
+      Noto Color Emoji 2.047 (NotoColorEmoji-OFL-1.1.txt, SIL Open Font
+      License 1.1)
