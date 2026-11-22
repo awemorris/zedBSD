@@ -82,6 +82,10 @@
 /* ToUnicodeEx's flag that leaves the keyboard's state (a dead key waiting) as it is (Windows 10 1607 and later). */
 #define WINDOW_TO_UNICODE_KEEP	0x4U
 
+/* The last character of Latin-1, and the step from a capital ASCII letter to its small one. */
+#define WINDOW_LATIN1_LAST	0xffU
+#define WINDOW_LETTER_CASE	0x20U
+
 /* The longest path of a bundled font, in UTF-8. */
 #define WINDOW_FONT_PATH	(MAX_PATH * 3 + 32)
 
@@ -1493,6 +1497,21 @@ window_shortcut(
 		typed = plain;
 		if ((modifiers & KL_MOD_SHIFT) != 0U)
 			typed = window_layout_character(wparam, scan, 1);
+	}
+
+	/*
+	 * A letter key of a layout of another script (Cyrillic, Greek) is
+	 * named by its Latin letter, as Windows' virtual keys name it, so that
+	 * the shortcuts of letters work on it too.
+	 */
+	if (named == 0U &&
+	    plain > WINDOW_LATIN1_LAST &&
+	    wparam >= 'A' &&
+	    wparam <= 'Z') {
+		plain = (uint32_t)wparam + WINDOW_LETTER_CASE;
+		typed = plain;
+		if ((modifiers & KL_MOD_SHIFT) != 0U)
+			typed = (uint32_t)wparam;
 	}
 
 	/* The keysym and the menu's modifiers; a key without either is no shortcut. */
