@@ -151,7 +151,7 @@ check preserves the contents for retry.
 
 ## USB trial and installation boundary
 
-A prepared USB boot medium, such as the installer's image, can be selected
+A prepared USB boot medium, such as the ordinary amd64 image, can be selected
 through the machine's firmware boot menu. Match the image's BIOS/UEFI Variant to the firmware path and retain
 a separate recovery boot medium. This guide intentionally has no raw-device
 write command: image creation, destructive media preparation and installing
@@ -165,67 +165,48 @@ investigate, not permission to report a clean halt.
 
 ## Install zedBSD with the installer
 
-The installer is a Keiland application on its own USB image. It installs
-zedBSD on an amd64 PC that has UEFI and ACPI and was started through UEFI.
+The installer is a Keiland application in the ordinary amd64 UEFI image. It
+downloads the system from zedBSD's published releases on GitHub and installs
+it on an amd64 PC that has UEFI and ACPI and was started through UEFI.
 BIOS, PC-98 and other architectures have no installer. It installs to a
 writable physical disk the kernel registers: NVMe (also behind Intel VMD),
 SATA, or USB Mass Storage, with 512-byte or 4096-byte logical sectors.
-The [installer reference](../reference/installer.md) defines the image, the
-screens and the helper `install-admin` exactly.
+The [installer reference](../reference/installer.md) defines the release it
+downloads, the screens and the helper `installer-helper` exactly.
 
-### The rule of the installer's image
+### Before you start
 
-**The installer's image is for installing only. Do not use it as your system.**
-Do not keep starting the computer from it, copy it to an internal disk, offer
-network services from it or keep your files on it.
-
-A system started from the installer's image logs in automatically as the
-default user `user`, whose password is the published default `user`. Treat
-that start as a start as root: the installer's helper writes any disk without
-asking for a password, so every program in that session, including web
-content in a browser, has the same power as root. This is intended, as with
-any installer that runs as root, and the image is safe only because of the
-rule above. Closing the installer and using the desktop to finish an
-installation is part of installing; using it afterwards is not.
-
-### Build the installer's image
-
-```sh
-make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk installer-image
-```
-
-The configuration must be amd64 with the `native` variant, and
-`installer-image` cannot share the command line with another image goal such
-as `disk-image`. `make menuconfig` configures only the kernel and the loader
-for this image. The programs and packages are a fixed selection: all of the
-base, the Keiland desktop, the firmware the kernel's drivers name, and every
-amd64 package under `userland/packages/`; tests and X11 are left out.
-
-The result is `build/amd64/installer-image.img`. It holds an ESP with the
-loader, a FAT32 partition labelled `ZEDBSD` with the kernel, the logo and a
-`zedbsd.cfg` that names the image's root and swap by PARTUUIDs new for each
-build, a UFS root with the installer and `/opt/installer`, and a swap
-partition. `/opt/installer` holds the units an installed system is made of,
-their index, and the loader, kernel and logo the installed system receives.
-
-Write the image to a USB drive whose contents you can lose, using the host's
-disk-image writer on the whole drive (not one of its partitions). Check the
-drive's identity before writing; this guide gives no raw-device command.
+- Start the PC from the ordinary image (for example written to a USB drive)
+  through the firmware's UEFI boot entry, and log in to the desktop.
+- Connect the PC to a network that reaches GitHub (Settings, Network). The
+  installer downloads the system while it runs; without the network it can
+  only say that the releases could not be reached.
+- The person at the desktop must be an administrator (a member of `wheel`), as
+  the image's own user is: the installer runs as root once you allow it.
 
 ### Install
 
 1. Back up anything on the target disk that you want to keep.
-2. Start the PC from the USB drive through the firmware's boot menu, choosing
-   its UEFI entry. The desktop starts and opens the installer instead of the
-   Welcome. If the PC was not started through UEFI, the first screen says so
-   and the installer does not continue.
-3. **Welcome**: read the warning and the image's rule, then **Next**.
-4. **Disk**: choose the target disk. Disks the running system uses (the USB
+2. Open **Installer** from App Home (or run `klsudo installer` in a terminal).
+   The screen darkens and the desktop asks whether the installer may run as
+   the administrator. Check that the request is the installer's, then press
+   **Allow**. The installer's title bar shows `Administrator:`; every program
+   it starts to read and write disks runs as root without asking again.
+3. **Welcome**: read the warning, then **Next**. If the PC was not started
+   through UEFI, the screen says so and the installer does not continue.
+4. **Release**: the published releases of zedBSD for this PC, the newest
+   first and chosen. Pre-releases (such as nightly builds) and drafts are not
+   offered. Choose one and press **Next**: the installer downloads that
+   release's system and checks it against the SHA-256 GitHub gives for it. A
+   download that does not match is not used, and the screen says so. When no
+   release has been published yet, or the releases cannot be reached, the
+   screen says which; **Try again** (or **Look again**) asks once more.
+5. **Disk**: choose the target disk. Disks the running system uses (the USB
    drive itself, its boot FAT, its swap), read-only disks, file-backed disks
    and disks too small are shown greyed with the reason. **Reload** reads the
    disks again after plugging one in. Names such as `nvme0n1` and `sda` are
    not persistent: check the kind and size.
-5. **Partitions**: choose one:
+6. **Partitions**: choose one:
    - **Use the whole disk** erases every partition, which the screen lists.
      The installer makes a 512 MiB ESP, a swap partition (the size of the
      memory, from 1 GiB to 8 GiB; 1 GiB on a disk under 32 GiB) and a UFS root
@@ -235,7 +216,7 @@ drive's identity before writing; this guide gives no raw-device command.
      `zedbsd.cfg` on any of its FAT filesystems (another zedBSD), and either no
      ESP or an ESP with enough free space and no file the installer would
      overwrite. A FAT that cannot be read counts as one with `zedbsd.cfg`.
-6. With **Choose partitions**:
+7. With **Choose partitions**:
    - **Edit**: **Delete** and **Create** write the partition table **at once,
      when pressed**; **Cancel** later does not undo them. Delete asks first.
      Create asks only for a size and puts the partition, aligned to 1 MiB, in
@@ -249,7 +230,7 @@ drive's identity before writing; this guide gives no raw-device command.
    - **Swap**: choose a swap partition, or none. With none, the installer makes
      `/swapfile` on the root (the memory's size, at most 2 GiB − 4 KiB) after
      asking.
-7. **Install**: choose what to install. Base System is required. Keiland
+8. **Install**: choose what to install. Base System is required. Keiland
    Desktop and Firmware are on; leaving either out asks first (without the
    desktop the system has only the console login; without firmware some Wi-Fi
    and GPU devices may not work). Firmware is installed only after accepting
@@ -257,17 +238,17 @@ drive's identity before writing; this guide gives no raw-device command.
    certificates and Fonts are on; Clang, GTK4, libavcodec, curl, Python and
    the other packages are off. What a choice depends on is added and shown
    greyed. The page shows the total size against the root's room.
-8. **User**: the login name, its display name and password, the root
+9. **User**: the login name, its display name and password, the root
    password, automatic login (on by default, off without the desktop) and the
    hostname (default `zedbsd`). The user is an administrator (groups `wheel`
    and `network`).
-9. **Confirm**: check the disk, the partition table before and after, which
+10. **Confirm**: check the disk, the partition table before and after, which
    partitions are formatted, what is installed and where the loader goes. With
    the whole disk, tick that its data may be erased. **Install** asks once
    more and starts writing.
-10. **Progress**: do not turn the PC off or restart it. **Cancel** stops at the
+11. **Progress**: do not turn the PC off or restart it. **Cancel** stops at the
     end of the current step (or between files while unpacking).
-11. **Finished**: it says how to start the installed system. Restart, remove
+12. **Finished**: it says how to start the installed system. Restart, remove
     the USB drive, and choose the installed disk in the firmware's boot menu.
     When the disk already had `\EFI\BOOT\BOOTX64.EFI`, it was kept and the
     loader is `\EFI\ZEDBSD\BOOTX64.EFI`: choose that in the boot menu. The

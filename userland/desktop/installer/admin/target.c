@@ -35,7 +35,7 @@
 #define TARGET_COMPONENT_MAX	128U
 
 /* The suffix of the file a replacement is written to before its rename. */
-#define TARGET_TEMPORARY	".install-admin"
+#define TARGET_TEMPORARY	".installer-helper"
 
 /* The room an edit may add to the text it reads. */
 #define TARGET_EDIT_SLACK	1024U

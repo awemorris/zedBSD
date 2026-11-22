@@ -53,6 +53,8 @@ enum screen_id {
 	SCREEN_ID_BACK,
 	SCREEN_ID_CANCEL,
 	SCREEN_ID_RETRY,
+	SCREEN_ID_RELEASE,
+	SCREEN_ID_RELEASES_RETRY,
 	SCREEN_ID_DISK,
 	SCREEN_ID_RELOAD,
 	SCREEN_ID_HANDLING,
@@ -96,7 +98,7 @@ static const char *const screen_steps[][2] = {
 };
 
 /* The dots of the steps: the screens a person walks (S9 to S11 are the end's). */
-#define SCREEN_WALKED		9
+#define SCREEN_WALKED		10
 
 static void screen_ground(struct inst_app *app, struct kl_rect *panel);
 static int screen_title(struct inst_app *app, const struct kl_rect *panel, const char *title, const char *summary);
@@ -110,6 +112,7 @@ static int screen_choice(struct inst_app *app, uint32_t id, uint32_t index, cons
 static int screen_button(struct inst_app *app, uint32_t id, int x, int y, const char *label, unsigned flags, const char *name, int *width);
 static void screen_mark(struct inst_app *app, int x, int y, unsigned pixels);
 static int screen_welcome(struct inst_app *app, int x, int top, int width);
+static int screen_releases(struct inst_app *app, int x, int top, int width);
 static int screen_disks(struct inst_app *app, int x, int top, int width);
 static int screen_handling(struct inst_app *app, int x, int top, int width);
 static int screen_edit(struct inst_app *app, int x, int top, int width);
@@ -385,6 +388,8 @@ screen_body(
 	switch (app->screen) {
 	case INST_S1:
 		return screen_welcome(app, x, top, width);
+	case INST_S1A:
+		return screen_releases(app, x, top, width);
 	case INST_S2:
 		return screen_disks(app, x, top, width);
 	case INST_S3:
@@ -781,7 +786,7 @@ screen_mark(
 		kl_canvas_mask(&app->canvas, x, y, layers[layer], (int)pixels, (int)pixels, pixels, KL_RGBA(colours[layer][0], colours[layer][1]));
 }
 
-/* S1: the mark, what the installer does, the warning, the rule of the image, and the probe's state. */
+/* S1: the mark, what the installer does, the warning, the network, and the probe's state. */
 static int
 screen_welcome(
 	struct inst_app *app,
@@ -800,7 +805,7 @@ screen_welcome(
 	(void)kl_tr_format(words, sizeof(words), kl_tr("{1} will be installed on a disk of this computer."), app->os_name, (const char *)NULL);
 	y = screen_lines(app, x + (int)SCREEN_MARK + 24, top + 18, width - (int)SCREEN_MARK - 24, words, 20U, 1, theme->text, 2);
 	(void)screen_lines(app, x + (int)SCREEN_MARK + 24, y + 6, width - (int)SCREEN_MARK - 24,
-			   kl_tr("The installer asks which disk, how to use it and what to install, then writes it. Nothing is written before you confirm."),
+			   kl_tr("The installer asks which release, which disk, how to use it and what to install, then writes it. Nothing is written before you confirm."),
 			   SCREEN_TEXT, 0, theme->text_secondary, 4);
 	y = top + (int)SCREEN_MARK + SCREEN_GAP + 6;
 
@@ -809,10 +814,10 @@ screen_welcome(
 			kl_tr("Installing may erase what is on the disk you choose. Copy anything you want to keep to another place before you go on."),
 			theme->card_edge);
 
-	/* The rule of the image. */
-	y = screen_card(app, x, y + SCREEN_GAP, width, kl_tr("This image is for installing only"),
-			kl_tr("Do not use it as your everyday system: do not keep starting the computer from it, copy it to an internal disk, offer network services from it or keep your files on it. In a system started from this image every program has the same power as root."),
-			theme->danger);
+	/* The network the system comes through. */
+	y = screen_card(app, x, y + SCREEN_GAP, width, kl_tr("Connect to the Internet"),
+			kl_tr("The system is downloaded from its published releases on GitHub and checked before it is installed. Connect this computer to a network first."),
+			theme->card_edge);
 	y += SCREEN_GAP;
 
 	/* The probe: running, failed (with Retry), or not on UEFI. */
@@ -833,6 +838,114 @@ screen_welcome(
 	/* The language. */
 	y = screen_lines(app, x, y + 6, width, kl_tr("The installer's words follow the desktop's language (Settings, Languages)."), SCREEN_TEXT_SMALL, 0,
 			 theme->text_faint, 2);
+
+	/* Reports the edge below. */
+	return y;
+}
+
+/*
+ * S1a: the published releases offered, one chosen (the newest at first),
+ * and the download of its system: under way, done, or why it failed.
+ */
+static int
+screen_releases(
+	struct inst_app *app,
+	int x,
+	int top,
+	int width)
+{
+	const struct kl_theme *theme;
+	const struct inst_release *release;
+	struct kl_rect rect;
+	char title[INST_TAG_MAX + 32U];
+	char detail[192];
+	char size[32];
+	char done[32];
+	char date[16];
+	char name[INST_TAG_MAX + 16U];
+	char words[INST_MESSAGE_MAX + 64U];
+	unsigned i;
+	int downloading;
+	int clicked;
+	int selected;
+	int pressed;
+	int same;
+	int y;
+
+	/* What the screen is for. */
+	theme = app->style.theme;
+	(void)kl_tr_format(words, sizeof(words), kl_tr("{1} is installed from one of its published releases. The newest is chosen; choose another to install it instead."),
+			   app->os_name, (const char *)NULL);
+	y = screen_lines(app, x, top, width, words, SCREEN_TEXT, 0, theme->text_secondary, 3);
+	y += 10;
+
+	/* The list's state: asked, failed (with Try again), or empty. */
+	if (app->releases_state == 0 || app->releases_state == 1) {
+		y = screen_lines(app, x, y, width, kl_tr("Looking for the releases..."), SCREEN_TEXT, 0, theme->text_secondary, 1);
+		return y;
+	}
+	if (app->releases_state == 3) {
+		(void)snprintf(words, sizeof(words), "%s %s", kl_tr("The releases could not be read:"), app->releases_message);
+		y = screen_lines(app, x, y, width, words, SCREEN_TEXT, 0, theme->bad, 3);
+		pressed = screen_button(app, SCREEN_ID_RELEASES_RETRY, x, y + 8, kl_tr("Try again"), 0U, "releases-retry", NULL);
+		if (pressed)
+			inst_releases_again(app);
+		return y + 8 + theme->control_height;
+	}
+	if (app->release_count == 0U) {
+		(void)kl_tr_format(words, sizeof(words), kl_tr("No release of {1} for this computer has been published yet, so there is nothing to install."),
+				   app->os_name, (const char *)NULL);
+		y = screen_lines(app, x, y, width, words, SCREEN_TEXT, 0, theme->text, 3);
+		pressed = screen_button(app, SCREEN_ID_RELEASES_RETRY, x, y + 8, kl_tr("Look again"), 0U, "releases-retry", NULL);
+		if (pressed)
+			inst_releases_again(app);
+		return y + 8 + theme->control_height;
+	}
+
+	/* Each release: its tag, its date and the size of its system; none is chosen while one downloads. */
+	downloading = app->download_state == 1;
+	for (i = 0; i < app->release_count; i++) {
+		release = &app->release[i];
+		(void)snprintf(title, sizeof(title), "%s", release->tag);
+		if (i == 0U)
+			(void)snprintf(title, sizeof(title), "%s (%s)", release->tag, kl_tr("newest"));
+		inst_bytes_text(release->bytes, size, sizeof(size));
+		(void)snprintf(date, sizeof(date), "%.10s", release->date);
+		(void)snprintf(detail, sizeof(detail), "%s %s, %s %s", kl_tr("Published"), date, kl_tr("download"), size);
+		rect.x = x;
+		rect.y = y;
+		rect.width = width;
+		rect.height = SCREEN_ROW;
+		(void)snprintf(name, sizeof(name), "release-%s", release->tag);
+		selected = app->release_chosen == (int)i;
+		clicked = screen_choice(app, SCREEN_ID_RELEASE, i, &rect, selected, !downloading, title, detail, name);
+		if (clicked)
+			inst_release_choose(app, i);
+
+		/* The next row, below this one. */
+		y += SCREEN_ROW + 8;
+	}
+
+	/* The download of the release chosen. */
+	same = 1;
+	if (app->release_chosen >= 0)
+		same = strcmp(app->download_tag, app->release[app->release_chosen].tag);
+	if (app->download_state == 1) {
+		inst_bytes_text(app->download_done, done, sizeof(done));
+		inst_bytes_text(app->download_total, size, sizeof(size));
+		(void)kl_tr_format(words, sizeof(words), kl_tr("Downloading {1}: {2} of {3}"), app->download_tag, done, size, (const char *)NULL);
+		y = screen_lines(app, x, y + 4, width, words, SCREEN_TEXT, 0, theme->text, 2);
+	} else if (app->download_state == 2 && same == 0) {
+		(void)kl_tr_format(words, sizeof(words), kl_tr("{1} is downloaded and checked."), app->download_tag, (const char *)NULL);
+		y = screen_lines(app, x, y + 4, width, words, SCREEN_TEXT, 0, theme->good, 2);
+	} else if (app->download_state == 3) {
+		(void)snprintf(words, sizeof(words), "%s %s", kl_tr("The system could not be downloaded:"), app->download_message);
+		y = screen_lines(app, x, y + 4, width, words, SCREEN_TEXT, 0, theme->bad, 3);
+		y = screen_lines(app, x, y + 4, width, kl_tr("Next tries again."), SCREEN_TEXT_SMALL, 0, theme->text_secondary, 1);
+	} else {
+		y = screen_lines(app, x, y + 4, width, kl_tr("Next downloads the system of the release chosen and checks it."), SCREEN_TEXT_SMALL, 0,
+				 theme->text_secondary, 2);
+	}
 
 	/* Reports the edge below. */
 	return y;
@@ -2103,17 +2216,17 @@ screen_done(
 	if (same == 0)
 		y = screen_lines(app, x, y + 4, width, kl_tr("The system has no swap: the swap file could not be used."), SCREEN_TEXT, 0, theme->text_secondary, 2);
 
-	/* The rule of the image. */
-	y = screen_card(app, x, y + SCREEN_GAP, width, kl_tr("Remove the installer's USB"),
-			kl_tr("The installer's image is for installing only: once the installed system starts, remove it and do not use it as your system. Until it is removed the firmware may start from it again."),
-			theme->danger);
+	/* The drive this system was started from. */
+	y = screen_card(app, x, y + SCREEN_GAP, width, kl_tr("Remove the drive this system started from"),
+			kl_tr("Once the installed system starts, remove the USB drive or disk this system was started from. Until it is removed the firmware may start from it again."),
+			theme->accent);
 
 	/* A restart that failed. */
 	if (app->power_message[0] != '\0')
 		y = screen_lines(app, x, y + 8, width, app->power_message, SCREEN_TEXT, 0, theme->bad, 2);
 
 	/* What Close does. */
-	y = screen_lines(app, x, y + 8, width, kl_tr("Close keeps the desktop of the installer's image for now."), SCREEN_TEXT_SMALL, 0, theme->text_faint, 2);
+	y = screen_lines(app, x, y + 8, width, kl_tr("Close goes back to the desktop of the system started now."), SCREEN_TEXT_SMALL, 0, theme->text_faint, 2);
 
 	/* Reports the edge below. */
 	return y;
@@ -2134,6 +2247,11 @@ screen_titles(
 	case INST_S1:
 		*title = kl_tr("Welcome");
 		(void)kl_tr_format(named, size, kl_tr("Install {1} on this computer"), app->os_name, (const char *)NULL);
+		*summary = named;
+		break;
+	case INST_S1A:
+		*title = kl_tr("Release");
+		(void)kl_tr_format(named, size, kl_tr("The release of {1} to install"), app->os_name, (const char *)NULL);
 		*summary = named;
 		break;
 	case INST_S2:

@@ -6,9 +6,9 @@
  */
 
 /*
- * The installer's index (/opt/installer/index): the units an installed
- * system is made of, the boot files, and the set-user-ID and
- * set-group-ID files a unit may carry.  The build writes it
+ * The installer's index (the member "index" of the downloaded system,
+ * payload.h): the units an installed system is made of, the boot files,
+ * and the set-user-ID and set-group-ID files a unit may carry.  The build writes it
  * (mk/tools/installer-units.py), one record a line, its fields
  * separated by TABs:
  *
@@ -49,7 +49,7 @@
 #define INDEX_BYTES_MAX		(1024U * 1024U)
 
 /*
- * One unit: a tarball of /opt/installer/units and what is known of it
+ * One unit: a tarball of the system's units/ and what is known of it
  * before it is opened.
  */
 struct index_unit {

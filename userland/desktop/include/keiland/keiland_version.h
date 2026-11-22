@@ -164,6 +164,8 @@ extern "C" {
  * 108: a network link's IPv6 addresses and router, kl_network_link's inet6_count, inet6 and router6
  * 109: a new size shown by another thread, kl_window_set_configure_deferred, kl_window_configure_take
  *      and _ack (struct kl_window_configure), and the size during Windows' modal resize, kl_window_on_resize
+ * 110: a display's resolution and refresh, kl_system_displays_modes, _resolution and _set_, _keep_, _revert_
+ *      and _reset_resolution (struct kl_display_mode, KL_DISPLAY_MODE_* and KL_DISPLAY_RESOLUTION_*)
  * 111: a system action run as the administrator once the person allowed it, kl_process_start_admin
  *      (struct kl_admin_options), KL_PROCESS_REFUSED, KL_PROCESS_LOST, KL_PROCESS_READY_START and KL_ADMIN_*
  *

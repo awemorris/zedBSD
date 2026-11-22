@@ -6,7 +6,7 @@
  */
 
 /*
- * The writing requests of install-admin's session: one change of a
+ * The writing requests of installer-helper's session: one change of a
  * partition table (edit) and the installation (install).  Each checks
  * the request again against the disk as it is now, writes, and reports
  * on the output one line at a time:
@@ -26,18 +26,21 @@
 #define USERLAND_DESKTOP_INSTALLER_ADMIN_SESSION_H
 
 #include "index.h"
+#include "payload.h"
 #include "plan.h"
 
 #include <stdio.h>
 
 /*
- * What a session holds from its start to its end: the index it checks
- * requests against, where it reports, where a cancellation comes from,
+ * What a session holds from its start to its end: the downloaded system
+ * and its index, which it checks requests against (none before the
+ * system is downloaded), where it reports, where a cancellation comes from,
  * the disk its first writing request bound it to, and whether the
  * installer has cancelled (or gone).
  */
 struct admin_session {
 	const struct installer_index *index;
+	const struct payload *payload;
 	FILE *output;
 	int input;
 	uint64_t disk;

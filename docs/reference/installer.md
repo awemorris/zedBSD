@@ -1,108 +1,84 @@
-# Installer, install-admin and efiboot
+# Installer, installer-helper and efiboot
 
-Status: reference; the amd64 UEFI installer's image, the installer program,
-its helper `install-admin`, the layout of an installed system and `efiboot`.
+Status: reference; the amd64 UEFI installer, its elevation, the release it
+downloads, its helper `installer-helper`, the layout of an installed system
+and `efiboot`.
 
 The procedure is in the
 [installation how-to](../howto/boot-and-storage.md#install-zedbsd-with-the-installer).
 The installer supports only amd64 PCs with UEFI and ACPI that were started
 through UEFI.
 
-## 1. The rule of the installer's image
+## 1. Elevation
 
-- The installer's image is for installing only and must not be used as a
-  system. Using it as a system means going on using the started image for
-  anything but installing: starting the computer from it as an everyday
-  system, copying it to an internal disk and running that, offering network
-  services from it, or keeping a person's files on it. Using its desktop after
-  closing the installer, as part of an installation, is installing.
-- The image logs in automatically as the default user `user`, whose password
-  is the published default `user` (the same accounts as every image). Root is
-  locked as in a release image.
-- A start of the installer's image is a start as root. `install-admin` writes
-  disks for that user without a password, so every process of that user,
-  including remote content in a browser, has the power of root. The system
-  does not try to separate that user from root.
-- What keeps that power out of other systems is that `install-admin` exists
-  only in the installer's image (Section 4.1) and that the image has no
-  network login service. Adding one (for example sshd) to the distributed
-  image changes the premise of this section.
+The installer is in the ordinary image. It writes disks, so it runs as root,
+and it gets there through the desktop's elevation (klsudo), never through a
+set-user-ID program:
 
-The installer shows the rule on its first and last screens.
+- App Home's entry runs `klsudo -n installer`. An installer started as anyone
+  but root starts itself again that way.
+- `/etc/keiland/admin.d/installer` is the admin action `installer`: the
+  program `/bin/installer` with no arguments, `display wayland` (the
+  compositor lends the program its connection, and its title bar shows
+  `Administrator:`), `wheel consent`, `others refuse`. A member of `wheel`
+  allows it in the compositor's dialog; anyone else is refused.
+- The installer starts `/usr/libexec/installer-helper` (mode 0500, owner root)
+  as its child, as root, for every read and write of a disk and for the
+  download. The helper is a separate process so that the window keeps
+  answering while it works; it asks nothing more of the person.
 
-## 2. The installer's image
+The installed system's user is chosen in the installer and is a member of
+`wheel` (Section 4.4).
 
-### 2.1 Building
+## 2. The release
 
-```sh
-make ZEDBSD_CONFIG=CONFIG installer-image
-```
+### 2.1 Where it comes from
 
-| Condition | Result |
+The installer installs one of zedBSD's published releases on GitHub. The
+helper asks GitHub's REST API for the releases
+(`https://api.github.com/repos/awemorris/zedBSD/releases?per_page=100`)
+with `fetch`, and offers those that are:
+
+- neither a draft nor a pre-release (the nightly builds are pre-releases);
+- of a tag of letters, digits, `.`, `_`, `-` and `+`;
+- with the asset `zedbsd-system-x86_64.tar` whose `digest` is `sha256:` and
+  64 hex digits, whose `browser_download_url` is https, and whose size is
+  under 64 GiB.
+
+The newest is chosen at first. A download is checked against the asset's
+size and the SHA-256 GitHub computed when it was uploaded; nothing of it is
+read before. The digest is never built into a program.
+
+`/etc/installer-helper.conf` (owner root, no group or other write) replaces
+the defaults, a line a setting:
+
+| Key | Value |
 | --- | --- |
-| `ZEDBSD_PLATFORM` is not amd64 or `ZEDBSD_VARIANT` is not `native` | make stops with an error |
-| Another image goal (`disk-image`, `run`, `rootfs`, `world`, ...) on the same command line | make stops with an error |
-| `ZEDBSD_EXTRA_FILES`, `ZEDBSD_TEST_EXTRA_FILES` or `ZEDBSD_TEST_RC_CONF` set | make stops with an error |
-| `installer` or `install-admin` in `ZEDBSD_USER_PROGRAMS` of any other build | make stops with an error; they are not selectable in menuconfig |
+| `api` | the API's https address |
+| `asset` | the asset's name |
+| `ca-file` | a CA file trusted besides `/etc/ssl/cert.pem` |
 
-The configuration selects the kernel, its drivers and the loader. The
-programs are a fixed selection, whatever the configuration selects: every
-base program, every desktop program, the firmware the kernel's drivers name
-(`config/drivers/firmware.list`), and every amd64 package under
-`userland/packages/`. Test programs and X11 are not included. Graphical boot
-and the graphical login are always on; `kmsg=` and extra boot lines come from
-the configuration.
+### 2.2 The system tarball
 
-The make runs itself again with `ZEDBSD_IMAGE_PROFILE=installer` and builds
-under `$(BUILD)/installer/`, not `$(BUILD)/rootfs`, so an ordinary image in the
-same `BUILD` is not disturbed. The output is `$(BUILD)/installer-image.img`.
-Build order:
-
-1. the whole root of that selection, without the installer and its helper;
-2. a manifest giving each file of it exactly one unit;
-3. the units and the boot files, then the index and its SHA-256;
-4. `install-admin`, built with that SHA-256, and the installer;
-5. the live root: the base, desktop and firmware units' files, the installer,
-   `install-admin`, `/opt/installer` and the live-only files;
-6. the image.
-
-The build fails when a file belongs to no unit or two, when two packages
-install different contents at one path, when a set-user-ID or set-group-ID
-file is not in the build's allowed list, or when the live root does not fit
-the image generator's limits (16 GiB, 65536 inodes).
-
-### 2.2 Layout
-
-| # | Partition | Contents |
-| --- | --- | --- |
-| 1 | ESP (FAT32) | `\EFI\BOOT\BOOTX64.EFI` |
-| 2 | FAT32, Basic Data type, volume label `ZEDBSD` | `vmunix`, `logo.ppm`, `zedbsd.cfg` |
-| 3 | UFS root | the live root and `/opt/installer` |
-| 4 | swap | ZEDSWAP2 |
-
-The root and swap PARTUUIDs are new for every build, and `zedbsd.cfg` names
-them (`rootpart=PARTUUID=`, `swap0=PARTUUID=`), so an attached installed disk
-or another image does not make the selection ambiguous. Two drives written
-from the same image file are still ambiguous.
-
-Only the live root has `/etc/keiland/autologin` naming `user`. Accounts,
-passwords and the screen lock are the base defaults.
-
-### 2.3 /opt/installer
+The asset is ustar, not compressed:
 
 ```text
-/opt/installer/index                  the index (2.4)
-/opt/installer/boot/BOOTX64.EFI       the loader, for the target's ESP
-/opt/installer/boot/vmunix            the kernel, for the target's /boot/vmunix
-/opt/installer/boot/logo.ppm          the logo, for the target's /boot/logo.ppm
-/opt/installer/units/base.tar.gz
-/opt/installer/units/desktop.tar.gz
-/opt/installer/units/firmware.tar.gz
-/opt/installer/units/CATEGORY-NAME.tar.gz   one for each package, e.g. lang-clang.tar.gz
+index                  the index (2.4)
+boot/BOOTX64.EFI       the loader, for the target's ESP
+boot/vmunix            the kernel, for the target's /boot/vmunix
+boot/logo.ppm          the logo, for the target's /boot/logo.ppm
+units/NAME.tar.gz      one for each unit, e.g. base.tar.gz, lang-clang.tar.gz
 ```
 
-The files and their directories are owned by root, with no group or other
-write permission; `install-admin` refuses them otherwise.
+Only regular files and directories, with relative paths without `.` or `..`
+components, are accepted. `mk/tools/installer-units.py` makes the index, the
+boot files and the units from a whole root.
+
+The helper keeps the tarball at `/run/installer-helper/system.tar` (memory)
+and reads each member where it lies, never unpacking the tarball itself.
+The index is copied to `/run/installer-helper/index` for the installer.
+
+### 2.3 Units
 
 A unit is a ustar archive compressed with deflate (gzip format). Its entries
 are regular files, directories and symbolic links, with relative paths and no
@@ -111,7 +87,7 @@ are regular files, directories and symbolic links, with relative paths and no
 package's registration, group and other write permission are removed. A
 set-user-ID or set-group-ID entry must be listed in the index.
 
-The installer and `install-admin` are in no unit and are never installed.
+The installer and `installer-helper` are in no unit and are never installed.
 
 ### 2.4 Index
 
@@ -129,7 +105,9 @@ One record a line, fields separated by TAB; an empty list is `-`.
 Dependencies come from the packages' requirements; a dependency on a package
 inside the base or desktop unit becomes a dependency on that unit. The build
 refuses cycles. `item` records are the choices of the installer's Install
-page (`platform/amd64/installer-items`).
+page, from the items file the release's build gives `installer-units.py`;
+the table is the intended selection. A licence's PATH is read on the running
+system.
 
 | Item | Units | Default |
 | --- | --- | --- |
@@ -151,15 +129,14 @@ libraries.
 
 ## 3. The installer
 
-`/bin/installer` is a Keiland application. On the installer's image the
-desktop starts it once a session in place of the Welcome (when
-`/opt/installer/index` exists), and App Home lists it. It runs as the
-session's user, never opens a disk, and gets everything it reads from or
-writes to a disk through `install-admin`.
+`/bin/installer` is a Keiland application. It runs as root (Section 1), and
+gets everything it reads from or writes to a disk, and the release, through
+`installer-helper`; it never opens a disk itself.
 
 | Screen | Purpose | Next is refused when |
 | --- | --- | --- |
-| Welcome | what the installer does, back-up warning, the rule of Section 1 | the probe failed (Retry is offered), or the computer was not started through UEFI |
+| Welcome | what the installer does, back-up warning, the network | the probe failed (Retry is offered), or the computer was not started through UEFI |
+| Release | the releases of 2.1, the newest chosen; the download's progress or why it failed | the releases are being read, could not be read (Try again), or none is offered (Look again); none is chosen; the download runs. Next downloads the release chosen and goes on when it is checked |
 | Disk | one disk; others are greyed with the reason | no disk is chosen |
 | Partitions | Use the whole disk, or Choose partitions | nothing is chosen |
 | Edit | Delete and Create, written at once | the disk has no sufficient ESP |
@@ -170,9 +147,9 @@ writes to a disk through `install-admin`.
 | Confirm | the whole plan | with the whole disk, the erase box is not ticked |
 | Progress | step, bytes, unit, elapsed time | |
 | Failure | step, reason, what the target now holds; Start over or Close | |
-| Finished | how to start the installed system, the user, the rule of Section 1; Restart or Close | |
+| Finished | how to start the installed system, the user, removing the drive started from; Restart or Close | |
 
-Rules the screens apply (`install-admin` checks them again):
+Rules the screens apply (`installer-helper` checks them again):
 
 - **Disks offered**: not used by the running system (any mount source, boot
   slot, `/boot/efi`, active swap or loop backing file, traced to its disk),
@@ -211,28 +188,25 @@ Rules the screens apply (`install-admin` checks them again):
 The text is translated through the `installer` domain and follows the
 desktop's language.
 
-## 4. install-admin
+## 4. installer-helper
 
 ### 4.1 Program
 
 ```text
-/usr/libexec/install-admin probe
-/usr/libexec/install-admin session
+/usr/libexec/installer-helper probe
+/usr/libexec/installer-helper releases
+/usr/libexec/installer-helper download TAG
+/usr/libexec/installer-helper session
 ```
 
-Mode 4550, owner root, group wheel; only in the installer's image. Before
-anything it:
+Mode 0500, owner root, not set-user-ID. Before anything it:
 
-1. requires effective uid 0;
-2. requires the caller to be root, or to be in the wheel group with the real
-   uid of the user named in `/etc/keiland/autologin`;
-3. reads `/opt/installer/index` once and requires its SHA-256 to be the one
-   it was built with (it does nothing on any other image);
-4. becomes root wholly (`setresuid`, `setresgid`, a new session), clears the
+1. requires its real and effective uid to be 0;
+2. becomes root wholly (`setresuid`, `setresgid`, a new session), clears the
    environment, closes other descriptors, resets the umask and limits, and
-   ignores SIGPIPE, SIGHUP, SIGINT and SIGTERM, so the caller cannot stop it or
-   its children half way;
-5. takes `/run/install-admin/lock` (directory mode 0700, made without
+   ignores SIGPIPE, SIGHUP, SIGINT and SIGTERM, so nothing sent to the
+   installer's process group stops it or its children half way;
+3. takes `/run/installer-helper/lock` (directory mode 0700, made without
    following symbolic links). A second helper is refused while one holds it.
 
 It asks for no password. Every request is logged to syslog `auth`, without
@@ -243,8 +217,25 @@ the passwords.
 | 0 | done |
 | 1 | failure |
 | 2 | usage |
-| 3 | refused: not the image's user, or not the installer's image |
+| 3 | refused: not root |
 | 4 | busy: another helper holds the lock |
+
+### 4.1.1 releases and download
+
+`releases` prints one line a release offered (2.1), newest first, then `end`:
+`RELEASE TAG DATE BYTES` (DATE is the publication's ISO 8601 time, or `-`).
+`download TAG` fetches that release's asset and reports:
+
+| Line | Meaning |
+| --- | --- |
+| `STEP N 3 NAME` | `release`, `download`, `check` begins |
+| `BYTES DONE TOTAL` | bytes downloaded so far |
+| `DONE` | the system is downloaded and checked |
+| `FAIL STEP ERRNO TEXT` | it failed at that step (`EBADMSG`: the download is not the release's SHA-256) |
+
+Either stops when its input ends or brings a line. A failed or stopped
+download leaves nothing behind. A session started before a download can edit
+partitions but not install.
 
 ### 4.2 probe
 
@@ -266,7 +257,7 @@ KIND is `nvme`, `removable` or `fixed`. LIVE is 1 for a disk the running
 system uses. TABLE is `gpt`, `mbr` or `none`. DIGEST is the SHA-256 of the
 partition table as read, which writing requests quote back. CFG and the
 loaders are `yes`, `no` or `unknown`; each FAT is mounted read-only on
-`/run/install-admin/probe` to look, and one that cannot be is `unknown`.
+`/run/installer-helper/probe` to look, and one that cannot be is `unknown`.
 
 ### 4.3 session
 
@@ -317,7 +308,7 @@ Before writing, every request is checked again against the disk as it is now:
 the registration, size and table digest must match what the screen showed, the
 disk must not be one the running system uses, partitions must not overlap or
 leave the disk, untouched entries must not change, every tuple must be in the
-current table, and the units must be in the index. Before each zeroing,
+current table, and the units must be in the downloaded system's index. Before each zeroing,
 `mkfs` and `mkswap`, the partition's device is checked to be that tuple and the
 kernel's table to match the disk's. Mounts of the disk's partitions are
 removed before each child program; one that cannot be removed fails the step.
@@ -332,7 +323,7 @@ are made from the identity just read, not from a child's output.
 | 2 | `claim` | unmount the disk's partitions |
 | 3 | `table` | whole disk: `diskpart init` with new random disk GUID and PARTUUIDs. Chosen: `diskpart batch` sets the root's and swap's type, name and a new PARTUUID, and clears their attributes |
 | 4 | `format` | zero each new partition's first and last MiB; `mkfs -t fat32` a new ESP, `mkfs -t ufs --profile=native` the root, `mkswap` the swap partition and read its header back |
-| 5 | `mount` | mount the root on `/run/install-admin/target`, `nosuid`, `nodev` |
+| 5 | `mount` | mount the root on `/run/installer-helper/target`, `nosuid`, `nodev` |
 | 6 | `unpack` | each unit in dependency order, checking its SHA-256 from the same descriptor it is read from; files opened component by component without following symbolic links; then the kernel and the logo to `/boot`, checked against the index |
 | 7 | `settings` | accounts, hostname, swap file, sshd, records |
 | 8 | `sync` | unmount and synchronize the root |
@@ -438,7 +429,6 @@ chosen in the firmware's boot menu.
 
 | Part | Source |
 | --- | --- |
-| Installer | [`userland/desktop/installer/`](../../userland/desktop/installer/) |
-| install-admin | [`userland/desktop/installer/admin/`](../../userland/desktop/installer/admin/) |
-| Image rules | [`platform/amd64/installer-image.mk`](../../platform/amd64/installer-image.mk), [`platform/amd64/installer-items`](../../platform/amd64/installer-items) |
-| Manifest, units, index, live root | [`mk/tools/`](../../mk/tools/) (`installer-manifest.py`, `installer-units.py`, `installer-live.py`, `installer-root-size.py`) |
+| Installer and its admin action | [`userland/desktop/installer/`](../../userland/desktop/installer/) |
+| installer-helper | [`userland/desktop/installer/admin/`](../../userland/desktop/installer/admin/) |
+| Units and index | [`mk/tools/installer-units.py`](../../mk/tools/installer-units.py) |

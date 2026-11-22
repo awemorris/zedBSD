@@ -6,7 +6,7 @@
  */
 
 /*
- * The requests install-admin's session reads from the installer, and the
+ * The requests installer-helper's session reads from the installer, and the
  * plan of an installation, read and checked again by the helper (it does
  * not believe the installer).  A request is one line of tokens separated
  * by one space and ended by a newline:

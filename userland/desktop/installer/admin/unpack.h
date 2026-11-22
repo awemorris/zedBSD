@@ -7,7 +7,7 @@
 
 /*
  * A unit's tarball, unpacked into the installed root: read whole from one
- * descriptor while its SHA-256 is taken, checked against the index, its
+ * descriptor (its place in the downloaded system) while its SHA-256 is taken, checked against the index, its
  * gzip wrapper undone, and its ustar entries made one path component at a
  * time under the root, never through a symbolic link.
  */

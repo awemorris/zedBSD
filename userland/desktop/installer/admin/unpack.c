@@ -8,10 +8,11 @@
 /*
  * A unit's tarball, unpacked (unpack.h).
  *
- * The tarball is read whole from the descriptor it will be unpacked from,
- * its SHA-256 taken while it is read, and compared with the index's before
- * anything of it is believed; it is never read a second time, so it cannot
- * be changed between the check and the use.  libz-compat's inflate takes a
+ * The tarball is read whole from the descriptor it will be unpacked from
+ * (where it lies in the downloaded system, payload.h), its SHA-256 taken
+ * while it is read, and compared with the index's before anything of it
+ * is believed; it is never read a second time, so it cannot be changed
+ * between the check and the use.  libz-compat's inflate takes a
  * stream whole and gives its output whole, so the unpacked archive is held
  * in memory too.
  *
@@ -82,9 +83,10 @@ static int unpack_make_directory(int parent, const char *leaf, unsigned mode);
 static uint32_t unpack_le32(const uint8_t *bytes);
 
 /*
- * Reads a whole file of an expected size from a descriptor and checks its
- * SHA-256.  Returns the bytes, which the caller frees, or EIO when the
- * size differs and EBADMSG when the digest does.
+ * Reads an expected number of bytes from a descriptor (a member of the
+ * downloaded tarball, whose size the caller checked) and checks their
+ * SHA-256.  Returns the bytes, which the caller frees, or EIO when fewer
+ * come and EBADMSG when the digest differs.
  */
 int
 unpack_read_whole(
@@ -96,7 +98,6 @@ unpack_read_whole(
 {
 	struct command_sha256_context context;
 	uint8_t digest[32];
-	uint8_t probe;
 	uint8_t *buffer;
 	size_t offset;
 	size_t want;
@@ -109,7 +110,7 @@ unpack_read_whole(
 	*data = NULL;
 	*length = 0;
 
-	/* A size the memory can hold, with the byte past it to see the end. */
+	/* A size the memory can hold. */
 	if (expected_bytes > (uint64_t)SIZE_MAX - 1U)
 		return EFBIG;
 	buffer_size = 1U;
@@ -143,13 +144,6 @@ unpack_read_whole(
 
 		/* Counts the bytes taken. */
 		offset += (size_t)got;
-	}
-
-	/* The file must end there. */
-	got = read(fd, &probe, 1U);
-	if (got != 0) {
-		free(buffer);
-		return EIO;
 	}
 
 	/* The digest must be the index's. */
