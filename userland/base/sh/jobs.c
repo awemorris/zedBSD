@@ -244,10 +244,13 @@ sh_fork(
 
 /*
  * Starts a program in the foreground with posix_spawn, which does not
- * copy the shell, for a job run without job control; actions (or NULL)
- * give it its descriptors, as for a command of a pipeline.  Returns the
- * child's pid, or -1 when the program could not be started this way
- * (the caller forks instead, and the child reports why).
+ * copy the shell; actions (or NULL) give it its descriptors, as for a
+ * command of a pipeline, and with job control begin with
+ * sh_spawn_actions_init's.  With job control the child joins the job's
+ * process group (a new one for the job's first process) and takes the
+ * terminal before it execs, as a forked child does.  Returns the child's
+ * pid, or -1 when the program could not be started this way (the caller
+ * forks instead, and the child reports why).
  */
 pid_t
 sh_spawn(
@@ -257,32 +260,57 @@ sh_spawn(
 	const posix_spawn_file_actions_t *actions)
 {
 	posix_spawnattr_t attributes;
+	posix_spawn_file_actions_t own_actions;
 	struct job *job;
 	struct process *process;
 	sigset_t defaults;
 	char **environment;
 	size_t size;
 	pid_t child;
+	short flags;
+	int own;
 	int error;
 
-	/* Job control puts the child in a group of its own and gives it the terminal: that is fork's. */
+	/* Only a job's process starts this way. */
 	job = memory;
-	if (job_control || job == NULL)
+	if (job == NULL)
 		return -1;
+
+	/* With job control, a command of no actions still takes the terminal. */
+	own = 0;
+	if (job_control && actions == NULL) {
+		error = sh_spawn_actions_init(&own_actions);
+		if (error != 0)
+			return -1;
+		own = 1;
+		actions = &own_actions;
+	}
 
 	/* Output buffered now goes before the program's. */
 	fflush(NULL);
 
 	/* Prepares the attributes of the spawn. */
 	error = posix_spawnattr_init(&attributes);
-	if (error != 0)
+	if (error != 0) {
+		if (own)
+			(void)posix_spawn_file_actions_destroy(&own_actions);
 		return -1;
+	}
 
 	/* The signals the shell handles for itself go back to their default. */
 	sh_signals_shell_set(&defaults);
 	error = posix_spawnattr_setsigdefault(&attributes, &defaults);
+	flags = POSIX_SPAWN_SETSIGDEF;
+
+	/* With job control, the child leads a group or joins the job's. */
+	if (error == 0 && job_control) {
+		error = posix_spawnattr_setpgroup(&attributes, job->group);
+		flags |= POSIX_SPAWN_SETPGROUP;
+	}
+
+	/* The attributes the spawn carries out. */
 	if (error == 0)
-		error = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF);
+		error = posix_spawnattr_setflags(&attributes, flags);
 
 	/* Starts the program with the exported variables; a failure is left to fork. */
 	environment = sh_var_environment();
@@ -290,8 +318,14 @@ sh_spawn(
 		error = posix_spawn(&child, path, actions, &attributes, argv, environment);
 	sh_var_environment_free(environment);
 	(void)posix_spawnattr_destroy(&attributes);
+	if (own)
+		(void)posix_spawn_file_actions_destroy(&own_actions);
 	if (error != 0)
 		return -1;
+
+	/* The job's first process leads its group, as with fork. */
+	if (job_control && job->group == 0)
+		job->group = child;
 
 	/* Grows the job's process array when it is full. */
 	if (job->count == job->capacity) {
@@ -311,6 +345,40 @@ sh_spawn(
 
 	/* Succeeded: the child. */
 	return child;
+}
+
+/*
+ * Prepares the file actions of a program sh_spawn starts.  With job
+ * control the first action gives the terminal to the child's group, while
+ * the shell's terminal is still where it was, before the actions that
+ * follow move the child's descriptors.  Returns 0 or the error number.
+ */
+int
+sh_spawn_actions_init(
+	posix_spawn_file_actions_t *actions)
+{
+	int terminal;
+	int error;
+
+	/* No actions yet. */
+	error = posix_spawn_file_actions_init(actions);
+	if (error != 0)
+		return error;
+
+	/* Without job control the terminal stays where it is. */
+	if (!job_control)
+		return 0;
+
+	/* The terminal is the shell's standard input, from before any redirection of this command. */
+	terminal = sh_redirect_saved_descriptor(0);
+	error = posix_spawn_file_actions_addtcsetpgrp_np(actions, terminal);
+	if (error != 0) {
+		(void)posix_spawn_file_actions_destroy(actions);
+		return error;
+	}
+
+	/* Succeeded: the actions are ready for the caller's. */
+	return 0;
 }
 
 /*

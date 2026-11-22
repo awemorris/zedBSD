@@ -133,6 +133,7 @@ enum {
 	SPAWN_ACTION_CHDIR,
 	SPAWN_ACTION_FCHDIR,
 	SPAWN_ACTION_CLOSEFROM,
+	SPAWN_ACTION_TCSETPGRP,
 };
 
 struct __dir_stream {
@@ -224,6 +225,7 @@ static void spawn_child(void *argument);
 #endif
 static int spawn_child_setup(const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr);
 static void spawn_close_from(int first);
+static int spawn_terminal_group(int descriptor);
 static int spawn_exec_search(const char *file, char *const argv[], char *const environment[]);
 static const char *spawn_environment_path(char *const environment[]);
 static int exec_search(const char *file, char *const argv[], char *const envp[]);
@@ -3833,6 +3835,41 @@ posix_spawn_file_actions_addclosefrom_np(
 	memset(action, 0, sizeof(*action));
 	action->operation = SPAWN_ACTION_CLOSEFROM;
 	action->descriptor = from;
+	return 0;
+}
+
+/*
+ * Adds an action that makes the child's process group the foreground group
+ * of the terminal open on a descriptor, as glibc's function of the same
+ * name: the child calls tcsetpgrp(descriptor, getpgrp()) when the actions
+ * reach it, after POSIX_SPAWN_SETPGROUP has put it in its group.  SIGTTOU
+ * is blocked meanwhile, so that a child still in the background group is
+ * not stopped by it.  A job-control shell starts a foreground job this way
+ * without copying itself.  Returns 0, EBADF for a negative descriptor, or
+ * EINVAL when the actions are full.
+ */
+int
+posix_spawn_file_actions_addtcsetpgrp_np(
+	posix_spawn_file_actions_t *actions,
+	int descriptor)
+{
+	struct __spawn_action *action;
+
+	/* The actions, and a descriptor number. */
+	if (actions == NULL)
+		return EINVAL;
+	if (descriptor < 0)
+		return EBADF;
+
+	/* A place among the actions. */
+	action = spawn_action_add(actions);
+	if (action == NULL)
+		return EINVAL;
+
+	/* Succeeded: the action is recorded. */
+	memset(action, 0, sizeof(*action));
+	action->operation = SPAWN_ACTION_TCSETPGRP;
+	action->descriptor = descriptor;
 	return 0;
 }
 
@@ -9168,6 +9205,11 @@ spawn_child_setup(
 		} else if (a->operation == SPAWN_ACTION_CLOSEFROM) {
 			/* Every descriptor from the action's on is closed. */
 			spawn_close_from(a->descriptor);
+		} else if (a->operation == SPAWN_ACTION_TCSETPGRP) {
+			/* The child's group becomes the terminal's foreground. */
+			e = spawn_terminal_group(a->descriptor);
+			if (e != 0)
+				return e;
 		} else {
 			/* Returns the computed result. */
 			return EINVAL;
@@ -9175,6 +9217,45 @@ spawn_child_setup(
 	}
 
 	/* Reports successful completion. */
+	return 0;
+}
+
+/*
+ * Makes the calling child's process group the foreground group of the
+ * terminal open on a descriptor (between its vfork and its exec).  SIGTTOU
+ * is blocked meanwhile: a process outside the foreground group would be
+ * stopped by it otherwise.  Returns 0 or the error number.
+ */
+static int
+spawn_terminal_group(
+	int descriptor)
+{
+	sigset_t stop;
+	sigset_t saved;
+	pid_t group;
+	int changed;
+	int error;
+
+	/* SIGTTOU waits until the terminal is the group's. */
+	sigemptyset(&stop);
+	(void)sigaddset(&stop, SIGTTOU);
+	changed = sigprocmask(SIG_BLOCK, &stop, &saved);
+	if (changed != 0)
+		return errno;
+
+	/* The child's own group takes the terminal. */
+	error = 0;
+	group = getpgrp();
+	changed = tcsetpgrp(descriptor, group);
+	if (changed != 0)
+		error = errno;
+
+	/* The mask is put back; the blocked SIGTTOU was never sent. */
+	(void)sigprocmask(SIG_SETMASK, &saved, NULL);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the group is in the foreground. */
 	return 0;
 }
 

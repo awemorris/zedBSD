@@ -507,10 +507,12 @@ extern volatile int sh_trap_last_signal;
 extern volatile int sh_interrupted;
 void sh_signals_for_exec(void);
 void sh_signals_shell_set(sigset_t *);
+void sh_signals_for_history(void);
 
 /* Processes and jobs. */
 pid_t sh_fork(int, void *);
 pid_t sh_spawn(const char *, char **, void *, const posix_spawn_file_actions_t *);
+int sh_spawn_actions_init(posix_spawn_file_actions_t *);
 void sh_fork_child(int, void *);
 int sh_wait_process(pid_t, int);
 int sh_job_wait_foreground(void *);
@@ -535,6 +537,8 @@ int sh_job_has_stopped(void);
 void sh_history_add(const char *);
 void sh_history_load(void);
 void sh_history_save(const char *);
+void sh_history_flush(void);
+void sh_history_flush_hangup(void);
 void sh_history_size_changed(const char *);
 
 /* Completion. */
