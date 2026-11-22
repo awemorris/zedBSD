@@ -110,7 +110,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	ed \
 	efiboot \
 	egrep \
-	emacs \
 	env \
 	etc \
 	expand \
@@ -175,7 +174,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	nice \
 	nl \
 	nm \
-	noct \
 	nohup \
 	nslookup \
 	ntpdate \

@@ -173,7 +173,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	nice \
 	nl \
 	nm \
-	noct \
 	nohup \
 	nslookup \
 	ntpdate \
