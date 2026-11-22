@@ -173,7 +173,7 @@ static uint32_t ir_load(struct meta_builder *builder, uint32_t buffer, uint32_t 
 static void ir_store(struct meta_builder *builder, uint32_t buffer, uint32_t offset, uint32_t value, uint32_t predicate);
 static void ir_atomic(struct meta_builder *builder, uint32_t operation, uint32_t buffer, uint32_t offset, uint32_t value, uint32_t predicate);
 static void ir_fence(struct meta_builder *builder, uint32_t fences);
-static int meta_place(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_gsi1_program *const *programs, struct ghci_vk_meta_pipeline *placed);
+static int meta_place(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_gsi1_program *const *programs, int grow, struct ghci_vk_meta_pipeline *placed);
 static int meta_entries(struct ghci_gsi1_program *const *programs, struct ghci_vk_meta_pipeline *placed);
 static uint32_t meta_layout(struct ghci_gsi1_program *const *programs, uint32_t *code_at, uint32_t *fragment_at);
 static int meta_write(struct ghci_gsi1_program *const *programs, uint8_t *view, uint64_t base, uint32_t code_at, uint32_t fragment_at, struct ghci_vk_meta_pipeline *placed);
@@ -224,7 +224,10 @@ ghci_vk_meta_compile(
 /*
  * Finds one of the driver's transfer programs placed in a device's code
  * heap, compiling it once for the GPU and placing it once for the device
- * at its first use.  Returns 0 with the placed program, ENOMEM, EIO (no
+ * at its first use.  grow says whether the code heap may grow for it (a
+ * submission's conversion may not; the end of a command buffer places
+ * the programs it needs beforehand).  Returns 0 with the placed program,
+ * ENOMEM, ENOSPC (no room in the heap, and it may not grow), EIO (no
  * room could be made in the heap), or ENOTSUP (the compiler refuses it,
  * or its pipeline state cannot hold it; the GPU remembers that, and the
  * kind is not compiled again).
@@ -234,6 +237,7 @@ ghci_vk_meta_pipeline(
 	struct ghci_vk_session *session,
 	struct ghci_vk_device *device,
 	enum ghci_vk_meta_kind kind,
+	int grow,
 	const struct ghci_vk_meta_pipeline **pipeline)
 {
 	struct ghci_gsi1_program *programs[GHCI_VK_META_PROGRAMS];
@@ -253,7 +257,7 @@ ghci_vk_meta_pipeline(
 		return error;
 
 	/* The programs' place in the device's code heap. */
-	error = meta_place(session, device, programs, &device->meta[kind]);
+	error = meta_place(session, device, programs, grow, &device->meta[kind]);
 	if (error == ENOTSUP)
 		meta_refuse(session->device, kind);
 	if (error != 0)
@@ -1690,16 +1694,18 @@ ir_fence(
 /*
  * Places the compiled programs of a transfer in a device's code heap:
  * the pipeline state record (a compute pipeline, or a draw's), then the
- * compute or vertex program's code, then a draw's fragment program's.
- * Returns 0, ENOMEM, EIO, or ENOTSUP for a compute program whose two
- * buffers are not in its resource table, or a draw that does not read
- * texture and sampler slot 0.
+ * compute or vertex program's code, then a draw's fragment program's;
+ * the heap grows for them only when grow says so.  Returns 0, ENOMEM,
+ * ENOSPC (no room, and the heap may not grow), EIO, or ENOTSUP for a
+ * compute program whose two buffers are not in its resource table, or a
+ * draw that does not read texture and sampler slot 0.
  */
 static int
 meta_place(
 	struct ghci_vk_session *session,
 	struct ghci_vk_device *device,
 	struct ghci_gsi1_program *const *programs,
+	int grow,
 	struct ghci_vk_meta_pipeline *placed)
 {
 	struct ghci_vk_heap_block *block;
@@ -1716,7 +1722,9 @@ meta_place(
 
 	/* The run: the record, then the code of each program. */
 	bytes = meta_layout(programs, &code_at, &fragment_at);
-	error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_CODE, bytes, META_PSO_ALIGN, &block, &offset);
+	error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_CODE, bytes, META_PSO_ALIGN, grow, &block, &offset);
+	if (error == ENOSPC && !grow)
+		return ENOSPC;
 	if (error == ENOMEM || error == ENOSPC)
 		return ENOMEM;
 	if (error != 0)
