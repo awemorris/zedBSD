@@ -14,6 +14,7 @@
  *   displayctl [--porcelain] modes DISPLAY
  *   displayctl [--porcelain] set DISPLAY WIDTHxHEIGHT[@HZ] [--keep] [--timeout=SECONDS]
  *   displayctl [--porcelain] keep DISPLAY | revert DISPLAY | reset DISPLAY [--keep] [--timeout=SECONDS]
+ *   displayctl [--porcelain] scale [DISPLAY [PERCENT|auto]]
  *
  * DISPLAY is a display's number in the list, its key, or the start of its
  * label.  A new mode is shown at once as a trial: unless it is kept within
@@ -24,8 +25,14 @@
  * none comes or when displayctl is ended.  --keep keeps the new mode at
  * once, for a change made from afar to a display known to show it.
  *
+ * scale lists the displays' scales (the scale shown, the user's choice,
+ * the recommended one and the steps offered), or one display's; with a
+ * percent (one of the steps offered, such as 125) it chooses that scale,
+ * and with auto it leaves the display to the default.  A scale is shown
+ * at once, without a trial, and kept for the monitor.
+ *
  * --porcelain prints one record a line, as "kind key=value ...": display,
- * mode, result.  The exit status is 0, 1 for a wrong use, or 2 for a
+ * mode, scale, result.  The exit status is 0, 1 for a wrong use, or 2 for a
  * request refused or not answered, or no compositor.
  */
 
@@ -101,6 +108,9 @@ static const char *displayctl_error_name(int error);
 static unsigned long long displayctl_clock_ms(void);
 static void displayctl_read_answer(void *argument);
 static void displayctl_usage(void);
+static void displayctl_scale_show(struct displayctl *run, unsigned index);
+static int displayctl_scale_set(struct displayctl *run, unsigned index, const char *word);
+static unsigned displayctl_percent(unsigned scale96);
 
 /*
  * Runs one command against the desktop's displays.
@@ -118,6 +128,7 @@ main(
 	int arg;
 	int status;
 	int differs;
+	int differs_scale;
 
 	/* Prints each line as it is made, so that a script reading the pipe sees it at once. */
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -201,7 +212,15 @@ main(
 		status = DISPLAYCTL_OK;
 	}
 
-	/* A display's modes, a change, a keep, a revert or a reset. */
+	/* Every display's scale. */
+	differs_scale = strcmp(command, "scale");
+	if (differs_scale == 0 && word_count == 0U) {
+		for (index = 0; index < (int)run.count; index++)
+			displayctl_scale_show(&run, (unsigned)index);
+		status = DISPLAYCTL_OK;
+	}
+
+	/* A display's modes, a change, a keep, a revert, a reset, or its scale shown or chosen. */
 	if (differs != 0 && word_count >= 1U) {
 		index = displayctl_find(&run, words[0]);
 		if (index < 0) {
@@ -216,6 +235,11 @@ main(
 			status = displayctl_set(&run, (unsigned)index, NULL, 1U);
 		} else if ((strcmp(command, "keep") == 0 || strcmp(command, "revert") == 0) && word_count == 1U) {
 			status = displayctl_simple(&run, (unsigned)index, command);
+		} else if (differs_scale == 0 && word_count == 1U) {
+			displayctl_scale_show(&run, (unsigned)index);
+			status = DISPLAYCTL_OK;
+		} else if (differs_scale == 0 && word_count == 2U) {
+			status = displayctl_scale_set(&run, (unsigned)index, words[1]);
 		}
 	}
 	if (status == DISPLAYCTL_USAGE)
@@ -947,5 +971,132 @@ displayctl_usage(void)
 	    "       displayctl [--porcelain] modes DISPLAY\n"
 	    "       displayctl [--porcelain] set DISPLAY WIDTHxHEIGHT[@HZ] [--keep] [--timeout=SECONDS]\n"
 	    "       displayctl [--porcelain] keep|revert DISPLAY\n"
-	    "       displayctl [--porcelain] reset DISPLAY [--keep] [--timeout=SECONDS]\n");
+	    "       displayctl [--porcelain] reset DISPLAY [--keep] [--timeout=SECONDS]\n"
+	    "       displayctl [--porcelain] scale [DISPLAY [PERCENT|auto]]\n");
+}
+
+/* Prints a display's scale: the scale shown, the user's choice, the recommended one, the steps offered, and why not. */
+static void
+displayctl_scale_show(
+	struct displayctl *run,
+	unsigned index)
+{
+	struct kl_display_scale scale;
+	const struct kl_display *display;
+	char chosen[16];
+	char offered[64];
+	size_t used;
+	unsigned at;
+	int written;
+	int error;
+
+	/* What the desktop told of the display's scale. */
+	display = &run->displays[index];
+	error = kl_system_displays_scale(run->system, display->key, &scale);
+	if (error != 0) {
+		if (run->porcelain) {
+			printf("scale index=%u key=%s error=%s\n", index + 1U, display->key, displayctl_error_name(error));
+			return;
+		}
+		printf("%u  %-20s scale unknown (%s)\n", index + 1U, display->label, strerror(error));
+		return;
+	}
+
+	/* The choice, and the steps offered, in percent. */
+	(void)snprintf(chosen, sizeof(chosen), "auto");
+	if (scale.chosen != 0U)
+		(void)snprintf(chosen, sizeof(chosen), "%u", displayctl_percent(scale.chosen));
+	used = 0U;
+	offered[0] = '\0';
+	for (at = 0U; at < scale.offered_count; at++) {
+		written = snprintf(offered + used, sizeof(offered) - used, "%s%u", at == 0U ? "" : ",", displayctl_percent(scale.offered[at]));
+		if (written < 0 || (size_t)written >= sizeof(offered) - used)
+			break;
+		used += (size_t)written;
+	}
+
+	/* One line, for scripts or for people. */
+	if (run->porcelain) {
+		printf("scale index=%u key=%s current=%u chosen=%s recommended=%u offered=%s width=%u height=%u why=0x%x\n", index + 1U, display->key,
+		    displayctl_percent(scale.current), chosen, displayctl_percent(scale.recommended), offered, scale.width, scale.height, scale.why);
+		return;
+	}
+	printf("%u  %-20s %u %%  (chosen %s%s, recommended %u %%)  offers %s %%  desktop %ux%u\n", index + 1U, display->label,
+	    displayctl_percent(scale.current), chosen, scale.chosen != 0U ? " %" : "", displayctl_percent(scale.recommended), offered, scale.width,
+	    scale.height);
+	if ((scale.why & KL_DISPLAY_SCALE_WHY_FIXED) != 0U)
+		printf("   This display offers 100 %% alone.\n");
+	if ((scale.why & KL_DISPLAY_SCALE_WHY_ALONE) != 0U)
+		printf("   The scale can be chosen only while one display is shown.\n");
+	if ((scale.why & KL_DISPLAY_SCALE_WHY_ANCHOR) != 0U)
+		printf("   The scale can be chosen only on the display the desktop is on.\n");
+	if ((scale.why & KL_DISPLAY_SCALE_WHY_BUSY) != 0U)
+		printf("   The scale cannot be chosen while the mode changes or a game is shown.\n");
+}
+
+/*
+ * Chooses a display's scale (word: a percent, or auto for the default),
+ * waits for its answer, and prints the display's scale after it.  Returns
+ * the exit status.
+ */
+static int
+displayctl_scale_set(
+	struct displayctl *run,
+	unsigned index,
+	const char *word)
+{
+	unsigned long percent;
+	unsigned scale96;
+	uint32_t request;
+	char *end;
+	int answer;
+	int differs;
+	int error;
+
+	/* The scale asked for: auto, or a percent of a quarter (the steps' 96ths are whole then). */
+	scale96 = 0U;
+	differs = strcmp(word, "auto");
+	if (differs != 0) {
+		percent = strtoul(word, &end, 10);
+		if (end == word || (*end != '\0' && strcmp(end, "%") != 0))
+			return DISPLAYCTL_USAGE;
+		if (percent < 100UL || percent > 400UL || percent % 25UL != 0UL) {
+			fprintf(stderr, "displayctl: scale: %s is not a step (100, 125, 150 ...)\n", word);
+			return DISPLAYCTL_USAGE;
+		}
+		scale96 = (unsigned)(percent * 96UL / 100UL);
+	}
+
+	/* The request. */
+	error = kl_system_displays_set_scale(run->system, run->displays[index].key, scale96, &request);
+	if (error != 0) {
+		displayctl_result(run, "scale", error);
+		return DISPLAYCTL_FAILED;
+	}
+
+	/* Its answer. */
+	error = displayctl_wait(run, request, &answer);
+	if (error != 0)
+		answer = ETIMEDOUT;
+	displayctl_result(run, "scale", answer);
+	if (answer != 0) {
+		displayctl_scale_show(run, index);
+		return DISPLAYCTL_FAILED;
+	}
+
+	/* The snapshot after it, and the display's scale in it. */
+	(void)displayctl_round(run, DISPLAYCTL_REST_MS);
+	displayctl_scale_show(run, index);
+
+	/* Succeeded: chosen and shown. */
+	return DISPLAYCTL_OK;
+}
+
+/* Reports a scale in 96ths in percent, rounded to the nearest. */
+static unsigned
+displayctl_percent(
+	unsigned scale96)
+{
+	/* scale * 100 / 96, a half up. */
+	return (scale96 * 100U + 48U) / 96U;
 }

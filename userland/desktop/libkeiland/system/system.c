@@ -236,6 +236,7 @@ struct system_displays_listener {
 	void (*touch)(void *data, struct wl_proxy *proxy, const char *identity, const char *label, uint32_t kind, const char *key);
 	void (*mode)(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 	void (*resolution)(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
+	void (*scale)(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
 };
 
 /* The listener of kl_system_machine_v1's events (ws188-p002), in their order. */
@@ -321,6 +322,8 @@ static void system_display_rotations(void *data, struct wl_proxy *proxy, const c
 static void system_display_touch(void *data, struct wl_proxy *proxy, const char *identity, const char *label, uint32_t kind, const char *key);
 static void system_display_mode(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 static void system_display_resolution(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
+static void system_display_scale(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
+static unsigned system_scale_to_96(unsigned scale120);
 static void system_machine_parts(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what);
 static void system_machine_about(void *data, struct wl_proxy *proxy, const char *name, const char *kernel, const char *architecture, const char *processor, const char *host, uint32_t cpus);
 static void system_machine_filesystem(void *data, struct wl_proxy *proxy, const char *path, uint32_t total_high, uint32_t total_low, uint32_t available_high, uint32_t available_low, uint32_t used_high, uint32_t used_low);
@@ -489,7 +492,8 @@ static const struct system_displays_listener system_displays_listener = {
 	system_display_rotations,
 	system_display_touch,
 	system_display_mode,
-	system_display_resolution
+	system_display_resolution,
+	system_display_scale
 };
 
 /* The computer's object's callbacks (ws188-p002). */
@@ -2544,6 +2548,86 @@ kl_system_displays_resolution(
 	/* Succeeded: the trial and the reasons. */
 	*state = told->state;
 	*why = told->why;
+	return 0;
+}
+
+/*
+ * Gives what the last snapshot holds of a display's scale: the scale it is
+ * shown at, the user's choice, the default, the steps it offers, its
+ * logical size and why its scale cannot be chosen now, in 96ths.
+ */
+int
+kl_system_displays_scale(
+	const struct kl_system *system,
+	const char *key,
+	struct kl_display_scale *scale)
+{
+	const struct system_view_scale *told;
+	unsigned index;
+
+	/* A display's key, from a compositor that tells the scales. */
+	if (system == NULL || key == NULL || scale == NULL)
+		return EINVAL;
+	if (system->displays == NULL || system->manager_version < KL_SYSTEM_SINCE_SCALE)
+		return ENOTSUP;
+
+	/* What the snapshot holds of it. */
+	told = system_view_scale_of(&system->view, key);
+	if (told == NULL)
+		return ENODEV;
+
+	/* The scales in 96ths, and the rest as told. */
+	memset(scale, 0, sizeof(*scale));
+	scale->current = system_scale_to_96(told->current);
+	scale->chosen = system_scale_to_96(told->chosen);
+	scale->recommended = system_scale_to_96(told->recommended);
+	for (index = 0U; index < told->offered_count && index < KL_DISPLAY_SCALES_MAX; index++)
+		scale->offered[index] = system_scale_to_96(told->offered[index]);
+	scale->offered_count = index;
+	scale->width = told->width;
+	scale->height = told->height;
+	scale->why = told->why;
+
+	/* Succeeded: the display's scale. */
+	return 0;
+}
+
+/*
+ * Chooses a display's scale (96ths; 0: the default), shown at once and
+ * kept for its monitor.
+ */
+int
+kl_system_displays_set_scale(
+	struct kl_system *system,
+	const char *key,
+	unsigned scale,
+	uint32_t *request)
+{
+	size_t length;
+	uint32_t number;
+	uint32_t scale120;
+
+	/* A display's key, and a scale that is a whole number of the compositor's 120ths. */
+	if (system == NULL || key == NULL)
+		return EINVAL;
+	length = strlen(key);
+	if (length == 0U || length >= KL_DISPLAY_KEY_MAX)
+		return EINVAL;
+	if (scale > 4U * KL_SYSTEM_SCALE_ONE)
+		return EINVAL;
+	if ((scale * KL_SYSTEM_SCALE_ONE) % 96U != 0U)
+		return EINVAL;
+	scale120 = scale * KL_SYSTEM_SCALE_ONE / 96U;
+
+	/* The displays object, from a compositor that changes the scales. */
+	if (system->displays == NULL || system->lost || system->manager_version < KL_SYSTEM_SINCE_SCALE)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_SET_SCALE, number, key, scale120);
+
+	/* Succeeded: the snapshot and the answer come later. */
 	return 0;
 }
 
@@ -6076,6 +6160,60 @@ system_display_resolution(
 	system = data;
 	now = system_milliseconds();
 	system_view_display_resolution(&system->view, key, state, remaining_ms, why, now);
+}
+
+/* Keeps a display's scale, the steps it offers and why its scale cannot be chosen now. */
+static void
+system_display_scale(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *key,
+	uint32_t current,
+	uint32_t chosen,
+	uint32_t recommended,
+	uint32_t width,
+	uint32_t height,
+	uint32_t why,
+	struct wl_array *offered)
+{
+	struct system_view_scale scale;
+	const uint32_t *steps;
+	struct kl_system *system;
+	size_t count;
+	size_t index;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The scale as told. */
+	memset(&scale, 0, sizeof(scale));
+	scale.current = current;
+	scale.chosen = chosen;
+	scale.recommended = recommended;
+	scale.width = width;
+	scale.height = height;
+	scale.why = why;
+
+	/* The steps offered, as many as there is room for. */
+	steps = offered->data;
+	count = offered->size / sizeof(steps[0]);
+	if (count > KL_DISPLAY_SCALES_MAX)
+		count = KL_DISPLAY_SCALES_MAX;
+	for (index = 0U; index < count; index++)
+		scale.offered[index] = steps[index];
+	scale.offered_count = (unsigned)count;
+
+	/* Kept with the display. */
+	system = data;
+	system_view_display_scale(&system->view, key, &scale);
+}
+
+/* Reports a scale in the compositor's 120ths in 96ths (KL_SCALE_BASE), rounded to the nearest. */
+static unsigned
+system_scale_to_96(
+	unsigned scale120)
+{
+	/* scale * 96 / 120, a half up. */
+	return (scale120 * 96U + KL_SYSTEM_SCALE_ONE / 2U) / KL_SYSTEM_SCALE_ONE;
 }
 
 /* Puts the printers and the jobs into effect (ws145-p003). */

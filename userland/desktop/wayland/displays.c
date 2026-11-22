@@ -11,6 +11,7 @@
  */
 
 #include "displays.h"
+#include "scale.h"
 #include "rotate.h"
 
 #include <errno.h>
@@ -313,6 +314,7 @@ kwl_displays_format(
 	const char *mode;
 	size_t used;
 	unsigned index;
+	unsigned percent;
 	int written;
 
 	/* The version and the mode. */
@@ -370,6 +372,15 @@ kwl_displays_format(
 		written = snprintf(text + used, size - used, "resolution=%s %lu %lu %lu\n", config->resolutions[index].key,
 		    (unsigned long)config->resolutions[index].width, (unsigned long)config->resolutions[index].height,
 		    (unsigned long)config->resolutions[index].refresh_mhz);
+		if (written < 0 || (size_t)written >= size - used)
+			return 0U;
+		used += (size_t)written;
+	}
+
+	/* Each monitor's scale, in percent, in the order written. */
+	for (index = 0U; index < config->scale_count && index < KWL_DISPLAYS_PLACES; index++) {
+		percent = config->scales[index].scale120 * KWL_SCALE_ONE_PERCENT / KWL_SCALE_ONE;
+		written = snprintf(text + used, size - used, "scale=%s %u\n", config->scales[index].key, percent);
 		if (written < 0 || (size_t)written >= size - used)
 			return 0U;
 		used += (size_t)written;
@@ -759,6 +770,132 @@ kwl_displays_forget_resolution(
 	}
 }
 
+/*
+ * Reads a scale's value "ID N": an identity (which may hold spaces) and
+ * the last word, a percent from 100 to 300 that is a whole number of
+ * 120ths.  Returns 0 with the scale in 120ths, or EINVAL for text that is
+ * not one.  Whether it is a step a display offers is the compositor's
+ * judgement when it shows it (scale.c), so this file stands alone.
+ */
+int
+kwl_displays_parse_scale(
+	const char *text,
+	char *key,
+	size_t size,
+	unsigned *scale120)
+{
+	const char *start;
+	uint32_t percent;
+	size_t length;
+	int error;
+
+	/* The percent, the last word. */
+	start = text + strlen(text);
+	error = displays_word(text, &start, &percent);
+	if (error != 0)
+		return error;
+
+	/* A scale from 100 % to 300 % that is a whole number of 120ths. */
+	if (percent < KWL_SCALE_MIN * KWL_SCALE_ONE_PERCENT / KWL_SCALE_ONE)
+		return EINVAL;
+	if (percent > KWL_SCALE_MAX * KWL_SCALE_ONE_PERCENT / KWL_SCALE_ONE)
+		return EINVAL;
+	if ((percent * KWL_SCALE_ONE) % KWL_SCALE_ONE_PERCENT != 0U)
+		return EINVAL;
+	*scale120 = percent * KWL_SCALE_ONE / KWL_SCALE_ONE_PERCENT;
+
+	/* The identity: everything before the space before the percent. */
+	length = (size_t)(start - text);
+	if (length == 0U || length >= size)
+		return EINVAL;
+	memcpy(key, text, length);
+	key[length] = '\0';
+
+	/* Succeeded: the identity and its step. */
+	return 0;
+}
+
+/* Finds a monitor's scale in a choice by its identity: the step (120ths), or 0 when it is left to the default. */
+unsigned
+kwl_displays_scale(
+	const struct kwl_display_config *config,
+	const char *key)
+{
+	unsigned index;
+	int differs;
+
+	/* Each scale kept. */
+	for (index = 0U; index < config->scale_count && index < KWL_DISPLAYS_PLACES; index++) {
+		differs = strcmp(config->scales[index].key, key);
+		if (differs == 0)
+			return config->scales[index].scale120;
+	}
+
+	/* Succeeded: left to the default. */
+	return 0U;
+}
+
+/*
+ * Keeps a monitor's scale in a choice (scale120 0: its line goes, the
+ * monitor left to the default): its line goes last, and with as many as
+ * the choice keeps, the oldest goes.  Returns 0, or EINVAL for an
+ * identity empty or too long or a scale outside 120 to 360 or not a whole
+ * percent.
+ */
+int
+kwl_displays_set_scale(
+	struct kwl_display_config *config,
+	const char *key,
+	unsigned scale120)
+{
+	struct kwl_display_scale *kept;
+	unsigned index;
+	size_t length;
+	int differs;
+
+	/* An identity the file can keep. */
+	length = strlen(key);
+	if (length == 0U || length >= KWL_DISPLAYS_KEY)
+		return EINVAL;
+
+	/* A scale the file can write as a whole percent, or none. */
+	if (scale120 != 0U) {
+		if (scale120 < KWL_SCALE_MIN || scale120 > KWL_SCALE_MAX)
+			return EINVAL;
+		if ((scale120 * KWL_SCALE_ONE_PERCENT) % KWL_SCALE_ONE != 0U)
+			return EINVAL;
+	}
+
+	/* Its old line goes. */
+	for (index = 0U; index < config->scale_count; index++) {
+		differs = strcmp(config->scales[index].key, key);
+		if (differs != 0)
+			continue;
+		config->scale_count--;
+		memmove(&config->scales[index], &config->scales[index + 1U], (config->scale_count - index) * sizeof(config->scales[0]));
+		break;
+	}
+
+	/* Left to the default: no line. */
+	if (scale120 == 0U)
+		return 0;
+
+	/* The oldest goes when there is no room. */
+	if (config->scale_count >= KWL_DISPLAYS_PLACES) {
+		config->scale_count--;
+		memmove(&config->scales[0], &config->scales[1], config->scale_count * sizeof(config->scales[0]));
+	}
+
+	/* The new line, last. */
+	kept = &config->scales[config->scale_count];
+	memcpy(kept->key, key, length + 1U);
+	kept->scale120 = scale120;
+	config->scale_count++;
+
+	/* Succeeded: the scale is kept. */
+	return 0;
+}
+
 /* Tells whether two rectangles share some area (the half-open edges do not). */
 static int
 displays_overlap(
@@ -874,6 +1011,7 @@ displays_line(
 	uint32_t width;
 	uint32_t height;
 	uint32_t refresh;
+	unsigned scale120;
 	int differs;
 	int error;
 
@@ -962,6 +1100,15 @@ displays_line(
 		error = kwl_displays_parse_resolution(value, key, sizeof(key), &width, &height, &refresh);
 		if (error == 0)
 			(void)kwl_displays_set_resolution(config, key, width, height, refresh);
+		return 0;
+	}
+
+	/* A monitor's scale; a line that is not one (not a step) is skipped. */
+	differs = strcmp(line, "scale");
+	if (differs == 0) {
+		error = kwl_displays_parse_scale(value, key, sizeof(key), &scale120);
+		if (error == 0)
+			(void)kwl_displays_set_scale(config, key, scale120);
 		return 0;
 	}
 
