@@ -33,5 +33,5 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(BUILD)/rootfs/.stamp \
 .PHONY: disk-image image-platform image-macppc32
 
 disk-image: $(DISK_IMAGE_ARTIFACT)
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 image-macppc32: image-platform

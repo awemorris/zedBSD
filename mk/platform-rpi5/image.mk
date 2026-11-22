@@ -38,7 +38,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
 .PHONY: disk-image check-disk-image image-rpi5 image-platform
 
 disk-image: $(DISK_IMAGE_ARTIFACT)
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 image-rpi5: image-platform
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)

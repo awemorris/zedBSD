@@ -7,6 +7,8 @@
 # rootfs Makefile
 #
 
+include mk/rootfs.mk
+
 MACPPC32_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 MACPPC32_ARCH_FILES  ?= $(ROOTFS_FILES)
 
