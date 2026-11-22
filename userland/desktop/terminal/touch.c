@@ -24,7 +24,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* How often the view is placed while fingers are down or it glides, in milliseconds. */
 #define TOUCH_TICK_MS		16
@@ -374,13 +373,13 @@ terminal_touch_take_pointer(
 uint64_t
 terminal_touch_clock(void)
 {
-	struct timespec now;
+	uint64_t now;
 
-	/* The monotonic clock. */
-	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+	/* libkeiland's monotonic clock. */
+	now = kl_clock_us();
 
 	/* Reports it in microseconds. */
-	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
+	return now;
 }
 
 /*

@@ -7,11 +7,16 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 KEILAND_TERMINAL_SOURCES := \
 	userland/desktop/terminal/main.c \
+	userland/desktop/terminal/run.c \
+	userland/desktop/terminal/connection-process.c \
 	userland/desktop/terminal/screen.c \
 	userland/desktop/terminal/keys.c \
 	userland/desktop/terminal/font.c \
+	userland/desktop/terminal/render-build.c \
 	userland/desktop/terminal/render.c \
+	userland/desktop/terminal/display-vulkan.c \
 	userland/desktop/terminal/window.c \
+	userland/desktop/terminal/frame-wayland.c \
 	userland/desktop/terminal/menu.c \
 	userland/desktop/terminal/clipboard.c \
 	userland/desktop/terminal/tabs.c \
