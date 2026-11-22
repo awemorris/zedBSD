@@ -2220,7 +2220,7 @@ keiui_ui_select_drawn(
 	select->rect = *rect;
 	select->box = *box;
 	select->style = *style;
-	select->clip = style->canvas->clip;
+	kl_canvas_logical(style->canvas, &style->canvas->clip, &select->clip);
 	select->drawn = 1;
 
 	/* Its record in the frame being drawn, the last of its id and index. */
@@ -3759,17 +3759,19 @@ ui_select_bounds(
 	struct kl_rect *bounds)
 {
 	const struct kl_canvas *canvas;
+	struct kl_rect pixels;
 	struct kl_rect whole;
 	int right;
 	int bottom;
 	int meet;
 
-	/* The canvas, or the program's bounds within it. */
+	/* The canvas (in its units, at a scale), or the program's bounds within it. */
 	canvas = ui->select.style.canvas;
-	whole.x = 0;
-	whole.y = 0;
-	whole.width = canvas->width;
-	whole.height = canvas->height;
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = canvas->width;
+	pixels.height = canvas->height;
+	kl_canvas_logical(canvas, &pixels, &whole);
 	*bounds = whole;
 	if (ui->select_bounded) {
 		meet = keiui_rect_intersect(&whole, &ui->select_bounds, bounds);
@@ -3788,10 +3790,10 @@ ui_select_bounds(
 	}
 
 	/* The covered widths taken off the canvas's right and bottom. */
-	if (right > 0 && bounds->x + bounds->width > canvas->width - right)
-		bounds->width = canvas->width - right - bounds->x;
-	if (bottom > 0 && bounds->y + bounds->height > canvas->height - bottom)
-		bounds->height = canvas->height - bottom - bounds->y;
+	if (right > 0 && bounds->x + bounds->width > whole.width - right)
+		bounds->width = whole.width - right - bounds->x;
+	if (bottom > 0 && bounds->y + bounds->height > whole.height - bottom)
+		bounds->height = whole.height - bottom - bounds->y;
 	if (bounds->width < 0)
 		bounds->width = 0;
 	if (bounds->height < 0)

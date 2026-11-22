@@ -110,13 +110,15 @@ struct terminal_page_program {
  * What the page shows of the run's settings that take effect at once:
  * the text's size (pixels at 96 dots an inch), the theme
  * (TERMINAL_THEME_*), whether ambiguous-width characters are wide, and
- * whether a selection is copied.
+ * whether a selection is copied; and the scale the window is drawn at
+ * (in 96ths, 0 for 100 %), which the page's widgets are drawn larger by.
  */
 struct terminal_page_state {
 	unsigned pixels;
 	unsigned theme;
 	int ambiguous_wide;
 	int copy_on_select;
+	unsigned scale;
 };
 
 /*

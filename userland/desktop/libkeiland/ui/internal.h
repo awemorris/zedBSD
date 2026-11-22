@@ -376,6 +376,13 @@ int keiui_button(struct kl_ui *ui, const struct kl_style *style, uint32_t id, ui
 void keiui_icon_line_draw(struct kl_canvas *canvas, enum kl_icon icon, float x, float y, float size, kl_color color);
 
 /*
+ * A mask and a picture placed in a canvas's pixels whatever its scale
+ * (canvas.c), for the text drawn at a scale's size (text.c).
+ */
+void keiui_canvas_mask_pixels(struct kl_canvas *canvas, int x, int y, const uint8_t *mask, int width, int height, size_t stride, kl_color color);
+void keiui_canvas_image_pixels(struct kl_canvas *canvas, const struct kl_image *image, float x, float y, float width, float height, float radius, float opacity);
+
+/*
  * ws190-p002 (plan/ws190/phase001/phase.md section 2.3): the fingers'
  * selection of a field or a text area, one a window's input (kl_ui keeps
  * it from kl_ui_create to kl_ui_destroy).  A double tap of a finger puts

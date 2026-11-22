@@ -168,6 +168,8 @@ extern "C" {
  *      and _reset_resolution (struct kl_display_mode, KL_DISPLAY_MODE_* and KL_DISPLAY_RESOLUTION_*)
  * 111: a system action run as the administrator once the person allowed it, kl_process_start_admin
  *      (struct kl_admin_options), KL_PROCESS_REFUSED, KL_PROCESS_LOST, KL_PROCESS_READY_START and KL_ADMIN_*
+ * 112: the scale a window and a canvas are drawn at, KL_SCALE_BASE, kl_window_scale and KL_WINDOW_SCALE,
+ *      kl_canvas's scale, kl_canvas_set_scale and kl_canvas_logical
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -177,7 +179,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 111U
+#define KL_VERSION 112U
 
 /*
  * Reports the interface version of the library that was loaded.
