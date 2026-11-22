@@ -23,11 +23,8 @@
 /* The pairs of a DEVICE_CAPS bit and a copy of it in another word. */
 #define MIRROR_PAIRS			5U
 
-/* The VA_BITS of the 2-level walk; a wider VA has the 3-level walk. */
+/* A VA of 32 bits or more, of which the driver uses the low 4 GiB. */
 #define VA_BITS_32			32U
-
-/* The address range of the GPU the driver uses: the low 4 GiB. */
-#define DRIVER_VA_BYTES			0x100000000ULL
 
 /* The milliseconds a reset may take when the clock is not known. */
 #define RESET_WAIT_UNKNOWN_MS		10000U
@@ -267,7 +264,7 @@ ghci_caps_has(
 		bit = caps->feature & GHCI_FEATURE_MRT_BLEND;
 		break;
 	case GHCI_HAS_HW_CURSOR:
-		bit = caps->feature & GHCI_FEATURE_HW_CURSOR;
+		bit = caps->disp_info & GHCI_DISP_INFO_HAS_CURSOR;
 		break;
 	case GHCI_HAS_ETC2:
 		bit = caps->fmt0 & GHCI_FMT0_ETC2;
@@ -356,49 +353,6 @@ ghci_caps_has(
 }
 
 /*
- * Reports the CP_HEAP bytes one session's root and upper tables may take.
- */
-uint32_t
-ghci_heap_session_bytes(
-	uint32_t va_bits)
-{
-	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 11.2, the 16 KiB root of the 2-level walk; the 8 KiB
-	 * root and the 4 KiB level 1 tables of the 3-level walk).
-	 */
-	if (va_bits <= VA_BITS_32)
-		return GHCI_ROOT_BYTES_VA32;
-
-	/* The 3-level walk: the root and the level 1 tables over the low 4 GiB the driver uses. */
-	return GHCI_ROOT_BYTES_VA40 + (uint32_t)(DRIVER_VA_BYTES / GHCI_L1_SPAN_BYTES) * GHCI_TABLE_BYTES;
-}
-
-/*
- * Reports the CP_HEAP bytes a device needs for every session and chunk.
- *
- * Every session's root and upper tables, a level 0 table for every 2 MiB
- * chunk the driver may use (the low 4 GiB, or all of a narrower VA), and
- * the spare the specification adds.  A VA narrower than 32 bits is
- * counted with the root of the 2-level walk, the largest it may have.
- */
-uint64_t
-ghci_heap_device_bytes(
-	uint32_t va_bits)
-{
-	uint64_t bytes;
-
-	/* Adds the roots and upper tables of all sixteen sessions. */
-	bytes = (uint64_t)GHCI_SESSIONS * ghci_heap_session_bytes(va_bits);
-
-	/* Adds a level 0 table for each chunk the VA holds; a chunk belongs to one session. */
-	bytes += (uint64_t)ghci_va_chunks(va_bits) * GHCI_TABLE_BYTES;
-
-	/* Succeeded: adds the spare the specification's sizing rule keeps. */
-	return bytes + GHCI_HEAP_SPARE_BYTES;
-}
-
-/*
  * Reports the 2 MiB chunks of GPU addresses the driver may use: those of
  * the low 4 GiB, or of the whole VA when it is narrower.
  */
@@ -411,7 +365,7 @@ ghci_va_chunks(
 		return GHCI_CHUNKS;
 
 	/* Succeeded: the chunks of the narrower VA. */
-	return (uint32_t)((1ULL << va_bits) / GHCI_L0_SPAN_BYTES);
+	return (uint32_t)((1ULL << va_bits) / GHCI_CHUNK_BYTES);
 }
 
 /*
@@ -665,8 +619,7 @@ decode_words(
 	caps->device_version = words[GHCI_CAPS_WORD_DEVICE_VERSION];
 	caps->cache_config = words[GHCI_CAPS_WORD_MEM_CACHE_CFG];
 	caps->prot_caps = words[GHCI_CAPS_WORD_PROT_CAPS];
-	caps->perf_src = words[GHCI_CAPS_WORD_PERF_SRC];
-	caps->extcap_present = words[GHCI_CAPS_WORD_EXTCAP_PRESENT];
+	caps->disp_info = words[GHCI_CAPS_WORD_DISP_PCLK_INFO];
 	caps->shader_stages = words[GHCI_CAPS_WORD_SHADER_STAGES];
 	caps->stage_limits = words[GHCI_CAPS_WORD_STAGE_LIMITS];
 	caps->fmt_limits = words[GHCI_CAPS_WORD_FMT_LIMITS] & GHCI_CAPS_FMT_LIMITS_MASK;

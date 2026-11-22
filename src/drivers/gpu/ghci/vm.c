@@ -81,14 +81,16 @@
 #define HOST_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE | GHCI_VM_FLAG_COHERENT)
 
 /*
- * The access every mapping of the GPU's local memory has: its address is
- * a local one (VM_FLAG_LOCAL), and the processor's caches have no part
- * in it.
+ * The access every mapping of the GPU's local memory has: the processor's
+ * caches have no part in it.  Its address is the local one, in
+ * [MEM_VRAM_BASE, MEM_VRAM_BASE + MEM_VRAM_SIZE), which alone makes it
+ * local memory.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 11.2,
- * VM_FLAG_LOCAL; section 11.3, phys of a mapping with VM_FLAG_LOCAL).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_VM_MAP flags [4:0], [31:5] reserved, the target memory decided by
+ * phys alone; section 11.3, the address routing).
  */
-#define LOCAL_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE | GHCI_VM_FLAG_LOCAL)
+#define LOCAL_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE)
 
 /*
  * One run of chunks a session owns and the GPU addresses its mappings
@@ -451,7 +453,7 @@ ghci_vm_close(
  * are the driver's.  The caller holds no lock of the device and does not
  * close the session meanwhile.
  *
- * Local memory is mapped with GHCI_VM_FLAG_LOCAL and its local address,
+ * Local memory is mapped at its local address (which tells the GPU it is local),
  * and never coherent with the processor.
  *
  * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,

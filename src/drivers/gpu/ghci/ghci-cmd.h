@@ -148,7 +148,6 @@
 #define GHCI_VM_FLAG_EXEC		(1U << 2)
 #define GHCI_VM_FLAG_COHERENT		(1U << 3)
 #define GHCI_VM_FLAG_WC			(1U << 4)
-#define GHCI_VM_FLAG_LOCAL		(1U << 5)
 
 /*
  * The records the page-table commands write to host memory: CMD_VM_MAP's

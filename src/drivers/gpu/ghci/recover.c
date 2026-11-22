@@ -563,6 +563,11 @@ recover_once(
 	if (error != 0)
 		return check_failed(device, "the replay did not finish");
 
+	/* The replayed maps are read, and placed again with the page-table memory they ask for. */
+	error = ghci_vm_replay_tables(device);
+	if (error != 0)
+		return check_failed(device, "the replayed maps did not finish");
+
 	/* Step 8: a last fence must find no new fault; the gate opens in the same section as the count is compared. */
 	error = last_check(device, fault_seen);
 	if (error != 0)
@@ -760,8 +765,8 @@ reset_and_check(
 	struct ghci_device *device)
 {
 	uint32_t status;
-	uint32_t want[6];
-	uint32_t offsets[6];
+	uint32_t want[4];
+	uint32_t offsets[4];
 	uint32_t word;
 	unsigned index;
 	int error;
@@ -798,15 +803,11 @@ reset_and_check(
 	want[1] = (uint32_t)(device->ring.memory->bus >> 32);
 	offsets[2] = GHCI_REG_RING_SIZE;
 	want[2] = device->ring_bytes;
-	offsets[3] = GHCI_REG_CP_HEAP_BASE;
-	want[3] = (uint32_t)device->heap->bus;
-	offsets[4] = GHCI_REG_CP_HEAP_LIMIT;
-	want[4] = (uint32_t)(device->heap->bus + device->heap->bytes);
-	offsets[5] = GHCI_REG_WDT_CYCLES;
-	want[5] = device->wdt_cycles;
+	offsets[3] = GHCI_REG_WDT_CYCLES;
+	want[3] = device->wdt_cycles;
 
 	/* Each is read back, and written again (the processor is idle) when it changed. */
-	for (index = 0U; index < 6U; index++) {
+	for (index = 0U; index < 4U; index++) {
 		word = ghci_read(device, offsets[index]);
 		if (word == want[index])
 			continue;
@@ -1291,6 +1292,8 @@ core_reset(
 	error = fence_back(device);
 	if (error == 0)
 		error = ghci_vm_replay(device);
+	if (error == 0)
+		error = ghci_vm_replay_tables(device);
 	if (error == 0)
 		error = last_check(device, fault_seen);
 	placing(device, 0, fault_seen);

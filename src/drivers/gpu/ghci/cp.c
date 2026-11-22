@@ -6,7 +6,7 @@
  */
 
 /*
- * The GHCI device's command processor: CP_HEAP, the ring, the fence
+ * The GHCI device's command processor: the ring, the fence
  * page, the gate, the submissions and their tickets, and the interrupt.
  *
  * The ring is host memory the driver alone writes; RING_WPTR is the
@@ -40,13 +40,9 @@
 #define IRQ_RECOVER			(GHCI_IRQ_FAULT | GHCI_IRQ_WATCHDOG)
 #define IRQ_TAKEN			(GHCI_IRQ_FENCE | IRQ_RECOVER)
 
-/* The end of CP_HEAP at most: a page below 4 GiB. */
-#define HEAP_END			0xfffff000ULL
-
 /* Every bit of IRQ_STATUS, which the start clears. */
 #define IRQ_ALL				0xffffffffU
 
-static int alloc_heap(struct ghci_device *device);
 static int liveness(struct ghci_device *device, int want_interrupt);
 static void release_memory(struct ghci_device *device);
 static int ring_room(struct ghci_device *device, uint32_t need, int log_entry);
@@ -59,7 +55,7 @@ static enum ghci_ticket_state ticket_state(struct ghci_device *device, const str
 static void log_registers(struct ghci_device *device, const char *what);
 
 /*
- * Starts the command processor: CP_HEAP, the ring, the fence page and
+ * Starts the command processor: the ring, the fence page and
  * the capability block's buffer, the interrupt, bus mastering, RUN and
  * the first fence.  The watchdog is set once the capability block is
  * read (ghci_cp_set_watchdog()).
@@ -73,11 +69,6 @@ ghci_cp_start(
 {
 	unsigned long irq;
 	int error;
-
-	/* CP_HEAP, which the processor's page-table walker takes its tables from. */
-	error = alloc_heap(device);
-	if (error != 0)
-		return error;
 
 	/* The ring's size: the glue's, or the default; a power of two between 4 KiB and 16 MiB. */
 	if (device->ring_bytes == 0U)
@@ -113,7 +104,7 @@ ghci_cp_start(
 	device->submit_count = 0U;
 	device->recovery_placing = 0;
 
-	/* Session 0's record and what CP_HEAP may hold. */
+	/* Session 0's record; its page table comes once the ring runs. */
 	ghci_vm_init(device);
 
 	/* The ring's place and size, written while the processor is idle. */
@@ -167,7 +158,7 @@ ghci_cp_start(
 		device->bus_master_set = 1;
 	}
 
-	/* The ring runs; the processor builds session 0's root in CP_HEAP. */
+	/* The ring runs, with the MMU off until the driver starts it. */
 	irq = spin_lock_irqsave(&device->irq_lock);
 
 	device->state = GHCI_STATE_RUNNING;
@@ -229,7 +220,7 @@ ghci_cp_stop(
 			kern_logf("ghci: %s: processor did not halt at the stop\n", device->name);
 	}
 
-	/* The reset stops every access to the ring and CP_HEAP. */
+	/* The reset stops every access to the ring and the page tables. */
 	ghci_write(device, GHCI_REG_CTRL, GHCI_CTRL_RESET);
 	error = ghci_wait_register(device, GHCI_REG_CTRL, GHCI_CTRL_RESET, 0U, device->reset_wait_ms);
 	reset_done = 1;
@@ -1093,53 +1084,6 @@ ghci_cp_interrupt(
 }
 
 /*
- * Takes CP_HEAP: the bound of every session's tables on a GPU with a
- * page-table walker, halved while it cannot be had, or session 0's root
- * alone on one without.  CP_HEAP is 32-bit physical memory.
- */
-static int
-alloc_heap(
-	struct ghci_device *device)
-{
-	uint64_t bytes;
-	int walker;
-	int error;
-
-	/* The size the walker may need at most, or the flat root. */
-	walker = ghci_caps_has(&device->caps, GHCI_HAS_HW_WALKER);
-	bytes = GHCI_FLAT_HEAP_BYTES;
-	if (walker)
-		bytes = ghci_heap_device_bytes(device->caps.va_bits);
-
-	/*
-	 * Halves the size while the memory cannot be had, down to the smallest
-	 * the driver settles for.  The heap ends a page below 4 GiB at most,
-	 * so that its exclusive CP_HEAP_LIMIT is a 32-bit address.
-	 */
-	for (;;) {
-		error = ghci_memory_alloc(device, bytes, HEAP_END, &device->heap);
-		if (error == 0)
-			break;
-		if (!walker || bytes / 2U < GHCI_HEAP_MIN_BYTES) {
-			kern_logf("ghci: %s: no CP_HEAP of %llu bytes\n", device->name, (unsigned long long)bytes);
-			return error;
-		}
-		bytes /= 2U;
-	}
-
-	/*
-	 * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-	 * 11.2, CP_HEAP_BASE and the exclusive CP_HEAP_LIMIT, 4 KiB aligned
-	 * 32-bit physical addresses, written while the processor is idle).
-	 */
-	ghci_write(device, GHCI_REG_CP_HEAP_BASE, (uint32_t)device->heap->bus);
-	ghci_write(device, GHCI_REG_CP_HEAP_LIMIT, (uint32_t)(device->heap->bus + device->heap->bytes));
-
-	/* Succeeded: CP_HEAP is set. */
-	return 0;
-}
-
-/*
  * Places one fence of the driver's and waits a bounded time for the
  * fence page to reach it, and with want_interrupt for its interrupt too.
  * Returns 0, or ETIMEDOUT.
@@ -1199,7 +1143,7 @@ liveness(
 }
 
 /*
- * Gives back the device's own memory: CP_HEAP, the ring, the fence page,
+ * Gives back the device's own memory: the ring, the fence page, the fault log ring,
  * the capability block's buffer and the quarantine.
  */
 static void
@@ -1209,10 +1153,10 @@ release_memory(
 	int error;
 
 	/* Each run, if it was taken; one that cannot be given back is kept in the quarantine. */
-	error = ghci_memory_free(device, device->heap);
+	error = ghci_memory_free(device, device->fault_ring);
 	if (error != 0)
-		ghci_memory_quarantine(device, device->heap);
-	device->heap = NULL;
+		ghci_memory_quarantine(device, device->fault_ring);
+	device->fault_ring = NULL;
 	error = ghci_memory_free(device, device->ring.memory);
 	if (error != 0)
 		ghci_memory_quarantine(device, device->ring.memory);

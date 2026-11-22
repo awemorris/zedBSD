@@ -122,7 +122,7 @@ ghci_device_start(
 	if (error != 0)
 		kern_logf("ghci: %s: display not started (%d)\n", device->name, error);
 
-	/* CP_HEAP, the ring, the fence page, the interrupt and the first fence. */
+	/* The ring, the fence page, the interrupt and the first fence. */
 	error = ghci_cp_start(device);
 	if (error != 0) {
 		ghci_display_detach(device);
@@ -132,6 +132,14 @@ ghci_device_start(
 
 	/* The capability block, which the command processor writes once the ring runs. */
 	error = read_block(device);
+	if (error != 0) {
+		ghci_display_detach(device);
+		(void)ghci_cp_stop(device);
+		return error;
+	}
+
+	/* The MMU with session 0's page table and the fault log ring, before any session or mapping. */
+	error = ghci_vm_mmu_start(device);
 	if (error != 0) {
 		ghci_display_detach(device);
 		(void)ghci_cp_stop(device);

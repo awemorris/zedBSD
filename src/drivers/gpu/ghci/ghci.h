@@ -373,8 +373,10 @@ struct ghci_bus_ops {
  * flags its GHCI_VM_FLAG_* and replayed the recovery generation it was
  * last placed in.  record is a page of host memory the processor writes
  * the mapping's CMD_VM_MAP and CMD_VM_UNMAP records to (NULL without a
- * walker); pending says that a replayed CMD_VM_MAP's record is still to
- * be read.  An UNMAPPING mapping's ticket is the fence after its
+ * walker); pending says that a placed CMD_VM_MAP's record is still to
+ * be read, and offered is the page-table memory that CMD_VM_MAP was given
+ * (NULL when none), which goes back to the allocator as far as the record
+ * says the processor did not keep it.  An UNMAPPING mapping's ticket is the fence after its
  * CMD_VM_UNMAP (unmap_placed) or its session's CMD_SESSION_CLOSE; the
  * mapping holds its allocation until that passes (lock).
  */
@@ -390,6 +392,7 @@ struct ghci_mapping {
 	struct ghci_ticket ticket;
 	uint64_t replayed;
 	struct ghci_allocation *record;
+	struct ghci_tables *offered;
 	int pending;
 	int unmap_placed;
 };

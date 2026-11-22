@@ -48,8 +48,6 @@
 #define GHCI_REG_IRQ_STATUS		0x038U
 #define GHCI_REG_IRQ_ENABLE		0x03CU
 #define GHCI_REG_WDT_CYCLES		0x048U
-#define GHCI_REG_CP_HEAP_BASE		0x050U
-#define GHCI_REG_CP_HEAP_LIMIT		0x054U
 #define GHCI_REG_SESSION_ACTIVE		0x058U
 #define GHCI_REG_MEM_VRAM_BASE		0x100U
 #define GHCI_REG_MEM_VRAM_SIZE		0x108U
@@ -113,7 +111,7 @@
  * starts.  The block is 32 + FMT_COUNT dwords; FMT_COUNT is at most 255
  * (format 0xFF is never reported), so a buffer of GHCI_CAPS_BLOCK_BYTES
  * holds the largest block and is asked for once.  Words 14 and 18 are
- * read for the log only.
+ * reserved and not read.
  *
  * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.5, the
  * capability block: word 0 BLOCK_ID "GCAP", word 1 [15:0] version 1 and
@@ -139,11 +137,11 @@
 #define GHCI_CAPS_WORD_DEVICE_VERSION	11U
 #define GHCI_CAPS_WORD_MEM_CACHE_CFG	12U
 #define GHCI_CAPS_WORD_PROT_CAPS	13U
-#define GHCI_CAPS_WORD_PERF_SRC		14U
+#define GHCI_CAPS_WORD_RESERVED_14	14U
 #define GHCI_CAPS_WORD_FMT_LIMITS	15U
 #define GHCI_CAPS_WORD_FMT_FIRST	16U
 #define GHCI_CAPS_WORD_FMT_COUNT	17U
-#define GHCI_CAPS_WORD_EXTCAP_PRESENT	18U
+#define GHCI_CAPS_WORD_RESERVED_18	18U
 #define GHCI_CAPS_WORD_SHADER_STAGES	19U
 #define GHCI_CAPS_WORD_STAGE_LIMITS	20U
 #define GHCI_CAPS_WORD_DISP_PCLK_MIN	21U
@@ -206,8 +204,6 @@
 #define GHCI_FEATURE_FAST_CLEAR		(1U << 10)
 #define GHCI_FEATURE_LOGIC_OP		(1U << 11)
 #define GHCI_FEATURE_EARLY_Z		(1U << 12)
-#define GHCI_FEATURE_HW_CURSOR		(1U << 13)
-#define GHCI_FEATURE_COLOR_LUT		(1U << 14)
 #define GHCI_FEATURE_MRT_BLEND		(1U << 15)
 #define GHCI_FEATURE_MAX_MRT_SHIFT	16U
 #define GHCI_FEATURE_LDS_KB_SHIFT	20U
@@ -216,6 +212,16 @@
 #define GHCI_FMT0_BC_MASK		0x0000007FU
 #define GHCI_FMT0_ETC2			(1U << 7)
 #define GHCI_FMT0_SRGB			(1U << 9)
+
+/*
+ * Whether the display has a cursor plane: word 23 says it, and
+ * EXT_CAP_FEATURE's bits 13 and 14 are reserved.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.2,
+ * EXT_CAP_FEATURE [13] and [14] reserved; section 3.2.5 and section 13.1,
+ * word 23 DISP_PCLK_INFO [18] HAS_CURSOR).
+ */
+#define GHCI_DISP_INFO_HAS_CURSOR	(1U << 18)
 
 /*
  * The VA width is VA_BITS_ENC + 30, the float filters of EXT_CAP_FMT0,
@@ -457,16 +463,15 @@
 #define GHCI_RING_BYTES_MAX		0x1000000U
 
 /*
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 11.2, the multi-level page table and CP_HEAP).
+ * The page of GPU addresses and of CMD_VM_MAP, and the run of GPU addresses
+ * the driver hands out to one session at a time (its own choice; the
+ * processor keeps the page tables, whose form the driver does not see).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_VM_MAP: 4 KiB aligned gpu_va, phys and size_bytes).
  */
 #define GHCI_PAGE_BYTES			4096U
-#define GHCI_ROOT_BYTES_VA32		(16U * 1024U)
-#define GHCI_ROOT_BYTES_VA40		(8U * 1024U)
-#define GHCI_TABLE_BYTES		4096U
-#define GHCI_L0_SPAN_BYTES		(2U * 1024U * 1024U)
-#define GHCI_L1_SPAN_BYTES		(1024U * 1024U * 1024U)
-#define GHCI_HEAP_SPARE_BYTES		(64U * 1024U)
+#define GHCI_CHUNK_BYTES		(2U * 1024U * 1024U)
 
 /* The sessions of a GPU: 0 is the driver's, 1 to 15 are clients'. */
 #define GHCI_SESSIONS			16U
@@ -526,8 +531,7 @@ struct ghci_caps {
 	uint32_t device_version;
 	uint32_t cache_config;
 	uint32_t prot_caps;
-	uint32_t perf_src;
-	uint32_t extcap_present;
+	uint32_t disp_info;
 	uint32_t shader_stages;
 	uint32_t stage_limits;
 	uint32_t stages_dropped;
@@ -580,8 +584,6 @@ int ghci_caps_identify(const uint32_t *window);
 int ghci_caps_boot(const uint32_t *window, struct ghci_caps *caps);
 int ghci_caps_block(const uint32_t *words, uint32_t dwords, struct ghci_caps *caps);
 int ghci_caps_has(const struct ghci_caps *caps, enum ghci_caps_flag flag);
-uint32_t ghci_heap_session_bytes(uint32_t va_bits);
-uint64_t ghci_heap_device_bytes(uint32_t va_bits);
 uint32_t ghci_va_chunks(uint32_t va_bits);
 uint32_t ghci_watchdog_cycles(uint32_t gclk_hz, uint32_t milliseconds);
 uint32_t ghci_halt_wait_ms(uint32_t gclk_hz, uint32_t wdt_cycles);
