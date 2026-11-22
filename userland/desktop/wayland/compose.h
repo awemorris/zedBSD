@@ -396,6 +396,20 @@ struct kwl_head {
 	unsigned in_frame;
 	uint32_t image;
 	uint32_t global;
+	/*
+	 * The head's scale (scale.h), as the output's in the server: its size
+	 * in pixels, the scale its part of the plane is shown at and the one
+	 * its display asks for (120ths), and its display's physical size in
+	 * millimetres (0 when unknown), from which the default is chosen.
+	 * width and height above are the head's rectangle of the plane, in
+	 * logical units.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	unsigned scale_wanted;
+	uint32_t mm_width;
+	uint32_t mm_height;
 };
 
 struct kwl_cursor_thread;
@@ -737,6 +751,13 @@ struct kwl_compose {
 	 */
 	uint32_t mode_width;
 	uint32_t mode_height;
+	/*
+	 * The output's display's physical size in millimetres, as its driver
+	 * gives it (0 when unknown): the default scale's density comes from it
+	 * where the display's EDID does not give one.
+	 */
+	uint32_t mm_width;
+	uint32_t mm_height;
 	unsigned rotation_selected;
 	unsigned rotation;
 	unsigned scanout_rotation;

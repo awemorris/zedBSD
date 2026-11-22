@@ -58,6 +58,7 @@
 #include "super-tap.h"
 #include "plane.h"
 #include "rotate.h"
+#include "scale.h"
 #include "title-tap.h"
 #include "cursor-box.h"
 #include "lane.h"
@@ -1320,6 +1321,19 @@ struct kwl_server {
 	unsigned rotate_given;
 	unsigned rotate_option;
 	unsigned rotate_policy;
+	/*
+	 * The output's scale (scale.h): pixel_width and pixel_height are its
+	 * size in pixels, the mode turned by the rotation, and scale120 the
+	 * scale the plane is shown at (120ths), from which width and height
+	 * are made.  kwl_output_size_set writes the three with width and
+	 * height.  scale_wanted is the scale the user's choice or the default
+	 * asks for the output (output-scale.c), which kwl_output_size_set is
+	 * given; it is 120 until the display is known.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	unsigned scale_wanted;
 	/* The display mode's refresh in millihertz (from Vulkan, compose.c), told to clients by wl_output. */
 	uint32_t refresh;
 	/*
@@ -2406,7 +2420,7 @@ void kwl_output_hotplug_take(struct kwl_server *server);
 void kwl_output_follow(struct kwl_server *server);
 void kwl_output_follow_later(struct kwl_server *server);
 void kwl_output_follow_wake(struct kwl_server *server);
-void kwl_output_size_set(struct kwl_server *server, uint32_t mode_width, uint32_t mode_height, unsigned rotation);
+void kwl_output_size_set(struct kwl_server *server, uint32_t mode_width, uint32_t mode_height, unsigned rotation, unsigned scale120);
 int kwl_output_select_rotation(struct kwl_server *server, unsigned slot, unsigned rotation, unsigned *applied, int *saved);
 int kwl_output_apply_rotation(struct kwl_server *server, unsigned slot, unsigned rotation, unsigned mode);
 void kwl_output_policy_set(struct kwl_server *server, unsigned policy);

@@ -1976,7 +1976,7 @@ compose_rotation_choose(
 	compose->rotation_selected = wanted;
 	compose->scanout_rotation = scanout;
 	compose->turn_rotation = turn;
-	kwl_output_size_set(server, compose->mode_width, compose->mode_height, wanted);
+	kwl_output_size_set(server, compose->mode_width, compose->mode_height, wanted, server->scale_wanted);
 }
 
 /* Records the device's largest 2D image and its number of memory types, which bound a client buffer's description. */
@@ -2770,7 +2770,7 @@ compose_turn_open(
 	compose->rotate_why |= KWL_ROTATE_WHY_RESOURCE;
 	compose->turn_rotation = KWL_ROTATE_0;
 	compose->scanout_rotation = KWL_ROTATE_0;
-	kwl_output_size_set(server, compose->mode_width, compose->mode_height, KWL_ROTATE_0);
+	kwl_output_size_set(server, compose->mode_width, compose->mode_height, KWL_ROTATE_0, server->scale_wanted);
 }
 
 /* Destroys the per-image views, framebuffers and semaphores. */
