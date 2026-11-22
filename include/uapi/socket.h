@@ -76,12 +76,22 @@ typedef uint32_t socklen_t;
 #define SO_DOMAIN	0x100a
 #define SO_PROTOCOL	0x100b
 /*
- * POSIX lists SO_KEEPALIVE among the options at SOL_SOCKET.  The transport
- * does not act on it yet: setsockopt reports EOPNOTSUPP, so a caller must
- * treat the request as unfulfilled rather than assume keepalives are on.
+ * POSIX lists SO_KEEPALIVE among the options at SOL_SOCKET.  TCP sends idle
+ * probes on a connection that has it set; TCP_KEEPIDLE, TCP_KEEPINTVL and
+ * TCP_KEEPCNT in <netinet/tcp.h> say when and how many.
  */
 #define SO_KEEPALIVE	0x0008
 #define SO_PEERCRED	0x0011
+
+/*
+ * SO_TIMESTAMP (an int, on or off; FreeBSD's number) has recvmsg give the
+ * time each datagram was queued on the socket, by the realtime clock: a
+ * control message at SOL_SOCKET of type SCM_TIMESTAMP holding a struct
+ * timeval.  UDP and ICMP sockets give it.  A stream has no datagrams to
+ * stamp, and TCP and unix sockets take the option and give no message, as
+ * FreeBSD's TCP does.
+ */
+#define SO_TIMESTAMP	0x0400
 
 /*
  * Immutable connection-time peer identity for connected AF_UNIX streams.
@@ -119,6 +129,7 @@ _Static_assert(sizeof(gid_t) == sizeof(uint32_t) && (gid_t)-1 > (gid_t)0,
 #define MSG_CMSG_CLOFORK	0x10000
 
 #define SCM_RIGHTS	0x0001
+#define SCM_TIMESTAMP	0x0002
 
 #define KERN_MSG_FD_MAX	8U
 
@@ -137,6 +148,16 @@ struct sendmsg_args {
 	uint32_t reserved;
 };
 
+/*
+ * One recvmsg request and what it received.
+ *
+ * size is 0 or sizeof(struct recvmsg_args).  With 0 the structure ends at
+ * hop_limit, the form it had before the receive information after it
+ * existed, and the kernel reads and writes no further; with the size it
+ * also fills the fields from traffic_class on.  The fields that report
+ * what was received, and the ones of the information, are 0 when the call
+ * is made.
+ */
 struct recvmsg_args {
 	uapi_ptr_t data;
 	uint64_t data_capacity;
@@ -145,21 +166,41 @@ struct recvmsg_args {
 	uint32_t flags;
 	uapi_ptr_t descriptors;
 	uint32_t descriptor_capacity;
-	uint32_t reserved;
+	uint32_t size;
 	uint64_t data_length;
 	uint32_t name_length;
 	uint32_t descriptor_count;
 	uint32_t output_flags;
 	uint32_t hop_limit;
+	uint32_t traffic_class;
+	uint32_t reserved;
+	int64_t timestamp_seconds;
+	int64_t timestamp_nanoseconds;
 };
 
 /*
- * recvmsg_args.output_flags: hop_limit holds the hop limit the datagram
- * came with (an IPv6 socket that asked for it with IPV6_RECVHOPLIMIT,
- * ws177-p044); libc gives it as an IPV6_HOPLIMIT control message.
- * hop_limit is 0 when the call is made.
+ * The bits of recvmsg_args.output_flags that say which of the information
+ * the datagram came with is given (libc turns each into its control
+ * message, where the caller left room):
+ *
+ * - RECVMSG_HOP_LIMIT: hop_limit, the hop limit of an IPv6 datagram, for a
+ *   socket that asked with IPV6_RECVHOPLIMIT (an IPV6_HOPLIMIT message),
+ * - RECVMSG_TOS: traffic_class, the Type of Service byte of an IPv4
+ *   datagram, for a socket that asked with IP_RECVTOS (an IP_TOS message),
+ * - RECVMSG_TCLASS: traffic_class, the traffic class of an IPv6 datagram,
+ *   for a socket that asked with IPV6_RECVTCLASS (an IPV6_TCLASS message),
+ * - RECVMSG_TIMESTAMP: timestamp_seconds and timestamp_nanoseconds, when
+ *   the datagram was queued, for a socket with SO_TIMESTAMP (an
+ *   SCM_TIMESTAMP message).
+ *
+ * Only RECVMSG_HOP_LIMIT can be given to a request whose size is 0.
  */
 #define RECVMSG_HOP_LIMIT	0x80000000U
+#define RECVMSG_TOS	0x40000000U
+#define RECVMSG_TCLASS	0x20000000U
+#define RECVMSG_TIMESTAMP	0x10000000U
+#define RECVMSG_INFORMATION	(RECVMSG_HOP_LIMIT | RECVMSG_TOS | \
+				 RECVMSG_TCLASS | RECVMSG_TIMESTAMP)
 
 #define SHUT_RD	0
 #define SHUT_WR	1

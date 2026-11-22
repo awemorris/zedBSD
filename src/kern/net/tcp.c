@@ -474,10 +474,12 @@ enum tcp_refusal {
 };
 
 /*
- * Idle probing for SO_KEEPALIVE, in clock ticks.  The defaults are the
- * traditional ones: probe after two hours of silence, then every 75 seconds,
- * and give up after nine unanswered probes.  A build may shorten them so the
- * behaviour can be observed in a test that does not run for hours.
+ * The system's idle probing for SO_KEEPALIVE, which a new socket starts
+ * from (TCP_KEEPIDLE, TCP_KEEPINTVL and TCP_KEEPCNT change a socket's).
+ * The defaults are the traditional ones: probe after two hours of silence,
+ * then every 75 seconds, and give up after nine unanswered probes.  A build
+ * may shorten them so the behaviour can be observed in a test that does
+ * not run for hours.
  */
 #ifndef CONFIG_TCP_KEEPALIVE_IDLE_MS
 #define CONFIG_TCP_KEEPALIVE_IDLE_MS 7200000U
@@ -489,11 +491,6 @@ enum tcp_refusal {
 #define CONFIG_TCP_KEEPALIVE_COUNT 9U
 #endif
 
-#define TCP_KEEPALIVE_IDLE \
-	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS)
-#define TCP_KEEPALIVE_INTERVAL \
-	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS)
-#define TCP_KEEPALIVE_COUNT ((unsigned)CONFIG_TCP_KEEPALIVE_COUNT)
 #define TCP_LISTEN_BACKLOG_MAX 16U
 
 /*
@@ -676,6 +673,8 @@ static int tcp_setsockopt(struct socket *socket, int level, int option, const vo
 static int tcp_getsockopt(struct socket *socket, int level, int option, void *value, socklen_t *length);
 static void tcp_keepalive_changed(struct socket *socket);
 static void tcp_keepalive_arm_locked(struct tcp_endpoint *endpoint);
+static int tcp_keepalive_set(struct tcp_endpoint *endpoint, int option, int requested);
+static int tcp_keepalive_get(struct tcp_endpoint *endpoint, int option);
 static struct tcp_endpoint * tcp_lookup(const struct tcp_segment_addresses *addresses, uint16_t source_port, uint16_t destination_port);
 static int tcp_connection_matches(const struct tcp_endpoint *endpoint, const struct tcp_segment_addresses *addresses, uint16_t source_port, uint16_t destination_port);
 static int tcp_listener_matches(const struct tcp_endpoint *endpoint, const struct tcp_segment_addresses *addresses, uint16_t destination_port);
@@ -749,6 +748,16 @@ tcp_socket_create(
 	/* The system's congestion control, net.tcp.congestion. */
 	endpoint->tcp.cc = tcp_cc_default();
 
+	/*
+	 * The system's idle probing, which TCP_KEEPIDLE, TCP_KEEPINTVL and
+	 * TCP_KEEPCNT change for the socket.
+	 */
+	endpoint->tcp.keepalive_idle = kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS);
+	endpoint->tcp.keepalive_idle_ms = CONFIG_TCP_KEEPALIVE_IDLE_MS;
+	endpoint->tcp.keepalive_interval = kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS);
+	endpoint->tcp.keepalive_interval_ms = CONFIG_TCP_KEEPALIVE_INTERVAL_MS;
+	endpoint->tcp.keepalive_count = CONFIG_TCP_KEEPALIVE_COUNT;
+
 	/* Puts the socket in the registry of sockets. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
 
@@ -814,7 +823,7 @@ tcp_keepalive_expire_locked(
 	}
 
 	/* Declares the peer unreachable once every probe went unanswered. */
-	if (endpoint->tcp.keepalive_probes >= TCP_KEEPALIVE_COUNT) {
+	if (endpoint->tcp.keepalive_probes >= endpoint->tcp.keepalive_count) {
 		endpoint->tcp.keepalive_deadline = 0;
 		endpoint->tcp.keepalive_probes = 0;
 		endpoint->tcp.state = TCP_CLOSED;
@@ -825,7 +834,7 @@ tcp_keepalive_expire_locked(
 
 	/* Schedules the next probe and asks for this one. */
 	endpoint->tcp.keepalive_probes++;
-	endpoint->tcp.keepalive_deadline = now + TCP_KEEPALIVE_INTERVAL;
+	endpoint->tcp.keepalive_deadline = now + endpoint->tcp.keepalive_interval;
 	return 1;
 }
 
@@ -1781,7 +1790,7 @@ tcp_keepalive_arm_locked(
 	}
 
 	/* Restarts the idle period. */
-	endpoint->tcp.keepalive_deadline = sched_ticks() + TCP_KEEPALIVE_IDLE;
+	endpoint->tcp.keepalive_deadline = sched_ticks() + endpoint->tcp.keepalive_idle;
 }
 
 /*
@@ -1805,6 +1814,79 @@ tcp_keepalive_changed(
 }
 
 /*
+ * Sets one of the idle probing options of a connection.
+ *
+ * TCP_KEEPIDLE and TCP_KEEPINTVL take seconds, TCP_KEEPCNT a number of
+ * probes, each from 1 to TCP_KEEP_MAX (EINVAL outside).  A new idle time
+ * restarts the idle period of a connection that probes; a new interval or
+ * count is used from the next probe on.
+ */
+static int
+tcp_keepalive_set(
+	struct tcp_endpoint *endpoint,
+	int option,
+	int requested)
+{
+	unsigned milliseconds;
+	unsigned long irq;
+
+	/* A value of at least 1 and no more than the most taken. */
+	if (requested < 1 || requested > TCP_KEEP_MAX)
+		return EINVAL;
+	milliseconds = (unsigned)requested * 1000U;
+
+	/* Has the connection probe by it. */
+	irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+	if (option == TCP_KEEPIDLE) {
+		endpoint->tcp.keepalive_idle_ms = milliseconds;
+		endpoint->tcp.keepalive_idle = kern_ms_to_ticks((uint64_t)milliseconds);
+		tcp_keepalive_arm_locked(endpoint);
+	} else if (option == TCP_KEEPINTVL) {
+		endpoint->tcp.keepalive_interval_ms = milliseconds;
+		endpoint->tcp.keepalive_interval = kern_ms_to_ticks((uint64_t)milliseconds);
+	} else {
+		endpoint->tcp.keepalive_count = (unsigned)requested;
+	}
+
+	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
+
+	/* The worker learns of a deadline the new idle time moved. */
+	net_worker_wakeup();
+
+	/* Succeeded: the connection probes by the new value. */
+	return 0;
+}
+
+/*
+ * Reports one of the idle probing options of a connection: the seconds of
+ * TCP_KEEPIDLE or TCP_KEEPINTVL (rounded down), or the count of TCP_KEEPCNT.
+ */
+static int
+tcp_keepalive_get(
+	struct tcp_endpoint *endpoint,
+	int option)
+{
+	unsigned long irq;
+	unsigned current;
+
+	/* Samples the value under the lock that guards its changes. */
+	irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+	if (option == TCP_KEEPIDLE)
+		current = endpoint->tcp.keepalive_idle_ms / 1000U;
+	else if (option == TCP_KEEPINTVL)
+		current = endpoint->tcp.keepalive_interval_ms / 1000U;
+	else
+		current = endpoint->tcp.keepalive_count;
+
+	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
+
+	/* Reports the value. */
+	return (int)current;
+}
+
+/*
  * Sets one option at the TCP protocol level.
  */
 static int
@@ -1822,7 +1904,7 @@ tcp_setsockopt(
 	int error;
 	int wake;
 
-	/* IPv6's options (IPV6_V6ONLY) are the internet socket layer's (ws130-p003). */
+	/* IPv6's options (IPV6_V6ONLY, IPV6_TCLASS) are the internet socket layer's (ws130-p003). */
 	if (socket != NULL && level == IPPROTO_IPV6) {
 		endpoint = tcp_endpoint(socket);
 		error = inet_socket_setsockopt(&endpoint->tcp.inet, level, option, value, length);
@@ -1831,9 +1913,36 @@ tcp_setsockopt(
 		return 0;
 	}
 
+	/* IPv4's (IP_TOS) are too; one it does not know is no option of this socket's. */
+	if (socket != NULL && level == IPPROTO_IP) {
+		endpoint = tcp_endpoint(socket);
+		error = inet_socket_setsockopt(&endpoint->tcp.inet, level, option, value, length);
+		if (error == EOPNOTSUPP)
+			return ENOPROTOOPT;
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* Only this protocol's own level is handled here. */
 	if (socket == NULL || level != IPPROTO_TCP)
 		return ENOPROTOOPT;
+
+	/* The idle probing of the connection. */
+	if (option == TCP_KEEPIDLE ||
+	    option == TCP_KEEPINTVL ||
+	    option == TCP_KEEPCNT) {
+		if (value == NULL || length != sizeof(enabled))
+			return EINVAL;
+		kern_memcpy(&enabled, value, sizeof(enabled));
+		endpoint = tcp_endpoint(socket);
+		error = tcp_keepalive_set(endpoint, option, enabled);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the probing follows the new value. */
+		return 0;
+	}
 
 	/*
 	 * TCP_CONGESTION: a name, which takes effect at once in any state;
@@ -1942,7 +2051,7 @@ tcp_getsockopt(
 	int enabled;
 	int error;
 
-	/* IPv6's options (IPV6_V6ONLY) are the internet socket layer's (ws130-p003). */
+	/* IPv6's options (IPV6_V6ONLY, IPV6_TCLASS) are the internet socket layer's (ws130-p003). */
 	if (socket != NULL && level == IPPROTO_IPV6) {
 		endpoint = tcp_endpoint(socket);
 		error = inet_socket_getsockopt(&endpoint->tcp.inet, level, option, value, length);
@@ -1951,9 +2060,35 @@ tcp_getsockopt(
 		return 0;
 	}
 
+	/* IPv4's (IP_TOS) are too; one it does not know is no option of this socket's. */
+	if (socket != NULL && level == IPPROTO_IP) {
+		endpoint = tcp_endpoint(socket);
+		error = inet_socket_getsockopt(&endpoint->tcp.inet, level, option, value, length);
+		if (error == EOPNOTSUPP)
+			return ENOPROTOOPT;
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* Only this protocol's own level is handled here. */
 	if (socket == NULL || level != IPPROTO_TCP)
 		return ENOPROTOOPT;
+
+	/* The idle probing of the connection, each an int. */
+	if (option == TCP_KEEPIDLE ||
+	    option == TCP_KEEPINTVL ||
+	    option == TCP_KEEPCNT) {
+		if (value == NULL || length == NULL || *length < sizeof(enabled))
+			return EINVAL;
+		endpoint = tcp_endpoint(socket);
+		enabled = tcp_keepalive_get(endpoint, option);
+		kern_memcpy(value, &enabled, sizeof(enabled));
+		*length = sizeof(enabled);
+
+		/* Succeeded: the value is given. */
+		return 0;
+	}
 
 	/* TCP_CONGESTION: the name and its NUL, cut to the length given (as FreeBSD gives it). */
 	if (option == TCP_CONGESTION) {
@@ -3088,6 +3223,9 @@ tcp_output_segment(
 
 	/* A copy sent before may carry the marks of its last way out. */
 	packet->flags &= ~(PACKET_BUF_TX_CSUM_TCP | PACKET_BUF_TX_CSUM_IPV4);
+
+	/* The Type of Service byte or traffic class the socket's packets go with (IP_TOS, IPV6_TCLASS). */
+	packet->traffic_class = inet_socket_send_class(&endpoint->tcp.inet, ipv6);
 
 	/* Hands the segment to IPv6, with the checksum over its pseudo-header. */
 	if (ipv6) {
@@ -7542,7 +7680,7 @@ tcp_send_bytes(
 		if (endpoint->tcp.state == TCP_ESTABLISHED && socket->keepalive != 0) {
 			endpoint->tcp.keepalive_probes = 0;
 			endpoint->tcp.keepalive_deadline =
-			    sched_ticks() + TCP_KEEPALIVE_IDLE;
+			    sched_ticks() + endpoint->tcp.keepalive_idle;
 		}
 		spin_unlock_irqrestore(&socket->lock, irq);
 
@@ -8749,6 +8887,13 @@ tcp_passive_syn(
 	child->tcp.maxunack = listener->tcp.maxunack;
 	child->tcp.maxunack_seconds = listener->tcp.maxunack_seconds;
 	child->tcp.cc = listener->tcp.cc;
+	child->tcp.keepalive_idle = listener->tcp.keepalive_idle;
+	child->tcp.keepalive_idle_ms = listener->tcp.keepalive_idle_ms;
+	child->tcp.keepalive_interval = listener->tcp.keepalive_interval;
+	child->tcp.keepalive_interval_ms = listener->tcp.keepalive_interval_ms;
+	child->tcp.keepalive_count = listener->tcp.keepalive_count;
+	child->tcp.inet.tos = listener->tcp.inet.tos;
+	child->tcp.inet.tclass = listener->tcp.inet.tclass;
 	child->tcp.inet.socket.reuse_address =
 	    listener->tcp.inet.socket.reuse_address;
 	child->tcp.inet.bind_reuse_address =
@@ -9283,7 +9428,7 @@ tcp_segment_input(
 	    endpoint->tcp.inet.socket.keepalive != 0) {
 		endpoint->tcp.keepalive_probes = 0;
 		endpoint->tcp.keepalive_deadline =
-		    sched_ticks() + TCP_KEEPALIVE_IDLE;
+		    sched_ticks() + endpoint->tcp.keepalive_idle;
 	}
 
 	/* The segment of a connection past its handshake is counted for net.tcpstats. */

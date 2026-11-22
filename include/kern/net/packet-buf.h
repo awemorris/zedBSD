@@ -146,6 +146,24 @@ struct packet_buf {
 	 */
 	uint8_t hop_limit;
 	uint8_t hop_limit_known;
+	/*
+	 * The Type of Service byte (IPv4) or traffic class (IPv6) the IP
+	 * header of an outgoing packet is given: what the sending socket's
+	 * IP_TOS or IPV6_TCLASS asks for, 0 for every other packet.
+	 */
+	uint8_t traffic_class;
+	/*
+	 * What a datagram queued for a socket came with, kept on the packet
+	 * queued for a socket that asked for it: the Type of Service byte or
+	 * traffic class (receive_class_version says of which IP version, 4 or
+	 * 6; 0 when not kept), and the realtime clock when it was queued
+	 * (receive_time_known says it was kept).
+	 */
+	uint8_t receive_class;
+	uint8_t receive_class_version;
+	uint8_t receive_time_known;
+	int64_t receive_seconds;
+	int32_t receive_nanoseconds;
 	void *control;
 	void (
 		*control_release)(
