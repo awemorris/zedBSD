@@ -114,6 +114,9 @@
 #define ADMIN_LINES		4U
 #define ADMIN_LINE_STEP		22
 
+/* The key codes whose presses the dialog keeps until their releases (the evdev codes up to KEY_MAX). */
+#define ADMIN_KEYS		768U
+
 /* The choices: Allow and Cancel, a place on the card on neither, and a place outside it. */
 #define ADMIN_ALLOW		0
 #define ADMIN_CANCEL		1
@@ -202,7 +205,10 @@ struct admin_view {
  * request under way (stage ADMIN_IDLE for none) and its dialog, the
  * number the next request to the manager gets (it skips 0, which numbers
  * no request), the timer that wakes the loop when a stage's wait ends,
- * and the client the person last said no to and when (0 for none).
+ * the client the person last said no to and when (0 for none), and the
+ * keys pressed while the dialog showed, a bit a key code: their releases
+ * are the dialog's too, even once it closed (the window that gets the
+ * keyboard back never heard their presses).
  */
 static struct {
 	struct kwl_server *server;
@@ -212,6 +218,7 @@ static struct {
 	struct kwl_timer timer;
 	uint64_t refused_client;
 	uint64_t refused_ms;
+	uint8_t keys_held[ADMIN_KEYS / 8U];
 } admin_state;
 
 static int admin_decode(const unsigned char *bytes, size_t size, size_t *offset, char *text, size_t room);
@@ -694,7 +701,8 @@ kwl_admin_ask_button(
 /*
  * Takes a key while the dialog shows: once it is armed, Esc cancels, Tab
  * and the arrows move the keys' choice, Enter and Space take it; a
- * release, a key repeating and a key before it is armed do nothing.
+ * release, a key repeating and a key before it is armed do nothing.  The
+ * release of a key pressed while it showed is its too, after it closed.
  * Returns 1 when the key was the dialog's (every one while it shows and
  * the screen is not locked).
  */
@@ -704,11 +712,29 @@ kwl_admin_ask_key(
 	uint32_t key,
 	uint32_t state)
 {
+	uint8_t bit;
+	int held;
 	int armed;
+
+	/* Whether the dialog had the press of the key (only the codes it keeps). */
+	bit = (uint8_t)(1U << (key % 8U));
+	held = 0;
+	if (key < ADMIN_KEYS && (admin_state.keys_held[key / 8U] & bit) != 0U)
+		held = 1;
+
+	/* Its release goes nowhere else. */
+	if (state == 0U && held) {
+		admin_state.keys_held[key / 8U] &= (uint8_t)~bit;
+		return 1;
+	}
 
 	/* Only while it shows; the lock screen has the keys once the screen is locked. */
 	if (!admin_state.view.open || server->locked)
 		return 0;
+
+	/* A key pressed now is the dialog's until it is let go. */
+	if (state == 1U && key < ADMIN_KEYS)
+		admin_state.keys_held[key / 8U] |= bit;
 
 	/* Only a key pressed once the dialog is armed acts (one held from before it, or repeating, does not). */
 	if (state != 1U)
