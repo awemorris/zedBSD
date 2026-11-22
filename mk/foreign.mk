@@ -21,3 +21,7 @@ keiland-freebsd-install:
 
 browser-win32:
 	$(MAKE) -f apps/browser-win32/Makefile
+
+terminal-win32:
+	cmake -S apps/terminal-win32 -B build/mikuterm-x64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=apps/terminal-win32/cmake/llvm-mingw-x86_64.cmake -DLLVM_MINGW=$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64
+	cmake --build build/mikuterm-x64 --target zip -j4
