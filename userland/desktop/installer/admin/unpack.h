@@ -37,5 +37,6 @@ typedef int (*unpack_entry_done)(void *context, const char *path, enum unpack_ki
 int unpack_read_whole(int fd, uint64_t expected_bytes, const uint8_t expected[32], uint8_t **data, size_t *length);
 int unpack_gunzip(const uint8_t *data, size_t length, uint64_t limit, uint8_t **output, size_t *output_length);
 int unpack_tar(int root, const uint8_t *archive, size_t length, const struct installer_index *index, unsigned unit, unpack_entry_done done, void *context);
+int unpack_tar_member(const uint8_t *archive, size_t length, const char *path, const uint8_t **data, uint64_t *bytes);
 
 #endif

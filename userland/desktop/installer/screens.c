@@ -1772,8 +1772,6 @@ screen_user(
 {
 	const struct kl_theme *theme;
 	struct kl_rect rect;
-	unsigned flags;
-	int desktop;
 	int changed;
 	int y;
 
@@ -1787,29 +1785,19 @@ screen_user(
 	y = screen_field_row(app, 5U, x, y, width, kl_tr("Root's password again"), &app->root_password_again, kl_tr("The same again"), "root-password-again");
 	y = screen_field_row(app, 6U, x, y, width, kl_tr("Computer's name"), &app->hostname, "zedbsd", "hostname");
 
-	/* The automatic login, only with the desktop. */
-	desktop = inst_catalog_has(&app->catalog, "desktop");
+	/* The automatic login: the installed system always starts at the desktop's login. */
 	(void)kl_row(&app->style, x - 20, y, width + 20, kl_tr("Log in automatically"), "", 1);
 	rect.x = x + 220;
 	rect.y = y + (40 - theme->switch_height) / 2;
 	rect.width = theme->switch_width;
 	rect.height = theme->switch_height;
-	flags = 0U;
-	if (!desktop) {
-		flags = KL_BUTTON_DISABLED;
-		app->autologin = 0;
-	}
 
 	/* The switch, and a redraw when it was turned. */
-	changed = kl_switch(app->ui, &app->style, SCREEN_ID_AUTOLOGIN, rect.x, rect.y, &app->autologin, flags);
+	changed = kl_switch(app->ui, &app->style, SCREEN_ID_AUTOLOGIN, rect.x, rect.y, &app->autologin, 0U);
 	if (changed)
 		app->dirty = 1;
-	inst_control(app, "autologin", &rect, desktop);
+	inst_control(app, "autologin", &rect, 1);
 	y += 40;
-	if (!desktop) {
-		y = screen_lines(app, x, y + 4, width, kl_tr("Without the desktop the system starts at the console's login."), SCREEN_TEXT_SMALL, 0,
-				 theme->text_secondary, 2);
-	}
 
 	/* The user's rights. */
 	y = screen_lines(app, x, y + 8, width, kl_tr("The user is an administrator of the installed system (the wheel group)."), SCREEN_TEXT_SMALL, 0,

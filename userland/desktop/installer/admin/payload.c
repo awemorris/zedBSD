@@ -8,6 +8,9 @@
 /*
  * The system the helper installs (payload.h): its download, the check of
  * the whole against the release's SHA-256, and the reading of its members.
+ * Once the whole is checked, the licences the index names are taken out
+ * of their units (each checked against the index's SHA-256 before it is
+ * inflated) for the installer.
  *
  * The download is fetch's (/bin/fetch, https with the system's roots and
  * the settings' CA file), run as a child with an empty environment, its
@@ -20,6 +23,7 @@
  */
 
 #include "payload.h"
+#include "unpack.h"
 
 #include "userland/base/common/sha256.h"
 
@@ -27,6 +31,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -67,6 +72,19 @@
 /* What a download is told to stop by: a word on its input, or the input's end. */
 #define PAYLOAD_CANCELED	(-1)
 
+/* The room a unit's inflated archive may take beyond its files: a block of header and padding each, and the end. */
+#define PAYLOAD_ENTRY_ROOM	1024U
+#define PAYLOAD_ARCHIVE_SLACK	(1024ULL * 1024ULL)
+
+/* The most fields of an index record the licences' reading splits. */
+#define PAYLOAD_RECORD_FIELDS	5U
+
+/* One licence the index names: the unit it is in, and its path in the unit (without the leading slash). */
+struct payload_license {
+	unsigned unit;
+	char path[PAYLOAD_NAME_MAX];
+};
+
 static int payload_file(const char *path, int *fd, uint64_t *size);
 static int payload_header(const uint8_t *header, char *name, uint64_t *bytes, int *regular);
 static int payload_octal(const uint8_t *field, size_t size, uint64_t *value);
@@ -79,6 +97,11 @@ static int payload_input(int input);
 static int payload_describe(FILE *output, int input, const struct release_config *config, char **text, size_t *length);
 static int payload_fetch(FILE *output, int input, const struct release_config *config, const struct release_asset *asset);
 static int payload_keep(void);
+static int payload_licenses(const struct payload *payload, const struct installer_index *index, const char *text);
+static int payload_license_records(const struct installer_index *index, const char *text, struct payload_license *license, unsigned *count);
+static int payload_license_unit(const struct payload *payload, const struct installer_index *index, unsigned unit, const struct payload_license *license, unsigned count, int directory);
+static int payload_license_write(int directory, unsigned number, const uint8_t *data, uint64_t bytes);
+static void payload_forget_licenses(void);
 static void payload_fail(FILE *output, const char *step, int error, const char *text);
 static uint64_t payload_seconds(void);
 
@@ -375,6 +398,7 @@ payload_download(
 	(void)unlink(PAYLOAD_PARTIAL);
 	(void)unlink(PAYLOAD_INDEX);
 	(void)unlink(PAYLOAD_INDEX_NEW);
+	payload_forget_licenses();
 
 	/* The settings. */
 	fprintf(output, "STEP 1 3 release\n");
@@ -417,6 +441,7 @@ payload_download(
 	if (error != 0) {
 		(void)unlink(PAYLOAD_TARBALL);
 		(void)unlink(PAYLOAD_INDEX_NEW);
+		payload_forget_licenses();
 		payload_fail(output, "check", error, "the downloaded system is not an installer's system");
 		return error;
 	}
@@ -1134,6 +1159,13 @@ payload_keep(void)
 		return error;
 	}
 
+	/* The licences it names, for the installer to show. */
+	error = payload_licenses(&payload, &index, text);
+	if (error != 0) {
+		free(text);
+		return error;
+	}
+
 	/* The installer's copy, written whole under a new name, then renamed. */
 	length = strlen(text);
 	fd = open(PAYLOAD_INDEX_NEW, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
@@ -1158,6 +1190,280 @@ payload_keep(void)
 
 	/* Succeeded: the system is kept. */
 	return 0;
+}
+
+/*
+ * Takes the licences the index names out of their units into the
+ * licences' directory, a file each, named by the record's place.  A
+ * licence's path is absolute in the index and must be plain; its unit's
+ * entry must be a regular file.  Returns 0, EFBIG for more licences than
+ * the installer shows, EINVAL for a record or a path that is not one,
+ * ENOENT for a unit or an entry the system has not, or the error of
+ * reading or writing.
+ */
+static int
+payload_licenses(
+	const struct payload *payload,
+	const struct installer_index *index,
+	const char *text)
+{
+	static struct payload_license license[PAYLOAD_LICENSES_MAX];
+	unsigned count;
+	unsigned unit;
+	unsigned i;
+	int directory;
+	int wanted;
+	int made;
+	int error;
+
+	/* The records, checked before anything is read. */
+	error = payload_license_records(index, text, license, &count);
+	if (error != 0)
+		return error;
+
+	/* The directory, root's alone, never through a link. */
+	made = mkdir(PAYLOAD_LICENSES, 0700);
+	if (made != 0 && errno != EEXIST)
+		return errno;
+	directory = open(PAYLOAD_LICENSES, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory < 0)
+		return errno;
+
+	/* Each unit that has a licence, inflated once. */
+	error = 0;
+	for (unit = 0; unit < index->unit_count && error == 0; unit++) {
+		wanted = 0;
+		for (i = 0; i < count; i++) {
+			if (license[i].unit == unit)
+				wanted = 1;
+		}
+		if (wanted)
+			error = payload_license_unit(payload, index, unit, license, count, directory);
+	}
+	close(directory);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the licences are there. */
+	return 0;
+}
+
+/*
+ * Reads the index's licence records (license UNIT PACKAGE PATH): the
+ * unit's place and the path without its leading slash.  Returns 0 with
+ * the count, EFBIG for more than the most, or EINVAL for a record with
+ * other fields, an unknown unit or a path that is not absolute.
+ */
+static int
+payload_license_records(
+	const struct installer_index *index,
+	const char *text,
+	struct payload_license *license,
+	unsigned *count)
+{
+	const char *field[PAYLOAD_RECORD_FIELDS];
+	size_t field_length[PAYLOAD_RECORD_FIELDS];
+	char unit_name[INDEX_NAME_MAX];
+	const char *line;
+	const char *end;
+	const char *at;
+	const char *tab;
+	unsigned fields;
+	unsigned slot;
+	int differs;
+	int error;
+
+	/* Each line of the index. */
+	*count = 0;
+	line = text;
+	while (*line != '\0') {
+		end = strchr(line, '\n');
+		if (end == NULL)
+			end = line + strlen(line);
+
+		/* Its fields, apart by a TAB. */
+		fields = 0;
+		at = line;
+		while (fields < PAYLOAD_RECORD_FIELDS) {
+			tab = memchr(at, '\t', (size_t)(end - at));
+			if (tab == NULL)
+				tab = end;
+			field[fields] = at;
+			field_length[fields] = (size_t)(tab - at);
+			fields++;
+			if (tab == end)
+				break;
+			at = tab + 1;
+		}
+
+		/* A licence record, of its four fields. */
+		differs = 1;
+		if (field_length[0] == 7U)
+			differs = memcmp(field[0], "license", 7U);
+		if (differs == 0) {
+			if (fields != 4U)
+				return EINVAL;
+			if (*count == PAYLOAD_LICENSES_MAX)
+				return EFBIG;
+
+			/* Its unit, which the index must have. */
+			if (field_length[1] == 0U || field_length[1] >= sizeof(unit_name))
+				return EINVAL;
+			memcpy(unit_name, field[1], field_length[1]);
+			unit_name[field_length[1]] = '\0';
+			error = index_find_unit(index, unit_name, &slot);
+			if (error != 0)
+				return EINVAL;
+
+			/* Its path: absolute in the index, kept without the slash (unpack_tar_member checks the rest). */
+			if (field_length[3] < 2U || field[3][0] != '/' || field_length[3] > sizeof(license[*count].path))
+				return EINVAL;
+			memcpy(license[*count].path, field[3] + 1, field_length[3] - 1U);
+			license[*count].path[field_length[3] - 1U] = '\0';
+			license[*count].unit = slot;
+			(*count)++;
+		}
+
+		/* The next line. */
+		if (*end == '\0')
+			break;
+		line = end + 1;
+	}
+
+	/* Succeeded: the records are read. */
+	return 0;
+}
+
+/*
+ * Reads one unit whole from the tarball, checks it against the index's
+ * SHA-256, inflates it and writes each licence of it.  Returns 0 or the
+ * error of one of those.
+ */
+static int
+payload_license_unit(
+	const struct payload *payload,
+	const struct installer_index *index,
+	unsigned unit,
+	const struct payload_license *license,
+	unsigned count,
+	int directory)
+{
+	const struct index_unit *record;
+	char name[PAYLOAD_NAME_MAX];
+	const uint8_t *member;
+	uint8_t *data;
+	uint8_t *archive;
+	uint64_t limit;
+	uint64_t bytes;
+	size_t length;
+	size_t archive_length;
+	unsigned i;
+	int fd;
+	int error;
+
+	/* The unit's tarball, read whole and checked. */
+	record = &index->unit[unit];
+	(void)snprintf(name, sizeof(name), "units/%s.tar.gz", record->name);
+	error = payload_open(payload, name, record->tar_bytes, &fd);
+	if (error != 0)
+		return error;
+	error = unpack_read_whole(fd, record->tar_bytes, record->sha256, &data, &length);
+	close(fd);
+	if (error != 0)
+		return error;
+
+	/* Inflated: no more than its files, a header and padding each, and the end. */
+	limit = record->bytes + record->entries * PAYLOAD_ENTRY_ROOM + PAYLOAD_ARCHIVE_SLACK;
+	error = unpack_gunzip(data, length, limit, &archive, &archive_length);
+	free(data);
+	if (error != 0)
+		return error;
+
+	/* Each licence of the unit, a regular file of it. */
+	for (i = 0; i < count && error == 0; i++) {
+		if (license[i].unit != unit)
+			continue;
+		error = unpack_tar_member(archive, archive_length, license[i].path, &member, &bytes);
+		if (error == 0)
+			error = payload_license_write(directory, i, member, bytes);
+	}
+	free(archive);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the unit's licences are written. */
+	return 0;
+}
+
+/* Writes one licence under a new name, then renames it to its number. */
+static int
+payload_license_write(
+	int directory,
+	unsigned number,
+	const uint8_t *data,
+	uint64_t bytes)
+{
+	char name[16];
+	char temporary[24];
+	ssize_t written;
+	int fd;
+	int renamed;
+	int error;
+
+	/* Its names, and nothing of an earlier one. */
+	(void)snprintf(name, sizeof(name), "%u", number);
+	(void)snprintf(temporary, sizeof(temporary), "%u.new", number);
+	(void)unlinkat(directory, temporary, 0);
+
+	/* Its bytes, whole. */
+	fd = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return errno;
+	error = 0;
+	written = 0;
+	if (bytes != 0U)
+		written = write(fd, data, (size_t)bytes);
+	if (written < 0 || (uint64_t)written != bytes)
+		error = EIO;
+	close(fd);
+	if (error != 0) {
+		(void)unlinkat(directory, temporary, 0);
+		return error;
+	}
+
+	/* In its place. */
+	renamed = renameat(directory, temporary, directory, name);
+	if (renamed != 0) {
+		error = errno;
+		(void)unlinkat(directory, temporary, 0);
+		return error;
+	}
+
+	/* Succeeded: the licence is there. */
+	return 0;
+}
+
+/* Removes the licences of an earlier download (the directory stays). */
+static void
+payload_forget_licenses(void)
+{
+	char name[24];
+	unsigned i;
+	int directory;
+
+	/* The directory, when there is one. */
+	directory = open(PAYLOAD_LICENSES, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory < 0)
+		return;
+
+	/* Each licence and its unfinished copy. */
+	for (i = 0; i < PAYLOAD_LICENSES_MAX; i++) {
+		(void)snprintf(name, sizeof(name), "%u", i);
+		(void)unlinkat(directory, name, 0);
+		(void)snprintf(name, sizeof(name), "%u.new", i);
+		(void)unlinkat(directory, name, 0);
+	}
+	close(directory);
 }
 
 /* Reports a failure at a step: its errno value and a short text. */

@@ -32,10 +32,14 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-/* The helper, the index of the system it downloaded, klsudo and the files of the running system. */
+/* The helper, the index and the licences of the system it downloaded, klsudo and the files of the running system. */
 #define INST_HELPER		"/usr/libexec/installer-helper"
 #ifndef INST_INDEX
 #define INST_INDEX		"/run/installer-helper/index"
+#endif
+/* The licences the index names, which the helper took out of the system downloaded: a file each, by its place. */
+#ifndef INST_LICENSES
+#define INST_LICENSES		"/run/installer-helper/licenses"
 #endif
 #define INST_KLSUDO		"/bin/klsudo"
 #define INST_ACTION		"installer"

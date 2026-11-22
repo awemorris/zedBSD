@@ -216,14 +216,17 @@ inst_catalog_has(
 }
 
 /*
- * Reads a licence of the firmware for the viewer, from its first page.
- * Returns 0 or an errno value (the viewer says so).
+ * Reads a licence of the firmware for the viewer, from its first page:
+ * the copy the helper took out of the system downloaded, not the running
+ * system's file of that path.  Returns 0 or an errno value (the viewer
+ * says so).
  */
 int
 inst_license_load(
 	struct inst_app *app,
 	unsigned index)
 {
+	char path[64];
 	char *text;
 	size_t length;
 	int error;
@@ -233,7 +236,8 @@ inst_license_load(
 		return EINVAL;
 
 	/* Its text, in place of the one shown. */
-	error = catalog_file(app->catalog.license[index].path, CATALOG_LICENSE_MAX, &text, &length);
+	(void)snprintf(path, sizeof(path), "%s/%u", INST_LICENSES, index);
+	error = catalog_file(path, CATALOG_LICENSE_MAX, &text, &length);
 	if (error != 0)
 		return error;
 	inst_license_close(app);

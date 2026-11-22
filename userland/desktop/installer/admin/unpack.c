@@ -425,6 +425,103 @@ unpack_tar(
 	return 0;
 }
 
+/*
+ * Finds a regular file of a ustar archive by its path, relative and
+ * plain, and gives where its bytes lie in the archive.  Every header up
+ * to it is checked as unpack_tar checks it.  Returns 0 with the bytes,
+ * EINVAL for a path that is not plain, an archive that is not one, or an
+ * entry of the path that is not a regular file (a link, a directory),
+ * or ENOENT when the archive has no entry of the path.
+ */
+int
+unpack_tar_member(
+	const uint8_t *archive,
+	size_t length,
+	const char *path,
+	const uint8_t **data,
+	uint64_t *bytes)
+{
+	char entry[UNPACK_PATH_MAX];
+	const uint8_t *header;
+	uint64_t size;
+	uint64_t mode;
+	size_t offset;
+	size_t padded;
+	int regular;
+	int zero;
+	int difference;
+	int error;
+
+	/* The path asked for, relative and plain. */
+	error = unpack_path_valid(path);
+	if (error != 0)
+		return error;
+
+	/* Walks the entries until the two zero blocks that end the archive. */
+	offset = 0;
+	for (;;) {
+		if (length - offset < UNPACK_BLOCK)
+			return EINVAL;
+		header = archive + offset;
+		zero = unpack_zero_block(header);
+		if (zero)
+			break;
+
+		/* The header's own checksum and the POSIX magic. */
+		error = unpack_header_checksum(header);
+		if (error != 0)
+			return error;
+		difference = memcmp(header + UNPACK_MAGIC, "ustar\0" "00", 8U);
+		if (difference != 0)
+			return EINVAL;
+
+		/* The kind: a regular file, a directory or a symbolic link, nothing else. */
+		regular = 0;
+		if (header[UNPACK_TYPE] == '0' || header[UNPACK_TYPE] == '\0')
+			regular = 1;
+		else if (header[UNPACK_TYPE] != '5' && header[UNPACK_TYPE] != '2')
+			return EINVAL;
+
+		/* The mode and the size, in octal. */
+		error = unpack_octal(header + UNPACK_MODE, UNPACK_MODE_SIZE, &mode);
+		if (error == 0)
+			error = unpack_octal(header + UNPACK_SIZE, UNPACK_SIZE_SIZE, &size);
+		if (error != 0 || mode > 07777U)
+			return EINVAL;
+		if (!regular && size != 0U)
+			return EINVAL;
+
+		/* The data has to be in the archive, padded to a whole block. */
+		offset += UNPACK_BLOCK;
+		if (size > length - offset)
+			return EINVAL;
+		padded = ((size_t)size + UNPACK_BLOCK - 1U) / UNPACK_BLOCK * UNPACK_BLOCK;
+		if (padded > length - offset)
+			return EINVAL;
+
+		/* The entry's path, which must be relative and plain. */
+		error = unpack_entry_path(header, entry, sizeof(entry));
+		if (error != 0)
+			return error;
+
+		/* The entry asked for: a regular file, or refused. */
+		difference = strcmp(entry, path);
+		if (difference == 0) {
+			if (!regular)
+				return EINVAL;
+			*data = archive + offset;
+			*bytes = size;
+			return 0;
+		}
+
+		/* The next entry. */
+		offset += padded;
+	}
+
+	/* The archive has no such entry. */
+	return ENOENT;
+}
+
 /* Reads an octal field: digits, then spaces or NULs. */
 static int
 unpack_octal(
@@ -663,6 +760,7 @@ unpack_make_file(
 	uint64_t written;
 	ssize_t result;
 	int fd;
+	int synced;
 	int changed;
 	int closed;
 	int error;
@@ -690,6 +788,17 @@ unpack_make_file(
 
 		/* Counts the bytes written. */
 		written += (uint64_t)result;
+	}
+
+	/*
+	 * A set-ID file's data goes to the disk first: the kernel clears the
+	 * set-ID bits when it writes a file's changed pages back, so bits
+	 * given before the write-back would be lost.
+	 */
+	if (error == 0 && (mode & 06000U) != 0U) {
+		synced = fsync(fd);
+		if (synced != 0)
+			error = errno;
 	}
 
 	/* The mode, set-ID bits included, once the data is in. */

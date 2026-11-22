@@ -151,7 +151,6 @@ struct session_installation {
 	unsigned entries_since_look;
 	uint64_t swapfile_bytes;
 	int swapfile_made;
-	int graphical;
 	int root_mounted;
 	int root_fd;
 	int esp_mounted;
@@ -2020,19 +2019,12 @@ session_install_check(
 	if (error != 0)
 		return error;
 
-	/* What they hold, and whether the desktop is among them (a graphical login, an automatic one). */
+	/* What they hold. */
 	for (i = 0; i < installation->order_count; i++) {
 		slot = installation->order[i];
 		installation->total_bytes += index->unit[slot].bytes;
 		installation->total_entries += index->unit[slot].entries;
-		same = strcmp(index->unit[slot].name, "desktop");
-		if (same == 0)
-			installation->graphical = 1;
 	}
-
-	/* Drops the autologin of a system with no graphical session. */
-	if (!installation->graphical)
-		request->install.autologin = 0;
 
 	/* The disk as the final page showed it. */
 	error = session_disk_load(&request->disk, &found);
@@ -2993,7 +2985,8 @@ session_install_esp(
 	cfg.swap_partuuid = NULL;
 	if (installation->has_swap_partition)
 		cfg.swap_partuuid = installation->swap.partuuid;
-	cfg.graphical = installation->graphical;
+	/* zedBSD is a client system: it always starts at the desktop's login. */
+	cfg.graphical = 1;
 	error = plan_cfg_text(&cfg, text, sizeof(text), &length);
 	if (error == 0)
 		error = session_write_new(esp, SESSION_CFG, (const uint8_t *)text, length, 0644);
