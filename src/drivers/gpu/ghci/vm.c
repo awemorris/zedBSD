@@ -8,9 +8,9 @@
 /*
  * The GHCI device's sessions and their GPU addresses: the session
  * numbers, CMD_SESSION_OPEN and CMD_SESSION_CLOSE, the mappings
- * CMD_VM_MAP and CMD_VM_UNMAP make, CP_HEAP's count, and what a recovery
- * does to the sessions: the culprit of a fault, the sessions that died
- * and the replay of the rest.
+ * CMD_VM_MAP and CMD_VM_UNMAP make, the memory their page tables take, and what a
+ * recovery does to the sessions: the culprit of a fault, the sessions
+ * that died and the replay of the rest.
  *
  * Numbers.  Session 0 is the driver's and always open; an owner takes
  * one of 1 to 15 and gives it back only once the session is retired (its
@@ -18,22 +18,24 @@
  *
  * Addresses.  The driver uses the low 4 GiB of GPU addresses (all of a
  * narrower VA), cut into 2 MiB chunks.  A chunk belongs to one session at
- * a time, so that no two sessions' mappings ever meet, even in the page
- * table every session shares on a GPU without PROT, and a level 0 table
- * of the walker serves one session only.  A session's mappings lie in
- * arenas, runs of the chunks it owns; an arena goes back when its last
- * mapping's unmap has passed.  The first and the last chunk of that range
- * are never used.
+ * a time, so that no two sessions' mappings ever meet.  A session's
+ * mappings lie in arenas, runs of the chunks it owns; an arena goes back
+ * when its last mapping's unmap has passed.  The first and the last
+ * chunk of that range are never used.
  *
- * CP_HEAP.  The command processor takes its page tables from CP_HEAP on
- * its own; the driver cannot see what it took and counts the bound
- * instead: each open session's root and upper tables, and a 4 KiB level
- * 0 table for each chunk a session (with PROT, which gives each session
- * its own table) or any session (without, one shared table) was given.
- * A request past the bound fails with ENOMEM before it reaches the GPU,
- * so that the processor never runs out (MMU_OOM).  A close gives its
- * session's tables back once its fence passed; the shared level 0 tables
- * stay until a reset, which empties CP_HEAP and is counted again.
+ * Page tables.  The processor builds and walks them itself, in memory
+ * the driver gives it: local memory on a discrete GPU, host memory below
+ * HOST_LIMIT otherwise, never the firmware's reservation.  The sizes it
+ * needs come from CMD_VM_QUERY_PT_MEM at the start; session 0's initial
+ * table goes with CMD_MMU_ENABLE, a client session's with
+ * CMD_SESSION_OPEN.  A CMD_VM_MAP first offers no memory for
+ * intermediate tables; one that needs some writes NEED_PT_MEM in its
+ * completion record with the bytes and the alignment, and is placed
+ * again with them.  The map waits for its record, so that no work uses a
+ * mapping the processor did not make.  The processor gives tables back
+ * in CMD_VM_UNMAP's record; everything a session had goes back once its
+ * close has passed, and everything once a reset ended (the replay offers
+ * memory again).
  *
  * A GPU without a page-table walker has neither sessions nor mappings in
  * the GPU: every session runs as session 0, a mapping's address is its
@@ -63,18 +65,32 @@
 /* The first chunk the driver hands out; the last one is end_chunk's. */
 #define FIRST_CHUNK			1U
 
+/* How long a map waits for its record before it looks again (the hang check ends a wait that never ends). */
+#define MAP_WAIT_MS			1000U
+
+/* The tries of one map at memory for its intermediate tables. */
+#define MAP_TRIES			4U
+
+/* The replay's passes over the maps that asked for memory for their tables. */
+#define REPLAY_PASSES			4U
+
+/* What a record reads before the processor writes it: no status the processor writes. */
+#define RECORD_UNWRITTEN		0xFFFFFFFFU
+
 /* The access every mapping of host memory has; the GPU keeps it coherent with the processor. */
 #define HOST_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE | GHCI_VM_FLAG_COHERENT)
 
 /*
- * The access every mapping of the GPU's local memory has: its address is
- * a local one (VM_FLAG_LOCAL), and the processor's caches have no part
- * in it.
+ * The access every mapping of the GPU's local memory has: the processor's
+ * caches have no part in it.  Its address is the local one, in
+ * [MEM_VRAM_BASE, MEM_VRAM_BASE + MEM_VRAM_SIZE), which alone makes it
+ * local memory.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 11.2,
- * VM_FLAG_LOCAL; section 11.3, phys of a mapping with VM_FLAG_LOCAL).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_VM_MAP flags [4:0], [31:5] reserved, the target memory decided by
+ * phys alone; section 11.3, the address routing).
  */
-#define LOCAL_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE | GHCI_VM_FLAG_LOCAL)
+#define LOCAL_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE)
 
 /*
  * One run of chunks a session owns and the GPU addresses its mappings
@@ -92,10 +108,16 @@ struct ghci_arena {
 static enum ghci_gate enter_ring(struct ghci_device *device);
 static int has_walker(const struct ghci_device *device);
 static uint32_t free_slot(const struct ghci_device *device);
-static uint8_t *marks_of(struct ghci_device *device, struct ghci_vm *vm);
-static uint64_t marks_need(struct ghci_device *device, struct ghci_vm *vm, uint32_t first, uint32_t chunks);
-static void marks_take(struct ghci_device *device, struct ghci_vm *vm, uint32_t first, uint32_t chunks);
-static unsigned marks_count(const uint8_t *marks);
+static int tables_take(struct ghci_device *device, uint64_t bytes, uint32_t align, int locked, struct ghci_tables **result);
+static void tables_give(struct ghci_device *device, struct ghci_tables *tables);
+static void tables_give_all(struct ghci_device *device, struct ghci_tables **list);
+static void tables_keep(struct ghci_device *device, struct ghci_vm *vm, struct ghci_tables *tables, uint32_t used);
+static void tables_return(struct ghci_device *device, struct ghci_vm *vm, const struct ghci_mapping *mapping);
+static uint32_t record_word(const struct ghci_allocation *record, uint32_t offset);
+static void record_clear(struct ghci_allocation *record);
+static int map_wait(struct ghci_device *device, const struct ghci_ticket *ticket);
+static int unmap_settle(struct ghci_device *device, struct ghci_vm *vm, struct ghci_mapping *mapping);
+static void memory_put(struct ghci_device *device, struct ghci_allocation *allocation);
 static int va_take(struct ghci_device *device, struct ghci_vm *vm, uint64_t bytes, uint64_t *va, struct ghci_arena **result);
 static void va_give(struct ghci_device *device, struct ghci_vm *vm, struct ghci_arena *arena, uint64_t va);
 static int run_find(const struct ghci_device *device, uint32_t chunks, uint32_t *first);
@@ -103,18 +125,17 @@ static uint32_t end_chunk(const struct ghci_device *device);
 static void mapping_drop(struct ghci_device *device, struct ghci_mapping *mapping);
 static void vm_retire(struct ghci_device *device, struct ghci_vm *vm);
 static void vm_fault(struct ghci_device *device, struct ghci_vm *vm);
-static int place_map(struct ghci_device *device, struct ghci_vm *vm, const struct ghci_mapping *mapping);
+static int place_map(struct ghci_device *device, struct ghci_vm *vm, const struct ghci_mapping *mapping, const struct ghci_tables *tables);
 static void current_ticket(struct ghci_device *device, struct ghci_ticket *ticket);
 
 /*
- * Sets session 0's record and what CP_HEAP may hold, at the start: the
- * bound less the specification's spare, with session 0's root counted.
+ * Sets session 0's record at the start; its initial page table comes
+ * with the MMU (ghci_vm_mmu_start()).
  */
 void
 ghci_vm_init(
 	struct ghci_device *device)
 {
-	uint64_t spare;
 	uint32_t slot;
 	int walker;
 
@@ -123,7 +144,6 @@ ghci_vm_init(
 	for (slot = 0U; slot < GHCI_SESSIONS; slot++)
 		device->vm[slot] = NULL;
 	kern_memset(device->chunk_owner, 0, sizeof(device->chunk_owner));
-	kern_memset(device->l0_marks, 0, sizeof(device->l0_marks));
 
 	/* Session 0, the driver's, is always open. */
 	kern_memset(&device->vm0, 0, sizeof(device->vm0));
@@ -131,20 +151,6 @@ ghci_vm_init(
 	device->vm0.flat = !walker;
 	device->vm0.state = GHCI_VM_OPEN;
 	device->vm[0] = &device->vm0;
-
-	/* A GPU without a walker builds no tables beyond session 0's root. */
-	device->heap_budget = 0U;
-	device->heap_used = 0U;
-	if (!walker)
-		return;
-
-	/* The bound, less the spare the specification's sizing keeps, and session 0's root. */
-	spare = GHCI_HEAP_SPARE_BYTES;
-	device->heap_budget = device->heap->bytes / 2U;
-	if (device->heap->bytes >= 2U * spare)
-		device->heap_budget = device->heap->bytes - spare;
-	device->heap_used = ghci_heap_session_bytes(device->caps.va_bits);
-	device->vm0.counted = 1;
 }
 
 /*
@@ -165,18 +171,21 @@ ghci_vm_fini(
 			vm_retire(device, vm);
 	}
 
-	/* Session 0's mappings go. */
+	/* Session 0's mappings and page-table memory go. */
 	while (device->vm0.mappings != NULL)
 		mapping_drop(device, device->vm0.mappings);
+	tables_give_all(device, &device->vm0.tables);
+	tables_give_all(device, &device->vm0.root);
 }
 
 /*
  * Opens a GHCI session for owner (the GPU core's session to report a
- * loss to): takes a number and places CMD_SESSION_OPEN.
+ * loss to): takes a number and places CMD_SESSION_OPEN with the memory of
+ * the session's initial page table.
  *
  * Returns 0 with the session, EBUSY when all fifteen numbers are in use,
- * ENOSPC when CP_HEAP's bound has no room for its tables, ENOMEM when
- * the host has no memory for its record, or EIO when the device is lost.
+ * ENOMEM when there is no memory for its record or its initial page
+ * table, or EIO when the device is lost.
  */
 int
 ghci_vm_open(
@@ -190,7 +199,6 @@ ghci_vm_open(
 	uint32_t packet[GHCI_DW_SESSION_OPEN];
 	uint32_t slot;
 	uint32_t start;
-	uint64_t need;
 	unsigned long irq;
 	int lost;
 	int error;
@@ -200,6 +208,15 @@ ghci_vm_open(
 	if (vm == NULL)
 		return ENOMEM;
 	vm->owner = owner;
+
+	/* The memory of its initial page table, taken before the device's lock (local memory takes it). */
+	if (has_walker(device)) {
+		error = tables_take(device, device->root_bytes, device->root_align, 0, &vm->root);
+		if (error != 0) {
+			kern_free(vm);
+			return ENOMEM;
+		}
+	}
 
 	/* Sessions that finished closing give their numbers back first. */
 	mutex_lock(&device->lock);
@@ -248,29 +265,26 @@ ghci_vm_open(
 		if (gate == GHCI_GATE_RETRY)
 			continue;
 
-		/* A free number, and room in CP_HEAP's bound for its tables. */
+		/* A free number. */
 		slot = free_slot(device);
-		need = ghci_heap_session_bytes(device->caps.va_bits);
 		if (slot == 0U) {
 			ghci_cp_leave(device);
 			error = EBUSY;
 			break;
 		}
-		if (device->heap_used + need > device->heap_budget) {
-			ghci_cp_leave(device);
-			error = ENOSPC;
-			break;
-		}
 
 		/*
-		 * CMD_SESSION_OPEN and a fence that says the processor opened it.
+		 * CMD_SESSION_OPEN with the initial page table, and a fence that
+		 * says the processor opened it.  The memory is given whether or
+		 * not the device has PROT, so that every session has a table of
+		 * its own wherever the processor takes it.
 		 *
-		 * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-		 * 7.3, CMD_SESSION_OPEN; section 11.2, the root a session takes
-		 * from CP_HEAP).
+		 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+		 * CMD_SESSION_OPEN: init_pt_pa and init_pt_bytes; section 11.2, the
+		 * per-session initial table of the bring-up).
 		 */
 		start = device->ring.wptr;
-		(void)ghci_cmd_session_open(packet, slot, 0U);
+		(void)ghci_cmd_session_open(packet, slot, 0U, vm->root->address, vm->root->bytes);
 		error = ghci_cp_place(device, packet, GHCI_DW_SESSION_OPEN);
 		if (error == 0)
 			error = ghci_cp_place_fence(device, NULL, start, &ticket);
@@ -286,25 +300,25 @@ ghci_vm_open(
 			break;
 		}
 
-		/* The session is open and counted. */
+		/* The session is open. */
 		vm->slot = slot;
 		vm->session = slot;
 		vm->state = GHCI_VM_OPEN;
-		vm->counted = 1;
 		vm->open_ticket = ticket;
 		device->vm[slot] = vm;
-		device->heap_used += need;
 		ghci_cp_leave(device);
 		break;
 	}
 
-	mutex_unlock(&device->lock);
-
 	/* An open that failed leaves nothing behind. */
 	if (error != 0) {
+		tables_give_all(device, &vm->root);
+		mutex_unlock(&device->lock);
 		kern_free(vm);
 		return error;
 	}
+
+	mutex_unlock(&device->lock);
 
 	/* Succeeded: the session is the owner's. */
 	*result = vm;
@@ -312,10 +326,10 @@ ghci_vm_open(
 }
 
 /*
- * Closes a session; it cannot fail.  Every live mapping is unmapped, then
- * CMD_SESSION_CLOSE and a fence are placed, and the session retires once
- * that fence passes (or a reset ends it): its number, chunks, tables and
- * memory go back then.  A session a reset killed, or one of a lost
+ * Closes a session; it cannot fail.  CMD_SESSION_CLOSE and a fence are
+ * placed, and the session retires once that fence passes (or a reset
+ * ends it): its number, chunks, mappings, page tables and memory go back
+ * then.  A session a reset killed, or one of a lost
  * device, retires at once without the GPU.  The caller gives up the
  * session and its mappings.
  */
@@ -327,7 +341,7 @@ ghci_vm_close(
 	struct ghci_mapping *mapping;
 	struct ghci_ticket ticket;
 	enum ghci_gate gate;
-	uint32_t packet[GHCI_DW_VM_UNMAP];
+	uint32_t packet[GHCI_DW_SESSION_CLOSE];
 	uint32_t start;
 	unsigned long irq;
 	int lost;
@@ -390,26 +404,17 @@ ghci_vm_close(
 		}
 
 		/*
-		 * Every live mapping's unmap, then CMD_SESSION_CLOSE (never before
-		 * the unmaps), then the fence.
+		 * CMD_SESSION_CLOSE, which ends every mapping of the session, then
+		 * the fence after which its page-table memory comes back.
 		 *
-		 * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-		 * 7.3, CMD_VM_UNMAP and CMD_SESSION_CLOSE; section 11.2, the
-		 * tables a session close returns to CP_HEAP).
+		 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.3,
+		 * CMD_SESSION_CLOSE and a fence reclaim the session's initial and
+		 * intermediate tables; section 11.2, CMD_SESSION_CLOSE destroys the
+		 * session's context).
 		 */
 		start = device->ring.wptr;
-		error = 0;
-		for (mapping = vm->mappings; mapping != NULL && error == 0; mapping = mapping->next) {
-			/* A mapping already unmapping has its packet in the ring. */
-			if (mapping->state != GHCI_MAPPING_LIVE)
-				continue;
-			(void)ghci_cmd_vm_unmap(packet, vm->session, mapping->va, mapping->bytes);
-			error = ghci_cp_place(device, packet, GHCI_DW_VM_UNMAP);
-		}
-		if (error == 0) {
-			(void)ghci_cmd_session_close(packet, vm->session);
-			error = ghci_cp_place(device, packet, GHCI_DW_SESSION_CLOSE);
-		}
+		(void)ghci_cmd_session_close(packet, vm->session);
+		error = ghci_cp_place(device, packet, GHCI_DW_SESSION_CLOSE);
 		if (error == 0)
 			error = ghci_cp_place_fence(device, NULL, start, &ticket);
 		ghci_cp_doorbell(device);
@@ -426,6 +431,7 @@ ghci_vm_close(
 				continue;
 			mapping->state = GHCI_MAPPING_UNMAPPING;
 			mapping->ticket = ticket;
+			mapping->unmap_placed = 0;
 		}
 		vm->state = GHCI_VM_CLOSING;
 		vm->close_ticket = ticket;
@@ -438,19 +444,28 @@ ghci_vm_close(
 
 /*
  * Maps an allocation into a session: takes GPU addresses in a chunk the
- * session owns and places CMD_VM_MAP.  flags adds GHCI_VM_FLAG_EXEC for
- * code and GHCI_VM_MAP_NO_WRITE for memory the GPU only reads (the
- * mapping then lacks GHCI_VM_FLAG_WRITE); the rest of the access and the
- * coherence are the driver's.  The placement is not waited for: the
- * processor runs the ring in order.
+ * session owns, places CMD_VM_MAP and a fence, and waits for the map's
+ * record.  A map that needs memory for intermediate page tables is
+ * placed again with the bytes its record asks for; a reset meanwhile
+ * places it again too.  flags adds GHCI_VM_FLAG_EXEC for code and
+ * GHCI_VM_MAP_NO_WRITE for memory the GPU only reads (the mapping then
+ * lacks GHCI_VM_FLAG_WRITE); the rest of the access and the coherence
+ * are the driver's.  The caller holds no lock of the device and does not
+ * close the session meanwhile.
  *
- * Local memory is mapped with GHCI_VM_FLAG_LOCAL and its local address,
+ * Local memory is mapped at its local address (which tells the GPU it is local),
  * and never coherent with the processor.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+ * CMD_VM_MAP: the record is visible once a later fence passes, a map
+ * that needs memory changes nothing and writes NEED_PT_MEM with
+ * required_bytes and required_align, the driver waits for OK before work
+ * uses the mapping, the rest of the memory given comes back at once).
  *
  * Returns 0 with the mapping, which holds the allocation; ENOTSUP for
  * local memory on a GPU without a page-table walker (whose addresses are
- * bus addresses); ENOMEM when no addresses or no room in CP_HEAP's bound
- * are left; or EIO when the session or the device is lost.
+ * bus addresses); ENOMEM when no addresses or no memory for the record
+ * or the tables are left; or EIO when the session or the device is lost.
  */
 int
 ghci_vm_map(
@@ -461,9 +476,19 @@ ghci_vm_map(
 	struct ghci_mapping **result)
 {
 	struct ghci_mapping *mapping;
+	struct ghci_tables *offered;
 	struct ghci_arena *arena;
+	struct ghci_ticket ticket;
 	enum ghci_gate gate;
+	uint32_t required;
+	uint32_t align;
+	uint32_t status;
+	uint32_t start;
+	unsigned tries;
+	unsigned long irq;
 	uint64_t va;
+	int placed;
+	int lost;
 	int error;
 
 	/* Local memory needs a walker; the flags a caller adds are EXEC and NO_WRITE. */
@@ -486,6 +511,15 @@ ghci_vm_map(
 		mapping->flags &= ~GHCI_VM_FLAG_WRITE;
 	mapping->state = GHCI_MAPPING_LIVE;
 
+	/* The page the processor writes the map's and the unmap's records to, with a walker. */
+	if (!vm->flat) {
+		error = ghci_memory_alloc(device, GHCI_PAGE_BYTES, 0U, &mapping->record);
+		if (error != 0) {
+			kern_free(mapping);
+			return ENOMEM;
+		}
+	}
+
 	/* Mappings that finished unmapping give their addresses back first. */
 	mutex_lock(&device->lock);
 
@@ -496,6 +530,9 @@ ghci_vm_map(
 	 * placed; the gate still waits out a recovery and refuses a lost
 	 * device.
 	 */
+	offered = NULL;
+	arena = NULL;
+	va = 0U;
 	if (vm->flat) {
 		for (;;) {
 			gate = enter_ring(device);
@@ -514,7 +551,8 @@ ghci_vm_map(
 			break;
 		}
 	} else {
-		/* The addresses and CMD_VM_MAP in one section past the gate. */
+		/* The addresses, CMD_VM_MAP and its fence in one section past the gate, then the wait for the record. */
+		tries = 0U;
 		for (;;) {
 			gate = enter_ring(device);
 			if (gate == GHCI_GATE_LOST) {
@@ -531,43 +569,110 @@ ghci_vm_map(
 				break;
 			}
 
-			/* Addresses in a chunk of the session's. */
-			error = va_take(device, vm, mapping->bytes, &va, &arena);
-			if (error != 0) {
-				ghci_cp_leave(device);
-				break;
+			/* Addresses in a chunk of the session's, kept over the tries. */
+			if (arena == NULL) {
+				error = va_take(device, vm, mapping->bytes, &va, &arena);
+				if (error != 0) {
+					ghci_cp_leave(device);
+					break;
+				}
+				mapping->va = va;
+				mapping->arena = arena;
 			}
-			mapping->va = va;
-			mapping->arena = arena;
 
-			/* The packet; a recovery that began gives the addresses back, and the map starts again. */
-			error = place_map(device, vm, mapping);
+			/* The packet and its fence; a recovery that began places the map again. */
+			record_clear(mapping->record);
+			start = device->ring.wptr;
+			error = place_map(device, vm, mapping, offered);
+			if (error == 0)
+				error = ghci_cp_place_fence(device, NULL, start, &ticket);
 			ghci_cp_doorbell(device);
+			ghci_cp_leave(device);
+			if (error == EAGAIN)
+				continue;
+			if (error != 0)
+				break;
+
+			/* The record, once the fence passed; a reset meanwhile places the map again. */
+			mutex_unlock(&device->lock);
+			error = map_wait(device, &ticket);
+			mutex_lock(&device->lock);
 			if (error != 0) {
-				va_give(device, vm, arena, va);
-				mapping->arena = NULL;
-				ghci_cp_leave(device);
-				if (error == EAGAIN)
-					continue;
+				irq = spin_lock_irqsave(&device->irq_lock);
+
+				lost = device->state == GHCI_STATE_LOST;
+
+				spin_unlock_irqrestore(&device->irq_lock, irq);
+				if (lost)
+					break;
+				continue;
+			}
+
+			/* Made: the memory offered is the processor's as far as it kept it. */
+			status = record_word(mapping->record, GHCI_MAP_COMP_STATUS);
+			if (status == GHCI_MAP_OK) {
+				if (offered != NULL)
+					tables_keep(device, vm, offered, record_word(mapping->record, GHCI_MAP_COMP_USED));
+				offered = NULL;
+				error = 0;
 				break;
 			}
-			ghci_cp_leave(device);
-			break;
+
+			/* A session the processor no longer has, or addresses it says are taken. */
+			if (status != GHCI_MAP_NEED_PT_MEM) {
+				kern_logf("ghci: %s: CMD_VM_MAP of session %u at %llx answered %u\n",
+				    device->name,
+				    (unsigned)vm->session,
+				    (unsigned long long)mapping->va,
+				    (unsigned)status);
+				error = EIO;
+				break;
+			}
+
+			/* Memory for its tables, as much as the record asks, outside the device's lock. */
+			required = record_word(mapping->record, GHCI_MAP_COMP_REQUIRED);
+			align = record_word(mapping->record, GHCI_MAP_COMP_ALIGN);
+			if (offered != NULL)
+				tables_give(device, offered);
+			offered = NULL;
+			tries++;
+			if (tries >= MAP_TRIES) {
+				error = ENOMEM;
+				break;
+			}
+			mutex_unlock(&device->lock);
+			error = tables_take(device, required, align, 0, &offered);
+			mutex_lock(&device->lock);
+			if (error != 0) {
+				error = ENOMEM;
+				break;
+			}
 		}
 	}
 
 	/* The mapping joins its session and holds the allocation. */
-	if (error == 0) {
+	placed = error == 0;
+	if (placed) {
 		mapping->next = vm->mappings;
 		vm->mappings = mapping;
 		allocation->reached = 1;
 		ghci_memory_hold(allocation);
 	}
 
+	/* A map that failed gives back its addresses and the memory it offered. */
+	if (!placed) {
+		if (arena != NULL)
+			va_give(device, vm, arena, va);
+		if (offered != NULL)
+			tables_give(device, offered);
+		if (mapping->record != NULL)
+			memory_put(device, mapping->record);
+	}
+
 	mutex_unlock(&device->lock);
 
 	/* A map that failed leaves nothing behind. */
-	if (error != 0) {
+	if (!placed) {
 		kern_free(mapping);
 		return error;
 	}
@@ -580,7 +685,8 @@ ghci_vm_map(
 /*
  * Unmaps a mapping; it cannot fail.  CMD_VM_UNMAP and a fence are
  * placed, and the mapping lets its addresses and its allocation go once
- * that fence passes.  Without a walker nothing is placed: the mapping
+ * that fence passes (with the intermediate tables its record gives
+ * back).  Without a walker nothing is placed: the mapping
  * waits for the work placed until now.  A mapping of a session a reset
  * killed, or of a lost device, goes at once.  The caller gives up the
  * mapping.
@@ -639,9 +745,16 @@ ghci_vm_unmap(
 		if (gate != GHCI_GATE_OPEN)
 			continue;
 
-		/* CMD_VM_UNMAP and its fence. */
+		/*
+		 * CMD_VM_UNMAP with the mapping's record page for the tables it
+		 * gives back, and its fence.
+		 *
+		 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+		 * CMD_VM_UNMAP: comp_pa on 64 bytes, comp_bytes in whole 64 bytes).
+		 */
+		record_clear(mapping->record);
 		start = device->ring.wptr;
-		(void)ghci_cmd_vm_unmap(packet, vm->session, mapping->va, mapping->bytes);
+		(void)ghci_cmd_vm_unmap(packet, vm->session, mapping->va, mapping->bytes, mapping->record->bus, GHCI_PAGE_BYTES);
 		error = ghci_cp_place(device, packet, GHCI_DW_VM_UNMAP);
 		if (error == 0)
 			error = ghci_cp_place_fence(device, NULL, start, &ticket);
@@ -649,6 +762,7 @@ ghci_vm_unmap(
 		if (error == 0) {
 			mapping->state = GHCI_MAPPING_UNMAPPING;
 			mapping->ticket = ticket;
+			mapping->unmap_placed = 1;
 		}
 		ghci_cp_leave(device);
 	}
@@ -673,6 +787,7 @@ ghci_vm_reclaim(
 	enum ghci_ticket_state state;
 	unsigned long irq;
 	uint32_t slot;
+	int unmapped;
 	int lost;
 	int freed;
 
@@ -690,12 +805,17 @@ ghci_vm_reclaim(
 		if (vm == NULL)
 			continue;
 
-		/* A mapping whose unmap passed goes. */
+		/* A mapping whose unmap passed goes, with the tables its record gives back. */
 		for (mapping = vm->mappings; mapping != NULL; mapping = next) {
 			next = mapping->next;
 			if (mapping->state != GHCI_MAPPING_UNMAPPING)
 				continue;
 			state = ghci_cp_ticket(device, &mapping->ticket);
+			if (state == GHCI_TICKET_DONE && mapping->unmap_placed) {
+				unmapped = unmap_settle(device, vm, mapping);
+				if (!unmapped)
+					continue;
+			}
 			if (state == GHCI_TICKET_DONE || (state == GHCI_TICKET_FAILED && lost)) {
 				mapping_drop(device, mapping);
 				freed = 1;
@@ -718,12 +838,12 @@ ghci_vm_reclaim(
 
 /*
  * Finds the culprits of a fault (the recovery's step 2): with a walker,
- * the session FAULT_INFO names when the fault is one a session's work
- * causes, and with PROT every confirmed open session the device no
- * longer shows active (the processor latched only the first fault);
+ * the session the fault names when the fault is one a session's work
+ * causes, and every confirmed open session the device no longer shows
+ * active (the processor reported only the first fault);
  * without a walker, the session of the first submission whose fence the
- * device had not written.  Faults of the processor itself, of session 0
- * and a CP_HEAP exhaustion have no culprit.  Each culprit becomes
+ * device had not written.  Faults of the processor itself and of session
+ * 0 have no culprit.  Each culprit becomes
  * FAULTED.  The caller holds the device's lock and cp_lock.  Returns the
  * number of culprits.
  */
@@ -752,8 +872,7 @@ ghci_vm_find_culprits(
 	 * 3.5, FAULT_INFO's kinds and units: a unit other than the processor
 	 * reporting an invalid operation, a protection, page or permission
 	 * fault is the session's work, as is a watchdog expiry; the
-	 * processor's own faults and MMU_OOM are the driver's or the
-	 * device's).
+	 * processor's own faults are the driver's or the device's).
 	 */
 	kind = fault_info & GHCI_FAULT_KIND_MASK;
 	unit = (fault_info >> GHCI_FAULT_UNIT_SHIFT) & GHCI_FAULT_UNIT_MASK;
@@ -799,15 +918,20 @@ ghci_vm_find_culprits(
 	}
 
 	/*
-	 * With PROT a session's fault ends only that session, and FAULT_INFO
-	 * holds the first fault alone: a session the processor confirmed open
-	 * that is no longer active faulted too.  Read only of a halted
-	 * processor, and only when the first fault was a session's: after a
-	 * fault of the device's own or an exhaustion of CP_HEAP (which drops
-	 * sessions through the driver's count) the fault stays the device's,
-	 * and is counted towards the storm.
+	 * With the walker a client session's fault ends only that session,
+	 * whatever CAP_PROT says, and the record read first names one fault
+	 * alone: a session the processor confirmed open that is no longer
+	 * active faulted too.  Read only of a halted processor, and only when
+	 * the first fault was a session's: after a fault of the device's own
+	 * the fault stays the device's, and is counted towards the storm.
+	 *
+	 * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.3, a
+	 * client session's fault regardless of CAP_PROT clears its
+	 * SESSION_ACTIVE bit and leaves the processor running).
 	 */
-	if (!ghci_caps_has(&device->caps, GHCI_HAS_PROT) || !halted || !attributable)
+	if (!halted)
+		return found;
+	if (!attributable)
 		return found;
 	for (slot = 1U; slot < GHCI_SESSIONS; slot++) {
 		/* An open session the processor confirmed opening. */
@@ -856,9 +980,10 @@ ghci_vm_mark_lost(
  * Settles the sessions after a reset (the recovery's step 6): a session
  * that was closing retires, a culprit and a session that lost work die,
  * the rest wait to be replayed; every unmap the reset ended is done (the
- * reset stopped the GPU); and CP_HEAP's count is made again from the
- * sessions that are replayed.  The caller holds the device's lock and
- * cp_lock.
+ * reset stopped the GPU); and the memory of every intermediate table
+ * goes back, as the processor forgot every page table (the initial
+ * tables are kept for the replay).  The caller holds the device's lock
+ * and cp_lock.
  */
 void
 ghci_vm_after_reset(
@@ -866,7 +991,6 @@ ghci_vm_after_reset(
 {
 	struct ghci_mapping *mapping;
 	struct ghci_mapping *next;
-	struct ghci_arena *arena;
 	struct ghci_vm *vm;
 	uint32_t slot;
 
@@ -876,9 +1000,8 @@ ghci_vm_after_reset(
 		if (vm == NULL)
 			continue;
 
-		/* A close the reset ended is done; the count is made again below. */
+		/* A close the reset ended is done. */
 		if (vm->state == GHCI_VM_CLOSING) {
-			vm->counted = 0;
 			vm_retire(device, vm);
 			continue;
 		}
@@ -889,24 +1012,20 @@ ghci_vm_after_reset(
 		 * close, as the GPU no longer reaches it).
 		 */
 		if (vm->state == GHCI_VM_ISOLATED && vm->closed) {
-			vm->counted = 0;
 			vm_retire(device, vm);
 			continue;
 		}
 		if (vm->state == GHCI_VM_ISOLATED) {
 			vm->state = GHCI_VM_DEAD;
-			vm->counted = 0;
 			vm->lost_work = 0;
 			continue;
 		}
 
 		/* A culprit, and a session whose work was thrown away, die. */
-		if (vm->state == GHCI_VM_FAULTED || (vm->lost_work && vm->state != GHCI_VM_DEAD)) {
+		if (vm->state == GHCI_VM_FAULTED || (vm->lost_work && vm->state != GHCI_VM_DEAD))
 			vm->state = GHCI_VM_DEAD;
-			vm->counted = 0;
-		} else if (vm->state == GHCI_VM_OPEN || vm->state == GHCI_VM_REPLAY_WAIT) {
+		else if (vm->state == GHCI_VM_OPEN || vm->state == GHCI_VM_REPLAY_WAIT)
 			vm->state = GHCI_VM_REPLAY_WAIT;
-		}
 		vm->lost_work = 0;
 	}
 
@@ -922,35 +1041,28 @@ ghci_vm_after_reset(
 		}
 	}
 
-	/* CP_HEAP holds nothing after the reset: the count of what the replay builds. */
-	if (!has_walker(device))
-		return;
-	kern_memset(device->l0_marks, 0, sizeof(device->l0_marks));
-	device->heap_used = ghci_heap_session_bytes(device->caps.va_bits);
+	/* The processor forgot every page table: the intermediate tables' memory goes back. */
 	for (slot = 0U; slot < GHCI_SESSIONS; slot++) {
-		/* Session 0 and the sessions the replay opens again. */
 		vm = device->vm[slot];
-		if (vm == NULL || (slot != 0U && vm->state != GHCI_VM_REPLAY_WAIT))
-			continue;
-
-		/* Their tables, and a level 0 table for each chunk of theirs. */
-		if (slot != 0U)
-			device->heap_used += ghci_heap_session_bytes(device->caps.va_bits);
-		vm->counted = 1;
-		kern_memset(vm->l0_marks, 0, sizeof(vm->l0_marks));
-		for (arena = vm->arenas; arena != NULL; arena = arena->next) {
-			device->heap_used += marks_need(device, vm, arena->first, arena->chunks);
-			marks_take(device, vm, arena->first, arena->chunks);
-		}
+		if (vm != NULL)
+			tables_give_all(device, &vm->tables);
 	}
 }
 
 /*
- * Replays the sessions after a reset (the recovery's step 7): session
- * 0's mappings, then each waiting session's CMD_SESSION_OPEN and live
- * mappings, and a fence that confirms the opens.  The caller holds the
- * device's lock and cp_lock, with the recovery's placement set.  Returns
- * 0, or EAGAIN when a new fault or the deadline ended a wait for room.
+ * Replays the sessions after a reset (the recovery's step 7): the MMU
+ * with session 0's initial table and the fault log ring, session 0's
+ * mappings, then each waiting session's CMD_SESSION_OPEN and live
+ * mappings, and a fence that confirms the opens.  The maps offer no
+ * memory for intermediate tables; ghci_vm_replay_tables() reads their
+ * records and gives what they ask.  The caller holds the device's lock
+ * and cp_lock, with the recovery's placement set.  Returns 0, or EAGAIN
+ * when a new fault or the deadline ended a wait for room.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 5, the
+ * recovery after CTRL.RESET: the fault log ring set up again, the MMU
+ * enabled again with the same memory, the sessions opened and mapped
+ * again).
  */
 int
 ghci_vm_replay(
@@ -959,7 +1071,7 @@ ghci_vm_replay(
 	struct ghci_mapping *mapping;
 	struct ghci_ticket ticket;
 	struct ghci_vm *vm;
-	uint32_t packet[GHCI_DW_SESSION_OPEN];
+	uint32_t packet[GHCI_DW_FAULT_LOG_SETUP];
 	uint32_t slot;
 	uint32_t start;
 	int error;
@@ -968,27 +1080,38 @@ ghci_vm_replay(
 	if (!has_walker(device))
 		return 0;
 
-	/* Session 0 and every waiting session, in turn. */
+	/* The MMU and the fault log ring the reset turned off. */
 	start = device->ring.wptr;
-	error = 0;
+	(void)ghci_cmd_mmu_enable(packet, device->vm0.root->address, device->vm0.root->bytes);
+	error = ghci_cp_place(device, packet, GHCI_DW_MMU_ENABLE);
+	if (error == 0) {
+		(void)ghci_cmd_fault_log_setup(packet, device->fault_ring->bus, GHCI_FAULT_RING_ENTRIES);
+		error = ghci_cp_place(device, packet, GHCI_DW_FAULT_LOG_SETUP);
+		device->fault_seq = 1U;
+	}
+
+	/* Session 0 and every waiting session, in turn. */
 	for (slot = 0U; slot < GHCI_SESSIONS && error == 0; slot++) {
 		vm = device->vm[slot];
 		if (vm == NULL || (slot != 0U && vm->state != GHCI_VM_REPLAY_WAIT))
 			continue;
 
-		/* The session opens again (session 0 is always open). */
+		/* The session opens again with its initial table (session 0 is always open). */
 		if (slot != 0U) {
-			(void)ghci_cmd_session_open(packet, vm->session, 0U);
+			(void)ghci_cmd_session_open(packet, vm->session, 0U, vm->root->address, vm->root->bytes);
 			error = ghci_cp_place(device, packet, GHCI_DW_SESSION_OPEN);
 		}
 
-		/* Its live mappings. */
+		/* Its live mappings, each with its record to read. */
 		for (mapping = vm->mappings; mapping != NULL && error == 0; mapping = mapping->next) {
 			if (mapping->state != GHCI_MAPPING_LIVE)
 				continue;
-			error = place_map(device, vm, mapping);
-			if (error == 0)
+			record_clear(mapping->record);
+			error = place_map(device, vm, mapping, NULL);
+			if (error == 0) {
 				mapping->replayed = device->recovery_generation;
+				mapping->pending = 1;
+			}
 		}
 	}
 
@@ -1007,6 +1130,213 @@ ghci_vm_replay(
 	}
 
 	/* Succeeded: the replay is in the ring. */
+	return 0;
+}
+
+/*
+ * Ends the replay's maps (the recovery's step 7, after ghci_vm_replay()):
+ * waits for the last fence placed, reads each replayed map's record, and
+ * places again with memory for its tables every map that asked for some,
+ * with a fence, until none asks.  The caller holds the device's lock and
+ * cp_lock, with the recovery's placement set.  Returns 0; EAGAIN when a
+ * new fault or the deadline ended a wait; ETIMEDOUT when a fence did not
+ * come; ENOMEM when the memory asked for cannot be had; or EIO when a
+ * record says what a replay cannot answer.
+ */
+int
+ghci_vm_replay_tables(
+	struct ghci_device *device)
+{
+	struct ghci_mapping *mapping;
+	struct ghci_tables *offered;
+	struct ghci_ticket ticket;
+	struct ghci_vm *vm;
+	uint32_t status;
+	uint32_t slot;
+	uint32_t start;
+	unsigned pass;
+	int placed;
+	int error;
+
+	/* Nothing is in a GPU without a walker. */
+	if (!has_walker(device))
+		return 0;
+
+	for (pass = 0U; pass < REPLAY_PASSES; pass++) {
+		/* The records of what was placed are visible once its fence passed. */
+		error = ghci_cp_await_fence(device, device->fence_placed, GHCI_LIVENESS_MS);
+		if (error != 0)
+			return ETIMEDOUT;
+
+		/* Each map still to be read, of session 0 and the waiting sessions. */
+		start = device->ring.wptr;
+		placed = 0;
+		for (slot = 0U; slot < GHCI_SESSIONS; slot++) {
+			vm = device->vm[slot];
+			if (vm == NULL || (slot != 0U && vm->state != GHCI_VM_REPLAY_WAIT))
+				continue;
+			for (mapping = vm->mappings; mapping != NULL; mapping = mapping->next) {
+				if (!mapping->pending)
+					continue;
+
+				/* Made: the memory offered is kept as far as the processor used it. */
+				status = record_word(mapping->record, GHCI_MAP_COMP_STATUS);
+				offered = mapping->offered;
+				mapping->offered = NULL;
+				if (status == GHCI_MAP_OK) {
+					if (offered != NULL)
+						tables_keep(device, vm, offered, record_word(mapping->record, GHCI_MAP_COMP_USED));
+					mapping->pending = 0;
+					continue;
+				}
+				if (offered != NULL)
+					tables_give(device, offered);
+				if (status != GHCI_MAP_NEED_PT_MEM)
+					return EIO;
+
+				/* Placed again with the memory its record asks for. */
+				error = tables_take(device,
+				    record_word(mapping->record, GHCI_MAP_COMP_REQUIRED),
+				    record_word(mapping->record, GHCI_MAP_COMP_ALIGN),
+				    1,
+				    &offered);
+				if (error != 0)
+					return ENOMEM;
+				mapping->offered = offered;
+				record_clear(mapping->record);
+				error = place_map(device, vm, mapping, offered);
+				if (error != 0)
+					return error;
+				placed = 1;
+			}
+		}
+
+		/* Every map is made. */
+		if (!placed)
+			return 0;
+
+		/* The fence after the maps placed again. */
+		error = ghci_cp_place_fence(device, NULL, start, &ticket);
+		ghci_cp_doorbell(device);
+		if (error != 0)
+			return error;
+	}
+
+	/* The maps kept asking for memory. */
+	return EIO;
+}
+
+/*
+ * Starts the MMU, once the ring runs and before any session or mapping:
+ * asks the processor for the sizes of its page-table memory
+ * (CMD_VM_QUERY_PT_MEM), gives session 0's initial table with
+ * CMD_MMU_ENABLE, and sets up the fault log ring, each waited for by a
+ * fence.  A GPU without a walker needs none of it.  The caller owns the
+ * device alone.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 6.0, the MMU
+ * off after a reset and the bring-up; section 7.3, CMD_VM_QUERY_PT_MEM,
+ * GhciVmPtMemInfo (struct_bytes 64, sizes and alignments), CMD_MMU_ENABLE
+ * and CMD_FAULT_LOG_SETUP; section 11.2, the bring-up sequence).
+ *
+ * Returns 0, ENOMEM, ETIMEDOUT when a fence did not come, or EIO for
+ * sizes the driver cannot use.
+ */
+int
+ghci_vm_mmu_start(
+	struct ghci_device *device)
+{
+	struct ghci_allocation *info;
+	struct ghci_ticket ticket;
+	uint32_t packet[GHCI_DW_FAULT_LOG_SETUP];
+	uint32_t size;
+	uint32_t start;
+	int error;
+
+	/* A GPU without a walker runs with the MMU off. */
+	if (!has_walker(device))
+		return 0;
+
+	/* The sizes, written to a page of host memory. */
+	error = ghci_memory_alloc(device, GHCI_PAGE_BYTES, 0U, &info);
+	if (error != 0)
+		return ENOMEM;
+	record_clear(info);
+	mutex_lock(&device->cp_lock);
+
+	start = device->ring.wptr;
+	(void)ghci_cmd_vm_query_pt_mem(packet, info->bus, GHCI_PT_INFO_BYTES);
+	error = ghci_cp_place(device, packet, GHCI_DW_VM_QUERY_PT_MEM);
+	if (error == 0)
+		error = ghci_cp_place_fence(device, NULL, start, &ticket);
+	if (error == 0)
+		ghci_cp_doorbell(device);
+
+	mutex_unlock(&device->cp_lock);
+	if (error == 0)
+		error = ghci_cp_await_fence(device, ticket.seq, GHCI_LIVENESS_MS);
+	if (error != 0) {
+		kern_logf("ghci: %s: page-table sizes not written (%d)\n", device->name, error);
+		return ETIMEDOUT;
+	}
+
+	/* The sizes; a record of another size, a zero size or an alignment not a power of two is refused. */
+	size = record_word(info, 0U);
+	device->root_bytes = record_word(info, GHCI_PT_INFO_INIT_BYTES);
+	device->root_align = record_word(info, GHCI_PT_INFO_INIT_ALIGN);
+	device->table_bytes = record_word(info, GHCI_PT_INFO_TABLE_BYTES);
+	device->table_align = record_word(info, GHCI_PT_INFO_TABLE_ALIGN);
+	memory_put(device, info);
+	if (size != GHCI_PT_INFO_BYTES || device->root_bytes == 0U || device->table_bytes == 0U ||
+	    device->root_align == 0U || (device->root_align & (device->root_align - 1U)) != 0U ||
+	    device->table_align == 0U || (device->table_align & (device->table_align - 1U)) != 0U) {
+		kern_logf("ghci: %s: page-table sizes not usable (%u bytes: root %u on %u, tables %u on %u)\n",
+		    device->name,
+		    (unsigned)size,
+		    (unsigned)device->root_bytes,
+		    (unsigned)device->root_align,
+		    (unsigned)device->table_bytes,
+		    (unsigned)device->table_align);
+		return EIO;
+	}
+
+	/* Session 0's initial table, and the fault log ring. */
+	error = tables_take(device, device->root_bytes, device->root_align, 0, &device->vm0.root);
+	if (error != 0)
+		return ENOMEM;
+	error = ghci_memory_alloc(device, GHCI_PAGE_BYTES, 0U, &device->fault_ring);
+	if (error != 0)
+		return ENOMEM;
+
+	/* CMD_MMU_ENABLE, CMD_FAULT_LOG_SETUP and a fence. */
+	mutex_lock(&device->cp_lock);
+
+	start = device->ring.wptr;
+	(void)ghci_cmd_mmu_enable(packet, device->vm0.root->address, device->vm0.root->bytes);
+	error = ghci_cp_place(device, packet, GHCI_DW_MMU_ENABLE);
+	if (error == 0) {
+		(void)ghci_cmd_fault_log_setup(packet, device->fault_ring->bus, GHCI_FAULT_RING_ENTRIES);
+		error = ghci_cp_place(device, packet, GHCI_DW_FAULT_LOG_SETUP);
+	}
+	if (error == 0)
+		error = ghci_cp_place_fence(device, NULL, start, &ticket);
+	if (error == 0)
+		ghci_cp_doorbell(device);
+	device->fault_seq = 1U;
+
+	mutex_unlock(&device->cp_lock);
+	if (error == 0)
+		error = ghci_cp_await_fence(device, ticket.seq, GHCI_LIVENESS_MS);
+	if (error != 0) {
+		kern_logf("ghci: %s: MMU not enabled (%d)\n", device->name, error);
+		return ETIMEDOUT;
+	}
+
+	/* Succeeded: the MMU is on, with session 0's table. */
+	kern_logf("ghci: %s: MMU on (initial table %u bytes, tables %u bytes)\n",
+	    device->name,
+	    (unsigned)device->root_bytes,
+	    (unsigned)device->table_bytes);
 	return 0;
 }
 
@@ -1161,88 +1491,10 @@ free_slot(
 }
 
 /*
- * Reports the record of level 0 tables a session's chunks are counted
- * in: its own with PROT (its own page table), the device's without (one
- * table every session shares).
- */
-static uint8_t *
-marks_of(
-	struct ghci_device *device,
-	struct ghci_vm *vm)
-{
-	/* One table per session with PROT. */
-	if (ghci_caps_has(&device->caps, GHCI_HAS_PROT))
-		return vm->l0_marks;
-
-	/* Succeeded: the shared table's. */
-	return device->l0_marks;
-}
-
-/* Reports the CP_HEAP bytes the level 0 tables of a run of chunks add for a session. */
-static uint64_t
-marks_need(
-	struct ghci_device *device,
-	struct ghci_vm *vm,
-	uint32_t first,
-	uint32_t chunks)
-{
-	uint8_t *marks;
-	uint64_t need;
-	uint32_t chunk;
-
-	/* A table for each chunk not yet counted. */
-	marks = marks_of(device, vm);
-	need = 0U;
-	for (chunk = first; chunk < first + chunks; chunk++) {
-		if ((marks[chunk / 8U] & (1U << (chunk % 8U))) == 0U)
-			need += GHCI_TABLE_BYTES;
-	}
-
-	/* Succeeded: the bytes. */
-	return need;
-}
-
-/* Counts the level 0 tables of a run of chunks for a session. */
-static void
-marks_take(
-	struct ghci_device *device,
-	struct ghci_vm *vm,
-	uint32_t first,
-	uint32_t chunks)
-{
-	uint8_t *marks;
-	uint32_t chunk;
-
-	/* Each chunk's table is counted. */
-	marks = marks_of(device, vm);
-	for (chunk = first; chunk < first + chunks; chunk++)
-		marks[chunk / 8U] |= (uint8_t)(1U << (chunk % 8U));
-}
-
-/* Reports how many level 0 tables a record counts. */
-static unsigned
-marks_count(
-	const uint8_t *marks)
-{
-	unsigned count;
-	unsigned chunk;
-
-	/* One for each bit. */
-	count = 0U;
-	for (chunk = 0U; chunk < GHCI_CHUNKS; chunk++) {
-		if ((marks[chunk / 8U] & (1U << (chunk % 8U))) != 0U)
-			count++;
-	}
-
-	/* Succeeded: the count. */
-	return count;
-}
-
-/*
  * Takes GPU addresses for bytes in a session: the first arena of one
- * chunk with room, or a new arena of the chunks the bytes need (its level
- * 0 tables counted in CP_HEAP's bound).  The caller holds the device's
- * lock.  Returns 0 with the address and its arena, or ENOMEM.
+ * chunk with room, or a new arena of the chunks the bytes need.  The
+ * caller holds the device's lock.  Returns 0 with the address and its
+ * arena, or ENOMEM.
  */
 static int
 va_take(
@@ -1253,7 +1505,6 @@ va_take(
 	struct ghci_arena **result)
 {
 	struct ghci_arena *arena;
-	uint64_t need;
 	uint32_t address;
 	uint32_t chunks;
 	uint32_t first;
@@ -1263,9 +1514,9 @@ va_take(
 
 	/* A mapping within the chunks handed out; one of a chunk or less shares an arena of one chunk. */
 	end = end_chunk(device);
-	if (bytes == 0U || bytes > (uint64_t)(end - FIRST_CHUNK) * GHCI_L0_SPAN_BYTES)
+	if (bytes == 0U || bytes > (uint64_t)(end - FIRST_CHUNK) * GHCI_CHUNK_BYTES)
 		return ENOMEM;
-	if (bytes <= GHCI_L0_SPAN_BYTES) {
+	if (bytes <= GHCI_CHUNK_BYTES) {
 		for (arena = vm->arenas; arena != NULL; arena = arena->next) {
 			if (arena->chunks != 1U)
 				continue;
@@ -1278,37 +1529,25 @@ va_take(
 		}
 	}
 
-	/*
-	 * A new arena: a run of free chunks, and room for their tables.
-	 *
-	 * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-	 * 11.2, a 4 KiB level 0 table for each 2 MiB of addresses a page
-	 * table maps, taken from CP_HEAP; section 11.6, one table per session
-	 * with PROT and one shared table without).
-	 */
-	chunks = (uint32_t)((bytes + GHCI_L0_SPAN_BYTES - 1U) / GHCI_L0_SPAN_BYTES);
+	/* A new arena: a run of free chunks. */
+	chunks = (uint32_t)((bytes + GHCI_CHUNK_BYTES - 1U) / GHCI_CHUNK_BYTES);
 	error = run_find(device, chunks, &first);
 	if (error != 0)
 		return error;
-	need = marks_need(device, vm, first, chunks);
-	if (device->heap_used + need > device->heap_budget)
-		return ENOMEM;
 	arena = kern_calloc(1U, sizeof(*arena));
 	if (arena == NULL)
 		return ENOMEM;
 
-	/* The chunks are the session's, and their tables are counted. */
+	/* The chunks are the session's. */
 	arena->first = first;
 	arena->chunks = chunks;
 	ghci_range_init(&arena->map,
-	    (uint64_t)first * GHCI_L0_SPAN_BYTES,
-	    (uint64_t)(first + chunks) * GHCI_L0_SPAN_BYTES,
+	    (uint64_t)first * GHCI_CHUNK_BYTES,
+	    (uint64_t)(first + chunks) * GHCI_CHUNK_BYTES,
 	    arena->extents,
 	    ARENA_EXTENTS);
 	for (chunk = first; chunk < first + chunks; chunk++)
 		device->chunk_owner[chunk] = vm;
-	marks_take(device, vm, first, chunks);
-	device->heap_used += need;
 	arena->next = vm->arenas;
 	vm->arenas = arena;
 
@@ -1323,9 +1562,7 @@ va_take(
 
 /*
  * Gives GPU addresses back to their arena; an arena left empty gives its
- * chunks back.  Their level 0 tables stay counted: the processor keeps
- * them until the session closes (with PROT) or a reset.  The caller holds
- * the device's lock.
+ * chunks back.  The caller holds the device's lock.
  */
 static void
 va_give(
@@ -1427,38 +1664,34 @@ mapping_drop(
 	if (*position == mapping)
 		*position = mapping->next;
 
-	/* Its addresses, its allocation and its record go. */
+	/* Its addresses, its allocation, the memory it offered for tables, its record page and its record go. */
 	if (mapping->arena != NULL)
 		va_give(device, vm, mapping->arena, mapping->va);
 	ghci_memory_unhold(device, mapping->allocation);
+	if (mapping->offered != NULL)
+		tables_give(device, mapping->offered);
+	if (mapping->record != NULL)
+		memory_put(device, mapping->record);
 	kern_free(mapping);
 }
 
 /*
- * Retires a session the GPU no longer reaches: its tables leave CP_HEAP's
- * count when they were counted (with PROT, its level 0 tables too), its
- * mappings and chunks go back, and its number is free.  The caller holds
- * the device's lock, or owns the device alone.
+ * Retires a session the GPU no longer reaches: its mappings and chunks go
+ * back, the memory of its page tables goes back, and its number is
+ * free.  The caller holds the device's lock, or owns the device alone.
  */
 static void
 vm_retire(
 	struct ghci_device *device,
 	struct ghci_vm *vm)
 {
-	uint64_t bytes;
-
-	/* The tables the close gave back to CP_HEAP. */
-	if (vm->counted && !vm->flat) {
-		bytes = ghci_heap_session_bytes(device->caps.va_bits);
-		if (ghci_caps_has(&device->caps, GHCI_HAS_PROT))
-			bytes += (uint64_t)marks_count(vm->l0_marks) * GHCI_TABLE_BYTES;
-		device->heap_used -= bytes;
-		vm->counted = 0;
-	}
-
 	/* Every mapping, and with the last of them every chunk. */
 	while (vm->mappings != NULL)
 		mapping_drop(device, vm->mappings);
+
+	/* The page tables the processor no longer has. */
+	tables_give_all(device, &vm->tables);
+	tables_give_all(device, &vm->root);
 
 	/* The number is free again. */
 	vm->state = GHCI_VM_RETIRED;
@@ -1482,20 +1715,319 @@ vm_fault(
 	kern_logf("ghci: %s: session %u faulted\n", device->name, (unsigned)vm->slot);
 }
 
-/* Places the CMD_VM_MAP of a mapping.  The caller holds cp_lock.  Returns as ghci_cp_place() does. */
+/*
+ * Places the CMD_VM_MAP of a mapping, offering tables for its
+ * intermediate page tables (none when NULL), with its record in the
+ * mapping's record page.  The caller holds cp_lock.  Returns as
+ * ghci_cp_place() does.
+ */
 static int
 place_map(
 	struct ghci_device *device,
 	struct ghci_vm *vm,
-	const struct ghci_mapping *mapping)
+	const struct ghci_mapping *mapping,
+	const struct ghci_tables *tables)
 {
+	struct ghci_map_args args;
 	uint32_t packet[GHCI_DW_VM_MAP];
 
-	/* The session, the access, the GPU address and the bus address. */
-	(void)ghci_cmd_vm_map(packet, vm->session, mapping->flags, mapping->va, mapping->allocation->bus, mapping->bytes);
+	/* The session, the access, the GPU address, the bus address, the tables and the record. */
+	args.session = vm->session;
+	args.flags = mapping->flags;
+	args.va = mapping->va;
+	args.bus = mapping->allocation->bus;
+	args.bytes = mapping->bytes;
+	args.pt = 0U;
+	args.pt_bytes = 0U;
+	if (tables != NULL) {
+		args.pt = tables->address;
+		args.pt_bytes = tables->bytes;
+	}
+	args.comp = mapping->record->bus;
+	(void)ghci_cmd_vm_map(packet, &args);
 
 	/* Succeeded: placed, or the placement's error. */
 	return ghci_cp_place(device, packet, GHCI_DW_VM_MAP);
+}
+
+/*
+ * Takes memory for page tables: bytes on align, in local memory on a
+ * discrete GPU and in host memory otherwise (below the driver's limit,
+ * which keeps under HOST_LIMIT), never in the firmware's reservation (the
+ * local allocator keeps it out).  The run is taken larger when align is
+ * above a page, and address is its first aligned byte.  locked says that
+ * the caller holds the device's lock.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 11.2, page
+ * table memory in [MEM_VRAM_BASE, MEM_VRAM_BASE + MEM_VRAM_SIZE) outside
+ * MEM_FW_VRAM on a discrete GPU, host memory below MEM_HOST_LIMIT on a
+ * unified one).
+ *
+ * Returns 0 with the record of the run, ENOTSUP on a discrete GPU whose
+ * local memory the driver does not hand out, or ENOMEM.
+ */
+static int
+tables_take(
+	struct ghci_device *device,
+	uint64_t bytes,
+	uint32_t align,
+	int locked,
+	struct ghci_tables **result)
+{
+	struct ghci_tables *tables;
+	struct ghci_allocation *memory;
+	uint64_t extra;
+	int error;
+
+	/* A size the commands can carry, and an alignment that is a power of two. */
+	if (bytes == 0U || bytes > 0xFFFFFFFFULL || align == 0U || (align & (align - 1U)) != 0U)
+		return ENOMEM;
+
+	/* Room to align the start within the run. */
+	extra = 0U;
+	if (align > GHCI_PAGE_BYTES)
+		extra = align - GHCI_PAGE_BYTES;
+
+	/* Local memory on a discrete GPU, host memory on a unified one. */
+	tables = kern_calloc(1U, sizeof(*tables));
+	if (tables == NULL)
+		return ENOMEM;
+	if (device->caps.local_bytes != 0U) {
+		if (locked)
+			error = ghci_memory_alloc_local_locked(device, bytes + extra, &memory);
+		else
+			error = ghci_memory_alloc_local(device, bytes + extra, &memory);
+	} else {
+		error = ghci_memory_alloc(device, bytes + extra, 0U, &memory);
+	}
+	if (error != 0) {
+		kern_free(tables);
+		return error;
+	}
+
+	/* Succeeded: the aligned start of the run. */
+	tables->memory = memory;
+	tables->address = (memory->bus + align - 1U) & ~(uint64_t)(align - 1U);
+	tables->bytes = (uint32_t)bytes;
+	*result = tables;
+	return 0;
+}
+
+/* Gives back memory of page tables the processor no longer has.  The caller holds the device's lock or owns it alone. */
+static void
+tables_give(
+	struct ghci_device *device,
+	struct ghci_tables *tables)
+{
+	/* Succeeded: the run and its record go. */
+	memory_put(device, tables->memory);
+	kern_free(tables);
+}
+
+/* Gives back every run of a list.  The caller holds the device's lock or owns it alone. */
+static void
+tables_give_all(
+	struct ghci_device *device,
+	struct ghci_tables **list)
+{
+	struct ghci_tables *tables;
+
+	/* Each run in turn. */
+	while (*list != NULL) {
+		tables = *list;
+		*list = tables->next;
+		tables_give(device, tables);
+	}
+}
+
+/*
+ * Keeps the memory a CMD_VM_MAP was offered as far as the processor used
+ * it: used bytes join the session's tables, and memory it did not use
+ * goes back at once.  The caller holds the device's lock.
+ */
+static void
+tables_keep(
+	struct ghci_device *device,
+	struct ghci_vm *vm,
+	struct ghci_tables *tables,
+	uint32_t used)
+{
+	/* None used: it goes back. */
+	if (used == 0U) {
+		tables_give(device, tables);
+		return;
+	}
+
+	/* Succeeded: the session keeps it until the processor gives it back. */
+	tables->used = used;
+	tables->returned = 0U;
+	tables->next = vm->tables;
+	vm->tables = tables;
+}
+
+/*
+ * Counts the intermediate tables a CMD_VM_UNMAP's record gives back
+ * against the runs of the session they lie in; a run all of whose used
+ * memory came back goes.  The caller holds the device's lock.
+ */
+static void
+tables_return(
+	struct ghci_device *device,
+	struct ghci_vm *vm,
+	const struct ghci_mapping *mapping)
+{
+	struct ghci_tables **position;
+	struct ghci_tables *tables;
+	uint64_t address;
+	uint32_t written;
+	uint32_t entry;
+	uint32_t at;
+	uint32_t bytes;
+
+	/* The entries the record holds. */
+	written = record_word(mapping->record, GHCI_UNMAP_COMP_WRITTEN);
+	for (entry = 0U; entry < written; entry++) {
+		/* One entry: the address and the bytes of a table given back. */
+		at = GHCI_UNMAP_COMP_ENTRIES + entry * GHCI_UNMAP_ENTRY_BYTES;
+		if (at + GHCI_UNMAP_ENTRY_BYTES > GHCI_PAGE_BYTES)
+			break;
+		address = record_word(mapping->record, at) | ((uint64_t)record_word(mapping->record, at + 4U) << 32);
+		bytes = record_word(mapping->record, at + 8U);
+
+		/* The run it lies in counts it; a run whose used memory all came back goes. */
+		for (position = &vm->tables; *position != NULL; position = &(*position)->next) {
+			tables = *position;
+			if (address < tables->address || address >= tables->address + tables->bytes)
+				continue;
+			tables->returned += bytes;
+			if (tables->returned >= tables->used) {
+				*position = tables->next;
+				tables_give(device, tables);
+			}
+			break;
+		}
+	}
+}
+
+/*
+ * Reads a passed unmap's record: the tables it gave back are counted,
+ * and the mapping may go (1).  A record buffer too small for the tables
+ * left the mapping as it was: it stays live until its session closes or
+ * a reset ends (0), which the log says.  The caller holds the device's
+ * lock.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+ * CMD_VM_UNMAP: NEED_BUF leaves the mapping and the TLBs as they were;
+ * INVALID_SESSION for a session the processor no longer has).
+ */
+static int
+unmap_settle(
+	struct ghci_device *device,
+	struct ghci_vm *vm,
+	struct ghci_mapping *mapping)
+{
+	uint32_t status;
+
+	/* Done: the tables it gave back. */
+	status = record_word(mapping->record, GHCI_UNMAP_COMP_STATUS);
+	if (status == GHCI_UNMAP_OK) {
+		tables_return(device, vm, mapping);
+		return 1;
+	}
+
+	/* A session the processor no longer has keeps nothing of it. */
+	if (status != GHCI_UNMAP_NEED_BUF)
+		return 1;
+
+	/* Too many tables for the record page: the mapping stays until its session goes. */
+	kern_logf("ghci: %s: CMD_VM_UNMAP of session %u at %llx needs %u bytes for its record; kept until the session goes\n",
+	    device->name,
+	    (unsigned)vm->session,
+	    (unsigned long long)mapping->va,
+	    (unsigned)record_word(mapping->record, GHCI_UNMAP_COMP_REQUIRED));
+	mapping->state = GHCI_MAPPING_LIVE;
+	mapping->unmap_placed = 0;
+	return 0;
+}
+
+/* Reads a 32-bit word the processor wrote to a record page. */
+static uint32_t
+record_word(
+	const struct ghci_allocation *record,
+	uint32_t offset)
+{
+	const volatile uint32_t *word;
+
+	/* Succeeded: the word, read through the record's view. */
+	word = (const volatile uint32_t *)(const void *)(record->view + offset);
+	return *word;
+}
+
+/* Marks a record page unwritten before a command writes to it. */
+static void
+record_clear(
+	struct ghci_allocation *record)
+{
+	volatile uint32_t *word;
+
+	/* The first word reads as no status until the processor writes it. */
+	word = (volatile uint32_t *)(void *)record->view;
+	*word = RECORD_UNWRITTEN;
+}
+
+/*
+ * Waits for a map's fence, again while it is not answered (the hang
+ * check ends a fence that never comes).  The caller holds no lock of the
+ * device.  Returns 0 once it passed, or EIO when a reset or the loss of
+ * the device ended it.
+ */
+static int
+map_wait(
+	struct ghci_device *device,
+	const struct ghci_ticket *ticket)
+{
+	int error;
+
+	/* Until the ticket is answered. */
+	do {
+		error = ghci_cp_wait(device, ticket, MAP_WAIT_MS);
+	} while (error == ETIMEDOUT);
+
+	/* Succeeded: passed, or ended. */
+	return error;
+}
+
+/*
+ * Gives a run of host or local memory back, or keeps it in the
+ * quarantine while a lost GPU may still reach it.  The caller holds the
+ * device's lock or owns the device alone.
+ */
+static void
+memory_put(
+	struct ghci_device *device,
+	struct ghci_allocation *allocation)
+{
+	unsigned long irq;
+	int lost;
+	int error;
+
+	/* The device's life, as the recovery last set it. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	lost = device->state == GHCI_STATE_LOST;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Memory a lost GPU may still reach waits for bus mastering to go. */
+	if (lost) {
+		ghci_memory_quarantine(device, allocation);
+		return;
+	}
+
+	/* Succeeded: the run goes back, or stays in the quarantine when its view cannot go. */
+	error = ghci_memory_free(device, allocation);
+	if (error != 0)
+		ghci_memory_quarantine(device, allocation);
 }
 
 /*

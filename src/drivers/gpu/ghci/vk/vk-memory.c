@@ -1106,7 +1106,7 @@ round_up(
  * most GHCI_VK_HEAP_BLOCK_MAX, mapped into the device's session (the
  * code heap executable and read-only to the GPU, the data heap writable
  * and not executable).  Returns 0, ENOSPC when the GPU's memory, its
- * addresses or CP_HEAP's room is used up (or the block would pass
+ * addresses or its page-table memory is used up (or the block would pass
  * GHCI_VK_HEAP_BLOCK_MAX), ENOMEM when the kernel has no memory for the
  * block's record, or EIO for a session or a device the GPU lost.
  */

@@ -12,34 +12,36 @@
  * Host memory is reached by the GPU at its bus address, which on the PC
  * and on the VisionFive 2's root complexes is its physical address (the
  * host bridge maps bus addresses one to one).  The driver takes every run
- * below 4 GiB (CP_HEAP, the framebuffer and a flip's record are 32-bit
- * physical addresses, and the rest follows for simplicity), below the
+ * below 4 GiB (a GPU without a walker reaches no more from every unit,
+ * and the rest follows for simplicity), below the
  * GPU's HOST_LIMIT when it reports one, and outside its local memory,
  * where the same addresses name the GPU's own memory.  Where the GPU
  * does not snoop the processor's caches (host_uncached), the processor's
  * view of a run is an uncached second mapping of it, made when the run is
  * taken and removed before it goes back.
  *
- * Local memory.  A discrete GPU (UMA clear, local memory in the MEM block
- * and a page-table walker) has memory of its own at [LOCAL_BASE,
- * LOCAL_BASE + LOCAL_SIZE) of its physical addresses.  The driver hands
- * out runs of it by their offsets from LOCAL_BASE with a first-fit
+ * Local memory.  A discrete GPU (UMA clear, local memory in the MEM
+ * window and a page-table walker) has memory of its own at
+ * [MEM_VRAM_BASE, MEM_VRAM_BASE + MEM_VRAM_SIZE) of its physical
+ * addresses.  The driver hands out runs of it by their offsets from
+ * MEM_VRAM_BASE with a first-fit
  * allocator; a run's GPU address is its local address.  The processor
  * never reads or writes local memory: the GPU reaches it, and copies to
  * and from it, and everything the host and the GPU share (the ring,
  * fences, tables, programs, what a client maps) is host memory the GPU
  * reaches by DMA.  The local window (BAR2) is for a boot framebuffer the
  * firmware left alone: it is open while the boot console may write a
- * kept boot framebuffer through it, and closed otherwise.  What a boot
- * display the firmware left running reads of local memory is kept out of
- * the allocator until the driver's own first flip has been taken.
+ * kept boot framebuffer through it, and closed otherwise.  The local
+ * memory the firmware reserved (MEM_FW_VRAM) is kept out of the
+ * allocator.
  * Nothing of local memory is cleared here: the caller clears a new run
  * with the GPU before any client sees it.
  *
  * Procedure referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section
  * 11.1, the local window for the framebuffer only, and every other
  * access to memory made by the GPU; section 11.3, the ring, command
- * buffers and fences in host memory on a discrete GPU).
+ * buffers and fences in host memory on a discrete GPU); lumiere-gpu
+ * 78d1b6b7 ghci.md (section 11.3, MEM_FW_VRAM).
  */
 
 #include <stddef.h>
@@ -64,41 +66,6 @@
 
 /* The largest run of local memory one allocation takes (the allocator counts in 32 bits). */
 #define LOCAL_RUN_MAX			0x80000000ULL
-
-/*
- * The registers of the display controller (DISP2) the start reads to
- * find what a boot display reads of memory, at offsets from the block:
- * DC_CAPS with its cursor-plane bit, CTRL with its ENABLE bit, STATUS
- * with its bit for a pending flip of plane 0, the image being scanned
- * out, the image a pending flip will take, its row pitch, its size
- * ([15:0] width, [31:16] height), and the cursor's image, which is 64
- * rows 256 bytes apart.
- *
- * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 13.2, the
- * register table and the cursor plane's image; section 13.3, the
- * handover).
- */
-#define DISPLAY_DC_CAPS			0x08U
-#define DISPLAY_DC_CAPS_CURSOR		(1U << 8)
-#define DISPLAY_CTRL			0x10U
-#define DISPLAY_CTRL_ENABLE		(1U << 0)
-#define DISPLAY_STATUS			0x14U
-#define DISPLAY_STATUS_FLIP_PENDING	(1U << 29)
-#define DISPLAY_FB_BASE			0x20U
-#define DISPLAY_FB_NEXT			0x24U
-#define DISPLAY_FB_STRIDE		0x28U
-#define DISPLAY_FB_SIZE			0x2CU
-#define DISPLAY_HEIGHT_SHIFT		16U
-#define DISPLAY_CURSOR_BASE		0xA0U
-#define DISPLAY_CURSOR_BYTES		(64U * 256U)
-
-/*
- * WINDOW_CTRL's ENABLE bit in the MEM block: the local window is open.
- *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 11.3,
- * the MEM capability's registers).
- */
-#define WINDOW_CTRL_ENABLE		(1U << 0)
 
 /*
  * The uncached views of RAM.
@@ -422,13 +389,58 @@ ghci_memory_alloc_local(
 }
 
 /*
+ * Takes a run of the GPU's local memory, not cleared, as
+ * ghci_memory_alloc_local() does, for a caller that holds the device's
+ * lock (the recovery's replay).
+ */
+int
+ghci_memory_alloc_local_locked(
+	struct ghci_device *device,
+	uint64_t bytes,
+	struct ghci_allocation **result)
+{
+	struct ghci_allocation *allocation;
+	uint32_t offset;
+	int error;
+
+	/* A device without local memory in use. */
+	if (!device->local_ready)
+		return ENOTSUP;
+
+	/* A run the allocator can count, in whole pages. */
+	bytes = (bytes + GHCI_PAGE_BYTES - 1U) & ~(uint64_t)(GHCI_PAGE_BYTES - 1U);
+	if (bytes == 0U || bytes > LOCAL_RUN_MAX)
+		return ENOMEM;
+
+	/* The record of the allocation. */
+	allocation = kern_calloc(1U, sizeof(*allocation));
+	if (allocation == NULL)
+		return ENOMEM;
+
+	/* The run, first fit on a page; no room is ENOMEM. */
+	error = ghci_range_alloc(&device->local_map, (uint32_t)bytes, GHCI_PAGE_BYTES, &offset);
+	if (error != 0) {
+		kern_free(allocation);
+		return ENOMEM;
+	}
+
+	/* Succeeded: the run is the caller's, at its local address. */
+	allocation->kind = GHCI_MEMORY_LOCAL;
+	allocation->bus = device->caps.local_base + offset;
+	allocation->bytes = bytes;
+	allocation->view = NULL;
+	*result = allocation;
+	return 0;
+}
+
+/*
  * Starts the use of the GPU's local memory and handles the boot
  * display, before the ring runs.
  *
- * What a boot display the firmware left running reads of local memory
- * is found first.  On a discrete device the allocator of local memory
- * starts, with those ranges kept out of it.  A device that is not
- * discrete, whose LOCAL_BASE is not on a page, or whose allocator cannot
+ * The local memory the firmware reserved (MEM_FW_VRAM) is found first.
+ * On a discrete device the allocator of local memory starts, with that
+ * range kept out of it.  A device that is not
+ * discrete, whose MEM_VRAM_BASE is not on a page, or whose allocator cannot
  * be made keeps everything in host memory.  The local window stays open
  * while the boot console may write a kept boot framebuffer through it,
  * and is closed otherwise.  The caller owns the device alone.  Returns 0; a failure
@@ -450,7 +462,7 @@ ghci_memory_local_start(
 	device->window_users = 0U;
 	device->window_open = 0;
 
-	/* What a boot display reads of local memory, which the boot console may still write. */
+	/* The firmware's reservation of local memory, which the boot console may still write. */
 	boot_ranges(device);
 	if (device->boot_count != 0U)
 		device->boot_reserved = 1;
@@ -461,7 +473,7 @@ ghci_memory_local_start(
 	if (discrete && !walker)
 		kern_logf("ghci: %s: local memory not used without a page-table walker\n", device->name);
 
-	/* Local memory is handed out in pages, from a LOCAL_BASE on a page. */
+	/* Local memory is handed out in pages, from a MEM_VRAM_BASE on a page. */
 	aligned = (device->caps.local_base & (GHCI_PAGE_BYTES - 1U)) == 0U;
 	if (discrete && walker && !aligned)
 		kern_logf("ghci: %s: local memory at %llx not on a page; local memory not used\n",
@@ -510,7 +522,7 @@ ghci_memory_local_start(
 
 /*
  * Ends the use of local memory at the detach, after the quarantine went:
- * the allocator goes when nothing but the boot ranges is in it.  The
+ * the allocator goes when nothing but the firmware's ranges is in it.  The
  * window keeps what it was (a boot console may still use it).
  */
 void
@@ -524,10 +536,8 @@ ghci_memory_local_stop(
 	if (device->local_extents == NULL)
 		return;
 
-	/* A run still out (one the quarantine kept) keeps the table, so that its free finds it. */
-	kept = 0U;
-	if (device->boot_reserved)
-		kept = device->boot_count;
+	/* A run still out besides the firmware's (one the quarantine kept) keeps the table, so that its free finds it. */
+	kept = device->boot_count;
 	if (device->local_map.count > kept) {
 		kern_logf("ghci: %s: %u local runs still out at the detach\n",
 		    device->name,
@@ -541,7 +551,7 @@ ghci_memory_local_stop(
 }
 
 /*
- * Reports the bytes of local memory the driver hands out: LOCAL_SIZE on a
+ * Reports the bytes of local memory the driver hands out: MEM_VRAM_SIZE on a
  * discrete device whose local memory is in use, else 0.
  */
 uint64_t
@@ -557,44 +567,32 @@ ghci_memory_local_bytes(
 }
 
 /*
- * Gives what the boot display read of local memory back to the allocator
- * once the driver's own first flip has been taken, and closes the local
- * window, which nothing else uses.
+ * Ends the boot console's use of the local window once the driver's own
+ * first flip has been taken, and closes the window, which nothing else
+ * uses.  The firmware's reservation stays out of the allocator for good:
+ * the firmware keeps it, and no page table may lie in it.
  *
  * The caller holds no lock: the function takes the device's lock, and
  * the interrupt's for the window.  It is called once nothing draws to the
- * boot framebuffer any more (a framebuffer console, a panic's output),
- * as the range may be handed out at once.
+ * boot framebuffer any more (a framebuffer console, a panic's output).
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.3, the release after the first flip was taken, and the window closed
- * if unused).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
+ * window kept open until the takeover, and MEM_FW_VRAM reserved for the
+ * device's firmware after it; section 11.2, page-table memory never
+ * overlaps MEM_FW_VRAM).
  */
 void
 ghci_memory_boot_release(
 	struct ghci_device *device)
 {
-	unsigned index;
 	int released;
-	int error;
 
-	/* The ranges, once. */
+	/* The boot console's use, once; the ranges stay out of the allocator. */
 	mutex_lock(&device->lock);
 
 	released = 0;
 	if (device->boot_reserved) {
-		for (index = 0U; index < device->boot_count; index++) {
-			error = 0;
-			if (device->local_ready)
-				error = ghci_range_free(&device->local_map, device->boot_offset[index]);
-			if (error != 0)
-				kern_logf("ghci: %s: boot range at %x not in the allocator (%d)\n",
-				    device->name,
-				    (unsigned)device->boot_offset[index],
-				    error);
-		}
 		device->boot_reserved = 0;
-		device->boot_count = 0U;
 		released = 1;
 	}
 
@@ -607,17 +605,20 @@ ghci_memory_boot_release(
 
 /*
  * Reports the end of the host addresses the driver gives the GPU: 4 GiB,
- * or HOST_LIMIT when the GPU reports a lower one.
+ * or HOST_LIMIT when the GPU reports a lower one.  HOST_LIMIT 0 lets the
+ * GPU reach every address of PA_BITS; the driver still keeps to the low
+ * 4 GiB, which a GPU without a walker reaches from every unit.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 11.3,
- * the MEM capability's HOST_LIMIT).
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 11.3,
+ * MEM_HOST_LIMIT, 0 for the whole of PA_BITS; section 11.2, the units of
+ * a flat GPU reach max(VA_BITS, 32) bits).
  */
 uint64_t
 ghci_memory_limit(
 	const struct ghci_device *device)
 {
-	/* A GPU that reports no limit is given the whole 32-bit range. */
-	if (device->caps.host_limit == 0U)
+	/* A GPU that reports no limit, or one above 4 GiB, is given the 32-bit range. */
+	if (device->caps.host_limit == 0U || device->caps.host_limit > ADDRESS_SPACE_END)
 		return ADDRESS_SPACE_END;
 
 	/* Succeeded: the limit the GPU reported. */
@@ -626,8 +627,8 @@ ghci_memory_limit(
 
 /*
  * Reports whether a run of RAM lies outside the GPU's local range: 1 when
- * it does.  The GPU routes every physical address in [LOCAL_BASE,
- * LOCAL_BASE + LOCAL_SIZE) to its local memory, so a host run there
+ * it does.  The GPU routes every physical address in [MEM_VRAM_BASE,
+ * MEM_VRAM_BASE + MEM_VRAM_SIZE) to its local memory, so a host run there
  * could not be reached.
  *
  * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 11.3,
@@ -703,85 +704,47 @@ host_view(
 }
 
 /*
- * Finds what a boot display the firmware left running reads of local
- * memory, into the device's boot ranges: the display controller (DISP2)
- * found enabled reads the image it scans out, the image a pending flip
- * of plane 0 will take and the cursor's image.  An image in host memory
- * needs nothing of the driver: the boot memory map already keeps it from
- * the kernel's allocator.  A DISP capability (ID 1) is not GHCI 1.0's
- * and is not read.
+ * Keeps the local memory the firmware reserved (MEM_FW_VRAM, a boot
+ * framebuffer the firmware's display may still read and the boot console
+ * may still write) in the device's boot ranges, so that the allocator
+ * never hands it out.  A device without it keeps nothing.
  *
- * Procedure referenced: amaterrace-gpu 93a7ac06 ghci.md (section 13.3,
- * the boot framebuffer of a DISP2 controller read from FB_BASE,
- * FB_STRIDE and FB_SIZE and its range kept; section 13.1, DISP not
- * defined).
+ * Procedure referenced: lumiere-gpu 78d1b6b7 ghci.md (section 11.3, the
+ * MEM window's MEM_FW_VRAM_BASE and MEM_FW_VRAM_SIZE; section 11.2, page
+ * table memory never overlaps it).
  */
 static void
 boot_ranges(
 	struct ghci_device *device)
 {
-	uint32_t block;
-	uint32_t ctrl;
-	uint32_t status;
-	uint32_t caps;
 	uint32_t offset;
 	uint32_t length;
-	uint64_t address;
-	uint64_t stride;
-	uint64_t height;
-	uint64_t frame;
 	int kept;
 
-	/* The display controller; without it or without local memory, nothing to keep. */
-	block = device->caps.block_offset[GHCI_EXTCAP_ID_DISP2];
-	if (block == 0U || device->caps.local_bytes == 0U)
+	/* Without local memory or a firmware reservation, nothing to keep. */
+	if (device->caps.local_bytes == 0U || device->caps.fw_bytes == 0U)
 		return;
 
-	/* A controller found disabled reads nothing. */
-	ctrl = ghci_read(device, block + DISPLAY_CTRL);
-	if ((ctrl & DISPLAY_CTRL_ENABLE) == 0U)
-		return;
-
-	/* One image of plane 0: rows of the pitch, as many as the height. */
-	stride = ghci_read(device, block + DISPLAY_FB_STRIDE);
-	height = ghci_read(device, block + DISPLAY_FB_SIZE) >> DISPLAY_HEIGHT_SHIFT;
-	frame = stride * height;
-
-	/* The image being scanned out. */
-	address = ghci_read(device, block + DISPLAY_FB_BASE);
-	kept = boot_range(device, address, frame, &offset, &length);
-	if (kept) {
-		boot_add(device, offset, length);
-		kern_logf("ghci: %s: boot framebuffer at %llx (%u bytes) kept\n",
+	/* The reservation's part of local memory, in whole pages. */
+	kept = boot_range(device, device->caps.fw_base, device->caps.fw_bytes, &offset, &length);
+	if (!kept) {
+		kern_logf("ghci: %s: firmware VRAM at %llx outside local memory\n",
 		    device->name,
-		    (unsigned long long)address,
-		    (unsigned)length);
-	} else if (frame != 0U) {
-		kern_logf("ghci: %s: boot framebuffer at %llx in host memory\n", device->name, (unsigned long long)address);
+		    (unsigned long long)device->caps.fw_base);
+		return;
 	}
 
-	/* The image a pending flip of plane 0 will take at the next vsync. */
-	status = ghci_read(device, block + DISPLAY_STATUS);
-	if ((status & DISPLAY_STATUS_FLIP_PENDING) != 0U) {
-		address = ghci_read(device, block + DISPLAY_FB_NEXT);
-		kept = boot_range(device, address, frame, &offset, &length);
-		if (kept)
-			boot_add(device, offset, length);
-	}
-
-	/* The cursor's image, on a controller with the cursor plane. */
-	caps = ghci_read(device, block + DISPLAY_DC_CAPS);
-	if ((caps & DISPLAY_DC_CAPS_CURSOR) != 0U) {
-		address = ghci_read(device, block + DISPLAY_CURSOR_BASE);
-		kept = boot_range(device, address, DISPLAY_CURSOR_BYTES, &offset, &length);
-		if (kept)
-			boot_add(device, offset, length);
-	}
+	/* Succeeded: the reservation is kept. */
+	boot_add(device, offset, length);
+	kern_logf("ghci: %s: firmware VRAM at %llx (%u bytes) kept\n",
+	    device->name,
+	    (unsigned long long)device->caps.fw_base,
+	    (unsigned)length);
 }
 
 /*
  * Reports the part of [address, address + bytes) in local memory, in
- * whole pages from LOCAL_BASE and cut to local memory, in offset and
+ * whole pages from MEM_VRAM_BASE and cut to local memory, in offset and
  * length.  Returns 1 when the range meets local memory, else 0.
  */
 static int
@@ -815,7 +778,7 @@ boot_range(
 	if (end > local_end)
 		end = local_end;
 
-	/* In whole pages from LOCAL_BASE, cut to local memory. */
+	/* In whole pages from MEM_VRAM_BASE, cut to local memory. */
 	first = (start - device->caps.local_base) & ~(uint64_t)(GHCI_PAGE_BYTES - 1U);
 	last = (end - device->caps.local_base + GHCI_PAGE_BYTES - 1U) & ~(uint64_t)(GHCI_PAGE_BYTES - 1U);
 	if (last > device->caps.local_bytes)
@@ -963,14 +926,12 @@ window_users_change(
 	int change)
 {
 	unsigned long irq;
-	uint32_t block;
+	int has_window;
 	int unbalanced;
 	int open;
 
-	/* The MEM block, with a window. */
-	block = device->caps.block_offset[GHCI_EXTCAP_ID_MEM];
-	if (device->caps.window_bytes == 0U)
-		block = 0U;
+	/* The MEM window, with a local window. */
+	has_window = device->caps.window_bytes != 0U;
 
 	/* The count and the register, in one section. */
 	irq = spin_lock_irqsave(&device->irq_lock);
@@ -983,9 +944,9 @@ window_users_change(
 	if (change < 0 && device->window_users != 0U)
 		device->window_users--;
 	open = device->window_users != 0U;
-	if (block != 0U) {
-		ghci_write(device, block + GHCI_MEM_WINDOW_CTRL, open ? WINDOW_CTRL_ENABLE : 0U);
-		(void)ghci_read(device, block + GHCI_MEM_WINDOW_CTRL);
+	if (has_window) {
+		ghci_write(device, GHCI_REG_MEM_WINDOW_CTRL, open ? GHCI_MEM_WINDOW_ENABLE : 0U);
+		(void)ghci_read(device, GHCI_REG_MEM_WINDOW_CTRL);
 		device->window_open = open;
 	}
 

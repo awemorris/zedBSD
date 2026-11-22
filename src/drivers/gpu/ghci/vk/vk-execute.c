@@ -2784,7 +2784,7 @@ subpass_begin(
 			store = (uint32_t)VK_ATTACHMENT_STORE_OP_STORE;
 		desc.colors[index].va = view->va + view_layer(exec, view);
 		desc.colors[index].row_pitch = view->row_pitch;
-		desc.colors[index].format = attachment->format;
+		desc.colors[index].format = ghci_vk_format_hw(attachment->format);
 		desc.colors[index].ops = load | (store << 2);
 		if (load != (uint32_t)VK_ATTACHMENT_LOAD_OP_CLEAR)
 			continue;
@@ -2804,7 +2804,7 @@ subpass_begin(
 		attachment = &exec->pass.pass->attachments[at];
 		desc.depth_stencil.va = view->va + view_layer(exec, view);
 		desc.depth_stencil.row_pitch = view->row_pitch;
-		desc.depth_stencil.format = attachment->format;
+		desc.depth_stencil.format = ghci_vk_format_hw(attachment->format);
 		load = pass_load(attachment, exec->pass.subpass, attachment->load);
 		if (clear != NULL)
 			load = clear->depth ? (uint32_t)VK_ATTACHMENT_LOAD_OP_CLEAR : (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -2836,7 +2836,7 @@ subpass_begin(
 		(void)ghci_vk_format_traits(exec->pass.pass->attachments[at].format, &traits);
 		desc.resolve.va = view->va + view_layer(exec, view);
 		desc.resolve.row_pitch = view->row_pitch;
-		desc.resolve.format = exec->pass.pass->attachments[at].format;
+		desc.resolve.format = ghci_vk_format_hw(exec->pass.pass->attachments[at].format);
 		desc.resolve.ops = (traits & GHCI_VK_FORMAT_INTEGER) != 0U ? 3U : 0U;
 	}
 
@@ -2980,7 +2980,7 @@ subpass_end(
 		transfer.dst.y = exec->pass.area[1];
 		transfer.width = exec->pass.area[2];
 		transfer.height = exec->pass.area[3];
-		transfer.format = exec->pass.pass->attachments[references->color[index]].format;
+		transfer.format = ghci_vk_format_hw(exec->pass.pass->attachments[references->color[index]].format);
 		transfer.resolve_mode = (traits & GHCI_VK_FORMAT_INTEGER) != 0U ? 3U : 0U;
 		transfer.samples = exec->pass.pass->attachments[references->color[index]].samples;
 		put(exec, words, ghci_cmd_resolve_image(words, &transfer));
@@ -3558,7 +3558,7 @@ clear_slice(
 	if (target->depth) {
 		desc.depth_stencil.va = target->va;
 		desc.depth_stencil.row_pitch = target->pitch;
-		desc.depth_stencil.format = target->format;
+		desc.depth_stencil.format = ghci_vk_format_hw(target->format);
 		if ((aspects & VK_IMAGE_ASPECT_DEPTH_BIT) != 0U) {
 			desc.depth_stencil.ops |= (uint32_t)VK_ATTACHMENT_LOAD_OP_CLEAR;
 			flags |= GHCI_CLEAR_DEPTH;
@@ -3574,7 +3574,7 @@ clear_slice(
 		kern_memcpy(table, value, 16U);
 		desc.colors[0].va = target->va;
 		desc.colors[0].row_pitch = target->pitch;
-		desc.colors[0].format = target->format;
+		desc.colors[0].format = ghci_vk_format_hw(target->format);
 		desc.colors[0].ops = (uint32_t)VK_ATTACHMENT_LOAD_OP_CLEAR;
 		flags |= 1U;
 	}
@@ -4208,7 +4208,7 @@ copy_image(
 			transfer.src.y = (uint32_t)region.offsets[0][1];
 			transfer.dst.x = (uint32_t)region.offsets[2][0];
 			transfer.dst.y = (uint32_t)region.offsets[2][1];
-			transfer.format = source->format;
+			transfer.format = ghci_vk_format_hw(source->format);
 
 			/* A blit's corners and formats. */
 			if (number == GPU_OP_CMD_BLIT_IMAGE) {
@@ -4216,7 +4216,7 @@ copy_image(
 				transfer.src_y1 = (uint32_t)region.offsets[1][1];
 				transfer.dst_x1 = (uint32_t)region.offsets[3][0];
 				transfer.dst_y1 = (uint32_t)region.offsets[3][1];
-				transfer.dst_format = destination->format;
+				transfer.dst_format = ghci_vk_format_hw(destination->format);
 				transfer.filter = filter;
 				put(exec, words, ghci_cmd_blit(words, &transfer));
 				continue;
@@ -4400,7 +4400,7 @@ meta_draw(
 	kern_memset(&desc, 0, sizeof(desc));
 	desc.colors[0].va = target->va;
 	desc.colors[0].row_pitch = target->pitch;
-	desc.colors[0].format = target->format;
+	desc.colors[0].format = ghci_vk_format_hw(target->format);
 	desc.colors[0].ops = (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD | ((uint32_t)VK_ATTACHMENT_STORE_OP_STORE << 2);
 	desc.width = target->width;
 	desc.height = target->height;
@@ -4484,7 +4484,7 @@ meta_texture(
 	desc.width = ghci_layout_extent(image->layout.width, level);
 	desc.height = ghci_layout_extent(image->layout.height, level);
 	desc.depth = 1U;
-	desc.format = image->format;
+	desc.format = ghci_vk_format_hw(image->format);
 	desc.mip_levels = 1U;
 	desc.row_pitch = ghci_layout_row(&image->layout, level);
 	desc.slice_pitch = ghci_layout_layer_stride(&image->layout);
@@ -4519,7 +4519,7 @@ meta_texture_3d(
 	desc.width = ghci_layout_extent(image->layout.width, level);
 	desc.height = ghci_layout_extent(image->layout.height, level);
 	desc.depth = ghci_layout_extent(image->layout.depth, level);
-	desc.format = image->format;
+	desc.format = ghci_vk_format_hw(image->format);
 	desc.mip_levels = 1U;
 	desc.row_pitch = ghci_layout_row(&image->layout, level);
 	desc.slice_pitch = ghci_layout_plane(&image->layout, level);
@@ -5210,7 +5210,7 @@ copy_buffer_image(
 			image_side->y = (uint32_t)offset[1];
 			transfer.width = extent[0];
 			transfer.height = extent[1];
-			transfer.format = image->format;
+			transfer.format = ghci_vk_format_hw(image->format);
 			if (to_image)
 				put(exec, words, ghci_cmd_copy_buffer_to_image(words, &transfer));
 			else

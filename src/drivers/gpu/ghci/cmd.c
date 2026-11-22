@@ -112,52 +112,68 @@ ghci_cmd_nop(
 }
 
 /*
- * Writes a VM_MAP of host or local pages into a session's address space.
+ * Writes a VM_MAP of host or local pages into a session's address space,
+ * with the memory given for its intermediate page tables and the place
+ * of its completion record.
  */
 uint32_t
 ghci_cmd_vm_map(
 	uint32_t *out,
-	uint32_t session,
-	uint32_t flags,
-	uint64_t va,
-	uint64_t bus,
-	uint64_t bytes)
+	const struct ghci_map_args *args)
 {
 	/* Refuses a session number the GPU does not have. */
-	if (session > SESSION_MAX)
+	if (args->session > SESSION_MAX)
+		return 0U;
+
+	/* Refuses a flag past WC: bits 31 to 5 are reserved and fault the processor. */
+	if ((args->flags & ~GHCI_VM_FLAGS_MASK) != 0U)
 		return 0U;
 
 	/* Refuses an empty range and addresses not on a 4 KiB page. */
-	if (bytes == 0U)
+	if (args->bytes == 0U)
 		return 0U;
-	if (((va | bus | bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
+	if (((args->va | args->bus | args->bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
+		return 0U;
+
+	/* Refuses a record off 32 bytes. */
+	if ((args->comp % GHCI_MAP_COMP_BYTES) != 0U)
 		return 0U;
 
 	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 7.3, CMD_VM_MAP: session, flags, reserved, VA, phys, size).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_VM_MAP: session, flags, reserved, VA, phys, size, pt_mem_pa,
+	 * pt_mem_bytes, reserved, comp_pa).
 	 */
 	out[0] = ghci_cmd_header(GHCI_OP_VM_MAP, GHCI_DW_VM_MAP, 0U);
-	out[1] = session;
-	out[2] = flags;
+	out[1] = args->session;
+	out[2] = args->flags;
 	out[3] = 0U;
-	put64(&out[4], va);
-	put64(&out[6], bus);
-	put64(&out[8], bytes);
+	put64(&out[4], args->va);
+	put64(&out[6], args->bus);
+	put64(&out[8], args->bytes);
+	put64(&out[10], args->pt);
+	if (args->pt_bytes == 0U)
+		put64(&out[10], 0U);
+	out[12] = args->pt_bytes;
+	out[13] = 0U;
+	put64(&out[14], args->comp);
 
-	/* Succeeded: ten dwords. */
+	/* Succeeded: sixteen dwords. */
 	return GHCI_DW_VM_MAP;
 }
 
 /*
- * Writes a VM_UNMAP of a range of a session's address space.
+ * Writes a VM_UNMAP of a range of a session's address space, with the
+ * buffer its completion record and the freed tables are written to.
  */
 uint32_t
 ghci_cmd_vm_unmap(
 	uint32_t *out,
 	uint32_t session,
 	uint64_t va,
-	uint64_t bytes)
+	uint64_t bytes,
+	uint64_t comp,
+	uint32_t comp_bytes)
 {
 	/* Refuses a session number the GPU does not have. */
 	if (session > SESSION_MAX)
@@ -169,9 +185,14 @@ ghci_cmd_vm_unmap(
 	if (((va | bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
 		return 0U;
 
+	/* Refuses a record buffer that is not whole 64-byte lines on a line. */
+	if (comp_bytes == 0U || (comp_bytes % GHCI_UNMAP_COMP_ALIGN) != 0U || (comp % GHCI_UNMAP_COMP_ALIGN) != 0U)
+		return 0U;
+
 	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 7.3, CMD_VM_UNMAP: session, flags, reserved, VA, size).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_VM_UNMAP: session, flags, reserved, VA, size, comp_pa,
+	 * comp_bytes, reserved).
 	 */
 	out[0] = ghci_cmd_header(GHCI_OP_VM_UNMAP, GHCI_DW_VM_UNMAP, 0U);
 	out[1] = session;
@@ -179,32 +200,122 @@ ghci_cmd_vm_unmap(
 	out[3] = 0U;
 	put64(&out[4], va);
 	put64(&out[6], bytes);
+	put64(&out[8], comp);
+	out[10] = comp_bytes;
+	out[11] = 0U;
 
-	/* Succeeded: eight dwords. */
+	/* Succeeded: twelve dwords. */
 	return GHCI_DW_VM_UNMAP;
 }
 
 /*
- * Writes a SESSION_OPEN of a client session.
+ * Writes a SESSION_OPEN of a client session, with the memory of its
+ * initial page table.
  */
 uint32_t
 ghci_cmd_session_open(
 	uint32_t *out,
 	uint32_t session,
-	uint32_t flags)
+	uint32_t flags,
+	uint64_t root,
+	uint32_t root_bytes)
 {
 	/* Refuses session 0, which is always open, and numbers past 15. */
 	if (session == 0U || session > SESSION_MAX)
 		return 0U;
 
-	/* Writes the session and its flags (bit 0, a protected context). */
+	/*
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_SESSION_OPEN: session, flags, init_pt_pa, init_pt_bytes).
+	 */
 	out[0] = ghci_cmd_header(GHCI_OP_SESSION_OPEN, GHCI_DW_SESSION_OPEN, 0U);
 	out[1] = session;
 	out[2] = flags;
-	out[3] = 0U;
+	put64(&out[3], root);
+	out[5] = root_bytes;
 
-	/* Succeeded: four dwords. */
+	/* Succeeded: six dwords. */
 	return GHCI_DW_SESSION_OPEN;
+}
+
+/*
+ * Writes a FAULT_LOG_SETUP that turns the fault log ring on with entries
+ * records at ring, or off when entries is 0.  The next sequence is not
+ * written back (COMP_WRITE 0).
+ */
+uint32_t
+ghci_cmd_fault_log_setup(
+	uint32_t *out,
+	uint64_t ring,
+	uint32_t entries)
+{
+	uint32_t flags;
+
+	/* Refuses a ring off 32 bytes, and one of fewer than two records or not a power of two. */
+	flags = 0U;
+	if (entries != 0U) {
+		if ((ring % GHCI_FAULT_RECORD_BYTES) != 0U || entries < 2U || (entries & (entries - 1U)) != 0U)
+			return 0U;
+		flags = GHCI_FAULT_LOG_ENABLE;
+	}
+
+	/*
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_FAULT_LOG_SETUP: ring_pa, capacity_entries, reserved, comp_pa).
+	 */
+	out[0] = ghci_cmd_header(GHCI_OP_FAULT_LOG_SETUP, GHCI_DW_FAULT_LOG_SETUP, flags);
+	put64(&out[1], entries != 0U ? ring : 0U);
+	out[3] = entries;
+	out[4] = 0U;
+	put64(&out[5], 0U);
+
+	/* Succeeded: seven dwords. */
+	return GHCI_DW_FAULT_LOG_SETUP;
+}
+
+/*
+ * Writes a VM_QUERY_PT_MEM, which has the processor write the sizes of
+ * the page-table memory it needs to a buffer of whole 64-byte lines.
+ */
+uint32_t
+ghci_cmd_vm_query_pt_mem(
+	uint32_t *out,
+	uint64_t bus,
+	uint32_t bytes)
+{
+	/* Refuses a buffer that is empty, not in whole lines or off a line. */
+	if (bytes == 0U || (bytes % GHCI_QUERY_CAPS_ALIGN) != 0U || (bus % GHCI_QUERY_CAPS_ALIGN) != 0U)
+		return 0U;
+
+	/* Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3, CMD_VM_QUERY_PT_MEM: dst_pa, dst_bytes, reserved). */
+	out[0] = ghci_cmd_header(GHCI_OP_VM_QUERY_PT_MEM, GHCI_DW_VM_QUERY_PT_MEM, 0U);
+	put64(&out[1], bus);
+	out[3] = bytes;
+	out[4] = 0U;
+
+	/* Succeeded: five dwords. */
+	return GHCI_DW_VM_QUERY_PT_MEM;
+}
+
+/*
+ * Writes an MMU_ENABLE, which takes session 0's initial page table and
+ * turns the MMU on.
+ */
+uint32_t
+ghci_cmd_mmu_enable(
+	uint32_t *out,
+	uint64_t root,
+	uint32_t root_bytes)
+{
+	/* Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3, CMD_MMU_ENABLE: flags, init_pt_pa, init_pt_bytes, reserved). */
+	out[0] = ghci_cmd_header(GHCI_OP_MMU_ENABLE, GHCI_DW_MMU_ENABLE, 0U);
+	out[1] = 0U;
+	put64(&out[2], root);
+	out[4] = root_bytes;
+	out[5] = 0U;
+
+	/* Succeeded: six dwords. */
+	return GHCI_DW_MMU_ENABLE;
 }
 
 /*
@@ -815,6 +926,56 @@ ghci_cmd_write_timestamp(
 
 	/* Succeeded: four dwords. */
 	return GHCI_DW_WRITE_TIMESTAMP;
+}
+
+/*
+ * Writes a WRITE_MEM: a 32-bit (or with GHCI_WRITE_MEM_64 a 64-bit)
+ * value to a session address, at the top of the pipe or, with
+ * GHCI_WRITE_MEM_BOTTOM, after all earlier work (and the caches' flush
+ * with GHCI_WRITE_MEM_FLUSH).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_WRITE_MEM: dst_va, value_lo, value_hi written 0 for a 32-bit write;
+ * a stage of 2 or 3, a reserved flag, TOP with FLUSH_CACHES and an
+ * unaligned dst_va fault the processor).
+ */
+uint32_t
+ghci_cmd_write_mem(
+	uint32_t *out,
+	uint32_t flags,
+	uint64_t va,
+	uint64_t value)
+{
+	uint32_t stage;
+
+	/* Refuses a stage past the bottom and a flag the command does not have. */
+	stage = flags & 3U;
+	if (stage > GHCI_WRITE_MEM_BOTTOM)
+		return 0U;
+	if ((flags & ~(3U | GHCI_WRITE_MEM_64 | GHCI_WRITE_MEM_FLUSH)) != 0U)
+		return 0U;
+
+	/* Refuses the flush at the top of the pipe, which has no earlier work to flush. */
+	if (stage == GHCI_WRITE_MEM_TOP && (flags & GHCI_WRITE_MEM_FLUSH) != 0U)
+		return 0U;
+
+	/* Refuses an address off 4 bytes, or off 8 bytes for a 64-bit write. */
+	if ((va & 3U) != 0U)
+		return 0U;
+	if ((flags & GHCI_WRITE_MEM_64) != 0U && (va & 7U) != 0U)
+		return 0U;
+
+	/* A 32-bit write leaves the high word 0, as the specification asks of software. */
+	if ((flags & GHCI_WRITE_MEM_64) == 0U)
+		value &= 0xFFFFFFFFULL;
+
+	/* Writes the address and the value. */
+	out[0] = ghci_cmd_header(GHCI_OP_WRITE_MEM, GHCI_DW_WRITE_MEM, flags);
+	put64(&out[1], va);
+	put64(&out[3], value);
+
+	/* Succeeded: five dwords. */
+	return GHCI_DW_WRITE_MEM;
 }
 
 /*

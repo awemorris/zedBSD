@@ -878,7 +878,7 @@ device_admit(
 /*
  * Makes the device's record and object and opens its GHCI session.  The
  * result says why a device could not be made: all fifteen sessions in
- * use (VK_ERROR_TOO_MANY_OBJECTS), no room in CP_HEAP's bound
+ * use (VK_ERROR_TOO_MANY_OBJECTS), no memory for the session's page table
  * (VK_ERROR_OUT_OF_DEVICE_MEMORY), no host memory for the session's
  * record (VK_ERROR_OUT_OF_HOST_MEMORY), or a lost GPU
  * (VK_ERROR_INITIALIZATION_FAILED).  Returns 0, or an

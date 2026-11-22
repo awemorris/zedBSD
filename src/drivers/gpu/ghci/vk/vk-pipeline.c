@@ -1786,7 +1786,7 @@ pipeline_pso(
 		order[place] = moved;
 	}
 	for (index = 0U; index < request->attribute_count; index++) {
-		pso->attributes[index].format = request->attributes[order[index]].format;
+		pso->attributes[index].format = ghci_vk_format_hw(request->attributes[order[index]].format);
 		pso->attributes[index].binding = request->attributes[order[index]].binding;
 		pso->attributes[index].per_instance = (request->per_instance >> request->attributes[order[index]].binding) & 1U;
 		pso->attributes[index].offset = request->attributes[order[index]].offset;

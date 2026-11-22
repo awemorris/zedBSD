@@ -6,11 +6,11 @@
  */
 
 /*
- * What a GHCI 1.0 GPU can do: the identification and BOOT_CAPS, the
- * extended capability list and its blocks, decoded from a copy of the
- * register window, and the capability block the command processor
- * writes to memory; and the sizes the driver derives from them (the
- * page table heap, the watchdog and the reset wait).
+ * What a GHCI 1.0 GPU can do: the identification, BOOT_CAPS and the MEM
+ * window, decoded from a copy of the register window, and the capability
+ * block the command processor writes to memory; and the sizes the driver
+ * derives from them (the page table heap, the watchdog and the reset
+ * wait).
  */
 
 #include <stddef.h>
@@ -23,11 +23,8 @@
 /* The pairs of a DEVICE_CAPS bit and a copy of it in another word. */
 #define MIRROR_PAIRS			5U
 
-/* The VA_BITS of the 2-level walk; a wider VA has the 3-level walk. */
+/* A VA of 32 bits or more, of which the driver uses the low 4 GiB. */
 #define VA_BITS_32			32U
-
-/* The address range of the GPU the driver uses: the low 4 GiB. */
-#define DRIVER_VA_BYTES			0x100000000ULL
 
 /* The milliseconds a reset may take when the clock is not known. */
 #define RESET_WAIT_UNKNOWN_MS		10000U
@@ -63,10 +60,13 @@ static const struct caps_mirror caps_mirrors[MIRROR_PAIRS] = {
 };
 
 static uint32_t window_word(const uint32_t *window, uint32_t offset);
+static uint64_t window_quad(const uint32_t *window, uint32_t offset);
+static int width_known(uint32_t va_encoding, uint32_t pa_encoding);
 static void decode_memory(const uint32_t *window, struct ghci_caps *caps);
 static int block_layout(const uint32_t *words, uint32_t dwords, uint32_t *first, uint32_t *count);
 static void decode_words(const uint32_t *words, struct ghci_caps *caps);
 static void check_copies(struct ghci_caps *caps);
+static void check_widths(struct ghci_caps *caps);
 static void check_stages(struct ghci_caps *caps);
 static uint32_t mirror_word(const struct ghci_caps *caps, uint32_t word);
 static int bit_disagrees(uint32_t authority, uint32_t copy);
@@ -97,18 +97,21 @@ ghci_caps_identify(
 
 /*
  * Decodes what the register window says before the processor runs:
- * BOOT_CAPS, the extended capability list and the MEM block.
+ * BOOT_CAPS and the MEM window.
  *
  * The record is cleared first, so that the words of the capability block
- * read as absent until ghci_caps_block() fills them.  A list that is
- * malformed leaves the device without blocks rather than refusing it.
+ * read as absent until ghci_caps_block() fills them.  Returns 0, ENODEV
+ * for a window that is not GHCI 1.0, or ENODEV for address widths whose
+ * encoding is reserved.
  */
 int
 ghci_caps_boot(
 	const uint32_t *window,
 	struct ghci_caps *caps)
 {
-	uint32_t found;
+	uint32_t va_encoding;
+	uint32_t pa_encoding;
+	int known;
 	int error;
 
 	/* Refuses a window that is not a GHCI 1.0 GPU. */
@@ -116,28 +119,27 @@ ghci_caps_boot(
 	if (error != 0)
 		return error;
 
-	/* Clears the record so that a block the list does not name reads as absent. */
+	/* Clears the record so that what the window does not say reads as absent. */
 	*caps = (struct ghci_caps){ 0 };
 
 	/*
-	 * The one capability register and the widths it encodes.
+	 * BOOT_CAPS and the widths it encodes; a reserved encoding fails the
+	 * attach.
 	 *
-	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.0,
-	 * BOOT_CAPS [11:8] VA_BITS - 30, [15:12] PA_BITS - 40).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.0,
+	 * BOOT_CAPS [11:8] VA_BITS - 30, [15:12] PA_BITS - 40, and the attach
+	 * that fails on a reserved encoding).
 	 */
 	caps->boot_caps = window_word(window, GHCI_REG_BOOT_CAPS);
-	caps->va_bits = GHCI_BOOT_VA_BITS_BASE + ((caps->boot_caps >> GHCI_BOOT_VA_BITS_SHIFT) & GHCI_BOOT_BITS_MASK);
-	caps->pa_bits = GHCI_BOOT_PA_BITS_BASE + ((caps->boot_caps >> GHCI_BOOT_PA_BITS_SHIFT) & GHCI_BOOT_BITS_MASK);
+	va_encoding = (caps->boot_caps >> GHCI_BOOT_VA_BITS_SHIFT) & GHCI_BOOT_BITS_MASK;
+	pa_encoding = (caps->boot_caps >> GHCI_BOOT_PA_BITS_SHIFT) & GHCI_BOOT_BITS_MASK;
+	known = width_known(va_encoding, pa_encoding);
+	if (!known)
+		return ENODEV;
+	caps->va_bits = GHCI_BOOT_VA_BITS_BASE + va_encoding;
+	caps->pa_bits = GHCI_BOOT_PA_BITS_BASE + pa_encoding;
 
-	/* Walks the extended capability list; a malformed list leaves no blocks. */
-	error = ghci_extcap_walk(window, caps->block_offset, caps->block_version, &found);
-	if (error != 0) {
-		caps->blocks = 0U;
-		return 0;
-	}
-
-	/* Reads the memory configuration of the MEM block. */
-	caps->blocks = found;
+	/* Reads the memory configuration of the MEM window. */
 	decode_memory(window, caps);
 
 	/* Succeeded: the record holds what the device says before it runs. */
@@ -148,9 +150,10 @@ ghci_caps_boot(
  * Decodes the capability block CMD_QUERY_CAPS wrote: words holds the
  * dwords of the answer buffer, of which the device wrote at most dwords.
  *
- * Returns 0 with the block's words in the record, or EINVAL for a block
- * whose identity, version or size the driver cannot read; the record's
- * block words are then left as ghci_caps_boot() cleared them.
+ * Returns 0 with the block's words in the record, EINVAL for a block
+ * whose identity, version or size the driver cannot read (the record's
+ * block words are then left as ghci_caps_boot() cleared them), or ENODEV
+ * for address widths the block encodes otherwise than BOOT_CAPS.
  */
 int
 ghci_caps_block(
@@ -171,7 +174,19 @@ ghci_caps_block(
 	/* The capability words. */
 	decode_words(words, caps);
 
-	/* The format table: one word per VkFormat, as far as the driver keeps them. */
+	/*
+	 * Widths EXT_CAP_FEATURE encodes otherwise than BOOT_CAPS, or with a
+	 * reserved encoding, fail the attach.
+	 *
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.0,
+	 * the attach fails when BOOT_CAPS and EXT_CAP_FEATURE disagree;
+	 * section 3.2.2, EXT_CAP_FEATURE [3:0] and [7:4]).
+	 */
+	check_widths(caps);
+	if (caps->width_mismatch)
+		return ENODEV;
+
+	/* The format table: one word per GhciFormat, as far as the driver keeps them. */
 	caps->format_count = count;
 	if (caps->format_count > GHCI_CAPS_FORMATS)
 		caps->format_count = GHCI_CAPS_FORMATS;
@@ -231,8 +246,7 @@ ghci_caps_has(
 		bit = caps->device_caps & GHCI_CAP_BLT;
 		break;
 	case GHCI_HAS_DISPLAY:
-		/* The display is the DISP2 block of the list, which the driver reads before the processor runs. */
-		bit = caps->blocks & (1U << GHCI_EXTCAP_ID_DISP2);
+		bit = caps->device_caps & GHCI_CAP_DISP;
 		break;
 	case GHCI_HAS_MSAA:
 		bit = caps->device_caps & GHCI_CAP_MSAA;
@@ -250,7 +264,7 @@ ghci_caps_has(
 		bit = caps->feature & GHCI_FEATURE_MRT_BLEND;
 		break;
 	case GHCI_HAS_HW_CURSOR:
-		bit = caps->feature & GHCI_FEATURE_HW_CURSOR;
+		bit = caps->disp_info & GHCI_DISP_INFO_HAS_CURSOR;
 		break;
 	case GHCI_HAS_ETC2:
 		bit = caps->fmt0 & GHCI_FMT0_ETC2;
@@ -339,128 +353,6 @@ ghci_caps_has(
 }
 
 /*
- * Walks the extended capability list and records where each block is.
- *
- * A list that loops, leaves the list area, has more than eight entries,
- * names a block outside the window or names one ID twice is refused.
- */
-int
-ghci_extcap_walk(
-	const uint32_t *window,
-	uint32_t *offsets,
-	uint32_t *versions,
-	uint32_t *found)
-{
-	uint32_t entry;
-	uint32_t count;
-	uint32_t word0;
-	uint32_t block;
-	uint32_t id;
-	uint32_t next;
-
-	/* Starts with no blocks found. */
-	*found = 0U;
-
-	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 4, the entry: [7:0] ID, [15:8] version, [31:16] the
-	 * distance to the next entry in dwords; word 1 the block offset;
-	 * section 4.1, the list at 0x100..0x13F, eight entries at most).
-	 */
-	entry = window_word(window, GHCI_REG_EXTCAP_PTR);
-	if (entry == 0U)
-		return 0;
-
-	/* Follows the entries until the last one. */
-	for (count = 0U; ; count++) {
-		/* Refuses a list longer than the list area holds. */
-		if (count >= GHCI_EXTCAP_ENTRIES_MAX)
-			return EINVAL;
-
-		/* Refuses an entry outside the list area or not on a dword. */
-		if (entry < GHCI_EXTCAP_LIST_FIRST || entry + 8U > GHCI_EXTCAP_LIST_END)
-			return EINVAL;
-		if ((entry & 3U) != 0U)
-			return EINVAL;
-
-		/* Reads the entry's ID, version and block. */
-		word0 = window_word(window, entry);
-		block = window_word(window, entry + 4U);
-		id = word0 & 0xFFU;
-
-		/* Refuses a block outside the window or not on a dword. */
-		if (block < GHCI_EXTCAP_BLOCK_FIRST || block >= GHCI_WINDOW_BYTES)
-			return EINVAL;
-		if ((block & 3U) != 0U)
-			return EINVAL;
-
-		/* Records an ID the driver knows; a second entry of one ID is malformed. */
-		if (id != 0U && id < GHCI_EXTCAP_IDS) {
-			if ((*found & (1U << id)) != 0U)
-				return EINVAL;
-
-			*found |= 1U << id;
-			offsets[id] = block;
-			versions[id] = (word0 >> 8) & 0xFFU;
-		}
-
-		/* Stops at the last entry; a distance of zero ends the list. */
-		next = word0 >> 16;
-		if (next == 0U)
-			break;
-
-		/* Moves on; the distance counts dwords from this entry. */
-		entry += next * 4U;
-	}
-
-	/* Succeeded: every block the list names is recorded. */
-	return 0;
-}
-
-/*
- * Reports the CP_HEAP bytes one session's root and upper tables may take.
- */
-uint32_t
-ghci_heap_session_bytes(
-	uint32_t va_bits)
-{
-	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 11.2, the 16 KiB root of the 2-level walk; the 8 KiB
-	 * root and the 4 KiB level 1 tables of the 3-level walk).
-	 */
-	if (va_bits <= VA_BITS_32)
-		return GHCI_ROOT_BYTES_VA32;
-
-	/* The 3-level walk: the root and the level 1 tables over the low 4 GiB the driver uses. */
-	return GHCI_ROOT_BYTES_VA40 + (uint32_t)(DRIVER_VA_BYTES / GHCI_L1_SPAN_BYTES) * GHCI_TABLE_BYTES;
-}
-
-/*
- * Reports the CP_HEAP bytes a device needs for every session and chunk.
- *
- * Every session's root and upper tables, a level 0 table for every 2 MiB
- * chunk the driver may use (the low 4 GiB, or all of a narrower VA), and
- * the spare the specification adds.  A VA narrower than 32 bits is
- * counted with the root of the 2-level walk, the largest it may have.
- */
-uint64_t
-ghci_heap_device_bytes(
-	uint32_t va_bits)
-{
-	uint64_t bytes;
-
-	/* Adds the roots and upper tables of all sixteen sessions. */
-	bytes = (uint64_t)GHCI_SESSIONS * ghci_heap_session_bytes(va_bits);
-
-	/* Adds a level 0 table for each chunk the VA holds; a chunk belongs to one session. */
-	bytes += (uint64_t)ghci_va_chunks(va_bits) * GHCI_TABLE_BYTES;
-
-	/* Succeeded: adds the spare the specification's sizing rule keeps. */
-	return bytes + GHCI_HEAP_SPARE_BYTES;
-}
-
-/*
  * Reports the 2 MiB chunks of GPU addresses the driver may use: those of
  * the low 4 GiB, or of the whole VA when it is narrower.
  */
@@ -473,7 +365,7 @@ ghci_va_chunks(
 		return GHCI_CHUNKS;
 
 	/* Succeeded: the chunks of the narrower VA. */
-	return (uint32_t)((1ULL << va_bits) / GHCI_L0_SPAN_BYTES);
+	return (uint32_t)((1ULL << va_bits) / GHCI_CHUNK_BYTES);
 }
 
 /*
@@ -587,24 +479,71 @@ window_word(
 	return window[offset / 4U];
 }
 
-/* Reads the registers of the MEM block, when the list names it. */
+/* Reads a 64-bit register of two words, the low one first. */
+static uint64_t
+window_quad(
+	const uint32_t *window,
+	uint32_t offset)
+{
+	uint64_t low;
+	uint64_t high;
+
+	/* Succeeded: the low word and the high word above it. */
+	low = window_word(window, offset);
+	high = window_word(window, offset + 4U);
+	return low | (high << 32);
+}
+
+/*
+ * Reports whether the VA and PA width encodings are defined ones: 1 when
+ * both are.
+ */
+static int
+width_known(
+	uint32_t va_encoding,
+	uint32_t pa_encoding)
+{
+	/* The defined VA widths: 30, 32 and 40 bits. */
+	if (va_encoding != GHCI_VA_ENC_30 && va_encoding != GHCI_VA_ENC_32 && va_encoding != GHCI_VA_ENC_40)
+		return 0;
+
+	/* Succeeded when the PA width is 40 or 48 bits. */
+	if (pa_encoding != GHCI_PA_ENC_40 && pa_encoding != GHCI_PA_ENC_48)
+		return 0;
+	return 1;
+}
+
+/*
+ * Reads the MEM window, when BOOT_CAPS says it is there: the local
+ * memory, the firmware's part of it, the local window and HOST_LIMIT.
+ * A GPU without it is unified, reaches all host addresses and has no
+ * local window.
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.0,
+ * CAP_BOOT_MEM; section 11.3, the MEM window's 64-bit MEM_VRAM_BASE,
+ * MEM_VRAM_SIZE, MEM_FW_VRAM_BASE, MEM_FW_VRAM_SIZE, MEM_HOST_LIMIT (0 for
+ * the whole of PA_BITS) and MEM_WINDOW_SIZE).
+ */
 static void
 decode_memory(
 	const uint32_t *window,
 	struct ghci_caps *caps)
 {
-	uint32_t base;
-
-	/* A GPU without MEM is unified, reaches host memory below 2 GiB and has no local window. */
-	if ((caps->blocks & (1U << GHCI_EXTCAP_ID_MEM)) == 0U)
+	/* A GPU without MEM is unified. */
+	if ((caps->boot_caps & GHCI_BOOT_MEM) == 0U)
 		return;
 
-	/* The local memory, the window onto it and the host addresses the GPU reaches. */
-	base = caps->block_offset[GHCI_EXTCAP_ID_MEM];
-	caps->local_base = window_word(window, base + GHCI_MEM_LOCAL_BASE);
-	caps->local_bytes = window_word(window, base + GHCI_MEM_LOCAL_SIZE);
-	caps->window_bytes = window_word(window, base + GHCI_MEM_WINDOW_SIZE);
-	caps->host_limit = window_word(window, base + GHCI_MEM_HOST_LIMIT);
+	/* The local memory, the firmware's run of it, the window onto it and the host addresses the GPU reaches. */
+	caps->local_base = window_quad(window, GHCI_REG_MEM_VRAM_BASE);
+	caps->local_bytes = window_quad(window, GHCI_REG_MEM_VRAM_SIZE);
+	caps->fw_base = window_quad(window, GHCI_REG_MEM_FW_VRAM_BASE);
+	caps->fw_bytes = window_quad(window, GHCI_REG_MEM_FW_VRAM_SIZE);
+	caps->window_bytes = window_quad(window, GHCI_REG_MEM_WINDOW_SIZE);
+	caps->host_limit = window_quad(window, GHCI_REG_MEM_HOST_LIMIT);
+	if (caps->local_bytes == 0U) {
+		caps->fw_bytes = 0U;
+		caps->window_bytes = 0U;
+	}
 }
 
 /*
@@ -633,26 +572,26 @@ block_layout(
 
 	/*
 	 * Version 1 or later; a later version keeps every word of version 1
-	 * where it is.  The size counts dwords in whole 64-byte lines.
+	 * where it is.  The size is CAP_DWORDS, 32 + FMT_COUNT.
 	 *
-	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.5,
-	 * BLOCK_INFO: [15:0] version 1, [31:16] the dwords, 192).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.5,
+	 * BLOCK_INFO: [15:0] version 1, [31:16] CAP_DWORDS = 32 + FMT_COUNT).
 	 */
 	version = words[GHCI_CAPS_WORD_INFO] & GHCI_CAPS_VERSION_MASK;
 	size = words[GHCI_CAPS_WORD_INFO] >> GHCI_CAPS_DWORDS_SHIFT;
 	if (version == 0U)
 		return EINVAL;
-	if (size < GHCI_CAPS_HEADER_DWORDS || (size % GHCI_CAPS_DWORDS_ALIGN) != 0U)
+	if (size < GHCI_CAPS_HEADER_DWORDS)
 		return EINVAL;
 
 	/* The device wrote no more than the buffer holds; the rest of a larger block is not read. */
 	if (size > dwords)
 		size = dwords;
 
-	/* The format table lies behind the words the driver knows and within the block. */
+	/* The format table lies behind the header words and within the block. */
 	*first = words[GHCI_CAPS_WORD_FMT_FIRST];
 	*count = words[GHCI_CAPS_WORD_FMT_COUNT];
-	if (*first < GHCI_CAPS_WORDS_KNOWN || *first > size)
+	if (*first < GHCI_CAPS_HEADER_DWORDS || *first > size)
 		return EINVAL;
 	if (*count > size - *first)
 		return EINVAL;
@@ -680,8 +619,7 @@ decode_words(
 	caps->device_version = words[GHCI_CAPS_WORD_DEVICE_VERSION];
 	caps->cache_config = words[GHCI_CAPS_WORD_MEM_CACHE_CFG];
 	caps->prot_caps = words[GHCI_CAPS_WORD_PROT_CAPS];
-	caps->perf_src = words[GHCI_CAPS_WORD_PERF_SRC];
-	caps->extcap_present = words[GHCI_CAPS_WORD_EXTCAP_PRESENT];
+	caps->disp_info = words[GHCI_CAPS_WORD_DISP_PCLK_INFO];
 	caps->shader_stages = words[GHCI_CAPS_WORD_SHADER_STAGES];
 	caps->stage_limits = words[GHCI_CAPS_WORD_STAGE_LIMITS];
 	caps->fmt_limits = words[GHCI_CAPS_WORD_FMT_LIMITS] & GHCI_CAPS_FMT_LIMITS_MASK;
@@ -722,8 +660,6 @@ check_copies(
 	struct ghci_caps *caps)
 {
 	uint32_t unified;
-	uint32_t va_bits;
-	uint32_t pa_bits;
 	uint32_t mirror;
 	uint32_t pair;
 	int differs;
@@ -736,10 +672,7 @@ check_copies(
 	if (differs)
 		caps->mismatches |= GHCI_CAP_PROT;
 
-	/* The list's DISP2 against DEVICE_CAPS's display, MEM's local memory against its UMA. */
-	differs = bit_disagrees(caps->blocks & (1U << GHCI_EXTCAP_ID_DISP2), caps->device_caps & GHCI_CAP_DISP);
-	if (differs)
-		caps->mismatches |= GHCI_CAP_DISP;
+	/* MEM's local memory against DEVICE_CAPS's UMA. */
 	unified = 0U;
 	if (caps->local_bytes == 0U)
 		unified = 1U;
@@ -754,18 +687,35 @@ check_copies(
 		if (differs)
 			caps->mismatches |= caps_mirrors[pair].device_bit;
 	}
+}
 
-	/*
-	 * EXT_CAP_FEATURE's address widths against BOOT_CAPS's.
-	 *
-	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md
-	 * (section 3.2.2, VA_BITS = 30 + [3:0], PA_BITS = 40 + [7:4]).
-	 */
-	va_bits = GHCI_FEATURE_VA_BITS_BASE + (caps->feature & GHCI_FEATURE_VA_BITS_MASK);
-	pa_bits = 40U + ((caps->feature >> GHCI_FEATURE_PA_BITS_SHIFT) & 0xFU);
-	if (va_bits != caps->va_bits)
+/*
+ * Records whether EXT_CAP_FEATURE's address widths are reserved
+ * encodings or disagree with BOOT_CAPS's (width_mismatch).
+ *
+ * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 3.2.2,
+ * VA_BITS = 30 + [3:0], PA_BITS = 40 + [7:4]).
+ */
+static void
+check_widths(
+	struct ghci_caps *caps)
+{
+	uint32_t va_encoding;
+	uint32_t pa_encoding;
+	int known;
+
+	/* The block's encodings, which must be defined ones. */
+	va_encoding = caps->feature & GHCI_FEATURE_VA_BITS_MASK;
+	pa_encoding = (caps->feature >> GHCI_FEATURE_PA_BITS_SHIFT) & 0xFU;
+	known = width_known(va_encoding, pa_encoding);
+	caps->width_mismatch = 0;
+	if (!known)
 		caps->width_mismatch = 1;
-	if (pa_bits != caps->pa_bits)
+
+	/* Succeeded when they are BOOT_CAPS's. */
+	if (GHCI_FEATURE_VA_BITS_BASE + va_encoding != caps->va_bits)
+		caps->width_mismatch = 1;
+	if (GHCI_BOOT_PA_BITS_BASE + pa_encoding != caps->pa_bits)
 		caps->width_mismatch = 1;
 }
 

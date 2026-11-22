@@ -837,7 +837,7 @@ image_view_descriptors(
 	desc.width = view->width;
 	desc.height = view->height;
 	desc.depth = depth;
-	desc.format = info->format;
+	desc.format = ghci_vk_format_hw(info->format);
 	desc.mip_levels = view->levels;
 	desc.row_pitch = view->row_pitch;
 	desc.slice_pitch = slice;
@@ -990,7 +990,7 @@ buffer_view_admit(
 	buffer_desc.base = va;
 	buffer_desc.bytes = (uint32_t)(elements * bytes);
 	buffer_desc.stride = bytes;
-	buffer_desc.format = info->format;
+	buffer_desc.format = ghci_vk_format_hw(info->format);
 	error = ghci_buffer_desc_encode(view->buffer_descriptor, &buffer_desc);
 	if (error != 0)
 		return (uint32_t)VK_ERROR_FORMAT_NOT_SUPPORTED;
@@ -1003,7 +1003,7 @@ buffer_view_admit(
 		texture.width = (uint32_t)elements;
 	texture.height = (uint32_t)((elements + GSI1_ABI_TEXEL_BUFFER_WIDTH - 1U) >> GSI1_ABI_TEXEL_BUFFER_SHIFT);
 	texture.depth = 1U;
-	texture.format = info->format;
+	texture.format = ghci_vk_format_hw(info->format);
 	texture.mip_levels = 1U;
 	texture.row_pitch = GSI1_ABI_TEXEL_BUFFER_WIDTH * bytes;
 	texture.slice_pitch = texture.row_pitch * texture.height;
