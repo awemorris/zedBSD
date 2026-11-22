@@ -168,6 +168,9 @@ x11server_destroy(
 	for (index = 0U; index < X11_MAX_CLIENTS; index++)
 		x11_client_close(server, index);
 
+	/* The properties left (the root window's). */
+	x11_selection_destroy(server);
+
 	/* Vulkan's state, after every swapchain on it, and the font. */
 	x11_vulkan_close(server->vulkan);
 	x11_glyphs_close(&server->glyphs);

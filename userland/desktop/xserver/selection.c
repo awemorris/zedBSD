@@ -654,6 +654,23 @@ x11_selection_forget_window(
 }
 
 /*
+ * Frees every property still kept (the root window's outlive their
+ * clients) when the server ends.
+ */
+void
+x11_selection_destroy(
+	struct x11server *server)
+{
+	unsigned index;
+
+	/* Each kept property. */
+	for (index = 0U; index < X11_MAX_PROPERTIES; index++) {
+		if (server->properties[index].data != NULL)
+			selection_property_delete(server, &server->properties[index]);
+	}
+}
+
+/*
  * Hears that the system's selection changed (the backend): another
  * program's text makes the server the owner of CLIPBOARD or PRIMARY for
  * it (the X owner before is told SelectionClear); none, while the server

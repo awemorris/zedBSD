@@ -488,6 +488,7 @@ unsigned x11_request_get_selection_owner(struct x11server *server, unsigned inde
 unsigned x11_request_convert_selection(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_send_event(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 void x11_selection_forget_window(struct x11server *server, uint32_t window);
+void x11_selection_destroy(struct x11server *server);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);
