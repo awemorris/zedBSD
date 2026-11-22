@@ -306,7 +306,7 @@ kwl_output_apply_rotation(
 
 	/* The same angle (a choice saved alone): the size is set as it is, and no image was made. */
 	if ((steps & KWL_ROTATE_STEP_TURN) == 0U) {
-		kwl_output_size_set(server, compose->mode_width, compose->mode_height, rotation);
+		kwl_output_size_set(server, compose->mode_width, compose->mode_height, rotation, server->scale_wanted);
 		output_rotate_clock_fill(&clock, clock.started);
 	}
 
@@ -732,7 +732,7 @@ output_rotate_turn_begin(
 	clock->idle = clock->parked;
 
 	/* The new angle and logical size, which the windows are fitted to and the clients told. */
-	kwl_output_size_set(server, compose->mode_width, compose->mode_height, after->rotation);
+	kwl_output_size_set(server, compose->mode_width, compose->mode_height, after->rotation, server->scale_wanted);
 	compose->scanout_rotation = after->scanout;
 	compose->turn_rotation = after->turn;
 	compose->rotate_why &= ~KWL_ROTATE_WHY_RESOURCE;

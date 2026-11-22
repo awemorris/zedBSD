@@ -1181,6 +1181,10 @@ heads_take(
 	head->height = opening->height;
 	head->refresh = opening->refresh;
 	head->output = opening->output;
+	head->pixel_width = opening->width;
+	head->pixel_height = opening->height;
+	head->scale120 = KWL_SCALE_ONE;
+	head->scale_wanted = KWL_SCALE_ONE;
 	(void)snprintf(head->name, sizeof(head->name), "%s", opening->name);
 
 	/* A view, a framebuffer and a present semaphore for each image, and the acquire's semaphore. */

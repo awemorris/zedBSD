@@ -138,6 +138,7 @@ main(
 	server.ime_method = 1;
 	server.size_width = 320;
 	server.size_height = 240;
+	server.scale_wanted = KWL_SCALE_ONE;
 
 	/* The session starts on the middle desktop, the others to its left and right. */
 	server.desktop = KWL_DESKTOP_START;
@@ -182,7 +183,7 @@ main(
 	}
 
 	/* The desktop's size until the display is known: the size asked for, unrotated. */
-	kwl_output_size_set(&server, server.size_width, server.size_height, KWL_ROTATE_0);
+	kwl_output_size_set(&server, server.size_width, server.size_height, KWL_ROTATE_0, server.scale_wanted);
 
 	/*
 	 * A login session locks after the time without input its settings
