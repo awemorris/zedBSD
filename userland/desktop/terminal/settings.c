@@ -11,7 +11,7 @@
  * keys terminal.ambiguous-wide (0 or 1: View > Treat Ambiguous-Width
  * Characters as Wide), terminal.font-size (the font's size in pixels, 8 to
  * 32: View > Zoom and Text Size), terminal.theme (0 dark, 1 light, 2
- * high contrast: View > Theme; ws128-p006) and terminal.copy-on-select (0
+ * high contrast: View > Theme) and terminal.copy-on-select (0
  * or 1: Settings > Behavior), which libkeiland keeps in the
  * terminal's own file (~/.config/keiland/terminal.conf).  The terminal
  * opens no settings file itself.

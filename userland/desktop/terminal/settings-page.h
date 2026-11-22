@@ -136,7 +136,7 @@ struct terminal_known_line {
 /* The settings tab (settings-page.c). */
 int terminal_page_open(const struct terminal_page_program *program, const char *font, const char *fallback);
 int terminal_page_input(struct terminal_window *window, const struct kl_window_event *event);
-int terminal_page_draw(struct terminal_window *window, const struct terminal_page_state *state, uint32_t width, uint32_t height, const uint32_t **pixels, struct kl_rect *parts, unsigned *count);
+int terminal_page_draw(struct terminal_window *window, const struct terminal_page_state *state, uint32_t width, uint32_t height, const uint32_t **pixels);
 int terminal_page_moving(void);
 void terminal_page_paste(const char *text, size_t length);
 size_t terminal_page_copy_text(char *text, size_t size);

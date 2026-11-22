@@ -1124,7 +1124,7 @@ run_menu_actions(
 			run_ambiguous_wide(options, run);
 			break;
 		case TERMINAL_ACTION_FIND:
-			/* The search bar opens with the text looked for last (ws128-p006); the settings' page has none. */
+			/* The search bar opens with the text looked for last; the settings' page has none. */
 			if (!run_window.page_active)
 				run_find(0);
 			break;
@@ -2841,9 +2841,7 @@ run_page_frame(
 	struct run_state *run)
 {
 	struct terminal_page_state state;
-	struct kl_rect parts[KL_FRAME_PARTS_MAX];
 	const uint32_t *pixels;
-	unsigned count;
 	int moving;
 	int asked;
 	int wait;
@@ -2869,7 +2867,7 @@ run_page_frame(
 
 	/* The page's frame, at the drawing's size. */
 	asked = terminal_window_frame_ask(&run_window, terminal_clock());
-	status = terminal_page_draw(&run_window, &state, run->width, run->height, &pixels, parts, &count);
+	status = terminal_page_draw(&run_window, &state, run->width, run->height, &pixels);
 	if (status != 0) {
 		run->operation = "terminal_page_draw";
 		errno = status;

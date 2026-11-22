@@ -355,6 +355,7 @@ page_item_set(
 	size_t text_size;
 	size_t made_size;
 	int font;
+	int differs;
 	int exists;
 	int error;
 
@@ -370,7 +371,11 @@ page_item_set(
 
 	/* A font that is there. */
 	font = 0;
-	if (_stricmp(keyword, "Font") == 0 || _stricmp(keyword, "FontFallback") == 0)
+	differs = _stricmp(keyword, "Font");
+	if (differs == 0)
+		font = 1;
+	differs = _stricmp(keyword, "FontFallback");
+	if (differs == 0)
 		font = 1;
 	if (font && value[0] != '\0') {
 		error = mikuterm_font(path, sizeof(path), value);
@@ -396,7 +401,10 @@ page_item_set(
 	}
 
 	/* The text with the line changed, written whole. */
-	error = mikuterm_conf_set(text != NULL ? text : "", text_size, keyword, value, &made, &made_size);
+	if (text == NULL)
+		error = mikuterm_conf_set("", 0U, keyword, value, &made, &made_size);
+	else
+		error = mikuterm_conf_set(text, text_size, keyword, value, &made, &made_size);
 	free(text);
 	if (error != 0)
 		return error;

@@ -13,7 +13,8 @@ version 1903 or later, on x64 or ARM64.
   mikuterm.exe           the program
   README.txt             this file
   config\mikuterm.conf   your settings (fonts, size, colours, the first host)
-  config\state.conf      what the View menu chose (mikuterm writes it)
+  config\state.conf      what the View menu and the settings chose at once
+                         (mikuterm writes it)
   ssh\config             the hosts you connect to, in OpenSSH's ssh_config form
   ssh\id_ed25519         your private key (you put it here)
   ssh\known_hosts        the hosts' keys you accepted (mikuterm writes it)
@@ -24,7 +25,8 @@ version 1903 or later, on x64 or ARM64.
 Copy the whole folder to move mikuterm to another place or another PC: your
 settings, hosts, key and known hosts go with it.  Keep the folder where you
 can write (not under "Program Files", and not inside the ZIP file itself), or
-mikuterm cannot keep the hosts' keys and the View menu's choices.
+mikuterm cannot keep the hosts' keys, the View menu's choices and the
+settings.
 
 
 2. Connecting
@@ -32,7 +34,8 @@ mikuterm cannot keep the hosts' keys and the View menu's choices.
 
 Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) lists the
 hosts of ssh\config and asks "Host:".  Type a host's name, its number in the
-list, or user@host:port for a host that is not in ssh\config.
+list, or user@host:port for a host that is not in ssh\config.  X opens the
+settings in the tab's place (section 3).
 
 When ssh\config gives no User for the host, the tab asks "login as:".
 
@@ -52,18 +55,60 @@ are not asked again.
 If a host later shows a key that is not the one ssh\known_hosts holds,
 mikuterm warns "REMOTE HOST IDENTIFICATION HAS CHANGED!" and does not
 connect.  When you know the host's key was replaced, delete the line the
-warning names from ssh\known_hosts (with Notepad) and connect again.
+warning names from ssh\known_hosts (in the settings' Keys pane, or with
+Notepad) and connect again.
 
 A tab closes when its connection ends normally (exit on the host).  When a
 connection fails, the tab says why; Enter connects again and Ctrl+C closes
 the tab.
 
 
-3. Your key and ssh\config
+3. The settings (F12)
+---------------------
+
+F12 (Shell > Settings...) opens the settings in a tab of their own, and F12
+on that tab goes back to the tab you came from.  X in a new tab's list of
+hosts opens them as well.  The sidebar has four panes (Ctrl+Page Down and
+Ctrl+Page Up move between them; Tab moves between a pane's fields and
+buttons):
+
+  Hosts       ssh\config, edited in place.  Save writes it and checks it as
+              a connection reads it, naming a line it cannot use.  It takes
+              effect from the next connection.
+  Appearance  the text's size, the theme and the ambiguous width take effect
+              at once, as the View menu's do; the fonts and the grid when
+              mikuterm starts again.
+  Behavior    copy-on-select takes effect at once; TERM and the connect
+              timeout from the next connection; the host of the first tab
+              when mikuterm starts again.
+  Keys        makes an ed25519 key, shows a key's public key (Copy Public
+              Key), and lists ssh\known_hosts, each line with a button that
+              removes it (after a host's key was replaced).
+
+What takes effect at once is kept in config\state.conf.  The rest is written
+into config\mikuterm.conf in place of its line; your other lines and
+comments stay as you wrote them.
+
+A key from the Keys pane: Name (id_ed25519 unless you choose another),
+Comment, and a passphrase typed twice (or none).  Make Key writes ssh\<name>
+and ssh\<name>.pub in OpenSSH's form, as ssh-keygen -t ed25519 writes them;
+with a passphrase the private key is encrypted as ssh-keygen encrypts it.  A
+key that is there already is never written over: choose another name.  Only
+your Windows account may open the new private key file.  Copy Public Key puts
+the line of the .pub on the clipboard: add it to the host's
+~/.ssh/authorized_keys.  A key of another name than id_ed25519 is used for a
+host whose lines in ssh\config name it (IdentityFile ~/.ssh/<name>).
+
+The settings tab is drawn at the screen's pixels: on a screen scaled above
+100 percent its words are smaller than the window's.
+
+
+4. Your key and ssh\config
 --------------------------
 
-mikuterm uses an ed25519 key, with or without a passphrase.  Make one with
-OpenSSH on any machine (Windows has it too):
+mikuterm uses an ed25519 key, with or without a passphrase.  Make one in the
+settings' Keys pane (section 3), or with OpenSSH on any machine (Windows has
+it too):
 
   ssh-keygen -t ed25519 -f id_ed25519
 
@@ -105,7 +150,7 @@ start with "|1|" (Ubuntu and Debian hash them), those hosts are asked about
 again.  Lines with plain names are read as they are.
 
 
-4. WSL
+5. WSL
 ------
 
 mikuterm connects to WSL through SSH, as to any other host.
@@ -134,7 +179,7 @@ WSL in the first tab whenever mikuterm starts, put "Connect wsl" into
 config\mikuterm.conf.
 
 
-5. config\mikuterm.conf
+6. config\mikuterm.conf
 -----------------------
 
 One "Keyword value" a line, as ssh_config.  A line mikuterm cannot use is
@@ -151,12 +196,13 @@ named in the first tab and skipped.
   CopyOnSelect    yes: what the pointer selects is copied at once (yes)
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
 
-What the View menu chooses (Text Size, Theme, Treat Ambiguous-Width
-Characters as Wide, Alt+F11) is kept in config\state.conf and wins over the same
-settings here; delete state.conf to go back to mikuterm.conf.
+What the View menu and the settings choose at once (Text Size, Theme, Treat
+Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
+config\state.conf and wins over the same settings here; delete state.conf to
+go back to mikuterm.conf.  The settings' other choices are written here.
 
 
-6. Passwords and the input method
+7. Passwords and the input method
 ---------------------------------
 
 While mikuterm asks for a password, what you type is not shown and the input
@@ -164,16 +210,16 @@ method (IME) is off.  mikuterm cannot see when a program on the host (sudo,
 su, passwd) asks for one: turn the input method off yourself with
 Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
 
-The function keys F1 to F12 go to the host (htop, mc).  mikuterm's own keys
-are Alt+F11 (Treat Ambiguous-Width Characters as Wide) and Alt+Enter
-(Fullscreen).
+The function keys F1 to F11 go to the host (htop, mc).  mikuterm's own keys
+are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide)
+and Alt+Enter (Fullscreen).
 
 
-7. Fonts
+8. Fonts
 --------
 
 Put a TrueType font (.ttf or .ttc with glyf outlines) into fonts\ and name it
-in config\mikuterm.conf:
+in the settings' Appearance pane, or in config\mikuterm.conf:
 
   Font MyFont.ttf
   FontFallback MyCJKFont.ttc
@@ -182,7 +228,7 @@ A font in fonts\ is used before one of the same name in share\fonts\.  A
 full path (C:\...) is taken as it is.
 
 
-8. Licenses
+9. Licenses
 -----------
 
 Copyright (C) 2026 Awe Morris.  mikuterm.exe is under the zlib license

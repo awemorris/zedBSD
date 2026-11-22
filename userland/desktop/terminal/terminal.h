@@ -209,11 +209,11 @@ struct terminal_menu_state {
 
 /*
  * The terminal's own settings kept between runs (settings.c, the desktop's
- * settings terminal.* through libkeiland, WS135): whether Ambiguous-width
- * characters are wide (ws128-p009), the font's size in pixels, the
- * colour theme (ws128-p006) and whether the text the pointer selects is
- * copied to the clipboard as well.  All zero is the default (a size of 0:
- * the size the terminal is started with).
+ * settings terminal.* through libkeiland; the program's own file for
+ * another program): whether Ambiguous-width characters are wide, the
+ * font's size in pixels, the colour theme and whether the text the
+ * pointer selects is copied to the clipboard as well.  All zero is the
+ * default (a size of 0: the size the terminal is started with).
  */
 struct terminal_settings {
 	int ambiguous_wide;

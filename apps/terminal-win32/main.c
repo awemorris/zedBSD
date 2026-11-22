@@ -190,36 +190,6 @@ wWinMain(
 	return 0;
 }
 
-/* Reads config\mikuterm.conf into the settings (its defaults when it is not there). */
-static void
-main_read_conf(
-	struct mikuterm_conf *conf)
-{
-	char path[MIKUTERM_PATH_MAX];
-	char *text;
-	size_t size;
-	int error;
-
-	/* The defaults. */
-	mikuterm_conf_defaults(conf);
-
-	/* The file, when it is there; one that cannot be read is a problem to show. */
-	error = mikuterm_path(path, sizeof(path), MAIN_CONF);
-	if (error != 0)
-		return;
-	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
-	if (error == ENOENT)
-		return;
-	if (error != 0) {
-		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
-		return;
-	}
-
-	/* What it says. */
-	(void)mikuterm_conf_read(conf, text, size, 0);
-	free(text);
-}
-
 /*
  * Finds a font named in the settings: a Windows path as it is, else the
  * user's fonts\ folder, else the program's share\fonts\.  Returns 0 or
@@ -262,6 +232,36 @@ mikuterm_font(
 
 	/* Succeeded: the path (the run says so when the font is not there). */
 	return 0;
+}
+
+/* Reads config\mikuterm.conf into the settings (its defaults when it is not there). */
+static void
+main_read_conf(
+	struct mikuterm_conf *conf)
+{
+	char path[MIKUTERM_PATH_MAX];
+	char *text;
+	size_t size;
+	int error;
+
+	/* The defaults. */
+	mikuterm_conf_defaults(conf);
+
+	/* The file, when it is there; one that cannot be read is a problem to show. */
+	error = mikuterm_path(path, sizeof(path), MAIN_CONF);
+	if (error != 0)
+		return;
+	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
+	if (error == ENOENT)
+		return;
+	if (error != 0) {
+		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
+		return;
+	}
+
+	/* What it says. */
+	(void)mikuterm_conf_read(conf, text, size, 0);
+	free(text);
 }
 
 /* Starts another mikuterm for a new window: the same program, apart from this one. */

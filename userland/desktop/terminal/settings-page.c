@@ -380,8 +380,7 @@ terminal_page_input(
  * Draws the page into its frame at the size the drawing shows (the panes
  * read the run's state: the text's size, the theme, the ambiguous width,
  * copy-on-select), carries out what the widgets reported, and gives the
- * frame (*pixels, width words a row) and the parts of it that changed
- * (none: the whole frame).  Returns 0, or ENOMEM.
+ * whole frame (*pixels, width words a row).  Returns 0, or ENOMEM.
  */
 int
 terminal_page_draw(
@@ -389,9 +388,7 @@ terminal_page_draw(
 	const struct terminal_page_state *state,
 	uint32_t width,
 	uint32_t height,
-	const uint32_t **pixels,
-	struct kl_rect *parts,
-	unsigned *count)
+	const uint32_t **pixels)
 {
 	const struct kl_theme *theme;
 	struct kl_rect sidebar;
@@ -407,10 +404,7 @@ terminal_page_draw(
 	int taken;
 	int error;
 
-	(void)parts;
-
 	/* A frame of the size, with its canvas. */
-	*count = 0U;
 	error = page_frame(width, height);
 	if (error != 0)
 		return error;
@@ -736,6 +730,7 @@ page_hosts(
 	struct kl_rect card;
 	struct kl_rect control;
 	char subtitle[PAGE_MESSAGE];
+	unsigned flags;
 	int area_height;
 	int pressed;
 	int y;
@@ -775,7 +770,10 @@ page_hosts(
 	control.y = y;
 	control.height = theme->control_height;
 	control.width = kl_button_width(&page.style, "Save");
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_SAVE, &control, "Save", KL_BUTTON_PRIMARY | (page.config_large ? KL_BUTTON_DISABLED : 0U));
+	flags = KL_BUTTON_PRIMARY;
+	if (page.config_large)
+		flags |= KL_BUTTON_DISABLED;
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_SAVE, &control, "Save", flags);
 	if (pressed)
 		page_config_save();
 	control.x += control.width + 8;
@@ -1139,7 +1137,10 @@ page_known(
 	/* Each line: its names and type, its fingerprint, and the removal's button. */
 	for (index = 0U; index < page.known_count; index++) {
 		line = &page.known[index];
-		(void)snprintf(text, sizeof(text), "%s%s%s", line->marker, line->marker[0] != '\0' ? " " : "", line->names);
+		if (line->marker[0] != '\0')
+			(void)snprintf(text, sizeof(text), "%s %s", line->marker, line->names);
+		else
+			(void)snprintf(text, sizeof(text), "%s", line->names);
 		baseline = kl_text_center(theme->text_body, y, PAGE_ROW / 2) + 2;
 		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline, text, theme->text_body, 0, card.width - 80, theme->text);
 		(void)snprintf(text, sizeof(text), "%s  %s", line->type, line->fingerprint);

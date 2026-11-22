@@ -29,10 +29,10 @@ own path, never from the current directory).
 | --- | --- | --- |
 | `mikuterm.exe` | the ZIP | the program |
 | `README.txt` | the ZIP | the user's guide |
-| `config\mikuterm.conf` | the user | the settings (section 3); the ZIP has a commented sample |
-| `config\state.conf` | mikuterm | what the View menu chose: `FontSize`, `Theme`, `AmbiguousWide` |
-| `ssh\config` | the user | the hosts, in `ssh_config(5)` form (section 4) |
-| `ssh\id_ed25519` | the user | the private key (section 4.3) |
+| `config\mikuterm.conf` | the user, and the settings tab in place of a keyword's line | the settings (section 3); the ZIP has a commented sample |
+| `config\state.conf` | mikuterm | what the View menu and the settings tab chose at once: `FontSize`, `Theme`, `AmbiguousWide`, `CopyOnSelect` |
+| `ssh\config` | the user (also from the settings tab) | the hosts, in `ssh_config(5)` form (section 4) |
+| `ssh\id_ed25519` | the user, or the settings tab's Make Key | the private key (section 4.3) |
 | `ssh\known_hosts` | mikuterm | the hosts' keys the user accepted (section 6) |
 | `fonts\` | the user | the user's fonts, found before `share\fonts\` |
 | `share\fonts\` | the ZIP | `keiland.ttf`, `keiland-bold.ttf`, `keiland-mono.ttf` (Mahora), `keiland-fallback-mono.ttf` (JetBrains Mono), `keiland-fallback.ttf` (Droid Sans Fallback), `keiland-emoji.ttf` (Noto Color Emoji) |
@@ -62,9 +62,16 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh\config`'s wins) | 15 |
 
-`config\state.conf` has the same form and only `FontSize`, `Theme` and
-`AmbiguousWide`; its values win over `mikuterm.conf`'s. Deleting it returns
-to `mikuterm.conf`.
+`config\state.conf` has the same form and only `FontSize`, `Theme`,
+`AmbiguousWide` and `CopyOnSelect`; its values win over `mikuterm.conf`'s.
+Deleting it returns to `mikuterm.conf`.
+
+The settings tab (section 7) writes the other keywords into
+`mikuterm.conf` itself: the first line of the keyword is replaced by
+`Keyword value` (quoted when the value has a space), every other line and
+comment is kept as it was, a keyword without a line is added at the end, and
+an empty value removes the line so the default holds. A value is checked as
+the file would be read before it is written.
 
 ## 4. `ssh\config`
 
@@ -183,7 +190,46 @@ A connection that ends normally closes its tab. One that fails shows why
 - A changed key is never replaced from the tab: the user deletes the line the
   warning names.
 
-## 7. Menus
+## 7. The settings tab
+
+Shell > Settings... (F12) opens the settings as a tab of their own, or
+chooses it when it is open; F12 on it goes back to the tab it was opened
+from. `X` answered to a new tab's `Host: ` list (shown as `X  Settings`) ends
+that tab's connection and turns the tab into the settings. The tab is a page
+of libkeiland's widgets with a sidebar of four panes; Ctrl+Page Down and
+Ctrl+Page Up move between the panes, Tab between a pane's controls. The page
+is drawn at the screen's pixels (it does not follow the screen's scale).
+
+| Pane | Setting | Takes effect | Kept in |
+| --- | --- | --- | --- |
+| Hosts | `ssh\config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh\config` |
+| Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config\state.conf` |
+| Appearance | `Font`, `FontFallback` (a file in `fonts\` or `share\fonts\`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config\mikuterm.conf` |
+| Behavior | copy-on-select | at once | `config\state.conf` |
+| Behavior | `Term`, `ConnectTimeout` | the next connection | `config\mikuterm.conf` |
+| Behavior | `Connect` | the next start | `config\mikuterm.conf` |
+| Keys | a new key, a key's public key, `ssh\known_hosts` | at once | `ssh\` |
+
+Keys pane:
+
+- Name: the key's file name in `ssh\` (letters, digits, `.`, `_`, `-`; not
+  starting with `.` or ending with `.pub`; `id_ed25519` by default). When a
+  key of the name is there, its public key line and SHA256 fingerprint are
+  shown (from `NAME.pub`, or from the private key file's public half), with
+  Copy Public Key.
+- Otherwise Comment (`user@computer` by default), Passphrase and Again, and
+  Make Key: a new `ssh-ed25519` key from the system's random generator
+  (`BCryptGenRandom`), written as `ssh\NAME` (OpenSSH's private key format;
+  with a passphrase encrypted with `aes256-ctr` under the `bcrypt` KDF, a
+  16-byte salt and 24 rounds, as `ssh-keygen` writes it) and `ssh\NAME.pub`
+  (the one-line public key). A file of either name that is there is never
+  written over. The private key file is made with a protected access list
+  that gives only the user who runs mikuterm access to it.
+- Known hosts: each line of `ssh\known_hosts` with its names, key type and
+  fingerprint, and a button that removes the line (asked once more); the
+  file is written whole without it.
+
+## 8. Menus
 
 mikuterm has the menus of zedBSD's terminal, with these differences:
 
@@ -193,11 +239,13 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 | Session > Forget Remembered Passphrases | none | mikuterm only; forgets the passphrases kept in Credential Manager |
 | View > Treat Ambiguous-Width Characters as Wide | Alt+F11 | mikuterm only |
 | View > Fullscreen | Alt+Enter | in the place of F11 (zedBSD's terminal keeps F11) |
-
-F1 to F12 alone reach the host as keys (htop and mc use F10 and F11).
+| Shell > Settings... | F12 | the settings tab (section 7), as in zedBSD's terminal |
 | Shell > New Window | Ctrl+Shift+N | starts another `mikuterm.exe` |
 
-## 8. Licenses
+F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
+opens the settings.
+
+## 9. Licenses
 
 `mikuterm.exe` is Awe Morris's work under the zlib license. The fonts in
 `share\fonts\` are their authors' works under their own licenses (SIL Open
