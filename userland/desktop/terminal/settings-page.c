@@ -101,7 +101,7 @@
 #define PAGE_AFTER_GAP		12
 
 /* The widest a known host's words are drawn, its removal's button after them. */
-#define PAGE_KNOWN_LINE	520
+#define PAGE_KNOWN_LINE	480
 
 /* The lowest the ssh_config's text area stands, and the most lines of a note. */
 #define PAGE_AREA_MIN		220
