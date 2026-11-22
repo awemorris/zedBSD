@@ -3,12 +3,15 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/config.mk
+include mk/platform-rpi4/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
 include mk/toolchain-llvm/llvm.mk
 .PHONY: toolchain-platform toolchain-cached-platform
 toolchain-platform: toolchain-llvm
-toolchain-platform-cached: toolchain-llvm-cached
+toolchain-cached-platform: toolchain-llvm-cached
 
-include mk/platform-rpi4/defaults.mk
 include mk/platform-rpi4/libc.mk
 include mk/platform-rpi4/sysroot.mk
 include mk/platform-rpi4/vmunix.mk

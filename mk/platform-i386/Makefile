@@ -3,10 +3,17 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/config.mk
+include mk/platform-i386/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
+# The PCI bus of the SoC has functions at every slot and fixed BARs.
+KERN_CPPFLAGS += -DPCI_INTEL_MID_QUIRKS
+
 include mk/toolchain-llvm/llvm.mk
 .PHONY: toolchain-platform toolchain-cached-platform
 toolchain-platform: toolchain-llvm
-toolchain-platform-cached: toolchain-llvm-cached
+toolchain-cached-platform: toolchain-llvm-cached
 
 include mk/platform-i386/defaults.mk
 include mk/platform-i386/libc.mk

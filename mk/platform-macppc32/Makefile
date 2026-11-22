@@ -3,11 +3,14 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/config.mk
+include mk/platform-macppc32/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
 include mk/toolchain.mk
 .PHONY: toolchain-platform
 toolchain-platform: toolchain-llvm
 
-include mk/platform-macppc32/defaults.mk
 include mk/platform-macppc32/libc.mk
 include mk/platform-macppc32/sysroot.mk
 include mk/platform-macppc32/vmunix.mk

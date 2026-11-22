@@ -25,24 +25,13 @@ help:
 	@echo "  disk       - Build the boot disk image."
 	@echo "  clean      - Clean build artifacts."
 
-# Default configuration file (overridable)
+# Default configuration file.
 CONFIGMK       := config.mk
 
 # Host toolchain
 HOST_CC        := cc
 HOST_CXX       := c++
 PYTHON         := python3
-
-# Kernel toolchain (which we build)
-CC             :=
-AS             :=
-LD             :=
-RANLIB         :=
-NM             :=
-OBJCOPY        :=
-OBJDUMP        :=
-READELF        :=
-STRIP          :=
 
 # Version String
 VERSION        := 1.0.0
@@ -53,24 +42,12 @@ KERNEL_LTO     := full
 # Indicates that the build is done by the toplevel Makefile
 TOPLEVEL_BUILD := 1
 
-# Import the base configuration variables.
-include mk/config.mk
-
 # Import the current developer configuration.
-MAKEFILES_BEFORE_CONFIG := $(MAKEFILE_LIST)
 include $(CONFIGMK)
-
-# The configuration file and every file it includes, which the packages'
-# stamps follow (mk/userland.mk).
-CONFIGMK_FILES := $(filter-out $(MAKEFILES_BEFORE_CONFIG),$(MAKEFILE_LIST))
-
-# The same configuration file as an absolute path, for the nested makes
-# (they run in other directories).
-ZEDBSD_CONFIGMK := $(abspath $(CONFIGMK))
 
 # If PLATFORM is empty, show a prompt and let user input.
 ifeq ($(PLATFORM),)
-$(info PLATFORM is not set. Please specify the target platform.)
+$(info PLATFORM is not set. Please specify the target platform, e.g., make PLATFORM=x86_64)
 $(info )
 $(info Platforms:)
 $(info   x86_64 (architecture: x86_64,  board: pcat))
@@ -81,12 +58,10 @@ $(info   vf2    (architecture: riscv64, board: vf2))
 $(info   i386   (architecture: i386,    board: pcat))
 $(info   pc9821 (architecture: i386,    board: pc98))
 $(info   pc9801ns (architecture: i386,    board: pc98))
-override PLATFORM := $(shell printf 'Enter platform: ' >/dev/tty; IFS= read -r p </dev/tty && printf '%s\n' "$$p")
+exit 1
 endif
 
-# Import the platform default configuration.
--include mk/platform-$(PLATFORM)/defaults.mk
-
+# Show the current configuration.
 $(info PLATFORM:     $(PLATFORM))
 $(info ARCHITECTURE: $(ARCHITECTURE))
 $(info BOARD:        $(BOARD))
@@ -94,43 +69,51 @@ $(info BOARD:        $(BOARD))
 # Deterimine the build directory.
 BUILD := build/$(PLATFORM)
 
-export
+EXPORT_LIST := \
+	BUILD=$(abspath $(BUILD)) \
+	ZEDBSD_CONFIGMK=$(abspath $(CONFIGMK)) \
+	HOST_CC=$(HOST_CC) \
+	HOST_CXX=$(HOST_CXX) \
+	PYTHON=$(PYTHON) \
+	VERSION=$(VERSION) \
+	KERNEL_LTO=$(KERNEL_LTO) \
+	TOPLEVEL_BUILD=$(TOPLEVEL_BUILD)
 
 toolchain:
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-platform 
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-platform $(EXPORT_LIST)
 
 toolchain-cached:
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-cached-platform 
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-cached-platform $(EXPORT_LIST)
 
 bootloader: toolchain
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile bootloader-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile bootloader-platform $(EXPORT_LIST)
 
 firmware: toolchain
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-platform $(EXPORT_LIST)
 
 firmware-licenses:
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-platform $(EXPORT_LIST)
 
 firmware-licenses-pending:
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-pending-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile firmware-licenses-pending-platform $(EXPORT_LIST)
 
 libc: toolchain
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile libc-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile libc-platform $(EXPORT_LIST)
 
 sysroot: libc
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile sysroot-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile sysroot-platform $(EXPORT_LIST)
 
 vmunix: sysroot
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile vmunix-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile vmunix-platform $(EXPORT_LIST)
 
 userland: sysroot
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile programs
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile programs $(EXPORT_LIST)
 
 rootfs: vmunix userland
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile rootfs-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile rootfs-platform $(EXPORT_LIST)
 
 disk: vmunix rootfs firmware bootloader
-	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile image-platform
+	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile image-platform $(EXPORT_LIST)
 
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
 include mk/foreign.mk
