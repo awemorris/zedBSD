@@ -58,6 +58,7 @@ int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t *, int);
 int posix_spawn_file_actions_addchdir_np(posix_spawn_file_actions_t *, const char *);
 int posix_spawn_file_actions_addfchdir_np(posix_spawn_file_actions_t *, int);
 int posix_spawn_file_actions_addclosefrom_np(posix_spawn_file_actions_t *, int);
+int posix_spawn_file_actions_addtcsetpgrp_np(posix_spawn_file_actions_t *, int);
 int posix_spawnattr_init(posix_spawnattr_t *);
 int posix_spawnattr_destroy(posix_spawnattr_t *);
 int posix_spawnattr_getflags(const posix_spawnattr_t *, short *);

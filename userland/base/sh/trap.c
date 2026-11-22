@@ -112,8 +112,15 @@ volatile int sh_interrupted;
 /* Set while the EXIT trap runs, so that an exit in it ends the shell. */
 static int exit_trap_running;
 
+/*
+ * Set once the shell keeps a history file: a hangup without a trap then
+ * writes the waiting lines before the shell ends by the signal.
+ */
+static int hangup_saves_history;
+
 static void trap_handler(int number);
 static void interrupt_handler(int number);
+static void hangup_handler(int number);
 static void set_disposition(int number, void (*handler)(int));
 static void reset_disposition(int number);
 static int parse_signal(const char *text);
@@ -163,6 +170,22 @@ sh_signals_for_interactive(
 	shell_mode(SIGTSTP, SIG_IGN);
 	shell_mode(SIGTTIN, SIG_IGN);
 	shell_mode(SIGTTOU, SIG_IGN);
+}
+
+/*
+ * Catches a hangup of the terminal in a shell that keeps a history file,
+ * so that the lines it read are written before the hangup ends it.  A
+ * hangup ignored on entry or trapped stays so.
+ */
+void
+sh_signals_for_history(
+	void)
+{
+	/* A trap reset later puts the handler back. */
+	hangup_saves_history = 1;
+
+	/* The hangup is caught unless something else handles it. */
+	shell_mode(SIGHUP, hangup_handler);
 }
 
 /*
@@ -398,7 +421,8 @@ sh_exit(
 		sh_handler = NULL;
 	}
 
-	/* Ends the process, with the buffered output written. */
+	/* Ends the process, with the history and the buffered output written. */
+	sh_history_flush();
 	fflush(NULL);
 	exit(status & 0xff);
 }
@@ -606,6 +630,22 @@ interrupt_handler(
 	sh_interrupted = 1;
 }
 
+/*
+ * Writes the waiting history lines on a hangup, then ends the shell by the
+ * same signal, as it would have ended without the handler.
+ */
+static void
+hangup_handler(
+	int number)
+{
+	/* The lines read since the file was last written. */
+	sh_history_flush_hangup();
+
+	/* The signal at its default, raised again; it is taken once the handler returns. */
+	set_disposition(number, SIG_DFL);
+	(void)raise(number);
+}
+
 /* Sets how a signal is handled, without restarting interrupted calls. */
 static void
 set_disposition(
@@ -640,6 +680,12 @@ reset_disposition(
 	signal_modes[number] = MODE_DEFAULT;
 	if (number == SIGINT && sh_option[SH_OPT_INTERACTIVE]) {
 		set_disposition(SIGINT, interrupt_handler);
+		signal_modes[number] = MODE_SHELL;
+	}
+
+	/* A shell that keeps a history file still writes it on a hangup. */
+	if (number == SIGHUP && hangup_saves_history) {
+		set_disposition(SIGHUP, hangup_handler);
 		signal_modes[number] = MODE_SHELL;
 	}
 }

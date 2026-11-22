@@ -461,6 +461,7 @@ sh_raise(
 {
 	/* With no handler at all, the shell ends. */
 	if (sh_handler == NULL) {
+		sh_history_flush();
 		fflush(NULL);
 		if (kind == SH_EX_EXIT)
 			exit(sh_exception_status & 0xff);
