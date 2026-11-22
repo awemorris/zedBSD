@@ -134,7 +134,8 @@ enum admin_wait {
 
 /*
  * The request that waits for its answer: the compositor's number and
- * client, what it waits for, until when, the streams and the words'
+ * client, what it waits for, whether a kept permission let it through
+ * (then nothing new is kept), until when, the streams and the words'
  * set, the locale, the program opened when it was asked, and the
  * definition and file as the person was shown them.
  */
@@ -143,6 +144,7 @@ struct admin_pending {
 	unsigned long id;
 	unsigned long client;
 	enum admin_wait wait;
+	int kept;
 	long long deadline_ms;
 	unsigned streams;
 	struct sessiond_admin_words words;
@@ -660,6 +662,7 @@ admin_ask(
 
 	/* A permission kept for the client: no dialog. */
 	kept = sessiond_admin_keep_find(&admin_session.keep, admin_session.generation, ask.client, ask.action, &identity, sessiond_milliseconds());
+	pending->kept = kept;
 	if (kept) {
 		syslog(LOG_NOTICE, "admin action %s allowed for %s: kept", ask.action, account->passwd.pw_name);
 
@@ -689,7 +692,6 @@ admin_allow(
 	struct sessiond_fds *fds)
 {
 	struct admin_pending *pending;
-	enum admin_wait wait;
 	const char *rest;
 	unsigned long id;
 	int display;
@@ -729,10 +731,12 @@ admin_allow(
 	}
 
 	/* Started; a permission the person gave is kept as the definition says. */
-	wait = pending->wait;
-	sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=%s", id, pending->definition.name, wait == ADMIN_WAIT_CONSENT ? "dialog" : "keep");
-	if (wait == ADMIN_WAIT_CONSENT)
+	if (pending->kept) {
+		sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=keep", id, pending->definition.name);
+	} else {
+		sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=dialog", id, pending->definition.name);
 		syslog(LOG_NOTICE, "admin action %s allowed by %s", pending->definition.name, admin_session.account->passwd.pw_name);
+	}
 	admin_start(display);
 	if (display >= 0)
 		(void)close(display);
@@ -793,10 +797,12 @@ admin_forget(
 	unsigned long client;
 	char *end;
 
-	/* The client's number. */
+	/* The client's number, all of the rest. */
 	errno = 0;
 	client = strtoul(arguments, &end, 10);
-	if (errno != 0 || end == arguments || *end != '\0') {
+	if (errno != 0 ||
+	    end == arguments ||
+	    *end != '\0') {
 		sessiond_log("SESSIOND ADMIN forget unreadable");
 		return;
 	}
@@ -958,15 +964,24 @@ admin_start(
 		error_pipe[1] = -1;
 	}
 
-	/* The child ends at once once the runner is on its own. */
+	/* The child ends at once once the runner is on its own; a child that could not be made is a failure. */
 	status = 0;
-	failed = middle < 0;
+	failed = 0;
+	if (middle < 0)
+		failed = 1;
 	if (!failed) {
 		do {
 			waited = waitpid(middle, &status, 0);
 		} while (waited < 0 && errno == EINTR);
-		if (waited != middle || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+
+		/* Only a child that ended by itself with 0 left a runner behind. */
+		if (waited != middle) {
 			failed = 1;
+		} else if (!WIFEXITED(status)) {
+			failed = 1;
+		} else if (WEXITSTATUS(status) != 0) {
+			failed = 1;
+		}
 	}
 	if (failed) {
 		sessiond_log("SESSIOND ADMIN failed id=%lu action=%s reason=runner status=%d", pending->id, launch.action, status);
@@ -1005,7 +1020,7 @@ admin_start(
 	admin_close_pair(status_pipe);
 
 	/* A permission the dialog gave is kept for the client as the definition says. */
-	if (pending->wait == ADMIN_WAIT_CONSENT) {
+	if (!pending->kept) {
 		sessiond_admin_keep_add(&admin_session.keep, admin_session.generation, pending->client, &pending->definition,
 		    &pending->identity, sessiond_milliseconds());
 	}

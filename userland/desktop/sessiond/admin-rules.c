@@ -170,6 +170,7 @@ sessiond_admin_parse(
 	struct rules_seen seen;
 	size_t start;
 	size_t end;
+	int valid;
 	int error;
 
 	/* The defaults: wheel allows, anyone else is refused, nothing is kept, input and output. */
@@ -181,8 +182,8 @@ sessiond_admin_parse(
 	definition->streams = SESSIOND_ADMIN_INPUT | SESSIOND_ADMIN_OUTPUT;
 
 	/* The action's own name. */
-	error = sessiond_admin_name_valid(name);
-	if (!error)
+	valid = sessiond_admin_name_valid(name);
+	if (!valid)
 		return EINVAL;
 	(void)snprintf(definition->name, sizeof(definition->name), "%s", name);
 
@@ -970,8 +971,12 @@ rules_value(
 
 	/* argv: an allowed set of words, as many lines as there are sets. */
 	differs = strcmp(key, "argv");
-	if (differs == 0)
-		return rules_argv(definition, value);
+	if (differs == 0) {
+		error = rules_argv(definition, value);
+		if (error != 0)
+			return EINVAL;
+		return 0;
+	}
 
 	/* program: the absolute path of the program, once. */
 	differs = strcmp(key, "program");
@@ -997,8 +1002,12 @@ rules_value(
 	differs = strncmp(key, "title.", 6U);
 	if (differs == 0)
 		language = key + 6;
-	if (language != NULL)
-		return rules_text(definition->titles, &definition->title_count, language, value, SESSIOND_ADMIN_TITLE_MAX);
+	if (language != NULL) {
+		error = rules_text(definition->titles, &definition->title_count, language, value, SESSIOND_ADMIN_TITLE_MAX);
+		if (error != 0)
+			return EINVAL;
+		return 0;
+	}
 
 	/* message and message.LANGUAGE. */
 	differs = strcmp(key, "message");
@@ -1007,8 +1016,12 @@ rules_value(
 	differs = strncmp(key, "message.", 8U);
 	if (differs == 0)
 		language = key + 8;
-	if (language != NULL)
-		return rules_text(definition->messages, &definition->message_count, language, value, SESSIOND_ADMIN_MESSAGE_MAX);
+	if (language != NULL) {
+		error = rules_text(definition->messages, &definition->message_count, language, value, SESSIOND_ADMIN_MESSAGE_MAX);
+		if (error != 0)
+			return EINVAL;
+		return 0;
+	}
 
 	/* wheel: how root and wheel are asked, once. */
 	differs = strcmp(key, "wheel");
@@ -1043,7 +1056,9 @@ rules_value(
 			return EINVAL;
 		seen->keep = 1;
 		error = rules_keep(value, &definition->keep, &definition->keep_seconds);
-		return error;
+		if (error != 0)
+			return EINVAL;
+		return 0;
 	}
 
 	/* display: whether the program is the desktop's and is lent a connection, once. */
@@ -1066,7 +1081,9 @@ rules_value(
 			return EINVAL;
 		seen->streams = 1;
 		error = rules_streams(value, &definition->streams);
-		return error;
+		if (error != 0)
+			return EINVAL;
+		return 0;
 	}
 
 	/* A key not known: a mistake must not make the definition looser. */
@@ -1566,6 +1583,8 @@ rules_token(
 
 	/* Up to a space or the end. */
 	length = strcspn(text, " ");
+
+	/* The token's length (0 for none). */
 	return length;
 }
 
