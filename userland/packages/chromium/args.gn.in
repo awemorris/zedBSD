@@ -13,7 +13,6 @@ treat_warnings_as_errors = false
 
 # zedBSD's compiler, C library and shared libraries.
 clang_base_path = "@LLVM@"
-clang_version = "@CLANG_VERSION@"
 target_sysroot = "@SYSROOT@"
 zedbsd_dynamic_dir = "@DYNAMIC@"
 
@@ -29,6 +28,13 @@ use_xkbcommon = false
 # zedBSD has a Vulkan driver of its own: no software Vulkan.
 enable_swiftshader = false
 enable_swiftshader_vulkan = false
+angle_enable_swiftshader = false
+dawn_use_swiftshader = false
+
+# ANGLE (WebGL) has no backend for zedBSD yet but its null one: neither
+# the native GL nor WebGPU underneath it.
+angle_enable_gl = false
+angle_enable_wgpu = false
 
 # Services that zedBSD does not have.
 use_dbus = false

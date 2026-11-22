@@ -32,6 +32,57 @@
    if (is_chromeos) {
      sources += [
        "process/process_priority_delegate.h",
+@@ -1767,13 +1783,21 @@
+       "posix/can_lower_nice_to.h",
+       "process/launch_posix.cc",
+       "profiler/module_cache_posix.cc",
+-      "profiler/stack_base_address_posix.cc",
+-      "profiler/stack_base_address_posix.h",
+-      "profiler/stack_copier_signal.cc",
+-      "profiler/stack_copier_signal.h",
+-      "profiler/thread_delegate_posix.cc",
+-      "profiler/thread_delegate_posix.h",
+     ]
++
++    # The signal-based stack copier of the sampling profiler takes another
++    # thread's registers from Linux's signal context and waits on a futex,
++    # neither of which zedBSD has: the profiler is not available there.
++    if (!is_zedbsd) {
++      sources += [
++        "profiler/stack_base_address_posix.cc",
++        "profiler/stack_base_address_posix.h",
++        "profiler/stack_copier_signal.cc",
++        "profiler/stack_copier_signal.h",
++        "profiler/thread_delegate_posix.cc",
++        "profiler/thread_delegate_posix.h",
++      ]
++    }
+   }
+ 
+   if (is_posix && !is_android) {
+@@ -1783,11 +1807,11 @@
+   if (is_posix && !is_ios) {
+     sources += [ "process/process_posix.cc" ]
+   }
+-  if (!is_win && !is_chromeos && !is_android && !is_linux) {
++  if (!is_win && !is_chromeos && !is_android && !is_linux && !is_zedbsd) {
+     sources += [ "synchronization/cancelable_event_default.cc" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_android) {
++  if (is_linux || is_chromeos || is_android || is_zedbsd) {
+     sources += [ "synchronization/cancelable_event_posix.cc" ]
+   }
+ 
+@@ -4487,7 +4511,7 @@
+       "posix/file_descriptor_shuffle_unittest.cc",
+       "posix/unix_domain_socket_unittest.cc",
+     ]
+-    if (!is_apple) {
++    if (!is_apple && !is_zedbsd) {
+       sources += [
+         "profiler/stack_base_address_posix_unittest.cc",
+         "profiler/stack_copier_signal_unittest.cc",
 --- a/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 +++ b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 @@ -90,6 +90,8 @@

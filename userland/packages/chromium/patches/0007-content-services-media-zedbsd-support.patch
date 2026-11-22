@@ -55,3 +55,14 @@
  
    # Screen AI library is not available for browser tests on ChromeOS. Tast tests
    # cover library's OCR functionality on ChromeOS.
+--- a/skia/ext/SkMemory_new_handler.cpp
++++ b/skia/ext/SkMemory_new_handler.cpp
+@@ -30,7 +30,7 @@
+ #include <windows.h>
+ #elif BUILDFLAG(IS_APPLE)
+ #include <malloc/malloc.h>
+-#else
++#elif !BUILDFLAG(IS_ZEDBSD)
+ #include <malloc.h>
+ #endif
+ 

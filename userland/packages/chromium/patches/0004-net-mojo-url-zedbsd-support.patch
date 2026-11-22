@@ -1,3 +1,14 @@
+--- a/ipc/param_traits_utils.h
++++ b/ipc/param_traits_utils.h
+@@ -174,7 +174,7 @@
+ // Since we want to support Android 32<>64 bit IPC, as long as we don't have
+ // these traits for 32 bit ARM then that'll catch any errors.
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_FUCHSIA) ||                                              \
++    BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD) ||                      \
+     (BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_64_BITS))
+ template <>
+ struct ParamTraits<long> {
 --- a/mojo/public/cpp/platform/socket_utils_posix.cc
 +++ b/mojo/public/cpp/platform/socket_utils_posix.cc
 @@ -26,7 +26,8 @@
@@ -10,6 +21,32 @@
    uid_t socket_euid;
    gid_t socket_gid;
    if (getpeereid(fd, &socket_euid, &socket_gid) < 0) {
+--- a/net/BUILD.gn
++++ b/net/BUILD.gn
+@@ -1671,8 +1671,13 @@
+     ]
+   }
+ 
++  # zedBSD has neither getifaddrs() nor netlink.
++  if (is_zedbsd) {
++    sources += [ "base/network_interfaces_zedbsd.cc" ]
++  }
++
+   # Use getifaddrs() on POSIX platforms, except Linux.
+-  if (is_posix && !is_linux && !is_chromeos) {
++  if (is_posix && !is_linux && !is_chromeos && !is_zedbsd) {
+     sources += [
+       "base/network_interfaces_getifaddrs.cc",
+       "base/network_interfaces_getifaddrs.h",
+@@ -3682,7 +3687,7 @@
+   }
+ 
+   # Use getifaddrs() on POSIX platforms, except Linux.
+-  if (is_posix && !is_linux && !is_chromeos) {
++  if (is_posix && !is_linux && !is_chromeos && !is_zedbsd) {
+     sources += [ "base/network_interfaces_getifaddrs_unittest.cc" ]
+   }
+ 
 --- a/net/base/net_errors_posix.cc
 +++ b/net/base/net_errors_posix.cc
 @@ -43,7 +43,9 @@
@@ -33,6 +70,169 @@
        return ERR_INSUFFICIENT_RESOURCES;
      case EMFILE:  // Too many open files.
        return ERR_INSUFFICIENT_RESOURCES;
+--- /dev/null
++++ b/net/base/network_interfaces_zedbsd.cc
+@@ -0,0 +1,160 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// The network interfaces of zedBSD.  zedBSD has neither getifaddrs() nor
++// netlink: the interfaces are listed with SIOCGIFCONF, and each one's
++// addresses are asked for with SIOCGIFADDR and SIOCGIFNETMASK (IPv4) and
++// SIOCGIFADDRS_IN6 (IPv6).
++
++#include <net/if.h>
++#include <netinet/in.h>
++#include <sys/ioctl.h>
++#include <sys/socket.h>
++#include <sys/types.h>
++
++#include <string.h>
++
++#include <array>
++#include <string>
++
++#include "base/files/scoped_file.h"
++#include "base/notimplemented.h"
++#include "base/threading/scoped_blocking_call.h"
++#include "net/base/ip_address.h"
++#include "net/base/ip_endpoint.h"
++#include "net/base/network_interfaces.h"
++#include "net/base/network_interfaces_posix.h"
++
++namespace net {
++
++namespace {
++
++// As many interfaces as one SIOCGIFCONF lists here.
++constexpr size_t kMaxInterfaces = 32;
++
++// The attributes of an IPv6 address, from its IN6_IFF_ flags.
++int AddressAttributes(uint32_t flags) {
++  int attributes = IP_ADDRESS_ATTRIBUTE_NONE;
++  if (flags & IN6_IFF_TENTATIVE) {
++    attributes |= IP_ADDRESS_ATTRIBUTE_TENTATIVE;
++  }
++  if (flags & IN6_IFF_DUPLICATED) {
++    attributes |= IP_ADDRESS_ATTRIBUTE_DUPLICATED;
++  }
++  if (flags & IN6_IFF_DEPRECATED) {
++    attributes |= IP_ADDRESS_ATTRIBUTE_DEPRECATED;
++  }
++  if (flags & IN6_IFF_TEMPORARY) {
++    attributes |= IP_ADDRESS_ATTRIBUTE_TEMPORARY;
++  }
++  return attributes;
++}
++
++// Adds the IPv4 address of the interface NAME, if it has one.
++void AddIPv4Address(int socket_fd,
++                    const std::string& name,
++                    uint32_t index,
++                    NetworkInterfaceList* networks) {
++  struct ifreq request = {};
++  name.copy(request.ifr_name, sizeof(request.ifr_name) - 1);
++  if (ioctl(socket_fd, SIOCGIFADDR, &request) != 0) {
++    return;
++  }
++  IPEndPoint address;
++  if (!address.FromSockAddr(&request.ifr_addr, sizeof(struct sockaddr_in)) ||
++      internal::IsLoopbackOrUnspecifiedAddress(&request.ifr_addr)) {
++    return;
++  }
++
++  uint32_t prefix_length = 0;
++  if (ioctl(socket_fd, SIOCGIFNETMASK, &request) == 0) {
++    IPEndPoint netmask;
++    if (netmask.FromSockAddr(&request.ifr_addr, sizeof(struct sockaddr_in))) {
++      prefix_length = MaskPrefixLength(netmask.address());
++    }
++  }
++
++  networks->emplace_back(name, name, index,
++                         NetworkChangeNotifier::CONNECTION_UNKNOWN,
++                         address.address(), prefix_length,
++                         IP_ADDRESS_ATTRIBUTE_NONE);
++}
++
++// Adds the IPv6 addresses of the interface NAME.
++void AddIPv6Addresses(int socket_fd,
++                      const std::string& name,
++                      uint32_t index,
++                      NetworkInterfaceList* networks) {
++  struct in6_ifaddrs addresses = {};
++  name.copy(addresses.ifa_name, sizeof(addresses.ifa_name) - 1);
++  if (ioctl(socket_fd, SIOCGIFADDRS_IN6, &addresses) != 0) {
++    return;
++  }
++  for (uint32_t i = 0; i < addresses.ifa_count && i < IN6_IFADDRS_MAX; i++) {
++    const struct in6_ifaddr_entry& entry = addresses.ifa_list[i];
++    IPAddress address(entry.ife_addr.s6_addr);
++    if (address.IsLoopback() || address.IsZero()) {
++      continue;
++    }
++    networks->emplace_back(name, name, index,
++                           NetworkChangeNotifier::CONNECTION_UNKNOWN, address,
++                           entry.ife_prefixlen,
++                           AddressAttributes(entry.ife_flags));
++  }
++}
++
++}  // namespace
++
++bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
++  if (networks == nullptr) {
++    return false;
++  }
++  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
++                                                base::BlockingType::MAY_BLOCK);
++
++  base::ScopedFD socket_fd(socket(AF_INET, SOCK_DGRAM, 0));
++  if (!socket_fd.is_valid()) {
++    return false;
++  }
++
++  std::array<struct ifreq, kMaxInterfaces> names = {};
++  struct ifconf list = {};
++  list.ifc_len = sizeof(names);
++  list.ifc_buf = reinterpret_cast<uintptr_t>(names.data());
++  if (ioctl(socket_fd.get(), SIOCGIFCONF, &list) != 0) {
++    return false;
++  }
++  size_t count = list.ifc_len / sizeof(names[0]);
++
++  for (size_t i = 0; i < count && i < names.size(); i++) {
++    std::string name(names[i].ifr_name,
++                     strnlen(names[i].ifr_name, sizeof(names[i].ifr_name)));
++    uint32_t index = static_cast<uint32_t>(names[i].ifr_ifindex);
++
++    // A loopback interface, one that is down and one the policy leaves out
++    // are not listed.
++    struct ifreq request = {};
++    name.copy(request.ifr_name, sizeof(request.ifr_name) - 1);
++    if (ioctl(socket_fd.get(), SIOCGIFFLAGS, &request) != 0) {
++      continue;
++    }
++    if ((request.ifr_flags & IFF_LOOPBACK) || !(request.ifr_flags & IFF_UP)) {
++      continue;
++    }
++    if (internal::ShouldIgnoreInterface(name, policy)) {
++      continue;
++    }
++
++    AddIPv4Address(socket_fd.get(), name, index, networks);
++    AddIPv6Addresses(socket_fd.get(), name, index, networks);
++  }
++  return true;
++}
++
++std::string GetWifiSSID() {
++  NOTIMPLEMENTED();
++  return std::string();
++}
++
++}  // namespace net
 --- a/net/cert/cert_verify_proc.cc
 +++ b/net/cert/cert_verify_proc.cc
 @@ -419,7 +419,8 @@
@@ -198,6 +398,18 @@
  
  #include <optional>
  
+--- a/net/features.gni
++++ b/net/features.gni
+@@ -67,7 +67,8 @@
+ 
+   # Platforms for which certificate verification can only be performed using
+   # the builtin cert verifier with the Chrome Root Store.
+-  chrome_root_store_only = is_win || is_mac || is_linux || is_chromeos
++  chrome_root_store_only =
++      is_win || is_mac || is_linux || is_chromeos || is_zedbsd
+ 
+   # DBSC is only supported on Windows, Linux and Mac for now.
+   enable_device_bound_sessions = is_win || is_linux || is_mac
 --- a/net/socket/udp_socket_posix.cc
 +++ b/net/socket/udp_socket_posix.cc
 @@ -142,7 +142,8 @@

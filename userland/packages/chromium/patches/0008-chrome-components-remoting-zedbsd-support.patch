@@ -1477,6 +1477,22 @@
 +      is_android || is_chromeos || is_ios || is_linux || is_mac || is_win ||
 +      is_zedbsd
  }
+--- a/components/variations/client_filterable_state.cc
++++ b/components/variations/client_filterable_state.cc
+@@ -128,9 +128,10 @@
+   return Study::PLATFORM_ANDROID;
+ #elif BUILDFLAG(IS_FUCHSIA)
+   return Study::PLATFORM_FUCHSIA;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_SOLARIS)
+-  // Default BSD and SOLARIS to Linux to not break those builds, although these
+-  // platforms are not officially supported by Chrome.
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_SOLARIS) || \
++    BUILDFLAG(IS_ZEDBSD)
++  // Default BSD, SOLARIS and zedBSD to Linux to not break those builds,
++  // although these platforms are not officially supported by Chrome.
+   return Study::PLATFORM_LINUX;
+ #else
+ #error Unknown platform
 --- a/components/webapps/isolated_web_apps/BUILD.gn
 +++ b/components/webapps/isolated_web_apps/BUILD.gn
 @@ -2,7 +2,7 @@

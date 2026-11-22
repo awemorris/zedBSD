@@ -28,14 +28,12 @@ $(eval $(call EXTERNAL_SOURCE,chromium))
 # build machine's.
 CHROMIUM_GN := $(EXT_chromium_SRCDIR)/buildtools/linux64/gn
 CHROMIUM_LLVM := $(patsubst %/,%,$(dir $(EXTERNAL_LLVM_BIN)))
-CHROMIUM_CLANG_VERSION = $(notdir $(firstword $(wildcard $(CHROMIUM_LLVM)/lib/clang/*)))
 CHROMIUM_ARGS := $(EXT_chromium_BUILDDIR)/args.gn
 CHROMIUM_TARGETS ?= content/shell:content_shell
 
 $(CHROMIUM_ARGS): $(CHROMIUM_DIR)/args.gn.in $(EXT_chromium_SRCSTAMP)
 	@mkdir -p '$(EXT_chromium_BUILDDIR)'
 	sed -e 's|@LLVM@|$(CHROMIUM_LLVM)|' \
-		-e 's|@CLANG_VERSION@|$(CHROMIUM_CLANG_VERSION)|' \
 		-e 's|@SYSROOT@|$(EXTERNAL_SYSROOT)|' \
 		-e 's|@DYNAMIC@|$(EXTERNAL_DYNAMIC)|' \
 		'$(CHROMIUM_DIR)/args.gn.in' > '$@.tmp'

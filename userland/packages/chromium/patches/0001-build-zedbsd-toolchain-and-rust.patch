@@ -250,6 +250,50 @@
  
    use_glib = is_linux && !is_castos &&
               # Avoid the need for glib when Android is building things via
+--- a/build/precompile.h
++++ b/build/precompile.h
+@@ -17,7 +17,10 @@
+ #include <fcntl.h>
+ #include <limits.h>
+ #include <math.h>
++// zedBSD's C library has no <memory.h> (its contents are in <string.h>).
++#if !defined(__ZEDBSD__)
+ #include <memory.h>
++#endif
+ #include <signal.h>
+ #include <stdarg.h>
+ #include <stddef.h>
+--- a/build/rust/gni_impl/libclang_args.gni
++++ b/build/rust/gni_impl/libclang_args.gni
+@@ -36,10 +36,24 @@
+ # says the wrong thing. We point it to our clang's resource dir which will
+ # make it behave consistently with our other command line flags and allows
+ # system headers to be found.
+-_libclang_extra_args += [
+-  "-resource-dir",
+-  rebase_path(clang_base_path + "/lib/clang/" + clang_version, root_build_dir),
+-]
++if (is_zedbsd) {
++  # The libclang of the Rust toolchain is Chromium's own clang, which does not
++  # know zedBSD: it takes the resource dir of that clang, and is told the
++  # macros that zedBSD's clang defines for the target.
++  _libclang_extra_args += [
++    "-resource-dir",
++    rebase_path(default_clang_base_path + "/lib/clang/" + clang_version,
++                root_build_dir),
++    "-D__ZEDBSD__=1",
++    "-D__unix__=1",
++  ]
++} else {
++  _libclang_extra_args += [
++    "-resource-dir",
++    rebase_path(clang_base_path + "/lib/clang/" + clang_version,
++                root_build_dir),
++  ]
++}
+ 
+ if (is_win) {
+   # On Windows we fall back to using system headers from a sysroot from
 --- a/build/rust/gni_impl/rustc_print_cfg.py
 +++ b/build/rust/gni_impl/rustc_print_cfg.py
 @@ -34,10 +34,18 @@

@@ -20,6 +20,17 @@
  // We disable format checker under vscode intellisense compilation.
  // See https://github.com/microsoft/vscode-cpptools/issues/3683 for
  // more details.
+--- a/third_party/angle/src/common/platform.h
++++ b/third_party/angle/src/common/platform.h
+@@ -25,7 +25,7 @@
+ #    define ANGLE_PLATFORM_POSIX 1
+ #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) ||              \
+     defined(__DragonFly__) || defined(__sun) || defined(__GLIBC__) || defined(__GNU__) || \
+-    defined(__QNX__) || defined(__Fuchsia__) || defined(__HAIKU__)
++    defined(__QNX__) || defined(__Fuchsia__) || defined(__HAIKU__) || defined(__ZEDBSD__)
+ #    define ANGLE_PLATFORM_POSIX 1
+ #else
+ #    error Unsupported platform.
 --- a/third_party/ced/src/util/string_util.h
 +++ b/third_party/ced/src/util/string_util.h
 @@ -18,6 +18,7 @@
@@ -41,6 +52,80 @@
    static_library("common") {
      sources = [
        "Algebra.h",
+--- a/third_party/dawn/src/dawn/common/DynamicLib.cpp
++++ b/third_party/dawn/src/dawn/common/DynamicLib.cpp
+@@ -124,6 +124,12 @@
+         *error = "DynamicLib.OpenLoaded: " + filename +
+                  " Windows Error: " + std::to_string(GetLastError());
+     }
++#elif DAWN_PLATFORM_IS(ZEDBSD)
++    // zedBSD's dlopen() has no RTLD_NOLOAD: a library is not looked for among
++    // the loaded ones only.
++    if (error != nullptr) {
++        *error = "DynamicLib.OpenLoaded: " + filename + " not supported";
++    }
+ #elif DAWN_PLATFORM_IS(POSIX)
+     mHandle = dlopen(filename.c_str(), RTLD_NOW | RTLD_NOLOAD);
+ 
+--- a/third_party/dawn/src/dawn/common/SystemUtils.cpp
++++ b/third_party/dawn/src/dawn/common/SystemUtils.cpp
+@@ -149,6 +149,11 @@
+     // UNIMPLEMENTED
+     return {};
+ }
++#elif DAWN_PLATFORM_IS(ZEDBSD)
++std::optional<std::string> GetExecutablePath() {
++    // zedBSD has no /proc/self/exe and no other way to ask for the path.
++    return {};
++}
+ #elif DAWN_PLATFORM_IS(EMSCRIPTEN)
+ std::optional<std::string> GetExecutablePath() {
+     return {};
+@@ -169,7 +174,8 @@
+     return exePath->substr(0, lastPathSepLoc + 1);
+ }
+ 
+-#if DAWN_PLATFORM_IS(LINUX) || DAWN_PLATFORM_IS(MACOS) || DAWN_PLATFORM_IS(IOS)
++#if DAWN_PLATFORM_IS(LINUX) || DAWN_PLATFORM_IS(MACOS) || DAWN_PLATFORM_IS(IOS) || \
++    DAWN_PLATFORM_IS(ZEDBSD)
+ std::optional<std::string> GetModulePath() {
+     static int placeholderSymbol = 0;
+     Dl_info dlInfo;
+--- a/third_party/dawn/src/utils/platform.h
++++ b/third_party/dawn/src/utils/platform.h
+@@ -90,6 +90,10 @@
+ #define DAWN_PLATFORM_IS_FUCHSIA 1
+ #define DAWN_PLATFORM_IS_POSIX 1
+ 
++#elif defined(__ZEDBSD__)
++#define DAWN_PLATFORM_IS_ZEDBSD 1
++#define DAWN_PLATFORM_IS_POSIX 1
++
+ #elif defined(__EMSCRIPTEN__)
+ #define DAWN_PLATFORM_IS_EMSCRIPTEN 1
+ #define DAWN_PLATFORM_IS_POSIX 1
+@@ -238,6 +242,9 @@
+ #if !defined(DAWN_PLATFORM_IS_FUCHSIA)
+ #define DAWN_PLATFORM_IS_FUCHSIA 0
+ #endif
++#if !defined(DAWN_PLATFORM_IS_ZEDBSD)
++#define DAWN_PLATFORM_IS_ZEDBSD 0
++#endif
+ #if !defined(DAWN_PLATFORM_IS_EMSCRIPTEN)
+ #define DAWN_PLATFORM_IS_EMSCRIPTEN 0
+ #endif
+--- a/third_party/dawn/third_party/renderdoc/renderdoc/api/app/renderdoc_app.h
++++ b/third_party/dawn/third_party/renderdoc/renderdoc/api/app/renderdoc_app.h
+@@ -35,7 +35,8 @@
+ 
+ #if defined(WIN32) || defined(__WIN32__) || defined(_WIN32) || defined(_MSC_VER)
+ #define RENDERDOC_CC __cdecl
+-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__sun__) || defined(__OpenBSD__)
++#elif defined(__linux__) || defined(__FreeBSD__) || defined(__sun__) || defined(__OpenBSD__) || \
++    defined(__ZEDBSD__)
+ #define RENDERDOC_CC
+ #elif defined(__APPLE__)
+ #define RENDERDOC_CC
 --- a/third_party/libxml/BUILD.gn
 +++ b/third_party/libxml/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -193,3 +278,48 @@
  /******************************************************************************
  ** This file is an amalgamation of many separate C source files from SQLite
  ** version 3.54.1.  By combining all the individual C code files into this
+--- a/third_party/vulkan-loader/src/BUILD.gn
++++ b/third_party/vulkan-loader/src/BUILD.gn
+@@ -53,7 +53,7 @@
+       "EXTRASYSCONFDIR=\"/pkg/data\"",
+     ]
+   }
+-  if (is_linux || is_chromeos || is_mac) {
++  if (is_linux || is_chromeos || is_mac || is_zedbsd) {
+     defines += [
+       "SYSCONFDIR=\"/etc\"",
+       "FALLBACK_CONFIG_DIRS=\"/etc/xdg\"",
+--- a/third_party/vulkan-loader/src/loader/loader_environment.c
++++ b/third_party/vulkan-loader/src/loader/loader_environment.c
+@@ -49,7 +49,7 @@
+ }
+ 
+ char *loader_secure_getenv(const char *name, const struct loader_instance *inst) {
+-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
++#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__ZEDBSD__)
+     // Apple does not appear to have a secure getenv implementation.
+     // The main difference between secure getenv and getenv is that secure getenv
+     // returns NULL if the process is being run with elevated privileges by a normal user.
+--- a/third_party/vulkan-loader/src/loader/vk_loader_platform.c
++++ b/third_party/vulkan-loader/src/loader/vk_loader_platform.c
+@@ -133,7 +133,7 @@
+ 
+     return buffer;
+ }
+-#elif defined(__Fuchsia__) || defined(__OpenBSD__)
++#elif defined(__Fuchsia__) || defined(__OpenBSD__) || defined(__ZEDBSD__)
+ char *loader_platform_executable_path(const struct loader_instance *inst, bool *oom) {
+     (void)inst;
+     (void)oom;
+--- a/third_party/vulkan-loader/src/loader/vk_loader_platform.h
++++ b/third_party/vulkan-loader/src/loader/vk_loader_platform.h
+@@ -44,7 +44,8 @@
+ 
+ // Set of platforms with a common set of functionality which is queried throughout the program
+ #if defined(__linux__) || defined(__APPLE__) || defined(__Fuchsia__) || defined(__QNX__) || defined(__FreeBSD__) || \
+-    defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) || defined(__GNU__) || defined(__CYGWIN__)
++    defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) || defined(__GNU__) || defined(__CYGWIN__) ||   \
++    defined(__ZEDBSD__)
+ #define COMMON_UNIX_PLATFORMS 1
+ #else
+ #define COMMON_UNIX_PLATFORMS 0
