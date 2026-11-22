@@ -48,7 +48,8 @@ struct terminal_run_result {
  * columns and rows are the grid the window opens with; timeout ends the
  * run after so many seconds (0 for none); token names the run in the log
  * lines; about is what Help > About writes on the screen (NULL for
- * nothing).  connector opens each tab's connection; new_window opens a new
+ * nothing); copy_on_select puts the text the pointer selects on the
+ * clipboard as well (0: only Edit > Copy does).  connector opens each tab's connection; new_window opens a new
  * window from this one (NULL: the program has none); ended is told how the
  * run ended before anything is torn down (NULL: nobody is told).  data is
  * the program's own, given to new_window and ended.
@@ -70,6 +71,7 @@ struct terminal_run_options {
 	unsigned timeout;
 	const char *token;
 	const char *about;
+	int copy_on_select;
 	const struct terminal_connector *connector;
 	void (*new_window)(void *data, struct kl_app *app, struct kl_window *from);
 	void (*ended)(void *data, const struct terminal_run_result *result);

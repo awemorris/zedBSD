@@ -248,6 +248,12 @@ static size_t run_paste_written;
  */
 static int run_secret;
 
+/*
+ * Whether the text the pointer selects also goes to the clipboard, as
+ * the run's options asked (the run's whole life).
+ */
+static int run_copy_on_select;
+
 static int run_start(const struct terminal_run_options *options, struct run_state *run);
 static int run_loop(const struct terminal_run_options *options, struct run_state *run);
 static int run_resize(const struct terminal_run_options *options, struct run_state *run);
@@ -374,6 +380,9 @@ run_start(
 	struct terminal_settings settings;
 	unsigned pixels;
 	int status;
+
+	/* Whether a selection is copied as well. */
+	run_copy_on_select = options->copy_on_select;
 
 	/* The settings kept from the last run (the defaults when there are none). */
 	terminal_settings_load(&settings);
@@ -2351,6 +2360,10 @@ run_selected_log(
 
 	/* The selected text is the primary selection (ws035-p100). */
 	terminal_primary_set(&run_window, run_primary, length);
+
+	/* And the clipboard's, when the run copies a selection at once. */
+	if (run_copy_on_select)
+		run_copy();
 }
 
 /*

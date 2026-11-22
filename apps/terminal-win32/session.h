@@ -1,0 +1,140 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * One tab's SSH connection, shared by the application's thread
+ * (connection-ssh.c: the tab reads what came, writes the keys typed, gives
+ * the grid's size and closes it) and the connection's own thread
+ * (ssh-thread.c: it chooses the host, connects, runs the SSH engine and
+ * asks the user what the connection needs).
+ *
+ * What both use is under the session's lock.  The thread hands the tab
+ * what to show through the output ring and wakes the application's
+ * thread with a post; the tab hands the thread the keys, the size, how
+ * much it has read and its end, and rings the waker the thread waits on.
+ * While the thread asks a question (a host, a user, a password, a yes or
+ * no), the keys typed edit the answer's line here instead of going to the
+ * remote side.
+ */
+
+#ifndef MIKUTERM_SESSION_H
+#define MIKUTERM_SESSION_H
+
+#include "mikuterm.h"
+
+#include <keiland/keiland.h>
+
+#include "userland/base/ssh/ssh-channel.h"
+
+/* The code of the posts that say a session has something for its tab. */
+#define SESSION_POST		0x6d696b75U
+
+/*
+ * The output ring's room: the most the SSH engine lets the tab hold
+ * unread (one and a half windows) and room for the questions' text.
+ */
+#define SESSION_OUTPUT_MAX	(SSH_CHANNEL_WINDOW + SSH_CHANNEL_WINDOW / 2U + 65536U)
+
+/* The keys typed that wait for the thread, at most. */
+#define SESSION_INPUT_MAX	65536U
+
+/* The longest answer to a question, in bytes. */
+#define SESSION_LINE_MAX	512U
+
+/* How much the tab reads before it tells the thread, so the window is given back on time. */
+#define SESSION_TAKEN_STEP	65536U
+
+/* The questions: none, a line shown as it is typed, a secret not shown. */
+#define SESSION_ASK_NONE	0U
+#define SESSION_ASK_LINE	1U
+#define SESSION_ASK_SECRET	2U
+
+/* Where the answer's editor is in an escape sequence the keys sent: outside, after ESC, inside one. */
+#define SESSION_ESCAPE_NONE	0U
+#define SESSION_ESCAPE_START	1U
+#define SESSION_ESCAPE_INSIDE	2U
+
+/*
+ * One tab's connection.  The tab and the thread each hold a reference;
+ * the last to let go frees it.  The fields up to the lock are set when it
+ * is made and only read afterwards; the rest are under the lock.
+ */
+struct mikuterm_session {
+	/* The core's handle: the tab's connection (first, so the core's pointer is the session's). */
+	struct terminal_connection connection;
+
+	/* The application posts go to, and the number they carry (the session's, not a pointer). */
+	struct kl_app *app;
+	uint32_t number;
+
+	/* What the thread waits on besides its socket: rung when the tab has something for it. */
+	struct kl_socket_waker *waker;
+
+	/* The host to connect to without asking (empty: ask), the TERM and the wait for a connection. */
+	char host[MIKUTERM_HOST_MAX];
+	char term[MIKUTERM_TERM_MAX];
+	unsigned connect_timeout;
+
+	/* Problems of the settings to show before anything else (empty: none). */
+	char notice[MIKUTERM_PROBLEMS_MAX];
+
+	struct kl_mutex lock;
+
+	/* Who still holds the session: the tab and the thread; 0 frees it. */
+	unsigned references;
+
+	/* What the tab has not read yet: a ring of output_capacity bytes. */
+	unsigned char *output;
+	size_t output_capacity;
+	size_t output_start;
+	size_t output_length;
+
+	/* How much the tab read since the thread last took the count (the engine gives the window back from it). */
+	size_t taken;
+
+	/* A post is on its way and not taken yet: no other is made until the tab takes it. */
+	int posted;
+
+	/* The connection ended as the tab ends: the tab closes once it read everything. */
+	int ended;
+
+	/* The keys typed, for the thread to send; input_full says the tab was refused some. */
+	unsigned char input[SESSION_INPUT_MAX];
+	size_t input_length;
+	int input_full;
+
+	/* The grid's size, and whether it changed since the thread last took it. */
+	int resized;
+	unsigned columns;
+	unsigned rows;
+	unsigned width;
+	unsigned height;
+
+	/* The tab closed: the thread ends the connection and lets go. */
+	int closing;
+
+	/* The question asked (SESSION_ASK_*), its answer being typed, and how it ended. */
+	unsigned question;
+	char line[SESSION_LINE_MAX];
+	size_t line_length;
+	unsigned escape;
+	int answered;
+	int cancelled;
+};
+
+/* Shared by the two sides (connection-ssh.c). */
+void session_release(struct mikuterm_session *session);
+void session_post(struct mikuterm_session *session);
+size_t session_put_locked(struct mikuterm_session *session, const void *bytes, size_t size);
+void session_say(struct mikuterm_session *session, const char *text);
+void session_ended(struct mikuterm_session *session);
+void session_thread_ended(void);
+
+/* The thread (ssh-thread.c). */
+void session_run(void *argument);
+
+#endif
