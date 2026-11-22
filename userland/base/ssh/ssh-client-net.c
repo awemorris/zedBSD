@@ -7,8 +7,7 @@
 
 /*
  * The connection of the ssh program: the TCP connection to the server,
- * the bytes between the socket and the transport, the upper-layer
- * messages the transport could not take yet, and the words for how a
+ * the bytes between the socket and the engine, and the words for how a
  * connection ended.
  */
 
@@ -26,21 +25,14 @@
 
 #include "ssh-client-common.h"
 
-/* The longest wait of one poll while waiting for a message, so that re-exchanges start on time. */
-#define CLIENT_POLL_MS		1000
-
 /* The longest numeric port text with its NUL. */
 #define CLIENT_PORT_TEXT	8U
 
 /* How the transport's reason for a failed negotiation starts. */
 #define CLIENT_NO_MATCH		"no matching "
 
-/* How this side's identification line starts in the output (RFC 4253 4.2). */
-#define CLIENT_VERSION_PREFIX	"SSH-"
-
 static int client_connect_one(const struct addrinfo *address, unsigned timeout, int *socket_out);
 static int client_wait_connected(int descriptor, unsigned timeout);
-static int client_backlog_put(struct ssh_client *client, const uint8_t *payload, size_t size);
 static const char *client_kind_words(const char *kind);
 
 /*
@@ -53,14 +45,9 @@ ssh_client_init(
 	/* Clears every field. */
 	memset(client, 0, sizeof(*client));
 
-	/* No socket yet. */
+	/* No socket and no engine yet. */
 	client->socket = -1;
-
-	/* The received messages may be plaintext of the session: secret. */
-	ssh_buf_init(&client->payload, SSH_PACKET_LIMIT, 1);
-
-	/* The backlog holds messages that may carry the user's input or a password: secret. */
-	ssh_buf_init(&client->backlog, SSH_CLIENT_BACKLOG_MAX, 1);
+	client->engine = NULL;
 
 	/* Messages go out at the INFO level until the settings say otherwise. */
 	client->log_level = SSH_CLIENT_LOG_INFO;
@@ -79,15 +66,11 @@ ssh_client_free(
 		client->socket = -1;
 	}
 
-	/* Wipes the transport's keys. */
-	if (client->transport_started) {
-		ssh_transport_free(&client->transport);
-		client->transport_started = 0;
-	}
+	/* Wipes the engine's keys and frees it. */
+	ssh_engine_close(client->engine);
+	client->engine = NULL;
 
-	/* Wipes the buffers and the bytes not yet fed. */
-	ssh_buf_free(&client->payload);
-	ssh_buf_free(&client->backlog);
+	/* Wipes the bytes not yet fed. */
 	ssh_wipe(client->receive, sizeof(client->receive));
 	client->receive_size = 0;
 	client->receive_offset = 0;
@@ -153,182 +136,6 @@ ssh_client_connect(
 }
 
 /*
- * Starts the transport as a client.
- */
-int
-ssh_client_start(
-	struct ssh_client *client)
-{
-	struct ssh_transport_ops ops;
-	uint64_t now;
-	int error;
-
-	/* Hands the host key check to the known_hosts logic, with the connection as its context. */
-	memset(&ops, 0, sizeof(ops));
-	ops.check_host_key = ssh_client_check_host_key;
-	ops.context = client;
-
-	/* Starts the transport, which queues the identification line. */
-	now = ssh_client_now_ms() / 1000U;
-	error = ssh_transport_init(&client->transport, SSH_ROLE_CLIENT, &ops, now);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the transport runs and must be freed. */
-	client->transport_started = 1;
-	return 0;
-}
-
-/*
- * Sends one upper-layer message.
- */
-int
-ssh_client_send(
-	struct ssh_client *client,
-	const uint8_t *payload,
-	size_t size)
-{
-	int error;
-
-	/* Keeps the order: while older messages wait, this one waits behind them. */
-	if (client->backlog.size > 0) {
-		error = client_backlog_put(client, payload, size);
-		if (error != 0)
-			return error;
-		return 0;
-	}
-
-	/* Gives the message to the transport. */
-	error = ssh_transport_send(&client->transport, payload, size);
-
-	/* Keeps a message the full output refused, to send it later. */
-	if (error == ENOBUFS) {
-		error = client_backlog_put(client, payload, size);
-		if (error != 0)
-			return error;
-		return 0;
-	}
-
-	/* Reports an error of the transport. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the transport has the message. */
-	return 0;
-}
-
-/*
- * Sends the message built in out.
- */
-int
-ssh_client_send_buf(
-	struct ssh_client *client,
-	const struct ssh_buf *out)
-{
-	int error;
-
-	/* Reports a message that could not be built. */
-	error = ssh_buf_error(out);
-	if (error != 0)
-		return error;
-
-	/* Sends what was built. */
-	error = ssh_client_send(client, out->data, out->size);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the message is sent or kept in order. */
-	return 0;
-}
-
-/*
- * Moves backlog messages into the transport while it takes them.
- */
-int
-ssh_client_flush(
-	struct ssh_client *client)
-{
-	uint32_t length;
-	size_t taken;
-	int error;
-
-	/* Hands the messages over in order until the transport refuses one. */
-	taken = 0;
-	error = 0;
-	while (client->backlog.size - taken >= 4U) {
-		length = ssh_load_be32(client->backlog.data + taken);
-		error = ssh_transport_send(&client->transport, client->backlog.data + taken + 4U, length);
-		if (error != 0)
-			break;
-		taken += 4U + (size_t)length;
-	}
-
-	/* Removes the messages the transport took (wiping them). */
-	ssh_buf_consume(&client->backlog, taken);
-
-	/* A refusal for a full output only means waiting longer. */
-	if (error == ENOBUFS)
-		return 0;
-
-	/* Reports an error of the transport. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the backlog is empty. */
-	return 0;
-}
-
-/*
- * Feeds received bytes to the transport and takes the next message.
- */
-int
-ssh_client_receive(
-	struct ssh_client *client)
-{
-	size_t chunk;
-	int error;
-
-	/* Alternates feeding and taking until a message is ready or nothing is left. */
-	for (;;) {
-		/* Feeds the next part of what was read, as far as the transport takes it. */
-		if (client->receive_offset < client->receive_size) {
-			chunk = client->receive_size - client->receive_offset;
-			if (chunk > SSH_CLIENT_FEED_SIZE)
-				chunk = SSH_CLIENT_FEED_SIZE;
-			error = ssh_transport_input(&client->transport, client->receive + client->receive_offset, chunk);
-			if (error == 0) {
-				client->receive_offset += chunk;
-			} else if (error != EMSGSIZE) {
-				return error;
-			}
-		}
-
-		/* Empties the receive buffer once all of it is fed, so that the socket is read again. */
-		if (client->receive_offset == client->receive_size) {
-			client->receive_offset = 0;
-			client->receive_size = 0;
-		}
-
-		/* Takes the next message from what the transport holds. */
-		error = ssh_transport_next(&client->transport, &client->payload);
-
-		/* Goes on feeding while bytes are left; reports that nothing is ready otherwise. */
-		if (error == EAGAIN) {
-			if (client->receive_offset < client->receive_size)
-				continue;
-			return EAGAIN;
-		}
-
-		/* Reports an error of the connection. */
-		if (error != 0)
-			return error;
-
-		/* Succeeded: client->payload holds one message. */
-		return 0;
-	}
-}
-
-/*
  * Reads from the socket into the receive buffer.
  */
 int
@@ -365,7 +172,7 @@ ssh_client_read_socket(
 }
 
 /*
- * Writes the transport's pending output to the socket.
+ * Writes the engine's pending output to the socket.
  */
 int
 ssh_client_write_socket(
@@ -376,7 +183,7 @@ ssh_client_write_socket(
 	ssize_t count;
 
 	/* Finds what waits to be written. */
-	pending = ssh_transport_pending(&client->transport, &size);
+	pending = ssh_engine_output(client->engine, &size);
 	if (size == 0)
 		return 0;
 
@@ -392,79 +199,52 @@ ssh_client_write_socket(
 	}
 
 	/* Succeeded: removes what was written from the output. */
-	ssh_transport_written(&client->transport, (size_t)count);
+	ssh_engine_written(client->engine, (size_t)count);
 	return 0;
 }
 
 /*
- * Waits until the transport hands up one message.
+ * Gives the engine the bytes read so far, and the end of the connection.
  */
 int
-ssh_client_wait(
+ssh_client_feed(
 	struct ssh_client *client,
-	uint64_t deadline_ms)
+	int *fed)
 {
-	struct pollfd descriptor;
-	size_t pending;
-	uint64_t now;
-	uint64_t left;
-	int timeout;
-	int status;
+	size_t taken;
 	int error;
 
-	/* Turns until a message comes or the connection ends. */
-	for (;;) {
-		/* Moves waiting messages into the transport. */
-		error = ssh_client_flush(client);
+	/* Starts with nothing given. */
+	*fed = 0;
+
+	/* Gives what is left of the bytes read, as far as the engine takes them. */
+	if (client->receive_offset < client->receive_size) {
+		error = ssh_engine_input(client->engine, client->receive + client->receive_offset, client->receive_size - client->receive_offset, &taken);
 		if (error != 0)
 			return error;
-
-		/* Takes a message that is already there. */
-		error = ssh_client_receive(client);
-		if (error == 0)
-			return 0;
-		if (error != EAGAIN)
-			return error;
-
-		/* Reports a connection the server closed. */
-		if (client->peer_closed)
-			return ECONNRESET;
-
-		/* Gives the transport the time, so that it starts a re-exchange when one is due. */
-		now = ssh_client_now_ms();
-		error = ssh_transport_tick(&client->transport, now / 1000U);
-		if (error != 0)
-			return error;
-
-		/* Stops waiting for a server that has not identified itself within ConnectTimeout. */
-		timeout = CLIENT_POLL_MS;
-		if (deadline_ms != 0 && client->transport.state == SSH_TRANSPORT_VERSION) {
-			if (now >= deadline_ms)
-				return ETIMEDOUT;
-			left = deadline_ms - now;
-			if (left < (uint64_t)timeout)
-				timeout = (int)left;
-		}
-
-		/* Waits for bytes to read, or for room to write the pending output. */
-		(void)ssh_transport_pending(&client->transport, &pending);
-		descriptor.fd = client->socket;
-		descriptor.events = POLLIN;
-		if (pending > 0)
-			descriptor.events |= POLLOUT;
-		descriptor.revents = 0;
-		status = poll(&descriptor, 1, timeout);
-		if (status < 0 && errno != EINTR)
-			return errno;
-
-		/* Writes when the socket has room. */
-		if ((descriptor.revents & POLLOUT) != 0)
-			(void)ssh_client_write_socket(client);
-
-		/* Reads when the socket has bytes, an end or an error. */
-		if ((descriptor.revents & (POLLIN | POLLHUP | POLLERR)) != 0)
-			(void)ssh_client_read_socket(client);
+		client->receive_offset += taken;
+		if (taken > 0)
+			*fed = 1;
 	}
+
+	/* Empties the receive buffer once all of it is given, so that the socket is read again. */
+	if (client->receive_offset == client->receive_size) {
+		ssh_wipe(client->receive, client->receive_size);
+		client->receive_offset = 0;
+		client->receive_size = 0;
+	}
+
+	/* Tells the engine of the end once every byte before it is given. */
+	if (client->peer_closed && client->receive_size == 0 && !client->end_told) {
+		error = ssh_engine_input(client->engine, client->receive, 0, &taken);
+		if (error != 0)
+			return error;
+		client->end_told = 1;
+		*fed = 1;
+	}
+
+	/* Succeeded: the engine has what it could take. */
+	return 0;
 }
 
 /*
@@ -472,24 +252,20 @@ ssh_client_wait(
  */
 void
 ssh_client_report(
-	struct ssh_client *client,
-	int error)
+	const struct ssh_client *client,
+	int error,
+	uint32_t code,
+	const char *reason)
 {
-	char reason[SSH_TRANSPORT_REASON_MAX];
 	const char *kind;
 	int compare;
-	int found;
 
 	/* Shows the server's own reason for ending the connection. */
 	if (error == ECONNABORTED) {
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Received disconnect from %s port %u:%lu: %s", client->host_name, (unsigned)client->port, (unsigned long)client->transport.reason_code, client->transport.reason);
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Received disconnect from %s port %u:%lu: %s", client->host_name, (unsigned)client->port, (unsigned long)code, reason);
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Disconnected from %s port %u", client->host_name, (unsigned)client->port);
 		return;
 	}
-
-	/* The host key check printed its own words. */
-	if (error == EACCES)
-		return;
 
 	/* Names a server that did not identify itself in time. */
 	if (error == ETIMEDOUT) {
@@ -504,24 +280,28 @@ ssh_client_report(
 		return;
 	}
 
-	/* Shows the reason this side gave the server, when it can still be read. */
-	found = ssh_client_local_reason(client, reason, sizeof(reason));
-	if (found) {
-		/* Words a failed negotiation as the kind of algorithm that had no match. */
-		compare = strncmp(reason, CLIENT_NO_MATCH, sizeof(CLIENT_NO_MATCH) - 1U);
-		if (compare == 0) {
-			kind = client_kind_words(reason + sizeof(CLIENT_NO_MATCH) - 1U);
-			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Unable to negotiate with %s port %u: no matching %s found", client->host_name, (unsigned)client->port, kind);
-			return;
-		}
-
-		/* Reports any other reason with the host and port. */
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s port %u: %s", client->host_name, (unsigned)client->port, reason);
+	/* Names the error alone when no reason was given. */
+	if (reason[0] == '\0') {
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: connection to %s port %u failed: %s", client->host_name, (unsigned)client->port, strerror(error));
 		return;
 	}
 
-	/* Otherwise names the error. */
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: connection to %s port %u failed: %s", client->host_name, (unsigned)client->port, strerror(error));
+	/* A host key that changed in a re-exchange ends the connection. */
+	if (error == EACCES) {
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s; disconnecting", reason);
+		return;
+	}
+
+	/* Words a failed negotiation as the kind of algorithm that had no match. */
+	compare = strncmp(reason, CLIENT_NO_MATCH, sizeof(CLIENT_NO_MATCH) - 1U);
+	if (compare == 0) {
+		kind = client_kind_words(reason + sizeof(CLIENT_NO_MATCH) - 1U);
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Unable to negotiate with %s port %u: no matching %s found", client->host_name, (unsigned)client->port, kind);
+		return;
+	}
+
+	/* Reports any other reason this side gave, with the host and port. */
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s port %u: %s", client->host_name, (unsigned)client->port, reason);
 }
 
 /*
@@ -529,9 +309,7 @@ ssh_client_report(
  */
 void
 ssh_client_close(
-	struct ssh_client *client,
-	uint32_t code,
-	const char *description)
+	struct ssh_client *client)
 {
 	struct pollfd descriptor;
 	size_t pending;
@@ -543,14 +321,10 @@ ssh_client_close(
 	if (client->socket < 0)
 		return;
 
-	/* Tells the server why, unless the transport has already ended. */
-	if (client->transport_started && client->transport.state != SSH_TRANSPORT_CLOSED)
-		ssh_transport_disconnect(&client->transport, code, description);
-
-	/* Writes what is pending, for a bounded time. */
+	/* Writes what is pending (the DISCONNECT among it), for a bounded time. */
 	deadline = ssh_client_now_ms() + SSH_CLIENT_CLOSE_WAIT_MS;
-	while (client->transport_started && !client->peer_closed) {
-		(void)ssh_transport_pending(&client->transport, &pending);
+	while (client->engine != NULL && !client->peer_closed) {
+		(void)ssh_engine_output(client->engine, &pending);
 		if (pending == 0)
 			break;
 
@@ -575,90 +349,6 @@ ssh_client_close(
 	/* Closes the socket. */
 	close(client->socket);
 	client->socket = -1;
-}
-
-/*
- * Finds the description of the DISCONNECT this side queued.
- *
- * Before the first NEWKEYS the output is the identification line and
- * plain binary packets (RFC 4253 4.2, 6: uint32 packet_length, byte
- * padding_length, the payload, the padding), so the packets can be
- * walked and the last DISCONNECT (RFC 4253 11.1: byte 1, uint32 code,
- * string description, string language) read.
- */
-int
-ssh_client_local_reason(
-	const struct ssh_client *client,
-	char *out,
-	size_t capacity)
-{
-	struct ssh_reader reader;
-	const uint8_t *pending;
-	const uint8_t *description;
-	const uint8_t *line_end;
-	size_t description_size;
-	size_t size;
-	size_t offset;
-	uint32_t packet_length;
-	uint8_t padding_length;
-	uint8_t number;
-	int compare;
-	int found;
-	int error;
-
-	/* Refuses an encrypted output, or no room for an answer. */
-	if (!client->transport_started)
-		return 0;
-	if (client->transport.have_session_id)
-		return 0;
-	if (capacity == 0)
-		return 0;
-
-	/* Steps over the identification line when it is still in the output. */
-	pending = ssh_transport_pending(&client->transport, &size);
-	offset = 0;
-	compare = 1;
-	if (size >= sizeof(CLIENT_VERSION_PREFIX) - 1U)
-		compare = memcmp(pending, CLIENT_VERSION_PREFIX, sizeof(CLIENT_VERSION_PREFIX) - 1U);
-	if (compare == 0) {
-		line_end = memchr(pending, '\n', size);
-		if (line_end == NULL)
-			return 0;
-		offset = (size_t)(line_end - pending) + 1U;
-	}
-
-	/* Walks the packets, keeping the description of the last DISCONNECT. */
-	found = 0;
-	while (size - offset >= 5U) {
-		packet_length = ssh_load_be32(pending + offset);
-		if (packet_length > size - offset - 4U)
-			break;
-		padding_length = pending[offset + 4U];
-		if ((size_t)padding_length + 1U > packet_length)
-			break;
-
-		/* Reads a DISCONNECT payload: number, code, description. */
-		ssh_reader_init(&reader, pending + offset + 5U, packet_length - 1U - padding_length);
-		number = ssh_reader_get_u8(&reader);
-		(void)ssh_reader_get_u32(&reader);
-		ssh_reader_get_string(&reader, &description, &description_size);
-		error = ssh_reader_error(&reader);
-
-		/* Keeps the description of a DISCONNECT, cut to the room. */
-		if (number == SSH_MSG_DISCONNECT && error == 0) {
-			if (description_size >= capacity)
-				description_size = capacity - 1U;
-			memcpy(out, description, description_size);
-			out[description_size] = '\0';
-			found = 1;
-		}
-
-		/* Goes to the next packet. */
-		offset += 4U + (size_t)packet_length;
-	}
-
-	/* Succeeded: reports whether a description was found. */
-	return found;
 }
 
 /*
@@ -770,32 +460,6 @@ client_wait_connected(
 		return failure;
 
 	/* Succeeded: the connection is made. */
-	return 0;
-}
-
-/*
- * Appends one message to the backlog as uint32 length and bytes.
- */
-static int
-client_backlog_put(
-	struct ssh_client *client,
-	const uint8_t *payload,
-	size_t size)
-{
-	int error;
-
-	/* Refuses a message the backlog has no room for (nothing appended). */
-	if (size > SSH_CLIENT_BACKLOG_MAX - 4U || client->backlog.size > SSH_CLIENT_BACKLOG_MAX - 4U - size)
-		return ENOBUFS;
-
-	/* Appends the length and the bytes. */
-	ssh_buf_put_u32(&client->backlog, (uint32_t)size);
-	ssh_buf_put_bytes(&client->backlog, payload, size);
-	error = ssh_buf_error(&client->backlog);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the message waits in order. */
 	return 0;
 }
 

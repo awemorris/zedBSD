@@ -1,20 +1,14 @@
 /*
- * zedBSD
- * Copyright (C) 2026 Awe Morris
- *
- * SPDX-License-Identifier: Zlib
- */
-
-/*
  * The parts of the ssh program that its files share: the command line as
  * read, the state of one connection, and the functions each file offers
  * the others.
  *
- * The program runs one connection in one process.  The library layers do
- * no I/O; the functions here own the socket, the terminal and the
- * standard streams, wait with poll, and feed bytes to the transport and
- * take messages from it.  Messages to the user go to the standard error
- * stream; while the terminal is in raw mode a line ends with CR LF.
+ * The program runs one connection in one process.  The protocol is the
+ * client engine's (ssh-client-engine.h), which does no I/O; the functions
+ * here own the socket, the terminal, the files and the standard streams,
+ * wait with poll, feed the engine the bytes read and act on its events.
+ * Messages to the user go to the standard error stream; while the
+ * terminal is in raw mode a line ends with CR LF.
  */
 
 #ifndef SSH_SSH_CLIENT_COMMON_H
@@ -23,11 +17,7 @@
 #include <stdarg.h>
 #include <termios.h>
 
-#include "ssh-auth.h"
-#include "ssh-channel.h"
-#include "ssh-config.h"
-#include "ssh-hostfile.h"
-#include "ssh-transport.h"
+#include "ssh-client-engine.h"
 
 /* The exit value of a connection that failed or ended without an exit status (ssh(1) EXIT STATUS). */
 #define SSH_CLIENT_EXIT_FAILURE		255
@@ -44,13 +34,8 @@
 /* The longest command sent to the server (the remaining arguments joined by spaces). */
 #define SSH_CLIENT_COMMAND_MAX		SSH_CHANNEL_COMMAND_MAX
 
-/*
- * The bytes read from the socket at once, and the most fed to the
- * transport at once (the transport's input keeps room for at least that
- * much beside one partial packet).
- */
+/* The bytes read from the socket at once. */
 #define SSH_CLIENT_RECEIVE_SIZE		16384U
-#define SSH_CLIENT_FEED_SIZE		4096U
 
 /*
  * The most bytes written to a stream that is not a regular file in one
@@ -66,25 +51,19 @@
 #define SSH_CLIENT_INPUT_CHUNK		16384U
 
 /*
- * The transport output above which the standard input is not read, so
- * that the program's own replies (window adjustments, keepalives) always
- * fit below the transport's limit.
+ * The engine's output above which the standard input is not read, so
+ * that the user's input does not pile up behind what the socket has not
+ * taken yet.
  */
 #define SSH_CLIENT_OUTPUT_HIGH		(1024U * 1024U)
 
-/* The most bytes of upper-layer messages kept while the transport refuses more. */
-#define SSH_CLIENT_BACKLOG_MAX		(1024U * 1024U)
-
 /*
- * The most bytes of channel data kept for one output stream: the window
- * is given back only while less than half a window waits, so at most one
- * and a half windows wait, beside at most half a window already written
- * but not yet removed.
+ * The most bytes of channel data kept for one output stream: the engine
+ * gives the window back only for the bytes written, so at most one window
+ * waits, beside at most half a window already written but not yet
+ * removed.
  */
 #define SSH_CLIENT_STREAM_MAX		(2U * SSH_CHANNEL_WINDOW)
-
-/* How many times a password is asked for (OpenSSH's NumberOfPasswordPrompts default). */
-#define SSH_CLIENT_PASSWORD_TRIES	3U
 
 /* The longest time spent writing the last bytes (the DISCONNECT) after the end, in milliseconds. */
 #define SSH_CLIENT_CLOSE_WAIT_MS	2000U
@@ -151,16 +130,15 @@ struct ssh_client_args {
  * config is the settings for the destination, host the name the user
  * gave, host_name the name connected to and looked up in known_hosts,
  * user the remote user and port the port.  socket is the connected
- * socket (-1 before and after).  payload holds the message the transport
- * last handed up.  backlog keeps upper-layer messages (uint32 length and
- * the bytes) that the transport refused while its output was full, so
- * that they go out in order.  receive keeps bytes read from the socket
- * that the transport has not taken yet (receive_offset to receive_size).
- * peer_closed is 1 once the socket reached its end or failed.  host_key
- * is the server's key blob accepted in the first exchange (have_host_key
- * 1 after it): every later exchange must show the same key.  raw is 1
- * while the terminal is in raw mode, so that messages end with CR LF.
- * The owner calls ssh_client_free.
+ * socket (-1 before and after).  engine is the connection's protocol
+ * (NULL before it is opened and after it is freed).  receive keeps bytes
+ * read from the socket that the engine has not taken yet (receive_offset
+ * to receive_size).  peer_closed is 1 once the socket reached its end or
+ * failed, and end_told 1 once the engine was told so.  rekeys is how many
+ * re-exchanges were reported at the debug level.  raw is 1 while the
+ * terminal is in raw mode, so that messages end with CR LF.
+ * identities_named is 1 when a setting named the identity files, so that
+ * a missing one is reported.  The owner calls ssh_client_free.
  */
 struct ssh_client {
 	struct ssh_config config;
@@ -170,39 +148,26 @@ struct ssh_client {
 	uint16_t port;
 	int log_level;
 	int socket;
-	int transport_started;
-	struct ssh_transport transport;
-	struct ssh_buf payload;
-	struct ssh_buf backlog;
+	struct ssh_engine *engine;
 	uint8_t receive[SSH_CLIENT_RECEIVE_SIZE];
 	size_t receive_size;
 	size_t receive_offset;
 	int peer_closed;
-	uint8_t host_key[SSH_KEY_BLOB_SIZE];
-	int have_host_key;
+	int end_told;
+	unsigned long rekeys;
 	int raw;
 	int identities_named;
 };
 
-/* What to do with a host key after looking it up (ssh_client_host_decide). */
-enum ssh_client_host_action {
-	/* The key is known for the host: go on. */
-	SSH_CLIENT_HOST_ACCEPT = 0,
-
-	/* The host is not known: go on and add the key to the user's known_hosts. */
-	SSH_CLIENT_HOST_ADD = 1,
-
-	/* The host is not known: ask the user. */
-	SSH_CLIENT_HOST_ASK = 2,
-
-	/* The host is known with another key: refuse. */
-	SSH_CLIENT_HOST_REFUSE_CHANGED = 3,
-
-	/* The key is revoked: refuse. */
-	SSH_CLIENT_HOST_REFUSE_REVOKED = 4,
-
-	/* The host is not known and the settings forbid adding it: refuse. */
-	SSH_CLIENT_HOST_REFUSE_UNKNOWN = 5
+/*
+ * The identity files of a connection as the engine takes them: files
+ * holds each file's bytes (secret) and identities names them (the
+ * setting's path) and points at the bytes; count of each are used.
+ */
+struct ssh_client_identities {
+	struct ssh_buf files[SSH_ENGINE_IDENTITIES_MAX];
+	struct ssh_engine_identity identities[SSH_ENGINE_IDENTITIES_MAX];
+	unsigned count;
 };
 
 /*
@@ -282,10 +247,10 @@ int ssh_client_ask(const char *prompt, int echo, char *out, size_t capacity);
 /* Returns the time of a monotonic clock in milliseconds. */
 uint64_t ssh_client_now_ms(void);
 
-/* Starts a connection's state: empty buffers, no socket, the transport not started. */
+/* Starts a connection's state: no socket, no engine, nothing received. */
 void ssh_client_init(struct ssh_client *client);
 
-/* Wipes and frees everything of the connection and closes its socket. */
+/* Wipes and frees everything of the connection, closes its socket and frees its engine. */
 void ssh_client_free(struct ssh_client *client);
 
 /*
@@ -296,124 +261,75 @@ void ssh_client_free(struct ssh_client *client);
 int ssh_client_connect(struct ssh_client *client);
 
 /*
- * Starts the transport as a client, with the host key check of
- * ssh_client_check_host_key.  Returns 0 or ENOMEM.
- */
-int ssh_client_start(struct ssh_client *client);
-
-/*
- * Sends one upper-layer message: to the transport, or to the backlog
- * while the transport's output is full or the backlog is not empty.
- * Returns 0, ENOBUFS (the backlog is full too), or the transport's error.
- */
-int ssh_client_send(struct ssh_client *client, const uint8_t *payload, size_t size);
-
-/* Sends the message in out (as ssh_client_send), or the error recorded in out. */
-int ssh_client_send_buf(struct ssh_client *client, const struct ssh_buf *out);
-
-/* Moves backlog messages into the transport while it takes them.  Returns 0 or the transport's error. */
-int ssh_client_flush(struct ssh_client *client);
-
-/*
- * Feeds the bytes read so far to the transport and takes the next
- * upper-layer message into client->payload.  Returns 0 (a message),
- * EAGAIN (none until more bytes come), or the transport's error.
- */
-int ssh_client_receive(struct ssh_client *client);
-
-/*
  * Reads from the socket into the receive buffer (only when the buffer is
  * empty).  Sets peer_closed at the end or on a failure.  Returns 0.
  */
 int ssh_client_read_socket(struct ssh_client *client);
 
-/* Writes the transport's pending output to the socket as far as it takes it.  Returns 0; sets peer_closed on a failure. */
+/* Writes the engine's pending output to the socket as far as it takes it.  Returns 0; sets peer_closed on a failure. */
 int ssh_client_write_socket(struct ssh_client *client);
 
 /*
- * Waits until the transport hands up one message (into client->payload),
- * writing the output meanwhile and starting re-exchanges on time.
- *
- * deadline_ms (0 for none) bounds the wait for the server's
- * identification line (ConnectTimeout).  Returns 0, ETIMEDOUT,
- * ECONNRESET (the server closed the connection), or the transport's
+ * Gives the engine the bytes read so far, and the end of the connection
+ * once every byte before it is given.  *fed is set to 1 when the engine
+ * took anything.  Returns 0 or the engine's error.
+ */
+int ssh_client_feed(struct ssh_client *client, int *fed);
+
+/*
+ * Prints why the connection ended with error, in the words of the user:
+ * the server's DISCONNECT (ECONNABORTED: code and reason are the
+ * server's), a server that did not identify itself in time (ETIMEDOUT), a
+ * closed connection (ECONNRESET, EPIPE), a host key that changed in a
+ * re-exchange (EACCES), the reason this side gave (reason, may be empty;
+ * a failed negotiation is worded as the kind of algorithm without a
+ * match), or else the error's name.
+ */
+void ssh_client_report(const struct ssh_client *client, int error, uint32_t code, const char *reason);
+
+/*
+ * Ends the connection: writes the engine's pending output (the
+ * DISCONNECT) for at most SSH_CLIENT_CLOSE_WAIT_MS, and closes the
+ * socket.
+ */
+void ssh_client_close(struct ssh_client *client);
+
+/*
+ * Checks the server's host key blob against the known_hosts files and the
+ * settings (ssh_engine_host_decide): accepts it, adds it, asks the user,
+ * or refuses it.  Returns 0 (accepted), EACCES (refused, after printing
+ * why) or another error.
+ */
+int ssh_client_check_host_key(struct ssh_client *client, const uint8_t *blob, size_t size);
+
+/*
+ * Loads the identity files of the settings that can be used (readable by
+ * the user alone, unencrypted ssh-ed25519 private keys) into identities,
+ * reporting the others.  Returns 0 or ENOMEM.
+ */
+int ssh_client_load_identities(const struct ssh_client *client, struct ssh_client_identities *identities);
+
+/* Wipes and frees the identity files' bytes. */
+void ssh_client_free_identities(struct ssh_client_identities *identities);
+
+/*
+ * Answers the engine's SSH_ENGINE_PASSWORD (tries refused before): asks
+ * the password on the terminal and gives it to the engine (*sent 1), or
+ * gives up when nobody can answer (*sent 0).  Returns 0 or the engine's
  * error.
  */
-int ssh_client_wait(struct ssh_client *client, uint64_t deadline_ms);
+int ssh_client_answer_password(struct ssh_client *client, unsigned tries, int *sent);
 
 /*
- * Prints why the connection ended with error (as returned by the
- * functions above), in the words of the user: the server's DISCONNECT,
- * the reason this side gave for a failed key exchange, a closed
- * connection.  Prints nothing for EACCES of the host key check, which
- * printed its own message.
+ * Runs the connection after the socket is connected: opens the engine,
+ * logs in, and runs the session (size bytes at command, the shell when
+ * size is 0) or, with -N, keeps the connection without one, carrying the
+ * standard streams until the session or the connection ends.  Prints why
+ * on a failure.  *exit_status receives the value to exit with: the
+ * command's exit status, or 255.  Returns 0, or the error that kept the
+ * connection from running (already reported).
  */
-void ssh_client_report(struct ssh_client *client, int error);
-
-/*
- * Ends the connection: queues DISCONNECT with code and description unless
- * the transport is already closed, writes the pending output for at most
- * SSH_CLIENT_CLOSE_WAIT_MS, and closes the socket.
- */
-void ssh_client_close(struct ssh_client *client, uint32_t code, const char *description);
-
-/*
- * Finds the description of the DISCONNECT this side queued in its
- * output, while the output is not yet encrypted (before the first
- * NEWKEYS).  Writes it into out (capacity bytes with the NUL) and returns
- * 1, or returns 0 when there is none.
- */
-int ssh_client_local_reason(const struct ssh_client *client, char *out, size_t capacity);
-
-/*
- * Decides what to do with a host key from the answers of the user's and
- * the global known_hosts files and the settings (ssh_config(5)
- * StrictHostKeyChecking and BatchMode).
- *
- * A revoked key in either file is refused; a key known in either file is
- * accepted; another key known for the host is refused (whatever the
- * settings say); an unknown host (no line, or lines of other key types
- * only) is added (no, accept-new), refused (yes, or ask in batch mode)
- * or asked about (ask).  Returns 0 or EINVAL (a value out of its range).
- */
-int ssh_client_host_decide(enum ssh_known_result user_answer, enum ssh_known_result global_answer, enum ssh_strict_host strict, int batch_mode, enum ssh_client_host_action *action);
-
-/*
- * Checks the server's host key blob (struct ssh_transport_ops
- * check_host_key; context is the struct ssh_client).
- *
- * In the first exchange the key is looked up in the known_hosts files and
- * accepted, added, asked about or refused as ssh_client_host_decide says;
- * in every later exchange it must be the key accepted first.  Returns 0,
- * EACCES (refused, after printing why) or another error.
- */
-int ssh_client_check_host_key(void *context, const uint8_t *blob, size_t size);
-
-/*
- * Runs the user authentication (RFC 4252) after the transport has
- * started: the service request, "none", the identity files with
- * "publickey", then "password" on the terminal.  Prints why on a failure.
- * Returns 0 (authenticated), EACCES (every method failed), or the error of
- * the connection.
- */
-int ssh_client_authenticate(struct ssh_client *client);
-
-/*
- * Runs the session channel: opens it, asks for a terminal when one is
- * wanted, starts the shell or the command (size bytes at command, none
- * when size is 0), and carries the standard streams until the channel
- * closes.  *exit_status receives the value to exit with.  Returns 0 or the
- * error that ended the connection (already reported).
- */
-int ssh_client_run_session(struct ssh_client *client, const struct ssh_client_args *args, const uint8_t *command, size_t size, int *exit_status);
-
-/*
- * Keeps the connection without a session (-N) until the server closes it
- * or a signal ends the program.  *exit_status receives the value to exit
- * with.  Returns 0 or the error that ended the connection (already
- * reported).
- */
-int ssh_client_run_without_session(struct ssh_client *client, int *exit_status);
+int ssh_client_run(struct ssh_client *client, const struct ssh_client_args *args, const uint8_t *command, size_t size, int *exit_status);
 
 /* Starts the escape state at the start of a line. */
 void ssh_client_escape_init(struct ssh_client_escape *escape);
