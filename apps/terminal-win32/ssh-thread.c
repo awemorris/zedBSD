@@ -309,6 +309,8 @@ thread_choose(
 	struct thread_choice *choice;
 	char key[LAUNCH_KEY_MAX];
 	char label[LAUNCH_LABEL_MAX];
+	char config[sizeof(THREAD_SSH_CONFIG)];
+	char status[LAUNCH_STATUS_MAX];
 	unsigned event;
 	unsigned index;
 	size_t length;
@@ -351,8 +353,11 @@ thread_choose(
 	/* WSL and the settings after the hosts; with no host, how to type one. */
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
-	if (choice->hosts.count == 0U)
-		launch_say(&choice->screen, "ssh\\config names no host: type one as user@host:port.");
+	if (choice->hosts.count == 0U) {
+		mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
+		(void)snprintf(status, sizeof(status), "%s names no host: type one as user@host:port.", config);
+		launch_say(&choice->screen, status);
+	}
 
 	/* The user's choice, until one is a host to connect to. */
 	error = 0;
@@ -610,6 +615,7 @@ thread_wsl(
 	char key[LAUNCH_KEY_MAX];
 	char note[LAUNCH_NOTE_MAX];
 	char found[THREAD_NAME_MAX];
+	char config[sizeof(THREAD_SSH_CONFIG)];
 	unsigned event;
 	unsigned count;
 	unsigned index;
@@ -629,12 +635,13 @@ thread_wsl(
 	/* The screen: the distributions by number, each with where it is reached, and the way back. */
 	screen = &choice->wsl;
 	launch_init(screen, "WSL distributions:");
+	mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
 	for (index = 0U; index < count; index++) {
 		/* The Host of ssh\config for it, or localhost on WslPort. */
 		(void)snprintf(key, sizeof(key), "%u", index + 1U);
 		error = thread_wsl_host(choice, choice->names[index], found, sizeof(found));
 		if (error == 0)
-			(void)snprintf(note, sizeof(note), "(ssh\\config: %s)", found);
+			(void)snprintf(note, sizeof(note), "(%s: %s)", config, found);
 		else
 			(void)snprintf(note, sizeof(note), "(localhost:%u)", choice->session->wsl_port);
 		(void)launch_add(screen, key, LAUNCH_DISTRIBUTION, choice->names[index], note);
@@ -1151,6 +1158,7 @@ thread_settings(
 	struct thread_link *link)
 {
 	char path[MIKUTERM_PATH_MAX];
+	char config[sizeof(THREAD_SSH_CONFIG)];
 	char error_text[SSH_CONFIG_ERROR_MAX];
 	char *text;
 	size_t size;
@@ -1159,11 +1167,12 @@ thread_settings(
 	/* The file; none is no settings. */
 	text = NULL;
 	size = 0U;
+	mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
 	error = mikuterm_path(path, sizeof(path), THREAD_SSH_CONFIG);
 	if (error == 0)
 		error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
 	if (error != 0 && error != ENOENT) {
-		(void)snprintf(link->reason, sizeof(link->reason), "ssh\\config could not be read (%s).", thread_error_text(error));
+		(void)snprintf(link->reason, sizeof(link->reason), "%s could not be read (%s).", config, thread_error_text(error));
 		return THREAD_FAILED;
 	}
 
@@ -1178,7 +1187,7 @@ thread_settings(
 
 	/* A file that cannot be read gives the reason. */
 	if (error != 0) {
-		(void)snprintf(link->reason, sizeof(link->reason), "ssh\\config: %s", error_text);
+		(void)snprintf(link->reason, sizeof(link->reason), "%s: %s", config, error_text);
 		return THREAD_FAILED;
 	}
 

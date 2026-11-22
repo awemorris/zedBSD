@@ -9,7 +9,7 @@ Awe Morris.  mikuterm's icon is Awe Morris's too, under the same license.
 The terminal's table of East Asian widths is derived from the Unicode
 Character Database (Unicode-License-V3.txt).
 
-The fonts in share\fonts:
+The fonts in share/fonts:
 
   keiland.ttf, keiland-bold.ttf, keiland-mono.ttf
       Mahora (Mahora-LICENSE.txt)

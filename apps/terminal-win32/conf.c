@@ -801,7 +801,7 @@ conf_copy(
 	return 0;
 }
 
-/* Adds a problem line ("mikuterm.conf line N: why") to what the first tab shows; a full list keeps its lines. */
+/* Adds a problem line ("config/mikuterm.conf line N: why", the name as mikuterm shows paths) to what the first tab shows; a full list keeps its lines. */
 static void
 conf_problem(
 	struct mikuterm_conf *conf,
@@ -814,7 +814,7 @@ conf_problem(
 	int written;
 
 	/* The line. */
-	written = snprintf(text, sizeof(text), "config\\mikuterm.conf line %u: %s\r\n", line, why);
+	written = snprintf(text, sizeof(text), "config/mikuterm.conf line %u: %s\r\n", line, why);
 	if (written < 0)
 		return;
 	length = strlen(text);
