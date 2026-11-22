@@ -658,6 +658,21 @@ kl_window_size(
 }
 
 /*
+ * Reports the scale the window is drawn at (KL_VERSION 112): the base one,
+ * the compositor's scale not being taken yet (a frame is drawn at the
+ * surface's size).
+ */
+unsigned
+kl_window_scale(
+	const struct kl_window *window)
+{
+	(void)window;
+
+	/* Every window is drawn at 100 %. */
+	return KL_SCALE_BASE;
+}
+
+/*
  * Makes the presenter fit the window's size and reports the size a frame
  * is drawn at.  Returns 0, or EIO when Vulkan refused.
  */

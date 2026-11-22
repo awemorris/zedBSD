@@ -18,9 +18,17 @@
  * of antialiasing a quiet interface needs.  Polygons are filled by scanlines:
  * four sub-rows a pixel row, each crossing its edges exactly, so a sloped
  * edge is smooth in both directions.
+ *
+ * A canvas drawn at another scale than KL_SCALE_BASE takes its positions and
+ * lengths in 96ths of the scale and makes them pixels at each call's start:
+ * a rectangle's edges round to the nearest pixel, the shapes' floats are
+ * multiplied, so the widgets laid out at one size are drawn as sharp as
+ * shapes drawn at the larger size.  At KL_SCALE_BASE nothing is converted.
  */
 
 #include <keiland/keiland.h>
+
+#include "internal.h"
 
 #include <errno.h>
 #include <math.h>
@@ -59,6 +67,9 @@ static uint32_t canvas_sample(const struct kl_image *image, float u, float v);
 static uint32_t canvas_lerp_pixel(uint32_t first, uint32_t second, unsigned weight);
 static int canvas_inner_span(float x, float y, float width, float height, float radius, float band, int py, int *from, int *to);
 static void canvas_run(uint32_t *row, int from, int to, kl_color color);
+static int canvas_scaled(const struct kl_canvas *canvas, float *factor);
+static void canvas_rect_pixels(const struct kl_rect *rect, float factor, struct kl_rect *pixels);
+static void canvas_mask_scaled(struct kl_canvas *canvas, int x, int y, const uint8_t *mask, int width, int height, size_t stride, kl_color color, float factor);
 
 /*
  * Makes a canvas over pixels the caller owns.
@@ -81,6 +92,7 @@ kl_canvas_init(
 	canvas->height = height;
 	canvas->clip.width = width;
 	canvas->clip.height = height;
+	canvas->scale = KL_SCALE_BASE;
 
 	/* The polygon filler's row, one float a pixel and one past the end. */
 	canvas->coverage = calloc((size_t)width + 2U, sizeof(float));
@@ -104,6 +116,52 @@ kl_canvas_release(
 }
 
 /*
+ * Sets the scale the canvas is drawn at from now on (KL_VERSION 112): the
+ * positions and lengths given to it are in 96ths of the scale.
+ */
+void
+kl_canvas_set_scale(
+	struct kl_canvas *canvas,
+	unsigned scale)
+{
+	/* No scale is the base one. */
+	if (scale == 0U)
+		scale = KL_SCALE_BASE;
+	canvas->scale = scale;
+}
+
+/*
+ * Gives a rectangle of the canvas's pixels in its units (KL_VERSION 112):
+ * the smallest rectangle of units that covers the pixels.
+ */
+void
+kl_canvas_logical(
+	const struct kl_canvas *canvas,
+	const struct kl_rect *pixels,
+	struct kl_rect *units)
+{
+	float factor;
+	int scaled;
+	int right;
+	int bottom;
+
+	/* At the base scale the units are the pixels. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (!scaled) {
+		*units = *pixels;
+		return;
+	}
+
+	/* The edges divided by the scale, outwards. */
+	right = (int)ceilf((float)(pixels->x + pixels->width) / factor);
+	bottom = (int)ceilf((float)(pixels->y + pixels->height) / factor);
+	units->x = (int)floorf((float)pixels->x / factor);
+	units->y = (int)floorf((float)pixels->y / factor);
+	units->width = right - units->x;
+	units->height = bottom - units->y;
+}
+
+/*
  * Narrows the clip to its intersection with a rectangle, until the
  * matching kl_canvas_clip_pop.
  */
@@ -113,8 +171,18 @@ kl_canvas_clip_push(
 	const struct kl_rect *rect)
 {
 	struct kl_rect clip;
+	struct kl_rect pixels;
+	float factor;
+	int scaled;
 	int right;
 	int bottom;
+
+	/* The rectangle in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		canvas_rect_pixels(rect, factor, &pixels);
+		rect = &pixels;
+	}
 
 	/* The intersection of the clip in force and the rectangle. */
 	clip = canvas->clip;
@@ -211,12 +279,15 @@ kl_canvas_fill(
 	const struct kl_rect *rect,
 	kl_color color)
 {
+	struct kl_rect pixels;
 	uint32_t *row;
 	uint32_t source;
+	float factor;
 	unsigned alpha;
 	unsigned red;
 	unsigned green;
 	unsigned blue;
+	int scaled;
 	int inside;
 	int left;
 	int top;
@@ -224,6 +295,13 @@ kl_canvas_fill(
 	int bottom;
 	int x;
 	int y;
+
+	/* The rectangle in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		canvas_rect_pixels(rect, factor, &pixels);
+		rect = &pixels;
+	}
 
 	/* The part of the rectangle inside the clip. */
 	inside = canvas_bounds(canvas, (float)rect->x, (float)rect->y, (float)rect->width, (float)rect->height, &left, &top, &right, &bottom);
@@ -275,9 +353,12 @@ kl_canvas_gradient(
 	kl_color top_color,
 	kl_color bottom_color)
 {
+	struct kl_rect pixels;
 	uint32_t *row;
 	kl_color color;
+	float factor;
 	float amount;
+	int scaled;
 	int inside;
 	int left;
 	int top;
@@ -285,6 +366,13 @@ kl_canvas_gradient(
 	int bottom;
 	int x;
 	int y;
+
+	/* The rectangle in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		canvas_rect_pixels(rect, factor, &pixels);
+		rect = &pixels;
+	}
 
 	/* The part of the rectangle inside the clip. */
 	inside = canvas_bounds(canvas, (float)rect->x, (float)rect->y, (float)rect->width, (float)rect->height, &left, &top, &right, &bottom);
@@ -335,6 +423,8 @@ kl_canvas_round_gradient(
 	kl_color top_color,
 	kl_color bottom_color)
 {
+	float factor;
+	int scaled;
 	uint32_t *row;
 	kl_color color;
 	float half_width;
@@ -353,6 +443,16 @@ kl_canvas_round_gradient(
 	int to;
 	int px;
 	int py;
+
+	/* The shape in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		x *= factor;
+		y *= factor;
+		width *= factor;
+		height *= factor;
+		radius *= factor;
+	}
 
 	/* The pixels the shape may touch, inside the clip. */
 	inside = canvas_bounds(canvas, x, y, width, height, &left, &top, &right, &bottom);
@@ -415,6 +515,8 @@ kl_canvas_round_border(
 	float thickness,
 	kl_color color)
 {
+	float factor;
+	int scaled;
 	uint32_t *row;
 	float half_width;
 	float half_height;
@@ -431,6 +533,17 @@ kl_canvas_round_border(
 	int to;
 	int px;
 	int py;
+
+	/* The outline in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		x *= factor;
+		y *= factor;
+		width *= factor;
+		height *= factor;
+		radius *= factor;
+		thickness *= factor;
+	}
 
 	/* The pixels the outline may touch, inside the clip. */
 	inside = canvas_bounds(canvas, x, y, width, height, &left, &top, &right, &bottom);
@@ -481,6 +594,8 @@ kl_canvas_shadow(
 	float softness,
 	kl_color color)
 {
+	float factor;
+	int scaled;
 	uint32_t *row;
 	float half_width;
 	float half_height;
@@ -497,6 +612,17 @@ kl_canvas_shadow(
 	int to;
 	int px;
 	int py;
+
+	/* The shadow in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		x *= factor;
+		y *= factor;
+		width *= factor;
+		height *= factor;
+		radius *= factor;
+		softness *= factor;
+	}
 
 	/* A shadow without softness is the shape itself. */
 	if (softness < 1.0f)
@@ -575,6 +701,8 @@ kl_canvas_ring(
 	float fraction,
 	kl_color color)
 {
+	float factor;
+	int scaled;
 	uint32_t *row;
 	float dx;
 	float dy;
@@ -589,6 +717,15 @@ kl_canvas_ring(
 	int bottom;
 	int px;
 	int py;
+
+	/* The ring in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		cx *= factor;
+		cy *= factor;
+		radius *= factor;
+		thickness *= factor;
+	}
 
 	/* The pixels the ring may touch, inside the clip. */
 	inside = canvas_bounds(canvas, cx - radius, cy - radius, 2.0f * radius, 2.0f * radius, &left, &top, &right, &bottom);
@@ -633,6 +770,9 @@ kl_canvas_polygon(
 	int count,
 	kl_color color)
 {
+	float scaled_points[2 * KL_POLYGON_POINTS];
+	float factor;
+	int scaled;
 	struct canvas_crossing crossings[CANVAS_CROSSINGS];
 	uint32_t *row;
 	float coverage;
@@ -656,6 +796,14 @@ kl_canvas_polygon(
 	/* A polygon has three corners at least and no more than the filler keeps. */
 	if (count < 3 || count > KL_POLYGON_POINTS)
 		return;
+
+	/* The corners in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		for (index = 0; index < 2 * count; index++)
+			scaled_points[index] = points[index] * factor;
+		points = scaled_points;
+	}
 
 	/* The polygon's bounding box. */
 	min_x = points[0];
@@ -766,9 +914,37 @@ kl_canvas_line(
 
 /*
  * Blends a color through a coverage mask (a glyph): 255 is the full color.
+ * At a scale each of the mask's pixels covers the pixels of its place.
  */
 void
 kl_canvas_mask(
+	struct kl_canvas *canvas,
+	int x,
+	int y,
+	const uint8_t *mask,
+	int width,
+	int height,
+	size_t stride,
+	kl_color color)
+{
+	float factor;
+	int scaled;
+
+	/* At a scale the mask is enlarged; otherwise its pixels are the canvas's. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		canvas_mask_scaled(canvas, x, y, mask, width, height, stride, color, factor);
+		return;
+	}
+	keiui_canvas_mask_pixels(canvas, x, y, mask, width, height, stride, color);
+}
+
+/*
+ * Blends a color through a coverage mask placed in the canvas's pixels,
+ * whatever its scale (the text drawn at the scale's size).
+ */
+void
+keiui_canvas_mask_pixels(
 	struct kl_canvas *canvas,
 	int x,
 	int y,
@@ -810,6 +986,38 @@ kl_canvas_mask(
  */
 void
 kl_canvas_image(
+	struct kl_canvas *canvas,
+	const struct kl_image *image,
+	float x,
+	float y,
+	float width,
+	float height,
+	float radius,
+	float opacity)
+{
+	float factor;
+	int scaled;
+
+	/* The rectangle in pixels, at a scale. */
+	scaled = canvas_scaled(canvas, &factor);
+	if (scaled) {
+		x *= factor;
+		y *= factor;
+		width *= factor;
+		height *= factor;
+		radius *= factor;
+	}
+
+	/* The picture drawn into those pixels. */
+	keiui_canvas_image_pixels(canvas, image, x, y, width, height, radius, opacity);
+}
+
+/*
+ * Draws a picture into a rectangle of the canvas's pixels, whatever its
+ * scale (a colour glyph drawn at the scale's size).
+ */
+void
+keiui_canvas_image_pixels(
 	struct kl_canvas *canvas,
 	const struct kl_image *image,
 	float x,
@@ -1465,4 +1673,90 @@ canvas_lerp_pixel(
 
 	/* Succeeded: the pixel between the two. */
 	return blended;
+}
+
+/* Tells whether the canvas is drawn at another scale than the base one, and how many pixels a unit is then. */
+static int
+canvas_scaled(
+	const struct kl_canvas *canvas,
+	float *factor)
+{
+	/* The base scale (or none set) leaves the units the pixels. */
+	if (canvas->scale == 0U || canvas->scale == KL_SCALE_BASE) {
+		*factor = 1.0f;
+		return 0;
+	}
+
+	/* Another scale: the pixels a unit is. */
+	*factor = (float)canvas->scale / (float)KL_SCALE_BASE;
+	return 1;
+}
+
+/* Makes a rectangle of units one of pixels, each edge at its nearest pixel (rectangles side by side stay so). */
+static void
+canvas_rect_pixels(
+	const struct kl_rect *rect,
+	float factor,
+	struct kl_rect *pixels)
+{
+	int right;
+	int bottom;
+
+	/* The four edges, rounded. */
+	right = (int)floorf((float)(rect->x + rect->width) * factor + 0.5f);
+	bottom = (int)floorf((float)(rect->y + rect->height) * factor + 0.5f);
+	pixels->x = (int)floorf((float)rect->x * factor + 0.5f);
+	pixels->y = (int)floorf((float)rect->y * factor + 0.5f);
+	pixels->width = right - pixels->x;
+	pixels->height = bottom - pixels->y;
+}
+
+/* Blends a color through a mask of units at a scale: each pixel takes the mask's pixel at its centre's place. */
+static void
+canvas_mask_scaled(
+	struct kl_canvas *canvas,
+	int x,
+	int y,
+	const uint8_t *mask,
+	int width,
+	int height,
+	size_t stride,
+	kl_color color,
+	float factor)
+{
+	const uint8_t *source;
+	uint32_t *row;
+	int inside;
+	int left;
+	int top;
+	int right;
+	int bottom;
+	int mask_x;
+	int mask_y;
+	int px;
+	int py;
+
+	/* The pixels of the enlarged mask inside the clip. */
+	inside = canvas_bounds(canvas, (float)x * factor, (float)y * factor, (float)width * factor, (float)height * factor, &left, &top, &right, &bottom);
+	if (inside == 0)
+		return;
+
+	/* Each pixel, as much as the mask's pixel under its centre says. */
+	for (py = top; py < bottom; py++) {
+		/* The mask's row under the pixels' row (none past its edge). */
+		mask_y = (int)floorf(((float)py + 0.5f) / factor) - y;
+		if (mask_y < 0 || mask_y >= height)
+			continue;
+		row = canvas->pixels + (size_t)py * canvas->stride;
+		source = mask + (size_t)mask_y * stride;
+
+		/* Each pixel of the row from the mask's pixel under it. */
+		for (px = left; px < right; px++) {
+			mask_x = (int)floorf(((float)px + 0.5f) / factor) - x;
+			if (mask_x < 0 || mask_x >= width)
+				continue;
+			if (source[mask_x] != 0U)
+				canvas_blend(&row[px], color, (float)source[mask_x] / 255.0f);
+		}
+	}
 }

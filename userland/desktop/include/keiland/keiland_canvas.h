@@ -28,6 +28,13 @@ extern "C" {
 /* A color as 0xAARRGGBB, not premultiplied. */
 typedef uint32_t kl_color;
 
+/*
+ * KL_VERSION 112: the scale a canvas, a window or a screen is drawn at, in
+ * 96ths: KL_SCALE_BASE is 100 %, 144 is 150 %, 192 is 200 % (the dots an
+ * inch of Windows; Wayland's whole and fractional scales come to the same).
+ */
+#define KL_SCALE_BASE		96U
+
 /* An opaque color from 0xRRGGBB. */
 #define KL_RGB(value)		((kl_color)(0xff000000U | (uint32_t)(value)))
 
@@ -66,6 +73,15 @@ struct kl_image {
  * The pixels are the caller's; the canvas adds the clip rectangles and the
  * scratch row the polygon filler accumulates coverage in, which live as
  * long as the canvas.
+ *
+ * KL_VERSION 112: the scale it is drawn at (KL_SCALE_BASE unless
+ * kl_canvas_set_scale says otherwise; 0 is taken as KL_SCALE_BASE).  At
+ * another scale every position and length given to the canvas's calls and
+ * to kl_text_draw is in units of 96ths of the scale, which the canvas makes
+ * pixels: the widgets lay out at one size and are drawn sharp at any scale,
+ * the text at the scale's size.  A mask's (kl_canvas_mask) and a picture's
+ * own pixels are enlarged with it.  width, height and the clip are the
+ * pixels' (kl_canvas_logical gives them in the canvas's units).
  */
 struct kl_canvas {
 	/* The pixels, the words in a row and the size. */
@@ -81,11 +97,21 @@ struct kl_canvas {
 
 	/* One row of polygon coverage, a float per pixel and one more. */
 	float *coverage;
+
+	/* KL_VERSION 112: the scale it is drawn at, in 96ths. */
+	unsigned scale;
 };
 
 /* The canvas (canvas.c). */
 int kl_canvas_init(struct kl_canvas *canvas, uint32_t *pixels, size_t stride, int width, int height);
 void kl_canvas_release(struct kl_canvas *canvas);
+/*
+ * KL_VERSION 112: the scale the canvas is drawn at from now on (in 96ths,
+ * 0 for KL_SCALE_BASE), and a rectangle of its pixels in its units (the
+ * smallest that covers them).
+ */
+void kl_canvas_set_scale(struct kl_canvas *canvas, unsigned scale);
+void kl_canvas_logical(const struct kl_canvas *canvas, const struct kl_rect *pixels, struct kl_rect *units);
 void kl_canvas_clip_push(struct kl_canvas *canvas, const struct kl_rect *rect);
 void kl_canvas_clip_pop(struct kl_canvas *canvas);
 void kl_canvas_clear(struct kl_canvas *canvas);

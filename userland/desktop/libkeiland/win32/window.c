@@ -325,6 +325,22 @@ kl_window_size(
 }
 
 /*
+ * Reports the scale the window is drawn at (KL_VERSION 112): its dpi, in
+ * 96ths as Windows gives it.
+ */
+unsigned
+kl_window_scale(
+	const struct kl_window *window)
+{
+	/* No window, or one that does not know its dpi, is at the base scale. */
+	if (window == NULL || window->dpi == 0U)
+		return KL_SCALE_BASE;
+
+	/* The dpi the window was last told. */
+	return window->dpi;
+}
+
+/*
  * Keeps whether the window defers its configures (KL_VERSION 109).
  * Windows sends none: the content's size is the window's own, and
  * nothing ever waits for an acknowledgement.  Returns 0, or EINVAL.
@@ -752,11 +768,13 @@ window_frame_message(
 	NCCALCSIZE_PARAMS *sizes;
 	MINMAXINFO *limits;
 	const RECT *suggested;
+	struct kl_window_event *input;
 	MONITORINFO monitor;
 	BOOL got;
 	HMONITOR place;
 	POINT point;
 	uint32_t caption;
+	unsigned dpi;
 	unsigned hit;
 	unsigned button;
 	LRESULT result;
@@ -828,8 +846,14 @@ window_frame_message(
 		limits->ptMinTrackSize.y = (LONG)(keiui_win32_scale(WINDOW_MIN_HEIGHT, window->dpi) + caption);
 		return 0;
 	case WM_DPICHANGED:
-		/* The new dpi, and the rectangle the system suggests for it. */
-		window->dpi = HIWORD(wparam);
+		/* The new dpi, told to the program before the size the system suggests for it. */
+		dpi = HIWORD(wparam);
+		if (dpi != 0U && dpi != window->dpi) {
+			window->dpi = dpi;
+			input = keiui_win32_push(window, KL_WINDOW_SCALE);
+			if (input != NULL)
+				input->code = dpi;
+		}
 		window->resize_waiting = 1;
 		suggested = (const RECT *)lparam;
 		(void)SetWindowPos(handle, NULL, suggested->left, suggested->top, suggested->right - suggested->left,

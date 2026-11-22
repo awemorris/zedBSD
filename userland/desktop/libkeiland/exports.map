@@ -313,6 +313,8 @@
 		kl_socket_waker_close;
 		kl_canvas_init;
 		kl_canvas_release;
+		kl_canvas_set_scale;
+		kl_canvas_logical;
 		kl_canvas_clip_push;
 		kl_canvas_clip_pop;
 		kl_canvas_clear;
@@ -436,6 +438,7 @@
 		kl_window_repeat_wait;
 		kl_window_set_title;
 		kl_window_size;
+		kl_window_scale;
 		kl_window_present_resize;
 		kl_window_present;
 		kl_window_present_part;
