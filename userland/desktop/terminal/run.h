@@ -49,7 +49,13 @@ struct terminal_run_result {
  * run after so many seconds (0 for none); token names the run in the log
  * lines; about is what Help > About writes on the screen (NULL for
  * nothing); copy_on_select puts the text the pointer selects on the
- * clipboard as well (0: only Edit > Copy does).  connector opens each tab's connection; new_window opens a new
+ * clipboard as well (0: only Edit > Copy does); input_method_menu gives
+ * the Session menu Disable Input Method, for connections that cannot tell
+ * when the remote side reads a password (0: no such item);
+ * ambiguous_wide_key makes F10 alone the shortcut of View > Treat
+ * Ambiguous-Width Characters as Wide (0: it has none; zedBSD's compositor
+ * opens the menus with F10).  connector
+ * opens each tab's connection; new_window opens a new
  * window from this one (NULL: the program has none); ended is told how the
  * run ended before anything is torn down (NULL: nobody is told).  data is
  * the program's own, given to new_window and ended.
@@ -72,6 +78,8 @@ struct terminal_run_options {
 	const char *token;
 	const char *about;
 	int copy_on_select;
+	int input_method_menu;
+	int ambiguous_wide_key;
 	const struct terminal_connector *connector;
 	void (*new_window)(void *data, struct kl_app *app, struct kl_window *from);
 	void (*ended)(void *data, const struct terminal_run_result *result);

@@ -1,24 +1,174 @@
 mikuterm (Micro Unicode Terminal)
 =================================
 
-A terminal with tabs whose tabs are SSH connections.  It runs from this
-folder: nothing is installed, and it reads and writes only here.
+mikuterm is a terminal for Windows whose tabs are SSH connections.  It runs
+from this folder: nothing is installed, nothing is written to the registry,
+and it reads and writes only the files of this folder.  It needs Windows 10
+version 1903 or later, on x64 or ARM64.
+
+
+1. The folder
+-------------
 
   mikuterm.exe           the program
+  README.txt             this file
   config\mikuterm.conf   your settings (fonts, size, colours, the first host)
   config\state.conf      what the View menu chose (mikuterm writes it)
-  ssh\config             the hosts, in OpenSSH's ssh_config form
-  ssh\id_ed25519         your key (an unencrypted ssh-ed25519 key)
-  ssh\known_hosts        the hosts' keys, added as you accept them
+  ssh\config             the hosts you connect to, in OpenSSH's ssh_config form
+  ssh\id_ed25519         your private key (you put it here)
+  ssh\known_hosts        the hosts' keys you accepted (mikuterm writes it)
   fonts\                 your own fonts
-  share\                 the program's fonts and the licenses
+  share\fonts\           the fonts mikuterm brings
+  share\licenses\        the licenses of mikuterm and of its fonts
 
-A new tab lists the hosts of ssh\config and asks "Host:" (a name, its number,
-or user@host:port).  A tab closes when its connection ends normally; when it
-fails, the tab says why and Enter connects again.
+Copy the whole folder to move mikuterm to another place or another PC: your
+settings, hosts, key and known hosts go with it.  Keep the folder where you
+can write (not under "Program Files", and not inside the ZIP file itself), or
+mikuterm cannot keep the hosts' keys and the View menu's choices.
 
-What you select with the pointer is copied to the clipboard (CopyOnSelect).
 
-Copyright (C) 2026 Awe Morris.  The program is under the zlib license
-(share\licenses\zedBSD-LICENSE.txt); the fonts are under their own licenses
-(share\licenses\README.txt).
+2. Connecting
+-------------
+
+Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) lists the
+hosts of ssh\config and asks "Host:".  Type a host's name, its number in the
+list, or user@host:port for a host that is not in ssh\config.
+
+When ssh\config gives no User for the host, the tab asks "login as:".
+
+The first time you connect to a host, mikuterm shows the host's key and asks
+whether to trust it, as OpenSSH's ssh does:
+
+  The authenticity of host 'server.example.org (192.0.2.10)' can't be established.
+  ED25519 key fingerprint is SHA256:...
+  This key is not known by any other names.
+  Are you sure you want to continue connecting (yes/no/[fingerprint])?
+
+Compare the fingerprint with the one the host's administrator gives you (on
+the host: ssh-keygen -l -f /etc/ssh/ssh_host_ed25519_key.pub), then type yes,
+or paste the fingerprint itself.  The key is added to ssh\known_hosts and you
+are not asked again.
+
+If a host later shows a key that is not the one ssh\known_hosts holds,
+mikuterm warns "REMOTE HOST IDENTIFICATION HAS CHANGED!" and does not
+connect.  When you know the host's key was replaced, delete the line the
+warning names from ssh\known_hosts (with Notepad) and connect again.
+
+A tab closes when its connection ends normally (exit on the host).  When a
+connection fails, the tab says why; Enter connects again and Ctrl+C closes
+the tab.
+
+
+3. Your key and ssh\config
+--------------------------
+
+mikuterm uses an ed25519 key without a passphrase.  Make one with OpenSSH on
+any machine (Windows has it too):
+
+  ssh-keygen -t ed25519 -N "" -f id_ed25519
+
+Put id_ed25519 into ssh\ and add the line of id_ed25519.pub to the host's
+~/.ssh/authorized_keys.  When the host does not take a key, mikuterm asks
+for the password.
+
+ssh\config is written as OpenSSH's ~/.ssh/config:
+
+  Host server
+      HostName server.example.org
+      User me
+
+mikuterm reads Host, HostName, User, Port, IdentityFile,
+StrictHostKeyChecking, UserKnownHostsFile, GlobalKnownHostsFile, BatchMode,
+ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
+PasswordAuthentication, PubkeyAuthentication and LogLevel.  Match, Include,
+ProxyJump and the other keywords it does not know are errors that name their
+line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is
+this folder's ssh\, ~/ is this folder, a name without a folder is in ssh\,
+and C:\... is taken as it is.
+
+ssh\known_hosts has one line a host, as OpenSSH writes it ("[host]:port" for
+a port other than 22).  mikuterm does not write hashed names (HashKnownHosts
+yes is an error) and cannot read them: if you copy a known_hosts whose lines
+start with "|1|" (Ubuntu and Debian hash them), those hosts are asked about
+again.  Lines with plain names are read as they are.
+
+
+4. WSL
+------
+
+mikuterm connects to WSL through SSH, as to any other host.
+
+In WSL (Ubuntu here):
+
+  sudo apt install openssh-server
+  sudo sed -i 's/^#\?Port .*/Port 2222/' /etc/ssh/sshd_config
+  sudo service ssh start
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  cat id_ed25519.pub >> ~/.ssh/authorized_keys
+
+(With systemd in WSL, "sudo systemctl enable --now ssh" starts it with WSL.
+Ubuntu 24.04 starts sshd from ssh.socket: after changing the port, run
+"sudo systemctl daemon-reload" and "sudo systemctl restart ssh.socket".)
+
+In ssh\config:
+
+  Host wsl
+      HostName 127.0.0.1
+      Port 2222
+      User me
+
+WSL 2 passes 127.0.0.1:2222 on to WSL (its localhost forwarding).  To open
+WSL in the first tab whenever mikuterm starts, put "Connect wsl" into
+config\mikuterm.conf.
+
+
+5. config\mikuterm.conf
+-----------------------
+
+One "Keyword value" a line, as ssh_config.  A line mikuterm cannot use is
+named in the first tab and skipped.
+
+  Font            the grid's font (keiland-mono.ttf)
+  FontFallback    the font for what the grid's font has not (keiland-fallback.ttf)
+  FontSize        the font's size in pixels at 96 dpi, 8 to 32 (16)
+  Columns, Rows   the grid the window opens with (90, 28)
+  Theme           dark, light or contrast (dark)
+  AmbiguousWide   yes: characters of ambiguous width take two cells (no)
+  Term            the TERM the host is told (xterm-256color)
+  Connect         the host the first tab connects to (none: the list)
+  CopyOnSelect    yes: what the pointer selects is copied at once (yes)
+  ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
+
+What the View menu chooses (Text Size, Theme, Treat Ambiguous-Width
+Characters as Wide, F10) is kept in config\state.conf and wins over the same
+settings here; delete state.conf to go back to mikuterm.conf.
+
+
+6. Passwords and the input method
+---------------------------------
+
+While mikuterm asks for a password, what you type is not shown and the input
+method (IME) is off.  mikuterm cannot see when a program on the host (sudo,
+su, passwd) asks for one: turn the input method off yourself with
+Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
+
+
+7. Fonts
+--------
+
+Put a TrueType font (.ttf or .ttc with glyf outlines) into fonts\ and name it
+in config\mikuterm.conf:
+
+  Font MyFont.ttf
+  FontFallback MyCJKFont.ttc
+
+A font in fonts\ is used before one of the same name in share\fonts\.  A
+full path (C:\...) is taken as it is.
+
+
+8. Licenses
+-----------
+
+Copyright (C) 2026 Awe Morris.  mikuterm.exe is under the zlib license
+(share\licenses\zedBSD-LICENSE.txt).  The fonts in share\fonts are their
+authors' works under their own licenses, listed in share\licenses\README.txt.

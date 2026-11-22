@@ -15,7 +15,11 @@
  * which then tells the actions' states (Copy and Paste enabled, the font's
  * size checked, Fullscreen and Treat Ambiguous-Width Characters as Wide
  * checked); libkeiland sends only what changed.  Without the System Menu
- * the terminal simply has no menus.
+ * the terminal simply has no menus.  Session > Disable Input Method is
+ * there only for a program that asks for it (terminal_run_options), one
+ * whose connections cannot tell when the remote side reads a password;
+ * F10 for Treat Ambiguous-Width Characters as Wide likewise, for a window
+ * system where F10 does not open the menus.
  */
 
 #include "terminal.h"
@@ -73,6 +77,7 @@
 #define MENU_SESSION_LINE	52U
 #define MENU_CLEAR		53U
 #define MENU_RESET		54U
+#define MENU_INPUT_METHOD	55U
 
 /* Help. */
 #define MENU_ABOUT		60U
@@ -81,6 +86,7 @@
 #define MENU_KEY_PLUS		0x2bU
 #define MENU_KEY_MINUS		0x2dU
 #define MENU_KEY_ZERO		0x30U
+#define MENU_KEY_F10		0xffc7U
 #define MENU_KEY_F11		0xffc8U
 
 /* The menus, in the order they are shown. */
@@ -119,12 +125,24 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SESSION, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Session", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_INTERRUPT, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send Interrupt", TERMINAL_ACTION_INTERRUPT, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_END_OF_FILE, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send End of File", TERMINAL_ACTION_END_OF_FILE, KL_MENU_ROLE_NONE, 0U, 0U },
+	{ MENU_INPUT_METHOD, MENU_SESSION, KL_MENU_ITEM_CHECKBOX, "Disable Input Method", TERMINAL_ACTION_INPUT_METHOD_OFF, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'i' },
 	{ MENU_SESSION_LINE, MENU_SESSION, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLEAR, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Clear Screen", TERMINAL_ACTION_CLEAR, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_RESET, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Reset Terminal", TERMINAL_ACTION_RESET, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_HELP, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Help", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_ABOUT, MENU_HELP, KL_MENU_ITEM_NORMAL, "About Terminal", TERMINAL_ACTION_ABOUT, KL_MENU_ROLE_ABOUT, 0U, 0U }
 };
+
+/*
+ * The menus the window shows: menu_items without the items the program
+ * did not ask for (Session > Disable Input Method unless
+ * window->input_method_item) and with the shortcuts it asked for (F10 for
+ * the ambiguous width when window->ambiguous_wide_key), made when the
+ * menus open and kept while the compositor shows them.  menu_shown_count
+ * is how many it holds.
+ */
+static struct kl_menu_entry menu_shown_items[sizeof(menu_items) / sizeof(menu_items[0])];
+static size_t menu_shown_count;
 
 static int menu_state(struct terminal_window *window, const struct terminal_menu_state *state);
 static void menu_action_state(struct terminal_window *window, uint32_t action, int enabled, int checked);
@@ -141,10 +159,29 @@ terminal_menu_open(
 	struct terminal_window *window,
 	const struct terminal_menu_state *state)
 {
+	size_t index;
 	int error;
 
+	/* The items the window shows: every one, but the input method's only when the program asked for it. */
+	menu_shown_count = 0U;
+	for (index = 0U; index < sizeof(menu_items) / sizeof(menu_items[0]); index++) {
+		/* A program that keeps the input method to its connections has no such item. */
+		if (menu_items[index].id == MENU_INPUT_METHOD && !window->input_method_item)
+			continue;
+
+		/* The item, after the ones before it. */
+		menu_shown_items[menu_shown_count] = menu_items[index];
+
+		/* F10 alone switches the ambiguous width for a program that asked for it (the compositor's F10 opens the menus). */
+		if (menu_items[index].id == MENU_AMBIGUOUS_WIDE && window->ambiguous_wide_key) {
+			menu_shown_items[menu_shown_count].modifiers = 0U;
+			menu_shown_items[menu_shown_count].keysym = MENU_KEY_F10;
+		}
+		menu_shown_count++;
+	}
+
 	/* The table; a compositor without the System Menu leaves the terminal without menus. */
-	error = kl_window_set_menu(window->kui, menu_items, sizeof(menu_items) / sizeof(menu_items[0]));
+	error = kl_window_set_menu(window->kui, menu_shown_items, menu_shown_count);
 	if (error == ENOTSUP) {
 		printf("ZTERM MENU none errno=%d\n", error);
 		return 0;
@@ -163,7 +200,7 @@ terminal_menu_open(
 	}
 
 	/* Succeeded: the menus are the compositor's to show. */
-	printf("ZTERM MENU ready items=%u\n", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
+	printf("ZTERM MENU ready items=%u\n", (unsigned)menu_shown_count);
 	return 0;
 }
 
@@ -255,7 +292,8 @@ terminal_menu_close(
  * Shows a state in the menus through the actions' states: Copy and Paste
  * enabled, Zoom In and Out within the sizes, the size's radio item,
  * Fullscreen and Treat Ambiguous-Width Characters as Wide checked, the
- * theme's radio item and Find Next and Find Previous enabled (ws128-p006).
+ * theme's radio item, Find Next and Find Previous enabled and
+ * Disable Input Method checked.
  */
 static int
 menu_state(
@@ -310,6 +348,10 @@ menu_state(
 	/* Finding again needs a text looked for. */
 	menu_action_state(window, TERMINAL_ACTION_FIND_NEXT, state->can_find_again, 0);
 	menu_action_state(window, TERMINAL_ACTION_FIND_PREVIOUS, state->can_find_again, 0);
+
+	/* Disable Input Method checked while the user keeps it off, for the window that has the item. */
+	if (window->input_method_item)
+		menu_action_state(window, TERMINAL_ACTION_INPUT_METHOD_OFF, 1, state->input_method_off);
 
 	/* Succeeded: the menus show the state. */
 	window->menu_state = *state;

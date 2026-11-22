@@ -252,6 +252,11 @@ session_put_locked(
 	memcpy(session->output, from + first, size - first);
 	session->output_length += size;
 
+	/* Whether the tab's cursor is now at the start of a line. */
+	session->line_started = 0;
+	if (from[size - 1U] == '\n')
+		session->line_started = 1;
+
 	/* Succeeded: the bytes are the tab's to read. */
 	return size;
 }
@@ -265,6 +270,25 @@ session_say(
 	/* The text in the ring. */
 	kl_mutex_lock(&session->lock);
 
+	(void)session_put_locked(session, text, strlen(text));
+
+	kl_mutex_unlock(&session->lock);
+
+	/* The tab reads it. */
+	session_post(session);
+}
+
+/* Shows a line of the thread's own in the tab, on a line of its own (after what the remote side left unended). */
+void
+session_say_line(
+	struct mikuterm_session *session,
+	const char *text)
+{
+	/* The end of a line left open, then the text. */
+	kl_mutex_lock(&session->lock);
+
+	if (!session->line_started)
+		(void)session_put_locked(session, "\r\n", 2U);
 	(void)session_put_locked(session, text, strlen(text));
 
 	kl_mutex_unlock(&session->lock);
@@ -379,6 +403,7 @@ connection_open(
 	session->width = width;
 	session->height = height;
 	session->references = 2U;
+	session->line_started = 1;
 
 	/* Its number, and one more thread running. */
 	kl_mutex_lock(&connection_registry);

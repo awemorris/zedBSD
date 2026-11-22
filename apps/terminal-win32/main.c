@@ -121,7 +121,12 @@ wWinMain(
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&connector, &connect);
 
-	/* The window: drawn on the processor, at the screen's scale, the grid the settings give. */
+	/*
+	 * The window: drawn on the processor, at the screen's scale, the grid
+	 * the settings give, Session > Disable Input Method for a password the
+	 * remote side asks for (the connection cannot see it asked), and F10
+	 * for the ambiguous width (Windows leaves F10 to the program).
+	 */
 	memset(&run, 0, sizeof(run));
 	run.application = "mikuterm";
 	run.display = NULL;
@@ -140,6 +145,8 @@ wWinMain(
 	run.token = "mikuterm";
 	run.about = MAIN_ABOUT;
 	run.copy_on_select = main_state.conf.copy_on_select;
+	run.input_method_menu = 1;
+	run.ambiguous_wide_key = 1;
 	run.connector = &connector.connector;
 	run.new_window = main_new_window;
 	run.ended = main_ended;

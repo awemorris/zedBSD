@@ -93,6 +93,9 @@ struct mikuterm_session {
 	size_t output_start;
 	size_t output_length;
 
+	/* The last byte put in the ring ended a line (or none was put yet): the thread's own lines start there. */
+	int line_started;
+
 	/* How much the tab read since the thread last took the count (the engine gives the window back from it). */
 	size_t taken;
 
@@ -131,6 +134,7 @@ void session_release(struct mikuterm_session *session);
 void session_post(struct mikuterm_session *session);
 size_t session_put_locked(struct mikuterm_session *session, const void *bytes, size_t size);
 void session_say(struct mikuterm_session *session, const char *text);
+void session_say_line(struct mikuterm_session *session, const char *text);
 void session_ended(struct mikuterm_session *session);
 void session_thread_ended(void);
 

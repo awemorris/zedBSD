@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 /* The most UTF-16 units of the program's path Windows is asked for (its longest path). */
 #define FOLDER_WIDE_MAX		32768U
@@ -35,6 +36,7 @@ static int folder_wide(const char *path, wchar_t **wide);
 static int folder_error(DWORD error);
 static int folder_write(const wchar_t *path, DWORD access, DWORD disposition, const void *bytes, size_t size);
 static int folder_absolute(const char *path);
+static int folder_parent_make(const wchar_t *path);
 
 /*
  * Finds the folder mikuterm.exe is in.  Returns 0, ENAMETOOLONG for a path
@@ -273,8 +275,10 @@ mikuterm_file_read(
 
 /*
  * Appends bytes to a file in one write, making the file when it is not
- * there: another program appending to it at the same time adds its own
- * lines whole, before or after.  Returns 0, EACCES, ENOENT, ENOMEM or EIO.
+ * there (and its directory, one level, when that is not there either, as
+ * ssh makes ~/.ssh): another program appending to it at the same time
+ * adds its own lines whole, before or after.  Returns 0, EACCES, ENOENT,
+ * ENOMEM or EIO.
  */
 int
 mikuterm_file_append(
@@ -290,8 +294,13 @@ mikuterm_file_append(
 	if (error != 0)
 		return error;
 
-	/* The bytes at the end. */
+	/* The bytes at the end; a directory that is not there is made, and the write tried once more. */
 	error = folder_write(wide, FILE_APPEND_DATA, OPEN_ALWAYS, bytes, size);
+	if (error == ENOENT) {
+		error = folder_parent_make(wide);
+		if (error == 0)
+			error = folder_write(wide, FILE_APPEND_DATA, OPEN_ALWAYS, bytes, size);
+	}
 	free(wide);
 	if (error != 0)
 		return error;
@@ -478,5 +487,44 @@ folder_absolute(
 		return 1;
 
 	/* Anything else is not. */
+	return 0;
+}
+
+/*
+ * Makes the directory a file's path is in, when its own parent is there.
+ * Returns 0 (also when it was there already), ENOENT, EACCES, ENOMEM or
+ * EIO.
+ */
+static int
+folder_parent_make(
+	const wchar_t *path)
+{
+	wchar_t *parent;
+	wchar_t *separator;
+	size_t length;
+	BOOL made;
+	DWORD error;
+
+	/* The path up to its last separator. */
+	length = wcslen(path);
+	parent = malloc((length + 1U) * sizeof(*parent));
+	if (parent == NULL)
+		return ENOMEM;
+	memcpy(parent, path, (length + 1U) * sizeof(*parent));
+	separator = wcsrchr(parent, L'\\');
+	if (separator == NULL || separator == parent) {
+		free(parent);
+		return ENOENT;
+	}
+	*separator = L'\0';
+
+	/* The directory; one already there is as good. */
+	made = CreateDirectoryW(parent, NULL);
+	error = GetLastError();
+	free(parent);
+	if (!made && error != ERROR_ALREADY_EXISTS)
+		return folder_error(error);
+
+	/* Succeeded: the directory is there. */
 	return 0;
 }

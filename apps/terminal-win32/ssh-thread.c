@@ -54,6 +54,20 @@
 /* Where the settings of the hosts are, inside the folder. */
 #define THREAD_SSH_CONFIG	"ssh/config"
 
+/* The known_hosts file that stands for none: nothing is read from it and nothing kept in it. */
+#define THREAD_NO_FILE		"/dev/null"
+
+/* The longest line about the hosts' keys shown at once (a path, a name and the words round them). */
+#define THREAD_LINE_MAX		(MIKUTERM_PATH_MAX + MIKUTERM_HOST_MAX + 128U)
+
+/* The frame of the warnings about a host's key. */
+#define THREAD_WARNING_RULE	"@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
+
+/* What an answer about an unknown host's key says. */
+#define THREAD_CONFIRM_NO	0
+#define THREAD_CONFIRM_YES	1
+#define THREAD_CONFIRM_AGAIN	2
+
 /* What an attempt to connect came to. */
 #define THREAD_DONE		0
 #define THREAD_FAILED		1
@@ -87,7 +101,8 @@ struct thread_hosts {
 
 /*
  * One attempt to connect: the settings for the host, the socket and the
- * engine, the bytes read and not yet taken by the engine, the question
+ * address it reached, the engine, the bytes read and not yet taken by the
+ * engine, the server's key with what known_hosts says of it, the question
  * waiting for the user, and how the attempt ended.
  */
 struct thread_link {
@@ -96,12 +111,16 @@ struct thread_link {
 	struct ssh_config config;
 	const char *host_name;
 	struct kl_socket *socket;
+	struct kl_address address;
 	struct ssh_engine *engine;
 	uint8_t received[THREAD_RECEIVE];
 	size_t received_start;
 	size_t received_end;
 	unsigned asked;
 	uint8_t host_key[SSH_ED25519_PUBLIC];
+	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
+	char known_name[MIKUTERM_HOST_MAX + 8U];
+	struct mikuterm_known_scan known;
 	int host_refused;
 	int disconnecting;
 	uint64_t farewell_ms;
@@ -122,8 +141,14 @@ static void thread_identities_free(struct ssh_engine_identity *identities, unsig
 static int thread_converse(struct thread_link *link);
 static void thread_events(struct thread_link *link);
 static void thread_host_key(struct thread_link *link, const struct ssh_engine_event *event);
+static enum ssh_known_result thread_known_read(struct thread_link *link, const char *written);
+static void thread_host_ask(struct thread_link *link, enum ssh_known_result user_answer, enum ssh_known_result global_answer);
+static void thread_host_changed(struct thread_link *link);
+static void thread_host_revoked(struct thread_link *link);
 static void thread_host_answer(struct thread_link *link, const char *answer, int cancelled);
+static int thread_confirm(const char *answer, const char *fingerprint);
 static int thread_known_hosts_add(struct thread_link *link);
+static int thread_known_hosts_write(struct thread_link *link, const char *path);
 static void thread_closed(struct thread_link *link, const struct ssh_engine_event *event);
 static void thread_from_tab(struct thread_link *link);
 static void thread_answers(struct thread_link *link);
@@ -190,9 +215,8 @@ session_run(
 		if (status == THREAD_CLOSING)
 			break;
 
-		/* Why it failed, and Enter to try again. */
-		session_say(session, "\r\n");
-		session_say(session, link->reason);
+		/* Why it failed, on a line of its own, and Enter to try again. */
+		session_say_line(session, link->reason);
 		session_say(session, "\r\n");
 		status = thread_ask(session, "Press Enter to connect again (Ctrl+C closes the tab). ", SESSION_ASK_LINE, answer, sizeof(answer));
 		if (status == ECANCELED)
@@ -418,17 +442,13 @@ thread_attempt(
 	if (status != THREAD_DONE)
 		return status;
 
-	/* The user, asked once when none is set. */
-	if (link->config.user[0] == '\0') {
+	/* The user, asked until one is given when none is set (kept for the next attempt). */
+	while (link->config.user[0] == '\0') {
 		error = thread_ask(session, "login as: ", SESSION_ASK_LINE, link->target->user, sizeof(link->target->user));
 		if (error == ECANCELED)
 			return THREAD_GIVEN_UP;
 		if (error != 0)
 			return THREAD_CLOSING;
-		if (link->target->user[0] == '\0') {
-			(void)snprintf(link->reason, sizeof(link->reason), "No user was given.");
-			return THREAD_FAILED;
-		}
 		(void)snprintf(link->config.user, sizeof(link->config.user), "%s", link->target->user);
 	}
 
@@ -600,6 +620,7 @@ thread_dial(
 		/* Connected. */
 		if (error == 0) {
 			link->socket = socket;
+			link->address = addresses[index];
 			return THREAD_DONE;
 		}
 
@@ -876,9 +897,10 @@ thread_events(
 }
 
 /*
- * Decides about the server's host key: the user's and the folder's
- * known_hosts and StrictHostKeyChecking say whether it is accepted, added,
- * refused, or asked about.
+ * Decides about the server's host key: the user's and the global
+ * known_hosts and StrictHostKeyChecking say whether it is accepted,
+ * added, refused, or asked about, and the user is told why as OpenSSH
+ * tells it.
  */
 static void
 thread_host_key(
@@ -888,11 +910,7 @@ thread_host_key(
 	enum ssh_known_result user_answer;
 	enum ssh_known_result global_answer;
 	enum ssh_engine_host_action action;
-	char path[MIKUTERM_PATH_MAX];
-	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
-	char prompt[MIKUTERM_HOST_MAX * 2U + SSH_KEY_FINGERPRINT_SIZE + 256U];
-	char *text;
-	size_t size;
+	char line[THREAD_LINE_MAX];
 	int error;
 
 	/* The key; one that is not ssh-ed25519 is refused. */
@@ -903,31 +921,19 @@ thread_host_key(
 		return;
 	}
 
-	/* The user's known_hosts (none: nothing known). */
-	user_answer = SSH_KNOWN_ABSENT;
-	error = mikuterm_ssh_path(path, sizeof(path), link->config.user_known_hosts);
-	if (error == 0)
-		error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &text, &size);
-	if (error == 0) {
-		(void)ssh_known_hosts_check(text, size, link->host_name, link->config.port, link->host_key, &user_answer, NULL);
-		free(text);
-	}
+	/* Its fingerprint, and the host's name in known_hosts. */
+	(void)ssh_key_fingerprint(link->host_key, link->fingerprint, sizeof(link->fingerprint));
+	(void)mikuterm_host_port_name(link->host_name, link->config.port, link->known_name, sizeof(link->known_name));
 
-	/* The global one, when the settings name a file of the folder or of Windows. */
-	global_answer = SSH_KNOWN_ABSENT;
-	error = mikuterm_ssh_path(path, sizeof(path), link->config.global_known_hosts);
-	if (error == 0)
-		error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &text, &size);
-	if (error == 0) {
-		(void)ssh_known_hosts_check(text, size, link->host_name, link->config.port, link->host_key, &global_answer, NULL);
-		free(text);
-	}
+	/* What the user's known_hosts and the global one say of it. */
+	memset(&link->known, 0, sizeof(link->known));
+	user_answer = thread_known_read(link, link->config.user_known_hosts);
+	global_answer = thread_known_read(link, link->config.global_known_hosts);
 
 	/* What to do. */
 	error = ssh_engine_host_decide(user_answer, global_answer, link->config.strict, link->config.batch_mode, &action);
 	if (error != 0)
 		action = SSH_ENGINE_HOST_REFUSE_UNKNOWN;
-	(void)ssh_key_fingerprint(link->host_key, fingerprint, sizeof(fingerprint));
 
 	/* Accepted, added, asked about or refused. */
 	switch (action) {
@@ -939,69 +945,235 @@ thread_host_key(
 		(void)ssh_engine_host_answer(link->engine, 1);
 		break;
 	case SSH_ENGINE_HOST_ASK:
-		(void)snprintf(prompt,
-			       sizeof(prompt),
-			       "The authenticity of host '%s' can't be established.\r\n"
-			       "ED25519 key fingerprint is %s.\r\n"
-			       "Are you sure you want to continue connecting (yes/no)? ",
-			       link->host_name,
-			       fingerprint);
-		thread_ask_start(link->session, prompt, SESSION_ASK_LINE);
-		link->asked = THREAD_ASKED_HOST_KEY;
+		thread_host_ask(link, user_answer, global_answer);
 		break;
 	case SSH_ENGINE_HOST_REFUSE_CHANGED:
-		(void)snprintf(prompt,
-			       sizeof(prompt),
-			       "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\r\n"
-			       "The ED25519 key of %s is now %s, not the one in ssh\\known_hosts.\r\n",
-			       link->host_name,
-			       fingerprint);
-		session_say(link->session, prompt);
+		thread_host_changed(link);
+		link->host_refused = 1;
+		(void)ssh_engine_host_answer(link->engine, 0);
+		break;
+	case SSH_ENGINE_HOST_REFUSE_REVOKED:
+		thread_host_revoked(link);
 		link->host_refused = 1;
 		(void)ssh_engine_host_answer(link->engine, 0);
 		break;
 	default:
-		/* Revoked, or unknown where the settings do not let it be added. */
+		/* Unknown where the settings do not let it be added. */
+		(void)snprintf(line, sizeof(line), "No ED25519 host key is known for %s and you have requested strict checking.\r\n", link->known_name);
+		session_say(link->session, line);
 		link->host_refused = 1;
 		(void)ssh_engine_host_answer(link->engine, 0);
 		break;
 	}
 }
 
-/* Takes the user's answer about an unknown host: yes accepts and keeps the key, no refuses, anything else asks again. */
+/*
+ * Reads a known_hosts file the settings name (none, one that is not
+ * there, or "/dev/null": nothing known) and looks the server's key up in
+ * it, keeping what the user is to be told in link->known.  Returns the
+ * library's answer.
+ */
+static enum ssh_known_result
+thread_known_read(
+	struct thread_link *link,
+	const char *written)
+{
+	enum ssh_known_result answer;
+	char path[MIKUTERM_PATH_MAX];
+	char shown[MIKUTERM_PATH_MAX];
+	char *text;
+	size_t size;
+	int differs;
+	int error;
+
+	/* The file that stands for none. */
+	answer = SSH_KNOWN_ABSENT;
+	differs = strcmp(written, THREAD_NO_FILE);
+	if (differs == 0)
+		return answer;
+
+	/* The file in the folder, or on Windows; one that cannot be read knows nothing. */
+	error = mikuterm_ssh_path(path, sizeof(path), written);
+	if (error != 0)
+		return answer;
+	error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &text, &size);
+	if (error != 0)
+		return answer;
+
+	/* The library's answer, and the lines the user is told of. */
+	(void)ssh_known_hosts_check(text, size, link->host_name, link->config.port, link->host_key, &answer, NULL);
+	mikuterm_path_shown(path, shown, sizeof(shown));
+	mikuterm_known_hosts_scan(text, size, shown, link->known_name, link->host_key, &link->known);
+	free(text);
+
+	/* Succeeded: what the file says. */
+	return answer;
+}
+
+/*
+ * Asks whether to trust an unknown host's key, as OpenSSH asks: the host
+ * and the address reached, the key's fingerprint, the other names the key
+ * is known by, and yes, no or the fingerprint.
+ */
+static void
+thread_host_ask(
+	struct thread_link *link,
+	enum ssh_known_result user_answer,
+	enum ssh_known_result global_answer)
+{
+	struct mikuterm_known_other *other;
+	char address[MIKUTERM_HOST_MAX + 8U];
+	char line[THREAD_LINE_MAX];
+	unsigned index;
+	int other_types;
+	int error;
+
+	/* The host as known_hosts names it, and the address reached as OpenSSH shows it. */
+	error = mikuterm_address_name(&link->address, link->config.port, address, sizeof(address));
+	if (error != 0)
+		(void)snprintf(address, sizeof(address), "%s", link->known_name);
+
+	/* Whether the host is known only by keys of other types. */
+	other_types = 0;
+	if (user_answer == SSH_KNOWN_OTHER_TYPES || global_answer == SSH_KNOWN_OTHER_TYPES)
+		other_types = 1;
+
+	/* Whose key it is, and its fingerprint. */
+	if (other_types) {
+		(void)snprintf(line,
+			       sizeof(line),
+			       "The authenticity of host '%s (%s)' can't be established\r\n"
+			       "but keys of different type are already known for this host.\r\n",
+			       link->known_name,
+			       address);
+	} else {
+		(void)snprintf(line, sizeof(line), "The authenticity of host '%s (%s)' can't be established.\r\n", link->known_name, address);
+	}
+	session_say(link->session, line);
+	(void)snprintf(line, sizeof(line), "ED25519 key fingerprint is %s.\r\n", link->fingerprint);
+	session_say(link->session, line);
+
+	/* The other names it is known by, the first few of them. */
+	if (link->known.other_count == 0U) {
+		session_say(link->session, "This key is not known by any other names.\r\n");
+	} else {
+		session_say(link->session, "This host key is known by the following other names/addresses:\r\n");
+		for (index = 0U; index < link->known.other_count && index < MIKUTERM_KNOWN_OTHERS; index++) {
+			other = &link->known.others[index];
+			(void)snprintf(line, sizeof(line), "    %s:%u: %s\r\n", other->path, other->line, other->names);
+			session_say(link->session, line);
+		}
+	}
+
+	/* The names left out. */
+	if (link->known.other_count > MIKUTERM_KNOWN_OTHERS) {
+		(void)snprintf(line, sizeof(line), "    (%u additional names omitted)\r\n", link->known.other_count - MIKUTERM_KNOWN_OTHERS);
+		session_say(link->session, line);
+	}
+
+	/* The question. */
+	thread_ask_start(link->session, "Are you sure you want to continue connecting (yes/no/[fingerprint])? ", SESSION_ASK_LINE);
+	link->asked = THREAD_ASKED_HOST_KEY;
+}
+
+/*
+ * Warns that the host showed another key than the one known for it, and
+ * says which line holds the old one and how to take it away.  The
+ * connection is refused: the screen never replaces a known key.
+ */
+static void
+thread_host_changed(
+	struct thread_link *link)
+{
+	char line[THREAD_LINE_MAX];
+
+	/* The warning's frame, as OpenSSH draws it. */
+	session_say(link->session, THREAD_WARNING_RULE);
+	session_say(link->session, "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n");
+	session_say(link->session, THREAD_WARNING_RULE);
+
+	/* What it may mean. */
+	session_say(link->session, "The host's key is not the one known_hosts holds for it.  Someone may be\r\n");
+	session_say(link->session, "listening in on the connection (a man-in-the-middle attack), or the\r\n");
+	session_say(link->session, "host's key may have been replaced.\r\n");
+
+	/* The key the server showed. */
+	session_say(link->session, "The fingerprint for the ED25519 key sent by the remote host is\r\n");
+	(void)snprintf(line, sizeof(line), "%s.\r\n", link->fingerprint);
+	session_say(link->session, line);
+
+	/* The line that holds the old key, and what to do when the key was replaced on purpose. */
+	if (link->known.changed_line != 0U) {
+		(void)snprintf(line,
+			       sizeof(line),
+			       "If the key was replaced on purpose, delete line %u of %s\r\n"
+			       "and connect again.\r\n",
+			       link->known.changed_line,
+			       link->known.changed_path);
+		session_say(link->session, line);
+		(void)snprintf(line, sizeof(line), "Offending ED25519 key in %s:%u\r\n", link->known.changed_path, link->known.changed_line);
+		session_say(link->session, line);
+	}
+
+	/* The refusal. */
+	(void)snprintf(line, sizeof(line), "Host key for %s has changed and you have requested strict checking.\r\n", link->known_name);
+	session_say(link->session, line);
+}
+
+/* Warns that the host showed a key marked as revoked; the connection is refused. */
+static void
+thread_host_revoked(
+	struct thread_link *link)
+{
+	char line[THREAD_LINE_MAX];
+
+	/* The warning's frame, as OpenSSH draws it. */
+	session_say(link->session, THREAD_WARNING_RULE);
+	session_say(link->session, "@       WARNING: REVOKED HOST KEY DETECTED!               @\r\n");
+	session_say(link->session, THREAD_WARNING_RULE);
+
+	/* Which key, where it is marked, and what it may mean. */
+	if (link->known.revoked_line != 0U) {
+		(void)snprintf(line,
+			       sizeof(line),
+			       "The ED25519 host key for %s is marked as revoked (%s:%u).\r\n",
+			       link->known_name,
+			       link->known.revoked_path,
+			       link->known.revoked_line);
+	} else {
+		(void)snprintf(line, sizeof(line), "The ED25519 host key for %s is marked as revoked.\r\n", link->known_name);
+	}
+	session_say(link->session, line);
+	session_say(link->session, "Someone may be using a stolen key to pretend to be this host.\r\n");
+}
+
+/*
+ * Takes the user's answer about an unknown host: yes or the fingerprint
+ * accepts and keeps the key, no or nothing refuses, anything else asks
+ * again.
+ */
 static void
 thread_host_answer(
 	struct thread_link *link,
 	const char *answer,
 	int cancelled)
 {
-	int yes_differs;
-	int no_differs;
-	int yes;
-	int no;
+	int confirmed;
 
-	/* Yes or no, in any case; giving up is no. */
-	yes_differs = _stricmp(answer, "yes");
-	no_differs = _stricmp(answer, "no");
-	yes = 0;
-	no = 0;
-	if (cancelled) {
-		no = 1;
-	} else if (yes_differs == 0) {
-		yes = 1;
-	} else if (no_differs == 0) {
-		no = 1;
-	}
+	/* What the answer says; giving the question up is no. */
+	confirmed = THREAD_CONFIRM_NO;
+	if (!cancelled)
+		confirmed = thread_confirm(answer, link->fingerprint);
 
 	/* Anything else asks again. */
-	if (!yes && !no) {
-		thread_ask_start(link->session, "Please type 'yes' or 'no': ", SESSION_ASK_LINE);
+	if (confirmed == THREAD_CONFIRM_AGAIN) {
+		thread_ask_start(link->session, "Please type 'yes', 'no' or the fingerprint: ", SESSION_ASK_LINE);
 		return;
 	}
 
 	/* No ends the connection. */
 	link->asked = THREAD_ASKED_NONE;
-	if (no) {
+	if (confirmed == THREAD_CONFIRM_NO) {
 		link->host_refused = 1;
 		(void)ssh_engine_host_answer(link->engine, 0);
 		return;
@@ -1013,56 +1185,146 @@ thread_host_answer(
 }
 
 /*
- * Appends the host's line to the user's known_hosts, in one write, and
- * says so.  Returns 0 or the error (the key is then accepted for this
- * connection alone).
+ * Reads an answer to the question about an unknown host's key, as OpenSSH
+ * reads it: its first word (white space before and after it ignored);
+ * nothing or "no" is THREAD_CONFIRM_NO, "yes" (both in any case) or the
+ * fingerprint exactly is THREAD_CONFIRM_YES, anything else
+ * THREAD_CONFIRM_AGAIN.
+ */
+static int
+thread_confirm(
+	const char *answer,
+	const char *fingerprint)
+{
+	char word[SESSION_LINE_MAX];
+	size_t length;
+	int no_differs;
+	int yes_differs;
+	int fingerprint_differs;
+
+	/* The first word. */
+	while (*answer == ' ' || *answer == '\t')
+		answer++;
+	length = strcspn(answer, " \t");
+	if (length >= sizeof(word))
+		length = sizeof(word) - 1U;
+	memcpy(word, answer, length);
+	word[length] = '\0';
+
+	/* Nothing, or no. */
+	no_differs = _stricmp(word, "no");
+	if (length == 0U || no_differs == 0)
+		return THREAD_CONFIRM_NO;
+
+	/* Yes, or the fingerprint itself. */
+	yes_differs = _stricmp(word, "yes");
+	fingerprint_differs = strcmp(word, fingerprint);
+	if (yes_differs == 0 || fingerprint_differs == 0)
+		return THREAD_CONFIRM_YES;
+
+	/* Succeeded: the answer is neither. */
+	return THREAD_CONFIRM_AGAIN;
+}
+
+/*
+ * Keeps the host's key in the user's known_hosts and says so as OpenSSH
+ * does ("/dev/null" keeps nothing and is told the same).  Returns 0, or
+ * the error of a file that could not keep it (the key is then accepted
+ * for this connection alone, and the user is told).
  */
 static int
 thread_known_hosts_add(
 	struct thread_link *link)
 {
-	static struct kl_mutex known_hosts_lock = KL_MUTEX_INIT;
-	struct ssh_buf line;
 	char path[MIKUTERM_PATH_MAX];
-	char name[MIKUTERM_HOST_MAX + 8U];
-	char text[MIKUTERM_HOST_MAX + 128U];
+	char shown[MIKUTERM_PATH_MAX];
+	char text[THREAD_LINE_MAX];
+	int differs;
 	int error;
 
-	/* The line. */
-	ssh_buf_init(&line, 1024U, 0);
-	error = ssh_known_hosts_put_line(link->host_name, link->config.port, link->host_key, &line);
-	if (error != 0) {
-		ssh_buf_free(&line);
-		return error;
+	/* The file, unless it is the one that keeps nothing. */
+	differs = strcmp(link->config.user_known_hosts, THREAD_NO_FILE);
+	error = 0;
+	if (differs != 0) {
+		/* Where it is, and how the user is told of it. */
+		mikuterm_path_shown(link->config.user_known_hosts, shown, sizeof(shown));
+		error = mikuterm_ssh_path(path, sizeof(path), link->config.user_known_hosts);
+		if (error == 0) {
+			mikuterm_path_shown(path, shown, sizeof(shown));
+			error = thread_known_hosts_write(link, path);
+		}
 	}
 
-	/* The file, written by one thread of the program at a time. */
-	error = mikuterm_ssh_path(path, sizeof(path), link->config.user_known_hosts);
-	if (error == 0) {
-		kl_mutex_lock(&known_hosts_lock);
-
-		error = mikuterm_file_append(path, line.data, line.size);
-
-		kl_mutex_unlock(&known_hosts_lock);
-	}
-	ssh_buf_free(&line);
-
-	/* The host as known_hosts names it: [host]:port for a port other than 22. */
-	if (link->config.port == 22U)
-		(void)snprintf(name, sizeof(name), "%s", link->host_name);
-	else
-		(void)snprintf(name, sizeof(name), "[%s]:%u", link->host_name, (unsigned)link->config.port);
-
-	/* What became of it. */
+	/* A file that could not keep it. */
 	if (error != 0) {
-		(void)snprintf(text, sizeof(text), "Warning: the key of '%s' could not be kept (%s).\r\n", name, thread_error_text(error));
+		(void)snprintf(text, sizeof(text), "Failed to add the host to the list of known hosts (%s).\r\n", shown);
 		session_say(link->session, text);
 		return error;
 	}
 
 	/* Succeeded: kept. */
-	(void)snprintf(text, sizeof(text), "Warning: Permanently added '%s' (ED25519) to the list of known hosts.\r\n", name);
+	(void)snprintf(text, sizeof(text), "Warning: Permanently added '%s' (ED25519) to the list of known hosts.\r\n", link->known_name);
 	session_say(link->session, text);
+	return 0;
+}
+
+/*
+ * Appends the host's line to a known_hosts file in one write, by one
+ * thread of the program at a time: the host in lower case ([host]:port
+ * for a port other than 22), not hashed, and a LF first when the file's
+ * last line has none.  Returns 0 or the error.
+ */
+static int
+thread_known_hosts_write(
+	struct thread_link *link,
+	const char *path)
+{
+	static struct kl_mutex known_hosts_lock = KL_MUTEX_INIT;
+	struct ssh_buf line;
+	char host[MIKUTERM_HOST_MAX];
+	char *old;
+	size_t size;
+	int unended;
+	int error;
+
+	/* The host as OpenSSH writes it: in lower case (the line adds the port). */
+	error = mikuterm_host_port_name(link->host_name, 22U, host, sizeof(host));
+	if (error != 0)
+		return error;
+
+	/* The line, with room for a LF before it. */
+	ssh_buf_init(&line, 1024U, 0);
+	ssh_buf_put_u8(&line, '\n');
+	error = ssh_known_hosts_put_line(host, link->config.port, link->host_key, &line);
+	if (error != 0) {
+		ssh_buf_free(&line);
+		return error;
+	}
+
+	/* The file as it ends now, and the line after it. */
+	kl_mutex_lock(&known_hosts_lock);
+
+	old = NULL;
+	size = 0U;
+	error = mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &old, &size);
+	unended = 0;
+	if (error == 0 && size != 0U && old[size - 1U] != '\n')
+		unended = 1;
+	free(old);
+	if (unended)
+		error = mikuterm_file_append(path, line.data, line.size);
+	else
+		error = mikuterm_file_append(path, line.data + 1U, line.size - 1U);
+
+	kl_mutex_unlock(&known_hosts_lock);
+
+	ssh_buf_free(&line);
+
+	/* A file that did not take the line. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the line is in the file. */
 	return 0;
 }
 
@@ -1090,7 +1352,7 @@ thread_closed(
 		if (link->host_refused)
 			(void)snprintf(link->reason, sizeof(link->reason), "Host key verification failed.");
 		else
-			(void)snprintf(link->reason, sizeof(link->reason), "%s@%s: Permission denied (%s).", link->config.user, link->host_name, event->reason);
+			(void)snprintf(link->reason, sizeof(link->reason), "%s@%s: %s", link->config.user, link->host_name, event->reason);
 		break;
 	case ETIMEDOUT:
 		(void)snprintf(link->reason, sizeof(link->reason), "Timeout, server %s not responding.", link->host_name);
