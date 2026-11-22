@@ -28,8 +28,6 @@
 
 #include "terminal.h"
 
-#include "userland/desktop/paths.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -66,6 +64,19 @@
 /* The replacement character, shown for what cannot be drawn. */
 #define FONT_REPLACEMENT	0xfffdU
 
+/*
+ * The flags of a font file's open.  The Windows C runtime has no
+ * close-on-exec and opens a file in text mode (turning CR LF into LF and
+ * stopping at a ^Z) unless told O_BINARY; a system without one of the
+ * flags gets 0 for it.
+ */
+#ifndef O_CLOEXEC
+#define O_CLOEXEC	0
+#endif
+#ifndef O_BINARY
+#define O_BINARY	0
+#endif
+
 static int font_read(const char *path, void **data, size_t *size);
 static int font_measure(struct terminal_font *font, unsigned pixels);
 static unsigned font_lookup(struct terminal_font *font, uint32_t key, unsigned *slot);
@@ -74,7 +85,9 @@ static void font_mark(struct terminal_font *font, unsigned x, unsigned y, unsign
 static void font_slot_origin(const struct terminal_font *font, unsigned slot, unsigned *x, unsigned *y);
 
 /*
- * Reads a font file and measures its cells at a size in pixels.
+ * Reads a font file and measures its cells at a size in pixels; its
+ * companion, the monospaced font that draws the signs and the box drawing
+ * it lacks, is another file (NULL for none).
  *
  * Returns 0, or an errno value when the file cannot be read or is not a
  * TrueType font.
@@ -83,6 +96,7 @@ int
 terminal_font_open(
 	struct terminal_font *font,
 	const char *path,
+	const char *companion,
 	unsigned pixels)
 {
 	int error;
@@ -103,7 +117,8 @@ terminal_font_open(
 	}
 
 	/* Its companion, the monospaced fallback, for the signs and the box drawing it lacks (ws090-p020; no bold is drawn). */
-	(void)truetype_open_companions(font->face, NULL, KEILAND_FONT_FALLBACK_MONO);
+	if (companion != NULL)
+		(void)truetype_open_companions(font->face, NULL, companion);
 
 	/* The cell's size at the size every glyph is drawn at. */
 	error = font_measure(font, pixels);
@@ -383,7 +398,7 @@ font_read(
 	int error;
 
 	/* Opens the file. */
-	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	descriptor = open(path, O_RDONLY | O_CLOEXEC | O_BINARY);
 	if (descriptor < 0)
 		return errno;
 

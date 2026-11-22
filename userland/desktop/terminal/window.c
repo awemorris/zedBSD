@@ -6,15 +6,15 @@
  */
 
 /*
- * The Wayland window of terminal: a window of libkeiland's application
- * (WS131 p018, kl_app; ws090-p011 before), whose surface the terminal
- * draws on with its own Vulkan (KL_PRESENT_NONE).  The application waits
- * for the compositor and the shells together: each shell is a process of
- * the application on a terminal of its own (kl_process), whose output and
- * end come as the application's events.
+ * The window of terminal: a window of libkeiland's application (WS131
+ * p018, kl_app; ws090-p011 before), whose frames the drawing shows
+ * (display.h).  The application waits for the window system and the tabs'
+ * connections together: each connection learns from the application's
+ * events what it has for the main loop (connection.h).
  *
  * The application queues the window's input; this file takes it into what
- * the main loop reads.  A key press is turned into bytes at once (keys.c)
+ * the main loop reads.  A key press is turned into bytes at once (the
+ * character the window system says it types, or keys.c's for the key)
  * and kept until the main loop writes them to the shell, and a held key's
  * repeats (which the application makes after the compositor's events are
  * in, BUG-111) are typed the same way.  The pointer's presses, releases
@@ -31,13 +31,12 @@
  */
 
 #include "terminal.h"
-
-#include <wayland-client.h>
+#include "connection.h"
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 /* The evdev codes of Page Up and Page Down, which with Shift scroll the view (ws035-p114). */
 #define WINDOW_KEY_PAGEUP	104U
@@ -63,20 +62,20 @@
  */
 #define WINDOW_WHEEL_NOTCH	60.0
 
-static void window_paced(void *data, struct wl_callback *callback, uint32_t time);
+/*
+ * Whether the ZTERM LAT and ZTERM PERF lines are written: -1 until the
+ * environment's TERMINAL_PERF is read (once, by the first ask), then 1
+ * when it is 1 and 0 otherwise.  The main thread's alone.
+ */
+static int window_perf = -1;
 
-/* The compositor's answer to the frame callback of a frame shown (the pacing, pace.h). */
-static const struct wl_callback_listener window_pace_listener = {
-	window_paced
-};
-
-static void window_pace_forget(struct terminal_window *window);
 static void window_event(struct terminal_window *window, const struct kl_window_event *event);
 static void window_selection(const struct kl_window_event *event);
 static void window_drop_enter(const struct kl_window_event *event);
-static void window_press(struct terminal_window *window, uint32_t key);
+static void window_press(struct terminal_window *window, const struct kl_window_event *event);
+static int window_key_text(const struct terminal_window *window, const struct kl_window_event *event);
 static void window_text_commit(struct terminal_window *window, const char *text);
-static void window_search_key(struct terminal_window *window, uint32_t key);
+static void window_search_key(struct terminal_window *window, const struct kl_window_event *event);
 static void window_search_append(struct terminal_window *window, const char *text, size_t length);
 static void window_text_preedit(struct terminal_window *window, const struct kl_window_event *event);
 static void window_text_delete(struct terminal_window *window, uint32_t before);
@@ -87,7 +86,10 @@ static void window_touch_push(struct terminal_window *window, unsigned type, con
 static uint32_t window_modifiers(unsigned modifiers);
 
 /*
- * Connects to the compositor and makes a toplevel window of a size.
+ * Connects to the window system and makes a toplevel window of a size:
+ * the application's name, the window's title and how its frames are shown
+ * (KL_PRESENT_NONE for the program's own Vulkan, KL_PRESENT_SHM for frames
+ * painted on the processor).
  *
  * Returns 0 once the first configure is acknowledged, or -1 with errno set.
  */
@@ -95,6 +97,9 @@ int
 terminal_window_open(
 	struct terminal_window *window,
 	const char *display,
+	const char *application,
+	const char *title,
+	unsigned present,
 	uint32_t width,
 	uint32_t height)
 {
@@ -109,17 +114,17 @@ terminal_window_open(
 	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = display;
-	app_options.application = "terminal";
+	app_options.application = application;
 	window->app = kl_app_open(&app_options);
 	if (window->app == NULL)
 		return -1;
 
-	/* Its window, the size asked for until the compositor gives one; the terminal draws on it itself. */
+	/* Its window, the size asked for until the compositor gives one, shown as the drawing asks. */
 	memset(&options, 0, sizeof(options));
-	options.title = "Terminal";
+	options.title = title;
 	options.width = width;
 	options.height = height;
-	options.present = KL_PRESENT_NONE;
+	options.present = present;
 	window->kui = kl_app_window_create(window->app, &options);
 	if (window->kui == NULL)
 		return -1;
@@ -165,37 +170,38 @@ terminal_window_open(
 }
 
 /*
- * Waits for the compositor or the shells and takes what happened: the
- * window's input, and what each shell told.
+ * Waits for the window system or the tabs' connections and takes what
+ * happened: the window's input, and what each connection told.
  *
  * `timeout` is in milliseconds (-1 waits for ever; a held key's repeat or
- * input already queued waits less); ready[i] has what shells[i] told
- * (KL_PROCESS_READY_*: output to read, room for the keys, its end).
- * Returns 0, or -1 when the connection is broken.
+ * input already queued waits less); ready[i] has what connections[i] told
+ * (TERMINAL_READY_*: output to read, room for the keys, its end).
+ * Returns 0, or -1 when the connection to the window system is broken.
  */
 int
 terminal_window_dispatch(
 	struct terminal_window *window,
-	struct kl_process *const *shells,
+	struct terminal_connection *const *connections,
 	unsigned count,
 	int timeout,
 	unsigned *ready)
 {
 	struct kl_app_event event;
 	unsigned index;
+	unsigned told;
 	int status;
 	int taken;
 
-	/* No shell told anything yet. */
+	/* No connection told anything yet. */
 	for (index = 0; index < count; index++)
 		ready[index] = 0U;
 
-	/* The compositor and the shells, together (a held key repeats within, after its release if that came). */
+	/* The window system and the connections, together (a held key repeats within, after its release if that came). */
 	status = kl_app_dispatch(window->app, timeout);
 	if (status != 0)
 		return -1;
 
-	/* What happened, in its order: the window's input, and what the shells told. */
+	/* What happened, in its order: the window's input, and what the connections told. */
 	for (;;) {
 		taken = kl_app_take(window->app, &event);
 		if (taken == 0)
@@ -208,12 +214,10 @@ terminal_window_dispatch(
 			continue;
 		}
 
-		/* A shell's news. */
-		if (event.kind != KL_APP_PROCESS)
-			continue;
+		/* A connection's news, which each connection tells its own. */
 		for (index = 0; index < count; index++) {
-			if (shells[index] == event.process)
-				ready[index] |= event.ready;
+			told = connections[index]->ops->event(connections[index], &event);
+			ready[index] |= told;
 		}
 	}
 
@@ -232,7 +236,7 @@ terminal_window_close(
 	struct terminal_window *window)
 {
 	/* The frame callback awaited, before the surface it was asked on. */
-	window_pace_forget(window);
+	terminal_window_frame_forget(window);
 
 	/* The menus, before the window they are shown on. */
 	if (window->kui != NULL)
@@ -279,134 +283,87 @@ terminal_window_set_fullscreen(
 }
 
 /*
- * Tells when the next frame may be drawn (pace.h), changing nothing: 0
- * now, or the milliseconds after which it is drawn without the
- * compositor's answer to the last frame (which wakes the wait sooner).
- */
-int
-terminal_window_frame_wait(
-	const struct terminal_window *window,
-	uint64_t now)
-{
-	int wait;
-
-	/* As the pace stands now. */
-	wait = terminal_pace_wait(&window->pace, now);
-
-	/* Reports when the frame may be drawn. */
-	return wait;
-}
-
-/*
- * Asks for the frame callback of the frame about to be shown, unless one
- * is still awaited (a callback unanswered past the watchdog is given up
- * first); returns 1 when it was asked for now.
- */
-int
-terminal_window_frame_ask(
-	struct terminal_window *window,
-	uint64_t now)
-{
-	struct wl_callback *callback;
-	struct wl_surface *surface;
-	int stale;
-	int status;
-
-	/* A callback unanswered for long rode on a commit that may never be shown: the new frame asks for its own. */
-	stale = terminal_pace_stale(&window->pace, now);
-	if (stale)
-		window_pace_forget(window);
-
-	/* A callback still awaited: the frame is shown ahead of it. */
-	if (window->pace_callback != NULL)
-		return 0;
-
-	/* The callback, on the surface's next commit (the window system commits the frame after this call). */
-	surface = kl_window_surface(window->kui);
-	if (surface == NULL)
-		return 0;
-	callback = wl_surface_frame(surface);
-	if (callback == NULL)
-		return 0;
-	status = wl_callback_add_listener(callback, &window_pace_listener, window);
-	if (status != 0) {
-		wl_callback_destroy(callback);
-		return 0;
-	}
-
-	/* Succeeded: the frame is awaited from now. */
-	window->pace_callback = callback;
-	terminal_pace_ask(&window->pace, now);
-	return 1;
-}
-
-/*
- * Follows a frame's showing: asked says whether its callback was asked for
- * with it (terminal_window_frame_ask), error whether it was shown (0).  A
- * frame not shown awaits no callback asked for with it.
- */
-void
-terminal_window_frame_shown(
-	struct terminal_window *window,
-	int asked,
-	int error)
-{
-	int forget;
-
-	/* The pace after the frame; a frame not shown forgets the callback asked for with it. */
-	forget = terminal_pace_shown(&window->pace, asked, error);
-	if (forget)
-		window_pace_forget(window);
-}
-
-/*
- * Returns a monotonic time in milliseconds (0 when the clock cannot be read).
+ * Returns a monotonic time in milliseconds.
  */
 uint64_t
 terminal_clock(void)
 {
-	struct timespec now;
-	int status;
+	uint64_t now;
 
-	/* The monotonic clock. */
-	status = clock_gettime(CLOCK_MONOTONIC, &now);
-	if (status != 0)
-		return 0U;
+	/* libkeiland's monotonic clock, in microseconds. */
+	now = kl_clock_us();
 
 	/* Reports it in milliseconds. */
-	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	return now / 1000U;
 }
 
-/* The compositor took the frame shown with the callback: the next may be drawn. */
-static void
-window_paced(
-	void *data,
-	struct wl_callback *callback,
-	uint32_t time)
+/*
+ * Tells whether the measurement's lines (ZTERM LAT, ZTERM PERF) are
+ * written: the environment's TERMINAL_PERF is 1, read the first time.
+ */
+int
+terminal_perf_on(void)
 {
-	struct terminal_window *window;
+	const char *perf;
+	int same;
 
-	(void)time;
+	/* Read once. */
+	if (window_perf >= 0)
+		return window_perf;
 
-	/* The callback is used up; nothing is awaited now. */
-	window = data;
-	wl_callback_destroy(callback);
-	window->pace_callback = NULL;
-	terminal_pace_clear(&window->pace);
+	/* The measurement is on only for "1". */
+	window_perf = 0;
+	perf = getenv("TERMINAL_PERF");
+	if (perf == NULL)
+		return window_perf;
+	same = strcmp(perf, "1");
+	if (same == 0)
+		window_perf = 1;
+
+	/* Reports whether it is on. */
+	return window_perf;
 }
 
-/* Stops awaiting the frame callback: the next frame may be drawn at once. */
-static void
-window_pace_forget(
-	struct terminal_window *window)
+/*
+ * Gives the monotonic clock in microseconds for the measurement's lines,
+ * or 0 when the measurement is off.
+ */
+uint64_t
+terminal_perf_now_us(void)
 {
-	/* The callback, when one is awaited. */
-	if (window->pace_callback != NULL)
-		wl_callback_destroy(window->pace_callback);
-	window->pace_callback = NULL;
+	uint64_t now;
+	int on;
 
-	/* Nothing awaited. */
-	terminal_pace_clear(&window->pace);
+	/* Only for a measurement. */
+	on = terminal_perf_on();
+	if (!on)
+		return 0U;
+
+	/* Succeeded: microseconds. */
+	now = kl_clock_us();
+	return now;
+}
+
+/*
+ * Writes a ZTERM LAT line, one step of a typed key's way to the screen
+ * (key, commit, write, read, present) with its bytes and the monotonic
+ * time in microseconds, when the measurement is on (TERMINAL_PERF=1).
+ */
+void
+terminal_perf_step(
+	const char *step,
+	unsigned bytes)
+{
+	uint64_t now;
+
+	/* Only for a measurement. */
+	now = terminal_perf_now_us();
+	if (now == 0U)
+		return;
+
+	/* The step's line. */
+	printf("ZTERM LAT %s bytes=%u at_us=%llu\n", step, bytes, (unsigned long long)now);
+	fflush(stdout);
 }
 
 /* Turns one input of the window into the terminal's. */
@@ -458,7 +415,7 @@ window_event(
 	case KL_WINDOW_KEY:
 		/* A press (or a held key's repeat) types; a release does nothing. */
 		if (event->pressed)
-			window_press(window, event->code);
+			window_press(window, event);
 		break;
 	case KL_WINDOW_TEXT_COMMIT:
 		window_text_commit(window, event->text);
@@ -561,15 +518,20 @@ window_selection(
 static void
 window_press(
 	struct terminal_window *window,
-	uint32_t key)
+	const struct kl_window_event *event)
 {
+	uint32_t key;
 	size_t length;
+	size_t room;
 	int shift;
 	int on;
+	int text;
+	int keypad;
 
 	/* While the search bar is open the keys edit what it looks for (ws128-p006). */
+	key = event->code;
 	if (window->search_open) {
-		window_search_key(window, key);
+		window_search_key(window, event);
 		return;
 	}
 
@@ -603,8 +565,28 @@ window_press(
 		return;
 	}
 
+	/*
+	 * The character the window system says the key types, in the
+	 * keyboard's own layout, unless the program asked the keypad for its
+	 * application sequences; otherwise the key's bytes (keys.c, the US
+	 * layout and the sequences of the keys that type no character).
+	 */
+	text = window_key_text(window, event);
+	keypad = terminal_key_keypad(key);
+	if ((window->key_modes & TERMINAL_KEYS_KEYPAD) != 0U && keypad)
+		text = 0;
+
 	/* The bytes, if they fit in what is left of the buffer. */
-	length = terminal_key_bytes(key, window->modifiers, window->input + window->input_length, sizeof(window->input) - window->input_length);
+	room = sizeof(window->input) - window->input_length;
+	length = 0U;
+	if (text) {
+		length = strlen(event->text);
+		if (length > room)
+			length = 0U;
+		memcpy(window->input + window->input_length, event->text, length);
+	} else {
+		length = terminal_key_bytes(key, window->modifiers, window->key_modes, window->input + window->input_length, room);
+	}
 	window->input_length += length;
 	terminal_perf_step("key", (unsigned)length);
 
@@ -653,6 +635,36 @@ window_text_commit(
 }
 
 /*
+ * Tells whether a key press is typed as the character the window system
+ * says it types (its text): one that is there, without Control or Alt
+ * (which make the key's own bytes), and not a control character.  The
+ * Wayland window system leaves the text empty.
+ */
+static int
+window_key_text(
+	const struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	unsigned char first;
+
+	/* Control and Alt make the key's own bytes. */
+	if ((window->modifiers & TERMINAL_MODIFIER_CONTROL) != 0U)
+		return 0;
+	if ((window->modifiers & TERMINAL_MODIFIER_ALT) != 0U)
+		return 0;
+
+	/* No character, or a control character (Enter, Tab, Backspace, Escape). */
+	first = (unsigned char)event->text[0];
+	if (first < 0x20U)
+		return 0;
+	if (first == 0x7fU)
+		return 0;
+
+	/* Succeeded: the key types its text. */
+	return 1;
+}
+
+/*
  * Answers a key while the search bar is open (ws128-p006): Escape closes
  * it, Enter finds the next older match (Shift+Enter the next newer),
  * Backspace takes back the last character, and a key that types a
@@ -661,13 +673,16 @@ window_text_commit(
 static void
 window_search_key(
 	struct terminal_window *window,
-	uint32_t key)
+	const struct kl_window_event *event)
 {
 	unsigned char bytes[16];
+	uint32_t key;
 	size_t length;
 	int shift;
+	int text;
 
 	/* Whether Shift is held, which turns Enter the other way. */
+	key = event->code;
 	shift = 0;
 	if ((window->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U)
 		shift = 1;
@@ -700,8 +715,15 @@ window_search_key(
 		break;
 	}
 
+	/* The character the window system says the key types joins the text. */
+	text = window_key_text(window, event);
+	if (text) {
+		window_search_append(window, event->text, strlen(event->text));
+		return;
+	}
+
 	/* A key that types one printable character of ASCII adds it; any other does nothing. */
-	length = terminal_key_bytes(key, window->modifiers & TERMINAL_MODIFIER_SHIFT, bytes, sizeof(bytes));
+	length = terminal_key_bytes(key, window->modifiers & TERMINAL_MODIFIER_SHIFT, 0U, bytes, sizeof(bytes));
 	if (length != 1U ||
 	    bytes[0] < 0x20U ||
 	    bytes[0] > 0x7eU)

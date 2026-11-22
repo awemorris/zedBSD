@@ -641,6 +641,14 @@ screen_escape(
 		/* A full reset: default colours, an empty grid, the cursor home. */
 		terminal_screen_init(screen, screen->columns, screen->rows);
 		break;
+	case '=':
+		/* DECKPAM: the keypad sends its application sequences. */
+		screen->keypad_application = 1;
+		break;
+	case '>':
+		/* DECKPNM: the keypad types its characters again. */
+		screen->keypad_application = 0;
+		break;
 	default:
 		break;
 	}
@@ -992,7 +1000,11 @@ screen_colour_256(
 	return TERMINAL_FOREGROUND;
 }
 
-/* Sets or resets the modes a CSI ... h or l names; only the cursor's visibility is kept. */
+/*
+ * Sets or resets the modes a CSI ... h or l names: the cursor's
+ * visibility, the cursor keys' application mode (DECCKM) and bracketed
+ * paste are kept; the alternate screen clears the grid.
+ */
 static void
 screen_mode(
 	struct terminal_screen *screen,
@@ -1005,9 +1017,13 @@ screen_mode(
 	for (index = 0; index < screen->parameter_count; index++) {
 		value = screen->parameters[index];
 
-		/* DECTCEM (? 25) shows or hides the cursor; the alternate screen (? 1049, ? 47) clears the grid, keeping the scrollback. */
+		/* DECTCEM (? 25) shows or hides the cursor, DECCKM (? 1) and bracketed paste (? 2004) are kept; the alternate screen (? 1049, ? 47) clears the grid, keeping the scrollback. */
 		if (screen->private_mode == '?' && value == 25) {
 			screen->cursor_visible = set;
+		} else if (screen->private_mode == '?' && value == 1) {
+			screen->cursor_keys_application = set;
+		} else if (screen->private_mode == '?' && value == 2004) {
+			screen->bracketed_paste = set;
 		} else if (screen->private_mode == '?' && (value == 1049 || value == 47 || value == 1047)) {
 			screen_clear_grid(screen);
 		}
