@@ -151,7 +151,8 @@ enum terminal_action {
 	TERMINAL_ACTION_FIND_PREVIOUS,
 	TERMINAL_ACTION_THEME_DARK,
 	TERMINAL_ACTION_THEME_LIGHT,
-	TERMINAL_ACTION_THEME_CONTRAST
+	TERMINAL_ACTION_THEME_CONTRAST,
+	TERMINAL_ACTION_INPUT_METHOD_OFF
 };
 
 /*
@@ -188,8 +189,9 @@ struct terminal_tab_request {
  * What the menus show of the terminal's state: whether something is
  * selected (Copy), whether the clipboard holds text (Paste), the font's
  * size (Zoom, Text Size), whether the window is fullscreen and whether
- * Ambiguous-width characters are wide (ws128-p009), the theme and whether
- * there is a text to find again (ws128-p006).
+ * Ambiguous-width characters are wide, the theme, whether there is a
+ * text to find again and whether the user turned
+ * the input method off (Session > Disable Input Method).
  */
 struct terminal_menu_state {
 	int selection;
@@ -199,6 +201,7 @@ struct terminal_menu_state {
 	int ambiguous_wide;
 	unsigned theme;
 	int can_find_again;
+	int input_method_off;
 };
 
 /*
@@ -677,10 +680,15 @@ struct terminal_window {
 
 	/*
 	 * The menus (menu.c): whether the window shows them (not without the
-	 * compositor's System Menu), the state they last showed, and the
-	 * actions chosen but not yet carried out, oldest first.
+	 * compositor's System Menu), whether they have Session > Disable Input
+	 * Method and whether F10 is the shortcut of View > Treat Ambiguous-Width
+	 * Characters as Wide (the program asked for them before they open), the
+	 * state they last showed, and the actions chosen but not yet carried
+	 * out, oldest first.
 	 */
 	int menu_shown;
+	int input_method_item;
+	int ambiguous_wide_key;
 	struct terminal_menu_state menu_state;
 	uint32_t actions[TERMINAL_ACTIONS];
 	unsigned action_count;

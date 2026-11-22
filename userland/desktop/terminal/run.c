@@ -249,6 +249,15 @@ static size_t run_paste_written;
 static int run_secret;
 
 /*
+ * Whether the user turned the input method off with Session > Disable
+ * Input Method (until the user turns it on again), and whether the
+ * window's text input is off now: for a secret, for the user, or both.
+ * Both are 0 at the start, when the text input is on.
+ */
+static int run_input_method_off;
+static int run_text_off;
+
+/*
  * Whether the text the pointer selects also goes to the clipboard, as
  * the run's options asked (the run's whole life).
  */
@@ -443,7 +452,9 @@ run_start(
 	terminal_display_size(run_display, &run->width, &run->height);
 	run_grid(run->width, run->height, &run->columns, &run->rows);
 
-	/* The menus, which the compositor draws (none from a compositor without the System Menu). */
+	/* The menus, which the compositor draws (none from a compositor without the System Menu), with the item and the key the program asked for. */
+	run_window.input_method_item = options->input_method_menu;
+	run_window.ambiguous_wide_key = options->ambiguous_wide_key;
 	run_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
@@ -478,6 +489,7 @@ run_loop(
 	struct terminal_connection *connections[TERMINAL_TABS];
 	unsigned ready[TERMINAL_TABS];
 	unsigned pending[TERMINAL_TABS];
+	uint32_t told[TERMINAL_TABS];
 	int status;
 	int timeout;
 	int wait;
@@ -544,9 +556,19 @@ run_loop(
 		if (status != 0)
 			return -1;
 
-		/* What a connection still had counts as told. */
-		for (index = 0; index < run_tab_count; index++)
+		/* What a connection still had counts as told, and which tab each place's bits are of. */
+		for (index = 0; index < run_tab_count; index++) {
 			ready[index] |= pending[index];
+			told[index] = run_tabs[index].id;
+		}
+
+		/* The places no tab had are told nothing (a tab made later in the round is not given another's end). */
+		for (;
+		     index < TERMINAL_TABS;
+		     index++) {
+			ready[index] = 0U;
+			told[index] = 0U;
+		}
 
 		/* The compositor closing the window ends the terminal. */
 		if (run_window.closed) {
@@ -576,6 +598,10 @@ run_loop(
 		for (index = run_tab_count; index > 0U; index--) {
 			/* A connection that told nothing to read and has not ended. */
 			if (index - 1U >= TERMINAL_TABS || (ready[index - 1U] & (TERMINAL_READY_OUTPUT | TERMINAL_READY_EXIT)) == 0U)
+				continue;
+
+			/* A tab made or moved since the round's wait was not told this: it is read on the next round. */
+			if (run_tabs[index - 1U].id != told[index - 1U])
 				continue;
 
 			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
@@ -807,11 +833,13 @@ run_read_shell(
 }
 
 /*
- * Turns the window's text input off while the active shell reads a secret
- * (ws095-p006): sudo, su, ssh and passwd turn the echo off and keep the
+ * Turns the window's text input off while the active shell reads a secret:
+ * sudo, su, ssh and passwd turn the echo off and keep the
  * whole line, so the keys then reach them as they are, with no text
  * composed.  A full-screen program that turns the echo off with the line
- * (an editor, ICANON off) keeps the input method.
+ * (an editor, ICANON off) keeps the input method.  The text input is also
+ * off while the user keeps it off (Session > Disable Input Method), for a
+ * password the connection cannot see being asked.
  */
 static void
 run_secret_follow(
@@ -819,30 +847,46 @@ run_secret_follow(
 {
 	unsigned mode;
 	int secret;
+	int changed;
+	int text_off;
 	int error;
 
-	/* The active connection's modes; one that cannot tell them leaves the text input as it is. */
-	if (connection == NULL)
-		return;
-	error = connection->ops->mode(connection, &mode);
-	if (error != 0)
-		return;
+	/* The active connection's modes; one that cannot tell them leaves the secret as it was. */
+	secret = run_secret;
+	error = ENOTSUP;
+	if (connection != NULL)
+		error = connection->ops->mode(connection, &mode);
 
 	/* A secret: no echo, on a whole line. */
-	secret = 0;
-	if ((mode & TERMINAL_MODE_ECHO) == 0U && (mode & TERMINAL_MODE_LINES) != 0U)
-		secret = 1;
-	if (secret == run_secret)
-		return;
+	if (error == 0) {
+		secret = 0;
+		if ((mode & TERMINAL_MODE_ECHO) == 0U && (mode & TERMINAL_MODE_LINES) != 0U)
+			secret = 1;
+	}
 
-	/* The text input off for the secret, on again after it. */
+	/* The secret as the connection tells it now. */
+	changed = 0;
+	if (secret != run_secret)
+		changed = 1;
 	run_secret = secret;
-	if (secret)
-		kl_window_text_input(run_window.kui, 0);
-	else
-		kl_window_text_input(run_window.kui, 1);
-	printf("ZTERM IME secret=%d\n", secret);
-	fflush(stdout);
+
+	/* The text input off for the secret or for the user, on again when neither holds. */
+	text_off = 0;
+	if (run_secret || run_input_method_off)
+		text_off = 1;
+	if (text_off != run_text_off) {
+		run_text_off = text_off;
+		if (text_off)
+			kl_window_text_input(run_window.kui, 0);
+		else
+			kl_window_text_input(run_window.kui, 1);
+	}
+
+	/* The log line the tests read when the secret changed. */
+	if (changed) {
+		printf("ZTERM IME secret=%d\n", secret);
+		fflush(stdout);
+	}
 }
 
 /*
@@ -1007,6 +1051,15 @@ run_menu_actions(
 		case TERMINAL_ACTION_THEME_CONTRAST:
 			run_theme(options, run, TERMINAL_THEME_CONTRAST);
 			break;
+		case TERMINAL_ACTION_INPUT_METHOD_OFF:
+			/* The input method off until chosen again; the text input follows on this round. */
+			if (run_input_method_off)
+				run_input_method_off = 0;
+			else
+				run_input_method_off = 1;
+			run_secret_follow(run->connection);
+			printf("ZTERM IME menu-off=%d\n", run_input_method_off);
+			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
 			if (options->about != NULL)
@@ -1055,6 +1108,7 @@ run_menu_state(
 	state->can_find_again = 0;
 	if (run_window.search_length != 0U)
 		state->can_find_again = 1;
+	state->input_method_off = run_input_method_off;
 }
 
 /*

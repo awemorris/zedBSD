@@ -24,6 +24,9 @@ structures, constants, errors and permissions that programs and people use
 - [evdev compatibility profile](evdev.md) — experimental UAPI with current
   input-core and USB HID producers; legacy console event/key-state UAPI has
   been removed while ordinary TTY and display operations remain.
+- [mikuterm](mikuterm.md): the portable Windows terminal and SSH client: its
+  folder, `mikuterm.conf`, the `ssh_config` keywords and paths it reads, the
+  questions it asks, how it reads and writes known_hosts, and its menus.
 - [Agent Acceptance Test interfaces](agent-acceptance-test.md): the test
   images' mouse and keyboard injection and screen capture.
 - [Camera devices](camera.md): the /dev/camN nodes, their ownership,

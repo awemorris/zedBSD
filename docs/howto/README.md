@@ -27,3 +27,7 @@ include both the expected success observation and a diagnostic path.
 - [Programming a Keiland application](keiland-programming.md): the
   application, its window and titlebar, the immediate mode user interface and
   the main loop, the widgets, the menus, and the desktop's other services.
+
+- [Connecting mikuterm to WSL](mikuterm-wsl.md): an SSH server in WSL on its
+  own port, the host in mikuterm's `ssh\config`, the first connection's key,
+  and what the errors mean.
