@@ -1212,6 +1212,24 @@ kl_process_start(
 
 /* Not on Windows. */
 int
+kl_process_start_admin(
+	struct kl_app *app,
+	struct kl_system *system,
+	const struct kl_admin_options *options,
+	struct kl_process **process)
+{
+	(void)app;
+	(void)system;
+	(void)options;
+
+	/* Not on Windows. */
+	if (process != NULL)
+		*process = NULL;
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
 kl_process_terminal_mode(
 	const struct kl_process *process,
 	unsigned *mode)

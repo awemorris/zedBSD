@@ -1,0 +1,5 @@
+# klsudo's texts in Japanese (domain klsudo). mk/tools/tr.py update keeps the translations.
+# userland/desktop/klsudo/main.c
+msg	Administrator permission	管理者の許可
+# userland/desktop/klsudo/main.c
+msg	Waiting for the administrator's permission	管理者の許可を待っています

@@ -535,6 +535,7 @@
 		kl_process_data;
 		kl_process_close;
 		kl_launch;
+		kl_process_start_admin;
 		kl_ui_key;
 		kl_ui_set_focus;
 		kl_ui_clear_focus;

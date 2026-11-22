@@ -17,6 +17,13 @@
  * (keiui_processes_queue) then queues one event for each process that has
  * something to tell and none queued: the output for as long as some waits,
  * the input's room and the end once.
+ *
+ * A system action (kl_process_start_admin) is asked through the system
+ * (system/system.c) and has no child of the application's: while its
+ * answer is awaited, the descriptors its start brings gather in the
+ * record; at the start the platform serves them as it serves a child's,
+ * with a thread that reads the end from the status descriptor in place of
+ * waiting for a child.
  */
 
 #include "process.h"
@@ -32,6 +39,9 @@ static int process_stream_open(struct keiui_stream *stream);
 static struct keiui_stream *process_stream(struct kl_process *process, unsigned stream);
 static size_t process_line_end(const struct keiui_stream *stream, size_t limit, int *found);
 static void process_forget(struct kl_process *process);
+static int process_make(struct kl_app *app, unsigned streams, void *data, struct kl_process **made);
+static void process_free(struct kl_process *process);
+static void process_admin_end(struct kl_process *process, unsigned how, int code);
 
 /*
  * Starts a process of the application.
@@ -57,42 +67,10 @@ kl_process_start(
 	if (!valid)
 		return EINVAL;
 
-	/* The record, with the program's reference. */
-	process = calloc(1, sizeof(*process));
-	if (process == NULL)
-		return ENOMEM;
-	process->data = options->data;
-	process->streams = options->streams;
-	process->app = app;
-	process->references = 1U;
-	process->child.input = -1;
-	process->child.output = -1;
-	process->child.error = -1;
-	process->child.terminal = -1;
-	process->child.control[0] = -1;
-	process->child.control[1] = -1;
-
-	/* The streams it uses: output (a terminal's too), error, and input (a terminal's too). */
-	error = 0;
-	if ((options->streams & (KL_PROCESS_OUTPUT | KL_PROCESS_TERMINAL)) != 0U)
-		error = process_stream_open(&process->output);
-	else
-		process->output.ended = 1;
-	if (error == 0 && (options->streams & KL_PROCESS_ERROR) != 0U)
-		error = process_stream_open(&process->error);
-	else
-		process->error.ended = 1;
-	if (error == 0 && (options->streams & (KL_PROCESS_INPUT | KL_PROCESS_TERMINAL)) != 0U)
-		error = process_stream_open(&process->input);
-	if (error == 0)
-		error = keiui_lock_open(&process->lock);
-	if (error != 0) {
-		free(process->output.bytes);
-		free(process->error.bytes);
-		free(process->input.bytes);
-		free(process);
+	/* The record, with the program's reference and the streams it uses. */
+	error = process_make(app, options->streams, options->data, &process);
+	if (error != 0)
 		return error;
-	}
 
 	/* The child and the platform's threads; a failure leaves the record to its last reference. */
 	error = keiui_child_start(process, options);
@@ -106,6 +84,66 @@ kl_process_start(
 	app->processes = process;
 
 	/* Succeeded: it runs. */
+	*made = process;
+	return 0;
+}
+
+/*
+ * Asks for a system action: a process whose answer comes from the system.
+ */
+int
+kl_process_start_admin(
+	struct kl_app *app,
+	struct kl_system *system,
+	const struct kl_admin_options *options,
+	struct kl_process **made)
+{
+	struct kl_process *process;
+	uint32_t request;
+	int error;
+
+	/* What is asked must make sense: the three streams at most, and a window of the application's. */
+	if (made != NULL)
+		*made = NULL;
+	if (app == NULL || system == NULL || options == NULL || made == NULL)
+		return EINVAL;
+	if (options->action == NULL ||
+	    options->window == NULL ||
+	    options->window->app != app)
+		return EINVAL;
+	if ((options->streams & ~(KL_PROCESS_INPUT | KL_PROCESS_OUTPUT | KL_PROCESS_ERROR)) != 0U)
+		return EINVAL;
+
+	/* The record, with the program's reference and the streams it uses. */
+	error = process_make(app, options->streams, options->data, &process);
+	if (error != 0)
+		return error;
+
+	/* Its control pipe, so that input written before the start wakes nobody in vain. */
+	error = keiui_child_await(process);
+	if (error != 0) {
+		process_free(process);
+		return error;
+	}
+
+	/* The request; the system checks the action's name and its words. */
+	error = keiui_system_admin_run(system, process, app->display, options->action, options->argv, options->streams, options->window->surface, &request);
+	if (error != 0) {
+		keiui_child_end(process);
+		process_free(process);
+		return error;
+	}
+
+	/* Its answer is awaited. */
+	process->admin = KEIUI_ADMIN_ASKING;
+	process->admin_system = system;
+	process->admin_request = request;
+
+	/* One of the application's processes. */
+	process->app_next = app->processes;
+	app->processes = process;
+
+	/* Succeeded: it is asked. */
 	*made = process;
 	return 0;
 }
@@ -166,8 +204,10 @@ int
 kl_process_close_input(
 	struct kl_process *process)
 {
-	/* Only an input of its own (a terminal's stays). */
-	if (process == NULL || (process->streams & KL_PROCESS_INPUT) == 0U)
+	/* Only an input of its own (a terminal's stays); a system action's is always there. */
+	if (process == NULL)
+		return EINVAL;
+	if ((process->streams & KL_PROCESS_INPUT) == 0U && process->admin == 0U)
 		return EINVAL;
 
 	/* Marked, and the thread told. */
@@ -330,6 +370,10 @@ kl_process_kill(
 	if (how != KL_PROCESS_HANGUP && how != KL_PROCESS_TERMINATE && how != KL_PROCESS_KILL)
 		return EINVAL;
 
+	/* A system action's program runs as another user: it stops when its input closes. */
+	if (process->admin != 0U)
+		return EPERM;
+
 	/* The system's signal. */
 	error = keiui_child_signal(process, how);
 	if (error != 0)
@@ -418,6 +462,14 @@ kl_process_close(
 	/* No process, nothing to close. */
 	if (process == NULL)
 		return;
+
+	/* A system action whose answer is awaited is taken back, and what its start brought is closed. */
+	if (process->admin == KEIUI_ADMIN_ASKING) {
+		keiui_system_admin_withdraw(process->admin_system, process->admin_request);
+		keiui_child_drop(process);
+		process->admin = KEIUI_ADMIN_ENDED;
+		process->admin_system = NULL;
+	}
 
 	/* Out of the application, and the application out of the threads' reach. */
 	process_forget(process);
@@ -548,13 +600,174 @@ keiui_process_release(
 	if (left != 0U)
 		return;
 
-	/* The last: the control pipe, the lock, the streams and the record. */
+	/* The last: the control pipe and what is left of the child, then the record. */
 	keiui_child_end(process);
-	keiui_lock_close(&process->lock);
-	free(process->output.bytes);
-	free(process->error.bytes);
-	free(process->input.bytes);
-	free(process);
+	process_free(process);
+}
+
+/*
+ * Keeps a descriptor a system action's start brings (the system's stream
+ * event); one that comes when no answer is awaited has nowhere to go.
+ */
+void
+keiui_process_admin_stream(
+	struct kl_process *process,
+	unsigned which,
+	int descriptor)
+{
+	/* Not awaited any more: closed. */
+	if (process->admin != KEIUI_ADMIN_ASKING) {
+		keiui_descriptor_close(descriptor);
+		return;
+	}
+
+	/* Kept for the start. */
+	keiui_child_take(process, which, descriptor);
+}
+
+/*
+ * Starts serving a system action that started: the platform's threads on
+ * the descriptors it brought.  Without its input or its status its end
+ * cannot be known: it is lost.
+ */
+void
+keiui_process_admin_started(
+	struct kl_process *process)
+{
+	int error;
+
+	/* Only an answer awaited. */
+	if (process->admin != KEIUI_ADMIN_ASKING)
+		return;
+	process->admin = KEIUI_ADMIN_STARTED;
+	process->admin_system = NULL;
+
+	/* The threads on its descriptors. */
+	error = keiui_child_adopt(process);
+	if (error != 0) {
+		/* What it brought is closed (its program reads its input's end); how it ends is not known. */
+		keiui_child_drop(process);
+		process_admin_end(process, KL_PROCESS_LOST, 0);
+		return;
+	}
+
+	/* The start told, before what the threads tell. */
+	keiui_lock_take(&process->lock);
+
+	process->ready |= KL_PROCESS_READY_START;
+	keiui_process_tell(process);
+
+	keiui_lock_give(&process->lock);
+}
+
+/*
+ * Ends a system action that was refused: it did not run.
+ */
+void
+keiui_process_admin_refused(
+	struct kl_process *process,
+	unsigned reason)
+{
+	/* Only an answer awaited. */
+	if (process->admin != KEIUI_ADMIN_ASKING)
+		return;
+
+	/* What came is closed, and the refusal told. */
+	keiui_child_drop(process);
+	process_admin_end(process, KL_PROCESS_REFUSED, (int)reason);
+}
+
+/*
+ * Ends a system action whose answer cannot come any more (the system
+ * closed, or the compositor went): it may have started meanwhile.
+ */
+void
+keiui_process_admin_lost(
+	struct kl_process *process)
+{
+	/* Only an answer awaited. */
+	if (process->admin != KEIUI_ADMIN_ASKING)
+		return;
+
+	/* What came is closed (a program that started reads its input's end), and the loss told. */
+	keiui_child_drop(process);
+	process_admin_end(process, KL_PROCESS_LOST, 0);
+}
+
+/*
+ * Takes the system's events for the system actions whose answers are
+ * awaited (the application's dispatch): the program that asked need not
+ * dispatch its system.
+ */
+void
+keiui_processes_admin_dispatch(
+	struct kl_app *app)
+{
+	struct kl_process *process;
+
+	/* Each process of the application whose answer is awaited (its events do not take it out of the list). */
+	for (process = app->processes; process != NULL; process = process->app_next) {
+		if (process->admin != KEIUI_ADMIN_ASKING)
+			continue;
+
+		/* Its system's events. */
+		keiui_system_admin_dispatch(process->admin_system);
+	}
+}
+
+/*
+ * Reads a system action's status line as how it ended.
+ */
+void
+keiui_process_status_parse(
+	const char *line,
+	unsigned *how,
+	int *code)
+{
+	const char *digits;
+	unsigned long number;
+	unsigned kind;
+	size_t count;
+	size_t index;
+	int same;
+
+	/* Not told, until the line says otherwise. */
+	*how = KL_PROCESS_LOST;
+	*code = 0;
+
+	/* Its word: an exit or a signal. */
+	kind = 0U;
+	digits = NULL;
+	same = strncmp(line, "EXIT ", 5U);
+	if (same == 0) {
+		kind = KL_PROCESS_EXITED;
+		digits = line + 5;
+	}
+	same = strncmp(line, "SIGNAL ", 7U);
+	if (same == 0) {
+		kind = KL_PROCESS_SIGNALED;
+		digits = line + 7;
+	}
+	if (kind == 0U)
+		return;
+
+	/* One to three decimal digits, then the line's end or nothing. */
+	count = strspn(digits, "0123456789");
+	if (count == 0U || count > 3U)
+		return;
+	if (digits[count] != '\0' && strcmp(digits + count, "\n") != 0)
+		return;
+
+	/* The number, at most 255. */
+	number = 0;
+	for (index = 0; index < count; index++)
+		number = number * 10U + (unsigned long)(digits[index] - '0');
+	if (number > 255U)
+		return;
+
+	/* Succeeded: how and its number. */
+	*how = kind;
+	*code = (int)number;
 }
 
 /*
@@ -746,4 +959,114 @@ process_forget(
 	/* Its event out of the queue. */
 	keiui_app_forget_process(app, process);
 	process->queued = 0;
+}
+
+/*
+ * Makes a process's record: the program's reference, the streams it uses
+ * (output, a terminal's too; error; input, a terminal's too) and its lock.
+ * Returns 0, or ENOMEM or the lock's error.
+ */
+static int
+process_make(
+	struct kl_app *app,
+	unsigned streams,
+	void *data,
+	struct kl_process **made)
+{
+	struct kl_process *process;
+	int error;
+
+	/* The record, with the program's reference and no descriptor. */
+	process = calloc(1, sizeof(*process));
+	if (process == NULL)
+		return ENOMEM;
+	process->data = data;
+	process->streams = streams;
+	process->app = app;
+	process->references = 1U;
+	process->child.input = -1;
+	process->child.output = -1;
+	process->child.error = -1;
+	process->child.terminal = -1;
+	process->child.status = -1;
+	process->child.control[0] = -1;
+	process->child.control[1] = -1;
+
+	/* The streams it uses: output (a terminal's too), error, and input (a terminal's too). */
+	error = 0;
+	if ((streams & (KL_PROCESS_OUTPUT | KL_PROCESS_TERMINAL)) != 0U)
+		error = process_stream_open(&process->output);
+	else
+		process->output.ended = 1;
+	if (error == 0 && (streams & KL_PROCESS_ERROR) != 0U)
+		error = process_stream_open(&process->error);
+	else
+		process->error.ended = 1;
+	if (error == 0 && (streams & (KL_PROCESS_INPUT | KL_PROCESS_TERMINAL)) != 0U)
+		error = process_stream_open(&process->input);
+
+	/* Gives up, freeing the rings, when one could not be made. */
+	if (error != 0) {
+		free(process->output.bytes);
+		free(process->error.bytes);
+		free(process->input.bytes);
+		free(process);
+		return error;
+	}
+
+	/* The lock of what the threads touch. */
+	error = keiui_lock_open(&process->lock);
+	if (error != 0) {
+		free(process->output.bytes);
+		free(process->error.bytes);
+		free(process->input.bytes);
+		free(process);
+		return error;
+	}
+
+	/* Succeeded: the record. */
+	*made = process;
+	return 0;
+}
+
+/* Frees a process's record: its lock, its streams and itself. */
+static void
+process_free(
+	struct kl_process *process)
+{
+	/* The lock, the rings, the record. */
+	keiui_lock_close(&process->lock);
+	free(process->output.bytes);
+	free(process->error.bytes);
+	free(process->input.bytes);
+	free(process);
+}
+
+/*
+ * Ends a system action that has no thread: how and its code, the streams
+ * ended and the input refused, and the end told.
+ */
+static void
+process_admin_end(
+	struct kl_process *process,
+	unsigned how,
+	int code)
+{
+	/* No answer awaited any more. */
+	process->admin = KEIUI_ADMIN_ENDED;
+	process->admin_system = NULL;
+
+	/* The end, as a reaped process's. */
+	keiui_lock_take(&process->lock);
+
+	process->how = how;
+	process->code = code;
+	process->reaped = 1;
+	process->input_closed = 1;
+	process->output.ended = 1;
+	process->error.ended = 1;
+	process->ready |= KL_PROCESS_READY_EXIT;
+	keiui_process_tell(process);
+
+	keiui_lock_give(&process->lock);
 }

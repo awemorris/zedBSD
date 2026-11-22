@@ -47,6 +47,8 @@ msg	Asked by {1}	{1} が求めています
 msg	Administrator permission	管理者の許可
 # userland/desktop/wayland/admin-ask.c
 msg	Allow	許可
+# userland/desktop/wayland/shell.c
+msg	Administrator: {1}	管理者: {1}
 # userland/desktop/wayland/bluetooth-ask.c:394
 msg	Closes in {1} s	あと {1} 秒で閉じます
 # userland/desktop/wayland/bluetooth-ask.c:597

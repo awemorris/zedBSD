@@ -55,9 +55,12 @@ struct keiui_lock {
 
 /*
  * A process's side of the system (process-posix.c): its ID (0 before it
- * runs), the application's ends of its standard input, output and error
- * and of its terminal (-1 when it has none or they closed), the pipe that
- * wakes its reading thread, and whether its terminal is to hang up.
+ * runs, and for a system action, whose program is not the application's
+ * child), the application's ends of its standard input, output and error
+ * and of its terminal (-1 when it has none or they closed), a system
+ * action's status (the read end its end is told on, -1 for any other), the
+ * pipe that wakes its reading thread, and whether its terminal is to hang
+ * up.
  */
 struct keiui_child {
 	long pid;
@@ -65,6 +68,7 @@ struct keiui_child {
 	int output;
 	int error;
 	int terminal;
+	int status;
 	int control[2];
 	int hang_up;
 };
