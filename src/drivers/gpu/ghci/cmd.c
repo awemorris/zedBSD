@@ -125,6 +125,10 @@ ghci_cmd_vm_map(
 	if (args->session > SESSION_MAX)
 		return 0U;
 
+	/* Refuses a flag past WC: bits 31 to 5 are reserved and fault the processor. */
+	if ((args->flags & ~GHCI_VM_FLAGS_MASK) != 0U)
+		return 0U;
+
 	/* Refuses an empty range and addresses not on a 4 KiB page. */
 	if (args->bytes == 0U)
 		return 0U;
@@ -922,6 +926,56 @@ ghci_cmd_write_timestamp(
 
 	/* Succeeded: four dwords. */
 	return GHCI_DW_WRITE_TIMESTAMP;
+}
+
+/*
+ * Writes a WRITE_MEM: a 32-bit (or with GHCI_WRITE_MEM_64 a 64-bit)
+ * value to a session address, at the top of the pipe or, with
+ * GHCI_WRITE_MEM_BOTTOM, after all earlier work (and the caches' flush
+ * with GHCI_WRITE_MEM_FLUSH).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_WRITE_MEM: dst_va, value_lo, value_hi written 0 for a 32-bit write;
+ * a stage of 2 or 3, a reserved flag, TOP with FLUSH_CACHES and an
+ * unaligned dst_va fault the processor).
+ */
+uint32_t
+ghci_cmd_write_mem(
+	uint32_t *out,
+	uint32_t flags,
+	uint64_t va,
+	uint64_t value)
+{
+	uint32_t stage;
+
+	/* Refuses a stage past the bottom and a flag the command does not have. */
+	stage = flags & 3U;
+	if (stage > GHCI_WRITE_MEM_BOTTOM)
+		return 0U;
+	if ((flags & ~(3U | GHCI_WRITE_MEM_64 | GHCI_WRITE_MEM_FLUSH)) != 0U)
+		return 0U;
+
+	/* Refuses the flush at the top of the pipe, which has no earlier work to flush. */
+	if (stage == GHCI_WRITE_MEM_TOP && (flags & GHCI_WRITE_MEM_FLUSH) != 0U)
+		return 0U;
+
+	/* Refuses an address off 4 bytes, or off 8 bytes for a 64-bit write. */
+	if ((va & 3U) != 0U)
+		return 0U;
+	if ((flags & GHCI_WRITE_MEM_64) != 0U && (va & 7U) != 0U)
+		return 0U;
+
+	/* A 32-bit write leaves the high word 0, as the specification asks of software. */
+	if ((flags & GHCI_WRITE_MEM_64) == 0U)
+		value &= 0xFFFFFFFFULL;
+
+	/* Writes the address and the value. */
+	out[0] = ghci_cmd_header(GHCI_OP_WRITE_MEM, GHCI_DW_WRITE_MEM, flags);
+	put64(&out[1], va);
+	put64(&out[3], value);
+
+	/* Succeeded: five dwords. */
+	return GHCI_DW_WRITE_MEM;
 }
 
 /*

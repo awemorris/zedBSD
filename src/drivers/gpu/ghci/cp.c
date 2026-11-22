@@ -49,6 +49,7 @@ static int ring_room(struct ghci_device *device, uint32_t need, int log_entry);
 static void ring_store(struct ghci_device *device, uint32_t index, uint32_t word);
 static void retire_log(struct ghci_device *device);
 static int packet_length(const uint32_t *packets, uint32_t left, uint32_t *length);
+static void fault_ring_take(struct ghci_device *device, struct ghci_fault_record *record);
 static void record_fault(struct ghci_device *device, uint32_t irq_status, uint64_t generation);
 static void take_fence(struct ghci_device *device, uint32_t irq_status, uint64_t generation);
 static enum ghci_ticket_state ticket_state(struct ghci_device *device, const struct ghci_ticket *ticket);
@@ -1360,6 +1361,85 @@ ticket_state(
 }
 
 /*
+ * Takes the records the processor wrote to the fault log ring since the
+ * last look, keeping the first in record when the registers latched no
+ * fault.  With the ring set up, a client session's fault is written there
+ * and not latched in FAULT_INFO and FAULT_ADDR; the session it names is
+ * the recovery's culprit.  A record whose sequence is not the next one
+ * expected is not written yet, or was overwritten; either ends the look,
+ * and the recovery's reset sets the ring up again from sequence 1.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.3, a client
+ * session's fault with the ring enabled is written to the ring without
+ * FAULT_INFO and FAULT_ADDR; section 10, GhciFaultRecord of 32 bytes:
+ * seq, fault_addr, timestamp, session_id and fault_info_word, at slot
+ * (seq - setup_next_seq) % capacity_entries, the next seq 1 after
+ * CMD_FAULT_LOG_SETUP following a reset).
+ */
+static void
+fault_ring_take(
+	struct ghci_device *device,
+	struct ghci_fault_record *record)
+{
+	const volatile uint32_t *word;
+	unsigned long irq;
+	uint64_t expected;
+	uint64_t seq;
+	uint32_t slot;
+	uint32_t taken;
+	uint32_t base;
+
+	/* A GPU without the ring (no walker, or before the MMU starts) writes no record. */
+	if (device->fault_ring == NULL)
+		return;
+
+	/* The sequence the driver expects next. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	expected = device->fault_seq;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Each record written since, up to one ring's worth. */
+	for (taken = 0U; taken < GHCI_FAULT_RING_ENTRIES; taken++) {
+		/* The record's slot; the ring was set up with its first sequence 1. */
+		slot = (uint32_t)((expected - 1U) % GHCI_FAULT_RING_ENTRIES);
+		base = slot * GHCI_FAULT_RECORD_BYTES;
+		word = (const volatile uint32_t *)(const void *)(device->fault_ring->view + base);
+		seq = word[GHCI_FAULT_RECORD_SEQ / 4U];
+		seq |= (uint64_t)word[GHCI_FAULT_RECORD_SEQ / 4U + 1U] << 32;
+		kern_io_read_barrier();
+
+		/* A slot that does not hold the expected record is not written yet. */
+		if (seq != expected)
+			break;
+
+		/* The first record fills a fault the registers did not latch. */
+		if (record->fault_info == 0U) {
+			record->fault_info = word[GHCI_FAULT_RECORD_INFO / 4U];
+			record->fault_address = word[GHCI_FAULT_RECORD_ADDRESS / 4U];
+			record->fault_address |= (uint64_t)word[GHCI_FAULT_RECORD_ADDRESS / 4U + 1U] << 32;
+		}
+
+		/* The session the processor names, for the log. */
+		kern_logf("ghci: %s: fault record %llu: session %u, fault %08x at %llx\n",
+		    device->name,
+		    (unsigned long long)seq,
+		    (unsigned)word[GHCI_FAULT_RECORD_SESSION / 4U],
+		    (unsigned)word[GHCI_FAULT_RECORD_INFO / 4U],
+		    (unsigned long long)record->fault_address);
+		expected++;
+	}
+
+	/* The next sequence the driver looks for. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	device->fault_seq = expected;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+}
+
+/*
  * Records a fault or a watchdog expiry for the service thread and closes
  * the gate.  The registers are read before the interrupt's lock; the
  * record carries the recovery generation the interrupt saw it in, so that
@@ -1386,6 +1466,9 @@ record_fault(
 	record.session_active = ghci_read(device, GHCI_REG_SESSION_ACTIVE);
 	record.rptr = ghci_read(device, GHCI_REG_RING_RPTR);
 	record.fence = ghci_fence_read(device);
+
+	/* A client session's fault, which the fault log ring has instead of the registers. */
+	fault_ring_take(device, &record);
 
 	/*
 	 * Closes the gate, counts the fault (the recovery's last check sees a

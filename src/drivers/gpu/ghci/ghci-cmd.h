@@ -64,6 +64,7 @@
 #define GHCI_OP_WRITE_TIMESTAMP		0x35U
 #define GHCI_OP_BEGIN_QUERY		0x36U
 #define GHCI_OP_END_QUERY		0x37U
+#define GHCI_OP_WRITE_MEM		0x3CU
 #define GHCI_OP_COPY_BUFFER		0x40U
 #define GHCI_OP_COPY_IMAGE		0x41U
 #define GHCI_OP_BLIT			0x42U
@@ -109,6 +110,7 @@
 #define GHCI_DW_WAIT_FENCE		5U
 #define GHCI_DW_WRITE_TIMESTAMP		4U
 #define GHCI_DW_QUERY			4U
+#define GHCI_DW_WRITE_MEM		5U
 #define GHCI_DW_COPY_BUFFER		8U
 #define GHCI_DW_COPY_IMAGE		11U
 #define GHCI_DW_BLIT			12U
@@ -140,14 +142,15 @@
 #define GHCI_DISP_SET_PAIRS_MAX		127U
 
 /*
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 11.2, the mapping flags of CMD_VM_MAP).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3 and
+ * section 11.2, CMD_VM_MAP flags [4:0], [31:5] reserved).
  */
 #define GHCI_VM_FLAG_READ		(1U << 0)
 #define GHCI_VM_FLAG_WRITE		(1U << 1)
 #define GHCI_VM_FLAG_EXEC		(1U << 2)
 #define GHCI_VM_FLAG_COHERENT		(1U << 3)
 #define GHCI_VM_FLAG_WC			(1U << 4)
+#define GHCI_VM_FLAGS_MASK		0x1FU
 
 /*
  * The records the page-table commands write to host memory: CMD_VM_MAP's
@@ -245,6 +248,22 @@
 #define GHCI_FLIP_PLANE_CURSOR		(1U << 2)
 #define GHCI_FLIP_RECORD_ENABLE		(1U << 3)
 #define GHCI_STRIDE_FROM_PSO		0xFFFFFFFFU
+
+/*
+ * CMD_WRITE_MEM's flags: when the write happens (at the top of the pipe,
+ * after the processor's own earlier writes, or at the bottom, after all
+ * earlier work), whether it writes 64 bits, and whether the GPU's caches
+ * are flushed first (the bottom only).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_WRITE_MEM: 5 dwords, flags [1:0] stage 0 TOP and 1 BOTTOM, [2]
+ * WRITE_64, [3] FLUSH_CACHES, TOP with FLUSH_CACHES is INVALID_OP, dst_va
+ * 4-byte aligned or 8-byte aligned for WRITE_64).
+ */
+#define GHCI_WRITE_MEM_TOP		0U
+#define GHCI_WRITE_MEM_BOTTOM		1U
+#define GHCI_WRITE_MEM_64		(1U << 2)
+#define GHCI_WRITE_MEM_FLUSH		(1U << 3)
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -626,6 +645,7 @@ uint32_t ghci_cmd_barrier(uint32_t *out, uint32_t src_stages, uint32_t dst_stage
 uint32_t ghci_cmd_fence(uint32_t *out, uint64_t bus, uint64_t seq, uint32_t flags);
 uint32_t ghci_cmd_wait_fence(uint32_t *out, uint64_t bus, uint64_t value);
 uint32_t ghci_cmd_write_timestamp(uint32_t *out, uint32_t host, uint64_t address, uint32_t stage);
+uint32_t ghci_cmd_write_mem(uint32_t *out, uint32_t flags, uint64_t va, uint64_t value);
 uint32_t ghci_cmd_query(uint32_t *out, uint32_t end, uint64_t pool_va, uint32_t index, uint32_t flags);
 uint32_t ghci_cmd_copy_buffer(uint32_t *out, uint64_t src_va, uint64_t dst_va, uint32_t bytes, uint32_t flags, uint32_t fill);
 uint32_t ghci_cmd_copy_image(uint32_t *out, const struct ghci_transfer *transfer);
