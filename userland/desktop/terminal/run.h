@@ -52,9 +52,13 @@ struct terminal_run_result {
  * clipboard as well (0: only Edit > Copy does); input_method_menu gives
  * the Session menu Disable Input Method, for connections that cannot tell
  * when the remote side reads a password (0: no such item);
- * ambiguous_wide_key makes F10 alone the shortcut of View > Treat
- * Ambiguous-Width Characters as Wide (0: it has none; zedBSD's compositor
- * opens the menus with F10).  connector
+ * ambiguous_wide_key makes Alt+F11 the shortcut of View > Treat
+ * Ambiguous-Width Characters as Wide (0: it has none); fullscreen_alt_enter
+ * makes Alt+Enter the shortcut of View > Fullscreen in the place of F11,
+ * and F11 alone then reaches the connection as a key (0: F11, zedBSD's
+ * own).  forget_passphrases gives the Session menu Forget Remembered
+ * Passphrases and is called with data when it is chosen (NULL: no such
+ * item).  connector
  * opens each tab's connection; new_window opens a new
  * window from this one (NULL: the program has none); ended is told how the
  * run ended before anything is torn down (NULL: nobody is told).  data is
@@ -80,6 +84,8 @@ struct terminal_run_options {
 	int copy_on_select;
 	int input_method_menu;
 	int ambiguous_wide_key;
+	int fullscreen_alt_enter;
+	void (*forget_passphrases)(void *data);
 	const struct terminal_connector *connector;
 	void (*new_window)(void *data, struct kl_app *app, struct kl_window *from);
 	void (*ended)(void *data, const struct terminal_run_result *result);

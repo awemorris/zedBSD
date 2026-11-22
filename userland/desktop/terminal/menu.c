@@ -18,8 +18,9 @@
  * the terminal simply has no menus.  Session > Disable Input Method is
  * there only for a program that asks for it (terminal_run_options), one
  * whose connections cannot tell when the remote side reads a password;
- * F10 for Treat Ambiguous-Width Characters as Wide likewise, for a window
- * system where F10 does not open the menus.
+ * Alt+F11 for Treat Ambiguous-Width Characters as Wide and Alt+Enter for
+ * Fullscreen likewise, for a program whose function keys belong to the
+ * remote side.
  */
 
 #include "terminal.h"
@@ -78,6 +79,7 @@
 #define MENU_CLEAR		53U
 #define MENU_RESET		54U
 #define MENU_INPUT_METHOD	55U
+#define MENU_FORGET		56U
 
 /* Help. */
 #define MENU_ABOUT		60U
@@ -86,8 +88,8 @@
 #define MENU_KEY_PLUS		0x2bU
 #define MENU_KEY_MINUS		0x2dU
 #define MENU_KEY_ZERO		0x30U
-#define MENU_KEY_F10		0xffc7U
 #define MENU_KEY_F11		0xffc8U
+#define MENU_KEY_RETURN		0xff0dU
 
 /* The menus, in the order they are shown. */
 static const struct kl_menu_entry menu_items[] = {
@@ -126,6 +128,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_INTERRUPT, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send Interrupt", TERMINAL_ACTION_INTERRUPT, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_END_OF_FILE, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send End of File", TERMINAL_ACTION_END_OF_FILE, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_INPUT_METHOD, MENU_SESSION, KL_MENU_ITEM_CHECKBOX, "Disable Input Method", TERMINAL_ACTION_INPUT_METHOD_OFF, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'i' },
+	{ MENU_FORGET, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Forget Remembered Passphrases", TERMINAL_ACTION_FORGET_PASSPHRASES, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_SESSION_LINE, MENU_SESSION, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLEAR, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Clear Screen", TERMINAL_ACTION_CLEAR, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_RESET, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Reset Terminal", TERMINAL_ACTION_RESET, KL_MENU_ROLE_NONE, 0U, 0U },
@@ -136,8 +139,10 @@ static const struct kl_menu_entry menu_items[] = {
 /*
  * The menus the window shows: menu_items without the items the program
  * did not ask for (Session > Disable Input Method unless
- * window->input_method_item) and with the shortcuts it asked for (F10 for
- * the ambiguous width when window->ambiguous_wide_key), made when the
+ * window->input_method_item, Session > Forget Remembered Passphrases
+ * unless window->forget_item) and with the shortcuts it asked for (Alt+F11
+ * for the ambiguous width when window->ambiguous_wide_key, Alt+Enter for
+ * Fullscreen when window->fullscreen_alt_enter), made when the
  * menus open and kept while the compositor shows them.  menu_shown_count
  * is how many it holds.
  */
@@ -169,13 +174,23 @@ terminal_menu_open(
 		if (menu_items[index].id == MENU_INPUT_METHOD && !window->input_method_item)
 			continue;
 
+		/* A program that keeps no passphrases has nothing to forget. */
+		if (menu_items[index].id == MENU_FORGET && !window->forget_item)
+			continue;
+
 		/* The item, after the ones before it. */
 		menu_shown_items[menu_shown_count] = menu_items[index];
 
-		/* F10 alone switches the ambiguous width for a program that asked for it (the compositor's F10 opens the menus). */
+		/* Alt+F11 switches the ambiguous width for a program that asked for it. */
 		if (menu_items[index].id == MENU_AMBIGUOUS_WIDE && window->ambiguous_wide_key) {
-			menu_shown_items[menu_shown_count].modifiers = 0U;
-			menu_shown_items[menu_shown_count].keysym = MENU_KEY_F10;
+			menu_shown_items[menu_shown_count].modifiers = KL_MENU_ALT;
+			menu_shown_items[menu_shown_count].keysym = MENU_KEY_F11;
+		}
+
+		/* Alt+Enter is Fullscreen's key for a program that leaves F11 to the remote side. */
+		if (menu_items[index].id == MENU_FULLSCREEN && window->fullscreen_alt_enter) {
+			menu_shown_items[menu_shown_count].modifiers = KL_MENU_ALT;
+			menu_shown_items[menu_shown_count].keysym = MENU_KEY_RETURN;
 		}
 		menu_shown_count++;
 	}

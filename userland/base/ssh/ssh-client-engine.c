@@ -122,7 +122,10 @@ enum engine_phase {
 	ENGINE_PHASE_CONNECTED = 5,
 
 	/* The connection ended; only the pending output remains. */
-	ENGINE_PHASE_CLOSED = 6
+	ENGINE_PHASE_CLOSED = 6,
+
+	/* SSH_ENGINE_PASSPHRASE is out; the passphrase of the key the server would take is awaited. */
+	ENGINE_PHASE_PASSPHRASE = 7
 };
 
 /* Which authentication request waits for its answer. */
@@ -169,7 +172,10 @@ struct engine_identity {
  * first exchange (have_host_key 1 once it is kept) and host_changed 1 when
  * a later exchange showed another.  methods are the methods the server
  * last named; identity_next the next identity to try and key the one
- * whose query or signature is out (secret); password_tries how many
+ * whose query or signature is out (secret; only its public half while
+ * key_encrypted is 1, until its passphrase opens the file), key_identity
+ * that key's identity and passphrase_tries how many passphrases did not
+ * open its file; password_tries how many
  * passwords were refused, passwords_over 1 once no more are asked for.
  * channels and channel are the session channel (NULL before it is open
  * and after its close went both ways); replies the kinds of the channel
@@ -196,6 +202,9 @@ struct ssh_engine {
 	unsigned identity_count;
 	unsigned identity_next;
 	struct ssh_key key;
+	int key_encrypted;
+	unsigned key_identity;
+	unsigned passphrase_tries;
 	int pubkey;
 	int password;
 	unsigned password_tries;
@@ -257,6 +266,8 @@ static int engine_take_service(struct ssh_engine *engine);
 static int engine_take_auth(struct ssh_engine *engine);
 static int engine_auth_next(struct ssh_engine *engine);
 static int engine_send_query(struct ssh_engine *engine);
+static int engine_send_signed(struct ssh_engine *engine);
+static int engine_give_up_key(struct ssh_engine *engine);
 static int engine_authenticated(struct ssh_engine *engine);
 static int engine_take_session(struct ssh_engine *engine);
 static int engine_opened(struct ssh_engine *engine);
@@ -648,6 +659,94 @@ ssh_engine_password(
 	}
 
 	/* Succeeded: the password is on its way. */
+	return 0;
+}
+
+/*
+ * Answers SSH_ENGINE_PASSPHRASE.
+ */
+int
+ssh_engine_passphrase(
+	struct ssh_engine *engine,
+	unsigned identity,
+	const char *passphrase)
+{
+	struct ssh_engine_event *event;
+	struct engine_identity *file;
+	struct ssh_key opened;
+	size_t length;
+	int wrong;
+	int same;
+	int error;
+
+	/* Refuses an answer nothing asked for, or for another identity. */
+	if (engine->phase != ENGINE_PHASE_PASSPHRASE || identity != engine->key_identity)
+		return EINVAL;
+
+	/* A user who gives up, or answers nothing, passes over the key. */
+	if (passphrase == NULL || passphrase[0] == '\0') {
+		error = engine_give_up_key(engine);
+		if (error != 0)
+			engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return 0;
+	}
+
+	/* Refuses a passphrase longer than a file takes. */
+	length = strlen(passphrase);
+	if (length > SSH_KEY_PASSPHRASE_MAX)
+		return EINVAL;
+
+	/* Opens the file with the passphrase. */
+	file = &engine->identities[engine->key_identity];
+	error = ssh_key_parse_private_passphrase((const char *)file->file.data, file->file.size, (const uint8_t *)passphrase, length, &opened);
+
+	/* A wrong passphrase counts against the tries. */
+	if (error == EACCES)
+		engine->passphrase_tries++;
+
+	/* Asks again while tries are left. */
+	if (error == EACCES && engine->passphrase_tries < SSH_ENGINE_PASSPHRASE_TRIES) {
+		event = engine_event(engine, SSH_ENGINE_PASSPHRASE);
+		if (event != NULL) {
+			event->identity = engine->key_identity;
+			event->tries = engine->passphrase_tries;
+		}
+		return EACCES;
+	}
+
+	/* The key must be the one offered: a file whose sealed key is not its blob's is no use. */
+	same = 0;
+	if (error == 0)
+		same = ssh_ct_equal(opened.public_key, engine->key.public_key, SSH_ED25519_PUBLIC);
+
+	/* Passes over the key after the last wrong passphrase, for a file broken under its encryption, and for another key. */
+	if (!same) {
+		ssh_key_clear(&opened);
+		wrong = 0;
+		if (error == EACCES)
+			wrong = 1;
+		error = engine_give_up_key(engine);
+		if (error != 0)
+			engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+
+		/* Tells a caller that kept the passphrase that it was wrong. */
+		if (wrong)
+			return EACCES;
+		return 0;
+	}
+
+	/* The opened key takes the place of the public half that was offered. */
+	engine->key = opened;
+	ssh_key_clear(&opened);
+	engine->key_encrypted = 0;
+
+	/* Signs the request the server said it would take, and sends it. */
+	engine->phase = ENGINE_PHASE_AUTH;
+	error = engine_send_signed(engine);
+	if (error != 0)
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+
+	/* Succeeded: the answer is taken. */
 	return 0;
 }
 
@@ -1387,6 +1486,7 @@ engine_dispatch(
 		break;
 	case ENGINE_PHASE_AUTH:
 	case ENGINE_PHASE_PASSWORD:
+	case ENGINE_PHASE_PASSPHRASE:
 		error = engine_take_auth(engine);
 		break;
 	case ENGINE_PHASE_CONNECTED:
@@ -1521,13 +1621,19 @@ engine_take_auth(
 		if (error != 0)
 			return EPROTO;
 
+		/* The key of an encrypted file needs its passphrase before it can sign. */
+		if (engine->key_encrypted) {
+			engine->phase = ENGINE_PHASE_PASSPHRASE;
+			event = engine_event(engine, SSH_ENGINE_PASSPHRASE);
+			if (event != NULL) {
+				event->identity = engine->key_identity;
+				event->tries = engine->passphrase_tries;
+			}
+			return 0;
+		}
+
 		/* Signs the request over the session identifier and sends it. */
-		ssh_buf_reset(&engine->out);
-		error = ssh_auth_put_publickey_signed(engine->user, &engine->key, engine->transport.session_id, &engine->out);
-		if (error != 0)
-			return error;
-		engine->request = ENGINE_REQUEST_SIGNED;
-		error = engine_send_out(engine);
+		error = engine_send_signed(engine);
 		if (error != 0)
 			return error;
 		return 0;
@@ -1603,18 +1709,33 @@ engine_send_query(
 	struct ssh_engine *engine)
 {
 	struct engine_identity *identity;
+	int encrypted;
 	int error;
 
 	/* Takes the next identity. */
 	identity = &engine->identities[engine->identity_next];
 	engine->identity_next++;
 
-	/* Reads its key; a file that cannot be used is passed over. */
-	error = ssh_key_parse_private((const char *)identity->file.data, identity->file.size, &engine->key);
+	/* Reads the public half of its key, which an encrypted file keeps in the clear; a file that cannot be used is passed over. */
+	error = ssh_key_parse_private_public((const char *)identity->file.data, identity->file.size, &engine->key, &encrypted);
 	if (error != 0) {
 		ssh_key_clear(&engine->key);
 		return EAGAIN;
 	}
+
+	/* A file in the clear gives its whole key now. */
+	if (!encrypted) {
+		error = ssh_key_parse_private((const char *)identity->file.data, identity->file.size, &engine->key);
+		if (error != 0) {
+			ssh_key_clear(&engine->key);
+			return EAGAIN;
+		}
+	}
+
+	/* Notes whose key is out and whether it still needs its passphrase. */
+	engine->key_encrypted = encrypted;
+	engine->key_identity = engine->identity_next - 1U;
+	engine->passphrase_tries = 0U;
 
 	/* Asks about the key without a signature. */
 	ssh_buf_reset(&engine->out);
@@ -2182,4 +2303,52 @@ engine_open_reason(
 	default:
 		return "channel open failed: unknown reason";
 	}
+}
+
+/* Signs the publickey request for engine->key over the session identifier and sends it (RFC 4252 7).  Returns 0 or an error of sending. */
+static int
+engine_send_signed(
+	struct ssh_engine *engine)
+{
+	int error;
+
+	/* Builds the signed request. */
+	ssh_buf_reset(&engine->out);
+	error = ssh_auth_put_publickey_signed(engine->user, &engine->key, engine->transport.session_id, &engine->out);
+	if (error != 0)
+		return error;
+
+	/* Sends it and waits for its answer. */
+	engine->request = ENGINE_REQUEST_SIGNED;
+	error = engine_send_out(engine);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the signed request is on its way. */
+	return 0;
+}
+
+/*
+ * Passes over the key whose passphrase was asked for: the next identity,
+ * a password or the end follows, the methods being those the server last
+ * named.  Returns 0 or an error of sending.
+ */
+static int
+engine_give_up_key(
+	struct ssh_engine *engine)
+{
+	int error;
+
+	/* Back to the requests, without the key. */
+	engine->phase = ENGINE_PHASE_AUTH;
+	engine->key_encrypted = 0;
+	engine->passphrase_tries = 0U;
+
+	/* Tries the next method. */
+	error = engine_auth_next(engine);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the next method is on its way, or the end is queued. */
+	return 0;
 }

@@ -78,6 +78,7 @@
 #define THREAD_ASKED_NONE	0U
 #define THREAD_ASKED_HOST_KEY	1U
 #define THREAD_ASKED_PASSWORD	2U
+#define THREAD_ASKED_PASSPHRASE	3U
 
 /*
  * What the user chose to connect to: the name given (a Host of ssh\config,
@@ -103,7 +104,9 @@ struct thread_hosts {
  * One attempt to connect: the settings for the host, the socket and the
  * address it reached, the engine, the bytes read and not yet taken by the
  * engine, the server's key with what known_hosts says of it, the question
- * waiting for the user, and how the attempt ended.
+ * waiting for the user (for a passphrase, whose key), the paths of the key
+ * files in the engine's order and whether a passphrase kept for the
+ * Windows session was tried for each, and how the attempt ended.
  */
 struct thread_link {
 	struct mikuterm_session *session;
@@ -117,6 +120,9 @@ struct thread_link {
 	size_t received_start;
 	size_t received_end;
 	unsigned asked;
+	unsigned asked_identity;
+	char identity_paths[SSH_ENGINE_IDENTITIES_MAX][MIKUTERM_PATH_MAX];
+	int recalled[SSH_ENGINE_IDENTITIES_MAX];
 	uint8_t host_key[SSH_ED25519_PUBLIC];
 	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
 	char known_name[MIKUTERM_HOST_MAX + 8U];
@@ -157,7 +163,9 @@ static int thread_receive(struct thread_link *link);
 static void thread_feed(struct thread_link *link);
 static int thread_ask(struct mikuterm_session *session, const char *prompt, unsigned kind, char *answer, size_t size);
 static void thread_ask_start(struct mikuterm_session *session, const char *prompt, unsigned kind);
-static int thread_ask_take(struct mikuterm_session *session, char *answer, size_t size, int *cancelled);
+static int thread_ask_take(struct mikuterm_session *session, char *answer, size_t size, int *cancelled, int *keep);
+static void thread_passphrase(struct thread_link *link, const struct ssh_engine_event *event);
+static void thread_passphrase_answer(struct thread_link *link, const char *answer, int cancelled, int keep);
 static int thread_closing(struct mikuterm_session *session);
 static void thread_say_bytes(struct mikuterm_session *session, const void *bytes, size_t size);
 static const char *thread_error_text(int error);
@@ -728,7 +736,8 @@ thread_identities(
 			return error;
 		}
 
-		/* One more identity. */
+		/* One more identity, whose path names it for its passphrase. */
+		(void)snprintf(link->identity_paths[*count], sizeof(link->identity_paths[*count]), "%s", path);
 		identities[*count].name = link->config.identity[index];
 		identities[*count].file = (const uint8_t *)text;
 		identities[*count].size = size;
@@ -881,6 +890,10 @@ thread_events(
 			(void)snprintf(prompt, sizeof(prompt), "%s@%s's password: ", link->config.user, link->host_name);
 			thread_ask_start(session, prompt, SESSION_ASK_SECRET);
 			link->asked = THREAD_ASKED_PASSWORD;
+			break;
+		case SSH_ENGINE_PASSPHRASE:
+			/* The passphrase of a key the server would take: the one kept, or asked in the tab. */
+			thread_passphrase(link, &event);
 			break;
 		case SSH_ENGINE_DATA:
 			/* The session's bytes for the tab, given back to the window as the tab reads them. */
@@ -1441,19 +1454,22 @@ thread_answers(
 	char answer[SESSION_LINE_MAX];
 	int cancelled;
 	int answered;
+	int keep;
 
 	/* Nothing asked. */
 	if (link->asked == THREAD_ASKED_NONE)
 		return;
 
 	/* The answer, when it came. */
-	answered = thread_ask_take(link->session, answer, sizeof(answer), &cancelled);
+	answered = thread_ask_take(link->session, answer, sizeof(answer), &cancelled, &keep);
 	if (!answered)
 		return;
 
 	/* What it answers. */
 	if (link->asked == THREAD_ASKED_HOST_KEY) {
 		thread_host_answer(link, answer, cancelled);
+	} else if (link->asked == THREAD_ASKED_PASSPHRASE) {
+		thread_passphrase_answer(link, answer, cancelled, keep);
 	} else {
 		/* A password, or none more when the user gave up. */
 		link->asked = THREAD_ASKED_NONE;
@@ -1569,7 +1585,7 @@ thread_ask(
 
 	/* The wait for the answer or the tab's close. */
 	for (;;) {
-		answered = thread_ask_take(session, answer, size, &cancelled);
+		answered = thread_ask_take(session, answer, size, &cancelled, NULL);
 		if (answered)
 			break;
 
@@ -1626,15 +1642,17 @@ thread_ask_start(
 
 /*
  * Takes the answer to the question asked, when it came: its text (cut to
- * size) and whether the user gave up.  Returns 1 when it came, 0 when not
- * yet.
+ * size), whether the user gave up and, when keep is not NULL, whether the
+ * user wants it kept for the Windows session.  Returns 1 when it came, 0
+ * when not yet.
  */
 static int
 thread_ask_take(
 	struct mikuterm_session *session,
 	char *answer,
 	size_t size,
-	int *cancelled)
+	int *cancelled,
+	int *keep)
 {
 	size_t length;
 	int answered;
@@ -1644,6 +1662,8 @@ thread_ask_take(
 
 	answered = session->answered;
 	*cancelled = session->cancelled;
+	if (keep != NULL)
+		*keep = session->keep;
 	if (answered) {
 		length = session->line_length;
 		if (length >= size)
@@ -1653,6 +1673,7 @@ thread_ask_take(
 		OPENSSL_cleanse(session->line, sizeof(session->line));
 		session->line_length = 0U;
 		session->question = SESSION_ASK_NONE;
+		session->keep_offered = 0;
 		session->answered = 0;
 		session->cancelled = 0;
 	}
@@ -1739,4 +1760,100 @@ thread_now(void)
 {
 	/* The clock's microseconds, in milliseconds. */
 	return kl_clock_us() / 1000U;
+}
+
+/*
+ * Answers the engine's question for the passphrase of a key the server
+ * would take: the passphrase kept for the Windows session, tried once in
+ * an attempt (a wrong one is forgotten, and the engine asks again), or
+ * else the user, asked in the tab without the passphrase being shown,
+ * with the choice of keeping it.
+ */
+static void
+thread_passphrase(
+	struct thread_link *link,
+	const struct ssh_engine_event *event)
+{
+	char kept[SESSION_LINE_MAX];
+	char shown[MIKUTERM_PATH_MAX];
+	const char *path;
+	unsigned identity;
+	int error;
+
+	/* A key the attempt did not read cannot be asked for: it is passed over. */
+	identity = event->identity;
+	if (identity >= SSH_ENGINE_IDENTITIES_MAX) {
+		(void)ssh_engine_passphrase(link->engine, identity, NULL);
+		return;
+	}
+	path = link->identity_paths[identity];
+
+	/* The passphrase kept for the Windows session, the first time the key is asked for in this attempt. */
+	if (!link->recalled[identity]) {
+		link->recalled[identity] = 1;
+		error = mikuterm_passphrase_recall(path, kept, sizeof(kept));
+		if (error == 0) {
+			/* Opens the key with it; a wrong one is forgotten, and the engine asks again. */
+			error = ssh_engine_passphrase(link->engine, identity, kept);
+			OPENSSL_cleanse(kept, sizeof(kept));
+			printf("MIKUTERM PASSPHRASE kept used=%d\n", error == 0);
+			fflush(stdout);
+			if (error == EACCES)
+				mikuterm_passphrase_forget(path);
+			return;
+		}
+	}
+
+	/* Asks the user, naming the key as its place in the folder, with the choice of keeping it. */
+	mikuterm_path_shown(path, shown, sizeof(shown));
+	kl_mutex_lock(&link->session->lock);
+
+	(void)snprintf(link->session->prompt, sizeof(link->session->prompt), "Enter passphrase for key '%s': ", shown);
+	if (!link->session->line_started)
+		(void)session_put_locked(link->session, "\r\n", 2U);
+	session_keep_line_locked(link->session);
+	link->session->keep_offered = 1;
+
+	kl_mutex_unlock(&link->session->lock);
+
+	/* The prompt; the keys typed are the passphrase from now on. */
+	thread_ask_start(link->session, link->session->prompt, SESSION_ASK_SECRET);
+	link->asked = THREAD_ASKED_PASSPHRASE;
+	link->asked_identity = identity;
+}
+
+/*
+ * Gives the engine the user's passphrase (or none, when the user gave up)
+ * and keeps it for the Windows session when it opened the key and the
+ * user chose to.
+ */
+static void
+thread_passphrase_answer(
+	struct thread_link *link,
+	const char *answer,
+	int cancelled,
+	int keep)
+{
+	const char *path;
+	int error;
+
+	/* The question is answered. */
+	link->asked = THREAD_ASKED_NONE;
+	path = link->identity_paths[link->asked_identity];
+
+	/* The user gave up: the key is passed over. */
+	if (cancelled) {
+		(void)ssh_engine_passphrase(link->engine, link->asked_identity, NULL);
+		return;
+	}
+
+	/* The engine opens the key with it at once; an empty one passes the key over. */
+	error = ssh_engine_passphrase(link->engine, link->asked_identity, answer);
+	if (error != 0 || answer[0] == '\0' || !keep)
+		return;
+
+	/* Keeps the passphrase that opened the key until the user signs out of Windows. */
+	error = mikuterm_passphrase_keep(path, answer);
+	printf("MIKUTERM PASSPHRASE keep error=%d\n", error);
+	fflush(stdout);
 }

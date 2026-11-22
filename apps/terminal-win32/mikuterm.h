@@ -143,6 +143,12 @@ int mikuterm_address_name(const struct kl_address *address, uint16_t port, char 
 void mikuterm_known_hosts_scan(const char *text, size_t size, const char *path, const char *name, const uint8_t *key, struct mikuterm_known_scan *scan);
 void mikuterm_path_shown(const char *path, char *shown, size_t size);
 
+/* The passphrases kept for the Windows session (credential.c). */
+int mikuterm_passphrase_recall(const char *path, char *passphrase, size_t size);
+int mikuterm_passphrase_keep(const char *path, const char *passphrase);
+void mikuterm_passphrase_forget(const char *path);
+unsigned mikuterm_passphrases_forget_all(void);
+
 /* The View menu's settings kept in state.conf (settings-file.c). */
 void mikuterm_settings_defaults(const struct mikuterm_conf *conf);
 
