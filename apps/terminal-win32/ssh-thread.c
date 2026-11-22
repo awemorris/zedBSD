@@ -116,6 +116,7 @@ static int thread_parse_target(const char *text, struct thread_target *target);
 static int thread_attempt(struct thread_link *link);
 static int thread_settings(struct thread_link *link);
 static int thread_dial(struct thread_link *link);
+static int thread_wait_connected(struct thread_link *link, struct kl_socket *socket, unsigned timeout);
 static int thread_identities(struct thread_link *link, struct ssh_engine_identity *identities, unsigned *count);
 static void thread_identities_free(struct ssh_engine_identity *identities, unsigned count);
 static int thread_converse(struct thread_link *link);
@@ -559,15 +560,10 @@ thread_dial(
 	struct thread_link *link)
 {
 	struct kl_address addresses[THREAD_ADDRESSES];
-	struct kl_socket_wait waits[2];
 	struct kl_socket *socket;
 	size_t count;
 	size_t index;
-	size_t ready;
 	unsigned timeout;
-	uint64_t deadline;
-	uint64_t now;
-	int closing;
 	int error;
 
 	/* The host's addresses (the thread waits for the system's answer). */
@@ -589,39 +585,16 @@ thread_dial(
 		error = kl_socket_open(addresses[index].family, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, &socket);
 		if (error != 0)
 			continue;
-		error = kl_socket_connect(socket, &addresses[index]);
-		if (error == EINPROGRESS) {
-			/* The connection's end, the tab's close, or the time. */
-			deadline = thread_now() + (uint64_t)timeout * 1000U;
-			for (;;) {
-				waits[0].socket = socket;
-				waits[0].waker = NULL;
-				waits[0].events = KL_SOCKET_WRITABLE;
-				waits[0].ready = 0U;
-				waits[1].socket = NULL;
-				waits[1].waker = link->session->waker;
-				waits[1].events = KL_SOCKET_READABLE;
-				waits[1].ready = 0U;
-				now = thread_now();
-				if (timeout != 0U && now >= deadline) {
-					error = ETIMEDOUT;
-					break;
-				}
-				error = kl_socket_poll(waits, 2U, (int)THREAD_ROUND_MS, &ready);
-				if (error != 0)
-					break;
 
-				/* A tab that closed wants no connection. */
-				closing = thread_closing(link->session);
-				if (closing) {
-					kl_socket_close(socket);
-					return THREAD_CLOSING;
-				}
-				if ((waits[0].ready & (KL_SOCKET_WRITABLE | KL_SOCKET_FAILED)) != 0U) {
-					error = kl_socket_connect_result(socket);
-					break;
-				}
-			}
+		/* The connection, waited for while it is on its way. */
+		error = kl_socket_connect(socket, &addresses[index]);
+		if (error == EINPROGRESS)
+			error = thread_wait_connected(link, socket, timeout);
+
+		/* A tab that closed wants no connection. */
+		if (error == EPIPE) {
+			kl_socket_close(socket);
+			return THREAD_CLOSING;
 		}
 
 		/* Connected. */
@@ -629,12 +602,74 @@ thread_dial(
 			link->socket = socket;
 			return THREAD_DONE;
 		}
+
+		/* The next address, on a new socket. */
 		kl_socket_close(socket);
 	}
 
 	/* No address answered. */
 	(void)snprintf(link->reason, sizeof(link->reason), "ssh: connect to host %s port %u: %s", link->host_name, (unsigned)link->config.port, thread_error_text(error));
 	return THREAD_FAILED;
+}
+
+/*
+ * Waits for a connection on its way to end, for the tab's close, or for
+ * timeout seconds (0: no limit).  Returns 0 (connected), why it failed,
+ * ETIMEDOUT, or EPIPE when the tab closed.
+ */
+static int
+thread_wait_connected(
+	struct thread_link *link,
+	struct kl_socket *socket,
+	unsigned timeout)
+{
+	struct kl_socket_wait waits[2];
+	uint64_t deadline;
+	uint64_t now;
+	size_t ready;
+	int closing;
+	int error;
+
+	/* The time it gives up. */
+	deadline = thread_now() + (uint64_t)timeout * 1000U;
+
+	/* Round after round until something ends the wait. */
+	for (;;) {
+		/* The time is up. */
+		now = thread_now();
+		if (timeout != 0U && now >= deadline)
+			return ETIMEDOUT;
+
+		/* The socket's end of the connection, or the waker. */
+		waits[0].socket = socket;
+		waits[0].waker = NULL;
+		waits[0].events = KL_SOCKET_WRITABLE;
+		waits[0].ready = 0U;
+		waits[1].socket = NULL;
+		waits[1].waker = link->session->waker;
+		waits[1].events = KL_SOCKET_READABLE;
+		waits[1].ready = 0U;
+		error = kl_socket_poll(waits, 2U, (int)THREAD_ROUND_MS, &ready);
+		if (error != 0)
+			return error;
+
+		/* A tab that closed wants no connection. */
+		closing = thread_closing(link->session);
+		if (closing)
+			return EPIPE;
+
+		/* The connection ended one way or the other. */
+		if ((waits[0].ready & (KL_SOCKET_WRITABLE | KL_SOCKET_FAILED)) != 0U)
+			break;
+	}
+
+	/* How it ended. */
+	error = kl_socket_connect_result(socket);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: connected. */
+	return 0;
 }
 
 /*

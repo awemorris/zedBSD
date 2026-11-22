@@ -13,7 +13,7 @@
 #
 #   llvm-mingw (cross, x64 or arm64):
 #     cmake -S apps/terminal-win32 -B <build> -G Ninja \
-#       -DCMAKE_TOOLCHAIN_FILE=apps/terminal-win32/cmake/llvm-mingw-x86_64.cmake -DLLVM_MINGW=<root>
+#       -DCMAKE_TOOLCHAIN_FILE=$PWD/apps/terminal-win32/cmake/llvm-mingw-x86_64.cmake -DLLVM_MINGW=<root>
 #     cmake --build <build> --target zip
 #   Visual Studio (MSVC or clang-cl, x64 or ARM64):
 #     cmake -S apps/terminal-win32 -B <build> -A x64
