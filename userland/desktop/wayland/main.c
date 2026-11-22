@@ -178,7 +178,7 @@ main(
 	/* Reads the command line; a mistake ends the run with the usage. */
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N [--locked]] [--lock-idle=seconds] | --greeter --auth-fd=N] [--seat-fd=N]\n");
+		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--scale=100..300] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N [--locked]] [--lock-idle=seconds] | --greeter --auth-fd=N] [--seat-fd=N]\n");
 		return 2;
 	}
 
@@ -663,6 +663,26 @@ parse_options(
 			/* Kept for the output's opening, which tells whether the display can take it. */
 			server->rotate_option = (unsigned)number;
 			server->rotate_given = 1;
+			continue;
+		}
+
+		/* A test's scale of the output in percent: 100 to 300, a whole number of 120ths. */
+		match = strncmp(argument, "--scale=", 8);
+		if (match == 0) {
+			/* An out-of-range scale is a mistake. */
+			error = unsigned_option(argument + 8, 300, &number);
+			if (error != 0)
+				return error;
+			if (number < 100U)
+				return EINVAL;
+
+			/* A percentage that is no whole number of 120ths is a mistake. */
+			if ((number * KWL_SCALE_ONE) % 100U != 0U)
+				return EINVAL;
+
+			/* The scale the output is shown at from its opening, over displays.conf's and the default. */
+			server->scale_wanted = (unsigned)(number * KWL_SCALE_ONE / 100U);
+			server->scale_given = 1U;
 			continue;
 		}
 

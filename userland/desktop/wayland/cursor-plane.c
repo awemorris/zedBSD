@@ -514,7 +514,7 @@ kwl_cursor_plane_hold(
 /*
  * Finds what the plane shows: 1 with an image and its hotspot, 0 for
  * nothing, -1 when the cursor must be composed (a drag, an image the
- * plane cannot show, or a rotated output).  The output the pointer is on
+ * plane cannot show, a rotated output or one at another scale).  The output the pointer is on
  * is the cursor thread's to judge, from the box.
  */
 static int
@@ -533,6 +533,14 @@ plane_state(
 	 */
 	plane = &server->compose->cursor_plane;
 	if (server->compose->rotation != KWL_ROTATE_0)
+		return -1;
+
+	/*
+	 * An output shown at another scale than 100 % composes the cursor:
+	 * the plane would show the cursor's image unscaled, at the pointer's
+	 * logical place.
+	 */
+	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
 		return -1;
 
 	/* The cursor as the frames would draw it. */

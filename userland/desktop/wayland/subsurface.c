@@ -790,7 +790,7 @@ draw_image(
 	shape.opacity = server->window_opacity;
 	shape.mode = MODE_IMAGE;
 	shape.radius = 0.0f;
-	shape.set = image->set;
+	shape.set = kwl_compose_image_set(server, image, shape.quad[2], shape.quad[3], shape.uv);
 	if (image->draw == KWL_DRAW_OPAQUE)
 		shape.opaque = 1.0f;
 	glass_shape_draw(server, command, &shape);

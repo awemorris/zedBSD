@@ -434,7 +434,7 @@ kwl_desktop_draw(
 	glass_shape_init(&shape, (float)surface->x, (float)surface->y, (float)width, (float)height);
 	kwl_viewport_source(surface, shape.uv);
 	shape.mode = MODE_IMAGE;
-	shape.set = image->set;
+	shape.set = kwl_compose_image_set(server, image, shape.quad[2], shape.quad[3], shape.uv);
 	if (image->draw == KWL_DRAW_OPAQUE)
 		shape.opaque = 1.0f;
 

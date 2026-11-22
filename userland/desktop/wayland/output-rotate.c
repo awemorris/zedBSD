@@ -689,10 +689,10 @@ output_rotate_turn_begin(
 	struct kwl_compose *compose;
 	VkResult result;
 
-	/* Whether the logical size changes, and whether the turn image of the size can serve the new angle. */
+	/* Whether the size in pixels changes, and whether the turn image of the size can serve the new angle. */
 	compose = server->compose;
 	memset(work, 0, sizeof(*work));
-	if (after->width != server->width || after->height != server->height)
+	if (after->width != server->pixel_width || after->height != server->pixel_height)
 		work->resized = 1U;
 	if (!work->resized && after->turn != KWL_ROTATE_0 && compose->turn.image != VK_NULL_HANDLE)
 		work->reuse = 1U;
