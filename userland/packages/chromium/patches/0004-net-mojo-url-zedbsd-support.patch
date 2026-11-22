@@ -1,15 +1,3 @@
---- a/mojo/core/BUILD.gn
-+++ b/mojo/core/BUILD.gn
-@@ -109,7 +109,8 @@
-       "channel_posix.h",
-     ]
- 
--    if (is_linux || is_chromeos || is_android) {
-+    if (is_linux ||
-+        is_chromeos || is_android) {
-       sources += [
-         "channel_linux.cc",
-         "channel_linux.h",
 --- a/mojo/public/cpp/platform/socket_utils_posix.cc
 +++ b/mojo/public/cpp/platform/socket_utils_posix.cc
 @@ -26,7 +26,8 @@
@@ -22,37 +10,6 @@
    uid_t socket_euid;
    gid_t socket_gid;
    if (getpeereid(fd, &socket_euid, &socket_gid) < 0) {
---- a/mojo/public/tools/bindings/mojom.gni
-+++ b/mojo/public/tools/bindings/mojom.gni
-@@ -67,7 +67,7 @@
- # value, so we limit the behavior to desktop builds for now.
- # We *cannot* enable scrambling on Chrome OS (it would break ARC).
- enable_scrambled_message_ids = enable_mojom_message_id_scrambling &&
--                               (is_mac || is_win || (is_linux && !is_castos))
-+                               (is_mac || is_win || ((is_linux || is_zedbsd) && !is_castos))
- if (enable_scrambled_message_ids) {
-   assert(!is_chromeos)
- }
---- a/net/BUILD.gn
-+++ b/net/BUILD.gn
-@@ -2702,7 +2702,7 @@
-   }
- }
- 
--if (is_linux || is_chromeos || is_mac) {
-+if ((is_linux || is_zedbsd) || is_chromeos || is_mac) {
-   executable("cachetool") {
-     testonly = true
-     sources = [ "tools/cachetool/cachetool.cc" ]
-@@ -3858,7 +3858,7 @@
-     ]
- 
-     # Platforms where sqlite_dev_shell is defined.
--    if (is_win || is_mac || is_linux || is_chromeos) {
-+    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
-       sources += [
-         "disk_cache/sql/sql_persistent_store_queries_unittest.cc",
-         "disk_cache/sql/sql_shared_cache_index_database_queries_unittest.cc",
 --- a/net/base/net_errors_posix.cc
 +++ b/net/base/net_errors_posix.cc
 @@ -43,7 +43,9 @@
@@ -241,30 +198,6 @@
  
  #include <optional>
  
---- a/net/features.gni
-+++ b/net/features.gni
-@@ -29,7 +29,7 @@
-   disable_zstd_filter = false
- 
-   # Multicast DNS. Enabled on desktop Android for the chrome.mdns extension API.
--  enable_mdns = is_win || is_linux || is_chromeos || is_fuchsia || is_apple ||
-+  enable_mdns = is_win || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia || is_apple ||
-                 enable_desktop_android_extensions
- 
-   # Reporting not used on iOS, except for iOS Blink.
-@@ -67,10 +67,10 @@
- 
-   # Platforms for which certificate verification can only be performed using
-   # the builtin cert verifier with the Chrome Root Store.
--  chrome_root_store_only = is_win || is_mac || is_linux || is_chromeos
-+  chrome_root_store_only = is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos
- 
-   # DBSC is only supported on Windows, Linux and Mac for now.
--  enable_device_bound_sessions = is_win || is_linux || is_mac
-+  enable_device_bound_sessions = is_win || (is_linux || is_zedbsd) || is_mac
- 
-   # Bracketed URIs parsing is only available for debug builds.
-   # TODO(crbug.com/365771838): Ensure tests are updated if needed if this
 --- a/net/socket/udp_socket_posix.cc
 +++ b/net/socket/udp_socket_posix.cc
 @@ -142,7 +142,8 @@

@@ -1,5 +1,14 @@
 --- a/build/config/ozone.gni
 +++ b/build/config/ozone.gni
+@@ -8,7 +8,7 @@
+ declare_args() {
+   # Indicates if Ozone is enabled. Ozone is a low-level library layer for Linux
+   # that does not require X11.
+-  use_ozone = is_chromeos || is_fuchsia || is_linux
++  use_ozone = is_chromeos || is_fuchsia || is_linux || is_zedbsd
+ }
+ 
+ declare_args() {
 @@ -56,6 +56,9 @@
    # Compile the 'wayland' platform.
    ozone_platform_wayland = false

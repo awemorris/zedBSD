@@ -21,3 +21,31 @@ EXT_chromium_PATCH_LEVEL := zedbsd1
 EXT_chromium_PATCHES := $(sort $(wildcard $(abspath $(CHROMIUM_DIR))/patches/*.patch))
 
 $(eval $(call EXTERNAL_SOURCE,chromium))
+
+# The GN build directory: args.gn names this tree's compiler, sysroot and
+# shared libraries, and is written again whenever the template or a patch
+# changes.  The GN and Ninja are the ones the release archive carries and the
+# build machine's.
+CHROMIUM_GN := $(EXT_chromium_SRCDIR)/buildtools/linux64/gn
+CHROMIUM_LLVM := $(patsubst %/,%,$(dir $(EXTERNAL_LLVM_BIN)))
+CHROMIUM_CLANG_VERSION = $(notdir $(firstword $(wildcard $(CHROMIUM_LLVM)/lib/clang/*)))
+CHROMIUM_ARGS := $(EXT_chromium_BUILDDIR)/args.gn
+CHROMIUM_TARGETS ?= content/shell:content_shell
+
+$(CHROMIUM_ARGS): $(CHROMIUM_DIR)/args.gn.in $(EXT_chromium_SRCSTAMP)
+	@mkdir -p '$(EXT_chromium_BUILDDIR)'
+	sed -e 's|@LLVM@|$(CHROMIUM_LLVM)|' \
+		-e 's|@CLANG_VERSION@|$(CHROMIUM_CLANG_VERSION)|' \
+		-e 's|@SYSROOT@|$(EXTERNAL_SYSROOT)|' \
+		-e 's|@DYNAMIC@|$(EXTERNAL_DYNAMIC)|' \
+		'$(CHROMIUM_DIR)/args.gn.in' > '$@.tmp'
+	@mv '$@.tmp' '$@'
+
+.PHONY: chromium-gen chromium-build
+chromium-gen: $(CHROMIUM_ARGS)
+	cd '$(EXT_chromium_SRCDIR)' && '$(CHROMIUM_GN)' gen '$(EXT_chromium_BUILDDIR)' \
+		--root-target=//content/shell:content_shell
+
+chromium-build: chromium-gen
+	$(EXTERNAL_NINJA_PROGRAM) -C '$(EXT_chromium_BUILDDIR)' -j $(BUILD_JOBS) \
+		$(CHROMIUM_TARGETS)

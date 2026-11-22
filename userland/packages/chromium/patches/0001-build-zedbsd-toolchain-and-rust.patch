@@ -1,59 +1,3 @@
---- a/BUILD.gn
-+++ b/BUILD.gn
-@@ -521,14 +521,14 @@
-       }
-     }
- 
--    if (is_ios || is_win || is_linux || is_fuchsia) {
-+    if (is_ios || is_win || (is_linux || is_zedbsd) || is_fuchsia) {
-       deps += [
-         "//base:base_i18n_perftests",
-         "//google_apis:google_apis_unittests",
-       ]
-     }
- 
--    if ((is_win || is_mac || is_linux || is_chromeos || is_fuchsia) &&
-+    if ((is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia) &&
-         (target_cpu == "x86" || target_cpu == "x64")) {
-       deps += [
-         "//third_party/swiftshader/src/Vulkan:icd_file",
-@@ -701,7 +701,7 @@
-       ]
-     }
- 
--    if (is_mac || is_win || is_android || is_linux || is_chromeos) {
-+    if (is_mac || is_win || is_android || (is_linux || is_zedbsd) || is_chromeos) {
-       deps += [
-         "//third_party/crashpad/crashpad:crashpad_tests",
-         "//third_party/crashpad/crashpad/tools:crashpad_database_util",
-@@ -719,15 +719,15 @@
-       deps += [ "//content/browser/bluetooth/tools:bluetooth_metrics_hash" ]
-     }
- 
--    if (is_win || is_linux || is_chromeos) {
-+    if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
-       deps += [ "//mojo" ]
-     }
- 
--    if (is_mac || is_linux || is_chromeos || is_android || is_fuchsia) {
-+    if (is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia) {
-       deps += [ "//third_party/perfetto:all" ]
-     }
- 
--    if (is_win || is_mac || is_linux || is_chromeos) {
-+    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
-       deps += [ "//third_party/sqlite:sqlite_shell" ]
-     }
- 
-@@ -1232,7 +1232,7 @@
-         "//third_party/blink/tools:wpt_tests_isolate",
-         "//third_party/blink/web_tests:wpt_tests",
-       ]
--      if (is_mac || is_linux) {
-+      if (is_mac || (is_linux || is_zedbsd)) {
-         data_deps += [ "//third_party/hyphenation-patterns:bundle_hyphen_data" ]
-       }
-     }
 --- a/build/build_config.h
 +++ b/build/build_config.h
 @@ -104,6 +104,8 @@
@@ -98,27 +42,19 @@
    } else if (is_linux || is_chromeos) {
      libs = [
        "dl",
-@@ -422,7 +424,7 @@
- 
-       # Force include the header.
-       cflags = [ "/FI$precompiled_header" ]
--    } else if (is_mac || is_linux) {
-+    } else if (is_mac || (is_linux || is_zedbsd)) {
-       precompiled_source = "//build/precompile.h"
-     }
-   }
 --- a/build/config/BUILDCONFIG.gn
 +++ b/build/config/BUILDCONFIG.gn
-@@ -123,6 +123,8 @@
+@@ -123,6 +123,9 @@
  #   even if the value is overridden, which is wasteful. See first bullet.
  
  declare_args() {
 +  # The directory of zedBSD's shared libraries the target links against.
 +  zedbsd_dynamic_dir = ""
++
    # Set to enable the official build level of optimization. This has nothing
    # to do with branding, but enables an additional level of optimization above
    # release (!is_debug). This might be better expressed as a tri-state
-@@ -295,6 +297,8 @@
+@@ -295,6 +298,8 @@
    _default_toolchain = "//build/toolchain/aix:$target_cpu"
  } else if (target_os == "zos") {
    _default_toolchain = "//build/toolchain/zos:$target_cpu"
@@ -127,7 +63,7 @@
  } else if (target_os == "emscripten") {
    # Because it's too hard to remove all targets from //BUILD.gn that do not work
    # with it.
-@@ -340,6 +344,7 @@
+@@ -340,6 +345,7 @@
  is_wasm = current_os == "emscripten"
  is_watchos = current_os == "watchos"
  is_win = current_os == "win" || current_os == "winuwp"
@@ -135,20 +71,9 @@
  
  is_apple = is_ios || is_mac || is_watchos
  is_posix = !is_win && !is_fuchsia
---- a/build/config/c++/modules.gni
-+++ b/build/config/c++/modules.gni
-@@ -23,7 +23,7 @@
- if (is_chromeos) {
-   # ChromeOS uses the linux sysroot.
-   module_platform = "linux"
--} else if (is_fuchsia || is_mac || is_linux || is_win) {
-+} else if (is_fuchsia || is_mac || (is_linux || is_zedbsd) || is_win) {
-   # Currently, these generate the same sysroot for all architectures. This is
-   # not inherently the case. If we start getting errors on one architecture
-   # but not the other, we will revert back to one modulemap per cpu.
 --- a/build/config/clang/BUILD.gn
 +++ b/build/config/clang/BUILD.gn
-@@ -252,13 +252,28 @@
+@@ -252,13 +252,33 @@
        } else if (current_os == "aix") {
          _dir = "aix"
          _suffix = "-powerpc64"
@@ -163,7 +88,13 @@
 -      libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
 +      if (is_zedbsd) {
 +        # zedBSD's compiler runtime is the sysroot's.
-+        not_needed([ "_ext", "_prefix", "_dir", "_suffix", "_libname" ])
++        not_needed([
++                     "_ext",
++                     "_prefix",
++                     "_dir",
++                     "_suffix",
++                     "_libname",
++                   ])
 +        libs = [ "$target_sysroot/usr/lib/${_prefix}clang_rt.${_libname}.a" ]
 +      } else {
 +        _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
@@ -171,8 +102,7 @@
 +          # The build machine's programs of a zedBSD build are compiled by
 +          # zedBSD's clang, which carries no runtime for the build machine:
 +          # they take the runtime of Chromium's own clang.
-+          _clang_lib_dir =
-+              "//third_party/llvm-build/Release+Asserts/lib/clang/$clang_version/lib"
++          _clang_lib_dir = "//third_party/llvm-build/Release+Asserts/lib/clang/$clang_version/lib"
 +        }
 +        _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
 +        libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
@@ -182,15 +112,6 @@
  }
 --- a/build/config/compiler/BUILD.gn
 +++ b/build/config/compiler/BUILD.gn
-@@ -123,7 +123,7 @@
-   # the space overhead is too great. We should use some mixture of profiles and
-   # optimization settings to better tune the size increase.
-   thin_lto_enable_optimizations =
--      (is_chromeos || is_android || is_win || is_linux || is_mac ||
-+      (is_chromeos || is_android || is_win || (is_linux || is_zedbsd) || is_mac ||
-        (is_ios && use_lld)) && is_official_build
- 
-   # Whether to enable thin lto incremental builds.
 @@ -314,8 +314,13 @@
  # libclang_rt.asan-*-android.so), so all sanitizer symbols are resolved at link
  # time and -Wl,-z,defs can safely remain enabled to catch missing symbols.
@@ -207,19 +128,18 @@
      ldflags = [
        "-Wl,-z,defs",
        "-Wl,--as-needed",
-@@ -469,8 +474,9 @@
+@@ -469,8 +474,8 @@
        } else if (is_chromeos) {
          cflags += [ "-fstack-protector-strong" ]
        } else if (is_posix || is_fuchsia) {
 -        if (current_os != "aix") {
 -          # Not available on aix.
-+        if (current_os != "aix" &&
-+            !(is_zedbsd)) {
++        if (current_os != "aix" && !is_zedbsd) {
 +          # Not available on aix or zedbsd.
            cflags += [ "-fstack-protector" ]
          }
        }
-@@ -1012,6 +1018,9 @@
+@@ -1012,6 +1017,9 @@
    }
    if (rust_abi_target != "") {
      rustflags += [ "--target=$rust_abi_target" ]
@@ -229,7 +149,7 @@
    }
    if (!use_thin_lto || !toolchain_supports_rust_thin_lto) {
      # Don't include bitcode if it won't be used.
-@@ -1795,6 +1804,9 @@
+@@ -1795,6 +1803,9 @@
  
    if (use_safe_libcxx) {
      defines += [ "_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE" ]
@@ -239,44 +159,6 @@
    } else {
      defines += [ "_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE" ]
    }
-@@ -2398,7 +2410,7 @@
- # 2. Remove the thin_archive config, so that the .a file actually contains all
- #    .o files, instead of just references to .o files in the build directoy
- config("thin_archive") {
--  if ((is_apple && use_lld) || (is_linux && !is_clang) || current_os == "aix" ||
-+  if ((is_apple && use_lld) || ((is_linux || is_zedbsd) && !is_clang) || current_os == "aix" ||
-       current_os == "zos") {
-     # The macOS and iOS linker ld64.ldd doesn't support thin archive without
-     # symbol table, gcc on linux also throws the error `archive has no index`.
---- a/build/config/compiler/compiler.gni
-+++ b/build/config/compiler/compiler.gni
-@@ -89,7 +89,7 @@
-   # Chrome's clang. crbug.com/1033839
-   use_thin_lto =
-       is_cfi || (is_clang && is_official_build && chrome_pgo_phase != 1 &&
--                 (is_linux || is_win || (is_apple && use_lld) ||
-+                 ((is_linux || is_zedbsd) || is_win || (is_apple && use_lld) ||
-                   (is_android && target_os != "chromeos") ||
-                   (is_chromeos && is_chromeos_device)))
- }
-@@ -296,7 +296,7 @@
-   # by binary size; disabling frame ptrs for ARM32 builds can save
-   # several MB.
-   enable_frame_pointers = current_cpu != "arm"
--} else if (is_apple || is_linux) {
-+} else if (is_apple || (is_linux || is_zedbsd)) {
-   enable_frame_pointers = true
- } else if (is_win) {
-   # 64-bit Windows ABI doesn't support frame pointers.
-@@ -364,7 +364,7 @@
- # deterministic builds to reduce compile times, so this is less relevant for
- # official builders.
- strip_absolute_paths_from_debug_symbols_default =
--    is_android || is_fuchsia || (is_win && use_lld) || is_linux ||
-+    is_android || is_fuchsia || (is_win && use_lld) || (is_linux || is_zedbsd) ||
-     is_chromeos || (is_apple && !enable_dsyms)
- 
- # If the platform uses stripped absolute paths by default, then we don't expose
 --- a/build/config/compiler_cpu_abi.gn
 +++ b/build/config/compiler_cpu_abi.gn
 @@ -48,7 +48,18 @@
@@ -301,19 +183,18 @@
      } else {
 --- a/build/config/linux/BUILD.gn
 +++ b/build/config/linux/BUILD.gn
-@@ -40,7 +40,8 @@
+@@ -40,7 +40,7 @@
    }
  
    if ((!is_chromeos || default_toolchain != "//build/toolchain/cros:target") &&
 -      (!use_custom_libcxx || current_cpu == "mipsel")) {
-+      (!use_custom_libcxx || current_cpu == "mipsel") &&
-+      !(is_zedbsd)) {
++      (!use_custom_libcxx || current_cpu == "mipsel") && !is_zedbsd) {
      libs = [ "atomic" ]
    }
  }
 --- a/build/config/linux/dri/BUILD.gn
 +++ b/build/config/linux/dri/BUILD.gn
-@@ -1,18 +1 @@
+@@ -1,18 +1,2 @@
 -# Copyright 2017 The Chromium Authors
 -# Use of this source code is governed by a BSD-style license that can be
 -# found in the LICENSE file.
@@ -331,8 +212,8 @@
 -                                   ],
 -                               "string")
 -  defines = [ "DRI_DRIVER_DIR=\"$dri_driver_dir\"" ]
--}
-+config("dri") {}
++config("dri") {
+ }
 --- a/build/config/rust.gni
 +++ b/build/config/rust.gni
 @@ -228,7 +228,14 @@
@@ -351,45 +232,24 @@
    if (current_cpu == "arm64") {
      rust_abi_target = "aarch64-unknown-linux-gnu"
    } else if (current_cpu == "x86") {
---- a/build/config/sanitizers/sanitizers.gni
-+++ b/build/config/sanitizers/sanitizers.gni
-@@ -177,7 +177,7 @@
-   # initialization code; targets created specifically for fuzztests alone
-   # would not normally be disabled by a setting of 'false' here.
-   register_fuzztests_in_test_suites =
--      is_linux || is_mac || is_win || use_libfuzzer || use_centipede ||
-+      (is_linux || is_zedbsd) || is_mac || is_win || use_libfuzzer || use_centipede ||
-       use_external_fuzzing_engine
- }
- 
 --- a/build/config/ui.gni
 +++ b/build/config/ui.gni
-@@ -24,12 +24,12 @@
+@@ -24,12 +24,13 @@
  declare_args() {
    # Indicates if Aura is enabled. Aura is a low-level windowing library, sort
    # of a replacement for GDI or GTK.
 -  use_aura = is_win || is_linux || is_chromeos || is_fuchsia
-+  use_aura = is_win || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia
++  use_aura = is_win || is_linux || is_chromeos || is_fuchsia || is_zedbsd
  }
  
  declare_args() {
    # True means the UI is built using the "views" framework.
 -  toolkit_views = is_mac || is_win || is_linux || is_chromeos || is_fuchsia
-+  toolkit_views = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia
++  toolkit_views =
++      is_mac || is_win || is_linux || is_chromeos || is_fuchsia || is_zedbsd
  
    use_glib = is_linux && !is_castos &&
               # Avoid the need for glib when Android is building things via
---- a/build/modules/BUILD.gn
-+++ b/build/modules/BUILD.gn
-@@ -101,7 +101,7 @@
-     extra_headers += [ ":ios_sysroot(${default_toolchain})" ]
-   } else if (is_mac && use_system_xcode) {
-     extra_headers += [ ":mac_sysroot(${default_toolchain})" ]
--  } else if (is_linux || is_mac || is_android || is_chromeos) {
-+  } else if ((is_linux || is_zedbsd) || is_mac || is_android || is_chromeos) {
-     root_include_dir = "usr/include"
-   } else if (is_fuchsia) {
-     root_include_dir = "include"
 --- a/build/rust/gni_impl/rustc_print_cfg.py
 +++ b/build/rust/gni_impl/rustc_print_cfg.py
 @@ -34,10 +34,18 @@
@@ -436,7 +296,7 @@
  s390x-unknown-linux-gnu
 --- /dev/null
 +++ b/build/rust/x86_64-unknown-zedbsd.json
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,42 @@
 +{
 +  "abi-return-struct-as-int": true,
 +  "arch": "x86_64",
@@ -477,7 +337,6 @@
 +    "unix"
 +  ],
 +  "target-pointer-width": 64,
-+  "linker": "/home/awe/zedBSD/build/x86_64/packages/toolchain/bin/zedbsd-clang",
 +  "tls-model": "global-dynamic"
 +}
 \ No newline at end of file
@@ -494,80 +353,6 @@
 +    current_os = "zedbsd"
 +  }
 +}
---- a/build_overrides/partition_alloc.gni
-+++ b/build_overrides/partition_alloc.gni
-@@ -73,7 +73,7 @@
- #   non-universal symbol wrapping), and has not been validated on others.
- # - Windows: debug CRT is not compatible, see below.
- _disable_partition_alloc_everywhere =
--    (!is_linux && is_component_build) || (is_win && is_debug)
-+    (!(is_linux || is_zedbsd) && is_component_build) || (is_win && is_debug)
- 
- use_allocator_shim_default = true  # Updated below:
- 
---- a/build_overrides/pdfium.gni
-+++ b/build_overrides/pdfium.gni
-@@ -11,7 +11,7 @@
- pdf_enable_v8_override = true
- 
- # Enable XFA forms in Chromium builds on a per-platform basis
--pdf_enable_xfa_override = is_chromeos || is_linux || is_mac || is_win
-+pdf_enable_xfa_override = is_chromeos || (is_linux || is_zedbsd) || is_mac || is_win
- 
- # Build PDFium either using the bundled FreeType, or using a third-party
- # FreeType, configured by the embedder in //build/config/freetype.
---- a/buildtools/third_party/libc++abi/BUILD.gn
-+++ b/buildtools/third_party/libc++abi/BUILD.gn
-@@ -59,7 +59,8 @@
- 
-   defines = [ "LIBCXXABI_SILENT_TERMINATE" ]
- 
--  if (is_linux || is_android) {
-+  if (is_linux ||
-+      is_android) {
-     defines += [ "_LIBCXXABI_USE_FUTEX" ]
-   }
- 
---- a/testing/libfuzzer/tests/BUILD.gn
-+++ b/testing/libfuzzer/tests/BUILD.gn
-@@ -53,7 +53,7 @@
- 
-     # The __generate targets (the wrappers) are only generated on Linux, Mac,
-     # and Windows (see _building_fuzztest_fuzzer in testing/test.gni).
--    if (use_fuzztest_wrapper && (is_linux || is_mac || is_win)) {
-+    if (use_fuzztest_wrapper && ((is_linux || is_zedbsd) || is_mac || is_win)) {
-       data_deps += [
-         ":fuzztest_crashing_fuzzer_FuzzTestCrashing_FastCrash_fuzzer__generate",
-         ":fuzztest_proto_crashing_fuzzer_FuzzTestProtoCrashing_FastCrash_fuzzer__generate",
---- a/testing/test.gni
-+++ b/testing/test.gni
-@@ -154,7 +154,7 @@
- 
-   _building_fuzztest_fuzzer =
-       defined(invoker.fuzztests) && use_fuzzing_engine &&
--      (is_linux || is_mac || is_win)
-+      ((is_linux || is_zedbsd) || is_mac || is_win)
- 
-   target(invoker.target_type, target_name) {
-     forward_variables_from(invoker,
---- a/tools/gn/src/gn/format_test_data/016.gn
-+++ b/tools/gn/src/gn/format_test_data/016.gn
-@@ -1 +1 @@
--something = !is_win && is_linux || is_mac && !(is_freebsd || is_ios)
-+something = !is_win && (is_linux || is_zedbsd) || is_mac && !(is_freebsd || is_ios)
---- a/tools/gn/src/gn/format_test_data/057.gn
-+++ b/tools/gn/src/gn/format_test_data/057.gn
-@@ -12,8 +12,8 @@
-     (is_java_library && defined(invoker.supports_android) &&
-       invoker.supports_android))
- 
--enable_one_click_signin = is_win || is_mac || (is_linux && !is_chromeos)
--enable_one_click_signin = (is_linux && !is_chromeos) || is_win || is_mac
-+enable_one_click_signin = is_win || is_mac || ((is_linux || is_zedbsd) && !is_chromeos)
-+enable_one_click_signin = ((is_linux || is_zedbsd) && !is_chromeos) || is_win || is_mac
- 
- x = c || (a&&b)
- x = (a&&b) || c
 --- a/tools/grit/grit_args.gni
 +++ b/tools/grit/grit_args.gni
 @@ -14,7 +14,7 @@
@@ -575,42 +360,10 @@
  # to (most) desktop platforms.
  assert(toolkit_views ==
 -       (is_chromeos || is_fuchsia || is_linux || is_mac || is_win))
-+       (is_chromeos || is_fuchsia || (is_linux || is_zedbsd) || is_mac || is_win))
++       (is_chromeos || is_fuchsia || is_linux || is_mac || is_win || is_zedbsd))
  
  # Variables that are passed to grit with the -D flag.
  
---- a/tools/ipc_fuzzer/ipc_fuzzer.gni
-+++ b/tools/ipc_fuzzer/ipc_fuzzer.gni
-@@ -12,6 +12,6 @@
-   # Currently only controls whether a mojo JS dump is produced.
-   enable_ipc_fuzzer = is_clang && !is_component_build && !is_official_build &&
-                       !using_sanitizer &&
--                      ((is_linux && !is_castos) || is_chromeos || is_mac ||
-+                      (((is_linux || is_zedbsd) && !is_castos) || is_chromeos || is_mac ||
-                        is_win) && !use_ozone
- }
---- a/tools/memory/partition_allocator/BUILD.gn
-+++ b/tools/memory/partition_allocator/BUILD.gn
-@@ -6,7 +6,7 @@
- 
- # Only support x86_64 Linux as the system calls used are Linux-specific. No
- # point in building this if PartitionAlloc is not the allocator used.
--_tcache_tool_supported = ((target_cpu == "x64" && is_linux) || is_mac) &&
-+_tcache_tool_supported = ((target_cpu == "x64" && (is_linux || is_zedbsd)) || is_mac) &&
-                          use_partition_alloc_as_malloc
- 
- if (_tcache_tool_supported) {
---- a/tools/perf/BUILD.gn
-+++ b/tools/perf/BUILD.gn
-@@ -24,7 +24,7 @@
-       "//build/config/clang:llvm-symbolizer_data($host_toolchain)",
-       "//tools/perf/chrome_telemetry_build:telemetry_chrome_test",
-     ]
--    if (is_linux || is_mac || is_win) {
-+    if ((is_linux || is_zedbsd) || is_mac || is_win) {
-       data_deps += [ "//chrome/test/chromedriver:chromedriver_server" ]
-     }
-   }
 --- a/tools/perf/chrome_telemetry_build/BUILD.gn
 +++ b/tools/perf/chrome_telemetry_build/BUILD.gn
 @@ -192,7 +192,7 @@
