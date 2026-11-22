@@ -145,6 +145,7 @@ KEILAND_SOURCES := \
 	userland/desktop/wayland/bluetooth-shell.c \
 	userland/desktop/wayland/audio-stream.c \
 	userland/desktop/wayland/bluetooth-ask.c \
+	userland/desktop/wayland/admin-ask.c \
 	userland/desktop/wayland/bluetooth-bar.c \
 	userland/desktop/wayland/status-panel.c \
 	userland/desktop/wayland/machine-shell.c \

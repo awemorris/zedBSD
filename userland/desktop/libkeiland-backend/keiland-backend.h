@@ -34,6 +34,7 @@
 
 struct pollfd;
 struct kl_backend_input_caps;
+struct kl_backend_admin_answer;
 
 /*
  * The revision of this interface.  The backend is a static library built
@@ -76,6 +77,7 @@ struct kl_backend_host {
 	void (*power_button)(void *data, unsigned button);
 	void (*lid_changed)(void *data, unsigned open);
 	void (*keys_changed)(void *data);
+	void (*session_admin)(void *data, struct kl_backend_admin_answer *answer);
 };
 
 /*
@@ -2164,6 +2166,106 @@ const char *kl_backend_session_reason(const struct kl_backend *backend);
  * (1), so that it can be locked and logged out through it, or not (0).
  */
 int kl_backend_session_managed(const struct kl_backend *backend);
+
+/*
+ * The admin actions (a program the system's definition names, run as root
+ * once the person at the screen allowed it; the session manager's ADMIN
+ * lines): the compositor asks the session's manager, shows the
+ * dialog the manager asks for, and passes the program's streams on.
+ *
+ * kl_backend_session_admin_ask asks for the action (ADMIN ASK) under id,
+ * the compositor's own number of the request (1 to 4294967295), for the
+ * client numbered client, in the desktop's locale ("ll", "ll_CC" or
+ * "ll_CC.UTF-8"; NULL or empty for none), with the streams the program is
+ * given (KL_BACKEND_ADMIN_INPUT, _OUTPUT, _ERROR), the action's name and
+ * its words (joined by one space each; NULL or empty for none).  The
+ * answer is one session_admin: SHOW (the dialog: title, message, how, and
+ * whether its ALLOW lends a connection), CONNECT (a permission kept for a
+ * program of the desktop: ALLOW with a connection, without the dialog),
+ * STARTED, REFUSED or FAILED.
+ *
+ * kl_backend_session_admin_allow says the person allowed the dialog of
+ * id, or answers a CONNECT; connection is the descriptor lent to a
+ * program of the desktop (sent with the line, still the caller's to close
+ * afterwards), or -1.  The answer is STARTED or FAILED.
+ *
+ * kl_backend_session_admin_cancel says the dialog of id went without an
+ * allow (no answer), and kl_backend_session_admin_forget that the client
+ * numbered client went (what it was allowed goes; no answer).
+ *
+ * One answer is awaited at a time: ask and allow return EBUSY while one
+ * is; the other requests of the session do not wait for it, nor it for
+ * them.  An answer that has not come within KL_BACKEND_ADMIN_WAIT_MS is
+ * given up: session_admin(FAILED, ETIMEDOUT) comes, and the late answer is
+ * cleaned up when it comes (a dialog or a connection asked for is
+ * cancelled, a program's streams are closed).  When the manager goes, an
+ * awaited answer comes as FAILED with EPIPE.  Each returns 0, EINVAL,
+ * ENOTSUP (the login screen, no session manager, or another operating
+ * system), EBUSY, or the error of sending.
+ */
+#define KL_BACKEND_ADMIN_WAIT_MS	10000U
+
+/* The streams of an action's program, as ASK asks for them and STARTED gives them. */
+#define KL_BACKEND_ADMIN_INPUT		0x1U
+#define KL_BACKEND_ADMIN_OUTPUT		0x2U
+#define KL_BACKEND_ADMIN_ERROR		0x4U
+#define KL_BACKEND_ADMIN_STATUS		0x8U
+
+/* What a session_admin answer is. */
+#define KL_BACKEND_ADMIN_SHOW		1U
+#define KL_BACKEND_ADMIN_CONNECT	2U
+#define KL_BACKEND_ADMIN_STARTED	3U
+#define KL_BACKEND_ADMIN_REFUSED	4U
+#define KL_BACKEND_ADMIN_FAILED		5U
+
+/* How a SHOW asks the person to confirm. */
+#define KL_BACKEND_ADMIN_CONSENT	1U
+#define KL_BACKEND_ADMIN_PASSWORD_SELF	2U
+#define KL_BACKEND_ADMIN_PASSWORD_ADMIN	3U
+
+/* Why a REFUSED refused: the manager's words, and a word not known here. */
+#define KL_BACKEND_ADMIN_UNKNOWN	1U
+#define KL_BACKEND_ADMIN_INVALID	2U
+#define KL_BACKEND_ADMIN_NOT_ALLOWED	3U
+#define KL_BACKEND_ADMIN_METHOD		4U
+#define KL_BACKEND_ADMIN_BUSY		5U
+#define KL_BACKEND_ADMIN_LOCKED		6U
+#define KL_BACKEND_ADMIN_OTHER		7U
+
+/* The most descriptors a STARTED carries (input, output, error, status), and the room of a dialog's text with its NUL. */
+#define KL_BACKEND_ADMIN_DESCRIPTORS	4U
+#define KL_BACKEND_ADMIN_TEXT		512U
+
+/*
+ * One answer of the manager's to an admin request (session_admin).
+ *
+ * kind is a KL_BACKEND_ADMIN_* answer and id the request's number.  A
+ * SHOW has how, display (1 when the ALLOW is to lend a connection), and
+ * the title and message to show (UTF-8, the manager's choice for the
+ * locale); a REFUSED has reason; a FAILED has error (an errno value).  A
+ * STARTED has bits (the streams it carries, KL_BACKEND_ADMIN_* with the
+ * status always) and their descriptors in the order of the bits, count of
+ * them: the callback owns them and sets each one it does not keep to -1;
+ * the backend closes what is left when the callback returns.
+ */
+struct kl_backend_admin_answer {
+	unsigned kind;
+	uint32_t id;
+	unsigned how;
+	unsigned display;
+	const char *title;
+	const char *message;
+	unsigned reason;
+	int error;
+	unsigned bits;
+	int descriptors[KL_BACKEND_ADMIN_DESCRIPTORS];
+	unsigned count;
+};
+
+int kl_backend_session_admin_ask(struct kl_backend *backend, uint32_t id, uint64_t client, const char *locale, unsigned streams, const char *action, const char *words);
+int kl_backend_session_admin_allow(struct kl_backend *backend, uint32_t id, int connection);
+int kl_backend_session_admin_cancel(struct kl_backend *backend, uint32_t id);
+int kl_backend_session_admin_forget(struct kl_backend *backend, uint64_t client);
 
 
 /*

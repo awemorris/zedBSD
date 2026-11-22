@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 28; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 37; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -29,6 +29,8 @@
  *   request 13 get_displays(new_id kl_system_displays_v1) since version 18 (ws113-p005)
  *   request 14 get_machine(new_id kl_system_machine_v1)   since version 21 (ws188-p002)
  *   request 15 get_bluetooth(new_id kl_system_bluetooth_v1) since version 23 (ws143-p006)
+ *   request 16 get_media(new_id kl_system_media_v1)       since version 29
+ *   request 17 get_admin(new_id kl_system_admin_v1)       since version 37
  *   event   0 capabilities(uint bits)              sent when it is bound
  *
  * kl_system_settings_v1
@@ -369,6 +371,33 @@
  *   one, nor when the client's queue has no room for a whole one: a sample is sent whole or not at all, and one
  *   skipped is not owed (the next counters cover it).
  *
+ * kl_system_admin_v1 (since version 37: an admin action, a program the
+ * system's definition in /etc/keiland/admin.d names, run as root once the
+ * person at the screen allowed it in the compositor's own dialog)
+ *   request 0 destroy                                  the requests not answered yet are withdrawn
+ *   request 1 run(uint request, string action, string words, uint streams, object wl_surface)
+ *                                                      asks for the action with its words (joined by
+ *                                                      one space each, empty for none) and the
+ *                                                      streams the program is given
+ *                                                      (KL_SYSTEM_ADMIN_INPUT, _OUTPUT, _ERROR); the
+ *                                                      surface is the window the person works in
+ *   request 2 withdraw(uint request)                   takes the request back before its answer
+ *   event   0 asking(uint request)                     the dialog shows (not sent when a permission
+ *                                                      the person gave before is kept)
+ *   event   1 stream(uint request, uint which, fd)     one of the program's streams: the input's
+ *                                                      write end (always, the program's life line:
+ *                                                      it stops when it reads its end), the output's
+ *                                                      and the error's read ends (when asked for),
+ *                                                      and the status's read end
+ *                                                      (KL_SYSTEM_ADMIN_STATUS: one line, "EXIT n"
+ *                                                      or "SIGNAL n", when the program ended)
+ *   event   2 started(uint request)                    after the streams: the program runs
+ *   event   3 refused(uint request, uint reason)       the program does not run (KL_SYSTEM_ADMIN_*)
+ *   Every run is answered once, by started or refused, unless it was
+ *   withdrawn first.  One request is asked at a time on the whole desktop;
+ *   another is refused busy.  Only the client whose window has the
+ *   keyboard (or gets it within a few seconds) may ask.
+ *
  * Every object hears its first state and a done when it is made, and each
  * change afterwards as the changed events and a done.
  */
@@ -378,7 +407,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION 36U
+#define KL_SYSTEM_MANAGER_VERSION 37U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -1109,5 +1138,52 @@
 #define KL_SYSTEM_MEDIA_EVENT_DONE 1U
 #define KL_SYSTEM_MEDIA_EVENT_CHANGED 2U
 #define KL_SYSTEM_MEDIA_PATHS_MAX 32768U
+
+/* Since manager version 37, the admin actions: the manager's get_admin, its capability and the object's name. */
+#define KL_SYSTEM_SINCE_ADMIN			37U
+#define KL_SYSTEM_MANAGER_GET_ADMIN		17U
+#define KL_SYSTEM_CAPABILITY_ELEVATE		0x40000U
+#define KL_SYSTEM_ADMIN_NAME			"kl_system_admin_v1"
+
+/* kl_system_admin_v1's requests and events. */
+#define KL_SYSTEM_ADMIN_DESTROY			0U
+#define KL_SYSTEM_ADMIN_RUN			1U
+#define KL_SYSTEM_ADMIN_WITHDRAW		2U
+#define KL_SYSTEM_ADMIN_EVENT_ASKING		0U
+#define KL_SYSTEM_ADMIN_EVENT_STREAM		1U
+#define KL_SYSTEM_ADMIN_EVENT_STARTED		2U
+#define KL_SYSTEM_ADMIN_EVENT_REFUSED		3U
+
+/*
+ * The program's streams: the bits run asks for (keiland_process.h's
+ * KL_PROCESS_INPUT, _OUTPUT and _ERROR), and which a stream event carries
+ * (the status besides).
+ */
+#define KL_SYSTEM_ADMIN_INPUT			0x1U
+#define KL_SYSTEM_ADMIN_OUTPUT			0x2U
+#define KL_SYSTEM_ADMIN_ERROR			0x4U
+#define KL_SYSTEM_ADMIN_STATUS			0x8U
+#define KL_SYSTEM_ADMIN_STREAMS			0x7U
+
+/* Why an action did not run (refused's reason; keiland_process.h's KL_ADMIN_* values). */
+#define KL_SYSTEM_ADMIN_NO			1U	/* the person said no, or closed the dialog */
+#define KL_SYSTEM_ADMIN_TIMEOUT			2U	/* nobody answered in time */
+#define KL_SYSTEM_ADMIN_UNKNOWN			3U	/* no such action, or words it does not list */
+#define KL_SYSTEM_ADMIN_NOT_ALLOWED		4U	/* this user may not run it */
+#define KL_SYSTEM_ADMIN_BUSY			5U	/* another request or dialog is under way */
+#define KL_SYSTEM_ADMIN_NOT_FRONT		6U	/* the window is not the one the person works in */
+#define KL_SYSTEM_ADMIN_LOCKED			7U	/* the screen locked */
+#define KL_SYSTEM_ADMIN_FAILED			8U	/* the program could not be started */
+#define KL_SYSTEM_ADMIN_UNSUPPORTED		9U	/* no session manager runs actions here, or the dialog cannot show */
+#define KL_SYSTEM_ADMIN_METHOD			10U	/* the action asks for a way of confirming not made yet */
+
+/*
+ * The bounds of run's strings, without their NULs: an action's name, one
+ * word, the words joined, and how many words.
+ */
+#define KL_SYSTEM_ADMIN_ACTION_MAX		32U
+#define KL_SYSTEM_ADMIN_WORD_MAX		64U
+#define KL_SYSTEM_ADMIN_WORDS_MAX		256U
+#define KL_SYSTEM_ADMIN_WORD_COUNT		8U
 
 #endif

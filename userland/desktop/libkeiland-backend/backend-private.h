@@ -23,6 +23,9 @@
 /* The bytes kept of the session manager's lines not read whole yet. */
 #define KL_BACKEND_SESSION_LINE	512U
 
+/* The descriptors received from the session manager and kept for the lines that take them (two programs' streams). */
+#define KL_BACKEND_ADMIN_HELD	8U
+
 /*
  * The evdev nodes (/dev/input/eventN) remembered as refusing to open: N
  * below 64 times KL_BACKEND_INPUT_REFUSED_WORDS.
@@ -76,6 +79,24 @@ struct kl_backend {
 	unsigned session_methods;
 	unsigned session_key_removed;
 	struct kl_backend_key_owner session_key_owner;
+	/*
+	 * The admin requests (zedBSD's session-zedbsd.c): admin_awaited is the
+	 * request whose answer is awaited (0 for none), admin_due_ms when that
+	 * wait ends (0 until the first tick after the request starts it);
+	 * admin_title and admin_message hold the dialog's texts that came for
+	 * it before its SHOW (empty otherwise).  admin_held keeps the
+	 * descriptors that came with the manager's lines, in their order, until
+	 * a STARTED takes them (admin_held_count of them; the others are closed
+	 * once no line is left half read); admin_lost is set when some did not
+	 * fit (the next STARTED fails).
+	 */
+	uint32_t admin_awaited;
+	uint64_t admin_due_ms;
+	char admin_title[KL_BACKEND_ADMIN_TEXT];
+	char admin_message[KL_BACKEND_ADMIN_TEXT];
+	int admin_held[KL_BACKEND_ADMIN_HELD];
+	unsigned admin_held_count;
+	unsigned admin_lost;
 	int events_descriptor;
 	/*
 	 * A power button's press whose release is awaited (zedBSD's
