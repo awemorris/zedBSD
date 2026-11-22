@@ -349,6 +349,16 @@ struct inode {
 	 */
 	unsigned i_exec_text;
 	unsigned i_write_access;
+
+	/*
+	 * Nonzero once a store through a shared mapping has changed the
+	 * content and no mode change has set the set-id bits since.  A store
+	 * has no credential to judge it by, so while this holds, a write-back
+	 * of the page cache clears the set-id bits.  The VM sets it when it
+	 * learns of such a store, under no lock; a mode change with set-id
+	 * bits clears it under i_io_lock, as a write-back reads it.
+	 */
+	atomic_uint_t i_mapped_store;
 	struct mutex i_lock;
 	nlink_t i_linkcount;
 	mode_t i_mode;
