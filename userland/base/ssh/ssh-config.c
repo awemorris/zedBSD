@@ -45,6 +45,9 @@
 #define CONFIG_DEFAULT_USER_KNOWN	"~/.ssh/known_hosts"
 #define CONFIG_DEFAULT_GLOBAL_KNOWN	"/etc/ssh/ssh_known_hosts"
 
+/* sshd's MaxSessions default (sshd_config(5) of OpenSSH 10.5p1). */
+#define CONFIG_DEFAULT_MAX_SESSIONS	10U
+
 /* What the value of a keyword is, for the readers of the keyword tables. */
 #define CONFIG_KIND_ACTED	0
 #define CONFIG_KIND_MATCH	1
@@ -83,7 +86,7 @@ enum sshd_keyword_id {
 	SSHD_KW_NONE = 17
 };
 
-/* The numbers of ssh_config keywords that are acted on; each below 15 is also the bit of ssh_config.set_mask. */
+/* The numbers of ssh_config keywords that are acted on; each below 18 is also the bit of ssh_config.set_mask. */
 enum ssh_keyword_id {
 	SSH_KW_USER = 0,
 	SSH_KW_HOST_NAME = 1,
@@ -100,8 +103,11 @@ enum ssh_keyword_id {
 	SSH_KW_PASSWORD = 12,
 	SSH_KW_PUBKEY = 13,
 	SSH_KW_LOG_LEVEL = 14,
-	SSH_KW_HOST = 15,
-	SSH_KW_NONE = 16
+	SSH_KW_FORWARD_X11 = 15,
+	SSH_KW_FORWARD_X11_TRUSTED = 16,
+	SSH_KW_FORWARD_X11_TIMEOUT = 17,
+	SSH_KW_HOST = 18,
+	SSH_KW_NONE = 19
 };
 
 /*
@@ -254,11 +260,12 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "PasswordAuthentication", CONFIG_KIND_ACTED, SSH_KW_PASSWORD },
 	{ "PubkeyAuthentication", CONFIG_KIND_ACTED, SSH_KW_PUBKEY },
 	{ "LogLevel", CONFIG_KIND_ACTED, SSH_KW_LOG_LEVEL },
+	{ "ForwardX11", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11 },
+	{ "ForwardX11Trusted", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11_TRUSTED },
+	{ "ForwardX11Timeout", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11_TIMEOUT },
 	{ "VerifyHostKeyDNS", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "HashKnownHosts", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "ForwardAgent", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
-	{ "ForwardX11", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
-	{ "ForwardX11Trusted", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "Compression", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "AddKeysToAgent", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "GSSAPIAuthentication", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
@@ -415,7 +422,7 @@ sshd_config_defaults(
 	/* The limits of a login: tries, time, sessions and unauthenticated connections. */
 	config->max_auth_tries = 6;
 	config->login_grace_time = 120;
-	config->max_sessions = SSH_CHANNEL_MAX;
+	config->max_sessions = CONFIG_DEFAULT_MAX_SESSIONS;
 	config->max_startups = 10;
 
 	/* Where a user's keys are read from, and the check of the file's permissions. */
@@ -661,6 +668,14 @@ ssh_config_defaults(
 	/* The INFO level. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_LOG_LEVEL)) == 0)
 		config->log_level = 1;
+
+	/* No X11 forwarding, untrusted when it is asked for, and no time limit on it. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_FORWARD_X11)) == 0)
+		config->forward_x11 = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_FORWARD_X11_TRUSTED)) == 0)
+		config->forward_x11_trusted = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_FORWARD_X11_TIMEOUT)) == 0)
+		config->forward_x11_timeout = 0;
 }
 
 /*
@@ -2155,6 +2170,12 @@ ssh_value(
 		if (status == 0)
 			target->log_level = value;
 		return status;
+	case SSH_KW_FORWARD_X11:
+		return config_value_bool(parsed, &target->forward_x11, what);
+	case SSH_KW_FORWARD_X11_TRUSTED:
+		return config_value_bool(parsed, &target->forward_x11_trusted, what);
+	case SSH_KW_FORWARD_X11_TIMEOUT:
+		return config_value_time(parsed, &target->forward_x11_timeout, what);
 	default:
 		break;
 	}

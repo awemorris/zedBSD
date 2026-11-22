@@ -12,10 +12,13 @@
  * What a channel is connected to (a shell, a command, a terminal, the
  * user's standard streams) belongs to the programs.
  *
- * Channel types: "session" (RFC 4254 6) is the only type opened or
- * accepted.  An open of another type ("direct-tcpip", "x11",
- * "auth-agent@openssh.com", ...) is answered with
- * SSH_OPEN_ADMINISTRATIVELY_PROHIBITED.  Global requests are all refused
+ * Channel types: "session" (RFC 4254 6) is the only type opened, and the
+ * only type ssh_channel_accept_open (the server side) accepts.  An open
+ * of another type ("direct-tcpip", "x11", "auth-agent@openssh.com", ...)
+ * is answered with SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, unless the
+ * program reads it with ssh_channel_take_open for a type it asked the
+ * peer to open (a client takes "x11", RFC 4254 6.3.2, after its x11-req)
+ * and answers it later with ssh_channel_answer_open.  Global requests are all refused
  * (REQUEST_FAILURE when a reply is wanted), except
  * "no-more-sessions@openssh.com" (OpenSSH PROTOCOL 2.2), which the server
  * honours (REQUEST_SUCCESS when a reply is wanted).
@@ -43,7 +46,9 @@
  * and the program drops them and answers a wanted reply with FAILURE.
  *
  * Windows (RFC 4254 5.2): local_window is what the peer may still send
- * here, remote_window what this side may still send.  Data beyond the
+ * here, remote_window what this side may still send; window_size is the
+ * window this side keeps up for the channel (SSH_CHANNEL_WINDOW, or the
+ * size given to ssh_channel_take_open).  Data beyond the
  * local window or longer than the announced maximum packet is a protocol
  * error (EPROTO).  A window adjustment that would take the window past
  * 2^32 - 1 is EPROTO (5.2 says the window must not be increased above
@@ -80,8 +85,12 @@
 /* The extended data type of the standard error (RFC 4254 5.2). */
 #define SSH_EXTENDED_DATA_STDERR		1
 
-/* The most channels of one connection (OpenSSH's MaxSessions default is 10). */
-#define SSH_CHANNEL_MAX			10U
+/*
+ * The most channels of one connection: a session and 32 forwarded X11
+ * connections.  sshd limits the sessions with MaxSessions (default 10,
+ * OpenSSH's).
+ */
+#define SSH_CHANNEL_MAX			33U
 
 /* The window announced and kept up (2 MiB), and the largest data packet announced. */
 #define SSH_CHANNEL_WINDOW		(2U * 1024U * 1024U)
@@ -106,14 +115,18 @@ enum ssh_channel_state {
 	SSH_CHANNEL_OPEN = 2,
 
 	/* CLOSE was sent or received but not both; the slot is freed when both are. */
-	SSH_CHANNEL_CLOSING = 3
+	SSH_CHANNEL_CLOSING = 3,
+
+	/* The peer's CHANNEL_OPEN was taken (ssh_channel_take_open) and waits for this side's answer. */
+	SSH_CHANNEL_ANSWERING = 4
 };
 
 /*
  * One channel.
  *
  * local_id is this side's number (the slot index), remote_id the peer's.
- * remote_packet is the largest data packet the peer accepts.  The eof_
+ * remote_packet is the largest data packet the peer accepts.
+ * window_size is the local window kept up (see the top).  The eof_
  * and close_ flags say which of those messages went which way; a channel
  * whose close went both ways is freed by ssh_channel_closed.  user is the
  * program's own state for the channel (not owned here).
@@ -125,6 +138,7 @@ struct ssh_channel {
 	uint32_t local_window;
 	uint32_t remote_window;
 	uint32_t remote_packet;
+	uint32_t window_size;
 	int eof_sent;
 	int eof_received;
 	int close_sent;
@@ -220,6 +234,33 @@ int ssh_channel_open_session(struct ssh_channels *channels, struct ssh_buf *out,
 int ssh_channel_accept_open(struct ssh_channels *channels, const uint8_t *payload, size_t size, struct ssh_buf *out, struct ssh_channel **channel);
 
 /*
+ * Reads a CHANNEL_OPEN from the peer whose answer this side gives later
+ * (a client, for the type it asked the peer to open).
+ *
+ * An open of type (a NUL-terminated name) takes a free slot (state
+ * ANSWERING: the peer's id, window and packet size kept, window_size
+ * window, which must be 1 to SSH_CHANNEL_WINDOW; a packet size below 1 is
+ * EPROTO), sets *channel, and points *data (*data_size bytes, in the
+ * payload) at what follows the packet size, which belongs to the type.
+ * Nothing is appended to out until ssh_channel_answer_open.  Another
+ * type gets OPEN_FAILURE ADMINISTRATIVELY_PROHIBITED and no free slot
+ * RESOURCE_SHORTAGE, appended to out, with *channel NULL.
+ *
+ * Returns 0 (taken or refused), EINVAL (malformed, or a bad window_size),
+ * EPROTO, or the error recorded in out.
+ */
+int ssh_channel_take_open(struct ssh_channels *channels, const uint8_t *payload, size_t size, const char *type, uint32_t window_size, struct ssh_buf *out, struct ssh_channel **channel, const uint8_t **data, size_t *data_size);
+
+/*
+ * Answers an open taken by ssh_channel_take_open: accept 1 moves the
+ * channel to OPEN and appends OPEN_CONFIRMATION with its window and this
+ * side's packet size; accept 0 appends OPEN_FAILURE CONNECT_FAILED and
+ * frees the slot.  A channel not ANSWERING is EINVAL.  Returns 0, EINVAL,
+ * or the error recorded in out (the channel is then left as it was).
+ */
+int ssh_channel_answer_open(struct ssh_channels *channels, struct ssh_channel *channel, int accept, struct ssh_buf *out);
+
+/*
  * Reads OPEN_CONFIRMATION or OPEN_FAILURE for a channel this side opened
  * (the client side).  A confirmation moves it to OPEN with the peer's id,
  * window and packet size; a failure frees it and *reason receives the
@@ -258,8 +299,7 @@ size_t ssh_channel_send_room(const struct ssh_channel *channel);
 /*
  * Tells the channel that the program has consumed size received bytes
  * (written them on), and, when the local window has fallen below half of
- * SSH_CHANNEL_WINDOW, appends WINDOW_ADJUST bringing it back to
- * SSH_CHANNEL_WINDOW.  (A program that cannot pass data on yet does not
+ * window_size, appends WINDOW_ADJUST bringing it back to window_size.  (A program that cannot pass data on yet does not
  * call this, so the peer stops when the window is used up.)
  */
 void ssh_channel_consumed(struct ssh_channel *channel, size_t size, struct ssh_buf *out);

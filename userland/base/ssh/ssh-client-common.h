@@ -222,6 +222,14 @@ int ssh_client_join_command(const struct ssh_client_args *args, struct ssh_buf *
 int ssh_client_apply_args(const struct ssh_client_args *args, struct ssh_config *config, char *error);
 
 /*
+ * Refuses settings the program does not act on although ssh_config reads
+ * them: ForwardX11 yes, ForwardX11Trusted yes and a ForwardX11Timeout
+ * other than 0 (ssh forwards no X11).  Returns 0 or EINVAL with error
+ * (capacity SSH_CONFIG_ERROR_MAX) set.
+ */
+int ssh_client_check_settings(const struct ssh_config *config, char *error);
+
+/*
  * Writes the home directory (HOME, or the account's when HOME is not set)
  * into out.  Returns 0, ENOENT or ENAMETOOLONG.
  */
