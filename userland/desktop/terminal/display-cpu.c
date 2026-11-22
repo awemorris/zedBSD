@@ -141,6 +141,39 @@ terminal_display_draw(
 }
 
 /*
+ * Shows a frame painted elsewhere (width by height pixels, a row after
+ * another) in the grid's place; the next grid is painted whole, since the
+ * window no longer shows the last one.
+ *
+ * Returns 0, EAGAIN when the frame is not the size the window is shown at
+ * (the caller resizes and paints again), or an errno value.
+ */
+int
+terminal_display_page(
+	struct terminal_display *display,
+	const uint32_t *pixels,
+	uint32_t width,
+	uint32_t height)
+{
+	int error;
+
+	/* A frame of another size than the window's. */
+	if (width != display->cpu.width || height != display->cpu.height)
+		return EAGAIN;
+
+	/* The whole frame shown. */
+	display->operation = "kl_window_present";
+	error = kl_window_present(display->window, pixels, (size_t)width);
+	display->result = error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the next grid covers the page whole. */
+	display->cpu.whole = 1;
+	return 0;
+}
+
+/*
  * Waits for the frame shown last: nothing, the processor painted it
  * before it was shown.
  */

@@ -78,10 +78,10 @@ mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LI
 mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_WIN32_SOURCES)
 
-# The terminal's core and the drawing on the processor (not its Wayland, Vulkan, process or settings files).
+# The terminal's core, its settings' tab and the drawing on the processor (not its Wayland, Vulkan, process or settings files).
 set(MIKUTERM_TERMINAL_NAMES
 	run screen width search keys font render-build render-cpu display-cpu frame-timer
-	window menu tabs clipboard primary touch)
+	window menu tabs clipboard primary touch settings-page settings-key)
 list(TRANSFORM MIKUTERM_TERMINAL_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/terminal/ OUTPUT_VARIABLE MIKUTERM_TERMINAL_SOURCES)
 list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
 
@@ -158,6 +158,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/known-hosts.c
 	${MIKUTERM_DIR}/ssh-thread.c
 	${MIKUTERM_DIR}/credential.c
+	${MIKUTERM_DIR}/page.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
@@ -234,7 +235,7 @@ endforeach()
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
 target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_keiland PUBLIC mikuterm_truetype mikuterm_png)
-target_link_libraries(mikuterm_terminal PUBLIC mikuterm_keiland)
+target_link_libraries(mikuterm_terminal PUBLIC mikuterm_keiland mikuterm_ssh)
 
 # The system's libraries the program imports (each a DLL that comes with Windows, and the UCRT).
 set(MIKUTERM_SYSTEM_LIBRARIES

@@ -18,6 +18,7 @@
 #include "terminal.h"
 
 struct terminal_connector;
+struct terminal_page_program;
 
 /*
  * How a run ended: whether it failed (then operation names what failed,
@@ -48,8 +49,7 @@ struct terminal_run_result {
  * columns and rows are the grid the window opens with; timeout ends the
  * run after so many seconds (0 for none); token names the run in the log
  * lines; about is what Help > About writes on the screen (NULL for
- * nothing); copy_on_select puts the text the pointer selects on the
- * clipboard as well (0: only Edit > Copy does); input_method_menu gives
+ * nothing); input_method_menu gives
  * the Session menu Disable Input Method, for connections that cannot tell
  * when the remote side reads a password (0: no such item);
  * ambiguous_wide_key makes Alt+F11 the shortcut of View > Treat
@@ -58,7 +58,11 @@ struct terminal_run_result {
  * and F11 alone then reaches the connection as a key (0: F11, zedBSD's
  * own).  forget_passphrases gives the Session menu Forget Remembered
  * Passphrases and is called with data when it is chosen (NULL: no such
- * item).  connector
+ * item).  page is what the settings' tab needs of the program
+ * (settings-page.h; NULL: the program has no settings tab, and Shell >
+ * Settings is not there), drawn with the fonts page_font and
+ * page_fallback.  Whether a selection is copied as well is a setting
+ * the program keeps (terminal_settings_*).  connector
  * opens each tab's connection; new_window opens a new
  * window from this one (NULL: the program has none); ended is told how the
  * run ended before anything is torn down (NULL: nobody is told).  data is
@@ -81,11 +85,13 @@ struct terminal_run_options {
 	unsigned timeout;
 	const char *token;
 	const char *about;
-	int copy_on_select;
 	int input_method_menu;
 	int ambiguous_wide_key;
 	int fullscreen_alt_enter;
 	void (*forget_passphrases)(void *data);
+	const struct terminal_page_program *page;
+	const char *page_font;
+	const char *page_fallback;
 	const struct terminal_connector *connector;
 	void (*new_window)(void *data, struct kl_app *app, struct kl_window *from);
 	void (*ended)(void *data, const struct terminal_run_result *result);

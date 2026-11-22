@@ -25,6 +25,11 @@
  * clipboard.c), the font's size, fullscreen, keys for the other end,
  * clearing and resetting the screen, and a line about the terminal.
  *
+ * The settings (settings-page.c) are a tab of their own, opened by Shell >
+ * Settings (F12) or by a connection the user asked for them: a tab without
+ * a connection (run_page_connection answers nothing) whose page of
+ * widgets the drawing shows in the grid's place while it is active.
+ *
  * Every outcome is one line on standard output (ZTERM ...), which the
  * tests read; the program says how the run ended before it is torn down.
  */
@@ -32,6 +37,7 @@
 #include "run.h"
 #include "connection.h"
 #include "display.h"
+#include "settings-page.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -122,7 +128,11 @@ struct run_tab {
 	struct terminal_connection *connection;
 	uint32_t id;
 	char title[TERMINAL_TAB_TITLE];
+	int settings;
 };
+
+/* The settings tab's title. */
+#define RUN_SETTINGS_TITLE	"Settings"
 
 /*
  * The tabs, in their order, how many there are, the active one (whose grid
@@ -259,9 +269,37 @@ static int run_text_off;
 
 /*
  * Whether the text the pointer selects also goes to the clipboard, as
- * the run's options asked (the run's whole life).
+ * the settings keep it (Settings > Behavior changes it).
  */
 static int run_copy_on_select;
+
+/* The ID of the tab that was active before Shell > Settings chose the settings' tab (0: none), which the item chooses again. */
+static uint32_t run_page_from;
+
+/*
+ * The settings tab's connection: it has nothing to read, takes every key
+ * without sending it anywhere and never ends (the tab closes when the
+ * user closes it).  One for the run; it holds nothing.
+ */
+static size_t run_page_read(struct terminal_connection *connection, unsigned char *buffer, size_t size);
+static int run_page_write(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
+static int run_page_resize(struct terminal_connection *connection, unsigned columns, unsigned rows, unsigned width, unsigned height);
+static int run_page_mode(const struct terminal_connection *connection, unsigned *mode);
+static unsigned run_page_event(struct terminal_connection *connection, const struct kl_app_event *event);
+static unsigned run_page_pending(const struct terminal_connection *connection);
+static void run_page_close(struct terminal_connection *connection);
+
+/* The settings tab's connection's functions, and the connection. */
+static const struct terminal_connection_ops run_page_ops = {
+	run_page_read,
+	run_page_write,
+	run_page_resize,
+	run_page_mode,
+	run_page_event,
+	run_page_pending,
+	run_page_close
+};
+static struct terminal_connection run_page_connection = { &run_page_ops };
 
 static int run_start(const struct terminal_run_options *options, struct run_state *run);
 static int run_loop(const struct terminal_run_options *options, struct run_state *run);
@@ -313,6 +351,12 @@ static void run_text_cursor(void);
 static void run_secret_follow(struct terminal_connection *connection);
 static unsigned run_font_pixels(const struct run_state *run, unsigned pixels);
 static void run_touch_queue(unsigned kind, const struct terminal_touch_pointer *made);
+static int run_tab_settings(const struct terminal_run_options *options, struct run_state *run);
+static int run_tab_to_settings(const struct terminal_run_options *options, struct run_state *run, unsigned index);
+static int run_page_frame(struct run_state *run);
+static void run_page_copy(void);
+static void run_page_paste(void);
+static void run_copy_on_select_switch(const struct terminal_run_options *options, struct run_state *run);
 
 /*
  * Runs the terminal: opens the font, the window, the display and the first
@@ -364,7 +408,8 @@ terminal_run(
 	while (run_tab_count > 0U)
 		(void)run_tab_close(options, &run, run_tab_count - 1U);
 
-	/* The drawing before the window it draws into, then the font. */
+	/* The settings' page, the drawing before the window it draws into, then the font. */
+	terminal_page_close();
 	terminal_display_close(run_display);
 	run_display = NULL;
 	terminal_touch_close(&run_touch);
@@ -390,15 +435,14 @@ run_start(
 	unsigned pixels;
 	int status;
 
-	/* Whether a selection is copied as well. */
-	run_copy_on_select = options->copy_on_select;
-
-	/* The settings kept from the last run (the defaults when there are none). */
+	/* The settings kept from the last run (the defaults when there are none), and whether a selection is copied as well. */
 	terminal_settings_load(&settings);
 	run->ambiguous_wide = settings.ambiguous_wide;
 	run->kept_pixels = settings.font_size;
 	run->theme = settings.theme;
-	printf("ZTERM SETTINGS run=%s ambiguous_wide=%d font_size=%u theme=%u\n", options->token, run->ambiguous_wide, settings.font_size, settings.theme);
+	run_copy_on_select = settings.copy_on_select;
+	printf("ZTERM SETTINGS run=%s ambiguous_wide=%d font_size=%u theme=%u copy_on_select=%d\n", options->token, run->ambiguous_wide, settings.font_size, settings.theme,
+	       run_copy_on_select);
 
 	/* The font's size: the one given on the command line, else the one kept, else the default (ws128-p006). */
 	pixels = options->pixels;
@@ -459,6 +503,9 @@ run_start(
 	run_window.forget_item = 0;
 	if (options->forget_passphrases != NULL)
 		run_window.forget_item = 1;
+	run_window.settings_item = 0;
+	if (options->page != NULL)
+		run_window.settings_item = 1;
 	run_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
@@ -498,6 +545,7 @@ run_loop(
 	int timeout;
 	int wait;
 	int asked;
+	int moving;
 	int error;
 
 	/* One round per event: wait, read the shell, send the keys, redraw what changed. */
@@ -537,6 +585,16 @@ run_loop(
 			wait = terminal_window_frame_wait(&run_window, now);
 			if (wait < timeout)
 				timeout = wait;
+		}
+
+		/* So is a frame of the settings' page (one that moves, or one an input asked for). */
+		if (run_window.page_active) {
+			moving = terminal_page_moving();
+			if (moving) {
+				wait = terminal_window_frame_wait(&run_window, now);
+				if (wait < timeout)
+					timeout = wait;
+			}
 		}
 
 		/* A connection that still has something now (whatever events come) is not waited for. */
@@ -610,7 +668,16 @@ run_loop(
 
 			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
 			status = run_read_shell(run_tabs[index - 1U].connection, run_tabs[index - 1U].screen, ready[index - 1U]);
-			if (status != 0) {
+			if (status != 0 && (ready[index - 1U] & TERMINAL_READY_SETTINGS) != 0U) {
+				/* A connection the user asked for the settings gives its tab to them. */
+				status = run_tab_to_settings(options, run, index - 1U);
+				if (status < 0)
+					return -1;
+				if (status > 0) {
+					run->reason = "shell-exited";
+					return 0;
+				}
+			} else if (status != 0) {
 				status = run_tab_close(options, run, index - 1U);
 				if (status != 0) {
 					run->reason = "shell-exited";
@@ -689,6 +756,14 @@ run_loop(
 			run_screen->changed = 1;
 		}
 
+		/* The settings' page is drawn in the grid's place while its tab is active. */
+		if (run_window.page_active) {
+			status = run_page_frame(run);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
 		/* Nothing changed: nothing to draw. */
 		if (!run_screen->changed)
 			continue;
@@ -756,8 +831,10 @@ run_resize(
 		run_tell_size(run, run_tabs[index].connection);
 	}
 
-	/* The active grid is drawn again. */
+	/* The active grid, or the settings' page, is drawn again. */
 	run_screen->changed = 1;
+	if (run_window.page_active)
+		terminal_page_shown(&run_window);
 
 	/* Succeeded: the next frame is drawn at the new size. */
 	printf("ZTERM RESIZE run=%s columns=%u rows=%u window=%ux%u\n", options->token, run->columns, run->rows, run->width, run->height);
@@ -854,6 +931,10 @@ run_secret_follow(
 	int changed;
 	int text_off;
 	int error;
+
+	/* The settings' page asks for the text input itself while its tab is active. */
+	if (run_window.page_active)
+		return;
 
 	/* The active connection's modes; one that cannot tell them leaves the secret as it was. */
 	secret = run_secret;
@@ -972,15 +1053,23 @@ run_menu_actions(
 				return 1;
 			break;
 		case TERMINAL_ACTION_COPY:
-			/* The selected text into the terminal's clipboard. */
-			run_copy();
+			/* The selected text into the terminal's clipboard (the settings' field's while their tab is active). */
+			if (run_window.page_active)
+				run_page_copy();
+			else
+				run_copy();
 			break;
 		case TERMINAL_ACTION_PASTE:
-			/* The clipboard's text to the shell, as if typed. */
-			run_start_paste();
+			/* The clipboard's text to the shell, as if typed (into the settings' field while their tab is active). */
+			if (run_window.page_active)
+				run_page_paste();
+			else
+				run_start_paste();
 			break;
 		case TERMINAL_ACTION_SELECT_ALL:
-			/* The whole screen is selected until a key is typed. */
+			/* The whole screen is selected until a key is typed (not the settings' page). */
+			if (run_window.page_active)
+				break;
 			run_screen->selected = 1;
 			run_screen->changed = 1;
 			break;
@@ -1035,16 +1124,19 @@ run_menu_actions(
 			run_ambiguous_wide(options, run);
 			break;
 		case TERMINAL_ACTION_FIND:
-			/* The search bar opens with the text looked for last (ws128-p006). */
-			run_find(0);
+			/* The search bar opens with the text looked for last; the settings' page has none. */
+			if (!run_window.page_active)
+				run_find(0);
 			break;
 		case TERMINAL_ACTION_FIND_NEXT:
 			/* The next older match. */
-			run_find(1);
+			if (!run_window.page_active)
+				run_find(1);
 			break;
 		case TERMINAL_ACTION_FIND_PREVIOUS:
 			/* The next newer match. */
-			run_find(-1);
+			if (!run_window.page_active)
+				run_find(-1);
 			break;
 		case TERMINAL_ACTION_THEME_DARK:
 			run_theme(options, run, TERMINAL_THEME_DARK);
@@ -1069,6 +1161,14 @@ run_menu_actions(
 			if (options->forget_passphrases != NULL)
 				options->forget_passphrases(options->data);
 			break;
+		case TERMINAL_ACTION_SETTINGS:
+			/* The settings' tab, opened or chosen (a program without them has none). */
+			status = run_tab_settings(options, run);
+			break;
+		case TERMINAL_ACTION_COPY_ON_SELECT:
+			/* A selection copied as well, or not, from now on and kept for the next run. */
+			run_copy_on_select_switch(options, run);
+			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
 			if (options->about != NULL)
@@ -1082,6 +1182,10 @@ run_menu_actions(
 		/* A failed action ends the terminal. */
 		if (status != 0)
 			return -1;
+
+		/* The settings' page shows what the action changed. */
+		if (run_window.page_active)
+			terminal_page_shown(&run_window);
 
 		/* The log line the tests read. */
 		printf("ZTERM ACTION run=%s action=%u\n", options->token, action);
@@ -1245,6 +1349,7 @@ run_save_settings(
 	settings.ambiguous_wide = run->ambiguous_wide;
 	settings.font_size = run->kept_pixels;
 	settings.theme = run->theme;
+	settings.copy_on_select = run_copy_on_select;
 
 	/* The settings file keeps them. */
 	error = terminal_settings_save(&settings);
@@ -1523,6 +1628,15 @@ run_tab_switch(
 	run_active = index;
 	run_screen = run_tabs[index].screen;
 	run->connection = run_tabs[index].connection;
+
+	/* The settings' tab takes the window's input; a grid's tab gets the text input back as its connection left it. */
+	if (run_tabs[index].settings) {
+		run_window.page_active = 1;
+		terminal_page_shown(&run_window);
+	} else if (run_window.page_active) {
+		run_window.page_active = 0;
+		kl_window_text_input(run_window.kui, !run_text_off);
+	}
 
 	/* The keys not yet sent belonged to the tab before; its grid is drawn, without the other tab's search. */
 	run_window.input_length = 0;
@@ -2581,4 +2695,359 @@ run_font_pixels(
 
 	/* Reports the size drawn at. */
 	return drawn;
+}
+
+/*
+ * Opens the settings' tab (Shell > Settings), or chooses it when it is
+ * open; chosen again on it, the item goes back to the tab it came from.
+ * A program without the settings, or a full window, has none.  Returns 0,
+ * or -1 with errno set when memory runs out.
+ */
+static int
+run_tab_settings(
+	const struct terminal_run_options *options,
+	struct run_state *run)
+{
+	struct run_tab *tab;
+	struct terminal_screen *screen;
+	unsigned index;
+	int found;
+	int error;
+
+	/* A program without the settings has no such tab. */
+	if (options->page == NULL)
+		return 0;
+
+	/* On the settings' tab, the tab it came from, when it is still there. */
+	if (run_tabs[run_active].settings) {
+		found = run_tab_find(run_page_from);
+		if (found >= 0)
+			run_tab_switch(run, (unsigned)found);
+		return 0;
+	}
+
+	/* The settings' tab that is open is chosen. */
+	for (index = 0U; index < run_tab_count; index++) {
+		if (run_tabs[index].settings) {
+			run_page_from = run_tabs[run_active].id;
+			run_tab_switch(run, index);
+			return 0;
+		}
+	}
+
+	/* A full window has no new tab. */
+	if (run_tab_count == TERMINAL_TABS)
+		return 0;
+
+	/* The page, made the first time; without memory for it there is no tab. */
+	error = terminal_page_open(options->page, options->page_font, options->page_fallback);
+	if (error != 0) {
+		printf("ZTERM SETTINGS none error=%d\n", error);
+		fflush(stdout);
+		return 0;
+	}
+
+	/* The tab's grid, which is never shown (every tab has one). */
+	screen = malloc(sizeof(*screen));
+	if (screen == NULL) {
+		errno = ENOMEM;
+		return -1;
+	}
+	terminal_screen_init(screen, run->columns, run->rows);
+
+	/* The tab, at the end, with its ID; the tab it came from is kept. */
+	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
+	tab->screen = screen;
+	tab->connection = &run_page_connection;
+	tab->id = run_tab_next;
+	tab->settings = 1;
+	run_title_copy(tab->title, sizeof(tab->title), RUN_SETTINGS_TITLE);
+	run_page_from = run_tabs[run_active].id;
+	run_tab_next++;
+	run_tab_count++;
+
+	/* Succeeded: it is the active one. */
+	run_tab_switch(run, run_tab_count - 1U);
+	printf("ZTERM TAB new run=%s id=%u count=%u settings=1\n", options->token, tab->id, run_tab_count);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Gives a tab whose connection ended because the user asked it for the
+ * settings to the settings: the tab becomes the settings' tab, or closes
+ * when that tab is open already (which is then chosen) or the program has
+ * no settings.  Returns 0, 1 when it was the last tab and closed (the
+ * terminal ends), or -1 with errno set.
+ */
+static int
+run_tab_to_settings(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	unsigned index)
+{
+	struct run_tab *tab;
+	unsigned other;
+	int found;
+	int status;
+	int error;
+
+	/* The settings' tab that is open, if any. */
+	found = -1;
+	for (other = 0U; other < run_tab_count; other++) {
+		if (run_tabs[other].settings)
+			found = (int)run_tabs[other].id;
+	}
+
+	/* The page, made the first time it is needed here. */
+	error = ENOTSUP;
+	if (options->page != NULL && found < 0)
+		error = terminal_page_open(options->page, options->page_font, options->page_fallback);
+
+	/* Without a tab to become: this one closes, and the open settings' tab is chosen. */
+	if (error != 0) {
+		status = run_tab_close(options, run, index);
+		if (status != 0)
+			return 1;
+		found = run_tab_find((uint32_t)found);
+		if (found >= 0)
+			run_tab_switch(run, (unsigned)found);
+		return 0;
+	}
+
+	/* The tab's connection goes, its grid starts again, and the tab is the settings'. */
+	tab = &run_tabs[index];
+	tab->connection->ops->close(tab->connection);
+	tab->connection = &run_page_connection;
+	tab->settings = 1;
+	terminal_screen_init(tab->screen, run->columns, run->rows);
+	run_title_copy(tab->title, sizeof(tab->title), RUN_SETTINGS_TITLE);
+
+	/* Succeeded: it is the active one. */
+	run_tab_switch(run, index);
+	printf("ZTERM TAB settings run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Draws the settings' page and shows it, when an input or something that
+ * moves asks for a frame and the window can take one.  Returns 0, or -1
+ * when the drawing failed.
+ */
+static int
+run_page_frame(
+	struct run_state *run)
+{
+	struct terminal_page_state state;
+	const uint32_t *pixels;
+	int moving;
+	int asked;
+	int wait;
+	int status;
+	int error;
+
+	/* Nothing asks for a frame. */
+	moving = terminal_page_moving();
+	if (!moving)
+		return 0;
+
+	/* The window has not taken the last frame yet: the page waits for it. */
+	wait = terminal_window_frame_wait(&run_window, terminal_clock());
+	if (wait != 0)
+		return 0;
+
+	/* What the page shows of the run. */
+	memset(&state, 0, sizeof(state));
+	state.pixels = run->pixels;
+	state.theme = run->theme;
+	state.ambiguous_wide = run->ambiguous_wide;
+	state.copy_on_select = run_copy_on_select;
+
+	/* The page's frame, at the drawing's size. */
+	asked = terminal_window_frame_ask(&run_window, terminal_clock());
+	status = terminal_page_draw(&run_window, &state, run->width, run->height, &pixels);
+	if (status != 0) {
+		run->operation = "terminal_page_draw";
+		errno = status;
+		terminal_window_frame_shown(&run_window, asked, EIO);
+		return -1;
+	}
+
+	/* Shown in the grid's place; a drawing out of date is remade, and the page drawn again. */
+	status = terminal_display_page(run_display, pixels, run->width, run->height);
+	run->operation = terminal_display_operation(run_display, &run->result);
+	error = 0;
+	if (status != 0)
+		error = EIO;
+	terminal_window_frame_shown(&run_window, asked, error);
+	if (status == EAGAIN) {
+		run_window.resized = 1;
+		terminal_page_shown(&run_window);
+		return 0;
+	}
+
+	/* Any other failure ends the terminal. */
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the page is on the window. */
+	return 0;
+}
+
+/* Copies the settings' page's selection (or the text it set aside) to the clipboard. */
+static void
+run_page_copy(void)
+{
+	size_t length;
+
+	/* The page's text, the terminal's clipboard from now on. */
+	length = terminal_page_copy_text(run_clipboard, sizeof(run_clipboard));
+	if (length == 0U)
+		return;
+	run_clipboard_length = length;
+	printf("ZTERM COPY bytes=%lu\n", (unsigned long)run_clipboard_length);
+	fflush(stdout);
+
+	/* It is the selection other clients paste. */
+	terminal_clipboard_set(&run_window, run_clipboard, run_clipboard_length);
+}
+
+/* Pastes the clipboard's text into the settings' page's field. */
+static void
+run_page_paste(void)
+{
+	int own;
+
+	/* Another client's selection is received first (the terminal's own copy is already here). */
+	own = terminal_clipboard_own(&run_window);
+	if (!own)
+		run_clipboard_length = terminal_clipboard_receive(&run_window, run_clipboard, sizeof(run_clipboard));
+
+	/* Into the field with the keyboard. */
+	terminal_page_paste(run_clipboard, run_clipboard_length);
+	printf("ZTERM PASTE settings bytes=%lu\n", (unsigned long)run_clipboard_length);
+	fflush(stdout);
+}
+
+/*
+ * Turns copy-on-select over (Settings > Behavior): a selection is copied
+ * to the clipboard as well from now on, or not, and the settings keep it
+ * for the next run.
+ */
+static void
+run_copy_on_select_switch(
+	const struct terminal_run_options *options,
+	struct run_state *run)
+{
+	int error;
+
+	/* The other setting. */
+	if (run_copy_on_select)
+		run_copy_on_select = 0;
+	else
+		run_copy_on_select = 1;
+
+	/* Kept; a failed write leaves this run changed and is reported. */
+	error = run_save_settings(run);
+
+	/* The log line the tests read. */
+	printf("ZTERM COPY-ON-SELECT run=%s on=%d saved=%d\n", options->token, run_copy_on_select, error);
+	fflush(stdout);
+}
+
+/* Reads nothing: the settings' tab's connection has no other end. */
+static size_t
+run_page_read(
+	struct terminal_connection *connection,
+	unsigned char *buffer,
+	size_t size)
+{
+	(void)connection;
+	(void)buffer;
+	(void)size;
+
+	/* Reports nothing to read. */
+	return 0U;
+}
+
+/* Takes every byte and sends it nowhere. */
+static int
+run_page_write(
+	struct terminal_connection *connection,
+	const unsigned char *bytes,
+	size_t size,
+	size_t *written)
+{
+	(void)connection;
+	(void)bytes;
+
+	/* Succeeded: all taken. */
+	*written = size;
+	return 0;
+}
+
+/* Hears the grid's size, which nothing needs. */
+static int
+run_page_resize(
+	struct terminal_connection *connection,
+	unsigned columns,
+	unsigned rows,
+	unsigned width,
+	unsigned height)
+{
+	(void)connection;
+	(void)columns;
+	(void)rows;
+	(void)width;
+	(void)height;
+
+	/* Succeeded: nothing to tell. */
+	return 0;
+}
+
+/* Cannot tell the input's modes: there is no other end. */
+static int
+run_page_mode(
+	const struct terminal_connection *connection,
+	unsigned *mode)
+{
+	(void)connection;
+	(void)mode;
+
+	/* Reports that it cannot tell. */
+	return ENOTSUP;
+}
+
+/* No application's event is the settings' tab's. */
+static unsigned
+run_page_event(
+	struct terminal_connection *connection,
+	const struct kl_app_event *event)
+{
+	(void)connection;
+	(void)event;
+
+	/* Reports none of its own. */
+	return 0U;
+}
+
+/* Has nothing waiting. */
+static unsigned
+run_page_pending(
+	const struct terminal_connection *connection)
+{
+	(void)connection;
+
+	/* Reports nothing. */
+	return 0U;
+}
+
+/* Hangs up on nothing: the connection is the run's and holds nothing. */
+static void
+run_page_close(
+	struct terminal_connection *connection)
+{
+	(void)connection;
 }

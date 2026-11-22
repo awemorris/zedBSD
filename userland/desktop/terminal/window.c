@@ -32,6 +32,7 @@
 
 #include "terminal.h"
 #include "connection.h"
+#include "settings-page.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -44,6 +45,9 @@
 
 /* F11, which makes the window fullscreen or ends it when the compositor's menu did not take it (BUG-194). */
 #define WINDOW_KEY_F11		87U
+
+/* F12, which opens the settings when the compositor's menu did not take it. */
+#define WINDOW_KEY_F12		88U
 
 /* The keys the search bar answers itself (ws128-p006): Escape, Backspace, Enter and the keypad's Enter. */
 #define WINDOW_KEY_ESCAPE	1U
@@ -84,6 +88,8 @@ static void window_pointer_event(struct terminal_window *window, unsigned kind, 
 static void window_pad_push(struct terminal_window *window, unsigned type, const struct kl_window_event *event);
 static void window_touch_push(struct terminal_window *window, unsigned type, const struct kl_window_event *event);
 static uint32_t window_modifiers(unsigned modifiers);
+static int window_page_input(struct terminal_window *window, const struct kl_window_event *event);
+static void window_action(struct terminal_window *window, uint32_t action);
 
 /*
  * Connects to the window system and makes a toplevel window of a size:
@@ -372,8 +378,17 @@ window_event(
 	struct terminal_window *window,
 	const struct kl_window_event *event)
 {
+	int taken;
+
 	/* Every input carries the modifiers held. */
 	window->modifiers = window_modifiers(event->modifiers);
+
+	/* While the settings' tab is active its widgets take the pointer, the keys and the text. */
+	if (window->page_active) {
+		taken = window_page_input(window, event);
+		if (taken)
+			return;
+	}
 
 	/* What it is. */
 	switch (event->kind) {
@@ -564,6 +579,14 @@ window_press(
 			on = 0;
 		printf("ZTERM FULLSCREEN key on=%d\n", on);
 		terminal_window_set_fullscreen(window, on);
+		return;
+	}
+
+	/* F12 alone opens the settings when the compositor's menus did not choose Shell > Settings. */
+	if (key == WINDOW_KEY_F12 &&
+	    window->modifiers == 0U &&
+	    window->settings_item) {
+		window_action(window, TERMINAL_ACTION_SETTINGS);
 		return;
 	}
 
@@ -937,6 +960,50 @@ window_pad_push(
 	kept->y = (float)event->dy;
 	kept->time = (uint32_t)(event->time_us / 1000U);
 	kept->arrival = event->arrival_us;
+}
+
+/*
+ * Gives an input of the window to the settings' page while its tab is
+ * active (F12 alone still goes back, as Shell > Settings does); reports 1
+ * when the page took it, 0 for one the window keeps (its size, closing,
+ * the menus, the tabs, the selections).
+ */
+static int
+window_page_input(
+	struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	int taken;
+
+	/* F12 alone, when the compositor's menus did not take it. */
+	if (event->kind == KL_WINDOW_KEY &&
+	    event->pressed &&
+	    event->code == WINDOW_KEY_F12 &&
+	    window->modifiers == 0U) {
+		window_action(window, TERMINAL_ACTION_SETTINGS);
+		return 1;
+	}
+
+	/* The page's widgets. */
+	taken = terminal_page_input(window, event);
+
+	/* Reports whether the page took it. */
+	return taken;
+}
+
+/* Queues an action for the main loop, as a menu's choice is (a full queue drops it). */
+static void
+window_action(
+	struct terminal_window *window,
+	uint32_t action)
+{
+	/* Room for it. */
+	if (window->action_count >= TERMINAL_ACTIONS)
+		return;
+
+	/* After the ones before it. */
+	window->actions[window->action_count] = action;
+	window->action_count++;
 }
 
 /* Turns libkeiland's modifier bits into wl_keyboard's, which keys.c and the selection read. */

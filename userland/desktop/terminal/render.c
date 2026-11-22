@@ -64,6 +64,10 @@ static VkResult render_module(struct terminal_renderer *renderer, const uint32_t
 static void render_upload(struct terminal_renderer *renderer, uint32_t vertex_count);
 static void render_store(void *data, size_t first, size_t count);
 static void render_record(struct terminal_renderer *renderer, VkCommandBuffer command, uint32_t image, uint32_t vertex_count, uint32_t ground);
+static VkResult render_page_make(struct terminal_renderer *renderer, uint32_t width, uint32_t height);
+static VkResult render_page_buffer(struct terminal_renderer *renderer, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer *buffer, VkDeviceMemory *memory, void **map);
+static void render_page_free(struct terminal_renderer *renderer);
+static void render_page_record(struct terminal_renderer *renderer, uint32_t image);
 static uint64_t render_now_us(void);
 static void render_perf_add(unsigned part, uint64_t started);
 static void render_perf_report(void);
@@ -360,6 +364,132 @@ terminal_renderer_draw(
 }
 
 /*
+ * Shows a frame painted elsewhere (width by height pixels, a row after
+ * another, premultiplied 0xAARRGGBB: the swapchain's size) in the grid's
+ * place: its pixels are copied into the page's image, which one quad
+ * draws as a colour glyph is drawn, and the image is presented.
+ *
+ * Returns VK_ERROR_OUT_OF_DATE_KHR when the swapchain no longer matches
+ * the window; the caller resizes and draws again.
+ */
+VkResult
+terminal_renderer_page(
+	struct terminal_renderer *renderer,
+	const uint32_t *pixels,
+	uint32_t width,
+	uint32_t height)
+{
+	static const float corners[TERMINAL_QUAD_VERTICES][4] = {
+		{ 0.0f, 0.0f, 0.0f, 0.0f },
+		{ 1.0f, 0.0f, 1.0f, 0.0f },
+		{ 0.0f, 1.0f, 0.0f, 1.0f },
+		{ 1.0f, 0.0f, 1.0f, 0.0f },
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		{ 0.0f, 1.0f, 0.0f, 1.0f }
+	};
+	VkSubmitInfo submit;
+	VkPresentInfoKHR present;
+	VkPipelineStageFlags stage;
+	float *vertex;
+	unsigned char *row;
+	uint32_t image;
+	uint32_t y;
+	unsigned index;
+	VkResult error;
+
+	/* The frame before is finished before the host touches the page's buffers again. */
+	error = terminal_renderer_idle(renderer);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The page's image and buffers at the frame's size. */
+	if (renderer->page == VK_NULL_HANDLE || renderer->page_width != width || renderer->page_height != height) {
+		error = render_page_make(renderer, width, height);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* The pixels, a row after another, into the buffer the image is copied from. */
+	row = renderer->page_map;
+	for (y = 0U; y < height; y++)
+		memcpy(row + (size_t)y * width * 4U, pixels + (size_t)y * width, (size_t)width * 4U);
+
+	/*
+	 * The quad over the whole frame: its corners in pixels and their
+	 * places in the image, a foreground of alpha 0 (the image's own
+	 * colours, as a colour glyph's) and an opaque background under it.
+	 */
+	vertex = renderer->page_vertex_map;
+	for (index = 0U; index < TERMINAL_QUAD_VERTICES; index++) {
+		vertex[0] = corners[index][0] * (float)width;
+		vertex[1] = corners[index][1] * (float)height;
+		vertex[2] = corners[index][2];
+		vertex[3] = corners[index][3];
+		vertex[4] = 0.0f;
+		vertex[5] = 0.0f;
+		vertex[6] = 0.0f;
+		vertex[7] = 0.0f;
+		vertex[8] = 0.0f;
+		vertex[9] = 0.0f;
+		vertex[10] = 0.0f;
+		vertex[11] = 1.0f;
+		vertex += TERMINAL_VERTEX_FLOATS;
+	}
+
+	/* The image to draw into, once the compositor has given one back. */
+	renderer->operation = "vkAcquireNextImageKHR";
+	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, UINT64_MAX, renderer->acquired, VK_NULL_HANDLE, &image);
+	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
+		return error;
+
+	/* The copy and the draw, recorded for this page. */
+	render_page_record(renderer, image);
+	renderer->operation = "vkEndCommandBuffer";
+	error = vkEndCommandBuffer(renderer->page_command);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The frame's fence starts unsignalled. */
+	renderer->operation = "vkResetFences";
+	error = vkResetFences(renderer->device, 1U, &renderer->fence);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Submits it after the acquire, signalling the image's present semaphore. */
+	stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	memset(&submit, 0, sizeof(submit));
+	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit.waitSemaphoreCount = 1U;
+	submit.pWaitSemaphores = &renderer->acquired;
+	submit.pWaitDstStageMask = &stage;
+	submit.commandBufferCount = 1U;
+	submit.pCommandBuffers = &renderer->page_command;
+	submit.signalSemaphoreCount = 1U;
+	submit.pSignalSemaphores = &renderer->targets[image].rendered;
+	renderer->operation = "vkQueueSubmit";
+	error = vkQueueSubmit(renderer->queue, 1U, &submit, renderer->fence);
+	if (error != VK_SUCCESS)
+		return error;
+	renderer->pending = 1;
+
+	/* Presents the image to the window. */
+	memset(&present, 0, sizeof(present));
+	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	present.waitSemaphoreCount = 1U;
+	present.pWaitSemaphores = &renderer->targets[image].rendered;
+	present.swapchainCount = 1U;
+	present.pSwapchains = &renderer->swapchain;
+	present.pImageIndices = &image;
+	renderer->operation = "vkQueuePresentKHR";
+	error = vkQueuePresentKHR(renderer->queue, &present);
+	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
+		return error;
+
+	/* Succeeded: the page is on the window. */
+	return VK_SUCCESS;
+}
+
+/*
  * Waits for the frame submitted last, if it was not waited for: after
  * this the host may write the vertices and the atlas.
  */
@@ -395,6 +525,13 @@ terminal_renderer_close(
 	if (renderer->device != VK_NULL_HANDLE) {
 		(void)vkDeviceWaitIdle(renderer->device);
 		render_targets_free(renderer);
+
+		/* The page's objects. */
+		render_page_free(renderer);
+		if (renderer->page_vertices != VK_NULL_HANDLE)
+			vkDestroyBuffer(renderer->device, renderer->page_vertices, NULL);
+		if (renderer->page_vertex_memory != VK_NULL_HANDLE)
+			vkFreeMemory(renderer->device, renderer->page_vertex_memory, NULL);
 
 		/* The drawing objects. */
 		if (renderer->pipeline != VK_NULL_HANDLE)
@@ -942,13 +1079,13 @@ render_atlas(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* A pool for the one set. */
+	/* A pool for the atlas's set and the page's. */
 	memset(&pool_size, 0, sizeof(pool_size));
 	pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	pool_size.descriptorCount = 1U;
+	pool_size.descriptorCount = 2U;
 	memset(&pool, 0, sizeof(pool));
 	pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	pool.maxSets = 1U;
+	pool.maxSets = 2U;
 	pool.poolSizeCount = 1U;
 	pool.pPoolSizes = &pool_size;
 	renderer->operation = "vkCreateDescriptorPool";
@@ -1495,6 +1632,301 @@ render_record(
 
 	/* The pass ends with the image ready to present. */
 	vkCmdEndRenderPass(command);
+}
+
+/*
+ * Makes the page's image, its view and its staging buffer at a size (the
+ * old ones go; the GPU is idle), the descriptor set that names it, and the
+ * quad's vertices and the page's command buffer the first time.
+ */
+static VkResult
+render_page_make(
+	struct terminal_renderer *renderer,
+	uint32_t width,
+	uint32_t height)
+{
+	VkImageCreateInfo image;
+	VkMemoryRequirements requirements;
+	VkImageViewCreateInfo view;
+	VkDescriptorSetAllocateInfo allocate;
+	VkCommandBufferAllocateInfo command;
+	VkDescriptorImageInfo image_info;
+	VkWriteDescriptorSet write;
+	VkResult error;
+
+	/* The old image and its buffer, of another size. */
+	render_page_free(renderer);
+
+	/* The image: optimal, filled by a copy, sampled by the fragment shader. */
+	memset(&image, 0, sizeof(image));
+	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image.imageType = VK_IMAGE_TYPE_2D;
+	image.format = VK_FORMAT_B8G8R8A8_UNORM;
+	image.extent.width = width;
+	image.extent.height = height;
+	image.extent.depth = 1U;
+	image.mipLevels = 1U;
+	image.arrayLayers = 1U;
+	image.samples = VK_SAMPLE_COUNT_1_BIT;
+	image.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	renderer->operation = "vkCreateImage";
+	error = vkCreateImage(renderer->device, &image, NULL, &renderer->page);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Its memory, the device's own, bound to it. */
+	vkGetImageMemoryRequirements(renderer->device, renderer->page, &requirements);
+	error = render_memory(renderer, &requirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &renderer->page_memory);
+	if (error != VK_SUCCESS)
+		return error;
+	renderer->operation = "vkBindImageMemory";
+	error = vkBindImageMemory(renderer->device, renderer->page, renderer->page_memory, 0U);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The view the shader samples. */
+	memset(&view, 0, sizeof(view));
+	view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	view.image = renderer->page;
+	view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view.format = VK_FORMAT_B8G8R8A8_UNORM;
+	view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	view.subresourceRange.levelCount = 1U;
+	view.subresourceRange.layerCount = 1U;
+	renderer->operation = "vkCreateImageView";
+	error = vkCreateImageView(renderer->device, &view, NULL, &renderer->page_view);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The buffer the pixels are copied from, four bytes a pixel. */
+	error = render_page_buffer(renderer, (VkDeviceSize)width * height * 4U, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &renderer->page_staging, &renderer->page_staging_memory, &renderer->page_map);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The set that names the image, made once (the atlas's layout and sampler). */
+	if (renderer->page_set == VK_NULL_HANDLE) {
+		memset(&allocate, 0, sizeof(allocate));
+		allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocate.descriptorPool = renderer->descriptor_pool;
+		allocate.descriptorSetCount = 1U;
+		allocate.pSetLayouts = &renderer->set_layout;
+		renderer->operation = "vkAllocateDescriptorSets";
+		error = vkAllocateDescriptorSets(renderer->device, &allocate, &renderer->page_set);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* The set names this image's view. */
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sampler = renderer->sampler;
+	image_info.imageView = renderer->page_view;
+	image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	memset(&write, 0, sizeof(write));
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = renderer->page_set;
+	write.dstBinding = 0U;
+	write.descriptorCount = 1U;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.pImageInfo = &image_info;
+	vkUpdateDescriptorSets(renderer->device, 1U, &write, 0U, NULL);
+
+	/* The quad's six vertices, made once. */
+	if (renderer->page_vertices == VK_NULL_HANDLE) {
+		error = render_page_buffer(renderer, (VkDeviceSize)TERMINAL_QUAD_VERTICES * TERMINAL_VERTEX_FLOATS * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+					   &renderer->page_vertices, &renderer->page_vertex_memory, &renderer->page_vertex_map);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* The command buffer of the pages, recorded again for each. */
+	if (renderer->page_command == VK_NULL_HANDLE) {
+		memset(&command, 0, sizeof(command));
+		command.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		command.commandPool = renderer->pool;
+		command.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		command.commandBufferCount = 1U;
+		renderer->operation = "vkAllocateCommandBuffers";
+		error = vkAllocateCommandBuffers(renderer->device, &command, &renderer->page_command);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* Succeeded: pages of the size can be shown. */
+	renderer->page_width = width;
+	renderer->page_height = height;
+	return VK_SUCCESS;
+}
+
+/* Makes a host-visible, coherent buffer of a size and use, bound to its memory and mapped for good. */
+static VkResult
+render_page_buffer(
+	struct terminal_renderer *renderer,
+	VkDeviceSize size,
+	VkBufferUsageFlags usage,
+	VkBuffer *buffer,
+	VkDeviceMemory *memory,
+	void **map)
+{
+	VkBufferCreateInfo create;
+	VkMemoryRequirements requirements;
+	VkResult error;
+
+	/* The buffer. */
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	create.size = size;
+	create.usage = usage;
+	create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	renderer->operation = "vkCreateBuffer";
+	error = vkCreateBuffer(renderer->device, &create, NULL, buffer);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Its memory, which the host sees, bound to it. */
+	vkGetBufferMemoryRequirements(renderer->device, *buffer, &requirements);
+	error = render_memory(renderer, &requirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, memory);
+	if (error != VK_SUCCESS)
+		return error;
+	renderer->operation = "vkBindBufferMemory";
+	error = vkBindBufferMemory(renderer->device, *buffer, *memory, 0U);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Mapped for the host's writes, for good. */
+	renderer->operation = "vkMapMemory";
+	error = vkMapMemory(renderer->device, *memory, 0U, VK_WHOLE_SIZE, 0U, map);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the buffer. */
+	return VK_SUCCESS;
+}
+
+/* Releases the page's image, its view and its staging buffer (the GPU is idle). */
+static void
+render_page_free(
+	struct terminal_renderer *renderer)
+{
+	/* Each one made. */
+	if (renderer->page_view != VK_NULL_HANDLE)
+		vkDestroyImageView(renderer->device, renderer->page_view, NULL);
+	if (renderer->page != VK_NULL_HANDLE)
+		vkDestroyImage(renderer->device, renderer->page, NULL);
+	if (renderer->page_memory != VK_NULL_HANDLE)
+		vkFreeMemory(renderer->device, renderer->page_memory, NULL);
+	if (renderer->page_staging != VK_NULL_HANDLE)
+		vkDestroyBuffer(renderer->device, renderer->page_staging, NULL);
+	if (renderer->page_staging_memory != VK_NULL_HANDLE)
+		vkFreeMemory(renderer->device, renderer->page_staging_memory, NULL);
+
+	/* None now. */
+	renderer->page_view = VK_NULL_HANDLE;
+	renderer->page = VK_NULL_HANDLE;
+	renderer->page_memory = VK_NULL_HANDLE;
+	renderer->page_staging = VK_NULL_HANDLE;
+	renderer->page_staging_memory = VK_NULL_HANDLE;
+	renderer->page_map = NULL;
+	renderer->page_width = 0U;
+	renderer->page_height = 0U;
+}
+
+/*
+ * Records a page's frame: the copy of the pixels into the page's image
+ * (whose old contents are not kept), then the pass that draws its one
+ * quad into the swapchain's image.
+ */
+static void
+render_page_record(
+	struct terminal_renderer *renderer,
+	uint32_t image)
+{
+	VkCommandBufferBeginInfo begin;
+	VkImageMemoryBarrier barrier;
+	VkBufferImageCopy region;
+	VkRenderPassBeginInfo pass;
+	VkClearValue clear;
+	VkViewport viewport;
+	VkRect2D scissor;
+	VkDeviceSize offset;
+	float size[4];
+
+	/* A recording submitted once (Begin resets it). */
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	(void)vkBeginCommandBuffer(renderer->page_command, &begin);
+
+	/* The image takes the copy after the page before was sampled. */
+	memset(&barrier, 0, sizeof(barrier));
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = renderer->page;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.levelCount = 1U;
+	barrier.subresourceRange.layerCount = 1U;
+	vkCmdPipelineBarrier(renderer->page_command, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+
+	/* The whole frame's pixels into the image. */
+	memset(&region, 0, sizeof(region));
+	region.bufferRowLength = renderer->page_width;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.layerCount = 1U;
+	region.imageExtent.width = renderer->page_width;
+	region.imageExtent.height = renderer->page_height;
+	region.imageExtent.depth = 1U;
+	vkCmdCopyBufferToImage(renderer->page_command, renderer->page_staging, renderer->page, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &region);
+
+	/* The pass samples the image after the copy. */
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	vkCmdPipelineBarrier(renderer->page_command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+
+	/* The pass, cleared (the quad covers it all). */
+	memset(&clear, 0, sizeof(clear));
+	clear.color.float32[3] = 1.0f;
+	memset(&pass, 0, sizeof(pass));
+	pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	pass.renderPass = renderer->pass;
+	pass.framebuffer = renderer->targets[image].framebuffer;
+	pass.renderArea.extent = renderer->extent;
+	pass.clearValueCount = 1U;
+	pass.pClearValues = &clear;
+	vkCmdBeginRenderPass(renderer->page_command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+
+	/* The whole image is the viewport. */
+	memset(&viewport, 0, sizeof(viewport));
+	viewport.width = (float)renderer->extent.width;
+	viewport.height = (float)renderer->extent.height;
+	viewport.maxDepth = 1.0f;
+	memset(&scissor, 0, sizeof(scissor));
+	scissor.extent = renderer->extent;
+	vkCmdSetViewport(renderer->page_command, 0U, 1U, &viewport);
+	vkCmdSetScissor(renderer->page_command, 0U, 1U, &scissor);
+
+	/* The quad: the cells' pipeline, the page's set and vertices, and the window's size. */
+	size[0] = (float)renderer->extent.width;
+	size[1] = (float)renderer->extent.height;
+	size[2] = 0.0f;
+	size[3] = 0.0f;
+	offset = 0U;
+	vkCmdBindPipeline(renderer->page_command, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->pipeline);
+	vkCmdBindDescriptorSets(renderer->page_command, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->layout, 0U, 1U, &renderer->page_set, 0U, NULL);
+	vkCmdBindVertexBuffers(renderer->page_command, 0U, 1U, &renderer->page_vertices, &offset);
+	vkCmdPushConstants(renderer->page_command, renderer->layout, VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(size), size);
+	vkCmdDraw(renderer->page_command, TERMINAL_QUAD_VERTICES, 1U, 0U, 0U);
+
+	/* The pass ends with the image ready to present. */
+	vkCmdEndRenderPass(renderer->page_command);
 }
 
 /* Gives the monotonic clock in microseconds for ZTERM PERF (0 when it is not asked for). */

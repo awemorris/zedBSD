@@ -121,6 +121,38 @@ terminal_display_draw(
 }
 
 /*
+ * Shows a frame painted elsewhere (width by height pixels, a row after
+ * another, premultiplied 0xAARRGGBB) in the grid's place, the swapchain's
+ * size.
+ *
+ * Returns 0, EAGAIN when the swapchain no longer matches the window or
+ * the frame is not its size (the caller resizes and draws again), or EIO.
+ */
+int
+terminal_display_page(
+	struct terminal_display *display,
+	const uint32_t *pixels,
+	uint32_t width,
+	uint32_t height)
+{
+	VkResult result;
+	int error;
+
+	/* A frame of another size than the swapchain's is drawn again at its size. */
+	if (width != display->renderer.extent.width || height != display->renderer.extent.height)
+		return EAGAIN;
+
+	/* The frame. */
+	result = terminal_renderer_page(&display->renderer, pixels, width, height);
+	error = display_error(display, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page is on the window. */
+	return 0;
+}
+
+/*
  * Waits for the frame drawn last: after this the font may change the
  * atlas's pixels.  Returns 0 or EIO.
  */

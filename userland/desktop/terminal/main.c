@@ -15,22 +15,31 @@
  * shell exits or the window is closed.  New Window starts another
  * terminal, the way this one was run.
  *
+ * Its settings' tab (settings-page.c) edits the user's ~/.ssh/config,
+ * makes keys in ~/.ssh (the private key 0600) and lists ~/.ssh/known_hosts;
+ * the files are written here with POSIX calls (main_page_*).
+ *
  * Every outcome is one line on standard output: ZTERM DONE on a normal end
  * (with the reason), ZTERM FAILED naming what failed otherwise.
  */
 
 #include "run.h"
 #include "connection.h"
+#include "settings-page.h"
 
 #include "userland/desktop/paths.h"
 
 #include "include/kern/os-name.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* The font the terminal uses unless told otherwise, and its size in pixels. */
 #define MAIN_FONT		KEILAND_DATADIR "/fonts/keiland-mono.ttf"
@@ -41,6 +50,22 @@
 
 /* The colour emoji font, which draws in colour what neither of them has (the desktop's text draws from it too). */
 #define MAIN_EMOJI_FONT		KEILAND_DATADIR "/fonts/keiland-emoji.ttf"
+
+/* The fonts the settings' tab draws its words with: the desktop's interface font and its fallback. */
+#define MAIN_PAGE_FONT		KEILAND_DATADIR "/fonts/keiland.ttf"
+#define MAIN_PAGE_FALLBACK	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
+
+/* The user's SSH files under the home directory, and the directory's mode when the settings make it. */
+#define MAIN_SSH_DIRECTORY	"/.ssh"
+#define MAIN_SSH_MODE		0700
+
+/* A file's modes: a secret one (a private key, the ssh_config made new), a public one. */
+#define MAIN_SECRET_MODE	0600
+#define MAIN_PUBLIC_MODE	0644
+
+/* The longest path of the user's SSH files, and the longest comment of a new key. */
+#define MAIN_PATH_MAX		1024U
+#define MAIN_COMMENT_MAX	320U
 
 /* The grid the window opens with. */
 #define MAIN_COLUMNS		90U
@@ -70,7 +95,31 @@ struct main_options {
 	unsigned timeout;
 };
 
+/*
+ * What the settings' tab is given: the user's SSH files' paths, the
+ * comment of a new key (user@host) and the functions that read and write
+ * them.  Set once before the run, for its whole life.
+ */
+struct main_page {
+	char ssh[MAIN_PATH_MAX];
+	char config[MAIN_PATH_MAX];
+	char keys[MAIN_PATH_MAX];
+	char known_hosts[MAIN_PATH_MAX];
+	char comment[MAIN_COMMENT_MAX];
+	struct terminal_page_program program;
+};
+
+/* The settings' tab's files (the main thread's). */
+static struct main_page main_page;
+
 static int main_parse(int argc, char **argv, struct main_options *options);
+static int main_page_init(const struct main_options *options);
+static int main_page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
+static int main_page_replace(void *data, const char *path, const void *bytes, size_t size);
+static int main_page_create(void *data, const char *path, const void *bytes, size_t size, int secret);
+static int main_page_exists(void *data, const char *path);
+static int main_page_write(const char *path, int flags, mode_t mode, const void *bytes, size_t size);
+static void main_page_directory(void);
 static const char *main_value(const char *argument, const char *name);
 static int main_number(const char *text, unsigned maximum, unsigned *value);
 static void main_new_window(void *data, struct kl_app *app, struct kl_window *from);
@@ -122,6 +171,14 @@ main(
 	run.token = options.token;
 	run.about = MAIN_ABOUT;
 	run.connector = &connector.connector;
+
+	/* The settings' tab, with the user's SSH files (none without a home directory). */
+	status = main_page_init(&options);
+	if (status == 0) {
+		run.page = &main_page.program;
+		run.page_font = MAIN_PAGE_FONT;
+		run.page_fallback = MAIN_PAGE_FALLBACK;
+	}
 	run.new_window = main_new_window;
 	run.ended = main_ended;
 	run.data = &options;
@@ -362,4 +419,297 @@ main_ended(
 
 	/* The line reaches whoever reads the log before the terminal goes. */
 	fflush(stdout);
+}
+
+/*
+ * Fills what the settings' tab is given: the paths of ~/.ssh/config,
+ * ~/.ssh/ and ~/.ssh/known_hosts, the comment user@host of a new key and
+ * the font the terminal draws with.  Returns 0, or ENOENT without a home
+ * directory (the terminal then has no settings' tab).
+ */
+static int
+main_page_init(
+	const struct main_options *options)
+{
+	const struct passwd *user;
+	const char *home;
+	const char *name;
+	char host[256];
+	int written;
+	int error;
+
+	/* The home directory: the environment's, else the user's entry. */
+	home = getenv("HOME");
+	user = getpwuid(getuid());
+	if ((home == NULL || home[0] == '\0') && user != NULL)
+		home = user->pw_dir;
+	if (home == NULL || home[0] == '\0')
+		return ENOENT;
+
+	/* The SSH files' paths. */
+	written = snprintf(main_page.ssh, sizeof(main_page.ssh), "%s%s", home, MAIN_SSH_DIRECTORY);
+	if (written < 0 || (size_t)written + 16U >= sizeof(main_page.ssh))
+		return ENOENT;
+	(void)snprintf(main_page.config, sizeof(main_page.config), "%s/config", main_page.ssh);
+	(void)snprintf(main_page.keys, sizeof(main_page.keys), "%s/", main_page.ssh);
+	(void)snprintf(main_page.known_hosts, sizeof(main_page.known_hosts), "%s/known_hosts", main_page.ssh);
+
+	/* A new key's comment, user@host as ssh-keygen writes it. */
+	name = "user";
+	if (user != NULL)
+		name = user->pw_name;
+	error = gethostname(host, sizeof(host));
+	if (error != 0)
+		(void)snprintf(host, sizeof(host), "%s", "localhost");
+	host[sizeof(host) - 1U] = '\0';
+	(void)snprintf(main_page.comment, sizeof(main_page.comment), "%s@%s", name, host);
+
+	/* The tab's program. */
+	memset(&main_page.program, 0, sizeof(main_page.program));
+	main_page.program.config_path = main_page.config;
+	main_page.program.config_shown = "~/.ssh/config";
+	main_page.program.key_directory = main_page.keys;
+	main_page.program.key_directory_shown = "~/.ssh/";
+	main_page.program.known_hosts_path = main_page.known_hosts;
+	main_page.program.known_hosts_shown = "~/.ssh/known_hosts";
+	main_page.program.read = main_page_read;
+	main_page.program.replace = main_page_replace;
+	main_page.program.create = main_page_create;
+	main_page.program.exists = main_page_exists;
+	main_page.program.check = NULL;
+	main_page.program.items = NULL;
+	main_page.program.item_count = 0U;
+	main_page.program.comment = main_page.comment;
+	main_page.program.font = options->font;
+	main_page.program.data = &main_page;
+
+	/* Succeeded: the tab has the user's files. */
+	return 0;
+}
+
+/* Reads a file whole into a buffer the caller frees (with a NUL after it); 0, ENOENT, EFBIG or another errno value. */
+static int
+main_page_read(
+	void *data,
+	const char *path,
+	size_t limit,
+	char **text,
+	size_t *size)
+{
+	struct stat status;
+	char *bytes;
+	size_t got;
+	ssize_t count;
+	int descriptor;
+	int error;
+
+	(void)data;
+
+	/* The file. */
+	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return errno;
+
+	/* Its size, within the limit. */
+	error = fstat(descriptor, &status);
+	if (error != 0) {
+		error = errno;
+		close(descriptor);
+		return error;
+	}
+	if (status.st_size < 0 || (unsigned long long)status.st_size > (unsigned long long)limit) {
+		close(descriptor);
+		return EFBIG;
+	}
+
+	/* Its bytes, and a NUL after them. */
+	bytes = malloc((size_t)status.st_size + 1U);
+	if (bytes == NULL) {
+		close(descriptor);
+		return ENOMEM;
+	}
+	got = 0U;
+	while (got < (size_t)status.st_size) {
+		count = read(descriptor, bytes + got, (size_t)status.st_size - got);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			break;
+		got += (size_t)count;
+	}
+	close(descriptor);
+	bytes[got] = '\0';
+
+	/* Succeeded: what the file holds. */
+	*text = bytes;
+	*size = got;
+	return 0;
+}
+
+/*
+ * Writes a file whole in place of the old one: the bytes go to path.new
+ * (the old file's mode, or a secret file's for a new one), which is then
+ * renamed over it, so a failure leaves the old file as it was.
+ */
+static int
+main_page_replace(
+	void *data,
+	const char *path,
+	const void *bytes,
+	size_t size)
+{
+	struct stat status;
+	char fresh[MAIN_PATH_MAX + 8U];
+	mode_t mode;
+	int written;
+	int error;
+
+	(void)data;
+
+	/* The new file's name and mode. */
+	written = snprintf(fresh, sizeof(fresh), "%s.new", path);
+	if (written < 0 || (size_t)written >= sizeof(fresh))
+		return ENAMETOOLONG;
+	mode = MAIN_SECRET_MODE;
+	error = stat(path, &status);
+	if (error == 0)
+		mode = status.st_mode & 07777U;
+
+	/* The bytes in it, in ~/.ssh made when it is not there. */
+	main_page_directory();
+	error = main_page_write(fresh, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* It takes the old file's name. */
+	error = rename(fresh, path);
+	if (error != 0) {
+		error = errno;
+		(void)unlink(fresh);
+		return error;
+	}
+
+	/* Succeeded: the file has the bytes. */
+	return 0;
+}
+
+/* Makes a new file (never over one there: EEXIST), 0600 for a secret and 0644 otherwise whatever the umask is. */
+static int
+main_page_create(
+	void *data,
+	const char *path,
+	const void *bytes,
+	size_t size,
+	int secret)
+{
+	mode_t mode;
+	int error;
+
+	(void)data;
+
+	/* The mode. */
+	mode = MAIN_PUBLIC_MODE;
+	if (secret)
+		mode = MAIN_SECRET_MODE;
+
+	/* The file, new, in ~/.ssh made when it is not there. */
+	main_page_directory();
+	error = main_page_write(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the file is made. */
+	return 0;
+}
+
+/* Tells whether anything is at a path (a link that leads nowhere counts). */
+static int
+main_page_exists(
+	void *data,
+	const char *path)
+{
+	struct stat status;
+	int error;
+
+	(void)data;
+
+	/* The path itself. */
+	error = lstat(path, &status);
+	if (error == 0)
+		return 1;
+
+	/* Nothing there. */
+	return 0;
+}
+
+/*
+ * Opens a file with the flags, sets its mode exactly, writes the bytes and
+ * syncs them; a file this call made and could not fill is removed.
+ */
+static int
+main_page_write(
+	const char *path,
+	int flags,
+	mode_t mode,
+	const void *bytes,
+	size_t size)
+{
+	const unsigned char *at;
+	ssize_t count;
+	int descriptor;
+	int error;
+
+	/* The file. */
+	descriptor = open(path, flags, mode);
+	if (descriptor < 0)
+		return errno;
+
+	/* Its mode, whatever the umask took away. */
+	error = fchmod(descriptor, mode);
+	if (error != 0)
+		error = errno;
+
+	/* The bytes, all of them. */
+	at = bytes;
+	while (error == 0 && size > 0U) {
+		count = write(descriptor, at, size);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			error = EIO;
+			if (count < 0)
+				error = errno;
+			break;
+		}
+		at += count;
+		size -= (size_t)count;
+	}
+
+	/* On the disk before it is used. */
+	if (error == 0) {
+		error = fsync(descriptor);
+		if (error != 0)
+			error = errno;
+	}
+	close(descriptor);
+
+	/* A file left half written goes. */
+	if (error != 0) {
+		(void)unlink(path);
+		return error;
+	}
+
+	/* Succeeded: the file holds the bytes. */
+	return 0;
+}
+
+/* Makes ~/.ssh (0700) when it is not there, as ssh does; one that cannot be made shows in the write that follows. */
+static void
+main_page_directory(void)
+{
+	int error;
+
+	/* The directory, one level. */
+	error = mkdir(main_page.ssh, MAIN_SSH_MODE);
+	(void)error;
 }

@@ -38,6 +38,10 @@
 #define MAIN_COMPANION		"keiland-fallback-mono.ttf"
 #define MAIN_EMOJI		"keiland-emoji.ttf"
 
+/* The fonts the settings' tab draws its words with (share\fonts): the interface's and its fallback. */
+#define MAIN_PAGE_FONT		"keiland.ttf"
+#define MAIN_PAGE_FALLBACK	"keiland-fallback.ttf"
+
 /* How long the program waits at its end for the connections' threads to say goodbye, in milliseconds. */
 #define MAIN_FAREWELL_MS	3000U
 
@@ -51,17 +55,19 @@
  */
 struct main_state {
 	struct mikuterm_conf conf;
+	struct mikuterm_connector connector;
 	char font[MIKUTERM_PATH_MAX];
 	char fallback[MIKUTERM_PATH_MAX];
 	char companion[MIKUTERM_PATH_MAX];
 	char emoji[MIKUTERM_PATH_MAX];
+	char page_font[MIKUTERM_PATH_MAX];
+	char page_fallback[MIKUTERM_PATH_MAX];
 };
 
 /* The program's state (large, and needed for the whole run). */
 static struct main_state main_state;
 
 static void main_read_conf(struct mikuterm_conf *conf);
-static int main_font(char *path, size_t size, const char *name);
 static void main_new_window(void *data, struct kl_app *app, struct kl_window *from);
 static void main_forget_passphrases(void *data);
 static void main_ended(void *data, const struct terminal_run_result *result);
@@ -77,8 +83,8 @@ wWinMain(
 	LPWSTR command_line,
 	int show)
 {
-	struct mikuterm_connector connector;
 	struct mikuterm_connect_options connect;
+	const struct terminal_page_program *page;
 	struct terminal_run_options run;
 	struct terminal_run_result result;
 	char text[256];
@@ -102,13 +108,13 @@ wWinMain(
 	mikuterm_settings_defaults(&main_state.conf);
 
 	/* The fonts: the user's choice or the folder's own, the companion and the emoji the folder's. */
-	error = main_font(main_state.font, sizeof(main_state.font), main_state.conf.font);
+	error = mikuterm_font(main_state.font, sizeof(main_state.font), main_state.conf.font);
 	if (error == 0)
-		error = main_font(main_state.fallback, sizeof(main_state.fallback), main_state.conf.fallback);
+		error = mikuterm_font(main_state.fallback, sizeof(main_state.fallback), main_state.conf.fallback);
 	if (error == 0)
-		error = main_font(main_state.companion, sizeof(main_state.companion), MAIN_COMPANION);
+		error = mikuterm_font(main_state.companion, sizeof(main_state.companion), MAIN_COMPANION);
 	if (error == 0)
-		error = main_font(main_state.emoji, sizeof(main_state.emoji), MAIN_EMOJI);
+		error = mikuterm_font(main_state.emoji, sizeof(main_state.emoji), MAIN_EMOJI);
 	if (error != 0) {
 		main_say("mikuterm's folder path is too long for its fonts.");
 		return 1;
@@ -120,7 +126,17 @@ wWinMain(
 	connect.connect = main_state.conf.connect;
 	connect.connect_timeout = main_state.conf.connect_timeout;
 	connect.notice = main_state.conf.problems;
-	mikuterm_connector_init(&connector, &connect);
+	mikuterm_connector_init(&main_state.connector, &connect);
+
+	/* The settings' tab: the folder's ssh\ files and mikuterm.conf (none when the folder's path is too long for them). */
+	error = mikuterm_page_init(&main_state.conf, &main_state.connector, &page);
+	if (error != 0)
+		page = NULL;
+	error = mikuterm_font(main_state.page_font, sizeof(main_state.page_font), MAIN_PAGE_FONT);
+	if (error == 0)
+		error = mikuterm_font(main_state.page_fallback, sizeof(main_state.page_fallback), MAIN_PAGE_FALLBACK);
+	if (error != 0)
+		page = NULL;
 
 	/*
 	 * The window: drawn on the processor, at the screen's scale, the grid
@@ -147,12 +163,14 @@ wWinMain(
 	run.timeout = 0U;
 	run.token = "mikuterm";
 	run.about = MAIN_ABOUT;
-	run.copy_on_select = main_state.conf.copy_on_select;
 	run.input_method_menu = 1;
 	run.ambiguous_wide_key = 1;
 	run.fullscreen_alt_enter = 1;
 	run.forget_passphrases = main_forget_passphrases;
-	run.connector = &connector.connector;
+	run.page = page;
+	run.page_font = main_state.page_font;
+	run.page_fallback = main_state.page_fallback;
+	run.connector = &main_state.connector.connector;
 	run.new_window = main_new_window;
 	run.ended = main_ended;
 	run.data = &main_state;
@@ -172,43 +190,13 @@ wWinMain(
 	return 0;
 }
 
-/* Reads config\mikuterm.conf into the settings (its defaults when it is not there). */
-static void
-main_read_conf(
-	struct mikuterm_conf *conf)
-{
-	char path[MIKUTERM_PATH_MAX];
-	char *text;
-	size_t size;
-	int error;
-
-	/* The defaults. */
-	mikuterm_conf_defaults(conf);
-
-	/* The file, when it is there; one that cannot be read is a problem to show. */
-	error = mikuterm_path(path, sizeof(path), MAIN_CONF);
-	if (error != 0)
-		return;
-	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
-	if (error == ENOENT)
-		return;
-	if (error != 0) {
-		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
-		return;
-	}
-
-	/* What it says. */
-	(void)mikuterm_conf_read(conf, text, size, 0);
-	free(text);
-}
-
 /*
  * Finds a font named in the settings: a Windows path as it is, else the
  * user's fonts\ folder, else the program's share\fonts\.  Returns 0 or
  * ENAMETOOLONG.
  */
-static int
-main_font(
+int
+mikuterm_font(
 	char *path,
 	size_t size,
 	const char *name)
@@ -244,6 +232,36 @@ main_font(
 
 	/* Succeeded: the path (the run says so when the font is not there). */
 	return 0;
+}
+
+/* Reads config\mikuterm.conf into the settings (its defaults when it is not there). */
+static void
+main_read_conf(
+	struct mikuterm_conf *conf)
+{
+	char path[MIKUTERM_PATH_MAX];
+	char *text;
+	size_t size;
+	int error;
+
+	/* The defaults. */
+	mikuterm_conf_defaults(conf);
+
+	/* The file, when it is there; one that cannot be read is a problem to show. */
+	error = mikuterm_path(path, sizeof(path), MAIN_CONF);
+	if (error != 0)
+		return;
+	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
+	if (error == ENOENT)
+		return;
+	if (error != 0) {
+		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
+		return;
+	}
+
+	/* What it says. */
+	(void)mikuterm_conf_read(conf, text, size, 0);
+	free(text);
 }
 
 /* Starts another mikuterm for a new window: the same program, apart from this one. */
