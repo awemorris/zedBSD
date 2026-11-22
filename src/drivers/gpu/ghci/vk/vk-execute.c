@@ -27,7 +27,13 @@
  *
  * What the packets read (tables, descriptions, clear colours, index
  * lists, data) is written to temporary memory of the device's data heap,
- * which goes back once the submission's ticket has passed.
+ * which goes back once the submission's ticket has passed.  A
+ * submission never grows a heap (a growth maps a block and waits for the
+ * GPU): the end of each primary command buffer converts it once without
+ * placing anything, which places the transfer programs it needs and
+ * makes its temporary memory ready (ghci_vk_execute_prepare()); a
+ * submission that finds no room ready is refused with
+ * VK_ERROR_OUT_OF_DEVICE_MEMORY.
  *
  * A command that cannot be run as recorded is refused in one of two
  * ways: a draw or a dispatch whose pipeline, sets, buffers or dynamic
@@ -91,6 +97,20 @@
  */
 #define TEMP_CHUNK_BYTES		(64U * 1024U)
 #define TEMP_BYTES_MAX			(GHCI_VK_HEAP_BLOCK_MAX / 2U)
+
+/*
+ * The submissions of one command buffer in flight at once whose
+ * temporary memory the end of its recording makes ready (a frame being
+ * drawn, one being shown, and one waiting).
+ */
+#define PREPARED_COPIES			3U
+
+/*
+ * The most chunks the end of a command buffer takes for the other
+ * buffers' prepared bytes (the largest heap block of chunks: more than
+ * that is prepared by their own ends).
+ */
+#define PREPARED_CHUNKS_MAX		(GHCI_VK_HEAP_BLOCK_MAX / TEMP_CHUNK_BYTES)
 
 /* The most triangles of a fan drawn from an index list (12 bytes each). */
 #define FAN_TRIANGLES_MAX		(TEMP_BYTES_MAX / 12U)
@@ -315,7 +335,11 @@ struct event_write {
  * the dword the first of them begins at), the command buffer's state as
  * a multiview pass began (view_state, which each view starts from), the
  * hardware tables of the bind being made, the events written, and the
- * first error, which refuses the submission.
+ * first error, which refuses the submission.  grow says that the
+ * conversion may grow the executor heaps, which waits for the GPU (the
+ * end of a command buffer and a clear of new memory may, a submission
+ * may not), and quiet that the log shows nothing of it (the conversion
+ * at the end of a command buffer, which its submission repeats).
  */
 struct exec {
 	struct ghci_vk_session *session;
@@ -332,6 +356,8 @@ struct exec {
 	struct ghci_vk_tables tables;
 	struct event_write events[EVENTS_MAX];
 	uint32_t event_count;
+	int grow;
+	int quiet;
 	int error;
 };
 
@@ -341,6 +367,8 @@ static void buffer_state_dirty(struct buffer_state *state);
 static void command_convert(struct exec *exec, uint32_t number, struct i915_wire_reader *reader);
 static void skip_command(struct exec *exec, const char *reason);
 static void refuse(struct exec *exec, int error, const char *reason);
+static int meta_error(int error);
+static void table_address(struct exec *exec, uint32_t set, uint64_t va);
 static void put(struct exec *exec, const uint32_t *words, uint32_t count);
 static void cut_mark(struct exec *exec, uint32_t at, const uint64_t *events, uint32_t count);
 static int temp_take(struct exec *exec, uint32_t bytes, uint32_t alignment, uint64_t *va, uint8_t **view);
@@ -467,6 +495,14 @@ ghci_vk_execute(
 	exec->device = device;
 	exec->submission = submission;
 
+	/*
+	 * A submission takes only the executor heap room that is there: a
+	 * growth would map a block and wait for the map's record, which comes
+	 * only after the work placed before it, and vkQueueSubmit does not
+	 * wait for the GPU.
+	 */
+	exec->grow = 0;
+
 	/* The head: what the host wrote is seen. */
 	put(exec, words, ghci_cmd_barrier(words, 0U, 0U, GHCI_VK_HEAD_FLAGS));
 
@@ -550,6 +586,9 @@ ghci_vk_execute_clear(
 	exec->submission = submission;
 	exec->state = state;
 
+	/* The allocation that asks for the clear may wait for the GPU, so the heaps may grow for it. */
+	exec->grow = 1;
+
 	/* The head: what the host wrote is seen. */
 	flags = GHCI_BARRIER_INVAL_ICACHE | GHCI_BARRIER_INVAL_TEX | GHCI_BARRIER_INVAL_L1_DATA | GHCI_BARRIER_INVAL_DESCRIPTOR;
 	put(exec, barrier_words, ghci_cmd_barrier(barrier_words, 0U, 0U, flags));
@@ -582,6 +621,118 @@ ghci_vk_execute_clear(
 
 	/* Succeeded: the packets are made. */
 	return 0;
+}
+
+/*
+ * Makes ready, as a primary command buffer's recording ends, the
+ * executor heap room its submissions take (vkEndCommandBuffer may wait
+ * for the GPU; vkQueueSubmit does not).  The buffer is converted as its
+ * submission will convert it, with heaps that may grow: the driver's
+ * transfer programs it needs are placed in the code heap, and its
+ * temporary memory is taken of the data heap.  That is the buffer's
+ * demand (PREPARED_COPIES times it for a buffer recorded for
+ * simultaneous use, which may be in flight that many times), which
+ * counts toward the device's prepared bytes until the buffer is recorded
+ * again or freed.  While the buffer's runs are still taken, the further
+ * copies of them and the other executable buffers' prepared bytes (in
+ * chunks) are taken too, beside what the submissions in flight hold;
+ * then everything goes back, and the data heap has the room ready.  A
+ * submission that finds none (more in flight than prepared) is refused
+ * with VK_ERROR_OUT_OF_DEVICE_MEMORY instead of waiting.  A conversion
+ * the submission would refuse prepares what it took before the refusal,
+ * and the submission reports the refusal.  Nothing reaches the log or
+ * the ring.
+ */
+void
+ghci_vk_execute_prepare(
+	struct ghci_vk_session *session,
+	struct ghci_vk_device *device,
+	struct ghci_vk_object *object)
+{
+	struct ghci_vk_command_buffer *commands;
+	struct ghci_vk_submission measured;
+	struct ghci_vk_temp *runs;
+	struct exec *exec;
+	uint64_t demand;
+	uint64_t others;
+	uint64_t chunks;
+	uint64_t room;
+	uint32_t copies;
+	uint32_t capacity;
+	uint32_t copy;
+	uint32_t index;
+	uint32_t taken;
+	int error;
+
+	/* The conversion's record: heaps that may grow, and nothing in the log. */
+	commands = &object->as.commands;
+	exec = kern_calloc(1U, sizeof(*exec));
+	if (exec == NULL)
+		return;
+	kern_memset(&measured, 0, sizeof(measured));
+	exec->session = session;
+	exec->device = device;
+	exec->submission = &measured;
+	exec->grow = 1;
+	exec->quiet = 1;
+
+	/* The buffer converted as its submission will be: its programs placed, its temporary memory taken. */
+	(void)buffer_convert(exec, object, 0);
+	kern_free(exec);
+
+	/*
+	 * The buffer's demand joins the device's prepared bytes; the buffer
+	 * gives it back when it is recorded again or freed.
+	 */
+	copies = 1U;
+	if (commands->simultaneous)
+		copies = PREPARED_COPIES;
+	demand = measured.temp_bytes * copies;
+	commands->demand = demand;
+	device->prepared += demand;
+	others = device->prepared - demand;
+
+	/* The records of the runs taken beside the buffer's own: its further copies, and chunks for the others. */
+	chunks = (others + TEMP_CHUNK_BYTES - 1U) / TEMP_CHUNK_BYTES;
+	if (chunks > PREPARED_CHUNKS_MAX)
+		chunks = PREPARED_CHUNKS_MAX;
+	capacity = (copies - 1U) * measured.temp_count + (uint32_t)chunks;
+	runs = NULL;
+	if (capacity != 0U) {
+		runs = kern_calloc(capacity, sizeof(*runs));
+		if (runs == NULL) {
+			ghci_vk_submission_end(device, &measured, NULL, 0);
+			return;
+		}
+	}
+
+	/* The buffer's further copies: the same runs again, while the first copy's are still taken. */
+	taken = 0U;
+	error = 0;
+	for (copy = 1U; copy < copies && error == 0; copy++) {
+		for (index = 0U; index < measured.temp_count; index++) {
+			error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, measured.temps[index].bytes, DESC_ALIGN, 1, &runs[taken].block, &runs[taken].offset);
+			if (error != 0)
+				break;
+			taken++;
+		}
+	}
+
+	/* The other executable buffers' prepared bytes, in chunks. */
+	room = 0U;
+	while (error == 0 && room < others && taken < capacity) {
+		error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, TEMP_CHUNK_BYTES, DESC_ALIGN, 1, &runs[taken].block, &runs[taken].offset);
+		if (error != 0)
+			break;
+		taken++;
+		room += TEMP_CHUNK_BYTES;
+	}
+
+	/* Every run is room again, ready for the submissions. */
+	for (index = 0U; index < taken; index++)
+		ghci_vk_heap_give(runs[index].block, runs[index].offset);
+	kern_free(runs);
+	ghci_vk_submission_end(device, &measured, NULL, 0);
 }
 
 /*
@@ -892,10 +1043,12 @@ skip_command(
 {
 	struct ghci_vk *vk;
 
-	/* One line per command buffer. */
+	/* One line per command buffer, none for the conversion at its end. */
 	if (exec->state->logged)
 		return;
 	exec->state->logged = 1;
+	if (exec->quiet)
+		return;
 
 	/* The device's first refusals are shown. */
 	vk = exec->session->device->vk;
@@ -914,10 +1067,12 @@ refuse(
 {
 	struct ghci_vk *vk;
 
-	/* The first error is the submission's. */
+	/* The first error is the submission's; the conversion at the end of a command buffer shows nothing. */
 	if (exec->error != 0)
 		return;
 	exec->error = error;
+	if (exec->quiet)
+		return;
 
 	/* The device's first refusals are shown. */
 	vk = exec->session->device->vk;
@@ -925,6 +1080,47 @@ refuse(
 		return;
 	vk->refusals++;
 	kern_logf("ghci: %s: vk: submission refused: %s\n", exec->session->device->name, reason);
+}
+
+/*
+ * Places the address of a buffer table the programs read from the
+ * constant bank (the resource table, or the pipeline's driver table):
+ * LOAD_CONST of its low and high words at the set's bank words.
+ */
+static void
+table_address(
+	struct exec *exec,
+	uint32_t set,
+	uint64_t va)
+{
+	uint32_t words[3U + 2U];
+	uint32_t address[2];
+
+	/* The low word, then the high word. */
+	address[0] = (uint32_t)va;
+	address[1] = (uint32_t)(va >> 32);
+	put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_SET(set), 2U, address));
+}
+
+/*
+ * Reports the error a transfer program that could not be placed refuses
+ * the submission with: no room ready (ENOSPC) and no memory (ENOMEM) as
+ * they are, anything else a lost session or device (EIO).
+ */
+static int
+meta_error(
+	int error)
+{
+	/* Out of room ready in the code heap. */
+	if (error == ENOSPC)
+		return ENOSPC;
+
+	/* Out of memory for the heap. */
+	if (error == ENOMEM)
+		return ENOMEM;
+
+	/* The session or the device is lost. */
+	return EIO;
 }
 
 /*
@@ -1145,14 +1341,24 @@ temp_take(
 		chunk = TEMP_CHUNK_BYTES;
 		while (chunk < bytes)
 			chunk <<= 1;
-		error = ghci_vk_heap_take(exec->session, exec->device, GHCI_VK_HEAP_DATA, (uint32_t)chunk, DESC_ALIGN, &exec->chunk_block, &exec->chunk_offset);
+		error = ghci_vk_heap_take(exec->session, exec->device, GHCI_VK_HEAP_DATA, (uint32_t)chunk, DESC_ALIGN, exec->grow, &exec->chunk_block, &exec->chunk_offset);
 		if (error != 0) {
 			exec->chunk_block = NULL;
-			refuse(exec, (error == ENOMEM || error == ENOSPC) ? ENOMEM : EIO, "no temporary memory for a submission");
+			if (error == ENOSPC && !exec->grow) {
+				/* The room made ready at the end of the command buffers is in use. */
+				refuse(exec, ENOSPC, "no temporary memory ready for a submission");
+			} else if (error == ENOMEM || error == ENOSPC) {
+				/* The heap could not grow. */
+				refuse(exec, ENOMEM, "no temporary memory for a submission");
+			} else {
+				/* The session or the device is lost. */
+				refuse(exec, EIO, "no temporary memory for a submission");
+			}
 			return error;
 		}
 		submission->temps[submission->temp_count].block = exec->chunk_block;
 		submission->temps[submission->temp_count].offset = exec->chunk_offset;
+		submission->temps[submission->temp_count].bytes = (uint32_t)chunk;
 		submission->temp_count++;
 		submission->chunk_used = 0U;
 		submission->chunk_bytes = (uint32_t)chunk;
@@ -1846,11 +2052,19 @@ pipeline_sets(
 /*
  * Places the hardware tables and constant bank words of a bind point's
  * pipeline when they changed or the other bind point's are in the ring
- * (the two share the four tables and the bank): sets 0 to 2 in temporary
- * memory, set 3 (the pipeline's driver table) when it has one, and
- * LOAD_CONST of c0-c23 and c32 on (never c24-c31).  A set the pipeline
- * reads that was never bound refuses the submission; a binding the
- * tables cannot be made of (ENOENT) skips the draw or dispatch.
+ * (the two share the bank): the texture and the sampler tables in
+ * temporary memory, bound to set 0 of the bind point with
+ * BIND_DESCRIPTOR_TABLE; the resource table in temporary memory and the
+ * pipeline's driver table (when it has one), whose addresses LOAD_CONST
+ * puts in the bank words the programs read them from (the hardware binds
+ * no buffer tables); and LOAD_CONST of c0-c23 and c32 on.  A set the
+ * pipeline reads that was never bound refuses the submission; a binding
+ * the tables cannot be made of (ENOENT) skips the draw or dispatch.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.4: texture
+ * and sampler tables latched per bind point, kind and set; buffer table
+ * addresses loaded into the constant bank with CMD_LOAD_CONST, which
+ * BIND_DESCRIPTOR_TABLE does not write).
  */
 static int
 tables_place(
@@ -1862,6 +2076,7 @@ tables_place(
 	struct buffer_state *state;
 	struct bind_state *bind;
 	uint32_t words[3U + GHCI_CONST_LOAD_MAX];
+	uint32_t flags;
 	uint32_t used;
 	uint32_t set;
 	uint32_t low;
@@ -1899,36 +2114,43 @@ tables_place(
 		return EINVAL;
 	}
 
-	/* Set 0: the textures by slot. */
+	/* The bind point's tables of textures and samplers. */
+	flags = 0U;
+	if (point == BIND_COMPUTE)
+		flags = GHCI_BIND_TABLE_COMPUTE;
+
+	/* The textures by slot: set 0's texture table, two 16-byte units an entry. */
 	if (tables->texture_count != 0U) {
 		error = temp_take(exec, tables->texture_count * GHCI_TEXTURE_DESC_BYTES, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->textures, tables->texture_count * GHCI_TEXTURE_DESC_BYTES);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_TEXTURES, va, tables->texture_count));
+		put(exec, words, ghci_cmd_bind_descriptor_table(words, flags, GSI1_ABI_SET_TEXTURES, va,
+			tables->texture_count * (GHCI_TEXTURE_DESC_BYTES / GHCI_TABLE_UNIT_BYTES)));
 	}
 
-	/* Set 1: the samplers by slot. */
+	/* The samplers by slot: set 0's sampler table, one 16-byte unit an entry. */
 	if (tables->sampler_count != 0U) {
 		error = temp_take(exec, tables->sampler_count * GHCI_SAMPLER_DESC_BYTES, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->samplers, tables->sampler_count * GHCI_SAMPLER_DESC_BYTES);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_SAMPLERS, va, tables->sampler_count));
+		put(exec, words, ghci_cmd_bind_descriptor_table(words, flags | GHCI_BIND_TABLE_SAMPLER, GSI1_ABI_SET_SAMPLERS, va,
+			tables->sampler_count * (GHCI_SAMPLER_DESC_BYTES / GHCI_TABLE_UNIT_BYTES)));
 	}
 
-	/* Set 2: the resource table, in 16-byte units. */
+	/* The resource table, its address where the programs read it. */
 	if (tables->resource_bytes != 0U) {
 		error = temp_take(exec, tables->resource_bytes, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->resources, tables->resource_bytes);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_RESOURCES, va, tables->resource_bytes / GSI1_ABI_RESOURCE_UNIT));
+		table_address(exec, GSI1_ABI_SET_RESOURCES, va);
 	}
 
-	/* Set 3: the pipeline's driver table (scratch). */
+	/* The pipeline's driver table (scratch), its address where the programs read it. */
 	if (pipeline->table_va != 0U)
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_DRIVER, pipeline->table_va, GSI1_ABI_DRIVER_TABLE_BYTES / GSI1_ABI_RESOURCE_UNIT));
+		table_address(exec, GSI1_ABI_SET_DRIVER, pipeline->table_va);
 
 	/* The push constants of c0-c23, then c32 to the bank's end (push 96-127 and the dynamic offsets). */
 	low = (pipeline->push_bytes + 3U) / 4U;
@@ -3702,13 +3924,13 @@ meta_run(
 		return exec->error;
 
 	/* The program, in the device's code heap; a program the compiler refuses skips the transfer. */
-	error = ghci_vk_meta_pipeline(exec->session, exec->device, dispatch->kind, &pipeline);
+	error = ghci_vk_meta_pipeline(exec->session, exec->device, dispatch->kind, exec->grow, &pipeline);
 	if (error == ENOTSUP) {
 		skip_command(exec, "a transfer whose program the compiler refuses");
 		return ENOTSUP;
 	}
 	if (error != 0) {
-		refuse(exec, error == ENOMEM ? ENOMEM : EIO, "no room for the driver's transfer program");
+		refuse(exec, meta_error(error), "no room for the driver's transfer program");
 		return error;
 	}
 
@@ -4386,13 +4608,13 @@ meta_draw(
 	int error;
 
 	/* The programs, in the device's code heap; programs the compiler refuses skip the transfer. */
-	error = ghci_vk_meta_pipeline(exec->session, exec->device, kind, &pipeline);
+	error = ghci_vk_meta_pipeline(exec->session, exec->device, kind, exec->grow, &pipeline);
 	if (error == ENOTSUP) {
 		skip_command(exec, "a transfer whose program the compiler refuses");
 		return;
 	}
 	if (error != 0) {
-		refuse(exec, error == ENOMEM ? ENOMEM : EIO, "no room for the driver's transfer program");
+		refuse(exec, meta_error(error), "no room for the driver's transfer program");
 		return;
 	}
 
@@ -4438,17 +4660,19 @@ meta_draw(
 	put(exec, words, ghci_cmd_set_viewport(words, viewport));
 	put(exec, words, ghci_cmd_set_scissor(words, (int32_t)rect[0], (int32_t)rect[1], rect[2], rect[3]));
 
-	/* The source's texture (set 0) and the sampler (set 1), slot 0 each. */
+	/* The source's texture and the sampler, slot 0 of the graphics tables of set 0 each. */
 	error = temp_take(exec, GHCI_TEXTURE_DESC_BYTES, TABLE_ALIGN, &table_va, &view);
 	if (error != 0)
 		return;
 	kern_memcpy(view, texture, GHCI_TEXTURE_DESC_BYTES);
-	put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_TEXTURES, table_va, 1U));
+	put(exec, words, ghci_cmd_bind_descriptor_table(words, 0U, GSI1_ABI_SET_TEXTURES, table_va,
+		GHCI_TEXTURE_DESC_BYTES / GHCI_TABLE_UNIT_BYTES));
 	error = temp_take(exec, GHCI_SAMPLER_DESC_BYTES, TABLE_ALIGN, &table_va, &view);
 	if (error != 0)
 		return;
 	(void)ghci_sampler_desc_encode(view, sampler);
-	put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_SAMPLERS, table_va, 1U));
+	put(exec, words, ghci_cmd_bind_descriptor_table(words, GHCI_BIND_TABLE_SAMPLER, GSI1_ABI_SET_SAMPLERS, table_va,
+		GHCI_SAMPLER_DESC_BYTES / GHCI_TABLE_UNIT_BYTES));
 
 	/* The push constants, one triangle, the end of the pass. */
 	put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_PUSH_LOW, push_words, push));

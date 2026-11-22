@@ -50,7 +50,7 @@ static int free_buffers(struct ghci_vk_session *session, struct i915_wire_reader
 static int begin_buffer(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int end_buffer(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int reset_buffer(struct ghci_vk_session *session, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static void buffer_reset(struct ghci_vk_command_buffer *commands);
+static void buffer_reset(struct ghci_vk_object *object);
 static int record(struct ghci_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader);
 static int record_arguments(struct ghci_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader);
 static void record_keep(struct ghci_vk_session *session, struct ghci_vk_object *object, const uint8_t *bytes, size_t length);
@@ -124,11 +124,16 @@ ghci_vk_command_route(
 	return 0;
 }
 
-/* Lets a command buffer's recording go. */
+/* Lets a command buffer's recording go, and takes the room its end made ready out of its device's count. */
 void
 ghci_vk_commands_release(
 	struct ghci_vk_object *object)
 {
+	/* The room made ready for its submissions. */
+	if (object->device != NULL)
+		object->device->prepared -= object->as.commands.demand;
+	object->as.commands.demand = 0U;
+
 	/* The recorded bytes. */
 	kern_free(object->as.commands.bytes);
 	object->as.commands.bytes = NULL;
@@ -271,7 +276,7 @@ pool_buffers(
 				ghci_vk_object_destroy(session, object);
 				continue;
 			}
-			buffer_reset(&object->as.commands);
+			buffer_reset(object);
 			position = &object->next;
 		}
 	}
@@ -417,8 +422,13 @@ begin_buffer(
 	object = ghci_vk_object_find(session, GHCI_VK_COMMAND_BUFFER, identity);
 	if (object == NULL)
 		return EINVAL;
-	buffer_reset(&object->as.commands);
+	buffer_reset(object);
 	object->as.commands.state = GHCI_VK_RECORD_RECORDING;
+
+	/* A buffer begun for simultaneous use may be in flight more than once. */
+	object->as.commands.simultaneous = 0;
+	if ((info.flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT) != 0U)
+		object->as.commands.simultaneous = 1;
 	ghci_vk_reply_result(reply, requested, (uint32_t)VK_SUCCESS);
 
 	/* Succeeded: the buffer records. */
@@ -428,6 +438,8 @@ begin_buffer(
 /*
  * vkEndCommandBuffer: [buffer] -> [result]: VK_SUCCESS, or
  * VK_ERROR_OUT_OF_HOST_MEMORY for a recording that could not be kept.
+ * A primary buffer's submissions find their executor heap room made
+ * ready here (ghci_vk_execute_prepare()).
  */
 static int
 end_buffer(
@@ -455,6 +467,15 @@ end_buffer(
 	result = (uint32_t)VK_SUCCESS;
 	if (object->as.commands.failed)
 		result = (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/*
+	 * A primary buffer's submissions take the executor heap room made
+	 * ready now, where a wait for the GPU is allowed (a secondary one is
+	 * converted within the primary that executes it, whose end prepares
+	 * it).
+	 */
+	if (!object->as.commands.failed && object->as.commands.level == (uint32_t)VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+		ghci_vk_execute_prepare(session, object->device, object);
 	ghci_vk_reply_result(reply, requested, result);
 
 	/* Succeeded: the buffer may be submitted. */
@@ -482,18 +503,29 @@ reset_buffer(
 	object = ghci_vk_object_find(session, GHCI_VK_COMMAND_BUFFER, identity);
 	if (object == NULL)
 		return EINVAL;
-	buffer_reset(&object->as.commands);
+	buffer_reset(object);
 	ghci_vk_reply_result(reply, requested, (uint32_t)VK_SUCCESS);
 
 	/* Succeeded: the buffer is reset. */
 	return 0;
 }
 
-/* Empties a command buffer's recording (its room stays for the next one). */
+/*
+ * Empties a command buffer's recording (its room stays for the next
+ * one); the data heap room its end made ready no longer counts toward
+ * its device's.
+ */
 static void
 buffer_reset(
-	struct ghci_vk_command_buffer *commands)
+	struct ghci_vk_object *object)
 {
+	struct ghci_vk_command_buffer *commands;
+
+	/* The room made ready for its submissions is the device's to count again. */
+	commands = &object->as.commands;
+	object->device->prepared -= commands->demand;
+	commands->demand = 0U;
+
 	/* No command, no failure, the initial state. */
 	commands->used = 0U;
 	commands->commands = 0U;

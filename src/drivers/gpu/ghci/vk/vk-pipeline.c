@@ -1630,7 +1630,7 @@ pipeline_place(
 	pipeline->charged = charged;
 
 	/* The run of the heap. */
-	error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_CODE, bytes, PIPELINE_PSO_ALIGN, &pipeline->block, &pipeline->offset);
+	error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_CODE, bytes, PIPELINE_PSO_ALIGN, 1, &pipeline->block, &pipeline->offset);
 	if (error != 0)
 		return ghci_vk_result(error);
 	view = pipeline->block->allocation->view + pipeline->offset;
@@ -1649,7 +1649,7 @@ pipeline_place(
 
 	/* The scratch memory and the table of its addresses, by stage (a compute program's at 0x10). */
 	if (scratch_bytes != 0U) {
-		error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, (uint32_t)scratch_bytes, PIPELINE_CODE_ALIGN, &pipeline->scratch_block, &pipeline->scratch_offset);
+		error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_DATA, (uint32_t)scratch_bytes, PIPELINE_CODE_ALIGN, 1, &pipeline->scratch_block, &pipeline->scratch_offset);
 		if (error != 0)
 			return ghci_vk_result(error);
 		pipeline->table_va = base + table_at;

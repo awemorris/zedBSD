@@ -296,8 +296,8 @@ enum ghci_vk_meta_kind {
 /* The most dwords one step of a transfer takes: its push constants (LOAD_CONST) and one DISPATCH. */
 #define GHCI_VK_META_STEP_DWORDS	(3U + GHCI_VK_META_PUSH_WORDS + GHCI_DW_DISPATCH)
 
-/* The dwords of a transfer's binds: its pipeline and its resource table. */
-#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + GHCI_DW_BIND_DESCRIPTOR_TABLE)
+/* The dwords of a transfer's binds: its pipeline, and its resource table's address (LOAD_CONST of two words). */
+#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + 3U + 2U)
 
 /*
  * One of the driver's transfer programs placed in a device's code heap:
@@ -459,7 +459,9 @@ struct ghci_vk_retired {
 
 /*
  * One VkDevice: its GHCI session, its executor heaps (code and data, the
- * bytes of each), the runs let go that wait for a ticket, the ticket of
+ * bytes of each, and the data heap bytes its executable command buffers'
+ * ends made ready, which each such end keeps free beside the runs in
+ * flight), the runs let go that wait for a ticket, the ticket of
  * the last work it placed in the ring, and the submissions it holds back
  * (holds, oldest first; hold_serial is the serial of the last one held
  * and hold_count how many are held; failed_timelines has a bit for each
@@ -479,6 +481,7 @@ struct ghci_vk_device {
 	struct ghci_vm *vm;
 	struct ghci_vk_heap_block *heap[GHCI_VK_HEAPS];
 	uint64_t heap_bytes[GHCI_VK_HEAPS];
+	uint64_t prepared;
 	struct ghci_vk_retired *retired;
 	struct ghci_ticket last;
 	int submitted;
@@ -577,13 +580,19 @@ struct ghci_vk_command_pool {
  * recorded commands as they came on the wire ([number][0][buffer] and
  * the arguments, one after another), which a submission executes.
  * failed says that a command could not be kept (the end of the
- * recording reports it).
+ * recording reports it), simultaneous that it was begun for
+ * simultaneous use (it may be in flight more than once), and demand is
+ * the data heap bytes its end made ready for its submissions, which
+ * count toward its device's prepared bytes until it is recorded again,
+ * reset or freed (0 for none).
  */
 struct ghci_vk_command_buffer {
 	uint64_t pool;
 	uint32_t level;
 	enum ghci_vk_recording state;
 	int failed;
+	int simultaneous;
+	uint64_t demand;
 	uint8_t *bytes;
 	uint32_t used;
 	uint32_t capacity;
@@ -893,10 +902,11 @@ struct ghci_vk_tables {
 	uint32_t bank_count;
 };
 
-/* One run of the data heap a submission's temporary memory takes. */
+/* One run of the data heap a submission's temporary memory takes, and its bytes. */
 struct ghci_vk_temp {
 	struct ghci_vk_heap_block *block;
 	uint32_t offset;
+	uint32_t bytes;
 };
 
 /*
@@ -1140,7 +1150,7 @@ int ghci_vk_query_route(struct ghci_vk_session *session, uint32_t opcode, uint32
 
 /* vk-memory.c: memory, buffers, images and the executor heap. */
 struct ghci_allocation *ghci_vk_memory_blob(struct ghci_device *device, struct ghci_session *owner, uint64_t blob_id);
-int ghci_vk_heap_take(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_heap heap, uint32_t bytes, uint32_t alignment, struct ghci_vk_heap_block **block, uint32_t *offset);
+int ghci_vk_heap_take(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_heap heap, uint32_t bytes, uint32_t alignment, int grow, struct ghci_vk_heap_block **block, uint32_t *offset);
 void ghci_vk_heap_give(struct ghci_vk_heap_block *block, uint32_t offset);
 void ghci_vk_heap_retire(struct ghci_vk_device *device, struct ghci_vk_heap_block *block, uint32_t offset, const struct ghci_ticket *ticket);
 void ghci_vk_heap_reclaim(struct ghci_vk_session *session, struct ghci_vk_device *device);
@@ -1162,12 +1172,13 @@ void ghci_vk_pass_release(struct ghci_vk_object *object);
 /* vk-execute.c: the recorded commands of a submission made into packets. */
 int ghci_vk_execute(struct ghci_vk_session *session, struct ghci_vk_device *device, const VkSubmitInfo *submits, uint64_t count, struct ghci_vk_submission *submission);
 int ghci_vk_execute_clear(struct ghci_vk_session *session, struct ghci_vk_device *device, uint64_t va, uint64_t bytes, struct ghci_vk_submission *submission);
+void ghci_vk_execute_prepare(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_vk_object *object);
 void ghci_vk_submission_end(struct ghci_vk_device *device, struct ghci_vk_submission *submission, const struct ghci_ticket *ticket, int placed);
 void ghci_vk_submission_written(struct ghci_vk_device *device, const struct ghci_vk_submission *submission, uint32_t end, const struct ghci_ticket *ticket);
 
 /* vk-meta.c: the driver's own transfer programs. */
 int ghci_vk_meta_compile(const struct ghci_caps *caps, enum ghci_vk_meta_kind kind, struct ghci_gsi1_program **programs);
-int ghci_vk_meta_pipeline(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_meta_kind kind, const struct ghci_vk_meta_pipeline **pipeline);
+int ghci_vk_meta_pipeline(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_meta_kind kind, int grow, const struct ghci_vk_meta_pipeline **pipeline);
 int ghci_vk_meta_copy(const struct ghci_vk_meta_copy *copy, struct ghci_vk_meta_dispatch *dispatch);
 void ghci_vk_meta_table(const struct ghci_vk_meta_pipeline *pipeline, const struct ghci_vk_meta_dispatch *dispatch, uint8_t *view);
 uint32_t ghci_vk_meta_bind(const struct ghci_vk_meta_pipeline *pipeline, uint64_t table, uint32_t *words);

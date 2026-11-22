@@ -130,8 +130,12 @@
  * Unprivileged ISA, version 20240411, chapter "RV32I Base Integer
  * Instruction Set" (the R, I, S, B and U formats), and chapter "F"
  * (the R4 format); amaterrace-gpu d9252e4 docs/ghci.md (section 12.4
- * "Instruction format", the word1 fields and the texture slots of section
- * 12.9), checked against amaterrace-gpu d9252e4 include/gsi1_isa.h.
+ * "Instruction format", the word1 fields), checked against amaterrace-gpu
+ * d9252e4 include/gsi1_isa.h; the texture fields from lumiere-gpu
+ * 875e54b3 ghci.md (section 12.4 word1 and section 12.9: tex_field =
+ * {w1[15:14], w1[20:17]}, samp_field = {w1[30], w1[16], w1[9:6]},
+ * w1[21] I/R, w1[31] 0; 875e54b3 include/gsi1_isa.h still names the
+ * 4-bit fields).
  */
 #define GSI1_W0_OPCODE_SHIFT 0u
 #define GSI1_W0_RD_SHIFT 7u
@@ -155,9 +159,13 @@
 #define GSI1_W1_SAT (1u << 14)
 #define GSI1_W1_HSEL_SHIFT 15u
 #define GSI1_W1_SUB_SHIFT 17u
-#define GSI1_W1_TEX_SLOT_SHIFT 17u	/* texture forms: sub[3:0], the texture slot (set 0) */
-#define GSI1_W1_SAMP_SLOT_SHIFT 6u	/* texture R forms: [9:6], the sampler slot (set 1) */
-#define GSI1_TEX_SLOTS 16u
+#define GSI1_W1_TEX_SLOT_SHIFT 17u	/* texture forms: tex_field[3:0] at [20:17] */
+#define GSI1_W1_TEX_SLOT_HIGH_SHIFT 14u	/* texture forms: tex_field[5:4] at [15:14] */
+#define GSI1_W1_SAMP_SLOT_SHIFT 6u	/* texture forms: samp_field[3:0] at [9:6] */
+#define GSI1_W1_SAMP_SLOT_BIT4_SHIFT 16u	/* texture forms: samp_field[4] */
+#define GSI1_W1_SAMP_SLOT_BIT5_SHIFT 30u	/* texture forms: samp_field[5] */
+#define GSI1_W1_TEX_REGISTER (1u << 21)	/* texture forms: I/R, the fields name registers */
+#define GSI1_TEX_SLOTS 64u		/* immediate slots of set 0's texture and sampler tables */
 #define GSI1_W1_IMM_HI_SHIFT 22u	/* I/S/B: + sext(imm_hi) << 12 */
 #define GSI1_W1_MOVI_SHIFT 2u		/* U: movi's imm[11:0] */
 #define GSI1_W1_TEX_DU_SHIFT 22u	/* texture R forms: texel offsets */

@@ -26,9 +26,6 @@
 /* The largest client session number. */
 #define SESSION_MAX			15U
 
-/* The descriptor sets a table can be bound to. */
-#define DESCRIPTOR_SETS			4U
-
 /* The topologies the pipeline state accepts: POINT to TRIANGLE_STRIP, and PATCH_LIST with tessellation. */
 #define TOPOLOGY_MAX			4U
 
@@ -466,23 +463,54 @@ ghci_cmd_bind_index_buffer(
 }
 
 /*
- * Writes a BIND_DESCRIPTOR_TABLE of one of the four sets.
+ * Writes a BIND_DESCRIPTOR_TABLE: a texture table (32-byte entries) or,
+ * with GHCI_BIND_TABLE_SAMPLER, a sampler table (16-byte entries) of a
+ * bind point's set 0 to 7, units 16-byte units long (0 with the address
+ * 0, which unbinds the set's table of that kind).  Returns the dwords
+ * (4), or 0 for flags of no such bit, a set past 7, a size the field
+ * does not hold, an address not on its entries' alignment, or a size
+ * with no table (or none with one).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_BIND_DESCRIPTOR_TABLE: table_va 32-byte aligned for textures and
+ * 16-byte aligned for samplers, 0 unbinds with table_size_16b 0; a set
+ * of 8 or more is an INVALID_OP fault).
  */
 uint32_t
 ghci_cmd_bind_descriptor_table(
 	uint32_t *out,
+	uint32_t flags,
 	uint32_t set,
 	uint64_t table_va,
-	uint32_t count)
+	uint32_t units)
 {
-	/* Refuses a set past 3 and a count the field does not hold. */
-	if (set >= DESCRIPTOR_SETS || count > 0xFFFFU)
+	uint64_t alignment;
+
+	/* Refuses a flag the header does not have, a set past 7 and a size the field does not hold. */
+	if ((flags & ~GHCI_BIND_TABLE_FLAGS) != 0U)
+		return 0U;
+	if (set >= GHCI_DESCRIPTOR_SETS)
+		return 0U;
+	if (units > 0xFFFFU)
 		return 0U;
 
-	/* Writes the table and its set and descriptor count. */
-	out[0] = ghci_cmd_header(GHCI_OP_BIND_DESCRIPTOR_TABLE, GHCI_DW_BIND_DESCRIPTOR_TABLE, 0U);
+	/* Refuses a table off its entries' alignment. */
+	alignment = GHCI_TEXTURE_DESC_BYTES;
+	if ((flags & GHCI_BIND_TABLE_SAMPLER) != 0U)
+		alignment = GHCI_SAMPLER_DESC_BYTES;
+	if ((table_va & (alignment - 1U)) != 0U)
+		return 0U;
+
+	/* Refuses an unbind with a size, and a table without one. */
+	if (table_va == 0U && units != 0U)
+		return 0U;
+	if (table_va != 0U && units == 0U)
+		return 0U;
+
+	/* Writes the table, its set and its size. */
+	out[0] = ghci_cmd_header(GHCI_OP_BIND_DESCRIPTOR_TABLE, GHCI_DW_BIND_DESCRIPTOR_TABLE, flags);
 	put64(&out[1], table_va);
-	out[3] = set | (count << 16);
+	out[3] = set | (units << 16);
 
 	/* Succeeded: four dwords. */
 	return GHCI_DW_BIND_DESCRIPTOR_TABLE;

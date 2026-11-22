@@ -554,7 +554,7 @@ take_slot(
 
 	/* The pipeline's stages share the slots. */
 	if (*count == limit) {
-		error = gsi1_refuse(lowering, ENOTSUP, "the pipeline's stages need more than 16 texture or sampler slots");
+		error = gsi1_refuse(lowering, ENOTSUP, "the pipeline's stages need more than 64 texture or sampler slots");
 		return error;
 	}
 

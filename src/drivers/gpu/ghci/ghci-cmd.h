@@ -238,6 +238,25 @@
 #define GHCI_COPY_ASYNC			(1U << 0)
 #define GHCI_COPY_FILL_PATTERN		(1U << 1)
 #define GHCI_COPY_FLUSH_SRC		(1U << 2)
+
+/*
+ * The flags of CMD_BIND_DESCRIPTOR_TABLE (the compute bind point, the
+ * graphics one without it; an invalidation of the texture unit's
+ * descriptor cache; a sampler table of 16-byte entries, a texture table
+ * of 32-byte entries without it), the sets a table binds to, and the
+ * table's size in 16-byte units.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_BIND_DESCRIPTOR_TABLE: flags [0] BIND_POINT, [1] INVAL_CACHE,
+ * [2] TABLE_KIND, [15:3] reserved; dword 3 [15:0] set_index 0..7,
+ * [31:16] table_size_16b; section 8.4, GHCI_MAX_DESCRIPTOR_SETS 8).
+ */
+#define GHCI_BIND_TABLE_COMPUTE		(1U << 0)
+#define GHCI_BIND_TABLE_INVAL_CACHE	(1U << 1)
+#define GHCI_BIND_TABLE_SAMPLER		(1U << 2)
+#define GHCI_BIND_TABLE_FLAGS		0x7U
+#define GHCI_DESCRIPTOR_SETS		8U
+#define GHCI_TABLE_UNIT_BYTES		16U
 #define GHCI_COPY_FLUSH_DST		(1U << 3)
 #define GHCI_CLEAR_COLOR_SHIFT		0U
 #define GHCI_CLEAR_DEPTH		(1U << 8)
@@ -638,7 +657,7 @@ uint32_t ghci_cmd_query_caps(uint32_t *out, uint64_t bus, uint32_t bytes);
 uint32_t ghci_cmd_bind_pipeline(uint32_t *out, uint64_t pso_va);
 uint32_t ghci_cmd_bind_vertex_buffers(uint32_t *out, uint32_t first, uint32_t count, const struct ghci_vertex_binding *bindings);
 uint32_t ghci_cmd_bind_index_buffer(uint32_t *out, uint64_t va, uint32_t index_32bit);
-uint32_t ghci_cmd_bind_descriptor_table(uint32_t *out, uint32_t set, uint64_t table_va, uint32_t count);
+uint32_t ghci_cmd_bind_descriptor_table(uint32_t *out, uint32_t flags, uint32_t set, uint64_t table_va, uint32_t units);
 uint32_t ghci_cmd_set_viewport(uint32_t *out, const uint32_t *float_bits);
 uint32_t ghci_cmd_set_scissor(uint32_t *out, int32_t x, int32_t y, uint32_t width, uint32_t height);
 uint32_t ghci_cmd_set_dynamic_state(uint32_t *out, uint32_t state_id, const uint32_t *payload);
