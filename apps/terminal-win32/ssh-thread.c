@@ -1447,6 +1447,8 @@ thread_from_tab(
 	written = 0U;
 	if (session->input_length != 0U && !closing)
 		(void)ssh_engine_write(link->engine, session->input, session->input_length, &written);
+
+	/* The keys taken leave the buffer, and a full buffer has room again. */
 	if (written != 0U) {
 		memmove(session->input, session->input + written, session->input_length - written);
 		session->input_length -= written;

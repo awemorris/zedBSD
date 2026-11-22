@@ -1757,8 +1757,12 @@ run_tab_requests(
 		found = run_tab_find(request.id);
 		if (found < 0)
 			continue;
+
+		/* A tab chosen is shown. */
 		if (request.kind == TERMINAL_TAB_ACTIVATE)
 			run_tab_switch(run, (unsigned)found);
+
+		/* A tab closed goes; the last one ends the run. */
 		if (request.kind == TERMINAL_TAB_CLOSE) {
 			status = run_tab_close(options, run, (unsigned)found);
 			if (status != 0)
