@@ -962,7 +962,8 @@ emit_texture(
 
 	/* The slots and the texel offsets. */
 	kern_memset(&extra, 0, sizeof(extra));
-	extra.sub = sample->slot;
+	extra.textured = 1;
+	extra.texture = sample->slot;
 	extra.sampler = sample->sampler;
 	extra.offset_u = sample->offset[0];
 	extra.offset_v = sample->offset[1];
@@ -985,6 +986,7 @@ emit_texsz(
 	uint32_t rd,
 	uint32_t level)
 {
+	uint64_t instruction;
 	uint32_t rs1;
 
 	/* texsz.l and texsz.s have no rs1. */
@@ -996,8 +998,10 @@ emit_texsz(
 	if (immediate == GSI1_TEXSZ_SAMPLES)
 		lowering->flags |= GHCI_GSI1_FLAG_SAMPLE_QUERY;
 
-	/* The I form: the slot in sub. */
-	gsi1_emit(lowering, gsi1_encode_i(GSI1_OP_CUSTOM1, GSI1_F3_TEXSZ, rd, rs1, (int32_t)immediate, slot));
+	/* The I form, with the texture slot's fields in word1 (no sampler). */
+	instruction = gsi1_encode_i(GSI1_OP_CUSTOM1, GSI1_F3_TEXSZ, rd, rs1, (int32_t)immediate, 0U);
+	instruction |= (uint64_t)gsi1_encode_texture_slots(slot, 0U) << 32;
+	gsi1_emit(lowering, instruction);
 }
 
 /* Reports the signed value of the low four bits. */

@@ -25,12 +25,14 @@
 /*
  * The extension word's own fields, as the encoder's callers pass them:
  * the float modifiers of the three sources, saturation and the half
- * select, the sub-operation, and the texture R forms' sampler slot and
- * texel offsets.
+ * select, the sub-operation, and a texture R form's slots (textured set;
+ * its sub is 0) and texel offsets.
  */
 struct gsi1_extra {
 	uint32_t modifiers;
 	uint32_t sub;
+	int textured;
+	uint32_t texture;
 	uint32_t sampler;
 	int32_t offset_u;
 	int32_t offset_v;
@@ -42,6 +44,9 @@ uint64_t gsi1_encode_r(uint32_t opcode, uint32_t funct3, uint32_t funct7, uint32
 
 /* Encodes an R4-form instruction (the three-source form). */
 uint64_t gsi1_encode_r4(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t rs3, const struct gsi1_extra *extra);
+
+/* Packs a texture instruction's immediate texture and sampler slots (0 to 63) into word1. */
+uint32_t gsi1_encode_texture_slots(uint32_t texture, uint32_t sampler);
 
 /* Encodes an I-form instruction with a 22-bit signed immediate. */
 uint64_t gsi1_encode_i(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1, int32_t immediate, uint32_t sub);

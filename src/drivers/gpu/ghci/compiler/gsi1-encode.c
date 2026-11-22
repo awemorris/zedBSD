@@ -27,8 +27,16 @@
 /* The bits of a texel offset (-8 to 7). */
 #define GSI1_TEXEL_OFFSET_BITS		0xfU
 
-/* The bits of a texture or sampler slot (0 to 15). */
-#define GSI1_SLOT_BITS			0xfU
+/*
+ * The parts of a texture or sampler slot (0 to 63): the low four bits,
+ * the two above them (a texture slot's), and bits 4 and 5 one by one (a
+ * sampler slot's).
+ */
+#define GSI1_SLOT_LOW_BITS		0xfU
+#define GSI1_SLOT_HIGH_SHIFT		4U
+#define GSI1_SLOT_HIGH_BITS		0x3U
+#define GSI1_SLOT_BIT4			4U
+#define GSI1_SLOT_BIT5			5U
 
 /* The bits of the sub-operation field and of a 7-bit field. */
 #define GSI1_SUB_BITS			0x1fU
@@ -106,6 +114,37 @@ gsi1_encode_r4(
 
 	/* Succeeded: the instruction's two words. */
 	return join_words(word0, word1);
+}
+
+/*
+ * Packs a texture instruction's immediate texture and sampler slots (0 to
+ * 63, set 0's tables) into word1: the texture slot's low four bits at
+ * [20:17] and its high two at [15:14], the sampler slot's low four bits
+ * at [9:6], bit 4 at [16] and bit 5 at [30].  The register mode ([21])
+ * and [31] stay 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 12.9:
+ * tex_field = {w1[15:14], w1[20:17]}, samp_field = {w1[30], w1[16],
+ * w1[9:6]}, w1[21] I/R, w1[31] 0).
+ */
+uint32_t
+gsi1_encode_texture_slots(
+	uint32_t texture,
+	uint32_t sampler)
+{
+	uint32_t word1;
+
+	/* The texture slot: its low four bits, then the two above. */
+	word1 = (texture & GSI1_SLOT_LOW_BITS) << GSI1_W1_TEX_SLOT_SHIFT;
+	word1 |= ((texture >> GSI1_SLOT_HIGH_SHIFT) & GSI1_SLOT_HIGH_BITS) << GSI1_W1_TEX_SLOT_HIGH_SHIFT;
+
+	/* The sampler slot: its low four bits, bit 4 and bit 5 each in a place of its own. */
+	word1 |= (sampler & GSI1_SLOT_LOW_BITS) << GSI1_W1_SAMP_SLOT_SHIFT;
+	word1 |= ((sampler >> GSI1_SLOT_BIT4) & 1U) << GSI1_W1_SAMP_SLOT_BIT4_SHIFT;
+	word1 |= ((sampler >> GSI1_SLOT_BIT5) & 1U) << GSI1_W1_SAMP_SLOT_BIT5_SHIFT;
+
+	/* Succeeded: the slot fields of word1. */
+	return word1;
 }
 
 /*
@@ -340,8 +379,9 @@ encode_extra(
 	/* The sub-operation. */
 	word1 |= (extra->sub & GSI1_SUB_BITS) << GSI1_W1_SUB_SHIFT;
 
-	/* A texture R form's sampler slot. */
-	word1 |= (extra->sampler & GSI1_SLOT_BITS) << GSI1_W1_SAMP_SLOT_SHIFT;
+	/* A texture R form's slots. */
+	if (extra->textured)
+		word1 |= gsi1_encode_texture_slots(extra->texture, extra->sampler);
 
 	/* The texel offsets, four signed bits each. */
 	word1 |= ((uint32_t)extra->offset_u & GSI1_TEXEL_OFFSET_BITS) << GSI1_W1_TEX_DU_SHIFT;

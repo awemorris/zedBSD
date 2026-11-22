@@ -296,8 +296,8 @@ enum ghci_vk_meta_kind {
 /* The most dwords one step of a transfer takes: its push constants (LOAD_CONST) and one DISPATCH. */
 #define GHCI_VK_META_STEP_DWORDS	(3U + GHCI_VK_META_PUSH_WORDS + GHCI_DW_DISPATCH)
 
-/* The dwords of a transfer's binds: its pipeline and its resource table. */
-#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + GHCI_DW_BIND_DESCRIPTOR_TABLE)
+/* The dwords of a transfer's binds: its pipeline, and its resource table's address (LOAD_CONST of two words). */
+#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + 3U + 2U)
 
 /*
  * One of the driver's transfer programs placed in a device's code heap:

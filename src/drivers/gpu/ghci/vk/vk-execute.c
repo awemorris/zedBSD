@@ -368,6 +368,7 @@ static void command_convert(struct exec *exec, uint32_t number, struct i915_wire
 static void skip_command(struct exec *exec, const char *reason);
 static void refuse(struct exec *exec, int error, const char *reason);
 static int meta_error(int error);
+static void table_address(struct exec *exec, uint32_t set, uint64_t va);
 static void put(struct exec *exec, const uint32_t *words, uint32_t count);
 static void cut_mark(struct exec *exec, uint32_t at, const uint64_t *events, uint32_t count);
 static int temp_take(struct exec *exec, uint32_t bytes, uint32_t alignment, uint64_t *va, uint8_t **view);
@@ -1079,6 +1080,26 @@ refuse(
 		return;
 	vk->refusals++;
 	kern_logf("ghci: %s: vk: submission refused: %s\n", exec->session->device->name, reason);
+}
+
+/*
+ * Places the address of a buffer table the programs read from the
+ * constant bank (the resource table, or the pipeline's driver table):
+ * LOAD_CONST of its low and high words at the set's bank words.
+ */
+static void
+table_address(
+	struct exec *exec,
+	uint32_t set,
+	uint64_t va)
+{
+	uint32_t words[3U + 2U];
+	uint32_t address[2];
+
+	/* The low word, then the high word. */
+	address[0] = (uint32_t)va;
+	address[1] = (uint32_t)(va >> 32);
+	put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_SET(set), 2U, address));
 }
 
 /*
@@ -2031,11 +2052,19 @@ pipeline_sets(
 /*
  * Places the hardware tables and constant bank words of a bind point's
  * pipeline when they changed or the other bind point's are in the ring
- * (the two share the four tables and the bank): sets 0 to 2 in temporary
- * memory, set 3 (the pipeline's driver table) when it has one, and
- * LOAD_CONST of c0-c23 and c32 on (never c24-c31).  A set the pipeline
- * reads that was never bound refuses the submission; a binding the
- * tables cannot be made of (ENOENT) skips the draw or dispatch.
+ * (the two share the bank): the texture and the sampler tables in
+ * temporary memory, bound to set 0 of the bind point with
+ * BIND_DESCRIPTOR_TABLE; the resource table in temporary memory and the
+ * pipeline's driver table (when it has one), whose addresses LOAD_CONST
+ * puts in the bank words the programs read them from (the hardware binds
+ * no buffer tables); and LOAD_CONST of c0-c23 and c32 on.  A set the
+ * pipeline reads that was never bound refuses the submission; a binding
+ * the tables cannot be made of (ENOENT) skips the draw or dispatch.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.4: texture
+ * and sampler tables latched per bind point, kind and set; buffer table
+ * addresses loaded into the constant bank with CMD_LOAD_CONST, which
+ * BIND_DESCRIPTOR_TABLE does not write).
  */
 static int
 tables_place(
@@ -2047,6 +2076,7 @@ tables_place(
 	struct buffer_state *state;
 	struct bind_state *bind;
 	uint32_t words[3U + GHCI_CONST_LOAD_MAX];
+	uint32_t flags;
 	uint32_t used;
 	uint32_t set;
 	uint32_t low;
@@ -2084,36 +2114,43 @@ tables_place(
 		return EINVAL;
 	}
 
-	/* Set 0: the textures by slot. */
+	/* The bind point's tables of textures and samplers. */
+	flags = 0U;
+	if (point == BIND_COMPUTE)
+		flags = GHCI_BIND_TABLE_COMPUTE;
+
+	/* The textures by slot: set 0's texture table, two 16-byte units an entry. */
 	if (tables->texture_count != 0U) {
 		error = temp_take(exec, tables->texture_count * GHCI_TEXTURE_DESC_BYTES, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->textures, tables->texture_count * GHCI_TEXTURE_DESC_BYTES);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_TEXTURES, va, tables->texture_count));
+		put(exec, words, ghci_cmd_bind_descriptor_table(words, flags, GSI1_ABI_SET_TEXTURES, va,
+			tables->texture_count * (GHCI_TEXTURE_DESC_BYTES / GHCI_TABLE_UNIT_BYTES)));
 	}
 
-	/* Set 1: the samplers by slot. */
+	/* The samplers by slot: set 0's sampler table, one 16-byte unit an entry. */
 	if (tables->sampler_count != 0U) {
 		error = temp_take(exec, tables->sampler_count * GHCI_SAMPLER_DESC_BYTES, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->samplers, tables->sampler_count * GHCI_SAMPLER_DESC_BYTES);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_SAMPLERS, va, tables->sampler_count));
+		put(exec, words, ghci_cmd_bind_descriptor_table(words, flags | GHCI_BIND_TABLE_SAMPLER, GSI1_ABI_SET_SAMPLERS, va,
+			tables->sampler_count * (GHCI_SAMPLER_DESC_BYTES / GHCI_TABLE_UNIT_BYTES)));
 	}
 
-	/* Set 2: the resource table, in 16-byte units. */
+	/* The resource table, its address where the programs read it. */
 	if (tables->resource_bytes != 0U) {
 		error = temp_take(exec, tables->resource_bytes, TABLE_ALIGN, &va, &view);
 		if (error != 0)
 			return error;
 		kern_memcpy(view, tables->resources, tables->resource_bytes);
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_RESOURCES, va, tables->resource_bytes / GSI1_ABI_RESOURCE_UNIT));
+		table_address(exec, GSI1_ABI_SET_RESOURCES, va);
 	}
 
-	/* Set 3: the pipeline's driver table (scratch). */
+	/* The pipeline's driver table (scratch), its address where the programs read it. */
 	if (pipeline->table_va != 0U)
-		put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_DRIVER, pipeline->table_va, GSI1_ABI_DRIVER_TABLE_BYTES / GSI1_ABI_RESOURCE_UNIT));
+		table_address(exec, GSI1_ABI_SET_DRIVER, pipeline->table_va);
 
 	/* The push constants of c0-c23, then c32 to the bank's end (push 96-127 and the dynamic offsets). */
 	low = (pipeline->push_bytes + 3U) / 4U;
@@ -4623,17 +4660,19 @@ meta_draw(
 	put(exec, words, ghci_cmd_set_viewport(words, viewport));
 	put(exec, words, ghci_cmd_set_scissor(words, (int32_t)rect[0], (int32_t)rect[1], rect[2], rect[3]));
 
-	/* The source's texture (set 0) and the sampler (set 1), slot 0 each. */
+	/* The source's texture and the sampler, slot 0 of the graphics tables of set 0 each. */
 	error = temp_take(exec, GHCI_TEXTURE_DESC_BYTES, TABLE_ALIGN, &table_va, &view);
 	if (error != 0)
 		return;
 	kern_memcpy(view, texture, GHCI_TEXTURE_DESC_BYTES);
-	put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_TEXTURES, table_va, 1U));
+	put(exec, words, ghci_cmd_bind_descriptor_table(words, 0U, GSI1_ABI_SET_TEXTURES, table_va,
+		GHCI_TEXTURE_DESC_BYTES / GHCI_TABLE_UNIT_BYTES));
 	error = temp_take(exec, GHCI_SAMPLER_DESC_BYTES, TABLE_ALIGN, &table_va, &view);
 	if (error != 0)
 		return;
 	(void)ghci_sampler_desc_encode(view, sampler);
-	put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_SAMPLERS, table_va, 1U));
+	put(exec, words, ghci_cmd_bind_descriptor_table(words, GHCI_BIND_TABLE_SAMPLER, GSI1_ABI_SET_SAMPLERS, table_va,
+		GHCI_SAMPLER_DESC_BYTES / GHCI_TABLE_UNIT_BYTES));
 
 	/* The push constants, one triangle, the end of the pass. */
 	put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_PUSH_LOW, push_words, push));
