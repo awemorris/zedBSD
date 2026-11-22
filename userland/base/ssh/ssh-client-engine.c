@@ -174,9 +174,9 @@ struct engine_identity {
  * channels and channel are the session channel (NULL before it is open
  * and after its close went both ways); replies the kinds of the channel
  * requests waiting for a reply; unconsumed the bytes of SSH_ENGINE_DATA
- * handed out that the caller has not reported used.  pty_refused, started, eof_wanted,
- * have_exit, exit_status, exit_signal and session_reason are what the
- * session came to.  events (event_count of them from event_first) wait to
+ * handed out that the caller has not reported used.  pty_refused,
+ * started, eof_wanted, have_exit, exit_status, exit_signal and
+ * session_reason are what the session came to.  events (event_count of them from event_first) wait to
  * be taken; closed_queued is 1 once SSH_ENGINE_CLOSED is among them or
  * taken.  peer_ended is 1 once the caller said the connection reached its
  * end, identified 1 once the server's identification line was read, and
