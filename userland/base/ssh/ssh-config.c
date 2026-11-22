@@ -160,6 +160,17 @@ struct ssh_state {
 	int option;
 };
 
+/*
+ * The state ssh_config_hosts keeps for one call: the caller's function
+ * and its data, and the nonzero answer with which that function stopped
+ * the walk (0 while it goes on).
+ */
+struct ssh_hosts_state {
+	ssh_config_host_handler host;
+	void *data;
+	int stopped;
+};
+
 /* The function that handles one split line; it answers 0 or EINVAL and, for EINVAL, says what was wrong in *what. */
 typedef int (*config_line_handler)(void *context, const struct config_line *parsed, const char **what);
 
@@ -372,6 +383,8 @@ static int ssh_value_identity(struct ssh_config *target, const struct config_lin
 static int ssh_value(struct ssh_config *target, int id, const struct config_line *parsed, const char **what);
 static int ssh_apply_host(struct ssh_state *state, const struct config_line *parsed, const char **what);
 static int ssh_config_apply(void *context, const struct config_line *parsed, const char **what);
+static int ssh_hosts_apply(void *context, const struct config_line *parsed, const char **what);
+static int ssh_hosts_is_name(const struct config_token *token);
 
 /*
  * Fills config with sshd's defaults (host_key_count 0: the default key
@@ -648,6 +661,54 @@ ssh_config_defaults(
 	/* The INFO level. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_LOG_LEVEL)) == 0)
 		config->log_level = 1;
+}
+
+/*
+ * Gives each host name of the Host lines of size bytes of ssh_config text
+ * to host, in order.
+ *
+ * A name is a pattern without '*', '?' or '!' (a pattern that matches one
+ * name only); patterns that match more are left out.  The lines are split
+ * as ssh_config_parse splits them, and nothing but Host is looked at.
+ */
+int
+ssh_config_hosts(
+	const char *text,
+	size_t size,
+	ssh_config_host_handler host,
+	void *data,
+	char *error)
+{
+	struct ssh_hosts_state state;
+	int status;
+
+	/* A missing function has nowhere to give the names to. */
+	if (host == NULL) {
+		config_error(error, 0, "no host function", NULL, 0);
+		return EINVAL;
+	}
+
+	/* Starts with the caller's function, which has not stopped the walk. */
+	state.host = host;
+	state.data = data;
+	state.stopped = 0;
+
+	/* Reads every line of the text. */
+	status = config_run(text, size, ssh_hosts_apply, &state, error);
+
+	/* Passes on the answer with which the caller's function stopped. */
+	if (state.stopped != 0) {
+		if (error != NULL)
+			error[0] = '\0';
+		return state.stopped;
+	}
+
+	/* Reports a text that could not be read. */
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every name was given. */
+	return 0;
 }
 
 /* Reports whether a byte separates the words of a line (a space, a tab or another white-space character). */
@@ -2241,4 +2302,80 @@ ssh_config_apply(
 
 	/* Succeeded: the line is handled. */
 	return 0;
+}
+
+/*
+ * Handles one line for ssh_config_hosts: a Host line gives each of its
+ * names to the caller's function; any other line is passed over.
+ */
+static int
+ssh_hosts_apply(
+	void *context,
+	const struct config_line *parsed,
+	const char **what)
+{
+	struct ssh_hosts_state *state;
+	const struct config_token *token;
+	unsigned index;
+	int keyword;
+	int name;
+	int answer;
+
+	/* Takes the state from the callback context. */
+	state = context;
+
+	/* Looks at Host lines only. */
+	keyword = config_find_keyword(ssh_keywords, sizeof(ssh_keywords) / sizeof(ssh_keywords[0]), parsed->keyword, parsed->keyword_size);
+	if (keyword < 0)
+		return 0;
+	if (ssh_keywords[keyword].kind != CONFIG_KIND_ACTED)
+		return 0;
+	if (ssh_keywords[keyword].id != SSH_KW_HOST)
+		return 0;
+
+	/* Gives each pattern that names one host. */
+	for (index = 0; index < parsed->token_count; index++) {
+		token = &parsed->tokens[index];
+		name = ssh_hosts_is_name(token);
+		if (!name)
+			continue;
+
+		/* Asks the caller's function; a nonzero answer stops the walk. */
+		answer = state->host(state->data, token->text, token->size);
+		if (answer != 0) {
+			state->stopped = answer;
+			*what = "stopped";
+			return EINVAL;
+		}
+	}
+
+	/* Succeeded: the line's names are given. */
+	return 0;
+}
+
+/* Reports whether a Host pattern names one host: not empty, and without '*', '?' or '!'. */
+static int
+ssh_hosts_is_name(
+	const struct config_token *token)
+{
+	size_t index;
+	char byte;
+
+	/* An empty pattern names nothing. */
+	if (token->size == 0)
+		return 0;
+
+	/* A wildcard or a negation makes a pattern of more (or no) hosts. */
+	for (index = 0; index < token->size; index++) {
+		byte = token->text[index];
+		if (byte == '*')
+			return 0;
+		if (byte == '?')
+			return 0;
+		if (byte == '!')
+			return 0;
+	}
+
+	/* The pattern is one name. */
+	return 1;
 }

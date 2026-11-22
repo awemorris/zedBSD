@@ -9,20 +9,28 @@
  * The messages and the arithmetic of a key exchange: SSH_MSG_KEXINIT and
  * the choice of algorithms (RFC 4253 7.1), the strict key exchange
  * markers (draft-ietf-sshm-strict-kex-02 3.1), the messages of
- * mlkem768x25519-sha256 (draft-ietf-sshm-mlkem-hybrid-kex-10 2), the
- * exchange hash H (its 2.5) and the derivation of keys (RFC 4253 7.2).
- * The order of the exchange and its state live in ssh-transport.h.
+ * mlkem768x25519-sha256 (draft-ietf-sshm-mlkem-hybrid-kex-10 2) and of
+ * curve25519-sha256 (RFC 8731 3, which uses the ECDH messages of RFC 5656
+ * 4), the exchange hash H (the draft's 2.5, RFC 8731 3.1) and the
+ * derivation of keys (RFC 4253 7.2).  The order of the exchange and its
+ * state live in ssh-transport.h.
  *
- * Each side offers exactly one algorithm of each kind and the peer's list
- * must contain it: the choice is then that algorithm, or nothing
- * (RFC 4253 7.1's rule "the first algorithm on the client's list that is
- * also on the server's" gives the same answer when one list has a single
- * name).  The lists sent:
+ * The server offers exactly one algorithm of each kind and the client's
+ * list must contain it.  The client offers one algorithm of each kind but
+ * the key exchange, where it offers mlkem768x25519-sha256 first and
+ * curve25519-sha256 (under its standard name and the older name that
+ * servers before RFC 8731 know) after it, so that a server without the
+ * hybrid method (OpenSSH before 9.9) is still reached.  The choice follows
+ * RFC 4253 7.1: the first algorithm on the client's list that is also on
+ * the server's.  The lists sent:
  *
- *   kex_algorithms          client: "mlkem768x25519-sha256,kex-strict-c,
- *                           kex-strict-c-v00@openssh.com"; server: the same
- *                           with -s (the markers only in the initial
- *                           KEXINIT; draft-ietf-sshm-strict-kex-02 3.1)
+ *   kex_algorithms          client: "mlkem768x25519-sha256,
+ *                           curve25519-sha256,curve25519-sha256@libssh.org,
+ *                           kex-strict-c,kex-strict-c-v00@openssh.com";
+ *                           server: "mlkem768x25519-sha256,kex-strict-s,
+ *                           kex-strict-s-v00@openssh.com" (the markers only
+ *                           in the initial KEXINIT;
+ *                           draft-ietf-sshm-strict-kex-02 3.1)
  *   server_host_key_algorithms  "ssh-ed25519"
  *   encryption_algorithms   "chacha20-poly1305@openssh.com" (both ways)
  *   mac_algorithms          empty (both ways): the cipher authenticates,
@@ -34,8 +42,10 @@
  * Strict key exchange is required: a peer whose initial KEXINIT carries
  * neither marker of its side is refused (EPROTO).  Every peer that offers
  * mlkem768x25519-sha256 (OpenSSH 9.9 and later) also offers strict key
- * exchange.  This side sends both the standard and the pre-standard
- * marker, so a peer that sends either name pairs with it (3.1).
+ * exchange, and so does every OpenSSH from 9.6 on that this client reaches
+ * with curve25519-sha256.  This side sends both the standard and the
+ * pre-standard marker, so a peer that sends either name pairs with it
+ * (3.1).
  */
 
 #ifndef SSH_SSH_KEX_H
@@ -51,8 +61,14 @@
 #define SSH_MSG_KEX_HYBRID_INIT		30
 #define SSH_MSG_KEX_HYBRID_REPLY	31
 
+/* The message numbers of curve25519-sha256 (RFC 5656 7.1, as RFC 8731 3 uses them); the same numbers as the hybrid ones. */
+#define SSH_MSG_KEX_ECDH_INIT		30
+#define SSH_MSG_KEX_ECDH_REPLY		31
+
 /* The algorithm names. */
 #define SSH_KEX_NAME		"mlkem768x25519-sha256"
+#define SSH_KEX_CURVE25519_NAME	"curve25519-sha256"
+#define SSH_KEX_CURVE25519_OLD_NAME	"curve25519-sha256@libssh.org"
 #define SSH_KEX_HOSTKEY_NAME	"ssh-ed25519"
 #define SSH_KEX_STRICT_CLIENT	"kex-strict-c"
 #define SSH_KEX_STRICT_CLIENT_OLD	"kex-strict-c-v00@openssh.com"
@@ -83,6 +99,28 @@ struct ssh_kexinit {
 	int first_kex_packet_follows;
 };
 
+/* The key exchange methods; a server uses only the hybrid one. */
+enum ssh_kex_method {
+	/* mlkem768x25519-sha256: K enters the hash and the derivation as a string. */
+	SSH_KEX_MLKEM768X25519 = 0,
+
+	/* curve25519-sha256 under either name: K enters them as an mpint. */
+	SSH_KEX_CURVE25519 = 1
+};
+
+/* How the shared secret K is encoded where the hash and the derivation take it. */
+enum ssh_kex_secret_form {
+	/* uint32 32, then the 32 bytes (draft-ietf-sshm-mlkem-hybrid-kex-10 2.5). */
+	SSH_KEX_SECRET_STRING = 0,
+
+	/*
+	 * The 32 bytes read as a big-endian unsigned number, as an mpint
+	 * (RFC 8731 3.1, RFC 4251 5): leading zero bytes dropped, and one zero
+	 * byte put in front when the highest bit of what is left is set.
+	 */
+	SSH_KEX_SECRET_MPINT = 1
+};
+
 /*
  * What the choice of algorithms decided.
  *
@@ -91,11 +129,13 @@ struct ssh_kexinit {
  * peer sent a guessed key exchange packet that is wrong and the next key
  * exchange packet from it must be dropped (RFC 4253 7: the guess is right
  * only when the peer's first kex algorithm and first host key algorithm
- * are the ones chosen).
+ * are the ones chosen).  method is the key exchange method chosen for
+ * this exchange (each exchange chooses again).
  */
 struct ssh_kex_choice {
 	int strict;
 	int ignore_next;
+	enum ssh_kex_method method;
 };
 
 /*
@@ -105,7 +145,10 @@ struct ssh_kex_choice {
  * version_client and version_server are the identification lines without
  * CR LF; kexinit_client and kexinit_server the whole KEXINIT payloads
  * including the message number; host_key the server's public key blob;
- * c_init and s_reply the hybrid values; k the 32-byte shared secret.
+ * c_init and s_reply the hybrid values, or with curve25519-sha256 the
+ * client's and the server's ephemeral public keys Q_C and Q_S (RFC 8731
+ * 3.1 hashes them as strings in the same places); k the 32-byte shared
+ * secret, which the hash encodes as its form says.
  */
 struct ssh_kex_hash_input {
 	const uint8_t *version_client;
@@ -151,16 +194,20 @@ int ssh_kexinit_parse(const uint8_t *payload, size_t size, struct ssh_kexinit *k
  * server is 1 when this side is the server; initial is 1 for the first
  * exchange of the connection (only then are strict markers looked at, and
  * choice->strict set; a later exchange leaves choice->strict as it was).
- * The peer must list SSH_KEX_NAME, SSH_KEX_HOSTKEY_NAME, SSH_CIPHER_NAME
- * in both directions and "none" compression in both directions (ENOTSUP
- * otherwise: the caller disconnects with
- * SSH_DISCONNECT_KEY_EXCHANGE_FAILED naming the kind).  The MAC lists are
- * not looked at.  In the initial exchange the peer must carry a strict
- * marker of its side, the standard or the pre-standard name (this side
- * sends both, so either pairs; EPROTO when it carries neither).
+ * A server's peer must list SSH_KEX_NAME; a client takes the first of
+ * SSH_KEX_NAME, SSH_KEX_CURVE25519_NAME and SSH_KEX_CURVE25519_OLD_NAME
+ * that the server lists, into choice->method.  The peer must also list
+ * SSH_KEX_HOSTKEY_NAME, SSH_CIPHER_NAME in both directions and "none"
+ * compression in both directions (ENOTSUP otherwise: the caller
+ * disconnects with SSH_DISCONNECT_KEY_EXCHANGE_FAILED naming the kind).
+ * The MAC lists are not looked at.  In the initial exchange the peer must
+ * carry a strict marker of its side, the standard or the pre-standard
+ * name (this side sends both, so either pairs; EPROTO when it carries
+ * neither).
  *
- * Returns 0, ENOTSUP or EPROTO.  kind (may be NULL) receives the name of
- * the kind that failed, for the message.
+ * Returns 0, ENOTSUP or EPROTO; on a failure choice is left as it was.
+ * kind (may be NULL) receives the name of the kind that failed, for the
+ * message.
  */
 int ssh_kex_choose(int server, int initial, const struct ssh_kexinit *peer, struct ssh_kex_choice *choice, const char **kind);
 
@@ -186,15 +233,36 @@ void ssh_kex_put_hybrid_reply(const uint8_t *host_key, size_t host_key_size, con
  */
 int ssh_kex_parse_hybrid_reply(const uint8_t *payload, size_t size, const uint8_t **host_key, size_t *host_key_size, const uint8_t **s_reply, size_t *s_reply_size, const uint8_t **signature, size_t *signature_size);
 
+/* Appends SSH_MSG_KEX_ECDH_INIT with Q_C (SSH_X25519_SIZE bytes) as a string to out (RFC 5656 4, RFC 8731 3). */
+void ssh_kex_put_ecdh_init(const uint8_t *q_c, struct ssh_buf *out);
+
+/*
+ * Reads SSH_MSG_KEX_ECDH_REPLY (RFC 5656 4): pointers into payload for
+ * K_S, Q_S and the signature blob.  The sizes are not checked here.
+ * Returns 0 or EINVAL.
+ */
+int ssh_kex_parse_ecdh_reply(const uint8_t *payload, size_t size, const uint8_t **host_key, size_t *host_key_size, const uint8_t **q_s, size_t *q_s_size, const uint8_t **signature, size_t *signature_size);
+
 /*
  * Computes the exchange hash H = SHA-256(string V_C, string V_S, string
  * I_C, string I_S, string K_S, string C_INIT, string S_REPLY, string K)
  * (draft-ietf-sshm-mlkem-hybrid-kex-10 2.5) into h (32 bytes).
  *
  * Returns 0, ENOMEM or EIO (h wiped).  Constant time in k (lengths are
- * public).
+ * public).  The same as ssh_kex_hash_form with SSH_KEX_SECRET_STRING.
  */
 int ssh_kex_hash(const struct ssh_kex_hash_input *input, uint8_t *h);
+
+/*
+ * Computes the exchange hash as ssh_kex_hash does, with K encoded in form:
+ * SSH_KEX_SECRET_MPINT gives H = SHA-256(string V_C, string V_S, string
+ * I_C, string I_S, string K_S, string Q_C, string Q_S, mpint K) of
+ * curve25519-sha256 (RFC 8731 3.1, RFC 5656 4), with Q_C and Q_S in c_init
+ * and s_reply.  The mpint's length depends on the leading bytes of K, as
+ * in every implementation of the method; the bytes are fed as they are.
+ * Returns 0, EINVAL (a form out of range), ENOMEM or EIO (h wiped).
+ */
+int ssh_kex_hash_form(const struct ssh_kex_hash_input *input, enum ssh_kex_secret_form form, uint8_t *h);
 
 /*
  * Derives size bytes of key material for one letter (RFC 4253 7.2): with
@@ -207,8 +275,17 @@ int ssh_kex_hash(const struct ssh_kex_hash_input *input, uint8_t *h);
  * encryption) and 'D' (server to client) are used, each 64 bytes
  * (SSH_CHACHAPOLY_KEY).  size is 1 to 256 (EINVAL otherwise).  session_id
  * is the H of the connection's first exchange (32 bytes).  Returns 0,
- * EINVAL, ENOMEM or EIO (out wiped).
+ * EINVAL, ENOMEM or EIO (out wiped).  The same as ssh_kex_derive_form
+ * with SSH_KEX_SECRET_STRING.
  */
 int ssh_kex_derive(const uint8_t *k, const uint8_t *h, const uint8_t *session_id, char letter, uint8_t *out, size_t size);
+
+/*
+ * Derives key material as ssh_kex_derive does, with K encoded in form
+ * (RFC 4253 7.2 "K is encoded as mpint" for curve25519-sha256, RFC 8731
+ * 3.1).  Returns 0, EINVAL (also a form out of range), ENOMEM or EIO (out
+ * wiped).
+ */
+int ssh_kex_derive_form(const uint8_t *k, enum ssh_kex_secret_form form, const uint8_t *h, const uint8_t *session_id, char letter, uint8_t *out, size_t size);
 
 #endif

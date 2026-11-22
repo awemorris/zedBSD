@@ -191,4 +191,26 @@ int ssh_config_option(struct ssh_config *config, const char *option, char *error
 /* Fills every field not set with its default. */
 void ssh_config_defaults(struct ssh_config *config);
 
+/*
+ * The function ssh_config_hosts gives each host name to: data as given,
+ * the name (size bytes, not NUL-terminated, pointing into the text).  It
+ * answers 0 to go on, or a nonzero value that stops the walk and is
+ * passed back.
+ */
+typedef int (*ssh_config_host_handler)(void *data, const char *name, size_t size);
+
+/*
+ * Gives host each name of the Host lines of size bytes of ssh_config text,
+ * in the order written (a name given twice comes twice): the patterns
+ * without '*', '?' or '!' (ssh_config(5) PATTERNS), so the names of the
+ * hosts the file has settings for, for a list a user picks from.  Lines
+ * other than Host are not looked at, so this succeeds on a file whose
+ * other keywords ssh_config_parse refuses.  A text it cannot split (a NUL,
+ * a line too long, an unbalanced quote) is EINVAL with error (capacity
+ * SSH_CONFIG_ERROR_MAX, may be NULL) set as ssh_config_parse sets it;
+ * size above SSH_CONFIG_FILE_MAX is EMSGSIZE.  Returns 0, EINVAL,
+ * EMSGSIZE, or the nonzero answer with which host stopped.
+ */
+int ssh_config_hosts(const char *text, size_t size, ssh_config_host_handler host, void *data, char *error);
+
 #endif

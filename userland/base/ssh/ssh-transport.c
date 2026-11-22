@@ -12,10 +12,11 @@
  * (KEXINIT and what may be sent around it), 7.3 (NEWKEYS), 9 (re-keying)
  * and 11 (the generic messages), RFC 4250 sections 4.1.2 and 4.2.2 (the
  * message numbers and the disconnect reasons), draft-ietf-sshm-strict-
- * kex-02 sections 3.2 and 3.3, and draft-ietf-sshm-mlkem-hybrid-kex-10
- * section 2.1.  The steps of an exchange are kept as bits of kex_step, one
- * for each message sent or received, so that a message is accepted only at
- * its own step and only once.
+ * kex-02 sections 3.2 and 3.3, draft-ietf-sshm-mlkem-hybrid-kex-10
+ * section 2.1, and RFC 8731 section 3 (curve25519-sha256, which RFC 5656
+ * section 4 frames).  The steps of an exchange are kept as bits of
+ * kex_step, one for each message sent or received, so that a message is
+ * accepted only at its own step and only once.
  */
 
 #include <string.h>
@@ -32,8 +33,10 @@
  *   NEWKEYS.
  *   draft-ietf-sshm-mlkem-hybrid-kex-10 2.1: the client sends
  *   SSH_MSG_KEX_HYBRID_INIT, the server answers SSH_MSG_KEX_HYBRID_REPLY.
- * HYBRID_SENT is the client's INIT or the server's REPLY; HYBRID_RECEIVED
- * is the server's INIT or the client's REPLY.
+ *   RFC 8731 3 and RFC 5656 4: curve25519-sha256 has the same two steps,
+ *   SSH_MSG_KEX_ECDH_INIT and SSH_MSG_KEX_ECDH_REPLY.
+ * HYBRID_SENT is the client's INIT or the server's REPLY of either method;
+ * HYBRID_RECEIVED is the server's INIT or the client's REPLY.
  */
 #define TRANSPORT_KEXINIT_SENT		0x01
 #define TRANSPORT_KEXINIT_RECEIVED	0x02
@@ -95,6 +98,9 @@
 /* The largest SSH_MSG_KEX_HYBRID_INIT this side builds: the message number and one string. */
 #define TRANSPORT_INIT_MAX		(1U + 4U + SSH_HYBRID_INIT_SIZE)
 
+/* The largest SSH_MSG_KEX_ECDH_INIT this side builds: the message number and one string. */
+#define TRANSPORT_ECDH_INIT_MAX		(1U + 4U + SSH_X25519_SIZE)
+
 /* The largest SSH_MSG_DISCONNECT this side builds: number, code, description and an empty language tag. */
 #define TRANSPORT_DISCONNECT_MAX	(1U + 4U + 4U + SSH_TRANSPORT_REASON_MAX + 4U)
 
@@ -146,9 +152,13 @@ static void transport_receive_disconnect(struct ssh_transport *transport, const 
 static int transport_receive_kexinit(struct ssh_transport *transport, const struct ssh_buf *payload);
 static int transport_receive_hybrid_init(struct ssh_transport *transport, const struct ssh_buf *payload);
 static int transport_receive_hybrid_reply(struct ssh_transport *transport, const struct ssh_buf *payload);
+static int transport_receive_ecdh_reply(struct ssh_transport *transport, const struct ssh_buf *payload);
 static int transport_receive_newkeys(struct ssh_transport *transport, const struct ssh_buf *payload);
 static int transport_send_kexinit(struct ssh_transport *transport);
 static int transport_send_hybrid_init(struct ssh_transport *transport);
+static int transport_send_ecdh_init(struct ssh_transport *transport);
+static int transport_send_exchange(struct ssh_transport *transport);
+static enum ssh_kex_secret_form transport_secret_form(const struct ssh_transport *transport);
 static int transport_send_newkeys(struct ssh_transport *transport);
 static int transport_send_unimplemented(struct ssh_transport *transport);
 static int transport_send_packet(struct ssh_transport *transport, const uint8_t *payload, size_t size);
@@ -471,6 +481,14 @@ ssh_transport_disconnect(
 	if (message.error == 0)
 		(void)ssh_packet_send(&transport->packet, message.data, message.size);
 	ssh_buf_free(&message);
+
+	/* Keeps the description, so the owner can tell its user why this side ended the connection. */
+	if (length > SSH_TRANSPORT_REASON_MAX - 1U)
+		length = SSH_TRANSPORT_REASON_MAX - 1U;
+	if (length > 0)
+		memcpy(transport->local_reason, description, length);
+	transport->local_reason[length] = '\0';
+	transport->local_code = code;
 
 	/*
 	 * CLOSED tells every later call that only the pending output remains:
@@ -895,7 +913,13 @@ transport_dispatch(
 		error = transport_receive_hybrid_init(transport, payload);
 		break;
 	case SSH_MSG_KEX_HYBRID_REPLY:
-		error = transport_receive_hybrid_reply(transport, payload);
+		/* The same number is the reply of either method; the method chosen for this exchange reads it. */
+		if (transport->role == SSH_ROLE_CLIENT && transport->choice.method == SSH_KEX_CURVE25519) {
+			error = transport_receive_ecdh_reply(transport, payload);
+		} else {
+			error = transport_receive_hybrid_reply(transport, payload);
+		}
+
 		break;
 	default:
 		/* Leaves the other numbers to the ranges below. */
@@ -986,8 +1010,8 @@ transport_receive_disconnect(
 
 /*
  * Takes the peer's KEXINIT: answers with this side's when the peer starts
- * the exchange, decides the algorithms, and, on a client, sends the
- * hybrid INIT.
+ * the exchange, decides the algorithms, and, on a client, sends its half
+ * of the method chosen.
  */
 static int
 transport_receive_kexinit(
@@ -1056,8 +1080,8 @@ transport_receive_kexinit(
 	if (transport->role == SSH_ROLE_SERVER)
 		return 0;
 
-	/* Sends the client's half. */
-	error = transport_send_hybrid_init(transport);
+	/* Sends the client's half of the method chosen. */
+	error = transport_send_exchange(transport);
 	if (error != 0)
 		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "cannot start key exchange");
 
@@ -1290,6 +1314,107 @@ transport_receive_hybrid_reply(
 }
 
 /*
+ * Takes the server's SSH_MSG_KEX_ECDH_REPLY of curve25519-sha256 on a
+ * client: checks the length of Q_S, the host key (ops->check_host_key),
+ * makes K and H, verifies the signature, and sends NEWKEYS (RFC 8731 3,
+ * RFC 5656 4).
+ */
+static int
+transport_receive_ecdh_reply(
+	struct ssh_transport *transport,
+	const struct ssh_buf *payload)
+{
+	struct ssh_kex_hash_input input;
+	uint8_t public_key[SSH_ED25519_PUBLIC];
+	const uint8_t *host_key;
+	const uint8_t *q_s;
+	const uint8_t *signature;
+	size_t host_key_size;
+	size_t q_s_size;
+	size_t signature_size;
+	int error;
+
+	/* Accepts the message only after the client's half was sent, and once. */
+	if ((transport->kex_step & TRANSPORT_HYBRID_SENT) == 0)
+		return transport_fail(transport, EPROTO, SSH_DISCONNECT_PROTOCOL_ERROR, "unexpected KEX_ECDH_REPLY");
+	if ((transport->kex_step & TRANSPORT_HYBRID_RECEIVED) != 0)
+		return transport_fail(transport, EPROTO, SSH_DISCONNECT_PROTOCOL_ERROR, "unexpected KEX_ECDH_REPLY");
+
+	/* Reads K_S, Q_S and the signature. */
+	error = ssh_kex_parse_ecdh_reply(payload->data, payload->size, &host_key, &host_key_size, &q_s, &q_s_size, &signature, &signature_size);
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "bad KEX_ECDH_REPLY");
+
+	/* HYBRID_RECEIVED marks the reply as taken, so a second one is refused. */
+	transport->kex_step |= TRANSPORT_HYBRID_RECEIVED;
+
+	/* Refuses a public key that is not 32 bytes before anything else is done with the reply (RFC 8731 3). */
+	if (q_s_size != SSH_X25519_SIZE)
+		return transport_fail(transport, EINVAL, SSH_DISCONNECT_KEY_EXCHANGE_FAILED, "bad Q_S length");
+
+	/* Reads the host key, which must be the ssh-ed25519 key that was negotiated. */
+	error = ssh_key_parse_public_blob(host_key, host_key_size, public_key);
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_KEY_EXCHANGE_FAILED, "bad host key");
+
+	/* Asks the caller whether the host key is the right one for this server. */
+	if (transport->ops.check_host_key == NULL)
+		return transport_fail(transport, EINVAL, SSH_DISCONNECT_PROTOCOL_ERROR, "no host key check");
+	error = transport->ops.check_host_key(transport->ops.context, host_key, host_key_size);
+	if (error == EACCES)
+		return transport_fail(transport, EACCES, SSH_DISCONNECT_HOST_KEY_NOT_VERIFIABLE, "host key not verifiable");
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "host key check failed");
+
+	/* Computes the shared secret; an all-zero result (a point of small order) fails the exchange (RFC 8731 3). */
+	error = ssh_x25519_shared(transport->x25519_private, q_s, transport->k);
+	ssh_wipe(transport->x25519_private, sizeof(transport->x25519_private));
+	if (error == EINVAL)
+		return transport_fail(transport, EINVAL, SSH_DISCONNECT_KEY_EXCHANGE_FAILED, "bad key exchange value");
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "key exchange failed");
+
+	/* Computes H over this side's and the server's lines and KEXINITs, the host key, Q_C, Q_S and K as an mpint. */
+	input.version_client = (const uint8_t *)transport->version_local;
+	input.version_client_size = strlen(transport->version_local);
+	input.version_server = (const uint8_t *)transport->version_peer;
+	input.version_server_size = strlen(transport->version_peer);
+	input.kexinit_client = transport->kexinit_local.data;
+	input.kexinit_client_size = transport->kexinit_local.size;
+	input.kexinit_server = transport->kexinit_peer.data;
+	input.kexinit_server_size = transport->kexinit_peer.size;
+	input.host_key = host_key;
+	input.host_key_size = host_key_size;
+	input.c_init = transport->q_c;
+	input.c_init_size = sizeof(transport->q_c);
+	input.s_reply = q_s;
+	input.s_reply_size = q_s_size;
+	input.k = transport->k;
+	error = ssh_kex_hash_form(&input, SSH_KEX_SECRET_MPINT, transport->h);
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "key exchange failed");
+
+	/* Verifies the server's signature over H with the host key. */
+	error = ssh_key_verify(public_key, transport->h, SSH_KEX_HASH_SIZE, signature, signature_size);
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_KEY_EXCHANGE_FAILED, "bad host key signature");
+
+	/* The first exchange's H is the session identifier for the whole connection (RFC 4253 7.2). */
+	if (transport->have_session_id == 0) {
+		memcpy(transport->session_id, transport->h, SSH_KEX_HASH_SIZE);
+		transport->have_session_id = 1;
+	}
+
+	/* Switches the sending direction to the new key. */
+	error = transport_send_newkeys(transport);
+	if (error != 0)
+		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "cannot send NEWKEYS");
+
+	/* Succeeded: the client waits for the server's NEWKEYS. */
+	return 0;
+}
+
+/*
  * Takes the peer's SSH_MSG_NEWKEYS: the receiving direction switches to
  * the new key (RFC 4253 7.3) and, with strict key exchange, its sequence
  * number starts again at 0 (strict key exchange 3.3).
@@ -1317,7 +1442,7 @@ transport_receive_newkeys(
 	letter = 'C';
 	if (transport->role == SSH_ROLE_CLIENT)
 		letter = 'D';
-	error = ssh_kex_derive(transport->k, transport->h, transport->session_id, letter, key, sizeof(key));
+	error = ssh_kex_derive_form(transport->k, transport_secret_form(transport), transport->h, transport->session_id, letter, key, sizeof(key));
 	if (error != 0)
 		return transport_fail(transport, error, SSH_DISCONNECT_PROTOCOL_ERROR, "key derivation failed");
 
@@ -1409,6 +1534,92 @@ transport_send_hybrid_init(
 }
 
 /*
+ * Makes the client's X25519 pair of curve25519-sha256 and sends
+ * SSH_MSG_KEX_ECDH_INIT with Q_C; Q_C stays in q_c for the exchange hash
+ * and the private key in x25519_private until the reply (RFC 8731 3: a new
+ * pair for every exchange).
+ */
+static int
+transport_send_ecdh_init(
+	struct ssh_transport *transport)
+{
+	struct ssh_buf message;
+	int error;
+
+	/* Makes the client's key pair. */
+	error = ssh_x25519_pair(transport->x25519_private, transport->q_c);
+	if (error != 0)
+		return error;
+
+	/* Builds the message. */
+	ssh_buf_init(&message, TRANSPORT_ECDH_INIT_MAX, 0);
+	ssh_kex_put_ecdh_init(transport->q_c, &message);
+	error = ssh_buf_error(&message);
+	if (error != 0) {
+		ssh_buf_free(&message);
+		return error;
+	}
+
+	/* Sends it. */
+	error = transport_send_packet(transport, message.data, message.size);
+	ssh_buf_free(&message);
+	if (error != 0)
+		return error;
+
+	/* HYBRID_SENT marks the client's half as sent: the reply is expected now. */
+	transport->kex_step |= TRANSPORT_HYBRID_SENT;
+
+	/* Succeeded: the client's half is in the output. */
+	return 0;
+}
+
+/*
+ * Sends the client's half of the key exchange method chosen for this
+ * exchange.
+ */
+static int
+transport_send_exchange(
+	struct ssh_transport *transport)
+{
+	int error;
+
+	/* Sends Q_C of curve25519-sha256 when that method was chosen. */
+	if (transport->choice.method == SSH_KEX_CURVE25519) {
+		error = transport_send_ecdh_init(transport);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: Q_C is in the output. */
+		return 0;
+	}
+
+	/* Sends C_INIT of the hybrid method otherwise. */
+	error = transport_send_hybrid_init(transport);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: C_INIT is in the output. */
+	return 0;
+}
+
+/*
+ * Reports how K enters the hash and the derivation of the exchange in
+ * progress: an mpint for curve25519-sha256, a string for the hybrid
+ * method.
+ */
+static enum ssh_kex_secret_form
+transport_secret_form(
+	const struct ssh_transport *transport)
+{
+	/* curve25519-sha256 encodes K as an mpint (RFC 8731 3.1). */
+	if (transport->choice.method == SSH_KEX_CURVE25519)
+		return SSH_KEX_SECRET_MPINT;
+
+	/* The hybrid method encodes K as a string (draft-ietf-sshm-mlkem-hybrid-kex-10 2.5). */
+	return SSH_KEX_SECRET_STRING;
+}
+
+/*
  * Sends SSH_MSG_NEWKEYS and switches the sending direction to the new key
  * (RFC 4253 7.3); with strict key exchange the sending sequence number
  * starts again at 0 (strict key exchange 3.3).  The held upper-layer
@@ -1427,7 +1638,7 @@ transport_send_newkeys(
 	letter = 'D';
 	if (transport->role == SSH_ROLE_CLIENT)
 		letter = 'C';
-	error = ssh_kex_derive(transport->k, transport->h, transport->session_id, letter, key, sizeof(key));
+	error = ssh_kex_derive_form(transport->k, transport_secret_form(transport), transport->h, transport->session_id, letter, key, sizeof(key));
 	if (error != 0)
 		return error;
 
@@ -1588,10 +1799,11 @@ transport_finish_exchange(
 	transport->state = SSH_TRANSPORT_RUNNING;
 	transport->kex_time = transport->now;
 
-	/* Wipes K, H and C_INIT and drops the KEXINIT payloads, which the next exchange replaces. */
+	/* Wipes K, H and C_INIT or Q_C and drops the KEXINIT payloads, which the next exchange replaces. */
 	ssh_wipe(transport->k, sizeof(transport->k));
 	ssh_wipe(transport->h, sizeof(transport->h));
 	ssh_wipe(transport->c_init, sizeof(transport->c_init));
+	ssh_wipe(transport->q_c, sizeof(transport->q_c));
 	ssh_buf_reset(&transport->kexinit_local);
 	ssh_buf_reset(&transport->kexinit_peer);
 }
@@ -1657,11 +1869,13 @@ static void
 transport_forget_secrets(
 	struct ssh_transport *transport)
 {
-	/* Wipes and frees the client's half. */
+	/* Wipes and frees the client's half of either method. */
 	ssh_hybrid_client_clear(&transport->hybrid);
+	ssh_wipe(transport->x25519_private, sizeof(transport->x25519_private));
 
-	/* Wipes C_INIT, the shared secret and the exchange hash. */
+	/* Wipes C_INIT or Q_C, the shared secret and the exchange hash. */
 	ssh_wipe(transport->c_init, sizeof(transport->c_init));
+	ssh_wipe(transport->q_c, sizeof(transport->q_c));
 	ssh_wipe(transport->k, sizeof(transport->k));
 	ssh_wipe(transport->h, sizeof(transport->h));
 

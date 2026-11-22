@@ -167,6 +167,34 @@ int ssh_ed25519_sign(const uint8_t *seed, const uint8_t *message, size_t size, u
 int ssh_ed25519_verify(const uint8_t *public_key, const uint8_t *message, size_t size, const uint8_t *signature);
 
 /*
+ * Computes the X25519 public key (32 bytes) of a 32-byte private key
+ * (RFC 7748 6.1, the base point 9): EVP_PKEY_new_raw_private_key
+ * EVP_PKEY_X25519, EVP_PKEY_get_raw_public_key.  Returns 0 or EIO.
+ */
+int ssh_x25519_public(const uint8_t *private_key, uint8_t *public_key);
+
+/*
+ * Makes an X25519 key pair: a private key of 32 random bytes (ssh_random,
+ * secret) and its public key (ssh_x25519_public).  Returns 0 or EIO (both
+ * wiped).
+ */
+int ssh_x25519_pair(uint8_t *private_key, uint8_t *public_key);
+
+/*
+ * Computes the X25519 shared secret (32 bytes) of a private key and a
+ * peer's public value (RFC 7748 6.1): EVP_PKEY_new_raw_private_key,
+ * EVP_PKEY_new_raw_public_key, EVP_PKEY_CTX_new, EVP_PKEY_derive_init,
+ * EVP_PKEY_derive_set_peer, EVP_PKEY_derive.
+ *
+ * The peer's value is refused (EINVAL) when the library refuses it at
+ * import or at the derivation, and when the result is all zero (a point of
+ * small order; RFC 7748 6.1, RFC 8731 3), which this function checks
+ * itself with ssh_ct_equal.  Returns 0, EINVAL, ENOMEM or EIO; shared is
+ * wiped on an error.
+ */
+int ssh_x25519_shared(const uint8_t *private_key, const uint8_t *peer_public, uint8_t *shared);
+
+/*
  * Starts the client's half of mlkem768x25519-sha256 (draft-ietf-sshm-
  * mlkem-hybrid-kex-10 2.1, 2.3.3) and writes C_INIT
  * (SSH_HYBRID_INIT_SIZE bytes) to c_init.
