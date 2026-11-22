@@ -139,8 +139,12 @@
 /* The pipelineCacheUUID the device reports and a pipeline cache's header carries. */
 #define GHCI_VK_CACHE_UUID		"zedBSD-ghci-pc10"
 
-/* The descriptor sets a pipeline layout binds (maxBoundDescriptorSets). */
-#define GHCI_VK_SETS			4U
+/*
+ * The descriptor sets a pipeline layout binds (maxBoundDescriptorSets):
+ * the driver lays every set out in the pipeline's texture, sampler and
+ * resource tables, so the count is the driver's own.
+ */
+#define GHCI_VK_SETS			8U
 
 /* The descriptor types of Vulkan 1.0 (VK_DESCRIPTOR_TYPE_SAMPLER to INPUT_ATTACHMENT). */
 #define GHCI_VK_DESCRIPTOR_TYPES	11U
@@ -584,7 +588,13 @@ struct ghci_vk_command_pool {
  * simultaneous use (it may be in flight more than once), and demand is
  * the data heap bytes its end made ready for its submissions, which
  * count toward its device's prepared bytes until it is recorded again,
- * reset or freed (0 for none).
+ * reset or freed (0 for none).  A primary buffer whose packets do not
+ * depend on what runs before it (no event, no cut, nothing skipped) is
+ * converted once at its end and its submissions place those packets:
+ * baked_words are they, baked_temps the data heap runs they read (the
+ * buffer's own until it is recorded again, reset or freed, and only read
+ * by the GPU, so submissions in flight at once share them), and
+ * baked_charged what the packets take of the session's budget.
  */
 struct ghci_vk_command_buffer {
 	uint64_t pool;
@@ -597,6 +607,11 @@ struct ghci_vk_command_buffer {
 	uint32_t used;
 	uint32_t capacity;
 	uint32_t commands;
+	uint32_t *baked_words;
+	uint32_t baked_used;
+	struct ghci_vk_temp *baked_temps;
+	uint32_t baked_temp_count;
+	uint64_t baked_charged;
 };
 
 /* A VkSampler: its sampler descriptor (section 8.3 of the specification). */
@@ -1150,7 +1165,7 @@ int ghci_vk_query_route(struct ghci_vk_session *session, uint32_t opcode, uint32
 
 /* vk-memory.c: memory, buffers, images and the executor heap. */
 struct ghci_allocation *ghci_vk_memory_blob(struct ghci_device *device, struct ghci_session *owner, uint64_t blob_id);
-int ghci_vk_heap_take(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_heap heap, uint32_t bytes, uint32_t alignment, int grow, struct ghci_vk_heap_block **block, uint32_t *offset);
+int ghci_vk_heap_take(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_heap heap, uint32_t bytes, uint32_t alignment, struct ghci_vk_heap_block **block, uint32_t *offset);
 void ghci_vk_heap_give(struct ghci_vk_heap_block *block, uint32_t offset);
 void ghci_vk_heap_retire(struct ghci_vk_device *device, struct ghci_vk_heap_block *block, uint32_t offset, const struct ghci_ticket *ticket);
 void ghci_vk_heap_reclaim(struct ghci_vk_session *session, struct ghci_vk_device *device);
@@ -1173,12 +1188,13 @@ void ghci_vk_pass_release(struct ghci_vk_object *object);
 int ghci_vk_execute(struct ghci_vk_session *session, struct ghci_vk_device *device, const VkSubmitInfo *submits, uint64_t count, struct ghci_vk_submission *submission);
 int ghci_vk_execute_clear(struct ghci_vk_session *session, struct ghci_vk_device *device, uint64_t va, uint64_t bytes, struct ghci_vk_submission *submission);
 void ghci_vk_execute_prepare(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_vk_object *object);
+void ghci_vk_execute_unbake(struct ghci_vk_device *device, struct ghci_vk_command_buffer *commands);
 void ghci_vk_submission_end(struct ghci_vk_device *device, struct ghci_vk_submission *submission, const struct ghci_ticket *ticket, int placed);
 void ghci_vk_submission_written(struct ghci_vk_device *device, const struct ghci_vk_submission *submission, uint32_t end, const struct ghci_ticket *ticket);
 
 /* vk-meta.c: the driver's own transfer programs. */
 int ghci_vk_meta_compile(const struct ghci_caps *caps, enum ghci_vk_meta_kind kind, struct ghci_gsi1_program **programs);
-int ghci_vk_meta_pipeline(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_meta_kind kind, int grow, const struct ghci_vk_meta_pipeline **pipeline);
+int ghci_vk_meta_pipeline(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_meta_kind kind, const struct ghci_vk_meta_pipeline **pipeline);
 int ghci_vk_meta_copy(const struct ghci_vk_meta_copy *copy, struct ghci_vk_meta_dispatch *dispatch);
 void ghci_vk_meta_table(const struct ghci_vk_meta_pipeline *pipeline, const struct ghci_vk_meta_dispatch *dispatch, uint8_t *view);
 uint32_t ghci_vk_meta_bind(const struct ghci_vk_meta_pipeline *pipeline, uint64_t table, uint32_t *words);
