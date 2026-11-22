@@ -59,6 +59,7 @@
 #define REQUEST_IMAGE_TEXT8		76U
 #define REQUEST_IMAGE_TEXT16		77U
 #define REQUEST_QUERY_EXTENSION		98U
+#define REQUEST_LIST_EXTENSIONS		99U
 #define REQUEST_GET_KEYBOARD_MAPPING	101U
 #define REQUEST_GET_POINTER_MAPPING	117U
 #define REQUEST_NO_OPERATION		127U
@@ -86,6 +87,13 @@
 /* The one core font's name, and the vendor the setup names. */
 #define FONT_NAME			"zed-unicode"
 #define SERVER_VENDOR			ZEDBSD_OS_NAME " X11"
+
+/* BIG-REQUESTS: its name and its one request, BigReqEnable. */
+#define BIGREQ_NAME			"BIG-REQUESTS"
+#define BIGREQ_ENABLE			0U
+
+/* The extensions ListExtensions names. */
+#define EXTENSION_NAMES_MAX		2U
 
 /* The most keycodes one GetKeyboardMapping answers. */
 #define KEYBOARD_MAPPING_MAX		248U
@@ -118,6 +126,13 @@ static unsigned protocol_image_text(struct x11server *server, unsigned index, co
 static unsigned protocol_get_keyboard_mapping(struct x11server *server, unsigned index, const uint8_t *request);
 static unsigned protocol_get_pointer_mapping(struct x11server *server, unsigned index);
 static unsigned protocol_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static void protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned protocol_list_extensions(struct x11server *server, struct x11_client *client);
+static unsigned protocol_big_requests(struct x11server *server, struct x11_client *client, const uint8_t *request);
+static void protocol_expose_one(struct x11server *server, struct x11_window *window);
+static void protocol_expose_children(struct x11server *server, uint32_t parent);
+static void protocol_swap16(uint8_t *bytes);
+static void protocol_swap32(uint8_t *bytes);
 static void protocol_gc_values(struct x11_gc *gc, const struct x11_client *client, const uint8_t *request, size_t length, size_t offset, uint32_t mask);
 static void protocol_line(struct x11_window *window, int from_x, int from_y, int to_x, int to_y, uint32_t color);
 static void protocol_move_descendants(struct x11server *server, uint32_t parent, int dx, int dy);
@@ -239,10 +254,12 @@ x11_request(
 	client->sequence++;
 	opcode = request[0];
 
-	/* Every request but the three of one word names something in its second word. */
+	/* Every request but those of one word names something in its second word. */
 	if (length < 8U &&
 	    opcode != REQUEST_GET_INPUT_FOCUS &&
 	    opcode != REQUEST_GET_POINTER_MAPPING &&
+	    opcode != REQUEST_LIST_EXTENSIONS &&
+	    opcode != X11_BIGREQ_MAJOR &&
 	    opcode != REQUEST_NO_OPERATION) {
 		protocol_error(server, client, X11_BAD_LENGTH, 0U, opcode);
 		return;
@@ -356,8 +373,14 @@ x11_request(
 		code = protocol_image_text(server, index, request, length);
 		break;
 	case REQUEST_QUERY_EXTENSION:
-		x11_glx_query_extension(server, client, request, length);
+		protocol_query_extension(server, client, request, length);
 		code = 0U;
+		break;
+	case REQUEST_LIST_EXTENSIONS:
+		code = protocol_list_extensions(server, client);
+		break;
+	case X11_BIGREQ_MAJOR:
+		code = protocol_big_requests(server, client, request);
 		break;
 	case REQUEST_GET_KEYBOARD_MAPPING:
 		code = protocol_get_keyboard_mapping(server, index, request);
@@ -542,36 +565,170 @@ x11_input_event(
 }
 
 /*
- * Tells a window's owner that all of the window must be drawn again, and
- * its configuration.
+ * Tells a window's owner its configuration, then that all of the window
+ * and of its mapped descendants must be drawn again (the configuration
+ * first, as a server that has changed a window's size reports it).
  */
 void
 x11_expose(
 	struct x11server *server,
 	struct x11_window *window)
 {
-	struct x11_client *client;
-	uint8_t event[32];
-	int msb;
-
-	/* The owner asked for exposures. */
-	client = x11_client_of(server, window->owner);
-	if (client != NULL && (window->event_mask & X11_MASK_EXPOSURE) != 0U) {
-		/* The whole window, and no more exposures follow. */
-		msb = client->order;
-		memset(event, 0, sizeof(event));
-		event[0] = X11_EVENT_EXPOSE;
-		x11_write16(event + 2, client->sequence, msb);
-		x11_write32(event + 4, window->id, msb);
-		x11_write16(event + 8, 0U, msb);
-		x11_write16(event + 10, 0U, msb);
-		x11_write16(event + 12, window->width, msb);
-		x11_write16(event + 14, window->height, msb);
-		x11_client_send(server, client, event, sizeof(event));
-	}
-
-	/* Its configuration too. */
+	/* The configuration. */
 	x11_configure_notify(server, window);
+
+	/* The window, then its mapped descendants, top to bottom of the tree. */
+	protocol_expose_one(server, window);
+	protocol_expose_children(server, window->id);
+}
+
+/*
+ * Turns an event (32 bytes, as a client sent it in SendEvent) from one
+ * byte order to the other, field by field as the core protocol lays out
+ * each event.  An event the core does not define is left as it is.
+ */
+void
+x11_event_swap(
+	uint8_t *event)
+{
+	unsigned offset;
+	unsigned format;
+
+	/* The sequence number, in every event but KeymapNotify. */
+	if ((event[0] & 0x7fU) != 11U)
+		protocol_swap16(event + 2);
+
+	/* The fields of each kind. */
+	switch (event[0] & 0x7fU) {
+	case 2U:
+	case 3U:
+	case 4U:
+	case 5U:
+	case 6U:
+	case 7U:
+	case 8U:
+		/* Key, button, motion, crossing: time, root, event, child, four places, state. */
+		for (offset = 4U; offset < 20U; offset += 4U)
+			protocol_swap32(event + offset);
+		for (offset = 20U; offset < 30U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 9U:
+	case 10U:
+	case 15U:
+		/* Focus, visibility: the window. */
+		protocol_swap32(event + 4);
+		break;
+	case 12U:
+		/* Expose: the window, a rectangle and a count. */
+		protocol_swap32(event + 4);
+		for (offset = 8U; offset < 18U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 13U:
+		/* GraphicsExpose: the drawable, a rectangle, the minor opcode and a count. */
+		protocol_swap32(event + 4);
+		for (offset = 8U; offset < 20U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 14U:
+		/* NoExpose: the drawable and the minor opcode. */
+		protocol_swap32(event + 4);
+		protocol_swap16(event + 8);
+		break;
+	case 16U:
+		/* CreateNotify: parent, window, a rectangle and a border. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		for (offset = 12U; offset < 22U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 17U:
+	case 18U:
+	case 19U:
+	case 20U:
+		/* DestroyNotify, UnmapNotify, MapNotify, MapRequest: event (or parent) and window. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		break;
+	case 21U:
+		/* ReparentNotify: event, window, parent and a place. */
+		for (offset = 4U; offset < 16U; offset += 4U)
+			protocol_swap32(event + offset);
+		protocol_swap16(event + 16);
+		protocol_swap16(event + 18);
+		break;
+	case 22U:
+		/* ConfigureNotify: event, window, above, a rectangle and a border. */
+		for (offset = 4U; offset < 16U; offset += 4U)
+			protocol_swap32(event + offset);
+		for (offset = 16U; offset < 26U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 23U:
+		/* ConfigureRequest: parent, window, sibling, a rectangle, a border and the mask. */
+		for (offset = 4U; offset < 16U; offset += 4U)
+			protocol_swap32(event + offset);
+		for (offset = 16U; offset < 28U; offset += 2U)
+			protocol_swap16(event + offset);
+		break;
+	case 24U:
+		/* GravityNotify: event, window and a place. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		protocol_swap16(event + 12);
+		protocol_swap16(event + 14);
+		break;
+	case 25U:
+		/* ResizeRequest: the window and a size. */
+		protocol_swap32(event + 4);
+		protocol_swap16(event + 8);
+		protocol_swap16(event + 10);
+		break;
+	case 26U:
+	case 27U:
+		/* Circulate: event (or parent) and window. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		break;
+	case 28U:
+	case 29U:
+		/* PropertyNotify (window, atom, time), SelectionClear (time, owner, selection). */
+		for (offset = 4U; offset < 16U; offset += 4U)
+			protocol_swap32(event + offset);
+		break;
+	case 30U:
+		/* SelectionRequest: time, owner, requestor, selection, target, property. */
+		for (offset = 4U; offset < 28U; offset += 4U)
+			protocol_swap32(event + offset);
+		break;
+	case 31U:
+		/* SelectionNotify: time, requestor, selection, target, property. */
+		for (offset = 4U; offset < 24U; offset += 4U)
+			protocol_swap32(event + offset);
+		break;
+	case 32U:
+		/* ColormapNotify: the window and the colormap. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		break;
+	case 33U:
+		/* ClientMessage: the window, the type, and the data in units of its format. */
+		protocol_swap32(event + 4);
+		protocol_swap32(event + 8);
+		format = event[1];
+		if (format == 16U) {
+			for (offset = 12U; offset < 32U; offset += 2U)
+				protocol_swap16(event + offset);
+		} else if (format == 32U) {
+			for (offset = 12U; offset < 32U; offset += 4U)
+				protocol_swap32(event + offset);
+		}
+		break;
+	default:
+		/* KeymapNotify, MappingNotify (bytes only) and the events of extensions. */
+		break;
+	}
 }
 
 /*
@@ -2034,4 +2191,170 @@ protocol_parent_y(
 
 	/* Succeeded: its y. */
 	return parent->y;
+}
+
+/*
+ * QueryExtension: BIG-REQUESTS is the core's own; any other name is
+ * answered by GLX's table (present only for GLX).
+ */
+static void
+protocol_query_extension(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	uint8_t reply[32];
+	size_t name_length;
+	int differs;
+
+	/* The name must fit the request. */
+	name_length = x11_read16(request + 4, client->order);
+	differs = 1;
+	if (name_length == sizeof(BIGREQ_NAME) - 1U && length >= 8U + name_length)
+		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
+
+	/* Another name: GLX's answer. */
+	if (differs != 0) {
+		x11_glx_query_extension(server, client, request, length);
+		return;
+	}
+
+	/* Succeeded: BIG-REQUESTS is present, with its major opcode and no events or errors. */
+	memset(reply, 0, sizeof(reply));
+	reply[8] = 1U;
+	reply[9] = (uint8_t)X11_BIGREQ_MAJOR;
+	x11_reply(server, client, reply, sizeof(reply));
+}
+
+/* ListExtensions: the names of the extensions present, each a counted string. */
+static unsigned
+protocol_list_extensions(
+	struct x11server *server,
+	struct x11_client *client)
+{
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, "GLX" };
+	uint8_t reply[32U + 32U];
+	size_t used;
+	size_t length;
+	unsigned index;
+
+	/* The names after the header, each its length and its bytes. */
+	memset(reply, 0, sizeof(reply));
+	used = 32U;
+	for (index = 0U; index < EXTENSION_NAMES_MAX; index++) {
+		length = strlen(names[index]);
+		reply[used] = (uint8_t)length;
+		memcpy(reply + used + 1U, names[index], length);
+		used += 1U + length;
+	}
+
+	/* Succeeded: the count, and the list padded to words. */
+	reply[1] = (uint8_t)EXTENSION_NAMES_MAX;
+	used = (used + 3U) & ~(size_t)3U;
+	x11_reply(server, client, reply, used);
+	return 0U;
+}
+
+/*
+ * BIG-REQUESTS: BigReqEnable answers the longest request in words (the
+ * input the core holds for a client) and lets the client send requests of
+ * length 0 with a 32-bit length.
+ */
+static unsigned
+protocol_big_requests(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request)
+{
+	uint8_t reply[32];
+
+	/* BigReqEnable is the only request. */
+	if (request[1] != BIGREQ_ENABLE)
+		return X11_BAD_REQUEST;
+
+	/* Succeeded: the longest request, and big requests from now on. */
+	memset(reply, 0, sizeof(reply));
+	x11_write32(reply + 8, X11_INPUT_CAP / 4U, client->order);
+	x11_reply(server, client, reply, sizeof(reply));
+	client->big_requests = 1;
+	return 0U;
+}
+
+/* Tells a window's owner, when it asked for exposures, that all of the window must be drawn again. */
+static void
+protocol_expose_one(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	struct x11_client *client;
+	uint8_t event[32];
+	int msb;
+
+	/* The owner must be there and have asked. */
+	client = x11_client_of(server, window->owner);
+	if (client == NULL)
+		return;
+	if ((window->event_mask & X11_MASK_EXPOSURE) == 0U)
+		return;
+
+	/* The whole window, and no more exposures follow. */
+	msb = client->order;
+	memset(event, 0, sizeof(event));
+	event[0] = X11_EVENT_EXPOSE;
+	x11_write16(event + 2, client->sequence, msb);
+	x11_write32(event + 4, window->id, msb);
+	x11_write16(event + 8, 0U, msb);
+	x11_write16(event + 10, 0U, msb);
+	x11_write16(event + 12, window->width, msb);
+	x11_write16(event + 14, window->height, msb);
+	x11_client_send(server, client, event, sizeof(event));
+}
+
+/* Exposes each mapped child of a window, and theirs in turn. */
+static void
+protocol_expose_children(
+	struct x11server *server,
+	uint32_t parent)
+{
+	struct x11_window *child;
+	unsigned slot;
+
+	/* Each mapped child, bottom to top of the stack. */
+	for (slot = 1U; slot < server->window_count; slot++) {
+		child = &server->windows[slot];
+		if (child->parent != parent || !child->mapped)
+			continue;
+		protocol_expose_one(server, child);
+		protocol_expose_children(server, child->id);
+	}
+}
+
+/* Reverses the two bytes of a 16-bit field. */
+static void
+protocol_swap16(
+	uint8_t *bytes)
+{
+	uint8_t first;
+
+	/* The two ends change places. */
+	first = bytes[0];
+	bytes[0] = bytes[1];
+	bytes[1] = first;
+}
+
+/* Reverses the four bytes of a 32-bit field. */
+static void
+protocol_swap32(
+	uint8_t *bytes)
+{
+	uint8_t byte;
+
+	/* The outer pair, then the inner pair. */
+	byte = bytes[0];
+	bytes[0] = bytes[3];
+	bytes[3] = byte;
+	byte = bytes[1];
+	bytes[1] = bytes[2];
+	bytes[2] = byte;
 }

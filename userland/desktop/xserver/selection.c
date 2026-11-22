@@ -589,6 +589,7 @@ x11_request_send_event(
 {
 	struct x11_window *window;
 	struct x11_client *client;
+	struct x11_client *receiver;
 	uint32_t destination;
 	uint8_t event[32];
 
@@ -610,7 +611,12 @@ x11_request_send_event(
 	if (window == NULL)
 		return X11_BAD_WINDOW;
 
-	/* Succeeded: sent to the window's owner (the event was built in the sender's byte order, which is also its owner's here). */
+	/* An owner of the other byte order gets the event's fields turned to its own. */
+	receiver = x11_client_of(server, window->owner);
+	if (receiver != NULL && receiver->order != client->order)
+		x11_event_swap(event);
+
+	/* Succeeded: sent to the window's owner, marked as sent. */
 	event[0] |= EVENT_SENT;
 	selection_event(server, window->owner, event);
 	return 0U;
