@@ -669,10 +669,12 @@ parse_options(
 		/* A test's scale of the output in percent: 100 to 300, a whole number of 120ths. */
 		match = strncmp(argument, "--scale=", 8);
 		if (match == 0) {
-			/* An out-of-range scale is a mistake. */
+			/* A scale over 300 % is a mistake. */
 			error = unsigned_option(argument + 8, 300, &number);
 			if (error != 0)
 				return error;
+
+			/* So is one under 100 %. */
 			if (number < 100U)
 				return EINVAL;
 

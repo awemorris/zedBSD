@@ -251,7 +251,9 @@ kwl_compose_image_set(
 	/* A buffer of the logical size at a whole-number scale: each texel a block of pixels, kept sharp. */
 	off_width = fabsf(width - shown_width);
 	off_height = fabsf(height - shown_height);
-	if (scale % KWL_SCALE_ONE == 0U && off_width <= 0.5f && off_height <= 0.5f)
+	if (scale % KWL_SCALE_ONE == 0U &&
+	    off_width <= 0.5f &&
+	    off_height <= 0.5f)
 		return import->set;
 
 	/* Stretched by a fraction: sampled smoothly. */

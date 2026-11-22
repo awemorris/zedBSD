@@ -2461,6 +2461,8 @@ glass_shape_draw(
 		kwl_compose_pass_rect(server, quad, quad);
 		kwl_compose_pass_rect(server, box, box);
 		radius = radius * factor;
+
+		/* A shadow's softness and an outline's thickness are lengths. */
 		if (shape->mode == MODE_SHADOW || shape->mode == MODE_RING)
 			soft = soft * factor;
 	}
