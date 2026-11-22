@@ -522,7 +522,7 @@ ghci_memory_local_start(
 
 /*
  * Ends the use of local memory at the detach, after the quarantine went:
- * the allocator goes when nothing but the boot ranges is in it.  The
+ * the allocator goes when nothing but the firmware's ranges is in it.  The
  * window keeps what it was (a boot console may still use it).
  */
 void
@@ -536,10 +536,8 @@ ghci_memory_local_stop(
 	if (device->local_extents == NULL)
 		return;
 
-	/* A run still out (one the quarantine kept) keeps the table, so that its free finds it. */
-	kept = 0U;
-	if (device->boot_reserved)
-		kept = device->boot_count;
+	/* A run still out besides the firmware's (one the quarantine kept) keeps the table, so that its free finds it. */
+	kept = device->boot_count;
 	if (device->local_map.count > kept) {
 		kern_logf("ghci: %s: %u local runs still out at the detach\n",
 		    device->name,
@@ -569,44 +567,32 @@ ghci_memory_local_bytes(
 }
 
 /*
- * Gives what the boot display read of local memory back to the allocator
- * once the driver's own first flip has been taken, and closes the local
- * window, which nothing else uses.
+ * Ends the boot console's use of the local window once the driver's own
+ * first flip has been taken, and closes the window, which nothing else
+ * uses.  The firmware's reservation stays out of the allocator for good:
+ * the firmware keeps it, and no page table may lie in it.
  *
  * The caller holds no lock: the function takes the device's lock, and
  * the interrupt's for the window.  It is called once nothing draws to the
- * boot framebuffer any more (a framebuffer console, a panic's output),
- * as the range may be handed out at once.
+ * boot framebuffer any more (a framebuffer console, a panic's output).
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.3, the release after the first flip was taken, and the window closed
- * if unused).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
+ * window kept open until the takeover, and MEM_FW_VRAM reserved for the
+ * device's firmware after it; section 11.2, page-table memory never
+ * overlaps MEM_FW_VRAM).
  */
 void
 ghci_memory_boot_release(
 	struct ghci_device *device)
 {
-	unsigned index;
 	int released;
-	int error;
 
-	/* The ranges, once. */
+	/* The boot console's use, once; the ranges stay out of the allocator. */
 	mutex_lock(&device->lock);
 
 	released = 0;
 	if (device->boot_reserved) {
-		for (index = 0U; index < device->boot_count; index++) {
-			error = 0;
-			if (device->local_ready)
-				error = ghci_range_free(&device->local_map, device->boot_offset[index]);
-			if (error != 0)
-				kern_logf("ghci: %s: boot range at %x not in the allocator (%d)\n",
-				    device->name,
-				    (unsigned)device->boot_offset[index],
-				    error);
-		}
 		device->boot_reserved = 0;
-		device->boot_count = 0U;
 		released = 1;
 	}
 

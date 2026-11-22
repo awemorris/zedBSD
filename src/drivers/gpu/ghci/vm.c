@@ -838,9 +838,9 @@ ghci_vm_reclaim(
 
 /*
  * Finds the culprits of a fault (the recovery's step 2): with a walker,
- * the session FAULT_INFO names when the fault is one a session's work
- * causes, and with PROT every confirmed open session the device no
- * longer shows active (the processor latched only the first fault);
+ * the session the fault names when the fault is one a session's work
+ * causes, and every confirmed open session the device no longer shows
+ * active (the processor reported only the first fault);
  * without a walker, the session of the first submission whose fence the
  * device had not written.  Faults of the processor itself and of session
  * 0 have no culprit.  Each culprit becomes
@@ -918,14 +918,20 @@ ghci_vm_find_culprits(
 	}
 
 	/*
-	 * With PROT a session's fault ends only that session, and FAULT_INFO
-	 * holds the first fault alone: a session the processor confirmed open
-	 * that is no longer active faulted too.  Read only of a halted
-	 * processor, and only when the first fault was a session's: after a
-	 * fault of the device's own the fault stays the device's, and is
-	 * counted towards the storm.
+	 * With the walker a client session's fault ends only that session,
+	 * whatever CAP_PROT says, and the record read first names one fault
+	 * alone: a session the processor confirmed open that is no longer
+	 * active faulted too.  Read only of a halted processor, and only when
+	 * the first fault was a session's: after a fault of the device's own
+	 * the fault stays the device's, and is counted towards the storm.
+	 *
+	 * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.3, a
+	 * client session's fault regardless of CAP_PROT clears its
+	 * SESSION_ACTIVE bit and leaves the processor running).
 	 */
-	if (!ghci_caps_has(&device->caps, GHCI_HAS_PROT) || !halted || !attributable)
+	if (!halted)
+		return found;
+	if (!attributable)
 		return found;
 	for (slot = 1U; slot < GHCI_SESSIONS; slot++) {
 		/* An open session the processor confirmed opening. */
