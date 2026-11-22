@@ -31,6 +31,10 @@ enable_swiftshader_vulkan = false
 angle_enable_swiftshader = false
 dawn_use_swiftshader = false
 
+# The Vulkan loader is the system's libvulkan.so: Chromium's own loader, a
+# library of the same name, is not built.
+angle_shared_libvulkan = false
+
 # ANGLE (WebGL) has no backend for zedBSD yet but its null one: neither
 # the native GL nor WebGPU underneath it.
 angle_enable_gl = false

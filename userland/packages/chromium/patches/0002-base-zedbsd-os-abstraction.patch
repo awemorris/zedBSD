@@ -83,6 +83,18 @@
        sources += [
          "profiler/stack_base_address_posix_unittest.cc",
          "profiler/stack_copier_signal_unittest.cc",
+--- a/base/allocator/partition_allocator/src/partition_alloc/BUILD.gn
++++ b/base/allocator/partition_allocator/src/partition_alloc/BUILD.gn
+@@ -787,7 +787,8 @@
+         "partition_alloc_base/time/time_conversion_posix.cc",
+       ]
+ 
+-      if (is_linux || is_chromeos) {
++      # Frame-pointer stack traces, which do not depend on the system.
++      if (is_linux || is_chromeos || is_zedbsd) {
+         sources += [ "partition_alloc_base/debug/stack_trace_linux.cc" ]
+       }
+ 
 --- a/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 +++ b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 @@ -90,6 +90,8 @@
