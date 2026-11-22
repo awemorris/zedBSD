@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <malloc.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -295,6 +296,62 @@ int posix_memalign(void **memory, size_t alignment, size_t size)
 		return ENOMEM;
 	*memory = result;
 	return 0;
+}
+
+/*
+ * Allocates size bytes at an address that is a multiple of alignment
+ * (<malloc.h>; the BSD and GNU libraries' memalign).
+ *
+ * The alignment is a power of two; another is refused with errno EINVAL,
+ * and a failed allocation sets ENOMEM.  The block is freed with free().
+ */
+void *
+memalign(
+	size_t alignment,
+	size_t size)
+{
+	void *block;
+
+	/* The alignment has to be a power of two. */
+	if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* Takes the block, at least one byte of it. */
+	if (size == 0)
+		size = 1U;
+	block = heap_aligned_alloc_active(alignment, size);
+	if (block == NULL) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	/* Succeeded: the aligned block. */
+	return block;
+}
+
+/*
+ * Reports how many bytes of a block from malloc, calloc, realloc or the
+ * aligned allocators its owner may use (<malloc.h>; the BSD and GNU
+ * libraries' malloc_usable_size): at least the size asked for, 0 for a
+ * null pointer.
+ */
+size_t
+malloc_usable_size(
+	void *pointer)
+{
+	size_t usable;
+
+	/* A null pointer has no bytes. */
+	if (pointer == NULL)
+		return 0;
+
+	/* The heap knows the block's size. */
+	usable = heap_usable_size_active(pointer);
+
+	/* Reports the bytes. */
+	return usable;
 }
 
 /* qsort, qsort_r, heapsort and mergesort are in sort.c. */

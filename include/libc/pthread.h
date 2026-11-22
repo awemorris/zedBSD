@@ -105,6 +105,14 @@ int pthread_cancel(pthread_t); int pthread_setcancelstate(int,int *);
 int pthread_setcanceltype(int,int *); void pthread_testcancel(void);
 int pthread_atfork(void (*)(void),void (*)(void),void (*)(void));
 int pthread_getconcurrency(void);
+
+/*
+ * A thread's name, as the BSD and GNU libraries give it (not in POSIX): at
+ * most 15 bytes and a NUL; pthread_setname_np refuses a longer one with
+ * ERANGE, pthread_getname_np a buffer too small for the name.
+ */
+int pthread_setname_np(pthread_t thread, const char *name);
+int pthread_getname_np(pthread_t thread, char *name, size_t size);
 int pthread_setconcurrency(int);
 void __pthread_cleanup_push(struct __pthread_cleanup *,
 	void (*)(void *),void *);

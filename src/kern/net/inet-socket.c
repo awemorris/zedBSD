@@ -18,12 +18,15 @@
 #include "kern/net/inet-socket.h"
 #include "kern/net/byteorder.h"
 #include "kern/net/net-device.h"
+#include "kern/net/packet-buf.h"
 #include "kern/net/route.h"
 #include "kern/atomic.h"
+#include "kern/clock.h"
 #include "kern/cred.h"
 #include "kern/uaccess.h"
 #include "internal.h"
 #include "ipv6.h"
+#include "wire.h"
 #include <kern/kcrt.h>
 
 #include <uapi/netif.h>
@@ -42,6 +45,8 @@
 #define INET_OVERLAP_NONE	0
 #define INET_OVERLAP_WILDCARD	1
 #define INET_OVERLAP_SAME	2
+/* The ECN field of a Type of Service byte or traffic class: its low two bits (RFC 3168 section 5). */
+#define INET_ECN_MASK	0x03U
 
 #define INET_IOCTL_ENCODING_MASK                                               \
 	(INET_IOCTL_DIRECTION_MASK | INET_IOCTL_SIZE_MASK |                     \
@@ -88,6 +93,8 @@ static int inet_ioctl_wlan_classify(unsigned long command, size_t *size, bool *q
 static int inet_ioctl_wlan_validate_name(const struct wlan_ioctl_header *header);
 static int inet_ioctl_wlan_validate(const struct wlan_ioctl_header *header, size_t size);
 static int inet_ioctl_wlan(unsigned long command, uintptr_t argument);
+static int inet_socket_set_class(struct inet_socket *inet, int level, int option, const void *value, socklen_t length, int *handled);
+static int inet_socket_get_class(struct inet_socket *inet, int level, int option, void *value, socklen_t *length, int *handled);
 static int inet_create(int type, int protocol, struct socket **result);
 static int inet6_create(int type, int protocol, struct socket **result);
 static int inet6_socket_bind(struct inet_socket *inet, const struct sockaddr *address, socklen_t length);
@@ -429,7 +436,11 @@ inet_socket_getpeername(
 }
 
 /*
- * Sets SO_BINDTODEVICE, the only socket option handled at this layer.
+ * Sets an option every internet socket takes.
+ *
+ * These are SO_BINDTODEVICE, IPV6_V6ONLY, and the traffic class options
+ * IP_TOS, IP_RECVTOS, IPV6_TCLASS and IPV6_RECVTCLASS; any other is
+ * reported as EOPNOTSUPP.
  */
 int
 inet_socket_setsockopt(
@@ -442,6 +453,19 @@ inet_socket_setsockopt(
 	char name[IFNAMSIZ];
 	struct net_device *device;
 	int enabled;
+	int handled;
+	int error;
+
+	/* The traffic class options. */
+	error = inet_socket_set_class(inet, level, option, value, length, &handled);
+	if (handled) {
+		/* Reports why the option was refused. */
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the option is set. */
+		return 0;
+	}
 
 	/* IPV6_V6ONLY of an IPv6 socket (ws130-p003), only before it is bound. */
 	if (inet != NULL && level == IPPROTO_IPV6 && option == IPV6_V6ONLY) {
@@ -486,7 +510,10 @@ inet_socket_setsockopt(
 }
 
 /*
- * Reads SO_BINDTODEVICE, the only socket option handled at this layer.
+ * Reads an option every internet socket takes.
+ *
+ * These are the ones inet_socket_setsockopt sets; any other is reported
+ * as EOPNOTSUPP.
  */
 int
 inet_socket_getsockopt(
@@ -499,6 +526,19 @@ inet_socket_getsockopt(
 	struct net_device *device;
 	size_t required;
 	int enabled;
+	int handled;
+	int error;
+
+	/* The traffic class options. */
+	error = inet_socket_get_class(inet, level, option, value, length, &handled);
+	if (handled) {
+		/* Reports why the option could not be read. */
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the value is given. */
+		return 0;
+	}
 
 	/* IPV6_V6ONLY of an IPv6 socket (ws130-p003). */
 	if (inet != NULL && level == IPPROTO_IPV6 && option == IPV6_V6ONLY) {
@@ -538,6 +578,80 @@ inet_socket_getsockopt(
 
 	/* Reports the read name. */
 	return 0;
+}
+
+/*
+ * Reports the Type of Service byte or traffic class a socket's packets go with.
+ *
+ * ipv6 says whether the packet goes as IPv6 (its IPV6_TCLASS) or as IPv4
+ * (its IP_TOS), which for an AF_INET6 socket depends on the peer.
+ */
+uint8_t
+inet_socket_send_class(
+	const struct inet_socket *inet,
+	int ipv6)
+{
+	/* An IPv6 packet carries the traffic class. */
+	if (ipv6)
+		return inet->tclass;
+
+	/* An IPv4 packet carries the Type of Service byte. */
+	return inet->tos;
+}
+
+/*
+ * Keeps, on a datagram queued for a socket, what the socket asked to be given of it.
+ *
+ * arrived is the packet as it came in, whose IP header is still where its
+ * network layer position says; queued is the one the socket is given (the
+ * same packet, or a copy of it).  The Type of Service byte of an IPv4
+ * datagram is kept for IP_RECVTOS, the traffic class of an IPv6 one for
+ * IPV6_RECVTCLASS, and the realtime clock for SO_TIMESTAMP (taken as the
+ * datagram is queued, as BSD takes it).
+ */
+void
+inet_socket_receive_note(
+	const struct inet_socket *inet,
+	const struct packet_buf *arrived,
+	struct packet_buf *queued)
+{
+	const struct ipv4_wire *header4;
+	const struct ipv6_wire *header6;
+	unsigned version;
+	time_t seconds;
+	long nanoseconds;
+
+	/* The traffic class, where the IP header is still known. */
+	if (arrived->l3_offset != PACKET_OFFSET_NONE) {
+		header4 = (const struct ipv4_wire *)(arrived->storage + arrived->l3_offset);
+		header6 = (const struct ipv6_wire *)(arrived->storage + arrived->l3_offset);
+		version = (unsigned)(header4->version_ihl >> 4);
+
+		/* An IPv4 datagram's Type of Service byte, for IP_RECVTOS. */
+		if (version == 4U && inet->receive_tos) {
+			queued->receive_class = header4->tos;
+			queued->receive_class_version = 4U;
+		}
+
+		/*
+		 * An IPv6 datagram's traffic class, for IPV6_RECVTCLASS: the low
+		 * four bits of the first byte and the high four of the second
+		 * (RFC 8200 section 3).
+		 */
+		if (version == 6U && inet->receive_tclass) {
+			queued->receive_class = (uint8_t)(((header6->version_class_flow[0] & 0x0fU) << 4) |
+			    (header6->version_class_flow[1] >> 4));
+			queued->receive_class_version = 6U;
+		}
+	}
+
+	/* The time it is queued, for SO_TIMESTAMP. */
+	if (inet->socket.timestamp) {
+		clock_realtime(&seconds, &nanoseconds);
+		queued->receive_seconds = (int64_t)seconds;
+		queued->receive_nanoseconds = (int32_t)nanoseconds;
+		queued->receive_time_known = 1U;
+	}
 }
 
 /*
@@ -2007,5 +2121,154 @@ inet6_socket_name(
 	*length = sizeof(output);
 
 	/* Succeeded: the copied address. */
+	return 0;
+}
+
+/*
+ * Sets one of the traffic class options, when the option is one of them.
+ *
+ * *handled says whether it was; when it was not, nothing is changed and
+ * the error is 0.  IP_TOS and IP_RECVTOS are taken by every internet
+ * socket, IPV6_TCLASS and IPV6_RECVTCLASS by an IPv6 one only.
+ */
+static int
+inet_socket_set_class(
+	struct inet_socket *inet,
+	int level,
+	int option,
+	const void *value,
+	socklen_t length,
+	int *handled)
+{
+	uint8_t traffic_class;
+	int requested;
+
+	*handled = 0;
+
+	/* Only the four options are handled here. */
+	if (inet == NULL)
+		return 0;
+	if (level == IPPROTO_IP) {
+		if (option != IP_TOS && option != IP_RECVTOS)
+			return 0;
+	} else if (level == IPPROTO_IPV6) {
+		if (option != IPV6_TCLASS && option != IPV6_RECVTCLASS)
+			return 0;
+	} else {
+		return 0;
+	}
+
+	*handled = 1;
+
+	/* The IPv6 options are no option of an IPv4 socket's. */
+	if (level == IPPROTO_IPV6 && inet->family != AF_INET6)
+		return ENOPROTOOPT;
+
+	/* Each takes an int. */
+	if (value == NULL || length != sizeof(requested))
+		return EINVAL;
+	kern_memcpy(&requested, value, sizeof(requested));
+
+	/* Asking to be given the byte or the class of each datagram. */
+	if (option == IP_RECVTOS) {
+		inet->receive_tos = (uint8_t)(requested != 0);
+		return 0;
+	}
+
+	if (option == IPV6_RECVTCLASS) {
+		inet->receive_tclass = (uint8_t)(requested != 0);
+		return 0;
+	}
+
+	/*
+	 * The value sent: IP_TOS keeps the low eight bits of any int, as BSD
+	 * and Linux do; IPV6_TCLASS takes 0 to 255, or -1 for the default
+	 * (RFC 3542 section 6.5).
+	 */
+	if (option == IP_TOS) {
+		traffic_class = (uint8_t)((unsigned)requested & 0xffU);
+	} else {
+		if (requested < -1 || requested > 255)
+			return EINVAL;
+		traffic_class = 0;
+		if (requested >= 0)
+			traffic_class = (uint8_t)requested;
+	}
+
+	/*
+	 * A TCP socket keeps the ECN field clear: this TCP does not negotiate
+	 * ECN, and a sender that has not may not mark its packets ECN-capable
+	 * (RFC 3168 section 6.1.1).  Linux clears it the same way.
+	 */
+	if (inet->socket.type == SOCK_STREAM)
+		traffic_class = (uint8_t)(traffic_class & ~INET_ECN_MASK);
+
+	/* Has the packets sent from now on carry it. */
+	if (option == IP_TOS)
+		inet->tos = traffic_class;
+	else
+		inet->tclass = traffic_class;
+
+	/* Succeeded: the option is set. */
+	return 0;
+}
+
+/*
+ * Reads one of the traffic class options, when the option is one of them.
+ *
+ * *handled says whether it was; when it was not, nothing is read and the
+ * error is 0.
+ */
+static int
+inet_socket_get_class(
+	struct inet_socket *inet,
+	int level,
+	int option,
+	void *value,
+	socklen_t *length,
+	int *handled)
+{
+	int current;
+
+	*handled = 0;
+
+	/* Only the four options are handled here. */
+	if (inet == NULL)
+		return 0;
+	if (level == IPPROTO_IP) {
+		if (option != IP_TOS && option != IP_RECVTOS)
+			return 0;
+	} else if (level == IPPROTO_IPV6) {
+		if (option != IPV6_TCLASS && option != IPV6_RECVTCLASS)
+			return 0;
+	} else {
+		return 0;
+	}
+
+	*handled = 1;
+
+	/* The IPv6 options are no option of an IPv4 socket's. */
+	if (level == IPPROTO_IPV6 && inet->family != AF_INET6)
+		return ENOPROTOOPT;
+
+	/* Each is an int. */
+	if (value == NULL || length == NULL || *length < sizeof(current))
+		return EINVAL;
+
+	/* The value the option has. */
+	if (option == IP_TOS)
+		current = (int)inet->tos;
+	else if (option == IP_RECVTOS)
+		current = (int)inet->receive_tos;
+	else if (option == IPV6_TCLASS)
+		current = (int)inet->tclass;
+	else
+		current = (int)inet->receive_tclass;
+
+	/* Gives it. */
+	kern_memcpy(value, &current, sizeof(current));
+	*length = sizeof(current);
+
+	/* Succeeded: the value is given. */
 	return 0;
 }

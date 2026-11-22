@@ -19,6 +19,8 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <net/if.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -26,8 +28,27 @@
 
 extern intptr_t syscall_result(intptr_t);
 
+/*
+ * One entry of the list getifaddrs() gives, with the storage its pointers
+ * point into.
+ *
+ * Each entry is one block from malloc, so the list lives until
+ * freeifaddrs() frees its entries one by one; the struct ifaddrs comes
+ * first, so the entry's address is the node's.
+ */
+struct ifaddrs_node {
+	struct ifaddrs entry;
+	char name[IFNAMSIZ];
+	struct sockaddr_storage address;
+	struct sockaddr_storage netmask;
+	struct sockaddr_storage broadcast;
+	struct if_data data;
+};
+
+
 static intptr_t socket_call(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5);
 static char *append_decimal(char *output, unsigned value);
+static int recvmsg_put_control(struct msghdr *message, size_t room, size_t *used, int level, int type, const void *data, size_t length);
 static int inet6_pton_text(const char *text, uint8_t *address);
 static int inet6_ntop_text(const uint8_t *address, char *text, size_t size);
 static int inet6_hex(char c);
@@ -35,6 +56,12 @@ static int inet6_dotted(const char *text, uint8_t *bytes);
 static int inet6_group(const char **cursor, uint16_t *group);
 static int inet6_zero_run(const uint16_t *groups, unsigned *start);
 static char *inet6_put_group(char *output, uint16_t group);
+static int ifaddrs_add_interface(int descriptor, const struct ifreq *interface, struct ifaddrs ***tail);
+static struct ifaddrs_node *ifaddrs_node_add(const char *name, unsigned flags, struct ifaddrs ***tail);
+static int ifaddrs_add_link(int descriptor, const char *name, unsigned flags, unsigned index, struct ifaddrs ***tail);
+static int ifaddrs_add_inet(int descriptor, const char *name, unsigned flags, struct ifaddrs ***tail);
+static int ifaddrs_add_inet6(int descriptor, const char *name, unsigned flags, unsigned index, struct ifaddrs ***tail);
+static void ifaddrs_prefix_mask(unsigned prefix_length, struct sockaddr_in6 *mask);
 
 /*
  * Implements the socket operation.
@@ -412,9 +439,13 @@ recvmsg(
 	unsigned char *buffer;
 	size_t total, offset, i, copied;
 	size_t control_room;
-	size_t needed;
+	size_t control_used;
 	ssize_t result;
 	int hop_limit;
+	int traffic_class;
+	unsigned char tos;
+	struct timeval stamp;
+	int put;
 
 	descriptor_capacity = 0;
 	total = 0;
@@ -477,6 +508,7 @@ recvmsg(
 	request.flags = (uint32_t)flags;
 	request.descriptors = (uapi_ptr_t)(uintptr_t)descriptors;
 	request.descriptor_capacity = descriptor_capacity;
+	request.size = (uint32_t)sizeof(request);
 	result = (ssize_t)socket_call(KERN_SYS_recvmsg, descriptor,
 				      (uintptr_t)&request, 0, 0, 0, 0);
 
@@ -484,7 +516,7 @@ recvmsg(
 	if (result >= 0) {
 		/* Process each element required by the operation. */
 		message->msg_namelen = request.name_length;
-		message->msg_flags = (int)request.output_flags;
+		message->msg_flags = (int)(request.output_flags & ~RECVMSG_INFORMATION);
 		copied = (size_t)result < total ? (size_t)result : total;
 		for (i = 0; i < message->msg_iovlen && copied != 0; i++) {
 			part = message->msg_iov[i].iov_len < copied
@@ -510,25 +542,53 @@ recvmsg(
 		}
 
 		/*
-		 * The hop limit the datagram came with (IPV6_RECVHOPLIMIT,
-		 * ws177-p044) as an IPV6_HOPLIMIT message, where there is room
-		 * (none: MSG_CTRUNC).
+		 * What the datagram came with, each as its control message after
+		 * the ones before it, where there is room (none: MSG_CTRUNC): the
+		 * time it was queued (SO_TIMESTAMP), its Type of Service byte
+		 * (IP_RECVTOS) or traffic class (IPV6_RECVTCLASS), and its hop
+		 * limit (IPV6_RECVHOPLIMIT).  A datagram carries no descriptors,
+		 * so these never share the buffer with SCM_RIGHTS.
 		 */
-		if ((request.output_flags & RECVMSG_HOP_LIMIT) != 0U) {
-			message->msg_flags = (int)(request.output_flags & ~RECVMSG_HOP_LIMIT);
-			needed = CMSG_SPACE(sizeof(int));
-			if (request.descriptor_count == 0U && control_room >= needed) {
-				control = message->msg_control;
-				hop_limit = (int)request.hop_limit;
-				control->cmsg_level = IPPROTO_IPV6;
-				control->cmsg_type = IPV6_HOPLIMIT;
-				control->cmsg_len = CMSG_LEN(sizeof(int));
-				memcpy(CMSG_DATA(control), &hop_limit, sizeof(int));
-				message->msg_controllen = CMSG_SPACE(sizeof(int));
-			} else {
+		control_used = message->msg_controllen;
+
+		/* The time it was queued, as a struct timeval (SCM_TIMESTAMP). */
+		if ((request.output_flags & RECVMSG_TIMESTAMP) != 0U) {
+			stamp.tv_sec = (time_t)request.timestamp_seconds;
+			stamp.tv_usec = (suseconds_t)(request.timestamp_nanoseconds / 1000);
+			put = recvmsg_put_control(message, control_room, &control_used, SOL_SOCKET, SCM_TIMESTAMP, &stamp,
+			    sizeof(stamp));
+			if (put != 0)
 				message->msg_flags |= MSG_CTRUNC;
-			}
 		}
+
+		/* An IPv4 datagram's Type of Service byte, as one unsigned char (IP_TOS). */
+		if ((request.output_flags & RECVMSG_TOS) != 0U) {
+			tos = (unsigned char)request.traffic_class;
+			put = recvmsg_put_control(message, control_room, &control_used, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
+			if (put != 0)
+				message->msg_flags |= MSG_CTRUNC;
+		}
+
+		/* An IPv6 datagram's traffic class, as an int (IPV6_TCLASS). */
+		if ((request.output_flags & RECVMSG_TCLASS) != 0U) {
+			traffic_class = (int)request.traffic_class;
+			put = recvmsg_put_control(message, control_room, &control_used, IPPROTO_IPV6, IPV6_TCLASS,
+			    &traffic_class, sizeof(traffic_class));
+			if (put != 0)
+				message->msg_flags |= MSG_CTRUNC;
+		}
+
+		/* An IPv6 datagram's hop limit, as an int (IPV6_HOPLIMIT). */
+		if ((request.output_flags & RECVMSG_HOP_LIMIT) != 0U) {
+			hop_limit = (int)request.hop_limit;
+			put = recvmsg_put_control(message, control_room, &control_used, IPPROTO_IPV6, IPV6_HOPLIMIT,
+			    &hop_limit, sizeof(hop_limit));
+			if (put != 0)
+				message->msg_flags |= MSG_CTRUNC;
+		}
+
+		/* The room the control messages took. */
+		message->msg_controllen = control_used;
 	}
 	free(buffer);
 
@@ -915,6 +975,53 @@ socket_call(
 	return function_result;
 }
 
+/*
+ * Puts one control message after the ones a received message already has.
+ *
+ * room is the size of the caller's control buffer and *used the bytes the
+ * messages before this one take; on success *used grows by this one's
+ * aligned size (or to the end of the buffer, when its padding does not
+ * fit).  Reports -1, changing nothing, when even the message without its
+ * padding does not fit, and the caller then marks MSG_CTRUNC.
+ */
+static int
+recvmsg_put_control(
+	struct msghdr *message,
+	size_t room,
+	size_t *used,
+	int level,
+	int type,
+	const void *data,
+	size_t length)
+{
+	struct cmsghdr *control;
+	unsigned char *start;
+	size_t needed;
+	size_t aligned;
+
+	/* The message has to fit, its padding need not. */
+	needed = CMSG_LEN(length);
+	if (*used > room || room - *used < needed)
+		return -1;
+
+	/* Fills the header and the data where the last message ended. */
+	start = (unsigned char *)message->msg_control + *used;
+	control = (struct cmsghdr *)start;
+	control->cmsg_len = needed;
+	control->cmsg_level = level;
+	control->cmsg_type = type;
+	memcpy(CMSG_DATA(control), data, length);
+
+	/* Counts it, with the padding to the next one where that fits. */
+	aligned = CMSG_SPACE(length);
+	if (aligned > room - *used)
+		aligned = room - *used;
+	*used += aligned;
+
+	/* Succeeded: the message is in the buffer. */
+	return 0;
+}
+
 /* Supports the append decimal operation. */
 static char *
 append_decimal(
@@ -1089,6 +1196,120 @@ if_freenameindex(
 {
 	/* The entries and the names are one block. */
 	free(list);
+}
+
+/*
+ * Lists the addresses of the network interfaces (getifaddrs(3) of the BSDs).
+ *
+ * Each interface the system lists gives an AF_PACKET entry for its link,
+ * an AF_INET entry when it has an IPv4 address, and an AF_INET6 entry for
+ * each IPv6 address (<ifaddrs.h> says what each holds).  An interface that
+ * goes away while it is read is left out.  Reports 0 with the list in
+ * *list, which the caller frees with freeifaddrs(), or -1 with errno.
+ */
+int
+getifaddrs(
+	struct ifaddrs **list)
+{
+	struct ifconf configuration;
+	struct ifreq *interfaces;
+	struct ifaddrs *head;
+	struct ifaddrs **tail;
+	size_t count;
+	size_t index;
+	int descriptor;
+	int status;
+	int saved;
+
+	/* A place for the list has to be given. */
+	if (list == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	/* The network's ioctls answer it. */
+	descriptor = socket(AF_INET, SOCK_DGRAM, 0);
+	if (descriptor < 0)
+		return -1;
+
+	/* Asks how much room the list of the interfaces takes. */
+	memset(&configuration, 0, sizeof(configuration));
+	status = ioctl(descriptor, SIOCGIFCONF, &configuration);
+	if (status != 0) {
+		saved = errno;
+		close(descriptor);
+		errno = saved;
+		return -1;
+	}
+
+	/* Room for the interfaces, at least one so that malloc gives a block. */
+	count = configuration.ifc_len / sizeof(struct ifreq);
+	interfaces = malloc((count + 1U) * sizeof(struct ifreq));
+	if (interfaces == NULL) {
+		close(descriptor);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	/* Reads the interfaces; one added since the question is left out. */
+	configuration.ifc_len = (uint32_t)(count * sizeof(struct ifreq));
+	configuration.ifc_buf = (uint64_t)(uintptr_t)interfaces;
+	status = 0;
+	if (count != 0U)
+		status = ioctl(descriptor, SIOCGIFCONF, &configuration);
+	if (status != 0) {
+		saved = errno;
+		free(interfaces);
+		close(descriptor);
+		errno = saved;
+		return -1;
+	}
+
+	/* An interface removed since the question shortens the list. */
+	count = configuration.ifc_len / sizeof(struct ifreq);
+
+	/* Adds the entries of each interface, in the order the system lists them. */
+	head = NULL;
+	tail = &head;
+	status = 0;
+	for (index = 0U; index < count; index++) {
+		status = ifaddrs_add_interface(descriptor, &interfaces[index], &tail);
+		if (status != 0)
+			break;
+	}
+
+	/* The ioctls and the interface names are no longer needed. */
+	saved = errno;
+	free(interfaces);
+	close(descriptor);
+
+	/* A failed entry frees the ones before it. */
+	if (status != 0) {
+		freeifaddrs(head);
+		errno = saved;
+		return -1;
+	}
+
+	/* Succeeded: the list, which the caller frees with freeifaddrs. */
+	*list = head;
+	return 0;
+}
+
+/*
+ * Frees a list getifaddrs() gave, all of its entries.
+ */
+void
+freeifaddrs(
+	struct ifaddrs *list)
+{
+	struct ifaddrs *next;
+
+	/* Each entry is its own block, its addresses inside it. */
+	while (list != NULL) {
+		next = list->ifa_next;
+		free(list);
+		list = next;
+	}
 }
 
 /* ------------------------------------------------------------------ *
@@ -1413,4 +1634,281 @@ inet6_put_group(
 
 	/* Returns the end. */
 	return output;
+}
+
+/*
+ * Adds the entries of one interface: its link, its IPv4 address and its
+ * IPv6 addresses.  An interface that has gone away adds none.  Reports 0,
+ * or -1 with errno ENOMEM when an entry could not be made.
+ */
+static int
+ifaddrs_add_interface(
+	int descriptor,
+	const struct ifreq *interface,
+	struct ifaddrs ***tail)
+{
+	struct ifreq request;
+	char name[IFNAMSIZ];
+	unsigned flags;
+	unsigned index;
+	int status;
+
+	/* The interface's name, terminated. */
+	memcpy(name, interface->ifr_name, IFNAMSIZ);
+	name[IFNAMSIZ - 1] = '\0';
+	index = (unsigned)interface->ifr_ifindex;
+
+	/* Its flags; one that has gone away since it was listed is left out. */
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFFLAGS, &request);
+	if (status != 0)
+		return 0;
+	flags = (unsigned)request.ifr_flags;
+
+	/* The link. */
+	status = ifaddrs_add_link(descriptor, name, flags, index, tail);
+	if (status != 0)
+		return -1;
+
+	/* The IPv4 address. */
+	status = ifaddrs_add_inet(descriptor, name, flags, tail);
+	if (status != 0)
+		return -1;
+
+	/* The IPv6 addresses. */
+	status = ifaddrs_add_inet6(descriptor, name, flags, index, tail);
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the interface's entries are in the list. */
+	return 0;
+}
+
+/*
+ * Adds an empty entry for an interface at the end of the list, with its
+ * name and flags.  Reports the entry, or NULL with errno ENOMEM.
+ */
+static struct ifaddrs_node *
+ifaddrs_node_add(
+	const char *name,
+	unsigned flags,
+	struct ifaddrs ***tail)
+{
+	struct ifaddrs_node *node;
+
+	/* One block for the entry and what it points to. */
+	node = calloc(1U, sizeof(*node));
+	if (node == NULL) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	/* Its name and flags. */
+	memcpy(node->name, name, IFNAMSIZ);
+	node->entry.ifa_name = node->name;
+	node->entry.ifa_flags = flags;
+
+	/* Links it after the last entry. */
+	**tail = &node->entry;
+	*tail = &node->entry.ifa_next;
+
+	/* Succeeded: the entry, for the caller to fill. */
+	return node;
+}
+
+/*
+ * Adds the entry of an interface's link: an AF_PACKET address with its
+ * index and hardware address, and its statistics as ifa_data.  Reports 0,
+ * or -1 with errno ENOMEM.
+ */
+static int
+ifaddrs_add_link(
+	int descriptor,
+	const char *name,
+	unsigned flags,
+	unsigned index,
+	struct ifaddrs ***tail)
+{
+	struct ifaddrs_node *node;
+	struct sockaddr_l2 link;
+	struct ifreq request;
+	int status;
+
+	/* The entry. */
+	node = ifaddrs_node_add(name, flags, tail);
+	if (node == NULL)
+		return -1;
+
+	/* The link's address: its index, and an Ethernet interface's hardware address. */
+	memset(&link, 0, sizeof(link));
+	link.sl2_family = AF_PACKET;
+	link.sl2_ifindex = index;
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFHWADDR, &request);
+	if (status == 0 && (flags & IFF_LOOPBACK) == 0U) {
+		link.sl2_hatype = L2_HARDWARE_ETHER;
+		link.sl2_halen = 6U;
+		memcpy(link.sl2_addr, request.ifr_hwaddr, 6U);
+	}
+
+	memcpy(&node->address, &link, sizeof(link));
+	node->entry.ifa_addr = (struct sockaddr *)&node->address;
+
+	/* The interface's counters, as the BSDs give them. */
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFSTATS, &request);
+	if (status == 0) {
+		node->data = request.ifr_data;
+		node->entry.ifa_data = &node->data;
+	}
+
+	/* Succeeded: the link's entry is in the list. */
+	return 0;
+}
+
+/*
+ * Adds the entry of an interface's IPv4 address, its netmask and, with
+ * IFF_BROADCAST, its broadcast address, when it has an address.  Reports
+ * 0, or -1 with errno ENOMEM.
+ */
+static int
+ifaddrs_add_inet(
+	int descriptor,
+	const char *name,
+	unsigned flags,
+	struct ifaddrs ***tail)
+{
+	struct ifaddrs_node *node;
+	struct sockaddr_in address;
+	struct ifreq request;
+	int status;
+
+	/* The address; an interface without one has no entry. */
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFADDR, &request);
+	if (status != 0)
+		return 0;
+	memcpy(&address, &request.ifr_addr, sizeof(address));
+	if (address.sin_addr.s_addr == 0U)
+		return 0;
+
+	/* The entry, with the address. */
+	node = ifaddrs_node_add(name, flags, tail);
+	if (node == NULL)
+		return -1;
+	address.sin_family = AF_INET;
+	memcpy(&node->address, &address, sizeof(address));
+	node->entry.ifa_addr = (struct sockaddr *)&node->address;
+
+	/* The netmask. */
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFNETMASK, &request);
+	if (status == 0) {
+		memcpy(&address, &request.ifr_addr, sizeof(address));
+		address.sin_family = AF_INET;
+		memcpy(&node->netmask, &address, sizeof(address));
+		node->entry.ifa_netmask = (struct sockaddr *)&node->netmask;
+	}
+
+	/* The broadcast address, of an interface that broadcasts. */
+	if ((flags & IFF_BROADCAST) != 0U) {
+		memset(&request, 0, sizeof(request));
+		memcpy(request.ifr_name, name, IFNAMSIZ);
+		status = ioctl(descriptor, SIOCGIFBRDADDR, &request);
+		if (status == 0) {
+			memcpy(&address, &request.ifr_addr, sizeof(address));
+			address.sin_family = AF_INET;
+			memcpy(&node->broadcast, &address, sizeof(address));
+			node->entry.ifa_broadaddr = (struct sockaddr *)&node->broadcast;
+		}
+	}
+
+	/* Succeeded: the address's entry is in the list. */
+	return 0;
+}
+
+/*
+ * Adds an entry for each IPv6 address of an interface, with the netmask of
+ * its prefix and, for a link-local one, the interface as its scope.  An
+ * interface the system has no IPv6 for has none.  Reports 0, or -1 with
+ * errno ENOMEM.
+ */
+static int
+ifaddrs_add_inet6(
+	int descriptor,
+	const char *name,
+	unsigned flags,
+	unsigned index,
+	struct ifaddrs ***tail)
+{
+	struct in6_ifaddrs addresses;
+	struct ifaddrs_node *node;
+	struct sockaddr_in6 address;
+	struct sockaddr_in6 netmask;
+	uint32_t entry;
+	int status;
+
+	/* The interface's IPv6 addresses. */
+	memset(&addresses, 0, sizeof(addresses));
+	memcpy(addresses.ifa_name, name, IFNAMSIZ);
+	status = ioctl(descriptor, SIOCGIFADDRS_IN6, &addresses);
+	if (status != 0)
+		return 0;
+
+	/* An entry for each. */
+	for (entry = 0U; entry < addresses.ifa_count && entry < IN6_IFADDRS_MAX; entry++) {
+		node = ifaddrs_node_add(name, flags, tail);
+		if (node == NULL)
+			return -1;
+
+		/* The address, with the interface as the scope of a link-local one. */
+		memset(&address, 0, sizeof(address));
+		address.sin6_family = AF_INET6;
+		address.sin6_addr = addresses.ifa_list[entry].ife_addr;
+		if (IN6_IS_ADDR_LINKLOCAL(&address.sin6_addr))
+			address.sin6_scope_id = index;
+		memcpy(&node->address, &address, sizeof(address));
+		node->entry.ifa_addr = (struct sockaddr *)&node->address;
+
+		/* The netmask of its prefix. */
+		ifaddrs_prefix_mask(addresses.ifa_list[entry].ife_prefixlen, &netmask);
+		memcpy(&node->netmask, &netmask, sizeof(netmask));
+		node->entry.ifa_netmask = (struct sockaddr *)&node->netmask;
+	}
+
+	/* Succeeded: the addresses' entries are in the list. */
+	return 0;
+}
+
+/*
+ * Writes the IPv6 netmask of a prefix length: that many one bits from the
+ * top, zero bits after them (a length over 128 is taken as 128).
+ */
+static void
+ifaddrs_prefix_mask(
+	unsigned prefix_length,
+	struct sockaddr_in6 *mask)
+{
+	unsigned byte;
+	unsigned bits;
+
+	memset(mask, 0, sizeof(*mask));
+	mask->sin6_family = AF_INET6;
+
+	/* Fills each byte with the bits of the prefix that fall in it. */
+	for (byte = 0U; byte < 16U; byte++) {
+		bits = 0U;
+		if (prefix_length > byte * 8U)
+			bits = prefix_length - byte * 8U;
+		if (bits >= 8U) {
+			mask->sin6_addr.s6_addr[byte] = 0xffU;
+		} else {
+			mask->sin6_addr.s6_addr[byte] = (uint8_t)(0xff00U >> bits);
+		}
+	}
 }

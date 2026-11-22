@@ -67,6 +67,28 @@ struct path;
 
 enum socket_lifecycle { SOCKET_OPEN = 1, SOCKET_CLOSING, SOCKET_CLOSED };
 
+/*
+ * What a received datagram came with besides its data and its sender, as
+ * recvmsg gives it in control messages.
+ *
+ * The protocol fills it for the datagram it hands over, from what was kept
+ * on the packet for a socket that asked for it; each part not kept stays
+ * as socket_receive_info_clear left it.
+ */
+struct socket_receive_info {
+	/* The hop limit of an IPv6 datagram, or -1 when not kept. */
+	int hop_limit;
+	/* The Type of Service byte or traffic class, or -1 when not kept. */
+	int traffic_class;
+	/* Which IP version traffic_class is of: 4 or 6 (0 with none). */
+	int traffic_class_version;
+	/* Whether the time the datagram was queued is given. */
+	int time_known;
+	/* That time by the realtime clock: seconds and nanoseconds. */
+	int64_t seconds;
+	int32_t nanoseconds;
+};
+
 struct socket_ops {
 	int (*bind)(struct socket *, const struct sockaddr *, socklen_t);
 	int (*connect)(struct socket *, const struct sockaddr *, socklen_t,
@@ -87,12 +109,13 @@ struct socket_ops {
 	ssize_t (*recvfrom)(struct socket *, void *, size_t, int,
 			    struct sockaddr *, socklen_t *);
 	/*
-	 * recvfrom that also gives the hop limit the datagram came with (-1
-	 * for none kept), for recvmsg (ws177-p044); NULL where no protocol
-	 * keeps one.
+	 * recvfrom that also gives what the datagram came with (its hop
+	 * limit, traffic class, the time it was queued), for recvmsg; NULL
+	 * where the protocol keeps none of it.
 	 */
-	ssize_t (*recvfrom_hop)(struct socket *, void *, size_t, int,
-				struct sockaddr *, socklen_t *, int *);
+	ssize_t (*recvfrom_info)(struct socket *, void *, size_t, int,
+				 struct sockaddr *, socklen_t *,
+				 struct socket_receive_info *);
 	int (*shutdown)(struct socket *, int);
 	int (*getsockname)(struct socket *, struct sockaddr *, socklen_t *);
 	int (*getpeername)(struct socket *, struct sockaddr *, socklen_t *);
@@ -140,6 +163,13 @@ struct socket {
 	uint64_t send_timeout_ticks;
 	unsigned reuse_address;
 	unsigned keepalive;
+	/*
+	 * SO_TIMESTAMP: set, a datagram protocol notes the realtime clock as
+	 * it queues each datagram, for recvmsg to give.  Written and read
+	 * under the lock by setsockopt, read without it as datagrams arrive
+	 * (a datagram queued while it changes may go either way).
+	 */
+	unsigned timestamp;
 	unsigned read_shutdown;
 	unsigned write_shutdown;
 	/*
@@ -225,6 +255,8 @@ void socket_file_ref_put(struct socket_file_ref *reference);
 unsigned socket_file_effective_flags(const struct socket_file_ref *reference,
 				     int message_flags);
 int socket_take_error(struct socket *socket);
+void socket_receive_info_clear(struct socket_receive_info *info);
+void socket_receive_info_take(const struct packet_buf *packet, struct socket_receive_info *info);
 void socket_set_error(struct socket *socket, int error);
 void socket_wake_receive(struct socket *socket);
 void socket_wake_send(struct socket *socket);

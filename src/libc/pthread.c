@@ -28,6 +28,8 @@
 #define KEY_MAX 32U
 #define DESTRUCTOR_ITERATIONS 4U
 #define ATFORK_MAX 16U
+/* The bytes of a thread's name with its NUL, as the BSD and GNU libraries keep it. */
+#define THREAD_NAME_MAX 16U
 
 struct atfork_handler {
 	void (*prepare)(void);
@@ -51,6 +53,12 @@ struct pthread_tcb {
 	uint32_t multibyte_state[6];
 	fenv_t floating_environment;
 	char ptsname_buffer[32];
+	/*
+	 * The name pthread_setname_np gave the thread, empty when it has none.
+	 * Written and read under the registry lock, which keeps the control
+	 * block from being freed meanwhile.
+	 */
+	char name[THREAD_NAME_MAX];
 	unsigned detached;
 	unsigned detached_queued;
 	unsigned owns_stack;
@@ -118,6 +126,7 @@ static void run_destructors(struct pthread_tcb *tcb);
 static void detached_enqueue(struct pthread_tcb *tcb);
 static struct pthread_tcb *registry_find(pthread_t tid);
 static struct pthread_tcb *registry_remove(pthread_t tid);
+static struct pthread_tcb *registry_find_locked(pthread_t tid);
 static int ensure_detached_reaper(void);
 static int usync_wait_word_absolute(volatile uint32_t *address, uint32_t value, const struct timespec *absolute, int pshared, int cancelable, clockid_t clock);
 static int cond_wait(pthread_cond_t *c, pthread_mutex_t *m, const struct timespec *absolute, clockid_t clock);
@@ -837,6 +846,96 @@ pthread_equal(
 {
 	/* Returns the computed result. */
 	return left == right;
+}
+
+/*
+ * Names a thread (pthread_setname_np of the BSD and GNU libraries).
+ *
+ * The name, with its NUL, takes at most THREAD_NAME_MAX bytes; a longer
+ * one is refused with ERANGE, as the GNU library refuses it.  A thread that
+ * does not exist is ESRCH.  The name is kept by the C library for
+ * pthread_getname_np: the kernel keeps no name for a thread.
+ */
+int
+pthread_setname_np(
+	pthread_t thread,
+	const char *name)
+{
+	struct pthread_tcb *tcb;
+	size_t length;
+
+	/* A name has to be given, and has to fit. */
+	if (name == NULL)
+		return EINVAL;
+	length = strlen(name);
+	if (length >= THREAD_NAME_MAX)
+		return ERANGE;
+
+	/* The thread's control block holds the name. */
+	ensure_main();
+	word_lock(&registry_lock);
+
+	tcb = registry_find_locked(thread);
+	if (tcb != NULL) {
+		memset(tcb->name, 0, sizeof(tcb->name));
+		memcpy(tcb->name, name, length);
+	}
+
+	word_unlock(&registry_lock);
+
+	/* A thread that is not there has no name to take. */
+	if (tcb == NULL)
+		return ESRCH;
+
+	/* Succeeded: the thread has the name. */
+	return 0;
+}
+
+/*
+ * Copies a thread's name, empty when it has none (pthread_getname_np of
+ * the BSD and GNU libraries).
+ *
+ * The buffer has to hold the name and its NUL (ERANGE otherwise); a
+ * thread that does not exist is ESRCH.
+ */
+int
+pthread_getname_np(
+	pthread_t thread,
+	char *name,
+	size_t size)
+{
+	struct pthread_tcb *tcb;
+	size_t length;
+	int error;
+
+	/* A buffer has to be given. */
+	if (name == NULL)
+		return EINVAL;
+
+	/* Copies the name from the thread's control block. */
+	ensure_main();
+	error = ESRCH;
+	word_lock(&registry_lock);
+
+	tcb = registry_find_locked(thread);
+	if (tcb != NULL) {
+		length = strnlen(tcb->name, sizeof(tcb->name));
+		error = ERANGE;
+		if (length < size) {
+			memcpy(name, tcb->name, length);
+			name[length] = '\0';
+			error = 0;
+		}
+	}
+
+	word_unlock(&registry_lock);
+
+	/* Reports why the name could not be given. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the name is in the buffer. */
+	return 0;
 }
 
 /*
@@ -3256,6 +3355,30 @@ registry_find(
 	word_unlock(&registry_lock);
 
 	/* Returns the computed result. */
+	return tcb;
+}
+
+/*
+ * Finds a thread's control block in the registry, whose lock the caller
+ * holds.  Reports NULL for a thread that is not there.
+ */
+static struct pthread_tcb *
+registry_find_locked(
+	pthread_t tid)
+{
+	struct pthread_tcb *tcb;
+
+	/* Walks the registry for the thread. */
+	for (tcb = tcb_list; tcb != NULL; tcb = tcb->next) {
+		if (tcb->tid == tid)
+			break;
+	}
+
+	/* The first thread is not in the registry: its block lives as long as the process. */
+	if (tcb == NULL && main_attached != 0U && main_tcb.tid == tid)
+		tcb = &main_tcb;
+
+	/* Reports the block, or NULL. */
 	return tcb;
 }
 

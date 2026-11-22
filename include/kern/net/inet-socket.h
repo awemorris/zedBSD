@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 struct net_device;
+struct packet_buf;
 
 #define INET_SOCKET_BOUND	0x0001U
 #define INET_SOCKET_CONNECTED	0x0002U
@@ -52,6 +53,17 @@ struct inet_socket {
 	unsigned scope6;
 	unsigned v6only;
 	unsigned mapped;
+	/*
+	 * The Type of Service byte its IPv4 packets go with (IP_TOS) and the
+	 * traffic class of its IPv6 ones (IPV6_TCLASS), 0 by default, and
+	 * whether it asked to be given the byte or the class each datagram
+	 * came with (IP_RECVTOS, IPV6_RECVTCLASS).  Written by setsockopt, read
+	 * as packets are sent and datagrams queued.
+	 */
+	uint8_t tos;
+	uint8_t tclass;
+	uint8_t receive_tos;
+	uint8_t receive_tclass;
 };
 
 int
@@ -128,6 +140,15 @@ inet_socket_getsockopt(
 	int option,
 	void *value,
 	socklen_t *length);
+uint8_t
+inet_socket_send_class(
+	const struct inet_socket *inet,
+	int ipv6);
+void
+inet_socket_receive_note(
+	const struct inet_socket *inet,
+	const struct packet_buf *arrived,
+	struct packet_buf *queued);
 
 int
 inet_interface_address(

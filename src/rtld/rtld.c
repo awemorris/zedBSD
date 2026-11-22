@@ -1341,7 +1341,7 @@ __rtld_dlopen(
 
 	/* Checks the active flags. */
 	if ((flags & ~(RTLD_LAZY | RTLD_NOW | RTLD_GLOBAL |
-		       RTLD_NODELETE)) != 0 ||
+		       RTLD_NODELETE | RTLD_NOLOAD)) != 0 ||
 	    ((flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_LAZY &&
 	     (flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_NOW)) {
 		set_loader_error("invalid dlopen flags");
@@ -1402,6 +1402,15 @@ __rtld_dlopen(
 			same_name = rtld_strcmp(loaded_name, name) == 0;
 		if (object->active && !object->unloading && (same_path || same_name))
 			goto loaded;
+	}
+
+	/* RTLD_NOLOAD asks only for an object already loaded, which this is not. */
+	if ((flags & RTLD_NOLOAD) != 0) {
+		set_loader_error("shared object not loaded");
+		loader_unlock();
+
+		/* Reports that no result is available. */
+		return NULL;
 	}
 
 	/* The file: at its path, or found where a DT_NEEDED name is (/lib, then /usr/lib for packages; BUG-083). */

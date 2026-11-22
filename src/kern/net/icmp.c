@@ -56,8 +56,9 @@ static int icmp_bind(struct socket *socket, const struct sockaddr *address, sock
 static int icmp_connect(struct socket *socket, const struct sockaddr *address, socklen_t length, unsigned io_flags);
 static ssize_t icmp_sendto(struct socket *socket, const void *buffer, size_t length, int flags, const struct sockaddr *address, socklen_t address_length);
 static ssize_t icmp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length);
-static ssize_t icmp_recvfrom_hop(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length, int *hop_limit);
+static ssize_t icmp_recvfrom_info(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length, struct socket_receive_info *info);
 static int icmp_setsockopt(struct socket *socket, int level, int option, const void *value, socklen_t length);
+static int icmp_getsockopt(struct socket *socket, int level, int option, void *value, socklen_t *length);
 static int icmp_getsockname(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static int icmp_getpeername(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static void icmp_close(struct socket *socket);
@@ -72,8 +73,9 @@ static const struct socket_ops icmp_ops = {
 	.connect = icmp_connect,
 	.sendto = icmp_sendto,
 	.recvfrom = icmp_recvfrom,
-	.recvfrom_hop = icmp_recvfrom_hop,
+	.recvfrom_info = icmp_recvfrom_info,
 	.setsockopt = icmp_setsockopt,
+	.getsockopt = icmp_getsockopt,
 	.getsockname = icmp_getsockname,
 	.getpeername = icmp_getpeername,
 	.ioctl = inet_socket_ioctl,
@@ -202,10 +204,11 @@ icmp6_raw_deliver(
 			copy->hop_limit_known = 1;
 		}
 
-		/* Names the sender, and queues the copy. */
+		/* Names the sender, keeps what the socket asked to be given of it (IPV6_RECVTCLASS, SO_TIMESTAMP), and queues the copy. */
 		copy->l3_offset = PACKET_OFFSET_NONE;
 		copy->l4_offset = 0;
 		inet_socket_peer_name(&endpoint->inet, 0, source, arrived, 0, copy->source_address, &copy->source_length);
+		inet_socket_receive_note(&endpoint->inet, packet, copy);
 		(void)socket_enqueue_packet(&endpoint->inet.socket, copy);
 		socket_release(&endpoint->inet.socket);
 	}
@@ -363,6 +366,7 @@ icmp_sendto(
 		device = net_device_find_by_index_ref(endpoint->inet.ifindex);
 	else
 		device = NULL;
+	packet->traffic_class = inet_socket_send_class(&endpoint->inet, 0);
 	error = ipv4_output(device, destination, IPPROTO_ICMP, packet);
 	net_device_release(device);
 
@@ -382,27 +386,28 @@ icmp_recvfrom(
 	struct sockaddr *address,
 	socklen_t *address_length)
 {
+	struct socket_receive_info info;
 	ssize_t result;
-	int hop_limit;
 
-	/* The message, its hop limit not asked for. */
-	result = icmp_recvfrom_hop(socket, buffer, length, flags, address, address_length, &hop_limit);
+	/* The message, what it came with not asked for. */
+	result = icmp_recvfrom_info(socket, buffer, length, flags, address, address_length, &info);
 	return result;
 }
 
 /*
  * Takes the next queued message: as much of it as fits, its sender, and
- * the hop limit it came with when the socket asked for it (-1 otherwise).
+ * what it kept of what it came with (the hop limit, the traffic class,
+ * the time it was queued) for a socket that asked for it.
  */
 static ssize_t
-icmp_recvfrom_hop(
+icmp_recvfrom_info(
 	struct socket *socket,
 	void *buffer,
 	size_t length,
 	int flags,
 	struct sockaddr *address,
 	socklen_t *address_length,
-	int *hop_limit)
+	struct socket_receive_info *info)
 {
 	struct packet_buf *packet;
 	size_t copied;
@@ -411,8 +416,8 @@ icmp_recvfrom_hop(
 	ssize_t result;
 	int error;
 
-	/* No hop limit unless the message kept one. */
-	*hop_limit = -1;
+	/* Nothing is given unless the message kept it. */
+	socket_receive_info_clear(info);
 
 	/* Rejects unsupported flags. */
 	if ((flags & ~(MSG_DONTWAIT | MSG_TRUNC)) != 0)
@@ -441,9 +446,8 @@ icmp_recvfrom_hop(
 		*address_length = actual;
 	}
 
-	/* The hop limit it came with (ws177-p044). */
-	if (packet->hop_limit_known)
-		*hop_limit = (int)packet->hop_limit;
+	/* What it kept of what it came with. */
+	socket_receive_info_take(packet, info);
 
 	/* With MSG_TRUNC the full packet length is reported instead. */
 	if ((flags & MSG_TRUNC) != 0)
@@ -457,8 +461,9 @@ icmp_recvfrom_hop(
 }
 
 /*
- * Sets an option: IPV6_RECVHOPLIMIT of an ICMPv6 socket (ws177-p044), or
- * the ones every inet socket takes (IPV6_V6ONLY, SO_BINDTODEVICE).
+ * Sets an option: IPV6_RECVHOPLIMIT of an ICMPv6 socket, or the ones every
+ * inet socket takes (IPV6_V6ONLY, SO_BINDTODEVICE, the traffic class
+ * options).
  */
 static int
 icmp_setsockopt(
@@ -492,6 +497,46 @@ icmp_setsockopt(
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Reads an option: IPV6_RECVHOPLIMIT of an ICMPv6 socket, or the ones
+ * every inet socket takes.
+ */
+static int
+icmp_getsockopt(
+	struct socket *socket,
+	int level,
+	int option,
+	void *value,
+	socklen_t *length)
+{
+	struct icmp_endpoint *endpoint;
+	int enabled;
+	int error;
+
+	/* Whether the hop limit of each message was asked for. */
+	endpoint = icmp_endpoint(socket);
+	if (level == IPPROTO_IPV6 && option == IPV6_RECVHOPLIMIT) {
+		if (endpoint->inet.family != AF_INET6)
+			return ENOPROTOOPT;
+		if (value == NULL || length == NULL || *length < sizeof(enabled))
+			return EINVAL;
+		enabled = endpoint->receive_hop_limit != 0;
+		kern_memcpy(value, &enabled, sizeof(enabled));
+		*length = sizeof(enabled);
+		return 0;
+	}
+
+	/* The inet socket's options; one it does not know is no option of this socket's. */
+	error = inet_socket_getsockopt(&endpoint->inet, level, option, value, length);
+	if (error == EOPNOTSUPP)
+		return ENOPROTOOPT;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the value is given. */
 	return 0;
 }
 
@@ -646,6 +691,9 @@ icmp_deliver(
 		address.sin_addr.s_addr = net_htonl(source);
 		kern_memcpy(copy->source_address, &address, sizeof(address));
 		copy->source_length = sizeof(address);
+
+		/* Keeps what the socket asked to be given of it (IP_RECVTOS, SO_TIMESTAMP), and queues the copy. */
+		inet_socket_receive_note(&endpoint->inet, packet, copy);
 		(void)socket_enqueue_packet(&endpoint->inet.socket, copy);
 		socket_release(&endpoint->inet.socket);
 	}
@@ -854,6 +902,7 @@ icmp6_sendto(
 	unspecified = in6_is_unspecified(&endpoint->inet.local6);
 	if (!unspecified)
 		source = &endpoint->inet.local6;
+	packet->traffic_class = inet_socket_send_class(&endpoint->inet, 1);
 	error = icmp6_send(device, source, &destination, 0U, packet);
 	if (device != NULL)
 		net_device_release(device);

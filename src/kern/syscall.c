@@ -2228,7 +2228,8 @@ sys_recvmsg_call(
 	ssize_t part;
 	socklen_t amount;
 	socklen_t name_copied;
-	int hop_limit;
+	struct socket_receive_info info;
+	size_t request_size;
 
 	process = current_process();
 	buffer = NULL;
@@ -2241,11 +2242,31 @@ sys_recvmsg_call(
 	    args[4] != 0 ||
 	    args[5] != 0)
 		return -EINVAL;
-	error = copyin(args[1], &request, sizeof(request));
+	kern_memset(&request, 0, sizeof(request));
+	request_size = offsetof(struct recvmsg_args, traffic_class);
+	error = copyin(args[1], &request, request_size);
 	if (error != 0)
 		return -error;
-	if (request.reserved != 0 ||
-	    request.hop_limit != 0 ||
+
+	/*
+	 * A request that says it has room for the receive information after
+	 * hop_limit is read whole; one that says nothing ends at hop_limit,
+	 * and nothing after it is read or written.
+	 */
+	if (request.size == sizeof(request)) {
+		request_size = sizeof(request);
+		error = copyin(args[1], &request, request_size);
+		if (error != 0)
+			return -error;
+	} else if (request.size != 0) {
+		return -EINVAL;
+	}
+
+	if (request.hop_limit != 0 ||
+	    request.traffic_class != 0 ||
+	    request.reserved != 0 ||
+	    request.timestamp_seconds != 0 ||
+	    request.timestamp_nanoseconds != 0 ||
 	    request.data_capacity > SIZE_MAX ||
 	    request.name_capacity > sizeof(address) ||
 	    request.descriptor_capacity > KERN_MSG_FD_MAX ||
@@ -2272,7 +2293,7 @@ sys_recvmsg_call(
 		request.name_length = 0;
 		request.descriptor_count = 0;
 		request.output_flags = 0;
-		error = copyout(&request, args[1], sizeof(request));
+		error = copyout(&request, args[1], request_size);
 		if (error != 0)
 			result = -error;
 		else
@@ -2300,10 +2321,13 @@ sys_recvmsg_call(
 		name_length_argument = NULL;
 	}
 
-	/* A non-AF_UNIX socket receives through recvfrom without descriptors (with the hop limit where it keeps it). */
+	/*
+	 * A non-AF_UNIX socket receives through recvfrom without descriptors
+	 * (with what the datagram came with, where the protocol keeps it).
+	 */
 	if (reference.socket->family != AF_UNIX) {
 		wire_result = 0;
-		hop_limit = -1;
+		socket_receive_info_clear(&info);
 		if (reference.socket->ops == NULL ||
 		    reference.socket->ops->recvfrom == NULL) {
 			kern_free(buffer);
@@ -2330,11 +2354,11 @@ sys_recvmsg_call(
 				buffer_argument = (uint8_t *)buffer + (size_t)wire_result;
 			else
 				buffer_argument = (uint8_t *)"";
-			if (reference.socket->ops->recvfrom_hop != NULL) {
-				part = reference.socket->ops->recvfrom_hop(
+			if (reference.socket->ops->recvfrom_info != NULL) {
+				part = reference.socket->ops->recvfrom_info(
 				    reference.socket, buffer_argument,
 				    buffer_capacity - (size_t)wire_result, receive_flags,
-				    address_argument, name_length_argument, &hop_limit);
+				    address_argument, name_length_argument, &info);
 			} else {
 				part = reference.socket->ops->recvfrom(
 				    reference.socket, buffer_argument,
@@ -2389,15 +2413,35 @@ sys_recvmsg_call(
 		else
 			request.output_flags = 0;
 
-		/* The hop limit the datagram came with, when its socket kept it (ws177-p044). */
-		if (hop_limit >= 0) {
-			request.hop_limit = (uint32_t)hop_limit;
+		/* The hop limit the datagram came with, when its socket kept it. */
+		if (info.hop_limit >= 0) {
+			request.hop_limit = (uint32_t)info.hop_limit;
 			request.output_flags |= RECVMSG_HOP_LIMIT;
+		}
+
+		/*
+		 * Its Type of Service byte or traffic class, and the time it was
+		 * queued, when its socket kept them and the request has room.
+		 */
+		if (request_size == sizeof(request)) {
+			if (info.traffic_class_version == 4) {
+				request.traffic_class = (uint32_t)info.traffic_class;
+				request.output_flags |= RECVMSG_TOS;
+			} else if (info.traffic_class_version == 6) {
+				request.traffic_class = (uint32_t)info.traffic_class;
+				request.output_flags |= RECVMSG_TCLASS;
+			}
+
+			if (info.time_known) {
+				request.timestamp_seconds = info.seconds;
+				request.timestamp_nanoseconds = (int64_t)info.nanoseconds;
+				request.output_flags |= RECVMSG_TIMESTAMP;
+			}
 		}
 
 		/* The request with what was received. */
 		if (error == 0)
-			error = copyout(&request, args[1], sizeof(request));
+			error = copyout(&request, args[1], request_size);
 		kern_free(buffer);
 		if (error != 0)
 			result = -error;
@@ -2477,7 +2521,7 @@ sys_recvmsg_call(
 		output_flags |= MSG_TRUNC;
 	request.output_flags = output_flags;
 	if (error == 0)
-		error = copyout(&request, args[1], sizeof(request));
+		error = copyout(&request, args[1], request_size);
 	if (error != 0) {
 		filedesc_abort_reserved(&reservation);
 		unix_socket_receive_abort(&transaction);

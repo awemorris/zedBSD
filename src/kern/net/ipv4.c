@@ -207,6 +207,7 @@ ipv4_output_routed(
 	/* Fills in the fixed fields of the header. */
 	kern_memset(header, 0, sizeof(*header));
 	header->version_ihl = 0x45U;
+	header->tos = packet->traffic_class;
 	wire_put16(header->total_length, (uint16_t)packet->length);
 	wire_put16(header->identification, ++next_identification);
 	wire_put16(header->fragment, 0x4000U);
@@ -469,6 +470,7 @@ ipv4_output_common(
 
 	kern_memset(header, 0, sizeof(*header));
 	header->version_ihl = 0x45U;
+	header->tos = packet->traffic_class;
 	total = (uint16_t)packet->length;
 	wire_put16(header->total_length, total);
 	wire_put16(header->identification, ++next_identification);
