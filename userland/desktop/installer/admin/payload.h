@@ -19,7 +19,9 @@
  * It is never unpacked as a whole: a member is read where it lies in the
  * tarball, so the system takes the room of one copy.  The index is also
  * copied beside it for the installer, which reads it to offer the choice
- * of what to install.
+ * of what to install, and so are the licences the index names (the
+ * firmware's), taken out of their units, for the installer to show:
+ * the ones of the system downloaded, not of the system running.
  */
 
 #ifndef USERLAND_DESKTOP_INSTALLER_ADMIN_PAYLOAD_H
@@ -40,6 +42,14 @@
 #define PAYLOAD_PARTIAL		PAYLOAD_DIRECTORY "/system.part"
 #define PAYLOAD_INDEX		PAYLOAD_DIRECTORY "/index"
 #define PAYLOAD_INDEX_NEW	PAYLOAD_DIRECTORY "/index.new"
+
+/*
+ * The licences the index names, for the installer: the directory, and in
+ * it one file a licence, named by its place among the index's licence
+ * records (0, 1, ...).  An index with more is refused.
+ */
+#define PAYLOAD_LICENSES	PAYLOAD_DIRECTORY "/licenses"
+#define PAYLOAD_LICENSES_MAX	32U
 
 /* The most members the tarball may have, and the longest name of one (with its NUL). */
 #define PAYLOAD_MEMBERS_MAX	512U

@@ -136,8 +136,15 @@ struct page_state {
 	int text_open;
 	struct kl_style style;
 
-	/* The frame (width by height pixels) and the canvas over it (canvas_made when it is). */
+	/*
+	 * The frame (frame_width by frame_height pixels), the scale it is drawn
+	 * at (in 96ths), its size in the widgets' units at that scale (width by
+	 * height), and the canvas over it (canvas_made when it is).
+	 */
 	uint32_t *pixels;
+	uint32_t frame_width;
+	uint32_t frame_height;
+	unsigned scale;
 	uint32_t width;
 	uint32_t height;
 	struct kl_canvas canvas;
@@ -214,7 +221,9 @@ static const uint32_t page_size_actions[PAGE_SIZES] = { TERMINAL_ACTION_SIZE_SMA
 /* What each effect is called where a card says when its settings take effect. */
 static const char *const page_effect_titles[2] = { "From the next connection", "From the next start" };
 
-static int page_frame(uint32_t width, uint32_t height);
+static int page_frame(uint32_t width, uint32_t height, unsigned scale);
+static double page_units(double pixels);
+static int page_pixels(int units);
 static void page_layout(struct kl_rect *sidebar, struct kl_rect *content);
 static void page_sidebar(const struct kl_rect *sidebar);
 static int page_hosts(struct terminal_window *window, int top, int left, int width);
@@ -324,11 +333,20 @@ terminal_page_input(
 	struct terminal_window *window,
 	const struct kl_window_event *event)
 {
+	struct kl_window_event scaled;
 	int taken;
 
 	/* Nothing before the page is made. */
 	if (!page.made)
 		return 0;
+
+	/* The places and distances in the widgets' units (the window gives pixels). */
+	scaled = *event;
+	scaled.x = page_units(event->x);
+	scaled.y = page_units(event->y);
+	scaled.dx = page_units(event->dx);
+	scaled.dy = page_units(event->dy);
+	event = &scaled;
 
 	/* What it is. */
 	switch (event->kind) {
@@ -412,7 +430,7 @@ terminal_page_draw(
 	int error;
 
 	/* A frame of the size, with its canvas. */
-	error = page_frame(width, height);
+	error = page_frame(width, height, state->scale);
 	if (error != 0)
 		return error;
 
@@ -424,11 +442,11 @@ terminal_page_draw(
 	page.dirty = 0;
 	kl_ui_begin(page.ui, now);
 
-	/* The ground. */
+	/* The ground (the widgets' units, at the scale). */
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = (int)width;
-	whole.height = (int)height;
+	whole.width = (int)page.width;
+	whole.height = (int)page.height;
 	kl_canvas_gradient(&page.canvas, &whole, theme->ground_top, theme->ground_bottom);
 
 	/* The sidebar and the content's panel. */
@@ -661,19 +679,27 @@ terminal_page_close(void)
 	memset(&page, 0, sizeof(page));
 }
 
-/* Makes the frame and its canvas the given size (kept while it does not change); 0 or ENOMEM. */
+/* Makes the frame and its canvas the given size at a scale (kept while neither changes); 0 or ENOMEM. */
 static int
 page_frame(
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	unsigned scale)
 {
+	struct kl_rect frame;
+	struct kl_rect units;
 	uint32_t *pixels;
 	int error;
 
-	/* The same size keeps the frame. */
+	/* A scale of 0 is 100 %. */
+	if (scale == 0U)
+		scale = KL_SCALE_BASE;
+
+	/* The same size and scale keep the frame. */
 	if (page.canvas_made &&
-	    page.width == width &&
-	    page.height == height)
+	    page.frame_width == width &&
+	    page.frame_height == height &&
+	    page.scale == scale)
 		return 0;
 
 	/* The old canvas goes; a new frame of the size. */
@@ -685,21 +711,74 @@ page_frame(
 	/* A window without an area has no frame. */
 	if (width == 0U || height == 0U)
 		return ENOMEM;
+
+	/* The frame's pixels. */
 	pixels = realloc(page.pixels, (size_t)width * height * sizeof(uint32_t));
 	if (pixels == NULL)
 		return ENOMEM;
 	page.pixels = pixels;
-	page.width = width;
-	page.height = height;
+	page.frame_width = width;
+	page.frame_height = height;
 
-	/* The canvas over it. */
+	/* The canvas over it, drawn at the scale. */
 	error = kl_canvas_init(&page.canvas, page.pixels, (size_t)width, (int)width, (int)height);
 	if (error != 0)
 		return ENOMEM;
+	kl_canvas_set_scale(&page.canvas, scale);
+	page.scale = scale;
+
+	/* The frame's size in the widgets' units, which the panes are laid out in. */
+	frame.x = 0;
+	frame.y = 0;
+	frame.width = (int)width;
+	frame.height = (int)height;
+	kl_canvas_logical(&page.canvas, &frame, &units);
+	page.width = (uint32_t)units.width;
+	page.height = (uint32_t)units.height;
 
 	/* Succeeded: the frame and its canvas. */
 	page.canvas_made = 1;
 	return 0;
+}
+
+/* Gives a place or a distance of the window's pixels in the widgets' units (the frame's scale). */
+static double
+page_units(
+	double pixels)
+{
+	double units;
+
+	/* A page not drawn yet is at 100 %. */
+	if (page.scale == 0U || page.scale == KL_SCALE_BASE)
+		return pixels;
+
+	/* The pixels over the scale. */
+	units = pixels * (double)KL_SCALE_BASE / (double)page.scale;
+
+	/* Reports the units. */
+	return units;
+}
+
+/* Gives a place or a length of the widgets' units in the window's pixels, rounded to the nearest. */
+static int
+page_pixels(
+	int units)
+{
+	double exact;
+	int pixels;
+
+	/* A page not drawn yet is at 100 %. */
+	if (page.scale == 0U || page.scale == KL_SCALE_BASE)
+		return units;
+
+	/* The units times the scale, the half pixel up (the whole part below the value, a negative one too). */
+	exact = (double)units * (double)page.scale / (double)KL_SCALE_BASE + 0.5;
+	pixels = (int)exact;
+	if ((double)pixels > exact)
+		pixels--;
+
+	/* Reports the pixels. */
+	return pixels;
 }
 
 /* Places the sidebar on the left and the content's panel beside it, narrower in a narrow window. */
@@ -1805,6 +1884,10 @@ page_text_follow(
 {
 	struct kl_rect caret;
 	int wanted;
+	int width;
+	int height;
+	int x;
+	int y;
 
 	/* What the focused widget wants. */
 	wanted = kl_ui_text_wanted(page.ui, &caret);
@@ -1815,9 +1898,14 @@ page_text_follow(
 		page.text_wanted = wanted;
 	}
 
-	/* The candidates' place at the caret. */
-	if (wanted)
-		kl_window_text_cursor(window->kui, caret.x, caret.y, caret.width, caret.height);
+	/* The candidates' place at the caret, in the window's pixels. */
+	if (wanted) {
+		x = page_pixels(caret.x);
+		y = page_pixels(caret.y);
+		width = page_pixels(caret.width);
+		height = page_pixels(caret.height);
+		kl_window_text_cursor(window->kui, x, y, width, height);
+	}
 }
 
 /* Finds the field or the text area with the keyboard's focus; reports 1 with one of them, 0 for none. */

@@ -312,6 +312,8 @@ static int run_menu_actions(const struct terminal_run_options *options, struct r
 static void run_menu_state(const struct run_state *run, struct terminal_menu_state *state);
 static void run_new_window(const struct terminal_run_options *options, const struct run_state *run);
 static int run_zoom(const struct terminal_run_options *options, struct run_state *run, unsigned pixels);
+static int run_rescale(const struct terminal_run_options *options, struct run_state *run);
+static uint32_t run_window_units(const struct run_state *run, unsigned pixels);
 static void run_ambiguous_wide(const struct terminal_run_options *options, struct run_state *run);
 static int run_save_settings(const struct run_state *run);
 static void run_theme(const struct terminal_run_options *options, struct run_state *run, unsigned theme);
@@ -469,17 +471,32 @@ run_start(
 	/* The colour emoji font for what neither has, read when a character first needs it. */
 	terminal_font_emoji(&run_font, options->emoji);
 
-	/* The window, sized for the grid asked for. */
+	/*
+	 * The window, sized for the grid asked for: the grid's pixels at the
+	 * scale, which the window's options take at 100 % (the window system
+	 * makes them its screen's).
+	 */
 	run->operation = "terminal_window_open";
 	status = terminal_window_open(&run_window,
 				      options->display,
 				      options->application,
 				      options->title,
 				      options->present,
-				      options->columns * run_font.cell_width + 2U * TERMINAL_PADDING,
-				      options->rows * run_font.cell_height + 2U * TERMINAL_PADDING);
+				      run_window_units(run, options->columns * run_font.cell_width + 2U * TERMINAL_PADDING),
+				      run_window_units(run, options->rows * run_font.cell_height + 2U * TERMINAL_PADDING));
 	if (status != 0)
 		return -1;
+
+	/* A window on a screen of another scale than the one asked has the font at its scale (a size the font cannot give keeps the old one). */
+	if (run_window.scale != 0U && run_window.scale != run->scale) {
+		run->scale = run_window.scale;
+		status = terminal_font_resize(&run_font, run_font_pixels(run, pixels));
+		if (status == ENOMEM) {
+			run->operation = "terminal_font_resize";
+			errno = status;
+			return -1;
+		}
+	}
 
 	/* The fingers; without memory for them they do nothing. */
 	status = terminal_touch_open(&run_touch);
@@ -740,6 +757,13 @@ run_loop(
 		if (options->timeout != 0U && now - started >= (uint64_t)options->timeout * 1000U) {
 			run->reason = "timeout";
 			return 0;
+		}
+
+		/* Another scale draws the text at it (the new size, if any, follows). */
+		if (run_window.rescaled) {
+			status = run_rescale(options, run);
+			if (status != 0)
+				return -1;
 		}
 
 		/* A new size remakes the swapchain and the grid, and tells the shell. */
@@ -1305,6 +1329,66 @@ run_zoom(
 
 	/* Succeeded: the next frame draws at the new size. */
 	printf("ZTERM ZOOM run=%s pixels=%u columns=%u rows=%u\n", options->token, pixels, run->columns, run->rows);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Draws the text at the window's new scale (moved to another screen, or
+ * the screen's scale changed): the same size at 96 dots an inch, the
+ * font at the scale's pixels, the grid that fits the window made again
+ * and told to the shell, and the settings' page drawn again.  Returns 0,
+ * or -1 when the font cannot be drawn at all any more.
+ */
+static int
+run_rescale(
+	const struct terminal_run_options *options,
+	struct run_state *run)
+{
+	unsigned previous;
+	unsigned scale;
+	unsigned index;
+	int error;
+
+	/* The scale told (none is the base one); an unchanged one does nothing. */
+	run_window.rescaled = 0;
+	scale = run_window.scale;
+	if (scale == 0U)
+		scale = KL_SCALE_BASE;
+	if (scale == run->scale)
+		return 0;
+
+	/* The font at the size at the new scale, once no frame reads the atlas; a size it cannot give keeps the old scale. */
+	(void)terminal_display_idle(run_display);
+	previous = run->scale;
+	run->scale = scale;
+	error = terminal_font_resize(&run_font, run_font_pixels(run, run->pixels));
+	if (error == ENOMEM) {
+		run->operation = "terminal_font_resize";
+		errno = error;
+		return -1;
+	}
+
+	/* A size the font cannot be measured at is not taken. */
+	if (error != 0) {
+		run->scale = previous;
+		return 0;
+	}
+
+	/* The grid that fits the window at the new cell, for every tab, told to each shell. */
+	run_grid(run->width, run->height, &run->columns, &run->rows);
+	for (index = 0; index < run_tab_count; index++) {
+		terminal_screen_resize(run_tabs[index].screen, run->columns, run->rows);
+		run_tell_size(run, run_tabs[index].connection);
+	}
+
+	/* The active grid, or the settings' page, is drawn again. */
+	run_screen->changed = 1;
+	terminal_page_shown(&run_window);
+
+	/* Succeeded: the next frame draws at the new scale. */
+	printf("ZTERM SCALE run=%s scale=%u cell=%ux%u columns=%u rows=%u\n", options->token, scale, run_font.cell_width, run_font.cell_height,
+	       run->columns, run->rows);
 	fflush(stdout);
 	return 0;
 }
@@ -2718,6 +2802,25 @@ run_font_pixels(
 }
 
 /*
+ * Gives a length of the screen's pixels at 100 % (a window's options'
+ * width and height): the pixels over the scale in 96ths, rounded up so
+ * that the grid fits.
+ */
+static uint32_t
+run_window_units(
+	const struct run_state *run,
+	unsigned pixels)
+{
+	uint32_t units;
+
+	/* The pixels at 100 %, none lost. */
+	units = (uint32_t)(((uint64_t)pixels * KL_SCALE_BASE + run->scale - 1U) / run->scale);
+
+	/* Reports the length at 100 %. */
+	return units;
+}
+
+/*
  * Opens the settings' tab (Shell > Settings), or chooses it when it is
  * open; chosen again on it, the item goes back to the tab it came from.
  * A program without the settings, or a full window, has none.  Returns 0,
@@ -2886,6 +2989,7 @@ run_page_frame(
 	state.theme = run->theme;
 	state.ambiguous_wide = run->ambiguous_wide;
 	state.copy_on_select = run_copy_on_select;
+	state.scale = run->scale;
 
 	/* The page's frame, at the drawing's size. */
 	asked = terminal_window_frame_ask(&run_window, terminal_clock());

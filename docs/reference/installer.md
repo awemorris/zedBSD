@@ -74,6 +74,17 @@ Only regular files and directories, with relative paths without `.` or `..`
 components, are accepted. `mk/tools/installer-units.py` makes the index, the
 boot files and the units from a whole root.
 
+The CI's x86_64 job (`.github/workflows/ci.yml`) builds the image with
+`mk/platform-x86_64/defaults.mk` alone and makes the asset from that image's
+root, with the image's loader and kernel and the logo of
+`make-boot-splash.py`, in two units: `firmware`, the files under
+`/lib/firmware` and the licence directories of the firmware packages
+(`userland/firmware`), and `base`, the rest. The items are `base`
+(required), `firmware` (on) and `other`. The units' version is the build's
+`VERSION` and their files have the commit's time. The asset goes to the
+nightly pre-release the job makes; a release is published by making a
+nightly a full release by hand, with the same asset.
+
 The helper keeps the tarball at `/run/installer-helper/system.tar` (memory)
 and reads each member where it lies, never unpacking the tarball itself.
 The index is copied to `/run/installer-helper/index` for the installer.
@@ -106,8 +117,13 @@ Dependencies come from the packages' requirements; a dependency on a package
 inside the base or desktop unit becomes a dependency on that unit. The build
 refuses cycles. `item` records are the choices of the installer's Install
 page, from the items file the release's build gives `installer-units.py`;
-the table is the intended selection. A licence's PATH is read on the running
-system.
+the table is the intended selection. A licence's PATH is the file's place in
+its unit: once the download is checked, the helper takes each licence out of
+its unit (the unit checked against its SHA-256 first; a path with `.` or `..`
+components or not absolute, an entry that is not a regular file, a unit the
+index has not, or more than 32 licences refuse the system) into
+`/run/installer-helper/licenses/N` (N its place among the `license`
+records), and the installer shows those, the downloaded system's licences.
 
 | Item | Units | Default |
 | --- | --- | --- |
@@ -182,8 +198,8 @@ Rules the screens apply (`installer-helper` checks them again):
 - **User**: login name of a lower-case letter followed by lower-case letters,
   digits, `-` and `_`, at most 32 bytes, not `root` or a system account;
   display name at most 64 bytes; passwords not empty and repeated; hostname of
-  lower-case letters, digits and `-`, at most 63 bytes. Automatic login is
-  offered only with the desktop.
+  lower-case letters, digits and `-`, at most 63 bytes. Automatic login can
+  always be chosen: the installed system starts at the desktop's login.
 
 The text is translated through the `installer` domain and follows the
 desktop's language.
@@ -377,7 +393,7 @@ kernel=rootpart:/boot/vmunix
 rootpart=PARTUUID=ROOT
 swap0=PARTUUID=SWAP          (with a swap partition)
 logo=rootpart:/boot/logo.ppm
-login=graphical              (with the desktop)
+login=graphical
 kmsg=quiet
 ```
 

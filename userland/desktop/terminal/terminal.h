@@ -598,6 +598,10 @@ struct terminal_window {
 	uint32_t height;
 	int resized;
 
+	/* The scale the window is drawn at (in 96ths, kl_window_scale), and whether it changed since it was last taken. */
+	unsigned scale;
+	int rescaled;
+
 	/* Whether the compositor asked the window to close. */
 	int closed;
 

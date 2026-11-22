@@ -145,8 +145,9 @@ terminal_window_open(
 	 */
 	(void)kl_window_set_opaque(window->kui, 1);
 
-	/* The window's size and full screen as the first configure left them. */
+	/* The window's size, scale and full screen as the first configure left them. */
 	kl_window_size(window->kui, &window->width, &window->height);
+	window->scale = kl_window_scale(window->kui);
 	window->fullscreen = kl_window_fullscreen(window->kui);
 
 	/*
@@ -170,6 +171,7 @@ terminal_window_open(
 			window_event(window, &event.input);
 	}
 	window->resized = 0;
+	window->rescaled = 0;
 
 	/* Succeeded: the window can be drawn into. */
 	return 0;
@@ -458,6 +460,11 @@ window_event(
 		/* The size the compositor gave, drawn at from the next frame. */
 		kl_window_size(window->kui, &window->width, &window->height);
 		window->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		/* Another screen's scale: the main loop draws the text at it (its new size follows as a resize). */
+		window->scale = event->code;
+		window->rescaled = 1;
 		break;
 	case KL_WINDOW_CLOSE:
 		/* The main loop ends the terminal. */
