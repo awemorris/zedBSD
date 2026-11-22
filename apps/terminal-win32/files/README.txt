@@ -32,10 +32,30 @@ settings.
 2. Connecting
 -------------
 
-Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) lists the
-hosts of ssh\config and asks "Host:".  Type a host's name, its number in the
-list, or user@host:port for a host that is not in ssh\config.  X opens the
-settings in the tab's place (section 3).
+Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) shows the
+hosts of ssh\config:
+
+  MikμTerm 0.1.0
+
+  Hosts:
+   [1] me@server
+   [2] backup
+   [w] WSL
+   [x] Settings
+
+  >>> me@server
+
+Up and Down choose a row, and Enter opens it.  A row's number (or w, or x)
+chooses that row too.  The ">>>" line holds the chosen row; to connect to a
+host that is not in the list, type it there instead (user@host:port, or a
+name): the first character you type takes the row's place.  Backspace and
+Ctrl+U edit the line, and Escape puts the chosen row back.  A name that
+starts with a digit, w or x is typed after Ctrl+U (those keys choose rows).
+A row shows user@host when ssh\config gives the host a User.
+
+[w] WSL lists WSL's distributions (section 5).  [x] Settings opens the
+settings in a tab of their own beside this one (section 3): the tab stays,
+and you come back to it with the tab bar or F12.  Ctrl+C closes the tab.
 
 When ssh\config gives no User for the host, the tab asks "login as:".
 
@@ -67,8 +87,8 @@ the tab.
 ---------------------
 
 F12 (Shell > Settings...) opens the settings in a tab of their own, and F12
-on that tab goes back to the tab you came from.  X in a new tab's list of
-hosts opens them as well.  The sidebar has four panes (Ctrl+Down or
+on that tab goes back to the tab you came from.  [x] Settings on a new tab's
+screen opens them as well.  The sidebar has four panes (Ctrl+Down or
 Ctrl+Page Down shows the next one, Ctrl+Up or Ctrl+Page Up the one before;
 Tab moves between a pane's fields and buttons):
 
@@ -78,9 +98,9 @@ Tab moves between a pane's fields and buttons):
   Appearance  the text's size, the theme and the ambiguous width take effect
               at once, as the View menu's do; the fonts and the grid when
               mikuterm starts again.
-  Behavior    copy-on-select takes effect at once; TERM and the connect
-              timeout from the next connection; the host of the first tab
-              when mikuterm starts again.
+  Behavior    copy-on-select takes effect at once; TERM, the connect
+              timeout and the port of WSL's sshd from the next connection;
+              the host of the first tab when mikuterm starts again.
   Keys        makes an ed25519 key, shows a key's public key (Copy Public
               Key), and lists ssh/known_hosts, each line with a button that
               removes it (after a host's key was replaced).
@@ -154,9 +174,39 @@ again.  Lines with plain names are read as they are.
 5. WSL
 ------
 
-mikuterm connects to WSL through SSH, as to any other host.
+mikuterm connects to WSL through SSH, as to any other host: an sshd runs in
+the distribution, and WSL 2 passes localhost's port on to it.
 
-In WSL (Ubuntu here):
+[w] WSL on a new tab's screen asks Windows (wsl.exe -l -q) for the
+distributions and lists them; Up, Down or a number and Enter choose one, [b]
+(or Escape) goes back.  mikuterm then starts the distribution
+(wsl.exe -d <name> -e whoami, which also starts an sshd that systemd runs)
+and connects to it:
+
+  - when ssh\config has a Host named wsl-<name> (for example
+    "Host wsl-Ubuntu-24.04"; the case does not matter), with that Host's
+    HostName, Port, User and other settings;
+  - otherwise to localhost on the port WslPort gives in config\mikuterm.conf
+    (2222 unless you change it; the settings' Behavior pane has it too).
+
+The user is the Host's User, or else the distribution's default user (the one
+whoami answers with); when neither is known the tab asks "login as:".
+
+All the distributions of WSL 2 share one network, so only one of them can
+listen on a port.  For one distribution, WslPort is enough.  For more, give
+each its own port and a Host:
+
+  Host wsl-Ubuntu-24.04
+      HostName localhost
+      Port 2222
+  Host wsl-Debian
+      HostName localhost
+      Port 2223
+
+When Windows has no WSL, or no distribution, or wsl.exe does not answer, the
+screen says so and stays on the hosts.
+
+In the distribution (Ubuntu here):
 
   sudo apt install openssh-server
   sudo sed -i 's/^#\?Port .*/Port 2222/' /etc/ssh/sshd_config
@@ -168,16 +218,8 @@ In WSL (Ubuntu here):
 Ubuntu 24.04 starts sshd from ssh.socket: after changing the port, run
 "sudo systemctl daemon-reload" and "sudo systemctl restart ssh.socket".)
 
-In ssh\config:
-
-  Host wsl
-      HostName 127.0.0.1
-      Port 2222
-      User me
-
-WSL 2 passes 127.0.0.1:2222 on to WSL (its localhost forwarding).  To open
-WSL in the first tab whenever mikuterm starts, put "Connect wsl" into
-config\mikuterm.conf.
+To open a distribution in the first tab whenever mikuterm starts, give it a
+Host (as above) and put "Connect wsl-<name>" into config\mikuterm.conf.
 
 
 6. config\mikuterm.conf
@@ -196,6 +238,8 @@ named in the first tab and skipped.
   Connect         the host the first tab connects to (none: the list)
   CopyOnSelect    yes: what the pointer selects is copied at once (yes)
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
+  WslPort         the port of the sshd in WSL, for a distribution without a
+                  Host wsl-<name> in ssh\config (2222)
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in

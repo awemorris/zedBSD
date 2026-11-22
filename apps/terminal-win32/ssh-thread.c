@@ -7,10 +7,11 @@
 
 /*
  * A tab's SSH connection on a thread of its own (session.h): it chooses
- * the host (the Connect host, or the one the user types at "Host:" from
- * the list of ssh\config's hosts), reads ssh\config for it, asks for the
- * user when none is set ("login as:"), connects, and runs zedBSD's SSH
- * client engine on the socket until the connection ends.
+ * the host (the Connect host, or the one the user takes on the launch
+ * screen of launch.c: a host of ssh\config, one typed, or a distribution
+ * of WSL, whose sshd it reaches like any host), reads ssh\config for it,
+ * asks for the user when none is set ("login as:"), connects, and runs
+ * zedBSD's SSH client engine on the socket until the connection ends.
  *
  * The socket is always read, so the transport's own messages (a
  * re-exchange, a keepalive, a DISCONNECT) are never held up; the server's
@@ -25,6 +26,8 @@
  */
 
 #include "session.h"
+#include "launch.h"
+#include "mikuterm-version.h"
 
 #include "userland/base/ssh/ssh-client-engine.h"
 #include "userland/base/ssh/ssh-key.h"
@@ -53,6 +56,23 @@
 
 /* Where the settings of the hosts are, inside the folder. */
 #define THREAD_SSH_CONFIG	"ssh/config"
+
+/* The launch screen's title: the name (with the Greek mu, in UTF-8) and the version. */
+#define THREAD_TITLE		"Mik\xce\xbcTerm " MIKUTERM_VERSION_TEXT
+
+/*
+ * WSL: how long wsl.exe may take to list the distributions and to start
+ * one (milliseconds), the start of an ssh\config Host for a distribution,
+ * and the host a distribution without one is reached on.
+ */
+#define THREAD_WSL_LIST_MS	15000U
+#define THREAD_WSL_START_MS	60000U
+#define THREAD_WSL_PREFIX	"wsl-"
+#define THREAD_WSL_HOST		"localhost"
+
+/* The largest text wsl.exe writes that is read, and the screen's text at its largest. */
+#define THREAD_WSL_OUTPUT	16384U
+#define THREAD_SCREEN_MAX	65536U
 
 /* The known_hosts file that stands for none: nothing is read from it and nothing kept in it. */
 #define THREAD_NO_FILE		"/dev/null"
@@ -83,21 +103,43 @@
 /*
  * What the user chose to connect to: the name given (a Host of ssh\config,
  * or a host's name or address), and the user and port given with it
- * (user@host:port; empty and 0 when not given).
+ * (user@host:port; empty and 0 when not given), the tab's title, and the
+ * WSL distribution it is (empty: none).
  */
 struct thread_target {
 	char host[MIKUTERM_HOST_MAX];
 	char user[SSH_USER_MAX + 1];
 	uint16_t port;
+	char title[MIKUTERM_HOST_MAX];
+	char distribution[LAUNCH_NAME_MAX];
 };
 
 /*
- * The hosts ssh\config has settings for, as the list "Host:" shows: their
- * names in the order written, each once.
+ * The hosts ssh\config has settings for, as the launch screen lists them:
+ * their names in the order written, each once, and the User each one's
+ * settings give (empty: none).
  */
 struct thread_hosts {
 	char names[THREAD_HOSTS][THREAD_NAME_MAX];
+	char users[THREAD_HOSTS][SSH_USER_MAX + 1];
 	unsigned count;
+};
+
+/*
+ * The launch screen's state while the user chooses: the session, the
+ * hosts, the screens of the hosts and of WSL's distributions, the
+ * distributions' names, what wsl.exe wrote and its text, and the
+ * screen's text as it is drawn.
+ */
+struct thread_choice {
+	struct mikuterm_session *session;
+	struct thread_hosts hosts;
+	struct launch_screen screen;
+	struct launch_screen wsl;
+	char names[LAUNCH_NAMES_MAX][LAUNCH_NAME_MAX];
+	unsigned char output[THREAD_WSL_OUTPUT];
+	char decoded[THREAD_WSL_OUTPUT * 2U];
+	char text[THREAD_SCREEN_MAX];
 };
 
 /*
@@ -136,6 +178,16 @@ struct thread_link {
 };
 
 static int thread_choose(struct mikuterm_session *session, struct thread_target *target);
+static void thread_hosts_read(struct thread_hosts *hosts);
+static int thread_launch(struct thread_choice *choice, struct launch_screen *screen, unsigned *event);
+static void thread_draw(struct thread_choice *choice, const struct launch_screen *screen);
+static int thread_wsl(struct thread_choice *choice, struct thread_target *target);
+static int thread_wsl_list(struct thread_choice *choice, unsigned *count);
+static int thread_wsl_host(const struct thread_choice *choice, const char *name, char *host, size_t size);
+static int thread_wsl_target(struct thread_choice *choice, const char *name, struct thread_target *target);
+static int thread_same_name(const char *first, const char *second);
+static int thread_user_name(const char *name);
+static int thread_stop(void *data);
 static int thread_host_named(void *data, const char *name, size_t size);
 static int thread_parse_target(const char *text, struct thread_target *target);
 static int thread_attempt(struct thread_link *link);
@@ -183,12 +235,11 @@ session_run(
 	struct thread_target target;
 	struct thread_link *link;
 	char answer[8];
+	char hint[LAUNCH_NAME_MAX + 96U];
 	int status;
 
-	/* The session; the settings' problems come first. */
+	/* The session (the settings' problems are said when the host is chosen). */
 	session = argument;
-	if (session->notice[0] != '\0')
-		session_say(session, session->notice);
 
 	/* The attempts' state is large: it is on the heap. */
 	link = malloc(sizeof(*link));
@@ -223,9 +274,13 @@ session_run(
 		if (status == THREAD_CLOSING)
 			break;
 
-		/* Why it failed, on a line of its own, and Enter to try again. */
+		/* Why it failed, on a line of its own (for WSL, what it needs), and Enter to try again. */
 		session_say_line(session, link->reason);
 		session_say(session, "\r\n");
+		if (target.distribution[0] != '\0') {
+			(void)snprintf(hint, sizeof(hint), "%s needs an sshd listening on port %u (README.txt, WSL).\r\n", target.distribution, (unsigned)link->config.port);
+			session_say(session, hint);
+		}
 		status = thread_ask(session, "Press Enter to connect again (Ctrl+C closes the tab). ", SESSION_ASK_LINE, answer, sizeof(answer));
 		if (status == ECANCELED)
 			session_ended(session);
@@ -240,98 +295,642 @@ session_run(
 
 /*
  * Chooses what to connect to: the session's host when it has one, else
- * the one the user types after the list of ssh\config's hosts (a name, a
- * number of the list, or user@host:port; X asks for the settings, which
- * then take the tab).  Returns 0, ECANCELED when the user gave up or asked
- * for the settings, or EPIPE when the tab closed.
+ * what the user takes on the launch screen: a host of ssh\config, a host
+ * typed on the ">>> " line (a name, or user@host:port), or a
+ * distribution of WSL.  Settings opens the settings' tab beside this one
+ * and the screen stays.  Returns 0, ECANCELED when the user gave up, or
+ * EPIPE when the tab closed.
  */
 static int
 thread_choose(
 	struct mikuterm_session *session,
 	struct thread_target *target)
 {
-	struct thread_hosts *hosts;
-	char path[MIKUTERM_PATH_MAX];
-	char answer[MIKUTERM_HOST_MAX];
-	char line[THREAD_NAME_MAX + 16U];
-	char *text;
-	char *end;
-	size_t size;
-	unsigned long number;
+	struct thread_choice *choice;
+	char key[LAUNCH_KEY_MAX];
+	char label[LAUNCH_LABEL_MAX];
+	unsigned event;
 	unsigned index;
+	size_t length;
+	int taken;
 	int error;
 
-	/* The host given. */
+	/* The host given; the settings' problems are said first. */
 	memset(target, 0, sizeof(*target));
 	if (session->host[0] != '\0') {
 		error = thread_parse_target(session->host, target);
-		if (error == 0)
+		if (error == 0) {
+			if (session->notice[0] != '\0')
+				session_say(session, session->notice);
+			(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
 			return 0;
+		}
 	}
 
-	/* The list of the hosts: ssh\config's names (none when it is not there). */
-	hosts = calloc(1U, sizeof(*hosts));
-	if (hosts == NULL)
+	/* The screen's state is large: it is on the heap. */
+	choice = calloc(1U, sizeof(*choice));
+	if (choice == NULL)
 		return ECANCELED;
+	choice->session = session;
+
+	/* The hosts of ssh\config (none when it is not there), each with its User. */
+	thread_hosts_read(&choice->hosts);
+
+	/* The screen: the hosts by number, WSL and the settings. */
+	launch_init(&choice->screen, "Hosts:");
+	for (index = 0U; index < choice->hosts.count; index++) {
+		/* user@name when ssh\config gives the user, the name alone when not. */
+		(void)snprintf(key, sizeof(key), "%u", index + 1U);
+		if (choice->hosts.users[index][0] != '\0')
+			(void)snprintf(label, sizeof(label), "%s@%s", choice->hosts.users[index], choice->hosts.names[index]);
+		else
+			(void)snprintf(label, sizeof(label), "%s", choice->hosts.names[index]);
+		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
+	}
+
+	/* WSL and the settings after the hosts; with no host, how to type one. */
+	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
+	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
+	if (choice->hosts.count == 0U)
+		launch_say(&choice->screen, "ssh\\config names no host: type one as user@host:port.");
+
+	/* The user's choice, until one is a host to connect to. */
+	error = 0;
+	for (;;) {
+		/* The keys until Enter, Escape, or the user giving up. */
+		error = thread_launch(choice, &choice->screen, &event);
+		if (error != 0)
+			break;
+		if (event == LAUNCH_EVENT_CANCEL) {
+			error = ECANCELED;
+			break;
+		}
+
+		/* Escape puts the chosen row back on the line. */
+		if (event == LAUNCH_EVENT_ESCAPE) {
+			launch_choose(&choice->screen, choice->screen.chosen);
+			continue;
+		}
+
+		/* What Enter took: nothing, a host typed, or a row. */
+		launch_say(&choice->screen, NULL);
+		taken = launch_row_taken(&choice->screen);
+		if (taken == -2)
+			continue;
+		if (taken == -1) {
+			/* A host typed: user@host:port, or a number of the list. */
+			error = thread_parse_target(choice->screen.line, target);
+			if (error == 0) {
+				(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
+				break;
+			}
+
+			/* Not a host: the screen says so and asks again. */
+			launch_say(&choice->screen, "That is not a host: type a name, or user@host:port.");
+			error = 0;
+			continue;
+		}
+
+		/* A host of ssh\config: its name, the user and port its settings give. */
+		index = (unsigned)taken;
+		if (choice->screen.rows[index].kind == LAUNCH_HOST) {
+			length = strlen(choice->hosts.names[index]);
+			memcpy(target->host, choice->hosts.names[index], length + 1U);
+			(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
+			break;
+		}
+
+		/* Settings: their tab opens beside this one, which stays on the screen. */
+		if (choice->screen.rows[index].kind == LAUNCH_SETTINGS) {
+			session_settings(session);
+			launch_choose(&choice->screen, index);
+			continue;
+		}
+
+		/* WSL: a distribution, or back to the hosts with why not. */
+		error = thread_wsl(choice, target);
+		if (error == EAGAIN) {
+			error = 0;
+			continue;
+		}
+
+		/* A distribution, or the user giving up, or the tab closing. */
+		break;
+	}
+
+	/* The screen goes before the connection's own lines, unless the tab closed. */
+	if (error != EPIPE) {
+		length = launch_leave(choice->text, sizeof(choice->text));
+		thread_say_bytes(session, choice->text, length);
+	}
+
+	/* The screen's state goes. */
+	free(choice);
+
+	/* Reports the user giving up, or the tab closing. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the target is chosen. */
+	return 0;
+}
+
+/*
+ * Reads the hosts ssh\config has settings for: their names as the list
+ * shows them, each with the User its settings give (empty when none).
+ * An ssh\config that is not there, or cannot be read, has none.
+ */
+static void
+thread_hosts_read(
+	struct thread_hosts *hosts)
+{
+	struct ssh_config *config;
+	char path[MIKUTERM_PATH_MAX];
+	char error_text[SSH_CONFIG_ERROR_MAX];
+	char *text;
+	size_t size;
+	unsigned index;
+	int error;
+
+	/* The file. */
+	hosts->count = 0U;
 	text = NULL;
 	size = 0U;
 	error = mikuterm_path(path, sizeof(path), THREAD_SSH_CONFIG);
 	if (error == 0)
 		error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
-	if (error == 0) {
-		(void)ssh_config_hosts(text, size, thread_host_named, hosts, NULL);
-		free(text);
+	if (error != 0)
+		return;
+
+	/* The names of its Host lines. */
+	(void)ssh_config_hosts(text, size, thread_host_named, hosts, NULL);
+
+	/* Each name's User, from its settings as a connection reads them. */
+	config = malloc(sizeof(*config));
+	if (config != NULL) {
+		for (index = 0U; index < hosts->count; index++) {
+			/* The settings for the name; a file the reader refuses gives no User. */
+			ssh_config_init(config);
+			error = ssh_config_parse(config, text, size, hosts->names[index], error_text);
+			if (error == 0)
+				(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
+		}
+
+		/* The settings read go. */
+		free(config);
 	}
 
-	/* Shown with their numbers, and X for the settings. */
-	if (hosts->count == 0U)
-		session_say(session, "ssh\\config names no host: type one (user@host:port).\r\n");
-	for (index = 0U; index < hosts->count; index++) {
-		(void)snprintf(line, sizeof(line), "  %2u  %s\r\n", index + 1U, hosts->names[index]);
-		session_say(session, line);
-	}
+	/* The file's text goes. */
+	free(text);
+}
 
-	/* And the settings, X. */
-	session_say(session, "   X  Settings (hosts, keys, fonts)\r\n");
+/*
+ * Shows a screen and takes the tab's keys for it until one ends the line
+ * (*event: Enter, Escape, or the user giving up); the screen is drawn
+ * again after keys and when the grid's size changes.  Returns 0, or
+ * EPIPE when the tab closed.
+ */
+static int
+thread_launch(
+	struct thread_choice *choice,
+	struct launch_screen *screen,
+	unsigned *event)
+{
+	struct mikuterm_session *session;
+	struct kl_socket_wait wait;
+	size_t ready;
+	size_t used;
+	unsigned columns;
+	unsigned rows;
+	unsigned drawn_columns;
+	unsigned drawn_rows;
+	int changed;
+	int room;
+	int closing;
+	int error;
 
-	/* The answer, until it is not empty. */
+	/* Nothing drawn yet for this screen. */
+	session = choice->session;
+	drawn_columns = 0U;
+	drawn_rows = 0U;
+	changed = 1;
+	*event = LAUNCH_EVENT_NONE;
 	for (;;) {
-		error = thread_ask(session, "Host: ", SESSION_ASK_LINE, answer, sizeof(answer));
-		if (error != 0) {
-			free(hosts);
-			return error;
+		/* The keys typed so far, as far as one ends the line (the rest wait for the next screen), and the grid's size. */
+		kl_mutex_lock(&session->lock);
+
+		room = 0;
+		if (session->input_length != 0U) {
+			*event = launch_keys(screen, session->input, session->input_length, &used);
+			memmove(session->input, session->input + used, session->input_length - used);
+			session->input_length -= used;
+			changed = 1;
+			if (session->input_full) {
+				session->input_full = 0;
+				room = 1;
+			}
 		}
 
-		/* An empty answer asks again. */
-		if (answer[0] == '\0')
-			continue;
+		/* The grid's size and the tab's close. */
+		columns = session->columns;
+		rows = session->rows;
+		closing = session->closing;
 
-		/* X is the settings: the tab becomes the settings' tab. */
-		if ((answer[0] == 'x' ||
-		     answer[0] == 'X') &&
-		    answer[1] == '\0') {
-			session_settings(session);
-			free(hosts);
-			return ECANCELED;
+		kl_mutex_unlock(&session->lock);
+
+		/* A tab that closed wants nothing more. */
+		if (closing)
+			return EPIPE;
+
+		/* The tab may send the keys it kept. */
+		if (room)
+			session_post(session);
+
+		/* A key that ended the line. */
+		if (*event != LAUNCH_EVENT_NONE)
+			return 0;
+
+		/* The screen as it is now, when it changed or the grid did. */
+		if (columns != drawn_columns || rows != drawn_rows)
+			changed = 1;
+		if (changed) {
+			thread_draw(choice, screen);
+			drawn_columns = columns;
+			drawn_rows = rows;
+			changed = 0;
 		}
 
-		/* A number of the list is its host. */
-		number = strtoul(answer, &end, 10);
-		if (*end == '\0' &&
-		    number >= 1UL &&
-		    number <= hosts->count)
-			(void)snprintf(answer, sizeof(answer), "%s", hosts->names[number - 1UL]);
+		/* The waker, rung by a key, the grid's size or the tab's close. */
+		wait.socket = NULL;
+		wait.waker = session->waker;
+		wait.events = KL_SOCKET_READABLE;
+		wait.ready = 0U;
+		error = kl_socket_poll(&wait, 1U, (int)THREAD_ROUND_MS, &ready);
+		if (error != 0)
+			return EPIPE;
+	}
+}
 
-		/* The host, the user and the port typed. */
-		error = thread_parse_target(answer, target);
+/* Draws a screen in the tab at the grid's size, the settings' problems (the first tab's) over its rows. */
+static void
+thread_draw(
+	struct thread_choice *choice,
+	const struct launch_screen *screen)
+{
+	unsigned columns;
+	unsigned rows;
+	size_t length;
+
+	/* The grid's size now. */
+	kl_mutex_lock(&choice->session->lock);
+
+	columns = choice->session->columns;
+	rows = choice->session->rows;
+
+	kl_mutex_unlock(&choice->session->lock);
+
+	/* The whole screen at once. */
+	length = launch_draw(screen, THREAD_TITLE, choice->session->notice, columns, rows, choice->text, sizeof(choice->text));
+	thread_say_bytes(choice->session, choice->text, length);
+}
+
+/*
+ * Asks wsl.exe for WSL's distributions and lets the user take one: the
+ * target is then its ssh\config Host (wsl-<name>) or localhost on
+ * WslPort.  Returns 0 with the target, EAGAIN to go back to the hosts
+ * (the screen's message says why when WSL could not list them),
+ * ECANCELED when the user gave up, or EPIPE when the tab closed.
+ */
+static int
+thread_wsl(
+	struct thread_choice *choice,
+	struct thread_target *target)
+{
+	struct launch_screen *screen;
+	char key[LAUNCH_KEY_MAX];
+	char note[LAUNCH_NOTE_MAX];
+	char found[THREAD_NAME_MAX];
+	unsigned event;
+	unsigned count;
+	unsigned index;
+	int taken;
+	int same;
+	int error;
+
+	/* The list, while the screen says it is being asked for. */
+	launch_say(&choice->screen, "Asking WSL for its distributions ...");
+	thread_draw(choice, &choice->screen);
+	count = 0U;
+	error = thread_wsl_list(choice, &count);
+	if (error != 0)
+		return error;
+	launch_say(&choice->screen, NULL);
+
+	/* The screen: the distributions by number, each with where it is reached, and the way back. */
+	screen = &choice->wsl;
+	launch_init(screen, "WSL distributions:");
+	for (index = 0U; index < count; index++) {
+		/* The Host of ssh\config for it, or localhost on WslPort. */
+		(void)snprintf(key, sizeof(key), "%u", index + 1U);
+		error = thread_wsl_host(choice, choice->names[index], found, sizeof(found));
 		if (error == 0)
-			break;
-		session_say(session, "That is not a host: type a name, a number, or user@host:port.\r\n");
+			(void)snprintf(note, sizeof(note), "(ssh\\config: %s)", found);
+		else
+			(void)snprintf(note, sizeof(note), "(localhost:%u)", choice->session->wsl_port);
+		(void)launch_add(screen, key, LAUNCH_DISTRIBUTION, choice->names[index], note);
 	}
 
-	/* Succeeded: the target is chosen. */
-	free(hosts);
+	/* The way back. */
+	(void)launch_add(screen, "b", LAUNCH_BACK, "Back", NULL);
+
+	/* The user's choice, until it is a distribution or back. */
+	for (;;) {
+		/* The keys until Enter, Escape, or the user giving up. */
+		error = thread_launch(choice, screen, &event);
+		if (error != 0)
+			return error;
+		if (event == LAUNCH_EVENT_CANCEL)
+			return ECANCELED;
+		if (event == LAUNCH_EVENT_ESCAPE)
+			return EAGAIN;
+
+		/* What Enter took: nothing, a name typed, or a row. */
+		launch_say(screen, NULL);
+		taken = launch_row_taken(screen);
+		if (taken == -2)
+			continue;
+		if (taken == -1) {
+			/* A distribution's name typed, in any case. */
+			for (index = 0U; index < count; index++) {
+				/* The same name. */
+				same = thread_same_name(choice->names[index], screen->line);
+				if (same)
+					break;
+			}
+
+			/* A name WSL did not list is said; one it did is its row. */
+			if (index == count) {
+				launch_say(screen, "WSL has no such distribution.");
+				continue;
+			}
+
+			/* The row of the name. */
+			taken = (int)index;
+		}
+
+		/* Back to the hosts. */
+		if (screen->rows[taken].kind == LAUNCH_BACK)
+			return EAGAIN;
+
+		/* The distribution: started, its user, and where it is reached. */
+		error = thread_wsl_target(choice, choice->names[taken], target);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the distribution is the target. */
+		return 0;
+	}
+}
+
+/*
+ * Runs "wsl.exe -l -q" and reads the distributions into choice->names
+ * (*count of them).  Returns 0, EAGAIN with the screen's message saying
+ * why there are none (no WSL, no distribution, wsl.exe's own error), or
+ * EPIPE when the tab closed meanwhile.
+ */
+static int
+thread_wsl_list(
+	struct thread_choice *choice,
+	unsigned *count)
+{
+	char line[LAUNCH_STATUS_MAX - 32U];
+	size_t size;
+	unsigned long code;
+	int error;
+
+	/* What wsl.exe says. */
+	*count = 0U;
+	error = mikuterm_wsl_run("-l -q", THREAD_WSL_LIST_MS, thread_stop, choice->session, choice->output, sizeof(choice->output), &size, &code);
+	if (error == ECANCELED)
+		return EPIPE;
+
+	/* Why it did not answer. */
+	if (error == ENOENT) {
+		launch_say(&choice->screen, "WSL is not installed: Windows has no wsl.exe.");
+		return EAGAIN;
+	}
+
+	/* A wsl.exe that did not end in time (it was ended). */
+	if (error == ETIMEDOUT) {
+		launch_say(&choice->screen, "wsl.exe did not answer in time.");
+		return EAGAIN;
+	}
+
+	/* A wsl.exe that could not be started. */
+	if (error != 0) {
+		launch_say(&choice->screen, "wsl.exe could not be run.");
+		return EAGAIN;
+	}
+
+	/* Its text; a failure says why in its first line. */
+	launch_output_text(choice->output, size, choice->decoded, sizeof(choice->decoded));
+	if (code != 0UL) {
+		error = launch_first_line(choice->decoded, line, sizeof(line));
+		if (error == 0)
+			(void)snprintf(choice->screen.status, sizeof(choice->screen.status), "WSL: %s", line);
+		else
+			(void)snprintf(choice->screen.status, sizeof(choice->screen.status), "wsl.exe failed (exit code 0x%lx).", code);
+		return EAGAIN;
+	}
+
+	/* The names, one a line; none is said. */
+	*count = launch_names(choice->decoded, choice->names, LAUNCH_NAMES_MAX);
+	if (*count == 0U) {
+		launch_say(&choice->screen, "WSL has no distribution: install one (wsl --install).");
+		return EAGAIN;
+	}
+
+	/* Succeeded: the distributions. */
 	return 0;
+}
+
+/*
+ * Finds the Host of ssh\config for a distribution: wsl-<name>, in any
+ * case, as ssh\config writes it.  Returns 0 with it in host, or ENOENT.
+ */
+static int
+thread_wsl_host(
+	const struct thread_choice *choice,
+	const char *name,
+	char *host,
+	size_t size)
+{
+	char wanted[THREAD_NAME_MAX];
+	unsigned index;
+	int same;
+
+	/* The name the Host would have. */
+	(void)snprintf(wanted, sizeof(wanted), "%s%s", THREAD_WSL_PREFIX, name);
+
+	/* A Host with that name. */
+	for (index = 0U; index < choice->hosts.count; index++) {
+		/* The same name, in any case: the Host as written. */
+		same = thread_same_name(choice->hosts.names[index], wanted);
+		if (same) {
+			(void)snprintf(host, size, "%s", choice->hosts.names[index]);
+			return 0;
+		}
+	}
+
+	/* No Host for it. */
+	return ENOENT;
+}
+
+/*
+ * Makes the target of a distribution: its Host of ssh\config (with that
+ * Host's settings), or localhost on WslPort.  The distribution is started
+ * first ("wsl.exe -d name -e whoami", so an sshd systemd starts is up),
+ * and the user it answers with is the one logged in as when ssh\config
+ * gives none.  Returns 0, or EPIPE when the tab closed.
+ */
+static int
+thread_wsl_target(
+	struct thread_choice *choice,
+	const char *name,
+	struct thread_target *target)
+{
+	char arguments[LAUNCH_NAME_MAX + 32U];
+	char user[SSH_USER_MAX + 1];
+	char status[LAUNCH_STATUS_MAX];
+	size_t size;
+	unsigned long code;
+	unsigned index;
+	int known;
+	int same;
+	int error;
+
+	/* The distribution started, while the screen says so. */
+	(void)snprintf(status, sizeof(status), "Starting %s ...", name);
+	launch_say(&choice->wsl, status);
+	thread_draw(choice, &choice->wsl);
+	(void)snprintf(arguments, sizeof(arguments), "-d \"%s\" -e whoami", name);
+	error = mikuterm_wsl_run(arguments, THREAD_WSL_START_MS, thread_stop, choice->session, choice->output, sizeof(choice->output), &size, &code);
+	if (error == ECANCELED)
+		return EPIPE;
+
+	/* The user it answered with, when it did (else "login as:" asks). */
+	user[0] = '\0';
+	if (error == 0 && code == 0UL) {
+		launch_output_text(choice->output, size, choice->decoded, sizeof(choice->decoded));
+		error = launch_first_line(choice->decoded, user, sizeof(user));
+		known = 0;
+		if (error == 0)
+			known = thread_user_name(user);
+		if (!known)
+			user[0] = '\0';
+	}
+
+	/* The Host of ssh\config for it, whose User wins over the one it answered with. */
+	memset(target, 0, sizeof(*target));
+	error = thread_wsl_host(choice, name, target->host, sizeof(target->host));
+	if (error == 0) {
+		for (index = 0U; index < choice->hosts.count; index++) {
+			/* The Host's own User. */
+			same = strcmp(choice->hosts.names[index], target->host);
+			if (same == 0 && choice->hosts.users[index][0] != '\0')
+				user[0] = '\0';
+		}
+	} else {
+		/* Else localhost, on WSL's sshd port. */
+		(void)snprintf(target->host, sizeof(target->host), "%s", THREAD_WSL_HOST);
+		target->port = (uint16_t)choice->session->wsl_port;
+	}
+
+	/* The user, the title and the distribution. */
+	(void)snprintf(target->user, sizeof(target->user), "%s", user);
+	(void)snprintf(target->title, sizeof(target->title), "%s", name);
+	(void)snprintf(target->distribution, sizeof(target->distribution), "%s", name);
+
+	/* Succeeded: the distribution is the target. */
+	return 0;
+}
+
+/* Tells whether two names are the same in any case of the ASCII letters (1) or not (0). */
+static int
+thread_same_name(
+	const char *first,
+	const char *second)
+{
+	size_t index;
+	int a;
+	int b;
+
+	/* Each character, the letters folded. */
+	for (index = 0U; first[index] != '\0' || second[index] != '\0'; index++) {
+		/* The two characters, small. */
+		a = (unsigned char)first[index];
+		b = (unsigned char)second[index];
+		if (a >= 'A' && a <= 'Z')
+			a += 'a' - 'A';
+		if (b >= 'A' && b <= 'Z')
+			b += 'a' - 'A';
+		if (a != b)
+			return 0;
+	}
+
+	/* The same. */
+	return 1;
+}
+
+/*
+ * Tells whether a text is a user's name a login takes (1) or not (0):
+ * letters, digits, '.', '_', '-' and '$', not starting with '-'.
+ */
+static int
+thread_user_name(
+	const char *name)
+{
+	size_t index;
+	char character;
+
+	/* Not empty, not an option. */
+	if (name[0] == '\0' || name[0] == '-')
+		return 0;
+
+	/* Each character one a name has. */
+	for (index = 0U; name[index] != '\0'; index++) {
+		/* A letter, a digit or one of the marks. */
+		character = name[index];
+		if (character >= 'a' && character <= 'z')
+			continue;
+		if (character >= 'A' && character <= 'Z')
+			continue;
+		if (character >= '0' && character <= '9')
+			continue;
+		if (character == '.' ||
+		    character == '_' ||
+		    character == '-' ||
+		    character == '$')
+			continue;
+		return 0;
+	}
+
+	/* A name. */
+	return 1;
+}
+
+/* Tells wsl.c whether to give up waiting: the tab closed (1) or not (0). */
+static int
+thread_stop(
+	void *data)
+{
+	int closing;
+
+	/* The tab's close. */
+	closing = thread_closing(data);
+
+	/* Reports it. */
+	return closing;
 }
 
 /* Adds one Host name of ssh\config to the list, once; answers 0 to go on. */
@@ -481,7 +1080,7 @@ thread_attempt(
 	}
 
 	/* The tab's title is the host, and where it goes is said. */
-	(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s port %u ...\r\n", link->target->host, link->host_name, (unsigned)link->config.port);
+	(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s port %u ...\r\n", link->target->title, link->host_name, (unsigned)link->config.port);
 	session_say(session, line);
 
 	/* The connection. */

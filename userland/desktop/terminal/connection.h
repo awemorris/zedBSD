@@ -24,7 +24,7 @@
 #define TERMINAL_READY_INPUT	0x4U
 #define TERMINAL_READY_EXIT	0x8U
 
-/* With TERMINAL_READY_EXIT: the user asked the connection for the settings, which take the tab's place. */
+/* The user asked the connection for the settings: they open in a tab of their own beside it (it goes on). */
 #define TERMINAL_READY_SETTINGS	0x10U
 
 /* A connection's input modes: the echo is on, the input is read by the line. */

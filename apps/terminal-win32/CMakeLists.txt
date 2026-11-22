@@ -157,6 +157,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/connection-ssh.c
 	${MIKUTERM_DIR}/known-hosts.c
 	${MIKUTERM_DIR}/ssh-thread.c
+	${MIKUTERM_DIR}/launch.c
+	${MIKUTERM_DIR}/wsl.c
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/page.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
