@@ -82,6 +82,7 @@ static const struct kl_settings_key settings_keys[] = {
 	{ "terminal.ambiguous-wide", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, 0U },
 	{ "terminal.font-size", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 8, 32, 16, 0U },
 	{ "terminal.theme", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2, 0, 0U },
+	{ "terminal.copy-on-select", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, 0U },
 	{ "files.column-width.kind", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.size", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.modified", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },

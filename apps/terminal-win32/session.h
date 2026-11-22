@@ -105,8 +105,9 @@ struct mikuterm_session {
 	/* A post is on its way and not taken yet: no other is made until the tab takes it. */
 	int posted;
 
-	/* The connection ended as the tab ends: the tab closes once it read everything. */
+	/* The connection ended as the tab ends: the tab closes once it read everything (or becomes the settings' tab, settings). */
 	int ended;
+	int settings;
 
 	/* The keys typed, for the thread to send; input_full says the tab was refused some. */
 	unsigned char input[SESSION_INPUT_MAX];
@@ -150,6 +151,7 @@ void session_say(struct mikuterm_session *session, const char *text);
 void session_say_line(struct mikuterm_session *session, const char *text);
 void session_keep_line_locked(struct mikuterm_session *session);
 void session_ended(struct mikuterm_session *session);
+void session_settings(struct mikuterm_session *session);
 void session_thread_ended(void);
 
 /* The thread (ssh-thread.c). */

@@ -15,6 +15,7 @@
 #include "mikuterm.h"
 
 #include <windows.h>
+#include <sddl.h>
 
 #include <errno.h>
 #include <stdlib.h>
@@ -37,6 +38,7 @@ static int folder_error(DWORD error);
 static int folder_write(const wchar_t *path, DWORD access, DWORD disposition, const void *bytes, size_t size);
 static int folder_absolute(const char *path);
 static int folder_parent_make(const wchar_t *path);
+static int folder_private(PSECURITY_DESCRIPTOR *descriptor);
 
 /*
  * Finds the folder mikuterm.exe is in.  Returns 0, ENAMETOOLONG for a path
@@ -363,6 +365,82 @@ mikuterm_file_replace(
 	return 0;
 }
 
+/*
+ * Makes a new file with the bytes, never over one that is there (EEXIST),
+ * in its directory made when only that is missing.  A secret file (a
+ * private key) is made with a protected access list that lets only the
+ * user who runs mikuterm at it, as ssh wants a key file kept; a file this
+ * call made and could not fill is removed.  Returns 0, EEXIST, ENOENT,
+ * EACCES, ENOMEM or EIO.
+ */
+int
+mikuterm_file_create(
+	const char *path,
+	const void *bytes,
+	size_t size,
+	int secret)
+{
+	SECURITY_ATTRIBUTES attributes;
+	SECURITY_ATTRIBUTES *protection;
+	PSECURITY_DESCRIPTOR descriptor;
+	wchar_t *wide;
+	HANDLE file;
+	DWORD written;
+	BOOL done;
+	int error;
+
+	/* The path for Windows, and its directory when only that is missing. */
+	error = folder_wide(path, &wide);
+	if (error != 0)
+		return error;
+	(void)folder_parent_make(wide);
+
+	/* A secret file's access list: the user alone. */
+	descriptor = NULL;
+	protection = NULL;
+	if (secret) {
+		error = folder_private(&descriptor);
+		if (error != 0) {
+			free(wide);
+			return error;
+		}
+		memset(&attributes, 0, sizeof(attributes));
+		attributes.nLength = sizeof(attributes);
+		attributes.lpSecurityDescriptor = descriptor;
+		attributes.bInheritHandle = FALSE;
+		protection = &attributes;
+	}
+
+	/* The file, new; nobody else may open it while it is written. */
+	file = CreateFileW(wide, GENERIC_WRITE, 0, protection, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (descriptor != NULL)
+		LocalFree(descriptor);
+	if (file == INVALID_HANDLE_VALUE) {
+		error = folder_error(GetLastError());
+		free(wide);
+		return error;
+	}
+
+	/* The bytes in one write, on the disk before the file closes. */
+	done = WriteFile(file, bytes, (DWORD)size, &written, NULL);
+	if (done && written == (DWORD)size)
+		done = FlushFileBuffers(file);
+	else
+		done = FALSE;
+	CloseHandle(file);
+
+	/* A file left half written goes. */
+	if (!done) {
+		(void)DeleteFileW(wide);
+		free(wide);
+		return EIO;
+	}
+
+	/* Succeeded: the file is made. */
+	free(wide);
+	return 0;
+}
+
 /* Tells whether a file or a directory is at a path (1) or not (0). */
 int
 mikuterm_file_exists(
@@ -419,6 +497,66 @@ folder_wide(
 	return 0;
 }
 
+/*
+ * Makes the security descriptor of a file only the user who runs the
+ * program may open: a protected access list (nothing inherited) with one
+ * entry that gives the user's account every right to it, in memory the
+ * caller frees with LocalFree.  Returns 0, ENOMEM or EIO.
+ */
+static int
+folder_private(
+	PSECURITY_DESCRIPTOR *descriptor)
+{
+	TOKEN_USER *user;
+	HANDLE token;
+	LPWSTR sid;
+	wchar_t text[256];
+	DWORD needed;
+	BOOL done;
+	int written;
+
+	/* The process's token. */
+	*descriptor = NULL;
+	done = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+	if (!done)
+		return EIO;
+
+	/* Its user, in memory as large as the token says. */
+	needed = 0U;
+	(void)GetTokenInformation(token, TokenUser, NULL, 0U, &needed);
+	user = malloc(needed != 0U ? needed : 1U);
+	if (user == NULL) {
+		CloseHandle(token);
+		return ENOMEM;
+	}
+	done = GetTokenInformation(token, TokenUser, user, needed, &needed);
+	CloseHandle(token);
+	if (!done) {
+		free(user);
+		return EIO;
+	}
+
+	/* The user's security identifier as text. */
+	done = ConvertSidToStringSidW(user->User.Sid, &sid);
+	free(user);
+	if (!done)
+		return EIO;
+
+	/* The descriptor: a protected list, all rights to that user alone. */
+	written = _snwprintf(text, sizeof(text) / sizeof(text[0]), L"D:P(A;;FA;;;%ls)", sid);
+	LocalFree(sid);
+	if (written < 0 || (size_t)written >= sizeof(text) / sizeof(text[0]))
+		return EIO;
+	done = ConvertStringSecurityDescriptorToSecurityDescriptorW(text, SDDL_REVISION_1, descriptor, NULL);
+	if (!done) {
+		*descriptor = NULL;
+		return EIO;
+	}
+
+	/* Succeeded: the descriptor. */
+	return 0;
+}
+
 /* Turns a Windows error of opening or moving a file into an errno value. */
 static int
 folder_error(
@@ -433,6 +571,9 @@ folder_error(
 	case ERROR_SHARING_VIOLATION:
 	case ERROR_WRITE_PROTECT:
 		return EACCES;
+	case ERROR_FILE_EXISTS:
+	case ERROR_ALREADY_EXISTS:
+		return EEXIST;
 	default:
 		return EIO;
 	}

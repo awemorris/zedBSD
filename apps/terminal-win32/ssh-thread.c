@@ -241,8 +241,9 @@ session_run(
 /*
  * Chooses what to connect to: the session's host when it has one, else
  * the one the user types after the list of ssh\config's hosts (a name, a
- * number of the list, or user@host:port).  Returns 0, ECANCELED when the
- * user gave up, or EPIPE when the tab closed.
+ * number of the list, or user@host:port; X asks for the settings, which
+ * then take the tab).  Returns 0, ECANCELED when the user gave up or asked
+ * for the settings, or EPIPE when the tab closed.
  */
 static int
 thread_choose(
@@ -282,13 +283,14 @@ thread_choose(
 		free(text);
 	}
 
-	/* Shown with their numbers. */
+	/* Shown with their numbers, and X for the settings. */
 	if (hosts->count == 0U)
 		session_say(session, "ssh\\config names no host: type one (user@host:port).\r\n");
 	for (index = 0U; index < hosts->count; index++) {
 		(void)snprintf(line, sizeof(line), "  %2u  %s\r\n", index + 1U, hosts->names[index]);
 		session_say(session, line);
 	}
+	session_say(session, "   X  Settings (hosts, keys, fonts)\r\n");
 
 	/* The answer, until it is not empty. */
 	for (;;) {
@@ -299,6 +301,13 @@ thread_choose(
 		}
 		if (answer[0] == '\0')
 			continue;
+
+		/* X is the settings: the tab becomes the settings' tab. */
+		if ((answer[0] == 'x' || answer[0] == 'X') && answer[1] == '\0') {
+			session_settings(session);
+			free(hosts);
+			return ECANCELED;
+		}
 
 		/* A number of the list is its host. */
 		number = strtoul(answer, &end, 10);

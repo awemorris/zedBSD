@@ -8,7 +8,8 @@
 /*
  * The terminal's settings kept from one run to the next (terminal.h's
  * terminal_settings_*), in mikuterm's folder: config\state.conf holds
- * what the View menu chose (FontSize, Theme, AmbiguousWide), and wins
+ * what the View menu and the settings' tab chose (FontSize, Theme,
+ * AmbiguousWide, CopyOnSelect), and wins
  * over config\mikuterm.conf, which gives the values before the menu
  * chose any.  Removing state.conf brings the user's settings back.  A
  * folder mikuterm cannot write in keeps nothing (the choice holds for the
@@ -61,6 +62,7 @@ terminal_settings_load(
 	memset(settings, 0, sizeof(*settings));
 	settings->ambiguous_wide = settings_conf.ambiguous_wide;
 	settings->theme = settings_conf.theme;
+	settings->copy_on_select = settings_conf.copy_on_select;
 	settings->font_size = 0U;
 
 	/* The kept settings, when there are some. */
@@ -81,6 +83,8 @@ terminal_settings_load(
 		settings->theme = state.theme;
 	if (state.ambiguous_given)
 		settings->ambiguous_wide = state.ambiguous_wide;
+	if (state.copy_given)
+		settings->copy_on_select = state.copy_on_select;
 }
 
 /*
@@ -92,32 +96,38 @@ terminal_settings_save(
 	const struct terminal_settings *settings)
 {
 	char path[MIKUTERM_PATH_MAX];
-	char text[256];
+	char text[320];
 	const char *wide;
+	const char *copy;
 	int written;
 	int error;
 
-	/* Ambiguous-width characters' setting as the file writes it. */
+	/* Ambiguous-width characters' setting and copy-on-select as the file writes them. */
 	wide = "no";
 	if (settings->ambiguous_wide)
 		wide = "yes";
+	copy = "no";
+	if (settings->copy_on_select)
+		copy = "yes";
 
 	/* The file's text; a size of 0 is none chosen and leaves the line out. */
 	if (settings->font_size != 0U) {
 		written = snprintf(text,
 				   sizeof(text),
-				   "# What the View menu chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
-				   "FontSize %u\r\nTheme %s\r\nAmbiguousWide %s\r\n",
+				   "# What the View menu and the settings chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
+				   "FontSize %u\r\nTheme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\n",
 				   settings->font_size,
 				   mikuterm_theme_text(settings->theme),
-				   wide);
+				   wide,
+				   copy);
 	} else {
 		written = snprintf(text,
 				   sizeof(text),
-				   "# What the View menu chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
-				   "Theme %s\r\nAmbiguousWide %s\r\n",
+				   "# What the View menu and the settings chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
+				   "Theme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\n",
 				   mikuterm_theme_text(settings->theme),
-				   wide);
+				   wide,
+				   copy);
 	}
 	if (written < 0 || (size_t)written >= sizeof(text))
 		return EINVAL;

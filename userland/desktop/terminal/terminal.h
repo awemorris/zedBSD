@@ -153,7 +153,9 @@ enum terminal_action {
 	TERMINAL_ACTION_THEME_LIGHT,
 	TERMINAL_ACTION_THEME_CONTRAST,
 	TERMINAL_ACTION_INPUT_METHOD_OFF,
-	TERMINAL_ACTION_FORGET_PASSPHRASES
+	TERMINAL_ACTION_FORGET_PASSPHRASES,
+	TERMINAL_ACTION_SETTINGS,
+	TERMINAL_ACTION_COPY_ON_SELECT
 };
 
 /*
@@ -208,14 +210,16 @@ struct terminal_menu_state {
 /*
  * The terminal's own settings kept between runs (settings.c, the desktop's
  * settings terminal.* through libkeiland, WS135): whether Ambiguous-width
- * characters are wide (ws128-p009), the font's size in pixels and the
- * colour theme (ws128-p006).  All zero is the default (a size of 0: the
- * size the terminal is started with).
+ * characters are wide (ws128-p009), the font's size in pixels, the
+ * colour theme (ws128-p006) and whether the text the pointer selects is
+ * copied to the clipboard as well.  All zero is the default (a size of 0:
+ * the size the terminal is started with).
  */
 struct terminal_settings {
 	int ambiguous_wide;
 	unsigned font_size;
 	unsigned theme;
+	int copy_on_select;
 };
 
 /* The keys' modes (terminal_window.key_modes): DECCKM's cursor keys and DECKPAM's keypad. */
@@ -700,6 +704,14 @@ struct terminal_window {
 
 	/* A drop on the window waiting for the main loop to paste it (clipboard.c, ws035-p088). */
 	int drop_pending;
+
+	/*
+	 * The settings tab (settings-page.c): whether it is the active tab
+	 * (the window's input then goes to its widgets), and whether the menus
+	 * have Shell > Settings (the program gave the tab what it needs).
+	 */
+	int page_active;
+	int settings_item;
 
 	/*
 	 * The pacing of the frames (pace.h): what the pacing's implementation

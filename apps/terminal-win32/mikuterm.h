@@ -50,7 +50,8 @@ struct kl_address;
 /*
  * What config\mikuterm.conf says (conf.c), each value its default when
  * the file does not say it.  The *_given fields say which of the View
- * menu's settings the file gave (state.conf wins over them).  problems
+ * menu's and the settings' tab's settings the file gave (state.conf wins
+ * over them).  problems
  * holds a line for each line the file could not use.
  */
 struct mikuterm_conf {
@@ -68,6 +69,7 @@ struct mikuterm_conf {
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
+	int copy_given;
 	char problems[MIKUTERM_PROBLEMS_MAX];
 };
 
@@ -128,12 +130,16 @@ int mikuterm_ssh_path(char *path, size_t size, const char *written);
 int mikuterm_file_read(const char *path, size_t limit, char **text, size_t *size);
 int mikuterm_file_append(const char *path, const void *bytes, size_t size);
 int mikuterm_file_replace(const char *path, const void *bytes, size_t size);
+int mikuterm_file_create(const char *path, const void *bytes, size_t size, int secret);
 int mikuterm_file_exists(const char *path);
 const char *mikuterm_program(void);
 
 /* The settings files (conf.c). */
 void mikuterm_conf_defaults(struct mikuterm_conf *conf);
 int mikuterm_conf_read(struct mikuterm_conf *conf, const char *text, size_t size, int state);
+int mikuterm_conf_value(const char *keyword, const char *value, const char **why);
+int mikuterm_conf_text(const struct mikuterm_conf *conf, const char *keyword, char *value, size_t size);
+int mikuterm_conf_set(const char *text, size_t size, const char *keyword, const char *value, char **out, size_t *out_size);
 int mikuterm_theme_name(const char *name, unsigned *theme);
 const char *mikuterm_theme_text(unsigned theme);
 
@@ -148,6 +154,11 @@ int mikuterm_passphrase_recall(const char *path, char *passphrase, size_t size);
 int mikuterm_passphrase_keep(const char *path, const char *passphrase);
 void mikuterm_passphrase_forget(const char *path);
 unsigned mikuterm_passphrases_forget_all(void);
+
+/* The settings' tab's files and settings (page.c), and where a font named in the settings is (main.c). */
+struct terminal_page_program;
+int mikuterm_page_init(struct mikuterm_conf *conf, struct mikuterm_connector *connector, const struct terminal_page_program **program);
+int mikuterm_font(char *path, size_t size, const char *name);
 
 /* The View menu's settings kept in state.conf (settings-file.c). */
 void mikuterm_settings_defaults(const struct mikuterm_conf *conf);

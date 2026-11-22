@@ -113,6 +113,29 @@ struct terminal_renderer {
 	int pending;
 	VkSemaphore acquired;
 
+	/*
+	 * A frame painted elsewhere shown in the grid's place (the settings
+	 * tab's page): an optimal image of the swapchain's size in the
+	 * device's memory (page_width by page_height; none until the first
+	 * page) and its view, the descriptor set that names it, the
+	 * host-written buffer its pixels are copied from (mapped for good),
+	 * the six vertices of the one quad that shows it, and the command
+	 * buffer recorded for each page.
+	 */
+	VkImage page;
+	VkDeviceMemory page_memory;
+	VkImageView page_view;
+	VkDescriptorSet page_set;
+	VkBuffer page_staging;
+	VkDeviceMemory page_staging_memory;
+	void *page_map;
+	VkBuffer page_vertices;
+	VkDeviceMemory page_vertex_memory;
+	void *page_vertex_map;
+	VkCommandBuffer page_command;
+	uint32_t page_width;
+	uint32_t page_height;
+
 	/* The Vulkan call that failed last, for the error line. */
 	const char *operation;
 };
@@ -121,6 +144,7 @@ struct terminal_renderer {
 VkResult terminal_renderer_open(struct terminal_renderer *renderer, struct terminal_window *window, struct terminal_font *font);
 VkResult terminal_renderer_resize(struct terminal_renderer *renderer, uint32_t width, uint32_t height);
 VkResult terminal_renderer_draw(struct terminal_renderer *renderer, struct terminal_screen *screen, struct terminal_font *font, const struct terminal_window *window);
+VkResult terminal_renderer_page(struct terminal_renderer *renderer, const uint32_t *pixels, uint32_t width, uint32_t height);
 VkResult terminal_renderer_idle(struct terminal_renderer *renderer);
 void terminal_renderer_close(struct terminal_renderer *renderer);
 

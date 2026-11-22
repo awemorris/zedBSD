@@ -18,6 +18,8 @@
  * the terminal simply has no menus.  Session > Disable Input Method is
  * there only for a program that asks for it (terminal_run_options), one
  * whose connections cannot tell when the remote side reads a password;
+ * Shell > Settings (F12) only for a program that gave the settings' tab
+ * what it needs;
  * Alt+F11 for Treat Ambiguous-Width Characters as Wide and Alt+Enter for
  * Fullscreen likewise, for a program whose function keys belong to the
  * remote side.
@@ -42,6 +44,7 @@
 #define MENU_CLOSE		12U
 #define MENU_NEW_TAB		13U
 #define MENU_CLOSE_TAB		14U
+#define MENU_SETTINGS		15U
 
 /* Edit. */
 #define MENU_COPY		20U
@@ -89,6 +92,7 @@
 #define MENU_KEY_MINUS		0x2dU
 #define MENU_KEY_ZERO		0x30U
 #define MENU_KEY_F11		0xffc8U
+#define MENU_KEY_F12		0xffc9U
 #define MENU_KEY_RETURN		0xff0dU
 
 /* The menus, in the order they are shown. */
@@ -96,6 +100,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SHELL, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Shell", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_NEW_WINDOW, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Window", TERMINAL_ACTION_NEW_WINDOW, KL_MENU_ROLE_NEW, KL_MENU_CTRL | KL_MENU_SHIFT, 'n' },
 	{ MENU_NEW_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Tab", TERMINAL_ACTION_NEW_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 't' },
+	{ MENU_SETTINGS, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Settings...", TERMINAL_ACTION_SETTINGS, KL_MENU_ROLE_NONE, 0U, MENU_KEY_F12 },
 	{ MENU_SHELL_LINE, MENU_SHELL, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLOSE_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Tab", TERMINAL_ACTION_CLOSE_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'w' },
 	{ MENU_CLOSE, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Window", TERMINAL_ACTION_CLOSE, KL_MENU_ROLE_CLOSE, KL_MENU_CTRL | KL_MENU_SHIFT, 'q' },
@@ -176,6 +181,10 @@ terminal_menu_open(
 
 		/* A program that keeps no passphrases has nothing to forget. */
 		if (menu_items[index].id == MENU_FORGET && !window->forget_item)
+			continue;
+
+		/* A program that gave the settings' tab nothing has no settings. */
+		if (menu_items[index].id == MENU_SETTINGS && !window->settings_item)
 			continue;
 
 		/* The item, after the ones before it. */

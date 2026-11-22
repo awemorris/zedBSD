@@ -15,8 +15,14 @@
  * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect and
  * ConnectTimeout.  A line mikuterm cannot use is skipped, the default
  * kept, and named in the problems the first tab shows ("line N: why").
- * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme
- * and AmbiguousWide as the View menu chose them; it reads nothing else.
+ * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme,
+ * AmbiguousWide and CopyOnSelect as the View menu and the settings' tab
+ * chose them; it reads nothing else.
+ *
+ * The settings' tab changes mikuterm.conf in place (mikuterm_conf_set):
+ * the first line of a keyword takes the new value, the other lines and
+ * the comments stay as the user wrote them, and a keyword not there yet
+ * is added at the end.
  */
 
 #include "mikuterm.h"
@@ -25,6 +31,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The longest line and the longest keyword read. */
@@ -77,7 +84,7 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "AmbiguousWide", 1 },
 	{ "Term", 0 },
 	{ "Connect", 0 },
-	{ "CopyOnSelect", 0 },
+	{ "CopyOnSelect", 1 },
 	{ "ConnectTimeout", 0 }
 };
 
@@ -89,6 +96,8 @@ static const char *const conf_themes[TERMINAL_THEMES] = {
 };
 
 static int conf_line(struct mikuterm_conf *conf, const char *line, size_t length, int state, unsigned *given, const char **why);
+static int conf_split(const char *line, size_t length, char *keyword, size_t keyword_size, char *text, size_t text_size, const char **value, const char **why);
+static int conf_keyword(const char *keyword, unsigned *found);
 static int conf_value(struct mikuterm_conf *conf, unsigned keyword, const char *value, const char **why);
 static int conf_number(const char *text, unsigned minimum, unsigned maximum, unsigned *number);
 static int conf_yes(const char *text, int *yes);
@@ -178,6 +187,212 @@ mikuterm_conf_read(
 	return 0;
 }
 
+/*
+ * Checks a value a keyword of mikuterm.conf may have, as the file's line
+ * would be read.  Returns 0, or EINVAL with why set (an unknown keyword
+ * among them).
+ */
+int
+mikuterm_conf_value(
+	const char *keyword,
+	const char *value,
+	const char **why)
+{
+	struct mikuterm_conf conf;
+	unsigned found;
+	int status;
+
+	/* The keyword. */
+	status = conf_keyword(keyword, &found);
+	if (status != 0) {
+		*why = "unknown keyword";
+		return EINVAL;
+	}
+
+	/* The value, read into settings of their own. */
+	mikuterm_conf_defaults(&conf);
+	status = conf_value(&conf, found, value, why);
+	if (status != 0)
+		return EINVAL;
+
+	/* Succeeded: the value may be written. */
+	return 0;
+}
+
+/*
+ * Writes a keyword's value in the settings as the file writes it (the
+ * default's when the file does not give it).  Returns 0, EINVAL for an
+ * unknown keyword, or ENAMETOOLONG.
+ */
+int
+mikuterm_conf_text(
+	const struct mikuterm_conf *conf,
+	const char *keyword,
+	char *value,
+	size_t size)
+{
+	unsigned found;
+	int written;
+	int status;
+
+	/* The keyword. */
+	status = conf_keyword(keyword, &found);
+	if (status != 0)
+		return EINVAL;
+
+	/* Its value as text. */
+	written = 0;
+	switch (found) {
+	case CONF_FONT:
+		written = snprintf(value, size, "%s", conf->font);
+		break;
+	case CONF_FALLBACK:
+		written = snprintf(value, size, "%s", conf->fallback);
+		break;
+	case CONF_SIZE:
+		written = snprintf(value, size, "%u", conf->font_size);
+		break;
+	case CONF_COLUMNS_KEY:
+		written = snprintf(value, size, "%u", conf->columns);
+		break;
+	case CONF_ROWS_KEY:
+		written = snprintf(value, size, "%u", conf->rows);
+		break;
+	case CONF_THEME:
+		written = snprintf(value, size, "%s", mikuterm_theme_text(conf->theme));
+		break;
+	case CONF_AMBIGUOUS:
+		written = snprintf(value, size, "%s", conf->ambiguous_wide ? "yes" : "no");
+		break;
+	case CONF_TERM_KEY:
+		written = snprintf(value, size, "%s", conf->term);
+		break;
+	case CONF_CONNECT:
+		written = snprintf(value, size, "%s", conf->connect);
+		break;
+	case CONF_COPY:
+		written = snprintf(value, size, "%s", conf->copy_on_select ? "yes" : "no");
+		break;
+	default:
+		written = snprintf(value, size, "%u", conf->connect_timeout);
+		break;
+	}
+
+	/* A value too long for the room. */
+	if (written < 0 || (size_t)written >= size)
+		return ENAMETOOLONG;
+
+	/* Succeeded: the value's text. */
+	return 0;
+}
+
+/*
+ * Makes a settings file's text with a keyword's value changed, into memory
+ * *out (*out_size bytes, a NUL after them) the caller frees: the first
+ * line of the keyword becomes "Keyword value" (quoted when it holds a
+ * space; its line break kept), or, without such a line, the line is added
+ * at the end (after a line break when the text does not end with one).
+ * An empty value removes the keyword's first line, so its default holds.
+ * Every other line stays as it was.  Returns 0 or ENOMEM.
+ */
+int
+mikuterm_conf_set(
+	const char *text,
+	size_t size,
+	const char *keyword,
+	const char *value,
+	char **out,
+	size_t *out_size)
+{
+	char copy[CONF_LINE_MAX];
+	char name[CONF_KEYWORD_MAX];
+	char line[CONF_LINE_MAX + CONF_KEYWORD_MAX + 4U];
+	const char *found_value;
+	const char *why;
+	const char *start;
+	const char *end;
+	const char *next;
+	char *made;
+	size_t line_length;
+	size_t at;
+	int differs;
+	int status;
+	int quoted;
+
+	/* The new line, "Keyword value", quoted when the value holds a space or a tab. */
+	quoted = 0;
+	if (strchr(value, ' ') != NULL || strchr(value, '\t') != NULL)
+		quoted = 1;
+	if (quoted)
+		(void)snprintf(line, sizeof(line), "%s \"%s\"", keyword, value);
+	else
+		(void)snprintf(line, sizeof(line), "%s %s", keyword, value);
+	line_length = strlen(line);
+
+	/* Room for the text, the new line and two line breaks. */
+	made = malloc(size + line_length + 5U);
+	if (made == NULL)
+		return ENOMEM;
+
+	/* The first line of the keyword. */
+	start = text;
+	end = text;
+	while (start < text + size) {
+		next = memchr(start, '\n', (size_t)(text + size - start));
+		if (next == NULL)
+			next = text + size;
+		end = next;
+		if (end > start && end[-1] == '\r')
+			end--;
+		status = conf_split(start, (size_t)(end - start), name, sizeof(name), copy, sizeof(copy), &found_value, &why);
+		if (status == 0 && name[0] != '\0') {
+			differs = _stricmp(name, keyword);
+			if (differs == 0)
+				break;
+		}
+		start = next;
+		if (start < text + size)
+			start++;
+	}
+
+	/* The text before it. */
+	at = (size_t)(start - text);
+	memcpy(made, text, at);
+
+	/* The keyword's line in its place, or none for an empty value, or the line added at the end. */
+	if (start < text + size) {
+		if (value[0] != '\0') {
+			memcpy(made + at, line, line_length);
+			at += line_length;
+			memcpy(made + at, end, (size_t)(text + size - end));
+			at += (size_t)(text + size - end);
+		} else {
+			next = end;
+			while (next < text + size && *next != '\n')
+				next++;
+			if (next < text + size)
+				next++;
+			memcpy(made + at, next, (size_t)(text + size - next));
+			at += (size_t)(text + size - next);
+		}
+	} else if (value[0] != '\0') {
+		if (at != 0U && made[at - 1U] != '\n') {
+			made[at++] = '\r';
+			made[at++] = '\n';
+		}
+		memcpy(made + at, line, line_length);
+		at += line_length;
+		made[at++] = '\r';
+		made[at++] = '\n';
+	}
+
+	/* Succeeded: the new text. */
+	made[at] = '\0';
+	*out = made;
+	*out_size = at;
+	return 0;
+}
+
 /* Reads a theme's name ("dark", "light", "contrast"); returns 0 or EINVAL. */
 int
 mikuterm_theme_name(
@@ -229,80 +444,20 @@ conf_line(
 {
 	char text[CONF_LINE_MAX];
 	char keyword[CONF_KEYWORD_MAX];
-	char *value;
-	char *end;
-	size_t index;
-	size_t keyword_length;
+	const char *value;
 	unsigned found;
-	int differs;
 	int status;
 
-	/* The line as a string; too long a line is refused. */
-	if (length >= sizeof(text)) {
-		*why = "the line is too long";
-		return EINVAL;
-	}
-	memcpy(text, line, length);
-	text[length] = '\0';
-
-	/* Spaces before the keyword; a blank line and a comment say nothing. */
-	index = 0U;
-	while (text[index] == ' ' || text[index] == '\t')
-		index++;
-	if (text[index] == '\0' || text[index] == '#')
+	/* The keyword and the value; a blank line and a comment say nothing. */
+	status = conf_split(line, length, keyword, sizeof(keyword), text, sizeof(text), &value, why);
+	if (status != 0)
+		return status;
+	if (keyword[0] == '\0')
 		return 0;
 
-	/* The keyword: up to a space, a tab or '='. */
-	keyword_length = 0U;
-	while (text[index] != '\0' && text[index] != ' ' && text[index] != '\t' && text[index] != '=') {
-		if (keyword_length + 1U >= sizeof(keyword)) {
-			*why = "unknown keyword";
-			return EINVAL;
-		}
-		keyword[keyword_length] = text[index];
-		keyword_length++;
-		index++;
-	}
-	keyword[keyword_length] = '\0';
-
-	/* The spaces and the one '=' between the keyword and the value. */
-	while (text[index] == ' ' || text[index] == '\t')
-		index++;
-	if (text[index] == '=')
-		index++;
-	while (text[index] == ' ' || text[index] == '\t')
-		index++;
-	value = text + index;
-
-	/* A value in quotes ends at the closing quote; another at the line's end, without its trailing spaces. */
-	if (value[0] == '"') {
-		value++;
-		end = strchr(value, '"');
-		if (end == NULL) {
-			*why = "a quote is not closed";
-			return EINVAL;
-		}
-		*end = '\0';
-	} else {
-		end = value + strlen(value);
-		while (end > value && (end[-1] == ' ' || end[-1] == '\t'))
-			end--;
-		*end = '\0';
-	}
-
-	/* The keyword, in any case. */
-	found = CONF_KEYWORDS;
-	for (index = 0U; index < CONF_KEYWORDS; index++) {
-		/* The keyword's own entry. */
-		differs = _stricmp(keyword, conf_names[index].name);
-		if (differs == 0) {
-			found = (unsigned)index;
-			break;
-		}
-	}
-
 	/* A keyword mikuterm does not know (state.conf's file passes over the user's keywords). */
-	if (found == CONF_KEYWORDS || (state && !conf_names[found].state)) {
+	status = conf_keyword(keyword, &found);
+	if (status != 0 || (state && !conf_names[found].state)) {
 		*why = "unknown keyword";
 		return EINVAL;
 	}
@@ -327,6 +482,110 @@ conf_line(
 	/* Succeeded: the keyword is given. */
 	*given |= 1U << found;
 	return 0;
+}
+
+/*
+ * Splits a line into its keyword (empty for a blank or a comment line,
+ * cut to keyword_size - 1 bytes; a longer one is unknown) and its value,
+ * which *value points at inside text (the line copied, its quotes or
+ * trailing spaces taken off).  Returns 0, or EINVAL with why set.
+ */
+static int
+conf_split(
+	const char *line,
+	size_t length,
+	char *keyword,
+	size_t keyword_size,
+	char *text,
+	size_t text_size,
+	const char **value,
+	const char **why)
+{
+	char *start;
+	char *end;
+	size_t index;
+	size_t keyword_length;
+
+	/* The line as a string; too long a line is refused. */
+	keyword[0] = '\0';
+	*value = "";
+	if (length >= text_size) {
+		*why = "the line is too long";
+		return EINVAL;
+	}
+	memcpy(text, line, length);
+	text[length] = '\0';
+
+	/* Spaces before the keyword; a blank line and a comment say nothing. */
+	index = 0U;
+	while (text[index] == ' ' || text[index] == '\t')
+		index++;
+	if (text[index] == '\0' || text[index] == '#')
+		return 0;
+
+	/* The keyword: up to a space, a tab or '='. */
+	keyword_length = 0U;
+	while (text[index] != '\0' && text[index] != ' ' && text[index] != '\t' && text[index] != '=') {
+		if (keyword_length + 1U >= keyword_size) {
+			*why = "unknown keyword";
+			return EINVAL;
+		}
+		keyword[keyword_length] = text[index];
+		keyword_length++;
+		index++;
+	}
+	keyword[keyword_length] = '\0';
+
+	/* The spaces and the one '=' between the keyword and the value. */
+	while (text[index] == ' ' || text[index] == '\t')
+		index++;
+	if (text[index] == '=')
+		index++;
+	while (text[index] == ' ' || text[index] == '\t')
+		index++;
+	start = text + index;
+
+	/* A value in quotes ends at the closing quote; another at the line's end, without its trailing spaces. */
+	if (start[0] == '"') {
+		start++;
+		end = strchr(start, '"');
+		if (end == NULL) {
+			*why = "a quote is not closed";
+			return EINVAL;
+		}
+		*end = '\0';
+	} else {
+		end = start + strlen(start);
+		while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+			end--;
+		*end = '\0';
+	}
+
+	/* Succeeded: the keyword and its value. */
+	*value = start;
+	return 0;
+}
+
+/* Finds a keyword of mikuterm.conf by its name, in any case; returns 0, or EINVAL for none. */
+static int
+conf_keyword(
+	const char *keyword,
+	unsigned *found)
+{
+	unsigned index;
+	int differs;
+
+	/* Each keyword's own entry. */
+	for (index = 0U; index < CONF_KEYWORDS; index++) {
+		differs = _stricmp(keyword, conf_names[index].name);
+		if (differs == 0) {
+			*found = index;
+			return 0;
+		}
+	}
+
+	/* No keyword has the name. */
+	return EINVAL;
 }
 
 /* Takes a keyword's value into the settings; returns 0, or EINVAL with why set. */
@@ -399,8 +658,10 @@ conf_value(
 	case CONF_COPY:
 		status = conf_yes(value, &yes);
 		*why = "CopyOnSelect is yes or no";
-		if (status == 0)
+		if (status == 0) {
 			conf->copy_on_select = yes;
+			conf->copy_given = 1;
+		}
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

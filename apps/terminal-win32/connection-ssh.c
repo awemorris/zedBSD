@@ -335,6 +335,26 @@ session_ended(
 	session_post(session);
 }
 
+/*
+ * Says that the user asked the tab for the settings: the connection ends
+ * and the tab becomes the settings' tab once it read everything.
+ */
+void
+session_settings(
+	struct mikuterm_session *session)
+{
+	/* The end, for the settings. */
+	kl_mutex_lock(&session->lock);
+
+	session->settings = 1;
+	session->ended = 1;
+
+	kl_mutex_unlock(&session->lock);
+
+	/* The tab learns it. */
+	session_post(session);
+}
+
 /* Says that a session's thread ended (its very last step), for the program's wait. */
 void
 session_thread_ended(void)
@@ -671,6 +691,8 @@ connection_event(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (session->ended)
 		ready |= TERMINAL_READY_EXIT;
+	if (session->settings)
+		ready |= TERMINAL_READY_SETTINGS;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -697,6 +719,8 @@ connection_pending(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (session->ended)
 		ready |= TERMINAL_READY_EXIT;
+	if (session->settings)
+		ready |= TERMINAL_READY_SETTINGS;
 
 	kl_mutex_unlock(&session->lock);
 

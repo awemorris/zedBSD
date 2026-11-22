@@ -5,6 +5,11 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
+#
+# The terminal, and the parts of zedBSD's SSH library its settings' tab
+# makes keys with (ssh-ed25519 keys and their files), on libcrypto-compat.
+#
+
 KEILAND_TERMINAL_SOURCES := \
 	userland/desktop/terminal/main.c \
 	userland/desktop/terminal/run.c \
@@ -24,7 +29,14 @@ KEILAND_TERMINAL_SOURCES := \
 	userland/desktop/terminal/touch.c \
 	userland/desktop/terminal/width.c \
 	userland/desktop/terminal/settings.c \
+	userland/desktop/terminal/settings-page.c \
+	userland/desktop/terminal/settings-key.c \
 	userland/desktop/terminal/search.c \
-	userland/desktop/picture/color-glyph.c
+	userland/desktop/picture/color-glyph.c \
+	userland/base/ssh/ssh-key.c \
+	userland/base/ssh/ssh-crypto.c \
+	userland/base/ssh/ssh-bcrypt.c \
+	userland/base/ssh/ssh-buf.c \
+	userland/base/ssh/ssh-common.c
 
-$(eval $(call USERLAND_PACKAGE,terminal,terminal - Wayland terminal,x86_64,y,basic,$(KEILAND_TERMINAL_SOURCES),y,desktop,desktop/terminal,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libpng-compat base/libz-compat,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,terminal,terminal - Wayland terminal,x86_64,y,basic,$(KEILAND_TERMINAL_SOURCES),y,desktop,desktop/terminal,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libpng-compat base/libz-compat base/libcrypto-compat,0755,program,,,bin))

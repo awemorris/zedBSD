@@ -221,6 +221,24 @@ int ssh_key_parse_private_passphrase(const char *text, size_t size, const uint8_
 int ssh_key_put_private(const struct ssh_key *key, uint32_t checkint, struct ssh_buf *out);
 
 /*
+ * Appends key (private 1; EINVAL otherwise) to out as an OpenSSH private
+ * key file encrypted with a passphrase, in the layout
+ * ssh_key_parse_private_passphrase reads (what ssh-keygen -N writes):
+ * cipher SSH_KEY_CIPHER and KDF SSH_KEY_KDF with the salt (1 to
+ * SSH_BCRYPT_SALT_MAX bytes) and rounds (1 to SSH_KEY_ROUNDS_MAX) given,
+ * the private section padded to the cipher's block and encrypted with
+ * the key and the first counter block bcrypt_pbkdf derives from the
+ * passphrase (passphrase_size bytes, 1 to SSH_KEY_PASSPHRASE_MAX),
+ * checkint the given value twice, wrapped as ssh_key_put_private wraps.
+ *
+ * The passphrase is not kept; the derived bytes and every byte of the
+ * section in the clear are wiped.  out should be secret.  Returns 0,
+ * EINVAL, ENOTSUP (rounds above the limit), EIO or the error recorded in
+ * out.
+ */
+int ssh_key_put_private_passphrase(const struct ssh_key *key, uint32_t checkint, const uint8_t *passphrase, size_t passphrase_size, const uint8_t *salt, size_t salt_size, unsigned rounds, struct ssh_buf *out);
+
+/*
  * Writes the SHA256 fingerprint of a public key: "SHA256:" followed by
  * the base64 of SHA-256 of the public key blob without '=' padding, as
  * ssh-keygen -l and ssh print it, and a NUL.
