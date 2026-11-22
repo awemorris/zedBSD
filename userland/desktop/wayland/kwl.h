@@ -1328,12 +1328,15 @@ struct kwl_server {
 	 * are made.  kwl_output_size_set writes the three with width and
 	 * height.  scale_wanted is the scale the user's choice or the default
 	 * asks for the output (output-scale.c), which kwl_output_size_set is
-	 * given; it is 120 until the display is known.
+	 * given; it is 120 until the display is known.  scale_given says a
+	 * test's --scale chose it, which wins over displays.conf and the
+	 * default.
 	 */
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	unsigned scale120;
 	unsigned scale_wanted;
+	unsigned scale_given;
 	/* The display mode's refresh in millihertz (from Vulkan, compose.c), told to clients by wl_output. */
 	uint32_t refresh;
 	/*
