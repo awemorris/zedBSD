@@ -71,6 +71,12 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh/config`'s wins) | 15 |
 | `WslPort` | the port on `localhost` of the sshd in WSL, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 2222 |
 
+A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
+server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
+root of the current drive (`/Windows/...`, `\Windows\...`) or a drive without
+a separator after it (`C:x.ttf`) among them, is a name in `fonts/` or
+`share/fonts/`.
+
 `config/state.conf` has the same form and only `FontSize`, `Theme`,
 `AmbiguousWide` and `CopyOnSelect`; its values win over `mikuterm.conf`'s.
 Deleting it returns to `mikuterm.conf`.

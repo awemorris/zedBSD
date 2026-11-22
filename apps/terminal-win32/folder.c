@@ -636,25 +636,23 @@ folder_parent_make(
 	const wchar_t *path)
 {
 	wchar_t *parent;
-	wchar_t *separator;
+	size_t directory;
 	size_t length;
 	BOOL made;
 	DWORD error;
 
-	/* The path up to its last separator. */
+	/* The path up to its last separator, a slash or a backslash. */
+	directory = mikuterm_path_directory(path);
+	if (directory == 0U)
+		return ENOENT;
 	length = wcslen(path);
 	parent = malloc((length + 1U) * sizeof(*parent));
 	if (parent == NULL)
 		return ENOMEM;
 	memcpy(parent, path, (length + 1U) * sizeof(*parent));
-	separator = wcsrchr(parent, L'\\');
-	if (separator == NULL || separator == parent) {
-		free(parent);
-		return ENOENT;
-	}
 
 	/* The path cut at its last separator. */
-	*separator = L'\0';
+	parent[directory] = L'\0';
 
 	/* The directory; one already there is as good. */
 	made = CreateDirectoryW(parent, NULL);

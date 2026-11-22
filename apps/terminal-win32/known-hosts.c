@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 
 /* What a hashed name is shown as, since the name itself cannot be read back. */
 #define KNOWN_HASHED_NAME	"(a hashed name)"
@@ -259,6 +260,30 @@ mikuterm_path_absolute(
 
 	/* A name with nothing after it is not a server's path. */
 	return 0;
+}
+
+/*
+ * Tells where a path's directory ends: the place of its last separator (a
+ * slash or a backslash, as Windows takes either), or 0 when it has none or
+ * only the first character is one (a path with no directory to make).
+ */
+size_t
+mikuterm_path_directory(
+	const wchar_t *path)
+{
+	size_t directory;
+	size_t index;
+
+	/* The last separator. */
+	directory = 0U;
+	for (index = 0U; path[index] != L'\0'; index++) {
+		/* A separator of either kind. */
+		if (path[index] == L'/' || path[index] == L'\\')
+			directory = index;
+	}
+
+	/* Succeeded: where the directory ends. */
+	return directory;
 }
 
 /*

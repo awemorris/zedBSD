@@ -272,7 +272,9 @@ in the settings' Appearance pane, or in config/mikuterm.conf:
   FontFallback MyCJKFont.ttc
 
 A font in fonts/ is used before one of the same name in share/fonts/.  A
-full path (C:/Windows/Fonts/consola.ttf, say) is taken as it is.
+full path (C:/Windows/Fonts/consola.ttf, say) is taken as it is: one that
+starts at a drive (C:/) or a server (//server/share/).  Anything else, such as
+/Windows/..., \Windows\... or C:x.ttf, is a name in fonts/ or share/fonts/.
 
 
 9. Licenses

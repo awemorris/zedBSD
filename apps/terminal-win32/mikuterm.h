@@ -151,6 +151,7 @@ int mikuterm_host_port_name(const char *host, uint16_t port, char *name, size_t 
 int mikuterm_address_name(const struct kl_address *address, uint16_t port, char *name, size_t size);
 void mikuterm_known_hosts_scan(const char *text, size_t size, const char *path, const char *name, const uint8_t *key, struct mikuterm_known_scan *scan);
 int mikuterm_path_absolute(const char *path);
+size_t mikuterm_path_directory(const wchar_t *path);
 void mikuterm_path_shown(const char *path, char *shown, size_t size);
 
 /* The passphrases kept for the Windows session (credential.c). */
