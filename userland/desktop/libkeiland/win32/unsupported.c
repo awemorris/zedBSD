@@ -2077,6 +2077,21 @@ kl_system_displays_get(
 }
 
 /* Not on Windows. */
+int
+kl_system_displays_keep_resolution(
+	struct kl_system *system,
+	const char *key,
+	uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)request;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
 unsigned
 kl_system_displays_mode(
 	const struct kl_system *system)
@@ -2085,6 +2100,72 @@ kl_system_displays_mode(
 
 	/* Not on Windows. */
 	return 0;
+}
+
+/* Not on Windows. */
+size_t
+kl_system_displays_modes(
+	const struct kl_system *system,
+	const char *key,
+	struct kl_display_mode *modes,
+	size_t capacity)
+{
+	(void)system;
+	(void)key;
+	(void)modes;
+	(void)capacity;
+
+	/* Not on Windows. */
+	return 0;
+}
+
+/* Not on Windows. */
+int
+kl_system_displays_reset_resolution(
+	struct kl_system *system,
+	const char *key,
+	uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)request;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_displays_resolution(
+	const struct kl_system *system,
+	const char *key,
+	unsigned *state,
+	uint32_t *remaining_ms,
+	unsigned *why)
+{
+	(void)system;
+	(void)key;
+	(void)state;
+	(void)remaining_ms;
+	(void)why;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_displays_revert_resolution(
+	struct kl_system *system,
+	const char *key,
+	uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)request;
+
+	/* Not on Windows. */
+	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -2130,6 +2211,27 @@ kl_system_displays_set_brightness(
 	(void)system;
 	(void)key;
 	(void)percent;
+	(void)request;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_displays_set_resolution(
+	struct kl_system *system,
+	const char *key,
+	uint32_t width,
+	uint32_t height,
+	uint32_t refresh_mhz,
+	uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)width;
+	(void)height;
+	(void)refresh_mhz;
 	(void)request;
 
 	/* Not on Windows. */
