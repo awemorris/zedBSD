@@ -64,6 +64,7 @@ void *heap_allocator_aligned_alloc(struct heap_allocator *heap,
 void *heap_allocator_calloc(struct heap_allocator *heap, size_t count, size_t size);
 void *heap_allocator_realloc(struct heap_allocator *heap, void *pointer, size_t size);
 void heap_allocator_free(struct heap_allocator *heap, void *pointer);
+size_t heap_allocator_usable_size(const struct heap_allocator *heap, void *pointer);
 size_t heap_allocator_current(const struct heap_allocator *heap);
 size_t heap_allocator_peak(const struct heap_allocator *heap);
 size_t heap_allocator_largest_failed(const struct heap_allocator *heap);
@@ -88,6 +89,7 @@ void *heap_calloc_active(size_t count, size_t size);
 void *heap_realloc_active(void *pointer, size_t size);
 char *heap_strdup_active(const char *string);
 void heap_free_active(void *pointer);
+size_t heap_usable_size_active(void *pointer);
 size_t heap_active_current(void);
 size_t heap_active_peak(void);
 size_t heap_active_error_count(void);

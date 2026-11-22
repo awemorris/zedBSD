@@ -23,6 +23,13 @@ extern "C" {
  */
 #define RTLD_NODELETE 0x1000
 
+/*
+ * An extension beyond POSIX, with FreeBSD's value (glibc has the same
+ * name): dlopen() gives a handle on the object only when it is loaded
+ * already, and loads nothing; otherwise it reports NULL.
+ */
+#define RTLD_NOLOAD 0x2000
+
 typedef struct dl_info {
 	const char *dli_fname;
 	void *dli_fbase;

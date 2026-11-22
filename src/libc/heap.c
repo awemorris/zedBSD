@@ -765,6 +765,29 @@ heap_allocator_realloc(struct heap_allocator *heap, void *pointer, size_t size)
 	return replacement;
 }
 
+/*
+ * Reports the bytes of an allocation its owner may use: the size it was
+ * asked for, which realloc keeps, or 0 for a pointer the heap did not give
+ * or has taken back.
+ */
+size_t
+heap_allocator_usable_size(
+	const struct heap_allocator *heap,
+	void *pointer)
+{
+	struct heap_block *block;
+
+	/* The block the pointer is the payload of, while it is in use. */
+	block = pointer_block(heap, pointer);
+	if (block == NULL)
+		return 0;
+	if (block->state != HEAP_USED)
+		return 0;
+
+	/* Succeeded: the bytes asked for. */
+	return block->used;
+}
+
 size_t
 heap_allocator_current(const struct heap_allocator *heap)
 {
@@ -941,6 +964,26 @@ void *heap_realloc_active(void *pointer, size_t size)
 	__libc_heap_unlock();
 	return result;
 }
+/*
+ * Reports the usable bytes of an allocation of the active heap.
+ */
+size_t
+heap_usable_size_active(
+	void *pointer)
+{
+	size_t usable;
+
+	/* Reads the block under the lock that guards the heap's changes. */
+	__libc_heap_lock();
+
+	usable = heap_allocator_usable_size(active_heap, pointer);
+
+	__libc_heap_unlock();
+
+	/* Reports the bytes. */
+	return usable;
+}
+
 void heap_free_active(void *pointer)
 {
 	__libc_heap_lock();
