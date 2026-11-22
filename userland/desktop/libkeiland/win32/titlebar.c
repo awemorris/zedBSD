@@ -33,6 +33,23 @@
  * KL_WINDOW_CONTROL_TEXT, Enter ends it with KL_TEXT_SUBMITTED and Escape
  * (or a press on the content) with KL_TEXT_CANCELLED (KL_WINDOW_CONTROL_DONE
  * with the text).  The sizes are at 96 dpi and scaled to the frame's.
+ *
+ * A window with a menu (kl_window_set_menu) has a button for it at the
+ * title bar's left: its release opens the menu as a popup of the system's
+ * (TrackPopupMenuEx), each submenu a popup of its own, built from the
+ * table and the actions' states (a hidden item is left out, a disabled one
+ * greyed, a checked one ticked, a radio item with a dot), each item's
+ * shortcut at its right.  A choice is a KL_WINDOW_ACTION.  The keys of the
+ * shortcuts are matched by the window (window.c, keiui_win32_menu_shortcut).
+ * kl_window_popup_menu opens a table the same way at a point of the content.
+ *
+ * A window with tabs (kl_window_set_tabs) shows them after the menu's
+ * button in place of its controls, as the Keiland desktop does: each with
+ * its title and, when closable, its close button, the active one on the
+ * panel's ground, and the new tab's button after them when asked for
+ * (frame.c lays them out).  A press on a tab chooses it; a release on a
+ * close button or on the new tab's button asks for that
+ * (KL_WINDOW_TAB).  The room left beside them stays the caption.
  */
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
@@ -40,6 +57,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The desktop title bar's sizes (96 dpi). */
@@ -56,6 +74,19 @@
 #define TITLEBAR_CRUMB_HEIGHT	24U
 #define TITLEBAR_CRUMB_MOST	800U
 #define TITLEBAR_DRAG_LEAST	96U
+
+/* How deep the submenus of a menu go at most (a table whose parents loop stops there). */
+#define TITLEBAR_MENU_DEPTH	8U
+
+/* The longest text of a menu item for Windows: its label, its '&'s doubled, a tab and the shortcut. */
+#define TITLEBAR_MENU_TEXT	(2U * KEIUI_WIN32_MENU_LABEL + 48U)
+
+/* The inset of a tab's title from its left edge, and the attention mark's side (96 dpi). */
+#define TITLEBAR_TAB_INSET	10U
+#define TITLEBAR_TAB_MARK	6U
+
+/* The icon of the close button of a tab and of the new tab's button (96 dpi). */
+#define TITLEBAR_TAB_ICON	12U
 
 /* The sides of a control. */
 #define TITLEBAR_LEFT		0U
@@ -79,6 +110,18 @@
 
 static unsigned titlebar_side(const struct keiui_win32_control *control);
 static unsigned titlebar_state(const struct kl_window *window, uint32_t action);
+static int titlebar_copy_menu(const struct kl_menu_entry *entries, size_t count, struct keiui_win32_menu_item **items);
+static int titlebar_popup(struct kl_window *window, const struct keiui_win32_menu_item *items, unsigned count, int32_t x, int32_t y);
+static HMENU titlebar_menu_build(struct kl_window *window, const struct keiui_win32_menu_item *items, unsigned count, uint32_t parent, unsigned depth);
+static int titlebar_menu_item(struct kl_window *window, HMENU menu, const struct keiui_win32_menu_item *items, unsigned count, unsigned index, unsigned depth);
+static void titlebar_menu_open(struct kl_window *window);
+static void titlebar_tabs_layout(struct kl_window *window, int32_t left, int32_t right, uint32_t height);
+static unsigned titlebar_part_at(const struct kl_window *window, int32_t x, int32_t y);
+static void titlebar_tab_input(struct kl_window *window, unsigned code, uint32_t id);
+static void titlebar_menu_draw(struct kl_window *window, struct kl_canvas *canvas);
+static void titlebar_tab_draw(struct kl_window *window, struct kl_canvas *canvas, unsigned index);
+static void titlebar_new_draw(struct kl_window *window, struct kl_canvas *canvas);
+static void titlebar_icon_button(struct kl_window *window, struct kl_canvas *canvas, const struct keiui_win32_rect *place, unsigned part, enum kl_icon icon, uint32_t size);
 static uint32_t titlebar_width(struct kl_window *window, const struct keiui_win32_control *control, uint32_t size);
 static unsigned titlebar_pixels(const struct kl_window *window);
 static unsigned titlebar_find(const struct kl_window *window, uint32_t id);
@@ -165,7 +208,7 @@ kl_window_set_action_state(
 
 	/* Adds a slot when the action has none yet. */
 	if (index == window->action_count) {
-		if (window->action_count == KEIUI_WIN32_CONTROLS)
+		if (window->action_count == KEIUI_WIN32_ACTIONS)
 			return E2BIG;
 		window->action_count++;
 	}
@@ -320,6 +363,198 @@ kl_window_focus_control(
 }
 
 /*
+ * Declares the window's menu (count 0 takes it away): shown from its
+ * button at the title bar's left.
+ */
+int
+kl_window_set_menu(
+	struct kl_window *window,
+	const struct kl_menu_entry *entries,
+	size_t count)
+{
+	struct keiui_win32_menu_item *items;
+	int error;
+
+	/* A window, and a table that fits. */
+	if (window == NULL || (count != 0U && entries == NULL))
+		return EINVAL;
+	if (count > KEIUI_WIN32_MENU_ITEMS)
+		return E2BIG;
+
+	/* The table's copy (none for no menu). */
+	items = NULL;
+	if (count != 0U) {
+		error = titlebar_copy_menu(entries, count, &items);
+		if (error != 0)
+			return error;
+	}
+
+	/* It replaces the menu shown, and the button follows it. */
+	free(window->menu);
+	window->menu = items;
+	window->menu_count = (unsigned)count;
+	window->control_hover = KEIUI_WIN32_NO_CONTROL;
+	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	titlebar_changed(window);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Opens a menu of a table at a point of the window's content (a context
+ * menu), and queues the item chosen (KL_WINDOW_ACTION).  Returns once the
+ * menu is closed.
+ */
+int
+kl_window_popup_menu(
+	struct kl_window *window,
+	const struct kl_menu_entry *entries,
+	size_t count,
+	int x,
+	int y)
+{
+	struct keiui_win32_menu_item *items;
+	POINT point;
+	BOOL turned;
+	int error;
+
+	/* A window and a table that fits. */
+	if (window == NULL || entries == NULL || count == 0U)
+		return EINVAL;
+	if (count > KEIUI_WIN32_MENU_ITEMS)
+		return E2BIG;
+
+	/* The table's copy. */
+	error = titlebar_copy_menu(entries, count, &items);
+	if (error != 0)
+		return error;
+
+	/* The point on the screen. */
+	point.x = x;
+	point.y = y;
+	turned = ClientToScreen(window->content, &point);
+	if (!turned) {
+		free(items);
+		return EIO;
+	}
+
+	/* The menu, until it closes. */
+	error = titlebar_popup(window, items, (unsigned)count, (int32_t)point.x, (int32_t)point.y);
+	free(items);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: what was chosen is queued. */
+	return 0;
+}
+
+/*
+ * Declares the window's tabs (count 0 takes them away, and the controls
+ * come back), with KL_TABS_* options.
+ */
+int
+kl_window_set_tabs(
+	struct kl_window *window,
+	const struct kl_tab_entry *tabs,
+	size_t count,
+	unsigned options)
+{
+	struct keiui_win32_tab *kept;
+	size_t index;
+
+	/* A window, and tabs that fit, each with an ID. */
+	if (window == NULL || (count != 0U && tabs == NULL))
+		return EINVAL;
+	if (count > KEIUI_WIN32_TABS)
+		return E2BIG;
+	for (index = 0U; index < count; index++) {
+		if (tabs[index].id == 0U)
+			return EINVAL;
+	}
+
+	/* The tabs' copy (none for no tabs). */
+	kept = NULL;
+	if (count != 0U) {
+		kept = calloc(count, sizeof(*kept));
+		if (kept == NULL)
+			return ENOMEM;
+	}
+
+	/* Each tab's ID, title and flags. */
+	for (index = 0U; index < count; index++) {
+		kept[index].id = tabs[index].id;
+		titlebar_copy_text(kept[index].title, sizeof(kept[index].title), tabs[index].title);
+		kept[index].flags = tabs[index].flags;
+	}
+
+	/* A field being edited ends with the controls the tabs replace. */
+	if (count != 0U && window->editing)
+		keiui_win32_field_end(window, KL_TEXT_CANCELLED);
+
+	/* They replace the tabs shown. */
+	free(window->tabs);
+	window->tabs = kept;
+	window->tab_count = (unsigned)count;
+	window->tab_options = options;
+	window->control_hover = KEIUI_WIN32_NO_CONTROL;
+	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	titlebar_changed(window);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Chooses the menu's item whose shortcut a key press is (a keysym and
+ * KL_MENU_* modifiers): its KL_WINDOW_ACTION is queued.  Returns 1 when an
+ * item took the key, 0 when none did.
+ */
+int
+keiui_win32_menu_shortcut(
+	struct kl_window *window,
+	uint32_t keysym,
+	unsigned menu)
+{
+	struct kl_window_event *input;
+	unsigned index;
+
+	/* The usable item of the shortcut, if any. */
+	index = keiui_win32_shortcut_find(window->menu, window->menu_count, window->actions, window->action_count, keysym, menu);
+	if (index == KEIUI_WIN32_NO_ITEM)
+		return 0;
+
+	/* Its choice; a full queue loses it, but the key is still the item's. */
+	input = keiui_win32_push(window, KL_WINDOW_ACTION);
+	if (input != NULL) {
+		input->code = window->menu[index].action;
+		input->id = (int32_t)window->menu[index].id;
+		input->begin = 0;
+	}
+
+	/* Succeeded: the key was the menu's. */
+	return 1;
+}
+
+/*
+ * Frees the window's menu and tabs (its closing).
+ */
+void
+keiui_win32_titlebar_free(
+	struct kl_window *window)
+{
+	/* The menu's table. */
+	free(window->menu);
+	window->menu = NULL;
+	window->menu_count = 0U;
+
+	/* The tabs. */
+	free(window->tabs);
+	window->tabs = NULL;
+	window->tab_count = 0U;
+}
+
+/*
  * Lays the controls out in a title bar of a width and a height (the
  * frame's pixels), and keeps their rectangles for the hit test.
  */
@@ -338,6 +573,7 @@ keiui_win32_titlebar_layout(
 	uint32_t most;
 	uint32_t least;
 	uint32_t drag;
+	int32_t margin;
 	int32_t left;
 	int32_t right;
 	int32_t needed;
@@ -362,9 +598,28 @@ keiui_win32_titlebar_layout(
 	keiui_win32_frame_buttons(&frame, buttons);
 	size = keiui_win32_scale(TITLEBAR_CONTROL, window->dpi);
 	gap = keiui_win32_scale(TITLEBAR_GAP, window->dpi);
-	left = (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
-	right = buttons[KEIUI_WIN32_BUTTON_MINIMIZE_INDEX].x - (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
+	margin = (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
+	left = margin;
+	right = buttons[KEIUI_WIN32_BUTTON_MINIMIZE_INDEX].x - margin;
 	y = ((int32_t)height - (int32_t)size) / 2;
+
+	/* The menu's button first at the left, a square like a control's. */
+	memset(&window->menu_place, 0, sizeof(window->menu_place));
+	if (window->menu_count != 0U) {
+		window->menu_place.x = left;
+		window->menu_place.y = y;
+		window->menu_place.width = size;
+		window->menu_place.height = size;
+		left += (int32_t)(size + gap);
+	}
+
+	/* Tabs take the controls' place, up to the bare title bar left to drag the window by. */
+	if (window->tab_count != 0U) {
+		for (index = 0U; index < window->control_count; index++)
+			window->controls[index].shown = 0;
+		titlebar_tabs_layout(window, left, right, height);
+		return;
+	}
 
 	/* Every control not hidden is shown at first, with its width. */
 	crumb = KEIUI_WIN32_NO_CONTROL;
@@ -397,7 +652,7 @@ keiui_win32_titlebar_layout(
 				continue;
 			needed += (int32_t)(control->width + gap);
 			if (index == crumb)
-				needed += 2 * left;
+				needed += 2 * margin;
 		}
 
 		/* Stops when the controls fit. */
@@ -492,8 +747,12 @@ keiui_win32_titlebar_layout(
 			control->shown = 0;
 	}
 
-	/* The shown controls' rectangles, for the hit test. */
+	/* The menu's button and the shown controls' rectangles, for the hit test. */
 	window->control_place_count = 0U;
+	if (window->menu_count != 0U) {
+		window->control_places[0] = window->menu_place;
+		window->control_place_count = 1U;
+	}
 	for (index = 0U; index < window->control_count; index++) {
 		control = &window->controls[index];
 		if (!control->shown)
@@ -522,11 +781,24 @@ keiui_win32_titlebar_draw(
 	unsigned shown;
 	unsigned side;
 	int baseline;
+	int start;
 
 	/* The layout of now. */
 	keiui_win32_titlebar_layout(window, width, height);
 	theme = kl_theme_default();
 	pixels = titlebar_pixels(window);
+
+	/* The menu's button. */
+	if (window->menu_count != 0U)
+		titlebar_menu_draw(window, canvas);
+
+	/* The tabs in place of the controls and the title. */
+	if (window->tab_count != 0U) {
+		for (index = 0U; index < window->tab_count; index++)
+			titlebar_tab_draw(window, canvas, index);
+		titlebar_new_draw(window, canvas);
+		return;
+	}
 
 	/* Each control shown. */
 	shown = 0U;
@@ -541,12 +813,14 @@ keiui_win32_titlebar_draw(
 			titlebar_button(window, canvas, index);
 	}
 
-	/* Without controls, the title. */
+	/* Without controls, the title, after the menu's button when there is one. */
 	if (shown != 0U || window->title == NULL || !window->text_open)
 		return;
+	start = (int)keiui_win32_scale(TITLEBAR_CRUMB_INSET, window->dpi);
+	if (window->menu_count != 0U)
+		start += window->menu_place.x + (int)window->menu_place.width;
 	baseline = kl_text_center(pixels, 0, (int)height);
-	(void)kl_text_draw_fit(&window->text, canvas, (int)keiui_win32_scale(TITLEBAR_CRUMB_INSET, window->dpi), baseline,
-	    window->title, pixels, 0, (int)width / 2, theme->text);
+	(void)kl_text_draw_fit(&window->text, canvas, start, baseline, window->title, pixels, 0, (int)width / 2, theme->text);
 }
 
 /* The control at a point of the frame's client (an index), or KEIUI_WIN32_NO_CONTROL. */
@@ -558,6 +832,12 @@ keiui_win32_titlebar_at(
 {
 	const struct keiui_win32_control *control;
 	unsigned index;
+	unsigned part;
+
+	/* The menu's button and the tabs. */
+	part = titlebar_part_at(window, x, y);
+	if (part != KEIUI_WIN32_NO_CONTROL)
+		return part;
 
 	/* Each control shown. */
 	for (index = 0U; index < window->control_count; index++) {
@@ -581,6 +861,22 @@ keiui_win32_titlebar_press(
 	struct keiui_win32_control *control;
 	unsigned side;
 	unsigned state;
+
+	/* A tab is chosen when it is pressed. */
+	if (index >= KEIUI_WIN32_TAB_BODY && index < KEIUI_WIN32_TAB_BODY + window->tab_count) {
+		titlebar_tab_input(window, KL_WINDOW_TAB_CHOSEN, window->tabs[index - KEIUI_WIN32_TAB_BODY].id);
+		return;
+	}
+
+	/* The menu's button and the tabs' buttons are held until their release. */
+	if (index == KEIUI_WIN32_MENU_BUTTON ||
+	    index == KEIUI_WIN32_TAB_NEW_BUTTON ||
+	    (index >= KEIUI_WIN32_TAB_CLOSE_BUTTON &&
+	     index < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count)) {
+		window->control_pressed = index;
+		(void)InvalidateRect(window->frame, NULL, FALSE);
+		return;
+	}
 
 	/* Nowhere, or a control that is disabled. */
 	if (index >= window->control_count)
@@ -619,7 +915,27 @@ keiui_win32_titlebar_release(
 	if (pressed == KEIUI_WIN32_NO_CONTROL || pressed != index)
 		return;
 
-	/* Its choice. */
+	/* The menu's button opens the menu below it. */
+	if (index == KEIUI_WIN32_MENU_BUTTON) {
+		titlebar_menu_open(window);
+		return;
+	}
+
+	/* The new tab's button asks for a tab. */
+	if (index == KEIUI_WIN32_TAB_NEW_BUTTON) {
+		titlebar_tab_input(window, KL_WINDOW_TAB_NEW, 0U);
+		return;
+	}
+
+	/* A tab's close button asks for its closing. */
+	if (index >= KEIUI_WIN32_TAB_CLOSE_BUTTON && index < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count) {
+		titlebar_tab_input(window, KL_WINDOW_TAB_CLOSE, window->tabs[index - KEIUI_WIN32_TAB_CLOSE_BUTTON].id);
+		return;
+	}
+
+	/* A control's choice, while it is still one. */
+	if (index >= window->control_count)
+		return;
 	input = keiui_win32_push(window, KL_WINDOW_ACTION);
 	if (input == NULL)
 		return;
@@ -876,16 +1192,11 @@ titlebar_state(
 	const struct kl_window *window,
 	uint32_t action)
 {
-	unsigned index;
+	unsigned state;
 
-	/* The action's entry. */
-	for (index = 0U; index < window->action_count; index++) {
-		if (window->actions[index].action == action)
-			return window->actions[index].state;
-	}
-
-	/* Enabled and shown. */
-	return 0U;
+	/* The window's entry of it. */
+	state = keiui_win32_action_state(window->actions, window->action_count, action);
+	return state;
 }
 
 /* A control's width: a generic one's pill fits its label, the breadcrumb its least, the rest a square. */
@@ -1287,4 +1598,475 @@ titlebar_copy_text(
 	/* Copies the characters that fit and ends the text. */
 	memcpy(to, from, length);
 	to[length] = '\0';
+}
+
+/* Copies a menu's table, each label cut to fit; 0, or ENOMEM. */
+static int
+titlebar_copy_menu(
+	const struct kl_menu_entry *entries,
+	size_t count,
+	struct keiui_win32_menu_item **items)
+{
+	struct keiui_win32_menu_item *copy;
+	size_t index;
+
+	/* The copy's memory. */
+	copy = calloc(count, sizeof(*copy));
+	if (copy == NULL)
+		return ENOMEM;
+
+	/* Each entry's fields and its label. */
+	for (index = 0U; index < count; index++) {
+		copy[index].id = entries[index].id;
+		copy[index].parent = entries[index].parent;
+		copy[index].type = entries[index].type;
+		titlebar_copy_text(copy[index].label, sizeof(copy[index].label), entries[index].label);
+		copy[index].action = entries[index].action;
+		copy[index].role = entries[index].role;
+		copy[index].modifiers = entries[index].modifiers;
+		copy[index].keysym = entries[index].keysym;
+	}
+
+	/* Succeeded: the caller owns the copy. */
+	*items = copy;
+	return 0;
+}
+
+/*
+ * Opens a menu of a table at a point of the screen (its top-left corner),
+ * waits for it to close and queues the item chosen; 0, or ENOMEM or EIO
+ * when it could not be made.
+ */
+static int
+titlebar_popup(
+	struct kl_window *window,
+	const struct keiui_win32_menu_item *items,
+	unsigned count,
+	int32_t x,
+	int32_t y)
+{
+	struct kl_window_event *input;
+	HMENU menu;
+	BOOL chosen;
+	unsigned index;
+
+	/* The menu of the top-level items, with its submenus. */
+	menu = titlebar_menu_build(window, items, count, KL_MENU_ROOT, 0U);
+	if (menu == NULL)
+		return ENOMEM;
+
+	/* Shown until a choice or a dismissal; the choice is the item's index plus one. */
+	chosen = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN,
+	    (int)x, (int)y, window->frame, NULL);
+	(void)DestroyMenu(menu);
+
+	/* The press that opened it is over, and the button is no longer held. */
+	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	window->control_hover = KEIUI_WIN32_NO_CONTROL;
+	(void)InvalidateRect(window->frame, NULL, FALSE);
+
+	/* Nothing chosen. */
+	if (chosen == 0)
+		return 0;
+	index = (unsigned)chosen - 1U;
+	if (index >= count)
+		return EIO;
+
+	/* The item's choice. */
+	input = keiui_win32_push(window, KL_WINDOW_ACTION);
+	if (input == NULL)
+		return 0;
+	input->code = items[index].action;
+	input->id = (int32_t)items[index].id;
+	input->begin = 0;
+
+	/* Succeeded: the choice is queued. */
+	return 0;
+}
+
+/*
+ * Makes the system's popup menu of a parent's items (KL_MENU_ROOT: the
+ * top-level ones), each submenu's in turn, down to TITLEBAR_MENU_DEPTH.
+ * Returns the menu (the caller destroys it, with its submenus), or NULL
+ * without memory.
+ */
+static HMENU
+titlebar_menu_build(
+	struct kl_window *window,
+	const struct keiui_win32_menu_item *items,
+	unsigned count,
+	uint32_t parent,
+	unsigned depth)
+{
+	HMENU menu;
+	unsigned index;
+	int error;
+
+	/* The menu. */
+	menu = CreatePopupMenu();
+	if (menu == NULL)
+		return NULL;
+
+	/* The parent's items, in the table's order. */
+	for (index = 0U; index < count; index++) {
+		if (items[index].parent != parent)
+			continue;
+
+		/* The item, or a menu that could not be made. */
+		error = titlebar_menu_item(window, menu, items, count, index, depth);
+		if (error != 0) {
+			(void)DestroyMenu(menu);
+			return NULL;
+		}
+	}
+
+	/* Succeeded: the menu with its items. */
+	return menu;
+}
+
+/*
+ * Appends an item to a menu by its type and its action's state: a hidden
+ * one is left out, a separator is a line, a submenu brings its own menu
+ * (greyed when disabled, left out too deep), any other is chosen by its
+ * index plus one, greyed when disabled, ticked when checked (a radio
+ * item with a dot), with its shortcut.  Returns 0, or ENOMEM.
+ */
+static int
+titlebar_menu_item(
+	struct kl_window *window,
+	HMENU menu,
+	const struct keiui_win32_menu_item *items,
+	unsigned count,
+	unsigned index,
+	unsigned depth)
+{
+	const struct keiui_win32_menu_item *item;
+	MENUITEMINFOW info;
+	char shortcut[48];
+	char text[TITLEBAR_MENU_TEXT];
+	uint16_t wide[TITLEBAR_MENU_TEXT];
+	size_t units;
+	HMENU submenu;
+	unsigned state;
+	BOOL added;
+	int error;
+
+	/* A hidden item is not shown. */
+	item = &items[index];
+	state = titlebar_state(window, item->action);
+	if ((state & KL_ACTION_HIDDEN) != 0U)
+		return 0;
+
+	/* A separator's line. */
+	if (item->type == KL_MENU_ITEM_SEPARATOR) {
+		added = AppendMenuW(menu, MF_SEPARATOR, 0U, NULL);
+		if (!added)
+			return ENOMEM;
+		return 0;
+	}
+
+	/* The text: the label, and the shortcut at the right. */
+	shortcut[0] = '\0';
+	if (item->type != KL_MENU_ITEM_SUBMENU)
+		keiui_win32_shortcut_text(item->modifiers, item->keysym, shortcut, sizeof(shortcut));
+	keiui_win32_menu_text(item->label, shortcut, text, sizeof(text));
+	error = keiui_win32_utf16_from_utf8(text, strlen(text), wide, TITLEBAR_MENU_TEXT, &units);
+	if (error != 0)
+		return 0;
+
+	/* The item's shape: its text and whether it is greyed or ticked. */
+	memset(&info, 0, sizeof(info));
+	info.cbSize = sizeof(info);
+	info.fMask = MIIM_STRING | MIIM_STATE | MIIM_FTYPE | MIIM_ID;
+	info.fType = MFT_STRING;
+	info.dwTypeData = (LPWSTR)wide;
+	info.cch = (UINT)units;
+	info.fState = MFS_ENABLED;
+	if ((state & KL_ACTION_DISABLED) != 0U)
+		info.fState |= MFS_DISABLED;
+	if ((state & KL_ACTION_CHECKED) != 0U)
+		info.fState |= MFS_CHECKED;
+	if (item->type == KL_MENU_ITEM_RADIO)
+		info.fType |= MFT_RADIOCHECK;
+	info.wID = index + 1U;
+
+	/* A submenu's own menu, made first; one too deep is left out. */
+	if (item->type == KL_MENU_ITEM_SUBMENU) {
+		if (depth + 1U >= TITLEBAR_MENU_DEPTH)
+			return 0;
+		submenu = titlebar_menu_build(window, items, count, item->id, depth + 1U);
+		if (submenu == NULL)
+			return ENOMEM;
+		info.fMask |= MIIM_SUBMENU;
+		info.hSubMenu = submenu;
+		info.wID = 0U;
+	}
+
+	/* The item at the menu's end (a submenu then belongs to the menu). */
+	added = InsertMenuItemW(menu, (UINT)GetMenuItemCount(menu), TRUE, &info);
+	if (!added) {
+		if (item->type == KL_MENU_ITEM_SUBMENU)
+			(void)DestroyMenu(info.hSubMenu);
+		return ENOMEM;
+	}
+
+	/* Succeeded: the item is in the menu. */
+	return 0;
+}
+
+/* Opens the window's menu below its button. */
+static void
+titlebar_menu_open(
+	struct kl_window *window)
+{
+	POINT point;
+	BOOL turned;
+
+	/* The button's bottom-left corner on the screen. */
+	point.x = window->menu_place.x;
+	point.y = window->menu_place.y + (LONG)window->menu_place.height;
+	turned = ClientToScreen(window->frame, &point);
+	if (!turned)
+		return;
+
+	/* The menu, until it closes. */
+	(void)titlebar_popup(window, window->menu, window->menu_count, (int32_t)point.x, (int32_t)point.y);
+}
+
+/*
+ * Lays the tabs out from a left edge, leaving the bare title bar before a
+ * right edge to drag the window by, and keeps the menu's button and the
+ * tab strip as the hit test's client places.
+ */
+static void
+titlebar_tabs_layout(
+	struct kl_window *window,
+	int32_t left,
+	int32_t right,
+	uint32_t height)
+{
+	struct keiui_win32_tab_place places[KEIUI_WIN32_TABS];
+	struct keiui_win32_tab_strip strip;
+	struct keiui_win32_rect *place;
+	int closable[KEIUI_WIN32_TABS];
+	int32_t end;
+	unsigned index;
+
+	/* The strip's room, and which tab is active. */
+	memset(&strip, 0, sizeof(strip));
+	strip.left = left;
+	strip.right = right - (int32_t)keiui_win32_scale(TITLEBAR_DRAG_LEAST, window->dpi);
+	if (strip.right < left)
+		strip.right = left;
+	strip.caption = height;
+	strip.dpi = window->dpi;
+	strip.count = window->tab_count;
+	strip.active = window->tab_count;
+	for (index = 0U; index < window->tab_count; index++) {
+		closable[index] = 0;
+		if ((window->tabs[index].flags & KL_TAB_CLOSABLE) != 0U)
+			closable[index] = 1;
+		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U)
+			strip.active = index;
+	}
+	strip.new_button = 0;
+	if ((window->tab_options & KL_TABS_NEW_BUTTON) != 0U)
+		strip.new_button = 1;
+
+	/* The tabs' places, kept with them. */
+	end = keiui_win32_tabs_layout(&strip, closable, places, &window->tab_new_place);
+	for (index = 0U; index < window->tab_count; index++)
+		window->tabs[index].place = places[index];
+
+	/* The hit test's client: the menu's button, and the strip from its left to its end. */
+	window->control_place_count = 0U;
+	if (window->menu_count != 0U) {
+		window->control_places[0] = window->menu_place;
+		window->control_place_count = 1U;
+	}
+	place = &window->control_places[window->control_place_count];
+	place->x = left;
+	place->y = 0;
+	place->width = 0U;
+	if (end > left)
+		place->width = (uint32_t)(end - left);
+	place->height = height;
+	window->control_place_count++;
+}
+
+/* What of the menu's button and the tabs is at a point of the frame's client, or KEIUI_WIN32_NO_CONTROL. */
+static unsigned
+titlebar_part_at(
+	const struct kl_window *window,
+	int32_t x,
+	int32_t y)
+{
+	struct keiui_win32_tab_place places[KEIUI_WIN32_TABS];
+	const struct keiui_win32_rect *menu;
+	unsigned index;
+	unsigned part;
+	int inside;
+
+	/* The menu's button, when the window has a menu. */
+	menu = &window->menu_place;
+	if (window->menu_count != 0U) {
+		inside = 1;
+		if (x < menu->x || x >= menu->x + (int32_t)menu->width)
+			inside = 0;
+		if (y < menu->y || y >= menu->y + (int32_t)menu->height)
+			inside = 0;
+		if (inside)
+			return KEIUI_WIN32_MENU_BUTTON;
+	}
+
+	/* No tabs. */
+	if (window->tab_count == 0U)
+		return KEIUI_WIN32_NO_CONTROL;
+
+	/* The tab or the button there. */
+	for (index = 0U; index < window->tab_count; index++)
+		places[index] = window->tabs[index].place;
+	index = keiui_win32_tabs_at(places, window->tab_count, &window->tab_new_place, x, y, &part);
+	if (index == KEIUI_WIN32_TAB_NONE)
+		return KEIUI_WIN32_NO_CONTROL;
+
+	/* Which of a tab, or the new tab's button. */
+	if (part == KEIUI_WIN32_TAB_PART_NEW)
+		return KEIUI_WIN32_TAB_NEW_BUTTON;
+	if (part == KEIUI_WIN32_TAB_PART_CLOSE)
+		return KEIUI_WIN32_TAB_CLOSE_BUTTON + index;
+	return KEIUI_WIN32_TAB_BODY + index;
+}
+
+/* Queues a tab's input (KL_WINDOW_TAB_*, and the tab's ID; 0 for a new one). */
+static void
+titlebar_tab_input(
+	struct kl_window *window,
+	unsigned code,
+	uint32_t id)
+{
+	struct kl_window_event *input;
+
+	/* The input. */
+	input = keiui_win32_push(window, KL_WINDOW_TAB);
+	if (input == NULL)
+		return;
+	input->code = code;
+	input->id = (int32_t)id;
+}
+
+/* Draws the menu's button: its ground under the pointer or held, and its lines. */
+static void
+titlebar_menu_draw(
+	struct kl_window *window,
+	struct kl_canvas *canvas)
+{
+	/* A button of the list's icon, the control's size. */
+	titlebar_icon_button(window, canvas, &window->menu_place, KEIUI_WIN32_MENU_BUTTON, KL_ICON_LIST, TITLEBAR_ICON);
+}
+
+/* Draws a tab: its ground (the panel's when active, the hover's under the pointer), its title, its mark and its close button. */
+static void
+titlebar_tab_draw(
+	struct kl_window *window,
+	struct kl_canvas *canvas,
+	unsigned index)
+{
+	const struct keiui_win32_tab *tab;
+	const struct kl_theme *theme;
+	kl_color ink;
+	unsigned pixels;
+	int baseline;
+	int inset;
+	int start;
+	int room;
+	float radius;
+	float mark;
+
+	/* A tab not shown. */
+	tab = &window->tabs[index];
+	if (!tab->place.shown)
+		return;
+	theme = kl_theme_default();
+	radius = (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi);
+
+	/* Its ground: the panel's when active, the hover's under the pointer. */
+	if ((tab->flags & KL_TAB_ACTIVE) != 0U) {
+		kl_canvas_round(canvas, (float)tab->place.tab.x, (float)tab->place.tab.y, (float)tab->place.tab.width,
+		    (float)tab->place.tab.height, radius, theme->panel);
+	} else if (window->control_hover == KEIUI_WIN32_TAB_BODY + index) {
+		kl_canvas_round(canvas, (float)tab->place.tab.x, (float)tab->place.tab.y, (float)tab->place.tab.width,
+		    (float)tab->place.tab.height, radius, theme->hover);
+	}
+
+	/* The attention's mark before the title, in the accent. */
+	inset = (int)keiui_win32_scale(TITLEBAR_TAB_INSET, window->dpi);
+	start = tab->place.tab.x + inset;
+	if ((tab->flags & KL_TAB_ATTENTION) != 0U) {
+		mark = (float)keiui_win32_scale(TITLEBAR_TAB_MARK, window->dpi);
+		kl_canvas_round(canvas, (float)start, (float)tab->place.tab.y + ((float)tab->place.tab.height - mark) / 2.0f, mark, mark,
+		    mark / 2.0f, theme->accent);
+		start += (int)mark + inset / 2;
+	}
+
+	/* The title, up to the close button. */
+	room = tab->place.tab.x + (int)tab->place.tab.width - inset - start;
+	if (tab->place.close.width != 0U)
+		room = tab->place.close.x - inset / 2 - start;
+	ink = theme->text_secondary;
+	if ((tab->flags & KL_TAB_ACTIVE) != 0U)
+		ink = theme->text;
+	if (window->text_open && room > 0) {
+		pixels = titlebar_pixels(window);
+		baseline = kl_text_center(pixels, tab->place.tab.y, (int)tab->place.tab.height);
+		(void)kl_text_draw_fit(&window->text, canvas, start, baseline, tab->title, pixels, 0, room, ink);
+	}
+
+	/* The close button. */
+	if (tab->place.close.width != 0U)
+		titlebar_icon_button(window, canvas, &tab->place.close, KEIUI_WIN32_TAB_CLOSE_BUTTON + index, KL_ICON_CLOSE, TITLEBAR_TAB_ICON);
+}
+
+/* Draws the new tab's button, when there is one. */
+static void
+titlebar_new_draw(
+	struct kl_window *window,
+	struct kl_canvas *canvas)
+{
+	/* No button. */
+	if (window->tab_new_place.width == 0U)
+		return;
+
+	/* A button of the plus. */
+	titlebar_icon_button(window, canvas, &window->tab_new_place, KEIUI_WIN32_TAB_NEW_BUTTON, KL_ICON_PLUS, TITLEBAR_TAB_ICON);
+}
+
+/* Draws a button of an icon: its ground under the pointer or held, and the icon (size at 96 dpi) in its middle. */
+static void
+titlebar_icon_button(
+	struct kl_window *window,
+	struct kl_canvas *canvas,
+	const struct keiui_win32_rect *place,
+	unsigned part,
+	enum kl_icon icon,
+	uint32_t size)
+{
+	const struct kl_theme *theme;
+	kl_color fill;
+	float side;
+
+	/* Its ground under the pointer, or held. */
+	theme = kl_theme_default();
+	if (window->control_pressed == part || window->control_hover == part) {
+		fill = theme->hover;
+		if (window->control_pressed == part)
+			fill = theme->selection;
+		kl_canvas_round(canvas, (float)place->x, (float)place->y, (float)place->width, (float)place->height,
+		    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), fill);
+	}
+
+	/* The icon in its middle. */
+	side = (float)keiui_win32_scale(size, window->dpi);
+	kl_icon_draw(canvas, icon, (float)place->x + ((float)place->width - side) / 2.0f, (float)place->y + ((float)place->height - side) / 2.0f,
+	    side, theme->text);
 }

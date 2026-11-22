@@ -32,6 +32,7 @@
 #include <keiland/keiland.h>
 #include "userland/desktop/libkeiland/platform/platform.h"
 #include "userland/desktop/libkeiland/win32/frame.h"
+#include "userland/desktop/libkeiland/win32/input.h"
 #include "userland/desktop/libkeiland/win32/wide.h"
 
 #include <windows.h>
@@ -48,8 +49,35 @@
 /* The code and the data a second start of the program sends its URLs with (WM_COPYDATA). */
 #define KEIUI_WIN32_COPY_URLS		0x4F474D31U
 
-/* The most title bar controls a window keeps, and the most action states. */
+/* The most title bar controls a window keeps. */
 #define KEIUI_WIN32_CONTROLS		16U
+
+/* The most action states a window keeps (its menu's and its controls'). */
+#define KEIUI_WIN32_ACTIONS		128U
+
+/* The most items a window's menu (or a popup) has, and the most tabs its title bar shows. */
+#define KEIUI_WIN32_MENU_ITEMS		256U
+#define KEIUI_WIN32_TABS		64U
+
+/* The longest title of a tab kept, with its NUL; a longer one is cut at a character. */
+#define KEIUI_WIN32_TAB_TITLE		256U
+
+/*
+ * The places of the title bar the hit test calls the client: each control,
+ * the menu's button, and the tab strip as one.
+ */
+#define KEIUI_WIN32_PLACES		(KEIUI_WIN32_CONTROLS + 2U)
+
+/*
+ * What of the title bar is under the pointer or pressed, beside a control
+ * (whose index is below KEIUI_WIN32_CONTROLS): the menu's button, a tab
+ * (its index added), a tab's close button (its index added), and the new
+ * tab's button.
+ */
+#define KEIUI_WIN32_MENU_BUTTON		0x10000U
+#define KEIUI_WIN32_TAB_BODY		0x20000U
+#define KEIUI_WIN32_TAB_CLOSE_BUTTON	0x30000U
+#define KEIUI_WIN32_TAB_NEW_BUTTON	0x40000U
 
 /* The longest text of a control (a URL with its NUL), of a label, and of a placeholder. */
 #define KEIUI_WIN32_CONTROL_TEXT	2048U
@@ -91,10 +119,16 @@ struct keiui_win32_control {
 	uint32_t height;
 };
 
-/* An action's state (KL_ACTION_* bits), for its controls. */
-struct keiui_win32_action {
-	uint32_t action;
-	unsigned state;
+/*
+ * One tab of a window's title bar (kl_window_set_tabs): its ID, its title
+ * (UTF-8, cut to fit), its KL_TAB_* flags, and where the last layout put
+ * it.
+ */
+struct keiui_win32_tab {
+	uint32_t id;
+	char title[KEIUI_WIN32_TAB_TITLE];
+	unsigned flags;
+	struct keiui_win32_tab_place place;
 };
 
 /*
@@ -135,8 +169,10 @@ struct keiui_win32_post {
  * property), its module, its windows, its thread, the counter that orders
  * every event queued, its own events (posts), the posts other threads made
  * (under post_lock, post_wake rung by the first), whether the system
- * is in the dark appearance, and whether OLE was started on its thread
- * (for a drag, drag.c).
+ * is in the dark appearance, whether OLE was started on its thread
+ * (for a drag, drag.c), and the primary selection: Windows has none, so
+ * it is the application's own, the text its windows last selected (NULL
+ * before any; clipboard.c), shared by its windows on its thread.
  */
 struct kl_app {
 	char *application;
@@ -154,6 +190,8 @@ struct kl_app {
 	struct keiui_win32_post *post_last;
 	int dark;
 	int ole;
+	char *primary;
+	size_t primary_length;
 };
 
 /*
@@ -176,8 +214,13 @@ struct kl_app {
  * during the modal size loop (NULL when none) with its data; the input
  * method's TSF (NULL when the window uses IMM32, ime.c); the touch pad's
  * DirectManipulation (NULL when the wheel's messages bring it, pointer.c);
- * and whether the title bar is drawn over the system's backdrop (glass:
- * its ground left transparent, present.c).
+ * whether the title bar is drawn over the system's backdrop (glass:
+ * its ground left transparent, present.c); the menu (kl_window_set_menu:
+ * its items, NULL when it has none) and its button's place; the tabs
+ * (kl_window_set_tabs: NULL when there are none), their options and the
+ * new tab's button's place; the key whose press went to the menu's
+ * shortcut or was a dead key, so that its release is not given either (0
+ * for none); and the frame's style and placement before full screen.
  */
 struct kl_window {
 	struct kl_app *app;
@@ -213,9 +256,9 @@ struct kl_window {
 	uint32_t caption_height;
 	struct keiui_win32_control controls[KEIUI_WIN32_CONTROLS];
 	unsigned control_count;
-	struct keiui_win32_rect control_places[KEIUI_WIN32_CONTROLS];
+	struct keiui_win32_rect control_places[KEIUI_WIN32_PLACES];
 	unsigned control_place_count;
-	struct keiui_win32_action actions[KEIUI_WIN32_CONTROLS];
+	struct keiui_win32_action actions[KEIUI_WIN32_ACTIONS];
 	unsigned action_count;
 	unsigned control_hover;
 	unsigned control_pressed;
@@ -233,6 +276,16 @@ struct kl_window {
 	struct keiui_win32_tsf *tsf;
 	struct keiui_win32_manipulation *manipulation;
 	int glass;
+	struct keiui_win32_menu_item *menu;
+	unsigned menu_count;
+	struct keiui_win32_rect menu_place;
+	struct keiui_win32_tab *tabs;
+	unsigned tab_count;
+	unsigned tab_options;
+	struct keiui_win32_rect tab_new_place;
+	uint32_t eaten_key;
+	LONG_PTR restore_style;
+	WINDOWPLACEMENT restore_place;
 };
 
 /* app.c */
@@ -269,6 +322,8 @@ void keiui_win32_field_insert(struct kl_window *window, const char *text);
 void keiui_win32_field_compose(struct kl_window *window, const char *text, size_t caret);
 void keiui_win32_field_end(struct kl_window *window, unsigned how);
 void keiui_win32_titlebar_release_all(struct kl_window *window);
+int keiui_win32_menu_shortcut(struct kl_window *window, uint32_t keysym, unsigned menu);
+void keiui_win32_titlebar_free(struct kl_window *window);
 
 /* ime.c */
 int keiui_win32_ime_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT *result);

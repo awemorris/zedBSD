@@ -8,7 +8,8 @@
 /*
  * What the window shows on Windows: the program's frames drawn on the CPU
  * (kl_window_present: copied into a DIB section of the content's size and
- * put on the screen at WM_PAINT with BitBlt), the program's own Vulkan
+ * put on the screen at WM_PAINT with BitBlt; with parts named, only those
+ * parts are copied and painted), the program's own Vulkan
  * surface over the content (vkCreateWin32SurfaceKHR, looked up through the
  * loader the program loaded: libkeiland imports nothing of Vulkan), and the
  * title bar, which libkeiland draws with its canvas (the three caption
@@ -40,6 +41,8 @@
 
 static int present_dib(HDC context, uint32_t width, uint32_t height, HBITMAP *bitmap, uint32_t **pixels);
 static void present_copy(struct kl_window *window, const uint32_t *pixels, size_t stride);
+static int present_clip(const struct kl_window *window, const struct kl_rect *part, RECT *area);
+static void present_copy_area(struct kl_window *window, const uint32_t *pixels, size_t stride, const RECT *area);
 static void present_button(struct kl_canvas *canvas, const struct kl_window *window, unsigned index, const struct keiui_win32_rect *place);
 
 /*
@@ -111,8 +114,8 @@ kl_window_present(
 }
 
 /*
- * Shows a frame of which one part changed (the whole frame is copied; the
- * part is what is painted).
+ * Shows a frame of which one part changed (only the part is copied and
+ * painted; NULL: the whole frame).
  */
 int
 kl_window_present_part(
@@ -137,7 +140,9 @@ kl_window_present_part(
 }
 
 /*
- * Shows a frame of which some parts changed (count 0: the whole frame).
+ * Shows a frame of which some parts changed (count 0: the whole frame):
+ * each part, cut to the frame, is copied into the memory shown and
+ * painted; the rest of the memory keeps the frames shown before.
  */
 int
 kl_window_present_parts(
@@ -149,6 +154,7 @@ kl_window_present_parts(
 {
 	RECT area;
 	unsigned index;
+	int inside;
 
 	/* A window, a frame and the memory to copy it into. */
 	if (window == NULL || pixels == NULL || (count != 0U && parts == NULL))
@@ -156,21 +162,19 @@ kl_window_present_parts(
 	if (window->shown == NULL)
 		return EINVAL;
 
-	/* The frame, copied. */
-	present_copy(window, pixels, stride);
-
-	/* The whole content painted, or each part. */
+	/* The whole frame, copied and painted. */
 	if (count == 0U) {
+		present_copy(window, pixels, stride);
 		(void)InvalidateRect(window->content, NULL, FALSE);
 		return 0;
 	}
 
-	/* Marks each changed part of the content for painting. */
+	/* Each part on the frame: its pixels copied, and that part of the content painted. */
 	for (index = 0U; index < count; index++) {
-		area.left = parts[index].x;
-		area.top = parts[index].y;
-		area.right = parts[index].x + parts[index].width;
-		area.bottom = parts[index].y + parts[index].height;
+		inside = present_clip(window, &parts[index], &area);
+		if (!inside)
+			continue;
+		present_copy_area(window, pixels, stride, &area);
 		(void)InvalidateRect(window->content, &area, FALSE);
 	}
 
@@ -483,6 +487,74 @@ present_copy(
 	(void)GdiFlush();
 	for (row = 0U; row < window->shown_height; row++)
 		memcpy(window->shown_pixels + (size_t)row * window->shown_width, pixels + (size_t)row * stride, (size_t)width * sizeof(uint32_t));
+}
+
+/* Cuts a part to the memory shown (the frame's size): 1 with the area left, 0 when nothing of it is on the frame. */
+static int
+present_clip(
+	const struct kl_window *window,
+	const struct kl_rect *part,
+	RECT *area)
+{
+	int64_t left;
+	int64_t top;
+	int64_t right;
+	int64_t bottom;
+
+	/* The part's edges, without overflow. */
+	left = part->x;
+	top = part->y;
+	right = (int64_t)part->x + (int64_t)part->width;
+	bottom = (int64_t)part->y + (int64_t)part->height;
+
+	/* Kept within the frame. */
+	if (left < 0)
+		left = 0;
+	if (top < 0)
+		top = 0;
+	if (right > (int64_t)window->shown_width)
+		right = (int64_t)window->shown_width;
+	if (bottom > (int64_t)window->shown_height)
+		bottom = (int64_t)window->shown_height;
+
+	/* Nothing left of it. */
+	if (right <= left || bottom <= top)
+		return 0;
+
+	/* Succeeded: the area on the frame. */
+	area->left = (LONG)left;
+	area->top = (LONG)top;
+	area->right = (LONG)right;
+	area->bottom = (LONG)bottom;
+	return 1;
+}
+
+/* Copies an area of a frame (within the memory shown, and within the frame's stride) into the memory shown. */
+static void
+present_copy_area(
+	struct kl_window *window,
+	const uint32_t *pixels,
+	size_t stride,
+	const RECT *area)
+{
+	size_t right;
+	size_t width;
+	LONG row;
+
+	/* The columns the frame's rows have. */
+	right = (size_t)area->right;
+	if (right > stride)
+		right = stride;
+	if (right <= (size_t)area->left)
+		return;
+	width = right - (size_t)area->left;
+
+	/* The area's rows, one after another. */
+	(void)GdiFlush();
+	for (row = area->top; row < area->bottom; row++) {
+		memcpy(window->shown_pixels + (size_t)row * window->shown_width + (size_t)area->left,
+		    pixels + (size_t)row * stride + (size_t)area->left, width * sizeof(uint32_t));
+	}
 }
 
 /* Draws one caption button: its ground when under the pointer or pressed, and its mark. */

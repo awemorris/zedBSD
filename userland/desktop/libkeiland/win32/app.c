@@ -20,15 +20,28 @@
  * until the dispatch.  Every event queued takes the next number of the
  * application's counter, so that kl_app_take gives the application's
  * posts and its windows' inputs in the order they came.
+ *
+ * A program started apart from the application (kl_launch) is a process
+ * of its own (CreateProcessW): its arguments written as one command line
+ * that its C runtime splits back (wide.c), or the system's command
+ * interpreter running a command line; the application's environment with
+ * the changes asked for; no handle of the application inherited.
  */
 
+#include "userland/desktop/libkeiland/process.h"
 #include "userland/desktop/libkeiland/win32/window-win32.h"
 
 #include <ole2.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
+
+/* The longest command line Windows takes, in UTF-16 units with its NUL; and in UTF-8 bytes. */
+#define APP_LINE_UNITS		32768U
+#define APP_LINE_BYTES		(APP_LINE_UNITS * 3U)
 
 static void app_posts_move(struct kl_app *app);
 static int app_post_event(struct kl_app *app, const struct kl_app_event *event);
@@ -36,6 +49,13 @@ static int app_deliver(struct kl_app *app, struct kl_app_event *event);
 static int app_has_window(const struct kl_app *app, const struct kl_window *window);
 static int app_queued(const struct kl_app *app);
 static int app_name(struct kl_app *app, const char *application);
+static WCHAR *app_wide(const char *text);
+static int app_launch_line(const struct kl_launch_options *options, WCHAR **program, WCHAR **line);
+static int app_environment(const char *const *changes, WCHAR **block);
+static size_t app_variable_name(const WCHAR *variable);
+static int app_variable_same(const WCHAR *one, const WCHAR *other);
+static int app_variable_order(const void *one, const void *other);
+static int app_launch_error(DWORD code);
 
 /*
  * The counter's rate of kl_clock_us (QueryPerformanceFrequency), read once;
@@ -141,7 +161,8 @@ kl_app_close(
 		free(post);
 	}
 
-	/* The classes, the wake, the lock and the state. */
+	/* The primary selection, the classes, the wake, the lock and the state. */
+	free(app->primary);
 	keiui_win32_classes_drop(app);
 	if (app->ole)
 		OleUninitialize();
@@ -245,6 +266,80 @@ kl_app_post(
 		return error;
 
 	/* Succeeded: the event is posted. */
+	return 0;
+}
+
+/*
+ * Starts a launch's program apart from the application, with the
+ * environment's changes given ("NAME=value" sets a variable, "NAME"
+ * removes it).  A command line runs in the system's command interpreter
+ * (cmd.exe /d /s /c) without a console window.  Returns 0 once it runs,
+ * or ENOENT, EACCES, ENOEXEC, E2BIG, ENOMEM or EIO.
+ */
+int
+keiui_launch_start(
+	const struct kl_launch_options *options,
+	const char *const *environment)
+{
+	PROCESS_INFORMATION started;
+	STARTUPINFOW startup;
+	WCHAR *directory;
+	WCHAR *program;
+	WCHAR *line;
+	WCHAR *block;
+	DWORD flags;
+	DWORD code;
+	BOOL created;
+	int error;
+
+	/* The program and its command line. */
+	error = app_launch_line(options, &program, &line);
+	if (error != 0)
+		return error;
+
+	/* The environment with its changes (NULL: the application's as it is). */
+	error = app_environment(environment, &block);
+	if (error != 0) {
+		free(program);
+		free(line);
+		return error;
+	}
+
+	/* The directory it starts in (NULL: the application's). */
+	directory = NULL;
+	if (options->directory != NULL) {
+		directory = app_wide(options->directory);
+		if (directory == NULL) {
+			free(block);
+			free(program);
+			free(line);
+			return ENOMEM;
+		}
+	}
+
+	/* The process, its own group, the command interpreter without a console window. */
+	memset(&startup, 0, sizeof(startup));
+	startup.cb = sizeof(startup);
+	memset(&started, 0, sizeof(started));
+	flags = CREATE_UNICODE_ENVIRONMENT | CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP;
+	if (options->command != NULL)
+		flags |= CREATE_NO_WINDOW;
+	created = CreateProcessW(program, line, NULL, NULL, FALSE, flags, block, directory, &startup, &started);
+	code = GetLastError();
+	free(directory);
+	free(block);
+	free(program);
+	free(line);
+	if (!created) {
+		error = app_launch_error(code);
+		return error;
+	}
+
+	/* Nothing of it comes back: its handles go. */
+	(void)CloseHandle(started.hThread);
+	(void)CloseHandle(started.hProcess);
+
+	/* Succeeded: the program runs. */
 	return 0;
 }
 
@@ -693,4 +788,345 @@ app_name(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Converts UTF-8 text to UTF-16 in memory of its own (the caller frees it); NULL without memory or for ill-formed sizes. */
+static WCHAR *
+app_wide(
+	const char *text)
+{
+	WCHAR *wide;
+	size_t length;
+	size_t count;
+	int error;
+
+	/* The text's length, and its units' memory (never more units than bytes). */
+	length = strlen(text);
+	wide = calloc(length + 1U, sizeof(*wide));
+	if (wide == NULL)
+		return NULL;
+
+	/* The conversion. */
+	error = keiui_win32_utf16_from_utf8(text, length, (uint16_t *)wide, length + 1U, &count);
+	if (error != 0) {
+		free(wide);
+		return NULL;
+	}
+
+	/* Succeeded: the caller owns the text. */
+	return wide;
+}
+
+/*
+ * Makes a launch's program (NULL: the command line's first argument,
+ * which Windows looks for) and its command line, in memory the caller
+ * frees; 0, E2BIG, EINVAL or ENOMEM.
+ */
+static int
+app_launch_line(
+	const struct kl_launch_options *options,
+	WCHAR **program,
+	WCHAR **line)
+{
+	WCHAR system[MAX_PATH];
+	WCHAR *command;
+	WCHAR *interpreter;
+	char *bytes;
+	size_t units;
+	UINT length;
+	int written;
+	int error;
+
+	/* Nothing made yet. */
+	*program = NULL;
+	*line = NULL;
+
+	/* A program's arguments: their line, converted. */
+	if (options->command == NULL) {
+		bytes = malloc(APP_LINE_BYTES);
+		if (bytes == NULL)
+			return ENOMEM;
+		error = keiui_win32_command_line(options->argv, bytes, APP_LINE_BYTES);
+		if (error == ERANGE) {
+			free(bytes);
+			return E2BIG;
+		}
+		if (error != 0) {
+			free(bytes);
+			return error;
+		}
+
+		/* The line in UTF-16, no longer than Windows takes. */
+		*line = app_wide(bytes);
+		free(bytes);
+		if (*line == NULL)
+			return ENOMEM;
+		units = wcslen(*line);
+		if (units >= APP_LINE_UNITS) {
+			free(*line);
+			*line = NULL;
+			return E2BIG;
+		}
+
+		/* Succeeded: Windows looks for the program by its name. */
+		return 0;
+	}
+
+	/* The system's command interpreter, by its whole path. */
+	length = GetSystemDirectoryW(system, MAX_PATH);
+	if (length == 0U || length >= MAX_PATH)
+		return EIO;
+	interpreter = calloc(MAX_PATH + 16U, sizeof(*interpreter));
+	if (interpreter == NULL)
+		return ENOMEM;
+	(void)_snwprintf(interpreter, MAX_PATH + 16U, L"%ls\\cmd.exe", system);
+
+	/* The command line it runs, in double quotes that /s takes away whole. */
+	command = app_wide(options->command);
+	if (command == NULL) {
+		free(interpreter);
+		return ENOMEM;
+	}
+	*line = calloc(APP_LINE_UNITS, sizeof(**line));
+	if (*line == NULL) {
+		free(command);
+		free(interpreter);
+		return ENOMEM;
+	}
+	written = _snwprintf(*line, APP_LINE_UNITS, L"\"%ls\" /d /s /c \"%ls\"", interpreter, command);
+	free(command);
+	if (written < 0 || (size_t)written >= APP_LINE_UNITS) {
+		free(*line);
+		*line = NULL;
+		free(interpreter);
+		return E2BIG;
+	}
+
+	/* Succeeded: the interpreter and its line. */
+	*program = interpreter;
+	return 0;
+}
+
+/*
+ * Makes the environment block of a launch: the application's variables
+ * but those the changes name (compared without case, as Windows does),
+ * then the changes that set one, sorted by name without case as Windows
+ * asks, in memory the caller frees.  No changes: NULL (the application's
+ * environment as it is).  0, or ENOMEM.
+ */
+static int
+app_environment(
+	const char *const *changes,
+	WCHAR **block)
+{
+	const WCHAR *named;
+	WCHAR **variables;
+	WCHAR **wide;
+	WCHAR *strings;
+	WCHAR *walk;
+	WCHAR *written;
+	size_t change_count;
+	size_t own_count;
+	size_t count;
+	size_t units;
+	size_t length;
+	size_t index;
+	size_t other;
+	int same;
+	int error;
+
+	/* No changes: the application's own. */
+	*block = NULL;
+	change_count = 0U;
+	while (changes != NULL && changes[change_count] != NULL)
+		change_count++;
+	if (change_count == 0U)
+		return 0;
+
+	/* Nothing made yet; every failure from here leaves through the end, which frees what was made. */
+	error = ENOMEM;
+	variables = NULL;
+	strings = NULL;
+	wide = calloc(change_count, sizeof(*wide));
+	if (wide == NULL)
+		goto end;
+
+	/* The changes in UTF-16. */
+	for (index = 0U; index < change_count; index++) {
+		wide[index] = app_wide(changes[index]);
+		if (wide[index] == NULL)
+			goto end;
+	}
+
+	/* The application's variables, counted. */
+	strings = GetEnvironmentStringsW();
+	own_count = 0U;
+	walk = strings;
+	while (walk != NULL && walk[0] != L'\0') {
+		length = wcslen(walk);
+		own_count++;
+		walk += length + 1U;
+	}
+
+	/* Room for every variable kept and every change. */
+	variables = calloc(own_count + change_count + 1U, sizeof(*variables));
+	if (variables == NULL)
+		goto end;
+
+	/* The application's variables that no change names. */
+	count = 0U;
+	walk = strings;
+	while (walk != NULL && walk[0] != L'\0') {
+		/* Whether a change names it. */
+		same = 0;
+		for (other = 0U; other < change_count && !same; other++)
+			same = app_variable_same(walk, wide[other]);
+
+		/* Kept when none does. */
+		if (!same) {
+			variables[count] = walk;
+			count++;
+		}
+		length = wcslen(walk);
+		walk += length + 1U;
+	}
+
+	/* The changes that set a variable (a name alone removes it). */
+	for (index = 0U; index < change_count; index++) {
+		named = wcschr(wide[index], L'=');
+		if (named == NULL)
+			continue;
+		variables[count] = wide[index];
+		count++;
+	}
+
+	/* In the order Windows asks for. */
+	qsort(variables, count, sizeof(*variables), app_variable_order);
+
+	/* The block's room: each variable with its NUL, and one more NUL. */
+	units = 1U;
+	for (index = 0U; index < count; index++) {
+		length = wcslen(variables[index]);
+		units += length + 1U;
+	}
+	*block = calloc(units, sizeof(**block));
+	if (*block == NULL)
+		goto end;
+
+	/* The variables, one after another. */
+	written = *block;
+	for (index = 0U; index < count; index++) {
+		length = wcslen(variables[index]);
+		memcpy(written, variables[index], (length + 1U) * sizeof(*written));
+		written += length + 1U;
+	}
+	written[0] = L'\0';
+	error = 0;
+
+end:
+	/* The copies go (the block stays the caller's). */
+	free(variables);
+	if (strings != NULL)
+		(void)FreeEnvironmentStringsW(strings);
+	for (index = 0U; wide != NULL && index < change_count; index++)
+		free(wide[index]);
+	free(wide);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the block. */
+	return 0;
+}
+
+/* The length of a variable's name ("=C:=C:\\" has the name "=C:"). */
+static size_t
+app_variable_name(
+	const WCHAR *variable)
+{
+	size_t length;
+
+	/* Up to the '=' after the first character (a name may start with one). */
+	length = 0U;
+	if (variable[0] != L'\0')
+		length = 1U;
+	while (variable[length] != L'\0' && variable[length] != L'=')
+		length++;
+	return length;
+}
+
+/* Tells whether two variables (or a variable and a name alone) have the same name, without case: 1 or 0. */
+static int
+app_variable_same(
+	const WCHAR *one,
+	const WCHAR *other)
+{
+	size_t one_length;
+	size_t other_length;
+	int compared;
+
+	/* The names' lengths. */
+	one_length = app_variable_name(one);
+	other_length = app_variable_name(other);
+
+	/* The names compared as Windows compares them. */
+	compared = CompareStringOrdinal(one, (int)one_length, other, (int)other_length, TRUE);
+	if (compared == CSTR_EQUAL)
+		return 1;
+	return 0;
+}
+
+/* Orders two variables by name without case (qsort's comparison). */
+static int
+app_variable_order(
+	const void *one,
+	const void *other)
+{
+	const WCHAR *first;
+	const WCHAR *second;
+	size_t first_length;
+	size_t second_length;
+	int compared;
+
+	/* The variables and their names' lengths. */
+	first = *(const WCHAR *const *)one;
+	second = *(const WCHAR *const *)other;
+	first_length = app_variable_name(first);
+	second_length = app_variable_name(second);
+
+	/* The names compared as Windows compares them. */
+	compared = CompareStringOrdinal(first, (int)first_length, second, (int)second_length, TRUE);
+	if (compared == CSTR_LESS_THAN)
+		return -1;
+	if (compared == CSTR_GREATER_THAN)
+		return 1;
+	return 0;
+}
+
+/* The errno value of CreateProcessW's failure. */
+static int
+app_launch_error(
+	DWORD code)
+{
+	/* The failures a launch reports. */
+	switch (code) {
+	case ERROR_FILE_NOT_FOUND:
+	case ERROR_PATH_NOT_FOUND:
+	case ERROR_INVALID_NAME:
+	case ERROR_DIRECTORY:
+		return ENOENT;
+	case ERROR_ACCESS_DENIED:
+		return EACCES;
+	case ERROR_BAD_EXE_FORMAT:
+		return ENOEXEC;
+	case ERROR_FILENAME_EXCED_RANGE:
+		return E2BIG;
+	case ERROR_NOT_ENOUGH_MEMORY:
+	case ERROR_OUTOFMEMORY:
+		return ENOMEM;
+	default:
+		break;
+	}
+
+	/* Any other failure of the system. */
+	return EIO;
 }

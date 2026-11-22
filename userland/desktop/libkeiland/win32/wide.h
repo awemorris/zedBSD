@@ -8,7 +8,8 @@
 /*
  * UTF-16 and UTF-8 for the Windows backend (wide.c): Windows gives and
  * takes text as UTF-16 (window titles, WM_CHAR, the input method's
- * composition, the clipboard's CF_UNICODETEXT) and Keiland as UTF-8.
+ * composition, the clipboard's CF_UNICODETEXT) and Keiland as UTF-8.  And
+ * the one line a program's arguments are given to Windows on.
  *
  * Text from the system is not trusted to be well-formed: an unpaired
  * surrogate becomes U+FFFD rather than an error, so a broken string from
@@ -82,5 +83,27 @@ int keiui_win32_utf16_from_utf8(const char *text, size_t length, uint16_t *units
  * possible: NULL arguments return 0 and change nothing.
  */
 int keiui_win32_char_unit(struct keiui_win32_surrogate *state, uint16_t unit, uint32_t *code_point);
+
+/*
+ * Writes a program's arguments as the one command line CreateProcessW
+ * takes (UTF-8), so that the C runtime of the program started splits it
+ * back into the same arguments.
+ *
+ * argv:  the arguments, argv[0] the program, NULL ending them.
+ * line:  size bytes; receives the line and its NUL.
+ * The arguments are separated by one space.  argv[0] is written as it is,
+ * in double quotes when it is empty or has a space or a tab (Windows reads
+ * the program's name up to the next quote, without backslash escapes, so
+ * a name with a double quote cannot be written).  Every other argument is
+ * written as it is when it is not empty and has no space, tab, newline,
+ * vertical tab or double quote; otherwise in double quotes, where a
+ * double quote is written after a backslash, the backslashes right before
+ * it are doubled, and the backslashes at the argument's end are doubled
+ * (the Microsoft C runtime's rules for parsing a command line).
+ * Returns 0, ERANGE (the line does not fit; line then holds an empty
+ * string), or EINVAL (argv or argv[0] NULL, argv[0] with a double quote,
+ * line NULL, size 0).
+ */
+int keiui_win32_command_line(const char *const *argv, char *line, size_t size);
 
 #endif

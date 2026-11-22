@@ -9,6 +9,12 @@
  * The clipboard on Windows: text as CF_UNICODETEXT (UTF-16 with its NUL,
  * in GMEM_MOVEABLE memory the clipboard then owns), converted from and to
  * UTF-8 with wide.h.  The window's frame owns what it copies.
+ *
+ * Windows has no primary selection (the text last selected, pasted with
+ * the middle button).  The application keeps its own: what one of its
+ * windows selects is the primary selection of all of them, which the
+ * others hear of (KL_WINDOW_SELECTION); other programs neither see it nor
+ * set it.
  */
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
@@ -72,6 +78,107 @@ kl_window_can_paste(
 	available = IsClipboardFormatAvailable(CF_UNICODETEXT);
 	if (!available)
 		return 0;
+	return 1;
+}
+
+/*
+ * Makes the selected text the application's primary selection (its own
+ * copy); without memory the old one stays.
+ */
+void
+kl_window_select(
+	struct kl_window *window,
+	const char *text,
+	size_t length)
+{
+	struct kl_window_event *input;
+	struct kl_window *other;
+	struct kl_app *app;
+	char *copy;
+
+	/* A window, and text. */
+	if (window == NULL || (text == NULL && length != 0U))
+		return;
+	app = window->app;
+
+	/* The copy, which replaces the old one. */
+	copy = malloc(length + 1U);
+	if (copy == NULL)
+		return;
+	if (length != 0U)
+		memcpy(copy, text, length);
+	copy[length] = '\0';
+	free(app->primary);
+	app->primary = copy;
+	app->primary_length = length;
+
+	/* The application's other windows hear that it changed, and that it has text. */
+	for (other = app->windows; other != NULL; other = other->next) {
+		if (other == window)
+			continue;
+
+		/* The change, as the compositor would tell it. */
+		input = keiui_win32_push(other, KL_WINDOW_SELECTION);
+		if (input == NULL)
+			continue;
+		input->code = KL_SELECTION_PRIMARY;
+		input->pressed = 1;
+	}
+}
+
+/*
+ * Reads the application's primary selection into text (size bytes, not
+ * ended with a NUL).  Returns its length, 0 when there is none.
+ */
+size_t
+kl_window_paste_primary(
+	struct kl_window *window,
+	char *text,
+	size_t size)
+{
+	size_t length;
+
+	/* A window and room. */
+	if (window == NULL || text == NULL)
+		return 0U;
+
+	/* As much of the selection as fits. */
+	length = window->app->primary_length;
+	if (length > size)
+		length = size;
+	if (length != 0U)
+		memcpy(text, window->app->primary, length);
+
+	/* Succeeded: the bytes copied. */
+	return length;
+}
+
+/*
+ * Tells whether the window's own text is a selection (KL_SELECTION_*): the
+ * primary selection always is (it is the application's), the clipboard
+ * when the window's frame put the text there last.
+ */
+int
+kl_window_selection_own(
+	const struct kl_window *window,
+	unsigned which)
+{
+	HWND owner;
+
+	/* A window. */
+	if (window == NULL)
+		return 0;
+
+	/* The application's own primary selection. */
+	if (which == KL_SELECTION_PRIMARY)
+		return 1;
+
+	/* The clipboard's owner. */
+	owner = GetClipboardOwner();
+	if (owner != window->frame)
+		return 0;
+
+	/* Succeeded: the window copied what the clipboard has. */
 	return 1;
 }
 

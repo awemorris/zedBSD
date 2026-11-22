@@ -14,8 +14,9 @@
  * answers WM_NCHITTEST itself, so Windows still moves, resizes, snaps and
  * shows the snap layouts over the maximize button (HTMAXBUTTON).  This
  * module decides, for a point, what part of the window it is on, and where
- * the three caption buttons are.  Pure: no Windows header (the HT* values
- * are given here), no state; the tests run on the host.
+ * the three caption buttons are, and lays out the tabs a window's title
+ * bar shows.  Pure: no Windows header (the HT* values are given here), no
+ * state; the tests run on the host.
  *
  * Coordinates are the client area's physical pixels, x to the right and y
  * down from the window's top-left corner.  Lengths given "at 96 dpi" are
@@ -116,5 +117,78 @@ void keiui_win32_frame_buttons(const struct keiui_win32_frame *frame, struct kei
  * bits), the same for y.
  */
 unsigned keiui_win32_frame_hit(const struct keiui_win32_frame *frame, int32_t x, int32_t y);
+
+/* The tabs' lengths at 96 dpi. */
+#define KEIUI_WIN32_TAB_HEIGHT		26U	/* a tab, and the new tab's button (a square) */
+#define KEIUI_WIN32_TAB_MOST		200U	/* the widest a tab grows */
+#define KEIUI_WIN32_TAB_LEAST		72U	/* the narrowest a tab shrinks; past it tabs are left out */
+#define KEIUI_WIN32_TAB_GAP		2U	/* between two tabs, and before the new tab's button */
+#define KEIUI_WIN32_TAB_CLOSE		18U	/* a tab's close button (a square) */
+#define KEIUI_WIN32_TAB_CLOSE_INSET	5U	/* from the close button to the tab's right edge */
+
+/* What a point of the tab strip is on (keiui_win32_tabs_at). */
+#define KEIUI_WIN32_TAB_NONE		0xFFFFFFFFU	/* no tab, no button */
+#define KEIUI_WIN32_TAB_PART_BODY	0U		/* a tab (to choose it) */
+#define KEIUI_WIN32_TAB_PART_CLOSE	1U		/* a tab's close button */
+#define KEIUI_WIN32_TAB_PART_NEW	2U		/* the new tab's button */
+
+/*
+ * The room the tabs are laid out in: the title bar's part from left to
+ * right (physical pixels, right not included) and its height, the dpi,
+ * how many tabs there are, which is active (count or more: none), and
+ * whether the new tab's button follows them.
+ */
+struct keiui_win32_tab_strip {
+	int32_t left;
+	int32_t right;
+	uint32_t caption;
+	unsigned dpi;
+	unsigned count;
+	unsigned active;
+	int new_button;
+};
+
+/*
+ * Where one tab goes: the tab, its close button (empty when it has none),
+ * and whether it is shown (0: it did not fit; both rectangles empty).
+ */
+struct keiui_win32_tab_place {
+	struct keiui_win32_rect tab;
+	struct keiui_win32_rect close;
+	int shown;
+};
+
+/*
+ * Lays out the tabs of a title bar.
+ *
+ * The tabs share the room less the new tab's button (KEIUI_WIN32_TAB_HEIGHT
+ * square and a gap, when asked for): each is the room's share less a gap,
+ * at most KEIUI_WIN32_TAB_MOST and at least KEIUI_WIN32_TAB_LEAST (scaled).
+ * When even the least width is too much for all of them, as many as fit
+ * are shown, from the first, or from the one that keeps the active tab the
+ * last shown when it would not be among them; the others are not shown.
+ * The tabs and the button are KEIUI_WIN32_TAB_HEIGHT (scaled) tall and in
+ * the middle of the caption's height; the button follows the last tab
+ * shown (or starts the strip when none is).  A tab whose closable[index]
+ * is not 0 has a close button of KEIUI_WIN32_TAB_CLOSE (scaled) at its
+ * right, KEIUI_WIN32_TAB_CLOSE_INSET (scaled) from its edge, in the middle
+ * of its height.
+ * strip, places (count of them) and new_place NULL, or closable NULL with
+ * tabs: nothing is written and strip's left is returned.  new_place is
+ * empty without the button.
+ * Returns where the strip ends (the right edge of the button, or of the
+ * last tab shown; left when nothing is shown).
+ */
+int32_t keiui_win32_tabs_layout(const struct keiui_win32_tab_strip *strip, const int *closable, struct keiui_win32_tab_place *places, struct keiui_win32_rect *new_place);
+
+/*
+ * Tells what a point is on among the tabs laid out: a tab's close button
+ * (part KEIUI_WIN32_TAB_PART_CLOSE), a tab (KEIUI_WIN32_TAB_PART_BODY), or
+ * the new tab's button (KEIUI_WIN32_TAB_PART_NEW, and the index count).
+ * Returns the tab's index, count for the button, or KEIUI_WIN32_TAB_NONE
+ * (part not written).  NULL places with count above 0, or NULL part:
+ * KEIUI_WIN32_TAB_NONE.
+ */
+unsigned keiui_win32_tabs_at(const struct keiui_win32_tab_place *places, unsigned count, const struct keiui_win32_rect *new_place, int32_t x, int32_t y, unsigned *part);
 
 #endif
