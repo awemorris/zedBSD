@@ -1136,6 +1136,22 @@ admin_middle(
 	int index;
 	int moved;
 
+	/*
+	 * Every signal as by default first, so that a SIGTERM meant for
+	 * sessiond never runs sessiond's handler here; then none blocked
+	 * (SIGPIPE, which sessiond ignores, is the program's again).
+	 */
+	for (signal_number = 1; signal_number < NSIG; signal_number++) {
+		if (signal_number == SIGKILL || signal_number == SIGSTOP)
+			continue;
+		(void)signal(signal_number, SIG_DFL);
+	}
+	sigemptyset(&empty);
+	(void)sigprocmask(SIG_SETMASK, &empty, NULL);
+
+	/* Its own session, away from sessiond's. */
+	(void)setsid();
+
 	/* The authentication log's socket goes with the others; the runner opens its own. */
 	closelog();
 
@@ -1176,18 +1192,12 @@ admin_middle(
 	/* Every other descriptor goes. */
 	(void)closefrom(ADMIN_FD_COUNT);
 
-	/* Its own session, no signal blocked, every signal as by default (SIGPIPE ignored by sessiond too). */
-	(void)setsid();
-	sigemptyset(&empty);
-	(void)sigprocmask(SIG_SETMASK, &empty, NULL);
-	for (signal_number = 1; signal_number < NSIG; signal_number++) {
-		if (signal_number == SIGKILL || signal_number == SIGSTOP)
-			continue;
-		(void)signal(signal_number, SIG_DFL);
-	}
+	/* Whether a connection is lent, for the runner to give up its own copy. */
+	display = 0;
+	if (table[ADMIN_FD_DISPLAY] >= 0)
+		display = 1;
 
 	/* The runner, left to init once this child ends. */
-	display = table[ADMIN_FD_DISPLAY] >= 0;
 	runner = fork();
 	if (runner < 0)
 		_exit(1);
