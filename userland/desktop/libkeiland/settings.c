@@ -790,11 +790,13 @@ settings_app_change(
 	if (error != 0)
 		return error;
 
-	/* The value in effect: the one asked for, none for a prefix row's key, or the default of a row's. */
+	/* The value in effect: the one asked for, none for a prefix row's key, empty for a path's or a text's, or the default of a row's. */
 	if (value != NULL) {
 		settings_cache_set(&settings->cache, key, value, 0U, 1U);
 	} else if ((found->flags & KL_SETTINGS_KEY_PREFIX) != 0U) {
 		settings_cache_set(&settings->cache, key, "", 0U, 0U);
+	} else if (found->type == KL_SETTINGS_TYPE_PATH || found->type == KL_SETTINGS_TYPE_TEXT) {
+		settings_cache_set(&settings->cache, key, "", KL_SETTINGS_DEFAULT, 1U);
 	} else {
 		(void)snprintf(fallback, sizeof(fallback), "%d", found->fallback);
 		settings_cache_set(&settings->cache, key, fallback, KL_SETTINGS_DEFAULT, 1U);

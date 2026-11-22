@@ -287,6 +287,12 @@ Keys pane:
   fingerprint, and a button that removes the line (asked once more); the
   file is written whole without it.
 
+zedBSD's terminal has the same tab with its own files and settings in place
+of the folder's: `~/.ssh/`, and Font, Fallback font, Columns, Rows and TERM
+kept in the desktop's settings ([Terminal](terminal.md), section 3). The
+settings that only connections have (`ConnectTimeout`, `WslPort`, `Connect`)
+are mikuterm's alone.
+
 ## 8. Menus
 
 mikuterm has the menus of zedBSD's terminal, with these differences:

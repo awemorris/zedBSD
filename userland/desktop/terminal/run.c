@@ -456,6 +456,14 @@ run_start(
 	/* The font, at the screen's scale, which sets the cell's size. */
 	run->operation = "terminal_font_open";
 	status = terminal_font_open(&run_font, options->font, options->companion, run_font_pixels(run, pixels));
+
+	/* A font that cannot be opened gives way to the program's own, when it has one. */
+	if (status != 0 && options->font_default != NULL) {
+		printf("ZTERM FONT font=refused error=%d\n", status);
+		status = terminal_font_open(&run_font, options->font_default, options->companion, run_font_pixels(run, pixels));
+	}
+
+	/* Without a font there is no grid. */
 	if (status != 0) {
 		errno = status;
 		return -1;

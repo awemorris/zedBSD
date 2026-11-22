@@ -74,14 +74,19 @@ struct terminal_connector {
 	void *data;
 };
 
+/* The longest terminal type a process connector gives its shells, with its NUL. */
+#define TERMINAL_TERM_MAX	64U
+
 /*
  * A connector that runs a shell on a pseudo-terminal for each tab
  * (connection-process.c): /bin/sh, or the shell running a command when
- * one is given.
+ * one is given, with term as its TERM ("xterm" unless the program changes
+ * it; a tab opened after a change takes the new one).
  */
 struct terminal_process_connector {
 	struct terminal_connector connector;
 	const char *command;
+	char term[TERMINAL_TERM_MAX];
 };
 
 void terminal_process_connector_init(struct terminal_process_connector *process, const char *command);

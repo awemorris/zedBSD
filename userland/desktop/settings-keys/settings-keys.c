@@ -47,6 +47,10 @@
  * half that time.
  * power.lock is the minutes without input before a login session locks
  * its screen (0 never, which it is unless chosen).
+ * terminal.font and terminal.fallback-font are the font files the
+ * terminal draws with (empty: its own), terminal.columns and
+ * terminal.rows the grid its window opens with, and terminal.term the
+ * TERM its shells are given (empty: xterm).
  */
 static const struct kl_settings_key settings_keys[] = {
 	{ "wallpaper", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_PATH, 0, 0, 0, KL_SETTINGS_KEY_KEPT },
@@ -83,6 +87,11 @@ static const struct kl_settings_key settings_keys[] = {
 	{ "terminal.font-size", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 8, 32, 16, 0U },
 	{ "terminal.theme", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2, 0, 0U },
 	{ "terminal.copy-on-select", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, 0U },
+	{ "terminal.font", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_PATH, 0, 0, 0, 0U },
+	{ "terminal.fallback-font", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_PATH, 0, 0, 0, 0U },
+	{ "terminal.columns", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 1, 240, 90, 0U },
+	{ "terminal.rows", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 1, 100, 28, 0U },
+	{ "terminal.term", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_TEXT, 0, 0, 0, 0U },
 	{ "files.column-width.kind", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.size", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
 	{ "files.column-width.modified", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_INT, 0, 2000, 0, 0U },
@@ -222,6 +231,10 @@ kl_settings_key_check(
 		/* Succeeded: the path may be given. */
 		return 0;
 	}
+
+	/* A text is any well-formed value. */
+	if (key->type == KL_SETTINGS_TYPE_TEXT)
+		return 0;
 
 	/* A number or a Boolean is a whole number. */
 	error = keys_parse(value, &parsed);
