@@ -72,7 +72,7 @@ hosts opens them as well.  The sidebar has four panes (Ctrl+Down or
 Ctrl+Page Down shows the next one, Ctrl+Up or Ctrl+Page Up the one before;
 Tab moves between a pane's fields and buttons):
 
-  Hosts       ssh\config, edited in place.  Save writes it and checks it as
+  Hosts       ssh/config, edited in place.  Save writes it and checks it as
               a connection reads it, naming a line it cannot use.  It takes
               effect from the next connection.
   Appearance  the text's size, the theme and the ambiguous width take effect
@@ -82,25 +82,26 @@ Tab moves between a pane's fields and buttons):
               timeout from the next connection; the host of the first tab
               when mikuterm starts again.
   Keys        makes an ed25519 key, shows a key's public key (Copy Public
-              Key), and lists ssh\known_hosts, each line with a button that
+              Key), and lists ssh/known_hosts, each line with a button that
               removes it (after a host's key was replaced).
 
-What takes effect at once is kept in config\state.conf.  The rest is written
-into config\mikuterm.conf in place of its line; your other lines and
+What takes effect at once is kept in config/state.conf.  The rest is written
+into config/mikuterm.conf in place of its line; your other lines and
 comments stay as you wrote them.
 
 A key from the Keys pane: Name (id_ed25519 unless you choose another),
-Comment, and a passphrase typed twice (or none).  Make Key writes ssh\<name>
-and ssh\<name>.pub in OpenSSH's form, as ssh-keygen -t ed25519 writes them;
+Comment, and a passphrase typed twice (or none).  Make Key writes ssh/<name>
+and ssh/<name>.pub in OpenSSH's form, as ssh-keygen -t ed25519 writes them;
 with a passphrase the private key is encrypted as ssh-keygen encrypts it.  A
 key that is there already is never written over: choose another name.  Only
 your Windows account may open the new private key file.  Copy Public Key puts
 the line of the .pub on the clipboard: add it to the host's
 ~/.ssh/authorized_keys.  A key of another name than id_ed25519 is used for a
-host whose lines in ssh\config name it (IdentityFile ~/.ssh/<name>).
+host whose lines in ssh/config name it (IdentityFile ~/.ssh/<name>).
 
-The settings tab is drawn at the screen's pixels: on a screen scaled above
-100 percent its words are smaller than the window's.
+The settings tab names the folder's files with / (ssh/config is the
+folder's ssh\config; Windows reads both).  It follows the screen's scale,
+as the window's text does.
 
 
 4. Your key and ssh\config

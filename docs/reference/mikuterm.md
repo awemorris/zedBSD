@@ -200,35 +200,41 @@ of libkeiland's widgets with a sidebar of four panes; Ctrl+Down or Ctrl+Page
 Down shows the next pane and Ctrl+Up or Ctrl+Page Up the one before, Tab moves
 between a pane's controls. Ctrl+Up and Ctrl+Down are the keys that work in
 zedBSD's terminal as well, whose desktop takes Ctrl+Page Up and Ctrl+Page Down
-for the titlebar's tabs. The page
-is drawn at the screen's pixels (it does not follow the screen's scale).
+for the titlebar's tabs. The page follows the window's scale (the monitor's
+dpi), as the grid does.
+
+Each card's rows put their labels in one column, as wide as the pane's widest
+label (within a least and a most), and the row's field, switch or buttons right
+after it; a field is at most 420 units (pixels at 100 %) wide, so a wide window
+does not stretch it. The tab names the folder's files with `/` (`ssh/config`
+is the folder's `ssh\config`; Windows reads both), as the table below does.
 
 | Pane | Setting | Takes effect | Kept in |
 | --- | --- | --- | --- |
-| Hosts | `ssh\config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh\config` |
-| Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config\state.conf` |
-| Appearance | `Font`, `FontFallback` (a file in `fonts\` or `share\fonts\`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config\mikuterm.conf` |
-| Behavior | copy-on-select | at once | `config\state.conf` |
-| Behavior | `Term`, `ConnectTimeout` | the next connection | `config\mikuterm.conf` |
-| Behavior | `Connect` | the next start | `config\mikuterm.conf` |
-| Keys | a new key, a key's public key, `ssh\known_hosts` | at once | `ssh\` |
+| Hosts | `ssh/config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh/config` |
+| Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
+| Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
+| Behavior | copy-on-select | at once | `config/state.conf` |
+| Behavior | `Term`, `ConnectTimeout` | the next connection | `config/mikuterm.conf` |
+| Behavior | `Connect` | the next start | `config/mikuterm.conf` |
+| Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
 
 Keys pane:
 
-- Name: the key's file name in `ssh\` (letters, digits, `.`, `_`, `-`; not
+- Name: the key's file name in `ssh/` (letters, digits, `.`, `_`, `-`; not
   starting with `.` or ending with `.pub`; `id_ed25519` by default). When a
   key of the name is there, its public key line and SHA256 fingerprint are
   shown (from `NAME.pub`, or from the private key file's public half), with
   Copy Public Key.
 - Otherwise Comment (`user@computer` by default), Passphrase and Again, and
   Make Key: a new `ssh-ed25519` key from the system's random generator
-  (`BCryptGenRandom`), written as `ssh\NAME` (OpenSSH's private key format;
+  (`BCryptGenRandom`), written as `ssh/NAME` (OpenSSH's private key format;
   with a passphrase encrypted with `aes256-ctr` under the `bcrypt` KDF, a
-  16-byte salt and 24 rounds, as `ssh-keygen` writes it) and `ssh\NAME.pub`
+  16-byte salt and 24 rounds, as `ssh-keygen` writes it) and `ssh/NAME.pub`
   (the one-line public key). A file of either name that is there is never
   written over. The private key file is made with a protected access list
   that gives only the user who runs mikuterm access to it.
-- Known hosts: each line of `ssh\known_hosts` with its names, key type and
+- Known hosts: each line of `ssh/known_hosts` with its names, key type and
   fingerprint, and a button that removes the line (asked once more); the
   file is written whole without it.
 

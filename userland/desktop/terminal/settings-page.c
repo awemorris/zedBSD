@@ -79,6 +79,30 @@
 #define PAGE_CARD_FOOT		12
 #define PAGE_NOTE_LINE		18
 
+/*
+ * A row's text inside a card: how far in from the card's left edge it
+ * starts (a card's padding, as kl_row draws its label) and its size.
+ */
+#define PAGE_INSET		20
+#define PAGE_TEXT_ROW		14U
+
+/*
+ * The label column of a pane's rows, from a row's text to its control: the
+ * widest label of the pane and the gap after it, within a least and a most,
+ * and in a narrow window at most a share of the row.  Then the widest a
+ * field stands (a wide window does not stretch it), and the room between a
+ * control and the words after it.
+ */
+#define PAGE_LABEL_GAP		24
+#define PAGE_LABEL_MIN		96
+#define PAGE_LABEL_MAX		220
+#define PAGE_LABEL_SHARE	0.4f
+#define PAGE_FIELD_MAX		420
+#define PAGE_AFTER_GAP		12
+
+/* The widest a known host's words are drawn, its removal's button after them. */
+#define PAGE_KNOWN_LINE	520
+
 /* The lowest the ssh_config's text area stands, and the most lines of a note. */
 #define PAGE_AREA_MIN		220
 #define PAGE_NOTE_LINES	4
@@ -155,6 +179,9 @@ struct page_state {
 	int dirty;
 	int moving;
 
+	/* The label column of the pane drawn (page_column), in units. */
+	int column;
+
 	/* The pane's scroll, its viewport and how tall its content was drawn. */
 	struct kl_scroll scroll;
 	int scroll_made;
@@ -218,6 +245,11 @@ static const unsigned page_sizes[PAGE_SIZES] = { TERMINAL_PIXELS_SMALL, TERMINAL
 static const char *const page_size_names[PAGE_SIZES] = { "Small", "Medium", "Large", "Huge" };
 static const uint32_t page_size_actions[PAGE_SIZES] = { TERMINAL_ACTION_SIZE_SMALL, TERMINAL_ACTION_SIZE_MEDIUM, TERMINAL_ACTION_SIZE_LARGE, TERMINAL_ACTION_SIZE_HUGE };
 
+/* The labels of the rows each pane draws itself, which its label column is measured for (with the program's settings in it). */
+static const char *const page_appearance_labels[] = { "Text size", "Size", "Theme", "Ambiguous width", "Font file" };
+static const char *const page_behavior_labels[] = { "Copy on select" };
+static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
+
 /* What each effect is called where a card says when its settings take effect. */
 static const char *const page_effect_titles[2] = { "From the next connection", "From the next start" };
 
@@ -242,6 +274,11 @@ static void page_key_make(void);
 static void page_known_read(void);
 static void page_known_remove(void);
 static int page_card(const struct kl_rect *rect, const char *title, const char *subtitle);
+static void page_column(unsigned pane, const char *const *labels, unsigned count);
+static int page_value_x(int left, int width);
+static int page_label(int top, int left, int width, const char *label, int last);
+static int page_control_width(int left, int width, int x);
+static void page_row_text(int x, int top, int right, const char *text);
 static int page_field_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field, const char *placeholder);
 static int page_note(int top, int left, int width, const char *text, kl_color ink);
 static int page_note_height(int width, const char *text);
@@ -930,9 +967,13 @@ page_appearance(
 	unsigned index;
 	unsigned flags;
 	int value_x;
+	int right;
 	int pressed;
 	int wide;
 	int y;
+
+	/* The pane's label column. */
+	page_column(TERMINAL_PANE_APPEARANCE, page_appearance_labels, sizeof(page_appearance_labels) / sizeof(page_appearance_labels[0]));
 
 	/* The card of what takes effect at once: the size, the theme and the width, then a note. */
 	theme = page.style.theme;
@@ -941,27 +982,30 @@ page_appearance(
 	card.width = width;
 	card.height = PAGE_CARD_SUBTITLED + 4 * PAGE_ROW + page_note_height(width - 40, "Ambiguous-width characters already on the screen keep their width.") + PAGE_CARD_FOOT;
 	y = page_card(&card, "At once", "The text's size, the colours and the width of ambiguous characters");
-	value_x = card.x + 20 + (int)((float)(card.width - 40) * 0.34f);
+	right = card.x + card.width - PAGE_INSET;
 
-	/* The text's size: smaller and larger, and its value. */
-	(void)snprintf(value, sizeof(value), "%u pixels", state->pixels);
-	(void)kl_row(&page.style, card.x, y, card.width, "Text size", value, 0);
+	/* The text's size: smaller and larger after its label, then its value. */
+	value_x = page_label(y, card.x, card.width, "Text size", 0);
+	control.x = value_x;
 	control.y = y + (PAGE_ROW - theme->control_height) / 2;
 	control.height = theme->control_height;
-	control.width = kl_button_width(&page.style, "Larger");
-	control.x = card.x + card.width - 20 - control.width;
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_LARGER, &control, "Larger", 0U);
-	if (pressed)
-		page_action(window, TERMINAL_ACTION_ZOOM_IN);
 	control.width = kl_button_width(&page.style, "Smaller");
-	control.x -= control.width + 8;
 	pressed = kl_button(page.ui, &page.style, PAGE_ID_SMALLER, &control, "Smaller", 0U);
 	if (pressed)
 		page_action(window, TERMINAL_ACTION_ZOOM_OUT);
+
+	/* Larger beside Smaller, and the size in use after them. */
+	control.x += control.width + 6;
+	control.width = kl_button_width(&page.style, "Larger");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_LARGER, &control, "Larger", 0U);
+	if (pressed)
+		page_action(window, TERMINAL_ACTION_ZOOM_IN);
+	(void)snprintf(value, sizeof(value), "%u pixels", state->pixels);
+	page_row_text(control.x + control.width + PAGE_AFTER_GAP, y, right, value);
 	y += PAGE_ROW;
 
 	/* The fixed sizes of View > Text Size, the one in use marked. */
-	(void)kl_row(&page.style, card.x, y, card.width, "Size", "", 0);
+	value_x = page_label(y, card.x, card.width, "Size", 0);
 	control.x = value_x;
 	control.y = y + (PAGE_ROW - theme->control_height) / 2;
 	for (index = 0U; index < PAGE_SIZES; index++) {
@@ -979,7 +1023,7 @@ page_appearance(
 	y += PAGE_ROW;
 
 	/* The theme, the one in use marked. */
-	(void)kl_row(&page.style, card.x, y, card.width, "Theme", "", 0);
+	value_x = page_label(y, card.x, card.width, "Theme", 0);
 	control.x = value_x;
 	for (index = 0U; index < TERMINAL_THEMES; index++) {
 		flags = 0U;
@@ -996,12 +1040,13 @@ page_appearance(
 	/* The switch's row under the themes. */
 	y += PAGE_ROW;
 
-	/* The ambiguous width: a switch. */
-	(void)kl_row(&page.style, card.x, y, card.width, "Ambiguous width", "Wide (two cells, as in East Asian text)", 1);
+	/* The ambiguous width: a switch, and what it does after it. */
+	value_x = page_label(y, card.x, card.width, "Ambiguous width", 1);
 	wide = state->ambiguous_wide;
-	pressed = kl_switch(page.ui, &page.style, PAGE_ID_AMBIGUOUS, card.x + card.width - 20 - theme->switch_width, y + (PAGE_ROW - theme->switch_height) / 2, &wide, 0U);
+	pressed = kl_switch(page.ui, &page.style, PAGE_ID_AMBIGUOUS, value_x, y + (PAGE_ROW - theme->switch_height) / 2, &wide, 0U);
 	if (pressed)
 		page_action(window, TERMINAL_ACTION_AMBIGUOUS_WIDE);
+	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, y, right, "Wide (two cells, as in East Asian text)");
 	y += PAGE_ROW;
 	(void)page_note(y, card.x + 20, card.width - 40, "Ambiguous-width characters already on the screen keep their width.", theme->text_secondary);
 
@@ -1011,7 +1056,8 @@ page_appearance(
 		card.y = y;
 		card.height = PAGE_CARD_TITLE + PAGE_ROW + page_note_height(width - 40, "The font is chosen with --font when the terminal starts.") + PAGE_CARD_FOOT;
 		y = page_card(&card, "Font", NULL);
-		(void)kl_row(&page.style, card.x, y, card.width, "Font file", page.program->font, 1);
+		value_x = page_label(y, card.x, card.width, "Font file", 1);
+		page_row_text(value_x, y, card.x + card.width - PAGE_INSET, page.program->font);
 		(void)page_note(y + PAGE_ROW, card.x + 20, card.width - 40, "The font is chosen with --font when the terminal starts.", theme->text_secondary);
 		return card.y + card.height;
 	}
@@ -1034,9 +1080,13 @@ page_behavior(
 {
 	const struct kl_theme *theme;
 	struct kl_rect card;
+	int value_x;
 	int changed;
 	int on;
 	int y;
+
+	/* The pane's label column. */
+	page_column(TERMINAL_PANE_BEHAVIOR, page_behavior_labels, sizeof(page_behavior_labels) / sizeof(page_behavior_labels[0]));
 
 	/* The card of what takes effect at once. */
 	theme = page.style.theme;
@@ -1046,12 +1096,13 @@ page_behavior(
 	card.height = PAGE_CARD_TITLE + PAGE_ROW + page_note_height(width - 40, "Off, only Edit > Copy puts the selected text on the clipboard.") + PAGE_CARD_FOOT;
 	y = page_card(&card, "At once", NULL);
 
-	/* Copy-on-select: a switch. */
-	(void)kl_row(&page.style, card.x, y, card.width, "Copy on select", "The selected text goes to the clipboard", 1);
+	/* Copy-on-select: a switch, and what it does after it. */
+	value_x = page_label(y, card.x, card.width, "Copy on select", 1);
 	on = state->copy_on_select;
-	changed = kl_switch(page.ui, &page.style, PAGE_ID_COPY_SELECT, card.x + card.width - 20 - theme->switch_width, y + (PAGE_ROW - theme->switch_height) / 2, &on, 0U);
+	changed = kl_switch(page.ui, &page.style, PAGE_ID_COPY_SELECT, value_x, y + (PAGE_ROW - theme->switch_height) / 2, &on, 0U);
 	if (changed)
 		page_action(window, TERMINAL_ACTION_COPY_ON_SELECT);
+	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, y, card.x + card.width - PAGE_INSET, "The selected text goes to the clipboard");
 	(void)page_note(y + PAGE_ROW, card.x + 20, card.width - 40, "Off, only Edit > Copy puts the selected text on the clipboard.", theme->text_secondary);
 
 	/* The program's own settings of the connections. */
@@ -1162,6 +1213,9 @@ page_keys(
 	int same;
 	int y;
 
+	/* The pane's label column. */
+	page_column(TERMINAL_PANE_KEYS, page_key_labels, sizeof(page_key_labels) / sizeof(page_key_labels[0]));
+
 	/* The key named looked up whenever its name changed. */
 	theme = page.style.theme;
 	same = strcmp(page.key_shown, page.key_name.text);
@@ -1248,6 +1302,7 @@ page_known(
 	int baseline;
 	int pressed;
 	int confirm;
+	int words;
 	int y;
 
 	/* The colours and sizes of the page's widgets. */
@@ -1275,6 +1330,11 @@ page_known(
 	if (page.known_count == 0U)
 		y = page_note(y, card.x + 20, card.width - 40, "No server is known yet.", theme->text_secondary);
 
+	/* How wide a line's words are drawn: the card's row, no wider than the most, the removal's button after them. */
+	words = card.width - 80;
+	if (words > PAGE_KNOWN_LINE)
+		words = PAGE_KNOWN_LINE;
+
 	/* Each line: its names and type, its fingerprint, and the removal's button. */
 	for (index = 0U; index < page.known_count; index++) {
 		line = &page.known[index];
@@ -1283,12 +1343,12 @@ page_known(
 		else
 			(void)snprintf(text, sizeof(text), "%s", line->names);
 		baseline = kl_text_center(theme->text_body, y, PAGE_ROW / 2) + 2;
-		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline, text, theme->text_body, 0, card.width - 80, theme->text);
+		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline, text, theme->text_body, 0, words, theme->text);
 		(void)snprintf(text, sizeof(text), "%s  %s", line->type, line->fingerprint);
-		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline + PAGE_ROW / 2 - 2, text, theme->text_small, 0, card.width - 80, theme->text_secondary);
+		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline + PAGE_ROW / 2 - 2, text, theme->text_small, 0, words, theme->text_secondary);
 		control.width = 28;
 		control.height = 28;
-		control.x = card.x + card.width - 20 - control.width;
+		control.x = card.x + 20 + words + PAGE_AFTER_GAP;
 		control.y = y + (PAGE_ROW - control.height) / 2;
 		pressed = kl_icon_button(page.ui, &page.style, PAGE_ID_KNOWN_REMOVE, index, &control, KL_ICON_TRASH, 16, KL_BUTTON_QUIET);
 		if (pressed) {
@@ -1727,6 +1787,136 @@ page_card(
 	return top;
 }
 
+/*
+ * Sets the label column of the pane about to be drawn for the labels of
+ * its own rows and of the program's settings in it: the widest label and
+ * the gap after it, within the least and the most.
+ */
+static void
+page_column(
+	unsigned pane,
+	const char *const *labels,
+	unsigned count)
+{
+	const struct terminal_page_item *item;
+	unsigned index;
+	int widest;
+	int width;
+
+	/* The widest of the pane's own labels. */
+	widest = 0;
+	for (index = 0U; index < count; index++) {
+		width = kl_text_width(&page.text, labels[index], strlen(labels[index]), PAGE_TEXT_ROW, 0);
+
+		/* A wider label widens the column. */
+		if (width > widest)
+			widest = width;
+	}
+
+	/* And of the program's settings the pane shows. */
+	for (index = 0U; index < page.program->item_count; index++) {
+		item = &page.program->items[index];
+
+		/* A setting of another pane is not in this one. */
+		if (item->pane != pane)
+			continue;
+
+		/* A wider label widens the column. */
+		width = kl_text_width(&page.text, item->label, strlen(item->label), PAGE_TEXT_ROW, 0);
+		if (width > widest)
+			widest = width;
+	}
+
+	/* The column: the widest label and the gap, within the least and the most. */
+	page.column = widest + PAGE_LABEL_GAP;
+	if (page.column < PAGE_LABEL_MIN)
+		page.column = PAGE_LABEL_MIN;
+	if (page.column > PAGE_LABEL_MAX)
+		page.column = PAGE_LABEL_MAX;
+}
+
+/* Reports where a row's control starts in a card: after the pane's label column, which a narrow card holds to a share of its row. */
+static int
+page_value_x(
+	int left,
+	int width)
+{
+	int column;
+	int most;
+
+	/* The pane's column, no more than its share of a narrow row. */
+	column = page.column;
+	most = (int)((float)(width - 2 * PAGE_INSET) * PAGE_LABEL_SHARE);
+	if (column > most)
+		column = most;
+
+	/* Reports the control's edge. */
+	return left + PAGE_INSET + column;
+}
+
+/*
+ * Draws a row's label, quiet, in the pane's label column, with the line
+ * under the row unless it is the last (kl_row's); reports where the row's
+ * control starts.
+ */
+static int
+page_label(
+	int top,
+	int left,
+	int width,
+	const char *label,
+	int last)
+{
+	int baseline;
+	int value_x;
+	int room;
+
+	/* The row's line, without kl_row's own columns of a label and a value. */
+	(void)kl_row(&page.style, left, top, width, "", "", last);
+
+	/* The label, fitted to its column. */
+	value_x = page_value_x(left, width);
+	room = value_x - left - PAGE_INSET - PAGE_AFTER_GAP;
+	baseline = kl_text_center(PAGE_TEXT_ROW, top, PAGE_ROW);
+	(void)kl_text_draw_fit(&page.text, &page.canvas, left + PAGE_INSET, baseline, label, PAGE_TEXT_ROW, 0, room, page.style.theme->text_secondary);
+
+	/* Reports the control's edge. */
+	return value_x;
+}
+
+/* Reports how wide a field starting at x in a card's row stands: to the row's right, at most PAGE_FIELD_MAX. */
+static int
+page_control_width(
+	int left,
+	int width,
+	int x)
+{
+	int room;
+
+	/* The room to the row's right, no more than the most. */
+	room = left + width - PAGE_INSET - x;
+	if (room > PAGE_FIELD_MAX)
+		room = PAGE_FIELD_MAX;
+
+	/* Reports the width. */
+	return room;
+}
+
+/* Draws a row's words (a value, or what a switch does) from x, fitted to the right edge given. */
+static void
+page_row_text(
+	int x,
+	int top,
+	int right,
+	const char *text)
+{
+	int baseline;
+
+	/* The words, plain, on the row's line. */
+	baseline = kl_text_center(PAGE_TEXT_ROW, top, PAGE_ROW);
+	(void)kl_text_draw_fit(&page.text, &page.canvas, x, baseline, text, PAGE_TEXT_ROW, 0, right - x, page.style.theme->text);
+}
+
 /* Draws a row of a label and a field; reports the edge below it. */
 static int
 page_field_row(
@@ -1742,15 +1932,14 @@ page_field_row(
 	struct kl_rect control;
 	int value_x;
 
-	/* The label, quiet, in the row. */
+	/* The label in the pane's column. */
 	theme = page.style.theme;
-	(void)kl_row(&page.style, left, top, width, label, "", 1);
+	value_x = page_label(top, left, width, label, 1);
 
-	/* The field in the value's column. */
-	value_x = left + 20 + (int)((float)(width - 40) * 0.34f);
+	/* The field after it, no wider than the most. */
 	control.x = value_x;
 	control.y = top + (PAGE_ROW - theme->control_height) / 2;
-	control.width = left + width - 20 - value_x;
+	control.width = page_control_width(left, width, value_x);
 	control.height = theme->control_height;
 	(void)kl_field(page.ui, &page.style, id, &control, field, placeholder);
 
