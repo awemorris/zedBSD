@@ -313,6 +313,79 @@ ssh_sha256(
 }
 
 /*
+ * Hashes size bytes at data into out (64 bytes) with SHA-512 in one call.
+ *
+ * Returns 0 or EIO.
+ */
+int
+ssh_sha512(
+	const void *data,
+	size_t size,
+	uint8_t *out)
+{
+	unsigned int digest_size;
+	int status;
+
+	/* Hashes the bytes in one call of the library. */
+	digest_size = 0U;
+	status = EVP_Digest(data, size, out, &digest_size, EVP_sha512(), NULL);
+	if (status != 1 || digest_size != SSH_SHA512_SIZE) {
+		ssh_wipe(out, SSH_SHA512_SIZE);
+		return EIO;
+	}
+
+	/* Succeeded: out holds the digest. */
+	return 0;
+}
+
+/*
+ * XORs size bytes with the AES-256-CTR keystream of key and iv.
+ *
+ * Returns 0, EINVAL, ENOMEM or EIO.
+ */
+int
+ssh_aes256_ctr(
+	const uint8_t *key,
+	const uint8_t *iv,
+	const uint8_t *in,
+	uint8_t *out,
+	size_t size)
+{
+	EVP_CIPHER_CTX *context;
+	int written;
+	int status;
+
+	/* Refuses a length the library's int cannot carry. */
+	if (size > (size_t)INT_MAX)
+		return EINVAL;
+
+	/* Makes the cipher context. */
+	context = EVP_CIPHER_CTX_new();
+	if (context == NULL)
+		return ENOMEM;
+
+	/* Sets up AES-256-CTR with the key and the first counter block. */
+	status = EVP_CipherInit_ex(context, EVP_aes_256_ctr(), NULL, key, iv, 1);
+	if (status != 1) {
+		EVP_CIPHER_CTX_free(context);
+		ssh_wipe(out, size);
+		return EIO;
+	}
+
+	/* Applies the keystream; every byte given is written. */
+	written = 0;
+	status = EVP_CipherUpdate(context, out, &written, in, (int)size);
+	EVP_CIPHER_CTX_free(context);
+	if (status != 1 || written != (int)size) {
+		ssh_wipe(out, size);
+		return EIO;
+	}
+
+	/* Succeeded: out holds the transformed bytes. */
+	return 0;
+}
+
+/*
  * Computes the Ed25519 public key (32 bytes) of a 32-byte seed (RFC 8032
  * 5.1.5): EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519) and
  * EVP_PKEY_get_raw_public_key.  Returns 0 or EIO.

@@ -18,7 +18,8 @@
  * The library functions each operation uses are named in its comment, so
  * that the set this file needs is known: RAND_bytes, OPENSSL_cleanse,
  * CRYPTO_memcmp; EVP_MD_CTX_new, EVP_MD_CTX_free, EVP_DigestInit_ex,
- * EVP_DigestUpdate, EVP_DigestFinal_ex, EVP_sha256; EVP_PKEY_new_raw_
+ * EVP_DigestUpdate, EVP_DigestFinal_ex, EVP_sha256, EVP_Digest,
+ * EVP_sha512; EVP_PKEY_new_raw_
  * private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_new_raw_public_key_ex,
  * EVP_PKEY_get_raw_public_key, EVP_PKEY_free, EVP_DigestSignInit,
  * EVP_DigestSign, EVP_DigestVerifyInit, EVP_DigestVerify;
@@ -27,7 +28,8 @@
  * EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer, EVP_PKEY_derive,
  * EVP_PKEY_encapsulate_init, EVP_PKEY_encapsulate,
  * EVP_PKEY_decapsulate_init, EVP_PKEY_decapsulate; EVP_CIPHER_CTX_new,
- * EVP_CIPHER_CTX_free, EVP_CipherInit_ex, EVP_CipherUpdate, EVP_chacha20;
+ * EVP_CIPHER_CTX_free, EVP_CipherInit_ex, EVP_CipherUpdate, EVP_chacha20,
+ * EVP_aes_256_ctr;
  * EVP_MAC_fetch, EVP_MAC_free, EVP_MAC_CTX_new, EVP_MAC_CTX_free,
  * EVP_MAC_init, EVP_MAC_update, EVP_MAC_final.
  *
@@ -44,6 +46,13 @@
 
 /* The SHA-256 digest size in bytes (FIPS 180-4). */
 #define SSH_SHA256_SIZE		32U
+
+/* The SHA-512 digest size in bytes (FIPS 180-4). */
+#define SSH_SHA512_SIZE		64U
+
+/* The AES-256 key and block sizes in bytes (FIPS 197). */
+#define SSH_AES256_KEY		32U
+#define SSH_AES_BLOCK		16U
 
 /* The Ed25519 sizes in bytes (RFC 8032 5.1.5, 5.1.6). */
 #define SSH_ED25519_SEED	32U
@@ -137,6 +146,24 @@ void ssh_sha256_free(struct ssh_sha256 *hash);
 
 /* Hashes size bytes at data into out (32 bytes) in one call.  Returns 0, ENOMEM or EIO. */
 int ssh_sha256(const void *data, size_t size, uint8_t *out);
+
+/*
+ * Hashes size bytes at data into out (64 bytes) with SHA-512 in one call
+ * (EVP_Digest with EVP_sha512); data may be NULL only when size is 0.
+ * Returns 0 or EIO (out wiped).
+ */
+int ssh_sha512(const void *data, size_t size, uint8_t *out);
+
+/*
+ * XORs size bytes of in with the AES-256-CTR keystream of a 32-byte key
+ * and the 16-byte first counter block iv into out (NIST SP 800-38A 6.5,
+ * the counter block incremented as one 128-bit big-endian integer):
+ * EVP_CIPHER_CTX_new, EVP_CipherInit_ex with EVP_aes_256_ctr,
+ * EVP_CipherUpdate, EVP_CIPHER_CTX_free.  in and out may be the same
+ * buffer.  Returns 0, EINVAL (size over INT_MAX), ENOMEM or EIO (out
+ * wiped).
+ */
+int ssh_aes256_ctr(const uint8_t *key, const uint8_t *iv, const uint8_t *in, uint8_t *out, size_t size);
 
 /*
  * Computes the Ed25519 public key (32 bytes) of a 32-byte seed (RFC 8032

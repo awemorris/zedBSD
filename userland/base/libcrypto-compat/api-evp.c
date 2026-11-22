@@ -6,8 +6,9 @@
  */
 
 /*
- * The public EVP digest, cipher and MAC functions.  The ciphers are
- * ChaCha20 and AES-256-CBC without padding (NIST SP 800-38A 6.2).
+ * The public EVP digest, cipher and MAC functions.  The digests are
+ * SHA-256 and SHA-512; the ciphers are ChaCha20, AES-256-CBC without
+ * padding (NIST SP 800-38A 6.2) and AES-256-CTR (6.5).
  *
  * A function that fails queues exactly one error of the EVP library
  * (a null argument, an argument that must be NULL, an unsupported
@@ -50,6 +51,18 @@ static const struct evp_md_st sha256_object = {
 };
 
 /*
+ * The SHA-512 algorithm object.
+ *
+ * EVP_sha512 returns this one constant object.  Only the plain digest
+ * functions accept it; the signing, verification and MAC paths compare
+ * against sha256_object and so refuse it.  Never written.
+ */
+static const struct evp_md_st sha512_object = {
+	CRYC_HASH_SHA512,
+	64
+};
+
+/*
  * The ChaCha20 algorithm object.
  *
  * EVP_chacha20 returns this one constant object, and a cipher is only
@@ -67,6 +80,17 @@ static const struct evp_cipher_st chacha20_object = {
  * mode exactly when its cipher pointer is this one.  Never written.
  */
 static const struct evp_cipher_st aes256_cbc_object = {
+	32,
+	16
+};
+
+/*
+ * The AES-256-CTR algorithm object.
+ *
+ * EVP_aes_256_ctr returns this one constant object; a context is in CTR
+ * mode exactly when its cipher pointer is this one.  Never written.
+ */
+static const struct evp_cipher_st aes256_ctr_object = {
 	32,
 	16
 };
@@ -103,6 +127,15 @@ static int cipher_cbc_update(EVP_CIPHER_CTX *ctx, unsigned char *out, int *out_l
 /* Encrypts or decrypts one 16-byte block in CBC mode, chaining it (NIST SP 800-38A 6.2). */
 static void cipher_cbc_block(EVP_CIPHER_CTX *ctx, const uint8_t *in, unsigned char *out);
 
+/* Sets up AES-256-CTR on a context, as EVP_CipherInit_ex describes. */
+static int cipher_ctr_init(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, const unsigned char *key, const unsigned char *iv, int enc);
+
+/* XORs size bytes with the AES-256-CTR keystream, continuing it (NIST SP 800-38A 6.5). */
+static int cipher_ctr_update(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in, size_t size);
+
+/* Adds 1 to the 128-bit big-endian counter block, modulo 2^128. */
+static void cipher_ctr_increment(uint8_t *counter);
+
 /*
  * Returns the SHA-256 digest algorithm (a constant object).
  */
@@ -114,8 +147,18 @@ EVP_sha256(void)
 }
 
 /*
- * Returns a digest's output size in bytes (32 for SHA-256), or -1 for
- * NULL.
+ * Returns the SHA-512 digest algorithm (a constant object).
+ */
+const EVP_MD *
+EVP_sha512(void)
+{
+	/* The one constant SHA-512 object. */
+	return &sha512_object;
+}
+
+/*
+ * Returns a digest's output size in bytes (32 for SHA-256, 64 for
+ * SHA-512), or -1 for NULL.
  */
 int
 EVP_MD_get_size(
@@ -169,8 +212,8 @@ EVP_MD_CTX_free(
 }
 
 /*
- * Starts a digest with type (EVP_sha256 only; impl NULL), discarding what
- * ctx held.
+ * Starts a digest with type (EVP_sha256 or EVP_sha512; impl NULL),
+ * discarding what ctx held.
  */
 int
 EVP_DigestInit_ex(
@@ -198,8 +241,8 @@ EVP_DigestInit_ex(
 		return 0;
 	}
 
-	/* Refuses every algorithm but SHA-256. */
-	if (type != &sha256_object) {
+	/* Refuses every algorithm but SHA-256 and SHA-512. */
+	if (type != &sha256_object && type != &sha512_object) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_UNSUPPORTED_ALGORITHM);
 		return 0;
 	}
@@ -210,7 +253,7 @@ EVP_DigestInit_ex(
 	/* Wipes the previous computation, which may have absorbed secret data. */
 	cryc_wipe(&ctx->hash, sizeof(ctx->hash));
 
-	/* Starts the SHA-256 computation. */
+	/* Starts the computation of the digest asked for. */
 	error = cryc_hash_init(&ctx->hash, type->hash);
 	if (error != 0) {
 		ctx->mode = CRYC_MD_NONE;
@@ -271,6 +314,8 @@ EVP_DigestFinal_ex(
 	unsigned char *md,
 	unsigned int *size)
 {
+	const EVP_MD *type;
+
 	/* Refuses a missing context. */
 	if (ctx == NULL) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
@@ -290,15 +335,16 @@ EVP_DigestFinal_ex(
 	}
 
 	/* Finishes the digest into the caller's buffer; the hash state is wiped by the finish. */
+	type = ctx->md;
 	cryc_hash_final(&ctx->hash, (uint8_t *)md);
 
 	/* The context is finished: it needs EVP_DigestInit_ex before it is used again. */
 	ctx->mode = CRYC_MD_NONE;
 	ctx->md = NULL;
 
-	/* Reports the digest size when the caller asked for it. */
+	/* Reports the size of the digest that was finished when the caller asked for it. */
 	if (size != NULL)
-		*size = (unsigned int)sha256_object.size;
+		*size = (unsigned int)type->size;
 
 	/* Succeeded: md holds the digest. */
 	return 1;
@@ -371,8 +417,8 @@ EVP_Digest(
 		return 0;
 	}
 
-	/* Refuses every algorithm but SHA-256. */
-	if (type != &sha256_object) {
+	/* Refuses every algorithm but SHA-256 and SHA-512. */
+	if (type != &sha256_object && type != &sha512_object) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_UNSUPPORTED_ALGORITHM);
 		return 0;
 	}
@@ -424,6 +470,17 @@ EVP_aes_256_cbc(void)
 {
 	/* The one constant AES-256-CBC object. */
 	return &aes256_cbc_object;
+}
+
+/*
+ * Returns the AES-256-CTR cipher (a constant object): 32-byte key, 16-byte
+ * IV (the first counter block), a stream of bytes.
+ */
+const EVP_CIPHER *
+EVP_aes_256_ctr(void)
+{
+	/* The one constant AES-256-CTR object. */
+	return &aes256_ctr_object;
 }
 
 /*
@@ -494,10 +551,11 @@ EVP_CipherInit_ex(
 		return 0;
 	}
 
-	/* Refuses every cipher but ChaCha20 and AES-256-CBC. */
+	/* Refuses every cipher but ChaCha20, AES-256-CBC and AES-256-CTR. */
 	if (cipher != NULL &&
 	    cipher != &chacha20_object &&
-	    cipher != &aes256_cbc_object) {
+	    cipher != &aes256_cbc_object &&
+	    cipher != &aes256_ctr_object) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_UNSUPPORTED_ALGORITHM);
 		return 0;
 	}
@@ -514,8 +572,14 @@ EVP_CipherInit_ex(
 		return done;
 	}
 
-	/* A context that held AES-256-CBC starts afresh as ChaCha20. */
-	if (ctx->cipher == &aes256_cbc_object)
+	/* AES-256-CTR is set up on its own. */
+	if (cipher == &aes256_ctr_object || (cipher == NULL && ctx->cipher == &aes256_ctr_object)) {
+		done = cipher_ctr_init(ctx, cipher, key, iv, enc);
+		return done;
+	}
+
+	/* A context that held AES (CBC or CTR) starts afresh as ChaCha20. */
+	if (ctx->cipher == &aes256_cbc_object || ctx->cipher == &aes256_ctr_object)
 		cryc_wipe(ctx, sizeof(*ctx));
 
 	/* The context is for ChaCha20 from here on. */
@@ -583,6 +647,15 @@ EVP_CipherUpdate(
 		return done;
 	}
 
+	/* AES-256-CTR is a stream: every byte given is written. */
+	if (ctx->cipher == &aes256_ctr_object) {
+		done = cipher_ctr_update(ctx, out, in, (size_t)in_length);
+		if (done == 0)
+			return 0;
+		*out_length = in_length;
+		return 1;
+	}
+
 	/* Applies the keystream. */
 	done = cipher_stream(ctx, out, in, (size_t)in_length);
 	if (done == 0)
@@ -615,7 +688,7 @@ EVP_Cipher(
 		return -1;
 	}
 
-	/* Only ChaCha20 is applied without the length output. */
+	/* Only the stream ciphers are applied without the length output. */
 	if (ctx->cipher == &aes256_cbc_object) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
 		return -1;
@@ -625,6 +698,14 @@ EVP_Cipher(
 	if (length > (unsigned int)INT_MAX) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
 		return -1;
+	}
+
+	/* Applies the AES-256-CTR keystream. */
+	if (ctx->cipher == &aes256_ctr_object) {
+		done = cipher_ctr_update(ctx, out, in, (size_t)length);
+		if (done == 0)
+			return -1;
+		return (int)length;
 	}
 
 	/* Applies the keystream. */
@@ -1299,4 +1380,145 @@ cipher_cbc_block(
 
 	/* The work block held plaintext. */
 	cryc_wipe(work, sizeof(work));
+}
+
+/*
+ * Sets up AES-256-CTR: a named cipher starts the context afresh (no key,
+ * a zero counter block, no buffered keystream); then the key is expanded
+ * and the IV taken as the counter block.  A key or an IV drops the
+ * buffered keystream.
+ */
+static int
+cipher_ctr_init(
+	EVP_CIPHER_CTX *ctx,
+	const EVP_CIPHER *cipher,
+	const unsigned char *key,
+	const unsigned char *iv,
+	int enc)
+{
+	int error;
+
+	/* Expands the key first, so that a failure leaves the context as it was. */
+	if (key != NULL) {
+		error = cryc_aes_init(&ctx->aes, key, CRYC_AES256_KEY);
+		if (error != 0) {
+			cryc_err_put(CRYC_LIB_EVP, CRYC_R_INTERNAL_ERROR);
+			return 0;
+		}
+	}
+
+	/* A named cipher starts afresh: everything but a new key is forgotten. */
+	if (cipher != NULL) {
+		cryc_wipe(ctx->key, sizeof(ctx->key));
+		cryc_wipe(ctx->keystream, sizeof(ctx->keystream));
+		cryc_wipe(ctx->chain, sizeof(ctx->chain));
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->counter = 0;
+		cryc_wipe(ctx->nonce, sizeof(ctx->nonce));
+		ctx->available = 0U;
+		ctx->partial_size = 0U;
+		ctx->key_set = CIPHER_KEY_NONE;
+		ctx->encrypt = 1;
+		ctx->padding = 0;
+		if (key == NULL)
+			cryc_aes_clear(&ctx->aes);
+		ctx->cipher = &aes256_ctr_object;
+	}
+
+	/* The key is ready; the buffered keystream belonged to the old one. */
+	if (key != NULL) {
+		ctx->key_set = CIPHER_KEY_READY;
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->partial_size = 0U;
+	}
+
+	/* The IV is the next counter block; the buffered keystream belonged to the old one. */
+	if (iv != NULL) {
+		memcpy(ctx->chain, iv, CRYC_AES_BLOCK);
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->partial_size = 0U;
+	}
+
+	/* The direction is only recorded: CTR encrypts and decrypts alike. */
+	if (enc == 1)
+		ctx->encrypt = 1;
+	else if (enc == 0)
+		ctx->encrypt = 0;
+
+	/* Succeeded: the context holds what was given. */
+	return 1;
+}
+
+/*
+ * XORs size bytes of in with the keystream into out (NIST SP 800-38A 6.5:
+ * O_j = CIPH_K(T_j), the counter blocks T_j following one another by the
+ * increment of cipher_ctr_increment).  The unused end of the last block
+ * of keystream is kept in partial[16 - partial_size .. 15] for the next
+ * call; chain holds the next counter block.
+ */
+static int
+cipher_ctr_update(
+	EVP_CIPHER_CTX *ctx,
+	unsigned char *out,
+	const unsigned char *in,
+	size_t size)
+{
+	size_t index;
+	size_t offset;
+
+	/* Refuses a context without a key. */
+	if (ctx->key_set == CIPHER_KEY_NONE) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_OPERATION_NOT_INITIALIZED);
+		return 0;
+	}
+
+	/* No bytes: nothing to do. */
+	if (size == 0U)
+		return 1;
+
+	/* Refuses missing buffers. */
+	if (in == NULL || out == NULL) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
+		return 0;
+	}
+
+	/* Each byte takes the next byte of keystream, a new block being made when the buffered one is used up. */
+	for (index = 0U; index < size; index++) {
+		/* Encrypts the counter block into a new block of keystream and moves to the next counter block. */
+		if (ctx->partial_size == 0U) {
+			cryc_aes_encrypt_blocks(&ctx->aes, ctx->chain, ctx->partial, 1U);
+			cipher_ctr_increment(ctx->chain);
+			ctx->partial_size = CRYC_AES_BLOCK;
+		}
+
+		/* XORs the byte with the first unused byte of keystream. */
+		offset = CRYC_AES_BLOCK - ctx->partial_size;
+		out[index] = (unsigned char)(in[index] ^ ctx->partial[offset]);
+		ctx->partial_size--;
+	}
+
+	/* Succeeded: the bytes are transformed and the keystream position is advanced. */
+	return 1;
+}
+
+/*
+ * Adds 1 to the 16-byte counter block taken as one big-endian integer,
+ * modulo 2^128.  The carry is carried through every byte whatever its
+ * value, so the time does not depend on the counter.
+ */
+static void
+cipher_ctr_increment(
+	uint8_t *counter)
+{
+	unsigned carry;
+	unsigned sum;
+	size_t index;
+
+	/* Adds the carry from the last byte to the first. */
+	carry = 1U;
+	for (index = CRYC_AES_BLOCK; index > 0U; index--) {
+		sum = (unsigned)counter[index - 1U] + carry;
+		counter[index - 1U] = (uint8_t)(sum & 0xFFU);
+		carry = sum >> 8;
+	}
 }

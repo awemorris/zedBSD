@@ -75,7 +75,7 @@ struct x509_store_ctx_st {
 	int depth;
 };
 
-/* The digest algorithm: only SHA-256. */
+/* A digest algorithm: SHA-256 or SHA-512 (told apart by the constant object's address). */
 struct evp_md_st {
 	enum cryc_hash_id hash;
 	int size;
@@ -98,7 +98,7 @@ struct evp_md_ctx_st {
 #define CRYC_MD_SIGN	2
 #define CRYC_MD_VERIFY	3
 
-/* A cipher algorithm: ChaCha20 or AES-256-CBC (told apart by the constant object's address). */
+/* A cipher algorithm: ChaCha20, AES-256-CBC or AES-256-CTR (told apart by the constant object's address). */
 struct evp_cipher_st {
 	int key_size;
 	int iv_size;
@@ -116,6 +116,10 @@ struct evp_cipher_st {
  * ciphertext block, partial[0 .. partial_size - 1] the bytes of an
  * incomplete block kept for the next call, encrypt the direction (1
  * encrypts, 0 decrypts), padding 1 while padding is on.
+ *
+ * AES-256-CTR: aes is the expanded key, chain the next counter block,
+ * partial[16 - partial_size .. 15] the unused rest of the current
+ * keystream block.
  *
  * Secret, all of it but the sizes and the flags.
  */
