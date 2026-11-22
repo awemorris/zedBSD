@@ -243,6 +243,7 @@ main_read_conf(
 	struct mikuterm_conf *conf)
 {
 	char path[MIKUTERM_PATH_MAX];
+	char shown[sizeof(MAIN_CONF)];
 	char *text;
 	size_t size;
 	int error;
@@ -258,7 +259,8 @@ main_read_conf(
 	if (error == ENOENT)
 		return;
 	if (error != 0) {
-		(void)snprintf(conf->problems, sizeof(conf->problems), "config\\mikuterm.conf could not be read (errno %d).\r\n", error);
+		mikuterm_path_shown(MAIN_CONF, shown, sizeof(shown));
+		(void)snprintf(conf->problems, sizeof(conf->problems), "%s could not be read (errno %d).\r\n", shown, error);
 		return;
 	}
 

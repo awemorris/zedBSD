@@ -10,7 +10,7 @@
  * library's known_hosts check answers: the names a host goes by in
  * known_hosts ([host]:port for a port other than 22, in lower case), the
  * line that holds the key a changed host had, the other names the same
- * key is known by, and how a file of the folder is named on the screen.
+ * key is known by, and how a path is named on the screen.
  *
  * The known_hosts text is OpenSSH's (sshd(8) SSH_KNOWN_HOSTS FILE
  * FORMAT): one "[marker] names key-type key [comment]" a line.  As the
@@ -220,9 +220,12 @@ mikuterm_known_hosts_scan(
 }
 
 /*
- * Writes how a file of the folder is named to the user: its path inside
- * the folder ("ssh\known_hosts") when it is there, its whole path
- * otherwise, with backslashes either way.
+ * Writes a path as the user is shown it, the one way every path mikuterm
+ * shows goes: its part inside the folder ("ssh/known_hosts") when it is
+ * there, as it is otherwise (a name already inside the folder, such as
+ * "ssh/config", or a path elsewhere on Windows), with slashes between its
+ * names either way.  Windows takes a slash as a backslash, so a path shown
+ * can be opened as it reads; the path mikuterm opens is not changed.
  */
 void
 mikuterm_path_shown(
@@ -247,12 +250,12 @@ mikuterm_path_shown(
 	     path[folder_length] == '/'))
 		inside = path + folder_length + 1U;
 
-	/* That part, with Windows' separators. */
+	/* That part, with slashes. */
 	(void)snprintf(shown, size, "%s", inside);
 	for (index = 0U; shown[index] != '\0'; index++) {
-		/* A slash is a backslash. */
-		if (shown[index] == '/')
-			shown[index] = '\\';
+		/* A backslash is a slash. */
+		if (shown[index] == '\\')
+			shown[index] = '/';
 	}
 }
 
