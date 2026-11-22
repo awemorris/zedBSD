@@ -1692,7 +1692,6 @@ flow_install(
 	unsigned count;
 	unsigned i;
 	uint64_t swap_bytes;
-	int desktop;
 	int error;
 
 	/* The disk; the request is large. */
@@ -1749,8 +1748,7 @@ flow_install(
 			error = flow_append(request, INST_REQUEST_MAX, &used, " %s", app->catalog.unit[i].name);
 	}
 
-	/* The user, the passwords, the automatic login (only with the desktop) and the hostname. */
-	desktop = inst_catalog_has(&app->catalog, "desktop");
+	/* The user, the passwords, the automatic login and the hostname. */
 	if (error == 0)
 		error = flow_field(request, INST_REQUEST_MAX, &used, "user", app->user.text);
 	if (error == 0)
@@ -1760,7 +1758,7 @@ flow_install(
 	if (error == 0)
 		error = flow_field(request, INST_REQUEST_MAX, &used, "root-password", app->root_password.text);
 	if (error == 0) {
-		if (app->autologin && desktop)
+		if (app->autologin)
 			error = flow_append(request, INST_REQUEST_MAX, &used, " autologin yes");
 		else
 			error = flow_append(request, INST_REQUEST_MAX, &used, " autologin no");

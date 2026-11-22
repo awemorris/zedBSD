@@ -1466,8 +1466,8 @@ target_home_rename(
 
 /*
  * Sets /etc/keiland/autologin to the user's name (or empties it): the
- * file is the desktop unit's, so without the desktop there is none, and
- * an automatic login is then refused with ENOENT.
+ * file is sessiond's, so without the desktop there is none, and an
+ * automatic login is then refused with ENOENT.
  */
 static int
 target_autologin(

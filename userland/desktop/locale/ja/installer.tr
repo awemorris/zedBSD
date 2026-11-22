@@ -403,8 +403,6 @@ msg	Root's password again	root のパスワード（確認）
 msg	Computer's name	コンピュータ名
 # userland/desktop/installer/screens.c:1792
 msg	Log in automatically	自動でログイン
-# userland/desktop/installer/screens.c:1810
-msg	Without the desktop the system starts at the console's login.	デスクトップが無い時は、システムはコンソールのログインで起動します。
 # userland/desktop/installer/screens.c:1815
 msg	The user is an administrator of the installed system (the wheel group).	このユーザはインストールしたシステムの管理者（wheel グループ）になります。
 # userland/desktop/installer/screens.c:1891

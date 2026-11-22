@@ -41,6 +41,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # The platform's defaults.mk alone: an empty file in place of the
+      # developer's config.mk.
+      - name: Build with the platform's defaults
+        run: |
+          : > "$RUNNER_TEMP/defaults-only.mk"
+          echo "CONFIGMK=$RUNNER_TEMP/defaults-only.mk" >> "$GITHUB_ENV"
+
       - name: Set up dependencies
         run: |
           sudo apt-get update
@@ -63,14 +70,14 @@ jobs:
 
       - name: Install the pinned toolchain from its cache
         run: |
-          make PLATFORM="$PLATFORM" toolchain-cached
-          make PLATFORM="$PLATFORM" toolchain
+          make PLATFORM="$PLATFORM" CONFIGMK="$CONFIGMK" toolchain-cached
+          make PLATFORM="$PLATFORM" CONFIGMK="$CONFIGMK" toolchain
 
       - name: Accept the firmware licenses
-        run: yes | make PLATFORM="$PLATFORM" firmware-licenses
+        run: yes | make PLATFORM="$PLATFORM" CONFIGMK="$CONFIGMK" firmware-licenses
 
       - name: Build the disk image
-        run: make -j4 PLATFORM="$PLATFORM" disk
+        run: make -j4 PLATFORM="$PLATFORM" CONFIGMK="$CONFIGMK" disk
 
       - name: Compress the disk image
         run: |
@@ -82,6 +89,56 @@ jobs:
         with:
           name: image-${{ matrix.platform }}
           path: artifacts/${{ matrix.artifact }}
+
+      # The installer's network install takes the system from the release's
+      # asset zedbsd-system-x86_64.tar: ustar, not compressed, of what
+      # mk/tools/installer-units.py writes (index, boot/ and units/), with the
+      # image's loader, kernel and logo.  The image's root is cut into two
+      # units: firmware, the files under /lib/firmware and the licences of
+      # the firmware packages (their registrations in userland/firmware),
+      # which the installer asks the person to agree to or leave out; and
+      # base, the rest.  The units are the build's VERSION, their files
+      # dated by the commit.
+      - name: Make the installer's system tarball
+        if: matrix.platform == 'x86_64'
+        run: |
+          build="build/$PLATFORM"
+          work="$RUNNER_TEMP/installer"
+          mkdir -p "$work" system
+          version=$(make -s --no-print-directory PLATFORM="$PLATFORM" CONFIGMK="$CONFIGMK" \
+            --eval 'ci-version: ; @echo $(VERSION)' ci-version | tail -n 1)
+          test -n "$version"
+          mtime=$(git log -1 --format=%ct)
+          firmware=$(sed -n 's/.*call USERLAND_PACKAGE,\([^,]*\),.*/\1/p' userland/firmware/*/Makefile)
+          (cd "$build/rootfs" && find . -mindepth 1 ! -path ./.stamp \( -type f -o -type l \) \
+            -printf '%P\tbase\t-\t%y\t%m\n') |
+            awk -F '\t' -v OFS='\t' -v names="$firmware" '
+              BEGIN { count = split(names, name, " "); for (i = 1; i <= count; i++) licence["usr/share/licenses/" name[i]] = 1 }
+              { split($1, part, "/") }
+              $1 ~ /^lib\/firmware\// || (part[1] "/" part[2] "/" part[3] "/" part[4]) in licence { $2 = "firmware" }
+              { print }' > "$work/manifest"
+          awk -F '\t' '$2 == "firmware" { found = 1 } END { exit !found }' "$work/manifest"
+          : > "$work/owners"
+          printf '%s\t%s\t%s\t%s\t%s\n' base - required 'Base System' base firmware - on Firmware firmware \
+            other - off 'Other packages' - > "$work/items"
+          python3 mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash.png "$work/logo.ppm"
+          python3 mk/tools/installer-units.py --manifest "$work/manifest" --owners "$work/owners" \
+            --tree "$build/rootfs" --items "$work/items" --version "$version" --mtime "$mtime" \
+            --boot "BOOTX64.EFI=esp:/EFI/BOOT/BOOTX64.EFI=$build/uefi/BOOTX64.EFI" \
+            --boot "vmunix=/boot/vmunix=$build/vmunix" \
+            --boot "logo.ppm=/boot/logo.ppm=$work/logo.ppm" \
+            --output "$work/payload"
+          tar --format=ustar --owner=0 --group=0 --numeric-owner --mode=go-w --mtime="@$mtime" --sort=name \
+            -cf system/zedbsd-system-x86_64.tar -C "$work/payload" index boot units
+          ls -l system/zedbsd-system-x86_64.tar
+
+      - name: Upload the installer's system tarball
+        if: matrix.platform == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-x86_64
+          path: system/zedbsd-system-x86_64.tar
+          if-no-files-found: error
 
   build-apps:
     name: Build mikuterm
@@ -139,6 +196,13 @@ jobs:
           merge-multiple: true
           path: artifacts
 
+      - name: Download the installer's system tarballs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: system-*
+          merge-multiple: true
+          path: artifacts
+
       - name: Download the apps
         uses: actions/download-artifact@v4
         with:
@@ -168,6 +232,8 @@ jobs:
             | Raspberry Pi 4 | Arm64   | Raspberry Pi 4   | `zedbsd-rpi4.img.gz`     | SD image      |
             | Raspberry Pi 5 | Arm64   | Raspberry Pi 5   | `zedbsd-rpi5.img.gz`     | SD image      |
             | VisionFive 2   | RISC-V  | VisionFive 2     | `zedbsd-vf2.img.gz`      | SD image      |
+
+            The installer of the x86_64 image installs `zedbsd-system-x86_64.tar` of a release that is not a prerelease.
             
             Retro Targets (X11 or console-only):
             | Image          | CPU     | Machine          | File                     | Description                   |
@@ -183,4 +249,5 @@ jobs:
 
           files: |
             artifacts/*.img.gz
+            artifacts/zedbsd-system-*.tar
             app-artifacts/*.zip
