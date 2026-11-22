@@ -61,3 +61,10 @@ msg	libavcodec
 msg	curl
 msg	Python
 msg	Other packages
+# Why the releases or the download of the system failed (flow.c flow_download_reason, drawn with kl_tr(reason)).
+msg	The download does not match the SHA-256 GitHub gives for the release. It was not used.
+msg	Stopped.
+msg	The release is no longer offered.
+msg	There is not enough memory to keep the downloaded system.
+msg	The answer about the releases could not be understood.
+msg	The releases could not be reached. Check the network connection, then try again.
