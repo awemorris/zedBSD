@@ -6,16 +6,11 @@
  */
 
 /*
- * The client side of one SSH connection as a state machine without I/O.
- *
- * Written from RFC 4253 section 10 (the service request), RFC 4252
- * sections 5 to 8 (the authentication requests and their answers), RFC
- * 4254 sections 5 and 6 (the session channel, its requests, its data and
- * its end), RFC 4254 section 8 and RFC 8160 (the terminal modes), and
- * ssh_config(5) of OpenSSH 10.5p1 (ServerAliveInterval,
- * ServerAliveCountMax, StrictHostKeyChecking, BatchMode).  The order of the
- * login and of the session is the one the ssh program follows; the
- * difference is that every wait is a state the engine returns from.
+ * The client side of one SSH connection as a state machine without I/O:
+ * the service request, the user authentication, the session channel with
+ * its terminal, and the keepalives.  The order of the login and of the
+ * session is the one the ssh program follows; the difference is that
+ * every wait is a state the engine returns from.
  */
 
 #include <stdlib.h>
@@ -2231,7 +2226,7 @@ engine_send_eof(
 /*
  * Sends a keepalive when the server has been silent for
  * ServerAliveInterval, and gives up after ServerAliveCountMax of them go
- * unanswered (ssh_config(5)).
+ * unanswered (ssh_config(5) of OpenSSH 10.5p1).
  */
 static int
 engine_keep_alive(
