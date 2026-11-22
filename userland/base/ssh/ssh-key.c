@@ -1448,15 +1448,18 @@ private_read_file(
 
 	/* A file in the clear has empty options (PROTOCOL.key 5); an encrypted one the salt and rounds of bcrypt; others are not supported. */
 	if (cipher_none && kdf_none) {
+		/* In the clear: the options of the KDF "none" are empty. */
 		if (options_size != 0)
 			return EINVAL;
 		file->encrypted = 0;
 	} else if (cipher_known && kdf_known) {
+		/* Encrypted: the salt and the rounds of bcrypt. */
 		error = private_read_kdf_options(options, options_size, file);
 		if (error != 0)
 			return error;
 		file->encrypted = 1;
 	} else {
+		/* Another cipher or KDF (aes256-gcm@openssh.com among them) is not supported. */
 		return ENOTSUP;
 	}
 
