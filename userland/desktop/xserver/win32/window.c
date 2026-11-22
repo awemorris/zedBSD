@@ -240,6 +240,7 @@ win32_surface_close(
 	struct x11_win32 *backend;
 	struct x11_surface **link;
 	struct x11_surface *other;
+	HWND focus;
 
 	/* Unlinks the surface from the backend's list. */
 	backend = context;
@@ -260,6 +261,11 @@ win32_surface_close(
 		if (other->owner == surface)
 			window_set_owner(other, NULL);
 	}
+
+	/* The keys held in a window that had the keyboard are let go, as its focus would. */
+	focus = GetFocus();
+	if (focus == surface->hwnd)
+		win32_input_release_keys(backend);
 
 	/* Destroys the window, whose messages no longer reach the surface. */
 	SetWindowLongPtrW(surface->hwnd, GWLP_USERDATA, 0);
