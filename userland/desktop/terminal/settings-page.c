@@ -83,11 +83,16 @@
 #define PAGE_AREA_MIN		220
 #define PAGE_NOTE_LINES	4
 
-/* The evdev codes of the keys the page answers itself: C, V and X with Control, Page Up and Page Down with Control. */
+/*
+ * The evdev codes of the keys the page answers itself: C, V and X with
+ * Control, and Up, Down, Page Up and Page Down with Control (the panes).
+ */
 #define PAGE_KEY_X		45U
 #define PAGE_KEY_C		46U
 #define PAGE_KEY_V		47U
+#define PAGE_KEY_UP		103U
 #define PAGE_KEY_PAGEUP	104U
+#define PAGE_KEY_DOWN		108U
 #define PAGE_KEY_PAGEDOWN	109U
 
 /* The spaces a tab of the ssh_config is shown as (the text area draws no tab). */
@@ -467,7 +472,12 @@ terminal_page_draw(
 	if (scrolled)
 		page.moving = 1;
 
-	/* The keys no widget took: Control with Page Up and Down shows the pane before or after, the others scroll the pane. */
+	/*
+	 * The keys no widget took: Control with Up or Page Up shows the pane
+	 * before, Control with Down or Page Down the pane after, the others
+	 * scroll the pane.  Up and Down are there for the desktops whose
+	 * titlebar takes Control with Page Up and Down for its tabs.
+	 */
 	for (;;) {
 		taken = kl_ui_take(page.ui, &event);
 		if (!taken)
@@ -477,14 +487,18 @@ terminal_page_draw(
 		if (event.kind != KL_EVENT_KEY)
 			continue;
 
-		/* Control with Page Up shows the pane before. */
-		if ((event.modifiers & KL_MOD_CTRL) != 0U && event.code == PAGE_KEY_PAGEUP) {
+		/* Control with Up or Page Up shows the pane before. */
+		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
+		    (event.code == PAGE_KEY_UP ||
+		     event.code == PAGE_KEY_PAGEUP)) {
 			page_pane((page.pane + TERMINAL_PANES - 1U) % TERMINAL_PANES);
 			continue;
 		}
 
-		/* Control with Page Down shows the pane after. */
-		if ((event.modifiers & KL_MOD_CTRL) != 0U && event.code == PAGE_KEY_PAGEDOWN) {
+		/* Control with Down or Page Down shows the pane after. */
+		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
+		    (event.code == PAGE_KEY_DOWN ||
+		     event.code == PAGE_KEY_PAGEDOWN)) {
 			page_pane((page.pane + 1U) % TERMINAL_PANES);
 			continue;
 		}
@@ -776,7 +790,7 @@ page_hosts(
 	(void)snprintf(subtitle, sizeof(subtitle), "%s", page.program->config_shown);
 	y = page_card(&card, "Hosts (ssh_config)", subtitle);
 
-	/* The text, or why it cannot be edited here. */
+	/* The text, or why it cannot be edited here; the area draws its placeholder on one line. */
 	control.x = card.x + 20;
 	control.y = y;
 	control.width = card.width - 40;
@@ -784,7 +798,7 @@ page_hosts(
 	if (page.config_large) {
 		(void)page_note(y, control.x, control.width, "The file is too large to edit here: edit it with a text editor.", theme->text_secondary);
 	} else {
-		(void)kl_text_area(page.ui, &page.style, PAGE_ID_CONFIG, &control, &page.config, "Host myserver\n    HostName myserver.example.org\n    User me");
+		(void)kl_text_area(page.ui, &page.style, PAGE_ID_CONFIG, &control, &page.config, "Host myserver, then its HostName, User and other lines");
 	}
 
 	/* Moves down past the area. */
