@@ -124,7 +124,7 @@ ghci_vk_command_route(
 	return 0;
 }
 
-/* Lets a command buffer's recording go, and the room its end made ready count no more. */
+/* Lets a command buffer's recording go, and takes the room its end made ready out of its device's count. */
 void
 ghci_vk_commands_release(
 	struct ghci_vk_object *object)
