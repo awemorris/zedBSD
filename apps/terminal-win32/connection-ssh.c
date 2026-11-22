@@ -340,18 +340,17 @@ session_ended(
 }
 
 /*
- * Says that the user asked the tab for the settings: the connection ends
- * and the tab becomes the settings' tab once it read everything.
+ * Says that the user asked the tab for the settings: the run opens them
+ * in a tab of their own (or chooses the one open), and this tab goes on.
  */
 void
 session_settings(
 	struct mikuterm_session *session)
 {
-	/* The end, for the settings. */
+	/* The request, for the tab's next post. */
 	kl_mutex_lock(&session->lock);
 
 	session->settings = 1;
-	session->ended = 1;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -438,6 +437,7 @@ connection_open(
 		length = sizeof(session->term) - 1U;
 	memcpy(session->term, connector->options.term, length);
 	session->connect_timeout = connector->options.connect_timeout;
+	session->wsl_port = connector->options.wsl_port;
 	if (!connector->first_opened) {
 		connection_copy(session->host, sizeof(session->host), connector->options.connect);
 		connection_copy(session->notice, sizeof(session->notice), connector->options.notice);
@@ -692,7 +692,7 @@ connection_event(
 	if ((uintptr_t)event->data != (uintptr_t)session->number)
 		return 0U;
 
-	/* The post is taken: the thread may post again, and everything there is now is read. */
+	/* The post is taken: the thread may post again, everything there is now is read, and a request for the settings is made once. */
 	kl_mutex_lock(&session->lock);
 
 	session->posted = 0;
@@ -703,6 +703,7 @@ connection_event(
 		ready |= TERMINAL_READY_EXIT;
 	if (session->settings)
 		ready |= TERMINAL_READY_SETTINGS;
+	session->settings = 0;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -721,7 +722,7 @@ connection_pending(
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
-	/* Output, and the end. */
+	/* Output, and the end (a request for the settings comes with the post alone). */
 	kl_mutex_lock(&session->lock);
 
 	ready = 0U;
@@ -729,8 +730,6 @@ connection_pending(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (session->ended)
 		ready |= TERMINAL_READY_EXIT;
-	if (session->settings)
-		ready |= TERMINAL_READY_SETTINGS;
 
 	kl_mutex_unlock(&session->lock);
 

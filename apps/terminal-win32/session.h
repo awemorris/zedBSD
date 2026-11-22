@@ -77,10 +77,11 @@ struct mikuterm_session {
 	/* What the thread waits on besides its socket: rung when the tab has something for it. */
 	struct kl_socket_waker *waker;
 
-	/* The host to connect to without asking (empty: ask), the TERM and the wait for a connection. */
+	/* The host to connect to without asking (empty: ask), the TERM, the wait for a connection and WSL's sshd port. */
 	char host[MIKUTERM_HOST_MAX];
 	char term[MIKUTERM_TERM_MAX];
 	unsigned connect_timeout;
+	unsigned wsl_port;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];
@@ -105,8 +106,14 @@ struct mikuterm_session {
 	/* A post is on its way and not taken yet: no other is made until the tab takes it. */
 	int posted;
 
-	/* The connection ended as the tab ends: the tab closes once it read everything (or becomes the settings' tab, settings). */
+	/* The connection ended as the tab ends: the tab closes once it read everything. */
 	int ended;
+
+	/*
+	 * The user asked for the settings: the tab's next post asks the run
+	 * for the settings' tab (opened beside this one, which goes on), and
+	 * the request is then taken.
+	 */
 	int settings;
 
 	/* The keys typed, for the thread to send; input_full says the tab was refused some. */
