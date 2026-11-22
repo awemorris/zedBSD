@@ -1,0 +1,1910 @@
+--- a/build/config/ozone.gni
++++ b/build/config/ozone.gni
+@@ -56,6 +56,9 @@
+   # Compile the 'wayland' platform.
+   ozone_platform_wayland = false
+ 
++  # Compile the 'keiland' platform (the Keiland desktop of zedBSD).
++  ozone_platform_keiland = false
++
+   if (ozone_auto_platforms) {
+     # Use headless as the default platform unless modified below.
+     ozone_platform = "headless"
+--- a/ui/ozone/BUILD.gn
++++ b/ui/ozone/BUILD.gn
+@@ -72,6 +72,11 @@
+   ozone_platform_test_deps += [ "platform/flatland:flatland_unittests" ]
+ }
+ 
++if (ozone_platform_keiland) {
++  ozone_platforms += [ "keiland" ]
++  ozone_platform_deps += [ "platform/keiland" ]
++}
++
+ platform_list_cc_file = "$target_gen_dir/platform_list.cc"
+ platform_list_h_file = "$target_gen_dir/platform_list.h"
+ platform_list_txt_file = "$target_gen_dir/platform_list.txt"
+--- /dev/null
++++ b/ui/ozone/platform/keiland/BUILD.gn
+@@ -0,0 +1,65 @@
++# Copyright 2026 The Chromium Authors and zedBSD Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//gpu/vulkan/features.gni")
++
++visibility = [ "//ui/ozone/*" ]
++
++# The Ozone platform of the Keiland desktop: a window of libkeiland
++# (kl_window, its own Wayland connection) for the window, its input and its
++# CPU frames, and the window's wl_surface for the GPU's own Vulkan swapchain.
++source_set("keiland") {
++  sources = [
++    "client_native_pixmap_factory_keiland.cc",
++    "client_native_pixmap_factory_keiland.h",
++    "keiland_event_reader.cc",
++    "keiland_event_reader.h",
++    "keiland_screen.cc",
++    "keiland_screen.h",
++    "keiland_surface_factory.cc",
++    "keiland_surface_factory.h",
++    "keiland_window.cc",
++    "keiland_window.h",
++    "keiland_window_manager.cc",
++    "keiland_window_manager.h",
++    "ozone_platform_keiland.cc",
++    "ozone_platform_keiland.h",
++  ]
++
++  defines = [ "OZONE_IMPLEMENTATION" ]
++
++  deps = [
++    "//base",
++    "//components/viz/common/resources:shared_image_format",
++    "//gpu/vulkan:buildflags",
++    "//skia",
++    "//ui/base",
++    "//ui/base/cursor",
++    "//ui/base/ime",
++    "//ui/display",
++    "//ui/events",
++    "//ui/events:dom_keycode_converter",
++    "//ui/events/ozone/layout",
++    "//ui/events/platform",
++    "//ui/gfx",
++    "//ui/gfx/geometry",
++    "//ui/ozone:ozone_base",
++    "//ui/ozone/common",
++    "//ui/platform_window",
++  ]
++
++  # libkeiland and libwayland-client of the target's sysroot.
++  libs = [
++    "keiland",
++    "wayland-client",
++  ]
++
++  if (enable_vulkan) {
++    sources += [
++      "vulkan_implementation_keiland.cc",
++      "vulkan_implementation_keiland.h",
++    ]
++    deps += [ "//gpu/vulkan" ]
++  }
++}
+--- /dev/null
++++ b/ui/ozone/platform/keiland/client_native_pixmap_factory_keiland.cc
+@@ -0,0 +1,15 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/client_native_pixmap_factory_keiland.h"
++
++#include "ui/ozone/common/stub_client_native_pixmap_factory.h"
++
++namespace ui {
++
++gfx::ClientNativePixmapFactory* CreateClientNativePixmapFactoryKeiland() {
++  return CreateStubClientNativePixmapFactory();
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/client_native_pixmap_factory_keiland.h
+@@ -0,0 +1,19 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_CLIENT_NATIVE_PIXMAP_FACTORY_KEILAND_H_
++#define UI_OZONE_PLATFORM_KEILAND_CLIENT_NATIVE_PIXMAP_FACTORY_KEILAND_H_
++
++namespace gfx {
++class ClientNativePixmapFactory;
++}
++
++namespace ui {
++
++// No native pixmaps: buffers are shared as shared memory.
++gfx::ClientNativePixmapFactory* CreateClientNativePixmapFactoryKeiland();
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_CLIENT_NATIVE_PIXMAP_FACTORY_KEILAND_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_event_reader.cc
+@@ -0,0 +1,153 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/keiland_event_reader.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <unistd.h>
++
++#include <wayland-client.h>
++
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/posix/eintr_wrapper.h"
++
++namespace ui {
++
++KeilandEventReader::KeilandEventReader(
++    wl_display* display,
++    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
++    base::RepeatingClosure dispatch,
++    base::OnceClosure broken)
++    : display_(display),
++      task_runner_(std::move(task_runner)),
++      dispatch_(std::move(dispatch)),
++      broken_(std::move(broken)),
++      done_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
++            base::WaitableEvent::InitialState::NOT_SIGNALED),
++      thread_("KeilandEventReader") {}
++
++KeilandEventReader::~KeilandEventReader() {
++  StopReading();
++}
++
++bool KeilandEventReader::StartReading() {
++  if (pipe(wake_) != 0) {
++    PLOG(ERROR) << "pipe";
++    return false;
++  }
++  for (int fd : wake_) {
++    fcntl(fd, F_SETFD, FD_CLOEXEC);
++    fcntl(fd, F_SETFL, O_NONBLOCK);
++  }
++  if (!thread_.Start()) {
++    StopReading();
++    return false;
++  }
++  // The thread's one task: the loop runs until StopReading wakes it.
++  thread_.task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&KeilandEventReader::Read, base::Unretained(this)));
++  return true;
++}
++
++void KeilandEventReader::DispatchDone() {
++  done_.Signal();
++}
++
++void KeilandEventReader::StopReading() {
++  stopping_ = true;
++  if (wake_[1] >= 0) {
++    char byte = 0;
++    (void)HANDLE_EINTR(write(wake_[1], &byte, 1));
++  }
++  done_.Signal();
++  // base::Thread may be joined on the window's thread.
++  thread_.Stop();
++  for (int& fd : wake_) {
++    if (fd >= 0) {
++      close(fd);
++      fd = -1;
++    }
++  }
++}
++
++bool KeilandEventReader::RequestDispatch() {
++  if (stopping_) {
++    return false;
++  }
++  task_runner_->PostTask(FROM_HERE, dispatch_);
++  done_.Wait();
++  return !stopping_;
++}
++
++bool KeilandEventReader::Flush(int fd) {
++  while (wl_display_flush(display_) < 0) {
++    if (errno != EAGAIN) {
++      return false;
++    }
++    struct pollfd fds[2] = {{fd, POLLOUT, 0}, {wake_[0], POLLIN, 0}};
++    if (HANDLE_EINTR(poll(fds, 2, -1)) < 0 || fds[1].revents) {
++      return false;
++    }
++  }
++  return true;
++}
++
++void KeilandEventReader::Read() {
++  const int fd = wl_display_get_fd(display_);
++  bool failed = false;
++
++  while (!stopping_) {
++    // Events already queued for the window: let the window take them first.
++    if (wl_display_prepare_read(display_) != 0) {
++      if (!RequestDispatch()) {
++        break;
++      }
++      continue;
++    }
++
++    if (!Flush(fd)) {
++      wl_display_cancel_read(display_);
++      failed = !stopping_;
++      break;
++    }
++
++    struct pollfd fds[2] = {{fd, POLLIN, 0}, {wake_[0], POLLIN, 0}};
++    if (HANDLE_EINTR(poll(fds, 2, -1)) < 0) {
++      wl_display_cancel_read(display_);
++      failed = true;
++      break;
++    }
++    if (fds[1].revents) {
++      wl_display_cancel_read(display_);
++      break;
++    }
++    if (fds[0].revents & POLLIN) {
++      if (wl_display_read_events(display_) < 0) {
++        failed = true;
++        break;
++      }
++    } else {
++      wl_display_cancel_read(display_);
++      if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
++        failed = true;
++        break;
++      }
++    }
++
++    if (!RequestDispatch()) {
++      break;
++    }
++  }
++
++  if (failed && !stopping_ && broken_) {
++    LOG(ERROR) << "The connection to the Keiland compositor broke.";
++    task_runner_->PostTask(FROM_HERE, std::move(broken_));
++  }
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_event_reader.h
+@@ -0,0 +1,76 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_KEILAND_EVENT_READER_H_
++#define UI_OZONE_PLATFORM_KEILAND_KEILAND_EVENT_READER_H_
++
++#include <atomic>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/synchronization/waitable_event.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/threading/thread.h"
++
++struct wl_display;
++
++namespace ui {
++
++// Reads a window's Wayland connection on a thread of its own and asks the
++// window's thread to dispatch what came.
++//
++// The window's connection is shared with the GPU's Vulkan swapchain, which
++// reads it on its own event queue; libwayland lets several threads read one
++// connection when each announces its read (wl_display_prepare_read).  This
++// thread announces the reads of the default queue, the window's: when events
++// wait in it, or once the connection has been read, it posts `dispatch` to
++// the window's thread and waits until the window calls DispatchDone(), so
++// that the window's own dispatch (kl_window_dispatch) never runs alongside
++// this thread's read.  `broken` is posted once the connection fails.
++class KeilandEventReader {
++ public:
++  KeilandEventReader(wl_display* display,
++                     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
++                     base::RepeatingClosure dispatch,
++                     base::OnceClosure broken);
++
++  KeilandEventReader(const KeilandEventReader&) = delete;
++  KeilandEventReader& operator=(const KeilandEventReader&) = delete;
++
++  ~KeilandEventReader();
++
++  // Opens the wake pipe and starts the thread.  Returns false when either
++  // cannot be made.
++  bool StartReading();
++
++  // Called on the window's thread once a posted dispatch is done.
++  void DispatchDone();
++
++  // Stops the thread and waits for it; called on the window's thread.
++  void StopReading();
++
++ private:
++  // The reader's loop, run as the thread's one task.
++  void Read();
++
++  // Posts the dispatch and waits for it; false when stopping.
++  bool RequestDispatch();
++
++  // Writes what is queued to the compositor; false when the connection broke
++  // or the reader stops.
++  bool Flush(int fd);
++
++  raw_ptr<wl_display> display_;
++  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
++  base::RepeatingClosure dispatch_;
++  base::OnceClosure broken_;
++  base::WaitableEvent done_;
++  std::atomic<bool> stopping_{false};
++  int wake_[2] = {-1, -1};
++  base::Thread thread_;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_EVENT_READER_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_screen.cc
+@@ -0,0 +1,69 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/keiland_screen.h"
++
++#include "ui/display/display.h"
++#include "ui/gfx/geometry/rect.h"
++
++namespace ui {
++
++namespace {
++
++constexpr int64_t kDisplayId = 1;
++constexpr int kScreenWidth = 3840;
++constexpr int kScreenHeight = 2160;
++
++}  // namespace
++
++KeilandScreen::KeilandScreen() {
++  display::Display display(kDisplayId,
++                           gfx::Rect(0, 0, kScreenWidth, kScreenHeight));
++  display.set_device_scale_factor(1.0f);
++  display_list_.AddDisplay(display, display::DisplayList::Type::PRIMARY);
++}
++
++KeilandScreen::~KeilandScreen() = default;
++
++const std::vector<display::Display>& KeilandScreen::GetAllDisplays() const {
++  return display_list_.displays();
++}
++
++display::Display KeilandScreen::GetPrimaryDisplay() const {
++  return *display_list_.GetPrimaryDisplayIterator();
++}
++
++display::Display KeilandScreen::GetDisplayForAcceleratedWidget(
++    gfx::AcceleratedWidget widget) const {
++  return GetPrimaryDisplay();
++}
++
++gfx::Point KeilandScreen::GetCursorScreenPoint() const {
++  return gfx::Point();
++}
++
++gfx::AcceleratedWidget KeilandScreen::GetAcceleratedWidgetAtScreenPoint(
++    const gfx::Point& point_in_dip) const {
++  return gfx::kNullAcceleratedWidget;
++}
++
++display::Display KeilandScreen::GetDisplayNearestPoint(
++    const gfx::Point& point_in_dip) const {
++  return GetPrimaryDisplay();
++}
++
++display::Display KeilandScreen::GetDisplayMatching(
++    const gfx::Rect& match_rect) const {
++  return GetPrimaryDisplay();
++}
++
++void KeilandScreen::AddObserver(display::DisplayObserver* observer) {
++  display_list_.AddObserver(observer);
++}
++
++void KeilandScreen::RemoveObserver(display::DisplayObserver* observer) {
++  display_list_.RemoveObserver(observer);
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_screen.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_KEILAND_SCREEN_H_
++#define UI_OZONE_PLATFORM_KEILAND_KEILAND_SCREEN_H_
++
++#include <vector>
++
++#include "ui/display/display_list.h"
++#include "ui/ozone/public/platform_screen.h"
++
++namespace ui {
++
++// One screen: the compositor places the windows and tells no screen's size
++// to a client, so the screen is a size large enough for a window to fill.
++class KeilandScreen : public PlatformScreen {
++ public:
++  KeilandScreen();
++
++  KeilandScreen(const KeilandScreen&) = delete;
++  KeilandScreen& operator=(const KeilandScreen&) = delete;
++
++  ~KeilandScreen() override;
++
++  // PlatformScreen:
++  const std::vector<display::Display>& GetAllDisplays() const override;
++  display::Display GetPrimaryDisplay() const override;
++  display::Display GetDisplayForAcceleratedWidget(
++      gfx::AcceleratedWidget widget) const override;
++  gfx::Point GetCursorScreenPoint() const override;
++  gfx::AcceleratedWidget GetAcceleratedWidgetAtScreenPoint(
++      const gfx::Point& point_in_dip) const override;
++  display::Display GetDisplayNearestPoint(
++      const gfx::Point& point_in_dip) const override;
++  display::Display GetDisplayMatching(
++      const gfx::Rect& match_rect) const override;
++  void AddObserver(display::DisplayObserver* observer) override;
++  void RemoveObserver(display::DisplayObserver* observer) override;
++
++ private:
++  display::DisplayList display_list_;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_SCREEN_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_surface_factory.cc
+@@ -0,0 +1,121 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/keiland_surface_factory.h"
++
++#include <string.h>
++
++#include <utility>
++
++#include "base/logging.h"
++#include "skia/ext/legacy_display_globals.h"
++#include "third_party/skia/include/core/SkCanvas.h"
++#include "third_party/skia/include/core/SkImageInfo.h"
++#include "third_party/skia/include/core/SkPixmap.h"
++#include "third_party/skia/include/core/SkSurface.h"
++#include "ui/gfx/vsync_provider.h"
++#include "ui/ozone/platform/keiland/keiland_window_manager.h"
++#include "ui/ozone/public/surface_ozone_canvas.h"
++
++#if BUILDFLAG(ENABLE_VULKAN)
++#include "ui/ozone/platform/keiland/vulkan_implementation_keiland.h"
++#endif
++
++namespace ui {
++
++namespace {
++
++// The software compositor's canvas: each frame is copied and shown by the
++// window's thread through libkeiland's shared memory presenter.
++class KeilandCanvasSurface : public SurfaceOzoneCanvas {
++ public:
++  KeilandCanvasSurface(KeilandWindowManager* manager,
++                       gfx::AcceleratedWidget widget)
++      : manager_(manager), widget_(widget) {}
++
++  KeilandCanvasSurface(const KeilandCanvasSurface&) = delete;
++  KeilandCanvasSurface& operator=(const KeilandCanvasSurface&) = delete;
++
++  ~KeilandCanvasSurface() override = default;
++
++  // SurfaceOzoneCanvas:
++  void ResizeCanvas(const gfx::Size& viewport_size, float scale) override {
++    size_ = viewport_size;
++    SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
++    // libkeiland's frames are premultiplied 0xAARRGGBB words: BGRA in
++    // memory on a little-endian machine.
++    surface_ = SkSurfaces::Raster(
++        SkImageInfo::Make(viewport_size.width(), viewport_size.height(),
++                          kBGRA_8888_SkColorType, kPremul_SkAlphaType),
++        &props);
++  }
++
++  SkCanvas* GetCanvas() override { return surface_->getCanvas(); }
++
++  void PresentCanvas(const gfx::Rect& damage) override {
++    SkPixmap pixmap;
++    if (!surface_ || !surface_->peekPixels(&pixmap)) {
++      return;
++    }
++    const size_t width = static_cast<size_t>(size_.width());
++    const size_t height = static_cast<size_t>(size_.height());
++    std::vector<uint32_t> pixels(width * height);
++    for (size_t row = 0; row < height; row++) {
++      memcpy(&pixels[row * width], pixmap.addr32(0, static_cast<int>(row)),
++             width * sizeof(uint32_t));
++    }
++    manager_->PresentFrame(widget_, size_, std::move(pixels));
++  }
++
++  std::unique_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
++    return nullptr;
++  }
++
++ private:
++  raw_ptr<KeilandWindowManager> manager_;
++  gfx::AcceleratedWidget widget_;
++  gfx::Size size_;
++  sk_sp<SkSurface> surface_;
++};
++
++}  // namespace
++
++KeilandSurfaceFactory::KeilandSurfaceFactory(KeilandWindowManager* manager)
++    : manager_(manager) {}
++
++KeilandSurfaceFactory::~KeilandSurfaceFactory() = default;
++
++std::vector<gl::GLImplementationParts>
++KeilandSurfaceFactory::GetAllowedGLImplementations() {
++  // No GL: the GPU draws with Vulkan.
++  return {};
++}
++
++GLOzone* KeilandSurfaceFactory::GetGLOzone(
++    const gl::GLImplementationParts& implementation) {
++  return nullptr;
++}
++
++#if BUILDFLAG(ENABLE_VULKAN)
++std::unique_ptr<gpu::VulkanImplementation>
++KeilandSurfaceFactory::CreateVulkanImplementation(bool use_swiftshader,
++                                                  bool allow_protected_memory) {
++  return std::make_unique<VulkanImplementationKeiland>(manager_,
++                                                       use_swiftshader);
++}
++#endif  // BUILDFLAG(ENABLE_VULKAN)
++
++std::unique_ptr<SurfaceOzoneCanvas>
++KeilandSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
++  wl_display* display = nullptr;
++  wl_surface* surface = nullptr;
++  if (!manager_->GetSurface(widget, &display, &surface)) {
++    LOG(ERROR) << "No Keiland window " << widget
++               << " in this process: run with --in-process-gpu.";
++    return nullptr;
++  }
++  return std::make_unique<KeilandCanvasSurface>(manager_, widget);
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_surface_factory.h
+@@ -0,0 +1,48 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_KEILAND_SURFACE_FACTORY_H_
++#define UI_OZONE_PLATFORM_KEILAND_KEILAND_SURFACE_FACTORY_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "gpu/vulkan/buildflags.h"
++#include "ui/ozone/public/surface_factory_ozone.h"
++
++namespace ui {
++
++class KeilandWindowManager;
++
++// The GPU's surfaces of the windows: a Vulkan swapchain on the window's
++// wl_surface, or a CPU canvas the window's thread shows.  Both need the
++// window in this process (--in-process-gpu or --single-process).
++class KeilandSurfaceFactory : public SurfaceFactoryOzone {
++ public:
++  explicit KeilandSurfaceFactory(KeilandWindowManager* manager);
++
++  KeilandSurfaceFactory(const KeilandSurfaceFactory&) = delete;
++  KeilandSurfaceFactory& operator=(const KeilandSurfaceFactory&) = delete;
++
++  ~KeilandSurfaceFactory() override;
++
++  // SurfaceFactoryOzone:
++  std::vector<gl::GLImplementationParts> GetAllowedGLImplementations() override;
++  GLOzone* GetGLOzone(const gl::GLImplementationParts& implementation) override;
++#if BUILDFLAG(ENABLE_VULKAN)
++  std::unique_ptr<gpu::VulkanImplementation> CreateVulkanImplementation(
++      bool use_swiftshader,
++      bool allow_protected_memory) override;
++#endif  // BUILDFLAG(ENABLE_VULKAN)
++  std::unique_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
++      gfx::AcceleratedWidget widget) override;
++
++ private:
++  raw_ptr<KeilandWindowManager> manager_;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_SURFACE_FACTORY_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_window.cc
+@@ -0,0 +1,525 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/keiland_window.h"
++
++#include <keiland/keiland_key.h>
++#include <keiland/keiland_window.h>
++#include <wayland-client.h>
++
++#include <string.h>
++
++#include "base/command_line.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/memory/ptr_util.h"
++#include "base/notimplemented.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/third_party/icu/icu_utf.h"
++#include "ui/base/cursor/platform_cursor.h"
++#include "ui/display/types/display_constants.h"
++#include "ui/events/event.h"
++#include "ui/events/event_constants.h"
++#include "ui/events/event_utils.h"
++#include "ui/events/keycodes/dom/dom_code.h"
++#include "ui/events/keycodes/dom/dom_key.h"
++#include "ui/events/keycodes/dom/keycode_converter.h"
++#include "ui/events/keycodes/keyboard_code_conversion.h"
++#include "ui/ozone/platform/keiland/keiland_event_reader.h"
++#include "ui/ozone/platform/keiland/keiland_window_manager.h"
++#include "ui/platform_window/platform_window_init_properties.h"
++
++namespace ui {
++
++namespace {
++
++constexpr char kApplicationId[] = "org.chromium.Chromium";
++constexpr uint32_t kDefaultWidth = 1024;
++constexpr uint32_t kDefaultHeight = 768;
++
++// The software compositor's frames are shown by libkeiland's shared memory
++// presenter; the GPU's by its own swapchain on the window's surface.
++bool UsesSoftwareFrames() {
++  const base::CommandLine* command_line =
++      base::CommandLine::ForCurrentProcess();
++  return command_line->HasSwitch("disable-gpu") ||
++         command_line->HasSwitch("disable-gpu-compositing");
++}
++
++int ModifierFlags(unsigned modifiers) {
++  int flags = 0;
++  if (modifiers & KL_MOD_SHIFT) {
++    flags |= EF_SHIFT_DOWN;
++  }
++  if (modifiers & KL_MOD_CTRL) {
++    flags |= EF_CONTROL_DOWN;
++  }
++  if (modifiers & KL_MOD_ALT) {
++    flags |= EF_ALT_DOWN;
++  }
++  if (modifiers & KL_MOD_SUPER) {
++    flags |= EF_COMMAND_DOWN;
++  }
++  return flags;
++}
++
++int ButtonFlag(uint32_t code) {
++  switch (code) {
++    case KL_BUTTON_LEFT:
++      return EF_LEFT_MOUSE_BUTTON;
++    case KL_BUTTON_RIGHT:
++      return EF_RIGHT_MOUSE_BUTTON;
++    case KL_BUTTON_MIDDLE:
++      return EF_MIDDLE_MOUSE_BUTTON;
++    default:
++      return 0;
++  }
++}
++
++base::TimeTicks EventTime(const kl_window_event& input) {
++  // libkeiland's times are CLOCK_MONOTONIC microseconds, base::TimeTicks'
++  // clock.
++  if (input.time_us == 0) {
++    return EventTimeForNow();
++  }
++  return base::TimeTicks() +
++         base::Microseconds(static_cast<int64_t>(input.time_us));
++}
++
++// The first character of a key's UTF-8 text, or 0.
++base_icu::UChar32 FirstCharacter(const char* text) {
++  const size_t length = strnlen(text, KL_WINDOW_TEXT_MAX);
++  if (length == 0) {
++    return 0;
++  }
++  size_t index = 0;
++  base_icu::UChar32 character;
++  CBU8_NEXT(reinterpret_cast<const uint8_t*>(text), index, length, character);
++  return character < 0 ? 0 : character;
++}
++
++}  // namespace
++
++// static
++std::unique_ptr<KeilandWindow> KeilandWindow::Create(
++    PlatformWindowDelegate* delegate,
++    KeilandWindowManager* manager,
++    const PlatformWindowInitProperties& properties) {
++  const bool presents_frames = UsesSoftwareFrames();
++
++  kl_window_options options;
++  memset(&options, 0, sizeof(options));
++  options.title = "Chromium";
++  options.application = kApplicationId;
++  options.width = properties.bounds.width() > 0
++                      ? static_cast<uint32_t>(properties.bounds.width())
++                      : kDefaultWidth;
++  options.height = properties.bounds.height() > 0
++                       ? static_cast<uint32_t>(properties.bounds.height())
++                       : kDefaultHeight;
++  options.present = presents_frames ? KL_PRESENT_SHM : KL_PRESENT_NONE;
++  options.role = KL_WINDOW_ROLE_TOPLEVEL;
++
++  kl_window* window = kl_window_open(&options);
++  if (!window) {
++    PLOG(ERROR) << "kl_window_open";
++    return nullptr;
++  }
++
++  auto result = base::WrapUnique(
++      new KeilandWindow(delegate, manager, window, presents_frames));
++  if (!result->Initialize()) {
++    return nullptr;
++  }
++  return result;
++}
++
++KeilandWindow::KeilandWindow(PlatformWindowDelegate* delegate,
++                             KeilandWindowManager* manager,
++                             kl_window* window,
++                             bool presents_frames)
++    : delegate_(delegate),
++      manager_(manager),
++      window_(window),
++      display_(kl_window_display(window)),
++      presents_frames_(presents_frames) {
++  uint32_t width = 0;
++  uint32_t height = 0;
++  kl_window_size(window_, &width, &height);
++  bounds_ = gfx::Rect(0, 0, static_cast<int>(width), static_cast<int>(height));
++}
++
++KeilandWindow::~KeilandWindow() {
++  repeat_timer_.Stop();
++  if (reader_) {
++    reader_->StopReading();
++    reader_.reset();
++  }
++  if (widget_ != gfx::kNullAcceleratedWidget) {
++    manager_->RemoveWindow(widget_);
++  }
++  kl_window_close(window_);
++}
++
++bool KeilandWindow::Initialize() {
++  widget_ = manager_->AddWindow(this, display_, kl_window_surface(window_));
++
++  reader_ = std::make_unique<KeilandEventReader>(
++      display_, base::SingleThreadTaskRunner::GetCurrentDefault(),
++      base::BindRepeating(&KeilandWindow::Dispatch,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&KeilandWindow::OnConnectionBroken,
++                     weak_ptr_factory_.GetWeakPtr()));
++  if (!reader_->StartReading()) {
++    reader_.reset();
++    return false;
++  }
++
++  delegate_->OnAcceleratedWidgetAvailable(widget_);
++  return true;
++}
++
++void KeilandWindow::Dispatch() {
++  KeilandEventReader* reader = reader_.get();
++  if (kl_window_dispatch(window_, 0) != 0) {
++    reader->DispatchDone();
++    OnConnectionBroken();
++    return;
++  }
++  kl_window_repeat(window_, kl_clock_us());
++
++  // The reader may read on while the input is handed on: the delegate's
++  // callbacks may even destroy the window.
++  reader->DispatchDone();
++  if (!DeliverQueued()) {
++    return;
++  }
++  ScheduleRepeat();
++  Flush();
++}
++
++void KeilandWindow::OnRepeat() {
++  if (kl_window_dispatch(window_, 0) != 0) {
++    OnConnectionBroken();
++    return;
++  }
++  kl_window_repeat(window_, kl_clock_us());
++  if (!DeliverQueued()) {
++    return;
++  }
++  ScheduleRepeat();
++  Flush();
++}
++
++void KeilandWindow::OnConnectionBroken() {
++  repeat_timer_.Stop();
++  delegate_->OnCloseRequest();
++}
++
++bool KeilandWindow::DeliverQueued() {
++  std::vector<kl_window_event> queued;
++  kl_window_event input;
++  while (kl_window_take(window_, &input) > 0) {
++    queued.push_back(input);
++  }
++
++  base::WeakPtr<KeilandWindow> alive = weak_ptr_factory_.GetWeakPtr();
++  for (const kl_window_event& event : queued) {
++    HandleEvent(event);
++    if (!alive) {
++      return false;
++    }
++  }
++  return true;
++}
++
++void KeilandWindow::ScheduleRepeat() {
++  const int wait_ms = kl_window_repeat_wait(window_, kl_clock_us());
++  if (wait_ms < 0) {
++    repeat_timer_.Stop();
++    return;
++  }
++  repeat_timer_.Start(FROM_HERE, base::Milliseconds(wait_ms),
++                      base::BindOnce(&KeilandWindow::OnRepeat,
++                                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void KeilandWindow::Flush() {
++  wl_display_flush(display_);
++}
++
++void KeilandWindow::HandleEvent(const kl_window_event& input) {
++  switch (input.kind) {
++    case KL_WINDOW_MOTION:
++      HandleMotion(input);
++      break;
++    case KL_WINDOW_LEAVE: {
++      MouseEvent event(EventType::kMouseExited, pointer_, pointer_,
++                       EventTime(input),
++                       ModifierFlags(input.modifiers) | button_flags_, 0);
++      delegate_->DispatchEvent(&event);
++      break;
++    }
++    case KL_WINDOW_BUTTON:
++      HandleButton(input);
++      break;
++    case KL_WINDOW_AXIS:
++      HandleAxis(input);
++      break;
++    case KL_WINDOW_KEY:
++      HandleKey(input);
++      break;
++    case KL_WINDOW_FOCUS:
++      active_ = input.pressed != 0;
++      delegate_->OnActivationChanged(active_);
++      break;
++    case KL_WINDOW_RESIZE:
++      HandleResize();
++      break;
++    case KL_WINDOW_CLOSE:
++      delegate_->OnCloseRequest();
++      break;
++    default:
++      // The fingers, the pen, the input method's text, the menus and the
++      // window's own posts are not taken yet.
++      break;
++  }
++}
++
++void KeilandWindow::HandleMotion(const kl_window_event& input) {
++  pointer_ = gfx::PointF(static_cast<float>(input.x),
++                         static_cast<float>(input.y));
++  const EventType type = button_flags_ ? EventType::kMouseDragged
++                                       : EventType::kMouseMoved;
++  MouseEvent event(type, pointer_, pointer_, EventTime(input),
++                   ModifierFlags(input.modifiers) | button_flags_, 0);
++  delegate_->DispatchEvent(&event);
++}
++
++void KeilandWindow::HandleButton(const kl_window_event& input) {
++  const int changed = ButtonFlag(input.code);
++  if (!changed) {
++    return;
++  }
++  pointer_ = gfx::PointF(static_cast<float>(input.x),
++                         static_cast<float>(input.y));
++  EventType type;
++  if (input.pressed) {
++    button_flags_ |= changed;
++    type = EventType::kMousePressed;
++  } else {
++    type = EventType::kMouseReleased;
++  }
++  // A press carries the button it pressed; a release the buttons held before.
++  const int flags = ModifierFlags(input.modifiers) | button_flags_;
++  if (!input.pressed) {
++    button_flags_ &= ~changed;
++  }
++  // A press's and a release's click count are counted by MouseEvent.
++  MouseEvent event(type, pointer_, pointer_, EventTime(input), flags, changed);
++  delegate_->DispatchEvent(&event);
++}
++
++void KeilandWindow::HandleAxis(const kl_window_event& input) {
++  // libkeiland's distances are the surface's pixels, down and right
++  // positive; a wheel's offset is up and left positive.
++  const gfx::Vector2d offset(static_cast<int>(-input.dx),
++                             static_cast<int>(-input.dy));
++  if (offset.IsZero()) {
++    return;
++  }
++  MouseWheelEvent event(offset, pointer_, pointer_, EventTime(input),
++                        ModifierFlags(input.modifiers) | button_flags_, 0);
++  delegate_->DispatchEvent(&event);
++}
++
++void KeilandWindow::HandleKey(const kl_window_event& input) {
++  int flags = ModifierFlags(input.modifiers);
++  if (input.repeated) {
++    flags |= EF_IS_REPEAT;
++  }
++
++  const DomCode dom_code =
++      KeycodeConverter::EvdevCodeToDomCode(static_cast<int>(input.code));
++  KeyboardCode key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
++  DomKey dom_key = DomKey::NONE;
++
++  // The character the backend says the key types, under its own layout;
++  // otherwise the US layout's meaning of the key.
++  const base_icu::UChar32 character =
++      input.pressed ? FirstCharacter(input.text) : 0;
++  if (character >= 0x20 && character != 0x7f) {
++    dom_key = DomKey::FromCharacter(character);
++  } else if (!DomCodeToUsLayoutDomKey(dom_code, flags, &dom_key, &key_code)) {
++    dom_key = DomKey::UNIDENTIFIED;
++  }
++
++  KeyEvent event(input.pressed ? EventType::kKeyPressed
++                               : EventType::kKeyReleased,
++                 key_code, dom_code, flags, dom_key, EventTime(input));
++  delegate_->DispatchEvent(&event);
++}
++
++void KeilandWindow::HandleResize() {
++  uint32_t width = 0;
++  uint32_t height = 0;
++  kl_window_size(window_, &width, &height);
++  const gfx::Rect bounds(0, 0, static_cast<int>(width),
++                         static_cast<int>(height));
++
++  const bool fullscreen = kl_window_fullscreen(window_) != 0;
++  if (fullscreen != fullscreen_) {
++    fullscreen_ = fullscreen;
++    base::WeakPtr<KeilandWindow> alive = weak_ptr_factory_.GetWeakPtr();
++    UpdateWindowState(fullscreen ? PlatformWindowState::kFullScreen
++                                 : PlatformWindowState::kNormal);
++    if (!alive) {
++      return;
++    }
++  }
++
++  if (bounds == bounds_) {
++    return;
++  }
++  bounds_ = bounds;
++  delegate_->OnBoundsChanged({/*origin changed=*/false});
++}
++
++void KeilandWindow::PresentFrame(const gfx::Size& size,
++                                 const std::vector<uint32_t>& pixels) {
++  if (!presents_frames_) {
++    return;
++  }
++  uint32_t width = 0;
++  uint32_t height = 0;
++  if (kl_window_present_resize(window_, &width, &height) != 0) {
++    return;
++  }
++  if (static_cast<int>(width) != size.width() ||
++      static_cast<int>(height) != size.height() ||
++      pixels.size() < static_cast<size_t>(size.GetArea())) {
++    // The compositor resized the window since: the next frame fits it.
++    return;
++  }
++  kl_window_present(window_, pixels.data(),
++                    static_cast<size_t>(size.width()));
++  Flush();
++}
++
++void KeilandWindow::UpdateWindowState(PlatformWindowState state) {
++  if (state == window_state_) {
++    return;
++  }
++  const PlatformWindowState old_state = window_state_;
++  window_state_ = state;
++  delegate_->OnWindowStateChanged(old_state, state);
++}
++
++void KeilandWindow::Show(bool inactive) {
++  visible_ = true;
++}
++
++void KeilandWindow::Hide() {
++  visible_ = false;
++}
++
++void KeilandWindow::Close() {
++  delegate_->OnClosed();
++}
++
++bool KeilandWindow::IsVisible() const {
++  return visible_;
++}
++
++void KeilandWindow::PrepareForShutdown() {}
++
++void KeilandWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
++  // The compositor chooses the window's place and size; a size asked for
++  // here is not passed on yet.
++  if (bounds.size() == bounds_.size()) {
++    return;
++  }
++  NOTIMPLEMENTED_LOG_ONCE();
++}
++
++gfx::Rect KeilandWindow::GetBoundsInPixels() const {
++  return bounds_;
++}
++
++void KeilandWindow::SetBoundsInDIP(const gfx::Rect& bounds) {
++  SetBoundsInPixels(delegate_->ConvertRectToPixels(bounds));
++}
++
++gfx::Rect KeilandWindow::GetBoundsInDIP() const {
++  return delegate_->ConvertRectToDIP(bounds_);
++}
++
++void KeilandWindow::SetTitle(const std::u16string& title) {
++  kl_window_set_title(window_, base::UTF16ToUTF8(title).c_str());
++  Flush();
++}
++
++void KeilandWindow::SetCapture() {}
++
++void KeilandWindow::ReleaseCapture() {}
++
++bool KeilandWindow::HasCapture() const {
++  return false;
++}
++
++void KeilandWindow::SetFullscreen(bool fullscreen, int64_t target_display_id) {
++  kl_window_set_fullscreen(window_, fullscreen ? 1 : 0);
++  Flush();
++}
++
++void KeilandWindow::Maximize() {
++  NOTIMPLEMENTED_LOG_ONCE();
++}
++
++void KeilandWindow::Minimize() {
++  NOTIMPLEMENTED_LOG_ONCE();
++}
++
++void KeilandWindow::Restore() {
++  if (fullscreen_) {
++    SetFullscreen(false, display::kInvalidDisplayId);
++  }
++}
++
++PlatformWindowState KeilandWindow::GetPlatformWindowState() const {
++  return window_state_;
++}
++
++void KeilandWindow::Activate() {}
++
++void KeilandWindow::Deactivate() {}
++
++void KeilandWindow::SetUseNativeFrame(bool use_native_frame) {}
++
++bool KeilandWindow::ShouldUseNativeFrame() const {
++  // The compositor draws the titlebar of a libkeiland window.
++  return true;
++}
++
++void KeilandWindow::SetCursor(scoped_refptr<PlatformCursor> cursor) {}
++
++void KeilandWindow::MoveCursorTo(const gfx::Point& location) {}
++
++void KeilandWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {}
++
++void KeilandWindow::SetRestoredBoundsInDIP(const gfx::Rect& bounds) {
++  restored_bounds_ = delegate_->ConvertRectToPixels(bounds);
++}
++
++gfx::Rect KeilandWindow::GetRestoredBoundsInDIP() const {
++  return delegate_->ConvertRectToDIP(restored_bounds_.value_or(bounds_));
++}
++
++void KeilandWindow::SetWindowIcons(const gfx::ImageSkia& window_icon,
++                                   const gfx::ImageSkia& app_icon) {}
++
++void KeilandWindow::SizeConstraintsChanged() {}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_window.h
+@@ -0,0 +1,141 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_H_
++#define UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_H_
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/timer/timer.h"
++#include "ui/gfx/geometry/point_f.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/native_ui_types.h"
++#include "ui/platform_window/platform_window.h"
++#include "ui/platform_window/platform_window_delegate.h"
++
++struct kl_window;
++struct kl_window_event;
++struct wl_display;
++
++namespace ui {
++
++class KeilandEventReader;
++class KeilandWindowManager;
++struct PlatformWindowInitProperties;
++
++// A toplevel window of the Keiland desktop: a libkeiland window
++// (kl_window_open) on a Wayland connection of its own.  Its input becomes
++// ui::Events for the delegate.  What it shows is the GPU's Vulkan swapchain
++// on its wl_surface (KL_PRESENT_NONE), or the CPU frames of the software
++// compositor (KL_PRESENT_SHM) when the GPU is not used.
++class KeilandWindow : public PlatformWindow {
++ public:
++  // Opens the window; nullptr when the compositor cannot be reached.
++  static std::unique_ptr<KeilandWindow> Create(
++      PlatformWindowDelegate* delegate,
++      KeilandWindowManager* manager,
++      const PlatformWindowInitProperties& properties);
++
++  KeilandWindow(const KeilandWindow&) = delete;
++  KeilandWindow& operator=(const KeilandWindow&) = delete;
++
++  ~KeilandWindow() override;
++
++  // PlatformWindow:
++  void Show(bool inactive) override;
++  void Hide() override;
++  void Close() override;
++  bool IsVisible() const override;
++  void PrepareForShutdown() override;
++  void SetBoundsInPixels(const gfx::Rect& bounds) override;
++  gfx::Rect GetBoundsInPixels() const override;
++  void SetBoundsInDIP(const gfx::Rect& bounds) override;
++  gfx::Rect GetBoundsInDIP() const override;
++  void SetTitle(const std::u16string& title) override;
++  void SetCapture() override;
++  void ReleaseCapture() override;
++  void SetFullscreen(bool fullscreen, int64_t target_display_id) override;
++  bool HasCapture() const override;
++  void Maximize() override;
++  void Minimize() override;
++  void Restore() override;
++  PlatformWindowState GetPlatformWindowState() const override;
++  void Activate() override;
++  void Deactivate() override;
++  void SetUseNativeFrame(bool use_native_frame) override;
++  bool ShouldUseNativeFrame() const override;
++  void SetCursor(scoped_refptr<PlatformCursor> cursor) override;
++  void MoveCursorTo(const gfx::Point& location) override;
++  void ConfineCursorToBounds(const gfx::Rect& bounds) override;
++  void SetRestoredBoundsInDIP(const gfx::Rect& bounds) override;
++  gfx::Rect GetRestoredBoundsInDIP() const override;
++  void SetWindowIcons(const gfx::ImageSkia& window_icon,
++                      const gfx::ImageSkia& app_icon) override;
++  void SizeConstraintsChanged() override;
++
++  // Shows a CPU frame of `size` (premultiplied 0xAARRGGBB words, `size`
++  // wide a row); a frame of another size than the window's is dropped.
++  void PresentFrame(const gfx::Size& size, const std::vector<uint32_t>& pixels);
++
++  gfx::AcceleratedWidget widget() const { return widget_; }
++
++ private:
++  KeilandWindow(PlatformWindowDelegate* delegate,
++                KeilandWindowManager* manager,
++                kl_window* window,
++                bool presents_frames);
++
++  // Starts the connection's reader; false when it cannot be started.
++  bool Initialize();
++
++  // Runs the compositor's events the reader found, and the key repeat.
++  void Dispatch();
++  void OnRepeat();
++  void OnConnectionBroken();
++
++  // Takes the window's queued input and hands it on.  Returns false once
++  // the window was destroyed by a delegate's callback.
++  bool DeliverQueued();
++  void ScheduleRepeat();
++  void HandleEvent(const kl_window_event& input);
++  void HandleMotion(const kl_window_event& input);
++  void HandleButton(const kl_window_event& input);
++  void HandleAxis(const kl_window_event& input);
++  void HandleKey(const kl_window_event& input);
++  void HandleResize();
++  void Flush();
++
++  void UpdateWindowState(PlatformWindowState state);
++
++  raw_ptr<PlatformWindowDelegate> delegate_;
++  raw_ptr<KeilandWindowManager> manager_;
++  raw_ptr<kl_window> window_;
++  raw_ptr<wl_display> display_;
++  const bool presents_frames_;
++  std::unique_ptr<KeilandEventReader> reader_;
++  base::OneShotTimer repeat_timer_;
++
++  gfx::AcceleratedWidget widget_ = gfx::kNullAcceleratedWidget;
++  gfx::Rect bounds_;
++  std::optional<gfx::Rect> restored_bounds_;
++  bool visible_ = false;
++  bool active_ = false;
++  bool fullscreen_ = false;
++  PlatformWindowState window_state_ = PlatformWindowState::kNormal;
++
++  // The pointer's place and the buttons held.
++  gfx::PointF pointer_;
++  int button_flags_ = 0;
++
++  base::WeakPtrFactory<KeilandWindow> weak_ptr_factory_{this};
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_window_manager.cc
+@@ -0,0 +1,77 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/keiland_window_manager.h"
++
++#include "base/check_op.h"
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/memory/ptr_util.h"
++#include "ui/ozone/platform/keiland/keiland_window.h"
++
++namespace ui {
++
++KeilandWindowManager::KeilandWindowManager(
++    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
++    : task_runner_(std::move(task_runner)) {}
++
++KeilandWindowManager::~KeilandWindowManager() = default;
++
++gfx::AcceleratedWidget KeilandWindowManager::AddWindow(KeilandWindow* window,
++                                                       wl_display* display,
++                                                       wl_surface* surface) {
++  DCHECK(task_runner_->BelongsToCurrentThread());
++  base::AutoLock hold(lock_);
++  const gfx::AcceleratedWidget widget = next_widget_++;
++  windows_[widget] = Entry{window, display, surface};
++  return widget;
++}
++
++void KeilandWindowManager::RemoveWindow(gfx::AcceleratedWidget widget) {
++  DCHECK(task_runner_->BelongsToCurrentThread());
++  base::AutoLock hold(lock_);
++  windows_.erase(widget);
++}
++
++KeilandWindow* KeilandWindowManager::GetWindow(gfx::AcceleratedWidget widget) {
++  DCHECK(task_runner_->BelongsToCurrentThread());
++  base::AutoLock hold(lock_);
++  auto it = windows_.find(widget);
++  return it == windows_.end() ? nullptr : it->second.window.get();
++}
++
++bool KeilandWindowManager::GetSurface(gfx::AcceleratedWidget widget,
++                                      wl_display** display,
++                                      wl_surface** surface) {
++  base::AutoLock hold(lock_);
++  auto it = windows_.find(widget);
++  if (it == windows_.end()) {
++    return false;
++  }
++  *display = it->second.display;
++  *surface = it->second.surface;
++  return true;
++}
++
++void KeilandWindowManager::PresentFrame(gfx::AcceleratedWidget widget,
++                                        const gfx::Size& size,
++                                        std::vector<uint32_t> pixels) {
++  // The manager lives as long as the platform, which outlives the threads
++  // that present.
++  task_runner_->PostTask(
++      FROM_HERE,
++      base::BindOnce(&KeilandWindowManager::PresentOnWindowThread,
++                     base::Unretained(this), widget, size, std::move(pixels)));
++}
++
++void KeilandWindowManager::PresentOnWindowThread(gfx::AcceleratedWidget widget,
++                                                 const gfx::Size& size,
++                                                 std::vector<uint32_t> pixels) {
++  KeilandWindow* window = GetWindow(widget);
++  if (window) {
++    window->PresentFrame(size, pixels);
++  }
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/keiland_window_manager.h
+@@ -0,0 +1,78 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_MANAGER_H_
++#define UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_MANAGER_H_
++
++#include <map>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "base/synchronization/lock.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/thread_annotations.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/native_ui_types.h"
++
++struct wl_display;
++struct wl_surface;
++
++namespace ui {
++
++class KeilandWindow;
++
++// The windows of the process, by widget.  The window's thread adds and
++// removes them; the GPU's threads (in the same process) look up the
++// window's Wayland objects for its Vulkan surface, and hand CPU frames to
++// the window's thread to be shown.
++class KeilandWindowManager {
++ public:
++  explicit KeilandWindowManager(
++      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
++
++  KeilandWindowManager(const KeilandWindowManager&) = delete;
++  KeilandWindowManager& operator=(const KeilandWindowManager&) = delete;
++
++  ~KeilandWindowManager();
++
++  // On the window's thread.
++  gfx::AcceleratedWidget AddWindow(KeilandWindow* window,
++                                   wl_display* display,
++                                   wl_surface* surface);
++  void RemoveWindow(gfx::AcceleratedWidget widget);
++  KeilandWindow* GetWindow(gfx::AcceleratedWidget widget);
++
++  // On any thread: the window's connection and surface, false when the
++  // widget is not a window of this process.
++  bool GetSurface(gfx::AcceleratedWidget widget,
++                  wl_display** display,
++                  wl_surface** surface);
++
++  // On any thread: shows a CPU frame (premultiplied 0xAARRGGBB words, as
++  // many a row as the size is wide) in the widget's window, on the window's
++  // thread.
++  void PresentFrame(gfx::AcceleratedWidget widget,
++                    const gfx::Size& size,
++                    std::vector<uint32_t> pixels);
++
++ private:
++  struct Entry {
++    raw_ptr<KeilandWindow> window;
++    raw_ptr<wl_display> display;
++    raw_ptr<wl_surface> surface;
++  };
++
++  void PresentOnWindowThread(gfx::AcceleratedWidget widget,
++                             const gfx::Size& size,
++                             std::vector<uint32_t> pixels);
++
++  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
++  base::Lock lock_;
++  std::map<gfx::AcceleratedWidget, Entry> windows_ GUARDED_BY(lock_);
++  gfx::AcceleratedWidget next_widget_ = 1;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_WINDOW_MANAGER_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/ozone_platform_keiland.cc
+@@ -0,0 +1,149 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/ozone_platform_keiland.h"
++
++#include <memory>
++
++#include "base/no_destructor.h"
++#include "base/task/single_thread_task_runner.h"
++#include "build/build_config.h"
++#include "ui/base/cursor/cursor_factory.h"
++#include "ui/base/ime/input_method_minimal.h"
++#include "ui/display/types/native_display_delegate.h"
++#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
++#include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
++#include "ui/events/platform/platform_event_source.h"
++#include "ui/ozone/common/bitmap_cursor_factory.h"
++#include "ui/ozone/common/stub_overlay_manager.h"
++#include "ui/ozone/platform/keiland/keiland_screen.h"
++#include "ui/ozone/platform/keiland/keiland_surface_factory.h"
++#include "ui/ozone/platform/keiland/keiland_window.h"
++#include "ui/ozone/platform/keiland/keiland_window_manager.h"
++#include "ui/ozone/public/gpu_platform_support_host.h"
++#include "ui/ozone/public/input_controller.h"
++#include "ui/ozone/public/ozone_platform.h"
++#include "ui/ozone/public/stub_input_controller.h"
++#include "ui/ozone/public/system_input_injector.h"
++#include "ui/platform_window/platform_window_init_properties.h"
++
++namespace ui {
++
++namespace {
++
++// The windows deliver their input themselves (PlatformWindowDelegate);
++// the source exists for the code that expects one.
++class KeilandPlatformEventSource : public PlatformEventSource {
++ public:
++  KeilandPlatformEventSource() = default;
++
++  KeilandPlatformEventSource(const KeilandPlatformEventSource&) = delete;
++  KeilandPlatformEventSource& operator=(const KeilandPlatformEventSource&) =
++      delete;
++
++  ~KeilandPlatformEventSource() override = default;
++};
++
++class OzonePlatformKeiland : public OzonePlatform {
++ public:
++  OzonePlatformKeiland() = default;
++
++  OzonePlatformKeiland(const OzonePlatformKeiland&) = delete;
++  OzonePlatformKeiland& operator=(const OzonePlatformKeiland&) = delete;
++
++  ~OzonePlatformKeiland() override = default;
++
++  // OzonePlatform:
++  SurfaceFactoryOzone* GetSurfaceFactoryOzone() override {
++    return surface_factory_.get();
++  }
++  OverlayManagerOzone* GetOverlayManager() override {
++    return overlay_manager_.get();
++  }
++  CursorFactory* GetCursorFactory() override { return cursor_factory_.get(); }
++  InputController* GetInputController() override {
++    return input_controller_.get();
++  }
++  GpuPlatformSupportHost* GetGpuPlatformSupportHost() override {
++    return gpu_platform_support_host_.get();
++  }
++  std::unique_ptr<SystemInputInjector> CreateSystemInputInjector() override {
++    return nullptr;
++  }
++  std::unique_ptr<PlatformWindow> CreatePlatformWindow(
++      PlatformWindowDelegate* delegate,
++      PlatformWindowInitProperties properties) override {
++    return KeilandWindow::Create(delegate, window_manager_.get(), properties);
++  }
++  bool IsWindowCompositingSupported() const override { return false; }
++  std::unique_ptr<display::NativeDisplayDelegate> CreateNativeDisplayDelegate()
++      override {
++    return nullptr;
++  }
++  std::unique_ptr<PlatformScreen> CreateScreen() override {
++    return std::make_unique<KeilandScreen>();
++  }
++  void InitScreen(PlatformScreen* screen) override {}
++  std::unique_ptr<InputMethod> CreateInputMethod(
++      ImeKeyEventDispatcher* ime_key_event_dispatcher,
++      gfx::AcceleratedWidget widget) override {
++    return std::make_unique<InputMethodMinimal>(ime_key_event_dispatcher);
++  }
++
++#if BUILDFLAG(IS_LINUX)
++  const PlatformProperties& GetPlatformProperties() override {
++    static base::NoDestructor<OzonePlatform::PlatformProperties> properties;
++    return *properties;
++  }
++#endif
++
++  bool InitializeUI(const InitParams& params) override {
++    window_manager_ = std::make_unique<KeilandWindowManager>(
++        base::SingleThreadTaskRunner::GetCurrentDefault());
++    surface_factory_ =
++        std::make_unique<KeilandSurfaceFactory>(window_manager_.get());
++    if (!PlatformEventSource::GetInstance()) {
++      platform_event_source_ = std::make_unique<KeilandPlatformEventSource>();
++    }
++    keyboard_layout_engine_ = std::make_unique<StubKeyboardLayoutEngine>();
++    KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
++        keyboard_layout_engine_.get());
++    overlay_manager_ = std::make_unique<StubOverlayManager>();
++    input_controller_ = std::make_unique<StubInputController>();
++    cursor_factory_ = std::make_unique<BitmapCursorFactory>();
++    gpu_platform_support_host_.reset(CreateStubGpuPlatformSupportHost());
++    return true;
++  }
++
++  void InitializeGPU(const InitParams& params) override {
++    // The GPU in the browser's process shares the windows; a GPU process of
++    // its own has none (its surfaces fail and say why).
++    if (!surface_factory_) {
++      if (!window_manager_) {
++        window_manager_ = std::make_unique<KeilandWindowManager>(
++            base::SingleThreadTaskRunner::GetCurrentDefault());
++      }
++      surface_factory_ =
++          std::make_unique<KeilandSurfaceFactory>(window_manager_.get());
++    }
++  }
++
++ private:
++  std::unique_ptr<KeyboardLayoutEngine> keyboard_layout_engine_;
++  std::unique_ptr<KeilandWindowManager> window_manager_;
++  std::unique_ptr<KeilandSurfaceFactory> surface_factory_;
++  std::unique_ptr<PlatformEventSource> platform_event_source_;
++  std::unique_ptr<CursorFactory> cursor_factory_;
++  std::unique_ptr<InputController> input_controller_;
++  std::unique_ptr<GpuPlatformSupportHost> gpu_platform_support_host_;
++  std::unique_ptr<OverlayManagerOzone> overlay_manager_;
++};
++
++}  // namespace
++
++OzonePlatform* CreateOzonePlatformKeiland() {
++  return new OzonePlatformKeiland();
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/ozone_platform_keiland.h
+@@ -0,0 +1,17 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_OZONE_PLATFORM_KEILAND_H_
++#define UI_OZONE_PLATFORM_KEILAND_OZONE_PLATFORM_KEILAND_H_
++
++namespace ui {
++
++class OzonePlatform;
++
++// The Ozone platform of the Keiland desktop (--ozone-platform=keiland).
++OzonePlatform* CreateOzonePlatformKeiland();
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_OZONE_PLATFORM_KEILAND_H_
+--- /dev/null
++++ b/ui/ozone/platform/keiland/vulkan_implementation_keiland.cc
+@@ -0,0 +1,165 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/ozone/platform/keiland/vulkan_implementation_keiland.h"
++
++#include <wayland-client.h>
++// clang-format off
++#include <vulkan/vulkan.h>
++#include <vulkan/vulkan_wayland.h>
++// clang-format on
++
++#include "base/files/file_path.h"
++#include "base/logging.h"
++#include "base/notimplemented.h"
++#include "gpu/vulkan/vulkan_function_pointers.h"
++#include "gpu/vulkan/vulkan_image.h"
++#include "gpu/vulkan/vulkan_instance.h"
++#include "gpu/vulkan/vulkan_surface.h"
++#include "ui/gfx/gpu_fence.h"
++#include "ui/gfx/gpu_memory_buffer_handle.h"
++#include "ui/ozone/platform/keiland/keiland_window_manager.h"
++
++namespace ui {
++
++namespace {
++
++class VulkanSurfaceKeiland : public gpu::VulkanSurface {
++ public:
++  VulkanSurfaceKeiland(VkInstance vk_instance,
++                       VkSurfaceKHR vk_surface,
++                       gfx::AcceleratedWidget widget)
++      : gpu::VulkanSurface(vk_instance, widget, vk_surface) {}
++
++  VulkanSurfaceKeiland(const VulkanSurfaceKeiland&) = delete;
++  VulkanSurfaceKeiland& operator=(const VulkanSurfaceKeiland&) = delete;
++
++  ~VulkanSurfaceKeiland() override = default;
++};
++
++}  // namespace
++
++VulkanImplementationKeiland::VulkanImplementationKeiland(
++    KeilandWindowManager* manager,
++    bool use_swiftshader)
++    : gpu::VulkanImplementation(use_swiftshader), manager_(manager) {}
++
++VulkanImplementationKeiland::~VulkanImplementationKeiland() = default;
++
++bool VulkanImplementationKeiland::InitializeVulkanInstance(bool using_surface) {
++  using_surface_ = using_surface;
++  std::vector<const char*> required_extensions;
++  if (using_surface_) {
++    required_extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
++    required_extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
++  }
++  return vulkan_instance_.Initialize(base::FilePath("libvulkan.so"),
++                                     required_extensions, {});
++}
++
++gpu::VulkanInstance* VulkanImplementationKeiland::GetVulkanInstance() {
++  return &vulkan_instance_;
++}
++
++std::unique_ptr<gpu::VulkanSurface>
++VulkanImplementationKeiland::CreateViewSurface(gfx::AcceleratedWidget window) {
++  if (!using_surface_) {
++    return nullptr;
++  }
++
++  wl_display* display = nullptr;
++  wl_surface* surface = nullptr;
++  if (!manager_->GetSurface(window, &display, &surface)) {
++    LOG(ERROR) << "No Keiland window " << window
++               << " in this process: run with --in-process-gpu.";
++    return nullptr;
++  }
++
++  const VkInstance instance = vulkan_instance_.vk_instance();
++  auto create = reinterpret_cast<PFN_vkCreateWaylandSurfaceKHR>(
++      gpu::GetVulkanFunctionPointers()->vkGetInstanceProcAddr(
++          instance, "vkCreateWaylandSurfaceKHR"));
++  if (!create) {
++    LOG(ERROR) << "vkCreateWaylandSurfaceKHR is missing.";
++    return nullptr;
++  }
++
++  VkWaylandSurfaceCreateInfoKHR info = {};
++  info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
++  info.display = display;
++  info.surface = surface;
++  VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
++  const VkResult result = create(instance, &info, nullptr, &vk_surface);
++  if (result != VK_SUCCESS) {
++    LOG(ERROR) << "vkCreateWaylandSurfaceKHR() failed: " << result;
++    return nullptr;
++  }
++  return std::make_unique<VulkanSurfaceKeiland>(instance, vk_surface, window);
++}
++
++bool VulkanImplementationKeiland::GetPhysicalDevicePresentationSupport(
++    VkPhysicalDevice device,
++    const std::vector<VkQueueFamilyProperties>& queue_family_properties,
++    uint32_t queue_family_index) {
++  // Every window has a connection of its own, and none may exist yet: the
++  // swapchain's creation finds out whether the queue presents to it.
++  return true;
++}
++
++std::vector<const char*>
++VulkanImplementationKeiland::GetRequiredDeviceExtensions() {
++  std::vector<const char*> extensions;
++  if (using_surface_) {
++    extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
++  }
++  return extensions;
++}
++
++std::vector<const char*>
++VulkanImplementationKeiland::GetOptionalDeviceExtensions() {
++  return {
++      VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
++      VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
++      VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
++      VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
++      VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME,
++  };
++}
++
++VkFence VulkanImplementationKeiland::CreateVkFenceForGpuFence(
++    VkDevice vk_device) {
++  NOTIMPLEMENTED_LOG_ONCE();
++  return VK_NULL_HANDLE;
++}
++
++std::unique_ptr<gfx::GpuFence>
++VulkanImplementationKeiland::ExportVkFenceToGpuFence(VkDevice vk_device,
++                                                     VkFence vk_fence) {
++  NOTIMPLEMENTED_LOG_ONCE();
++  return nullptr;
++}
++
++VkExternalSemaphoreHandleTypeFlagBits
++VulkanImplementationKeiland::GetExternalSemaphoreHandleType() {
++  return VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
++}
++
++bool VulkanImplementationKeiland::CanImportGpuMemoryBuffer(
++    gpu::VulkanDeviceQueue* device_queue,
++    gfx::GpuMemoryBufferType memory_buffer_type) {
++  return false;
++}
++
++std::unique_ptr<gpu::VulkanImage>
++VulkanImplementationKeiland::CreateImageFromGpuMemoryHandle(
++    gpu::VulkanDeviceQueue* device_queue,
++    gfx::GpuMemoryBufferHandle gmb_handle,
++    gfx::Size size,
++    VkFormat vk_format,
++    const gfx::ColorSpace& color_space) {
++  NOTIMPLEMENTED_LOG_ONCE();
++  return nullptr;
++}
++
++}  // namespace ui
+--- /dev/null
++++ b/ui/ozone/platform/keiland/vulkan_implementation_keiland.h
+@@ -0,0 +1,68 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_OZONE_PLATFORM_KEILAND_VULKAN_IMPLEMENTATION_KEILAND_H_
++#define UI_OZONE_PLATFORM_KEILAND_VULKAN_IMPLEMENTATION_KEILAND_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "gpu/vulkan/vulkan_implementation.h"
++#include "gpu/vulkan/vulkan_instance.h"
++
++namespace ui {
++
++class KeilandWindowManager;
++
++// Vulkan of the Keiland desktop: the window's surface is a Wayland surface
++// (VK_KHR_wayland_surface) on the window's own connection, presented
++// through a swapchain.
++class VulkanImplementationKeiland : public gpu::VulkanImplementation {
++ public:
++  VulkanImplementationKeiland(KeilandWindowManager* manager,
++                              bool use_swiftshader);
++
++  VulkanImplementationKeiland(const VulkanImplementationKeiland&) = delete;
++  VulkanImplementationKeiland& operator=(const VulkanImplementationKeiland&) =
++      delete;
++
++  ~VulkanImplementationKeiland() override;
++
++  // gpu::VulkanImplementation:
++  bool InitializeVulkanInstance(bool using_surface) override;
++  gpu::VulkanInstance* GetVulkanInstance() override;
++  std::unique_ptr<gpu::VulkanSurface> CreateViewSurface(
++      gfx::AcceleratedWidget window) override;
++  bool GetPhysicalDevicePresentationSupport(
++      VkPhysicalDevice device,
++      const std::vector<VkQueueFamilyProperties>& queue_family_properties,
++      uint32_t queue_family_index) override;
++  std::vector<const char*> GetRequiredDeviceExtensions() override;
++  std::vector<const char*> GetOptionalDeviceExtensions() override;
++  VkFence CreateVkFenceForGpuFence(VkDevice vk_device) override;
++  std::unique_ptr<gfx::GpuFence> ExportVkFenceToGpuFence(
++      VkDevice vk_device,
++      VkFence vk_fence) override;
++  VkExternalSemaphoreHandleTypeFlagBits GetExternalSemaphoreHandleType()
++      override;
++  bool CanImportGpuMemoryBuffer(
++      gpu::VulkanDeviceQueue* device_queue,
++      gfx::GpuMemoryBufferType memory_buffer_type) override;
++  std::unique_ptr<gpu::VulkanImage> CreateImageFromGpuMemoryHandle(
++      gpu::VulkanDeviceQueue* device_queue,
++      gfx::GpuMemoryBufferHandle gmb_handle,
++      gfx::Size size,
++      VkFormat vk_format,
++      const gfx::ColorSpace& color_space) override;
++
++ private:
++  raw_ptr<KeilandWindowManager> manager_;
++  bool using_surface_ = true;
++  gpu::VulkanInstance vulkan_instance_;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_KEILAND_VULKAN_IMPLEMENTATION_KEILAND_H_

@@ -1,0 +1,5307 @@
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -178,7 +178,7 @@
+     data = [ "$root_out_dir/resources.pak" ]
+     data_deps = []
+ 
+-    if (is_win || is_linux || is_chromeos) {
++    if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+       deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+     }
+ 
+@@ -2089,7 +2089,7 @@
+     "//content/public/app",
+     "//v8",
+   ]
+-  if (is_win || is_linux || is_chromeos || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_mac) {
+     _chrome_renderer_deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+--- a/chrome/app/BUILD.gn
++++ b/chrome/app/BUILD.gn
+@@ -191,7 +191,7 @@
+   ]
+   public_deps = [ "//ui/lottie" ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -640,7 +640,7 @@
+       "//ui/webui/resources/js/batch_upload_promo:mojo_bindings",
+       "//ui/webui/resources/js/browser_command:mojo_bindings",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/ui/webui/app_home",
+         "//chrome/browser/ui/webui/app_home:mojo_bindings",
+@@ -656,6 +656,13 @@
+         "//chrome/browser/ui/webui/whats_new",
+       ]
+     }
++    if (is_zedbsd) {
++      # zedBSD has no Chrome updater: the system updates the browser.
++      deps -= [
++        "//chrome/browser/ui/webui/updater",
++        "//chrome/browser/ui/webui/updater:mojo_bindings",
++      ]
++    }
+     if (is_win) {
+       deps +=
+           [ "//chrome/browser/ui/webui/default_browser:visual_guided_setter" ]
+@@ -1646,7 +1653,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "platform_util.cc" ]
+     deps += [
+       "//chrome/browser/browser_switcher",
+@@ -1658,6 +1665,12 @@
+       "//chrome/browser/ui/webui/updater",
+     ]
+   }
++  if (is_zedbsd) {
++    # zedBSD has no Chrome updater: the system updates the browser.
++    deps -= [
++      "//chrome/browser/ui/webui/updater",
++    ]
++  }
+ 
+   if (!is_android || is_desktop_android) {
+     deps += [
+@@ -3347,7 +3360,7 @@
+       "//chrome/browser/ui/webui/signin:inline_login_impl",
+     ]
+   }
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public_deps += [
+       "//chrome/browser/ui/webui/app_home:mojo_bindings",
+       "//chrome/browser/ui/webui/on_device_translation_internals:mojo_bindings",
+@@ -3405,6 +3418,13 @@
+       "//ui/views/window/vector_icons",
+     ]
+   }
++  if (is_zedbsd) {
++    # zedBSD has no Chrome updater: the system updates the browser.
++    deps -= [
++      "//chrome/browser/ui/webui/updater",
++      "//chrome/browser/ui/webui/updater:mojo_bindings",
++    ]
++  }
+   if (is_chromeos) {
+     assert(enable_extensions)
+     assert(enable_supervised_users)
+@@ -3865,7 +3885,7 @@
+       "//third_party/wtl",
+     ]
+   }
+-  if (is_linux || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_mac || is_chromeos) {
+     deps += [
+       ":process_singleton_posix",
+       "//ui/views",
+@@ -3925,7 +3945,7 @@
+       "//chrome/browser/webshare:impl",
+     ]
+   }
+-  if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android) {
+     public_deps += [
+       "//chrome/browser/ui/webui/ai_overlay_dialog:mojo_bindings",
+       "//chrome/browser/ui/webui/discards:mojo_bindings",
+@@ -4163,7 +4183,7 @@
+       "//chrome/browser/ui/webui/tab_strip_internals:impl",
+     ]
+   }
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     deps += [
+       "//chrome/browser/gapis",
+       "//chrome/browser/ui/views:first_run_dialog",
+@@ -4214,13 +4234,13 @@
+   if (is_linux || is_chromeos) {
+     deps += [ "//third_party/fontconfig" ]
+   }
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [
+       "//chrome/browser/ui/views:bluetooth_dialogs",
+       "//chrome/browser/ui/views:create_application_shortcut_view",
+     ]
+   }
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     deps += [
+       "//chrome/browser/ui/views:native_widget_factory",
+       "//chrome/browser/ui/views/frame:browser_frame_view_factory_views",
+@@ -4728,7 +4748,7 @@
+ 
+   deps = []
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//services/resource_coordinator/public/mojom:mojom_js" ]
+   }
+ 
+@@ -5209,7 +5229,7 @@
+       "//ui/webui/resources/cr_components/app_management:mojo_bindings",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       public_deps += [ "//chrome/browser/ui/webui/app_home:mojo_bindings" ]
+     }
+   }
+@@ -5310,11 +5330,11 @@
+       "//ui/shell_dialogs:test_support",
+     ]
+ 
+-    if (is_win || is_linux || is_chromeos) {
++    if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+       sources += [ "process_singleton_browsertest.cc" ]
+     }
+ 
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       sources += [ "chrome_main_process_singleton_browsertest.cc" ]
+     }
+ 
+--- a/chrome/browser/accessibility/BUILD.gn
++++ b/chrome/browser/accessibility/BUILD.gn
+@@ -187,7 +187,7 @@
+ source_set("unit_tests") {
+   testonly = true
+   sources = []
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "soda_installer_impl_unittest.cc" ]
+   }
+   deps = [
+@@ -197,7 +197,7 @@
+     "//chrome/test:test_support",
+     "//testing/gtest",
+   ]
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     deps += [
+       "//chrome/browser/component_updater",
+       "//components/component_updater:component_updater_paths",
+--- a/chrome/browser/accessibility/live_caption/BUILD.gn
++++ b/chrome/browser/accessibility/live_caption/BUILD.gn
+@@ -110,7 +110,7 @@
+       "live_caption_speech_recognition_host_browsertest.h",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [
+         "live_caption_automatic_language_download_browsertest.cc",
+         "live_caption_language_identification_browsertest.cc",
+--- a/chrome/browser/actor/BUILD.gn
++++ b/chrome/browser/actor/BUILD.gn
+@@ -615,7 +615,7 @@
+     "tools/window_management_tool_browsertest.cc",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "page_tool_toctou_popup_browsertest.cc" ]
+   }
+   deps = [
+--- a/chrome/browser/ai/BUILD.gn
++++ b/chrome/browser/ai/BUILD.gn
+@@ -7,7 +7,7 @@
+ import("//pdf/features.gni")
+ 
+ assert(build_with_model_execution)
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("ai") {
+   sources = [
+--- a/chrome/browser/bluetooth/BUILD.gn
++++ b/chrome/browser/bluetooth/BUILD.gn
+@@ -129,7 +129,7 @@
+   configs += [ "//build/config/compiler:no_exit_time_destructors" ]
+ }
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   source_set("device_realtarget_browsertests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/browser_switcher/BUILD.gn
++++ b/chrome/browser/browser_switcher/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//testing/libfuzzer/fuzzer_test.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("browser_switcher") {
+   public = []
+@@ -18,7 +18,7 @@
+     public_deps += [ "//chrome/browser/policy:policy_migrator" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public += [
+       "alternative_browser_driver.h",
+       "browser_switcher_navigation_throttle.h",
+@@ -54,7 +54,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "browser_switcher_navigation_throttle.cc",
+       "browser_switcher_prefs.cc",
+@@ -84,7 +84,7 @@
+     deps += [ "//chrome/browser/win/isolated_browser:isolated_browser_support" ]
+   }
+ 
+-  if (is_mac || is_linux) {
++  if (is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "alternative_browser_driver_posix.cc" ]
+   }
+ }
+@@ -94,7 +94,7 @@
+   sources = []
+   deps = [ "//chrome/test/base:chrome_render_view_host_test_harness" ]
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [
+       "alternative_browser_driver_unittest.cc",
+       "browser_switcher_navigation_throttle_unittest.cc",
+@@ -130,7 +130,7 @@
+     sources = []
+     deps = []
+ 
+-    if (is_mac || is_win || is_linux) {
++    if (is_mac || is_win || (is_linux || is_zedbsd)) {
+       sources += [
+         "browser_switcher_browsertest.cc",
+         "browser_switcher_service_browsertest.cc",
+--- a/chrome/browser/chooser_controller/BUILD.gn
++++ b/chrome/browser/chooser_controller/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("chooser_controller") {
+   sources = [
+--- a/chrome/browser/commerce/BUILD.gn
++++ b/chrome/browser/commerce/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("commerce") {
+   sources = [ "shopping_service_factory.h" ]
+--- a/chrome/browser/companion/text_finder/BUILD.gn
++++ b/chrome/browser/companion/text_finder/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("text_finder") {
+   sources = [
+--- a/chrome/browser/content_settings/BUILD.gn
++++ b/chrome/browser/content_settings/BUILD.gn
+@@ -7,7 +7,7 @@
+ import("//extensions/buildflags/buildflags.gni")
+ import("//pdf/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("content_settings") {
+   sources = [
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -267,7 +267,7 @@
+     }
+   }
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+   if (is_android) {
+@@ -351,7 +351,7 @@
+       "//ui/views",
+       "//ui/views/controls/webview",
+     ]
+-    if (is_mac || is_win || is_linux || is_chromeos) {
++    if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+       deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+     }
+     if (is_chromeos) {
+--- a/chrome/browser/download/bubble/BUILD.gn
++++ b/chrome/browser/download/bubble/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ # The download bubble UI is desktop-only.
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("bubble") {
+   public = [
+--- a/chrome/browser/enterprise/BUILD.gn
++++ b/chrome/browser/enterprise/BUILD.gn
+@@ -269,7 +269,7 @@
+         [ "//components/enterprise/connectors/core:cloud_content_scanning" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos || is_android) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos || is_android) {
+     public += [
+       "reporting/realtime_event_upload_helper.h",
+       "reporting/saas_usage/navigation_handle_data_delegate.h",
+@@ -282,7 +282,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     public += [
+       "connectors/device_trust/browser/signing_key_policy_observer.h",
+       "connectors/device_trust/signals/decorators/browser/browser_signals_decorator.h",
+@@ -379,7 +379,7 @@
+ static_library("browser_launch_reporting") {
+   sources = []
+   deps = []
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [
+       "reporting/browser_launch/browser_launch_data_collector_desktop.cc",
+       "reporting/browser_launch/browser_launch_data_collector_desktop.h",
+@@ -762,7 +762,7 @@
+         [ "//chrome/browser/enterprise/connectors/analysis:sdk_manager" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos || is_android) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos || is_android) {
+     sources += [
+       "reporting/realtime_event_upload_helper.cc",
+       "reporting/saas_usage/navigation_handle_data_delegate.cc",
+@@ -777,7 +777,7 @@
+     deps += [ "//components/enterprise/device_trust/core:device_trust_service" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [
+       "connectors/device_trust/browser/signing_key_policy_observer.cc",
+       "connectors/device_trust/signals/decorators/browser/browser_signals_decorator.cc",
+--- a/chrome/browser/enterprise/connectors/device_trust/key_management/installer/management_service/BUILD.gn
++++ b/chrome/browser/enterprise/connectors/device_trust/key_management/installer/management_service/BUILD.gn
+@@ -47,7 +47,7 @@
+   }
+ }
+ 
+-if (is_linux || is_win) {
++if ((is_linux || is_zedbsd) || is_win) {
+   source_set("metrics") {
+     configs += [ "//components/enterprise:extra_warnings" ]
+ 
+--- a/chrome/browser/enterprise/connectors/device_trust/test/BUILD.gn
++++ b/chrome/browser/enterprise/connectors/device_trust/test/BUILD.gn
+@@ -40,7 +40,7 @@
+     deps += [ "//chrome/browser/ash/login/test:test_support" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public += [ "device_trust_test_environment.h" ]
+     sources += [ "device_trust_test_environment.cc" ]
+ 
+--- a/chrome/browser/enterprise/core/BUILD.gn
++++ b/chrome/browser/enterprise/core/BUILD.gn
+@@ -36,7 +36,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "dependency_factory_impl_unittest.cc" ]
+     deps += [
+       ":core",
+--- a/chrome/browser/enterprise/idle/BUILD.gn
++++ b/chrome/browser/enterprise/idle/BUILD.gn
+@@ -11,7 +11,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_linux || is_mac || is_win || is_android) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win || is_android) {
+     sources += [
+       "action_runner_unittest.cc",
+       "action_unittest.cc",
+@@ -25,7 +25,7 @@
+   }
+ }
+ 
+-if (!is_android && !is_chromeos_device && (is_win || is_mac || is_linux)) {
++if (!is_android && !is_chromeos_device && (is_win || is_mac || (is_linux || is_zedbsd))) {
+   source_set("interactive_ui_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/enterprise/profile_management/BUILD.gn
++++ b/chrome/browser/enterprise/profile_management/BUILD.gn
+@@ -8,7 +8,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "saml_response_parser_unittest.cc" ]
+     deps += [
+       "//base",
+@@ -19,7 +19,7 @@
+   }
+ }
+ 
+-if (!is_android && (is_win || is_mac || is_linux)) {
++if (!is_android && (is_win || is_mac || (is_linux || is_zedbsd))) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/enterprise/remote_commands/BUILD.gn
++++ b/chrome/browser/enterprise/remote_commands/BUILD.gn
+@@ -10,7 +10,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "rotate_attestation_credential_job_unittest.cc" ]
+     deps += [
+       "//base",
+--- a/chrome/browser/enterprise/reporting/BUILD.gn
++++ b/chrome/browser/enterprise/reporting/BUILD.gn
+@@ -60,7 +60,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "browser_launch/browser_launch_data_collector_desktop_unittest.cc",
+       "browser_launch/browser_launch_event_uploader_desktop_unittest.cc",
+--- a/chrome/browser/enterprise/signin/BUILD.gn
++++ b/chrome/browser/enterprise/signin/BUILD.gn
+@@ -36,7 +36,7 @@
+     "//testing/gtest",
+   ]
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [
+       "managed_profile_creator_unittest.cc",
+       "oidc_managed_profile_creation_delegate_unittest.cc",
+@@ -46,7 +46,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/enterprise/webstore/BUILD.gn
++++ b/chrome/browser/enterprise/webstore/BUILD.gn
+@@ -8,7 +8,7 @@
+   sources = []
+   deps = [ "//chrome/test/base:chrome_render_view_host_test_harness" ]
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "chrome_web_store_navigation_throttle_unittest.cc" ]
+     deps += [
+       "//base",
+--- a/chrome/browser/extensions/BUILD.gn
++++ b/chrome/browser/extensions/BUILD.gn
+@@ -667,7 +667,7 @@
+   ]
+   defines = []
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+@@ -2261,7 +2261,7 @@
+       sources += [ "policy_dse_ntp_override_metrics_reporter_unittest.cc" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [
+         # Batch upload is only available on Windows, Mac and Linux.
+         "sync/extension_local_data_batch_uploader_unittest.cc",
+@@ -2722,7 +2722,7 @@
+     deps += [ "//chrome/test/base:test_utils_mac" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "api/image_writer_private/image_writer_utility_client_browsertest.cc",
+     ]
+@@ -2926,7 +2926,7 @@
+   }  # if (is_chromeos)
+ 
+   # ChromeOS and Android don't use the download bubble UI.
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/ui/download" ]
+   }
+ 
+@@ -3092,14 +3092,14 @@
+       sources += [ "api/pdf_viewer_private/pdf_viewer_private_apitest.cc" ]
+     }
+ 
+-    if (is_win || is_linux || is_mac || is_chromeos) {
++    if (is_win || (is_linux || is_zedbsd) || is_mac || is_chromeos) {
+       sources += [
+         "api/experimental_ai_data/experimental_ai_data_policy_browsertest.cc",
+       ]
+       deps += [ "//chrome/browser/extensions/api/experimental_ai_data" ]
+     }
+ 
+-    if (is_win || is_linux || is_mac) {
++    if (is_win || (is_linux || is_zedbsd) || is_mac) {
+       sources += [
+         "//chrome/browser/ui/views/web_apps/file_handler_launch_dialog_browsertest.cc",
+         "api/experimental_actor/experimental_actor_apitest.cc",
+@@ -3137,7 +3137,7 @@
+         "//components/enterprise/connectors/core",
+       ]
+     }
+-    if (is_win || is_linux || is_mac || is_chromeos) {
++    if (is_win || (is_linux || is_zedbsd) || is_mac || is_chromeos) {
+       sources += [ "//chrome/browser/enterprise/connectors/device_trust/device_trust_browsertest.cc" ]
+ 
+       deps += [
+@@ -3151,7 +3151,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_linux || is_mac) {
++    if (is_win || (is_linux || is_zedbsd) || is_mac) {
+       deps += [
+         "//chrome/browser/enterprise/connectors/device_trust/key_management/browser/commands:test_support",
+         "//chrome/browser/enterprise/connectors/device_trust/key_management/core/persistence:test_support",
+--- a/chrome/browser/extensions/api/BUILD.gn
++++ b/chrome/browser/extensions/api/BUILD.gn
+@@ -85,7 +85,7 @@
+       public_deps += [ "//chrome/browser/extensions/api/pdf_viewer_private" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       public_deps +=
+           [ "//chrome/browser/extensions/api/web_authentication_proxy" ]
+     }
+--- a/chrome/browser/extensions/api/tab_groups/BUILD.gn
++++ b/chrome/browser/extensions/api/tab_groups/BUILD.gn
+@@ -51,7 +51,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+--- a/chrome/browser/extensions/api/web_authentication_proxy/BUILD.gn
++++ b/chrome/browser/extensions/api/web_authentication_proxy/BUILD.gn
+@@ -7,7 +7,7 @@
+ assert(enable_extensions_core)
+ 
+ # This API is limited to Win/Mac/Linux.
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("web_authentication_proxy") {
+   sources = [
+--- a/chrome/browser/favicon/BUILD.gn
++++ b/chrome/browser/favicon/BUILD.gn
+@@ -51,7 +51,7 @@
+   if (is_chromeos) {
+     deps += [ "//ash/constants" ]
+   }
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ }
+--- a/chrome/browser/feedback/BUILD.gn
++++ b/chrome/browser/feedback/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("feedback_enum") {
+   sources = [ "public/feedback_source.h" ]
+@@ -60,7 +60,7 @@
+       "//chrome/browser/feedback:feedback_enum",
+       "//components/sessions:session_id",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "feedback_disabled_dialog.h" ]
+       public_deps += [ "//ui/gfx:native_ui_types" ]
+     }
+@@ -152,7 +152,7 @@
+       "//net",
+       "//services/cert_verifier:lib",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "feedback_disabled_dialog.cc" ]
+       deps += [
+         "//chrome/app:generated_resources",
+@@ -277,7 +277,7 @@
+       deps += [ "//chromeos/ash/components/dbus/spaced" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "feedback_disabled_dialog_browsertest.cc" ]
+       deps += [ "//components/prefs" ]
+     }
+--- a/chrome/browser/file_system_access/BUILD.gn
++++ b/chrome/browser/file_system_access/BUILD.gn
+@@ -7,7 +7,7 @@
+ import("//components/safe_browsing/buildflags.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("file_system_access") {
+   sources = [
+--- a/chrome/browser/first_run/BUILD.gn
++++ b/chrome/browser/first_run/BUILD.gn
+@@ -122,7 +122,7 @@
+       deps += [ "//chrome/browser/ui/views:eula_dialog_linux" ]
+     }
+ 
+-    if (is_linux || is_mac) {
++    if ((is_linux || is_zedbsd) || is_mac) {
+       sources += [ "first_run_internal_posix.cc" ]
+     }
+   }
+@@ -204,7 +204,7 @@
+     sources += [ "first_run_browsertest.cc" ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "first_run_internal_posix_browsertest.cc" ]
+   }
+   if (!is_android) {
+--- a/chrome/browser/gapis/BUILD.gn
++++ b/chrome/browser/gapis/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_linux || is_mac)
++assert((is_linux || is_zedbsd) || is_mac)
+ 
+ source_set("gapis") {
+   sources = [
+--- a/chrome/browser/headless/BUILD.gn
++++ b/chrome/browser/headless/BUILD.gn
+@@ -106,7 +106,7 @@
+       "test/headless_mode_browsertest.h",
+     ]
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       sources += [
+         "test/headless_browser_test_utils.cc",
+         "test/headless_browser_test_utils.h",
+@@ -149,7 +149,7 @@
+       "//ui/base/clipboard:clipboard_test_support",
+     ]
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       deps += [
+         "//chrome/browser/profiles",
+         "//chrome/browser/ui/browser_window",
+--- a/chrome/browser/hid/BUILD.gn
++++ b/chrome/browser/hid/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("hid") {
+   public = [
+@@ -31,7 +31,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [
+       "hid_connection_tracker.h",
+       "hid_connection_tracker_factory.h",
+@@ -191,7 +191,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "hid_status_icon_unittest.cc" ]
+     deps += [ "//chrome/browser/device_notifications:unit_tests" ]
+   }
+--- a/chrome/browser/image_editor/BUILD.gn
++++ b/chrome/browser/image_editor/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ import("//build/config/ui.gni")
+ 
+-assert(is_chromeos || is_linux || is_mac || is_win,
++assert(is_chromeos || (is_linux || is_zedbsd) || is_mac || is_win,
+        "Image Editor is for desktop plaforms only")
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+--- a/chrome/browser/importer/BUILD.gn
++++ b/chrome/browser/importer/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("importer") {
+   sources = [
+--- a/chrome/browser/infobars/BUILD.gn
++++ b/chrome/browser/infobars/BUILD.gn
+@@ -156,7 +156,7 @@
+       "//url",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/ui/startup/default_browser_prompt",
+         "//chrome/browser/ui/views/session_restore_infobar",
+--- a/chrome/browser/lifetime/BUILD.gn
++++ b/chrome/browser/lifetime/BUILD.gn
+@@ -47,7 +47,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public += [ "scheduled_restart_manager.h" ]
+     public_deps += [
+       "//chrome/browser/upgrade_detector",
+@@ -190,7 +190,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "scheduled_restart_manager.cc" ]
+     deps += [
+       "//chrome/browser/enterprise",
+@@ -257,7 +257,7 @@
+       sources += [ "switch_utils_unittest.cc" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "scheduled_restart_manager_unittest.cc" ]
+       deps += [
+         ":test_support",
+@@ -278,7 +278,7 @@
+     }
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     source_set("test_support") {
+       testonly = true
+       public = [ "scheduled_restart_test_utils.h" ]
+@@ -337,7 +337,7 @@
+       sources += [ "application_lifetime_browsertest.cc" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "scheduled_restart_manager_browsertest.cc" ]
+       deps += [ ":test_support" ]
+     }
+--- a/chrome/browser/lookalikes/BUILD.gn
++++ b/chrome/browser/lookalikes/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("lookalikes") {
+   sources = [
+--- a/chrome/browser/manta/BUILD.gn
++++ b/chrome/browser/manta/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("manta") {
+   public = [ "manta_service_factory.h" ]
+--- a/chrome/browser/media/webrtc/BUILD.gn
++++ b/chrome/browser/media/webrtc/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ import("//build/config/ozone.gni")
+ import("//build/config/ui.gni")
+--- a/chrome/browser/memory/BUILD.gn
++++ b/chrome/browser/memory/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("memory") {
+   public = [
+--- a/chrome/browser/metrics/BUILD.gn
++++ b/chrome/browser/metrics/BUILD.gn
+@@ -208,7 +208,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     public += [ "structured/chrome_structured_metrics_delegate.h" ]
+     public_deps += [
+       "//components/metrics/structured:events",
+@@ -227,7 +227,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_android || is_linux) {
++  if (is_win || is_android || (is_linux || is_zedbsd)) {
+     public += [ "chrome_metrics_service_crash_reporter.h" ]
+   }
+ 
+@@ -493,7 +493,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [ "structured/chrome_structured_metrics_delegate.cc" ]
+   }
+ 
+@@ -508,7 +508,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     deps += [ "//chrome/browser/updates:update_metrics" ]
+   }
+ 
+@@ -516,7 +516,7 @@
+     deps += [ "//chrome/browser/default_browser:startup_metrics" ]
+   }
+ 
+-  if (is_win || is_android || is_linux) {
++  if (is_win || is_android || (is_linux || is_zedbsd)) {
+     sources += [ "chrome_metrics_service_crash_reporter.cc" ]
+   }
+ 
+--- a/chrome/browser/metrics/structured/BUILD.gn
++++ b/chrome/browser/metrics/structured/BUILD.gn
+@@ -16,7 +16,7 @@
+ 
+   if (is_chromeos) {
+     deps += [ "//components/metrics/structured:external_metrics" ]
+-  } else if (is_win || is_linux || is_mac) {
++  } else if (is_win || (is_linux || is_zedbsd) || is_mac) {
+     sources += [
+       "chrome_event_storage.cc",
+       "chrome_event_storage.h",
+@@ -45,7 +45,7 @@
+   ]
+ }
+ 
+-if (is_win || is_linux || is_mac) {
++if (is_win || (is_linux || is_zedbsd) || is_mac) {
+   source_set("unit_tests") {
+     testonly = true
+ 
+--- a/chrome/browser/navigation_predictor/BUILD.gn
++++ b/chrome/browser/navigation_predictor/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ import("//build/config/features.gni")
+ import("//net/features.gni")
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("navigation_predictor") {
+   sources = [
+--- a/chrome/browser/optimization_guide/BUILD.gn
++++ b/chrome/browser/optimization_guide/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("optimization_guide") {
+   sources = [
+--- a/chrome/browser/payments/browser_binding/BUILD.gn
++++ b/chrome/browser/payments/browser_binding/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-is_desktop = is_mac || is_win || is_linux || is_chromeos
++is_desktop = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos
+ 
+ source_set("browser_bound_key_deleter") {
+   sources = [
+--- a/chrome/browser/performance_manager/BUILD.gn
++++ b/chrome/browser/performance_manager/BUILD.gn
+@@ -272,7 +272,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [ "user_tuning/memory_saver_policy_handler.cc" ]
+     deps += [ "//components/policy/core/browser" ]
+   }
+@@ -451,7 +451,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_mac || is_win) {
+     sources += [ "user_tuning/memory_saver_policy_handler_unittest.cc" ]
+   }
+ 
+--- a/chrome/browser/picture_in_picture/BUILD.gn
++++ b/chrome/browser/picture_in_picture/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//chrome/common/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ # The window occlusion logic is currently for desktop only, and the
+ # WebContentsObserver-based implementation does not work on Linux
+@@ -40,7 +40,7 @@
+     "//url",
+   ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     public_deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+   if (!is_android) {
+--- a/chrome/browser/policy/BUILD.gn
++++ b/chrome/browser/policy/BUILD.gn
+@@ -626,7 +626,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "test/audio_sandbox_enabled_browsertest.cc" ]
+   }
+ 
+@@ -651,7 +651,7 @@
+     deps += [ "//chrome/browser/win/isolated_browser:isolated_browser_support" ]
+   }
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     sources += [ "test/network_service_sandbox_enabled_browsertest.cc" ]
+   }
+ 
+@@ -667,7 +667,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_win || is_linux) {
++  if (is_mac || is_win || (is_linux || is_zedbsd)) {
+     # Welcome and What's New pages that are controlled by the promotional
+     # tabs policy are win/mac/linux only.
+     sources += [ "test/promotional_tabs_enabled_policy_browsertest.cc" ]
+@@ -679,7 +679,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "test/full_screen_allowed_policy_browsertest.cc" ]
+ 
+     if (enable_extensions) {
+@@ -886,7 +886,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "gemini_enterprise_url_policy_handler_unittest.cc" ]
+   }
+ 
+@@ -1116,7 +1116,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [ "gemini_enterprise_url_policy_handler.h" ]
+   }
+ 
+@@ -1171,11 +1171,11 @@
+     public += [ "browser_dm_token_storage_mac.h" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     public += [ "battery_saver_policy_handler.h" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     public += [
+       "cloud/profile_token_policy_web_signin_service.h",
+       "cloud/profile_token_policy_web_signin_service_factory.h",
+@@ -1187,7 +1187,7 @@
+     public += [ "browser_dm_token_storage_linux.h" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [
+       "messaging_layer/util/manual_test_heartbeat_event.h",
+       "messaging_layer/util/manual_test_heartbeat_event_factory.h",
+@@ -1416,7 +1416,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "gemini_enterprise_url_policy_handler.cc" ]
+     deps += [ "//chrome/browser/glic/gemini_enterprise:url_allowlist" ]
+   }
+@@ -1556,11 +1556,11 @@
+     }
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [ "battery_saver_policy_handler.cc" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [
+       "cloud/profile_token_policy_web_signin_service.cc",
+       "cloud/profile_token_policy_web_signin_service_factory.cc",
+@@ -1576,7 +1576,7 @@
+     sources += [ "browser_dm_token_storage_linux.cc" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "messaging_layer/util/manual_test_heartbeat_event.cc",
+       "messaging_layer/util/manual_test_heartbeat_event_factory.cc",
+--- a/chrome/browser/predictors/BUILD.gn
++++ b/chrome/browser/predictors/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//extensions/buildflags/buildflags.gni")
+ import("//third_party/protobuf/proto_library.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ proto_library("resource_prefetch_predictor_proto") {
+   sources = [ "resource_prefetch_predictor.proto" ]
+--- a/chrome/browser/predictors/lcp_critical_path_predictor/BUILD.gn
++++ b/chrome/browser/predictors/lcp_critical_path_predictor/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//third_party/protobuf/proto_library.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ proto_library("lcp_critical_path_predictor_proto") {
+   sources = [ "lcp_critical_path_predictor.proto" ]
+--- a/chrome/browser/prefs/BUILD.gn
++++ b/chrome/browser/prefs/BUILD.gn
+@@ -11,7 +11,7 @@
+ import("//pdf/features.gni")
+ import("//rlz/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("prefs") {
+   sources = [
+@@ -231,7 +231,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     deps += [ "//chrome/browser/ui/webui/management" ]
+   }
+ 
+@@ -355,7 +355,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "//chrome/browser/browser_switcher",
+       "//chrome/browser/ui/webui/whats_new",
+--- a/chrome/browser/preloading/prefetch/no_state_prefetch/BUILD.gn
++++ b/chrome/browser/preloading/prefetch/no_state_prefetch/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//components/safe_browsing/buildflags.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("no_state_prefetch") {
+   sources = [
+--- a/chrome/browser/privacy/BUILD.gn
++++ b/chrome/browser/privacy/BUILD.gn
+@@ -102,7 +102,7 @@
+   }
+ }
+ 
+-if (is_win || is_linux || is_android || is_chromeos) {
++if (is_win || (is_linux || is_zedbsd) || is_android || is_chromeos) {
+   import("//components/policy/tools/generate_policy_source.gni")
+   import("//third_party/protobuf/proto_library.gni")
+ 
+--- a/chrome/browser/profiles/BUILD.gn
++++ b/chrome/browser/profiles/BUILD.gn
+@@ -240,7 +240,7 @@
+     sources += [ "profile_shortcut_manager_stub.cc" ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     deps += [
+       "//chrome/browser/gapis",
+       "//components/gapis",
+@@ -349,7 +349,7 @@
+     deps += [ "//chrome/credential_provider/common:common_constants" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     public += [ "guest_mode_policy_handler.h" ]
+     sources += [ "guest_mode_policy_handler.cc" ]
+     deps += [
+@@ -599,7 +599,7 @@
+     "//url",
+   ]
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+@@ -1038,11 +1038,11 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//chrome/browser/multistep_filter" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "//chrome/browser/browser_switcher",
+       "//chrome/browser/search_integrity",
+@@ -1106,7 +1106,7 @@
+     deps += [ "//chrome/browser/captive_portal" ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     deps += [
+       "//chrome/browser/gapis",
+       "//components/gapis",
+@@ -1250,7 +1250,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "guest_mode_policy_handler_unittest.cc" ]
+   }
+ 
+@@ -1336,7 +1336,7 @@
+       ]
+     }
+ 
+-    if (is_mac || is_win || is_linux) {
++    if (is_mac || is_win || (is_linux || is_zedbsd)) {
+       sources += [ "profile_statistics_browsertest.cc" ]
+       deps += [ "//chrome/browser/autofill" ]
+     }
+--- a/chrome/browser/record_replay/BUILD.gn
++++ b/chrome/browser/record_replay/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//third_party/protobuf/proto_library.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ group("record_replay") {
+   public_deps = [ "//components/record_replay/content/browser" ]
+--- a/chrome/browser/reduce_accept_language/BUILD.gn
++++ b/chrome/browser/reduce_accept_language/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//chrome/common/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("reduce_accept_language") {
+   sources = [ "reduce_accept_language_factory.h" ]
+--- a/chrome/browser/regional_capabilities/BUILD.gn
++++ b/chrome/browser/regional_capabilities/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/chrome_build.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("regional_capabilities") {
+   sources = [
+--- a/chrome/browser/renderer_context_menu/BUILD.gn
++++ b/chrome/browser/renderer_context_menu/BUILD.gn
+@@ -226,7 +226,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+     public += [ "spelling_options_submenu_observer.h" ]
+     sources += [ "spelling_options_submenu_observer.cc" ]
+   }
+@@ -441,7 +441,7 @@
+       "//url",
+     ]
+ 
+-    if (is_linux || is_chromeos || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+       sources += [
+         # This test is for the spelling options submenu that's only for
+         # Windows, ChromeOS, and Linux.
+--- a/chrome/browser/resources/BUILD.gn
++++ b/chrome/browser/resources/BUILD.gn
+@@ -145,7 +145,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android) {
+     public_deps += [
+       "discards:resources",
+       "management:resources",
+@@ -153,11 +153,11 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public_deps += [ "skills:resources" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public_deps += [
+       "app_home:resources",
+       "app_settings:resources",
+@@ -500,7 +500,7 @@
+     ]
+   }
+ 
+-  if (is_android || is_linux || is_chromeos || is_win) {
++  if (is_android || (is_linux || is_zedbsd) || is_chromeos || is_win) {
+     public_deps += [ "//chrome/browser/resources/sandbox_internals:resources" ]
+   }
+ 
+@@ -592,7 +592,7 @@
+     ]
+   }
+ 
+-  if (is_android || is_linux || is_chromeos || is_win) {
++  if (is_android || (is_linux || is_zedbsd) || is_chromeos || is_win) {
+     sources += [ "$root_gen_dir/chrome/sandbox_internals_resources.pak" ]
+   }
+ 
+--- a/chrome/browser/resources/app_home/BUILD.gn
++++ b/chrome/browser/resources/app_home/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ build_webui("build") {
+   grd_prefix = "app_home"
+--- a/chrome/browser/resources/app_settings/BUILD.gn
++++ b/chrome/browser/resources/app_settings/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//chrome/common/features.gni")
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+ build_webui("build") {
+--- a/chrome/browser/resources/browser_switch/BUILD.gn
++++ b/chrome/browser/resources/browser_switch/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//chrome/common/features.gni")
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ build_webui("build") {
+   grd_prefix = "browser_switch"
+--- a/chrome/browser/resources/on_device_translation_internals/BUILD.gn
++++ b/chrome/browser/resources/on_device_translation_internals/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ build_webui("build") {
+   grd_prefix = "on_device_translation_internals"
+--- a/chrome/browser/resources/sandbox_internals/BUILD.gn
++++ b/chrome/browser/resources/sandbox_internals/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_android || is_linux || is_chromeos || is_win)
++assert(is_android || (is_linux || is_zedbsd) || is_chromeos || is_win)
+ 
+ build_webui("build") {
+   grd_prefix = "sandbox_internals"
+--- a/chrome/browser/resources/settings/BUILD.gn
++++ b/chrome/browser/resources/settings/BUILD.gn
+@@ -532,7 +532,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     ts_files += [
+       "a11y_page/ax_annotations_section.html.ts",
+       "a11y_page/ax_annotations_section.ts",
+--- a/chrome/browser/resources/signin/history_sync_optin/BUILD.gn
++++ b/chrome/browser/resources/signin/history_sync_optin/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ build_webui("build") {
+   ts_composite = true
+--- a/chrome/browser/resources/tab_search/BUILD.gn
++++ b/chrome/browser/resources/tab_search/BUILD.gn
+@@ -7,7 +7,7 @@
+ import("//ui/webui/resources/tools/generate_grd.gni")
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_linux || is_chromeos || is_win || is_mac)
++assert((is_linux || is_zedbsd) || is_chromeos || is_win || is_mac)
+ 
+ build_webui("build") {
+   grd_prefix = "tab_search"
+--- a/chrome/browser/resources/updater/BUILD.gn
++++ b/chrome/browser/resources/updater/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_mac || is_win || is_linux)
++assert(is_mac || is_win || (is_linux || is_zedbsd))
+ 
+ build_webui("build") {
+   grd_prefix = "updater"
+--- a/chrome/browser/safe_browsing/BUILD.gn
++++ b/chrome/browser/safe_browsing/BUILD.gn
+@@ -156,7 +156,7 @@
+     allow_circular_includes_from += [ "//chrome/browser/ash/file_manager" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [ "security_settings_bundle_toast_helper.h" ]
+     sources += [ "security_settings_bundle_toast_helper.cc" ]
+     deps += [
+@@ -1071,7 +1071,7 @@
+     # For extensions::DownloadedByExtension in the download_protection tests.
+     deps += [ "//chrome/browser/extensions" ]
+   }
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "generated_safe_browsing_pref_unittest.cc",
+       "generated_security_settings_bundle_pref_unittest.cc",
+--- a/chrome/browser/search/BUILD.gn
++++ b/chrome/browser/search/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//extensions/buildflags/buildflags.gni")
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("search") {
+   sources = [
+--- a/chrome/browser/search/background/BUILD.gn
++++ b/chrome/browser/search/background/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ import("//third_party/protobuf/proto_library.gni")
+ 
+--- a/chrome/browser/search_engine_choice/BUILD.gn
++++ b/chrome/browser/search_engine_choice/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/chrome_build.gni")
+ import("//build/config/chromeos/args.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("search_engine_choice") {
+   sources = [ "search_engine_choice_service_factory.h" ]
+--- a/chrome/browser/search_engines/BUILD.gn
++++ b/chrome/browser/search_engines/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//extensions/buildflags/buildflags.gni")
+ import("//rlz/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("search_engines") {
+   public = [
+--- a/chrome/browser/serial/BUILD.gn
++++ b/chrome/browser/serial/BUILD.gn
+@@ -126,7 +126,7 @@
+   ]
+ }
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   source_set("device_realtarget_browsertests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/sharing_hub/BUILD.gn
++++ b/chrome/browser/sharing_hub/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("sharing_hub") {
+   sources = [
+@@ -56,7 +56,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "sharing_hub_model_unittest.cc" ]
+     deps += [
+       ":sharing_hub",
+--- a/chrome/browser/signin/BUILD.gn
++++ b/chrome/browser/signin/BUILD.gn
+@@ -122,14 +122,14 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     public += [
+       "accounts_policy_manager.h",
+       "accounts_policy_manager_factory.h",
+     ]
+   }
+ 
+-  if (is_mac || is_linux) {
++  if (is_mac || (is_linux || is_zedbsd)) {
+     public += [ "first_run_desktop_refresh_field_trial.h" ]
+   }
+ 
+@@ -392,7 +392,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [
+       "accounts_policy_manager.cc",
+       "accounts_policy_manager_factory.cc",
+@@ -403,7 +403,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_linux) {
++  if (is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "first_run_desktop_refresh_field_trial.cc" ]
+   }
+ 
+@@ -678,7 +678,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "accounts_policy_manager_unittest.cc" ]
+   }
+ 
+@@ -801,7 +801,7 @@
+       "//testing/gtest",
+     ]
+ 
+-    if (is_mac || is_win || is_linux) {
++    if (is_mac || is_win || (is_linux || is_zedbsd)) {
+       sources += [ "signin_hats_util_browsertest.cc" ]
+       deps += [ "//chrome/browser/ui/hats:test_support" ]
+     }
+--- a/chrome/browser/speech/BUILD.gn
++++ b/chrome/browser/speech/BUILD.gn
+@@ -339,7 +339,7 @@
+ 
+     if (!is_linux || target_cpu != "arm64") {
+       # SODA doesn't support Linux on Arm64.
+-      if (is_win || is_mac || is_linux) {
++      if (is_win || is_mac || (is_linux || is_zedbsd)) {
+         sources += [ "on_device_speech_recognition_impl_browsertest.cc" ]
+         deps += [
+           "//chrome/browser/browsing_data:constants",
+--- a/chrome/browser/spellchecker/BUILD.gn
++++ b/chrome/browser/spellchecker/BUILD.gn
+@@ -20,7 +20,7 @@
+     public += [ "spelling_request.h" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [
+       "spellcheck_language_blocklist_policy_handler.h",
+       "spellcheck_language_policy_handler.h",
+@@ -44,7 +44,7 @@
+     "//services/network/public/cpp",
+   ]
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     public_deps += [ "//components/policy/core/browser" ]
+   }
+ }
+@@ -63,7 +63,7 @@
+     sources += [ "spelling_request.cc" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "spellcheck_language_blocklist_policy_handler.cc",
+       "spellcheck_language_policy_handler.cc",
+@@ -146,7 +146,7 @@
+     "//testing/gtest",
+   ]
+ 
+-  if (is_chromeos || is_linux || is_win) {
++  if (is_chromeos || (is_linux || is_zedbsd) || is_win) {
+     sources += [ "spellcheck_language_policy_handlers_unittest.cc" ]
+     deps += [ "//components/policy/core/browser" ]
+   }
+--- a/chrome/browser/supervised_user/BUILD.gn
++++ b/chrome/browser/supervised_user/BUILD.gn
+@@ -54,7 +54,7 @@
+     public += [ "desktop/supervised_user_service_platform_delegate.h" ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     public += [
+       "linux_mac_windows/parent_access_dialog_result_observer.h",
+       "linux_mac_windows/parent_access_view.h",
+@@ -197,7 +197,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [
+       "linux_mac_windows/parent_access_dialog_result_observer.cc",
+       "linux_mac_windows/parent_access_view.cc",
+@@ -287,7 +287,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     sources += [ "linux_mac_windows/supervised_user_extensions_metrics_delegate_impl_unittest.cc" ]
+   }
+ 
+@@ -392,7 +392,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [
+         "kids_profile_interactive_uitest.cc",
+         "linux_mac_windows/parent_access_dialog_result_observer_browsertest.cc",
+@@ -413,7 +413,7 @@
+         "//extensions/common",
+       ]
+ 
+-      if (is_win || is_linux || is_mac) {
++      if (is_win || (is_linux || is_zedbsd) || is_mac) {
+         sources += [ "supervised_user_pending_state_navigation_browsertest.cc" ]
+       }
+     }
+--- a/chrome/browser/support_tool/BUILD.gn
++++ b/chrome/browser/support_tool/BUILD.gn
+@@ -38,13 +38,23 @@
+       "//components/policy/core/browser",
+     ]
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       public += [ "updater_data_collector.h" ]
+       public_deps += [
+         "//chrome/updater:public_sources",
+         "//chrome/updater:public_util",
+       ]
+     }
++    if (is_zedbsd) {
++      # zedBSD has no Chrome updater: the system updates the browser.
++      public -= [
++        "updater_data_collector.h",
++      ]
++      public_deps -= [
++        "//chrome/updater:public_sources",
++        "//chrome/updater:public_util",
++      ]
++    }
+   }
+ 
+   source_set("impl") {
+@@ -82,10 +92,19 @@
+       ]
+     }
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       sources += [ "updater_data_collector.cc" ]
+       deps += [ "//chrome/updater:public_sources" ]
+     }
++    if (is_zedbsd) {
++      # zedBSD has no Chrome updater: the system updates the browser.
++      sources -= [
++        "updater_data_collector.cc",
++      ]
++      deps -= [
++        "//chrome/updater:public_sources",
++      ]
++    }
+   }
+ 
+   source_set("unit_tests") {
+@@ -118,10 +137,19 @@
+       deps += [ "//chromeos/ash/components/system" ]
+     }
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       sources += [ "updater_data_collector_unittest.cc" ]
+       deps += [ "//chrome/updater:public_sources" ]
+     }
++    if (is_zedbsd) {
++      # zedBSD has no Chrome updater: the system updates the browser.
++      sources -= [
++        "updater_data_collector_unittest.cc",
++      ]
++      deps -= [
++        "//chrome/updater:public_sources",
++      ]
++    }
+   }
+ 
+   source_set("browser_tests") {
+--- a/chrome/browser/sync/BUILD.gn
++++ b/chrome/browser/sync/BUILD.gn
+@@ -7,7 +7,7 @@
+ import("//components/supervised_user/buildflags.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("sync") {
+   sources = [
+--- a/chrome/browser/sync/test/integration/BUILD.gn
++++ b/chrome/browser/sync/test/integration/BUILD.gn
+@@ -223,11 +223,11 @@
+         deps += [ "//chrome/browser/spellchecker" ]
+       }
+     }
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources +=
+           [ "web_apps/two_client_web_apps_integration_test_mac_win_linux.cc" ]
+     }
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       sources +=
+           [ "web_apps/two_client_web_apps_integration_test_win_linux.cc" ]
+     }
+@@ -326,7 +326,7 @@
+       "//third_party/angle:includes",
+     ]
+ 
+-    if (is_linux || is_chromeos || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+       data_deps += [ "//chrome:packed_resources" ]
+     }
+ 
+--- a/chrome/browser/task_manager/BUILD.gn
++++ b/chrome/browser/task_manager/BUILD.gn
+@@ -203,7 +203,7 @@
+   ]
+ 
+   libs = []
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+   if (is_win) {
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -411,7 +411,7 @@
+         "//chromeos/strings",
+       ]
+     }
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/startup/default_browser_prompt" ]
+     }
+   }
+@@ -808,7 +808,7 @@
+         "//ui/linux:linux_ui",
+       ]
+     }
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/ui/shortcuts",
+         "//chrome/browser/ui/startup/default_browser_prompt",
+@@ -991,7 +991,7 @@
+       "//ui/gfx",
+       "//ui/gfx/geometry",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/views/scheduled_restart" ]
+     }
+   }
+@@ -1557,7 +1557,7 @@
+     "//extensions/buildflags",
+     "//url",
+   ]
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+   if (!is_android && enable_extensions_core) {
+--- a/chrome/browser/ui/ai_overlay_dialog/BUILD.gn
++++ b/chrome/browser/ui/ai_overlay_dialog/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/chrome_build.gni")
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_desktop_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android)
+ 
+ source_set("ai_overlay_dialog") {
+   sources = [
+--- a/chrome/browser/ui/animation/BUILD.gn
++++ b/chrome/browser/ui/animation/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("animation") {
+   public = [
+--- a/chrome/browser/ui/apps/BUILD.gn
++++ b/chrome/browser/ui/apps/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//printing/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("apps") {
+   sources = [
+--- a/chrome/browser/ui/autofill/BUILD.gn
++++ b/chrome/browser/ui/autofill/BUILD.gn
+@@ -12,7 +12,7 @@
+   import("//build/config/android/rules.gni")
+ }
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("bubble_controller_base") {
+   public = [ "bubble_controller_base.h" ]
+--- a/chrome/browser/ui/autofill/autofill_ai/BUILD.gn
++++ b/chrome/browser/ui/autofill/autofill_ai/BUILD.gn
+@@ -8,7 +8,7 @@
+   import("//build/config/android/rules.gni")
+ }
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ if (is_android) {
+   java_cpp_enum("autofill_ai_ui_java_enums") {
+--- a/chrome/browser/ui/autofill/email_verifier/BUILD.gn
++++ b/chrome/browser/ui/autofill/email_verifier/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("email_verifier") {
+   public = [ "email_verification_controller.h" ]
+--- a/chrome/browser/ui/autofill/payments/BUILD.gn
++++ b/chrome/browser/ui/autofill/payments/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("payments") {
+   sources = [
+--- a/chrome/browser/ui/blocked_content/BUILD.gn
++++ b/chrome/browser/ui/blocked_content/BUILD.gn
+@@ -6,7 +6,7 @@
+ import("//build/config/ozone.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("blocked_content") {
+   sources = [
+--- a/chrome/browser/ui/bluetooth/BUILD.gn
++++ b/chrome/browser/ui/bluetooth/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("bluetooth") {
+   sources = [ "bluetooth_dialogs.h" ]
+--- a/chrome/browser/ui/bookmarks/BUILD.gn
++++ b/chrome/browser/ui/bookmarks/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("bookmarks") {
+   sources = [
+--- a/chrome/browser/ui/browser_window/internal/BUILD.gn
++++ b/chrome/browser/ui/browser_window/internal/BUILD.gn
+@@ -189,7 +189,7 @@
+       }
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/download/bubble",
+         "//chrome/browser/ui/views/profiles:profile_customization_bubble_sync_controller",
+@@ -197,7 +197,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android) {
+       deps += [ "//chrome/browser/ui/ai_overlay_dialog" ]
+     }
+ 
+--- a/chrome/browser/ui/commerce/BUILD.gn
++++ b/chrome/browser/ui/commerce/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("commerce") {
+   sources = [
+--- a/chrome/browser/ui/content_settings/BUILD.gn
++++ b/chrome/browser/ui/content_settings/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("content_settings") {
+   sources = []
+--- a/chrome/browser/ui/contextual_search/BUILD.gn
++++ b/chrome/browser/ui/contextual_search/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//pdf/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("contextual_search") {
+   sources = [
+--- a/chrome/browser/ui/cookie_controls/BUILD.gn
++++ b/chrome/browser/ui/cookie_controls/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("unit_tests") {
+   testonly = true
+--- a/chrome/browser/ui/dialogs/BUILD.gn
++++ b/chrome/browser/ui/dialogs/BUILD.gn
+@@ -59,7 +59,7 @@
+     "//ui/shell_dialogs",
+   ]
+ 
+-  if (is_win || is_linux || is_mac || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_mac || is_chromeos) {
+     deps += [ "//chrome/browser/ui/bookmarks" ]
+   }
+ 
+--- a/chrome/browser/ui/digital_credentials/BUILD.gn
++++ b/chrome/browser/ui/digital_credentials/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("digital_credentials") {
+   sources = []
+--- a/chrome/browser/ui/download/BUILD.gn
++++ b/chrome/browser/ui/download/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ # Download bubble UI is not used on ChromeOS.
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("download_display") {
+   public = [ "download_display.h" ]
+--- a/chrome/browser/ui/exclusive_access/BUILD.gn
++++ b/chrome/browser/ui/exclusive_access/BUILD.gn
+@@ -6,7 +6,7 @@
+ import("//build/config/ozone.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("exclusive_access") {
+   sources = [
+--- a/chrome/browser/ui/extensions/BUILD.gn
++++ b/chrome/browser/ui/extensions/BUILD.gn
+@@ -70,7 +70,7 @@
+     public_deps += [ "//components/messages/android" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "extension_install_ui_desktop.h" ]
+   }
+   public_deps += [
+@@ -225,7 +225,7 @@
+     "//ui/strings",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "extension_install_ui_desktop.cc" ]
+     deps += [
+       "//chrome/browser/prefs",
+@@ -384,7 +384,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "settings_overridden_dialog_unittest.cc" ]
+     deps += [
+       ":extensions",
+--- a/chrome/browser/ui/file_system_access/BUILD.gn
++++ b/chrome/browser/ui/file_system_access/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//components/safe_browsing/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("file_system_access") {
+   sources = [
+--- a/chrome/browser/ui/find_bar/BUILD.gn
++++ b/chrome/browser/ui/find_bar/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/chromeos/args.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("find_bar") {
+   sources = [
+--- a/chrome/browser/ui/frame/BUILD.gn
++++ b/chrome/browser/ui/frame/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("frame") {
+   public = [ "window_frame_util.h" ]
+--- a/chrome/browser/ui/global_error/BUILD.gn
++++ b/chrome/browser/ui/global_error/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("global_error") {
+   sources = [
+--- a/chrome/browser/ui/global_media_controls/BUILD.gn
++++ b/chrome/browser/ui/global_media_controls/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//chrome/common/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("global_media_controls") {
+   sources = [
+--- a/chrome/browser/ui/hats/BUILD.gn
++++ b/chrome/browser/ui/hats/BUILD.gn
+@@ -8,7 +8,7 @@
+   import("//build/config/android/rules.gni")
+ }
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("hats") {
+   sources = [
+@@ -147,7 +147,7 @@
+       "trust_safety_sentiment_service_factory_unittest.cc",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "trust_safety_sentiment_service_unittest.cc" ]
+     }
+ 
+--- a/chrome/browser/ui/hung_renderer/BUILD.gn
++++ b/chrome/browser/ui/hung_renderer/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/chromeos/args.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("hung_renderer") {
+   sources = [
+--- a/chrome/browser/ui/infobars/BUILD.gn
++++ b/chrome/browser/ui/infobars/BUILD.gn
+@@ -47,7 +47,7 @@
+     deps += [ "//chrome/browser/ui/startup/default_browser_prompt/pin_infobar" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/ui/views/session_restore_infobar" ]
+   }
+ }
+--- a/chrome/browser/ui/interventions/BUILD.gn
++++ b/chrome/browser/ui/interventions/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("interventions") {
+   sources = [
+--- a/chrome/browser/ui/javascript_dialogs/BUILD.gn
++++ b/chrome/browser/ui/javascript_dialogs/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("javascript_dialogs") {
+   sources = [
+--- a/chrome/browser/ui/lens/BUILD.gn
++++ b/chrome/browser/ui/lens/BUILD.gn
+@@ -324,7 +324,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       deps += [ "//chrome/browser/ui/webui:theme_source" ]
+     }
+   }
+--- a/chrome/browser/ui/login/BUILD.gn
++++ b/chrome/browser/ui/login/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("login") {
+   sources = [
+--- a/chrome/browser/ui/media_router/BUILD.gn
++++ b/chrome/browser/ui/media_router/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("media_router") {
+   sources = [
+--- a/chrome/browser/ui/omnibox/BUILD.gn
++++ b/chrome/browser/ui/omnibox/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/chromeos/args.gni")
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ # The public interface has no circular dependencies.
+ source_set("omnibox") {
+--- a/chrome/browser/ui/page_action/BUILD.gn
++++ b/chrome/browser/ui/page_action/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("icon_type") {
+   sources = [ "page_action_icon_type.h" ]
+--- a/chrome/browser/ui/page_info/BUILD.gn
++++ b/chrome/browser/ui/page_info/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//components/safe_browsing/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("page_info") {
+   sources = [
+--- a/chrome/browser/ui/passwords/BUILD.gn
++++ b/chrome/browser/ui/passwords/BUILD.gn
+@@ -54,7 +54,7 @@
+     deps += [ "//chrome/browser/ui/toasts/api:toasts" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "password_cross_domain_confirmation_popup_controller_impl.h",
+       "password_cross_domain_confirmation_popup_controller_interface.h",
+@@ -173,7 +173,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "password_cross_domain_confirmation_popup_controller_impl.cc" ]
+   }
+ }
+--- a/chrome/browser/ui/passwords/bubble_controllers/BUILD.gn
++++ b/chrome/browser/ui/passwords/bubble_controllers/BUILD.gn
+@@ -34,7 +34,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "relaunch_chrome_bubble_controller.h" ]
+   }
+ }
+@@ -95,7 +95,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "relaunch_chrome_bubble_controller.cc" ]
+   }
+ }
+@@ -160,7 +160,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_linux) {
++  if (is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "relaunch_chrome_bubble_controller_unittest.cc" ]
+   }
+ }
+--- a/chrome/browser/ui/permission_bubble/BUILD.gn
++++ b/chrome/browser/ui/permission_bubble/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("permission_bubble") {
+   sources = [ "permission_prompt.h" ]
+--- a/chrome/browser/ui/prefs/BUILD.gn
++++ b/chrome/browser/ui/prefs/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("prefs") {
+   sources = [
+--- a/chrome/browser/ui/profiles/BUILD.gn
++++ b/chrome/browser/ui/profiles/BUILD.gn
+@@ -30,7 +30,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "profile_customization_synced_theme_waiter.h",
+       "profile_customization_util.h",
+@@ -89,7 +89,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "profile_customization_synced_theme_waiter.cc",
+       "profile_customization_util.cc",
+@@ -196,7 +196,7 @@
+     }
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "profile_customization_util_unittest.cc",
+       "profile_picker_unittest.cc",
+--- a/chrome/browser/ui/qrcode_generator/BUILD.gn
++++ b/chrome/browser/ui/qrcode_generator/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ assert(toolkit_views)
+ 
+ source_set("qrcode_generator") {
+--- a/chrome/browser/ui/read_anything/BUILD.gn
++++ b/chrome/browser/ui/read_anything/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/compiler/compiler.gni")
+ import("//chrome/common/features.gni")
+--- a/chrome/browser/ui/safety_hub/BUILD.gn
++++ b/chrome/browser/ui/safety_hub/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//components/safe_browsing/buildflags.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("safety_hub") {
+   sources = [
+--- a/chrome/browser/ui/send_tab_to_self/BUILD.gn
++++ b/chrome/browser/ui/send_tab_to_self/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/ozone.gni")
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ assert(toolkit_views)
+ 
+ source_set("send_tab_to_self") {
+--- a/chrome/browser/ui/shared_highlighting/BUILD.gn
++++ b/chrome/browser/ui/shared_highlighting/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("shared_highlighting") {
+   sources = [
+--- a/chrome/browser/ui/sharing_hub/BUILD.gn
++++ b/chrome/browser/ui/sharing_hub/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ assert(toolkit_views)
+ 
+ source_set("sharing_hub") {
+@@ -80,7 +80,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("test_support_ui") {
+     testonly = true
+     sources = [
+--- a/chrome/browser/ui/shortcuts/BUILD.gn
++++ b/chrome/browser/ui/shortcuts/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("shortcuts") {
+   sources = [
+--- a/chrome/browser/ui/startup/BUILD.gn
++++ b/chrome/browser/ui/startup/BUILD.gn
+@@ -75,12 +75,12 @@
+     sources += [ "chrome_for_testing_infobar_delegate.h" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "web_app_startup_utils.h" ]
+     public_deps += [ "//components/services/app_service/public/cpp:app_types" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "first_run_service.h",
+       "web_app_info_recorder_utils.h",
+@@ -298,7 +298,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/views/session_restore_infobar" ]
+     }
+ 
+@@ -332,7 +332,7 @@
+     sources += [ "chrome_for_testing_infobar_delegate.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "web_app_startup_utils.cc" ]
+     deps += [
+       "//chrome/browser/lifetime:termination_notification",
+@@ -340,7 +340,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "first_run_service.cc",
+       "web_app_info_recorder_utils.cc",
+--- a/chrome/browser/ui/startup/default_browser_prompt/BUILD.gn
++++ b/chrome/browser/ui/startup/default_browser_prompt/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux,
++assert(is_win || is_mac || (is_linux || is_zedbsd),
+        "Default browser prompts exist only on non-Chromeos desktop platforms")
+ 
+ source_set("default_browser_prompt") {
+--- a/chrome/browser/ui/supervised_user/BUILD.gn
++++ b/chrome/browser/ui/supervised_user/BUILD.gn
+@@ -30,7 +30,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/ui/sync/BUILD.gn
++++ b/chrome/browser/ui/sync/BUILD.gn
+@@ -115,7 +115,7 @@
+       ]
+     }
+ 
+-    if (is_linux || is_mac || is_win) {
++    if ((is_linux || is_zedbsd) || is_mac || is_win) {
+       sources += [ "sync_passphrase_dialog_unittest.cc" ]
+       deps += [ "//components/sync:test_support" ]
+     }
+@@ -127,7 +127,7 @@
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+     deps = [ "//chrome/browser/ui:browser_commands" ]
+-    if (is_mac || is_linux || is_win) {
++    if (is_mac || (is_linux || is_zedbsd) || is_win) {
+       sources = [ "sync_passphrase_dialog_browsertest.cc" ]
+       deps += [
+         ":sync",
+--- a/chrome/browser/ui/tab_contents/BUILD.gn
++++ b/chrome/browser/ui/tab_contents/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//components/enterprise/buildflags/buildflags.gni")
+ import("//extensions/buildflags/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("tab_contents") {
+   sources = [
+@@ -14,7 +14,7 @@
+     "tab_contents_iterator.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "chrome_web_contents_menu_helper.h",
+       "chrome_web_contents_view_handle_drop.h",
+@@ -42,7 +42,7 @@
+     "tab_contents_iterator.cc",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "chrome_web_contents_menu_helper.cc",
+       "chrome_web_contents_view_handle_drop.cc",
+--- a/chrome/browser/ui/tabs/BUILD.gn
++++ b/chrome/browser/ui/tabs/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ import("//chrome/common/features.gni")
+ import("//components/captive_portal/core/features.gni")
+@@ -463,7 +463,7 @@
+       "vertical_tab_strip_state_controller_impl.h",
+     ]
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       sources += [ "inactive_window_mouse_event_controller.h" ]
+     }
+ 
+@@ -539,7 +539,7 @@
+       "vertical_tab_strip_state_controller_impl.cc",
+     ]
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       sources += [ "inactive_window_mouse_event_controller.cc" ]
+     }
+ 
+@@ -777,7 +777,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       deps += [
+         "//chrome/browser/multistep_filter",
+         "//chrome/browser/multistep_filter/ui",
+--- a/chrome/browser/ui/tabs/alert/BUILD.gn
++++ b/chrome/browser/ui/tabs/alert/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ import("//chrome/common/features.gni")
+ 
+--- a/chrome/browser/ui/tabs/saved_tab_groups/BUILD.gn
++++ b/chrome/browser/ui/tabs/saved_tab_groups/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//chrome/common/features.gni")
+ 
+--- a/chrome/browser/ui/toasts/BUILD.gn
++++ b/chrome/browser/ui/toasts/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/chrome_build.gni")
+ import("//build/config/ui.gni")
+--- a/chrome/browser/ui/toolbar/BUILD.gn
++++ b/chrome/browser/ui/toolbar/BUILD.gn
+@@ -274,7 +274,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/ui/startup/default_browser_prompt" ]
+   }
+ }
+@@ -392,7 +392,7 @@
+ 
+     deps += [ "//build/config/linux/dbus:buildflags" ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/startup/default_browser_prompt" ]
+     }
+ 
+@@ -477,7 +477,7 @@
+         "//chromeos/constants",
+       ]
+     }
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser:global_features",
+         "//chrome/browser/lifetime",
+--- a/chrome/browser/ui/toolbar/cast/BUILD.gn
++++ b/chrome/browser/ui/toolbar/cast/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("cast") {
+   sources = [
+--- a/chrome/browser/ui/user_education/BUILD.gn
++++ b/chrome/browser/ui/user_education/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/chromeos/args.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ # This is the public interface for the user education service.
+ source_set("user_education") {
+--- a/chrome/browser/ui/views/BUILD.gn
++++ b/chrome/browser/ui/views/BUILD.gn
+@@ -468,7 +468,7 @@
+   ]
+ }
+ 
+-if (is_win || is_linux || is_chromeos) {
++if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+   source_set("bluetooth_dialogs") {
+     public = [
+       "bluetooth_device_credentials_view.h",
+@@ -496,7 +496,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   source_set("close_bubble_on_tab_activation_helper") {
+     public = [ "close_bubble_on_tab_activation_helper.h" ]
+     sources = [ "close_bubble_on_tab_activation_helper.cc" ]
+@@ -861,7 +861,7 @@
+ }
+ 
+ source_set("first_run_dialog") {
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     public = [ "first_run_dialog.h" ]
+     sources = [ "first_run_dialog.cc" ]
+     public_deps = [
+@@ -1783,11 +1783,11 @@
+     "//ui/views:test_support",
+   ]
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ ":bluetooth_dialogs" ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "first_run_dialog_browsertest.cc" ]
+     deps += [ ":first_run_dialog" ]
+   }
+@@ -1960,7 +1960,7 @@
+       sources += [ "keyboard_access_interactive_uitest.cc" ]
+     }
+ 
+-    if (is_mac || is_linux || is_win) {
++    if (is_mac || (is_linux || is_zedbsd) || is_win) {
+       sources += [ "default_link_capturing_interactive_uitest.cc" ]
+     }
+ 
+@@ -2007,7 +2007,7 @@
+       "//ui/web_dialogs:test_support",
+     ]
+ 
+-    if (is_mac || is_linux || is_win) {
++    if (is_mac || (is_linux || is_zedbsd) || is_win) {
+       deps += [
+         ":intent_picker_bubble_view",
+         "//chrome/browser/apps/link_capturing",
+--- a/chrome/browser/ui/views/animations/BUILD.gn
++++ b/chrome/browser/ui/views/animations/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("animations") {
+   sources = [
+--- a/chrome/browser/ui/views/app_menu/BUILD.gn
++++ b/chrome/browser/ui/views/app_menu/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/ui.gni")
+ import("//extensions/buildflags/buildflags.gni")
+@@ -202,7 +202,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/lifetime" ]
+   }
+ }
+--- a/chrome/browser/ui/views/autofill/BUILD.gn
++++ b/chrome/browser/ui/views/autofill/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/ui.gni")
+ import("//components/signin/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("delete_address_profile_dialog_view") {
+   sources = [ "delete_address_profile_dialog_view.cc" ]
+--- a/chrome/browser/ui/views/autofill/autofill_ai/BUILD.gn
++++ b/chrome/browser/ui/views/autofill/autofill_ai/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("autofill_ai") {
+   public = [
+--- a/chrome/browser/ui/views/autofill/one_time_tokens/BUILD.gn
++++ b/chrome/browser/ui/views/autofill/one_time_tokens/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("one_time_tokens") {
+   public = [ "gmail_otp_opt_in_bubble_view.h" ]
+--- a/chrome/browser/ui/views/autofill/payments/BUILD.gn
++++ b/chrome/browser/ui/views/autofill/payments/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("dialog_view_ids") {
+   public = [ "dialog_view_ids.h" ]
+--- a/chrome/browser/ui/views/autofill/popup/email_verifier/BUILD.gn
++++ b/chrome/browser/ui/views/autofill/popup/email_verifier/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("email_verifier") {
+   public = [ "email_verification_popup_view_impl.h" ]
+--- a/chrome/browser/ui/views/bubble/BUILD.gn
++++ b/chrome/browser/ui/views/bubble/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/ui.gni")
+ 
+--- a/chrome/browser/ui/views/contextual_tasks/BUILD.gn
++++ b/chrome/browser/ui/views/contextual_tasks/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD - style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("onboarding_bubble") {
+   sources = [
+--- a/chrome/browser/ui/views/data_sharing/BUILD.gn
++++ b/chrome/browser/ui/views/data_sharing/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ assert(toolkit_views)
+ 
+ source_set("data_sharing") {
+--- a/chrome/browser/ui/views/device_signals_consent/BUILD.gn
++++ b/chrome/browser/ui/views/device_signals_consent/BUILD.gn
+@@ -37,7 +37,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/ui/views/download/BUILD.gn
++++ b/chrome/browser/ui/views/download/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD - style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("download") {
+   sources = [
+--- a/chrome/browser/ui/views/global_media_controls/BUILD.gn
++++ b/chrome/browser/ui/views/global_media_controls/BUILD.gn
+@@ -138,7 +138,7 @@
+     "//ui/views:test_support",
+   ]
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [ "media_dialog_view_unittest.cc" ]
+     deps += [
+       "//chrome/browser/accessibility",
+--- a/chrome/browser/ui/views/hats/BUILD.gn
++++ b/chrome/browser/ui/views/hats/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("hats") {
+   public = [ "hats_next_web_dialog.h" ]
+--- a/chrome/browser/ui/views/location_bar/BUILD.gn
++++ b/chrome/browser/ui/views/location_bar/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/ozone.gni")
+ import("//build/config/ui.gni")
+--- a/chrome/browser/ui/views/location_bar/cookie_controls/BUILD.gn
++++ b/chrome/browser/ui/views/location_bar/cookie_controls/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/ui.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("cookie_controls") {
+   sources = []
+--- a/chrome/browser/ui/views/media_preview/BUILD.gn
++++ b/chrome/browser/ui/views/media_preview/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("media_preview") {
+   public = [
+--- a/chrome/browser/ui/views/media_preview/camera_preview/BUILD.gn
++++ b/chrome/browser/ui/views/media_preview/camera_preview/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("camera_preview") {
+   public = [
+--- a/chrome/browser/ui/views/media_preview/mic_preview/BUILD.gn
++++ b/chrome/browser/ui/views/media_preview/mic_preview/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("mic_preview") {
+   public = [
+--- a/chrome/browser/ui/views/media_router/BUILD.gn
++++ b/chrome/browser/ui/views/media_router/BUILD.gn
+@@ -211,7 +211,7 @@
+ 
+     # media_router_ui_interactive_uitest.cc is desktop-only; it does not build
+     # on ChromeOS or Fuchsia.
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui:browser_window_header" ]
+       sources += [ "media_router_ui_interactive_uitest.cc" ]
+     }
+--- a/chrome/browser/ui/views/page_info/BUILD.gn
++++ b/chrome/browser/ui/views/page_info/BUILD.gn
+@@ -50,7 +50,7 @@
+     "//ui/views",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     # page_info_permission_content_view.h embeds a PageInfoPreviewsCoordinator
+     # (media_preview is unavailable on ChromeOS).
+     public_deps += [ "//chrome/browser/ui/views/media_preview" ]
+--- a/chrome/browser/ui/views/passwords/BUILD.gn
++++ b/chrome/browser/ui/views/passwords/BUILD.gn
+@@ -60,7 +60,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     # password_relaunch_chrome_view is only shown on Linux and macOS.
+     public += [ "password_relaunch_chrome_view.h" ]
+   }
+@@ -138,7 +138,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     # password_relaunch_chrome_view is only shown on Linux and macOS.
+     sources += [ "password_relaunch_chrome_view.cc" ]
+     deps += [ "//components/os_crypt/common" ]
+--- a/chrome/browser/ui/views/permissions/BUILD.gn
++++ b/chrome/browser/ui/views/permissions/BUILD.gn
+@@ -69,7 +69,7 @@
+       # with #if !BUILDFLAG(IS_CHROMEOS) blocks:
+       # media_preview/permission_prompt_previews_coordinator.h and
+       # media_effects/media_device_info.h. media_preview itself asserts
+-      # is_win || is_mac || is_linux (a strict subset of !is_chromeos on
++      # is_win || is_mac || (is_linux || is_zedbsd) (a strict subset of !is_chromeos on
+       # the platforms toolkit_views builds for), so this matches.
+       public_deps += [
+         "//chrome/browser/ui/views/media_preview",
+--- a/chrome/browser/ui/views/profiles/BUILD.gn
++++ b/chrome/browser/ui/views/profiles/BUILD.gn
+@@ -22,7 +22,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   source_set("profile_menu_coordinator") {
+     public = [ "profile_menu_coordinator.h" ]
+     public_deps = [
+@@ -389,7 +389,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("profile_menu_view") {
+     public = [ "profile_menu_view.h" ]
+     sources = [ "profile_menu_view.cc" ]
+@@ -808,7 +808,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("interactive_ui_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+@@ -1334,7 +1334,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "device_signals_disclaimer_browsertest.cc",
+       "profile_picker_glic_flow_controller_browsertest.cc",
+@@ -1374,7 +1374,7 @@
+     }
+   }
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     sources += [
+       "history_sync_optin_ui_browsertest.cc",
+       "managed_user_profile_notice_ui_browsertest.cc",
+@@ -1400,7 +1400,7 @@
+       ":profile_picker_glic_flow_controller",
+       ":profile_picker_reauth_provider",
+     ]
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       sources += [
+         "first_run_default_browser_ui_browsertest.cc",
+         "first_run_feature_showcase_ui_browsertest.cc",
+--- a/chrome/browser/ui/views/relaunch_notification/BUILD.gn
++++ b/chrome/browser/ui/views/relaunch_notification/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//chrome/browser/buildflags.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("relaunch_notification") {
+   public = [
+--- a/chrome/browser/ui/views/scheduled_restart/BUILD.gn
++++ b/chrome/browser/ui/views/scheduled_restart/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/features.gni")
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("scheduled_restart") {
+     public = [
+       "scheduled_restart_bubble_controller.h",
+--- a/chrome/browser/ui/views/send_tab_to_self/BUILD.gn
++++ b/chrome/browser/ui/views/send_tab_to_self/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("send_tab_to_self") {
+   public = [
+--- a/chrome/browser/ui/views/sharing_hub/BUILD.gn
++++ b/chrome/browser/ui/views/sharing_hub/BUILD.gn
+@@ -60,7 +60,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("unit_tests") {
+     testonly = true
+     sources = [
+--- a/chrome/browser/ui/views/side_panel/BUILD.gn
++++ b/chrome/browser/ui/views/side_panel/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD - style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//chrome/common/features.gni")
+ import("//extensions/buildflags/buildflags.gni")
+--- a/chrome/browser/ui/views/supervised_user/BUILD.gn
++++ b/chrome/browser/ui/views/supervised_user/BUILD.gn
+@@ -48,7 +48,7 @@
+   ]
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/ui/views/toolbar/BUILD.gn
++++ b/chrome/browser/ui/views/toolbar/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ import("//build/config/ui.gni")
+ import("//ui/webui/webui_features.gni")
+@@ -396,7 +396,7 @@
+     deps += [ "//chrome/browser/ui/views/zoom" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//chrome/browser/ui/ai_overlay_dialog" ]
+   }
+   deps += [ "//chrome/browser/ui/views/extensions:extensions_toolbar_desktop" ]
+@@ -529,7 +529,7 @@
+         "webui_toolbar_web_view_test_base.h",
+       ]
+ 
+-      if (is_win || is_mac || is_linux) {
++      if (is_win || is_mac || (is_linux || is_zedbsd)) {
+         sources += [ "webui_media_toolbar_button_browsertest.cc" ]
+       }
+ 
+@@ -605,7 +605,7 @@
+         "webui_toolbar_web_view_test_base.h",
+       ]
+ 
+-      if (is_win || is_mac || is_linux) {
++      if (is_win || is_mac || (is_linux || is_zedbsd)) {
+         sources += [ "webui_media_toolbar_button_interactive_uitest.cc" ]
+       }
+     }
+--- a/chrome/browser/ui/views/web_apps/BUILD.gn
++++ b/chrome/browser/ui/views/web_apps/BUILD.gn
+@@ -62,7 +62,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public += [
+       "deprecated_apps_dialog_view.h",
+       "force_installed_deprecated_apps_dialog_view.h",
+@@ -159,10 +159,10 @@
+   if (is_win) {
+     sources += [ "web_app_integration_browsertest_win.cc" ]
+   }
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     sources += [ "web_app_integration_browsertest_win_linux.cc" ]
+   }
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "web_app_integration_browsertest_win_linux_cros.cc" ]
+   }
+   if (is_mac) {
+@@ -176,7 +176,7 @@
+       "//components/remote_cocoa/browser",
+     ]
+   }
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "deprecated_apps_dialog_view_browsertest.cc",
+       "force_installed_deprecated_apps_dialog_view_browsertest.cc",
+@@ -227,7 +227,7 @@
+   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+   sources = []
+   deps = []
+-  if (is_mac || is_linux || is_win || is_chromeos) {
++  if (is_mac || (is_linux || is_zedbsd) || is_win || is_chromeos) {
+     sources += [ "web_app_navigation_capturing_iph_interactive_uitest.cc" ]
+     deps += [
+       "//chrome/browser/apps/link_capturing:test_support",
+@@ -902,7 +902,7 @@
+     public_deps += [ "//chrome/browser/ui/webui/app_home" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/ui/webui/app_settings" ]
+   }
+ }
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -184,7 +184,7 @@
+     deps += [ "//chrome/browser/ui/webui/safe_browsing" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [
+       "//chrome/browser/ui/webui/settings",
+       "//chrome/browser/ui/webui/signin",
+@@ -233,17 +233,23 @@
+     deps += [ "//chrome/browser/ui/webui/unexportable_keys_internals" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos || is_android) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     deps += [ "//chrome/browser/ui/webui/sandbox" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "//chrome/browser/ui/webui/browser_switch",
+       "//chrome/browser/ui/webui/on_device_translation_internals",
+       "//chrome/browser/ui/webui/updater",
+     ]
+   }
++  if (is_zedbsd) {
++    # zedBSD has no Chrome updater: the system updates the browser.
++    deps -= [
++      "//chrome/browser/ui/webui/updater",
++    ]
++  }
+ 
+   if (is_win) {
+     deps += [ "//chrome/browser/ui/webui/conflicts" ]
+@@ -283,7 +289,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android) {
+     deps += [ "//chrome/browser/ui/webui/discards" ]
+   }
+ 
+@@ -386,7 +392,7 @@
+ 
+     # webui_util_desktop.h is included only under #if !BUILDFLAG(IS_ANDROID);
+     # the util target itself is desktop-only.
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       deps += [
+         "//chrome/browser/ui/webui/top_chrome",
+         "//chrome/browser/ui/webui/util",
+@@ -669,11 +675,11 @@
+     deps += [ "//chrome/browser/ui/webui/conflicts" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos || is_android) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     deps += [ "//chrome/browser/ui/webui/sandbox" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/ui/webui/whats_new" ]
+   }
+ 
+@@ -727,7 +733,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("profile_helper") {
+     sources = [ "profile_helper.cc" ]
+     public = [ "profile_helper.h" ]
+@@ -1019,7 +1025,7 @@
+       "//url",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [ "profile_helper_browsertest.cc" ]
+       deps += [
+         ":profile_helper",
+--- a/chrome/browser/ui/webui/about/BUILD.gn
++++ b/chrome/browser/ui/webui/about/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("about") {
+   sources = [ "about_ui.h" ]
+--- a/chrome/browser/ui/webui/accessibility/BUILD.gn
++++ b/chrome/browser/ui/webui/accessibility/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("accessibility") {
+   sources = [ "accessibility_ui.h" ]
+--- a/chrome/browser/ui/webui/ai_overlay_dialog/BUILD.gn
++++ b/chrome/browser/ui/webui/ai_overlay_dialog/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/chrome_build.gni")
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_desktop_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android)
+ 
+ mojom("mojo_bindings") {
+   sources = [ "ai_overlay_dialog.mojom" ]
+--- a/chrome/browser/ui/webui/app_home/BUILD.gn
++++ b/chrome/browser/ui/webui/app_home/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//extensions/buildflags/buildflags.gni")
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ mojom("mojo_bindings") {
+   sources = [ "app_home.mojom" ]
+--- a/chrome/browser/ui/webui/app_management/BUILD.gn
++++ b/chrome/browser/ui/webui/app_management/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("app_management") {
+   sources = [
+--- a/chrome/browser/ui/webui/app_settings/BUILD.gn
++++ b/chrome/browser/ui/webui/app_settings/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ source_set("app_settings") {
+   public = [
+--- a/chrome/browser/ui/webui/browser_switch/BUILD.gn
++++ b/chrome/browser/ui/webui/browser_switch/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("browser_switch") {
+     sources = [ "browser_switch_ui.cc" ]
+     public = [ "browser_switch_ui.h" ]
+--- a/chrome/browser/ui/webui/infobar_internals/BUILD.gn
++++ b/chrome/browser/ui/webui/infobar_internals/BUILD.gn
+@@ -89,7 +89,7 @@
+       "//chrome/browser/win/installer_downloader:prefs",
+     ]
+   }
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "//chrome/browser/apps/link_capturing",
+       "//chrome/browser/ui/startup/default_browser_prompt",
+--- a/chrome/browser/ui/webui/intro/BUILD.gn
++++ b/chrome/browser/ui/webui/intro/BUILD.gn
+@@ -16,7 +16,7 @@
+   webui_module_path = "/"
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("intro") {
+     sources = [
+       "finish_or_continue_handler.cc",
+--- a/chrome/browser/ui/webui/new_tab_page/BUILD.gn
++++ b/chrome/browser/ui/webui/new_tab_page/BUILD.gn
+@@ -203,7 +203,7 @@
+       "//components/user_education/webui",
+       "//ui/webui/tracked_element",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/views/scheduled_restart" ]
+     }
+   }
+--- a/chrome/browser/ui/webui/on_device_translation_internals/BUILD.gn
++++ b/chrome/browser/ui/webui/on_device_translation_internals/BUILD.gn
+@@ -10,7 +10,7 @@
+   webui_module_path = "/"
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   source_set("on_device_translation_internals") {
+     sources = [
+       "on_device_translation_internals_page_handler_impl.cc",
+--- a/chrome/browser/ui/webui/organizer_panel/BUILD.gn
++++ b/chrome/browser/ui/webui/organizer_panel/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_linux || is_chromeos || is_win || is_mac)
++assert((is_linux || is_zedbsd) || is_chromeos || is_win || is_mac)
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+ mojom("mojo_bindings") {
+--- a/chrome/browser/ui/webui/password_manager/BUILD.gn
++++ b/chrome/browser/ui/webui/password_manager/BUILD.gn
+@@ -162,7 +162,7 @@
+   ]
+ 
+   # password_manager_ui_handler_unittest historically ran on desktop excluding
+-  # ChromeOS (is_linux || is_mac || is_win).
++  # ChromeOS ((is_linux || is_zedbsd) || is_mac || is_win).
+   if (!is_chromeos) {
+     sources += [ "password_manager_ui_handler_unittest.cc" ]
+   }
+--- a/chrome/browser/ui/webui/password_manager/notification_cards/BUILD.gn
++++ b/chrome/browser/ui/webui/password_manager/notification_cards/BUILD.gn
+@@ -63,7 +63,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "relaunch_chrome_banner.cc" ]
+     public += [ "relaunch_chrome_banner.h" ]
+     deps += [ "//components/os_crypt/common" ]
+@@ -125,7 +125,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     sources += [ "relaunch_chrome_banner_unittest.cc" ]
+     deps += [ "//components/os_crypt/browser:test_support" ]
+   }
+--- a/chrome/browser/ui/webui/safe_browsing/BUILD.gn
++++ b/chrome/browser/ui/webui/safe_browsing/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("safe_browsing") {
+   sources = [
+--- a/chrome/browser/ui/webui/sandbox/BUILD.gn
++++ b/chrome/browser/ui/webui/sandbox/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-if (is_win || is_android || is_linux || is_chromeos) {
++if (is_win || is_android || (is_linux || is_zedbsd) || is_chromeos) {
+   source_set("sandbox") {
+     sources = [ "sandbox_internals_ui.cc" ]
+     public = [ "sandbox_internals_ui.h" ]
+--- a/chrome/browser/ui/webui/search_engine_choice/BUILD.gn
++++ b/chrome/browser/ui/webui/search_engine_choice/BUILD.gn
+@@ -42,7 +42,7 @@
+   }
+ }
+ 
+-if (is_win || is_linux) {
++if (is_win || (is_linux || is_zedbsd)) {
+   source_set("browser_tests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/ui/webui/settings/BUILD.gn
++++ b/chrome/browser/ui/webui/settings/BUILD.gn
+@@ -6,7 +6,7 @@
+ import("//build/config/ui.gni")
+ import("//components/signin/features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("settings") {
+   sources = [
+@@ -115,7 +115,7 @@
+     public_deps += [ "//ui/webui/resources/cr_components/signin:mojo_bindings" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "settings_default_browser_handler.h",
+       "settings_manage_profile_handler.h",
+@@ -357,7 +357,7 @@
+     "//v8:v8_version",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "settings_default_browser_handler.cc",
+       "settings_manage_profile_handler.cc",
+@@ -704,7 +704,7 @@
+       deps += [ "//ui/ozone" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [
+         "accessibility_main_handler_unittest.cc",
+         "settings_manage_profile_handler_unittest.cc",
+@@ -782,7 +782,7 @@
+     deps += [ "//chrome/test/base/ash/interactive:test_support" ]
+   }
+ 
+-  if ((is_mac || is_linux || is_win) && enable_dice_support) {
++  if ((is_mac || (is_linux || is_zedbsd) || is_win) && enable_dice_support) {
+     sources += [ "sync_settings_interactive_uitest.cc" ]
+     deps += [
+       "//chrome/browser/signin",
+--- a/chrome/browser/ui/webui/settings/search/BUILD.gn
++++ b/chrome/browser/ui/webui/settings/search/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ # Native search backend for desktop chrome://settings.
+ source_set("search") {
+--- a/chrome/browser/ui/webui/settings/search/mojom/BUILD.gn
++++ b/chrome/browser/ui/webui/settings/search/mojom/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ mojom("mojom") {
+   sources = [
+--- a/chrome/browser/ui/webui/signin/BUILD.gn
++++ b/chrome/browser/ui/webui/signin/BUILD.gn
+@@ -135,7 +135,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "history_sync_optin/history_sync_optin_handler.h",
+       "history_sync_optin/history_sync_optin_ui.h",
+@@ -229,7 +229,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "history_sync_optin/history_sync_optin_handler.cc",
+       "history_sync_optin/history_sync_optin_ui.cc",
+@@ -464,7 +464,7 @@
+       "//url",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/views/profiles:profile_management_types" ]
+     }
+   }
+--- a/chrome/browser/ui/webui/signin/history_sync_optin/BUILD.gn
++++ b/chrome/browser/ui/webui/signin/history_sync_optin/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ mojom("mojo_bindings") {
+   sources = [ "history_sync_optin.mojom" ]
+--- a/chrome/browser/ui/webui/tab_search/BUILD.gn
++++ b/chrome/browser/ui/webui/tab_search/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//mojo/public/tools/bindings/mojom.gni")
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_linux || is_chromeos || is_win || is_mac)
++assert((is_linux || is_zedbsd) || is_chromeos || is_win || is_mac)
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+ mojom("mojo_bindings") {
+--- a/chrome/browser/ui/webui/updater/BUILD.gn
++++ b/chrome/browser/ui/webui/updater/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_mac || is_win || is_linux)
++assert(is_mac || is_win || (is_linux || is_zedbsd))
+ 
+ mojom("mojo_bindings") {
+   sources = [ "updater_ui.mojom" ]
+--- a/chrome/browser/ui/webui/util/BUILD.gn
++++ b/chrome/browser/ui/webui/util/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/webui_features.gni")
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("util") {
+   public = [
+--- a/chrome/browser/ui/webui/whats_new/BUILD.gn
++++ b/chrome/browser/ui/webui/whats_new/BUILD.gn
+@@ -24,7 +24,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "whats_new_fetcher.h",
+       "whats_new_handler.h",
+@@ -72,7 +72,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "whats_new_fetcher.cc",
+       "whats_new_handler.cc",
+@@ -101,7 +101,7 @@
+   }
+ }
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   source_set("unit_tests") {
+     testonly = true
+     sources = [
+--- a/chrome/browser/ui/zoom/BUILD.gn
++++ b/chrome/browser/ui/zoom/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android)
+ 
+ source_set("zoom") {
+   sources = [
+--- a/chrome/browser/updates/BUILD.gn
++++ b/chrome/browser/updates/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ source_set("update_metrics") {
+-  assert(is_linux || is_win || is_mac)
++  assert((is_linux || is_zedbsd) || is_win || is_mac)
+ 
+   public = [ "update_metrics_provider.h" ]
+ 
+@@ -11,7 +11,7 @@
+ }
+ 
+ source_set("impl") {
+-  assert(is_linux || is_win || is_mac)
++  assert((is_linux || is_zedbsd) || is_win || is_mac)
+ 
+   sources = [ "update_metrics_provider.cc" ]
+ 
+--- a/chrome/browser/usb/BUILD.gn
++++ b/chrome/browser/usb/BUILD.gn
+@@ -258,7 +258,7 @@
+   }
+ }
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   source_set("device_realtarget_browsertests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/browser/web_applications/BUILD.gn
++++ b/chrome/browser/web_applications/BUILD.gn
+@@ -1219,7 +1219,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//components/services/app_service" ]
+   }
+ 
+@@ -1344,7 +1344,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_mac) {
+     sources += [ "os_integration/shortcut_sub_manager_browsertest.cc" ]
+   }
+ 
+--- a/chrome/browser/webapps/BUILD.gn
++++ b/chrome/browser/webapps/BUILD.gn
+@@ -37,7 +37,7 @@
+     deps += [ "//chrome/browser/web_applications" ]
+   }
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ }
+--- a/chrome/browser/webauthn/BUILD.gn
++++ b/chrome/browser/webauthn/BUILD.gn
+@@ -271,7 +271,7 @@
+     "//device/fido",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//chrome/browser/extensions/api/web_authentication_proxy" ]
+   }
+ 
+@@ -591,7 +591,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       sources +=
+           [ "chrome_webauthn_iwa_remote_desktop_override_browsertest.cc" ]
+     }
+--- a/chrome/chrome_paks.gni
++++ b/chrome/chrome_paks.gni
+@@ -519,12 +519,12 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+       sources += [ "$root_gen_dir/chrome/management_resources.pak" ]
+       deps += [ "//chrome/browser/resources/management:resources" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_desktop_android) {
+       sources += [
+         "$root_gen_dir/chrome/ai_overlay_dialog_untrusted_resources.pak",
+         "$root_gen_dir/chrome/discards_resources.pak",
+@@ -535,7 +535,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       sources += [ "$root_gen_dir/chrome/skills_resources.pak" ]
+       deps += [ "//chrome/browser/resources/skills:resources" ]
+     }
+@@ -600,7 +600,7 @@
+       deps += [ "//chrome/browser/resources/watermark:resources" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       sources += [
+         "$root_gen_dir/chrome/app_home_resources.pak",
+         "$root_gen_dir/chrome/app_settings_resources.pak",
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -278,7 +278,7 @@
+     "//components/pdf/common:util",
+   ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+@@ -305,7 +305,7 @@
+     ]
+ 
+     # Add controlled frame dependencies on platforms that support it.
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       assert(enable_extensions)
+       deps += [
+         "//chrome/common/apps/platform_apps",
+--- a/chrome/common/chromeos/extensions/BUILD.gn
++++ b/chrome/common/chromeos/extensions/BUILD.gn
+@@ -37,7 +37,7 @@
+     "//extensions/common",
+   ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+--- a/chrome/common/extensions/api/api_sources.gni
++++ b/chrome/common/extensions/api/api_sources.gni
+@@ -99,11 +99,11 @@
+     "webrtc_desktop_capture_private.idl",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     schema_sources_ += [ "web_authentication_proxy.webidl" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     schema_sources_ += [ "contextual_tasks_private.webidl" ]
+   }
+ 
+@@ -128,7 +128,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_chromeos) {
+     schema_sources_ += [ "input_ime.json" ]
+   }
+ 
+--- a/chrome/common/features.gni
++++ b/chrome/common/features.gni
+@@ -40,14 +40,14 @@
+   # supported on all desktop platforms, as opposed to the v1 UI which is only
+   # supported on platforms using NSS (Linux and CrOS).
+   chrome_root_store_cert_management_ui =
+-      is_win || is_mac || is_linux || is_chromeos
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos
+ 
+   # Enables support for background apps.
+   enable_background_contents = !is_android
+   enable_background_mode = !is_android && !is_chromeos
+ 
+   # Enables usage of notifications via Chrome's MessageCenter.
+-  enable_chrome_notifications = is_mac || is_win || is_linux
++  enable_chrome_notifications = is_mac || is_win || (is_linux || is_zedbsd)
+ 
+   # Skips unmigrated actor files in the build on Android. This is temporary, and
+   # will eventually be removed once migration is done. Adding this flag likely
+--- a/chrome/enterprise_companion/BUILD.gn
++++ b/chrome/enterprise_companion/BUILD.gn
+@@ -2,6 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
++import("//chrome/enterprise_companion/config.gni")
+ import("//build/util/process_version.gni")
+ import("//chrome/enterprise_companion/branding.gni")
+ import("//chrome/process_version_rc_template.gni")
+@@ -334,7 +335,7 @@
+     data_deps += [ ":enterprise_companion_test" ]
+   }
+ 
+-  if (!is_chrome_branded) {
++  if (!is_chrome_branded && enable_enterprise_companion) {
+     data_deps +=
+         [ "//third_party/enterprise_companion:old_enterprise_companion" ]
+   }
+--- a/chrome/renderer/BUILD.gn
++++ b/chrome/renderer/BUILD.gn
+@@ -243,7 +243,7 @@
+     "//v8",
+   ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ 
+--- a/chrome/services/speech/buildflags/buildflags.gni
++++ b/chrome/services/speech/buildflags/buildflags.gni
+@@ -11,7 +11,7 @@
+ declare_args() {
+   # Whether the browser provides a speech recognition service
+   # (//media/mojo/mojom/speech_recognition_service.mojom) to the renderer.
+-  enable_speech_service = is_chromeos || is_linux || is_mac || is_win
++  enable_speech_service = is_chromeos || (is_linux || is_zedbsd) || is_mac || is_win
+ }
+ 
+ declare_args() {
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -89,7 +89,7 @@
+     "fuzzing:test",
+     "//chrome/test/variations:variations_desktop_smoke_tests",
+   ]
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     deps += [ "//chrome/test/device_realtarget:device_realtarget_browsertests" ]
+   }
+ }
+@@ -474,7 +474,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public_deps += [
+       "//ui/base:pixel_diff_test_support",
+       "//ui/views:view_pixel_diff_test_support",
+@@ -1748,12 +1748,12 @@
+       deps += [ "//chrome/browser/compose:browser_tests" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+       deps +=
+           [ "//chrome/browser/ui/views/device_signals_consent:browser_tests" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "../browser/enterprise/connectors/test:test_support",
+         "//chrome/browser/enterprise/profile_management:browser_tests",
+@@ -1892,7 +1892,7 @@
+       deps += [ "//chrome/browser/profiles/batch_upload:browser_tests" ]
+     }
+ 
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/webui/search_engine_choice:browser_tests" ]
+     }
+ 
+@@ -2090,7 +2090,7 @@
+       deps += [ "//chrome/browser/captive_portal:browser_tests" ]
+     }
+ 
+-    if (is_mac || is_win || is_linux) {
++    if (is_mac || is_win || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/browser_switcher:browser_tests",
+         "//chrome/browser/ui/webui/signin:browser_tests",
+@@ -2138,7 +2138,7 @@
+   }
+ }
+ 
+-if (is_linux || is_chromeos || is_mac || is_win || is_android) {
++if ((is_linux || is_zedbsd) || is_chromeos || is_mac || is_win || is_android) {
+   import("//tools/binary_size/sizes.gni")
+ 
+   # TODO(b/246519185) - Py3 incompatible, decide if to keep test.
+@@ -2546,7 +2546,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+     data_deps += [ "//chrome:packed_resources" ]
+   }
+   defines = []
+@@ -2829,7 +2829,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "../browser/enterprise/connectors/test:test_support",
+       "../services/system_signals:unit_tests",
+@@ -2842,7 +2842,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [
+       "//chrome/browser/accessibility/live_caption:unit_tests",
+       "//chrome/browser/multistep_filter:unit_tests",
+@@ -3218,7 +3218,7 @@
+       deps += [ "//chrome/browser/startup:unit_tests" ]
+     }
+ 
+-    if (is_linux || is_mac || is_win) {
++    if ((is_linux || is_zedbsd) || is_mac || is_win) {
+       deps += [ "//chrome/browser/ui/webui/updater:unit_tests" ]
+     }
+ 
+@@ -3333,7 +3333,7 @@
+       "//chrome/browser/ui/download:unit_tests",
+     ]
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       deps += [
+         "//chrome/browser/ui/views/media_preview:unit_tests",
+         "//chrome/browser/ui/views/media_preview/camera_preview:unit_tests",
+@@ -3527,11 +3527,11 @@
+         [ "//chrome/browser/extensions/api/safe_browsing_private:unit_tests" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     deps += [ "//chrome/browser/ui/webui/management:unit_tests" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_mac || is_win) {
+     deps += [
+       "../browser/enterprise/connectors/device_trust:features",
+       "../browser/enterprise/connectors/device_trust/signals:test_support",
+@@ -3543,7 +3543,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     deps += [
+       "../browser/enterprise/connectors/device_trust/key_management/browser",
+       "../browser/enterprise/connectors/device_trust/key_management/browser:test_support",
+@@ -3640,10 +3640,10 @@
+       "//chrome/browser/ui/views/profiles:unit_tests",
+       "//chrome/browser/ui/views/relaunch_notification:unit_tests",
+     ]
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/browser/ui/views/scheduled_restart:unit_tests" ]
+     }
+-    if (is_win || (is_linux && use_dbus)) {
++    if (is_win || ((is_linux || is_zedbsd) && use_dbus)) {
+       deps += [ "//chrome/browser/ui/views/status_icons:unit_tests" ]
+     }
+     if (is_mac) {
+@@ -3659,7 +3659,7 @@
+     deps += [ "//chrome/browser/ui/views/lens:unit_tests" ]
+   }
+ 
+-  if (is_win || is_linux || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_mac) {
+     deps += [ "//chrome/browser/metrics/structured:unit_tests" ]
+   }
+ 
+@@ -4065,11 +4065,11 @@
+       }
+     }
+ 
+-    if (is_linux || is_chromeos || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+       data_deps += [ "//chrome:packed_resources" ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [
+         "//chrome/browser/enterprise/idle:interactive_ui_tests",
+         "//chrome/browser/ui/startup/default_browser_prompt:interactive_ui_tests",
+@@ -4284,7 +4284,7 @@
+     "//components/safe_browsing:buildflags",
+     "//components/webui/flags:switches",
+   ]
+-  if (is_linux || is_chromeos || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+     data_deps = [ "//chrome:packed_resources" ]
+   }
+   sources = []
+@@ -4425,7 +4425,7 @@
+       data += [ "//third_party/webpagereplay/" ]
+     }
+ 
+-    if (is_linux || is_chromeos || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+       data_deps = [ "//chrome:packed_resources" ]
+     }
+ 
+@@ -4700,7 +4700,7 @@
+   }
+ }
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   script_test("variations_smoke_tests") {
+     if (is_linux) {
+       script = "//testing/xvfb.py"
+--- a/chrome/test/base/BUILD.gn
++++ b/chrome/test/base/BUILD.gn
+@@ -257,7 +257,7 @@
+   public_deps = [ "//base" ]
+   deps = [ "//chrome/browser:browser_process" ]
+ 
+-  if (is_chrome_branded && (is_mac || is_win || is_linux)) {
++  if (is_chrome_branded && (is_mac || is_win || (is_linux || is_zedbsd))) {
+     sources += [ "scoped_channel_override.h" ]
+     public_deps += [ "//build:branding_buildflags" ]
+     if (is_mac) {
+--- a/chrome/test/data/webui/BUILD.gn
++++ b/chrome/test/data/webui/BUILD.gn
+@@ -320,7 +320,7 @@
+     sources += [ "omnibox_everywhere/omnibox_everywhere_browsertest.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "discards/discards_browsertest.cc",
+       "skills/skills_browsertest.cc",
+@@ -331,7 +331,7 @@
+     }
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "app_home/app_home_browsertest.cc",
+       "app_settings/app_settings_browsertest.cc",
+@@ -925,7 +925,7 @@
+     grdp_files += [ "$target_gen_dir/media_router/resources.grdp" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [
+       "app_home:build_grdp",
+       "app_settings:build_grdp",
+@@ -942,7 +942,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "skills:build_grdp" ]
+     grdp_files += [ "$target_gen_dir/skills/resources.grdp" ]
+     if (is_chrome_branded) {
+--- a/chrome/test/data/webui/app_home/BUILD.gn
++++ b/chrome/test/data/webui/app_home/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("../build_webui_tests.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+ build_webui_tests("build") {
+--- a/chrome/test/data/webui/app_settings/BUILD.gn
++++ b/chrome/test/data/webui/app_settings/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("../build_webui_tests.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+--- a/chrome/test/data/webui/on_device_translation_internals/BUILD.gn
++++ b/chrome/test/data/webui/on_device_translation_internals/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("../build_webui_tests.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || (is_linux || is_zedbsd))
+ 
+ build_webui_tests("build") {
+   cc_test_files = [ "on_device_translation_internals_browsertest.cc" ]
+--- a/chrome/test/data/webui/settings/BUILD.gn
++++ b/chrome/test/data/webui/settings/BUILD.gn
+@@ -273,7 +273,7 @@
+     files += [ "passkeys_page_test.ts" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     files += [
+       "a11y_page_test.ts",
+       "ax_annotations_section_test.ts",
+--- a/chrome/test/data/webui/updater/BUILD.gn
++++ b/chrome/test/data/webui/updater/BUILD.gn
+@@ -1,6 +1,6 @@
+ import("../build_webui_tests.gni")
+ 
+-assert(is_mac || is_win || is_linux)
++assert(is_mac || is_win || (is_linux || is_zedbsd))
+ 
+ build_webui_tests("build") {
+   cc_test_files = [ "updater_browsertest.cc" ]
+--- a/chrome/test/device_realtarget/BUILD.gn
++++ b/chrome/test/device_realtarget/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//testing/test.gni")
+ 
+-if (is_linux || is_mac || is_win) {
++if ((is_linux || is_zedbsd) || is_mac || is_win) {
+   test("device_realtarget_browsertests") {
+     testonly = true
+     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+--- a/chrome/updater/BUILD.gn
++++ b/chrome/updater/BUILD.gn
+@@ -60,7 +60,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   action("updater_license") {
+     script = "//chrome/updater/fix_licenses.py"
+     deps = [ ":generate_updater_license" ]
+@@ -1040,6 +1040,13 @@
+       ":updater_selfupdate_test_crx",
+       "//chrome/updater/test/test_installer:app_installers",
+     ]
++    if (is_zedbsd) {
++      # zedBSD has no Chrome updater: its packages are not made.
++      data_deps -= [
++        ":enterprise_companion_test_crx",
++        ":updater_selfupdate_test_crx",
++      ]
++    }
+ 
+     defines = []
+ 
+--- a/chrome/updater/zip.gni
++++ b/chrome/updater/zip.gni
+@@ -31,6 +31,10 @@
+                              "testonly",
+                              "visibility",
+                            ])
++    if (!defined(inputs)) {
++      # A platform the artifact is not made for (zedBSD) zips nothing.
++      inputs = []
++    }
+     zip_comment_values = [
+       "path=" + rebase_path(invoker.output, root_build_dir),
+       "version=" + chrome_version_full,
+--- a/chrome/utility/BUILD.gn
++++ b/chrome/utility/BUILD.gn
+@@ -181,7 +181,7 @@
+       ]
+     }
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || (is_linux || is_zedbsd)) {
+       deps += [ "//chrome/services/system_signals" ]
+     }
+   }
+--- a/components/BUILD.gn
++++ b/components/BUILD.gn
+@@ -105,7 +105,7 @@
+ test("components_unittests") {
+   use_xvfb = use_xvfb_in_this_config
+ 
+-  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia) {
++  if (is_android || (is_linux || is_zedbsd) || is_chromeos || is_mac || is_win || is_fuchsia) {
+     # Ideally these would be added to the specific :unit_tests targets they are
+     # relevant for. Please try to do this rather than add to this list.
+     data = [
+@@ -425,7 +425,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     deps += [ "//components/gapis:unit_tests" ]
+   }
+ 
+@@ -604,11 +604,11 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_android || is_ios) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_android || is_ios) {
+     deps += [ "//components/enterprise/idle:unit_tests" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     deps += [ "//components/named_system_lock:unit_tests" ]
+   }
+ 
+@@ -688,7 +688,7 @@
+     ]
+   }  # iOS / !iOS
+ 
+-  if (is_mac || is_linux || is_chromeos) {
++  if (is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     data_deps += [ "//content/shell:pak" ]
+   }
+ 
+@@ -836,7 +836,7 @@
+     deps += [ "//components/constrained_window:unit_tests" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [
+       "//components/metrics/private_metrics:unit_tests",
+       "//components/metrics/structured:unit_tests",
+@@ -847,7 +847,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps += [ "//components/services/font_data:unit_tests" ]
+   }
+ 
+--- a/components/autofill/core/browser/BUILD.gn
++++ b/components/autofill/core/browser/BUILD.gn
+@@ -1616,7 +1616,7 @@
+     deps += [ "//components/autofill/ios/common" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     sources += [
+       "metrics/cross_tab_copy_paste_tracker.cc",
+       "metrics/cross_tab_copy_paste_tracker.h",
+@@ -2541,7 +2541,7 @@
+     deps += [ "//components/autofill/core/browser/policy:unit_tests" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     sources += [ "metrics/cross_tab_copy_paste_tracker_unittest.cc" ]
+     deps += [ "//ui/base/clipboard:clipboard_test_support" ]
+   }
+--- a/components/component_updater/installer_policies/BUILD.gn
++++ b/components/component_updater/installer_policies/BUILD.gn
+@@ -74,7 +74,7 @@
+     "//third_party/zlib/google:zip",
+   ]
+ 
+-  if (is_chromeos || is_win || is_mac || is_linux) {
++  if (is_chromeos || is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "iwa_key_distribution_component_installer_policy.cc",
+       "iwa_key_distribution_component_installer_policy.h",
+--- a/components/compose/features.gni
++++ b/components/compose/features.gni
+@@ -4,5 +4,5 @@
+ 
+ declare_args() {
+   # Whether Compose is enabled in the build.
+-  enable_compose = is_mac || is_win || is_linux || is_chromeos
++  enable_compose = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos
+ }
+--- a/components/crash/core/app/BUILD.gn
++++ b/components/crash/core/app/BUILD.gn
+@@ -41,12 +41,12 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos || is_android || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_mac) {
+     source_set("shared_memory_user_stream_args") {
+       sources = []
+       deps = [ "//base" ]
+ 
+-      if (is_win || is_linux || is_chromeos || is_android) {
++      if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+         sources += [
+           "shared_memory_user_stream_args.cc",
+           "shared_memory_user_stream_args.h",
+@@ -75,11 +75,11 @@
+       "//third_party/crashpad/crashpad/minidump",
+     ]
+ 
+-    if (is_linux || is_chromeos || is_android || is_mac) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_android || is_mac) {
+       deps += [ ":shared_memory_user_stream_args" ]
+     }
+ 
+-    if (is_linux || is_chromeos || is_mac) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_mac) {
+       deps += [ "//components/stability_report" ]
+     }
+ 
+@@ -152,7 +152,7 @@
+     libs = [ "log" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos || is_android || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_mac) {
+     deps += [ ":shared_memory_user_stream_args" ]
+   }
+ 
+@@ -285,7 +285,7 @@
+   }
+ }
+ 
+-if (is_mac || is_android || is_linux || is_chromeos) {
++if (is_mac || is_android || (is_linux || is_zedbsd) || is_chromeos) {
+   # We build a chromium-specific crashpad_handler executable so that we can
+   # define custom UserStreamDataSources.
+   executable("chrome_crashpad_handler") {
+@@ -369,11 +369,11 @@
+       ":shared_memory_data_source",
+     ]
+ 
+-    if (is_win || is_linux || is_chromeos || is_android || is_mac) {
++    if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_mac) {
+       deps += [ ":shared_memory_user_stream_args" ]
+     }
+ 
+-    if (is_win || is_linux || is_chromeos || is_android) {
++    if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+       sources += [ "shared_memory_user_stream_args_unittest.cc" ]
+     }
+ 
+--- a/components/crash/core/common/BUILD.gn
++++ b/components/crash/core/common/BUILD.gn
+@@ -8,7 +8,7 @@
+ 
+ declare_args() {
+   # If set to true, this will stub out and disable the entire crash key system.
+-  use_crash_key_stubs = is_fuchsia
++  use_crash_key_stubs = is_fuchsia || is_zedbsd
+ }
+ 
+ group("common") {
+--- a/components/device_signals/core/browser/BUILD.gn
++++ b/components/device_signals/core/browser/BUILD.gn
+@@ -85,7 +85,7 @@
+       "//components/safe_browsing/android:safe_browsing_api_handler",
+       "//components/safe_browsing/android:safe_browsing_api_handler_util",
+     ]
+-  } else if (is_win || is_mac || is_linux || is_chromeos) {
++  } else if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     public += [
+       "agent_signals_collector.h",
+       "certificate_signals_collector.h",
+@@ -194,7 +194,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "agent_signals_collector_unittest.cc",
+       "certificate_signals_collector_unittest.cc",
+--- a/components/device_signals/core/common/BUILD.gn
++++ b/components/device_signals/core/common/BUILD.gn
+@@ -41,7 +41,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_linux || is_chromeos) {
++  if (is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "posix/platform_utils_posix.cc" ]
+   }
+ 
+@@ -81,7 +81,7 @@
+   sources = []
+   deps = []
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "platform_utils_unittest.cc" ]
+ 
+     deps += [
+--- a/components/device_signals/core/system_signals/BUILD.gn
++++ b/components/device_signals/core/system_signals/BUILD.gn
+@@ -17,7 +17,7 @@
+     "platform_delegate.cc",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     public += [ "base_platform_delegate.h" ]
+ 
+     sources += [ "base_platform_delegate.cc" ]
+@@ -58,7 +58,7 @@
+     "file_system_service_unittest.cc",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "base_platform_delegate_unittest.cc" ]
+   }
+ 
+@@ -80,7 +80,7 @@
+     deps += [ "//components/device_signals/core/system_signals/mac:unit_tests" ]
+   }
+ 
+-  if (is_mac || is_linux) {
++  if (is_mac || (is_linux || is_zedbsd)) {
+     deps +=
+         [ "//components/device_signals/core/system_signals/posix:unit_tests" ]
+   }
+--- a/components/enterprise/BUILD.gn
++++ b/components/enterprise/BUILD.gn
+@@ -296,7 +296,7 @@
+         [ "device_attestation/ios/device_attestation_service_ios_unittest.mm" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos || is_mac || is_android) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_mac || is_android) {
+     deps +=
+         [ "//components/enterprise/network_header_injection/core:unit_tests" ]
+   }
+--- a/components/enterprise/buildflags/buildflags.gni
++++ b/components/enterprise/buildflags/buildflags.gni
+@@ -10,29 +10,29 @@
+   # Indicates support for content analysis against a cloud agent for Enterprise
+   # Connector policies.
+   enterprise_cloud_content_analysis =
+-      is_win || is_mac || is_linux || is_chromeos || is_ios
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_ios
+ 
+   # Indicates support for content analysis against a cloud agent for Enterprise
+   # Connector policies.
+-  enterprise_local_content_analysis = is_win || is_mac || is_linux
++  enterprise_local_content_analysis = is_win || is_mac || (is_linux || is_zedbsd)
+ 
+   # Indicates support for Data Control rules.
+   enterprise_data_controls =
+-      is_win || is_mac || is_linux || is_chromeos || is_android || is_ios
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android || is_ios
+ 
+   # Indicates support for watermark.
+   enterprise_watermark =
+-      (is_win || is_mac || is_linux || is_chromeos || is_ios) && !is_castos
++      (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_ios) && !is_castos
+ 
+   enterprise_screenshot_protection = is_win || is_mac || is_ios || is_android
+ 
+   # Support on all platforms except for iOS since it uses `WKWebView` cache.
+   enterprise_cache_encryption =
+-      is_win || is_mac || is_linux || is_chromeos || is_android
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android
+ 
+   # Indicates support for Enterprise Proxy policy and service.
+   enterprise_proxy =
+-      is_win || is_mac || is_linux || is_chromeos || is_android || is_ios
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android || is_ios
+ }
+ 
+ declare_args() {
+--- a/components/gapis/BUILD.gn
++++ b/components/gapis/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_linux || is_mac)
++assert((is_linux || is_zedbsd) || is_mac)
+ 
+ static_library("gapis") {
+   sources = [
+--- a/components/gwp_asan/BUILD.gn
++++ b/components/gwp_asan/BUILD.gn
+@@ -15,7 +15,7 @@
+     "//testing/gtest",
+     "//third_party/boringssl",
+   ]
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android || is_ios) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android || is_ios) {
+     deps += [
+       "//components/gwp_asan/client:unit_tests",
+       "//components/gwp_asan/crash_handler:unit_tests",
+@@ -34,7 +34,7 @@
+   data_deps = [ "//testing/buildbot/filters:gwp_asan_unittests_filters" ]
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+   executable("dump_gwp_asan") {
+     sources = [ "tools/dump_gwp_asan/dump_gwp_asan.cc" ]
+ 
+--- a/components/gwp_asan/buildflags/buildflags.gni
++++ b/components/gwp_asan/buildflags/buildflags.gni
+@@ -12,7 +12,7 @@
+ # official builds.
+ # iOS is disabled when !use_partition_alloc due to https://crbug.com/446856826
+ supported_platform =
+-    is_linux || is_chromeos || is_mac || (is_ios && use_partition_alloc) ||
++    (is_linux || is_zedbsd) || is_chromeos || is_mac || (is_ios && use_partition_alloc) ||
+     (is_win && (current_cpu == "x64" || current_cpu == "arm64")) ||
+     (is_android && !is_component_build && enable_frame_pointers)
+ 
+--- a/components/metrics/BUILD.gn
++++ b/components/metrics/BUILD.gn
+@@ -362,7 +362,7 @@
+       sources += [ "machine_id_provider_nonwin.cc" ]
+     }
+ 
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       sources += [
+         "motherboard.cc",
+         "motherboard.h",
+@@ -728,7 +728,7 @@
+       deps += [ "//extensions/buildflags" ]
+     }
+ 
+-    if (is_win || is_linux) {
++    if (is_win || (is_linux || is_zedbsd)) {
+       sources += [ "motherboard_metrics_provider_unittest.cc" ]
+     }
+   }
+--- a/components/metrics/structured/buildflags/buildflags.gni
++++ b/components/metrics/structured/buildflags/buildflags.gni
+@@ -3,6 +3,6 @@
+ # found in the LICENSE file.
+ 
+ declare_args() {
+-  structured_metrics_enabled = is_win || is_mac || is_linux || is_chromeos
+-  structured_metrics_debug_enabled = is_win || is_mac || is_linux || is_chromeos
++  structured_metrics_enabled = is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos
++  structured_metrics_debug_enabled = is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos
+ }
+--- a/components/named_mojo_ipc_server/BUILD.gn
++++ b/components/named_mojo_ipc_server/BUILD.gn
+@@ -68,7 +68,7 @@
+   sources = []
+ 
+   # Disable MojoIpcServerTest on unsupported platforms.
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [ "named_mojo_ipc_server_unittest.cc" ]
+   }
+   deps = [
+--- a/components/named_system_lock/BUILD.gn
++++ b/components/named_system_lock/BUILD.gn
+@@ -20,7 +20,7 @@
+   sources = []
+ 
+   # Disable NamedSystemLockTest on unsupported platforms.
+-  if (is_linux || is_win || is_mac) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac) {
+     sources += [ "lock_unittest.cc" ]
+   }
+ 
+--- a/components/ntp_tiles/BUILD.gn
++++ b/components/ntp_tiles/BUILD.gn
+@@ -142,7 +142,7 @@
+     deps += [ "//components/supervised_user/core/browser" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [
+       "enterprise/enterprise_shortcuts_manager_impl.cc",
+       "enterprise/enterprise_shortcuts_manager_impl.h",
+@@ -204,7 +204,7 @@
+     deps += [ "//components/supervised_user/core/browser" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [
+       "enterprise/enterprise_shortcuts_manager_impl_unittest.cc",
+       "enterprise/enterprise_shortcuts_store_unittest.cc",
+--- a/components/on_device_translation/buildflags/features.gni
++++ b/components/on_device_translation/buildflags/features.gni
+@@ -5,5 +5,5 @@
+ declare_args() {
+   # On Device Translation is still not supported on other platforms.
+   # TODO(crbug.com/364795294): Support other platforms.
+-  enable_on_device_translation = is_mac || is_win || is_linux || is_chromeos
++  enable_on_device_translation = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos
+ }
+--- a/components/password_manager/core/browser/BUILD.gn
++++ b/components/password_manager/core/browser/BUILD.gn
+@@ -247,7 +247,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "password_manager_blocklist_policy.cc",
+       "password_manager_blocklist_policy.h",
+@@ -586,7 +586,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "hash_password_manager_unittest.cc" ]
+   }
+ 
+--- a/components/payments/content/BUILD.gn
++++ b/components/payments/content/BUILD.gn
+@@ -219,7 +219,7 @@
+     deps +=
+         [ "//components/payments/content/browser_binding:android_unittests" ]
+   }
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     deps +=
+         [ "//components/payments/content/browser_binding:desktop_unittests" ]
+   }
+--- a/components/payments/content/browser_binding/BUILD.gn
++++ b/components/payments/content/browser_binding/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-is_desktop = is_mac || is_win || is_linux || is_chromeos || is_fuchsia
++is_desktop = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia
+ 
+ source_set("browser_binding") {
+   visibility = [
+--- a/components/policy/core/common/BUILD.gn
++++ b/components/policy/core/common/BUILD.gn
+@@ -297,7 +297,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "cloud/profile_cloud_policy_manager.cc",
+       "cloud/profile_cloud_policy_manager.h",
+@@ -307,7 +307,7 @@
+   }
+ 
+   # Compile on Linux for fuzzer and since code is reused on Chrome OS.
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "registry_dict.cc",
+       "registry_dict.h",
+@@ -462,14 +462,14 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "cloud/mock_profile_cloud_policy_store.cc",
+       "cloud/mock_profile_cloud_policy_store.h",
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [
+       "field_validation_test_utils.cc",
+       "field_validation_test_utils.h",
+@@ -583,7 +583,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "registry_dict_unittest.cc" ]
+   }
+   if (is_chromeos) {
+@@ -610,7 +610,7 @@
+     sources += [ "policy_loader_common_unittest.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "cloud/profile_cloud_policy_manager_unittest.cc",
+       "cloud/profile_cloud_policy_store_unittest.cc",
+@@ -654,7 +654,7 @@
+       sources += [ "policy_loader_ios_unittest.mm" ]
+     }
+   }
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     # Needed by policy_loader_win_unittest.cc
+     data = [ "//chrome/test/data/policy/" ]
+   }
+--- a/components/power_metrics/BUILD.gn
++++ b/components/power_metrics/BUILD.gn
+@@ -48,7 +48,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [
+       "system_power_monitor.cc",
+       "system_power_monitor.h",
+@@ -76,7 +76,7 @@
+     data = [ "test/data/" ]
+   }
+ 
+-  if (is_win || is_linux || is_chromeos) {
++  if (is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "system_power_monitor_unittest.cc" ]
+ 
+     deps += [ "//base/test:test_support" ]
+--- a/components/record_replay/content/renderer/BUILD.gn
++++ b/components/record_replay/content/renderer/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux || is_chromeos)
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ static_library("renderer") {
+   sources = [
+--- a/components/search_engines/BUILD.gn
++++ b/components/search_engines/BUILD.gn
+@@ -154,7 +154,7 @@
+     deps += [ "//third_party/search_engines_data:resources" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [
+       "enterprise/search_aggregator_policy_handler.cc",
+       "enterprise/search_aggregator_policy_handler.h",
+@@ -287,7 +287,7 @@
+     "//url",
+   ]
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if ((is_linux || is_zedbsd) || is_win || is_mac || is_chromeos) {
+     sources += [
+       "enterprise/search_aggregator_policy_handler_unittest.cc",
+       "enterprise/site_search_policy_handler_unittest.cc",
+--- a/components/services/paint_preview_compositor/BUILD.gn
++++ b/components/services/paint_preview_compositor/BUILD.gn
+@@ -36,7 +36,7 @@
+     deps += [ "//components/services/font/public/cpp" ]
+   }
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     deps += [ "//content/public/child" ]
+   }
+ 
+--- a/components/services/print_compositor/BUILD.gn
++++ b/components/services/print_compositor/BUILD.gn
+@@ -23,7 +23,7 @@
+     "//ui/accessibility",
+   ]
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     deps += [ "//content/public/child" ]
+   }
+ 
+--- a/components/signin/features.gni
++++ b/components/signin/features.gni
+@@ -6,11 +6,11 @@
+ 
+ declare_args() {
+   # Compile time flag for Bound Session Credentials.
+-  enable_bound_session_credentials = is_linux || is_mac || is_win
++  enable_bound_session_credentials = (is_linux || is_zedbsd) || is_mac || is_win
+ }
+ 
+ # Dice is supported on the platform (but not necessarily enabled).
+-enable_dice_support = is_linux || is_mac || is_win || is_fuchsia
++enable_dice_support = (is_linux || is_zedbsd) || is_mac || is_win || is_fuchsia
+ 
+ # Mirror is enabled and other account consistency mechanisms are not available.
+ enable_mirror = is_android || is_chromeos || is_ios
+--- a/components/skills/internal/BUILD.gn
++++ b/components/skills/internal/BUILD.gn
+@@ -46,7 +46,7 @@
+     "//services/network/public/cpp",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "enterprise_published_skills_policy_handler.cc",
+       "enterprise_published_skills_policy_handler.h",
+@@ -105,7 +105,7 @@
+     sources += [ "skills_fetcher_unittest.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "enterprise_published_skills_policy_handler_unittest.cc" ]
+   }
+ 
+--- a/components/stability_report/BUILD.gn
++++ b/components/stability_report/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//third_party/protobuf/proto_library.gni")
+ 
+-if (is_win || is_linux || is_chromeos || is_mac) {
++if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_mac) {
+   proto_library("stability_report_proto") {
+     sources = [ "stability_report.proto" ]
+   }
+@@ -34,7 +34,7 @@
+       ]
+     }
+ 
+-    if (is_linux || is_chromeos || is_mac) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_mac) {
+       sources += [
+         "user_stream_data_source_posix.cc",
+         "user_stream_data_source_posix.h",
+@@ -63,7 +63,7 @@
+       sources += [ "user_stream_data_source_win_unittest.cc" ]
+     }
+ 
+-    if (is_linux || is_chromeos || is_mac) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_mac) {
+       sources += [ "user_stream_data_source_posix_unittest.cc" ]
+ 
+       deps += [ "//base/test:test_support" ]
+--- a/components/supervised_user/buildflags.gni
++++ b/components/supervised_user/buildflags.gni
+@@ -6,5 +6,5 @@
+   # Enables supervision for Family Link users.
+   enable_supervised_users =
+       # Platforms which fully support supervision features:
+-      is_android || is_chromeos || is_ios || is_linux || is_mac || is_win
++      is_android || is_chromeos || is_ios || (is_linux || is_zedbsd) || is_mac || is_win
+ }
+--- a/components/sync_bookmarks/BUILD.gn
++++ b/components/sync_bookmarks/BUILD.gn
+@@ -39,7 +39,7 @@
+     "synced_bookmark_tracker_entity.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "initial_account_bookmark_deduplicator.cc",
+       "initial_account_bookmark_deduplicator.h",
+@@ -81,7 +81,7 @@
+     "test_node_builders.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [ "initial_account_bookmark_deduplicator_unittest.cc" ]
+   }
+ 
+--- a/components/themes/BUILD.gn
++++ b/components/themes/BUILD.gn
+@@ -84,7 +84,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_ios) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_ios) {
+     sources += [ "theme_color_policy_handler_unittest.cc" ]
+     deps += [
+       ":policy",
+@@ -97,7 +97,7 @@
+   data = [ "//media/test/data/" ]
+ }
+ 
+-if (is_win || is_mac || is_linux || is_ios) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_ios) {
+   source_set("policy") {
+     public = [ "theme_color_policy_handler.h" ]
+     sources = [ "theme_color_policy_handler.cc" ]
+--- a/components/viz/viz.gni
++++ b/components/viz/viz.gni
+@@ -18,7 +18,7 @@
+     ((is_linux && !is_castos && !is_cfi) || (is_fuchsia && target_cpu == "x64"))
+ 
+ enable_skia_graphite_tests =
+-    skia_use_dawn && (is_mac || is_win || is_linux || (is_ios && use_blink))
++    skia_use_dawn && (is_mac || is_win || (is_linux || is_zedbsd) || (is_ios && use_blink))
+ 
+ # TODO(crbug.com/1336055): Determine whether is_cast_android needs this.
+ enable_cast_overlay_strategy = is_castos || is_cast_android
+--- a/components/vrp_flags/features.gni
++++ b/components/vrp_flags/features.gni
+@@ -5,6 +5,6 @@
+ declare_args() {
+   # If this platform provides security vrp_flags for VRP researchers. VrpFlags
+   # are not available on any 32 bit platforms.
+-  enable_vrp_flags = (is_win || is_mac || is_linux) &&
++  enable_vrp_flags = (is_win || is_mac || (is_linux || is_zedbsd)) &&
+                      (current_cpu == "x64" || current_cpu == "arm64")
+ }
+--- a/components/webapps/isolated_web_apps/BUILD.gn
++++ b/components/webapps/isolated_web_apps/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_chromeos || is_win || is_mac || is_linux,
++assert(is_chromeos || is_win || is_mac || (is_linux || is_zedbsd),
+        "components/webapps/isolated_web_apps are no-op on Android or iOS.")
+ 
+ component("isolated_web_apps") {
+--- a/components/webapps/isolated_web_apps/test_support/BUILD.gn
++++ b/components/webapps/isolated_web_apps/test_support/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_chromeos || is_win || is_mac || is_linux,
++assert(is_chromeos || is_win || is_mac || (is_linux || is_zedbsd),
+        "components/webapps/isolated_web_apps are no-op on Android or iOS.")
+ 
+ source_set("test_support") {
+--- a/components/webauthn/core/browser/BUILD.gn
++++ b/components/webauthn/core/browser/BUILD.gn
+@@ -126,7 +126,7 @@
+ 
+   # has to be in this form because of how checks are
+   # implemented in  components/webapps/isolated_web_apps/BUILD.gn
+-  if (is_chromeos || is_win || is_mac || is_linux) {
++  if (is_chromeos || is_win || is_mac || (is_linux || is_zedbsd)) {
+     deps += [ "//components/webapps/isolated_web_apps:scheme" ]
+   }
+ }
+--- a/remoting/BUILD.gn
++++ b/remoting/BUILD.gn
+@@ -9,7 +9,7 @@
+ 
+   deps = [ ":remoting_unittests" ]
+ 
+-  if (!is_component_build && (is_win || is_linux)) {
++  if (!is_component_build && (is_win || (is_linux || is_zedbsd))) {
+     deps += [ "//remoting/codec:webrtc_video_encoder_benchmark" ]
+   }
+ 
+--- a/remoting/base/BUILD.gn
++++ b/remoting/base/BUILD.gn
+@@ -52,7 +52,7 @@
+ 
+ source_set("remoting_export") {
+   sources = [ "remoting_export.h" ]
+-  if (is_linux || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_mac || is_win) {
+     configs += [ "//remoting/build/config:host_implementation" ]
+   }
+ }
+@@ -371,7 +371,7 @@
+       "user_settings_win.cc",
+       "user_settings_win.h",
+     ]
+-  } else if (is_mac || is_linux) {
++  } else if (is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "file_host_settings.cc",
+       "file_host_settings.h",
+@@ -529,7 +529,7 @@
+     sources += [ "passwd_utils_unittest.cc" ]
+   }
+ 
+-  if (is_linux || is_win) {
++  if ((is_linux || is_zedbsd) || is_win) {
+     sources += [ "crash/crashpad_database_manager_unittest.cc" ]
+     deps += [ "//remoting/base/crash:crashpad_db_mgr" ]
+   }
+--- a/remoting/base/crash/BUILD.gn
++++ b/remoting/base/crash/BUILD.gn
+@@ -6,7 +6,7 @@
+ 
+ source_set("crash") {
+   public_deps = []
+-  if (is_linux || is_win) {
++  if ((is_linux || is_zedbsd) || is_win) {
+     public_deps += [ ":crashpad" ]
+   }
+   if (is_win) {
+@@ -17,7 +17,7 @@
+   }
+ }
+ 
+-if (is_linux || is_win) {
++if ((is_linux || is_zedbsd) || is_win) {
+   source_set("crashpad_db_mgr") {
+     sources = [
+       "crashpad_database_manager.cc",
+--- a/remoting/build/config/BUILD.gn
++++ b/remoting/build/config/BUILD.gn
+@@ -35,7 +35,7 @@
+ # to external binaries.
+ config("host_implementation") {
+   defines = []
+-  if (is_win || is_linux || is_mac) {
++  if (is_win || (is_linux || is_zedbsd) || is_mac) {
+     defines += [ "HOST_IMPLEMENTATION" ]
+ 
+     if (!is_mac && is_chrome_branded && is_official_build) {
+--- a/remoting/codec/BUILD.gn
++++ b/remoting/codec/BUILD.gn
+@@ -35,7 +35,7 @@
+ 
+   # Currently, building WebrtcVideoEncoderGpu is only supported on Windows and
+   # Linux, and encoding with WebrtcVideoEncoderGpu is only supported on Windows.
+-  if (remoting_enable_h264 && (is_win || is_linux || is_chromeos)) {
++  if (remoting_enable_h264 && (is_win || (is_linux || is_zedbsd) || is_chromeos)) {
+     public_configs = [ "//skia:skia_config" ]
+     sources += [
+       "webrtc_video_encoder_gpu.cc",
+@@ -64,7 +64,7 @@
+   ]
+ }
+ 
+-if (!is_component_build && (is_win || is_linux)) {
++if (!is_component_build && (is_win || (is_linux || is_zedbsd))) {
+   executable("webrtc_video_encoder_benchmark") {
+     testonly = true
+ 
+--- a/remoting/host/BUILD.gn
++++ b/remoting/host/BUILD.gn
+@@ -40,11 +40,11 @@
+       "//remoting/host/webauthn:remote_webauthn",
+     ]
+ 
+-    if (is_linux || is_win) {
++    if ((is_linux || is_zedbsd) || is_win) {
+       deps += [ "//remoting/host/crash:crash_tools" ]
+     }
+ 
+-    if (enable_me2me_host && (is_linux || is_win)) {
++    if (enable_me2me_host && ((is_linux || is_zedbsd) || is_win)) {
+       deps += [ "//remoting/host/remote_open_url" ]
+     }
+ 
+@@ -1035,7 +1035,7 @@
+   }
+ 
+   # start_host is only supported on Linux and Windows.
+-  if (is_linux || is_win) {
++  if ((is_linux || is_zedbsd) || is_win) {
+     sources += [ "setup/host_starter_base_unittest.cc" ]
+   }
+ 
+--- a/remoting/host/crash/BUILD.gn
++++ b/remoting/host/crash/BUILD.gn
+@@ -7,7 +7,7 @@
+ 
+ source_set("crash_tools") {
+   public_deps = []
+-  if (is_linux || is_win) {
++  if ((is_linux || is_zedbsd) || is_win) {
+     public_deps += [ ":remoting_crashpad_handler" ]
+   }
+   if (is_linux) {
+@@ -15,7 +15,7 @@
+   }
+ }
+ 
+-if (is_linux || is_win) {
++if ((is_linux || is_zedbsd) || is_win) {
+   executable("remoting_crashpad_handler") {
+     sources = [ "crashpad_handler.cc" ]
+ 
+--- a/remoting/host/remote_open_url/BUILD.gn
++++ b/remoting/host/remote_open_url/BUILD.gn
+@@ -128,7 +128,7 @@
+   ]
+ }
+ 
+-if (enable_me2me_host && (is_linux || is_win)) {
++if (enable_me2me_host && ((is_linux || is_zedbsd) || is_win)) {
+   executable("remote_open_url") {
+     sources = [ "remote_open_url_entry_point.cc" ]
+     deps = [
+--- a/remoting/host/webauthn/BUILD.gn
++++ b/remoting/host/webauthn/BUILD.gn
+@@ -90,7 +90,7 @@
+   ]
+ }
+ 
+-if (is_win || is_linux || is_mac) {
++if (is_win || (is_linux || is_zedbsd) || is_mac) {
+   executable("remote_webauthn") {
+     sources = [ "remote_webauthn_entry_point.cc" ]
+ 
+--- a/remoting/remoting_options.gni
++++ b/remoting/remoting_options.gni
+@@ -9,14 +9,14 @@
+ remoting_use_x11 = ozone_platform_x11 && (is_linux && !is_castos)
+ 
+ enable_remoting_client =
+-    is_chromeos || (is_linux && !is_castos) || is_mac || is_win
++    is_chromeos || ((is_linux || is_zedbsd) && !is_castos) || is_mac || is_win
+ 
+ enable_remoting_host = is_win || is_mac || is_chromeos || remoting_use_x11
+ 
+ enable_me2me_host = is_win || is_mac || remoting_use_x11
+ 
+ # Enable multi-process host support.
+-remoting_multi_process = is_win || is_linux
++remoting_multi_process = is_win || (is_linux || is_zedbsd)
+ 
+ remoting_rdp_session = 1
+ 
+--- a/remoting/test/frame_generator/BUILD.gn
++++ b/remoting/test/frame_generator/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-if (!is_component_build && (is_win || is_linux)) {
++if (!is_component_build && (is_win || (is_linux || is_zedbsd))) {
+   source_set("frame_generator_test_support") {
+     testonly = true
+ 

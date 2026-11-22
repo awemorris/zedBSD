@@ -1,0 +1,250 @@
+--- a/ui/base/BUILD.gn
++++ b/ui/base/BUILD.gn
+@@ -710,7 +710,7 @@
+   ]
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   static_library("pixel_diff_test_support") {
+     testonly = true
+     sources = [
+@@ -1100,7 +1100,7 @@
+     "//url",
+   ]
+ 
+-  if (is_mac || is_win || is_linux || is_chromeos) {
++  if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "accelerators/global_accelerator_listener/global_accelerator_listener_unittest.cc" ]
+     deps += [
+       "//ui/base/accelerators/global_accelerator_listener",
+@@ -1112,7 +1112,7 @@
+     sources += [ "accelerators/global_accelerator_listener/global_accelerator_listener_chromeos_unittest.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+     deps += [ "//ui/base/unowned_user_data:unit_tests" ]
+   }
+ 
+@@ -1182,7 +1182,7 @@
+   }
+ 
+   # TODO(crbug.com/40134424): Support CrOS.
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "test/skia_gold_matching_algorithm_unittest.cc",
+       "test/skia_gold_pixel_diff_unittest.cc",
+@@ -1323,7 +1323,7 @@
+     deps += [ "//ui/events:dom_keycode_converter" ]
+   }
+ 
+-  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia) {
++  if (is_android || (is_linux || is_zedbsd) || is_chromeos || is_mac || is_win || is_fuchsia) {
+     # TODO(brettw): We should be able to depend on //ui/resources:ui_test_pak
+     # instead of depending directly on the non-test .pak files, but depending
+     # on ui_test_pak seems to have no effect.
+@@ -1336,7 +1336,7 @@
+       "//ui/resources:ui_test_pak",  # TODO(brettw): this does nothing.
+     ]
+   }
+-  if (is_linux || is_chromeos || is_win || is_fuchsia) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win || is_fuchsia) {
+     data += [
+       # TODO(brettw): Remove these two lines.
+       "$root_out_dir/ui/en-US.pak",
+--- a/ui/base/ui_features.gni
++++ b/ui/base/ui_features.gni
+@@ -28,7 +28,7 @@
+ 
+   # Whether the message center should be included for displaying notifications.
+   enable_message_center =
+-      is_win || is_mac || is_linux || is_chromeos || is_fuchsia
++      is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_fuchsia
+ 
+   enable_hidpi = true
+ }
+--- a/ui/base/unowned_user_data/BUILD.gn
++++ b/ui/base/unowned_user_data/BUILD.gn
+@@ -6,7 +6,7 @@
+ # ones where it's needed today.
+ 
+ assert(
+-    is_win || is_apple || is_linux || is_chromeos || is_android || is_fuchsia)
++    is_win || is_apple || (is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia)
+ 
+ component("unowned_user_data") {
+   defines = [ "IS_UNOWNED_USER_DATA_IMPL" ]
+--- a/ui/events/BUILD.gn
++++ b/ui/events/BUILD.gn
+@@ -319,7 +319,7 @@
+     frameworks = [ "UIKit.framework" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+     public += [ "keyboard_event_counter.h" ]
+     sources += [ "keyboard_event_counter.cc" ]
+   }
+@@ -734,7 +734,7 @@
+       ]
+     }
+ 
+-    if (is_linux || is_chromeos || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+       sources += [ "keyboard_event_counter_unittest.cc" ]
+     }
+ 
+--- a/ui/gfx/BUILD.gn
++++ b/ui/gfx/BUILD.gn
+@@ -875,7 +875,7 @@
+     sources += [ "system_fonts_win_unittest.cc" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_android || is_fuchsia || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia || is_win) {
+     sources += [ "platform_font_skia_unittest.cc" ]
+   }
+ 
+--- a/ui/gl/BUILD.gn
++++ b/ui/gl/BUILD.gn
+@@ -59,7 +59,7 @@
+ 
+ # On ChromeOS, system services require real ANGLE shared libraries,
+ # so we omit dummy stubs to avoid output target collisions.
+-use_angle_stubs = use_static_angle && (is_linux || is_win || is_mac)
++use_angle_stubs = use_static_angle && ((is_linux || is_zedbsd) || is_win || is_mac)
+ 
+ # Generate stubs for EGL and GLESv2 libraries when linking ANGLE statically.
+ # Some bot infrastructure expects these files to exist even in static builds.
+--- a/ui/gl/features.gni
++++ b/ui/gl/features.gni
+@@ -12,20 +12,20 @@
+   # Should Dawn support be compiled to back the WebGPU implementation?
+   # Also controls linking Dawn dependencies in such as SPIRV-Tools or
+   # Vulkan Validation Layers.
+-  use_dawn = is_apple || is_win || is_chromeos || (is_linux && !is_castos) ||
++  use_dawn = is_apple || is_win || is_chromeos || ((is_linux || is_zedbsd) && !is_castos) ||
+              (is_android && target_cpu != "x86" && target_cpu != "x64") ||
+              is_desktop_android
+ 
+   # Should Dawn test binaries (unittests, end2end_tests, perf_tests) be built?
+   # Independent of use_dawn, which controls whether Dawn is used in Chromium.
+-  build_dawn_tests = is_mac || is_win || is_linux || is_chromeos || is_android
++  build_dawn_tests = is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos || is_android
+ 
+   enable_validating_command_decoder = is_android
+ }
+ 
+ declare_args() {
+   enable_swiftshader =
+-      (is_win || is_linux || is_chromeos || is_mac || is_fuchsia) &&
++      (is_win || (is_linux || is_zedbsd) || is_chromeos || is_mac || is_fuchsia) &&
+       (target_cpu == "x86" || target_cpu == "x64" || target_cpu == "arm" ||
+        target_cpu == "arm64" || target_cpu == "mipsel" ||
+        target_cpu == "mips64el" || target_cpu == "riscv64")
+--- a/ui/menus/BUILD.gn
++++ b/ui/menus/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//testing/test.gni")
+-assert(is_win || is_mac || is_linux || is_chromeos || is_android ||
++assert(is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android ||
+        is_fuchsia || is_ios)
+ 
+ component("menus") {
+--- a/ui/native_theme/BUILD.gn
++++ b/ui/native_theme/BUILD.gn
+@@ -173,7 +173,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     sources += [ "native_theme_fluent_unittest.cc" ]
+     deps += [ "//skia:test_fonts" ]
+   }
+--- a/ui/views/BUILD.gn
++++ b/ui/views/BUILD.gn
+@@ -1052,7 +1052,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   static_library("view_pixel_diff_test_support") {
+     testonly = true
+     sources = [
+@@ -1667,7 +1667,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+     sources += [ "test/view_skia_gold_pixel_diff_unittest.cc" ]
+     deps += [ "//ui/views:view_pixel_diff_test_support" ]
+   }
+--- a/ui/views/examples/BUILD.gn
++++ b/ui/views/examples/BUILD.gn
+@@ -198,7 +198,7 @@
+     "//ui/views:test_support",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || (is_linux || is_zedbsd)) {
+     sources += [
+       "examples_skia_gold_pixel_diff.cc",
+       "examples_skia_gold_pixel_diff.h",
+--- a/ui/webui/resources/mojo/BUILD.gn
++++ b/ui/webui/resources/mojo/BUILD.gn
+@@ -107,7 +107,7 @@
+       [ "components/user_education/webui/user_education.mojom-webui.ts" ]
+ }
+ 
+-if (is_mac || is_win || is_linux || is_chromeos || is_android) {
++if (is_mac || is_win || (is_linux || is_zedbsd) || is_chromeos || is_android) {
+   mojo_ts_files += [ "mojo/public/mojom/base/version.mojom-webui.ts" ]
+ }
+ 
+--- a/ui/webui/webui_features.gni
++++ b/ui/webui/webui_features.gni
+@@ -49,17 +49,17 @@
+   declare_args() {
+     # Enable the WebUI version of the Bookmarks page.
+     enable_webui_bookmarks =
+-        target_os == "win" || target_os == "mac" || target_os == "linux" ||
++        target_os == "win" || target_os == "mac" || (target_os == "linux" || target_os == "zedbsd") ||
+         target_os == "chromeos" || is_desktop_android
+ 
+     # Enable the WebUI version of the History page.
+     enable_webui_history =
+-        target_os == "win" || target_os == "mac" || target_os == "linux" ||
++        target_os == "win" || target_os == "mac" || (target_os == "linux" || target_os == "zedbsd") ||
+         target_os == "chromeos" || is_desktop_android
+ 
+     # Enable the WebUI version of the New Tab Page.
+     enable_webui_ntp =
+-        target_os == "win" || target_os == "mac" || target_os == "linux" ||
++        target_os == "win" || target_os == "mac" || (target_os == "linux" || target_os == "zedbsd") ||
+         target_os == "chromeos" || is_desktop_android
+   }
+ 
+@@ -90,7 +90,7 @@
+ if (enable_webui_generate_code_cache) {
+   enable_webui_generate_code_cache =
+       optimize_webui && !is_msan &&
+-      ((host_toolchain == current_toolchain && (is_linux || is_win)) ||
++      ((host_toolchain == current_toolchain && ((is_linux || is_zedbsd) || is_win)) ||
+        (is_mac && host_os == "mac" && current_toolchain == default_toolchain))
+ }
+ 
+@@ -110,6 +110,6 @@
+ }
+ 
+ if (load_webui_from_disk) {
+-  assert(is_linux || is_mac || is_win || is_chromeos,
++  assert((is_linux || is_zedbsd) || is_mac || is_win || is_chromeos,
+          "load_webui_from_disk not available")
+ }

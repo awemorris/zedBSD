@@ -1,3 +1,95 @@
+--- a/base/BUILD.gn
++++ b/base/BUILD.gn
+@@ -172,7 +172,7 @@
+   flags = [ "CRONET_BUILD=$is_cronet_build" ]
+ }
+ 
+-use_epoll = is_linux || is_chromeos || is_android
++use_epoll = is_linux || is_chromeos || is_android || is_zedbsd
+ 
+ generate_allowlist_from_histograms_file("memory_dump_provider_name_variants") {
+   namespace = "trace_event_metrics"
+@@ -1117,6 +1117,22 @@
+     ]
+   }
+ 
++  if (is_zedbsd) {
++    sources += [
++      "base_paths_posix.cc",
++      "debug/elf_reader.cc",
++      "debug/elf_reader.h",
++      "files/file_path_watcher_stub.cc",
++      "process/memory_stubs.cc",
++      "process/process_handle_zedbsd.cc",
++      "process/process_iterator_zedbsd.cc",
++      "process/process_metrics_zedbsd.cc",
++      "system/sys_info_zedbsd.cc",
++      "threading/platform_thread_zedbsd.cc",
++      "zedbsd_rust_compat.c",
++    ]
++  }
++
+   if (is_chromeos) {
+     sources += [
+       "process/process_priority_delegate.h",
+@@ -1783,7 +1799,7 @@
+   if (is_posix && !is_ios) {
+     sources += [ "process/process_posix.cc" ]
+   }
+-  if (!is_win && !is_chromeos && !is_android && !is_linux) {
++  if (!is_win && !is_chromeos && !is_android && !(is_linux || is_zedbsd)) {
+     sources += [ "synchronization/cancelable_event_default.cc" ]
+   }
+ 
+@@ -3112,7 +3128,7 @@
+   header_dir = "base/memory"
+ 
+   protected_memory_enabled = !is_component_build && is_clang &&
+-                             (is_win || is_linux || is_android || is_mac)
++                             (is_win || (is_linux || is_zedbsd) || is_android || is_mac)
+ 
+   flags = [ "PROTECTED_MEMORY_ENABLED=$protected_memory_enabled" ]
+ }
+@@ -4314,7 +4330,7 @@
+     "//testing/buildbot/filters:base_unittests_filters",
+   ]
+ 
+-  if (is_win || is_linux) {
++  if (is_win || (is_linux || is_zedbsd)) {
+     data_deps += [ "//base/allocator:system_allocator_test_helper" ]
+     sources += [ "allocator/system_allocator_unittest.cc" ]
+   }
+--- a/base/allocator/BUILD.gn
++++ b/base/allocator/BUILD.gn
+@@ -33,7 +33,7 @@
+   }
+ }
+ 
+-if (is_win || is_linux) {
++if (is_win || (is_linux || is_zedbsd)) {
+   if (current_toolchain == default_system_allocator_toolchain) {
+     # This binary ends up in the 'system_allocator' build output directory.
+     executable("system_allocator_test_helper") {
+--- a/base/allocator/partition_allocator/partition_alloc.gni
++++ b/base/allocator/partition_allocator/partition_alloc.gni
+@@ -312,7 +312,7 @@
+   # outside of Chromium.
+   use_asan_backup_ref_ptr =
+       build_with_chromium && is_asan &&
+-      (is_win || is_android || is_linux || is_apple || is_chromeos)
++      (is_win || is_android || (is_linux || is_zedbsd) || is_apple || is_chromeos)
+ 
+   # Use probe-on-destruct unowned ptr detection with ASAN.
+   use_raw_ptr_asan_unowned_impl = false
+@@ -617,7 +617,7 @@
+   # occupied by ART and reservation fails gracefully.
+   enable_user_space_zero_segment =
+       has_64_bit_pointers && use_partition_alloc_as_malloc &&
+-      (is_mac || is_win || is_chromeos || is_linux || is_android)
++      (is_mac || is_win || is_chromeos || (is_linux || is_zedbsd) || is_android)
+ 
+   # Size of the zero segment in MB. The total size will be at least this value.
+   # This is 4GB + 1MB. The 1MB protects from using certain kinds of objects
 --- a/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 +++ b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 @@ -90,6 +90,8 @@
@@ -143,98 +235,6 @@
  }
  
  PA_COMPONENT_EXPORT(PARTITION_ALLOC)
---- a/base/BUILD.gn
-+++ b/base/BUILD.gn
-@@ -18,6 +18,7 @@
- # huge sequence of random-looking conditionals.
- 
- import("//base/allocator/allocator.gni")
-+is_zedbsd_target = is_zedbsd && current_toolchain == default_toolchain
- import("//base/allocator/partition_allocator/partition_alloc.gni")
- import("//base/debug/debug.gni")
- import("//base/trace_event/tracing.gni")
-@@ -1096,7 +1097,7 @@
-     ]
-   }
- 
--  if (is_linux || is_chromeos) {
-+  if ((is_linux && !is_zedbsd_target) || is_chromeos) {
-     sources += [
-       "debug/proc_maps_linux.cc",
-       "debug/proc_maps_linux.h",
-@@ -1117,6 +1118,15 @@
-     ]
-   }
- 
-+  if (is_zedbsd_target) {
-+    sources += [
-+      "process/process_metrics_zedbsd.cc",
-+      "threading/platform_thread_zedbsd.cc",
-+      "zedbsd_rust_compat.c",
-+    ]
-+    sources -= [ "linux_util.cc", "linux_util.h" ]
-+  }
-+
-   if (is_chromeos) {
-     sources += [
-       "process/process_priority_delegate.h",
-@@ -1125,7 +1135,7 @@
-     ]
-   }
- 
--  if (is_linux || is_chromeos || is_android) {
-+  if ((is_linux && !is_zedbsd_target) || is_chromeos || is_android) {
-     sources += [
-       "files/file_path_watcher_inotify.cc",
-       "files/file_path_watcher_inotify.h",
-@@ -1215,7 +1225,8 @@
-   # Needed for <atomic> if using newer C++ library than sysroot, except if
-   # building inside the cros_sdk environment - use host_toolchain as a
-   # more robust check for this.
--  if (!use_sysroot && (is_android || is_chromeos || (is_linux && !is_castos)) &&
-+  if (!use_sysroot && !is_zedbsd_target &&
-+      (is_android || is_chromeos || (is_linux && !is_castos)) &&
-       host_toolchain != "//build/toolchain/cros:host") {
-     libs += [ "atomic" ]
-   }
-@@ -1767,12 +1778,7 @@
-       "posix/can_lower_nice_to.h",
-       "process/launch_posix.cc",
-       "profiler/module_cache_posix.cc",
--      "profiler/stack_base_address_posix.cc",
--      "profiler/stack_base_address_posix.h",
--      "profiler/stack_copier_signal.cc",
--      "profiler/stack_copier_signal.h",
--      "profiler/thread_delegate_posix.cc",
--      "profiler/thread_delegate_posix.h",
-+
-     ]
-   }
- 
-@@ -2409,11 +2415,18 @@
- 
-     configs += linux_configs
-     all_dependent_configs += linux_configs
--    sources += [
--      "process/set_process_title_linux.cc",
--      "process/set_process_title_linux.h",
--      "system/sys_info_linux.cc",
--    ]
-+    if (!is_zedbsd_target) {
-+      sources += [
-+        "process/set_process_title_linux.cc",
-+        "process/set_process_title_linux.h",
-+        "system/sys_info_linux.cc",
-+      ]
-+    } else {
-+      sources += [
-+        "files/file_path_watcher_stub.cc",
-+        "system/sys_info_zedbsd.cc",
-+      ]
-+    }
-     if (!is_cronet_build) {
-       # These dependencies are not required on Android.
-       sources += [
 --- a/base/debug/elf_reader.cc
 +++ b/base/debug/elf_reader.cc
 @@ -6,6 +6,9 @@
@@ -838,6 +838,152 @@
  static const char kFDDir[] = "/dev/fd";
  #elif BUILDFLAG(IS_OPENBSD)
  static const char kFDDir[] = "/dev/fd";
+--- /dev/null
++++ b/base/process/process_handle_zedbsd.cc
+@@ -0,0 +1,46 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_handle.h"
++
++#include <fcntl.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <uapi/system.h>
++#include <unistd.h>
++
++#include "base/files/file_path.h"
++#include "base/files/scoped_file.h"
++#include "base/posix/eintr_wrapper.h"
++
++namespace base {
++
++ProcessId GetParentProcessId(ProcessHandle process) {
++  if (process == getpid()) {
++    return getppid();
++  }
++
++  // KERN_SYSTEM_GET_PROCESS answers the first process above the pid asked.
++  ScopedFD system(HANDLE_EINTR(open("/dev/system", O_RDONLY | O_CLOEXEC)));
++  if (!system.is_valid() || process <= 0) {
++    return -1;
++  }
++  struct process_info info;
++  memset(&info, 0, sizeof(info));
++  info.pid = process - 1;
++  info.version = KERN_SYSTEM_PROCESS_INFO_VERSION;
++  info.struct_size = sizeof(info);
++  if (ioctl(system.get(), KERN_SYSTEM_GET_PROCESS, &info) != 0 ||
++      info.pid != process) {
++    return -1;
++  }
++  return info.ppid;
++}
++
++FilePath GetProcessExecutablePath(ProcessHandle process) {
++  // zedBSD tells no process's executable path.
++  return FilePath();
++}
++
++}  // namespace base
+--- a/base/process/process_iterator.h
++++ b/base/process/process_iterator.h
+@@ -112,6 +112,10 @@
+ #if BUILDFLAG(IS_WIN)
+   HANDLE snapshot_;
+   bool started_iteration_ = false;
++#elif BUILDFLAG(IS_ZEDBSD)
++  // /dev/system, and the pid after which the next process is asked for.
++  int system_fd_ = -1;
++  int32_t cursor_pid_ = 0;
+ #elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+   std::vector<kinfo_proc> kinfo_procs_;
+   size_t index_of_kinfo_proc_ = 0;
+--- /dev/null
++++ b/base/process/process_iterator_zedbsd.cc
+@@ -0,0 +1,81 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_iterator.h"
++
++#include <fcntl.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <uapi/system.h>
++#include <unistd.h>
++
++#include "base/posix/eintr_wrapper.h"
++#include "base/strings/string_split.h"
++
++namespace base {
++
++// zedBSD lists the processes through /dev/system: KERN_SYSTEM_GET_PROCESS
++// answers the first process whose pid is above the one asked for, and
++// KERN_SYSTEM_GET_PROCESS_ARGUMENTS a process's arguments after argv[0].
++ProcessIterator::ProcessIterator(const ProcessFilter* filter)
++    : filter_(filter) {
++  system_fd_ = HANDLE_EINTR(open("/dev/system", O_RDONLY | O_CLOEXEC));
++}
++
++ProcessIterator::~ProcessIterator() {
++  if (system_fd_ >= 0) {
++    close(system_fd_);
++  }
++}
++
++bool ProcessIterator::CheckForNextProcess() {
++  if (system_fd_ < 0) {
++    return false;
++  }
++
++  struct process_info info;
++  memset(&info, 0, sizeof(info));
++  info.pid = cursor_pid_;
++  info.version = KERN_SYSTEM_PROCESS_INFO_VERSION;
++  info.struct_size = sizeof(info);
++  if (ioctl(system_fd_, KERN_SYSTEM_GET_PROCESS, &info) != 0 ||
++      info.pid <= cursor_pid_) {
++    return false;
++  }
++  cursor_pid_ = info.pid;
++
++  entry_.pid_ = info.pid;
++  entry_.ppid_ = info.ppid;
++  entry_.gid_ = info.process_group;
++  entry_.exe_file_.assign(info.command,
++                          strnlen(info.command, sizeof(info.command)));
++
++  // The command line: the command, then the arguments after argv[0].
++  entry_.cmd_line_args_.clear();
++  entry_.cmd_line_args_.push_back(entry_.exe_file_);
++  struct system_process_arguments arguments;
++  memset(&arguments, 0, sizeof(arguments));
++  arguments.pid = info.pid;
++  arguments.version = KERN_SYSTEM_PROCESS_ARGUMENTS_VERSION;
++  arguments.struct_size = sizeof(arguments);
++  if (ioctl(system_fd_, KERN_SYSTEM_GET_PROCESS_ARGUMENTS, &arguments) == 0) {
++    const std::string line(
++        arguments.arguments,
++        strnlen(arguments.arguments, sizeof(arguments.arguments)));
++    for (const std::string& argument :
++         SplitString(line, " ", KEEP_WHITESPACE, SPLIT_WANT_NONEMPTY)) {
++      entry_.cmd_line_args_.push_back(argument);
++    }
++  }
++  return true;
++}
++
++bool NamedProcessIterator::IncludeEntry() {
++  if (executable_name_ != entry().exe_file()) {
++    return false;
++  }
++  return ProcessIterator::IncludeEntry();
++}
++
++}  // namespace base
 --- a/base/process/process_metrics.h
 +++ b/base/process/process_metrics.h
 @@ -311,7 +311,7 @@
@@ -965,6 +1111,31 @@
  #include <unistd.h>
  
  #include "base/files/file_util.h"
+--- a/base/sync_socket_posix.cc
++++ b/base/sync_socket_posix.cc
+@@ -163,12 +163,22 @@
+ 
+ size_t SyncSocket::Peek() {
+   DCHECK(IsValid());
++#if BUILDFLAG(IS_ZEDBSD)
++  struct pollfd pfd = {handle_.get(), POLLIN, 0};
++  if (HANDLE_EINTR(poll(&pfd, 1, 0)) <= 0 || !(pfd.revents & POLLIN)) {
++    return 0;
++  }
++  char buf[1];
++  ssize_t n = HANDLE_EINTR(recv(handle_.get(), buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT));
++  return n > 0 ? static_cast<size_t>(n) : 0;
++#else
+   int number_chars = 0;
+   if (ioctl(handle_.get(), FIONREAD, &number_chars) == -1) {
+     // If there is an error in ioctl, signal that the channel would block.
+     return 0;
+   }
+   return checked_cast<size_t>(number_chars);
++#endif
+ }
+ 
+ bool SyncSocket::IsValid() const {
 --- a/base/synchronization/cancelable_event.h
 +++ b/base/synchronization/cancelable_event.h
 @@ -11,7 +11,7 @@
@@ -996,31 +1167,6 @@
    if (PriorityInheritanceAvailable()) {
  #pragma clang diagnostic push  // Can be removed once our min-sdk is >= 28.
  #pragma clang diagnostic ignored "-Wunguarded-availability"
---- a/base/sync_socket_posix.cc
-+++ b/base/sync_socket_posix.cc
-@@ -163,12 +163,22 @@
- 
- size_t SyncSocket::Peek() {
-   DCHECK(IsValid());
-+#if BUILDFLAG(IS_ZEDBSD)
-+  struct pollfd pfd = {handle_.get(), POLLIN, 0};
-+  if (HANDLE_EINTR(poll(&pfd, 1, 0)) <= 0 || !(pfd.revents & POLLIN)) {
-+    return 0;
-+  }
-+  char buf[1];
-+  ssize_t n = HANDLE_EINTR(recv(handle_.get(), buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT));
-+  return n > 0 ? static_cast<size_t>(n) : 0;
-+#else
-   int number_chars = 0;
-   if (ioctl(handle_.get(), FIONREAD, &number_chars) == -1) {
-     // If there is an error in ioctl, signal that the channel would block.
-     return 0;
-   }
-   return checked_cast<size_t>(number_chars);
-+#endif
- }
- 
- bool SyncSocket::IsValid() const {
 --- a/base/system/sys_info_posix.cc
 +++ b/base/system/sys_info_posix.cc
 @@ -110,7 +110,7 @@

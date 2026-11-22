@@ -20,6 +20,168 @@
  // We disable format checker under vscode intellisense compilation.
  // See https://github.com/microsoft/vscode-cpptools/issues/3683 for
  // more details.
+--- a/third_party/angle/build_overrides/partition_alloc.gni
++++ b/third_party/angle/build_overrides/partition_alloc.gni
+@@ -27,7 +27,7 @@
+ _build_type_supported = !is_win || (!is_component_build && !is_debug)
+ 
+ _platform_supported =
+-    is_android || is_apple || is_chromeos || is_fuchsia || is_linux || is_win
++    is_android || is_apple || is_chromeos || is_fuchsia || (is_linux || is_zedbsd) || is_win
+ 
+ _supported = _compiler_supported && _build_type_supported &&
+              _platform_supported && !using_sanitizer
+--- a/third_party/angle/gni/angle.gni
++++ b/third_party/angle/gni/angle.gni
+@@ -380,7 +380,7 @@
+       (!is_android || (ndk_api_level_at_least_26 && !build_with_chromium))
+   angle_enable_vulkan_api_dump_layer =
+       angle_enable_vulkan && angle_debug_layers_enabled && angle_standalone &&
+-      !is_apple && (is_linux || is_android)
++      !is_apple && ((is_linux || is_zedbsd) || is_android)
+ 
+   # ISpriteVisual windows cannot be validated and can lead to crashes if an
+   # invalid window is provided to ANGLE. Disable them for non-standalone ANGLE
+--- a/third_party/angle/src/libOpenCL/BUILD.gn
++++ b/third_party/angle/src/libOpenCL/BUILD.gn
+@@ -8,7 +8,7 @@
+ 
+ assert(angle_enable_cl)
+ 
+-if (is_win || is_linux) {
++if (is_win || (is_linux || is_zedbsd)) {
+   glesv2_path =
+       rebase_path(get_label_info("$angle_root:libGLESv2", "root_out_dir"))
+ }
+--- a/third_party/angle/src/tests/BUILD.gn
++++ b/third_party/angle/src/tests/BUILD.gn
+@@ -13,7 +13,7 @@
+   build_angle_gles1_conform_tests = checkout_angle_internal
+   build_angle_trace_perf_tests = false
+   build_angle_perftests =
+-      is_win || is_linux || is_chromeos || is_android || is_apple || is_fuchsia
++      is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_apple || is_fuchsia
+ }
+ 
+ declare_args() {
+@@ -278,7 +278,7 @@
+   }
+ }
+ 
+-if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
++if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia || is_apple) {
+   import("angle_end2end_tests.gni")
+ 
+   angle_test("angle_end2end_tests") {
+@@ -541,7 +541,7 @@
+   }
+ }
+ 
+-if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
++if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia || is_apple) {
+   import("angle_white_box_tests.gni")
+ 
+   angle_test("angle_white_box_tests") {
+@@ -647,7 +647,7 @@
+   test_utils = ":angle_common_test_utils_static"
+ }
+ 
+-if (is_win || is_linux || is_chromeos || is_android || is_apple) {
++if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_android || is_apple) {
+   import("angle_perftests.gni")
+ 
+   # This test suite is for perf tests that use ANGLE's internals in some direct
+@@ -1288,7 +1288,7 @@
+       cflags_c = [ "-Wno-shadow" ]
+     }
+ 
+-    if (!is_win && !is_linux && !is_chromeos) {
++    if (!is_win && !(is_linux || is_zedbsd) && !is_chromeos) {
+       defines = [ "NULLWS" ]
+     }
+   }
+@@ -1577,7 +1577,7 @@
+     if (is_win) {
+       sources += deqp_framework_delibs_sources_win
+     }
+-    if (is_linux || is_chromeos || is_android || is_apple) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_android || is_apple) {
+       sources += deqp_framework_delibs_sources_unix
+     }
+ 
+--- a/third_party/blink/renderer/controller/BUILD.gn
++++ b/third_party/blink/renderer/controller/BUILD.gn
+@@ -106,7 +106,7 @@
+ 
+   # HighestPmfReporter depends on MemoryUsageMonitor and MemoryUsageMonitor
+   # depends on platform specific code. Explicitly specify supported platforms.
+-  if (is_linux || is_chromeos || is_win || is_android || is_apple) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win || is_android || is_apple) {
+     sources += [
+       "highest_pmf_reporter.cc",
+       "highest_pmf_reporter.h",
+@@ -288,7 +288,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_android || is_apple || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_android || is_apple || is_win) {
+     sources += [
+       "highest_pmf_reporter_test.cc",
+       "memory_usage_monitor_test.cc",
+--- a/third_party/blink/renderer/core/BUILD.gn
++++ b/third_party/blink/renderer/core/BUILD.gn
+@@ -168,7 +168,7 @@
+ 
+       # Force include the header.
+       cflags = [ "/FI$precompiled_header" ]
+-    } else if (is_mac || is_linux) {
++    } else if (is_mac || (is_linux || is_zedbsd)) {
+       precompiled_source = "//third_party/blink/renderer/core/precompile_core.h"
+     }
+   }
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -386,7 +386,7 @@
+ 
+       # Force include the header.
+       cflags = [ "/FI$precompiled_header" ]
+-    } else if (is_mac || is_linux) {
++    } else if (is_mac || (is_linux || is_zedbsd)) {
+       precompiled_source =
+           "//third_party/blink/renderer/platform/precompile_platform.h"
+     }
+--- a/third_party/blink/renderer/platform/image-decoders/BUILD.gn
++++ b/third_party/blink/renderer/platform/image-decoders/BUILD.gn
+@@ -129,7 +129,7 @@
+     "//third_party/blink/renderer/platform:test_support",
+   ]
+ 
+-  if (is_win || is_mac || (is_linux && !is_castos)) {
++  if (is_win || is_mac || ((is_linux || is_zedbsd) && !is_castos)) {
+     deps += [ "//ui/base:pixel_diff_test_support" ]
+   }
+ 
+--- a/third_party/blink/web_tests/BUILD.gn
++++ b/third_party/blink/web_tests/BUILD.gn
+@@ -162,7 +162,7 @@
+     data += [ "OptimizationGuideExpectations" ]
+   }
+ 
+-  if (is_win || is_linux || is_fuchsia) {
++  if (is_win || (is_linux || is_zedbsd) || is_fuchsia) {
+     data += [
+       "platform/win/",
+       "platform/win10/",
+@@ -200,7 +200,7 @@
+   }
+ 
+   # flag-specific tests only runs on linux & mac as of now
+-  if (is_linux || is_mac) {
++  if ((is_linux || is_zedbsd) || is_mac) {
+     data += [
+       "FlagSpecificConfig",
+       "FlagExpectations/",
 --- a/third_party/ced/src/util/string_util.h
 +++ b/third_party/ced/src/util/string_util.h
 @@ -18,6 +18,7 @@
@@ -30,6 +192,271 @@
  
  namespace base {
  
+--- a/third_party/dav1d/BUILD.gn
++++ b/third_party/dav1d/BUILD.gn
+@@ -42,7 +42,7 @@
+     # upstream's meson.build setup:
+     # https://chromium.googlesource.com/external/github.com/videolan/dav1d/+/master/meson.build
+     needs_stack_alignment = true
+-    if (current_cpu == "x64" || is_linux || is_apple) {
++    if (current_cpu == "x64" || (is_linux || is_zedbsd) || is_apple) {
+       stack_alignment = 16
+     } else {
+       stack_alignment = 4
+--- a/third_party/dawn/BUILD.gn
++++ b/third_party/dawn/BUILD.gn
+@@ -85,7 +85,7 @@
+ 
+   group("cmds") {
+     deps = [ "src/tint:cmds" ]
+-    if ((target_cpu == "x64" && (is_win || is_linux || is_mac)) ||
++    if ((target_cpu == "x64" && (is_win || (is_linux || is_zedbsd) || is_mac)) ||
+         (target_cpu == "arm64" && is_win)) {
+       deps += [ "${dawn_dxc_gn_dir}:dxc" ]
+     }
+@@ -101,7 +101,7 @@
+     if (dawn_build_emdawnwebgpu) {
+       deps += [ ":emdawnwebgpu_samples" ]
+     }
+-    if ((target_cpu == "x64" && (is_win || is_linux || is_mac)) ||
++    if ((target_cpu == "x64" && (is_win || (is_linux || is_zedbsd) || is_mac)) ||
+         (target_cpu == "arm64" && is_win)) {
+       deps += [ "${dawn_dxc_gn_dir}:dxc" ]
+     }
+--- a/third_party/dawn/build_overrides/partition_alloc.gni
++++ b/third_party/dawn/build_overrides/partition_alloc.gni
+@@ -47,7 +47,7 @@
+ _build_type_supported = !is_win || (!is_component_build && !is_debug)
+ 
+ _platform_supported =
+-    is_android || is_apple || is_chromeos || is_fuchsia || is_linux || is_win
++    is_android || is_apple || is_chromeos || is_fuchsia || (is_linux || is_zedbsd) || is_win
+ 
+ _supported = _compiler_supported && _build_type_supported &&
+              _platform_supported && !using_sanitizer
+--- a/third_party/dawn/scripts/dawn_features.gni
++++ b/third_party/dawn/scripts/dawn_features.gni
+@@ -175,12 +175,12 @@
+ declare_args() {
+   # Uses our built version of the Vulkan validation layers
+   dawn_enable_vulkan_validation_layers =
+-      dawn_enable_vulkan && ((is_linux && !is_chromeos) || is_win || is_mac)
++      dawn_enable_vulkan && (((is_linux || is_zedbsd) && !is_chromeos) || is_win || is_mac)
+ 
+   # Uses our built version of the Vulkan loader on platforms where we can't
+   # assume to have one present at the system level.
+   dawn_enable_vulkan_loader =
+-      dawn_enable_vulkan && (is_mac || (is_linux && !is_android))
++      dawn_enable_vulkan && (is_mac || ((is_linux || is_zedbsd) && !is_android))
+ 
+   # Enable SPIR-V validation by default.
+   # A Dawn toggle can be used to disable this at runtime for Graphite.
+@@ -190,7 +190,7 @@
+ # Not enabled for UWP because it only supports CoreWindow for windowing.
+ # Not enabled for Emscripten because samples use Emscripten APIs, not GLFW.
+ dawn_supports_glfw_for_windowing =
+-    (is_win && !dawn_is_winuwp) || (is_linux && !is_chromeos) || is_mac
++    (is_win && !dawn_is_winuwp) || ((is_linux || is_zedbsd) && !is_chromeos) || is_mac
+ 
+ # Much of the GL backend code is shared, so define a convenience var.
+ dawn_enable_opengl = dawn_enable_opengles || dawn_enable_desktop_gl
+--- a/third_party/dawn/src/dawn/common/BUILD.gn
++++ b/third_party/dawn/src/dawn/common/BUILD.gn
+@@ -152,7 +152,7 @@
+ # This GN file is discovered by all Chromium builds, but common doesn't support
+ # all of Chromium's OSes so we explicitly make the target visible only on
+ # systems we know Dawn is able to compile on.
+-if (is_win || is_linux || is_chromeos || is_mac || is_fuchsia || is_android ||
++if (is_win || (is_linux || is_zedbsd) || is_chromeos || is_mac || is_fuchsia || is_android ||
+     is_ios || is_wasm) {
+   static_library("common") {
+     sources = [
+--- a/third_party/dawn/src/dawn/tests/BUILD.gn
++++ b/third_party/dawn/src/dawn/tests/BUILD.gn
+@@ -767,7 +767,7 @@
+     }
+   }
+ 
+-  if (is_mac || is_ios || is_linux) {
++  if (is_mac || is_ios || (is_linux || is_zedbsd)) {
+     sources += [ "end2end/BufferHostMappedPointerTests_posix.cpp" ]
+   }
+   if (is_win) {
+--- a/third_party/dawn/src/tint/BUILD.gn
++++ b/third_party/dawn/src/tint/BUILD.gn
+@@ -265,7 +265,7 @@
+ 
+ source_set("dxcompiler-for-fuzzer") {
+   if (dawn_use_built_dxc && defined(use_fuzzing_engine) && use_fuzzing_engine &&
+-      (is_win || is_linux || is_mac) && target_cpu != "x86") {
++      (is_win || (is_linux || is_zedbsd) || is_mac) && target_cpu != "x86") {
+     public_deps = [ "${dawn_dxc_gn_dir}:dxcompiler" ]
+   }
+ }
+--- a/third_party/dawn/third_party/directx-shader-compiler/BUILD.gn
++++ b/third_party/dawn/third_party/directx-shader-compiler/BUILD.gn
+@@ -263,7 +263,7 @@
+       "HAVE_MALLOC_MALLOC_H=",
+       "HAVE_MALLOC_ZONE_STATISTICS=",
+     ]
+-  } else if (is_linux || is_mac) {
++  } else if ((is_linux || is_zedbsd) || is_mac) {
+     values += [
+       "HAVE_DECL_STRERROR_S=",
+       "HAVE_DIRENT_H=1",
+@@ -549,7 +549,7 @@
+     cflags_c += [
+       "/EHsc",  # DXC uses exceptions
+     ]
+-  } else if (is_linux || is_mac) {
++  } else if ((is_linux || is_zedbsd) || is_mac) {
+     cflags_cc += [
+       "-fcxx-exceptions",  # DXC uses exceptions
+       "-fms-extensions",
+@@ -1332,7 +1332,7 @@
+       "${target_gen_dir}/lib/DxilPIXPasses",
+     ]
+ 
+-    if (is_linux || is_mac) {
++    if ((is_linux || is_zedbsd) || is_mac) {
+       include_dirs += [
+         "$dawn_dxheaders_dir/include/directx",
+         "$dawn_dxheaders_dir/include/wsl/stubs/",
+--- a/third_party/icu/BUILD.gn
++++ b/third_party/icu/BUILD.gn
+@@ -180,7 +180,7 @@
+ # Config used to set default visibility to hidden.
+ config("visibility_hidden") {
+   cflags = []
+-  if (is_mac || is_linux || is_chromeos || is_android || is_fuchsia) {
++  if (is_mac || (is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia) {
+     cflags += [ "-fvisibility=hidden" ]
+   }
+ }
+--- a/third_party/libwebp/BUILD.gn
++++ b/third_party/libwebp/BUILD.gn
+@@ -29,7 +29,7 @@
+   ]
+ 
+   # WEBP_REDUCE_SIZE is defined for non-desktop platforms only.
+-  if (!is_chromeos && !is_win && !is_mac && !is_linux) {
++  if (!is_chromeos && !is_win && !is_mac && !(is_linux || is_zedbsd)) {
+     defines += [ "WEBP_REDUCE_SIZE" ]
+   }
+   if (!is_ios) {
+--- a/third_party/libxml/BUILD.gn
++++ b/third_party/libxml/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ # Define an "os_include" variable that points at the OS-specific generated
+ # headers.  These were generated by running the configure script offline.
+-if (is_linux || is_chromeos || is_android || is_fuchsia) {
++if ((is_linux || is_zedbsd) || is_chromeos || is_android || is_fuchsia) {
+   os_include = "linux"
+ } else if (is_apple) {
+   os_include = "mac"
+--- a/third_party/openh264/BUILD.gn
++++ b/third_party/openh264/BUILD.gn
+@@ -41,7 +41,7 @@
+ 
+ # MSAN builds are flaky with assembler. crbug.com/685168
+ 
+-use_assembler = (is_win || is_mac || is_linux || is_chromeos) &&
++use_assembler = (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) &&
+                 (current_cpu == "x86" || current_cpu == "x64") && !is_msan
+ 
+ # This IF statement will make the targets visible only on specific builds,
+@@ -132,7 +132,7 @@
+       }
+     }
+   }
+-}  # if (is_win || is_linux || is_chromeos)
++}  # if (is_win || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ source_set("common") {
+   sources = openh264_common_sources
+--- a/third_party/openscreen/src/BUILD.gn
++++ b/third_party/openscreen/src/BUILD.gn
+@@ -91,7 +91,7 @@
+ 
+   # The cast_receiver depends on the standalone implementation which is only
+   # implemented for certain operating systems.
+-  if (is_linux || is_mac || is_chromeos || is_android) {
++  if ((is_linux || is_zedbsd) || is_mac || is_chromeos || is_android) {
+     deps += [ "cast/standalone_receiver:cast_receiver" ]
+   }
+ 
+--- a/third_party/openscreen/src/third_party/googleurl/BUILD.gn
++++ b/third_party/openscreen/src/third_party/googleurl/BUILD.gn
+@@ -19,7 +19,7 @@
+     cflags = [ "-Wno-return-type" ]
+ 
+     # Googleurl doesn't properly detect that wchar is utf32.
+-    if (is_linux || is_mac) {
++    if ((is_linux || is_zedbsd) || is_mac) {
+       defines = [ "WCHAR_T_IS_UTF32" ]
+     }
+   }
+--- a/third_party/pdfium/build_overrides/partition_alloc.gni
++++ b/third_party/pdfium/build_overrides/partition_alloc.gni
+@@ -27,7 +27,7 @@
+ #   non-universal symbol wrapping), and has not been validated on others.
+ # - Windows: debug CRT is not compatible, see below.
+ _disable_partition_alloc_everywhere =
+-    (!is_linux && is_component_build) || (is_win && is_debug)
++    (!(is_linux || is_zedbsd) && is_component_build) || (is_win && is_debug)
+ 
+ # Under Windows debug build, the allocator shim is not compatible with CRT.
+ # For all other platforms & configurations, the shim is required, to replace
+@@ -37,7 +37,7 @@
+ # - The allocator shim does not work with macOS with use_custom_libcxx=false.
+ # - The allocator shim isn't working standalone on Windows at the moment.
+ #   See crbug.com/pdfium/2068.
+-if ((is_linux || is_chromeos || is_android || is_apple ||
++if (((is_linux || is_zedbsd) || is_chromeos || is_android || is_apple ||
+      (is_win && !is_component_build && !is_debug)) && !_is_using_sanitizers &&
+     (!is_mac || use_custom_libcxx) && !is_win) {
+   _use_shim = true
+@@ -56,7 +56,7 @@
+ shim_supports_sized_dealloc_default = false
+ use_partition_alloc_as_malloc_default = _default_allocator == "partition"
+ 
+-_is_brp_supported = (is_win || is_android || is_linux || is_mac ||
++_is_brp_supported = (is_win || is_android || (is_linux || is_zedbsd) || is_mac ||
+                      is_chromeos) && use_partition_alloc_as_malloc_default
+ 
+ enable_backup_ref_ptr_support_default = _is_brp_supported
+--- a/third_party/perfetto/BUILD.gn
++++ b/third_party/perfetto/BUILD.gn
+@@ -210,7 +210,7 @@
+     # Checks that the "fake" backend implementations build.
+     "src/tracing:client_api_no_backends_compile_test",
+   ]
+-  if (is_linux || is_android || is_mac || is_freebsd) {
++  if ((is_linux || is_zedbsd) || is_android || is_mac || is_freebsd) {
+     all_targets += [ "src/tracebox" ]
+   }
+ }
+--- a/third_party/perfetto/gn/perfetto.gni
++++ b/third_party/perfetto/gn/perfetto.gni
+@@ -357,7 +357,7 @@
+   # Enables the REPL interactive prompt in the trace processor.
+   enable_perfetto_trace_processor_linenoise =
+       perfetto_build_standalone && enable_perfetto_trace_processor &&
+-      (is_linux || is_android || is_mac)
++      ((is_linux || is_zedbsd) || is_android || is_mac)
+ 
+   # Enables JSON support in the trace processor. Required for JSON trace import
+   # and export.
+--- a/third_party/perfetto/gn/standalone/sanitizers/vars.gni
++++ b/third_party/perfetto/gn/standalone/sanitizers/vars.gni
+@@ -55,5 +55,5 @@
+ assert(!using_sanitizer || is_clang || is_system_compiler,
+        "is_*san requires is_clang=true'")
+ assert(!is_msan || is_linux, "msan only supported on linux")
+-assert(!is_tsan || (is_linux || is_mac), "tsan only supported on linux and mac")
++assert(!is_tsan || ((is_linux || is_zedbsd) || is_mac), "tsan only supported on linux and mac")
+ assert(!is_fuzzer || use_libfuzzer || link_fuzzer != "")
 --- a/third_party/perfetto/include/perfetto/base/build_config.h
 +++ b/third_party/perfetto/include/perfetto/base/build_config.h
 @@ -148,6 +148,20 @@
@@ -118,6 +545,17 @@
  }
  #endif
  
+--- a/third_party/perfetto/src/base/BUILD.gn
++++ b/third_party/perfetto/src/base/BUILD.gn
+@@ -21,7 +21,7 @@
+ # On standalone builds this is all the OSes we support. On chromium builds,
+ # though, this really means !is_fuchsia && !is_nacl.
+ _subprocess_supported =
+-    is_linux || is_chromeos || is_android || is_mac || is_win || is_freebsd
++    (is_linux || is_zedbsd) || is_chromeos || is_android || is_mac || is_win || is_freebsd
+ 
+ perfetto_component("base") {
+   deps = [
 --- a/third_party/perfetto/src/base/android_utils.cc
 +++ b/third_party/perfetto/src/base/android_utils.cc
 @@ -116,7 +116,7 @@
@@ -162,6 +600,68 @@
      PERFETTO_BUILDFLAG(PERFETTO_OS_WASM)
  
  #include <stddef.h>
+--- a/third_party/skia/BUILD.gn
++++ b/third_party/skia/BUILD.gn
+@@ -3073,7 +3073,7 @@
+     }
+   }
+ 
+-  if ((is_linux || is_mac || skia_enable_optimize_size) &&
++  if (((is_linux || is_zedbsd) || is_mac || skia_enable_optimize_size) &&
+       skia_enable_tools_that_might_need_ganesh) {
+     if (skia_enable_skottie) {
+       test_app("skottie_tool") {
+@@ -3287,7 +3287,7 @@
+       }
+     }
+ 
+-    if (is_linux || is_mac) {
++    if ((is_linux || is_zedbsd) || is_mac) {
+       test_app("create_test_font") {
+         sources = [ "tools/fonts/create_test_font.cpp" ]
+         deps = [ ":skia" ]
+@@ -3773,7 +3773,7 @@
+       }
+     }
+ 
+-    if (is_linux || is_win || is_mac) {
++    if ((is_linux || is_zedbsd) || is_win || is_mac) {
+       test_app("editor") {
+         is_shared_library = is_android
+         deps = [ "modules/skplaintexteditor:editor_app" ]
+--- a/third_party/skia/gn/skia.gni
++++ b/third_party/skia/gn/skia.gni
+@@ -82,7 +82,7 @@
+   skia_use_lua = is_skia_dev_build && !is_ios
+   skia_use_metal = false
+   skia_use_ndk_images = is_android && defined(ndk_api) && ndk_api >= 30
+-  skia_use_perfetto = is_linux || is_mac || is_android
++  skia_use_perfetto = (is_linux || is_zedbsd) || is_mac || is_android
+   skia_use_pprof = false
+   skia_enable_pipeline_label_tracing = false
+ 
+--- a/third_party/skia/third_party/dawn/BUILD.gn
++++ b/third_party/skia/third_party/dawn/BUILD.gn
+@@ -306,7 +306,7 @@
+   if (dawn_enable_d3d12 && is_win) {
+     defines += [ "SK_DAWN_HAS_D3D12" ]
+   }
+-  if (dawn_enable_vulkan && (is_win || is_android || is_linux)) {
++  if (dawn_enable_vulkan && (is_win || is_android || (is_linux || is_zedbsd))) {
+     defines += [ "SK_DAWN_HAS_VULKAN" ]
+   }
+   if (dawn_enable_opengles && (is_android || is_linux)) {
+--- a/third_party/sqlite/BUILD.gn
++++ b/third_party/sqlite/BUILD.gn
+@@ -362,7 +362,7 @@
+   public_configs = [ ":dev_sqlite3_compile_options" ]
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos) {
+   executable("sqlite_shell") {
+     include_dirs = [
+       # SQLite's shell.c contains an '#include "sqlite3.h", which we want to be
 --- a/third_party/sqlite/src/amalgamation/sqlite3.c
 +++ b/third_party/sqlite/src/amalgamation/sqlite3.c
 @@ -1,3 +1,6 @@
@@ -171,3 +671,104 @@
  /******************************************************************************
  ** This file is an amalgamation of many separate C source files from SQLite
  ** version 3.54.1.  By combining all the individual C code files into this
+--- a/third_party/updater/BUILD.gn
++++ b/third_party/updater/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/chrome_build.gni")
+ import("//chrome/updater/branding.gni")
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || (is_linux || is_zedbsd)) {
+   copy("old_updater") {
+     testonly = true
+     sources = []
+--- a/third_party/webrtc/examples/BUILD.gn
++++ b/third_party/webrtc/examples/BUILD.gn
+@@ -46,7 +46,7 @@
+     deps += [ ":AppRTCMobile" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+     deps += [
+       ":peerconnection_server",
+       ":stunserver",
+@@ -644,7 +644,7 @@
+   }
+ }
+ 
+-if (is_linux || is_chromeos || is_win) {
++if ((is_linux || is_zedbsd) || is_chromeos || is_win) {
+   if (is_linux || is_chromeos) {
+     pkg_config("gtk_config") {
+       packages = [
+--- a/third_party/webrtc/modules/BUILD.gn
++++ b/third_party/webrtc/modules/BUILD.gn
+@@ -101,7 +101,7 @@
+       "sframe:synchronized_sframe_encryptor_unittest",
+     ]
+ 
+-    if (is_linux || is_chromeos || is_mac || is_win) {
++    if ((is_linux || is_zedbsd) || is_chromeos || is_mac || is_win) {
+       tests += [ "audio_device:audio_device_unittest" ]
+     }
+     if (is_mac) {
+--- a/third_party/webrtc/modules/audio_device/BUILD.gn
++++ b/third_party/webrtc/modules/audio_device/BUILD.gn
+@@ -487,7 +487,7 @@
+     defines = [ "WEBRTC_DUMMY_AUDIO_BUILD" ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_mac || is_win) {
++  if ((is_linux || is_zedbsd) || is_chromeos || is_mac || is_win) {
+     rtc_cc_test("audio_device_unittest") {
+       sources = [ "audio_device_unittest.cc" ]
+       deps = [
+--- a/third_party/webrtc/modules/video_capture/BUILD.gn
++++ b/third_party/webrtc/modules/video_capture/BUILD.gn
+@@ -165,7 +165,7 @@
+     rtc_test("video_capture_tests") {
+       sources = [ "test/video_capture_unittest.cc" ]
+       ldflags = []
+-      if (is_linux || is_chromeos || is_mac) {
++      if ((is_linux || is_zedbsd) || is_chromeos || is_mac) {
+         ldflags += [
+           "-lpthread",
+           "-lm",
+--- a/third_party/webrtc/test/BUILD.gn
++++ b/third_party/webrtc/test/BUILD.gn
+@@ -1745,10 +1745,10 @@
+     ]
+     deps += [ "../api:scoped_refptr" ]
+   }
+-  if (!((is_linux || is_chromeos) && rtc_use_x11) && !is_mac && !is_win) {
++  if (!(((is_linux || is_zedbsd) || is_chromeos) && rtc_use_x11) && !is_mac && !is_win) {
+     sources += [ "null_platform_renderer.cc" ]
+   }
+-  if (((is_linux || is_chromeos) && rtc_use_x11) || is_mac) {
++  if ((((is_linux || is_zedbsd) || is_chromeos) && rtc_use_x11) || is_mac) {
+     sources += [
+       "gl/gl_renderer.cc",
+       "gl/gl_renderer.h",
+--- a/third_party/webrtc/webrtc.gni
++++ b/third_party/webrtc/webrtc.gni
+@@ -332,7 +332,7 @@
+   rtc_build_dcsctp = !build_with_mozilla && rtc_enable_sctp
+ 
+   # Enable gRPC used for negotiation in multiprocess tests
+-  rtc_enable_grpc = rtc_enable_protobuf && (is_linux || is_mac)
++  rtc_enable_grpc = rtc_enable_protobuf && ((is_linux || is_zedbsd) || is_mac)
+ }
+ 
+ # Make it possible to provide custom locations for some libraries (move these
+--- a/third_party/widevine/cdm/widevine.gni
++++ b/third_party/widevine/cdm/widevine.gni
+@@ -40,7 +40,7 @@
+ # desktop platforms. The CDM can be bundled regardless whether it's a
+ # component. See below.
+ enable_widevine_cdm_component =
+-    enable_library_widevine_cdm && (is_win || is_mac || is_linux || is_chromeos)
++    enable_library_widevine_cdm && (is_win || is_mac || (is_linux || is_zedbsd) || is_chromeos)
+ 
+ declare_args() {
+   # Widevine CDM is bundled as part of Google Chrome and
