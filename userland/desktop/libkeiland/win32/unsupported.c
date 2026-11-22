@@ -1221,10 +1221,9 @@ kl_process_start_admin(
 	(void)app;
 	(void)system;
 	(void)options;
+	(void)process;
 
 	/* Not on Windows. */
-	if (process != NULL)
-		*process = NULL;
 	return ENOTSUP;
 }
 
