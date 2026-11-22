@@ -9,11 +9,11 @@
  * The types and functions the modules of xserver share.
  *
  * These are the core's modules, none of which does input or output of its
- * own.  server.c keeps the server's life and its clients' connections
+ * own.  client.c keeps the server's life and its clients' connections
  * (their bytes come and go through the transport), protocol.c answers
  * their requests, window.c keeps the windows, pixmaps and graphics
  * contexts and draws into them, rootless.c shows each top-level window as
- * a surface of the backend (whose pixels vulkan.c shows through a
+ * a surface of the backend (whose pixels present-vulkan.c shows through a
  * swapchain when it can), selection.c keeps atoms, properties and
  * selections, and keymap.c, glyphs.c and glx.c are the keyboard's table,
  * the core font and the GLX extension.
@@ -44,6 +44,13 @@
 
 /* The most bytes of one client's requests one tick handles before it lets the caller run again. */
 #define X11_TICK_BYTES		(256U * 1024U)
+
+/* The longest authorization data a connection may be asked for, and the one name checked. */
+#define X11_AUTH_MAX		64U
+#define X11_AUTH_COOKIE		"MIT-MAGIC-COOKIE-1"
+
+/* The major opcode of BIG-REQUESTS (the core's extensions are numbered from 129; 128 is zedBSD's PutImageRGB24). */
+#define X11_BIGREQ_MAJOR	129U
 
 /* How many of a client's last requests the stuck-client report shows. */
 #define X11_HISTORY		16U
@@ -144,6 +151,24 @@ struct x11_client {
 	/* Bytes of input handled since the transport was last told, and whether it has been told of output waiting. */
 	size_t consumed;
 	int output_told;
+
+	/*
+	 * The authorization the setup must present (x11server_connect): its
+	 * name is MIT-MAGIC-COOKIE-1 and its data these bytes.  Without one,
+	 * any setup is accepted.
+	 */
+	int auth_required;
+	uint8_t auth_data[X11_AUTH_MAX];
+	size_t auth_size;
+
+	/*
+	 * Nonzero once the client is to end when its output has been taken
+	 * (its setup was refused): no more of its input is handled.
+	 */
+	int ending;
+
+	/* Nonzero once the client has enabled BIG-REQUESTS (a request of length 0 then carries a 32-bit length). */
+	int big_requests;
 
 	/* Nonzero for a most-significant-byte-first client, and once its setup is answered. */
 	int order;
@@ -412,7 +437,7 @@ struct x11server {
 	uint16_t motion_buttons;
 };
 
-/* server.c: the clients' connections, and the log. */
+/* client.c: the clients' connections, and the log. */
 struct x11_client *x11_client_of(struct x11server *server, unsigned owner);
 void x11_client_send(struct x11server *server, struct x11_client *client, const void *bytes, size_t length);
 void x11_client_close(struct x11server *server, unsigned index);
@@ -430,6 +455,8 @@ void x11_input_event(struct x11server *server, unsigned owner, uint8_t type, uin
 void x11_expose(struct x11server *server, struct x11_window *window);
 void x11_configure_notify(struct x11server *server, struct x11_window *window);
 void x11_destroy_notify(struct x11server *server, unsigned owner, uint32_t event_window, uint32_t window);
+void x11_event_swap(uint8_t *event);
+void x11_move_descendants(struct x11server *server, uint32_t parent, int dx, int dy);
 
 /* window.c: windows, pixmaps, graphics contexts and drawing. */
 struct x11_window *x11_window_find(struct x11server *server, uint32_t id);
@@ -462,6 +489,7 @@ unsigned x11_request_get_selection_owner(struct x11server *server, unsigned inde
 unsigned x11_request_convert_selection(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_send_event(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 void x11_selection_forget_window(struct x11server *server, uint32_t window);
+void x11_selection_destroy(struct x11server *server);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);
@@ -469,7 +497,7 @@ void x11_rootless_closing(struct x11server *server);
 void x11_rootless_flush_motion(struct x11server *server);
 void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 
-/* vulkan.c: a surface shown through a Vulkan swapchain. */
+/* present-vulkan.c: a surface shown through a Vulkan swapchain. */
 struct x11_vulkan *x11_vulkan_open(const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
 struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);

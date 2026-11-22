@@ -25,7 +25,7 @@
  * desktop's requests for it are handed to the core, numbered by their
  * descriptors, which the core's answer writes and closes.
  *
- * The primary selection (ws035-p103) is bridged the same way with X's
+ * The primary selection is bridged the same way with X's
  * PRIMARY, through the desktop's zwp_primary_selection_device_manager_v1
  * when it has one.
  */
@@ -1430,7 +1430,7 @@ wayland_toplevel_configure(
 
 	/* The server resizes the X window, and then this one follows. */
 	if (window->wayland->server != NULL)
-		x11server_backend_configure(window->wayland->server, window->id, width, height);
+		x11server_backend_configure(window->wayland->server, window->id, X11_SURFACE_ANY, X11_SURFACE_ANY, width, height);
 }
 
 /* The desktop asks a window to close: the server decides what that means. */
@@ -1532,7 +1532,7 @@ wayland_pending_sizes(
 		window->pending_height = 0U;
 		fprintf(stderr, "X11SERVER BOUNDS window=0x%x width=%u height=%u was=%ux%u\n", (unsigned)window->id, width, height, window->width, window->height);
 		if (wayland->server != NULL)
-			x11server_backend_configure(wayland->server, window->id, (int)width, (int)height);
+			x11server_backend_configure(wayland->server, window->id, X11_SURFACE_ANY, X11_SURFACE_ANY, (int)width, (int)height);
 		return;
 	}
 }

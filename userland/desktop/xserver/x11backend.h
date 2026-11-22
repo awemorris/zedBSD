@@ -36,6 +36,9 @@
 #define X11_SURFACE_POPUP	1U
 #define X11_SURFACE_ROOT	2U
 
+/* No place: the system places the surface, or does not say where it is (x11server_backend_configure). */
+#define X11_SURFACE_ANY		INT32_MIN
+
 /* The state of a surface: minimized (ICCCM's Iconic). */
 #define X11_SURFACE_ICONIC	(1U << 0)
 
@@ -140,7 +143,7 @@ struct x11_backend_ops {
 void x11server_backend_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time, uint16_t state);
 void x11server_backend_pointer(struct x11server *server, const struct x11_pointer_frame *frame);
 void x11server_backend_enter(struct x11server *server, uint32_t window, int keyboard);
-void x11server_backend_configure(struct x11server *server, uint32_t window, int width, int height);
+void x11server_backend_configure(struct x11server *server, uint32_t window, int32_t x, int32_t y, int width, int height);
 void x11server_backend_close(struct x11server *server, uint32_t window);
 void x11server_backend_state(struct x11server *server, uint32_t window, int iconic);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
