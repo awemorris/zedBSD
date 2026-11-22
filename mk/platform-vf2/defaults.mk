@@ -261,6 +261,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	ime \
 	dict \
 	skk-dict \
+	klsudo \
 	libGL \
 	libbrowser \
 	libcrypto-compat \
