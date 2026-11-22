@@ -13,10 +13,11 @@ of its own (2222 here, so that it does not meet a server on Windows' port 22).
 
 - mikuterm unpacked into a folder you can write in.
 - A WSL 2 distribution (`wsl --list --verbose` in PowerShell shows `VERSION 2`).
-- An ed25519 key without a passphrase. To make one in PowerShell:
+- An ed25519 key. To make one in PowerShell (it asks for a passphrase; an
+  empty one makes a key without):
 
   ```
-  ssh-keygen -t ed25519 -N '""' -f id_ed25519
+  ssh-keygen -t ed25519 -f id_ed25519
   ```
 
   Put `id_ed25519` into mikuterm's `ssh\` folder. Keep `id_ed25519.pub` for
@@ -94,6 +95,6 @@ goes straight to the prompt.
 | The tab shows | Cause and remedy |
 | --- | --- |
 | `ssh: connect to host 127.0.0.1 port 2222: Connection refused` (or `Connection timed out`) | WSL is not running, sshd is not running in it, or it listens on another port: open the WSL shell, start sshd (step 1) and check `ss -ltn` there. If WSL's networking mode is not the default NAT mode, check that its localhost forwarding is on (`localhostForwarding` in `.wslconfig`). |
-| `me@127.0.0.1's password:` | The key was not accepted: check `~/.ssh/authorized_keys` (the `.pub` line, mode 600) and that `ssh\id_ed25519` is the matching private key without a passphrase. |
+| `me@127.0.0.1's password:` | The key was not accepted: check `~/.ssh/authorized_keys` (the `.pub` line, mode 600) and that `ssh\id_ed25519` is the matching private key. |
 | `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` | WSL's host keys were made again (a reinstalled distribution): delete the line the warning names from `ssh\known_hosts` and connect again. |
 | `ssh\config: line N: ...` | A keyword mikuterm does not support (for example `Include`): remove the line. |

@@ -114,8 +114,13 @@ ssh_client_connect(
 	     address = address->ai_next) {
 		ssh_client_log(client, SSH_CLIENT_LOG_VERBOSE, "ssh: connecting to %s port %s", client->host_name, port_text);
 		error = client_connect_one(address, client->config.connect_timeout, &descriptor);
-		if (error == 0)
+		if (error == 0) {
+			/* Keeps the address reached in numbers, which the question about a new host shows. */
+			status = getnameinfo(address->ai_addr, address->ai_addrlen, client->address, sizeof(client->address), NULL, 0, NI_NUMERICHOST);
+			if (status != 0)
+				client->address[0] = '\0';
 			break;
+		}
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: connect to host %s port %s: %s", client->host_name, port_text, strerror(error));
 	}
 

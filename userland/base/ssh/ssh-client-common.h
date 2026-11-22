@@ -129,6 +129,7 @@ struct ssh_client_args {
  *
  * config is the settings for the destination, host the name the user
  * gave, host_name the name connected to and looked up in known_hosts,
+ * address the numeric address the socket reached (empty before),
  * user the remote user and port the port.  socket is the connected
  * socket (-1 before and after).  engine is the connection's protocol
  * (NULL before it is opened and after it is freed).  receive keeps bytes
@@ -146,6 +147,7 @@ struct ssh_client {
 	struct ssh_config config;
 	char host[SSH_HOST_MAX + 1];
 	char host_name[SSH_HOST_MAX + 1];
+	char address[SSH_HOST_MAX + 1];
 	char user[SSH_USER_MAX + 1];
 	uint16_t port;
 	int log_level;
