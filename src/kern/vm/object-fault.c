@@ -911,7 +911,10 @@ vm_object_mapping_remove(
 }
 
 /*
- * Marks an object page dirty with a fresh generation.
+ * Marks an object page dirty after a store through a mapping of it.
+ *
+ * The page takes a fresh generation, and its write-back clears the file's
+ * set-id bits unless a mode change accepts the content first.
  */
 void
 vm_object_mark_dirty(
@@ -927,7 +930,7 @@ vm_object_mark_dirty(
 	vm_metadata_enter();
 	irq = spin_lock_irqsave(&page->owner->lock);
 
-	vm_object_page_dirty_mark(page);
+	vm_object_page_store_mark(page);
 
 	spin_unlock_irqrestore(&page->owner->lock, irq);
 	vm_metadata_leave();
@@ -1035,10 +1038,11 @@ vm_object_page_pin_copy(
 	/*
 	 * Orphan writes stay dirty so abort can restore the old cache image.
 	 * Commit discards the orphan without ever putting it on writeback.
+	 * A write is a store into a user's mapping, judged as one.
 	 */
 	if (write) {
 		kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, buffer, length);
-		vm_object_page_dirty_mark(page);
+		vm_object_page_store_mark(page);
 	} else {
 		kern_memcpy(buffer, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + offset, length);
 	}

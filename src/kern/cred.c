@@ -548,6 +548,111 @@ vfs_clear_setid_on_write(
 }
 
 /*
+ * Records that a store through a shared mapping changed a file's content.
+ *
+ * The caller may hold spin locks: this only marks the inode, and the
+ * write-back that later writes the store clears the set-id bits.
+ */
+void
+vfs_note_mapped_store(
+	struct inode *inode)
+{
+	/* Ignores a page of no file, and a file that has no set-id bits to lose. */
+	if (inode == NULL || inode->i_type != INODE_REG)
+		return;
+
+	/* A store already pending needs no second mark. */
+	if (atomic_load_acquire(&inode->i_mapped_store) != 0)
+		return;
+
+	/*
+	 * The mark tells every later write-back to clear the set-id bits,
+	 * until a mode change with set-id bits accepts the content.
+	 */
+	atomic_store_release(&inode->i_mapped_store, 1U);
+}
+
+/*
+ * Clears the set-id bits before a write-back of the page cache when a store
+ * through a shared mapping is pending.
+ *
+ * A write is judged when it is made, by its writer's credential; its
+ * write-back clears nothing more, so bits set after the write stay.  The
+ * caller holds the inode's I/O lock.
+ */
+int
+vfs_clear_setid_on_writeback(
+	struct inode *inode)
+{
+	int error;
+
+	/* Rejects a missing inode. */
+	if (inode == NULL)
+		return EINVAL;
+
+	/* Only content no mode change has accepted since a store loses the bits. */
+	if (atomic_load_acquire(&inode->i_mapped_store) == 0)
+		return 0;
+
+	/* Clears the bits as for any content change. */
+	error = vfs_clear_setid_on_content_change(inode);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Accepts the content stored through mappings so far when a mode change
+ * sets set-id bits on a regular file.
+ *
+ * Reports whether a store was pending, for vfs_setid_accept_abort() to put
+ * back when the mode change fails.  The caller holds the inode's I/O lock,
+ * which orders this against a write-back's test of the mark.
+ */
+unsigned
+vfs_setid_accept_begin(
+	struct inode *inode,
+	mode_t mode)
+{
+	unsigned expected;
+
+	/* Only set-id bits on a regular file accept anything. */
+	if (inode == NULL || inode->i_type != INODE_REG ||
+	    (mode & (S_ISUID | S_ISGID)) == 0)
+		return 0;
+
+	/*
+	 * Takes the mark down only as it stands: a store learnt of after this
+	 * point marks the inode again and clears the new bits at its
+	 * write-back.
+	 */
+	expected = 1U;
+	if (!atomic_compare_exchange(&inode->i_mapped_store, &expected, 0U))
+		return 0;
+
+	/* Succeeded: a pending store was accepted. */
+	return 1U;
+}
+
+/*
+ * Puts back the pending store a failed mode change had accepted.
+ */
+void
+vfs_setid_accept_abort(
+	struct inode *inode,
+	unsigned pending)
+{
+	/* Nothing was taken down. */
+	if (inode == NULL || pending == 0)
+		return;
+
+	/* The content stays unaccepted, so a write-back still clears the bits. */
+	atomic_store_release(&inode->i_mapped_store, 1U);
+}
+
+/*
  * Reads an extended attribute after checking the namespace permission.
  *
  * A negative result carries the error.

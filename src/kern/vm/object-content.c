@@ -530,7 +530,7 @@ vm_object_content_prepare(
 		/* Folds the revoked state into the page's dirty record. */
 		irq = spin_lock_irqsave(&object->lock);
 		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0) {
-			vm_object_page_dirty_mark(page);
+			vm_object_page_store_mark(page);
 		}
 
 		dirty = (page->flags & VM_OBJECT_PAGE_DIRTY) != 0;
