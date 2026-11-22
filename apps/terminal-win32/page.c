@@ -11,9 +11,9 @@
  * the user may read it) and ssh\known_hosts, the check of an ssh\config
  * with the SSH library's own reader, and mikuterm's own settings of
  * config\mikuterm.conf: the fonts and the grid (from the next start), the
- * TERM and the wait for a connection (from the next connection: the
- * connector takes them at once) and the host of the first tab (from the
- * next start).  A setting is written in place of its line in
+ * TERM, the wait for a connection and the port of WSL's sshd (from the
+ * next connection: the connector takes them at once) and the host of the
+ * first tab (from the next start).  A setting is written in place of its line in
  * mikuterm.conf, every other line kept.
  */
 
@@ -77,6 +77,7 @@ static const struct terminal_page_item page_items[] = {
 	{ "Rows", "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
 	{ "Term", "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION },
 	{ "ConnectTimeout", "Connect timeout (s)", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION },
+	{ "WslPort", "WSL sshd port", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION },
 	{ "Connect", "Host at start", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START }
 };
 
@@ -415,11 +416,13 @@ page_item_set(
 		return error;
 	}
 
-	/* The next connection's TERM and wait, from the file as it is now. */
+	/* The next connection's TERM, wait and WSL port, from the file as it is now. */
 	page_conf_now(&conf);
 	(void)snprintf(state->conf->term, sizeof(state->conf->term), "%s", conf.term);
 	state->conf->connect_timeout = conf.connect_timeout;
 	state->connector->options.connect_timeout = conf.connect_timeout;
+	state->conf->wsl_port = conf.wsl_port;
+	state->connector->options.wsl_port = conf.wsl_port;
 	printf("MIKUTERM SETTINGS saved %s\n", keyword);
 	fflush(stdout);
 

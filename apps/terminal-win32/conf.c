@@ -12,8 +12,8 @@
  * skipped, and the first line of a keyword the one that counts.
  *
  * config\mikuterm.conf is the user's: Font, FontFallback, FontSize,
- * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect and
- * ConnectTimeout.  A line mikuterm cannot use is skipped, the default
+ * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect,
+ * ConnectTimeout and WslPort.  A line mikuterm cannot use is skipped, the default
  * kept, and named in the problems the first tab shows ("line N: why").
  * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme,
  * AmbiguousWide and CopyOnSelect as the View menu and the settings' tab
@@ -45,6 +45,9 @@
 #define CONF_TERM		"xterm-256color"
 #define CONF_CONNECT_TIMEOUT	15U
 
+/* The port of the sshd in WSL a distribution is reached on, when ssh\config has no Host for it. */
+#define CONF_WSL_PORT		2222U
+
 /* The longest wait for a connection the settings may ask, in seconds. */
 #define CONF_CONNECT_TIMEOUT_MAX	3600U
 
@@ -61,7 +64,8 @@ enum conf_keyword {
 	CONF_CONNECT = 8,
 	CONF_COPY = 9,
 	CONF_TIMEOUT = 10,
-	CONF_KEYWORDS = 11
+	CONF_WSL = 11,
+	CONF_KEYWORDS = 12
 };
 
 /*
@@ -85,7 +89,8 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "Term", 0 },
 	{ "Connect", 0 },
 	{ "CopyOnSelect", 1 },
-	{ "ConnectTimeout", 0 }
+	{ "ConnectTimeout", 0 },
+	{ "WslPort", 0 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -121,11 +126,12 @@ mikuterm_conf_defaults(
 	conf->theme = TERMINAL_THEME_DARK;
 	conf->ambiguous_wide = 0;
 
-	/* The connections: xterm's TERM, the list of hosts first, a selection copied, 15 seconds to connect. */
+	/* The connections: xterm's TERM, the list of hosts first, a selection copied, 15 seconds to connect, WSL's sshd on 2222. */
 	(void)conf_copy(conf->term, sizeof(conf->term), CONF_TERM);
 	conf->connect[0] = '\0';
 	conf->copy_on_select = 1;
 	conf->connect_timeout = CONF_CONNECT_TIMEOUT;
+	conf->wsl_port = CONF_WSL_PORT;
 }
 
 /*
@@ -272,6 +278,9 @@ mikuterm_conf_text(
 		break;
 	case CONF_COPY:
 		written = snprintf(value, size, "%s", conf->copy_on_select ? "yes" : "no");
+		break;
+	case CONF_WSL:
+		written = snprintf(value, size, "%u", conf->wsl_port);
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -662,6 +671,12 @@ conf_value(
 			conf->copy_on_select = yes;
 			conf->copy_given = 1;
 		}
+		break;
+	case CONF_WSL:
+		status = conf_number(value, 1U, 65535U, &number);
+		*why = "WslPort is a port from 1 to 65535";
+		if (status == 0)
+			conf->wsl_port = number;
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

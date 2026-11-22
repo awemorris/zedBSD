@@ -354,7 +354,7 @@ static void run_secret_follow(struct terminal_connection *connection);
 static unsigned run_font_pixels(const struct run_state *run, unsigned pixels);
 static void run_touch_queue(unsigned kind, const struct terminal_touch_pointer *made);
 static int run_tab_settings(const struct terminal_run_options *options, struct run_state *run);
-static int run_tab_to_settings(const struct terminal_run_options *options, struct run_state *run, unsigned index);
+static int run_tab_settings_open(const struct terminal_run_options *options, struct run_state *run, unsigned from);
 static int run_page_frame(struct run_state *run);
 static void run_page_copy(void);
 static void run_page_paste(void);
@@ -673,6 +673,21 @@ run_loop(
 			return 0;
 		}
 
+		/* A connection the user asked for the settings (on the active tab) opens them beside it, and goes on. */
+		for (index = 0; index < run_tab_count && index < TERMINAL_TABS; index++) {
+			/* The request, of the tab told, while it is the one the user works in. */
+			if ((ready[index] & TERMINAL_READY_SETTINGS) == 0U || run_tabs[index].id != told[index])
+				continue;
+			if (index != run_active || run_tabs[index].settings)
+				continue;
+
+			/* The settings' tab, opened or chosen; one request a round. */
+			status = run_tab_settings_open(options, run, index);
+			if (status < 0)
+				return -1;
+			break;
+		}
+
 		/* What each connection wrote goes on its grid, from the last tab so a closed one leaves the others' places; a connection's end closes its tab. */
 		for (index = run_tab_count; index > 0U; index--) {
 			/* A connection that told nothing to read and has not ended. */
@@ -685,16 +700,7 @@ run_loop(
 
 			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
 			status = run_read_shell(run_tabs[index - 1U].connection, run_tabs[index - 1U].screen, ready[index - 1U]);
-			if (status != 0 && (ready[index - 1U] & TERMINAL_READY_SETTINGS) != 0U) {
-				/* A connection the user asked for the settings gives its tab to them. */
-				status = run_tab_to_settings(options, run, index - 1U);
-				if (status < 0)
-					return -1;
-				if (status > 0) {
-					run->reason = "shell-exited";
-					return 0;
-				}
-			} else if (status != 0) {
+			if (status != 0) {
 				status = run_tab_close(options, run, index - 1U);
 				if (status != 0) {
 					run->reason = "shell-exited";
@@ -2811,11 +2817,8 @@ run_tab_settings(
 	const struct terminal_run_options *options,
 	struct run_state *run)
 {
-	struct run_tab *tab;
-	struct terminal_screen *screen;
-	unsigned index;
 	int found;
-	int error;
+	int status;
 
 	/* A program without the settings has no such tab. */
 	if (options->page == NULL)
@@ -2829,10 +2832,40 @@ run_tab_settings(
 		return 0;
 	}
 
+	/* The settings' tab, from the active one. */
+	status = run_tab_settings_open(options, run, run_active);
+	if (status < 0)
+		return -1;
+
+	/* Succeeded: the settings' tab is the active one, when there is room for it. */
+	return 0;
+}
+
+/*
+ * Makes the settings' tab the active one, from a tab (the one Shell >
+ * Settings goes back to): the open one is chosen, or a new one is made at
+ * the end.  A program without the settings, or a full window, has none.
+ * Returns 0, or -1 with errno set when memory runs out.
+ */
+static int
+run_tab_settings_open(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	unsigned from)
+{
+	struct run_tab *tab;
+	struct terminal_screen *screen;
+	unsigned index;
+	int error;
+
+	/* A program without the settings has no such tab. */
+	if (options->page == NULL)
+		return 0;
+
 	/* The settings' tab that is open is chosen. */
 	for (index = 0U; index < run_tab_count; index++) {
 		if (run_tabs[index].settings) {
-			run_page_from = run_tabs[run_active].id;
+			run_page_from = run_tabs[from].id;
 			run_tab_switch(run, index);
 			return 0;
 		}
@@ -2866,70 +2899,13 @@ run_tab_settings(
 	tab->id = run_tab_next;
 	tab->settings = 1;
 	run_title_copy(tab->title, sizeof(tab->title), RUN_SETTINGS_TITLE);
-	run_page_from = run_tabs[run_active].id;
+	run_page_from = run_tabs[from].id;
 	run_tab_next++;
 	run_tab_count++;
 
 	/* Succeeded: it is the active one. */
 	run_tab_switch(run, run_tab_count - 1U);
 	printf("ZTERM TAB new run=%s id=%u count=%u settings=1\n", options->token, tab->id, run_tab_count);
-	fflush(stdout);
-	return 0;
-}
-
-/*
- * Gives a tab whose connection ended because the user asked it for the
- * settings to the settings: the tab becomes the settings' tab, or closes
- * when that tab is open already (which is then chosen) or the program has
- * no settings.  Returns 0, 1 when it was the last tab and closed (the
- * terminal ends), or -1 with errno set.
- */
-static int
-run_tab_to_settings(
-	const struct terminal_run_options *options,
-	struct run_state *run,
-	unsigned index)
-{
-	struct run_tab *tab;
-	unsigned other;
-	int found;
-	int status;
-	int error;
-
-	/* The settings' tab that is open, if any. */
-	found = -1;
-	for (other = 0U; other < run_tab_count; other++) {
-		if (run_tabs[other].settings)
-			found = (int)run_tabs[other].id;
-	}
-
-	/* The page, made the first time it is needed here. */
-	error = ENOTSUP;
-	if (options->page != NULL && found < 0)
-		error = terminal_page_open(options->page, options->page_font, options->page_fallback);
-
-	/* Without a tab to become: this one closes, and the open settings' tab is chosen. */
-	if (error != 0) {
-		status = run_tab_close(options, run, index);
-		if (status != 0)
-			return 1;
-		found = run_tab_find((uint32_t)found);
-		if (found >= 0)
-			run_tab_switch(run, (unsigned)found);
-		return 0;
-	}
-
-	/* The tab's connection goes, its grid starts again, and the tab is the settings'. */
-	tab = &run_tabs[index];
-	tab->connection->ops->close(tab->connection);
-	tab->connection = &run_page_connection;
-	tab->settings = 1;
-	terminal_screen_init(tab->screen, run->columns, run->rows);
-	run_title_copy(tab->title, sizeof(tab->title), RUN_SETTINGS_TITLE);
-
-	/* Succeeded: it is the active one. */
-	run_tab_switch(run, index);
-	printf("ZTERM TAB settings run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
 	fflush(stdout);
 	return 0;
 }

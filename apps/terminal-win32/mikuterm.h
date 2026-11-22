@@ -16,7 +16,8 @@
  * form), the keys and known_hosts (ssh\), and the fonts (fonts\ and
  * share\fonts\).  connection-ssh.c is the tabs' connection on the
  * application's thread; ssh-thread.c runs each connection's SSH engine
- * on a thread of its own.
+ * on a thread of its own, after the screen of launch.c chose the host
+ * (or a WSL distribution, which wsl.c asks wsl.exe for).
  */
 
 #ifndef MIKUTERM_H
@@ -66,6 +67,7 @@ struct mikuterm_conf {
 	char connect[MIKUTERM_HOST_MAX];
 	int copy_on_select;
 	unsigned connect_timeout;
+	unsigned wsl_port;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
@@ -81,6 +83,7 @@ struct mikuterm_connect_options {
 	const char *term;
 	const char *connect;
 	unsigned connect_timeout;
+	unsigned wsl_port;
 	const char *notice;
 };
 
@@ -162,6 +165,9 @@ int mikuterm_font(char *path, size_t size, const char *name);
 
 /* The View menu's settings kept in state.conf (settings-file.c). */
 void mikuterm_settings_defaults(const struct mikuterm_conf *conf);
+
+/* wsl.exe, for WSL's distributions (wsl.c). */
+int mikuterm_wsl_run(const char *arguments, unsigned milliseconds, int (*stop)(void *data), void *data, unsigned char *output, size_t capacity, size_t *size, unsigned long *code);
 
 /* The tabs' connections (connection-ssh.c, ssh-thread.c). */
 void mikuterm_connector_init(struct mikuterm_connector *connector, const struct mikuterm_connect_options *options);

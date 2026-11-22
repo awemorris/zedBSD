@@ -125,6 +125,7 @@ wWinMain(
 	connect.term = main_state.conf.term;
 	connect.connect = main_state.conf.connect;
 	connect.connect_timeout = main_state.conf.connect_timeout;
+	connect.wsl_port = main_state.conf.wsl_port;
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&main_state.connector, &connect);
 

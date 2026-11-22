@@ -61,6 +61,7 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `Connect` | the host the first tab connects to (a `Host` of `ssh\config`, or `[user@]host[:port]`) | none: the first tab lists the hosts |
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh\config`'s wins) | 15 |
+| `WslPort` | the port on `localhost` of the sshd in WSL, for a distribution without a `Host wsl-NAME` in `ssh\config` (1 to 65535) | 2222 |
 
 `config\state.conf` has the same form and only `FontSize`, `Theme`,
 `AmbiguousWide` and `CopyOnSelect`; its values win over `mikuterm.conf`'s.
@@ -123,10 +124,58 @@ The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
 
 ## 5. Tabs and questions
 
-A new tab (Shell > New Tab, Ctrl+Shift+T) lists the names of `ssh\config`
-with numbers and asks `Host: `; the answer is a name, a number, or
-`[user@]host[:port]` (an IPv6 address in brackets). The first tab connects to
-`Connect` without asking when it is set.
+A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
+tab connects to `Connect` without it when that is set.
+
+```
+MikμTerm 0.1.0
+
+Hosts:
+ [1] me@server
+ [2] backup
+ [w] WSL
+ [x] Settings
+
+>>> me@server
+```
+
+- The first line is the program's name and version. A notice of
+  `mikuterm.conf`'s problems (the first tab's) comes under it.
+- `Hosts:` lists the names of `ssh\config`'s `Host` lines (the ones without
+  `*`, `?` or `!`, each once, at most 32), numbered from 1, shown as
+  `USER@NAME` when the host's settings give a `User`; then `[w] WSL` and
+  `[x] Settings`.
+- The chosen row is drawn with the background `#39C5BB` and dark text, in
+  every theme. When the rows do not fit the grid, the ones round the chosen
+  row are shown.
+- The `>>> ` line holds the chosen row's text. Up and Down choose a row;
+  while the line holds a row's text, the row's key (its number, a second digit
+  making 10 and above, `w`, `x`) chooses that row, and any other character
+  starts a line typed by hand in its place. Backspace and Ctrl+U edit the
+  line; a paste (bracketed) is always text and takes the row's place. Escape
+  puts the chosen row's text back.
+- Enter opens the chosen row, or the row whose text the line is; any other
+  line is a host typed by hand, `[user@]host[:port]` (an IPv6 address in
+  brackets), or a `Host` of `ssh\config` by name. An empty line does
+  nothing. A name that starts with a digit, `w` or `x` is typed after
+  Ctrl+U.
+- `[x] Settings` opens the settings tab beside this one (section 7); this
+  tab stays on the screen. Ctrl+C or Ctrl+D closes the tab.
+- `[w] WSL` runs `wsl.exe -l -q` (the one in the Windows system folder,
+  without a console window, at most 15 seconds) and reads its output
+  (UTF-16LE with or without a byte order mark, or UTF-8 when `WSL_UTF8=1`).
+  The distributions are listed the same way under `WSL distributions:`, each
+  with where it is reached, and `[b] Back` (or Escape) returns to the hosts.
+  When there is no `wsl.exe`, no distribution, wsl.exe fails (its first line
+  is shown) or does not answer in time, the hosts' screen says so.
+- A distribution chosen is started with `wsl.exe -d NAME -e whoami` (at most
+  60 seconds; it also starts an sshd systemd runs in it) and reached by SSH:
+  through `ssh\config`'s `Host wsl-NAME` (the name in any case) with all that
+  Host's settings, or else at `localhost` on `WslPort`. The user is the
+  Host's `User`, else the user `whoami` answered, else `login as:` asks. The
+  distributions of WSL 2 share one network, so each needs its own port (and
+  its own Host) when more than one runs an sshd. A connection to a
+  distribution that fails adds `NAME needs an sshd listening on port PORT`.
 
 The questions are answered on a line of the tab: Backspace and Ctrl+U edit
 it, Enter answers, Ctrl+C or Ctrl+D gives the question up. They follow
@@ -194,8 +243,8 @@ A connection that ends normally closes its tab. One that fails shows why
 
 Shell > Settings... (F12) opens the settings as a tab of their own, or
 chooses it when it is open; F12 on it goes back to the tab it was opened
-from. `X` answered to a new tab's `Host: ` list (shown as `X  Settings`) ends
-that tab's connection and turns the tab into the settings. The tab is a page
+from. `[x] Settings` on a new tab's launch screen (section 5) opens it, or
+chooses it, the same way, and the launch screen's tab stays. The tab is a page
 of libkeiland's widgets with a sidebar of four panes; Ctrl+Page Down and
 Ctrl+Page Up move between the panes, Tab between a pane's controls. The page
 is drawn at the screen's pixels (it does not follow the screen's scale).
@@ -206,7 +255,7 @@ is drawn at the screen's pixels (it does not follow the screen's scale).
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config\state.conf` |
 | Appearance | `Font`, `FontFallback` (a file in `fonts\` or `share\fonts\`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config\mikuterm.conf` |
 | Behavior | copy-on-select | at once | `config\state.conf` |
-| Behavior | `Term`, `ConnectTimeout` | the next connection | `config\mikuterm.conf` |
+| Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config\mikuterm.conf` |
 | Behavior | `Connect` | the next start | `config\mikuterm.conf` |
 | Keys | a new key, a key's public key, `ssh\known_hosts` | at once | `ssh\` |
 
