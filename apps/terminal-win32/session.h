@@ -45,6 +45,9 @@
 /* The longest answer to a question, in bytes. */
 #define SESSION_LINE_MAX	512U
 
+/* The longest prompt of a question kept to be shown again (a key file's path and the words round it). */
+#define SESSION_PROMPT_MAX	(MIKUTERM_PATH_MAX + 64U)
+
 /* How much the tab reads before it tells the thread, so the window is given back on time. */
 #define SESSION_TAKEN_STEP	65536U
 
@@ -120,6 +123,16 @@ struct mikuterm_session {
 	/* The tab closed: the thread ends the connection and lets go. */
 	int closing;
 
+	/*
+	 * Whether the question offers to keep its answer for the Windows
+	 * session (a passphrase), and the user's choice (on by default, Tab
+	 * switches it; it stays for the tab's later questions), and the
+	 * question's prompt, shown again under the choice when it switches.
+	 */
+	int keep_offered;
+	int keep;
+	char prompt[SESSION_PROMPT_MAX];
+
 	/* The question asked (SESSION_ASK_*), its answer being typed, and how it ended. */
 	unsigned question;
 	char line[SESSION_LINE_MAX];
@@ -135,6 +148,7 @@ void session_post(struct mikuterm_session *session);
 size_t session_put_locked(struct mikuterm_session *session, const void *bytes, size_t size);
 void session_say(struct mikuterm_session *session, const char *text);
 void session_say_line(struct mikuterm_session *session, const char *text);
+void session_keep_line_locked(struct mikuterm_session *session);
 void session_ended(struct mikuterm_session *session);
 void session_thread_ended(void);
 

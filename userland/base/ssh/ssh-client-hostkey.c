@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -42,7 +43,7 @@
 #define CLIENT_KNOWN_NAME_MAX		(SSH_HOST_MAX + 9U)
 
 static int client_lookup(const struct ssh_client *client, const char *configured, const uint8_t *public_key, enum ssh_known_result *answer, int *ends_with_line);
-static int client_ask_new_host(const struct ssh_client *client, const char *name, const char *fingerprint, int *accepted);
+static int client_ask_new_host(const struct ssh_client *client, const char *name, const char *address, const char *fingerprint, int *accepted);
 static int client_add_known_host(struct ssh_client *client, const uint8_t *public_key, const char *name);
 static int client_open_known_hosts(const char *path);
 static void client_known_name(const char *host, uint16_t port, char *out, size_t capacity);
@@ -60,6 +61,7 @@ ssh_client_check_host_key(
 	uint8_t public_key[SSH_ED25519_PUBLIC];
 	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
 	char name[CLIENT_KNOWN_NAME_MAX];
+	char address[CLIENT_KNOWN_NAME_MAX];
 	char user_path[SSH_CLIENT_PATH_MAX];
 	enum ssh_known_result user_answer;
 	enum ssh_known_result global_answer;
@@ -78,6 +80,9 @@ ssh_client_check_host_key(
 	if (error != 0)
 		return error;
 	client_known_name(client->host_name, client->port, name, sizeof(name));
+	client_known_name(client->address, client->port, address, sizeof(address));
+	if (client->address[0] == '\0')
+		client_known_name(client->host_name, client->port, address, sizeof(address));
 	ssh_client_log(client, SSH_CLIENT_LOG_VERBOSE, "ssh: server host key: %s %s", SSH_KEY_NAME, fingerprint);
 
 	/* Looks the key up in the user's file. */
@@ -103,7 +108,7 @@ ssh_client_check_host_key(
 
 	/* Asks the user about a new host when the settings say so. */
 	if (action == SSH_ENGINE_HOST_ASK) {
-		error = client_ask_new_host(client, name, fingerprint, &accepted);
+		error = client_ask_new_host(client, name, address, fingerprint, &accepted);
 		if (error != 0 || !accepted) {
 			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key verification failed.");
 			return EACCES;
@@ -127,11 +132,16 @@ ssh_client_check_host_key(
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key verification failed.");
 		return EACCES;
 	case SSH_ENGINE_HOST_REFUSE_REVOKED:
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: the host key %s of %s is marked as revoked.", fingerprint, name);
+		/* OpenSSH's frame and words, then a sentence of this program's own. */
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@       WARNING: REVOKED HOST KEY DETECTED!               @");
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "The ED25519 host key for %s is marked as revoked.", name);
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Someone may be using a stolen key to pretend to be this host.");
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key verification failed.");
 		return EACCES;
 	default:
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: no %s host key is known for %s and strict checking (or batch mode) forbids adding one.", SSH_KEY_NAME, name);
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "No ED25519 host key is known for %s and you have requested strict checking.", name);
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key verification failed.");
 		return EACCES;
 	}
@@ -207,21 +217,24 @@ static int
 client_ask_new_host(
 	const struct ssh_client *client,
 	const char *name,
+	const char *address,
 	const char *fingerprint,
 	int *accepted)
 {
-	char prompt[SSH_HOST_MAX + SSH_KEY_FINGERPRINT_SIZE + 256U];
+	char prompt[2U * CLIENT_KNOWN_NAME_MAX + SSH_KEY_FINGERPRINT_SIZE + 256U];
 	char answer[CLIENT_ANSWER_MAX];
 	const char *question;
+	const char *word;
+	size_t length;
 	int is_yes;
 	int is_fingerprint;
 	int is_no;
 	int error;
 
-	/* Shows what is known about the host. */
+	/* Shows what is known about the host, in OpenSSH's words. */
 	*accepted = 0;
 	(void)client;
-	sprintf(prompt, "The host '%s' is not known yet.\nIts %s key has the fingerprint %s.\nTrust it and go on connecting (yes/no/[fingerprint])? ", name, SSH_KEY_NAME, fingerprint);
+	sprintf(prompt, "The authenticity of host '%s (%s)' can't be established.\nED25519 key fingerprint is %s.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", name, address, fingerprint);
 	question = prompt;
 
 	/* Asks until the answer is one of the three. */
@@ -230,21 +243,31 @@ client_ask_new_host(
 		if (error != 0)
 			return error;
 
-		/* Takes yes, or the fingerprint the user compared. */
-		is_yes = strcmp(answer, "yes");
+		/* The answer without the blanks round it. */
+		word = answer;
+		while (*word == ' ' || *word == '\t')
+			word++;
+		length = strlen(word);
+		while (length > 0U && (word[length - 1U] == ' ' || word[length - 1U] == '\t'))
+			length--;
+		memmove(answer, word, length);
+		answer[length] = '\0';
+
+		/* Takes yes (in any case), or the fingerprint the user compared. */
+		is_yes = strcasecmp(answer, "yes");
 		is_fingerprint = strcmp(answer, fingerprint);
 		if (is_yes == 0 || is_fingerprint == 0) {
 			*accepted = 1;
 			return 0;
 		}
 
-		/* Takes no. */
-		is_no = strcmp(answer, "no");
-		if (is_no == 0)
+		/* Takes no, and nothing, as a refusal. */
+		is_no = strcasecmp(answer, "no");
+		if (is_no == 0 || length == 0U)
 			return 0;
 
 		/* Asks again, shorter. */
-		question = "Please answer 'yes', 'no' or the fingerprint: ";
+		question = "Please type 'yes', 'no' or the fingerprint: ";
 	}
 }
 
@@ -293,7 +316,7 @@ client_add_known_host(
 	descriptor = client_open_known_hosts(path);
 	if (descriptor < 0) {
 		error = errno;
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: failed to add the host to %s: %s", path, strerror(error));
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Failed to add the host to the list of known hosts (%s).", path);
 		ssh_buf_free(&line);
 		return error;
 	}
@@ -310,7 +333,7 @@ client_add_known_host(
 
 	/* Reports a line that could not be written. */
 	if (error != 0) {
-		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: failed to add the host to %s: %s", path, strerror(error));
+		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Failed to add the host to the list of known hosts (%s).", path);
 		return error;
 	}
 
@@ -415,12 +438,14 @@ client_warn_changed(
 {
 	/* Says loudly that someone may be in the middle, and how to clear a key that really changed. */
 	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@    WARNING: THE HOST KEY OF THE SERVER HAS CHANGED!     @");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @");
 	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "The server %s showed a %s key with the fingerprint", name, SSH_KEY_NAME);
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "%s,", fingerprint);
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "but another key is known for it.  Someone may be listening in on the");
-	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "connection (a man-in-the-middle attack), or the host key was replaced.");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "The host's key is not the one known_hosts holds for it.  Someone may be");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "listening in on the connection (a man-in-the-middle attack), or the");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "host's key may have been replaced.");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "The fingerprint for the ED25519 key sent by the remote host is");
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "%s.", fingerprint);
 	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "If the key was replaced on purpose, remove the old line with");
 	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "  ssh-keygen -f \"%s\" -R \"%s\"", path, name);
+	ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key for %s has changed and you have requested strict checking.", name);
 }

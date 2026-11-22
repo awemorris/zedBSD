@@ -129,6 +129,7 @@ struct ssh_client_args {
  *
  * config is the settings for the destination, host the name the user
  * gave, host_name the name connected to and looked up in known_hosts,
+ * address the numeric address the socket reached (empty before),
  * user the remote user and port the port.  socket is the connected
  * socket (-1 before and after).  engine is the connection's protocol
  * (NULL before it is opened and after it is freed).  receive keeps bytes
@@ -138,12 +139,15 @@ struct ssh_client_args {
  * re-exchanges were reported at the debug level.  raw is 1 while the
  * terminal is in raw mode, so that messages end with CR LF.
  * identities_named is 1 when a setting named the identity files, so that
- * a missing one is reported.  The owner calls ssh_client_free.
+ * a missing one is reported.  identity_paths are the paths of the identity
+ * files given to the engine, in its order (a passphrase is asked for by
+ * the file's path).  The owner calls ssh_client_free.
  */
 struct ssh_client {
 	struct ssh_config config;
 	char host[SSH_HOST_MAX + 1];
 	char host_name[SSH_HOST_MAX + 1];
+	char address[SSH_HOST_MAX + 1];
 	char user[SSH_USER_MAX + 1];
 	uint16_t port;
 	int log_level;
@@ -157,6 +161,7 @@ struct ssh_client {
 	unsigned long rekeys;
 	int raw;
 	int identities_named;
+	char identity_paths[SSH_ENGINE_IDENTITIES_MAX][SSH_CLIENT_PATH_MAX];
 };
 
 /*
@@ -304,10 +309,11 @@ int ssh_client_check_host_key(struct ssh_client *client, const uint8_t *blob, si
 
 /*
  * Loads the identity files of the settings that can be used (readable by
- * the user alone, unencrypted ssh-ed25519 private keys) into identities,
- * reporting the others.  Returns 0 or ENOMEM.
+ * the user alone, ssh-ed25519 private keys in the clear or encrypted with
+ * a passphrase) into identities, naming each by its path in
+ * client->identity_paths and reporting the others.  Returns 0 or ENOMEM.
  */
-int ssh_client_load_identities(const struct ssh_client *client, struct ssh_client_identities *identities);
+int ssh_client_load_identities(struct ssh_client *client, struct ssh_client_identities *identities);
 
 /* Wipes and frees the identity files' bytes. */
 void ssh_client_free_identities(struct ssh_client_identities *identities);
@@ -319,6 +325,15 @@ void ssh_client_free_identities(struct ssh_client_identities *identities);
  * error.
  */
 int ssh_client_answer_password(struct ssh_client *client, unsigned tries, int *sent);
+
+/*
+ * Answers the engine's SSH_ENGINE_PASSPHRASE for identity: asks the
+ * passphrase of that file on the terminal (a wrong one is asked again
+ * without a word, as ssh(1) does) and gives it to the engine, or gives up
+ * the key when nobody can answer.  The passphrase is wiped after use.
+ * Returns 0 or the engine's error.
+ */
+int ssh_client_answer_passphrase(struct ssh_client *client, unsigned identity);
 
 /*
  * Runs the connection after the socket is connected: opens the engine,

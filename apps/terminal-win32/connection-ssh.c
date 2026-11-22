@@ -32,6 +32,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The words of the line about keeping a passphrase, after its box. */
+#define CONNECTION_KEEP_TEXT	"Remember the passphrase until you sign out of Windows (Tab switches this)\r\n"
+
 /* The first title of a tab, before the remote side sets its own. */
 #define CONNECTION_TITLE	"mikuterm"
 
@@ -297,6 +300,25 @@ session_say_line(
 	session_post(session);
 }
 
+/*
+ * Shows whether the passphrase asked for is kept for the Windows session
+ * (the caller holds the lock): one line with a box, checked when it is,
+ * and the key that switches it.
+ */
+void
+session_keep_line_locked(
+	struct mikuterm_session *session)
+{
+	/* The box as the choice stands. */
+	if (session->keep)
+		(void)session_put_locked(session, "[x] ", 4U);
+	else
+		(void)session_put_locked(session, "[ ] ", 4U);
+
+	/* What it means. */
+	(void)session_put_locked(session, CONNECTION_KEEP_TEXT, strlen(CONNECTION_KEEP_TEXT));
+}
+
 /* Says that the connection ended as the tab ends: the tab closes once it read everything. */
 void
 session_ended(
@@ -404,6 +426,7 @@ connection_open(
 	session->height = height;
 	session->references = 2U;
 	session->line_started = 1;
+	session->keep = 1;
 
 	/* Its number, and one more thread running. */
 	kl_mutex_lock(&connection_registry);
@@ -777,6 +800,18 @@ connection_edit(
 		case 0x1bU:
 			/* The start of another key's sequence. */
 			session->escape = SESSION_ESCAPE_START;
+			break;
+		case '\t':
+			/* Tab switches whether a passphrase is kept, shown under the prompt again (the typed secret stays). */
+			if (session->keep_offered) {
+				if (session->keep)
+					session->keep = 0;
+				else
+					session->keep = 1;
+				(void)session_put_locked(session, "\r\n", 2U);
+				session_keep_line_locked(session);
+				(void)session_put_locked(session, session->prompt, strlen(session->prompt));
+			}
 			break;
 		default:
 			/* Other control characters are not text. */

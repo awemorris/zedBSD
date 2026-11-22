@@ -741,6 +741,10 @@ client_take_event(
 	case SSH_ENGINE_PASSWORD:
 		error = client_take_password(session, event);
 		break;
+	case SSH_ENGINE_PASSPHRASE:
+		/* Asks the passphrase of the encrypted key the server would take. */
+		error = ssh_client_answer_passphrase(client, event->identity);
+		break;
 	case SSH_ENGINE_AUTHENTICATED:
 		error = client_take_login(session);
 		break;

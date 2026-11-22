@@ -551,12 +551,14 @@ window_press(
 	}
 
 	/*
-	 * F11 alone is the Fullscreen item's key (BUG-194): it reaches the
-	 * window only when the compositor's menus did not choose the item (a
-	 * desktop without them), and does the same here instead of reaching
-	 * the shell.
+	 * F11 alone is the Fullscreen item's key: it reaches the window only
+	 * when the compositor's menus did not choose the item (a desktop
+	 * without them), and does the same here instead of reaching the shell;
+	 * a program that moved Fullscreen to Alt+Enter leaves F11 to the shell.
 	 */
-	if (key == WINDOW_KEY_F11 && window->modifiers == 0U) {
+	if (key == WINDOW_KEY_F11 &&
+	    window->modifiers == 0U &&
+	    !window->fullscreen_alt_enter) {
 		on = 1;
 		if (window->fullscreen)
 			on = 0;

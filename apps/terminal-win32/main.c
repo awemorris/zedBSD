@@ -63,6 +63,7 @@ static struct main_state main_state;
 static void main_read_conf(struct mikuterm_conf *conf);
 static int main_font(char *path, size_t size, const char *name);
 static void main_new_window(void *data, struct kl_app *app, struct kl_window *from);
+static void main_forget_passphrases(void *data);
 static void main_ended(void *data, const struct terminal_run_result *result);
 static void main_say(const char *text);
 
@@ -124,8 +125,10 @@ wWinMain(
 	/*
 	 * The window: drawn on the processor, at the screen's scale, the grid
 	 * the settings give, Session > Disable Input Method for a password the
-	 * remote side asks for (the connection cannot see it asked), and F10
-	 * for the ambiguous width (Windows leaves F10 to the program).
+	 * remote side asks for (the connection cannot see it asked), Alt+F11
+	 * for the ambiguous width and Alt+Enter for Fullscreen (F10 and F11 go
+	 * to the remote side, for the programs that use them), and Session >
+	 * Forget Remembered Passphrases.
 	 */
 	memset(&run, 0, sizeof(run));
 	run.application = "mikuterm";
@@ -147,6 +150,8 @@ wWinMain(
 	run.copy_on_select = main_state.conf.copy_on_select;
 	run.input_method_menu = 1;
 	run.ambiguous_wide_key = 1;
+	run.fullscreen_alt_enter = 1;
+	run.forget_passphrases = main_forget_passphrases;
 	run.connector = &connector.connector;
 	run.new_window = main_new_window;
 	run.ended = main_ended;
@@ -297,4 +302,23 @@ main_say(
 {
 	/* The box, until the user closes it. */
 	(void)MessageBoxA(NULL, text, "mikuterm", MB_OK | MB_ICONERROR);
+}
+
+/*
+ * Forgets every passphrase mikuterm keeps for the Windows session
+ * (Session > Forget Remembered Passphrases).
+ */
+static void
+main_forget_passphrases(
+	void *data)
+{
+	unsigned forgotten;
+
+	/* Nothing of the program's state is needed. */
+	(void)data;
+
+	/* Every credential of mikuterm's goes. */
+	forgotten = mikuterm_passphrases_forget_all();
+	printf("MIKUTERM PASSPHRASE forget count=%u\n", forgotten);
+	fflush(stdout);
 }

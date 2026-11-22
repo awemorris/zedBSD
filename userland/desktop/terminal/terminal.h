@@ -152,7 +152,8 @@ enum terminal_action {
 	TERMINAL_ACTION_THEME_DARK,
 	TERMINAL_ACTION_THEME_LIGHT,
 	TERMINAL_ACTION_THEME_CONTRAST,
-	TERMINAL_ACTION_INPUT_METHOD_OFF
+	TERMINAL_ACTION_INPUT_METHOD_OFF,
+	TERMINAL_ACTION_FORGET_PASSPHRASES
 };
 
 /*
@@ -681,14 +682,18 @@ struct terminal_window {
 	/*
 	 * The menus (menu.c): whether the window shows them (not without the
 	 * compositor's System Menu), whether they have Session > Disable Input
-	 * Method and whether F10 is the shortcut of View > Treat Ambiguous-Width
-	 * Characters as Wide (the program asked for them before they open), the
+	 * Method and Session > Forget Remembered Passphrases, whether Alt+F11 is
+	 * the shortcut of View > Treat Ambiguous-Width
+	 * Characters as Wide and whether Alt+Enter is View > Fullscreen's in the
+	 * place of F11 (the program asked for them before they open), the
 	 * state they last showed, and the actions chosen but not yet carried
 	 * out, oldest first.
 	 */
 	int menu_shown;
 	int input_method_item;
 	int ambiguous_wide_key;
+	int fullscreen_alt_enter;
+	int forget_item;
 	struct terminal_menu_state menu_state;
 	uint32_t actions[TERMINAL_ACTIONS];
 	unsigned action_count;

@@ -28,9 +28,12 @@
  * session) is sent until the caller accepts it.  A later exchange must
  * show the same key, or the connection ends.
  *
- * The user's keys are unencrypted ssh-ed25519 private key files
- * (openssh-key-v1) given as their bytes; a file that cannot be used (an
- * encrypted one among them) is passed over.
+ * The user's keys are ssh-ed25519 private key files (openssh-key-v1)
+ * given as their bytes, in the clear or encrypted as ssh-keygen writes
+ * them with a passphrase; a file that cannot be used is passed over.  An
+ * encrypted key is offered by its public half, which the file keeps in
+ * the clear, and its passphrase is asked for (SSH_ENGINE_PASSPHRASE) only
+ * when the server would take the key.  The engine keeps no passphrase.
  *
  * The received data of the session is handed out as it comes
  * (SSH_ENGINE_DATA); the channel's window is given back only while the
@@ -54,6 +57,9 @@
 
 /* How many times a password is asked for (OpenSSH's NumberOfPasswordPrompts default). */
 #define SSH_ENGINE_PASSWORD_TRIES	3U
+
+/* How many times the passphrase of one key is asked for before the key is passed over (as many as the passwords). */
+#define SSH_ENGINE_PASSPHRASE_TRIES	3U
 
 /* The longest name-list of methods kept from USERAUTH_FAILURE. */
 #define SSH_ENGINE_METHODS_MAX		1024U
@@ -113,7 +119,15 @@ enum ssh_engine_event_kind {
 	 * side sent).  tries is how many passwords the server refused.  Only
 	 * the pending output remains.
 	 */
-	SSH_ENGINE_CLOSED = 8
+	SSH_ENGINE_CLOSED = 8,
+
+	/*
+	 * The server would take the key of an encrypted identity file
+	 * (identity, its place in the options' identities); tries is how many
+	 * passphrases did not open the file before.  The caller answers with
+	 * ssh_engine_passphrase.
+	 */
+	SSH_ENGINE_PASSPHRASE = 9
 };
 
 /* What to do with a host key after looking it up (ssh_engine_host_decide). */
@@ -150,6 +164,7 @@ struct ssh_engine_event {
 	size_t size;
 	unsigned stream;
 	unsigned tries;
+	unsigned identity;
 	int pty;
 	int exit_status;
 	char exit_signal[SSH_CHANNEL_SIGNAL_MAX + 1];
@@ -260,6 +275,23 @@ int ssh_engine_host_answer(struct ssh_engine *engine, int accept);
  * no password is asked for or it is too long.
  */
 int ssh_engine_password(struct ssh_engine *engine, const char *password);
+
+/*
+ * Answers SSH_ENGINE_PASSPHRASE for identity with passphrase
+ * (NUL-terminated, at most SSH_KEY_PASSPHRASE_MAX bytes; the engine does
+ * not keep it).  The file is decrypted at once, which takes a fraction of
+ * a second for OpenSSH's default rounds: a passphrase that opens it sends
+ * the signed request; a wrong one asks again (another
+ * SSH_ENGINE_PASSPHRASE) until SSH_ENGINE_PASSPHRASE_TRIES were wrong,
+ * and then, as for NULL or an empty passphrase (the user gives up), and
+ * for a file that is broken under its encryption, the key is passed over
+ * and the next method follows.  Returns 0 (the passphrase opened the file,
+ * or the user gave up), EACCES (the passphrase did not open the file: the
+ * answer is taken as above, and a caller that kept the passphrase should
+ * forget it), or EINVAL when no passphrase is asked for identity or it is
+ * too long.
+ */
+int ssh_engine_passphrase(struct ssh_engine *engine, unsigned identity, const char *passphrase);
 
 /*
  * Sends the user's input to the session: *written receives how many of

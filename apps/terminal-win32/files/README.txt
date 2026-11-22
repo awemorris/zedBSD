@@ -62,14 +62,26 @@ the tab.
 3. Your key and ssh\config
 --------------------------
 
-mikuterm uses an ed25519 key without a passphrase.  Make one with OpenSSH on
-any machine (Windows has it too):
+mikuterm uses an ed25519 key, with or without a passphrase.  Make one with
+OpenSSH on any machine (Windows has it too):
 
-  ssh-keygen -t ed25519 -N "" -f id_ed25519
+  ssh-keygen -t ed25519 -f id_ed25519
 
 Put id_ed25519 into ssh\ and add the line of id_ed25519.pub to the host's
 ~/.ssh/authorized_keys.  When the host does not take a key, mikuterm asks
 for the password.
+
+A key with a passphrase (ssh-keygen's aes256-ctr and bcrypt) is asked for
+its passphrase only when the host would take it:
+
+  [x] Remember the passphrase until you sign out of Windows (Tab switches this)
+  Enter passphrase for key 'ssh\id_ed25519':
+
+What you type is not shown.  With the box checked (Tab switches it), a
+passphrase that opens the key is kept in Windows' Credential Manager for your
+Windows session: it stays in memory, is never written to the disk, and goes
+when you sign out.  The next connection uses it without asking.  Session >
+Forget Remembered Passphrases forgets every passphrase mikuterm kept.
 
 ssh\config is written as OpenSSH's ~/.ssh/config:
 
@@ -140,7 +152,7 @@ named in the first tab and skipped.
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
 
 What the View menu chooses (Text Size, Theme, Treat Ambiguous-Width
-Characters as Wide, F10) is kept in config\state.conf and wins over the same
+Characters as Wide, Alt+F11) is kept in config\state.conf and wins over the same
 settings here; delete state.conf to go back to mikuterm.conf.
 
 
@@ -151,6 +163,10 @@ While mikuterm asks for a password, what you type is not shown and the input
 method (IME) is off.  mikuterm cannot see when a program on the host (sudo,
 su, passwd) asks for one: turn the input method off yourself with
 Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
+
+The function keys F1 to F12 go to the host (htop, mc).  mikuterm's own keys
+are Alt+F11 (Treat Ambiguous-Width Characters as Wide) and Alt+Enter
+(Fullscreen).
 
 
 7. Fonts

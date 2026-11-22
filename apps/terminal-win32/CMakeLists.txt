@@ -87,7 +87,7 @@ list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
 
 # The SSH library's modules the client engine needs, and the engine (not the programs' files).
 set(MIKUTERM_SSH_NAMES
-	buf packet cipher crypto kex transport auth channel key hostfile config common client-engine)
+	buf packet cipher crypto bcrypt kex transport auth channel key hostfile config common client-engine)
 list(TRANSFORM MIKUTERM_SSH_NAMES PREPEND ${MIKUTERM_ROOT}/userland/base/ssh/ssh- OUTPUT_VARIABLE MIKUTERM_SSH_SOURCES)
 list(TRANSFORM MIKUTERM_SSH_SOURCES APPEND .c)
 
@@ -157,6 +157,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/connection-ssh.c
 	${MIKUTERM_DIR}/known-hosts.c
 	${MIKUTERM_DIR}/ssh-thread.c
+	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so

@@ -455,6 +455,10 @@ run_start(
 	/* The menus, which the compositor draws (none from a compositor without the System Menu), with the item and the key the program asked for. */
 	run_window.input_method_item = options->input_method_menu;
 	run_window.ambiguous_wide_key = options->ambiguous_wide_key;
+	run_window.fullscreen_alt_enter = options->fullscreen_alt_enter;
+	run_window.forget_item = 0;
+	if (options->forget_passphrases != NULL)
+		run_window.forget_item = 1;
 	run_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
@@ -1059,6 +1063,11 @@ run_menu_actions(
 				run_input_method_off = 1;
 			run_secret_follow(run->connection);
 			printf("ZTERM IME menu-off=%d\n", run_input_method_off);
+			break;
+		case TERMINAL_ACTION_FORGET_PASSPHRASES:
+			/* The program forgets the passphrases it keeps. */
+			if (options->forget_passphrases != NULL)
+				options->forget_passphrases(options->data);
 			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */

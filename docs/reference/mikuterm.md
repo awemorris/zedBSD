@@ -103,8 +103,10 @@ The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
 
 ### 4.3 Keys and algorithms
 
-- Keys: OpenSSH's private key format with an `ssh-ed25519` key and no
-  passphrase. A key with a passphrase is passed over.
+- Keys: OpenSSH's private key format with an `ssh-ed25519` key, in the
+  clear or encrypted as `ssh-keygen` writes it with a passphrase (cipher
+  `aes256-ctr`, KDF `bcrypt`, up to 16384 rounds). Another cipher
+  (`ssh-keygen -Z`) is not supported, and such a key is passed over.
 - Key exchange: `mlkem768x25519-sha256`, then `curve25519-sha256`
   (OpenSSH 8.x and 9.x servers, WSL's Ubuntu among them). Host key:
   `ssh-ed25519`. Cipher: `chacha20-poly1305@openssh.com`. Strict key
@@ -127,6 +129,7 @@ OpenSSH's `ssh` where it has the same question:
 | --- | --- | --- |
 | No `User` for the host | `login as: ` | a name; an empty one is asked again |
 | A host's key is not known (`StrictHostKeyChecking ask`) | `The authenticity of host 'NAME (ADDRESS)' can't be established.`, `ED25519 key fingerprint is SHA256:...`, the other names the key is known by in known_hosts (or `This key is not known by any other names.`), `Are you sure you want to continue connecting (yes/no/[fingerprint])? ` | `yes` (any case) or the fingerprint: trust it and keep it; `no` or nothing: refuse; anything else: `Please type 'yes', 'no' or the fingerprint: ` |
+| The server would take an encrypted key | `[x] Remember the passphrase until you sign out of Windows (Tab switches this)` and `Enter passphrase for key 'FILE': `; the same again after a wrong one, three times at most | the passphrase, not shown; Tab switches the box; nothing, or Ctrl+C, passes the key over |
 | The server asks for the password | `USER@HOST's password: `, then `Permission denied, please try again.` after a refused one | the password, not shown |
 | The host showed another key than the one known | the `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` frame, the fingerprint of the key shown, `Offending ED25519 key in FILE:LINE`, `Host key for NAME has changed and you have requested strict checking.` | none: the connection is refused |
 | The key is on an `@revoked` line | the `WARNING: REVOKED HOST KEY DETECTED!` frame and the file and line | none: refused |
@@ -137,11 +140,20 @@ port other than 22, in lower case); `ADDRESS` is the address reached, in the
 same form. A file inside the folder is shown by its path in the folder
 (`ssh\known_hosts`).
 
-While a question asks for a secret (the password), the tab's input does not
+While a question asks for a secret (a passphrase, the password), the tab's input does not
 echo and the window's input method is off. A password a program on the host
 asks for (sudo, su) cannot be told from other input: Session > Disable Input
 Method (Ctrl+Shift+I) turns the input method off until it is chosen again.
-F10 is the shortcut of View > Treat Ambiguous-Width Characters as Wide.
+
+A passphrase that opened its key while the box was checked is kept in
+Windows' Credential Manager as a generic credential named
+`mikuterm:passphrase:` and the key file's full path, for the Windows logon
+session only (`CRED_PERSIST_SESSION`: held in memory, never written to the
+disk, gone when the user signs out). The next connection with that key uses
+it without asking; one that no longer opens the key is forgotten and the
+question is asked. Session > Forget Remembered Passphrases deletes every
+credential of mikuterm's. Nothing else of the user's credentials is read or
+changed.
 
 A connection that ends normally closes its tab. One that fails shows why
 (`Host key verification failed.`, `USER@HOST: Permission denied (METHODS).`,
@@ -178,7 +190,11 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 | Item | Shortcut | |
 | --- | --- | --- |
 | Session > Disable Input Method | Ctrl+Shift+I | mikuterm only; checked while the user keeps the input method off |
-| View > Treat Ambiguous-Width Characters as Wide | F10 | F10 in mikuterm only (zedBSD's compositor opens the menus with F10); F10 then does not reach the host |
+| Session > Forget Remembered Passphrases | none | mikuterm only; forgets the passphrases kept in Credential Manager |
+| View > Treat Ambiguous-Width Characters as Wide | Alt+F11 | mikuterm only |
+| View > Fullscreen | Alt+Enter | in the place of F11 (zedBSD's terminal keeps F11) |
+
+F1 to F12 alone reach the host as keys (htop and mc use F10 and F11).
 | Shell > New Window | Ctrl+Shift+N | starts another `mikuterm.exe` |
 
 ## 8. Licenses
