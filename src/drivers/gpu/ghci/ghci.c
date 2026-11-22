@@ -89,7 +89,6 @@ int
 ghci_device_start(
 	struct ghci_device *device)
 {
-	int has_cursor;
 	int error;
 
 	/* The locks and wait queues every later step uses. */
@@ -114,10 +113,7 @@ ghci_device_start(
 	/* The local memory of a discrete GPU, the boot framebuffer in it, and the local window. */
 	(void)ghci_memory_local_start(device);
 
-	/*
-	 * The display controller, while the processor is idle and the host
-	 * may write it: a boot display keeps running, a dark one stays dark.
-	 */
+	/* The display's record, and a boot display the firmware left running, which keeps running. */
 	error = ghci_display_attach(device);
 	if (error != 0)
 		kern_logf("ghci: %s: display not started (%d)\n", device->name, error);
@@ -150,15 +146,8 @@ ghci_device_start(
 	ghci_cp_set_watchdog(device);
 	log_caps(device);
 
-	/*
-	 * The cursor plane needs HW_CURSOR besides the controller's own bit,
-	 * and only the block tells it; no lease has used the plane yet.
-	 */
-	has_cursor = ghci_caps_has(&device->caps, GHCI_HAS_HW_CURSOR);
-	if (device->display.cursor && !has_cursor) {
-		kern_logf("ghci: %s: no HW_CURSOR; the display has no cursor plane\n", device->name);
-		device->display.cursor = 0;
-	}
+	/* The display, through its commands, when the block says the GPU has one. */
+	(void)ghci_display_start(device);
 
 	/* Whether the device gets the Vulkan executor, and what isolation its sessions have. */
 	choose_policy(device);
@@ -689,13 +678,6 @@ static void
 log_caps(
 	struct ghci_device *device)
 {
-	int has_display;
-
-	/* A display the device has is driven by commands, which the driver does not serve yet. */
-	has_display = ghci_caps_has(&device->caps, GHCI_HAS_DISPLAY);
-	if (has_display)
-		kern_logf("ghci: %s: display commands not served; the GPU's display is not used\n", device->name);
-
 	/* A copy that disagrees with the word the driver keeps is only logged. */
 	if (device->caps.mismatches != 0U)
 		kern_logf("ghci: %s: DEVICE_CAPS bits %08x disagree with BOOT_CAPS, MEM or their mirrors; those used\n",
@@ -793,7 +775,7 @@ register_device(
 	device->ops.share = &ghci_share_ops;
 
 	/*
-	 * The display controller's operations, on a device with DISP2: the
+	 * The display's operations, on a device whose display started: the
 	 * display and its events, the cursor's three with the cursor plane,
 	 * and the scan-out query.
 	 */

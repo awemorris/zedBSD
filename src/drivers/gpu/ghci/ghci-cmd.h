@@ -74,6 +74,12 @@
 #define GHCI_OP_COPY_IMAGE_TO_BUFFER	0x46U
 #define GHCI_OP_DISP_SET		0x50U
 #define GHCI_OP_FLIP			0x51U
+#define GHCI_OP_DISP_SET_MODE		0x52U
+#define GHCI_OP_DISP_QUERY_STATE	0x53U
+#define GHCI_OP_DISP_SET_CURSOR		0x54U
+#define GHCI_OP_DISP_QUERY_MODES	0x55U
+#define GHCI_OP_DISP_EVENT_SETUP	0x56U
+#define GHCI_OP_DISP_I2C_XFER		0x57U
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md (section 7.2,
@@ -117,7 +123,23 @@
 #define GHCI_DW_FILL_BUFFER		5U
 #define GHCI_DW_RESOLVE_IMAGE		11U
 #define GHCI_DW_BUFFER_IMAGE		10U
-#define GHCI_DW_FLIP			8U
+
+/*
+ * The sizes of the display commands.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3, the
+ * display commands 0x50..0x57: DISP_SET 6, FLIP 10, DISP_SET_MODE 8,
+ * DISP_QUERY_STATE 9, DISP_SET_CURSOR 4, DISP_QUERY_MODES 9,
+ * DISP_EVENT_SETUP 7, DISP_I2C_XFER 10).
+ */
+#define GHCI_DW_DISP_SET		6U
+#define GHCI_DW_FLIP			10U
+#define GHCI_DW_DISP_SET_MODE		8U
+#define GHCI_DW_DISP_QUERY_STATE	9U
+#define GHCI_DW_DISP_SET_CURSOR		4U
+#define GHCI_DW_DISP_QUERY_MODES	9U
+#define GHCI_DW_DISP_EVENT_SETUP	7U
+#define GHCI_DW_DISP_I2C_XFER		10U
 
 /*
  * CMD_QUERY_CAPS: the address and the size of the buffer the capability
@@ -137,9 +159,6 @@
 #define GHCI_VERTEX_BINDINGS		16U
 #define GHCI_CONST_WORDS		512U
 #define GHCI_CONST_LOAD_MAX		32U
-
-/* The register pairs of one DISP_SET: 1 + 2N dwords stay within a packet. */
-#define GHCI_DISP_SET_PAIRS_MAX		127U
 
 /*
  * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3 and
@@ -261,12 +280,170 @@
 #define GHCI_CLEAR_COLOR_SHIFT		0U
 #define GHCI_CLEAR_DEPTH		(1U << 8)
 #define GHCI_CLEAR_STENCIL		(1U << 9)
-#define GHCI_DISP_SET_WAIT_IDLE		(1U << 0)
+#define GHCI_STRIDE_FROM_PSO		0xFFFFFFFFU
+
+/*
+ * The display commands' flags and the records they write.
+ *
+ * Every display command but FLIP and SET_CURSOR may ask for a 64-bit
+ * completion once the display service queue has run it (COMP_WRITE, at
+ * an 8-byte address; the value's top byte must be 0) and for
+ * IRQ_STATUS[3] after it (COMP_IRQ).  The completion written is the
+ * value with the queue's status in [62:56] (0 OK, 1 INVALID_STATE) and
+ * [63] set when a CTRL.RESET cancelled the command.  A FLIP's 16-byte
+ * record (its value with [31] set when cancelled, the frame count and
+ * the 64-bit timestamp) goes to an 8-byte address.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3, the
+ * display commands' flags, CMD_FLIP's flags and GhciFlipRecord,
+ * CMD_DISP_EVENT_SETUP's ring_cfg, CMD_DISP_I2C_XFER's flags and the
+ * 4-byte GhciDisplayI2cBufHeader; section 13.2, GhciDisplayModeDesc,
+ * GhciDisplayState, GhciDisplayModesHeader and GhciDisplayEventRecord).
+ */
+#define GHCI_DISP_COMP_WRITE		(1U << 8)
+#define GHCI_DISP_COMP_IRQ		(1U << 9)
+#define GHCI_DISP_COMP_FLAGS		(GHCI_DISP_COMP_WRITE | GHCI_DISP_COMP_IRQ)
+#define GHCI_DISP_COMP_CANCELLED	(1ULL << 63)
+#define GHCI_DISP_COMP_STATUS_SHIFT	56U
+#define GHCI_DISP_COMP_STATUS_MASK	0x7FU
+#define GHCI_DISP_COMP_VALUE_MASK	0x00FFFFFFFFFFFFFFULL
+#define GHCI_DISP_COMP_OK		0U
+#define GHCI_DISP_COMP_INVALID_STATE	1U
+#define GHCI_DISP_SET_ENABLE		(1U << 0)
+#define GHCI_DISP_SET_RESET		(1U << 1)
+#define GHCI_DISP_SET_TEST_PATTERN	(1U << 2)
+#define GHCI_DISP_SET_MODE_CHECK_ONLY	(1U << 0)
 #define GHCI_FLIP_VSYNC_WAIT		(1U << 0)
 #define GHCI_FLIP_IMMEDIATE		(1U << 1)
 #define GHCI_FLIP_PLANE_CURSOR		(1U << 2)
 #define GHCI_FLIP_RECORD_ENABLE		(1U << 3)
-#define GHCI_STRIDE_FROM_PSO		0xFFFFFFFFU
+#define GHCI_FLIP_WAIT_GPU_IDLE		(1U << 4)
+#define GHCI_FLIP_RECORD_IRQ		(1U << 5)
+#define GHCI_FLIP_FLAGS			0x3FU
+#define GHCI_FLIP_VALUE_MAX		0x7FFFFFFFU
+#define GHCI_FLIP_CANCELLED		(1U << 31)
+#define GHCI_FLIP_RECORD_BYTES		16U
+#define GHCI_DISP_CURSOR_SHOW		(1U << 0)
+#define GHCI_DISP_EVENT_ENABLE		(1U << 0)
+#define GHCI_DISP_EVENT_CAPACITY_MAX	0xFFFFU
+#define GHCI_DISP_EVENT_MASK_SHIFT	16U
+#define GHCI_DISP_EVENT_MASK_VSYNC	(1U << 0)
+#define GHCI_DISP_EVENT_MASK_HOTPLUG	(1U << 1)
+#define GHCI_DISP_EVENT_MASK_UNDERFLOW	(1U << 2)
+#define GHCI_DISP_EVENT_MASK_ERROR	(1U << 3)
+#define GHCI_DISP_EVENT_MASKS		0xFU
+#define GHCI_DISP_EVENT_VSYNC		1U
+#define GHCI_DISP_EVENT_HOTPLUG		2U
+#define GHCI_DISP_EVENT_UNDERFLOW	3U
+#define GHCI_DISP_EVENT_ERROR		4U
+#define GHCI_DISP_ERROR_SCANOUT_READ	1U
+#define GHCI_DISP_ERROR_RECORD_WRITE	2U
+#define GHCI_DISP_ERROR_COMP_WRITE	3U
+#define GHCI_DISP_EVENT_RECORD_BYTES	32U
+#define GHCI_DISP_EVENT_SEQ		0x00U
+#define GHCI_DISP_EVENT_TYPE		0x10U
+#define GHCI_DISP_EVENT_DISPLAY		0x14U
+#define GHCI_DISP_EVENT_PAYLOAD		0x1CU
+#define GHCI_DISP_I2C_WRITE		(1U << 0)
+#define GHCI_DISP_I2C_HAS_OFFSET	(1U << 1)
+#define GHCI_DISP_I2C_HAS_SEG		(1U << 2)
+#define GHCI_DISP_I2C_FLAGS		0x7U
+#define GHCI_DISP_I2C_BYTES_MAX		256U
+#define GHCI_DISP_I2C_HEADER_BYTES	4U
+#define GHCI_DISP_I2C_OK		0U
+#define GHCI_DISP_I2C_NACK		1U
+#define GHCI_DISP_I2C_BUS_ERROR		2U
+#define GHCI_DISP_I2C_TIMEOUT		3U
+#define GHCI_DISP_I2C_CANCELLED		4U
+#define GHCI_DISP_MODE_BYTES		64U
+#define GHCI_DISP_MODE_STRUCT_BYTES	0x00U
+#define GHCI_DISP_MODE_PIXEL_CLOCK	0x04U
+#define GHCI_DISP_MODE_HACTIVE		0x08U
+#define GHCI_DISP_MODE_HSYNC_START	0x0AU
+#define GHCI_DISP_MODE_HSYNC_END	0x0CU
+#define GHCI_DISP_MODE_HTOTAL		0x0EU
+#define GHCI_DISP_MODE_VACTIVE		0x10U
+#define GHCI_DISP_MODE_VSYNC_START	0x12U
+#define GHCI_DISP_MODE_VSYNC_END	0x14U
+#define GHCI_DISP_MODE_VTOTAL		0x16U
+#define GHCI_DISP_MODE_FLAGS		0x18U
+#define GHCI_DISP_MODE_STATUS		0x1CU
+#define GHCI_DISP_MODE_ACTUAL_CLOCK	0x20U
+#define GHCI_DISP_MODE_ID		0x24U
+#define GHCI_DISP_MODE_HSYNC_POSITIVE	(1U << 0)
+#define GHCI_DISP_MODE_VSYNC_POSITIVE	(1U << 1)
+#define GHCI_DISP_MODE_ARBITRARY	0xFFFFFFFFU
+#define GHCI_DISP_MODE_OK		0U
+#define GHCI_DISP_MODE_UNSUPPORTED	1U
+#define GHCI_DISP_MODE_ENABLED		2U
+#define GHCI_DISP_MODE_INVALID_DESC	3U
+#define GHCI_DISP_MODE_CANCELLED	4U
+#define GHCI_DISP_MODES_HEADER_BYTES	16U
+#define GHCI_DISP_MODES_TOTAL		0x00U
+#define GHCI_DISP_MODES_RETURNED	0x04U
+#define GHCI_DISP_STATE_BYTES		128U
+#define GHCI_DISP_STATE_FLAGS		0x06U
+#define GHCI_DISP_STATE_FB_BASE		0x20U
+#define GHCI_DISP_STATE_FB_STRIDE	0x28U
+#define GHCI_DISP_STATE_FORMAT		0x0CU
+#define GHCI_DISP_STATE_MODE		0x40U
+#define GHCI_DISP_STATE_ENABLE		(1U << 0)
+#define GHCI_DISP_STATE_SCANOUT_ACTIVE	(1U << 2)
+#define GHCI_DISP_STATE_CONNECTED	(1U << 4)
+#define GHCI_DISP_STATE_HAS_IMAGE	(1U << 10)
+
+/*
+ * The 64-byte alignment of the display's descriptors, snapshots and
+ * scan-out addresses and rows, and the cursor plane's fixed image: 64 x
+ * 64 pixels of BGRA8, rows 256 bytes apart.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_FLIP's base and stride_bytes on 64 bytes, a cursor's implicit
+ * 64x64 BGRA8 image with 256-byte rows).
+ */
+#define GHCI_DISP_ALIGN			64U
+#define GHCI_CURSOR_SIZE		64U
+
+/*
+ * Where a display command writes its completion: COMP_WRITE and
+ * COMP_IRQ (flags), the 8-byte address and the value (top byte 0).
+ */
+struct ghci_disp_comp {
+	uint32_t flags;
+	uint64_t pa;
+	uint64_t value;
+};
+
+/*
+ * What one CMD_FLIP says: the display, the image (address, row stride
+ * and GhciFormat; both 0 for the cursor plane), the flags, the 31-bit
+ * value its record carries, and where the record goes.
+ */
+struct ghci_flip_args {
+	uint32_t display;
+	uint64_t base;
+	uint32_t stride;
+	uint32_t format;
+	uint32_t flags;
+	uint32_t value;
+	uint64_t record;
+};
+
+/*
+ * What one CMD_DISP_I2C_XFER says: the display, the flags (WRITE,
+ * HAS_OFFSET, HAS_SEG), the 7-bit address, the register offset, the
+ * E-DDC segment, the payload's bytes, and the buffer (its 4-byte header,
+ * then the payload).
+ */
+struct ghci_i2c_args {
+	uint32_t display;
+	uint32_t flags;
+	uint32_t slave;
+	uint32_t offset;
+	uint32_t segment;
+	uint32_t bytes;
+	uint64_t buffer;
+};
 
 /*
  * CMD_WRITE_MEM's flags: when the write happens (at the top of the pipe,
@@ -317,6 +494,16 @@
  */
 #define GHCI_FORMAT_NONE		0x00U
 #define GHCI_FORMAT_INVALID		0xFFU
+
+/*
+ * The two formats a boot display and the driver's display images use:
+ * 8 bits a channel, red first or blue first.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 include/ghci_cmd.h
+ * (GHCI_FMT_R8G8B8A8_UNORM 0x20, GHCI_FMT_B8G8R8A8_UNORM 0x28).
+ */
+#define GHCI_FORMAT_R8G8B8A8_UNORM	0x20U
+#define GHCI_FORMAT_B8G8R8A8_UNORM	0x28U
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -684,8 +871,14 @@ uint32_t ghci_cmd_fill_buffer(uint32_t *out, uint64_t dst_va, uint32_t bytes, ui
 uint32_t ghci_cmd_resolve_image(uint32_t *out, const struct ghci_transfer *transfer);
 uint32_t ghci_cmd_copy_buffer_to_image(uint32_t *out, const struct ghci_transfer *transfer);
 uint32_t ghci_cmd_copy_image_to_buffer(uint32_t *out, const struct ghci_transfer *transfer);
-uint32_t ghci_cmd_disp_set(uint32_t *out, uint32_t wait_idle, uint32_t pairs, const uint32_t *offsets, const uint32_t *values);
-uint32_t ghci_cmd_flip(uint32_t *out, uint32_t display, uint32_t base_phys, uint32_t flags, uint32_t value, uint32_t record_phys);
+uint32_t ghci_cmd_disp_set(uint32_t *out, uint32_t display, uint32_t flags, const struct ghci_disp_comp *comp);
+uint32_t ghci_cmd_flip(uint32_t *out, const struct ghci_flip_args *args);
+uint32_t ghci_cmd_disp_set_mode(uint32_t *out, uint32_t display, uint32_t flags, uint64_t mode, const struct ghci_disp_comp *comp);
+uint32_t ghci_cmd_disp_query_state(uint32_t *out, uint32_t display, uint64_t dst, uint32_t bytes, const struct ghci_disp_comp *comp);
+uint32_t ghci_cmd_disp_set_cursor(uint32_t *out, uint32_t display, int32_t x, int32_t y, uint32_t show);
+uint32_t ghci_cmd_disp_query_modes(uint32_t *out, uint32_t display, uint64_t dst, uint32_t max_modes, const struct ghci_disp_comp *comp);
+uint32_t ghci_cmd_disp_event_setup(uint32_t *out, uint32_t display, uint64_t ring, uint32_t capacity, uint32_t mask, const struct ghci_disp_comp *comp);
+uint32_t ghci_cmd_disp_i2c_xfer(uint32_t *out, const struct ghci_i2c_args *args, const struct ghci_disp_comp *comp);
 int ghci_pso_encode(uint8_t *out, const struct ghci_pso *pso);
 int ghci_pso_ext_encode(uint8_t *out, const struct ghci_pso *pso, const struct ghci_pso_ext *ext);
 int ghci_texture_desc_encode(uint8_t *out, const struct ghci_texture_desc *desc);

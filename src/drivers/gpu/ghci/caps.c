@@ -63,6 +63,7 @@ static uint32_t window_word(const uint32_t *window, uint32_t offset);
 static uint64_t window_quad(const uint32_t *window, uint32_t offset);
 static int width_known(uint32_t va_encoding, uint32_t pa_encoding);
 static void decode_memory(const uint32_t *window, struct ghci_caps *caps);
+static void decode_boot_display(const uint32_t *window, struct ghci_caps *caps);
 static int block_layout(const uint32_t *words, uint32_t dwords, uint32_t *first, uint32_t *count);
 static void decode_words(const uint32_t *words, struct ghci_caps *caps);
 static void check_copies(struct ghci_caps *caps);
@@ -141,6 +142,9 @@ ghci_caps_boot(
 
 	/* Reads the memory configuration of the MEM window. */
 	decode_memory(window, caps);
+
+	/* Reads the boot display the firmware may have left running. */
+	decode_boot_display(window, caps);
 
 	/* Succeeded: the record holds what the device says before it runs. */
 	return 0;
@@ -547,6 +551,36 @@ decode_memory(
 }
 
 /*
+ * Reads the BOOT_DISP window, when BOOT_CAPS says it is there and the
+ * device has local memory: the boot display's state, and its image's
+ * GhciFormat, size, rows and offset in local memory.  Without it, no boot
+ * display is running.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
+ * BOOT_DISP window of a PCIe device with local memory, read before any
+ * takeover; its FB_OFFSET is a 64-bit register of two words).
+ */
+static void
+decode_boot_display(
+	const uint32_t *window,
+	struct ghci_caps *caps)
+{
+	/* A device without the window, or without local memory, has no boot display. */
+	if ((caps->boot_caps & GHCI_BOOT_BOOT_DISP) == 0U)
+		return;
+	if (caps->local_bytes == 0U)
+		return;
+
+	/* The state and the image as the firmware left them. */
+	caps->boot_disp_status = window_word(window, GHCI_REG_BOOT_DISP_STATUS);
+	caps->boot_disp_format = window_word(window, GHCI_REG_BOOT_DISP_FORMAT) & GHCI_BOOT_DISP_FORMAT_MASK;
+	caps->boot_disp_width = window_word(window, GHCI_REG_BOOT_DISP_WIDTH);
+	caps->boot_disp_height = window_word(window, GHCI_REG_BOOT_DISP_HEIGHT);
+	caps->boot_disp_stride = window_word(window, GHCI_REG_BOOT_DISP_STRIDE);
+	caps->boot_disp_offset = window_quad(window, GHCI_REG_BOOT_DISP_FB_OFFSET);
+}
+
+/*
  * Checks the identity, version and size of a capability block and finds
  * its format table: the table's first dword and its formats.  Returns 0,
  * or EINVAL.
@@ -620,6 +654,12 @@ decode_words(
 	caps->cache_config = words[GHCI_CAPS_WORD_MEM_CACHE_CFG];
 	caps->prot_caps = words[GHCI_CAPS_WORD_PROT_CAPS];
 	caps->disp_info = words[GHCI_CAPS_WORD_DISP_PCLK_INFO];
+	caps->disp_clock_min = words[GHCI_CAPS_WORD_DISP_PCLK_MIN];
+	caps->disp_clock_max = words[GHCI_CAPS_WORD_DISP_PCLK_MAX];
+	caps->disp_limits_h = words[GHCI_CAPS_WORD_DISP_LIMITS_H];
+	caps->disp_limits_v = words[GHCI_CAPS_WORD_DISP_LIMITS_V];
+	caps->disp_blank_h = words[GHCI_CAPS_WORD_DISP_MIN_H_BLANK];
+	caps->disp_blank_v = words[GHCI_CAPS_WORD_DISP_MIN_V_BLANK];
 	caps->shader_stages = words[GHCI_CAPS_WORD_SHADER_STAGES];
 	caps->stage_limits = words[GHCI_CAPS_WORD_STAGE_LIMITS];
 	caps->fmt_limits = words[GHCI_CAPS_WORD_FMT_LIMITS] & GHCI_CAPS_FMT_LIMITS_MASK;

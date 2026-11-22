@@ -80,6 +80,7 @@ extern int kern_pmem_unmap_uncached(void *mapped, size_t size) __attribute__((we
 static int host_usable(const struct ghci_device *device, const struct kern_pmem *run);
 static int host_view(struct ghci_device *device, struct ghci_allocation *allocation);
 static void boot_ranges(struct ghci_device *device);
+static void boot_framebuffer(const struct ghci_device *device, uint64_t *first, uint64_t *last);
 static int boot_range(struct ghci_device *device, uint64_t address, uint64_t bytes, uint32_t *offset, uint32_t *length);
 static void boot_add(struct ghci_device *device, uint32_t offset, uint32_t bytes);
 static int local_reserve(struct ghci_device *device);
@@ -538,6 +539,8 @@ ghci_memory_local_stop(
 
 	/* A run still out besides the firmware's (one the quarantine kept) keeps the table, so that its free finds it. */
 	kept = device->boot_count;
+	if (device->boot_fb_freed)
+		kept--;
 	if (device->local_map.count > kept) {
 		kern_logf("ghci: %s: %u local runs still out at the detach\n",
 		    device->name,
@@ -567,19 +570,22 @@ ghci_memory_local_bytes(
 }
 
 /*
- * Ends the boot console's use of the local window once the driver's own
- * first flip has been taken, and closes the window, which nothing else
- * uses.  The firmware's reservation stays out of the allocator for good:
- * the firmware keeps it, and no page table may lie in it.
+ * Ends the boot console's use of the local window once the driver has
+ * taken the display over, closes the window, which nothing else uses,
+ * and gives the boot framebuffer's whole pages back to the allocator.
+ * The rest of the firmware's reservation stays out of the allocator for
+ * good: the firmware keeps it, and no page table may lie in it.
  *
  * The caller holds no lock: the function takes the device's lock, and
  * the interrupt's for the window.  It is called once nothing draws to the
- * boot framebuffer any more (a framebuffer console, a panic's output).
+ * boot framebuffer any more (a framebuffer console, a panic's output) and
+ * the display no longer scans it.
  *
  * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
- * window kept open until the takeover, and MEM_FW_VRAM reserved for the
- * device's firmware after it; section 11.2, page-table memory never
- * overlaps MEM_FW_VRAM).
+ * window kept open until the takeover, the boot framebuffer's extent
+ * reclaimed after it, and the rest of MEM_FW_VRAM reserved for the
+ * device's firmware; section 11.2, page-table memory never overlaps
+ * MEM_FW_VRAM).
  */
 void
 ghci_memory_boot_release(
@@ -594,6 +600,12 @@ ghci_memory_boot_release(
 	if (device->boot_reserved) {
 		device->boot_reserved = 0;
 		released = 1;
+	}
+
+	/* The framebuffer's pages are local memory again, once. */
+	if (released && device->local_ready && device->boot_fb_bytes != 0U && !device->boot_fb_freed) {
+		(void)ghci_range_free(&device->local_map, device->boot_fb_offset);
+		device->boot_fb_freed = 1;
 	}
 
 	mutex_unlock(&device->lock);
@@ -707,21 +719,33 @@ host_view(
  * Keeps the local memory the firmware reserved (MEM_FW_VRAM, a boot
  * framebuffer the firmware's display may still read and the boot console
  * may still write) in the device's boot ranges, so that the allocator
- * never hands it out.  A device without it keeps nothing.
+ * never hands it out.  A device without it keeps nothing.  When a boot
+ * display runs, the whole pages of its framebuffer are a range of their
+ * own (boot_fb_offset), which the takeover may give back; the rest of
+ * the reservation is the firmware's for good.
  *
- * Procedure referenced: lumiere-gpu 78d1b6b7 ghci.md (section 11.3, the
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 11.3, the
  * MEM window's MEM_FW_VRAM_BASE and MEM_FW_VRAM_SIZE; section 11.2, page
- * table memory never overlaps it).
+ * table memory never overlaps it; section 13.3, only the boot
+ * framebuffer's extent, MEM_VRAM_BASE + BOOT_DISP_FB_OFFSET for
+ * BOOT_DISP_STRIDE x BOOT_DISP_HEIGHT bytes, may be reclaimed after the
+ * takeover).
  */
 static void
 boot_ranges(
 	struct ghci_device *device)
 {
+	uint64_t fw_first;
+	uint64_t fw_last;
+	uint64_t fb_first;
+	uint64_t fb_last;
 	uint32_t offset;
 	uint32_t length;
 	int kept;
 
 	/* Without local memory or a firmware reservation, nothing to keep. */
+	device->boot_fb_bytes = 0U;
+	device->boot_fb_freed = 0;
 	if (device->caps.local_bytes == 0U || device->caps.fw_bytes == 0U)
 		return;
 
@@ -733,13 +757,66 @@ boot_ranges(
 		    (unsigned long long)device->caps.fw_base);
 		return;
 	}
+	fw_first = offset;
+	fw_last = (uint64_t)offset + length;
+
+	/* The boot framebuffer's whole pages inside the reservation, when a boot display runs. */
+	boot_framebuffer(device, &fb_first, &fb_last);
+	if (fb_first < fw_first || fb_last > fw_last || fb_first >= fb_last) {
+		fb_first = fw_last;
+		fb_last = fw_last;
+	}
+
+	/* The reservation before the framebuffer, the framebuffer, and the reservation after it. */
+	if (fb_first > fw_first)
+		boot_add(device, (uint32_t)fw_first, (uint32_t)(fb_first - fw_first));
+	if (fb_last > fb_first) {
+		boot_add(device, (uint32_t)fb_first, (uint32_t)(fb_last - fb_first));
+		device->boot_fb_offset = (uint32_t)fb_first;
+		device->boot_fb_bytes = (uint32_t)(fb_last - fb_first);
+	}
+	if (fw_last > fb_last)
+		boot_add(device, (uint32_t)fb_last, (uint32_t)(fw_last - fb_last));
 
 	/* Succeeded: the reservation is kept. */
-	boot_add(device, offset, length);
 	kern_logf("ghci: %s: firmware VRAM at %llx (%u bytes) kept\n",
 	    device->name,
 	    (unsigned long long)device->caps.fw_base,
 	    (unsigned)length);
+}
+
+/*
+ * Reports the whole pages of the boot framebuffer a running boot display
+ * scans, as offsets of local memory (first == last for none): the pages
+ * inside [MEM_VRAM_BASE + FB_OFFSET, + STRIDE x HEIGHT), so that giving
+ * them back never takes a page the firmware keeps.
+ */
+static void
+boot_framebuffer(
+	const struct ghci_device *device,
+	uint64_t *first,
+	uint64_t *last)
+{
+	uint64_t start;
+	uint64_t end;
+
+	/* No boot display, or one that is not running. */
+	*first = 0U;
+	*last = 0U;
+	if ((device->caps.boot_disp_status & GHCI_BOOT_DISP_ACTIVE) == 0U)
+		return;
+
+	/* The framebuffer's bytes from MEM_VRAM_BASE, within local memory. */
+	start = device->caps.boot_disp_offset;
+	end = start + (uint64_t)device->caps.boot_disp_stride * device->caps.boot_disp_height;
+	if (end <= start || end > device->caps.local_bytes)
+		return;
+
+	/* Succeeded: its whole pages, rounded inward. */
+	*first = (start + GHCI_PAGE_BYTES - 1U) & ~(uint64_t)(GHCI_PAGE_BYTES - 1U);
+	*last = end & ~(uint64_t)(GHCI_PAGE_BYTES - 1U);
+	if (*last < *first)
+		*last = *first;
 }
 
 /*
@@ -792,8 +869,9 @@ boot_range(
 
 /*
  * Adds a range to the device's boot ranges, keeping them in address order
- * and joining ranges that overlap or touch, so that each is taken out of
- * the allocator, and given back, as one run.  The caller owns the device
+ * and joining ranges that overlap, so that each is taken out of the
+ * allocator, and given back, as one run (ranges that only touch stay
+ * apart: the boot framebuffer is given back without the rest).  The caller owns the device
  * alone, and adds at most GHCI_BOOT_RANGES ranges.
  */
 static void
@@ -833,7 +911,7 @@ boot_add(
 	slot = 0U;
 	for (index = 1U; index < count; index++) {
 		end = (uint64_t)device->boot_offset[slot] + device->boot_bytes[slot];
-		if (device->boot_offset[index] <= end) {
+		if (device->boot_offset[index] < end) {
 			next_end = (uint64_t)device->boot_offset[index] + device->boot_bytes[index];
 			if (next_end > end)
 				device->boot_bytes[slot] = (uint32_t)(next_end - device->boot_offset[slot]);
