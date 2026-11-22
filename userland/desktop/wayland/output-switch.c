@@ -975,10 +975,6 @@ output_sync_then(
  * size in pixels and the scale it is shown at.  Before the compositor's
  * device is open (no compose yet) it sets the sizes alone, from the size
  * asked for.
- *
- * The plane is shown at 100 % whatever scale is asked for until the
- * drawing maps logical units to pixels; the scale asked for is kept in
- * server->scale_wanted meanwhile.
  */
 void
 kwl_output_size_set(
@@ -997,8 +993,9 @@ kwl_output_size_set(
 	/* The size in pixels: the mode on its side at a quarter turn. */
 	kwl_rotate_size(rotation, mode_width, mode_height, &pixel_width, &pixel_height);
 
-	/* The drawing does not map units to pixels yet: the output is shown at 100 %. */
-	scale120 = KWL_SCALE_ONE;
+	/* No scale asked for is 100 %. */
+	if (scale120 == 0U)
+		scale120 = KWL_SCALE_ONE;
 
 	/* The logical size: the pixels divided by the scale. */
 	width = kwl_scale_logical(pixel_width, scale120);

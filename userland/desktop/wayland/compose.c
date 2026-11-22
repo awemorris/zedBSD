@@ -2756,8 +2756,8 @@ compose_turn_open(
 	if (compose->turn_rotation == KWL_ROTATE_0)
 		return;
 
-	/* The image of the logical size, drawn into from now on. */
-	result = kwl_turn_open(compose, server->width, server->height, compose->turn_rotation, &compose->turn);
+	/* The image of the logical orientation in pixels (the mode turned by the angle), drawn into from now on. */
+	result = kwl_turn_open(compose, server->pixel_width, server->pixel_height, compose->turn_rotation, &compose->turn);
 	if (result == VK_SUCCESS) {
 		compose->target_width = compose->turn.width;
 		compose->target_height = compose->turn.height;
@@ -3569,42 +3569,52 @@ compose_quad_part(
 	uint32_t quad_height,
 	const float *uv)
 {
+	VkDescriptorSet set;
 	float constants[8];
+	float plane[4];
+	float quad[4];
 	float width;
 	float height;
 	uint64_t pixels;
 	int visible;
 
 	/* The output drawn: the anchor, or a head's part of the plane. */
-	width = (float)server->width;
-	height = (float)server->height;
 	if (server->view_width != 0U) {
 		x -= server->view_x;
 		y -= server->view_y;
-		width = (float)server->view_width;
-		height = (float)server->view_height;
 	}
 
+	/* The quad in the pass's pixels, and the size of the picture drawn. */
+	plane[0] = (float)x;
+	plane[1] = (float)y;
+	plane[2] = (float)quad_width;
+	plane[3] = (float)quad_height;
+	kwl_compose_pass_rect(server, plane, quad);
+	kwl_compose_pass_size(server, &width, &height);
+
 	/* Omit images wholly outside the pass scissor, or between the damage's rectangles. */
-	visible = kwl_compose_clip_visible(server->compose, (float)x, (float)y, (float)quad_width, (float)quad_height);
+	visible = kwl_compose_clip_visible(server->compose, quad[0], quad[1], quad[2], quad[3]);
 	if (!visible)
 		return;
 
 	/* The rectangle in normalized device coordinates, and the part of the image. */
-	constants[0] = 2.0f * (float)x / width - 1.0f;
-	constants[1] = 2.0f * (float)y / height - 1.0f;
-	constants[2] = 2.0f * (float)(x + (int32_t)quad_width) / width - 1.0f;
-	constants[3] = 2.0f * (float)(y + (int32_t)quad_height) / height - 1.0f;
+	constants[0] = 2.0f * quad[0] / width - 1.0f;
+	constants[1] = 2.0f * quad[1] / height - 1.0f;
+	constants[2] = 2.0f * (quad[0] + quad[2]) / width - 1.0f;
+	constants[3] = 2.0f * (quad[1] + quad[3]) / height - 1.0f;
 	memcpy(&constants[4], uv, 4U * sizeof(float));
 
+	/* The image sampled a texel a pixel, or smoothly where the scale stretches it. */
+	set = kwl_compose_image_set(server, import, plane[2], plane[3], uv);
+
 	/* The pipeline for the window's way of drawing, its image, and the strip. */
-	kwl_compose_count_draw(server, server->compose->pipelines[import->draw], import->set, 0U);
-	pixels = kwl_compose_count_pixels(server, (float)x, (float)y, (float)quad_width, (float)quad_height, import->draw == KWL_DRAW_ALPHA);
+	kwl_compose_count_draw(server, server->compose->pipelines[import->draw], set, 0U);
+	pixels = kwl_compose_count_pixels(server, quad[0], quad[1], quad[2], quad[3], import->draw == KWL_DRAW_ALPHA);
 	kwl_compose_count_kind(server, KWL_COUNT_QUAD, pixels);
 	kwl_batch_flush(server, command);
-	kwl_compose_bind(server, command, server->compose->pipelines[import->draw], server->compose->layout, import->set);
+	kwl_compose_bind(server, command, server->compose->pipelines[import->draw], server->compose->layout, set);
 	kwl_list_push_constants(command, server->compose->layout, VK_SHADER_STAGE_VERTEX_BIT, 0U, sizeof(constants), constants);
-	kwl_compose_clip_draw(server, command, (float)x, (float)y, (float)quad_width, (float)quad_height, KWL_QUAD_VERTICES);
+	kwl_compose_clip_draw(server, command, quad[0], quad[1], quad[2], quad[3], KWL_QUAD_VERTICES);
 	kwl_compose_count_commands(server, 1U, 1U);
 }
 
@@ -3627,6 +3637,7 @@ compose_region(
 	struct kwl_compose *compose;
 	uint64_t frame;
 	uint64_t last;
+	unsigned index;
 	unsigned slot;
 	int partial;
 
@@ -3640,7 +3651,10 @@ compose_region(
 	if (!server->dirty && server->damaged && server->damage_count != 0U) {
 		compose->history_whole[slot] = 0;
 		compose->history_count[slot] = server->damage_count;
-		memcpy(compose->history[slot], server->damage, (size_t)server->damage_count * sizeof(compose->history[slot][0]));
+
+		/* The damage of the plane, kept as the output's pixels it touches. */
+		for (index = 0U; index < server->damage_count; index++)
+			kwl_compose_damage_pixels(server, server->damage[index], compose->history[slot][index]);
 	}
 
 	/* The image is drawn in this frame. */

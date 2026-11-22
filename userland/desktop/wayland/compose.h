@@ -1187,6 +1187,12 @@ uint64_t kwl_compose_count_pixels(struct kwl_server *server, float x, float y, f
 void kwl_compose_count_kind(struct kwl_server *server, unsigned kind, uint64_t pixels);
 void kwl_compose_bind(struct kwl_server *server, struct kwl_list *command, VkPipeline pipeline, VkPipelineLayout layout, VkDescriptorSet set);
 void kwl_compose_bind_forget(struct kwl_compose *compose);
+unsigned kwl_compose_pass_scale(const struct kwl_server *server);
+void kwl_compose_pass_size(const struct kwl_server *server, float *width, float *height);
+void kwl_compose_pass_rect(const struct kwl_server *server, const float *plane, float *pixels);
+int32_t kwl_compose_pass_pixel(const struct kwl_server *server, int32_t plane);
+void kwl_compose_damage_pixels(const struct kwl_server *server, const int32_t *plane, int32_t *pixels);
+VkDescriptorSet kwl_compose_image_set(const struct kwl_server *server, const struct kwl_import *import, float width, float height, const float *uv);
 void kwl_compose_bounds_begin(struct kwl_compose *compose);
 int kwl_compose_bounds_end(struct kwl_compose *compose, float *bounds);
 int kwl_compose_clip_visible(struct kwl_compose *compose, float x, float y, float width, float height);
