@@ -1299,10 +1299,15 @@ window_key(
 	keiui_win32_key_flags((int64_t)lparam, &flags);
 	code = keiui_win32_key_code(flags.scan, flags.extended, (unsigned)wparam);
 
-	/* The release of a key whose press was not given is not given either. */
-	if (flags.released && window->eaten_key != 0U && code == window->eaten_key) {
-		window->eaten_key = 0U;
-		return;
+	/*
+	 * The release of a key whose press was not given (a dead key, a
+	 * shortcut) is not given either; eaten_key then says no key waits.
+	 */
+	if (flags.released && window->eaten_key != 0U) {
+		if (code == window->eaten_key) {
+			window->eaten_key = 0U;
+			return;
+		}
 	}
 
 	/* Whether a press is a dead key, which TranslateMessage told with a WM_DEADCHAR behind it. */
@@ -1335,7 +1340,7 @@ window_key(
 		}
 	}
 
-	/* A dead key waits for the next key, which brings the character it makes. */
+	/* A dead key waits for the next key, which brings the character it makes; its release is not given either. */
 	if (dead && !flags.released) {
 		window->eaten_key = code;
 		return;
@@ -1497,7 +1502,11 @@ window_shortcut(
 
 	/* The item of the shortcut, if any. */
 	taken = keiui_win32_menu_shortcut(window, keysym, menu);
-	return taken;
+	if (!taken)
+		return 0;
+
+	/* Succeeded: an item took the press. */
+	return 1;
 }
 
 /*

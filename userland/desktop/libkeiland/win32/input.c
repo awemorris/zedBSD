@@ -571,9 +571,9 @@ keiui_win32_menu_text(
 		if (label[index] == '&')
 			text_append(text, size, "&");
 
-		/* The character's bytes: its lead byte and the continuation bytes after it. */
+		/* The character's bytes: its lead byte and the continuation bytes after it (a NUL is none). */
 		length = 1U;
-		while (length < 4U && label[index + length] != '\0' && ((unsigned char)label[index + length] & 0xc0U) == 0x80U)
+		while (length < 4U && ((unsigned char)label[index + length] & 0xc0U) == 0x80U)
 			length++;
 		memcpy(character, label + index, length);
 		character[length] = '\0';

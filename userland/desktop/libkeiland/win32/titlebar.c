@@ -869,8 +869,10 @@ keiui_win32_titlebar_press(
 	}
 
 	/* The menu's button and the tabs' buttons are held until their release. */
-	if (index == KEIUI_WIN32_MENU_BUTTON || index == KEIUI_WIN32_TAB_NEW_BUTTON ||
-	    (index >= KEIUI_WIN32_TAB_CLOSE_BUTTON && index < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count)) {
+	if (index == KEIUI_WIN32_MENU_BUTTON ||
+	    index == KEIUI_WIN32_TAB_NEW_BUTTON ||
+	    (index >= KEIUI_WIN32_TAB_CLOSE_BUTTON &&
+	     index < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count)) {
 		window->control_pressed = index;
 		(void)InvalidateRect(window->frame, NULL, FALSE);
 		return;
@@ -1903,12 +1905,19 @@ titlebar_part_at(
 	const struct keiui_win32_rect *menu;
 	unsigned index;
 	unsigned part;
+	int inside;
 
-	/* The menu's button. */
+	/* The menu's button, when the window has a menu. */
 	menu = &window->menu_place;
-	if (window->menu_count != 0U && x >= menu->x && x < menu->x + (int32_t)menu->width && y >= menu->y &&
-	    y < menu->y + (int32_t)menu->height)
-		return KEIUI_WIN32_MENU_BUTTON;
+	if (window->menu_count != 0U) {
+		inside = 1;
+		if (x < menu->x || x >= menu->x + (int32_t)menu->width)
+			inside = 0;
+		if (y < menu->y || y >= menu->y + (int32_t)menu->height)
+			inside = 0;
+		if (inside)
+			return KEIUI_WIN32_MENU_BUTTON;
+	}
 
 	/* No tabs. */
 	if (window->tab_count == 0U)

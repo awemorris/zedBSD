@@ -832,6 +832,7 @@ app_launch_line(
 	WCHAR *command;
 	WCHAR *interpreter;
 	char *bytes;
+	size_t units;
 	UINT length;
 	int written;
 	int error;
@@ -860,7 +861,8 @@ app_launch_line(
 		free(bytes);
 		if (*line == NULL)
 			return ENOMEM;
-		if (wcslen(*line) >= APP_LINE_UNITS) {
+		units = wcslen(*line);
+		if (units >= APP_LINE_UNITS) {
 			free(*line);
 			*line = NULL;
 			return E2BIG;
@@ -917,6 +919,7 @@ app_environment(
 	const char *const *changes,
 	WCHAR **block)
 {
+	const WCHAR *named;
 	WCHAR **variables;
 	WCHAR **wide;
 	WCHAR *strings;
@@ -929,7 +932,8 @@ app_environment(
 	size_t length;
 	size_t index;
 	size_t other;
-	int named;
+	int same;
+	int error;
 
 	/* No changes: the application's own. */
 	*block = NULL;
@@ -939,52 +943,58 @@ app_environment(
 	if (change_count == 0U)
 		return 0;
 
-	/* The changes in UTF-16. */
+	/* Nothing made yet; every failure from here leaves through the end, which frees what was made. */
+	error = ENOMEM;
+	variables = NULL;
+	strings = NULL;
 	wide = calloc(change_count, sizeof(*wide));
 	if (wide == NULL)
-		return ENOMEM;
+		goto end;
+
+	/* The changes in UTF-16. */
 	for (index = 0U; index < change_count; index++) {
 		wide[index] = app_wide(changes[index]);
-		if (wide[index] == NULL) {
-			while (index > 0U)
-				free(wide[--index]);
-			free(wide);
-			return ENOMEM;
-		}
+		if (wide[index] == NULL)
+			goto end;
 	}
 
-	/* The application's variables. */
+	/* The application's variables, counted. */
 	strings = GetEnvironmentStringsW();
 	own_count = 0U;
-	for (walk = strings; walk != NULL && *walk != L'\0'; walk += wcslen(walk) + 1U)
+	walk = strings;
+	while (walk != NULL && walk[0] != L'\0') {
+		length = wcslen(walk);
 		own_count++;
+		walk += length + 1U;
+	}
 
 	/* Room for every variable kept and every change. */
 	variables = calloc(own_count + change_count + 1U, sizeof(*variables));
-	if (variables == NULL) {
-		if (strings != NULL)
-			(void)FreeEnvironmentStringsW(strings);
-		for (index = 0U; index < change_count; index++)
-			free(wide[index]);
-		free(wide);
-		return ENOMEM;
-	}
+	if (variables == NULL)
+		goto end;
 
 	/* The application's variables that no change names. */
 	count = 0U;
-	for (walk = strings; walk != NULL && *walk != L'\0'; walk += wcslen(walk) + 1U) {
-		named = 0;
-		for (other = 0U; other < change_count && !named; other++)
-			named = app_variable_same(walk, wide[other]);
-		if (!named) {
+	walk = strings;
+	while (walk != NULL && walk[0] != L'\0') {
+		/* Whether a change names it. */
+		same = 0;
+		for (other = 0U; other < change_count && !same; other++)
+			same = app_variable_same(walk, wide[other]);
+
+		/* Kept when none does. */
+		if (!same) {
 			variables[count] = walk;
 			count++;
 		}
+		length = wcslen(walk);
+		walk += length + 1U;
 	}
 
 	/* The changes that set a variable (a name alone removes it). */
 	for (index = 0U; index < change_count; index++) {
-		if (wcschr(wide[index], L'=') == NULL)
+		named = wcschr(wide[index], L'=');
+		if (named == NULL)
 			continue;
 		variables[count] = wide[index];
 		count++;
@@ -993,30 +1003,36 @@ app_environment(
 	/* In the order Windows asks for. */
 	qsort(variables, count, sizeof(*variables), app_variable_order);
 
-	/* The block: each variable with its NUL, and one more NUL. */
+	/* The block's room: each variable with its NUL, and one more NUL. */
 	units = 1U;
-	for (index = 0U; index < count; index++)
-		units += wcslen(variables[index]) + 1U;
-	*block = calloc(units + 1U, sizeof(**block));
-	if (*block != NULL) {
-		written = *block;
-		for (index = 0U; index < count; index++) {
-			length = wcslen(variables[index]);
-			memcpy(written, variables[index], (length + 1U) * sizeof(*written));
-			written += length + 1U;
-		}
-		*written = L'\0';
+	for (index = 0U; index < count; index++) {
+		length = wcslen(variables[index]);
+		units += length + 1U;
 	}
+	*block = calloc(units, sizeof(**block));
+	if (*block == NULL)
+		goto end;
 
-	/* The copies go. */
+	/* The variables, one after another. */
+	written = *block;
+	for (index = 0U; index < count; index++) {
+		length = wcslen(variables[index]);
+		memcpy(written, variables[index], (length + 1U) * sizeof(*written));
+		written += length + 1U;
+	}
+	written[0] = L'\0';
+	error = 0;
+
+end:
+	/* The copies go (the block stays the caller's). */
 	free(variables);
 	if (strings != NULL)
 		(void)FreeEnvironmentStringsW(strings);
-	for (index = 0U; index < change_count; index++)
+	for (index = 0U; wide != NULL && index < change_count; index++)
 		free(wide[index]);
 	free(wide);
-	if (*block == NULL)
-		return ENOMEM;
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the caller owns the block. */
 	return 0;
