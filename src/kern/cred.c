@@ -557,12 +557,15 @@ void
 vfs_note_mapped_store(
 	struct inode *inode)
 {
+	unsigned pending;
+
 	/* Ignores a page of no file, and a file that has no set-id bits to lose. */
 	if (inode == NULL || inode->i_type != INODE_REG)
 		return;
 
 	/* A store already pending needs no second mark. */
-	if (atomic_load_acquire(&inode->i_mapped_store) != 0)
+	pending = atomic_load_acquire(&inode->i_mapped_store);
+	if (pending != 0)
 		return;
 
 	/*
@@ -584,6 +587,7 @@ int
 vfs_clear_setid_on_writeback(
 	struct inode *inode)
 {
+	unsigned pending;
 	int error;
 
 	/* Rejects a missing inode. */
@@ -591,7 +595,8 @@ vfs_clear_setid_on_writeback(
 		return EINVAL;
 
 	/* Only content no mode change has accepted since a store loses the bits. */
-	if (atomic_load_acquire(&inode->i_mapped_store) == 0)
+	pending = atomic_load_acquire(&inode->i_mapped_store);
+	if (pending == 0)
 		return 0;
 
 	/* Clears the bits as for any content change. */
@@ -617,6 +622,7 @@ vfs_setid_accept_begin(
 	mode_t mode)
 {
 	unsigned expected;
+	int exchanged;
 
 	/* Only set-id bits on a regular file accept anything. */
 	if (inode == NULL || inode->i_type != INODE_REG ||
@@ -629,7 +635,8 @@ vfs_setid_accept_begin(
 	 * write-back.
 	 */
 	expected = 1U;
-	if (!atomic_compare_exchange(&inode->i_mapped_store, &expected, 0U))
+	exchanged = atomic_compare_exchange(&inode->i_mapped_store, &expected, 0U);
+	if (!exchanged)
 		return 0;
 
 	/* Succeeded: a pending store was accepted. */
