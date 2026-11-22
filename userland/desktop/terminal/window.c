@@ -576,10 +576,11 @@ window_press(
 	if ((window->key_modes & TERMINAL_KEYS_KEYPAD) != 0U && keypad)
 		text = 0;
 
-	/* The bytes, if they fit in what is left of the buffer. */
+	/* The bytes, if they fit in what is left of the buffer (a text that does not fit whole is left out). */
 	room = sizeof(window->input) - window->input_length;
 	length = 0U;
 	if (text) {
+		/* The text's bytes, whole or none. */
 		length = strlen(event->text);
 		if (length > room)
 			length = 0U;

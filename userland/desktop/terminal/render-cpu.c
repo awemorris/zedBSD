@@ -311,6 +311,7 @@ cpu_band_add(
 
 	/* A band it meets takes it in. */
 	for (index = 0U; index < cpu->band_count; index++) {
+		/* A band apart from it (bands that touch meet). */
 		band = &cpu->bands[index];
 		if (top > band->bottom || bottom < band->top)
 			continue;
@@ -387,6 +388,7 @@ cpu_band_merge(
 		joined = 0;
 		for (one = 0U; one < cpu->band_count && !joined; one++) {
 			for (other = one + 1U; other < cpu->band_count && !joined; other++) {
+				/* Two bands apart stay apart. */
 				first = &cpu->bands[one];
 				second = &cpu->bands[other];
 				if (second->top > first->bottom || second->bottom < first->top)
@@ -496,7 +498,7 @@ cpu_paint_quad(
 	if (right > (int)cpu->width)
 		right = (int)cpu->width;
 
-	/* Each pixel. */
+	/* Each row of pixels, and its row of the atlas (at the atlas's edge beyond it). */
 	for (y = upper; y < lower; y++) {
 		row = cpu->pixels + (size_t)y * cpu->width;
 		atlas_y = texel_y + (y - cpu_whole(quad[1]));
