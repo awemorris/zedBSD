@@ -97,6 +97,16 @@
 /* The room for "address port address port". */
 #define SESSION_CONNECTION_MAX	128U
 
+/*
+ * The refusal of a session beyond MaxSessions: OPEN_FAILURE with
+ * CONNECT_FAILED and these words, as OpenSSH's sshd answers (its
+ * server_input_channel_open and session_new, OpenSSH 10.0).
+ */
+#define SESSION_OVER_MAX_TEXT	"open failed"
+
+/* The channel type of a session (RFC 4254 6.1). */
+#define SESSION_CHANNEL_TYPE	"session"
+
 /* The one subsystem these programs run. */
 #define SESSION_SFTP		"sftp"
 
@@ -211,6 +221,7 @@ static void session_on_child(int signal_number);
 static int session_serve(struct session *session, int wake);
 static int session_message(struct session *session, const struct ssh_buf *payload);
 static int session_open(struct session *session, const struct ssh_buf *payload);
+static int session_refuse_over_max(struct session *session, const struct ssh_buf *payload, int *refused);
 static int session_data(struct session *session, const struct ssh_buf *payload);
 static int session_end(struct session *session, const struct ssh_buf *payload);
 static int session_request(struct session *session, const struct ssh_buf *payload);
@@ -791,7 +802,7 @@ session_message(
 
 /*
  * Answers a CHANNEL_OPEN.  A session channel beyond MaxSessions is
- * confirmed and closed at once (the table has room for SSH_CHANNEL_MAX;
+ * refused with OPEN_FAILURE (the table has room for SSH_CHANNEL_MAX;
  * MaxSessions may be lower).
  */
 static int
@@ -803,7 +814,24 @@ session_open(
 	struct session_link *link;
 	unsigned index;
 	unsigned active;
+	int refused;
 	int status;
+
+	/* Counts the sessions open before this one. */
+	active = 0;
+	for (index = 0; index < SSH_CHANNEL_MAX; index++) {
+		if (session->links[index].channel != NULL)
+			active++;
+	}
+
+	/* A session beyond MaxSessions is refused before it takes a slot. */
+	if (active >= session->child.config.max_sessions) {
+		status = session_refuse_over_max(session, payload, &refused);
+		if (status != 0)
+			return status;
+		if (refused)
+			return 0;
+	}
 
 	/* Lets the table answer: a session channel or a refusal. */
 	ssh_buf_reset(&session->message);
@@ -813,13 +841,6 @@ session_open(
 	status = session_send(session);
 	if (status != 0 || channel == NULL)
 		return status;
-
-	/* Counts the sessions open before this one. */
-	active = 0;
-	for (index = 0; index < SSH_CHANNEL_MAX; index++) {
-		if (session->links[index].channel != NULL)
-			active++;
-	}
 
 	/* Takes the link of the channel's slot. */
 	link = &session->links[channel->local_id];
@@ -834,17 +855,65 @@ session_open(
 	ssh_buf_init(&link->input, SSH_CHANNEL_WINDOW + SSH_CHANNEL_PACKET, 1);
 	channel->user = link;
 
-	/* A session beyond MaxSessions is closed at once. */
-	if (active >= session->child.config.max_sessions) {
-		link->finished = 1;
-		ssh_buf_reset(&session->message);
-		ssh_channel_put_close(channel, &session->message);
-		status = session_send(session);
-		if (status != 0)
-			return status;
-	}
-
 	/* Succeeded: the channel is open. */
+	return 0;
+}
+
+/*
+ * Refuses a session open beyond MaxSessions: a well-formed "session" open
+ * (a packet size of 1 or more, before no-more-sessions) is answered with
+ * OPEN_FAILURE CONNECT_FAILED and *refused is 1.  Any other open is left
+ * to ssh_channel_accept_open (*refused 0), which answers it as before.
+ * Returns 0 or the error of sending.
+ */
+static int
+session_refuse_over_max(
+	struct session *session,
+	const struct ssh_buf *payload,
+	int *refused)
+{
+	struct ssh_reader reader;
+	const uint8_t *type;
+	size_t type_size;
+	uint32_t sender;
+	uint32_t packet;
+	int different;
+	int status;
+
+	/* Reads the framing of the open: number, type, sender, window, packet size. */
+	*refused = 0;
+	ssh_reader_init(&reader, payload->data, payload->size);
+	(void)ssh_reader_get_u8(&reader);
+	ssh_reader_get_string(&reader, &type, &type_size);
+	sender = ssh_reader_get_u32(&reader);
+	(void)ssh_reader_get_u32(&reader);
+	packet = ssh_reader_get_u32(&reader);
+	status = ssh_reader_error(&reader);
+	if (status != 0)
+		return 0;
+
+	/* Only a session open the table would take is refused here. */
+	if (type_size != sizeof(SESSION_CHANNEL_TYPE) - 1U)
+		return 0;
+	different = memcmp(type, SESSION_CHANNEL_TYPE, type_size);
+	if (different != 0)
+		return 0;
+	if (packet < 1 || session->channels.no_more_sessions)
+		return 0;
+
+	/* Answers OPEN_FAILURE (RFC 4254 5.1) with CONNECT_FAILED, as OpenSSH's sshd does. */
+	ssh_buf_reset(&session->message);
+	ssh_buf_put_u8(&session->message, SSH_MSG_CHANNEL_OPEN_FAILURE);
+	ssh_buf_put_u32(&session->message, sender);
+	ssh_buf_put_u32(&session->message, SSH_OPEN_CONNECT_FAILED);
+	ssh_buf_put_cstring(&session->message, SESSION_OVER_MAX_TEXT);
+	ssh_buf_put_cstring(&session->message, "");
+	status = session_send(session);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the open is refused. */
+	*refused = 1;
 	return 0;
 }
 
