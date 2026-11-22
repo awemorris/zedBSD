@@ -154,6 +154,8 @@ mikuterm_wsl_run(
 		} else if (now >= deadline) {
 			error = ETIMEDOUT;
 		}
+
+		/* A wait given up ends the program. */
 		if (error != 0) {
 			(void)TerminateProcess(process.hProcess, 1U);
 			(void)WaitForSingleObject(process.hProcess, WSL_ROUND_MS);
@@ -248,6 +250,8 @@ wsl_start(
 		free(attributes);
 		return EIO;
 	}
+
+	/* The two handles in the list. */
 	handed[0] = write_end;
 	handed[1] = nothing;
 	made = UpdateProcThreadAttribute(attributes, 0U, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handed, sizeof(handed), NULL, NULL);
@@ -307,6 +311,8 @@ wsl_drain(
 			into = output->bytes + output->size;
 			wanted = (DWORD)(output->capacity - output->size);
 		}
+
+		/* No more than waits, so the read never waits. */
 		if (wanted > waiting)
 			wanted = waiting;
 		got = 0U;

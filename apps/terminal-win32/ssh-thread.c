@@ -347,6 +347,8 @@ thread_choose(
 			(void)snprintf(label, sizeof(label), "%s", choice->hosts.names[index]);
 		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
 	}
+
+	/* WSL and the settings after the hosts; with no host, how to type one. */
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
 	if (choice->hosts.count == 0U)
@@ -382,6 +384,8 @@ thread_choose(
 				(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
 				break;
 			}
+
+			/* Not a host: the screen says so and asks again. */
 			launch_say(&choice->screen, "That is not a host: type a name, or user@host:port.");
 			error = 0;
 			continue;
@@ -409,6 +413,8 @@ thread_choose(
 			error = 0;
 			continue;
 		}
+
+		/* A distribution, or the user giving up, or the tab closing. */
 		break;
 	}
 
@@ -417,6 +423,8 @@ thread_choose(
 		length = launch_leave(choice->text, sizeof(choice->text));
 		thread_say_bytes(session, choice->text, length);
 	}
+
+	/* The screen's state goes. */
 	free(choice);
 
 	/* Reports the user giving up, or the tab closing. */
@@ -467,8 +475,12 @@ thread_hosts_read(
 			if (error == 0)
 				(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
 		}
+
+		/* The settings read go. */
 		free(config);
 	}
+
+	/* The file's text goes. */
 	free(text);
 }
 
@@ -518,6 +530,8 @@ thread_launch(
 				room = 1;
 			}
 		}
+
+		/* The grid's size and the tab's close. */
 		columns = session->columns;
 		rows = session->rows;
 		closing = session->closing;
@@ -625,6 +639,8 @@ thread_wsl(
 			(void)snprintf(note, sizeof(note), "(localhost:%u)", choice->session->wsl_port);
 		(void)launch_add(screen, key, LAUNCH_DISTRIBUTION, choice->names[index], note);
 	}
+
+	/* The way back. */
 	(void)launch_add(screen, "b", LAUNCH_BACK, "Back", NULL);
 
 	/* The user's choice, until it is a distribution or back. */
@@ -651,10 +667,14 @@ thread_wsl(
 				if (same)
 					break;
 			}
+
+			/* A name WSL did not list is said; one it did is its row. */
 			if (index == count) {
 				launch_say(screen, "WSL has no such distribution.");
 				continue;
 			}
+
+			/* The row of the name. */
 			taken = (int)index;
 		}
 
@@ -699,10 +719,14 @@ thread_wsl_list(
 		launch_say(&choice->screen, "WSL is not installed: Windows has no wsl.exe.");
 		return EAGAIN;
 	}
+
+	/* A wsl.exe that did not end in time (it was ended). */
 	if (error == ETIMEDOUT) {
 		launch_say(&choice->screen, "wsl.exe did not answer in time.");
 		return EAGAIN;
 	}
+
+	/* A wsl.exe that could not be started. */
 	if (error != 0) {
 		launch_say(&choice->screen, "wsl.exe could not be run.");
 		return EAGAIN;
@@ -883,7 +907,10 @@ thread_user_name(
 			continue;
 		if (character >= '0' && character <= '9')
 			continue;
-		if (character == '.' || character == '_' || character == '-' || character == '$')
+		if (character == '.' ||
+		    character == '_' ||
+		    character == '-' ||
+		    character == '$')
 			continue;
 		return 0;
 	}

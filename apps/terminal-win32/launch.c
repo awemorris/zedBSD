@@ -57,6 +57,8 @@ static unsigned launch_cells(const char *text, size_t size);
 static unsigned launch_notice_lines(const char *notice);
 static unsigned launch_row_width(const struct launch_row *row);
 static void launch_draw_row(struct launch_writer *writer, const struct launch_screen *screen, unsigned index, unsigned width, unsigned budget);
+static void launch_trim(const char **start, const char **end);
+static int launch_blank(char character);
 static size_t launch_utf8(unsigned long codepoint, char *bytes);
 static void launch_text_add(char *text, size_t text_size, size_t *length, const char *bytes, size_t size);
 
@@ -172,6 +174,8 @@ launch_keys(
 				screen->sequence_length = 0U;
 				continue;
 			}
+
+			/* The Escape key; the byte after it is the caller's to give again. */
 			*used = index;
 			return LAUNCH_EVENT_ESCAPE;
 		}
@@ -186,6 +190,8 @@ launch_keys(
 				screen->sequence[screen->sequence_length] = (char)byte;
 				screen->sequence_length++;
 			}
+
+			/* The sequence's byte is taken. */
 			continue;
 		}
 
@@ -199,6 +205,8 @@ launch_keys(
 				*used = size;
 				return LAUNCH_EVENT_ESCAPE;
 			}
+
+			/* The sequence goes on in the next byte. */
 			break;
 		case '\r':
 		case '\n':
@@ -338,6 +346,8 @@ launch_draw(
 		if (*start == '\n')
 			start++;
 	}
+
+	/* The blank line after a notice. */
 	if (notice_lines != 0U)
 		launch_put(&writer, "\r\n");
 
@@ -381,6 +391,8 @@ launch_draw(
 		(void)launch_put_cells(&writer, screen->status, strlen(screen->status), budget);
 		launch_put(&writer, "\033[0m");
 	}
+
+	/* The message's line ends, empty or not. */
 	launch_put(&writer, "\r\n");
 
 	/* The prompt and the line's end that fits after it; the cursor shown after it. */
@@ -397,6 +409,8 @@ launch_draw(
 			offset++;
 		skip--;
 	}
+
+	/* The line's end that fits, and the cursor after it. */
 	launch_put_bytes(&writer, screen->line + offset, screen->line_length - offset);
 	launch_put(&writer, "\033[?25h");
 
@@ -462,7 +476,9 @@ launch_output_text(
 	/* UTF-16 when it starts with its byte order mark or most of its first units' high bytes are 0 (ASCII text). */
 	wide = 0;
 	index = 0U;
-	if (size >= 2U && bytes[0] == 0xffU && bytes[1] == 0xfeU) {
+	if (size >= 2U &&
+	    bytes[0] == 0xffU &&
+	    bytes[1] == 0xfeU) {
 		wide = 1;
 		index = 2U;
 	} else {
@@ -474,19 +490,26 @@ launch_output_text(
 			if (bytes[position + 1U] == 0U && bytes[position] != 0U)
 				zeros++;
 		}
+
+		/* Most units of ASCII text. */
 		if (pairs != 0U && zeros * 2U > pairs)
 			wide = 1;
 	}
 
 	/* UTF-8, as it is, without a byte order mark or NULs. */
 	if (!wide) {
-		if (size >= 3U && bytes[0] == 0xefU && bytes[1] == 0xbbU && bytes[2] == 0xbfU)
+		if (size >= 3U &&
+		    bytes[0] == 0xefU &&
+		    bytes[1] == 0xbbU &&
+		    bytes[2] == 0xbfU)
 			index = 3U;
 		for (; index < size; index++) {
 			/* Each byte but a NUL. */
 			if (bytes[index] != 0U)
 				launch_text_add(text, text_size, &length, (const char *)&bytes[index], 1U);
 		}
+
+		/* The UTF-8 text is read. */
 		return;
 	}
 
@@ -549,10 +572,7 @@ launch_names(
 			next++;
 
 		/* The name without the spaces and CR round it. */
-		while (start < end && (*start == ' ' || *start == '\t'))
-			start++;
-		while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
-			end--;
+		launch_trim(&start, &end);
 		length = (size_t)(end - start);
 
 		/* A name of the characters WSL allows, that fits. */
@@ -561,7 +581,9 @@ launch_names(
 			refused = 1;
 		for (index = 0U; index < length && !refused; index++) {
 			/* A space, a quote or a control character. */
-			if ((unsigned char)start[index] <= 0x20U || start[index] == '"' || start[index] == 0x7f)
+			if ((unsigned char)start[index] <= 0x20U ||
+			    start[index] == '"' ||
+			    start[index] == 0x7f)
 				refused = 1;
 		}
 
@@ -571,6 +593,8 @@ launch_names(
 			names[count][length] = '\0';
 			count++;
 		}
+
+		/* The next line. */
 		start = next;
 	}
 
@@ -600,10 +624,7 @@ launch_first_line(
 		end = strchr(start, '\n');
 		if (end == NULL)
 			end = start + strlen(start);
-		while (start < end && (*start == ' ' || *start == '\t' || *start == '\r'))
-			start++;
-		while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
-			end--;
+		launch_trim(&start, &end);
 
 		/* A line with text: it, cut to fit. */
 		if (end > start) {
@@ -667,6 +688,8 @@ launch_sequence(
 				screen->number = 0U;
 			}
 		}
+
+		/* The end of a paste: keys are keys again. */
 		same = strcmp(screen->sequence, LAUNCH_PASTE_END);
 		if (same == 0)
 			screen->pasting = 0;
@@ -869,6 +892,8 @@ launch_put_cells(
 			launch_put_bytes(writer, text + start, end - start);
 			used++;
 		}
+
+		/* The next character. */
 		start = end;
 	}
 
@@ -986,10 +1011,14 @@ launch_draw_row(
 	used += launch_put_cells(writer, row->key, strlen(row->key), room - used);
 	used += launch_put_cells(writer, "] ", 2U, room - used);
 	used += launch_put_cells(writer, row->label, strlen(row->label), room - used);
-	if (index == screen->chosen && width > used && width <= room) {
+	if (index == screen->chosen &&
+	    width > used &&
+	    width <= room) {
 		launch_pad(writer, width - used);
 		used = width;
 	}
+
+	/* The colours back after the chosen row. */
 	if (index == screen->chosen)
 		launch_put(writer, "\033[0m");
 
@@ -1001,6 +1030,50 @@ launch_draw_row(
 		(void)launch_put_cells(writer, row->note, strlen(row->note), room - used);
 		launch_put(writer, "\033[0m");
 	}
+}
+
+/* Moves the start of a text past its blanks and its end back before them (spaces, tabs, CRs). */
+static void
+launch_trim(
+	const char **start,
+	const char **end)
+{
+	int blank;
+
+	/* The blanks at the start. */
+	while (*start < *end) {
+		/* A blank is passed over. */
+		blank = launch_blank(**start);
+		if (!blank)
+			break;
+		(*start)++;
+	}
+
+	/* The blanks at the end. */
+	while (*end > *start) {
+		/* A blank is left out. */
+		blank = launch_blank((*end)[-1]);
+		if (!blank)
+			break;
+		(*end)--;
+	}
+}
+
+/* Tells whether a character is a blank round a name: a space, a tab or a CR (1), or not (0). */
+static int
+launch_blank(
+	char character)
+{
+	/* The three blanks. */
+	if (character == ' ')
+		return 1;
+	if (character == '\t')
+		return 1;
+	if (character == '\r')
+		return 1;
+
+	/* Anything else is text. */
+	return 0;
 }
 
 /* Writes a character's UTF-8 bytes (one to four); returns how many. */
