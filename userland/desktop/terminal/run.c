@@ -402,6 +402,9 @@ run_start(
 	if (status != 0)
 		printf("ZTERM FONT fallback=none error=%d\n", status);
 
+	/* The colour emoji font for what neither has, read when a character first needs it. */
+	terminal_font_emoji(&run_font, options->emoji);
+
 	/* The window, sized for the grid asked for. */
 	run->operation = "terminal_window_open";
 	status = terminal_window_open(&run_window,

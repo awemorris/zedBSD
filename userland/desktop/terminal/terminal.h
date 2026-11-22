@@ -393,6 +393,19 @@ struct terminal_font {
 	size_t fallback_size;
 	struct truetype_face *fallback_face;
 
+	/*
+	 * The colour emoji font, which draws in its own colours the characters
+	 * neither the face nor the fallback has: its path (the caller's, NULL
+	 * for none), whether it has been tried (it is opened the first time
+	 * such a character is drawn, and a file that cannot be opened is not
+	 * tried again), its file, kept in memory, and its face.
+	 */
+	const char *emoji_path;
+	int emoji_tried;
+	void *emoji_data;
+	size_t emoji_size;
+	struct truetype_face *emoji_face;
+
 	/* The size glyphs are drawn at, in pixels. */
 	unsigned pixels_size;
 
@@ -437,9 +450,21 @@ struct terminal_font {
 	uint32_t *keys;
 	uint32_t *values;
 	unsigned table_size;
+
+	/*
+	 * Which slots hold a colour glyph, one byte a slot (nonzero for
+	 * colour): such a slot holds the glyph's premultiplied colours rather
+	 * than a coverage, and the quads that show it say so to the drawing.
+	 */
+	unsigned char *colours;
 };
 
-/* The floats of one vertex (position and atlas place, then the two colours), and the vertices of one quad. */
+/*
+ * The floats of one vertex (position and atlas place, then the two
+ * colours), and the vertices of one quad.  The foreground's alpha is how
+ * the atlas is read: 1 for a coverage between the two colours, 0 for a
+ * colour glyph's own premultiplied colours over the background.
+ */
 #define TERMINAL_VERTEX_FLOATS	12U
 #define TERMINAL_QUAD_VERTICES	6U
 
@@ -717,6 +742,8 @@ int terminal_font_open(struct terminal_font *font, const char *path, const char 
 int terminal_font_attach(struct terminal_font *font, unsigned char *pixels, size_t row_pitch, unsigned width, unsigned height);
 int terminal_font_resize(struct terminal_font *font, unsigned pixels);
 int terminal_font_fallback(struct terminal_font *font, const char *path);
+void terminal_font_emoji(struct terminal_font *font, const char *path);
+int terminal_font_colour(const struct terminal_font *font, unsigned slot);
 unsigned terminal_font_slot(struct terminal_font *font, uint32_t codepoint);
 unsigned terminal_font_wide_slot(struct terminal_font *font, uint32_t codepoint);
 void terminal_font_close(struct terminal_font *font);
