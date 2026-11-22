@@ -131,6 +131,7 @@ terminal_key_make(
 	struct ssh_key key;
 	struct ssh_buf file;
 	struct ssh_buf public_line;
+	size_t passphrase_length;
 	int exists;
 	int error;
 
@@ -146,7 +147,8 @@ terminal_key_make(
 	}
 
 	/* A passphrase a reader of the file takes. */
-	if (strlen(passphrase) > SSH_KEY_PASSPHRASE_MAX) {
+	passphrase_length = strlen(passphrase);
+	if (passphrase_length > SSH_KEY_PASSPHRASE_MAX) {
 		key_why(why, why_size, "The passphrase is too long.");
 		return EINVAL;
 	}

@@ -227,6 +227,8 @@ terminal_build_frame(
 				continue;
 			}
 		}
+
+		/* Where this row's vertices start. */
 		row_start = vertex;
 
 		/* The cells the search's matches cover on this line. */
@@ -438,6 +440,8 @@ build_rows_usable(
 		for (index = 0U; index < TERMINAL_RENDER_ROWS; index++)
 			build->rows[index].valid = 0;
 	}
+
+	/* Reports whether the rows could be kept. */
 	return same;
 }
 
@@ -536,6 +540,8 @@ build_range_add(
 		build->store(build->store_data, first, count);
 		return;
 	}
+
+	/* The range, one more in the list. */
 	build->ranges[build->range_count].first = first;
 	build->ranges[build->range_count].count = count;
 	build->range_count++;

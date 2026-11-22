@@ -290,6 +290,8 @@ thread_choose(
 		(void)snprintf(line, sizeof(line), "  %2u  %s\r\n", index + 1U, hosts->names[index]);
 		session_say(session, line);
 	}
+
+	/* And the settings, X. */
 	session_say(session, "   X  Settings (hosts, keys, fonts)\r\n");
 
 	/* The answer, until it is not empty. */
@@ -299,6 +301,8 @@ thread_choose(
 			free(hosts);
 			return error;
 		}
+
+		/* An empty answer asks again. */
 		if (answer[0] == '\0')
 			continue;
 
@@ -572,10 +576,14 @@ thread_settings(
 		error = ssh_config_parse(&link->config, text, size, link->target->host, error_text);
 		free(text);
 	}
+
+	/* A file that cannot be read gives the reason. */
 	if (error != 0) {
 		(void)snprintf(link->reason, sizeof(link->reason), "ssh\\config: %s", error_text);
 		return THREAD_FAILED;
 	}
+
+	/* What the file did not say takes the defaults. */
 	ssh_config_defaults(&link->config);
 
 	/* What was typed wins over the file. */
@@ -1078,6 +1086,8 @@ thread_host_ask(
 	} else {
 		(void)snprintf(line, sizeof(line), "The authenticity of host '%s (%s)' can't be established.\r\n", link->known_name, address);
 	}
+
+	/* Tells whose key it is, then its fingerprint. */
 	session_say(link->session, line);
 	(void)snprintf(line, sizeof(line), "ED25519 key fingerprint is %s.\r\n", link->fingerprint);
 	session_say(link->session, line);
@@ -1172,6 +1182,8 @@ thread_host_revoked(
 	} else {
 		(void)snprintf(line, sizeof(line), "The ED25519 host key for %s is marked as revoked.\r\n", link->known_name);
 	}
+
+	/* What that may mean. */
 	session_say(link->session, line);
 	session_say(link->session, "Someone may be using a stolen key to pretend to be this host.\r\n");
 }
@@ -1349,6 +1361,8 @@ thread_known_hosts_write(
 
 	kl_mutex_unlock(&known_hosts_lock);
 
+
+	/* The line is written or not; its buffer goes. */
 	ssh_buf_free(&line);
 
 	/* A file that did not take the line. */
@@ -1570,6 +1584,8 @@ thread_feed(
 			link->received_start = link->received_end;
 			break;
 		}
+
+		/* What the engine took is gone from the buffer; none taken waits for more. */
 		link->received_start += taken;
 		if (taken == 0U)
 			break;
@@ -1804,6 +1820,8 @@ thread_passphrase(
 		(void)ssh_engine_passphrase(link->engine, identity, NULL);
 		return;
 	}
+
+	/* The key's file. */
 	path = link->identity_paths[identity];
 
 	/* The passphrase kept for the Windows session, the first time the key is asked for in this attempt. */

@@ -312,6 +312,8 @@ mikuterm_conf_set(
 	const char *start;
 	const char *end;
 	const char *next;
+	const char *space;
+	const char *tab;
 	char *made;
 	size_t line_length;
 	size_t at;
@@ -320,8 +322,10 @@ mikuterm_conf_set(
 	int quoted;
 
 	/* The new line, "Keyword value", quoted when the value holds a space or a tab. */
+	space = strchr(value, ' ');
+	tab = strchr(value, '\t');
 	quoted = 0;
-	if (strchr(value, ' ') != NULL || strchr(value, '\t') != NULL)
+	if (space != NULL || tab != NULL)
 		quoted = 1;
 	if (quoted)
 		(void)snprintf(line, sizeof(line), "%s \"%s\"", keyword, value);
@@ -338,6 +342,7 @@ mikuterm_conf_set(
 	start = text;
 	end = text;
 	while (start < text + size) {
+		/* One line, its CR LF end set apart. */
 		next = memchr(start, '\n', (size_t)(text + size - start));
 		if (next == NULL)
 			next = text + size;
@@ -345,11 +350,15 @@ mikuterm_conf_set(
 		if (end > start && end[-1] == '\r')
 			end--;
 		status = conf_split(start, (size_t)(end - start), name, sizeof(name), copy, sizeof(copy), &found_value, &why);
+
+		/* A line of the keyword ends the search. */
 		if (status == 0 && name[0] != '\0') {
 			differs = _stricmp(name, keyword);
 			if (differs == 0)
 				break;
 		}
+
+		/* The next line. */
 		start = next;
 		if (start < text + size)
 			start++;
@@ -380,6 +389,8 @@ mikuterm_conf_set(
 			made[at++] = '\r';
 			made[at++] = '\n';
 		}
+
+		/* The new line, ended with CR LF. */
 		memcpy(made + at, line, line_length);
 		at += line_length;
 		made[at++] = '\r';
@@ -515,6 +526,8 @@ conf_split(
 		*why = "the line is too long";
 		return EINVAL;
 	}
+
+	/* A copy to cut into words. */
 	memcpy(text, line, length);
 	text[length] = '\0';
 
@@ -535,10 +548,14 @@ conf_split(
 			*why = "unknown keyword";
 			return EINVAL;
 		}
+
+		/* One more of the keyword's characters. */
 		keyword[keyword_length] = text[index];
 		keyword_length++;
 		index++;
 	}
+
+	/* The keyword ends as a C string. */
 	keyword[keyword_length] = '\0';
 
 	/* The spaces and the one '=' between the keyword and the value. */
@@ -558,6 +575,8 @@ conf_split(
 			*why = "a quote is not closed";
 			return EINVAL;
 		}
+
+		/* The value ends at the closing quote. */
 		*end = '\0';
 	} else {
 		end = start + strlen(start);
@@ -625,6 +644,7 @@ conf_value(
 			conf->font_size = number;
 			conf->font_size_given = 1;
 		}
+
 		break;
 	case CONF_COLUMNS_KEY:
 		status = conf_number(value, 1U, TERMINAL_MAX_COLUMNS, &number);
@@ -645,6 +665,7 @@ conf_value(
 			conf->theme = number;
 			conf->theme_given = 1;
 		}
+
 		break;
 	case CONF_AMBIGUOUS:
 		status = conf_yes(value, &yes);
@@ -653,6 +674,7 @@ conf_value(
 			conf->ambiguous_wide = yes;
 			conf->ambiguous_given = 1;
 		}
+
 		break;
 	case CONF_TERM_KEY:
 		status = conf_copy(conf->term, sizeof(conf->term), value);
@@ -669,6 +691,7 @@ conf_value(
 			conf->copy_on_select = yes;
 			conf->copy_given = 1;
 		}
+
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

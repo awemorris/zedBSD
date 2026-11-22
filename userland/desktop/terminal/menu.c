@@ -201,6 +201,8 @@ terminal_menu_open(
 			menu_shown_items[menu_shown_count].modifiers = KL_MENU_ALT;
 			menu_shown_items[menu_shown_count].keysym = MENU_KEY_RETURN;
 		}
+
+		/* One more item shown. */
 		menu_shown_count++;
 	}
 

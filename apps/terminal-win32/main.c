@@ -312,6 +312,8 @@ main_ended(
 	} else {
 		printf("ZTERM FAILED run=mikuterm operation=%s result=%d errno=%d\n", result->operation, result->result, result->error);
 	}
+
+	/* The line is out before the program ends. */
 	fflush(stdout);
 }
 

@@ -713,6 +713,8 @@ ssh_engine_passphrase(
 			event->identity = engine->key_identity;
 			event->tries = engine->passphrase_tries;
 		}
+
+		/* The caller hears the refusal; the question is out again. */
 		return EACCES;
 	}
 
@@ -1141,6 +1143,8 @@ engine_copy_options(
 		if (error != 0)
 			return error;
 	}
+
+	/* Every identity is kept. */
 	engine->identity_count = options->identity_count;
 
 	/* The session and its terminal. */
@@ -1161,6 +1165,8 @@ engine_copy_options(
 	} else {
 		error = ssh_engine_put_default_modes(&engine->modes);
 	}
+
+	/* A buffer that could not grow is told. */
 	if (error != 0)
 		return error;
 
@@ -1388,6 +1394,8 @@ engine_end(
 		event->tries = engine->password_tries;
 		engine_copy_text(event->reason, sizeof(event->reason), reason);
 	}
+
+	/* The closing event has been queued, or tried when the queue was full. */
 	engine->closed_queued = 1;
 }
 
@@ -1640,6 +1648,8 @@ engine_take_auth(
 				event->identity = engine->key_identity;
 				event->tries = engine->passphrase_tries;
 			}
+
+			/* Succeeded: the question is out, and the signature waits for its answer. */
 			return 0;
 		}
 

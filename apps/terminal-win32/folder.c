@@ -241,6 +241,8 @@ mikuterm_file_read(
 		CloseHandle(file);
 		return EIO;
 	}
+
+	/* A file larger than the caller takes is refused. */
 	if (length.QuadPart < 0 || (unsigned long long)length.QuadPart > (unsigned long long)limit) {
 		CloseHandle(file);
 		return EFBIG;
@@ -262,10 +264,14 @@ mikuterm_file_read(
 			free(bytes);
 			return EIO;
 		}
+
+		/* The end of the file ends the reading. */
 		if (got == 0U)
 			break;
 		have += got;
 	}
+
+	/* The file closes once it is read. */
 	CloseHandle(file);
 
 	/* Succeeded: the text, NUL-terminated. */
@@ -303,6 +309,8 @@ mikuterm_file_append(
 		if (error == 0)
 			error = folder_write(wide, FILE_APPEND_DATA, OPEN_ALWAYS, bytes, size);
 	}
+
+	/* The path goes; a failure is told. */
 	free(wide);
 	if (error != 0)
 		return error;
@@ -404,6 +412,8 @@ mikuterm_file_create(
 			free(wide);
 			return error;
 		}
+
+		/* The new file's protection. */
 		memset(&attributes, 0, sizeof(attributes));
 		attributes.nLength = sizeof(attributes);
 		attributes.lpSecurityDescriptor = descriptor;
@@ -529,6 +539,8 @@ folder_private(
 		CloseHandle(token);
 		return ENOMEM;
 	}
+
+	/* The user's SID, read into it. */
 	done = GetTokenInformation(token, TokenUser, user, needed, &needed);
 	CloseHandle(token);
 	if (!done) {
@@ -603,6 +615,8 @@ folder_write(
 		CloseHandle(file);
 		return EIO;
 	}
+
+	/* The bytes are on the disk before the file closes. */
 	done = FlushFileBuffers(file);
 	CloseHandle(file);
 	if (!done)
@@ -661,6 +675,8 @@ folder_parent_make(
 		free(parent);
 		return ENOENT;
 	}
+
+	/* The path cut at its last separator. */
 	*separator = L'\0';
 
 	/* The directory; one already there is as good. */

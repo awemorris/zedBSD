@@ -830,6 +830,8 @@ font_draw_colour(
 			row[origin_x + (unsigned)target_x] = image.pixels[(size_t)y * (size_t)image.width + (size_t)x];
 		}
 	}
+
+	/* The glyph's picture is in the atlas now. */
 	free(image.pixels);
 
 	/* The frame's slots hold colours: the quads that show them say so. */

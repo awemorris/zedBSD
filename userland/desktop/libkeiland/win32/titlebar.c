@@ -1875,6 +1875,8 @@ titlebar_tabs_layout(
 		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U)
 			strip.active = index;
 	}
+
+	/* The new-tab button when the window asked for one. */
 	strip.new_button = 0;
 	if ((window->tab_options & KL_TABS_NEW_BUTTON) != 0U)
 		strip.new_button = 1;
@@ -1890,6 +1892,8 @@ titlebar_tabs_layout(
 		window->control_places[0] = window->menu_place;
 		window->control_place_count = 1U;
 	}
+
+	/* The window's controls, after the menu. */
 	place = &window->control_places[window->control_place_count];
 	place->x = left;
 	place->y = 0;

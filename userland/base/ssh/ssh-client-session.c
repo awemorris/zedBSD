@@ -191,6 +191,8 @@ ssh_client_run(
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s", strerror(ENOMEM));
 		return ENOMEM;
 	}
+
+	/* The session's starting state from the arguments. */
 	client_session_setup(session, client, args);
 
 	/* Opens the engine for the login and the session. */
@@ -332,6 +334,8 @@ client_session_setup(
 		session->want_session = 0;
 		session->input_end = 1;
 	}
+
+	/* -n alone reads no input either. */
 	if (args->null_stdin)
 		session->input_end = 1;
 
@@ -411,6 +415,8 @@ client_open_engine(
 			return error;
 		}
 	}
+
+	/* The command to run instead of a shell. */
 	options.command = command;
 	options.command_size = size;
 

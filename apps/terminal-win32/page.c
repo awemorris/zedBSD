@@ -483,6 +483,8 @@ page_comment(
 		(void)snprintf(comment, size, "mikuterm");
 		return;
 	}
+
+	/* The user at the computer, as ssh-keygen's comment. */
 	(void)snprintf(comment, size, "%s@%s", user, computer);
 }
 

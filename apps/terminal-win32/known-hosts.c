@@ -195,6 +195,7 @@ mikuterm_known_hosts_scan(
 				scan->revoked_line = number;
 				(void)snprintf(scan->revoked_path, sizeof(scan->revoked_path), "%s", path);
 			}
+
 			continue;
 		}
 
@@ -208,6 +209,7 @@ mikuterm_known_hosts_scan(
 				scan->changed_line = number;
 				(void)snprintf(scan->changed_path, sizeof(scan->changed_path), "%s", path);
 			}
+
 			continue;
 		}
 
@@ -372,6 +374,8 @@ known_other_add(
 		(void)snprintf(other->names, sizeof(other->names), "%s", KNOWN_HASHED_NAME);
 		return;
 	}
+
+	/* The names, cut at the room for them. */
 	length = parsed->names_size;
 	if (length >= sizeof(other->names))
 		length = sizeof(other->names) - 1U;

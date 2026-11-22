@@ -1173,6 +1173,8 @@ private_put_file(
 		ssh_buf_put_cstring(&body, "none");
 		ssh_buf_put_cstring(&body, "none");
 	}
+
+	/* The KDF's options (empty without a passphrase), and the count of keys, one. */
 	ssh_buf_put_string(&body, options.data, options.size);
 	ssh_buf_put_u32(&body, 1);
 

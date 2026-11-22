@@ -741,6 +741,8 @@ line_argument(
 			if (error != 0)
 				return error;
 		}
+
+		/* Succeeded: the argument is on the line. */
 		return 0;
 	}
 
