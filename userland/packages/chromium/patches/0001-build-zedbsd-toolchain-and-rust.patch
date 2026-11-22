@@ -265,7 +265,7 @@
  #include <stddef.h>
 --- a/build/rust/gni_impl/libclang_args.gni
 +++ b/build/rust/gni_impl/libclang_args.gni
-@@ -36,10 +36,24 @@
+@@ -36,10 +36,30 @@
  # says the wrong thing. We point it to our clang's resource dir which will
  # make it behave consistently with our other command line flags and allows
  # system headers to be found.
@@ -273,22 +273,28 @@
 -  "-resource-dir",
 -  rebase_path(clang_base_path + "/lib/clang/" + clang_version, root_build_dir),
 -]
-+if (is_zedbsd) {
-+  # The libclang of the Rust toolchain is Chromium's own clang, which does not
-+  # know zedBSD: it takes the resource dir of that clang, and is told the
-+  # macros that zedBSD's clang defines for the target.
++#
++# libclang is that of Chromium's own clang.  Every toolchain of a zedBSD build
++# compiles with zedBSD's clang, so libclang takes the resource dir of its own
++# clang there; and as it does not know zedBSD, it is told the macros that
++# zedBSD's clang defines for the target.
++if (target_os == "zedbsd") {
 +  _libclang_extra_args += [
 +    "-resource-dir",
 +    rebase_path(default_clang_base_path + "/lib/clang/" + clang_version,
 +                root_build_dir),
-+    "-D__ZEDBSD__=1",
-+    "-D__unix__=1",
 +  ]
 +} else {
 +  _libclang_extra_args += [
 +    "-resource-dir",
 +    rebase_path(clang_base_path + "/lib/clang/" + clang_version,
 +                root_build_dir),
++  ]
++}
++if (is_zedbsd) {
++  _libclang_extra_args += [
++    "-D__ZEDBSD__=1",
++    "-D__unix__=1",
 +  ]
 +}
  

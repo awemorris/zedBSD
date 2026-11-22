@@ -126,6 +126,18 @@
  #define RENDERDOC_CC
  #elif defined(__APPLE__)
  #define RENDERDOC_CC
+--- a/third_party/ffmpeg/ffmpeg_options.gni
++++ b/third_party/ffmpeg/ffmpeg_options.gni
+@@ -63,7 +63,8 @@
+ os_config = current_os
+ if ((is_linux || is_chromeos) && is_msan) {
+   os_config = "linux-noasm"
+-} else if (is_chromeos || is_fuchsia) {
++} else if (is_chromeos || is_fuchsia || is_zedbsd) {
++  # The configuration made for Linux, which Fuchsia shares, serves zedBSD.
+   os_config = "linux"
+ } else if (is_win && !is_clang) {
+   os_config = "win-msvc"
 --- a/third_party/libxml/BUILD.gn
 +++ b/third_party/libxml/BUILD.gn
 @@ -4,7 +4,7 @@

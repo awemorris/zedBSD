@@ -11,7 +11,19 @@
    }
 --- a/content/shell/BUILD.gn
 +++ b/content/shell/BUILD.gn
-@@ -1163,7 +1163,7 @@
+@@ -58,8 +58,9 @@
+   }
+ }
+ 
+-# Web test support not built on android, but is everywhere else.
+-support_web_tests = !is_android
++# Web test support not built on android, but is everywhere else.  Nor on
++# zedBSD: its test fonts are not in the release archive the build starts from.
++support_web_tests = !is_android && !is_zedbsd
+ 
+ source_set("android_shell_descriptors") {
+   testonly = true
+@@ -1163,7 +1164,7 @@
    if (is_win) {
      data_deps += [ "//build/win:copy_cdb_to_output" ]
    }
@@ -65,4 +77,36 @@
 +#elif !BUILDFLAG(IS_ZEDBSD)
  #include <malloc.h>
  #endif
+ 
+--- a/v8/BUILD.gn
++++ b/v8/BUILD.gn
+@@ -2537,6 +2537,13 @@
+   # The clang toolchain's resource dir contains builting headers
+   # include/{stddef.h,stdarg.h,...}.
+   _metagen_clang_resource_dir = "$clang_base_path/lib/clang/$clang_version"
++  if (target_os == "zedbsd") {
++    # Every toolchain of a zedBSD build compiles with zedBSD's clang, which is
++    # not the one libclang comes from: the resource dir is that of Chromium's
++    # own clang.
++    _metagen_clang_resource_dir =
++        "$default_clang_base_path/lib/clang/$clang_version"
++  }
+ 
+   # The headers are parsed with v8_base_without_compiler's flags.
+   _metagen_flags_target = ":v8_base_without_compiler"
+@@ -2690,6 +2697,15 @@
+         args += [ "--extra-flag=$flag" ]
+       }
+     }
++
++    if (is_zedbsd) {
++      # libclang does not know zedBSD: it is told the macros that zedBSD's
++      # clang defines for the target.
++      args += [
++        "--extra-flag=-D__ZEDBSD__=1",
++        "--extra-flag=-D__unix__=1",
++      ]
++    }
+   }
+ }
  
