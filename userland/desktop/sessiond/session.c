@@ -70,6 +70,10 @@
  *                    user); SLEPT woke=…, NOSLEEP …, ERROR busy or ERROR
  *                    once the sleep is done
  *   POWER cancel     stops a sleep before the kernel is asked; no answer
+ *   ADMIN ...        an admin action: a program a definition names, run
+ *                    as root once the person allows it in the compositor's
+ *                    dialog (admin.c); the lock screen ends what was
+ *                    allowed
  */
 
 #include "auth.h"
@@ -233,6 +237,9 @@ sessiond_session_run(
 	daemon->session_ready = session_handoff(daemon, control);
 	sessiond_exchange_init(&exchange, control, account, NULL);
 
+	/* The admin actions of this session, nothing kept from one before. */
+	sessiond_admin_begin(control, account, daemon->session_locked);
+
 	/*
 	 * Waits for it to end, answering it, and giving a device that comes to
 	 * the user.  The wait is a second at most, for the session's end, which
@@ -318,6 +325,7 @@ sessiond_session_run(
 			/* A session that closed its end says nothing more, and its attempt ends. */
 			if ((entry[0].revents & (POLLHUP | POLLERR)) != 0 && (entry[0].revents & POLLIN) == 0) {
 				sessiond_exchange_stop(&exchange);
+				sessiond_admin_end();
 				sessiond_sleep_forget(control);
 				(void)close(control);
 				control = -1;
@@ -337,9 +345,11 @@ sessiond_session_run(
 		if (ready > 0 && seat_slot < entries && entry[seat_slot].revents != 0)
 			plugged = sessiond_seat_events_collect();
 
-		/* An attempt under way moves on. */
-		if (control >= 0)
+		/* An attempt under way moves on, and an admin request nobody answered runs out. */
+		if (control >= 0) {
 			sessiond_exchange_tick(&exchange);
+			sessiond_admin_tick();
+		}
 
 		/* A device that came is the user's too, until the session hands the seat to the greeter. */
 		if (plugged && !leaving)
@@ -348,6 +358,7 @@ sessiond_session_run(
 
 	/* The session has ended: what is left of it goes, and the record says so. */
 	sessiond_exchange_stop(&exchange);
+	sessiond_admin_end();
 	sessiond_sleep_forget(control);
 	if (control >= 0)
 		(void)close(control);
@@ -442,20 +453,42 @@ session_request(
 	struct sessiond_exchange *exchange)
 {
 	char line[SESSIOND_LINE_MAX];
+	struct sessiond_fds fds;
 	int got;
+	int cut;
 	int match;
 
-	/* The line (a short wait: it came whole or nearly). */
-	got = sessiond_read_line(control, line, sizeof(line), 500);
-	if (got <= 0)
+	/* The line and what came with it (a short wait: it came whole or nearly). */
+	got = sessiond_read_request(control, line, sizeof(line), 500, &fds, &cut);
+	if (got <= 0) {
+		sessiond_fds_close(&fds);
 		return 0;
+	}
+
+	/* The secret line after an ADMIN PASSWORD, erased unread. */
+	match = sessiond_admin_secret(line);
+	if (match) {
+		sessiond_fds_close(&fds);
+		return 0;
+	}
 
 	/* The lock screen's and Settings' requests, or a secret's line after one (erased with the line). */
 	match = sessiond_exchange_line(exchange, line);
 	if (match) {
 		memset(line, 0, sizeof(line));
+		sessiond_fds_close(&fds);
 		return 0;
 	}
+
+	/* An admin action, which alone may take descriptors. */
+	match = strncmp(line, "ADMIN ", 6);
+	if (match == 0) {
+		sessiond_admin_request(line + 6, cut, &fds);
+		return 0;
+	}
+
+	/* No other request carries descriptors. */
+	sessiond_fds_close(&fds);
 
 	/* A system service of the Sharing page. */
 	match = strncmp(line, "SERVICE ", 8);
@@ -475,12 +508,14 @@ session_request(
 	match = strcmp(line, "LOCKED");
 	if (match == 0) {
 		daemon->session_locked = 1;
+		sessiond_admin_lock(1);
 		sessiond_log("SESSIOND SESSION locked user=%s", account->passwd.pw_name);
 		return 0;
 	}
 	match = strcmp(line, "UNLOCKED");
 	if (match == 0) {
 		daemon->session_locked = 0;
+		sessiond_admin_lock(0);
 		sessiond_log("SESSIOND SESSION unlocked user=%s", account->passwd.pw_name);
 		return 0;
 	}

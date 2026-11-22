@@ -21,6 +21,8 @@
  *   POWER suspend          sleeps it (sleep.c): SLEPT woke=…,
  *                          NOSLEEP …, ERROR busy or ERROR when it is done
  *   POWER cancel           stops a sleep before the kernel is asked; no answer
+ *   ADMIN ...              refused: the login screen runs no admin action
+ *                          (admin.c)
  *
  * Anything else is answered ERROR.  The secret is erased as soon as it is
  * written to passkey, and never written anywhere else.  sessiond's loop
@@ -631,6 +633,8 @@ greeter_request(
 	struct greeter *greeter,
 	char *line)
 {
+	char reply[SESSIOND_LINE_MAX];
+	int answered;
 	int match;
 
 	/* The greeter is about to take the display: nothing holds it while no session runs; it has started. */
@@ -654,6 +658,15 @@ greeter_request(
 	match = strncmp(line, "POWER ", 6);
 	if (match == 0) {
 		greeter_power(greeter, line + 6);
+		return;
+	}
+
+	/* The login screen runs no admin action: refused by the request's number. */
+	match = strncmp(line, "ADMIN ", 6);
+	if (match == 0) {
+		answered = sessiond_admin_greeter_reply(line + 6, reply, sizeof(reply));
+		if (answered)
+			greeter_reply(greeter, reply);
 		return;
 	}
 

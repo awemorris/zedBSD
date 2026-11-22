@@ -41,6 +41,14 @@
  *                           gone (a session that crashes starts again with
  *                           it then)
  *   RELEASED                (none): the display has been given back
+ *   ADMIN ASK id client locale streams action [word...]
+ *                           ADMIN TITLE, ADMIN MESSAGE and ADMIN SHOW (the
+ *                           dialog); ADMIN CONNECT; ADMIN STARTED id bits
+ *                           with the program's streams (SCM_RIGHTS);
+ *                           ADMIN REFUSED id reason; ADMIN FAILED id errno
+ *   ADMIN ALLOW id          (with the connection lent to a program of the
+ *                           desktop): ADMIN STARTED; ADMIN FAILED
+ *   ADMIN CANCEL id, ADMIN FORGET client   (none)
  *
  * READY is said just before the compositor first takes the display, when
  * everything slow is done, and GO is awaited: sessiond sends it once the
@@ -60,6 +68,14 @@
  * a line of its own after its request (ws172-p002), and TOUCH lines (a
  * security key waits to be touched, ws172-p003) answer nothing yet: the
  * host hears session_answer(KL_BACKEND_SESSION_TOUCH, 0) for each.
+ *
+ * The admin requests' answers all start with ADMIN and name their
+ * request, so they answer no other request, and the other requests do not
+ * wait for them: one admin answer is awaited at a time, beside the one of
+ * the other requests, for KL_BACKEND_ADMIN_WAIT_MS at most.  The
+ * descriptors the manager sends with a line (a program's streams) are read
+ * with recvmsg and kept in their order until the STARTED line that names
+ * them; any other is closed.
  */
 
 #include "userland/desktop/libkeiland-backend/backend-private.h"
@@ -70,6 +86,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -80,6 +98,13 @@
 /* The longest request the compositor sends (ENROLL with its password's and PIN's lines), and the longest secret. */
 #define SESSION_REQUEST_MAX 1024U
 #define SESSION_SECRET_MAX 256U
+
+/* An admin request's bounds: an action's name, one word, the words joined, how many words, and a locale (without their NULs). */
+#define SESSION_ADMIN_ACTION_MAX 32U
+#define SESSION_ADMIN_WORD_MAX 64U
+#define SESSION_ADMIN_WORDS_MAX 256U
+#define SESSION_ADMIN_WORD_COUNT 8U
+#define SESSION_ADMIN_LOCALE_MAX 16U
 
 /* What a line of sessiond's answers (but QUIT and TOUCH). */
 enum session_answer {
@@ -130,6 +155,25 @@ static void session_answered(struct kl_backend *backend, const char *line);
 static void session_slept(struct kl_backend *backend, const char *line);
 static void session_end(struct kl_backend *backend, unsigned reason);
 static uint64_t session_milliseconds(void);
+static ssize_t session_receive(struct kl_backend *backend, int descriptor);
+static void session_hold(struct kl_backend *backend, struct msghdr *header);
+static int session_admin_usable(const struct kl_backend *backend);
+static int session_admin_action_valid(const char *action);
+static int session_admin_words_valid(const char *words);
+static int session_admin_word_byte(char byte);
+static int session_admin_locale_valid(const char *locale);
+static int session_admin_send(struct kl_backend *backend, const char *line, int connection);
+static void session_admin_line(struct kl_backend *backend, const char *line);
+static const char *session_admin_verb(const char *text, const char *verb);
+static int session_admin_number(const char *text, unsigned base, unsigned long limit, unsigned long *value, const char **rest);
+static int session_admin_id(const char *text, uint32_t *id, const char **rest);
+static int session_admin_show(const char *rest, struct kl_backend_admin_answer *answer);
+static int session_admin_refused(const char *rest, struct kl_backend_admin_answer *answer);
+static void session_admin_take(struct kl_backend *backend, struct kl_backend_admin_answer *answer);
+static void session_admin_give(struct kl_backend *backend, struct kl_backend_admin_answer *answer);
+static void session_admin_late(struct kl_backend *backend, struct kl_backend_admin_answer *answer);
+static void session_admin_fail(struct kl_backend *backend, int error);
+static void session_admin_drop(struct kl_backend *backend);
 
 /*
  * Says READY and waits for GO, before the display is first taken.
@@ -995,6 +1039,184 @@ kl_backend_session_managed(
 }
 
 /*
+ * Asks sessiond for an admin action (ADMIN ASK); its answer comes as session_admin.
+ */
+int
+kl_backend_session_admin_ask(
+	struct kl_backend *backend,
+	uint32_t id,
+	uint64_t client,
+	const char *locale,
+	unsigned streams,
+	const char *action,
+	const char *words)
+{
+	char line[KL_BACKEND_SESSION_LINE];
+	const char *shown_locale;
+	const char *space;
+	int usable;
+	int valid;
+	int length;
+	int error;
+
+	/* Only a session sessiond started and still listens to asks, with a request's number. */
+	if (backend == NULL || action == NULL || id == 0U)
+		return EINVAL;
+	usable = session_admin_usable(backend);
+	if (!usable)
+		return ENOTSUP;
+
+	/* The streams of the three; the action's name, its words and the locale as sessiond reads them. */
+	if ((streams & ~(KL_BACKEND_ADMIN_INPUT | KL_BACKEND_ADMIN_OUTPUT | KL_BACKEND_ADMIN_ERROR)) != 0U)
+		return EINVAL;
+	valid = session_admin_action_valid(action);
+	if (!valid)
+		return EINVAL;
+	if (words == NULL)
+		words = "";
+	valid = session_admin_words_valid(words);
+	if (!valid)
+		return EINVAL;
+	if (locale == NULL)
+		locale = "";
+	valid = session_admin_locale_valid(locale);
+	if (!valid)
+		return EINVAL;
+
+	/* One admin answer is awaited at a time. */
+	if (backend->admin_awaited != 0U)
+		return EBUSY;
+
+	/* No locale is written "-", and no words leave no space before them. */
+	shown_locale = locale;
+	if (locale[0] == '\0')
+		shown_locale = "-";
+	space = " ";
+	if (words[0] == '\0')
+		space = "";
+
+	/* The request, whose bounds keep it within a line of sessiond's. */
+	length = snprintf(line, sizeof(line), "ADMIN ASK %lu %llu %s %x %s%s%s\n", (unsigned long)id, (unsigned long long)client, shown_locale, streams, action, space, words);
+	if (length < 0 || (size_t)length >= sizeof(line))
+		return EINVAL;
+	error = session_admin_send(backend, line, -1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer is awaited, and its time starts at the next tick. */
+	backend->admin_awaited = id;
+	backend->admin_due_ms = 0U;
+	backend->admin_title[0] = '\0';
+	backend->admin_message[0] = '\0';
+	return 0;
+}
+
+/*
+ * Tells sessiond the person allowed the dialog of id, or answers its
+ * CONNECT (ADMIN ALLOW, with the connection lent to a program of the
+ * desktop); its answer comes as session_admin.
+ */
+int
+kl_backend_session_admin_allow(
+	struct kl_backend *backend,
+	uint32_t id,
+	int connection)
+{
+	char line[KL_BACKEND_SESSION_LINE];
+	int usable;
+	int length;
+	int error;
+
+	/* Only a session sessiond still listens to, with a request's number. */
+	if (backend == NULL || id == 0U || connection < -1)
+		return EINVAL;
+	usable = session_admin_usable(backend);
+	if (!usable)
+		return ENOTSUP;
+
+	/* One admin answer is awaited at a time. */
+	if (backend->admin_awaited != 0U)
+		return EBUSY;
+
+	/* The line, with the connection when there is one. */
+	length = snprintf(line, sizeof(line), "ADMIN ALLOW %lu\n", (unsigned long)id);
+	if (length < 0 || (size_t)length >= sizeof(line))
+		return EINVAL;
+	error = session_admin_send(backend, line, connection);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: STARTED or FAILED is awaited. */
+	backend->admin_awaited = id;
+	backend->admin_due_ms = 0U;
+	return 0;
+}
+
+/*
+ * Tells sessiond the dialog of id went without an allow (ADMIN CANCEL); it has no answer.
+ */
+int
+kl_backend_session_admin_cancel(
+	struct kl_backend *backend,
+	uint32_t id)
+{
+	char line[KL_BACKEND_SESSION_LINE];
+	int usable;
+	int length;
+	int error;
+
+	/* Only a session sessiond still listens to, with a request's number. */
+	if (backend == NULL || id == 0U)
+		return EINVAL;
+	usable = session_admin_usable(backend);
+	if (!usable)
+		return ENOTSUP;
+
+	/* The line, which awaits nothing. */
+	length = snprintf(line, sizeof(line), "ADMIN CANCEL %lu\n", (unsigned long)id);
+	if (length < 0 || (size_t)length >= sizeof(line))
+		return EINVAL;
+	error = session_admin_send(backend, line, -1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: sessiond forgets the request. */
+	return 0;
+}
+
+/*
+ * Tells sessiond a client went (ADMIN FORGET): what it was allowed goes; it has no answer.
+ */
+int
+kl_backend_session_admin_forget(
+	struct kl_backend *backend,
+	uint64_t client)
+{
+	char line[KL_BACKEND_SESSION_LINE];
+	int usable;
+	int length;
+	int error;
+
+	/* Only a session sessiond still listens to. */
+	if (backend == NULL)
+		return EINVAL;
+	usable = session_admin_usable(backend);
+	if (!usable)
+		return ENOTSUP;
+
+	/* The line, which awaits nothing. */
+	length = snprintf(line, sizeof(line), "ADMIN FORGET %llu\n", (unsigned long long)client);
+	if (length < 0 || (size_t)length >= sizeof(line))
+		return EINVAL;
+	error = session_admin_send(backend, line, -1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the client's permissions are gone. */
+	return 0;
+}
+
+/*
  * Reads what sessiond sent, and ends a Log Out that was not answered in time.
  */
 void
@@ -1023,8 +1245,16 @@ kl_backend_session_tick(
 		}
 	}
 
-	/* What has come (nothing new still leaves the lines kept during the wait for GO). */
-	count = read(descriptor, backend->session_line + backend->session_used, sizeof(backend->session_line) - 1U - backend->session_used);
+	/* An admin answer awaited starts its time at the first tick, and is given up once it has run out. */
+	if (backend->admin_awaited != 0U) {
+		if (backend->admin_due_ms == 0U)
+			backend->admin_due_ms = now_ms + KL_BACKEND_ADMIN_WAIT_MS;
+		if (now_ms >= backend->admin_due_ms)
+			session_admin_fail(backend, ETIMEDOUT);
+	}
+
+	/* What has come, with the descriptors sent along (nothing new still leaves the lines kept during the wait for GO). */
+	count = session_receive(backend, descriptor);
 	if (count < 0 && backend->session_used == 0U)
 		return;
 
@@ -1035,13 +1265,20 @@ kl_backend_session_tick(
 		return;
 	}
 
-	/* A session carries on without sessiond, whose descriptor is closed; a sleep asked is over (ws052-p011). */
+	/*
+	 * A session carries on without sessiond, whose descriptor is closed; a
+	 * sleep asked is over (ws052-p011), and so is an admin answer awaited
+	 * (the descriptors kept go with it).
+	 */
 	if (count == 0) {
 		backend->session_gone = 1U;
 		(void)close(descriptor);
 		backend->options.session_descriptor = -1;
 		if (backend->power_asked == KL_BACKEND_POWER_SUSPEND)
 			session_slept(backend, "ERROR");
+		if (backend->admin_awaited != 0U)
+			session_admin_fail(backend, EPIPE);
+		session_admin_drop(backend);
 		return;
 	}
 
@@ -1064,6 +1301,10 @@ kl_backend_session_tick(
 	/* A line that never ends is thrown away. */
 	if (backend->session_used + 1U >= sizeof(backend->session_line))
 		backend->session_used = 0U;
+
+	/* Descriptors no line took are closed once no line is left half read (a line's come with its first byte). */
+	if (backend->session_used == 0U)
+		session_admin_drop(backend);
 }
 
 /*
@@ -1089,6 +1330,10 @@ kl_backend_session_wait(
 		if (backend->logout_ms != 0U)
 			*due_ms = backend->logout_ms + SESSION_LOGOUT_MS;
 	}
+
+	/* An admin answer awaited: the same, after KL_BACKEND_ADMIN_WAIT_MS. */
+	if (backend->admin_awaited != 0U && backend->admin_due_ms < *due_ms)
+		*due_ms = backend->admin_due_ms;
 
 	/* Succeeded: sessiond's lines wake the wait. */
 	return descriptor;
@@ -1161,6 +1406,13 @@ session_answered(
 	unsigned request;
 	int same;
 	int error;
+
+	/* An admin request's answer names its request: it answers no other (not a SERVICE's nor a sleep's). */
+	same = strncmp(line, "ADMIN ", 6U);
+	if (same == 0) {
+		session_admin_line(backend, line + 6);
+		return;
+	}
 
 	/* QUIT: the greeter is ready; the display goes back, then the compositor ends. */
 	same = strcmp(line, "QUIT");
@@ -1676,4 +1928,724 @@ session_milliseconds(
 
 	/* Succeeded: the milliseconds since an arbitrary start. */
 	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+/* Reads what sessiond sent after the lines kept, and keeps the descriptors sent along; returns as read. */
+static ssize_t
+session_receive(
+	struct kl_backend *backend,
+	int descriptor)
+{
+	union {
+		struct cmsghdr align;
+		char space[CMSG_SPACE(sizeof(int) * KL_BACKEND_ADMIN_HELD)];
+	} control;
+	struct msghdr header;
+	struct iovec vector;
+	ssize_t count;
+
+	/* The room after the lines kept, and room for two programs' descriptors. */
+	vector.iov_base = backend->session_line + backend->session_used;
+	vector.iov_len = sizeof(backend->session_line) - 1U - backend->session_used;
+	memset(&header, 0, sizeof(header));
+	header.msg_iov = &vector;
+	header.msg_iovlen = 1;
+	header.msg_control = control.space;
+	header.msg_controllen = sizeof(control.space);
+
+	/* What has come; a descriptor received is never inherited by the compositor's children. */
+	count = recvmsg(descriptor, &header, MSG_CMSG_CLOEXEC);
+	if (count < 0 && errno == ENOTSOCK) {
+		/* A descriptor that is no socket carries no descriptors: it is read. */
+		count = read(descriptor, vector.iov_base, vector.iov_len);
+		return count;
+	}
+	if (count < 0)
+		return count;
+
+	/* The descriptors, kept for the line that names them. */
+	session_hold(backend, &header);
+
+	/* Succeeded: the bytes that came (0 at the end). */
+	return count;
+}
+
+/* Keeps the descriptors a message carried, in their order; those beyond the room are closed and the loss noted. */
+static void
+session_hold(
+	struct kl_backend *backend,
+	struct msghdr *header)
+{
+	struct cmsghdr *message;
+	unsigned char *data;
+	size_t count;
+	size_t index;
+	int received;
+
+	/* Descriptors the kernel had no room for are lost: the STARTED they belonged to fails. */
+	if ((header->msg_flags & MSG_CTRUNC) != 0)
+		backend->admin_lost = 1U;
+
+	/* Each SCM_RIGHTS message's descriptors. */
+	for (message = CMSG_FIRSTHDR(header);
+	     message != NULL;
+	     message = CMSG_NXTHDR(header, message)) {
+		/* Only descriptors are kept. */
+		if (message->cmsg_level != SOL_SOCKET || message->cmsg_type != SCM_RIGHTS)
+			continue;
+
+		/* Each in its order, or closed when the room is full. */
+		data = CMSG_DATA(message);
+		count = (message->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+		for (index = 0; index < count; index++) {
+			memcpy(&received, data + index * sizeof(int), sizeof(int));
+			if (backend->admin_held_count < KL_BACKEND_ADMIN_HELD) {
+				backend->admin_held[backend->admin_held_count] = received;
+				backend->admin_held_count++;
+			} else {
+				(void)close(received);
+				backend->admin_lost = 1U;
+			}
+		}
+	}
+}
+
+/* Tells whether admin requests may be sent: a session (not the login screen) sessiond still listens to. */
+static int
+session_admin_usable(
+	const struct kl_backend *backend)
+{
+	/* The login screen asks for no action (sessiond refuses them there). */
+	if (backend->options.greeter_descriptor >= 0)
+		return 0;
+
+	/* No session manager, or one that left. */
+	if (backend->options.session_descriptor < 0)
+		return 0;
+	if (backend->session_gone)
+		return 0;
+
+	/* Succeeded: a session sessiond listens to. */
+	return 1;
+}
+
+/* Tells whether an action's name is one sessiond reads: a lowercase letter or digit, then those and '-', at most 32. */
+static int
+session_admin_action_valid(
+	const char *action)
+{
+	size_t index;
+	char byte;
+
+	/* Each byte, the first not a '-'. */
+	for (index = 0U; action[index] != '\0'; index++) {
+		byte = action[index];
+		if (index >= SESSION_ADMIN_ACTION_MAX)
+			return 0;
+		if (byte >= 'a' && byte <= 'z')
+			continue;
+		if (byte >= '0' && byte <= '9')
+			continue;
+		if (byte == '-' && index != 0U)
+			continue;
+
+		/* A byte no name has. */
+		return 0;
+	}
+
+	/* An empty name is none. */
+	if (index == 0U)
+		return 0;
+
+	/* Succeeded: a name. */
+	return 1;
+}
+
+/*
+ * Tells whether the words are ones sessiond reads: at most 8 words of 1 to
+ * 64 bytes each, joined by one space, at most 256 bytes in all (empty for
+ * none).
+ */
+static int
+session_admin_words_valid(
+	const char *words)
+{
+	size_t index;
+	size_t word_length;
+	unsigned count;
+	int allowed;
+
+	/* No words. */
+	if (words[0] == '\0')
+		return 1;
+
+	/* Each byte: a word's, or the one space between two words. */
+	word_length = 0U;
+	count = 1U;
+	for (index = 0U; words[index] != '\0'; index++) {
+		if (index >= SESSION_ADMIN_WORDS_MAX)
+			return 0;
+
+		/* A space ends a word that is not empty, and starts the next. */
+		if (words[index] == ' ') {
+			if (word_length == 0U)
+				return 0;
+			word_length = 0U;
+			count++;
+			if (count > SESSION_ADMIN_WORD_COUNT)
+				return 0;
+			continue;
+		}
+
+		/* A word's byte, within a word's length. */
+		allowed = session_admin_word_byte(words[index]);
+		if (!allowed)
+			return 0;
+		word_length++;
+		if (word_length > SESSION_ADMIN_WORD_MAX)
+			return 0;
+	}
+
+	/* The last word is not empty (no space at the end). */
+	if (word_length == 0U)
+		return 0;
+
+	/* Succeeded: words sessiond reads. */
+	return 1;
+}
+
+/* Tells whether a byte may be in a word: a letter, a digit, or one of "._/:=@+,-". */
+static int
+session_admin_word_byte(
+	char byte)
+{
+	const char *punctuation;
+
+	/* Letters and digits. */
+	if (byte >= 'a' && byte <= 'z')
+		return 1;
+	if (byte >= 'A' && byte <= 'Z')
+		return 1;
+	if (byte >= '0' && byte <= '9')
+		return 1;
+
+	/* The punctuation a path or an option has; the end of the string is not a byte of it. */
+	punctuation = strchr("._/:=@+,-", byte);
+	if (byte != '\0' && punctuation != NULL)
+		return 1;
+
+	/* Another byte. */
+	return 0;
+}
+
+/* Tells whether a locale is one sessiond reads: empty, or "ll" or "lll", then "_CC", then ".UTF-8", the last two each if any. */
+static int
+session_admin_locale_valid(
+	const char *locale)
+{
+	size_t letters;
+	int same;
+
+	/* No locale. */
+	if (locale[0] == '\0')
+		return 1;
+
+	/* Two or three lowercase letters. */
+	letters = 0U;
+	while (locale[letters] >= 'a' && locale[letters] <= 'z')
+		letters++;
+	if (letters < 2U || letters > 3U)
+		return 0;
+	locale += letters;
+
+	/* The region: '_' and two capitals. */
+	if (locale[0] == '_') {
+		if (locale[1] < 'A' || locale[1] > 'Z')
+			return 0;
+		if (locale[2] < 'A' || locale[2] > 'Z')
+			return 0;
+		locale += 3;
+	}
+
+	/* The end, or the encoding and the end. */
+	if (locale[0] == '\0')
+		return 1;
+	same = strcmp(locale, ".UTF-8");
+	if (same != 0)
+		return 0;
+
+	/* Succeeded: a locale with its encoding. */
+	return 1;
+}
+
+/* Writes one admin line whole, with the connection lent to a program as SCM_RIGHTS when it is not -1. */
+static int
+session_admin_send(
+	struct kl_backend *backend,
+	const char *line,
+	int connection)
+{
+	union {
+		struct cmsghdr align;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct cmsghdr *message;
+	struct msghdr header;
+	struct iovec vector;
+	size_t length;
+	ssize_t sent;
+	int error;
+
+	/* A line without a descriptor goes as the other requests'. */
+	if (connection < 0) {
+		error = session_send(backend, KL_BACKEND_SESSION_NONE, line);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* The line, and the descriptor with its first byte. */
+	length = strlen(line);
+	vector.iov_base = (void *)line;
+	vector.iov_len = length;
+	memset(&control, 0, sizeof(control));
+	memset(&header, 0, sizeof(header));
+	header.msg_iov = &vector;
+	header.msg_iovlen = 1;
+	header.msg_control = control.space;
+	header.msg_controllen = sizeof(control.space);
+	message = CMSG_FIRSTHDR(&header);
+	message->cmsg_level = SOL_SOCKET;
+	message->cmsg_type = SCM_RIGHTS;
+	message->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(message), &connection, sizeof(int));
+
+	/* Sent whole, or the error; a gone sessiond is an error, not a signal. */
+	sent = sendmsg(session_descriptor(backend), &header, MSG_NOSIGNAL);
+	if (sent < 0)
+		return errno;
+	if ((size_t)sent != length)
+		return EIO;
+
+	/* Succeeded: sessiond has the line and its own copy of the connection. */
+	return 0;
+}
+
+/* Acts on one answer of sessiond's to an admin request (the line after "ADMIN "). */
+static void
+session_admin_line(
+	struct kl_backend *backend,
+	const char *line)
+{
+	struct kl_backend_admin_answer answer;
+	unsigned long value;
+	const char *rest;
+	unsigned index;
+	int error;
+
+	/* No descriptor yet, and nothing known of the answer. */
+	memset(&answer, 0, sizeof(answer));
+	for (index = 0U; index < KL_BACKEND_ADMIN_DESCRIPTORS; index++)
+		answer.descriptors[index] = -1;
+
+	/* TITLE and MESSAGE: the dialog's texts, kept until its SHOW (only the awaited request's). */
+	rest = session_admin_verb(line, "TITLE");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error == 0 && *rest == ' ' && answer.id == backend->admin_awaited)
+			(void)snprintf(backend->admin_title, sizeof(backend->admin_title), "%s", rest + 1);
+		return;
+	}
+	rest = session_admin_verb(line, "MESSAGE");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error == 0 && *rest == ' ' && answer.id == backend->admin_awaited)
+			(void)snprintf(backend->admin_message, sizeof(backend->admin_message), "%s", rest + 1);
+		return;
+	}
+
+	/* SHOW: the dialog; one not understood is cancelled, and its request fails. */
+	rest = session_admin_verb(line, "SHOW");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error != 0)
+			return;
+		answer.kind = KL_BACKEND_ADMIN_SHOW;
+		answer.title = backend->admin_title;
+		answer.message = backend->admin_message;
+		error = session_admin_show(rest, &answer);
+		if (error != 0) {
+			(void)kl_backend_session_admin_cancel(backend, answer.id);
+			if (answer.id == backend->admin_awaited)
+				session_admin_fail(backend, EPROTO);
+			return;
+		}
+		session_admin_give(backend, &answer);
+		return;
+	}
+
+	/* CONNECT: a permission kept for a program of the desktop, whose connection is asked for. */
+	rest = session_admin_verb(line, "CONNECT");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error != 0 || *rest != '\0')
+			return;
+		answer.kind = KL_BACKEND_ADMIN_CONNECT;
+		session_admin_give(backend, &answer);
+		return;
+	}
+
+	/* STARTED: the program runs; its descriptors are the next kept ones. */
+	rest = session_admin_verb(line, "STARTED");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error != 0 || *rest != ' ')
+			return;
+		error = session_admin_number(rest + 1, 16U, 0xfUL, &value, &rest);
+		if (error != 0 || *rest != '\0')
+			return;
+		answer.kind = KL_BACKEND_ADMIN_STARTED;
+		answer.bits = (unsigned)value;
+		session_admin_take(backend, &answer);
+		session_admin_give(backend, &answer);
+		return;
+	}
+
+	/* REFUSED: the action does not run, and why. */
+	rest = session_admin_verb(line, "REFUSED");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error != 0 || *rest != ' ')
+			return;
+		answer.kind = KL_BACKEND_ADMIN_REFUSED;
+		(void)session_admin_refused(rest + 1, &answer);
+		session_admin_give(backend, &answer);
+		return;
+	}
+
+	/* FAILED: the program could not be started, or the request was not one sessiond waits for. */
+	rest = session_admin_verb(line, "FAILED");
+	if (rest != NULL) {
+		error = session_admin_id(rest, &answer.id, &rest);
+		if (error != 0 || *rest != ' ')
+			return;
+		error = session_admin_number(rest + 1, 10U, 65535UL, &value, &rest);
+		if (error != 0 || *rest != '\0')
+			value = EPROTO;
+		answer.kind = KL_BACKEND_ADMIN_FAILED;
+		answer.error = (int)value;
+		session_admin_give(backend, &answer);
+		return;
+	}
+
+	/* A line not understood answers nothing (an awaited answer runs out of time). */
+	return;
+}
+
+/* Gives what follows "VERB " in an admin line, or NULL when the line is not that verb's. */
+static const char *
+session_admin_verb(
+	const char *text,
+	const char *verb)
+{
+	size_t length;
+	int same;
+
+	/* The verb, then one space. */
+	length = strlen(verb);
+	same = strncmp(text, verb, length);
+	if (same != 0)
+		return NULL;
+	if (text[length] != ' ')
+		return NULL;
+
+	/* Succeeded: what follows the verb. */
+	return text + length + 1;
+}
+
+/*
+ * Reads a number of one or more digits in base (10 or 16, lowercase) up
+ * to limit; *rest is where it ended.  Returns 0, or EINVAL.
+ */
+static int
+session_admin_number(
+	const char *text,
+	unsigned base,
+	unsigned long limit,
+	unsigned long *value,
+	const char **rest)
+{
+	unsigned long number;
+	unsigned digit;
+	size_t index;
+	char byte;
+
+	/* Each digit, while the number stays within its limit. */
+	number = 0UL;
+	for (index = 0U; text[index] != '\0'; index++) {
+		byte = text[index];
+		if (byte >= '0' && byte <= '9') {
+			digit = (unsigned)(byte - '0');
+		} else if (base == 16U && byte >= 'a' && byte <= 'f') {
+			digit = (unsigned)(byte - 'a') + 10U;
+		} else {
+			break;
+		}
+		if (number > (limit - digit) / base)
+			return EINVAL;
+		number = number * base + digit;
+	}
+
+	/* At least one digit. */
+	if (index == 0U)
+		return EINVAL;
+
+	/* Succeeded: the number and where it ended. */
+	*value = number;
+	*rest = text + index;
+	return 0;
+}
+
+/* Reads a request's number (1 to 4294967295); *rest is where it ended.  Returns 0, or EINVAL. */
+static int
+session_admin_id(
+	const char *text,
+	uint32_t *id,
+	const char **rest)
+{
+	unsigned long value;
+	int error;
+
+	/* The digits. */
+	error = session_admin_number(text, 10U, 0xffffffffUL, &value, rest);
+	if (error != 0)
+		return error;
+
+	/* No request is numbered 0. */
+	if (value == 0UL)
+		return EINVAL;
+
+	/* Succeeded: the request's number. */
+	*id = (uint32_t)value;
+	return 0;
+}
+
+/* Reads SHOW's rest (" how", then " display" or nothing) into the answer.  Returns 0, or EPROTO. */
+static int
+session_admin_show(
+	const char *rest,
+	struct kl_backend_admin_answer *answer)
+{
+	static const struct {
+		const char *word;
+		unsigned how;
+	} hows[] = {
+		{ "consent", KL_BACKEND_ADMIN_CONSENT },
+		{ "password-self", KL_BACKEND_ADMIN_PASSWORD_SELF },
+		{ "password-admin", KL_BACKEND_ADMIN_PASSWORD_ADMIN },
+	};
+	const char *after;
+	size_t length;
+	size_t index;
+	int same;
+
+	/* How the person confirms: one of the words, after one space, ending the line or before another space. */
+	if (rest[0] != ' ')
+		return EPROTO;
+	rest++;
+	after = NULL;
+	for (index = 0U; index < sizeof(hows) / sizeof(hows[0]); index++) {
+		length = strlen(hows[index].word);
+		same = strncmp(rest, hows[index].word, length);
+		if (same == 0 && (rest[length] == '\0' || rest[length] == ' ')) {
+			answer->how = hows[index].how;
+			after = rest + length;
+			break;
+		}
+	}
+	if (after == NULL)
+		return EPROTO;
+
+	/* The end, or a connection to lend. */
+	if (after[0] == '\0')
+		return 0;
+	same = strcmp(after, " display");
+	if (same != 0)
+		return EPROTO;
+
+	/* Succeeded: the ALLOW lends a connection. */
+	answer->display = 1U;
+	return 0;
+}
+
+/* Reads REFUSED's reason word into the answer (a word not known here is KL_BACKEND_ADMIN_OTHER).  Returns 0. */
+static int
+session_admin_refused(
+	const char *rest,
+	struct kl_backend_admin_answer *answer)
+{
+	static const struct {
+		const char *word;
+		unsigned reason;
+	} reasons[] = {
+		{ "unknown", KL_BACKEND_ADMIN_UNKNOWN },
+		{ "invalid", KL_BACKEND_ADMIN_INVALID },
+		{ "not-allowed", KL_BACKEND_ADMIN_NOT_ALLOWED },
+		{ "method", KL_BACKEND_ADMIN_METHOD },
+		{ "busy", KL_BACKEND_ADMIN_BUSY },
+		{ "locked", KL_BACKEND_ADMIN_LOCKED },
+	};
+	size_t index;
+	int same;
+
+	/* The word's reason. */
+	answer->reason = KL_BACKEND_ADMIN_OTHER;
+	for (index = 0U; index < sizeof(reasons) / sizeof(reasons[0]); index++) {
+		same = strcmp(rest, reasons[index].word);
+		if (same == 0) {
+			answer->reason = reasons[index].reason;
+			break;
+		}
+	}
+
+	/* Succeeded: the reason, known or not. */
+	return 0;
+}
+
+/*
+ * Takes a STARTED's descriptors from the ones kept: one for each bit, the
+ * input and the status always among them.  When they are not all there
+ * (lost, too few, or bits without the two), the ones taken are closed and
+ * the answer becomes a FAILED with EPROTO: the program sees its input end
+ * and stops.
+ */
+static void
+session_admin_take(
+	struct kl_backend *backend,
+	struct kl_backend_admin_answer *answer)
+{
+	unsigned wanted;
+	unsigned index;
+	unsigned bit;
+	int whole;
+
+	/* As many as the bits say. */
+	wanted = 0U;
+	for (bit = 0x1U; bit <= KL_BACKEND_ADMIN_STATUS; bit <<= 1) {
+		if ((answer->bits & bit) != 0U)
+			wanted++;
+	}
+
+	/* Whole: nothing was lost, the input and the status are named, and enough came. */
+	whole = 1;
+	if (backend->admin_lost)
+		whole = 0;
+	if ((answer->bits & KL_BACKEND_ADMIN_INPUT) == 0U)
+		whole = 0;
+	if ((answer->bits & KL_BACKEND_ADMIN_STATUS) == 0U)
+		whole = 0;
+	if (backend->admin_held_count < wanted)
+		whole = 0;
+
+	/* A whole set goes to the answer, in its order; the rest stay kept. */
+	if (whole) {
+		for (index = 0U; index < wanted; index++)
+			answer->descriptors[index] = backend->admin_held[index];
+		answer->count = wanted;
+		backend->admin_held_count -= wanted;
+		memmove(backend->admin_held, backend->admin_held + wanted, backend->admin_held_count * sizeof(backend->admin_held[0]));
+		return;
+	}
+
+	/* Otherwise every kept one is closed (which belong to this line is not known), and the start fails. */
+	session_admin_drop(backend);
+	answer->kind = KL_BACKEND_ADMIN_FAILED;
+	answer->error = EPROTO;
+	answer->bits = 0U;
+}
+
+/*
+ * Gives an answer to the host when it is the awaited request's (the
+ * request then no longer awaits), or cleans up after a late one; the
+ * descriptors the host did not keep are closed.
+ */
+static void
+session_admin_give(
+	struct kl_backend *backend,
+	struct kl_backend_admin_answer *answer)
+{
+	unsigned index;
+
+	/* An answer nobody awaits (its time ran out, or it was never asked) is cleaned up. */
+	if (backend->admin_awaited == 0U || answer->id != backend->admin_awaited) {
+		session_admin_late(backend, answer);
+	} else {
+		/* The request no longer awaits; the host hears it, or the dialog it cannot show is cancelled. */
+		backend->admin_awaited = 0U;
+		backend->admin_due_ms = 0U;
+		if (backend->host.session_admin != NULL)
+			backend->host.session_admin(backend->host.data, answer);
+		else
+			session_admin_late(backend, answer);
+	}
+
+	/* The descriptors no one kept, and the dialog's texts, go. */
+	for (index = 0U; index < KL_BACKEND_ADMIN_DESCRIPTORS; index++) {
+		if (answer->descriptors[index] >= 0)
+			(void)close(answer->descriptors[index]);
+		answer->descriptors[index] = -1;
+	}
+	backend->admin_title[0] = '\0';
+	backend->admin_message[0] = '\0';
+}
+
+/* Cleans up after an answer nobody awaits: a dialog or a connection asked for is cancelled (the streams close in the caller). */
+static void
+session_admin_late(
+	struct kl_backend *backend,
+	struct kl_backend_admin_answer *answer)
+{
+	/* sessiond would wait two minutes for the person: it forgets the request now. */
+	if (answer->kind == KL_BACKEND_ADMIN_SHOW || answer->kind == KL_BACKEND_ADMIN_CONNECT)
+		(void)kl_backend_session_admin_cancel(backend, answer->id);
+}
+
+/* Ends the awaited admin request without its answer: the host hears FAILED with error. */
+static void
+session_admin_fail(
+	struct kl_backend *backend,
+	int error)
+{
+	struct kl_backend_admin_answer answer;
+	unsigned index;
+
+	/* The answer: the awaited request failed. */
+	memset(&answer, 0, sizeof(answer));
+	for (index = 0U; index < KL_BACKEND_ADMIN_DESCRIPTORS; index++)
+		answer.descriptors[index] = -1;
+	answer.kind = KL_BACKEND_ADMIN_FAILED;
+	answer.id = backend->admin_awaited;
+	answer.error = error;
+
+	/* It no longer awaits; the host hears it. */
+	backend->admin_awaited = 0U;
+	backend->admin_due_ms = 0U;
+	backend->admin_title[0] = '\0';
+	backend->admin_message[0] = '\0';
+	if (backend->host.session_admin != NULL)
+		backend->host.session_admin(backend->host.data, &answer);
+}
+
+/* Closes the descriptors kept for no line, and forgets that any were lost. */
+static void
+session_admin_drop(
+	struct kl_backend *backend)
+{
+	unsigned index;
+
+	/* Each kept one. */
+	for (index = 0U; index < backend->admin_held_count; index++)
+		(void)close(backend->admin_held[index]);
+	backend->admin_held_count = 0U;
+	backend->admin_lost = 0U;
 }

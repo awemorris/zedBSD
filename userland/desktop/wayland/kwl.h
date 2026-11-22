@@ -343,6 +343,8 @@ enum kwl_kind {
 	KWL_SYSTEM_BLUETOOTH,
 	/* The CLI-owned photo/video library and its watchers (media-library.c). */
 	KWL_SYSTEM_MEDIA,
+	/* The system extension's admin actions (admin-ask.c). */
+	KWL_SYSTEM_ADMIN,
 	/* The sound's playback streams, kl_audio_v1 and its streams (audio-stream.c, WS191). */
 	KWL_AUDIO,
 	KWL_AUDIO_STREAM,
@@ -1022,6 +1024,15 @@ struct kwl_client {
 	 * another program's window (activation.c, ws089-p016).
 	 */
 	uint64_t connected_ms;
+	/*
+	 * The admin actions (admin-ask.c): admin_asked is set once the client
+	 * asked for one, so that its end tells the session manager to forget
+	 * what it was allowed; admin_lent is set for the connection the
+	 * compositor made and lent to a program run as root (its windows may
+	 * be marked as such).
+	 */
+	unsigned admin_asked;
+	unsigned admin_lent;
 };
 
 /* The drawings one KWL PERF window keeps the times of (five seconds at 60 frames and the quiet pictures, with room). */
@@ -2712,6 +2723,16 @@ int kwl_bluetooth_bar_request(unsigned request, const char *address, unsigned ty
 int kwl_bluetooth_bar_answer(int *error);
 int kwl_bluetooth_answer(uint32_t id, unsigned yes);
 int kwl_bluetooth_cancel(void);
+
+/* The admin actions: the objects, the relay to the session manager and the dialog's place (admin-ask.c). */
+int kwl_admin_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+int kwl_admin_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_admin_tick(struct kwl_server *server);
+void kwl_admin_gone(struct kwl_object *object);
+void kwl_admin_client_gone(struct kwl_client *client);
+void kwl_admin_answer(void *data, struct kl_backend_admin_answer *answer);
+void kwl_admin_decide(struct kwl_server *server, unsigned allow, const char *via);
+int kwl_admin_available(struct kwl_server *server);
 
 /* The pairing's window (bluetooth-ask.c, ws143-p006). */
 void kwl_bluetooth_ask_take(struct kwl_server *server, const struct kl_backend_bluetooth_question *question);
