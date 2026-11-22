@@ -42,9 +42,9 @@ static int client_run(struct ssh_client *client, const struct ssh_client_args *a
 /*
  * The one connection of the program.
  *
- * It is static because it holds the receive buffer and the transport's
- * keys, which are large for the stack; main starts it with
- * ssh_client_init and frees it before the program ends.
+ * It is static because it holds the receive buffer and the settings,
+ * which are large for the stack; main starts it with ssh_client_init and
+ * frees it before the program ends.
  */
 static struct ssh_client client_connection;
 
@@ -255,9 +255,9 @@ client_settle(
 }
 
 /*
- * Connects, authenticates and runs the session or the connection without
- * one.  Returns 0 when the session ran (its exit value in *exit_status),
- * or an error after the reason was printed.
+ * Connects, then logs in and runs the session or the connection without
+ * one.  Returns 0 when the connection ran (its exit value in
+ * *exit_status), or an error after the reason was printed.
  */
 static int
 client_run(
@@ -266,7 +266,6 @@ client_run(
 	int *exit_status)
 {
 	struct ssh_buf command;
-	uint32_t code;
 	int error;
 
 	/* Builds the command from the arguments after the destination. */
@@ -285,37 +284,17 @@ client_run(
 		return error;
 	}
 
-	/* Starts the transport and logs in. */
-	error = ssh_client_start(client);
-	if (error == 0)
-		error = ssh_client_authenticate(client);
-	if (error != 0) {
-		ssh_client_report(client, error);
-		ssh_client_close(client, SSH_DISCONNECT_PROTOCOL_ERROR, "protocol error");
-		ssh_buf_free(&command);
-		return error;
-	}
-
-	/* Runs the session, or keeps the connection without one (-N). */
-	if (args->no_command) {
-		error = ssh_client_run_without_session(client, exit_status);
-	} else {
-		error = ssh_client_run_session(client, args, command.data, command.size, exit_status);
-	}
-
-	/* Releases the command text. */
+	/* Logs in and runs the session, or keeps the connection without one (-N). */
+	error = ssh_client_run(client, args, command.data, command.size, exit_status);
 	ssh_buf_free(&command);
 
-	/* Ends the connection, telling the server why. */
-	code = SSH_DISCONNECT_BY_APPLICATION;
-	if (error != 0)
-		code = SSH_DISCONNECT_PROTOCOL_ERROR;
-	ssh_client_close(client, code, "disconnected by user");
+	/* Ends the connection, writing the DISCONNECT the engine queued. */
+	ssh_client_close(client);
 
-	/* Reports a connection that broke (the reason is already printed). */
+	/* Reports a connection that could not run (the reason is already printed). */
 	if (error != 0)
 		return error;
 
-	/* Succeeded: *exit_status holds the session's exit value. */
+	/* Succeeded: *exit_status holds the exit value. */
 	return 0;
 }

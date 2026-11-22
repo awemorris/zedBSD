@@ -33,10 +33,11 @@
  * encrypted one among them) is passed over.
  *
  * The received data of the session is handed out as it comes
- * (SSH_ENGINE_DATA); the channel's window is given back only for what the
- * caller reports used with ssh_engine_consumed, so the server stops when
- * the caller falls behind by one window (SSH_CHANNEL_WINDOW) and the
- * caller never holds more than that.
+ * (SSH_ENGINE_DATA); the channel's window is given back only while the
+ * caller holds less than half a window of it not yet reported used with
+ * ssh_engine_consumed, so the server stops when the caller falls behind
+ * and the caller never holds more than one and a half windows
+ * (SSH_CHANNEL_WINDOW).
  */
 
 #ifndef SSH_SSH_CLIENT_ENGINE_H
@@ -109,7 +110,8 @@ enum ssh_engine_event_kind {
 	 * authentication method was left, ETIMEDOUT when the server answered
 	 * no keepalive, ECONNREFUSED when the server refused the session, or
 	 * the transport's error (code and reason are then the DISCONNECT this
-	 * side sent).  Only the pending output remains.
+	 * side sent).  tries is how many passwords the server refused.  Only
+	 * the pending output remains.
 	 */
 	SSH_ENGINE_CLOSED = 8
 };
@@ -293,6 +295,15 @@ void ssh_engine_disconnect(struct ssh_engine *engine, const char *description);
  * or the error recorded in out.
  */
 int ssh_engine_put_default_modes(struct ssh_buf *out);
+
+/*
+ * Reports whether the server's identification line (RFC 4253 4.2) was
+ * read: 1 once it was, 0 before.
+ */
+int ssh_engine_identified(const struct ssh_engine *engine);
+
+/* Reports how many later exchanges showed the first exchange's host key again. */
+unsigned long ssh_engine_rekeys(const struct ssh_engine *engine);
 
 /*
  * Decides what to do with a host key from the answers of the user's and

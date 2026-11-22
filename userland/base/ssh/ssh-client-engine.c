@@ -173,12 +173,15 @@ struct engine_identity {
  * passwords were refused, passwords_over 1 once no more are asked for.
  * channels and channel are the session channel (NULL before it is open
  * and after its close went both ways); replies the kinds of the channel
- * requests waiting for a reply.  pty_refused, started, eof_wanted,
+ * requests waiting for a reply; unconsumed the bytes of SSH_ENGINE_DATA
+ * handed out that the caller has not reported used.  pty_refused, started, eof_wanted,
  * have_exit, exit_status, exit_signal and session_reason are what the
  * session came to.  events (event_count of them from event_first) wait to
  * be taken; closed_queued is 1 once SSH_ENGINE_CLOSED is among them or
  * taken.  peer_ended is 1 once the caller said the connection reached its
- * end.  now_ms is the time of the last tick, alive_due when the next
+ * end, identified 1 once the server's identification line was read, and
+ * rekeys counts the later exchanges that showed the first exchange's host
+ * key.  now_ms is the time of the last tick, alive_due when the next
  * keepalive is due and alive_sent how many went unanswered.
  */
 struct ssh_engine {
@@ -215,6 +218,7 @@ struct ssh_engine {
 	struct ssh_channel *channel;
 	enum engine_reply_kind replies[ENGINE_REPLIES_MAX];
 	unsigned reply_count;
+	size_t unconsumed;
 	int pty_refused;
 	int started;
 	int eof_wanted;
@@ -227,6 +231,8 @@ struct ssh_engine {
 	unsigned event_count;
 	int closed_queued;
 	int peer_ended;
+	int identified;
+	unsigned long rekeys;
 	uint64_t now_ms;
 	uint64_t alive_due;
 	unsigned alive_interval;
@@ -524,6 +530,10 @@ ssh_engine_next(
 		/* Takes the next message from what the transport holds. */
 		error = ssh_transport_next(&engine->transport, &engine->payload);
 
+		/* Notes that the server identified itself once the transport went past its identification line. */
+		if (engine->transport.state == SSH_TRANSPORT_INITIAL_KEX || engine->transport.state == SSH_TRANSPORT_RUNNING)
+			engine->identified = 1;
+
 		/* Reports the end of the connection once every byte before it is used. */
 		if (error == EAGAIN && engine->peer_ended) {
 			if (engine->phase == ENGINE_PHASE_KEX && engine->transport.state == SSH_TRANSPORT_RUNNING)
@@ -707,8 +717,17 @@ ssh_engine_consumed(
 {
 	int error;
 
+	/* Counts what the caller used of what it holds (never more than it holds). */
+	if (size > engine->unconsumed)
+		size = engine->unconsumed;
+	engine->unconsumed -= size;
+
 	/* A closed connection or channel takes no window back. */
 	if (engine->phase == ENGINE_PHASE_CLOSED || engine->channel == NULL || size == 0)
+		return;
+
+	/* Waits while the caller still holds half a window or more: the window refills whole. */
+	if (engine->unconsumed >= SSH_CHANNEL_WINDOW / 2U)
 		return;
 
 	/* Gives the window back when half of it is used (ssh_channel_consumed decides). */
@@ -916,6 +935,32 @@ ssh_engine_host_decide(
 
 	/* Succeeded: *action says what to do. */
 	return 0;
+}
+
+/*
+ * Reports whether the server's identification line was read.
+ */
+int
+ssh_engine_identified(
+	const struct ssh_engine *engine)
+{
+	/* The line was read when the transport went past it at any time before. */
+	if (engine->identified)
+		return 1;
+
+	/* Reports that the server has not identified itself yet. */
+	return 0;
+}
+
+/*
+ * Reports how many later exchanges showed the first exchange's host key.
+ */
+unsigned long
+ssh_engine_rekeys(
+	const struct ssh_engine *engine)
+{
+	/* Reports the count kept by the host key check. */
+	return engine->rekeys;
 }
 
 /* Refuses options the engine cannot act on: EINVAL, or 0. */
@@ -1230,6 +1275,7 @@ engine_end(
 	if (event != NULL) {
 		event->error = error;
 		event->code = code;
+		event->tries = engine->password_tries;
 		engine_copy_text(event->reason, sizeof(event->reason), reason);
 	}
 	engine->closed_queued = 1;
@@ -1319,6 +1365,9 @@ engine_check_host_key(
 		engine->host_changed = 1;
 		return EACCES;
 	}
+
+	/* Counts one more exchange that showed the key shown before. */
+	engine->rekeys++;
 
 	/* Succeeded: the key is the one shown before. */
 	return 0;
@@ -1762,8 +1811,10 @@ engine_take_data(
 	if (error != 0)
 		return EPROTO;
 
-	/* Drops data of a closing channel and of a type other than the error output, giving its window back at once. */
+	/* Drops data of a closing channel and of a type other than the error output, giving its window back unless the caller holds half a window. */
 	if (channel->close_sent || (extended != 0 && extended != SSH_EXTENDED_DATA_STDERR)) {
+		if (engine->unconsumed >= SSH_CHANNEL_WINDOW / 2U)
+			return 0;
 		ssh_buf_reset(&engine->out);
 		ssh_channel_consumed(channel, size, &engine->out);
 		if (engine->out.size == 0)
@@ -1778,7 +1829,8 @@ engine_take_data(
 	if (size == 0)
 		return 0;
 
-	/* Hands the bytes out; they point into payload until the next call. */
+	/* Hands the bytes out, counted until the caller reports them used; they point into payload until the next call. */
+	engine->unconsumed += size;
 	event = engine_event(engine, SSH_ENGINE_DATA);
 	if (event != NULL) {
 		event->bytes = data;
