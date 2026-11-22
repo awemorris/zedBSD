@@ -1018,8 +1018,7 @@ admin_refuse_object(
 	payload[0] = number;
 	payload[1] = reason;
 	error = kwl_emit(object->client, object->id, KL_SYSTEM_ADMIN_EVENT_REFUSED, payload, sizeof(payload));
-	printf("KWL ADMIN refused client=%llu request=%u reason=%u why=%s errno=%d\n",
-	    (unsigned long long)object->client->number, number, reason, why, error);
+	printf("KWL ADMIN refused client=%llu request=%u reason=%u why=%s errno=%d\n", (unsigned long long)object->client->number, number, reason, why, error);
 }
 
 /* Gives a manager's REFUSED reason as the client's (KL_SYSTEM_ADMIN_*). */

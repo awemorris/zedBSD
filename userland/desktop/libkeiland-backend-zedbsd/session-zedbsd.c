@@ -1096,8 +1096,7 @@ kl_backend_session_admin_ask(
 		space = "";
 
 	/* The request, whose bounds keep it within a line of sessiond's. */
-	length = snprintf(line, sizeof(line), "ADMIN ASK %lu %llu %s %x %s%s%s\n",
-	    (unsigned long)id, (unsigned long long)client, shown_locale, streams, action, space, words);
+	length = snprintf(line, sizeof(line), "ADMIN ASK %lu %llu %s %x %s%s%s\n", (unsigned long)id, (unsigned long long)client, shown_locale, streams, action, space, words);
 	if (length < 0 || (size_t)length >= sizeof(line))
 		return EINVAL;
 	error = session_admin_send(backend, line, -1);

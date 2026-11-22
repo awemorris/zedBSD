@@ -2202,6 +2202,11 @@ int kl_backend_session_managed(const struct kl_backend *backend);
  * awaited answer comes as FAILED with EPIPE.  Each returns 0, EINVAL,
  * ENOTSUP (the login screen, no session manager, or another operating
  * system), EBUSY, or the error of sending.
+ *
+ * Unlike the other callbacks, session_admin may call back into the
+ * backend for the admin requests (an allow that answers a CONNECT or the
+ * person's dialog, a cancel): the request it answers no longer awaits when
+ * it is called.
  */
 #define KL_BACKEND_ADMIN_WAIT_MS	10000U
 
