@@ -1,0 +1,334 @@
+--- a/build/build_config.h
++++ b/build/build_config.h
+@@ -104,6 +104,8 @@
+ #define OS_WIN 1
+ #elif defined(__Fuchsia__)
+ #define OS_FUCHSIA 1
++#elif defined(__ZEDBSD__)
++#define OS_ZEDBSD 1
+ #elif defined(__FreeBSD__)
+ #define OS_FREEBSD 1
+ #elif defined(__NetBSD__)
+@@ -142,7 +144,7 @@
+     defined(OS_FREEBSD) || defined(OS_IOS) || defined(OS_LINUX) ||   \
+     defined(OS_CHROMEOS) || defined(OS_MAC) || defined(OS_NETBSD) || \
+     defined(OS_OPENBSD) || defined(OS_QNX) || defined(OS_SOLARIS) || \
+-    defined(OS_ZOS)
++    defined(OS_ZOS) || defined(OS_ZEDBSD)
+ #define OS_POSIX 1
+ #endif
+ 
+@@ -243,6 +245,12 @@
+ #define BUILDFLAG_INTERNAL_IS_POSIX() (0)
+ #endif
+ 
++#if defined(OS_ZEDBSD)
++#define BUILDFLAG_INTERNAL_IS_ZEDBSD() (1)
++#else
++#define BUILDFLAG_INTERNAL_IS_ZEDBSD() (0)
++#endif
++
+ #if defined(OS_QNX)
+ #define BUILDFLAG_INTERNAL_IS_QNX() (1)
+ #else
+--- a/build/config/BUILDCONFIG.gn
++++ b/build/config/BUILDCONFIG.gn
+@@ -123,6 +123,8 @@
+ #   even if the value is overridden, which is wasteful. See first bullet.
+ 
+ declare_args() {
++  is_zedbsd = false
++  zedbsd_dynamic_dir = ""
+   # Set to enable the official build level of optimization. This has nothing
+   # to do with branding, but enables an additional level of optimization above
+   # release (!is_debug). This might be better expressed as a tri-state
+--- a/build/config/BUILD.gn
++++ b/build/config/BUILD.gn
+@@ -208,6 +208,8 @@
+     # Targets should choose to explicitly link frameworks they require. Since
+     # linking can have run-time side effects, nothing should be listed here.
+     libs = []
++  } else if (is_zedbsd && current_toolchain == default_toolchain) {
++    libs = [ "m" ]
+   } else if (is_linux || is_chromeos) {
+     libs = [
+       "dl",
+--- a/build/config/clang/BUILD.gn
++++ b/build/config/clang/BUILD.gn
+@@ -256,9 +256,16 @@
+         assert(false)  # Unhandled target platform
+       }
+ 
+-      _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
+-      _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
+-      libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
++      not_needed([ "_ext", "_prefix", "_dir", "_suffix", "_libname" ])
++      if (is_zedbsd && current_toolchain == default_toolchain) {
++        libs = [ "/home/awe/zedBSD/build/x86_64/sysroot/usr/lib/libclang_rt.builtins.a" ]
++      } else if (is_zedbsd) {
++        libs = [ "//third_party/llvm-build/Release+Asserts/lib/clang/24/lib/x86_64-unknown-linux-gnu/libclang_rt.builtins.a" ]
++      } else {
++        _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
++        _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
++        libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
++      }
+     }
+   }
+ }
+--- a/build/config/compiler/BUILD.gn
++++ b/build/config/compiler/BUILD.gn
+@@ -314,8 +314,13 @@
+ # libclang_rt.asan-*-android.so), so all sanitizer symbols are resolved at link
+ # time and -Wl,-z,defs can safely remain enabled to catch missing symbols.
+ config("no_unresolved_symbols") {
+-  if ((!using_sanitizer || is_android) &&
+-      (is_linux || is_chromeos || is_android || is_fuchsia)) {
++  if (is_zedbsd && current_toolchain == default_toolchain) {
++    ldflags = [
++      "-Wl,--allow-shlib-undefined",
++      "-Wl,--as-needed",
++    ]
++  } else if ((!using_sanitizer || is_android) &&
++             (is_linux || is_chromeos || is_android || is_fuchsia)) {
+     ldflags = [
+       "-Wl,-z,defs",
+       "-Wl,--as-needed",
+@@ -469,8 +474,9 @@
+       } else if (is_chromeos) {
+         cflags += [ "-fstack-protector-strong" ]
+       } else if (is_posix || is_fuchsia) {
+-        if (current_os != "aix") {
+-          # Not available on aix.
++        if (current_os != "aix" &&
++            !(is_zedbsd && current_toolchain == default_toolchain)) {
++          # Not available on aix or zedbsd.
+           cflags += [ "-fstack-protector" ]
+         }
+       }
+@@ -1012,6 +1018,9 @@
+   }
+   if (rust_abi_target != "") {
+     rustflags += [ "--target=$rust_abi_target" ]
++    if (rust_abi_target == "x86_64-unknown-zedbsd") {
++      rustflags += [ "-Zunstable-options" ]
++    }
+   }
+   if (!use_thin_lto || !toolchain_supports_rust_thin_lto) {
+     # Don't include bitcode if it won't be used.
+@@ -1795,6 +1804,9 @@
+ 
+   if (use_safe_libcxx) {
+     defines += [ "_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE" ]
++    if (is_zedbsd && current_toolchain == default_toolchain) {
++      defines += [ "_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE" ]
++    }
+   } else {
+     defines += [ "_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE" ]
+   }
+--- a/build/config/compiler_cpu_abi.gn
++++ b/build/config/compiler_cpu_abi.gn
+@@ -48,7 +48,18 @@
+ if ((is_posix && !is_apple) || is_fuchsia) {
+   # simplicity we always explicitly set the architecture.
+   if (current_cpu == "x64") {
+-    if (is_clang && !is_android && !is_fuchsia && !is_chromeos_device) {
++    if (is_zedbsd && current_toolchain == default_toolchain) {
++      cpu_abi_cflags += [
++        "--target=x86_64-unknown-zedbsd",
++        "-DKERN_USER_ABI_LP64",
++        "-ftls-model=global-dynamic",
++      ]
++      cpu_abi_ldflags += [
++        "--target=x86_64-unknown-zedbsd",
++        "-L$zedbsd_dynamic_dir",
++        "-Wl,-rpath-link,$zedbsd_dynamic_dir",
++      ]
++    } else if (is_clang && !is_android && !is_fuchsia && !is_chromeos_device) {
+       cpu_abi_cflags += [ "--target=x86_64-unknown-linux-gnu" ]
+       cpu_abi_ldflags += [ "--target=x86_64-unknown-linux-gnu" ]
+     } else {
+--- a/build/config/linux/BUILD.gn
++++ b/build/config/linux/BUILD.gn
+@@ -40,7 +40,8 @@
+   }
+ 
+   if ((!is_chromeos || default_toolchain != "//build/toolchain/cros:target") &&
+-      (!use_custom_libcxx || current_cpu == "mipsel")) {
++      (!use_custom_libcxx || current_cpu == "mipsel") &&
++      !(is_zedbsd && current_toolchain == default_toolchain)) {
+     libs = [ "atomic" ]
+   }
+ }
+--- a/build/config/linux/dri/BUILD.gn
++++ b/build/config/linux/dri/BUILD.gn
+@@ -1,18 +1 @@
+-# Copyright 2017 The Chromium Authors
+-# Use of this source code is governed by a BSD-style license that can be
+-# found in the LICENSE file.
+-
+-import("//build/config/linux/pkg_config.gni")
+-
+-assert(is_linux, "This file should only be referenced on Linux")
+-
+-pkg_config("dri") {
+-  packages = [ "dri" ]
+-  dri_driver_dir = exec_script(pkg_config_script,
+-                               common_pkg_config_args + pkg_config_args + [
+-                                     "--dridriverdir",
+-                                     "dri",
+-                                   ],
+-                               "string")
+-  defines = [ "DRI_DRIVER_DIR=\"$dri_driver_dir\"" ]
+-}
++config("dri") {}
+--- a/build/config/rust.gni
++++ b/build/config/rust.gni
+@@ -234,7 +234,11 @@
+   } else if (current_cpu == "x86") {
+     rust_abi_target = "i686-unknown-linux-gnu"
+   } else if (current_cpu == "x64") {
+-    rust_abi_target = "x86_64-unknown-linux-gnu"
++    if (is_zedbsd && current_toolchain == default_toolchain) {
++      rust_abi_target = "x86_64-unknown-zedbsd"
++    } else {
++      rust_abi_target = "x86_64-unknown-linux-gnu"
++    }
+   } else if (current_cpu == "arm") {
+     if (arm_float_abi == "hard") {
+       float_suffix = "hf"
+--- a/build/config/sysroot.gni
++++ b/build/config/sysroot.gni
+@@ -21,7 +21,7 @@
+ }
+ 
+ if (sysroot == "") {
+-  if (current_os == target_os && current_cpu == target_cpu &&
++  if (current_toolchain == default_toolchain && current_os == target_os && current_cpu == target_cpu &&
+       target_sysroot != "") {
+     sysroot = target_sysroot
+   } else if (is_android) {
+--- a/build/rust/gni_impl/rustc_print_cfg.py
++++ b/build/rust/gni_impl/rustc_print_cfg.py
+@@ -34,10 +34,18 @@
+     # output of `--print-cfg`.  If so, then consider also passing extra `args`
+     # (derived from `rustflags` maybe?).
+     args = [rustc_path, "--print=cfg", f"--target={target}"]
++    if target == "x86_64-unknown-zedbsd":
++        args.append("-Zunstable-options")
++
++    env = os.environ.copy()
++    env.setdefault(
++        "RUST_TARGET_PATH",
++        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
++    )
+ 
+     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+     with open(output_path, 'w') as output_file:
+-        subprocess.run(args, stdout=output_file, check=True)
++        subprocess.run(args, stdout=output_file, env=env, check=True)
+ 
+ 
+ def main():
+--- a/build/rust/gni_impl/rustc_wrapper.py
++++ b/build/rust/gni_impl/rustc_wrapper.py
+@@ -423,6 +423,10 @@
+     rustenv = dict([item.split("=", 1) for item in rustenv])  # list to dict
+     _SaveRustEnvAndFlags(args.dump_rustc_env_and_flags, rustenv, rustc_args)
+     PrepareRustEnvForExecution(rustenv)
++    rustenv.setdefault(
++        "RUST_TARGET_PATH",
++        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
++    )
+ 
+     # Add `--emit` and `-o` flags into the `rustc` invocation
+     # (but do this _after_ the `_SaveRustEnvAndFlags` call above).
+--- a/build/rust/known-target-triples.txt
++++ b/build/rust/known-target-triples.txt
+@@ -41,5 +41,6 @@
+ x86_64-pc-windows-msvc
+ x86_64-unknown-fuchsia
+ x86_64-unknown-linux-gnu
++x86_64-unknown-zedbsd
+ powerpc64le-unknown-linux-gnu
+ s390x-unknown-linux-gnu
+--- /dev/null
++++ b/build/rust/x86_64-unknown-zedbsd.json
+@@ -0,0 +1,43 @@
++{
++  "abi-return-struct-as-int": true,
++  "arch": "x86_64",
++  "cpu": "x86-64",
++  "crt-objects-fallback": "false",
++  "crt-static-respected": true,
++  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
++  "default-dwarf-version": 2,
++  "dynamic-linking": true,
++  "has-rpath": true,
++  "has-thread-local": true,
++  "linker-flavor": "gnu-cc",
++  "llvm-target": "x86_64-unknown-zedbsd",
++  "max-atomic-width": 64,
++  "os": "freebsd",
++  "plt-by-default": false,
++  "position-independent-executables": true,
++  "pre-link-args": {
++    "gnu-cc": [
++      "-m64"
++    ],
++    "gnu-lld-cc": [
++      "-m64"
++    ]
++  },
++  "relro-level": "full",
++  "stack-probes": {
++    "kind": "inline"
++  },
++  "supported-sanitizers": [
++    "address",
++    "memory",
++    "thread",
++    "cfi"
++  ],
++  "supports-xray": true,
++  "target-family": [
++    "unix"
++  ],
++  "target-pointer-width": 64,
++  "linker": "/home/awe/zedBSD/build/x86_64/packages/toolchain/bin/zedbsd-clang",
++  "tls-model": "global-dynamic"
++}
+\ No newline at end of file
+--- /dev/null
++++ b/build/toolchain/zedbsd/BUILD.gn
+@@ -0,0 +1,8 @@
++import("//build/toolchain/gcc_toolchain.gni")
++
++clang_toolchain("clang_x64") {
++  toolchain_args = {
++    current_cpu = "x64"
++    current_os = "linux"
++  }
++}
+--- a/buildtools/third_party/libc++abi/BUILD.gn
++++ b/buildtools/third_party/libc++abi/BUILD.gn
+@@ -59,7 +59,8 @@
+ 
+   defines = [ "LIBCXXABI_SILENT_TERMINATE" ]
+ 
+-  if (is_linux || is_android) {
++  if ((is_linux && !(is_zedbsd && current_toolchain == default_toolchain)) ||
++      is_android) {
+     defines += [ "_LIBCXXABI_USE_FUTEX" ]
+   }
+ 
+--- a/content/gpu/BUILD.gn
++++ b/content/gpu/BUILD.gn
+@@ -126,7 +126,7 @@
+   }
+ 
+   # Use DRI on desktop Linux builds.
+-  if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
++  if (false && current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
+       !is_castos) {
+     configs += [ "//build/config/linux/dri" ]
+   }

@@ -1,0 +1,1333 @@
+--- a/base/allocator/partition_allocator/src/partition_alloc/build_config.h
++++ b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
+@@ -90,6 +90,8 @@
+ #define PA_IS_WIN
+ #elif defined(__Fuchsia__)
+ #define PA_IS_FUCHSIA
++#elif defined(__ZEDBSD__)
++#define PA_IS_ZEDBSD
+ #elif defined(__FreeBSD__)
+ #define PA_IS_FREEBSD
+ #elif defined(__NetBSD__)
+@@ -120,7 +122,7 @@
+ #if defined(PA_IS_AIX) || defined(PA_IS_ASMJS) || defined(PA_IS_FREEBSD) ||  \
+     defined(PA_IS_IOS) || defined(PA_IS_LINUX) || defined(PA_IS_CHROMEOS) || \
+     defined(PA_IS_MAC) || defined(PA_IS_NETBSD) || defined(PA_IS_OPENBSD) || \
+-    defined(PA_IS_QNX) || defined(PA_IS_SOLARIS) ||                          \
++    defined(PA_IS_QNX) || defined(PA_IS_SOLARIS) || defined(PA_IS_ZEDBSD) ||                          \
+     PA_BUILDFLAG(IS_ANDROID) || PA_BUILDFLAG(IS_CHROMEOS)
+ #define PA_IS_POSIX
+ #endif
+--- a/base/allocator/partition_allocator/src/partition_alloc/page_allocator_internals_posix.h
++++ b/base/allocator/partition_allocator/src/partition_alloc/page_allocator_internals_posix.h
+@@ -6,7 +6,9 @@
+ #define PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_POSIX_H_
+ 
+ #include <sys/mman.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ 
+ #include <algorithm>
+ #include <atomic>
+--- a/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/rand_util_posix.cc
++++ b/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/rand_util_posix.cc
+@@ -18,7 +18,9 @@
+ #include <CommonCrypto/CommonRandom.h>
+ #else
+ #include <fcntl.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <unistd.h>
+ #include <cerrno>
+ 
+--- a/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/threading/platform_thread_posix.cc
++++ b/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/threading/platform_thread_posix.cc
+@@ -61,8 +61,12 @@
+ #elif PA_BUILDFLAG(IS_POSIX) && PA_BUILDFLAG(IS_AIX)
+   return pthread_self();
+ #elif PA_BUILDFLAG(IS_POSIX) && !PA_BUILDFLAG(IS_AIX)
++  #if defined(__ZEDBSD__)
++  return static_cast<int64_t>(pthread_self());
++#else
+   return reinterpret_cast<int64_t>(pthread_self());
+ #endif
++#endif
+ }
+ 
+ // static
+--- a/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/time/time_now_posix.cc
++++ b/base/allocator/partition_allocator/src/partition_alloc/partition_alloc_base/time/time_now_posix.cc
+@@ -68,8 +68,7 @@
+ namespace subtle {
+ Time TimeNowIgnoringOverride() {
+   struct timeval tv;
+-  struct timezone tz = {0, 0};  // UTC
+-  PA_BASE_CHECK(gettimeofday(&tv, &tz) == 0);
++  PA_BASE_CHECK(gettimeofday(&tv, nullptr) == 0);
+   // Combine seconds and microseconds in a 64-bit field containing microseconds
+   // since the epoch.  That's enough for nearly 600 centuries.  Adjust from
+   // Unix (1970) to Windows (1601) epoch.
+--- a/base/allocator/partition_allocator/src/partition_alloc/stack/stack.cc
++++ b/base/allocator/partition_allocator/src/partition_alloc/stack/stack.cc
+@@ -54,6 +54,9 @@
+ #elif PA_BUILDFLAG(IS_POSIX) || PA_BUILDFLAG(IS_FUCHSIA)
+ 
+ uintptr_t GetStackTop() {
++#if defined(__ZEDBSD__)
++  return 0;
++#else
+   pthread_attr_t attr;
+   int error = pthread_getattr_np(pthread_self(), &attr);
+   if (!error) {
+@@ -74,6 +77,7 @@
+ #else
+   return 0;
+ #endif  // PA_BUILDFLAG(PA_LIBC_GLIBC)
++#endif
+ }
+ 
+ #else  // PA_BUILDFLAG(IS_WIN)
+--- a/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc
++++ b/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc
+@@ -9,7 +9,9 @@
+ #if PA_BUILDFLAG(ENABLE_PKEYS)
+ 
+ #include <sys/mman.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <unistd.h>
+ 
+ #include <cerrno>
+@@ -19,7 +21,7 @@
+ #include "partition_alloc/partition_alloc_check.h"
+ #include "partition_alloc/thread_isolation/thread_isolation.h"
+ 
+-#if !PA_BUILDFLAG(IS_LINUX) && !PA_BUILDFLAG(IS_CHROMEOS)
++#if !defined(__ZEDBSD__) && !PA_BUILDFLAG(IS_LINUX) && !PA_BUILDFLAG(IS_CHROMEOS)
+ #error "This pkey code is currently only supported on Linux and ChromeOS"
+ #endif
+ 
+@@ -32,7 +34,12 @@
+ 
+ PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+ int PkeyMprotect(void* addr, size_t len, int prot, int pkey) {
++  #if defined(__ZEDBSD__)
++  errno = ENOSYS;
++  return -1;
++#else
+   return syscall(SYS_pkey_mprotect, addr, len, prot, pkey);
++#endif
+ }
+ 
+ void TagMemoryWithPkey(int pkey, void* address, size_t size) {
+@@ -46,12 +53,19 @@
+ 
+ PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+ int PkeyAlloc(int access_rights) {
++  #if defined(__ZEDBSD__)
++  errno = ENOSYS;
++  return -1;
++#else
+   return syscall(SYS_pkey_alloc, 0, access_rights);
++#endif
+ }
+ 
+ PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+ void PkeyFree(int pkey) {
++  #if !defined(__ZEDBSD__)
+   PA_PCHECK(syscall(SYS_pkey_free, pkey) == 0);
++#endif
+ }
+ 
+ PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+--- a/base/BUILD.gn
++++ b/base/BUILD.gn
+@@ -18,6 +18,7 @@
+ # huge sequence of random-looking conditionals.
+ 
+ import("//base/allocator/allocator.gni")
++is_zedbsd_target = is_zedbsd && current_toolchain == default_toolchain
+ import("//base/allocator/partition_allocator/partition_alloc.gni")
+ import("//base/debug/debug.gni")
+ import("//base/trace_event/tracing.gni")
+@@ -1096,7 +1097,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if ((is_linux && !is_zedbsd_target) || is_chromeos) {
+     sources += [
+       "debug/proc_maps_linux.cc",
+       "debug/proc_maps_linux.h",
+@@ -1117,6 +1118,15 @@
+     ]
+   }
+ 
++  if (is_zedbsd_target) {
++    sources += [
++      "process/process_metrics_zedbsd.cc",
++      "threading/platform_thread_zedbsd.cc",
++      "zedbsd_rust_compat.c",
++    ]
++    sources -= [ "linux_util.cc", "linux_util.h" ]
++  }
++
+   if (is_chromeos) {
+     sources += [
+       "process/process_priority_delegate.h",
+@@ -1125,7 +1135,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_android) {
++  if ((is_linux && !is_zedbsd_target) || is_chromeos || is_android) {
+     sources += [
+       "files/file_path_watcher_inotify.cc",
+       "files/file_path_watcher_inotify.h",
+@@ -1215,7 +1225,8 @@
+   # Needed for <atomic> if using newer C++ library than sysroot, except if
+   # building inside the cros_sdk environment - use host_toolchain as a
+   # more robust check for this.
+-  if (!use_sysroot && (is_android || is_chromeos || (is_linux && !is_castos)) &&
++  if (!use_sysroot && !is_zedbsd_target &&
++      (is_android || is_chromeos || (is_linux && !is_castos)) &&
+       host_toolchain != "//build/toolchain/cros:host") {
+     libs += [ "atomic" ]
+   }
+@@ -1767,12 +1778,7 @@
+       "posix/can_lower_nice_to.h",
+       "process/launch_posix.cc",
+       "profiler/module_cache_posix.cc",
+-      "profiler/stack_base_address_posix.cc",
+-      "profiler/stack_base_address_posix.h",
+-      "profiler/stack_copier_signal.cc",
+-      "profiler/stack_copier_signal.h",
+-      "profiler/thread_delegate_posix.cc",
+-      "profiler/thread_delegate_posix.h",
++
+     ]
+   }
+ 
+@@ -2409,11 +2415,18 @@
+ 
+     configs += linux_configs
+     all_dependent_configs += linux_configs
+-    sources += [
+-      "process/set_process_title_linux.cc",
+-      "process/set_process_title_linux.h",
+-      "system/sys_info_linux.cc",
+-    ]
++    if (!is_zedbsd_target) {
++      sources += [
++        "process/set_process_title_linux.cc",
++        "process/set_process_title_linux.h",
++        "system/sys_info_linux.cc",
++      ]
++    } else {
++      sources += [
++        "files/file_path_watcher_stub.cc",
++        "system/sys_info_zedbsd.cc",
++      ]
++    }
+     if (!is_cronet_build) {
+       # These dependencies are not required on Android.
+       sources += [
+--- a/base/debug/elf_reader.cc
++++ b/base/debug/elf_reader.cc
+@@ -6,6 +6,9 @@
+ 
+ #include <arpa/inet.h>
+ #include <elf.h>
++#ifndef NT_GNU_BUILD_ID
++#define NT_GNU_BUILD_ID 3
++#endif
+ #include <string.h>
+ 
+ #include <optional>
+--- a/base/debug/stack_trace_posix.cc
++++ b/base/debug/stack_trace_posix.cc
+@@ -14,7 +14,9 @@
+ #include <string.h>
+ #include <sys/param.h>
+ #include <sys/stat.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <sys/types.h>
+ #include <unistd.h>
+ 
+@@ -86,7 +88,7 @@
+ #include "base/strings/string_util.h"
+ #include "build/build_config.h"
+ 
+-#if defined(USE_SYMBOLIZE)
++#if defined(USE_SYMBOLIZE) && !BUILDFLAG(IS_ZEDBSD)
+ #include "base/third_party/symbolize/symbolize.h"  // nogncheck
+ 
+ #if BUILDFLAG(ENABLE_STACK_TRACE_LINE_NUMBERS)
+@@ -188,7 +190,7 @@
+ }
+ #endif  // defined(HAVE_DLADDR) || defined(USE_SYMBOLIZE)
+ 
+-#if defined(USE_SYMBOLIZE)
++#if defined(USE_SYMBOLIZE) && !BUILDFLAG(IS_ZEDBSD)
+ void OutputFrameId(size_t frame_id, BacktraceOutputHandler* handler) {
+   handler->HandleOutput("#");
+   OutputValue(frame_id, handler);
+@@ -204,7 +206,7 @@
+   // Don't exceed kMaxTraces or GetDwarfCompileUnitOffsets can go OOB.
+   traces = traces.first(std::min(traces.size(), StackTrace::kMaxTraces));
+ 
+-#if defined(USE_SYMBOLIZE)
++#if defined(USE_SYMBOLIZE) && !BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(ENABLE_STACK_TRACE_LINE_NUMBERS)
+   std::array<uint64_t, StackTrace::kMaxTraces> cu_offsets = {};
+   GetDwarfCompileUnitOffsets(traces.data(), cu_offsets.data(), traces.size());
+@@ -390,6 +392,7 @@
+   char buf[1024] = {0};
+   internal::itoa_r(signal, 10, 0, buf);
+   PrintToStderr(buf);
++#if !BUILDFLAG(IS_ZEDBSD)
+   if (signal == SIGBUS) {
+     if (info->si_code == BUS_ADRALN) {
+       PrintToStderr(" BUS_ADRALN ");
+@@ -438,6 +441,9 @@
+     } else {
+       PrintToStderr(" <unknown> ");
+     }
++#else
++  if (false) {
++#endif
+   } else if (signal == SIGSEGV) {
+     if (info->si_code == SEGV_MAPERR) {
+       PrintToStderr(" SEGV_MAPERR ");
+@@ -456,7 +462,7 @@
+   }
+   if (signal == SIGBUS || signal == SIGFPE || signal == SIGILL ||
+       signal == SIGSEGV) {
+-    internal::itoa_r(reinterpret_cast<intptr_t>(info->si_addr), 16, 12, buf);
++    internal::itoa_r((intptr_t)(info->si_addr), 16, 12, buf);
+     PrintToStderr(buf);
+   }
+   PrintToStderr("\n");
+@@ -660,7 +666,7 @@
+   StackTrace stack_trace;
+ }
+ 
+-#if defined(USE_SYMBOLIZE)
++#if defined(USE_SYMBOLIZE) && !BUILDFLAG(IS_ZEDBSD)
+ 
+ // class SandboxSymbolizeHelper.
+ //
+@@ -980,7 +986,7 @@
+ }  // namespace
+ 
+ bool EnableInProcessStackDumping() {
+-#if defined(USE_SYMBOLIZE)
++#if defined(USE_SYMBOLIZE) && !BUILDFLAG(IS_ZEDBSD)
+   SandboxSymbolizeHelper::GetInstance();
+ #endif  // USE_SYMBOLIZE
+ 
+@@ -1075,14 +1081,14 @@
+ #endif
+ }
+ 
+-#if defined(HAVE_BACKTRACE)
+ void StackTrace::OutputToStreamWithPrefixImpl(
+     std::ostream* os,
+     cstring_view prefix_string) const {
++#if defined(HAVE_BACKTRACE)
+   StreamBacktraceOutputHandler handler(os);
+   ProcessBacktrace(addresses(), prefix_string, &handler);
+-}
+ #endif
++}
+ 
+ namespace internal {
+ 
+--- a/base/files/file_path.cc
++++ b/base/files/file_path.cc
+@@ -5,6 +5,7 @@
+ #include "base/files/file_path.h"
+ 
+ #include <string.h>
++#include <strings.h>
+ 
+ #include <algorithm>
+ #include <atomic>
+--- a/base/files/file_posix.cc
++++ b/base/files/file_posix.cc
+@@ -96,7 +96,7 @@
+ }
+ 
+ int CallFtruncate(PlatformFile file, int64_t length) {
+-#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   return HANDLE_EINTR(ftruncate(file, length));
+ #else
+   return HANDLE_EINTR(ftruncate64(file, length));
+@@ -104,7 +104,7 @@
+ }
+ 
+ int CallFutimes(PlatformFile file, const std::array<struct timeval, 2> times) {
+-#ifdef __USE_XOPEN2K8
++#if defined(__USE_XOPEN2K8) || BUILDFLAG(IS_ZEDBSD)
+   // futimens should be available, but futimes might not be
+   // http://pubs.opengroup.org/onlinepubs/9699919799/
+ 
+@@ -602,7 +602,7 @@
+   }
+ 
+   if (flags & FLAG_TERMINAL_DEVICE) {
+-    open_flags |= O_NOCTTY | O_NDELAY;
++    open_flags |= O_NOCTTY | O_NONBLOCK;
+   }
+ 
+   if (flags & FLAG_APPEND && flags & FLAG_READ) {
+--- a/base/memory/platform_shared_memory_region.h
++++ b/base/memory/platform_shared_memory_region.h
+@@ -104,7 +104,7 @@
+ #if BUILDFLAG(IS_FUCHSIA)
+     kNotVmo,
+ #endif
+-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+     kFcntlFailed,
+     kReadOnlyFdNotReadOnly,
+     kUnexpectedReadOnlyFd,
+@@ -117,7 +117,7 @@
+   static PlatformSharedMemoryRegion CreateWritable(size_t size);
+   static PlatformSharedMemoryRegion CreateUnsafe(size_t size);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   // Creates a new kUnsafe region backed by an anonymous file (memfd) without
+   // touching the filesystem, so that it also works inside a sandbox whose
+   // seccomp policy allows memfd_create(2) (the baseline policy does). Unlike
+@@ -260,7 +260,7 @@
+                            CheckPlatformHandlePermissionsCorrespondToMode);
+   static PlatformSharedMemoryRegion Create(Mode mode,
+                                            size_t size
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+                                            ,
+                                            bool executable = false
+ #endif
+--- a/base/memory/platform_shared_memory_region_posix.cc
++++ b/base/memory/platform_shared_memory_region_posix.cc
+@@ -6,7 +6,9 @@
+ 
+ #include <fcntl.h>
+ #include <sys/mman.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <unistd.h>
+ 
+ #include <atomic>
+@@ -64,7 +66,7 @@
+   return std::nullopt;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ // Added in Linux 6.3; not in all sysroot headers yet.
+ #ifndef MFD_NOEXEC_SEAL
+@@ -87,6 +89,9 @@
+ // the file-based implementation.
+ ScopedFDPair CreateAnonymousRegion(PlatformSharedMemoryRegion::Mode mode,
+                                    size_t size) {
++#if BUILDFLAG(IS_ZEDBSD)
++  return {};
++#else
+   // MFD_NOEXEC_SEAL creates the file non-executable and seals that state.
+   // Kernels older than 6.3 reject the flag with EINVAL; remember that.
+   // The raw system call is used (as in mojo/core/channel_linux.cc) so that
+@@ -145,6 +150,7 @@
+   }
+ 
+   return ScopedFDPair(std::move(fd), std::move(readonly_fd));
++#endif
+ }
+ 
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+@@ -261,7 +267,7 @@
+   return true;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // static
+ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::CreateUnsafeAnonymous(
+     size_t size) {
+@@ -281,7 +287,7 @@
+ // static
+ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
+                                                               size_t size
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+                                                               ,
+                                                               bool executable
+ #endif
+@@ -297,7 +303,7 @@
+   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
+                                      "lead to this region being non-modifiable";
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   if (!executable) {
+     ScopedFDPair anonymous_region = CreateAnonymousRegion(mode, size);
+     if (anonymous_region.fd.is_valid()) {
+@@ -317,7 +323,7 @@
+   // flag.
+   FilePath directory;
+   if (!GetShmemTempDir(
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+           executable,
+ #else
+           false /* executable */,
+--- a/base/memory/protected_memory.h
++++ b/base/memory/protected_memory.h
+@@ -115,7 +115,7 @@
+ 
+ #define DECLARE_PROTECTED_DATA constinit
+ #define DEFINE_PROTECTED_DATA constinit __declspec(allocate("prot$mem"))
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ // This value is used to align the writers variable. That variable needs to be
+ // aligned to ensure that the protected memory section starts on a page
+ // boundary.
+--- a/base/message_loop/message_pump_epoll.cc
++++ b/base/message_loop/message_pump_epoll.cc
+@@ -4,8 +4,12 @@
+ 
+ #include "base/message_loop/message_pump_epoll.h"
+ 
++#if !BUILDFLAG(IS_ZEDBSD)
++#include <sys/epoll.h>
+ #include <sys/eventfd.h>
++#endif
+ 
++#include <fcntl.h>
+ #include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+@@ -38,10 +42,17 @@
+ 
+ // Caches the state of the "BatchNativeEventsInMessagePumpEpoll".
+ std::atomic_bool g_use_batched_version = false;
++#if BUILDFLAG(IS_ZEDBSD)
++std::atomic_bool g_use_poll = true;
++#else
+ std::atomic_bool g_use_poll = false;
++#endif
+ 
++#ifndef POLLRDHUP
++#define POLLRDHUP 0
++#endif
+ constexpr std::pair<uint32_t, short int> kEpollToPollEvents[] = {
+-    {EPOLLIN, POLLIN},   {EPOLLOUT, POLLOUT}, {EPOLLRDHUP, POLLRDHUP},
++    {EPOLLIN, POLLIN},   {EPOLLOUT, POLLOUT},     {EPOLLRDHUP, POLLRDHUP},
+     {EPOLLPRI, POLLPRI}, {EPOLLERR, POLLERR}, {EPOLLHUP, POLLHUP}};
+ 
+ void SetEventsForPoll(const uint32_t epoll_events, struct pollfd* poll_entry) {
+@@ -135,6 +146,16 @@
+ };
+ 
+ MessagePumpEpoll::MessagePumpEpoll() {
++#if BUILDFLAG(IS_ZEDBSD)
++  int fds[2];
++  PCHECK(pipe(fds) == 0);
++  PCHECK(fcntl(fds[0], F_SETFL, O_NONBLOCK) == 0);
++  PCHECK(fcntl(fds[1], F_SETFL, O_NONBLOCK) == 0);
++  PCHECK(fcntl(fds[0], F_SETFD, FD_CLOEXEC) == 0);
++  PCHECK(fcntl(fds[1], F_SETFD, FD_CLOEXEC) == 0);
++  wake_event_.reset(fds[0]);
++  wake_pipe_write_.reset(fds[1]);
++#else
+   epoll_.reset(epoll_create1(/*flags=*/0));
+   PCHECK(epoll_.is_valid());
+ 
+@@ -144,6 +165,7 @@
+   epoll_event wake{.events = EPOLLIN, .data = {.ptr = &wake_event_}};
+   int rv = epoll_ctl(epoll_.get(), EPOLL_CTL_ADD, wake_event_.get(), &wake);
+   PCHECK(rv == 0);
++#endif
+ 
+   struct pollfd poll_entry;
+   poll_entry.fd = wake_event_.get();
+@@ -161,7 +183,11 @@
+   g_use_batched_version.store(
+       base::FeatureList::IsEnabled(kBatchNativeEventsInMessagePumpEpoll),
+       std::memory_order_relaxed);
++  #if BUILDFLAG(IS_ZEDBSD)
++  g_use_poll.store(true,
++#else
+   g_use_poll.store(base::FeatureList::IsEnabled(kUsePollForMessagePumpEpoll),
++#endif
+                    std::memory_order_relaxed);
+ }
+ 
+@@ -299,14 +325,15 @@
+ }
+ 
+ void MessagePumpEpoll::ScheduleWork() {
++#if BUILDFLAG(IS_ZEDBSD)
++  const uint8_t value = 1;
++  ssize_t n = HANDLE_EINTR(write(wake_pipe_write_.get(), &value, sizeof(value)));
++  DPCHECK(n == sizeof(value) || errno == EAGAIN);
++#else
+   const uint64_t value = 1;
+   ssize_t n = HANDLE_EINTR(write(wake_event_.get(), &value, sizeof(value)));
+-
+-  // EAGAIN here implies that the write() would overflow of the event counter,
+-  // which is a condition we can safely ignore. It implies that the event
+-  // counter is non-zero and therefore readable, which is enough to ensure that
+-  // any pending wait eventually wakes up.
+   DPCHECK(n == sizeof(value) || errno == EAGAIN);
++#endif
+ }
+ 
+ void MessagePumpEpoll::ScheduleDelayedWork(
+@@ -320,9 +347,11 @@
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   DCHECK(!entry.stopped);
+   const uint32_t events = entry.ComputeActiveEvents();
++#if !BUILDFLAG(IS_ZEDBSD)
+   epoll_event event{.events = events, .data = {.ptr = &entry}};
+   int rv = epoll_ctl(epoll_.get(), EPOLL_CTL_ADD, entry.fd, &event);
+   DPCHECK(rv == 0);
++#endif
+   entry.registered_events = events;
+ 
+   DCHECK(FindPollEntry(entry.fd) == pollfds_.end());
+@@ -360,9 +389,11 @@
+       // Persistent events don't need to be modified if no bits are changing.
+       return;
+     }
++#if !BUILDFLAG(IS_ZEDBSD)
+     epoll_event event{.events = events, .data = {.ptr = &entry}};
+     int rv = epoll_ctl(epoll_.get(), EPOLL_CTL_MOD, entry.fd, &event);
+     DPCHECK(rv == 0);
++#endif
+     entry.registered_events = events;
+ 
+     auto poll_entry = FindPollEntry(entry.fd);
+@@ -378,8 +409,10 @@
+ void MessagePumpEpoll::StopEpollEvent(EpollEventEntry& entry) {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   if (!entry.stopped) {
++#if !BUILDFLAG(IS_ZEDBSD)
+     int rv = epoll_ctl(epoll_.get(), EPOLL_CTL_DEL, entry.fd, nullptr);
+     DPCHECK(rv == 0);
++#endif
+     entry.stopped = true;
+     entry.registered_events = 0;
+     RemovePollEntry(entry.fd);
+@@ -440,8 +473,12 @@
+   // to iterate through the list of watched fds. This value is pretty arbitrary,
+   // the internet suggests that under 1000 fds that epoll isn't noticeably
+   // faster than poll but this isn't easy to empirically measure.
++#if BUILDFLAG(IS_ZEDBSD)
++  bool use_poll = true;
++#else
+   bool use_poll =
+       g_use_poll.load(std::memory_order_relaxed) && entries_.size() < 500;
++#endif
+ 
+   if (use_poll) {
+     if (!GetEventsPoll(epoll_timeout, &poll_events)) {
+@@ -449,6 +486,9 @@
+     }
+     ready_events = span(poll_events).first(poll_events.size());
+   } else {
++#if BUILDFLAG(IS_ZEDBSD)
++    return false;
++#else
+     const int epoll_result = epoll_wait(epoll_.get(), epoll_events,
+                                         std::size(epoll_events), epoll_timeout);
+     if (epoll_result < 0) {
+@@ -461,6 +501,7 @@
+ 
+     ready_events =
+         span(epoll_events).first(base::checked_cast<size_t>(epoll_result));
++#endif
+   }
+ 
+   if (!ready_events.empty()) {
+@@ -660,9 +701,14 @@
+ void MessagePumpEpoll::HandleWakeUp() {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   BeginNativeWorkBatch();
++#if BUILDFLAG(IS_ZEDBSD)
++  uint8_t buf[64];
++  while (HANDLE_EINTR(read(wake_event_.get(), buf, sizeof(buf))) > 0) {}
++#else
+   uint64_t value;
+   ssize_t n = HANDLE_EINTR(read(wake_event_.get(), &value, sizeof(value)));
+   DPCHECK(n == sizeof(value));
++#endif
+ }
+ 
+ void MessagePumpEpoll::BeginNativeWorkBatch() {
+--- a/base/message_loop/message_pump_epoll.h
++++ b/base/message_loop/message_pump_epoll.h
+@@ -6,7 +6,32 @@
+ #define BASE_MESSAGE_LOOP_MESSAGE_PUMP_EPOLL_H_
+ 
+ #include <poll.h>
++#include "build/build_config.h"
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include <sys/epoll.h>
++#else
++#include <stdint.h>
++#ifndef EPOLLIN
++#define EPOLLIN      0x0001U
++#define EPOLLPRI     0x0002U
++#define EPOLLOUT     0x0004U
++#define EPOLLERR     0x0008U
++#define EPOLLHUP     0x0010U
++#define EPOLLRDHUP   0x2000U
++#define EPOLLET      (1U << 31)
++#define EPOLLONESHOT (1U << 30)
++typedef union epoll_data {
++  void* ptr;
++  int fd;
++  uint32_t u32;
++  uint64_t u64;
++} epoll_data_t;
++struct epoll_event {
++  uint32_t events;
++  epoll_data_t data;
++};
++#endif
++#endif
+ 
+ #include <cstdint>
+ #include <map>
+@@ -235,6 +260,9 @@
+ 
+   // An eventfd object used to wake the pump's thread when scheduling new work.
+   ScopedFD wake_event_;
++#if BUILDFLAG(IS_ZEDBSD)
++  ScopedFD wake_pipe_write_;
++#endif
+ 
+   // Tracks when we should next record periodic metrics.
+   base::TimeTicks next_metrics_time_;
+--- a/base/message_loop/message_pump_for_ui.h
++++ b/base/message_loop/message_pump_for_ui.h
+@@ -20,7 +20,7 @@
+ // No MessagePumpForUI, see below.
+ #elif defined(USE_GLIB)
+ #include "base/message_loop/message_pump_glib.h"
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_ZEDBSD)
+ #include "base/message_loop/message_pump_epoll.h"
+ #elif BUILDFLAG(IS_FUCHSIA)
+ #include "base/message_loop/message_pump_fuchsia.h"
+@@ -43,7 +43,7 @@
+ // TODO(abarth): Figure out if we need this.
+ #elif defined(USE_GLIB)
+ using MessagePumpForUI = MessagePumpGlib;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_ZEDBSD)
+ using MessagePumpForUI = MessagePumpEpoll;
+ #elif BUILDFLAG(IS_FUCHSIA)
+ using MessagePumpForUI = MessagePumpFuchsia;
+--- a/base/posix/can_lower_nice_to.cc
++++ b/base/posix/can_lower_nice_to.cc
+@@ -47,10 +47,11 @@
+   //
+   // So, we are allowed to reduce niceness to a minimum of NZERO - rlimit:
+   struct rlimit rlim;
+-  if (getrlimit(RLIMIT_NICE, &rlim) != 0) {
++  if (true) {
+     return false;
+   }
+-  const int lowest_nice_allowed = NZERO - static_cast<int>(rlim.rlim_cur);
++  (void)rlim;
++  const int lowest_nice_allowed = 0;
+ 
+   // And lowering niceness to |nice_value| is allowed if it is greater than or
+   // equal to the limit:
+--- a/base/posix/unix_domain_socket.cc
++++ b/base/posix/unix_domain_socket.cc
+@@ -30,7 +30,7 @@
+   // macOS does not support SEQPACKET.
+   const int flags = SOCK_STREAM;
+ #else
+-  const int flags = SOCK_SEQPACKET;
++  const int flags = SOCK_STREAM;
+ #endif
+   if (socketpair(AF_UNIX, flags, 0, raw_socks) == -1) {
+     return false;
+@@ -42,7 +42,7 @@
+ 
+ // static
+ bool UnixDomainSocket::EnableReceiveProcessId(int fd) {
+-#if !BUILDFLAG(IS_APPLE)
++#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+   const int enable = 1;
+   return setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0;
+ #else
+@@ -88,7 +88,7 @@
+ 
+   // Avoid a SIGPIPE if the other end breaks the connection.
+   // Due to a bug in the Linux kernel (net/unix/af_unix.c) MSG_NOSIGNAL isn't
+-  // regarded for SOCK_SEQPACKET in the AF_UNIX domain, but it is mandated by
++  // regarded for SOCK_STREAM in the AF_UNIX domain, but it is mandated by
+   // POSIX.
+   const ssize_t r = HANDLE_EINTR(sendmsg(fd, &msg, MSG_NOSIGNAL));
+   const bool ret = static_cast<ssize_t>(msg_span.size()) == r;
+@@ -126,11 +126,11 @@
+ 
+   const size_t kControlBufferSize =
+       CMSG_SPACE(sizeof(int) * kMaxFileDescriptors)
+-#if !BUILDFLAG(IS_APPLE)
++#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+       // macOS does not support ucred.
+       // macOS supports xucred, but this structure is insufficient.
+       + CMSG_SPACE(sizeof(struct ucred))
+-#endif  // !BUILDFLAG(IS_APPLE)
++#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+       ;
+   char control_buffer[kControlBufferSize];
+   msg_hdr.msg_control = control_buffer;
+@@ -156,7 +156,7 @@
+         wire_fds = reinterpret_cast<int*>(UNSAFE_TODO(CMSG_DATA(cmsg)));
+         wire_fds_len = payload_len / sizeof(int);
+       }
+-#if !BUILDFLAG(IS_APPLE)
++#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+       // macOS does not support SCM_CREDENTIALS.
+       if (cmsg->cmsg_level == SOL_SOCKET &&
+           cmsg->cmsg_type == SCM_CREDENTIALS) {
+@@ -165,7 +165,7 @@
+         pid =
+             reinterpret_cast<struct ucred*>(UNSAFE_TODO(CMSG_DATA(cmsg)))->pid;
+       }
+-#endif  // !BUILDFLAG(IS_APPLE)
++#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+     }
+   }
+ 
+--- a/base/process/launch_posix.cc
++++ b/base/process/launch_posix.cc
+@@ -14,7 +14,9 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <sys/resource.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <sys/time.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+@@ -206,7 +208,7 @@
+ static const char kFDDir[] = "/proc/self/fd";
+ #elif BUILDFLAG(IS_SOLARIS)
+ static const char kFDDir[] = "/dev/fd";
+-#elif BUILDFLAG(IS_FREEBSD)
++#elif BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_ZEDBSD)
+ static const char kFDDir[] = "/dev/fd";
+ #elif BUILDFLAG(IS_OPENBSD)
+ static const char kFDDir[] = "/dev/fd";
+--- a/base/process/process_metrics.h
++++ b/base/process/process_metrics.h
+@@ -311,7 +311,7 @@
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||      \
+     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_AIX) || \
+-    BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ // Data about system-wide memory consumption. Available on Windows, Mac, Linux,
+ // Android and Chrome OS.
+ //
+@@ -347,7 +347,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+-    BUILDFLAG(IS_AIX)
++    BUILDFLAG(IS_AIX) || BUILDFLAG(IS_ZEDBSD)
+   // This provides an estimate of available memory as described here:
+   // https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=34e431b0ae398fc54ea69ff85ec700722c9da773
+   // NOTE: this is ONLY valid in kernels 3.14 and up.  Its value will always
+@@ -362,7 +362,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_AIX) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_AIX) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   ByteSize buffers;
+   ByteSize cached;
+   ByteSize active_anon;
+--- a/base/process/process_metrics_posix.cc
++++ b/base/process/process_metrics_posix.cc
+@@ -22,10 +22,12 @@
+ #if BUILDFLAG(IS_APPLE)
+ #include <malloc/malloc.h>
+ #else
++#if !defined(__ZEDBSD__)
+ #include <malloc.h>
+ #endif
++#endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD) || BUILDFLAG(IS_ANDROID)
+ #include <features.h>
+ 
+ #include "base/numerics/safe_conversions.h"
+@@ -42,7 +44,7 @@
+ 
+ #if !BUILDFLAG(IS_FUCHSIA)
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ static const rlim_t kSystemDefaultMaxFds = 8192;
+ #elif BUILDFLAG(IS_APPLE)
+ static const rlim_t kSystemDefaultMaxFds = 256;
+--- /dev/null
++++ b/base/process/process_metrics_zedbsd.cc
+@@ -0,0 +1,58 @@
++// Copyright 2026 zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_metrics.h"
++
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <uapi/system.h>
++#include <unistd.h>
++
++#include "base/files/scoped_file.h"
++#include "base/process/process.h"
++
++namespace base {
++
++bool GetSystemMemoryInfo(SystemMemoryInfo* meminfo) {
++  if (!meminfo) {
++    return false;
++  }
++  *meminfo = SystemMemoryInfo{};
++
++  ScopedFD fd(open("/dev/system", O_RDONLY | O_CLOEXEC));
++  if (!fd.is_valid()) {
++    return false;
++  }
++
++  struct vm_statistics vmstat = {};
++  if (ioctl(fd.get(), KERN_SYSTEM_GET_VMSTAT, &vmstat) != 0) {
++    return false;
++  }
++
++  meminfo->total = ByteSize(vmstat.physical_total);
++  meminfo->free = ByteSize(vmstat.physical_free);
++  meminfo->available = ByteSize(vmstat.physical_free + vmstat.vm_clean);
++  meminfo->swap_total = ByteSize(vmstat.swap_total);
++  meminfo->swap_free = ByteSize(vmstat.swap_free);
++  meminfo->cached = ByteSize(vmstat.vm_clean);
++  meminfo->dirty = ByteSize(vmstat.vm_dirty);
++  return true;
++}
++
++ByteSize SystemMemoryInfo::GetAvailablePhysicalMemory() const {
++  return available.is_zero() ? free : available;
++}
++
++size_t GetSystemCommitChargeFromMeminfo(const SystemMemoryInfo& meminfo) {
++  if (meminfo.total.InBytes() <= meminfo.free.InBytes()) {
++    return 0;
++  }
++  return static_cast<size_t>((meminfo.total - meminfo.free).InKiB());
++}
++
++Time Process::CreationTime() const {
++  return Time();
++}
++
++}  // namespace base
+--- a/base/rand_util_posix.cc
++++ b/base/rand_util_posix.cc
+@@ -21,7 +21,9 @@
+ #else
+ #include <errno.h>
+ #include <fcntl.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/syscall.h>
++#endif
+ #include <unistd.h>
+ 
+ #include "base/files/file_util.h"
+--- a/base/synchronization/cancelable_event.h
++++ b/base/synchronization/cancelable_event.h
+@@ -11,7 +11,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include <windows.h>
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include <semaphore.h>
+ #else
+ #include "base/synchronization/waitable_event.h"
+@@ -49,7 +49,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+   using NativeHandle = HANDLE;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+   using NativeHandle = sem_t;
+ #else
+   using NativeHandle = WaitableEvent;
+--- a/base/synchronization/lock_impl_posix.cc
++++ b/base/synchronization/lock_impl_posix.cc
+@@ -107,7 +107,7 @@
+   pthread_mutexattr_t mta;
+   int rv = pthread_mutexattr_init(&mta);
+   DCHECK_EQ(rv, 0) << ". " << SystemErrorCodeToString(rv);
+-#if PRIORITY_INHERITANCE_LOCKS_POSSIBLE()
++#if PRIORITY_INHERITANCE_LOCKS_POSSIBLE() && defined(PTHREAD_PRIO_INHERIT)
+   if (PriorityInheritanceAvailable()) {
+ #pragma clang diagnostic push  // Can be removed once our min-sdk is >= 28.
+ #pragma clang diagnostic ignored "-Wunguarded-availability"
+--- a/base/sync_socket_posix.cc
++++ b/base/sync_socket_posix.cc
+@@ -163,12 +163,22 @@
+ 
+ size_t SyncSocket::Peek() {
+   DCHECK(IsValid());
++#if BUILDFLAG(IS_ZEDBSD)
++  struct pollfd pfd = {handle_.get(), POLLIN, 0};
++  if (HANDLE_EINTR(poll(&pfd, 1, 0)) <= 0 || !(pfd.revents & POLLIN)) {
++    return 0;
++  }
++  char buf[1];
++  ssize_t n = HANDLE_EINTR(recv(handle_.get(), buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT));
++  return n > 0 ? static_cast<size_t>(n) : 0;
++#else
+   int number_chars = 0;
+   if (ioctl(handle_.get(), FIONREAD, &number_chars) == -1) {
+     // If there is an error in ioctl, signal that the channel would block.
+     return 0;
+   }
+   return checked_cast<size_t>(number_chars);
++#endif
+ }
+ 
+ bool SyncSocket::IsValid() const {
+--- a/base/system/sys_info_posix.cc
++++ b/base/system/sys_info_posix.cc
+@@ -110,7 +110,7 @@
+ 
+ namespace base {
+ 
+-#if !BUILDFLAG(IS_OPENBSD)
++#if !BUILDFLAG(IS_OPENBSD) && !BUILDFLAG(IS_ZEDBSD)
+ // static
+ int SysInfo::NumberOfProcessors() {
+ #if BUILDFLAG(IS_MAC)
+--- /dev/null
++++ b/base/system/sys_info_zedbsd.cc
+@@ -0,0 +1,56 @@
++// Copyright 2026 zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/system/sys_info.h"
++
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <sys/sysctl.h>
++#include <uapi/system.h>
++#include <unistd.h>
++
++#include "base/files/scoped_file.h"
++#include "base/process/process_metrics.h"
++#include "base/system/sys_info_internal.h"
++
++namespace base {
++
++// static
++ByteSize SysInfo::AmountOfTotalPhysicalMemoryImpl() {
++  SystemMemoryInfo info;
++  if (GetSystemMemoryInfo(&info)) {
++    return info.total;
++  }
++  return ByteSize(0);
++}
++
++// static
++ByteSize SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
++  SystemMemoryInfo info;
++  if (GetSystemMemoryInfo(&info)) {
++    return info.GetAvailablePhysicalMemory();
++  }
++  return ByteSize(0);
++}
++
++// static
++int SysInfo::NumberOfProcessors() {
++  int mib[2] = {CTL_HW, HW_NCPU};
++  int ncpu = 1;
++  size_t len = sizeof(ncpu);
++  if (sysctl(mib, 2, &ncpu, &len, nullptr, 0) == 0 && ncpu > 0) {
++    return ncpu;
++  }
++  return 1;
++}
++
++// static
++SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
++  HardwareInfo info;
++  info.manufacturer = "zedBSD";
++  info.model = "zedBSD";
++  return info;
++}
++
++}  // namespace base
+--- a/base/threading/platform_thread_posix.cc
++++ b/base/threading/platform_thread_posix.cc
+@@ -272,8 +272,12 @@
+ #elif BUILDFLAG(IS_POSIX) && BUILDFLAG(IS_AIX)
+   return PlatformThreadId(pthread_self());
+ #elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_AIX)
++  #if BUILDFLAG(IS_ZEDBSD)
++  return PlatformThreadId(static_cast<PlatformThreadId::UnderlyingType>(pthread_self()));
++#else
+   return PlatformThreadId(reinterpret_cast<int64_t>(pthread_self()));
+ #endif
++#endif
+ }
+ 
+ // static
+--- /dev/null
++++ b/base/threading/platform_thread_zedbsd.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/threading/platform_thread.h"
++
++#include <optional>
++#include <string>
++
++#include "base/threading/platform_thread_internal_posix.h"
++#include "base/threading/thread_id_name_manager.h"
++
++namespace base {
++
++namespace internal {
++
++const ThreadTypeToNiceValuePairForTest kThreadTypeToNiceValueMapForTest[7] = {
++    {ThreadType::kRealtimeAudio, -10},
++    {ThreadType::kPresentation, -8},
++    {ThreadType::kAudioProcessing, -4},
++    {ThreadType::kDefault, 0},
++    {ThreadType::kUtility, 2},
++    {ThreadType::kBackground, 10},
++    {ThreadType::kDefault, 0},
++};
++
++bool CanSetThreadTypeToRealtimeAudio() {
++  return false;
++}
++
++int ThreadTypeToNiceValue(ThreadType thread_type) {
++  return 0;
++}
++
++std::optional<ThreadType> GetCurrentEffectiveThreadTypeForPlatformForTest() {
++  return std::nullopt;
++}
++
++PlatformPriorityOverride SetThreadTypeOverride(
++    PlatformThreadHandle thread_handle,
++    ThreadType thread_type) {
++  return false;
++}
++
++void RemoveThreadTypeOverride(
++    PlatformThreadHandle thread_handle,
++    const PlatformPriorityOverride& priority_override_handle,
++    ThreadType initial_thread_type) {}
++
++}  // namespace internal
++
++size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
++  return 2 * (1 << 20);
++}
++
++void InitThreading() {}
++
++void TerminateOnThread() {}
++
++// static
++void PlatformThreadBase::SetName(const std::string& name) {
++  ThreadIdNameManager::GetInstance()->SetName(name);
++}
++
++}  // namespace base
+--- a/base/time/time_now_posix.cc
++++ b/base/time/time_now_posix.cc
+@@ -78,8 +78,7 @@
+ namespace subtle {
+ Time TimeNowIgnoringOverride() {
+   struct timeval tv;
+-  struct timezone tz = {0, 0};  // UTC
+-  CHECK(gettimeofday(&tv, &tz) == 0);
++  CHECK(gettimeofday(&tv, nullptr) == 0);
+   // Combine seconds and microseconds in a 64-bit field containing microseconds
+   // since the epoch.  That's enough for nearly 600 centuries.  Adjust from
+   // Unix (1970) to Windows (1601) epoch.
+@@ -110,7 +109,7 @@
+ }
+ 
+ TimeTicks TimeTicksLowResolutionNowIgnoringOverride() {
+-  return TimeTicks() + Microseconds(ClockNow(CLOCK_MONOTONIC_COARSE));
++  return TimeTicks() + Microseconds(ClockNow(CLOCK_MONOTONIC));
+ }
+ }  // namespace subtle
+ 
+@@ -132,22 +131,22 @@
+ // RealTicks ------------------------------------------------------------------
+ 
+ namespace subtle {
+-// In Linux and Android, `CLOCK_BOOTTIME` is identical to `CLOCK_MONOTONIC`
++// In Linux and Android, `CLOCK_MONOTONIC` is identical to `CLOCK_MONOTONIC`
+ // (which backs `TimeTicks` and `LiveTicks`), except that it includes time spent
+ // in system suspension. Both clocks are derived from the same kernel timekeeper
+ // and frequency adjustments (NTP), differing only by `offs_boot` which is
+-// updated solely when resuming from suspend. Therefore, `CLOCK_BOOTTIME` is
++// updated solely when resuming from suspend. Therefore, `CLOCK_MONOTONIC` is
+ // guaranteed to advance in exact lockstep with `CLOCK_MONOTONIC` while awake.
+ // See:
+ // https://man7.org/linux/man-pages/man2/clock_gettime.2.html
+ // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/kernel/time/timekeeping.c
+ //
+-// Note: `CLOCK_BOOTTIME` is not available or equivalent on all POSIX systems,
++// Note: `CLOCK_MONOTONIC` is not available or equivalent on all POSIX systems,
+ // but it is consistent for all platforms that use this implementation (Linux,
+ // ChromeOS, and Android). Apple platforms use an alternate implementation in
+ // time_apple.mm.
+ time_internal::RealTicks RealTicksNowIgnoringOverride() {
+-  return time_internal::RealTicks() + Microseconds(ClockNow(CLOCK_BOOTTIME));
++  return time_internal::RealTicks() + Microseconds(ClockNow(CLOCK_MONOTONIC));
+ }
+ }  // namespace subtle
+ 
+--- a/base/trace_event/malloc_dump_provider.cc
++++ b/base/trace_event/malloc_dump_provider.cc
+@@ -31,8 +31,10 @@
+ #if BUILDFLAG(IS_APPLE)
+ #include <malloc/malloc.h>
+ #else
++#if !defined(__ZEDBSD__)
+ #include <malloc.h>
+ #endif
++#endif
+ #if BUILDFLAG(IS_WIN)
+ #include <windows.h>
+ #endif
+@@ -273,6 +275,14 @@
+                          size_t* resident_size,
+                          size_t* allocated_objects_size,
+                          size_t* allocated_objects_count) {
++#if BUILDFLAG(IS_ZEDBSD)
++  (void)pmd;
++  (void)total_virtual_size;
++  (void)resident_size;
++  (void)allocated_objects_size;
++  (void)allocated_objects_count;
++}
++#else
+ #if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+ #if __GLIBC_PREREQ(2, 33)
+ #define MALLINFO2_FOUND_IN_LIBC
+@@ -302,6 +312,7 @@
+   }
+ }
+ #endif
++#endif
+ 
+ #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
+ void ReportPartitionAllocThreadCacheStats(
+--- a/base/trace_event/process_memory_dump.cc
++++ b/base/trace_event/process_memory_dump.cc
+@@ -171,7 +171,7 @@
+ #elif BUILDFLAG(IS_APPLE)
+     // mincore in MAC does not fail with EAGAIN.
+     failure =
+-        !!mincore(reinterpret_cast<void*>(chunk_start), chunk_size, vec.data());
++        !!0 /* mincore */
+     for (size_t i = 0; i < page_count; i++) {
+       accumulate_page_if_resident(i, (vec[i] & MINCORE_INCORE) != 0);
+     }
+@@ -185,7 +185,7 @@
+           mincore(reinterpret_cast<char*>(chunk_start), chunk_size,
+                   reinterpret_cast<char*>(vec.data()));
+ #else
+-          mincore(reinterpret_cast<void*>(chunk_start), chunk_size, vec.data());
++          0 /* mincore */;
+ #endif
+     } while (result == -1 && errno == EAGAIN && error_counter++ < 100);
+     failure = !!result;
+--- /dev/null
++++ b/base/zedbsd_rust_compat.c
+@@ -0,0 +1,50 @@
++#include <errno.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <unistd.h>
++
++int *__error(void)
++{
++	return __libc_errno_location();
++}
++
++int pthread_getthreadid_np(void)
++{
++	return (int)(uintptr_t)pthread_self();
++}
++
++int pthread_setname_np(pthread_t tid, const char *name)
++{
++	(void)tid;
++	(void)name;
++	return 0;
++}
++
++int pthread_attr_get_np(pthread_t tid, pthread_attr_t *attr)
++{
++	(void)tid;
++	(void)attr;
++	return ENOSYS;
++}
++
++int cpuset_getaffinity(int level, int which, int64_t id, size_t setsize, void *mask)
++{
++	(void)level;
++	(void)which;
++	(void)id;
++	(void)setsize;
++	(void)mask;
++	errno = ENOSYS;
++	return -1;
++}
++
++int _umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2)
++{
++	(void)obj;
++	(void)op;
++	(void)val;
++	(void)uaddr;
++	(void)uaddr2;
++	errno = ENOSYS;
++	return -1;
++}

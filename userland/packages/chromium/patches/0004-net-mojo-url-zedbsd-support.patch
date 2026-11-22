@@ -1,0 +1,418 @@
+--- a/mojo/core/BUILD.gn
++++ b/mojo/core/BUILD.gn
+@@ -109,7 +109,8 @@
+       "channel_posix.h",
+     ]
+ 
+-    if (is_linux || is_chromeos || is_android) {
++    if ((is_linux && !(is_zedbsd && current_toolchain == default_toolchain)) ||
++        is_chromeos || is_android) {
+       sources += [
+         "channel_linux.cc",
+         "channel_linux.h",
+--- a/mojo/public/cpp/platform/socket_utils_posix.cc
++++ b/mojo/public/cpp/platform/socket_utils_posix.cc
+@@ -26,7 +26,8 @@
+ }
+ 
+ bool GetPeerEuid(base::PlatformFile fd, uid_t* peer_euid) {
+-#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FREEBSD) || \
++    BUILDFLAG(IS_ZEDBSD)
+   uid_t socket_euid;
+   gid_t socket_gid;
+   if (getpeereid(fd, &socket_euid, &socket_gid) < 0) {
+--- a/net/base/net_errors_posix.cc
++++ b/net/base/net_errors_posix.cc
+@@ -43,7 +43,9 @@
+     case ECONNREFUSED:
+       return ERR_CONNECTION_REFUSED;
+     case EHOSTUNREACH:
++    #ifdef EHOSTDOWN
+     case EHOSTDOWN:
++#endif
+     case ENETUNREACH:
+     case EAFNOSUPPORT:
+       return ERR_ADDRESS_UNREACHABLE;
+@@ -107,7 +109,9 @@
+       return ERR_ACCESS_DENIED;
+     case ETXTBSY:  // Text file busy.
+       return ERR_ACCESS_DENIED;
+-    case EUSERS:  // Too many users.
++    #ifdef EUSERS
++    case EUSERS:
++#endif  // Too many users.
+       return ERR_INSUFFICIENT_RESOURCES;
+     case EMFILE:  // Too many open files.
+       return ERR_INSUFFICIENT_RESOURCES;
+--- a/net/BUILD.gn
++++ b/net/BUILD.gn
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//build/buildflag_header.gni")
++is_zedbsd_target = is_zedbsd && current_toolchain == default_toolchain
+ import("//build/config/cast.gni")
+ import("//build/config/compiler/compiler.gni")
+ import("//build/config/cronet/config.gni")
+@@ -1452,7 +1453,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux && !is_zedbsd_target) {
+     sources += [
+       "base/network_change_notifier_linux.cc",
+       "base/network_change_notifier_linux.h",
+@@ -1479,7 +1480,7 @@
+     }
+   }
+ 
+-  if (is_linux || is_chromeos || is_android) {
++  if ((is_linux && !is_zedbsd_target) || is_chromeos || is_android) {
+     sources += [
+       "base/address_map_linux.cc",
+       "base/address_map_linux.h",
+@@ -1491,7 +1492,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux && !is_zedbsd_target) {
+     sources += [
+       "base/address_map_cache_linux.cc",
+       "base/address_map_cache_linux.h",
+--- a/net/cert/cert_verify_proc.cc
++++ b/net/cert/cert_verify_proc.cc
+@@ -419,7 +419,8 @@
+   return CreateCertVerifyProcBuiltin(
+       std::move(cert_net_fetcher), std::move(crl_set), std::move(ct_verifier),
+       std::move(ct_policy_enforcer),
+-#if BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD) || \
++    (BUILDFLAG(IS_LINUX) && !BUILDFLAG(USE_NSS_SERVER_CERTS))
+       CreateChromeOnlySystemTrustStore(std::move(chrome_root)),
+ #else
+       CreateSslSystemTrustStoreChromeRoot(std::move(chrome_root)),
+--- a/net/dns/address_info.cc
++++ b/net/dns/address_info.cc
+@@ -74,7 +74,7 @@
+     // error.
+     // http://crbug.com/134142
+     err = ERR_NAME_NOT_RESOLVED;
+-#elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_FREEBSD)
++#elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_FREEBSD) && !BUILDFLAG(IS_ZEDBSD)
+     if (os_error != EAI_NONAME && os_error != EAI_NODATA)
+       err = ERR_NAME_RESOLUTION_FAILED;
+ #endif
+--- a/net/dns/address_sorter_posix.cc
++++ b/net/dns/address_sorter_posix.cc
+@@ -15,7 +15,9 @@
+ 
+ #if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+ #include <sys/socket.h>  // Must be included before ifaddrs.h.
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include <ifaddrs.h>
++#endif
+ #include <net/if.h>
+ #include <string.h>
+ #include <sys/ioctl.h>
+@@ -499,7 +501,9 @@
+     NetworkChangeNotifier::IPAddressChangeType change_type) {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   source_map_.clear();
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_ZEDBSD)
++  return;
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   // TODO(crbug.com/40263501): This always returns nullptr on ChromeOS.
+   const AddressMapOwnerLinux* address_map_owner =
+       NetworkChangeNotifier::GetAddressMapOwner();
+--- a/net/dns/dns_config_service_posix.h
++++ b/net/dns/dns_config_service_posix.h
+@@ -7,6 +7,9 @@
+ 
+ #include <netinet/in.h>
+ #include <resolv.h>
++#ifdef QUERY
++#undef QUERY
++#endif
+ #include <sys/types.h>
+ 
+ #include <memory>
+--- a/net/dns/dns_util.cc
++++ b/net/dns/dns_util.cc
+@@ -31,7 +31,9 @@
+ #include <net/if.h>
+ #include <netinet/in.h>
+ #if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include <ifaddrs.h>
++#endif
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ #endif  // BUILDFLAG(IS_POSIX)
+ 
+--- a/net/dns/host_resolver_manager.cc
++++ b/net/dns/host_resolver_manager.cc
+@@ -134,7 +134,9 @@
+ #include <net/if.h>
+ #include "net/base/sys_addrinfo.h"
+ #if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include <ifaddrs.h>
++#endif
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ #endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+ 
+--- a/net/dns/loopback_only.cc
++++ b/net/dns/loopback_only.cc
+@@ -23,7 +23,9 @@
+ #if BUILDFLAG(IS_ANDROID)
+ #include "net/android/network_library.h"
+ #else  // BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include <ifaddrs.h>
++#endif
+ #endif  // BUILDFLAG(IS_ANDROID)
+ #endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+ 
+@@ -40,6 +42,9 @@
+ 
+ #if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)) || BUILDFLAG(IS_FUCHSIA)
+ bool HaveOnlyLoopbackAddressesUsingGetifaddrs() {
++#if BUILDFLAG(IS_ZEDBSD)
++  return false;
++#else
+   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                 base::BlockingType::MAY_BLOCK);
+   struct ifaddrs* interface_addr = nullptr;
+@@ -81,6 +86,7 @@
+   }
+   freeifaddrs(interface_addr);
+   return result;
++#endif
+ }
+ #endif  // (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)) ||
+         // BUILDFLAG(IS_FUCHSIA)
+--- a/net/dns/public/resolv_reader.h
++++ b/net/dns/public/resolv_reader.h
+@@ -6,6 +6,9 @@
+ #define NET_DNS_PUBLIC_RESOLV_READER_H_
+ 
+ #include <resolv.h>
++#ifdef QUERY
++#undef QUERY
++#endif
+ 
+ #include <memory>
+ #include <optional>
+--- a/net/dns/public/scoped_res_state.cc
++++ b/net/dns/public/scoped_res_state.cc
+@@ -14,7 +14,7 @@
+ namespace net {
+ 
+ ScopedResState::ScopedResState() {
+-#if BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   // Note: res_ninit in glibc always returns 0 and sets RES_INIT.
+   // res_init behaves the same way.
+   memset(&_res, 0, sizeof(_res));
+@@ -26,7 +26,7 @@
+ }
+ 
+ ScopedResState::~ScopedResState() {
+-#if !BUILDFLAG(IS_OPENBSD) && !BUILDFLAG(IS_FUCHSIA)
++#if !BUILDFLAG(IS_OPENBSD) && !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_ZEDBSD)
+ 
+   // Prefer res_ndestroy where available.
+ #if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FREEBSD)
+@@ -44,7 +44,7 @@
+ 
+ const struct __res_state& ScopedResState::state() const {
+   DCHECK(IsValid());
+-#if BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   return _res;
+ #else
+   return res_;
+--- a/net/dns/public/scoped_res_state.h
++++ b/net/dns/public/scoped_res_state.h
+@@ -6,6 +6,9 @@
+ #define NET_DNS_PUBLIC_SCOPED_RES_STATE_H_
+ 
+ #include <resolv.h>
++#ifdef QUERY
++#undef QUERY
++#endif
+ 
+ #include <optional>
+ 
+--- a/net/socket/udp_socket_posix.cc
++++ b/net/socket/udp_socket_posix.cc
+@@ -142,7 +142,8 @@
+ }
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_FUCHSIA)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_FUCHSIA) && \
++    !BUILDFLAG(IS_ZEDBSD)
+ // Helper for IPv4 SSM. Sets sin_len on macOS, no-op on Linux.
+ group_source_req CreateIPv4SourceGroupRequest(const IPAddress& group_address,
+                                               const IPAddress& source_address,
+@@ -775,6 +776,9 @@
+   DCHECK_NE(socket_, kInvalidSocket);
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   uint32_t ecn = 1;
+   if (addr_family_ == AF_INET6) {
+     if (setsockopt(socket_, IPPROTO_IPV6, IPV6_RECVTCLASS, &ecn, sizeof(ecn)) !=
+@@ -800,10 +804,11 @@
+ 
+   int rv = setsockopt(socket_, IPPROTO_IP, IP_RECVTOS, &ecn, sizeof(ecn));
+   return rv == 0 ? OK : MapSystemError(errno);
++#endif
+ }
+ 
+ void UDPSocketPosix::SetMsgConfirm(bool confirm) {
+-#if !BUILDFLAG(IS_APPLE)
++#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+   if (confirm) {
+     sendto_flags_ |= MSG_CONFIRM;
+   } else {
+@@ -1077,6 +1082,7 @@
+        // SAFETY: CMSG_NXTHDR is a system macro that safely iterates over
+        // control messages using the boundaries defined in msghdr.
+        cmsg = UNSAFE_BUFFERS(CMSG_NXTHDR(msg, cmsg))) {
++#if !BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(IS_APPLE)
+     constexpr int kTosType = IP_RECVTOS;
+ #else
+@@ -1107,6 +1113,7 @@
+       base::byte_span_from_ref(tclass_val).copy_from(cmsg_data_as_span);
+       result->tos = static_cast<uint8_t>(tclass_val);
+     }
++#endif
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+     else if (gro_status_ == GroStatus::kEnabled &&
+              cmsg->cmsg_level == SOL_UDP && cmsg->cmsg_type == UDP_GRO &&
+@@ -1454,6 +1461,9 @@
+ }
+ 
+ int UDPSocketPosix::SetMulticastOptions() {
++#if BUILDFLAG(IS_ZEDBSD)
++  return OK;
++#else
+   if (!(socket_options_ & SOCKET_OPTION_MULTICAST_LOOP)) {
+     int rv;
+     if (addr_family_ == AF_INET) {
+@@ -1509,6 +1519,7 @@
+     }
+   }
+   return OK;
++#endif
+ }
+ 
+ int UDPSocketPosix::DoBind(const IPEndPoint& address) {
+@@ -1548,6 +1559,9 @@
+   if (!is_connected())
+     return ERR_SOCKET_NOT_CONNECTED;
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   switch (group_address.size()) {
+     case IPAddress::kIPv4AddressSize: {
+       if (addr_family_ != AF_INET)
+@@ -1577,6 +1591,7 @@
+     default:
+       NOTREACHED() << "Invalid address family";
+   }
++#endif
+ }
+ 
+ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
+@@ -1585,6 +1600,9 @@
+   if (!is_connected())
+     return ERR_SOCKET_NOT_CONNECTED;
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   switch (group_address.size()) {
+     case IPAddress::kIPv4AddressSize: {
+       if (addr_family_ != AF_INET)
+@@ -1618,12 +1636,14 @@
+     default:
+       NOTREACHED() << "Invalid address family";
+   }
++#endif
+ }
+ 
+ int UDPSocketPosix::SetSourceGroupMembership(const IPAddress& group_address,
+                                              const IPAddress& source_address,
+                                              int option) const {
+-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+   return ERR_NOT_IMPLEMENTED;
+ #else
+   uint32_t interface_index = multicast_interface_;
+@@ -1661,8 +1681,12 @@
+     return ERR_INVALID_ARGUMENT;
+   }
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   return SetSourceGroupMembership(group_address, source_address,
+                                   MCAST_JOIN_SOURCE_GROUP);
++#endif
+ }
+ 
+ int UDPSocketPosix::LeaveSourceGroup(const IPAddress& group_address,
+@@ -1677,8 +1701,12 @@
+     return ERR_INVALID_ARGUMENT;
+   }
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   return SetSourceGroupMembership(group_address, source_address,
+                                   MCAST_LEAVE_SOURCE_GROUP);
++#endif
+ }
+ 
+ int UDPSocketPosix::SetMulticastInterface(uint32_t interface_index) {
+@@ -1720,6 +1748,9 @@
+   if (dscp == DSCP_NO_CHANGE && ecn == ECN_NO_CHANGE) {
+     return OK;
+   }
++#if BUILDFLAG(IS_ZEDBSD)
++  return ERR_NOT_IMPLEMENTED;
++#else
+   int dscp_and_ecn = (dscp << 2) | ecn;
+   socklen_t size = sizeof(dscp_and_ecn);
+   if (dscp == DSCP_NO_CHANGE || ecn == ECN_NO_CHANGE) {
+@@ -1752,6 +1783,7 @@
+   if (rv < 0)
+     return MapSystemError(errno);
+   return OK;
++#endif
+ }
+ 
+ int UDPSocketPosix::SetIPv6Only(bool ipv6_only) {
+--- a/url/third_party/mozilla/url_parse.h
++++ b/url/third_party/mozilla/url_parse.h
+@@ -169,6 +169,9 @@
+ //      ParsePathURL(url, url_len, &parsed);
+ //
+ struct COMPONENT_EXPORT(URL) Parsed {
++#ifdef QUERY
++#undef QUERY
++#endif
+   // Identifies different components.
+   enum ComponentType {
+     SCHEME,
