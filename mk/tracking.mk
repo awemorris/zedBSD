@@ -45,7 +45,9 @@ $(VMUNIX_OBJS): $(KERN_FLAGS_STAMP)
 LIBC_TRACKED_OBJS := $(sort $(filter $(LIBC_OBJ_DIR)/%.o,\
 	$(foreach list,$(filter %_OBJS,$(.VARIABLES)),$($(list)))))
 
-# The libc objects follow the compile flags, as the kernel's do.
+# The libc objects follow the compile flags, as the kernel's do.  The
+# kernel's make and the packages' make run at the same time and both check
+# the stamp, so each writes its own temporary file.
 LIBC_FLAGS_STAMP := $(BUILD)/.libc-flags
 LIBC_TRACKED_FLAGS = $(foreach flags,$(sort $(filter %LIBC_STATIC_CFLAGS %LIBC_DYNAMIC_CFLAGS,$(.VARIABLES))),$($(flags)))
 
@@ -53,8 +55,9 @@ LIBC_TRACKED_FLAGS = $(foreach flags,$(sort $(filter %LIBC_STATIC_CFLAGS %LIBC_D
 FORCE_LIBC_FLAGS:
 $(LIBC_FLAGS_STAMP): FORCE_LIBC_FLAGS
 	@mkdir -p $(dir $@)
-	@printf '%s\n' '$(LIBC_TRACKED_FLAGS)' > $@.tmp
-	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+	@tmp=$@.tmp.$$$$; \
+	printf '%s\n' '$(LIBC_TRACKED_FLAGS)' > $$tmp; \
+	if cmp -s $$tmp $@; then rm -f $$tmp; else mv -f $$tmp $@; fi
 
 $(LIBC_TRACKED_OBJS): $(LIBC_FLAGS_STAMP)
 

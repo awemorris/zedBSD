@@ -8,8 +8,9 @@ include mk/platform-macppc32/defaults.mk
 include $(ZEDBSD_CONFIGMK)
 
 include mk/toolchain.mk
-.PHONY: toolchain-platform
+.PHONY: toolchain-platform toolchain-cached-platform
 toolchain-platform: toolchain-llvm
+toolchain-cached-platform: toolchain-llvm-cached
 
 include mk/platform-macppc32/libc.mk
 include mk/platform-macppc32/sysroot.mk

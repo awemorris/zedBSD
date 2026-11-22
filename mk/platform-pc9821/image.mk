@@ -78,7 +78,7 @@ $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(BOOTLOADER_DEPS) $(BOOT_CONFIG_STAMP) \
 	$(PYTHON) mk/tools/make-pc98-hdd-image.py --force --heads 8 --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) --stage1 $(BUILD)/bootloader/stage1.bin --stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --fat-size-mib $(BOOT_MIB) $@
 
 .PHONY: image-platform check-disk-image
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
 	$(PYTHON) mk/tools/check-pc98-hdd-image.py --heads 8 --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) --stage1 $(BUILD)/bootloader/stage1.bin --stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE $<

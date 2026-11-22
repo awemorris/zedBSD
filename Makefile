@@ -58,7 +58,7 @@ $(info   vf2    (architecture: riscv64, board: vf2))
 $(info   i386   (architecture: i386,    board: pcat))
 $(info   pc9821 (architecture: i386,    board: pc98))
 $(info   pc9801ns (architecture: i386,    board: pc98))
-exit 1
+$(error PLATFORM is not set)
 endif
 
 # Show the current configuration.
@@ -85,7 +85,9 @@ toolchain:
 toolchain-cached:
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile toolchain-cached-platform $(EXPORT_LIST)
 
-bootloader: toolchain
+# A board's bootloader may take files from the firmware's cache, which only
+# one make may fill at a time.
+bootloader: firmware
 	$(MAKE) -f mk/platform-$(PLATFORM)/Makefile bootloader-platform $(EXPORT_LIST)
 
 firmware: toolchain

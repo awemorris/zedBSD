@@ -35,7 +35,7 @@ jobs:
           - platform: pc9801ns
             artifact: zedbsd-pc9801ns.img.gz
     env:
-      CONFIGMK: config/config.${{ matrix.platform }}.mk
+      PLATFORM: ${{ matrix.platform }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
@@ -48,7 +48,7 @@ jobs:
             build-essential cmake curl device-tree-compiler dosfstools e2fsprogs git grub-common gzip \
             mtools nasm ninja-build patch python3 xz-utils
 
-      # The Makefile uses .WAIT, which needs GNU make 4.4 or later; the runner has 4.3.
+      # The build is made and tested with GNU make 4.4.1; the runner has 4.3.
       - name: Install GNU make 4.4.1
         run: |
           curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz -o "$RUNNER_TEMP/make.tar.gz"
@@ -63,14 +63,14 @@ jobs:
 
       - name: Install the pinned toolchain from its cache
         run: |
-          make CONFIGMK="$CONFIGMK" toolchain-cached
-          make CONFIGMK="$CONFIGMK" toolchain
+          make PLATFORM="$PLATFORM" toolchain-cached
+          make PLATFORM="$PLATFORM" toolchain
 
       - name: Accept the firmware licenses
-        run: yes | make CONFIGMK="$CONFIGMK" firmware-licenses
+        run: yes | make PLATFORM="$PLATFORM" firmware-licenses
 
       - name: Build the disk image
-        run: make -j4 CONFIGMK="$CONFIGMK" disk
+        run: make -j4 PLATFORM="$PLATFORM" disk
 
       - name: Compress the disk image
         run: |
@@ -84,25 +84,43 @@ jobs:
           path: artifacts/${{ matrix.artifact }}
 
   build-apps:
-    name: Build ${{ matrix.platform }}
-    runs-on: ubuntu-latest
+    name: Build mikuterm
+    runs-on: ubuntu-24.04
     env:
       LLVM_MINGW_TAG: "20261104"
       LLVM_MINGW_NAME: "llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64"
+      LLVM_MINGW_SHA256: "919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake curl ninja-build python3 xz-utils
+
+      - name: Install llvm-mingw
+        run: |
+          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_TAG/$LLVM_MINGW_NAME.tar.xz" \
+            -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/llvm-mingw.tar.xz" | sha256sum -c
+          tar -xJf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP"
+          echo "LLVM_MINGW=$RUNNER_TEMP/$LLVM_MINGW_NAME" >> "$GITHUB_ENV"
+
+      # CMake takes the toolchain file by its absolute path.
       - name: Build
         run: |
-          cmake -S apps/terminal-win32 -B build/mikuterm-x64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw-x86_64.cmake -DLLVM_MINGW=/opt/llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+          cmake -S apps/terminal-win32 -B build/mikuterm-x64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/apps/terminal-win32/cmake/llvm-mingw-x86_64.cmake" \
+            -DLLVM_MINGW="$LLVM_MINGW"
           cmake --build build/mikuterm-x64 --target zip -j4
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: build/mikuterm-x64/mikuterm-0.1.0-win64.zip
-          path: app-artifacts/mikuterm-0.1.0-win64.zip
+          name: mikuterm-win64
+          path: build/mikuterm-x64/mikuterm-*-win64.zip
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
@@ -124,7 +142,7 @@ jobs:
       - name: Download the apps
         uses: actions/download-artifact@v4
         with:
-          pattern: miterm-*
+          pattern: mikuterm-*
           merge-multiple: true
           path: app-artifacts
 
@@ -164,5 +182,5 @@ jobs:
             | mikuterm    | Windows 11 x64    | SSH Terminal for Windows (Micro Unicode Terminal) |
 
           files: |
-            - artifacts/*.img.gz
-            - app-artifacts/*.zip
+            artifacts/*.img.gz
+            app-artifacts/*.zip
