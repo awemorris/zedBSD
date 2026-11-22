@@ -186,7 +186,7 @@ ghci_caps_block(
 	if (caps->width_mismatch)
 		return ENODEV;
 
-	/* The format table: one word per VkFormat, as far as the driver keeps them. */
+	/* The format table: one word per GhciFormat, as far as the driver keeps them. */
 	caps->format_count = count;
 	if (caps->format_count > GHCI_CAPS_FORMATS)
 		caps->format_count = GHCI_CAPS_FORMATS;

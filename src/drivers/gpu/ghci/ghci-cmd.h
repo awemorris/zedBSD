@@ -289,6 +289,17 @@
 #define GHCI_VERTEX_ATTRIBUTES		16U
 
 /*
+ * The GhciFormat numbers every format field of a record or a packet
+ * carries: 0 for none (an unused attribute, an untyped buffer), 0xFF for
+ * no format; the formats themselves are the executor's table's.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.5.1, the
+ * 8-bit GhciFormat namespace: 0x00 GHCI_FMT_NONE, 0xFF GHCI_FMT_INVALID).
+ */
+#define GHCI_FORMAT_NONE		0x00U
+#define GHCI_FORMAT_INVALID		0xFFU
+
+/*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
  * (section 8.2, the byte offsets of the pipeline state).
  */

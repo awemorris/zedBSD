@@ -1126,6 +1126,7 @@ int ghci_vk_format_size(uint32_t format, uint32_t *bytes, uint32_t *block);
 void ghci_vk_formats_from_bits(const struct ghci_caps *caps, uint32_t format, uint32_t optimal, uint32_t linear, uint32_t buffer, struct ghci_vk_formats *formats);
 void ghci_vk_formats_make(const struct ghci_caps *caps, struct ghci_vk_formats *formats);
 uint32_t ghci_vk_formats_count(const struct ghci_vk_formats *formats);
+uint32_t ghci_vk_format_hw(uint32_t format);
 uint32_t ghci_vk_format_traits(uint32_t format, uint32_t *flags);
 
 /* The routes of the command groups. */

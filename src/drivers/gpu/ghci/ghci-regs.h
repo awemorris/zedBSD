@@ -166,8 +166,15 @@
 #define GHCI_CAPS_FMT_BUFFER_FIRST	3U
 #define GHCI_CAPS_FMT_LIMITS_MASK	0xFU
 
-/* The VkFormats whose table words the driver keeps (0 to 184); a later format has no feature. */
-#define GHCI_CAPS_FORMATS		185U
+/*
+ * The GhciFormats whose table words the driver keeps (0x00 to 0x9F, the
+ * standard formats); a vendor format (0xE0 to 0xFE) has no feature.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.5.1, the
+ * GhciFormat namespace: 0x00 to 0x9F standard, 0xA0 to 0xDF reserved,
+ * 0xE0 to 0xFE vendor).
+ */
+#define GHCI_CAPS_FORMATS		160U
 
 /*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
@@ -487,8 +494,8 @@
  * pa_bits, the local memory, the firmware's part of it and HOST_LIMIT);
  * everything else comes from the capability block CMD_QUERY_CAPS writes
  * once the ring runs (block_read is then 1).  formats holds the block's
- * format table word of each VkFormat below format_count; a later one has
- * none.
+ * format table word of each GhciFormat below format_count; a later one
+ * has none.
  *
  * Where two words carry one fact, the one the driver had first stays the
  * authority: BOOT_CAPS for the walker, PROT and the address widths, MEM
