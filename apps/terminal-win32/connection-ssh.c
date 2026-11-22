@@ -59,6 +59,7 @@ static void connection_close(struct terminal_connection *connection);
 static void connection_edit(struct mikuterm_session *session, const unsigned char *bytes, size_t size);
 static void connection_erase(struct mikuterm_session *session);
 static void connection_free(struct mikuterm_session *session);
+static void connection_copy(char *to, size_t size, const char *text);
 
 /* The functions of a tab's SSH connection. */
 static const struct terminal_connection_ops connection_ops = {
@@ -368,10 +369,8 @@ connection_open(
 	memcpy(session->term, connector->options.term, length);
 	session->connect_timeout = connector->options.connect_timeout;
 	if (!connector->first_opened) {
-		if (connector->options.connect != NULL && strlen(connector->options.connect) < sizeof(session->host))
-			memcpy(session->host, connector->options.connect, strlen(connector->options.connect) + 1U);
-		if (connector->options.notice != NULL && strlen(connector->options.notice) < sizeof(session->notice))
-			memcpy(session->notice, connector->options.notice, strlen(connector->options.notice) + 1U);
+		connection_copy(session->host, sizeof(session->host), connector->options.connect);
+		connection_copy(session->notice, sizeof(session->notice), connector->options.notice);
 	}
 
 	/* Its grid; the tab and the thread hold it. */
@@ -803,4 +802,25 @@ connection_free(
 	/* A password may have been typed into it. */
 	OPENSSL_cleanse(session->line, sizeof(session->line));
 	free(session);
+}
+
+/* Copies a text given to the connector into a session's field; a NULL or too long text leaves it empty. */
+static void
+connection_copy(
+	char *to,
+	size_t size,
+	const char *text)
+{
+	size_t length;
+
+	/* Nothing given. */
+	to[0] = '\0';
+	if (text == NULL)
+		return;
+
+	/* Only a text that fits whole. */
+	length = strlen(text);
+	if (length >= size)
+		return;
+	memcpy(to, text, length + 1U);
 }

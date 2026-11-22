@@ -146,6 +146,7 @@ mikuterm_ssh_path(
 	const char *directory;
 	const char *rest;
 	size_t length;
+	size_t rest_length;
 	int absolute;
 	int home_ssh;
 	int home;
@@ -179,10 +180,11 @@ mikuterm_ssh_path(
 
 	/* The name inside the folder. */
 	length = strlen(directory);
-	if (length + strlen(rest) + 1U > sizeof(inside))
+	rest_length = strlen(rest);
+	if (length + rest_length + 1U > sizeof(inside))
 		return ENAMETOOLONG;
 	memcpy(inside, directory, length);
-	memcpy(inside + length, rest, strlen(rest) + 1U);
+	memcpy(inside + length, rest, rest_length + 1U);
 
 	/* Its path. */
 	error = mikuterm_path(path, size, inside);
@@ -312,14 +314,16 @@ mikuterm_file_replace(
 	char fresh[MIKUTERM_PATH_MAX];
 	wchar_t *wide;
 	wchar_t *fresh_wide;
+	size_t length;
 	BOOL moved;
 	int error;
 
 	/* The new file's name: the path and ".new". */
-	if (strlen(path) + 5U > sizeof(fresh))
+	length = strlen(path);
+	if (length + 5U > sizeof(fresh))
 		return ENAMETOOLONG;
-	memcpy(fresh, path, strlen(path));
-	memcpy(fresh + strlen(path), ".new", 5);
+	memcpy(fresh, path, length);
+	memcpy(fresh + length, ".new", 5);
 
 	/* Both paths for Windows. */
 	error = folder_wide(path, &wide);

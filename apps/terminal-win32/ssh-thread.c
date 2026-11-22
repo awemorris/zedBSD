@@ -328,6 +328,8 @@ thread_parse_target(
 	const char *at;
 	const char *colon;
 	const char *close;
+	const char *second;
+	const char *space;
 	unsigned long port;
 	size_t length;
 	char *end;
@@ -358,8 +360,12 @@ thread_parse_target(
 		length = (size_t)(close - host - 1);
 		host++;
 	} else {
+		/* More than one ':' is an IPv6 address without brackets, which has no port. */
 		colon = strchr(host, ':');
-		if (colon != NULL && strchr(colon + 1, ':') != NULL)
+		second = NULL;
+		if (colon != NULL)
+			second = strchr(colon + 1, ':');
+		if (second != NULL)
 			colon = NULL;
 		length = strlen(host);
 		if (colon != NULL)
@@ -379,7 +385,8 @@ thread_parse_target(
 		return EINVAL;
 	memcpy(target->host, host, length);
 	target->host[length] = '\0';
-	if (strpbrk(target->host, " \t") != NULL)
+	space = strpbrk(target->host, " \t");
+	if (space != NULL)
 		return EINVAL;
 
 	/* Succeeded: the target. */
@@ -560,6 +567,7 @@ thread_dial(
 	unsigned timeout;
 	uint64_t deadline;
 	uint64_t now;
+	int closing;
 	int error;
 
 	/* The host's addresses (the thread waits for the system's answer). */
@@ -602,7 +610,10 @@ thread_dial(
 				error = kl_socket_poll(waits, 2U, (int)THREAD_ROUND_MS, &ready);
 				if (error != 0)
 					break;
-				if (thread_closing(link->session)) {
+
+				/* A tab that closed wants no connection. */
+				closing = thread_closing(link->session);
+				if (closing) {
 					kl_socket_close(socket);
 					return THREAD_CLOSING;
 				}
@@ -929,18 +940,23 @@ thread_host_answer(
 	const char *answer,
 	int cancelled)
 {
+	int yes_differs;
+	int no_differs;
 	int yes;
 	int no;
 
-	/* Yes or no, in any case. */
+	/* Yes or no, in any case; giving up is no. */
+	yes_differs = _stricmp(answer, "yes");
+	no_differs = _stricmp(answer, "no");
 	yes = 0;
 	no = 0;
-	if (cancelled)
+	if (cancelled) {
 		no = 1;
-	else if (_stricmp(answer, "yes") == 0)
+	} else if (yes_differs == 0) {
 		yes = 1;
-	else if (_stricmp(answer, "no") == 0)
+	} else if (no_differs == 0) {
 		no = 1;
+	}
 
 	/* Anything else asks again. */
 	if (!yes && !no) {
@@ -1248,6 +1264,7 @@ thread_ask(
 	size_t ready;
 	int cancelled;
 	int answered;
+	int closing;
 	int error;
 
 	/* The question. */
@@ -1258,8 +1275,13 @@ thread_ask(
 		answered = thread_ask_take(session, answer, size, &cancelled);
 		if (answered)
 			break;
-		if (thread_closing(session))
+
+		/* A tab that closed wants no answer. */
+		closing = thread_closing(session);
+		if (closing)
 			return EPIPE;
+
+		/* The waker, rung by a key or the tab's close. */
 		wait.socket = NULL;
 		wait.waker = session->waker;
 		wait.events = KL_SOCKET_READABLE;
@@ -1270,7 +1292,8 @@ thread_ask(
 	}
 
 	/* A tab that closed meanwhile wants no answer. */
-	if (thread_closing(session))
+	closing = thread_closing(session);
+	if (closing)
 		return EPIPE;
 
 	/* Reports a question given up. */

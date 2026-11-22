@@ -202,14 +202,16 @@ main_font(
 	const char *name)
 {
 	char inside[MIKUTERM_PATH_MAX];
+	size_t length;
 	int exists;
 	int error;
 
 	/* A path from a drive or a server. */
+	length = strlen(name);
 	if (name[0] == '\\' || (name[0] != '\0' && name[1] == ':')) {
-		if (strlen(name) + 1U > size)
+		if (length + 1U > size)
 			return ENAMETOOLONG;
-		memcpy(path, name, strlen(name) + 1U);
+		memcpy(path, name, length + 1U);
 		return 0;
 	}
 
