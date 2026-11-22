@@ -15,7 +15,6 @@
 #include <vulkan/vulkan.h>
 
 #include <keiland/keiland.h>
-#include "userland/desktop/libkeiland/process.h"
 #include "userland/desktop/libkeiland/ui/chooser.h"
 #include "userland/desktop/libkeiland/ui/picker.h"
 
@@ -212,19 +211,6 @@ keiui_chooser_type_select(
 	(void)character;
 
 	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-keiui_launch_start(
-	const struct kl_launch_options *options,
-	const char *const *environment)
-{
-	(void)options;
-	(void)environment;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -3967,17 +3953,6 @@ kl_window_frame_wait(
 }
 
 /* Not on Windows. */
-int
-kl_window_fullscreen(
-	const struct kl_window *window)
-{
-	(void)window;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
 void
 kl_window_keyboard_inset(
 	const struct kl_window *window,
@@ -4109,40 +4084,6 @@ kl_window_output_mode(
 }
 
 /* Not on Windows. */
-size_t
-kl_window_paste_primary(
-	struct kl_window *window,
-	char *text,
-	size_t size)
-{
-	(void)window;
-	(void)text;
-	(void)size;
-
-	/* Not on Windows. */
-	return 0;
-}
-
-/* Not on Windows. */
-int
-kl_window_popup_menu(
-	struct kl_window *window,
-	const struct kl_menu_entry *entries,
-	size_t count,
-	int x,
-	int y)
-{
-	(void)window;
-	(void)entries;
-	(void)count;
-	(void)x;
-	(void)y;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
 void
 kl_window_present_times(
 	const struct kl_window *window,
@@ -4231,38 +4172,11 @@ kl_window_see_through(
 }
 
 /* Not on Windows. */
-void
-kl_window_select(
-	struct kl_window *window,
-	const char *text,
-	size_t length)
-{
-	(void)window;
-	(void)text;
-	(void)length;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
 int
 kl_window_selecting(
 	const struct kl_window *window)
 {
 	(void)window;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_selection_own(
-	const struct kl_window *window,
-	unsigned which)
-{
-	(void)window;
-	(void)which;
 
 	/* Not on Windows. */
 	return ENOTSUP;
@@ -4312,18 +4226,6 @@ kl_window_set_control_suggestions(
 }
 
 /* Not on Windows. */
-void
-kl_window_set_fullscreen(
-	struct kl_window *window,
-	int fullscreen)
-{
-	(void)window;
-	(void)fullscreen;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
 int
 kl_window_set_glass(
 	struct kl_window *window,
@@ -4361,21 +4263,6 @@ kl_window_set_maximized(
 	(void)maximized;
 
 	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_window_set_menu(
-	struct kl_window *window,
-	const struct kl_menu_entry *entries,
-	size_t count)
-{
-	(void)window;
-	(void)entries;
-	(void)count;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -4429,23 +4316,6 @@ kl_window_set_serial(
 	(void)serial;
 
 	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_window_set_tabs(
-	struct kl_window *window,
-	const struct kl_tab_entry *tabs,
-	size_t count,
-	unsigned options)
-{
-	(void)window;
-	(void)tabs;
-	(void)count;
-	(void)options;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */

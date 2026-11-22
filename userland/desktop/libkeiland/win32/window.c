@@ -22,7 +22,14 @@
  * The keys come to the frame, which keeps the focus.  A key's text is the
  * WM_CHAR (WM_SYSCHAR) units TranslateMessage queued behind it, taken at
  * once; a character without a key (Alt and the number pad) is a
- * KL_WINDOW_TEXT_COMMIT.  The pointer's messages come to the content (the
+ * KL_WINDOW_TEXT_COMMIT.  A dead key (a WM_DEADCHAR behind it) is not
+ * given, nor its release: the character it makes comes with the next key's
+ * text.  A key pressed with Control has the character the layout types
+ * without Control and Alt as its text (Shift kept), which Windows would
+ * otherwise turn into a control character, so that a program can tell
+ * Ctrl+[ on any layout.  A press that is the shortcut of an item of the
+ * window's menu chooses the item (titlebar.c), and neither it nor its
+ * release is given.  The pointer's messages come to the content (the
  * wheel's to the frame, with the screen's point, turned into the
  * content's).  While the frame is resized in the system's modal loop
  * (WM_ENTERSIZEMOVE to WM_EXITSIZEMOVE) the program's thread takes no
@@ -72,6 +79,12 @@
 /* The units of text a key's characters may take, and the bytes they become. */
 #define WINDOW_CHAR_UNITS	16U
 
+/* ToUnicodeEx's flag that leaves the keyboard's state (a dead key waiting) as it is (Windows 10 1607 and later). */
+#define WINDOW_TO_UNICODE_KEEP	0x4U
+
+/* The longest path of a bundled font, in UTF-8. */
+#define WINDOW_FONT_PATH	(MAX_PATH * 3 + 32)
+
 /*
  * The frame's attributes of the Desktop Window Manager by number (the
  * SDK's names are newer than some headers): the dark title bar, and the
@@ -87,6 +100,16 @@
 /* ntdll's RtlGetVersion, which tells the system's real version whatever the manifest says. */
 typedef LONG (WINAPI *window_version_fn)(OSVERSIONINFOW *version);
 
+/*
+ * The bundled data's companion fonts (the bold one and the monospaced
+ * one), whose paths kl_text_companions keeps for every font opened after
+ * it: written when a window opens its title bar's font, on the
+ * application's thread, always with the same paths, and kept for the life
+ * of the program (empty before the first window).
+ */
+static char window_companion_bold[WINDOW_FONT_PATH];
+static char window_companion_mono[WINDOW_FONT_PATH];
+
 static LRESULT window_frame_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT window_content_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_frame_box(const struct kl_window *window, struct keiui_win32_frame *frame);
@@ -97,6 +120,10 @@ static void window_resized(struct kl_window *window);
 static void window_sizing(struct kl_window *window);
 static void window_key(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_char(struct kl_window *window, WPARAM wparam);
+static int window_dead_key(struct kl_window *window);
+static int window_shortcut(struct kl_window *window, WPARAM wparam, unsigned scan, uint32_t code);
+static uint32_t window_layout_character(WPARAM wparam, unsigned scan, int shift);
+static void window_control_text(WPARAM wparam, unsigned scan, char *text, size_t size);
 static void window_pointer(struct kl_window *window, unsigned kind, LPARAM lparam, uint32_t code, int pressed);
 static void window_wheel(struct kl_window *window, WPARAM wparam, LPARAM lparam, int horizontal);
 static void window_caption_mouse(struct kl_window *window, UINT message, WPARAM wparam);
@@ -257,9 +284,10 @@ kl_window_close(
 		(void)DestroyWindow(window->frame);
 	}
 
-	/* The frames' memory, a drag that waited, the title bar's font, the title and the state. */
+	/* The frames' memory, a drag that waited, the menu and the tabs, the title bar's font, the title and the state. */
 	keiui_win32_present_release(window);
 	keiui_win32_drag_drop(window);
+	keiui_win32_titlebar_free(window);
 	if (window->text_open)
 		kl_text_close(&window->text);
 	free(window->title);
@@ -378,6 +406,89 @@ kl_window_set_title(
 
 	/* The title, kept and shown. */
 	(void)window_set_title(window, title);
+}
+
+/*
+ * Puts the window in full screen (its monitor's whole area, without the
+ * frame's border and title bar) or takes it out (the style and the place
+ * it had before).  The size is told as any other (KL_WINDOW_RESIZE).
+ */
+void
+kl_window_set_fullscreen(
+	struct kl_window *window,
+	int fullscreen)
+{
+	MONITORINFO monitor;
+	HMONITOR place;
+	BOOL done;
+	LONG_PTR style;
+
+	/* A window. */
+	if (window == NULL)
+		return;
+
+	/* Out of full screen: the style and the place it had, and the title bar again. */
+	if (!fullscreen) {
+		if (!window->fullscreen)
+			return;
+		window->fullscreen = 0;
+		(void)SetWindowLongPtrW(window->frame, GWL_STYLE, window->restore_style);
+		(void)SetWindowPlacement(window->frame, &window->restore_place);
+		(void)SetWindowPos(window->frame, NULL, 0, 0, 0, 0,
+		    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		window_layout(window);
+		return;
+	}
+
+	/* Already in full screen. */
+	if (window->fullscreen)
+		return;
+
+	/* Where the window is now, to go back to. */
+	memset(&window->restore_place, 0, sizeof(window->restore_place));
+	window->restore_place.length = sizeof(window->restore_place);
+	done = GetWindowPlacement(window->frame, &window->restore_place);
+	if (!done)
+		return;
+
+	/* The monitor it is on. */
+	place = MonitorFromWindow(window->frame, MONITOR_DEFAULTTONEAREST);
+	memset(&monitor, 0, sizeof(monitor));
+	monitor.cbSize = sizeof(monitor);
+	done = GetMonitorInfoW(place, &monitor);
+	if (!done)
+		return;
+
+	/* A field being edited in the title bar ends with it. */
+	if (window->editing)
+		keiui_win32_field_end(window, KL_TEXT_CANCELLED);
+
+	/* No border and no title bar, over the whole monitor. */
+	window->restore_style = GetWindowLongPtrW(window->frame, GWL_STYLE);
+	style = (window->restore_style & ~(LONG_PTR)WS_OVERLAPPEDWINDOW) | (LONG_PTR)WS_POPUP;
+	window->fullscreen = 1;
+	(void)SetWindowLongPtrW(window->frame, GWL_STYLE, style);
+	(void)SetWindowPos(window->frame, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+	    monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+	    SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+	window_layout(window);
+}
+
+/*
+ * Tells whether the window is in full screen: 1, or 0.
+ */
+int
+kl_window_fullscreen(
+	const struct kl_window *window)
+{
+	/* No window is in none. */
+	if (window == NULL)
+		return 0;
+
+	/* The window's state. */
+	if (window->fullscreen)
+		return 1;
+	return 0;
 }
 
 /*
@@ -1153,7 +1264,12 @@ window_resized(
 	(void)keiui_win32_push(window, KL_WINDOW_RESIZE);
 }
 
-/* A key pressed or let go, with the characters TranslateMessage queued behind a press. */
+/*
+ * A key pressed or let go, with the characters TranslateMessage queued
+ * behind a press: a dead key's press and release are not given, a press
+ * that is the menu's shortcut chooses its item instead, and a press with
+ * Control has the character without Control as its text.
+ */
 static void
 window_key(
 	struct kl_window *window,
@@ -1171,6 +1287,8 @@ window_key(
 	MSG next;
 	BOOL found;
 	int complete;
+	int dead;
+	int taken;
 	unsigned held;
 
 	/* A key the input method takes is its own. */
@@ -1180,6 +1298,17 @@ window_key(
 	/* The key's code. */
 	keiui_win32_key_flags((int64_t)lparam, &flags);
 	code = keiui_win32_key_code(flags.scan, flags.extended, (unsigned)wparam);
+
+	/* The release of a key whose press was not given is not given either. */
+	if (flags.released && window->eaten_key != 0U && code == window->eaten_key) {
+		window->eaten_key = 0U;
+		return;
+	}
+
+	/* Whether a press is a dead key, which TranslateMessage told with a WM_DEADCHAR behind it. */
+	dead = 0;
+	if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+		dead = window_dead_key(window);
 
 	/* The characters it types, queued right behind it (control characters are not text). */
 	count = 0U;
@@ -1206,6 +1335,12 @@ window_key(
 		}
 	}
 
+	/* A dead key waits for the next key, which brings the character it makes. */
+	if (dead && !flags.released) {
+		window->eaten_key = code;
+		return;
+	}
+
 	/* While the title bar's field is edited, its keys are the field's. */
 	if (window->editing) {
 		if (!flags.released) {
@@ -1218,6 +1353,15 @@ window_key(
 
 		/* Stops here: the field took the key. */
 		return;
+	}
+
+	/* A press may be the shortcut of an item of the menu, which takes it with its release. */
+	if (!flags.released && window->menu_count != 0U) {
+		taken = window_shortcut(window, wparam, flags.scan, code);
+		if (taken) {
+			window->eaten_key = code;
+			return;
+		}
 	}
 
 	/* An unknown key with no text tells nothing. */
@@ -1237,6 +1381,10 @@ window_key(
 		input->repeated = 1;
 	if (count != 0U)
 		(void)keiui_win32_utf8_from_utf16(units, count, input->text, sizeof(input->text), NULL);
+
+	/* A press with Control types no character: its text is the one the key types without Control. */
+	if (input->pressed && count == 0U && (input->modifiers & KL_MOD_CTRL) != 0U)
+		window_control_text(wparam, flags.scan, input->text, sizeof(input->text));
 }
 
 /* A character that came without its key: the text input's commit. */
@@ -1280,6 +1428,160 @@ window_char(
 	if (input == NULL)
 		return;
 	(void)keiui_win32_utf8_from_utf16(units, count, input->text, sizeof(input->text), NULL);
+}
+
+/* Takes the WM_DEADCHAR (WM_SYSDEADCHAR) TranslateMessage queued behind a dead key's press: 1 when there was one. */
+static int
+window_dead_key(
+	struct kl_window *window)
+{
+	MSG next;
+	BOOL found;
+	int dead;
+
+	/* Every dead character behind the press. */
+	dead = 0;
+	for (;;) {
+		found = PeekMessageW(&next, window->frame, WM_DEADCHAR, WM_DEADCHAR, PM_REMOVE);
+		if (!found)
+			found = PeekMessageW(&next, window->frame, WM_SYSDEADCHAR, WM_SYSDEADCHAR, PM_REMOVE);
+		if (!found)
+			break;
+		dead = 1;
+	}
+
+	/* Whether the key is a dead one. */
+	return dead;
+}
+
+/*
+ * Chooses the menu's item whose shortcut a press is: the key's keysym (its
+ * name, or the character the layout types with Shift as held but without
+ * Control and Alt) and the modifiers, by the compositor's rules
+ * (keiui_win32_shortcut_key).  Returns 1 when an item took the press.
+ */
+static int
+window_shortcut(
+	struct kl_window *window,
+	WPARAM wparam,
+	unsigned scan,
+	uint32_t code)
+{
+	uint32_t named;
+	uint32_t plain;
+	uint32_t typed;
+	uint32_t keysym;
+	unsigned modifiers;
+	unsigned menu;
+	int known;
+	int taken;
+
+	/* The modifiers held, and the key's name when it types no character. */
+	modifiers = window_modifiers();
+	named = keiui_win32_named_keysym(code);
+
+	/* The characters the key types in the layout, plainly and with Shift as held. */
+	plain = 0U;
+	typed = 0U;
+	if (named == 0U) {
+		plain = window_layout_character(wparam, scan, 0);
+		typed = plain;
+		if ((modifiers & KL_MOD_SHIFT) != 0U)
+			typed = window_layout_character(wparam, scan, 1);
+	}
+
+	/* The keysym and the menu's modifiers; a key without either is no shortcut. */
+	known = keiui_win32_shortcut_key(named, plain, typed, modifiers, &keysym, &menu);
+	if (!known)
+		return 0;
+
+	/* The item of the shortcut, if any. */
+	taken = keiui_win32_menu_shortcut(window, keysym, menu);
+	return taken;
+}
+
+/*
+ * The one character a key types in the keyboard's layout with no modifier
+ * and no lock, or with Shift alone; 0 for none, a dead key, a control
+ * character or more than one unit.  The keyboard's state (a dead key
+ * waiting) is left as it is.
+ */
+static uint32_t
+window_layout_character(
+	WPARAM wparam,
+	unsigned scan,
+	int shift)
+{
+	BYTE state[256];
+	WCHAR units[WINDOW_CHAR_UNITS];
+	HKL layout;
+	int got;
+
+	/* A keyboard with nothing held, or Shift alone. */
+	memset(state, 0, sizeof(state));
+	if (shift) {
+		state[VK_SHIFT] = 0x80U;
+		state[VK_LSHIFT] = 0x80U;
+	}
+
+	/* The character in the layout of the thread. */
+	layout = GetKeyboardLayout(0U);
+	got = ToUnicodeEx((UINT)wparam, (UINT)scan, state, units, (int)WINDOW_CHAR_UNITS, WINDOW_TO_UNICODE_KEEP, layout);
+	if (got != 1)
+		return 0U;
+
+	/* A control character, or half a character, is none. */
+	if (units[0] < 0x20U || units[0] == 0x7fU)
+		return 0U;
+	if (units[0] >= 0xd800U && units[0] <= 0xdfffU)
+		return 0U;
+
+	/* Succeeded: the character. */
+	return (uint32_t)units[0];
+}
+
+/*
+ * Writes the text a key types with the keyboard's state as it is but
+ * without Control and Alt (Shift and the locks kept), for a press with
+ * Control; text is left as it is when the key types none or a control
+ * character.  The keyboard's state is left as it is.
+ */
+static void
+window_control_text(
+	WPARAM wparam,
+	unsigned scan,
+	char *text,
+	size_t size)
+{
+	BYTE state[256];
+	WCHAR units[WINDOW_CHAR_UNITS];
+	HKL layout;
+	BOOL read;
+	int got;
+
+	/* The keyboard's state, less Control and Alt. */
+	read = GetKeyboardState(state);
+	if (!read)
+		return;
+	state[VK_CONTROL] = 0U;
+	state[VK_LCONTROL] = 0U;
+	state[VK_RCONTROL] = 0U;
+	state[VK_MENU] = 0U;
+	state[VK_LMENU] = 0U;
+	state[VK_RMENU] = 0U;
+
+	/* What the key types so. */
+	layout = GetKeyboardLayout(0U);
+	got = ToUnicodeEx((UINT)wparam, (UINT)scan, state, units, (int)WINDOW_CHAR_UNITS, WINDOW_TO_UNICODE_KEEP, layout);
+	if (got <= 0)
+		return;
+
+	/* A control character is no text. */
+	if (units[0] < 0x20U || units[0] == 0x7fU)
+		return;
+
+	/* The text in UTF-8. */
+	(void)keiui_win32_utf8_from_utf16((const uint16_t *)units, (size_t)got, text, size, NULL);
 }
 
 /* A pointer's input at a point of the content (a focus input has none: lparam 0). */
@@ -1536,7 +1838,7 @@ window_set_title(
 	return 0;
 }
 
-/* Opens the title bar's font: the bundled data's fonts (none: the title bar draws no text). */
+/* Opens the title bar's font: the bundled data's fonts with their companions (none: the title bar draws no text). */
 static void
 window_font(
 	struct kl_window *window)
@@ -1551,6 +1853,11 @@ window_font(
 	error = kl_data_directory(directory, sizeof(directory));
 	if (error != 0)
 		return;
+
+	/* The bundled companions (bold, and monospaced for the signs the sans font lacks), for this font and those opened after it. */
+	(void)snprintf(window_companion_bold, sizeof(window_companion_bold), "%s\\fonts\\keiland-bold.ttf", directory);
+	(void)snprintf(window_companion_mono, sizeof(window_companion_mono), "%s\\fonts\\keiland-fallback-mono.ttf", directory);
+	kl_text_companions(window_companion_bold, window_companion_mono);
 
 	/* The sans font and its fallback. */
 	(void)snprintf(primary, sizeof(primary), "%s\\fonts\\keiland.ttf", directory);

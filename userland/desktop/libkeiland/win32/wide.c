@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* The character that stands for text that could not be decoded. */
 #define REPLACEMENT_CHARACTER	0xFFFDU
@@ -45,6 +46,11 @@ static size_t encode_utf8(uint32_t code_point, unsigned char *bytes);
 static size_t decode_utf8(const unsigned char *bytes, size_t available, uint32_t *code_point);
 static size_t encode_utf16(uint32_t code_point, uint16_t *units);
 static size_t utf8_scan_units(const unsigned char *bytes, size_t length, uint16_t *units, size_t capacity);
+static int line_put(char *line, size_t size, size_t *used, char byte);
+static int line_repeat(char *line, size_t size, size_t *used, char byte, size_t count);
+static int line_name(const char *name, int quoted, char *line, size_t size, size_t *used);
+static int line_quoting(const char *argument);
+static int line_argument(const char *argument, char *line, size_t size, size_t *used);
 
 /*
  * Converts UTF-16 to UTF-8, writing whole characters only.
@@ -254,6 +260,70 @@ keiui_win32_char_unit(
 
 	/* Reports a complete character. */
 	return 1;
+}
+
+/*
+ * Writes a program's arguments as one command line.
+ */
+int
+keiui_win32_command_line(
+	const char *const *argv,
+	char *line,
+	size_t size)
+{
+	const char *quote;
+	const char *space;
+	const char *tab;
+	size_t used;
+	size_t index;
+	int quoted;
+	int error;
+
+	/* The arguments with a program, and room for the line. */
+	if (argv == NULL || argv[0] == NULL || line == NULL || size == 0U)
+		return EINVAL;
+
+	/* A program's name cannot hold a double quote. */
+	quote = strchr(argv[0], '"');
+	if (quote != NULL)
+		return EINVAL;
+
+	/* The program's name is quoted when it is empty or has a space or a tab. */
+	space = strchr(argv[0], ' ');
+	tab = strchr(argv[0], '\t');
+	quoted = 0;
+	if (argv[0][0] == '\0' || space != NULL || tab != NULL)
+		quoted = 1;
+
+	/* The program's name, without the escapes of the other arguments. */
+	used = 0U;
+	line[0] = '\0';
+	error = line_name(argv[0], quoted, line, size, &used);
+	if (error != 0) {
+		line[0] = '\0';
+		return error;
+	}
+
+	/* Every other argument after a space. */
+	for (index = 1U; argv[index] != NULL; index++) {
+		/* The separating space. */
+		error = line_put(line, size, &used, ' ');
+		if (error != 0) {
+			line[0] = '\0';
+			return error;
+		}
+
+		/* The argument, quoted when it must be. */
+		error = line_argument(argv[index], line, size, &used);
+		if (error != 0) {
+			line[0] = '\0';
+			return error;
+		}
+	}
+
+	/* Succeeded: the line, ended. */
+	line[used] = '\0';
+	return 0;
 }
 
 /*
@@ -535,4 +605,179 @@ utf8_scan_units(
 
 	/* The number of units the text takes. */
 	return produced;
+}
+
+/* Puts one byte of a command line, keeping room for its NUL; 0, or ERANGE. */
+static int
+line_put(
+	char *line,
+	size_t size,
+	size_t *used,
+	char byte)
+{
+	/* The byte and the NUL after it must fit. */
+	if (*used + 2U > size)
+		return ERANGE;
+
+	/* The byte. */
+	line[*used] = byte;
+	(*used)++;
+	return 0;
+}
+
+/* Puts one byte of a command line a number of times; 0, or ERANGE. */
+static int
+line_repeat(
+	char *line,
+	size_t size,
+	size_t *used,
+	char byte,
+	size_t count)
+{
+	size_t index;
+	int error;
+
+	/* The byte, count times. */
+	for (index = 0U; index < count; index++) {
+		error = line_put(line, size, used, byte);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: all of them are there. */
+	return 0;
+}
+
+/* Writes the program's name, in double quotes when asked; 0, or ERANGE. */
+static int
+line_name(
+	const char *name,
+	int quoted,
+	char *line,
+	size_t size,
+	size_t *used)
+{
+	size_t index;
+	int error;
+
+	/* The opening quote. */
+	if (quoted) {
+		error = line_put(line, size, used, '"');
+		if (error != 0)
+			return error;
+	}
+
+	/* The name as it is. */
+	for (index = 0U; name[index] != '\0'; index++) {
+		error = line_put(line, size, used, name[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* The closing quote. */
+	if (quoted) {
+		error = line_put(line, size, used, '"');
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the name is written. */
+	return 0;
+}
+
+/* Tells whether an argument needs double quotes (empty, or with a blank or a double quote): 1 or 0. */
+static int
+line_quoting(
+	const char *argument)
+{
+	size_t index;
+
+	/* The empty argument is only there when quoted. */
+	if (argument[0] == '\0')
+		return 1;
+
+	/* A blank would split it, and a double quote would be read as quoting. */
+	for (index = 0U; argument[index] != '\0'; index++) {
+		switch (argument[index]) {
+		case ' ':
+		case '\t':
+		case '\n':
+		case '\v':
+		case '"':
+			return 1;
+		default:
+			break;
+		}
+	}
+
+	/* It is written as it is. */
+	return 0;
+}
+
+/* Writes one argument after the program's, quoted when it must be; 0, or ERANGE. */
+static int
+line_argument(
+	const char *argument,
+	char *line,
+	size_t size,
+	size_t *used)
+{
+	size_t backslashes;
+	size_t index;
+	size_t count;
+	int quoting;
+	int error;
+
+	/* An argument written as it is. */
+	quoting = line_quoting(argument);
+	if (!quoting) {
+		for (index = 0U; argument[index] != '\0'; index++) {
+			error = line_put(line, size, used, argument[index]);
+			if (error != 0)
+				return error;
+		}
+		return 0;
+	}
+
+	/* The opening quote. */
+	error = line_put(line, size, used, '"');
+	if (error != 0)
+		return error;
+
+	/* Each character, the backslashes counted until what follows them says how they are written. */
+	backslashes = 0U;
+	for (index = 0U; argument[index] != '\0'; index++) {
+		/* A backslash waits for what follows it. */
+		if (argument[index] == '\\') {
+			backslashes++;
+			continue;
+		}
+
+		/* Before a double quote the backslashes are doubled, and the quote is escaped by one more. */
+		count = backslashes;
+		if (argument[index] == '"')
+			count = backslashes * 2U + 1U;
+		error = line_repeat(line, size, used, '\\', count);
+		if (error != 0)
+			return error;
+		backslashes = 0U;
+
+		/* The character itself. */
+		error = line_put(line, size, used, argument[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* The backslashes at the end are doubled, so that the closing quote stays a quote. */
+	error = line_repeat(line, size, used, '\\', backslashes * 2U);
+	if (error != 0)
+		return error;
+
+	/* The closing quote. */
+	error = line_put(line, size, used, '"');
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the argument is written. */
+	return 0;
 }
