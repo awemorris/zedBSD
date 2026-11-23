@@ -2265,18 +2265,29 @@ engine_send_query(
 	return 0;
 }
 
-/* Notes the login and opens the session channel when one is wanted (RFC 4254 6.1). */
+/* Notes the login (and the identity it took) and opens the session channel when one is wanted (RFC 4254 6.1). */
 static int
 engine_authenticated(
 	struct ssh_engine *engine)
 {
+	struct ssh_engine_event *event;
+	unsigned identity;
 	int error;
+
+	/* The identity whose key the server took: the one whose signed request it answered. */
+	identity = SSH_ENGINE_IDENTITY_NONE;
+	if (engine->request == ENGINE_REQUEST_SIGNED)
+		identity = engine->key_identity;
 
 	/* The login is over: the keys and passwords are no longer needed. */
 	engine->phase = ENGINE_PHASE_CONNECTED;
 	engine_forget(engine);
 	engine->alive_due = engine->now_ms + (uint64_t)engine->alive_interval * 1000U;
-	(void)engine_event(engine, SSH_ENGINE_AUTHENTICATED);
+
+	/* The caller hears of it, with the identity. */
+	event = engine_event(engine, SSH_ENGINE_AUTHENTICATED);
+	if (event != NULL)
+		event->identity = identity;
 
 	/* A connection without a session waits for the server or the user. */
 	if (!engine->session)
