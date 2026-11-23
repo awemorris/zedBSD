@@ -18,7 +18,10 @@
  * gets only those three descriptors.  When the child has ended and all of
  * its output has been sent, the channel gets exit-status or exit-signal,
  * EOF and CLOSE (6.10).  Re-exchanges are signed by the monitor; the
- * login records of terminals are written by the monitor.
+ * login records of terminals are written by the monitor.  The port
+ * forwardings (sshd-forward.c) run in the same loop with the user's
+ * rights: direct-tcpip channels, tcpip-forward requests and the
+ * forwarded-tcpip channels they open.
  *
  * The environment of a child (sshd(8) LOGIN PROCESS, "basic
  * environment"): HOME, USER, LOGNAME, SHELL, PATH, SSH_CONNECTION,
@@ -50,6 +53,7 @@
 #include "ssh-channel.h"
 #include "ssh-ttymodes.h"
 #include "sshd-child.h"
+#include "sshd-forward.h"
 #include "sshd-monitor.h"
 
 /* The most bytes one read of a child takes. */
@@ -174,7 +178,8 @@ struct session_link {
  * SSH_CONNECTION and SSH_CLIENT.  message is
  * the scratch buffer each outgoing message is built in.  alive_missed
  * counts keepalives not answered; last_input is when the client last sent
- * something (seconds, monotonic).
+ * something (seconds, monotonic).  forwards are the port forwardings,
+ * whose channels share the table with the sessions'.
  */
 struct session {
 	struct sshd_child child;
@@ -188,6 +193,7 @@ struct session {
 	struct ssh_buf message;
 	unsigned alive_missed;
 	uint64_t last_input;
+	struct sshd_forwards forwards;
 };
 
 /*
@@ -305,6 +311,9 @@ sshd_session_run(void)
 		session.links[index].err_child = -1;
 	}
 
+	/* Starts the port forwardings with the user's id, which decides the privileged ports. */
+	sshd_forward_init(&session.forwards, &session.child.config, session.account.pw_uid, &session.channels, &session.transport);
+
 	/* Wakes poll when a child ends. */
 	status = pipe(wake);
 	if (status != 0)
@@ -324,8 +333,9 @@ sshd_session_run(void)
 	session.last_input = sshd_child_now();
 	status = session_serve(&session, wake[0]);
 
-	/* Ends what is left: the children's terminals hang up, their records close. */
+	/* Ends what is left: the children's terminals hang up, their records close, the forwardings' sockets close. */
 	session_hang_up(&session);
+	sshd_forward_free(&session.forwards);
 	(void)sshd_child_flush(&session.transport);
 	ssh_transport_free(&session.transport);
 	ssh_buf_free(&session.message);
@@ -531,16 +541,19 @@ session_serve(
 	int wake)
 {
 	struct ssh_buf payload;
-	struct pollfd waiting[2 + 3 * SSH_CHANNEL_MAX];
-	struct session_link *owners[2 + 3 * SSH_CHANNEL_MAX];
-	int kinds[2 + 3 * SSH_CHANNEL_MAX];
+	struct pollfd waiting[2 + 3 * SSH_CHANNEL_MAX + SSHD_FORWARD_SLOTS];
+	struct session_link *owners[2 + 3 * SSH_CHANNEL_MAX + SSHD_FORWARD_SLOTS];
+	int kinds[2 + 3 * SSH_CHANNEL_MAX + SSHD_FORWARD_SLOTS];
 	uint8_t chunk[SESSION_READ_CHUNK];
 	struct session_link *link;
 	const uint8_t *pending;
 	size_t size;
 	ssize_t got;
 	size_t room;
+	uint64_t now_ms;
 	unsigned count;
+	unsigned forward_base;
+	unsigned forward_count;
 	unsigned index;
 	int timeout;
 	int ready;
@@ -587,6 +600,11 @@ session_serve(
 		}
 
 		/* Stops when finishing a link failed. */
+		if (status != 0)
+			break;
+
+		/* Sends what the forwarded channels have due: EOFs, closes, connections out of time. */
+		status = sshd_forward_pump(&session->forwards, sshd_forward_now_ms());
 		if (status != 0)
 			break;
 
@@ -661,6 +679,16 @@ session_serve(
 		if (session->child.config.client_alive_interval != 0 &&
 		    session->child.config.client_alive_interval < (unsigned)(SESSION_POLL_MS / 1000))
 			timeout = (int)session->child.config.client_alive_interval * 1000;
+
+		/* Waits for the forwardings' sockets too, waking for their times. */
+		now_ms = sshd_forward_now_ms();
+		forward_base = count;
+		forward_count = sshd_forward_poll(&session->forwards, waiting + count, SSHD_FORWARD_SLOTS, size, now_ms, &timeout);
+		for (index = 0; index < forward_count; index++) {
+			kinds[count] = 5;
+			owners[count] = NULL;
+			count++;
+		}
 		ready = poll(waiting, (nfds_t)count, timeout);
 		if (ready < 0 && errno != EINTR) {
 			status = EIO;
@@ -705,6 +733,13 @@ session_serve(
 		if (status != 0)
 			break;
 
+		/* Moves the forwardings on: new connections, their bytes, connections being made. */
+		if (ready > 0) {
+			status = sshd_forward_serve(&session->forwards, waiting + forward_base, sshd_forward_now_ms());
+			if (status != 0)
+				break;
+		}
+
 		/* Lets the transport re-key, and keeps the client alive. */
 		status = ssh_transport_tick(&session->transport, sshd_child_now());
 		if (status == 0)
@@ -739,12 +774,17 @@ session_message(
 	struct ssh_channel *adjusted;
 	char name[SSH_NAME_MAX + 1];
 	int want_reply;
+	int handled;
 	int status;
 
 	/* Dispatches by the message number. */
 	status = 0;
 	switch (payload->data[0]) {
 	case SSH_MSG_GLOBAL_REQUEST:
+		/* The forwardings' requests go to them, every other to the table. */
+		status = sshd_forward_global(&session->forwards, payload->data, payload->size, &handled);
+		if (status != 0 || handled)
+			break;
 		ssh_buf_reset(&session->message);
 		status = ssh_channel_global_request(&session->channels, payload->data, payload->size, name, &want_reply, &session->message);
 		if (status == 0 && session->message.size > 0)
@@ -757,6 +797,11 @@ session_message(
 		break;
 	case SSH_MSG_CHANNEL_OPEN:
 		status = session_open(session, payload);
+		break;
+	case SSH_MSG_CHANNEL_OPEN_CONFIRMATION:
+	case SSH_MSG_CHANNEL_OPEN_FAILURE:
+		/* The client's answer to a forwarded-tcpip channel, the only kind this side opens. */
+		status = sshd_forward_open_reply(&session->forwards, payload->data, payload->size);
 		break;
 	case SSH_MSG_CHANNEL_WINDOW_ADJUST:
 		status = ssh_channel_parse_window_adjust(&session->channels, payload->data, payload->size, &adjusted);
@@ -815,7 +860,15 @@ session_open(
 	unsigned index;
 	unsigned active;
 	int refused;
+	int direct;
 	int status;
+
+	/* A direct-tcpip open is a forwarding's, which takes it apart from the sessions. */
+	direct = sshd_forward_is_direct(payload->data, payload->size);
+	if (direct) {
+		status = sshd_forward_open(&session->forwards, payload->data, payload->size);
+		return status;
+	}
 
 	/* Counts the sessions open before this one. */
 	active = 0;
@@ -933,12 +986,20 @@ session_data(
 	const uint8_t *data;
 	size_t size;
 	uint32_t extended;
+	int forwarded;
 	int status;
 
 	/* Reads the message against the channel's window. */
 	status = ssh_channel_parse_data(&session->channels, payload->data, payload->size, &channel, &data, &size, &extended);
 	if (status != 0)
 		return status;
+
+	/* Data of a forwarded channel goes to its socket. */
+	forwarded = sshd_forward_owns(&session->forwards, channel);
+	if (forwarded) {
+		status = sshd_forward_data(&session->forwards, channel, data, size, extended);
+		return status;
+	}
 	link = session_link_of(session, channel);
 
 	/* Keeps data for a child that reads its input. */
@@ -979,6 +1040,7 @@ session_end(
 {
 	struct ssh_channel *channel;
 	struct session_link *link;
+	int forwarded;
 	int status;
 	int freed;
 
@@ -986,6 +1048,13 @@ session_end(
 	status = ssh_channel_parse_end(&session->channels, payload->data, payload->size, &channel);
 	if (status != 0)
 		return status;
+
+	/* The end of a forwarded channel goes to the forwardings. */
+	forwarded = sshd_forward_owns(&session->forwards, channel);
+	if (forwarded) {
+		status = sshd_forward_end(&session->forwards, channel, payload->data[0] == SSH_MSG_CHANNEL_CLOSE);
+		return status;
+	}
 	link = session_link_of(session, channel);
 
 	/* An EOF only marks the input's end. */
