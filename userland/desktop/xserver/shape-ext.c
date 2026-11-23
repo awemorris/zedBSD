@@ -241,6 +241,26 @@ x11_shape_has(
 }
 
 /*
+ * Tells whether a window has a bounding region of its own, which cuts
+ * what its surface shows.
+ */
+int
+x11_shape_bounded(
+	const struct x11_window *window)
+{
+	/* No shape's state. */
+	if (window->shape == NULL)
+		return 0;
+
+	/* Only events asked for, or other regions. */
+	if (!window->shape->set[X11_SHAPE_BOUNDING])
+		return 0;
+
+	/* Succeeded: the bounding region is set. */
+	return 1;
+}
+
+/*
  * Tells whether a place on the root window, inside a window's rectangle,
  * takes the pointer for the window: inside its effective bounding and
  * input regions.  A window without regions takes all of its rectangle.
