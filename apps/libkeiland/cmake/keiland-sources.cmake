@@ -11,6 +11,10 @@
 #   KEILAND_WIN32_SOURCES   a Windows program's files: the platform layer, the Windows
 #                           backend (apps/libkeiland/win32) and its stubs of what
 #                           Windows has not
+#   KEILAND_POSIX_SOURCES   the platform layer of a POSIX system (threads, sockets)
+#   KEILAND_ANDROID_SOURCES an Android program's files: the Android backend
+#                           (apps/libkeiland/android) and its stubs of what Android has not;
+#                           with KEILAND_POSIX_SOURCES
 #
 set(KEILAND_COMMON_SOURCES
 	userland/desktop/libkeiland/version.c
@@ -68,3 +72,24 @@ set(KEILAND_WIN32_SOURCES
 	apps/libkeiland/win32/pointer.c
 	apps/libkeiland/win32/drag.c
 	apps/libkeiland/win32/unsupported.c)
+
+set(KEILAND_POSIX_SOURCES
+	userland/desktop/libkeiland/platform/platform-posix.c
+	userland/desktop/libkeiland/platform/thread-posix.c
+	userland/desktop/libkeiland/platform/socket-posix.c)
+
+set(KEILAND_ANDROID_SOURCES
+	apps/libkeiland/android/activity.c
+	apps/libkeiland/android/app.c
+	apps/libkeiland/android/window.c
+	apps/libkeiland/android/present.c
+	apps/libkeiland/android/input.c
+	apps/libkeiland/android/keys-table.c
+	apps/libkeiland/android/ime.c
+	apps/libkeiland/android/clipboard.c
+	apps/libkeiland/android/titlebar.c
+	apps/libkeiland/android/places.c
+	apps/libkeiland/android/theme.c
+	apps/libkeiland/android/bridge.c
+	apps/libkeiland/android/bridge-jni.c
+	apps/libkeiland/android/unsupported.c)
