@@ -151,7 +151,8 @@ kl_window_close(
 			(void)keiland_java_set_title(top->title);
 	}
 
-	/* The title and the state. */
+	/* The title, the frame kept and the state. */
+	android_present_release(window);
 	free(window->title);
 	free(window);
 }
@@ -409,6 +410,9 @@ android_window_layout(
 		if (changed || window == app->windows)
 			window_input(window, KL_WINDOW_RESIZE, 0);
 	}
+
+	/* The window shown, of the size it was, is painted again from its last frame (the native window may be new and empty). */
+	android_present_repaint(app);
 }
 
 /*
