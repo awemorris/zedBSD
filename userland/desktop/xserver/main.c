@@ -26,6 +26,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <vulkan/vulkan.h>
+
 /* The largest root window side. */
 #define MAIN_SIZE_MAX		16384UL
 
@@ -49,7 +51,8 @@
 
 /*
  * What the program is started with: the root window's size (zero for the
- * core's default), whether windows are shown through wl_shm only, and the
+ * core's default), whether windows are drawn in memory and shown through
+ * wl_shm only (no Vulkan), and the
  * paths of the socket and the font.
  */
 struct main_options {
@@ -155,14 +158,16 @@ main(
 		return 1;
 	}
 
-	/* The core, on the desktop, shown through Vulkan unless --shm. */
+	/* The core, on the desktop, drawn and shown through Vulkan (libvulkan's loader) unless --shm. */
 	memset(&server_options, 0, sizeof(server_options));
 	server_options.width = options.width;
 	server_options.height = options.height;
 	server_options.backend = &x11_wayland_ops;
 	server_options.backend_context = wayland;
-	if (!options.shm)
+	if (!options.shm) {
+		server_options.vulkan_loader = (x11server_vulkan_function)vkGetInstanceProcAddr;
 		server_options.vulkan_wsi = X11_WAYLAND_WSI;
+	}
 	if (font_count != 0U) {
 		server_options.fonts = fonts;
 		server_options.font_count = font_count;
@@ -277,7 +282,7 @@ main_options(
 			continue;
 		}
 
-		/* The windows through wl_shm instead of Vulkan. */
+		/* The windows drawn in memory and shown through wl_shm instead of Vulkan. */
 		differs = strcmp(argv[argument], "--shm");
 		if (differs == 0) {
 			options->shm = 1;

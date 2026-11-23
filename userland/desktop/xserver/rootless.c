@@ -11,8 +11,10 @@
  *
  * At the end of a tick, the part of each top-level window's pixels (it
  * and its inferiors, draw.c) that changed is shown on its surface, which
- * is opened, resized, retitled and moved to follow the X window: through a Vulkan swapchain on the surface while Vulkan can show
- * it, else through the backend's present.  The backend's pointer,
+ * is opened, resized, retitled and moved to follow the X window: through
+ * a Vulkan swapchain on the surface while Vulkan can show it (from the
+ * window's image on the GPU when it has one), else through the backend's
+ * present (the pixels in memory brought up to date first).  The backend's pointer,
  * keyboard, focus, sizes and close requests come back as X events.  The
  * system draws the pointer; X cursors are not shown.
  *
@@ -256,9 +258,12 @@ rootless_track(
 		window->wm_changed = 0U;
 	}
 
-	/* A swapchain on it once it has pixels, unless windows are shown through the backend. */
-	if (window->swapchain == NULL && window->image.pixels != NULL)
+	/* A swapchain on it once it has pixels, unless windows are shown through the backend (a surface Vulkan failed on goes, to be opened again). */
+	if (window->swapchain == NULL && window->image.pixels != NULL) {
 		rootless_swapchain(server, window);
+		if (window->surface == NULL)
+			return;
+	}
 
 	/* What changed since the surface was last told: the window manager's part first. */
 	rootless_size(window, &width, &height);
@@ -356,7 +361,7 @@ rootless_info(
 	x11_wm_info(server, window, info);
 }
 
-/* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan off. */
+/* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan's windows off. */
 static void
 rootless_swapchain(
 	struct x11server *server,
@@ -371,24 +376,26 @@ rootless_swapchain(
 	if (window->swapchain != NULL)
 		return;
 
-	/* This window and later ones are shown through the backend. */
-	server->cpu_present = 1;
-	x11_log(server, "X11SERVER PRESENT backend (Vulkan cannot show windows)");
+	/* This window (from a new surface, the next tick) and later ones are shown through the backend. */
+	rootless_cpu(server, window, "cannot show");
 }
 
-/* Leaves a window, and every later one, to the backend's present: its swapchain goes, and it is drawn whole. */
+/*
+ * Leaves a window, and every later one, to the backend's present: its
+ * swapchain goes with its surface (a system window that was shown
+ * through Vulkan may take no other pixels), which is opened again
+ * without one and drawn whole.
+ */
 static void
 rootless_cpu(
 	struct x11server *server,
 	struct x11_window *window,
 	const char *why)
 {
-	/* The swapchain goes. */
+	/* The swapchain and the surface go; the next present opens the surface again. */
 	x11_log(server, "X11SERVER PRESENT backend (Vulkan %s window 0x%x)", why, (unsigned)window->id);
-	x11_vulkan_window_close(window->swapchain);
-	window->swapchain = NULL;
+	x11_rootless_forget(server, window);
 	server->cpu_present = 1;
-	window->surface_fresh = 1;
 }
 
 /*
@@ -407,21 +414,30 @@ rootless_show(
 	int height)
 {
 	struct x11_rect part;
+	struct x11_box box;
 	int status;
 
-	/* Through the swapchain: the whole image each frame. */
+	/* Through the swapchain: the whole image each frame, from the GPU when it is there. */
 	if (window->swapchain != NULL) {
-		status = x11_vulkan_window_present(window->swapchain, window->image.pixels, window->image.stride);
+		if (window->image.gpu != NULL) {
+			status = x11_vulkan_window_present_image(window->swapchain, &window->image);
+		} else {
+			status = x11_vulkan_window_present(window->swapchain, window->image.pixels, window->image.stride);
+		}
 		if (status >= 0)
 			return status;
 
-		/* Vulkan failed: this window and later ones are shown through the backend, whole. */
+		/* Vulkan failed: this window and later ones are shown through the backend, whole, from a new surface. */
 		rootless_cpu(server, window, "failed on");
-		x = 0;
-		y = 0;
-		width = window->image.width;
-		height = window->image.height;
+		return 1;
 	}
+
+	/* The part's pixels in memory brought up to date with the GPU's. */
+	box.x0 = x;
+	box.y0 = y;
+	box.x1 = x + width;
+	box.y1 = y + height;
+	x11_render_image_memory_box(&window->image, &box);
 
 	/* Through the backend, the part as the damage. */
 	part.x = x;
