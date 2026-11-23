@@ -919,6 +919,7 @@ shape_get_rectangles(
 	size_t index;
 	unsigned kind;
 	unsigned code;
+	int unshaped;
 	int error;
 
 	/* The window and the kind. */
@@ -939,6 +940,19 @@ shape_get_rectangles(
 	if (error != 0) {
 		x11_region_fini(&region);
 		return X11_BAD_ALLOC;
+	}
+
+	/*
+	 * The X.Org server gives the default bounding and input rectangle the
+	 * width and height with one border, not two (QueryExtents gives two);
+	 * clients see the same here.
+	 */
+	unshaped = 1;
+	if (window->shape != NULL && window->shape->set[kind])
+		unshaped = 0;
+	if (unshaped && kind != X11_SHAPE_CLIP && region.count == 1U) {
+		region.boxes[0].x1 -= (int)window->border;
+		region.boxes[0].y1 -= (int)window->border;
 	}
 
 	/* The reply, room for every rectangle. */

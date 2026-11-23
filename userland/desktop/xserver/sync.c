@@ -206,10 +206,11 @@ static int sync_add(int64_t a, int64_t b, int64_t *sum);
 static int64_t sync_read64(const uint8_t *bytes, int msb);
 static void sync_write64(uint8_t *bytes, int64_t value, int msb);
 static void sync_counter_changed(struct x11server *server, uint32_t counter, int64_t old_value, int64_t new_value);
-static void sync_counter_destroyed(struct x11server *server, uint32_t counter);
+static void sync_counter_destroyed(struct x11server *server, uint32_t counter, int64_t value);
+static int sync_compare_down(const void *a, const void *b);
 static void sync_alarm_check(struct x11server *server, struct sync_alarm *alarm, int64_t old_value);
 static void sync_alarm_fire(struct x11server *server, struct sync_alarm *alarm);
-static void sync_alarm_notify(struct x11server *server, struct sync_alarm *alarm, int64_t alarm_value);
+static void sync_alarm_notify(struct x11server *server, struct sync_alarm *alarm, int64_t alarm_value, int64_t counter_value);
 static void sync_alarm_free(struct x11server *server, struct sync_alarm *alarm);
 static int sync_wait_add(struct x11_sync *state, struct sync_wait *wait);
 static void sync_wait_check(struct x11server *server, struct sync_wait *wait, uint32_t counter, int64_t old_value, int64_t new_value);
@@ -682,7 +683,7 @@ sync_destroy_counter(
 	x11_resource_remove(request->server, id);
 	x11_memory_release(request->server, counter->owner, sizeof(*counter));
 	free(counter);
-	sync_counter_destroyed(request->server, id);
+	sync_counter_destroyed(request->server, id, value);
 	return 0U;
 }
 
@@ -1554,7 +1555,8 @@ sync_counter_changed(
 static void
 sync_counter_destroyed(
 	struct x11server *server,
-	uint32_t counter)
+	uint32_t counter,
+	int64_t value)
 {
 	struct x11_sync *state;
 	struct sync_alarm *alarm;
@@ -1587,18 +1589,20 @@ sync_counter_destroyed(
 		sync_wait_end(server, wait, 1);
 	}
 
-	/* Succeeded: each alarm on it is inactive and told. */
+	/* Succeeded: each alarm on it is inactive and told, the newest first (as the X.Org server tells them). */
 	for (slot = 0U; slot < server->clients_max; slot++) {
 		error = x11_resource_owned(server, slot, X11_RESOURCE_ALARM, &ids, &count);
 		if (error != 0)
 			continue;
+		if (count > 1U)
+			qsort(ids, count, sizeof(*ids), sync_compare_down);
 		for (index = 0U; index < count; index++) {
 			alarm = x11_resource_find(server, ids[index], X11_RESOURCE_ALARM);
 			if (alarm == NULL || alarm->counter != counter)
 				continue;
 			alarm->state = SYNC_ALARM_INACTIVE;
 			alarm->counter = 0U;
-			sync_alarm_notify(server, alarm, alarm->test_value);
+			sync_alarm_notify(server, alarm, alarm->test_value, value);
 		}
 		free(ids);
 	}
@@ -1675,35 +1679,25 @@ sync_alarm_fire(
 	}
 
 	/* Succeeded: its clients told, and the new test value kept. */
-	sync_alarm_notify(server, alarm, fired_at);
+	sync_alarm_notify(server, alarm, fired_at, value);
 	alarm->test_value = next;
 }
 
 /*
- * Sends AlarmNotify to an alarm's clients: the alarm, its counter's value
- * (0 without one), the value it fired at, the time and its state.
+ * Sends AlarmNotify to an alarm's clients: the alarm, its counter's value,
+ * the value it fired at, the time and its state.
  */
 static void
 sync_alarm_notify(
 	struct x11server *server,
 	struct sync_alarm *alarm,
-	int64_t alarm_value)
+	int64_t alarm_value,
+	int64_t value)
 {
-	struct sync_counter *counter;
 	struct x11_client *client;
 	uint8_t event[32];
-	int64_t value;
 	unsigned slot;
-	int found;
 	int msb;
-
-	/* The counter's value. */
-	value = 0;
-	if (alarm->counter != 0U) {
-		found = sync_counter_find(server, alarm->counter, &value, &counter);
-		if (!found)
-			value = 0;
-	}
 
 	/* Each client it tells, in its byte order. */
 	for (slot = 0U; slot < alarm->client_count; slot++) {
@@ -1729,9 +1723,19 @@ sync_alarm_free(
 	struct x11server *server,
 	struct sync_alarm *alarm)
 {
-	/* Its clients told. */
+	struct sync_counter *counter;
+	int64_t value;
+	int found;
+
+	/* Its clients told, with its counter's value (0 without one). */
 	alarm->state = SYNC_ALARM_DESTROYED;
-	sync_alarm_notify(server, alarm, alarm->test_value);
+	value = 0;
+	if (alarm->counter != 0U) {
+		found = sync_counter_find(server, alarm->counter, &value, &counter);
+		if (!found)
+			value = 0;
+	}
+	sync_alarm_notify(server, alarm, alarm->test_value, value);
 
 	/* Succeeded: its charge and itself. */
 	x11_memory_release(server, alarm->owner, sizeof(*alarm));
@@ -1953,6 +1957,7 @@ sync_release(
 	struct sync_counter *counter;
 	struct sync_fence *fence;
 	void *object;
+	int64_t value;
 	uint32_t *ids;
 	size_t count;
 	size_t index;
@@ -1969,9 +1974,10 @@ sync_release(
 		x11_resource_remove(server, ids[index]);
 		if (type == X11_RESOURCE_COUNTER) {
 			counter = object;
+			value = counter->value;
 			x11_memory_release(server, counter->owner, sizeof(*counter));
 			free(counter);
-			sync_counter_destroyed(server, ids[index]);
+			sync_counter_destroyed(server, ids[index], value);
 		} else if (type == X11_RESOURCE_ALARM) {
 			sync_alarm_free(server, object);
 		} else {
@@ -1983,4 +1989,25 @@ sync_release(
 
 	/* Succeeded: none is left. */
 	free(ids);
+}
+
+/* Orders ids from the largest down (the newest a client made first). */
+static int
+sync_compare_down(
+	const void *a,
+	const void *b)
+{
+	uint32_t first;
+	uint32_t second;
+
+	/* The two ids. */
+	first = *(const uint32_t *)a;
+	second = *(const uint32_t *)b;
+
+	/* Succeeded: the larger first. */
+	if (first > second)
+		return -1;
+	if (first < second)
+		return 1;
+	return 0;
 }
