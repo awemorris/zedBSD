@@ -81,7 +81,7 @@ mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/
 # The terminal's core, its settings' tab and the drawing on the processor (not its Wayland, Vulkan, process or settings files).
 set(MIKUTERM_TERMINAL_NAMES
 	run screen width search keys font render-build render-cpu display-cpu frame-timer
-	window menu tabs clipboard primary touch settings-page settings-key)
+	window menu tabs clipboard primary touch settings-page settings-key settings-hosts)
 list(TRANSFORM MIKUTERM_TERMINAL_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/terminal/ OUTPUT_VARIABLE MIKUTERM_TERMINAL_SOURCES)
 list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
 

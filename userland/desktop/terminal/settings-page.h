@@ -11,8 +11,8 @@
  *
  * The settings are a tab of the window like the connections' tabs: a page
  * of libkeiland's widgets with a sidebar of four panes (the hosts of
- * ssh_config, the appearance, the behaviour, and the keys with
- * known_hosts).  What the page cannot know -- where the program keeps
+ * ssh_config a host at a time, settings-hosts.c the text's changes; the
+ * appearance; the behaviour; and the keys with known_hosts).  What the page cannot know -- where the program keeps
  * its files, how it writes them, and the settings only it has -- the
  * program gives it (struct terminal_page_program).  The settings the run
  * carries out at once (the text's size, the theme, the ambiguous width,
@@ -76,8 +76,10 @@ struct terminal_page_item {
  * whole in place of the old one, create makes a file that must not be
  * there yet (EEXIST when it is; secret: only the user may read it), and
  * exists says whether a file is there.  check reads an ssh_config's text
- * and writes what is wrong with it, a line for each problem (empty when
- * nothing is; NULL: the program checks nothing).  items are the
+ * as a connection reads it and writes the first problem ("line N: what"),
+ * empty when there is none (NULL: the program checks nothing).
+ * open_editor opens a file in the system's text editor, on its way when
+ * it returns (0, or an errno value; NULL: the program has none).  items are the
  * program's own settings (item_count of them), whose values item_get and
  * item_set read and keep (item_set writes why a value was refused, and
  * the program takes a setting of the next connection at once).  comment
@@ -99,6 +101,7 @@ struct terminal_page_program {
 	int (*create)(void *data, const char *path, const void *bytes, size_t size, int secret);
 	int (*exists)(void *data, const char *path);
 	int (*check)(void *data, const char *text, size_t size, char *report, size_t capacity);
+	int (*open_editor)(void *data, struct terminal_window *window, const char *path);
 	const struct terminal_page_item *items;
 	unsigned item_count;
 	int (*item_get)(void *data, const char *keyword, char *value, size_t size);

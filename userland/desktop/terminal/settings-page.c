@@ -10,7 +10,10 @@
  * the processor into a frame the drawing shows in place of a grid
  * (display.h's terminal_display_page), with a sidebar of four panes:
  *
- *   Hosts       the ssh_config the program reads, edited and saved;
+ *   Hosts       the hosts of the ssh_config the program reads, each in a
+ *               form (its name, address, port, user, command, identity
+ *               files and forwards), its other lines shown; the file
+ *               opens in the system's text editor for the rest;
  *   Appearance  the text's size, the theme and the ambiguous width (at
  *               once), and the program's own settings of the look;
  *   Behavior    copy-on-select (at once), and the program's own settings
@@ -32,6 +35,7 @@
  */
 
 #include "settings-page.h"
+#include "settings-hosts.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -41,9 +45,8 @@
 /* The widgets' ids (each widget's, or its first with an index). */
 #define PAGE_ID_PANES		1U
 #define PAGE_ID_SCROLL		2U
-#define PAGE_ID_CONFIG		3U
-#define PAGE_ID_CONFIG_SAVE	4U
-#define PAGE_ID_CONFIG_REVERT	5U
+#define PAGE_ID_HOSTS_SAVE	4U
+#define PAGE_ID_HOSTS_REVERT	5U
 #define PAGE_ID_SMALLER		6U
 #define PAGE_ID_LARGER		7U
 #define PAGE_ID_AMBIGUOUS	9U
@@ -62,6 +65,22 @@
 #define PAGE_ID_ITEM		32U
 #define PAGE_ID_SIZES		48U
 #define PAGE_ID_THEMES		56U
+#define PAGE_ID_HOST_ROWS	64U
+#define PAGE_ID_HOST_FIELD	65U
+#define PAGE_ID_HOST_NEW	72U
+#define PAGE_ID_HOST_ADD	73U
+#define PAGE_ID_HOST_EDITOR	74U
+#define PAGE_ID_IDENTITY_NEW	75U
+#define PAGE_ID_IDENTITY_ADD	76U
+#define PAGE_ID_LINE_REMOVE	77U
+#define PAGE_ID_FORWARD_LOCAL	78U
+#define PAGE_ID_FORWARD_REMOTE	79U
+#define PAGE_ID_FORWARD_LISTEN	80U
+#define PAGE_ID_FORWARD_TO	81U
+#define PAGE_ID_FORWARD_ADD	82U
+#define PAGE_ID_HOST_REMOVE	83U
+#define PAGE_ID_HOST_REMOVE_YES	84U
+#define PAGE_ID_HOST_REMOVE_NO	85U
 
 /* The layout: the margin round the panels, the sidebar's width, a pane's padding and the gap between cards, in pixels. */
 #define PAGE_MARGIN		12
@@ -100,12 +119,42 @@
 #define PAGE_FIELD_MAX		420
 #define PAGE_AFTER_GAP		12
 
-/* The widest a known host's words are drawn, its removal's button after them. */
+/* The widest a known host's words (or a line of a host) are drawn, its removal's button after them. */
 #define PAGE_KNOWN_LINE	480
 
-/* The lowest the ssh_config's text area stands, and the most lines of a note. */
-#define PAGE_AREA_MIN		220
+/* The most lines of a note. */
 #define PAGE_NOTE_LINES	4
+
+/* A removal's icon button, square, and its icon. */
+#define PAGE_ICON_BUTTON	28
+#define PAGE_ICON_PIXELS	16
+
+/* The fields of a host's form (Host, HostName, Port, User, RemoteCommand), and the most of a block's other lines shown. */
+#define PAGE_HOST_FIELDS	5U
+#define PAGE_HOST_NAME		0U
+#define PAGE_HOST_PORT		2U
+#define PAGE_HOST_COMMAND	4U
+#define PAGE_OTHER_LINES	40U
+
+/* The longest line of the Hosts pane's words (a host's title, a line shown), with its NUL. */
+#define PAGE_HOST_TEXT		256U
+
+/*
+ * What a widget of the Hosts pane asks for, carried out after the frame is
+ * drawn (the text and its lines change only between frames).
+ */
+#define PAGE_HOSTS_NOTHING	0U
+#define PAGE_HOSTS_SELECT	1U
+#define PAGE_HOSTS_ADD_HOST	2U
+#define PAGE_HOSTS_REMOVE_ASK	3U
+#define PAGE_HOSTS_REMOVE	4U
+#define PAGE_HOSTS_KEEP		5U
+#define PAGE_HOSTS_ADD_IDENTITY	6U
+#define PAGE_HOSTS_ADD_FORWARD	7U
+#define PAGE_HOSTS_REMOVE_LINE	8U
+#define PAGE_HOSTS_SAVE		9U
+#define PAGE_HOSTS_REVERT	10U
+#define PAGE_HOSTS_EDITOR	11U
 
 /*
  * The evdev codes of the keys the page answers itself: C, V and X with
@@ -119,14 +168,10 @@
 #define PAGE_KEY_DOWN		108U
 #define PAGE_KEY_PAGEDOWN	109U
 
-/* The spaces a tab of the ssh_config is shown as (the text area draws no tab). */
-#define PAGE_TAB_SPACES	4U
-
 /* How many pixels a line of the page's scroll is, for the keys. */
 #define PAGE_SCROLL_LINE	40.0
 
-/* The largest ssh_config the Hosts pane edits (the text area's room) and the largest known_hosts read. */
-#define PAGE_CONFIG_MAX	(KL_TEXT_AREA_MAX - 1U)
+/* The largest known_hosts read. */
 #define PAGE_KNOWN_MAX		(1024U * 1024U)
 
 /* The longest message a pane shows. */
@@ -191,12 +236,38 @@ struct page_state {
 	/* Whether the window's text input was asked on, as last told (-1 before the first frame). */
 	int text_wanted;
 
-	/* Hosts: the ssh_config's text, whether it was read (and was too large to edit), and the last save's word. */
-	struct kl_text_area config;
-	int config_read;
-	int config_large;
-	int config_crlf;
-	struct page_message config_message;
+	/*
+	 * Hosts: the ssh_config's bytes as last read or saved (original, which
+	 * a save compares the file with, and which the check tells new problems
+	 * from), the text with the pane's changes not saved yet (text, read into
+	 * hosts), whether the file was read (and was too large or could not be
+	 * read: nothing to edit), the block shown (TERMINAL_HOSTS_NONE: none)
+	 * and the one the form's fields were filled from, with what each field
+	 * was filled with (a field that still holds it changes nothing), the
+	 * fields of a new host, identity file and forward (remote or local), a
+	 * removal of the host asked, what a widget asked for in the frame drawn
+	 * (PAGE_HOSTS_*, and the block or line it is about), and the last word.
+	 */
+	char *hosts_original;
+	size_t hosts_original_size;
+	char *hosts_text;
+	size_t hosts_size;
+	struct terminal_hosts hosts;
+	int hosts_read;
+	int hosts_unusable;
+	unsigned hosts_block;
+	unsigned hosts_filled;
+	struct kl_field host_fields[PAGE_HOST_FIELDS];
+	char host_filled[PAGE_HOST_FIELDS][KL_FIELD_MAX];
+	struct kl_field host_new;
+	struct kl_field identity_new;
+	struct kl_field forward_listen;
+	struct kl_field forward_to;
+	int forward_remote;
+	int host_remove_asked;
+	unsigned hosts_later;
+	unsigned hosts_later_what;
+	struct page_message hosts_message;
 
 	/* The program's settings: their fields (read when items_read), and the last save's word. */
 	struct kl_field items[TERMINAL_ITEMS_MAX];
@@ -216,7 +287,7 @@ struct page_state {
 	struct page_message key_message;
 
 	/* The text the next Copy takes in place of the focused field's selection (a cut's, or the public key), when copied_set. */
-	char copied[KL_TEXT_AREA_MAX];
+	char copied[KL_FIELD_MAX + TERMINAL_KEY_LINE_MAX];
 	size_t copied_length;
 	int copied_set;
 
@@ -229,7 +300,7 @@ struct page_state {
 	struct page_message known_message;
 };
 
-/* The page (large: the text area and the known hosts; one for the run). */
+/* The page (large: the known hosts and the host's fields; one for the run). */
 static struct page_state page;
 
 /* The panes' names and icons, in their order. */
@@ -249,6 +320,12 @@ static const uint32_t page_size_actions[PAGE_SIZES] = { TERMINAL_ACTION_SIZE_SMA
 static const char *const page_appearance_labels[] = { "Text size", "Size", "Theme", "Ambiguous width", "Font file" };
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
+static const char *const page_host_labels[] = { "Name", "Host address", "Port", "User", "Command", "Identity file", "Forward", "Listen", "Destination", "New host" };
+
+/* The keywords of a host's form, its labels and what each field shows empty, in the fields' order. */
+static const char *const page_host_keywords[PAGE_HOST_FIELDS] = { "Host", "HostName", "Port", "User", "RemoteCommand" };
+static const char *const page_host_field_labels[PAGE_HOST_FIELDS] = { "Name", "Host address", "Port", "User", "Command" };
+static const char *const page_host_placeholders[PAGE_HOST_FIELDS] = { "myserver (Host)", "myserver.example.com (HostName)", "22 (Port)", "The login name (User)", "Run instead of a shell (RemoteCommand)" };
 
 static int page_frame(uint32_t width, uint32_t height, unsigned scale);
 static double page_units(double pixels);
@@ -256,6 +333,38 @@ static int page_pixels(int units);
 static void page_layout(struct kl_rect *sidebar, struct kl_rect *content);
 static void page_sidebar(const struct kl_rect *sidebar);
 static int page_hosts(struct terminal_window *window, int top, int left, int width);
+static int page_hosts_list(int top, int left, int width);
+static int page_hosts_form(int top, int left, int width);
+static int page_hosts_identities(int top, int left, int width);
+static int page_hosts_forwards(int top, int left, int width);
+static int page_hosts_other(int top, int left, int width);
+static int page_hosts_actions(int top, int left, int width);
+static void page_hosts_read(void);
+static int page_hosts_take(char *text, size_t size);
+static void page_hosts_select(unsigned block);
+static void page_hosts_fill(void);
+static int page_hosts_apply(void);
+static void page_hosts_add_host(void);
+static void page_hosts_remove_host(void);
+static void page_hosts_add_identity(void);
+static void page_hosts_add_forward(void);
+static void page_hosts_remove_line(unsigned line);
+static void page_hosts_save(void);
+static void page_hosts_editor(struct terminal_window *window);
+static int page_hosts_listed(unsigned block);
+static unsigned page_hosts_lines(unsigned block);
+static void page_hosts_title(unsigned block, char *text, size_t size);
+static void page_hosts_where(unsigned line, char *text, size_t size);
+static void page_hosts_forward_text(unsigned line, char *text, size_t size);
+static int page_hosts_other_line(unsigned line);
+static int page_hosts_second(unsigned line);
+static void page_hosts_later(unsigned action, unsigned what);
+static void page_hosts_carry_out(struct terminal_window *window);
+static const char *page_hosts_why(unsigned field, int error);
+static int page_hosts_saved(void);
+static unsigned page_hosts_first(void);
+static int page_line_row(int top, int left, int width, const char *label, const char *text, kl_color ink, uint32_t index, int removable);
+static int page_field_button(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field, const char *placeholder, uint32_t button, const char *button_label);
 static int page_appearance(struct terminal_window *window, const struct terminal_page_state *state, int top, int left, int width);
 static int page_behavior(struct terminal_window *window, const struct terminal_page_state *state, int top, int left, int width);
 static int page_keys(struct terminal_window *window, int top, int left, int width);
@@ -263,9 +372,6 @@ static int page_known(int top, int left, int width);
 static int page_items(unsigned pane, int top, int left, int width);
 static void page_items_read(void);
 static void page_items_save(unsigned pane);
-static void page_config_read(void);
-static void page_config_save(void);
-static int page_config_shown(const char *bytes, size_t size);
 static void page_key_look(void);
 static void page_key_make(void);
 static void page_known_read(void);
@@ -283,7 +389,7 @@ static int page_message_draw(int top, int left, int width, const struct page_mes
 static void page_say(struct page_message *message, int bad, const char *text);
 static void page_action(struct terminal_window *window, uint32_t action);
 static void page_text_follow(struct terminal_window *window);
-static int page_focused(struct kl_field **field, struct kl_text_area **area);
+static int page_focused(struct kl_field **field);
 static void page_selection(const char *text, size_t caret, size_t anchor, size_t *from, size_t *to);
 static void page_commit(const char *text, size_t length);
 static int page_key(struct terminal_window *window, const struct kl_window_event *event);
@@ -348,6 +454,10 @@ terminal_page_open(
 	page.key_again.secret = 1;
 	kl_field_set_limit(&page.key_pass, 1024U);
 	kl_field_set_limit(&page.key_again, 1024U);
+
+	/* No host shown before the file is read. */
+	page.hosts_block = TERMINAL_HOSTS_NONE;
+	page.hosts_filled = TERMINAL_HOSTS_NONE;
 
 	/* Succeeded: the page is made, the Hosts pane first. */
 	page.pane = TERMINAL_PANE_HOSTS;
@@ -590,7 +700,7 @@ terminal_page_moving(void)
 }
 
 /*
- * Pastes text into the focused field or text area (Edit > Paste, or
+ * Pastes text into the focused field (Edit > Paste, or
  * Control with V: the run receives the clipboard's text), as the input
  * method commits text.
  */
@@ -600,11 +710,10 @@ terminal_page_paste(
 	size_t length)
 {
 	struct kl_field *field;
-	struct kl_text_area *area;
 	int focused;
 
 	/* Only into a field that has the keyboard. */
-	focused = page_focused(&field, &area);
+	focused = page_focused(&field);
 	if (!focused)
 		return;
 
@@ -617,7 +726,7 @@ terminal_page_paste(
 /*
  * Gives the text a Copy takes while the settings tab is active (Edit >
  * Copy, Control with C or X, Copy Public Key): what the page set aside,
- * else the focused field's or text area's selection; a secret field's is
+ * else the focused field's selection; a secret field's is
  * never given.  Returns its length (0: nothing to copy), the text cut to
  * size - 1 bytes and ended.
  */
@@ -627,7 +736,6 @@ terminal_page_copy_text(
 	size_t size)
 {
 	struct kl_field *field;
-	struct kl_text_area *area;
 	size_t from;
 	size_t to;
 	int focused;
@@ -644,29 +752,16 @@ terminal_page_copy_text(
 		return to;
 	}
 
-	/* Only from a field that has the keyboard. */
-	focused = page_focused(&field, &area);
-	if (!focused)
+	/* Only from a field that has the keyboard, never a secret one. */
+	focused = page_focused(&field);
+	if (!focused || field->secret)
 		return 0U;
 
-	/* The field's selection, unless it is a secret, or the text area's. */
-	if (field != NULL) {
-		if (field->secret)
-			return 0U;
-		page_selection(field->text, field->caret, field->anchor, &from, &to);
-
-		/* Copies the selection, cut at the buffer's size. */
-		if (to - from > size - 1U)
-			to = from + size - 1U;
-		memcpy(text, field->text + from, to - from);
-	} else {
-		page_selection(area->text, area->caret, area->anchor, &from, &to);
-
-		/* Copies the selection, cut at the buffer's size. */
-		if (to - from > size - 1U)
-			to = from + size - 1U;
-		memcpy(text, area->text + from, to - from);
-	}
+	/* The field's selection, cut at the buffer's size. */
+	page_selection(field->text, field->caret, field->anchor, &from, &to);
+	if (to - from > size - 1U)
+		to = from + size - 1U;
+	memcpy(text, field->text + from, to - from);
 
 	/* The copy ends as a C string. */
 	text[to - from] = '\0';
@@ -709,6 +804,11 @@ terminal_page_close(void)
 	if (page.scroll_made)
 		kl_scroll_release(&page.scroll);
 	kl_ui_destroy(page.ui);
+
+	/* The ssh_config's text. */
+	terminal_hosts_release(&page.hosts);
+	free(page.hosts_text);
+	free(page.hosts_original);
 
 	/* The secrets typed, and everything else. */
 	memset(&page, 0, sizeof(page));
@@ -868,7 +968,12 @@ page_sidebar(
 	}
 }
 
-/* Draws the Hosts pane: the ssh_config's text, Save and Revert, and what the last save found; reports its bottom. */
+/*
+ * Draws the Hosts pane: the hosts of the ssh_config and Open in text
+ * editor, the form of the host chosen (its fields, its identity files),
+ * its forwards, its other lines, then Save, Revert and Remove host with
+ * the last word; reports its bottom.
+ */
 static int
 page_hosts(
 	struct terminal_window *window,
@@ -877,78 +982,1633 @@ page_hosts(
 	int width)
 {
 	const struct kl_theme *theme;
+	int y;
+
+	/* The pane's label column, and the file the first time. */
+	theme = page.style.theme;
+	page_column(TERMINAL_PANE_HOSTS, page_host_labels, sizeof(page_host_labels) / sizeof(page_host_labels[0]));
+	if (!page.hosts_read)
+		page_hosts_read();
+
+	/* The hosts, a new one, and the text editor. */
+	y = page_hosts_list(top, left, width);
+
+	/* A file that cannot be edited here shows the list's card alone, with Revert and the last word. */
+	if (page.hosts_unusable) {
+		y = page_hosts_actions(y + PAGE_GAP, left, width);
+		page_hosts_carry_out(window);
+		return y;
+	}
+
+	/* The host chosen: its form and identity files, its forwards and its other lines. */
+	if (page.hosts_block != TERMINAL_HOSTS_NONE) {
+		y = page_hosts_form(y + PAGE_GAP, left, width);
+		if (page.hosts.blocks[page.hosts_block].kind != TERMINAL_HOSTS_BLOCK_MATCH)
+			y = page_hosts_forwards(y + PAGE_GAP, left, width);
+		y = page_hosts_other(y + PAGE_GAP, left, width);
+	} else {
+		y += PAGE_GAP;
+		y = page_note(y, left + 4, width - 8, "Add a host, or open the file in a text editor.", theme->text_secondary);
+	}
+
+	/* Save, Revert, Remove host and the last word. */
+	y = page_hosts_actions(y + PAGE_GAP, left, width);
+
+	/* What a widget asked for, now that the frame is drawn from the text as it was. */
+	page_hosts_carry_out(window);
+
+	/* Reports the pane's bottom. */
+	return y;
+}
+
+/*
+ * Draws the card of the hosts: a row for each (a click shows its form), a
+ * new host's name with Add, and Open in text editor; reports its bottom.
+ */
+static int
+page_hosts_list(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
 	struct kl_rect card;
+	struct kl_rect row;
 	struct kl_rect control;
 	char subtitle[PAGE_MESSAGE];
+	char title[PAGE_HOST_TEXT];
+	const char *editor_note;
+	unsigned index;
+	unsigned listed;
 	unsigned flags;
-	int area_height;
 	int pressed;
 	int y;
 
-	(void)window;
-
-	/* The colours and sizes of the page's widgets. */
+	/* How many rows: the blocks listed, or a word that there is none. */
 	theme = page.style.theme;
+	listed = 0U;
+	for (index = 0U; index < page.hosts.block_count; index++) {
+		if (page_hosts_listed(index))
+			listed++;
+	}
 
-	/* The file, the first time. */
-	if (!page.config_read)
-		page_config_read();
-
-	/* The card: as tall as the panel allows, with the area, the buttons, the note and the last word. */
-	area_height = (int)page.viewport.height - 2 * PAGE_PAD - PAGE_CARD_SUBTITLED - theme->control_height - 3 * PAGE_NOTE_LINE - 40;
-	if (area_height < PAGE_AREA_MIN)
-		area_height = PAGE_AREA_MIN;
+	/* The card: the rows, the new host's row, the editor's button and its note. */
+	editor_note = "The text editor's changes take effect from the next connection; Revert shows them here.";
 	card.x = left;
 	card.y = top;
 	card.width = width;
-	card.height = PAGE_CARD_SUBTITLED + area_height + 12 + theme->control_height + 12 + page_note_height(width - 40, "Takes effect from the next connection.") +
-	    page_note_height(width - 40, page.config_message.text) + PAGE_CARD_FOOT;
+	card.height = PAGE_CARD_SUBTITLED + (int)listed * PAGE_ITEM_HEIGHT + 8 + PAGE_ROW + 8 + theme->control_height + 6 +
+	    page_note_height(width - 40, editor_note) + PAGE_CARD_FOOT;
+	if (listed == 0U)
+		card.height += PAGE_NOTE_LINE;
+	if (page.hosts_unusable)
+		card.height -= PAGE_ROW + 8;
 	(void)snprintf(subtitle, sizeof(subtitle), "%s", page.program->config_shown);
-	y = page_card(&card, "Hosts (ssh_config)", subtitle);
+	y = page_card(&card, "Hosts", subtitle);
 
-	/* The text, or why it cannot be edited here; the area draws its placeholder on one line. */
-	control.x = card.x + 20;
-	control.y = y;
-	control.width = card.width - 40;
-	control.height = area_height;
-	if (page.config_large) {
-		(void)page_note(y, control.x, control.width, "The file is too large to edit here: edit it with a text editor.", theme->text_secondary);
-	} else {
-		(void)kl_text_area(page.ui, &page.style, PAGE_ID_CONFIG, &control, &page.config, "Host myserver, then its HostName, User and other lines");
+	/* None yet. */
+	if (listed == 0U)
+		y = page_note(y, card.x + 20, card.width - 40, "There is no host in the file yet.", theme->text_secondary);
+
+	/* Each block listed; a click shows its form (the changes of the one shown kept in the text). */
+	for (index = 0U; index < page.hosts.block_count; index++) {
+		if (!page_hosts_listed(index))
+			continue;
+		page_hosts_title(index, title, sizeof(title));
+		row.x = card.x + 12;
+		row.y = y;
+		row.width = card.width - 24;
+		row.height = PAGE_ITEM_HEIGHT;
+		flags = 0U;
+		if (page.hosts.blocks[index].kind == TERMINAL_HOSTS_BLOCK_MATCH)
+			flags = KL_PLACE_QUIET;
+		pressed = kl_sidebar_place(page.ui, &page.style, PAGE_ID_HOST_ROWS, index, &row, KL_ICON_COMPUTER, title, index == page.hosts_block, flags);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_SELECT, index);
+		y += PAGE_ITEM_HEIGHT;
 	}
 
-	/* Moves down past the area. */
-	y += area_height + 12;
+	/* A new host's name and Add, when the file can be edited here. */
+	y += 8;
+	if (!page.hosts_unusable) {
+		pressed = page_field_button(y, card.x, card.width, "New host", PAGE_ID_HOST_NEW, &page.host_new, "myserver", PAGE_ID_HOST_ADD, "Add Host");
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_ADD_HOST, 0U);
+		y += PAGE_ROW + 8;
+	}
 
-	/* Save and Revert. */
+	/* The file in the system's text editor, and when its changes take effect. */
+	control.x = card.x + 20;
 	control.y = y;
+	control.height = theme->control_height;
+	control.width = kl_button_width(&page.style, "Open in Text Editor");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_EDITOR, &control, "Open in Text Editor", 0U);
+	if (pressed)
+		page_hosts_later(PAGE_HOSTS_EDITOR, 0U);
+	y += control.height + 6;
+	(void)page_note(y, card.x + 20, card.width - 40, editor_note, theme->text_secondary);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
+}
+
+/*
+ * Draws the card of the host shown: its fields (each with the line of
+ * another block that wins over it), then its identity files; a Match's
+ * card only says it is edited in the text editor.  Reports its bottom.
+ */
+static int
+page_hosts_form(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
+	const struct terminal_hosts_block *block;
+	struct kl_rect card;
+	char title[PAGE_HOST_TEXT];
+	char where[PAGE_HOST_TEXT];
+	char note[PAGE_MESSAGE];
+	unsigned overriding[PAGE_HOST_FIELDS];
+	unsigned index;
+	unsigned first;
+	int named;
+	int y;
+
+	/* The block and its title. */
+	theme = page.style.theme;
+	block = &page.hosts.blocks[page.hosts_block];
+	page_hosts_title(page.hosts_block, title, sizeof(title));
+	card.x = left;
+	card.y = top;
+	card.width = width;
+
+	/* A Match: its lines are under Other lines, and the text editor changes them. */
+	if (block->kind == TERMINAL_HOSTS_BLOCK_MATCH) {
+		card.height = PAGE_CARD_TITLE + page_note_height(width - 40, "A Match block is changed in the text editor.") + PAGE_CARD_FOOT;
+		y = page_card(&card, title, NULL);
+		(void)page_note(y, card.x + 20, card.width - 40, "A Match block is changed in the text editor.", theme->text_secondary);
+		return card.y + card.height;
+	}
+
+	/* The fields shown: a Host's name only in a Host's block; the line that wins over each. */
+	first = PAGE_HOST_NAME;
+	if (block->kind != TERMINAL_HOSTS_BLOCK_HOST)
+		first = PAGE_HOST_NAME + 1U;
+	card.height = PAGE_CARD_SUBTITLED + (int)(PAGE_HOST_FIELDS - first) * PAGE_ROW + PAGE_CARD_FOOT;
+	for (index = first; index < PAGE_HOST_FIELDS; index++) {
+		overriding[index] = TERMINAL_HOSTS_NONE;
+		if (index != PAGE_HOST_NAME)
+			overriding[index] = terminal_hosts_overrides(&page.hosts, page.hosts_block, page_host_keywords[index]);
+		if (overriding[index] != TERMINAL_HOSTS_NONE)
+			card.height += PAGE_NOTE_LINE;
+	}
+
+	/* A Host's name with a wildcard only: the blocks before are not compared. */
+	named = 1;
+	if (block->kind == TERMINAL_HOSTS_BLOCK_HOST)
+		named = terminal_hosts_has_name(&page.hosts, page.hosts_block);
+	if (!named)
+		card.height += PAGE_NOTE_LINE;
+
+	/* The card, the line its block starts at under the title. */
+	note[0] = '\0';
+	if (block->kind == TERMINAL_HOSTS_BLOCK_HOST)
+		(void)snprintf(note, sizeof(note), "From line %u", page.hosts.lines[block->first].number);
+	else
+		(void)snprintf(note, sizeof(note), "These lines apply to every host");
+	y = page_card(&card, title, note);
+
+	/* Each field, and the line of another block that wins over it. */
+	for (index = first; index < PAGE_HOST_FIELDS; index++) {
+		y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		if (overriding[index] == TERMINAL_HOSTS_NONE)
+			continue;
+		page_hosts_where(overriding[index], where, sizeof(where));
+		(void)snprintf(note, sizeof(note), "Overridden by %s", where);
+		y = page_note(y, page_value_x(card.x, card.width), card.width - 40, note, theme->bad);
+	}
+
+	/* A wildcard's block: other blocks may give these too. */
+	if (!named)
+		(void)page_note(y, card.x + 20, card.width - 40, "Other blocks may set these too (the name has a wildcard).", theme->text_secondary);
+
+	/* The identity files under the card. */
+	y = page_hosts_identities(card.y + card.height + PAGE_GAP, left, width);
+
+	/* Reports the bottom. */
+	return y;
+}
+
+/*
+ * Draws the card of the host's identity files: its own lines (each with a
+ * removal), those other blocks add (read only), and a new one with Add;
+ * reports its bottom.
+ */
+static int
+page_hosts_identities(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
+	struct kl_rect card;
+	char text[PAGE_HOST_TEXT];
+	char where[PAGE_HOST_TEXT];
+	char word[PAGE_HOST_TEXT];
+	unsigned line;
+	unsigned rows;
+	int pressed;
+	int y;
+
+	/* The rows: the block's lines and those others add. */
+	theme = page.style.theme;
+	rows = 0U;
+	line = terminal_hosts_find(&page.hosts, page.hosts_block, "IdentityFile", TERMINAL_HOSTS_NONE);
+	while (line != TERMINAL_HOSTS_NONE) {
+		rows++;
+		line = terminal_hosts_find(&page.hosts, page.hosts_block, "IdentityFile", line);
+	}
+	line = terminal_hosts_other(&page.hosts, page.hosts_block, "IdentityFile", TERMINAL_HOSTS_NONE);
+	while (line != TERMINAL_HOSTS_NONE) {
+		rows++;
+		line = terminal_hosts_other(&page.hosts, page.hosts_block, "IdentityFile", line);
+	}
+
+	/* The card: the rows and the new one's row. */
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + (int)rows * PAGE_ROW + PAGE_ROW + PAGE_CARD_FOOT;
+	y = page_card(&card, "Identity files", "The keys tried, in order (IdentityFile)");
+
+	/* The block's own, each with its removal. */
+	line = terminal_hosts_find(&page.hosts, page.hosts_block, "IdentityFile", TERMINAL_HOSTS_NONE);
+	while (line != TERMINAL_HOSTS_NONE) {
+		(void)terminal_hosts_word(&page.hosts, line, 0U, word, sizeof(word));
+		y = page_line_row(y, card.x, card.width, "", word, theme->text, line, 1);
+		line = terminal_hosts_find(&page.hosts, page.hosts_block, "IdentityFile", line);
+	}
+
+	/* Those other blocks add, read only. */
+	line = terminal_hosts_other(&page.hosts, page.hosts_block, "IdentityFile", TERMINAL_HOSTS_NONE);
+	while (line != TERMINAL_HOSTS_NONE) {
+		(void)terminal_hosts_word(&page.hosts, line, 0U, word, sizeof(word));
+		page_hosts_where(line, where, sizeof(where));
+		(void)snprintf(text, sizeof(text), "%s (%s)", word, where);
+		y = page_line_row(y, card.x, card.width, "", text, theme->text_secondary, line, 0);
+		line = terminal_hosts_other(&page.hosts, page.hosts_block, "IdentityFile", line);
+	}
+
+	/* A new one. */
+	pressed = page_field_button(y, card.x, card.width, "Identity file", PAGE_ID_IDENTITY_NEW, &page.identity_new, "~/.ssh/id_ed25519", PAGE_ID_IDENTITY_ADD, "Add");
+	if (pressed)
+		page_hosts_later(PAGE_HOSTS_ADD_IDENTITY, 0U);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
+}
+
+/*
+ * Draws the card of the host's forwards: its own (each with a removal),
+ * those other blocks add (read only), and a new one: Local or Remote,
+ * where it listens, where it goes, and Add.  Reports its bottom.
+ */
+static int
+page_hosts_forwards(
+	int top,
+	int left,
+	int width)
+{
+	static const char *const keywords[2] = { "LocalForward", "RemoteForward" };
+	const struct kl_theme *theme;
+	struct kl_rect card;
+	struct kl_rect control;
+	char text[PAGE_HOST_TEXT];
+	char where[PAGE_HOST_TEXT];
+	char shown[PAGE_HOST_TEXT];
+	const char *explained;
+	unsigned kind;
+	unsigned line;
+	unsigned rows;
+	int value_x;
+	int pressed;
+	int y;
+
+	/* The rows of both kinds: the block's and those others add. */
+	theme = page.style.theme;
+	rows = 0U;
+	for (kind = 0U; kind < 2U; kind++) {
+		line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
+		while (line != TERMINAL_HOSTS_NONE) {
+			rows++;
+			line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], line);
+		}
+		line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
+		while (line != TERMINAL_HOSTS_NONE) {
+			rows++;
+			line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], line);
+		}
+	}
+
+	/* What the kind chosen does. */
+	explained = "Local: a port on this computer reaches the destination from the server.";
+	if (page.forward_remote)
+		explained = "Remote: a port on the server reaches the destination from this computer (port 0: the server chooses).";
+
+	/* The card: the rows, the kind, the two ends and Add, and the note. */
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + (int)rows * PAGE_ROW + 3 * PAGE_ROW + page_note_height(width - 40, explained) + PAGE_CARD_FOOT;
+	y = page_card(&card, "Port forwarding", "LocalForward and RemoteForward");
+
+	/* Each forward, the block's with a removal, the others' read only. */
+	for (kind = 0U; kind < 2U; kind++) {
+		line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
+		while (line != TERMINAL_HOSTS_NONE) {
+			page_hosts_forward_text(line, shown, sizeof(shown));
+			y = page_line_row(y, card.x, card.width, "", shown, theme->text, line, 1);
+			line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], line);
+		}
+		line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
+		while (line != TERMINAL_HOSTS_NONE) {
+			page_hosts_forward_text(line, shown, sizeof(shown));
+			page_hosts_where(line, where, sizeof(where));
+			(void)snprintf(text, sizeof(text), "%s (%s)", shown, where);
+			y = page_line_row(y, card.x, card.width, "", text, theme->text_secondary, line, 0);
+			line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], line);
+		}
+	}
+
+	/* The kind of a new one: Local or Remote, the one chosen marked. */
+	value_x = page_label(y, card.x, card.width, "Forward", 0);
+	control.x = value_x;
+	control.y = y + (PAGE_ROW - theme->control_height) / 2;
+	control.height = theme->control_height;
+	control.width = kl_button_width(&page.style, "Local");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_LOCAL, &control, "Local", page.forward_remote ? 0U : KL_BUTTON_PRIMARY);
+	if (pressed) {
+		page.forward_remote = 0;
+		page.dirty = 1;
+	}
+	control.x += control.width + 6;
+	control.width = kl_button_width(&page.style, "Remote");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_REMOTE, &control, "Remote", page.forward_remote ? KL_BUTTON_PRIMARY : 0U);
+	if (pressed) {
+		page.forward_remote = 1;
+		page.dirty = 1;
+	}
+	y += PAGE_ROW;
+
+	/* Where it listens, and where it goes with Add. */
+	y = page_field_row(y, card.x, card.width, "Listen", PAGE_ID_FORWARD_LISTEN, &page.forward_listen, page.forward_remote ? "8080, or 0" : "8080, or 127.0.0.1:8080");
+	pressed = page_field_button(y, card.x, card.width, "Destination", PAGE_ID_FORWARD_TO, &page.forward_to, page.forward_remote ? "localhost:3000" : "db.internal:5432", PAGE_ID_FORWARD_ADD, "Add");
+	if (pressed)
+		page_hosts_later(PAGE_HOSTS_ADD_FORWARD, 0U);
+	y += PAGE_ROW;
+
+	/* What the kind does. */
+	(void)page_note(y, card.x + 20, card.width - 40, explained, theme->text_secondary);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
+}
+
+/*
+ * Draws the card of the block's other lines, which the form does not show
+ * (comments, the keywords it does not know, Include, a second line of a
+ * keyword that ssh passes over), read only; none: no card.  Reports its
+ * bottom (top when there is no card).
+ */
+static int
+page_hosts_other(
+	int top,
+	int left,
+	int width)
+{
+	const struct terminal_hosts_block *block;
+	const struct terminal_hosts_line *line;
+	const struct kl_theme *theme;
+	struct kl_rect card;
+	char text[PAGE_HOST_TEXT];
+	char shown[PAGE_HOST_TEXT];
+	unsigned index;
+	unsigned count;
+	unsigned rows;
+	size_t length;
+	int other;
+	int second;
+	int baseline;
+	int y;
+
+	/* The lines not in the form. */
+	theme = page.style.theme;
+	block = &page.hosts.blocks[page.hosts_block];
+	count = 0U;
+	for (index = block->first; index < block->end; index++) {
+		other = page_hosts_other_line(index);
+		if (other)
+			count++;
+	}
+
+	/* No card without them. */
+	if (count == 0U)
+		return top - PAGE_GAP;
+
+	/* The card: a line a row, at most so many, and the note. */
+	rows = count;
+	if (rows > PAGE_OTHER_LINES)
+		rows = PAGE_OTHER_LINES + 1U;
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + (int)rows * PAGE_NOTE_LINE + 6 + page_note_height(width - 40, "Open the file in a text editor to change these.") + PAGE_CARD_FOOT;
+	y = page_card(&card, "Other lines", "As the file has them");
+
+	/* Each line, its number first; a keyword's second line says ssh passes over it. */
+	rows = 0U;
+	for (index = block->first; index < block->end && rows < PAGE_OTHER_LINES; index++) {
+		other = page_hosts_other_line(index);
+		if (!other)
+			continue;
+
+		/* The line's bytes, cut to the row. */
+		line = &page.hosts.lines[index];
+		length = line->end - line->start;
+		if (length > sizeof(shown) - 1U)
+			length = sizeof(shown) - 1U;
+		memcpy(shown, page.hosts_text + line->start, length);
+		shown[length] = '\0';
+
+		/* Its number, and why ssh passes over a second line of a field's keyword. */
+		second = page_hosts_second(index);
+		if (second) {
+			(void)snprintf(text, sizeof(text), "%u: %s  (ignored: an earlier line sets it)", line->number, shown);
+		} else {
+			(void)snprintf(text, sizeof(text), "%u: %s", line->number, shown);
+		}
+
+		/* The row. */
+		baseline = kl_text_center(theme->text_small, y, PAGE_NOTE_LINE);
+		(void)kl_text_draw_fit(&page.text, &page.canvas, card.x + 20, baseline, text, theme->text_small, 0, card.width - 40, theme->text_secondary);
+		y += PAGE_NOTE_LINE;
+		rows++;
+	}
+
+	/* How many more there are. */
+	if (count > PAGE_OTHER_LINES) {
+		(void)snprintf(text, sizeof(text), "... and %u more", count - PAGE_OTHER_LINES);
+		y = page_note(y, card.x + 20, card.width - 40, text, theme->text_secondary);
+	}
+
+	/* Where they are changed. */
+	(void)page_note(y + 6, card.x + 20, card.width - 40, "Open the file in a text editor to change these.", theme->text_secondary);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
+}
+
+/*
+ * Draws Save, Revert and (for a Host) Remove Host, the question of a
+ * removal, whether there are changes not saved, the last word and when a
+ * save takes effect; reports the bottom.
+ */
+static int
+page_hosts_actions(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
+	struct kl_rect control;
+	char title[PAGE_HOST_TEXT];
+	char text[PAGE_MESSAGE];
+	unsigned flags;
+	int removable;
+	int baseline;
+	int pressed;
+	int same;
+	int y;
+
+	/* Save, unless the file cannot be edited here. */
+	theme = page.style.theme;
+	control.x = left + 4;
+	control.y = top;
 	control.height = theme->control_height;
 	control.width = kl_button_width(&page.style, "Save");
 	flags = KL_BUTTON_PRIMARY;
-	if (page.config_large)
+	if (page.hosts_unusable)
 		flags |= KL_BUTTON_DISABLED;
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_SAVE, &control, "Save", flags);
-	if (pressed)
-		page_config_save();
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_HOSTS_SAVE, &control, "Save", flags);
+	if (pressed && !page.hosts_unusable)
+		page_hosts_later(PAGE_HOSTS_SAVE, 0U);
 
-	/* Revert, beside Save, reads the file again. */
+	/* Revert, beside it, reads the file again. */
 	control.x += control.width + 8;
 	control.width = kl_button_width(&page.style, "Revert");
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_CONFIG_REVERT, &control, "Revert", 0U);
-	if (pressed) {
-		page_config_read();
-		page_say(&page.config_message, 0, "The file was read again.");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_HOSTS_REVERT, &control, "Revert", 0U);
+	if (pressed)
+		page_hosts_later(PAGE_HOSTS_REVERT, 0U);
+
+	/* Remove Host, for a Host's block shown. */
+	removable = 0;
+	if (!page.hosts_unusable &&
+	    page.hosts_block != TERMINAL_HOSTS_NONE &&
+	    page.hosts.blocks[page.hosts_block].kind == TERMINAL_HOSTS_BLOCK_HOST)
+		removable = 1;
+	if (removable) {
+		control.x += control.width + 8;
+		control.width = kl_button_width(&page.style, "Remove Host");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_REMOVE, &control, "Remove Host", KL_BUTTON_DANGER);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_REMOVE_ASK, 0U);
+	}
+	y = top + control.height + 8;
+
+	/* The removal asked: Remove or Keep. */
+	if (removable && page.host_remove_asked) {
+		page_hosts_title(page.hosts_block, title, sizeof(title));
+		(void)snprintf(text, sizeof(text), "Remove Host %s and its %u lines?", title, page_hosts_lines(page.hosts_block));
+		control.x = left + 4;
+		control.y = y;
+		baseline = kl_text_center(theme->text_body, control.y, control.height);
+		(void)kl_text_draw_fit(&page.text, &page.canvas, control.x, baseline, text, theme->text_body, 0, PAGE_KNOWN_LINE, theme->text);
+		control.x += kl_text_width(&page.text, text, strlen(text), theme->text_body, 0) + 12;
+		if (control.x > left + 4 + PAGE_KNOWN_LINE + 12)
+			control.x = left + 4 + PAGE_KNOWN_LINE + 12;
+		control.width = kl_button_width(&page.style, "Remove");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_REMOVE_YES, &control, "Remove", KL_BUTTON_DANGER);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_REMOVE, 0U);
+		control.x += control.width + 8;
+		control.width = kl_button_width(&page.style, "Keep");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_REMOVE_NO, &control, "Keep", 0U);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_KEEP, 0U);
+		y += control.height + 8;
 	}
 
-	/* Moves down past the buttons. */
-	y += control.height + 12;
+	/* Changes the file does not have yet. */
+	same = page_hosts_saved();
+	if (!same)
+		y = page_note(y, left + 4, width - 8, "There are changes not saved yet.", theme->text);
 
-	/* When it takes effect, and the last word. */
-	y = page_note(y, card.x + 20, card.width - 40, "Takes effect from the next connection.", theme->text_secondary);
-	y = page_message_draw(y, card.x + 20, card.width - 40, &page.config_message);
+	/* The last word, and when a save takes effect. */
+	y = page_message_draw(y, left + 4, width - 8, &page.hosts_message);
+	y = page_note(y, left + 4, width - 8, "A save takes effect from the next connection.", theme->text_secondary);
 
-	/* Reports the pane's bottom. */
-	return card.y + card.height;
+	/* Reports the bottom. */
+	return y;
+}
+
+/* Keeps what a widget of the Hosts pane asked for (the first of a frame), carried out once the frame is drawn. */
+static void
+page_hosts_later(
+	unsigned action,
+	unsigned what)
+{
+	/* One a frame: a click is one. */
+	if (page.hosts_later != PAGE_HOSTS_NOTHING)
+		return;
+	page.hosts_later = action;
+	page.hosts_later_what = what;
+	page.dirty = 1;
+}
+
+/* Carries out what a widget of the Hosts pane asked for in the frame just drawn. */
+static void
+page_hosts_carry_out(
+	struct terminal_window *window)
+{
+	unsigned action;
+	unsigned what;
+
+	/* The action, taken once. */
+	action = page.hosts_later;
+	what = page.hosts_later_what;
+	page.hosts_later = PAGE_HOSTS_NOTHING;
+
+	/* Which. */
+	switch (action) {
+	case PAGE_HOSTS_SELECT:
+		page_hosts_select(what);
+		break;
+	case PAGE_HOSTS_ADD_HOST:
+		page_hosts_add_host();
+		break;
+	case PAGE_HOSTS_REMOVE_ASK:
+		page.host_remove_asked = 1;
+		break;
+	case PAGE_HOSTS_REMOVE:
+		page_hosts_remove_host();
+		break;
+	case PAGE_HOSTS_KEEP:
+		page.host_remove_asked = 0;
+		break;
+	case PAGE_HOSTS_ADD_IDENTITY:
+		page_hosts_add_identity();
+		break;
+	case PAGE_HOSTS_ADD_FORWARD:
+		page_hosts_add_forward();
+		break;
+	case PAGE_HOSTS_REMOVE_LINE:
+		page_hosts_remove_line(what);
+		break;
+	case PAGE_HOSTS_SAVE:
+		page_hosts_save();
+		break;
+	case PAGE_HOSTS_REVERT:
+		page_hosts_read();
+		page_say(&page.hosts_message, 0, "The file was read again.");
+		break;
+	case PAGE_HOSTS_EDITOR:
+		page_hosts_editor(window);
+		break;
+	default:
+		/* Nothing asked. */
+		return;
+	}
+
+	/* A frame shows what it did. */
+	page.dirty = 1;
+}
+
+/*
+ * Reads the ssh_config into the pane, every change not saved dropped: the
+ * bytes as they are (none when the file is not there), read into lines and
+ * blocks, the first Host shown.  A file too large or that cannot be read
+ * is not edited here (its word says why).
+ */
+static void
+page_hosts_read(void)
+{
+	char text[PAGE_MESSAGE];
+	char *bytes;
+	char *copy;
+	size_t size;
+	int error;
+
+	/* Nothing kept from before. */
+	free(page.hosts_original);
+	page.hosts_original = NULL;
+	page.hosts_original_size = 0U;
+	page.hosts_read = 1;
+	page.hosts_unusable = 0;
+	page.host_remove_asked = 0;
+	page.hosts_block = TERMINAL_HOSTS_NONE;
+	page.hosts_filled = TERMINAL_HOSTS_NONE;
+
+	/* The file's bytes; one not there is empty. */
+	bytes = NULL;
+	size = 0U;
+	error = page.program->read(page.program->data, page.program->config_path, TERMINAL_HOSTS_TEXT_MAX, &bytes, &size);
+	if (error == ENOENT) {
+		bytes = NULL;
+		size = 0U;
+		error = 0;
+	}
+
+	/* A file too large, or that cannot be read, is left to the text editor. */
+	if (error != 0) {
+		page.hosts_unusable = 1;
+		if (error == EFBIG) {
+			(void)snprintf(text, sizeof(text), "%s is larger than %u KiB: change it in a text editor.", page.program->config_shown, TERMINAL_HOSTS_TEXT_MAX / 1024U);
+		} else {
+			(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
+		}
+		page_say(&page.hosts_message, 1, text);
+		size = 0U;
+	}
+
+	/* The bytes as read, which a save compares the file with. */
+	page.hosts_original = malloc(size + 1U);
+	if (page.hosts_original == NULL) {
+		free(bytes);
+		page.hosts_unusable = 1;
+		page_say(&page.hosts_message, 1, "There is no memory to read the file.");
+		return;
+	}
+
+	/* The copy the pane changes. */
+	copy = malloc(size + 1U);
+	if (copy == NULL) {
+		free(page.hosts_original);
+		free(bytes);
+		page.hosts_original = NULL;
+		page.hosts_unusable = 1;
+		page_say(&page.hosts_message, 1, "There is no memory to read the file.");
+		return;
+	}
+
+	/* Both hold the bytes. */
+	if (size > 0U) {
+		memcpy(page.hosts_original, bytes, size);
+		memcpy(copy, bytes, size);
+	}
+	page.hosts_original[size] = '\0';
+	copy[size] = '\0';
+	page.hosts_original_size = size;
+	free(bytes);
+
+	/* The text the pane changes. */
+	error = page_hosts_take(copy, size);
+	if (error != 0) {
+		page.hosts_unusable = 1;
+		page_say(&page.hosts_message, 1, "There is no memory to read the file.");
+		return;
+	}
+
+	/* The first Host shown, else the first block listed. */
+	page_hosts_select(page_hosts_first());
+	page_log("hosts", "read");
+}
+
+/*
+ * Makes a text (malloc'd, a NUL after it; the pane's from now on) the
+ * pane's text, read into its lines and blocks; the old one goes.  The
+ * block shown stays (the caller moves it when the blocks changed).
+ * Returns 0, or ENOMEM (the text is freed, the old one stays).
+ */
+static int
+page_hosts_take(
+	char *text,
+	size_t size)
+{
+	struct terminal_hosts read;
+	int error;
+
+	/* Its lines and blocks. */
+	error = terminal_hosts_read(&read, text, size);
+	if (error != 0) {
+		free(text);
+		return error;
+	}
+
+	/* In place of the old text. */
+	terminal_hosts_release(&page.hosts);
+	free(page.hosts_text);
+	page.hosts = read;
+	page.hosts_text = text;
+	page.hosts_size = size;
+	page.host_remove_asked = 0;
+
+	/* A block shown that is gone shows none. */
+	if (page.hosts_block != TERMINAL_HOSTS_NONE && page.hosts_block >= page.hosts.block_count) {
+		page.hosts_block = TERMINAL_HOSTS_NONE;
+		page.hosts_filled = TERMINAL_HOSTS_NONE;
+	}
+
+	/* Succeeded: the text is the pane's. */
+	page.dirty = 1;
+	return 0;
+}
+
+/*
+ * Shows a block's form: the changes of the form shown go into the text
+ * first (a value that cannot be written keeps it shown, with why).
+ */
+static void
+page_hosts_select(
+	unsigned block)
+{
+	char title[PAGE_HOST_TEXT];
+	int error;
+
+	/* The form shown, kept. */
+	error = page_hosts_apply();
+	if (error != 0)
+		return;
+
+	/* The block, its fields filled from its lines. */
+	page.hosts_block = block;
+	page.host_remove_asked = 0;
+	page_hosts_fill();
+	kl_ui_clear_focus(page.ui);
+
+	/* Logs which. */
+	title[0] = '\0';
+	if (block != TERMINAL_HOSTS_NONE)
+		page_hosts_title(block, title, sizeof(title));
+	page_log("hosts-shown", title);
+}
+
+/* Fills the form's fields from the block shown: the Host line's names, each keyword's first line (a word without its quotes; RemoteCommand as written). */
+static void
+page_hosts_fill(void)
+{
+	const struct terminal_hosts_block *block;
+	char value[KL_FIELD_MAX];
+	unsigned index;
+	unsigned line;
+
+	/* Each field. */
+	for (index = 0U; index < PAGE_HOST_FIELDS; index++) {
+		value[0] = '\0';
+		if (page.hosts_block != TERMINAL_HOSTS_NONE) {
+			block = &page.hosts.blocks[page.hosts_block];
+			line = TERMINAL_HOSTS_NONE;
+			if (index == PAGE_HOST_NAME && block->kind == TERMINAL_HOSTS_BLOCK_HOST)
+				line = block->first;
+			if (index != PAGE_HOST_NAME && block->kind != TERMINAL_HOSTS_BLOCK_MATCH)
+				line = terminal_hosts_find(&page.hosts, page.hosts_block, page_host_keywords[index], TERMINAL_HOSTS_NONE);
+
+			/* The Host's names and the command as written; a value of a word without its quotes. */
+			if (line != TERMINAL_HOSTS_NONE) {
+				if (index == PAGE_HOST_NAME || index == PAGE_HOST_COMMAND)
+					(void)terminal_hosts_value(&page.hosts, line, value, sizeof(value));
+				else
+					(void)terminal_hosts_word(&page.hosts, line, 0U, value, sizeof(value));
+			}
+		}
+
+		/* The field, and what it was filled with. */
+		kl_field_set(&page.host_fields[index], value);
+		(void)snprintf(page.host_filled[index], sizeof(page.host_filled[index]), "%s", page.host_fields[index].text);
+	}
+
+	/* The fields are the block's. */
+	page.hosts_filled = page.hosts_block;
+}
+
+/*
+ * Writes the form's changed fields into the text, each the least change
+ * of its line (an empty one takes the keyword's lines out).  Returns 0, or
+ * EINVAL (with why) for a value the file cannot hold, or ENOMEM.
+ */
+static int
+page_hosts_apply(void)
+{
+	char written[TERMINAL_HOSTS_VALUE_MAX];
+	char text[PAGE_MESSAGE];
+	const char *field;
+	unsigned long port;
+	unsigned changed;
+	unsigned index;
+	char *out;
+	char *end;
+	size_t size;
+	int same;
+	int error;
+
+	/* Only a form filled from the block shown (not a Match's). */
+	if (page.hosts_block == TERMINAL_HOSTS_NONE || page.hosts_filled != page.hosts_block)
+		return 0;
+	if (page.hosts.blocks[page.hosts_block].kind == TERMINAL_HOSTS_BLOCK_MATCH)
+		return 0;
+
+	/* Each field that changed. */
+	changed = 0U;
+	for (index = 0U; index < PAGE_HOST_FIELDS; index++) {
+		field = page.host_fields[index].text;
+		same = strcmp(field, page.host_filled[index]);
+		if (same == 0)
+			continue;
+
+		/* The value as the file holds it (empty: the lines go). */
+		written[0] = '\0';
+		error = 0;
+		if (index == PAGE_HOST_NAME) {
+			error = terminal_hosts_put_names(field, written, sizeof(written));
+		} else if (field[0] == '\0') {
+			error = 0;
+		} else if (index == PAGE_HOST_COMMAND) {
+			error = terminal_hosts_put_command(field, written, sizeof(written));
+		} else {
+			error = terminal_hosts_put_word(field, written, sizeof(written));
+		}
+
+		/* A port is a number from 1 to 65535. */
+		if (error == 0 && index == PAGE_HOST_PORT && field[0] != '\0') {
+			port = strtoul(field, &end, 10);
+			if (*end != '\0' || port == 0UL || port > 65535UL || field[0] < '0' || field[0] > '9')
+				error = EINVAL;
+		}
+
+		/* A value the file cannot hold is told, and the form stays. */
+		if (error != 0) {
+			(void)snprintf(text, sizeof(text), "%s: %s", page_host_field_labels[index], page_hosts_why(index, error));
+			page_say(&page.hosts_message, 1, text);
+			kl_ui_set_focus(page.ui, PAGE_ID_HOST_FIELD + index, 0U);
+			return EINVAL;
+		}
+
+		/* The line changed in the text. */
+		error = terminal_hosts_set(&page.hosts, page.hosts_block, page_host_keywords[index], written, &out, &size);
+		if (error == 0)
+			error = page_hosts_take(out, size);
+		if (error != 0) {
+			page_say(&page.hosts_message, 1, "There is no memory to change the text.");
+			return error;
+		}
+		(void)snprintf(page.host_filled[index], sizeof(page.host_filled[index]), "%s", field);
+		changed++;
+	}
+
+	/* The form shows the values as the file holds them now. */
+	if (changed > 0U) {
+		page_hosts_fill();
+		page_log("hosts", "applied");
+	}
+
+	/* Succeeded: the text has the form's values. */
+	return 0;
+}
+
+/* Tells why a field's value cannot be written. */
+static const char *
+page_hosts_why(
+	unsigned field,
+	int error)
+{
+	/* Too long for a line. */
+	if (error == ENAMETOOLONG)
+		return "too long";
+
+	/* What each field takes. */
+	switch (field) {
+	case PAGE_HOST_NAME:
+		return "a host needs a name: words without quotes, none starting with # or =";
+	case PAGE_HOST_PORT:
+		return "a number from 1 to 65535";
+	case PAGE_HOST_COMMAND:
+		return "a command cannot start with = or hold a control character";
+	default:
+		break;
+	}
+
+	/* A word with a quote or a control character. */
+	return "a value cannot hold a double quote or a control character";
+}
+
+/* Adds a Host of the new host's name where ssh reads it before what would win over it, and shows its form. */
+static void
+page_hosts_add_host(void)
+{
+	char names[TERMINAL_HOSTS_VALUE_MAX];
+	char text[PAGE_MESSAGE];
+	unsigned block;
+	char *out;
+	size_t size;
+	int error;
+
+	/* The names as the file holds them. */
+	error = terminal_hosts_put_names(page.host_new.text, names, sizeof(names));
+	if (error != 0) {
+		(void)snprintf(text, sizeof(text), "New host: %s", page_hosts_why(PAGE_HOST_NAME, error));
+		page_say(&page.hosts_message, 1, text);
+		return;
+	}
+
+	/* The form shown kept first. */
+	error = page_hosts_apply();
+	if (error != 0)
+		return;
+
+	/* The block in the text, shown. */
+	error = terminal_hosts_add_host(&page.hosts, names, &out, &size, &block);
+	if (error == 0)
+		error = page_hosts_take(out, size);
+	if (error != 0) {
+		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
+		return;
+	}
+	page.hosts_block = block;
+	page_hosts_fill();
+	kl_field_set(&page.host_new, "");
+	kl_ui_set_focus(page.ui, PAGE_ID_HOST_FIELD + 1U, 0U);
+	(void)snprintf(text, sizeof(text), "Host %s was added at line %u. Fill in its address and the rest, then Save.", names, page.hosts.lines[page.hosts.blocks[block].first].number);
+	page_say(&page.hosts_message, 0, text);
+}
+
+/* Takes the Host shown out of the text (its keywords' lines, its comments kept), and shows another. */
+static void
+page_hosts_remove_host(void)
+{
+	char title[PAGE_HOST_TEXT];
+	char text[PAGE_MESSAGE];
+	unsigned removed;
+	unsigned block;
+	char *out;
+	size_t size;
+	int error;
+
+	/* The Host shown. */
+	block = page.hosts_block;
+	if (block == TERMINAL_HOSTS_NONE)
+		return;
+	page_hosts_title(block, title, sizeof(title));
+
+	/* The text without it; its form's changes go with it. */
+	error = terminal_hosts_remove_host(&page.hosts, block, &out, &size, &removed);
+	if (error == 0)
+		error = page_hosts_take(out, size);
+	if (error != 0) {
+		page_say(&page.hosts_message, 1, "The host could not be taken out.");
+		return;
+	}
+
+	/* The block before it shown (the first listed when there is none). */
+	page.hosts_filled = TERMINAL_HOSTS_NONE;
+	page.hosts_block = TERMINAL_HOSTS_NONE;
+	while (block > 0U) {
+		block--;
+		if (block < page.hosts.block_count && page_hosts_listed(block)) {
+			page.hosts_block = block;
+			break;
+		}
+	}
+	if (page.hosts_block == TERMINAL_HOSTS_NONE)
+		page.hosts_block = page_hosts_first();
+	page_hosts_fill();
+	(void)snprintf(text, sizeof(text), "Host %s was taken out (%u lines). Save writes the file.", title, removed);
+	page_say(&page.hosts_message, 0, text);
+	page_log("hosts", "host-removed");
+}
+
+/* Adds the new identity file to the Host shown, after its others. */
+static void
+page_hosts_add_identity(void)
+{
+	char written[TERMINAL_HOSTS_VALUE_MAX];
+	char text[PAGE_MESSAGE];
+	char *out;
+	size_t size;
+	int error;
+
+	/* The path as the file holds it. */
+	error = terminal_hosts_put_word(page.identity_new.text, written, sizeof(written));
+	if (error != 0) {
+		(void)snprintf(text, sizeof(text), "Identity file: %s", page_hosts_why(PAGE_HOST_FIELDS, error));
+		page_say(&page.hosts_message, 1, text);
+		return;
+	}
+
+	/* The line in the text. */
+	error = terminal_hosts_add(&page.hosts, page.hosts_block, "IdentityFile", written, &out, &size);
+	if (error == 0)
+		error = page_hosts_take(out, size);
+	if (error != 0) {
+		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
+		return;
+	}
+	kl_field_set(&page.identity_new, "");
+	page_say(&page.hosts_message, 0, "The identity file was added. Save writes the file.");
+}
+
+/* Adds the new forward (Local or Remote) to the Host shown, after its others. */
+static void
+page_hosts_add_forward(void)
+{
+	char written[TERMINAL_HOSTS_VALUE_MAX];
+	char text[PAGE_MESSAGE];
+	const char *keyword;
+	const char *why;
+	char *out;
+	size_t size;
+	int error;
+
+	/* Where it listens and where it goes, as the file holds them. */
+	error = terminal_hosts_put_forward(page.forward_remote, page.forward_listen.text, page.forward_to.text, written, sizeof(written), &why);
+	if (error != 0) {
+		(void)snprintf(text, sizeof(text), "Forward: %s", why);
+		page_say(&page.hosts_message, 1, text);
+		return;
+	}
+
+	/* The line in the text. */
+	keyword = "LocalForward";
+	if (page.forward_remote)
+		keyword = "RemoteForward";
+	error = terminal_hosts_add(&page.hosts, page.hosts_block, keyword, written, &out, &size);
+	if (error == 0)
+		error = page_hosts_take(out, size);
+	if (error != 0) {
+		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
+		return;
+	}
+	kl_field_set(&page.forward_listen, "");
+	kl_field_set(&page.forward_to, "");
+	(void)snprintf(text, sizeof(text), "%s %s was added. Save writes the file.", keyword, written);
+	page_say(&page.hosts_message, 0, text);
+}
+
+/* Takes one line (an identity file or a forward) out of the text. */
+static void
+page_hosts_remove_line(
+	unsigned line)
+{
+	char text[PAGE_MESSAGE];
+	unsigned number;
+	char *out;
+	size_t size;
+	int error;
+
+	/* The line's number before it goes. */
+	if (line >= page.hosts.line_count)
+		return;
+	number = page.hosts.lines[line].number;
+
+	/* The text without it. */
+	error = terminal_hosts_remove(&page.hosts, line, &out, &size);
+	if (error == 0)
+		error = page_hosts_take(out, size);
+	if (error != 0) {
+		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
+		return;
+	}
+	(void)snprintf(text, sizeof(text), "Line %u was taken out. Save writes the file.", number);
+	page_say(&page.hosts_message, 0, text);
+}
+
+/*
+ * Saves the text as the ssh_config: the form's changes in it, the
+ * program's check finding no problem the file did not have, and the file
+ * as it was read (a change made outside is not written over: Revert reads
+ * it again).
+ */
+static void
+page_hosts_save(void)
+{
+	char report[PAGE_MESSAGE];
+	char text[PAGE_MESSAGE];
+	char *now;
+	char *copy;
+	size_t now_size;
+	int differs;
+	int fresh;
+	int same;
+	int error;
+
+	/* The form's changes, then whether anything changed. */
+	error = page_hosts_apply();
+	if (error != 0)
+		return;
+	same = page_hosts_saved();
+	if (same) {
+		page_say(&page.hosts_message, 0, "Nothing changed.");
+		return;
+	}
+
+	/* No problem the file did not have already. */
+	if (page.program->check != NULL) {
+		fresh = terminal_hosts_new_problem(page.program->check, page.program->data, page.hosts_original, page.hosts_original_size, page.hosts_text, page.hosts_size, report, sizeof(report));
+		if (fresh) {
+			(void)snprintf(text, sizeof(text), "Not saved: %s", report);
+			page_say(&page.hosts_message, 1, text);
+			page_log("hosts", "save-refused");
+			return;
+		}
+	}
+
+	/* The file as it was read (one not there then and now is the same). */
+	now = NULL;
+	now_size = 0U;
+	error = page.program->read(page.program->data, page.program->config_path, TERMINAL_HOSTS_TEXT_MAX, &now, &now_size);
+	if (error == ENOENT) {
+		now = NULL;
+		now_size = 0U;
+		error = 0;
+	}
+	if (error != 0 && error != EFBIG) {
+		(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
+		page_say(&page.hosts_message, 1, text);
+		return;
+	}
+	same = 0;
+	if (error == 0 && now_size == page.hosts_original_size) {
+		differs = 0;
+		if (now_size > 0U)
+			differs = memcmp(now, page.hosts_original, now_size);
+		if (differs == 0)
+			same = 1;
+	}
+	free(now);
+	if (!same) {
+		page_say(&page.hosts_message, 1, "The file was changed outside since it was read. Revert to read it again.");
+		page_log("hosts", "changed-outside");
+		return;
+	}
+
+	/* The file, written whole. */
+	error = page.program->replace(page.program->data, page.program->config_path, page.hosts_text, page.hosts_size);
+	if (error != 0) {
+		(void)snprintf(text, sizeof(text), "%s could not be written (%s).", page.program->config_shown, strerror(error));
+		page_say(&page.hosts_message, 1, text);
+		page_log("hosts", "save-failed");
+		return;
+	}
+
+	/* What the file holds now. */
+	copy = malloc(page.hosts_size + 1U);
+	if (copy != NULL) {
+		memcpy(copy, page.hosts_text, page.hosts_size + 1U);
+		free(page.hosts_original);
+		page.hosts_original = copy;
+		page.hosts_original_size = page.hosts_size;
+	}
+
+	/* Succeeded. */
+	page_say(&page.hosts_message, 0, "Saved. It takes effect from the next connection.");
+	page_log("hosts", "saved");
+}
+
+/* Opens the ssh_config in the system's text editor (an empty one made when it is not there). */
+static void
+page_hosts_editor(
+	struct terminal_window *window)
+{
+	char text[PAGE_MESSAGE];
+	int exists;
+	int error;
+
+	/* A program that cannot open one. */
+	if (page.program->open_editor == NULL) {
+		page_say(&page.hosts_message, 1, "There is no text editor to open the file with.");
+		return;
+	}
+
+	/* An empty file when there is none, for the editor to open. */
+	exists = page.program->exists(page.program->data, page.program->config_path);
+	if (!exists) {
+		error = page.program->create(page.program->data, page.program->config_path, "", 0U, 1);
+		if (error != 0 && error != EEXIST) {
+			(void)snprintf(text, sizeof(text), "%s could not be made (%s).", page.program->config_shown, strerror(error));
+			page_say(&page.hosts_message, 1, text);
+			return;
+		}
+	}
+
+	/* The editor, on its way. */
+	error = page.program->open_editor(page.program->data, window, page.program->config_path);
+	if (error != 0) {
+		(void)snprintf(text, sizeof(text), "The text editor could not be opened (%s).", strerror(error));
+		page_say(&page.hosts_message, 1, text);
+		page_log("hosts", "editor-failed");
+		return;
+	}
+
+	/* Succeeded: its changes take effect from the next connection. */
+	page_say(&page.hosts_message, 0, "The file is open in the text editor. Its changes take effect from the next connection; Revert shows them here.");
+	page_log("hosts", "editor");
+}
+
+/* Reports whether the pane's text is the file as last read or saved. */
+static int
+page_hosts_saved(void)
+{
+	int differs;
+
+	/* The same length. */
+	if (page.hosts_size != page.hosts_original_size)
+		return 0;
+
+	/* The same bytes. */
+	differs = 0;
+	if (page.hosts_size > 0U)
+		differs = memcmp(page.hosts_text, page.hosts_original, page.hosts_size);
+	if (differs != 0)
+		return 0;
+
+	/* Saved. */
+	return 1;
+}
+
+/* Finds the block shown first: the first Host, else the first block listed, else none. */
+static unsigned
+page_hosts_first(void)
+{
+	unsigned index;
+	int listed;
+
+	/* The first Host. */
+	for (index = 0U; index < page.hosts.block_count; index++) {
+		if (page.hosts.blocks[index].kind == TERMINAL_HOSTS_BLOCK_HOST)
+			return index;
+	}
+
+	/* Else the first listed. */
+	for (index = 0U; index < page.hosts.block_count; index++) {
+		listed = page_hosts_listed(index);
+		if (listed)
+			return index;
+	}
+
+	/* None. */
+	return TERMINAL_HOSTS_NONE;
+}
+
+/* Reports whether the list shows a block: every Host and Match, and the part before them when it has a keyword's line. */
+static int
+page_hosts_listed(
+	unsigned block)
+{
+	const struct terminal_hosts_block *read;
+	unsigned index;
+
+	/* A Host's and a Match's. */
+	read = &page.hosts.blocks[block];
+	if (read->kind != TERMINAL_HOSTS_BLOCK_BEFORE)
+		return 1;
+
+	/* The part before them, with a keyword's line. */
+	for (index = read->first; index < read->end; index++) {
+		if (page.hosts.lines[index].kind == TERMINAL_HOSTS_LINE_KEYWORD ||
+		    page.hosts.lines[index].kind == TERMINAL_HOSTS_LINE_BAD)
+			return 1;
+	}
+
+	/* Only comments and blank lines. */
+	return 0;
+}
+
+/* Counts a block's lines a removal takes out: all but its comments and blank lines. */
+static unsigned
+page_hosts_lines(
+	unsigned block)
+{
+	unsigned index;
+	unsigned count;
+
+	/* Each line of a keyword. */
+	count = 0U;
+	for (index = page.hosts.blocks[block].first; index < page.hosts.blocks[block].end; index++) {
+		if (page.hosts.lines[index].kind != TERMINAL_HOSTS_LINE_EMPTY &&
+		    page.hosts.lines[index].kind != TERMINAL_HOSTS_LINE_COMMENT)
+			count++;
+	}
+
+	/* Reports the count. */
+	return count;
+}
+
+/*
+ * Writes a block's title: a Host's names and what it connects to
+ * (user@address:port from its own lines), "Match" and its condition, or
+ * "Before any Host".
+ */
+static void
+page_hosts_title(
+	unsigned block,
+	char *text,
+	size_t size)
+{
+	const struct terminal_hosts_block *read;
+	char names[PAGE_HOST_TEXT];
+	char user[PAGE_HOST_TEXT];
+	char address[PAGE_HOST_TEXT];
+	char port[16];
+	unsigned line;
+
+	/* The part before any Host. */
+	read = &page.hosts.blocks[block];
+	if (read->kind == TERMINAL_HOSTS_BLOCK_BEFORE) {
+		(void)snprintf(text, size, "Before any Host");
+		return;
+	}
+
+	/* A Match and its condition. */
+	(void)terminal_hosts_value(&page.hosts, read->first, names, sizeof(names));
+	if (read->kind == TERMINAL_HOSTS_BLOCK_MATCH) {
+		(void)snprintf(text, size, "Match %s", names);
+		return;
+	}
+
+	/* A Host's user, address and port, from its own lines. */
+	line = terminal_hosts_find(&page.hosts, block, "User", TERMINAL_HOSTS_NONE);
+	(void)terminal_hosts_word(&page.hosts, line, 0U, user, sizeof(user));
+	line = terminal_hosts_find(&page.hosts, block, "HostName", TERMINAL_HOSTS_NONE);
+	(void)terminal_hosts_word(&page.hosts, line, 0U, address, sizeof(address));
+	line = terminal_hosts_find(&page.hosts, block, "Port", TERMINAL_HOSTS_NONE);
+	(void)terminal_hosts_word(&page.hosts, line, 0U, port, sizeof(port));
+
+	/* The names alone when it has none of them. */
+	if (user[0] == '\0' && address[0] == '\0' && port[0] == '\0') {
+		(void)snprintf(text, size, "%s", names);
+		return;
+	}
+
+	/* The names and user@address:port, each part that is there. */
+	(void)snprintf(text, size, "%s   %s%s%s%s%s", names, user, user[0] != '\0' ? "@" : "", address, port[0] != '\0' ? ":" : "", port);
+}
+
+/* Writes where a line is: its number and its block ("line 3 (Host *)"). */
+static void
+page_hosts_where(
+	unsigned line,
+	char *text,
+	size_t size)
+{
+	const struct terminal_hosts_block *block;
+	char names[PAGE_HOST_TEXT];
+
+	/* The part before any Host. */
+	block = &page.hosts.blocks[page.hosts.lines[line].block];
+	if (block->kind == TERMINAL_HOSTS_BLOCK_BEFORE) {
+		(void)snprintf(text, size, "line %u, before any Host", page.hosts.lines[line].number);
+		return;
+	}
+
+	/* A Host's or a Match's line. */
+	(void)terminal_hosts_value(&page.hosts, block->first, names, sizeof(names));
+	if (block->kind == TERMINAL_HOSTS_BLOCK_MATCH) {
+		(void)snprintf(text, size, "line %u, Match %s", page.hosts.lines[line].number, names);
+	} else {
+		(void)snprintf(text, size, "line %u, Host %s", page.hosts.lines[line].number, names);
+	}
+}
+
+/* Writes a forward as the card shows it: its kind, where it listens and where it goes. */
+static void
+page_hosts_forward_text(
+	unsigned line,
+	char *text,
+	size_t size)
+{
+	char listen[PAGE_HOST_TEXT];
+	char destination[PAGE_HOST_TEXT];
+	const char *kind;
+	int remote;
+
+	/* The kind. */
+	remote = terminal_hosts_keyword_is(&page.hosts, line, "RemoteForward");
+	kind = "Local";
+	if (remote)
+		kind = "Remote";
+
+	/* Its two ends (a value of another shape as written). */
+	(void)terminal_hosts_word(&page.hosts, line, 0U, listen, sizeof(listen));
+	(void)terminal_hosts_word(&page.hosts, line, 1U, destination, sizeof(destination));
+	if (destination[0] == '\0') {
+		(void)terminal_hosts_value(&page.hosts, line, listen, sizeof(listen));
+		(void)snprintf(text, size, "%s  %s", kind, listen);
+		return;
+	}
+
+	/* Where it listens, and where it goes. */
+	(void)snprintf(text, size, "%s  %s  ->  %s", kind, listen, destination);
+}
+
+/*
+ * Reports whether a line of the block shown is one of its Other lines:
+ * a comment, a keyword the form does not show (Include among them), a
+ * second line of a field's keyword, a line that cannot be read; every line
+ * of a Match but its own.
+ */
+static int
+page_hosts_other_line(
+	unsigned line)
+{
+	static const char *const listed[] = { "IdentityFile", "LocalForward", "RemoteForward" };
+	const struct terminal_hosts_line *read;
+	unsigned index;
+	int same;
+	int second;
+
+	/* Blank lines and the block's own Host or Match line are not. */
+	read = &page.hosts.lines[line];
+	if (read->kind == TERMINAL_HOSTS_LINE_EMPTY ||
+	    read->kind == TERMINAL_HOSTS_LINE_HOST ||
+	    read->kind == TERMINAL_HOSTS_LINE_MATCH)
+		return 0;
+
+	/* Every other line of a Match, comments and lines that cannot be read. */
+	if (page.hosts.blocks[read->block].kind == TERMINAL_HOSTS_BLOCK_MATCH)
+		return 1;
+	if (read->kind != TERMINAL_HOSTS_LINE_KEYWORD)
+		return 1;
+
+	/* A line of a list the form shows. */
+	for (index = 0U; index < sizeof(listed) / sizeof(listed[0]); index++) {
+		same = terminal_hosts_keyword_is(&page.hosts, line, listed[index]);
+		if (same)
+			return 0;
+	}
+
+	/* A field's keyword: its first line is in the form, a second one is not. */
+	for (index = PAGE_HOST_NAME + 1U; index < PAGE_HOST_FIELDS; index++) {
+		same = terminal_hosts_keyword_is(&page.hosts, line, page_host_keywords[index]);
+		if (!same)
+			continue;
+		second = page_hosts_second(line);
+		return second;
+	}
+
+	/* A keyword the form does not show. */
+	return 1;
+}
+
+/* Reports whether a line is a second line of a field's keyword in its block (ssh passes over it). */
+static int
+page_hosts_second(
+	unsigned line)
+{
+	unsigned index;
+	unsigned first;
+	int same;
+
+	/* The field's keyword it is. */
+	for (index = PAGE_HOST_NAME + 1U; index < PAGE_HOST_FIELDS; index++) {
+		same = terminal_hosts_keyword_is(&page.hosts, line, page_host_keywords[index]);
+		if (!same)
+			continue;
+
+		/* Not the block's first of it. */
+		first = terminal_hosts_find(&page.hosts, page.hosts.lines[line].block, page_host_keywords[index], TERMINAL_HOSTS_NONE);
+		if (first != line)
+			return 1;
+		return 0;
+	}
+
+	/* Not a field's keyword. */
+	return 0;
+}
+
+/*
+ * Draws a row of a card with a label, a line's words (fitted, at most
+ * PAGE_KNOWN_LINE wide) and, when it may go, a button that takes the line
+ * out; reports the edge below it.
+ */
+static int
+page_line_row(
+	int top,
+	int left,
+	int width,
+	const char *label,
+	const char *text,
+	kl_color ink,
+	uint32_t index,
+	int removable)
+{
+	struct kl_rect control;
+	int value_x;
+	int words;
+	int baseline;
+	int pressed;
+
+	/* The label, and the words after it. */
+	value_x = page_label(top, left, width, label, 1);
+	words = left + width - PAGE_INSET - value_x - PAGE_ICON_BUTTON - PAGE_AFTER_GAP;
+	if (words > PAGE_KNOWN_LINE)
+		words = PAGE_KNOWN_LINE;
+	baseline = kl_text_center(PAGE_TEXT_ROW, top, PAGE_ROW);
+	(void)kl_text_draw_fit(&page.text, &page.canvas, value_x, baseline, text, PAGE_TEXT_ROW, 0, words, ink);
+
+	/* The removal's button after the words. */
+	if (removable) {
+		control.width = PAGE_ICON_BUTTON;
+		control.height = PAGE_ICON_BUTTON;
+		control.x = value_x + words + PAGE_AFTER_GAP;
+		control.y = top + (PAGE_ROW - control.height) / 2;
+		pressed = kl_icon_button(page.ui, &page.style, PAGE_ID_LINE_REMOVE, index, &control, KL_ICON_TRASH, PAGE_ICON_PIXELS, KL_BUTTON_QUIET);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_REMOVE_LINE, index);
+	}
+
+	/* Reports the edge below the row. */
+	return top + PAGE_ROW;
+}
+
+/* Draws a row of a label, a field and a button after it; reports whether the button was pressed. */
+static int
+page_field_button(
+	int top,
+	int left,
+	int width,
+	const char *label,
+	uint32_t id,
+	struct kl_field *field,
+	const char *placeholder,
+	uint32_t button,
+	const char *button_label)
+{
+	const struct kl_theme *theme;
+	struct kl_rect control;
+	int value_x;
+	int button_width;
+	int pressed;
+
+	/* The label in the pane's column. */
+	theme = page.style.theme;
+	value_x = page_label(top, left, width, label, 1);
+
+	/* The field, leaving room for the button. */
+	button_width = kl_button_width(&page.style, button_label);
+	control.x = value_x;
+	control.y = top + (PAGE_ROW - theme->control_height) / 2;
+	control.width = page_control_width(left, width, value_x);
+	if (control.width > left + width - PAGE_INSET - value_x - button_width - 8)
+		control.width = left + width - PAGE_INSET - value_x - button_width - 8;
+	control.height = theme->control_height;
+	(void)kl_field(page.ui, &page.style, id, &control, field, placeholder);
+
+	/* The button after it. */
+	control.x += control.width + 8;
+	control.width = button_width;
+	pressed = kl_button(page.ui, &page.style, button, &control, button_label, 0U);
+
+	/* Reports whether it was pressed. */
+	return pressed;
 }
 
 /* Draws the Appearance pane: the text's size, the theme and the ambiguous width, then the program's own; reports its bottom. */
@@ -1505,162 +3165,6 @@ page_items_save(
 	}
 }
 
-/* Reads the ssh_config into the text area (empty when it is not there). */
-static void
-page_config_read(void)
-{
-	char text[PAGE_MESSAGE];
-	char *bytes;
-	size_t size;
-	int error;
-
-	/* The file, as large as the area holds. */
-	page.config_read = 1;
-	page.config_large = 0;
-	error = page.program->read(page.program->data, page.program->config_path, PAGE_CONFIG_MAX, &bytes, &size);
-	if (error == ENOENT) {
-		kl_text_area_set(&page.config, "");
-		return;
-	}
-
-	/* A file too large for the area is not edited here. */
-	if (error == EFBIG) {
-		page.config_large = 1;
-		return;
-	}
-
-	/* Any other failure is told, and the area is left empty. */
-	if (error != 0) {
-		kl_text_area_set(&page.config, "");
-		(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
-		page_say(&page.config_message, 1, text);
-		return;
-	}
-
-	/* Its text in the area: its line breaks as LF (CR LF told apart for the save), its tabs as spaces. */
-	error = page_config_shown(bytes, size);
-	free(bytes);
-	if (error != 0)
-		page.config_large = 1;
-}
-
-/*
- * Puts an ssh_config's text in the area as the area shows it: each CR LF
- * as LF (config_crlf remembers it, and the save writes CR LF again) and
- * each tab as PAGE_TAB_SPACES spaces (ssh reads spaces as it reads tabs).
- * Returns 0, or EFBIG when the text does not fit the area.
- */
-static int
-page_config_shown(
-	const char *bytes,
-	size_t size)
-{
-	char *shown;
-	size_t at;
-	size_t index;
-	unsigned space;
-
-	/* The room of the area. */
-	shown = malloc(KL_TEXT_AREA_MAX);
-	if (shown == NULL)
-		return ENOMEM;
-
-	/* Each byte, a CR before an LF left out and a tab spread out. */
-	at = 0U;
-	page.config_crlf = 0;
-	for (index = 0U; index < size; index++) {
-		/* A CR before an LF is dropped, and the file is marked as one with CR LF. */
-		if (bytes[index] == '\r' &&
-		    index + 1U < size &&
-		    bytes[index + 1U] == '\n') {
-			page.config_crlf = 1;
-			continue;
-		}
-
-		/* A text too long for the area is not edited here. */
-		if (at + PAGE_TAB_SPACES >= KL_TEXT_AREA_MAX) {
-			free(shown);
-			return EFBIG;
-		}
-
-		/* A tab shows as spaces. */
-		if (bytes[index] == '\t') {
-			for (space = 0U; space < PAGE_TAB_SPACES; space++)
-				shown[at++] = ' ';
-			continue;
-		}
-
-		/* Any other byte as it is. */
-		shown[at++] = bytes[index];
-	}
-
-	/* The text ends as a C string. */
-	shown[at] = '\0';
-
-	/* Succeeded: the area shows it. */
-	kl_text_area_set(&page.config, shown);
-	free(shown);
-	return 0;
-}
-
-/*
- * Saves the text area as the ssh_config, then has the program check it:
- * what is wrong is shown (the file is kept all the same, as an editor
- * keeps a file), else that it takes effect from the next connection.
- */
-static void
-page_config_save(void)
-{
-	char report[PAGE_MESSAGE];
-	char text[PAGE_MESSAGE];
-	char *bytes;
-	size_t size;
-	size_t index;
-	int error;
-
-	/* The text, its line breaks CR LF again when the file had them. */
-	bytes = malloc(2U * page.config.length + 1U);
-	if (bytes == NULL) {
-		page_say(&page.config_message, 1, "There is no memory to save the file.");
-		return;
-	}
-
-	/* Each LF becomes CR LF again when the file had them. */
-	size = 0U;
-	for (index = 0U; index < page.config.length; index++) {
-		if (page.config.text[index] == '\n' && page.config_crlf)
-			bytes[size++] = '\r';
-		bytes[size++] = page.config.text[index];
-	}
-
-	/* The file, written whole. */
-	error = page.program->replace(page.program->data, page.program->config_path, bytes, size);
-	free(bytes);
-	if (error != 0) {
-		(void)snprintf(text, sizeof(text), "%s could not be written (%s).", page.program->config_shown, strerror(error));
-		page_say(&page.config_message, 1, text);
-		page_log("config", "save-failed");
-		return;
-	}
-
-	/* What the program finds wrong in it. */
-	report[0] = '\0';
-	if (page.program->check != NULL)
-		(void)page.program->check(page.program->data, page.config.text, page.config.length, report, sizeof(report));
-
-	/* A problem the program found is told; the file stays saved. */
-	if (report[0] != '\0') {
-		(void)snprintf(text, sizeof(text), "Saved, but: %s", report);
-		page_say(&page.config_message, 1, text);
-		page_log("config", "saved-problems");
-		return;
-	}
-
-	/* Succeeded. */
-	page_say(&page.config_message, 0, "Saved. It takes effect from the next connection.");
-	page_log("config", "saved");
-}
-
 /* Looks up the key named in the name field: its public key when it is there. */
 static void
 page_key_look(void)
@@ -2117,25 +3621,37 @@ page_text_follow(
 	}
 }
 
-/* Finds the field or the text area with the keyboard's focus; reports 1 with one of them, 0 for none. */
+/* Finds the field with the keyboard's focus; reports 1 with it, 0 for none. */
 static int
 page_focused(
-	struct kl_field **field,
-	struct kl_text_area **area)
+	struct kl_field **field)
 {
 	unsigned index;
 	int has;
 
 	/* None yet. */
 	*field = NULL;
-	*area = NULL;
 
-	/* The ssh_config's text. */
-	has = kl_ui_has_focus(page.ui, PAGE_ID_CONFIG, 0U);
-	if (has) {
-		*area = &page.config;
-		return 1;
+	/* A field of the Hosts pane's form. */
+	for (index = 0U; index < PAGE_HOST_FIELDS; index++) {
+		has = kl_ui_has_focus(page.ui, PAGE_ID_HOST_FIELD + index, 0U);
+		if (has)
+			*field = &page.host_fields[index];
 	}
+
+	/* The Hosts pane's fields of a new host, identity file and forward. */
+	has = kl_ui_has_focus(page.ui, PAGE_ID_HOST_NEW, 0U);
+	if (has)
+		*field = &page.host_new;
+	has = kl_ui_has_focus(page.ui, PAGE_ID_IDENTITY_NEW, 0U);
+	if (has)
+		*field = &page.identity_new;
+	has = kl_ui_has_focus(page.ui, PAGE_ID_FORWARD_LISTEN, 0U);
+	if (has)
+		*field = &page.forward_listen;
+	has = kl_ui_has_focus(page.ui, PAGE_ID_FORWARD_TO, 0U);
+	if (has)
+		*field = &page.forward_to;
 
 	/* A field of the Keys pane. */
 	has = kl_ui_has_focus(page.ui, PAGE_ID_KEY_NAME, 0U);
@@ -2232,8 +3748,7 @@ page_key(
 	const struct kl_window_event *event)
 {
 	struct kl_field *field;
-	struct kl_text_area *area;
-	char text[KL_TEXT_AREA_MAX];
+	char text[KL_FIELD_MAX];
 	size_t length;
 	unsigned held;
 	int focused;
@@ -2248,7 +3763,7 @@ page_key(
 		return 0;
 
 	/* Without a field with the keyboard the key is no one's. */
-	focused = page_focused(&field, &area);
+	focused = page_focused(&field);
 	if (!focused)
 		return 1;
 
@@ -2265,7 +3780,7 @@ page_key(
 	}
 
 	/* A cut: the selection set aside for the Copy, then taken out (never a secret's). */
-	if (field != NULL && field->secret)
+	if (field->secret)
 		return 1;
 	length = terminal_page_copy_text(text, sizeof(text));
 	if (length == 0U)
@@ -2310,7 +3825,6 @@ page_key_text(
 {
 	struct kl_window_event commit;
 	struct kl_field *field;
-	struct kl_text_area *area;
 	unsigned char first;
 	int focused;
 
@@ -2324,7 +3838,7 @@ page_key_text(
 		return 0;
 
 	/* Only a field takes text (Space presses a button). */
-	focused = page_focused(&field, &area);
+	focused = page_focused(&field);
 	if (!focused)
 		return 0;
 
