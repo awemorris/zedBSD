@@ -38,6 +38,15 @@ struct x11server;
 /* The backend's table of functions (x11backend.h). */
 struct x11_backend_ops;
 
+/*
+ * A function of the Vulkan loader as the program found it: the loader's
+ * vkGetInstanceProcAddr, which the core casts back to its own type.
+ */
+typedef void (*x11server_vulkan_function)(void);
+
+/* The options have vulkan_loader (a program may test for it). */
+#define X11SERVER_VULKAN_LOADER	1
+
 /* The role of a font file: the monospaced face the core font is drawn with. */
 #define X11SERVER_FONT_MONO	0U
 
@@ -64,10 +73,18 @@ struct x11server_options {
 	void *backend_context;
 
 	/*
+	 * The Vulkan loader's vkGetInstanceProcAddr, through which the core
+	 * finds every Vulkan function and draws the windows and pixmaps on
+	 * the GPU; NULL (or a loader with no usable device) draws them in
+	 * memory and shows them through the backend's own present.
+	 */
+	x11server_vulkan_function vulkan_loader;
+
+	/*
 	 * The Vulkan WSI instance extension of the backend's surfaces
-	 * (VK_KHR_wayland_surface on Wayland), through which windows are
-	 * shown while Vulkan can show them; NULL shows every window through
-	 * the backend's own present.
+	 * (VK_KHR_wayland_surface on Wayland, VK_KHR_win32_surface on
+	 * Windows), through which windows are shown while Vulkan can show
+	 * them; NULL shows every window through the backend's own present.
 	 */
 	const char *vulkan_wsi;
 

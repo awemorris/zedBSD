@@ -48,6 +48,12 @@ x11_render_boxes(
 	size_t clip_index;
 	int inside;
 
+	/* An image with a copy on the GPU is drawn there. */
+	if (target->gpu != NULL) {
+		x11_render_vulkan_boxes(target, clip, paint, boxes, count);
+		return;
+	}
+
 	/* Each box, in each box of the clip it meets. */
 	for (index = 0U; index < count; index++) {
 		for (clip_index = 0U; clip_index < clip->count; clip_index++) {
@@ -73,6 +79,12 @@ x11_render_spans(
 {
 	struct x11_box box;
 	size_t index;
+
+	/* An image with a copy on the GPU is drawn there. */
+	if (target->gpu != NULL) {
+		x11_render_vulkan_spans(target, clip, paint, spans, count);
+		return;
+	}
 
 	/* Each span is a box one pixel high. */
 	for (index = 0U; index < count; index++) {
@@ -109,6 +121,12 @@ x11_render_mask(
 	int inside;
 	int row;
 	int column;
+
+	/* An image with a copy on the GPU is drawn there. */
+	if (target->gpu != NULL) {
+		x11_render_vulkan_mask(target, clip, paint, x, y, width, height, bits, stride);
+		return;
+	}
 
 	/* The rectangle of the bitmap on the target. */
 	rectangle.x0 = x;
@@ -170,6 +188,17 @@ x11_render_copy(
 	int inside;
 	int row;
 	int column;
+	int copied;
+
+	/* An image with a copy on the GPU, as the target or the source, is copied by the GPU's layer. */
+	if (target->gpu != NULL || source->gpu != NULL) {
+		copied = x11_render_vulkan_copy(target, clip, x, y, source, source_x, source_y, function, plane_mask);
+		if (copied != 0)
+			return copied;
+
+		/* Succeeded: copied. */
+		return 0;
+	}
 
 	/* From the target to the source, and the part of the target whose source is in the source image. */
 	dx = source_x - x;
@@ -244,6 +273,12 @@ x11_render_put(
 	int row;
 	int column;
 
+	/* An image with a copy on the GPU is drawn there. */
+	if (target->gpu != NULL) {
+		x11_render_vulkan_put(target, clip, x, y, width, height, pixels, stride, function, plane_mask);
+		return;
+	}
+
 	/* The rectangle of the pixels on the target, and the planes that change. */
 	rectangle.x0 = x;
 	rectangle.y0 = y;
@@ -283,6 +318,12 @@ x11_render_read(
 	int column;
 	int from_x;
 	int from_y;
+
+	/* An image with a copy on the GPU may be newer there: it is read from there. */
+	if (source->gpu != NULL) {
+		x11_render_vulkan_read(source, x, y, width, height, pixels, stride);
+		return;
+	}
 
 	/* Each pixel, from the image when it is inside. */
 	for (row = 0; row < height; row++) {

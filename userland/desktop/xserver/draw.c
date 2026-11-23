@@ -149,11 +149,13 @@ x11_image_copy(
 		return ENOMEM;
 	}
 
-	/* The source's size and depth, and its pixels row by row. */
+	/* The source's size and depth, and its pixels row by row (brought up to date from the GPU first); the copy is in memory only. */
+	x11_render_image_memory(source);
 	image->width = source->width;
 	image->height = source->height;
 	image->stride = (size_t)source->width;
 	image->depth = source->depth;
+	image->gpu = NULL;
 	for (row = 0; row < source->height; row++)
 		memcpy(image->pixels + (size_t)row * image->stride, source->pixels + (size_t)row * source->stride, (size_t)source->width * sizeof(uint32_t));
 
@@ -173,7 +175,8 @@ x11_image_free(
 	if (image == NULL)
 		return;
 
-	/* The pixels, and the image. */
+	/* Its copy on the GPU, the pixels, and the image. */
+	x11_render_image_detach(image);
 	free(image->pixels);
 	free(image);
 }
@@ -475,6 +478,9 @@ x11_request_create_pixmap(
 	pixmap->image.stride = width;
 	pixmap->image.depth = request[1];
 
+	/* Drawn on the GPU when it can be, its pixels 0 there too. */
+	x11_render_image_attach(server->vulkan, &pixmap->image, height, 0U);
+
 	/* Found by its id. */
 	error = x11_resource_add(server, id, X11_RESOURCE_PIXMAP, pixmap);
 	if (error != 0) {
@@ -520,8 +526,9 @@ x11_pixmap_free(
 	struct x11server *server,
 	struct x11_pixmap *pixmap)
 {
-	/* The charge, the pixels and the pixmap. */
+	/* The charge, the copy on the GPU, the pixels and the pixmap. */
 	x11_memory_release(server, pixmap->owner, sizeof(*pixmap) + x11_image_bytes(pixmap->width, pixmap->height));
+	x11_render_image_detach(&pixmap->image);
 	free(pixmap->image.pixels);
 	free(pixmap);
 }
@@ -1378,7 +1385,7 @@ draw_top_sync(
 	for (index = 0U; index < bytes / sizeof(*pixels); index++)
 		pixels[index] = DRAW_UNPAINTED;
 
-	/* Succeeded: the new pixels. */
+	/* The new pixels. */
 	top->image.pixels = pixels;
 	top->image.stride = (size_t)columns;
 	top->image.width = width;
@@ -1386,6 +1393,9 @@ draw_top_sync(
 	top->image.depth = X11_DEPTH;
 	top->image_rows = rows;
 	top->image_bytes = bytes;
+
+	/* Succeeded: drawn on the GPU when it can be, unpainted there too. */
+	x11_render_image_attach(server->vulkan, &top->image, rows, DRAW_UNPAINTED);
 	return 1;
 }
 
@@ -1399,7 +1409,8 @@ draw_top_free(
 	if (top->image.pixels == NULL)
 		return;
 
-	/* The pixels and their charge go. */
+	/* The copy on the GPU, the pixels and their charge go. */
+	x11_render_image_detach(&top->image);
 	free(top->image.pixels);
 	x11_memory_release(server, top->owner, top->image_bytes);
 	memset(&top->image, 0, sizeof(top->image));

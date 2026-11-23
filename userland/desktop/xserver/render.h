@@ -13,8 +13,9 @@
  * A request's handler resolves the graphics context and the drawable's
  * clip into one of these operations; the layer draws it by the X rules
  * (the graphics context's function and plane mask, the fill style) and
- * only inside the clip.  render-cpu.c draws into memory; a GPU drawing
- * layer takes the same operations.  region.c keeps the regions.
+ * only inside the clip.  render-cpu.c draws into memory; an image with a
+ * copy on the GPU (render-vulkan.c) is drawn there by the same operations,
+ * which render-cpu.c hands to it.  region.c keeps the regions.
  *
  * Pure: no system header, no state outside the values passed.
  */
@@ -68,9 +69,18 @@ struct x11_span {
 	int x1;
 };
 
+/* The server's Vulkan (render-vulkan.h), and an image's copy on its device. */
+struct x11_vulkan;
+struct x11_gpu_image;
+
 /*
  * The pixels of a drawable: rows of width pixels, stride pixels apart.
  * A pixel of depth 24 is 0x00RRGGBB, of depth 1 is 0 or 1.
+ *
+ * gpu is the image's copy on the GPU (NULL: the pixels are all there is).
+ * With one, the drawing is done there and the pixels in memory may be
+ * older: whoever reads them other than through these operations brings
+ * them up to date first (x11_render_image_memory).
  */
 struct x11_image {
 	uint32_t *pixels;
@@ -78,6 +88,7 @@ struct x11_image {
 	int width;
 	int height;
 	unsigned depth;
+	struct x11_gpu_image *gpu;
 };
 
 /*
@@ -125,5 +136,17 @@ void x11_render_mask(struct x11_image *target, const struct x11_region *clip, co
 int x11_render_copy(struct x11_image *target, const struct x11_region *clip, int x, int y, const struct x11_image *source, int source_x, int source_y, unsigned function, uint32_t plane_mask);
 void x11_render_put(struct x11_image *target, const struct x11_region *clip, int x, int y, int width, int height, const uint32_t *pixels, size_t stride, unsigned function, uint32_t plane_mask);
 void x11_render_read(const struct x11_image *source, int x, int y, int width, int height, uint32_t *pixels, size_t stride);
+
+/* render-vulkan.c: an image's copy on the GPU, and the operations drawn there. */
+void x11_render_image_attach(struct x11_vulkan *vulkan, struct x11_image *image, int rows, uint32_t fill);
+void x11_render_image_detach(struct x11_image *image);
+void x11_render_image_memory(const struct x11_image *image);
+void x11_render_image_memory_box(const struct x11_image *image, const struct x11_box *box);
+void x11_render_vulkan_boxes(struct x11_image *target, const struct x11_region *clip, const struct x11_paint *paint, const struct x11_box *boxes, size_t count);
+void x11_render_vulkan_spans(struct x11_image *target, const struct x11_region *clip, const struct x11_paint *paint, const struct x11_span *spans, size_t count);
+void x11_render_vulkan_mask(struct x11_image *target, const struct x11_region *clip, const struct x11_paint *paint, int x, int y, int width, int height, const uint8_t *bits, size_t stride);
+int x11_render_vulkan_copy(struct x11_image *target, const struct x11_region *clip, int x, int y, const struct x11_image *source, int source_x, int source_y, unsigned function, uint32_t plane_mask);
+void x11_render_vulkan_put(struct x11_image *target, const struct x11_region *clip, int x, int y, int width, int height, const uint32_t *pixels, size_t stride, unsigned function, uint32_t plane_mask);
+void x11_render_vulkan_read(const struct x11_image *source, int x, int y, int width, int height, uint32_t *pixels, size_t stride);
 
 #endif

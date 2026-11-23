@@ -743,10 +743,11 @@ struct x11server {
 	void *backend;
 
 	/*
-	 * Vulkan's state, made with the first swapchain (NULL until then), the
-	 * WSI extension the backend's surfaces need, and whether windows are
-	 * shown through the backend's present instead (Vulkan was not asked
-	 * for, or failed once).
+	 * Vulkan's state, made when the server starts with the program's
+	 * loader (NULL: none, everything drawn in memory), the WSI extension
+	 * the backend's surfaces need, and whether windows are shown through
+	 * the backend's present instead (Vulkan cannot show them, or failed
+	 * once).
 	 */
 	struct x11_vulkan *vulkan;
 	const char *vulkan_wsi;
@@ -1072,10 +1073,13 @@ void x11_rootless_flush_motion(struct x11server *server);
 void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 
 /* present-vulkan.c: a surface shown through a Vulkan swapchain. */
-struct x11_vulkan *x11_vulkan_open(const char *wsi);
+struct x11_vulkan *x11_vulkan_open(struct x11server *server, x11server_vulkan_function loader, const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
+int x11_vulkan_shows(const struct x11_vulkan *vulkan);
+int x11_vulkan_lost(const struct x11_vulkan *vulkan);
 struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);
 int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *pixels, size_t stride);
+int x11_vulkan_window_present_image(struct x11_vulkan_window *window, const struct x11_image *pixels);
 int x11_vulkan_window_resize(struct x11_vulkan_window *window, unsigned width, unsigned height);
 void x11_vulkan_window_close(struct x11_vulkan_window *window);
 
