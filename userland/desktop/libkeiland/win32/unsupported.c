@@ -2207,6 +2207,21 @@ kl_system_displays_rotations(
 
 /* Not on Windows. */
 int
+kl_system_displays_scale(
+	const struct kl_system *system,
+	const char *key,
+	struct kl_display_scale *scale)
+{
+	(void)system;
+	(void)key;
+	(void)scale;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
 kl_system_displays_set_brightness(
 	struct kl_system *system,
 	const char *key,
@@ -2254,6 +2269,23 @@ kl_system_displays_set_rotation(
 	(void)system;
 	(void)key;
 	(void)rotation;
+	(void)request;
+
+	/* Not on Windows. */
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_displays_set_scale(
+	struct kl_system *system,
+	const char *key,
+	unsigned scale,
+	uint32_t *request)
+{
+	(void)system;
+	(void)key;
+	(void)scale;
 	(void)request;
 
 	/* Not on Windows. */
