@@ -140,45 +140,6 @@ jobs:
           path: system/zedbsd-system-x86_64.tar
           if-no-files-found: error
 
-  build-apps:
-    name: Build mikuterm
-    runs-on: ubuntu-24.04
-    env:
-      LLVM_MINGW_TAG: "20261104"
-      LLVM_MINGW_NAME: "llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64"
-      LLVM_MINGW_SHA256: "919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926"
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake curl ninja-build python3 xz-utils
-
-      - name: Install llvm-mingw
-        run: |
-          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_TAG/$LLVM_MINGW_NAME.tar.xz" \
-            -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
-          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/llvm-mingw.tar.xz" | sha256sum -c
-          tar -xJf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP"
-          echo "LLVM_MINGW=$RUNNER_TEMP/$LLVM_MINGW_NAME" >> "$GITHUB_ENV"
-
-      # CMake takes the toolchain file by its absolute path.
-      - name: Build
-        run: |
-          cmake -S apps/terminal-win32 -B build/mikuterm-x64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/apps/terminal-win32/cmake/llvm-mingw-x86_64.cmake" \
-            -DLLVM_MINGW="$LLVM_MINGW"
-          cmake --build build/mikuterm-x64 --target zip -j4
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: mikuterm-x64
-          path: build/mikuterm-x64/mikuterm-*-x64.zip
-          if-no-files-found: error
-
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -242,11 +203,6 @@ jobs:
             | pc9821         | i486DX  | PC-9821          | `zedbsd-pc9821.img.gz`   | IDE image (Head=8, Sector=17) |
             | macppc32       | PowerPC | PowerPC Mac (G4) | `zedbsd-macppc32.img.gz` | USB image [(How to boot)](https://github.com/awemorris/zedBSD/blob/main/docs/howto/powermac-boot.md) |
             
-            Windows-ported Apps:
-            | Name        | OS                | Description                                       |
-            |-------------|-------------------|---------------------------------------------------|
-            | mikuterm    | Windows 11 x64    | SSH Terminal for Windows (Micro Unicode Terminal) |
-
           files: |
             artifacts/*.img.gz
             artifacts/zedbsd-system-*.tar
