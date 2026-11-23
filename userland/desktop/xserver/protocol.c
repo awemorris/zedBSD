@@ -70,11 +70,13 @@
 #define REQUEST_POLY_FILL_RECTANGLE	70U
 #define REQUEST_IMAGE_TEXT8		76U
 #define REQUEST_IMAGE_TEXT16		77U
+#define REQUEST_QUERY_BEST_SIZE		97U
 #define REQUEST_QUERY_EXTENSION		98U
 #define REQUEST_LIST_EXTENSIONS		99U
 #define REQUEST_GET_KEYBOARD_MAPPING	101U
 #define REQUEST_ROTATE_PROPERTIES	114U
 #define REQUEST_GET_POINTER_MAPPING	117U
+#define REQUEST_GET_MODIFIER_MAPPING	119U
 #define REQUEST_NO_OPERATION		127U
 
 /* zedBSD's own: an RGB image of a window's or a pixmap's rectangle, three bytes a pixel. */
@@ -87,6 +89,11 @@
 
 /* The default foreground. */
 #define GC_DEFAULT_FOREGROUND		0xffffffU
+
+/* QueryBestSize's classes, and the largest cursor (the backend's pointer is the system's). */
+#define BEST_SIZE_CURSOR		0U
+#define BEST_SIZE_STIPPLE		2U
+#define BEST_CURSOR_MAX			64U
 
 /* SetInputFocus's largest revert-to, and PolyLine's coordinate modes. */
 #define REVERT_TO_MAX			2U
@@ -146,6 +153,8 @@ static unsigned protocol_poly_fill_rectangle(struct x11server *server, unsigned 
 static unsigned protocol_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_get_keyboard_mapping(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_get_pointer_mapping(struct x11server *server, unsigned index, size_t length);
+static unsigned protocol_get_modifier_mapping(struct x11server *server, unsigned index, size_t length);
+static unsigned protocol_query_best_size(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned protocol_list_extensions(struct x11server *server, struct x11_client *client, size_t length);
@@ -566,6 +575,9 @@ protocol_dispatch(
 	case REQUEST_IMAGE_TEXT16:
 		code = protocol_image_text(server, index, request, length);
 		break;
+	case REQUEST_QUERY_BEST_SIZE:
+		code = protocol_query_best_size(server, index, request, length);
+		break;
 	case REQUEST_QUERY_EXTENSION:
 		code = protocol_query_extension(server, client, request, length);
 		break;
@@ -580,6 +592,9 @@ protocol_dispatch(
 		break;
 	case REQUEST_GET_POINTER_MAPPING:
 		code = protocol_get_pointer_mapping(server, index, length);
+		break;
+	case REQUEST_GET_MODIFIER_MAPPING:
+		code = protocol_get_modifier_mapping(server, index, length);
 		break;
 	case REQUEST_NO_OPERATION:
 		code = 0U;
@@ -1394,6 +1409,81 @@ protocol_get_pointer_mapping(
 	reply[32] = 1U;
 	reply[33] = 2U;
 	reply[34] = 3U;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/*
+ * GetModifierMapping: no key is a modifier's (the backend gives the
+ * modifiers held in each event's state; the keyboard's own modifier keys
+ * have no keycodes yet).
+ */
+static unsigned
+protocol_get_modifier_mapping(
+	struct x11server *server,
+	unsigned index,
+	size_t length)
+{
+	struct x11_client *client;
+	uint8_t reply[32];
+
+	/* The header alone. */
+	client = &server->clients[index];
+	if (length != 4U)
+		return X11_BAD_LENGTH;
+
+	/* Succeeded: no keycode a modifier. */
+	memset(reply, 0, sizeof(reply));
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/*
+ * QueryBestSize: the size asked for, for a tile or a stipple (the server
+ * draws any), and at most 64 each way for a cursor.
+ */
+static unsigned
+protocol_query_best_size(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct protocol_target target;
+	struct x11_client *client;
+	struct x11_window *window;
+	uint8_t reply[32];
+	uint16_t width;
+	uint16_t height;
+	unsigned code;
+
+	/* The class and a drawable (an InputOnly window only for a cursor). */
+	client = &server->clients[index];
+	if (length != 12U)
+		return X11_BAD_LENGTH;
+	if (request[1] > BEST_SIZE_STIPPLE)
+		return X11_BAD_VALUE;
+	window = x11_window_find(server, x11_read32(request + 4, client->order));
+	if (window == NULL || window->window_class != X11_INPUT_ONLY || request[1] != BEST_SIZE_CURSOR) {
+		code = protocol_drawable(server, x11_read32(request + 4, client->order), &target);
+		if (code != 0U)
+			return code;
+	}
+
+	/* The size asked, a cursor's within the largest. */
+	width = x11_read16(request + 8, client->order);
+	height = x11_read16(request + 10, client->order);
+	if (request[1] == BEST_SIZE_CURSOR) {
+		if (width > BEST_CURSOR_MAX)
+			width = BEST_CURSOR_MAX;
+		if (height > BEST_CURSOR_MAX)
+			height = BEST_CURSOR_MAX;
+	}
+
+	/* Succeeded: the reply. */
+	memset(reply, 0, sizeof(reply));
+	x11_write16(reply + 8, width, client->order);
+	x11_write16(reply + 10, height, client->order);
 	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }

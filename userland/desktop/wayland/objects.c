@@ -455,6 +455,12 @@ kwl_object_destroy(
 	if (object->kind == KWL_SURFACE || object->kind == KWL_VIEWPORT)
 		kwl_viewport_object_gone(object);
 
+	/* A surface and its fractional scale (surface-outputs.c); a wl_output and its xdg_outputs (protocol.c). */
+	if (object->kind == KWL_SURFACE || object->kind == KWL_FRACTIONAL_SCALE)
+		kwl_fractional_scale_object_gone(object);
+	if (object->kind == KWL_OUTPUT)
+		kwl_xdg_output_object_gone(object);
+
 	/* A surface and its content type (content-type.c), and the game mode that shows it (scanout.c). */
 	if (object->kind == KWL_SURFACE || object->kind == KWL_CONTENT_TYPE)
 		kwl_content_type_object_gone(object);
