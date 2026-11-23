@@ -332,16 +332,18 @@ x11_draw_border(
 	struct x11_window *window)
 {
 	struct x11_region outline;
+	struct x11_window *top;
 	int error;
 
-	/* The border that can be seen. */
+	/* The border that can be seen, on its top-level window's pixels. */
 	x11_region_init(&outline);
 	error = draw_outline(server, window, &outline);
+	top = x11_window_top_level(window);
 
 	/* Painted and shown, when there is any. */
 	if (error == 0 && outline.count != 0U) {
 		draw_paint_border(server, window, &outline);
-		draw_dirty_window(server, x11_window_top_level(window));
+		draw_dirty_window(server, top);
 	}
 	x11_region_fini(&outline);
 }

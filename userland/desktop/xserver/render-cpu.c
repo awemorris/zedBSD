@@ -161,6 +161,7 @@ x11_render_copy(
 	struct x11_box part;
 	uint32_t *copy;
 	uint32_t mask;
+	uint32_t all_planes;
 	size_t clip_index;
 	size_t width;
 	size_t height;
@@ -177,7 +178,8 @@ x11_render_copy(
 	readable.y0 = -dy;
 	readable.x1 = source->width - dx;
 	readable.y1 = source->height - dy;
-	mask = plane_mask & render_depth_mask(target->depth);
+	all_planes = render_depth_mask(target->depth);
+	mask = plane_mask & all_planes;
 
 	/* Each box of the clip inside both images. */
 	for (clip_index = 0U; clip_index < clip->count; clip_index++) {
@@ -198,7 +200,7 @@ x11_render_copy(
 			memcpy(copy + (size_t)row * width, source->pixels + (size_t)(part.y0 + dy + row) * source->stride + (size_t)(part.x0 + dx), width * sizeof(*copy));
 
 		/* Each pixel joined with the target's; a copy into every plane is stored row by row. */
-		if (function == X11_FUNCTION_COPY && mask == render_depth_mask(target->depth)) {
+		if (function == X11_FUNCTION_COPY && mask == all_planes) {
 			for (row = part.y0; row < part.y1; row++)
 				memcpy(target->pixels + (size_t)row * target->stride + (size_t)part.x0, copy + (size_t)(row - part.y0) * width, width * sizeof(*copy));
 			free(copy);
@@ -456,17 +458,19 @@ render_fill_box(
 {
 	uint32_t source;
 	uint32_t mask;
+	uint32_t all_planes;
 	int painted;
 	int row;
 	int column;
 
 	/* The planes that change. */
-	mask = paint->plane_mask & render_depth_mask(target->depth);
+	all_planes = render_depth_mask(target->depth);
+	mask = paint->plane_mask & all_planes;
 
 	/* The foreground copied into every plane is stored as it is (most fills). */
 	if (paint->fill_style == X11_FILL_SOLID &&
 	    paint->function == X11_FUNCTION_COPY &&
-	    mask == render_depth_mask(target->depth)) {
+	    mask == all_planes) {
 		source = paint->foreground & mask;
 		for (row = box->y0; row < box->y1; row++) {
 			for (column = box->x0; column < box->x1; column++)
