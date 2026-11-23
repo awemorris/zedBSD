@@ -96,6 +96,8 @@ kwl_glass_map_set(
 	const struct kwl_import *blurred;
 	struct kwl_compose *compose;
 	float key[KWL_GLASS_MAP_KEY];
+	float width;
+	float height;
 	int taken;
 
 	/* Not possible on this device. */
@@ -110,18 +112,19 @@ kwl_glass_map_set(
 	    set != blurred->set)
 		return 0;
 
-	/* On the output's whole plane, at its size (not a head's part of it). */
+	/* On the output's whole plane, at its size in pixels (not a head's part of it). */
 	if (server->view_width != 0U)
 		return 0;
-	if (constants[20] != (float)server->width || constants[21] != (float)server->height)
+	kwl_compose_pass_size(server, &width, &height);
+	if (constants[20] != width || constants[21] != height)
 		return 0;
 
 	/* A sheen from the top depends on the box: only a box that is the whole output. */
 	if (constants[6] != 0.0f &&
 	    (constants[8] != 0.0f ||
 	     constants[9] != 0.0f ||
-	     constants[10] != (float)server->width ||
-	     constants[11] != (float)server->height))
+	     constants[10] != width ||
+	     constants[11] != height))
 		return 0;
 
 	/*
@@ -704,11 +707,19 @@ map_image_size(
 {
 	float reach;
 
-	/* The output's size, for a glass's map and a whole-output picture; two outputs side by side for Wiseview's ground. */
-	*width = server->width;
-	*height = server->height;
+	/*
+	 * The output's size in pixels, for a glass's map and a whole-output
+	 * picture (drawn at the output's scale); two outputs side by side for
+	 * Wiseview's ground.
+	 */
+	*width = server->pixel_width;
+	*height = server->pixel_height;
+	if (*width == 0U || *height == 0U) {
+		*width = server->width;
+		*height = server->height;
+	}
 	if (map->key[9] == (float)KWL_GLASS_PICTURE_WISEVIEW_GROUND)
-		*width = 2U * server->width;
+		*width = 2U * *width;
 	if (map->key[9] != (float)KWL_GLASS_PICTURE_SHADOW)
 		return;
 

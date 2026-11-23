@@ -43,7 +43,9 @@ struct terminal_run_result {
  * (the monospaced font for the signs and the box drawing, NULL for none),
  * fallback (CJK, NULL for none) and emoji (the colour emoji font, read the
  * first time a character only it has is drawn, NULL for none) are font
- * files and last as long as the run; pixels is the font's
+ * files and last as long as the run; font_default is the font opened in
+ * font's place when font cannot be (one the user kept that is gone; NULL:
+ * the run then fails); pixels is the font's
  * size at 96 dots an inch (pixels_given when the user chose it, which
  * wins over the size kept), scale the screen's in 96ths (0 for 96).
  * columns and rows are the grid the window opens with; timeout ends the
@@ -74,6 +76,7 @@ struct terminal_run_options {
 	const char *title;
 	unsigned present;
 	const char *font;
+	const char *font_default;
 	const char *companion;
 	const char *fallback;
 	const char *emoji;

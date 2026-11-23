@@ -12,15 +12,19 @@ version 1903 or later, on x64 or ARM64.
 
   mikuterm.exe           the program
   README.txt             this file
-  config\mikuterm.conf   your settings (fonts, size, colours, the first host)
-  config\state.conf      what the View menu and the settings chose at once
+  config/mikuterm.conf   your settings (fonts, size, colours, the first host)
+  config/state.conf      what the View menu and the settings chose at once
                          (mikuterm writes it)
-  ssh\config             the hosts you connect to, in OpenSSH's ssh_config form
-  ssh\id_ed25519         your private key (you put it here)
-  ssh\known_hosts        the hosts' keys you accepted (mikuterm writes it)
-  fonts\                 your own fonts
-  share\fonts\           the fonts mikuterm brings
-  share\licenses\        the licenses of mikuterm and of its fonts
+  ssh/config             the hosts you connect to, in OpenSSH's ssh_config form
+  ssh/id_ed25519         your private key (you put it here)
+  ssh/known_hosts        the hosts' keys you accepted (mikuterm writes it)
+  fonts/                 your own fonts
+  share/fonts/           the fonts mikuterm brings
+  share/licenses/        the licenses of mikuterm and of its fonts
+
+Paths in this file and on mikuterm's screen are written with / between
+folders, as in ssh/config; Windows takes / and \ alike, so either opens the
+same file.
 
 Copy the whole folder to move mikuterm to another place or another PC: your
 settings, hosts, key and known hosts go with it.  Keep the folder where you
@@ -33,7 +37,7 @@ settings.
 -------------
 
 Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) shows the
-hosts of ssh\config:
+hosts of ssh/config:
 
   MikμTerm 0.1.0
 
@@ -51,13 +55,13 @@ host that is not in the list, type it there instead (user@host:port, or a
 name): the first character you type takes the row's place.  Backspace and
 Ctrl+U edit the line, and Escape puts the chosen row back.  A name that
 starts with a digit, w or x is typed after Ctrl+U (those keys choose rows).
-A row shows user@host when ssh\config gives the host a User.
+A row shows user@host when ssh/config gives the host a User.
 
 [w] WSL lists WSL's distributions (section 5).  [x] Settings opens the
 settings in a tab of their own beside this one (section 3): the tab stays,
 and you come back to it with the tab bar or F12.  Ctrl+C closes the tab.
 
-When ssh\config gives no User for the host, the tab asks "login as:".
+When ssh/config gives no User for the host, the tab asks "login as:".
 
 The first time you connect to a host, mikuterm shows the host's key and asks
 whether to trust it, as OpenSSH's ssh does:
@@ -69,13 +73,13 @@ whether to trust it, as OpenSSH's ssh does:
 
 Compare the fingerprint with the one the host's administrator gives you (on
 the host: ssh-keygen -l -f /etc/ssh/ssh_host_ed25519_key.pub), then type yes,
-or paste the fingerprint itself.  The key is added to ssh\known_hosts and you
+or paste the fingerprint itself.  The key is added to ssh/known_hosts and you
 are not asked again.
 
-If a host later shows a key that is not the one ssh\known_hosts holds,
+If a host later shows a key that is not the one ssh/known_hosts holds,
 mikuterm warns "REMOTE HOST IDENTIFICATION HAS CHANGED!" and does not
 connect.  When you know the host's key was replaced, delete the line the
-warning names from ssh\known_hosts (in the settings' Keys pane, or with
+warning names from ssh/known_hosts (in the settings' Keys pane, or with
 Notepad) and connect again.
 
 A tab closes when its connection ends normally (exit on the host).  When a
@@ -92,7 +96,7 @@ screen opens them as well.  The sidebar has four panes (Ctrl+Down or
 Ctrl+Page Down shows the next one, Ctrl+Up or Ctrl+Page Up the one before;
 Tab moves between a pane's fields and buttons):
 
-  Hosts       ssh\config, edited in place.  Save writes it and checks it as
+  Hosts       ssh/config, edited in place.  Save writes it and checks it as
               a connection reads it, naming a line it cannot use.  It takes
               effect from the next connection.
   Appearance  the text's size, the theme and the ambiguous width take effect
@@ -102,28 +106,27 @@ Tab moves between a pane's fields and buttons):
               timeout and the port of WSL's sshd from the next connection;
               the host of the first tab when mikuterm starts again.
   Keys        makes an ed25519 key, shows a key's public key (Copy Public
-              Key), and lists ssh\known_hosts, each line with a button that
+              Key), and lists ssh/known_hosts, each line with a button that
               removes it (after a host's key was replaced).
 
-What takes effect at once is kept in config\state.conf.  The rest is written
-into config\mikuterm.conf in place of its line; your other lines and
+What takes effect at once is kept in config/state.conf.  The rest is written
+into config/mikuterm.conf in place of its line; your other lines and
 comments stay as you wrote them.
 
 A key from the Keys pane: Name (id_ed25519 unless you choose another),
-Comment, and a passphrase typed twice (or none).  Make Key writes ssh\<name>
-and ssh\<name>.pub in OpenSSH's form, as ssh-keygen -t ed25519 writes them;
+Comment, and a passphrase typed twice (or none).  Make Key writes ssh/<name>
+and ssh/<name>.pub in OpenSSH's form, as ssh-keygen -t ed25519 writes them;
 with a passphrase the private key is encrypted as ssh-keygen encrypts it.  A
 key that is there already is never written over: choose another name.  Only
 your Windows account may open the new private key file.  Copy Public Key puts
 the line of the .pub on the clipboard: add it to the host's
 ~/.ssh/authorized_keys.  A key of another name than id_ed25519 is used for a
-host whose lines in ssh\config name it (IdentityFile ~/.ssh/<name>).
+host whose lines in ssh/config name it (IdentityFile ~/.ssh/<name>).
 
-The settings tab is drawn at the screen's pixels: on a screen scaled above
-100 percent its words are smaller than the window's.
+The settings tab follows the screen's scale, as the window's text does.
 
 
-4. Your key and ssh\config
+4. Your key and ssh/config
 --------------------------
 
 mikuterm uses an ed25519 key, with or without a passphrase.  Make one in the
@@ -132,7 +135,7 @@ it too):
 
   ssh-keygen -t ed25519 -f id_ed25519
 
-Put id_ed25519 into ssh\ and add the line of id_ed25519.pub to the host's
+Put id_ed25519 into ssh/ and add the line of id_ed25519.pub to the host's
 ~/.ssh/authorized_keys.  When the host does not take a key, mikuterm asks
 for the password.
 
@@ -140,7 +143,7 @@ A key with a passphrase (ssh-keygen's aes256-ctr and bcrypt) is asked for
 its passphrase only when the host would take it:
 
   [x] Remember the passphrase until you sign out of Windows (Tab switches this)
-  Enter passphrase for key 'ssh\id_ed25519':
+  Enter passphrase for key 'ssh/id_ed25519':
 
 What you type is not shown.  With the box checked (Tab switches it), a
 passphrase that opens the key is kept in Windows' Credential Manager for your
@@ -148,7 +151,7 @@ Windows session: it stays in memory, is never written to the disk, and goes
 when you sign out.  The next connection uses it without asking.  Session >
 Forget Remembered Passphrases forgets every passphrase mikuterm kept.
 
-ssh\config is written as OpenSSH's ~/.ssh/config:
+ssh/config is written as OpenSSH's ~/.ssh/config:
 
   Host server
       HostName server.example.org
@@ -160,10 +163,10 @@ ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
 PasswordAuthentication, PubkeyAuthentication and LogLevel.  Match, Include,
 ProxyJump and the other keywords it does not know are errors that name their
 line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is
-this folder's ssh\, ~/ is this folder, a name without a folder is in ssh\,
-and C:\... is taken as it is.
+this folder's ssh/, ~/ is this folder, a name without a folder is in ssh/,
+and a full path (C:/... or //server/share/...) is taken as it is.
 
-ssh\known_hosts has one line a host, as OpenSSH writes it ("[host]:port" for
+ssh/known_hosts has one line a host, as OpenSSH writes it ("[host]:port" for
 a port other than 22).  mikuterm does not write hashed names (HashKnownHosts
 yes is an error) and cannot read them: if you copy a known_hosts whose lines
 start with "|1|" (Ubuntu and Debian hash them), those hosts are asked about
@@ -182,10 +185,10 @@ distributions and lists them; Up, Down or a number and Enter choose one, [b]
 (wsl.exe -d <name> -e whoami, which also starts an sshd that systemd runs)
 and connects to it:
 
-  - when ssh\config has a Host named wsl-<name> (for example
+  - when ssh/config has a Host named wsl-<name> (for example
     "Host wsl-Ubuntu-24.04"; the case does not matter), with that Host's
     HostName, Port, User and other settings;
-  - otherwise to localhost on the port WslPort gives in config\mikuterm.conf
+  - otherwise to localhost on the port WslPort gives in config/mikuterm.conf
     (2222 unless you change it; the settings' Behavior pane has it too).
 
 The user is the Host's User, or else the distribution's default user (the one
@@ -218,10 +221,10 @@ Ubuntu 24.04 starts sshd from ssh.socket: after changing the port, run
 "sudo systemctl daemon-reload" and "sudo systemctl restart ssh.socket".)
 
 To open a distribution in the first tab whenever mikuterm starts, give it a
-Host (as above) and put "Connect wsl-<name>" into config\mikuterm.conf.
+Host (as above) and put "Connect wsl-<name>" into config/mikuterm.conf.
 
 
-6. config\mikuterm.conf
+6. config/mikuterm.conf
 -----------------------
 
 One "Keyword value" a line, as ssh_config.  A line mikuterm cannot use is
@@ -238,11 +241,11 @@ named in the first tab and skipped.
   CopyOnSelect    yes: what the pointer selects is copied at once (yes)
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
   WslPort         the port of the sshd in WSL, for a distribution without a
-                  Host wsl-<name> in ssh\config (2222)
+                  Host wsl-<name> in ssh/config (2222)
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
-config\state.conf and wins over the same settings here; delete state.conf to
+config/state.conf and wins over the same settings here; delete state.conf to
 go back to mikuterm.conf.  The settings' other choices are written here.
 
 
@@ -262,19 +265,21 @@ and Alt+Enter (Fullscreen).
 8. Fonts
 --------
 
-Put a TrueType font (.ttf or .ttc with glyf outlines) into fonts\ and name it
-in the settings' Appearance pane, or in config\mikuterm.conf:
+Put a TrueType font (.ttf or .ttc with glyf outlines) into fonts/ and name it
+in the settings' Appearance pane, or in config/mikuterm.conf:
 
   Font MyFont.ttf
   FontFallback MyCJKFont.ttc
 
-A font in fonts\ is used before one of the same name in share\fonts\.  A
-full path (C:\...) is taken as it is.
+A font in fonts/ is used before one of the same name in share/fonts/.  A
+full path (C:/Windows/Fonts/consola.ttf, say) is taken as it is: one that
+starts at a drive (C:/) or a server (//server/share/).  Anything else, such as
+/Windows/..., \Windows\... or C:x.ttf, is a name in fonts/ or share/fonts/.
 
 
 9. Licenses
 -----------
 
 Copyright (C) 2026 Awe Morris.  mikuterm.exe is under the zlib license
-(share\licenses\zedBSD-LICENSE.txt).  The fonts in share\fonts are their
-authors' works under their own licenses, listed in share\licenses\README.txt.
+(share/licenses/zedBSD-LICENSE.txt).  The fonts in share/fonts are their
+authors' works under their own licenses, listed in share/licenses/README.txt.

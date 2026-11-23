@@ -133,7 +133,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: eighteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29; the phone's calls since 33; the displays' angles since 34; the network's IPv6 since 35; the displays' modes since 36; get_admin since 37) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: eighteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29; the phone's calls since 33; the displays' angles since 34; the network's IPv6 since 35; the displays' modes since 36; get_admin since 37; the displays' scales since 38) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
     KL_SYSTEM_MANAGER_NAME,
     KL_SYSTEM_MANAGER_VERSION,
@@ -532,6 +532,7 @@ static const struct wl_message system_displays_requests[] = {
 	{ "keep_resolution", "us", system_plain_types },
 	{ "revert_resolution", "us", system_plain_types },
 	{ "reset_resolution", "us", system_plain_types },
+	{ "set_scale", "usu", system_plain_types },
 };
 
 /* The events of kl_system_displays_v1. */
@@ -544,6 +545,7 @@ static const struct wl_message system_displays_events[] = {
 	{ "touch", "ssus", system_plain_types },
 	{ "mode", "suuuu", system_plain_types },
 	{ "resolution", "suuu", system_plain_types },
+	{ "scale", "suuuuuua", system_plain_types },
 };
 
 /*
@@ -551,15 +553,16 @@ static const struct wl_message system_displays_events[] = {
  * 19, ws113-p014; set_rotation, bind_touch, listen_touch and the events
  * rotation, rotations and touch since 34, ws217-p004; set_resolution,
  * keep_resolution, revert_resolution, reset_resolution and the events mode
- * and resolution since 36): eleven requests and eight events.  It lives
+ * and resolution since 36; set_scale and the event scale since 38): twelve
+ * requests and nine events.  It lives
  * for the program.
  */
 const struct wl_interface kl_system_displays_v1_interface = {
 	KL_SYSTEM_DISPLAYS_NAME,
-	KL_SYSTEM_SINCE_RESOLUTION,
-	11,
+	KL_SYSTEM_SINCE_SCALE,
+	12,
 	system_displays_requests,
-	8,
+	9,
 	system_displays_events
 };
 

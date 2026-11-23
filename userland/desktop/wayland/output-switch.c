@@ -833,7 +833,7 @@ output_move_closed(
 	compose->output_lost = 0U;
 	compose->display = move->target;
 	memcpy(compose->display_name, move->name, sizeof(compose->display_name));
-	kwl_output_size_set(server, move->width, move->height, KWL_ROTATE_0);
+	kwl_output_size_set(server, move->width, move->height, KWL_ROTATE_0, server->scale_wanted);
 	server->refresh = move->refresh;
 	kwl_display_open(server, output_move_opened, move);
 }
@@ -864,7 +864,7 @@ output_move_opened(
 		printf("KWL OUTPUT switch failed name=%s errno=%d\n", move->name, error);
 		compose->display = move->old_display;
 		memcpy(compose->display_name, move->old_name, sizeof(compose->display_name));
-		kwl_output_size_set(server, move->old_mode_width, move->old_mode_height, compose->opened.rotation);
+		kwl_output_size_set(server, move->old_mode_width, move->old_mode_height, compose->opened.rotation, server->scale_wanted);
 		compose->rotation_selected = compose->opened.selected;
 		compose->scanout_rotation = compose->opened.scanout;
 		compose->turn_rotation = compose->opened.turn;
@@ -970,9 +970,10 @@ output_sync_then(
 
 /*
  * Sets the output's display mode and the angle it shows, and the desktop's
- * logical size, the mode turned by the angle: the one place that writes
- * server->width and height (WS217).  Before the compositor's device is
- * open (no compose yet) it sets the logical size alone, from the size
+ * logical size, the mode turned by the angle and divided by the scale: the
+ * one place that writes server->width and height (WS217), and the output's
+ * size in pixels and the scale it is shown at.  Before the compositor's
+ * device is open (no compose yet) it sets the sizes alone, from the size
  * asked for.
  */
 void
@@ -980,14 +981,25 @@ kwl_output_size_set(
 	struct kwl_server *server,
 	uint32_t mode_width,
 	uint32_t mode_height,
-	unsigned rotation)
+	unsigned rotation,
+	unsigned scale120)
 {
 	struct kwl_compose *compose;
 	uint32_t width;
 	uint32_t height;
+	uint32_t pixel_width;
+	uint32_t pixel_height;
 
-	/* The logical size: the mode on its side at a quarter turn. */
-	kwl_rotate_size(rotation, mode_width, mode_height, &width, &height);
+	/* The size in pixels: the mode on its side at a quarter turn. */
+	kwl_rotate_size(rotation, mode_width, mode_height, &pixel_width, &pixel_height);
+
+	/* No scale asked for is 100 %. */
+	if (scale120 == 0U)
+		scale120 = KWL_SCALE_ONE;
+
+	/* The logical size: the pixels divided by the scale. */
+	width = kwl_scale_logical(pixel_width, scale120);
+	height = kwl_scale_logical(pixel_height, scale120);
 
 	/* The output's mode and angle, once its device is open. */
 	compose = server->compose;
@@ -997,9 +1009,12 @@ kwl_output_size_set(
 		compose->rotation = rotation;
 	}
 
-	/* The desktop's size, which the windows, the plane and wl_output take. */
+	/* The desktop's size, which the windows, the plane and wl_output take, and the pixels it is shown on. */
 	server->width = width;
 	server->height = height;
+	server->pixel_width = pixel_width;
+	server->pixel_height = pixel_height;
+	server->scale120 = scale120;
 }
 
 /*
