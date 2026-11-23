@@ -735,6 +735,7 @@ x11_shape_arc_line(
 	double offset;
 	double reach;
 	double square;
+	double distance;
 	long long outer_width;
 	long long outer_height;
 	long long inner_width;
@@ -821,7 +822,8 @@ x11_shape_arc_line(
 		if (square < 0.0)
 			square = 0.0;
 		reach = radius_y * sqrt(square);
-		if (radius_y * radius_y * fabs(offset) > radius_x * radius_x * reach)
+		distance = fabs(offset);
+		if (radius_y * radius_y * distance > radius_x * radius_x * reach)
 			continue;
 		shape_arc_point(list, &ellipse, column, shape_round(centre_y - reach));
 		shape_arc_point(list, &ellipse, column, shape_round(centre_y + reach));
@@ -836,7 +838,8 @@ x11_shape_arc_line(
 		if (square < 0.0)
 			square = 0.0;
 		reach = radius_x * sqrt(square);
-		if (radius_x * radius_x * fabs(offset) > radius_y * radius_y * reach)
+		distance = fabs(offset);
+		if (radius_x * radius_x * distance > radius_y * radius_y * reach)
 			continue;
 		shape_arc_point(list, &ellipse, shape_round(centre_x - reach), row);
 		shape_arc_point(list, &ellipse, shape_round(centre_x + reach), row);
@@ -1491,6 +1494,7 @@ shape_kept(
 	double middle_side;
 	double after_start;
 	double before_end;
+	int on_line;
 
 	/* All of a full ellipse. */
 	if (ellipse->full)
@@ -1500,7 +1504,8 @@ shape_kept(
 	if (!pie) {
 		middle_side = shape_side(ellipse->start_x, ellipse->start_y, ellipse->end_x, ellipse->end_y, ellipse->middle_x, ellipse->middle_y);
 		side = shape_side(ellipse->start_x, ellipse->start_y, ellipse->end_x, ellipse->end_y, point_x, point_y);
-		if (shape_on_line(side, ellipse)) {
+		on_line = shape_on_line(side, ellipse);
+		if (on_line) {
 			point_x += SHAPE_NUDGE;
 			point_y += SHAPE_NUDGE * SHAPE_NUDGE;
 			side = shape_side(ellipse->start_x, ellipse->start_y, ellipse->end_x, ellipse->end_y, point_x, point_y);
@@ -1512,10 +1517,12 @@ shape_kept(
 
 	/* A pie: counterclockwise from the start and clockwise from the end. */
 	after_start = shape_turn(ellipse, ellipse->start_x, ellipse->start_y, point_x, point_y);
-	if (shape_on_line(after_start, ellipse))
+	on_line = shape_on_line(after_start, ellipse);
+	if (on_line)
 		after_start = shape_turn(ellipse, ellipse->start_x, ellipse->start_y, point_x + SHAPE_NUDGE, point_y + SHAPE_NUDGE * SHAPE_NUDGE);
 	before_end = -shape_turn(ellipse, ellipse->end_x, ellipse->end_y, point_x, point_y);
-	if (shape_on_line(before_end, ellipse))
+	on_line = shape_on_line(before_end, ellipse);
+	if (on_line)
 		before_end = -shape_turn(ellipse, ellipse->end_x, ellipse->end_y, point_x + SHAPE_NUDGE, point_y + SHAPE_NUDGE * SHAPE_NUDGE);
 
 	/* Within an extent of half a turn or less, both. */
@@ -1589,11 +1596,13 @@ shape_on_line(
 	const struct shape_ellipse *ellipse)
 {
 	double scale;
+	double size;
 
 	/* The size the products are of: width times height, twice over. */
 	scale = (double)ellipse->width * (double)ellipse->height;
 	scale *= scale;
-	if (fabs(cross) <= scale * 1e-12)
+	size = fabs(cross);
+	if (size <= scale * 1e-12)
 		return 1;
 
 	return 0;
@@ -1686,6 +1695,7 @@ shape_wide_ellipse(
 	double radius_y;
 	double half;
 	double distance;
+	double edge;
 	double foot_x;
 	double foot_y;
 	int first_row;
@@ -1723,7 +1733,8 @@ shape_wide_ellipse(
 			drawn = 0;
 			if (column < last_column) {
 				distance = shape_foot((double)column - centre_x, (double)row - centre_y, radius_x, radius_y, &foot_x, &foot_y);
-				if (fabs(distance - half) <= SHAPE_ON_EDGE)
+				edge = fabs(distance - half);
+				if (edge <= SHAPE_ON_EDGE)
 					distance = shape_foot((double)column - centre_x + SHAPE_NUDGE, (double)row - centre_y + SHAPE_NUDGE * SHAPE_NUDGE, radius_x, radius_y, &foot_x, &foot_y);
 				if (distance < half)
 					drawn = shape_kept(ellipse, 2.0 * foot_x, 2.0 * foot_y, 1);
