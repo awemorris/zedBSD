@@ -121,6 +121,7 @@ int terminal_hosts_put_word(const char *value, char *written, size_t size);
 int terminal_hosts_put_names(const char *value, char *written, size_t size);
 int terminal_hosts_put_command(const char *value, char *written, size_t size);
 int terminal_hosts_put_forward(int remote, const char *listen, const char *destination, char *written, size_t size, const char **why);
+int terminal_hosts_put_x11(const char *keyword, const char *value, char *written, size_t size, const char **why);
 
 /* The changes of the text (each gives a new text, malloc'd, with a NUL after it). */
 int terminal_hosts_set(const struct terminal_hosts *hosts, unsigned block, const char *keyword, const char *value, char **out, size_t *out_size);

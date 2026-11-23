@@ -40,7 +40,7 @@
 #define TERMINAL_EFFECT_START		1U
 
 /* The most settings of a program, and the longest value of one with its NUL. */
-#define TERMINAL_ITEMS_MAX		8U
+#define TERMINAL_ITEMS_MAX		12U
 #define TERMINAL_ITEM_VALUE		512U
 
 /* The longest file name of a key made, with its NUL, and the longest one-line public key. */
@@ -54,8 +54,9 @@
 /*
  * One setting of the program's own, shown in a pane: the keyword it is
  * kept under, the label shown, the pane (TERMINAL_PANE_APPEARANCE or
- * _BEHAVIOR), what it holds (TERMINAL_ITEM_*) and when it takes effect
- * (TERMINAL_EFFECT_*).
+ * _BEHAVIOR), what it holds (TERMINAL_ITEM_*), when it takes effect
+ * (TERMINAL_EFFECT_*), and what its field shows empty (NULL: the
+ * keyword).
  */
 struct terminal_page_item {
 	const char *keyword;
@@ -63,6 +64,7 @@ struct terminal_page_item {
 	unsigned pane;
 	unsigned kind;
 	unsigned effect;
+	const char *hint;
 };
 
 /*
@@ -83,7 +85,10 @@ struct terminal_page_item {
  * program's own settings (item_count of them), whose values item_get and
  * item_set read and keep (item_set writes why a value was refused, and
  * the program takes a setting of the next connection at once).  comment
- * is the comment a new key gets (user@host).  font names the font the
+ * is the comment a new key gets (user@host).  x11 says whether the program
+ * forwards X11: a host's form then has its X11 lines (ForwardX11,
+ * ForwardX11Trusted, ForwardX11Timeout, X11RootWindow, X11WindowTabify);
+ * 0 leaves them among the host's other lines.  font names the font the
  * terminal draws with, for a program without a Font setting (NULL: none
  * shown).  connection is the word for what a setting of the next
  * connection waits for ("tab" for a program whose tabs are shells; NULL:
@@ -107,6 +112,7 @@ struct terminal_page_program {
 	int (*item_get)(void *data, const char *keyword, char *value, size_t size);
 	int (*item_set)(void *data, const char *keyword, const char *value, char *why, size_t size);
 	const char *comment;
+	int x11;
 	const char *font;
 	const char *connection;
 	void *data;

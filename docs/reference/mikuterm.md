@@ -535,7 +535,7 @@ does not stretch it.
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
 | Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
 | Behavior | copy-on-select | at once | `config/state.conf` |
-| Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config/mikuterm.conf` |
+| Behavior | `Term`, `ConnectTimeout`, `WslPort`, `X11Scale`, `X11Render`, `X11PrimaryToClipboard` | the next connection | `config/mikuterm.conf` |
 | Behavior | `Connect` | the next start | `config/mikuterm.conf` |
 | Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
 
@@ -551,7 +551,14 @@ Hosts pane:
   Port, User, Command (`RemoteCommand`, as written), Identity files
   (`IdentityFile`, in order), and Port forwarding (`LocalForward`,
   `RemoteForward`: where it listens, `[address:]port`, and where it goes,
-  `host:port`, an IPv6 address in brackets). A value that another block
+  `host:port`, an IPv6 address in brackets), and X11: Forward X11
+  (`ForwardX11`, `yes` or `no`), Trusted (`ForwardX11Trusted`, `yes` or
+  `no`), Timeout (`ForwardX11Timeout`, a time as `ssh_config(5)` writes one:
+  seconds, or numbers each with `s`, `m`, `h`, `d` or `w`), Root window
+  (`X11RootWindow`, `off` or a size from `320x200` to `7680x4320`) and Window
+  tabs (`X11WindowTabify`, `yes` or `no`) (section 4.5). A field takes the
+  values a connection reads, and says what it takes otherwise; an empty field
+  takes the keyword's line out. A value that another block
   earlier in the file sets for the same host says `Overridden by line N`
   (the first value `ssh` obtains is used); identity files and forwards that
   other blocks add are shown with their lines. Other lines lists the block's
@@ -595,7 +602,9 @@ zedBSD's terminal has the same tab with its own files and settings in place
 of the folder's: `~/.ssh/`, and Font, Fallback font, Columns, Rows and TERM
 kept in the desktop's settings ([Terminal](terminal.md), section 3). The
 settings that only connections have (`ConnectTimeout`, `WslPort`, `Connect`)
-are mikuterm's alone.
+and the X11 ones (a host's X11 card, `X11Scale`, `X11Render`,
+`X11PrimaryToClipboard`) are mikuterm's alone: zedBSD's `ssh` does not
+forward X11, and its terminal lists a host's X11 lines under Other lines.
 
 ## 8. Menus
 
