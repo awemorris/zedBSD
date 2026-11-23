@@ -319,7 +319,9 @@ x11_vulkan_shows(
 	const struct x11_vulkan *vulkan)
 {
 	/* No Vulkan, or none that presents. */
-	if (vulkan == NULL || !vulkan->wsi || vulkan->lost)
+	if (vulkan == NULL ||
+	    !vulkan->wsi ||
+	    vulkan->lost)
 		return 0;
 
 	/* Succeeded: swapchains can be made. */

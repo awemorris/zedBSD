@@ -385,7 +385,9 @@ x11_render_image_attach(
 
 	/* Only a drawable of depth 24 is drawn on the GPU, while there is room for it. */
 	image->gpu = NULL;
-	if (vulkan == NULL || vulkan->render == NULL || vulkan->lost)
+	if (vulkan == NULL ||
+	    vulkan->render == NULL ||
+	    vulkan->lost)
 		return;
 	if (image->depth != X11_DEPTH || image->pixels == NULL)
 		return;
@@ -465,7 +467,9 @@ x11_render_image_memory(
 
 	/* Memory is already as new. */
 	copy = image->gpu;
-	if (copy == NULL || !copy->memory_stale || copy->vulkan->lost)
+	if (copy == NULL ||
+	    !copy->memory_stale ||
+	    copy->vulkan->lost)
 		return;
 
 	/* The whole room read back. */
@@ -493,7 +497,9 @@ x11_render_image_memory_box(
 
 	/* Memory is already as new. */
 	copy = image->gpu;
-	if (copy == NULL || !copy->memory_stale || copy->vulkan->lost)
+	if (copy == NULL ||
+	    !copy->memory_stale ||
+	    copy->vulkan->lost)
 		return;
 
 	/* The box inside the room. */
@@ -780,7 +786,9 @@ x11_render_vulkan_put(
 
 	/* A copy of every plane goes straight from a staging buffer, each part of it. */
 	usable = render_usable(target);
-	if (usable && function == X11_FUNCTION_COPY && (plane_mask & RENDER_PLANES) == RENDER_PLANES) {
+	if (usable &&
+	    function == X11_FUNCTION_COPY &&
+	    (plane_mask & RENDER_PLANES) == RENDER_PLANES) {
 		failed = 0;
 		for (index = 0U; index < parts.count && failed == 0; index++) {
 			part = &parts.boxes[index];
@@ -1580,7 +1588,9 @@ render_staging(
 
 	/* A buffer that has used some of its room or descriptor sets goes to the device; the next one starts. */
 	start = (slot->staging_used + 15U) & ~(VkDeviceSize)15U;
-	if ((start + size > slot->staging_size || slot->descriptors_used >= RENDER_DESCRIPTORS) && slot->staging_used != 0U) {
+	if ((start + size > slot->staging_size ||
+	     slot->descriptors_used >= RENDER_DESCRIPTORS) &&
+	    slot->staging_used != 0U) {
 		error = x11_render_vulkan_submit(vulkan, VK_NULL_HANDLE, VK_NULL_HANDLE);
 		if (error != VK_SUCCESS)
 			return NULL;
@@ -2142,7 +2152,9 @@ render_scratch(
 	/* Big enough already. */
 	render = vulkan->render;
 	scratch = render->scratch;
-	if (scratch != NULL && scratch->width >= width && scratch->height >= height)
+	if (scratch != NULL &&
+	    scratch->width >= width &&
+	    scratch->height >= height)
 		return scratch;
 
 	/* A larger one, of at least the old one's size. */
