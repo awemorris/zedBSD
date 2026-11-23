@@ -40,6 +40,9 @@
 #define CURSOR_OPAQUE			0xff000000U
 #define CURSOR_CLEAR			0x00000000U
 
+/* The version the backend is told for the cursor hidden by a client (XFIXES's HideCursor); no cursor has it. */
+#define CURSOR_HIDDEN_VERSION		0xffffffffU
+
 static unsigned cursor_create(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned cursor_create_glyph(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned cursor_free_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -180,6 +183,8 @@ x11_cursor_update(
 	struct x11_window *top;
 	uint32_t *pixels;
 	uint32_t version;
+	uint32_t clear;
+	int hidden;
 
 	/* A backend that shows no X cursor, or a pointer outside the X windows. */
 	if (server->ops == NULL || server->ops->cursor == NULL)
@@ -195,11 +200,14 @@ x11_cursor_update(
 	if (top == NULL || top->surface == NULL)
 		return;
 
-	/* The cursor shown there, unless the backend was told of it already. */
+	/* The cursor shown there (none while a client hid it, XFIXES), unless the backend was told of it already. */
 	cursor = cursor_shown(server, window);
 	version = 0U;
 	if (cursor != NULL)
 		version = cursor->version;
+	hidden = x11_xfixes_cursor_hidden(server);
+	if (hidden)
+		version = CURSOR_HIDDEN_VERSION;
 	if (server->cursor_known &&
 	    server->cursor_window == top->id &&
 	    server->cursor_surface == top->surface &&
@@ -209,6 +217,18 @@ x11_cursor_update(
 	server->cursor_window = top->id;
 	server->cursor_surface = top->surface;
 	server->cursor_shown_version = version;
+
+	/* Hidden: a clear cursor of one pixel. */
+	if (hidden) {
+		clear = CURSOR_CLEAR;
+		memset(&image, 0, sizeof(image));
+		image.shape = -1;
+		image.width = 1;
+		image.height = 1;
+		image.pixels = &clear;
+		server->ops->cursor(server->backend, top->surface, &image);
+		return;
+	}
 
 	/* None: the system's pointer. */
 	if (cursor == NULL) {
@@ -235,6 +255,121 @@ x11_cursor_update(
 	/* Succeeded: the backend shows it. */
 	server->ops->cursor(server->backend, top->surface, &image);
 	free(pixels);
+}
+
+/*
+ * Finds the cursor shown now: over the X window under the pointer, the
+ * grab's or the window's (as x11_cursor_update shows it).  Returns it, or
+ * NULL for the system's pointer (also outside the X windows).
+ */
+const struct x11_cursor *
+x11_cursor_current(
+	struct x11server *server)
+{
+	const struct x11_cursor *cursor;
+	struct x11_window *window;
+
+	/* Outside the X windows, or over the root window. */
+	if (server->pointer_outside)
+		return NULL;
+	window = x11_input_window_under(server);
+	if (window == NULL || window == server->root)
+		return NULL;
+
+	/* Succeeded: the cursor shown over it, if any. */
+	cursor = cursor_shown(server, window);
+	return cursor;
+}
+
+/*
+ * Makes a cursor's image as ARGB pixels (malloc'd, width by height), or
+ * NULL for a cursor of the cursor font (no image) or without memory.
+ */
+uint32_t *
+x11_cursor_pixels(
+	const struct x11_cursor *cursor)
+{
+	uint32_t *pixels;
+
+	/* A shape of the system's has no image here. */
+	if (cursor->source == NULL)
+		return NULL;
+
+	/* Succeeded: the image. */
+	pixels = cursor_image(cursor);
+	return pixels;
+}
+
+/*
+ * Makes a cursor look like another (XFIXES's ChangeCursor): its shape,
+ * bitmaps, colours and hot spot are copied, its charge follows them, and
+ * it is a new version, so that the backend shows it again.  Returns 0, or
+ * BadAlloc (the cursor is then as it was).
+ */
+unsigned
+x11_cursor_change(
+	struct x11server *server,
+	struct x11_cursor *target,
+	const struct x11_cursor *source)
+{
+	uint8_t *bits;
+	uint8_t *mask;
+	size_t bytes;
+	size_t charged;
+	int error;
+
+	/* The same cursor: nothing to do. */
+	if (target == source)
+		return 0U;
+
+	/* Copies of the bitmaps. */
+	bytes = source->stride * (size_t)source->height;
+	bits = NULL;
+	mask = NULL;
+	if (source->source != NULL) {
+		bits = malloc(bytes);
+		if (bits == NULL)
+			return X11_BAD_ALLOC;
+		mask = malloc(bytes);
+		if (mask == NULL) {
+			free(bits);
+			return X11_BAD_ALLOC;
+		}
+		memcpy(bits, source->source, bytes);
+		memcpy(mask, source->mask, bytes);
+	}
+
+	/* The new charge in place of the old. */
+	charged = sizeof(*target) + bytes * 2U;
+	error = x11_memory_charge(server, target->owner, charged);
+	if (error != 0) {
+		free(bits);
+		free(mask);
+		return X11_BAD_ALLOC;
+	}
+	x11_memory_release(server, target->owner, target->charged);
+	target->charged = charged;
+
+	/* The look. */
+	free(target->source);
+	free(target->mask);
+	target->source = bits;
+	target->mask = mask;
+	target->shape = source->shape;
+	target->width = source->width;
+	target->height = source->height;
+	target->hot_x = source->hot_x;
+	target->hot_y = source->hot_y;
+	target->stride = source->stride;
+	memcpy(target->foreground, source->foreground, sizeof(target->foreground));
+	memcpy(target->background, source->background, sizeof(target->background));
+
+	/* Succeeded: a new version (never 0), which the backend is shown again. */
+	server->cursor_serial++;
+	if (server->cursor_serial == 0U)
+		server->cursor_serial++;
+	target->version = server->cursor_serial;
+	return 0U;
 }
 
 /*

@@ -1656,9 +1656,10 @@ draw_top_free(
 
 /*
  * Works out the part of a window that can be drawn, on its top-level
- * window's pixels: inside it (and its border when asked), inside each
- * ancestor, not under a mapped InputOutput sibling above it or above an
- * ancestor, and not under its own mapped InputOutput children when asked.
+ * window's pixels: inside it (and its border when asked) and its shape,
+ * inside each ancestor and its shape, not under a mapped InputOutput
+ * sibling above it or above an ancestor (as far as their shapes cover),
+ * and not under its own mapped InputOutput children when asked.
  * A window that cannot be seen, an InputOnly one, the root window, and a
  * tree without pixels have none.  Returns 0, or ENOMEM.
  */
@@ -1705,13 +1706,21 @@ draw_clip(
 	if (error != 0)
 		return error;
 
-	/* Inside each ancestor up to the top-level window. */
+	/* Inside its shape (SHAPE), when it has one. */
+	error = x11_shape_clip_window(window, border && window != top, clip);
+	if (error != 0)
+		return error;
+
+	/* Inside each ancestor (and its shape) up to the top-level window. */
 	for (ancestor = window->parent; ancestor != NULL && ancestor != server->root; ancestor = ancestor->parent) {
 		box.x0 = ancestor->x;
 		box.y0 = ancestor->y;
 		box.x1 = ancestor->x + (int)ancestor->width;
 		box.y1 = ancestor->y + (int)ancestor->height;
 		x11_region_intersect_box(clip, &box);
+		error = x11_shape_clip_inside(ancestor, clip);
+		if (error != 0)
+			return error;
 	}
 
 	/*
@@ -1723,11 +1732,7 @@ draw_clip(
 		for (sibling = ancestor->above; sibling != NULL; sibling = sibling->above) {
 			if (!sibling->mapped || sibling->window_class != X11_INPUT_OUTPUT)
 				continue;
-			box.x0 = sibling->x - (int)sibling->border;
-			box.y0 = sibling->y - (int)sibling->border;
-			box.x1 = sibling->x + (int)sibling->width + (int)sibling->border;
-			box.y1 = sibling->y + (int)sibling->height + (int)sibling->border;
-			error = x11_region_subtract_box(clip, &box);
+			error = x11_shape_subtract_outside(sibling, clip);
 			if (error != 0)
 				return error;
 		}
@@ -1737,11 +1742,7 @@ draw_clip(
 	for (sibling = window->first_child; children && sibling != NULL; sibling = sibling->above) {
 		if (!sibling->mapped || sibling->window_class != X11_INPUT_OUTPUT)
 			continue;
-		box.x0 = sibling->x - (int)sibling->border;
-		box.y0 = sibling->y - (int)sibling->border;
-		box.x1 = sibling->x + (int)sibling->width + (int)sibling->border;
-		box.y1 = sibling->y + (int)sibling->height + (int)sibling->border;
-		error = x11_region_subtract_box(clip, &box);
+		error = x11_shape_subtract_outside(sibling, clip);
 		if (error != 0)
 			return error;
 	}
