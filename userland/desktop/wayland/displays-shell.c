@@ -112,6 +112,8 @@ static void displays_rotation(struct kwl_object *object, struct kwl_server *serv
 static int displays_resolution_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void displays_modes(struct kwl_object *object, struct kwl_server *server, VkDisplayKHR display, const char *key);
 static uint32_t displays_resolution_applied(int error);
+static int displays_scale_request(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static void displays_scale(struct kwl_object *object, struct kwl_server *server, VkDisplayKHR display, const char *key);
 static int displays_places(const char *text, struct kwl_display_config *wanted);
 static void displays_result(struct kwl_object *object, uint32_t request, uint32_t applied, uint32_t saved);
 static void displays_answer(struct kwl_object *object, VkDisplayKHR before, uint32_t request, uint32_t applied, int saved);
@@ -208,6 +210,16 @@ kwl_displays_request(
 		if (object->version < KL_SYSTEM_SINCE_RESOLUTION)
 			return EPROTO;
 		error = displays_resolution_request(object, opcode, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A display's scale chosen (since 38). */
+	if (opcode == KL_SYSTEM_DISPLAYS_SET_SCALE) {
+		if (object->version < KL_SYSTEM_SINCE_SCALE)
+			return EPROTO;
+		error = displays_scale_request(object, bytes, size);
 		if (error != 0)
 			return error;
 		return 0;
@@ -578,6 +590,10 @@ displays_output(
 	/* Its modes and its trial after them, for an object that hears them (since 36). */
 	if (object->version >= KL_SYSTEM_SINCE_RESOLUTION)
 		displays_modes(object, server, display, key);
+
+	/* Its scale after them, for an object that hears it (since 38). */
+	if (object->version >= KL_SYSTEM_SINCE_SCALE)
+		displays_scale(object, server, display, key);
 }
 
 /*
@@ -620,6 +636,40 @@ displays_modes(
 	offset = displays_put_word(payload, offset, remaining);
 	offset = displays_put_word(payload, offset, why);
 	(void)kwl_emit(object->client, object->id, KL_SYSTEM_DISPLAYS_EVENT_RESOLUTION, payload, offset);
+}
+
+/*
+ * Sends an object a display's scale event: the scale it is shown at, the
+ * user's choice, the default, its logical size, why its scale cannot be
+ * chosen now, and the steps it offers (an array of words).
+ */
+static void
+displays_scale(
+	struct kwl_object *object,
+	struct kwl_server *server,
+	VkDisplayKHR display,
+	const char *key)
+{
+	struct kwl_output_scale_state state;
+	unsigned char payload[DISPLAYS_EVENT_MAX];
+	unsigned index;
+	size_t offset;
+
+	/* What the display's scale is now. */
+	kwl_output_scale_report(server, display, key, &state);
+
+	/* The event: key, the scales, the logical size, why not, and the steps offered. */
+	offset = displays_put_string(payload, 0U, key);
+	offset = displays_put_word(payload, offset, state.current);
+	offset = displays_put_word(payload, offset, state.chosen);
+	offset = displays_put_word(payload, offset, state.recommended);
+	offset = displays_put_word(payload, offset, state.width);
+	offset = displays_put_word(payload, offset, state.height);
+	offset = displays_put_word(payload, offset, state.why);
+	offset = displays_put_word(payload, offset, (uint32_t)(state.offered_count * 4U));
+	for (index = 0U; index < state.offered_count; index++)
+		offset = displays_put_word(payload, offset, state.offered[index]);
+	(void)kwl_emit(object->client, object->id, KL_SYSTEM_DISPLAYS_EVENT_SCALE, payload, offset);
 }
 
 /*
@@ -1194,6 +1244,56 @@ displays_resolution_applied(
 
 	/* Succeeded: any other is a failure (the old mode is back). */
 	return KL_SYSTEM_RESULT_FAILED;
+}
+
+/*
+ * Carries out a set_scale(request, key, scale): the display's scale in
+ * 120ths (0: the default), applied at once and written for its monitor
+ * (output-scale.c).  The answer waits for the writing.  Returns 0, or
+ * EPROTO for a malformed one.
+ */
+static int
+displays_scale_request(
+	struct kwl_object *object,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_server *server;
+	const char *key;
+	uint32_t request;
+	uint32_t scale;
+	size_t next;
+	int active;
+	int saved;
+	int error;
+
+	/* The request's words and key. */
+	if (size < 12U)
+		return EPROTO;
+	request = displays_word(bytes, 0U);
+	error = displays_string(bytes, size, 4U, KL_SYSTEM_DISPLAY_KEY_MAX, &key, &next);
+	if (error != 0 || next + 4U != size)
+		return EPROTO;
+	scale = displays_word(bytes, next);
+
+	/* Only an active session changes a display (D-AUTH2). */
+	server = object->client->server;
+	active = displays_active(server);
+	if (!active) {
+		displays_result(object, request, KL_SYSTEM_RESULT_DENIED, 0U);
+		return 0;
+	}
+
+	/* The scale chosen, and shown. */
+	error = kwl_output_scale_set(server, key, scale, &saved);
+	printf("KWL DISPLAYS scale client=%llu key=%s scale=%u errno=%d saved=%d\n", (unsigned long long)object->client->number, key, scale, error,
+	    saved);
+
+	/* Succeeded: answered, once written when the choice was given to the file. */
+	if (error != 0)
+		saved = error;
+	displays_hold(object, request, displays_resolution_applied(error), saved, 0U);
+	return 0;
 }
 
 /*

@@ -467,9 +467,9 @@ kwl_layers_set(
 }
 
 /*
- * Gives the box (left, top, right, bottom, in the picture's pixels) of
- * what Home's picture holds; outside it the picture is clear.  Returns 0
- * when it is not known (the whole picture is then drawn).
+ * Gives the box (left, top, right, bottom, in the plane's units) of what
+ * Home's picture holds; outside it the picture is clear.  Returns 0 when
+ * it is not known (the whole picture is then drawn).
  */
 int
 kwl_layers_home_bounds(
@@ -477,17 +477,31 @@ kwl_layers_home_bounds(
 	float *bounds)
 {
 	struct kwl_layers *layers;
+	unsigned scale;
+	float factor;
 
 	/* Known once the picture was drawn with it. */
 	layers = &server->compose->layers;
 	if (!layers->home_bounded)
 		return 0;
 
-	/* Succeeded: the box. */
+	/* The box, gathered in the picture's pixels. */
 	bounds[0] = layers->home_bounds[0];
 	bounds[1] = layers->home_bounds[1];
 	bounds[2] = layers->home_bounds[2];
 	bounds[3] = layers->home_bounds[3];
+
+	/* Taken back to the plane's units from the output's scale it was drawn at. */
+	scale = server->scale120;
+	if (scale != 0U && scale != KWL_SCALE_ONE) {
+		factor = (float)KWL_SCALE_ONE / (float)scale;
+		bounds[0] = bounds[0] * factor;
+		bounds[1] = bounds[1] * factor;
+		bounds[2] = bounds[2] * factor;
+		bounds[3] = bounds[3] * factor;
+	}
+
+	/* Succeeded: the box. */
 	return 1;
 }
 
@@ -512,11 +526,11 @@ kwl_layers_anim_inband(
 	unsigned desktop_draws;
 	int allowed;
 
-	/* Only a window's animation, with the pictures of the output's present size. */
+	/* Only a window's animation, with the pictures of the output's present size in pixels. */
 	layers = &server->compose->layers;
 	if (!layers->ready || server->anim == NULL)
 		return;
-	if (layers->width != server->width || layers->height != server->height)
+	if (layers->width != server->pixel_width || layers->height != server->pixel_height)
 		return;
 
 	/* Decided once, at its first frame; not used unless drawn now. */
@@ -611,12 +625,12 @@ kwl_layers_anim_picture(
 {
 	struct kwl_layers *layers;
 
-	/* The rectangle the body was drawn in, as a part of the picture. */
+	/* The rectangle of the plane the body was drawn in, as a part of the picture (the whole output). */
 	layers = &server->compose->layers;
-	uv[0] = (float)layers->anim_rect[0] / (float)layers->width;
-	uv[1] = (float)layers->anim_rect[1] / (float)layers->height;
-	uv[2] = (float)(layers->anim_rect[0] + layers->anim_rect[2]) / (float)layers->width;
-	uv[3] = (float)(layers->anim_rect[1] + layers->anim_rect[3]) / (float)layers->height;
+	uv[0] = (float)layers->anim_rect[0] / (float)server->width;
+	uv[1] = (float)layers->anim_rect[1] / (float)server->height;
+	uv[2] = (float)(layers->anim_rect[0] + layers->anim_rect[2]) / (float)server->width;
+	uv[3] = (float)(layers->anim_rect[1] + layers->anim_rect[3]) / (float)server->height;
 
 	/* Succeeded: the window's picture. */
 	return layers->images[KWL_LAYER_WINDOW].set;

@@ -4200,7 +4200,7 @@ draw_body_part(
 		shape.opacity = 1.0f;
 	shape.mode = MODE_IMAGE;
 	shape.radius = radius;
-	shape.set = image->set;
+	shape.set = kwl_compose_image_set(server, image, shape.quad[2], shape.quad[3], shape.uv);
 	if (image->draw == KWL_DRAW_OPAQUE)
 		shape.opaque = 1.0f;
 	glass_shape_draw(server, command, &shape);
@@ -6472,6 +6472,7 @@ draw_sheet(
 	cut_top = top;
 	if (server->view_width != 0U)
 		cut_top = top - server->view_y;
+	cut_top = kwl_compose_pass_pixel(server, cut_top);
 	if (cut.offset.y < cut_top)
 		cut.offset.y = cut_top;
 	if (bottom < cut.offset.y)

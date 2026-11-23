@@ -21,17 +21,53 @@
 #define WLC_GENERIC_ARGUMENTS	20U
 
 /*
+ * Whether this ABI passes a 32-bit unsigned argument sign-extended from its
+ * bit 31 to the 64-bit register.
+ *
+ * The RISC-V LP64 psABI (Integer Calling Convention) widens an integer
+ * scalar narrower than XLEN by the sign of its type up to 32 bits and then
+ * sign-extends it to XLEN bits, so a uint of 2^31 or more arrives with its
+ * upper half all ones; MIPS64 and LoongArch64 do the same.  Every other ABI
+ * the generic path is built for extends a uint with zeros or leaves the
+ * upper half unspecified (see wlc_generic_callback).
+ */
+#if defined(__riscv) && (__riscv_xlen == 64)
+#define WLC_GENERIC_UINT_SIGN_EXTENDED	1
+#elif defined(__mips__) && defined(__LP64__)
+#define WLC_GENERIC_UINT_SIGN_EXTENDED	1
+#elif defined(__loongarch__) && (__loongarch_grlen == 64)
+#define WLC_GENERIC_UINT_SIGN_EXTENDED	1
+#else
+#define WLC_GENERIC_UINT_SIGN_EXTENDED	0
+#endif
+
+/*
  * A listener callback as the generic path calls it.
  *
  * Every Wayland argument (int, uint, fixed, fd, string, object, new_id,
- * array) is an integer or a pointer.  On the ABIs zedBSD builds for (amd64,
- * i386, AArch64's AAPCS64, SPARC V9) such an argument takes one register or
- * one word-sized stack slot, extended to the word, in the same place
- * whatever the argument's declared integer or pointer type.  A callback
- * declared with its own, possibly narrower, parameters of those kinds
- * therefore reads exactly its arguments from a call that passes each as one
- * word, and ignores the words after them.  This is what lets the library
- * call listeners of protocols it has no table for without libffi.
+ * array) is a 32-bit integer or a pointer, and on every ABI the generic
+ * path is built for such an argument takes one register or one word-sized
+ * stack slot, in the same place whatever its declared integer or pointer
+ * type.  A callback declared with its own, possibly narrower, parameters of
+ * those kinds therefore reads exactly its arguments from a call that passes
+ * each as one word, and ignores the words after them.  This is what lets
+ * the library call listeners of protocols it has no table for without
+ * libffi.
+ *
+ * What a 32-bit argument's word must hold above its 32 bits is the ABI's:
+ *
+ * - i386, 32-bit Arm, 32-bit PowerPC and m68k: nothing; the word is the
+ *   value.
+ * - x86-64 (System V psABI) and AArch64 (AAPCS64): unspecified; the callee
+ *   reads only the low 32 bits.
+ * - SPARC V9 and 64-bit PowerPC: the value extended by its type, with its
+ *   sign for an int, fixed or fd and with zeros for a uint; the callee may
+ *   rely on it.
+ * - RISC-V LP64, MIPS64 and LoongArch64: the value extended with its bit 31
+ *   for every 32-bit type, uint included; the callee may rely on it.
+ *
+ * The generic path therefore extends an int, a fixed and an fd with their
+ * sign everywhere, and a uint as WLC_GENERIC_UINT_SIGN_EXTENDED says.
  */
 typedef void (*wlc_generic_callback)(void *, void *,
 	uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t,
@@ -40,6 +76,7 @@ typedef void (*wlc_generic_callback)(void *, void *,
 	uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 static int wlc_event_generic(struct wlc_event *event, const void *listener, void *data);
+static uintptr_t wlc_generic_uint_word(uint32_t value);
 
 /*
  * Releases payload, undelivered rights and object references held by one event.
@@ -740,7 +777,7 @@ wlc_event_generic(
 	/* The callback, through a plain function pointer to the one-word-per-argument type. */
 	callback = (wlc_generic_callback)(void (*)(void))callbacks[event->opcode];
 
-	/* Each argument as one word; the signed kinds (int, fixed, fd) are extended with their sign. */
+	/* Each argument as one word; the signed kinds (int, fixed, fd) are extended with their sign, a uint as the ABI passes it. */
 	memset(words, 0, sizeof(words));
 	signature = wlc_signature_start(event->message->signature, &version);
 	for (index = 0; index < event->argument_count; index++) {
@@ -759,7 +796,7 @@ wlc_event_generic(
 			words[index] = (uintptr_t)(intptr_t)argument->h;
 			break;
 		case 'u':
-			words[index] = (uintptr_t)argument->u;
+			words[index] = wlc_generic_uint_word(argument->u);
 			break;
 		case 's':
 			words[index] = (uintptr_t)argument->s;
@@ -785,4 +822,24 @@ wlc_event_generic(
 
 	/* Succeeded: the callback has run. */
 	return 0;
+}
+
+/* Makes the word that carries a uint argument as the ABI passes a 32-bit unsigned value. */
+static uintptr_t
+wlc_generic_uint_word(
+	uint32_t value)
+{
+	uintptr_t word;
+
+	/* The value extended with zeros, which is the word on every ABI but the sign-extending ones. */
+	word = (uintptr_t)value;
+
+#if WLC_GENERIC_UINT_SIGN_EXTENDED
+	/* Fills the upper half with copies of bit 31, as a register holding any 32-bit value is on these ABIs. */
+	if ((value & 0x80000000U) != 0)
+		word |= ~(uintptr_t)0xffffffffU;
+#endif
+
+	/* Succeeded: the word holds the value as the listener's uint parameter expects it. */
+	return word;
 }

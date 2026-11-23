@@ -41,12 +41,17 @@
  *                             kept (the ID may hold spaces; the last three words
  *                             are the numbers); the line written last is the
  *                             last, and the oldest goes when there are too many
+ *   scale=ID N                a monitor's scale the user chose, in percent (100
+ *                             to 300, a step of scale.h; the ID may hold spaces, N is the
+ *                             last word); a monitor left to the default has no
+ *                             line, and the oldest line goes when there are too
+ *                             many
  *
  * KEY is a display's persistent connector key (D-ID A2, the display's name,
  * "zedbsd-port-v1:pci:0000:00:02.0:hdmi:B").  ID is a monitor's identity
  * (resolution.h: "edid-v1:...", made from its EDID, or the connector's key
  * for a display without one), so a monitor keeps its resolution on another
- * connector; the places, the angles and the displays turned off stay by
+ * connector (and its scale); the places, the angles and the displays turned off stay by
  * connector.  Lines of other keys are left for later versions; a file of
  * another version is not read.
  *
@@ -99,6 +104,12 @@ struct kwl_display_resolution {
 	uint32_t refresh_mhz;
 };
 
+/* A monitor's scale the user chose (120ths, scale.h), by its identity. */
+struct kwl_display_scale {
+	char key[KWL_DISPLAYS_KEY];
+	unsigned scale120;
+};
+
 /* A display's place in the extended mode, by its key. */
 struct kwl_display_place {
 	char key[KWL_DISPLAYS_KEY];
@@ -111,8 +122,8 @@ struct kwl_display_place {
  * the built-in panel's light when one was chosen, the places, the
  * displays turned off (ws113-p014), the displays' rotations with the
  * number of rotate lines the reading dropped (WS217: not an angle, a key
- * too long, one too many), and the monitors' resolutions, the one written
- * last at the end.
+ * too long, one too many), the monitors' resolutions, the one written
+ * last at the end, and the monitors' scales the same way.
  */
 struct kwl_display_config {
 	unsigned mode;
@@ -128,6 +139,8 @@ struct kwl_display_config {
 	unsigned rotation_dropped;
 	unsigned resolution_count;
 	struct kwl_display_resolution resolutions[KWL_DISPLAYS_PLACES];
+	unsigned scale_count;
+	struct kwl_display_scale scales[KWL_DISPLAYS_PLACES];
 };
 
 void kwl_displays_fit(uint32_t source_width, uint32_t source_height, uint32_t width, uint32_t height, struct kwl_display_rect *fitted);
@@ -149,5 +162,8 @@ int kwl_displays_parse_resolution(const char *text, char *key, size_t size, uint
 int kwl_displays_resolution(const struct kwl_display_config *config, const char *key, uint32_t *width, uint32_t *height, uint32_t *refresh_mhz);
 int kwl_displays_set_resolution(struct kwl_display_config *config, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz);
 void kwl_displays_forget_resolution(struct kwl_display_config *config, const char *key);
+int kwl_displays_parse_scale(const char *text, char *key, size_t size, unsigned *scale120);
+unsigned kwl_displays_scale(const struct kwl_display_config *config, const char *key);
+int kwl_displays_set_scale(struct kwl_display_config *config, const char *key, unsigned scale120);
 
 #endif

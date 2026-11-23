@@ -154,6 +154,16 @@ int kl_ui_text_wanted(const struct kl_ui *ui, struct kl_rect *caret);
  */
 int kl_ui_window_input(struct kl_ui *ui, const struct kl_window_event *event);
 void kl_ui_window_text(struct kl_ui *ui, struct kl_window *window);
+/*
+ * KL_VERSION 114: the scale of the window the widgets are on, in 96ths
+ * (KL_SCALE_BASE, the default, is 100 %).  kl_ui_window_input then takes
+ * the window's pixels and gives the widgets their places and the wheel's
+ * distances in units (pixels over the scale), as they are laid out in
+ * units on a kl_canvas of that scale.  A program that turns the window's
+ * places into units itself before it calls kl_ui_pointer_* and the like
+ * leaves the scale at KL_SCALE_BASE (the places are not turned twice).
+ */
+void kl_ui_set_scale(struct kl_ui *ui, unsigned scale);
 
 /* The widgets, each drawn and asked by one call during a frame. */
 int kl_button(struct kl_ui *ui, const struct kl_style *style, uint32_t id, const struct kl_rect *rect, const char *label, unsigned flags);

@@ -67,6 +67,8 @@ KEILAND_SOURCES := \
 	userland/desktop/wayland/output-rotate.c \
 	userland/desktop/wayland/resolution.c \
 	userland/desktop/wayland/output-resolution.c \
+	userland/desktop/wayland/scale.c \
+	userland/desktop/wayland/output-scale.c \
 	userland/desktop/wayland/turn.c \
 	userland/desktop/wayland/compose.c \
 	userland/desktop/wayland/scene.c \
