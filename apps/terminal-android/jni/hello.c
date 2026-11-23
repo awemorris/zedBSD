@@ -32,6 +32,19 @@ static ANativeWindow *hello_window;
 static void hello_paint(void);
 
 /*
+ * The program has no Java classes of its own to prepare.
+ */
+jint
+keiland_android_app_jni_load(
+	JNIEnv *env)
+{
+	(void)env;
+
+	/* Succeeded: nothing to register. */
+	return JNI_OK;
+}
+
+/*
  * Runs the events of the Activity and paints each window; does not return.
  */
 void

@@ -21,7 +21,9 @@ endif()
 option(MIKUTERM_ANDROID_HELLO "Build the trial body of the native thread" ON)
 set(MIKUTERM_ANDROID_SOURCES
 	${MIKUTERM_ROOT}/apps/terminal-android/jni/entry.c
-	${MIKUTERM_ROOT}/apps/libkeiland/android/activity.c)
+	${MIKUTERM_ROOT}/apps/libkeiland/android/activity.c
+	${MIKUTERM_ROOT}/apps/libkeiland/android/bridge.c
+	${MIKUTERM_ROOT}/apps/libkeiland/android/bridge-jni.c)
 if(MIKUTERM_ANDROID_HELLO)
 	list(APPEND MIKUTERM_ANDROID_SOURCES ${MIKUTERM_ROOT}/apps/terminal-android/jni/hello.c)
 endif()
