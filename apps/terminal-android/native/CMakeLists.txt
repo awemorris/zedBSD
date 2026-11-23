@@ -30,16 +30,11 @@ mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LI
 mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_POSIX_SOURCES)
 
-# libkeiland: the files every system shares with the POSIX platform layer, and the Android layer
-# (only the files that exist yet are built).
+# libkeiland: the files every system shares with the POSIX platform layer, and the Android layer.
 set(MIKUTERM_KEILAND_COMMON ${KEILAND_COMMON_SOURCES} ${KEILAND_POSIX_SOURCES})
 list(TRANSFORM MIKUTERM_KEILAND_COMMON PREPEND ${MIKUTERM_ROOT}/)
-set(KEILAND_ANDROID_BUILT "")
-foreach(file IN LISTS KEILAND_ANDROID_SOURCES)
-	if(EXISTS ${MIKUTERM_ROOT}/${file})
-		list(APPEND KEILAND_ANDROID_BUILT ${MIKUTERM_ROOT}/${file})
-	endif()
-endforeach()
+set(MIKUTERM_KEILAND_ANDROID ${KEILAND_ANDROID_SOURCES})
+list(TRANSFORM MIKUTERM_KEILAND_ANDROID PREPEND ${MIKUTERM_ROOT}/)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
 # that the rest of that side is not on the include path.
@@ -79,7 +74,7 @@ add_library(mikuterm_truetype STATIC ${MIKUTERM_TRUETYPE_SOURCES})
 add_library(mikuterm_crypto STATIC ${MIKUTERM_CRYPTO_SOURCES} ${MIKUTERM_CRYPTO_OS_SOURCES})
 add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
-add_library(keiland_android STATIC ${KEILAND_ANDROID_BUILT})
+add_library(keiland_android STATIC ${MIKUTERM_KEILAND_ANDROID})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
 foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssh keiland_common keiland_android
 	mikuterm_terminal)
