@@ -29,6 +29,12 @@
  * The primary selection is bridged the same way with X's
  * PRIMARY, through the desktop's zwp_primary_selection_device_manager_v1
  * when it has one.
+ *
+ * The cursor: the core tells the cursor of the X window under the
+ * pointer; it is drawn into a wl_shm buffer of a cursor surface of the
+ * backend's, which the pointer shows while it is over that window (set
+ * again at each entering, as Wayland asks).  A window whose X cursor is
+ * None, and a cursor without an image, shows the backend's own arrow.
  */
 
 #include "userland/desktop/xserver/program.h"
@@ -59,6 +65,9 @@
 
 /* The application's identity on the desktop. */
 #define WAYLAND_APP_ID		"xserver"
+
+/* The largest side of a cursor image the backend shows (a larger one is the arrow). */
+#define WAYLAND_CURSOR_MAX	256
 
 /* The text types the clipboard offers and takes, the one read first, and how long a read may wait (milliseconds) and hold. */
 #define WAYLAND_TEXT_UTF8	"text/plain;charset=utf-8"
@@ -206,6 +215,19 @@ struct x11_wayland {
 	int primary_new_text;
 	struct zwp_primary_selection_offer_v1 *primary;
 	int primary_text;
+
+	/*
+	 * The cursor: the serial of the pointer's last entering (a cursor is
+	 * set with it), the cursor surface and the buffer it shows (NULL: none
+	 * made yet), its hot spot, and the window whose cursor it is (NULL:
+	 * the arrow, of no window).
+	 */
+	uint32_t pointer_serial;
+	struct wl_surface *cursor_surface;
+	struct wl_buffer *cursor_buffer;
+	int cursor_hot_x;
+	int cursor_hot_y;
+	struct x11_surface *cursor_window;
 };
 
 static struct x11_surface *wayland_open(void *context, uint32_t id, const struct x11_surface_info *info);
@@ -269,17 +291,22 @@ static void wayland_primary_selection(void *data, struct zwp_primary_selection_d
 static void wayland_primary_type(void *data, struct zwp_primary_selection_offer_v1 *offer, const char *mime_type);
 static void wayland_primary_send(void *data, struct zwp_primary_selection_source_v1 *source, const char *mime_type, int32_t fd);
 static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_source_v1 *source);
+static void wayland_cursor(void *context, struct x11_surface *window, const struct x11_cursor_image *image);
+static int wayland_cursor_draw(struct x11_wayland *wayland, const uint32_t *pixels, int width, int height, int hot_x, int hot_y);
+static void wayland_cursor_arrow(struct x11_wayland *wayland);
+static void wayland_cursor_show(struct x11_wayland *wayland);
 
 /*
  * The backend's functions, which the core calls with the connection as
  * their context.  Wayland gives no client the pointer's place on the
  * screen, nor a way to move it or to keep it, nor a bell: those are NULL.
+ * The X cursor is shown.
  * A shape is the surface's input region alone, the same whichever way the
  * pixels are shown, so it asks nothing of the core's way (no flags).
  */
 const struct x11_backend_ops x11_wayland_ops = {
 	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
-	wayland_clipboard_read, NULL, NULL, NULL, NULL, NULL, 0U
+	wayland_clipboard_read, NULL, NULL, NULL, NULL, wayland_cursor, 0U
 };
 
 /* The registry's callbacks. */
@@ -538,6 +565,12 @@ x11_wayland_close(
 	/* The windows the core left open. */
 	while (wayland->windows != NULL)
 		wayland_close(wayland, wayland->windows);
+
+	/* The cursor's buffer and surface. */
+	if (wayland->cursor_buffer != NULL)
+		wl_buffer_destroy(wayland->cursor_buffer);
+	if (wayland->cursor_surface != NULL)
+		wl_surface_destroy(wayland->cursor_surface);
 
 	/* The input devices. */
 	if (wayland->keyboard != NULL)
@@ -819,9 +852,11 @@ wayland_close(
 		}
 	}
 
-	/* The pointer is no longer in it. */
+	/* The pointer is no longer in it, and its cursor is no window's. */
 	if (wayland->pointer_window == window)
 		wayland->pointer_window = NULL;
+	if (wayland->cursor_window == window)
+		wayland->cursor_window = NULL;
 
 	/* Its buffers (before the surface they are on), its roles and its surface. */
 	wayland_buffers_free(window);
@@ -1690,15 +1725,19 @@ wayland_pointer_enter(
 	struct x11_wayland *wayland;
 	struct x11_surface *window;
 
-	/* The desktop draws its own pointer over the window. */
-	wayland = data;
-	wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);
-
 	/* A surface that is not one of the windows is ignored. */
+	(void)pointer;
+	wayland = data;
 	window = wayland_window_of(wayland, surface);
 	wayland->pointer_window = window;
 	if (window == NULL)
 		return;
+
+	/* The window's cursor, else the arrow until the core tells it. */
+	wayland->pointer_serial = serial;
+	if (wayland->cursor_window != window)
+		wayland_cursor_arrow(wayland);
+	wayland_cursor_show(wayland);
 
 	/* The X window comes up, and the pointer is at its place on the root window. */
 	if (wayland->server != NULL)
@@ -2451,4 +2490,185 @@ wayland_primary_cancelled(
 	}
 	printf("X11 PRIMARY cancelled\n");
 	fflush(stdout);
+}
+
+/*
+ * Shows the cursor of an X window (the core's cursor function): its
+ * image, or the arrow for None and for a cursor without one.  It is
+ * shown at once when the pointer is over the window, and again when the
+ * pointer enters it.
+ */
+static void
+wayland_cursor(
+	void *context,
+	struct x11_surface *window,
+	const struct x11_cursor_image *image)
+{
+	struct x11_wayland *wayland;
+	int error;
+
+	/* The image, else the arrow. */
+	wayland = context;
+	error = EINVAL;
+	if (image != NULL && image->pixels != NULL && image->width > 0 && image->height > 0 &&
+	    image->width <= WAYLAND_CURSOR_MAX && image->height <= WAYLAND_CURSOR_MAX)
+		error = wayland_cursor_draw(wayland, image->pixels, image->width, image->height, image->hot_x, image->hot_y);
+	if (error != 0)
+		wayland_cursor_arrow(wayland);
+	wayland->cursor_window = window;
+
+	/* Shown when the pointer is over the window. */
+	if (wayland->pointer_window == window)
+		wayland_cursor_show(wayland);
+}
+
+/*
+ * Draws a cursor into a new buffer of the cursor surface: pixels of
+ * 0xAARRGGBB, not premultiplied (Wayland's ARGB8888 is), width by height,
+ * with its hot spot (kept inside the image).  The buffer shown before is
+ * let go.  Returns 0, or an errno value.
+ */
+static int
+wayland_cursor_draw(
+	struct x11_wayland *wayland,
+	const uint32_t *pixels,
+	int width,
+	int height,
+	int hot_x,
+	int hot_y)
+{
+	struct wl_shm_pool *pool;
+	struct wl_buffer *buffer;
+	uint32_t *memory;
+	uint32_t pixel;
+	uint32_t alpha;
+	char name[64];
+	size_t bytes;
+	size_t index;
+	int descriptor;
+	int error;
+
+	/* The cursor surface, once. */
+	if (wayland->cursor_surface == NULL) {
+		wayland->cursor_surface = wl_compositor_create_surface(wayland->compositor);
+		if (wayland->cursor_surface == NULL)
+			return ENOMEM;
+	}
+
+	/* Anonymous shared memory for the image. */
+	bytes = (size_t)width * (size_t)height * sizeof(uint32_t);
+	(void)snprintf(name, sizeof(name), "/xserver-%ld-cursor", (long)getpid());
+	descriptor = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (descriptor < 0)
+		return errno;
+	(void)shm_unlink(name);
+	error = ftruncate(descriptor, (off_t)bytes);
+	if (error != 0) {
+		(void)close(descriptor);
+		return EIO;
+	}
+	memory = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+	if (memory == MAP_FAILED) {
+		(void)close(descriptor);
+		return EIO;
+	}
+
+	/* The pixels, premultiplied. */
+	for (index = 0U; index < (size_t)width * (size_t)height; index++) {
+		pixel = pixels[index];
+		alpha = pixel >> 24;
+		memory[index] = (alpha << 24) |
+				((((pixel >> 16) & 0xFFU) * alpha + 127U) / 255U) << 16 |
+				((((pixel >> 8) & 0xFFU) * alpha + 127U) / 255U) << 8 |
+				(((pixel & 0xFFU) * alpha + 127U) / 255U);
+	}
+	(void)munmap(memory, bytes);
+
+	/* The buffer (the desktop keeps its own reference to the memory). */
+	pool = wl_shm_create_pool(wayland->shm, descriptor, (int32_t)bytes);
+	(void)close(descriptor);
+	if (pool == NULL)
+		return ENOMEM;
+	buffer = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_shm_pool_destroy(pool);
+	if (buffer == NULL)
+		return ENOMEM;
+
+	/* On the surface, in place of the one before. */
+	wl_surface_attach(wayland->cursor_surface, buffer, 0, 0);
+	wl_surface_damage(wayland->cursor_surface, 0, 0, width, height);
+	wl_surface_commit(wayland->cursor_surface);
+	if (wayland->cursor_buffer != NULL)
+		wl_buffer_destroy(wayland->cursor_buffer);
+	wayland->cursor_buffer = buffer;
+
+	/* Succeeded: its hot spot, inside it. */
+	if (hot_x < 0 || hot_x >= width)
+		hot_x = 0;
+	if (hot_y < 0 || hot_y >= height)
+		hot_y = 0;
+	wayland->cursor_hot_x = hot_x;
+	wayland->cursor_hot_y = hot_y;
+	return 0;
+}
+
+/*
+ * Draws the backend's own arrow (the pointer of a window with no X cursor
+ * of its own), black with a white inside, its hot spot at its tip.
+ */
+static void
+wayland_cursor_arrow(
+	struct x11_wayland *wayland)
+{
+	static const char *const rows[] = {
+		"X           ",
+		"XX          ",
+		"X.X         ",
+		"X..X        ",
+		"X...X       ",
+		"X....X      ",
+		"X.....X     ",
+		"X......X    ",
+		"X.......X   ",
+		"X........X  ",
+		"X.........X ",
+		"X......XXXXX",
+		"X...X..X    ",
+		"X..XX..X    ",
+		"X.X  X..X   ",
+		"XX   X..X   ",
+		"X     X..X  ",
+		"      X..X  ",
+		"       XX   "
+	};
+	uint32_t pixels[sizeof(rows) / sizeof(rows[0])][12];
+	unsigned row;
+	unsigned column;
+
+	/* The rows: X black, . white, the rest clear. */
+	for (row = 0U; row < sizeof(rows) / sizeof(rows[0]); row++) {
+		for (column = 0U; column < 12U; column++) {
+			pixels[row][column] = 0U;
+			if (rows[row][column] == 'X')
+				pixels[row][column] = 0xFF000000U;
+			if (rows[row][column] == '.')
+				pixels[row][column] = 0xFFFFFFFFU;
+		}
+	}
+
+	/* Drawn (without memory for it, the cursor stays as it was). */
+	(void)wayland_cursor_draw(wayland, &pixels[0][0], 12, (int)(sizeof(rows) / sizeof(rows[0])), 0, 0);
+}
+
+/* Shows the cursor surface as the pointer, with the serial of the last entering. */
+static void
+wayland_cursor_show(
+	struct x11_wayland *wayland)
+{
+	/* Only with a pointer and a cursor drawn. */
+	if (wayland->pointer == NULL || wayland->cursor_buffer == NULL)
+		return;
+	wl_pointer_set_cursor(wayland->pointer, wayland->pointer_serial, wayland->cursor_surface,
+			      wayland->cursor_hot_x, wayland->cursor_hot_y);
+	(void)wl_display_flush(wayland->display);
 }

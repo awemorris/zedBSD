@@ -65,8 +65,8 @@
 /*
  * A backend the X server can show its windows with: its name, the core's
  * table of its functions and the Vulkan instance extension its windows
- * are shown through (NULL: the core draws in memory and hands the
- * backend its pixels), and the functions the loop calls: open (0, or an
+ * are shown through (NULL: the core hands the backend its pixels), and
+ * the functions the loop calls: open (0, or an
  * errno value when this system has no such display), attach the core,
  * the descriptor to wait on, the dispatch of what came (0, or -1 when the
  * display is lost) and close.
@@ -103,10 +103,16 @@ static int child_send(void *context, const void *bytes, size_t size, size_t *sen
 static int child_start_server(void *context, struct x11_serve *serve);
 static uint32_t child_now(void);
 
-/* The backends, the first that opens chosen. */
+/*
+ * The backends, the first that opens chosen.  The Wayland backend's
+ * windows are never shown through a Vulkan swapchain: the program links
+ * the tree's Wayland client library, whose display the system's Vulkan
+ * drivers (built against the system's library) cannot use.  The core may
+ * still draw with Vulkan, and hands the backend the pixels.
+ */
 static const struct child_backend child_backends[] = {
 	{
-		"wayland", &x11_wayland_ops, X11_WAYLAND_WSI,
+		"wayland", &x11_wayland_ops, NULL,
 		child_wayland_open, child_wayland_attach, child_wayland_fd, child_wayland_dispatch, child_wayland_close
 	}
 };
@@ -129,7 +135,9 @@ mikuterm_x11_child(void)
 	int timeout;
 	int ready;
 	int lost;
+	int readable;
 	int flags;
+	int result;
 	int error;
 	int status;
 
@@ -141,7 +149,10 @@ mikuterm_x11_child(void)
 	child.link = STDIN_FILENO;
 	(void)mikuterm_folder_init();
 	flags = fcntl(child.link, F_GETFL);
-	if (flags < 0 || fcntl(child.link, F_SETFL, flags | O_NONBLOCK) < 0)
+	if (flags < 0)
+		return 1;
+	result = fcntl(child.link, F_SETFL, flags | O_NONBLOCK);
+	if (result < 0)
 		return 1;
 	(void)fcntl(child.link, F_SETFD, FD_CLOEXEC);
 	system.receive = child_receive;
@@ -204,7 +215,10 @@ mikuterm_x11_child(void)
 
 		/* The desktop's events (those already read, too); a lost desktop ends the server. */
 		if (child.backend != NULL) {
-			lost = child.kind->dispatch(child.backend, ready > 0 && (waits[CHILD_BACKEND].revents & POLLIN) != 0);
+			readable = 0;
+			if (ready > 0 && (waits[CHILD_BACKEND].revents & POLLIN) != 0)
+				readable = 1;
+			lost = child.kind->dispatch(child.backend, readable);
 			if (lost != 0) {
 				child.serve.ending = X11_SERVE_BROKEN;
 				break;
@@ -246,6 +260,7 @@ child_wayland_attach(
 	void *backend,
 	struct x11server *server)
 {
+	/* The core hears the desktop from now on. */
 	x11_wayland_attach(backend, server);
 }
 
@@ -256,6 +271,7 @@ child_wayland_fd(
 {
 	int descriptor;
 
+	/* The connection's socket. */
 	descriptor = x11_wayland_fd(backend);
 	return descriptor;
 }
@@ -268,6 +284,7 @@ child_wayland_dispatch(
 {
 	int lost;
 
+	/* The events, and the requests flushed. */
 	lost = x11_wayland_dispatch(backend, readable);
 	return lost;
 }
@@ -277,6 +294,7 @@ static void
 child_wayland_close(
 	void *backend)
 {
+	/* The windows, the globals and the connection go. */
 	x11_wayland_close(backend);
 }
 
@@ -338,9 +356,10 @@ child_send(
  * Starts the backend and the core: the first backend that opens, the
  * core rootless (each top-level X window a window of the desktop) at its
  * default size, or one window of the size the settings give, the core
- * fonts from mikuterm's folder, the windows drawn and shown through the
- * system's Vulkan (unless X11Render is cpu, or the backend has no Vulkan
- * surface), else drawn in memory.  Returns 0, or an errno value.
+ * fonts from mikuterm's folder, the windows drawn with the system's
+ * Vulkan (unless X11Render is cpu; without Vulkan the core draws in
+ * memory) and shown through the backend's swapchain or its present.
+ * Returns 0, or an errno value.
  */
 static int
 child_start_server(
@@ -377,8 +396,8 @@ child_start_server(
 	options.backend = child->kind->ops;
 	options.backend_context = child->backend;
 
-	/* The system's Vulkan loader, unless the processor is asked to draw. */
-	if ((serve->flags & X11_HOST_RENDER_CPU) == 0U && child->kind->vulkan_wsi != NULL) {
+	/* The system's Vulkan loader, unless the processor is asked to draw; the backend's swapchain where it has one. */
+	if ((serve->flags & X11_HOST_RENDER_CPU) == 0U) {
 		options.vulkan_loader = (x11server_vulkan_function)vkGetInstanceProcAddr;
 		options.vulkan_wsi = child->kind->vulkan_wsi;
 	}
