@@ -187,6 +187,80 @@ x11_window_root(
 }
 
 /*
+ * Makes a window of the server's own (owned by no client): an unmapped
+ * 1x1 InputOnly child of the root window, under its other children, at an
+ * id no client chooses.  The window manager names it in EWMH's
+ * _NET_SUPPORTING_WM_CHECK.  Returns 0, or an errno value.
+ */
+int
+x11_window_server_child(
+	struct x11server *server,
+	uint32_t id)
+{
+	struct x11_window *window;
+	int error;
+
+	/* The server holds the window's memory. */
+	error = x11_memory_charge(server, X11_NO_CLIENT, sizeof(*window));
+	if (error != 0)
+		return error;
+
+	/* The window, off the screen. */
+	window = calloc(1U, sizeof(*window));
+	if (window == NULL) {
+		x11_memory_release(server, X11_NO_CLIENT, sizeof(*window));
+		return ENOMEM;
+	}
+	window->id = id;
+	window->owner = X11_NO_CLIENT;
+	window->window_class = X11_INPUT_ONLY;
+	window->win_gravity = GRAVITY_NORTH_WEST;
+	window->colormap = X11_COLORMAP_XID;
+	window->x = -100;
+	window->y = -100;
+	window->width = 1U;
+	window->height = 1U;
+
+	/* Found by its id. */
+	error = x11_resource_add(server, id, X11_RESOURCE_WINDOW, window);
+	if (error != 0) {
+		free(window);
+		x11_memory_release(server, X11_NO_CLIENT, sizeof(*window));
+		return error;
+	}
+
+	/* Succeeded: at the bottom of the root window's children. */
+	window_link(server->root, window, server->root->first_child);
+	return 0;
+}
+
+/*
+ * Maps a window for the window manager (a minimized window brought back),
+ * as its owner's MapWindow would.
+ */
+void
+x11_window_map(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	/* Succeeded: mapped, its clients told. */
+	window_map(server, window->owner, window);
+}
+
+/*
+ * Unmaps a window for the window manager (a window minimized), as
+ * UnmapWindow would.
+ */
+void
+x11_window_unmap(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	/* Succeeded: unmapped, its clients told. */
+	window_unmap(server, window, 0);
+}
+
+/*
  * Returns the window of an id, or NULL.
  */
 struct x11_window *
@@ -1751,6 +1825,7 @@ window_map(
 	struct x11_client *client;
 	uint8_t event[32];
 	unsigned redirect;
+	int iconic;
 
 	/* Mapped already, or the root window. */
 	if (window->mapped || window->parent == NULL)
@@ -1780,6 +1855,11 @@ window_map(
 		window->border = 0U;
 		window_configure_notify(server, window);
 	}
+
+	/* The window manager keeps a top-level window that starts minimized (ICCCM's Iconic) unmapped. */
+	iconic = x11_wm_map(server, window);
+	if (iconic)
+		return;
 
 	/* Mapped (what is seen of its tree kept first), and told. */
 	x11_draw_begin(server, window, NULL);
@@ -1819,8 +1899,11 @@ window_unmap(
 	/* What was under it is painted and exposed (a top-level window's pixels go). */
 	x11_draw_end(server);
 
-	/* Succeeded: the focus in it reverts, and the grabs on it end. */
+	/* The focus in it reverts, and the grabs on it end. */
 	x11_input_window_hidden(server, window);
+
+	/* Succeeded: the window manager hears that a top-level window left the screen. */
+	x11_wm_unmapped(server, window);
 }
 
 /* Tells a window's and its parent's clients the window's configuration. */

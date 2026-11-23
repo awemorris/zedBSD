@@ -42,6 +42,12 @@ static void window_sized(struct x11_surface *surface, WPARAM kind);
 static void window_post_report(struct x11_surface *surface);
 static void window_report(struct x11_surface *surface);
 static void window_dpi_changed(struct x11_surface *surface, WPARAM wparam, const RECT *suggested);
+static int window_limited(const struct x11_surface *surface);
+static void window_frame(const struct x11_surface *surface, LONG *width, LONG *height);
+static void window_min_max(struct x11_surface *surface, MINMAXINFO *limits);
+static void window_sizing(struct x11_surface *surface, WPARAM edge, RECT *outer);
+static void window_set_state(struct x11_surface *surface, unsigned state);
+static void window_fullscreen(struct x11_surface *surface, int on);
 static void window_paint(struct x11_surface *surface);
 static int window_dib(struct x11_surface *surface, unsigned width, unsigned height);
 static void window_dib_free(struct x11_surface *surface);
@@ -137,6 +143,7 @@ win32_surface_open(
 	surface->reported_height = info->height;
 	surface->flags = info->flags;
 	surface->owner = info->owner;
+	surface->hints = info->hints;
 
 	/* A menu without an owner stays above the window the pointer is in. */
 	if (surface->owner == NULL && surface->kind == X11_SURFACE_POPUP)
@@ -164,15 +171,23 @@ win32_surface_open(
 	/* Gives it its title. */
 	window_set_title(surface, info->title);
 
-	/* Shows it: a menu without taking the focus, a top-level window as asked. */
+	/* Shows it: a menu without taking the focus, a top-level window as asked (maximized, minimized). */
 	show = SW_SHOWNORMAL;
 	if (surface->kind == X11_SURFACE_POPUP)
 		show = SW_SHOWNOACTIVATE;
+	if (surface->kind == X11_SURFACE_TOPLEVEL && (surface->flags & X11_SURFACE_MAXIMIZED) != 0) {
+		show = SW_SHOWMAXIMIZED;
+		surface->state |= X11_SURFACE_MAXIMIZED;
+	}
 	if ((surface->flags & X11_SURFACE_ICONIC) != 0) {
 		show = SW_SHOWMINNOACTIVE;
 		surface->iconic = 1;
 	}
 	ShowWindow(surface->hwnd, show);
+
+	/* Full-screen when the client asked before it mapped the window. */
+	if (surface->kind == X11_SURFACE_TOPLEVEL && (surface->flags & X11_SURFACE_FULLSCREEN) != 0)
+		window_fullscreen(surface, 1);
 
 	/* Succeeded: the core holds the surface. */
 	win32_log(backend, "X11 WIN32 open window=0x%lx kind=%u at %ld,%ld %ldx%ld", (unsigned long)window, surface->kind,
@@ -219,6 +234,14 @@ win32_surface_update(
 	/* Gives it its new owner. */
 	if ((changed & X11_SURFACE_CHANGED_OWNER) != 0)
 		window_set_owner(surface, info->owner);
+
+	/* Keeps the new limits on its size from the next sizing on. */
+	if ((changed & X11_SURFACE_CHANGED_HINTS) != 0)
+		surface->hints = info->hints;
+
+	/* Maximizes it or makes it full-screen, or back, as the client asked (EWMH's _NET_WM_STATE). */
+	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0 && surface->kind == X11_SURFACE_TOPLEVEL)
+		window_set_state(surface, info->flags & (X11_SURFACE_MAXIMIZED | X11_SURFACE_FULLSCREEN));
 
 	/* Minimizes or restores it as the client asked (ICCCM's WM_CHANGE_STATE). */
 	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0) {
@@ -401,6 +424,18 @@ window_message(
 		return 0;
 	case WM_SIZE:
 		window_sized(surface, wparam);
+		return 0;
+	case WM_GETMINMAXINFO:
+		/* The limits the X client put on its window's size (WM_NORMAL_HINTS). */
+		window_min_max(surface, (MINMAXINFO *)lparam);
+		return 0;
+	case WM_SIZING:
+		/* The size the user drags to, brought within those limits (a terminal's whole cells). */
+		window_sizing(surface, wparam, (RECT *)lparam);
+		return TRUE;
+	case WM_CAPTURECHANGED:
+		/* Another program taking the pointer ends an X client's grab. */
+		win32_input_capture_changed(surface, (HWND)lparam);
 		return 0;
 	case WM_MOVE:
 		window_post_report(surface);
@@ -620,8 +655,9 @@ window_set_owner(
 
 /*
  * Follows a window's change of size or state: minimized and restored are
- * ICCCM's Iconic and Normal states, which the core is told of; a size the
- * user gave is told to the core once, in X's pixels.
+ * ICCCM's Iconic and Normal states, maximized and full-screen EWMH's,
+ * which the core is told of; a size the user gave is told to the core
+ * once, in X's pixels.
  */
 static void
 window_sized(
@@ -629,6 +665,7 @@ window_sized(
 	WPARAM kind)
 {
 	struct x11_win32 *backend;
+	unsigned state;
 
 	/* Minimized: the window becomes Iconic. */
 	backend = surface->backend;
@@ -636,16 +673,26 @@ window_sized(
 		if (!surface->iconic) {
 			surface->iconic = 1;
 			if (backend->server != NULL)
-				x11server_backend_state(backend->server, surface->window, 1);
+				x11server_backend_state(backend->server, surface->window, (int)(X11_SURFACE_ICONIC | surface->state));
 		}
 		return;
 	}
 
-	/* Restored: the window is Normal again. */
-	if (surface->iconic) {
+	/* Maximized or not; a full-screen window keeps its state, whatever Windows calls its size. */
+	if ((surface->state & X11_SURFACE_FULLSCREEN) != 0U) {
+		state = surface->state;
+	} else if (kind == SIZE_MAXIMIZED) {
+		state = X11_SURFACE_MAXIMIZED;
+	} else {
+		state = 0U;
+	}
+
+	/* Restored, or another state: the window is Normal, and the core hears its state. */
+	if (surface->iconic || state != surface->state) {
 		surface->iconic = 0;
+		surface->state = state;
 		if (backend->server != NULL)
-			x11server_backend_state(backend->server, surface->window, 0);
+			x11server_backend_state(backend->server, surface->window, (int)state);
 	}
 
 	/* The size the user gave is told from the loop (not from within a call of the core's). */
@@ -742,6 +789,243 @@ window_dpi_changed(
 	AdjustWindowRectExForDpi(&outer, style, FALSE, extended, HIWORD(wparam));
 	SetWindowPos(surface->hwnd, NULL, suggested->left, suggested->top, outer.right - outer.left,
 	    outer.bottom - outer.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+/* Tells whether the X client put any limit on its window's size. */
+static int
+window_limited(
+	const struct x11_surface *surface)
+{
+	const struct x11_size_hints *hints;
+
+	/* A menu, or a window filling the screen, is not limited. */
+	hints = &surface->hints;
+	if (surface->kind != X11_SURFACE_TOPLEVEL)
+		return 0;
+	if ((surface->state & X11_SURFACE_FULLSCREEN) != 0)
+		return 0;
+
+	/* Any field set. */
+	if (hints->min_width != 0 || hints->min_height != 0)
+		return 1;
+	if (hints->max_width != 0 || hints->max_height != 0)
+		return 1;
+	if (hints->width_inc > 1 || hints->height_inc > 1)
+		return 1;
+	if (hints->min_aspect_x != 0 || hints->max_aspect_x != 0)
+		return 1;
+
+	/* None. */
+	return 0;
+}
+
+/* Gives the width and height the window's frame adds to its client area, at the window's DPI. */
+static void
+window_frame(
+	const struct x11_surface *surface,
+	LONG *width,
+	LONG *height)
+{
+	RECT outer;
+	DWORD style;
+	DWORD extended;
+	UINT dpi;
+
+	/* An empty client area with the frame around it. */
+	style = (DWORD)GetWindowLongPtrW(surface->hwnd, GWL_STYLE);
+	extended = (DWORD)GetWindowLongPtrW(surface->hwnd, GWL_EXSTYLE);
+	dpi = GetDpiForWindow(surface->hwnd);
+	if (dpi == 0)
+		dpi = USER_DEFAULT_SCREEN_DPI;
+	outer.left = 0;
+	outer.top = 0;
+	outer.right = 0;
+	outer.bottom = 0;
+	AdjustWindowRectExForDpi(&outer, style, FALSE, extended, dpi);
+
+	/* Succeeded: the frame's size. */
+	*width = outer.right - outer.left;
+	*height = outer.bottom - outer.top;
+}
+
+/*
+ * Gives Windows the smallest and largest size of a window
+ * (WM_GETMINMAXINFO): the X client's limits, scaled, with the frame.
+ */
+static void
+window_min_max(
+	struct x11_surface *surface,
+	MINMAXINFO *limits)
+{
+	struct x11_win32 *backend;
+	LONG frame_width;
+	LONG frame_height;
+	int limited;
+
+	/* No limits to give. */
+	limited = window_limited(surface);
+	if (!limited)
+		return;
+
+	/* The frame around the client area. */
+	backend = surface->backend;
+	window_frame(surface, &frame_width, &frame_height);
+
+	/* The smallest size. */
+	if (surface->hints.min_width != 0)
+		limits->ptMinTrackSize.x = (LONG)x11_win32_scale_size(surface->hints.min_width, backend->scale) + frame_width;
+	if (surface->hints.min_height != 0)
+		limits->ptMinTrackSize.y = (LONG)x11_win32_scale_size(surface->hints.min_height, backend->scale) + frame_height;
+
+	/* The largest size, dragged to or maximized. */
+	if (surface->hints.max_width != 0) {
+		limits->ptMaxTrackSize.x = (LONG)x11_win32_scale_size(surface->hints.max_width, backend->scale) + frame_width;
+		limits->ptMaxSize.x = limits->ptMaxTrackSize.x;
+	}
+	if (surface->hints.max_height != 0) {
+		limits->ptMaxTrackSize.y = (LONG)x11_win32_scale_size(surface->hints.max_height, backend->scale) + frame_height;
+		limits->ptMaxSize.y = limits->ptMaxTrackSize.y;
+	}
+}
+
+/*
+ * Brings the size the user drags a window to within the X client's limits
+ * (WM_SIZING): the client area in X's pixels goes through the core's rule
+ * (whole steps, ratio, smallest and largest), and the edge being dragged
+ * moves to fit.
+ */
+static void
+window_sizing(
+	struct x11_surface *surface,
+	WPARAM edge,
+	RECT *outer)
+{
+	struct x11_win32 *backend;
+	LONG frame_width;
+	LONG frame_height;
+	LONG client_width;
+	LONG client_height;
+	LONG width;
+	LONG height;
+	unsigned x_width;
+	unsigned x_height;
+	int limited;
+
+	/* No limits to keep. */
+	limited = window_limited(surface);
+	if (!limited)
+		return;
+
+	/* The client area being dragged to, in X's pixels. */
+	backend = surface->backend;
+	window_frame(surface, &frame_width, &frame_height);
+	client_width = outer->right - outer->left - frame_width;
+	client_height = outer->bottom - outer->top - frame_height;
+	if (client_width < 1)
+		client_width = 1;
+	if (client_height < 1)
+		client_height = 1;
+	x_width = window_x_size((unsigned)client_width, backend->scale);
+	x_height = window_x_size((unsigned)client_height, backend->scale);
+
+	/* Within the limits, back on the screen. */
+	x11server_size_hints_apply(&surface->hints, &x_width, &x_height);
+	width = (LONG)x11_win32_scale_size(x_width, backend->scale) + frame_width;
+	height = (LONG)x11_win32_scale_size(x_height, backend->scale) + frame_height;
+
+	/* The left or the right edge, as dragged. */
+	if (edge == WMSZ_LEFT || edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT) {
+		outer->left = outer->right - width;
+	} else {
+		outer->right = outer->left + width;
+	}
+
+	/* The top or the bottom edge, as dragged. */
+	if (edge == WMSZ_TOP || edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) {
+		outer->top = outer->bottom - height;
+	} else {
+		outer->bottom = outer->top + height;
+	}
+}
+
+/*
+ * Maximizes a window or makes it full-screen, or brings it back, as the X
+ * client asked (X11_SURFACE_MAXIMIZED, FULLSCREEN).
+ */
+static void
+window_set_state(
+	struct x11_surface *surface,
+	unsigned state)
+{
+	/* The same state. */
+	if (state == surface->state)
+		return;
+
+	/* Full-screen first: it covers the monitor whatever else is asked. */
+	if ((state & X11_SURFACE_FULLSCREEN) != 0 && (surface->state & X11_SURFACE_FULLSCREEN) == 0) {
+		window_fullscreen(surface, 1);
+		surface->state = state;
+		return;
+	}
+	if ((state & X11_SURFACE_FULLSCREEN) == 0 && (surface->state & X11_SURFACE_FULLSCREEN) != 0)
+		window_fullscreen(surface, 0);
+
+	/* Succeeded: maximized, or restored. */
+	surface->state = state;
+	if ((state & X11_SURFACE_MAXIMIZED) != 0) {
+		ShowWindow(surface->hwnd, SW_MAXIMIZE);
+	} else {
+		ShowWindow(surface->hwnd, SW_RESTORE);
+	}
+}
+
+/*
+ * Makes a window cover its monitor without a frame (on nonzero), keeping
+ * its style and place to go back to, or brings it back (on 0).
+ */
+static void
+window_fullscreen(
+	struct x11_surface *surface,
+	int on)
+{
+	HMONITOR monitor;
+	MONITORINFO information;
+	LONG_PTR style;
+	BOOL found;
+
+	/* Back to the framed window it was. */
+	if (!on) {
+		if ((surface->state & X11_SURFACE_FULLSCREEN) == 0)
+			return;
+		surface->state &= ~X11_SURFACE_FULLSCREEN;
+		SetWindowLongPtrW(surface->hwnd, GWL_STYLE, surface->windowed_style);
+		SetWindowPos(surface->hwnd, NULL, surface->windowed_rect.left, surface->windowed_rect.top,
+		    surface->windowed_rect.right - surface->windowed_rect.left,
+		    surface->windowed_rect.bottom - surface->windowed_rect.top,
+		    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		return;
+	}
+
+	/* The monitor the window is on. */
+	monitor = MonitorFromWindow(surface->hwnd, MONITOR_DEFAULTTONEAREST);
+	information.cbSize = sizeof(information);
+	found = GetMonitorInfoW(monitor, &information);
+	if (!found)
+		return;
+
+	/* The style and place to go back to. */
+	surface->windowed_style = GetWindowLongPtrW(surface->hwnd, GWL_STYLE);
+	GetWindowRect(surface->hwnd, &surface->windowed_rect);
+	surface->state |= X11_SURFACE_FULLSCREEN;
+
+	/* Succeeded: no frame, the whole monitor. */
+	style = surface->windowed_style & ~(LONG_PTR)WS_OVERLAPPEDWINDOW;
+	style |= WS_POPUP;
+	SetWindowLongPtrW(surface->hwnd, GWL_STYLE, style);
+	SetWindowPos(surface->hwnd, HWND_TOP, information.rcMonitor.left, information.rcMonitor.top,
+	    information.rcMonitor.right - information.rcMonitor.left,
+	    information.rcMonitor.bottom - information.rcMonitor.top,
+	    SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 /* Paints the part of a window Windows asks for from the DIB (black before any pixels). */
