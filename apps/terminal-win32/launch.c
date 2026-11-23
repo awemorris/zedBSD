@@ -25,6 +25,9 @@
 /* The longest text of the note over the hosts, in lines, shown on the screen. */
 #define LAUNCH_NOTICE_LINES	6U
 
+/* The most lines the message over the prompt is wrapped into. */
+#define LAUNCH_STATUS_LINES	3U
+
 /* What starts and ends a paste the terminal brackets (CSI 200 ~, CSI 201 ~). */
 #define LAUNCH_PASTE_START	"200"
 #define LAUNCH_PASTE_END	"201"
@@ -55,10 +58,12 @@ static unsigned launch_put_cells(struct launch_writer *writer, const char *text,
 static void launch_pad(struct launch_writer *writer, unsigned cells);
 static unsigned launch_cells(const char *text, size_t size);
 static unsigned launch_notice_lines(const char *notice);
+static size_t launch_wrap(const char *text, size_t size, unsigned cells);
 static unsigned launch_row_width(const struct launch_row *row);
 static void launch_draw_row(struct launch_writer *writer, const struct launch_screen *screen, unsigned index, unsigned width, unsigned budget);
 static void launch_trim(const char **start, const char **end);
 static int launch_blank(char character);
+static int launch_ipv4(const char *text, size_t size);
 static size_t launch_utf8(unsigned long codepoint, char *bytes);
 static void launch_text_add(char *text, size_t text_size, size_t *length, const char *bytes, size_t size);
 
@@ -300,6 +305,8 @@ launch_draw(
 	const char *end;
 	unsigned budget;
 	unsigned notice_lines;
+	unsigned status_lines;
+	unsigned status_cells;
 	unsigned fixed;
 	unsigned shown;
 	unsigned first;
@@ -309,6 +316,8 @@ launch_draw(
 	unsigned line_cells;
 	unsigned skip;
 	size_t offset;
+	size_t length;
+	size_t taken;
 
 	/* The text from the start; a row ends before the last column. */
 	writer.out = out;
@@ -356,7 +365,13 @@ launch_draw(
 	launch_put(&writer, "\r\n");
 
 	/* As many rows as the grid has room for, round the chosen one. */
-	fixed = 2U + notice_lines + 1U + 1U + 1U;
+	status_cells = launch_cells(screen->status, strlen(screen->status));
+	status_lines = 1U;
+	if (status_cells > budget)
+		status_lines = (status_cells + budget - 1U) / budget;
+	if (status_lines > LAUNCH_STATUS_LINES)
+		status_lines = LAUNCH_STATUS_LINES;
+	fixed = 2U + notice_lines + 1U + status_lines + 1U;
 	if (notice_lines != 0U)
 		fixed++;
 	shown = 1U;
@@ -385,11 +400,20 @@ launch_draw(
 		launch_put(&writer, "\r\n");
 	}
 
-	/* The message, in yellow, on the line over the prompt (blank when none). */
-	if (screen->status[0] != '\0') {
+	/* The message, in yellow, over the prompt, wrapped at its spaces (blank when none). */
+	offset = 0U;
+	length = strlen(screen->status);
+	for (index = 0U; index < status_lines && offset < length; index++) {
+		/* One line's words, and the spaces after them passed over. */
+		if (index != 0U)
+			launch_put(&writer, "\r\n");
+		taken = launch_wrap(screen->status + offset, length - offset, budget);
 		launch_put(&writer, "\033[33m");
-		(void)launch_put_cells(&writer, screen->status, strlen(screen->status), budget);
+		(void)launch_put_cells(&writer, screen->status + offset, taken, budget);
 		launch_put(&writer, "\033[0m");
+		offset += taken;
+		while (offset < length && screen->status[offset] == ' ')
+			offset++;
 	}
 
 	/* The message's line ends, empty or not. */
@@ -978,6 +1002,48 @@ launch_notice_lines(
 	return lines;
 }
 
+/*
+ * Tells how many bytes of a text (size bytes) go on a line of so many
+ * cells: all of it when it fits, else up to the last space that fits (the
+ * space left for the next line), or as many characters as fit when no
+ * space does.
+ */
+static size_t
+launch_wrap(
+	const char *text,
+	size_t size,
+	unsigned cells)
+{
+	size_t index;
+	size_t space;
+	unsigned used;
+
+	/* The characters that fit, and the last space among them. */
+	used = 0U;
+	space = 0U;
+	for (index = 0U; index < size; index++) {
+		/* A byte that starts a character takes a cell; one more than fits ends the line. */
+		if (((unsigned char)text[index] & 0xc0U) == 0x80U)
+			continue;
+		if (used == cells)
+			break;
+		if (text[index] == ' ')
+			space = index;
+		used++;
+	}
+
+	/* All of it fits. */
+	if (index == size)
+		return size;
+
+	/* Up to the last space, or else the characters that fit. */
+	if (space != 0U)
+		return space;
+
+	/* Succeeded: as many characters as fit. */
+	return index;
+}
+
 /* Tells how many cells a row's "[key] label" takes. */
 static unsigned
 launch_row_width(
@@ -1047,6 +1113,66 @@ launch_draw_row(
 	}
 }
 
+/*
+ * Writes the first IPv4 address of a text into address (size bytes with
+ * its NUL, at least LAUNCH_IPV4_MAX): the words of "hostname -I" (the
+ * addresses separated by blanks), the first in dotted form that is not a
+ * loopback (127.x.x.x).  Returns 0, or ENOENT when there is none.
+ */
+int
+launch_first_ipv4(
+	const char *text,
+	char *address,
+	size_t size)
+{
+	size_t start;
+	size_t end;
+	size_t length;
+	int blank;
+	int valid;
+	int loopback;
+
+	/* Each word in turn. */
+	address[0] = '\0';
+	start = 0U;
+	while (text[start] != '\0') {
+		/* Blanks and line breaks between the words are passed over. */
+		blank = launch_blank(text[start]);
+		if (blank || text[start] == '\n') {
+			start++;
+			continue;
+		}
+
+		/* The word, up to the next blank or line break. */
+		end = start;
+		while (text[end] != '\0' && text[end] != '\n') {
+			/* A blank ends the word. */
+			blank = launch_blank(text[end]);
+			if (blank)
+				break;
+			end++;
+		}
+		length = end - start;
+
+		/* An IPv4 address that fits and is not on the loopback is the answer. */
+		valid = launch_ipv4(text + start, length);
+		loopback = 0;
+		if (length >= 4U && strncmp(text + start, "127.", 4U) == 0)
+			loopback = 1;
+		if (valid && !loopback && length < size) {
+			memcpy(address, text + start, length);
+			address[length] = '\0';
+			return 0;
+		}
+
+		/* The next word. */
+		start = end;
+	}
+
+	/* No address. */
+	return ENOENT;
+}
+
 /* Moves the start of a text past its blanks and its end back before them (spaces, tabs, CRs). */
 static void
 launch_trim(
@@ -1089,6 +1215,49 @@ launch_blank(
 
 	/* Anything else is text. */
 	return 0;
+}
+
+/* Tells whether a text (size bytes) is an IPv4 address in dotted form, four numbers of 0 to 255 (1), or not (0). */
+static int
+launch_ipv4(
+	const char *text,
+	size_t size)
+{
+	size_t index;
+	unsigned parts;
+	unsigned digits;
+	unsigned value;
+
+	/* Each character: digits, and a dot between the numbers. */
+	parts = 1U;
+	digits = 0U;
+	value = 0U;
+	for (index = 0U; index < size; index++) {
+		/* A dot ends a number that has digits. */
+		if (text[index] == '.') {
+			if (digits == 0U || parts == 4U)
+				return 0;
+			parts++;
+			digits = 0U;
+			value = 0U;
+			continue;
+		}
+
+		/* A digit, three at most, the number at most 255. */
+		if (text[index] < '0' || text[index] > '9')
+			return 0;
+		value = value * 10U + (unsigned)(text[index] - '0');
+		digits++;
+		if (digits > 3U || value > 255U)
+			return 0;
+	}
+
+	/* Four numbers, the last with digits. */
+	if (parts != 4U || digits == 0U)
+		return 0;
+
+	/* An address. */
+	return 1;
 }
 
 /* Writes a character's UTF-8 bytes (one to four); returns how many. */

@@ -47,7 +47,7 @@
 #define CONF_CONNECT_TIMEOUT	15U
 
 /* The port of the sshd in WSL a distribution is reached on, when ssh\config has no Host for it. */
-#define CONF_WSL_PORT		2222U
+#define CONF_WSL_PORT		22U
 
 /* The longest wait for a connection the settings may ask, in seconds. */
 #define CONF_CONNECT_TIMEOUT_MAX	3600U
@@ -148,7 +148,7 @@ mikuterm_conf_defaults(
 	conf->theme = TERMINAL_THEME_DARK;
 	conf->ambiguous_wide = 0;
 
-	/* The connections: xterm's TERM, the list of hosts first, a selection copied, 15 seconds to connect, WSL's sshd on 2222. */
+	/* The connections: xterm's TERM, the list of hosts first, a selection copied, 15 seconds to connect, WSL's sshd on its own port 22. */
 	(void)conf_copy(conf->term, sizeof(conf->term), CONF_TERM);
 	conf->connect[0] = '\0';
 	conf->copy_on_select = 1;

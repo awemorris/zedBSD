@@ -178,8 +178,16 @@ int mikuterm_font(char *path, size_t size, const char *name);
 /* The View menu's settings kept in state.conf (settings-file.c). */
 void mikuterm_settings_defaults(const struct mikuterm_conf *conf);
 
-/* wsl.exe, for WSL's distributions (wsl.c). */
+/* What listens on a port of localhost (mikuterm_port_listener): nothing, WSL's forwarding, another program, one not known. */
+#define MIKUTERM_LISTENER_NONE		0U
+#define MIKUTERM_LISTENER_WSL		1U
+#define MIKUTERM_LISTENER_WINDOWS	2U
+#define MIKUTERM_LISTENER_UNKNOWN	3U
+
+/* wsl.exe, for WSL's distributions, and what of Windows decides where a distribution is reached (wsl.c). */
 int mikuterm_wsl_run(const char *arguments, unsigned milliseconds, int (*stop)(void *data), void *data, unsigned char *output, size_t capacity, size_t *size, unsigned long *code);
+int mikuterm_windows_address(const char *address);
+unsigned mikuterm_port_listener(unsigned port, char *name, size_t size);
 
 /* The tabs' connections (connection-ssh.c, ssh-thread.c). */
 void mikuterm_connector_init(struct mikuterm_connector *connector, const struct mikuterm_connect_options *options);

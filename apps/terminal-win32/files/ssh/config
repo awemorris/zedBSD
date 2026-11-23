@@ -12,10 +12,12 @@
 #	# X11Forwarding yes and xauth):
 #	ForwardX11 yes
 #
-# WSL: run sshd inside WSL on a port of its own (for example 2222) and
-# connect to it through WSL's localhost forwarding:
+# WSL: [w] on a new tab's screen connects to a distribution's own sshd
+# (port 22) without anything here.  A Host named wsl-<name> changes how one
+# distribution is reached, for example when its sshd listens on another
+# port (WSL's mirrored networking with Windows' own sshd on 22).  Without a
+# HostName, mikuterm finds the distribution's address each time:
 #
-#Host wsl
-#	HostName 127.0.0.1
+#Host wsl-Ubuntu-24.04
 #	Port 2222
 #	User me
