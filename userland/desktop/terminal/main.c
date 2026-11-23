@@ -166,8 +166,8 @@ struct main_page {
 
 /*
  * The Host names of an ssh_config a check reads it for: so many of them
- * (the first MAIN_CHECK_HOSTS kept).  One for a check, on its stack's
- * caller's heap.
+ * (the first MAIN_CHECK_HOSTS kept).  One for each check, on the heap for
+ * that check alone (it is too large for a small stack).
  */
 struct main_check_names {
 	char names[MAIN_CHECK_HOSTS][MAIN_CHECK_NAME];
