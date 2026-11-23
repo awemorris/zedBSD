@@ -1945,8 +1945,9 @@ render_create_cursor(
 }
 
 /*
- * CreateAnimCursor: a cursor of frames (each a cursor and how long it is
- * shown).  The server shows the first frame and does not move on.
+ * CreateAnimCursor: a cursor of frames (each a cursor that is not
+ * animated, and how long it is shown, in milliseconds), which the cursor
+ * shown moves through (cursor.c).
  */
 static unsigned
 render_create_anim_cursor(
@@ -1955,7 +1956,7 @@ render_create_anim_cursor(
 	const uint8_t *request,
 	size_t length)
 {
-	struct x11_cursor *first;
+	struct x11_cursor_frame *frames;
 	struct x11_cursor *frame;
 	size_t count;
 	size_t at;
@@ -1970,18 +1971,26 @@ render_create_anim_cursor(
 	if (count == 0U)
 		return X11_BAD_VALUE;
 
-	/* Every frame's cursor exists. */
-	first = NULL;
+	/* Every frame's cursor exists, and is not animated itself (BadMatch, as X.Org's). */
 	for (at = 0U; at < count; at++) {
 		frame = x11_cursor_find(server, x11_read32(request + 8U + at * 8U, msb));
 		if (frame == NULL)
 			return X11_BAD_CURSOR;
-		if (first == NULL)
-			first = frame;
+		if (frame->frames != NULL)
+			return X11_BAD_MATCH;
 	}
 
-	/* The cursor, as its first frame. */
-	code = x11_cursor_create_copy(server, index, x11_read32(request + 4, msb), first);
+	/* The frames: each cursor and its delay. */
+	frames = calloc(count, sizeof(*frames));
+	if (frames == NULL)
+		return X11_BAD_ALLOC;
+	for (at = 0U; at < count; at++) {
+		frames[at].cursor = x11_cursor_find(server, x11_read32(request + 8U + at * 8U, msb));
+		frames[at].delay = x11_read32(request + 12U + at * 8U, msb);
+	}
+
+	/* The cursor, which takes the frames. */
+	code = x11_cursor_create_anim(server, index, x11_read32(request + 4, msb), frames, count);
 	if (code != 0U)
 		return code;
 
