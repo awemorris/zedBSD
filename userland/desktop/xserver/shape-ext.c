@@ -283,10 +283,12 @@ x11_shape_clip_window(
 	struct x11_region *clip)
 {
 	struct x11_region shaped;
+	int shaped_window;
 	int error;
 
 	/* Unshaped. */
-	if (!x11_shape_has(window))
+	shaped_window = x11_shape_has(window);
+	if (!shaped_window)
 		return 0;
 
 	/* The effective region of the part asked for. */

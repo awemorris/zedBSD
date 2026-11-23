@@ -1660,7 +1660,9 @@ sync_alarm_fire(
 
 	/* A comparison that never stops holding by itself ends the alarm. */
 	fired_at = alarm->test_value;
-	if (alarm->delta == 0 && (alarm->test_type == SYNC_POSITIVE_COMPARISON || alarm->test_type == SYNC_NEGATIVE_COMPARISON))
+	if (alarm->delta == 0 &&
+	    (alarm->test_type == SYNC_POSITIVE_COMPARISON ||
+	     alarm->test_type == SYNC_NEGATIVE_COMPARISON))
 		alarm->state = SYNC_ALARM_INACTIVE;
 
 	/* The test value moves on until the condition no longer holds. */

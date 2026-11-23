@@ -26,6 +26,15 @@
  * a minimized window being withdrawn).  The root window names the hints
  * this window manager keeps (_NET_SUPPORTED) and its own window
  * (_NET_SUPPORTING_WM_CHECK).
+ *
+ * It also gives the surface the window's icon (_NET_WM_ICON), its shape
+ * (SHAPE's bounding region, from shape-ext.c) and its request for the
+ * user's attention (WM_HINTS's urgency, _NET_WM_STATE_DEMANDS_ATTENTION,
+ * which ends when the window is activated); asks the system to bring a
+ * window to the front when a client sends _NET_ACTIVE_WINDOW; says the
+ * size of the system's frame (_NET_FRAME_EXTENTS, also when a client asks
+ * before it maps a window); and resizes a window in step with its
+ * client's drawing (_NET_WM_SYNC_REQUEST and the client's SYNC counter).
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -936,6 +945,10 @@ x11_wm_sync_configure(
 		window->sync_height = height;
 		return 1;
 	}
+
+	/* A move alone needs no drawing: given at once. */
+	if (width == (int)window->width && height == (int)window->height)
+		return 0;
 
 	/* Succeeded: the client is asked, then given the size. */
 	wm_sync_request(server, window);

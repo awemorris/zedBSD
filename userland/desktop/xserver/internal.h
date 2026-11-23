@@ -23,8 +23,9 @@
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
  * wm.c is the top-level windows' window manager (ICCCM and EWMH),
- * and keymap.c, glyphs.c and glx.c are the US keyboard map, the core font
- * and the GLX extension.
+ * keymap.c, glyphs.c and glx.c are the US keyboard map, the core font
+ * and the GLX extension, and extension.c hands the requests of SHAPE
+ * (shape-ext.c), SYNC (sync.c) and XFIXES (xfixes.c) to their modules.
  */
 
 #ifndef KEILAND_X11SERVER_INTERNAL_H
