@@ -321,9 +321,9 @@ named in the first tab and skipped.
   X11Render       auto or cpu: how the X windows are drawn (auto)
   X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
                   xterm copies to) also goes to the Windows clipboard (no)
-  X11RootWindow   off, or a size such as 1920x1080 (320x200 to 7680x4320):
-                  the remote X programs share one window, at first of that
-                  size, a whole X screen, for a remote desktop (off; see 10)
+
+A remote desktop's window (X11RootWindow) is set for each host in
+ssh/config (section 10).
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
@@ -405,24 +405,31 @@ unless you set it.
 When the shell ends while X programs still run, the connection stays open
 until the last of them ends; close the tab to end them all.
 
-A remote desktop: with X11RootWindow 1920x1080 (for example) in
-config/mikuterm.conf, the X programs of a connection do not get windows of
-their own but are drawn in one window of that size, the whole X screen,
-which opens with the first X program.  Start a window manager in the tab
+A remote desktop: with X11RootWindow 1920x1080 (for example; off, or a size
+from 320x200 to 7680x4320) in the host's block of ssh/config,
+
+  Host desktop
+      HostName desktop.example.org
+      ForwardX11 yes
+      X11RootWindow 1920x1080
+
+the X programs of a connection to that host do not get windows of their own
+but are drawn in one window of that size, the whole X screen, which opens
+with the first X program.  Start a window manager in the tab
 (twm &, or openbox-session &) to frame and move them.  Every key typed in
 that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
 key.  Closing the window ends every X program of the connection.  The window
 opens at the size set and may be resized or maximized: the X screen takes
 the new size, and programs that follow the screen's size (xrandr, a desktop's
-panel) see it change.
+panel) see it change.  X11RootWindow is mikuterm's: OpenSSH's ssh stops at
+a keyword it does not know, so a file both read needs "IgnoreUnknown
+X11RootWindow" before the first Host line.
 
 The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
 xlogo), and GTK and Qt programs draw through its RENDER (anti-aliased text,
 images, gradients) and take input through XInput2.  Not every program has
 been tried yet; one that needs what the server does not have stops with an
-X error.  Animated cursors show their first picture only.  A window
-whose program asks for no position may open at the top left of another
-display; Win+Shift+Left or Right moves it.
+X error.
 
 The X server does not offer OpenGL (GLX): remote programs that draw with
 OpenGL through the X server do not show here.

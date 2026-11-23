@@ -11,7 +11,8 @@
  * A cursor is a shape of two colours with a mask and a hot spot, made from
  * two bitmaps (CreateCursor) or two glyphs (CreateGlyphCursor), or an
  * image with alpha (RENDER's CreateCursor and CreateAnimCursor, which
- * render-ext.c answers).  A glyph
+ * render-ext.c answers).  An animated cursor (CreateAnimCursor) shows
+ * frames, each another cursor for a time, round and round.  A glyph
  * of the cursor font is one of the standard cursors: it is kept as that
  * shape's number and the backend shows its own cursor of the shape (the
  * server has no images of them).  A cursor lives while its id does or a
@@ -21,6 +22,16 @@
  * pointer grab's, else the window's, else its nearest ancestor's that
  * names one (none: the system's pointer).  At each tick the backend is
  * told when that changed for the surface under the pointer.
+ *
+ * An animated cursor moves on as X.Org's does (render/animcur.c): shown
+ * anew, it starts at its first frame; each frame is shown for its delay
+ * (milliseconds), then the next, the first after the last; a frame of
+ * delay 0 is shown from then on, and a cursor of one frame does not
+ * move.  The core moves it at the tick, one frame at a time through the
+ * backend's cursor, so a backend needs nothing of its own for it.  Only
+ * the one shown moves, and only while it is shown: the tick asks to be
+ * called at its next frame then (x11_cursor_due), and at no other time
+ * for it.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -45,6 +56,16 @@
 /* The version the backend is told for the cursor hidden by a client (XFIXES's HideCursor); no cursor has it. */
 #define CURSOR_HIDDEN_VERSION		0xffffffffU
 
+/*
+ * The shortest time a frame of an animated cursor is shown (milliseconds):
+ * about a frame of a display of 60 Hz, the unit of Windows' animated
+ * cursors.  A shorter delay (but 0) is shown this long.
+ */
+#define CURSOR_FRAME_MIN_MS		16U
+
+/* The longest, so that the server's time (which goes round) still tells it is to come. */
+#define CURSOR_FRAME_MAX_MS		0x7fffffffU
+
 static unsigned cursor_create(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned cursor_create_glyph(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned cursor_free_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -52,6 +73,12 @@ static unsigned cursor_recolor(struct x11server *server, unsigned index, const u
 static unsigned cursor_check_id(struct x11server *server, unsigned index, uint32_t id);
 static unsigned cursor_add(struct x11server *server, unsigned index, uint32_t id, struct x11_cursor *cursor);
 static struct x11_cursor *cursor_new(int width, int height);
+static struct x11_cursor *cursor_copy(const struct x11_cursor *model);
+static void cursor_stamp(struct x11server *server, struct x11_cursor *cursor);
+static void cursor_drop_frames(struct x11server *server, struct x11_cursor *cursor);
+static const struct x11_cursor *cursor_animate(struct x11server *server, const struct x11_cursor *cursor);
+static void cursor_frame_due(struct x11server *server, const struct x11_cursor *cursor);
+static void cursor_still(struct x11server *server);
 static void cursor_colors(struct x11server *server, struct x11_cursor *cursor, const uint8_t *bytes, int msb);
 static const struct x11_cursor *cursor_shown(struct x11server *server, struct x11_window *window);
 static uint32_t *cursor_image(const struct x11_cursor *cursor);
@@ -137,10 +164,11 @@ x11_cursor_release(
 	if (cursor == NULL)
 		return;
 
-	/* One fewer holder; none left frees its bitmaps or image, its charge and it. */
+	/* One fewer holder; none left frees its frames, its bitmaps or image, its charge and it. */
 	cursor->holders--;
 	if (cursor->holders != 0U)
 		return;
+	cursor_drop_frames(server, cursor);
 	free(cursor->source);
 	free(cursor->mask);
 	free(cursor->argb);
@@ -190,26 +218,43 @@ x11_cursor_update(
 	uint32_t clear;
 	int hidden;
 
-	/* A backend that shows no X cursor, or a pointer outside the X windows. */
-	if (server->ops == NULL || server->ops->cursor == NULL)
+	/* A backend that shows no X cursor, or a pointer outside the X windows: no cursor moves. */
+	if (server->ops == NULL || server->ops->cursor == NULL) {
+		cursor_still(server);
 		return;
-	if (server->pointer_outside)
+	}
+	if (server->pointer_outside) {
+		cursor_still(server);
 		return;
+	}
 
 	/* The top-level window under the pointer, and its surface. */
 	window = x11_input_window_under(server);
-	if (window == NULL || window == server->root)
+	if (window == NULL || window == server->root) {
+		cursor_still(server);
 		return;
+	}
 	top = x11_window_top_level(window);
-	if (top == NULL || top->surface == NULL)
+	if (top == NULL || top->surface == NULL) {
+		cursor_still(server);
 		return;
+	}
 
-	/* The cursor shown there (none while a client hid it, XFIXES), unless the backend was told of it already. */
+	/* The cursor shown there (none while a client hid it, XFIXES). */
 	cursor = cursor_shown(server, window);
+	hidden = x11_xfixes_cursor_hidden(server);
+
+	/* An animated cursor shows its frame of the time; with any other, none moves. */
+	if (cursor != NULL && cursor->frames != NULL && !hidden) {
+		cursor = cursor_animate(server, cursor);
+	} else {
+		cursor_still(server);
+	}
+
+	/* Its version, unless the backend was told of it already. */
 	version = 0U;
 	if (cursor != NULL)
 		version = cursor->version;
-	hidden = x11_xfixes_cursor_hidden(server);
 	if (hidden)
 		version = CURSOR_HIDDEN_VERSION;
 	if (server->cursor_known &&
@@ -318,66 +363,43 @@ x11_cursor_create_argb(
 }
 
 /*
- * Makes a cursor that looks as another does (RENDER's CreateAnimCursor
- * shows its first frame): a copy of its shape, bitmaps or image, colours
- * and hot spot.  Returns 0, BadIDChoice, or BadAlloc.
+ * Makes an animated cursor (RENDER's CreateAnimCursor) of its frames
+ * (count of them, at least one, malloc'd, which it takes: freed whatever
+ * is returned), each a cursor that is not animated.  It looks as its
+ * first frame and holds each.  Returns 0, BadIDChoice, or BadAlloc.
  */
 unsigned
-x11_cursor_create_copy(
+x11_cursor_create_anim(
 	struct x11server *server,
 	unsigned index,
 	uint32_t id,
-	const struct x11_cursor *model)
+	struct x11_cursor_frame *frames,
+	size_t count)
 {
 	struct x11_cursor *cursor;
-	size_t pixels;
-	size_t bits;
+	size_t at;
 	unsigned code;
 
 	/* A new id of the client's. */
 	code = cursor_check_id(server, index, id);
-	if (code != 0U)
+	if (code != 0U) {
+		free(frames);
 		return code;
-
-	/* The cursor, with bitmaps of the model's size when it has them. */
-	if (model->source != NULL) {
-		cursor = cursor_new(model->width, model->height);
-	} else {
-		cursor = cursor_new(0, 0);
 	}
-	if (cursor == NULL)
+
+	/* The cursor, as its first frame. */
+	cursor = cursor_copy(frames[0].cursor);
+	if (cursor == NULL) {
+		free(frames);
 		return X11_BAD_ALLOC;
-	bits = cursor->stride * (size_t)model->height;
-	if (model->source != NULL) {
-		memcpy(cursor->source, model->source, bits);
-		memcpy(cursor->mask, model->mask, bits);
 	}
 
-	/* The model's image. */
-	pixels = (size_t)model->width * (size_t)model->height;
-	if (model->argb != NULL) {
-		cursor->argb = malloc(pixels * sizeof(*cursor->argb));
-		if (cursor->argb == NULL) {
-			free(cursor->source);
-			free(cursor->mask);
-			free(cursor);
-			return X11_BAD_ALLOC;
-		}
-		memcpy(cursor->argb, model->argb, pixels * sizeof(*cursor->argb));
-	}
-
-	/* Its shape, size, hot spot, colours and a version of its own. */
-	cursor->shape = model->shape;
-	cursor->width = model->width;
-	cursor->height = model->height;
-	cursor->hot_x = model->hot_x;
-	cursor->hot_y = model->hot_y;
-	memcpy(cursor->foreground, model->foreground, sizeof(cursor->foreground));
-	memcpy(cursor->background, model->background, sizeof(cursor->background));
-	server->cursor_serial++;
-	if (server->cursor_serial == 0U)
-		server->cursor_serial++;
-	cursor->version = server->cursor_serial;
+	/* Its frames, each held while it lives, and a version of its own. */
+	for (at = 0U; at < count; at++)
+		x11_cursor_hold(frames[at].cursor);
+	cursor->frames = frames;
+	cursor->frame_count = count;
+	cursor_stamp(server, cursor);
 
 	/* Charged and found by its id (freed on failure). */
 	code = cursor_add(server, index, id, cursor);
@@ -386,6 +408,26 @@ x11_cursor_create_copy(
 
 	/* Succeeded: made. */
 	return 0U;
+}
+
+/*
+ * Tells when the animated cursor shown is to move on (*due, the server's
+ * time).  Returns nonzero when one is to, 0 when no cursor moves.
+ */
+int
+x11_cursor_due(
+	struct x11server *server,
+	uint32_t *due)
+{
+	/* No cursor moves. */
+	*due = server->now;
+	if (!server->cursor_anim_timed)
+		return 0;
+
+	/* Succeeded: its next frame's time, never before now. */
+	if ((int32_t)(server->cursor_anim_due - server->now) > 0)
+		*due = server->cursor_anim_due;
+	return 1;
 }
 
 /*
@@ -507,7 +549,8 @@ x11_cursor_change(
 	x11_memory_release(server, target->owner, target->charged);
 	target->charged = charged;
 
-	/* The look. */
+	/* The look, still: an animated cursor's frames go (an animated source gives its first frame's look). */
+	cursor_drop_frames(server, target);
 	free(target->source);
 	free(target->mask);
 	free(target->argb);
@@ -524,10 +567,7 @@ x11_cursor_change(
 	memcpy(target->background, source->background, sizeof(target->background));
 
 	/* Succeeded: a new version (never 0), which the backend is shown again. */
-	server->cursor_serial++;
-	if (server->cursor_serial == 0U)
-		server->cursor_serial++;
-	target->version = server->cursor_serial;
+	cursor_stamp(server, target);
 	return 0U;
 }
 
@@ -868,6 +908,7 @@ cursor_add(
 	cursor->charged = sizeof(*cursor) + cursor->stride * (size_t)cursor->height * 2U;
 	if (cursor->argb != NULL)
 		cursor->charged = sizeof(*cursor) + (size_t)cursor->width * (size_t)cursor->height * sizeof(uint32_t);
+	cursor->charged += cursor->frame_count * sizeof(*cursor->frames);
 	error = x11_memory_charge(server, index, cursor->charged);
 	if (error != 0) {
 		cursor->charged = 0U;
@@ -927,6 +968,172 @@ cursor_new(
 
 	/* Succeeded: the cursor. */
 	return cursor;
+}
+
+/*
+ * Makes a cursor that looks as another does: a copy of its shape, bitmaps
+ * or image, colours and hot spot, with no frames, version or charge.
+ * Returns it, or NULL.
+ */
+static struct x11_cursor *
+cursor_copy(
+	const struct x11_cursor *model)
+{
+	struct x11_cursor *cursor;
+	size_t pixels;
+	size_t bits;
+
+	/* The cursor, with bitmaps of the model's size when it has them. */
+	if (model->source != NULL) {
+		cursor = cursor_new(model->width, model->height);
+	} else {
+		cursor = cursor_new(0, 0);
+	}
+	if (cursor == NULL)
+		return NULL;
+	bits = cursor->stride * (size_t)model->height;
+	if (model->source != NULL) {
+		memcpy(cursor->source, model->source, bits);
+		memcpy(cursor->mask, model->mask, bits);
+	}
+
+	/* The model's image. */
+	pixels = (size_t)model->width * (size_t)model->height;
+	if (model->argb != NULL) {
+		cursor->argb = malloc(pixels * sizeof(*cursor->argb));
+		if (cursor->argb == NULL) {
+			free(cursor->source);
+			free(cursor->mask);
+			free(cursor);
+			return NULL;
+		}
+		memcpy(cursor->argb, model->argb, pixels * sizeof(*cursor->argb));
+	}
+
+	/* Succeeded: its shape, size, hot spot and colours. */
+	cursor->shape = model->shape;
+	cursor->width = model->width;
+	cursor->height = model->height;
+	cursor->hot_x = model->hot_x;
+	cursor->hot_y = model->hot_y;
+	memcpy(cursor->foreground, model->foreground, sizeof(cursor->foreground));
+	memcpy(cursor->background, model->background, sizeof(cursor->background));
+	return cursor;
+}
+
+/*
+ * Gives a cursor a version the server has given no other (never 0), so
+ * that the backend is told of it again.
+ */
+static void
+cursor_stamp(
+	struct x11server *server,
+	struct x11_cursor *cursor)
+{
+	/* The next serial, past 0. */
+	server->cursor_serial++;
+	if (server->cursor_serial == 0U)
+		server->cursor_serial++;
+
+	/* Succeeded: the cursor's. */
+	cursor->version = server->cursor_serial;
+}
+
+/* Lets go of an animated cursor's frames (none: nothing), leaving it still. */
+static void
+cursor_drop_frames(
+	struct x11server *server,
+	struct x11_cursor *cursor)
+{
+	struct x11_cursor_frame *frames;
+	size_t count;
+	size_t at;
+
+	/* A cursor that is not animated. */
+	if (cursor->frames == NULL)
+		return;
+
+	/* Still from now on. */
+	frames = cursor->frames;
+	count = cursor->frame_count;
+	cursor->frames = NULL;
+	cursor->frame_count = 0U;
+
+	/* Succeeded: each frame's hold let go (none is animated, so this goes no deeper). */
+	for (at = 0U; at < count; at++)
+		x11_cursor_release(server, frames[at].cursor);
+	free(frames);
+}
+
+/*
+ * Moves the animated cursor shown on when its frame's time is over (from
+ * its first frame when it is shown anew).  Returns the frame's cursor to
+ * show.
+ */
+static const struct x11_cursor *
+cursor_animate(
+	struct x11server *server,
+	const struct x11_cursor *cursor)
+{
+	size_t frame;
+
+	/* Shown anew (or another cursor as it was): its first frame, the next one due after its delay. */
+	if (server->cursor_anim_version != cursor->version || server->cursor_anim_frame >= cursor->frame_count) {
+		server->cursor_anim_version = cursor->version;
+		server->cursor_anim_frame = 0U;
+		cursor_frame_due(server, cursor);
+		return cursor->frames[0].cursor;
+	}
+
+	/* The frame's time not over, or a frame shown from then on. */
+	frame = server->cursor_anim_frame;
+	if (!server->cursor_anim_timed || (int32_t)(server->now - server->cursor_anim_due) < 0)
+		return cursor->frames[frame].cursor;
+
+	/* Succeeded: the next frame (the first after the last), the one after it due after its delay. */
+	frame = (frame + 1U) % cursor->frame_count;
+	server->cursor_anim_frame = frame;
+	cursor_frame_due(server, cursor);
+	return cursor->frames[frame].cursor;
+}
+
+/*
+ * Sets when the animated cursor shown moves on from the frame it shows:
+ * after the frame's delay (CURSOR_FRAME_MIN_MS at least, CURSOR_FRAME_MAX_MS
+ * at most); never for a
+ * frame of delay 0 or a cursor of one frame.
+ */
+static void
+cursor_frame_due(
+	struct x11server *server,
+	const struct x11_cursor *cursor)
+{
+	uint32_t delay;
+
+	/* A cursor of one frame, or a frame of delay 0: it moves no more. */
+	delay = cursor->frames[server->cursor_anim_frame].delay;
+	server->cursor_anim_timed = 0;
+	if (cursor->frame_count < 2U || delay == 0U)
+		return;
+
+	/* Succeeded: due after the delay, between the shortest and the longest a frame is shown. */
+	if (delay < CURSOR_FRAME_MIN_MS)
+		delay = CURSOR_FRAME_MIN_MS;
+	if (delay > CURSOR_FRAME_MAX_MS)
+		delay = CURSOR_FRAME_MAX_MS;
+	server->cursor_anim_timed = 1;
+	server->cursor_anim_due = server->now + delay;
+}
+
+/* Ends the animation of the cursor shown, when one moves: none moves until one is shown anew. */
+static void
+cursor_still(
+	struct x11server *server)
+{
+	/* Succeeded: no animated cursor shown, no frame due. */
+	server->cursor_anim_version = 0U;
+	server->cursor_anim_frame = 0U;
+	server->cursor_anim_timed = 0;
 }
 
 /*

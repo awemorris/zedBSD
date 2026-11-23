@@ -958,9 +958,12 @@ struct x11_font {
  * two colours, its hot spot, and, when it is one of the cursor font's,
  * which (shape -1: none).  A cursor of RENDER has an image instead
  * (argb: a8r8g8b8 pixels, premultiplied, width by height; NULL for the
- * others).  It lives while its id does or a window or a grab holds it
- * (holders).
+ * others).  An animated cursor (RENDER's CreateAnimCursor) also has its
+ * frames, each a cursor it holds that has none, and looks as its first
+ * frame (frames NULL for the others).  It lives while its id does or a
+ * window, a grab or an animated cursor holds it (holders).
  */
+struct x11_cursor_frame;
 struct x11_cursor {
 	uint32_t id;
 	unsigned owner;
@@ -977,7 +980,18 @@ struct x11_cursor {
 	uint16_t foreground[3];
 	uint16_t background[3];
 	uint32_t version;
+	struct x11_cursor_frame *frames;
+	size_t frame_count;
 	size_t charged;
+};
+
+/*
+ * One frame of an animated cursor: the cursor shown, and for how long
+ * (milliseconds; 0: from then on).
+ */
+struct x11_cursor_frame {
+	struct x11_cursor *cursor;
+	uint32_t delay;
 };
 
 /*
@@ -1216,6 +1230,15 @@ struct x11server {
 
 	/* The version the last cursor made or recoloured was given (cursor.c), never 0. */
 	uint32_t cursor_serial;
+
+	/*
+	 * The animated cursor shown (cursor.c): its version (0: none), the
+	 * frame shown, whether another follows, and when (the server's time).
+	 */
+	uint32_t cursor_anim_version;
+	size_t cursor_anim_frame;
+	int cursor_anim_timed;
+	uint32_t cursor_anim_due;
 
 	/* Where log lines go. */
 	void (*log)(void *context, const char *line);
@@ -1706,12 +1729,13 @@ void x11_cursor_hold(struct x11_cursor *cursor);
 void x11_cursor_release(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_free(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_update(struct x11server *server);
+int x11_cursor_due(struct x11server *server, uint32_t *due);
 const struct x11_cursor *x11_cursor_current(struct x11server *server);
 uint32_t *x11_cursor_pixels(const struct x11_cursor *cursor);
 unsigned x11_cursor_change(struct x11server *server, struct x11_cursor *target, const struct x11_cursor *source);
 unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_cursor_create_argb(struct x11server *server, unsigned index, uint32_t id, uint32_t *pixels, int width, int height, int hot_x, int hot_y);
-unsigned x11_cursor_create_copy(struct x11server *server, unsigned index, uint32_t id, const struct x11_cursor *model);
+unsigned x11_cursor_create_anim(struct x11server *server, unsigned index, uint32_t id, struct x11_cursor_frame *frames, size_t count);
 
 /*
  * What a drawable gives a drawing that is not a core request's (RENDER's):

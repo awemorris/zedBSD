@@ -527,8 +527,6 @@ connection_open(
 	session->x11_scale = connector->options.x11_scale;
 	session->x11_render_cpu = connector->options.x11_render_cpu;
 	session->x11_primary = connector->options.x11_primary;
-	session->x11_root_width = connector->options.x11_root_width;
-	session->x11_root_height = connector->options.x11_root_height;
 	session->x11_tabify = connector->options.x11_tabify;
 	if (!connector->first_opened) {
 		connection_copy(session->host, sizeof(session->host), connector->options.connect);

@@ -58,6 +58,15 @@
 /* The largest port number. */
 #define CONFIG_PORT_MAX		65535U
 
+/* The smallest and largest root window X11RootWindow may ask (X's pixels). */
+#define CONFIG_ROOT_WIDTH_MIN		320U
+#define CONFIG_ROOT_HEIGHT_MIN		200U
+#define CONFIG_ROOT_WIDTH_MAX		7680U
+#define CONFIG_ROOT_HEIGHT_MAX		4320U
+
+/* The longest keyword IgnoreUnknown's patterns are matched against, with its NUL. */
+#define CONFIG_KEYWORD_COPY_MAX		128U
+
 /* The most digits a port may be written with. */
 #define CONFIG_PORT_DIGITS_MAX	5U
 
@@ -117,9 +126,9 @@ enum sshd_keyword_id {
 };
 
 /*
- * The numbers of ssh_config keywords that are acted on; each below 24 is
- * also the bit of ssh_config.set_mask (the forwardings, which add up, and
- * Host have none).
+ * The numbers of ssh_config keywords that are acted on; each below 25 is
+ * also the bit of ssh_config.set_mask (the forwardings, which add up,
+ * Host and IgnoreUnknown, which the parse keeps for itself, have none).
  */
 enum ssh_keyword_id {
 	SSH_KW_USER = 0,
@@ -146,10 +155,12 @@ enum ssh_keyword_id {
 	SSH_KW_SESSION_TYPE = 21,
 	SSH_KW_REMOTE_COMMAND = 22,
 	SSH_KW_PROXY_COMMAND = 23,
-	SSH_KW_LOCAL_FORWARD = 24,
-	SSH_KW_REMOTE_FORWARD = 25,
-	SSH_KW_HOST = 26,
-	SSH_KW_NONE = 27
+	SSH_KW_X11_ROOT_WINDOW = 24,
+	SSH_KW_LOCAL_FORWARD = 25,
+	SSH_KW_REMOTE_FORWARD = 26,
+	SSH_KW_HOST = 27,
+	SSH_KW_IGNORE_UNKNOWN = 28,
+	SSH_KW_NONE = 29
 };
 
 /*
@@ -203,13 +214,15 @@ struct sshd_state {
  * The state ssh_config_parse and ssh_config_option keep for one call: the
  * configuration being filled, the host name given, whether the lines now
  * being read apply to it (a Host block that did not match turns this off),
- * and whether the line is a -o option (where Host is not allowed).
+ * whether the line is a -o option (where Host is not allowed), and the
+ * pattern-list of IgnoreUnknown ("" until a line that applies gives it).
  */
 struct ssh_state {
 	struct ssh_config *config;
 	const char *host;
 	int active;
 	int option;
+	char ignore_unknown[CONFIG_LINE_MAX + 1U];
 };
 
 /*
@@ -318,6 +331,8 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "SessionType", CONFIG_KIND_ACTED, SSH_KW_SESSION_TYPE },
 	{ "RemoteCommand", CONFIG_KIND_ACTED, SSH_KW_REMOTE_COMMAND },
 	{ "ProxyCommand", CONFIG_KIND_ACTED, SSH_KW_PROXY_COMMAND },
+	{ "X11RootWindow", CONFIG_KIND_ACTED, SSH_KW_X11_ROOT_WINDOW },
+	{ "IgnoreUnknown", CONFIG_KIND_ACTED, SSH_KW_IGNORE_UNKNOWN },
 	{ "LocalForward", CONFIG_KIND_ACTED, SSH_KW_LOCAL_FORWARD },
 	{ "RemoteForward", CONFIG_KIND_ACTED, SSH_KW_REMOTE_FORWARD },
 	{ "VerifyHostKeyDNS", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
@@ -487,6 +502,8 @@ static int sshd_value(struct sshd_config *target, int id, const struct config_li
 static int sshd_config_apply(void *context, const struct config_line *parsed, const char **what);
 static int ssh_value_identity(struct ssh_config *target, const struct config_line *parsed, const char **what);
 static int ssh_value_command(char *command, const struct config_line *parsed, const char **what);
+static int ssh_value_root(struct ssh_config *target, const struct config_line *parsed, const char **what);
+static int ssh_ignore_unknown(const struct ssh_state *state, const struct config_line *parsed);
 static int ssh_value(struct ssh_config *target, int id, const struct config_line *parsed, const char **what);
 static int ssh_value_forward(struct ssh_state *state, int id, const struct config_line *parsed, const char **what);
 static int config_read_forward(enum ssh_forward_kind kind, const char *spec, struct ssh_forward *forward, const char **what);
@@ -646,6 +663,7 @@ ssh_config_parse(
 	state.host = host;
 	state.active = 1;
 	state.option = 0;
+	state.ignore_unknown[0] = '\0';
 
 	/* Reads every line of the text. */
 	status = config_run(text, size, ssh_config_apply, &state, error);
@@ -712,6 +730,7 @@ ssh_config_option(
 	state.host = "";
 	state.active = 1;
 	state.option = 1;
+	state.ignore_unknown[0] = '\0';
 
 	/* Applies the option like a line of a file. */
 	status = ssh_config_apply(&state, &parsed, &what);
@@ -800,6 +819,12 @@ ssh_config_defaults(
 	/* No proxy: the host is reached directly. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_PROXY_COMMAND)) == 0)
 		config->proxy_command[0] = '\0';
+
+	/* The remote X windows each a window of the system's, no root window. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_X11_ROOT_WINDOW)) == 0) {
+		config->x11_root_width = 0;
+		config->x11_root_height = 0;
+	}
 
 	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
@@ -2390,6 +2415,123 @@ ssh_value_command(
 	return 0;
 }
 
+/*
+ * Reads X11RootWindow: off (in any case; both sizes 0), or WIDTHxHEIGHT
+ * in decimal from 320x200 to 7680x4320.
+ */
+static int
+ssh_value_root(
+	struct ssh_config *target,
+	const struct config_line *parsed,
+	const char **what)
+{
+	const struct config_token *token;
+	unsigned width;
+	unsigned height;
+	unsigned *side;
+	size_t index;
+	int status;
+	int off;
+
+	/* One value. */
+	status = config_one_token(parsed, what);
+	if (status != 0)
+		return status;
+	token = &parsed->tokens[0];
+
+	/* off: no root window. */
+	off = config_text_equal(token->text, token->size, "off");
+	if (off) {
+		target->x11_root_width = 0;
+		target->x11_root_height = 0;
+		return 0;
+	}
+
+	/* The width, an x, the height: digits each, at most five. */
+	width = 0;
+	height = 0;
+	side = &width;
+	for (index = 0; index < token->size; index++) {
+		if ((token->text[index] == 'x' || token->text[index] == 'X') && side == &width && index > 0) {
+			side = &height;
+			continue;
+		}
+		if (token->text[index] < '0' || token->text[index] > '9' || *side > 9999U) {
+			*what = "X11RootWindow is off or a size from 320x200 to 7680x4320";
+			return EINVAL;
+		}
+		*side = *side * 10U + (unsigned)(token->text[index] - '0');
+	}
+
+	/* Both sizes within the limits. */
+	if (side != &height ||
+	    width < CONFIG_ROOT_WIDTH_MIN || width > CONFIG_ROOT_WIDTH_MAX ||
+	    height < CONFIG_ROOT_HEIGHT_MIN || height > CONFIG_ROOT_HEIGHT_MAX) {
+		*what = "X11RootWindow is off or a size from 320x200 to 7680x4320";
+		return EINVAL;
+	}
+
+	/* Succeeded: the size. */
+	target->x11_root_width = width;
+	target->x11_root_height = height;
+	return 0;
+}
+
+/*
+ * Tells whether an unknown keyword is one IgnoreUnknown's pattern-list
+ * names: some pattern of the comma-separated list matches it (letters'
+ * case aside) and no negated one ("!pattern") does, as OpenSSH's
+ * match_pattern_list reads a list.  Returns 1 or 0.
+ */
+static int
+ssh_ignore_unknown(
+	const struct ssh_state *state,
+	const struct config_line *parsed)
+{
+	char keyword[CONFIG_KEYWORD_COPY_MAX];
+	const char *list;
+	const char *pattern;
+	size_t length;
+	size_t size;
+	int negation;
+	int matched;
+	int hit;
+
+	/* No list yet, or a keyword too long to be one it names. */
+	list = state->ignore_unknown;
+	if (list[0] == '\0')
+		return 0;
+	if (parsed->keyword_size >= sizeof(keyword))
+		return 0;
+	memcpy(keyword, parsed->keyword, parsed->keyword_size);
+	keyword[parsed->keyword_size] = '\0';
+
+	/* Each pattern of the list; a negated one that matches says no at once. */
+	matched = 0;
+	pattern = list;
+	length = strlen(list);
+	while (length > 0) {
+		size = 0;
+		while (size < length && pattern[size] != ',')
+			size++;
+		negation = 0;
+		if (size > 0 && pattern[0] == '!')
+			negation = 1;
+		hit = ssh_pattern_match(pattern + negation, size - (size_t)negation, keyword, 1);
+		if (hit && negation)
+			return 0;
+		if (hit)
+			matched = 1;
+		if (size == length)
+			break;
+		pattern += size + 1U;
+		length -= size + 1U;
+	}
+
+	/* Succeeded: named when a pattern matched. */
+	return matched;
+}
+
 /* Reads the value of one acted-on ssh_config keyword (not Host) into target; 0 or EINVAL with *what set. */
 static int
 ssh_value(
@@ -2501,6 +2643,9 @@ ssh_value(
 	case SSH_KW_PROXY_COMMAND:
 		status = ssh_value_command(target->proxy_command, parsed, what);
 		return status;
+	case SSH_KW_X11_ROOT_WINDOW:
+		status = ssh_value_root(target, parsed, what);
+		return status;
 	default:
 		break;
 	}
@@ -2586,15 +2731,19 @@ ssh_config_apply(
 	const struct config_keyword *entry;
 	uint32_t bit;
 	int index;
+	int ignored;
 	int keep;
 	int status;
 
 	/* Takes the state from the callback context. */
 	state = context;
 
-	/* Finds the keyword. */
+	/* Finds the keyword; an unknown one IgnoreUnknown names is skipped. */
 	index = config_find_keyword(ssh_keywords, sizeof(ssh_keywords) / sizeof(ssh_keywords[0]), parsed->keyword, parsed->keyword_size);
 	if (index < 0) {
+		ignored = ssh_ignore_unknown(state, parsed);
+		if (ignored)
+			return 0;
 		*what = "unknown keyword";
 		return EINVAL;
 	}
@@ -2621,6 +2770,22 @@ ssh_config_apply(
 		status = ssh_apply_host(state, parsed, what);
 		if (status != 0)
 			return status;
+		return 0;
+	}
+
+	/*
+	 * IgnoreUnknown: one value (a pattern-list), kept from the first line
+	 * of a block that applies, for the unknown keywords after it (as
+	 * OpenSSH reads it).
+	 */
+	if (entry->id == SSH_KW_IGNORE_UNKNOWN) {
+		status = config_one_token(parsed, what);
+		if (status != 0)
+			return status;
+		if (state->active && state->ignore_unknown[0] == '\0' && parsed->tokens[0].size < sizeof(state->ignore_unknown)) {
+			memcpy(state->ignore_unknown, parsed->tokens[0].text, parsed->tokens[0].size);
+			state->ignore_unknown[parsed->tokens[0].size] = '\0';
+		}
 		return 0;
 	}
 

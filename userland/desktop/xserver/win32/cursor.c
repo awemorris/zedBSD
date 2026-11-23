@@ -89,6 +89,8 @@ win32_surface_cursor(
 {
 	struct x11_win32 *backend;
 	HCURSOR cursor;
+	HCURSOR old;
+	int old_owned;
 	int owned;
 
 	/* The cursor: Windows' own of a standard shape, else one made from the image, else the arrow. */
@@ -105,14 +107,23 @@ win32_surface_cursor(
 	if (cursor == NULL)
 		cursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
 
-	/* The one it had goes, when the backend made it. */
-	win32_cursor_free(surface);
+	/* The new one in place of the one it had. */
+	old = surface->cursor;
+	old_owned = surface->cursor_owned;
 	surface->cursor = cursor;
 	surface->cursor_owned = owned;
 
 	/* Shown at once while the pointer is over the window. */
 	if (backend->pointer_surface == surface)
 		SetCursor(cursor);
+
+	/*
+	 * The old one goes, when the backend made it, once it is no longer
+	 * the one shown (a cursor in use may not be destroyed, and an
+	 * animated cursor's frames come one after another).
+	 */
+	if (old != NULL && old_owned && old != cursor)
+		DestroyCursor(old);
 }
 
 /*
