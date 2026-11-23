@@ -11,8 +11,12 @@
  * names (its first word) taken apart from the rest of the line, which is
  * handed to the program as its command line is.
  *
+ * On the POSIX systems the whole line is split into the program's
+ * words as a shell splits a simple command, without a shell.
+ *
  * It does not include a header of Windows, so the tests run it on the
- * host; proxy.c finds and starts the program on Windows.
+ * host; proxy.c finds and starts the program on Windows,
+ * apps/terminal-linux/proxy-posix.c on the POSIX systems.
  */
 
 #ifndef MIKUTERM_PROXY_COMMAND_H
@@ -36,6 +40,7 @@ struct proxy_command_tokens {
 };
 
 int proxy_command_expand(const char *text, const struct proxy_command_tokens *tokens, char *out, size_t size, char *error, size_t error_size);
+int proxy_command_words(const char *command, char *buffer, size_t size, char **words, unsigned most, unsigned *count, char *error, size_t error_size);
 int proxy_command_program(const char *command, unsigned words, char *program, size_t size, const char **rest, int *quoted);
 
 #endif

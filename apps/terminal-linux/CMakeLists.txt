@@ -45,6 +45,18 @@ set(MIKUTERM_VULKAN_INCLUDE "" CACHE PATH "A directory holding vulkan/vulkan.h (
 set(MIKUTERM_DISTFILES "${MIKUTERM_ROOT}/build/distfiles" CACHE PATH "Where downloaded files may already be")
 option(MIKUTERM_WERROR "Make every warning an error" ON)
 
+#
+# Flatpak's build: mikuterm in the sandbox runs no program of the computer's (a login shell, a
+# ProxyCommand's program, GitHub's gh), only its SSH connections and its own X server.  ON sets the
+# features below to 0.
+#
+option(MIKUTERM_FLATPAK "Build for Flatpak: no login shell, ProxyCommand or GitHub Codespaces" OFF)
+if(MIKUTERM_FLATPAK)
+	set(MIKUTERM_LOCAL_PROGRAMS 0)
+else()
+	set(MIKUTERM_LOCAL_PROGRAMS 1)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "The kind of build" FORCE)
 endif()
@@ -118,6 +130,16 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_WIN32_DIR}/x11-serve.c
 	${MIKUTERM_WIN32_DIR}/x11-tab.c
 	${MIKUTERM_WIN32_DIR}/x11-noglx.c)
+
+# The login shell, ProxyCommand and GitHub Codespaces (gh): the files that run the computer's programs.
+if(MIKUTERM_LOCAL_PROGRAMS)
+	list(APPEND MIKUTERM_SOURCES
+		${MIKUTERM_DIR}/login-shell-posix.c
+		${MIKUTERM_DIR}/program-posix.c
+		${MIKUTERM_DIR}/proxy-posix.c
+		${MIKUTERM_WIN32_DIR}/proxy-command.c
+		${MIKUTERM_WIN32_DIR}/codespace.c)
+endif()
 
 #
 # The X server of X11 forwarding (mikuterm --x11-server): the core of zedBSD's X server (without
@@ -220,13 +242,17 @@ target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 
 #
 # The program, in bin/ of the build directory with its data in share/mikuterm/ beside it, as it is
-# installed.  MIKUTERM_LINUX: the launch screen has no WSL row, the words are Linux's.
+# installed.  MIKUTERM_LINUX: the launch screen has no WSL row, the words are Linux's.  The features
+# (1 or 0): the launch screen's Login Shell, ssh_config's ProxyCommand, and GitHub Codespaces.
 #
 add_executable(mikuterm ${MIKUTERM_SOURCES})
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_xserver)
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_WIN32_DIR})
 # Windows' _stricmp is the C library's strcasecmp (<strings.h>, which <string.h> brings with _GNU_SOURCE).
-target_compile_definitions(mikuterm PRIVATE MIKUTERM_LINUX MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp)
+target_compile_definitions(mikuterm PRIVATE MIKUTERM_LINUX MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp
+	MIKUTERM_HAVE_LOGIN_SHELL=${MIKUTERM_LOCAL_PROGRAMS}
+	MIKUTERM_HAVE_PROXY_COMMAND=${MIKUTERM_LOCAL_PROGRAMS}
+	MIKUTERM_HAVE_CODESPACES=${MIKUTERM_LOCAL_PROGRAMS})
 set_target_properties(mikuterm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 install(TARGETS mikuterm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

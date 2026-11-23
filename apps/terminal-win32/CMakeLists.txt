@@ -322,8 +322,12 @@ target_link_libraries(mikuterm_terminal PUBLIC mikuterm_keiland mikuterm_ssh)
 set(MIKUTERM_SYSTEM_LIBRARIES
 	ws2_32 iphlpapi bcrypt crypt32 dwmapi shcore imm32 shell32 ole32 uuid gdi32 user32 advapi32)
 
-# The program.
+# The program, with its features (1 or 0): no login shell (WSL is Windows' own), ProxyCommand and GitHub Codespaces.
 add_executable(mikuterm WIN32 ${MIKUTERM_SOURCES})
+target_compile_definitions(mikuterm PRIVATE
+	MIKUTERM_HAVE_LOGIN_SHELL=0
+	MIKUTERM_HAVE_PROXY_COMMAND=1
+	MIKUTERM_HAVE_CODESPACES=1)
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh ${MIKUTERM_SYSTEM_LIBRARIES})
 set_source_files_properties(${MIKUTERM_DIR}/resources/mikuterm.rc PROPERTIES
 	OBJECT_DEPENDS "${MIKUTERM_DIR}/resources/mikuterm.manifest;${MIKUTERM_DIR}/resources/mikuterm.ico")
