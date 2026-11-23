@@ -45,8 +45,14 @@
 #define FORMAT_XY_PIXMAP		1U
 #define FORMAT_Z_PIXMAP			2U
 
-/* PolyLine's coordinate mode relative to the previous point. */
+/* The coordinate mode relative to the previous point, and FillPoly's last shape hint (Convex). */
 #define COORDINATES_PREVIOUS		1U
+#define POLYGON_CONVEX			2U
+
+/* The line styles, and the pie-slice arc mode. */
+#define LINE_SOLID			0U
+#define LINE_DOUBLE_DASH		2U
+#define ARC_PIE_SLICE			1U
 
 /* The bit gravities: Forget, and Static (the others are the nine places). */
 #define GRAVITY_FORGET			0U
@@ -54,9 +60,6 @@
 
 /* What an image not yet painted shows, and the colour text is drawn in without a graphics context. */
 #define DRAW_UNPAINTED			0x607080U
-
-/* The most pixels one line is drawn with (longer lines are cut short: nothing that far can be seen). */
-#define DRAW_SPANS			((size_t)4U * 131072U + 2U)
 
 /* How far from the origin a relative point may walk (further is as far). */
 #define DRAW_FAR			131072
@@ -82,6 +85,24 @@ struct draw_target {
 	int height;
 	unsigned depth;
 	struct x11_window *top;
+};
+
+/*
+ * A shape request on its way: what it draws into, its context, the
+ * paints of its even dashes (and of a solid line or a fill) and of a
+ * double dash's odd dashes, the spans of the shape being made, the box
+ * around what has been painted, and whether memory ran out.
+ */
+struct draw_shape {
+	struct draw_target target;
+	struct x11_gc *gc;
+	struct x11_paint paint;
+	struct x11_paint odd_paint;
+	struct x11_spans even;
+	struct x11_spans odd;
+	struct x11_box bounds;
+	int painted;
+	int failed;
 };
 
 static int draw_top_sync(struct x11server *server, struct x11_window *top);
@@ -110,7 +131,16 @@ static uint32_t draw_bit(const uint8_t *row, unsigned index, int msb);
 static void draw_set_bit(uint8_t *row, unsigned index, int msb);
 static size_t draw_bitmap_row(unsigned bits);
 static struct x11_window *draw_next_over(struct x11_window *window, const struct x11_window *top);
-static void draw_line(struct x11_span *spans, size_t *count, int from_x, int from_y, int to_x, int to_y);
+static unsigned draw_copy(struct x11server *server, unsigned index, const uint8_t *request, uint32_t plane);
+static unsigned draw_shape_begin(struct x11server *server, unsigned index, const uint8_t *request, struct draw_shape *shape);
+static void draw_shape_fini(struct draw_shape *shape);
+static void draw_shape_paint(struct draw_shape *shape, int merge);
+static void draw_shape_widen(struct draw_shape *shape, const struct x11_box *box);
+static unsigned draw_shape_end(struct x11server *server, struct draw_shape *shape);
+static void draw_shape_path(struct draw_shape *shape, const int *points, size_t count);
+static int *draw_points(struct draw_shape *shape, const uint8_t *bytes, size_t count, int relative, int msb);
+static int draw_far(int value);
+static void draw_arc_of(const struct draw_shape *shape, const uint8_t *bytes, int msb, struct x11_arc *arc);
 
 /*
  * Gives the bytes an image of a size is charged as.
@@ -616,109 +646,46 @@ x11_request_copy_area(
 	const uint8_t *request,
 	size_t length)
 {
-	struct draw_target source;
-	struct draw_target target;
-	struct x11_region readable;
-	struct x11_region lost;
-	struct x11_box rectangle;
-	struct x11_box bounds;
-	struct x11_gc *gc;
 	unsigned code;
-	int source_x;
-	int source_y;
-	int target_x;
-	int target_y;
-	int width;
-	int height;
-	int dx;
-	int dy;
-	int error;
-	int msb;
 
-	/* The destination, the context, and the source, both drawables of the context's depth. */
-	msb = server->clients[index].order;
+	/* The rectangle copied as it is. */
 	if (length != 28U)
 		return X11_BAD_LENGTH;
-	code = draw_exists(server, x11_read32(request + 8, msb));
+	code = draw_copy(server, index, request, 0U);
 	if (code != 0U)
 		return code;
-	gc = x11_gc_find(server, x11_read32(request + 12, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-	code = draw_target(server, x11_read32(request + 4, msb), gc->subwindow_mode, &source);
-	if (code != 0U) {
-		draw_target_fini(&source);
+
+	/* Succeeded: copied. */
+	return 0U;
+}
+
+/*
+ * CopyPlane: one plane of a rectangle of a drawable (of any depth) onto
+ * another as a bitmap, the context's foreground where the plane is set
+ * and its background where it is clear; what could not be read is told
+ * as for CopyArea.
+ */
+unsigned
+x11_request_copy_plane(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	uint32_t plane;
+	unsigned code;
+
+	/* The rectangle and the plane, which must be one bit. */
+	if (length != 32U)
+		return X11_BAD_LENGTH;
+	plane = x11_read32(request + 28, server->clients[index].order);
+	if (plane == 0U || (plane & (plane - 1U)) != 0U)
+		return X11_BAD_VALUE;
+
+	/* Copied as a bitmap. */
+	code = draw_copy(server, index, request, plane);
+	if (code != 0U)
 		return code;
-	}
-	code = draw_target_gc(server, x11_read32(request + 8, msb), gc, &target);
-	if (code == 0U && source.depth != target.depth)
-		code = X11_BAD_MATCH;
-	if (code != 0U) {
-		draw_target_fini(&source);
-		draw_target_fini(&target);
-		return code;
-	}
-
-	/* The rectangle, and how far the copy moves a pixel on the images. */
-	source_x = (int16_t)x11_read16(request + 16, msb);
-	source_y = (int16_t)x11_read16(request + 18, msb);
-	target_x = (int16_t)x11_read16(request + 20, msb);
-	target_y = (int16_t)x11_read16(request + 22, msb);
-	width = x11_read16(request + 24, msb);
-	height = x11_read16(request + 26, msb);
-	dx = (target.x + target_x) - (source.x + source_x);
-	dy = (target.y + target_y) - (source.y + source_y);
-
-	/* What of the source rectangle can be read, on the source's image (nothing when it has none). */
-	x11_region_init(&readable);
-	x11_region_init(&lost);
-	rectangle.x0 = source.x + source_x;
-	rectangle.y0 = source.y + source_y;
-	rectangle.x1 = rectangle.x0 + width;
-	rectangle.y1 = rectangle.y0 + height;
-	error = 0;
-	if (source.image != NULL) {
-		error = x11_region_copy(&readable, &source.clip);
-		x11_region_intersect_box(&readable, &rectangle);
-	}
-
-	/* Moved onto the destination's image, inside its clip, and copied. */
-	x11_region_translate(&readable, dx, dy);
-	if (error == 0 && target.image != NULL) {
-		error = x11_region_copy(&lost, &readable);
-		if (error == 0)
-			error = x11_region_intersect(&lost, &target.clip);
-		if (error == 0)
-			error = x11_render_copy(target.image, &lost, 0, 0, source.image, -dx, -dy, gc->function, gc->plane_mask);
-		x11_region_extents(&lost, &bounds);
-		draw_dirty(server, &target, &bounds);
-	}
-
-	/* With graphics exposures: the destination rectangle less what could be read, inside the destination's clip. */
-	if (error == 0 && gc->graphics_exposures) {
-		rectangle.x0 = target.x + target_x;
-		rectangle.y0 = target.y + target_y;
-		rectangle.x1 = rectangle.x0 + width;
-		rectangle.y1 = rectangle.y0 + height;
-		error = x11_region_set(&lost, &rectangle);
-		if (error == 0)
-			error = x11_region_subtract(&lost, &readable);
-		if (error == 0)
-			error = x11_region_intersect(&lost, &target.clip);
-		if (target.image == NULL)
-			x11_region_clear(&lost);
-		x11_region_translate(&lost, -target.x, -target.y);
-		if (error == 0)
-			draw_graphics_expose(server, &server->clients[index], x11_read32(request + 8, msb), &lost, REQUEST_COPY_AREA);
-	}
-
-	/* Done with the regions and the drawables; a region that found no memory is BadAlloc. */
-	x11_region_fini(&readable);
-	x11_region_fini(&lost);
-	draw_target_fini(&source);
-	draw_target_fini(&target);
-	if (error != 0)
-		return X11_BAD_ALLOC;
 
 	/* Succeeded: copied. */
 	return 0U;
@@ -788,114 +755,6 @@ x11_request_poly_fill_rectangle(
 	}
 
 	/* Succeeded: filled, and shown again. */
-	draw_dirty(server, &target, &bounds);
-	draw_target_fini(&target);
-	return 0U;
-}
-
-/*
- * PolyLine: connected thin lines through points (relative to the one
- * before in the Previous mode), each pixel painted once per line.
- */
-unsigned
-x11_request_poly_line(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct draw_target target;
-	struct x11_paint paint;
-	struct x11_span *spans;
-	struct x11_box bounds;
-	struct x11_gc *gc;
-	size_t offset;
-	size_t count;
-	unsigned code;
-	int last_x;
-	int last_y;
-	int x;
-	int y;
-	int msb;
-
-	/* The coordinate mode, the context, the drawable, and whole points. */
-	msb = server->clients[index].order;
-	if (length < 12U || (length - 12U) % 4U != 0U)
-		return X11_BAD_LENGTH;
-	if (request[1] > COORDINATES_PREVIOUS)
-		return X11_BAD_VALUE;
-	code = draw_exists(server, x11_read32(request + 4, msb));
-	if (code != 0U)
-		return code;
-	gc = x11_gc_find(server, x11_read32(request + 8, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-	code = draw_target_gc(server, x11_read32(request + 4, msb), gc, &target);
-	if (code != 0U) {
-		draw_target_fini(&target);
-		return code;
-	}
-	if (target.image == NULL) {
-		draw_target_fini(&target);
-		return 0U;
-	}
-
-	/* Each line's pixels are spans of one pixel; a line between two far points has at most DRAW_SPANS. */
-	draw_paint_of(gc, &target, &paint);
-	spans = malloc(DRAW_SPANS * sizeof(*spans));
-	if (spans == NULL) {
-		draw_target_fini(&target);
-		return X11_BAD_ALLOC;
-	}
-
-	/* Each point after the first ends a line from the one before. */
-	last_x = 0;
-	last_y = 0;
-	memset(&bounds, 0, sizeof(bounds));
-	for (offset = 12U; offset + 4U <= length; offset += 4U) {
-		x = (int16_t)x11_read16(request + offset, msb);
-		y = (int16_t)x11_read16(request + offset + 2U, msb);
-		if (offset != 12U && request[1] == COORDINATES_PREVIOUS) {
-			x += last_x;
-			y += last_y;
-		}
-
-		/* A point walked far off by relative steps stays far off without overflowing. */
-		if (x > DRAW_FAR)
-			x = DRAW_FAR;
-		if (x < -DRAW_FAR)
-			x = -DRAW_FAR;
-		if (y > DRAW_FAR)
-			y = DRAW_FAR;
-		if (y < -DRAW_FAR)
-			y = -DRAW_FAR;
-		if (offset == 12U) {
-			bounds.x0 = target.x + x;
-			bounds.y0 = target.y + y;
-			bounds.x1 = bounds.x0 + 1;
-			bounds.y1 = bounds.y0 + 1;
-		}
-		if (offset != 12U) {
-			count = 0U;
-			draw_line(spans, &count, target.x + last_x, target.y + last_y, target.x + x, target.y + y);
-			x11_render_spans(target.image, &target.clip, &paint, spans, count);
-		}
-
-		/* The box around every point. */
-		if (target.x + x < bounds.x0)
-			bounds.x0 = target.x + x;
-		if (target.y + y < bounds.y0)
-			bounds.y0 = target.y + y;
-		if (target.x + x + 1 > bounds.x1)
-			bounds.x1 = target.x + x + 1;
-		if (target.y + y + 1 > bounds.y1)
-			bounds.y1 = target.y + y + 1;
-		last_x = x;
-		last_y = y;
-	}
-
-	/* Succeeded: drawn, and shown again. */
-	free(spans);
 	draw_dirty(server, &target, &bounds);
 	draw_target_fini(&target);
 	return 0U;
@@ -1280,6 +1139,351 @@ x11_request_put_image_rgb24(
 	draw_dirty(server, &target, &bounds);
 	free(row_pixels);
 	draw_target_fini(&target);
+	return 0U;
+}
+
+/*
+ * PolyPoint: points (relative to the one before in the Previous mode),
+ * each pixel painted with the foreground (points take no fill style).
+ */
+unsigned
+x11_request_poly_point(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	size_t offset;
+	unsigned code;
+	int last_x;
+	int last_y;
+	int x;
+	int y;
+	int msb;
+
+	/* The coordinate mode, the drawable, the context, and whole points. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 4U != 0U)
+		return X11_BAD_LENGTH;
+	if (request[1] > COORDINATES_PREVIOUS)
+		return X11_BAD_VALUE;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* A point is the foreground alone, whatever the fill style. */
+	shape.paint.fill_style = X11_FILL_SOLID;
+
+	/* Each point, painted as it comes (a point given twice is painted twice). */
+	last_x = 0;
+	last_y = 0;
+	for (offset = 12U; offset + 4U <= length && shape.target.image != NULL; offset += 4U) {
+		x = (int16_t)x11_read16(request + offset, msb);
+		y = (int16_t)x11_read16(request + offset + 2U, msb);
+		if (offset != 12U && request[1] == COORDINATES_PREVIOUS) {
+			x = draw_far(x + last_x);
+			y = draw_far(y + last_y);
+		}
+		x11_spans_add(&shape.even, shape.target.y + y, shape.target.x + x, shape.target.x + x + 1);
+		last_x = x;
+		last_y = y;
+	}
+	draw_shape_paint(&shape, 0);
+
+	/* Succeeded unless memory ran out: painted, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * PolyLine: lines through points (relative to the one before in the
+ * Previous mode).  Thin lines paint each point once (the last one not
+ * with a NotLast cap, nor when it closes the path); wide lines are one
+ * shape with joins where the lines meet, each pixel painted once.
+ */
+unsigned
+x11_request_poly_line(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	size_t count;
+	unsigned code;
+	int *points;
+	int msb;
+
+	/* The coordinate mode, the drawable, the context, and whole points. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 4U != 0U)
+		return X11_BAD_LENGTH;
+	if (request[1] > COORDINATES_PREVIOUS)
+		return X11_BAD_VALUE;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* The points on the image. */
+	count = (length - 12U) / 4U;
+	points = draw_points(&shape, request + 12, count, request[1] == COORDINATES_PREVIOUS, msb);
+
+	/* The path, drawn as one shape. */
+	if (points != NULL && count > 0U) {
+		draw_shape_path(&shape, points, count);
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
+	}
+	free(points);
+
+	/* Succeeded unless memory ran out: drawn, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * PolySegment: lines, each from its own first point to its own second,
+ * each drawn as a line of its own (its dashes start again).
+ */
+unsigned
+x11_request_poly_segment(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	size_t offset;
+	unsigned code;
+	int points[4];
+	int msb;
+
+	/* The drawable, the context, and whole segments. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 8U != 0U)
+		return X11_BAD_LENGTH;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* Each segment, painted on its own. */
+	for (offset = 12U; offset + 8U <= length && shape.target.image != NULL; offset += 8U) {
+		points[0] = shape.target.x + (int16_t)x11_read16(request + offset, msb);
+		points[1] = shape.target.y + (int16_t)x11_read16(request + offset + 2U, msb);
+		points[2] = shape.target.x + (int16_t)x11_read16(request + offset + 4U, msb);
+		points[3] = shape.target.y + (int16_t)x11_read16(request + offset + 6U, msb);
+		draw_shape_path(&shape, points, 2U);
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
+	}
+
+	/* Succeeded unless memory ran out: drawn, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * PolyRectangle: the outlines of rectangles, each a closed path through
+ * its corners (width + 1 by height + 1 pixels for thin lines), drawn on
+ * its own.
+ */
+unsigned
+x11_request_poly_rectangle(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	size_t offset;
+	unsigned code;
+	int points[10];
+	int x;
+	int y;
+	int width;
+	int height;
+	int msb;
+
+	/* The drawable, the context, and whole rectangles. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 8U != 0U)
+		return X11_BAD_LENGTH;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* Each rectangle's path around its corners, back to the first. */
+	for (offset = 12U; offset + 8U <= length && shape.target.image != NULL; offset += 8U) {
+		x = shape.target.x + (int16_t)x11_read16(request + offset, msb);
+		y = shape.target.y + (int16_t)x11_read16(request + offset + 2U, msb);
+		width = x11_read16(request + offset + 4U, msb);
+		height = x11_read16(request + offset + 6U, msb);
+		points[0] = x;
+		points[1] = y;
+		points[2] = x + width;
+		points[3] = y;
+		points[4] = x + width;
+		points[5] = y + height;
+		points[6] = x;
+		points[7] = y + height;
+		points[8] = x;
+		points[9] = y;
+		draw_shape_path(&shape, points, 5U);
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
+	}
+
+	/* Succeeded unless memory ran out: drawn, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * PolyArc: arcs of ellipses drawn as lines, each on its own and each
+ * pixel of one painted once.
+ */
+unsigned
+x11_request_poly_arc(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	struct x11_arc arc;
+	size_t offset;
+	unsigned code;
+	int msb;
+
+	/* The drawable, the context, and whole arcs. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 12U != 0U)
+		return X11_BAD_LENGTH;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* Each arc, painted on its own. */
+	for (offset = 12U; offset + 12U <= length && shape.target.image != NULL; offset += 12U) {
+		draw_arc_of(&shape, request + offset, msb, &arc);
+		x11_shape_arc_line(&shape.even, &arc, shape.gc->line_width);
+		draw_shape_paint(&shape, 1);
+	}
+
+	/* Succeeded unless memory ran out: drawn, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * FillPoly: a polygon through points (relative to the one before in the
+ * Previous mode, its last point joined to its first) filled by the
+ * context's fill rule.  The shape the client names is only a hint.
+ */
+unsigned
+x11_request_fill_poly(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	double *corners;
+	size_t count;
+	size_t at;
+	unsigned code;
+	int *points;
+	int msb;
+
+	/* The shape and the coordinate mode, the drawable, the context, and whole points. */
+	msb = server->clients[index].order;
+	if (length < 16U || (length - 16U) % 4U != 0U)
+		return X11_BAD_LENGTH;
+	if (request[12] > POLYGON_CONVEX)
+		return X11_BAD_VALUE;
+	if (request[13] > COORDINATES_PREVIOUS)
+		return X11_BAD_VALUE;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* The points on the image. */
+	count = (length - 16U) / 4U;
+	points = draw_points(&shape, request + 16, count, request[13] == COORDINATES_PREVIOUS, msb);
+
+	/* The polygon, filled. */
+	corners = NULL;
+	if (points != NULL && count > 0U)
+		corners = malloc(count * 2U * sizeof(*corners));
+	if (corners != NULL) {
+		for (at = 0U; at < count * 2U; at++)
+			corners[at] = (double)points[at];
+		x11_shape_polygon(&shape.even, corners, count, shape.gc->fill_rule != 0U);
+		draw_shape_paint(&shape, 0);
+	} else if (count > 0U) {
+		shape.even.failed = 1;
+	}
+	free(corners);
+	free(points);
+
+	/* Succeeded unless memory ran out: filled, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
+	return 0U;
+}
+
+/*
+ * PolyFillArc: arcs of ellipses filled as pie slices or chords (the
+ * context's arc mode), each on its own.
+ */
+unsigned
+x11_request_poly_fill_arc(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct draw_shape shape;
+	struct x11_arc arc;
+	size_t offset;
+	unsigned code;
+	int msb;
+
+	/* The drawable, the context, and whole arcs. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 12U != 0U)
+		return X11_BAD_LENGTH;
+	code = draw_shape_begin(server, index, request, &shape);
+	if (code != 0U)
+		return code;
+
+	/* Each arc, filled on its own. */
+	for (offset = 12U; offset + 12U <= length && shape.target.image != NULL; offset += 12U) {
+		draw_arc_of(&shape, request + offset, msb, &arc);
+		x11_shape_arc_fill(&shape.even, &arc, shape.gc->arc_mode == ARC_PIE_SLICE);
+		draw_shape_paint(&shape, 0);
+	}
+
+	/* Succeeded unless memory ran out: filled, and shown again. */
+	code = draw_shape_end(server, &shape);
+	if (code != 0U)
+		return code;
+
 	return 0U;
 }
 
@@ -2322,64 +2526,6 @@ draw_bitmap_row(
 	return ((size_t)bits + 31U) / 32U * 4U;
 }
 
-/*
- * Adds the pixels of a thin line from one point to another, both ends
- * included, as spans of one pixel (Bresenham's steps), as many as
- * DRAW_SPANS holds.
- */
-static void
-draw_line(
-	struct x11_span *spans,
-	size_t *count,
-	int from_x,
-	int from_y,
-	int to_x,
-	int to_y)
-{
-	int dx;
-	int dy;
-	int step_x;
-	int step_y;
-	int error;
-	int twice;
-
-	/* The distances and directions. */
-	dx = abs(to_x - from_x);
-	dy = -abs(to_y - from_y);
-	step_x = 1;
-	if (from_x > to_x)
-		step_x = -1;
-	step_y = 1;
-	if (from_y > to_y)
-		step_y = -1;
-	error = dx + dy;
-
-	/* Each pixel from the start to the end, as many as there is room for. */
-	for (;;) {
-		if (*count >= DRAW_SPANS)
-			break;
-		spans[*count].y = from_y;
-		spans[*count].x0 = from_x;
-		spans[*count].x1 = from_x + 1;
-		(*count)++;
-
-		/* The end is drawn last. */
-		if (from_x == to_x && from_y == to_y)
-			break;
-
-		/* A step across, down, or both. */
-		twice = 2 * error;
-		if (twice >= dy) {
-			error += dy;
-			from_x += step_x;
-		}
-		if (twice <= dx) {
-			error += dx;
-			from_y += step_y;
-		}
-	}
-}
-
 /* Returns the next window in a walk of a tree that does not go into a window's children, or NULL past the tree. */
 static struct x11_window *
 draw_next_over(
@@ -2395,4 +2541,443 @@ draw_next_over(
 
 	/* Past the tree. */
 	return NULL;
+}
+/*
+ * Copies a rectangle of a request (CopyArea, or CopyPlane when a plane is
+ * given) from its source drawable onto its destination, and tells what
+ * could not be read.  Returns 0, or the error.
+ */
+static unsigned
+draw_copy(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	uint32_t plane)
+{
+	struct draw_target source;
+	struct x11_paint paint;
+	struct draw_target target;
+	struct x11_region readable;
+	struct x11_region lost;
+	struct x11_box rectangle;
+	struct x11_box bounds;
+	struct x11_gc *gc;
+	unsigned code;
+	int source_x;
+	int source_y;
+	int target_x;
+	int target_y;
+	int width;
+	int height;
+	int dx;
+	int dy;
+	int error;
+	int msb;
+
+	/* The destination, the context, and the source (of the context's depth for an area). */
+	msb = server->clients[index].order;
+	code = draw_exists(server, x11_read32(request + 8, msb));
+	if (code != 0U)
+		return code;
+	gc = x11_gc_find(server, x11_read32(request + 12, msb));
+	if (gc == NULL)
+		return X11_BAD_GC;
+	code = draw_target(server, x11_read32(request + 4, msb), gc->subwindow_mode, &source);
+	if (code != 0U) {
+		draw_target_fini(&source);
+		return code;
+	}
+	code = draw_target_gc(server, x11_read32(request + 8, msb), gc, &target);
+	if (code == 0U && plane == 0U && source.depth != target.depth)
+		code = X11_BAD_MATCH;
+	if (code == 0U && plane != 0U && source.depth < 32U && (plane >> source.depth) != 0U)
+		code = X11_BAD_VALUE;
+	if (code != 0U) {
+		draw_target_fini(&source);
+		draw_target_fini(&target);
+		return code;
+	}
+
+	/* The rectangle, and how far the copy moves a pixel on the images. */
+	source_x = (int16_t)x11_read16(request + 16, msb);
+	source_y = (int16_t)x11_read16(request + 18, msb);
+	target_x = (int16_t)x11_read16(request + 20, msb);
+	target_y = (int16_t)x11_read16(request + 22, msb);
+	width = x11_read16(request + 24, msb);
+	height = x11_read16(request + 26, msb);
+	dx = (target.x + target_x) - (source.x + source_x);
+	dy = (target.y + target_y) - (source.y + source_y);
+
+	/* What of the source rectangle can be read, on the source's image (nothing when it has none). */
+	x11_region_init(&readable);
+	x11_region_init(&lost);
+	rectangle.x0 = source.x + source_x;
+	rectangle.y0 = source.y + source_y;
+	rectangle.x1 = rectangle.x0 + width;
+	rectangle.y1 = rectangle.y0 + height;
+	error = 0;
+	if (source.image != NULL) {
+		error = x11_region_copy(&readable, &source.clip);
+		x11_region_intersect_box(&readable, &rectangle);
+	}
+
+	/* Moved onto the destination's image, inside its clip, and copied. */
+	x11_region_translate(&readable, dx, dy);
+	if (error == 0 && target.image != NULL) {
+		error = x11_region_copy(&lost, &readable);
+		if (error == 0)
+			error = x11_region_intersect(&lost, &target.clip);
+		if (error == 0 && plane == 0U)
+			error = x11_render_copy(target.image, &lost, 0, 0, source.image, -dx, -dy, gc->function, gc->plane_mask);
+		if (error == 0 && plane != 0U) {
+			draw_paint_of(gc, &target, &paint);
+			error = x11_render_copy_plane(target.image, &lost, 0, 0, source.image, -dx, -dy, plane, &paint);
+		}
+		x11_region_extents(&lost, &bounds);
+		draw_dirty(server, &target, &bounds);
+	}
+
+	/* With graphics exposures: the destination rectangle less what could be read, inside the destination's clip. */
+	if (error == 0 && gc->graphics_exposures) {
+		rectangle.x0 = target.x + target_x;
+		rectangle.y0 = target.y + target_y;
+		rectangle.x1 = rectangle.x0 + width;
+		rectangle.y1 = rectangle.y0 + height;
+		error = x11_region_set(&lost, &rectangle);
+		if (error == 0)
+			error = x11_region_subtract(&lost, &readable);
+		if (error == 0)
+			error = x11_region_intersect(&lost, &target.clip);
+		if (target.image == NULL)
+			x11_region_clear(&lost);
+		x11_region_translate(&lost, -target.x, -target.y);
+		if (error == 0)
+			draw_graphics_expose(server, &server->clients[index], x11_read32(request + 8, msb), &lost, request[0]);
+	}
+
+	/* Done with the regions and the drawables; a region that found no memory is BadAlloc. */
+	x11_region_fini(&readable);
+	x11_region_fini(&lost);
+	draw_target_fini(&source);
+	draw_target_fini(&target);
+	if (error != 0)
+		return X11_BAD_ALLOC;
+
+	/* Succeeded: copied. */
+	return 0U;
+}
+
+
+/*
+ * Starts a shape request: its drawable (at byte 4) and context (at byte
+ * 8), the paints of its even and odd dashes, and empty lists of spans
+ * kept inside the drawable's clip.  Returns 0 (the shape is ended with
+ * draw_shape_end), or the error (nothing to end).
+ */
+static unsigned
+draw_shape_begin(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	struct draw_shape *shape)
+{
+	struct x11_box image;
+	struct x11_box extents;
+	unsigned code;
+	int inside;
+	int msb;
+
+	/* The drawable and the context, the drawable of the context's depth. */
+	msb = server->clients[index].order;
+	memset(shape, 0, sizeof(*shape));
+	code = draw_exists(server, x11_read32(request + 4, msb));
+	if (code != 0U)
+		return code;
+	shape->gc = x11_gc_find(server, x11_read32(request + 8, msb));
+	if (shape->gc == NULL)
+		return X11_BAD_GC;
+	code = draw_target_gc(server, x11_read32(request + 4, msb), shape->gc, &shape->target);
+	if (code != 0U) {
+		draw_target_fini(&shape->target);
+		return code;
+	}
+
+	/* The spans are kept inside the clip on the image (nothing where nothing is drawn). */
+	memset(&extents, 0, sizeof(extents));
+	if (shape->target.image != NULL) {
+		x11_region_extents(&shape->target.clip, &extents);
+		image.x0 = 0;
+		image.y0 = 0;
+		image.x1 = shape->target.image->width;
+		image.y1 = shape->target.image->height;
+		inside = x11_box_intersect(&extents, &image, &extents);
+		if (!inside)
+			memset(&extents, 0, sizeof(extents));
+	}
+	x11_spans_init(&shape->even, &extents);
+	x11_spans_init(&shape->odd, &extents);
+
+	/*
+	 * The paint of the even dashes (and of a solid line or a fill), and of
+	 * a double dash's odd dashes: the background where a solid or a
+	 * stippled fill would take the foreground, otherwise the same.
+	 */
+	draw_paint_of(shape->gc, &shape->target, &shape->paint);
+	shape->odd_paint = shape->paint;
+	if (shape->paint.fill_style == X11_FILL_SOLID || shape->paint.fill_style == X11_FILL_STIPPLED)
+		shape->odd_paint.foreground = shape->paint.background;
+
+	/* Succeeded: ready to draw. */
+	return 0U;
+}
+
+/* Ends what starting a shape made, drawing nothing more. */
+static void
+draw_shape_fini(
+	struct draw_shape *shape)
+{
+	/* The lists and the drawable's clip. */
+	x11_spans_fini(&shape->even);
+	x11_spans_fini(&shape->odd);
+	draw_target_fini(&shape->target);
+}
+
+/*
+ * Paints the spans a shape has made (each pixel once when they are
+ * merged first), keeps the box of what was painted, and empties the
+ * lists for the next shape.
+ */
+static void
+draw_shape_paint(
+	struct draw_shape *shape,
+	int merge)
+{
+	struct x11_box extents;
+
+	/* A list that ran out of memory leaves the request BadAlloc. */
+	if (shape->even.failed || shape->odd.failed)
+		shape->failed = 1;
+
+	/* Each pixel once, when the shape asks. */
+	if (merge) {
+		x11_spans_merge(&shape->even);
+		x11_spans_merge(&shape->odd);
+	}
+
+	/* The even spans, then the odd ones, painted. */
+	if (shape->target.image != NULL) {
+		x11_render_spans(shape->target.image, &shape->target.clip, &shape->paint, shape->even.spans, shape->even.count);
+		x11_render_spans(shape->target.image, &shape->target.clip, &shape->odd_paint, shape->odd.spans, shape->odd.count);
+	}
+
+	/* The box around what was painted. */
+	x11_spans_extents(&shape->even, &extents);
+	draw_shape_widen(shape, &extents);
+	x11_spans_extents(&shape->odd, &extents);
+	draw_shape_widen(shape, &extents);
+
+	/* Empty for the next shape. */
+	x11_spans_clear(&shape->even);
+	x11_spans_clear(&shape->odd);
+}
+
+/* Widens the box of what a shape painted by a box (an empty one adds nothing). */
+static void
+draw_shape_widen(
+	struct draw_shape *shape,
+	const struct x11_box *box)
+{
+	/* An empty box. */
+	if (box->x0 >= box->x1 || box->y0 >= box->y1)
+		return;
+
+	/* The first box painted. */
+	if (!shape->painted) {
+		shape->bounds = *box;
+		shape->painted = 1;
+		return;
+	}
+
+	/* Around both. */
+	if (box->x0 < shape->bounds.x0)
+		shape->bounds.x0 = box->x0;
+	if (box->y0 < shape->bounds.y0)
+		shape->bounds.y0 = box->y0;
+	if (box->x1 > shape->bounds.x1)
+		shape->bounds.x1 = box->x1;
+	if (box->y1 > shape->bounds.y1)
+		shape->bounds.y1 = box->y1;
+}
+
+/*
+ * Ends a shape request: what it painted is shown again.  Returns 0, or
+ * BadAlloc when memory ran out on the way (what was painted stays).
+ */
+static unsigned
+draw_shape_end(
+	struct x11server *server,
+	struct draw_shape *shape)
+{
+	int failed;
+
+	/* Shown again, and done with the lists. */
+	if (shape->painted)
+		draw_dirty(server, &shape->target, &shape->bounds);
+	failed = shape->failed;
+	draw_shape_fini(shape);
+
+	/* Memory ran out. */
+	if (failed)
+		return X11_BAD_ALLOC;
+
+	/* Succeeded: drawn. */
+	return 0U;
+}
+
+/*
+ * Adds a path through points (on the image) to a shape's lists, as the
+ * context draws lines: thin or wide, solid or dashed.  A thin path paints
+ * each point once: each line leaves its last point to the next, and the
+ * path's last point is not painted with a NotLast cap or when it is the
+ * first point again.
+ */
+static void
+draw_shape_path(
+	struct draw_shape *shape,
+	const int *points,
+	size_t count)
+{
+	struct x11_dash dash;
+	struct x11_dash *dashed;
+	struct x11_spans *odd;
+	const uint8_t *lengths;
+	size_t dash_count;
+	size_t at;
+	unsigned cap;
+	int closed;
+	int last;
+
+	/* The dashes start at the offset; a double dash draws its odd dashes too. */
+	dashed = NULL;
+	odd = NULL;
+	if (shape->gc->line_style != LINE_SOLID) {
+		lengths = x11_gc_dashes(shape->gc, &dash_count);
+		x11_dash_start(&dash, lengths, dash_count, shape->gc->dash_offset);
+		dashed = &dash;
+	}
+	if (shape->gc->line_style == LINE_DOUBLE_DASH)
+		odd = &shape->odd;
+
+	/* A wide path, its NotLast cap a butt one. */
+	cap = shape->gc->cap_style;
+	if (shape->gc->line_width != 0U) {
+		if (cap == X11_CAP_NOT_LAST)
+			cap = X11_CAP_BUTT;
+		x11_shape_wide_path(&shape->even, odd, dashed, points, count, shape->gc->line_width, cap, shape->gc->join_style);
+		return;
+	}
+
+	/* A thin path of one point is that point. */
+	if (count == 1U) {
+		x11_shape_thin_line(&shape->even, odd, dashed, points[0], points[1], points[0], points[1], cap != X11_CAP_NOT_LAST);
+		return;
+	}
+
+	/* A thin path that ends where it began closes on its first point. */
+	closed = 0;
+	if (count > 2U &&
+	    points[0] == points[count * 2U - 2U] &&
+	    points[1] == points[count * 2U - 1U])
+		closed = 1;
+
+	/* Each line, the last one ending on its last point unless that is not painted. */
+	for (at = 0U; at + 1U < count; at++) {
+		last = 0;
+		if (at + 2U == count && cap != X11_CAP_NOT_LAST && !closed)
+			last = 1;
+		x11_shape_thin_line(&shape->even, odd, dashed, points[at * 2U], points[at * 2U + 1U], points[at * 2U + 2U], points[at * 2U + 3U], last);
+	}
+}
+
+/*
+ * Reads a request's points (relative to the one before when asked) onto
+ * a shape's image, as x, y pairs (malloc'd).  Returns them, or NULL when
+ * there are none or no memory (the shape is marked failed).
+ */
+static int *
+draw_points(
+	struct draw_shape *shape,
+	const uint8_t *bytes,
+	size_t count,
+	int relative,
+	int msb)
+{
+	int *points;
+	size_t at;
+	int last_x;
+	int last_y;
+	int x;
+	int y;
+
+	/* No points. */
+	if (count == 0U)
+		return NULL;
+
+	/* Room for them. */
+	points = malloc(count * 2U * sizeof(*points));
+	if (points == NULL) {
+		shape->failed = 1;
+		return NULL;
+	}
+
+	/* Each point, a relative one added to the one before. */
+	last_x = 0;
+	last_y = 0;
+	for (at = 0U; at < count; at++) {
+		x = (int16_t)x11_read16(bytes + at * 4U, msb);
+		y = (int16_t)x11_read16(bytes + at * 4U + 2U, msb);
+		if (at != 0U && relative) {
+			x = draw_far(x + last_x);
+			y = draw_far(y + last_y);
+		}
+		points[at * 2U] = shape->target.x + x;
+		points[at * 2U + 1U] = shape->target.y + y;
+		last_x = x;
+		last_y = y;
+	}
+
+	/* Succeeded: the points. */
+	return points;
+}
+
+/* Returns a coordinate walked by relative steps, kept from going so far that it would overflow. */
+static int
+draw_far(
+	int value)
+{
+	/* As far as DRAW_FAR either way. */
+	if (value > DRAW_FAR)
+		return DRAW_FAR;
+	if (value < -DRAW_FAR)
+		return -DRAW_FAR;
+
+	/* Near enough. */
+	return value;
+}
+
+/* Reads one arc of a request (x, y, width, height, two angles) onto a shape's image. */
+static void
+draw_arc_of(
+	const struct draw_shape *shape,
+	const uint8_t *bytes,
+	int msb,
+	struct x11_arc *arc)
+{
+	/* The box of the ellipse on the image, and the angles. */
+	arc->x = shape->target.x + (int16_t)x11_read16(bytes, msb);
+	arc->y = shape->target.y + (int16_t)x11_read16(bytes + 2, msb);
+	arc->width = x11_read16(bytes + 4, msb);
+	arc->height = x11_read16(bytes + 6, msb);
+	arc->angle1 = (int16_t)x11_read16(bytes + 8, msb);
+	arc->angle2 = (int16_t)x11_read16(bytes + 10, msb);
 }

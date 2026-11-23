@@ -22,17 +22,9 @@
  * written to the socket, and each way of a connection ends on its own
  * (the EOF and the shut of the socket's sending).
  *
- * Procedure referenced: OpenSSH's ssh, openssh-portable
- * fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0: ssh.c (ssh_init_forwarding,
- * ssh_confirm_remote_forward), channels.c
- * (channel_setup_fwd_listener_tcpip, channel_fwd_bind_addr,
- * channel_rfwd_bind_host, connect_to).  The messages are theirs.
- *
  * On Windows each listening socket is made exclusive (SO_EXCLUSIVEADDRUSE)
  * before it is bound, so that no other program, even the same user's,
  * binds the same port to take its connections.
- * Procedure referenced: Microsoft, "Using SO_REUSEADDR and
- * SO_EXCLUSIVEADDRUSE" (Windows Sockets 2).
  *
  * What differs from OpenSSH's ssh: a connection that cannot be made to a
  * remote forwarding's destination, and a direct-tcpip channel the server
@@ -133,6 +125,9 @@ forward_init(
  * each local forwarding and asks the server for each remote one.
  * Returns 0, or FORWARD_FATAL with the line in fatal when
  * ExitOnForwardFailure ends the connection.
+ *
+ * Values referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_init_forwarding, the text of the messages it writes).
  */
 int
 forward_start(
@@ -560,6 +555,9 @@ forward_listen_local(
  * address; "localhost" is the loopback addresses; any other is that
  * address (a name is looked up).  Returns 0 with *count of them, or
  * ENOENT when there is none (the reason said).
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (channel_setup_fwd_listener_tcpip, channel_fwd_bind_addr).
  */
 static int
 forward_bind_addresses(
@@ -674,6 +672,8 @@ forward_listen_one(
 			(void)snprintf(line, sizeof(line), "bind [%s]:%u: %s", host, (unsigned)address->port, forward_error_text(error));
 			forward_say(forwards, line);
 		}
+
+		/* Succeeded: the address list ends here, bound or not. */
 		return 0;
 	}
 
@@ -746,6 +746,9 @@ forward_bind(
  * port again with SO_REUSEADDR and take the connections.  Elsewhere a
  * bound port is not shared without both sockets asking.  Returns 0 or
  * EIO.
+ *
+ * Procedure referenced: Microsoft, "Using SO_REUSEADDR and
+ * SO_EXCLUSIVEADDRUSE" (Windows Sockets 2).
  */
 static int
 forward_make_exclusive(
@@ -775,6 +778,9 @@ forward_make_exclusive(
  * "localhost" when no bind address was given, as OpenSSH's ssh sends.
  * Returns 0, or FORWARD_FATAL when the request could not go and
  * ExitOnForwardFailure ends the connection.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_init_forwarding).
  */
 static int
 forward_ask_remote(
@@ -967,6 +973,9 @@ forward_take_closed(
  * Takes the server's answer to a remote forwarding.  Returns 0, or
  * FORWARD_FATAL when a refusal ends the connection
  * (ExitOnForwardFailure).
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_confirm_remote_forward).
  */
 static int
 forward_take_reply(
@@ -989,6 +998,8 @@ forward_take_reply(
 			(void)snprintf(line, sizeof(line), "Allocated port %u for remote forward to %s:%u", event->port, forward->connect_host, (unsigned)forward->connect_port);
 			forward_say(forwards, line);
 		}
+
+		/* Succeeded: the reply was taken. */
 		return 0;
 	}
 
@@ -1008,6 +1019,9 @@ forward_take_reply(
  * Takes a forwarded-tcpip channel the server opened for a remote
  * forwarding: connects to the forwarding's destination, and answers the
  * server once the connection is made or failed.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (connect_to).
  */
 static void
 forward_take_open(
@@ -1026,6 +1040,8 @@ forward_take_open(
 		(void)ssh_engine_open_answer(forwards->engine, event->channel, 0);
 		return;
 	}
+
+	/* Takes the forwarding the connection belongs to. */
 	forward = &forwards->config->forward[remote->forward];
 
 	/* Takes an entry for the connection; one too many is refused. */
@@ -1034,6 +1050,8 @@ forward_take_open(
 		(void)ssh_engine_open_answer(forwards->engine, event->channel, 0);
 		return;
 	}
+
+	/* Remembers the channel the connection is carried on. */
 	link->channel = event->channel;
 
 	/* Looks the destination up (the thread waits for the system's answer, as OpenSSH's ssh does). */
@@ -1289,6 +1307,8 @@ forward_settle(
 			forward_abort(forwards, link);
 			return;
 		}
+
+		/* Remembers that the end of this side was sent. */
 		link->eof_sent = 1;
 	}
 
@@ -1497,6 +1517,8 @@ forward_address_text(
 		(void)snprintf(text, size, "?");
 		return;
 	}
+
+	/* Skips the brackets of an IPv6 address. */
 	if (written[0] == '[') {
 		start = written + 1;
 		end--;

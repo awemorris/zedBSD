@@ -82,17 +82,29 @@
 #define REQUEST_FREE_PIXMAP		54U
 #define REQUEST_CREATE_GC		55U
 #define REQUEST_CHANGE_GC		56U
+#define REQUEST_COPY_GC			57U
+#define REQUEST_SET_DASHES		58U
+#define REQUEST_SET_CLIP_RECTANGLES	59U
 #define REQUEST_FREE_GC			60U
 #define REQUEST_CLEAR_AREA		61U
 #define REQUEST_COPY_AREA		62U
+#define REQUEST_COPY_PLANE		63U
+#define REQUEST_POLY_POINT		64U
 #define REQUEST_POLY_LINE		65U
+#define REQUEST_POLY_SEGMENT		66U
+#define REQUEST_POLY_RECTANGLE		67U
+#define REQUEST_POLY_ARC		68U
+#define REQUEST_FILL_POLY		69U
 #define REQUEST_POLY_FILL_RECTANGLE	70U
+#define REQUEST_POLY_FILL_ARC		71U
 #define REQUEST_PUT_IMAGE		72U
 #define REQUEST_GET_IMAGE		73U
 #define REQUEST_POLY_TEXT8		74U
 #define REQUEST_POLY_TEXT16		75U
 #define REQUEST_IMAGE_TEXT8		76U
 #define REQUEST_IMAGE_TEXT16		77U
+#define REQUEST_CREATE_COLORMAP		78U
+#define REQUEST_LOOKUP_COLOR		92U
 #define REQUEST_CREATE_CURSOR		93U
 #define REQUEST_CREATE_GLYPH_CURSOR	94U
 #define REQUEST_FREE_CURSOR		95U
@@ -460,8 +472,14 @@ protocol_dispatch(
 	struct x11_client *client;
 	unsigned code;
 
-	/* The handler of the opcode. */
+	/* The colormaps' requests have a handler of their own. */
 	client = &server->clients[index];
+	if (request[0] >= REQUEST_CREATE_COLORMAP && request[0] <= REQUEST_LOOKUP_COLOR) {
+		code = x11_colormap_request(server, index, request, length);
+		return code;
+	}
+
+	/* The handler of the opcode. */
 	switch (request[0]) {
 	case REQUEST_CREATE_WINDOW:
 		code = x11_request_create_window(server, index, request, length);
@@ -600,6 +618,15 @@ protocol_dispatch(
 	case REQUEST_CHANGE_GC:
 		code = x11_request_change_gc(server, index, request, length);
 		break;
+	case REQUEST_COPY_GC:
+		code = x11_request_copy_gc(server, index, request, length);
+		break;
+	case REQUEST_SET_DASHES:
+		code = x11_request_set_dashes(server, index, request, length);
+		break;
+	case REQUEST_SET_CLIP_RECTANGLES:
+		code = x11_request_set_clip_rectangles(server, index, request, length);
+		break;
 	case REQUEST_FREE_GC:
 		code = x11_request_free_gc(server, index, request, length);
 		break;
@@ -609,11 +636,32 @@ protocol_dispatch(
 	case REQUEST_COPY_AREA:
 		code = x11_request_copy_area(server, index, request, length);
 		break;
+	case REQUEST_COPY_PLANE:
+		code = x11_request_copy_plane(server, index, request, length);
+		break;
+	case REQUEST_POLY_POINT:
+		code = x11_request_poly_point(server, index, request, length);
+		break;
 	case REQUEST_POLY_LINE:
 		code = x11_request_poly_line(server, index, request, length);
 		break;
+	case REQUEST_POLY_SEGMENT:
+		code = x11_request_poly_segment(server, index, request, length);
+		break;
+	case REQUEST_POLY_RECTANGLE:
+		code = x11_request_poly_rectangle(server, index, request, length);
+		break;
+	case REQUEST_POLY_ARC:
+		code = x11_request_poly_arc(server, index, request, length);
+		break;
+	case REQUEST_FILL_POLY:
+		code = x11_request_fill_poly(server, index, request, length);
+		break;
 	case REQUEST_POLY_FILL_RECTANGLE:
 		code = x11_request_poly_fill_rectangle(server, index, request, length);
+		break;
+	case REQUEST_POLY_FILL_ARC:
+		code = x11_request_poly_fill_arc(server, index, request, length);
 		break;
 	case REQUEST_PUT_IMAGE:
 		code = x11_request_put_image(server, index, request, length);

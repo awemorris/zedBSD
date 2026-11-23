@@ -1401,8 +1401,8 @@ x11_mark_dirty(
 /*
  * Releases what a closed client held: its windows (with their inferiors),
  * what it asked for on other windows, its pixmaps, graphics contexts,
- * fonts and cursors, and the charge of the properties it wrote that
- * outlive it.
+ * fonts, colormaps and cursors, and the charge of the properties it wrote
+ * that outlive it.
  */
 void
 x11_resources_release(
@@ -1424,6 +1424,7 @@ x11_resources_release(
 	window_release_kind(server, owner, X11_RESOURCE_PIXMAP);
 	window_release_kind(server, owner, X11_RESOURCE_GC);
 	window_release_kind(server, owner, X11_RESOURCE_FONT);
+	window_release_kind(server, owner, X11_RESOURCE_COLORMAP);
 	window_release_kind(server, owner, X11_RESOURCE_CURSOR);
 
 	/* The properties it wrote on windows that stay. */
@@ -1451,6 +1452,7 @@ window_values_read(
 	struct x11_pixmap *pixmap;
 	uint32_t value;
 	unsigned holder;
+	unsigned kind;
 	unsigned bit;
 	int msb;
 
@@ -1511,8 +1513,11 @@ window_values_read(
 				return X11_BAD_VALUE;
 			break;
 		case ATTRIBUTE_COLORMAP:
-			/* CopyFromParent or the screen's one colormap. */
-			if (value != 0U && value != X11_COLORMAP_XID)
+			/* CopyFromParent, the screen's colormap, or one a client made. */
+			if (value == 0U || value == X11_COLORMAP_XID)
+				break;
+			kind = x11_resource_type(server, value);
+			if (kind != X11_RESOURCE_COLORMAP)
 				return X11_BAD_COLORMAP;
 			break;
 		case ATTRIBUTE_CURSOR:
@@ -1590,8 +1595,13 @@ window_values_apply(
 	/* The events kept from propagating, the colormap and the cursor. */
 	if ((values->mask & (1U << ATTRIBUTE_DO_NOT_PROPAGATE)) != 0U)
 		window->do_not_propagate = values->value[ATTRIBUTE_DO_NOT_PROPAGATE];
-	if ((values->mask & (1U << ATTRIBUTE_COLORMAP)) != 0U && window->window_class == X11_INPUT_OUTPUT)
-		window->colormap = X11_COLORMAP_XID;
+	if ((values->mask & (1U << ATTRIBUTE_COLORMAP)) != 0U && window->window_class == X11_INPUT_OUTPUT) {
+		window->colormap = values->value[ATTRIBUTE_COLORMAP];
+		if (window->colormap == 0U && window->parent != NULL)
+			window->colormap = window->parent->colormap;
+		if (window->colormap == 0U)
+			window->colormap = X11_COLORMAP_XID;
+	}
 	if ((values->mask & (1U << ATTRIBUTE_CURSOR)) != 0U)
 		window_set_cursor(server, window, values->value[ATTRIBUTE_CURSOR]);
 
@@ -2462,6 +2472,8 @@ window_release_kind(
 			x11_gc_free(server, object);
 		} else if (type == X11_RESOURCE_FONT) {
 			x11_font_free(server, object);
+		} else if (type == X11_RESOURCE_COLORMAP) {
+			x11_colormap_free(server, object);
 		} else {
 			x11_cursor_free(server, object);
 		}

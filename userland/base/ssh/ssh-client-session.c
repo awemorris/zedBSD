@@ -772,6 +772,8 @@ client_take_event(
 		client_forward_failed(session);
 		return 0;
 	}
+
+	/* Passes a failure of the forwardings back to the caller. */
 	if (error != 0)
 		return error;
 
@@ -926,6 +928,8 @@ client_take_login(
 		client_forward_failed(session);
 		return 0;
 	}
+
+	/* Passes a failure of the forwardings back to the caller. */
 	if (error != 0)
 		return error;
 

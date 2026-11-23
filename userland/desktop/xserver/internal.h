@@ -11,7 +11,7 @@
  * These are the core's modules, none of which does input or output of its
  * own.  client.c keeps the server's life and its clients' connections
  * (their bytes come and go through the transport), protocol.c dispatches
- * their requests and answers the font ones, input.c
+ * their requests, input.c
  * keeps the keyboard, the pointer, the focus and the grabs and answers
  * their requests, resource.c keeps the resource ids and the memory each client holds,
  * window.c keeps the window tree and answers its requests, event.c
@@ -19,7 +19,9 @@
  * properties, selection.c keeps selections and the clipboard's bridge,
  * draw.c keeps the pixels of the top-level windows, the clips, the
  * exposures and the pixmap and drawing requests, gc.c the graphics
- * contexts, render-cpu.c draws (render.h) and region.c keeps regions,
+ * contexts, shape.c turns lines, arcs and polygons into spans,
+ * colormap.c and colornames.c keep the colormaps and the colours' names,
+ * render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
  * wm.c is the top-level windows' window manager (ICCCM and EWMH), font.c
@@ -120,6 +122,7 @@
 #define X11_RESOURCE_GC		3U
 #define X11_RESOURCE_FONT	4U
 #define X11_RESOURCE_CURSOR	5U
+#define X11_RESOURCE_COLORMAP	6U
 #define X11_RESOURCE_GONE	0xffU
 
 /*
@@ -665,7 +668,9 @@ struct x11_transfer {
  * the drawables it may draw on.  The tile, the stipple and the clip mask
  * are copied when they are set (the protocol leaves later changes to the
  * pixmaps undefined), so a pixmap may be freed while a context uses it;
- * the clip is a region on the clip origin (clip_set 0: none).
+ * the clip is a region on the clip origin (clip_set 0: none).  The dashes
+ * are one length (dash_one, as ChangeGC gives them) or the list SetDashes
+ * gave (dash_list, malloc'd), dash_count lengths in all.
  */
 struct x11_gc {
 	uint32_t id;
@@ -694,7 +699,9 @@ struct x11_gc {
 	int clip_set;
 	struct x11_region clip;
 	uint16_t dash_offset;
-	uint8_t dashes;
+	uint8_t dash_one;
+	uint8_t *dash_list;
+	size_t dash_count;
 	size_t charged;
 };
 
@@ -795,6 +802,16 @@ struct x11_cursor {
 	uint16_t background[3];
 	uint32_t version;
 	size_t charged;
+};
+
+/*
+ * One colormap a client made.  The screen's one visual is TrueColor, so a
+ * colormap holds no cells: every one gives each colour the pixel of its
+ * own bits, and only its id and its owner are kept.
+ */
+struct x11_colormap {
+	uint32_t id;
+	unsigned owner;
 };
 
 /*
@@ -1297,7 +1314,14 @@ void x11_image_free(struct x11_image *image);
 size_t x11_image_bytes(int width, int height);
 unsigned x11_request_clear_area(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_copy_area(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_copy_plane(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_point(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_poly_line(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_segment(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_arc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_fill_poly(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_fill_arc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_poly_fill_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_put_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_get_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -1311,7 +1335,16 @@ void x11_pixmap_free(struct x11server *server, struct x11_pixmap *pixmap);
 unsigned x11_request_create_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_change_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_free_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_copy_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_set_dashes(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_set_clip_rectangles(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+const uint8_t *x11_gc_dashes(const struct x11_gc *gc, size_t *count);
 void x11_gc_free(struct x11server *server, struct x11_gc *gc);
+
+/* colormap.c: colormaps and colours. */
+unsigned x11_colormap_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_colormap_free(struct x11server *server, struct x11_colormap *colormap);
+int x11_color_lookup(const char *name, size_t length, uint16_t *red, uint16_t *green, uint16_t *blue);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);

@@ -50,9 +50,11 @@ option(MIKUTERM_WERROR "Make every warning an error" ${MIKUTERM_WERROR_DEFAULT})
 
 # The architecture's name in the zip's name.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|ARM64|arm64)$" OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
-	set(MIKUTERM_ZIP_ARCH winarm64)
+	set(MIKUTERM_ZIP_ARCH arm64)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|i686|i586|i486|i386)$")
+	set(MIKUTERM_ZIP_ARCH x86)
 else()
-	set(MIKUTERM_ZIP_ARCH win64)
+	set(MIKUTERM_ZIP_ARCH x64)
 endif()
 
 #
@@ -182,6 +184,9 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-cpu.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/gc.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/draw.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/shape.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/colormap.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/colornames.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/input.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/font.c
