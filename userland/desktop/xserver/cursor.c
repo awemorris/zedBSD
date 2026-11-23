@@ -315,10 +315,14 @@ cursor_create(
 		}
 	}
 
-	/* Succeeded: the cursor in its colours, found by its id. */
+	/* The cursor in its colours, found by its id. */
 	cursor_colors(server, cursor, request + 16, msb);
 	code = cursor_add(server, index, x11_read32(request + 4, msb), cursor);
-	return code;
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: the cursor exists. */
+	return 0U;
 }
 
 /*
@@ -390,7 +394,9 @@ cursor_create_glyph(
 		cursor->shape = (int)source_char;
 		cursor_colors(server, cursor, request + 20, msb);
 		code = cursor_add(server, index, x11_read32(request + 4, msb), cursor);
-		return code;
+		if (code != 0U)
+			return code;
+		return 0U;
 	}
 
 	/* The source glyph's box and bits, kept (the mask's may take its place in the font). */
@@ -474,10 +480,14 @@ cursor_create_glyph(
 	}
 	free(source_bits);
 
-	/* Succeeded: the cursor in its colours, found by its id. */
+	/* The cursor in its colours, found by its id. */
 	cursor_colors(server, cursor, request + 20, msb);
 	code = cursor_add(server, index, x11_read32(request + 4, msb), cursor);
-	return code;
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: the cursor exists. */
+	return 0U;
 }
 
 /* FreeCursor: the id goes (the cursor lives on while a window or a grab names it). */

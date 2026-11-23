@@ -1365,7 +1365,9 @@ font_resolve(
 	size_t pattern_length;
 	size_t offset;
 	size_t index;
+	const char *special;
 	int matches;
+	int found;
 	int error;
 
 	/* An alias stands for its name. */
@@ -1381,22 +1383,28 @@ font_resolve(
 	}
 
 	/* The special fonts by their names. */
+	special = NULL;
 	matches = font_field_is(pattern, pattern_length, FONT_CURSOR_NAME);
 	if (matches) {
-		error = font_make_special(server, FONT_CURSOR_NAME, owner, result);
-		return error;
+		special = FONT_CURSOR_NAME;
+	} else {
+		matches = font_field_is(pattern, pattern_length, FONT_ZED_NAME);
+		if (matches)
+			special = FONT_ZED_NAME;
 	}
-	matches = font_field_is(pattern, pattern_length, FONT_ZED_NAME);
-	if (matches) {
-		error = font_make_special(server, FONT_ZED_NAME, owner, result);
-		return error;
+	if (special != NULL) {
+		error = font_make_special(server, special, owner, result);
+		if (error != 0)
+			return error;
+		return 0;
 	}
 
-	/* The first of the listed names (not the aliases' or special ones) the pattern matches. */
+	/* The first of the listed names (not the aliases' or special ones) the pattern matches and that reads as one. */
 	error = font_names(server);
 	if (error != 0)
 		return error;
-	for (offset = 0U; offset < server->font_names_size; offset += strlen(listed) + 1U) {
+	found = 0;
+	for (offset = 0U; offset < server->font_names_size && !found; offset += strlen(listed) + 1U) {
 		listed = server->font_names + offset;
 		if (listed[0] != '-')
 			continue;
@@ -1404,10 +1412,16 @@ font_resolve(
 		if (!matches)
 			continue;
 		error = font_parse(listed, &spec);
-		if (error != 0)
-			continue;
+		if (error == 0)
+			found = 1;
+	}
+
+	/* Its font. */
+	if (found) {
 		error = font_make(server, &spec, owner, result);
-		return error;
+		if (error != 0)
+			return error;
+		return 0;
 	}
 
 	/* A scalable name at the size the pattern gives. */
