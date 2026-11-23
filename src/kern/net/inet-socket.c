@@ -101,6 +101,7 @@ static int inet6_socket_bind(struct inet_socket *inet, const struct sockaddr *ad
 static int inet6_socket_connect(struct inet_socket *inet, const struct sockaddr *address, socklen_t length);
 static int inet6_socket_name(struct inet_socket *inet, struct sockaddr *address, socklen_t *length, int peer);
 static int inet_ipv4_address_local(uint32_t local, unsigned *ifindex);
+static int inet_socket_reserved_port_check(const struct inet_socket *inet, uint16_t port);
 static int inet_overlap_ipv4(const struct inet_socket *existing, const struct inet_socket *candidate);
 static int inet_overlap_ipv6(const struct inet_socket *existing, const struct inet_socket *candidate);
 static void inet6_mapped(struct in6_addr *out, uint32_t address);
@@ -256,7 +257,8 @@ inet_socket_object_init(
  * Binds a socket to a local address and port.
  *
  * A specific address must belong to a live interface, which then also
- * binds the socket to that interface.
+ * binds the socket to that interface.  A port below IPPORT_RESERVED is
+ * the superuser's only.
  */
 int
 inet_socket_bind(
@@ -266,6 +268,7 @@ inet_socket_bind(
 {
 	const struct sockaddr_in *input;
 	uint32_t local;
+	uint16_t port;
 	unsigned ifindex;
 	int error;
 
@@ -293,12 +296,19 @@ inet_socket_bind(
 		error = inet_ipv4_address_local(local, &ifindex);
 		if (error != 0)
 			return error;
-		inet->ifindex = ifindex;
 	}
 
-	/* Records the local endpoint. */
+	/* Refuses a reserved port to a caller without the privilege for it. */
+	port = net_ntohs(input->sin_port);
+	error = inet_socket_reserved_port_check(inet, port);
+	if (error != 0)
+		return error;
+
+	/* Records the local endpoint, on the interface a specific address names. */
+	if (local != INADDR_ANY)
+		inet->ifindex = ifindex;
 	inet->local_address = local;
-	inet->local_port = net_ntohs(input->sin_port);
+	inet->local_port = port;
 	inet->inet_flags |= INET_SOCKET_BOUND;
 
 	/* Reports the bound socket. */
@@ -349,7 +359,8 @@ inet_socket_connect(
  *
  * Two sockets conflict when they share a port and their addresses are
  * equal or one is the wildcard; SO_REUSEADDR on both sides lifts the
- * wildcard case only.
+ * wildcard case only.  The protocol chooses the sockets to compare: TCP
+ * leaves its connections out for a candidate bound under SO_REUSEADDR.
  */
 int
 inet_socket_local_conflict(
@@ -1825,6 +1836,56 @@ inet_ipv4_address_local(
 	return 0;
 }
 
+/*
+ * Tells whether the caller may bind a socket to a port.
+ *
+ * The ports below IPPORT_RESERVED are the ones a peer trusts to be served
+ * by the system, so only the superuser binds a TCP or UDP socket to one;
+ * anyone else is refused with EACCES.  Port 0 asks for an ephemeral port
+ * and a raw socket has no port, so neither is checked.
+ *
+ * Procedure referenced: FreeBSD 14.1 sys/netinet/in_pcb.c
+ * (in_pcbbind_setup, the reserved port check against
+ * ipport_reservedlow and ipport_reservedhigh).
+ */
+static int
+inet_socket_reserved_port_check(
+	const struct inet_socket *inet,
+	uint16_t port)
+{
+	struct ucred *credential;
+	int superuser;
+
+	/* An ephemeral port is never reserved. */
+	if (port == 0)
+		return 0;
+
+	/* A port at or above IPPORT_RESERVED is anyone's. */
+	if (port >= IPPORT_RESERVED)
+		return 0;
+
+	/* Only TCP and UDP sockets have ports; a raw socket ignores the field. */
+	if (inet->socket.type != SOCK_STREAM) {
+		if (inet->socket.type != SOCK_DGRAM)
+			return 0;
+	}
+
+	/*
+	 * Samples the credential of the calling thread.  A kernel thread
+	 * runs with the superuser's credential of process 0.
+	 */
+	credential = cred_current_ref();
+	superuser = cred_is_superuser(credential);
+	cred_release(credential);
+
+	/* Refuses the reserved port to anyone but the superuser. */
+	if (!superuser)
+		return EACCES;
+
+	/* Succeeded: the superuser may bind a reserved port. */
+	return 0;
+}
+
 /* Tells how two sockets' IPv4 addresses overlap, when both take IPv4. */
 static int
 inet_overlap_ipv4(
@@ -1920,6 +1981,7 @@ inet6_socket_bind(
 	unsigned flags;
 	unsigned ifindex;
 	uint32_t local;
+	uint16_t port;
 	int mapped;
 	int linklocal;
 	int unspecified;
@@ -1931,6 +1993,7 @@ inet6_socket_bind(
 	    address->sa_family != AF_INET6)
 		return EINVAL;
 	kern_memcpy(&input, address, sizeof(input));
+	port = net_ntohs(input.sin6_port);
 
 	/* An IPv4-mapped address: an IPv4 one is configured on an interface (or the wildcard). */
 	mapped = in6_is_v4mapped(&input.sin6_addr);
@@ -1945,13 +2008,18 @@ inet6_socket_bind(
 				return error;
 		}
 
+		/* Refuses a reserved port to a caller without the privilege for it. */
+		error = inet_socket_reserved_port_check(inet, port);
+		if (error != 0)
+			return error;
+
 		/* The socket speaks IPv4 from now on (the wildcard keeps a SO_BINDTODEVICE interface, as IPv4's does). */
 		if (ifindex != 0)
 			inet->ifindex = ifindex;
 		inet->local_address = local;
 		inet->local6 = input.sin6_addr;
 		inet->mapped = 1;
-		inet->local_port = net_ntohs(input.sin6_port);
+		inet->local_port = port;
 		inet->inet_flags |= INET_SOCKET_BOUND;
 		return 0;
 	}
@@ -1983,12 +2051,17 @@ inet6_socket_bind(
 			return EADDRNOTAVAIL;
 	}
 
+	/* Refuses a reserved port to a caller without the privilege for it. */
+	error = inet_socket_reserved_port_check(inet, port);
+	if (error != 0)
+		return error;
+
 	/* Records the local endpoint; [::] keeps a SO_BINDTODEVICE interface, as IPv4's wildcard does. */
 	if (ifindex != 0)
 		inet->ifindex = ifindex;
 	inet->local6 = input.sin6_addr;
 	inet->local_address = 0;
-	inet->local_port = net_ntohs(input.sin6_port);
+	inet->local_port = port;
 	inet->inet_flags |= INET_SOCKET_BOUND;
 
 	/* Succeeded: the bound socket. */
