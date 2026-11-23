@@ -50,9 +50,11 @@ option(MIKUTERM_WERROR "Make every warning an error" ${MIKUTERM_WERROR_DEFAULT})
 
 # The architecture's name in the zip's name.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|ARM64|arm64)$" OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
-	set(MIKUTERM_ZIP_ARCH winarm64)
+	set(MIKUTERM_ZIP_ARCH arm64)
+elif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|i686|i586|i486|i386)$")
+	set(MIKUTERM_ZIP_ARCH x86)
 else()
-	set(MIKUTERM_ZIP_ARCH win64)
+	set(MIKUTERM_ZIP_ARCH x64)
 endif()
 
 #
