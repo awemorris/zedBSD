@@ -571,6 +571,9 @@ run_start(
 	run_window.settings_item = 0;
 	if (options->page != NULL)
 		run_window.settings_item = 1;
+	run_window.new_window_item = 0;
+	if (options->new_window != NULL)
+		run_window.new_window_item = 1;
 	run_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
