@@ -231,6 +231,95 @@ kwl_displays_place_right(
 	*x = (int32_t)right;
 }
 
+/*
+ * Places the displays again after one of them (changed) took another size
+ * (its scale or its mode): that display keeps its left top corner, and
+ * each other display that overlaps it, or that no longer reaches it
+ * through the edges the displays share, goes right of the rightmost
+ * display placed (kwl_displays_place_right, as a display connected while
+ * the compositor runs), one after the other in their order.  The other
+ * displays keep their places.  rects holds the new sizes and gets the new
+ * places.  Returns how many displays moved.
+ */
+unsigned
+kwl_displays_rearrange(
+	struct kwl_display_rect *rects,
+	unsigned count,
+	unsigned changed)
+{
+	struct kwl_display_rect placed[KWL_DISPLAYS_PLACES];
+	unsigned kept[KWL_DISPLAYS_PLACES];
+	unsigned reached[KWL_DISPLAYS_PLACES];
+	unsigned placed_count;
+	unsigned moved;
+	unsigned index;
+	unsigned other;
+	unsigned grew;
+	int overlap;
+	int touch;
+
+	/* Nothing to place without the display that changed among them. */
+	if (count > KWL_DISPLAYS_PLACES || changed >= count)
+		return 0U;
+
+	/* The displays that keep their places: all but those the changed one overlaps now. */
+	for (index = 0U; index < count; index++) {
+		kept[index] = 1U;
+		if (index == changed)
+			continue;
+		overlap = displays_overlap(&rects[index], &rects[changed]);
+		if (overlap)
+			kept[index] = 0U;
+	}
+
+	/* Of those, the ones still reached from the changed display through shared edges. */
+	memset(reached, 0, sizeof(reached));
+	reached[changed] = 1U;
+	grew = 1U;
+	while (grew) {
+		grew = 0U;
+		for (index = 0U; index < count; index++) {
+			/* Only a display reached already reaches others. */
+			if (!reached[index])
+				continue;
+
+			/* The kept displays it shares an edge with. */
+			for (other = 0U; other < count; other++) {
+				if (reached[other] || !kept[other])
+					continue;
+				touch = displays_touch(&rects[index], &rects[other]);
+				if (!touch)
+					continue;
+				reached[other] = 1U;
+				grew = 1U;
+			}
+		}
+	}
+
+	/* The displays that stay, as the others are placed beside them. */
+	placed_count = 0U;
+	for (index = 0U; index < count; index++) {
+		if (!reached[index])
+			continue;
+		placed[placed_count] = rects[index];
+		placed_count++;
+	}
+
+	/* Each display not reached, in turn: right of the rightmost display placed so far. */
+	moved = 0U;
+	for (index = 0U; index < count; index++) {
+		if (reached[index])
+			continue;
+		kwl_displays_place_right(placed, placed_count, &rects[index].x, &rects[index].y);
+		placed[placed_count] = rects[index];
+		placed_count++;
+		moved++;
+	}
+
+	/* Succeeded: how many moved. */
+	return moved;
+}
+
 /* Makes the choice of no file: every display extended, no anchor, no place. */
 void
 kwl_displays_config_init(

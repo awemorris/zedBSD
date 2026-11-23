@@ -113,6 +113,7 @@ terminal_window_open(
 	struct kl_app_options app_options;
 	struct kl_app_event event;
 	int taken;
+	int error;
 
 	/* Nothing held yet. */
 	memset(window, 0, sizeof(*window));
@@ -134,6 +135,15 @@ terminal_window_open(
 	window->kui = kl_app_window_create(window->app, &options);
 	if (window->kui == NULL)
 		return -1;
+
+	/*
+	 * The window follows the screen's scale: the grid, the padding and the
+	 * text are drawn in its pixels (KL_WINDOW_SCALE draws the font again).
+	 * A compositor without the fractional scale shows it at 100 %, scaled.
+	 */
+	error = kl_window_follow_scale(window->kui);
+	if (error != 0)
+		printf("ZTERM SCALE follow=refused error=%d\n", error);
 
 	/* The keyboard's editing buttons come as the compositor's keys for a terminal (Ctrl+Shift+C and V), not as Ctrl+C. */
 	kl_window_edit_by_keys(window->kui);

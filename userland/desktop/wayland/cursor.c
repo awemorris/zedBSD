@@ -18,6 +18,7 @@
  * client, or a cursor surface, brings the arrow back.
  */
 
+#include "compose.h"
 #include "extras.h"
 #include "popup.h"
 #include "toplevel.h"
@@ -129,6 +130,9 @@ static void mask_diagonal(struct cursor_mask *mask, unsigned falling);
 static void mask_ring(struct cursor_mask *mask);
 static void mask_hourglass(struct cursor_mask *mask);
 static int image_make(struct kwl_server *server, unsigned index);
+static int image_make_at(struct kwl_server *server, unsigned index, unsigned scale120, struct kwl_import **made);
+static struct kwl_cursor_set *cursor_set_at(struct kwl_server *server, unsigned scale120);
+static void cursor_set_release(struct kwl_server *server, struct kwl_cursor_set *set);
 static void image_figure(const struct cursor_mask *mask, int size, struct cursor_pixels *pixels);
 static int image_edge(const struct cursor_pixels *pixels, int size, int x, int y, int reach);
 static uint32_t cursor_word(const unsigned char *bytes, size_t offset);
@@ -281,13 +285,74 @@ kwl_cursor_images_rescale(
 }
 
 /*
- * Releases the images of the cursor shapes.
+ * Gives the image to draw the cursor with on a pass shown at a scale (a
+ * head's, compose.c): the image itself (the arrow or a shape's, made at
+ * the output's scale) when the scale is the output's, else the same
+ * cursor drawn at that scale, made the first time it is drawn there.
+ * When it cannot be made the image itself is given (drawn scaled).
+ */
+const struct kwl_import *
+kwl_cursor_scaled(
+	struct kwl_server *server,
+	const struct kwl_import *image,
+	unsigned scale120)
+{
+	struct kwl_cursor_set *set;
+	struct kwl_import **slot;
+	unsigned index;
+	int error;
+
+	/* The output's scale, or no image: the image itself. */
+	if (image == NULL || scale120 == 0U || scale120 == server->cursor_scale120)
+		return image;
+
+	/* The set at the scale (none: drawn scaled). */
+	set = cursor_set_at(server, scale120);
+	if (set == NULL)
+		return image;
+
+	/* The arrow's place in the set, or the shape's. */
+	slot = NULL;
+	if (image == server->arrow)
+		slot = &set->arrow;
+	for (index = 0U; index < KWL_CURSOR_IMAGES && slot == NULL; index++) {
+		if (image == server->cursor_images[index])
+			slot = &set->images[index];
+	}
+
+	/* Not one of the compositor's images: as it is. */
+	if (slot == NULL)
+		return image;
+
+	/* Made the first time it is drawn at the scale. */
+	if (*slot == NULL) {
+		if (slot == &set->arrow)
+			error = kwl_arrow_make(server, scale120, slot);
+		else
+			error = image_make_at(server, (unsigned)(slot - set->images), scale120, slot);
+		if (error != 0) {
+			printf("KWL CURSOR scaled scale=%u errno=%d\n", scale120, error);
+			return image;
+		}
+	}
+
+	/* Succeeded: the cursor at the scale. */
+	return *slot;
+}
+
+/*
+ * Releases the images of the cursor shapes, and every set at another
+ * scale.
  */
 void
 kwl_cursor_images_destroy(
 	struct kwl_server *server)
 {
 	unsigned index;
+
+	/* The sets at other scales. */
+	for (index = 0U; index < KWL_CURSOR_SETS; index++)
+		cursor_set_release(server, &server->cursor_sets[index]);
 
 	/* Each image made. */
 	for (index = 0; index < KWL_CURSOR_IMAGES; index++) {
@@ -801,6 +866,25 @@ image_make(
 	struct kwl_server *server,
 	unsigned index)
 {
+	int error;
+
+	/* Succeeded or not: the image at the output's scale, in its place. */
+	error = image_make_at(server, index, server->cursor_scale120, &server->cursor_images[index]);
+	return error;
+}
+
+/*
+ * Makes the image of a cursor shape (its index) at a scale into *made: the
+ * figure white, its edge black, a round(scale) pixels wide.  Returns 0,
+ * ENOMEM or EIO (*made untouched).
+ */
+static int
+image_make_at(
+	struct kwl_server *server,
+	unsigned index,
+	unsigned scale120,
+	struct kwl_import **made)
+{
 	struct cursor_mask mask;
 	struct cursor_pixels pixels;
 	struct kwl_import *image;
@@ -813,12 +897,12 @@ image_make(
 	VkResult result;
 
 	/* The image's pixels across, and how far its edge reaches. */
-	size = kwl_scale_snap(CURSOR_SIZE, server->cursor_scale120);
+	size = kwl_scale_snap(CURSOR_SIZE, scale120);
 	if (size > CURSOR_PIXELS_MOST)
 		size = CURSOR_PIXELS_MOST;
 	if (size < CURSOR_SIZE)
 		size = CURSOR_SIZE;
-	reach = kwl_scale_snap(1, server->cursor_scale120);
+	reach = kwl_scale_snap(1, scale120);
 	if (reach < 1)
 		reach = 1;
 
@@ -857,8 +941,83 @@ image_make(
 
 	/* Succeeded: drawn with alpha. */
 	image->draw = KWL_DRAW_ALPHA;
-	server->cursor_images[index] = image;
+	*made = image;
 	return 0;
+}
+
+/*
+ * Finds the set of the cursor's images at a scale, or takes one for it:
+ * an empty set, else one whose scale no open head of the extended mode
+ * shows now (its images let go).  Returns NULL when every set is shown
+ * (more scales than sets).
+ */
+static struct kwl_cursor_set *
+cursor_set_at(
+	struct kwl_server *server,
+	unsigned scale120)
+{
+	struct kwl_cursor_set *set;
+	struct kwl_compose *compose;
+	unsigned index;
+	unsigned head;
+	unsigned shown;
+
+	/* The set at the scale already. */
+	for (index = 0U; index < KWL_CURSOR_SETS; index++) {
+		if (server->cursor_sets[index].scale120 == scale120)
+			return &server->cursor_sets[index];
+	}
+
+	/* An empty set, else one no head shows. */
+	compose = server->compose;
+	for (index = 0U; index < KWL_CURSOR_SETS; index++) {
+		set = &server->cursor_sets[index];
+		shown = 0U;
+		for (head = 0U; head < KWL_HEADS && set->scale120 != 0U; head++) {
+			if (compose->heads[head].open && compose->heads[head].scale120 == set->scale120)
+				shown = 1U;
+		}
+
+		/* A set some head shows stays. */
+		if (shown)
+			continue;
+
+		/* Taken for the scale; its images are made when drawn. */
+		cursor_set_release(server, set);
+		set->scale120 = scale120;
+		return set;
+	}
+
+	/* Succeeded: no set free. */
+	return NULL;
+}
+
+/* Lets go of a set's images; it is empty after. */
+static void
+cursor_set_release(
+	struct kwl_server *server,
+	struct kwl_cursor_set *set)
+{
+	unsigned index;
+
+	/* The arrow. */
+	if (set->arrow != NULL) {
+		kwl_host_image_release(server->compose, set->arrow);
+		free(set->arrow);
+		set->arrow = NULL;
+	}
+
+	/* Each shape's image made. */
+	for (index = 0U; index < KWL_CURSOR_IMAGES; index++) {
+		if (set->images[index] == NULL)
+			continue;
+		kwl_host_image_release(server->compose, set->images[index]);
+		free(set->images[index]);
+		set->images[index] = NULL;
+	}
+
+	/* Succeeded: empty. */
+	set->scale120 = 0U;
 }
 
 /* Stretches a logical mask to an image of size pixels across: each pixel takes the unit its middle lies in. */

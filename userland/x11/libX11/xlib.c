@@ -30,6 +30,37 @@ struct _XGC {
 
 /* The largest request, in bytes (its length field counts 65535 words). */
 #define XZED_REQUEST_BYTES (65535U * 4U)
+
+/* The keyboard's requests, and MappingNotify. */
+#define KEYMAP_GET_KEYBOARD_MAPPING	101U
+#define KEYMAP_GET_MODIFIER_MAPPING	119U
+#define KEYMAP_MAPPING_NOTIFY		34
+
+/* The core protocol's modifiers: Shift, Lock, and the first of Mod1 to Mod5. */
+#define KEYMAP_MODIFIERS		8U
+#define KEYMAP_LOCK			1U
+
+/* The keysyms that name a modifier's meaning, and the keypad's keysyms. */
+#define KEYMAP_MODE_SWITCH		0xff7eU
+#define KEYMAP_NUM_LOCK			0xff7fU
+#define KEYMAP_CAPS_LOCK		0xffe5U
+#define KEYMAP_SHIFT_LOCK		0xffe6U
+#define KEYMAP_KEYPAD_FIRST		0xff80U
+#define KEYMAP_KEYPAD_LAST		0xffbdU
+
+/* What the Lock modifier does: nothing, Caps Lock (letters), Shift Lock (every key). */
+#define KEYMAP_LOCK_NONE		0
+#define KEYMAP_LOCK_CAPS		1
+#define KEYMAP_LOCK_SHIFT		2
+
+/*
+ * A connection: its socket, the ids it chooses, the root window, the
+ * sequence number of its last request and the events read ahead of a
+ * reply.  The keyboard's map, read when the connection opens and again
+ * after a MappingNotify: the keycodes the server has, the keysyms of each
+ * (keysyms_per_keycode a keycode; NULL when the server gave none), and
+ * the modifier bits that are Mode_switch and Num_Lock and what Lock does.
+ */
 struct _XDisplay {
 	int fd;
 	uint32_t base, next, root;
@@ -37,6 +68,14 @@ struct _XDisplay {
 	uint16_t sequence;
 	uint8_t events[EVENT_QUEUE_SIZE][32];
 	unsigned event_head, event_count;
+	uint8_t min_keycode;
+	uint8_t max_keycode;
+	unsigned keysyms_per_keycode;
+	uint32_t *keysyms;
+	unsigned mode_switch_mask;
+	unsigned num_lock_mask;
+	int lock_meaning;
+	int keymap_stale;
 };
 
 static void w16(uint8_t *p, uint16_t v);
@@ -53,6 +92,12 @@ static int store_string(Display *d, Window w, Atom property, const char *n);
 static int fetch_string(Display *d, Window w, Atom property, char **value);
 static int text_req(Display *d, uint8_t op, Drawable w, GC g, int x, int y, const void *s, int n, int wide);
 static void event(Display *d, const uint8_t *b, XEvent *e);
+static void keymap_load(Display *d);
+static int keymap_read_keysyms(Display *d);
+static int keymap_read_modifiers(Display *d);
+static uint32_t keymap_keysym(const Display *d, unsigned keycode, unsigned column);
+static void keymap_case(uint32_t keysym, uint32_t *lower, uint32_t *upper);
+static int keymap_discard(Display *d, size_t bytes);
 
 /*
  * Implements the XOpenDisplay operation.
@@ -110,6 +155,11 @@ XOpenDisplay(
 	d->root = r32(b + screen);
 	d->white = 0xffffff;
 
+	/* The keycodes the server has, and its keyboard's map. */
+	d->min_keycode = b[26];
+	d->max_keycode = b[27];
+	keymap_load(d);
+
 	/* Returns the computed result. */
 	return d;
 bad:
@@ -134,6 +184,7 @@ XCloseDisplay(
 	if (!d)
 		return 0;
 	close(d->fd);
+	free(d->keysyms);
 	free(d);
 
 	/* Reports successful completion. */
@@ -1756,56 +1807,107 @@ XSync(
 }
 
 /*
- * Implements the XLookupKeysym operation.
+ * Returns the keysym of a key event.
+ *
+ * Index 0 chooses the keysym the event's state types, by the core
+ * protocol's rules: the second group while Mode_switch's modifier is held
+ * (the first when the key has none), the keypad's digits while Num_Lock's
+ * is, the second keysym of the group with Shift (or Shift Lock), and an
+ * upper-case letter with Caps Lock.  Another index is that column of the
+ * key's keysyms as the server gave them.  (Xlib's own XLookupKeysym
+ * returns column 0 for index 0; the tree's programs want the keysym the
+ * key types, which XLookupString gives elsewhere.)  The keyboard's map is read
+ * again after the server said it changed.
  */
 KeySym
 XLookupKeysym(
 	XKeyEvent *e,
 	int index)
 {
-	KeyCode k;
+	Display *d;
+	uint32_t first;
+	uint32_t second;
+	uint32_t lower;
+	uint32_t upper;
+	unsigned keycode;
+	unsigned group;
+	int shift;
+	int lock;
 
-	/* Handles the e condition. */
-	if (!e || index != 0)
+	/* The event's connection and key. */
+	if (e == NULL || e->display == NULL || index < 0)
 		return None;
-	k = (KeyCode)e->keycode;
+	d = e->display;
+	keycode = e->keycode;
 
-	/* Dispatch the selected operation case. */
-	switch (k) {
-	case 0xe0:
-		/* Returns the computed result. */
-		return XK_Up;
-	case 0xe1:
-		/* Returns the computed result. */
-		return XK_Down;
-	case 0xe2:
-		/* Returns the computed result. */
-		return XK_Left;
-	case 0xe3:
-		/* Returns the computed result. */
-		return XK_Right;
-	case 0xe4:
-		/* Returns the computed result. */
-		return XK_Home;
-	case 0xe5:
-		/* Returns the computed result. */
-		return XK_End;
-	case 0xe6:
-		/* Returns the computed result. */
-		return XK_Page_Up;
-	case 0xe7:
-		/* Returns the computed result. */
-		return XK_Page_Down;
-	case 0xe8:
-		/* Returns the computed result. */
-		return XK_Insert;
-	case 0xe9:
-		/* Returns the computed result. */
-		return XK_Delete;
-	default:
-		/* Returns the computed result. */
-		return k >= 8 ? (KeySym)(k - 8) : None;
+	/* The map, read again when the server said it changed. */
+	if (d->keymap_stale)
+		keymap_load(d);
+	if (d->keysyms == NULL || keycode < d->min_keycode || keycode > d->max_keycode)
+		return None;
+
+	/* Another column: as the server gave it. */
+	if (index != 0)
+		return (KeySym)keymap_keysym(d, keycode, (unsigned)index);
+
+	/*
+	 * One keysym a keycode: the server (xzed) gives each character its own
+	 * keycode, with Shift and Caps Lock already applied, so the keysym is
+	 * the character as it is.
+	 */
+	if (d->keysyms_per_keycode == 1U)
+		return (KeySym)keymap_keysym(d, keycode, 0U);
+
+	/* The group: the second while Mode_switch is held and the key has one. */
+	group = 0U;
+	if ((e->state & d->mode_switch_mask) != 0U) {
+		first = keymap_keysym(d, keycode, 2U);
+		second = keymap_keysym(d, keycode, 3U);
+		if (first != 0U || second != 0U)
+			group = 2U;
 	}
+	first = keymap_keysym(d, keycode, group);
+	second = keymap_keysym(d, keycode, group + 1U);
+
+	/* A group of one keysym is that keysym twice, or a letter's two cases. */
+	if (second == 0U) {
+		keymap_case(first, &lower, &upper);
+		first = lower;
+		second = upper;
+	}
+
+	/* Shift, and Lock as Caps Lock or Shift Lock. */
+	shift = 0;
+	if ((e->state & ShiftMask) != 0U)
+		shift = 1;
+	lock = 0;
+	if ((e->state & LockMask) != 0U)
+		lock = d->lock_meaning;
+
+	/* The keypad with Num_Lock: the digit, unless Shift (or Shift Lock) asks for the function. */
+	if ((e->state & d->num_lock_mask) != 0U && second >= KEYMAP_KEYPAD_FIRST && second <= KEYMAP_KEYPAD_LAST) {
+		if (shift || lock == KEYMAP_LOCK_SHIFT)
+			return (KeySym)first;
+		return (KeySym)second;
+	}
+
+	/* Shift or Shift Lock: the second, a letter in upper case under Caps Lock. */
+	if (shift || lock == KEYMAP_LOCK_SHIFT) {
+		if (lock == KEYMAP_LOCK_CAPS) {
+			keymap_case(second, &lower, &upper);
+			return (KeySym)upper;
+		}
+		return (KeySym)second;
+	}
+
+	/* Caps Lock alone: the first, a letter in upper case. */
+	if (lock == KEYMAP_LOCK_CAPS) {
+		keymap_case(first, &lower, &upper);
+		return (KeySym)upper;
+	}
+
+	/* Succeeded: the first. */
+	return (KeySym)first;
 }
 
 /*
@@ -2609,6 +2711,10 @@ event(
 	e->xany.serial = r16(b + 2);
 	e->xany.send_event = (b[0] & 0x80) != 0;
 
+	/* The keyboard's map changed: it is read again before the next key is looked up. */
+	if (e->type == KEYMAP_MAPPING_NOTIFY)
+		d->keymap_stale = 1;
+
 	/* The selections' events. */
 	if (e->type == SelectionClear) {
 		e->xselectionclear.time = r32(b + 4);
@@ -2674,4 +2780,245 @@ event(
 		e->xkey.state = r16(b + 28);
 		e->xkey.same_screen = b[30];
 	}
+}
+
+/*
+ * Reads the server's keyboard map: the keysyms of every keycode, and the
+ * modifiers that are Mode_switch and Num_Lock and what Lock does.  A
+ * server that answers neither leaves no map (no key has a keysym); one
+ * that answers no modifier map leaves no modifier (xzed's).
+ */
+static void
+keymap_load(
+	Display *d)
+{
+	int error;
+
+	/* Read once more only when asked again. */
+	d->keymap_stale = 0;
+	free(d->keysyms);
+	d->keysyms = NULL;
+	d->keysyms_per_keycode = 0U;
+	d->mode_switch_mask = 0U;
+	d->num_lock_mask = 0U;
+	d->lock_meaning = KEYMAP_LOCK_NONE;
+
+	/* The keysyms. */
+	if (d->min_keycode == 0U || d->max_keycode < d->min_keycode)
+		return;
+	error = keymap_read_keysyms(d);
+	if (error != 0)
+		return;
+
+	/* The modifiers (none when the server does not answer). */
+	(void)keymap_read_modifiers(d);
+}
+
+/* Reads the keysyms of every keycode (GetKeyboardMapping).  Returns 0, or -1. */
+static int
+keymap_read_keysyms(
+	Display *d)
+{
+	uint8_t q[8] = {0};
+	uint8_t r[32];
+	uint32_t *keysyms;
+	uint8_t *bytes;
+	size_t length;
+	size_t count;
+	size_t index;
+	unsigned per;
+	int failed;
+
+	/* Every keycode the server has. */
+	count = (size_t)d->max_keycode - d->min_keycode + 1U;
+	q[0] = KEYMAP_GET_KEYBOARD_MAPPING;
+	q[4] = d->min_keycode;
+	q[5] = (uint8_t)count;
+	failed = req(d, q, sizeof(q));
+	if (failed)
+		return -1;
+	failed = reply(d, r);
+	if (failed)
+		return -1;
+
+	/* The keysyms each keycode has, and their bytes. */
+	per = r[1];
+	length = (size_t)r32(r + 4) * 4U;
+	if (per == 0U || length != count * per * 4U) {
+		(void)keymap_discard(d, length);
+		return -1;
+	}
+	bytes = malloc(length);
+	if (bytes == NULL) {
+		(void)keymap_discard(d, length);
+		return -1;
+	}
+	failed = rd(d->fd, bytes, length);
+	if (failed) {
+		free(bytes);
+		return -1;
+	}
+
+	/* The keysyms, kept in the host's order. */
+	keysyms = malloc(count * per * sizeof(*keysyms));
+	if (keysyms == NULL) {
+		free(bytes);
+		return -1;
+	}
+	for (index = 0U; index < count * per; index++)
+		keysyms[index] = r32(bytes + index * 4U);
+	free(bytes);
+
+	/* Succeeded: the map. */
+	d->keysyms = keysyms;
+	d->keysyms_per_keycode = per;
+	return 0;
+}
+
+/*
+ * Reads the modifiers' keycodes (GetModifierMapping) and finds which
+ * modifiers carry Mode_switch and Num_Lock, and whether Lock is Caps Lock
+ * or Shift Lock.  Returns 0, or -1.
+ */
+static int
+keymap_read_modifiers(
+	Display *d)
+{
+	uint8_t q[4] = {0};
+	uint8_t r[32];
+	uint8_t *keycodes;
+	size_t length;
+	unsigned per;
+	unsigned modifier;
+	unsigned slot;
+	unsigned column;
+	unsigned keycode;
+	uint32_t keysym;
+	int failed;
+
+	/* The request (a server without it answers with an error). */
+	q[0] = KEYMAP_GET_MODIFIER_MAPPING;
+	failed = req(d, q, sizeof(q));
+	if (failed)
+		return -1;
+	failed = reply(d, r);
+	if (failed)
+		return -1;
+
+	/* The keycodes, per of each modifier. */
+	per = r[1];
+	length = (size_t)r32(r + 4) * 4U;
+	if (length != (size_t)per * KEYMAP_MODIFIERS) {
+		(void)keymap_discard(d, length);
+		return -1;
+	}
+	if (length == 0U)
+		return 0;
+	keycodes = malloc(length);
+	if (keycodes == NULL) {
+		(void)keymap_discard(d, length);
+		return -1;
+	}
+	failed = rd(d->fd, keycodes, length);
+	if (failed) {
+		free(keycodes);
+		return -1;
+	}
+
+	/* Each modifier's keys, by the keysyms they carry. */
+	for (modifier = 0U; modifier < KEYMAP_MODIFIERS; modifier++) {
+		for (slot = 0U; slot < per; slot++) {
+			keycode = keycodes[modifier * per + slot];
+			if (keycode == 0U)
+				continue;
+			for (column = 0U; column < d->keysyms_per_keycode; column++) {
+				keysym = keymap_keysym(d, keycode, column);
+				if (keysym == KEYMAP_MODE_SWITCH)
+					d->mode_switch_mask |= 1U << modifier;
+				if (keysym == KEYMAP_NUM_LOCK)
+					d->num_lock_mask |= 1U << modifier;
+				if (modifier == KEYMAP_LOCK && keysym == KEYMAP_CAPS_LOCK)
+					d->lock_meaning = KEYMAP_LOCK_CAPS;
+				if (modifier == KEYMAP_LOCK && keysym == KEYMAP_SHIFT_LOCK && d->lock_meaning == KEYMAP_LOCK_NONE)
+					d->lock_meaning = KEYMAP_LOCK_SHIFT;
+			}
+		}
+	}
+	free(keycodes);
+
+	/* Succeeded: the modifiers' meanings. */
+	return 0;
+}
+
+/* Returns a keycode's keysym in a column (NoSymbol past those it has). */
+static uint32_t
+keymap_keysym(
+	const Display *d,
+	unsigned keycode,
+	unsigned column)
+{
+	/* A keycode or column the map does not have. */
+	if (d->keysyms == NULL || keycode < d->min_keycode || keycode > d->max_keycode)
+		return 0U;
+	if (column >= d->keysyms_per_keycode)
+		return 0U;
+
+	/* Succeeded: the keysym. */
+	return d->keysyms[(size_t)(keycode - d->min_keycode) * d->keysyms_per_keycode + column];
+}
+
+/*
+ * Gives a keysym's lower- and upper-case forms: a Latin-1 letter's two
+ * cases, any other keysym itself twice.
+ */
+static void
+keymap_case(
+	uint32_t keysym,
+	uint32_t *lower,
+	uint32_t *upper)
+{
+	/* Itself, unless a letter. */
+	*lower = keysym;
+	*upper = keysym;
+
+	/* The ASCII letters. */
+	if (keysym >= 'a' && keysym <= 'z') {
+		*upper = keysym - 0x20U;
+		return;
+	}
+	if (keysym >= 'A' && keysym <= 'Z') {
+		*lower = keysym + 0x20U;
+		return;
+	}
+
+	/* Succeeded: the Latin-1 letters (but the multiplication and division signs). */
+	if (keysym >= 0xe0U && keysym <= 0xfeU && keysym != 0xf7U)
+		*upper = keysym - 0x20U;
+	else if (keysym >= 0xc0U && keysym <= 0xdeU && keysym != 0xd7U)
+		*lower = keysym + 0x20U;
+}
+
+/* Reads and drops the rest of a reply.  Returns 0, or -1. */
+static int
+keymap_discard(
+	Display *d,
+	size_t bytes)
+{
+	uint8_t chunk[256];
+	size_t part;
+	int failed;
+
+	/* In chunks. */
+	while (bytes > 0U) {
+		part = bytes;
+		if (part > sizeof(chunk))
+			part = sizeof(chunk);
+		failed = rd(d->fd, chunk, part);
+		if (failed)
+			return -1;
+		bytes -= part;
+	}
+
+	/* Succeeded: dropped. */
+	return 0;
 }

@@ -317,6 +317,7 @@ chooser_draw(
 	uint32_t width;
 	uint32_t height;
 	unsigned scale;
+	int asked;
 	int again;
 	int status;
 
@@ -356,17 +357,31 @@ chooser_draw(
 	}
 
 	/* The next frame asked for while something moves, and the frame shown. */
+	asked = 0;
 	if (again && chooser->frame == NULL) {
 		chooser->frame = wl_surface_frame(kl_window_surface(chooser->window));
-		if (chooser->frame != NULL)
+		if (chooser->frame != NULL) {
 			(void)wl_callback_add_listener(chooser->frame, &chooser_frame_listener, chooser);
+			asked = 1;
+		}
 	}
 
 	/* The glass panels for the frame's size, then the frame shown (a buffer the compositor still reads: drawn again when it comes back). */
 	chooser_glass_panels(chooser);
 	status = kl_window_present(chooser->window, chooser->pixels, (size_t)chooser->width);
-	if (status != 0)
+	if (status != 0) {
+		/*
+		 * A frame not shown (both buffers still read) is drawn again when a
+		 * buffer comes back.  The callback asked for with it went with no
+		 * commit and would never come, and the wake-up draws only while none
+		 * is awaited, so it goes.
+		 */
 		chooser->dirty = 1;
+		if (asked) {
+			wl_callback_destroy(chooser->frame);
+			chooser->frame = NULL;
+		}
+	}
 	(void)wl_display_flush(chooser->display);
 }
 

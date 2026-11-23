@@ -55,11 +55,21 @@
 #define KWL_SCALE_LEAST_LONG		1024U
 
 /*
- * The default: the density (dots per inch) shown at 100 %, and the largest
- * step the default may choose.  Larger steps are only the user's choice.
+ * The default, as Windows chooses its default scale factor (Microsoft,
+ * "Guidance for Rounded Display Bezels", Windows hardware design
+ * guidelines, section "Calculating the Windows Default Scale Factor and
+ * Effective Resolution"): the display's zoom is its density times its
+ * viewing distance over 96 dots per inch at 28 inches, the density and
+ * the distance a desktop monitor is shown at 100 %.  A built-in panel is
+ * a laptop's, seen from 24.5 inches; any other display a desktop's.  The
+ * distances are in tenths of an inch.
  */
-#define KWL_SCALE_AUTO_DPI		110U
-#define KWL_SCALE_AUTO_MAX		240U
+#define KWL_SCALE_ZOOM_DPI		96U
+#define KWL_SCALE_VIEW_DESKTOP		280U
+#define KWL_SCALE_VIEW_LAPTOP		245U
+
+/* The largest step the default may choose (250 %); larger steps are only the user's choice. */
+#define KWL_SCALE_AUTO_MAX		300U
 
 /*
  * Whether a display the user left to the default takes the scale its
@@ -83,10 +93,9 @@
 
 /*
  * Why a display's scale cannot be chosen now (the same bits as
- * libkeiland's KL_DISPLAY_SCALE_WHY_*): it offers 100 % alone, another
- * display is shown beside it (or the same desktop on several), it is not
- * the display the desktop is shown on, or a change of its mode or a game
- * is under way.
+ * libkeiland's KL_DISPLAY_SCALE_WHY_*): it offers 100 % alone, the mirror
+ * shows the anchor's desktop on it (at the anchor's scale), it is shown
+ * nowhere, or a change of its mode or a game is under way.
  */
 #define KWL_SCALE_WHY_FIXED		0x1U
 #define KWL_SCALE_WHY_ALONE		0x2U
@@ -112,7 +121,7 @@ unsigned kwl_scale_offered(uint32_t width, uint32_t height, unsigned *offered, u
 int kwl_scale_offers(uint32_t width, uint32_t height, unsigned scale120);
 unsigned kwl_scale_largest(uint32_t width, uint32_t height);
 unsigned kwl_scale_density(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height);
-unsigned kwl_scale_recommended(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height);
+unsigned kwl_scale_recommended(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height, unsigned viewing);
 unsigned kwl_scale_shown(unsigned chosen, unsigned recommended, uint32_t width, uint32_t height);
 unsigned kwl_scale_from_percent(unsigned percent);
 unsigned kwl_scale_percent(unsigned scale120);
@@ -392,6 +401,61 @@ kwl_scale_unsnap_rect(
 	/* Publishes the size between them. */
 	plane[2] = right - plane[0];
 	plane[3] = bottom - plane[1];
+}
+
+/*
+ * Chooses which of count things kept one a scale (scales[i], 0 for a slot
+ * that holds none; used[i] the clock of its last use) serves a pass at a
+ * scale: the one made at it (*made 1), else a slot that holds none, else
+ * the one used longest ago, to be made again at the scale (*made 0).  A
+ * slot used at the clock since or later (in the frame being recorded) is
+ * not made again, since what was recorded before still draws from it:
+ * when every slot is, count is given and nothing is made.  The passes of
+ * the outputs shown at as many scales as there are slots keep theirs, so
+ * none is made again while they are shown.
+ */
+static inline unsigned
+kwl_scale_slot_choose(
+	const unsigned *scales,
+	const uint64_t *used,
+	unsigned count,
+	unsigned scale,
+	uint64_t since,
+	int *made)
+{
+	unsigned slot;
+	unsigned free_slot;
+	unsigned oldest;
+
+	/* The slot made at the scale, a free one and the one used longest ago. */
+	free_slot = count;
+	oldest = 0U;
+	for (slot = 0U; slot < count; slot++) {
+		if (scales[slot] == scale) {
+			*made = 1;
+			return slot;
+		}
+
+		/* A slot that holds none is taken before any is made again. */
+		if (scales[slot] == 0U && free_slot == count)
+			free_slot = slot;
+
+		/* Otherwise the oldest so far. */
+		if (used[slot] < used[oldest])
+			oldest = slot;
+	}
+
+	/* A free slot, to be made at the scale. */
+	*made = 0;
+	if (free_slot != count)
+		return free_slot;
+
+	/* Every slot is in use in this frame: none is made again. */
+	if (used[oldest] >= since)
+		return count;
+
+	/* The one used longest ago, to be made again. */
+	return oldest;
 }
 
 #endif

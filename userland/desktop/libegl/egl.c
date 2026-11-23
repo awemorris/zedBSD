@@ -825,6 +825,7 @@ timed_create_context(
 	struct zegl_context *context;
 	struct zegl_config *chosen;
 	EGLint version;
+	EGLint minor;
 	unsigned index;
 
 	/* Sharing object names between contexts is not there yet. */
@@ -837,17 +838,50 @@ timed_create_context(
 		return EGL_NO_CONTEXT;
 	}
 
-	/* The version asked for (2 by default); 2 and 3 are made. */
+	/*
+	 * The version asked for: the major version (EGL_CONTEXT_CLIENT_VERSION
+	 * is EGL 1.5's EGL_CONTEXT_MAJOR_VERSION; 2 by default) and the minor
+	 * one (0 by default).
+	 */
 	version = 1;
+	minor = 0;
 	for (index = 0U; attrib_list != NULL && attrib_list[index] != EGL_NONE; index += 2U) {
-		if (attrib_list[index] == EGL_CONTEXT_CLIENT_VERSION)
+		if (attrib_list[index] == EGL_CONTEXT_MAJOR_VERSION)
 			version = attrib_list[index + 1U];
+		if (attrib_list[index] == EGL_CONTEXT_MINOR_VERSION)
+			minor = attrib_list[index + 1U];
 	}
 
 	/* No version given is 2. */
 	if (version == 1)
 		version = 2;
 	if (version != 2 && version != 3) {
+		(void)egl_fail(EGL_BAD_MATCH);
+		return EGL_NO_CONTEXT;
+	}
+
+	/*
+	 * A version that no context here implements is refused, not made as an
+	 * earlier one: OpenGL ES 2.0, 3.0 and 3.1 are made, 2.1 and 3.2 on are
+	 * not.  An application that tries the versions from the latest down
+	 * learns its version from the first context made.  A context of 3 is
+	 * 3.1 only when libGLESv2 finds the device runs OpenGL ES 3.1's compute
+	 * (at the context's first call); on a device without it a request for
+	 * 3.1 still gets a context, of 3.0, which GL_VERSION names.
+	 *
+	 * Reference: Khronos EGL 1.5 specification, section 3.7.1.1 (a context
+	 * of an OpenGL ES version the implementation cannot support is not
+	 * made; EGL_BAD_MATCH).
+	 */
+	if (minor < 0) {
+		(void)egl_fail(EGL_BAD_MATCH);
+		return EGL_NO_CONTEXT;
+	}
+	if (version == 2 && minor > 0) {
+		(void)egl_fail(EGL_BAD_MATCH);
+		return EGL_NO_CONTEXT;
+	}
+	if (version == 3 && minor > 1) {
 		(void)egl_fail(EGL_BAD_MATCH);
 		return EGL_NO_CONTEXT;
 	}

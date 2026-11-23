@@ -81,7 +81,7 @@ mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/
 # The terminal's core, its settings' tab and the drawing on the processor (not its Wayland, Vulkan, process or settings files).
 set(MIKUTERM_TERMINAL_NAMES
 	run screen width search keys font render-build render-cpu display-cpu frame-timer
-	window menu tabs clipboard primary touch settings-page settings-key)
+	window menu tabs clipboard primary touch settings-page settings-key settings-hosts)
 list(TRANSFORM MIKUTERM_TERMINAL_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/terminal/ OUTPUT_VARIABLE MIKUTERM_TERMINAL_SOURCES)
 list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
 
@@ -157,6 +157,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/connection-ssh.c
 	${MIKUTERM_DIR}/known-hosts.c
 	${MIKUTERM_DIR}/ssh-thread.c
+	${MIKUTERM_DIR}/forward.c
+	${MIKUTERM_DIR}/remote-command.c
 	${MIKUTERM_DIR}/launch.c
 	${MIKUTERM_DIR}/wsl.c
 	${MIKUTERM_DIR}/credential.c
@@ -180,6 +182,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-cpu.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/gc.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/draw.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/input.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c

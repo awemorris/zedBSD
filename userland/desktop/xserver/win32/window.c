@@ -454,12 +454,15 @@ window_message(
 			x11server_backend_enter(backend->server, surface->window, 1);
 		return 0;
 	case WM_KILLFOCUS:
-		/* The keys held are let go: their releases go elsewhere. */
+		/* The keys held are let go (their releases go elsewhere), and the X focus leaves the window. */
 		win32_input_release_keys(backend);
+		if (backend->server != NULL)
+			x11server_backend_leave(backend->server, surface->window, 1);
 		return 0;
 	case WM_INPUTLANGCHANGE:
-		/* Another layout: the keysyms are read again. */
+		/* Another layout: the keysyms are read again, and the core's clients hear of them. */
 		win32_layout_read(backend);
+		win32_layout_give(backend);
 		break;
 	case WM_MOUSEMOVE:
 	case WM_LBUTTONDOWN:

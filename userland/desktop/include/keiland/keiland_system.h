@@ -998,9 +998,12 @@ int kl_system_displays_reset_resolution(struct kl_system *system, const char *ke
  * the monitor (its EDID's identity).  It is answered (kl_system_take_result)
  * once the choice is written: 0, EINVAL (not a step, or a display the
  * desktop's display mirrors), ENOTSUP (a step the display does not offer,
- * or a display whose scale cannot be chosen), ENOBUFS (another display is
- * shown beside it), EBUSY (a change of the mode or a game), ENODEV (a key
- * not connected), EPERM (outside an active session).  It returns 0 when
+ * or a display whose scale cannot be chosen), EBUSY (a change of the mode
+ * or a game), ENODEV (a key not connected), EPERM (outside an active
+ * session).  A display beside the desktop's display in the extended mode
+ * takes its scale too; the displays are then placed again around it (it
+ * keeps its left top corner, one it overlaps or one no longer joined goes
+ * right of the rightmost).  It returns 0 when
  * asked, EINVAL (no key, or a scale that is not a whole number of the
  * compositor's 120ths), or ENOTSUP from a compositor before scales.
  *
@@ -1010,8 +1013,8 @@ int kl_system_displays_reset_resolution(struct kl_system *system, const char *ke
  */
 #define KL_DISPLAY_SCALES_MAX			8U
 #define KL_DISPLAY_SCALE_WHY_FIXED		0x1U	/* the display offers 100 % alone */
-#define KL_DISPLAY_SCALE_WHY_ALONE		0x2U	/* another display is shown beside it */
-#define KL_DISPLAY_SCALE_WHY_ANCHOR		0x4U	/* it is not the display the desktop is on */
+#define KL_DISPLAY_SCALE_WHY_ALONE		0x2U	/* the mirror shows the desktop's display on it, at that display's scale */
+#define KL_DISPLAY_SCALE_WHY_ANCHOR		0x4U	/* it shows nothing now */
 #define KL_DISPLAY_SCALE_WHY_BUSY		0x8U	/* a change of its mode or a game is under way */
 struct kl_display_scale {
 	unsigned current;

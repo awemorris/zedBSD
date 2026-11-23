@@ -16,8 +16,9 @@
  * SubstructureNotify clients; keys, buttons and motion start at the window
  * under the pointer (or the focus window) and go up the tree to the first
  * window a client selected them on, unless a window on the way keeps them
- * from propagating.  A button press that reaches a client grabs the
- * pointer for it until every button is up.
+ * from propagating.  Which device event goes where under the focus and
+ * the grabs is input.c's to decide; it builds them and sends them up the
+ * tree with the functions here.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -26,24 +27,17 @@
 #include <string.h>
 
 /* The events whose layout the core speaks of here. */
-#define EVENT_KEYMAP_NOTIFY		11U
+#define EVENT_KEYMAP_NOTIFY		X11_EVENT_KEYMAP_NOTIFY
 #define EVENT_SELECTION_NOTIFY		31U
 
 /* SendEvent's destinations that are not windows: the window under the pointer and the focus window. */
 #define SEND_POINTER_WINDOW		0U
 #define SEND_INPUT_FOCUS		1U
 
-/* The bits of a key or button event's state that are the buttons held (the same bits as their motion masks). */
-#define STATE_BUTTONS			0x1f00U
-
 /* The first number of selections a window keeps room for. */
 #define EVENT_SELECTS_FIRST		2U
 
 static struct x11_event_select *event_select_find(const struct x11_window *window, unsigned client);
-static void event_device(uint8_t *event, struct x11server *server, uint8_t type, uint8_t detail, uint32_t time, const struct x11_window *window, uint32_t child, uint16_t state);
-static struct x11_window *event_propagate(struct x11server *server, struct x11_window *source, const struct x11_window *stop, uint32_t mask, uint8_t type, uint8_t detail, uint32_t time, uint16_t state);
-static int event_to_grab(struct x11server *server, uint32_t mask, uint8_t type, uint8_t detail, uint32_t time, uint16_t state);
-static uint32_t event_child_toward(const struct x11_window *window, const struct x11_window *inferior);
 static void event_swap16(uint8_t *bytes);
 static void event_swap32(uint8_t *bytes);
 
@@ -336,124 +330,6 @@ x11_event_property(
 }
 
 /*
- * Sends a key the backend reported: from the window under the pointer
- * when it is in the focus window, else from the focus window, up to the
- * focus window.
- */
-void
-x11_event_key(
-	struct x11server *server,
-	uint8_t keycode,
-	int pressed,
-	uint32_t time,
-	uint16_t state)
-{
-	struct x11_window *focus;
-	struct x11_window *source;
-	uint32_t mask;
-	uint8_t type;
-	int inside;
-
-	/* No focus drops the key; PointerRoot is the root window, whose inferiors take what is under the pointer. */
-	if (server->focus == X11_FOCUS_NONE)
-		return;
-	focus = x11_window_find(server, server->focus);
-	if (focus == NULL)
-		focus = server->root;
-
-	/* The window under the pointer, when it is the focus window's or one of its inferiors'. */
-	source = x11_window_at(server, server->pointer_x, server->pointer_y);
-	inside = x11_window_inferior(source, focus);
-	if (!inside)
-		source = focus;
-
-	/* The press or the release. */
-	type = X11_EVENT_KEY_RELEASE;
-	mask = X11_MASK_KEY_RELEASE;
-	if (pressed) {
-		type = X11_EVENT_KEY_PRESS;
-		mask = X11_MASK_KEY_PRESS;
-	}
-
-	/* Sent up to the focus window. */
-	(void)event_propagate(server, source, focus, mask, type, keycode, time, state);
-}
-
-/*
- * Sends a button the backend reported: to the client that grabbed the
- * pointer, else up the tree from the window under the pointer.  A press
- * that reaches a client grabs the pointer for it (the caller ends the
- * grab once every button is up).
- */
-void
-x11_event_button(
-	struct x11server *server,
-	uint8_t button,
-	int pressed,
-	uint32_t time,
-	uint16_t state)
-{
-	struct x11_window *source;
-	struct x11_window *delivered;
-	uint32_t mask;
-	uint8_t type;
-	int grabbed;
-
-	/* The press or the release. */
-	type = X11_EVENT_BUTTON_RELEASE;
-	mask = X11_MASK_BUTTON_RELEASE;
-	if (pressed) {
-		type = X11_EVENT_BUTTON_PRESS;
-		mask = X11_MASK_BUTTON_PRESS;
-	}
-
-	/* A grabbed pointer speaks only to its client. */
-	grabbed = event_to_grab(server, mask, type, button, time, state);
-	if (grabbed)
-		return;
-
-	/* Up the tree from the window under the pointer. */
-	source = x11_window_at(server, server->pointer_x, server->pointer_y);
-	delivered = event_propagate(server, source, NULL, mask, type, button, time, state);
-
-	/* A press that reached a client grabs the pointer for it, on the window it reached. */
-	if (pressed && delivered != NULL) {
-		server->grab_owner = x11_event_selector(delivered, X11_MASK_BUTTON_PRESS);
-		server->grab_window = delivered->id;
-	}
-}
-
-/*
- * Sends a motion of the pointer (to where it is now): to the client that
- * grabbed it, else up the tree from the window under it, to the clients
- * that asked for motion (with these buttons held).
- */
-void
-x11_event_motion(
-	struct x11server *server,
-	uint32_t time,
-	uint16_t state)
-{
-	struct x11_window *source;
-	uint32_t mask;
-	int grabbed;
-
-	/* Any motion, and motion with each button held. */
-	mask = X11_MASK_POINTER_MOTION;
-	if ((state & STATE_BUTTONS) != 0U)
-		mask |= X11_MASK_BUTTON_MOTION | ((uint32_t)state & STATE_BUTTONS);
-
-	/* A grabbed pointer speaks only to its client. */
-	grabbed = event_to_grab(server, mask, X11_EVENT_MOTION_NOTIFY, 0U, time, state);
-	if (grabbed)
-		return;
-
-	/* Up the tree from the window under the pointer. */
-	source = x11_window_at(server, server->pointer_x, server->pointer_y);
-	(void)event_propagate(server, source, NULL, mask, X11_EVENT_MOTION_NOTIFY, 0U, time, state);
-}
-
-/*
  * Turns an event (32 bytes) from one byte order to the other, field by
  * field as the core protocol lays out each event.  An event the core does
  * not define is left as it is.
@@ -659,7 +535,7 @@ x11_request_send_event(
 		if (focus == NULL)
 			focus = server->root;
 	}
-	pointer = x11_window_at(server, server->pointer_x, server->pointer_y);
+	pointer = x11_input_window_under(server);
 
 	/* The destination. */
 	destination = NULL;
@@ -713,27 +589,13 @@ x11_request_send_event(
 	return 0U;
 }
 
-/* Returns a client's entry on a window, or NULL. */
-static struct x11_event_select *
-event_select_find(
-	const struct x11_window *window,
-	unsigned client)
-{
-	unsigned index;
-
-	/* The entry of the client. */
-	for (index = 0U; index < window->select_count; index++) {
-		if (window->selects[index].client == client)
-			return &window->selects[index];
-	}
-
-	/* None. */
-	return NULL;
-}
-
-/* Fills a key, button or motion event (least significant byte first) as seen from a window. */
-static void
-event_device(
+/*
+ * Fills a key, button, motion or crossing event (least significant byte
+ * first) as seen from a window: the pointer on the root window and in the
+ * window, the state, on this screen.
+ */
+void
+x11_event_device(
 	uint8_t *event,
 	struct x11server *server,
 	uint8_t type,
@@ -764,11 +626,13 @@ event_device(
 /*
  * Sends a device event from a window up the tree, to the clients of the
  * first window on the way where any asked for it, unless a window keeps it
- * from propagating or the way ends at the stop window.  Returns the window
- * it went to, or NULL.
+ * from propagating or the way ends at the stop window.  With a client
+ * named (not X11_NO_CLIENT), only that client hears it, and only when it
+ * is among those of that first window (the event as it would reach the
+ * client without a grab).  Returns the window it went to, or NULL.
  */
-static struct x11_window *
-event_propagate(
+struct x11_window *
+x11_event_propagate(
 	struct x11server *server,
 	struct x11_window *source,
 	const struct x11_window *stop,
@@ -776,21 +640,39 @@ event_propagate(
 	uint8_t type,
 	uint8_t detail,
 	uint32_t time,
-	uint16_t state)
+	uint16_t state,
+	unsigned only)
 {
 	struct x11_window *window;
+	struct x11_client *client;
 	uint8_t event[32];
 	uint32_t child;
+	uint32_t selected;
 	unsigned delivered;
 
 	/* From the source up, the child on the way named in each event. */
 	window = source;
 	child = 0U;
 	while (window != NULL) {
-		event_device(event, server, type, detail, time, window, child, state);
-		delivered = x11_event_deliver(server, window, mask, event);
-		if (delivered > 0U)
+		x11_event_device(event, server, type, detail, time, window, child, state);
+
+		/* Every client that asked hears it. */
+		if (only == X11_NO_CLIENT) {
+			delivered = x11_event_deliver(server, window, mask, event);
+			if (delivered > 0U)
+				return window;
+		}
+
+		/* The first window anyone asked on ends the way; the named client hears it there if it asked. */
+		selected = x11_event_masks(window);
+		if (only != X11_NO_CLIENT && (selected & mask) != 0U) {
+			selected = x11_event_mask_of(window, only);
+			client = x11_client_of(server, only);
+			if ((selected & mask) == 0U || client == NULL)
+				return NULL;
+			x11_event_send(server, client, event);
 			return window;
+		}
 
 		/* Kept from going on, or at the end of the way. */
 		if ((window->do_not_propagate & mask) != 0U)
@@ -806,55 +688,12 @@ event_propagate(
 }
 
 /*
- * Sends a pointer event to the client that grabbed the pointer, when it
- * asked for it on the grab's window.  Returns nonzero while the pointer is
- * grabbed (whether the event went or not).
+ * Returns the child of a window that an inferior is in (the inferior
+ * itself when it is a child), or None (the inferior is the window, or not
+ * in it).
  */
-static int
-event_to_grab(
-	struct x11server *server,
-	uint32_t mask,
-	uint8_t type,
-	uint8_t detail,
-	uint32_t time,
-	uint16_t state)
-{
-	struct x11_window *window;
-	struct x11_window *pointer;
-	struct x11_client *client;
-	uint8_t event[32];
-	uint32_t selected;
-	uint32_t child;
-
-	/* No grab, or one whose window or client is gone. */
-	if (server->grab_owner == X11_NO_CLIENT)
-		return 0;
-	window = x11_window_find(server, server->grab_window);
-	client = x11_client_of(server, server->grab_owner);
-	if (window == NULL || client == NULL) {
-		server->grab_owner = X11_NO_CLIENT;
-		server->grab_window = 0U;
-		return 0;
-	}
-
-	/* The grab's client hears it when it asked for it on the grab's window. */
-	selected = x11_event_mask_of(window, server->grab_owner);
-	if ((selected & mask) == 0U)
-		return 1;
-
-	/* As seen from the grab's window, the child toward the window under the pointer. */
-	pointer = x11_window_at(server, server->pointer_x, server->pointer_y);
-	child = event_child_toward(window, pointer);
-	event_device(event, server, type, detail, time, window, child, state);
-	x11_event_send(server, client, event);
-
-	/* Succeeded: the grab's client has it. */
-	return 1;
-}
-
-/* Returns the child of a window that an inferior is in (the inferior itself when it is a child), or None. */
-static uint32_t
-event_child_toward(
+uint32_t
+x11_event_child_toward(
 	const struct x11_window *window,
 	const struct x11_window *inferior)
 {
@@ -868,6 +707,24 @@ event_child_toward(
 
 	/* Succeeded: the child. */
 	return inferior->id;
+}
+
+/* Returns a client's entry on a window, or NULL. */
+static struct x11_event_select *
+event_select_find(
+	const struct x11_window *window,
+	unsigned client)
+{
+	unsigned index;
+
+	/* The entry of the client. */
+	for (index = 0U; index < window->select_count; index++) {
+		if (window->selects[index].client == client)
+			return &window->selects[index];
+	}
+
+	/* None. */
+	return NULL;
 }
 
 /* Reverses the two bytes of a 16-bit field. */

@@ -60,7 +60,7 @@ struct terminal_connection;
 #define TERMINAL_OSC		256U
 #define TERMINAL_TITLE		128U
 
-/* The space between the window's edge and the grid, in pixels. */
+/* The space between the window's edge and the grid, in pixels at 100 % (the font's padding is it at the screen's scale). */
 #define TERMINAL_PADDING	8U
 
 /* The default colours: light grey on a dark blue-grey, as 0xRRGGBB. */
@@ -421,6 +421,9 @@ struct terminal_font {
 	unsigned cell_width;
 	unsigned cell_height;
 	int baseline;
+
+	/* The space between the window's edge and the grid in pixels: TERMINAL_PADDING at the screen's scale, set by the caller. */
+	unsigned padding;
 
 	/* The atlas image's size, its pixels (B8G8R8A8, borrowed from the renderer) and its row pitch. */
 	unsigned atlas_width;

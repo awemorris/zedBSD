@@ -1355,6 +1355,7 @@ struct kwl_output_scale_state {
 
 /* The choice of a display's scale (output-scale.c). */
 void kwl_output_scale_choose(struct kwl_server *server);
+void kwl_output_scale_head(struct kwl_server *server, struct kwl_head *head);
 void kwl_output_scale_report(struct kwl_server *server, VkDisplayKHR display, const char *key, struct kwl_output_scale_state *state);
 int kwl_output_scale_set(struct kwl_server *server, const char *key, unsigned scale120, int *saved);
 void kwl_output_resolution_report(struct kwl_server *server, const char *key, unsigned *state, uint32_t *remaining_ms);
@@ -1374,6 +1375,7 @@ int kwl_heads_config_save(struct kwl_server *server);
 uint64_t kwl_heads_config_ticket(void);
 int kwl_heads_config_settled(uint64_t ticket, int *error);
 void kwl_heads_sync(struct kwl_server *server);
+void kwl_heads_rearrange(struct kwl_server *server, unsigned slot, const struct kwl_plane_rect *before);
 void kwl_heads_close_display(struct kwl_server *server, VkDisplayKHR display);
 void kwl_heads_close_all(struct kwl_server *server, struct kwl_head_rest *rests, unsigned *count);
 void kwl_heads_rest_destroy(struct kwl_server *server, struct kwl_head_rest *rests, unsigned count);

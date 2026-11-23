@@ -134,6 +134,7 @@ static int window_relative_y(const struct x11_window *window);
 static void window_map(struct x11server *server, unsigned requester, struct x11_window *window);
 static void window_unmap(struct x11server *server, struct x11_window *window, int from_configure);
 static void window_configure_notify(struct x11server *server, struct x11_window *window);
+static void window_configure_synthetic(struct x11server *server, struct x11_window *window, unsigned client);
 static unsigned window_configure_read(struct x11server *server, struct x11_window *window, uint32_t mask, const uint8_t *values, int msb, struct window_configure *configure);
 static void window_configure_request(struct x11server *server, unsigned redirect, struct x11_window *window, const struct window_configure *configure);
 static void window_gravity(struct x11server *server, struct x11_window *window, int old_width, int old_height, int dx, int dy);
@@ -730,6 +731,7 @@ x11_request_configure_window(
 	int new_x;
 	int new_y;
 	int resized;
+	int border_refused;
 	int fits;
 	int msb;
 
@@ -761,6 +763,19 @@ x11_request_configure_window(
 	if (!window->override_redirect && redirect != X11_NO_CLIENT && redirect != index) {
 		window_configure_request(server, redirect, window, &configure);
 		return 0U;
+	}
+
+	/*
+	 * The rootless server, as the top-level windows' window manager, keeps
+	 * them without a border: a border asked for is 0, and a request that
+	 * then changes nothing is answered with a synthetic ConfigureNotify
+	 * (ICCCM 4.1.5), so the client hears what it has.
+	 */
+	border_refused = 0;
+	if (window->parent == server->root && !window->override_redirect) {
+		if ((configure.mask & (1U << CONFIGURE_BORDER)) != 0U && configure.border != 0U)
+			border_refused = 1;
+		configure.border = 0U;
 	}
 
 	/* Another client that redirects the window's resizes is asked for the size; the rest goes on. */
@@ -797,6 +812,17 @@ x11_request_configure_window(
 	window->border = configure.border;
 	if ((configure.mask & (1U << CONFIGURE_STACK_MODE)) != 0U)
 		(void)window_restack(server, window, configure.sibling, configure.stack_mode);
+
+	/* A refused border that left everything as it was: the synthetic ConfigureNotify alone (nothing newly seen). */
+	if (border_refused &&
+	    new_x == old_x &&
+	    new_y == old_y &&
+	    !resized &&
+	    (configure.mask & (1U << CONFIGURE_STACK_MODE)) == 0U) {
+		x11_draw_end(server);
+		window_configure_synthetic(server, window, index);
+		return 0U;
+	}
 
 	/* The window's clients are told, its children follow their gravity, and what is newly seen is drawn again. */
 	window_configure_notify(server, window);
@@ -1744,6 +1770,17 @@ window_map(
 		return;
 	}
 
+	/*
+	 * The rootless server is the top-level windows' window manager and
+	 * keeps them without a border (the outer corner stays): the clients
+	 * hear the change before the map.
+	 */
+	if (window->parent == server->root && !window->override_redirect && window->border != 0U) {
+		window_move(window, -(int)window->border, -(int)window->border);
+		window->border = 0U;
+		window_configure_notify(server, window);
+	}
+
 	/* Mapped (what is seen of its tree kept first), and told. */
 	x11_draw_begin(server, window, NULL);
 	window->mapped = 1;
@@ -1779,8 +1816,11 @@ window_unmap(
 	event[12] = (uint8_t)from_configure;
 	x11_event_structure(server, window, event);
 
-	/* Succeeded: what was under it is painted and exposed (a top-level window's pixels go). */
+	/* What was under it is painted and exposed (a top-level window's pixels go). */
 	x11_draw_end(server);
+
+	/* Succeeded: the focus in it reverts, and the grabs on it end. */
+	x11_input_window_hidden(server, window);
 }
 
 /* Tells a window's and its parent's clients the window's configuration. */
@@ -1806,6 +1846,42 @@ window_configure_notify(
 
 	/* Told. */
 	x11_event_structure(server, window, event);
+}
+
+/*
+ * Tells the client that asked to configure a top-level window its
+ * configuration as it stands, in a synthetic ConfigureNotify (sent as by
+ * SendEvent, its place on the root window), as a window manager answers
+ * a request it did not carry out.
+ */
+static void
+window_configure_synthetic(
+	struct x11server *server,
+	struct x11_window *window,
+	unsigned client)
+{
+	struct x11_client *asked;
+	uint8_t event[32];
+
+	/* The client, still there. */
+	asked = x11_client_of(server, client);
+	if (asked == NULL)
+		return;
+
+	/* The event and the window, no sibling, its place on the root window, its size, border and override-redirect. */
+	memset(event, 0, sizeof(event));
+	event[0] = X11_EVENT_CONFIGURE_NOTIFY | X11_EVENT_SENT;
+	x11_write32(event + 4, window->id, 0);
+	x11_write32(event + 8, window->id, 0);
+	x11_write16(event + 16, (uint16_t)(window->x - (int)window->border), 0);
+	x11_write16(event + 18, (uint16_t)(window->y - (int)window->border), 0);
+	x11_write16(event + 20, window->width, 0);
+	x11_write16(event + 22, window->height, 0);
+	x11_write16(event + 24, window->border, 0);
+	event[26] = window->override_redirect;
+
+	/* Succeeded: sent. */
+	x11_event_send(server, asked, event);
 }
 
 /*
@@ -2126,7 +2202,7 @@ window_restack(
 
 /*
  * Frees a window that has no children left: what it held, its place in
- * the tree and its id.  The focus and a pointer grab on it go.
+ * the tree and its id.  The focus and the grabs on it go.
  */
 static void
 window_free(
@@ -2135,13 +2211,8 @@ window_free(
 {
 	void *found;
 
-	/* The focus goes back to the window under the pointer, and a grab on it ends. */
-	if (server->focus == window->id)
-		server->focus = X11_FOCUS_POINTER_ROOT;
-	if (server->grab_window == window->id) {
-		server->grab_owner = X11_NO_CLIENT;
-		server->grab_window = 0U;
-	}
+	/* The focus on it reverts, and the grabs on it end. */
+	x11_input_window_destroyed(server, window);
 
 	/* The selections it owned, its properties, and its surface. */
 	x11_selection_forget_window(server, window->id);

@@ -837,7 +837,7 @@ vulkan_swapchain(
 			mode = VK_PRESENT_MODE_MAILBOX_KHR;
 	}
 
-	/* The swapchain: three images when allowed, opaque. */
+	/* The swapchain: three images when allowed. */
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 	create.surface = surface->surface;
@@ -867,7 +867,22 @@ vulkan_swapchain(
 	/* One queue family uses the images. */
 	create.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create.preTransform = capabilities.currentTransform;
+
+	/*
+	 * A config with alpha makes a see-through window: the compositor
+	 * blends the images by their alpha, which OpenGL ES writes
+	 * premultiplied, as a Wayland EGL window's buffers of an alpha config
+	 * are (ARGB8888 rather than XRGB8888).  A config without alpha, or a
+	 * surface that cannot blend, is opaque.
+	 */
 	create.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	if (surface->config != NULL &&
+	    surface->config->alpha > 0 &&
+	    (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) != 0U) {
+		create.compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+	}
+
+	/* The present mode, and the old swapchain the new one replaces. */
 	create.presentMode = mode;
 	create.clipped = VK_TRUE;
 	create.oldSwapchain = old;

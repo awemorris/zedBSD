@@ -129,6 +129,8 @@ struct heads_pointer_shift {
 	const struct kwl_plane_rect *before;
 	const struct kwl_plane_rect *after;
 	unsigned leave;
+	/* The output whose size changed (its pointer carried to the same share of it), or KWL_PLANE_SLOTS for none. */
+	unsigned changed;
 };
 
 /*
@@ -925,6 +927,139 @@ kwl_displays_apply(
 }
 
 /*
+ * Places the displays again after one of them (slot: the anchor or a
+ * head) took another logical size, its scale changed (and the mode, for
+ * WS358): in the extended mode the changed display keeps its left top
+ * corner and a display it overlaps or one no longer joined goes right of
+ * the rightmost (kwl_displays_rearrange, the rule of a display
+ * connected).  `before` is the outputs' rectangles before the change
+ * (kwl_outputs).  The windows of the changed head come to the same share
+ * of its new size, those of a moved display go along with it, the pointer
+ * the same; the places are kept in displays.conf (D-STORE) and the
+ * clients are told.  In the mirror mode only the clients are told.
+ */
+void
+kwl_heads_rearrange(
+	struct kwl_server *server,
+	unsigned slot,
+	const struct kwl_plane_rect *before)
+{
+	struct kwl_display_rect rects[KWL_DISPLAYS_PLACES];
+	unsigned slots[KWL_DISPLAYS_PLACES];
+	struct kwl_plane_rect after[KWL_PLANE_SLOTS];
+	struct heads_pointer_shift follow;
+	struct kwl_compose *compose;
+	struct kwl_client *client;
+	struct kwl_object *object;
+	struct kwl_head *head;
+	unsigned changed;
+	unsigned count;
+	unsigned index;
+	unsigned moved;
+	unsigned at;
+	int32_t dx;
+	int32_t dy;
+	int window;
+	int saved;
+
+	/* The mirror places nothing: every display shows the anchor's desktop. */
+	compose = server->compose;
+	if (compose == NULL || compose->display_mode != KWL_DISPLAYS_EXTENDED) {
+		heads_changed(server);
+		return;
+	}
+
+	/* The rectangles: the anchor's first, then each open head's; the changed one's index. */
+	rects[0].x = compose->output_x;
+	rects[0].y = compose->output_y;
+	rects[0].width = server->width;
+	rects[0].height = server->height;
+	slots[0] = KWL_PLANE_ANCHOR;
+	count = 1U;
+	changed = 0U;
+	for (index = 0U; index < KWL_HEADS && count < KWL_DISPLAYS_PLACES; index++) {
+		head = &compose->heads[index];
+		if (!head->open || head->lost)
+			continue;
+		if (index + 1U == slot)
+			changed = count;
+		rects[count].x = head->x;
+		rects[count].y = head->y;
+		rects[count].width = head->width;
+		rects[count].height = head->height;
+		slots[count] = index + 1U;
+		count++;
+	}
+
+	/* The places again, written back and logged. */
+	moved = kwl_displays_rearrange(rects, count, changed);
+	compose->output_x = rects[0].x;
+	compose->output_y = rects[0].y;
+	printf("KWL DISPLAYS place slot=0 x=%ld y=%ld width=%u height=%u\n", (long)rects[0].x, (long)rects[0].y, rects[0].width, rects[0].height);
+	for (index = 1U; index < count; index++) {
+		head = &compose->heads[slots[index] - 1U];
+		head->x = rects[index].x;
+		head->y = rects[index].y;
+		head->dirty = 1U;
+		printf("KWL DISPLAYS place slot=%u x=%ld y=%ld width=%u height=%u\n", slots[index], (long)rects[index].x, (long)rects[index].y,
+		       rects[index].width, rects[index].height);
+	}
+
+	/* Each head's window: to the same share of the changed head, or along with its head. */
+	(void)kwl_outputs(server, after);
+	for (client = server->clients; client != NULL; client = client->next) {
+		for (object = client->objects; object != NULL; object = object->next) {
+			window = heads_is_window(object);
+			if (!window || object->output == KWL_PLANE_ANCHOR || object->output >= KWL_PLANE_SLOTS)
+				continue;
+			at = object->output;
+
+			/* A window of the changed head (or of a head no longer shown) is carried. */
+			if (at == slot || after[at].width == 0U || before[at].width == 0U) {
+				if (after[at].width == 0U)
+					heads_window_place(server, object, &before[at], &after[KWL_PLANE_ANCHOR], KWL_PLANE_ANCHOR, "scale");
+				else
+					heads_window_place(server, object, &before[at], &after[at], at, "scale");
+				continue;
+			}
+
+			/* Along with its head, and the place it comes back to from docked. */
+			dx = after[at].x - before[at].x;
+			dy = after[at].y - before[at].y;
+			object->x += dx;
+			object->y += dy;
+			object->restore_x += dx;
+			object->restore_y += dy;
+			printf("KWL WINDOW follow surface=%u output=%u x=%d y=%d\n", object->id, at, object->x, object->y);
+		}
+	}
+
+	/* The pointer the same way, the outputs as they are now given to the cursor's box in the same warp. */
+	follow.before = before;
+	follow.after = after;
+	follow.leave = 0U;
+	follow.changed = slot;
+	kwl_pointer_warp(server, after, heads_pointer_follow, &follow);
+
+	/* The places kept: every display shown now. */
+	if (compose->display_name[0] != '\0')
+		(void)kwl_displays_set(&compose->config, compose->display_name, compose->output_x, compose->output_y);
+	for (index = 0U; index < KWL_HEADS; index++) {
+		head = &compose->heads[index];
+		if (!head->open || head->name[0] == '\0')
+			continue;
+		(void)kwl_displays_set(&compose->config, head->name, head->x, head->y);
+	}
+
+	/* Written apart from the places applied (D-STORE). */
+	saved = kwl_heads_config_save(server);
+
+	/* Everything drawn again, and the clients told. */
+	heads_changed(server);
+	printf("KWL DISPLAYS rearranged slot=%u moved=%u saved=%d\n", slot, moved, saved);
+}
+
+/*
  * Describes the displays shown, a line each, for the tests' capture
  * channel (shot.c): "mode=M" first, then "output name=N width=W height=H
  * x=X y=Y rotation=R scanout=S turn=T" (the logical size and the angles,
@@ -1220,15 +1355,14 @@ heads_take(
 	compose = server->compose;
 	memset(head, 0, sizeof(*head));
 	head->display = opening->display;
-	head->width = opening->width;
-	head->height = opening->height;
 	head->refresh = opening->refresh;
 	head->output = opening->output;
 	head->pixel_width = opening->width;
 	head->pixel_height = opening->height;
-	head->scale120 = KWL_SCALE_ONE;
-	head->scale_wanted = KWL_SCALE_ONE;
 	(void)snprintf(head->name, sizeof(head->name), "%s", opening->name);
+
+	/* Its scale, and its rectangle of the plane: its pixels over the scale. */
+	kwl_output_scale_head(server, head);
 
 	/* A view, a framebuffer and a present semaphore for each image, and the acquire's semaphore. */
 	result = heads_targets(compose, head);
@@ -1259,8 +1393,9 @@ heads_take(
 	server->dirty = 1;
 
 	/* Succeeded: the head shows the display. */
-	printf("KWL OUTPUT head open name=%s width=%u height=%u refresh_mhz=%u x=%ld y=%ld images=%u\n", head->name, head->width, head->height,
-	       head->refresh, (long)head->x, (long)head->y, head->output.image_count);
+	printf("KWL OUTPUT head open name=%s width=%u height=%u refresh_mhz=%u x=%ld y=%ld images=%u pixels=%ux%u scale=%u\n", head->name,
+	       head->width, head->height, head->refresh, (long)head->x, (long)head->y, head->output.image_count, head->pixel_width,
+	       head->pixel_height, head->scale120);
 	return 0;
 }
 
@@ -1710,13 +1845,17 @@ heads_record_extended(
 		head->wallpaper = wallpaper->image;
 	}
 
-	/* From here the pass draws the head's part of the plane: its windows and the cursor over them (ws113-p007). */
+	/*
+	 * From here the pass draws the head's part of the plane: its windows
+	 * and the cursor over them (ws113-p007), in logical units, which the
+	 * pass shows at the head's scale on its pixels (compose-bind.c).
+	 */
 	slot = (unsigned)(head - compose->heads) + 1U;
 	server->view_output = slot;
 	server->view_x = head->x - compose->output_x;
 	server->view_y = head->y - compose->output_y;
-	server->view_width = head->output.width;
-	server->view_height = head->output.height;
+	server->view_width = head->width;
+	server->view_height = head->height;
 	compose->scissor_now = scissor;
 	compose->backdrop_set = VK_NULL_HANDLE;
 	count = heads_windows(server, slot, windows, KWL_FRAME_WINDOWS);
@@ -2518,6 +2657,7 @@ heads_windows_follow(
 	follow.before = before;
 	follow.after = after;
 	follow.leave = leave;
+	follow.changed = KWL_PLANE_SLOTS;
 	kwl_pointer_warp(server, after, heads_pointer_follow, &follow);
 }
 
@@ -2907,6 +3047,12 @@ heads_pointer_follow(
 	if (follow->leave || follow->after[slot].width == 0U || follow->before[slot].width == 0U) {
 		kwl_plane_carry(&follow->before[slot], &follow->after[KWL_PLANE_ANCHOR], *x, *y, 1U, 1U, 0, x, y);
 		*output = KWL_PLANE_ANCHOR;
+		return;
+	}
+
+	/* On the output whose size changed: to the same share of its new size. */
+	if (slot == follow->changed) {
+		kwl_plane_carry(&follow->before[slot], &follow->after[slot], *x, *y, 1U, 1U, 0, x, y);
 		return;
 	}
 

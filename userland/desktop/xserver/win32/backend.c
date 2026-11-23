@@ -38,6 +38,10 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_surface_present,
 	win32_clipboard_offer,
 	win32_clipboard_read,
+	win32_input_capture,
+	win32_input_place,
+	win32_input_warp,
+	win32_input_bell,
 };
 
 static unsigned backend_main_scale(void);
@@ -122,8 +126,9 @@ x11_win32_attach(
 	struct x11_win32 *backend,
 	struct x11server *server)
 {
-	/* The server hears the input from now on. */
+	/* The server hears the input from now on, and takes the layout's map. */
 	backend->server = server;
+	win32_layout_give(backend);
 
 	/* It hears whether another program's text is already on the clipboard. */
 	win32_clipboard_attach(backend);

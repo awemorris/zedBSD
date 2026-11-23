@@ -1675,10 +1675,19 @@ emit_interface_decorations(
 		glsl_module_decorate(state->module, variable, SPV_DECORATION_NO_PERSPECTIVE, NULL, 0U);
 	}
 
-	/* A block's members (a geometry shader's input block is an array of it): flat when the member is (or holds an integer: a fragment shader's integer input must be). */
-	if (symbol->type->kind == GLSL_KIND_STRUCT)
+	/*
+	 * A block's members (a geometry shader's input block is an array of
+	 * it): flat when the member is (or holds an integer: a fragment
+	 * shader's integer input must be).  A struct that is not a block is a
+	 * plain variable: its own Flat (the check made it flat when a member
+	 * is an integer) covers its members, which take the locations after
+	 * its own.
+	 */
+	if (symbol->type->kind == GLSL_KIND_STRUCT && symbol->type->block != 0U)
 		emit_block_members(state, symbol->type);
-	if (symbol->type->kind == GLSL_KIND_ARRAY && symbol->type->element->kind == GLSL_KIND_STRUCT)
+	if (symbol->type->kind == GLSL_KIND_ARRAY &&
+	    symbol->type->element->kind == GLSL_KIND_STRUCT &&
+	    symbol->type->element->block != 0U)
 		emit_block_members(state, symbol->type->element);
 
 	/* Centroid and invariance. */

@@ -16,7 +16,8 @@
  * wl_shm buffers, the one the desktop has released, and committed with
  * the changed rectangles as damage.  The pointer's events become pointer
  * frames on the root window (the place in the window plus the window's
- * corner there), and the keyboard's evdev codes become X keycodes.
+ * corner there), and each key is the X keycode of its place on the
+ * keyboard (its evdev code plus 8); the core's map is US.
  *
  * The clipboard: the seat's data device tells the core when another
  * client's text becomes the selection (the core then owns X's CLIPBOARD
@@ -48,17 +49,13 @@
 #define VK_USE_PLATFORM_WAYLAND_KHR 1
 #include <vulkan/vulkan.h>
 
-/* The evdev codes of the pointer's buttons, and the key that toggles caps lock. */
+/* The evdev codes of the pointer's buttons. */
 #define WAYLAND_BTN_LEFT	0x110U
 #define WAYLAND_BTN_RIGHT	0x111U
 #define WAYLAND_BTN_MIDDLE	0x112U
-#define WAYLAND_KEY_CAPSLOCK	58U
 
-/* How many evdev key codes are remembered for their releases. */
-#define WAYLAND_KEYS		256U
-
-/* The modifier bits of wl_keyboard.modifiers kept (the same bits as X's). */
-#define WAYLAND_MODIFIERS	(X11_SHIFT_MASK | X11_CONTROL_MASK | X11_ALT_MASK)
+/* The evdev key codes an X keycode can name (the keycode is the code plus 8, at most 255). */
+#define WAYLAND_KEYS		248U
 
 /* The application's identity on the desktop. */
 #define WAYLAND_APP_ID		"xserver"
@@ -163,12 +160,8 @@ struct x11_wayland {
 	int pointer_y;
 	uint16_t buttons;
 
-	/* The modifiers held and caps lock. */
-	uint32_t modifiers;
-	int caps_lock;
-
-	/* The X keycode each evdev key was pressed as, so its release says the same. */
-	uint8_t keycodes[WAYLAND_KEYS];
+	/* The keys held (by evdev code), whose releases the core hears when the focus leaves. */
+	uint8_t held[WAYLAND_KEYS];
 
 	/*
 	 * The clipboard (ws035-p087): the data device manager and the seat's
@@ -267,11 +260,12 @@ static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_s
 
 /*
  * The backend's functions, which the core calls with the connection as
- * their context.
+ * their context.  Wayland gives no client the pointer's place on the
+ * screen, nor a way to move it or to keep it, nor a bell: those are NULL.
  */
 const struct x11_backend_ops x11_wayland_ops = {
 	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
-	wayland_clipboard_read
+	wayland_clipboard_read, NULL, NULL, NULL, NULL
 };
 
 /* The registry's callbacks. */
@@ -1560,13 +1554,18 @@ wayland_pointer_leave(
 	struct wl_surface *surface)
 {
 	struct x11_wayland *wayland;
+	struct x11_surface *window;
 
 	/* The pointer is in none of the windows. */
 	(void)pointer;
 	(void)serial;
-	(void)surface;
 	wayland = data;
+	window = wayland_window_of(wayland, surface);
 	wayland->pointer_window = NULL;
+
+	/* Succeeded: the core hears that it left the X windows. */
+	if (window != NULL && wayland->server != NULL)
+		x11server_backend_leave(wayland->server, window->id, 0);
 }
 
 /* The pointer moves within a window. */
@@ -1690,7 +1689,10 @@ wayland_keyboard_enter(
 		x11server_backend_enter(wayland->server, window->id, 1);
 }
 
-/* Focus leaves: the modifiers are forgotten. */
+/*
+ * Focus leaves a window: the keys held are released for the core (their
+ * releases go elsewhere), and the X focus leaves the window.
+ */
 static void
 wayland_keyboard_leave(
 	void *data,
@@ -1699,16 +1701,31 @@ wayland_keyboard_leave(
 	struct wl_surface *surface)
 {
 	struct x11_wayland *wayland;
+	struct x11_surface *window;
+	uint32_t key;
 
-	/* No modifier is held any more. */
+	/* Before the core is attached nothing was told. */
 	(void)keyboard;
 	(void)serial;
-	(void)surface;
 	wayland = data;
-	wayland->modifiers = 0U;
+	if (wayland->server == NULL)
+		return;
+
+	/* Each key held, released. */
+	for (key = 0U; key < WAYLAND_KEYS; key++) {
+		if (!wayland->held[key])
+			continue;
+		wayland->held[key] = 0U;
+		x11server_backend_key(wayland->server, (uint8_t)(key + X11_KEYMAP_EVDEV_OFFSET), 0, 0U);
+	}
+
+	/* Succeeded: the X window of the surface (one the core opened) loses the focus. */
+	window = wayland_window_of(wayland, surface);
+	if (window != NULL)
+		x11server_backend_leave(wayland->server, window->id, 1);
 }
 
-/* A key is pressed or released: the server hears its X keycode with the modifiers. */
+/* A key is pressed or released: the server hears the X keycode of its place on the keyboard. */
 static void
 wayland_keyboard_key(
 	void *data,
@@ -1719,48 +1736,28 @@ wayland_keyboard_key(
 	uint32_t state)
 {
 	struct x11_wayland *wayland;
-	uint16_t modifiers;
-	uint8_t keycode;
-	int shifted;
+	int pressed;
 
-	/* The serial, which a selection is set with; a code past the table, or one before the core is attached, is ignored. */
+	/* The serial, which a selection is set with; a code past the keycodes, or one before the core is attached, is ignored. */
 	(void)keyboard;
 	wayland = data;
 	wayland->serial = serial;
 	if (key >= WAYLAND_KEYS || wayland->server == NULL)
 		return;
-	modifiers = (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS);
 
-	/* Caps lock toggles on its press and types nothing. */
-	if (key == WAYLAND_KEY_CAPSLOCK) {
-		if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-			wayland->caps_lock = !wayland->caps_lock;
-		return;
-	}
-
-	/* A release says the keycode its press had. */
-	if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
-		keycode = wayland->keycodes[key];
-		wayland->keycodes[key] = 0U;
-		if (keycode != 0U)
-			x11server_backend_key(wayland->server, keycode, 0, time, modifiers);
-		return;
-	}
-
-	/* A press: the keycode in the current shift and caps lock states. */
-	shifted = 0;
-	if ((wayland->modifiers & X11_SHIFT_MASK) != 0U)
-		shifted = 1;
-	keycode = x11_keymap_keycode((uint16_t)key, shifted, wayland->caps_lock);
-	if (keycode == 0U)
+	/* A release of a key not held (its press went to another client of the desktop) says nothing. */
+	pressed = 0;
+	if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		pressed = 1;
+	if (!pressed && !wayland->held[key])
 		return;
 
-	/* Succeeded: the server hears the press. */
-	wayland->keycodes[key] = keycode;
-	x11server_backend_key(wayland->server, keycode, 1, time, modifiers);
+	/* Succeeded: the server hears it. */
+	wayland->held[key] = (uint8_t)pressed;
+	x11server_backend_key(wayland->server, (uint8_t)(key + X11_KEYMAP_EVDEV_OFFSET), pressed, time);
 }
 
-/* Keeps the modifiers held (the same bits as X's). */
+/* The modifiers the desktop reports are not used: the core makes them from the keys. */
 static void
 wayland_keyboard_modifiers(
 	void *data,
@@ -1771,16 +1768,14 @@ wayland_keyboard_modifiers(
 	uint32_t locked,
 	uint32_t group)
 {
-	struct x11_wayland *wayland;
-
-	/* Only the held ones count. */
+	/* The core makes the modifiers from the keys it hears. */
+	(void)data;
 	(void)keyboard;
 	(void)serial;
+	(void)depressed;
 	(void)latched;
 	(void)locked;
 	(void)group;
-	wayland = data;
-	wayland->modifiers = depressed;
 }
 
 /* Notes a new offer introduced by the desktop; its types follow. */

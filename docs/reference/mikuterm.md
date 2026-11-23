@@ -99,7 +99,13 @@ zedBSD's `ssh`:
   `StrictHostKeyChecking` (`yes`, `no`, `ask`, `accept-new`, `off`),
   `UserKnownHostsFile` (the first path), `GlobalKnownHostsFile`, `BatchMode`,
   `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`,
-  `RequestTTY`, `PasswordAuthentication`, `PubkeyAuthentication`, `LogLevel`.
+  `RequestTTY`, `PasswordAuthentication`, `PubkeyAuthentication`, `LogLevel`,
+  `ForwardX11`, `ForwardX11Trusted`, `ForwardX11Timeout`, `LocalForward`,
+  `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
+  `ClearAllForwardings`, `RemoteCommand` (section 4.4).
+- `SessionType none` (a connection that only forwards ports) is read but
+  refused: the tab says `ssh/config: SessionType none is not supported` and
+  does not connect.
 - Accepted only with a value that changes nothing (for example
   `HashKnownHosts no`, `ForwardAgent no`).
 - Anything else, `Match`, `Include` and `ProxyJump` among them, is an error:
@@ -135,6 +141,75 @@ The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
   exchange is required.
 - Authentication: the keys, then the password. keyboard-interactive and
   agents are not supported.
+
+### 4.4 Port forwarding and `RemoteCommand`
+
+A host's `LocalForward` and `RemoteForward` lines forward TCP ports as
+OpenSSH's `ssh -L` and `ssh -R` do, and as zedBSD's `ssh` does:
+
+```
+Host db
+    HostName server.example.org
+    LocalForward 8080 127.0.0.1:80
+    RemoteForward 9000 localhost:3000
+```
+
+- `LocalForward [address:]port host:hostport`: mikuterm listens on this PC
+  and each connection to it goes through the SSH connection to `host` and
+  `hostport` as the server reaches them. Without an address it listens on
+  the loopback addresses (`127.0.0.1` and `::1`) only; with `GatewayPorts
+  yes`, or the address `*` or empty, on every address of the PC (other
+  computers can then use the port); `localhost` is the loopback addresses;
+  another address (or a name, looked up) is that address only.
+- `RemoteForward [address:]port host:hostport`: the server listens on
+  `port` (on `localhost` unless an address is given; its sshd's
+  `GatewayPorts` decides what it allows) and each connection to it comes to
+  `host` and `hostport` as this PC reaches them. A connection that cannot be
+  made in 30 seconds is refused. `port` 0 lets the server choose.
+- `ExitOnForwardFailure yes` ends the connection when a forwarding cannot be
+  set up; `ClearAllForwardings yes` drops every forwarding of the host.
+- The forwardings start once the user is logged in and last as long as the
+  connection. When the shell ends while forwarded connections are open, the
+  connection stays until they end (the tab says so); close the tab to end
+  them. Each tab connecting to the host has its own forwardings: a second
+  tab with the same `LocalForward` cannot listen on the port.
+- A listening socket is exclusive (`SO_EXCLUSIVEADDRUSE`): no other program
+  can take the port while mikuterm listens on it. When the connection is
+  made again (Enter after a failure), a port that its last connections
+  still hold is tried once more after 2 seconds.
+- Listening on every address may make Windows Defender Firewall ask whether
+  mikuterm may accept connections from the network. On the loopback
+  addresses anyone using this PC can connect to the port, as with OpenSSH.
+
+The tab shows OpenSSH's short lines when a forwarding is not set up as
+asked, and nothing when it is:
+
+| When | The tab shows |
+| --- | --- |
+| A `LocalForward` cannot listen on an address | `bind [127.0.0.1]:8080: Address already in use` (the last address tried) |
+| No `LocalForward` can listen | `Could not request local forwarding.` |
+| The server refuses a `RemoteForward` | `Warning: remote port forwarding failed for listen port 9000` |
+| The server chose the port of `RemoteForward 0 ...` | `Allocated port 40123 for remote forward to localhost:3000` |
+| `ExitOnForwardFailure yes` and a forwarding failed | the connection ends with `Could not request local forwarding.` or `Error: remote port forwarding failed for listen port 9000`, and Enter connects again |
+
+A forwarded connection that the server or this PC cannot make (OpenSSH's
+`channel N: open failed:` and `connect_to ...` lines) is closed without a
+line in the tab. Dynamic forwarding (`DynamicForward`, SOCKS), forwarding
+Unix sockets, and a `RemoteForward` without a destination (a SOCKS proxy on
+the server) are not supported; `DynamicForward` is an error of
+`ssh/config`.
+
+`RemoteCommand` runs that command instead of the shell, on a terminal as the
+shell would be. Its tokens are OpenSSH's: `%%`, `%h` (the host's address),
+`%n` and `%k` (the name as given), `%p`, `%r` (the remote user), `%u` (the
+Windows user), `%d` (the user's profile folder), `%l` (this PC's name),
+`%L` (that name up to its first dot) and `%j` (empty). `%C` and `%i`
+(Windows has no user number) are errors, as are an unknown token and a `%`
+at the end; the tab then names the problem and does not connect.
+
+How a forwarded port differs from OpenSSH's: the server's connections to a
+`RemoteForward` are refused once the shell ended (OpenSSH takes them while
+the connection lasts).
 
 ## 5. Tabs and questions
 
@@ -290,13 +365,46 @@ does not stretch it.
 
 | Pane | Setting | Takes effect | Kept in |
 | --- | --- | --- | --- |
-| Hosts | `ssh/config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh/config` |
+| Hosts | `ssh/config`, a host at a time (below); Open in Text Editor for the rest | the next connection | `ssh/config` |
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
 | Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
 | Behavior | copy-on-select | at once | `config/state.conf` |
 | Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config/mikuterm.conf` |
 | Behavior | `Connect` | the next start | `config/mikuterm.conf` |
 | Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
+
+Hosts pane:
+
+- The list: each `Host` (its names, and `user@address:port` from its own
+  lines), the lines before any `Host` when there are some, and each `Match`
+  (shown, changed only in a text editor). New host and Add Host put a `Host`
+  block where `ssh` reads it before a block that would win over it: before
+  the first `Host` whose patterns match the name, or the first `Match`, else
+  at the end.
+- The form of the host chosen: Name (`Host`), Host address (`HostName`),
+  Port, User, Command (`RemoteCommand`, as written), Identity files
+  (`IdentityFile`, in order), and Port forwarding (`LocalForward`,
+  `RemoteForward`: where it listens, `[address:]port`, and where it goes,
+  `host:port`, an IPv6 address in brackets). A value that another block
+  earlier in the file sets for the same host says `Overridden by line N`
+  (the first value `ssh` obtains is used); identity files and forwards that
+  other blocks add are shown with their lines. Other lines lists the block's
+  lines the form does not show (comments, other keywords, `Include`, a second
+  line of a keyword that `ssh` passes over).
+- Only the lines a change is about are rewritten: a value in place (the
+  keyword's spelling, `=`, indent and a comment after it kept), a line added
+  after the block's lines (indented as they are, ending CR LF or LF as the
+  line before it), a line taken out. Remove Host takes out the `Host` line and
+  its keywords' lines, and keeps the comments.
+- Save (Ctrl+S) checks the text as a connection reads it and writes nothing
+  when a line it changed cannot be read (`Not saved: line N: ...`); a problem
+  the file had already does not stop it. It does not write over a file
+  changed outside since it was read; Revert (Ctrl+R) reads the file again,
+  the changes not saved dropped.
+- Open in Text Editor opens `ssh/config` (made empty when it is not there) in
+  the editor Windows has for it (its `edit`, else its `open`, else Notepad).
+  The pane does not read the editor's changes until Revert or the next start;
+  connections read the file each time.
 
 Keys pane:
 

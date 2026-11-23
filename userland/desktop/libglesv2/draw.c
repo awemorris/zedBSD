@@ -64,6 +64,7 @@ static int draw_signed(GLenum type);
 static VkFormat draw_format(GLint size, GLenum type, GLboolean normalized, int integer, size_t *bytes);
 static int draw_format_ok(struct gles_state *state, VkFormat format);
 static unsigned draw_attribute_base(GLenum type);
+static uint32_t draw_attribute_columns(GLenum type);
 static float draw_component(const unsigned char *element, GLenum type, GLboolean normalized, GLint component);
 static uint32_t draw_integer(const unsigned char *element, GLenum type, GLint component);
 static unsigned draw_sampler_shape(GLenum type);
@@ -2453,23 +2454,49 @@ draw_vertices(
 	uint32_t repeat;
 	uint32_t element_size;
 	uint32_t index;
+	uint32_t count;
+	uint32_t location;
+	uint32_t slot;
+	uint32_t slots;
+	GLenum types[GLES_ATTRIBS];
 	unsigned base;
 	int fetchable;
 	int is_signed;
 	int status;
 
-	/* One binding per active attribute. */
+	/*
+	 * The locations the active attributes take: one for a scalar or a
+	 * vector, one per column of a matrix and per element of an array
+	 * (each read from the generic attribute of its own location), every
+	 * one a binding of its own.
+	 */
 	program = state->program;
 	memset(layout, 0, sizeof(*layout));
+	count = 0U;
 	for (index = 0U; index < program->attribute_count; index++) {
-		attrib = &state->attribs[program->attributes[index].location];
-		layout->locations[index] = program->attributes[index].location;
+		slots = draw_attribute_columns(program->attributes[index].type) * (uint32_t)program->attributes[index].size;
+		for (slot = 0U; slot < slots; slot++) {
+			location = program->attributes[index].location + slot;
+
+			/* The link keeps every location inside the generic attributes; anything else is not drawn. */
+			if (location >= GLES_ATTRIBS || count >= GLES_ATTRIBS)
+				return -1;
+
+			/* The location, and the attribute's type (a matrix's column reads floats, as the matrix does). */
+			layout->locations[count] = location;
+			types[count] = program->attributes[index].type;
+			count++;
+		}
+	}
+
+	/* One binding per location. */
+	for (index = 0U; index < count; index++) {
+		attrib = &state->attribs[layout->locations[index]];
 		layout->rates[index] = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		/* A disabled array: the current value, the same for every vertex. */
 		if (!attrib->enabled) {
-			status = draw_current(state, attrib, program->attributes[index].type, &buffers[index], &offsets[index],
-					      &layout->formats[index]);
+			status = draw_current(state, attrib, types[index], &buffers[index], &offsets[index], &layout->formats[index]);
 			if (status != 0)
 				return -1;
 			layout->strides[index] = 0U;
@@ -2490,7 +2517,7 @@ draw_vertices(
 		 * converted to the input's kind (Vulkan fetches a format only
 		 * into an input of its own kind).
 		 */
-		base = draw_attribute_base(program->attributes[index].type);
+		base = draw_attribute_base(types[index]);
 		is_signed = draw_signed(attrib->type);
 		if (attrib->integer &&
 		    base == 1U &&
@@ -2562,7 +2589,7 @@ draw_vertices(
 	}
 
 	/* Succeeded: every attribute has its vertices. */
-	layout->count = program->attribute_count;
+	layout->count = count;
 	return 0;
 }
 
@@ -2856,6 +2883,36 @@ draw_attribute_base(
 
 	/* Anything else reads floats. */
 	return 0U;
+}
+
+/*
+ * Returns how many locations one element of an attribute of a type takes:
+ * a matrix one per column, a scalar or a vector one.
+ */
+static uint32_t
+draw_attribute_columns(
+	GLenum type)
+{
+	/* The matrices, by their columns. */
+	switch (type) {
+	case GL_FLOAT_MAT2:
+	case GL_FLOAT_MAT2x3:
+	case GL_FLOAT_MAT2x4:
+		return 2U;
+	case GL_FLOAT_MAT3:
+	case GL_FLOAT_MAT3x2:
+	case GL_FLOAT_MAT3x4:
+		return 3U;
+	case GL_FLOAT_MAT4:
+	case GL_FLOAT_MAT4x2:
+	case GL_FLOAT_MAT4x3:
+		return 4U;
+	default:
+		break;
+	}
+
+	/* Anything else takes one. */
+	return 1U;
 }
 
 /* Converts one component of an array's element to a float, as GL reads it. */

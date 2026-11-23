@@ -185,7 +185,7 @@ terminal_build_frame(
 		signed_line = top + (long long)row;
 		if (signed_line < oldest || signed_line > newest)
 			continue;
-		y = (float)((int)TERMINAL_PADDING + row * (int)font->cell_height + screen->view_offset);
+		y = (float)((int)font->padding + row * (int)font->cell_height + screen->view_offset);
 		if (y + (float)font->cell_height <= 0.0f || y >= (float)build->height)
 			continue;
 
@@ -317,7 +317,7 @@ terminal_build_frame(
 			}
 
 			/* The cell's two triangles, over both cells of a wide character. */
-			x = (float)(TERMINAL_PADDING + column * font->cell_width);
+			x = (float)(font->padding + column * font->cell_width);
 			vertex = build_quad(vertex, font, x, y, (float)(cells * font->cell_width), (float)font->cell_height, slot, foreground, background);
 
 			/* The right half of a wide character is drawn with its left. */
@@ -585,14 +585,14 @@ build_preedit(
 
 	/* While the search bar is open: from its caret, on the grid's last row (as the bar draws it). */
 	if (window->search_open && screen->rows != 0U) {
-		y = (float)(TERMINAL_PADDING + (screen->rows - 1U) * font->cell_height);
+		y = (float)(font->padding + (screen->rows - 1U) * font->cell_height);
 		column = terminal_search_bar_column(window->search_query, window->search_length, screen->ambiguous_wide);
 	} else {
 		/* The cursor's row in the view; a cursor the view does not show shows no composed text. */
 		row = (long long)screen->cursor_row + (long long)screen->view;
 		if (row < (long long)first_row || row > (long long)last_row)
 			return vertex;
-		y = (float)((int)TERMINAL_PADDING + (int)row * (int)font->cell_height + screen->view_offset);
+		y = (float)((int)font->padding + (int)row * (int)font->cell_height + screen->view_offset);
 		column = screen->cursor_column;
 	}
 
@@ -641,7 +641,7 @@ build_preedit(
 		}
 
 		/* The character's quad, and the next cell. */
-		x = (float)(TERMINAL_PADDING + column * font->cell_width);
+		x = (float)(font->padding + column * font->cell_width);
 		vertex = build_quad(vertex, font, x, y, (float)(cells * font->cell_width), (float)font->cell_height, slot, foreground, background);
 		column += cells;
 	}
@@ -693,7 +693,7 @@ build_search_bar(
 		snprintf(text + caret, sizeof(text) - caret, "   not found");
 
 	/* The last row of the grid, from its first column. */
-	y = (float)(TERMINAL_PADDING + (screen->rows - 1U) * font->cell_height);
+	y = (float)(font->padding + (screen->rows - 1U) * font->cell_height);
 	start = build->vertices;
 	column = 0U;
 	at = 0;
@@ -733,7 +733,7 @@ build_search_bar(
 		}
 
 		/* The cell's quad, and the next cell. */
-		x = (float)(TERMINAL_PADDING + column * font->cell_width);
+		x = (float)(font->padding + column * font->cell_width);
 		vertex = build_quad(vertex, font, x, y, (float)(cells * font->cell_width), (float)font->cell_height, slot, foreground, background);
 		column += cells;
 	}
