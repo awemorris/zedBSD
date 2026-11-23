@@ -16,15 +16,9 @@
  */
 
 #include "userland/desktop/xserver/internal.h"
-#include "userland/desktop/paths.h"
 
-#include <errno.h>
-#include <fcntl.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <truetype/truetype.h>
-#include <unistd.h>
 
 /* The cell, the size the font is drawn at, and where its baseline is in the cell. */
 #define GLYPHS_CELL_WIDTH	8U
@@ -32,44 +26,37 @@
 #define GLYPHS_PIXELS		13U
 #define GLYPHS_BASELINE		12
 
-/* The largest font file read. */
-#define GLYPHS_FILE_MAX		(32U * 1024U * 1024U)
-
 /* How much coverage sets a pixel. */
 #define GLYPHS_COVERED		128U
 
-static int glyphs_read(struct x11_glyphs *glyphs, const char *path, size_t *size);
 static void glyphs_draw(struct x11_glyphs *glyphs, uint32_t codepoint, struct x11_glyph *glyph);
 
 /*
- * Reads a monospaced TrueType font for the core font.  Returns 0, or an
- * errno value (there is then no text).
+ * Opens the core font over a monospaced TrueType file the caller keeps in
+ * memory, with the file of the characters it lacks (NULL: none), which
+ * the font library reads by its path.  Returns 0, or an errno value
+ * (there is then no text).
  */
 int
 x11_glyphs_open(
 	struct x11_glyphs *glyphs,
-	const char *path)
+	const uint8_t *bytes,
+	size_t size,
+	const char *fallback_path)
 {
-	size_t size;
 	int error;
 
-	/* The file. */
+	/* The face over the bytes. */
 	memset(glyphs, 0, sizeof(*glyphs));
-	error = glyphs_read(glyphs, path, &size);
+	error = truetype_open(bytes, size, 0U, &glyphs->face);
 	if (error != 0) {
 		x11_glyphs_close(glyphs);
 		return error;
 	}
 
-	/* The face over it. */
-	error = truetype_open(glyphs->data, size, 0U, &glyphs->face);
-	if (error != 0) {
-		x11_glyphs_close(glyphs);
-		return error;
-	}
-
-	/* Its companion, the monospaced fallback, for the signs it lacks (ws090-p020). */
-	(void)truetype_open_companions(glyphs->face, NULL, KEILAND_FONT_FALLBACK_MONO);
+	/* Its companion, the monospaced fallback, for the signs it lacks. */
+	if (fallback_path != NULL)
+		(void)truetype_open_companions(glyphs->face, NULL, fallback_path);
 
 	/* At the cell's size. */
 	error = truetype_set_pixel_size(glyphs->face, GLYPHS_PIXELS);
@@ -114,72 +101,18 @@ x11_glyph(
 }
 
 /*
- * Releases the font.
+ * Releases the font (the file's bytes stay the caller's).
  */
 void
 x11_glyphs_close(
 	struct x11_glyphs *glyphs)
 {
-	/* The face reads the file, so it goes first. */
+	/* The face. */
 	if (glyphs->face != NULL)
 		truetype_close(glyphs->face);
-	free(glyphs->data);
 
 	/* No font, and no glyph kept. */
 	memset(glyphs, 0, sizeof(*glyphs));
-}
-
-/* Reads the whole font file into memory the face keeps using. */
-static int
-glyphs_read(
-	struct x11_glyphs *glyphs,
-	const char *path,
-	size_t *size)
-{
-	struct stat status;
-	ssize_t count;
-	size_t done;
-	int descriptor;
-	int error;
-
-	/* The file. */
-	descriptor = open(path, O_RDONLY | O_CLOEXEC);
-	if (descriptor < 0)
-		return errno;
-
-	/* Its size, which must be sensible. */
-	error = fstat(descriptor, &status);
-	if (error != 0 ||
-	    status.st_size <= 0 ||
-	    (unsigned long)status.st_size > GLYPHS_FILE_MAX) {
-		(void)close(descriptor);
-		return EINVAL;
-	}
-
-	/* The memory for it. */
-	*size = (size_t)status.st_size;
-	glyphs->data = malloc(*size);
-	if (glyphs->data == NULL) {
-		(void)close(descriptor);
-		return ENOMEM;
-	}
-
-	/* Read to the end. */
-	done = 0U;
-	while (done < *size) {
-		count = read(descriptor, (char *)glyphs->data + done, *size - done);
-		if (count <= 0) {
-			(void)close(descriptor);
-			return EIO;
-		}
-
-		/* What was read counts towards the whole. */
-		done += (size_t)count;
-	}
-
-	/* Succeeded: the font is in memory. */
-	(void)close(descriptor);
-	return 0;
 }
 
 /* Draws a glyph onto the cell's baseline as one bit a pixel (a glyph that cannot be drawn is an empty cell). */
