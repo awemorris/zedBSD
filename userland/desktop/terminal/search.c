@@ -6,7 +6,7 @@
  */
 
 /*
- * Finding text in the terminal (ws128-p006, Edit > Find): in the lines the
+ * Finding text in the terminal (Edit > Find): in the lines the
  * scrollback keeps and on the screen, by their numbers (a line is numbered
  * from the first the screen ever showed, as the selection's are).
  *
@@ -39,7 +39,7 @@ static uint32_t search_fold(uint32_t codepoint);
 static void search_bounds(const struct terminal_screen *screen, unsigned long *oldest, unsigned long *newest);
 
 /*
- * Reports the column of the search bar's caret (ws090-p022): after
+ * Reports the column of the search bar's caret: after
  * "Find: " and the cells of the text looked for (UTF-8, length bytes), as
  * the bar draws them; the input method's composed text starts there.
  */

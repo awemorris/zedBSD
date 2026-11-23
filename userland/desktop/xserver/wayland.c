@@ -125,6 +125,14 @@ struct x11_surface {
 	unsigned pending_width;
 	unsigned pending_height;
 
+	/*
+	 * Its state (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) as last asked
+	 * of the desktop or told the server.  The desktop does not say when
+	 * it brings a minimized window back; the window's activation (a
+	 * configure with the activated state, or the keyboard's focus) does.
+	 */
+	unsigned state;
+
 	/* The next window of the connection. */
 	struct x11_surface *next;
 };
@@ -226,6 +234,9 @@ static void wayland_toplevel_close(void *data, struct xdg_toplevel *toplevel);
 static void wayland_toplevel_bounds(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height);
 static void wayland_pending_sizes(struct x11_wayland *wayland);
 static void wayland_bounded_size(struct x11_surface *window);
+static void wayland_limits(struct x11_surface *window, const struct x11_size_hints *hints);
+static void wayland_set_state(struct x11_surface *window, unsigned state);
+static void wayland_state_heard(struct x11_surface *window, unsigned state);
 static void wayland_buffer_release(void *data, struct wl_buffer *buffer);
 static void wayland_seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities);
 static void wayland_seat_name(void *data, struct wl_seat *seat, const char *name);
@@ -614,6 +625,10 @@ wayland_open(
 		app_id = WAYLAND_APP_ID;
 	xdg_toplevel_set_app_id(window->toplevel, app_id);
 
+	/* The limits on its size and its state, asked for before the first commit. */
+	wayland_limits(window, &info->hints);
+	wayland_set_state(window, info->flags);
+
 	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	window->titlebar = kl_titlebar_create(wayland->display, window->toplevel, &wayland_titlebar_listener, window);
 	if (window->titlebar == NULL)
@@ -661,6 +676,83 @@ wayland_update(
 	/* The desktop shows the title on the title bar. */
 	if ((changed & X11_SURFACE_CHANGED_TITLE) != 0U)
 		xdg_toplevel_set_title(window->toplevel, info->title);
+
+	/* The limits on its size. */
+	if ((changed & X11_SURFACE_CHANGED_HINTS) != 0U)
+		wayland_limits(window, &info->hints);
+
+	/* Its state as the client asked (minimized, maximized, full-screen). */
+	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0U)
+		wayland_set_state(window, info->flags);
+}
+
+/*
+ * Asks the desktop to keep a window within the limits its X client put on
+ * its size (the smallest and largest size; the steps and the ratio are
+ * the server's to keep).
+ */
+static void
+wayland_limits(
+	struct x11_surface *window,
+	const struct x11_size_hints *hints)
+{
+	/* The smallest size (0: none). */
+	xdg_toplevel_set_min_size(window->toplevel, (int32_t)hints->min_width, (int32_t)hints->min_height);
+
+	/* Succeeded: the largest size (0: none). */
+	xdg_toplevel_set_max_size(window->toplevel, (int32_t)hints->max_width, (int32_t)hints->max_height);
+}
+
+/*
+ * Asks the desktop for the state the X client asked a window to have:
+ * minimized, maximized or not, full-screen or not.  The desktop has no way
+ * to bring a minimized window back; it comes back when the user does.
+ */
+static void
+wayland_set_state(
+	struct x11_surface *window,
+	unsigned state)
+{
+	unsigned old;
+
+	/* What changes. */
+	old = window->state;
+	window->state = state;
+
+	/* Full-screen. */
+	if ((state & X11_SURFACE_FULLSCREEN) != 0U && (old & X11_SURFACE_FULLSCREEN) == 0U)
+		xdg_toplevel_set_fullscreen(window->toplevel, NULL);
+	if ((state & X11_SURFACE_FULLSCREEN) == 0U && (old & X11_SURFACE_FULLSCREEN) != 0U)
+		xdg_toplevel_unset_fullscreen(window->toplevel);
+
+	/* Maximized. */
+	if ((state & X11_SURFACE_MAXIMIZED) != 0U && (old & X11_SURFACE_MAXIMIZED) == 0U)
+		xdg_toplevel_set_maximized(window->toplevel);
+	if ((state & X11_SURFACE_MAXIMIZED) == 0U && (old & X11_SURFACE_MAXIMIZED) != 0U)
+		xdg_toplevel_unset_maximized(window->toplevel);
+
+	/* Succeeded: minimized. */
+	if ((state & X11_SURFACE_ICONIC) != 0U && (old & X11_SURFACE_ICONIC) == 0U)
+		xdg_toplevel_set_minimized(window->toplevel);
+}
+
+/*
+ * Tells the server the state the desktop gave a window (maximized,
+ * full-screen, or back from minimized), when it changed.
+ */
+static void
+wayland_state_heard(
+	struct x11_surface *window,
+	unsigned state)
+{
+	/* The same state. */
+	if (state == window->state)
+		return;
+
+	/* Succeeded: the server hears it. */
+	window->state = state;
+	if (window->wayland->server != NULL)
+		x11server_backend_state(window->wayland->server, window->id, (int)state);
 }
 
 /*
@@ -1335,11 +1427,39 @@ wayland_toplevel_configure(
 	struct wl_array *states)
 {
 	struct x11_surface *window;
+	const uint32_t *state;
+	size_t count;
+	size_t index;
+	unsigned heard;
+	int activated;
+
+	/* The states the desktop gives (32-bit values): maximized, full-screen, activated. */
+	(void)toplevel;
+	window = data;
+	heard = 0U;
+	activated = 0;
+	state = states->data;
+	count = states->size / sizeof(uint32_t);
+	for (index = 0U; index < count; index++) {
+		if (state[index] == XDG_TOPLEVEL_STATE_MAXIMIZED)
+			heard |= X11_SURFACE_MAXIMIZED;
+		if (state[index] == XDG_TOPLEVEL_STATE_FULLSCREEN)
+			heard |= X11_SURFACE_FULLSCREEN;
+		if (state[index] == XDG_TOPLEVEL_STATE_ACTIVATED)
+			activated = 1;
+	}
+
+	/*
+	 * After the first configure, the server hears them; a minimized window
+	 * stays so until the desktop activates it.
+	 */
+	if (window->configured) {
+		if ((window->state & X11_SURFACE_ICONIC) != 0U && !activated)
+			heard |= X11_SURFACE_ICONIC;
+		wayland_state_heard(window, heard);
+	}
 
 	/* A size left to the window keeps its own, within the desktop's bounds (the next dispatch asks for it). */
-	(void)toplevel;
-	(void)states;
-	window = data;
 	if (width <= 0 || height <= 0) {
 		wayland_bounded_size(window);
 		return;
@@ -1683,9 +1803,17 @@ wayland_keyboard_enter(
 	(void)keys;
 	wayland = data;
 
-	/* The X window of the surface (one the core opened) gets the focus. */
+	/* The X window of the surface (one the core opened). */
 	window = wayland_window_of(wayland, surface);
-	if (window != NULL && wayland->server != NULL)
+	if (window == NULL)
+		return;
+
+	/* A minimized window the desktop brought back is no longer minimized. */
+	if ((window->state & X11_SURFACE_ICONIC) != 0U)
+		wayland_state_heard(window, window->state & ~X11_SURFACE_ICONIC);
+
+	/* Succeeded: it gets the focus. */
+	if (wayland->server != NULL)
 		x11server_backend_enter(wayland->server, window->id, 1);
 }
 

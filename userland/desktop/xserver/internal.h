@@ -22,6 +22,7 @@
  * contexts, render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
+ * wm.c is the top-level windows' window manager (ICCCM and EWMH),
  * and keymap.c, glyphs.c and glx.c are the US keyboard map, the core font
  * and the GLX extension.
  */
@@ -94,6 +95,15 @@
 #define X11_COLORMAP_XID	0x00000101U
 #define X11_VISUAL_XID		3U
 
+/*
+ * The window manager's own window (wm.c): the child of the root window
+ * that EWMH's _NET_SUPPORTING_WM_CHECK names, in an id no client chooses.
+ */
+#define X11_WM_CHECK_XID	0x00000102U
+
+/* The longest title a surface is given, in bytes of UTF-8 with its NUL. */
+#define X11_TITLE_MAX		256U
+
 /* The focus that is no window: None (keys are dropped) and PointerRoot (keys go to the window under the pointer). */
 #define X11_FOCUS_NONE		0U
 #define X11_FOCUS_POINTER_ROOT	1U
@@ -126,9 +136,14 @@
 #define X11_ATOM_LAST_PREDEFINED	68U
 #define X11_ATOM_PRIMARY	1U
 #define X11_ATOM_ATOM		4U
+#define X11_ATOM_CARDINAL	6U
 #define X11_ATOM_STRING		31U
+#define X11_ATOM_WINDOW		33U
+#define X11_ATOM_WM_HINTS	35U
 #define X11_ATOM_WM_NAME	39U
+#define X11_ATOM_WM_NORMAL_HINTS	40U
 #define X11_ATOM_WM_CLASS	67U
+#define X11_ATOM_WM_TRANSIENT_FOR	68U
 #define X11_ATOM_ICON_PATH	0x5a000001U
 
 /* The event masks the core speaks of by name (the bits of a window's event mask and of SendEvent's). */
@@ -536,6 +551,18 @@ struct x11_window {
 	char name[64];
 
 	/*
+	 * The window manager's state of a top-level window (wm.c): ICCCM's
+	 * state (WM_STATE: X11_WM_WITHDRAWN, NORMAL or ICONIC), the state its
+	 * surface is to have (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN, with
+	 * wm.c's own bits of a half maximized one), and what of the window
+	 * the surface is yet to be told (X11_SURFACE_CHANGED_*).  An Iconic
+	 * window is unmapped and keeps its surface, minimized.
+	 */
+	uint8_t wm_state;
+	unsigned wm_flags;
+	unsigned wm_changed;
+
+	/*
 	 * A mapped top-level window's surface, the swapchain its pixels are
 	 * shown through (NULL: the backend's present shows them), the size,
 	 * place and title the surface was last given, and whether it must be
@@ -548,7 +575,7 @@ struct x11_window {
 	int32_t surface_x;
 	int32_t surface_y;
 	int surface_fresh;
-	char surface_title[64];
+	char surface_title[X11_TITLE_MAX];
 };
 
 /*
@@ -727,6 +754,42 @@ struct x11_glyphs {
 	struct x11_glyph cache[X11_GLYPHS_CACHED];
 	uint8_t cached[X11_GLYPHS_CACHED];
 	uint8_t coverage[X11_GLYPH_DRAWN_MAX * X11_GLYPH_DRAWN_MAX];
+};
+
+/* ICCCM's states of a top-level window (WM_STATE's first field). */
+#define X11_WM_WITHDRAWN	0U
+#define X11_WM_NORMAL		1U
+#define X11_WM_ICONIC		3U
+
+/*
+ * The atoms the window manager (wm.c) speaks of, interned when the server
+ * starts: ICCCM's protocols and state, and EWMH's hints, the states and
+ * the kinds of window that are shown as menus.
+ */
+struct x11_wm_atoms {
+	uint32_t protocols;
+	uint32_t delete_window;
+	uint32_t take_focus;
+	uint32_t state;
+	uint32_t change_state;
+	uint32_t net_supported;
+	uint32_t net_supporting_wm_check;
+	uint32_t net_wm_name;
+	uint32_t net_wm_state;
+	uint32_t net_wm_state_fullscreen;
+	uint32_t net_wm_state_maximized_vert;
+	uint32_t net_wm_state_maximized_horz;
+	uint32_t net_wm_state_hidden;
+	uint32_t net_wm_window_type;
+	uint32_t net_wm_window_type_menu;
+	uint32_t net_wm_window_type_dropdown_menu;
+	uint32_t net_wm_window_type_popup_menu;
+	uint32_t net_wm_window_type_tooltip;
+	uint32_t net_wm_window_type_combo;
+	uint32_t net_wm_window_type_dnd;
+	uint32_t net_wm_window_type_notification;
+	uint32_t net_active_window;
+	uint32_t net_close_window;
 };
 
 /*
@@ -929,6 +992,14 @@ struct x11server {
 	uint32_t motion_time;
 	int motion_x;
 	int motion_y;
+
+	/*
+	 * The window manager (wm.c): its atoms, and the top-level window the
+	 * root window's _NET_ACTIVE_WINDOW names (0: none), kept so that it
+	 * is written only when it changes.
+	 */
+	struct x11_wm_atoms wm;
+	uint32_t wm_active;
 };
 
 /* client.c: the clients' connections, and the log. */
@@ -981,6 +1052,9 @@ unsigned x11_request_translate_coordinates(struct x11server *server, unsigned in
 void x11_window_destroy(struct x11server *server, struct x11_window *window);
 void x11_window_raise(struct x11server *server, struct x11_window *window);
 void x11_window_backend_configure(struct x11server *server, struct x11_window *window, int x, int y, uint16_t width, uint16_t height);
+int x11_window_server_child(struct x11server *server, uint32_t id);
+void x11_window_map(struct x11server *server, struct x11_window *window);
+void x11_window_unmap(struct x11server *server, struct x11_window *window);
 int x11_window_viewable(const struct x11_window *window);
 struct x11_window *x11_window_next(struct x11_window *window, const struct x11_window *top);
 int x11_window_inferior(const struct x11_window *window, const struct x11_window *ancestor);
@@ -1100,6 +1174,24 @@ void x11_input_window_hidden(struct x11server *server, struct x11_window *window
 void x11_input_window_destroyed(struct x11server *server, struct x11_window *window);
 void x11_input_forget_client(struct x11server *server, unsigned client);
 unsigned x11_input_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_input_capture_lost(struct x11server *server, uint32_t time);
+
+/* wm.c: the top-level windows' window manager (ICCCM and EWMH). */
+int x11_wm_init(struct x11server *server);
+void x11_wm_fini(struct x11server *server);
+int x11_wm_map(struct x11server *server, struct x11_window *window);
+void x11_wm_unmapped(struct x11server *server, struct x11_window *window);
+void x11_wm_close(struct x11server *server, struct x11_window *window);
+void x11_wm_backend_state(struct x11server *server, struct x11_window *window, unsigned state);
+void x11_wm_root_event(struct x11server *server, const uint8_t *event);
+void x11_wm_property(struct x11server *server, struct x11_window *window, uint32_t atom);
+void x11_wm_focus_changed(struct x11server *server);
+int x11_wm_protocol(struct x11server *server, struct x11_window *window, uint32_t protocol);
+void x11_wm_take_focus(struct x11server *server, struct x11_window *window, uint32_t time);
+int x11_wm_keeps_surface(const struct x11_window *window);
+void x11_wm_info(struct x11server *server, struct x11_window *window, struct x11_surface_info *info);
+void x11_wm_title(struct x11server *server, struct x11_window *window, char *title, size_t size);
+void x11_wm_constrain(struct x11server *server, struct x11_window *window, int *width, int *height);
 
 /* glyphs.c: the core font. */
 int x11_glyphs_open(struct x11_glyphs *glyphs, const uint8_t *bytes, size_t size, const char *fallback_path);

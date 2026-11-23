@@ -175,6 +175,13 @@ x11server_create(
 	server->pointer_y = (int)server->height / 2;
 	x11_input_init(server);
 
+	/* The window manager: its atoms, its own window and the root window's EWMH hints. */
+	error = x11_wm_init(server);
+	if (error != 0) {
+		x11server_destroy(server);
+		return error;
+	}
+
 	/* Succeeded: the server waits for clients. */
 	*result = server;
 	return 0;
@@ -197,6 +204,9 @@ x11server_destroy(
 	/* Every client, with its windows, pixmaps, graphics contexts and fonts. */
 	for (index = 0U; index < server->clients_max; index++)
 		x11_client_close(server, index);
+
+	/* The window manager's own window. */
+	x11_wm_fini(server);
 
 	/* The clipboard's copies and the texts being given in pieces. */
 	x11_selection_destroy(server);
