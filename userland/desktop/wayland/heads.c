@@ -1050,12 +1050,18 @@ kwl_output_view(
 	view->pixel_height = shown->height;
 	view->scale120 = KWL_SCALE_ONE;
 
-	/* The pixels it is shown on and its scale, once its opening has set them. */
+	/* The pixels it is shown on, its mode, and its scale, once its opening has set them. */
 	if (shown->pixel_width != 0U && shown->scale120 != 0U) {
 		view->pixel_width = shown->pixel_width;
 		view->pixel_height = shown->pixel_height;
+		view->mode_width = shown->pixel_width;
+		view->mode_height = shown->pixel_height;
 		view->scale120 = shown->scale120;
 	}
+
+	/* The mirror shows the anchor's picture, drawn at the anchor's scale. */
+	if (compose->display_mode == KWL_DISPLAYS_MIRROR && server->scale120 != 0U)
+		view->scale120 = server->scale120;
 
 	/* Its physical size, when its density is one a display has. */
 	density = kwl_scale_density(shown->pixel_width, shown->pixel_height, shown->mm_width, shown->mm_height);
