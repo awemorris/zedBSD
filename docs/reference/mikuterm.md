@@ -18,7 +18,7 @@ How to connect to WSL is a [how-to](../howto/mikuterm-wsl.md).
 | Windows | Windows 10 version 1903 or later (the manifest's UTF-8 code page needs it), x64 and ARM64 |
 | Drawing | On the processor, shown through GDI; no GPU driver is needed |
 | Installation | None: the ZIP is unpacked anywhere the user can write. No registry entry, no `%APPDATA%`, no administrator rights |
-| Build | CMake in `apps/terminal-win32` with llvm-mingw (`cmake/llvm-mingw-x86_64.cmake`, `-aarch64.cmake`); the `zip` target makes `mikuterm-<version>-win64.zip` and `-winarm64.zip` |
+| Build | CMake in `apps/terminal-win32` with llvm-mingw (`cmake/llvm-mingw-x86_64.cmake`, `-aarch64.cmake`); the `zip` target makes `mikuterm-<version>-x64.zip`, `-arm64.zip` and `-x86.zip` |
 
 ## 2. The folder
 
