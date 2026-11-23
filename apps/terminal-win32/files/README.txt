@@ -370,8 +370,10 @@ key.  Closing the window ends every X program of the connection.  The size
 stays as set (the window cannot be resized yet).
 
 The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
-xlogo).  Programs that need what it does not have yet (GTK and many Qt
-programs need RENDER and XInput2) stop with an X error for now.  A window
+xlogo), and GTK and Qt programs draw through its RENDER (anti-aliased text,
+images, gradients) and take input through XInput2.  Not every program has
+been tried yet; one that needs what the server does not have stops with an
+X error.  Animated cursors show their first picture only.  A window
 whose program asks for no position may open at the top left of another
 display; Win+Shift+Left or Right moves it.
 
