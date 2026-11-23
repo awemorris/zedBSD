@@ -35,7 +35,42 @@ static const unsigned scale_steps[KWL_SCALE_STEPS] = {
 	360U
 };
 
+/*
+ * The default's steps by the display's zoom (Microsoft's table "Default
+ * Scale Factor"): a zoom below a bound, in hundredths, takes the step
+ * beside it; a zoom past the last bound takes 250 %.  The bounds lie
+ * between the steps, so the zoom goes to the nearest of 100, 125, 150,
+ * 200 and 250 %.
+ */
+static const struct {
+	unsigned zoom100;
+	unsigned scale120;
+} scale_zooms[] = {
+	{ 120U, 120U },
+	{ 143U, 150U },
+	{ 178U, 180U },
+	{ 232U, 240U }
+};
+
+/*
+ * The largest step the default may choose by the display's short side in
+ * pixels (Microsoft's table "Max Scale Factor", by the vertical
+ * resolution): a short side below a bound takes the step beside it; one
+ * past the last bound takes 250 %.
+ */
+static const struct {
+	uint32_t pixels;
+	unsigned scale120;
+} scale_most[] = {
+	{ 900U, 120U },
+	{ 1080U, 150U },
+	{ 1440U, 180U },
+	{ 1800U, 240U }
+};
+
 static int scale_aspect_agrees(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height);
+static unsigned scale_by_zoom(double zoom);
+static unsigned scale_most_for(uint32_t width, uint32_t height);
 
 /* Reports the step at an index of the table (the smallest first), or 0 past its end. */
 unsigned
@@ -212,37 +247,47 @@ kwl_scale_density(
 }
 
 /*
- * Reports the scale a display's density asks for (120ths): the density
- * over KWL_SCALE_AUTO_DPI rounded to the nearest quarter, from 100 % up to
- * KWL_SCALE_AUTO_MAX and the largest step the display offers.  A display
- * whose physical size is not known, or cannot be its own, is 100 %.
+ * Reports the scale a display asks for (120ths), as Windows chooses its
+ * default (scale.h): the zoom is the display's density times the viewing
+ * distance (tenths of an inch, KWL_SCALE_VIEW_*) over KWL_SCALE_ZOOM_DPI
+ * at KWL_SCALE_VIEW_DESKTOP, taken to the nearest of 100, 125, 150, 200
+ * and 250 %, then kept within the largest step the display's short side
+ * allows and the largest step it offers.  A display whose physical size
+ * is not known, or cannot be its own, is 100 %.
  */
 unsigned
 kwl_scale_recommended(
 	uint32_t width,
 	uint32_t height,
 	uint32_t mm_width,
-	uint32_t mm_height)
+	uint32_t mm_height,
+	unsigned viewing)
 {
+	double pixels;
+	double inches;
+	double zoom;
 	unsigned dpi;
-	unsigned quarters;
 	unsigned scale120;
+	unsigned most;
 	unsigned largest;
 
-	/* The density, when the physical size is the display's. */
+	/* A density the display can have, else 100 %. */
 	dpi = kwl_scale_density(width, height, mm_width, mm_height);
 	if (dpi == 0U)
 		return KWL_SCALE_ONE;
 
-	/* dpi / KWL_SCALE_AUTO_DPI in quarters, rounded to the nearest (30 120ths each). */
-	quarters = (dpi * 4U * 2U + KWL_SCALE_AUTO_DPI) / (2U * KWL_SCALE_AUTO_DPI);
-	scale120 = quarters * (KWL_SCALE_ONE / 4U);
+	/* The zoom: the density unrounded (the diagonal in pixels over the diagonal in inches), scaled by the distance. */
+	pixels = sqrt((double)width * (double)width + (double)height * (double)height);
+	inches = sqrt((double)mm_width * (double)mm_width + (double)mm_height * (double)mm_height) * 10.0 / (double)SCALE_INCH_TENTHS_MM;
+	zoom = pixels / inches * (double)viewing / ((double)KWL_SCALE_ZOOM_DPI * (double)KWL_SCALE_VIEW_DESKTOP);
 
-	/* Not below 100 %, nor above the default's largest or the display's. */
-	if (scale120 < KWL_SCALE_ONE)
-		scale120 = KWL_SCALE_ONE;
-	if (scale120 > KWL_SCALE_AUTO_MAX)
-		scale120 = KWL_SCALE_AUTO_MAX;
+	/* The step of the zoom. */
+	scale120 = scale_by_zoom(zoom);
+
+	/* Not above the largest the short side allows, nor the largest the display offers. */
+	most = scale_most_for(width, height);
+	if (scale120 > most)
+		scale120 = most;
 	largest = kwl_scale_largest(width, height);
 	if (scale120 > largest)
 		scale120 = largest;
@@ -390,4 +435,45 @@ scale_aspect_agrees(
 
 	/* Succeeded: the same shape. */
 	return 1;
+}
+
+/* Reports the default's step for a zoom (scale_zooms): the step of the first bound above it, else KWL_SCALE_AUTO_MAX. */
+static unsigned
+scale_by_zoom(
+	double zoom)
+{
+	unsigned index;
+
+	/* Each bound, the smallest first. */
+	for (index = 0U; index < sizeof(scale_zooms) / sizeof(scale_zooms[0]); index++) {
+		if (zoom * 100.0 < (double)scale_zooms[index].zoom100)
+			return scale_zooms[index].scale120;
+	}
+
+	/* Succeeded: past every bound, the default's largest step. */
+	return KWL_SCALE_AUTO_MAX;
+}
+
+/* Reports the largest step the default may choose for a display's short side (scale_most), else KWL_SCALE_AUTO_MAX. */
+static unsigned
+scale_most_for(
+	uint32_t width,
+	uint32_t height)
+{
+	uint32_t short_side;
+	unsigned index;
+
+	/* The short side, whichever way the display is turned. */
+	short_side = width;
+	if (height < short_side)
+		short_side = height;
+
+	/* Each bound, the smallest first. */
+	for (index = 0U; index < sizeof(scale_most) / sizeof(scale_most[0]); index++) {
+		if (short_side < scale_most[index].pixels)
+			return scale_most[index].scale120;
+	}
+
+	/* Succeeded: past every bound, the default's largest step. */
+	return KWL_SCALE_AUTO_MAX;
 }
