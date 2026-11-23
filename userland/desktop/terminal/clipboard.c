@@ -7,16 +7,16 @@
 
 /*
  * The terminal's clipboard, drops and drags through libkeiland's window
- * (WS131 p018; the compositor's clipboard since WS035 p079): Edit > Copy makes
+ * (the compositor's clipboard when there is one): Edit > Copy makes
  * the terminal's text the selection, Edit > Paste receives the
  * selection's text (the terminal's own directly).  A drag of text or of
- * file names dropped on the window (ws035-p088) is pasted into the shell
+ * file names dropped on the window is pasted into the shell
  * like a paste: file names (from "text/uri-list") each quoted and followed
  * by a space, text as it is.  Selected text dragged out of the window
- * (ws035-p093) is a drag of libkeiland's window.
+ * is a drag of libkeiland's window.
  *
- * Without the compositor's clipboard the clipboard is the window's own, as
- * before.  The lines the tests read are printed here and in window.c.
+ * Without the compositor's clipboard the clipboard is the window's own.
+ * The lines the tests read are printed here and in window.c.
  */
 
 #include "terminal.h"
@@ -46,7 +46,7 @@ terminal_clipboard_set(
 }
 
 /*
- * Starts a drag of text out of the window (ws035-p093), from the press
+ * Starts a drag of text out of the window, from the press
  * with the serial.
  */
 void

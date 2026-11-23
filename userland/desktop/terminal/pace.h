@@ -7,7 +7,7 @@
 
 /*
  * The pacing of the terminal's frames, as libkeiland paces the frames of
- * a window that asks for KL_PACING_FRAME (ws210-p014 F2.4): a frame is
+ * a window that asks for KL_PACING_FRAME: a frame is
  * drawn only once the compositor has taken the one before (its frame
  * callback came), so that no more than one frame goes ahead of the
  * compositor.  The changes made meanwhile (a selection dragged, a shell's

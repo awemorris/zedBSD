@@ -7,12 +7,12 @@
 
 /*
  * The terminal's tabs in the compositor's titlebar (the Titlebar Presentation's
- * TABS mode, plan/ws070/titlebar-design.md, ws035-p086).
+ * TABS mode).
  *
  * Each tab is a shell of its own (main.c).  With one tab the titlebar
  * shows the menus (MENU mode); with two or more it shows the tabs, with
  * "+" for a new one and the menus under "..." (TABS mode), given to
- * libkeiland's window as a table (kl_window_set_tabs, WS131 p018).
+ * libkeiland's window as a table (kl_window_set_tabs).
  * The compositor draws them and tells the terminal a tab chosen, a tab's close
  * button and "+" as the window's KL_WINDOW_TAB inputs; those are queued
  * here for the main loop.  The tabs are sent only when they changed.
