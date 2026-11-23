@@ -1246,6 +1246,7 @@ xkb_get_named_indicator(
 	uint32_t name;
 	uint32_t lit;
 	uint16_t core;
+	size_t name_length;
 	unsigned index;
 	int msb;
 
@@ -1268,7 +1269,8 @@ xkb_get_named_indicator(
 	x11_xkb_state_of(server, core, &state);
 	lit = xkb_indicator_state(server, &state);
 	for (index = 0U; index < XKB_INDICATORS; index++) {
-		name = x11_atom_intern(server, xkb_indicators[index].name, strlen(xkb_indicators[index].name), 1);
+		name_length = strlen(xkb_indicators[index].name);
+		name = x11_atom_intern(server, xkb_indicators[index].name, name_length, 1);
 		if (name != atom)
 			continue;
 
@@ -1995,9 +1997,11 @@ xkb_write_atom(
 	const char *name)
 {
 	uint32_t atom;
+	size_t length;
 
 	/* Succeeded: interned, and written. */
-	atom = x11_atom_intern(server, name, strlen(name), 0);
+	length = strlen(name);
+	atom = x11_atom_intern(server, name, length, 0);
 	xkb_put32(buffer, atom);
 }
 

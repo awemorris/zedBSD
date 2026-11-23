@@ -551,6 +551,7 @@ x11_xinput_crossing(
 	struct x11_client *client;
 	uint32_t mask;
 	unsigned index;
+	int matches;
 
 	/* A grab: the grabbing client alone, by its grab's mask on its window and its own selection when it asked. */
 	grab = &server->pointer_grab;
@@ -572,7 +573,8 @@ x11_xinput_crossing(
 	/* Succeeded: each client that selected it. */
 	for (index = 0U; index < window->xi_select_count; index++) {
 		mask = window->xi_selects[index].mask;
-		if (!xinput_device_matches(window->xi_selects[index].device, XI_MASTER_POINTER))
+		matches = xinput_device_matches(window->xi_selects[index].device, XI_MASTER_POINTER);
+		if (!matches)
 			continue;
 		if ((mask & (1U << type)) == 0U)
 			continue;
@@ -712,7 +714,8 @@ xinput_list_input_devices(
 	for (index = 0U; index < XI_DEVICES; index++) {
 		device = &xinput_devices[index];
 		field = reply + 32U + index * 8U;
-		type = x11_atom_intern(server, device->type, strlen(device->type), 0);
+		name_length = strlen(device->type);
+		type = x11_atom_intern(server, device->type, name_length, 0);
 		x11_write32(field, type, msb);
 		field[4] = (uint8_t)device->id;
 		field[5] = 1U;
@@ -969,6 +972,7 @@ xinput_select_events(
 	const struct xinput_device *found;
 	struct x11_window *window;
 	uint32_t mask;
+	uint32_t beyond;
 	uint16_t device;
 	size_t offset;
 	size_t words;
@@ -1005,8 +1009,9 @@ xinput_select_events(
 		mask = 0U;
 		if (words > 0U)
 			mask = x11_read32(request + offset + 4U, 0);
-		for (word = 0U; word < words; word++) {
-			if (word > 0U && x11_read32(request + offset + 4U + word * 4U, 0) != 0U)
+		for (word = 1U; word < words; word++) {
+			beyond = x11_read32(request + offset + 4U + word * 4U, 0);
+			if (beyond != 0U)
 				return X11_BAD_VALUE;
 		}
 		if ((mask >> (XI_EVENT_LAST + 1U)) != 0U)
@@ -1545,6 +1550,7 @@ xinput_device_classes(
 {
 	uint32_t label;
 	uint32_t keycode;
+	size_t label_length;
 	size_t used;
 	unsigned button;
 	unsigned axis;
@@ -1573,14 +1579,16 @@ xinput_device_classes(
 	x11_write32(info + 8, 0U, msb);
 	used = 12U;
 	for (button = 0U; button < XI_BUTTONS; button++) {
-		label = x11_atom_intern(server, xinput_button_labels[button], strlen(xinput_button_labels[button]), 0);
+		label_length = strlen(xinput_button_labels[button]);
+		label = x11_atom_intern(server, xinput_button_labels[button], label_length, 0);
 		x11_write32(info + used, label, msb);
 		used += 4U;
 	}
 
 	/* Succeeded: its axes, from 0 to the screen's last pixel, where the pointer is. */
 	for (axis = 0U; axis < XI_AXES; axis++) {
-		label = x11_atom_intern(server, xinput_axis_labels[axis], strlen(xinput_axis_labels[axis]), 0);
+		label_length = strlen(xinput_axis_labels[axis]);
+		label = x11_atom_intern(server, xinput_axis_labels[axis], label_length, 0);
 		extent = server->width - 1U;
 		if (axis == 1U)
 			extent = server->height - 1U;
