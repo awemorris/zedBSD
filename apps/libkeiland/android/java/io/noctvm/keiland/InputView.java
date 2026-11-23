@@ -26,6 +26,9 @@ final class InputView extends View {
 	/** Letters only, with no suggestions or corrections (0), or a language's input (1). */
 	private int mode;
 
+	/** Whether the keyboard was asked for before the window could show it (it has no focus yet). */
+	private boolean showPending;
+
 	InputView(Context context) {
 		super(context);
 		setFocusable(true);
@@ -65,7 +68,11 @@ final class InputView extends View {
 		}
 	}
 
-	/** Shows the soft keyboard for this view, or hides it. */
+	/**
+	 * Shows the soft keyboard for this view, or hides it.  The input method refuses to show while
+	 * the window has no focus, so a request made too early is kept and carried out when the window
+	 * gains the focus.
+	 */
 	void showKeyboard(boolean show) {
 		InputMethodManager manager;
 
@@ -75,9 +82,28 @@ final class InputView extends View {
 		}
 		if (show) {
 			requestFocus();
-			manager.showSoftInput(this, 0);
+			showPending = true;
+			if (hasWindowFocus()) {
+				showPending = !manager.showSoftInput(this, 0);
+			}
 		} else {
+			showPending = false;
 			manager.hideSoftInputFromWindow(getWindowToken(), 0);
+		}
+	}
+
+	@Override
+	public void onWindowFocusChanged(boolean hasWindowFocus) {
+		InputMethodManager manager;
+
+		super.onWindowFocusChanged(hasWindowFocus);
+
+		/* Carries out a request that had to wait for the focus. */
+		if (hasWindowFocus && showPending) {
+			manager = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+			if (manager != null) {
+				showPending = !manager.showSoftInput(this, 0);
+			}
 		}
 	}
 

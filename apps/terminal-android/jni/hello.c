@@ -45,13 +45,6 @@ static ANativeWindow *hello_window;
  */
 static int hello_log = -1;
 
-/*
- * Whether the keyboard has to be asked for when the window gains the focus.  It is asked for
- * again only after the focus was lost: showing the keyboard changes the window's focus, so
- * asking at every gain would never stop.
- */
-static int hello_keyboard_due = 1;
-
 static void hello_paint(void);
 static void hello_log_open(void);
 static void hello_log_line(const char *line);
@@ -108,21 +101,9 @@ hello_main(void)
 			}
 
 			hello_paint();
+
+			/* Asks for the keyboard; the Java side waits for the focus when it has to. */
 			keiland_java_show_keyboard(1);
-			hello_keyboard_due = 0;
-			break;
-
-		case KEILAND_ANDROID_FOCUS_LOST:
-			/* The keyboard goes with the focus, and comes back with it. */
-			hello_keyboard_due = 1;
-			break;
-
-		case KEILAND_ANDROID_FOCUS_GAINED:
-			/* Asks for the keyboard when the focus comes back. */
-			if (hello_keyboard_due) {
-				keiland_java_show_keyboard(1);
-				hello_keyboard_due = 0;
-			}
 			break;
 
 		case KEILAND_ANDROID_WINDOW_RESIZED:
