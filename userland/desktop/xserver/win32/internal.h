@@ -128,6 +128,9 @@ struct x11_win32 {
 	struct x11_surface *surfaces;
 	unsigned surface_count;
 
+	/* The root surface of a rooted server (NULL: none open), on which the pointer's place is the root window's. */
+	struct x11_surface *root_surface;
+
 	/*
 	 * The keyboard: the layout's map; by evdev code, the keys held (the
 	 * core hears each by its keycode, the code plus 8); the Shift, Ctrl
@@ -140,6 +143,9 @@ struct x11_win32 {
 	uint8_t held[X11_WIN32_EVDEV_MAX + 1];
 	uint16_t modifiers;
 	int altgr_control;
+
+	/* The text typed through WM_CHAR: a high surrogate waiting for its low one (0: none). */
+	uint16_t text_high;
 
 	/*
 	 * The pointer: the surface under it, its last place on the root window,
@@ -199,6 +205,12 @@ void win32_cursor_free(struct x11_surface *surface);
 /* layout.c */
 void win32_layout_read(struct x11_win32 *backend);
 void win32_layout_give(struct x11_win32 *backend);
+
+/* ime.c */
+int win32_ime_translates(const MSG *message);
+void win32_ime_place(struct x11_surface *surface);
+LRESULT win32_ime_composition(struct x11_surface *surface, WPARAM wparam, LPARAM lparam);
+void win32_ime_char(struct x11_surface *surface, WPARAM wparam);
 
 /* clipboard.c */
 int win32_clipboard_start(struct x11_win32 *backend);

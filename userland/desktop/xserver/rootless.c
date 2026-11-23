@@ -17,6 +17,10 @@
  * present (the pixels in memory brought up to date first).  The backend's pointer,
  * keyboard, focus, sizes and close requests come back as X events.  The
  * system draws the pointer; X cursors are not shown.
+ *
+ * A rooted server shows its root window the same way, as the one surface
+ * (rooted.c decides while it is open), and leaves the stacking and the
+ * focus of the windows to its clients.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -49,6 +53,7 @@ x11_rootless_present(
 	struct x11server *server)
 {
 	struct x11_window *window;
+	struct x11_window *first;
 	int box_x0;
 	int box_y0;
 	int box_x1;
@@ -58,6 +63,14 @@ x11_rootless_present(
 	int right;
 	int bottom;
 	int busy;
+
+	/*
+	 * The windows shown: the root window's children, or a rooted server's
+	 * root window alone (none while it has no client).
+	 */
+	first = server->root->first_child;
+	if (server->mode == X11SERVER_ROOTED)
+		first = x11_rooted_shown(server);
 
 	/* Nothing has changed. */
 	if (!server->dirty)
@@ -71,7 +84,7 @@ x11_rootless_present(
 	server->dirty = 0;
 
 	/* Each top-level window. */
-	for (window = server->root->first_child; window != NULL; window = window->above) {
+	for (window = first; window != NULL; window = window->above) {
 		/* Its surface, following it; an unmapped window has none, and a minimized one (without pixels) shows nothing. */
 		rootless_track(server, window);
 		if (window->surface == NULL)
@@ -127,11 +140,15 @@ x11_rootless_closing(
 	struct x11_window *window;
 	unsigned index;
 
-	/* Each window asked about, if it is still there. */
+	/* Each window asked about, if it is still there; a rooted server's root window ends its clients. */
 	for (index = 0U; index < server->closing_count; index++) {
 		window = x11_window_find(server, server->closing[index]);
 		if (window == NULL)
 			continue;
+		if (window == server->root) {
+			x11_rooted_close(server);
+			continue;
+		}
 
 		/* The window manager closes it as its client asked to be. */
 		x11_wm_close(server, window);
@@ -334,6 +351,12 @@ rootless_info(
 	info->title = title;
 	info->class_name = class_name;
 
+	/* A rooted server's root window is no window manager's. */
+	if (window == server->root) {
+		info->kind = X11_SURFACE_ROOT;
+		return;
+	}
+
 	/* Succeeded: its kind, state, owner and limits, as its window manager has them. */
 	x11_wm_info(server, window, info);
 }
@@ -461,10 +484,28 @@ x11server_backend_keymap(
 }
 
 /*
+ * Takes a character the backend's input method typed (a Unicode code
+ * point): the X clients hear it as a key whose keysym is the character.
+ */
+void
+x11server_backend_text(
+	struct x11server *server,
+	uint32_t character,
+	uint32_t time)
+{
+	/* The move held back goes first, so the character is seen where the pointer is. */
+	x11_rootless_flush_motion(server);
+
+	/* Succeeded: the input types it. */
+	x11_input_text(server, character, time);
+}
+
+/*
  * Takes the pointer from the backend: where it is, and a physical button
  * that changed.  A press focuses and raises the top-level window under
- * the pointer first (the rootless server is its window manager).  Moves
- * between buttons are held back so only the last of a burst is sent.
+ * the pointer first (the rootless server is its window manager; a rooted
+ * server's clients do that themselves).  Moves between buttons are held
+ * back so only the last of a burst is sent.
  */
 void
 x11server_backend_pointer(
@@ -487,7 +528,7 @@ x11server_backend_pointer(
 	x11_rootless_flush_motion(server);
 
 	/* A press raises the top-level window under the pointer and gives it the focus. */
-	if (frame->pressed) {
+	if (frame->pressed && server->mode != X11SERVER_ROOTED) {
 		under = x11_window_at(server, frame->x, frame->y);
 		top = x11_window_top_level(under);
 		if (top != server->root) {

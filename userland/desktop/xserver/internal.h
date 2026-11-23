@@ -24,6 +24,8 @@
  * render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
+ * or, for a rooted server, the root window as one surface (rooted.c,
+ * which also keeps the save-sets and ends clients for KillClient),
  * wm.c is the top-level windows' window manager (ICCCM and EWMH), font.c
  * keeps the core fonts and answers their requests and the text ones,
  * glyphs.c draws their glyphs from the TrueType faces, cursor.c keeps the
@@ -89,6 +91,9 @@
 
 /* How many of a client's last requests the stuck-client report shows. */
 #define X11_HISTORY		16U
+
+/* The kinds of XKEYBOARD's events (NewKeyboardNotify to ExtensionDeviceNotify), each of which a client selects with details. */
+#define X11_XKB_EVENT_KINDS	12U
 
 /*
  * The server's own resources, in the ids no client chooses: the root
@@ -272,6 +277,9 @@
 /* The device events held while a grab freezes their device. */
 #define X11_DEVICE_QUEUE	256U
 
+/* The keycodes lent at once to the characters a backend types (an input method's text). */
+#define X11_TEXT_KEYS		8U
+
 /* The device events held: a key, a button, a motion, and the pointer leaving every X window. */
 #define X11_DEVICE_KEY		1U
 #define X11_DEVICE_BUTTON	2U
@@ -320,7 +328,8 @@ struct x11_cursor;
  * AllowEvents, 1 as usual), and when it started.  A grab a button press
  * or a key press started (passive) ends with that button's or key's
  * release; an implicit grab is the one every button press starts for the
- * client it reached.
+ * client it reached.  A grab of XInputExtension's (xi2) hears that
+ * extension's events, those its mask names, in place of the core's.
  */
 struct x11_grab {
 	unsigned client;
@@ -335,6 +344,8 @@ struct x11_grab {
 	uint8_t passive;
 	uint8_t implicit;
 	uint8_t key;
+	uint8_t xi2;
+	uint32_t xi2_mask;
 };
 
 /*
@@ -368,6 +379,20 @@ struct x11_device_event {
 	uint32_t time;
 	int x;
 	int y;
+};
+
+/*
+ * A keycode lent to a character the backend typed (an input method's
+ * text, which no key of the keyboard's map carries): the keycode, the
+ * keysym its first two columns carry, and when it was last used (a count
+ * the server keeps, so the least recently used one is lent again first).
+ * It stays lent while the map keeps that keysym there; a client's
+ * ChangeKeyboardMapping or a backend's map that fills the keycode ends it.
+ */
+struct x11_text_key {
+	uint8_t keycode;
+	uint32_t keysym;
+	uint32_t used;
 };
 struct x11_vulkan;
 struct x11_vulkan_window;
@@ -453,6 +478,20 @@ struct x11_client {
 	uint32_t history_length[X11_HISTORY];
 	uint16_t history_sequence[X11_HISTORY];
 	unsigned history_next;
+
+	/*
+	 * XKEYBOARD (xkb.c): nonzero once the client asked to use it (its
+	 * core events then carry XKB's state), the per-client flags it set,
+	 * the kinds of XKB events it selected and, for each kind, the details.
+	 */
+	int xkb_used;
+	uint32_t xkb_flags;
+	uint32_t xkb_events;
+	uint32_t xkb_details[X11_XKB_EVENT_KINDS];
+
+	/* XInputExtension (xinput.c): the version the client and the server agreed on (0 until it asked). */
+	uint16_t xi_major;
+	uint16_t xi_minor;
 };
 
 /*
@@ -473,6 +512,31 @@ struct x11_resource {
 struct x11_event_select {
 	unsigned client;
 	uint32_t mask;
+};
+
+/*
+ * The XInputExtension events one client asked for on a window from one
+ * device (or from all devices, or all master devices): a bit for each
+ * event type below 32.
+ */
+struct x11_xi_select {
+	unsigned client;
+	uint16_t device;
+	uint32_t mask;
+};
+
+/*
+ * The keyboard's state as XKEYBOARD tells it: the effective, the held and
+ * the locked modifiers, the group (1 while a Mode_switch key is held), the
+ * core state a client without XKB sees, and the pointer's buttons.
+ */
+struct x11_xkb_state {
+	uint8_t mods;
+	uint8_t base;
+	uint8_t locked;
+	uint8_t group;
+	uint8_t compat;
+	uint16_t buttons;
 };
 
 /*
@@ -542,6 +606,10 @@ struct x11_window {
 	unsigned select_count;
 	unsigned select_capacity;
 	uint32_t do_not_propagate;
+
+	/* The XInputExtension events clients asked for on it (xinput.c). */
+	struct x11_xi_select *xi_selects;
+	unsigned xi_select_count;
 
 	/* Its origin on the root window, its size and border, and whether it is mapped. */
 	int x;
@@ -661,6 +729,17 @@ struct x11_transfer {
 	size_t length;
 	size_t offset;
 	int done;
+};
+
+/*
+ * One window of a client's save-set (rooted.c, ChangeSaveSet): a window of
+ * another client that is reparented out of the client's windows and
+ * mapped when the client ends, so that a window manager's end leaves the
+ * windows it framed on the screen.
+ */
+struct x11_save {
+	unsigned client;
+	uint32_t window;
 };
 
 /*
@@ -967,9 +1046,10 @@ struct x11_wm_atoms {
  * changed and not been shown, and the pointer's and keyboard's state.
  */
 struct x11server {
-	/* The root window's size. */
+	/* The root window's size, and how the server shows itself (X11SERVER_ROOTLESS or X11SERVER_ROOTED). */
 	unsigned width;
 	unsigned height;
+	unsigned mode;
 
 	/* The backend's functions and their context. */
 	const struct x11_backend_ops *ops;
@@ -1097,6 +1177,14 @@ struct x11server {
 	uint8_t keys_down[X11_KEY_BYTES];
 	uint16_t locks;
 
+	/*
+	 * The keycodes lent to the characters the backend typed (input.c):
+	 * how many are lent, and the count their use is stamped with.
+	 */
+	struct x11_text_key text_keys[X11_TEXT_KEYS];
+	unsigned text_key_count;
+	uint32_t text_stamp;
+
 	/* The keyboard's control, kept for GetKeyboardControl: the click and the bell, the LEDs and auto-repeat. */
 	int8_t key_click_percent;
 	int8_t bell_percent;
@@ -1191,6 +1279,22 @@ struct x11server {
 	 */
 	struct x11_wm_atoms wm;
 	uint32_t wm_active;
+
+	/*
+	 * XKEYBOARD (xkb.c): the keyboard's state and the indicators the
+	 * clients last heard of, so that a change sends StateNotify and
+	 * IndicatorStateNotify once.
+	 */
+	struct x11_xkb_state xkb_last;
+	uint32_t xkb_indicators;
+
+	/*
+	 * The save-sets (rooted.c): every client's windows in one list, an
+	 * entry going when its window is destroyed or its client ends.
+	 */
+	struct x11_save *saves;
+	unsigned save_count;
+	unsigned save_capacity;
 };
 
 /* client.c: the clients' connections, and the log. */
@@ -1245,6 +1349,8 @@ void x11_window_raise(struct x11server *server, struct x11_window *window);
 void x11_window_backend_configure(struct x11server *server, struct x11_window *window, int x, int y, uint16_t width, uint16_t height);
 int x11_window_server_child(struct x11server *server, uint32_t id);
 void x11_window_map(struct x11server *server, struct x11_window *window);
+void x11_window_map_by(struct x11server *server, unsigned requester, struct x11_window *window);
+unsigned x11_window_reparent(struct x11server *server, unsigned requester, struct x11_window *window, struct x11_window *parent, int x, int y);
 void x11_window_unmap(struct x11server *server, struct x11_window *window);
 int x11_window_viewable(const struct x11_window *window);
 struct x11_window *x11_window_next(struct x11_window *window, const struct x11_window *top);
@@ -1353,6 +1459,18 @@ void x11_rootless_closing(struct x11server *server);
 void x11_rootless_flush_motion(struct x11server *server);
 void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 
+/* rooted.c: the root window as one surface, the save-sets, and the ends of clients. */
+void x11_rooted_start(struct x11server *server);
+struct x11_window *x11_rooted_shown(struct x11server *server);
+void x11_rooted_close(struct x11server *server);
+int x11_rooted_server_manages(const struct x11server *server, const struct x11_window *window);
+unsigned x11_save_set_change(struct x11server *server, unsigned client, struct x11_window *window, int remove);
+void x11_save_set_restore(struct x11server *server, unsigned client);
+void x11_save_set_forget_window(struct x11server *server, uint32_t window);
+void x11_save_set_fini(struct x11server *server);
+unsigned x11_request_set_close_down_mode(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_kill_client(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+
 /* present-vulkan.c: a surface shown through a Vulkan swapchain. */
 struct x11_vulkan *x11_vulkan_open(struct x11server *server, x11server_vulkan_function loader, const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
@@ -1373,6 +1491,7 @@ void x11_input_button(struct x11server *server, uint8_t button, int pressed, uin
 void x11_input_motion(struct x11server *server, uint32_t time, int x, int y);
 void x11_input_leave(struct x11server *server, uint32_t time);
 void x11_input_keymap(struct x11server *server, const struct x11_keymap *keymap);
+void x11_input_text(struct x11server *server, uint32_t character, uint32_t time);
 void x11_input_focus_top_level(struct x11server *server, struct x11_window *window, uint32_t time);
 void x11_input_focus_lost(struct x11server *server, struct x11_window *window, uint32_t time);
 struct x11_window *x11_input_window_under(struct x11server *server);
@@ -1382,6 +1501,9 @@ void x11_input_window_destroyed(struct x11server *server, struct x11_window *win
 void x11_input_forget_client(struct x11server *server, unsigned client);
 unsigned x11_input_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 void x11_input_capture_lost(struct x11server *server, uint32_t time);
+unsigned x11_input_grab_device(struct x11server *server, unsigned index, int keyboard, const struct x11_grab *grab, uint32_t time);
+void x11_input_ungrab_device(struct x11server *server, unsigned index, int keyboard, uint32_t time);
+void x11_input_allow(struct x11server *server, unsigned index, unsigned mode, uint32_t time);
 
 /* wm.c: the top-level windows' window manager (ICCCM and EWMH). */
 int x11_wm_init(struct x11server *server);
@@ -1424,11 +1546,60 @@ void x11_cursor_free(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_update(struct x11server *server);
 unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
-/* glx.c: the GLX extension. */
+/* xkb.c: XKEYBOARD. */
+int x11_xkb_query(const uint8_t *name, size_t length, uint8_t *major, uint8_t *event, uint8_t *error);
+unsigned x11_xkb_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_xkb_state_of(const struct x11server *server, uint16_t core, struct x11_xkb_state *state);
+void x11_xkb_event_state(const struct x11server *server, const struct x11_client *client, uint8_t *event);
+void x11_xkb_input_changed(struct x11server *server, const struct x11_device_event *event);
+void x11_xkb_mapping_changed(struct x11server *server, uint8_t request);
+
+/* xinput.c: XInputExtension and the Generic Event Extension. */
+int x11_xinput_query(const uint8_t *name, size_t length, uint8_t *major, uint8_t *event, uint8_t *error);
+unsigned x11_xinput_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_ge_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+int x11_xinput_propagate(struct x11server *server, const struct x11_window *window, uint32_t child, uint8_t type, uint8_t detail, uint32_t time, uint16_t state, unsigned only);
+int x11_xinput_to_grab(struct x11server *server, const struct x11_grab *grab, uint8_t type, uint8_t detail, uint32_t time, uint16_t state);
+void x11_xinput_implicit_grab(const struct x11_window *window, struct x11_grab *grab);
+void x11_xinput_crossing(struct x11server *server, uint8_t type, const struct x11_window *window, uint8_t detail, uint8_t mode, uint32_t time, uint32_t child, uint8_t flags);
+void x11_xinput_focus(struct x11server *server, uint8_t type, const struct x11_window *window, uint8_t detail, uint8_t mode);
+void x11_xinput_window_destroyed(struct x11_window *window);
+void x11_xinput_forget_client(struct x11server *server, unsigned client);
+
+/*
+ * glx.c: the GLX extension.  A program whose server does not name GLX links
+ * an implementation of these that answers GLX absent instead.
+ */
 void x11_glx_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+size_t x11_glx_list_name(uint8_t *list, size_t room);
 unsigned x11_glx_request(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 
 /* The GLX extension's major opcode. */
 #define X11_GLX_MAJOR		144U
+
+/*
+ * GLX's first event and first error.  A client's Xlib names the 17 events
+ * and the 14 errors from them as GLX's (glxproto.h's __GLX_NUMBER_EVENTS and
+ * __GLX_NUMBER_ERRORS), so they follow those of the other extensions and
+ * overlap none of them.
+ */
+#define X11_GLX_FIRST_EVENT	89U
+#define X11_GLX_FIRST_ERROR	149U
+
+/*
+ * The input extensions' major opcodes, first events and first errors:
+ * XKEYBOARD (one event code, one error), XInputExtension (the 17 event
+ * codes and 5 errors of its version 1, its version 2's events being
+ * GenericEvent) and the Generic Event Extension (no events or errors).
+ */
+#define X11_XKB_MAJOR		131U
+#define X11_XKB_EVENT		71U
+#define X11_XKB_ERROR		128U
+#define X11_XINPUT_MAJOR	132U
+#define X11_XINPUT_EVENT	72U
+#define X11_XINPUT_EVENTS	17U
+#define X11_XINPUT_ERROR	129U
+#define X11_XINPUT_ERRORS	5U
+#define X11_GE_MAJOR		133U
 
 #endif

@@ -49,7 +49,7 @@
 /* The header's size, the most bytes one frame carries, and the link's version. */
 #define X11_LINK_HEADER		9U
 #define X11_LINK_BODY_MAX	65536U
-#define X11_LINK_VERSION	1U
+#define X11_LINK_VERSION	2U
 
 /* The X clients one link carries at a time. */
 #define X11_LINK_CHANNELS	32U

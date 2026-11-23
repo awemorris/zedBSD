@@ -13,7 +13,7 @@
  * the server back with x11_win32_attach.  The backend opens a Windows
  * window for each top-level X window (a framed window, or a borderless
  * one that is never activated for an override-redirect menu or tooltip),
- * shows the X pixels in it through GDI or gives the core a Vulkan surface
+ * or one framed window for the whole root window of a rooted server, shows the X pixels in it through GDI or gives the core a Vulkan surface
  * of it, scales X's pixels to the screen's, turns the keyboard and the
  * pointer into X's input, and passes the clipboard across.
  *

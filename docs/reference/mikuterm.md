@@ -218,6 +218,25 @@ How a forwarded port differs from OpenSSH's: the server's connections to a
 `RemoteForward` are refused once the shell ended (OpenSSH takes them while
 the connection lasts).
 
+### 4.5 Remote X programs
+
+`ForwardX11 yes` shows the host's X11 programs as windows on the PC, through
+an X server mikuterm runs for the connection (the folder's `README.txt`,
+section 10, has the steps). What the remote programs should know:
+
+- The X server does not offer GLX: a program that draws with OpenGL through
+  the X server does not show.
+- GTK 4 draws with OpenGL on the host by default, even over ssh (in software
+  there), and sends each window whole as an image every time it changes,
+  which is slow over a network. `GSK_RENDERER=cairo` on the host makes it
+  draw with Cairo, which sends far less: `GSK_RENDERER=cairo gtk4-demo`, or
+  `export GSK_RENDERER=cairo` in the host's `~/.profile` for every program of
+  the login.
+- GTK programs use the host's D-Bus session. When the login shares one with
+  a desktop on the host, a program may wait about half a minute for the
+  desktop's services before its window opens; started in a D-Bus session of
+  its own (`dbus-run-session gtk3-demo`), it does not wait.
+
 ## 5. Tabs and questions
 
 A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
