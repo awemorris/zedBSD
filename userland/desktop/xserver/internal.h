@@ -102,9 +102,14 @@
 #define X11_RESOURCE_FONT	4U
 #define X11_RESOURCE_GONE	0xffU
 
-/* How many selections are kept, and how many of the backend's requests for an X client's text may wait. */
+/*
+ * How many selections are kept, how many of X's selections the clipboard
+ * bridges (CLIPBOARD and PRIMARY), and how many large texts may be given
+ * to requestors in pieces at once.
+ */
 #define X11_MAX_SELECTIONS	8U
-#define X11_PENDING_SENDS	4U
+#define X11_BRIDGES		2U
+#define X11_TRANSFERS		4U
 
 /*
  * Atoms: the last of the core's predefined atoms (the next name interned
@@ -422,14 +427,58 @@ struct x11_window {
 
 /*
  * One selection (selection.c): its atom, the owner window (0 for none; the
- * root window while the backend's text is the selection's), the owner's
- * client slot (X11_NO_CLIENT for the backend) and when it was taken.
+ * root window while the server answers for it), the owner's client slot
+ * (X11_NO_CLIENT for the server), when it last changed, and whether it
+ * has changed at all.
  */
 struct x11_selection {
 	uint32_t atom;
 	uint32_t window;
 	unsigned owner;
 	uint32_t time;
+	int changed;
+};
+
+/*
+ * The clipboard's bridge of one of X's CLIPBOARD and PRIMARY (selection.c;
+ * its index is the backend's X11_SELECTION_* number): the selection's
+ * atom and the root window's property an X owner's text is asked into;
+ * the target being asked for (0: nothing is; UTF8_STRING, then STRING) of
+ * which owner window and client, whether the text comes in pieces (INCR),
+ * whether the owner was told to start them and since when it waits to
+ * be, and what came so far; and the copy of the last X owner's text (NULL for
+ * none), which the root window answers with once that owner is gone.
+ */
+struct x11_bridge {
+	uint32_t atom;
+	uint32_t property;
+	uint32_t asking;
+	uint32_t window;
+	unsigned owner;
+	int incr;
+	int incr_started;
+	uint32_t incr_since;
+	uint8_t *data;
+	size_t length;
+	uint8_t *kept;
+	size_t kept_length;
+};
+
+/*
+ * A large text given to a requestor in pieces (selection.c, INCR): the
+ * requestor's window and property, the type, the requestor's client, the
+ * text (NULL: the slot is free) and how much is given, and whether the
+ * empty last piece is.
+ */
+struct x11_transfer {
+	uint32_t window;
+	uint32_t property;
+	uint32_t type;
+	unsigned client;
+	uint8_t *data;
+	size_t length;
+	size_t offset;
+	int done;
 };
 
 /*
@@ -582,19 +631,19 @@ struct x11server {
 	size_t atom_table_capacity;
 
 	/*
-	 * Selections (selection.c): the selections, the backend's requests
-	 * for an X owner's text waiting for the owner's answer (the backend's
-	 * numbers, oldest first), and the atoms the server uses itself.
+	 * Selections (selection.c): the selections, the clipboard's bridges,
+	 * the texts being given in pieces, and the atoms the server uses
+	 * itself.
 	 */
 	struct x11_selection selections[X11_MAX_SELECTIONS];
 	unsigned selection_count;
-	uint32_t pending_sends[X11_PENDING_SENDS];
-	unsigned pending_count;
+	struct x11_bridge bridges[X11_BRIDGES];
+	struct x11_transfer transfers[X11_TRANSFERS];
 	uint32_t atom_clipboard;
 	uint32_t atom_utf8;
 	uint32_t atom_targets;
 	uint32_t atom_text;
-	uint32_t atom_bridge;
+	uint32_t atom_incr;
 
 	/* The implicit grab of a button press: the client it is for (X11_NO_CLIENT: none) and its window. */
 	unsigned grab_owner;
@@ -717,6 +766,8 @@ void x11_selection_bridge_done(struct x11server *server, unsigned slot, const ui
 void x11_selection_forget_window(struct x11server *server, uint32_t window);
 void x11_selection_forget_client(struct x11server *server, unsigned client);
 void x11_selection_property_event(struct x11server *server, struct x11_window *window, uint32_t atom, int deleted);
+void x11_selection_destroy(struct x11server *server);
+int x11_selection_tick(struct x11server *server);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);

@@ -15,7 +15,9 @@
  * surface to show them through, and passes the clipboard across.  The
  * backend calls the core with what its system reports: keys, the
  * pointer, a window entered, given a size, asked to close or minimized,
- * and the system's clipboard.  zedBSD's backend is the Wayland desktop
+ * and whether another program's text is the system's clipboard
+ * (x11server_backend_clipboard, also once when the backend is given the
+ * server).  zedBSD's backend is the Wayland desktop
  * (wayland.c).
  */
 
@@ -52,6 +54,12 @@
 /* The selections the clipboard passes across: X's CLIPBOARD and PRIMARY. */
 #define X11_SELECTION_CLIPBOARD	0U
 #define X11_SELECTION_PRIMARY	1U
+
+/* The clipboard's functions are clipboard_offer and clipboard_read (the core copies an X owner's text at once). */
+#define X11_BACKEND_CLIPBOARD_OFFER	1
+
+/* The longest text the clipboard passes either way (16 MiB). */
+#define X11_CLIPBOARD_TEXT_MAX	(16U * 1024U * 1024U)
 
 /* The modifier bits of a key or button event's state (X's). */
 #define X11_SHIFT_MASK		(1U << 0)
@@ -119,13 +127,14 @@ struct x11_pointer_frame {
  * stride pixels apart) with the parts that changed, returning 0, EBUSY
  * while the system still holds the last frame, or another errno value.
  *
- * The clipboard: clipboard_own makes the X owner's text the system's
- * selection (own nonzero) or gives that up; clipboard_has_text tells
- * whether another program's text is the system's selection; clipboard_read
- * reads it (malloc'd text the core frees, a NUL after its length; 0 or an
- * errno value); clipboard_answer gives a request the system made
- * (x11server_backend_clipboard_request) its text, NULL for none, and
- * returns how many bytes it delivered.
+ * The clipboard: clipboard_offer makes the text of an X client's CLIPBOARD
+ * or PRIMARY (UTF-8, size bytes) the system's clipboard or primary
+ * selection at once, so that it outlives the X client; the backend keeps
+ * a copy of it.  It returns 0, EACCES when the backend's policy refuses
+ * it now, ENOTSUP for a selection the system does not take, or another
+ * errno value.  clipboard_read reads another program's text of the
+ * system's selection for an X client (malloc'd text the core frees, a NUL
+ * after its length; 0 or an errno value).
  */
 struct x11_backend_ops {
 	struct x11_surface *(*open)(void *context, uint32_t window, const struct x11_surface_info *info);
@@ -133,10 +142,8 @@ struct x11_backend_ops {
 	void (*close)(void *context, struct x11_surface *surface);
 	int (*vulkan_surface)(void *context, struct x11_surface *surface, void *instance, void *result);
 	int (*present)(void *context, struct x11_surface *surface, const uint32_t *pixels, size_t stride, const struct x11_rect *parts, unsigned count);
-	int (*clipboard_own)(void *context, unsigned selection, int own);
-	int (*clipboard_has_text)(void *context, unsigned selection);
+	int (*clipboard_offer)(void *context, unsigned selection, const uint8_t *text, size_t size);
 	int (*clipboard_read)(void *context, unsigned selection, uint8_t **text, size_t *size);
-	size_t (*clipboard_answer)(void *context, uint32_t request, const uint8_t *text, size_t size);
 };
 
 /* What the backend tells the core. */
@@ -147,7 +154,6 @@ void x11server_backend_configure(struct x11server *server, uint32_t window, int3
 void x11server_backend_close(struct x11server *server, uint32_t window);
 void x11server_backend_state(struct x11server *server, uint32_t window, int iconic);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
-void x11server_backend_clipboard_request(struct x11server *server, unsigned selection, uint32_t request);
 
 /*
  * The X keycode an evdev key types in the shift and caps lock states given

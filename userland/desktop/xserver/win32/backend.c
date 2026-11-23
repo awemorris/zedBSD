@@ -36,10 +36,8 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_surface_close,
 	win32_surface_vulkan,
 	win32_surface_present,
-	win32_clipboard_own,
-	win32_clipboard_has_text,
+	win32_clipboard_offer,
 	win32_clipboard_read,
-	win32_clipboard_answer,
 };
 
 static unsigned backend_main_scale(void);
@@ -126,6 +124,9 @@ x11_win32_attach(
 {
 	/* The server hears the input from now on. */
 	backend->server = server;
+
+	/* It hears whether another program's text is already on the clipboard. */
+	win32_clipboard_attach(backend);
 }
 
 /*
