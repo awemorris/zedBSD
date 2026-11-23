@@ -52,7 +52,6 @@
 
 /* The line styles, and the pie-slice arc mode. */
 #define LINE_SOLID			0U
-#define LINE_ON_OFF_DASH		1U
 #define LINE_DOUBLE_DASH		2U
 #define ARC_PIE_SLICE			1U
 
@@ -142,7 +141,6 @@ static unsigned draw_shape_end(struct x11server *server, struct draw_shape *shap
 static void draw_shape_path(struct draw_shape *shape, const int *points, size_t count);
 static int *draw_points(struct draw_shape *shape, const uint8_t *bytes, size_t count, int relative, int msb);
 static int draw_far(int value);
-static int draw_line_merged(const struct x11_gc *gc);
 static void draw_arc_of(const struct draw_shape *shape, const uint8_t *bytes, int msb, struct x11_arc *arc);
 
 /*
@@ -1259,7 +1257,7 @@ x11_request_poly_line(
 	/* The path, drawn as one shape. */
 	if (points != NULL && count > 0U) {
 		draw_shape_path(&shape, points, count);
-		draw_shape_paint(&shape, draw_line_merged(shape.gc));
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
 	}
 	free(points);
 
@@ -1303,7 +1301,7 @@ x11_request_poly_segment(
 		points[2] = shape.target.x + (int16_t)x11_read16(request + offset + 4U, msb);
 		points[3] = shape.target.y + (int16_t)x11_read16(request + offset + 6U, msb);
 		draw_shape_path(&shape, points, 2U);
-		draw_shape_paint(&shape, draw_line_merged(shape.gc));
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
 	}
 
 	/* Succeeded unless memory ran out: drawn, and shown again. */
@@ -1361,7 +1359,7 @@ x11_request_poly_rectangle(
 		points[8] = x;
 		points[9] = y;
 		draw_shape_path(&shape, points, 5U);
-		draw_shape_paint(&shape, draw_line_merged(shape.gc));
+		draw_shape_paint(&shape, shape.gc->line_width != 0U);
 	}
 
 	/* Succeeded unless memory ran out: drawn, and shown again. */
@@ -2972,29 +2970,6 @@ draw_points(
 
 	/* Succeeded: the points. */
 	return points;
-}
-
-/*
- * Tells whether a line's spans are merged before they are painted, so
- * that each pixel is painted once: a wide line is one shape, except that
- * the dashes of an on-off dash with projecting caps are each a shape of
- * their own (where their caps overlap, the pixels are painted again, as
- * X.Org's do).  A thin line paints its pixels as it visits them.
- */
-static int
-draw_line_merged(
-	const struct x11_gc *gc)
-{
-	/* A thin line. */
-	if (gc->line_width == 0U)
-		return 0;
-
-	/* Dashes capped past their ends, each its own shape. */
-	if (gc->line_style == LINE_ON_OFF_DASH && gc->cap_style == X11_CAP_PROJECTING)
-		return 0;
-
-	/* One shape. */
-	return 1;
 }
 
 /* Returns a coordinate walked by relative steps, kept from going so far that it would overflow. */
