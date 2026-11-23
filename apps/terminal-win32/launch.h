@@ -7,10 +7,11 @@
 
 /*
  * The screen a new tab shows before it connects (launch.c): a list of
- * rows under a heading (the hosts of ssh\config, WSL and the settings; or
- * WSL's distributions), one of them chosen and shown in reverse, and the
- * ">>> " line under them, which holds the chosen row's text and can be
- * edited into a host typed by hand.
+ * rows under a heading (the hosts of ssh\config, WSL, GitHub Codespaces
+ * and the settings; or WSL's distributions, or the codespaces), one of
+ * them chosen and shown in reverse, and the ">>> " line under them, which
+ * holds the chosen row's text and can be edited into a host typed by
+ * hand.
  *
  * The keys the tab sends come here as they are: Up and Down choose a row,
  * a row's own key (its number, or a letter) chooses it while the line is
@@ -53,12 +54,14 @@
 #define LAUNCH_CHOSEN_BACK	"57;197;187"
 #define LAUNCH_CHOSEN_TEXT	"16;20;24"
 
-/* What a row is: a host, WSL, the settings, a distribution of WSL, the way back. */
+/* What a row is: a host, WSL, the settings, a distribution of WSL, the way back, GitHub Codespaces, a codespace. */
 #define LAUNCH_HOST		1U
 #define LAUNCH_WSL		2U
 #define LAUNCH_SETTINGS		3U
 #define LAUNCH_DISTRIBUTION	4U
 #define LAUNCH_BACK		5U
+#define LAUNCH_CODESPACES	6U
+#define LAUNCH_CODESPACE	7U
 
 /* What the keys came to: nothing yet, Enter, the user giving up (Ctrl+C, Ctrl+D), Escape. */
 #define LAUNCH_EVENT_NONE	0U

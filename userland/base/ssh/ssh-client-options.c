@@ -356,6 +356,12 @@ ssh_client_check_settings(
 		return EINVAL;
 	}
 
+	/* A host reached through a command is not: ssh connects its own socket. */
+	if (config->proxy_command[0] != '\0') {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "ProxyCommand is not supported");
+		return EINVAL;
+	}
+
 	/* Succeeded: every setting is one the program acts on or leaves off. */
 	return 0;
 }
