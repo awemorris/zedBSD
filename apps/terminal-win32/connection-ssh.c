@@ -22,9 +22,16 @@
  * The threads post only while the application is open: the run tells
  * mikuterm_connections_stop before it closes the application, and the
  * program waits a while for the threads to end (mikuterm_connections_wait).
+ *
+ * A tab whose user chose the login shell (MIKUTERM_HAVE_LOGIN_SHELL)
+ * becomes the shell's terminal: its thread ends, the tab starts the shell
+ * on a terminal of its own (login-shell.h), reads what is left in the
+ * ring and then what the shell writes, and hands its keys, size and end
+ * to the shell.
  */
 
 #include "session.h"
+#include "login-shell.h"
 #include "x11-tab.h"
 
 #include <compat/crypto/crypto.h>
@@ -76,6 +83,9 @@ static void connection_edit(struct mikuterm_session *session, const unsigned cha
 static void connection_erase(struct mikuterm_session *session);
 static void connection_free(struct mikuterm_session *session);
 static void connection_copy(char *to, size_t size, const char *text);
+#if MIKUTERM_HAVE_LOGIN_SHELL
+static unsigned connection_shell(struct mikuterm_session *session, const char *path);
+#endif
 
 /* The functions of a tab's SSH connection. */
 static const struct terminal_connection_ops connection_ops = {
@@ -367,6 +377,28 @@ session_settings(
 	session_post(session);
 }
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+/*
+ * Asks the tab for the login shell of a path in place of the connection,
+ * the thread's last word: the tab starts it at its next post.
+ */
+void
+session_shell(
+	struct mikuterm_session *session,
+	const char *path)
+{
+	/* The shell, for the tab's next post. */
+	kl_mutex_lock(&session->lock);
+
+	connection_copy(session->shell, sizeof(session->shell), path);
+
+	kl_mutex_unlock(&session->lock);
+
+	/* The tab learns it. */
+	session_post(session);
+}
+#endif
+
 /*
  * Posts to the application that the session or the X window's tab of a
  * number has something for it, while the application is open.  Returns
@@ -596,6 +628,7 @@ connection_read(
 	size_t size)
 {
 	struct mikuterm_session *session;
+	size_t count;
 	size_t first;
 	int tell;
 
@@ -605,21 +638,22 @@ connection_read(
 	/* As much as there is and fits, from the ring's start, wrapping round its end. */
 	kl_mutex_lock(&session->lock);
 
-	if (size > session->output_length)
-		size = session->output_length;
+	count = size;
+	if (count > session->output_length)
+		count = session->output_length;
 	first = session->output_capacity - session->output_start;
-	if (first > size)
-		first = size;
+	if (first > count)
+		first = count;
 	memcpy(buffer, session->output + session->output_start, first);
-	memcpy(buffer + first, session->output, size - first);
-	session->output_start = (session->output_start + size) % session->output_capacity;
-	session->output_length -= size;
+	memcpy(buffer + first, session->output, count - first);
+	session->output_start = (session->output_start + count) % session->output_capacity;
+	session->output_length -= count;
 
 	/*
 	 * taken is what the thread gives back to the server's window: it is
 	 * told after a step's worth, or when the tab has read everything.
 	 */
-	session->taken += size;
+	session->taken += count;
 	tell = 0;
 	if (session->taken >= SESSION_TAKEN_STEP)
 		tell = 1;
@@ -632,8 +666,14 @@ connection_read(
 	if (tell)
 		kl_socket_waker_ring(session->waker);
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* After the ring (the launch screen's last words), what the login shell wrote. */
+	if (session->process != NULL && count < size)
+		count += kl_process_read(session->process, KL_PROCESS_OUTPUT, buffer + count, size - count);
+
+#endif
 	/* Succeeded: the bytes read. */
-	return size;
+	return count;
 }
 
 /*
@@ -652,11 +692,24 @@ connection_write(
 	struct mikuterm_session *session;
 	size_t room;
 	int wake;
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	int error;
+#endif
 
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 	wake = 0;
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The keys of the login shell's terminal (as many as it takes now). */
+	if (session->process != NULL) {
+		error = kl_process_write(session->process, bytes, size, written);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+#endif
 	/* Where the keys go. */
 	kl_mutex_lock(&session->lock);
 
@@ -723,6 +776,12 @@ connection_resize(
 	/* The thread takes it. */
 	kl_socket_waker_ring(session->waker);
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The login shell's terminal takes it (the shell gets SIGWINCH). */
+	if (session->process != NULL)
+		return kl_process_resize(session->process, columns, rows);
+
+#endif
 	/* Succeeded. */
 	return 0;
 }
@@ -739,10 +798,29 @@ connection_mode(
 {
 	struct mikuterm_session *session;
 	unsigned question;
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	unsigned terminal;
+	int error;
+#endif
 
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The modes the login shell's program set on its terminal (a password is read without echo). */
+	if (session->process != NULL) {
+		error = kl_process_terminal_mode(session->process, &terminal);
+		if (error != 0)
+			return error;
+		*mode = 0U;
+		if ((terminal & KL_PROCESS_TERMINAL_ECHO) != 0U)
+			*mode |= TERMINAL_MODE_ECHO;
+		if ((terminal & KL_PROCESS_TERMINAL_LINES) != 0U)
+			*mode |= TERMINAL_MODE_LINES;
+		return 0;
+	}
+
+#endif
 	/* The question asked now. */
 	kl_mutex_lock(&session->lock);
 
@@ -773,10 +851,21 @@ connection_event(
 {
 	struct mikuterm_session *session;
 	unsigned ready;
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	char shell[MIKUTERM_PATH_MAX];
+#endif
 
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The login shell's news: output, room for the keys, its end (the same bits). */
+	if (session->process != NULL &&
+	    event->kind == KL_APP_PROCESS &&
+	    event->process == session->process)
+		return event->ready;
+
+#endif
 	/* Only this session's post. */
 	if (event->kind != KL_APP_POST || event->code != SESSION_POST)
 		return 0U;
@@ -797,9 +886,19 @@ connection_event(
 	session->settings = 0;
 	if (session->tab_count != 0U)
 		ready |= TERMINAL_READY_TAB;
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	memcpy(shell, session->shell, sizeof(shell));
+	session->shell[0] = '\0';
+#endif
 
 	kl_mutex_unlock(&session->lock);
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The login shell the thread asked for, started once. */
+	if (shell[0] != '\0' && session->process == NULL)
+		ready |= connection_shell(session, shell);
+
+#endif
 	/* Reports what the session has. */
 	return ready;
 }
@@ -850,6 +949,15 @@ connection_close(
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The login shell's terminal hangs up, and the shell is let go (the library reaps it). */
+	if (session->process != NULL) {
+		(void)kl_process_kill(session->process, KL_PROCESS_HANGUP);
+		kl_process_close(session->process);
+		session->process = NULL;
+	}
+
+#endif
 	/* The thread ends the connection; a question waits no more; the tabs waiting are taken out. */
 	kl_mutex_lock(&session->lock);
 
@@ -1071,3 +1179,48 @@ connection_copy(
 		return;
 	memcpy(to, text, length + 1U);
 }
+
+#if MIKUTERM_HAVE_LOGIN_SHELL
+/*
+ * Starts the login shell of a path as the tab's connection, at the grid's
+ * size and with the session's TERM.  Returns the TERMINAL_READY_* bits it
+ * has at once: none when it runs (its own events tell), or the output
+ * when it could not start (the tab says why and stays, for the user to
+ * read and close).
+ */
+static unsigned
+connection_shell(
+	struct mikuterm_session *session,
+	const char *path)
+{
+	char line[MIKUTERM_PATH_MAX + 64U];
+	unsigned columns;
+	unsigned rows;
+	int error;
+
+	/* The grid's size now. */
+	kl_mutex_lock(&session->lock);
+
+	columns = session->columns;
+	rows = session->rows;
+
+	kl_mutex_unlock(&session->lock);
+
+	/* The shell on a terminal of its own. */
+	error = login_shell_start(session->app, path, session->term, columns, rows, &session->process);
+	if (error == 0)
+		return 0U;
+
+	/* Why it did not start, in the tab. */
+	session->process = NULL;
+	(void)snprintf(line, sizeof(line), "mikuterm: %s could not be started: %s\r\n", path, strerror(error));
+	kl_mutex_lock(&session->lock);
+
+	(void)session_put_locked(session, line, strlen(line));
+
+	kl_mutex_unlock(&session->lock);
+
+	/* Reports the line to read. */
+	return TERMINAL_READY_OUTPUT;
+}
+#endif

@@ -19,6 +19,7 @@ How to connect to WSL is a [how-to](../howto/mikuterm-wsl.md).
 | Drawing | On the processor, shown through GDI; no GPU driver is needed |
 | Installation | None: the ZIP is unpacked anywhere the user can write. No registry entry, no `%APPDATA%`, no administrator rights |
 | Build | CMake in `apps/terminal-win32` with llvm-mingw (`cmake/llvm-mingw-x86_64.cmake`, `-aarch64.cmake`); the `zip` target makes `mikuterm-<version>-x64.zip`, `-arm64.zip` and `-x86.zip` |
+| Linux | CMake in `apps/terminal-linux`: a Wayland program with the same tabs, its folder in `$XDG_CONFIG_HOME/mikuterm`. It has no WSL row; it has `[l] Login Shell` (section 5), and runs `ProxyCommand` (section 4.6) and gh (GitHub Codespaces) the POSIX way. The Flatpak build (`-DMIKUTERM_FLATPAK=ON`, as `resources/flatpak` gives it) runs no program of the computer's: no Login Shell, no `ProxyCommand`, no GitHub Codespaces |
 
 ## 2. The folder
 
@@ -300,6 +301,22 @@ shell:
   question shows `<no hostip for proxy command>` for the address, as
   OpenSSH's does.
 
+On Linux (not the Flatpak build) no shell runs the command either:
+
+- The line is split into words as a POSIX shell splits a simple command:
+  blanks between words, `\` before a character, `'...'` as written, and
+  `"..."` in which `\` keeps only `$`, `` ` ``, `"` and `\`. A pipe, a list,
+  a redirection or a subshell (`|`, `&`, `;`, `<`, `>`, `(`, `)` outside
+  quotes) and an expansion (`$`, `` ` `` not after a backslash or in single
+  quotes) are errors of the connection, not text handed to the program.
+- A first word `exec` is passed over. The program is a path from the root,
+  or a name looked for in the folders of `PATH` from the root (not the
+  current directory); the other words are its arguments.
+- It runs with one end of a pair of connected sockets as its standard
+  input and output, in a process group of its own, which is asked to end
+  (then ended) when the connection ends or the tab closes; when mikuterm
+  ends, the program reads the end of its input.
+
 A GitHub codespace (section 5) is reached with the settings
 `gh codespace ssh -c NAME --config` writes: its `User`, its `IdentityFile`
 (the key gh made, `codespaces.auto` in the profile's `.ssh` folder),
@@ -310,7 +327,8 @@ key's without quotes, so mikuterm puts the `IdentityFile` path in quotes
 and makes the `ProxyCommand` again with gh's path (as mikuterm found it)
 and the key's in quotes; it is given before gh's settings, and
 `ssh/config`'s settings for the Host (`Host cs.*`, for example) come before
-both.
+both. On Linux the `ProxyCommand` is read by the rules above, so the paths
+in double quotes are taken whole.
 
 ## 5. Tabs and questions
 
@@ -364,7 +382,9 @@ Hosts:
 - `Hosts:` lists the names of `ssh/config`'s `Host` lines (the ones without
   `*`, `?` or `!`, each once, at most 32), numbered from 1, shown as
   `USER@NAME` when the host's settings give a `User`; then `[w] WSL`,
-  `[c] GitHub Codespaces` and `[x] Settings`.
+  `[c] GitHub Codespaces` and `[x] Settings`. On Linux the rows after the
+  hosts are `[l] Login Shell`, `[c] GitHub Codespaces` and `[x] Settings`
+  (the Flatpak build: `[x] Settings` alone).
 - The chosen row is drawn with the background `#39C5BB` and dark text, in
   every theme. When the rows do not fit the grid, the ones round the chosen
   row are shown.
@@ -381,6 +401,13 @@ Hosts:
   Ctrl+U.
 - `[x] Settings` opens the settings tab beside this one (section 7); this
   tab stays on the screen. Ctrl+C or Ctrl+D closes the tab.
+- `[l] Login Shell` (Linux) makes the tab the terminal of the user's login
+  shell: the shell `SHELL` names, else the user's entry in the password
+  database, else `/bin/sh` (each only a path from the root to a file the
+  user may run), started with `-l` on a pseudo-terminal of the tab's size,
+  in the home directory, with the `TERM` of `mikuterm.conf`. The keys, the
+  size and the tab's close go to it (closing the tab hangs it up); its end
+  closes the tab. When no shell can be run, the screen says so and stays.
 - `[w] WSL` runs `wsl.exe -l -q` (the one in the Windows system folder,
   without a console window, at most 15 seconds) and reads its output
   (UTF-16LE with or without a byte order mark, or UTF-8 when `WSL_UTF8=1`).
@@ -421,7 +448,9 @@ Hosts:
     come before).
 - `[c] GitHub Codespaces` runs GitHub CLI's `gh codespace list` (gh in a
   folder of `PATH`, else `C:\Program Files\GitHub CLI\gh.exe`; without a
-  console window, at most 60 seconds) and lists the codespaces under
+  console window, at most 60 seconds; on Linux gh in a folder of `PATH`,
+  its arguments split as section 4.6 splits a `ProxyCommand`, reading
+  nothing, its output and errors read together) and lists the codespaces under
   `GitHub Codespaces:`, each by its display name (else its name) with its
   repository, and, when it is not running, its state and `starts when
   chosen`; `[b] Back` (or Escape) returns to the hosts. A codespace's name

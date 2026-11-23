@@ -31,6 +31,8 @@
 #include "codespace.h"
 #include "forward.h"
 #include "launch.h"
+#include "login-shell.h"
+#include "program.h"
 #include "proxy.h"
 #include "proxy-command.h"
 #include "remote-command.h"
@@ -44,8 +46,6 @@
 #include <compat/crypto/crypto.h>
 
 #ifdef _WIN32
-#include "program.h"
-
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -55,6 +55,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* GitHub Codespaces are reached through a ProxyCommand (the features are mikuterm.h's). */
+#if MIKUTERM_HAVE_CODESPACES && !MIKUTERM_HAVE_PROXY_COMMAND
+#error "MIKUTERM_HAVE_CODESPACES needs MIKUTERM_HAVE_PROXY_COMMAND"
+#endif
 
 /* The most addresses of a host tried, and the most hosts of ssh\config listed. */
 #define THREAD_ADDRESSES	8U
@@ -179,7 +184,8 @@
  * (empty: none).  For a codespace, settings holds the ssh settings gh
  * gave (settings_size bytes; 0: none), read after ssh\config's, and proxy
  * the ProxyCommand setting made for it (empty: none), which comes before
- * gh's own.
+ * gh's own.  shell is the path of the login shell the user chose (empty:
+ * a host was chosen), which the tab runs in place of a connection.
  */
 struct thread_target {
 	char host[MIKUTERM_HOST_MAX];
@@ -193,6 +199,7 @@ struct thread_target {
 	char settings[THREAD_CODESPACE_CONFIG_MAX];
 	size_t settings_size;
 	char proxy[sizeof(THREAD_PROXY_KEYWORD) + SSH_CONFIG_COMMAND_MAX];
+	char shell[MIKUTERM_PATH_MAX];
 };
 
 /*
@@ -298,13 +305,13 @@ static int thread_wsl_host(const struct thread_choice *choice, const char *name,
 static int thread_wsl_target(struct thread_choice *choice, const char *name, struct thread_target *target);
 static int thread_wsl_address(struct thread_choice *choice, const char *name, uint16_t port, struct thread_target *target);
 static void thread_wsl_hint(const struct thread_link *link, char *hint, size_t size);
-#ifdef _WIN32
+#if MIKUTERM_HAVE_CODESPACES
 static int thread_codespaces(struct thread_choice *choice, struct thread_target *target);
-static int thread_codespaces_list(struct thread_choice *choice, wchar_t *gh, size_t gh_size, unsigned *count);
-static int thread_gh_find(wchar_t *gh, size_t size);
+static int thread_codespaces_list(struct thread_choice *choice, mikuterm_program_char *gh, size_t gh_size, unsigned *count);
+static int thread_gh_find(mikuterm_program_char *gh, size_t size);
 static int thread_gh_failed(struct thread_choice *choice, struct launch_screen *screen, int error, unsigned long code, size_t size);
-static int thread_codespace_target(struct thread_choice *choice, const wchar_t *gh, const struct codespace_entry *space, struct thread_target *target);
-static int thread_codespace_proxy(const char *settings, size_t size, const char *host, const wchar_t *gh, const char *name, struct thread_target *target);
+static int thread_codespace_target(struct thread_choice *choice, const mikuterm_program_char *gh, const struct codespace_entry *space, struct thread_target *target);
+static int thread_codespace_proxy(const char *settings, size_t size, const char *host, const mikuterm_program_char *gh, const char *name, struct thread_target *target);
 #endif
 static int thread_same_name(const char *first, const char *second);
 static int thread_user_name(const char *name);
@@ -401,9 +408,15 @@ session_run(
 	if (status == 0 && target.warning[0] != '\0')
 		session_say(session, target.warning);
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	/* The login shell: the tab starts it and is its terminal from now on; the thread has nothing to connect. */
+	if (status == 0 && target.shell[0] != '\0')
+		session_shell(session, target.shell);
+#endif
+
 	/* Connects until the connection ends well, the tab closes, or the user gives up after a failure. */
 	again = 0;
-	while (status == 0) {
+	while (status == 0 && target.shell[0] == '\0') {
 		/* One attempt; one after a failed one may find a forwarded port still held by the last. */
 		memset(link, 0, sizeof(*link));
 		link->session = session;
@@ -446,8 +459,8 @@ session_run(
 /*
  * Chooses what to connect to: the session's host when it has one, else
  * what the user takes on the launch screen: a host of ssh\config, a host
- * typed on the ">>> " line (a name, or user@host:port), a distribution
- * of WSL, or a codespace.  Settings opens the settings' tab beside this one
+ * typed on the ">>> " line (a name, or user@host:port), the login shell,
+ * a distribution of WSL, or a codespace.  Settings opens the settings' tab beside this one
  * and the screen stays.  Returns 0, ECANCELED when the user gave up, or
  * EPIPE when the tab closed.
  */
@@ -500,11 +513,14 @@ thread_choose(
 		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
 	}
 
-	/* WSL (not on Linux), GitHub Codespaces (on Windows, where gh runs) and the settings after the hosts; with no host, how to type one. */
+	/* The login shell, WSL (not on Linux), GitHub Codespaces and the settings after the hosts; with no host, how to type one. */
+#if MIKUTERM_HAVE_LOGIN_SHELL
+	(void)launch_add(&choice->screen, "l", LAUNCH_SHELL, "Login Shell", NULL);
+#endif
 #ifndef MIKUTERM_LINUX
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
 #endif
-#ifdef _WIN32
+#if MIKUTERM_HAVE_CODESPACES
 	(void)launch_add(&choice->screen, "c", LAUNCH_CODESPACES, "GitHub Codespaces", NULL);
 #endif
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
@@ -567,8 +583,22 @@ thread_choose(
 			continue;
 		}
 
+#if MIKUTERM_HAVE_LOGIN_SHELL
+		/* The login shell, the tab's from now on; one that cannot be found is said, and the screen stays. */
+		if (choice->screen.rows[index].kind == LAUNCH_SHELL) {
+			error = login_shell_find(target->shell, sizeof(target->shell));
+			if (error != 0) {
+				launch_say(&choice->screen, "No login shell can be run (SHELL, the password database, /bin/sh).");
+				error = 0;
+				continue;
+			}
+
+			break;
+		}
+
+#endif
 		/* WSL or GitHub Codespaces: a distribution or a codespace, or back to the hosts with why not. */
-#ifdef _WIN32
+#if MIKUTERM_HAVE_CODESPACES
 		if (choice->screen.rows[index].kind == LAUNCH_CODESPACES)
 			error = thread_codespaces(choice, target);
 		else
@@ -1160,7 +1190,7 @@ thread_wsl_hint(
 	}
 }
 
-#ifdef _WIN32
+#if MIKUTERM_HAVE_CODESPACES
 /*
  * Asks gh for the codespaces and lets the user take one: the target is
  * then the Host gh's ssh settings name, reached through gh.  Returns 0
@@ -1175,7 +1205,7 @@ thread_codespaces(
 {
 	struct launch_screen *screen;
 	const struct codespace_entry *space;
-	wchar_t gh[MIKUTERM_PATH_MAX];
+	mikuterm_program_char gh[MIKUTERM_PATH_MAX];
 	char key[LAUNCH_KEY_MAX];
 	char note[LAUNCH_NOTE_MAX];
 	const char *label;
@@ -1284,7 +1314,7 @@ thread_codespaces(
 static int
 thread_codespaces_list(
 	struct thread_choice *choice,
-	wchar_t *gh,
+	mikuterm_program_char *gh,
 	size_t gh_size,
 	unsigned *count)
 {
@@ -1319,24 +1349,28 @@ thread_codespaces_list(
 }
 
 /*
- * Finds gh: in the folders of PATH, else in the folder GitHub CLI's
- * installer puts it in (under the Program Files folder).  Writes its path
- * into gh (size units).  Returns 0 or ENOENT.
+ * Finds gh: in the folders of PATH, else (on Windows) in the folder
+ * GitHub CLI's installer puts it in (under the Program Files folder).
+ * Writes its path into gh (size units).  Returns 0 or ENOENT.
  */
 static int
 thread_gh_find(
-	wchar_t *gh,
+	mikuterm_program_char *gh,
 	size_t size)
 {
+#ifdef _WIN32
 	DWORD length;
 	DWORD attributes;
 	size_t added;
+#endif
 	int error;
 
 	/* In PATH. */
 	error = mikuterm_program_find(THREAD_GH_NAME, gh, size);
 	if (error == 0)
 		return 0;
+
+#ifdef _WIN32
 
 	/* The Program Files folder, and gh where the installer puts it. */
 	added = wcslen(THREAD_GH_INSTALLED);
@@ -1354,6 +1388,10 @@ thread_gh_find(
 
 	/* Succeeded: gh's path. */
 	return 0;
+#else
+	/* Not in PATH: a POSIX system's packages put gh in a folder of it. */
+	return ENOENT;
+#endif
 }
 
 /*
@@ -1415,7 +1453,7 @@ thread_gh_failed(
 static int
 thread_codespace_target(
 	struct thread_choice *choice,
-	const wchar_t *gh,
+	const mikuterm_program_char *gh,
 	const struct codespace_entry *space,
 	struct thread_target *target)
 {
@@ -1501,7 +1539,7 @@ thread_codespace_proxy(
 	const char *settings,
 	size_t size,
 	const char *host,
-	const wchar_t *gh,
+	const mikuterm_program_char *gh,
 	const char *name,
 	struct thread_target *target)
 {
@@ -1510,12 +1548,22 @@ thread_codespace_proxy(
 	char gh_path[MIKUTERM_PATH_MAX];
 	char command[SSH_CONFIG_COMMAND_MAX];
 	const char *identity;
+#ifndef _WIN32
+	size_t length;
+#endif
 	int error;
 
-	/* gh's path in UTF-8. */
+	/* gh's path in UTF-8 (a POSIX system's is already). */
+#ifdef _WIN32
 	error = thread_local_name(gh, gh_path, sizeof(gh_path));
 	if (error != 0)
 		return EINVAL;
+#else
+	length = strlen(gh);
+	if (length >= sizeof(gh_path))
+		return EINVAL;
+	memcpy(gh_path, gh, length + 1U);
+#endif
 
 	/* The settings for the Host, for the key they name. */
 	config = malloc(sizeof(*config));
@@ -2117,7 +2165,7 @@ static int
 thread_dial_proxy(
 	struct thread_link *link)
 {
-#ifdef _WIN32
+#if MIKUTERM_HAVE_PROXY_COMMAND
 	struct proxy_command_tokens tokens;
 	char error_text[PROXY_ERROR_MAX];
 	char *command;
@@ -2155,8 +2203,8 @@ thread_dial_proxy(
 	/* Succeeded: the ProxyCommand's connection. */
 	return THREAD_DONE;
 #else
-	/* Only the Windows program starts a ProxyCommand. */
-	(void)snprintf(link->reason, sizeof(link->reason), "ProxyCommand is not supported here");
+	/* A build that runs no local program starts no ProxyCommand. */
+	(void)snprintf(link->reason, sizeof(link->reason), "ProxyCommand is not supported by this build of mikuterm");
 	return THREAD_FAILED;
 #endif
 }
@@ -2170,7 +2218,7 @@ static void
 thread_proxy_said(
 	struct thread_link *link)
 {
-#ifdef _WIN32
+#if MIKUTERM_HAVE_PROXY_COMMAND
 	char text[PROXY_ERRORS_MAX + 1U];
 	const char *start;
 	const char *end;
@@ -2208,7 +2256,7 @@ thread_proxy_said(
 			start++;
 	}
 #else
-	/* Only the Windows program starts a ProxyCommand: there is nothing it said. */
+	/* A build without ProxyCommand starts none: there is nothing it said. */
 	(void)link;
 #endif
 }
@@ -2226,8 +2274,8 @@ thread_hang_up(
 		kl_socket_close(link->socket);
 	link->socket = NULL;
 
-	/* The command and its relays (only the Windows program starts one). */
-#ifdef _WIN32
+	/* The command and what carries its bytes (a build without ProxyCommand starts none). */
+#if MIKUTERM_HAVE_PROXY_COMMAND
 	proxy_stop(link->proxy);
 #endif
 	link->proxy = NULL;

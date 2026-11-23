@@ -8,7 +8,9 @@ command: mikuterm
 # memory (no GPU device) and connects to SSH servers (the network).  Its
 # settings, hosts and keys are in its own XDG configuration directory
 # (~/.var/app/io.noctvm.mikuterm/config/mikuterm), so no host directory
-# is shared.
+# is shared.  It runs no program of the computer's (MIKUTERM_FLATPAK: no
+# login shell, no ProxyCommand, no GitHub Codespaces), only its SSH
+# connections and its own X server.
 finish-args:
   - --socket=wayland
   - --share=network
@@ -19,6 +21,7 @@ modules:
     subdir: apps/terminal-linux
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
+      - -DMIKUTERM_FLATPAK=ON
       - -DMIKUTERM_VULKAN_INCLUDE=/usr/include
       - -DMIKUTERM_DISTFILES=/run/build/mikuterm/distfiles
     sources:

@@ -131,6 +131,20 @@ struct mikuterm_session {
 	 */
 	int settings;
 
+	/*
+	 * The login shell the user chose on the launch screen, by its path
+	 * (empty: none, or taken): the tab's next post starts it on a
+	 * terminal of its own, and the thread, which asked for it, has ended.
+	 */
+	char shell[MIKUTERM_PATH_MAX];
+
+	/*
+	 * The login shell running as the tab's connection (NULL: none): the
+	 * application's thread's alone, not under the lock.  The tab's keys,
+	 * size and end go to it, and it is read after the ring.
+	 */
+	struct kl_process *process;
+
 	/* The keys typed, for the thread to send; input_full says the tab was refused some. */
 	unsigned char input[SESSION_INPUT_MAX];
 	size_t input_length;
@@ -182,6 +196,7 @@ void session_say_line(struct mikuterm_session *session, const char *text);
 void session_keep_line_locked(struct mikuterm_session *session);
 void session_ended(struct mikuterm_session *session);
 void session_settings(struct mikuterm_session *session);
+void session_shell(struct mikuterm_session *session, const char *path);
 void session_thread_ended(void);
 int session_app_post(struct kl_app *app, uint32_t number);
 void session_tab(struct mikuterm_session *session, struct x11_tab *tab);

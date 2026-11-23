@@ -14,7 +14,10 @@
  * OpenSSH hands the line to the user's shell.  Here no shell runs it: the
  * first word is the program (in double quotes when its path has spaces),
  * and the rest of the line is the program's command line as written,
- * which the program splits into its arguments by Windows' rules.
+ * which the program splits into its arguments by Windows' rules.  On the
+ * POSIX systems the line is split into words as a POSIX shell splits a
+ * simple command, and what only a shell does (a pipe, a redirection, an
+ * expansion) is refused rather than handed to the program as text.
  */
 
 #include "proxy-command.h"
@@ -25,6 +28,7 @@
 
 static int proxy_command_put(char *out, size_t size, size_t *used, const char *text);
 static int proxy_command_blank(char character);
+static int proxy_command_shell(char character);
 
 /*
  * Writes text into out (size bytes with its NUL) with each %-token
@@ -114,6 +118,151 @@ proxy_command_expand(
 	}
 
 	/* Succeeded: the command with its tokens put in. */
+	return 0;
+}
+
+/*
+ * Splits a command into its words as a POSIX shell splits a simple
+ * command, without running one: blanks separate the words; a backslash
+ * takes the character after it as it is; text in single quotes is taken
+ * as it is; in double quotes a backslash takes only $, `, " and \ as they
+ * are.  The words are written one after another, each with its NUL, into
+ * buffer (size bytes), and words points at them (at most most of them,
+ * *count used).  Returns 0, EINVAL with the reason in error (a quote not
+ * closed, a character only a shell acts on: | & ; < > ( ) outside
+ * quotes, $ or ` not taken as they are), ENOENT for a command with no
+ * word, E2BIG for more than most words, or EMSGSIZE when buffer is too
+ * small.
+ *
+ * Procedure referenced: POSIX.1-2017 XCU 2.2 (Quoting: the backslash,
+ * single quotes and double quotes) and 2.3 (Token Recognition: the
+ * blanks and the operators).
+ */
+int
+proxy_command_words(
+	const char *command,
+	char *buffer,
+	size_t size,
+	char **words,
+	unsigned most,
+	unsigned *count,
+	char *error,
+	size_t error_size)
+{
+	const char *at;
+	size_t used;
+	unsigned quote;
+	int in_word;
+	int blank;
+	int special;
+	char character;
+
+	/* Nothing split yet. */
+	error[0] = '\0';
+	*count = 0U;
+	used = 0U;
+	in_word = 0;
+	quote = 0U;
+
+	/* Each character, by where it stands: outside quotes, in single quotes, in double quotes. */
+	for (at = command; *at != '\0'; at++) {
+		character = *at;
+
+		/* In single quotes, everything to the closing one as it is. */
+		if (quote == '\'') {
+			if (character == '\'') {
+				quote = 0U;
+				continue;
+			}
+		} else if (quote == '"') {
+			/* In double quotes: the closing one, a backslash before $ ` " \, and what a shell would expand. */
+			if (character == '"') {
+				quote = 0U;
+				continue;
+			}
+			if (character == '\\' &&
+			    (at[1] == '$' ||
+			     at[1] == '`' ||
+			     at[1] == '"' ||
+			     at[1] == '\\')) {
+				at++;
+				character = *at;
+			} else if (character == '$' || character == '`') {
+				(void)snprintf(error, error_size, "ProxyCommand: no shell runs the command: %c is not taken (put it after a backslash)", character);
+				return EINVAL;
+			}
+		} else {
+			/* Outside quotes: a blank ends the word. */
+			blank = proxy_command_blank(character);
+			if (blank) {
+				if (in_word) {
+					if (used >= size)
+						return EMSGSIZE;
+					buffer[used] = '\0';
+					used++;
+					in_word = 0;
+				}
+				continue;
+			}
+
+			/* A character only a shell acts on. */
+			special = proxy_command_shell(character);
+			if (special) {
+				(void)snprintf(error, error_size, "ProxyCommand: no shell runs the command: %c is not taken (put it in quotes)", character);
+				return EINVAL;
+			}
+
+			/* A word starts here: a new one needs room among the words. */
+			if (!in_word) {
+				if (*count >= most) {
+					(void)snprintf(error, error_size, "ProxyCommand: the command has too many words");
+					return E2BIG;
+				}
+				words[*count] = buffer + used;
+				(*count)++;
+				in_word = 1;
+			}
+
+			/* A quote opens, or a backslash takes the next character as it is. */
+			if (character == '\'' || character == '"') {
+				quote = (unsigned char)character;
+				continue;
+			}
+			if (character == '\\') {
+				if (at[1] == '\0')
+					break;
+				at++;
+				character = *at;
+			}
+		}
+
+		/* The character is the word's. */
+		if (used >= size)
+			return EMSGSIZE;
+		buffer[used] = character;
+		used++;
+	}
+
+	/* A quote not closed. */
+	if (quote != 0U) {
+		(void)snprintf(error, error_size, "ProxyCommand: a quote is not closed");
+		return EINVAL;
+	}
+
+	/* The last word's end. */
+	if (in_word) {
+		if (used >= size)
+			return EMSGSIZE;
+		buffer[used] = '\0';
+	}
+
+	/* A command with no word. */
+	if (*count == 0U) {
+		(void)snprintf(error, error_size, "ProxyCommand: no program is named");
+		return ENOENT;
+	}
+
+	/* Succeeded: the words. */
 	return 0;
 }
 
@@ -243,6 +392,31 @@ proxy_command_blank(
 	/* A space or a tab. */
 	if (character == ' ' || character == '\t')
 		return 1;
+
+	/* Any other. */
+	return 0;
+}
+
+/* Tells whether a character outside quotes is one only a shell acts on (1: a pipe, a list, a redirection, a subshell, an expansion) or not (0). */
+static int
+proxy_command_shell(
+	char character)
+{
+	/* The operators and the expansions of a shell's command line. */
+	switch (character) {
+	case '|':
+	case '&':
+	case ';':
+	case '<':
+	case '>':
+	case '(':
+	case ')':
+	case '$':
+	case '`':
+		return 1;
+	default:
+		break;
+	}
 
 	/* Any other. */
 	return 0;
