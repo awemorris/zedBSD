@@ -589,38 +589,66 @@ x11server_backend_enter(
 }
 
 /*
- * Hears that the system gave a surface a size: the X window is resized,
- * told, and drawn again by its client.
+ * Hears that the system moved a surface or gave it a size (the user moved
+ * or resized it, or the system corrected what the core asked for): the X
+ * window takes the place (X11_SURFACE_ANY: not known, the place stays) and
+ * the size, its client is told, and a new size is drawn again by it.  The
+ * surface is not told back what it reported.
  */
 void
 x11server_backend_configure(
 	struct x11server *server,
 	uint32_t window,
+	int32_t x,
+	int32_t y,
 	int width,
 	int height)
 {
-	struct x11_window *resized;
+	struct x11_window *changed;
+	int moved;
 	int failed;
 
 	/* The X window, at a size it can have. */
-	resized = x11_window_find(server, window);
-	if (resized == NULL ||
+	changed = x11_window_find(server, window);
+	if (changed == NULL ||
 	    width <= 0 ||
 	    height <= 0 ||
 	    width > ROOTLESS_SIZE_MAX ||
 	    height > ROOTLESS_SIZE_MAX)
 		return;
 
+	/* A known place within X's coordinates: the window and its descendants move there. */
+	moved = 0;
+	if (x != X11_SURFACE_ANY &&
+	    y != X11_SURFACE_ANY &&
+	    x >= -ROOTLESS_SIZE_MAX && x <= ROOTLESS_SIZE_MAX &&
+	    y >= -ROOTLESS_SIZE_MAX && y <= ROOTLESS_SIZE_MAX &&
+	    (x != changed->x || y != changed->y)) {
+		x11_move_descendants(server, changed->id, (int)x - changed->x, (int)y - changed->y);
+		changed->x = (int16_t)x;
+		changed->y = (int16_t)y;
+		changed->surface_x = changed->x;
+		changed->surface_y = changed->y;
+		moved = 1;
+	}
+
+	/* The same size: only the move is told. */
+	if ((unsigned)width == changed->width && (unsigned)height == changed->height) {
+		if (moved)
+			x11_configure_notify(server, changed);
+		return;
+	}
+
 	/* Pixels of the new size. */
-	failed = x11_window_resize(resized, (uint16_t)width, (uint16_t)height);
+	failed = x11_window_resize(changed, (uint16_t)width, (uint16_t)height);
 	if (failed != 0)
 		return;
 
 	/* The size, told to the client, which draws the window again. */
-	resized->width = (uint16_t)width;
-	resized->height = (uint16_t)height;
-	x11_expose(server, resized);
-	x11_mark_dirty(server, resized->x, resized->y, resized->width, resized->height);
+	changed->width = (uint16_t)width;
+	changed->height = (uint16_t)height;
+	x11_expose(server, changed);
+	x11_mark_dirty(server, changed->x, changed->y, changed->width, changed->height);
 }
 
 /*

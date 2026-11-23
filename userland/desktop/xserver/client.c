@@ -52,12 +52,18 @@
 #define SERVER_SLOT_BITS	8U
 #define SERVER_SLOT_MASK	0xffU
 
+/* Why a setup is refused. */
+#define SERVER_REFUSED_AUTH	"Invalid MIT-MAGIC-COOKIE-1 key"
+
 /* How many of a stuck client's held bytes its report shows, and the report's head. */
 #define SERVER_HELD_BYTES	32U
 #define SERVER_HELD_HEAD	"X11SERVER HELD"
 
 static struct x11_client *server_client(struct x11server *server, uint32_t id, unsigned *index);
 static int server_handle(struct x11server *server, unsigned index);
+static int server_setup(struct x11server *server, unsigned index, size_t *need);
+static int server_authorized(const struct x11_client *client, const uint8_t *name, size_t name_length, const uint8_t *data, size_t data_length);
+static void server_refuse(struct x11server *server, struct x11_client *client, const char *reason);
 static int server_append(struct x11_client *client, const uint8_t *bytes, size_t length);
 static void server_report(struct x11server *server);
 static void server_report_history(struct x11server *server, const struct x11_client *client);
@@ -162,6 +168,9 @@ x11server_destroy(
 	for (index = 0U; index < X11_MAX_CLIENTS; index++)
 		x11_client_close(server, index);
 
+	/* The properties left (the root window's). */
+	x11_selection_destroy(server);
+
 	/* Vulkan's state, after every swapchain on it, and the font. */
 	x11_vulkan_close(server->vulkan);
 	x11_glyphs_close(&server->glyphs);
@@ -172,8 +181,10 @@ x11server_destroy(
 
 /*
  * Takes a new client into a free slot and gives the transport its number.
- * Returns 0, or EAGAIN when every slot is in use (the transport refuses
- * the connection).
+ * With an authorization, the client's setup must present it (an
+ * MIT-MAGIC-COOKIE-1 of those bytes) or is refused.  Returns 0, EAGAIN
+ * when every slot is in use (the transport refuses the connection), or
+ * EINVAL for an authorization the core cannot check.
  */
 int
 x11server_connect(
@@ -183,12 +194,22 @@ x11server_connect(
 {
 	struct x11_client *slot;
 	unsigned index;
+	int differs;
 
-	/* Any authorization is accepted for now. */
-	(void)auth;
+	/* Only MIT-MAGIC-COOKIE-1 of a size the core keeps can be checked. */
+	*client = 0U;
+	if (auth != NULL) {
+		if (auth->name == NULL ||
+		    auth->data == NULL ||
+		    auth->size == 0U ||
+		    auth->size > X11_AUTH_MAX)
+			return EINVAL;
+		differs = strcmp(auth->name, X11_AUTH_COOKIE);
+		if (differs != 0)
+			return EINVAL;
+	}
 
 	/* The first slot free and not waiting for the transport to hear of a close. */
-	*client = 0U;
 	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
 		if (server->clients[index].id == 0U && server->clients[index].closed == 0U)
 			break;
@@ -213,6 +234,13 @@ x11server_connect(
 	slot->base = (index + 1U) << 22;
 	slot->last_ms = server->now;
 
+	/* The authorization its setup must present. */
+	if (auth != NULL) {
+		slot->auth_required = 1;
+		memcpy(slot->auth_data, auth->data, auth->size);
+		slot->auth_size = auth->size;
+	}
+
 	/* Succeeded: the transport hands the client's bytes in by its number. */
 	*client = slot->id;
 	return 0;
@@ -236,10 +264,12 @@ x11server_input(
 	uint8_t *grown;
 	size_t capacity;
 
-	/* The client. */
+	/* The client; no bytes is nothing to add. */
 	connection = server_client(server, client, &index);
 	if (connection == NULL)
 		return ENOENT;
+	if (size == 0U)
+		return 0;
 
 	/* A client that sends more than the core holds breaks the protocol. */
 	if (size > X11_INPUT_CAP - connection->used) {
@@ -319,9 +349,11 @@ x11server_written(
 	if (connection == NULL)
 		return;
 
-	/* No more than is waiting. */
+	/* No more than is waiting, and nothing to take when nothing was sent. */
 	if (size > connection->output_used)
 		size = connection->output_used;
+	if (size == 0U)
+		return;
 
 	/* What was sent leaves the queue; the transport hears again of what comes next. */
 	memmove(connection->output, connection->output + size, connection->output_used - size);
@@ -446,10 +478,14 @@ x11server_tick(
 	/* What changed is shown. */
 	x11_rootless_present(server);
 
-	/* A client that stopped taking its output is closed. */
+	/* A client that stopped taking its output is closed, and one refused once its refusal is taken. */
 	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
 		client = &server->clients[index];
-		if (client->id != 0U && client->broken)
+		if (client->id == 0U)
+			continue;
+		if (client->broken)
+			x11_client_close(server, index);
+		else if (client->ending && client->output_used == 0U)
 			x11_client_close(server, index);
 	}
 
@@ -613,76 +649,84 @@ server_handle(
 	unsigned index)
 {
 	struct x11_client *client;
-	uint16_t name_length;
-	uint16_t data_length;
+	const uint8_t *request;
+	uint32_t words;
 	uint16_t units;
+	uint8_t opcode;
 	size_t handled;
 	size_t need;
-	int error;
+	size_t length;
+	int whole;
 
 	/* Each whole message at the front of the buffer. */
 	client = &server->clients[index];
 	handled = 0U;
 	for (;;) {
-		/* The rest waits for the next tick once the tick's share is used. */
+		/* The rest waits for the next tick once the tick's share is used; a refused client sends nothing more. */
 		if (handled >= X11_TICK_BYTES)
 			break;
+		if (client->ending)
+			return 0;
 
-		/* A request's length is in its header; the setup's in its fixed part. */
+		/* The setup, answered whole or not at all. */
 		if (!client->setup) {
-			/* The fixed part, and the byte order it names. */
-			if (client->used < 12U)
+			whole = server_setup(server, index, &need);
+			if (!whole)
 				return 0;
-			if (client->input[0] != 'l' && client->input[0] != 'B') {
-				x11_client_close(server, index);
-				return 0;
-			}
-
-			/* The byte order it names. */
-			client->order = 0;
-			if (client->input[0] == 'B')
-				client->order = 1;
-
-			/* The authorization's name and data, padded to words. */
-			name_length = x11_read16(client->input + 6, client->order);
-			data_length = x11_read16(client->input + 8, client->order);
-			need = 12U + (((size_t)name_length + 3U) & ~(size_t)3U) + (((size_t)data_length + 3U) & ~(size_t)3U);
-			if (client->used < need)
-				return 0;
-
-			/* The setup is answered (any authorization is accepted). */
-			error = x11_setup_reply(server, client);
-			if (error != 0) {
-				x11_client_close(server, index);
+			if (client->id == 0U || client->ending) {
+				if (client->id != 0U)
+					client->consumed += need;
 				return 0;
 			}
-
-			/* Requests follow. */
-			client->setup = 1;
 		} else {
-			/* The header and the length it gives (in words; zero is not a length). */
+			/* The header and the length it gives (in words). */
 			if (client->used < 4U)
 				return 0;
 			units = x11_read16(client->input + 2, client->order);
+			request = client->input;
+			need = (size_t)units * 4U;
+			length = need;
+
+			/* Zero is a length only for a client that enabled BIG-REQUESTS: a 32-bit length in words follows the header. */
 			if (units == 0U) {
-				x11_client_close(server, index);
-				return 0;
+				if (!client->big_requests) {
+					x11_client_close(server, index);
+					return 0;
+				}
+				if (client->used < 8U)
+					return 0;
+				words = x11_read32(client->input + 4, client->order);
+				if (words < 2U || words > X11_INPUT_CAP / 4U) {
+					x11_client_close(server, index);
+					return 0;
+				}
+				need = (size_t)words * 4U;
 			}
 
-			/* The request's length in bytes. */
-			need = (size_t)units * 4U;
+			/* The whole request. */
 			if (client->used < need)
 				return 0;
 
+			/*
+			 * A big request is handed on as an ordinary one: its header
+			 * moves over the 32-bit length, and the request starts there.
+			 */
+			if (units == 0U) {
+				memmove(client->input + 4, client->input, 4U);
+				request = client->input + 4;
+				length = need - 4U;
+			}
+
 			/* The request; a request that ended its own client leaves nothing more to do. */
-			x11_request(server, index, client->input, need);
+			opcode = request[0];
+			x11_request(server, index, request, length);
 			if (client->id == 0U)
 				return 0;
 
 			/* The request, remembered for the stuck-client report. */
-			client->last_opcode = client->input[0];
+			client->last_opcode = opcode;
 			client->last_ms = server->now;
-			client->history_opcode[client->history_next] = client->input[0];
+			client->history_opcode[client->history_next] = opcode;
 			client->history_length[client->history_next] = (uint32_t)need;
 			client->history_sequence[client->history_next] = client->sequence;
 			client->history_next = (client->history_next + 1U) % X11_HISTORY;
@@ -697,6 +741,140 @@ server_handle(
 
 	/* Whole requests may still be waiting. */
 	return 1;
+}
+
+/*
+ * Answers a client's setup once it is whole: accepted, or refused when it
+ * does not present the authorization asked for (the client then ends once
+ * the refusal is taken).  Returns nonzero when the setup was whole (*need:
+ * its length), 0 when more is to come or the client was closed.
+ */
+static int
+server_setup(
+	struct x11server *server,
+	unsigned index,
+	size_t *need)
+{
+	struct x11_client *client;
+	uint16_t name_length;
+	uint16_t data_length;
+	size_t name_padded;
+	int authorized;
+	int error;
+
+	/* The fixed part, and the byte order it names. */
+	client = &server->clients[index];
+	*need = 0U;
+	if (client->used < 12U)
+		return 0;
+	if (client->input[0] != 'l' && client->input[0] != 'B') {
+		x11_client_close(server, index);
+		return 0;
+	}
+
+	/* The byte order it names. */
+	client->order = 0;
+	if (client->input[0] == 'B')
+		client->order = 1;
+
+	/* The authorization's name and data, padded to words. */
+	name_length = x11_read16(client->input + 6, client->order);
+	data_length = x11_read16(client->input + 8, client->order);
+	name_padded = ((size_t)name_length + 3U) & ~(size_t)3U;
+	*need = 12U + name_padded + (((size_t)data_length + 3U) & ~(size_t)3U);
+	if (client->used < *need)
+		return 0;
+
+	/* A client asked for an authorization must present it. */
+	if (client->auth_required) {
+		authorized = server_authorized(client, client->input + 12, name_length, client->input + 12 + name_padded, data_length);
+		if (!authorized) {
+			x11_log(server, "X11SERVER SETUP refused client=%u (authorization)", index);
+			server_refuse(server, client, SERVER_REFUSED_AUTH);
+			client->ending = 1;
+			return 1;
+		}
+	}
+
+	/* The setup is answered. */
+	error = x11_setup_reply(server, client);
+	if (error != 0) {
+		x11_client_close(server, index);
+		return 0;
+	}
+
+	/* Succeeded: requests follow. */
+	client->setup = 1;
+	return 1;
+}
+
+/*
+ * Tells whether a setup's authorization is the one asked for: the name
+ * MIT-MAGIC-COOKIE-1 and the same bytes, compared in a time that does not
+ * depend on where they differ.
+ */
+static int
+server_authorized(
+	const struct x11_client *client,
+	const uint8_t *name,
+	size_t name_length,
+	const uint8_t *data,
+	size_t data_length)
+{
+	unsigned difference;
+	size_t index;
+	int differs;
+
+	/* The name. */
+	if (name_length != sizeof(X11_AUTH_COOKIE) - 1U)
+		return 0;
+	differs = memcmp(name, X11_AUTH_COOKIE, name_length);
+	if (differs != 0)
+		return 0;
+
+	/* The data's size. */
+	if (data_length != client->auth_size)
+		return 0;
+
+	/* Every byte, each one looked at. */
+	difference = 0U;
+	for (index = 0U; index < data_length; index++)
+		difference |= (unsigned)(data[index] ^ client->auth_data[index]);
+	if (difference != 0U)
+		return 0;
+
+	/* Succeeded: the authorization asked for. */
+	return 1;
+}
+
+/* Queues a refused setup's answer: Failed, protocol 11.0, and the reason. */
+static void
+server_refuse(
+	struct x11server *server,
+	struct x11_client *client,
+	const char *reason)
+{
+	uint8_t reply[8U + 64U];
+	size_t length;
+	size_t padded;
+
+	/* The reason, padded to words. */
+	length = strlen(reason);
+	if (length > 64U)
+		length = 64U;
+	padded = (length + 3U) & ~(size_t)3U;
+
+	/* The answer. */
+	memset(reply, 0, sizeof(reply));
+	reply[0] = 0U;
+	reply[1] = (uint8_t)length;
+	x11_write16(reply + 2, 11U, client->order);
+	x11_write16(reply + 4, 0U, client->order);
+	x11_write16(reply + 6, (uint16_t)(padded / 4U), client->order);
+	memcpy(reply + 8, reason, length);
+
+	/* Queued. */
+	x11_client_send(server, client, reply, 8U + padded);
 }
 
 /* Adds bytes to a client's queue, growing it; ENOBUFS past X11_OUTPUT_CAP, ENOMEM. */
