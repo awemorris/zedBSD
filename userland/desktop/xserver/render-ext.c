@@ -562,7 +562,9 @@ x11_render_picture_pixels(
 		return X11_BAD_ALLOC;
 	}
 
-	/* The picture copied onto them. */
+	/* The picture copied onto them (its pixels up to date in memory first). */
+	if (source.source.image != NULL)
+		x11_render_image_memory(source.source.image);
 	box.x0 = 0;
 	box.y0 = 0;
 	box.x1 = image.width;
@@ -1291,6 +1293,10 @@ render_add_traps(
 {
 	struct x11_trapezoid trapezoid;
 	struct x11_picture *picture;
+	struct x11_image *image;
+	struct x11_region all;
+	struct x11_box all_box;
+	int error;
 	const uint8_t *trap;
 	size_t count;
 	size_t at;
@@ -1314,6 +1320,10 @@ render_add_traps(
 	x = (int16_t)x11_read16(request + 8, msb);
 	y = (int16_t)x11_read16(request + 10, msb);
 
+	/* The pixmap's pixels up to date in memory (it may have a copy on the GPU). */
+	image = &picture->pixmap->image;
+	x11_render_image_memory(image);
+
 	/* Each trap as the trapezoid between its spans. */
 	count = (length - 12U) / 24U;
 	for (at = 0U; at < count; at++) {
@@ -1328,7 +1338,20 @@ render_add_traps(
 		trapezoid.right[1] = trapezoid.top;
 		trapezoid.right[2] = (int32_t)x11_read32(trap + 16, msb);
 		trapezoid.right[3] = trapezoid.bottom;
-		x11_coverage_trapezoid(&picture->pixmap->image, x, y, &trapezoid);
+		x11_coverage_trapezoid(image, x, y, &trapezoid);
+	}
+
+	/* The pixels put onto the copy on the GPU, when there is one. */
+	if (image->gpu != NULL) {
+		all_box.x0 = 0;
+		all_box.y0 = 0;
+		all_box.x1 = image->width;
+		all_box.y1 = image->height;
+		x11_region_init(&all);
+		error = x11_region_set(&all, &all_box);
+		if (error == 0)
+			x11_render_vulkan_put(image, &all, 0, 0, image->width, image->height, image->pixels, image->stride, X11_FUNCTION_COPY, 0xffffffffU);
+		x11_region_fini(&all);
 	}
 
 	/* Succeeded: added (a pixmap is not shown). */
@@ -2663,6 +2686,9 @@ render_draw(
 	struct x11_box box;
 	const struct x11_image *source_image;
 	const struct x11_image *mask_image;
+	struct x11_box image_box;
+	struct x11_image *target_image;
+	int drawn;
 	unsigned code;
 	int error;
 
@@ -2698,12 +2724,29 @@ render_draw(
 		x11_region_fini(&clip);
 	}
 
-	/* A source or mask on the destination's image reads a copy of it. */
-	copy = NULL;
+	/*
+	 * Images with a copy on the GPU: what is read and the part drawn are
+	 * brought up to date in memory first (the composite is drawn in
+	 * memory).
+	 */
 	source_image = source->source.image;
 	mask_image = NULL;
 	if (mask != NULL)
 		mask_image = mask->source.image;
+	if (source_image != NULL)
+		x11_render_image_memory(source_image);
+	if (mask_image != NULL)
+		x11_render_image_memory(mask_image);
+	image_box.x0 = 0;
+	image_box.y0 = 0;
+	image_box.x1 = destination.view.image->width;
+	image_box.y1 = destination.view.image->height;
+	drawn = x11_box_intersect(&box, &image_box, &image_box);
+	if (drawn)
+		x11_render_image_memory_box(destination.view.image, &image_box);
+
+	/* A source or mask on the destination's image reads a copy of it. */
+	copy = NULL;
 	if (error == 0 && (source_image == destination.view.image || mask_image == destination.view.image))
 		error = x11_image_copy(destination.view.image, &copy);
 	if (error == 0 && copy != NULL) {
@@ -2713,9 +2756,12 @@ render_draw(
 			mask->source.image = copy;
 	}
 
-	/* Composited, and shown again. */
-	if (error == 0) {
+	/* Composited (and the part drawn put onto the copy on the GPU, when there is one), and shown again. */
+	if (error == 0 && drawn) {
 		x11_render_composite(destination.view.image, &region, op, &source->source, source_x, source_y, mask != NULL ? &mask->source : NULL, mask_x, mask_y, box.x0, box.y0, width, height);
+		target_image = destination.view.image;
+		if (target_image->gpu != NULL)
+			x11_render_vulkan_put(target_image, &region, image_box.x0, image_box.y0, image_box.x1 - image_box.x0, image_box.y1 - image_box.y0, target_image->pixels + (size_t)image_box.y0 * target_image->stride + (size_t)image_box.x0, target_image->stride, X11_FUNCTION_COPY, 0xffffffffU);
 		x11_draw_view_dirty(server, &destination.view, &box);
 	}
 
