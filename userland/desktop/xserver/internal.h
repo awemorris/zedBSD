@@ -819,8 +819,10 @@ struct x11_font {
 /*
  * One cursor (cursor.c): its shape, a mask of the pixels it shows and its
  * two colours, its hot spot, and, when it is one of the cursor font's,
- * which (shape -1: none).  It lives while its id does or a window or a
- * grab holds it (holders).
+ * which (shape -1: none).  A cursor of RENDER has an image instead
+ * (argb: a8r8g8b8 pixels, premultiplied, width by height; NULL for the
+ * others).  It lives while its id does or a window or a grab holds it
+ * (holders).
  */
 struct x11_cursor {
 	uint32_t id;
@@ -834,6 +836,7 @@ struct x11_cursor {
 	uint8_t *source;
 	uint8_t *mask;
 	size_t stride;
+	uint32_t *argb;
 	uint16_t foreground[3];
 	uint16_t background[3];
 	uint32_t version;
@@ -1478,6 +1481,8 @@ void x11_cursor_release(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_free(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_update(struct x11server *server);
 unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_cursor_create_argb(struct x11server *server, unsigned index, uint32_t id, uint32_t *pixels, int width, int height, int hot_x, int hot_y);
+unsigned x11_cursor_create_copy(struct x11server *server, unsigned index, uint32_t id, const struct x11_cursor *model);
 
 /*
  * What a drawable gives a drawing that is not a core request's (RENDER's):

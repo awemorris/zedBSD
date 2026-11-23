@@ -241,6 +241,8 @@ static unsigned render_add_glyphs(struct x11server *server, unsigned index, cons
 static unsigned render_free_glyphs(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_composite_glyphs(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_set_transform(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned render_create_cursor(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned render_create_anim_cursor(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_query_filters(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned render_set_filter(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_create_source(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -362,6 +364,12 @@ x11_render_request(
 	case RENDER_ADD_TRAPS:
 		code = render_add_traps(server, index, request, length);
 		break;
+	case RENDER_CREATE_CURSOR:
+		code = render_create_cursor(server, index, request, length);
+		break;
+	case RENDER_CREATE_ANIM_CURSOR:
+		code = render_create_anim_cursor(server, index, request, length);
+		break;
 	case RENDER_CREATE_SOLID_FILL:
 	case RENDER_CREATE_LINEAR_GRADIENT:
 	case RENDER_CREATE_RADIAL_GRADIENT:
@@ -369,7 +377,7 @@ x11_render_request(
 		code = render_create_source(server, index, request, length);
 		break;
 	default:
-		/* The requests RENDER no longer has (Scale, the coloured shapes, AddGlyphsFromPicture), and the cursors. */
+		/* The requests RENDER no longer has (Scale, the coloured shapes, AddGlyphsFromPicture, QueryDithers). */
 		code = X11_BAD_IMPLEMENTATION;
 		break;
 	}
@@ -1864,6 +1872,97 @@ render_composite_glyphs(
 		return code;
 
 	/* Succeeded: drawn. */
+	return 0U;
+}
+
+/*
+ * CreateCursor: a cursor of a picture's pixels (its drawable read as
+ * a8r8g8b8), with a hot spot inside them.
+ */
+static unsigned
+render_create_cursor(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	uint32_t *pixels;
+	unsigned code;
+	int width;
+	int height;
+	int hot_x;
+	int hot_y;
+	int msb;
+
+	/* The id, the picture and the hot spot. */
+	msb = server->clients[index].order;
+	if (length != 16U)
+		return X11_BAD_LENGTH;
+	hot_x = x11_read16(request + 12, msb);
+	hot_y = x11_read16(request + 14, msb);
+
+	/* The picture's pixels. */
+	code = x11_render_picture_pixels(server, x11_read32(request + 8, msb), &pixels, &width, &height);
+	if (code != 0U)
+		return code;
+
+	/* A hot spot inside them. */
+	if (hot_x >= width || hot_y >= height) {
+		free(pixels);
+		return X11_BAD_MATCH;
+	}
+
+	/* The cursor, which takes the pixels. */
+	code = x11_cursor_create_argb(server, index, x11_read32(request + 4, msb), pixels, width, height, hot_x, hot_y);
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: made. */
+	return 0U;
+}
+
+/*
+ * CreateAnimCursor: a cursor of frames (each a cursor and how long it is
+ * shown).  The server shows the first frame and does not move on.
+ */
+static unsigned
+render_create_anim_cursor(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_cursor *first;
+	struct x11_cursor *frame;
+	size_t count;
+	size_t at;
+	unsigned code;
+	int msb;
+
+	/* The id and at least one whole frame. */
+	msb = server->clients[index].order;
+	if (length < 8U || (length - 8U) % 8U != 0U)
+		return X11_BAD_LENGTH;
+	count = (length - 8U) / 8U;
+	if (count == 0U)
+		return X11_BAD_VALUE;
+
+	/* Every frame's cursor exists. */
+	first = NULL;
+	for (at = 0U; at < count; at++) {
+		frame = x11_cursor_find(server, x11_read32(request + 8U + at * 8U, msb));
+		if (frame == NULL)
+			return X11_BAD_CURSOR;
+		if (first == NULL)
+			first = frame;
+	}
+
+	/* The cursor, as its first frame. */
+	code = x11_cursor_create_copy(server, index, x11_read32(request + 4, msb), first);
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: made. */
 	return 0U;
 }
 
