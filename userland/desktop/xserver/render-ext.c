@@ -256,6 +256,9 @@ static void render_operand_image(struct render_operand *operand, const struct x1
 static void render_operand_fini(struct render_operand *operand);
 static void render_draw(struct x11server *server, unsigned op, struct x11_picture *target, struct render_operand *source, int source_x, int source_y, struct render_operand *mask, int mask_x, int mask_y, int x, int y, int width, int height);
 static int render_image_make(struct x11_image *image, int width, int height, unsigned depth);
+static int render_mask_make(struct x11server *server, struct x11_image *image, int width, int height, unsigned depth);
+static void render_mask_free(struct x11server *server, struct x11_image *image);
+static void render_drawable_box(const struct x11_picture *picture, struct x11_box *box);
 static void render_shapes(struct x11server *server, unsigned op, struct x11_picture *source, struct x11_picture *target, uint32_t mask_format, int source_dx, int source_dy, const struct x11_trapezoid *trapezoids, size_t count, size_t per_shape);
 static void render_trapezoid_read(const uint8_t *bytes, int msb, struct x11_trapezoid *trapezoid);
 static void render_triangle_trapezoids(const int32_t *points, struct x11_trapezoid *trapezoids);
@@ -1643,6 +1646,7 @@ render_composite_glyphs(
 	struct x11_image mask;
 	struct x11_source white;
 	struct x11_region all;
+	struct x11_box drawable;
 	struct x11_box extents;
 	struct x11_box box;
 	const uint8_t *item;
@@ -1664,6 +1668,7 @@ render_composite_glyphs(
 	int start_x;
 	int start_y;
 	int started;
+	int inside;
 	int have_extents;
 	int error;
 	int valid;
@@ -1829,11 +1834,15 @@ render_composite_glyphs(
 		if (code != 0U)
 			break;
 
-		/* After the first pass: the mask over the extents, empty. */
+		/* After the first pass: the mask over the extents inside the drawable, empty. */
 		if (pass == 0U && mask_format != 0U) {
 			if (!have_extents)
 				break;
-			error = render_image_make(&mask, extents.x1 - extents.x0, extents.y1 - extents.y0, mask_depth);
+			render_drawable_box(target, &drawable);
+			inside = x11_box_intersect(&extents, &drawable, &extents);
+			if (!inside)
+				break;
+			error = render_mask_make(server, &mask, extents.x1 - extents.x0, extents.y1 - extents.y0, mask_depth);
 			if (error != 0) {
 				code = X11_BAD_ALLOC;
 				break;
@@ -1849,7 +1858,7 @@ render_composite_glyphs(
 	}
 
 	/* What was made goes. */
-	free(mask.pixels);
+	render_mask_free(server, &mask);
 	render_operand_fini(&source);
 	if (code != 0U)
 		return code;
@@ -2700,18 +2709,7 @@ render_shapes(
 		group = count;
 
 	/* The destination's drawable on itself. */
-	drawable.x0 = 0;
-	drawable.y0 = 0;
-	drawable.x1 = 0;
-	drawable.y1 = 0;
-	if (target->window != NULL) {
-		drawable.x1 = target->window->width;
-		drawable.y1 = target->window->height;
-	}
-	if (target->pixmap != NULL) {
-		drawable.x1 = target->pixmap->width;
-		drawable.y1 = target->pixmap->height;
-	}
+	render_drawable_box(target, &drawable);
 
 	/* Each group: its bounds inside the drawable, its mask, the source through it. */
 	for (first = 0U; first < count; first += group) {
@@ -2744,7 +2742,7 @@ render_shapes(
 			continue;
 
 		/* The mask, each trapezoid's coverage added. */
-		error = render_image_make(&mask, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, depth);
+		error = render_mask_make(server, &mask, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, depth);
 		if (error != 0)
 			break;
 		for (at = first; at < first + group && at < count; at++)
@@ -2754,7 +2752,7 @@ render_shapes(
 		render_operand_image(&mask_operand, &mask, 0);
 		render_draw(server, op, target, &source_operand, bounds.x0 + source_dx, bounds.y0 + source_dy, &mask_operand, 0, 0, bounds.x0, bounds.y0, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 		render_operand_fini(&mask_operand);
-		free(mask.pixels);
+		render_mask_free(server, &mask);
 	}
 
 	/* The source's view goes. */
@@ -3128,4 +3126,75 @@ render_row_bytes(
 
 	/* A word a pixel. */
 	return (size_t)width * 4U;
+}
+
+/*
+ * Makes a mask of the server's own for one request (all 0), charged to
+ * the server while it lasts.  Returns 0, or -1 when the server may not
+ * hold it or there is no memory.
+ */
+static int
+render_mask_make(
+	struct x11server *server,
+	struct x11_image *image,
+	int width,
+	int height,
+	unsigned depth)
+{
+	size_t bytes;
+	int error;
+
+	/* The server holds it. */
+	memset(image, 0, sizeof(*image));
+	bytes = x11_image_bytes(width, height);
+	error = x11_memory_charge(server, X11_NO_CLIENT, bytes);
+	if (error != 0)
+		return -1;
+
+	/* The pixels. */
+	error = render_image_make(image, width, height, depth);
+	if (error != 0) {
+		x11_memory_release(server, X11_NO_CLIENT, bytes);
+		return -1;
+	}
+
+	/* Succeeded: made. */
+	return 0;
+}
+
+/* Frees a mask render_mask_make made (one with no pixels: nothing), with its charge. */
+static void
+render_mask_free(
+	struct x11server *server,
+	struct x11_image *image)
+{
+	/* None was made. */
+	if (image->pixels == NULL)
+		return;
+
+	/* The charge and the pixels. */
+	x11_memory_release(server, X11_NO_CLIENT, x11_image_bytes(image->width, image->height));
+	free(image->pixels);
+	image->pixels = NULL;
+}
+
+/* Gives a drawable's picture's drawable on itself: from (0, 0), its size. */
+static void
+render_drawable_box(
+	const struct x11_picture *picture,
+	struct x11_box *box)
+{
+	/* Nothing, or the window's or pixmap's size. */
+	box->x0 = 0;
+	box->y0 = 0;
+	box->x1 = 0;
+	box->y1 = 0;
+	if (picture->window != NULL) {
+		box->x1 = picture->window->width;
+		box->y1 = picture->window->height;
+	}
+	if (picture->pixmap != NULL) {
+		box->x1 = picture->pixmap->width;
+		box->y1 = picture->pixmap->height;
+	}
 }

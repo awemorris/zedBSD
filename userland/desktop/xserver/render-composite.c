@@ -38,6 +38,9 @@
 /* Half a turn in radians (math.h's M_PI is not in every C library). */
 #define COMPOSITE_PI			3.14159265358979323846
 
+/* The farthest a transformed place goes (16.16; a pixel's whole part then still fits an int). */
+#define COMPOSITE_PLACE_MAX		1099511627776.0
+
 /* The bits of a bilinear sample's weights, and the weights' full scale after they are widened to 8 bits. */
 #define COMPOSITE_BILINEAR_BITS		7U
 #define COMPOSITE_BILINEAR_SCALE	65536U
@@ -350,28 +353,43 @@ composite_transform_fixed(
 	int64_t *place_y)
 {
 	const int32_t *matrix;
-	int64_t mapped_x;
-	int64_t mapped_y;
-	int64_t mapped_w;
+	double mapped_x;
+	double mapped_y;
+	double mapped_w;
 
-	/* The three rows of the matrix by the point (x, y, 1). */
+	/*
+	 * The three rows of the matrix by the point (x, y, 1), each rounded
+	 * to 16.16, in floating point (the products of 16.16 numbers do not
+	 * fit 64 bits).
+	 */
 	matrix = source->transform;
-	mapped_x = ((int64_t)matrix[0] * x + (int64_t)matrix[1] * y) / COMPOSITE_FIXED_ONE + (int64_t)matrix[2];
-	mapped_y = ((int64_t)matrix[3] * x + (int64_t)matrix[4] * y) / COMPOSITE_FIXED_ONE + (int64_t)matrix[5];
-	mapped_w = ((int64_t)matrix[6] * x + (int64_t)matrix[7] * y) / COMPOSITE_FIXED_ONE + (int64_t)matrix[8];
+	mapped_x = floor(((double)matrix[0] * (double)x + (double)matrix[1] * (double)y + (double)matrix[2] * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2) / COMPOSITE_FIXED_ONE);
+	mapped_y = floor(((double)matrix[3] * (double)x + (double)matrix[4] * (double)y + (double)matrix[5] * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2) / COMPOSITE_FIXED_ONE);
+	mapped_w = floor(((double)matrix[6] * (double)x + (double)matrix[7] * (double)y + (double)matrix[8] * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2) / COMPOSITE_FIXED_ONE);
 
 	/* A projective point at infinity. */
-	if (mapped_w == 0)
+	if (mapped_w == 0.0)
 		return 0;
 
-	/* Succeeded: the point divided by its weight (an affine matrix has weight one). */
-	if (mapped_w == COMPOSITE_FIXED_ONE) {
-		*place_x = mapped_x;
-		*place_y = mapped_y;
-		return 1;
+	/* The point divided by its weight (none for an affine matrix, whose weight is one), kept far inside 64 bits. */
+	if (mapped_w != COMPOSITE_FIXED_ONE) {
+		mapped_x = mapped_x * COMPOSITE_FIXED_ONE / mapped_w;
+		mapped_y = mapped_y * COMPOSITE_FIXED_ONE / mapped_w;
+		mapped_x = mapped_x < 0.0 ? ceil(mapped_x) : floor(mapped_x);
+		mapped_y = mapped_y < 0.0 ? ceil(mapped_y) : floor(mapped_y);
 	}
-	*place_x = mapped_x * COMPOSITE_FIXED_ONE / mapped_w;
-	*place_y = mapped_y * COMPOSITE_FIXED_ONE / mapped_w;
+	if (mapped_x > COMPOSITE_PLACE_MAX)
+		mapped_x = COMPOSITE_PLACE_MAX;
+	if (mapped_x < -COMPOSITE_PLACE_MAX)
+		mapped_x = -COMPOSITE_PLACE_MAX;
+	if (mapped_y > COMPOSITE_PLACE_MAX)
+		mapped_y = COMPOSITE_PLACE_MAX;
+	if (mapped_y < -COMPOSITE_PLACE_MAX)
+		mapped_y = -COMPOSITE_PLACE_MAX;
+
+	/* Succeeded: the place. */
+	*place_x = (int64_t)mapped_x;
+	*place_y = (int64_t)mapped_y;
 	return 1;
 }
 
