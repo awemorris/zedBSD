@@ -29,9 +29,14 @@
 /* The largest root window side. */
 #define MAIN_SIZE_MAX		16384UL
 
-/* The defaults of the socket's path and the font's. */
+/* The defaults of the socket's path and the monospaced font's, and the proportional fonts' paths. */
 #define MAIN_SOCKET_PATH	"/tmp/.X11-unix/X0"
 #define MAIN_FONT_PATH		KEILAND_DATADIR "/fonts/keiland-mono.ttf"
+#define MAIN_SANS_PATH		KEILAND_DATADIR "/fonts/keiland.ttf"
+#define MAIN_SANS_BOLD_PATH	KEILAND_DATADIR "/fonts/keiland-bold.ttf"
+
+/* The font files read: the monospaced one, and the proportional one and its bold. */
+#define MAIN_FONTS		3U
 
 /* The largest font file read. */
 #define MAIN_FONT_MAX		(32U * 1024U * 1024U)
@@ -64,6 +69,7 @@ static volatile sig_atomic_t main_stopped;
 static int main_options(int argc, char **argv, struct main_options *options);
 static int main_size(const char *text, unsigned *width, unsigned *height);
 static int main_font(const char *path, uint8_t **bytes, size_t *size);
+static void main_fonts_free(uint8_t **bytes);
 static uint32_t main_now(void);
 static void main_log(void *context, const char *line);
 static void main_signal(int number);
@@ -77,15 +83,16 @@ main(
 	char **argv)
 {
 	struct pollfd descriptors[MAIN_POLLFDS];
-	struct x11server_font_file font;
+	struct x11server_font_file fonts[MAIN_FONTS];
 	struct x11server_options server_options;
 	struct main_options options;
 	struct x11server *server;
 	struct x11_wayland *wayland;
 	struct x11_unix *transport;
 	const char *path;
-	uint8_t *font_bytes;
+	uint8_t *font_bytes[MAIN_FONTS];
 	size_t font_size;
+	unsigned font_count;
 	uint32_t wake;
 	uint32_t now;
 	unsigned count;
@@ -107,21 +114,44 @@ main(
 	(void)signal(SIGTERM, main_signal);
 	(void)signal(SIGPIPE, SIG_IGN);
 
-	/* The core font's file; without one, text is not drawn. */
+	/* The monospaced font's file; without one, text is not drawn. */
+	memset(fonts, 0, sizeof(fonts));
+	memset(font_bytes, 0, sizeof(font_bytes));
+	font_count = 0U;
 	path = options.font_path;
 	if (path == NULL)
 		path = MAIN_FONT_PATH;
-	font_bytes = NULL;
-	font_size = 0U;
-	error = main_font(path, &font_bytes, &font_size);
-	if (error != 0)
+	error = main_font(path, &font_bytes[0], &font_size);
+	if (error != 0) {
 		fprintf(stderr, "xserver: %s: %s (no text)\n", path, strerror(error));
+	} else {
+		fonts[font_count].bytes = font_bytes[0];
+		fonts[font_count].size = font_size;
+		fonts[font_count].role = X11SERVER_FONT_MONO;
+		font_count++;
+	}
+
+	/* The proportional font and its bold, when they are there (else the monospaced face draws them). */
+	error = main_font(MAIN_SANS_PATH, &font_bytes[1], &font_size);
+	if (error == 0) {
+		fonts[font_count].bytes = font_bytes[1];
+		fonts[font_count].size = font_size;
+		fonts[font_count].role = X11SERVER_FONT_SANS;
+		font_count++;
+	}
+	error = main_font(MAIN_SANS_BOLD_PATH, &font_bytes[2], &font_size);
+	if (error == 0) {
+		fonts[font_count].bytes = font_bytes[2];
+		fonts[font_count].size = font_size;
+		fonts[font_count].role = X11SERVER_FONT_SANS_BOLD;
+		font_count++;
+	}
 
 	/* The connection to the desktop, which shows the windows and gives the input. */
 	error = x11_wayland_open(&wayland, NULL);
 	if (error != 0) {
 		fprintf(stderr, "xserver: %s\n", strerror(error));
-		free(font_bytes);
+		main_fonts_free(font_bytes);
 		return 1;
 	}
 
@@ -133,12 +163,9 @@ main(
 	server_options.backend_context = wayland;
 	if (!options.shm)
 		server_options.vulkan_wsi = X11_WAYLAND_WSI;
-	if (font_bytes != NULL) {
-		font.bytes = font_bytes;
-		font.size = font_size;
-		font.role = X11SERVER_FONT_MONO;
-		server_options.fonts = &font;
-		server_options.font_count = 1U;
+	if (font_count != 0U) {
+		server_options.fonts = fonts;
+		server_options.font_count = font_count;
 	}
 	server_options.font_fallback_path = KEILAND_FONT_FALLBACK_MONO;
 	server_options.log = main_log;
@@ -147,7 +174,7 @@ main(
 	if (error != 0) {
 		fprintf(stderr, "xserver: %s\n", strerror(error));
 		x11_wayland_close(wayland);
-		free(font_bytes);
+		main_fonts_free(font_bytes);
 		return 1;
 	}
 
@@ -163,7 +190,7 @@ main(
 		fprintf(stderr, "xserver: %s\n", strerror(error));
 		x11server_destroy(server);
 		x11_wayland_close(wayland);
-		free(font_bytes);
+		main_fonts_free(font_bytes);
 		return 1;
 	}
 
@@ -209,11 +236,11 @@ main(
 		x11_unix_write(transport, server);
 	}
 
-	/* The socket and its connections, the core, the desktop's connection, and the font go. */
+	/* The socket and its connections, the core, the desktop's connection, and the fonts go. */
 	x11_unix_close(transport);
 	x11server_destroy(server);
 	x11_wayland_close(wayland);
-	free(font_bytes);
+	main_fonts_free(font_bytes);
 
 	/* Succeeded: stopped. */
 	return 0;
@@ -367,6 +394,18 @@ main_font(
 	*bytes = data;
 	*size = done;
 	return 0;
+}
+
+/* Frees the font files' bytes read (those not read are NULL). */
+static void
+main_fonts_free(
+	uint8_t **bytes)
+{
+	unsigned index;
+
+	/* Each file's. */
+	for (index = 0U; index < MAIN_FONTS; index++)
+		free(bytes[index]);
 }
 
 /* Returns the monotonic time in milliseconds (its low 32 bits: the core's clock). */

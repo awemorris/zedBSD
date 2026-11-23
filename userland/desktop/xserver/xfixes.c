@@ -16,11 +16,12 @@
  * graphics context's clip.  And a client may ask about the cursor, hide
  * it and name it.
  *
- * The cursor's half answers from what the core has: the system draws the
- * pointer and the core keeps no cursor image of its own yet, so
- * GetCursorImage gives an empty (transparent) cursor of one pixel, a
- * cursor id is checked against the resources a client made, and hiding
- * the cursor is counted for each client as the protocol has it.  Pointer
+ * The cursor's half works on cursor.c's cursors: GetCursorImage gives the
+ * cursor shown under the pointer (a clear one of one pixel where the
+ * system's own pointer, or a shape of the cursor font, which has no image
+ * here, is shown), CursorNotify tells of a new cursor shown, cursors are
+ * named and changed, and a client's HideCursor hides the cursor until it
+ * shows it again or goes.  Pointer
  * barriers are kept as resources only: a rootless server cannot hold the
  * system's pointer back.  A client's disconnect mode is kept for its
  * answer; the server does not end when its last client goes.
@@ -92,12 +93,7 @@
 /* The disconnect mode a client may set: the server ends with its last client (kept, not acted on). */
 #define XFIXES_DISCONNECT_TERMINATE	1U
 
-/*
- * The kinds of resource the cursor's and RENDER's requests name, which
- * other modules make (the cursor's number in Q1's table of kinds; RENDER's
- * BadPicture, its first error plus one).
- */
-#define XFIXES_RESOURCE_CURSOR		5U
+/* RENDER's BadPicture (its first error plus one), for the picture requests while the core has no pictures. */
 #define XFIXES_BAD_PICTURE		135U
 
 /* The core requests XFIXES's GC clip borrows: ChangeGC and SetClipRectangles, and ChangeGC's clip-mask bit. */
@@ -169,7 +165,8 @@ struct xfixes_name {
  * XFIXES's state of a server: for each client slot the version it asked
  * for (0: none yet), how many times it hid the cursor, and its disconnect
  * mode; the wishes to hear of selections and of the cursor; the names
- * given to cursors; and the serial of the cursor GetCursorImage reports.
+ * given to cursors; and the serial of the cursor last shown, as
+ * CursorNotify told it (0: the system's pointer).
  */
 struct x11_xfixes {
 	uint8_t *versions;
@@ -181,7 +178,7 @@ struct x11_xfixes {
 	struct xfixes_name *names;
 	unsigned name_count;
 	unsigned name_capacity;
-	uint32_t cursor_serial;
+	uint32_t cursor_shown;
 };
 
 static struct x11_xfixes *xfixes_state(struct x11server *server);
@@ -220,7 +217,9 @@ static unsigned xfixes_find_region(struct x11_ext_request *request, uint32_t id,
 static unsigned xfixes_add_region(struct x11_ext_request *request, uint32_t id, struct x11_region *region);
 static unsigned xfixes_replace(struct x11server *server, struct xfixes_region *target, struct x11_region *region);
 static unsigned xfixes_rects(struct x11_ext_request *request, size_t offset, struct x11_region *region);
-static unsigned xfixes_find_cursor(struct x11_ext_request *request, uint32_t id);
+static unsigned xfixes_find_cursor(struct x11_ext_request *request, uint32_t id, struct x11_cursor **cursor);
+static uint32_t xfixes_cursor_serial(const struct x11_cursor *cursor);
+static uint32_t xfixes_cursor_name(const struct x11_xfixes *state, const struct x11_cursor *cursor);
 static size_t xfixes_region_bytes(const struct x11_region *region);
 static void xfixes_region_free(struct x11server *server, struct xfixes_region *region);
 static unsigned xfixes_select(struct x11_xfixes *state, unsigned client, uint32_t window, uint32_t selection, uint32_t mask);
@@ -521,6 +520,83 @@ x11_xfixes_region(
 	return &found->region;
 }
 
+/*
+ * Tells whether a client hid the cursor (HideCursor more times than
+ * ShowCursor): the cursor is then not shown.
+ */
+int
+x11_xfixes_cursor_hidden(
+	struct x11server *server)
+{
+	struct x11_xfixes *state;
+	unsigned slot;
+
+	/* Nothing kept yet. */
+	state = server->xfixes;
+	if (state == NULL)
+		return 0;
+
+	/* Any client's count. */
+	for (slot = 0U; slot < server->clients_max; slot++) {
+		if (state->hidden[slot] != 0U)
+			return 1;
+	}
+
+	/* Succeeded: shown. */
+	return 0;
+}
+
+/*
+ * Tells the clients that asked (SelectCursorInput) of a new cursor shown:
+ * CursorNotify with its serial and name, once for each change.
+ */
+void
+x11_xfixes_cursor_tick(
+	struct x11server *server)
+{
+	const struct x11_cursor *cursor;
+	struct x11_xfixes *state;
+	struct x11_client *client;
+	uint8_t event[32];
+	uint32_t serial;
+	uint32_t atom;
+	unsigned slot;
+	int msb;
+
+	/* Nothing kept yet. */
+	state = server->xfixes;
+	if (state == NULL)
+		return;
+
+	/* The cursor shown now, the same as last told. */
+	cursor = x11_cursor_current(server);
+	serial = xfixes_cursor_serial(cursor);
+	if (serial == state->cursor_shown)
+		return;
+	state->cursor_shown = serial;
+	atom = xfixes_cursor_name(state, cursor);
+
+	/* Succeeded: each wish for the cursor's events told, in its client's byte order. */
+	for (slot = 0U; slot < state->select_count; slot++) {
+		if (state->selects[slot].selection != 0U)
+			continue;
+		if ((state->selects[slot].mask & XFIXES_CURSOR_MASK) == 0U)
+			continue;
+		client = x11_client_of(server, state->selects[slot].client);
+		if (client == NULL)
+			continue;
+		msb = client->order;
+		memset(event, 0, sizeof(event));
+		event[0] = (uint8_t)(X11_XFIXES_EVENT + XFIXES_CURSOR_NOTIFY);
+		event[1] = 0U;
+		x11_write32(event + 4, state->selects[slot].window, msb);
+		x11_write32(event + 8, serial, msb);
+		x11_write32(event + 12, server->now, msb);
+		x11_write32(event + 16, atom, msb);
+		x11_extension_event(server, client, event);
+	}
+}
+
 /* Returns XFIXES's state, made when first asked for (NULL without memory). */
 static struct x11_xfixes *
 xfixes_state(
@@ -547,8 +623,7 @@ xfixes_state(
 		return NULL;
 	}
 
-	/* Succeeded: the first cursor's serial. */
-	state->cursor_serial = 1U;
+	/* Succeeded: kept for the server. */
 	server->xfixes = state;
 	return state;
 }
@@ -671,8 +746,8 @@ xfixes_select_selection_input(
 }
 
 /*
- * SelectCursorInput: the client hears of the cursor's changes on a window
- * (kept; the core shows no cursor of its own to change yet).
+ * SelectCursorInput: the client hears of a new cursor shown, with the
+ * window it named.
  */
 static unsigned
 xfixes_select_cursor_input(
@@ -698,46 +773,111 @@ xfixes_select_cursor_input(
 		return X11_BAD_VALUE;
 	}
 
-	/* Succeeded: kept, replaced or forgotten. */
+	/* Kept, replaced or forgotten; a change is told from the cursor shown now on. */
 	code = xfixes_select(request->server->xfixes, request->index, window_id, 0U, mask);
-	return code;
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: the cursor shown now is the one known. */
+	request->server->xfixes->cursor_shown = xfixes_cursor_serial(x11_cursor_current(request->server));
+	return 0U;
 }
 
 /*
  * GetCursorImage and GetCursorImageAndName: where the pointer is, and the
- * cursor's image (one transparent pixel: the system draws the pointer),
- * its hot spot and serial, and for the second its name (none).
+ * cursor shown: its image, hot spot and serial (a clear pixel with the
+ * system's pointer or a shape of the cursor font), and for the second its
+ * name (none: 0 and no bytes).
  */
 static unsigned
 xfixes_get_cursor_image(
 	struct x11_ext_request *request,
 	int named)
 {
-	uint8_t reply[36];
+	const struct x11_cursor *cursor;
+	const char *name;
+	uint32_t *pixels;
+	uint32_t clear;
+	uint8_t *reply;
+	uint32_t atom;
+	size_t count;
+	size_t index;
+	size_t name_length;
 	size_t size;
+	size_t at;
+	int width;
+	int height;
+	int hot_x;
+	int hot_y;
 
 	/* The header alone. */
 	if (request->length != 4U)
 		return X11_BAD_LENGTH;
 
-	/* The pointer's place, a cursor of one pixel with its hot spot on it, and its serial. */
-	memset(reply, 0, sizeof(reply));
-	x11_write16(reply + 8, (uint16_t)request->server->pointer_x, request->msb);
-	x11_write16(reply + 10, (uint16_t)request->server->pointer_y, request->msb);
-	x11_write16(reply + 12, 1U, request->msb);
-	x11_write16(reply + 14, 1U, request->msb);
-	x11_write32(reply + 20, request->server->xfixes->cursor_serial, request->msb);
-
-	/* The image's one pixel (and, with the name, no name). */
-	size = 36U;
-	x11_write32(reply + 32, 0U, request->msb);
-	if (named) {
-		x11_write32(reply + 24, 0U, request->msb);
-		x11_write16(reply + 28, 0U, request->msb);
+	/* The cursor shown, and its image (one clear pixel without one). */
+	cursor = x11_cursor_current(request->server);
+	pixels = NULL;
+	if (cursor != NULL)
+		pixels = x11_cursor_pixels(cursor);
+	clear = 0U;
+	width = 1;
+	height = 1;
+	hot_x = 0;
+	hot_y = 0;
+	if (pixels != NULL) {
+		width = cursor->width;
+		height = cursor->height;
+		hot_x = cursor->hot_x;
+		hot_y = cursor->hot_y;
 	}
 
-	/* Succeeded: the reply. */
+	/* Its name, for the second request. */
+	atom = 0U;
+	name = NULL;
+	name_length = 0U;
+	if (named)
+		atom = xfixes_cursor_name(request->server->xfixes, cursor);
+	if (atom != 0U)
+		name = x11_atom_name(request->server, atom, &name_length);
+	if (name == NULL)
+		name_length = 0U;
+	if (name_length > XFIXES_NAME_MAX)
+		name_length = XFIXES_NAME_MAX;
+
+	/* The reply: the fixed part, the pixels, and the name padded to a word. */
+	count = (size_t)width * (size_t)height;
+	size = 32U + count * 4U + ((name_length + 3U) & ~(size_t)3U);
+	reply = calloc(1U, size);
+	if (reply == NULL) {
+		free(pixels);
+		return X11_BAD_ALLOC;
+	}
+	x11_write16(reply + 8, (uint16_t)request->server->pointer_x, request->msb);
+	x11_write16(reply + 10, (uint16_t)request->server->pointer_y, request->msb);
+	x11_write16(reply + 12, (uint16_t)width, request->msb);
+	x11_write16(reply + 14, (uint16_t)height, request->msb);
+	x11_write16(reply + 16, (uint16_t)hot_x, request->msb);
+	x11_write16(reply + 18, (uint16_t)hot_y, request->msb);
+	x11_write32(reply + 20, xfixes_cursor_serial(cursor), request->msb);
+	if (named) {
+		x11_write32(reply + 24, atom, request->msb);
+		x11_write16(reply + 28, (uint16_t)name_length, request->msb);
+	}
+	for (index = 0U; index < count; index++) {
+		at = 32U + index * 4U;
+		if (pixels != NULL) {
+			x11_write32(reply + at, pixels[index], request->msb);
+		} else {
+			x11_write32(reply + at, clear, request->msb);
+		}
+	}
+	if (name_length != 0U)
+		memcpy(reply + 32U + count * 4U, name, name_length);
+
+	/* Succeeded: sent. */
 	x11_reply(request->server, request->client, reply, size);
+	free(reply);
+	free(pixels);
 	return 0U;
 }
 
@@ -1374,6 +1514,7 @@ xfixes_set_cursor_name(
 {
 	struct x11_xfixes *state;
 	struct xfixes_name *grown;
+	struct x11_cursor *found;
 	uint32_t cursor;
 	uint32_t atom;
 	size_t length;
@@ -1388,7 +1529,7 @@ xfixes_set_cursor_name(
 	length = x11_read16(request->bytes + 8, request->msb);
 	if (12U + ((length + 3U) & ~(size_t)3U) != request->length)
 		return X11_BAD_LENGTH;
-	code = xfixes_find_cursor(request, cursor);
+	code = xfixes_find_cursor(request, cursor, &found);
 	if (code != 0U)
 		return code;
 
@@ -1429,6 +1570,7 @@ xfixes_get_cursor_name(
 	struct x11_ext_request *request)
 {
 	struct x11_xfixes *state;
+	struct x11_cursor *found;
 	const char *name;
 	uint8_t *reply;
 	uint32_t cursor;
@@ -1442,7 +1584,7 @@ xfixes_get_cursor_name(
 	if (request->length != 8U)
 		return X11_BAD_LENGTH;
 	cursor = x11_read32(request->bytes + 4, request->msb);
-	code = xfixes_find_cursor(request, cursor);
+	code = xfixes_find_cursor(request, cursor, &found);
 	if (code != 0U)
 		return code;
 
@@ -1478,36 +1620,41 @@ xfixes_get_cursor_name(
 	return 0U;
 }
 
-/*
- * ChangeCursor: a cursor's image would become another's; both ids are
- * checked (the core shows no cursor of its own to change).
- */
+/* ChangeCursor: the destination cursor looks like the source from now on, wherever it is used. */
 static unsigned
 xfixes_change_cursor(
 	struct x11_ext_request *request)
 {
+	struct x11_cursor *source;
+	struct x11_cursor *target;
 	unsigned code;
 
 	/* The two cursors. */
 	if (request->length != 12U)
 		return X11_BAD_LENGTH;
-	code = xfixes_find_cursor(request, x11_read32(request->bytes + 4, request->msb));
+	code = xfixes_find_cursor(request, x11_read32(request->bytes + 4, request->msb), &source);
 	if (code != 0U)
 		return code;
-	code = xfixes_find_cursor(request, x11_read32(request->bytes + 8, request->msb));
+	code = xfixes_find_cursor(request, x11_read32(request->bytes + 8, request->msb), &target);
 	if (code != 0U)
 		return code;
 
-	/* Succeeded: accepted. */
-	return 0U;
+	/* Succeeded: changed. */
+	code = x11_cursor_change(request->server, target, source);
+	return code;
 }
 
-/* ChangeCursorByName: as ChangeCursor, for the cursors of a name. */
+/* ChangeCursorByName: every cursor of a name looks like the source from now on. */
 static unsigned
 xfixes_change_cursor_by_name(
 	struct x11_ext_request *request)
 {
+	struct x11_xfixes *state;
+	struct x11_cursor *source;
+	struct x11_cursor *target;
+	uint32_t atom;
 	size_t length;
+	unsigned slot;
 	unsigned code;
 
 	/* The cursor and the name filling the request. */
@@ -1516,11 +1663,27 @@ xfixes_change_cursor_by_name(
 	length = x11_read16(request->bytes + 8, request->msb);
 	if (12U + ((length + 3U) & ~(size_t)3U) != request->length)
 		return X11_BAD_LENGTH;
-	code = xfixes_find_cursor(request, x11_read32(request->bytes + 4, request->msb));
+	code = xfixes_find_cursor(request, x11_read32(request->bytes + 4, request->msb), &source);
 	if (code != 0U)
 		return code;
 
-	/* Succeeded: accepted. */
+	/* The name's atom; a name no atom has names no cursor. */
+	atom = x11_atom_intern(request->server, (const char *)request->bytes + 12, length, 1);
+	if (atom == 0U)
+		return 0U;
+
+	/* Succeeded: each cursor of the name changed. */
+	state = request->server->xfixes;
+	for (slot = 0U; slot < state->name_count; slot++) {
+		if (state->names[slot].atom != atom)
+			continue;
+		target = x11_cursor_find(request->server, state->names[slot].cursor);
+		if (target == NULL)
+			continue;
+		code = x11_cursor_change(request->server, target, source);
+		if (code != 0U)
+			return code;
+	}
 	return 0U;
 }
 
@@ -1577,8 +1740,8 @@ xfixes_expand_region(
 
 /*
  * HideCursor and ShowCursor: the client hides the cursor once more, or
- * once less (BadMatch when it has not hidden it).  The system draws the
- * pointer; the count is kept for the protocol's answers.
+ * once less (BadMatch when it has not hidden it); while any client's count
+ * is above 0 the cursor is not shown (cursor.c).
  */
 static unsigned
 xfixes_hide_cursor(
@@ -1919,22 +2082,56 @@ xfixes_rects(
 	return 0U;
 }
 
-/* Checks a cursor a request names (one a client made).  Returns 0, or BadCursor. */
+/* Finds a cursor a request names (one a client made).  Returns 0, or BadCursor (naming the id). */
 static unsigned
 xfixes_find_cursor(
 	struct x11_ext_request *request,
-	uint32_t id)
+	uint32_t id,
+	struct x11_cursor **cursor)
 {
-	unsigned type;
-
-	/* A resource of the cursor's kind. */
-	type = x11_resource_type(request->server, id);
-	if (type != XFIXES_RESOURCE_CURSOR) {
+	/* The cursor of the id. */
+	*cursor = x11_cursor_find(request->server, id);
+	if (*cursor == NULL) {
 		request->bad = id;
 		return X11_BAD_CURSOR;
 	}
 
 	/* Succeeded: a cursor. */
+	return 0U;
+}
+
+/* Gives a cursor's serial as XFIXES reports it: its version (0: the system's pointer). */
+static uint32_t
+xfixes_cursor_serial(
+	const struct x11_cursor *cursor)
+{
+	/* The system's pointer. */
+	if (cursor == NULL)
+		return 0U;
+
+	/* Succeeded: the version cursor.c gave it. */
+	return cursor->version;
+}
+
+/* Gives the atom of a cursor's name (0: none, or no cursor). */
+static uint32_t
+xfixes_cursor_name(
+	const struct x11_xfixes *state,
+	const struct x11_cursor *cursor)
+{
+	unsigned slot;
+
+	/* No cursor, or one whose id went. */
+	if (cursor == NULL || cursor->id == 0U)
+		return 0U;
+
+	/* Its entry. */
+	for (slot = 0U; slot < state->name_count; slot++) {
+		if (state->names[slot].cursor == cursor->id)
+			return state->names[slot].atom;
+	}
+
+	/* None given. */
 	return 0U;
 }
 

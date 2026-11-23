@@ -7,12 +7,13 @@
 
 /*
  * The X11 core protocol's dispatch, the replies and errors it sends, and
- * the requests of fonts, pixmaps, graphics contexts, drawing, the server
- * grab and the core's extensions.
+ * the requests of the server grab and the core's extensions.
  *
  * Wire layouts follow the public X11 core protocol.  The window, atom,
- * property, selection, event and input requests are answered by
- * window.c, property.c, selection.c, event.c and input.c.  Requests the server does not know
+ * property, selection, event, input, drawing, graphics context, font,
+ * text and cursor requests are answered by window.c, property.c,
+ * selection.c, event.c, input.c, draw.c, gc.c, font.c and cursor.c.
+ * Requests the server does not know
  * are refused with BadRequest, and each request is checked for its length
  * and its values, answering the protocol's error when one is wrong.
  */
@@ -72,7 +73,11 @@
 #define REQUEST_OPEN_FONT		45U
 #define REQUEST_CLOSE_FONT		46U
 #define REQUEST_QUERY_FONT		47U
+#define REQUEST_QUERY_TEXT_EXTENTS	48U
 #define REQUEST_LIST_FONTS		49U
+#define REQUEST_LIST_FONTS_WITH_INFO	50U
+#define REQUEST_SET_FONT_PATH		51U
+#define REQUEST_GET_FONT_PATH		52U
 #define REQUEST_CREATE_PIXMAP		53U
 #define REQUEST_FREE_PIXMAP		54U
 #define REQUEST_CREATE_GC		55U
@@ -94,10 +99,16 @@
 #define REQUEST_POLY_FILL_ARC		71U
 #define REQUEST_PUT_IMAGE		72U
 #define REQUEST_GET_IMAGE		73U
+#define REQUEST_POLY_TEXT8		74U
+#define REQUEST_POLY_TEXT16		75U
 #define REQUEST_IMAGE_TEXT8		76U
 #define REQUEST_IMAGE_TEXT16		77U
 #define REQUEST_CREATE_COLORMAP		78U
 #define REQUEST_LOOKUP_COLOR		92U
+#define REQUEST_CREATE_CURSOR		93U
+#define REQUEST_CREATE_GLYPH_CURSOR	94U
+#define REQUEST_FREE_CURSOR		95U
+#define REQUEST_RECOLOR_CURSOR		96U
 #define REQUEST_QUERY_BEST_SIZE		97U
 #define REQUEST_QUERY_EXTENSION		98U
 #define REQUEST_LIST_EXTENSIONS		99U
@@ -127,8 +138,7 @@
 #define KEYCODE_MIN			8U
 #define KEYCODE_MAX			255U
 
-/* The one core font's name, and the vendor the setup names. */
-#define FONT_NAME			"zed-unicode"
+/* The vendor the setup names. */
 #define SERVER_VENDOR			ZEDBSD_OS_NAME " X11"
 
 /* The core's extensions: BIG-REQUESTS (its one request, BigReqEnable) and XC-MISC. */
@@ -142,10 +152,6 @@
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_grab_server(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_open_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_close_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_query_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_list_fonts(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_best_size(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned protocol_list_extensions(struct x11server *server, struct x11_client *client, size_t length);
@@ -581,16 +587,24 @@ protocol_dispatch(
 		code = x11_request_translate_coordinates(server, index, request, length);
 		break;
 	case REQUEST_OPEN_FONT:
-		code = protocol_open_font(server, index, request, length);
-		break;
 	case REQUEST_CLOSE_FONT:
-		code = protocol_close_font(server, index, request, length);
-		break;
 	case REQUEST_QUERY_FONT:
-		code = protocol_query_font(server, index, request, length);
-		break;
+	case REQUEST_QUERY_TEXT_EXTENTS:
 	case REQUEST_LIST_FONTS:
-		code = protocol_list_fonts(server, index, request, length);
+	case REQUEST_LIST_FONTS_WITH_INFO:
+	case REQUEST_SET_FONT_PATH:
+	case REQUEST_GET_FONT_PATH:
+	case REQUEST_POLY_TEXT8:
+	case REQUEST_POLY_TEXT16:
+	case REQUEST_IMAGE_TEXT8:
+	case REQUEST_IMAGE_TEXT16:
+		code = x11_font_request(server, index, request, length);
+		break;
+	case REQUEST_CREATE_CURSOR:
+	case REQUEST_CREATE_GLYPH_CURSOR:
+	case REQUEST_FREE_CURSOR:
+	case REQUEST_RECOLOR_CURSOR:
+		code = x11_cursor_request(server, index, request, length);
 		break;
 	case REQUEST_CREATE_PIXMAP:
 		code = x11_request_create_pixmap(server, index, request, length);
@@ -655,11 +669,6 @@ protocol_dispatch(
 	case REQUEST_GET_IMAGE:
 		code = x11_request_get_image(server, index, request, length);
 		break;
-	case REQUEST_IMAGE_TEXT8:
-	case REQUEST_IMAGE_TEXT16:
-		code = x11_request_image_text(server, index, request, length);
-		break;
-
 	case REQUEST_QUERY_BEST_SIZE:
 		code = protocol_query_best_size(server, index, request, length);
 		break;
@@ -727,149 +736,6 @@ protocol_grab_server(
 	/* Succeeded: UngrabServer lets the others go on (another client's grab is not its to end). */
 	if (server->grabbed == index)
 		server->grabbed = X11_NO_CLIENT;
-	return 0U;
-}
-
-/* OpenFont: every name opens the one core font. */
-static unsigned
-protocol_open_font(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	struct x11_font *font;
-	uint16_t name_length;
-	uint32_t id;
-	unsigned taken;
-	int chosen;
-	int error;
-
-	/* The name, filling the request to its last word. */
-	client = &server->clients[index];
-	if (length < 12U)
-		return X11_BAD_LENGTH;
-	name_length = x11_read16(request + 8, client->order);
-	if (12U + (((size_t)name_length + 3U) & ~(size_t)3U) != length)
-		return X11_BAD_LENGTH;
-
-	/* An id of the client's range not in use. */
-	id = x11_read32(request + 4, client->order);
-	chosen = x11_id_chosen(client, id);
-	taken = x11_resource_type(server, id);
-	if (!chosen || taken != 0U)
-		return X11_BAD_ID_CHOICE;
-
-	/* The font, charged to the client. */
-	error = x11_memory_charge(server, index, sizeof(*font));
-	if (error != 0)
-		return X11_BAD_ALLOC;
-	font = calloc(1U, sizeof(*font));
-	if (font == NULL) {
-		x11_memory_release(server, index, sizeof(*font));
-		return X11_BAD_ALLOC;
-	}
-	font->id = id;
-	font->owner = index;
-
-	/* Found by its id. */
-	error = x11_resource_add(server, id, X11_RESOURCE_FONT, font);
-	if (error != 0) {
-		x11_memory_release(server, index, sizeof(*font));
-		free(font);
-		return X11_BAD_ALLOC;
-	}
-
-	/* Succeeded: the font is open. */
-	return 0U;
-}
-
-/* CloseFont: the font goes. */
-static unsigned
-protocol_close_font(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_font *font;
-
-	/* The font of the id. */
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	font = x11_resource_find(server, x11_read32(request + 4, server->clients[index].order), X11_RESOURCE_FONT);
-	if (font == NULL)
-		return X11_BAD_FONT;
-
-	/* Succeeded: its id and its charge go. */
-	x11_resource_remove(server, font->id);
-	x11_memory_release(server, font->owner, sizeof(*font));
-	free(font);
-	return 0U;
-}
-
-/* QueryFont: the core font's metrics (Unicode, 8x16 cells with 16x16 for wide characters), of a font or a graphics context's. */
-static unsigned
-protocol_query_font(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[60];
-	unsigned type;
-	int msb;
-
-	/* A font, or a graphics context. */
-	client = &server->clients[index];
-	msb = client->order;
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	type = x11_resource_type(server, x11_read32(request + 4, msb));
-	if (type != X11_RESOURCE_FONT && type != X11_RESOURCE_GC)
-		return X11_BAD_FONT;
-
-	/* Succeeded: the character range, the ascent and no properties or per-character metrics. */
-	memset(reply, 0, sizeof(reply));
-	x11_write16(reply + 8, 0U, msb);
-	x11_write16(reply + 10, 255U, msb);
-	x11_write16(reply + 12, 0U, msb);
-	x11_write16(reply + 14, 255U, msb);
-	x11_write16(reply + 18, 0U, msb);
-	x11_write16(reply + 20, 16U, msb);
-	x11_write32(reply + 56, 0U, msb);
-	x11_reply(server, client, reply, sizeof(reply));
-	return 0U;
-}
-
-/* ListFonts: the one core font's name. */
-static unsigned
-protocol_list_fonts(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[44];
-	size_t pattern;
-
-	/* The pattern, filling the request to its last word. */
-	client = &server->clients[index];
-	if (length < 8U)
-		return X11_BAD_LENGTH;
-	pattern = x11_read16(request + 6, client->order);
-	if (8U + ((pattern + 3U) & ~(size_t)3U) != length)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: one name, as a length and its bytes. */
-	memset(reply, 0, sizeof(reply));
-	x11_write16(reply + 8, 1U, client->order);
-	reply[32] = (uint8_t)(sizeof(FONT_NAME) - 1U);
-	memcpy(reply + 33, FONT_NAME, sizeof(FONT_NAME) - 1U);
-	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }
 

@@ -236,6 +236,9 @@ x11_extension_tick(
 	/* The window manager's resizes held for a counter. */
 	waiting = x11_wm_sync_tick(server);
 
+	/* XFIXES's clients told of a new cursor shown. */
+	x11_xfixes_cursor_tick(server);
+
 	/* Succeeded: whether work waits for a later time, and whether a client woke. */
 	*timed = 0;
 	if (sync_timed || waiting)
