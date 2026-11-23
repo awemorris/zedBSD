@@ -87,11 +87,12 @@ x11server_create(
 	if (options->backend == NULL)
 		return EINVAL;
 
-	/* The server, with every client slot free and no grab. */
+	/* The server, with no grab of the pointer or of the server. */
 	server = calloc(1U, sizeof(*server));
 	if (server == NULL)
 		return ENOMEM;
-	server->grab_owner = -1;
+	server->grab_owner = X11_NO_CLIENT;
+	server->grabbed = X11_NO_CLIENT;
 	server->now = now;
 	server->report_ms = now;
 	server->generation = 1U;
@@ -106,6 +107,26 @@ x11server_create(
 	server->vulkan_wsi = options->vulkan_wsi;
 	if (server->vulkan_wsi == NULL)
 		server->cpu_present = 1;
+
+	/* The client slots, every one free. */
+	server->clients_max = options->clients_max;
+	if (server->clients_max == 0U)
+		server->clients_max = X11_CLIENTS_DEFAULT;
+	if (server->clients_max > X11_CLIENTS_LIMIT)
+		server->clients_max = X11_CLIENTS_LIMIT;
+	server->clients = calloc(server->clients_max, sizeof(*server->clients));
+	if (server->clients == NULL) {
+		free(server);
+		return ENOMEM;
+	}
+
+	/* The memory a client and the server may hold. */
+	server->client_memory_max = options->client_memory_max;
+	if (server->client_memory_max == 0U)
+		server->client_memory_max = X11_CLIENT_MEMORY_DEFAULT;
+	server->server_memory_max = options->server_memory_max;
+	if (server->server_memory_max == 0U)
+		server->server_memory_max = X11_SERVER_MEMORY_DEFAULT;
 
 	/* The root window's size. */
 	server->width = options->width;
@@ -128,20 +149,23 @@ x11server_create(
 			x11_log(server, "xserver: font: %s (no text)", strerror(error));
 	}
 
-	/* The atoms the server uses itself (selection.c). */
+	/* The core's atoms, and those the server uses itself (selection.c). */
+	error = x11_atoms_init(server);
+	if (error != 0) {
+		x11server_destroy(server);
+		return error;
+	}
 	x11_selection_init(server);
 
-	/* The root window: the server's, mapped, with no pixels (nothing shows it). */
-	server->windows[0].id = X11_ROOT_XID;
-	server->windows[0].owner = X11_NO_CLIENT;
-	server->windows[0].background = SERVER_ROOT_BACKGROUND;
-	server->windows[0].width = (uint16_t)server->width;
-	server->windows[0].height = (uint16_t)server->height;
-	server->windows[0].mapped = 1;
-	server->window_count = 1U;
+	/* The root window. */
+	error = x11_window_root(server, SERVER_ROOT_BACKGROUND);
+	if (error != 0) {
+		x11server_destroy(server);
+		return error;
+	}
 
-	/* The focus on the root window, the pointer in its middle. */
-	server->focus = X11_ROOT_XID;
+	/* The focus follows the pointer, which is in the root window's middle. */
+	server->focus = X11_FOCUS_POINTER_ROOT;
 	server->pointer_x = (int)server->width / 2;
 	server->pointer_y = (int)server->height / 2;
 
@@ -165,17 +189,30 @@ x11server_destroy(
 		return;
 
 	/* Every client, with its windows, pixmaps, graphics contexts and fonts. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++)
+	for (index = 0U; index < server->clients_max; index++)
 		x11_client_close(server, index);
 
-	/* The properties left (the root window's). */
+	/* The clipboard's copies and the texts being given in pieces. */
 	x11_selection_destroy(server);
+
+	/* The root window, with what is left of it (its properties). */
+	if (server->root != NULL) {
+		x11_property_forget_window(server, server->root);
+		free(server->root->selects);
+		free(server->root);
+		server->root = NULL;
+	}
+
+	/* The resource ids and the atoms. */
+	x11_resource_fini(server);
+	x11_atoms_fini(server);
 
 	/* Vulkan's state, after every swapchain on it, and the font. */
 	x11_vulkan_close(server->vulkan);
 	x11_glyphs_close(&server->glyphs);
 
 	/* The server itself. */
+	free(server->clients);
 	free(server);
 }
 
@@ -210,13 +247,13 @@ x11server_connect(
 	}
 
 	/* The first slot free and not waiting for the transport to hear of a close. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		if (server->clients[index].id == 0U && server->clients[index].closed == 0U)
 			break;
 	}
 
 	/* No room: the connection is refused. */
-	if (index == X11_MAX_CLIENTS)
+	if (index == server->clients_max)
 		return EAGAIN;
 
 	/*
@@ -231,7 +268,7 @@ x11server_connect(
 		server->generation = 1U;
 
 	/* Its resource ids start at its own base. */
-	slot->base = (index + 1U) << 22;
+	slot->base = (index + 1U) << X11_ID_SHIFT;
 	slot->last_ms = server->now;
 
 	/* The authorization its setup must present. */
@@ -400,7 +437,7 @@ x11server_next(
 	memset(event, 0, sizeof(*event));
 
 	/* A client the core closed comes first: its connection goes, and the slot is free again. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		connection = &server->clients[index];
 		if (connection->closed == 0U)
 			continue;
@@ -411,7 +448,7 @@ x11server_next(
 	}
 
 	/* Input handled: the transport may take as much more. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		connection = &server->clients[index];
 		if (connection->id == 0U || connection->consumed == 0U)
 			continue;
@@ -423,7 +460,7 @@ x11server_next(
 	}
 
 	/* Output waiting that the transport has not heard of. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		connection = &server->clients[index];
 		if (connection->id == 0U || connection->output_used == 0U)
 			continue;
@@ -453,7 +490,9 @@ x11server_tick(
 	uint32_t *wake)
 {
 	struct x11_client *client;
+	unsigned grabbed;
 	unsigned index;
+	int waiting;
 	int more;
 	int left;
 
@@ -465,21 +504,33 @@ x11server_tick(
 	x11_rootless_closing(server);
 	x11_rootless_flush_motion(server);
 
-	/* Each client's whole requests, up to a tick's share. */
+	/*
+	 * Each client's whole requests, up to a tick's share; while a client
+	 * holds the server, only its own.  A grab that ends in the pass lets
+	 * the others go on at once.
+	 */
 	more = 0;
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	grabbed = server->grabbed;
+	for (index = 0U; index < server->clients_max; index++) {
 		if (server->clients[index].id == 0U)
+			continue;
+		if (server->grabbed != X11_NO_CLIENT && server->grabbed != index)
 			continue;
 		left = server_handle(server, index);
 		if (left)
 			more = 1;
 	}
+	if (grabbed != X11_NO_CLIENT && server->grabbed == X11_NO_CLIENT)
+		more = 1;
+
+	/* An X owner's text in pieces starts once the owner listens. */
+	waiting = x11_selection_tick(server);
 
 	/* What changed is shown. */
 	x11_rootless_present(server);
 
 	/* A client that stopped taking its output is closed, and one refused once its refusal is taken. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		client = &server->clients[index];
 		if (client->id == 0U)
 			continue;
@@ -495,7 +546,7 @@ x11server_tick(
 	/* At once while requests wait, soon while something is to be shown or held back, else at the next report. */
 	if (more) {
 		*wake = server->now;
-	} else if (server->dirty || server->motion_pending) {
+	} else if (server->dirty || server->motion_pending || waiting) {
 		*wake = server->now + SERVER_TICK_MS;
 	} else {
 		*wake = server->now + SERVER_REPORT_MS;
@@ -514,8 +565,8 @@ x11_client_of(
 	struct x11server *server,
 	unsigned owner)
 {
-	/* The root window's owner and a free slot have no client. */
-	if (owner >= X11_MAX_CLIENTS)
+	/* The server and a free slot have no client. */
+	if (owner >= server->clients_max)
 		return NULL;
 	if (server->clients[owner].id == 0U)
 		return NULL;
@@ -570,18 +621,17 @@ x11_client_close(
 	id = client->id;
 	client->id = 0U;
 
-	/* Its windows (with their surfaces), pixmaps, graphics contexts and fonts. */
+	/* Its windows (with their surfaces), pixmaps, graphics contexts and fonts, and the selections it owned. */
 	x11_resources_release(server, index);
+	x11_selection_forget_client(server, index);
 
-	/* A grab of its own goes. */
-	if (server->grab_owner == (int)index) {
-		server->grab_owner = -1;
+	/* Its grab of the pointer and of the server goes. */
+	if (server->grab_owner == index) {
+		server->grab_owner = X11_NO_CLIENT;
 		server->grab_window = 0U;
 	}
-
-	/* A motion held back for it is dropped. */
-	if (server->motion_pending && server->motion_client == index)
-		server->motion_pending = 0;
+	if (server->grabbed == index)
+		server->grabbed = X11_NO_CLIENT;
 
 	/* Its buffers; the slot waits until the transport has heard of the close. */
 	free(client->input);
@@ -626,7 +676,7 @@ server_client(
 
 	/* The slot the number names. */
 	slot = id & SERVER_SLOT_MASK;
-	if (id == 0U || slot >= X11_MAX_CLIENTS)
+	if (id == 0U || slot >= server->clients_max)
 		return NULL;
 
 	/* A slot another client has taken since. */
@@ -654,6 +704,7 @@ server_handle(
 	uint16_t units;
 	uint8_t opcode;
 	size_t handled;
+	size_t dropped;
 	size_t need;
 	size_t length;
 	int whole;
@@ -667,6 +718,21 @@ server_handle(
 			break;
 		if (client->ending)
 			return 0;
+
+		/* The bytes of a request refused for its length go as they come. */
+		if (client->discard > 0U) {
+			dropped = client->used;
+			if (dropped > client->discard)
+				dropped = client->discard;
+			memmove(client->input, client->input + dropped, client->used - dropped);
+			client->used -= dropped;
+			client->consumed += dropped;
+			client->discard -= dropped;
+			handled += dropped;
+			if (client->discard > 0U)
+				return 0;
+			continue;
+		}
 
 		/* The setup, answered whole or not at all. */
 		if (!client->setup) {
@@ -696,11 +762,18 @@ server_handle(
 				if (client->used < 8U)
 					return 0;
 				words = x11_read32(client->input + 4, client->order);
-				if (words < 2U || words > X11_INPUT_CAP / 4U) {
+				if (words < 2U) {
 					x11_client_close(server, index);
 					return 0;
 				}
 				need = (size_t)words * 4U;
+
+				/* Longer than the core holds: refused, and its bytes dropped as they come. */
+				if (words > X11_INPUT_CAP / 4U) {
+					x11_request_refuse(server, index, client->input[0], client->input[1], X11_BAD_LENGTH);
+					client->discard = need;
+					continue;
+				}
 			}
 
 			/* The whole request. */
@@ -935,7 +1008,7 @@ server_report(
 	server->report_ms = now;
 
 	/* Each client quiet for that long with something held. */
-	for (index = 0U; index < X11_MAX_CLIENTS; index++) {
+	for (index = 0U; index < server->clients_max; index++) {
 		client = &server->clients[index];
 		if (client->id == 0U || !client->setup)
 			continue;

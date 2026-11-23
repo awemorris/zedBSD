@@ -20,10 +20,10 @@
  *
  * The clipboard: the seat's data device tells the core when another
  * client's text becomes the selection (the core then owns X's CLIPBOARD
- * for it and reads the text when an X client asks); while an X client
- * owns CLIPBOARD the backend offers its text as a data source, and the
- * desktop's requests for it are handed to the core, numbered by their
- * descriptors, which the core's answer writes and closes.
+ * for it and reads the text when an X client asks); the text the core
+ * copies from an X owner of CLIPBOARD is offered as a data source, and
+ * the backend keeps it, so it answers the desktop's requests itself and
+ * the text stays after the X client ends.
  *
  * The primary selection is bridged the same way with X's
  * PRIMARY, through the desktop's zwp_primary_selection_device_manager_v1
@@ -69,7 +69,7 @@
 #define WAYLAND_TEXT_X11	"UTF8_STRING"
 #define WAYLAND_TEXT_STRING	"STRING"
 #define WAYLAND_READ_MS		2000
-#define WAYLAND_READ_MAX	(1024U * 1024U)
+#define WAYLAND_READ_MAX	X11_CLIPBOARD_TEXT_MAX
 
 /*
  * One wl_shm buffer of a window, and whether the desktop holds it.
@@ -173,7 +173,8 @@ struct x11_wayland {
 	/*
 	 * The clipboard (ws035-p087): the data device manager and the seat's
 	 * device (NULL without them), the server's own source while an X
-	 * client's text is the selection (NULL otherwise), the offer
+	 * client's text is the selection (NULL otherwise) and that text (a
+	 * copy, NULL with the source), the offer
 	 * introduced last and whether it has text, the selection's offer from
 	 * another client (NULL for none) and whether it has text, and the
 	 * serial of the last input (a selection is set with it).
@@ -181,6 +182,8 @@ struct x11_wayland {
 	struct wl_data_device_manager *data_manager;
 	struct wl_data_device *data_device;
 	struct wl_data_source *source;
+	uint8_t *source_text;
+	size_t source_length;
 	struct wl_data_offer *offer_new;
 	int offer_new_text;
 	struct wl_data_offer *selection;
@@ -190,12 +193,14 @@ struct x11_wayland {
 	/*
 	 * The primary selection (ws035-p103), the same as the clipboard's:
 	 * the manager and the seat's device (NULL without them), the server's
-	 * own source, the offer introduced last and whether it has text, and
+	 * own source and its text, the offer introduced last and whether it has text, and
 	 * another client's selection and whether it has text.
 	 */
 	struct zwp_primary_selection_device_manager_v1 *primary_manager;
 	struct zwp_primary_selection_device_v1 *primary_device;
 	struct zwp_primary_selection_source_v1 *primary_source;
+	uint8_t *primary_source_text;
+	size_t primary_source_length;
 	struct zwp_primary_selection_offer_v1 *primary_new;
 	int primary_new_text;
 	struct zwp_primary_selection_offer_v1 *primary;
@@ -207,16 +212,12 @@ static void wayland_update(void *context, struct x11_surface *window, const stru
 static void wayland_close(void *context, struct x11_surface *window);
 static int wayland_vulkan_surface(void *context, struct x11_surface *window, void *instance, void *result);
 static int wayland_present(void *context, struct x11_surface *window, const uint32_t *pixels, size_t stride, const struct x11_rect *parts, unsigned count);
-static int wayland_clipboard_own(void *context, unsigned selection, int own);
-static int wayland_clipboard_has_text(void *context, unsigned selection);
+static int wayland_clipboard_offer(void *context, unsigned selection, const uint8_t *text, size_t size);
 static int wayland_clipboard_read(void *context, unsigned selection, uint8_t **text, size_t *size);
-static size_t wayland_clipboard_answer(void *context, uint32_t request, const uint8_t *text, size_t size);
-static int wayland_selection_own(struct x11_wayland *wayland);
-static void wayland_selection_drop(struct x11_wayland *wayland);
+static int wayland_selection_own(struct x11_wayland *wayland, uint8_t *text, size_t length);
 static int wayland_selection_has_text(const struct x11_wayland *wayland);
 static int wayland_selection_read(struct x11_wayland *wayland, char **text, size_t *length);
-static int wayland_primary_own(struct x11_wayland *wayland);
-static void wayland_primary_drop(struct x11_wayland *wayland);
+static int wayland_primary_own(struct x11_wayland *wayland, uint8_t *text, size_t length);
 static int wayland_primary_has_text(const struct x11_wayland *wayland);
 static int wayland_primary_read(struct x11_wayland *wayland, char **text, size_t *length);
 static int wayland_buffers(struct x11_surface *window);
@@ -257,6 +258,7 @@ static void wayland_source_send(void *data, struct wl_data_source *source, const
 static void wayland_source_cancelled(void *data, struct wl_data_source *source);
 static int wayland_text_type(const char *mime_type);
 static int wayland_pipe_read(int fd, char **text, size_t *length);
+static size_t wayland_pipe_write(int fd, const uint8_t *text, size_t length);
 static void wayland_primary_offer(void *data, struct zwp_primary_selection_device_v1 *device, struct zwp_primary_selection_offer_v1 *offer);
 static void wayland_primary_selection(void *data, struct zwp_primary_selection_device_v1 *device, struct zwp_primary_selection_offer_v1 *offer);
 static void wayland_primary_type(void *data, struct zwp_primary_selection_offer_v1 *offer, const char *mime_type);
@@ -268,8 +270,8 @@ static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_s
  * their context.
  */
 const struct x11_backend_ops x11_wayland_ops = {
-	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_own, wayland_clipboard_has_text,
-	wayland_clipboard_read, wayland_clipboard_answer
+	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
+	wayland_clipboard_read
 };
 
 /* The registry's callbacks. */
@@ -426,6 +428,12 @@ x11_wayland_attach(
 {
 	/* The core from now on. */
 	wayland->server = server;
+
+	/* It hears of another client's text already the desktop's clipboard or primary selection. */
+	if (wayland->selection != NULL && wayland->selection_text)
+		x11server_backend_clipboard(server, X11_SELECTION_CLIPBOARD, 1);
+	if (wayland->primary != NULL && wayland->primary_text)
+		x11server_backend_clipboard(server, X11_SELECTION_PRIMARY, 1);
 }
 
 /*
@@ -500,6 +508,7 @@ x11_wayland_close(
 	/* The primary selection's objects. */
 	if (wayland->primary_source != NULL)
 		zwp_primary_selection_source_v1_destroy(wayland->primary_source);
+	free(wayland->primary_source_text);
 	if (wayland->primary != NULL)
 		zwp_primary_selection_offer_v1_destroy(wayland->primary);
 	if (wayland->primary_device != NULL)
@@ -510,6 +519,7 @@ x11_wayland_close(
 	/* The clipboard's objects. */
 	if (wayland->source != NULL)
 		wl_data_source_destroy(wayland->source);
+	free(wayland->source_text);
 	if (wayland->selection != NULL)
 		wl_data_offer_destroy(wayland->selection);
 	if (wayland->data_device != NULL)
@@ -790,67 +800,48 @@ wayland_present(
 }
 
 /*
- * Makes an X owner's text the desktop's selection (own nonzero), or gives
- * that up.  Returns 0, or an errno value.
+ * Makes the text the core copied from an X owner of CLIPBOARD or PRIMARY
+ * the desktop's clipboard or primary selection: the backend keeps a copy
+ * and answers the desktop's requests with it.  Returns 0, or an errno
+ * value (ENOTSUP without the device, E2BIG, ENOMEM).
  */
 static int
-wayland_clipboard_own(
+wayland_clipboard_offer(
 	void *context,
 	unsigned selection,
-	int own)
+	const uint8_t *text,
+	size_t size)
 {
 	struct x11_wayland *wayland;
+	uint8_t *copy;
 	int error;
 
-	/* The primary selection. */
+	/* A text too long to pass is refused. */
 	wayland = context;
+	if (size > X11_CLIPBOARD_TEXT_MAX)
+		return E2BIG;
+
+	/* The backend's copy (an empty text is still text). */
+	copy = malloc(size + 1U);
+	if (copy == NULL)
+		return ENOMEM;
+	if (size != 0U)
+		memcpy(copy, text, size);
+	copy[size] = '\0';
+
+	/* The primary selection, or the clipboard, with a new source. */
 	if (selection == X11_SELECTION_PRIMARY) {
-		if (!own) {
-			wayland_primary_drop(wayland);
-			return 0;
-		}
-
-		/* The server's primary source. */
-		error = wayland_primary_own(wayland);
-		if (error != 0)
-			return error;
-		return 0;
+		error = wayland_primary_own(wayland, copy, size);
+	} else {
+		error = wayland_selection_own(wayland, copy, size);
 	}
-
-	/* The clipboard given up. */
-	if (!own) {
-		wayland_selection_drop(wayland);
-		return 0;
-	}
-
-	/* The server's source. */
-	error = wayland_selection_own(wayland);
-	if (error != 0)
+	if (error != 0) {
+		free(copy);
 		return error;
-
-	/* Succeeded: the X owner's text is offered. */
-	return 0;
-}
-
-/* Tells whether another client's text is the desktop's clipboard or primary selection. */
-static int
-wayland_clipboard_has_text(
-	void *context,
-	unsigned selection)
-{
-	struct x11_wayland *wayland;
-	int text;
-
-	/* The primary selection's. */
-	wayland = context;
-	if (selection == X11_SELECTION_PRIMARY) {
-		text = wayland_primary_has_text(wayland);
-		return text;
 	}
 
-	/* The clipboard's. */
-	text = wayland_selection_has_text(wayland);
-	return text;
+	/* Succeeded: the source holds the copy. */
+	return 0;
 }
 
 /*
@@ -888,58 +879,22 @@ wayland_clipboard_read(
 }
 
 /*
- * Answers a desktop client's request for an X owner's text: the text
- * (none for NULL) is written into the request's descriptor, which is then
- * closed so the reader sees the end.  Returns how many bytes were written.
- */
-static size_t
-wayland_clipboard_answer(
-	void *context,
-	uint32_t request,
-	const uint8_t *text,
-	size_t size)
-{
-	ssize_t wrote;
-	size_t done;
-	int fd;
-
-	/* The request is the descriptor the desktop gave. */
-	(void)context;
-	fd = (int)request;
-
-	/* All of it (a short text; a failure leaves the reader what was written). */
-	done = 0U;
-	while (text != NULL && done < size) {
-		wrote = write(fd, text + done, size - done);
-		if (wrote <= 0)
-			break;
-		done += (size_t)wrote;
-	}
-
-	/* The reader sees the end. */
-	(void)close(fd);
-
-	/* Succeeded: what was written. */
-	return done;
-}
-
-/*
- * Makes an X client's text the desktop's selection: the server's source
- * offers the text types, and the desktop's requests for them go to
- * the core (x11server_backend_clipboard_request).  Returns 0, or an
- * errno value (ENOTSUP without a data device).
+ * Makes an X client's text the desktop's selection: a new source of the
+ * server's offers the text types and holds the text (which it takes),
+ * and the source before goes.  Returns 0, or an errno value (ENOTSUP
+ * without a data device, ENOMEM).
  */
 static int
 wayland_selection_own(
-	struct x11_wayland *wayland)
+	struct x11_wayland *wayland,
+	uint8_t *text,
+	size_t length)
 {
 	struct wl_data_source *source;
 
-	/* Only with a data device; an own source already there is kept. */
+	/* Only with a data device. */
 	if (wayland->data_device == NULL)
 		return ENOTSUP;
-	if (wayland->source != NULL)
-		return 0;
 
 	/* The source and its types. */
 	source = wl_data_device_manager_create_data_source(wayland->data_manager);
@@ -951,9 +906,16 @@ wayland_selection_own(
 	wl_data_source_offer(source, WAYLAND_TEXT_X11);
 	wl_data_source_offer(source, WAYLAND_TEXT_STRING);
 
-	/* The selection, with the last input's serial; another client's offer is not the selection any more. */
-	wayland->source = source;
+	/* The selection, with the last input's serial; the server's source before goes. */
 	wl_data_device_set_selection(wayland->data_device, source, wayland->serial);
+	if (wayland->source != NULL)
+		wl_data_source_destroy(wayland->source);
+	free(wayland->source_text);
+	wayland->source = source;
+	wayland->source_text = text;
+	wayland->source_length = length;
+
+	/* Another client's offer is not the selection any more. */
 	if (wayland->selection != NULL)
 		wl_data_offer_destroy(wayland->selection);
 	wayland->selection = NULL;
@@ -961,29 +923,9 @@ wayland_selection_own(
 
 	/* Succeeded: sent at once. */
 	(void)wl_display_flush(wayland->display);
-	printf("X11 CLIPBOARD own\n");
+	printf("X11 CLIPBOARD own bytes=%lu\n", (unsigned long)length);
 	fflush(stdout);
 	return 0;
-}
-
-/*
- * Gives up the server's source (its X client gave up CLIPBOARD, or went):
- * the desktop's selection is emptied.
- */
-static void
-wayland_selection_drop(
-	struct x11_wayland *wayland)
-{
-	/* Only the server's own source. */
-	if (wayland->source == NULL)
-		return;
-
-	/* The source goes; the selection with it. */
-	wl_data_source_destroy(wayland->source);
-	wayland->source = NULL;
-	(void)wl_display_flush(wayland->display);
-	printf("X11 CLIPBOARD drop\n");
-	fflush(stdout);
 }
 
 /*
@@ -1045,22 +987,21 @@ wayland_selection_read(
 }
 
 /*
- * Makes an X client's text the desktop's primary selection (ws035-p103),
- * as x11_wayland_selection_own does for the clipboard; the desktop's
- * requests go to the core (x11server_backend_clipboard_request).
- * Returns 0, or an errno value (ENOTSUP without a primary device).
+ * Makes an X client's text the desktop's primary selection, as
+ * wayland_selection_own does for the clipboard.  Returns 0, or an errno
+ * value (ENOTSUP without a primary device, ENOMEM).
  */
 static int
 wayland_primary_own(
-	struct x11_wayland *wayland)
+	struct x11_wayland *wayland,
+	uint8_t *text,
+	size_t length)
 {
 	struct zwp_primary_selection_source_v1 *source;
 
-	/* Only with a primary device; an own source already there is kept. */
+	/* Only with a primary device. */
 	if (wayland->primary_device == NULL)
 		return ENOTSUP;
-	if (wayland->primary_source != NULL)
-		return 0;
 
 	/* The source and its types. */
 	source = zwp_primary_selection_device_manager_v1_create_source(wayland->primary_manager);
@@ -1072,9 +1013,16 @@ wayland_primary_own(
 	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_X11);
 	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_STRING);
 
-	/* The selection; another client's offer is not the selection any more. */
-	wayland->primary_source = source;
+	/* The selection; the server's source before goes. */
 	zwp_primary_selection_device_v1_set_selection(wayland->primary_device, source, wayland->serial);
+	if (wayland->primary_source != NULL)
+		zwp_primary_selection_source_v1_destroy(wayland->primary_source);
+	free(wayland->primary_source_text);
+	wayland->primary_source = source;
+	wayland->primary_source_text = text;
+	wayland->primary_source_length = length;
+
+	/* Another client's offer is not the selection any more. */
 	if (wayland->primary != NULL)
 		zwp_primary_selection_offer_v1_destroy(wayland->primary);
 	wayland->primary = NULL;
@@ -1082,26 +1030,9 @@ wayland_primary_own(
 
 	/* Succeeded: sent at once. */
 	(void)wl_display_flush(wayland->display);
-	printf("X11 PRIMARY own\n");
+	printf("X11 PRIMARY own bytes=%lu\n", (unsigned long)length);
 	fflush(stdout);
 	return 0;
-}
-
-/* Gives up the server's primary source (its X client gave up PRIMARY, or went). */
-static void
-wayland_primary_drop(
-	struct x11_wayland *wayland)
-{
-	/* Only the server's own source. */
-	if (wayland->primary_source == NULL)
-		return;
-
-	/* The source goes; the selection with it. */
-	zwp_primary_selection_source_v1_destroy(wayland->primary_source);
-	wayland->primary_source = NULL;
-	(void)wl_display_flush(wayland->display);
-	printf("X11 PRIMARY drop\n");
-	fflush(stdout);
 }
 
 /* Tells whether another client's text is the desktop's primary selection. */
@@ -2012,9 +1943,9 @@ wayland_source_target(
 }
 
 /*
- * A client asks for the X client's text: its descriptor goes to
- * the core, which asks the X owner and answers with the text when it comes.
- * A type that is not text is closed at once.
+ * A client asks for the X client's text: the copy the source holds is
+ * written into its descriptor, which is then closed so the reader sees
+ * the end.  A type that is not text is closed at once.
  */
 static void
 wayland_source_send(
@@ -2024,21 +1955,22 @@ wayland_source_send(
 	int32_t fd)
 {
 	struct x11_wayland *wayland;
+	size_t done;
 	int text;
 
-	/* Only text, and only with a server to answer. */
-	(void)source;
+	/* Only text of the server's own source. */
 	wayland = data;
 	text = wayland_text_type(mime_type);
-	if (!text || wayland->server == NULL) {
+	if (!text || source != wayland->source || wayland->source_text == NULL) {
 		close(fd);
 		return;
 	}
 
-	/* Succeeded: the core's answer writes and closes the descriptor. */
+	/* Succeeded: the copy is written and the descriptor closed. */
 	printf("X11 CLIPBOARD send mime=%s\n", mime_type);
+	done = wayland_pipe_write(fd, wayland->source_text, wayland->source_length);
+	printf("X11 CLIPBOARD sent bytes=%lu\n", (unsigned long)done);
 	fflush(stdout);
-	x11server_backend_clipboard_request(wayland->server, X11_SELECTION_CLIPBOARD, (uint32_t)fd);
 }
 
 /* Another client took the selection: the server's source goes (the new selection follows). */
@@ -2049,11 +1981,15 @@ wayland_source_cancelled(
 {
 	struct x11_wayland *wayland;
 
-	/* The source. */
+	/* The source, and the copy it held. */
 	wayland = data;
 	wl_data_source_destroy(source);
-	if (wayland->source == source)
+	if (wayland->source == source) {
 		wayland->source = NULL;
+		free(wayland->source_text);
+		wayland->source_text = NULL;
+		wayland->source_length = 0U;
+	}
 	printf("X11 CLIPBOARD cancelled\n");
 	fflush(stdout);
 }
@@ -2170,6 +2106,54 @@ wayland_pipe_read(
 	return 0;
 }
 
+/*
+ * Writes a text into a descriptor a desktop client reads, waiting at most
+ * WAYLAND_READ_MS for room each time; closes it so the reader sees the
+ * end.  Returns how many bytes were written (fewer when the reader went
+ * or was too slow).
+ */
+static size_t
+wayland_pipe_write(
+	int fd,
+	const uint8_t *text,
+	size_t length)
+{
+	struct pollfd descriptor;
+	ssize_t wrote;
+	size_t done;
+	int flags;
+	int status;
+
+	/* The descriptor never blocks the server. */
+	flags = fcntl(fd, F_GETFL);
+	if (flags >= 0)
+		(void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+	/* All of it, while the reader takes it. */
+	done = 0U;
+	while (done < length) {
+		/* Waits for room. */
+		descriptor.fd = fd;
+		descriptor.events = POLLOUT;
+		descriptor.revents = 0;
+		status = poll(&descriptor, 1, WAYLAND_READ_MS);
+		if (status <= 0)
+			break;
+
+		/* As much as fits; a failure other than a full pipe ends it. */
+		wrote = write(fd, text + done, length - done);
+		if (wrote < 0 && errno == EAGAIN)
+			continue;
+		if (wrote <= 0)
+			break;
+		done += (size_t)wrote;
+	}
+
+	/* Succeeded: the reader sees the end. */
+	(void)close(fd);
+	return done;
+}
+
 /* Notes a new primary offer introduced by the desktop; its types follow. */
 static void
 wayland_primary_offer(
@@ -2252,9 +2236,9 @@ wayland_primary_type(
 }
 
 /*
- * A client asks for the X client's PRIMARY text: its descriptor goes to
- * the core, which asks the X owner.  A type that is not text is closed
- * at once.
+ * A client asks for the X client's PRIMARY text: the copy the source
+ * holds is written into its descriptor, which is then closed.  A type
+ * that is not text is closed at once.
  */
 static void
 wayland_primary_send(
@@ -2264,21 +2248,22 @@ wayland_primary_send(
 	int32_t fd)
 {
 	struct x11_wayland *wayland;
+	size_t done;
 	int text;
 
-	/* Only text, and only with a server to answer. */
-	(void)source;
+	/* Only text of the server's own source. */
 	wayland = data;
 	text = wayland_text_type(mime_type);
-	if (!text || wayland->server == NULL) {
+	if (!text || source != wayland->primary_source || wayland->primary_source_text == NULL) {
 		close(fd);
 		return;
 	}
 
-	/* Succeeded: the core's answer writes and closes the descriptor. */
+	/* Succeeded: the copy is written and the descriptor closed. */
 	printf("X11 PRIMARY send mime=%s\n", mime_type);
+	done = wayland_pipe_write(fd, wayland->primary_source_text, wayland->primary_source_length);
+	printf("X11 PRIMARY sent bytes=%lu\n", (unsigned long)done);
 	fflush(stdout);
-	x11server_backend_clipboard_request(wayland->server, X11_SELECTION_PRIMARY, (uint32_t)fd);
 }
 
 /* Another client took the primary selection: the server's source goes. */
@@ -2289,11 +2274,15 @@ wayland_primary_cancelled(
 {
 	struct x11_wayland *wayland;
 
-	/* The source. */
+	/* The source, and the copy it held. */
 	wayland = data;
 	zwp_primary_selection_source_v1_destroy(source);
-	if (wayland->primary_source == source)
+	if (wayland->primary_source == source) {
 		wayland->primary_source = NULL;
+		free(wayland->primary_source_text);
+		wayland->primary_source_text = NULL;
+		wayland->primary_source_length = 0U;
+	}
 	printf("X11 PRIMARY cancelled\n");
 	fflush(stdout);
 }

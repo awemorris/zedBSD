@@ -4,3 +4,13 @@
 Host *
 	# Nothing here resolves a name to check a fingerprint against.
 	VerifyHostKeyDNS no
+
+# Port forwarding, as in OpenSSH (ssh -L, -R, -g, -N).  A local forwarding
+# listens on the loopback addresses unless a bind address or GatewayPorts yes
+# says otherwise; a remote one asks the server to listen.  For example:
+#Host db-tunnel
+#	HostName db.example.org
+#	LocalForward 5432 localhost:5432
+#	RemoteForward 8080 localhost:80
+#	ExitOnForwardFailure yes
+#	SessionType none

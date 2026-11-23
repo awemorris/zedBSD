@@ -145,13 +145,11 @@ struct x11_win32 {
 	int wheel;
 	int hwheel;
 
-	/* The clipboard: when the user last pasted and copied, the request asked of the core, and the sequence the backend set. */
+	/* The clipboard: when the user last pasted and copied, and the sequence the backend set. */
 	DWORD paste_time;
 	DWORD copy_time;
 	int pasted;
 	int copied;
-	uint32_t clipboard_request;
-	unsigned clipboard_selection;
 	DWORD clipboard_sequence;
 
 	/* Vulkan: the loader, opened when the core first asks for a surface. */
@@ -184,10 +182,9 @@ void win32_layout_read(struct x11_win32 *backend);
 /* clipboard.c */
 int win32_clipboard_start(struct x11_win32 *backend);
 void win32_clipboard_stop(struct x11_win32 *backend);
+void win32_clipboard_attach(struct x11_win32 *backend);
 void win32_clipboard_changed(struct x11_win32 *backend);
-int win32_clipboard_own(void *context, unsigned selection, int own);
-int win32_clipboard_has_text(void *context, unsigned selection);
+int win32_clipboard_offer(void *context, unsigned selection, const uint8_t *text, size_t size);
 int win32_clipboard_read(void *context, unsigned selection, uint8_t **text, size_t *size);
-size_t win32_clipboard_answer(void *context, uint32_t request, const uint8_t *text, size_t size);
 
 #endif

@@ -47,6 +47,7 @@ static void output_scale_physical(struct kwl_server *server, VkDisplayKHR displa
 static unsigned output_scale_chosen(struct kwl_server *server, VkDisplayKHR display, const char *key);
 static unsigned output_scale_why(struct kwl_server *server, VkDisplayKHR display);
 static VkDisplayKHR output_scale_display(struct kwl_server *server, const char *key);
+static unsigned output_scale_viewing(const char *key);
 
 /*
  * Chooses the scale the output asks for (server->scale_wanted), for the
@@ -66,6 +67,7 @@ kwl_output_scale_choose(
 	unsigned chosen;
 	unsigned shown;
 	unsigned dpi;
+	unsigned viewing;
 
 	/* Nothing to choose for before the output's display is known. */
 	compose = server->compose;
@@ -77,7 +79,8 @@ kwl_output_scale_choose(
 	compose->mm_width = mm_width;
 	compose->mm_height = mm_height;
 	dpi = kwl_scale_density(compose->mode_width, compose->mode_height, mm_width, mm_height);
-	recommended = kwl_scale_recommended(compose->mode_width, compose->mode_height, mm_width, mm_height);
+	viewing = output_scale_viewing(compose->display_name);
+	recommended = kwl_scale_recommended(compose->mode_width, compose->mode_height, mm_width, mm_height, viewing);
 
 	/* The user's choice for the monitor, shown at a step the mode offers. */
 	chosen = output_scale_chosen(server, compose->display, compose->display_name);
@@ -116,13 +119,15 @@ kwl_output_scale_head(
 	unsigned chosen;
 	unsigned shown;
 	unsigned dpi;
+	unsigned viewing;
 
-	/* The display's physical size, its density and the default it asks for. */
+	/* The display's physical size, its density and the default it asks for (seen from its distance). */
 	output_scale_physical(server, head->display, head->name, &mm_width, &mm_height);
 	head->mm_width = mm_width;
 	head->mm_height = mm_height;
 	dpi = kwl_scale_density(head->pixel_width, head->pixel_height, mm_width, mm_height);
-	recommended = kwl_scale_recommended(head->pixel_width, head->pixel_height, mm_width, mm_height);
+	viewing = output_scale_viewing(head->name);
+	recommended = kwl_scale_recommended(head->pixel_width, head->pixel_height, mm_width, mm_height, viewing);
 
 	/* The user's choice for the monitor, shown at a step the mode offers. */
 	chosen = output_scale_chosen(server, head->display, head->name);
@@ -158,6 +163,7 @@ kwl_output_scale_report(
 	uint32_t refresh;
 	uint32_t mm_width;
 	uint32_t mm_height;
+	unsigned viewing;
 	unsigned shown;
 	unsigned slot;
 	VkResult result;
@@ -191,7 +197,8 @@ kwl_output_scale_report(
 
 	/* The default its density asks for, and the steps its mode offers. */
 	output_scale_physical(server, display, key, &mm_width, &mm_height);
-	state->recommended = kwl_scale_recommended(mode_width, mode_height, mm_width, mm_height);
+	viewing = output_scale_viewing(key);
+	state->recommended = kwl_scale_recommended(mode_width, mode_height, mm_width, mm_height, viewing);
 	state->offered_count = kwl_scale_offered(mode_width, mode_height, state->offered, KWL_SCALE_STEPS);
 
 	/* The user's choice, and the scale it would be shown at. */
@@ -457,4 +464,27 @@ output_scale_display(
 
 	/* Succeeded: not connected. */
 	return VK_NULL_HANDLE;
+}
+
+/*
+ * Tells the distance a display is seen from (tenths of an inch, scale.h):
+ * a laptop's for the machine's built-in panel (a connector's key that says
+ * eDP), a desktop's for any other.  The display the compositor started on
+ * is not taken for a built-in panel without such a key, as
+ * kwl_output_display_internal takes it: a desktop's only monitor would be
+ * shown too small.
+ */
+static unsigned
+output_scale_viewing(
+	const char *key)
+{
+	const char *found;
+
+	/* A key that says it is the built-in panel. */
+	found = strstr(key, ":edp:");
+	if (found != NULL)
+		return KWL_SCALE_VIEW_LAPTOP;
+
+	/* Succeeded: any other display is a desktop's. */
+	return KWL_SCALE_VIEW_DESKTOP;
 }

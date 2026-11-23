@@ -230,7 +230,8 @@ void kl_window_size(const struct kl_window *window, uint32_t *width, uint32_t *h
  * frames and does not defer its configures sends its first frame of a new
  * size after kl_window_size reports it; one that defers them acknowledges
  * with kl_window_configure_ack before that frame, which shows it at the
- * new logical size.
+ * new logical size.  On Windows a window follows its monitor's dpi from
+ * the start, and kl_window_follow_scale returns 0 and changes nothing.
  */
 unsigned kl_window_scale(const struct kl_window *window);
 int kl_window_follow_scale(struct kl_window *window);

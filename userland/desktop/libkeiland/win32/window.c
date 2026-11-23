@@ -346,6 +346,24 @@ kl_window_scale(
 }
 
 /*
+ * Has a window follow the system's scale (KL_VERSION 114).  A window on
+ * Windows follows its monitor's dpi from the start (its size, its frames
+ * and its input's places are in pixels at kl_window_scale), so nothing
+ * changes.  Returns 0, or EINVAL.
+ */
+int
+kl_window_follow_scale(
+	struct kl_window *window)
+{
+	/* A window. */
+	if (window == NULL)
+		return EINVAL;
+
+	/* Succeeded: it follows the dpi already. */
+	return 0;
+}
+
+/*
  * Keeps whether the window defers its configures (KL_VERSION 109).
  * Windows sends none: the content's size is the window's own, and
  * nothing ever waits for an acknowledgement.  Returns 0, or EINVAL.

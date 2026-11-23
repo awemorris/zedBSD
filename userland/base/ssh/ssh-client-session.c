@@ -12,13 +12,16 @@
  * is wanted, and the standard streams carried over it until the
  * connection ends; the escape sequences of the terminal (ssh(1) ESCAPE
  * CHARACTERS), the window size, ConnectTimeout (ssh_config(5)), the
- * messages for how the connection ended, and the exit status.
+ * messages for how the connection ended, and the exit status.  The port
+ * forwardings (ssh-client-forward.c) are set up after the login and run
+ * in the same loop; without a session (-N, SessionType none) the
+ * connection lasts until a signal or the server ends it.
  *
  * Everything runs in one poll loop.  The socket does not block; the
  * standard streams keep their mode (they may be shared with other
  * processes) and are written in pieces poll says fit.  The engine does the
- * protocol: the transport, the order of the login, the channel, its window
- * and ServerAliveInterval.
+ * protocol: the transport, the order of the login, the channels, their
+ * windows and ServerAliveInterval.
  */
 
 #include <errno.h>
@@ -47,6 +50,9 @@
 #define CLIENT_SLOT_ERROR	3
 #define CLIENT_SLOT_SIGNAL	4
 #define CLIENT_SLOTS		5
+
+/* The pollfd slots of the loop with the forwardings' after the program's own. */
+#define CLIENT_ALL_SLOTS	(CLIENT_SLOTS + SSH_CLIENT_FORWARD_SLOTS)
 
 /* The terminal type sent when TERM does not give one. */
 #define CLIENT_DEFAULT_TERM	"dumb"
@@ -77,7 +83,7 @@ struct client_stream {
 /*
  * The state of the loop.
  *
- * want_session is 0 for -N.  input holds the user's bytes read and passed
+ * want_session is 0 for -N and SessionType none.  input holds the user's bytes read and passed
  * through the escapes but not yet taken by the engine (input_size of
  * them, from input_offset).  input_end is 1 once the standard input
  * reached its end (or -n, -N, "~."), eof_given 1 once the engine was told.
@@ -95,7 +101,8 @@ struct client_stream {
  * is 1 once the engine said the connection ended, reported 1 when that
  * end was reported as an error.  done is 1 when the loop is to end.
  * deadline is when a server that has not identified itself is given up
- * (ConnectTimeout; 0 for never).
+ * (ConnectTimeout; 0 for never).  forwards are the port forwardings, set
+ * up at the login.
  */
 struct client_session {
 	struct ssh_client *client;
@@ -127,6 +134,7 @@ struct client_session {
 	int reported;
 	int done;
 	uint64_t deadline;
+	struct ssh_client_forwards forwards;
 };
 
 /*
@@ -167,6 +175,7 @@ static void client_leave_raw(struct client_session *session);
 static void client_stream_init(struct client_stream *stream, int descriptor);
 static int client_finished(const struct client_session *session);
 static void client_quit(struct client_session *session);
+static void client_forward_failed(struct client_session *session);
 
 /*
  * Runs the connection after the socket is connected.
@@ -328,9 +337,9 @@ client_session_setup(
 	memset(session, 0, sizeof(*session));
 	session->client = client;
 
-	/* -N opens no session and reads no input; -n reads no input. */
+	/* -N and SessionType none open no session and read no input; -n reads no input. */
 	session->want_session = 1;
-	if (args->no_command) {
+	if (args->no_command || client->config.session_type_none) {
 		session->want_session = 0;
 		session->input_end = 1;
 	}
@@ -345,6 +354,9 @@ client_session_setup(
 
 	/* Starts the escapes at the start of a line. */
 	ssh_client_escape_init(&session->escape);
+
+	/* Starts the forwardings, which are set up at the login. */
+	ssh_client_forwards_init(&session->forwards, client);
 }
 
 /*
@@ -356,6 +368,9 @@ client_session_finish(
 {
 	/* Puts the terminal back, if the loop did not. */
 	client_leave_raw(session);
+
+	/* Closes the forwardings' sockets. */
+	ssh_client_forwards_free(&session->forwards);
 
 	/* Wipes and frees the buffers. */
 	ssh_buf_free(&session->output.queue);
@@ -543,11 +558,13 @@ client_session_run(
 	struct client_session *session)
 {
 	struct ssh_client *client;
-	struct pollfd slots[CLIENT_SLOTS];
+	struct pollfd slots[CLIENT_ALL_SLOTS];
 	size_t pending;
 	uint64_t now;
 	uint64_t wake;
+	uint64_t forward_wake;
 	uint64_t wait_ms;
+	unsigned slot_count;
 	int identified;
 	int finished;
 	int status;
@@ -573,8 +590,9 @@ client_session_run(
 			return error;
 		client_note_rekeys(session);
 
-		/* Gives the engine the user's input it takes. */
+		/* Gives the engine the user's input and the forwarded connections' bytes it takes. */
 		client_send_input(session);
+		ssh_client_forwards_pump(&session->forwards);
 
 		/* Ends when the connection is over and the session's output written. */
 		finished = client_finished(session);
@@ -640,8 +658,17 @@ client_session_run(
 		slots[CLIENT_SLOT_SIGNAL].fd = client_signal_pipe[0];
 		slots[CLIENT_SLOT_SIGNAL].events = POLLIN;
 
-		/* Waits for any of them, at most until the engine or the deadline wants the time. */
-		status = poll(slots, CLIENT_SLOTS, (int)wait_ms);
+		/* Watches the forwardings' sockets after the program's own, waking for their times too. */
+		forward_wake = UINT64_MAX;
+		slot_count = ssh_client_forwards_poll(&session->forwards, slots + CLIENT_SLOTS, SSH_CLIENT_FORWARD_SLOTS, now, &forward_wake);
+		if (forward_wake <= now) {
+			wait_ms = 0;
+		} else if (forward_wake - now < wait_ms) {
+			wait_ms = forward_wake - now;
+		}
+
+		/* Waits for any of them, at most until the engine, the deadline or a forwarding wants the time. */
+		status = poll(slots, CLIENT_SLOTS + slot_count, (int)wait_ms);
 		if (status < 0 && errno != EINTR)
 			return errno;
 
@@ -676,6 +703,10 @@ client_session_run(
 		/* Writes the error stream when it can take data or failed. */
 		if ((slots[CLIENT_SLOT_ERROR].revents & (POLLOUT | POLLHUP | POLLERR)) != 0)
 			client_write_stream(session, &session->error);
+
+		/* Moves the forwardings on: new connections, their bytes, connections being made. */
+		now = ssh_client_now_ms();
+		ssh_client_forwards_serve(&session->forwards, slots + CLIENT_SLOTS, now);
 	}
 }
 
@@ -729,10 +760,24 @@ client_take_event(
 	const struct ssh_engine_event *event)
 {
 	struct ssh_client *client;
+	int taken;
 	int error;
 
 	/* Takes the client of the session. */
 	client = session->client;
+
+	/* Gives the forwardings what is theirs; ExitOnForwardFailure may end the connection. */
+	error = ssh_client_forwards_event(&session->forwards, event, &taken);
+	if (error == SSH_CLIENT_FORWARD_FATAL) {
+		client_forward_failed(session);
+		return 0;
+	}
+	if (error != 0)
+		return error;
+
+	/* Nothing more to do for an event of the forwardings. */
+	if (taken)
+		return 0;
 
 	/* Acts by the kind of the event. */
 	error = 0;
@@ -875,6 +920,15 @@ client_take_login(
 	if (session->tty_note)
 		ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Pseudo-terminal will not be allocated because stdin is not a terminal.");
 
+	/* Sets up the port forwardings; ExitOnForwardFailure ends the connection when one failed. */
+	error = ssh_client_forwards_start(&session->forwards);
+	if (error == SSH_CLIENT_FORWARD_FATAL) {
+		client_forward_failed(session);
+		return 0;
+	}
+	if (error != 0)
+		return error;
+
 	/* Every key goes to the remote terminal as it is typed from now on. */
 	if (session->pty)
 		client_enter_raw(session);
@@ -941,6 +995,9 @@ client_take_exit(
 	struct client_session *session,
 	const struct ssh_engine_event *event)
 {
+	/* No new forwarded connection is taken after the session; the open ones keep the connection. */
+	ssh_client_forwards_stop_listening(&session->forwards);
+
 	/* Keeps the signal that ended the command, or its status. */
 	if (event->exit_signal[0] != '\0') {
 		session->have_exit = 1;
@@ -1398,6 +1455,8 @@ static int
 client_finished(
 	const struct client_session *session)
 {
+	int draining;
+
 	/* The connection must have ended. */
 	if (!session->closed)
 		return 0;
@@ -1406,6 +1465,11 @@ client_finished(
 	if (session->output.queue.size > session->output.offset && !session->output.broken)
 		return 0;
 	if (session->error.queue.size > session->error.offset && !session->error.broken)
+		return 0;
+
+	/* The server's last bytes of a forwarded connection must be written too. */
+	draining = ssh_client_forwards_draining(&session->forwards);
+	if (draining)
 		return 0;
 
 	/* Reports that the session is over. */
@@ -1426,4 +1490,18 @@ client_quit(
 
 	/* Tells the server. */
 	ssh_engine_disconnect(session->client->engine, NULL);
+}
+
+/*
+ * Ends the connection because a forwarding failed under
+ * ExitOnForwardFailure (the reason already said): the exit value is 255.
+ */
+static void
+client_forward_failed(
+	struct client_session *session)
+{
+	/* Puts the terminal back, then ends with 255. */
+	client_leave_raw(session);
+	session->failed = 1;
+	client_quit(session);
 }

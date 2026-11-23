@@ -81,20 +81,39 @@ struct x11server_options {
 	 */
 	const char *font_fallback_path;
 
+	/*
+	 * The clients the server takes at once (64 when zero, at most 127),
+	 * and the memory one client and the whole server may hold for their
+	 * windows, pixmaps, properties and pixels (256 MiB and 512 MiB when
+	 * zero): a request past them is refused with BadAlloc.
+	 */
+	unsigned clients_max;
+	size_t client_memory_max;
+	size_t server_memory_max;
+
 	/* Where the core's log lines go, one at a time without a newline (NULL: nowhere). */
 	void (*log)(void *context, const char *line);
 	void *log_context;
 };
 
 /*
- * The authorization a connection must present.  The core does not check
- * one yet; NULL accepts any.
+ * The authorization a connection must present (MIT-MAGIC-COOKIE-1 and its
+ * data); NULL accepts any.
  */
 struct x11server_auth {
 	const char *name;
 	const uint8_t *data;
 	size_t size;
 };
+
+/*
+ * The longest request (BIG-REQUESTS' longest, in bytes), and so the most
+ * bytes of a client's input the core holds unhandled: a transport must
+ * let the core have that many before it holds a client back, or a long
+ * request is left half in.  A request longer than that is refused
+ * (BadLength) and its bytes are dropped as they come.
+ */
+#define X11SERVER_REQUEST_MAX	(16U * 1024U * 1024U)
 
 /* What x11server_next reports: nothing, a closed client, input handled, output waiting. */
 #define X11SERVER_EVENT_NONE		0U

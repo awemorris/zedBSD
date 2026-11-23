@@ -13,7 +13,7 @@ LIBCXX_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 LIBCXX_DIR := $(patsubst %/,%,$(dir $(LIBCXX_MAKEFILE)))
 include $(LIBCXX_DIR)/../../../base/package.mk
 include $(LIBCXX_DIR)/../../external.mk
-include $(LIBCXX_DIR)/../../../../toolchain/llvm/version.mk
+include $(LIBCXX_DIR)/../../../../mk/toolchain-llvm/version.mk
 
 # The compiler's own source is the source here; nothing is fetched again.
 # The package patches a copy of it (external.mk), never the toolchain's tree.
@@ -22,7 +22,7 @@ LIBCXX_PATCHES := $(sort $(wildcard \
 LIBCXX_PATCH_LEVEL := zedbsd1
 LIBCXX_SOURCE := $(EXTERNAL_WORKROOT)/libcxx/src
 LIBCXX_SOURCE_STAMP := \
-	$(LIBCXX_SOURCE)/.zedbsd-libcxx-source-$(LLVM_VERSION)-$(LLVM_PATCH_LEVEL)-$(LIBCXX_PATCH_LEVEL)
+	$(LIBCXX_SOURCE)/.zedbsd-libcxx-source-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)-$(LIBCXX_PATCH_LEVEL)
 
 LIBCXX_BUILD := $(EXTERNAL_WORKROOT)/libcxx/build
 LIBCXX_STAGE := $(EXTERNAL_WORKROOT)/libcxx/stage
