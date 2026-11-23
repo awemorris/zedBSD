@@ -19,6 +19,7 @@
  */
 
 #include "mikuterm.h"
+#include "x11-host.h"
 
 #include "userland/desktop/terminal/run.h"
 
@@ -44,6 +45,9 @@
 
 /* How long the program waits at its end for the connections' threads to say goodbye, in milliseconds. */
 #define MAIN_FAREWELL_MS	3000U
+
+/* The command line of the X server process of an SSH connection (x11-child.c). */
+#define MAIN_X11_SWITCH		L"--x11-server"
 
 /* What Help > About writes on the screen. */
 #define MAIN_ABOUT		"\r\n\033[1mmikuterm\033[0m " MIKUTERM_VERSION_TEXT \
@@ -93,8 +97,16 @@ wWinMain(
 
 	(void)instance;
 	(void)previous;
-	(void)command_line;
 	(void)show;
+
+	/*
+	 * The X server process of an SSH connection (started by mikuterm
+	 * itself): it shows no message and reads no settings of its own.
+	 */
+	if (command_line != NULL && wcscmp(command_line, MAIN_X11_SWITCH) == 0) {
+		status = mikuterm_x11_child();
+		return status;
+	}
 
 	/* The folder everything is in. */
 	error = mikuterm_folder_init();
@@ -126,6 +138,9 @@ wWinMain(
 	connect.connect = main_state.conf.connect;
 	connect.connect_timeout = main_state.conf.connect_timeout;
 	connect.wsl_port = main_state.conf.wsl_port;
+	connect.x11_scale = main_state.conf.x11_scale;
+	connect.x11_render_cpu = main_state.conf.x11_render_cpu;
+	connect.x11_primary = main_state.conf.x11_primary;
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&main_state.connector, &connect);
 

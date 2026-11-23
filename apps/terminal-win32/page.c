@@ -423,6 +423,12 @@ page_item_set(
 	state->connector->options.connect_timeout = conf.connect_timeout;
 	state->conf->wsl_port = conf.wsl_port;
 	state->connector->options.wsl_port = conf.wsl_port;
+	state->conf->x11_scale = conf.x11_scale;
+	state->connector->options.x11_scale = conf.x11_scale;
+	state->conf->x11_render_cpu = conf.x11_render_cpu;
+	state->connector->options.x11_render_cpu = conf.x11_render_cpu;
+	state->conf->x11_primary = conf.x11_primary;
+	state->connector->options.x11_primary = conf.x11_primary;
 	printf("MIKUTERM SETTINGS saved %s\n", keyword);
 	fflush(stdout);
 

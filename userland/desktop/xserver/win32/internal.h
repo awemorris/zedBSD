@@ -65,8 +65,10 @@
  * (X's pixels): the pointer's place on the root window is counted from
  * them, so the core and the backend agree on it even where Windows put
  * the window elsewhere, and present's pixels have that size.
- * reported_width and reported_height are the size the backend last told
- * the core the user gave the window, so it is told once.  The DIB holds the X pixels scaled to the screen
+ * reported_x, reported_y, reported_width and reported_height are the place
+ * and size the core last gave or was told (the user moved or sized the
+ * window), so each is told once; report_posted says a report waits in the
+ * message queue.  The DIB holds the X pixels scaled to the screen
  * while the window is shown through GDI; vulkan says the core shows it
  * through a Vulkan surface instead.  Surfaces are linked from the
  * backend's list.
@@ -81,8 +83,11 @@ struct x11_surface {
 	int32_t y;
 	unsigned width;
 	unsigned height;
+	int32_t reported_x;
+	int32_t reported_y;
 	unsigned reported_width;
 	unsigned reported_height;
+	int report_posted;
 	unsigned flags;
 	struct x11_surface *owner;
 	int iconic;

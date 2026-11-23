@@ -82,6 +82,9 @@ struct mikuterm_session {
 	char term[MIKUTERM_TERM_MAX];
 	unsigned connect_timeout;
 	unsigned wsl_port;
+	unsigned x11_scale;
+	int x11_render_cpu;
+	int x11_primary;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];
