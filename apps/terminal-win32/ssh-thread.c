@@ -1110,7 +1110,7 @@ thread_codespaces_list(
 	*count = 0U;
 	error = thread_gh_find(gh, gh_size);
 	if (error != 0) {
-		launch_say(&choice->screen, "GitHub CLI (gh) is not installed: see https://cli.github.com, then run gh auth login -s codespace.");
+		launch_say(&choice->screen, "GitHub CLI (gh) is not installed: see https://cli.github.com.");
 		return EAGAIN;
 	}
 
