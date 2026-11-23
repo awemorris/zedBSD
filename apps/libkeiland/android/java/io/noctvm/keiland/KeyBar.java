@@ -19,7 +19,8 @@ import android.widget.LinearLayout;
 
 /**
  * The row of keys that a soft keyboard has not got and a terminal needs: Esc, Tab, Ctrl, Alt, the
- * arrows and a few symbols.  It is a view of the system, shown over the keyboard while the keyboard is
+ * arrows and a few symbols, and a button that puts the keyboard away (some systems give no other way
+ * to; a tap on the window brings it back).  It is a view of the system, shown over the keyboard while the keyboard is
  * up, so the native code draws nothing of it.
  *
  * Ctrl and Alt hold until the next key is pressed (pressing one again lets it go).  The other
@@ -52,6 +53,7 @@ final class KeyBar extends HorizontalScrollView {
 		row.setGravity(Gravity.CENTER_VERTICAL);
 		addView(row, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
 
+		addHide(row);
 		addKey(row, "Esc", KeyEvent.KEYCODE_ESCAPE, 0);
 		addKey(row, "Tab", KeyEvent.KEYCODE_TAB, 0);
 		ctrlButton = addLatch(row, "Ctrl", KeyEvent.META_CTRL_ON);
@@ -98,11 +100,33 @@ final class KeyBar extends HorizontalScrollView {
 				int held;
 
 				held = takeLatched() | meta;
+				if (view.getContext() instanceof KeilandActivity) {
+					((KeilandActivity) view.getContext()).inputView().forgetContext();
+				}
 				KeilandBridge.nativeKey(keycode, held, true);
 				KeilandBridge.nativeKey(keycode, held, false);
 			}
 		});
 		row.addView(button, new LinearLayout.LayoutParams(buttonWidth(label), LayoutParams.MATCH_PARENT));
+	}
+
+	/** A button that puts the soft keyboard away, and with it this bar. */
+	private void addHide(LinearLayout row) {
+		Button button;
+
+		button = makeButton("\u25BC");
+		button.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View view) {
+				Context context;
+
+				context = view.getContext();
+				if (context instanceof KeilandActivity) {
+					((KeilandActivity) context).inputView().showKeyboard(false);
+				}
+			}
+		});
+		row.addView(button, new LinearLayout.LayoutParams(buttonWidth("\u25BC"), LayoutParams.MATCH_PARENT));
 	}
 
 	/** A button that holds a modifier for the next key. */
