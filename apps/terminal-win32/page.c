@@ -523,6 +523,10 @@ page_item_set(
 	state->connector->options.x11_render_cpu = conf.x11_render_cpu;
 	state->conf->x11_primary = conf.x11_primary;
 	state->connector->options.x11_primary = conf.x11_primary;
+	state->conf->x11_root_width = conf.x11_root_width;
+	state->connector->options.x11_root_width = conf.x11_root_width;
+	state->conf->x11_root_height = conf.x11_root_height;
+	state->connector->options.x11_root_height = conf.x11_root_height;
 	printf("MIKUTERM SETTINGS saved %s\n", keyword);
 	fflush(stdout);
 
