@@ -413,19 +413,6 @@ Hosts:
   - The user is the Host's `User`, else the user `whoami` answered, else
     `login as:` asks. The distributions of WSL 2 share one network, so each
     needs its own port (and its own Host) when more than one runs an sshd.
-  - The first login (the server accepted the user) to a distribution
-    without a `Host wsl-NAME` adds one to `ssh/config`, as the settings
-    tab's Hosts pane adds a Host (before the first `Host` block that would
-    apply to the name, else at the end after a blank line; indented and
-    ending its lines as the file does; every other byte kept): `User` (the
-    user logged in as), `Port` when the port is not 22 (a Host without
-    `Port` is reached on 22), and `IdentityFile` (as the settings named it)
-    when the server took a key other than `~/.ssh/id_ed25519`. It has no
-    `HostName`. The tab says `Added Host wsl-NAME (User USER) to
-    ssh/config.`, or `ssh/config: Host wsl-NAME could not be added
-    (REASON).`; a `Host wsl-NAME` added meanwhile (in any case) is left as
-    it is. mikuterm does not add a key to the distribution's
-    `authorized_keys`.
   - A connection that fails adds why, by how it failed: `Nothing listens on
     port PORT of NAME (ADDRESS): its sshd is not installed, not started, or on
     another port ...` (refused), `NAME did not answer at ADDRESS port PORT:
