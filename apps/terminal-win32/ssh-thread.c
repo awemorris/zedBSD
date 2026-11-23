@@ -281,6 +281,8 @@ session_run(
 			(void)snprintf(hint, sizeof(hint), "%s needs an sshd listening on port %u (README.txt, WSL).\r\n", target.distribution, (unsigned)link->config.port);
 			session_say(session, hint);
 		}
+
+		/* Enter tries again; Ctrl+C closes the tab. */
 		status = thread_ask(session, "Press Enter to connect again (Ctrl+C closes the tab). ", SESSION_ASK_LINE, answer, sizeof(answer));
 		if (status == ECANCELED)
 			session_ended(session);
@@ -514,7 +516,7 @@ thread_launch(
 	int closing;
 	int error;
 
-	/* Nothing drawn yet for this screen. */
+	/* The screen drawn and the keys taken round by round, nothing drawn yet. */
 	session = choice->session;
 	drawn_columns = 0U;
 	drawn_rows = 0U;
@@ -630,6 +632,8 @@ thread_wsl(
 	error = thread_wsl_list(choice, &count);
 	if (error != 0)
 		return error;
+
+	/* The list is read: the message goes. */
 	launch_say(&choice->screen, NULL);
 
 	/* The screen: the distributions by number, each with where it is reached, and the way back. */
@@ -919,6 +923,8 @@ thread_user_name(
 		    character == '-' ||
 		    character == '$')
 			continue;
+
+		/* Any other character is not a name's. */
 		return 0;
 	}
 

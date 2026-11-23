@@ -6,8 +6,7 @@
  */
 
 /*
- * The CPU canvas of the library (Files' canvas.c, moved here unchanged by
- * ws090-p002): rectangles, rounded rectangles with
+ * The CPU canvas of the library: rectangles, rounded rectangles with
  * soft edges, shadows, gradients, circles and rings, polygons, lines,
  * coverage masks (glyphs) and scaled pictures, blended over premultiplied
  * BGRA pixels.
@@ -233,8 +232,8 @@ kl_canvas_clip_pop(
 
 /*
  * Makes the canvas clear within the clip: every pixel transparent (the
- * whole canvas when no clip is pushed; a frame drawn again only in a part,
- * BUG-226, clears that part).
+ * whole canvas when no clip is pushed; a frame drawn again only in a part
+ * clears that part).
  */
 void
 kl_canvas_clear(
@@ -328,8 +327,8 @@ kl_canvas_fill(
 
 	/*
 	 * Otherwise the color is premultiplied once and laid over every pixel,
-	 * as canvas_blend does at full coverage (BUG-226: the panels' fills were
-	 * most of a frame, the color worked out again for each pixel).
+	 * as canvas_blend does at full coverage (the panels' fills are most of
+	 * a frame, and working the color out again for each pixel was slow).
 	 */
 	red = ((color >> 16) & 0xffU) * alpha / 255U;
 	green = ((color >> 8) & 0xffU) * alpha / 255U;
@@ -930,12 +929,14 @@ kl_canvas_mask(
 	float factor;
 	int scaled;
 
-	/* At a scale the mask is enlarged; otherwise its pixels are the canvas's. */
+	/* At a scale the mask is enlarged. */
 	scaled = canvas_scaled(canvas, &factor);
 	if (scaled) {
 		canvas_mask_scaled(canvas, x, y, mask, width, height, stride, color, factor);
 		return;
 	}
+
+	/* At the base scale the mask's pixels are the canvas's. */
 	keiui_canvas_mask_pixels(canvas, x, y, mask, width, height, stride, color);
 }
 
@@ -1458,8 +1459,8 @@ canvas_blend(
  * leaves, (pixel * remaining + 127) / 255, at most 255.  Two channels are
  * worked out at once, each in a 16-bit lane of one word (red and blue,
  * then alpha and green), and the division by 255 is the exact
- * (t + (t >> 8) + 1) >> 8 of t = pixel * remaining + 127 (BUG-226: this is
- * most of the time of a frame's translucent panels).
+ * (t + (t >> 8) + 1) >> 8 of t = pixel * remaining + 127 (this is most of
+ * the time of a frame's translucent panels).
  */
 static void
 canvas_blend_premultiplied(
@@ -1752,9 +1753,12 @@ canvas_mask_scaled(
 
 		/* Each pixel of the row from the mask's pixel under it. */
 		for (px = left; px < right; px++) {
+			/* The mask's pixel under the pixel's centre (none past its edge). */
 			mask_x = (int)floorf(((float)px + 0.5f) / factor) - x;
 			if (mask_x < 0 || mask_x >= width)
 				continue;
+
+			/* A pixel the mask does not cover is left as it is. */
 			if (source[mask_x] != 0U)
 				canvas_blend(&row[px], color, (float)source[mask_x] / 255.0f);
 		}
