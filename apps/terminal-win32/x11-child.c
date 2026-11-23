@@ -497,6 +497,8 @@ child_start_server(
 	backend_options.scale_percent = child->scale;
 	backend_options.trusted = (child->flags & X11_HOST_TRUSTED) != 0;
 	backend_options.primary_to_clipboard = (child->flags & X11_HOST_PRIMARY) != 0;
+	if (child->root_width != 0 && child->root_height != 0)
+		backend_options.rooted = 1;
 	backend_options.service = child_service;
 	backend_options.service_context = child;
 	error = x11_win32_create(&backend_options, &child->backend);

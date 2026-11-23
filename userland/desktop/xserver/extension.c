@@ -9,8 +9,9 @@
  * The extensions the core answers beside the core protocol: BIG-REQUESTS
  * (here), XC-MISC (resource.c), XKEYBOARD (xkb.c), XInputExtension and
  * the Generic Event Extension (xinput.c), RENDER (render-ext.c), SHAPE
- * (shape-ext.c), SYNC (sync.c) and XFIXES (xfixes.c).  GLX is not in the
- * table: glx.c names it where the server has it.
+ * (shape-ext.c), SYNC (sync.c), XFIXES (xfixes.c), RANDR (randr.c) and
+ * XINERAMA (xinerama.c).  GLX is not in the table: glx.c names it where
+ * the server has it.
  *
  * QueryExtension and ListExtensions find them here by name, and a request
  * whose major opcode is one of theirs is handed to its module.  A module
@@ -57,7 +58,9 @@ static const struct extension_entry extension_table[] = {
 	{ "RENDER", X11_RENDER_MAJOR, 0U, X11_RENDER_ERROR, x11_render_request, NULL },
 	{ "SHAPE", X11_SHAPE_MAJOR, X11_SHAPE_EVENT, 0U, NULL, x11_shape_request },
 	{ "SYNC", X11_SYNC_MAJOR, X11_SYNC_EVENT, X11_SYNC_ERROR, NULL, x11_sync_request },
-	{ "XFIXES", X11_XFIXES_MAJOR, X11_XFIXES_EVENT, X11_XFIXES_ERROR, NULL, x11_xfixes_request }
+	{ "XFIXES", X11_XFIXES_MAJOR, X11_XFIXES_EVENT, X11_XFIXES_ERROR, NULL, x11_xfixes_request },
+	{ "RANDR", X11_RANDR_MAJOR, X11_RANDR_EVENT, X11_RANDR_ERROR, x11_randr_request, NULL },
+	{ "XINERAMA", X11_XINERAMA_MAJOR, 0U, 0U, x11_xinerama_request, NULL }
 };
 
 /* How many extensions the table has. */
@@ -218,6 +221,9 @@ x11_extension_forget_client(
 	/* XFIXES's regions, barriers and events. */
 	x11_xfixes_forget_client(server, index);
 
+	/* RANDR's events it asked for. */
+	x11_randr_forget_client(server, index);
+
 	/* Succeeded: SYNC's counters, alarms, fences and waits. */
 	x11_sync_forget_client(server, index);
 }
@@ -234,8 +240,11 @@ x11_extension_forget_window(
 	/* Its shapes. */
 	x11_shape_forget_window(server, window);
 
-	/* Succeeded: XFIXES's events on it. */
+	/* XFIXES's events on it. */
 	x11_xfixes_forget_window(server, window);
+
+	/* Succeeded: RANDR's events on it. */
+	x11_randr_forget_window(server, window->id);
 }
 
 /*
@@ -281,6 +290,9 @@ x11_extension_fini(
 {
 	/* XFIXES's state. */
 	x11_xfixes_fini(server);
+
+	/* RANDR's selections. */
+	x11_randr_fini(server);
 
 	/* Succeeded: SYNC's state. */
 	x11_sync_fini(server);
