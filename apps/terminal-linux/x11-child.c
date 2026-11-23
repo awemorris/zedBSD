@@ -65,8 +65,8 @@
 /*
  * A backend the X server can show its windows with: its name, the core's
  * table of its functions and the Vulkan instance extension its windows
- * are shown through (NULL: the core draws in memory and hands the
- * backend its pixels), and the functions the loop calls: open (0, or an
+ * are shown through (NULL: the core hands the backend its pixels), and
+ * the functions the loop calls: open (0, or an
  * errno value when this system has no such display), attach the core,
  * the descriptor to wait on, the dispatch of what came (0, or -1 when the
  * display is lost) and close.
@@ -103,10 +103,16 @@ static int child_send(void *context, const void *bytes, size_t size, size_t *sen
 static int child_start_server(void *context, struct x11_serve *serve);
 static uint32_t child_now(void);
 
-/* The backends, the first that opens chosen. */
+/*
+ * The backends, the first that opens chosen.  The Wayland backend's
+ * windows are never shown through a Vulkan swapchain: the program links
+ * the tree's Wayland client library, whose display the system's Vulkan
+ * drivers (built against the system's library) cannot use.  The core may
+ * still draw with Vulkan, and hands the backend the pixels.
+ */
 static const struct child_backend child_backends[] = {
 	{
-		"wayland", &x11_wayland_ops, X11_WAYLAND_WSI,
+		"wayland", &x11_wayland_ops, NULL,
 		child_wayland_open, child_wayland_attach, child_wayland_fd, child_wayland_dispatch, child_wayland_close
 	}
 };
@@ -338,9 +344,10 @@ child_send(
  * Starts the backend and the core: the first backend that opens, the
  * core rootless (each top-level X window a window of the desktop) at its
  * default size, or one window of the size the settings give, the core
- * fonts from mikuterm's folder, the windows drawn and shown through the
- * system's Vulkan (unless X11Render is cpu, or the backend has no Vulkan
- * surface), else drawn in memory.  Returns 0, or an errno value.
+ * fonts from mikuterm's folder, the windows drawn with the system's
+ * Vulkan (unless X11Render is cpu; without Vulkan the core draws in
+ * memory) and shown through the backend's swapchain or its present.
+ * Returns 0, or an errno value.
  */
 static int
 child_start_server(
@@ -377,8 +384,8 @@ child_start_server(
 	options.backend = child->kind->ops;
 	options.backend_context = child->backend;
 
-	/* The system's Vulkan loader, unless the processor is asked to draw. */
-	if ((serve->flags & X11_HOST_RENDER_CPU) == 0U && child->kind->vulkan_wsi != NULL) {
+	/* The system's Vulkan loader, unless the processor is asked to draw; the backend's swapchain where it has one. */
+	if ((serve->flags & X11_HOST_RENDER_CPU) == 0U) {
 		options.vulkan_loader = (x11server_vulkan_function)vkGetInstanceProcAddr;
 		options.vulkan_wsi = child->kind->vulkan_wsi;
 	}
