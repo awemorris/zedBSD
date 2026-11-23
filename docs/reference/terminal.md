@@ -84,10 +84,16 @@ takes it.
 Hosts pane: the same as mikuterm's ([mikuterm](mikuterm.md), section 7):
 each `Host` of `~/.ssh/config` in a form (Name, Host address, Port, User,
 Command, Identity files, Port forwarding), only the lines a change is about
-rewritten, Save (Ctrl+S) refused for a line the SSH client's reader cannot
-use or a file changed outside since it was read, Revert (Ctrl+R).
+rewritten, Save (Ctrl+S) refused for a changed line the SSH client's reader
+cannot use (a problem the file had already does not stop it) or a file
+changed outside since it was read, Revert (Ctrl+R).
 Open in Text Editor starts `textedit` with `~/.ssh/config` (made empty, mode
-0600, when it is not there).
+0600, when it is not there); the pane reads the editor's changes on Revert or
+when the terminal starts again. The file is the one zedBSD's `ssh` reads: a
+host's Port forwarding lines (`LocalForward`, `RemoteForward`) are set up by
+each `ssh` to the host as its `-L` and `-R` are, and Command
+(`RemoteCommand`) runs without a terminal unless `ssh` is given `-t` or the
+host has `RequestTTY yes`, as with OpenSSH (mikuterm always gives it one).
 
 Keys pane: the key's file name in `~/.ssh/` (`id_ed25519` by default). A key
 of the name that is there shows its public key line and SHA256 fingerprint
