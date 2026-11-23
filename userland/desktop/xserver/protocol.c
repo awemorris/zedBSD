@@ -147,7 +147,7 @@
 #define XCMISC_NAME			"XC-MISC"
 
 /* The extensions ListExtensions names. */
-#define EXTENSION_NAMES_MAX		3U
+#define EXTENSION_NAMES_MAX		6U
 
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -693,6 +693,15 @@ protocol_dispatch(
 	case X11_XCMISC_MAJOR:
 		code = x11_xcmisc_request(server, index, request, length);
 		break;
+	case X11_XKB_MAJOR:
+		code = x11_xkb_request(server, index, request, length);
+		break;
+	case X11_XINPUT_MAJOR:
+		code = x11_xinput_request(server, index, request, length);
+		break;
+	case X11_GE_MAJOR:
+		code = x11_ge_request(server, index, request, length);
+		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
 		if (length >= 4U)
@@ -797,6 +806,8 @@ protocol_query_extension(
 	uint8_t reply[32];
 	size_t name_length;
 	uint8_t major;
+	uint8_t first_event;
+	uint8_t first_error;
 	int differs;
 
 	/* The name, filling the request to its last word. */
@@ -806,8 +817,12 @@ protocol_query_extension(
 	if (8U + ((name_length + 3U) & ~(size_t)3U) != length)
 		return X11_BAD_LENGTH;
 
-	/* The core's own extensions by name. */
+	/* The core's own extensions by name; the input extensions name their events and errors. */
 	major = 0U;
+	first_event = 0U;
+	first_error = 0U;
+	(void)x11_xkb_query(request + 8, name_length, &major, &first_event, &first_error);
+	(void)x11_xinput_query(request + 8, name_length, &major, &first_event, &first_error);
 	if (name_length == sizeof(BIGREQ_NAME) - 1U) {
 		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
 		if (differs == 0)
@@ -825,10 +840,12 @@ protocol_query_extension(
 		return 0U;
 	}
 
-	/* Succeeded: present, with its major opcode and no events or errors. */
+	/* Succeeded: present, with its major opcode, its first event and its first error. */
 	memset(reply, 0, sizeof(reply));
 	reply[8] = 1U;
 	reply[9] = major;
+	reply[10] = first_event;
+	reply[11] = first_error;
 	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }
@@ -840,8 +857,8 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX" };
-	uint8_t reply[32U + 32U];
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", "XKEYBOARD", "XInputExtension", "Generic Event Extension" };
+	uint8_t reply[32U + 128U];
 	size_t used;
 	size_t name_length;
 	unsigned index;

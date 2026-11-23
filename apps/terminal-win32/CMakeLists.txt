@@ -191,6 +191,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/font.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/cursor.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xkb.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xinput.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c
