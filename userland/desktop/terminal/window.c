@@ -589,6 +589,14 @@ window_press(
 		return;
 	}
 
+	/* Alt+F11 switches the ambiguous width likewise, for a program that gave the item that key. */
+	if (key == WINDOW_KEY_F11 &&
+	    window->modifiers == TERMINAL_MODIFIER_ALT &&
+	    window->ambiguous_wide_key) {
+		window_action(window, TERMINAL_ACTION_AMBIGUOUS_WIDE);
+		return;
+	}
+
 	/* F12 alone opens the settings when the compositor's menus did not choose Shell > Settings. */
 	if (key == WINDOW_KEY_F12 &&
 	    window->modifiers == 0U &&

@@ -331,13 +331,13 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 | --- | --- | --- |
 | Session > Disable Input Method | Ctrl+Shift+I | mikuterm only; checked while the user keeps the input method off |
 | Session > Forget Remembered Passphrases | none | mikuterm only; forgets the passphrases kept in Credential Manager |
-| View > Treat Ambiguous-Width Characters as Wide | Alt+F11 | mikuterm only |
 | View > Fullscreen | Alt+Enter | in the place of F11 (zedBSD's terminal keeps F11) |
 | Shell > Settings... | F12 | the settings tab (section 7), as in zedBSD's terminal |
 | Shell > New Window | Ctrl+Shift+N | starts another `mikuterm.exe` |
 
 F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
-opens the settings. Ctrl+Alt with the top row's digits, Page Up and Page
+opens the settings, and Alt+F11 is View > Treat Ambiguous-Width Characters
+as Wide, as in zedBSD's terminal. Ctrl+Alt with the top row's digits, Page Up and Page
 Down choose the tabs (section 5); zedBSD's terminal leaves the tabs' keys to
 its desktop's titlebar (Ctrl+Tab, Ctrl+Page Up and Ctrl+Page Down).
 
