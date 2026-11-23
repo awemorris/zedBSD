@@ -465,10 +465,10 @@ XCreateSimpleWindow(
 	w16(q + 18, (uint16_t)he);
 	w16(q + 20, (uint16_t)bw);
 	w16(q + 22, 1);
-	w32(q + 24, 3);
-	w32(q + 28, 3);
-	w32(q + 32, (uint32_t)bc);
-	w32(q + 36, (uint32_t)bg);
+	w32(q + 24, 0);
+	w32(q + 28, (1U << 1) | (1U << 3));
+	w32(q + 32, (uint32_t)bg);
+	w32(q + 36, (uint32_t)bc);
 
 	/* Computes the function result. */
 	function_result = req(d, q, sizeof(q)) ? 0 : id;

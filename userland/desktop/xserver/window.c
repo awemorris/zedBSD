@@ -90,6 +90,11 @@
 /* ChangeSaveSet's modes. */
 #define SAVE_SET_DELETE			1U
 
+/* The requests of which one handler answers two: DestroyWindow, MapWindow and UnmapWindow (the others are their Subwindows forms). */
+#define REQUEST_DESTROY_WINDOW		4U
+#define REQUEST_MAP_WINDOW		8U
+#define REQUEST_UNMAP_WINDOW		10U
+
 /*
  * The values of the window attributes a request gives: which bits it
  * names, and each value.
@@ -257,7 +262,11 @@ x11_request_create_window(
 	uint32_t mask;
 	uint32_t visual;
 	uint32_t id;
+	uint16_t width;
+	uint16_t height;
+	uint16_t border;
 	unsigned window_class;
+	unsigned taken;
 	unsigned code;
 	int fits;
 	int chosen;
@@ -281,7 +290,8 @@ x11_request_create_window(
 	chosen = x11_id_chosen(client, id);
 	if (!chosen)
 		return X11_BAD_ID_CHOICE;
-	if (x11_resource_type(server, id) != 0U)
+	taken = x11_resource_type(server, id);
+	if (taken != 0U)
 		return X11_BAD_ID_CHOICE;
 
 	/* The parent. */
@@ -295,7 +305,10 @@ x11_request_create_window(
 		return X11_BAD_VALUE;
 	if (window_class == 0U)
 		window_class = parent->window_class;
-	if (x11_read16(request + 16, msb) == 0U || x11_read16(request + 18, msb) == 0U)
+	width = x11_read16(request + 16, msb);
+	height = x11_read16(request + 18, msb);
+	border = x11_read16(request + 20, msb);
+	if (width == 0U || height == 0U)
 		return X11_BAD_VALUE;
 
 	/* The depth and visual the class allows: the screen's for InputOutput, none for InputOnly. */
@@ -308,7 +321,7 @@ x11_request_create_window(
 		if (request[1] != 0U && request[1] != X11_DEPTH)
 			return X11_BAD_MATCH;
 	} else {
-		if (request[1] != 0U || x11_read16(request + 20, msb) != 0U)
+		if (request[1] != 0U || border != 0U)
 			return X11_BAD_MATCH;
 		if ((mask & ~ATTRIBUTE_INPUT_ONLY) != 0U)
 			return X11_BAD_MATCH;
@@ -327,9 +340,9 @@ x11_request_create_window(
 	window->colormap = X11_COLORMAP_XID;
 	if (window_class == X11_INPUT_ONLY)
 		window->colormap = 0U;
-	window->width = x11_read16(request + 16, msb);
-	window->height = x11_read16(request + 18, msb);
-	window->border = x11_read16(request + 20, msb);
+	window->width = width;
+	window->height = height;
+	window->border = border;
 	window->x = parent->x + (int16_t)x11_read16(request + 12, msb) + window->border;
 	window->y = parent->y + (int16_t)x11_read16(request + 14, msb) + window->border;
 
@@ -508,7 +521,7 @@ x11_request_destroy_window(
 		return X11_BAD_WINDOW;
 
 	/* DestroyWindow: the window itself (the root window stays). */
-	if (request[0] == 4U) {
+	if (request[0] == REQUEST_DESTROY_WINDOW) {
 		x11_window_destroy(server, window);
 		return 0U;
 	}
@@ -647,7 +660,7 @@ x11_request_map_window(
 		return X11_BAD_WINDOW;
 
 	/* MapWindow: the window itself. */
-	if (request[0] == 8U) {
+	if (request[0] == REQUEST_MAP_WINDOW) {
 		window_map(server, index, window);
 		return 0U;
 	}
@@ -679,7 +692,7 @@ x11_request_unmap_window(
 		return X11_BAD_WINDOW;
 
 	/* UnmapWindow: the window itself (never the root window). */
-	if (request[0] == 10U) {
+	if (request[0] == REQUEST_UNMAP_WINDOW) {
 		if (window != server->root)
 			window_unmap(server, window, 0);
 		return 0U;
@@ -706,6 +719,7 @@ x11_request_configure_window(
 	size_t length)
 {
 	struct window_configure configure;
+	struct x11_client *asked;
 	struct x11_window *window;
 	uint8_t event[32];
 	uint32_t mask;
@@ -718,7 +732,6 @@ x11_request_configure_window(
 	int new_x;
 	int new_y;
 	int resized;
-	int restacked;
 	int fits;
 	int msb;
 
@@ -757,13 +770,14 @@ x11_request_configure_window(
 	if (configure.width != window->width || configure.height != window->height)
 		resized = 1;
 	redirect = x11_event_selector(window, X11_MASK_RESIZE_REDIRECT);
-	if (resized && redirect != X11_NO_CLIENT && redirect != index) {
+	asked = x11_client_of(server, redirect);
+	if (resized && asked != NULL && redirect != index) {
 		memset(event, 0, sizeof(event));
 		event[0] = X11_EVENT_RESIZE_REQUEST;
 		x11_write32(event + 4, window->id, 0);
 		x11_write16(event + 8, configure.width, 0);
 		x11_write16(event + 10, configure.height, 0);
-		x11_event_send(server, x11_client_of(server, redirect), event);
+		x11_event_send(server, asked, event);
 		configure.width = window->width;
 		configure.height = window->height;
 		resized = 0;
@@ -788,11 +802,9 @@ x11_request_configure_window(
 	window->width = configure.width;
 	window->height = configure.height;
 	window->border = configure.border;
-	restacked = 0;
 	if ((configure.mask & (1U << CONFIGURE_STACK_MODE)) != 0U)
-		restacked = window_restack(server, window, configure.sibling, configure.stack_mode);
+		(void)window_restack(server, window, configure.sibling, configure.stack_mode);
 	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
-	(void)restacked;
 
 	/* The window's clients are told, its children follow their gravity, and a new size is drawn again. */
 	window_configure_notify(server, window);
@@ -818,6 +830,7 @@ x11_request_circulate_window(
 	const uint8_t *request,
 	size_t length)
 {
+	struct x11_client *asked;
 	struct x11_window *window;
 	struct x11_window *child;
 	struct x11_window *chosen;
@@ -863,9 +876,10 @@ x11_request_circulate_window(
 	x11_write32(event + 8, chosen->id, 0);
 	event[16] = (uint8_t)place;
 	redirect = x11_event_selector(window, X11_MASK_SUBSTRUCTURE_REDIRECT);
-	if (redirect != X11_NO_CLIENT && redirect != index) {
+	asked = x11_client_of(server, redirect);
+	if (asked != NULL && redirect != index) {
 		event[0] = X11_EVENT_CIRCULATE_REQUEST;
-		x11_event_send(server, x11_client_of(server, redirect), event);
+		x11_event_send(server, asked, event);
 		return 0U;
 	}
 
@@ -2291,6 +2305,8 @@ window_free(
 	struct x11server *server,
 	struct x11_window *window)
 {
+	void *found;
+
 	/* The focus goes back to the window under the pointer, and a grab on it ends. */
 	if (server->focus == window->id)
 		server->focus = X11_FOCUS_POINTER_ROOT;
@@ -2315,7 +2331,8 @@ window_free(
 	/* Its place in the tree and its id. */
 	if (window->parent != NULL)
 		window_unlink(window);
-	if (x11_resource_find(server, window->id, X11_RESOURCE_WINDOW) == window)
+	found = x11_resource_find(server, window->id, X11_RESOURCE_WINDOW);
+	if (found == window)
 		x11_resource_remove(server, window->id);
 
 	/* Succeeded: gone. */

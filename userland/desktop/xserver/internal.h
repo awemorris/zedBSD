@@ -85,7 +85,7 @@
  */
 #define X11_ROOT_XID		0x00000100U
 #define X11_COLORMAP_XID	0x00000101U
-#define X11_VISUAL_XID		0x00000021U
+#define X11_VISUAL_XID		3U
 
 /* The focus that is no window: None (keys are dropped) and PointerRoot (keys go to the window under the pointer). */
 #define X11_FOCUS_NONE		0U
