@@ -148,7 +148,6 @@ jobs:
       contents: write
     needs:
       - build-os
-      - build-apps
     steps:
       - name: Download the disk images
         uses: actions/download-artifact@v4
@@ -163,13 +162,6 @@ jobs:
           pattern: system-*
           merge-multiple: true
           path: artifacts
-
-      - name: Download the apps
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mikuterm-*
-          merge-multiple: true
-          path: app-artifacts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -206,4 +198,3 @@ jobs:
           files: |
             artifacts/*.img.gz
             artifacts/zedbsd-system-*.tar
-            app-artifacts/*.zip
