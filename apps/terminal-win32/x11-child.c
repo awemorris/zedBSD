@@ -44,6 +44,9 @@
 /* The authorization the X clients present (the fake cookie's protocol). */
 #define CHILD_AUTH_NAME		"MIT-MAGIC-COOKIE-1"
 
+/* The Vulkan instance extension the backend's windows are shown through. */
+#define CHILD_VULKAN_WSI	"VK_KHR_win32_surface"
+
 /* What is read at once, the reading buffer, and the frames waiting before the X clients' replies wait. */
 #define CHILD_READ		65536U
 #define CHILD_IN_MAX		(X11_LINK_HEADER + X11_LINK_BODY_MAX + CHILD_READ)
@@ -421,7 +424,9 @@ child_hello(
 /*
  * Starts the backend and the core: the windows of the host, the root the
  * size of the virtual screen, the core font from mikuterm's folder, the
- * windows shown through GDI.  Returns 0, or an errno value.
+ * windows drawn and shown through the system's Vulkan when it has one
+ * (and X11Render is not cpu), else drawn in memory and shown through GDI.
+ * Returns 0, or an errno value.
  */
 static int
 child_start_server(
@@ -467,6 +472,13 @@ child_start_server(
 	options.backend = &x11_win32_ops;
 	options.backend_context = child->backend;
 	options.vulkan_wsi = NULL;
+
+	/* The system's Vulkan loader, unless the processor is asked to draw; without one the core draws in memory. */
+	if ((child->flags & X11_HOST_RENDER_CPU) == 0U) {
+		error = x11_win32_vulkan_loader(child->backend, &options.vulkan_loader);
+		if (error == 0)
+			options.vulkan_wsi = CHILD_VULKAN_WSI;
+	}
 	if (child->font != NULL) {
 		font.bytes = (const uint8_t *)child->font;
 		font.size = child->font_size;
