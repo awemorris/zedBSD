@@ -97,8 +97,8 @@ struct terminal_connection;
 /* How many menu choices, and tab requests, wait for the main loop at most. */
 #define TERMINAL_ACTIONS	16U
 
-/* The most tabs (shells) one window has, and the longest tab title. */
-#define TERMINAL_TABS		8U
+/* The most tabs (shells) one window has (ten, as far as the keys of the tabs' places reach), and the longest tab title. */
+#define TERMINAL_TABS		10U
 #define TERMINAL_TAB_TITLE	64U
 
 /* How many pointer events wait for the main loop at most. */

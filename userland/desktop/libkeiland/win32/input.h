@@ -9,9 +9,10 @@
  * The pointer and keyboard details of the Windows backend (input.c): what
  * the window procedure reads out of a message's wParam and lParam, turned
  * into the values of struct kl_window_event, and the rules of a window's
- * menu that need no Windows call (which item a key's shortcut chooses, and
- * the text an item shows).  Pure: no Windows header (the few constants are
- * given here with their <winuser.h> values), no state.
+ * menu and tabs that need no Windows call (which item a key's shortcut
+ * chooses, the text an item shows, which tab a key goes to).  Pure: no
+ * Windows header (the few constants are given here with their <winuser.h>
+ * values), no state.
  */
 
 #ifndef KEIUI_WIN32_INPUT_H
@@ -43,6 +44,19 @@
 #define KEIUI_WIN32_HELD_ALT		0x04U	/* VK_MENU */
 #define KEIUI_WIN32_HELD_WIN		0x08U	/* VK_LWIN or VK_RWIN */
 #define KEIUI_WIN32_HELD_ALTGR		0x10U	/* the right Alt of a layout with AltGr (VK_RMENU with VK_LCONTROL synthesized) */
+#define KEIUI_WIN32_HELD_RIGHT_ALT	0x20U	/* VK_RMENU, whatever the layout */
+
+/*
+ * What a key press asks of a window's tabs (keiui_win32_tab_request): none,
+ * the tab of a place from KEIUI_WIN32_TAB_KEY_FIRST to
+ * KEIUI_WIN32_TAB_KEY_TENTH (the place itself, counted from 1), the one
+ * before the active tab, or the one after it.
+ */
+#define KEIUI_WIN32_TAB_KEY_NONE	0U
+#define KEIUI_WIN32_TAB_KEY_FIRST	1U
+#define KEIUI_WIN32_TAB_KEY_TENTH	10U
+#define KEIUI_WIN32_TAB_KEY_PREVIOUS	11U
+#define KEIUI_WIN32_TAB_KEY_NEXT	12U
 
 /* The kinds of pointer of WM_POINTER* (POINTER_INPUT_TYPE values). */
 #define KEIUI_WIN32_POINTER_GENERIC	1U	/* PT_POINTER */
@@ -224,5 +238,31 @@ void keiui_win32_shortcut_text(unsigned menu, uint32_t keysym, char *text, size_
  * above 0); what does not fit is cut at a character.
  */
 void keiui_win32_menu_text(const char *label, const char *shortcut, char *text, size_t size);
+
+/*
+ * Tells what a key press asks of a window's tabs: Control and Alt with a
+ * key of the top row's digits choose the tab of that place (1 to 9, and 0
+ * the tenth), with Page Up the tab before the active one and with Page
+ * Down the one after it.
+ *
+ * code: the key's evdev code (keiui_win32_key_code), so the digits are the
+ * keys' places whatever the layout types on them.
+ * held: KEIUI_WIN32_HELD_* bits as the key's message found them.  Shift and
+ * the Windows key make no tab key.  The right Alt makes none either: it is
+ * AltGr on the layouts that have one, whose characters (with the left
+ * Control Windows synthesizes beside it) stay text for the program; Control
+ * with the left Alt is the tabs' alone.
+ * Returns KEIUI_WIN32_TAB_KEY_NONE or the request (KEIUI_WIN32_TAB_KEY_*).
+ */
+unsigned keiui_win32_tab_request(uint32_t code, unsigned held);
+
+/*
+ * Chooses the tab a request (KEIUI_WIN32_TAB_KEY_*) goes to among count tabs
+ * whose active one is at active (count when none is): a place's tab when
+ * there are that many, the one before or after the active one around the
+ * ends (the last or the first when none is active).
+ * Returns the tab's index, or count when the request has no tab to go to.
+ */
+unsigned keiui_win32_tab_target(unsigned request, unsigned count, unsigned active);
 
 #endif

@@ -61,6 +61,16 @@ A row shows user@host when ssh/config gives the host a User.
 settings in a tab of their own beside this one (section 3): the tab stays,
 and you come back to it with the tab bar or F12.  Ctrl+C closes the tab.
 
+A window has up to ten tabs.  These keys go between them:
+
+  Ctrl+Alt+1 to 9     the tab of that place, counted from the left
+  Ctrl+Alt+0          the tenth tab
+  Ctrl+Alt+Page Up    the tab before (the last one after the first)
+  Ctrl+Alt+Page Down  the tab after (the first one after the last)
+
+Use the left Alt key for them.  The right Alt key is AltGr on the keyboards
+that have one, and AltGr with a digit still types its character.
+
 When ssh/config gives no User for the host, the tab asks "login as:".
 
 The first time you connect to a host, mikuterm shows the host's key and asks
@@ -258,8 +268,9 @@ su, passwd) asks for one: turn the input method off yourself with
 Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
 
 The function keys F1 to F11 go to the host (htop, mc).  mikuterm's own keys
-are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide)
-and Alt+Enter (Fullscreen).
+are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide),
+Alt+Enter (Fullscreen) and Ctrl+Alt with a digit, Page Up or Page Down (the
+tabs, section 2).
 
 
 8. Fonts

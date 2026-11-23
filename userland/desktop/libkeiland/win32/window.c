@@ -82,6 +82,9 @@
 /* ToUnicodeEx's flag that leaves the keyboard's state (a dead key waiting) as it is (Windows 10 1607 and later). */
 #define WINDOW_TO_UNICODE_KEEP	0x4U
 
+/* The space bar's scan code, which lets a waiting dead key go (it types the accent alone). */
+#define WINDOW_SCAN_SPACE	0x39U
+
 /* The last character of Latin-1, and the step from a capital ASCII letter to its small one. */
 #define WINDOW_LATIN1_LAST	0xffU
 #define WINDOW_LETTER_CASE	0x20U
@@ -125,6 +128,7 @@ static void window_sizing(struct kl_window *window);
 static void window_key(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_char(struct kl_window *window, WPARAM wparam);
 static int window_dead_key(struct kl_window *window);
+static void window_dead_clear(void);
 static int window_shortcut(struct kl_window *window, WPARAM wparam, unsigned scan, uint32_t code);
 static uint32_t window_layout_character(WPARAM wparam, unsigned scan, int shift);
 static void window_control_text(WPARAM wparam, unsigned scan, char *text, size_t size);
@@ -134,6 +138,7 @@ static void window_caption_mouse(struct kl_window *window, UINT message, WPARAM 
 static void window_caption_press(struct kl_window *window, unsigned button);
 static void window_copy_data(struct kl_window *window, const COPYDATASTRUCT *copy);
 static unsigned window_modifiers(void);
+static unsigned window_held(void);
 static uint32_t window_caption(const struct kl_window *window);
 static int window_set_title(struct kl_window *window, const char *title);
 static void window_font(struct kl_window *window);
@@ -1296,9 +1301,10 @@ window_resized(
 
 /*
  * A key pressed or let go, with the characters TranslateMessage queued
- * behind a press: a dead key's press and release are not given, a press
- * that is the menu's shortcut chooses its item instead, and a press with
- * Control has the character without Control as its text.
+ * behind a press: a press of the tabs' keys chooses a tab, a dead key's
+ * press and release are not given, a press that is the menu's shortcut
+ * chooses its item instead, and a press with Control has the character
+ * without Control as its text.
  */
 static void
 window_key(
@@ -1367,6 +1373,23 @@ window_key(
 				units[count] = (uint16_t)code_point;
 				count++;
 			}
+		}
+	}
+
+	/*
+	 * A press may be the tabs' (Control and the left Alt with a digit or
+	 * Page Up or Down), which goes before the characters the layout makes
+	 * of Control and Alt: one that left a dead key waiting has it let go,
+	 * so that it does not join the next key typed in the tab chosen.
+	 */
+	if (!flags.released) {
+		held = window_held();
+		taken = keiui_win32_tab_key(window, code, held);
+		if (taken) {
+			if (dead)
+				window_dead_clear();
+			window->eaten_key = code;
+			return;
 		}
 	}
 
@@ -1489,6 +1512,24 @@ window_dead_key(
 
 	/* Whether the key is a dead one. */
 	return dead;
+}
+
+/*
+ * Lets go of the dead key the keyboard's layout keeps waiting: the space
+ * typed after it in the keyboard's state of nothing held gives the accent
+ * alone (dropped here) and leaves no key waiting.
+ */
+static void
+window_dead_clear(void)
+{
+	BYTE state[256];
+	WCHAR units[WINDOW_CHAR_UNITS];
+	HKL layout;
+
+	/* The space, typed into the layout's own state (no flag keeps it), which the waiting key leaves. */
+	memset(state, 0, sizeof(state));
+	layout = GetKeyboardLayout(0U);
+	(void)ToUnicodeEx((UINT)VK_SPACE, (UINT)WINDOW_SCAN_SPACE, state, units, (int)WINDOW_CHAR_UNITS, 0U, layout);
 }
 
 /*
@@ -1805,9 +1846,27 @@ static unsigned
 window_modifiers(void)
 {
 	unsigned held;
+	unsigned modifiers;
+
+	/* The modifier keys held. */
+	held = window_held();
+
+	/* Keiland's bits. */
+	modifiers = keiui_win32_modifiers(held);
+	return modifiers;
+}
+
+/*
+ * The modifier keys held when the message being handled was made
+ * (KEIUI_WIN32_HELD_*): GetKeyState tells each key's state as of that
+ * message, and VK_RMENU tells the right Alt from the left one.
+ */
+static unsigned
+window_held(void)
+{
+	unsigned held;
 	SHORT state;
 	SHORT other;
-	unsigned modifiers;
 
 	/* Each modifier key. */
 	held = 0U;
@@ -1825,15 +1884,16 @@ window_modifiers(void)
 	if (state < 0 || other < 0)
 		held |= KEIUI_WIN32_HELD_WIN;
 
-	/* AltGr: the right Alt with the left Control the system makes with it. */
+	/* The right Alt, and AltGr: the right Alt with the left Control the system makes with it. */
 	state = GetKeyState(VK_RMENU);
 	other = GetKeyState(VK_LCONTROL);
+	if (state < 0)
+		held |= KEIUI_WIN32_HELD_RIGHT_ALT;
 	if (state < 0 && other < 0)
 		held |= KEIUI_WIN32_HELD_ALTGR;
 
-	/* Keiland's bits. */
-	modifiers = keiui_win32_modifiers(held);
-	return modifiers;
+	/* The keys held. */
+	return held;
 }
 
 /* The title bar's height at the frame's dpi (none in full screen). */

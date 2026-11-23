@@ -139,7 +139,24 @@ The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
 ## 5. Tabs and questions
 
 A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
-tab connects to `Connect` without it when that is set.
+tab connects to `Connect` without it when that is set. A window has at most
+ten tabs, the settings tab among them.
+
+The keys go between the tabs (the tab bar shows them from two):
+
+| Keys | Tab |
+| --- | --- |
+| Ctrl+Alt+1 to Ctrl+Alt+9 | the tab of that place, counted from the left |
+| Ctrl+Alt+0 | the tenth tab |
+| Ctrl+Alt+Page Up | the tab before the active one (the last after the first) |
+| Ctrl+Alt+Page Down | the tab after it (the first after the last) |
+
+The digits are those of the top row, whatever the keyboard layout types on
+them; a place with no tab does nothing. These keys are mikuterm's and never
+reach the host. They are taken with the left Alt key only: the right Alt
+key is AltGr on the layouts that have one (Windows reports it as Ctrl+Alt),
+and AltGr with a digit types its character to the host as before. Ctrl with
+the left Alt types no AltGr character in mikuterm, as these keys take it.
 
 ```
 MikμTerm 0.1.0
@@ -314,13 +331,15 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 | --- | --- | --- |
 | Session > Disable Input Method | Ctrl+Shift+I | mikuterm only; checked while the user keeps the input method off |
 | Session > Forget Remembered Passphrases | none | mikuterm only; forgets the passphrases kept in Credential Manager |
-| View > Treat Ambiguous-Width Characters as Wide | Alt+F11 | mikuterm only |
 | View > Fullscreen | Alt+Enter | in the place of F11 (zedBSD's terminal keeps F11) |
 | Shell > Settings... | F12 | the settings tab (section 7), as in zedBSD's terminal |
 | Shell > New Window | Ctrl+Shift+N | starts another `mikuterm.exe` |
 
 F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
-opens the settings.
+opens the settings, and Alt+F11 is View > Treat Ambiguous-Width Characters
+as Wide, as in zedBSD's terminal. Ctrl+Alt with the top row's digits, Page Up and Page
+Down choose the tabs (section 5); zedBSD's terminal leaves the tabs' keys to
+its desktop's titlebar (Ctrl+Tab, Ctrl+Page Up and Ctrl+Page Down).
 
 ## 9. Licenses
 

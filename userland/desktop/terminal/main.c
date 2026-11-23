@@ -244,6 +244,9 @@ main(
 	run.about = MAIN_ABOUT;
 	run.connector = &connector.connector;
 
+	/* Alt+F11 switches the width of the ambiguous characters, as mikuterm's does. */
+	run.ambiguous_wide_key = 1;
+
 	/* A kept font that cannot be opened gives way to the terminal's own (one given on the command line does not). */
 	if (options.font_kept)
 		run.font_default = MAIN_FONT;
