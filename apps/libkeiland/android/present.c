@@ -27,6 +27,13 @@
 /* The native window whose format was set last (the format is set again for another). */
 static ANativeWindow *present_native;
 
+/* Where the last frame was put in the native window: the window, the frame's offset and size. */
+static ANativeWindow *present_laid;
+static int32_t present_laid_left;
+static int32_t present_laid_top;
+static uint32_t present_laid_width;
+static uint32_t present_laid_height;
+
 /* What copying a frame needs of the buffer and the frame. */
 struct present_view {
 	uint8_t *bits;
@@ -227,6 +234,7 @@ android_present_copy(
 	int32_t x;
 	int32_t y;
 	int widened;
+	int moved;
 
 	/* The format, set again only for another window. */
 	if (present_native != native) {
@@ -234,6 +242,19 @@ android_present_copy(
 			return EIO;
 		present_native = native;
 	}
+
+	/*
+	 * Where the frame lies in the native window (its place, its size and the native window itself): when it
+	 * is not where the last one was, the bands around it hold what the last one left, so the whole native
+	 * window is written, the frame in full and the bands black.
+	 */
+	moved = (present_laid != native || present_laid_left != insets[ANDROID_INSET_LEFT] ||
+	    present_laid_top != insets[ANDROID_INSET_TOP] || present_laid_width != width || present_laid_height != height);
+	present_laid = native;
+	present_laid_left = insets[ANDROID_INSET_LEFT];
+	present_laid_top = insets[ANDROID_INSET_TOP];
+	present_laid_width = width;
+	present_laid_height = height;
 
 	/* The area the parts cover, at the place the insets leave. */
 	left = 0x7fffffff;
@@ -260,18 +281,30 @@ android_present_copy(
 		right = (int32_t)width;
 	if (bottom > (int32_t)height)
 		bottom = (int32_t)height;
+	if (moved) {
+		left = 0;
+		top = 0;
+		right = (int32_t)width;
+		bottom = (int32_t)height;
+	}
 	if (left >= right || top >= bottom)
 		return 0;
 	asked.left = left + insets[ANDROID_INSET_LEFT];
 	asked.top = top + insets[ANDROID_INSET_TOP];
 	asked.right = right + insets[ANDROID_INSET_LEFT];
 	asked.bottom = bottom + insets[ANDROID_INSET_TOP];
+	if (moved) {
+		asked.left = 0;
+		asked.top = 0;
+		asked.right = ANativeWindow_getWidth(native);
+		asked.bottom = ANativeWindow_getHeight(native);
+	}
 
 	/* The buffer, and the area to write (the one asked for, or wider). */
 	dirty = asked;
 	if (ANativeWindow_lock(native, &buffer, &dirty) != 0)
 		return EIO;
-	widened = (dirty.left != asked.left || dirty.top != asked.top || dirty.right != asked.right ||
+	widened = (moved || dirty.left != asked.left || dirty.top != asked.top || dirty.right != asked.right ||
 	    dirty.bottom != asked.bottom);
 
 	/* The frame's place in the buffer. */

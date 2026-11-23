@@ -28,6 +28,9 @@ import android.widget.PopupWindow;
  * the program's Java classes.
  */
 public class KeilandActivity extends NativeActivity {
+	/** The most of the window a keyboard may cover and still be made room for, in percent. */
+	private static final int KEYBOARD_MAX_PERCENT = 70;
+
 	/** The view the input method types into. */
 	private InputView inputView;
 
@@ -148,7 +151,8 @@ public class KeilandActivity extends NativeActivity {
 		bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
 		keyboard = insets.getInsets(WindowInsets.Type.ime());
 		covered = 0;
-		if (insets.isVisible(WindowInsets.Type.ime())) {
+		/* A keyboard that covers most of the window (a full-screen input method) leaves the program nothing to be shown in, so it is not made room for. */
+		if (insets.isVisible(WindowInsets.Type.ime()) && keyboard.bottom <= inputView.getHeight() * KEYBOARD_MAX_PERCENT / 100) {
 			covered = keyboard.bottom + keyBar.heightPixels();
 			if (keyBarWindow.isShowing()) {
 				keyBarWindow.update(0, keyboard.bottom, ViewGroup.LayoutParams.MATCH_PARENT, keyBar.heightPixels());
