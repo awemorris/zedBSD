@@ -17,6 +17,7 @@
 #   <build>/bin/mikuterm                      (runs from the build directory)
 #   cmake --install <build> --prefix <prefix> (bin/mikuterm, share/mikuterm, and the desktop's
 #                                              entry, icons and metainfo of resources/freedesktop)
+#   -DMIKUTERM_FLATPAK=ON                     (Flatpak's build: no login shell, ProxyCommand or gh)
 #
 # The frames are painted on the processor and shown by libkeiland in shared memory.  libkeiland
 # keeps its Vulkan surface, so the build reads Vulkan's headers (MIKUTERM_VULKAN_INCLUDE, or the
