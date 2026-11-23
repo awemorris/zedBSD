@@ -173,7 +173,9 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/page.c
 	${MIKUTERM_DIR}/x11-link.c
 	${MIKUTERM_DIR}/x11-host.c
+	${MIKUTERM_DIR}/x11-spawn-win32.c
 	${MIKUTERM_DIR}/x11-child.c
+	${MIKUTERM_DIR}/x11-serve.c
 	${MIKUTERM_DIR}/x11-tab.c
 	${MIKUTERM_DIR}/x11-tab-child.c
 	${MIKUTERM_DIR}/x11-noglx.c

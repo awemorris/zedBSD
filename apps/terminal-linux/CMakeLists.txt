@@ -102,7 +102,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/folder.c
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/system.c
-	${MIKUTERM_DIR}/x11-none.c
+	${MIKUTERM_DIR}/x11-spawn-posix.c
+	${MIKUTERM_DIR}/x11-child.c
 	${MIKUTERM_WIN32_DIR}/conf.c
 	${MIKUTERM_WIN32_DIR}/settings-file.c
 	${MIKUTERM_WIN32_DIR}/connection-ssh.c
@@ -111,7 +112,25 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_WIN32_DIR}/forward.c
 	${MIKUTERM_WIN32_DIR}/remote-command.c
 	${MIKUTERM_WIN32_DIR}/launch.c
-	${MIKUTERM_WIN32_DIR}/page.c)
+	${MIKUTERM_WIN32_DIR}/page.c
+	${MIKUTERM_WIN32_DIR}/x11-link.c
+	${MIKUTERM_WIN32_DIR}/x11-host.c
+	${MIKUTERM_WIN32_DIR}/x11-serve.c
+	${MIKUTERM_WIN32_DIR}/x11-tab.c
+	${MIKUTERM_WIN32_DIR}/x11-noglx.c)
+
+#
+# The X server of X11 forwarding (mikuterm --x11-server): the core of zedBSD's X server (without
+# GLX: x11-noglx.c), and the backend its windows are shown with, the Wayland desktop's.  The tabs'
+# scale is the Windows backend's arithmetic (pure).
+#
+set(MIKUTERM_X11_NAMES
+	client glyphs keymap protocol rootless selection window resource event property region
+	render-cpu render-vulkan present-vulkan gc draw shape colormap colornames input wm font cursor
+	xkb xinput rooted extension shape-ext xfixes sync render-ext render-composite coverage randr
+	xinerama wayland win32/scale)
+list(TRANSFORM MIKUTERM_X11_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/xserver/ OUTPUT_VARIABLE MIKUTERM_X11_SOURCES)
+list(TRANSFORM MIKUTERM_X11_SOURCES APPEND .c)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
 # that the rest of that side is not on the include path (it would hide the C library's).
@@ -188,7 +207,8 @@ add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(mikuterm_wayland STATIC ${MIKUTERM_WAYLAND_SOURCES})
 add_library(mikuterm_keiland STATIC ${MIKUTERM_KEILAND_SOURCES})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
-foreach(library z png truetype crypto ssh wayland keiland terminal)
+add_library(mikuterm_xserver STATIC ${MIKUTERM_X11_SOURCES})
+foreach(library z png truetype crypto ssh wayland keiland terminal xserver)
 	target_link_libraries(mikuterm_${library} PRIVATE mikuterm_flags)
 endforeach()
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
@@ -196,13 +216,14 @@ target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_keiland PUBLIC mikuterm_truetype mikuterm_png mikuterm_wayland
 	${MIKUTERM_VULKAN_LIBRARY} Threads::Threads m)
 target_link_libraries(mikuterm_terminal PUBLIC mikuterm_keiland mikuterm_ssh)
+target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 
 #
 # The program, in bin/ of the build directory with its data in share/mikuterm/ beside it, as it is
 # installed.  MIKUTERM_LINUX: the launch screen has no WSL row, the words are Linux's.
 #
 add_executable(mikuterm ${MIKUTERM_SOURCES})
-target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh)
+target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_xserver)
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_WIN32_DIR})
 # Windows' _stricmp is the C library's strcasecmp (<strings.h>, which <string.h> brings with _GNU_SOURCE).
 target_compile_definitions(mikuterm PRIVATE MIKUTERM_LINUX MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp)
