@@ -69,6 +69,24 @@ struct kl_app {
 	struct kl_system *system;
 };
 
+/*
+ * A logical window.  The system gives the program one window (the Activity's)
+ * and the program may make several: the first of the application's list is
+ * shown, with the size of the native window less the insets, and the others
+ * wait behind it.
+ */
+struct kl_window {
+	struct kl_window *next;
+	struct kl_app *app;
+	uint32_t width;
+	uint32_t height;
+	unsigned present;
+	char *title;
+	kl_window_resize_fn resize_callback;
+	void *resize_data;
+	int text_input;
+};
+
 /* app.c */
 
 /* Returns the open application, or NULL when none is (one for the process). */
