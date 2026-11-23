@@ -6,9 +6,9 @@
  */
 
 /*
- * The X server side of SSH's X11 forwarding on Linux: none yet.  The
- * Windows program runs zedBSD's X server in a process of its own
- * (x11-host.c); the Linux program has no X server of its own, so a host
+ * The X server side of SSH's X11 forwarding for a build without one
+ * (MIKUTERM_HAVE_X11 0).  A program that has the X server runs zedBSD's
+ * in a process of its own (x11-host.c); this build has none, so a host
  * whose settings ask for ForwardX11 has each X client refused, and the
  * tab says so once.  No X window's tab is ever opened.
  */
