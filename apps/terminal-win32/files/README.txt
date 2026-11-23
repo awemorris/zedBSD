@@ -71,6 +71,12 @@ A window has up to ten tabs.  These keys go between them:
 Use the left Alt key for them.  The right Alt key is AltGr on the keyboards
 that have one, and AltGr with a digit still types its character.
 
+A tab is named "mikuterm 1", "mikuterm 2" and so on in the order the tabs
+were opened, until the host gives it a title of its own.  When the tabs do
+not fit in the title bar, it shows as many as fit between two arrows (< and
+>, or the mouse wheel over the tabs) and a button (v) that lists the tabs
+out of sight; a tab chosen by its keys is always brought into sight.
+
 When ssh/config gives no User for the host, the tab asks "login as:".
 
 The first time you connect to a host, mikuterm shows the host's key and asks
