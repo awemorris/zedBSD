@@ -26,6 +26,17 @@
  * by the processor: the part of the image is read back, drawn in memory
  * and put back.
  *
+ * A composite of RENDER onto such an image is drawn through
+ * composite.frag when its operator is one of Porter-Duff's (Saturate but
+ * with a mask of component alpha), its source is a colour or an image (on
+ * the GPU, read through a sampler, or in memory, written into the staging
+ * buffer the shader reads), its mask none, a colour or an image in memory,
+ * neither transformed nor a gradient, and neither the target's own image;
+ * the others are drawn in memory (render-ext.c's way, the caller's).  The
+ * part drawn is copied to the scratch image first, and the shader joins
+ * the source with that copy a channel at a time as pixman does (each
+ * product rounded), so that the pixels are render-composite.c's.
+ *
  * The commands are recorded into one of three command buffers and
  * submitted when something must wait for them (a read back, a present) or
  * a buffer is full.  The staging memory a command buffer uses for its
@@ -78,6 +89,36 @@
 
 /* The colour channels a pipeline may write (bit 0 blue, 1 green, 2 red, as the planes of a pixel). */
 #define RENDER_WRITE_ALL	7U
+
+/* The operators drawn on the GPU: Porter-Duff's, Clear to Saturate (which is not with component alpha). */
+#define RENDER_COMPOSITE_OPS		14U
+#define RENDER_OP_SATURATE		13U
+
+/* What a picture of composite.frag is: none (no mask), one colour, pixels in the buffer, the image on the GPU. */
+#define RENDER_PICTURE_NONE		0
+#define RENDER_PICTURE_SOLID		1
+#define RENDER_PICTURE_BUFFER		2
+#define RENDER_PICTURE_GPU		3
+
+/* The most pixels of a picture in memory written into the staging buffer for one composite. */
+#define RENDER_PICTURE_PIXELS_MAX	(4U * 1024U * 1024U)
+
+/*
+ * Why a composite is drawn in memory (the counts the log reports): its
+ * operator, a gradient, a transform, Saturate with a mask of component
+ * alpha, a mask on the GPU, a picture of the target's own image, a
+ * picture too large for the buffer, or the device (a pipeline, staging
+ * memory).
+ */
+#define RENDER_CPU_OP			0U
+#define RENDER_CPU_GRADIENT		1U
+#define RENDER_CPU_TRANSFORM		2U
+#define RENDER_CPU_COMPONENT		3U
+#define RENDER_CPU_GPU_MASK		4U
+#define RENDER_CPU_SELF			5U
+#define RENDER_CPU_LARGE		6U
+#define RENDER_CPU_DEVICE		7U
+#define RENDER_CPU_REASONS		8U
 
 /*
  * An image's copy on the GPU: the Vulkan image, its memory and view, the
@@ -167,6 +208,19 @@ struct x11_render_vulkan {
 	unsigned images;
 	unsigned long fallbacks;
 	unsigned long readbacks;
+
+	/*
+	 * The composites' pipeline, its layouts and fragment shader (made with
+	 * the first composite; composite_failed once they could not be), and
+	 * how many were drawn on the GPU and in memory, by why.
+	 */
+	VkDescriptorSetLayout composite_set_layout;
+	VkPipelineLayout composite_layout;
+	VkShaderModule composite_fragment;
+	VkPipeline composite_pipeline;
+	int composite_failed;
+	unsigned long composites;
+	unsigned long composites_cpu[RENDER_CPU_REASONS];
 };
 
 /*
@@ -180,6 +234,65 @@ struct render_push {
 	int32_t mode;
 	uint32_t foreground;
 	uint32_t background;
+};
+
+/*
+ * The values paint.vert (which reads target_size alone) and
+ * composite.frag take for a composite, laid out as composite.frag's
+ * block: the target's size and the place of its copy's first texel on
+ * it; for the source and the mask, where a pixel of the target is on the
+ * picture (offset), the picture's box's size, the texel of the picture's
+ * (0, 0) on the GPU image or the first pixel in the buffer (base, as a
+ * place on the picture) and the size of the pixels there (extent); the
+ * operator and whether the mask is of component alpha; what each picture
+ * is, its repeat, its colour (a8r8g8b8) and the index of its first pixel
+ * in the buffer.
+ */
+struct render_composite_push {
+	int32_t target_size[2];
+	int32_t target_origin[2];
+	int32_t source_offset[2];
+	int32_t source_size[2];
+	int32_t source_base[2];
+	int32_t source_extent[2];
+	int32_t mask_offset[2];
+	int32_t mask_size[2];
+	int32_t mask_base[2];
+	int32_t mask_extent[2];
+	int32_t op;
+	int32_t component;
+	int32_t source_mode;
+	int32_t source_repeat;
+	int32_t mask_mode;
+	int32_t mask_repeat;
+	uint32_t source_color;
+	uint32_t mask_color;
+	uint32_t source_start;
+	uint32_t mask_start;
+};
+
+/*
+ * A picture of a composite as the GPU reads it: what it is (for a mask,
+ * whether it is of component alpha), its repeat, offset, size, base and
+ * extent as the shader takes them, its colour, its image on the GPU, or
+ * its image in memory and the box of it written into the buffer (on the
+ * picture), with that part's size and place in the staging memory (bytes
+ * from the composite's first).
+ */
+struct render_picture {
+	int mode;
+	int component;
+	int repeat;
+	int offset[2];
+	int size[2];
+	int base[2];
+	int extent[2];
+	uint32_t color;
+	struct x11_gpu_image *gpu;
+	const struct x11_image *image;
+	const struct x11_box *box;
+	size_t bytes;
+	size_t at;
 };
 
 /*
@@ -229,6 +342,12 @@ static int render_clear(struct x11_image *target, uint32_t pixel, const struct r
 static int render_draw(struct x11_image *target, struct x11_gpu_image *pattern, unsigned function, unsigned write, const struct render_push *push, const struct render_parts *parts);
 static int render_copy_gpu(struct x11_image *target, const struct x11_image *source, int dx, int dy, unsigned function, uint32_t plane_mask, const struct render_parts *parts);
 static int render_copy_images(struct x11_gpu_image *target, int target_dx, int target_dy, struct x11_gpu_image *source, int source_dx, int source_dy, const struct render_parts *parts);
+static VkResult render_composite_objects(struct x11_vulkan *vulkan);
+static VkPipeline render_composite_pipeline(struct x11_vulkan *vulkan);
+static unsigned render_picture_of(const struct x11_image *target, const struct x11_source *picture, int is_mask, int dx, int dy, const struct x11_box *extents, struct render_picture *result);
+static void render_picture_write(const struct render_picture *picture, uint32_t *pixels);
+static uint32_t render_solid(const struct x11_color *color);
+static int render_composite_draw(struct x11_image *target, unsigned op, struct render_picture *source, struct render_picture *mask, const struct render_parts *parts);
 static void render_fallback_begin(const struct x11_image *image, const struct x11_box *box, struct x11_image *view);
 static void render_fallback_end(struct x11_image *image, const struct x11_box *box);
 static int render_usable(const struct x11_image *image);
@@ -317,6 +436,10 @@ x11_render_vulkan_close(
 	/* The device finishes what it was given first. */
 	(void)vulkan->vk.vkDeviceWaitIdle(device);
 	x11_log(vulkan->server, "X11SERVER RENDER end fallbacks=%lu readbacks=%lu", render->fallbacks, render->readbacks);
+	x11_log(vulkan->server, "X11SERVER RENDER composites gpu=%lu cpu: op=%lu gradient=%lu transform=%lu component=%lu gpu_mask=%lu self=%lu large=%lu device=%lu",
+	    render->composites, render->composites_cpu[RENDER_CPU_OP], render->composites_cpu[RENDER_CPU_GRADIENT], render->composites_cpu[RENDER_CPU_TRANSFORM],
+	    render->composites_cpu[RENDER_CPU_COMPONENT], render->composites_cpu[RENDER_CPU_GPU_MASK], render->composites_cpu[RENDER_CPU_SELF],
+	    render->composites_cpu[RENDER_CPU_LARGE], render->composites_cpu[RENDER_CPU_DEVICE]);
 
 	/* The images that went, the scratch and the blank pattern. */
 	for (index = 0U; index < RENDER_SLOTS; index++)
@@ -345,6 +468,16 @@ x11_render_vulkan_close(
 				vulkan->vk.vkDestroyPipeline(device, render->pipelines[function][write], NULL);
 		}
 	}
+
+	/* The composites' pipeline and what it has. */
+	if (render->composite_pipeline != VK_NULL_HANDLE)
+		vulkan->vk.vkDestroyPipeline(device, render->composite_pipeline, NULL);
+	if (render->composite_fragment != VK_NULL_HANDLE)
+		vulkan->vk.vkDestroyShaderModule(device, render->composite_fragment, NULL);
+	if (render->composite_layout != VK_NULL_HANDLE)
+		vulkan->vk.vkDestroyPipelineLayout(device, render->composite_layout, NULL);
+	if (render->composite_set_layout != VK_NULL_HANDLE)
+		vulkan->vk.vkDestroyDescriptorSetLayout(device, render->composite_set_layout, NULL);
 
 	/* What the pipelines share. */
 	if (render->sampler != VK_NULL_HANDLE)
@@ -929,6 +1062,83 @@ x11_render_vulkan_read(
 }
 
 /*
+ * Composites a rectangle of an image with a copy on the GPU (x, y, width
+ * by height, on the image) inside a clip, as render-composite.c's
+ * x11_render_composite does, when the GPU can (the file's comment says
+ * which composites).  Returns nonzero when drawn, 0 when the caller is to
+ * draw it in memory (the image's pixels are then as they were).
+ */
+int
+x11_render_vulkan_composite(
+	struct x11_image *target,
+	const struct x11_region *clip,
+	unsigned op,
+	const struct x11_source *source,
+	int source_x,
+	int source_y,
+	const struct x11_source *mask,
+	int mask_x,
+	int mask_y,
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	struct x11_render_vulkan *render;
+	struct render_picture source_picture;
+	struct render_picture mask_picture;
+	struct render_parts parts;
+	struct x11_box rectangle;
+	unsigned reason;
+	int drawn;
+
+	/* An image drawn on the GPU, and an operator it draws. */
+	if (!render_usable(target))
+		return 0;
+	render = target->gpu->vulkan->render;
+	if (op >= RENDER_COMPOSITE_OPS) {
+		render->composites_cpu[RENDER_CPU_OP]++;
+		return 0;
+	}
+
+	/* The rectangle's parts inside the image and the clip. */
+	rectangle.x0 = x;
+	rectangle.y0 = y;
+	rectangle.x1 = x + width;
+	rectangle.y1 = y + height;
+	memset(&parts, 0, sizeof(parts));
+	render_parts_clip(&parts, target, clip, &rectangle);
+	if (parts.count == 0U) {
+		free(parts.boxes);
+		return 1;
+	}
+
+	/* The source and the mask as the GPU reads them. */
+	reason = render_picture_of(target, source, 0, source_x - x, source_y - y, &parts.extents, &source_picture);
+	if (reason == RENDER_CPU_REASONS)
+		reason = render_picture_of(target, mask, 1, mask_x - x, mask_y - y, &parts.extents, &mask_picture);
+	if (reason == RENDER_CPU_REASONS && mask_picture.component && op == RENDER_OP_SATURATE)
+		reason = RENDER_CPU_COMPONENT;
+	if (reason != RENDER_CPU_REASONS) {
+		render->composites_cpu[reason]++;
+		free(parts.boxes);
+		return 0;
+	}
+
+	/* Drawn, or in memory when the device could not. */
+	drawn = render_composite_draw(target, op, &source_picture, &mask_picture, &parts);
+	free(parts.boxes);
+	if (!drawn) {
+		render->composites_cpu[RENDER_CPU_DEVICE]++;
+		return 0;
+	}
+
+	/* Succeeded: drawn on the GPU. */
+	render->composites++;
+	return 1;
+}
+
+/*
  * Gives the Vulkan image of an image's copy on the GPU (VK_NULL_HANDLE:
  * none).
  */
@@ -1032,7 +1242,7 @@ render_slot_make(
 	VkCommandBufferAllocateInfo command;
 	VkFenceCreateInfo fence;
 	VkDescriptorPoolCreateInfo pool;
-	VkDescriptorPoolSize size;
+	VkDescriptorPoolSize sizes[2];
 	VkResult error;
 
 	/* The command buffer. */
@@ -1052,14 +1262,16 @@ render_slot_make(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The descriptor sets of its draws (one pattern each). */
-	size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	size.descriptorCount = RENDER_DESCRIPTORS;
+	/* The descriptor sets of its draws (one pattern each; a composite's two images and its staging buffer). */
+	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	sizes[0].descriptorCount = RENDER_DESCRIPTORS * 2U;
+	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	sizes[1].descriptorCount = RENDER_DESCRIPTORS;
 	memset(&pool, 0, sizeof(pool));
 	pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	pool.maxSets = RENDER_DESCRIPTORS;
-	pool.poolSizeCount = 1U;
-	pool.pPoolSizes = &size;
+	pool.poolSizeCount = 2U;
+	pool.pPoolSizes = sizes;
 	error = vulkan->vk.vkCreateDescriptorPool(vulkan->device, &pool, NULL, &slot->descriptors);
 	if (error != VK_SUCCESS)
 		return error;
@@ -1104,11 +1316,11 @@ render_slot_staging(
 	slot->staging_size = 0U;
 	slot->staging_used = 0U;
 
-	/* The buffer: uploads come from it and boxes are drawn from it. */
+	/* The buffer: uploads come from it, boxes are drawn from it, and composites read pictures in it. */
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	create.size = size;
-	create.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	create.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	error = vulkan->vk.vkCreateBuffer(device, &create, NULL, &slot->staging);
 	if (error != VK_SUCCESS)
@@ -2789,6 +3001,575 @@ render_copy_images(
 	/* Succeeded: the copy recorded. */
 	vulkan->vk.vkCmdCopyImage(command, source->image, VK_IMAGE_LAYOUT_GENERAL, target->image, VK_IMAGE_LAYOUT_GENERAL, (uint32_t)parts->count, regions);
 	free(regions);
+	return 1;
+}
+
+/*
+ * Makes what the composites' pipeline is made of: the descriptor set
+ * layout (the source's image on the GPU, the staging buffer and the
+ * target's copy), the pipeline layout and composite.frag.  Returns
+ * VK_SUCCESS, or the error.
+ */
+static VkResult
+render_composite_objects(
+	struct x11_vulkan *vulkan)
+{
+	struct x11_render_vulkan *render;
+	VkDescriptorSetLayoutBinding bindings[3];
+	VkDescriptorSetLayoutCreateInfo set_layout;
+	VkPushConstantRange range;
+	VkPipelineLayoutCreateInfo layout;
+	VkShaderModuleCreateInfo module;
+	VkResult error;
+
+	/* The source's image, the buffer of the pictures in memory and the target's copy, read by the fragment shader. */
+	render = vulkan->render;
+	memset(bindings, 0, sizeof(bindings));
+	bindings[0].binding = 0U;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	bindings[0].descriptorCount = 1U;
+	bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	bindings[1].binding = 1U;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[1].descriptorCount = 1U;
+	bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	bindings[2].binding = 2U;
+	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	bindings[2].descriptorCount = 1U;
+	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	memset(&set_layout, 0, sizeof(set_layout));
+	set_layout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	set_layout.bindingCount = 3U;
+	set_layout.pBindings = bindings;
+	error = vulkan->vk.vkCreateDescriptorSetLayout(vulkan->device, &set_layout, NULL, &render->composite_set_layout);
+	if (error != VK_SUCCESS) {
+		render->composite_set_layout = VK_NULL_HANDLE;
+		return error;
+	}
+
+	/* The set and the push constants both shaders take. */
+	range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	range.offset = 0U;
+	range.size = (uint32_t)sizeof(struct render_composite_push);
+	memset(&layout, 0, sizeof(layout));
+	layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layout.setLayoutCount = 1U;
+	layout.pSetLayouts = &render->composite_set_layout;
+	layout.pushConstantRangeCount = 1U;
+	layout.pPushConstantRanges = &range;
+	error = vulkan->vk.vkCreatePipelineLayout(vulkan->device, &layout, NULL, &render->composite_layout);
+	if (error != VK_SUCCESS) {
+		render->composite_layout = VK_NULL_HANDLE;
+		return error;
+	}
+
+	/* The fragment shader (the vertex shader is the fills'). */
+	memset(&module, 0, sizeof(module));
+	module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	module.codeSize = sizeof(x11_render_composite_frag);
+	module.pCode = x11_render_composite_frag;
+	error = vulkan->vk.vkCreateShaderModule(vulkan->device, &module, NULL, &render->composite_fragment);
+	if (error != VK_SUCCESS) {
+		render->composite_fragment = VK_NULL_HANDLE;
+		return error;
+	}
+
+	/* Succeeded: the pipeline can be made. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Gives the composites' pipeline: composite.frag's pixel written over the
+ * target's colour channels (a target of depth 24 keeps its alpha at 1),
+ * made the first time it is asked for.  Returns VK_NULL_HANDLE when it
+ * cannot be made.
+ */
+static VkPipeline
+render_composite_pipeline(
+	struct x11_vulkan *vulkan)
+{
+	struct x11_render_vulkan *render;
+	VkPipelineShaderStageCreateInfo stages[2];
+	VkVertexInputBindingDescription binding;
+	VkVertexInputAttributeDescription attribute;
+	VkPipelineVertexInputStateCreateInfo input;
+	VkPipelineInputAssemblyStateCreateInfo assembly;
+	VkPipelineViewportStateCreateInfo viewport;
+	VkPipelineRasterizationStateCreateInfo raster;
+	VkPipelineMultisampleStateCreateInfo multisample;
+	VkPipelineColorBlendAttachmentState blend;
+	VkPipelineColorBlendStateCreateInfo blending;
+	VkDynamicState dynamic_states[2];
+	VkPipelineDynamicStateCreateInfo dynamic;
+	VkGraphicsPipelineCreateInfo create;
+	VkPipeline pipeline;
+	VkResult error;
+
+	/* Made before, or never to be made. */
+	render = vulkan->render;
+	pipeline = render->composite_pipeline;
+	if (pipeline != VK_NULL_HANDLE)
+		return pipeline;
+	if (render->composite_failed)
+		return VK_NULL_HANDLE;
+
+	/* What it is made of, the first time. */
+	if (render->composite_set_layout == VK_NULL_HANDLE) {
+		error = render_composite_objects(vulkan);
+		if (error != VK_SUCCESS) {
+			x11_log(vulkan->server, "X11SERVER RENDER composite objects failed: %d", (int)error);
+			render->composite_failed = 1;
+			return VK_NULL_HANDLE;
+		}
+	}
+
+	/* The two shaders. */
+	memset(stages, 0, sizeof(stages));
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].module = render->vertex;
+	stages[0].pName = "main";
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].module = render->composite_fragment;
+	stages[1].pName = "main";
+
+	/* One box (x0, y0, x1, y1) an instance, six vertices of two triangles each. */
+	binding.binding = 0U;
+	binding.stride = (uint32_t)(4U * sizeof(int32_t));
+	binding.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+	attribute.location = 0U;
+	attribute.binding = 0U;
+	attribute.format = VK_FORMAT_R32G32B32A32_SINT;
+	attribute.offset = 0U;
+	memset(&input, 0, sizeof(input));
+	input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	input.vertexBindingDescriptionCount = 1U;
+	input.pVertexBindingDescriptions = &binding;
+	input.vertexAttributeDescriptionCount = 1U;
+	input.pVertexAttributeDescriptions = &attribute;
+	memset(&assembly, 0, sizeof(assembly));
+	assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+	/* The viewport and scissor are the target's, set when drawing. */
+	memset(&viewport, 0, sizeof(viewport));
+	viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewport.viewportCount = 1U;
+	viewport.scissorCount = 1U;
+	dynamic_states[0] = VK_DYNAMIC_STATE_VIEWPORT;
+	dynamic_states[1] = VK_DYNAMIC_STATE_SCISSOR;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamic.dynamicStateCount = 2U;
+	dynamic.pDynamicStates = dynamic_states;
+
+	/* Filled triangles, one sample a pixel. */
+	memset(&raster, 0, sizeof(raster));
+	raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	raster.polygonMode = VK_POLYGON_MODE_FILL;
+	raster.cullMode = VK_CULL_MODE_NONE;
+	raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	raster.lineWidth = 1.0f;
+	memset(&multisample, 0, sizeof(multisample));
+	multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	/* The colour channels written as the shader joined them (the alpha, 1 on a target of depth 24, is not). */
+	memset(&blend, 0, sizeof(blend));
+	blend.blendEnable = VK_FALSE;
+	blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
+	memset(&blending, 0, sizeof(blending));
+	blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	blending.logicOpEnable = VK_FALSE;
+	blending.logicOp = VK_LOGIC_OP_COPY;
+	blending.attachmentCount = 1U;
+	blending.pAttachments = &blend;
+
+	/* The pipeline. */
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	create.stageCount = 2U;
+	create.pStages = stages;
+	create.pVertexInputState = &input;
+	create.pInputAssemblyState = &assembly;
+	create.pViewportState = &viewport;
+	create.pRasterizationState = &raster;
+	create.pMultisampleState = &multisample;
+	create.pColorBlendState = &blending;
+	create.pDynamicState = &dynamic;
+	create.layout = render->composite_layout;
+	create.renderPass = render->render_pass;
+	error = vulkan->vk.vkCreateGraphicsPipelines(vulkan->device, VK_NULL_HANDLE, 1U, &create, NULL, &pipeline);
+	if (error != VK_SUCCESS) {
+		x11_log(vulkan->server, "X11SERVER RENDER composite pipeline failed: %d", (int)error);
+		render->composite_failed = 1;
+		return VK_NULL_HANDLE;
+	}
+
+	/* Succeeded: kept for the next time. */
+	render->composite_pipeline = pipeline;
+	return pipeline;
+}
+
+/*
+ * Makes a composite's picture (NULL: no mask) as the GPU reads it, at
+ * (dx, dy) from the target's place, for the parts of the target within
+ * extents.  Returns RENDER_CPU_REASONS when the GPU can read it, else why
+ * the composite is drawn in memory.
+ */
+static unsigned
+render_picture_of(
+	const struct x11_image *target,
+	const struct x11_source *picture,
+	int is_mask,
+	int dx,
+	int dy,
+	const struct x11_box *extents,
+	struct render_picture *result)
+{
+	struct x11_box whole;
+	struct x11_box read;
+	int meets;
+
+	/* No mask. */
+	memset(result, 0, sizeof(*result));
+	if (picture == NULL) {
+		result->mode = RENDER_PICTURE_NONE;
+		return RENDER_CPU_REASONS;
+	}
+
+	/* One colour everywhere (a mask's channels count for component alpha). */
+	result->component = is_mask && picture->component_alpha;
+	result->offset[0] = dx;
+	result->offset[1] = dy;
+	if (picture->kind == X11_SOURCE_SOLID) {
+		result->mode = RENDER_PICTURE_SOLID;
+		result->color = render_solid(&picture->color);
+		return RENDER_CPU_REASONS;
+	}
+
+	/* What the GPU does not read: a gradient, a transform, the target's own image. */
+	if (picture->kind != X11_SOURCE_IMAGE || picture->image == NULL)
+		return RENDER_CPU_GRADIENT;
+	if (picture->transformed)
+		return RENDER_CPU_TRANSFORM;
+	if (picture->image == target)
+		return RENDER_CPU_SELF;
+
+	/* The picture's box, and how it goes on outside it. */
+	result->repeat = (int)picture->repeat;
+	result->size[0] = picture->box.x1 - picture->box.x0;
+	result->size[1] = picture->box.y1 - picture->box.y0;
+
+	/* An image on the GPU: read there through the sampler (a source's only). */
+	if (picture->image->gpu != NULL && picture->image->gpu->kind == RENDER_KIND_TARGET) {
+		if (is_mask)
+			return RENDER_CPU_GPU_MASK;
+		result->mode = RENDER_PICTURE_GPU;
+		result->gpu = picture->image->gpu;
+		result->base[0] = picture->box.x0;
+		result->base[1] = picture->box.y0;
+		return RENDER_CPU_REASONS;
+	}
+
+	/* An image in memory: the part of its box the parts read (all of it when it repeats) goes into the buffer. */
+	result->mode = RENDER_PICTURE_BUFFER;
+	result->image = picture->image;
+	result->box = &picture->box;
+	whole.x0 = 0;
+	whole.y0 = 0;
+	whole.x1 = result->size[0];
+	whole.y1 = result->size[1];
+	read = whole;
+	if (picture->repeat == X11_REPEAT_NONE) {
+		read.x0 = extents->x0 + dx;
+		read.y0 = extents->y0 + dy;
+		read.x1 = extents->x1 + dx;
+		read.y1 = extents->y1 + dy;
+		meets = x11_box_intersect(&read, &whole, &read);
+		if (!meets)
+			memset(&read, 0, sizeof(read));
+	}
+	if (read.x1 < read.x0 || read.y1 < read.y0)
+		memset(&read, 0, sizeof(read));
+	if ((size_t)(read.x1 - read.x0) * (size_t)(read.y1 - read.y0) > RENDER_PICTURE_PIXELS_MAX)
+		return RENDER_CPU_LARGE;
+
+	/* Succeeded: that part's place and size. */
+	result->base[0] = read.x0;
+	result->base[1] = read.y0;
+	result->extent[0] = read.x1 - read.x0;
+	result->extent[1] = read.y1 - read.y0;
+	result->bytes = (size_t)result->extent[0] * (size_t)result->extent[1] * sizeof(uint32_t);
+	return RENDER_CPU_REASONS;
+}
+
+/*
+ * Writes the part of a picture in memory the GPU reads into the buffer:
+ * its rows, each pixel as a8r8g8b8 by the image's depth (a pixel outside
+ * the image clear).
+ */
+static void
+render_picture_write(
+	const struct render_picture *picture,
+	uint32_t *pixels)
+{
+	const struct x11_image *image;
+	uint32_t pixel;
+	int row;
+	int column;
+	int x;
+	int y;
+
+	/* Each row of the part, from the box's place on the image. */
+	image = picture->image;
+	for (row = 0; row < picture->extent[1]; row++) {
+		y = picture->box->y0 + picture->base[1] + row;
+		for (column = 0; column < picture->extent[0]; column++) {
+			x = picture->box->x0 + picture->base[0] + column;
+
+			/* Nothing outside the image. */
+			if (x < 0 || y < 0 || x >= image->width || y >= image->height) {
+				*pixels++ = 0U;
+				continue;
+			}
+			pixel = image->pixels[(size_t)y * image->stride + (size_t)x];
+
+			/* By the depth's format: a1, a8, a8r8g8b8 as it is, x8r8g8b8 opaque. */
+			if (image->depth == 1U) {
+				pixel = (pixel & 1U) * 0xff000000U;
+			} else if (image->depth == 8U) {
+				pixel = (pixel & 0xffU) << 24U;
+			} else if (image->depth != 32U) {
+				pixel |= RENDER_OPAQUE;
+			}
+			*pixels++ = pixel;
+		}
+	}
+}
+
+/* Gives a premultiplied colour of 16 bits a channel as a8r8g8b8 (each channel's top 8 bits, as render-composite.c reads it). */
+static uint32_t
+render_solid(
+	const struct x11_color *color)
+{
+	uint32_t pixel;
+
+	/* The top byte of each, in its place. */
+	pixel = ((uint32_t)color->alpha >> 8U) << 24U;
+	pixel |= ((uint32_t)color->red >> 8U) << 16U;
+	pixel |= ((uint32_t)color->green >> 8U) << 8U;
+	pixel |= (uint32_t)color->blue >> 8U;
+	return pixel;
+}
+
+/*
+ * Draws a composite's parts on its target's copy on the GPU through
+ * composite.frag: the parts copied to the scratch image (the target's
+ * pixels the shader joins), and the boxes and the pictures in memory
+ * written into one staging buffer, which the shader reads.  Returns
+ * nonzero when drawn, 0 when the device could not (nothing drawn but,
+ * perhaps, the copy).
+ */
+static int
+render_composite_draw(
+	struct x11_image *target,
+	unsigned op,
+	struct render_picture *source,
+	struct render_picture *mask,
+	const struct render_parts *parts)
+{
+	struct x11_vulkan *vulkan;
+	struct x11_render_vulkan *render;
+	struct x11_gpu_image *image;
+	struct x11_gpu_image *sampled;
+	struct x11_gpu_image *copy;
+	struct render_slot *slot;
+	struct render_access accesses[3];
+	struct render_composite_push values;
+	VkDescriptorSetAllocateInfo allocate;
+	VkDescriptorImageInfo described[2];
+	VkDescriptorBufferInfo buffered;
+	VkWriteDescriptorSet updates[3];
+	VkDescriptorSet set;
+	VkRenderPassBeginInfo begin;
+	VkViewport viewport;
+	VkRect2D scissor;
+	VkCommandBuffer command;
+	VkPipeline pipeline;
+	VkBuffer buffer;
+	VkDeviceSize offset;
+	VkDeviceSize range;
+	VkDeviceSize total;
+	uint8_t *bytes;
+	int32_t *boxes;
+	VkResult error;
+	size_t index;
+	int copied;
+
+	/* The pipeline and framebuffer. */
+	image = target->gpu;
+	vulkan = image->vulkan;
+	render = vulkan->render;
+	pipeline = render_composite_pipeline(vulkan);
+	if (pipeline == VK_NULL_HANDLE)
+		return 0;
+	error = render_framebuffer(image);
+	if (error != VK_SUCCESS)
+		return 0;
+
+	/* The parts' pixels copied to the scratch image, from its first texel at the extents' top left. */
+	copy = render_scratch(vulkan, parts->extents.x1 - parts->extents.x0, parts->extents.y1 - parts->extents.y0);
+	if (copy == NULL)
+		return 0;
+	copied = render_copy_images(copy, -parts->extents.x0, -parts->extents.y0, image, 0, 0, parts);
+	if (!copied)
+		return 0;
+
+	/* The boxes, then the source's and the mask's pixels, in one staging buffer (with room for the descriptor set). */
+	source->at = parts->count * 4U * sizeof(int32_t);
+	mask->at = source->at + source->bytes;
+	total = (VkDeviceSize)(mask->at + mask->bytes);
+	bytes = render_staging(vulkan, total, &buffer, &offset);
+	if (bytes == NULL)
+		return 0;
+	boxes = (int32_t *)(void *)bytes;
+	for (index = 0U; index < parts->count; index++) {
+		boxes[index * 4U + 0U] = parts->boxes[index].x0;
+		boxes[index * 4U + 1U] = parts->boxes[index].y0;
+		boxes[index * 4U + 2U] = parts->boxes[index].x1;
+		boxes[index * 4U + 3U] = parts->boxes[index].y1;
+	}
+	if (source->mode == RENDER_PICTURE_BUFFER)
+		render_picture_write(source, (uint32_t *)(void *)(bytes + source->at));
+	if (mask->mode == RENDER_PICTURE_BUFFER)
+		render_picture_write(mask, (uint32_t *)(void *)(bytes + mask->at));
+
+	/* The part of the buffer the shader may read, which must hold the pictures. */
+	slot = &render->slots[render->current];
+	range = slot->staging_size;
+	if (range > (VkDeviceSize)vulkan->storage_range_max)
+		range = (VkDeviceSize)vulkan->storage_range_max;
+	if (offset + total > range)
+		return 0;
+
+	/* The descriptor set: the source's image on the GPU (else the blank one, unread) and the buffer. */
+	sampled = render->blank;
+	if (source->mode == RENDER_PICTURE_GPU)
+		sampled = source->gpu;
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocate.descriptorPool = slot->descriptors;
+	allocate.descriptorSetCount = 1U;
+	allocate.pSetLayouts = &render->composite_set_layout;
+	error = vulkan->vk.vkAllocateDescriptorSets(vulkan->device, &allocate, &set);
+	if (error != VK_SUCCESS)
+		return 0;
+	slot->descriptors_used++;
+	described[0].sampler = render->sampler;
+	described[0].imageView = sampled->view;
+	described[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	described[1].sampler = render->sampler;
+	described[1].imageView = copy->view;
+	described[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	buffered.buffer = buffer;
+	buffered.offset = 0U;
+	buffered.range = range;
+	memset(updates, 0, sizeof(updates));
+	updates[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	updates[0].dstSet = set;
+	updates[0].dstBinding = 0U;
+	updates[0].descriptorCount = 1U;
+	updates[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	updates[0].pImageInfo = &described[0];
+	updates[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	updates[1].dstSet = set;
+	updates[1].dstBinding = 1U;
+	updates[1].descriptorCount = 1U;
+	updates[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	updates[1].pBufferInfo = &buffered;
+	updates[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	updates[2].dstSet = set;
+	updates[2].dstBinding = 2U;
+	updates[2].descriptorCount = 1U;
+	updates[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	updates[2].pImageInfo = &described[1];
+	vulkan->vk.vkUpdateDescriptorSets(vulkan->device, 3U, updates, 0U, NULL);
+
+	/* After what the draw must wait for: the source's image and the target's copy read, the boxes written. */
+	command = render_begin(vulkan);
+	if (command == VK_NULL_HANDLE)
+		return 0;
+	accesses[0].image = sampled;
+	accesses[0].write = 0;
+	memset(&accesses[0].box, 0, sizeof(accesses[0].box));
+	accesses[1].image = image;
+	accesses[1].write = 1;
+	accesses[1].box = parts->extents;
+	accesses[2].image = copy;
+	accesses[2].write = 0;
+	memset(&accesses[2].box, 0, sizeof(accesses[2].box));
+	render_accesses(vulkan, command, accesses, 3U);
+
+	/* The values: the target's size and its copy's place, the operator, the pictures, and their pixels' places in the buffer. */
+	memset(&values, 0, sizeof(values));
+	values.target_size[0] = image->width;
+	values.target_size[1] = image->height;
+	values.target_origin[0] = parts->extents.x0;
+	values.target_origin[1] = parts->extents.y0;
+	values.op = (int32_t)op;
+	values.component = mask->component;
+	for (index = 0U; index < 2U; index++) {
+		values.source_offset[index] = source->offset[index];
+		values.source_size[index] = source->size[index];
+		values.source_base[index] = source->base[index];
+		values.source_extent[index] = source->extent[index];
+		values.mask_offset[index] = mask->offset[index];
+		values.mask_size[index] = mask->size[index];
+		values.mask_base[index] = mask->base[index];
+		values.mask_extent[index] = mask->extent[index];
+	}
+	values.source_mode = source->mode;
+	values.source_repeat = source->repeat;
+	values.mask_mode = mask->mode;
+	values.mask_repeat = mask->repeat;
+	values.source_color = source->color;
+	values.mask_color = mask->color;
+	values.source_start = (uint32_t)((offset + source->at) / sizeof(uint32_t));
+	values.mask_start = (uint32_t)((offset + mask->at) / sizeof(uint32_t));
+
+	/* The draw: one instance a box, inside the boxes' extents. */
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	begin.renderPass = render->render_pass;
+	begin.framebuffer = image->framebuffer;
+	begin.renderArea.offset.x = parts->extents.x0;
+	begin.renderArea.offset.y = parts->extents.y0;
+	begin.renderArea.extent.width = (uint32_t)(parts->extents.x1 - parts->extents.x0);
+	begin.renderArea.extent.height = (uint32_t)(parts->extents.y1 - parts->extents.y0);
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)image->width;
+	viewport.height = (float)image->height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = (uint32_t)image->width;
+	scissor.extent.height = (uint32_t)image->height;
+	vulkan->vk.vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+	vulkan->vk.vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+	vulkan->vk.vkCmdSetViewport(command, 0U, 1U, &viewport);
+	vulkan->vk.vkCmdSetScissor(command, 0U, 1U, &scissor);
+	vulkan->vk.vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, render->composite_layout, 0U, 1U, &set, 0U, NULL);
+	vulkan->vk.vkCmdPushConstants(command, render->composite_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, (uint32_t)sizeof(values), &values);
+	vulkan->vk.vkCmdBindVertexBuffers(command, 0U, 1U, &buffer, &offset);
+	vulkan->vk.vkCmdDraw(command, 6U, (uint32_t)parts->count, 0U, 0U);
+	vulkan->vk.vkCmdEndRenderPass(command);
+
+	/* Succeeded: the GPU's pixels are newer than memory's. */
+	image->memory_stale = 1;
 	return 1;
 }
 

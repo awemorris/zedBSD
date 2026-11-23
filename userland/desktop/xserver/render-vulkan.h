@@ -146,9 +146,14 @@ struct x11_vulkan {
 	VkQueue queue;
 	VkPhysicalDeviceMemoryProperties memory;
 
-	/* What the device can do that the drawing asks of it: logic operations, the largest image side. */
+	/*
+	 * What the device can do that the drawing asks of it: logic
+	 * operations, the largest image side, and the most bytes a shader
+	 * reads of a storage buffer.
+	 */
 	int logic_op;
 	uint32_t image_side_max;
+	uint32_t storage_range_max;
 
 	/*
 	 * Nonzero once the device was lost: nothing more is drawn or shown on

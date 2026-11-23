@@ -17,7 +17,8 @@ import subprocess
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-SHADERS = [("paint.vert", "x11_render_paint_vert"), ("paint.frag", "x11_render_paint_frag")]
+SHADERS = [("paint.vert", "x11_render_paint_vert"), ("paint.frag", "x11_render_paint_frag"),
+           ("composite.frag", "x11_render_composite_frag")]
 
 
 def compile_shader(source):
