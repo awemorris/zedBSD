@@ -74,6 +74,15 @@
 #define X11_SURFACE_URGENT	(1U << 3)
 
 /*
+ * A top-level window whose client asked for no decoration at all
+ * (_MOTIF_WM_HINTS with its decorations 0): the system shows it without a
+ * frame, and cut to its shape when it has one.  A decorated window keeps
+ * the system's frame whole and is never cut: what lies outside its shape
+ * shows the frame's background, as under an X window manager's frame.
+ */
+#define X11_SURFACE_UNDECORATED	(1U << 4)
+
+/*
  * What an update of a surface changes: its size, its place on the root
  * window, its title, its owner, its state, and the limits on its size.
  */

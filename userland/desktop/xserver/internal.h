@@ -1138,6 +1138,7 @@ struct x11_wm_atoms {
 	uint32_t take_focus;
 	uint32_t state;
 	uint32_t change_state;
+	uint32_t motif_wm_hints;
 	uint32_t net_supported;
 	uint32_t net_supporting_wm_check;
 	uint32_t net_wm_name;
