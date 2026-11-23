@@ -1308,6 +1308,10 @@ struct x11server {
 	uint16_t buttons;
 	uint16_t physical_buttons;
 	uint8_t pressed_as[X11_BUTTONS];
+
+	/* The place of the last raw motion sent (xinput.c). */
+	int raw_x;
+	int raw_y;
 	uint8_t button_map[X11_BUTTONS];
 
 	/* The pointer's control: the acceleration and its threshold (kept for the answer; the system moves the pointer). */
@@ -1892,6 +1896,8 @@ int x11_xinput_to_grab(struct x11server *server, const struct x11_grab *grab, ui
 void x11_xinput_implicit_grab(const struct x11_window *window, struct x11_grab *grab);
 void x11_xinput_crossing(struct x11server *server, uint8_t type, const struct x11_window *window, uint8_t detail, uint8_t mode, uint32_t time, uint32_t child, uint8_t flags);
 void x11_xinput_focus(struct x11server *server, uint8_t type, const struct x11_window *window, uint8_t detail, uint8_t mode);
+void x11_xinput_raw(struct x11server *server, unsigned kind, uint8_t detail, int pressed, uint32_t time, int x, int y);
+int x11_xinput_raw_poll(struct x11server *server);
 void x11_xinput_window_destroyed(struct x11_window *window);
 void x11_xinput_forget_client(struct x11server *server, unsigned client);
 

@@ -20,11 +20,13 @@
  * its window; on each window a client that selected the extension's
  * event hears it in the extension's form, and only when none did do the
  * core's clients hear the core event (input.c and event.c call here
- * first).  The crossing and focus events are the extension's apart from
- * the core's: each client hears the form it selected.  A grab
- * (XIGrabDevice, or the implicit grab a button press starts for a client
- * that heard it in the extension's form) is one of input.c's, which hears
- * the extension's events its mask names.
+ * first).  Before it, its raw form goes to the clients that selected that
+ * on the root window, from the physical device and then from its master
+ * device, wherever the pointer is.  The crossing and focus events are the
+ * extension's apart from the core's: each client hears the form it
+ * selected.  A grab (XIGrabDevice, or the implicit grab a button press
+ * starts for a client that heard it in the extension's form) is one of
+ * input.c's, which hears the extension's events its mask names.
  *
  * Version 1 shows the physical devices to its clients: OpenDevice opens
  * them (not the master devices, which are the core's), and a client that
@@ -221,6 +223,11 @@
 #define XI_EVENT_LEAVE			8U
 #define XI_EVENT_FOCUS_IN		9U
 #define XI_EVENT_FOCUS_OUT		10U
+#define XI_EVENT_RAW_KEY_PRESS		13U
+#define XI_EVENT_RAW_KEY_RELEASE	14U
+#define XI_EVENT_RAW_BUTTON_PRESS	15U
+#define XI_EVENT_RAW_BUTTON_RELEASE	16U
+#define XI_EVENT_RAW_MOTION		17U
 #define XI_EVENT_LAST			24U
 
 /* GenericEvent, the core event code every one of the extension's events goes by. */
@@ -257,6 +264,15 @@
 #define XI_DEVICE_EVENT_SIZE		84U
 #define XI_AXES_SIZE			(4U + XI_AXES * 8U)
 #define XI_CROSSING_EVENT_SIZE		76U
+
+/*
+ * A raw event: its fixed part, the valuators' mask (two words, room for
+ * the 36 valuators a device may have, as X.Org sends it), and a motion's
+ * two axes, each as the value and the raw value (32.32 fixed point).
+ */
+#define XI_RAW_EVENT_SIZE		32U
+#define XI_RAW_MASK_WORDS		2U
+#define XI_RAW_AXES_SIZE		(XI_AXES * 16U)
 
 /* The longest device description. */
 #define XI_DEVICE_INFO_MAX		1280U
@@ -325,6 +341,8 @@ static void xinput_send_device(struct x11server *server, struct x11_client *clie
 static void xinput_send_crossing(struct x11server *server, struct x11_client *client, uint8_t type, const struct x11_window *window, uint8_t detail, uint8_t mode, uint32_t time, uint32_t child, uint8_t flags);
 static void xinput_write_state(uint8_t *bytes, const struct x11server *server, uint16_t state, int msb);
 static void xinput_send(struct x11server *server, struct x11_client *client, uint8_t *event, size_t length);
+static void xinput_raw_send(struct x11server *server, uint8_t type, uint8_t detail, uint32_t time, uint16_t device, uint16_t source, int x, int y);
+static int xinput_raw_matches(uint16_t selected, uint16_t device);
 static int xinput_window_or_none(struct x11server *server, uint32_t id);
 static unsigned xinput1_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned xinput1_open_device(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
@@ -738,6 +756,102 @@ x11_xinput_focus(
 			continue;
 		xinput_send_crossing(server, client, type, window, detail, mode, server->now, 0U, CROSSING_SAME_SCREEN);
 	}
+}
+
+/*
+ * Sends the raw form of a key, a button or a motion the backend reported
+ * (its detail: the keycode or the button, and for a motion the place on
+ * the root window) to the clients that selected it on the root window.
+ * It goes before the event itself, whatever window the pointer is in and
+ * whatever grab is active, first from the physical device and then from
+ * its master device, the physical one its source.
+ */
+void
+x11_xinput_raw(
+	struct x11server *server,
+	unsigned kind,
+	uint8_t detail,
+	int pressed,
+	uint32_t time,
+	int x,
+	int y)
+{
+	uint16_t master;
+	uint16_t slave;
+	uint8_t type;
+
+	/* The event's type and devices. */
+	master = XI_MASTER_POINTER;
+	slave = XI_SLAVE_POINTER;
+	if (kind == X11_DEVICE_KEY) {
+		master = XI_MASTER_KEYBOARD;
+		slave = XI_SLAVE_KEYBOARD;
+		type = pressed ? XI_EVENT_RAW_KEY_PRESS : XI_EVENT_RAW_KEY_RELEASE;
+	} else if (kind == X11_DEVICE_BUTTON) {
+		type = pressed ? XI_EVENT_RAW_BUTTON_PRESS : XI_EVENT_RAW_BUTTON_RELEASE;
+	} else if (kind == X11_DEVICE_MOTION) {
+		type = XI_EVENT_RAW_MOTION;
+		detail = 0U;
+	} else {
+		return;
+	}
+
+	/* Nobody selected anything on the root window. */
+	if (server->root == NULL || server->root->xi_select_count == 0U)
+		return;
+
+	/* A motion's place is kept, so the system's pointer is followed from there. */
+	if (type == XI_EVENT_RAW_MOTION) {
+		server->raw_x = x;
+		server->raw_y = y;
+	}
+
+	/* Succeeded: from the physical device, then from its master device. */
+	xinput_raw_send(server, type, detail, time, slave, slave, x, y);
+	xinput_raw_send(server, type, detail, time, master, slave, x, y);
+}
+
+/*
+ * Follows the system's pointer where the backend reports no motion (over
+ * the system's own windows, outside every X window): while a client
+ * selected RawMotion on the root window, a pointer the backend finds
+ * moved since the last raw motion sends one from there, as a server that
+ * owns the pointer would.  Returns nonzero while a client selected it
+ * and the backend tells the pointer's place (the server is to tick soon).
+ */
+int
+x11_xinput_raw_poll(
+	struct x11server *server)
+{
+	const struct x11_window *root;
+	unsigned index;
+	int selected;
+	int error;
+	int x;
+	int y;
+
+	/* A client must have selected RawMotion on the root window, and the backend tell the place. */
+	root = server->root;
+	if (root == NULL || server->ops->pointer == NULL)
+		return 0;
+	selected = 0;
+	for (index = 0U; index < root->xi_select_count; index++) {
+		if ((root->xi_selects[index].mask & (1U << XI_EVENT_RAW_MOTION)) != 0U)
+			selected = 1;
+	}
+	if (!selected)
+		return 0;
+
+	/* The system's pointer, sent when it moved (not known: nothing to send). */
+	error = server->ops->pointer(server->backend, &x, &y);
+	if (error != 0)
+		return 1;
+	if (x == server->raw_x && y == server->raw_y)
+		return 1;
+
+	/* Succeeded: the raw motion. */
+	x11_xinput_raw(server, X11_DEVICE_MOTION, 0U, 0, server->now, x, y);
+	return 1;
 }
 
 /*
@@ -2074,6 +2188,112 @@ xinput_send(
 
 	/* Succeeded: queued. */
 	x11_client_send(server, client, event, length);
+}
+
+/*
+ * Sends a raw event from one device to each client that selected it on
+ * the root window for that device, once: the detail, the source, and for
+ * a motion both axes (a raw value is the value: the pointer has no
+ * acceleration).
+ */
+static void
+xinput_raw_send(
+	struct x11server *server,
+	uint8_t type,
+	uint8_t detail,
+	uint32_t time,
+	uint16_t device,
+	uint16_t source,
+	int x,
+	int y)
+{
+	uint8_t event[XI_RAW_EVENT_SIZE + XI_RAW_MASK_WORDS * 4U + XI_RAW_AXES_SIZE];
+	const struct x11_window *root;
+	struct x11_client *client;
+	size_t length;
+	unsigned index;
+	unsigned other;
+	unsigned id;
+	int repeated;
+	int selected;
+	int msb;
+
+	/* Each client with an entry on the root window, once (at its first entry). */
+	root = server->root;
+	for (index = 0U; index < root->xi_select_count; index++) {
+		id = root->xi_selects[index].client;
+		repeated = 0;
+		for (other = 0U; other < index; other++) {
+			if (root->xi_selects[other].client == id)
+				repeated = 1;
+		}
+		if (repeated)
+			continue;
+
+		/* The client must have selected the event for the device in one of its entries. */
+		selected = 0;
+		for (other = index; other < root->xi_select_count; other++) {
+			if (root->xi_selects[other].client != id)
+				continue;
+			if ((root->xi_selects[other].mask & (1U << type)) == 0U)
+				continue;
+			if (xinput_raw_matches(root->xi_selects[other].device, device))
+				selected = 1;
+		}
+		if (!selected)
+			continue;
+		client = x11_client_of(server, id);
+		if (client == NULL)
+			continue;
+
+		/* The type, device, time, detail, source and the mask's length. */
+		msb = client->order;
+		memset(event, 0, sizeof(event));
+		x11_write16(event + 8, type, msb);
+		x11_write16(event + 10, device, msb);
+		x11_write32(event + 12, time, msb);
+		x11_write32(event + 16, detail, msb);
+		x11_write16(event + 20, source, msb);
+		x11_write16(event + 22, XI_RAW_MASK_WORDS, msb);
+		length = XI_RAW_EVENT_SIZE + XI_RAW_MASK_WORDS * 4U;
+
+		/* A motion's axes: both set in the mask, the values, then the raw values. */
+		if (type == XI_EVENT_RAW_MOTION) {
+			event[XI_RAW_EVENT_SIZE] = 0x3U;
+			x11_write32(event + length, (uint32_t)x, msb);
+			x11_write32(event + length + 8U, (uint32_t)y, msb);
+			x11_write32(event + length + 16U, (uint32_t)x, msb);
+			x11_write32(event + length + 24U, (uint32_t)y, msb);
+			length += XI_RAW_AXES_SIZE;
+		}
+
+		/* Sent. */
+		xinput_send(server, client, event, length);
+	}
+}
+
+/*
+ * Tells whether a selection's device (all, all master devices, or one)
+ * takes a raw event from a device, master or physical.
+ */
+static int
+xinput_raw_matches(
+	uint16_t selected,
+	uint16_t device)
+{
+	const struct xinput_device *found;
+
+	/* All devices, or the device itself. */
+	if (selected == XI_ALL_DEVICES || selected == device)
+		return 1;
+
+	/* All master devices: a master device. */
+	found = xinput_device_find(device);
+	if (selected == XI_ALL_MASTER_DEVICES && found != NULL)
+		return found->use == XI_USE_MASTER_POINTER || found->use == XI_USE_MASTER_KEYBOARD;
+
+	/* Another device. */
+	return 0;
 }
 
 /* Tells whether an id is None or a window. */
