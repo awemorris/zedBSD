@@ -43,6 +43,14 @@ struct android_post {
 	void *data;
 };
 
+/* One item of the window's menu that has a shortcut: its key (an XKB keysym), the modifiers (KL_MENU_*), the item's ID and its action. */
+struct android_shortcut {
+	uint32_t keysym;
+	unsigned modifiers;
+	uint32_t id;
+	uint32_t action;
+};
+
 /*
  * The application: the events queued for the program (a ring only M touches),
  * the posts other threads made (the lock holds only them), the logical windows
@@ -87,6 +95,9 @@ struct kl_window {
 	uint32_t *shown;
 	uint32_t shown_width;
 	uint32_t shown_height;
+	/* The shortcuts of the window's menu: what a key chosen with Ctrl, Alt or Super held does. */
+	struct android_shortcut *shortcuts;
+	size_t shortcut_count;
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
 	int text_input;
@@ -179,6 +190,15 @@ void android_clipboard_bridge(struct kl_app *app, const struct keiland_bridge_ev
 void android_theme_bridge(struct kl_app *app, const struct keiland_bridge_event *event);
 
 /* titlebar.c */
+
+/*
+ * Turns a key pressed with Ctrl, Alt or Super held into the action of the window's menu item that has it
+ * as its shortcut (a KL_WINDOW_ACTION input).  Returns 1 when an item had it, 0 when none did.
+ */
+int android_titlebar_shortcut(struct kl_window *window, int32_t keycode, int32_t meta);
+
+/* Lets the shortcuts kept for a window go. */
+void android_titlebar_release(struct kl_window *window);
 
 /* Returns 1 when the strip of the window's titlebar took a press at (x, y) (pixels of the window). */
 int android_titlebar_hit(struct kl_window *window, double x, double y, int pressed);

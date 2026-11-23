@@ -76,6 +76,9 @@ public final class KeilandBridge {
 	/** The answer to a menu: the request's number and the chosen item, or -1 when it was dismissed. */
 	static native void nativeMenu(int request, int item);
 
+	/** A key of the key bar: the Android key code, the meta state (KeyEvent's META_*_ON bits) and whether it is pressed. */
+	static native void nativeKey(int keycode, int meta, boolean down);
+
 	/** Runs the work on the main thread, where an exception is the work's own and never reaches the native thread. */
 	private static void post(final Runnable work) {
 		MAIN.post(new Runnable() {

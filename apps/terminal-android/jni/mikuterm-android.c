@@ -73,6 +73,9 @@ struct main_state {
 static struct main_state main_state;
 
 static void main_read_conf(struct mikuterm_conf *conf);
+#if !MIKUTERM_ANDROID_ECHO
+static void main_connector_init(struct mikuterm_connector *connector, const struct mikuterm_conf *conf);
+#endif
 static void main_forget_passphrases(void *data);
 static void main_ended(void *data, const struct terminal_run_result *result);
 
@@ -82,7 +85,6 @@ static void main_ended(void *data, const struct terminal_run_result *result);
 void
 mikuterm_android_main(void)
 {
-	struct mikuterm_connect_options connect;
 	const struct terminal_page_program *page;
 	struct terminal_run_options run;
 	struct terminal_run_result result;
@@ -123,16 +125,7 @@ mikuterm_android_main(void)
 	main_state.connector.connector.operation = "echo_connector_open";
 	main_state.connector.connector.data = NULL;
 #else
-	memset(&connect, 0, sizeof(connect));
-	connect.term = main_state.conf.term;
-	connect.connect = main_state.conf.connect;
-	connect.connect_timeout = main_state.conf.connect_timeout;
-	connect.wsl_port = main_state.conf.wsl_port;
-	connect.x11_scale = main_state.conf.x11_scale;
-	connect.x11_render_cpu = main_state.conf.x11_render_cpu;
-	connect.x11_primary = main_state.conf.x11_primary;
-	connect.notice = main_state.conf.problems;
-	mikuterm_connector_init(&main_state.connector, &connect);
+	main_connector_init(&main_state.connector, &main_state.conf);
 #endif
 
 	/* The settings' tab: the folder's ssh/ files and mikuterm.conf (none when the folder's path is too long for them). */
@@ -236,6 +229,29 @@ mikuterm_font(
 	/* Succeeded: the path (the run says so when the font is not there). */
 	return 0;
 }
+
+#if !MIKUTERM_ANDROID_ECHO
+/* Makes the tabs' connector from the settings: SSH connections, the first to the Connect host when the settings name one. */
+static void
+main_connector_init(
+	struct mikuterm_connector *connector,
+	const struct mikuterm_conf *conf)
+{
+	struct mikuterm_connect_options connect;
+
+	/* What the settings say of the connections. */
+	memset(&connect, 0, sizeof(connect));
+	connect.term = conf->term;
+	connect.connect = conf->connect;
+	connect.connect_timeout = conf->connect_timeout;
+	connect.wsl_port = conf->wsl_port;
+	connect.x11_scale = conf->x11_scale;
+	connect.x11_render_cpu = conf->x11_render_cpu;
+	connect.x11_primary = conf->x11_primary;
+	connect.notice = conf->problems;
+	mikuterm_connector_init(connector, &connect);
+}
+#endif
 
 /* Reads config/mikuterm.conf into the settings (its defaults when it is not there). */
 static void
