@@ -78,6 +78,10 @@
 /* The keypad's Enter, which <uapi/input.h> does not name. */
 #define SHELL_KEY_KPENTER	96U
 
+/* The keysyms of plus and of =, the key's character without Shift on the US layout (a shortcut on plus is also its = key). */
+#define SHELL_KEYSYM_PLUS	0x2bU
+#define SHELL_KEYSYM_EQUAL	0x3dU
+
 /* The modifier bits of the compositor's wl_keyboard.modifiers. */
 #define SEAT_SHIFT		0x01U
 #define SEAT_CTRL		0x04U
@@ -2298,10 +2302,12 @@ shell_shortcut_item(
 		if (item->keysym == 0U || item->modifiers != modifiers)
 			continue;
 
-		/* Its key in lower case, as the key's symbol is. */
+		/* Its key in lower case, as the key's symbol is; a plus is also its key's = without Shift. */
 		wanted = item->keysym;
 		if (wanted >= 'A' && wanted <= 'Z')
 			wanted = wanted - 'A' + 'a';
+		if (wanted == SHELL_KEYSYM_PLUS && keysym == SHELL_KEYSYM_EQUAL)
+			wanted = SHELL_KEYSYM_EQUAL;
 
 		/* An item with another key is passed. */
 		if (wanted != keysym)

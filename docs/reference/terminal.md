@@ -129,12 +129,17 @@ tab's history. mikuterm has its own keys for the tabs on Windows
 | Shell > Settings... | F12 |
 | Edit > Copy, Paste, Select All | Ctrl+Shift+C, Ctrl+Shift+V, Ctrl+Shift+A |
 | Edit > Find..., Find Next, Find Previous | Ctrl+Shift+F, Ctrl+Shift+G, Ctrl+Shift+H |
-| View > Zoom In, Zoom Out, Normal Size | Ctrl++, Ctrl+-, Ctrl+0 |
+| View > Zoom In, Zoom Out, Normal Size | Ctrl+Alt++ (Ctrl+Alt+= too), Ctrl+Alt+-, Ctrl+0 |
 | View > Text Size, Theme | none |
 | View > Fullscreen | F11 |
 | View > Treat Ambiguous-Width Characters as Wide | Alt+F11 (kept in `terminal.ambiguous-wide` at once) |
 | Session > Send Interrupt, Send End of File, Clear Screen, Reset Terminal | none |
 | Help > About Terminal | none |
+
+Zoom In and Zoom Out take Alt with Control so that Ctrl+- and Ctrl+Shift+-
+(C-_, which sends 0x1F, Emacs' undo) reach the shell. Zoom In is the plus
+key's character with Control and Alt: Ctrl+Alt+Shift+= or Ctrl+Alt+= on a US
+keyboard, and the keypad's + and - work too.
 
 mikuterm has the same menus with the differences its reference lists
 ([mikuterm](mikuterm.md), section 8).

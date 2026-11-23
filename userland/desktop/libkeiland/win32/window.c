@@ -1343,7 +1343,10 @@ window_key(
 	int complete;
 	int dead;
 	int taken;
+	int altgr_text;
+	int shifted;
 	unsigned held;
+	uint32_t own;
 
 	/* A key the input method takes is its own. */
 	if (wparam == VK_PROCESSKEY)
@@ -1434,8 +1437,28 @@ window_key(
 		return;
 	}
 
+	/*
+	 * Control with Alt that types a character in the layout other than
+	 * the key's own (AltGr's, which Windows makes of Control and Alt)
+	 * types it: the key is not a shortcut, and its text goes without the
+	 * two modifiers, as AltGr's.  A key that types its own character so
+	 * (the keypad's plus) stays a shortcut.
+	 */
+	altgr_text = 0;
+	if (!flags.released && count != 0U) {
+		held = window_modifiers();
+		if ((held & KL_MOD_CTRL) != 0U && (held & KL_MOD_ALT) != 0U) {
+			shifted = 0;
+			if ((held & KL_MOD_SHIFT) != 0U)
+				shifted = 1;
+			own = window_layout_character(wparam, flags.scan, shifted);
+			if ((uint32_t)units[0] != own)
+				altgr_text = 1;
+		}
+	}
+
 	/* A press may be the shortcut of an item of the menu, which takes it with its release. */
-	if (!flags.released && window->menu_count != 0U) {
+	if (!flags.released && window->menu_count != 0U && !altgr_text) {
 		taken = window_shortcut(window, wparam, flags.scan, code);
 		if (taken) {
 			window->eaten_key = code;
@@ -1460,6 +1483,8 @@ window_key(
 		input->repeated = 1;
 	if (count != 0U)
 		(void)keiui_win32_utf8_from_utf16(units, count, input->text, sizeof(input->text), NULL);
+	if (altgr_text)
+		input->modifiers &= ~(unsigned)(KL_MOD_CTRL | KL_MOD_ALT);
 
 	/* A press with Control types no character: its text is the one the key types without Control. */
 	if (input->pressed &&

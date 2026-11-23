@@ -338,8 +338,11 @@ Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
 
 The function keys F1 to F11 go to the host (htop, mc).  mikuterm's own keys
 are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide),
-Alt+Enter (Fullscreen) and Ctrl+Alt with a digit, Page Up or Page Down (the
-tabs, section 2).
+Alt+Enter (Fullscreen), Ctrl+Alt with a digit, Page Up or Page Down (the
+tabs, section 2), and Ctrl+Alt+Plus (or =) and Ctrl+Alt+Minus (View > Zoom
+In and Zoom Out); Ctrl+Minus and Ctrl+Shift+Minus (C-_) go to the host.  On a
+layout whose AltGr types a character on the plus or minus key, Ctrl+Alt with
+that key types the character, and the keypad's + and - zoom.
 
 
 8. Fonts
