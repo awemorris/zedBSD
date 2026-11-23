@@ -7,8 +7,10 @@
 
 /*
  * A mouse's pointer acceleration (pointer-accel.c, ws089-p024): turns a
- * relative motion in the mouse's counts into pixels at the user's speed
- * (a percentage) and a gain that grows with how fast the mouse moves.
+ * relative motion in the mouse's counts into units of the plane at the
+ * user's speed (a percentage) and a gain that grows with how fast the
+ * mouse moves: whole units, or 256ths of a unit on an output at another
+ * scale than 100 %, where a unit is more than a pixel.
  *
  * It knows nothing of the seat: the caller hands it each report's motion
  * with the report's time and moves the pointer by what it gives back
@@ -42,5 +44,6 @@ struct kwl_pointer_accel {
 void kwl_pointer_accel_init(struct kwl_pointer_accel *accel);
 int64_t kwl_pointer_accel_gain(int64_t counts_per_second, int32_t level);
 void kwl_pointer_accel_move(struct kwl_pointer_accel *accel, int64_t dx, int64_t dy, uint64_t time_us, int32_t speed, int32_t level, int64_t *pixels_x, int64_t *pixels_y);
+void kwl_pointer_accel_move_fine(struct kwl_pointer_accel *accel, int64_t dx, int64_t dy, uint64_t time_us, int32_t speed, int32_t level, int64_t *fine_x, int64_t *fine_y);
 
 #endif

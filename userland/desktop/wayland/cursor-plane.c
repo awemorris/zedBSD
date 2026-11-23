@@ -481,6 +481,28 @@ kwl_cursor_plane_update(
 }
 
 /*
+ * Parks the cursor thread and leaves the plane empty, so that the thread
+ * reads no image the main thread is about to let go (the arrow and the
+ * shapes made again at another scale, cursor.c).  The next
+ * kwl_cursor_plane_update ends the park and shows the cursor again.
+ */
+void
+kwl_cursor_plane_forget(
+	struct kwl_server *server)
+{
+	struct kwl_cursor_plane *plane;
+
+	/* Only an open plane. */
+	if (server->compose == NULL || !server->compose->cursor_plane.open)
+		return;
+	plane = &server->compose->cursor_plane;
+
+	/* Parked, then shown nothing: the thread looks at the box again only after the park. */
+	kwl_cursor_plane_hold(server);
+	plane_publish(server, plane, NULL, 0, 0, 0U);
+}
+
+/*
  * Parks the cursor thread while the scheduler shows nothing (the game mode,
  * a sleep's request, a mode switch waiting): the plane is not presented
  * then.  The next kwl_cursor_plane_update ends the park.  A thread that
@@ -514,7 +536,8 @@ kwl_cursor_plane_hold(
 /*
  * Finds what the plane shows: 1 with an image and its hotspot, 0 for
  * nothing, -1 when the cursor must be composed (a drag, an image the
- * plane cannot show, a rotated output or one at another scale).  The output the pointer is on
+ * plane cannot show, a rotated output, a client's cursor on an output at
+ * another scale).  The output the pointer is on
  * is the cursor thread's to judge, from the box.
  */
 static int
@@ -525,6 +548,7 @@ plane_state(
 	int32_t *hotspot_y)
 {
 	struct kwl_cursor_plane *plane;
+	int fixed;
 	int state;
 
 	/*
@@ -535,18 +559,24 @@ plane_state(
 	if (server->compose->rotation != KWL_ROTATE_0)
 		return -1;
 
-	/*
-	 * An output shown at another scale than 100 % composes the cursor:
-	 * the plane would show the cursor's image unscaled, at the pointer's
-	 * logical place.
-	 */
-	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
-		return -1;
-
 	/* The cursor as the frames would draw it. */
 	state = kwl_compose_cursor_source(server, image, hotspot_x, hotspot_y);
 	if (state <= 0)
 		return state;
+
+	/*
+	 * On an output shown at another scale than 100 % the plane shows only
+	 * the compositor's own images drawn at that scale, a pixel for a pixel
+	 * (a client's cursor, of its logical size, is composed and scaled).
+	 * The hotspot is given in the image's pixels.
+	 */
+	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE) {
+		fixed = plane_fixed(server, *image);
+		if (!fixed || server->cursor_scale120 != server->scale120)
+			return -1;
+		*hotspot_x = kwl_scale_snap(*hotspot_x, server->scale120);
+		*hotspot_y = kwl_scale_snap(*hotspot_y, server->scale120);
+	}
 
 	/* Only a host-written image (the arrow, the shapes, a wl_shm cursor) that fits the plane. */
 	if ((*image)->staging == VK_NULL_HANDLE ||

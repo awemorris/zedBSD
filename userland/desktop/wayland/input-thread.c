@@ -961,6 +961,7 @@ input_frame(
 	int64_t moved_x;
 	int64_t moved_y;
 	unsigned absolute_seen;
+	unsigned fine;
 	unsigned index;
 
 	/* The event that carries the report to the main thread. */
@@ -1016,13 +1017,22 @@ input_frame(
 
 	/*
 	 * The relative movement at the mouse's speed and acceleration
-	 * (ws089-p024), the fractions of a pixel carried to the next report so
-	 * that a slow pointer still moves.
+	 * (ws089-p024), in units of the plane, the fractions of a unit carried
+	 * to the next report so that a slow pointer still moves.  On an output
+	 * at another scale than 100 % a mouse alone moves in 256ths of a unit,
+	 * the pointer keeping its place between units (cursor-box.c).
 	 */
+	fine = 0U;
 	if (delta_x != 0 || delta_y != 0) {
 		if (frame != NULL)
 			frame->placed = 1U;
-		kwl_pointer_accel_move(&reader->accel, delta_x, delta_y, reader->frame_time_us, input->own_settings.mouse_speed, input->own_settings.mouse_acceleration, &moved_x, &moved_y);
+		if (!absolute_seen)
+			fine = kwl_cursor_box_fine(input->box);
+		if (fine) {
+			kwl_pointer_accel_move_fine(&reader->accel, delta_x, delta_y, reader->frame_time_us, input->own_settings.mouse_speed, input->own_settings.mouse_acceleration, &moved_x, &moved_y);
+		} else {
+			kwl_pointer_accel_move(&reader->accel, delta_x, delta_y, reader->frame_time_us, input->own_settings.mouse_speed, input->own_settings.mouse_acceleration, &moved_x, &moved_y);
+		}
 		delta_x = moved_x;
 		delta_y = moved_y;
 	}
@@ -1041,7 +1051,10 @@ input_frame(
 			input_motion_times(input, reader, &frame->motion);
 		}
 	} else if (delta_x != 0 || delta_y != 0) {
-		if (frame != NULL) {
+		if (frame != NULL && fine) {
+			kwl_cursor_box_move_fine(input->box, delta_x, delta_y, reader->frame_time_us, &frame->motion);
+			input_motion_times(input, reader, &frame->motion);
+		} else if (frame != NULL) {
 			kwl_cursor_box_move(input->box, delta_x, delta_y, reader->frame_time_us, &frame->motion);
 			input_motion_times(input, reader, &frame->motion);
 		}
