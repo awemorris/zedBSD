@@ -3747,7 +3747,7 @@ thread_x11_start(
 	}
 	link->x11_cookie[X11_HOST_COOKIE * 2U] = '\0';
 
-	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy, the root window of its Host in ssh\config, the tabs. */
+	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy, and the root window and the tabs of its Host in ssh\config. */
 	(void)snprintf(settings.host, sizeof(settings.host), "%s", link->target->title);
 	settings.scale = link->session->x11_scale;
 	settings.root_width = link->config.x11_root_width;
@@ -3759,7 +3759,7 @@ thread_x11_start(
 		settings.flags |= X11_HOST_PRIMARY;
 	if (link->session->x11_render_cpu)
 		settings.flags |= X11_HOST_RENDER_CPU;
-	if (link->session->x11_tabify)
+	if (link->config.x11_window_tabify)
 		settings.flags |= X11_HOST_TABIFY;
 	x11_host_init(&link->x11_host, &settings);
 

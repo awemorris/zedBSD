@@ -47,7 +47,7 @@
 #define X11_LINK_SHUTDOWN	9U
 
 /*
- * The frames of the X windows shown in mikuterm's tabs (the settings'
+ * The frames of the X windows shown in mikuterm's tabs (a Host's
  * X11WindowTabify), each with the X window's id as its link id.  The
  * child sends a tab's opening (its size in X's pixels, the X server's
  * scale in percent and its title), a new title, a new size, a part of its

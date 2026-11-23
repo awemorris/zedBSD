@@ -20,8 +20,17 @@
 #	ForwardX11 yes
 #	X11RootWindow 1920x1080
 #
-# X11RootWindow is mikuterm's own; for a file OpenSSH reads too, put
-# "IgnoreUnknown X11RootWindow" before the first Host line.
+# The host's X programs' main windows as tabs of mikuterm's window, beside
+# the tab of the connection (dialogs and menus stay windows of their own):
+#
+#Host tabs
+#	HostName server.example.org
+#	ForwardX11 yes
+#	X11WindowTabify yes
+#
+# X11RootWindow and X11WindowTabify are mikuterm's own; for a file OpenSSH
+# reads too, put "IgnoreUnknown X11RootWindow,X11WindowTabify" before the
+# first Host line.
 #
 # WSL: [w] on a new tab's screen connects to a distribution's own sshd
 # (port 22) without anything here.  A Host named wsl-<name> changes how one

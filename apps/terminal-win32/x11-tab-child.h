@@ -7,7 +7,7 @@
 
 /*
  * The X server process's side of the X windows shown in mikuterm's tabs
- * (the settings' X11WindowTabify): a backend of the X server's core that
+ * (a Host's X11WindowTabify): a backend of the X server's core that
  * wraps the Windows backend.
  *
  * Each top-level X window that no other window owns and that has no shape

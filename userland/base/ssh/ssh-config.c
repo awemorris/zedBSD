@@ -156,11 +156,12 @@ enum ssh_keyword_id {
 	SSH_KW_REMOTE_COMMAND = 22,
 	SSH_KW_PROXY_COMMAND = 23,
 	SSH_KW_X11_ROOT_WINDOW = 24,
-	SSH_KW_LOCAL_FORWARD = 25,
-	SSH_KW_REMOTE_FORWARD = 26,
-	SSH_KW_HOST = 27,
-	SSH_KW_IGNORE_UNKNOWN = 28,
-	SSH_KW_NONE = 29
+	SSH_KW_X11_WINDOW_TABIFY = 25,
+	SSH_KW_LOCAL_FORWARD = 26,
+	SSH_KW_REMOTE_FORWARD = 27,
+	SSH_KW_HOST = 28,
+	SSH_KW_IGNORE_UNKNOWN = 29,
+	SSH_KW_NONE = 30
 };
 
 /*
@@ -332,6 +333,7 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "RemoteCommand", CONFIG_KIND_ACTED, SSH_KW_REMOTE_COMMAND },
 	{ "ProxyCommand", CONFIG_KIND_ACTED, SSH_KW_PROXY_COMMAND },
 	{ "X11RootWindow", CONFIG_KIND_ACTED, SSH_KW_X11_ROOT_WINDOW },
+	{ "X11WindowTabify", CONFIG_KIND_ACTED, SSH_KW_X11_WINDOW_TABIFY },
 	{ "IgnoreUnknown", CONFIG_KIND_ACTED, SSH_KW_IGNORE_UNKNOWN },
 	{ "LocalForward", CONFIG_KIND_ACTED, SSH_KW_LOCAL_FORWARD },
 	{ "RemoteForward", CONFIG_KIND_ACTED, SSH_KW_REMOTE_FORWARD },
@@ -825,6 +827,10 @@ ssh_config_defaults(
 		config->x11_root_width = 0;
 		config->x11_root_height = 0;
 	}
+
+	/* The remote X windows not in tabs. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_X11_WINDOW_TABIFY)) == 0)
+		config->x11_window_tabify = 0;
 
 	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
@@ -2645,6 +2651,9 @@ ssh_value(
 		return status;
 	case SSH_KW_X11_ROOT_WINDOW:
 		status = ssh_value_root(target, parsed, what);
+		return status;
+	case SSH_KW_X11_WINDOW_TABIFY:
+		status = config_value_bool(parsed, &target->x11_window_tabify, what);
 		return status;
 	default:
 		break;
