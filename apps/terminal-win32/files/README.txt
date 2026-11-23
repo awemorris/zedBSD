@@ -421,7 +421,10 @@ from 320x200 to 7680x4320) in the host's block of ssh/config,
 the X programs of a connection to that host do not get windows of their own
 but are drawn in one window of that size, the whole X screen, which opens
 with the first X program.  Start a window manager in the tab
-(twm &, or openbox-session &) to frame and move them.  Every key typed in
+(twm &, or openbox-session &) to frame and move them.  The server has no
+Composite: with Xfce, turn xfwm4's compositor off (xfwm4 --compositor=off,
+or xfconf-query -c xfwm4 -p /general/use_compositing -s false), or it
+paints black over the windows.  Every key typed in
 that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
 key.  Closing the window ends every X program of the connection.  The window
 opens at the size set and may be resized or maximized: the X screen takes
