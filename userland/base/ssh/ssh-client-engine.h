@@ -96,9 +96,6 @@
 /* The most identity files one engine tries. */
 #define SSH_ENGINE_IDENTITIES_MAX	SSH_CONFIG_KEYS_MAX
 
-/* The identity of an event that names none (SSH_ENGINE_AUTHENTICATED after a password). */
-#define SSH_ENGINE_IDENTITY_NONE	((unsigned)-1)
-
 /* How many times a password is asked for (OpenSSH's NumberOfPasswordPrompts default). */
 #define SSH_ENGINE_PASSWORD_TRIES	3U
 
@@ -150,11 +147,7 @@ enum ssh_engine_event_kind {
 	 */
 	SSH_ENGINE_PASSWORD = 3,
 
-	/*
-	 * The server accepted the user: identity is the identity whose key it
-	 * took (its place in the options' identities), or
-	 * SSH_ENGINE_IDENTITY_NONE when it took a password or no method.
-	 */
+	/* The server accepted the user. */
 	SSH_ENGINE_AUTHENTICATED = 4,
 
 	/* The shell or the command started; pty is 1 when the server gave the terminal asked for. */
