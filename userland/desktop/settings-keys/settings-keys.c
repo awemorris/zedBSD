@@ -19,32 +19,29 @@
 /*
  * Every setting the desktop knows, in the order the compositor reports
  * them.  The compositor's keys come first; the ranges are the ones
- * the compositor and Settings used before (ws089-p007).  appearance.accent
- * (ws179-p001) is the accent the user chose, 0 blue to 7 graphite
- * (artwork/accent.h).  The pointer is set for
- * a mouse and for the touch pads apart (ws089-p024): the speed in percent,
- * the acceleration's level (0 none, 1 mild, 2 medium, 3 strong) and the
- * natural scrolling; a mouse 150% and strong without natural scrolling, a
- * touch pad 100% and medium (the curve of ws159-p004) with it.  The
- * language of the interface (WS158) is 0 English or 1 Japanese
- * (kl_tr_language_code).  welcome.done (ws164-p002) is 1 once an account
- * has taken or skipped the Welcome.  mail.codes.browser (ws169-p002) lets
- * the browser hear the arrivals of mail and their sign-in codes, off until
- * the user allows it in Mail.  notify.allow.<application> (ws177-p026)
- * lets an application's notifications show, on unless the user turns it
- * off on Settings' Notifications page (Mail, Calendar, Phone, Browser).
- * phone.backend (ws170-p004) chooses the
- * phone's backend: 0 none, 1 loopback (the tests' and a demo's), 2 the paired
- * phone by Bluetooth (ws197-p004a, set by Settings' "Use as phone").  The one
- * pointer setting of before (pointer.*) is only read, to be moved to the
- * mouse's (settings.c).  Files keeps the width of each list column the
- * user dragged (BUG-220), in pixels, 0 for the column's own width.
- * notes.clean-copy-told (ws177-p011) is 1 once Notes told, after a clean
- * copy, that the notebook itself keeps what was removed in its history.
- * power.sleep.ac and power.sleep.battery (ws052-p012) are the minutes
- * without input before the machine sleeps, on the power adapter and on
- * battery (0 never, which they are unless chosen); the screen goes out at
- * half that time.
+ * the compositor and Settings used before.  appearance.accent is the
+ * accent the user chose, 0 blue to 7 graphite (artwork/accent.h).  The
+ * pointer is set for a mouse and for the touch pads apart: the speed in
+ * percent, the acceleration's level (0 none, 1 mild, 2 medium, 3 strong)
+ * and the natural scrolling; a mouse 150% and strong without natural
+ * scrolling, a touch pad 100% and medium with it.  The language of the
+ * interface is 0 English or 1 Japanese (kl_tr_language_code).
+ * welcome.done is 1 once an account has taken or skipped the Welcome.
+ * mail.codes.browser lets the browser hear the arrivals of mail and their
+ * sign-in codes, off until the user allows it in Mail.
+ * notify.allow.<application> lets an application's notifications show, on
+ * unless the user turns it off on Settings' Notifications page (Mail,
+ * Calendar, Phone, Browser).  phone.backend chooses the phone's backend:
+ * 0 none, 1 loopback (the tests' and a demo's), 2 the paired phone by
+ * Bluetooth (set by Settings' "Use as phone").  The one pointer setting of
+ * before (pointer.*) is only read, to be moved to the mouse's
+ * (settings.c).  Files keeps the width of each list column the user
+ * dragged, in pixels, 0 for the column's own width.
+ * notes.clean-copy-told is 1 once Notes told, after a clean copy, that the
+ * notebook itself keeps what was removed in its history.
+ * power.sleep.ac and power.sleep.battery are the minutes without input
+ * before the machine sleeps, on the power adapter and on battery (0 never,
+ * which they are unless chosen); the screen goes out at half that time.
  * power.lock is the minutes without input before a login session locks
  * its screen (0 never, which it is unless chosen).
  * terminal.font and terminal.fallback-font are the font files the

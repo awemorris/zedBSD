@@ -6,7 +6,7 @@
  */
 
 /*
- * The input of a window (ws090-p003, plan/ws090/design.md section 4):
+ * The input of a window:
  * which part of a frame a pointer, the wheel or a finger meant.
  *
  * Each frame records the parts that take input -- widgets, scroll
@@ -46,14 +46,14 @@
 /* The evdev code of Tab, which moves the focus. */
 #define UI_KEY_TAB		15U
 
-/* The evdev codes of the editing commands' letters (ws177-p013): Z, Y, C, X and V. */
+/* The evdev codes of the editing commands' letters: Z, Y, C, X and V. */
 #define UI_KEY_Z		44U
 #define UI_KEY_Y		21U
 #define UI_KEY_C		46U
 #define UI_KEY_X		45U
 #define UI_KEY_V		47U
 
-/* The evdev code of A, whose Ctrl+A the bar's Select All sends (ws190-p002). */
+/* The evdev code of A, whose Ctrl+A the bar's Select All sends. */
 #define UI_KEY_A		30U
 
 /* The most changes a text widget's history keeps (the oldest goes first). */
@@ -65,7 +65,7 @@
 
 /*
  * How far round a widget's region a change of the lit widget may draw
- * (pixels: a lit row's ground, a ring, a shadow; BUG-226).
+ * (pixels: a lit row's ground, a ring, a shadow).
  */
 #define UI_DAMAGE_MARGIN	8
 
@@ -102,7 +102,7 @@ struct ui_record {
 	struct kl_text_touch *touch;
 
 	/*
-	 * A handle of the fingers' selection (UI_KIND_HANDLE, ws190-p002): the
+	 * A handle of the fingers' selection (UI_KIND_HANDLE): the
 	 * text box its touch's content is in (rect is the knob's reach), and
 	 * the knob's centre, around which a finger finds it.  index is the end
 	 * (KL_TEXT_HANDLE_ANCHOR or _CARET).
@@ -128,7 +128,7 @@ struct ui_undo_step {
 };
 
 /*
- * The history of the text widget last edited (ws177-p013): its id, the
+ * The history of the text widget last edited: its id, the
  * changes (count of them, done of them not taken back), and the hash of
  * its text after the last one done, which tells a text the application
  * set itself (the history then no longer applies).  valid is 0 while no
@@ -154,7 +154,7 @@ struct ui_key {
 /*
  * A key pressed for the widget that had the focus then (a Tab after it
  * moves the focus on), and whether that widget took it.  Since KL_VERSION
- * 38 (BUG-203) it may instead be a text an input method or the on-screen
+ * 38 it may instead be a text an input method or the on-screen
  * keyboard sent for that widget (kind): text to put in place of the
  * selection, or bytes to delete around it.  Keys and texts wait in one
  * queue so that a text field carries them out in the order they came.
@@ -192,7 +192,7 @@ struct kl_ui {
 	/*
 	 * The widget lit when the last frame that drew the lighting was drawn
 	 * (kl_ui_end, ui_settle_lighting), and whether the lit widget changed
-	 * since (ws210-p014 F1): the part a frame needs for the lighting is
+	 * since: the part a frame needs for the lighting is
 	 * that widget and the one lit now, whatever the pointer passed over in
 	 * between, so a frame late behind the pointer draws no trail of the
 	 * rows it crossed.
@@ -236,18 +236,18 @@ struct kl_ui {
 	uint64_t now_us;
 
 	/*
-	 * The scroll a touch pad's two fingers hold (KL_VERSION 40, BUG-211):
+	 * The scroll a touch pad's two fingers hold (KL_VERSION 40):
 	 * the one under the pointer when they began, until they lift.  It is
 	 * the application's; it is looked for among the frame's scrolls before
 	 * each use, as the application may have let it go.  NULL when none.
 	 */
 	struct kl_scroll *axis_scroll;
 
-	/* The keyboard inset last acted on (ui_inset's serial, ws102-p015). */
+	/* The keyboard inset last acted on (ui_inset's serial). */
 	unsigned inset_serial;
 
 	/*
-	 * The text an input method is composing (BUG-203): the text, its
+	 * The text an input method is composing: the text, its
 	 * cursor's byte offsets (-1 when hidden), and the widget that had the
 	 * focus when it came, which shows it at its caret.  An empty text is
 	 * none; the widget drawn without the focus drops it.
@@ -268,9 +268,9 @@ struct kl_ui {
 	struct kl_rect text_shown_caret;
 
 	/*
-	 * The parts of the window the next frame needs drawn again (BUG-226,
-	 * ws210-p014 F3): the regions of widgets whose look changed in the
-	 * frame shown, with UI_DAMAGE_MARGIN round them, and what the
+	 * The parts of the window the next frame needs drawn again: the regions
+	 * of widgets whose look changed in the frame shown, with
+	 * UI_DAMAGE_MARGIN round them, and what the
 	 * application added (kl_ui_damage), as at most KL_FRAME_PARTS_MAX
 	 * rectangles, near ones merged.  damage_whole when a change could not
 	 * be placed (the whole window).  Kept until kl_ui_take_damage or
@@ -281,7 +281,7 @@ struct kl_ui {
 	struct kl_rect damage[KL_FRAME_PARTS_MAX];
 
 	/*
-	 * ws177-p013: the window the input is of, with its clipboard's calls
+	 * The window the input is of, with its clipboard's calls
 	 * (kl_ui_window_text ties them; NULL before: the clipboard is then
 	 * none), and the text widgets' history of changes.
 	 */
@@ -291,7 +291,7 @@ struct kl_ui {
 	struct ui_undo undo;
 
 	/*
-	 * ws190-p002: the window's calls the bar asks of it (whether the
+	 * The window's calls the bar asks of it (whether the
 	 * clipboard has text, the keyboard's inset; NULL before
 	 * kl_ui_window_text), the fingers' selection, whether the program
 	 * turned it off and where its bar may stand (kl_ui_set_text_bar), the
@@ -313,7 +313,7 @@ struct kl_ui {
 
 /*
  * The on-screen keyboard's inset a window heard last (window.c,
- * keiui_ui_inset_note; ws102-p015): a serial counted up with each, the
+ * keiui_ui_inset_note): a serial counted up with each, the
  * window's size, the widths covered from its right and bottom edges, and
  * the reason (KL_KEYBOARD_INSET_*), and the caret's rectangle in the
  * window the application told (kl_window_text_cursor; height 0 when it
@@ -405,7 +405,7 @@ kl_ui_create(void)
 		return NULL;
 	}
 
-	/* The fingers' selection's scroll (ws190-p002), which the records of a frame may point at until the input goes. */
+	/* The fingers' selection's scroll, which the records of a frame may point at until the input goes. */
 	error = kl_scroll_init(&ui->select.scroll, KL_SCROLL_X);
 	if (error != 0) {
 		kl_ui_destroy(ui);
@@ -535,7 +535,7 @@ kl_ui_pointer_leave(
 
 /*
  * Forgets the press the pointer holds on a widget without a click
- * (KL_VERSION 70, ws189-p002): the press became a drag and drop, whose
+ * (KL_VERSION 70): the press became a drag and drop, whose
  * release the compositor keeps.  Returns 1 when a press was held.
  */
 int
@@ -556,7 +556,7 @@ kl_ui_pointer_cancel(
 /*
  * Takes the part of the window that the changes of the lit widget since
  * the last frame (kl_ui_pointer_motion, kl_ui_pointer_leave) need drawn
- * again, when that is all that changed (KL_VERSION 62, BUG-226): the
+ * again, when that is all that changed (KL_VERSION 62): the
  * application may draw its next frame within it alone (kl_canvas_clip_push
  * round the whole drawing; the rest of the frame keeps its pixels).
  * Returns 1 with the part, 0 when there is none, or when the whole window
@@ -779,7 +779,7 @@ kl_ui_wheel(
 }
 
 /*
- * Takes a window's scrolling input (KL_VERSION 40, BUG-211): a wheel's
+ * Takes a window's scrolling input (KL_VERSION 40): a wheel's
  * axis event glides the scroll under the pointer as kl_ui_wheel does; a
  * touch pad's fingers hold the scroll under the pointer when they began
  * and move it at once, and their end (KL_WINDOW_AXIS_STOP) lets it fly on.
@@ -891,7 +891,7 @@ kl_ui_touch_down(
 		}
 
 		/*
-		 * A handle of the fingers' selection under the finger (ws190-p002)
+		 * A handle of the fingers' selection under the finger
 		 * is the touch's region, its content in the text box; the region
 		 * under it is kept, not pressed, for two fingers, which scroll it.
 		 */
@@ -1010,7 +1010,7 @@ kl_ui_begin(
 	ui->drawing_count = 0;
 	ui->text_drawing = 0;
 
-	/* The fingers' selection's field has not been drawn in it yet (ws190-p002). */
+	/* The fingers' selection's field has not been drawn in it yet. */
 	ui->select.drawn = 0;
 
 	/* A frame drawn covers the changes of the lit widget so far (the lighting's own is settled by kl_ui_end). */
@@ -1148,7 +1148,7 @@ kl_ui_end(
 	int lit;
 	int moved;
 
-	/* The fingers' selection's handles and bar over the frame, or its end (ws190-p002). */
+	/* The fingers' selection's handles and bar over the frame, or its end. */
 	ui_select_overlay(ui);
 
 	/* The lighting the frame was drawn with, when it drew the widgets concerned. */
@@ -1191,7 +1191,7 @@ kl_ui_end(
 		if (ui->keys[index].kind != KEIUI_INPUT_KEY)
 			continue;
 
-		/* The bar's command its field did not take is not the application's key (ws190-p002). */
+		/* The bar's command its field did not take is not the application's key. */
 		if (ui->keys[index].from_bar)
 			continue;
 
@@ -1613,7 +1613,7 @@ keiui_ui_take_activate(
 }
 
 /*
- * Tells which editing command a key with its modifiers is (ws177-p013):
+ * Tells which editing command a key with its modifiers is:
  * Ctrl+Z undo, Ctrl+Shift+Z and Ctrl+Y redo, Ctrl+C copy, Ctrl+X cut,
  * Ctrl+V paste, Ctrl+Left and Ctrl+Right a word (with Shift too).
  * Returns KEIUI_EDIT_NONE for any other key.
@@ -2108,7 +2108,7 @@ keiui_ui_now(
 }
 
 /*
- * Gives a window's input's fingers' selection (ws190-p002), which the
+ * Gives a window's input's fingers' selection, which the
  * text widgets put themselves in and draw it from.
  */
 struct keiui_select *
@@ -2365,9 +2365,9 @@ ui_find(
 
 /*
  * Adds the region of a widget of the frame shown, with UI_DAMAGE_MARGIN
- * round it, to the part a change of the lit widget needs drawn again
- * (BUG-226); a widget the frame shown has no region for asks for the whole
- * window.  No widget and a still widget (kl_ui_hit_still) add nothing.
+ * round it, to the part a change of the lit widget needs drawn again; a
+ * widget the frame shown has no region for asks for the whole window.
+ * No widget and a still widget (kl_ui_hit_still) add nothing.
  * Returns 1 when something is to be drawn again, 0 when nothing is.
  */
 static int
@@ -2451,10 +2451,9 @@ ui_take_lighting(
 }
 
 /*
- * Records the widget lit when the frame being ended was drawn (ws210-p014
- * F1, review-1 M1): when it recorded the widget lit now, or, with none lit
- * now, the widget lit when the frame before was drawn, it drew the
- * lighting as it is now.  A frame that recorded neither (a field's key
+ * Records the widget lit when the frame being ended was drawn: when it
+ * recorded the widget lit now, or, with none lit now, the widget lit when
+ * the frame before was drawn, it drew the lighting as it is now.  A frame that recorded neither (a field's key
  * worked out on a one-pixel canvas) drew no lighting and changes nothing.
  */
 static void
@@ -2862,7 +2861,7 @@ ui_gesture(
 		if (ui->caught)
 			break;
 
-		/* A tap on a handle of the fingers' selection keeps it as it is (ws190-p002). */
+		/* A tap on a handle of the fingers' selection keeps it as it is. */
 		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE)
 			break;
 
@@ -2905,7 +2904,7 @@ ui_gesture(
 		/* The tap is carried out. */
 		break;
 	case KL_GESTURE_LONG_PRESS:
-		/* A long press on a handle of the fingers' selection is nothing (ws190-p002). */
+		/* A long press on a handle of the fingers' selection is nothing. */
 		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE)
 			break;
 
@@ -2928,7 +2927,7 @@ ui_gesture(
 		ui->finger_y = gesture->y;
 		ui->edge_us = now_us;
 		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE && gesture->fingers == 1U) {
-			/* One finger on a handle of the fingers' selection drags that end (ws190-p002). */
+			/* One finger on a handle of the fingers' selection drags that end. */
 			ui->drag = UI_DRAG_SELECT;
 			ui_content(ui, gesture->x, gesture->y, &x, &y);
 			keiui_text_touch_hold(ui->touch_region.touch, (int)ui->touch_region.index, x, y);
@@ -2942,7 +2941,7 @@ ui_gesture(
 				ui->drag = UI_DRAG_SCROLL;
 			}
 		} else if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_NO_DRAG) != 0U) {
-			/* A drag that starts on the bar's buttons does nothing (ws190-p002). */
+			/* A drag that starts on the bar's buttons does nothing. */
 			ui->drag = UI_DRAG_NONE;
 		} else if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_DRAGGABLE) != 0U) {
 			ui->drag = UI_DRAG_WIDGET;
@@ -2972,7 +2971,7 @@ ui_gesture(
 			/*
 			 * The selection ends where the finger lifted.  A frame follows the
 			 * finger's resampled place, which lags it, and a quick stroke lifts
-			 * before any frame has followed it to its end (ws190-p003, T1-445).
+			 * before any frame has followed it to its end.
 			 */
 			ui->finger_x = gesture->x;
 			ui->finger_y = gesture->y;
@@ -3134,7 +3133,7 @@ ui_focus_press(
 	const struct ui_record *owner;
 	struct ui_key key;
 
-	/* A widget that keeps the focus where it is (the bar's buttons, ws190-p002). */
+	/* A widget that keeps the focus where it is (the bar's buttons). */
 	if (record != NULL && record->kind == UI_KIND_HIT && (record->flags & KEIUI_KEEP_FOCUS) != 0U)
 		return;
 

@@ -6,9 +6,9 @@
  */
 
 /*
- * An application's own settings, which libkeiland resolves itself (WS135
- * D3 (a), plan/ws135/design.md section 2.3): the keys <app>.<name> are the
- * lines <name>=<value> of ~/.config/keiland/<app>.conf.
+ * An application's own settings, which libkeiland resolves itself: the
+ * keys <app>.<name> are the lines <name>=<value> of
+ * ~/.config/keiland/<app>.conf.
  *
  * The file is read when the settings open, and a change rewrites it with
  * that line replaced (or taken out, for a key back at its default) and
