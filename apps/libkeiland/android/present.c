@@ -18,6 +18,7 @@
 #include <android/native_window.h>
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The system's format of the buffer: four bytes a pixel, red first. */
@@ -36,6 +37,7 @@ struct present_view {
 	int32_t top;
 };
 
+static int present_keep(struct kl_window *window, const uint32_t *pixels, size_t stride, const struct kl_rect *parts, unsigned count);
 static void present_fill(uint8_t *bits, int32_t stride, const ARect *area, const ARect *keep);
 static void present_rows(const ARect *area, const struct present_view *view);
 
@@ -90,8 +92,8 @@ kl_window_present_part(
 /*
  * Shows a frame of which some parts changed (count 0: the whole frame).  A
  * window that is not the one shown, or while nothing can be drawn in (no
- * native window, the Activity stopped), takes the frame and drops it: the
- * window is drawn again when it can be.
+ * native window, the Activity stopped), keeps the frame and shows nothing: the
+ * frame is painted when it can be (android_present_repaint).
  */
 int
 kl_window_present_parts(
@@ -110,10 +112,6 @@ kl_window_present_parts(
 		return EINVAL;
 	app = window->app;
 
-	/* Nothing to draw in, or not the window shown. */
-	if (app->native == NULL || !app->started || android_window_top(app) != window)
-		return 0;
-
 	/* No part named is the whole frame. */
 	if (count == 0U || parts == NULL) {
 		whole.x = 0;
@@ -124,13 +122,62 @@ kl_window_present_parts(
 		count = 1U;
 	}
 
+	/* The frame is kept, so that a native window made later (the Activity made again) can be painted without the program. */
+	error = present_keep(window, pixels, stride, parts, count);
+	if (error != 0)
+		return error;
+
+	/* Nothing to draw in, or not the window shown: the frame is painted when it can be. */
+	if (app->native == NULL || !app->started || android_window_top(app) != window)
+		return 0;
+
 	/* Written and posted. */
-	error = android_present_copy(app->native, app->insets, pixels, stride, window->width, window->height, parts, count);
+	error = android_present_copy(app->native, app->insets, window->shown, window->width, window->width, window->height, parts, count);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the frame is shown. */
 	return 0;
+}
+
+/*
+ * Paints the window on top again from the frame kept: the native window a new
+ * Activity gives has no picture, and a program draws again only for a change.
+ */
+void
+android_present_repaint(
+	struct kl_app *app)
+{
+	struct kl_rect whole;
+	struct kl_window *window;
+
+	/* A window that can be drawn in, with a frame of its size. */
+	window = android_window_top(app);
+	if (window == NULL || app->native == NULL || !app->started || window->shown == NULL)
+		return;
+	if (window->shown_width != window->width || window->shown_height != window->height)
+		return;
+
+	/* All of it. */
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = (int)window->width;
+	whole.height = (int)window->height;
+	(void)android_present_copy(app->native, app->insets, window->shown, window->width, window->width, window->height, &whole, 1U);
+}
+
+/*
+ * Lets the frame kept go.
+ */
+void
+android_present_release(
+	struct kl_window *window)
+{
+	/* The memory and its size. */
+	free(window->shown);
+	window->shown = NULL;
+	window->shown_width = 0U;
+	window->shown_height = 0U;
 }
 
 /*
@@ -351,4 +398,49 @@ present_rows(
 		target = view->bits + ((size_t)y * (size_t)view->stride + (size_t)area->left) * 4U;
 		android_pixels_row(target, source, (uint32_t)width);
 	}
+}
+
+/* Copies the parts of a frame into the frame kept (made again, black, when the window's size changed).  Returns 0 or ENOMEM. */
+static int
+present_keep(
+	struct kl_window *window,
+	const uint32_t *pixels,
+	size_t stride,
+	const struct kl_rect *parts,
+	unsigned count)
+{
+	unsigned index;
+	int32_t left;
+	int32_t top;
+	int32_t right;
+	int32_t bottom;
+	int32_t y;
+
+	/* A frame of the window's size. */
+	if (window->shown == NULL || window->shown_width != window->width || window->shown_height != window->height) {
+		android_present_release(window);
+		window->shown = calloc((size_t)window->width * (size_t)window->height, sizeof(uint32_t));
+		if (window->shown == NULL)
+			return ENOMEM;
+		window->shown_width = window->width;
+		window->shown_height = window->height;
+	}
+
+	/* Each part's rows. */
+	for (index = 0U; index < count; index++) {
+		left = parts[index].x < 0 ? 0 : parts[index].x;
+		top = parts[index].y < 0 ? 0 : parts[index].y;
+		right = parts[index].x + parts[index].width;
+		bottom = parts[index].y + parts[index].height;
+		if (right > (int32_t)window->width)
+			right = (int32_t)window->width;
+		if (bottom > (int32_t)window->height)
+			bottom = (int32_t)window->height;
+		for (y = top; y < bottom && left < right; y++)
+			memcpy(window->shown + (size_t)y * window->width + (size_t)left, pixels + (size_t)y * stride + (size_t)left,
+			    (size_t)(right - left) * sizeof(uint32_t));
+	}
+
+	/* Succeeded. */
+	return 0;
 }

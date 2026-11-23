@@ -82,6 +82,11 @@ struct kl_window {
 	uint32_t height;
 	unsigned present;
 	char *title;
+
+	/* The last frame shown (the window's width by height words, no padding), for a new native window to be painted from. */
+	uint32_t *shown;
+	uint32_t shown_width;
+	uint32_t shown_height;
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
 	int text_input;
@@ -126,6 +131,12 @@ struct kl_window *android_window_top(struct kl_app *app);
  */
 int android_present_copy(ANativeWindow *native, const int32_t insets[5], const uint32_t *pixels, size_t stride,
 	uint32_t width, uint32_t height, const struct kl_rect *parts, unsigned count);
+
+/* Paints the window on top again from the frame kept, when one of its size is there (a new native window has no picture). */
+void android_present_repaint(struct kl_app *app);
+
+/* Lets the frame kept go. */
+void android_present_release(struct kl_window *window);
 
 /* Turns count premultiplied 0xAARRGGBB words into R, G, B and an opaque A byte each. */
 void android_pixels_row(uint8_t *out, const uint32_t *in, uint32_t count);

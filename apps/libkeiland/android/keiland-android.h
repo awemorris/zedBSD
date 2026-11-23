@@ -186,6 +186,16 @@ int keiland_post_app(uint32_t code, void *data);
 int android_places_unpack(ANativeActivity *activity);
 
 /*
+ * Returns the scale of the screen the Activity is on, in 96ths (96 is 100 %): its
+ * density in dots per inch times 96 over 160.  Windows are drawn at this scale
+ * (kl_window_scale), so a program that is asked for the scale before a window
+ * is made (terminal_run's scale) gives this.
+ *
+ * Called on M; 96 while there is no Activity.
+ */
+unsigned keiland_android_scale(void);
+
+/*
  * Returns the looper of M, for a program that waits for more than the events.
  *
  * Called on M.

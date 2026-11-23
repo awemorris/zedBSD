@@ -48,7 +48,6 @@ static void app_bridge_drain(struct kl_app *app);
 static void app_bridge_event(struct kl_app *app, const struct keiland_bridge_event *event);
 static void app_posts_drain(struct kl_app *app);
 static void app_focus(struct kl_app *app, int focused);
-static unsigned app_scale(void);
 
 /*
  * Opens the application: the one of the process, with the scale of the
@@ -88,7 +87,7 @@ kl_app_open(
 	(void)snprintf(app->application, sizeof(app->application), "%s", application);
 
 	/* The scale of the screen, English until the system tells the language. */
-	app->scale = app_scale();
+	app->scale = keiland_android_scale();
 	(void)snprintf(app->language, sizeof(app->language), "%s", "en");
 
 	/* Succeeded: what the Activity queued before is seen by the first dispatch (the wake-up is still set). */
@@ -657,8 +656,8 @@ app_focus(
  * Returns the scale of the screen in 96ths: its density in dots per inch
  * over 160 (the system's medium), as 96 is a hundredth percent.
  */
-static unsigned
-app_scale(void)
+unsigned
+keiland_android_scale(void)
 {
 	ANativeActivity *activity;
 	AConfiguration *configuration;
