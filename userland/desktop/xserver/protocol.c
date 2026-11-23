@@ -136,8 +136,11 @@
 #define BIGREQ_ENABLE			0U
 #define XCMISC_NAME			"XC-MISC"
 
+/* RENDER's name. */
+#define RENDER_NAME			"RENDER"
+
 /* The extensions ListExtensions names. */
-#define EXTENSION_NAMES_MAX		3U
+#define EXTENSION_NAMES_MAX		4U
 
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -162,7 +165,7 @@ x11_setup_reply(
 	struct x11server *server,
 	struct x11_client *client)
 {
-	uint8_t reply[8 + 32 + 12 + 8 + 8 + 40 + 8 + 24 + 8];
+	uint8_t reply[8 + 32 + 12 + 5 * 8 + 40 + 8 + 24 + 8 + 8 + 8 + 8 + 24];
 	uint8_t *field;
 	int msb;
 
@@ -174,7 +177,7 @@ x11_setup_reply(
 	x11_write16(reply + 4, 0U, msb);
 	x11_write16(reply + 6, (uint16_t)((sizeof(reply) - 8U) / 4U), msb);
 
-	/* The fixed part: release, the client's ids, motion buffer, vendor length, request length, one screen and one format. */
+	/* The fixed part: release, the client's ids, motion buffer, vendor length, request length, one screen and five formats. */
 	field = reply + 8;
 	x11_write32(field, 1U, msb);
 	x11_write32(field + 4, client->base, msb);
@@ -182,7 +185,7 @@ x11_setup_reply(
 	x11_write16(field + 16, (uint16_t)(sizeof(SERVER_VENDOR) - 1U), msb);
 	x11_write16(field + 18, 65535U, msb);
 	field[20] = 1U;
-	field[21] = 2U;
+	field[21] = 5U;
 	field[22] = (uint8_t)msb;
 	field[23] = (uint8_t)msb;
 	field[24] = 32U;
@@ -194,13 +197,28 @@ x11_setup_reply(
 	field += 32;
 	memcpy(field, SERVER_VENDOR, sizeof(SERVER_VENDOR) - 1U);
 
-	/* The pixmap formats: depth 1, a bit a pixel, and depth 24, 32 bits a pixel, rows padded to 32 bits. */
+	/*
+	 * The pixmap formats, rows padded to 32 bits: depth 1, a bit a pixel;
+	 * depth 4 and 8, a byte a pixel; depth 24 and 32, 32 bits a pixel.
+	 */
 	field += 12;
 	field[0] = 1U;
 	field[1] = 1U;
 	field[2] = 32U;
 	field += 8;
+	field[0] = X11_DEPTH_NIBBLE;
+	field[1] = 8U;
+	field[2] = 32U;
+	field += 8;
+	field[0] = X11_DEPTH_ALPHA;
+	field[1] = 8U;
+	field[2] = 32U;
+	field += 8;
 	field[0] = X11_DEPTH;
+	field[1] = 32U;
+	field[2] = 32U;
+	field += 8;
+	field[0] = X11_DEPTH_ARGB;
 	field[1] = 32U;
 	field[2] = 32U;
 
@@ -216,13 +234,13 @@ x11_setup_reply(
 	x11_write16(field + 24, (uint16_t)(server->width * 254U / 96U / 10U), msb);
 	x11_write16(field + 26, (uint16_t)(server->height * 254U / 96U / 10U), msb);
 
-	/* One colormap installed at most and at least, the root visual, no backing store, depth 24, two depths. */
+	/* One colormap installed at most and at least, the root visual, no backing store, depth 24, five depths. */
 	x11_write16(field + 28, 1U, msb);
 	x11_write16(field + 30, 1U, msb);
 	x11_write32(field + 32, X11_VISUAL_XID, msb);
 	field[36] = 0U;
 	field[38] = X11_DEPTH;
-	field[39] = 2U;
+	field[39] = 5U;
 
 	/* The depth 24 with its one visual. */
 	field += 40;
@@ -243,6 +261,31 @@ x11_setup_reply(
 	field += 24;
 	field[0] = 1U;
 	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 4, with no visual. */
+	field += 8;
+	field[0] = X11_DEPTH_NIBBLE;
+	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 8 of the alpha masks, with no visual. */
+	field += 8;
+	field[0] = X11_DEPTH_ALPHA;
+	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 32 with its one visual. */
+	field += 8;
+	field[0] = X11_DEPTH_ARGB;
+	x11_write16(field + 2, 1U, msb);
+
+	/* The visual: TrueColor, 8 bits a channel, the same red, green and blue masks (alpha is the top byte). */
+	field += 8;
+	x11_write32(field, X11_VISUAL_ARGB_XID, msb);
+	field[4] = 4U;
+	field[5] = 8U;
+	x11_write16(field + 6, 256U, msb);
+	x11_write32(field + 8, 0x00ff0000U, msb);
+	x11_write32(field + 12, 0x0000ff00U, msb);
+	x11_write32(field + 16, 0x000000ffU, msb);
 
 	/* The reply, queued; a client that is already broken cannot take it. */
 	x11_client_send(server, client, reply, sizeof(reply));
@@ -684,6 +727,9 @@ protocol_dispatch(
 	case X11_XCMISC_MAJOR:
 		code = x11_xcmisc_request(server, index, request, length);
 		break;
+	case X11_RENDER_MAJOR:
+		code = x11_render_request(server, index, request, length);
+		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
 		if (length >= 4U)
@@ -918,8 +964,9 @@ protocol_query_best_size(
 }
 
 /*
- * QueryExtension: BIG-REQUESTS and XC-MISC are the core's own; any other
- * name is answered by GLX's table (present only for GLX).
+ * QueryExtension: BIG-REQUESTS, XC-MISC and RENDER are the core's own
+ * (RENDER with its first error); any other name is answered by GLX's
+ * table (present only for GLX).
  */
 static unsigned
 protocol_query_extension(
@@ -931,6 +978,7 @@ protocol_query_extension(
 	uint8_t reply[32];
 	size_t name_length;
 	uint8_t major;
+	uint8_t first_error;
 	int differs;
 
 	/* The name, filling the request to its last word. */
@@ -942,6 +990,7 @@ protocol_query_extension(
 
 	/* The core's own extensions by name. */
 	major = 0U;
+	first_error = 0U;
 	if (name_length == sizeof(BIGREQ_NAME) - 1U) {
 		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
 		if (differs == 0)
@@ -952,6 +1001,13 @@ protocol_query_extension(
 		if (differs == 0)
 			major = X11_XCMISC_MAJOR;
 	}
+	if (name_length == sizeof(RENDER_NAME) - 1U) {
+		differs = memcmp(request + 8, RENDER_NAME, name_length);
+		if (differs == 0) {
+			major = X11_RENDER_MAJOR;
+			first_error = X11_RENDER_ERROR;
+		}
+	}
 
 	/* Another name: GLX's answer. */
 	if (major == 0U) {
@@ -959,10 +1015,11 @@ protocol_query_extension(
 		return 0U;
 	}
 
-	/* Succeeded: present, with its major opcode and no events or errors. */
+	/* Succeeded: present, with its major opcode, no events, and its errors (if it has any). */
 	memset(reply, 0, sizeof(reply));
 	reply[8] = 1U;
 	reply[9] = major;
+	reply[11] = first_error;
 	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }
@@ -974,8 +1031,8 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX" };
-	uint8_t reply[32U + 32U];
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", RENDER_NAME };
+	uint8_t reply[32U + 96U];
 	size_t used;
 	size_t name_length;
 	unsigned index;

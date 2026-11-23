@@ -381,14 +381,15 @@ x11_draw_border(
 /*
  * Copies a pixmap for a window's background or border, charged to its
  * owner: *tile replaces the copy there was (whose charge *charged loses).
- * Returns 0, BadPixmap, BadMatch for a pixmap of another depth, or
- * BadAlloc.
+ * Returns 0, BadPixmap, BadMatch for a pixmap of another depth than the
+ * window's, or BadAlloc.
  */
 unsigned
 x11_draw_set_tile(
 	struct x11server *server,
 	unsigned owner,
 	uint32_t pixmap_id,
+	unsigned depth,
 	struct x11_image **tile,
 	size_t *charged)
 {
@@ -398,11 +399,11 @@ x11_draw_set_tile(
 	size_t bytes;
 	int error;
 
-	/* A pixmap of the screen's depth. */
+	/* A pixmap of the window's depth. */
 	pixmap = x11_pixmap_find(server, pixmap_id);
 	if (pixmap == NULL)
 		return X11_BAD_PIXMAP;
-	if (pixmap->depth != X11_DEPTH)
+	if (pixmap->depth != depth)
 		return X11_BAD_MATCH;
 
 	/* The owner is charged for the copy. */
@@ -433,8 +434,8 @@ x11_draw_set_tile(
 }
 
 /*
- * CreatePixmap: pixels of 0 of a size, of depth 1 or the screen's,
- * charged to the client.
+ * CreatePixmap: pixels of 0 of a size, of one of the screen's depths (1,
+ * 4, 8, 24 and 32), charged to the client.
  */
 unsigned
 x11_request_create_pixmap(
@@ -450,6 +451,7 @@ x11_request_create_pixmap(
 	uint16_t height;
 	uint32_t id;
 	size_t bytes;
+	unsigned depth;
 	unsigned code;
 	unsigned taken;
 	int chosen;
@@ -474,7 +476,8 @@ x11_request_create_pixmap(
 	height = x11_read16(request + 14, msb);
 	if (width == 0U || height == 0U)
 		return X11_BAD_VALUE;
-	if (request[1] != 1U && request[1] != X11_DEPTH)
+	depth = request[1];
+	if (depth != 1U && depth != X11_DEPTH_NIBBLE && depth != X11_DEPTH_ALPHA && depth != X11_DEPTH && depth != X11_DEPTH_ARGB)
 		return X11_BAD_VALUE;
 
 	/* The client holds the pixmap and its pixels. */
@@ -543,17 +546,170 @@ x11_request_free_pixmap(
 }
 
 /*
- * Frees a pixmap that no id names, with its pixels and charge.
+ * Frees a pixmap that no id names, with its pixels and charge.  A pixmap
+ * a picture holds stays, without an id, its charge the server's, until
+ * the last picture lets it go.
  */
 void
 x11_pixmap_free(
 	struct x11server *server,
 	struct x11_pixmap *pixmap)
 {
+	size_t bytes;
+
+	/* The pixmap's charge. */
+	bytes = sizeof(*pixmap) + x11_image_bytes(pixmap->width, pixmap->height);
+
+	/* Held: kept without an id, charged to the server rather than to a client that may go. */
+	if (pixmap->holds != 0U) {
+		if (pixmap->id != 0U && pixmap->owner != X11_NO_CLIENT) {
+			x11_memory_release(server, pixmap->owner, bytes);
+			(void)x11_memory_charge(server, X11_NO_CLIENT, bytes);
+			pixmap->owner = X11_NO_CLIENT;
+		}
+		pixmap->id = 0U;
+		return;
+	}
+
 	/* The charge, the pixels and the pixmap. */
-	x11_memory_release(server, pixmap->owner, sizeof(*pixmap) + x11_image_bytes(pixmap->width, pixmap->height));
+	x11_memory_release(server, pixmap->owner, bytes);
 	free(pixmap->image.pixels);
 	free(pixmap);
+}
+
+/* Holds a pixmap for a picture of it: it stays while the picture does. */
+void
+x11_pixmap_hold(
+	struct x11_pixmap *pixmap)
+{
+	/* One more picture holds it. */
+	pixmap->holds++;
+}
+
+/*
+ * Lets a pixmap go for a picture of it: a pixmap whose id has gone is
+ * freed with the last picture that held it.
+ */
+void
+x11_pixmap_let_go(
+	struct x11server *server,
+	struct x11_pixmap *pixmap)
+{
+	/* One picture fewer holds it. */
+	pixmap->holds--;
+
+	/* The last hold of a pixmap without an id: freed. */
+	if (pixmap->holds == 0U && pixmap->id == 0U)
+		x11_pixmap_free(server, pixmap);
+}
+
+/*
+ * Finds what a RENDER drawing on a window draws into: the window's
+ * top-level image and its clip by a subwindow mode.  Returns 0, BadMatch
+ * for an InputOnly window, or BadAlloc; the view is to be ended with
+ * x11_draw_view_fini whatever is returned.
+ */
+unsigned
+x11_draw_view_window(
+	struct x11server *server,
+	struct x11_window *window,
+	unsigned subwindow_mode,
+	struct x11_draw_view *view)
+{
+	struct draw_target target;
+	unsigned code;
+
+	/* The window as a core request's target. */
+	code = draw_target(server, window->id, subwindow_mode, &target);
+
+	/* Its parts, the clip taken over. */
+	view->image = target.image;
+	view->x = target.x;
+	view->y = target.y;
+	view->clip = target.clip;
+	view->window = target.window;
+	view->pixmap = NULL;
+	view->width = target.width;
+	view->height = target.height;
+	view->depth = target.depth;
+	view->top = target.top;
+
+	/* Succeeded: the view, or the error. */
+	if (code != 0U)
+		return code;
+	return 0U;
+}
+
+/*
+ * Finds what a RENDER drawing on a pixmap draws into: all of it.  Returns
+ * 0, or ENOMEM; the view is to be ended with x11_draw_view_fini whatever
+ * is returned.
+ */
+int
+x11_draw_view_pixmap(
+	struct x11_pixmap *pixmap,
+	struct x11_draw_view *view)
+{
+	struct x11_box box;
+	int error;
+
+	/* The pixmap's pixels. */
+	memset(view, 0, sizeof(*view));
+	x11_region_init(&view->clip);
+	view->image = &pixmap->image;
+	view->pixmap = pixmap;
+	view->width = pixmap->width;
+	view->height = pixmap->height;
+	view->depth = pixmap->depth;
+
+	/* All of it is drawn on. */
+	box.x0 = 0;
+	box.y0 = 0;
+	box.x1 = pixmap->width;
+	box.y1 = pixmap->height;
+	error = x11_region_set(&view->clip, &box);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the view. */
+	return 0;
+}
+
+/* Ends what finding a view made. */
+void
+x11_draw_view_fini(
+	struct x11_draw_view *view)
+{
+	/* The clip's boxes. */
+	x11_region_fini(&view->clip);
+}
+
+/*
+ * Has the part of a view's pixels a RENDER drawing may have changed shown
+ * again: a box on the image, inside the clip (nothing for a pixmap).
+ */
+void
+x11_draw_view_dirty(
+	struct x11server *server,
+	const struct x11_draw_view *view,
+	const struct x11_box *bounds)
+{
+	struct x11_box extents;
+	struct x11_box part;
+	int inside;
+
+	/* A pixmap is not shown. */
+	if (view->top == NULL)
+		return;
+
+	/* The part inside the clip, on the root window. */
+	x11_region_extents(&view->clip, &extents);
+	inside = x11_box_intersect(&extents, bounds, &part);
+	if (!inside)
+		return;
+
+	/* Shown again. */
+	x11_mark_dirty(server, view->top->x + part.x0, view->top->y + part.y0, part.x1 - part.x0, part.y1 - part.y0);
 }
 
 /*
@@ -766,7 +922,8 @@ x11_request_poly_fill_rectangle(
  * function and plane mask, inside its clip.  XYBitmap paints the
  * foreground where a bit is set and the background where it is clear;
  * XYPixmap gives each plane as a bitmap, the most significant first;
- * ZPixmap gives whole pixels (32 bits for depth 24, one bit for depth 1).
+ * ZPixmap gives whole pixels (32 bits for depth 24 and 32, 8 bits for
+ * depth 4 and 8, one bit for depth 1).
  * Bitmaps are rows padded to 32 bits after left-pad bits, in the bit
  * order the setup gave the client (its own byte order).
  */
@@ -847,6 +1004,7 @@ x11_request_get_image(
 	uint8_t *data;
 	size_t row_bytes;
 	size_t plane_bytes;
+	size_t byte_row;
 	size_t size;
 	unsigned format;
 	unsigned planes;
@@ -915,7 +1073,11 @@ x11_request_get_image(
 		return code;
 	}
 
-	/* The reply's size: a bitmap a plane, or a word a pixel of depth 24 (a bit for depth 1). */
+	/*
+	 * The reply's size: a bitmap a plane, or for ZPixmap a bit a pixel of
+	 * depth 1, a byte a pixel of depth 4 and 8 (rows padded to 32 bits), a word
+	 * a pixel of depth 24 and 32.  Only the drawable's planes are read.
+	 */
 	row_bytes = draw_bitmap_row((unsigned)width);
 	plane_bytes = row_bytes * (size_t)height;
 	planes = 0U;
@@ -924,11 +1086,16 @@ x11_request_get_image(
 			planes++;
 	}
 	size = plane_bytes * planes;
+	byte_row = ((size_t)width + 3U) & ~(size_t)3U;
 	if (format == FORMAT_Z_PIXMAP) {
 		size = plane_bytes;
-		if (target.depth != 1U)
+		if (target.depth == X11_DEPTH_ALPHA || target.depth == X11_DEPTH_NIBBLE)
+			size = byte_row * (size_t)height;
+		if (target.depth == X11_DEPTH || target.depth == X11_DEPTH_ARGB)
 			size = (size_t)width * (size_t)height * 4U;
 	}
+	if (target.depth < 32U)
+		plane_mask &= ((uint32_t)1U << target.depth) - 1U;
 	if (size > X11_OUTPUT_CAP - 32U) {
 		draw_target_fini(&target);
 		return X11_BAD_ALLOC;
@@ -958,6 +1125,10 @@ x11_request_get_image(
 		}
 		for (column = 0; column < width; column++) {
 			pixel = row_pixels[column] & plane_mask;
+			if (format == FORMAT_Z_PIXMAP && (target.depth == X11_DEPTH_ALPHA || target.depth == X11_DEPTH_NIBBLE)) {
+				data[(size_t)row * byte_row + (size_t)column] = (uint8_t)pixel;
+				continue;
+			}
 			if (format == FORMAT_Z_PIXMAP && target.depth != 1U) {
 				x11_write32(data + ((size_t)row * (size_t)width + (size_t)column) * 4U, pixel, msb);
 				continue;
@@ -983,7 +1154,7 @@ x11_request_get_image(
 	/* The depth, and the visual of a window (none for a pixmap). */
 	reply[1] = (uint8_t)target.depth;
 	if (target.window != NULL)
-		x11_write32(reply + 8, X11_VISUAL_XID, msb);
+		x11_write32(reply + 8, target.window->visual, msb);
 	x11_reply(server, client, reply, 32U + size);
 
 	/* Succeeded: answered. */
@@ -1587,7 +1758,7 @@ draw_top_sync(
 	top->image.stride = (size_t)columns;
 	top->image.width = width;
 	top->image.height = height;
-	top->image.depth = X11_DEPTH;
+	top->image.depth = top->depth;
 	top->image_rows = rows;
 	top->image_bytes = bytes;
 	return 1;
@@ -1858,7 +2029,7 @@ draw_frame_save(
 	frame->saved.width = box.x1 - box.x0;
 	frame->saved.height = box.y1 - box.y0;
 	frame->saved.stride = (size_t)frame->saved.width;
-	frame->saved.depth = X11_DEPTH;
+	frame->saved.depth = frame->top->image.depth;
 	frame->saved_x = box.x0;
 	frame->saved_y = box.y0;
 	x11_render_read(&frame->top->image, box.x0, box.y0, frame->saved.width, frame->saved.height, frame->saved.pixels, frame->saved.stride);
@@ -2168,7 +2339,7 @@ draw_target(
 		target->window = window;
 		target->width = window->width;
 		target->height = window->height;
-		target->depth = X11_DEPTH;
+		target->depth = window->depth;
 		if (window == server->root)
 			return 0U;
 		top = x11_window_top_level(window);
@@ -2433,13 +2604,20 @@ draw_put_rows(
 	pad = request[20];
 	depth = request[21];
 
-	/* The image's bytes: a bitmap a plane (rows padded to 32 bits), or a word a pixel of depth 24. */
+	/*
+	 * The image's bytes: a bitmap a plane (rows padded to 32 bits), or for
+	 * ZPixmap a byte a pixel of depth 4 and 8 (rows padded to 32 bits) or
+	 * a word a pixel of depth 24 and 32.
+	 */
 	row_bytes = draw_bitmap_row(pad + (unsigned)width);
 	plane_bytes = row_bytes * (size_t)height;
 	size = plane_bytes;
 	if (format == FORMAT_XY_PIXMAP)
 		size = plane_bytes * depth;
-	if (format == FORMAT_Z_PIXMAP && depth != 1U) {
+	if (format == FORMAT_Z_PIXMAP && (depth == X11_DEPTH_ALPHA || depth == X11_DEPTH_NIBBLE)) {
+		row_bytes = ((size_t)width + 3U) & ~(size_t)3U;
+		size = row_bytes * (size_t)height;
+	} else if (format == FORMAT_Z_PIXMAP && depth != 1U) {
 		row_bytes = (size_t)width * 4U;
 		size = row_bytes * (size_t)height;
 	}
@@ -2458,9 +2636,19 @@ draw_put_rows(
 	for (row = 0; row < height; row++) {
 		line = data + (size_t)row * row_bytes;
 		for (column = 0; column < width; column++) {
-			/* ZPixmap of depth 24: a word in the client's order. */
+			/* ZPixmap of depth 4 and 8: a byte (of the depth's planes). */
+			if (format == FORMAT_Z_PIXMAP && (depth == X11_DEPTH_ALPHA || depth == X11_DEPTH_NIBBLE)) {
+				row_pixels[column] = line[column];
+				if (depth == X11_DEPTH_NIBBLE)
+					row_pixels[column] &= 0x0fU;
+				continue;
+			}
+
+			/* ZPixmap of depth 24 and 32: a word in the client's order, of the depth's planes. */
 			if (format == FORMAT_Z_PIXMAP && depth != 1U) {
-				row_pixels[column] = x11_read32(line + (size_t)column * 4U, msb) & 0x00ffffffU;
+				row_pixels[column] = x11_read32(line + (size_t)column * 4U, msb);
+				if (depth == X11_DEPTH)
+					row_pixels[column] &= 0x00ffffffU;
 				continue;
 			}
 

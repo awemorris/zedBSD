@@ -47,7 +47,7 @@
 /* The planes of a pixel of the screen's depth. */
 #define COLOR_PIXEL_MASK		0x00ffffffU
 
-static unsigned colormap_create(struct x11server *server, unsigned index, uint32_t id);
+static unsigned colormap_create(struct x11server *server, unsigned index, uint32_t id, uint32_t visual);
 static unsigned colormap_check(struct x11server *server, uint32_t id);
 static unsigned colormap_free(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned colormap_copy_and_free(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -80,7 +80,7 @@ x11_colormap_request(
 	msb = server->clients[index].order;
 	switch (request[0]) {
 	case REQUEST_CREATE_COLORMAP:
-		/* An allocation of none (all is no use with a fixed visual), a window, and the screen's visual. */
+		/* An allocation of none (all is no use with a fixed visual), a window, and one of the screen's visuals. */
 		if (length != 16U)
 			return X11_BAD_LENGTH;
 		if (request[1] > COLORMAP_ALLOC_ALL)
@@ -89,11 +89,11 @@ x11_colormap_request(
 		if (window == NULL)
 			return X11_BAD_WINDOW;
 		visual = x11_read32(request + 12, msb);
-		if (visual != X11_VISUAL_XID)
+		if (visual != X11_VISUAL_XID && visual != X11_VISUAL_ARGB_XID)
 			return X11_BAD_MATCH;
 		if (request[1] == COLORMAP_ALLOC_ALL)
 			return X11_BAD_MATCH;
-		code = colormap_create(server, index, x11_read32(request + 4, msb));
+		code = colormap_create(server, index, x11_read32(request + 4, msb), visual);
 		break;
 	case REQUEST_FREE_COLORMAP:
 		code = colormap_free(server, index, request, length);
@@ -174,12 +174,37 @@ x11_colormap_free(
 	free(colormap);
 }
 
-/* Makes a colormap of an id the client chose.  Returns 0, or the error. */
+/*
+ * Gives the visual of a colormap: the screen's colormap has the screen's
+ * visual.  Returns the visual's id, or 0 when the id names no colormap.
+ */
+uint32_t
+x11_colormap_visual(
+	struct x11server *server,
+	uint32_t id)
+{
+	struct x11_colormap *colormap;
+
+	/* The screen's. */
+	if (id == X11_COLORMAP_XID)
+		return X11_VISUAL_XID;
+
+	/* One a client made, or none. */
+	colormap = x11_resource_find(server, id, X11_RESOURCE_COLORMAP);
+	if (colormap == NULL)
+		return 0U;
+
+	/* Succeeded: its visual. */
+	return colormap->visual;
+}
+
+/* Makes a colormap of an id the client chose, of a visual.  Returns 0, or the error. */
 static unsigned
 colormap_create(
 	struct x11server *server,
 	unsigned index,
-	uint32_t id)
+	uint32_t id,
+	uint32_t visual)
 {
 	struct x11_colormap *colormap;
 	unsigned taken;
@@ -203,6 +228,7 @@ colormap_create(
 	}
 	colormap->id = id;
 	colormap->owner = index;
+	colormap->visual = visual;
 
 	/* Found by its id. */
 	error = x11_resource_add(server, id, X11_RESOURCE_COLORMAP, colormap);
@@ -279,6 +305,7 @@ colormap_copy_and_free(
 	const uint8_t *request,
 	size_t length)
 {
+	uint32_t visual;
 	unsigned code;
 	int msb;
 
@@ -290,8 +317,9 @@ colormap_copy_and_free(
 	if (code != 0U)
 		return code;
 
-	/* The new one. */
-	code = colormap_create(server, index, x11_read32(request + 4, msb));
+	/* The new one, of the same visual. */
+	visual = x11_colormap_visual(server, x11_read32(request + 8, msb));
+	code = colormap_create(server, index, x11_read32(request + 4, msb), visual);
 	if (code != 0U)
 		return code;
 
@@ -441,12 +469,14 @@ colormap_query_colors(
 	struct x11_client *client;
 	uint8_t *reply;
 	uint32_t pixel;
+	uint32_t planes;
+	uint32_t visual;
 	size_t count;
 	size_t at;
 	unsigned code;
 	int msb;
 
-	/* A colormap and whole pixels, each of the screen's depth. */
+	/* A colormap and whole pixels, each of its visual's depth (all 32 bits for the ARGB visual). */
 	client = &server->clients[index];
 	msb = client->order;
 	if (length < 8U || length % 4U != 0U)
@@ -454,10 +484,14 @@ colormap_query_colors(
 	code = colormap_check(server, x11_read32(request + 4, msb));
 	if (code != 0U)
 		return code;
+	visual = x11_colormap_visual(server, x11_read32(request + 4, msb));
+	planes = COLOR_PIXEL_MASK;
+	if (visual == X11_VISUAL_ARGB_XID)
+		planes = 0xffffffffU;
 	count = (length - 8U) / 4U;
 	for (at = 0U; at < count; at++) {
 		pixel = x11_read32(request + 8U + at * 4U, msb);
-		if ((pixel & ~COLOR_PIXEL_MASK) != 0U)
+		if ((pixel & ~planes) != 0U)
 			return X11_BAD_VALUE;
 	}
 
