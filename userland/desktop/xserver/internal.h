@@ -58,7 +58,7 @@
  * back more than that, so only a client that breaks the protocol reaches
  * it), and of replies and events not yet taken from it.
  */
-#define X11_INPUT_CAP		(16U * 1024U * 1024U)
+#define X11_INPUT_CAP		X11SERVER_REQUEST_MAX
 #define X11_OUTPUT_CAP		(4U * 1024U * 1024U)
 
 /* The most bytes of one client's requests one tick handles before it lets the caller run again. */
@@ -254,6 +254,9 @@ struct x11_client {
 
 	/* Nonzero once the client has enabled BIG-REQUESTS (a request of length 0 then carries a 32-bit length). */
 	int big_requests;
+
+	/* The bytes of a request too long to hold, refused, still to be dropped as they come. */
+	size_t discard;
 
 	/* Nonzero for a most-significant-byte-first client, and once its setup is answered. */
 	int order;
@@ -619,6 +622,7 @@ uint32_t x11_read32(const uint8_t *bytes, int msb);
 void x11_write16(uint8_t *bytes, uint16_t value, int msb);
 void x11_write32(uint8_t *bytes, uint32_t value, int msb);
 void x11_reply(struct x11server *server, struct x11_client *client, uint8_t *reply, size_t length);
+void x11_request_refuse(struct x11server *server, unsigned index, uint8_t opcode, uint8_t minor, unsigned code);
 int x11_id_chosen(const struct x11_client *client, uint32_t id);
 int x11_values_fit(uint32_t mask, size_t fixed, size_t length);
 

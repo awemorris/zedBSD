@@ -106,6 +106,15 @@ struct x11server_auth {
 	size_t size;
 };
 
+/*
+ * The longest request (BIG-REQUESTS' longest, in bytes), and so the most
+ * bytes of a client's input the core holds unhandled: a transport must
+ * let the core have that many before it holds a client back, or a long
+ * request is left half in.  A request longer than that is refused
+ * (BadLength) and its bytes are dropped as they come.
+ */
+#define X11SERVER_REQUEST_MAX	(16U * 1024U * 1024U)
+
 /* What x11server_next reports: nothing, a closed client, input handled, output waiting. */
 #define X11SERVER_EVENT_NONE		0U
 #define X11SERVER_EVENT_CLOSED		1U
