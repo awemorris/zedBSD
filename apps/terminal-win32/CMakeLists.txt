@@ -189,6 +189,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/colornames.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/input.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/rooted.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c

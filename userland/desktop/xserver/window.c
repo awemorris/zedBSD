@@ -16,7 +16,8 @@
  * are passed to that client as MapRequest, ConfigureRequest,
  * CirculateRequest or ResizeRequest instead.  The rootless server is
  * itself the window manager of the root window's children, so no client
- * may redirect them.  A change that moves, resizes, maps, unmaps or
+ * may redirect them; a rooted server lets one client (a window manager)
+ * redirect them.  A change that moves, resizes, maps, unmaps or
  * restacks a window is bracketed by x11_draw_begin and x11_draw_end
  * (draw.c), which keep the pixels that are still seen and expose the
  * rest.  What changes is gathered into one box (x11_mark_dirty) that
@@ -245,6 +246,20 @@ x11_window_map(
 {
 	/* Succeeded: mapped, its clients told. */
 	window_map(server, window->owner, window);
+}
+
+/*
+ * Maps a window as a client's MapWindow would: the client that redirects
+ * its parent's children is asked instead, unless it is the requester.
+ */
+void
+x11_window_map_by(
+	struct x11server *server,
+	unsigned requester,
+	struct x11_window *window)
+{
+	/* Succeeded: mapped or asked for, its clients told. */
+	window_map(server, requester, window);
 }
 
 /*
@@ -607,9 +622,8 @@ x11_request_destroy_window(
 }
 
 /*
- * ChangeSaveSet: a window of another client into the save-set or out of
- * it.  The rootless server reparents no client's window, so nothing is
- * kept for the client's close.
+ * ChangeSaveSet: a window of another client into the client's save-set
+ * or out of it (rooted.c keeps the save-sets).
  */
 unsigned
 x11_request_change_save_set(
@@ -619,6 +633,7 @@ x11_request_change_save_set(
 	size_t length)
 {
 	struct x11_window *window;
+	unsigned code;
 
 	/* The mode and a window of another client. */
 	if (length != 8U)
@@ -631,8 +646,9 @@ x11_request_change_save_set(
 	if (window->owner == index || window == server->root)
 		return X11_BAD_MATCH;
 
-	/* Succeeded: accepted. */
-	return 0U;
+	/* Succeeded: kept, or let go, or BadAlloc. */
+	code = x11_save_set_change(server, index, window, request[1] == SAVE_SET_DELETE);
+	return code;
 }
 
 /*
@@ -649,15 +665,10 @@ x11_request_reparent_window(
 {
 	struct x11_window *window;
 	struct x11_window *parent;
-	struct x11_window *old_parent;
-	uint8_t event[32];
-	int was_mapped;
-	int inside;
-	int x;
-	int y;
+	unsigned code;
 	int msb;
 
-	/* The window and the new parent, which must not be the window or one of its inferiors. */
+	/* The window and the new parent. */
 	msb = server->clients[index].order;
 	if (length != 16U)
 		return X11_BAD_LENGTH;
@@ -667,6 +678,38 @@ x11_request_reparent_window(
 	parent = x11_window_find(server, x11_read32(request + 8, msb));
 	if (parent == NULL)
 		return X11_BAD_WINDOW;
+
+	/* Succeeded: reparented, or the error. */
+	code = x11_window_reparent(server, index, window, parent, (int16_t)x11_read16(request + 12, msb), (int16_t)x11_read16(request + 14, msb));
+	return code;
+}
+
+/*
+ * Reparents a window for a client (ReparentWindow, or a save-set's
+ * window when its client ends): unmapped first when it is mapped, on top
+ * of the new parent's children at a place relative to it (the outer
+ * corner of its border); told to the window's and both parents' clients,
+ * then mapped again as the requester's MapWindow would.  Returns 0, or
+ * BadMatch for the root window, a parent that is the window or one of its
+ * inferiors, or an InputOutput window under an InputOnly parent.
+ */
+unsigned
+x11_window_reparent(
+	struct x11server *server,
+	unsigned requester,
+	struct x11_window *window,
+	struct x11_window *parent,
+	int x,
+	int y)
+{
+	struct x11_window *old_parent;
+	uint8_t event[32];
+	int was_mapped;
+	int inside;
+	int new_x;
+	int new_y;
+
+	/* A window that can go under the parent. */
 	if (window == server->root)
 		return X11_BAD_MATCH;
 	inside = x11_window_inferior(parent, window);
@@ -688,9 +731,9 @@ x11_request_reparent_window(
 	/* On top of the new parent's children, at its place there; the inferiors move with it. */
 	window_unlink(window);
 	window_link(parent, window, NULL);
-	x = parent->x + (int16_t)x11_read16(request + 12, msb) + window->border;
-	y = parent->y + (int16_t)x11_read16(request + 14, msb) + window->border;
-	window_move(window, x - window->x, y - window->y);
+	new_x = parent->x + x + window->border;
+	new_y = parent->y + y + window->border;
+	window_move(window, new_x - window->x, new_y - window->y);
 
 	/* The window's clients, then the old and the new parent's, are told. */
 	memset(event, 0, sizeof(event));
@@ -709,7 +752,7 @@ x11_request_reparent_window(
 
 	/* Succeeded: mapped again when it was mapped. */
 	if (was_mapped)
-		window_map(server, index, window);
+		window_map(server, requester, window);
 	return 0U;
 }
 
@@ -806,6 +849,7 @@ x11_request_configure_window(
 	int new_y;
 	int resized;
 	int border_refused;
+	int manages;
 	int fits;
 	int msb;
 
@@ -846,7 +890,8 @@ x11_request_configure_window(
 	 * (ICCCM 4.1.5), so the client hears what it has.
 	 */
 	border_refused = 0;
-	if (window->parent == server->root && !window->override_redirect) {
+	manages = x11_rooted_server_manages(server, window);
+	if (manages) {
 		if ((configure.mask & (1U << CONFIGURE_BORDER)) != 0U && configure.border != 0U)
 			border_refused = 1;
 		configure.border = 0U;
@@ -1434,7 +1479,7 @@ x11_resources_release(
  * for what names nothing, BadMatch for a pixmap of another depth, and
  * BadAccess for events only one client may select, held by another (and
  * SubstructureRedirect on the root window, whose children the rootless
- * server manages itself).  Returns 0, or the error.
+ * server manages itself; a rooted server lets a client manage them).  Returns 0, or the error.
  */
 static unsigned
 window_values_read(
@@ -1497,7 +1542,9 @@ window_values_read(
 			/* The core's events; those only one client may select must be free. */
 			if ((value & ~X11_MASK_ALL) != 0U)
 				return X11_BAD_VALUE;
-			if (window == server->root && (value & X11_MASK_SUBSTRUCTURE_REDIRECT) != 0U)
+			if (window == server->root &&
+			    server->mode != X11SERVER_ROOTED &&
+			    (value & X11_MASK_SUBSTRUCTURE_REDIRECT) != 0U)
 				return X11_BAD_ACCESS;
 			holder = x11_event_selector(window, value & X11_MASK_EXCLUSIVE & ~x11_event_mask_of(window, index));
 			if (holder != X11_NO_CLIENT && holder != index)
@@ -1835,6 +1882,7 @@ window_map(
 	struct x11_client *client;
 	uint8_t event[32];
 	unsigned redirect;
+	int manages;
 	int iconic;
 
 	/* Mapped already, or the root window. */
@@ -1860,7 +1908,8 @@ window_map(
 	 * keeps them without a border (the outer corner stays): the clients
 	 * hear the change before the map.
 	 */
-	if (window->parent == server->root && !window->override_redirect && window->border != 0U) {
+	manages = x11_rooted_server_manages(server, window);
+	if (manages && window->border != 0U) {
 		window_move(window, -(int)window->border, -(int)window->border);
 		window->border = 0U;
 		window_configure_notify(server, window);
@@ -2307,9 +2356,10 @@ window_free(
 	/* The focus on it reverts, and the grabs on it end. */
 	x11_input_window_destroyed(server, window);
 
-	/* The selections it owned, its properties, and its surface. */
+	/* The selections it owned, its properties, its place in save-sets, and its surface. */
 	x11_selection_forget_window(server, window->id);
 	x11_property_forget_window(server, window);
+	x11_save_set_forget_window(server, window->id);
 	x11_rootless_forget(server, window);
 
 	/* Its pixels, background and border, and its own charge. */

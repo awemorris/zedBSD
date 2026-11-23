@@ -42,6 +42,15 @@ struct x11_backend_ops;
 #define X11SERVER_FONT_MONO	0U
 
 /*
+ * How the server shows itself: rootless, each top-level X window a window
+ * of the system (the server is their window manager), or rooted, the
+ * whole root window one window of the system, inside which an X client
+ * may manage the windows (a remote desktop's window manager).
+ */
+#define X11SERVER_ROOTLESS	0U
+#define X11SERVER_ROOTED	1U
+
+/*
  * One font file: its bytes, which the caller keeps unchanged for the
  * server's life, and the role it plays.
  */
@@ -58,6 +67,13 @@ struct x11server_options {
 	/* The root window's size (1280x800 when zero). */
 	unsigned width;
 	unsigned height;
+
+	/*
+	 * X11SERVER_ROOTLESS (zero) or X11SERVER_ROOTED.  A rooted server
+	 * keeps the root window's pixels and shows them on one surface of the
+	 * backend (X11_SURFACE_ROOT) while a client is connected.
+	 */
+	unsigned mode;
 
 	/* The backend: its functions and the context they are called with. */
 	const struct x11_backend_ops *backend;

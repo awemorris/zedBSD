@@ -273,6 +273,9 @@ named in the first tab and skipped.
   X11Render       auto or cpu: how the X windows are drawn (auto)
   X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
                   xterm copies to) also goes to the Windows clipboard (no)
+  X11RootWindow   off, or a size such as 1920x1080 (320x200 to 7680x4320):
+                  the remote X programs share one window of that size, a
+                  whole X screen, for a remote desktop (off; see 10)
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
@@ -350,6 +353,15 @@ unless you set it.
 
 When the shell ends while X programs still run, the connection stays open
 until the last of them ends; close the tab to end them all.
+
+A remote desktop: with X11RootWindow 1920x1080 (for example) in
+config/mikuterm.conf, the X programs of a connection do not get windows of
+their own but are drawn in one window of that size, the whole X screen,
+which opens with the first X program.  Start a window manager in the tab
+(twm &, or openbox-session &) to frame and move them.  Every key typed in
+that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
+key.  Closing the window ends every X program of the connection.  The size
+stays as set (the window cannot be resized yet).
 
 The X server is new: it shows simple X programs, and programs that need what
 it does not have yet (images, cursors of the cursor font: xterm, xclock,

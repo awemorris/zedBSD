@@ -13,7 +13,8 @@
  * The process reads the description of its socket's end from its
  * standard input (a pipe the parent closes), says HELLO, and takes the
  * parent's HELLO with the settings (the host's name, the fake cookie, the
- * scale, the clipboard's policy).  Then one thread runs the X server's
+ * scale, the clipboard's policy, the root window shown as one window or
+ * not).  Then one thread runs the X server's
  * core and the Windows backend and the link: each OPEN is an X client
  * checked against the cookie, its DATA the client's bytes, and the
  * client's replies go back as DATA within the parent's credit.  The
@@ -50,9 +51,13 @@
 #define CHILD_OUT_HIGH		(1024U * 1024U)
 #define CHILD_OUT_MAX		(4U * 1024U * 1024U)
 
-/* The longest wait for the link (ms) and the HELLO's fixed part. */
+/* The longest wait for the link (ms), and the HELLO's root window's size and its fixed part. */
 #define CHILD_WAIT_MS		1000U
-#define CHILD_HELLO_FIXED	(12U + X11_HOST_COOKIE)
+#define CHILD_HELLO_ROOT	(12U + X11_HOST_COOKIE)
+#define CHILD_HELLO_FIXED	(CHILD_HELLO_ROOT + 8U)
+
+/* The longest side of a root window shown as one window (the core's pixels' longest). */
+#define CHILD_ROOT_MAX		16384U
 
 /*
  * The X server process's state: the link's socket and its event, the
@@ -75,6 +80,8 @@ struct child {
 	char host[X11_HOST_NAME_MAX];
 	unsigned scale;
 	unsigned flags;
+	unsigned root_width;
+	unsigned root_height;
 	struct x11_win32 *backend;
 	struct x11server *server;
 	char *font;
@@ -381,8 +388,8 @@ child_take(
 
 /*
  * Takes the parent's HELLO (once): the version, the scale, the flags, the
- * cookie and the host's name; then the X server starts.  Returns 0, or
- * EPROTO.
+ * cookie, the root window's size and the host's name; then the X server
+ * starts.  Returns 0, or EPROTO.
  */
 static int
 child_hello(
@@ -402,6 +409,10 @@ child_hello(
 	child->scale = x11_link_get32(frame->body + 4);
 	child->flags = x11_link_get32(frame->body + 8);
 	memcpy(child->cookie, frame->body + 12, X11_HOST_COOKIE);
+	child->root_width = x11_link_get32(frame->body + CHILD_HELLO_ROOT);
+	child->root_height = x11_link_get32(frame->body + CHILD_HELLO_ROOT + 4U);
+	if (child->root_width > CHILD_ROOT_MAX || child->root_height > CHILD_ROOT_MAX)
+		return EPROTO;
 	name = frame->size - CHILD_HELLO_FIXED;
 	if (name >= sizeof(child->host))
 		name = sizeof(child->host) - 1U;
@@ -420,8 +431,9 @@ child_hello(
 
 /*
  * Starts the backend and the core: the windows of the host, the root the
- * size of the virtual screen, the core font from mikuterm's folder, the
- * windows shown through GDI.  Returns 0, or an errno value.
+ * size of the virtual screen (or, shown as one window, the size the
+ * settings give), the core font from mikuterm's folder, the windows shown
+ * through GDI.  Returns 0, or an errno value.
  */
 static int
 child_start_server(
@@ -459,9 +471,15 @@ child_start_server(
 	if (error != 0)
 		child->fallback[0] = '\0';
 
-	/* The core, its root the virtual screen in X's pixels. */
+	/* The core, its root the virtual screen in X's pixels, or one window of the size the settings give. */
 	x11_win32_root_size(child->backend, &width, &height);
 	memset(&options, 0, sizeof(options));
+	options.mode = X11SERVER_ROOTLESS;
+	if (child->root_width != 0 && child->root_height != 0) {
+		width = child->root_width;
+		height = child->root_height;
+		options.mode = X11SERVER_ROOTED;
+	}
 	options.width = width;
 	options.height = height;
 	options.backend = &x11_win32_ops;

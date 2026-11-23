@@ -36,7 +36,12 @@
 /*
  * The kind of a surface: a decorated top-level X window of the rootless
  * server, an override-redirect one (a menu or a tooltip: no decoration,
- * never activated), or the one window of the whole root window.
+ * never activated), or the one window of the whole root window of a
+ * rooted server.  A root surface has the root window's size, which does
+ * not change; the backend places it itself (its x and y are 0), keeps the
+ * user from sizing it, and gives the pointer's place on it as the place on
+ * the root window.  Every key it hears goes to X, and its close ends the
+ * server's clients.
  */
 #define X11_SURFACE_TOPLEVEL	0U
 #define X11_SURFACE_POPUP	1U

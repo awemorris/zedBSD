@@ -16,7 +16,10 @@
  * graphics context includes inferiors) not covered by its own mapped
  * children.  The clip is worked out from the tree each time it is needed.
  * The root window of the rootless server has no pixels: drawing there is
- * dropped, and its image reads as its background.
+ * dropped, and its image reads as its background.  A rooted server keeps
+ * one image, the root window's, which its surface shows: every window
+ * draws into it, and the root window's children are stacked, clipped and
+ * bordered on it as any other children.
  *
  * A change to a tree (a window mapped, unmapped, moved, resized,
  * restacked) is bracketed by x11_draw_begin and x11_draw_end: the first
@@ -106,6 +109,8 @@ struct draw_shape {
 	int failed;
 };
 
+static struct x11_window *draw_top(struct x11server *server, struct x11_window *window);
+static int draw_top_holds(struct x11server *server, const struct x11_window *top);
 static int draw_top_sync(struct x11server *server, struct x11_window *top);
 static void draw_top_free(struct x11server *server, struct x11_window *top);
 static int draw_clip(struct x11server *server, const struct x11_window *window, int border, int children, struct x11_region *clip);
@@ -224,10 +229,10 @@ x11_draw_begin(
 	struct x11_window *top;
 	int error;
 
-	/* The top-level window the change is in (none for the root window itself). */
+	/* The window whose pixels the change is in (none for the root window itself of a rootless server). */
 	top = NULL;
-	if (window != server->root)
-		top = x11_window_top_level(window);
+	if (window != server->root || server->mode == X11SERVER_ROOTED)
+		top = draw_top(server, window);
 
 	/* A change inside one already under way in the same tree, or past the frames there are, joins it. */
 	if (server->frame_count != 0U) {
@@ -278,6 +283,7 @@ x11_draw_end(
 	struct x11_window *window;
 	int changed;
 	int painted;
+	int holds;
 	int fresh;
 
 	/* A change nested inside another ends with it. */
@@ -288,10 +294,13 @@ x11_draw_end(
 	if (frame->depth != 0U)
 		return;
 
-	/* A tree still under the root window, whose pixels follow it. */
+	/* A tree that still holds pixels, which follow it. */
 	top = frame->top;
 	changed = 0;
-	if (top != NULL && top->parent == server->root) {
+	holds = 0;
+	if (top != NULL)
+		holds = draw_top_holds(server, top);
+	if (holds) {
 		fresh = draw_top_sync(server, top);
 		frame->fresh = fresh;
 
@@ -368,7 +377,7 @@ x11_draw_border(
 	/* The border that can be seen, on its top-level window's pixels. */
 	x11_region_init(&outline);
 	error = draw_outline(server, window, &outline);
-	top = x11_window_top_level(window);
+	top = draw_top(server, window);
 
 	/* Painted and shown, when there is any. */
 	if (error == 0 && outline.count != 0U) {
@@ -614,7 +623,7 @@ x11_request_clear_area(
 		x11_region_fini(&region);
 		return 0U;
 	}
-	top = x11_window_top_level(window);
+	top = draw_top(server, window);
 	box.x0 = window->x - top->x + x;
 	box.y0 = window->y - top->y + y;
 	box.x1 = box.x0 + width;
@@ -1510,6 +1519,51 @@ x11_request_poly_fill_arc(
 }
 
 /*
+ * Returns the window whose pixels a window draws into: its top-level
+ * window, or the root window of a rooted server.
+ */
+static struct x11_window *
+draw_top(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	struct x11_window *top;
+
+	/* A rooted server's one image. */
+	if (server->mode == X11SERVER_ROOTED)
+		return server->root;
+
+	/* Succeeded: the top-level window. */
+	top = x11_window_top_level(window);
+	return top;
+}
+
+/*
+ * Tells whether a window is one that holds pixels of its own tree: a
+ * child of the root window of a rootless server, or the root window of a
+ * rooted one.
+ */
+static int
+draw_top_holds(
+	struct x11server *server,
+	const struct x11_window *top)
+{
+	/* A rooted server's root window. */
+	if (server->mode == X11SERVER_ROOTED) {
+		if (top == server->root)
+			return 1;
+		return 0;
+	}
+
+	/* A rootless server's top-level window. */
+	if (top->parent == server->root)
+		return 1;
+
+	/* Neither. */
+	return 0;
+}
+
+/*
  * Brings a top-level window's pixels in step with it: none unless it is a
  * viewable InputOutput window, else its size (each side at most
  * X11_IMAGE_SIDE_MAX), in room of whole steps that a smaller size keeps
@@ -1634,14 +1688,16 @@ draw_clip(
 	int viewable;
 	int error;
 
-	/* Nothing to draw on. */
+	/* Nothing to draw on (the root window of a rootless server has no pixels). */
 	x11_region_clear(clip);
-	if (window == server->root || window->window_class == X11_INPUT_ONLY)
+	if (window == server->root && server->mode != X11SERVER_ROOTED)
+		return 0;
+	if (window->window_class == X11_INPUT_ONLY)
 		return 0;
 	viewable = x11_window_viewable(window);
 	if (!viewable)
 		return 0;
-	top = x11_window_top_level((struct x11_window *)window);
+	top = draw_top(server, (struct x11_window *)window);
 	if (top->image.pixels == NULL)
 		return 0;
 
@@ -1669,7 +1725,11 @@ draw_clip(
 		x11_region_intersect_box(clip, &box);
 	}
 
-	/* Not under a sibling above it or above an ancestor below the top-level window (top-level windows are the system's to stack). */
+	/*
+	 * Not under a sibling above it or above an ancestor below the window
+	 * that holds the pixels (a rootless server's top-level windows are the
+	 * system's to stack).
+	 */
 	for (ancestor = window; ancestor != top; ancestor = ancestor->parent) {
 		for (sibling = ancestor->above; sibling != NULL; sibling = sibling->above) {
 			if (!sibling->mapped || sibling->window_class != X11_INPUT_OUTPUT)
@@ -1724,16 +1784,18 @@ draw_outline(
 	struct x11_box inside;
 	int error;
 
-	/* No border to draw. */
+	/* No border to draw (a rootless server's top-level window has none drawn). */
 	x11_region_clear(outline);
-	if (window->border == 0U || window == server->root || window->parent == server->root)
+	if (window->border == 0U || window == server->root)
+		return 0;
+	if (window->parent == server->root && server->mode != X11SERVER_ROOTED)
 		return 0;
 
 	/* The window with its border that can be seen, less the inside. */
 	error = draw_clip(server, window, 1, 0, outline);
 	if (error != 0)
 		return error;
-	top = x11_window_top_level((struct x11_window *)window);
+	top = draw_top(server, (struct x11_window *)window);
 	inside.x0 = window->x - top->x;
 	inside.y0 = window->y - top->y;
 	inside.x1 = inside.x0 + (int)window->width;
@@ -2043,17 +2105,20 @@ draw_paint_background(
 	struct x11_paint paint;
 	struct x11_box box;
 
-	/* The window whose background it is, up through ParentRelative. */
+	/* The window whose background it is, up through ParentRelative (to the root window's of a rooted server). */
 	owner = window;
-	while (owner->background_kind == X11_BACKGROUND_PARENT && owner->parent != NULL && owner->parent != server->root)
+	while (owner->background_kind == X11_BACKGROUND_PARENT && owner->parent != NULL) {
+		if (owner->parent == server->root && server->mode != X11SERVER_ROOTED)
+			break;
 		owner = owner->parent;
+	}
 	if (owner->background_kind == X11_BACKGROUND_NONE)
 		return;
 	if (owner->background_kind == X11_BACKGROUND_PARENT)
 		return;
 
 	/* Its pixel, or its tile from its origin, copied into every plane. */
-	top = x11_window_top_level(window);
+	top = draw_top(server, window);
 	memset(&paint, 0, sizeof(paint));
 	paint.function = X11_FUNCTION_COPY;
 	paint.plane_mask = 0xffffffffU;
@@ -2089,8 +2154,7 @@ draw_paint_border(
 	struct x11_box box;
 
 	/* The border's pixel, or its tile, copied into every plane. */
-	(void)server;
-	top = x11_window_top_level(window);
+	top = draw_top(server, window);
 	memset(&paint, 0, sizeof(paint));
 	paint.function = X11_FUNCTION_COPY;
 	paint.plane_mask = 0xffffffffU;
@@ -2128,7 +2192,7 @@ draw_expose(
 		return;
 
 	/* On the window, top to bottom. */
-	top = x11_window_top_level(window);
+	top = draw_top(server, window);
 	x11_region_translate(region, top->x - window->x, top->y - window->y);
 	(void)x11_region_canonical(region);
 
@@ -2160,7 +2224,7 @@ draw_target(
 	memset(target, 0, sizeof(*target));
 	x11_region_init(&target->clip);
 
-	/* A window: its top-level window's pixels and its clip (none for the root window). */
+	/* A window: its top-level window's pixels and its clip (none for the root window of a rootless server). */
 	window = x11_window_find(server, id);
 	if (window != NULL) {
 		if (window->window_class == X11_INPUT_ONLY)
@@ -2169,9 +2233,9 @@ draw_target(
 		target->width = window->width;
 		target->height = window->height;
 		target->depth = X11_DEPTH;
-		if (window == server->root)
+		if (window == server->root && server->mode != X11SERVER_ROOTED)
 			return 0U;
-		top = x11_window_top_level(window);
+		top = draw_top(server, window);
 		if (top->image.pixels == NULL)
 			return 0U;
 		error = draw_clip(server, window, 0, subwindow_mode == X11_CLIP_BY_CHILDREN, &target->clip);
