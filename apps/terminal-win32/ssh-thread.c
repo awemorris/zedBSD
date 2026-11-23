@@ -229,8 +229,10 @@ struct thread_choice {
  * engine, the server's key with what known_hosts says of it, the question
  * waiting for the user (for a passphrase, whose key), the paths of the key
  * files in the engine's order, which of the settings' IdentityFile each
- * is (identity_sources), and whether a passphrase kept for the Windows
- * session was tried for each, and how the attempt ended.
+ * is (identity_sources, identity_count of them) and which named no file
+ * (missing_sources, missing_count), whether a passphrase kept for the
+ * Windows session was tried for each, whether the tab was told which
+ * keys were not taken (keys_said), and how the attempt ended.
  * dial_error is why no address of the host answered (0: one did).
  * again is 1 for an attempt after a failed one.  command is
  * RemoteCommand with its tokens put in (empty: the shell).  forwards
@@ -254,6 +256,10 @@ struct thread_link {
 	unsigned asked_identity;
 	char identity_paths[SSH_ENGINE_IDENTITIES_MAX][MIKUTERM_PATH_MAX];
 	unsigned identity_sources[SSH_ENGINE_IDENTITIES_MAX];
+	unsigned identity_count;
+	unsigned missing_sources[SSH_ENGINE_IDENTITIES_MAX];
+	unsigned missing_count;
+	int keys_said;
 	int recalled[SSH_ENGINE_IDENTITIES_MAX];
 	uint8_t host_key[SSH_ED25519_PUBLIC];
 	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
@@ -308,6 +314,8 @@ static int thread_attempt(struct thread_link *link);
 static int thread_settings(struct thread_link *link);
 static int thread_dial(struct thread_link *link);
 static int thread_dial_proxy(struct thread_link *link);
+static int thread_wait_server(struct thread_link *link);
+static void thread_keys_said(struct thread_link *link);
 static void thread_proxy_said(struct thread_link *link);
 static void thread_hang_up(struct thread_link *link);
 static int thread_wait_connected(struct thread_link *link, struct kl_socket *socket, unsigned timeout);
@@ -1847,6 +1855,21 @@ thread_attempt(
 		return status;
 	}
 
+	/*
+	 * Through a ProxyCommand, the server's first bytes are waited for
+	 * before the keys are read: the command may make a key it then
+	 * hands the server (gh makes its codespaces key only when it runs),
+	 * as OpenSSH's ssh reads a key only when it signs with it.
+	 */
+	if (link->proxy != NULL) {
+		status = thread_wait_server(link);
+		if (status != THREAD_DONE) {
+			thread_hang_up(link);
+			ssh_buf_free(&link->command);
+			return status;
+		}
+	}
+
 	/* The user's keys. */
 	count = 0U;
 	error = thread_identities(link, identities, &count);
@@ -1922,7 +1945,9 @@ thread_attempt(
 	ssh_engine_close(link->engine);
 	link->engine = NULL;
 
-	/* A failure through a ProxyCommand says what the command said; then the connection goes. */
+	/* A login refused says which keys were not taken, a failure what a ProxyCommand said; then the connection goes. */
+	if (status == THREAD_FAILED && link->error == EACCES && !link->host_refused)
+		thread_keys_said(link);
 	if (status == THREAD_FAILED)
 		thread_proxy_said(link);
 	thread_hang_up(link);
@@ -2270,6 +2295,118 @@ thread_hang_up(
 }
 
 /*
+ * Waits for the server's first bytes on a ProxyCommand's connection (or
+ * its end), for the tab's close, or for the connection's time (the one
+ * thread_dial gives; none when it is 0).  The bytes are not taken: the
+ * engine reads them.  Returns THREAD_DONE (bytes, the end, or the time
+ * up: the engine finds what came), or THREAD_CLOSING.
+ */
+static int
+thread_wait_server(
+	struct thread_link *link)
+{
+	struct kl_socket_wait waits[2];
+	uint64_t deadline;
+	uint64_t now;
+	unsigned timeout;
+	size_t ready;
+	int closing;
+	int error;
+
+	/* The time it gives up waiting. */
+	timeout = link->config.connect_timeout;
+	if (timeout == 0U)
+		timeout = link->session->connect_timeout;
+	deadline = thread_now() + (uint64_t)timeout * 1000U;
+
+	/* Round after round until something comes. */
+	for (;;) {
+		/* The time is up: the engine goes on with what there is. */
+		now = thread_now();
+		if (timeout != 0U && now >= deadline)
+			return THREAD_DONE;
+
+		/* The socket's bytes (or its end), or the waker. */
+		waits[0].socket = link->socket;
+		waits[0].waker = NULL;
+		waits[0].events = KL_SOCKET_READABLE;
+		waits[0].ready = 0U;
+		waits[1].socket = NULL;
+		waits[1].waker = link->session->waker;
+		waits[1].events = KL_SOCKET_READABLE;
+		waits[1].ready = 0U;
+		error = kl_socket_poll(waits, 2U, (int)THREAD_ROUND_MS, &ready);
+		if (error != 0)
+			return THREAD_DONE;
+
+		/* A tab that closed wants no connection. */
+		closing = thread_closing(link->session);
+		if (closing)
+			return THREAD_CLOSING;
+
+		/* The server spoke, or the connection ended. */
+		if ((waits[0].ready & (KL_SOCKET_READABLE | KL_SOCKET_FAILED)) != 0U)
+			return THREAD_DONE;
+	}
+}
+
+/*
+ * Says in the tab, once an attempt, which of the settings' key files were
+ * read and not taken by the server, and which were not there, when the
+ * login goes on to a password or fails; also on the program's log.
+ */
+static void
+thread_keys_said(
+	struct thread_link *link)
+{
+	char line[THREAD_LINE_MAX];
+	size_t used;
+	unsigned index;
+	int written;
+
+	/* Once, and only when the settings named key files. */
+	if (link->keys_said)
+		return;
+	link->keys_said = 1;
+
+	/* The keys read and offered, none of which the server took. */
+	if (link->identity_count != 0U) {
+		used = 0U;
+		written = snprintf(line, sizeof(line), "No key was accepted (tried:");
+		if (written > 0)
+			used = (size_t)written;
+		for (index = 0U; index < link->identity_count && used < sizeof(line); index++) {
+			/* The key as the settings name it. */
+			written = snprintf(line + used, sizeof(line) - used, " %s", link->config.identity[link->identity_sources[index]]);
+			if (written > 0)
+				used += (size_t)written;
+		}
+		if (used < sizeof(line))
+			(void)snprintf(line + used, sizeof(line) - used, ").\r\n");
+		session_say(link->session, line);
+		printf("MIKUTERM KEYS %s", line);
+	}
+
+	/* The key files named that were not there. */
+	if (link->missing_count != 0U) {
+		used = 0U;
+		written = snprintf(line, sizeof(line), "Key files not found:");
+		if (written > 0)
+			used = (size_t)written;
+		for (index = 0U; index < link->missing_count && used < sizeof(line); index++) {
+			/* The file as the settings name it. */
+			written = snprintf(line + used, sizeof(line) - used, " %s", link->config.identity[link->missing_sources[index]]);
+			if (written > 0)
+				used += (size_t)written;
+		}
+		if (used < sizeof(line))
+			(void)snprintf(line + used, sizeof(line) - used, ".\r\n");
+		session_say(link->session, line);
+		printf("MIKUTERM KEYS %s", line);
+	}
+}
+
+/*
  * Reads the identity files the settings name (a file that is not there
  * is passed over).  Returns 0, or the error of a file that is there but
  * cannot be read.
@@ -2288,16 +2425,21 @@ thread_identities(
 
 	/* Each file in the order the settings give. */
 	*count = 0U;
+	link->identity_count = 0U;
+	link->missing_count = 0U;
 	for (index = 0U; index < link->config.identity_count && index < SSH_ENGINE_IDENTITIES_MAX; index++) {
 		/* Its path in the folder; one that names nothing is passed over. */
 		error = mikuterm_ssh_path(path, sizeof(path), link->config.identity[index]);
 		if (error != 0)
 			continue;
 
-		/* Its bytes. */
+		/* Its bytes; one that is not there is noted for the tab. */
 		error = mikuterm_file_read(path, SSH_KEY_FILE_MAX, &text, &size);
-		if (error == ENOENT)
+		if (error == ENOENT) {
+			link->missing_sources[link->missing_count] = index;
+			link->missing_count++;
 			continue;
+		}
 		if (error != 0) {
 			thread_identities_free(identities, *count);
 			*count = 0U;
@@ -2314,6 +2456,7 @@ thread_identities(
 	}
 
 	/* Succeeded: the identities that are there. */
+	link->identity_count = *count;
 	return 0;
 }
 
@@ -2510,9 +2653,11 @@ thread_events(
 			thread_say_bytes(session, event.bytes, event.size);
 			break;
 		case SSH_ENGINE_PASSWORD:
-			/* A password, asked in the tab without being shown. */
+			/* A password, asked in the tab without being shown (first, which keys were not taken). */
 			if (event.tries != 0U)
 				session_say(session, "Permission denied, please try again.\r\n");
+			else
+				thread_keys_said(link);
 			(void)snprintf(prompt, sizeof(prompt), "%s@%s's password: ", link->config.user, link->host_name);
 			thread_ask_start(session, prompt, SESSION_ASK_SECRET);
 			link->asked = THREAD_ASKED_PASSWORD;
