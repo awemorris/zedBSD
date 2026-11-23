@@ -137,6 +137,9 @@ struct x11_win32 {
 	uint16_t modifiers;
 	int altgr_control;
 
+	/* The text typed through WM_CHAR: a high surrogate waiting for its low one (0: none). */
+	uint16_t text_high;
+
 	/*
 	 * The pointer: the surface under it, its last place on the root window,
 	 * the buttons 1 to 3 held (X's bits), every button held (for the
@@ -191,6 +194,12 @@ void win32_input_bell(void *context, int percent);
 /* layout.c */
 void win32_layout_read(struct x11_win32 *backend);
 void win32_layout_give(struct x11_win32 *backend);
+
+/* ime.c */
+int win32_ime_translates(const MSG *message);
+void win32_ime_place(struct x11_surface *surface);
+LRESULT win32_ime_composition(struct x11_surface *surface, WPARAM wparam, LPARAM lparam);
+void win32_ime_char(struct x11_surface *surface, WPARAM wparam);
 
 /* clipboard.c */
 int win32_clipboard_start(struct x11_win32 *backend);

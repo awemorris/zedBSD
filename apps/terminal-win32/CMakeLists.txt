@@ -192,6 +192,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/ime.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/layout.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/clipboard.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/scancode.c
