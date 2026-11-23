@@ -24,11 +24,19 @@
 /* The class of the X windows. */
 #define WINDOW_CLASS_NAME	L"zedBSD.X11Window"
 
-/* The styles of a framed top-level window, the root window (framed, sized by the user), and a menu or tooltip. */
+/*
+ * The styles of a framed top-level window, a top-level window without
+ * decoration (no frame, but the taskbar's menu and minimizing), the root
+ * window (framed, sized by the user), and a menu or tooltip.
+ */
 #define WINDOW_STYLE_FRAMED	(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
+#define WINDOW_STYLE_BARE	(WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN)
 #define WINDOW_STYLE_ROOT	(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
 #define WINDOW_STYLE_POPUP	(WS_POPUP | WS_CLIPCHILDREN)
 #define WINDOW_EXSTYLE_POPUP	(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+
+/* The bits of a style that make a top-level window framed or bare. */
+#define WINDOW_STYLE_FRAME_BITS	(WS_OVERLAPPEDWINDOW | WS_POPUP)
 
 /* The message that tells the core a window's place and size from the loop. */
 #define WINDOW_REPORT		(WM_APP + 1U)
@@ -47,6 +55,7 @@ static HMONITOR window_home_monitor(const struct x11_surface *surface);
 static void window_root_outer(const struct x11_surface *surface, RECT *outer);
 static void window_set_title(struct x11_surface *surface, const char *title);
 static void window_set_owner(struct x11_surface *surface, struct x11_surface *owner);
+static void window_set_decoration(struct x11_surface *surface, unsigned flags);
 static void window_sized(struct x11_surface *surface, WPARAM kind);
 static void window_post_report(struct x11_surface *surface);
 static void window_report(struct x11_surface *surface);
@@ -280,8 +289,13 @@ win32_surface_update(
 	if ((changed & X11_SURFACE_CHANGED_HINTS) != 0)
 		surface->hints = info->hints;
 
-	/* Maximizes it or makes it full-screen, or back, as the client asked (EWMH's _NET_WM_STATE); its shape follows the frame. */
+	/*
+	 * Framed or not, maximized or full-screen, or back, as the client
+	 * asked (_MOTIF_WM_HINTS, EWMH's _NET_WM_STATE); its shape follows
+	 * the frame.
+	 */
 	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0 && surface->kind == X11_SURFACE_TOPLEVEL) {
+		window_set_decoration(surface, info->flags);
 		window_set_state(surface, info->flags & (X11_SURFACE_MAXIMIZED | X11_SURFACE_FULLSCREEN));
 		win32_decor_shape(surface);
 	}
@@ -416,6 +430,9 @@ win32_surface_present(
 		dirty.bottom = box.y1;
 		InvalidateRect(surface->hwnd, &dirty, FALSE);
 	}
+
+	/* A framed shaped window's background outside its shape, over what X left there. */
+	win32_decor_fill(surface);
 
 	/* Succeeded: the window paints the parts. */
 	return 0;
@@ -628,6 +645,13 @@ window_styles(
 	/* The root window: Windows' own frame, without the edges and the button that would size it. */
 	if (surface->kind == X11_SURFACE_ROOT) {
 		*style = WINDOW_STYLE_ROOT;
+		*extended = 0;
+		return;
+	}
+
+	/* A top-level window whose client asked for no decoration: no frame. */
+	if ((surface->flags & X11_SURFACE_UNDECORATED) != 0U) {
+		*style = WINDOW_STYLE_BARE;
 		*extended = 0;
 		return;
 	}
@@ -925,6 +949,50 @@ window_set_owner(
 		owner_window = owner->hwnd;
 
 	SetWindowLongPtrW(surface->hwnd, GWLP_HWNDPARENT, (LONG_PTR)owner_window);
+}
+
+/*
+ * Gives a top-level window Windows' frame or takes it away, as its client
+ * asked (_MOTIF_WM_HINTS), the client area staying where X has it.  A
+ * full-screen window, which has no frame, keeps the style for when it
+ * comes back.
+ */
+static void
+window_set_decoration(
+	struct x11_surface *surface,
+	unsigned flags)
+{
+	DWORD style;
+	DWORD extended;
+	LONG_PTR current;
+	RECT outer;
+
+	/* The decoration did not change. */
+	if (((surface->flags ^ flags) & X11_SURFACE_UNDECORATED) == 0U)
+		return;
+
+	/* The new decoration, and the frame's style of it. */
+	surface->flags &= ~X11_SURFACE_UNDECORATED;
+	surface->flags |= flags & X11_SURFACE_UNDECORATED;
+	window_styles(surface, &style, &extended);
+
+	/* Full-screen: the style it goes back to. */
+	if ((surface->state & X11_SURFACE_FULLSCREEN) != 0U) {
+		surface->windowed_style &= ~(LONG_PTR)WINDOW_STYLE_FRAME_BITS;
+		surface->windowed_style |= (LONG_PTR)(style & WINDOW_STYLE_FRAME_BITS);
+		return;
+	}
+
+	/* The window's style, its other bits (visible, maximized) kept. */
+	current = GetWindowLongPtrW(surface->hwnd, GWL_STYLE);
+	current &= ~(LONG_PTR)WINDOW_STYLE_FRAME_BITS;
+	current |= (LONG_PTR)(style & WINDOW_STYLE_FRAME_BITS);
+	SetWindowLongPtrW(surface->hwnd, GWL_STYLE, current);
+
+	/* Succeeded: the new frame around the same client area (SWP_FRAMECHANGED applies the style). */
+	window_outer(surface, &outer);
+	SetWindowPos(surface->hwnd, NULL, outer.left, outer.top, outer.right - outer.left, outer.bottom - outer.top,
+	    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 /*

@@ -9,15 +9,18 @@
  * The X server's Windows backend: what a window manager does for an X
  * window's frame beyond its place and size.
  *
- * An X window's shape (SHAPE's bounding region) becomes the Windows
- * window's region (SetWindowRgn): the frame stays whole, and of the
- * client area only the shape's rectangles are shown and take the
- * pointer, so that xeyes' eyes stand alone as on X.  Its _NET_WM_ICON
- * becomes the window's icon, a request for the user's attention flashes
- * its taskbar button, an X client's request to activate it brings it to
- * the front (or flashes it where Windows keeps a program from taking the
- * front), and the core is told the size of the frame around each window
- * (_NET_FRAME_EXTENTS).
+ * An X window's shape (SHAPE's bounding region) is shown as under an X
+ * window manager: a window with Windows' frame keeps the frame whole and
+ * the client area a rectangle, the part outside the shape showing the
+ * window's background (a window region would cost it the frame of the
+ * system's look); a window without a frame (a menu, or one whose client
+ * asked for no decoration through _MOTIF_WM_HINTS) becomes its shape
+ * (the window's region, SetWindowRgn), so that oclock -transparent
+ * stands alone as on X.  Its _NET_WM_ICON becomes the window's icon, a
+ * request for the user's attention flashes its taskbar button, an X
+ * client's request to activate it brings it to the front (or flashes it
+ * where Windows keeps a program from taking the front), and the core is
+ * told the size of the frame around each window (_NET_FRAME_EXTENTS).
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
@@ -34,7 +37,8 @@ static void decor_set_icon(struct x11_surface *surface, const struct x11_surface
 static void decor_set_urgent(struct x11_surface *surface, int urgent);
 static void decor_activate(struct x11_surface *surface);
 static void decor_flash(struct x11_surface *surface, DWORD flags, UINT count);
-static int decor_framed(const struct x11_surface *surface);
+static int decor_cut(const struct x11_surface *surface);
+static HRGN decor_shape_region(const struct x11_surface *surface, const POINT *offset, const RECT *bounds);
 static void decor_client_offset(const struct x11_surface *surface, RECT *window_rect, POINT *offset, RECT *client);
 
 /*
@@ -71,82 +75,98 @@ win32_decor_update(
 }
 
 /*
- * Applies a window's shape as its region again (its frame, its scale or
- * its state changed): the frame whole, the client area cut to the shape.
- * A window without a shape has no region.
+ * Applies a window's shape again (its frame, its decoration, its scale or
+ * its state changed).  A window without a frame (a menu, or a window
+ * whose client asked for no decoration) is cut to the shape: the shape is
+ * the window's region.  A framed window has no region, so that Windows
+ * draws its frame as it draws every other window's, and the part of its
+ * client area outside the shape shows the window's background, as an X
+ * window manager's frame does around a shaped client.  A window without
+ * a shape has neither.
  */
 void
 win32_decor_shape(
 	struct x11_surface *surface)
 {
-	struct x11_win32 *backend;
-	RGNDATA *data;
-	RECT *rects;
 	RECT window_rect;
 	RECT client;
 	POINT offset;
 	HRGN region;
-	HRGN frame;
-	HRGN inside;
-	size_t bytes;
-	unsigned index;
-	int framed;
+	HRGN outside;
+	int cut;
 	int set;
 
+	/* The old outside goes. */
+	if (surface->outside != NULL) {
+		DeleteObject(surface->outside);
+		surface->outside = NULL;
+	}
+
 	/* Unshaped: no region. */
-	backend = surface->backend;
 	if (!surface->shaped) {
 		SetWindowRgn(surface->hwnd, NULL, TRUE);
 		return;
 	}
 
-	/* Where the client area is in the window. */
-	decor_client_offset(surface, &window_rect, &offset, &client);
-
-	/* The shape's rectangles, scaled, on the window. */
-	bytes = sizeof(RGNDATAHEADER) + ((size_t)surface->shape_count + 1U) * sizeof(RECT);
-	data = calloc(1U, bytes);
-	if (data == NULL)
+	/* A window without a frame: cut to the shape, on the window (Windows owns the region once set). */
+	cut = decor_cut(surface);
+	if (cut) {
+		decor_client_offset(surface, &window_rect, &offset, &client);
+		region = decor_shape_region(surface, &offset, &window_rect);
+		if (region == NULL)
+			return;
+		set = SetWindowRgn(surface->hwnd, region, TRUE);
+		if (set == 0)
+			DeleteObject(region);
 		return;
-	rects = (RECT *)data->Buffer;
-	for (index = 0U; index < surface->shape_count; index++) {
-		rects[index].left = offset.x + x11_win32_scale_to_screen(surface->shape[index].x, backend->scale);
-		rects[index].top = offset.y + x11_win32_scale_to_screen(surface->shape[index].y, backend->scale);
-		rects[index].right = offset.x + x11_win32_scale_to_screen(surface->shape[index].x + (int32_t)surface->shape[index].width, backend->scale);
-		rects[index].bottom = offset.y + x11_win32_scale_to_screen(surface->shape[index].y + (int32_t)surface->shape[index].height, backend->scale);
 	}
-	data->rdh.dwSize = sizeof(RGNDATAHEADER);
-	data->rdh.iType = RDH_RECTANGLES;
-	data->rdh.nCount = surface->shape_count;
-	data->rdh.nRgnSize = (DWORD)(surface->shape_count * sizeof(RECT));
-	data->rdh.rcBound.left = 0;
-	data->rdh.rcBound.top = 0;
-	data->rdh.rcBound.right = window_rect.right - window_rect.left;
-	data->rdh.rcBound.bottom = window_rect.bottom - window_rect.top;
-	region = ExtCreateRegion(NULL, (DWORD)bytes, data);
-	free(data);
+
+	/* A framed window: no region; the shape on the client area. */
+	SetWindowRgn(surface->hwnd, NULL, TRUE);
+	decor_client_offset(surface, &window_rect, &offset, &client);
+	offset.x = 0;
+	offset.y = 0;
+	region = decor_shape_region(surface, &offset, &client);
 	if (region == NULL)
 		return;
 
-	/* A framed window keeps its frame: the window less its client area. */
-	framed = decor_framed(surface);
-	if (framed) {
-		frame = CreateRectRgn(0, 0, window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
-		inside = CreateRectRgn(offset.x, offset.y, offset.x + client.right, offset.y + client.bottom);
-		if (frame != NULL && inside != NULL) {
-			CombineRgn(frame, frame, inside, RGN_DIFF);
-			CombineRgn(region, region, frame, RGN_OR);
-		}
-		if (frame != NULL)
-			DeleteObject(frame);
-		if (inside != NULL)
-			DeleteObject(inside);
-	}
-
-	/* Succeeded: the window's region (Windows owns it once set). */
-	set = SetWindowRgn(surface->hwnd, region, TRUE);
-	if (set == 0)
+	/* The client area less the shape. */
+	outside = CreateRectRgn(0, 0, client.right, client.bottom);
+	if (outside == NULL) {
 		DeleteObject(region);
+		return;
+	}
+	CombineRgn(outside, outside, region, RGN_DIFF);
+	DeleteObject(region);
+	surface->outside = outside;
+
+	/* Succeeded: the background there, and the window painted again. */
+	win32_decor_fill(surface);
+	InvalidateRect(surface->hwnd, NULL, FALSE);
+}
+
+/*
+ * Paints the window's background into the part of a framed shaped
+ * window's DIB outside its shape, whose pixels X leaves undefined: the
+ * system's colour of a window's background, as a window class without a
+ * background of its own would erase it to.
+ */
+void
+win32_decor_fill(
+	struct x11_surface *surface)
+{
+	HBRUSH brush;
+
+	/* Nothing outside a shape, or no pixels yet. */
+	if (surface->outside == NULL || surface->dib_dc == NULL)
+		return;
+
+	/* The system's brush (never freed). */
+	brush = GetSysColorBrush(COLOR_WINDOW);
+	FillRgn(surface->dib_dc, surface->outside, brush);
+
+	/* Succeeded: drawn before the DIB's pixels are written directly again. */
+	GdiFlush();
 }
 
 /*
@@ -201,11 +221,14 @@ void
 win32_decor_free(
 	struct x11_surface *surface)
 {
-	/* The shape. */
+	/* The shape and the part outside it. */
 	free(surface->shape);
 	surface->shape = NULL;
 	surface->shape_count = 0U;
 	surface->shaped = 0;
+	if (surface->outside != NULL)
+		DeleteObject(surface->outside);
+	surface->outside = NULL;
 
 	/* Succeeded: the icon (the window is destroyed before). */
 	if (surface->icon != NULL)
@@ -378,22 +401,74 @@ decor_flash(
 	FlashWindowEx(&flash);
 }
 
-/* Tells whether a window has Windows' frame (a top-level window that is not full-screen). */
+/*
+ * Tells whether a window is cut to its shape: one without Windows'
+ * frame, a menu or tooltip, or a top-level window whose client asked for
+ * no decoration.
+ */
 static int
-decor_framed(
+decor_cut(
 	const struct x11_surface *surface)
 {
-	LONG_PTR style;
+	/* A menu or a tooltip. */
+	if (surface->kind == X11_SURFACE_POPUP)
+		return 1;
 
-	/* A menu, or a window that dropped its frame (full-screen). */
-	if (surface->kind != X11_SURFACE_TOPLEVEL)
-		return 0;
-	style = GetWindowLongPtrW(surface->hwnd, GWL_STYLE);
-	if ((style & WS_CAPTION) == 0)
-		return 0;
+	/* A top-level window without decoration. */
+	if (surface->kind == X11_SURFACE_TOPLEVEL && (surface->flags & X11_SURFACE_UNDECORATED) != 0U)
+		return 1;
 
-	/* Succeeded: framed. */
-	return 1;
+	/* Succeeded: framed (or full-screen, which shows the whole window). */
+	return 0;
+}
+
+/*
+ * Makes the region of a window's shape: its rectangles scaled and moved
+ * by offset, within bounds.  Returns the region, or NULL.
+ */
+static HRGN
+decor_shape_region(
+	const struct x11_surface *surface,
+	const POINT *offset,
+	const RECT *bounds)
+{
+	struct x11_win32 *backend;
+	RGNDATA *data;
+	RECT *rects;
+	HRGN region;
+	size_t bytes;
+	unsigned index;
+
+	/* The room for the rectangles. */
+	backend = surface->backend;
+	bytes = sizeof(RGNDATAHEADER) + ((size_t)surface->shape_count + 1U) * sizeof(RECT);
+	data = calloc(1U, bytes);
+	if (data == NULL)
+		return NULL;
+
+	/* The shape's rectangles, scaled and moved. */
+	rects = (RECT *)data->Buffer;
+	for (index = 0U; index < surface->shape_count; index++) {
+		rects[index].left = offset->x + x11_win32_scale_to_screen(surface->shape[index].x, backend->scale);
+		rects[index].top = offset->y + x11_win32_scale_to_screen(surface->shape[index].y, backend->scale);
+		rects[index].right = offset->x + x11_win32_scale_to_screen(surface->shape[index].x + (int32_t)surface->shape[index].width, backend->scale);
+		rects[index].bottom = offset->y + x11_win32_scale_to_screen(surface->shape[index].y + (int32_t)surface->shape[index].height, backend->scale);
+	}
+
+	/* The header. */
+	data->rdh.dwSize = sizeof(RGNDATAHEADER);
+	data->rdh.iType = RDH_RECTANGLES;
+	data->rdh.nCount = surface->shape_count;
+	data->rdh.nRgnSize = (DWORD)(surface->shape_count * sizeof(RECT));
+	data->rdh.rcBound.left = 0;
+	data->rdh.rcBound.top = 0;
+	data->rdh.rcBound.right = bounds->right - bounds->left;
+	data->rdh.rcBound.bottom = bounds->bottom - bounds->top;
+
+	/* Succeeded: the region. */
+	region = ExtCreateRegion(NULL, (DWORD)bytes, data);
+	free(data);
+	return region;
 }
 
 /*

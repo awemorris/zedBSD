@@ -226,7 +226,8 @@ struct x11_size_hints {
  * and size (X's pixels), its title (UTF-8), the X client's class (NULL:
  * none; the backend names it itself), the surface of the top-level window
  * it is transient for (WM_TRANSIENT_FOR; NULL: none), its state
- * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) and the limits on its size.
+ * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN, URGENT, UNDECORATED) and the
+ * limits on its size.
  *
  * default_place is nonzero for a decorated window whose client asked for
  * no place of its own (ICCCM's WM_NORMAL_HINTS has no USPosition, and no
@@ -254,8 +255,10 @@ struct x11_surface_info {
 	 * The window's shape: the rectangles of its pixels the surface shows
 	 * and takes the pointer in (from the window's corner; they do not
 	 * overlap), shape_count of them.  shaped 0: the whole window (shape is
-	 * NULL).  The system clips the surface to them (Windows'
-	 * SetWindowRgn); Wayland takes them as the input region only.
+	 * NULL).  A surface without the system's frame is cut to them
+	 * (Windows' SetWindowRgn); a framed one stays whole, the window's
+	 * background outside them; Wayland takes them as the input region
+	 * only.
 	 */
 	int shaped;
 	const struct x11_rect *shape;

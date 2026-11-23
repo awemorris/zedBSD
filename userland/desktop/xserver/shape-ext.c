@@ -21,9 +21,9 @@
  * GetRectangles gives back), and the effective regions are worked out
  * when the window's size or its regions change.  draw.c clips drawing to
  * them, window.c finds the pointer's window with them, and rootless.c
- * gives a top-level window's bounding region to the backend, which clips
- * the system's window to it (Windows' SetWindowRgn).  A client that
- * selected ShapeNotify on a window hears of each change.
+ * gives a top-level window's bounding region to the backend, which cuts a
+ * system's window without a frame to it (Windows' SetWindowRgn).  A
+ * client that selected ShapeNotify on a window hears of each change.
  *
  * Wire layouts follow the public SHAPE extension protocol (version 1.1);
  * where the protocol leaves a choice, the answers are those of the X.Org
