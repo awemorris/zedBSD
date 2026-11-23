@@ -1,0 +1,26 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+// The Android Studio project of mikuterm.  It only opens the sources of apps/terminal-android in
+// the IDE (build, run and debug the Java and the C); the official build is the CMake project one
+// folder up, and no source is copied here.
+
+pluginManagement {
+	repositories {
+		google()
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+dependencyResolutionManagement {
+	repositories {
+		google()
+		mavenCentral()
+	}
+}
+
+rootProject.name = "mikuterm"
+include(":app")
