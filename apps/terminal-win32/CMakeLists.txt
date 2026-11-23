@@ -161,6 +161,27 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/wsl.c
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/page.c
+	${MIKUTERM_DIR}/x11-link.c
+	${MIKUTERM_DIR}/x11-host.c
+	${MIKUTERM_DIR}/x11-child.c
+	${MIKUTERM_DIR}/x11-novulkan.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/client.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/glx.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/glyphs.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/keymap.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/protocol.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/rootless.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/selection.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/window.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/layout.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/clipboard.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/scancode.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/keysyms.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/scale.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/text.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
