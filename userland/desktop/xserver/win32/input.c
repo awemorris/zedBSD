@@ -290,6 +290,52 @@ win32_input_capture(
 }
 
 /*
+ * Follows the pointer's capture leaving a window (WM_CAPTURECHANGED): a
+ * capture the backend kept for an X client (a grab, or the buttons held)
+ * that went to no X window was taken by another program (it was
+ * activated): the buttons held are let go where the pointer was last, and
+ * the core ends the client's grab.  A capture the backend let go itself,
+ * or moved to another X window, is not lost.
+ */
+void
+win32_input_capture_changed(
+	struct x11_surface *surface,
+	HWND taker)
+{
+	struct x11_win32 *backend;
+	struct x11_surface *other;
+	unsigned button;
+	DWORD time;
+
+	/* The backend kept no capture (it let it go). */
+	backend = surface->backend;
+	if (!backend->grab_capture && backend->buttons_held == 0)
+		return;
+
+	/* Another X window took it. */
+	for (other = backend->surfaces; other != NULL; other = other->next) {
+		if (taker != NULL && other->hwnd == taker)
+			return;
+	}
+
+	/* Lost: nothing keeps it now. */
+	time = (DWORD)GetMessageTime();
+	backend->grab_capture = 0;
+	backend->buttons_held = 0;
+	win32_log(backend, "X11 WIN32 capture lost window=0x%lx", (unsigned long)surface->window);
+
+	/* The buttons held are let go, ending the implicit grab. */
+	for (button = WIN32_BUTTON_LEFT; button <= WIN32_BUTTON_RIGHT; button++) {
+		if ((backend->buttons & (1U << (button - 1U))) != 0)
+			input_frame(surface, button, 0, time);
+	}
+
+	/* Succeeded: the core ends a client's grab. */
+	if (backend->server != NULL)
+		x11server_backend_capture_lost(backend->server, (uint32_t)time);
+}
+
+/*
  * Tells where the system's pointer is on the root window (X's pixels from
  * the virtual screen's corner), inside an X window or not.  Returns 0, or
  * an errno value.

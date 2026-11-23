@@ -31,7 +31,7 @@
 #define ROOTLESS_SIZE_MAX	16384
 
 static void rootless_track(struct x11server *server, struct x11_window *window);
-static void rootless_info(struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
+static void rootless_info(struct x11server *server, struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
 static int rootless_composite(struct x11server *server, struct x11_window *window, size_t bytes);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
@@ -73,9 +73,11 @@ x11_rootless_present(
 
 	/* Each top-level window. */
 	for (window = server->root->first_child; window != NULL; window = window->above) {
-		/* Its surface, following it; an unmapped window has none. */
+		/* Its surface, following it; an unmapped window has none, and a minimized one shows nothing. */
 		rootless_track(server, window);
 		if (window->surface == NULL)
+			continue;
+		if (!window->mapped)
 			continue;
 
 		/* The part of the box inside it, or all of it when it must be drawn whole. */
@@ -116,28 +118,25 @@ x11_rootless_present(
 }
 
 /*
- * Ends the clients whose top-level windows the backend asked to close
- * (at the tick after the backend's events, not in the middle of them).
+ * Closes the top-level windows the backend asked to close (at the tick
+ * after the backend's events, not in the middle of them): the window
+ * manager asks the client, or ends it.
  */
 void
 x11_rootless_closing(
 	struct x11server *server)
 {
 	struct x11_window *window;
-	struct x11_client *client;
 	unsigned index;
 
-	/* Each window asked about, if it is still there and a client's. */
+	/* Each window asked about, if it is still there. */
 	for (index = 0U; index < server->closing_count; index++) {
 		window = x11_window_find(server, server->closing[index]);
 		if (window == NULL)
 			continue;
-		client = x11_client_of(server, window->owner);
-		if (client == NULL)
-			continue;
 
-		/* Its client goes, with all its windows. */
-		x11_client_close(server, window->owner);
+		/* The window manager closes it as its client asked to be. */
+		x11_wm_close(server, window);
 	}
 
 	/* None is left to close. */
@@ -199,19 +198,23 @@ rootless_track(
 	const char *title;
 	const char *class_name;
 	char class_buffer[64];
+	char title_buffer[X11_TITLE_MAX];
 	unsigned changed;
 	size_t bytes;
 	int differs;
 	int failed;
+	int kept;
 
-	/* An unmapped window, and an InputOnly one, has no surface. */
-	if (!window->mapped || window->window_class == X11_INPUT_ONLY) {
+	/* An unmapped window has no surface, unless the window manager keeps it minimized; an InputOnly one has none. */
+	kept = x11_wm_keeps_surface(window);
+	if ((!window->mapped && !kept) || window->window_class == X11_INPUT_ONLY) {
 		x11_rootless_forget(server, window);
 		return;
 	}
 
-	/* The title: WM_NAME, or X11 without one. */
-	title = window->name;
+	/* The title: _NET_WM_NAME or WM_NAME, or X11 without one. */
+	x11_wm_title(server, window, title_buffer, sizeof(title_buffer));
+	title = title_buffer;
 	if (title[0] == '\0')
 		title = ROOTLESS_TITLE;
 
@@ -229,7 +232,7 @@ rootless_track(
 		failed = rootless_composite(server, window, bytes);
 		if (failed != 0)
 			return;
-		rootless_info(window, title, class_name, &info);
+		rootless_info(server, window, title, class_name, &info);
 		window->surface = server->ops->open(server->backend, window->id, &info);
 		if (window->surface == NULL)
 			return;
@@ -241,12 +244,15 @@ rootless_track(
 		window->surface_fresh = 1;
 		(void)snprintf(window->surface_title, sizeof(window->surface_title), "%s", title);
 
+		/* The surface has all of the window manager's state. */
+		window->wm_changed = 0U;
+
 		/* A swapchain on it, unless windows are shown through the backend. */
 		rootless_swapchain(server, window);
 	}
 
-	/* What changed since the surface was last told. */
-	changed = 0U;
+	/* What changed since the surface was last told: the window manager's part first. */
+	changed = window->wm_changed;
 	if (window->surface_width != window->width || window->surface_height != window->height)
 		changed |= X11_SURFACE_CHANGED_SIZE;
 	if (window->surface_x != window->x || window->surface_y != window->y)
@@ -269,8 +275,9 @@ rootless_track(
 		return;
 
 	/* The surface told; it counts the pointer's places from the window's corner on the root window. */
-	rootless_info(window, title, class_name, &info);
+	rootless_info(server, window, title, class_name, &info);
 	server->ops->update(server->backend, window->surface, &info, changed);
+	window->wm_changed = 0U;
 	window->surface_x = window->x;
 	window->surface_y = window->y;
 	(void)snprintf(window->surface_title, sizeof(window->surface_title), "%s", title);
@@ -293,20 +300,23 @@ rootless_track(
 /* Fills what a top-level window's surface shows. */
 static void
 rootless_info(
+	struct x11server *server,
 	struct x11_window *window,
 	const char *title,
 	const char *class_name,
 	struct x11_surface_info *info)
 {
-	/* A decorated top-level window, where its X window is, with its title and class. */
+	/* Where its X window is, with its title and class. */
 	memset(info, 0, sizeof(*info));
-	info->kind = X11_SURFACE_TOPLEVEL;
 	info->x = window->x;
 	info->y = window->y;
 	info->width = window->width;
 	info->height = window->height;
 	info->title = title;
 	info->class_name = class_name;
+
+	/* Succeeded: its kind, state, owner and limits, as its window manager has them. */
+	x11_wm_info(server, window, info);
 }
 
 /*
@@ -651,6 +661,9 @@ x11server_backend_configure(
 	    height > ROOTLESS_SIZE_MAX)
 		return;
 
+	/* Within the limits its client put on its size (a system that does not keep them gave another). */
+	x11_wm_constrain(server, changed, &width, &height);
+
 	/* A place not known, or outside X's coordinates, stays as it is. */
 	if (x < -ROOTLESS_SIZE_MAX || x > ROOTLESS_SIZE_MAX || y < -ROOTLESS_SIZE_MAX || y > ROOTLESS_SIZE_MAX) {
 		x = X11_SURFACE_ANY;
@@ -678,17 +691,37 @@ x11server_backend_close(
 }
 
 /*
- * Hears that the system minimized a surface or brought it back.  The
- * server does not keep ICCCM's Iconic state yet, so nothing changes.
+ * Hears the state the system or the user gave a surface
+ * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN): minimized, the window
+ * manager unmaps the X window and makes it Iconic; brought back, it maps
+ * it again; maximized or full-screen, it says so in _NET_WM_STATE.
  */
 void
 x11server_backend_state(
 	struct x11server *server,
 	uint32_t window,
-	int iconic)
+	int state)
 {
-	/* Not kept yet. */
-	(void)server;
-	(void)window;
-	(void)iconic;
+	struct x11_window *changed;
+
+	/* The X window. */
+	changed = x11_window_find(server, window);
+	if (changed == NULL || changed == server->root)
+		return;
+
+	/* Succeeded: the window manager follows the state. */
+	x11_wm_backend_state(server, changed, (unsigned)state);
+}
+
+/*
+ * Hears that the system took the pointer's capture away (another program
+ * was activated): an X client's active grab of the pointer ends.
+ */
+void
+x11server_backend_capture_lost(
+	struct x11server *server,
+	uint32_t time)
+{
+	/* Succeeded: the grab ends. */
+	x11_input_capture_lost(server, time);
 }

@@ -315,8 +315,9 @@ x11_event_property(
 		event[16] = 1U;
 	(void)x11_event_deliver(server, window, X11_MASK_PROPERTY_CHANGE, event);
 
-	/* The selections hear of it too. */
+	/* The selections and the window manager hear of it too. */
 	x11_selection_property_event(server, window, atom, deleted);
+	x11_wm_property(server, window, atom);
 }
 
 /*
@@ -550,6 +551,10 @@ x11_request_send_event(
 		x11_selection_bridge_done(server, index, event);
 		return 0U;
 	}
+
+	/* The window manager hears what a client asks of it on the root window (ICCCM's and EWMH's messages). */
+	if (destination == server->root)
+		x11_wm_root_event(server, event);
 
 	/* No mask: to the client that created the destination. */
 	if (mask == 0U) {
