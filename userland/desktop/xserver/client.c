@@ -134,6 +134,9 @@ x11server_create(
 		server->height = SERVER_HEIGHT;
 	}
 
+	/* The one monitor, the whole root window, until the backend tells the system's. */
+	x11_randr_init(server);
+
 	/* Rootless, or the whole root window one surface. */
 	server->mode = X11SERVER_ROOTLESS;
 	if (options->mode == X11SERVER_ROOTED)
@@ -215,6 +218,7 @@ x11server_destroy(
 
 	/* The resource ids, the atoms, the passive grabs and the save-sets. */
 	x11_save_set_fini(server);
+	x11_randr_fini(server);
 	x11_resource_fini(server);
 	x11_atoms_fini(server);
 	x11_input_fini(server);
@@ -708,6 +712,7 @@ x11_client_close(
 	x11_input_forget_client(server, index);
 	x11_resources_release(server, index);
 	x11_selection_forget_client(server, index);
+	x11_randr_forget_client(server, index);
 
 	/* Its grab of the server goes. */
 	if (server->grabbed == index)

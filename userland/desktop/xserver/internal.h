@@ -110,6 +110,27 @@
  */
 #define X11_WM_CHECK_XID	0x00000102U
 
+/*
+ * RANDR's and XINERAMA's major opcodes, RANDR's first event
+ * (RRScreenChangeNotify, then RRNotify) and its first error (BadRROutput,
+ * BadRRCrtc, BadRRMode, BadRRProvider, BadRRLease).
+ */
+#define X11_RANDR_MAJOR		138U
+#define X11_RANDR_EVENT		69U
+#define X11_RANDR_ERROR		144U
+#define X11_XINERAMA_MAJOR	139U
+
+/*
+ * RANDR's objects of each monitor, in ids no client chooses: monitor n
+ * has the CRTC, the output and the mode of these ids plus n.
+ */
+#define X11_RANDR_CRTC_XID	0x00000200U
+#define X11_RANDR_OUTPUT_XID	0x00000300U
+#define X11_RANDR_MODE_XID	0x00000400U
+
+/* No monitor is the main one. */
+#define X11_NO_MONITOR		0xffffffffU
+
 /* The longest title a surface is given, in bytes of UTF-8 with its NUL. */
 #define X11_TITLE_MAX		256U
 
@@ -396,6 +417,9 @@ struct x11_text_key {
 };
 struct x11_vulkan;
 struct x11_vulkan_window;
+
+/* RANDR's selections of events, kept by randr.c. */
+struct x11_randr;
 
 /*
  * One client's connection.
@@ -1051,6 +1075,24 @@ struct x11server {
 	unsigned height;
 	unsigned mode;
 
+	/*
+	 * The monitors on the root window (randr.c): those the backend last
+	 * told, at least one (the whole root window until it tells), the id of
+	 * each one's mode and the id the next new mode takes, the main one
+	 * (X11_NO_MONITOR: none), when the layout last changed (RANDR's
+	 * configuration time) and when it was last set (its set time), both
+	 * the server's milliseconds, and RANDR's selections of events (NULL
+	 * until a client first asks for them).
+	 */
+	struct x11_monitor monitors[X11_MONITORS_MAX];
+	unsigned monitor_count;
+	uint32_t monitor_modes[X11_MONITORS_MAX];
+	uint32_t monitor_mode_serial;
+	unsigned monitor_primary;
+	uint32_t monitor_config_time;
+	uint32_t monitor_set_time;
+	struct x11_randr *randr;
+
 	/* The backend's functions and their context. */
 	const struct x11_backend_ops *ops;
 	void *backend;
@@ -1324,6 +1366,18 @@ void x11_resource_fini(struct x11server *server);
 int x11_memory_charge(struct x11server *server, unsigned owner, size_t bytes);
 void x11_memory_release(struct x11server *server, unsigned owner, size_t bytes);
 unsigned x11_xcmisc_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+
+/* randr.c: RANDR, the monitors as outputs, CRTCs and modes, and the root window's size. */
+void x11_randr_init(struct x11server *server);
+int x11_randr_query(const uint8_t *name, size_t length, uint8_t *major, uint8_t *event, uint8_t *error);
+unsigned x11_randr_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_randr_forget_client(struct x11server *server, unsigned index);
+void x11_randr_forget_window(struct x11server *server, uint32_t window);
+void x11_randr_fini(struct x11server *server);
+
+/* xinerama.c: XINERAMA, the monitors as its screens. */
+int x11_xinerama_query(const uint8_t *name, size_t length, uint8_t *major, uint8_t *event, uint8_t *error);
+unsigned x11_xinerama_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /* window.c: the window tree, its requests, and drawing into windows and pixmaps. */
 int x11_window_root(struct x11server *server, uint32_t background);

@@ -175,6 +175,7 @@ struct x11_win32 {
 
 /* backend.c */
 void win32_log(struct x11_win32 *backend, const char *format, ...);
+void win32_screen_tell(struct x11_win32 *backend);
 
 /* window.c */
 int win32_window_register(struct x11_win32 *backend);

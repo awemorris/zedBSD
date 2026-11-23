@@ -194,6 +194,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xkb.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xinput.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/rooted.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/randr.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xinerama.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c

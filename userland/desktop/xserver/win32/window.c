@@ -24,14 +24,18 @@
 /* The class of the X windows. */
 #define WINDOW_CLASS_NAME	L"zedBSD.X11Window"
 
-/* The styles of a framed top-level window, the root window (framed, not sized by the user), and a menu or tooltip. */
+/* The styles of a framed top-level window, the root window (framed, sized by the user), and a menu or tooltip. */
 #define WINDOW_STYLE_FRAMED	(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
-#define WINDOW_STYLE_ROOT	((WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)) | WS_CLIPCHILDREN)
+#define WINDOW_STYLE_ROOT	(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
 #define WINDOW_STYLE_POPUP	(WS_POPUP | WS_CLIPCHILDREN)
 #define WINDOW_EXSTYLE_POPUP	(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
 
 /* The message that tells the core a window's place and size from the loop. */
 #define WINDOW_REPORT		(WM_APP + 1U)
+
+/* The smallest root window the user may size the root surface's window to, in X's pixels. */
+#define WINDOW_ROOT_MIN_WIDTH	320U
+#define WINDOW_ROOT_MIN_HEIGHT	200U
 
 static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT window_message(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
@@ -43,6 +47,8 @@ static void window_set_owner(struct x11_surface *surface, struct x11_surface *ow
 static void window_sized(struct x11_surface *surface, WPARAM kind);
 static void window_post_report(struct x11_surface *surface);
 static void window_report(struct x11_surface *surface);
+static void window_root_report(struct x11_surface *surface);
+static void window_root_resize(struct x11_surface *surface, unsigned width, unsigned height);
 static void window_dpi_changed(struct x11_surface *surface, WPARAM wparam, const RECT *suggested);
 static int window_limited(const struct x11_surface *surface);
 static void window_frame(const struct x11_surface *surface, LONG *width, LONG *height);
@@ -217,6 +223,12 @@ win32_surface_update(
 
 	/* The backend is the surface's. */
 	(void)context;
+
+	/* The root window keeps its place on the screen and takes the root window's size. */
+	if (surface->kind == X11_SURFACE_ROOT && (changed & X11_SURFACE_CHANGED_SIZE) != 0) {
+		window_root_resize(surface, info->width, info->height);
+		changed &= ~(unsigned)(X11_SURFACE_CHANGED_SIZE | X11_SURFACE_CHANGED_POSITION);
+	}
 
 	/* Moves and sizes the window to the X window's new place and size. */
 	if ((changed & (X11_SURFACE_CHANGED_SIZE | X11_SURFACE_CHANGED_POSITION)) != 0) {
@@ -466,6 +478,11 @@ window_message(
 	case WM_DPICHANGED:
 		window_dpi_changed(surface, wparam, (const RECT *)lparam);
 		return 0;
+	case WM_DISPLAYCHANGE:
+		/* The monitors changed: the core hears the new layout, and the window's place on it. */
+		win32_screen_tell(backend);
+		window_post_report(surface);
+		break;
 	case WM_PAINT:
 		window_paint(surface);
 		return 0;
@@ -840,13 +857,15 @@ window_report(
 	int32_t x;
 	int32_t y;
 
-	/* Nothing to tell of a minimized window, nor of the root window, which is where it is whatever its place on the screen. */
+	/* Nothing to tell of a minimized window; the root window tells only its size, being where it is whatever its place on the screen. */
 	backend = surface->backend;
 	surface->report_posted = 0;
 	if (surface->iconic)
 		return;
-	if (surface->kind == X11_SURFACE_ROOT)
+	if (surface->kind == X11_SURFACE_ROOT) {
+		window_root_report(surface);
 		return;
+	}
 
 	/* The client area's place on the root window and its size, in X's pixels. */
 	GetClientRect(surface->hwnd, &client);
@@ -872,6 +891,79 @@ window_report(
 	surface->y = y;
 	if (backend->server != NULL)
 		x11server_backend_configure(backend->server, surface->window, x, y, (int)width, (int)height);
+}
+
+/*
+ * Tells the core the size the user gave the root surface's window, in X's
+ * pixels, as the root window's new size (one monitor, the whole of it),
+ * once: a size already told is not told again.
+ */
+static void
+window_root_report(
+	struct x11_surface *surface)
+{
+	struct x11_win32 *backend;
+	RECT client;
+	unsigned width;
+	unsigned height;
+
+	/* The client area's size in X's pixels. */
+	backend = surface->backend;
+	GetClientRect(surface->hwnd, &client);
+	width = window_x_size((unsigned)(client.right - client.left), backend->scale);
+	height = window_x_size((unsigned)(client.bottom - client.top), backend->scale);
+
+	/* What the core already has, or was told, is not told again. */
+	if (width == surface->reported_width && height == surface->reported_height)
+		return;
+
+	/* Succeeded: the core sizes the root window, and tells its clients. */
+	surface->reported_width = width;
+	surface->reported_height = height;
+	surface->width = width;
+	surface->height = height;
+	if (backend->server != NULL)
+		x11server_backend_screen(backend->server, width, height, NULL, 0U);
+}
+
+/*
+ * Gives the root surface's window the root window's size (X's pixels,
+ * scaled) where it is on the screen, unless its client area has that size
+ * already (the user gave it).
+ */
+static void
+window_root_resize(
+	struct x11_surface *surface,
+	unsigned width,
+	unsigned height)
+{
+	struct x11_win32 *backend;
+	RECT client;
+	LONG frame_width;
+	LONG frame_height;
+	LONG screen_width;
+	LONG screen_height;
+
+	/* The size the core gives, which is the size told from now on. */
+	backend = surface->backend;
+	surface->width = width;
+	surface->height = height;
+	surface->reported_width = width;
+	surface->reported_height = height;
+
+	/* A client area of that size already, or a minimized or maximized window, stays as it is. */
+	screen_width = (LONG)x11_win32_scale_size(width, backend->scale);
+	screen_height = (LONG)x11_win32_scale_size(height, backend->scale);
+	GetClientRect(surface->hwnd, &client);
+	if (client.right - client.left == screen_width && client.bottom - client.top == screen_height)
+		return;
+	if (surface->iconic || surface->state != 0U)
+		return;
+
+	/* Succeeded: the window sized around the client area, its corner where it is. */
+	window_frame(surface, &frame_width, &frame_height);
+	SetWindowPos(surface->hwnd, NULL, 0, 0, screen_width + frame_width, screen_height + frame_height,
+	    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 /*
@@ -969,13 +1061,21 @@ window_min_max(
 	LONG frame_height;
 	int limited;
 
+	/* The root surface's window: no smaller than the smallest root window. */
+	backend = surface->backend;
+	if (surface->kind == X11_SURFACE_ROOT) {
+		window_frame(surface, &frame_width, &frame_height);
+		limits->ptMinTrackSize.x = (LONG)x11_win32_scale_size(WINDOW_ROOT_MIN_WIDTH, backend->scale) + frame_width;
+		limits->ptMinTrackSize.y = (LONG)x11_win32_scale_size(WINDOW_ROOT_MIN_HEIGHT, backend->scale) + frame_height;
+		return;
+	}
+
 	/* No limits to give. */
 	limited = window_limited(surface);
 	if (!limited)
 		return;
 
 	/* The frame around the client area. */
-	backend = surface->backend;
 	window_frame(surface, &frame_width, &frame_height);
 
 	/* The smallest size. */

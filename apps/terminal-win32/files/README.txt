@@ -280,8 +280,8 @@ named in the first tab and skipped.
   X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
                   xterm copies to) also goes to the Windows clipboard (no)
   X11RootWindow   off, or a size such as 1920x1080 (320x200 to 7680x4320):
-                  the remote X programs share one window of that size, a
-                  whole X screen, for a remote desktop (off; see 10)
+                  the remote X programs share one window, at first of that
+                  size, a whole X screen, for a remote desktop (off; see 10)
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
@@ -366,8 +366,10 @@ their own but are drawn in one window of that size, the whole X screen,
 which opens with the first X program.  Start a window manager in the tab
 (twm &, or openbox-session &) to frame and move them.  Every key typed in
 that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
-key.  Closing the window ends every X program of the connection.  The size
-stays as set (the window cannot be resized yet).
+key.  Closing the window ends every X program of the connection.  The window
+opens at the size set and may be resized or maximized: the X screen takes
+the new size, and programs that follow the screen's size (xrandr, a desktop's
+panel) see it change.
 
 The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
 xlogo).  Programs that need what it does not have yet (GTK and many Qt

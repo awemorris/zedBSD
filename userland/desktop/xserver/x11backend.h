@@ -21,8 +21,10 @@
  * made full-screen, the pointer's capture taken by another program, and
  * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server), and the characters an input method typed
- * (x11server_backend_text).  The core is the X windows' window manager
+ * server), the characters an input method typed
+ * (x11server_backend_text), and the root window's size and the monitors
+ * on it (x11server_backend_screen, whenever they change; a backend that
+ * never tells has one monitor, the whole root window).  The core is the X windows' window manager
  * (wm.c): it decides what a close means to the X client and keeps ICCCM's
  * and EWMH's state of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
  */
@@ -238,6 +240,36 @@ struct x11_pointer_frame {
 };
 
 /*
+ * The backend tells the core the system's monitors (x11server_backend_screen):
+ * the core answers RANDR's and XINERAMA's questions with them.
+ */
+#define X11_BACKEND_MONITORS	1
+
+/* The most monitors the core keeps, and the longest name of one with its NUL. */
+#define X11_MONITORS_MAX	16U
+#define X11_MONITOR_NAME_MAX	32U
+
+/*
+ * One of the system's monitors as the X clients see it: its place on the
+ * root window and its size (X's pixels), its size in millimetres (0: the
+ * core reckons it at 96 pixels an inch), its refresh rate in hertz (0:
+ * 60), whether it is the system's main monitor, and its name (ASCII;
+ * empty: the core names it).  RANDR shows each as an output with its own
+ * CRTC and mode, and XINERAMA as one of its screens.
+ */
+struct x11_monitor {
+	int32_t x;
+	int32_t y;
+	unsigned width;
+	unsigned height;
+	unsigned width_mm;
+	unsigned height_mm;
+	unsigned refresh;
+	int primary;
+	char name[X11_MONITOR_NAME_MAX];
+};
+
+/*
  * The backend's functions, each called with the context given in the
  * server's options.
  *
@@ -297,6 +329,7 @@ void x11server_backend_close(struct x11server *server, uint32_t window);
 void x11server_backend_state(struct x11server *server, uint32_t window, int state);
 void x11server_backend_capture_lost(struct x11server *server, uint32_t time);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
+void x11server_backend_screen(struct x11server *server, unsigned width, unsigned height, const struct x11_monitor *monitors, unsigned count);
 
 /* What the core gives the backend: a size within a surface's limits. */
 void x11server_size_hints_apply(const struct x11_size_hints *hints, unsigned *width, unsigned *height);

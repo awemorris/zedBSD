@@ -45,7 +45,23 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_surface_cursor,
 };
 
+/* The prefix of a monitor's device name ("\\.\DISPLAY1"), left out of the name X clients see. */
+#define BACKEND_DEVICE_PREFIX	"\\\\.\\"
+
+/*
+ * The system's monitors as EnumDisplayMonitors finds them, in X's
+ * pixels on the root window, while they are being gathered.
+ */
+struct backend_monitors {
+	struct x11_win32 *backend;
+	struct x11_monitor monitors[X11_MONITORS_MAX];
+	unsigned count;
+};
+
 static unsigned backend_main_scale(void);
+static void backend_virtual_screen(struct x11_win32 *backend);
+static BOOL CALLBACK backend_monitor_found(HMONITOR monitor, HDC context, LPRECT rectangle, LPARAM gathered);
+static void backend_monitor_name(const WCHAR *device, char *name, size_t size);
 
 /*
  * Makes a backend: its window classes, its hidden window of the
@@ -88,10 +104,7 @@ x11_win32_create(
 		backend->scale = backend_main_scale();
 
 	/* The root window covers the virtual screen, all monitors' bounding box. */
-	backend->virtual_screen.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-	backend->virtual_screen.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-	backend->virtual_screen.right = backend->virtual_screen.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-	backend->virtual_screen.bottom = backend->virtual_screen.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+	backend_virtual_screen(backend);
 
 	/* Registers the class of the X windows. */
 	error = win32_window_register(backend);
@@ -133,6 +146,9 @@ x11_win32_attach(
 
 	/* It hears whether another program's text is already on the clipboard. */
 	win32_clipboard_attach(backend);
+
+	/* It hears the monitors on the root window. */
+	win32_screen_tell(backend);
 }
 
 /*
@@ -298,6 +314,42 @@ win32_log(
 	backend->options.log(backend->options.log_context, line);
 }
 
+/*
+ * Tells the core the root window's size and the system's monitors on it
+ * as they are now (the virtual screen and each monitor, in X's pixels),
+ * when the server is rootless; a rooted server's root window is sized
+ * with its own window.  The core tells the X clients only what changed.
+ */
+void
+win32_screen_tell(
+	struct x11_win32 *backend)
+{
+	struct backend_monitors found;
+	unsigned width;
+	unsigned height;
+	BOOL listed;
+
+	/* A rooted server, or none yet. */
+	if (backend->options.rooted)
+		return;
+	if (backend->server == NULL)
+		return;
+
+	/* The virtual screen as it is now. */
+	backend_virtual_screen(backend);
+	x11_win32_root_size(backend, &width, &height);
+
+	/* Each monitor on it; none found is the whole root window. */
+	memset(&found, 0, sizeof(found));
+	found.backend = backend;
+	listed = EnumDisplayMonitors(NULL, NULL, backend_monitor_found, (LPARAM)&found);
+	if (!listed)
+		found.count = 0U;
+
+	/* Succeeded: the core takes them. */
+	x11server_backend_screen(backend->server, width, height, found.monitors, found.count);
+}
+
 /* Gives the scale of the main monitor's DPI (100 % when it cannot be read). */
 static unsigned
 backend_main_scale(void)
@@ -322,4 +374,108 @@ backend_main_scale(void)
 	/* Succeeded: the scale of the DPI. */
 	scale = x11_win32_scale_of_dpi(dpi_x);
 	return scale;
+}
+
+/* Reads the virtual screen, all monitors' bounding box, which the root window of a rootless server covers. */
+static void
+backend_virtual_screen(
+	struct x11_win32 *backend)
+{
+	/* Its corner and its size. */
+	backend->virtual_screen.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+	backend->virtual_screen.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+	backend->virtual_screen.right = backend->virtual_screen.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+	backend->virtual_screen.bottom = backend->virtual_screen.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+}
+
+/*
+ * Takes one monitor EnumDisplayMonitors found: its place and size on the
+ * root window in X's pixels, its rate, whether it is the main one and its
+ * device's name.  Returns TRUE to go on to the next.
+ */
+static BOOL CALLBACK
+backend_monitor_found(
+	HMONITOR monitor,
+	HDC context,
+	LPRECT rectangle,
+	LPARAM gathered)
+{
+	struct backend_monitors *found;
+	struct x11_monitor *shown;
+	struct x11_win32 *backend;
+	MONITORINFOEXW information;
+	DEVMODEW mode;
+	BOOL read;
+
+	/* The monitors gathered so far; no room is the end. */
+	(void)context;
+	(void)rectangle;
+	found = (struct backend_monitors *)gathered;
+	backend = found->backend;
+	if (found->count == X11_MONITORS_MAX)
+		return FALSE;
+
+	/* Its rectangle on the screen, its flags and its device's name. */
+	memset(&information, 0, sizeof(information));
+	information.cbSize = sizeof(information);
+	read = GetMonitorInfoW(monitor, (MONITORINFO *)&information);
+	if (!read)
+		return TRUE;
+
+	/* Its place from the virtual screen's corner and its size, in X's pixels. */
+	shown = &found->monitors[found->count];
+	shown->x = x11_win32_scale_to_x(information.rcMonitor.left - backend->virtual_screen.left, backend->scale);
+	shown->y = x11_win32_scale_to_x(information.rcMonitor.top - backend->virtual_screen.top, backend->scale);
+	shown->width = (unsigned)x11_win32_scale_to_x(information.rcMonitor.right - information.rcMonitor.left, backend->scale);
+	shown->height = (unsigned)x11_win32_scale_to_x(information.rcMonitor.bottom - information.rcMonitor.top, backend->scale);
+
+	/* The main one. */
+	if ((information.dwFlags & MONITORINFOF_PRIMARY) != 0)
+		shown->primary = 1;
+
+	/* Its rate (Windows says 0 or 1 for the hardware's default). */
+	memset(&mode, 0, sizeof(mode));
+	mode.dmSize = sizeof(mode);
+	read = EnumDisplaySettingsW(information.szDevice, ENUM_CURRENT_SETTINGS, &mode);
+	if (read && mode.dmDisplayFrequency > 1)
+		shown->refresh = mode.dmDisplayFrequency;
+
+	/* Succeeded: its name, and on to the next. */
+	backend_monitor_name(information.szDevice, shown->name, sizeof(shown->name));
+	found->count++;
+	return TRUE;
+}
+
+/*
+ * Gives a monitor's name from its device's ("\\.\DISPLAY1" is
+ * "DISPLAY1"): its ASCII letters, others left out.
+ */
+static void
+backend_monitor_name(
+	const WCHAR *device,
+	char *name,
+	size_t size)
+{
+	size_t prefix;
+	size_t used;
+	size_t index;
+
+	/* The prefix every device's name has, when it has it. */
+	prefix = 0U;
+	while (prefix < sizeof(BACKEND_DEVICE_PREFIX) - 1U && device[prefix] == (WCHAR)BACKEND_DEVICE_PREFIX[prefix])
+		prefix++;
+	if (prefix != sizeof(BACKEND_DEVICE_PREFIX) - 1U)
+		prefix = 0U;
+
+	/* Each printable ASCII letter after it, as many as fit. */
+	used = 0U;
+	for (index = prefix; device[index] != 0 && used + 1U < size; index++) {
+		if (device[index] < L'!' || device[index] > L'~')
+			continue;
+		name[used] = (char)device[index];
+		used++;
+	}
+
+	/* Succeeded: ended. */
+	name[used] = '\0';
 }

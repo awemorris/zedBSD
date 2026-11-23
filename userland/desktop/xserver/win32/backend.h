@@ -66,7 +66,10 @@ struct x11_win32;
  * takes the main monitor's).  trusted lets the remote clients read and set
  * the clipboard at any time; otherwise only just after a paste or a copy
  * in one of their windows.  primary_to_clipboard also makes X's PRIMARY
- * selection the Windows clipboard.  service is called (with
+ * selection the Windows clipboard.  rooted says the server is rooted: its
+ * root window is one window, whose size the user changes and the root
+ * window's follows (one monitor, the whole of it), instead of the virtual
+ * screen with the system's monitors on it.  service is called (with
  * service_context) on a timer while Windows runs its own loop; log gets
  * the backend's log lines (NULL: none).
  */
@@ -75,6 +78,7 @@ struct x11_win32_options {
 	unsigned scale_percent;
 	int trusted;
 	int primary_to_clipboard;
+	int rooted;
 	void (*service)(void *context);
 	void *service_context;
 	void (*log)(void *context, const char *line);

@@ -149,7 +149,7 @@
 #define XCMISC_NAME			"XC-MISC"
 
 /* The extensions ListExtensions names. */
-#define EXTENSION_NAMES_MAX		6U
+#define EXTENSION_NAMES_MAX		8U
 
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -710,6 +710,12 @@ protocol_dispatch(
 	case X11_GE_MAJOR:
 		code = x11_ge_request(server, index, request, length);
 		break;
+	case X11_RANDR_MAJOR:
+		code = x11_randr_request(server, index, request, length);
+		break;
+	case X11_XINERAMA_MAJOR:
+		code = x11_xinerama_request(server, index, request, length);
+		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
 		if (length >= 4U)
@@ -831,6 +837,8 @@ protocol_query_extension(
 	first_error = 0U;
 	(void)x11_xkb_query(request + 8, name_length, &major, &first_event, &first_error);
 	(void)x11_xinput_query(request + 8, name_length, &major, &first_event, &first_error);
+	(void)x11_randr_query(request + 8, name_length, &major, &first_event, &first_error);
+	(void)x11_xinerama_query(request + 8, name_length, &major, &first_event, &first_error);
 	if (name_length == sizeof(BIGREQ_NAME) - 1U) {
 		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
 		if (differs == 0)
@@ -865,7 +873,7 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", "XKEYBOARD", "XInputExtension", "Generic Event Extension" };
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", "XKEYBOARD", "XInputExtension", "Generic Event Extension", "RANDR", "XINERAMA" };
 	uint8_t reply[32U + 128U];
 	size_t used;
 	size_t name_length;

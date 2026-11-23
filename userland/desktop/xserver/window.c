@@ -2365,6 +2365,7 @@ window_free(
 
 	/* The selections it owned, its properties, its place in save-sets, and its surface. */
 	x11_selection_forget_window(server, window->id);
+	x11_randr_forget_window(server, window->id);
 	x11_property_forget_window(server, window);
 	x11_save_set_forget_window(server, window->id);
 	x11_rootless_forget(server, window);
