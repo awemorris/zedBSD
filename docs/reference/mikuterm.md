@@ -314,7 +314,7 @@ both.
 
 ## 5. Tabs and questions
 
-A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
+A new tab (Shell > New Tab, Ctrl+Alt+T) shows the launch screen; the first
 tab connects to `Connect` without it when that is set. A window has at most
 ten tabs, the settings tab among them.
 
@@ -607,11 +607,12 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 
 F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
 opens the settings, and Alt+F11 is View > Treat Ambiguous-Width Characters
-as Wide, as in zedBSD's terminal. View > Zoom In and Zoom Out are Ctrl+Alt++
-(Ctrl+Alt+= too) and Ctrl+Alt+-, as in zedBSD's terminal; Ctrl+- and
-Ctrl+Shift+- (C-_) reach the host. On a layout whose AltGr types a character
-on the plus or minus key (the German layout's ~ on +), Control and Alt with
-that key type the character, as AltGr does, and the keypad's + and - zoom. Ctrl+Alt with the top row's digits, Page Up and Page
+as Wide, as in zedBSD's terminal. Shell > New Tab is Ctrl+Alt+T, and View >
+Zoom In and Zoom Out are Ctrl+Alt++ (Ctrl+Alt+= too) and Ctrl+Alt+-, as in
+zedBSD's terminal; Ctrl+- and Ctrl+Shift+- (C-_) reach the host. On a layout
+whose AltGr types a character on T or on the plus or minus key (the German
+layout's ~ on +), Control and Alt with that key type the character, as AltGr
+does, and the keypad's + and - zoom. Ctrl+Alt with the top row's digits, Page Up and Page
 Down choose the tabs (section 5); zedBSD's terminal leaves the tabs' keys to
 its desktop's titlebar (Ctrl+Tab, Ctrl+Page Up and Ctrl+Page Down).
 
