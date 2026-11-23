@@ -585,6 +585,8 @@ client_apply_forward(
 		snprintf(error, SSH_CONFIG_ERROR_MAX, "Bad %s forwarding specification '%s': %s", kind_name, spec, reason);
 		return EINVAL;
 	}
+
+	/* Refuses a specification that does not parse. */
 	if (status != 0) {
 		snprintf(error, SSH_CONFIG_ERROR_MAX, "Bad %s forwarding specification '%s'", kind_name, spec);
 		return EINVAL;

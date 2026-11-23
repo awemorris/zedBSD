@@ -1647,6 +1647,7 @@ thread_events(
 	char prompt[SSH_USER_MAX + MIKUTERM_HOST_MAX + 32U];
 	int taken;
 	int error;
+	unsigned int open_count;
 
 	/* Each event in turn. */
 	session = link->session;
@@ -1721,7 +1722,10 @@ thread_events(
 			/* No more forwarded connections are taken; those open keep the connection until they end. */
 			if (link->forwards != NULL) {
 				forward_stop_listening(link->forwards);
-				if (forward_open_count(link->forwards) != 0U)
+
+				/* Counts the forwarded connections still open. */
+				open_count = forward_open_count(link->forwards);
+				if (open_count != 0U)
 					session_say(session, "\r\nThe shell ended; the connection stays open while forwarded connections remain (close the tab to end them).\r\n");
 			}
 			break;

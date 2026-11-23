@@ -18,9 +18,7 @@
  * unless GatewayPorts or a bind address says otherwise) and opens a
  * direct-tcpip channel for each connection it accepts.  A remote
  * forwarding's forwarded-tcpip channel is answered once the connection to
- * its destination is made.  The messages are OpenSSH's ssh's
- * (ssh_init_forwarding, channel_setup_fwd_listener_tcpip, connect_to and
- * ssh_confirm_remote_forward in openssh-portable).
+ * its destination is made.
  */
 
 #include <errno.h>
@@ -111,6 +109,9 @@ ssh_client_forwards_init(
 
 /*
  * Sets up the forwardings once the user is authenticated.
+ *
+ * Values referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_init_forwarding, the text of the messages it writes).
  */
 int
 ssh_client_forwards_start(
@@ -515,6 +516,8 @@ forward_listen_local(
 	} else if (forward->listen_host[0] == '\0') {
 		listen_name = "*";
 	}
+
+	/* Tells that the local forwarding is set up. */
 	ssh_client_log(forwards->client, SSH_CLIENT_LOG_VERBOSE, "Local connections to %s:%u forwarded to remote address %s:%u", listen_name, (unsigned)forward->listen_port, forward->connect_host, (unsigned)forward->connect_port);
 
 	/* Finds the addresses to listen on. */
@@ -541,6 +544,9 @@ forward_listen_local(
  * address; "localhost" is the loopback addresses; any other is that
  * address (a name is looked up).  Returns 0 with *count of them, or
  * ENOENT when there is none (the reason said).
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (channel_setup_fwd_listener_tcpip, channel_fwd_bind_addr).
  */
 static int
 forward_bind_addresses(
@@ -755,6 +761,9 @@ forward_listen_one(
  * "localhost" when no bind address was given, as OpenSSH's ssh sends.
  * Returns 0, or SSH_CLIENT_FORWARD_FATAL when the request could not go
  * and ExitOnForwardFailure ends the connection.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_init_forwarding).
  */
 static int
 forward_ask_remote(
@@ -779,6 +788,8 @@ forward_ask_remote(
 		address = forward->listen_host;
 		listen_name = forward->listen_host;
 	}
+
+	/* Tells that the remote forwarding is asked for. */
 	ssh_client_log(client, SSH_CLIENT_LOG_VERBOSE, "Remote connections from %s:%u forwarded to local address %s:%u", listen_name, (unsigned)forward->listen_port, forward->connect_host, (unsigned)forward->connect_port);
 
 	/* Sends the request; its answer comes as SSH_ENGINE_FORWARD_REPLY. */
@@ -848,6 +859,8 @@ forward_accept(
 		close(descriptor);
 		return;
 	}
+
+	/* Sends each small packet at once, as an interactive stream needs. */
 	on = 1;
 	(void)setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 
@@ -959,6 +972,9 @@ forward_take_closed(
  * Takes the server's answer to a remote forwarding.  Returns 0, or
  * SSH_CLIENT_FORWARD_FATAL when a refusal ends the connection
  * (ExitOnForwardFailure).
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (ssh_confirm_remote_forward).
  */
 static int
 forward_take_reply(
@@ -998,6 +1014,9 @@ forward_take_reply(
  * Takes a forwarded-tcpip channel the server opened for a remote
  * forwarding: connects to the forwarding's destination, and answers the
  * server once the connection is made or failed.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (connect_to).
  */
 static void
 forward_take_open(
@@ -1020,6 +1039,8 @@ forward_take_open(
 		(void)ssh_engine_open_answer(client->engine, event->channel, 0);
 		return;
 	}
+
+	/* Takes the forwarding the connection belongs to. */
 	forward = &client->config.forward[remote->forward];
 	ssh_client_log(client, SSH_CLIENT_LOG_DEBUG, "ssh: forwarded connection to %s port %u from %s port %u", event->listen_address, event->listen_port, event->address, event->port);
 
@@ -1030,6 +1051,8 @@ forward_take_open(
 		(void)ssh_engine_open_answer(client->engine, event->channel, 0);
 		return;
 	}
+
+	/* Remembers the channel the connection is carried on. */
 	link->channel = event->channel;
 
 	/* Looks the destination up (this waits, as OpenSSH's ssh does). */
@@ -1306,6 +1329,8 @@ forward_settle(
 			forward_abort(forwards, link);
 			return;
 		}
+
+		/* Remembers that the end of this side was sent. */
 		link->eof_sent = 1;
 	}
 
