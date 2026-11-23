@@ -144,7 +144,7 @@ static void tls_report(const char *what, const struct connection *connection, in
 static void connection_close(struct connection *connection);
 static int connection_send(struct connection *connection, const void *buffer, size_t length);
 static int connection_receive(struct connection *connection, void *buffer, size_t capacity, size_t *count);
-static int reader_line(struct reader *reader, char *line, size_t capacity);
+static int reader_line(struct reader *reader, char *line, size_t capacity, int *truncated);
 static int reader_byte(struct reader *reader);
 static int reader_fill(struct reader *reader);
 static int equal_case(const char *left, const char *right);
@@ -518,14 +518,19 @@ read_head(
 	struct response_head *head,
 	char redirect[URL_MAX])
 {
-	char line[2048];
+	char line[16384];
 	char *space;
 	char *end;
+	char *colon;
+	int truncated;
+	int is_length;
+	int is_encoding;
+	int is_location;
 	int version;
 	int error;
 
 	/* The status line: HTTP/x.y, a space, and the status code. */
-	error = reader_line(reader, line, sizeof(line));
+	error = reader_line(reader, line, sizeof(line), NULL);
 	if (error != 0) {
 		fprintf(stderr, "fetch: %s: no response\n", url->host);
 		return -1;
@@ -549,10 +554,28 @@ read_head(
 	/* Reads the header fields up to the empty line. */
 	for (;;) {
 		/* One field. */
-		error = reader_line(reader, line, sizeof(line));
+		error = reader_line(reader, line, sizeof(line), &truncated);
 		if (error != 0) {
 			fprintf(stderr, "fetch: %s: the response head is cut short or too long\n", url->host);
 			return -1;
+		}
+
+		/* A field too long for the buffer is refused if it is one this program uses, else passed over. */
+		if (truncated) {
+			colon = strchr(line, ':');
+			if (colon == NULL) {
+				fprintf(stderr, "fetch: %s: the response head is cut short or too long\n", url->host);
+				return -1;
+			}
+			*colon = '\0';
+			is_length = equal_case(line, "Content-Length");
+			is_encoding = equal_case(line, "Transfer-Encoding");
+			is_location = equal_case(line, "Location");
+			if (is_length || is_encoding || is_location) {
+				fprintf(stderr, "fetch: %s: the response head is cut short or too long\n", url->host);
+				return -1;
+			}
+			continue;
 		}
 
 		/* The empty line ends the head. */
@@ -1135,18 +1158,28 @@ connection_receive(
 	return 0;
 }
 
-/* Reads one line, without its CR LF; returns 0, or -1 at the end or for too long a line. */
+/*
+ * Reads one line, without its CR LF; returns 0, or -1 at the end or for
+ * too long a line (when truncated is NULL).  When truncated is given, a
+ * line longer than capacity is read to its line feed, its start kept
+ * and *truncated set to 1.
+ */
 static int
 reader_line(
 	struct reader *reader,
 	char *line,
-	size_t capacity)
+	size_t capacity,
+	int *truncated)
 {
 	size_t used;
 	int byte;
+	int over;
 
 	/* Reads bytes up to the line feed. */
+	if (truncated != NULL)
+		*truncated = 0;
 	used = 0;
+	over = 0;
 	for (;;) {
 		/* The next byte; the end of the connection cuts the line short. */
 		byte = reader_byte(reader);
@@ -1155,15 +1188,23 @@ reader_line(
 
 		/* The line feed ends the line, and a carriage return before it goes. */
 		if (byte == '\n') {
-			if (used != 0 && line[used - 1] == '\r')
+			if (!over && used != 0 && line[used - 1] == '\r')
 				used--;
 			line[used] = '\0';
+			if (over && truncated != NULL)
+				*truncated = 1;
 			return 0;
 		}
 
-		/* Refuses a line longer than the buffer. */
-		if (used + 1 >= capacity)
-			return -1;
+		/* Keeps bytes while there is room; drops the rest when truncated is given. */
+		if (over)
+			continue;
+		if (used + 1 >= capacity) {
+			if (truncated == NULL)
+				return -1;
+			over = 1;
+			continue;
+		}
 		line[used] = (char)byte;
 		used++;
 	}
@@ -1396,7 +1437,7 @@ copy_chunked(
 	/* Copies chunks until the last, empty one. */
 	for (;;) {
 		/* The chunk's size in hex, with any extension after a semicolon. */
-		error = reader_line(reader, line, sizeof(line));
+		error = reader_line(reader, line, sizeof(line), NULL);
 		if (error != 0)
 			return -1;
 		amount = strtoull(line, &end, 16);
@@ -1408,7 +1449,7 @@ copy_chunked(
 		/* The last chunk: the trailer fields up to the empty line end the body. */
 		if (amount == 0) {
 			do {
-				error = reader_line(reader, line, sizeof(line));
+				error = reader_line(reader, line, sizeof(line), NULL);
 				if (error != 0)
 					return -1;
 			} while (line[0] != '\0');
