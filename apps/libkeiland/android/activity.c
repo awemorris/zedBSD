@@ -286,6 +286,16 @@ keiland_android_wake(void)
 }
 
 /*
+ * Reads the wake-up descriptor.
+ */
+void
+keiland_android_wake_clear(void)
+{
+	/* The counter goes back to 0. */
+	activity_wake_drain();
+}
+
+/*
  * Returns a number for a request whose answer comes later.
  */
 uint32_t

@@ -115,6 +115,14 @@ int keiland_android_take(struct keiland_android_event *event);
 void keiland_android_wake(void);
 
 /*
+ * Reads the wake-up descriptor so that M's looper stops reporting it.
+ *
+ * Called on M, when it hears KEILAND_IDENT_WAKE and before it looks at what was
+ * queued: a wake-up that comes after the read is heard again.
+ */
+void keiland_android_wake_clear(void);
+
+/*
  * Returns a number for a request whose answer comes later, from any thread.
  *
  * The numbers rise from 1 and skip 0, so 0 can mean "no request".
@@ -159,6 +167,23 @@ jint keiland_android_app_jni_load(JNIEnv *env);
  * Activity is destroyed.  For every other kind it does nothing.
  */
 void keiland_android_done(const struct keiland_android_event *event);
+
+/*
+ * Hands the application an event of its own (KL_APP_POST with code and data),
+ * from any thread, as kl_app_post does but without an application: the post
+ * waits until one is open and dispatches.  Returns 0 or ENOMEM.
+ */
+int keiland_post_app(uint32_t code, void *data);
+
+/*
+ * Unpacks the program's read-only data (assets/share of the package) into the
+ * folder kl_data_directory names, when the version the package holds is not the
+ * one written there.
+ *
+ * Called on M, once at the start, with keiland_android_activity().  Returns 0,
+ * ENOENT (the package holds none) or the error of a file.
+ */
+int android_places_unpack(ANativeActivity *activity);
 
 /*
  * Returns the looper of M, for a program that waits for more than the events.

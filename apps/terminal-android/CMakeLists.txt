@@ -27,6 +27,11 @@ include(${MIKUTERM_DIR}/cmake/android-sdk.cmake)
 
 set(MIKUTERM_ANDROID_ABIS "arm64-v8a;x86_64" CACHE STRING "The ABIs the apk carries")
 
+# For trying the program in parts (each is passed on to the native build): the trial body that
+# paints the window one colour, and the connection that shows back what is typed.
+option(MIKUTERM_ANDROID_HELLO "Build the trial body of the native thread" OFF)
+option(MIKUTERM_ANDROID_ECHO "Open tabs with a connection that shows back what is typed" OFF)
+
 # The version code grows with the version: major * 10000 + minor * 100 + patch.
 math(EXPR MIKUTERM_VERSION_CODE
 	"${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
@@ -49,6 +54,8 @@ foreach(abi ${MIKUTERM_ANDROID_ABIS})
 			-DCMAKE_BUILD_TYPE=Release
 			-DMIKUTERM_ROOT=${MIKUTERM_ROOT}
 			-DMIKUTERM_VERSION=${PROJECT_VERSION}
+			-DMIKUTERM_ANDROID_HELLO=${MIKUTERM_ANDROID_HELLO}
+			-DMIKUTERM_ANDROID_ECHO=${MIKUTERM_ANDROID_ECHO}
 		BUILD_ALWAYS ON
 		INSTALL_COMMAND
 			${CMAKE_COMMAND} -E make_directory ${MIKUTERM_APK_DIR}/lib/${abi}
@@ -88,6 +95,33 @@ add_custom_command(
 	VERBATIM)
 add_custom_target(dex DEPENDS ${MIKUTERM_DEX_DIR}/classes.dex)
 
+# The program's read-only data (the fonts and their licenses) as the apk's assets; the program
+# unpacks it into its own folder when the version in share.version changes.
+set(MIKUTERM_SHARE
+	"fonts/keiland.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-Regular.ttf"
+	"fonts/keiland-bold.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-Bold.ttf"
+	"fonts/keiland-mono.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-Mono.ttf"
+	"fonts/keiland-fallback-mono.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/JetBrainsMono-Regular.ttf"
+	"fonts/keiland-fallback.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallbackFull.ttf"
+	"licenses/zedBSD-LICENSE.txt=${MIKUTERM_ROOT}/LICENSE"
+	"licenses/Mahora-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-LICENSE.txt"
+	"licenses/JetBrainsMono-OFL.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/JetBrainsMono-OFL.txt"
+	"licenses/DroidSansFallback-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallback-LICENSE.txt")
+set(MIKUTERM_ASSETS_DIR ${CMAKE_BINARY_DIR}/assets)
+set(MIKUTERM_SHARE_SOURCES "")
+foreach(pair IN LISTS MIKUTERM_SHARE)
+	string(REGEX REPLACE "^[^=]*=" "" source "${pair}")
+	list(APPEND MIKUTERM_SHARE_SOURCES ${source})
+endforeach()
+add_custom_command(
+	OUTPUT ${MIKUTERM_ASSETS_DIR}/share.version
+	COMMAND ${CMAKE_COMMAND} "-DFILES=${MIKUTERM_SHARE}" -DOUT=${MIKUTERM_ASSETS_DIR} -DVERSION=${PROJECT_VERSION}
+		-P ${MIKUTERM_DIR}/cmake/make-assets.cmake
+	DEPENDS ${MIKUTERM_SHARE_SOURCES} ${MIKUTERM_DIR}/cmake/make-assets.cmake
+	COMMENT "Making the assets"
+	VERBATIM)
+add_custom_target(assets DEPENDS ${MIKUTERM_ASSETS_DIR}/share.version)
+
 # The resources, compiled, and the apk that holds the manifest and the resources only.  A debug
 # build (the default) makes the apk debuggable.
 option(MIKUTERM_DEBUGGABLE "Make the apk debuggable" ON)
@@ -110,8 +144,8 @@ add_custom_command(
 	COMMAND ${AAPT2} link -I ${ANDROID_JAR} --manifest ${MIKUTERM_DIR}/AndroidManifest.xml
 		--min-sdk-version 28 --target-sdk-version 35
 		--version-code ${MIKUTERM_VERSION_CODE} --version-name ${PROJECT_VERSION}
-		${MIKUTERM_AAPT2_DEBUG} -o ${MIKUTERM_BASE_APK} ${CMAKE_BINARY_DIR}/res.zip
-	DEPENDS ${CMAKE_BINARY_DIR}/res.zip ${MIKUTERM_DIR}/AndroidManifest.xml
+		${MIKUTERM_AAPT2_DEBUG} -A ${MIKUTERM_ASSETS_DIR} -o ${MIKUTERM_BASE_APK} ${CMAKE_BINARY_DIR}/res.zip
+	DEPENDS ${CMAKE_BINARY_DIR}/res.zip ${MIKUTERM_DIR}/AndroidManifest.xml ${MIKUTERM_ASSETS_DIR}/share.version
 	COMMENT "Linking the manifest and the resources"
 	VERBATIM)
 add_custom_target(base-apk DEPENDS ${MIKUTERM_BASE_APK})

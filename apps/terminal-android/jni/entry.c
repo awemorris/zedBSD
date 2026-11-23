@@ -13,13 +13,17 @@
 
 #include "apps/libkeiland/android/keiland-android.h"
 
+#if MIKUTERM_ANDROID_HELLO
 #include "apps/terminal-android/jni/hello.h"
+#else
+#include "apps/terminal-android/jni/mikuterm-android.h"
+#endif
 
 #include <jni.h>
 
 /*
  * Hands the new Activity to libkeiland, with the function the program's native
- * thread runs.
+ * thread runs (the program's body, or the trial body that only paints).
  */
 JNIEXPORT void
 ANativeActivity_onCreate(
@@ -28,5 +32,9 @@ ANativeActivity_onCreate(
 	size_t saved_state_size)
 {
 	/* Starts the native thread (the first time) and hooks the Activity to it. */
+#if MIKUTERM_ANDROID_HELLO
 	keiland_android_start(activity, saved_state, saved_state_size, hello_main);
+#else
+	keiland_android_start(activity, saved_state, saved_state_size, mikuterm_android_main);
+#endif
 }
