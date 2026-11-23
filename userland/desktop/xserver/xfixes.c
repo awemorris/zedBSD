@@ -93,9 +93,6 @@
 /* The disconnect mode a client may set: the server ends with its last client (kept, not acted on). */
 #define XFIXES_DISCONNECT_TERMINATE	1U
 
-/* RENDER's BadPicture (its first error plus one), for the picture requests while the core has no pictures. */
-#define XFIXES_BAD_PICTURE		135U
-
 /* The core requests XFIXES's GC clip borrows: ChangeGC and SetClipRectangles, and ChangeGC's clip-mask bit. */
 #define XFIXES_CORE_CHANGE_GC		56U
 #define XFIXES_CORE_SET_CLIP		59U
@@ -1476,15 +1473,24 @@ xfixes_set_window_shape_region(
 }
 
 /*
- * CreateRegionFromPicture and SetPictureClipRegion: RENDER's pictures,
- * which the core does not make yet; every picture id is refused.
+ * CreateRegionFromPicture and SetPictureClipRegion: a region made of a
+ * RENDER picture's client clip (BadMatch when it has none), or a picture's
+ * client clip set to a region at a clip origin (None: no clip), through
+ * render-ext.c.  The clip is kept on its origin as the client gave it.
  */
 static unsigned
 xfixes_picture_region(
 	struct x11_ext_request *request)
 {
+	struct xfixes_region *source;
+	struct x11_region region;
 	uint32_t id;
+	uint32_t picture_id;
+	uint32_t region_id;
+	unsigned picture_code;
 	unsigned code;
+	int x;
+	int y;
 
 	/* The fixed size: the region and the picture, or the picture, the region and the origin. */
 	if (request->bytes[1] == XFIXES_CREATE_REGION_FROM_PICTURE && request->length != 12U)
@@ -1492,19 +1498,60 @@ xfixes_picture_region(
 	if (request->bytes[1] == XFIXES_SET_PICTURE_CLIP_REGION && request->length != 16U)
 		return X11_BAD_LENGTH;
 
-	/* A new region's id is checked first. */
+	/* CreateRegionFromPicture: the new region's id first, then the picture's clip. */
 	if (request->bytes[1] == XFIXES_CREATE_REGION_FROM_PICTURE) {
 		id = x11_read32(request->bytes + 4, request->msb);
 		code = xfixes_new_id(request, id);
 		if (code != 0U)
 			return code;
-		request->bad = x11_read32(request->bytes + 8, request->msb);
-		return XFIXES_BAD_PICTURE;
+		picture_id = x11_read32(request->bytes + 8, request->msb);
+		x11_region_init(&region);
+		code = x11_render_picture_region(request->server, picture_id, &region);
+		if (code != 0U) {
+			x11_region_fini(&region);
+			request->bad = picture_id;
+			return code;
+		}
+		code = xfixes_add_region(request, id, &region);
+		if (code != 0U)
+			return code;
+
+		/* Succeeded: the region holds the picture's clip. */
+		return 0U;
 	}
 
-	/* Succeeded: no such picture. */
-	request->bad = x11_read32(request->bytes + 4, request->msb);
-	return XFIXES_BAD_PICTURE;
+	/* SetPictureClipRegion: the region (None: no clip); a bad picture is told before a bad region, as X.Org does. */
+	picture_id = x11_read32(request->bytes + 4, request->msb);
+	region_id = x11_read32(request->bytes + 8, request->msb);
+	source = NULL;
+	if (region_id != 0U) {
+		code = xfixes_find_region(request, region_id, &source);
+		if (code != 0U) {
+			x11_region_init(&region);
+			picture_code = x11_render_picture_region(request->server, picture_id, &region);
+			x11_region_fini(&region);
+			if (picture_code != 0U && picture_code != X11_BAD_MATCH && picture_code != X11_BAD_ALLOC) {
+				request->bad = picture_id;
+				return picture_code;
+			}
+			return code;
+		}
+	}
+
+	/* The picture's clip at the origin. */
+	x = (int16_t)x11_read16(request->bytes + 12, request->msb);
+	y = (int16_t)x11_read16(request->bytes + 14, request->msb);
+	if (source == NULL)
+		code = x11_render_picture_clip(request->server, picture_id, NULL, x, y);
+	else
+		code = x11_render_picture_clip(request->server, picture_id, &source->region, x, y);
+	if (code != 0U) {
+		request->bad = picture_id;
+		return code;
+	}
+
+	/* Succeeded: the picture is clipped to the region. */
+	return 0U;
 }
 
 /* SetCursorName: a cursor's name (an atom of it), kept for GetCursorName. */
