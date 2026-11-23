@@ -1375,18 +1375,7 @@
  
 --- a/base/trace_event/malloc_dump_provider.cc
 +++ b/base/trace_event/malloc_dump_provider.cc
-@@ -31,8 +31,10 @@
- #if BUILDFLAG(IS_APPLE)
- #include <malloc/malloc.h>
- #else
-+#if !defined(__ZEDBSD__)
- #include <malloc.h>
- #endif
-+#endif
- #if BUILDFLAG(IS_WIN)
- #include <windows.h>
- #endif
-@@ -273,6 +275,14 @@
+@@ -273,6 +273,14 @@
                           size_t* resident_size,
                           size_t* allocated_objects_size,
                           size_t* allocated_objects_count) {
@@ -1401,7 +1390,7 @@
  #if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
  #if __GLIBC_PREREQ(2, 33)
  #define MALLINFO2_FOUND_IN_LIBC
-@@ -302,6 +312,7 @@
+@@ -302,6 +310,7 @@
    }
  }
  #endif
@@ -1431,7 +1420,7 @@
      failure = !!result;
 --- /dev/null
 +++ b/base/zedbsd_rust_compat.c
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,43 @@
 +#include <errno.h>
 +#include <pthread.h>
 +#include <stdint.h>
@@ -1445,13 +1434,6 @@
 +int pthread_getthreadid_np(void)
 +{
 +	return (int)(uintptr_t)pthread_self();
-+}
-+
-+int pthread_setname_np(pthread_t tid, const char *name)
-+{
-+	(void)tid;
-+	(void)name;
-+	return 0;
 +}
 +
 +int pthread_attr_get_np(pthread_t tid, pthread_attr_t *attr)
