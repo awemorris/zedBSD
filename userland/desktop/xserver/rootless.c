@@ -11,8 +11,10 @@
  *
  * At the end of a tick, the part of each top-level window's pixels (it
  * and its inferiors, draw.c) that changed is shown on its surface, which
- * is opened, resized, retitled and moved to follow the X window: through a Vulkan swapchain on the surface while Vulkan can show
- * it, else through the backend's present.  The backend's pointer,
+ * is opened, resized, retitled and moved to follow the X window: through
+ * a Vulkan swapchain on the surface while Vulkan can show it (from the
+ * window's image on the GPU when it has one), else through the backend's
+ * present (the pixels in memory brought up to date first).  The backend's pointer,
  * keyboard, focus, sizes and close requests come back as X events.  The
  * system draws the pointer; X cursors are not shown.
  *
@@ -36,6 +38,7 @@
 static void rootless_track(struct x11server *server, struct x11_window *window);
 static void rootless_size(const struct x11_window *window, int *width, int *height);
 static void rootless_info(struct x11server *server, struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
+static void rootless_extras(struct x11server *server, struct x11_window *window, unsigned changed, struct x11_surface_info *info, struct x11_rect **shape, uint32_t **icon);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
 static int rootless_show(struct x11server *server, struct x11_window *window, int x, int y, int width, int height);
@@ -202,6 +205,8 @@ rootless_track(
 	struct x11_window *window)
 {
 	struct x11_surface_info info;
+	struct x11_rect *shape;
+	uint32_t *icon;
 	const char *title;
 	const char *class_name;
 	char class_buffer[64];
@@ -241,7 +246,10 @@ rootless_track(
 		if (server->surface_count >= X11_SURFACES_MAX)
 			return;
 		rootless_info(server, window, title, class_name, &info);
+		rootless_extras(server, window, X11_SURFACE_CHANGED_SHAPE | X11_SURFACE_CHANGED_ICON, &info, &shape, &icon);
 		window->surface = server->ops->open(server->backend, window->id, &info);
+		free(shape);
+		free(icon);
 		if (window->surface == NULL)
 			return;
 		server->surface_count++;
@@ -256,9 +264,12 @@ rootless_track(
 		window->wm_changed = 0U;
 	}
 
-	/* A swapchain on it once it has pixels, unless windows are shown through the backend. */
-	if (window->swapchain == NULL && window->image.pixels != NULL)
+	/* A swapchain on it once it has pixels, unless windows are shown through the backend (a surface Vulkan failed on goes, to be opened again). */
+	if (window->swapchain == NULL && window->image.pixels != NULL) {
 		rootless_swapchain(server, window);
+		if (window->surface == NULL)
+			return;
+	}
 
 	/* What changed since the surface was last told: the window manager's part first. */
 	rootless_size(window, &width, &height);
@@ -271,13 +282,20 @@ rootless_track(
 	if (differs != 0)
 		changed |= X11_SURFACE_CHANGED_TITLE;
 
+	/* A shape is cut to the window's size, so a shaped window's new size is a new shape. */
+	if ((changed & X11_SURFACE_CHANGED_SIZE) != 0U && window->shape != NULL)
+		changed |= X11_SURFACE_CHANGED_SHAPE;
+
 	/* Nothing else to bring in step. */
 	if (changed == 0U)
 		return;
 
 	/* The surface told; it counts the pointer's places from the window's corner on the root window. */
 	rootless_info(server, window, title, class_name, &info);
+	rootless_extras(server, window, changed, &info, &shape, &icon);
 	server->ops->update(server->backend, window->surface, &info, changed);
+	free(shape);
+	free(icon);
 	window->wm_changed = 0U;
 	window->surface_x = window->x;
 	window->surface_y = window->y;
@@ -356,7 +374,48 @@ rootless_info(
 	x11_wm_info(server, window, info);
 }
 
-/* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan off. */
+/*
+ * Fills the parts of what a surface shows that are made only when they
+ * changed: the window's shape and its icon (each malloc'd into *shape and
+ * *icon, NULL when not made, freed by the caller once the backend has
+ * them).  Without memory for one, the surface is not told of it.
+ */
+static void
+rootless_extras(
+	struct x11server *server,
+	struct x11_window *window,
+	unsigned changed,
+	struct x11_surface_info *info,
+	struct x11_rect **shape,
+	uint32_t **icon)
+{
+	unsigned count;
+	int error;
+
+	/* Nothing made yet. */
+	*shape = NULL;
+	*icon = NULL;
+
+	/* The shape (SHAPE's bounding region on the window's pixels). */
+	if ((changed & X11_SURFACE_CHANGED_SHAPE) != 0U) {
+		count = 0U;
+		error = x11_shape_surface(window, shape, &count);
+		if (error == 0 && *shape != NULL) {
+			info->shaped = 1;
+			info->shape = *shape;
+			info->shape_count = count;
+		}
+	}
+
+	/* Succeeded: the icon (_NET_WM_ICON), when it has one. */
+	if ((changed & X11_SURFACE_CHANGED_ICON) != 0U) {
+		error = x11_wm_icon(server, window, icon, &info->icon_width, &info->icon_height);
+		if (error == 0)
+			info->icon = *icon;
+	}
+}
+
+/* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan's windows off. */
 static void
 rootless_swapchain(
 	struct x11server *server,
@@ -371,24 +430,26 @@ rootless_swapchain(
 	if (window->swapchain != NULL)
 		return;
 
-	/* This window and later ones are shown through the backend. */
-	server->cpu_present = 1;
-	x11_log(server, "X11SERVER PRESENT backend (Vulkan cannot show windows)");
+	/* This window (from a new surface, the next tick) and later ones are shown through the backend. */
+	rootless_cpu(server, window, "cannot show");
 }
 
-/* Leaves a window, and every later one, to the backend's present: its swapchain goes, and it is drawn whole. */
+/*
+ * Leaves a window, and every later one, to the backend's present: its
+ * swapchain goes with its surface (a system window that was shown
+ * through Vulkan may take no other pixels), which is opened again
+ * without one and drawn whole.
+ */
 static void
 rootless_cpu(
 	struct x11server *server,
 	struct x11_window *window,
 	const char *why)
 {
-	/* The swapchain goes. */
+	/* The swapchain and the surface go; the next present opens the surface again. */
 	x11_log(server, "X11SERVER PRESENT backend (Vulkan %s window 0x%x)", why, (unsigned)window->id);
-	x11_vulkan_window_close(window->swapchain);
-	window->swapchain = NULL;
+	x11_rootless_forget(server, window);
 	server->cpu_present = 1;
-	window->surface_fresh = 1;
 }
 
 /*
@@ -407,21 +468,30 @@ rootless_show(
 	int height)
 {
 	struct x11_rect part;
+	struct x11_box box;
 	int status;
 
-	/* Through the swapchain: the whole image each frame. */
+	/* Through the swapchain: the whole image each frame, from the GPU when it is there. */
 	if (window->swapchain != NULL) {
-		status = x11_vulkan_window_present(window->swapchain, window->image.pixels, window->image.stride);
+		if (window->image.gpu != NULL) {
+			status = x11_vulkan_window_present_image(window->swapchain, &window->image);
+		} else {
+			status = x11_vulkan_window_present(window->swapchain, window->image.pixels, window->image.stride);
+		}
 		if (status >= 0)
 			return status;
 
-		/* Vulkan failed: this window and later ones are shown through the backend, whole. */
+		/* Vulkan failed: this window and later ones are shown through the backend, whole, from a new surface. */
 		rootless_cpu(server, window, "failed on");
-		x = 0;
-		y = 0;
-		width = window->image.width;
-		height = window->image.height;
+		return 1;
 	}
+
+	/* The part's pixels in memory brought up to date with the GPU's. */
+	box.x0 = x;
+	box.y0 = y;
+	box.x1 = x + width;
+	box.y1 = y + height;
+	x11_render_image_memory_box(&window->image, &box);
 
 	/* Through the backend, the part as the damage. */
 	part.x = x;
@@ -594,6 +664,7 @@ x11server_backend_configure(
 	int height)
 {
 	struct x11_window *changed;
+	int held;
 
 	/* The X window, at a size it can have. */
 	changed = x11_window_find(server, window);
@@ -613,6 +684,11 @@ x11server_backend_configure(
 		x = X11_SURFACE_ANY;
 		y = X11_SURFACE_ANY;
 	}
+
+	/* A client that draws in step with the window manager is asked first; a size given while it draws waits. */
+	held = x11_wm_sync_configure(server, changed, x, y, width, height);
+	if (held)
+		return;
 
 	/* Succeeded: the window takes them, and its clients are told. */
 	x11_window_backend_configure(server, changed, (int)x, (int)y, (uint16_t)width, (uint16_t)height);
@@ -668,4 +744,33 @@ x11server_backend_capture_lost(
 {
 	/* Succeeded: the grab ends. */
 	x11_input_capture_lost(server, time);
+}
+
+/*
+ * Hears the size of the system's frame around a surface (left, right,
+ * top and bottom, in X's pixels): its window's _NET_FRAME_EXTENTS says it.
+ */
+void
+x11server_backend_frame(
+	struct x11server *server,
+	uint32_t window,
+	unsigned left,
+	unsigned right,
+	unsigned top,
+	unsigned bottom)
+{
+	struct x11_window *framed;
+	uint32_t extents[4];
+
+	/* The X window. */
+	framed = x11_window_find(server, window);
+	if (framed == NULL || framed == server->root)
+		return;
+
+	/* Succeeded: the window manager says it. */
+	extents[0] = left;
+	extents[1] = right;
+	extents[2] = top;
+	extents[3] = bottom;
+	x11_wm_frame(server, framed, extents);
 }

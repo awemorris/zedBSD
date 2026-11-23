@@ -28,8 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The extension's name and the version the core speaks. */
-#define RANDR_NAME			"RANDR"
+/* The version the core speaks. */
 #define RANDR_VERSION_MAJOR		1U
 #define RANDR_VERSION_MINOR		5U
 
@@ -219,34 +218,6 @@ x11_randr_init(
 	server->monitor_modes[0] = randr_mode_next(server);
 	server->monitor_config_time = server->now;
 	server->monitor_set_time = server->now;
-}
-
-/*
- * Answers QueryExtension's name RANDR: its major opcode, first event and
- * first error.  Returns nonzero when the name is the extension's.
- */
-int
-x11_randr_query(
-	const uint8_t *name,
-	size_t length,
-	uint8_t *major,
-	uint8_t *event,
-	uint8_t *error)
-{
-	int differs;
-
-	/* Another name. */
-	if (length != sizeof(RANDR_NAME) - 1U)
-		return 0;
-	differs = memcmp(name, RANDR_NAME, length);
-	if (differs != 0)
-		return 0;
-
-	/* Succeeded: the extension's numbers. */
-	*major = (uint8_t)X11_RANDR_MAJOR;
-	*event = (uint8_t)X11_RANDR_EVENT;
-	*error = (uint8_t)X11_RANDR_ERROR;
-	return 1;
 }
 
 /*

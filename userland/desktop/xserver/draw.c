@@ -183,11 +183,13 @@ x11_image_copy(
 		return ENOMEM;
 	}
 
-	/* The source's size and depth, and its pixels row by row. */
+	/* The source's size and depth, and its pixels row by row (brought up to date from the GPU first); the copy is in memory only. */
+	x11_render_image_memory(source);
 	image->width = source->width;
 	image->height = source->height;
 	image->stride = (size_t)source->width;
 	image->depth = source->depth;
+	image->gpu = NULL;
 	for (row = 0; row < source->height; row++)
 		memcpy(image->pixels + (size_t)row * image->stride, source->pixels + (size_t)row * source->stride, (size_t)source->width * sizeof(uint32_t));
 
@@ -207,7 +209,8 @@ x11_image_free(
 	if (image == NULL)
 		return;
 
-	/* The pixels, and the image. */
+	/* Its copy on the GPU, the pixels, and the image. */
+	x11_render_image_detach(image);
 	free(image->pixels);
 	free(image);
 }
@@ -513,6 +516,9 @@ x11_request_create_pixmap(
 	pixmap->image.stride = width;
 	pixmap->image.depth = request[1];
 
+	/* Drawn on the GPU when it can be, its pixels 0 there too. */
+	x11_render_image_attach(server->vulkan, &pixmap->image, height, 0U);
+
 	/* Found by its id. */
 	error = x11_resource_add(server, id, X11_RESOURCE_PIXMAP, pixmap);
 	if (error != 0) {
@@ -558,8 +564,9 @@ x11_pixmap_free(
 	struct x11server *server,
 	struct x11_pixmap *pixmap)
 {
-	/* The charge, the pixels and the pixmap. */
+	/* The charge, the copy on the GPU, the pixels and the pixmap. */
 	x11_memory_release(server, pixmap->owner, sizeof(*pixmap) + x11_image_bytes(pixmap->width, pixmap->height));
+	x11_render_image_detach(&pixmap->image);
 	free(pixmap->image.pixels);
 	free(pixmap);
 }
@@ -1614,7 +1621,7 @@ draw_top_sync(
 	for (index = 0U; index < bytes / sizeof(*pixels); index++)
 		pixels[index] = DRAW_UNPAINTED;
 
-	/* Succeeded: the new pixels. */
+	/* The new pixels. */
 	top->image.pixels = pixels;
 	top->image.stride = (size_t)columns;
 	top->image.width = width;
@@ -1622,6 +1629,9 @@ draw_top_sync(
 	top->image.depth = X11_DEPTH;
 	top->image_rows = rows;
 	top->image_bytes = bytes;
+
+	/* Succeeded: drawn on the GPU when it can be, unpainted there too. */
+	x11_render_image_attach(server->vulkan, &top->image, rows, DRAW_UNPAINTED);
 	return 1;
 }
 
@@ -1635,7 +1645,8 @@ draw_top_free(
 	if (top->image.pixels == NULL)
 		return;
 
-	/* The pixels and their charge go. */
+	/* The copy on the GPU, the pixels and their charge go. */
+	x11_render_image_detach(&top->image);
 	free(top->image.pixels);
 	x11_memory_release(server, top->owner, top->image_bytes);
 	memset(&top->image, 0, sizeof(top->image));
@@ -1645,9 +1656,10 @@ draw_top_free(
 
 /*
  * Works out the part of a window that can be drawn, on its top-level
- * window's pixels: inside it (and its border when asked), inside each
- * ancestor, not under a mapped InputOutput sibling above it or above an
- * ancestor, and not under its own mapped InputOutput children when asked.
+ * window's pixels: inside it (and its border when asked) and its shape,
+ * inside each ancestor and its shape, not under a mapped InputOutput
+ * sibling above it or above an ancestor (as far as their shapes cover),
+ * and not under its own mapped InputOutput children when asked.
  * A window that cannot be seen, an InputOnly one, the root window, and a
  * tree without pixels have none.  Returns 0, or ENOMEM.
  */
@@ -1694,13 +1706,21 @@ draw_clip(
 	if (error != 0)
 		return error;
 
-	/* Inside each ancestor up to the top-level window. */
+	/* Inside its shape (SHAPE), when it has one. */
+	error = x11_shape_clip_window(window, border && window != top, clip);
+	if (error != 0)
+		return error;
+
+	/* Inside each ancestor (and its shape) up to the top-level window. */
 	for (ancestor = window->parent; ancestor != NULL && ancestor != server->root; ancestor = ancestor->parent) {
 		box.x0 = ancestor->x;
 		box.y0 = ancestor->y;
 		box.x1 = ancestor->x + (int)ancestor->width;
 		box.y1 = ancestor->y + (int)ancestor->height;
 		x11_region_intersect_box(clip, &box);
+		error = x11_shape_clip_inside(ancestor, clip);
+		if (error != 0)
+			return error;
 	}
 
 	/*
@@ -1712,11 +1732,7 @@ draw_clip(
 		for (sibling = ancestor->above; sibling != NULL; sibling = sibling->above) {
 			if (!sibling->mapped || sibling->window_class != X11_INPUT_OUTPUT)
 				continue;
-			box.x0 = sibling->x - (int)sibling->border;
-			box.y0 = sibling->y - (int)sibling->border;
-			box.x1 = sibling->x + (int)sibling->width + (int)sibling->border;
-			box.y1 = sibling->y + (int)sibling->height + (int)sibling->border;
-			error = x11_region_subtract_box(clip, &box);
+			error = x11_shape_subtract_outside(sibling, clip);
 			if (error != 0)
 				return error;
 		}
@@ -1726,11 +1742,7 @@ draw_clip(
 	for (sibling = window->first_child; children && sibling != NULL; sibling = sibling->above) {
 		if (!sibling->mapped || sibling->window_class != X11_INPUT_OUTPUT)
 			continue;
-		box.x0 = sibling->x - (int)sibling->border;
-		box.y0 = sibling->y - (int)sibling->border;
-		box.x1 = sibling->x + (int)sibling->width + (int)sibling->border;
-		box.y1 = sibling->y + (int)sibling->height + (int)sibling->border;
-		error = x11_region_subtract_box(clip, &box);
+		error = x11_shape_subtract_outside(sibling, clip);
 		if (error != 0)
 			return error;
 	}

@@ -234,6 +234,7 @@ static void wayland_toplevel_close(void *data, struct xdg_toplevel *toplevel);
 static void wayland_toplevel_bounds(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height);
 static void wayland_pending_sizes(struct x11_wayland *wayland);
 static void wayland_bounded_size(struct x11_surface *window);
+static void wayland_shape(struct x11_wayland *wayland, struct x11_surface *window, const struct x11_surface_info *info);
 static void wayland_limits(struct x11_surface *window, const struct x11_size_hints *hints);
 static void wayland_set_state(struct x11_surface *window, unsigned state);
 static void wayland_state_heard(struct x11_surface *window, unsigned state);
@@ -625,9 +626,10 @@ wayland_open(
 		app_id = WAYLAND_APP_ID;
 	xdg_toplevel_set_app_id(window->toplevel, app_id);
 
-	/* The limits on its size and its state, asked for before the first commit. */
+	/* The limits on its size, its state and its shape, asked for before the first commit. */
 	wayland_limits(window, &info->hints);
 	wayland_set_state(window, info->flags);
+	wayland_shape(wayland, window, info);
 
 	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	window->titlebar = kl_titlebar_create(wayland->display, window->toplevel, &wayland_titlebar_listener, window);
@@ -684,6 +686,45 @@ wayland_update(
 	/* Its state as the client asked (minimized, maximized, full-screen). */
 	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0U)
 		wayland_set_state(window, info->flags);
+
+	/*
+	 * Its shape, as the region the pointer is taken in (the buffer has no
+	 * alpha, so the desktop still shows all of it).  The icon, the
+	 * attention and the activation have no request the desktop takes.
+	 */
+	if ((changed & X11_SURFACE_CHANGED_SHAPE) != 0U)
+		wayland_shape(window->wayland, window, info);
+}
+
+/*
+ * Gives a window's shape to the desktop as the surface's input region
+ * (unshaped: the whole surface), applied at the next commit.
+ */
+static void
+wayland_shape(
+	struct x11_wayland *wayland,
+	struct x11_surface *window,
+	const struct x11_surface_info *info)
+{
+	struct wl_region *region;
+	unsigned index;
+
+	/* Unshaped: the whole surface takes the pointer. */
+	if (!info->shaped) {
+		wl_surface_set_input_region(window->surface, NULL);
+		return;
+	}
+
+	/* The shape's rectangles as a region. */
+	region = wl_compositor_create_region(wayland->compositor);
+	if (region == NULL)
+		return;
+	for (index = 0U; index < info->shape_count; index++)
+		wl_region_add(region, info->shape[index].x, info->shape[index].y, (int32_t)info->shape[index].width, (int32_t)info->shape[index].height);
+
+	/* Succeeded: the surface's input region, the region no longer needed. */
+	wl_surface_set_input_region(window->surface, region);
+	wl_region_destroy(region);
 }
 
 /*

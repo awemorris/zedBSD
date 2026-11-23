@@ -96,5 +96,6 @@ unsigned x11_win32_scale(const struct x11_win32 *backend);
 void x11_win32_root_size(const struct x11_win32 *backend, unsigned *width, unsigned *height);
 const struct x11_win32_keymap *x11_win32_keymap(const struct x11_win32 *backend);
 void *x11_win32_window_handle(const struct x11_surface *surface);
+int x11_win32_vulkan_loader(struct x11_win32 *backend, x11server_vulkan_function *loader);
 
 #endif

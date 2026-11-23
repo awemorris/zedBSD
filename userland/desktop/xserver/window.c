@@ -1390,6 +1390,7 @@ x11_window_child_at(
 	int y)
 {
 	struct x11_window *child;
+	int inside;
 
 	/* The children from the top of the stack down. */
 	for (child = parent->last_child; child != NULL; child = child->below) {
@@ -1399,6 +1400,11 @@ x11_window_child_at(
 		    y < child->y ||
 		    x >= child->x + child->width ||
 		    y >= child->y + child->height)
+			continue;
+
+		/* Outside its shape (SHAPE's bounding and input regions) the pointer passes through it. */
+		inside = x11_shape_contains(child, x, y);
+		if (!inside)
 			continue;
 		return child;
 	}
@@ -2363,9 +2369,9 @@ window_free(
 	/* The focus on it reverts, and the grabs on it end. */
 	x11_input_window_destroyed(server, window);
 
-	/* The selections it owned, its properties, its place in save-sets, and its surface. */
+	/* The selections it owned, its properties, its shapes and the extensions' events on it, its place in save-sets, and its surface. */
 	x11_selection_forget_window(server, window->id);
-	x11_randr_forget_window(server, window->id);
+	x11_extension_forget_window(server, window);
 	x11_property_forget_window(server, window);
 	x11_save_set_forget_window(server, window->id);
 	x11_rootless_forget(server, window);

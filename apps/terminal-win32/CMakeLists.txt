@@ -20,9 +20,11 @@
 #     cmake --build <build> --config Release --target zip
 #
 # The frames are painted on the processor and shown by libkeiland (no Vulkan).  MIKUTERM_VULKAN
-# keeps libkeiland's Vulkan surface in the build, for which Vulkan's headers are needed
-# (MIKUTERM_VULKAN_INCLUDE, or the release's tarball fetched and checked); off, no Vulkan header
-# is read.  The zip's fonts are the tree's, and Noto Color Emoji, fetched and checked against
+# keeps libkeiland's Vulkan surface in the build; off, libkeiland reads no Vulkan header.  The X
+# server's drawing and showing (present-vulkan.c, render-vulkan.c, win32/vulkan.c) always read
+# Vulkan's headers (MIKUTERM_VULKAN_INCLUDE, or the release's tarball: a copy in
+# MIKUTERM_DISTFILES first, else fetched, checked against its SHA-256) and open vulkan-1.dll at
+# run time; the program imports no Vulkan library.  The zip's fonts are the tree's, and Noto Color Emoji, fetched and checked against
 # the SHA-256 its package records (a copy in MIKUTERM_DISTFILES is used first); nothing fetched
 # goes into the tree.
 #
@@ -168,7 +170,6 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/x11-link.c
 	${MIKUTERM_DIR}/x11-host.c
 	${MIKUTERM_DIR}/x11-child.c
-	${MIKUTERM_DIR}/x11-novulkan.c
 	${MIKUTERM_DIR}/x11-noglx.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/client.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/glyphs.c
@@ -182,6 +183,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/property.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/region.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-cpu.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/render-vulkan.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/present-vulkan.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/gc.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/draw.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/shape.c
@@ -194,6 +197,10 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xkb.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xinput.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/rooted.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/extension.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/shape-ext.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xfixes.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/sync.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/randr.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xinerama.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
@@ -206,7 +213,9 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/keysyms.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/scale.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/text.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/vulkan.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/cursor.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/decor.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
@@ -221,11 +230,18 @@ endforeach()
 # The version, for the resource and Help > About.
 configure_file(${MIKUTERM_DIR}/resources/mikuterm-version.h.in ${MIKUTERM_INCLUDE}/mikuterm-version.h @ONLY)
 
-# Vulkan's headers, when the surface is kept: the given directory, or the release's tarball.
+# Vulkan's headers: the given directory, or the release's tarball (MIKUTERM_DISTFILES' copy first).
 set(MIKUTERM_VULKAN_SDK_TAG vulkan-sdk-1.4.309.0)
 set(MIKUTERM_VULKAN_SHA256 2bc1b4127950badc80212abf1edfa5c3b5032f3425edf37255863ba7592c1969)
-if(MIKUTERM_VULKAN AND NOT MIKUTERM_VULKAN_INCLUDE)
+if(NOT MIKUTERM_VULKAN_INCLUDE)
 	set(tarball ${CMAKE_CURRENT_BINARY_DIR}/sources/Vulkan-Headers-${MIKUTERM_VULKAN_SDK_TAG}.tar.gz)
+	set(local ${MIKUTERM_DISTFILES}/Vulkan-Headers-${MIKUTERM_VULKAN_SDK_TAG}.tar.gz)
+	if(NOT EXISTS ${tarball} AND EXISTS ${local})
+		file(SHA256 ${local} local_sha256)
+		if(local_sha256 STREQUAL MIKUTERM_VULKAN_SHA256)
+			configure_file(${local} ${tarball} COPYONLY)
+		endif()
+	endif()
 	if(NOT EXISTS ${tarball})
 		file(DOWNLOAD
 			https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${MIKUTERM_VULKAN_SDK_TAG}.tar.gz
@@ -255,6 +271,12 @@ if(MIKUTERM_VULKAN)
 else()
 	target_compile_definitions(mikuterm_flags INTERFACE KEILAND_WIN32_NO_VULKAN)
 endif()
+# The X server's Vulkan files read Vulkan's headers whether libkeiland's surface is kept or not.
+set_source_files_properties(
+	${MIKUTERM_ROOT}/userland/desktop/xserver/render-vulkan.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/present-vulkan.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/vulkan.c
+	PROPERTIES INCLUDE_DIRECTORIES ${MIKUTERM_VULKAN_INCLUDE})
 if(MIKUTERM_MSVC_STYLE)
 	target_compile_options(mikuterm_flags INTERFACE $<$<COMPILE_LANGUAGE:C>:/std:c11 /W3 /utf-8>)
 	target_compile_definitions(mikuterm_flags INTERFACE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)

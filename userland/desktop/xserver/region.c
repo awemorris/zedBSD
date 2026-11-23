@@ -425,6 +425,7 @@ x11_region_canonical(
 	size_t previous_start;
 	size_t previous_count;
 	size_t made;
+	size_t room;
 	int same;
 	int top;
 	int bottom;
@@ -452,13 +453,28 @@ x11_region_canonical(
 		edge_count++;
 	}
 
-	/* Room for the result: a band holds at most every box, and there are fewer bands than edges (too many is only sorted). */
-	if (edge_count > REGION_MAX / region->count) {
+	/*
+	 * Room for the result: each band holds at most the boxes across it,
+	 * counted first, so that a region of many thin bands (one made from a
+	 * bitmap) does not ask for a band's room for every box (too many is
+	 * only sorted).
+	 */
+	room = 0U;
+	for (edge = 0U; edge + 1U < edge_count; edge++) {
+		top = edges[edge];
+		bottom = edges[edge + 1U];
+		for (index = 0U; index < region->count; index++) {
+			if (region->boxes[index].y0 > top || region->boxes[index].y1 < bottom)
+				continue;
+			room++;
+		}
+	}
+	if (room > REGION_MAX) {
 		free(edges);
 		x11_region_sort(region);
 		return ENOMEM;
 	}
-	result = malloc(region->count * edge_count * sizeof(*result));
+	result = malloc(room * sizeof(*result));
 	if (result == NULL) {
 		free(edges);
 		x11_region_sort(region);
@@ -524,7 +540,7 @@ x11_region_canonical(
 	free(region->boxes);
 	region->boxes = result;
 	region->count = made;
-	region->capacity = region->count * edge_count;
+	region->capacity = room;
 	return 0;
 }
 

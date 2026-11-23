@@ -18,8 +18,7 @@
 
 #include <string.h>
 
-/* The extension's name and the version the core speaks. */
-#define XINERAMA_NAME			"XINERAMA"
+/* The version the core speaks. */
 #define XINERAMA_VERSION_MAJOR		1U
 #define XINERAMA_VERSION_MINOR		1U
 
@@ -39,34 +38,6 @@ static unsigned xinerama_get_state(struct x11server *server, struct x11_client *
 static unsigned xinerama_get_screen_size(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned xinerama_is_active(struct x11server *server, struct x11_client *client, size_t length);
 static unsigned xinerama_query_screens(struct x11server *server, struct x11_client *client, size_t length);
-
-/*
- * Answers QueryExtension's name XINERAMA: its major opcode (it has no
- * events or errors).  Returns nonzero when the name is the extension's.
- */
-int
-x11_xinerama_query(
-	const uint8_t *name,
-	size_t length,
-	uint8_t *major,
-	uint8_t *event,
-	uint8_t *error)
-{
-	int differs;
-
-	/* Another name. */
-	if (length != sizeof(XINERAMA_NAME) - 1U)
-		return 0;
-	differs = memcmp(name, XINERAMA_NAME, length);
-	if (differs != 0)
-		return 0;
-
-	/* Succeeded: the extension's numbers. */
-	*major = (uint8_t)X11_XINERAMA_MAJOR;
-	*event = 0U;
-	*error = 0U;
-	return 1;
-}
 
 /*
  * Answers a XINERAMA request.  Returns 0, or the error to send.

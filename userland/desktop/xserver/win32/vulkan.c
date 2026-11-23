@@ -10,9 +10,9 @@
  * the core shows the window's pixels through.
  *
  * The program imports no Vulkan library: the loader (vulkan-1.dll) is
- * opened from the system folder when the core first asks for a surface,
- * and vkCreateWin32SurfaceKHR is looked up on the core's instance, which
- * the same loader made.
+ * opened from the system folder when the program asks for it to give the
+ * core (or the core first asks for a surface), and vkCreateWin32SurfaceKHR
+ * is looked up on the core's instance, which the same loader made.
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
@@ -24,6 +24,30 @@
 #include <errno.h>
 
 static int vulkan_loader(struct x11_win32 *backend, PFN_vkGetInstanceProcAddr *lookup);
+
+/*
+ * Gives the system's Vulkan loader's vkGetInstanceProcAddr, for the core
+ * to draw and show the windows with (the loader is opened from System32
+ * only, never from the program's folder).  Returns 0, or ENOENT when the
+ * system has no Vulkan loader (the core then draws in memory).
+ */
+int
+x11_win32_vulkan_loader(
+	struct x11_win32 *backend,
+	x11server_vulkan_function *loader)
+{
+	PFN_vkGetInstanceProcAddr lookup;
+	int error;
+
+	/* The loader's lookup. */
+	error = vulkan_loader(backend, &lookup);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the lookup, as the core takes it. */
+	*loader = (x11server_vulkan_function)lookup;
+	return 0;
+}
 
 /*
  * Makes the Vulkan surface of a window (the backend's vulkan_surface).

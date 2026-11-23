@@ -67,6 +67,7 @@ static void server_refuse(struct x11server *server, struct x11_client *client, c
 static int server_append(struct x11_client *client, const uint8_t *bytes, size_t length);
 static void server_report(struct x11server *server);
 static void server_report_history(struct x11server *server, const struct x11_client *client);
+static void server_vulkan_lost(struct x11server *server);
 
 /*
  * Starts a server: the core fonts' faces and the root window, with the backend
@@ -79,6 +80,7 @@ x11server_create(
 	struct x11server **result)
 {
 	struct x11server *server;
+	int shows;
 	int error;
 
 	/* A backend is required. */
@@ -101,9 +103,14 @@ x11server_create(
 	server->log = options->log;
 	server->log_context = options->log_context;
 
-	/* Windows are shown through Vulkan when its WSI is named, else through the backend's present. */
+	/* Vulkan when the program gave its loader: windows and pixmaps drawn on the GPU, shown through swapchains when it can. */
 	server->vulkan_wsi = options->vulkan_wsi;
-	if (server->vulkan_wsi == NULL)
+	if (options->vulkan_loader != NULL)
+		server->vulkan = x11_vulkan_open(server, options->vulkan_loader, options->vulkan_wsi);
+
+	/* Else, or without the WSI, windows are shown through the backend's present. */
+	shows = x11_vulkan_shows(server->vulkan);
+	if (!shows)
 		server->cpu_present = 1;
 
 	/* The client slots, every one free. */
@@ -206,8 +213,12 @@ x11server_destroy(
 	/* The clipboard's copies and the texts being given in pieces. */
 	x11_selection_destroy(server);
 
-	/* The root window, with what is left of it (its properties, its pixels and its surface). */
+	/* The extensions' state. */
+	x11_extension_fini(server);
+
+	/* The root window, with what is left of it (its properties, the extensions' events on it, its pixels and its surface). */
 	if (server->root != NULL) {
+		x11_extension_forget_window(server, server->root);
 		x11_property_forget_window(server, server->root);
 		x11_rootless_forget(server, server->root);
 		x11_draw_forget(server, server->root);
@@ -218,7 +229,6 @@ x11server_destroy(
 
 	/* The resource ids, the atoms, the passive grabs and the save-sets. */
 	x11_save_set_fini(server);
-	x11_randr_fini(server);
 	x11_resource_fini(server);
 	x11_atoms_fini(server);
 	x11_input_fini(server);
@@ -573,23 +583,32 @@ x11server_tick(
 	unsigned grabbed;
 	unsigned index;
 	int waiting;
+	int timed;
 	int more;
 	int left;
+	int lost;
 
 	/* The server's time never goes back. */
 	if ((int32_t)(now - server->now) > 0)
 		server->now = now;
 
+	/* A device that was lost ends the clients that drew on it, and the server goes on without Vulkan. */
+	lost = x11_vulkan_lost(server->vulkan);
+	if (lost)
+		server_vulkan_lost(server);
+
 	/* The windows the backend asked to close, and a motion held back. */
 	x11_rootless_closing(server);
 	x11_rootless_flush_motion(server);
+
+	/* The extensions' waits that time ended (SYNC's, the window manager's resizes): a client woken goes on now. */
+	more = x11_extension_tick(server, &timed);
 
 	/*
 	 * Each client's whole requests, up to a tick's share; while a client
 	 * holds the server, only its own.  A grab that ends in the pass lets
 	 * the others go on at once.
 	 */
-	more = 0;
 	grabbed = server->grabbed;
 	for (index = 0U; index < server->clients_max; index++) {
 		if (server->clients[index].id == 0U)
@@ -630,7 +649,7 @@ x11server_tick(
 	/* At once while requests wait, soon while something is to be shown or held back, else at the next report. */
 	if (more) {
 		*wake = server->now;
-	} else if (server->dirty || server->motion_pending || waiting) {
+	} else if (server->dirty || server->motion_pending || waiting || timed) {
 		*wake = server->now + SERVER_TICK_MS;
 	} else {
 		*wake = server->now + SERVER_REPORT_MS;
@@ -708,11 +727,18 @@ x11_client_close(
 	id = client->id;
 	client->id = 0U;
 
-	/* Its grabs of the devices, its windows (with their surfaces), pixmaps, graphics contexts and fonts, and the selections it owned. */
+	/*
+	 * Its grabs of the devices, the selections it owned (before its
+	 * windows, so that XFIXES's clients hear the client closed, as the
+	 * X.Org server has it), and its windows (with their surfaces),
+	 * pixmaps, graphics contexts and fonts.
+	 */
 	x11_input_forget_client(server, index);
-	x11_resources_release(server, index);
 	x11_selection_forget_client(server, index);
-	x11_randr_forget_client(server, index);
+	x11_resources_release(server, index);
+
+	/* What it held in the extensions (regions, counters, alarms, waits, events it asked for). */
+	x11_extension_forget_client(server, index);
 
 	/* Its grab of the server goes. */
 	if (server->grabbed == index)
@@ -802,6 +828,10 @@ server_handle(
 		if (handled >= X11_TICK_BYTES)
 			break;
 		if (client->ending)
+			return 0;
+
+		/* A client waiting for counters or fences (SYNC's Await) sends nothing more until the wait ends. */
+		if (client->blocked)
 			return 0;
 
 		/* The bytes of a request refused for its length go as they come. */
@@ -1151,4 +1181,28 @@ server_report_history(
 
 	/* Said. */
 	x11_log(server, "%s", held);
+}
+
+/*
+ * Gives up Vulkan after its device was lost: what the clients drew there
+ * is gone, so each one is ended (they may connect again); the server then
+ * draws in memory and shows through the backend.
+ */
+static void
+server_vulkan_lost(
+	struct x11server *server)
+{
+	unsigned index;
+
+	/* Every client, with its windows (their swapchains) and pixmaps. */
+	x11_log(server, "X11SERVER VULKAN lost: every client is ended, drawing goes on in memory");
+	for (index = 0U; index < server->clients_max; index++) {
+		if (server->clients[index].id != 0U)
+			x11_client_close(server, index);
+	}
+
+	/* Vulkan, after everything on it. */
+	x11_vulkan_close(server->vulkan);
+	server->vulkan = NULL;
+	server->cpu_present = 1;
 }
