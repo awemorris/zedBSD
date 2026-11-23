@@ -1404,8 +1404,11 @@ window_key(
 		held = window_held();
 		taken = keiui_win32_tab_key(window, code, held);
 		if (taken) {
+			/* A dead key this press left waiting is let go. */
 			if (dead)
 				window_dead_clear();
+
+			/* The press is the tabs', so its release is not given either. */
 			window->eaten_key = code;
 			return;
 		}
