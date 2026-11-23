@@ -73,6 +73,9 @@
 /* The room for the decimal digits of an unsigned long, with the NUL. */
 #define MONITOR_DECIMAL_MAX	24U
 
+/* The room for one PermitOpen or PermitListen entry as text ("[host]:port"), with the NUL. */
+#define MONITOR_PERMIT_TEXT_MAX	(SSH_CONFIG_HOST_MAX + 3U + MONITOR_DECIMAL_MAX)
+
 /* How a value is written as a word of sshd_config text. */
 #define MONITOR_WORD_PLAIN	0
 #define MONITOR_WORD_QUOTED	1
@@ -118,6 +121,10 @@ static int monitor_time_before(const struct timespec *left, const struct timespe
 static void monitor_wait_until(const struct timespec *start, unsigned ms);
 static int monitor_word_kind(const char *text);
 static int monitor_put_line(struct ssh_buf *out, const char *keyword, const char *first, const char *second);
+static int monitor_put_words(struct ssh_buf *out, const char *keyword, const char *const *words, unsigned count);
+static int monitor_put_forwarding(const struct sshd_config *config, struct ssh_buf *out);
+static int monitor_put_permits(struct ssh_buf *out, const char *keyword, enum sshd_permit_mode mode, const struct sshd_permit *list, unsigned count);
+static int monitor_permits_equal(enum sshd_permit_mode left_mode, const struct sshd_permit *left, unsigned left_count, enum sshd_permit_mode right_mode, const struct sshd_permit *right, unsigned right_count);
 static int monitor_put_number_line(struct ssh_buf *out, const char *keyword, unsigned long value);
 static void monitor_decimal(unsigned long value, char *text);
 static int monitor_config_equal(const struct sshd_config *left, const struct sshd_config *right);
@@ -532,6 +539,10 @@ sshd_config_put_text(
 	/* Writes the sftp subsystem when there is one. */
 	if (status == 0 && config->sftp_command[0] != '\0')
 		status = monitor_put_line(out, "Subsystem", "sftp", config->sftp_command);
+
+	/* Writes what may be forwarded. */
+	if (status == 0)
+		status = monitor_put_forwarding(config, out);
 
 	/* Takes back what was written when a setting cannot be carried. */
 	if (status == 0)
@@ -1593,8 +1604,7 @@ monitor_put_line(
 {
 	const char *words[2];
 	unsigned count;
-	unsigned index;
-	int kind;
+	int written;
 
 	/* Collects the words. */
 	words[0] = first;
@@ -1603,7 +1613,33 @@ monitor_put_line(
 	if (second != NULL)
 		count = 2;
 
-	/* Refuses a word the text cannot carry before anything is written. */
+	/* Writes the line. */
+	written = monitor_put_words(out, keyword, words, count);
+	if (written != 0)
+		return written;
+
+	/* Succeeded: the line is appended. */
+	return 0;
+}
+
+/*
+ * Appends the line "keyword word..." to out (count words, at least one),
+ * each word written as monitor_word_kind says.  Returns 0 or EINVAL (a
+ * word that cannot be written; out unchanged).
+ */
+static int
+monitor_put_words(
+	struct ssh_buf *out,
+	const char *keyword,
+	const char *const *words,
+	unsigned count)
+{
+	unsigned index;
+	int kind;
+
+	/* Refuses a line without words, and a word the text cannot carry, before anything is written. */
+	if (count == 0)
+		return EINVAL;
 	for (index = 0; index < count; index++) {
 		kind = monitor_word_kind(words[index]);
 		if (kind == MONITOR_WORD_NONE)
@@ -1627,6 +1663,162 @@ monitor_put_line(
 
 	/* Succeeded: the line is appended (a failure of out is recorded in it). */
 	return 0;
+}
+
+/*
+ * Appends the lines of what may be forwarded: AllowTcpForwarding,
+ * GatewayPorts, PermitOpen, PermitListen and DisableForwarding.  Returns
+ * 0 or EINVAL (a value that has no name, or an entry the text cannot
+ * carry).
+ */
+static int
+monitor_put_forwarding(
+	const struct sshd_config *config,
+	struct ssh_buf *out)
+{
+	const char *name;
+	int status;
+
+	/* Names the directions forwarded. */
+	name = NULL;
+	if (config->tcp_forwarding == (SSHD_TCP_FORWARD_LOCAL | SSHD_TCP_FORWARD_REMOTE)) {
+		name = "yes";
+	} else if (config->tcp_forwarding == SSHD_TCP_FORWARD_LOCAL) {
+		name = "local";
+	} else if (config->tcp_forwarding == SSHD_TCP_FORWARD_REMOTE) {
+		name = "remote";
+	} else if (config->tcp_forwarding == 0) {
+		name = "no";
+	}
+	if (name == NULL)
+		return EINVAL;
+	status = monitor_put_line(out, "AllowTcpForwarding", name, NULL);
+	if (status != 0)
+		return status;
+
+	/* Names where forwarded ports listen. */
+	name = NULL;
+	if (config->gateway_ports == SSHD_GATEWAY_NO) {
+		name = "no";
+	} else if (config->gateway_ports == SSHD_GATEWAY_YES) {
+		name = "yes";
+	} else if (config->gateway_ports == SSHD_GATEWAY_CLIENT_SPECIFIED) {
+		name = "clientspecified";
+	}
+	if (name == NULL)
+		return EINVAL;
+	status = monitor_put_line(out, "GatewayPorts", name, NULL);
+	if (status != 0)
+		return status;
+
+	/* Writes the destinations and the listeners allowed. */
+	status = monitor_put_permits(out, "PermitOpen", config->permit_open_mode, config->permit_open, config->permit_open_count);
+	if (status != 0)
+		return status;
+	status = monitor_put_permits(out, "PermitListen", config->permit_listen_mode, config->permit_listen, config->permit_listen_count);
+	if (status != 0)
+		return status;
+
+	/* Writes whether every forwarding is off. */
+	name = "no";
+	if (config->disable_forwarding)
+		name = "yes";
+	status = monitor_put_line(out, "DisableForwarding", name, NULL);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the lines are appended. */
+	return 0;
+}
+
+/*
+ * Appends the line of PermitOpen or PermitListen: "any", "none", or each
+ * entry as "host:port" ("[host]:port" for a host with a colon, "*" for
+ * any port).  Returns 0 or EINVAL.
+ */
+static int
+monitor_put_permits(
+	struct ssh_buf *out,
+	const char *keyword,
+	enum sshd_permit_mode mode,
+	const struct sshd_permit *list,
+	unsigned count)
+{
+	char texts[SSHD_PERMITS_MAX][MONITOR_PERMIT_TEXT_MAX];
+	char port[MONITOR_DECIMAL_MAX];
+	const char *words[SSHD_PERMITS_MAX];
+	const char *colon;
+	unsigned index;
+	int written;
+
+	/* Every one, or none. */
+	if (mode == SSHD_PERMIT_ANY)
+		return monitor_put_line(out, keyword, "any", NULL);
+	if (mode == SSHD_PERMIT_NONE)
+		return monitor_put_line(out, keyword, "none", NULL);
+
+	/* A list must have entries, no more than the field holds. */
+	if (mode != SSHD_PERMIT_LIST || count == 0 || count > SSHD_PERMITS_MAX)
+		return EINVAL;
+
+	/* Writes each entry as a word. */
+	for (index = 0; index < count; index++) {
+		/* The port, or "*" for any. */
+		if (list[index].port == 0) {
+			(void)snprintf(port, sizeof(port), "*");
+		} else {
+			monitor_decimal(list[index].port, port);
+		}
+
+		/* The host, in brackets when it holds a colon (an IPv6 address). */
+		colon = strchr(list[index].host, ':');
+		if (colon != NULL) {
+			(void)snprintf(texts[index], sizeof(texts[index]), "[%s]:%s", list[index].host, port);
+		} else {
+			(void)snprintf(texts[index], sizeof(texts[index]), "%s:%s", list[index].host, port);
+		}
+		words[index] = texts[index];
+	}
+
+	/* Writes the line. */
+	written = monitor_put_words(out, keyword, words, count);
+	if (written != 0)
+		return written;
+
+	/* Succeeded: the line is appended. */
+	return 0;
+}
+
+/* Reports whether two PermitOpen or PermitListen settings are the same (1 or 0). */
+static int
+monitor_permits_equal(
+	enum sshd_permit_mode left_mode,
+	const struct sshd_permit *left,
+	unsigned left_count,
+	enum sshd_permit_mode right_mode,
+	const struct sshd_permit *right,
+	unsigned right_count)
+{
+	unsigned index;
+	int same;
+
+	/* Compares the modes and the counts. */
+	if (left_mode != right_mode || left_count != right_count)
+		return 0;
+	if (left_count > SSHD_PERMITS_MAX)
+		return 0;
+
+	/* Compares each entry. */
+	for (index = 0; index < left_count; index++) {
+		if (left[index].port != right[index].port)
+			return 0;
+		same = strcmp(left[index].host, right[index].host);
+		if (same != 0)
+			return 0;
+	}
+
+	/* Every entry is the same. */
+	return 1;
 }
 
 /* Appends the line "keyword <decimal value>" to out; 0 or EINVAL. */
@@ -1695,6 +1887,18 @@ monitor_config_equal(
 	if (left->max_sessions != right->max_sessions || left->max_startups != right->max_startups)
 		return 0;
 	if (left->client_alive_interval != right->client_alive_interval || left->client_alive_count != right->client_alive_count)
+		return 0;
+	if (left->tcp_forwarding != right->tcp_forwarding || left->gateway_ports != right->gateway_ports)
+		return 0;
+	if (left->disable_forwarding != right->disable_forwarding)
+		return 0;
+
+	/* Compares the destinations and the listeners allowed. */
+	same = monitor_permits_equal(left->permit_open_mode, left->permit_open, left->permit_open_count, right->permit_open_mode, right->permit_open, right->permit_open_count);
+	if (!same)
+		return 0;
+	same = monitor_permits_equal(left->permit_listen_mode, left->permit_listen, left->permit_listen_count, right->permit_listen_mode, right->permit_listen, right->permit_listen_count);
+	if (!same)
 		return 0;
 
 	/* Compares the texts. */

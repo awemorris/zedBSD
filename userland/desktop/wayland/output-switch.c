@@ -44,6 +44,7 @@
 
 #include "kwl.h"
 #include "compose.h"
+#include "extras.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -1900,6 +1901,9 @@ output_resized(
 		if (error != 0)
 			printf("KWL OUTPUT resize glass errno=%d\n", error);
 	}
+
+	/* The cursor's images at the output's scale, when it changed. */
+	kwl_cursor_images_rescale(server);
 
 	/* The windows. */
 	kwl_glass_output_resized(server);

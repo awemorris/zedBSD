@@ -1825,8 +1825,8 @@ drag_place(
 		(void)kwl_glass_body_origin(server, surface, &left, &top);
 
 	/* Succeeded: the pointer from there. */
-	*x = (uint32_t)((server->pointer_x - left) * 256);
-	*y = (uint32_t)((server->pointer_y - top) * 256);
+	*x = (uint32_t)((server->pointer_x - left) * 256 + server->pointer_fraction_x);
+	*y = (uint32_t)((server->pointer_y - top) * 256 + server->pointer_fraction_y);
 }
 
 /*
