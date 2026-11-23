@@ -42,6 +42,9 @@
 /* The application: one for the process, made by kl_app_open. */
 static struct kl_app *app_open;
 
+/* The program's hook for the posts made with keiland_post_app (NULL: none); set and read on M. */
+static int (*app_post_hook)(uint32_t code, void *data);
+
 static void app_activity_event(struct kl_app *app, const struct keiland_android_event *event);
 static void app_activity_drain(struct kl_app *app);
 static void app_bridge_drain(struct kl_app *app);
@@ -145,6 +148,7 @@ kl_app_dispatch(
 {
 	int ident;
 	int wait;
+	int due;
 
 	/* An application. */
 	if (app == NULL)
@@ -154,6 +158,11 @@ kl_app_dispatch(
 	wait = timeout_ms;
 	if (app->event_count != 0U)
 		wait = 0;
+
+	/* Nor past the time a held tab's long press is due. */
+	due = android_titlebar_wait(app);
+	if (due >= 0 && (wait < 0 || due < wait))
+		wait = due;
 
 	/*
 	 * What was queued before the wake-up descriptor was there (or while no
@@ -191,6 +200,9 @@ kl_app_dispatch(
 		if (ident == KEILAND_IDENT_INPUT && app->input != NULL)
 			android_input_drain(app, app->input);
 	}
+
+	/* A long press that is due opens its menu. */
+	android_titlebar_tick(app);
 
 	/* Succeeded: what happened is queued. */
 	return 0;
@@ -296,6 +308,15 @@ kl_window_post(
 
 	/* Succeeded: it waits for the dispatch. */
 	return 0;
+}
+
+/* Sets the hook that sees the posts made with keiland_post_app (NULL removes it). */
+void
+keiland_android_set_post_hook(
+	int (*hook)(uint32_t code, void *data))
+{
+	/* Kept for the dispatch. */
+	app_post_hook = hook;
 }
 
 /*
@@ -568,6 +589,10 @@ app_bridge_event(
 		android_clipboard_bridge(app, event);
 		break;
 	case KEILAND_BRIDGE_APP_POST:
+		/* The program's hook may take it (the data is then the hook's). */
+		if (app_post_hook != NULL && app_post_hook(event->code, event->data) == 1)
+			break;
+
 		/* The program's own event (the data is the program's). */
 		memset(&posted, 0, sizeof(posted));
 		posted.kind = KL_APP_POST;
@@ -579,8 +604,9 @@ app_bridge_event(
 		(void)android_input_bridge_key(app, event);
 		break;
 	case KEILAND_BRIDGE_MENU:
+		android_titlebar_menu_answer(app, (uint32_t)event->a, event->b);
+		break;
 	default:
-		/* The menu's answer has no taker yet. */
 		break;
 	}
 }

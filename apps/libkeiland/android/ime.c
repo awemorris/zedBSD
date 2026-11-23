@@ -80,7 +80,7 @@ kl_window_text_cursor(
 
 	/* The window is the native window less the insets. */
 	(void)keiland_java_set_cursor_anchor((float)(x + window->app->insets[ANDROID_INSET_LEFT]),
-	    (float)(y + window->app->insets[ANDROID_INSET_TOP]), (float)width, (float)height);
+	    (float)(y + window->app->insets[ANDROID_INSET_TOP] + (int32_t)android_titlebar_height(window)), (float)width, (float)height);
 }
 
 /* Takes the text around the caret: the input method is not shown it (the editable stays empty). */

@@ -21,6 +21,7 @@
 #include <keiland/keiland.h>
 #include "apps/libkeiland/android/bridge.h"
 #include "apps/libkeiland/android/keiland-android.h"
+#include "apps/libkeiland/android/titlebar.h"
 
 #include <android/native_window.h>
 
@@ -41,14 +42,6 @@ struct android_post {
 	struct kl_window *window;
 	uint32_t code;
 	void *data;
-};
-
-/* One item of the window's menu that has a shortcut: its key (an XKB keysym), the modifiers (KL_MENU_*), the item's ID and its action. */
-struct android_shortcut {
-	uint32_t keysym;
-	unsigned modifiers;
-	uint32_t id;
-	uint32_t action;
 };
 
 /*
@@ -95,9 +88,8 @@ struct kl_window {
 	uint32_t *shown;
 	uint32_t shown_width;
 	uint32_t shown_height;
-	/* The shortcuts of the window's menu: what a key chosen with Ctrl, Alt or Super held does. */
-	struct android_shortcut *shortcuts;
-	size_t shortcut_count;
+	/* The title bar's strip: the menu, the tabs and the strip's picture. */
+	struct android_titlebar bar;
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
 	int text_input;
@@ -137,11 +129,30 @@ struct kl_window *android_window_top(struct kl_app *app);
 /* present.c */
 
 /*
- * Copies the parts of a frame of 0xAARRGGBB words (stride in words) into the
- * native window's buffer, as RGBA, at the insets' offset, and posts it.
+ * What is shown of a window: the title bar's strip (strip_height rows of
+ * width words, or none) above the program's frame (height rows, stride
+ * words a row, or none yet), both of width pixels.  strip_dirty says the strip
+ * is to be written too.
  */
-int android_present_copy(ANativeWindow *native, const int32_t insets[5], const uint32_t *pixels, size_t stride,
-	uint32_t width, uint32_t height, const struct kl_rect *parts, unsigned count);
+struct android_view {
+	const uint32_t *strip;
+	uint32_t strip_height;
+	int strip_dirty;
+	const uint32_t *pixels;
+	size_t stride;
+	uint32_t width;
+	uint32_t height;
+};
+
+/*
+ * Copies the parts of a view (the program's frame's parts, and the strip when
+ * it is dirty) of 0xAARRGGBB words into the native window's buffer, as RGBA,
+ * at the insets' offset, and posts it.
+ */
+int android_present_copy(ANativeWindow *native, const int32_t insets[5], const struct android_view *view, const struct kl_rect *parts, unsigned count);
+
+/* Shows the window's strip again (it changed), when the window is the one shown and can be drawn in. */
+void android_present_strip(struct kl_window *window);
 
 /* Paints the window on top again from the frame kept, when one of its size is there (a new native window has no picture). */
 void android_present_repaint(struct kl_app *app);
@@ -197,10 +208,32 @@ void android_theme_bridge(struct kl_app *app, const struct keiland_bridge_event 
  */
 int android_titlebar_shortcut(struct kl_window *window, int32_t keycode, int32_t meta);
 
-/* Lets the shortcuts kept for a window go. */
+/* Starts a new window's strip state, and lets everything the strip holds go. */
+void android_titlebar_init(struct kl_window *window);
 void android_titlebar_release(struct kl_window *window);
 
-/* Returns 1 when the strip of the window's titlebar took a press at (x, y) (pixels of the window). */
-int android_titlebar_hit(struct kl_window *window, double x, double y, int pressed);
+/* Returns the strip's height in pixels (0 without a menu or tabs), as laid out and as it is wanted by the menu and the tabs now. */
+uint32_t android_titlebar_height(const struct kl_window *window);
+uint32_t android_titlebar_wanted(const struct kl_window *window);
+
+/* Makes the strip fit the window (its height by the menu and tabs, its width by the window's) and draws it. */
+void android_titlebar_resize(struct kl_window *window);
+
+/* The theme or the window's title changed: the strips are drawn again and the one shown is put on the screen. */
+void android_titlebar_restyle(struct kl_app *app);
+void android_titlebar_changed(struct kl_window *window);
+
+/*
+ * Takes a finger's (or the mouse button's, finger ANDROID_FINGER_MOUSE) touch at (x, y) in the window's pixels
+ * (phase 1 down, 2 moved, 0 up, 3 cancelled).  Returns 1 when the strip has it, 0 when it is the program's.
+ */
+int android_titlebar_hit(struct kl_window *window, double x, double y, int32_t finger, int phase);
+
+/* The time in milliseconds until a held tab's long press is due (-1: none waits), and the long press's opening of the tab's menu. */
+int android_titlebar_wait(struct kl_app *app);
+void android_titlebar_tick(struct kl_app *app);
+
+/* Takes the answer to a popup (the request's number, the item's position or -1). */
+void android_titlebar_menu_answer(struct kl_app *app, uint32_t request, int32_t item);
 
 #endif /* KEILAND_ANDROID_ANDROID_H */
