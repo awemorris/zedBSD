@@ -76,6 +76,10 @@ fm_glass_refresh(
 	size_t index;
 	int same;
 	int error;
+	int left;
+	int top;
+	int right;
+	int bottom;
 
 	/* A window that is not glass has no panels. */
 	if (!glass->on)
@@ -87,14 +91,21 @@ fm_glass_refresh(
 	if (same != 0)
 		return;
 
-	/* Each panel in the compositor's terms. */
+	/*
+	 * Each panel in the compositor's terms: drawn in units, sent in the
+	 * window's pixels, each edge where the canvas put it.
+	 */
 	memset(sent, 0, sizeof(sent));
 	for (index = 0; index < count; index++) {
-		sent[index].x = panels[index].rect.x;
-		sent[index].y = panels[index].rect.y;
-		sent[index].width = panels[index].rect.width;
-		sent[index].height = panels[index].rect.height;
-		sent[index].radius = panels[index].radius;
+		left = fm_window_pixel(glass->window, panels[index].rect.x);
+		top = fm_window_pixel(glass->window, panels[index].rect.y);
+		right = fm_window_pixel(glass->window, panels[index].rect.x + panels[index].rect.width);
+		bottom = fm_window_pixel(glass->window, panels[index].rect.y + panels[index].rect.height);
+		sent[index].x = left;
+		sent[index].y = top;
+		sent[index].width = right - left;
+		sent[index].height = bottom - top;
+		sent[index].radius = fm_window_pixel(glass->window, panels[index].radius);
 		sent[index].kind = KL_GLASS_CARD;
 	}
 
@@ -108,6 +119,7 @@ fm_glass_refresh(
 	/* Remembered, to send again only what changes. */
 	memcpy(glass->shown, panels, sizeof(panels[0]) * count);
 	glass->shown_count = count;
+	glass->shown_scale = glass->window->scale;
 	glass->sent = 1;
 	fm_log("GLASS panels count=%lu", (unsigned long)count);
 }
@@ -136,8 +148,10 @@ glass_same(
 {
 	size_t index;
 
-	/* Nothing sent yet, or another count. */
+	/* Nothing sent yet, another scale (the same units are other pixels), or another count. */
 	if (glass->sent == 0)
+		return 0;
+	if (glass->shown_scale != glass->window->scale)
 		return 0;
 	if (glass->shown_count != count)
 		return 0;

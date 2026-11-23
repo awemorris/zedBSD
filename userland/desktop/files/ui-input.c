@@ -297,7 +297,7 @@ fm_input_button(
 
 /*
  * Scrolls the content (or the sidebar, when the pointer is over it) by an
- * amount of pixels (positive is down), kept within what there is.
+ * amount of units (positive is down), kept within what there is.
  */
 void
 fm_input_scroll(

@@ -7,7 +7,7 @@
 
 /*
  * Dragging the selected items within the window (spec §14, design §10.4):
- * a press on an item that moves more than a few pixels drags the whole
+ * a press on an item that moves more than a few units drags the whole
  * selection.  Under the pointer a folder among the items, a place of the
  * sidebar or a tab is the target; the release moves the items there (on the
  * same device, else copies them), Ctrl copies, Ctrl+Shift makes links;
@@ -32,10 +32,10 @@
 #include <sys/stat.h>
 #include <time.h>
 
-/* How far the pointer moves from the press before the items are dragged, in pixels. */
+/* How far the pointer moves from the press before the items are dragged, in units. */
 #define DRAG_START		6
 
-/* The size of the dragged icon, and where it is from the pointer, in pixels. */
+/* The size of the dragged icon, and where it is from the pointer, in units. */
 #define DRAG_ICON		52
 #define DRAG_OFFSET_X		2
 #define DRAG_OFFSET_Y		14
@@ -48,14 +48,14 @@
 
 /*
  * The scroll at the content's edges under a drag: how near the top or the
- * bottom edge the pointer starts it, in pixels, and its speed there, in
- * pixels a millisecond, slow at the band's inner side and fast at the edge.
+ * bottom edge the pointer starts it, in units, and its speed there, in
+ * units a millisecond, slow at the band's inner side and fast at the edge.
  */
 #define DRAG_EDGE		44
 #define DRAG_EDGE_SLOW		0.08
 #define DRAG_EDGE_FAST		1.2
 
-/* The radius of the badges on the dragged icon, in pixels. */
+/* The radius of the badges on the dragged icon, in units. */
 #define DRAG_BADGE		10
 
 /* The badges' colors: the count's, a copy's and a link's. */

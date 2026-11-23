@@ -24,6 +24,7 @@
 #include <keiland/keiland.h>
 
 #include <errno.h>
+#include <math.h>
 #include <pwd.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -39,7 +40,7 @@
 #define UI_LOG_PREFIX		"ZFILES "
 #define UI_LOG_LINE		1024U
 
-/* The frame's measurements, in pixels: the tasks' place from the corner. */
+/* The frame's measurements, in units: the tasks' place from the corner. */
 #define UI_MARGIN		12
 
 /* The margin round a region drawn again alone (its edge and shadow, BUG-221, BUG-226). */
@@ -69,7 +70,6 @@
 
 
 static void ui_layout(struct fm_app *app);
-static void ui_clear_rect(struct kl_canvas *canvas, const struct kl_rect *rect);
 static void ui_draw_frame(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *part);
 static int ui_damage_near(const struct kl_rect *first, const struct kl_rect *second);
 static void ui_rect_union(struct kl_rect *into, const struct kl_rect *rect);
@@ -369,6 +369,8 @@ fm_ui_draw(
 	struct kl_canvas *canvas)
 {
 	struct kl_rect parts[FM_DAMAGE_PARTS];
+	struct kl_rect whole;
+	struct kl_rect units;
 	int part_count;
 	int index;
 
@@ -402,9 +404,14 @@ fm_ui_draw(
 	app->drawn_hover_index = app->hover_index;
 	app->hover_moved = 0;
 
-	/* The panels' places at this size. */
-	app->width = canvas->width;
-	app->height = canvas->height;
+	/* The panels' places at this size, in the canvas's units. */
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = canvas->width;
+	whole.height = canvas->height;
+	kl_canvas_logical(canvas, &whole, &units);
+	app->width = units.width;
+	app->height = units.height;
 	ui_layout(app);
 
 	/* The whole frame, or each part of it clipped to that part. */
@@ -511,6 +518,27 @@ fm_ui_frame_part(
 		app->frame_part.y = grown.y;
 	app->frame_part.width = right - app->frame_part.x;
 	app->frame_part.height = bottom - app->frame_part.y;
+}
+
+/*
+ * Turns a length or a place in a canvas's units into its pixels, at the
+ * nearest pixel (where the canvas puts an edge), for a picture made at
+ * the canvas's scale.
+ */
+int
+fm_ui_pixels(
+	const struct kl_canvas *canvas,
+	int units)
+{
+	double pixels;
+
+	/* At 100 % the units are the pixels. */
+	if (canvas->scale == 0U || canvas->scale == KL_SCALE_BASE)
+		return units;
+
+	/* Reports the units times the scale, rounded to the nearest pixel. */
+	pixels = (double)units * (double)canvas->scale / (double)KL_SCALE_BASE;
+	return (int)floor(pixels + 0.5);
 }
 
 /*
@@ -1431,42 +1459,6 @@ ui_select_paths(
 	app->select_count = 0;
 }
 
-/* Makes a rectangle of the canvas transparent (the glass shows through), within the canvas. */
-static void
-ui_clear_rect(
-	struct kl_canvas *canvas,
-	const struct kl_rect *rect)
-{
-	uint32_t *row;
-	int left;
-	int top;
-	int right;
-	int bottom;
-	int y;
-
-	/* The rectangle within the canvas. */
-	left = rect->x;
-	top = rect->y;
-	right = rect->x + rect->width;
-	bottom = rect->y + rect->height;
-	if (left < 0)
-		left = 0;
-	if (top < 0)
-		top = 0;
-	if (right > canvas->width)
-		right = canvas->width;
-	if (bottom > canvas->height)
-		bottom = canvas->height;
-	if (left >= right || top >= bottom)
-		return;
-
-	/* Each of its rows, transparent black (premultiplied). */
-	for (y = top; y < bottom; y++) {
-		row = canvas->pixels + (size_t)y * canvas->stride;
-		memset(row + left, 0, sizeof(row[0]) * (size_t)(right - left));
-	}
-}
-
 /*
  * Draws the window's frame, all of it (part NULL) or clipped to one part
  * of the window, the rest keeping the last frame's pixels.
@@ -1482,16 +1474,18 @@ ui_draw_frame(
 	/* The clickable regions are recorded again by this drawing. */
 	app->hit_count = 0;
 
-	/* The window's ground: clear on glass (the desktop shows between the panels), else a quiet light gradient. */
+	/*
+	 * The window's ground: clear on glass (the desktop shows between the
+	 * panels; a part clears the clip it was pushed as), else a quiet light
+	 * gradient.
+	 */
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = canvas->width;
-	whole.height = canvas->height;
+	whole.width = app->width;
+	whole.height = app->height;
 	if (part != NULL)
 		kl_canvas_clip_push(canvas, part);
-	if (app->glass != 0 && part != NULL) {
-		ui_clear_rect(canvas, part);
-	} else if (app->glass != 0) {
+	if (app->glass != 0) {
 		kl_canvas_clear(canvas);
 	} else {
 		kl_canvas_gradient(canvas, &whole, FM_COLOR_BACKGROUND_TOP, FM_COLOR_BACKGROUND_BOTTOM);
