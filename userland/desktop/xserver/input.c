@@ -2350,9 +2350,11 @@ input_grab_pointer(
 	struct x11_window *window;
 	struct x11_window *confine;
 	struct x11_window *old;
+	struct x11_cursor *cursor;
 	struct x11_grab grab;
 	uint8_t reply[32];
 	uint32_t confine_id;
+	uint32_t cursor_id;
 	uint32_t mask;
 	uint32_t time;
 	unsigned status;
@@ -2382,8 +2384,14 @@ input_grab_pointer(
 			return X11_BAD_WINDOW;
 	}
 	time = x11_read32(request + 20, msb);
+	cursor_id = x11_read32(request + 16, msb);
+	if (cursor_id != 0U) {
+		cursor = x11_cursor_find(server, cursor_id);
+		if (cursor == NULL)
+			return X11_BAD_CURSOR;
+	}
 
-	/* The grab asked for (the server keeps no cursors yet: any cursor is taken). */
+	/* The grab asked for (its cursor is shown while it lasts, cursor.c). */
 	memset(&grab, 0, sizeof(grab));
 	grab.client = index;
 	grab.window = window->id;
@@ -2490,6 +2498,7 @@ input_grab_passive(
 	struct x11_passive_grab *grown;
 	struct x11_window *window;
 	struct x11_window *confine;
+	struct x11_cursor *cursor;
 	unsigned capacity;
 	unsigned slot;
 	int msb;
@@ -2532,7 +2541,7 @@ input_grab_passive(
 		return X11_BAD_WINDOW;
 	passive.window = window->id;
 
-	/* The modes, the modifiers, and the confining window. */
+	/* The modes, the modifiers, the confining window and the cursor. */
 	if (passive.pointer_mode > MODE_ASYNC || passive.keyboard_mode > MODE_ASYNC)
 		return X11_BAD_VALUE;
 	if (passive.modifiers != ANY_MODIFIER && (passive.modifiers & ~MODIFIER_BITS) != 0U)
@@ -2541,6 +2550,11 @@ input_grab_passive(
 		confine = x11_window_find(server, passive.confine_to);
 		if (confine == NULL)
 			return X11_BAD_WINDOW;
+	}
+	if (passive.cursor != 0U) {
+		cursor = x11_cursor_find(server, passive.cursor);
+		if (cursor == NULL)
+			return X11_BAD_CURSOR;
 	}
 
 	/* Another client's grab of the same combination on the window (any matching any). */
@@ -2654,6 +2668,8 @@ input_change_active_grab(
 	const uint8_t *request,
 	size_t length)
 {
+	struct x11_cursor *cursor;
+	uint32_t cursor_id;
 	uint32_t mask;
 	uint32_t time;
 	int valid;
@@ -2663,6 +2679,12 @@ input_change_active_grab(
 	msb = server->clients[index].order;
 	if (length != 16U)
 		return X11_BAD_LENGTH;
+	cursor_id = x11_read32(request + 4, msb);
+	if (cursor_id != 0U) {
+		cursor = x11_cursor_find(server, cursor_id);
+		if (cursor == NULL)
+			return X11_BAD_CURSOR;
+	}
 	time = x11_read32(request + 8, msb);
 	mask = x11_read16(request + 12, msb);
 	if ((mask & ~POINTER_EVENT_BITS) != 0U)

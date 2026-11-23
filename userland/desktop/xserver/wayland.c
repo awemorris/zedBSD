@@ -265,7 +265,7 @@ static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_s
  */
 const struct x11_backend_ops x11_wayland_ops = {
 	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
-	wayland_clipboard_read, NULL, NULL, NULL, NULL
+	wayland_clipboard_read, NULL, NULL, NULL, NULL, NULL
 };
 
 /* The registry's callbacks. */

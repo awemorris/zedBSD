@@ -90,6 +90,10 @@ struct x11_surface {
 	int iconic;
 	int vulkan;
 
+	/* The cursor shown over it (NULL: the arrow), and whether the backend made it (and frees it). */
+	HCURSOR cursor;
+	int cursor_owned;
+
 	/* The window's pixels for GDI: a top-down 32-bit DIB of the scaled size. */
 	HDC dib_dc;
 	HBITMAP dib;
@@ -178,6 +182,10 @@ void win32_input_capture(void *context, struct x11_surface *surface, int on);
 int win32_input_place(void *context, int *x, int *y);
 int win32_input_warp(void *context, int x, int y);
 void win32_input_bell(void *context, int percent);
+
+/* cursor.c */
+void win32_surface_cursor(void *context, struct x11_surface *surface, const struct x11_cursor_image *image);
+void win32_cursor_free(struct x11_surface *surface);
 
 /* layout.c */
 void win32_layout_read(struct x11_win32 *backend);

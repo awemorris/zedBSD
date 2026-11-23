@@ -22,8 +22,10 @@
  * contexts, render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
- * and keymap.c, glyphs.c and glx.c are the US keyboard map, the core font
- * and the GLX extension.
+ * font.c keeps the core fonts and answers their requests and the text
+ * ones, glyphs.c draws their glyphs from the TrueType faces, cursor.c
+ * keeps the cursors and tells the backend which one to show, and keymap.c
+ * and glx.c are the US keyboard map and the GLX extension.
  */
 
 #ifndef KEILAND_X11SERVER_INTERNAL_H
@@ -107,6 +109,7 @@
 #define X11_RESOURCE_PIXMAP	2U
 #define X11_RESOURCE_GC		3U
 #define X11_RESOURCE_FONT	4U
+#define X11_RESOURCE_CURSOR	5U
 #define X11_RESOURCE_GONE	0xffU
 
 /*
@@ -262,13 +265,33 @@
 #define X11_FREEZE_POINTER	1U
 #define X11_FREEZE_KEYBOARD	2U
 
-/* The glyph cell of the core font, the printable ASCII glyphs kept once drawn, and the largest glyph drawn from the font. */
-#define X11_GLYPH_BITMAP	32U
-#define X11_GLYPHS_CACHED	128U
-#define X11_GLYPH_DRAWN_MAX	48U
+/*
+ * The faces the core fonts are drawn from (glyphs.c), by their roles: the
+ * monospaced one and its bold, the proportional one and its bold.  A role
+ * without a file of its own takes another's face (drawn bold when it is a
+ * bold role).
+ */
+#define X11_FACE_MONO		0U
+#define X11_FACE_MONO_BOLD	1U
+#define X11_FACE_SANS		2U
+#define X11_FACE_SANS_BOLD	3U
+#define X11_FACES		4U
 
-/* The types other modules keep behind pointers: the font's face, and Vulkan's state and a window's swapchain. */
+/* The largest pixel size a core font is drawn at, and the largest glyph drawn from a face (pixels each way). */
+#define X11_FONT_PIXELS_MAX	128U
+#define X11_GLYPH_DRAWN_MAX	256U
+
+/* How many glyphs one font keeps drawn, and the longest name a font answers to. */
+#define X11_FONT_CACHE		256U
+#define X11_FONT_NAME_MAX	255U
+
+/* The kinds of a core font: one drawn from a face, and the cursor font (the shapes of the standard cursors). */
+#define X11_FONT_TEXT		0U
+#define X11_FONT_CURSOR		1U
+
+/* The types other modules keep behind pointers: a face, and Vulkan's state and a window's swapchain. */
 struct truetype_face;
+struct x11_cursor;
 
 /*
  * An active grab of the pointer or of the keyboard: the client that holds
@@ -493,6 +516,9 @@ struct x11_window {
 	uint32_t colormap;
 	uint32_t cursor;
 
+	/* The cursor named (NULL: None, the parent's is shown), held while the window names it. */
+	struct x11_cursor *cursor_held;
+
 	/* The events each client asked for, and those kept from reaching its ancestors. */
 	struct x11_event_select *selects;
 	unsigned select_count;
@@ -646,11 +672,102 @@ struct x11_gc {
 };
 
 /*
- * One open font (every name opens the one core font).
+ * The metrics of one character of a core font, as QueryFont answers them:
+ * the ink's left and right edges from the origin, how far the origin
+ * moves, and the ink above and below the baseline.  All zero: the font has
+ * no such character.
+ */
+struct x11_char_metrics {
+	int16_t left;
+	int16_t right;
+	int16_t width;
+	int16_t ascent;
+	int16_t descent;
+};
+
+/*
+ * One glyph a font keeps drawn: its character (used 0: the slot is free),
+ * where its bits sit from the origin on the baseline (left, and the rows
+ * above it), its size, and the bits (one a pixel, most significant first,
+ * rows of stride bytes).
+ */
+struct x11_font_glyph {
+	uint32_t codepoint;
+	int used;
+	int left;
+	int top;
+	int width;
+	int height;
+	size_t stride;
+	uint8_t *bits;
+};
+
+/*
+ * One open core font (font.c): a size of a face, or the cursor font.
+ *
+ * A text font has its name (an XLFD, or the name it was opened by when it
+ * has none), the face's role, the pixel size the face is drawn at, how
+ * far a glyph is moved right and raised from the origin, the font's
+ * ascent and descent, and its characters: the range of the first and
+ * second bytes, the default character, and either one width every
+ * character shares (monospaced: cell_width, metrics NULL) or each one's
+ * metrics, with the bounds of them all.  A monospaced font draws the
+ * line-drawing characters itself, across the whole cell (line_drawing),
+ * and the tree's zed-unicode keeps the background under ImageText (the
+ * tree's libX11 sends its XDrawString as ImageText).  The glyphs drawn so far are kept, the bytes the owner is
+ * charged with the worst they could take.  The server's own default font
+ * has the owner X11_NO_CLIENT and no id.
  */
 struct x11_font {
 	uint32_t id;
 	unsigned owner;
+	unsigned kind;
+	char name[X11_FONT_NAME_MAX + 1U];
+	unsigned role;
+	unsigned pixels;
+	int shift_x;
+	int raise;
+	int ascent;
+	int descent;
+	uint8_t min_byte1;
+	uint8_t max_byte1;
+	uint8_t min_byte2;
+	uint8_t max_byte2;
+	uint16_t default_char;
+	int cell_width;
+	int box_width;
+	int line_drawing;
+	int keeps_background;
+	struct x11_char_metrics min_bounds;
+	struct x11_char_metrics max_bounds;
+	struct x11_char_metrics *metrics;
+	size_t metric_count;
+	struct x11_font_glyph cache[X11_FONT_CACHE];
+	size_t charged;
+};
+
+/*
+ * One cursor (cursor.c): its shape, a mask of the pixels it shows and its
+ * two colours, its hot spot, and, when it is one of the cursor font's,
+ * which (shape -1: none).  It lives while its id does or a window or a
+ * grab holds it (holders).
+ */
+struct x11_cursor {
+	uint32_t id;
+	unsigned owner;
+	unsigned holders;
+	int shape;
+	int width;
+	int height;
+	int hot_x;
+	int hot_y;
+	uint8_t *source;
+	uint8_t *mask;
+	size_t stride;
+	uint16_t foreground[3];
+	uint16_t background[3];
+	uint32_t version;
+	size_t charged;
 };
 
 /*
@@ -706,27 +823,63 @@ struct x11_draw_frame {
 };
 
 /*
- * One glyph of the core font: a cell of one bit a pixel, rows of stride
- * bytes, and how far the pen moves after it.
+ * The faces the core fonts are drawn from (glyphs.c): one over each font
+ * file the caller keeps in memory (NULL: none of that role), the size and
+ * weight each was last set to, and the coverage a glyph is drawn into
+ * before it becomes bits (NULL when there is no face).
  */
-struct x11_glyph {
-	unsigned width;
-	unsigned height;
-	unsigned stride;
-	unsigned advance;
-	uint8_t bitmap[X11_GLYPH_BITMAP];
+struct x11_faces {
+	struct truetype_face *faces[X11_FACES];
+	unsigned sizes[X11_FACES];
+	int bolds[X11_FACES];
+	uint8_t *coverage;
 };
 
 /*
- * The core font: the face over the TrueType file the caller keeps in
- * memory, the ASCII glyphs drawn so far, and the coverage a glyph is drawn
- * into before it becomes bits.  The face is NULL when there is no font.
+ * A glyph as a face draws it: its coverage (rows of stride bytes, 0 to
+ * 255), where it sits from the origin (left, and the rows above the
+ * baseline), its size and how far the origin moves.
  */
-struct x11_glyphs {
-	struct truetype_face *face;
-	struct x11_glyph cache[X11_GLYPHS_CACHED];
-	uint8_t cached[X11_GLYPHS_CACHED];
-	uint8_t coverage[X11_GLYPH_DRAWN_MAX * X11_GLYPH_DRAWN_MAX];
+struct x11_face_glyph {
+	const uint8_t *coverage;
+	size_t stride;
+	int left;
+	int top;
+	int width;
+	int height;
+	int advance;
+};
+
+/*
+ * One glyph of a text request (font.c to draw.c): where its bits go on the
+ * drawable (its top-left corner), their size, and where they start in the
+ * request's bits (one a pixel, most significant first, rows of stride
+ * bytes).
+ */
+struct x11_text_glyph {
+	int x;
+	int y;
+	int width;
+	int height;
+	size_t stride;
+	size_t offset;
+};
+
+/*
+ * The text a request draws (draw.c): the drawable and graphics context,
+ * whether the glyphs go on a box filled with the background first
+ * (ImageText) and that box, the box that covers all that is drawn (both
+ * on the drawable), and the glyphs and their bits.
+ */
+struct x11_text {
+	uint32_t drawable;
+	uint32_t gc;
+	int image;
+	struct x11_box background;
+	struct x11_box extent;
+	const struct x11_text_glyph *glyphs;
+	size_t count;
+	const uint8_t *bits;
 };
 
 /*
@@ -752,8 +905,29 @@ struct x11server {
 	const char *vulkan_wsi;
 	int cpu_present;
 
-	/* The core font. */
-	struct x11_glyphs glyphs;
+	/*
+	 * The faces the core fonts are drawn from, the font a graphics context
+	 * without one of its own draws with (NULL until first needed), and the
+	 * names ListFonts answers (NUL after each; NULL until first asked).
+	 */
+	struct x11_faces faces;
+	struct x11_font *default_font;
+	char *font_names;
+	size_t font_names_size;
+
+	/*
+	 * The cursor shown (cursor.c): the top-level window and the surface it
+	 * was last given to (the pair, so that a surface made anew at the same
+	 * place is not taken for the old one), the version of the cursor (0:
+	 * the system's own), and whether any was given.
+	 */
+	uint32_t cursor_window;
+	const struct x11_surface *cursor_surface;
+	uint32_t cursor_shown_version;
+	int cursor_known;
+
+	/* The version the last cursor made or recoloured was given (cursor.c), never 0. */
+	uint32_t cursor_serial;
 
 	/* Where log lines go. */
 	void (*log)(void *context, const char *line);
@@ -1053,7 +1227,7 @@ unsigned x11_request_poly_line(struct x11server *server, unsigned index, const u
 unsigned x11_request_poly_fill_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_put_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_get_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-unsigned x11_request_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_draw_text(struct x11server *server, const struct x11_text *text);
 unsigned x11_request_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_create_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_request_free_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -1097,10 +1271,29 @@ void x11_input_window_destroyed(struct x11server *server, struct x11_window *win
 void x11_input_forget_client(struct x11server *server, unsigned client);
 unsigned x11_input_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
-/* glyphs.c: the core font. */
-int x11_glyphs_open(struct x11_glyphs *glyphs, const uint8_t *bytes, size_t size, const char *fallback_path);
-int x11_glyph(struct x11_glyphs *glyphs, uint32_t codepoint, struct x11_glyph *glyph);
-void x11_glyphs_close(struct x11_glyphs *glyphs);
+/* glyphs.c: the faces the core fonts are drawn from. */
+int x11_faces_open(struct x11_faces *faces, const struct x11server_font_file *files, unsigned count, const char *fallback_path);
+void x11_faces_close(struct x11_faces *faces);
+int x11_face_present(const struct x11_faces *faces, unsigned role);
+int x11_face_line(struct x11_faces *faces, unsigned role, unsigned pixels, int *ascent, int *descent, int *advance);
+int x11_face_char(struct x11_faces *faces, unsigned role, unsigned pixels, uint32_t codepoint, struct x11_char_metrics *metrics);
+int x11_face_draw(struct x11_faces *faces, unsigned role, unsigned pixels, uint32_t codepoint, struct x11_face_glyph *glyph);
+
+/* font.c: the core fonts and the requests of fonts and text. */
+void x11_fonts_fini(struct x11server *server);
+struct x11_font *x11_font_find(struct x11server *server, uint32_t id);
+void x11_font_free(struct x11server *server, struct x11_font *font);
+int x11_font_has_char(const struct x11_font *font, uint32_t character);
+const struct x11_font_glyph *x11_font_glyph(struct x11server *server, struct x11_font *font, uint32_t character);
+unsigned x11_font_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+
+/* cursor.c: cursors, and the one the backend shows. */
+struct x11_cursor *x11_cursor_find(struct x11server *server, uint32_t id);
+void x11_cursor_hold(struct x11_cursor *cursor);
+void x11_cursor_release(struct x11server *server, struct x11_cursor *cursor);
+void x11_cursor_free(struct x11server *server, struct x11_cursor *cursor);
+void x11_cursor_update(struct x11server *server);
+unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /* glx.c: the GLX extension. */
 void x11_glx_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);

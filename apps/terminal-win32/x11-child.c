@@ -36,8 +36,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The fonts of the core font, inside mikuterm's folder. */
-#define CHILD_FONT		"share/fonts/keiland-mono.ttf"
+/* The fonts of the core fonts, inside mikuterm's folder: how many, and the monospaced faces' fallback. */
+#define CHILD_FONTS		3U
 #define CHILD_FALLBACK		"share/fonts/keiland-fallback-mono.ttf"
 #define CHILD_FONT_MAX		(32U * 1024U * 1024U)
 
@@ -57,7 +57,7 @@
 /*
  * The X server process's state: the link's socket and its event, the
  * frames read and those waiting, the link's table and the X client of
- * each slot of it, the settings, the backend, the core and its font.
+ * each slot of it, the settings, the backend, the core and its fonts.
  */
 struct child {
 	SOCKET socket;
@@ -77,9 +77,23 @@ struct child {
 	unsigned flags;
 	struct x11_win32 *backend;
 	struct x11server *server;
-	char *font;
-	size_t font_size;
+	char *fonts[CHILD_FONTS];
+	size_t font_sizes[CHILD_FONTS];
 	char fallback[MIKUTERM_PATH_MAX];
+};
+
+/*
+ * The font files the core fonts are drawn from, by their roles: the
+ * monospaced face, and the proportional face and its bold (the
+ * monospaced bold is the core's own, made bold).
+ */
+static const struct {
+	const char *path;
+	unsigned role;
+} child_fonts[CHILD_FONTS] = {
+	{ "share/fonts/keiland-mono.ttf", X11SERVER_FONT_MONO },
+	{ "share/fonts/keiland.ttf", X11SERVER_FONT_SANS },
+	{ "share/fonts/keiland-bold.ttf", X11SERVER_FONT_SANS_BOLD }
 };
 
 static int child_connect(struct child *child);
@@ -114,6 +128,7 @@ mikuterm_x11_child(void)
 	DWORD timeout;
 	HANDLE handles[1];
 	unsigned waited;
+	unsigned index;
 	int error;
 	int status;
 
@@ -158,7 +173,7 @@ mikuterm_x11_child(void)
 	if (child.ending == 2)
 		status = 2;
 
-	/* The end: the core, the backend, the link. */
+	/* The end: the core, the backend, the link, the fonts' bytes. */
 	if (child.server != NULL)
 		x11server_destroy(child.server);
 	if (child.backend != NULL)
@@ -166,7 +181,8 @@ mikuterm_x11_child(void)
 	closesocket(child.socket);
 	WSACloseEvent(child.event);
 	WSACleanup();
-	free(child.font);
+	for (index = 0U; index < CHILD_FONTS; index++)
+		free(child.fonts[index]);
 	free(child.in);
 	free(child.out);
 	return status;
@@ -420,7 +436,7 @@ child_hello(
 
 /*
  * Starts the backend and the core: the windows of the host, the root the
- * size of the virtual screen, the core font from mikuterm's folder, the
+ * size of the virtual screen, the core fonts from mikuterm's folder, the
  * windows shown through GDI.  Returns 0, or an errno value.
  */
 static int
@@ -429,8 +445,10 @@ child_start_server(
 {
 	struct x11_win32_options backend_options;
 	struct x11server_options options;
-	struct x11server_font_file font;
+	struct x11server_font_file fonts[CHILD_FONTS];
 	char path[MIKUTERM_PATH_MAX];
+	unsigned count;
+	unsigned index;
 	unsigned width;
 	unsigned height;
 	int error;
@@ -447,14 +465,24 @@ child_start_server(
 	if (error != 0)
 		return error;
 
-	/* The core font's bytes and the fallback's path. */
-	error = mikuterm_path(path, sizeof(path), CHILD_FONT);
-	if (error == 0)
-		error = mikuterm_file_read(path, CHILD_FONT_MAX, &child->font, &child->font_size);
-	if (error != 0) {
-		child->font = NULL;
-		child->font_size = 0;
+	/* Each font file's bytes that can be read (a missing one's role is drawn with another face). */
+	count = 0U;
+	for (index = 0U; index < CHILD_FONTS; index++) {
+		error = mikuterm_path(path, sizeof(path), child_fonts[index].path);
+		if (error == 0)
+			error = mikuterm_file_read(path, CHILD_FONT_MAX, &child->fonts[index], &child->font_sizes[index]);
+		if (error != 0) {
+			child->fonts[index] = NULL;
+			child->font_sizes[index] = 0;
+			continue;
+		}
+		fonts[count].bytes = (const uint8_t *)child->fonts[index];
+		fonts[count].size = child->font_sizes[index];
+		fonts[count].role = child_fonts[index].role;
+		count++;
 	}
+
+	/* The monospaced faces' fallback's path. */
 	error = mikuterm_path(child->fallback, sizeof(child->fallback), CHILD_FALLBACK);
 	if (error != 0)
 		child->fallback[0] = '\0';
@@ -467,12 +495,9 @@ child_start_server(
 	options.backend = &x11_win32_ops;
 	options.backend_context = child->backend;
 	options.vulkan_wsi = NULL;
-	if (child->font != NULL) {
-		font.bytes = (const uint8_t *)child->font;
-		font.size = child->font_size;
-		font.role = X11SERVER_FONT_MONO;
-		options.fonts = &font;
-		options.font_count = 1;
+	if (count != 0U) {
+		options.fonts = fonts;
+		options.font_count = count;
 	}
 	if (child->fallback[0] != '\0')
 		options.font_fallback_path = child->fallback;

@@ -13,7 +13,8 @@
  * system window (a surface) for each mapped top-level X window, keeps its
  * size, place and title in step, hands it pixels or asks it for a Vulkan
  * surface to show them through, passes the clipboard across, and asks
- * for the pointer's capture, place and warp and for the bell.  The
+ * for the pointer's capture, place and warp, for the bell and for the
+ * cursor shown over a surface.  The
  * backend calls the core with what its system reports: keys (by their
  * place on the keyboard), the keyboard's map, the pointer, a window
  * entered and left, given a size, asked to close or minimized, and
@@ -72,6 +73,9 @@
  * and keys by their place on the keyboard (x11server_backend_key).
  */
 #define X11_BACKEND_KEYMAP	1
+
+/* The backend may show X's cursors (the cursor function). */
+#define X11_BACKEND_CURSOR	1
 
 /*
  * The keyboard's map: the keycodes (an evdev key code plus 8, so 8 to
@@ -134,6 +138,24 @@ struct x11_rect {
 };
 
 /*
+ * A cursor the backend shows over a surface: its shape when it is one of
+ * the standard cursors (the cursor font's glyph, an XC_* number of X's
+ * cursorfont.h; -1: none, the image is its shape), and its image: pixels
+ * of 0xAARRGGBB (alpha 0 or 255), width by height, with the hot spot, the
+ * pixel the pointer's place is on (pixels NULL: no image, the shape
+ * alone).  A backend shows its own cursor of a standard shape when it has
+ * one.
+ */
+struct x11_cursor_image {
+	int shape;
+	int width;
+	int height;
+	int hot_x;
+	int hot_y;
+	const uint32_t *pixels;
+};
+
+/*
  * One pointer event from the backend, in the root window's coordinates:
  * where the pointer is, and at most one button that changed.
  */
@@ -183,6 +205,10 @@ struct x11_pointer_frame {
  * or an errno value when it cannot tell).  warp moves it there (0, or an
  * errno value).  bell rings at a volume from -100 to 100 percent of the
  * base volume.
+ *
+ * cursor (which may be NULL: the system's pointer is shown) sets the
+ * cursor shown while the pointer is over a surface (image NULL: the
+ * system's own pointer); the backend copies what it needs.
  */
 struct x11_backend_ops {
 	struct x11_surface *(*open)(void *context, uint32_t window, const struct x11_surface_info *info);
@@ -196,6 +222,7 @@ struct x11_backend_ops {
 	int (*pointer)(void *context, int *x, int *y);
 	int (*warp)(void *context, int x, int y);
 	void (*bell)(void *context, int percent);
+	void (*cursor)(void *context, struct x11_surface *surface, const struct x11_cursor_image *image);
 };
 
 /* What the backend tells the core. */
