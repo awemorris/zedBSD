@@ -704,10 +704,15 @@ x11_client_close(
 	id = client->id;
 	client->id = 0U;
 
-	/* Its grabs of the devices, its windows (with their surfaces), pixmaps, graphics contexts and fonts, and the selections it owned. */
+	/*
+	 * Its grabs of the devices, the selections it owned (before its
+	 * windows, so that XFIXES's clients hear the client closed, as the
+	 * X.Org server has it), and its windows (with their surfaces),
+	 * pixmaps, graphics contexts and fonts.
+	 */
 	x11_input_forget_client(server, index);
-	x11_resources_release(server, index);
 	x11_selection_forget_client(server, index);
+	x11_resources_release(server, index);
 
 	/* What it held in the extensions (regions, counters, alarms, waits, events it asked for). */
 	x11_extension_forget_client(server, index);
