@@ -470,7 +470,9 @@ page_editor(
 		if (opener == 0) {
 			(void)execvp(PAGE_OPENER, arguments);
 			failure = errno;
-			(void)write(pipe_ends[1], &failure, sizeof(failure));
+			got = write(pipe_ends[1], &failure, sizeof(failure));
+			if (got < 0)
+				_exit(126);
 			_exit(127);
 		}
 		_exit(0);
