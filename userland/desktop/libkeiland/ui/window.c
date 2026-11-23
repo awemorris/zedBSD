@@ -24,6 +24,9 @@
 #include "userland/desktop/libkeiland/desktop-private.h"
 
 #include "userland/desktop/libwayland/content-type-v1-client-protocol.h"
+#include "userland/desktop/libwayland/fractional-scale-v1-client-protocol.h"
+#include "userland/desktop/libwayland/viewporter-client-protocol.h"
+#include "window-scale.h"
 
 #include <keiland/keiland.h>
 
@@ -128,6 +131,9 @@ static struct keiui_trace_frame *window_trace_begin(struct kl_window *window);
 static void window_trace_end(struct kl_window *window, struct keiui_trace_frame *frame, const struct kl_rect *parts, unsigned count, int error);
 static void window_trace_close(struct kl_window *window);
 static void window_traced(void *data, struct wl_callback *callback, uint32_t time);
+static void window_scale_preferred(void *data, struct wp_fractional_scale_v1 *fractional, uint32_t scale);
+static int window_scale_resize(struct kl_window *window);
+static void window_viewport_send(struct kl_window *window);
 
 /*
  * The globals a window on another's connection finds through a registry of
@@ -142,6 +148,8 @@ struct window_found {
 	uint32_t seat;
 	uint32_t seat_version;
 	uint32_t text_manager;
+	uint32_t viewporter;
+	uint32_t fractional_manager;
 };
 
 /* The registry's callbacks of that search. */
@@ -197,6 +205,11 @@ static const struct kl_desktop_listener desktop_listener = {
 /* The first screen's description: its current mode is kept (KL_VERSION 45). */
 static const struct wl_output_listener output_listener = {
 	window_output_geometry, window_output_mode, window_output_done, window_output_scale, NULL, NULL
+};
+
+/* The compositor's scale for the surface of a window that follows it. */
+static const struct wp_fractional_scale_v1_listener fractional_listener = {
+	window_scale_preferred
 };
 
 /* The touch screen's events of versions 1 to 5 (shape and orientation, of version 6, are never called). */
@@ -314,6 +327,16 @@ kl_window_close(
 		wp_content_type_v1_destroy(window->content_type);
 	if (window->content_manager != NULL)
 		wp_content_type_manager_v1_destroy(window->content_manager);
+
+	/* The surface's scale and viewport before the surface, their managers with them. */
+	if (window->fractional != NULL)
+		wp_fractional_scale_v1_destroy(window->fractional);
+	if (window->viewport != NULL)
+		wp_viewport_destroy(window->viewport);
+	if (window->fractional_manager != NULL)
+		wp_fractional_scale_manager_v1_destroy(window->fractional_manager);
+	if (window->viewporter != NULL)
+		wp_viewporter_destroy(window->viewporter);
 
 	/* The roles before the surface, the surface before the globals that made it. */
 	if (window->toplevel != NULL)
@@ -641,8 +664,9 @@ kl_window_set_title(
 }
 
 /*
- * Reports the size the compositor gives the window (the one a frame is
- * drawn at after kl_window_present_resize).
+ * Reports the size the compositor gives the window in pixels (the one a
+ * frame is drawn at after kl_window_present_resize): the configured size,
+ * times the scale for a window that follows it.
  */
 void
 kl_window_size(
@@ -650,24 +674,59 @@ kl_window_size(
 	uint32_t *width,
 	uint32_t *height)
 {
-	/* The configured size. */
-	*width = window->width;
-	*height = window->height;
+	/* The configured size in pixels. */
+	*width = window->pixel_width;
+	*height = window->pixel_height;
 }
 
 /*
- * Reports the scale the window is drawn at (KL_VERSION 112): the base one,
- * the compositor's scale not being taken yet (a frame is drawn at the
- * surface's size).
+ * Reports the scale the window is drawn at (KL_VERSION 112): the
+ * compositor's, for a window that follows it (KL_VERSION 114,
+ * kl_window_follow_scale), else the base one (the compositor enlarges the
+ * frames itself).
  */
 unsigned
 kl_window_scale(
 	const struct kl_window *window)
 {
-	(void)window;
+	unsigned scale;
 
-	/* Every window is drawn at 100 %. */
-	return KL_SCALE_BASE;
+	/* A window that does not follow the scale is drawn at 100 %. */
+	if (!window->scale_follow)
+		return KL_SCALE_BASE;
+
+	/* Succeeded: the compositor's scale in 96ths. */
+	scale = keiui_scale_96(window->scale120);
+	return scale;
+}
+
+/*
+ * Has a window follow the compositor's scale (KL_VERSION 114): from now on
+ * its size, its frames and its input's places are in pixels at the scale
+ * the compositor gives its surface, and a change of the scale comes as
+ * KL_WINDOW_SCALE and then KL_WINDOW_RESIZE.  A window that does not ask
+ * is drawn at 100 % and enlarged by the compositor.  Returns 0 (asked
+ * again, nothing changes), EINVAL without a window, or ENOTSUP under a
+ * compositor that does not tell the scale (the window stays at 100 %).
+ */
+int
+kl_window_follow_scale(
+	struct kl_window *window)
+{
+	int error;
+
+	/* A window. */
+	if (window == NULL)
+		return EINVAL;
+
+	/* Its surface's scale and viewport. */
+	error = keiui_window_follow_scale(window);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the scale comes with the compositor's next events. */
+	(void)wl_display_flush(window->display);
+	return 0;
 }
 
 /*
@@ -683,9 +742,12 @@ kl_window_present_resize(
 	VkResult result;
 	int error;
 
-	/* Vulkan: a swapchain of the size, whose extent may differ. */
+	/* The surface's logical size, shown by the frame of the new size (a window that follows the scale). */
+	window_viewport_send(window);
+
+	/* Vulkan: a swapchain of the size in pixels, whose extent may differ. */
 	if (window->present == KL_PRESENT_VULKAN) {
-		result = keiui_present_resize(&window->vulkan, window->width, window->height);
+		result = keiui_present_resize(&window->vulkan, window->pixel_width, window->pixel_height);
 		error = errno;
 		if (result != VK_SUCCESS) {
 			window_present_tell(window, "kl_window_present_resize", result, error);
@@ -696,11 +758,11 @@ kl_window_present_resize(
 		return 0;
 	}
 
-	/* Shared memory, or the application's own drawing: the window's size. */
-	*width = window->width;
-	*height = window->height;
-	window->shm_width = window->width;
-	window->shm_height = window->height;
+	/* Shared memory, or the application's own drawing: the window's size in pixels. */
+	*width = window->pixel_width;
+	*height = window->pixel_height;
+	window->shm_width = window->pixel_width;
+	window->shm_height = window->pixel_height;
 
 	/* Succeeded: frames are drawn at that size. */
 	return 0;
@@ -842,10 +904,10 @@ kl_window_configure_take(
 	if (window->configure_waiting == 0)
 		return EAGAIN;
 
-	/* The latest serial and its size; the take remembers which size change it is. */
+	/* The latest serial and its size in pixels; the take remembers which size change it is. */
 	configure->serial = window->configure_serial;
-	configure->width = window->width;
-	configure->height = window->height;
+	configure->width = window->pixel_width;
+	configure->height = window->pixel_height;
 	window->configure_taken = 1;
 	window->configure_taken_serial = window->configure_serial;
 	window->configure_taken_sizes = window->configure_sizes;
@@ -892,6 +954,9 @@ kl_window_configure_ack(
 	} else {
 		xdg_surface_ack_configure(window->role, serial);
 	}
+
+	/* The surface's logical size, shown by the frame of that configure (a window that follows the scale). */
+	window_viewport_send(window);
 
 	/* The acknowledgement goes now, ahead of the frame another thread commits after it. */
 	(void)wl_display_flush(window->display);
@@ -1231,9 +1296,9 @@ kl_window_desktop_place(
 	if (window->desktop == NULL)
 		return EINVAL;
 
-	/* Succeeded: the place. */
-	*x = window->desktop_x;
-	*y = window->desktop_y;
+	/* Succeeded: the place, in the window's pixels. */
+	*x = (int32_t)floor(keiui_window_pixels(window, (double)window->desktop_x) + 0.5);
+	*y = (int32_t)floor(keiui_window_pixels(window, (double)window->desktop_y) + 0.5);
 	return 0;
 }
 
@@ -1518,6 +1583,161 @@ keiui_clock_ms(void)
 	return now / 1000U;
 }
 
+/*
+ * Has a window follow the compositor's scale: its surface's fractional
+ * scale and viewport made, the scale heard from the compositor's next
+ * events.  Returns 0 (also for a window that follows it already), or
+ * ENOTSUP under a compositor without the viewporter or the fractional
+ * scale (or for the desktop's surface), ENOMEM.
+ */
+int
+keiui_window_follow_scale(
+	struct kl_window *window)
+{
+	int status;
+
+	/* Once. */
+	if (window->scale_follow)
+		return 0;
+
+	/* A window's surface, and a compositor that tells the scale. */
+	if (window->surface == NULL || window->desktop != NULL)
+		return ENOTSUP;
+	if (window->viewporter == NULL || window->fractional_manager == NULL)
+		return ENOTSUP;
+
+	/* The surface's viewport, which shows its frames at the logical size. */
+	window->viewport = wp_viewporter_get_viewport(window->viewporter, window->surface);
+	if (window->viewport == NULL)
+		return ENOMEM;
+
+	/* Its fractional scale, which tells the scale. */
+	window->fractional = wp_fractional_scale_manager_v1_get_fractional_scale(window->fractional_manager, window->surface);
+	if (window->fractional == NULL) {
+		wp_viewport_destroy(window->viewport);
+		window->viewport = NULL;
+		return ENOMEM;
+	}
+	status = wp_fractional_scale_v1_add_listener(window->fractional, &fractional_listener, window);
+	if (status != 0) {
+		wp_fractional_scale_v1_destroy(window->fractional);
+		wp_viewport_destroy(window->viewport);
+		window->fractional = NULL;
+		window->viewport = NULL;
+		return ENOMEM;
+	}
+
+	/*
+	 * Following from now on: the frames already shown are at 100 %, which
+	 * the logical size sent now shows as they are until the scale comes.
+	 */
+	window->scale_follow = 1;
+	window_viewport_send(window);
+
+	/* Succeeded: the window follows the scale. */
+	return 0;
+}
+
+/*
+ * Reports a place or a distance the compositor gives in logical units in
+ * the window's pixels (the same for a window that does not follow the
+ * scale).
+ */
+double
+keiui_window_pixels(
+	const struct kl_window *window,
+	double units)
+{
+	double pixels;
+
+	/* A window at 100 %: the same. */
+	if (!window->scale_follow)
+		return units;
+
+	/* Succeeded: times the scale. */
+	pixels = keiui_scale_to_pixels(units, window->scale120);
+	return pixels;
+}
+
+/*
+ * Reports a point of the window's pixels in the compositor's logical units,
+ * rounded to the nearest (the same for a window that does not follow the
+ * scale).
+ */
+int32_t
+keiui_window_units_point(
+	const struct kl_window *window,
+	int32_t pixels)
+{
+	int32_t units;
+
+	/* A window at 100 %: the same. */
+	if (!window->scale_follow)
+		return pixels;
+
+	/* Succeeded: over the scale. */
+	units = keiui_scale_units_round(pixels, window->scale120);
+	return units;
+}
+
+/*
+ * Makes a rectangle of the window's pixels one of the compositor's logical
+ * units that holds it whole: the left and top edges rounded down, the
+ * right and bottom ones up (the same for a window that does not follow the
+ * scale).
+ */
+void
+keiui_window_units_rect(
+	const struct kl_window *window,
+	int32_t *x,
+	int32_t *y,
+	int32_t *width,
+	int32_t *height)
+{
+	int32_t left;
+	int32_t top;
+	int32_t right;
+	int32_t bottom;
+
+	/* A window at 100 %: the same. */
+	if (!window->scale_follow)
+		return;
+
+	/* The four edges over the scale, outwards. */
+	left = keiui_scale_units_floor(*x, window->scale120);
+	top = keiui_scale_units_floor(*y, window->scale120);
+	right = keiui_scale_units_ceil(*x + *width, window->scale120);
+	bottom = keiui_scale_units_ceil(*y + *height, window->scale120);
+
+	/* The rectangle they bound. */
+	*x = left;
+	*y = top;
+	*width = right - left;
+	*height = bottom - top;
+}
+
+/*
+ * Makes glass panels of the window's pixels the compositor's, in its
+ * logical units: each rectangle held whole, its corners' radius over the
+ * scale (copied as they are for a window that does not follow the scale).
+ */
+void
+keiui_window_units_panels(
+	const struct kl_window *window,
+	const struct kl_glass_panel *panels,
+	size_t count,
+	struct kl_glass_panel *units)
+{
+	size_t index;
+
+	/* Each panel. */
+	for (index = 0U; index < count; index++) {
+		units[index] = panels[index];
+		keiui_window_units_rect(window, &units[index].x, &units[index].y, &units[index].width, &units[index].height);
+		units[index].radius = keiui_window_units_point(window, panels[index].radius);
+	}
+}
+
 /* Connects, binds the globals, makes the surface and its toplevel, waits for the first configure and makes the presenter; 0 or an errno value. */
 static int
 window_setup(
@@ -1535,6 +1755,10 @@ window_setup(
 	window->repeat_delay = WINDOW_REPEAT_DELAY;
 	window->repeat_interval = WINDOW_REPEAT_INTERVAL;
 	window->present = options->present;
+
+	/* Drawn at 100 % until the window follows the compositor's scale. */
+	window->scale120 = KEIUI_SCALE_ONE;
+	(void)window_scale_resize(window);
 
 	/* The connection. */
 	window->display = wl_display_connect(options->display);
@@ -1593,8 +1817,8 @@ window_setup(
 	}
 
 	/* Succeeded: the window is configured. */
-	window->shm_width = window->width;
-	window->shm_height = window->height;
+	window->shm_width = window->pixel_width;
+	window->shm_height = window->pixel_height;
 	return 0;
 }
 
@@ -1621,6 +1845,10 @@ window_setup_shared(
 	window->repeat_delay = WINDOW_REPEAT_DELAY;
 	window->repeat_interval = WINDOW_REPEAT_INTERVAL;
 	window->present = options->present;
+
+	/* Drawn at 100 % until the window follows the compositor's scale. */
+	window->scale120 = KEIUI_SCALE_ONE;
+	(void)window_scale_resize(window);
 
 	/* A queue of its own, and the display as seen from it, so that the application's events do not run meanwhile. */
 	queue = wl_display_create_queue(window->display);
@@ -1664,6 +1892,12 @@ window_setup_shared(
 	if (found.text_manager != 0U)
 		keiui_text_input_bind(window, registry, found.text_manager);
 
+	/* The viewporter and the fractional scale's manager, for the window's own scale. */
+	if (found.viewporter != 0U && found.fractional_manager != 0U) {
+		window->viewporter = wl_registry_bind(registry, found.viewporter, &wp_viewporter_interface, 1U);
+		window->fractional_manager = wl_registry_bind(registry, found.fractional_manager, &wp_fractional_scale_manager_v1_interface, 1U);
+	}
+
 	/* The search's objects go. */
 	wl_registry_destroy(registry);
 	wl_proxy_wrapper_destroy(wrapper);
@@ -1688,6 +1922,12 @@ window_setup_shared(
 	if (window->text_manager != NULL)
 		wl_proxy_set_queue((struct wl_proxy *)window->text_manager, NULL);
 	keiui_text_input_start(window);
+
+	/* And the scale's managers. */
+	if (window->viewporter != NULL)
+		wl_proxy_set_queue((struct wl_proxy *)window->viewporter, NULL);
+	if (window->fractional_manager != NULL)
+		wl_proxy_set_queue((struct wl_proxy *)window->fractional_manager, NULL);
 
 	/* The search's queue is empty and goes. */
 	wl_event_queue_destroy(queue);
@@ -1724,10 +1964,17 @@ window_setup_shared(
 		xdg_toplevel_set_parent(window->toplevel, parent);
 	xdg_toplevel_set_min_size(window->toplevel, (int32_t)min_width, (int32_t)min_height);
 
+	/*
+	 * The library's own windows (a file chooser's, a media picker's) follow
+	 * the compositor's scale whatever their parent does, from before their
+	 * first configure (a compositor without it leaves them at 100 %).
+	 */
+	(void)keiui_window_follow_scale(window);
+
 	/* The first commit, which asks for the first configure. */
 	wl_surface_commit(window->surface);
-	window->shm_width = window->width;
-	window->shm_height = window->height;
+	window->shm_width = window->pixel_width;
+	window->shm_height = window->pixel_height;
 
 	/* Succeeded: the window waits for its configure. */
 	return 0;
@@ -1753,6 +2000,10 @@ window_setup_app(
 	window->repeat_delay = WINDOW_REPEAT_DELAY;
 	window->repeat_interval = WINDOW_REPEAT_INTERVAL;
 	window->present = options->present;
+
+	/* Drawn at 100 % until the window follows the compositor's scale. */
+	window->scale120 = KEIUI_SCALE_ONE;
+	(void)window_scale_resize(window);
 
 	/* The globals the application found, bound from its registry as a window of its own connection binds them. */
 	for (index = 0; index < app->global_count; index++)
@@ -1801,8 +2052,8 @@ window_setup_app(
 	}
 
 	/* Succeeded: the window is configured. */
-	window->shm_width = window->width;
-	window->shm_height = window->height;
+	window->shm_width = window->pixel_width;
+	window->shm_height = window->pixel_height;
 	return 0;
 }
 
@@ -1903,6 +2154,18 @@ window_search(
 	match = strcmp(interface, "zwp_text_input_manager_v3");
 	if (match == 0 && found->text_manager == 0U) {
 		found->text_manager = name;
+		return;
+	}
+
+	/* The viewporter and the fractional scale's manager (the window's own scale). */
+	match = strcmp(interface, "wp_viewporter");
+	if (match == 0 && found->viewporter == 0U) {
+		found->viewporter = name;
+		return;
+	}
+	match = strcmp(interface, "wp_fractional_scale_manager_v1");
+	if (match == 0 && found->fractional_manager == 0U) {
+		found->fractional_manager = name;
 		return;
 	}
 
@@ -2122,6 +2385,18 @@ window_global(
 		return;
 	}
 
+	/* The viewporter and the fractional scale's manager, for a window that follows the compositor's scale (KL_VERSION 114). */
+	match = strcmp(interface, "wp_viewporter");
+	if (match == 0 && window->viewporter == NULL) {
+		window->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1U);
+		return;
+	}
+	match = strcmp(interface, "wp_fractional_scale_manager_v1");
+	if (match == 0 && window->fractional_manager == NULL) {
+		window->fractional_manager = wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1U);
+		return;
+	}
+
 	/* The first screen, whose mode an application may show (KL_VERSION 45). */
 	match = strcmp(interface, "wl_output");
 	if (match == 0 && window->output == NULL) {
@@ -2202,8 +2477,9 @@ window_configure(
 		if (resized)
 			window->configure_sizes++;
 	} else {
-		/* The acknowledgement comes before any image of the new state. */
+		/* The acknowledgement comes before any image of the new state, with the surface's logical size (a window that follows the scale). */
 		xdg_surface_ack_configure(surface, serial);
+		window_viewport_send(window);
 	}
 
 	/* The window is configured, and its owner woken. */
@@ -2269,6 +2545,9 @@ window_toplevel_configure(
 		window->height = (uint32_t)height;
 		resized = 1;
 	}
+
+	/* The size in pixels follows. */
+	(void)window_scale_resize(window);
 
 	/* The application hears of a new size, and of a window maximized or no longer (it may lay out otherwise). */
 	if (was_maximized != window->maximized)
@@ -2382,10 +2661,10 @@ window_pointer_enter(
 		return;
 	window->pointer_ours = 1;
 
-	/* The pointer's place, as a motion. */
+	/* The pointer's place in the window's pixels, as a motion. */
 	window->serial = serial;
-	window->pointer_x = wl_fixed_to_double(x);
-	window->pointer_y = wl_fixed_to_double(y);
+	window->pointer_x = keiui_window_pixels(window, wl_fixed_to_double(x));
+	window->pointer_y = keiui_window_pixels(window, wl_fixed_to_double(y));
 	(void)window_push(window, KL_WINDOW_MOTION);
 }
 
@@ -2429,9 +2708,9 @@ window_pointer_motion(
 	if (!window->pointer_ours)
 		return;
 
-	/* The new place. */
-	window->pointer_x = wl_fixed_to_double(x);
-	window->pointer_y = wl_fixed_to_double(y);
+	/* The new place, in the window's pixels. */
+	window->pointer_x = keiui_window_pixels(window, wl_fixed_to_double(x));
+	window->pointer_y = keiui_window_pixels(window, wl_fixed_to_double(y));
 
 	/*
 	 * A window that asked for its motions merged (KL_PACING_MOTION): a
@@ -2530,9 +2809,9 @@ window_pointer_axis(
 	keiui_window_stamp(event, time);
 	event->axis_source = window->axis_source;
 	if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-		event->dy = wl_fixed_to_double(value) * WINDOW_SCROLL_SCALE;
+		event->dy = keiui_window_pixels(window, wl_fixed_to_double(value)) * WINDOW_SCROLL_SCALE;
 	else
-		event->dx = wl_fixed_to_double(value) * WINDOW_SCROLL_SCALE;
+		event->dx = keiui_window_pixels(window, wl_fixed_to_double(value)) * WINDOW_SCROLL_SCALE;
 }
 
 /* A group of pointer events ends (each was queued as it came): the next frame's scrolling is a wheel's until told. */
@@ -2829,8 +3108,8 @@ window_touch_push(
 	if (event == NULL)
 		return;
 	event->id = id;
-	event->x = wl_fixed_to_double(x);
-	event->y = wl_fixed_to_double(y);
+	event->x = keiui_window_pixels(window, wl_fixed_to_double(x));
+	event->y = keiui_window_pixels(window, wl_fixed_to_double(y));
 
 	/* The event's time (a cancel has none: the reading's). */
 	if (kind != KL_WINDOW_TOUCH_CANCEL)
@@ -3040,8 +3319,10 @@ window_inset(
 	struct kl_window *window;
 	int handled;
 
-	/* The widths, kept for kl_window_keyboard_inset. */
+	/* The widths in the window's pixels, kept for kl_window_keyboard_inset. */
 	window = data;
+	right = (int32_t)floor(keiui_window_pixels(window, (double)right) + 0.5);
+	bottom = (int32_t)floor(keiui_window_pixels(window, (double)bottom) + 0.5);
 	window->inset_right = right;
 	window->inset_bottom = bottom;
 
@@ -3053,7 +3334,7 @@ window_inset(
 		return;
 
 	/* The default: the next frame keeps the caret in sight. */
-	keiui_ui_inset_note(window->width, window->height, right, bottom, reason, window->text_cursor);
+	keiui_ui_inset_note(window->pixel_width, window->pixel_height, right, bottom, reason, window->text_cursor);
 }
 
 /* The screen's geometry: only the mode matters here. */
@@ -3162,6 +3443,9 @@ window_desktop_configure(
 		window->height = (uint32_t)height;
 		resized = 1;
 	}
+
+	/* The size in pixels follows. */
+	(void)window_scale_resize(window);
 
 	/* The application hears of a new size. */
 	if (resized)
@@ -3434,4 +3718,94 @@ window_traced(
 	frame = data;
 	wl_callback_destroy(callback);
 	keiui_trace_done(frame, kl_clock_us(), time);
+}
+
+/*
+ * Takes the scale the compositor gives the surface of a window that
+ * follows it (120ths): a new one makes the frames another size in pixels,
+ * told as KL_WINDOW_SCALE and then KL_WINDOW_RESIZE.  The logical size
+ * stays, so the viewport's destination does not change.
+ */
+static void
+window_scale_preferred(
+	void *data,
+	struct wp_fractional_scale_v1 *fractional,
+	uint32_t scale)
+{
+	struct kl_window_event *event;
+	struct kl_window *window;
+	unsigned taken;
+
+	/* The same scale changes nothing. */
+	(void)fractional;
+	window = data;
+	taken = keiui_scale_taken(scale);
+	if (taken == window->scale120)
+		return;
+
+	/* The new scale and the size in pixels at it. */
+	window->scale120 = taken;
+	(void)window_scale_resize(window);
+
+	/* The application hears the scale (in 96ths), then the size (it draws its text and widgets at the scale first). */
+	event = window_push(window, KL_WINDOW_SCALE);
+	if (event != NULL)
+		event->code = keiui_scale_96(taken);
+	(void)window_push(window, KL_WINDOW_RESIZE);
+}
+
+/*
+ * Makes the size of the window's frames in pixels from its logical size
+ * and its scale (the logical size itself for a window that does not
+ * follow the scale).  Returns 1 when the size in pixels changed, else 0.
+ */
+static int
+window_scale_resize(
+	struct kl_window *window)
+{
+	uint32_t width;
+	uint32_t height;
+
+	/* The logical size, times the scale for a window that follows it. */
+	width = window->width;
+	height = window->height;
+	if (window->scale_follow) {
+		width = keiui_scale_pixels(window->width, window->scale120);
+		height = keiui_scale_pixels(window->height, window->scale120);
+	}
+
+	/* The same size changes nothing. */
+	if (width == window->pixel_width && height == window->pixel_height)
+		return 0;
+
+	/* Succeeded: the new size in pixels. */
+	window->pixel_width = width;
+	window->pixel_height = height;
+	return 1;
+}
+
+/*
+ * Sends the surface's logical size as its viewport's destination (a
+ * window that follows the scale), when it is not the one sent last: the
+ * compositor shows the frames of the size in pixels at it, with the next
+ * commit.
+ */
+static void
+window_viewport_send(
+	struct kl_window *window)
+{
+	/* Only a window that follows the scale, with a size. */
+	if (!window->scale_follow || window->viewport == NULL)
+		return;
+	if (window->width == 0U || window->height == 0U)
+		return;
+
+	/* The size sent last stays. */
+	if (window->width == window->viewport_width && window->height == window->viewport_height)
+		return;
+
+	/* The destination, for the next commit. */
+	wp_viewport_set_destination(window->viewport, (int32_t)window->width, (int32_t)window->height);
+	window->viewport_width = window->width;
+	window->viewport_height = window->height;
 }

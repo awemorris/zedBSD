@@ -28,7 +28,9 @@ LIBWAYLAND_SOURCES := userland/desktop/libwayland/client.c \
 	userland/desktop/libwayland/activation-protocol.c \
 	userland/desktop/libwayland/content-type-protocol.c \
 	userland/desktop/libwayland/theme-protocol.c \
-	userland/desktop/libwayland/game-protocol.c
+	userland/desktop/libwayland/game-protocol.c \
+	userland/desktop/libwayland/fractional-scale-protocol.c \
+	userland/desktop/libwayland/viewporter-protocol.c
 
 # The public SONAME follows the standard client library spelling.  The .pc
 # file is for a program built on the system; the headers are the sysroot's.

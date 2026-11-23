@@ -7,7 +7,8 @@
 
 /*
  * Atoms, window properties and selections, and the bridge between X's
- * CLIPBOARD and the desktop's clipboard (ws035-p087).
+ * CLIPBOARD and the clipboard of the system the backend shows the server
+ * on.
  *
  * Atoms: the core predefined atoms the clients use keep their numbers;
  * any other name is given the next number.  Properties: any property a
@@ -18,18 +19,18 @@
  * owner answers the requestor through SendEvent (SelectionNotify), as the
  * ICCCM has it.
  *
- * The bridge: when another desktop client's text becomes the desktop's
+ * The bridge: when another program's text becomes the system's
  * selection, the server owns CLIPBOARD for it (on the root window) and
- * answers a ConvertSelection itself, with the text read from the desktop
- * (and PRIMARY, when no X client owns it).  While an X client owns
- * CLIPBOARD the server offers its text to the desktop; a desktop client
- * asking for it hands over a descriptor, and the server asks the owner
- * for UTF8_STRING into a property of the root window, then writes what the
- * owner put there into the descriptor.
+ * answers a ConvertSelection itself, with the text the backend reads (and
+ * PRIMARY, when no X client owns it).  While an X client owns CLIPBOARD
+ * the backend offers its text to the system; a program asking for it
+ * becomes a request of the backend's, and the server asks the owner for
+ * UTF8_STRING into a property of the root window, then gives what the
+ * owner put there to the backend to answer the request with.
  *
- * PRIMARY is bridged the same way with the desktop's primary selection
- * (ws035-p103); without an X owner and without the desktop's primary text,
- * PRIMARY still answers with the clipboard's text, as before.
+ * PRIMARY is bridged the same way with the system's primary selection;
+ * without an X owner and without the system's primary text, PRIMARY still
+ * answers with the clipboard's text.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -38,7 +39,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* The core predefined atoms kept by name. */
 #define ATOM_PRIMARY		1U
@@ -96,7 +96,8 @@ static void selection_notify(struct x11server *server, unsigned owner, uint32_t 
 static void selection_clear(struct x11server *server, struct x11_selection *entry);
 static uint32_t selection_bridge_convert(struct x11server *server, uint32_t requestor, uint32_t target, uint32_t property, int primary);
 static void selection_desktop_owns(struct x11server *server, uint32_t atom, const char *name, int text);
-static void selection_bridge_ask(struct x11server *server, uint32_t atom, int fd);
+static void selection_bridge_ask(struct x11server *server, uint32_t atom, uint32_t request);
+static void selection_backend_own(struct x11server *server, uint32_t atom, int own);
 static void selection_bridge_done(struct x11server *server, uint32_t property);
 static const char *selection_name(struct x11server *server, uint32_t atom);
 
@@ -400,7 +401,7 @@ x11_request_delete_property(
 /*
  * SetSelectionOwner: a window (or None) owns a selection; the owner
  * before, when another, is told SelectionClear.  CLIPBOARD owned by an X
- * client is offered to the desktop; given up, it is taken back.
+ * client is offered to the system; given up, it is taken back.
  */
 unsigned
 x11_request_set_selection_owner(
@@ -442,32 +443,20 @@ x11_request_set_selection_owner(
 	name = selection_name(server, atom);
 	if (name == NULL)
 		name = "?";
-	printf("X11 SELECTION owner selection=%s window=0x%x client=%u\n", name, window, index);
-	fflush(stdout);
+	x11_log(server, "X11 SELECTION owner selection=%s window=0x%x client=%u", name, window, index);
 
-	/* CLIPBOARD owned by an X client is the desktop's selection; given up, the desktop's is emptied. */
-	if (atom == server->atom_clipboard && server->wayland != NULL) {
-		if (window != 0U) {
-			(void)x11_wayland_selection_own(server->wayland);
-		} else {
-			x11_wayland_selection_drop(server->wayland);
-		}
-	}
-
-	/* The same for PRIMARY and the desktop's primary selection. */
-	if (atom == ATOM_PRIMARY && server->wayland != NULL) {
-		if (window != 0U) {
-			(void)x11_wayland_primary_own(server->wayland);
-		} else {
-			x11_wayland_primary_drop(server->wayland);
-		}
+	/* CLIPBOARD or PRIMARY owned by an X client is the system's selection; given up, the system's is emptied. */
+	if (window != 0U) {
+		selection_backend_own(server, atom, 1);
+	} else {
+		selection_backend_own(server, atom, 0);
 	}
 
 	/* Succeeded: owned. */
 	return 0U;
 }
 
-/* GetSelectionOwner: the owner window (the root window while the desktop's text is CLIPBOARD's), or None. */
+/* GetSelectionOwner: the owner window (the root window while the system's text is CLIPBOARD's), or None. */
 unsigned
 x11_request_get_selection_owner(
 	struct x11server *server,
@@ -501,7 +490,7 @@ x11_request_get_selection_owner(
 /*
  * ConvertSelection: the owner is asked (SelectionRequest) to put the
  * selection, as the target, in the requestor's property; the server
- * answers itself for the desktop's text (CLIPBOARD owned for it, or
+ * answers itself for the system's text (CLIPBOARD owned for it, or
  * PRIMARY without an X owner); without an owner the requestor is told
  * None at once.
  */
@@ -541,7 +530,7 @@ x11_request_convert_selection(
 		property = target;
 
 	/*
-	 * The desktop's text answers: a selection owned for it, or a PRIMARY
+	 * The system's text answers: a selection owned for it, or a PRIMARY
 	 * or CLIPBOARD without an X owner while there is some (PRIMARY's own,
 	 * else the clipboard's).
 	 */
@@ -549,12 +538,10 @@ x11_request_convert_selection(
 	bridge = 0;
 	if (entry != NULL && entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT)
 		bridge = 1;
-	text = 0;
 	primary = 0;
-	if (server->wayland != NULL && selection == ATOM_PRIMARY)
-		primary = x11_wayland_primary_has_text(server->wayland);
-	if (server->wayland != NULL)
-		text = x11_wayland_selection_has_text(server->wayland);
+	if (selection == ATOM_PRIMARY)
+		primary = server->ops->clipboard_has_text(server->backend, X11_SELECTION_PRIMARY);
+	text = server->ops->clipboard_has_text(server->backend, X11_SELECTION_CLIPBOARD);
 	if ((entry == NULL || entry->window == 0U) && (text || primary) &&
 	    (selection == ATOM_PRIMARY || selection == server->atom_clipboard))
 		bridge = 1;
@@ -602,6 +589,7 @@ x11_request_send_event(
 {
 	struct x11_window *window;
 	struct x11_client *client;
+	struct x11_client *receiver;
 	uint32_t destination;
 	uint8_t event[32];
 
@@ -623,7 +611,12 @@ x11_request_send_event(
 	if (window == NULL)
 		return X11_BAD_WINDOW;
 
-	/* Succeeded: sent to the window's owner (the event was built in the sender's byte order, which is also its owner's here). */
+	/* An owner of the other byte order gets the event's fields turned to its own. */
+	receiver = x11_client_of(server, window->owner);
+	if (receiver != NULL && receiver->order != client->order)
+		x11_event_swap(event);
+
+	/* Succeeded: sent to the window's owner, marked as sent. */
 	event[0] |= EVENT_SENT;
 	selection_event(server, window->owner, event);
 	return 0U;
@@ -632,7 +625,7 @@ x11_request_send_event(
 /*
  * Forgets what a window held: its properties, and the selections it owned
  * (a selection owned by it has no owner any more; CLIPBOARD's is taken
- * back from the desktop).
+ * back from the system).
  */
 void
 x11_selection_forget_window(
@@ -654,79 +647,76 @@ x11_selection_forget_window(
 		if (server->selections[index].window != window)
 			continue;
 
-		/* No owner now; the desktop's CLIPBOARD or primary selection is taken back. */
+		/* No owner now; the system's clipboard or primary selection is taken back. */
 		server->selections[index].window = 0U;
-		if (server->selections[index].atom == server->atom_clipboard && server->wayland != NULL)
-			x11_wayland_selection_drop(server->wayland);
-		if (server->selections[index].atom == ATOM_PRIMARY && server->wayland != NULL)
-			x11_wayland_primary_drop(server->wayland);
+		selection_backend_own(server, server->selections[index].atom, 0);
 	}
 }
 
 /*
- * The desktop's selection changed (wayland.c): another client's text makes
- * the server CLIPBOARD's owner for it (the X owner before is told
- * SelectionClear); none, while the server owned it, leaves it without an
- * owner.
+ * Frees every property still kept (the root window's outlive their
+ * clients) when the server ends.
  */
 void
-x11_selection_wayland(
-	void *context,
+x11_selection_destroy(
+	struct x11server *server)
+{
+	unsigned index;
+
+	/* Each kept property. */
+	for (index = 0U; index < X11_MAX_PROPERTIES; index++) {
+		if (server->properties[index].data != NULL)
+			selection_property_delete(server, &server->properties[index]);
+	}
+}
+
+/*
+ * Hears that the system's selection changed (the backend): another
+ * program's text makes the server the owner of CLIPBOARD or PRIMARY for
+ * it (the X owner before is told SelectionClear); none, while the server
+ * owned it, leaves it without an owner.
+ */
+void
+x11server_backend_clipboard(
+	struct x11server *server,
+	unsigned selection,
 	int text)
 {
-	struct x11server *server;
+	/* PRIMARY's owner. */
+	if (selection == X11_SELECTION_PRIMARY) {
+		selection_desktop_owns(server, ATOM_PRIMARY, "PRIMARY", text);
+		return;
+	}
 
 	/* CLIPBOARD's owner. */
-	server = context;
 	selection_desktop_owns(server, server->atom_clipboard, "CLIPBOARD", text);
 }
 
-/* The desktop's primary selection changed (wayland.c, ws035-p103): PRIMARY as CLIPBOARD above. */
-void
-x11_selection_primary(
-	void *context,
-	int text)
-{
-	struct x11server *server;
-
-	/* PRIMARY's owner. */
-	server = context;
-	selection_desktop_owns(server, ATOM_PRIMARY, "PRIMARY", text);
-}
-
 /*
- * A desktop client asks for the X owner's text (wayland.c): its descriptor
- * waits, and the owner is asked for UTF8_STRING in the root window's
- * bridge property.  Without an owner, or with too many waiting, the
- * descriptor is closed at once (the reader sees no text).
+ * Takes a request of the system for the text of an X owner of CLIPBOARD
+ * or PRIMARY (the backend's number for it): the request waits, and the
+ * owner is asked for UTF8_STRING in the root window's bridge property.
+ * Without an owner, or with too many waiting, the request is answered at
+ * once with no text.
  */
 void
-x11_selection_send(
-	void *context,
-	int fd)
+x11server_backend_clipboard_request(
+	struct x11server *server,
+	unsigned selection,
+	uint32_t request)
 {
-	struct x11server *server;
+	/* PRIMARY's owner is asked. */
+	if (selection == X11_SELECTION_PRIMARY) {
+		selection_bridge_ask(server, ATOM_PRIMARY, request);
+		return;
+	}
 
 	/* CLIPBOARD's owner is asked. */
-	server = context;
-	selection_bridge_ask(server, server->atom_clipboard, fd);
-}
-
-/* A desktop client asks for PRIMARY's X text (wayland.c, ws035-p103): as x11_selection_send. */
-void
-x11_selection_primary_send(
-	void *context,
-	int fd)
-{
-	struct x11server *server;
-
-	/* PRIMARY's owner is asked. */
-	server = context;
-	selection_bridge_ask(server, ATOM_PRIMARY, fd);
+	selection_bridge_ask(server, server->atom_clipboard, request);
 }
 
 /*
- * The desktop's text became (or stopped being) a selection's: with text
+ * The system's text became (or stopped being) a selection's: with text
  * the server owns it on the root window (the X owner before is told
  * SelectionClear); without, the server's ownership ends.
  */
@@ -750,8 +740,7 @@ selection_desktop_owns(
 			selection_clear(server, entry);
 		entry->window = X11_ROOT_XID;
 		entry->owner = X11_NO_CLIENT;
-		printf("X11 SELECTION owner selection=%s window=root client=desktop\n", name);
-		fflush(stdout);
+		x11_log(server, "X11 SELECTION owner selection=%s window=root client=desktop", name);
 		return;
 	}
 
@@ -761,16 +750,16 @@ selection_desktop_owns(
 }
 
 /*
- * Asks a selection's X owner for its text for a desktop client: the
- * descriptor waits, and the owner is asked for UTF8_STRING in the root
+ * Asks a selection's X owner for its text for a request of the system:
+ * the request waits, and the owner is asked for UTF8_STRING in the root
  * window's bridge property.  Without an owner, or with too many waiting,
- * the descriptor is closed at once (the reader sees no text).
+ * the request is answered at once with no text.
  */
 static void
 selection_bridge_ask(
 	struct x11server *server,
 	uint32_t atom,
-	int fd)
+	uint32_t request)
 {
 	struct x11_selection *entry;
 	struct x11_client *owner;
@@ -784,12 +773,12 @@ selection_bridge_ask(
 
 	/* Nobody to ask, or too many waiting: no text. */
 	if (owner == NULL || server->pending_count == X11_PENDING_SENDS) {
-		close(fd);
+		(void)server->ops->clipboard_answer(server->backend, request, NULL, 0U);
 		return;
 	}
 
-	/* The descriptor waits for the answer. */
-	server->pending_sends[server->pending_count] = fd;
+	/* The request waits for the answer. */
+	server->pending_sends[server->pending_count] = request;
 	server->pending_count++;
 
 	/* Succeeded: the owner is asked, the root window as the requestor. */
@@ -1060,7 +1049,7 @@ selection_clear(
 }
 
 /*
- * Answers a conversion of the desktop's text: TARGETS lists the text
+ * Answers a conversion of the system's text: TARGETS lists the text
  * types, a text type puts the text in the requestor's property (as
  * UTF8_STRING, or STRING when asked).  Returns the property, or 0 (None)
  * when there is nothing to give.
@@ -1076,7 +1065,7 @@ selection_bridge_convert(
 	uint8_t targets[16];
 	uint32_t type;
 	size_t length;
-	char *text;
+	uint8_t *text;
 	int error;
 
 	/* TARGETS: the types given, as atoms. */
@@ -1096,11 +1085,11 @@ selection_bridge_convert(
 	if (target != server->atom_utf8 && target != ATOM_STRING && target != server->atom_text)
 		return 0U;
 
-	/* The desktop's text: its primary selection's for PRIMARY when it has one, else its clipboard's. */
+	/* The system's text: its primary selection's for PRIMARY when it has one, else its clipboard's. */
 	if (primary) {
-		error = x11_wayland_primary_read(server->wayland, &text, &length);
+		error = server->ops->clipboard_read(server->backend, X11_SELECTION_PRIMARY, &text, &length);
 	} else {
-		error = x11_wayland_selection_read(server->wayland, &text, &length);
+		error = server->ops->clipboard_read(server->backend, X11_SELECTION_CLIPBOARD, &text, &length);
 	}
 
 	/* Nothing read, nothing given. */
@@ -1111,21 +1100,20 @@ selection_bridge_convert(
 	type = server->atom_utf8;
 	if (target == ATOM_STRING)
 		type = ATOM_STRING;
-	error = selection_property_set(server, requestor, property, type, 8U, PROPERTY_REPLACE, (const uint8_t *)text, length);
+	error = selection_property_set(server, requestor, property, type, 8U, PROPERTY_REPLACE, text, length);
 	free(text);
 	if (error != 0)
 		return 0U;
 
 	/* Succeeded: the property holds it. */
-	printf("X11 SELECTION convert requestor=0x%x bytes=%lu\n", requestor, (unsigned long)length);
-	fflush(stdout);
+	x11_log(server, "X11 SELECTION convert requestor=0x%x bytes=%lu", requestor, (unsigned long)length);
 	return property;
 }
 
 /*
  * Ends the oldest request of the bridge: the X owner put its text in the
- * root window's property (or answered None); the text goes to the waiting
- * descriptor, which is closed.
+ * root window's property (or answered None); the backend answers the
+ * system's request with it.
  */
 static void
 selection_bridge_done(
@@ -1133,14 +1121,13 @@ selection_bridge_done(
 	uint32_t property)
 {
 	struct x11_property *kept;
+	uint32_t request;
 	size_t done;
-	ssize_t wrote;
-	int fd;
 
-	/* The oldest waiting descriptor. */
+	/* The oldest waiting request. */
 	if (server->pending_count == 0U)
 		return;
-	fd = server->pending_sends[0];
+	request = server->pending_sends[0];
 	server->pending_count--;
 	memmove(&server->pending_sends[0], &server->pending_sends[1], server->pending_count * sizeof(server->pending_sends[0]));
 
@@ -1149,21 +1136,35 @@ selection_bridge_done(
 	if (property != 0U)
 		kept = selection_property(server, X11_ROOT_XID, property);
 
-	/* All of it (a short text; a failure leaves the reader what was written). */
-	done = 0;
-	while (kept != NULL && done < kept->length) {
-		wrote = write(fd, kept->data + done, kept->length - done);
-		if (wrote <= 0)
-			break;
-		done += (size_t)wrote;
+	/* The request is answered with all of it, or with none. */
+	if (kept != NULL) {
+		done = server->ops->clipboard_answer(server->backend, request, kept->data, kept->length);
+	} else {
+		done = server->ops->clipboard_answer(server->backend, request, NULL, 0U);
 	}
 
-	/* The reader sees the end, and the property goes. */
-	close(fd);
+	/* The property goes. */
 	if (kept != NULL)
 		selection_property_delete(server, kept);
-	printf("X11 SELECTION sent bytes=%lu\n", (unsigned long)done);
-	fflush(stdout);
+	x11_log(server, "X11 SELECTION sent bytes=%lu", (unsigned long)done);
+}
+
+/* Makes an X owner's text the system's selection of CLIPBOARD or PRIMARY, or gives that up; other atoms are not bridged. */
+static void
+selection_backend_own(
+	struct x11server *server,
+	uint32_t atom,
+	int own)
+{
+	/* CLIPBOARD. */
+	if (atom == server->atom_clipboard) {
+		(void)server->ops->clipboard_own(server->backend, X11_SELECTION_CLIPBOARD, own);
+		return;
+	}
+
+	/* PRIMARY. */
+	if (atom == ATOM_PRIMARY)
+		(void)server->ops->clipboard_own(server->backend, X11_SELECTION_PRIMARY, own);
 }
 
 /* Returns an atom's name (the predefined ones kept by name, and those given numbers); NULL for another. */

@@ -27,6 +27,7 @@
 
 #include <wayland/text-input-unstable-v3-client-protocol.h>
 
+#include <math.h>
 #include <string.h>
 
 static void text_enter(void *data, struct zwp_text_input_v3 *input, struct wl_surface *surface);
@@ -124,8 +125,9 @@ kl_window_text_input(
 }
 
 /*
- * Tells where the caret is (surface pixels), so that a candidate list or a
- * keyboard stays out of its way; sent when it changes.
+ * Tells where the caret is (the window's pixels; the compositor hears it in
+ * its logical units), so that a candidate list or a keyboard stays out of
+ * its way; sent when it changes.
  */
 void
 kl_window_text_cursor(
@@ -135,6 +137,11 @@ kl_window_text_cursor(
 	int width,
 	int height)
 {
+	int32_t sent_x;
+	int32_t sent_y;
+	int32_t sent_width;
+	int32_t sent_height;
+
 	/* The same as before: nothing to say. */
 	if (window->text_cursor[0] == x && window->text_cursor[1] == y && window->text_cursor[2] == width && window->text_cursor[3] == height)
 		return;
@@ -143,10 +150,15 @@ kl_window_text_cursor(
 	window->text_cursor[2] = width;
 	window->text_cursor[3] = height;
 
-	/* Sent while enabled. */
+	/* Sent while enabled, in the compositor's logical units. */
 	if (!window->text_enabled || window->text_input == NULL)
 		return;
-	zwp_text_input_v3_set_cursor_rectangle(window->text_input, x, y, width, height);
+	sent_x = x;
+	sent_y = y;
+	sent_width = width;
+	sent_height = height;
+	keiui_window_units_rect(window, &sent_x, &sent_y, &sent_width, &sent_height);
+	zwp_text_input_v3_set_cursor_rectangle(window->text_input, sent_x, sent_y, sent_width, sent_height);
 	zwp_text_input_v3_commit(window->text_input);
 	window->text_commits++;
 }
@@ -357,6 +369,10 @@ static void
 text_state(
 	struct kl_window *window)
 {
+	int32_t x;
+	int32_t y;
+	int32_t width;
+	int32_t height;
 	int enabled;
 
 	/* Nothing to enable. */
@@ -373,7 +389,12 @@ text_state(
 	if (enabled) {
 		zwp_text_input_v3_enable(window->text_input);
 		text_send_context(window);
-		zwp_text_input_v3_set_cursor_rectangle(window->text_input, window->text_cursor[0], window->text_cursor[1], window->text_cursor[2], window->text_cursor[3]);
+		x = window->text_cursor[0];
+		y = window->text_cursor[1];
+		width = window->text_cursor[2];
+		height = window->text_cursor[3];
+		keiui_window_units_rect(window, &x, &y, &width, &height);
+		zwp_text_input_v3_set_cursor_rectangle(window->text_input, x, y, width, height);
 	} else {
 		zwp_text_input_v3_disable(window->text_input);
 	}
@@ -418,8 +439,26 @@ text_copy(
 int
 kl_ui_window_input(
 	struct kl_ui *ui,
-	const struct kl_window_event *event)
+	const struct kl_window_event *pixels)
 {
+	struct kl_window_event units;
+	const struct kl_window_event *event;
+	unsigned scale;
+	double factor;
+
+	/* The input in units: its place and the wheel's distances over the window's scale (the same at 100 %). */
+	event = pixels;
+	scale = keiui_ui_scale(ui);
+	if (scale != KL_SCALE_BASE) {
+		factor = (double)KL_SCALE_BASE / (double)scale;
+		units = *pixels;
+		units.x = pixels->x * factor;
+		units.y = pixels->y * factor;
+		units.dx = pixels->dx * factor;
+		units.dy = pixels->dy * factor;
+		event = &units;
+	}
+
 	/* What it is. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
@@ -484,6 +523,9 @@ kl_ui_window_text(
 	struct kl_window *window)
 {
 	struct kl_rect caret;
+	unsigned scale;
+	int right;
+	int bottom;
 	int wanted;
 
 	/* The window, for the clipboard, and for the bar of the fingers' selection (ws190-p002). */
@@ -495,6 +537,17 @@ kl_ui_window_text(
 	kl_window_text_input(window, wanted);
 	if (!wanted)
 		return;
+
+	/* The caret in the window's pixels: its units times the widgets' scale, held whole. */
+	scale = keiui_ui_scale(ui);
+	if (scale != KL_SCALE_BASE) {
+		right = (int)ceil((double)(caret.x + caret.width) * (double)scale / (double)KL_SCALE_BASE);
+		bottom = (int)ceil((double)(caret.y + caret.height) * (double)scale / (double)KL_SCALE_BASE);
+		caret.x = (int)floor((double)caret.x * (double)scale / (double)KL_SCALE_BASE);
+		caret.y = (int)floor((double)caret.y * (double)scale / (double)KL_SCALE_BASE);
+		caret.width = right - caret.x;
+		caret.height = bottom - caret.y;
+	}
 
 	/* Where its caret is, for the candidates and the on-screen keyboard. */
 	kl_window_text_cursor(window, caret.x, caret.y, caret.width, caret.height);

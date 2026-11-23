@@ -2375,9 +2375,12 @@ glass_shape_draw(
 	float quad[4];
 	float box[4];
 	float radius;
+	float soft;
+	float factor;
 	float opacity;
 	float width;
 	float height;
+	unsigned scale;
 	VkDescriptorSet set;
 	VkPipeline pipeline;
 	VkRect2D pieces[1U + KWL_CUT_PIECES];
@@ -2420,11 +2423,10 @@ glass_shape_draw(
 	 * forward, the desktops sliding): x' = layer x + x * scale.
 	 */
 	compose = server->compose;
-	width = (float)server->width;
-	height = (float)server->height;
 	memcpy(quad, shape->quad, sizeof(quad));
 	memcpy(box, shape->box, sizeof(box));
 	radius = shape->radius;
+	soft = shape->soft;
 	opacity = shape->opacity;
 	if (server->layer_on) {
 		quad[0] = server->layer_x + quad[0] * server->layer_scale;
@@ -2439,15 +2441,34 @@ glass_shape_draw(
 		opacity = opacity * server->layer_opacity;
 	}
 
-	/* On a head, its part of the plane: the quad and the box in its own pixels. */
+	/* On a head, its part of the plane: the quad and the box from its left top corner. */
 	if (server->view_width != 0U) {
 		quad[0] -= (float)server->view_x;
 		quad[1] -= (float)server->view_y;
 		box[0] -= (float)server->view_x;
 		box[1] -= (float)server->view_y;
-		width = (float)server->view_width;
-		height = (float)server->view_height;
 	}
+
+	/*
+	 * The quad and the box in the pass's pixels: their corners snapped each
+	 * (scale.h), so the rounded box keeps to the quad's pixels, and the
+	 * corners' radius and a shadow's softness or an outline's thickness
+	 * scaled with them (glass's softness is its flatness, no length).
+	 */
+	scale = kwl_compose_pass_scale(server);
+	if (scale != KWL_SCALE_ONE) {
+		factor = (float)scale / (float)KWL_SCALE_ONE;
+		kwl_compose_pass_rect(server, quad, quad);
+		kwl_compose_pass_rect(server, box, box);
+		radius = radius * factor;
+
+		/* A shadow's softness and an outline's thickness are lengths. */
+		if (shape->mode == MODE_SHADOW || shape->mode == MODE_RING)
+			soft = soft * factor;
+	}
+
+	/* The size of the picture the pass draws into. */
+	kwl_compose_pass_size(server, &width, &height);
 
 	/* Completely clipped quads cannot affect a pixel: outside the scissor, or between the damage's rectangles. */
 	visible = kwl_compose_clip_visible(compose, quad[0], quad[1], quad[2], quad[3]);
@@ -2482,7 +2503,7 @@ glass_shape_draw(
 	/* The shape and the output. */
 	constants[16] = radius;
 	constants[17] = shape->mode;
-	constants[18] = shape->soft;
+	constants[18] = soft;
 	constants[19] = shape->opaque;
 	constants[20] = width;
 	constants[21] = height;
@@ -5458,9 +5479,11 @@ glass_draw_halves(
 {
 	struct kwl_compose *compose;
 	float constants[KWL_PANEL_CONSTANTS];
+	float width;
+	float height;
 	VkPipeline pipeline;
 
-	/* An opaque image over each half; its box is the whole image, so every pixel is covered. */
+	/* An opaque image over each half (each the output's pixels); its box is the whole image, so every pixel is covered. */
 	compose = server->compose;
 	memset(constants, 0, sizeof(constants));
 	constants[0] = -1.0f;
@@ -5469,13 +5492,14 @@ glass_draw_halves(
 	constants[3] = 1.0f;
 	constants[6] = 1.0f;
 	constants[7] = 1.0f;
-	constants[10] = 2.0f * (float)server->width;
-	constants[11] = (float)server->height;
+	kwl_compose_pass_size(server, &width, &height);
+	constants[10] = 2.0f * width;
+	constants[11] = height;
 	constants[15] = 1.0f;
 	constants[17] = MODE_IMAGE;
 	constants[19] = 1.0f;
-	constants[20] = 2.0f * (float)server->width;
-	constants[21] = (float)server->height;
+	constants[20] = 2.0f * width;
+	constants[21] = height;
 	constants[23] = 1.0f;
 	pipeline = compose->panel_opaque_pipelines[KWL_PANEL_INSIDE_IMAGE];
 
@@ -5514,10 +5538,9 @@ glass_draw_crossfade(
 	uint64_t pixels;
 	int visible;
 
-	/* Not seen where the frame's damage leaves nothing. */
+	/* Not seen where the frame's damage leaves nothing; the output's pixels. */
 	compose = server->compose;
-	width = (float)server->width;
-	height = (float)server->height;
+	kwl_compose_pass_size(server, &width, &height);
 	visible = kwl_compose_clip_visible(compose, 0.0f, 0.0f, width, height);
 	if (!visible)
 		return;

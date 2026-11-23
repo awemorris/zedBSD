@@ -1,0 +1,497 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The X server's Windows backend: the keyboard and the pointer of the X
+ * windows as X's input.
+ *
+ * A key is named by its place on the keyboard (the scan code, as an evdev
+ * code) whatever the layout; the core is given the X keycode of the key.
+ * The pointer's place on the root window is counted from the X window's
+ * place the core gave, the buttons are X's 1 to 9 (the wheels 4 to 7), and
+ * a button held captures the pointer, as X's implicit grab does.  A paste
+ * or a copy (by key or by button) is noted for the clipboard's policy.
+ */
+
+#include "userland/desktop/xserver/win32/internal.h"
+#include "userland/desktop/xserver/win32/scale.h"
+
+#include <windowsx.h>
+
+/* The wheel's notch (WHEEL_DELTA). */
+#define INPUT_NOTCH	120
+
+/* The bits of a key message's lParam: the scan code, the extended bit and the previous state (a repeat). */
+#define INPUT_SCAN_SHIFT	16U
+#define INPUT_SCAN_MASK		0xFFU
+#define INPUT_EXTENDED_BIT	24U
+#define INPUT_REPEAT_BIT	30U
+
+static int input_fake_control(struct x11_surface *surface, int pressed);
+static void input_note_action(struct x11_win32 *backend, uint32_t code, DWORD time);
+static void input_send_key(struct x11_win32 *backend, uint32_t code, int pressed, DWORD time);
+static void input_modifier(struct x11_win32 *backend, uint32_t code, int pressed);
+static void input_frame(struct x11_surface *surface, unsigned button, int pressed, DWORD time);
+static void input_wheel(struct x11_surface *surface, int *remainder, int delta, unsigned positive, unsigned negative, DWORD time);
+static void input_enter(struct x11_surface *surface);
+
+/*
+ * Turns a key message of an X window into X's input: the key's evdev
+ * code from its scan code, the left Ctrl Windows makes up before AltGr
+ * dropped, a held key's repeat sent as X does (a release and a press),
+ * Alt+F4 kept for closing the window.
+ */
+void
+win32_input_key(
+	struct x11_surface *surface,
+	UINT message,
+	WPARAM wparam,
+	LPARAM lparam)
+{
+	struct x11_win32 *backend;
+	unsigned scan;
+	int extended;
+	int pressed;
+	int repeat;
+	uint32_t code;
+	DWORD time;
+	int fake;
+
+	/* Reads the key, whether it went down, and whether it was already down. */
+	backend = surface->backend;
+	scan = (unsigned)(((uint32_t)lparam >> INPUT_SCAN_SHIFT) & INPUT_SCAN_MASK);
+	extended = (int)(((uint32_t)lparam >> INPUT_EXTENDED_BIT) & 1U);
+	pressed = 0;
+	if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+		pressed = 1;
+	repeat = 0;
+	if (pressed && (((uint32_t)lparam >> INPUT_REPEAT_BIT) & 1U) != 0)
+		repeat = 1;
+	time = (DWORD)GetMessageTime();
+
+	/* The key's place on the keyboard; a key X cannot name is dropped. */
+	code = x11_win32_scan_to_evdev(scan, extended, (unsigned)wparam);
+	if (code == 0 || code > X11_WIN32_EVDEV_MAX)
+		return;
+
+	/* The left Ctrl Windows sends before AltGr is not a key the user pressed. */
+	if (code == WIN32_KEY_LEFTCTRL && backend->keymap.altgr) {
+		fake = input_fake_control(surface, pressed);
+		if (fake)
+			return;
+	}
+
+	/* Alt+F4 closes the window, as on every Windows window; X does not get the F4. */
+	if (pressed && code == WIN32_KEY_F4 && (backend->modifiers & X11_ALT_MASK) != 0) {
+		if (!repeat)
+			SendMessageW(surface->hwnd, WM_CLOSE, 0, 0);
+		return;
+	}
+
+	/* Notes a paste or a copy made with the keyboard. */
+	if (pressed && !repeat)
+		input_note_action(backend, code, time);
+
+	/* A key held down repeats as X repeats: released and pressed again. */
+	if (repeat && backend->held[code]) {
+		input_send_key(backend, code, 0, time);
+		input_send_key(backend, code, 1, time);
+		return;
+	}
+
+	/* A release of a key not held (its press went elsewhere) is dropped. */
+	if (!pressed && !backend->held[code])
+		return;
+
+	/* Succeeded: the core hears the key. */
+	input_send_key(backend, code, pressed, time);
+}
+
+/*
+ * Lets go of every key held, as releases (the window lost the keyboard,
+ * and the keys' releases will go to another window).
+ */
+void
+win32_input_release_keys(
+	struct x11_win32 *backend)
+{
+	uint32_t code;
+	DWORD time;
+
+	/* Releases each key held. */
+	time = (DWORD)GetMessageTime();
+	for (code = 0; code <= X11_WIN32_EVDEV_MAX; code++) {
+		if (backend->held[code])
+			input_send_key(backend, code, 0, time);
+	}
+
+	/* No left Ctrl is pending as AltGr's any more. */
+	backend->altgr_control = 0;
+}
+
+/*
+ * Turns a pointer message of an X window into X's input: a motion, a
+ * button (1 to 3, and 8 and 9 for the side buttons), or the wheels'
+ * notches as presses and releases of buttons 4 to 7.
+ */
+void
+win32_input_pointer(
+	struct x11_surface *surface,
+	UINT message,
+	WPARAM wparam,
+	LPARAM lparam)
+{
+	struct x11_win32 *backend;
+	DWORD time;
+	int local_x;
+	int local_y;
+	unsigned button;
+	int pressed;
+
+	/* The wheels: the pointer stays where it was, and each notch is a click of a wheel's button. */
+	backend = surface->backend;
+	time = (DWORD)GetMessageTime();
+	if (message == WM_MOUSEWHEEL) {
+		input_wheel(surface, &backend->wheel, GET_WHEEL_DELTA_WPARAM(wparam), WIN32_BUTTON_WHEEL_UP,
+		    WIN32_BUTTON_WHEEL_DOWN, time);
+		return;
+	}
+	if (message == WM_MOUSEHWHEEL) {
+		input_wheel(surface, &backend->hwheel, GET_WHEEL_DELTA_WPARAM(wparam), WIN32_BUTTON_WHEEL_RIGHT,
+		    WIN32_BUTTON_WHEEL_LEFT, time);
+		return;
+	}
+
+	/* The pointer's place on the root window, counted from the X window's place. */
+	local_x = GET_X_LPARAM(lparam);
+	local_y = GET_Y_LPARAM(lparam);
+	backend->pointer_x = surface->x + x11_win32_scale_to_x(local_x, backend->scale);
+	backend->pointer_y = surface->y + x11_win32_scale_to_x(local_y, backend->scale);
+	input_enter(surface);
+
+	/* Which button changed, and how. */
+	button = 0;
+	pressed = 0;
+	switch (message) {
+	case WM_LBUTTONDOWN:
+		button = WIN32_BUTTON_LEFT;
+		pressed = 1;
+		break;
+	case WM_LBUTTONUP:
+		button = WIN32_BUTTON_LEFT;
+		break;
+	case WM_MBUTTONDOWN:
+		button = WIN32_BUTTON_MIDDLE;
+		pressed = 1;
+		break;
+	case WM_MBUTTONUP:
+		button = WIN32_BUTTON_MIDDLE;
+		break;
+	case WM_RBUTTONDOWN:
+		button = WIN32_BUTTON_RIGHT;
+		pressed = 1;
+		break;
+	case WM_RBUTTONUP:
+		button = WIN32_BUTTON_RIGHT;
+		break;
+	case WM_XBUTTONDOWN:
+	case WM_XBUTTONUP:
+		button = WIN32_BUTTON_BACK;
+		if (GET_XBUTTON_WPARAM(wparam) == XBUTTON2)
+			button = WIN32_BUTTON_FORWARD;
+		if (message == WM_XBUTTONDOWN)
+			pressed = 1;
+		break;
+	default:
+		break;
+	}
+
+	/* A middle click pastes and the end of a left drag copies, for the clipboard's policy. */
+	if (button == WIN32_BUTTON_MIDDLE && pressed) {
+		backend->paste_time = time;
+		backend->pasted = 1;
+	}
+	if (button == WIN32_BUTTON_LEFT && !pressed) {
+		backend->copy_time = time;
+		backend->copied = 1;
+	}
+
+	/* The first button down captures the pointer, the last one up lets it go (X's implicit grab). */
+	if (button != 0 && pressed) {
+		if (backend->buttons_held == 0)
+			SetCapture(surface->hwnd);
+		backend->buttons_held++;
+	} else if (button != 0 && backend->buttons_held != 0) {
+		backend->buttons_held--;
+		if (backend->buttons_held == 0)
+			ReleaseCapture();
+	}
+
+	/* Succeeded: the core hears the motion or the button. */
+	input_frame(surface, button, pressed, time);
+}
+
+/*
+ * Follows the pointer out of a window.
+ */
+void
+win32_input_leave(
+	struct x11_surface *surface)
+{
+	/* The pointer is in no X window now. */
+	if (surface->backend->pointer_surface == surface)
+		surface->backend->pointer_surface = NULL;
+}
+
+/*
+ * Tells whether a left Ctrl message is the one Windows makes up before
+ * AltGr: the next key message is the right Alt with the same time.  The
+ * release of a press that was dropped is dropped too.  Returns 1 to drop.
+ */
+static int
+input_fake_control(
+	struct x11_surface *surface,
+	int pressed)
+{
+	struct x11_win32 *backend;
+	MSG next;
+	BOOL found;
+	int altgr;
+
+	/* Looks at the next key message without taking it. */
+	backend = surface->backend;
+	altgr = 0;
+	found = PeekMessageW(&next, surface->hwnd, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE);
+	if (found && next.wParam == VK_MENU && (((uint32_t)next.lParam >> INPUT_EXTENDED_BIT) & 1U) != 0 &&
+	    next.time == (DWORD)GetMessageTime())
+		altgr = 1;
+
+	/* A press before AltGr is dropped and remembered. */
+	if (pressed) {
+		if (altgr)
+			backend->altgr_control = 1;
+		return altgr;
+	}
+
+	/* The release of a dropped press is dropped. */
+	if (backend->altgr_control) {
+		backend->altgr_control = 0;
+		return 1;
+	}
+
+	/* A release before AltGr's is dropped too. */
+	return altgr;
+}
+
+/* Notes a paste (Ctrl+V, Shift+Insert) or a copy (Ctrl+C, Ctrl+Insert), with or without Shift. */
+static void
+input_note_action(
+	struct x11_win32 *backend,
+	uint32_t code,
+	DWORD time)
+{
+	/* With Ctrl: C copies, V and nothing else pastes, Insert copies. */
+	if ((backend->modifiers & X11_CONTROL_MASK) != 0) {
+		if (code == WIN32_KEY_C || code == WIN32_KEY_INSERT) {
+			backend->copy_time = time;
+			backend->copied = 1;
+		} else if (code == WIN32_KEY_V) {
+			backend->paste_time = time;
+			backend->pasted = 1;
+		}
+		return;
+	}
+
+	/* Shift+Insert pastes. */
+	if ((backend->modifiers & X11_SHIFT_MASK) != 0 && code == WIN32_KEY_INSERT) {
+		backend->paste_time = time;
+		backend->pasted = 1;
+	}
+}
+
+/*
+ * Sends a key to the core.
+ *
+ * The core's keyboard model takes the keycode of the character the key
+ * types (US) in the Shift and Caps Lock states; the release sends the
+ * keycode its press sent.  The modifier bits held go with each event, and
+ * Caps Lock toggles on its press.
+ */
+static void
+input_send_key(
+	struct x11_win32 *backend,
+	uint32_t code,
+	int pressed,
+	DWORD time)
+{
+	uint8_t keycode;
+	uint16_t state;
+	int shifted;
+
+	/* The key is held or not from now on; the state sent is the one before it. */
+	backend->held[code] = (uint8_t)pressed;
+	state = backend->modifiers;
+	if (backend->caps_lock)
+		state |= WIN32_LOCK_MASK;
+	input_modifier(backend, code, pressed);
+
+	/* Caps Lock toggles on its press and types nothing. */
+	if (code == WIN32_KEY_CAPSLOCK) {
+		if (pressed)
+			backend->caps_lock = !backend->caps_lock;
+		return;
+	}
+
+	/* A release sends the keycode its press sent. */
+	if (!pressed) {
+		keycode = backend->sent[code];
+		backend->sent[code] = 0;
+		if (keycode != 0 && backend->server != NULL)
+			x11server_backend_key(backend->server, keycode, 0, (uint32_t)time, state);
+		return;
+	}
+
+	/* A press: the keycode in the current Shift and Caps Lock states (0: the key types nothing). */
+	shifted = 0;
+	if ((state & X11_SHIFT_MASK) != 0)
+		shifted = 1;
+	keycode = x11_keymap_keycode((uint16_t)code, shifted, backend->caps_lock);
+	backend->sent[code] = keycode;
+	if (keycode == 0 || backend->server == NULL)
+		return;
+
+	/* Succeeded: the core hears the press. */
+	x11server_backend_key(backend->server, keycode, 1, (uint32_t)time, state);
+}
+
+/* Keeps X's modifier bits as the Shift, Ctrl and Alt keys go down and up (AltGr is not Alt). */
+static void
+input_modifier(
+	struct x11_win32 *backend,
+	uint32_t code,
+	int pressed)
+{
+	uint16_t bit;
+
+	/* The modifier of the key, if it is one. */
+	bit = 0;
+	if (code == WIN32_KEY_LEFTSHIFT || code == WIN32_KEY_RIGHTSHIFT) {
+		bit = X11_SHIFT_MASK;
+	} else if (code == WIN32_KEY_LEFTCTRL || code == WIN32_KEY_RIGHTCTRL) {
+		bit = X11_CONTROL_MASK;
+	} else if (code == WIN32_KEY_LEFTALT) {
+		bit = X11_ALT_MASK;
+	} else if (code == WIN32_KEY_RIGHTALT && !backend->keymap.altgr) {
+		bit = X11_ALT_MASK;
+	}
+	if (bit == 0)
+		return;
+
+	/* Sets or clears it. */
+	if (pressed) {
+		backend->modifiers |= bit;
+	} else {
+		backend->modifiers &= (uint16_t)~bit;
+	}
+}
+
+/* Sends the pointer's place and at most one button to the core. */
+static void
+input_frame(
+	struct x11_surface *surface,
+	unsigned button,
+	int pressed,
+	DWORD time)
+{
+	struct x11_win32 *backend;
+	struct x11_pointer_frame frame;
+	uint16_t bit;
+
+	/* The bit of buttons 1 to 3 (the others have none in the state). */
+	backend = surface->backend;
+	bit = 0;
+	if (button >= WIN32_BUTTON_LEFT && button <= WIN32_BUTTON_RIGHT)
+		bit = (uint16_t)(1U << (button - 1U));
+
+	/* The frame: the place, the buttons before and after. */
+	frame.x = backend->pointer_x;
+	frame.y = backend->pointer_y;
+	frame.time = (uint32_t)time;
+	frame.buttons_before = backend->buttons;
+	frame.button = (uint8_t)button;
+	frame.pressed = pressed;
+	if (pressed) {
+		backend->buttons |= bit;
+	} else {
+		backend->buttons &= (uint16_t)~bit;
+	}
+	frame.buttons_after = backend->buttons;
+
+	/* Succeeded: the core hears it. */
+	if (backend->server != NULL)
+		x11server_backend_pointer(backend->server, &frame);
+}
+
+/*
+ * Turns a wheel's turn into clicks of its buttons: each whole notch one
+ * press and release, the rest kept for the next turn.
+ */
+static void
+input_wheel(
+	struct x11_surface *surface,
+	int *remainder,
+	int delta,
+	unsigned positive,
+	unsigned negative,
+	DWORD time)
+{
+	/* The wheels act on the window the pointer is in. */
+	if (surface->backend->pointer_surface != NULL)
+		surface = surface->backend->pointer_surface;
+
+	/* Clicks a button for each whole notch. */
+	*remainder += delta;
+	while (*remainder >= INPUT_NOTCH) {
+		input_frame(surface, positive, 1, time);
+		input_frame(surface, positive, 0, time);
+		*remainder -= INPUT_NOTCH;
+	}
+	while (*remainder <= -INPUT_NOTCH) {
+		input_frame(surface, negative, 1, time);
+		input_frame(surface, negative, 0, time);
+		*remainder += INPUT_NOTCH;
+	}
+}
+
+/*
+ * Follows the pointer into a window: the core hears which X window it
+ * entered, and Windows is asked to say when it leaves.
+ */
+static void
+input_enter(
+	struct x11_surface *surface)
+{
+	struct x11_win32 *backend;
+	TRACKMOUSEEVENT track;
+
+	/* Nothing to do while the pointer stays in the window. */
+	backend = surface->backend;
+	if (backend->pointer_surface == surface)
+		return;
+
+	/* Asks for WM_MOUSELEAVE. */
+	backend->pointer_surface = surface;
+	track.cbSize = sizeof(track);
+	track.dwFlags = TME_LEAVE;
+	track.hwndTrack = surface->hwnd;
+	track.dwHoverTime = 0;
+	TrackMouseEvent(&track);
+
+	/* The core hears that the X window was entered. */
+	if (backend->server != NULL)
+		x11server_backend_enter(backend->server, surface->window, 0);
+}

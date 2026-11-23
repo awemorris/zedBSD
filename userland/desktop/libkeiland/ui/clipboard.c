@@ -833,8 +833,8 @@ clipboard_enter(
 	window->drop_serial = serial;
 	window->drop_offered = offered;
 	window->drop_utf8 = window->pending_utf8;
-	window->drop_x = wl_fixed_to_double(x);
-	window->drop_y = wl_fixed_to_double(y);
+	window->drop_x = keiui_window_pixels(window, wl_fixed_to_double(x));
+	window->drop_y = keiui_window_pixels(window, wl_fixed_to_double(y));
 	kl_window_answer_drop(window, KL_DND_COPY, KL_DND_COPY);
 
 	/* Succeeded: the window hears it came, and whether it is its own. */
@@ -885,8 +885,8 @@ clipboard_motion(
 	window = data;
 	if (window->drop_offer == NULL)
 		return;
-	window->drop_x = wl_fixed_to_double(x);
-	window->drop_y = wl_fixed_to_double(y);
+	window->drop_x = keiui_window_pixels(window, wl_fixed_to_double(x));
+	window->drop_y = keiui_window_pixels(window, wl_fixed_to_double(y));
 	clipboard_drop_input(window, KL_WINDOW_DROP_MOTION, window->drop_offered, window->drop_x, window->drop_y);
 }
 

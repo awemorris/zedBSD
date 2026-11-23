@@ -131,6 +131,7 @@ unsigned kwl_resolution_candidates(const struct kwl_resolution_mode *listed, uns
 int kwl_resolution_find(const struct kwl_resolution_mode *modes, unsigned count, uint32_t width, uint32_t height, uint32_t refresh_mhz);
 int kwl_resolution_pick(const struct kwl_resolution_mode *modes, unsigned count, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t now_mhz);
 int kwl_resolution_identity(const uint8_t *edid, size_t length, const char *connector, char *identity, size_t size);
+int kwl_resolution_physical(const uint8_t *edid, size_t length, uint32_t *mm_width, uint32_t *mm_height);
 void kwl_resolution_trial_init(struct kwl_resolution_trial *trial);
 int kwl_resolution_begin(struct kwl_resolution_trial *trial, const char *key, const char *identity, const struct kwl_resolution_mode *target, const struct kwl_resolution_mode *current, const struct kwl_resolution_mode *fallback, unsigned reset, uint64_t now_ms, struct kwl_resolution_step *step);
 void kwl_resolution_shown(struct kwl_resolution_trial *trial, uint64_t now_ms, struct kwl_resolution_step *step);

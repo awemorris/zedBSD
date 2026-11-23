@@ -8,11 +8,12 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # The compositor's X11 server: rootless, each top-level X window a window of the desktop.
 
 KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
-	userland/desktop/xserver/server.c userland/desktop/xserver/protocol.c \
+	userland/desktop/xserver/client.c userland/desktop/xserver/protocol.c \
 	userland/desktop/xserver/window.c userland/desktop/xserver/rootless.c \
 	userland/desktop/xserver/wayland.c userland/desktop/xserver/keymap.c \
 	userland/desktop/xserver/glyphs.c userland/desktop/xserver/glx.c \
-	userland/desktop/xserver/vulkan.c userland/desktop/xserver/selection.c
+	userland/desktop/xserver/present-vulkan.c userland/desktop/xserver/selection.c \
+	userland/desktop/xserver/unix.c
 
 # GLX: libGLX.so, one of the server's libraries, which X programs link
 # with libGL (-lGL -lGLX); a private libX11 is built in.  The image

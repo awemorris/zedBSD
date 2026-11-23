@@ -26,6 +26,8 @@ KEILAND_FREEBSD_WAYLAND_SOURCES := \
 	userland/desktop/libwayland/edit-protocol.c \
 	userland/desktop/libwayland/activation-protocol.c \
 	userland/desktop/libwayland/content-type-protocol.c \
-	userland/desktop/libwayland/theme-protocol.c
+	userland/desktop/libwayland/theme-protocol.c \
+	userland/desktop/libwayland/fractional-scale-protocol.c \
+	userland/desktop/libwayland/viewporter-protocol.c
 
 $(eval $(call KEILAND_FREEBSD_LIBRARY,wayland,libwayland-client.so,$(KEILAND_FREEBSD_WAYLAND_SOURCES),,,userland/desktop/libwayland/exports.map))

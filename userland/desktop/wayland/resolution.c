@@ -27,6 +27,31 @@
 #define RESOLUTION_EDID_DESCRIPTOR	18U
 #define RESOLUTION_EDID_SERIAL_TEXT	0xffU
 
+/*
+ * Where the base block keeps the display's physical size (VESA E-EDID
+ * Standard, Release A, Revision 2 (EDID 1.4), section 3.6.2, "Horizontal
+ * and Vertical Screen Size or Aspect Ratio"): bytes 15h and 16h, the
+ * horizontal and vertical size in centimetres; both 0 when the size is
+ * not known or varies (a projector), one of them 0 when the other gives
+ * the aspect ratio instead.
+ */
+#define RESOLUTION_EDID_WIDTH_CM	0x15U
+#define RESOLUTION_EDID_HEIGHT_CM	0x16U
+
+/*
+ * Where a detailed timing descriptor keeps the image's size in
+ * millimetres (the same standard, section 3.10.2, "Detailed Timing
+ * Descriptor"): bytes 0 and 1 are the pixel clock (0 for a descriptor
+ * that is not a timing), byte 0Ch the horizontal size's low 8 bits, byte
+ * 0Dh the vertical size's, and byte 0Eh their high 4 bits (horizontal in
+ * the upper nibble, vertical in the lower).  The base block's first
+ * descriptor is the preferred timing.
+ */
+#define RESOLUTION_DTD_CLOCK		0x00U
+#define RESOLUTION_DTD_WIDTH_MM		0x0cU
+#define RESOLUTION_DTD_HEIGHT_MM	0x0dU
+#define RESOLUTION_DTD_SIZE_HIGH	0x0eU
+
 /* The FNV-1a hash's start and prime, which shorten a serial string or a connector's key to eight hex digits. */
 #define RESOLUTION_HASH_START		2166136261U
 #define RESOLUTION_HASH_PRIME		16777619U
@@ -64,6 +89,7 @@ static void resolution_add(struct kwl_resolution_mode *offered, unsigned *count,
 static uint32_t resolution_hash(const unsigned char *bytes, size_t length);
 static size_t resolution_serial_text(const uint8_t *edid, char *text, size_t size);
 static int resolution_serial_real(uint32_t serial);
+static int resolution_edid_base(const uint8_t *edid, size_t length);
 static void resolution_open(struct kwl_resolution_trial *trial, const struct kwl_resolution_mode *mode, unsigned state, uint64_t now_ms, struct kwl_resolution_step *step);
 static void resolution_step_clear(struct kwl_resolution_step *step);
 
@@ -266,7 +292,6 @@ kwl_resolution_identity(
 	char *identity,
 	size_t size)
 {
-	static const uint8_t header[8] = { 0x00U, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0x00U };
 	char vendor[4];
 	char text[16];
 	uint32_t serial;
@@ -275,21 +300,13 @@ kwl_resolution_identity(
 	uint32_t hash;
 	size_t text_length;
 	size_t used;
-	size_t index;
-	unsigned sum;
-	int differs;
+	int base;
 	int real;
 	int written;
 
 	/* A base block whose header and checksum hold names the monitor; anything else is known by its connector. */
-	sum = 0U;
-	differs = 1;
-	if (edid != NULL && length >= RESOLUTION_EDID_BLOCK) {
-		differs = memcmp(edid, header, sizeof(header));
-		for (index = 0U; index < RESOLUTION_EDID_BLOCK; index++)
-			sum += edid[index];
-	}
-	if (differs != 0 || (sum & 0xffU) != 0U) {
+	base = resolution_edid_base(edid, length);
+	if (!base) {
 		written = snprintf(identity, size, "%s", connector);
 		if (written < 0 || (size_t)written >= size)
 			return ENOSPC;
@@ -339,6 +356,54 @@ kwl_resolution_identity(
 
 	/* Succeeded: the monitor of this model on this connector. */
 	return 0;
+}
+
+/*
+ * Reads a display's physical size in millimetres from its EDID (NULL or
+ * length 0 for none): the preferred timing's image size, else the base
+ * block's size in centimetres.  Returns 1 with it, or 0 when the EDID
+ * gives none (nothing is written then).  The size is as the EDID says;
+ * kwl_scale_density judges whether it can be the display's.
+ */
+int
+kwl_resolution_physical(
+	const uint8_t *edid,
+	size_t length,
+	uint32_t *mm_width,
+	uint32_t *mm_height)
+{
+	const uint8_t *timing;
+	uint32_t clock;
+	uint32_t width;
+	uint32_t height;
+	int base;
+
+	/* Only a base block whose header and checksum hold. */
+	base = resolution_edid_base(edid, length);
+	if (!base)
+		return 0;
+
+	/* The preferred timing's image size, when the first descriptor is a timing that gives one. */
+	timing = edid + RESOLUTION_EDID_DESCRIPTORS;
+	clock = (uint32_t)timing[RESOLUTION_DTD_CLOCK] | ((uint32_t)timing[RESOLUTION_DTD_CLOCK + 1U] << 8);
+	width = (uint32_t)timing[RESOLUTION_DTD_WIDTH_MM] | (((uint32_t)timing[RESOLUTION_DTD_SIZE_HIGH] & 0xf0U) << 4);
+	height = (uint32_t)timing[RESOLUTION_DTD_HEIGHT_MM] | (((uint32_t)timing[RESOLUTION_DTD_SIZE_HIGH] & 0x0fU) << 8);
+	if (clock != 0U && width != 0U && height != 0U) {
+		*mm_width = width;
+		*mm_height = height;
+		return 1;
+	}
+
+	/* Else the base block's size in centimetres, when both are given (one alone is an aspect ratio). */
+	width = edid[RESOLUTION_EDID_WIDTH_CM];
+	height = edid[RESOLUTION_EDID_HEIGHT_CM];
+	if (width == 0U || height == 0U)
+		return 0;
+
+	/* Succeeded: the size in centimetres, in millimetres. */
+	*mm_width = width * 10U;
+	*mm_height = height * 10U;
+	return 1;
 }
 
 /* Readies a trial: nothing tried. */
@@ -808,4 +873,35 @@ resolution_step_clear(
 {
 	/* Nothing to open, save or answer. */
 	memset(step, 0, sizeof(*step));
+}
+
+/* Tells whether an EDID begins with a base block whose header and checksum hold: 1 or 0. */
+static int
+resolution_edid_base(
+	const uint8_t *edid,
+	size_t length)
+{
+	static const uint8_t header[8] = { 0x00U, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0x00U };
+	size_t index;
+	unsigned sum;
+	int differs;
+
+	/* A whole base block. */
+	if (edid == NULL || length < RESOLUTION_EDID_BLOCK)
+		return 0;
+
+	/* Its fixed header. */
+	differs = memcmp(edid, header, sizeof(header));
+	if (differs != 0)
+		return 0;
+
+	/* Its bytes sum to 0 modulo 256. */
+	sum = 0U;
+	for (index = 0U; index < RESOLUTION_EDID_BLOCK; index++)
+		sum += edid[index];
+	if ((sum & 0xffU) != 0U)
+		return 0;
+
+	/* Succeeded: a base block. */
+	return 1;
 }

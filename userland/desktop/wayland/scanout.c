@@ -546,6 +546,8 @@ scanout_facts(
 {
 	uint32_t width;
 	uint32_t height;
+	uint32_t buffer_width;
+	uint32_t buffer_height;
 	uint64_t now;
 
 	/* The pointer's stillness: a move restarts it. */
@@ -575,8 +577,24 @@ scanout_facts(
 	if (top->current != NULL && top->current->shm == NULL)
 		facts->gpu_buffer = 1U;
 	kwl_surface_size(top, &width, &height);
-	if (width == server->width && height == server->height && top->source[2] <= 0 && top->destination[0] <= 0)
-		facts->size_matches = 1U;
+	if (server->scale120 == 0U || server->scale120 == KWL_SCALE_ONE) {
+		/* At 100 %: the buffer itself the output's size, without a viewport. */
+		if (width == server->width && height == server->height && top->source[2] <= 0 && top->destination[0] <= 0)
+			facts->size_matches = 1U;
+	} else if (top->current != NULL) {
+		/*
+		 * At another scale: a buffer of the output's pixels shown a texel a
+		 * pixel, its viewport's destination the whole logical output and its
+		 * source the whole buffer.
+		 */
+		kwl_buffer_size(top->current, &buffer_width, &buffer_height);
+		if (width == server->width &&
+		    height == server->height &&
+		    top->source[2] <= 0 &&
+		    buffer_width == server->pixel_width &&
+		    buffer_height == server->pixel_height)
+			facts->size_matches = 1U;
+	}
 
 	/* What may be drawn over it, a screenshot waiting, a refusal of it. */
 	facts->overlay = (unsigned)scanout_overlay(server, top);
@@ -614,6 +632,9 @@ scanout_lendable(
 		why = "display";
 	} else if (game->game_count == 0U || game->game_count + 2U > KWL_GAME_IMAGES) {
 		why = "count";
+	} else if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE) {
+		/* The game's chain does not know the output's scale: the compositor draws it scaled. */
+		why = "scale";
 	} else if (game->game_width != server->compose->mode_width || game->game_height != server->compose->mode_height) {
 		why = "size";
 	} else if ((game->game_usage & ~(uint32_t)SCANOUT_USAGE) != 0U) {
