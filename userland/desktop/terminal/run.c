@@ -1400,10 +1400,17 @@ run_rescale(
 	run_screen->changed = 1;
 	terminal_page_shown(&run_window);
 
-	/* Succeeded: the next frame draws at the new scale. */
-	printf("ZTERM SCALE run=%s scale=%u cell=%ux%u columns=%u rows=%u\n", options->token, scale, run_font.cell_width, run_font.cell_height,
-	       run->columns, run->rows);
+	/* The new scale, cell and grid, in the log. */
+	printf("ZTERM SCALE run=%s scale=%u cell=%ux%u columns=%u rows=%u\n",
+	       options->token,
+	       scale,
+	       run_font.cell_width,
+	       run_font.cell_height,
+	       run->columns,
+	       run->rows);
 	fflush(stdout);
+
+	/* Succeeded: the next frame draws at the new scale. */
 	return 0;
 }
 

@@ -438,6 +438,9 @@ connection_open(
 	memcpy(session->term, connector->options.term, length);
 	session->connect_timeout = connector->options.connect_timeout;
 	session->wsl_port = connector->options.wsl_port;
+	session->x11_scale = connector->options.x11_scale;
+	session->x11_render_cpu = connector->options.x11_render_cpu;
+	session->x11_primary = connector->options.x11_primary;
 	if (!connector->first_opened) {
 		connection_copy(session->host, sizeof(session->host), connector->options.connect);
 		connection_copy(session->notice, sizeof(session->notice), connector->options.notice);

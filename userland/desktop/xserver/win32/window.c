@@ -29,6 +29,9 @@
 #define WINDOW_STYLE_POPUP	(WS_POPUP | WS_CLIPCHILDREN)
 #define WINDOW_EXSTYLE_POPUP	(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
 
+/* The message that tells the core a window's place and size from the loop. */
+#define WINDOW_REPORT		(WM_APP + 1U)
+
 static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT window_message(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_styles(const struct x11_surface *surface, DWORD *style, DWORD *extended);
@@ -36,11 +39,14 @@ static void window_outer(const struct x11_surface *surface, RECT *outer);
 static void window_set_title(struct x11_surface *surface, const char *title);
 static void window_set_owner(struct x11_surface *surface, struct x11_surface *owner);
 static void window_sized(struct x11_surface *surface, WPARAM kind);
+static void window_post_report(struct x11_surface *surface);
+static void window_report(struct x11_surface *surface);
 static void window_dpi_changed(struct x11_surface *surface, WPARAM wparam, const RECT *suggested);
 static void window_paint(struct x11_surface *surface);
 static int window_dib(struct x11_surface *surface, unsigned width, unsigned height);
 static void window_dib_free(struct x11_surface *surface);
 static unsigned window_x_size(unsigned size, unsigned percent);
+static int32_t window_x_place(int32_t place, unsigned percent);
 
 /*
  * Registers the window class of the X windows.  Returns 0, or an errno
@@ -125,6 +131,8 @@ win32_surface_open(
 	surface->y = info->y;
 	surface->width = info->width;
 	surface->height = info->height;
+	surface->reported_x = info->x;
+	surface->reported_y = info->y;
 	surface->reported_width = info->width;
 	surface->reported_height = info->height;
 	surface->flags = info->flags;
@@ -195,6 +203,8 @@ win32_surface_update(
 		surface->y = info->y;
 		surface->width = info->width;
 		surface->height = info->height;
+		surface->reported_x = info->x;
+		surface->reported_y = info->y;
 		surface->reported_width = info->width;
 		surface->reported_height = info->height;
 		window_outer(surface, &outer);
@@ -391,6 +401,12 @@ window_message(
 		return 0;
 	case WM_SIZE:
 		window_sized(surface, wparam);
+		return 0;
+	case WM_MOVE:
+		window_post_report(surface);
+		return 0;
+	case WINDOW_REPORT:
+		window_report(surface);
 		return 0;
 	case WM_ENTERSIZEMOVE:
 		/* Windows runs its own loop while the user moves or sizes: the server keeps going on a timer. */
@@ -610,9 +626,6 @@ window_sized(
 	WPARAM kind)
 {
 	struct x11_win32 *backend;
-	RECT client;
-	unsigned width;
-	unsigned height;
 
 	/* Minimized: the window becomes Iconic. */
 	backend = surface->backend;
@@ -632,20 +645,76 @@ window_sized(
 			x11server_backend_state(backend->server, surface->window, 0);
 	}
 
-	/* The client area's size in X's pixels. */
+	/* The size the user gave is told from the loop (not from within a call of the core's). */
+	window_post_report(surface);
+}
+
+/*
+ * Asks for the window's place and size to be told to the core from the
+ * message loop: a move or a size Windows makes while the core is calling
+ * the backend (a window placed onto the work area) must not call the core
+ * back from within that call.
+ */
+static void
+window_post_report(
+	struct x11_surface *surface)
+{
+	/* One request at a time. */
+	if (surface->report_posted)
+		return;
+
+	surface->report_posted = 1;
+	PostMessageW(surface->hwnd, WINDOW_REPORT, 0, 0);
+}
+
+/*
+ * Tells the core the place and size of a window the user (or Windows)
+ * gave it, in X's pixels, once: a place and size the core already has,
+ * or was told of, is not told again.  The core takes the place as the X
+ * window's, and the pointer is counted from it from then on.
+ */
+static void
+window_report(
+	struct x11_surface *surface)
+{
+	struct x11_win32 *backend;
+	RECT client;
+	POINT corner;
+	unsigned width;
+	unsigned height;
+	int32_t x;
+	int32_t y;
+
+	/* Nothing to tell of a minimized window. */
+	backend = surface->backend;
+	surface->report_posted = 0;
+	if (surface->iconic)
+		return;
+
+	/* The client area's place on the root window and its size, in X's pixels. */
 	GetClientRect(surface->hwnd, &client);
+	corner.x = 0;
+	corner.y = 0;
+	ClientToScreen(surface->hwnd, &corner);
+	x = window_x_place(corner.x - backend->virtual_screen.left, backend->scale);
+	y = window_x_place(corner.y - backend->virtual_screen.top, backend->scale);
 	width = window_x_size((unsigned)(client.right - client.left), backend->scale);
 	height = window_x_size((unsigned)(client.bottom - client.top), backend->scale);
 
-	/* A size the core already has, or was already told of, is not told again. */
-	if (width == surface->reported_width && height == surface->reported_height)
+	/* What the core already has, or was told, is not told again. */
+	if (x == surface->reported_x && y == surface->reported_y && width == surface->reported_width &&
+	    height == surface->reported_height)
 		return;
 
-	/* Tells the core of the size the user gave. */
+	/* Tells the core; the pointer is counted from the new place. */
+	surface->reported_x = x;
+	surface->reported_y = y;
 	surface->reported_width = width;
 	surface->reported_height = height;
+	surface->x = x;
+	surface->y = y;
 	if (backend->server != NULL)
-		x11server_backend_configure(backend->server, surface->window, (int)width, (int)height);
+		x11server_backend_configure(backend->server, surface->window, x, y, (int)width, (int)height);
 }
 
 /*
@@ -788,4 +857,27 @@ window_x_size(
 
 	/* Succeeded: the X size. */
 	return x_size;
+}
+
+/*
+ * Gives the X place of a screen place on the root window: rounded to the
+ * nearest (half up, the same on both sides of zero), so that the screen
+ * place of an X place gives that X place back.
+ */
+static int32_t
+window_x_place(
+	int32_t place,
+	unsigned percent)
+{
+	int64_t numerator;
+	int64_t quotient;
+
+	/* Divides out the scale with half a pixel added, rounding down. */
+	numerator = (int64_t)place * 100 + (int64_t)(percent / 2U);
+	quotient = numerator / (int64_t)percent;
+	if (numerator % (int64_t)percent != 0 && numerator < 0)
+		quotient--;
+
+	/* Succeeded: the X place. */
+	return (int32_t)quotient;
 }

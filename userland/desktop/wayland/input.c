@@ -830,6 +830,8 @@ kwl_pointer_warp(
 		move(context, outputs, &x, &y, &output);
 		server->pointer_x = x;
 		server->pointer_y = y;
+		server->pointer_fraction_x = 0;
+		server->pointer_fraction_y = 0;
 		server->pointer_output = output;
 		return;
 	}
@@ -848,9 +850,11 @@ kwl_pointer_warp(
 		kwl_cursor_box_warp(&server->cursor_box, NULL, move, context, &motion);
 	}
 
-	/* The main thread's view of the place. */
+	/* The main thread's view of the place (a warp leaves no part between units). */
 	server->pointer_x = motion.x;
 	server->pointer_y = motion.y;
+	server->pointer_fraction_x = motion.fraction_x;
+	server->pointer_fraction_y = motion.fraction_y;
 	server->pointer_output = motion.output;
 	server->pointer_warp = motion.warp;
 }
@@ -1708,9 +1712,11 @@ apply_motion(
 	if (motion->warp != server->pointer_warp)
 		return 0;
 
-	/* The view already has this place. */
+	/* The view already has this place, to its part between units. */
 	if (motion->x == server->pointer_x &&
 	    motion->y == server->pointer_y &&
+	    motion->fraction_x == server->pointer_fraction_x &&
+	    motion->fraction_y == server->pointer_fraction_y &&
 	    motion->output == server->pointer_output)
 		return 0;
 
@@ -1731,6 +1737,8 @@ apply_motion(
 	old_y = server->pointer_y;
 	server->pointer_x = motion->x;
 	server->pointer_y = motion->y;
+	server->pointer_fraction_x = motion->fraction_x;
+	server->pointer_fraction_y = motion->fraction_y;
 	server->pointer_output = motion->output;
 	kwl_seat_motion(server, time);
 	kwl_damage_pointer(server, old_x, old_y);

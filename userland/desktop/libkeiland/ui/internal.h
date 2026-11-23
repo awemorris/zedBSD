@@ -21,7 +21,7 @@ struct wl_event_queue;
 struct wl_interface;
 
 /*
- * A search for one global of a display (globals.c, WS131 p015), for
+ * A search for one global of a display (globals.c), for
  * libkeiland's objects: the global's name (0 when the compositor has none)
  * and version, the registry it is bound from -- an application's, when
  * the display is one (no search then), otherwise a registry of the
@@ -37,7 +37,7 @@ struct keiui_global_search {
 	const char *interface;
 };
 
-/* The theme handed out made the appearance's with an accent's colours, one written so for the tests, and the light or the dark theme itself (theme.c, ws089-p017, ws179-p001). */
+/* The theme handed out made the appearance's with an accent's colours, one written so for the tests, and the light or the dark theme itself (theme.c). */
 void keiui_theme_set(unsigned appearance, unsigned accent);
 void keiui_theme_with(unsigned appearance, unsigned accent, struct kl_theme *theme);
 const struct kl_theme *keiui_theme_of(unsigned appearance);
@@ -62,7 +62,7 @@ struct wl_registry *keiui_app_global(struct wl_display *display, const char *int
 #define KEIUI_MODAL		4U
 
 /*
- * ws190-p002: a press on a widget that keeps the focus where it is (the
+ * A press on a widget that keeps the focus where it is (the
  * bar's buttons: a press there does not take the keyboard from the field
  * whose selection it acts on), and a widget a finger's drag that starts on
  * it does nothing for (neither a selection nor a scroll begins).
@@ -78,7 +78,7 @@ struct wl_registry *keiui_app_global(struct wl_display *display, const char *int
 #define KEIUI_STILL		32U
 
 /*
- * KL_VERSION 91 (ws210-p014 F2.1): whether a pointer's motion of a window
+ * KL_VERSION 91: whether a pointer's motion of a window
  * that asked for KL_PACING_MOTION takes the place of the newest input
  * queued (1) rather than a slot of its own (0).  It does when that input
  * is a motion of the same window: nothing came between them, so the
@@ -108,7 +108,7 @@ keiui_motion_merges(
 }
 
 /*
- * KL_VERSION 92 (ws210-p014 F2.3): whether an input of a window that asked
+ * KL_VERSION 92: whether an input of a window that asked
  * for KL_PACING_FRAME may wait for the compositor's next frame (1), or asks
  * for a frame at once (0).  Only the pointer's, a finger's, a pen's and a
  * drop's moves and the wheel wait; every other kind (a button, a key, the
@@ -141,7 +141,7 @@ keiui_pacing_waits(
 #define KEIUI_PACE_WATCHDOG_US	1000000U
 
 /*
- * The pacing of a window's frames (KL_PACING_FRAME, ws210-p014 F2.4): a
+ * The pacing of a window's frames (KL_PACING_FRAME): a
  * frame callback asked for with the frame last shown and not yet answered
  * (asked, at asked_us), a frame shown again while it was (overdue: the
  * next waits for the answer), and an input since the last frame that does
@@ -155,9 +155,9 @@ struct keiui_pace {
 };
 
 /*
- * Tells when a window that paces its frames may draw the next one
- * (ws210-p014 F2.4), without changing anything: 0 now, a positive number
- * of milliseconds (rounded up) until the callback is waited for no
+ * Tells when a window that paces its frames may draw the next one,
+ * without changing anything: 0 now, a positive number of milliseconds
+ * (rounded up) until the callback is waited for no
  * longer, or -1 to wait for the callback alone (the compositor's answer
  * wakes the wait).
  */
@@ -259,7 +259,7 @@ keiui_pace_clear(
 	pace->overdue = 0;
 }
 
-/* The ids of the library's own records (ws190-p002): the bar of a field's selection and its handles; programs use none from 0xfffffff0 up. */
+/* The ids of the library's own records: the bar of a field's selection and its handles; programs use none from 0xfffffff0 up. */
 #define KEIUI_TEXT_BAR_ID	0xfffffffdU
 #define KEIUI_TEXT_HANDLE_ID	0xfffffffcU
 
@@ -282,7 +282,7 @@ int keiui_ui_take_key(struct kl_ui *ui, uint32_t id, uint32_t index, keiui_wants
 #define KEIUI_INPUT_DELETE	3U
 
 /*
- * One input a widget that edits text takes (BUG-203): its kind, a key's
+ * One input a widget that edits text takes: its kind, a key's
  * code and modifiers, the text an input method or the on-screen keyboard
  * commits, and the bytes to delete before and after the caret.
  */
@@ -293,7 +293,7 @@ struct keiui_input {
 	char text[KL_WINDOW_TEXT_MAX];
 	uint32_t before;
 	uint32_t after;
-	/* ws190-p002: a command of the bar of the fingers' selection (Ctrl+X, C, V or A the bar sent), not the keyboard's. */
+	/* A command of the bar of the fingers' selection (Ctrl+X, C, V or A the bar sent), not the keyboard's. */
 	int from_bar;
 };
 
@@ -302,7 +302,7 @@ int keiui_ui_take_input(struct kl_ui *ui, uint32_t id, uint32_t index, keiui_wan
 
 /*
  * The editing a text widget (a field, a text area) asks of its window's
- * input (ui.c, ws177-p013): the commands of the keys with Control --
+ * input (ui.c): the commands of the keys with Control --
  * undo (Ctrl+Z) and redo (Ctrl+Shift+Z, Ctrl+Y), copy, cut and paste
  * (Ctrl+C, Ctrl+X, Ctrl+V) and a word left or right (Ctrl+Left,
  * Ctrl+Right, with Shift the selection) -- and the history of the widget's
@@ -355,7 +355,7 @@ int keiui_ui_focus_ring(const struct kl_ui *ui);
 
 /*
  * Notes the on-screen keyboard's inset a window heard (ui.c, from
- * window.c; ws102-p015): the window's size, the covered widths from its
+ * window.c): the window's size, the covered widths from its
  * right and bottom edges, the reason, and the caret's rectangle in the
  * window as the application last told it (kl_window_text_cursor; height 0
  * when it has not).  The next kl_ui_end of each window's input keeps its
@@ -383,11 +383,10 @@ void keiui_canvas_mask_pixels(struct kl_canvas *canvas, int x, int y, const uint
 void keiui_canvas_image_pixels(struct kl_canvas *canvas, const struct kl_image *image, float x, float y, float width, float height, float radius, float opacity);
 
 /*
- * ws190-p002 (plan/ws190/phase001/phase.md section 2.3): the fingers'
- * selection of a field or a text area, one a window's input (kl_ui keeps
- * it from kl_ui_create to kl_ui_destroy).  A double tap of a finger puts
- * the focused field in it; kl_ui records the handles and the bar over the
- * field in kl_ui_end and carries the fingers on them out.
+ * The fingers' selection of a field or a text area, one a window's input
+ * (kl_ui keeps it from kl_ui_create to kl_ui_destroy).  A double tap of a
+ * finger puts the focused field in it; kl_ui records the handles and the
+ * bar over the field in kl_ui_end and carries the fingers on them out.
  *
  * The view's answers come from the field's own copy kept here (field or
  * area, and for a text area its lines in layout), never from the
@@ -446,6 +445,7 @@ void keiui_ui_select_begin(struct kl_ui *ui, uint32_t id, uint32_t index, int ki
 
 /* Takes the fingers' selection's mode away (ui.c; the widget keeps its selection). */
 void keiui_ui_select_end(struct kl_ui *ui);
+unsigned keiui_ui_scale(const struct kl_ui *ui);
 
 /* Notes that the widget in the mode was drawn in the frame being drawn, at its rectangle and text box, with its style (ui.c). */
 void keiui_ui_select_drawn(struct kl_ui *ui, const struct kl_rect *rect, const struct kl_rect *box, const struct kl_style *style);

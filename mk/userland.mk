@@ -159,6 +159,7 @@ $(BUILD)/packages/libGLX/.stamp: $(BUILD)/packages/libGL/.stamp $(BUILD)/package
 KEILAND_COMMON_DEPS := $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/libtruetype/.stamp
 $(BUILD)/packages/settings/.stamp:    $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp
 $(BUILD)/packages/terminal/.stamp:    $(KEILAND_COMMON_DEPS)
+$(BUILD)/packages/displayctl/.stamp:  $(BUILD)/packages/libkeiland/.stamp
 $(BUILD)/packages/files/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp
 $(BUILD)/packages/browser/.stamp:     $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libbrowser/.stamp $(BUILD)/packages/libz-compat/.stamp
 $(BUILD)/packages/imageview/.stamp:   $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp

@@ -61,6 +61,16 @@ A row shows user@host when ssh/config gives the host a User.
 settings in a tab of their own beside this one (section 3): the tab stays,
 and you come back to it with the tab bar or F12.  Ctrl+C closes the tab.
 
+A window has up to ten tabs.  These keys go between them:
+
+  Ctrl+Alt+1 to 9     the tab of that place, counted from the left
+  Ctrl+Alt+0          the tenth tab
+  Ctrl+Alt+Page Up    the tab before (the last one after the first)
+  Ctrl+Alt+Page Down  the tab after (the first one after the last)
+
+Use the left Alt key for them.  The right Alt key is AltGr on the keyboards
+that have one, and AltGr with a digit still types its character.
+
 When ssh/config gives no User for the host, the tab asks "login as:".
 
 The first time you connect to a host, mikuterm shows the host's key and asks
@@ -160,7 +170,8 @@ ssh/config is written as OpenSSH's ~/.ssh/config:
 mikuterm reads Host, HostName, User, Port, IdentityFile,
 StrictHostKeyChecking, UserKnownHostsFile, GlobalKnownHostsFile, BatchMode,
 ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
-PasswordAuthentication, PubkeyAuthentication and LogLevel.  Match, Include,
+PasswordAuthentication, PubkeyAuthentication, LogLevel, ForwardX11,
+ForwardX11Trusted and ForwardX11Timeout (see 10).  Match, Include,
 ProxyJump and the other keywords it does not know are errors that name their
 line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is
 this folder's ssh/, ~/ is this folder, a name without a folder is in ssh/,
@@ -242,6 +253,12 @@ named in the first tab and skipped.
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
   WslPort         the port of the sshd in WSL, for a distribution without a
                   Host wsl-<name> in ssh/config (2222)
+  X11Scale        the size of the remote X programs' windows: auto (the
+                  main monitor's scale) or 100, 125, 150, 175, 200 ... 400
+                  percent (auto)
+  X11Render       auto or cpu: how the X windows are drawn (auto)
+  X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
+                  xterm copies to) also goes to the Windows clipboard (no)
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
@@ -258,8 +275,9 @@ su, passwd) asks for one: turn the input method off yourself with
 Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
 
 The function keys F1 to F11 go to the host (htop, mc).  mikuterm's own keys
-are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide)
-and Alt+Enter (Fullscreen).
+are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide),
+Alt+Enter (Fullscreen) and Ctrl+Alt with a digit, Page Up or Page Down (the
+tabs, section 2).
 
 
 8. Fonts
@@ -283,3 +301,42 @@ starts at a drive (C:/) or a server (//server/share/).  Anything else, such as
 Copyright (C) 2026 Awe Morris.  mikuterm.exe is under the zlib license
 (share/licenses/zedBSD-LICENSE.txt).  The fonts in share/fonts are their
 authors' works under their own licenses, listed in share/licenses/README.txt.
+
+
+10. Remote X programs (X11 forwarding)
+--------------------------------------
+
+mikuterm can show the X11 programs of a host as windows on this PC.  Turn it
+on for the host in ssh/config:
+
+  Host server
+      HostName server.example.org
+      ForwardX11 yes
+
+The host's sshd needs "X11Forwarding yes" in its sshd_config and the xauth
+program installed (Debian and Ubuntu: apt install xauth).  Then a program
+started in the tab (xeyes &, for example) opens its window here.  Each
+connection has an X server of its own, run by mikuterm in a process of its
+own (mikuterm.exe --x11-server, at a low integrity level where Windows
+allows it); it ends with the connection, and if it fails, the tab says so
+and the next program starts a new one.
+
+Every X window's title starts with the host's name in brackets, [server].
+A remote program can draw a window that looks like anything: do not type a
+password or passphrase of this PC or of mikuterm into an X window.
+
+The clipboard: unless ForwardX11Trusted is yes, a remote program can read the
+Windows clipboard only just after you paste in one of its windows (the
+middle button, Ctrl+V, Ctrl+Shift+V or Shift+Insert), and can set it only
+just after you copy in one of its windows (a selection with the left button,
+Ctrl+C, Ctrl+Shift+C or Ctrl+Insert).  With ForwardX11Trusted yes it may do
+both at any time.  ForwardX11Timeout (for example 20m) refuses new X programs
+of an untrusted connection after that time; unlike OpenSSH's, it is off
+unless you set it.
+
+When the shell ends while X programs still run, the connection stays open
+until the last of them ends; close the tab to end them all.
+
+The X server is new: it shows simple X programs, and programs that need what
+it does not have yet (images, cursors of the cursor font: xterm, xclock,
+xeyes, xlogo) stop with an X error for now.

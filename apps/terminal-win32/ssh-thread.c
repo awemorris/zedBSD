@@ -27,9 +27,11 @@
 
 #include "session.h"
 #include "launch.h"
+#include "x11-host.h"
 #include "mikuterm-version.h"
 
 #include "userland/base/ssh/ssh-client-engine.h"
+#include "userland/base/ssh/ssh-crypto.h"
 #include "userland/base/ssh/ssh-key.h"
 
 #include <compat/crypto/crypto.h>
@@ -175,6 +177,11 @@ struct thread_link {
 	int closed;
 	int error;
 	char reason[THREAD_REASON_MAX];
+	int x11;
+	int x11_refused;
+	uint64_t x11_since_ms;
+	char x11_cookie[SSH_ENGINE_X11_COOKIE_DIGITS + 1];
+	struct x11_host x11_host;
 };
 
 static int thread_choose(struct mikuterm_session *session, struct thread_target *target);
@@ -222,6 +229,8 @@ static int thread_closing(struct mikuterm_session *session);
 static void thread_say_bytes(struct mikuterm_session *session, const void *bytes, size_t size);
 static const char *thread_error_text(int error);
 static uint64_t thread_now(void);
+static int thread_x11_start(struct thread_link *link);
+static void thread_x11_open(struct thread_link *link, const struct ssh_engine_event *event);
 
 /*
  * Runs one tab's connection, from choosing the host to its end, and lets
@@ -281,6 +290,8 @@ session_run(
 			(void)snprintf(hint, sizeof(hint), "%s needs an sshd listening on port %u (README.txt, WSL).\r\n", target.distribution, (unsigned)link->config.port);
 			session_say(session, hint);
 		}
+
+		/* Enter tries again; Ctrl+C closes the tab. */
 		status = thread_ask(session, "Press Enter to connect again (Ctrl+C closes the tab). ", SESSION_ASK_LINE, answer, sizeof(answer));
 		if (status == ECANCELED)
 			session_ended(session);
@@ -514,7 +525,7 @@ thread_launch(
 	int closing;
 	int error;
 
-	/* Nothing drawn yet for this screen. */
+	/* The screen drawn and the keys taken round by round, nothing drawn yet. */
 	session = choice->session;
 	drawn_columns = 0U;
 	drawn_rows = 0U;
@@ -630,6 +641,8 @@ thread_wsl(
 	error = thread_wsl_list(choice, &count);
 	if (error != 0)
 		return error;
+
+	/* The list is read: the message goes. */
 	launch_say(&choice->screen, NULL);
 
 	/* The screen: the distributions by number, each with where it is reached, and the way back. */
@@ -919,6 +932,8 @@ thread_user_name(
 		    character == '-' ||
 		    character == '$')
 			continue;
+
+		/* Any other character is not a name's. */
 		return 0;
 	}
 
@@ -1117,6 +1132,13 @@ thread_attempt(
 	options.modes = NULL;
 	options.command = NULL;
 	options.alive_interval = link->config.server_alive_interval;
+
+	/* X11 forwarding, when the host's settings ask for it: a fake cookie of this connection's. */
+	error = thread_x11_start(link);
+	if (error == 0 && link->x11) {
+		options.x11 = 1;
+		options.x11_cookie = link->x11_cookie;
+	}
 	options.alive_count = link->config.server_alive_count;
 	options.now_ms = thread_now();
 	kl_mutex_lock(&session->lock);
@@ -1138,8 +1160,10 @@ thread_attempt(
 		return THREAD_FAILED;
 	}
 
-	/* The conversation until the end. */
+	/* The conversation until the end; the X server ends with it. */
 	status = thread_converse(link);
+	if (link->x11)
+		x11_host_end(&link->x11_host, link->engine);
 	ssh_engine_close(link->engine);
 	link->engine = NULL;
 	kl_socket_close(link->socket);
@@ -1406,7 +1430,10 @@ static int
 thread_converse(
 	struct thread_link *link)
 {
-	struct kl_socket_wait waits[2];
+	struct kl_socket_wait waits[3];
+	struct kl_socket *x11_socket;
+	int x11_writable;
+	size_t count;
 	uint64_t now;
 	uint64_t wake;
 	uint64_t wait;
@@ -1419,6 +1446,12 @@ thread_converse(
 		/* What the engine has to say, and what the bytes read so far still hold. */
 		thread_feed(link);
 		thread_events(link);
+
+		/* The X server's round: the X clients' bytes both ways; a line for the tab when it stopped. */
+		if (link->x11) {
+			if (x11_host_pump(&link->x11_host, link->engine, thread_now()) != 0)
+				session_say(link->session, link->x11_host.message);
+		}
 
 		/* The end: what is left to send goes, briefly. */
 		if (link->closed) {
@@ -1467,7 +1500,21 @@ thread_converse(
 		waits[1].waker = link->session->waker;
 		waits[1].events = KL_SOCKET_READABLE;
 		waits[1].ready = 0U;
-		error = kl_socket_poll(waits, 2U, (int)wait, &ready);
+		count = 2U;
+		x11_writable = 0;
+		x11_socket = NULL;
+		if (link->x11)
+			x11_socket = x11_host_socket(&link->x11_host, &x11_writable);
+		if (x11_socket != NULL) {
+			waits[2].socket = x11_socket;
+			waits[2].waker = NULL;
+			waits[2].events = KL_SOCKET_READABLE;
+			if (x11_writable)
+				waits[2].events |= KL_SOCKET_WRITABLE;
+			waits[2].ready = 0U;
+			count = 3U;
+		}
+		error = kl_socket_poll(waits, count, (int)wait, &ready);
 		if (error != 0) {
 			(void)snprintf(link->reason, sizeof(link->reason), "The wait for the network failed (%s).", thread_error_text(error));
 			return THREAD_FAILED;
@@ -1528,8 +1575,38 @@ thread_events(
 			thread_passphrase(link, &event);
 			break;
 		case SSH_ENGINE_DATA:
+			/* An X client's bytes go to the X server. */
+			if (event.channel != SSH_ENGINE_SESSION_CHANNEL) {
+				if (link->x11)
+					x11_host_data(&link->x11_host, link->engine, event.channel, event.bytes, event.size);
+				break;
+			}
+
 			/* The session's bytes for the tab, given back to the window as the tab reads them. */
 			thread_say_bytes(session, event.bytes, event.size);
+			break;
+		case SSH_ENGINE_X11_REPLY:
+			/* A refusal is said as OpenSSH says it; the session goes on. */
+			if (!event.accepted) {
+				session_say(session, event.reason);
+				session_say(session, "\r\n");
+			}
+			break;
+		case SSH_ENGINE_X11_OPEN:
+			thread_x11_open(link, &event);
+			break;
+		case SSH_ENGINE_CHANNEL_EOF:
+			if (link->x11)
+				x11_host_eof(&link->x11_host, event.channel);
+			break;
+		case SSH_ENGINE_CHANNEL_CLOSED:
+			if (link->x11)
+				x11_host_closed(&link->x11_host, event.channel);
+			break;
+		case SSH_ENGINE_EXIT:
+			/* The shell ended while X clients stay: the connection waits for them. */
+			if (link->x11 && x11_host_open_count(&link->x11_host) != 0)
+				session_say(session, "\r\nThe shell ended; the connection stays open while X clients run (close the tab to end them).\r\n");
 			break;
 		case SSH_ENGINE_CLOSED:
 			thread_closed(link, &event);
@@ -2068,6 +2145,10 @@ thread_from_tab(
 
 	kl_mutex_unlock(&session->lock);
 
+	/* The user typed in the tab: its X server's windows may come to the front (not while a question is asked). */
+	if (written != 0U && link->x11 && link->asked == THREAD_ASKED_NONE)
+		x11_host_foreground(&link->x11_host);
+
 	/* The window, as the tab read. */
 	if (taken != 0U)
 		ssh_engine_consumed(link->engine, taken);
@@ -2504,4 +2585,96 @@ thread_passphrase_answer(
 	error = mikuterm_passphrase_keep(path, answer);
 	printf("MIKUTERM PASSPHRASE keep error=%d\n", error);
 	fflush(stdout);
+}
+
+/*
+ * Prepares X11 forwarding when the host's settings ask for it
+ * (ForwardX11 yes): a fake MIT-MAGIC-COOKIE-1 of 16 random bytes for this
+ * connection (its hexadecimal text for x11-req), and the X server's
+ * settings.  Returns 0, or an errno value (forwarding stays off).
+ */
+static int
+thread_x11_start(
+	struct thread_link *link)
+{
+	struct x11_host_settings settings;
+	unsigned i;
+	int error;
+	static const char digits[] = "0123456789abcdef";
+
+	/* Nothing unless asked. */
+	link->x11 = 0;
+	link->x11_refused = 0;
+	if (!link->config.forward_x11)
+		return 0;
+
+	/* The cookie, from the system's random numbers. */
+	memset(&settings, 0, sizeof(settings));
+	error = ssh_random(settings.cookie, X11_HOST_COOKIE);
+	if (error != 0)
+		return error;
+	for (i = 0; i < X11_HOST_COOKIE; i++) {
+		link->x11_cookie[i * 2U] = digits[settings.cookie[i] >> 4];
+		link->x11_cookie[i * 2U + 1U] = digits[settings.cookie[i] & 0x0FU];
+	}
+	link->x11_cookie[X11_HOST_COOKIE * 2U] = '\0';
+
+	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy. */
+	(void)snprintf(settings.host, sizeof(settings.host), "%s", link->target->title);
+	settings.scale = link->session->x11_scale;
+	settings.flags = 0;
+	if (link->config.forward_x11_trusted)
+		settings.flags |= X11_HOST_TRUSTED;
+	if (link->session->x11_primary)
+		settings.flags |= X11_HOST_PRIMARY;
+	if (link->session->x11_render_cpu)
+		settings.flags |= X11_HOST_RENDER_CPU;
+	x11_host_init(&link->x11_host, &settings);
+
+	/* Succeeded: x11-req goes with the session. */
+	link->x11 = 1;
+	link->x11_since_ms = thread_now();
+	return 0;
+}
+
+/*
+ * Answers an X client the server forwards: refused when forwarding was not
+ * asked, when ForwardX11Timeout passed on an untrusted connection, or when
+ * the X server cannot take it (the tab is told once).
+ */
+static void
+thread_x11_open(
+	struct thread_link *link,
+	const struct ssh_engine_event *event)
+{
+	uint64_t now;
+	int error;
+
+	/* Not asked: refused. */
+	if (!link->x11) {
+		(void)ssh_engine_x11_answer(link->engine, event->channel, 0);
+		return;
+	}
+
+	/* An untrusted connection's time for new X clients may have passed. */
+	now = thread_now();
+	if (!link->config.forward_x11_trusted && link->config.forward_x11_timeout != 0 &&
+	    now - link->x11_since_ms > (uint64_t)link->config.forward_x11_timeout * 1000U) {
+		if (!link->x11_refused)
+			session_say(link->session, "\r\nRejected X11 connection after ForwardX11Timeout expired\r\n");
+		link->x11_refused = 1;
+		(void)ssh_engine_x11_answer(link->engine, event->channel, 0);
+		return;
+	}
+
+	/* The X server takes it, or cannot. */
+	error = x11_host_accept(&link->x11_host, event->channel, now);
+	if (error != 0) {
+		if (!link->x11_refused)
+			session_say(link->session, "\r\nX11: an X client was refused (the X server could not take it).\r\n");
+		link->x11_refused = 1;
+		(void)ssh_engine_x11_answer(link->engine, event->channel, 0);
+		return;
+	}
+	(void)ssh_engine_x11_answer(link->engine, event->channel, 1);
 }

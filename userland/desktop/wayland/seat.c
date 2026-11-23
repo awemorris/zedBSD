@@ -607,10 +607,10 @@ kwl_seat_motion_deliver(
 	if (target == NULL)
 		return;
 
-	/* Motion carries a timestamp and the surface-local position in 24.8 fixed point. */
+	/* Motion carries a timestamp and the surface-local position in 24.8 fixed point, with the pointer's part between units. */
 	words[0] = time;
-	words[1] = (uint32_t)((server->pointer_x - target->x) * 256);
-	words[2] = (uint32_t)((server->pointer_y - target->y) * 256);
+	words[1] = (uint32_t)((server->pointer_x - target->x) * 256 + server->pointer_fraction_x);
+	words[2] = (uint32_t)((server->pointer_y - target->y) * 256 + server->pointer_fraction_y);
 	for (object = target->client->objects; object != NULL; object = object->next) {
 		/* Only live pointer objects receive motion. */
 		if (object->kind != KWL_POINTER || object->dead)
@@ -1467,12 +1467,12 @@ pointer_enter(
 	struct kwl_server *server;
 	uint32_t words[4];
 
-	/* Enter carries the serial, the surface and the surface-local position (the window's place taken off). */
+	/* Enter carries the serial, the surface and the surface-local position (the window's place taken off, the pointer's part between units added). */
 	server = pointer->client->server;
 	words[0] = serial;
 	words[1] = surface->id;
-	words[2] = (uint32_t)((server->pointer_x - surface->x) * 256);
-	words[3] = (uint32_t)((server->pointer_y - surface->y) * 256);
+	words[2] = (uint32_t)((server->pointer_x - surface->x) * 256 + server->pointer_fraction_x);
+	words[3] = (uint32_t)((server->pointer_y - surface->y) * 256 + server->pointer_fraction_y);
 	deliver(pointer->client, pointer->id, POINTER_ENTER, words, sizeof(words));
 
 	/* Version 5 pointers see enter as a group of its own. */

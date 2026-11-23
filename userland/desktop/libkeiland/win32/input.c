@@ -38,6 +38,8 @@
 /* The evdev codes of the keys that type no character and are named in a shortcut. */
 #define EVDEV_KEY_ESC		1U
 #define EVDEV_KEY_BACKSPACE	14U
+#define EVDEV_KEY_1		2U
+#define EVDEV_KEY_0		11U
 #define EVDEV_KEY_TAB		15U
 #define EVDEV_KEY_ENTER		28U
 #define EVDEV_KEY_F1		59U
@@ -97,6 +99,7 @@ static int small_letter(uint32_t code_point);
 static void shortcut_key_name(uint32_t keysym, char *name, size_t size);
 static size_t utf8_encode(uint32_t code_point, char *bytes);
 static void text_append(char *text, size_t size, const char *more);
+static int tab_modifiers(unsigned held);
 
 /*
  * Turns a wheel delta into Keiland's distance in pixels.
@@ -589,6 +592,93 @@ keiui_win32_menu_text(
 }
 
 /*
+ * Tells what a key press asks of a window's tabs.
+ */
+unsigned
+keiui_win32_tab_request(
+	uint32_t code,
+	unsigned held)
+{
+	int modifiers;
+
+	/* Only with the tabs' modifiers. */
+	modifiers = tab_modifiers(held);
+	if (!modifiers)
+		return KEIUI_WIN32_TAB_KEY_NONE;
+
+	/* The digits 1 to 9 of the top row are the places 1 to 9 (their codes follow each other). */
+	if (code >= EVDEV_KEY_1 && code < EVDEV_KEY_0)
+		return KEIUI_WIN32_TAB_KEY_FIRST + (code - EVDEV_KEY_1);
+
+	/* Which other key. */
+	switch (code) {
+	case EVDEV_KEY_0:
+		/* 0 comes after 9 on the row: the tenth place. */
+		return KEIUI_WIN32_TAB_KEY_TENTH;
+	case EVDEV_KEY_PAGEUP:
+		/* Page Up: the tab before the active one. */
+		return KEIUI_WIN32_TAB_KEY_PREVIOUS;
+	case EVDEV_KEY_PAGEDOWN:
+		/* Page Down: the tab after it. */
+		return KEIUI_WIN32_TAB_KEY_NEXT;
+	default:
+		break;
+	}
+
+	/* Any other key is no tab key. */
+	return KEIUI_WIN32_TAB_KEY_NONE;
+}
+
+/*
+ * Chooses the tab a request goes to.
+ */
+unsigned
+keiui_win32_tab_target(
+	unsigned request,
+	unsigned count,
+	unsigned active)
+{
+	unsigned place;
+
+	/* No tab to go to. */
+	if (count == 0U)
+		return count;
+
+	/* A place's tab, when there are that many. */
+	if (request >= KEIUI_WIN32_TAB_KEY_FIRST && request <= KEIUI_WIN32_TAB_KEY_TENTH) {
+		/* Fewer tabs than the place: none to go to. */
+		place = request - KEIUI_WIN32_TAB_KEY_FIRST;
+		if (place >= count)
+			return count;
+
+		/* Succeeded: the tab of the place. */
+		return place;
+	}
+
+	/* With none active, the first going forward and the last going back. */
+	if (active >= count) {
+		if (request == KEIUI_WIN32_TAB_KEY_NEXT)
+			return 0U;
+		if (request == KEIUI_WIN32_TAB_KEY_PREVIOUS)
+			return count - 1U;
+
+		/* An unknown request goes nowhere. */
+		return count;
+	}
+
+	/* The one after the active tab, the first after the last. */
+	if (request == KEIUI_WIN32_TAB_KEY_NEXT)
+		return (active + 1U) % count;
+
+	/* The one before the active tab, the last before the first. */
+	if (request == KEIUI_WIN32_TAB_KEY_PREVIOUS)
+		return (active + count - 1U) % count;
+
+	/* An unknown request goes nowhere. */
+	return count;
+}
+
+/*
  * Reads a 16-bit word as a signed number.
  */
 static int32_t
@@ -789,4 +879,37 @@ text_append(
 	/* The bytes that fit, and the end. */
 	memcpy(text + length, more, adding);
 	text[length + adding] = '\0';
+}
+
+/*
+ * Tells whether the modifiers held are the tabs' keys': Control and Alt,
+ * without Shift, the Windows key or the right Alt.
+ */
+static int
+tab_modifiers(
+	unsigned held)
+{
+	/* Both Control and Alt. */
+	if ((held & KEIUI_WIN32_HELD_CONTROL) == 0U)
+		return 0;
+	if ((held & KEIUI_WIN32_HELD_ALT) == 0U)
+		return 0;
+
+	/* Shift or the Windows key makes another chord. */
+	if ((held & KEIUI_WIN32_HELD_SHIFT) != 0U)
+		return 0;
+	if ((held & KEIUI_WIN32_HELD_WIN) != 0U)
+		return 0;
+
+	/*
+	 * The right Alt is AltGr on a layout that has one, and Windows then
+	 * reports Control and Alt beside it (a left Control it synthesizes), so
+	 * the characters AltGr types stay text: the tabs take Control with the
+	 * left Alt alone.  Taking this decision away gives the tabs AltGr too.
+	 */
+	if ((held & KEIUI_WIN32_HELD_RIGHT_ALT) != 0U)
+		return 0;
+
+	/* Succeeded: the tabs' modifiers. */
+	return 1;
 }

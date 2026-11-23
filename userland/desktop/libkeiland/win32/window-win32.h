@@ -217,10 +217,12 @@ struct kl_app {
  * whether the title bar is drawn over the system's backdrop (glass:
  * its ground left transparent, present.c); the menu (kl_window_set_menu:
  * its items, NULL when it has none) and its button's place; the tabs
- * (kl_window_set_tabs: NULL when there are none), their options and the
- * new tab's button's place; the key whose press went to the menu's
- * shortcut or was a dead key, so that its release is not given either (0
- * for none); and the frame's style and placement before full screen.
+ * (kl_window_set_tabs: NULL when there are none), their options, the
+ * new tab's button's place and whether the program ever declared tabs (the
+ * tabs' keys are then the window's even while it shows none); the key
+ * whose press went to the menu's shortcut or to the tabs or was a dead
+ * key, so that its release is not given either (0 for none); and the
+ * frame's style and placement before full screen.
  */
 struct kl_window {
 	struct kl_app *app;
@@ -283,6 +285,7 @@ struct kl_window {
 	unsigned tab_count;
 	unsigned tab_options;
 	struct keiui_win32_rect tab_new_place;
+	int tabs_declared;
 	uint32_t eaten_key;
 	LONG_PTR restore_style;
 	WINDOWPLACEMENT restore_place;
@@ -323,6 +326,7 @@ void keiui_win32_field_compose(struct kl_window *window, const char *text, size_
 void keiui_win32_field_end(struct kl_window *window, unsigned how);
 void keiui_win32_titlebar_release_all(struct kl_window *window);
 int keiui_win32_menu_shortcut(struct kl_window *window, uint32_t keysym, unsigned menu);
+int keiui_win32_tab_key(struct kl_window *window, uint32_t code, unsigned held);
 void keiui_win32_titlebar_free(struct kl_window *window);
 
 /* ime.c */

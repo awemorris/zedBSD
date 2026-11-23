@@ -49,7 +49,12 @@
  * panel's ground, and the new tab's button after them when asked for
  * (frame.c lays them out).  A press on a tab chooses it; a release on a
  * close button or on the new tab's button asks for that
- * (KL_WINDOW_TAB).  The room left beside them stays the caption.
+ * (KL_WINDOW_TAB).  The room left beside them stays the caption.  As the
+ * Keiland desktop's title bar takes its keys for the tabs, Control and the
+ * left Alt with a digit of the top row choose the tab of that place (0 the
+ * tenth), with Page Up and Page Down the one before and after (around the
+ * ends); the right Alt is left to the characters AltGr types
+ * (keiui_win32_tab_request).
  */
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
@@ -503,6 +508,7 @@ kl_window_set_tabs(
 	window->tabs = kept;
 	window->tab_count = (unsigned)count;
 	window->tab_options = options;
+	window->tabs_declared = 1;
 	window->control_hover = KEIUI_WIN32_NO_CONTROL;
 	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
 	titlebar_changed(window);
@@ -539,6 +545,51 @@ keiui_win32_menu_shortcut(
 	}
 
 	/* Succeeded: the key was the menu's. */
+	return 1;
+}
+
+/*
+ * Takes a key press that is the tabs' (keiui_win32_tab_request) for a
+ * window that declared tabs: its tab is chosen (KL_WINDOW_TAB_CHOSEN) when
+ * there is one and it is not the active tab already.  Returns 1 when the
+ * key was the tabs' (even with no tab to go to), 0 for any other.
+ */
+int
+keiui_win32_tab_key(
+	struct kl_window *window,
+	uint32_t code,
+	unsigned held)
+{
+	unsigned request;
+	unsigned active;
+	unsigned target;
+	unsigned index;
+
+	/* Only for a program that has tabs. */
+	if (!window->tabs_declared)
+		return 0;
+
+	/* Only a key of the tabs. */
+	request = keiui_win32_tab_request(code, held);
+	if (request == KEIUI_WIN32_TAB_KEY_NONE)
+		return 0;
+
+	/* The active tab (tab_count when none is marked). */
+	active = window->tab_count;
+	for (index = 0U; index < window->tab_count; index++) {
+		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U && active == window->tab_count)
+			active = index;
+	}
+
+	/* The tab it goes to; none, or the active one, leaves the tabs as they are. */
+	target = keiui_win32_tab_target(request, window->tab_count, active);
+	if (target >= window->tab_count || target == active)
+		return 1;
+
+	/* Chosen as its click would (the program's next tabs show it). */
+	titlebar_tab_input(window, KL_WINDOW_TAB_CHOSEN, window->tabs[target].id);
+
+	/* Succeeded: the key was the tabs'. */
 	return 1;
 }
 

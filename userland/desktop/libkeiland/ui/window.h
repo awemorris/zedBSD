@@ -69,6 +69,10 @@ struct kl_glass;
 struct zwp_tablet_manager_v2;
 struct zwp_tablet_seat_v2;
 struct zwp_tablet_tool_v2;
+struct wp_viewporter;
+struct wp_viewport;
+struct wp_fractional_scale_manager_v1;
+struct wp_fractional_scale_v1;
 struct kl_window;
 
 /*
@@ -653,6 +657,33 @@ struct kl_window {
 	struct kl_glass_panel glass_panels[KL_GLASS_PANELS_MAX];
 	size_t glass_count;
 	int glass_sent;
+
+	/*
+	 * The compositor's scale (window-scale.h, KL_VERSION 114): the
+	 * viewporter and the fractional scale's manager (NULL under a
+	 * compositor without them), and, for a window that follows the scale
+	 * (kl_window_follow_scale), its viewport and fractional scale objects.
+	 * scale120 is the scale the window is drawn at (120ths; 120 for a
+	 * window that does not follow it), and pixel_width and pixel_height
+	 * the size of its frames in pixels: width and height above times the
+	 * scale (the same for a window that does not follow it).
+	 * viewport_width and viewport_height are the logical size last sent as
+	 * the viewport's destination (0 for none yet): it is sent again when
+	 * the logical size changes, with the configure's acknowledgement, at
+	 * kl_window_present_resize or at kl_window_configure_ack, so that it
+	 * goes with the first frame of the new size.  A change of the scale
+	 * alone keeps the logical size and sends nothing.
+	 */
+	struct wp_viewporter *viewporter;
+	struct wp_fractional_scale_manager_v1 *fractional_manager;
+	struct wp_viewport *viewport;
+	struct wp_fractional_scale_v1 *fractional;
+	int scale_follow;
+	unsigned scale120;
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	uint32_t viewport_width;
+	uint32_t viewport_height;
 };
 
 /* An application's part of its windows (app.c): an event queued for a window (NULL when full), a window gone, and the menu service. */
@@ -684,6 +715,13 @@ void keiui_window_wake(struct kl_window *window);
 
 /* The window's clock in milliseconds (window.c). */
 uint64_t keiui_clock_ms(void);
+
+/* The compositor's scale (window.c): a window made to follow it, and a place in logical units in the window's pixels. */
+int keiui_window_follow_scale(struct kl_window *window);
+double keiui_window_pixels(const struct kl_window *window, double units);
+int32_t keiui_window_units_point(const struct kl_window *window, int32_t pixels);
+void keiui_window_units_rect(const struct kl_window *window, int32_t *x, int32_t *y, int32_t *width, int32_t *height);
+void keiui_window_units_panels(const struct kl_window *window, const struct kl_glass_panel *panels, size_t count, struct kl_glass_panel *units);
 
 /* The Vulkan presenter (present.c). */
 VkResult keiui_present_open(struct keiui_present *present, struct kl_window *window);

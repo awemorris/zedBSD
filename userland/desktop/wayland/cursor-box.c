@@ -19,7 +19,9 @@
 #include <string.h>
 #include <time.h>
 
-static void box_write(struct kwl_cursor_box *box, int32_t x, int32_t y, unsigned output, uint64_t event_us, struct kwl_cursor_motion *motion);
+static void box_write(struct kwl_cursor_box *box, int32_t x, int32_t y, int32_t fraction_x, int32_t fraction_y, unsigned output, uint64_t event_us, struct kwl_cursor_motion *motion);
+static int box_fine(const struct kwl_cursor_box *box);
+static int64_t box_floor_div(int64_t value, int64_t divisor);
 static void box_geometry(struct kwl_cursor_box *box, const struct kwl_cursor_geometry *geometry);
 static void box_geometry_read(const struct kwl_cursor_box *box, struct kwl_cursor_geometry *geometry);
 static int32_t geometry_scale(const struct kwl_cursor_axis *axis, uint32_t size, unsigned unit);
@@ -123,9 +125,76 @@ kwl_cursor_box_move(
 	pthread_mutex_lock(&box->lock);
 
 	output = kwl_plane_move(box->outputs, box->output_count, box->output, box->x, box->y, (int32_t)dx, (int32_t)dy, &x, &y);
-	box_write(box, x, y, output, event_us, motion);
+	box_write(box, x, y, box->fraction_x, box->fraction_y, output, event_us, motion);
 
 	pthread_mutex_unlock(&box->lock);
+}
+
+/*
+ * Moves the pointer by a relative motion in 256ths of a unit (a mouse's
+ * motion on an output at another scale than 100 %, kwl_cursor_box_fine):
+ * the place's part between units is kept, and the whole units it adds up
+ * to move the pointer over the outputs as kwl_cursor_box_move does.  An
+ * axis stopped at an edge no output shares loses its part.
+ */
+void
+kwl_cursor_box_move_fine(
+	struct kwl_cursor_box *box,
+	int64_t dx,
+	int64_t dy,
+	uint64_t event_us,
+	struct kwl_cursor_motion *motion)
+{
+	int32_t whole_x;
+	int32_t whole_y;
+	int32_t fraction_x;
+	int32_t fraction_y;
+	int32_t x;
+	int32_t y;
+	unsigned output;
+
+	/* The new place computed from the box's and written in one section. */
+	pthread_mutex_lock(&box->lock);
+
+	/* The motion with the place's part between units, as whole units and the part left. */
+	kwl_cursor_fine_split((int64_t)box->fraction_x + dx, &whole_x, &fraction_x);
+	kwl_cursor_fine_split((int64_t)box->fraction_y + dy, &whole_y, &fraction_y);
+
+	/* The whole units over the outputs. */
+	output = kwl_plane_move(box->outputs, box->output_count, box->output, box->x, box->y, whole_x, whole_y, &x, &y);
+
+	/* An axis held at an edge on the same output keeps no part beyond it. */
+	if (output == box->output && (int64_t)x != (int64_t)box->x + whole_x)
+		fraction_x = 0;
+	if (output == box->output && (int64_t)y != (int64_t)box->y + whole_y)
+		fraction_y = 0;
+	box_write(box, x, y, fraction_x, fraction_y, output, event_us, motion);
+
+	pthread_mutex_unlock(&box->lock);
+}
+
+/*
+ * Tells whether the pointer keeps its place between units (the anchor shown
+ * at another scale than 100 %): the input thread then gives a mouse's
+ * motion in 256ths of a unit (kwl_cursor_box_move_fine).
+ */
+unsigned
+kwl_cursor_box_fine(
+	struct kwl_cursor_box *box)
+{
+	int fine;
+
+	/* The scale as the main thread last gave it. */
+	pthread_mutex_lock(&box->lock);
+
+	fine = box_fine(box);
+
+	pthread_mutex_unlock(&box->lock);
+
+	/* Whether the place keeps its part between units. */
+	if (fine)
+		return 1U;
+	return 0U;
 }
 
 /*
@@ -156,6 +225,9 @@ kwl_cursor_box_place(
 	unsigned slot;
 	int32_t x;
 	int32_t y;
+	int32_t fraction_x;
+	int32_t fraction_y;
+	int fine;
 
 	/* The report's axes. */
 	across.value = value_x;
@@ -175,14 +247,27 @@ kwl_cursor_box_place(
 	if (slot >= KWL_PLANE_SLOTS || geometry.outputs[slot].width == 0U)
 		slot = KWL_PLANE_ANCHOR;
 
-	/* The report's place on it, a direct device's (its panel turned back by its angle). */
-	kwl_cursor_geometry_place(&geometry, slot, 1U, 1U, &across, &down, &x, &y);
+	/*
+	 * The report's place on it, a direct device's (its panel turned back by
+	 * its angle): in whole units at 100 %, in 256ths of a unit on an output
+	 * at another scale, where the part between units is kept.
+	 */
+	fraction_x = 0;
+	fraction_y = 0;
+	fine = box_fine(box);
+	if (fine) {
+		kwl_cursor_geometry_place(&geometry, slot, 1U, 256U, &across, &down, &x, &y);
+		kwl_cursor_fine_split(x, &x, &fraction_x);
+		kwl_cursor_fine_split(y, &y, &fraction_y);
+	} else {
+		kwl_cursor_geometry_place(&geometry, slot, 1U, 1U, &across, &down, &x, &y);
+	}
 
 	/* The report's relative motion added, kept on the output. */
 	rect = &geometry.outputs[slot];
 	x = rect->x + kwl_cursor_clamp((int64_t)(x - rect->x) + dx, rect->width);
 	y = rect->y + kwl_cursor_clamp((int64_t)(y - rect->y) + dy, rect->height);
-	box_write(box, x, y, slot, event_us, motion);
+	box_write(box, x, y, fraction_x, fraction_y, slot, event_us, motion);
 
 	pthread_mutex_unlock(&box->lock);
 }
@@ -220,7 +305,7 @@ kwl_cursor_box_warp(
 	output = box->output;
 	move(context, box->outputs, &x, &y, &output);
 	box->warp++;
-	box_write(box, x, y, output, 0U, motion);
+	box_write(box, x, y, 0, 0, output, 0U, motion);
 
 	pthread_mutex_unlock(&box->lock);
 }
@@ -356,12 +441,58 @@ kwl_cursor_geometry_place(
 	*y += rect->y * (int32_t)unit;
 }
 
-/* Writes a place into the box (its lock held), wakes the cursor thread and reports the write. */
+/*
+ * Gives the pixel a place of the plane (whole units and 256ths of a unit)
+ * is shown at, snapped as scale.h snaps a unit: floor(place * scale + 1/2).
+ * At 100 % (or a scale not known) it is the unit itself.
+ */
+int32_t
+kwl_cursor_pixel(
+	int32_t unit,
+	int32_t fraction,
+	unsigned scale120)
+{
+	int64_t fixed;
+	int64_t pixel;
+
+	/* At 100 % a unit is a pixel. */
+	if (scale120 == 0U || scale120 == KWL_SCALE_ONE)
+		return unit;
+
+	/* floor((place * scale / 120) + 1/2), the place in 256ths. */
+	fixed = (int64_t)unit * 256 + fraction;
+	pixel = box_floor_div(fixed * (int64_t)scale120 + 128 * (int64_t)KWL_SCALE_ONE, 256 * (int64_t)KWL_SCALE_ONE);
+
+	/* Succeeded: the pixel. */
+	return (int32_t)pixel;
+}
+
+/*
+ * Splits a place or a motion in 256ths of a unit into whole units (rounded
+ * down, also below 0) and the part left (0 to 255).
+ */
+void
+kwl_cursor_fine_split(
+	int64_t fine,
+	int32_t *whole,
+	int32_t *fraction)
+{
+	int64_t units;
+
+	/* The whole units, rounded toward minus infinity. */
+	units = box_floor_div(fine, 256);
+	*whole = (int32_t)units;
+	*fraction = (int32_t)(fine - units * 256);
+}
+
+/* Writes a place (and its part between units) into the box (its lock held), wakes the cursor thread and reports the write. */
 static void
 box_write(
 	struct kwl_cursor_box *box,
 	int32_t x,
 	int32_t y,
+	int32_t fraction_x,
+	int32_t fraction_y,
 	unsigned output,
 	uint64_t event_us,
 	struct kwl_cursor_motion *motion)
@@ -371,6 +502,8 @@ box_write(
 	/* What changed, before the place is replaced. */
 	motion->moved = 0U;
 	if (x != box->x || y != box->y || output != box->output)
+		motion->moved = 1U;
+	if (fraction_x != box->fraction_x || fraction_y != box->fraction_y)
 		motion->moved = 1U;
 	motion->crossed = 0U;
 	if (output != box->output)
@@ -383,6 +516,8 @@ box_write(
 	now = kwl_microseconds();
 	box->x = x;
 	box->y = y;
+	box->fraction_x = fraction_x;
+	box->fraction_y = fraction_y;
 	box->output = output;
 	if (event_us != 0U)
 		box->event_us = event_us;
@@ -393,6 +528,8 @@ box_write(
 	/* What the writer tells the main thread. */
 	motion->x = x;
 	motion->y = y;
+	motion->fraction_x = fraction_x;
+	motion->fraction_y = fraction_y;
 	motion->output = output;
 	motion->warp = box->warp;
 	motion->event_us = event_us;
@@ -414,6 +551,7 @@ box_geometry(
 	box->output_count = geometry->output_count;
 	memcpy(box->physical, geometry->physical, sizeof(box->physical));
 	box->absolute_slot = geometry->absolute_slot;
+	box->scale120 = geometry->scale120;
 }
 
 /* Copies the box's geometry out (its lock held). */
@@ -427,6 +565,7 @@ box_geometry_read(
 	geometry->output_count = box->output_count;
 	memcpy(geometry->physical, box->physical, sizeof(geometry->physical));
 	geometry->absolute_slot = box->absolute_slot;
+	geometry->scale120 = box->scale120;
 }
 
 /*
@@ -456,4 +595,34 @@ geometry_scale(
 
 	/* Succeeded: the place the value falls on. */
 	return (int32_t)((offset * ((int64_t)size - 1) * (int64_t)unit) / range);
+}
+
+/* Tells whether the box keeps the place's part between units: its scale is known and not 100 % (its lock held). */
+static int
+box_fine(
+	const struct kwl_cursor_box *box)
+{
+	/* At 100 %, or before the main thread gave a scale, whole units. */
+	if (box->scale120 == 0U || box->scale120 == KWL_SCALE_ONE)
+		return 0;
+
+	/* Another scale. */
+	return 1;
+}
+
+/* Divides rounding toward minus infinity (the divisor above 0). */
+static int64_t
+box_floor_div(
+	int64_t value,
+	int64_t divisor)
+{
+	int64_t quotient;
+
+	/* C rounds toward 0: one less for a negative value left with a remainder. */
+	quotient = value / divisor;
+	if (value % divisor != 0 && value < 0)
+		quotient--;
+
+	/* The quotient. */
+	return quotient;
 }

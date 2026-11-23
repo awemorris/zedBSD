@@ -88,6 +88,13 @@
 /* Where a font named without a directory is looked for. */
 #define MAIN_FONT_DIRECTORY	KEILAND_DATADIR "/fonts/"
 
+/* The program started for a new window when the terminal was not run by a path. */
+#define MAIN_PROGRAM		KEILAND_BINDIR "/terminal"
+
+/* What Help > About Terminal writes on the screen. */
+#define MAIN_ABOUT		"\r\n\033[1mTerminal\033[0m: a VT100 terminal for " ZEDBSD_OS_NAME ", drawn with Vulkan.\r\n" \
+				"Its menus are drawn by the System Menu (xdg_toplevel_menu_v1).\r\n"
+
 /* The terminal's own settings in the settings' tab. */
 enum main_item {
 	MAIN_ITEM_NONE,
@@ -97,13 +104,6 @@ enum main_item {
 	MAIN_ITEM_ROWS,
 	MAIN_ITEM_TERM
 };
-
-/* The program started for a new window when the terminal was not run by a path. */
-#define MAIN_PROGRAM		KEILAND_BINDIR "/terminal"
-
-/* What Help > About Terminal writes on the screen. */
-#define MAIN_ABOUT		"\r\n\033[1mTerminal\033[0m: a VT100 terminal for " ZEDBSD_OS_NAME ", drawn with Vulkan.\r\n" \
-				"Its menus are drawn by the System Menu (xdg_toplevel_menu_v1).\r\n"
 
 /*
  * What the command line asked for.
@@ -243,6 +243,9 @@ main(
 	run.token = options.token;
 	run.about = MAIN_ABOUT;
 	run.connector = &connector.connector;
+
+	/* Alt+F11 switches the width of the ambiguous characters, as mikuterm's does. */
+	run.ambiguous_wide_key = 1;
 
 	/* A kept font that cannot be opened gives way to the terminal's own (one given on the command line does not). */
 	if (options.font_kept)
@@ -587,6 +590,7 @@ main_kept_read(
 	struct terminal_process_connector *connector)
 {
 	struct kl_settings *settings;
+	const char *fallback_shown;
 	char term[TERMINAL_TERM_MAX];
 	int number;
 	int error;
@@ -599,24 +603,32 @@ main_kept_read(
 
 	/* The font file, unless --font chose one. */
 	error = kl_settings_get(settings, MAIN_KEY_FONT, main_kept.font, sizeof(main_kept.font), NULL);
-	if (error == 0 && main_kept.font[0] != '\0' && !options->font_given) {
+	if (error == 0 &&
+	    main_kept.font[0] != '\0' &&
+	    !options->font_given) {
 		options->font = main_kept.font;
 		options->font_kept = 1;
 	}
 
 	/* The fallback font file, unless --fallback-font chose one. */
 	error = kl_settings_get(settings, MAIN_KEY_FALLBACK, main_kept.fallback, sizeof(main_kept.fallback), NULL);
-	if (error == 0 && main_kept.fallback[0] != '\0' && !options->fallback_given)
+	if (error == 0 &&
+	    main_kept.fallback[0] != '\0' &&
+	    !options->fallback_given)
 		options->fallback = main_kept.fallback;
 
 	/* The columns, unless --columns chose them (the table's default, 90, when none are kept). */
 	number = kl_settings_get_int(settings, MAIN_KEY_COLUMNS, (int)MAIN_COLUMNS);
-	if (number >= 1 && number <= (int)TERMINAL_MAX_COLUMNS && !options->columns_given)
+	if (number >= 1 &&
+	    number <= (int)TERMINAL_MAX_COLUMNS &&
+	    !options->columns_given)
 		options->columns = (unsigned)number;
 
 	/* The rows, unless --rows chose them. */
 	number = kl_settings_get_int(settings, MAIN_KEY_ROWS, (int)MAIN_ROWS);
-	if (number >= 1 && number <= (int)TERMINAL_MAX_ROWS && !options->rows_given)
+	if (number >= 1 &&
+	    number <= (int)TERMINAL_MAX_ROWS &&
+	    !options->rows_given)
 		options->rows = (unsigned)number;
 
 	/* The shells' TERM, when one well formed is kept. */
@@ -630,9 +642,19 @@ main_kept_read(
 	/* Closes the settings, which are not needed any more. */
 	kl_settings_close(settings);
 
+	/* The fallback font as the log names it ("none" when there is none). */
+	fallback_shown = "none";
+	if (options->fallback != NULL)
+		fallback_shown = options->fallback;
+
 	/* What the run takes, in the log. */
-	printf("ZTERM SETTINGS run=%s font=%s fallback=%s columns=%u rows=%u term=%s\n", options->token, options->font, options->fallback != NULL ? options->fallback : "none",
-	       options->columns, options->rows, connector->term);
+	printf("ZTERM SETTINGS run=%s font=%s fallback=%s columns=%u rows=%u term=%s\n",
+	       options->token,
+	       options->font,
+	       fallback_shown,
+	       options->columns,
+	       options->rows,
+	       connector->term);
 	fflush(stdout);
 }
 
@@ -898,8 +920,10 @@ main_item_number(
 		return EINVAL;
 	}
 
-	/* Succeeded: the number, and its text as it is kept. */
+	/* The number's text as it is kept. */
 	(void)snprintf(text, size, "%u", *number);
+
+	/* Succeeded: the number, and its text. */
 	return 0;
 }
 

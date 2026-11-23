@@ -68,6 +68,9 @@ struct mikuterm_conf {
 	int copy_on_select;
 	unsigned connect_timeout;
 	unsigned wsl_port;
+	unsigned x11_scale;
+	int x11_render_cpu;
+	int x11_primary;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
@@ -84,6 +87,9 @@ struct mikuterm_connect_options {
 	const char *connect;
 	unsigned connect_timeout;
 	unsigned wsl_port;
+	unsigned x11_scale;
+	int x11_render_cpu;
+	int x11_primary;
 	const char *notice;
 };
 

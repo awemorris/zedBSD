@@ -755,10 +755,12 @@ page_frame(
 	page.frame_width = width;
 	page.frame_height = height;
 
-	/* The canvas over it, drawn at the scale. */
+	/* The canvas over it. */
 	error = kl_canvas_init(&page.canvas, page.pixels, (size_t)width, (int)width, (int)height);
 	if (error != 0)
 		return ENOMEM;
+
+	/* The canvas drawn at the scale, which the page's events are measured by too. */
 	kl_canvas_set_scale(&page.canvas, scale);
 	page.scale = scale;
 
@@ -992,12 +994,14 @@ page_appearance(
 	if (pressed)
 		page_action(window, TERMINAL_ACTION_ZOOM_OUT);
 
-	/* Larger beside Smaller, and the size in use after them. */
+	/* Larger beside Smaller. */
 	control.x += control.width + 6;
 	control.width = kl_button_width(&page.style, "Larger");
 	pressed = kl_button(page.ui, &page.style, PAGE_ID_LARGER, &control, "Larger", 0U);
 	if (pressed)
 		page_action(window, TERMINAL_ACTION_ZOOM_IN);
+
+	/* The size in use after the two buttons. */
 	(void)snprintf(value, sizeof(value), "%u pixels", state->pixels);
 	page_row_text(control.x + control.width + PAGE_AFTER_GAP, y, right, value);
 	y += PAGE_ROW;
@@ -1038,12 +1042,14 @@ page_appearance(
 	/* The switch's row under the themes. */
 	y += PAGE_ROW;
 
-	/* The ambiguous width: a switch, and what it does after it. */
+	/* The ambiguous width: a switch. */
 	value_x = page_label(y, card.x, card.width, "Ambiguous width", 1);
 	wide = state->ambiguous_wide;
 	pressed = kl_switch(page.ui, &page.style, PAGE_ID_AMBIGUOUS, value_x, y + (PAGE_ROW - theme->switch_height) / 2, &wide, 0U);
 	if (pressed)
 		page_action(window, TERMINAL_ACTION_AMBIGUOUS_WIDE);
+
+	/* What the switch does, after it, and the note under the row. */
 	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, y, right, "Wide (two cells, as in East Asian text)");
 	y += PAGE_ROW;
 	(void)page_note(y, card.x + 20, card.width - 40, "Ambiguous-width characters already on the screen keep their width.", theme->text_secondary);
@@ -1094,12 +1100,14 @@ page_behavior(
 	card.height = PAGE_CARD_TITLE + PAGE_ROW + page_note_height(width - 40, "Off, only Edit > Copy puts the selected text on the clipboard.") + PAGE_CARD_FOOT;
 	y = page_card(&card, "At once", NULL);
 
-	/* Copy-on-select: a switch, and what it does after it. */
+	/* Copy-on-select: a switch. */
 	value_x = page_label(y, card.x, card.width, "Copy on select", 1);
 	on = state->copy_on_select;
 	changed = kl_switch(page.ui, &page.style, PAGE_ID_COPY_SELECT, value_x, y + (PAGE_ROW - theme->switch_height) / 2, &on, 0U);
 	if (changed)
 		page_action(window, TERMINAL_ACTION_COPY_ON_SELECT);
+
+	/* What the switch does, after it, and the note under the row. */
 	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, y, card.x + card.width - PAGE_INSET, "The selected text goes to the clipboard");
 	(void)page_note(y + PAGE_ROW, card.x + 20, card.width - 40, "Off, only Edit > Copy puts the selected text on the clipboard.", theme->text_secondary);
 

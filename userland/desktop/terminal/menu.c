@@ -20,9 +20,10 @@
  * whose connections cannot tell when the remote side reads a password;
  * Shell > Settings (F12) only for a program that gave the settings' tab
  * what it needs;
- * Alt+F11 for Treat Ambiguous-Width Characters as Wide and Alt+Enter for
- * Fullscreen likewise, for a program whose function keys belong to the
- * remote side.
+ * Alt+F11 for Treat Ambiguous-Width Characters as Wide likewise for a
+ * program that asks for it (both terminal and mikuterm do), and Alt+Enter
+ * for Fullscreen for a program whose function keys belong to the remote
+ * side.
  */
 
 #include "terminal.h"

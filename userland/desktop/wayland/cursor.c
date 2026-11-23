@@ -80,9 +80,12 @@
 #define IMAGE_WAIT			9U
 #define IMAGE_NONE			KWL_CURSOR_IMAGES
 
-/* The size of every image, and its middle (the hotspot of most). */
+/* The size of every image, and its middle (the hotspot of most), in logical units. */
 #define CURSOR_SIZE			24
 #define CURSOR_MIDDLE			12
+
+/* The most pixels across an image is drawn with: its size at 300 %. */
+#define CURSOR_PIXELS_MOST		72
 
 /*
  * One image's figure, as a mask of the pixels drawn white (the black edge
@@ -90,6 +93,15 @@
  */
 struct cursor_mask {
 	unsigned char fill[CURSOR_SIZE][CURSOR_SIZE];
+};
+
+/*
+ * One image's figure in the pixels it is drawn with: the logical mask
+ * stretched to the output's scale, each pixel taking the unit its middle
+ * lies in, so the figure keeps its square steps.
+ */
+struct cursor_pixels {
+	unsigned char fill[CURSOR_PIXELS_MOST][CURSOR_PIXELS_MOST];
 };
 
 /* The hotspot of each image (x, y), by index: the middle, the hand's fingertip. */
@@ -117,6 +129,8 @@ static void mask_diagonal(struct cursor_mask *mask, unsigned falling);
 static void mask_ring(struct cursor_mask *mask);
 static void mask_hourglass(struct cursor_mask *mask);
 static int image_make(struct kwl_server *server, unsigned index);
+static void image_figure(const struct cursor_mask *mask, int size, struct cursor_pixels *pixels);
+static int image_edge(const struct cursor_pixels *pixels, int size, int x, int y, int reach);
 static uint32_t cursor_word(const unsigned char *bytes, size_t offset);
 
 /*
@@ -223,6 +237,47 @@ kwl_cursor_images_create(
 
 	/* Succeeded: every shape has its image. */
 	return 0;
+}
+
+/*
+ * Makes the arrow and the shapes' images again at the output's scale when
+ * it is not the one they were drawn at (the output shown at another
+ * scale).  The cursor plane's thread is parked and shows nothing first,
+ * so it never reads an image let go; its next update shows the new one.
+ * An image that cannot be made is made when first asked for, as at the
+ * start; without the arrow the cursor is not drawn.
+ */
+void
+kwl_cursor_images_rescale(
+	struct kwl_server *server)
+{
+	unsigned scale;
+	int error;
+
+	/* Nothing made yet, or made at this scale already. */
+	if (server->compose == NULL || server->arrow == NULL)
+		return;
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+	if (scale == server->cursor_scale120)
+		return;
+
+	/* The plane lets go of the images first. */
+	kwl_cursor_plane_forget(server);
+
+	/* The arrow and the shapes let go, then made at the new scale. */
+	kwl_arrow_destroy(server);
+	error = kwl_arrow_create(server);
+	if (error != 0)
+		printf("KWL CURSOR arrow errno=%d\n", error);
+	error = kwl_cursor_images_create(server);
+	if (error != 0)
+		printf("KWL CURSOR images errno=%d\n", error);
+	printf("KWL CURSOR scale=%u\n", server->cursor_scale120);
+
+	/* Every output is drawn with the new cursor. */
+	server->dirty = 1;
 }
 
 /*
@@ -736,62 +791,64 @@ mask_diagonal(
 	}
 }
 
-/* Makes one image: its figure white, a black edge around it, transparent elsewhere. */
+/*
+ * Makes one image at the scale of the cursor's images: its figure white, a
+ * black edge around it as wide as a unit's pixels, transparent elsewhere.
+ * At 100 % it is the logical mask as it is, with a one-pixel edge.
+ */
 static int
 image_make(
 	struct kwl_server *server,
 	unsigned index)
 {
 	struct cursor_mask mask;
+	struct cursor_pixels pixels;
 	struct kwl_import *image;
 	uint32_t *row;
+	int size;
+	int reach;
 	int x;
 	int y;
-	int dx;
-	int dy;
 	int edge;
 	VkResult result;
+
+	/* The image's pixels across, and how far its edge reaches. */
+	size = kwl_scale_snap(CURSOR_SIZE, server->cursor_scale120);
+	if (size > CURSOR_PIXELS_MOST)
+		size = CURSOR_PIXELS_MOST;
+	if (size < CURSOR_SIZE)
+		size = CURSOR_SIZE;
+	reach = kwl_scale_snap(1, server->cursor_scale120);
+	if (reach < 1)
+		reach = 1;
 
 	/* A linear, host-visible image the CPU writes once. */
 	image = calloc(1, sizeof(*image));
 	if (image == NULL)
 		return ENOMEM;
-	result = kwl_host_image_create(server->compose, CURSOR_SIZE, CURSOR_SIZE, server->compose->sampler, image);
+	result = kwl_host_image_create(server->compose, (uint32_t)size, (uint32_t)size, server->compose->sampler, image);
 	if (result != VK_SUCCESS) {
 		kwl_host_image_release(server->compose, image);
 		free(image);
 		return EIO;
 	}
 
-	/* The figure. */
+	/* The figure, in the image's pixels. */
 	mask_figure(index, &mask);
+	image_figure(&mask, size, &pixels);
 
 	/* Each pixel: white in the figure, black next to it, transparent elsewhere (B, G, R, A in memory). */
-	for (y = 0; y < CURSOR_SIZE; y++) {
+	for (y = 0; y < size; y++) {
 		row = (uint32_t *)((unsigned char *)image->map + (size_t)y * image->row_pitch);
-		for (x = 0; x < CURSOR_SIZE; x++) {
+		for (x = 0; x < size; x++) {
 			/* A pixel of the figure. */
-			if (mask.fill[y][x]) {
+			if (pixels.fill[y][x]) {
 				row[x] = 0xffffffffU;
 				continue;
 			}
 
-			/* A pixel next to the figure is its edge. */
-			edge = 0;
-			for (dy = -1; dy <= 1; dy++) {
-				/* The three neighbours of this row. */
-				for (dx = -1; dx <= 1; dx++) {
-					/* A neighbour inside the image and in the figure. */
-					if (y + dy >= 0 &&
-					    y + dy < CURSOR_SIZE &&
-					    x + dx >= 0 &&
-					    x + dx < CURSOR_SIZE &&
-					    mask.fill[y + dy][x + dx])
-						edge = 1;
-				}
-			}
-
 			/* The edge black, anything else clear. */
+			edge = image_edge(&pixels, size, x, y, reach);
 			row[x] = 0x00000000U;
 			if (edge)
 				row[x] = 0xff000000U;
@@ -801,6 +858,63 @@ image_make(
 	/* Succeeded: drawn with alpha. */
 	image->draw = KWL_DRAW_ALPHA;
 	server->cursor_images[index] = image;
+	return 0;
+}
+
+/* Stretches a logical mask to an image of size pixels across: each pixel takes the unit its middle lies in. */
+static void
+image_figure(
+	const struct cursor_mask *mask,
+	int size,
+	struct cursor_pixels *pixels)
+{
+	int x;
+	int y;
+	int unit_x;
+	int unit_y;
+
+	/* Nothing outside the image. */
+	memset(pixels, 0, sizeof(*pixels));
+
+	/* Each pixel's middle, (2 p + 1) / (2 size) of the way across, in the logical mask. */
+	for (y = 0; y < size; y++) {
+		unit_y = ((2 * y + 1) * CURSOR_SIZE) / (2 * size);
+		for (x = 0; x < size; x++) {
+			unit_x = ((2 * x + 1) * CURSOR_SIZE) / (2 * size);
+			pixels->fill[y][x] = mask->fill[unit_y][unit_x];
+		}
+	}
+}
+
+/* Tells whether a pixel outside the figure lies within reach pixels of it (either way, and diagonally): its edge. */
+static int
+image_edge(
+	const struct cursor_pixels *pixels,
+	int size,
+	int x,
+	int y,
+	int reach)
+{
+	int dx;
+	int dy;
+
+	/* The pixels around it, inside the image. */
+	for (dy = -reach; dy <= reach; dy++) {
+		/* A row outside the image. */
+		if (y + dy < 0 || y + dy >= size)
+			continue;
+
+		/* That row's pixels. */
+		for (dx = -reach; dx <= reach; dx++) {
+			/* A pixel of the figure inside the image. */
+			if (x + dx >= 0 &&
+			    x + dx < size &&
+			    pixels->fill[y + dy][x + dx])
+				return 1;
+		}
+	}
+
+	/* Nothing of the figure near it. */
 	return 0;
 }
 

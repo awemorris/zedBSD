@@ -124,7 +124,7 @@ keiui_present_open(
 	present->check = present_diagnostic("KL_PRESENT_CHECK");
 
 	/* The swapchain at the window's size (which decides whether frames are copied). */
-	error = present_swapchain(present, window->width, window->height);
+	error = present_swapchain(present, window->pixel_width, window->pixel_height);
 	if (error != VK_SUCCESS)
 		return error;
 

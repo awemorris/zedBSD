@@ -41,7 +41,7 @@ file itself. A key at its default has no line.
 | --- | --- | --- | --- | --- |
 | `terminal.font-size` | pixels at 100 %, 8 to 32 | 16 | at once | View > Zoom, View > Text Size, the settings tab |
 | `terminal.theme` | 0 dark, 1 light, 2 high contrast | 0 | at once | View > Theme, the settings tab |
-| `terminal.ambiguous-wide` | 0 or 1: East Asian Ambiguous characters take two cells | 0 | at once | View > Treat Ambiguous-Width Characters as Wide, the settings tab |
+| `terminal.ambiguous-wide` | 0 or 1: East Asian Ambiguous characters take two cells | 0 | at once | View > Treat Ambiguous-Width Characters as Wide (Alt+F11), the settings tab |
 | `terminal.copy-on-select` | 0 or 1: the text the pointer selects is also put on the clipboard (it is always the primary selection) | 0 | at once | the settings tab |
 | `terminal.font` | the font file's full path | none: `keiland-mono.ttf` | the next start | the settings tab |
 | `terminal.fallback-font` | the fallback font file's full path | none: `keiland-fallback.ttf` | the next start | the settings tab |
@@ -101,8 +101,10 @@ more).
 | Next, previous tab | Ctrl+Tab and Ctrl+Page Down, Ctrl+Shift+Tab and Ctrl+Page Up | the desktop's titlebar |
 | Settings | Shell > Settings..., F12 | section 3 |
 
-A shell that exits closes its tab. Shift+Page Up and Shift+Page Down scroll
-the tab's history.
+A window has at most ten tabs (Shell > New Tab does nothing past them). A
+shell that exits closes its tab. Shift+Page Up and Shift+Page Down scroll the
+tab's history. mikuterm has its own keys for the tabs on Windows
+([mikuterm](mikuterm.md), section 5).
 
 ## 5. Menus
 
@@ -116,7 +118,7 @@ the tab's history.
 | View > Zoom In, Zoom Out, Normal Size | Ctrl++, Ctrl+-, Ctrl+0 |
 | View > Text Size, Theme | none |
 | View > Fullscreen | F11 |
-| View > Treat Ambiguous-Width Characters as Wide | none |
+| View > Treat Ambiguous-Width Characters as Wide | Alt+F11 (kept in `terminal.ambiguous-wide` at once) |
 | Session > Send Interrupt, Send End of File, Clear Screen, Reset Terminal | none |
 | Help > About Terminal | none |
 

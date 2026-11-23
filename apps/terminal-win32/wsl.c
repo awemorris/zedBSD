@@ -39,9 +39,9 @@
 #define WSL_COMMAND_MAX		1024U
 
 /*
- * What wsl.exe wrote: the caller's room, how much is in it, and whether
- * more came than it holds (the rest is read and dropped, so wsl.exe never
- * waits on a full pipe).
+ * What wsl.exe wrote: the caller's room and how much is in it.  What comes
+ * after the room is full is read and dropped, so wsl.exe never waits on a
+ * full pipe.
  */
 struct wsl_output {
 	unsigned char *bytes;
@@ -83,6 +83,7 @@ mikuterm_wsl_run(
 	DWORD found;
 	DWORD waited;
 	DWORD exit_code;
+	BOOL code_read;
 	BOOL made;
 	uint64_t deadline;
 	uint64_t now;
@@ -166,7 +167,7 @@ mikuterm_wsl_run(
 	/* The last of what it wrote, and its exit code. */
 	wsl_drain(read_end, &collected);
 	exit_code = 0U;
-	made = GetExitCodeProcess(process.hProcess, &exit_code);
+	code_read = GetExitCodeProcess(process.hProcess, &exit_code);
 	CloseHandle(process.hThread);
 	CloseHandle(process.hProcess);
 	CloseHandle(read_end);
@@ -174,7 +175,9 @@ mikuterm_wsl_run(
 	/* Reports a wait that ended early. */
 	if (error != 0)
 		return error;
-	if (!made)
+
+	/* Reports an exit code that could not be read. */
+	if (!code_read)
 		return EIO;
 
 	/* Succeeded: what it wrote and how it ended. */

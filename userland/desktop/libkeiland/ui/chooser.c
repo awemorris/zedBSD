@@ -74,10 +74,18 @@ struct kl_file_chooser {
 	struct kl_glass_panel panels[CHOOSER_PANELS];
 	size_t panel_count;
 
-	/* The frame: its pixels and size, the canvas over them, the style, the frame asked for, and whether another is due. */
+	/*
+	 * The frame: its pixels and size, the scale it is drawn at (the
+	 * window's, which follows the compositor's) and its size in the
+	 * canvas's units, the canvas over them, the style, the frame asked
+	 * for, and whether another is due.
+	 */
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
+	int units_width;
+	int units_height;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_style style;
@@ -308,6 +316,7 @@ chooser_draw(
 {
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
 	int again;
 	int status;
 
@@ -315,19 +324,24 @@ chooser_draw(
 	if (chooser->window == NULL || !chooser->window->configured)
 		return;
 
-	/* The frame's size: the window's (a new canvas when it changed). */
+	/* The frame's size in pixels and its scale: the window's (a new canvas when either changed). */
 	(void)kl_window_present_resize(chooser->window, &width, &height);
-	if (width != chooser->width || height != chooser->height || !chooser->canvas_made) {
+	scale = kl_window_scale(chooser->window);
+	if (width != chooser->width ||
+	    height != chooser->height ||
+	    scale != chooser->scale ||
+	    !chooser->canvas_made) {
 		chooser->width = width;
 		chooser->height = height;
+		chooser->scale = scale;
 		status = chooser_canvas(chooser);
 		if (status != 0)
 			return;
 	}
 
-	/* The frame and its input. */
+	/* The frame and its input, laid out in the canvas's units. */
 	chooser_media_poll(chooser);
-	again = keiui_chooser_frame(&chooser->model, chooser->ui, &chooser->style, (int)chooser->width, (int)chooser->height, kl_clock_us());
+	again = keiui_chooser_frame(&chooser->model, chooser->ui, &chooser->style, chooser->units_width, chooser->units_height, kl_clock_us());
 	if (chooser->model.media_loading)
 		again = 1;
 	chooser->dirty = again;
@@ -361,6 +375,8 @@ static int
 chooser_canvas(
 	struct kl_file_chooser *chooser)
 {
+	struct kl_rect whole;
+	struct kl_rect units;
 	uint32_t *pixels;
 	size_t count;
 	int status;
@@ -382,6 +398,17 @@ chooser_canvas(
 		return -1;
 	chooser->canvas_made = 1;
 	chooser->style.canvas = &chooser->canvas;
+
+	/* Drawn at the window's scale, the input taken at it, and the frame's size in the canvas's units. */
+	kl_canvas_set_scale(&chooser->canvas, chooser->scale);
+	kl_ui_set_scale(chooser->ui, chooser->scale);
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = (int)chooser->width;
+	whole.height = (int)chooser->height;
+	kl_canvas_logical(&chooser->canvas, &whole, &units);
+	chooser->units_width = units.width;
+	chooser->units_height = units.height;
 
 	/* Succeeded. */
 	return 0;
@@ -547,12 +574,16 @@ chooser_glass_panels(
 	if (chooser->glass == NULL)
 		return;
 
-	/* The window's panel; a sheet's reaches a radius above its top, so that its upper corners are square under the title bar. */
+	/*
+	 * The window's panel, in the canvas's units (the compositor's logical
+	 * ones); a sheet's reaches a radius above its top, so that its upper
+	 * corners are square under the title bar.
+	 */
 	memset(panels, 0, sizeof(panels));
 	panels[0].x = 0;
 	panels[0].y = 0;
-	panels[0].width = (int32_t)chooser->width;
-	panels[0].height = (int32_t)chooser->height;
+	panels[0].width = (int32_t)chooser->units_width;
+	panels[0].height = (int32_t)chooser->units_height;
 	panels[0].radius = CHOOSER_GLASS_RADIUS;
 	panels[0].kind = KL_GLASS_CARD;
 	if (chooser->sheet != NULL) {
@@ -561,7 +592,7 @@ chooser_glass_panels(
 	}
 
 	/* The two cards on it, where the view draws them. */
-	count = 1U + keiui_chooser_panels((int)chooser->width, (int)chooser->height, cards, 2U);
+	count = 1U + keiui_chooser_panels(chooser->units_width, chooser->units_height, cards, 2U);
 	for (index = 1U; index < count; index++) {
 		panels[index].x = cards[index - 1U].x;
 		panels[index].y = cards[index - 1U].y;

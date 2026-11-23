@@ -249,13 +249,18 @@ mikuterm_path_absolute(
 	if (path[0] == '\\' && path[1] == '\\')
 		return 1;
 
-	/* With slashes: the server's name runs to the second separator, which must be there. */
+	/* Anything else that does not start with two slashes is not a Windows path. */
 	if (path[0] != '/' || path[1] != '/')
 		return 0;
+
+	/* With slashes: the server's name runs to the second separator, which must be there. */
 	for (index = 2U; path[index] != '\0'; index++) {
-		/* The separator after the name. */
-		if (path[index] == '/' || path[index] == '\\')
-			return index > 2U;
+		/* The separator after the name; one right after the slashes leaves no name. */
+		if (path[index] == '/' || path[index] == '\\') {
+			if (index == 2U)
+				return 0;
+			return 1;
+		}
 	}
 
 	/* A name with nothing after it is not a server's path. */

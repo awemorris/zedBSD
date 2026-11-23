@@ -13,7 +13,7 @@
  *
  * config\mikuterm.conf is the user's: Font, FontFallback, FontSize,
  * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect,
- * ConnectTimeout and WslPort.  A line mikuterm cannot use is skipped, the default
+ * ConnectTimeout, WslPort, X11Scale, X11Render and X11PrimaryToClipboard.  A line mikuterm cannot use is skipped, the default
  * kept, and named in the problems the first tab shows ("line N: why").
  * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme,
  * AmbiguousWide and CopyOnSelect as the View menu and the settings' tab
@@ -65,7 +65,10 @@ enum conf_keyword {
 	CONF_COPY = 9,
 	CONF_TIMEOUT = 10,
 	CONF_WSL = 11,
-	CONF_KEYWORDS = 12
+	CONF_X11_SCALE = 12,
+	CONF_X11_RENDER = 13,
+	CONF_X11_PRIMARY = 14,
+	CONF_KEYWORDS = 15
 };
 
 /*
@@ -90,7 +93,10 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "Connect", 0 },
 	{ "CopyOnSelect", 1 },
 	{ "ConnectTimeout", 0 },
-	{ "WslPort", 0 }
+	{ "WslPort", 0 },
+	{ "X11Scale", 0 },
+	{ "X11Render", 0 },
+	{ "X11PrimaryToClipboard", 0 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -132,6 +138,11 @@ mikuterm_conf_defaults(
 	conf->copy_on_select = 1;
 	conf->connect_timeout = CONF_CONNECT_TIMEOUT;
 	conf->wsl_port = CONF_WSL_PORT;
+
+	/* The X server: the monitor's scale, Vulkan where it is, PRIMARY kept in X. */
+	conf->x11_scale = 0;
+	conf->x11_render_cpu = 0;
+	conf->x11_primary = 0;
 }
 
 /*
@@ -281,6 +292,19 @@ mikuterm_conf_text(
 		break;
 	case CONF_WSL:
 		written = snprintf(value, size, "%u", conf->wsl_port);
+		break;
+	case CONF_X11_SCALE:
+		if (conf->x11_scale == 0) {
+			written = snprintf(value, size, "auto");
+		} else {
+			written = snprintf(value, size, "%u", conf->x11_scale);
+		}
+		break;
+	case CONF_X11_RENDER:
+		written = snprintf(value, size, "%s", conf->x11_render_cpu ? "cpu" : "auto");
+		break;
+	case CONF_X11_PRIMARY:
+		written = snprintf(value, size, "%s", conf->x11_primary ? "yes" : "no");
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -707,6 +731,37 @@ conf_value(
 		*why = "WslPort is a port from 1 to 65535";
 		if (status == 0)
 			conf->wsl_port = number;
+		break;
+	case CONF_X11_SCALE:
+		/* auto, or a percent from 100 to 400 in steps of 25. */
+		*why = "X11Scale is auto or a percent from 100 to 400 in steps of 25";
+		status = _stricmp(value, "auto");
+		if (status == 0) {
+			conf->x11_scale = 0;
+			break;
+		}
+		status = conf_number(value, 100U, 400U, &number);
+		if (status == 0 && number % 25U != 0)
+			status = EINVAL;
+		if (status == 0)
+			conf->x11_scale = number;
+		break;
+	case CONF_X11_RENDER:
+		*why = "X11Render is auto or cpu";
+		status = 0;
+		if (_stricmp(value, "auto") == 0) {
+			conf->x11_render_cpu = 0;
+		} else if (_stricmp(value, "cpu") == 0) {
+			conf->x11_render_cpu = 1;
+		} else {
+			status = EINVAL;
+		}
+		break;
+	case CONF_X11_PRIMARY:
+		status = conf_yes(value, &yes);
+		*why = "X11PrimaryToClipboard is yes or no";
+		if (status == 0)
+			conf->x11_primary = yes;
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

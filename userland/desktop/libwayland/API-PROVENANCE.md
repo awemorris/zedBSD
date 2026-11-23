@@ -16,8 +16,9 @@ against the following pinned primary interface descriptions on 2026-09-13:
 | text-input-unstable-v3.xml (`unstable/text-input/`, the same Debian package, 2026-09-29; interface version 1) | wayland-protocols 1.44 | `49048087a67011a8840bca889cd2b0ba374382be1ed54ec98adf7837fdca1982` |
 | xdg-activation-v1.xml (`staging/xdg-activation/`, the Debian package wayland-protocols 1.44-1 on the build host, 2026-10-05; interface version 1; the client side is libwayland's private `xdg-activation-v1-client-protocol.h`, reached through libkeiland's kl_activation_* and kl_instance_*, and the compositor's activation.c) | wayland-protocols 1.44 | `d8418be2d5738d50aff788bef1c7574f33f26659aa045447ff2ef9b78c58fe01` |
 | content-type-v1.xml (`staging/content-type/`, the Debian package wayland-protocols 1.44-1 on the build host, 2026-10-06; interface version 1; the client side is libwayland's private `content-type-v1-client-protocol.h`, reached through libkeiland's kl_window_set_content_type, and the compositor's content-type.c; ws122-p005b) | wayland-protocols 1.44 | `203d17a26baa2ab4a8c2c9cb737c953fa3263c73a0a8aa6e552a41b3eac2196d` |
-| fractional-scale-v1.xml (`staging/fractional-scale/`, the Debian package wayland-protocols 1.44-1 on the build host, 2026-11-23; interface version 1; the client side is libwayland's private `fractional-scale-v1-client-protocol.h`, reached through libkeiland; the same bytes are in the wayland-protocols 1.49 release archive the GTK port builds with) | wayland-protocols 1.44 | `5941de5d28f427ecdadddc8623a6f6af0a30b0ab4726847236ba7a7652b81316` |
-| viewporter.xml (`stable/viewporter/`, the same Debian package, 2026-11-23; interface version 1; the client side is libwayland's private `viewporter-client-protocol.h`, reached through libkeiland; the same bytes are in the wayland-protocols 1.49 release archive) | wayland-protocols 1.44 | `dcb12279a03746301fe490aaed4b38a403485a925abfce2ccfceb644e104fe71` |
+| fractional-scale-v1.xml (`staging/fractional-scale/`, the Debian package wayland-protocols 1.44-1 on the build host, 2026-11-23; interface version 1; the client side is libwayland's private `fractional-scale-v1-client-protocol.h`, reached through libkeiland, and the compositor's `surface-outputs.c`; the same bytes are in the wayland-protocols 1.49 release archive the GTK port builds with) | wayland-protocols 1.44 | `5941de5d28f427ecdadddc8623a6f6af0a30b0ab4726847236ba7a7652b81316` |
+| viewporter.xml (`stable/viewporter/`, the same Debian package, 2026-11-23; interface version 1; the client side is libwayland's private `viewporter-client-protocol.h`, reached through libkeiland, and the compositor's `viewport.c`; the same bytes are in the wayland-protocols 1.49 release archive) | wayland-protocols 1.44 | `dcb12279a03746301fe490aaed4b38a403485a925abfce2ccfceb644e104fe71` |
+| xdg-output-unstable-v1.xml (`unstable/xdg-output/`, the same Debian package, 2026-11-23; interface version 3; the compositor's `protocol.c` alone, no client header: GTK generates its own code from the same XML) | wayland-protocols 1.44 | `363d547c3eefe8959160cac903ff90b311d4b183005557d73640d9df2cfd7f79` |
 | [input-method-unstable-v2.xml](https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/a047c2a33ff7724a476892cc4fe5dcb803607ef5/protocol/input-method-unstable-v2.xml) (MIT) | wlroots 0.19.2 (`a047c2a33ff7724a476892cc4fe5dcb803607ef5`) | `99414dbad9458e71aa1fa01bc45f94ca6685787bfcb4d98948f72c1b45b60703` |
 | [virtual-keyboard-unstable-v1.xml](https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/a047c2a33ff7724a476892cc4fe5dcb803607ef5/protocol/virtual-keyboard-unstable-v1.xml) (MIT) | wlroots 0.19.2 (`a047c2a33ff7724a476892cc4fe5dcb803607ef5`) | `7ad7870003ecd592cae47dc19d277a609b7f18fd7b7be012623cf3225a7294f5` |
 
@@ -122,6 +123,22 @@ takes the factory's bound version. preferred_scale reaches its listener through
 the generic dispatch. Both headers are private (`userland/desktop/libwayland/`),
 not installed; a toolkit built from upstream sources (GTK) generates its own
 code from the same XML and does not use them.
+
+The compositor's side of the client's scale (`userland/desktop/wayland/`) was
+checked against the same pinned descriptions and the pinned Wayland 1.23.1
+description. wl_surface v4 request set_buffer_scale (8, `i`; error
+invalid_scale 0 for a scale below one) is double-buffered and divides the
+buffer's size into the surface's; damage (2, `iiii`) is in the surface's units
+and damage_buffer (9, `iiii`, since 4) in the buffer's pixels. wl_output v4
+mode (1, `uiii`) gives the pixels the plane is shown on and scale (3, `i`)
+the scale rounded up to a whole number. wp_fractional_scale_manager_v1 v1 is
+global 31 and wp_fractional_scale_v1 sends preferred_scale (0, `u`) when its
+object is made, before the first configure and when the scale changes; a
+second object for a surface is fractional_scale_exists (0). zxdg_output_manager_v1
+v3 is global 32: requests destroy (0) and get_xdg_output (1, `no`);
+zxdg_output_v1 request destroy (0) and events logical_position (0, `ii`),
+logical_size (1, `ii`), done (2, deprecated since 3: version 3 is ended by
+wl_output's done), name (3, `s`, since 2) and description (4, `s`, since 2).
 
 ## Protocol description license notices
 
@@ -320,6 +337,31 @@ viewporter:
 
 ```
 Copyright © 2013-2016 Collabora, Ltd.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+xdg-output-unstable-v1:
+
+```
+Copyright © 2017 Red Hat Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
