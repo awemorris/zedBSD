@@ -29,6 +29,9 @@ final class InputView extends View {
 	/** The key bar shown over the keyboard, whose Ctrl and Alt hold for the next character typed. */
 	private KeyBar keyBar;
 
+	/** The connection the input method has now, or null. */
+	private KeilandInputConnection connection;
+
 	/** Whether the keyboard was asked for before the window could show it (it has no focus yet). */
 	private boolean showPending;
 
@@ -54,7 +57,15 @@ final class InputView extends View {
 				| android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
 		}
 		info.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
-		return new KeilandInputConnection(this);
+		connection = new KeilandInputConnection(this);
+		return connection;
+	}
+
+	/** Tells the input method's connection that the program's text moved on without it (a key of the key bar, Enter). */
+	void forgetContext() {
+		if (connection != null) {
+			connection.forgetContext();
+		}
 	}
 
 	/** Takes the key bar whose held modifiers the typed characters get. */
