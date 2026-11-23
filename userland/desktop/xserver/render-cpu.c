@@ -247,6 +247,96 @@ x11_render_copy(
 }
 
 /*
+ * Copies one plane of a source image onto the target inside a clip (on
+ * the target's coordinates) as a bitmap: the target's pixel (x + i,
+ * y + j) takes the paint's foreground where the source's pixel
+ * (source_x + i, source_y + j) has the plane set and its background where
+ * it is clear, joined by the paint's function and plane mask.  The caller
+ * keeps the clip to where the source can be read.  The source may be the
+ * target itself, overlapping.  Returns 0, or ENOMEM.
+ */
+int
+x11_render_copy_plane(
+	struct x11_image *target,
+	const struct x11_region *clip,
+	int x,
+	int y,
+	const struct x11_image *source,
+	int source_x,
+	int source_y,
+	uint32_t plane,
+	const struct x11_paint *paint)
+{
+	struct x11_box readable;
+	struct x11_box limit;
+	struct x11_box part;
+	uint32_t *copy;
+	uint32_t mask;
+	uint32_t pixel;
+	size_t clip_index;
+	size_t width;
+	size_t height;
+	int dx;
+	int dy;
+	int inside;
+	int row;
+	int column;
+	int copied;
+
+	/* An image with a copy on the GPU, as the target or the source, is copied by the GPU's layer. */
+	if (target->gpu != NULL || source->gpu != NULL) {
+		copied = x11_render_vulkan_copy_plane(target, clip, x, y, source, source_x, source_y, plane, paint);
+		if (copied != 0)
+			return copied;
+
+		/* Succeeded: copied. */
+		return 0;
+	}
+
+	/* From the target to the source, and the part of the target whose source is in the source image. */
+	dx = source_x - x;
+	dy = source_y - y;
+	readable.x0 = -dx;
+	readable.y0 = -dy;
+	readable.x1 = source->width - dx;
+	readable.y1 = source->height - dy;
+	mask = paint->plane_mask & render_depth_mask(target->depth);
+
+	/* Each box of the clip inside both images. */
+	for (clip_index = 0U; clip_index < clip->count; clip_index++) {
+		inside = x11_box_intersect(&clip->boxes[clip_index], &readable, &limit);
+		if (!inside)
+			continue;
+		inside = render_clip_box(target, &limit, &limit, &part);
+		if (!inside)
+			continue;
+
+		/* The source's pixels of the box, taken first: the target may be the source. */
+		width = (size_t)(part.x1 - part.x0);
+		height = (size_t)(part.y1 - part.y0);
+		copy = malloc(width * height * sizeof(*copy));
+		if (copy == NULL)
+			return ENOMEM;
+		for (row = 0; row < (int)height; row++)
+			memcpy(copy + (size_t)row * width, source->pixels + (size_t)(part.y0 + dy + row) * source->stride + (size_t)(part.x0 + dx), width * sizeof(*copy));
+
+		/* Each pixel the foreground or the background by its plane, joined with the target's. */
+		for (row = part.y0; row < part.y1; row++) {
+			for (column = part.x0; column < part.x1; column++) {
+				pixel = paint->background;
+				if ((copy[(size_t)(row - part.y0) * width + (size_t)(column - part.x0)] & plane) != 0U)
+					pixel = paint->foreground;
+				render_store(target, column, row, pixel, paint->function, mask);
+			}
+		}
+		free(copy);
+	}
+
+	/* Succeeded: copied. */
+	return 0;
+}
+
+/*
  * Puts pixels (width by height, rows stride pixels apart, already of the
  * target's depth) onto the target at (x, y), joined by a function and a
  * plane mask, inside a clip.

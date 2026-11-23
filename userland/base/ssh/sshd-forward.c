@@ -10,9 +10,7 @@
  * the user: the remote forwardings it listens for, the channels of
  * forwarded connections both ways, and the policy of sshd_config(5).
  *
- * The rules follow OpenSSH's sshd (serverloop.c server_input_global_request
- * and server_request_direct_tcpip, channels.c channel_fwd_bind_addr,
- * remote_open_match and open_match in openssh-portable): the address a
+ * The rules follow OpenSSH's sshd: the address a
  * remote forwarding listens on comes from GatewayPorts and the address
  * the client asked for; PermitListen matches the asked address as a
  * pattern without regard to case and the port exactly or "*"; PermitOpen
@@ -263,6 +261,9 @@ sshd_forward_is_direct(
 
 /*
  * Takes a direct-tcpip open.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 serverloop.c
+ * (server_request_direct_tcpip).
  */
 int
 sshd_forward_open(
@@ -598,6 +599,8 @@ sshd_forward_poll(
 				*timeout_ms = (int)wait;
 			continue;
 		}
+
+		/* The resting time is over, so the forwarding accepts again. */
 		remote->paused_until = 0;
 
 		/* Takes a slot for each of its sockets. */
@@ -746,6 +749,9 @@ sshd_forward_now_ms(void)
  * Takes a tcpip-forward request: string address, uint32 port.  Listens
  * when the policy allows and answers.  Returns 0, EINVAL (malformed) or
  * the error of queueing the answer.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 serverloop.c
+ * (server_input_global_request).
  */
 static int
 forward_take_request(
@@ -779,6 +785,8 @@ forward_take_request(
 		status = forward_reply(forwards, want_reply, 0, 0, 0);
 		return status;
 	}
+
+	/* Copies the address as a string. */
 	memcpy(address, address_bytes, address_size);
 	address[address_size] = '\0';
 
@@ -938,6 +946,9 @@ forward_remote_refusal(
  * Reports whether PermitListen allows a remote forwarding: any, none, or
  * an entry whose host pattern matches the address (without regard to
  * case) and whose port is the port or "*".
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (remote_open_match).
  */
 static int
 forward_listen_permitted(
@@ -973,6 +984,9 @@ forward_listen_permitted(
  * Reports whether PermitOpen allows a destination: any, none, or an
  * entry whose host is "*" or the host as written, and whose port is the
  * port or "*".
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (open_match).
  */
 static int
 forward_open_permitted(
@@ -1015,6 +1029,9 @@ forward_open_permitted(
  * for "" and "*", the loopback for "localhost", and the address asked
  * otherwise (a name is looked up).  Returns 0 with *count of them, or the
  * error of the lookup.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 channels.c
+ * (channel_fwd_bind_addr).
  */
 static int
 forward_bind_addresses(
@@ -1181,6 +1198,8 @@ forward_listen(
 			error = errno;
 			continue;
 		}
+
+		/* Sends each small packet at once, as an interactive stream needs. */
 		on = 1;
 		(void)setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 		if (addresses[position].family == AF_INET6)
@@ -1218,6 +1237,8 @@ forward_listen(
 				close(descriptor);
 				continue;
 			}
+
+			/* Reads the port from the address family the socket has. */
 			if (bound.ss_family == AF_INET) {
 				chosen = ntohs(((struct sockaddr_in *)&bound)->sin_port);
 			} else {
@@ -1330,6 +1351,8 @@ forward_accept(
 		close(descriptor);
 		return 0;
 	}
+
+	/* Sends each small packet at once, as an interactive stream needs. */
 	on = 1;
 	(void)setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 
@@ -1693,6 +1716,8 @@ forward_settle(
 		status = forward_close(forwards, entry);
 		return status;
 	}
+
+	/* Closes a connection the client closed once its bytes are written. */
 	if (entry->client_closed && written) {
 		status = forward_close(forwards, entry);
 		return status;

@@ -364,8 +364,8 @@ struct tcp_stats_header {
  *
  * The state is the kernel's enum tcp_state (0 closed, 1 listen, 2 SYN
  * sent, 3 SYN received, 4 established, 5 FIN wait 1, 6 FIN wait 2, 7 close
- * wait, 8 last ACK, 9 time wait).  An IPv4 address is in the first 4 bytes
- * of its field, in network order.  backoff is how many times the
+ * wait, 8 last ACK, 9 time wait, 10 closing).  An IPv4 address is in the
+ * first 4 bytes of its field, in network order.  backoff is how many times the
  * retransmission timeout is doubled: the timeouts since the last valid
  * round-trip sample (a probe of a closed window answered or
  * sent again as it opens sets it back too, and the probes themselves are

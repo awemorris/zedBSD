@@ -13,10 +13,6 @@
  * the SSH library does not compute) and %i (a numeric user id, which
  * Windows does not have) are refused, as is an unknown token and a '%'
  * at the end.
- *
- * Procedure referenced: OpenSSH's ssh, openssh-portable
- * fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0, ssh.c (the expansion of
- * RemoteCommand with percent_expand) and ssh_config(5) TOKENS.
  */
 
 #include "remote-command.h"
@@ -34,6 +30,10 @@ static int remote_command_token(char token, const struct remote_command_tokens *
  * Appends text to out with each %-token replaced by its value.  Returns
  * 0, EINVAL with the reason in error (a token that cannot be put in), or
  * the error of out (EMSGSIZE for a command longer than out takes).
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7df9768272cfabc2d78e4a12c2b3c0 ssh.c
+ * (the expansion of RemoteCommand with percent_expand), and
+ * ssh_config(5) of OpenSSH, TOKENS.
  */
 int
 remote_command_expand(
@@ -145,6 +145,8 @@ remote_command_token(
 			(void)snprintf(error, error_size, "RemoteCommand: the local user's name is not known");
 			return EINVAL;
 		}
+
+		/* Succeeded: the user's name stands for the token. */
 		*value = tokens->local_user;
 		return 0;
 	case 'd':
@@ -153,6 +155,8 @@ remote_command_token(
 			(void)snprintf(error, error_size, "RemoteCommand: the local user's home folder is not known");
 			return EINVAL;
 		}
+
+		/* Succeeded: the home folder stands for the token. */
 		*value = tokens->home;
 		return 0;
 	case 'C':

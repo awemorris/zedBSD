@@ -748,6 +748,75 @@ x11_render_vulkan_copy(
 }
 
 /*
+ * Copies one plane of a source as a bitmap when either image has a copy
+ * on the GPU (render-cpu.c's x11_render_copy_plane for them): drawn in
+ * memory around the boxes it changes, the source's part brought up to
+ * date first.  Returns 0, or ENOMEM.
+ */
+int
+x11_render_vulkan_copy_plane(
+	struct x11_image *target,
+	const struct x11_region *clip,
+	int x,
+	int y,
+	const struct x11_image *source,
+	int source_x,
+	int source_y,
+	uint32_t plane,
+	const struct x11_paint *paint)
+{
+	struct render_parts parts;
+	struct x11_image target_view;
+	struct x11_image source_view;
+	struct x11_box readable;
+	struct x11_box limit;
+	struct x11_box source_box;
+	size_t index;
+	int usable;
+	int dx;
+	int dy;
+	int error;
+
+	/* The part of the target whose source is in the source image, inside the clip. */
+	dx = source_x - x;
+	dy = source_y - y;
+	readable.x0 = -dx;
+	readable.y0 = -dy;
+	readable.x1 = source->width - dx;
+	readable.y1 = source->height - dy;
+	memset(&parts, 0, sizeof(parts));
+	for (index = 0U; index < clip->count; index++) {
+		usable = x11_box_intersect(&clip->boxes[index], &readable, &limit);
+		if (!usable)
+			continue;
+		render_parts_clip(&parts, target, NULL, &limit);
+	}
+	if (parts.count == 0U) {
+		free(parts.boxes);
+		return 0;
+	}
+
+	/* The source's part brought up to date in memory, and the target's drawn there and put back. */
+	source_box = parts.extents;
+	source_box.x0 += dx;
+	source_box.y0 += dy;
+	source_box.x1 += dx;
+	source_box.y1 += dy;
+	x11_render_image_memory_box(source, &source_box);
+	source_view = *source;
+	source_view.gpu = NULL;
+	render_fallback_begin(target, &parts.extents, &target_view);
+	error = x11_render_copy_plane(&target_view, clip, x, y, &source_view, source_x, source_y, plane, paint);
+	render_fallback_end(target, &parts.extents);
+	free(parts.boxes);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: copied in memory. */
+	return 0;
+}
+
+/*
  * Puts pixels onto an image with a copy on the GPU (render-cpu.c's
  * x11_render_put for it).
  */
