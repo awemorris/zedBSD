@@ -34,7 +34,7 @@ android {
 		}
 		externalNativeBuild {
 			cmake {
-				arguments "-DMIKUTERM_ROOT=${rootDir_.canonicalPath}",
+				arguments "-DMIKUTERM_ROOT=${rootDir_.canonicalPath.replace('\\', '/')}",
 					"-DMIKUTERM_VERSION=${version_}"
 			}
 		}
@@ -95,6 +95,7 @@ def configureShare = tasks.register("configureShareAssets", Exec) {
 	doFirst {
 		commandLine cmakeTool("cmake"), "-S", terminalDir.path, "-B", shareDir.get().asFile.path,
 			"-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=${cmakeTool("ninja")}",
+			"-DMIKUTERM_ASSETS_ONLY=ON",
 			"-DANDROID_SDK_ROOT=${sdk.get().asFile.path}", "-DANDROID_NDK_ROOT=${ndk.get().asFile.path}"
 	}
 }
