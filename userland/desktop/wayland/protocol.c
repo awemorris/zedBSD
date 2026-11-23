@@ -759,7 +759,9 @@ output_events(
 	/* Its xdg_outputs' logical place and size, which the done below ends too. */
 	for (other = output->client->objects; other != NULL; other = other->next) {
 		/* Only a live xdg_output of this binding. */
-		if (other->kind != KWL_XDG_OUTPUT || other->dead || other->xdg_output_of != output)
+		if (other->kind != KWL_XDG_OUTPUT ||
+		    other->dead ||
+		    other->xdg_output_of != output)
 			continue;
 
 		/* The place and the size again. */
@@ -884,6 +886,7 @@ xdg_output_create(
 	struct kwl_output_view view;
 	struct kwl_object *created;
 	struct kwl_object *output;
+	uint32_t output_id;
 	uint32_t id;
 	int error;
 
@@ -891,7 +894,8 @@ xdg_output_create(
 	if (size != 8U)
 		return EPROTO;
 	id = word_at(bytes, 0);
-	output = kwl_find(manager->client, word_at(bytes, 4));
+	output_id = word_at(bytes, 4);
+	output = kwl_find(manager->client, output_id);
 	if (output == NULL || output->kind != KWL_OUTPUT)
 		return EPROTO;
 
@@ -904,6 +908,8 @@ xdg_output_create(
 	/* A display that closed is told nothing more. */
 	if (output->output_head == KWL_OUTPUT_GONE)
 		return 0;
+
+	/* What the display shows now; a head that is not open tells nothing. */
 	error = kwl_output_view(manager->client->server, output->output_head, &view);
 	if (error != 0)
 		return 0;
@@ -968,6 +974,8 @@ xdg_output_events(
 		error = emit_string(xdg_output->client, xdg_output->id, XDG_OUTPUT_NAME, text);
 		if (error != 0)
 			return error;
+
+		/* The description, as wl_output's gives it. */
 		(void)snprintf(text, sizeof(text), "Display %ux%u", view->width, view->height);
 		error = emit_string(xdg_output->client, xdg_output->id, XDG_OUTPUT_DESCRIPTION, text);
 		if (error != 0)

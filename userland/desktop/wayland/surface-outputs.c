@@ -264,7 +264,9 @@ kwl_fractional_scale_sync(
 		if (client->fatal)
 			continue;
 		for (surface = client->objects; surface != NULL; surface = surface->next) {
-			if (surface->kind == KWL_SURFACE && !surface->dead && surface->fractional != NULL)
+			if (surface->kind == KWL_SURFACE &&
+			    !surface->dead &&
+			    surface->fractional != NULL)
 				kwl_fractional_scale_tell(surface);
 		}
 	}
@@ -596,10 +598,16 @@ fractional_output_scale(
 		scale = KWL_SCALE_ONE;
 
 	/* A head's own, while it is open. */
-	if (slot == KWL_PLANE_ANCHOR || server->compose == NULL || slot > KWL_HEADS)
+	if (slot == KWL_PLANE_ANCHOR ||
+	    server->compose == NULL ||
+	    slot > KWL_HEADS)
 		return scale;
+
+	/* A head closed, lost or not scaled yet shows nothing of its own. */
 	head = &server->compose->heads[slot - 1U];
-	if (!head->open || head->lost || head->scale120 == 0U)
+	if (!head->open ||
+	    head->lost ||
+	    head->scale120 == 0U)
 		return scale;
 
 	/* Succeeded: the head's scale. */
