@@ -41,6 +41,7 @@ static void rootless_info(struct x11server *server, struct x11_window *window, c
 static void rootless_extras(struct x11server *server, struct x11_window *window, unsigned changed, struct x11_surface_info *info, struct x11_rect **shape, uint32_t **icon);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
+static int rootless_shaped_present(struct x11server *server, struct x11_window *window);
 static int rootless_show(struct x11server *server, struct x11_window *window, int x, int y, int width, int height);
 
 /*
@@ -196,6 +197,9 @@ x11_rootless_forget(
 		server->surface_count--;
 	}
 	window->surface = NULL;
+
+	/* A new surface is shown the way its window asks for then. */
+	window->surface_present = 0;
 }
 
 /* Brings a top-level window's surface in step with it: opened when mapped, closed when not, its size, title and place. */
@@ -217,6 +221,7 @@ rootless_track(
 	int differs;
 	int failed;
 	int kept;
+	int shaped;
 
 	/*
 	 * An unmapped window has no surface, unless the window manager keeps
@@ -226,6 +231,7 @@ rootless_track(
 	kept = x11_wm_keeps_surface(window);
 	if ((!window->mapped && !kept) || window->window_class == X11_INPUT_ONLY || (window->mapped && window->image.pixels == NULL)) {
 		x11_rootless_forget(server, window);
+		window->surface_reopen = 0;
 		return;
 	}
 
@@ -241,11 +247,25 @@ rootless_track(
 	if (failed == 0)
 		class_name = class_buffer;
 
-	/* A window without a surface gets one, while there are not too many. */
+	/*
+	 * A shaped window on a backend that shows shapes only through its
+	 * present loses its swapchain: the surface goes, and is opened again
+	 * below at once and drawn whole this tick, so no frame is lost.
+	 */
+	shaped = rootless_shaped_present(server, window);
+	if (shaped && window->swapchain != NULL) {
+		x11_log(server, "X11SERVER PRESENT backend for the shaped window 0x%x", (unsigned)window->id);
+		x11_rootless_forget(server, window);
+		window->surface_reopen = 1;
+	}
+
+	/* A window without a surface gets one, while there are not too many; one opened again keeps its place. */
 	if (window->surface == NULL) {
 		if (server->surface_count >= X11_SURFACES_MAX)
 			return;
 		rootless_info(server, window, title, class_name, &info);
+		if (window->surface_reopen)
+			info.default_place = 0;
 		rootless_extras(server, window, X11_SURFACE_CHANGED_SHAPE | X11_SURFACE_CHANGED_ICON, &info, &shape, &icon);
 		window->surface = server->ops->open(server->backend, window->id, &info);
 		free(shape);
@@ -253,6 +273,7 @@ rootless_track(
 		if (window->surface == NULL)
 			return;
 		server->surface_count++;
+		window->surface_reopen = 0;
 		window->surface_width = (uint16_t)info.width;
 		window->surface_height = (uint16_t)info.height;
 		window->surface_x = window->x;
@@ -264,8 +285,16 @@ rootless_track(
 		window->wm_changed = 0U;
 	}
 
-	/* A swapchain on it once it has pixels, unless windows are shown through the backend (a surface Vulkan failed on goes, to be opened again). */
-	if (window->swapchain == NULL && window->image.pixels != NULL) {
+	/* A shaped window's surface stays with the backend's present from now on, shape or not. */
+	if (shaped)
+		window->surface_present = 1;
+
+	/*
+	 * A swapchain on it once it has pixels, unless it or every window is
+	 * shown through the backend (a surface Vulkan failed on goes, to be
+	 * opened again).
+	 */
+	if (window->swapchain == NULL && window->image.pixels != NULL && !window->surface_present) {
 		rootless_swapchain(server, window);
 		if (window->surface == NULL)
 			return;
@@ -446,10 +475,35 @@ rootless_cpu(
 	struct x11_window *window,
 	const char *why)
 {
-	/* The swapchain and the surface go; the next present opens the surface again. */
+	/* The swapchain and the surface go; the next present opens the surface again, where it was. */
 	x11_log(server, "X11SERVER PRESENT backend (Vulkan %s window 0x%x)", why, (unsigned)window->id);
 	x11_rootless_forget(server, window);
+	window->surface_reopen = 1;
 	server->cpu_present = 1;
+}
+
+/*
+ * Tells whether a window must be shown through the backend's present: it
+ * has a bounding shape, and the backend shows shapes only there.
+ */
+static int
+rootless_shaped_present(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	int bounded;
+
+	/* A backend whose swapchains show shapes as its present does. */
+	if ((server->ops->flags & X11_BACKEND_SHAPED_PRESENT) == 0U)
+		return 0;
+
+	/* An unshaped window. */
+	bounded = x11_shape_bounded(window);
+	if (!bounded)
+		return 0;
+
+	/* Succeeded: shown through the present. */
+	return 1;
 }
 
 /*

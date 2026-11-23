@@ -274,10 +274,12 @@ static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_s
  * The backend's functions, which the core calls with the connection as
  * their context.  Wayland gives no client the pointer's place on the
  * screen, nor a way to move it or to keep it, nor a bell: those are NULL.
+ * A shape is the surface's input region alone, the same whichever way the
+ * pixels are shown, so it asks nothing of the core's way (no flags).
  */
 const struct x11_backend_ops x11_wayland_ops = {
 	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
-	wayland_clipboard_read, NULL, NULL, NULL, NULL, NULL
+	wayland_clipboard_read, NULL, NULL, NULL, NULL, NULL, 0U
 };
 
 /* The registry's callbacks. */
