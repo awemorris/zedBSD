@@ -41,11 +41,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Whether the build has the login shell (1 or 0, defined by the build). */
-#ifndef MIKUTERM_HAVE_LOGIN_SHELL
-#error "MIKUTERM_HAVE_LOGIN_SHELL is not defined"
-#endif
-
 /* The words of the line about keeping a passphrase, after its box (the Linux program keeps it while it runs). */
 #ifdef MIKUTERM_LINUX
 #define CONNECTION_KEEP_TEXT	"Remember the passphrase until mikuterm ends (Tab switches this)\r\n"

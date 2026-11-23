@@ -56,21 +56,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * The features the build gives the launch screen and the connections (1
- * or 0, each defined by the build): the user's login shell, the local
- * programs of ProxyCommand, and GitHub Codespaces, which are reached
- * through a ProxyCommand of gh's.
- */
-#ifndef MIKUTERM_HAVE_LOGIN_SHELL
-#error "MIKUTERM_HAVE_LOGIN_SHELL is not defined"
-#endif
-#ifndef MIKUTERM_HAVE_PROXY_COMMAND
-#error "MIKUTERM_HAVE_PROXY_COMMAND is not defined"
-#endif
-#ifndef MIKUTERM_HAVE_CODESPACES
-#error "MIKUTERM_HAVE_CODESPACES is not defined"
-#endif
+/* GitHub Codespaces are reached through a ProxyCommand (the features are mikuterm.h's). */
 #if MIKUTERM_HAVE_CODESPACES && !MIKUTERM_HAVE_PROXY_COMMAND
 #error "MIKUTERM_HAVE_CODESPACES needs MIKUTERM_HAVE_PROXY_COMMAND"
 #endif

@@ -28,6 +28,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * The features a build has (1) or not (0): the launch screen's login
+ * shell, the local programs of ssh_config's ProxyCommand, and GitHub
+ * Codespaces (reached through a ProxyCommand of gh's).  Each build's
+ * CMake sets them; one that does not (the host tests) has none of them.
+ */
+#ifndef MIKUTERM_HAVE_LOGIN_SHELL
+#define MIKUTERM_HAVE_LOGIN_SHELL	0
+#endif
+#ifndef MIKUTERM_HAVE_PROXY_COMMAND
+#define MIKUTERM_HAVE_PROXY_COMMAND	0
+#endif
+#ifndef MIKUTERM_HAVE_CODESPACES
+#define MIKUTERM_HAVE_CODESPACES	0
+#endif
+
 /* The longest path mikuterm keeps, in UTF-8 bytes with its NUL. */
 #define MIKUTERM_PATH_MAX	1024U
 
