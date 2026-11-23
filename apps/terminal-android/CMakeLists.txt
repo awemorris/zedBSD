@@ -25,7 +25,7 @@ set(MIKUTERM_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(${MIKUTERM_DIR}/cmake/android-sdk.cmake)
 
-set(MIKUTERM_ANDROID_ABIS "arm64-v8a;x86_64" CACHE STRING "The ABIs the apk carries")
+set(MIKUTERM_ANDROID_ABIS "arm64-v8a;armeabi-v7a;x86;x86_64;riscv64" CACHE STRING "The ABIs the apk carries")
 
 # For trying the program in parts (each is passed on to the native build): the trial body that
 # paints the window one colour, and the connection that shows back what is typed.
