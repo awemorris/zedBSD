@@ -26,7 +26,9 @@
  */
 
 #include "session.h"
+#include "forward.h"
 #include "launch.h"
+#include "remote-command.h"
 #include "x11-host.h"
 #include "mikuterm-version.h"
 
@@ -35,6 +37,12 @@
 #include "userland/base/ssh/ssh-key.h"
 
 #include <compat/crypto/crypto.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -51,6 +59,12 @@
 
 /* The bytes read from the socket at once. */
 #define THREAD_RECEIVE		16384U
+
+/* The waits of one round: the socket, the waker, the X server's link, and the forwardings' sockets. */
+#define THREAD_WAITS		(3U + FORWARD_WAITS_MAX)
+
+/* The longest local user's name, home folder and computer's name for RemoteCommand's tokens, in UTF-8 with the NUL. */
+#define THREAD_LOCAL_NAME_MAX	(MIKUTERM_PATH_MAX)
 
 /* The longest wait of one round when nothing is due, and how long DISCONNECT may take to leave, in milliseconds. */
 #define THREAD_ROUND_MS		1000U
@@ -151,6 +165,11 @@ struct thread_choice {
  * waiting for the user (for a passphrase, whose key), the paths of the key
  * files in the engine's order and whether a passphrase kept for the
  * Windows session was tried for each, and how the attempt ended.
+ * again is 1 for an attempt after a failed one.  command is
+ * RemoteCommand with its tokens put in (empty: the shell).  forwards
+ * holds the port forwardings (NULL when the host has none), and
+ * forward_failed is 1 when ExitOnForwardFailure ended the connection
+ * (reason says why).
  */
 struct thread_link {
 	struct mikuterm_session *session;
@@ -182,6 +201,10 @@ struct thread_link {
 	uint64_t x11_since_ms;
 	char x11_cookie[SSH_ENGINE_X11_COOKIE_DIGITS + 1];
 	struct x11_host x11_host;
+	int again;
+	struct ssh_buf command;
+	struct forward_state *forwards;
+	int forward_failed;
 };
 
 static int thread_choose(struct mikuterm_session *session, struct thread_target *target);
@@ -231,6 +254,17 @@ static const char *thread_error_text(int error);
 static uint64_t thread_now(void);
 static int thread_x11_start(struct thread_link *link);
 static void thread_x11_open(struct thread_link *link, const struct ssh_engine_event *event);
+static int thread_remote_command(struct thread_link *link);
+static void thread_local_names(struct remote_command_tokens *tokens, char *local_user, char *home, char *local_host, size_t size);
+#ifdef _WIN32
+static int thread_local_name(const wchar_t *wide, char *name, size_t size);
+#endif
+static int thread_forwards_open(struct thread_link *link);
+static void thread_forwards_close(struct thread_link *link);
+static void thread_forward_event(struct thread_link *link, const struct ssh_engine_event *event, int *taken);
+static void thread_forward_start(struct thread_link *link);
+static void thread_forward_fail(struct thread_link *link);
+static void thread_forward_say(void *data, const char *line);
 
 /*
  * Runs one tab's connection, from choosing the host to its end, and lets
@@ -245,6 +279,7 @@ session_run(
 	struct thread_link *link;
 	char answer[8];
 	char hint[LAUNCH_NAME_MAX + 96U];
+	int again;
 	int status;
 
 	/* The session (the settings' problems are said when the host is chosen). */
@@ -266,12 +301,15 @@ session_run(
 		session_ended(session);
 
 	/* Connects until the connection ends well, the tab closes, or the user gives up after a failure. */
+	again = 0;
 	while (status == 0) {
-		/* One attempt. */
+		/* One attempt; one after a failed one may find a forwarded port still held by the last. */
 		memset(link, 0, sizeof(*link));
 		link->session = session;
 		link->target = &target;
+		link->again = again;
 		status = thread_attempt(link);
+		again = 1;
 
 		/* A normal end, or the user giving up, ends the tab. */
 		if (status == THREAD_DONE || status == THREAD_GIVEN_UP) {
@@ -1101,25 +1139,36 @@ thread_attempt(
 		(void)snprintf(link->config.user, sizeof(link->config.user), "%s", link->target->user);
 	}
 
+	/* RemoteCommand with its tokens put in, before the connection as OpenSSH's ssh does it. */
+	ssh_buf_init(&link->command, SSH_CHANNEL_COMMAND_MAX, 0);
+	error = thread_remote_command(link);
+	if (error != 0) {
+		ssh_buf_free(&link->command);
+		return THREAD_FAILED;
+	}
+
 	/* The tab's title is the host, and where it goes is said. */
 	(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s port %u ...\r\n", link->target->title, link->host_name, (unsigned)link->config.port);
 	session_say(session, line);
 
 	/* The connection. */
 	status = thread_dial(link);
-	if (status != THREAD_DONE)
+	if (status != THREAD_DONE) {
+		ssh_buf_free(&link->command);
 		return status;
+	}
 
 	/* The user's keys. */
 	count = 0U;
 	error = thread_identities(link, identities, &count);
 	if (error != 0) {
 		kl_socket_close(link->socket);
+		ssh_buf_free(&link->command);
 		(void)snprintf(link->reason, sizeof(link->reason), "The keys could not be read (%s).", thread_error_text(error));
 		return THREAD_FAILED;
 	}
 
-	/* The engine: a shell on a terminal of the tab's size. */
+	/* The engine: a shell, or RemoteCommand, on a terminal of the tab's size (the tab is a terminal either way). */
 	memset(&options, 0, sizeof(options));
 	options.user = link->config.user;
 	options.identities = identities;
@@ -1131,6 +1180,11 @@ thread_attempt(
 	options.term = session->term;
 	options.modes = NULL;
 	options.command = NULL;
+	options.command_size = 0U;
+	if (link->command.size != 0U) {
+		options.command = link->command.data;
+		options.command_size = link->command.size;
+	}
 	options.alive_interval = link->config.server_alive_interval;
 
 	/* X11 forwarding, when the host's settings ask for it: a fake cookie of this connection's. */
@@ -1154,16 +1208,29 @@ thread_attempt(
 	/* The engine copies the keys; the copies here are wiped. */
 	error = ssh_engine_open(&options, &link->engine);
 	thread_identities_free(identities, count);
+	ssh_buf_free(&link->command);
 	if (error != 0) {
 		kl_socket_close(link->socket);
 		(void)snprintf(link->reason, sizeof(link->reason), "The connection could not start (%s).", thread_error_text(error));
 		return THREAD_FAILED;
 	}
 
-	/* The conversation until the end; the X server ends with it. */
+	/* The port forwardings' state, when the host has any (they start once the user is authenticated). */
+	error = thread_forwards_open(link);
+	if (error != 0) {
+		ssh_engine_close(link->engine);
+		link->engine = NULL;
+		kl_socket_close(link->socket);
+		link->socket = NULL;
+		(void)snprintf(link->reason, sizeof(link->reason), "The connection could not start (%s).", thread_error_text(error));
+		return THREAD_FAILED;
+	}
+
+	/* The conversation until the end; the X server and the forwardings end with it. */
 	status = thread_converse(link);
 	if (link->x11)
 		x11_host_end(&link->x11_host, link->engine);
+	thread_forwards_close(link);
 	ssh_engine_close(link->engine);
 	link->engine = NULL;
 	kl_socket_close(link->socket);
@@ -1218,17 +1285,9 @@ thread_settings(
 	/* What the file did not say takes the defaults. */
 	ssh_config_defaults(&link->config);
 
-	/* Settings the connection cannot act on yet are refused rather than left without effect. */
-	if (link->config.forward_count != 0) {
-		(void)snprintf(link->reason, sizeof(link->reason), "%s: port forwarding (LocalForward, RemoteForward) is not supported yet", config);
-		return THREAD_FAILED;
-	}
+	/* A connection without a session (SessionType none) is refused rather than opened as a shell. */
 	if (link->config.session_type_none) {
 		(void)snprintf(link->reason, sizeof(link->reason), "%s: SessionType none is not supported", config);
-		return THREAD_FAILED;
-	}
-	if (link->config.remote_command[0] != '\0') {
-		(void)snprintf(link->reason, sizeof(link->reason), "%s: RemoteCommand is not supported yet", config);
 		return THREAD_FAILED;
 	}
 
@@ -1444,9 +1503,10 @@ static int
 thread_converse(
 	struct thread_link *link)
 {
-	struct kl_socket_wait waits[3];
+	struct kl_socket_wait waits[THREAD_WAITS];
 	struct kl_socket *x11_socket;
 	int x11_writable;
+	size_t forward_base;
 	size_t count;
 	uint64_t now;
 	uint64_t wake;
@@ -1466,6 +1526,10 @@ thread_converse(
 			if (x11_host_pump(&link->x11_host, link->engine, thread_now()) != 0)
 				session_say(link->session, link->x11_host.message);
 		}
+
+		/* The forwarded connections' bytes read go into their channels. */
+		if (link->forwards != NULL)
+			forward_pump(link->forwards);
 
 		/* The end: what is left to send goes, briefly. */
 		if (link->closed) {
@@ -1528,6 +1592,20 @@ thread_converse(
 			waits[2].ready = 0U;
 			count = 3U;
 		}
+
+		/* The forwardings' sockets after the others; a time limit of theirs may shorten the wait. */
+		forward_base = count;
+		if (link->forwards != NULL) {
+			wake = now + wait;
+			count += forward_waits(link->forwards, waits + forward_base, THREAD_WAITS - forward_base, now, &wake);
+			if (wake <= now) {
+				wait = 0U;
+			} else if (wake < now + wait) {
+				wait = wake - now;
+			}
+		}
+
+		/* The wait. */
 		error = kl_socket_poll(waits, count, (int)wait, &ready);
 		if (error != 0) {
 			(void)snprintf(link->reason, sizeof(link->reason), "The wait for the network failed (%s).", thread_error_text(error));
@@ -1537,11 +1615,19 @@ thread_converse(
 		/* What came; a socket that ended or failed is the connection's end. */
 		if ((waits[0].ready & (KL_SOCKET_READABLE | KL_SOCKET_FAILED)) != 0U)
 			(void)thread_receive(link);
+
+		/* The forwardings' connections, accepted, connected, read and written. */
+		if (link->forwards != NULL)
+			forward_serve(link->forwards, waits + forward_base, thread_now());
 	}
 
 	/* The tab closed. */
 	if (link->disconnecting)
 		return THREAD_CLOSING;
+
+	/* ExitOnForwardFailure ended it: the tab shows why and waits. */
+	if (link->forward_failed)
+		return THREAD_FAILED;
 
 	/* A normal end. */
 	if (link->error == 0)
@@ -1559,6 +1645,7 @@ thread_events(
 	struct ssh_engine_event event;
 	struct mikuterm_session *session;
 	char prompt[SSH_USER_MAX + MIKUTERM_HOST_MAX + 32U];
+	int taken;
 	int error;
 
 	/* Each event in turn. */
@@ -1567,6 +1654,11 @@ thread_events(
 		error = ssh_engine_next(link->engine, &event);
 		if (error != 0)
 			break;
+
+		/* An event of the forwardings is theirs alone. */
+		thread_forward_event(link, &event, &taken);
+		if (taken)
+			continue;
 
 		/* What it says. */
 		switch (event.kind) {
@@ -1587,6 +1679,10 @@ thread_events(
 		case SSH_ENGINE_PASSPHRASE:
 			/* The passphrase of a key the server would take: the one kept, or asked in the tab. */
 			thread_passphrase(link, &event);
+			break;
+		case SSH_ENGINE_AUTHENTICATED:
+			/* The port forwardings start once the user is in. */
+			thread_forward_start(link);
 			break;
 		case SSH_ENGINE_DATA:
 			/* An X client's bytes go to the X server. */
@@ -1621,6 +1717,13 @@ thread_events(
 			/* The shell ended while X clients stay: the connection waits for them. */
 			if (link->x11 && x11_host_open_count(&link->x11_host) != 0)
 				session_say(session, "\r\nThe shell ended; the connection stays open while X clients run (close the tab to end them).\r\n");
+
+			/* No more forwarded connections are taken; those open keep the connection until they end. */
+			if (link->forwards != NULL) {
+				forward_stop_listening(link->forwards);
+				if (forward_open_count(link->forwards) != 0U)
+					session_say(session, "\r\nThe shell ended; the connection stays open while forwarded connections remain (close the tab to end them).\r\n");
+			}
 			break;
 		case SSH_ENGINE_CLOSED:
 			thread_closed(link, &event);
@@ -2691,4 +2794,266 @@ thread_x11_open(
 		return;
 	}
 	(void)ssh_engine_x11_answer(link->engine, event->channel, 1);
+}
+
+/*
+ * Puts RemoteCommand's tokens in their places (link->command; empty when
+ * the host has none).  Returns 0, or EINVAL with the reason.
+ */
+static int
+thread_remote_command(
+	struct thread_link *link)
+{
+	struct remote_command_tokens tokens;
+	char local_user[THREAD_LOCAL_NAME_MAX];
+	char home[THREAD_LOCAL_NAME_MAX];
+	char local_host[THREAD_LOCAL_NAME_MAX];
+	char config[sizeof(THREAD_SSH_CONFIG)];
+	char error_text[REMOTE_COMMAND_ERROR_MAX];
+	int error;
+
+	/* No RemoteCommand: the shell. */
+	if (link->config.remote_command[0] == '\0')
+		return 0;
+
+	/* The connection's values, and the local user's and computer's. */
+	memset(&tokens, 0, sizeof(tokens));
+	tokens.host_name = link->host_name;
+	tokens.host = link->target->host;
+	tokens.port = link->config.port;
+	tokens.user = link->config.user;
+	thread_local_names(&tokens, local_user, home, local_host, THREAD_LOCAL_NAME_MAX);
+
+	/* The command, its tokens put in. */
+	error = remote_command_expand(link->config.remote_command, &tokens, &link->command, error_text, sizeof(error_text));
+	if (error != 0) {
+		mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
+		(void)snprintf(link->reason, sizeof(link->reason), "%s: %s", config, error_text);
+		return error;
+	}
+
+	/* Succeeded: link->command holds the command. */
+	return 0;
+}
+
+/*
+ * Finds the local user's name (%u), home folder (%d) and the computer's
+ * name (%l) for RemoteCommand, each in size bytes: on Windows from the
+ * system (the home folder is the profile's, as Windows' OpenSSH gives
+ * it), elsewhere (the host tests) from the environment.  A name not found
+ * is left NULL in tokens (the computer's name empty).
+ */
+static void
+thread_local_names(
+	struct remote_command_tokens *tokens,
+	char *local_user,
+	char *home,
+	char *local_host,
+	size_t size)
+{
+#ifdef _WIN32
+	wchar_t wide[THREAD_LOCAL_NAME_MAX];
+	DWORD length;
+	BOOL done;
+	int error;
+
+	/* The local user's name, when Windows tells it. */
+	length = THREAD_LOCAL_NAME_MAX;
+	done = GetUserNameW(wide, &length);
+	if (done) {
+		error = thread_local_name(wide, local_user, size);
+		if (error == 0)
+			tokens->local_user = local_user;
+	}
+
+	/* The profile's folder. */
+	length = GetEnvironmentVariableW(L"USERPROFILE", wide, THREAD_LOCAL_NAME_MAX);
+	if (length != 0U && length < THREAD_LOCAL_NAME_MAX) {
+		error = thread_local_name(wide, home, size);
+		if (error == 0)
+			tokens->home = home;
+	}
+
+	/* The computer's name in the DNS, or none. */
+	local_host[0] = '\0';
+	length = THREAD_LOCAL_NAME_MAX;
+	done = GetComputerNameExW(ComputerNameDnsHostname, wide, &length);
+	if (done)
+		(void)thread_local_name(wide, local_host, size);
+	tokens->local_host = local_host;
+#else
+	const char *value;
+	int status;
+
+	/* The local user's name. */
+	value = getenv("USER");
+	if (value != NULL) {
+		(void)snprintf(local_user, size, "%s", value);
+		tokens->local_user = local_user;
+	}
+
+	/* The home folder. */
+	value = getenv("HOME");
+	if (value != NULL) {
+		(void)snprintf(home, size, "%s", value);
+		tokens->home = home;
+	}
+
+	/* The computer's name, or none. */
+	status = gethostname(local_host, size);
+	if (status != 0)
+		local_host[0] = '\0';
+	local_host[size - 1U] = '\0';
+	tokens->local_host = local_host;
+#endif
+}
+
+#ifdef _WIN32
+/*
+ * Writes a name Windows gave in UTF-16 as UTF-8.  Returns 0, or EINVAL
+ * when it does not fit (name is then empty).
+ */
+static int
+thread_local_name(
+	const wchar_t *wide,
+	char *name,
+	size_t size)
+{
+	int written;
+
+	/* Converts the name with its NUL. */
+	written = WideCharToMultiByte(CP_UTF8, 0, wide, -1, name, (int)size, NULL, NULL);
+	if (written <= 0) {
+		name[0] = '\0';
+		return EINVAL;
+	}
+
+	/* Succeeded: name holds the name. */
+	return 0;
+}
+#endif
+
+/*
+ * Makes the port forwardings' state of a connection whose host has
+ * LocalForward or RemoteForward (none for one without).  Returns 0 or
+ * ENOMEM.
+ */
+static int
+thread_forwards_open(
+	struct thread_link *link)
+{
+	struct forward_state *forwards;
+
+	/* A host without forwardings needs none. */
+	link->forwards = NULL;
+	link->forward_failed = 0;
+	if (link->config.forward_count == 0U)
+		return 0;
+
+	/* The state is large (a chunk for each connection): it is on the heap. */
+	forwards = malloc(sizeof(*forwards));
+	if (forwards == NULL)
+		return ENOMEM;
+
+	/* Starts it on the connection's engine and settings; an attempt after a failed one waits once for a port still held. */
+	forward_init(forwards, link->engine, &link->config, thread_forward_say, link);
+	forwards->rebind_wait = link->again;
+	link->forwards = forwards;
+
+	/* Succeeded: the forwardings start once the user is authenticated. */
+	return 0;
+}
+
+/* Closes the port forwardings' sockets and frees their state. */
+static void
+thread_forwards_close(
+	struct thread_link *link)
+{
+	/* A host without forwardings has nothing to close. */
+	if (link->forwards == NULL)
+		return;
+
+	/* Closes every socket and wipes the bytes held, then frees the state. */
+	forward_free(link->forwards);
+	OPENSSL_cleanse(link->forwards, sizeof(*link->forwards));
+	free(link->forwards);
+	link->forwards = NULL;
+}
+
+/*
+ * Hands an event of the engine to the port forwardings: *taken is 1 when
+ * it was theirs.
+ */
+static void
+thread_forward_event(
+	struct thread_link *link,
+	const struct ssh_engine_event *event,
+	int *taken)
+{
+	int status;
+
+	/* A host without forwardings takes none. */
+	*taken = 0;
+	if (link->forwards == NULL)
+		return;
+
+	/* The forwardings take theirs; a refused remote forwarding may end the connection. */
+	status = forward_event(link->forwards, event, thread_now(), taken);
+	if (status == FORWARD_FATAL)
+		thread_forward_fail(link);
+}
+
+/* Starts the port forwardings once the user is authenticated. */
+static void
+thread_forward_start(
+	struct thread_link *link)
+{
+	int status;
+
+	/* A host without forwardings has none to start. */
+	if (link->forwards == NULL)
+		return;
+
+	/* Listens and asks; a forwarding that could not be set up may end the connection. */
+	status = forward_start(link->forwards);
+	if (status == FORWARD_FATAL)
+		thread_forward_fail(link);
+}
+
+/*
+ * Ends the connection because a forwarding could not be set up and
+ * ExitOnForwardFailure is yes: the tab shows the forwardings' line as the
+ * reason and waits for Enter, as for a failed connection.
+ */
+static void
+thread_forward_fail(
+	struct thread_link *link)
+{
+	/* Only the first failure ends it. */
+	if (link->forward_failed)
+		return;
+
+	/* The reason is the forwardings' line, as OpenSSH's ssh writes it before it exits. */
+	(void)snprintf(link->reason, sizeof(link->reason), "%s", link->forwards->fatal);
+	link->forward_failed = 1;
+
+	/* No more connections are taken, and the connection ends. */
+	forward_stop_listening(link->forwards);
+	ssh_engine_disconnect(link->engine, "port forwarding failed");
+}
+
+/* Shows a line of the port forwardings in the tab, on a line of its own. */
+static void
+thread_forward_say(
+	void *data,
+	const char *line)
+{
+	struct thread_link *link;
+
+	/* The connection the forwardings belong to. */
+	link = data;
+
+	/* The line, and its end. */
+	session_say_line(link->session, line);
+	session_say(link->session, "\r\n");
 }
