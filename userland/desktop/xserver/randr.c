@@ -210,6 +210,7 @@ x11_randr_init(
 	server->monitors[0].width = server->width;
 	server->monitors[0].height = server->height;
 	(void)snprintf(server->monitors[0].name, sizeof(server->monitors[0].name), "%s", RANDR_DEFAULT_NAME);
+	randr_monitor_clean(&server->monitors[0]);
 	server->monitor_count = 1U;
 	server->monitor_primary = X11_NO_MONITOR;
 
@@ -1364,8 +1365,8 @@ randr_get_providers(
 
 /*
  * GetMonitors: each monitor, named after its output, with its place and
- * size, its physical size and its one output.  The main one is marked;
- * without a main one, the first is.
+ * size, its physical size and its one output, the main one (if any)
+ * marked.
  */
 static unsigned
 randr_get_monitors(
@@ -1379,7 +1380,6 @@ randr_get_monitors(
 	uint8_t *info;
 	uint32_t name;
 	size_t used;
-	unsigned primary;
 	unsigned index;
 	int known;
 
@@ -1396,11 +1396,6 @@ randr_get_monitors(
 	x11_write32(reply + 12, server->monitor_count, client->order);
 	x11_write32(reply + 16, server->monitor_count, client->order);
 
-	/* The main one, or the first. */
-	primary = server->monitor_primary;
-	if (primary == X11_NO_MONITOR)
-		primary = 0U;
-
 	/* Each monitor and its output. */
 	used = 32U;
 	for (index = 0U; index < server->monitor_count; index++) {
@@ -1408,7 +1403,7 @@ randr_get_monitors(
 		name = x11_atom_intern(server, monitor->name, strlen(monitor->name), 0);
 		info = reply + used;
 		x11_write32(info, name, client->order);
-		if (index == primary)
+		if (index == server->monitor_primary)
 			info[4] = 1U;
 		info[5] = 1U;
 		x11_write16(info + 6, 1U, client->order);
