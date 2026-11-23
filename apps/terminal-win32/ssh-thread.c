@@ -86,6 +86,21 @@
 #define THREAD_WSL_PREFIX	"wsl-"
 #define THREAD_WSL_HOST		"localhost"
 
+/* SSH's own port, a Host's when it names none. */
+#define THREAD_SSH_PORT		22U
+
+/* How long a started distribution may take to tell its addresses, in milliseconds. */
+#define THREAD_WSL_ADDRESS_MS	15000U
+
+/* The longest line on what a distribution's failed connection needs. */
+#define THREAD_HINT_MAX		(LAUNCH_NAME_MAX * 2U + MIKUTERM_HOST_MAX + 160U)
+
+/* The longest name of a program of Windows said in a message, with its NUL. */
+#define THREAD_PROGRAM_MAX	64U
+
+/* The longest warning about a distribution's port shown before its connection. */
+#define THREAD_WARNING_MAX	256U
+
 /* The largest text wsl.exe writes that is read, and the screen's text at its largest. */
 #define THREAD_WSL_OUTPUT	16384U
 #define THREAD_SCREEN_MAX	65536U
@@ -119,8 +134,13 @@
 /*
  * What the user chose to connect to: the name given (a Host of ssh\config,
  * or a host's name or address), and the user and port given with it
- * (user@host:port; empty and 0 when not given), the tab's title, and the
- * WSL distribution it is (empty: none).
+ * (user@host:port; empty and 0 when not given), the tab's title, the WSL
+ * distribution it is (empty: none), the address the distribution is
+ * reached at when ssh\config names none (empty: the host), the name its
+ * host key is known by in known_hosts when not its host's (a distribution
+ * reached at an address that changes with each start of WSL is known as
+ * wsl-<name>; empty: the host's), and a warning to show before connecting
+ * (empty: none).
  */
 struct thread_target {
 	char host[MIKUTERM_HOST_MAX];
@@ -128,16 +148,21 @@ struct thread_target {
 	uint16_t port;
 	char title[MIKUTERM_HOST_MAX];
 	char distribution[LAUNCH_NAME_MAX];
+	char address[MIKUTERM_HOST_MAX];
+	char key_name[MIKUTERM_HOST_MAX];
+	char warning[THREAD_WARNING_MAX];
 };
 
 /*
  * The hosts ssh\config has settings for, as the launch screen lists them:
- * their names in the order written, each once, and the User each one's
- * settings give (empty: none).
+ * their names in the order written, each once, and the User and Port each
+ * one's settings give (empty, 0: none) and whether they give a HostName.
  */
 struct thread_hosts {
 	char names[THREAD_HOSTS][THREAD_NAME_MAX];
 	char users[THREAD_HOSTS][SSH_USER_MAX + 1];
+	uint16_t ports[THREAD_HOSTS];
+	int named[THREAD_HOSTS];
 	unsigned count;
 };
 
@@ -165,6 +190,7 @@ struct thread_choice {
  * waiting for the user (for a passphrase, whose key), the paths of the key
  * files in the engine's order and whether a passphrase kept for the
  * Windows session was tried for each, and how the attempt ended.
+ * dial_error is why no address of the host answered (0: one did).
  * again is 1 for an attempt after a failed one.  command is
  * RemoteCommand with its tokens put in (empty: the shell).  forwards
  * holds the port forwardings (NULL when the host has none), and
@@ -195,6 +221,7 @@ struct thread_link {
 	uint64_t farewell_ms;
 	int closed;
 	int error;
+	int dial_error;
 	char reason[THREAD_REASON_MAX];
 	int x11;
 	int x11_refused;
@@ -215,6 +242,8 @@ static int thread_wsl(struct thread_choice *choice, struct thread_target *target
 static int thread_wsl_list(struct thread_choice *choice, unsigned *count);
 static int thread_wsl_host(const struct thread_choice *choice, const char *name, char *host, size_t size);
 static int thread_wsl_target(struct thread_choice *choice, const char *name, struct thread_target *target);
+static int thread_wsl_address(struct thread_choice *choice, const char *name, uint16_t port, struct thread_target *target);
+static void thread_wsl_hint(const struct thread_link *link, char *hint, size_t size);
 static int thread_same_name(const char *first, const char *second);
 static int thread_user_name(const char *name);
 static int thread_stop(void *data);
@@ -278,7 +307,7 @@ session_run(
 	struct thread_target target;
 	struct thread_link *link;
 	char answer[8];
-	char hint[LAUNCH_NAME_MAX + 96U];
+	char hint[THREAD_HINT_MAX];
 	int again;
 	int status;
 
@@ -299,6 +328,10 @@ session_run(
 	status = thread_choose(session, &target);
 	if (status == ECANCELED)
 		session_ended(session);
+
+	/* A warning about where the host is comes before its connection. */
+	if (status == 0 && target.warning[0] != '\0')
+		session_say(session, target.warning);
 
 	/* Connects until the connection ends well, the tab closes, or the user gives up after a failure. */
 	again = 0;
@@ -325,7 +358,7 @@ session_run(
 		session_say_line(session, link->reason);
 		session_say(session, "\r\n");
 		if (target.distribution[0] != '\0') {
-			(void)snprintf(hint, sizeof(hint), "%s needs an sshd listening on port %u (README.txt, WSL).\r\n", target.distribution, (unsigned)link->config.port);
+			thread_wsl_hint(link, hint, sizeof(hint));
 			session_say(session, hint);
 		}
 
@@ -526,8 +559,14 @@ thread_hosts_read(
 			/* The settings for the name; a file the reader refuses gives no User. */
 			ssh_config_init(config);
 			error = ssh_config_parse(config, text, size, hosts->names[index], error_text);
-			if (error == 0)
-				(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
+			if (error != 0)
+				continue;
+
+			/* Its User, Port and whether it names its HostName. */
+			(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
+			hosts->ports[index] = config->port;
+			if (config->host_name[0] != '\0')
+				hosts->named[index] = 1;
 		}
 
 		/* The settings read go. */
@@ -688,13 +727,13 @@ thread_wsl(
 	launch_init(screen, "WSL distributions:");
 	mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
 	for (index = 0U; index < count; index++) {
-		/* The Host of ssh\config for it, or localhost on WslPort. */
+		/* The Host of ssh\config for it, or its own sshd on WslPort. */
 		(void)snprintf(key, sizeof(key), "%u", index + 1U);
 		error = thread_wsl_host(choice, choice->names[index], found, sizeof(found));
 		if (error == 0)
 			(void)snprintf(note, sizeof(note), "(%s: %s)", config, found);
 		else
-			(void)snprintf(note, sizeof(note), "(localhost:%u)", choice->session->wsl_port);
+			(void)snprintf(note, sizeof(note), "(its sshd, port %u)", choice->session->wsl_port);
 		(void)launch_add(screen, key, LAUNCH_DISTRIBUTION, choice->names[index], note);
 	}
 
@@ -740,8 +779,10 @@ thread_wsl(
 		if (screen->rows[taken].kind == LAUNCH_BACK)
 			return EAGAIN;
 
-		/* The distribution: started, its user, and where it is reached. */
+		/* The distribution: started, its user, and where it is reached (EAGAIN: the screen says why not). */
 		error = thread_wsl_target(choice, choice->names[taken], target);
+		if (error == EAGAIN)
+			continue;
 		if (error != 0)
 			return error;
 
@@ -846,10 +887,11 @@ thread_wsl_host(
 
 /*
  * Makes the target of a distribution: its Host of ssh\config (with that
- * Host's settings), or localhost on WslPort.  The distribution is started
- * first ("wsl.exe -d name -e whoami", so an sshd systemd starts is up),
- * and the user it answers with is the one logged in as when ssh\config
- * gives none.  Returns 0, or EPIPE when the tab closed.
+ * Host's settings), or its own sshd on WslPort (thread_wsl_address).  The
+ * distribution is started first ("wsl.exe -d name -e whoami", so an sshd
+ * systemd starts is up), and the user it answers with is the one logged
+ * in as when ssh\config gives none.  Returns 0, EAGAIN when it cannot be
+ * reached (the screen says why), or EPIPE when the tab closed.
  */
 static int
 thread_wsl_target(
@@ -863,6 +905,7 @@ thread_wsl_target(
 	size_t size;
 	unsigned long code;
 	unsigned index;
+	uint16_t port;
 	int known;
 	int same;
 	int error;
@@ -888,20 +931,36 @@ thread_wsl_target(
 			user[0] = '\0';
 	}
 
-	/* The Host of ssh\config for it, whose User wins over the one it answered with. */
+	/* The Host of ssh\config for it (its User wins over the one answered, its HostName over the address), or none. */
 	memset(target, 0, sizeof(*target));
+	port = (uint16_t)choice->session->wsl_port;
 	error = thread_wsl_host(choice, name, target->host, sizeof(target->host));
 	if (error == 0) {
 		for (index = 0U; index < choice->hosts.count; index++) {
-			/* The Host's own User. */
+			/* The Host's own settings. */
 			same = strcmp(choice->hosts.names[index], target->host);
-			if (same == 0 && choice->hosts.users[index][0] != '\0')
+			if (same != 0)
+				continue;
+			if (choice->hosts.users[index][0] != '\0')
 				user[0] = '\0';
+			port = THREAD_SSH_PORT;
+			if (choice->hosts.ports[index] != 0U)
+				port = choice->hosts.ports[index];
+			if (choice->hosts.named[index])
+				port = 0U;
 		}
 	} else {
-		/* Else localhost, on WSL's sshd port. */
-		(void)snprintf(target->host, sizeof(target->host), "%s", THREAD_WSL_HOST);
-		target->port = (uint16_t)choice->session->wsl_port;
+		/* Without a Host: the name it would have, and WslPort. */
+		(void)snprintf(target->host, sizeof(target->host), "%s%s", THREAD_WSL_PREFIX, name);
+		target->port = port;
+	}
+
+	/* Unless the Host names its HostName: its own address (or localhost), its key known by its name. */
+	if (port != 0U) {
+		error = thread_wsl_address(choice, name, port, target);
+		if (error != 0)
+			return error;
+		(void)snprintf(target->key_name, sizeof(target->key_name), "%s%s", THREAD_WSL_PREFIX, name);
 	}
 
 	/* The user, the title and the distribution. */
@@ -911,6 +970,114 @@ thread_wsl_target(
 
 	/* Succeeded: the distribution is the target. */
 	return 0;
+}
+
+/*
+ * Finds where a distribution's own sshd (on a port) is reached from
+ * Windows, into target->address, as WSL's networking places it.  The
+ * distribution's addresses come from "hostname -I" in it (the way
+ * Microsoft's WSL documentation gives).  In the default NAT networking
+ * the distribution has an address of its own, which Windows reaches
+ * directly, whatever Windows itself listens on.  In mirrored networking its addresses are
+ * Windows' own, and it is reached at localhost; so it is when no address
+ * comes.  At localhost another program of Windows on the same port
+ * (Windows' OpenSSH Server on 22) would answer in its place: then the
+ * screen says so and nothing is connected (EAGAIN); a program mikuterm
+ * cannot tell leaves a warning for the tab.  Returns 0, EAGAIN, or EPIPE
+ * when the tab closed.
+ */
+static int
+thread_wsl_address(
+	struct thread_choice *choice,
+	const char *name,
+	uint16_t port,
+	struct thread_target *target)
+{
+	char arguments[LAUNCH_NAME_MAX + 32U];
+	char address[LAUNCH_IPV4_MAX];
+	char program[THREAD_PROGRAM_MAX];
+	char status[LAUNCH_STATUS_MAX];
+	size_t size;
+	unsigned long code;
+	unsigned listener;
+	int own;
+	int error;
+
+	/* The distribution's addresses, the first IPv4 one kept. */
+	address[0] = '\0';
+	(void)snprintf(arguments, sizeof(arguments), "-d \"%s\" -e hostname -I", name);
+	error = mikuterm_wsl_run(arguments, THREAD_WSL_ADDRESS_MS, thread_stop, choice->session, choice->output, sizeof(choice->output), &size, &code);
+	if (error == ECANCELED)
+		return EPIPE;
+	if (error == 0 && code == 0UL) {
+		launch_output_text(choice->output, size, choice->decoded, sizeof(choice->decoded));
+		(void)launch_first_ipv4(choice->decoded, address, sizeof(address));
+	}
+
+	/* An address of its own (NAT) is where its sshd is. */
+	if (address[0] != '\0') {
+		own = mikuterm_windows_address(address);
+		if (!own) {
+			(void)snprintf(target->address, sizeof(target->address), "%s", address);
+			return 0;
+		}
+	}
+
+	/* At localhost (mirrored, or no address), a program of Windows on the port would answer instead. */
+	listener = mikuterm_port_listener(port, program, sizeof(program));
+	if (listener == MIKUTERM_LISTENER_WINDOWS) {
+		(void)snprintf(status, sizeof(status), "%s listens on port %u, so %s's sshd cannot be reached there: give it another port (WslPort, or Host wsl-%s; README.txt, WSL).", program, (unsigned)port, name, name);
+		launch_say(&choice->wsl, status);
+		return EAGAIN;
+	}
+
+	/* A program that cannot be told is only warned of. */
+	if (listener == MIKUTERM_LISTENER_UNKNOWN)
+		(void)snprintf(target->warning, sizeof(target->warning), "Note: a program of Windows also listens on localhost port %u; if the host key asked about is not %s's, give %s's sshd another port (README.txt, WSL).\r\n", (unsigned)port, name, name);
+
+	/* Succeeded: localhost. */
+	(void)snprintf(target->address, sizeof(target->address), "%s", THREAD_WSL_HOST);
+	return 0;
+}
+
+/*
+ * Writes the line that tells why a distribution's connection failed and
+ * what it needs, from how the connection failed: nothing listened (its
+ * sshd is not installed or not started, or listens on another port), no
+ * answer (WSL's network or a firewall), or a failure after the
+ * connection (the lines before say why; the line only points to the
+ * README).
+ */
+static void
+thread_wsl_hint(
+	const struct thread_link *link,
+	char *hint,
+	size_t size)
+{
+	const char *name;
+	unsigned port;
+
+	/* The distribution, and the port connected to. */
+	name = link->target->distribution;
+	port = (unsigned)link->config.port;
+
+	/* Why, by how it failed. */
+	switch (link->dial_error) {
+	case ECONNREFUSED:
+		/* Nothing listened there. */
+		(void)snprintf(hint, size, "Nothing listens on port %u of %s (%s): its sshd is not installed, not started, or on another port (sudo apt install openssh-server; sudo systemctl enable --now ssh; README.txt, WSL).\r\n", port, name, link->host_name);
+		break;
+	case ETIMEDOUT:
+	case EHOSTUNREACH:
+	case ENETUNREACH:
+		/* No answer at all. */
+		(void)snprintf(hint, size, "%s did not answer at %s port %u: WSL's network or a firewall keeps Windows from it (README.txt, WSL).\r\n", name, link->host_name, port);
+		break;
+	default:
+		/* The connection was made, and the lines before say what went wrong. */
+		(void)snprintf(hint, size, "For %s, see README.txt, WSL.\r\n", name);
+		break;
+	}
 }
 
 /* Tells whether two names are the same in any case of the ASCII letters (1) or not (0). */
@@ -1297,10 +1464,12 @@ thread_settings(
 	if (link->target->port != 0U)
 		link->config.port = link->target->port;
 
-	/* The name connected to: HostName, or the name given. */
+	/* The name connected to: HostName, or a distribution's address, or the name given. */
 	link->host_name = link->target->host;
 	if (link->config.host_name[0] != '\0')
 		link->host_name = link->config.host_name;
+	else if (link->target->address[0] != '\0')
+		link->host_name = link->target->address;
 
 	/* Succeeded: the settings. */
 	return THREAD_DONE;
@@ -1375,6 +1544,7 @@ thread_dial(
 	}
 
 	/* No address answered. */
+	link->dial_error = error;
 	(void)snprintf(link->reason, sizeof(link->reason), "ssh: connect to host %s port %u: %s", link->host_name, (unsigned)link->config.port, thread_error_text(error));
 	return THREAD_FAILED;
 }
@@ -1773,9 +1943,12 @@ thread_host_key(
 		return;
 	}
 
-	/* Its fingerprint, and the host's name in known_hosts. */
+	/* Its fingerprint, and the host's name in known_hosts (a distribution's own name when it has one). */
 	(void)ssh_key_fingerprint(link->host_key, link->fingerprint, sizeof(link->fingerprint));
-	(void)mikuterm_host_port_name(link->host_name, link->config.port, link->known_name, sizeof(link->known_name));
+	if (link->target->key_name[0] != '\0')
+		(void)mikuterm_host_port_name(link->target->key_name, link->config.port, link->known_name, sizeof(link->known_name));
+	else
+		(void)mikuterm_host_port_name(link->host_name, link->config.port, link->known_name, sizeof(link->known_name));
 
 	/* What the user's known_hosts and the global one say of it. */
 	memset(&link->known, 0, sizeof(link->known));

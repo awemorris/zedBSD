@@ -15,12 +15,23 @@
  * Only the pipe's end and NUL are handed to wsl.exe: mikuterm's other
  * handles (the sockets) stay its own.  The wait has a limit and gives up
  * when the tab closes; a wsl.exe given up is ended.
+ *
+ * Where a distribution's sshd is reached also needs two things of
+ * Windows itself: whether an address the distribution has is one of
+ * Windows' own (WSL's mirrored networking gives Linux Windows' addresses;
+ * its default NAT gives the distribution an address of its own), and
+ * which program of Windows listens on a port of localhost (WSL's own
+ * forwarding of a Linux port, or a server of Windows such as its OpenSSH
+ * Server, which would answer in the distribution's place).
  */
 
 #include "mikuterm.h"
 
 #include <keiland/keiland.h>
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include <windows.h>
 
 #include <errno.h>
@@ -38,6 +49,16 @@
 /* The longest command line, in UTF-16 units with its NUL. */
 #define WSL_COMMAND_MAX		1024U
 
+/* The room asked for Windows' adapters and listeners at first (more is asked when it does not fit). */
+#define WSL_TABLE_SIZE		16384U
+
+/* The start of the names of WSL's own programs on Windows (wslrelay.exe forwards localhost's ports). */
+#define WSL_OWN_PREFIX		"wsl"
+
+/* The service of Windows' OpenSSH Server, and the port it takes unless told another. */
+#define WSL_WINDOWS_SSHD	L"sshd"
+#define WSL_SSH_PORT		22U
+
 /*
  * What wsl.exe wrote: the caller's room and how much is in it.  What comes
  * after the room is full is read and dropped, so wsl.exe never waits on a
@@ -52,6 +73,8 @@ struct wsl_output {
 static int wsl_command(const char *arguments, wchar_t *program, size_t program_size, wchar_t *command, size_t command_size);
 static int wsl_start(wchar_t *program, wchar_t *command, HANDLE write_end, HANDLE nothing, PROCESS_INFORMATION *process);
 static void wsl_drain(HANDLE read_end, struct wsl_output *output);
+static unsigned wsl_owner(DWORD pid, char *name, size_t size);
+static int wsl_sshd_running(void);
 
 /*
  * Runs wsl.exe with the arguments (UTF-8) and collects what it writes to
@@ -327,4 +350,244 @@ wsl_drain(
 		if (into != spill)
 			output->size += got;
 	}
+}
+
+/*
+ * Tells whether an IPv4 address (dotted) is one of Windows' own: an
+ * address of one of its network adapters (1), or not (0, also when the
+ * adapters cannot be read).
+ */
+int
+mikuterm_windows_address(
+	const char *address)
+{
+	IP_ADAPTER_ADDRESSES *adapters;
+	IP_ADAPTER_ADDRESSES *adapter;
+	IP_ADAPTER_UNICAST_ADDRESS *unicast;
+	struct sockaddr_in *own;
+	struct in_addr wanted;
+	ULONG size;
+	ULONG result;
+	int parsed;
+	int found;
+
+	/* The address asked about. */
+	parsed = inet_pton(AF_INET, address, &wanted);
+	if (parsed != 1)
+		return 0;
+
+	/* The adapters' IPv4 addresses, with room enough (asked again once when there was not). */
+	size = WSL_TABLE_SIZE;
+	adapters = malloc(size);
+	if (adapters == NULL)
+		return 0;
+	result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, NULL, adapters, &size);
+	if (result == ERROR_BUFFER_OVERFLOW) {
+		free(adapters);
+		adapters = malloc(size);
+		if (adapters == NULL)
+			return 0;
+		result = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, NULL, adapters, &size);
+	}
+	if (result != NO_ERROR) {
+		free(adapters);
+		return 0;
+	}
+
+	/* Each adapter's each address. */
+	found = 0;
+	for (adapter = adapters; adapter != NULL && !found; adapter = adapter->Next) {
+		for (unicast = adapter->FirstUnicastAddress; unicast != NULL; unicast = unicast->Next) {
+			/* The same IPv4 address. */
+			if (unicast->Address.lpSockaddr->sa_family != AF_INET)
+				continue;
+			own = (struct sockaddr_in *)unicast->Address.lpSockaddr;
+			if (own->sin_addr.s_addr == wanted.s_addr) {
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	/* The table goes. */
+	free(adapters);
+
+	/* Reports whether Windows has it. */
+	return found;
+}
+
+/*
+ * Tells which program of Windows listens on a TCP port of localhost
+ * (IPv4, on 127.0.0.1 or on every address), with its file's name in
+ * name (size bytes with its NUL; empty when not known):
+ * MIKUTERM_LISTENER_NONE, MIKUTERM_LISTENER_WSL (WSL's own forwarding),
+ * MIKUTERM_LISTENER_WINDOWS (another program, or Windows' OpenSSH Server
+ * when the program cannot be told and the port is 22 with that service
+ * running), or MIKUTERM_LISTENER_UNKNOWN (a program mikuterm may not ask
+ * about, such as a service of another account).
+ */
+unsigned
+mikuterm_port_listener(
+	unsigned port,
+	char *name,
+	size_t size)
+{
+	MIB_TCPTABLE_OWNER_PID *table;
+	MIB_TCPROW_OWNER_PID *row;
+	DWORD table_size;
+	DWORD result;
+	DWORD index;
+	DWORD any;
+	DWORD loopback;
+	unsigned listener;
+	unsigned owner;
+	unsigned row_port;
+	int running;
+
+	/* Nothing known yet. */
+	name[0] = '\0';
+	listener = MIKUTERM_LISTENER_NONE;
+
+	/* The listeners of IPv4, with room enough (asked again once when there was not). */
+	table_size = WSL_TABLE_SIZE;
+	table = malloc(table_size);
+	if (table == NULL)
+		return MIKUTERM_LISTENER_NONE;
+	result = GetExtendedTcpTable(table, &table_size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0U);
+	if (result == ERROR_INSUFFICIENT_BUFFER) {
+		free(table);
+		table = malloc(table_size);
+		if (table == NULL)
+			return MIKUTERM_LISTENER_NONE;
+		result = GetExtendedTcpTable(table, &table_size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0U);
+	}
+	if (result != NO_ERROR) {
+		free(table);
+		return MIKUTERM_LISTENER_NONE;
+	}
+
+	/* The listeners on the port that localhost reaches: what each is (the most telling one counts). */
+	any = htonl(INADDR_ANY);
+	loopback = htonl(INADDR_LOOPBACK);
+	for (index = 0U; index < table->dwNumEntries; index++) {
+		/* The port, and an address that localhost reaches. */
+		row = &table->table[index];
+		row_port = ntohs((u_short)row->dwLocalPort);
+		if (row_port != port)
+			continue;
+		if (row->dwLocalAddr != any && row->dwLocalAddr != loopback)
+			continue;
+
+		/* The program that listens; another program of Windows is the answer at once. */
+		owner = wsl_owner(row->dwOwningPid, name, size);
+		if (owner == MIKUTERM_LISTENER_WINDOWS) {
+			listener = owner;
+			break;
+		}
+		if (owner == MIKUTERM_LISTENER_UNKNOWN || listener == MIKUTERM_LISTENER_NONE)
+			listener = owner;
+	}
+
+	/* The table goes. */
+	free(table);
+
+	/* A program that cannot be told, on the port of SSH while Windows' OpenSSH Server runs, is that server. */
+	if (listener == MIKUTERM_LISTENER_UNKNOWN && port == WSL_SSH_PORT) {
+		running = wsl_sshd_running();
+		if (running) {
+			(void)snprintf(name, size, "Windows' OpenSSH Server");
+			listener = MIKUTERM_LISTENER_WINDOWS;
+		}
+	}
+
+	/* Succeeded: what listens. */
+	return listener;
+}
+
+/*
+ * Tells what a listening process is: WSL's own (its file's name starts
+ * with "wsl"), another program of Windows, or unknown when mikuterm may
+ * not ask about it; its file's name (without the folder) goes into name.
+ * Returns MIKUTERM_LISTENER_*.
+ */
+static unsigned
+wsl_owner(
+	DWORD pid,
+	char *name,
+	size_t size)
+{
+	HANDLE process;
+	wchar_t path[MAX_PATH];
+	wchar_t *base;
+	DWORD length;
+	BOOL queried;
+	int converted;
+	int same;
+
+	/* The process, if it may be asked about. */
+	name[0] = '\0';
+	process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	if (process == NULL)
+		return MIKUTERM_LISTENER_UNKNOWN;
+
+	/* Its file. */
+	length = MAX_PATH;
+	queried = QueryFullProcessImageNameW(process, 0U, path, &length);
+	CloseHandle(process);
+	if (!queried)
+		return MIKUTERM_LISTENER_UNKNOWN;
+
+	/* The file's name without its folder, in UTF-8. */
+	base = wcsrchr(path, L'\\');
+	if (base == NULL)
+		base = path;
+	else
+		base++;
+	converted = WideCharToMultiByte(CP_UTF8, 0U, base, -1, name, (int)size, NULL, NULL);
+	if (converted <= 0) {
+		name[0] = '\0';
+		return MIKUTERM_LISTENER_UNKNOWN;
+	}
+
+	/* WSL's own program, or another. */
+	same = _strnicmp(name, WSL_OWN_PREFIX, strlen(WSL_OWN_PREFIX));
+	if (same == 0)
+		return MIKUTERM_LISTENER_WSL;
+
+	/* Another program of Windows. */
+	return MIKUTERM_LISTENER_WINDOWS;
+}
+
+/* Tells whether the service of Windows' OpenSSH Server runs (1) or not (0, also when it cannot be asked). */
+static int
+wsl_sshd_running(void)
+{
+	SC_HANDLE manager;
+	SC_HANDLE service;
+	SERVICE_STATUS status;
+	BOOL queried;
+
+	/* The service manager and the service, asked only about the service's state. */
+	manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+	if (manager == NULL)
+		return 0;
+	service = OpenServiceW(manager, WSL_WINDOWS_SSHD, SERVICE_QUERY_STATUS);
+	if (service == NULL) {
+		CloseServiceHandle(manager);
+		return 0;
+	}
+
+	/* Its state. */
+	queried = QueryServiceStatus(service, &status);
+	CloseServiceHandle(service);
+	CloseServiceHandle(manager);
+	if (!queried)
+		return 0;
+
+	/* Reports a service that runs. */
+	if (status.dwCurrentState == SERVICE_RUNNING)
+		return 1;
+
+	/* Not running. */
+	return 0;
 }
