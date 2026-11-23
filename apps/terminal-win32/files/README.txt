@@ -106,9 +106,17 @@ screen opens them as well.  The sidebar has four panes (Ctrl+Down or
 Ctrl+Page Down shows the next one, Ctrl+Up or Ctrl+Page Up the one before;
 Tab moves between a pane's fields and buttons):
 
-  Hosts       ssh/config, edited in place.  Save writes it and checks it as
-              a connection reads it, naming a line it cannot use.  It takes
-              effect from the next connection.
+  Hosts       the hosts of ssh/config, one at a time: its name, address
+              (HostName), port, user, command (RemoteCommand), identity
+              files and port forwards (LocalForward, RemoteForward), and Add
+              Host.  Only the lines you change are rewritten; your comments
+              and the lines the form does not show stay as they are.  Save
+              (Ctrl+S) checks the file as a connection reads it and refuses
+              a line it cannot use; it does not write over a file changed
+              outside since it was read (Revert, Ctrl+R, reads it again).
+              Open in Text Editor opens ssh/config in Windows' editor for
+              it (Notepad when none is set).  Both take effect from the
+              next connection.
   Appearance  the text's size, the theme and the ambiguous width take effect
               at once, as the View menu's do; the fonts and the grid when
               mikuterm starts again.

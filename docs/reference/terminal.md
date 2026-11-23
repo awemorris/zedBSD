@@ -65,7 +65,7 @@ Ctrl+Page Down for the tabs), and Tab moves between a pane's controls.
 
 | Pane | Setting | Takes effect | Kept in |
 | --- | --- | --- | --- |
-| Hosts | `~/.ssh/config`, edited as text (tabs shown as four spaces), written whole by Save | the next `ssh` | `~/.ssh/config` |
+| Hosts | `~/.ssh/config`, a host at a time (below); Open in Text Editor (textedit) for the rest | the next `ssh` | `~/.ssh/config` |
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `terminal.font-size`, `terminal.theme`, `terminal.ambiguous-wide` |
 | Appearance | Font and Fallback font (a full path, or a file name in `/usr/share/fonts/`; checked to open as the terminal's font), Columns, Rows | the next start | `terminal.font`, `terminal.fallback-font`, `terminal.columns`, `terminal.rows` |
 | Behavior | copy-on-select | at once | `terminal.copy-on-select` |
@@ -80,6 +80,14 @@ a directory is kept as its full path; an empty field, or the default, takes
 the kept value away. The card "From the next start" says the change waits for
 the terminal to start again; "From the next tab" says the next tab's shell
 takes it.
+
+Hosts pane: the same as mikuterm's ([mikuterm](mikuterm.md), section 7):
+each `Host` of `~/.ssh/config` in a form (Name, Host address, Port, User,
+Command, Identity files, Port forwarding), only the lines a change is about
+rewritten, Save (Ctrl+S) refused for a line the SSH client's reader cannot
+use or a file changed outside since it was read, Revert (Ctrl+R).
+Open in Text Editor starts `textedit` with `~/.ssh/config` (made empty, mode
+0600, when it is not there).
 
 Keys pane: the key's file name in `~/.ssh/` (`id_ed25519` by default). A key
 of the name that is there shows its public key line and SHA256 fingerprint

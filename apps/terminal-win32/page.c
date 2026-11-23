@@ -9,7 +9,9 @@
  * What mikuterm gives the terminal's settings' tab (settings-page.h): the
  * folder's ssh\config, ssh\ for the keys (a private key made so that only
  * the user may read it) and ssh\known_hosts, the check of an ssh\config
- * with the SSH library's own reader, and mikuterm's own settings of
+ * with the SSH library's own reader, the system's text editor the
+ * ssh\config opens in (the file's own "edit" verb, else "open", else
+ * Notepad), and mikuterm's own settings of
  * config\mikuterm.conf: the fonts and the grid (from the next start), the
  * TERM, the wait for a connection and the port of WSL's sshd (from the
  * next connection: the connector takes them at once) and the host of the
@@ -23,6 +25,7 @@
 #include "userland/base/ssh/ssh-config.h"
 
 #include <windows.h>
+#include <shellapi.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -40,6 +43,9 @@
 
 /* The longest name of a host checked, with its NUL. */
 #define PAGE_HOST_MAX		128U
+
+/* The editor of a file no verb opens: Notepad, which every Windows has. */
+#define PAGE_NOTEPAD		L"notepad.exe"
 
 /*
  * The names of an ssh\config's Host lines, which it is checked for: so
@@ -87,6 +93,8 @@ static int page_create(void *data, const char *path, const void *bytes, size_t s
 static int page_exists(void *data, const char *path);
 static int page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
 static int page_host_named(void *data, const char *name, size_t size);
+static int page_editor(void *data, struct terminal_window *window, const char *path);
+static int page_shell(const wchar_t *verb, const wchar_t *file, const wchar_t *parameters);
 static int page_item_get(void *data, const char *keyword, char *value, size_t size);
 static int page_item_set(void *data, const char *keyword, const char *value, char *why, size_t size);
 static void page_conf_now(struct mikuterm_conf *conf);
@@ -138,6 +146,7 @@ mikuterm_page_init(
 	page_state.program.create = page_create;
 	page_state.program.exists = page_exists;
 	page_state.program.check = page_check;
+	page_state.program.open_editor = page_editor;
 	page_state.program.items = page_items;
 	page_state.program.item_count = sizeof(page_items) / sizeof(page_items[0]);
 	page_state.program.item_get = page_item_get;
@@ -305,6 +314,91 @@ page_host_named(
 	hosts->names[hosts->count][size] = '\0';
 	hosts->count++;
 	return 0;
+}
+
+/*
+ * Opens a file of the folder in the system's text editor: the editor the
+ * file's type names for "edit", else the program that opens it, else
+ * Notepad with the file.  No dialog asks the user to choose a program.
+ * Returns 0, ENAMETOOLONG or EINVAL for a path that cannot be a wide one,
+ * or ENOENT when none could start.
+ */
+static int
+page_editor(
+	void *data,
+	struct terminal_window *window,
+	const char *path)
+{
+	wchar_t wide[MIKUTERM_PATH_MAX];
+	wchar_t quoted[MIKUTERM_PATH_MAX + 2U];
+	int units;
+	int started;
+
+	(void)data;
+	(void)window;
+
+	/* The path as Windows takes it. */
+	units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, (int)(sizeof(wide) / sizeof(wide[0])));
+	if (units <= 0)
+		return EINVAL;
+
+	/* The file's own editor. */
+	started = page_shell(L"edit", wide, NULL);
+	if (started) {
+		printf("MIKUTERM SETTINGS editor edit\n");
+		fflush(stdout);
+		return 0;
+	}
+
+	/* The program that opens it. */
+	started = page_shell(L"open", wide, NULL);
+	if (started) {
+		printf("MIKUTERM SETTINGS editor open\n");
+		fflush(stdout);
+		return 0;
+	}
+
+	/* Notepad with the file, its path in quotes. */
+	if ((size_t)units + 2U > sizeof(quoted) / sizeof(quoted[0]))
+		return ENAMETOOLONG;
+	quoted[0] = L'"';
+	memcpy(quoted + 1, wide, ((size_t)units - 1U) * sizeof(wchar_t));
+	quoted[units] = L'"';
+	quoted[units + 1] = L'\0';
+	started = page_shell(L"open", PAGE_NOTEPAD, quoted);
+	if (!started)
+		return ENOENT;
+
+	/* Succeeded: Notepad is starting. */
+	printf("MIKUTERM SETTINGS editor notepad\n");
+	fflush(stdout);
+	return 0;
+}
+
+/* Starts a verb of the shell on a file without asking the user anything; reports 1 when it started. */
+static int
+page_shell(
+	const wchar_t *verb,
+	const wchar_t *file,
+	const wchar_t *parameters)
+{
+	SHELLEXECUTEINFOW shell;
+	BOOL done;
+
+	/* The verb on the file, no dialog when nothing takes it. */
+	memset(&shell, 0, sizeof(shell));
+	shell.cbSize = sizeof(shell);
+	shell.fMask = SEE_MASK_FLAG_NO_UI;
+	shell.lpVerb = verb;
+	shell.lpFile = file;
+	shell.lpParameters = parameters;
+	shell.nShow = SW_SHOWNORMAL;
+	done = ShellExecuteExW(&shell);
+	if (!done)
+		return 0;
+
+	/* Succeeded: it started. */
+	return 1;
 }
 
 /* Gives a setting's value as config\mikuterm.conf gives it now (its default when the file does not). */
