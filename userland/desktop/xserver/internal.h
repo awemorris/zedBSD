@@ -729,6 +729,16 @@ struct x11_window {
 	 */
 	struct x11_surface *surface;
 	struct x11_vulkan_window *swapchain;
+
+	/*
+	 * Whether the surface is shown through the backend's present for the
+	 * rest of its life (it had a shape on a backend that asks for that),
+	 * and whether the next surface opened is the same window's surface
+	 * opened again to be shown another way (it keeps its place: the
+	 * system does not place it anew).
+	 */
+	int surface_present;
+	int surface_reopen;
 	uint16_t surface_width;
 	uint16_t surface_height;
 	int32_t surface_x;
@@ -1799,6 +1809,7 @@ unsigned x11_shape_request(struct x11_ext_request *request);
 void x11_shape_forget_client(struct x11server *server, unsigned index);
 void x11_shape_forget_window(struct x11server *server, struct x11_window *window);
 int x11_shape_has(const struct x11_window *window);
+int x11_shape_bounded(const struct x11_window *window);
 int x11_shape_contains(const struct x11_window *window, int x, int y);
 int x11_shape_clip_window(const struct x11_window *window, int border, struct x11_region *clip);
 int x11_shape_clip_inside(const struct x11_window *window, struct x11_region *clip);

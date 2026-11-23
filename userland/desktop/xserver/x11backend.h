@@ -143,6 +143,14 @@
 #define X11_BACKEND_CURSOR	1
 
 /*
+ * What a backend's flags may ask of the core: a surface with a shape is
+ * shown through the backend's present, never through a swapchain (the
+ * system cuts a window to its shape only where it draws the window's
+ * pixels itself).
+ */
+#define X11_BACKEND_SHAPED_PRESENT	(1U << 0)
+
+/*
  * The keyboard's map: the keycodes (an evdev key code plus 8, so 8 to
  * 255), the keysyms each carries, and the modifiers.
  */
@@ -367,6 +375,9 @@ struct x11_monitor {
  * cursor (which may be NULL: the system's pointer is shown) sets the
  * cursor shown while the pointer is over a surface (image NULL: the
  * system's own pointer); the backend copies what it needs.
+ *
+ * flags (0 when the table leaves it out) asks the core to show some
+ * surfaces in a way of its own (X11_BACKEND_SHAPED_PRESENT).
  */
 struct x11_backend_ops {
 	struct x11_surface *(*open)(void *context, uint32_t window, const struct x11_surface_info *info);
@@ -381,6 +392,7 @@ struct x11_backend_ops {
 	int (*warp)(void *context, int x, int y);
 	void (*bell)(void *context, int percent);
 	void (*cursor)(void *context, struct x11_surface *surface, const struct x11_cursor_image *image);
+	unsigned flags;
 };
 
 /* What the backend tells the core. */

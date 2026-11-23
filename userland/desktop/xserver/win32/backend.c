@@ -28,7 +28,10 @@
  * The backend's functions as the core calls them.
  *
  * The table is constant for the life of the program; every function takes
- * the struct x11_win32 as its context.
+ * the struct x11_win32 as its context.  A shaped window is shown through
+ * GDI: its window region (SetWindowRgn) is a property of what GDI and the
+ * window manager draw, and neither the Vulkan WSI nor DXGI's flip model
+ * says that it cuts a swapchain's pixels (under Wine it does not).
  */
 const struct x11_backend_ops x11_win32_ops = {
 	win32_surface_open,
@@ -43,6 +46,7 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_input_warp,
 	win32_input_bell,
 	win32_surface_cursor,
+	X11_BACKEND_SHAPED_PRESENT,
 };
 
 /* The prefix of a monitor's device name ("\\.\DISPLAY1"), left out of the name X clients see. */

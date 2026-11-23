@@ -170,20 +170,23 @@ terminal_key_bytes(
 	if (character == 0)
 		return 0U;
 
-	/* Control turns a letter and a few symbols into the control character (Ctrl-C is 3). */
+	/*
+	 * Control turns a character into the control character as X11's
+	 * XLookupString (and so xterm) does: '@' to '~' and the space keep
+	 * their low five bits (Ctrl-C is 3, Ctrl-_ is 0x1f, Ctrl-^ is 0x1e),
+	 * '2' is 0, '3' to '7' are 0x1b to 0x1f, '8' is 0x7f and '/' is 0x1f.
+	 */
 	if ((modifiers & TERMINAL_MODIFIER_CONTROL) != 0U) {
-		if (character >= 'a' && character <= 'z') {
-			character = (char)(character - 'a' + 1);
-		} else if (character >= 'A' && character <= 'Z') {
-			character = (char)(character - 'A' + 1);
-		} else if (character == '[' || character == '{') {
-			character = 0x1b;
-		} else if (character == '\\' || character == '|') {
-			character = 0x1c;
-		} else if (character == ']' || character == '}') {
-			character = 0x1d;
-		} else if (character == ' ' || character == '@' || character == '2') {
+		if ((character >= '@' && character <= '~') || character == ' ') {
+			character = (char)(character & 0x1f);
+		} else if (character == '2') {
 			character = 0;
+		} else if (character >= '3' && character <= '7') {
+			character = (char)(character - '3' + 0x1b);
+		} else if (character == '8') {
+			character = 0x7f;
+		} else if (character == '/') {
+			character = 0x1f;
 		}
 	}
 

@@ -69,7 +69,7 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `Connect` | the host the first tab connects to (a `Host` of `ssh/config`, or `[user@]host[:port]`) | none: the first tab lists the hosts |
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh/config`'s wins) | 15 |
-| `WslPort` | the port on `localhost` of the sshd in WSL, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 2222 |
+| `WslPort` | the port of a WSL distribution's own sshd, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 22 |
 
 A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
 server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
@@ -358,12 +358,35 @@ Hosts:
   is shown) or does not answer in time, the hosts' screen says so.
 - A distribution chosen is started with `wsl.exe -d NAME -e whoami` (at most
   60 seconds; it also starts an sshd systemd runs in it) and reached by SSH:
-  through `ssh/config`'s `Host wsl-NAME` (the name in any case) with all that
-  Host's settings, or else at `localhost` on `WslPort`. The user is the
-  Host's `User`, else the user `whoami` answered, else `login as:` asks. The
-  distributions of WSL 2 share one network, so each needs its own port (and
-  its own Host) when more than one runs an sshd. A connection to a
-  distribution that fails adds `NAME needs an sshd listening on port PORT`.
+  - With `ssh/config`'s `Host wsl-NAME` (the name in any case) that gives a
+    `HostName`: that Host, with all its settings.
+  - Otherwise at the distribution's own sshd, on the Host's `Port` (22 when it
+    gives none) or, without a Host, on `WslPort`. Its addresses come from
+    `wsl.exe -d NAME -e hostname -I` (at most 15 seconds; the way Microsoft's
+    WSL documentation gives); the first IPv4 address that is not a loopback
+    counts. An address that is not one of Windows' own (the default NAT
+    networking: the distribution has an address of its own) is connected to
+    directly. One of Windows' own adapters' addresses (mirrored networking,
+    `networkingMode=mirrored`, which mirrors Windows' interfaces into Linux),
+    or none, means `localhost`.
+  - At `localhost`, a program of Windows that listens on the port (on
+    127.0.0.1 or every address; WSL's own `wsl*.exe` forwarding excepted)
+    would answer in the distribution's place: the screen names it (or
+    `Windows' OpenSSH Server` when the program cannot be told, the port is 22
+    and the `sshd` service runs) and nothing is connected. A program that
+    cannot be told is only warned of, before the connection.
+  - The host key is looked up and kept as `wsl-NAME` (`[wsl-NAME]:PORT` for a
+    port other than 22), not by the address, which changes with each start
+    of WSL; a Host with a `HostName` uses its own name.
+  - The user is the Host's `User`, else the user `whoami` answered, else
+    `login as:` asks. The distributions of WSL 2 share one network, so each
+    needs its own port (and its own Host) when more than one runs an sshd.
+  - A connection that fails adds why, by how it failed: `Nothing listens on
+    port PORT of NAME (ADDRESS): its sshd is not installed, not started, or on
+    another port ...` (refused), `NAME did not answer at ADDRESS port PORT:
+    WSL's network or a firewall keeps Windows from it ...` (no answer), or
+    `For NAME, see README.txt, WSL.` (a failure after connecting, whose lines
+    come before).
 - `[c] GitHub Codespaces` runs GitHub CLI's `gh codespace list` (gh in a
   folder of `PATH`, else `C:\Program Files\GitHub CLI\gh.exe`; without a
   console window, at most 60 seconds) and lists the codespaces under

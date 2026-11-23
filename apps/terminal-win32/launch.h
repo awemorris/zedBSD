@@ -43,6 +43,9 @@
 /* The longest key of a row ("12", "w"), with its NUL. */
 #define LAUNCH_KEY_MAX		4U
 
+/* The longest IPv4 address in dotted form, with its NUL. */
+#define LAUNCH_IPV4_MAX		16U
+
 /* The most distributions read from WSL's list, and the longest name of one with its NUL. */
 #define LAUNCH_NAMES_MAX	32U
 #define LAUNCH_NAME_MAX		64U
@@ -119,5 +122,6 @@ size_t launch_leave(char *out, size_t size);
 void launch_output_text(const unsigned char *bytes, size_t size, char *text, size_t text_size);
 unsigned launch_names(const char *text, char names[][LAUNCH_NAME_MAX], unsigned most);
 int launch_first_line(const char *text, char *line, size_t size);
+int launch_first_ipv4(const char *text, char *address, size_t size);
 
 #endif

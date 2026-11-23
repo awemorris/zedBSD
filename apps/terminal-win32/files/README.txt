@@ -210,52 +210,75 @@ again.  Lines with plain names are read as they are.
 5. WSL
 ------
 
-mikuterm connects to WSL through SSH, as to any other host: an sshd runs in
-the distribution, and WSL 2 passes localhost's port on to it.
+mikuterm connects to WSL through SSH, as to any other host: the
+distribution's own sshd, on its own port 22, with nothing to change.
 
 [w] WSL on a new tab's screen asks Windows (wsl.exe -l -q) for the
 distributions and lists them; Up, Down or a number and Enter choose one, [b]
 (or Escape) goes back.  mikuterm then starts the distribution
-(wsl.exe -d <name> -e whoami, which also starts an sshd that systemd runs)
-and connects to it:
+(wsl.exe -d <name> -e whoami, which also starts an sshd that systemd runs),
+asks it for its address (wsl.exe -d <name> -e hostname -I), and connects:
 
   - when ssh/config has a Host named wsl-<name> (for example
     "Host wsl-Ubuntu-24.04"; the case does not matter), with that Host's
-    HostName, Port, User and other settings;
-  - otherwise to localhost on the port WslPort gives in config/mikuterm.conf
-    (2222 unless you change it; the settings' Behavior pane has it too).
+    Port, User and other settings, and its HostName when it gives one
+    (without one, the distribution's address as below);
+  - otherwise to the distribution's own address on the port WslPort gives
+    in config/mikuterm.conf (22 unless you change it; the settings' Behavior
+    pane has it too).  With WSL's default networking (NAT) the distribution
+    has an address of its own, which Windows reaches directly, so Windows'
+    own sshd on port 22 is no trouble.  With mirrored networking
+    (networkingMode=mirrored in .wslconfig) the distribution has Windows'
+    addresses and is reached at localhost.
 
 The user is the Host's User, or else the distribution's default user (the one
-whoami answers with); when neither is known the tab asks "login as:".
-
-All the distributions of WSL 2 share one network, so only one of them can
-listen on a port.  For one distribution, WslPort is enough.  For more, give
-each its own port and a Host:
-
-  Host wsl-Ubuntu-24.04
-      HostName localhost
-      Port 2222
-  Host wsl-Debian
-      HostName localhost
-      Port 2223
-
-When Windows has no WSL, or no distribution, or wsl.exe does not answer, the
-screen says so and stays on the hosts.
+whoami answers with); when neither is known the tab asks "login as:".  The
+host's key is kept in ssh/known_hosts under the name wsl-<name>, as WSL gives
+the distribution another address each time it starts.
 
 In the distribution (Ubuntu here):
 
   sudo apt install openssh-server
-  sudo sed -i 's/^#\?Port .*/Port 2222/' /etc/ssh/sshd_config
-  sudo service ssh start
+  sudo systemctl enable --now ssh
   mkdir -p ~/.ssh && chmod 700 ~/.ssh
   cat id_ed25519.pub >> ~/.ssh/authorized_keys
 
-(With systemd in WSL, "sudo systemctl enable --now ssh" starts it with WSL.
-Ubuntu 24.04 starts sshd from ssh.socket: after changing the port, run
-"sudo systemctl daemon-reload" and "sudo systemctl restart ssh.socket".)
+(Without systemd in WSL, "sudo service ssh start" starts sshd, again after
+each start of WSL.)
+
+When a distribution cannot be reached, the tab says which of these it is:
+
+  - Nothing listens on port 22: the distribution's sshd is not installed or
+    not started (the commands above), or it listens on another port.
+  - The distribution did not answer: WSL's network or a firewall keeps
+    Windows from it.
+  - "Windows' OpenSSH Server listens on port 22" (with mirrored networking):
+    the distribution shares Windows' ports, and Windows' own sshd has 22.
+    Give the distribution's sshd another port and tell mikuterm, as below.
+
+To use another port (2222 here), change it in the distribution:
+
+  sudo sed -i 's/^#\?Port .*/Port 2222/' /etc/ssh/sshd_config
+  sudo systemctl daemon-reload
+  sudo systemctl restart ssh.socket ssh
+
+and set "WslPort 2222" in config/mikuterm.conf, or give the distribution a
+Host in ssh/config.  The distributions of WSL 2 share one network, so two
+that both run an sshd need a port each, and a Host each:
+
+  Host wsl-Ubuntu-24.04
+      Port 22
+  Host wsl-Debian
+      Port 2223
+
+Such a Host needs no HostName: mikuterm finds the distribution's address
+each time.
+
+When Windows has no WSL, or no distribution, or wsl.exe does not answer, the
+screen says so and stays on the hosts.
 
 To open a distribution in the first tab whenever mikuterm starts, give it a
-Host (as above) and put "Connect wsl-<name>" into config/mikuterm.conf.
+Host and put "Connect wsl-<name>" into config/mikuterm.conf.
 
 
 6. config/mikuterm.conf
@@ -274,8 +297,8 @@ named in the first tab and skipped.
   Connect         the host the first tab connects to (none: the list)
   CopyOnSelect    yes: what the pointer selects is copied at once (yes)
   ConnectTimeout  how many seconds a connection may take, 0 for no limit (15)
-  WslPort         the port of the sshd in WSL, for a distribution without a
-                  Host wsl-<name> in ssh/config (2222)
+  WslPort         the port of the sshd in a WSL distribution without a
+                  Host wsl-<name> in ssh/config (22)
   X11Scale        the size of the remote X programs' windows: auto (the
                   main monitor's scale) or 100, 125, 150, 175, 200 ... 400
                   percent (auto)
