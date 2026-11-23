@@ -6,8 +6,8 @@
  */
 
 /*
- * The touch screen of the terminal (ws081-p011): the fingers scroll the
- * scrollback with libkeiland's gestures and scroll (kl_scroll, ws090-p015:
+ * The touch screen of the terminal: the fingers scroll the
+ * scrollback with libkeiland's gestures and scroll (kl_scroll:
  * its own ends below 0 and the rubber band against the grid), and play the
  * pointer's left button for taps and a long press (touch.h).
  *
@@ -24,7 +24,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* How often the view is placed while fingers are down or it glides, in milliseconds. */
 #define TOUCH_TICK_MS		16
@@ -209,7 +208,7 @@ terminal_touch_event(
 		/* Nothing else. */
 		break;
 	case TERMINAL_TOUCH_PAD:
-		/* A touch pad's fingers scroll the view (ws090-p019). */
+		/* A touch pad's fingers scroll the view. */
 		touch_pad(touch, event->y, time, event->arrival);
 		break;
 	case TERMINAL_TOUCH_PAD_STOP:
@@ -374,13 +373,13 @@ terminal_touch_take_pointer(
 uint64_t
 terminal_touch_clock(void)
 {
-	struct timespec now;
+	uint64_t now;
 
-	/* The monotonic clock. */
-	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+	/* libkeiland's monotonic clock. */
+	now = kl_clock_us();
 
 	/* Reports it in microseconds. */
-	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
+	return now;
 }
 
 /*
@@ -630,8 +629,8 @@ touch_pointer(
 
 /*
  * A touch pad's two fingers move the view by dy (pixels, as a wheel
- * scrolls: down toward the live screen) at the compositor's time
- * (ws090-p019): the scroll takes the view at their first move (from where
+ * scrolls: down toward the live screen) at the compositor's time:
+ * the scroll takes the view at their first move (from where
  * the screen has it, unless it already owns it; a glide is caught) and
  * follows them.  Fingers on the screen keep it from them.
  */
@@ -666,7 +665,7 @@ touch_pad(
 	}
 }
 
-/* The touch pad's fingers lift: the view flies on at their velocity, as the scroll throws it (ws090-p019). */
+/* The touch pad's fingers lift: the view flies on at their velocity, as the scroll throws it. */
 static void
 touch_pad_stop(
 	struct terminal_touch *touch,

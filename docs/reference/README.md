@@ -24,6 +24,11 @@ structures, constants, errors and permissions that programs and people use
 - [evdev compatibility profile](evdev.md) — experimental UAPI with current
   input-core and USB HID producers; legacy console event/key-state UAPI has
   been removed while ordinary TTY and display operations remain.
+- [Terminal](terminal.md): the desktop's terminal: its command line, the
+  settings it keeps, its settings tab, its tabs and its menus.
+- [mikuterm](mikuterm.md): the portable Windows terminal and SSH client: its
+  folder, `mikuterm.conf`, the `ssh_config` keywords and paths it reads, the
+  questions it asks, how it reads and writes known_hosts, and its menus.
 - [Agent Acceptance Test interfaces](agent-acceptance-test.md): the test
   images' mouse and keyboard injection and screen capture.
 - [Camera devices](camera.md): the /dev/camN nodes, their ownership,
@@ -52,6 +57,10 @@ structures, constants, errors and permissions that programs and people use
 - [useradd, usermod and userdel](user-administration.md): root's commands
   that add, change and remove the people's accounts through account-admin.
 
+- [pgrep and pkill](pgrep.md): the commands that find processes by name,
+  command line, user, group, parent, process group or session, and write
+  their IDs or signal them.
+
 - [gpu](gpu-command.md): root's command that lists the GPU nodes and shows
   their capabilities, displays, Vulkan, GL and video, changes a display's mode
   through the desktop session, and resets a GPU and reads its reports.
@@ -66,4 +75,4 @@ structures, constants, errors and permissions that programs and people use
 
 - [Regular-file image formatters](image-formatters.md): UFS/ZEDSWAP2 initialization and read-only pristine verification.
 
-- [Installer, install-admin and efiboot](installer.md): the amd64 UEFI installer's image and its rule, the installer's screens, the helper's requests, the installed system's layout and UEFI boot entries.
+- [Installer, installer-helper and efiboot](installer.md): the amd64 UEFI installer, its elevation through klsudo, the release it downloads, its screens, the helper's requests, the installed system's layout and UEFI boot entries.

@@ -6,28 +6,34 @@
  */
 
 /*
- * The parts of terminal, a VT100 terminal drawn with Vulkan in a
- * Wayland window.
+ * The parts of terminal, a VT100 terminal in a window of libkeiland.
  *
- * screen.c keeps the character grid and interprets what the shell writes;
- * width.c says how many cells a character takes; settings.c keeps the
- * terminal's settings between runs;
- * keys.c turns the compositor's key codes into the bytes a shell reads;
- * font.c draws the glyphs of a monospaced TrueType font into an atlas;
- * render.c draws the grid from that atlas; window.c holds the Wayland
- * window (libkeiland's application and window, WS131 p018) and turns its
- * input into the terminal's; menu.c gives the compositor the window's menus
- * (Shell, Edit, View, Session, Help) through libkeiland; tabs.c gives it
- * the window's tabs (the titlebar's TABS mode, ws035-p086); clipboard.c
- * and primary.c paste, drop and drag through libkeiland's window; main.c
- * runs a shell on a pseudo-terminal for each tab and ties them together.
+ * screen.c keeps the character grid and interprets what the program on the
+ * other end writes; width.c says how many cells a character takes;
+ * settings.c keeps the terminal's settings between runs; keys.c turns the
+ * window's key codes into the bytes a program reads; font.c draws the
+ * glyphs of a monospaced TrueType font into an atlas; render-build.c
+ * turns the grid into the quads a frame draws; window.c holds the window
+ * (libkeiland's application and window) and turns its input into the
+ * terminal's; menu.c gives the window its menus (Shell, Edit, View,
+ * Session, Help) through libkeiland; tabs.c gives it the window's tabs;
+ * clipboard.c and primary.c paste, drop and drag through libkeiland's
+ * window; run.c runs a connection for each tab and ties them together.
+ *
+ * What differs between the programs that share this terminal is behind
+ * five boundaries, each chosen when the program is linked: the other end
+ * of a tab (connection.h: connection-process.c runs a program on a
+ * pseudo-terminal), the drawing (display.h: display-vulkan.c draws with
+ * Vulkan through render.c, display-cpu.c with the processor through
+ * render-cpu.c), the pacing of the frames (terminal_window_frame_*:
+ * frame-wayland.c waits for the compositor's frame callback, frame-timer.c
+ * for a fixed time), the settings kept between runs (terminal_settings_*)
+ * and the program's entry (run.h: main.c calls terminal_run).
  */
 
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-#define VK_USE_PLATFORM_WAYLAND_KHR 1
-#include <vulkan/vulkan.h>
 #include <keiland/keiland.h>
 
 #include <stddef.h>
@@ -37,14 +43,14 @@
 #include "touch.h"
 #include "width.h"
 
-/* The compositor's frame callback the window awaits (window.c). */
-struct wl_callback;
+/* The other end of a tab (connection.h). */
+struct terminal_connection;
 
 /* The largest grid the terminal keeps, whatever the window's size. */
 #define TERMINAL_MAX_COLUMNS	240U
 #define TERMINAL_MAX_ROWS	100U
 
-/* How many lines that scrolled off the top of the screen the terminal keeps to scroll back to (ws035-p114). */
+/* How many lines that scrolled off the top of the screen the terminal keeps to scroll back to. */
 #define TERMINAL_HISTORY	1000U
 
 /* How many numeric parameters one control sequence keeps. */
@@ -54,7 +60,7 @@ struct wl_callback;
 #define TERMINAL_OSC		256U
 #define TERMINAL_TITLE		128U
 
-/* The space between the window's edge and the grid, in pixels. */
+/* The space between the window's edge and the grid, in pixels at 100 % (the font's padding is it at the screen's scale). */
 #define TERMINAL_PADDING	8U
 
 /* The default colours: light grey on a dark blue-grey, as 0xRRGGBB. */
@@ -65,7 +71,7 @@ struct wl_callback;
 #define TERMINAL_SELECTION	0x3a5a98U
 
 /*
- * The colour themes of View > Theme (ws128-p006): the dark one the
+ * The colour themes of View > Theme: the dark one the
  * terminal always had (TERMINAL_FOREGROUND on TERMINAL_BACKGROUND), a light
  * one, and white on black.  The cells keep the dark theme's colours for
  * the text's default ones; the drawing puts the theme's in their place.
@@ -75,7 +81,7 @@ struct wl_callback;
 #define TERMINAL_THEME_CONTRAST	2U
 #define TERMINAL_THEMES		3U
 
-/* The longest text Edit > Find looks for, in bytes and in characters (ws128-p006). */
+/* The longest text Edit > Find looks for, in bytes and in characters. */
 #define TERMINAL_SEARCH_BYTES	128U
 #define TERMINAL_SEARCH_LENGTH	64U
 
@@ -91,15 +97,32 @@ struct wl_callback;
 /* How many menu choices, and tab requests, wait for the main loop at most. */
 #define TERMINAL_ACTIONS	16U
 
-/* The most tabs (shells) one window has, and the longest tab title. */
-#define TERMINAL_TABS		8U
+/* The most tabs (shells) one window has (ten, as far as the keys of the tabs' places reach), and the longest tab title. */
+#define TERMINAL_TABS		10U
 #define TERMINAL_TAB_TITLE	64U
 
-/* How many pointer events wait for the main loop at most (ws035-p093). */
+/* How many pointer events wait for the main loop at most. */
 #define TERMINAL_POINTER_EVENTS	32U
 
-/* How many touch inputs wait for the main loop at most (ws081-p011). */
+/* How many touch inputs wait for the main loop at most. */
 #define TERMINAL_TOUCH_EVENTS	256U
+
+/* How many inputs of a picture's tab wait for the main loop at most. */
+#define TERMINAL_PICTURE_EVENTS	64U
+
+/*
+ * The kinds of a picture's tab's inputs (connection.h): a key pressed or
+ * released, text an input method typed, the pointer moved, a button
+ * pressed or released, the wheel turned, the keyboard's focus coming or
+ * going, and the pointer leaving the window.
+ */
+#define TERMINAL_PICTURE_KEY	1U
+#define TERMINAL_PICTURE_TEXT	2U
+#define TERMINAL_PICTURE_MOTION	3U
+#define TERMINAL_PICTURE_BUTTON	4U
+#define TERMINAL_PICTURE_AXIS	5U
+#define TERMINAL_PICTURE_FOCUS	6U
+#define TERMINAL_PICTURE_LEAVE	7U
 
 /* The kinds of pointer events the main loop takes: the left button pressed or released, a motion. */
 #define TERMINAL_POINTER_PRESS		1U
@@ -145,11 +168,15 @@ enum terminal_action {
 	TERMINAL_ACTION_FIND_PREVIOUS,
 	TERMINAL_ACTION_THEME_DARK,
 	TERMINAL_ACTION_THEME_LIGHT,
-	TERMINAL_ACTION_THEME_CONTRAST
+	TERMINAL_ACTION_THEME_CONTRAST,
+	TERMINAL_ACTION_INPUT_METHOD_OFF,
+	TERMINAL_ACTION_FORGET_PASSPHRASES,
+	TERMINAL_ACTION_SETTINGS,
+	TERMINAL_ACTION_COPY_ON_SELECT
 };
 
 /*
- * The colours of a theme (ws128-p006), as 0xRRGGBB: the text's default
+ * The colours of a theme, as 0xRRGGBB: the text's default
  * foreground and background, the selection's background, a match's
  * background and the current match's, the text on a match, and the
  * search bar's background.
@@ -182,8 +209,9 @@ struct terminal_tab_request {
  * What the menus show of the terminal's state: whether something is
  * selected (Copy), whether the clipboard holds text (Paste), the font's
  * size (Zoom, Text Size), whether the window is fullscreen and whether
- * Ambiguous-width characters are wide (ws128-p009), the theme and whether
- * there is a text to find again (ws128-p006).
+ * Ambiguous-width characters are wide, the theme, whether there is a
+ * text to find again and whether the user turned
+ * the input method off (Session > Disable Input Method).
  */
 struct terminal_menu_state {
 	int selection;
@@ -193,20 +221,27 @@ struct terminal_menu_state {
 	int ambiguous_wide;
 	unsigned theme;
 	int can_find_again;
+	int input_method_off;
 };
 
 /*
  * The terminal's own settings kept between runs (settings.c, the desktop's
- * settings terminal.* through libkeiland, WS135): whether Ambiguous-width
- * characters are wide (ws128-p009), the font's size in pixels and the
- * colour theme (ws128-p006).  All zero is the default (a size of 0: the
- * size the terminal is started with).
+ * settings terminal.* through libkeiland; the program's own file for
+ * another program): whether Ambiguous-width characters are wide, the
+ * font's size in pixels, the colour theme and whether the text the
+ * pointer selects is copied to the clipboard as well.  All zero is the
+ * default (a size of 0: the size the terminal is started with).
  */
 struct terminal_settings {
 	int ambiguous_wide;
 	unsigned font_size;
 	unsigned theme;
+	int copy_on_select;
 };
+
+/* The keys' modes (terminal_window.key_modes): DECCKM's cursor keys and DECKPAM's keypad. */
+#define TERMINAL_KEYS_CURSOR	0x1U
+#define TERMINAL_KEYS_KEYPAD	0x2U
 
 /* The modifier bits of wl_keyboard.modifiers, as the compositor reports them. */
 #define TERMINAL_MODIFIER_SHIFT		0x01U
@@ -252,7 +287,7 @@ struct terminal_screen {
 	/*
 	 * Nonzero while a character written in the last column has left the
 	 * cursor there with its wrap still to come (the right margin of xterm
-	 * and the VT100, terminfo's am and xenl; ws128-p010, BUG-150).  The
+	 * and the VT100, terminfo's am and xenl).  The
 	 * next printed character wraps first; a carriage return, a line feed,
 	 * a move or an edit cancels the wrap, and SGR and the modes keep it.
 	 */
@@ -260,6 +295,17 @@ struct terminal_screen {
 
 	/* Whether the cursor is shown (DECTCEM, CSI ? 25 h / l). */
 	int cursor_visible;
+
+	/*
+	 * The keys' modes the program set: the cursor keys send ESC O, not
+	 * ESC [ (DECCKM, CSI ? 1 h / l); the keypad sends its application
+	 * sequences, not its characters (DECKPAM ESC =, DECKPNM ESC >); a paste
+	 * is sent between ESC [ 200 ~ and ESC [ 201 ~ (bracketed paste,
+	 * CSI ? 2004 h / l).  All are off after a reset.
+	 */
+	int cursor_keys_application;
+	int keypad_application;
+	int bracketed_paste;
 
 	/* The rows scrolled by a line feed at the bottom (DECSTBM), inclusive. */
 	unsigned scroll_top;
@@ -273,7 +319,7 @@ struct terminal_screen {
 
 	/*
 	 * Whether Ambiguous-width characters written from now on take two cells
-	 * (View > Treat Ambiguous-Width Characters as Wide, ws128-p009).  Cells
+	 * (View > Treat Ambiguous-Width Characters as Wide).  Cells
 	 * already written keep their width.
 	 */
 	int ambiguous_wide;
@@ -286,7 +332,7 @@ struct terminal_screen {
 
 	/*
 	 * The OSC string being read (its first TERMINAL_OSC - 1 bytes), and the
-	 * title OSC 0 or 2 last set (ws035-p091; empty until one is set).
+	 * title OSC 0 or 2 last set (empty until one is set).
 	 */
 	char osc[TERMINAL_OSC];
 	unsigned osc_length;
@@ -304,17 +350,17 @@ struct terminal_screen {
 	int selected;
 
 	/*
-	 * A range selected with the pointer (ws035-p093): whether there is one,
+	 * A range selected with the pointer: whether there is one,
 	 * and its first and last cells (column, line) in reading order.  A line
 	 * is numbered from the first the screen ever showed, so the range stays
-	 * on its text while the text scrolls (ws035-p114).
+	 * on its text while the text scrolls.
 	 */
 	int range;
 	unsigned long range_from[2];
 	unsigned long range_to[2];
 
 	/*
-	 * The scrollback (ws035-p114): the lines that scrolled off the top of
+	 * The scrollback: the lines that scrolled off the top of
 	 * the whole screen, a ring of TERMINAL_HISTORY lines of
 	 * TERMINAL_MAX_COLUMNS cells each, where the oldest line is in the
 	 * ring and how many are kept.  scrolled counts every line that ever
@@ -322,7 +368,7 @@ struct terminal_screen {
 	 * oldest line kept is line scrolled - history_count.  view is how many
 	 * lines back from the live screen the window shows (0: the live
 	 * screen); new output keeps a view that is back on the same text.
-	 * view_offset (ws081-p011) moves the text down by that many pixels
+	 * view_offset moves the text down by that many pixels
 	 * within a line while the fingers scroll it smoothly (negative past the
 	 * live screen, a line or more past the oldest line kept); the wheel and
 	 * the keys set it back to 0.
@@ -336,7 +382,7 @@ struct terminal_screen {
 };
 
 /*
- * One pointer event for the main loop (ws035-p093): its kind
+ * One pointer event for the main loop: its kind
  * (TERMINAL_POINTER_*), where it was in the surface, in pixels, its time in
  * milliseconds and its serial (a press's starts a drag).
  */
@@ -347,6 +393,23 @@ struct terminal_pointer_event {
 	uint32_t time;
 	uint32_t serial;
 	uint32_t modifiers;
+};
+
+/*
+ * One input of a picture's tab, as the window had it: its kind
+ * (TERMINAL_PICTURE_*), a key's or a button's evdev code, whether it is
+ * pressed (a focus: whether it came), where the pointer is (the window's
+ * pixels), the wheel's distance and the text typed (UTF-8).
+ */
+struct terminal_picture_event {
+	unsigned kind;
+	uint32_t code;
+	int pressed;
+	int32_t x;
+	int32_t y;
+	double dx;
+	double dy;
+	char text[KL_WINDOW_TEXT_MAX];
 };
 
 /*
@@ -364,13 +427,26 @@ struct terminal_font {
 	struct truetype_face *face;
 
 	/*
-	 * The fallback font (ws128-p009), which draws the characters the face
+	 * The fallback font, which draws the characters the face
 	 * has no glyph for (CJK): its file, kept in memory, and its face (NULL
 	 * without one).  It is drawn at the face's size.
 	 */
 	void *fallback_data;
 	size_t fallback_size;
 	struct truetype_face *fallback_face;
+
+	/*
+	 * The colour emoji font, which draws in its own colours the characters
+	 * neither the face nor the fallback has: its path (the caller's, NULL
+	 * for none), whether it has been tried (it is opened the first time
+	 * such a character is drawn, and a file that cannot be opened is not
+	 * tried again), its file, kept in memory, and its face.
+	 */
+	const char *emoji_path;
+	int emoji_tried;
+	void *emoji_data;
+	size_t emoji_size;
+	struct truetype_face *emoji_face;
 
 	/* The size glyphs are drawn at, in pixels. */
 	unsigned pixels_size;
@@ -379,6 +455,9 @@ struct terminal_font {
 	unsigned cell_width;
 	unsigned cell_height;
 	int baseline;
+
+	/* The space between the window's edge and the grid in pixels: TERMINAL_PADDING at the screen's scale, set by the caller. */
+	unsigned padding;
 
 	/* The atlas image's size, its pixels (B8G8R8A8, borrowed from the renderer) and its row pitch. */
 	unsigned atlas_width;
@@ -403,7 +482,7 @@ struct terminal_font {
 	/*
 	 * The first of the two slots side by side that hold the replacement
 	 * character two cells wide, which a wide character shows when the
-	 * atlas is full (ws128-p009).
+	 * atlas is full.
 	 */
 	unsigned wide_replacement;
 
@@ -416,35 +495,25 @@ struct terminal_font {
 	uint32_t *keys;
 	uint32_t *values;
 	unsigned table_size;
-};
 
-/*
- * One swapchain image the renderer draws into; the image is the swapchain's.
- */
-struct terminal_target {
-	VkImage image;
-	VkImageView view;
-	VkFramebuffer framebuffer;
-	VkSemaphore rendered;
 	/*
-	 * The image's frame recorded (made at its first frame, recorded again
-	 * only when what it records changes: the vertices' count or the
-	 * background), and what it was recorded with; recorded is zero until
-	 * a recording may be submitted again as it is.
+	 * Which slots hold a colour glyph, one byte a slot (nonzero for
+	 * colour): such a slot holds the glyph's premultiplied colours rather
+	 * than a coverage, and the quads that show it say so to the drawing.
 	 */
-	VkCommandBuffer command;
-	uint32_t vertex_count;
-	uint32_t ground;
-	int recorded;
+	unsigned char *colours;
 };
 
 /*
- * The Vulkan objects of the terminal's window.
- *
- * They are made once the window is configured and remade in part when the
- * window changes size.
+ * The floats of one vertex (position and atlas place, then the two
+ * colours), and the vertices of one quad.  The foreground's alpha is how
+ * the atlas is read: 1 for a coverage between the two colours, 0 for a
+ * colour glyph's own premultiplied colours over the background.
  */
-/* The most rows of a view a renderer keeps (a view between lines shows one more at each end). */
+#define TERMINAL_VERTEX_FLOATS	12U
+#define TERMINAL_QUAD_VERTICES	6U
+
+/* The most rows of a view the drawing keeps (a view between lines shows one more at each end). */
 #define TERMINAL_RENDER_ROWS	(TERMINAL_MAX_ROWS + 4U)
 
 /* A part of a frame's vertices that was built: its first vertex and how many. */
@@ -496,111 +565,66 @@ struct terminal_render_key {
 	uint32_t height;
 };
 
-struct terminal_renderer {
-	/* The instance, the surface of the window, the device and its queue. */
-	VkInstance instance;
-	VkSurfaceKHR surface;
-	VkPhysicalDevice physical;
-	VkDevice device;
-	VkQueue queue;
-	uint32_t family;
+/*
+ * The quads of a frame (render-build.c), which the drawing shows: every
+ * cell of the grid, the cursor, the search bar and the input method's
+ * composed text as two triangles of six vertices that sample the glyph
+ * atlas.
+ *
+ * One lives as long as the drawing that owns it.  Rows the same as in the
+ * frame before, at the same place, are not built again: their vertices
+ * stay where the frame before built them.  The parts built (ranges) are
+ * what the drawing has to take again; a list that fills hands its next
+ * part to store at once.
+ */
+struct terminal_build {
+	/* The vertices, TERMINAL_VERTEX_FLOATS floats each, and how many fit. */
+	float *vertices;
+	size_t capacity;
 
-	/* The swapchain, its format and extent, and one target per image. */
-	VkSwapchainKHR swapchain;
-	VkFormat format;
-	VkExtent2D extent;
-	struct terminal_target *targets;
-	uint32_t count;
-
-	/* The pass and the pipeline that draw cells, and what the pipeline binds. */
-	VkRenderPass pass;
-	VkDescriptorSetLayout set_layout;
-	VkPipelineLayout layout;
-	VkPipeline pipeline;
-	VkDescriptorPool descriptor_pool;
-	VkDescriptorSet set;
-	VkSampler sampler;
-
-	/*
-	 * The glyph atlas: an optimal image in the device's own memory and its
-	 * view, and the host-written buffer the font draws into (staging,
-	 * mapped for good at staging_map).  The rows the font wrote are copied
-	 * from the buffer into the image by the upload command buffer, which
-	 * runs before the frame that needs them; atlas_defined is nonzero once
-	 * the image has had its first copy (its layout is then the shader's).
-	 */
-	VkImage atlas;
-	VkDeviceMemory atlas_memory;
-	VkImageView atlas_view;
-	VkBuffer staging;
-	VkDeviceMemory staging_memory;
-	void *staging_map;
-	VkCommandBuffer upload;
-	int atlas_defined;
-
-	/* The vertices of one frame, in host-visible memory mapped for good. */
-	VkBuffer vertices;
-	VkDeviceMemory vertex_memory;
-	void *vertex_map;
-	size_t vertex_capacity;
-
-	/*
-	 * The processor reaches the mapping around its cache, so a frame's
-	 * rows are built in the host's own memory (vertex_build, each at its
-	 * place) and only the doublewords that changed in the parts built
-	 * (ranges, range_count of them, in vertices) are stored into the
-	 * mapping (render_upload); vertex_kept is a copy of the mapping, of
-	 * which the first vertex_known doublewords were written.
-	 */
-	float *vertex_build;
-	float *vertex_kept;
-	size_t vertex_known;
+	/* The parts of the frame's vertices built, in order, and how many. */
 	struct terminal_render_range ranges[TERMINAL_RENDER_ROWS + 1U];
 	unsigned range_count;
 
 	/*
-	 * The rows of the view as they were last drawn (rows, their cells in
+	 * The rows of the view as they were last built (rows, their cells in
 	 * row_cells, TERMINAL_MAX_COLUMNS a row): a row the same as in the
 	 * frame before, at the same place, is neither built nor stored again.
 	 * row_frame counts the frames; what every row depends on beside its
-	 * own state is kept in row_key, and a change of it drops them all.
+	 * own state is kept in row_key, and a change of it drops them all
+	 * (key_changed says the last frame's key changed).
 	 */
 	struct terminal_render_row *rows;
 	struct terminal_cell *row_cells;
 	uint64_t row_frame;
 	struct terminal_render_key row_key;
+	int key_changed;
 
-	/*
-	 * The command pool (each image has its command buffer, its target's),
-	 * the fence that says the frame finished (pending while a frame
-	 * submitted has not been waited for) and the acquire semaphore.
-	 */
-	VkCommandPool pool;
-	VkFence fence;
-	int pending;
-	VkSemaphore acquired;
+	/* The size of the frame, in pixels, which the drawing sets before each frame. */
+	uint32_t width;
+	uint32_t height;
 
-	/* The Vulkan call that failed last, for the error line. */
-	const char *operation;
+	/* Stores a part at once when the list of parts is full (the drawing's). */
+	void (*store)(void *data, size_t first, size_t count);
+	void *store_data;
 };
 
 /*
- * The Wayland window: libkeiland's application and its window (WS131
- * p018: the connection, the toplevel, the seat's input, the key repeat,
- * the menus, the tabs, the selections and drag and drop; the terminal draws
- * on its surface with its own Vulkan), and what its input has left for the
- * main loop.
+ * The window: libkeiland's application and its window (the
+ * connection, the toplevel, the seat's input, the key repeat, the menus,
+ * the tabs, the selections and drag and drop; the drawing shows the frames
+ * on it), and what its input has left for the main loop.
  */
 struct terminal_window {
 	/* libkeiland's application and window. */
 	struct kl_app *app;
 	struct kl_window *kui;
 
-	/* The touch inputs not yet taken by the main loop, oldest first (ws081-p011; a full queue drops the newest). */
+	/* The touch inputs not yet taken by the main loop, oldest first (a full queue drops the newest). */
 	struct terminal_touch_event touches[TERMINAL_TOUCH_EVENTS];
 	unsigned touch_count;
 
-	/* Where the pointer is over the surface (pixels), and its events not yet taken by the main loop (ws035-p093). */
+	/* Where the pointer is over the surface (pixels), and its events not yet taken by the main loop. */
 	int32_t pointer_x;
 	int32_t pointer_y;
 	struct terminal_pointer_event pointer_events[TERMINAL_POINTER_EVENTS];
@@ -611,18 +635,29 @@ struct terminal_window {
 	uint32_t height;
 	int resized;
 
+	/* The scale the window is drawn at (in 96ths, kl_window_scale), and whether it changed since it was last taken. */
+	unsigned scale;
+	int rescaled;
+
 	/* Whether the compositor asked the window to close. */
 	int closed;
 
 	/* The modifiers held, in the bits of wl_keyboard.modifiers (TERMINAL_MODIFIER_*). */
 	uint32_t modifiers;
 
+	/*
+	 * The keys' modes of the active tab's program (TERMINAL_KEYS_*), which
+	 * the main loop sets before the keys are read: they choose the bytes
+	 * the cursor keys and the keypad send.
+	 */
+	unsigned key_modes;
+
 	/* The bytes the keys pressed since the last read produced, for the shell. */
 	unsigned char input[256];
 	size_t input_length;
 
 	/*
-	 * The input method's text being composed (BUG-155, text-input-v3
+	 * The input method's text being composed (text-input-v3
 	 * through libkeiland's window): shown over the cells from the cursor
 	 * until it is committed (its bytes then go to the shell like typed
 	 * keys) or replaced; empty for none.  preedit_begin and preedit_end
@@ -643,8 +678,8 @@ struct terminal_window {
 	char last_commit[KL_WINDOW_TEXT_MAX];
 
 	/*
-	 * The view's scrolling the main loop has not yet carried out
-	 * (ws035-p114): wheel notches and Shift+Page Up or Down pages, each
+	 * The view's scrolling the main loop has not yet carried out:
+	 * wheel notches and Shift+Page Up or Down pages, each
 	 * positive going back into the scrollback and negative toward the live
 	 * screen; wheel is the wheel's distance not yet a whole notch.
 	 */
@@ -655,11 +690,11 @@ struct terminal_window {
 	/* Whether the compositor last configured the window fullscreen. */
 	int fullscreen;
 
-	/* The colour theme the window is drawn in (TERMINAL_THEME_*, ws128-p006). */
+	/* The colour theme the window is drawn in (TERMINAL_THEME_*). */
 	unsigned theme;
 
 	/*
-	 * Edit > Find (ws128-p006): whether the search bar is open (the keys
+	 * Edit > Find: whether the search bar is open (the keys
 	 * then edit the text looked for instead of going to the shell), the
 	 * text (UTF-8, search_length bytes), whether it changed since the main
 	 * loop last looked, and a step the main loop has yet to take (1 to the
@@ -691,23 +726,56 @@ struct terminal_window {
 
 	/*
 	 * The menus (menu.c): whether the window shows them (not without the
-	 * compositor's System Menu), the state they last showed, and the
-	 * actions chosen but not yet carried out, oldest first.
+	 * compositor's System Menu), whether they have Session > Disable Input
+	 * Method and Session > Forget Remembered Passphrases, whether Alt+F11 is
+	 * the shortcut of View > Treat Ambiguous-Width
+	 * Characters as Wide and whether Alt+Enter is View > Fullscreen's in the
+	 * place of F11 (the program asked for them before they open), the
+	 * state they last showed, and the actions chosen but not yet carried
+	 * out, oldest first.
 	 */
 	int menu_shown;
+	int input_method_item;
+	int ambiguous_wide_key;
+	int fullscreen_alt_enter;
+	int forget_item;
 	struct terminal_menu_state menu_state;
 	uint32_t actions[TERMINAL_ACTIONS];
 	unsigned action_count;
 
-	/* A drop on the window waiting for the main loop to paste it (clipboard.c, ws035-p088). */
+	/* A drop on the window waiting for the main loop to paste it (clipboard.c). */
 	int drop_pending;
 
 	/*
-	 * The pacing of the frames (pace.h): the frame callback asked for with
-	 * the frame last shown, until the compositor answers it (NULL when
-	 * none is awaited), and the state it keeps with the inputs.
+	 * The settings tab (settings-page.c): whether it is the active tab
+	 * (the window's input then goes to its widgets), and whether the menus
+	 * have Shell > Settings (the program gave the tab what it needs).
 	 */
-	struct wl_callback *pace_callback;
+	int page_active;
+	int settings_item;
+	int new_window_item;
+
+	/*
+	 * A picture's tab (connection.h): whether it is the active tab (the
+	 * window's keys, text and pointer then go to it as they are), and its
+	 * inputs not yet taken by the main loop, oldest first (a motion takes
+	 * the place of a motion just before it; a full queue drops the
+	 * newest).
+	 */
+	int picture_active;
+	struct terminal_picture_event picture_events[TERMINAL_PICTURE_EVENTS];
+	unsigned picture_event_count;
+
+	/* Whether the window has the keyboard's focus (it has when it opens). */
+	int focused;
+
+	/*
+	 * The pacing of the frames (pace.h): what the pacing's implementation
+	 * awaits for the frame last shown (frame-wayland.c: the compositor's
+	 * frame callback, NULL when none is awaited), and the state it keeps
+	 * with the inputs.
+	 */
+	void *pace_callback;
 	struct terminal_pace pace;
 };
 
@@ -747,35 +815,42 @@ void terminal_settings_load(struct terminal_settings *settings);
 int terminal_settings_save(const struct terminal_settings *settings);
 
 /* The key codes (keys.c). */
-size_t terminal_key_bytes(uint32_t key, uint32_t modifiers, unsigned char *bytes, size_t size);
+size_t terminal_key_bytes(uint32_t key, uint32_t modifiers, unsigned modes, unsigned char *bytes, size_t size);
+int terminal_key_keypad(uint32_t key);
 
 /* The glyph atlas (font.c). */
-int terminal_font_open(struct terminal_font *font, const char *path, unsigned pixels);
+int terminal_font_open(struct terminal_font *font, const char *path, const char *companion, unsigned pixels);
 int terminal_font_attach(struct terminal_font *font, unsigned char *pixels, size_t row_pitch, unsigned width, unsigned height);
 int terminal_font_resize(struct terminal_font *font, unsigned pixels);
 int terminal_font_fallback(struct terminal_font *font, const char *path);
+void terminal_font_emoji(struct terminal_font *font, const char *path);
+int terminal_font_colour(const struct terminal_font *font, unsigned slot);
 unsigned terminal_font_slot(struct terminal_font *font, uint32_t codepoint);
 unsigned terminal_font_wide_slot(struct terminal_font *font, uint32_t codepoint);
 void terminal_font_close(struct terminal_font *font);
 
-/* The drawing (render.c). */
-VkResult terminal_renderer_open(struct terminal_renderer *renderer, struct terminal_window *window, struct terminal_font *font);
-VkResult terminal_renderer_resize(struct terminal_renderer *renderer, uint32_t width, uint32_t height);
-VkResult terminal_renderer_draw(struct terminal_renderer *renderer, struct terminal_screen *screen, struct terminal_font *font, const struct terminal_window *window);
-VkResult terminal_renderer_idle(struct terminal_renderer *renderer);
-void terminal_perf_step(const char *step, unsigned bytes);
-void terminal_renderer_close(struct terminal_renderer *renderer);
+/* The quads of a frame (render-build.c). */
+int terminal_build_open(struct terminal_build *build);
+uint32_t terminal_build_frame(struct terminal_build *build, struct terminal_screen *screen, struct terminal_font *font, const struct terminal_window *window);
+const struct terminal_theme *terminal_build_theme(const struct terminal_window *window);
+void terminal_build_close(struct terminal_build *build);
 
 /* The window (window.c). */
-int terminal_window_open(struct terminal_window *window, const char *display, uint32_t width, uint32_t height);
-int terminal_window_dispatch(struct terminal_window *window, struct kl_process *const *shells, unsigned count, int timeout, unsigned *ready);
+int terminal_window_open(struct terminal_window *window, const char *display, const char *application, const char *title, unsigned present, uint32_t width, uint32_t height);
+int terminal_window_dispatch(struct terminal_window *window, struct terminal_connection *const *connections, unsigned count, int timeout, unsigned *ready);
 void terminal_window_close(struct terminal_window *window);
 void terminal_window_type(struct terminal_window *window, const char *bytes, size_t length);
 void terminal_window_set_fullscreen(struct terminal_window *window, int fullscreen);
+uint64_t terminal_clock(void);
+int terminal_perf_on(void);
+uint64_t terminal_perf_now_us(void);
+void terminal_perf_step(const char *step, unsigned bytes);
+
+/* The pacing of the frames (frame-wayland.c or frame-timer.c). */
 int terminal_window_frame_wait(const struct terminal_window *window, uint64_t now);
 int terminal_window_frame_ask(struct terminal_window *window, uint64_t now);
 void terminal_window_frame_shown(struct terminal_window *window, int asked, int error);
-uint64_t terminal_clock(void);
+void terminal_window_frame_forget(struct terminal_window *window);
 
 /* The tabs in the titlebar (tabs.c). */
 void terminal_tabs_show(struct terminal_window *window, const struct terminal_tab_view *tabs, unsigned count, uint32_t active);

@@ -1,0 +1,12 @@
+# The installer, run as root once the person allowed it (klsudo installer):
+# it writes the disks of this computer through its helper.
+program /bin/installer
+argv
+title Install zedBSD
+title.ja zedBSD のインストール
+message The installer will run as the administrator: it can erase and write the disks of this computer.
+message.ja インストーラが管理者として動き、このコンピュータのディスクを消去して書き込めるようになります。
+wheel consent
+others refuse
+streams input output error
+display wayland

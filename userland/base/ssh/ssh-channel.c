@@ -23,15 +23,14 @@
 /* The global request that closes the door to further sessions (OpenSSH PROTOCOL 2.2). */
 #define GLOBAL_NO_MORE_SESSIONS		"no-more-sessions@openssh.com"
 
-/* The local window level below which consumed bytes are given back to the peer: half of the full window. */
-#define CHANNEL_WINDOW_HALF		(SSH_CHANNEL_WINDOW / 2U)
-
 /* The most a window may hold: 2^32 - 1 (RFC 4254 5.2). */
 #define CHANNEL_WINDOW_LIMIT		0xffffffffU
 
 /* The text sent with a channel open failure for each reason; the language tag is empty. */
 #define OPEN_FAILURE_PROHIBITED_TEXT	"administratively prohibited"
 #define OPEN_FAILURE_SHORTAGE_TEXT	"resource shortage"
+#define OPEN_FAILURE_CONNECT_TEXT	"connect failed"
+#define OPEN_FAILURE_UNKNOWN_TEXT	"unknown channel type"
 
 /* One row of the table of request names: the name on the wire and the type it stands for. */
 struct request_name {
@@ -64,11 +63,13 @@ static const struct request_name request_names[] = {
 	{ NULL, SSH_CREQ_OTHER }
 };
 
-static struct ssh_channel *take_free_slot(struct ssh_channels *channels);
+static struct ssh_channel *take_free_slot(struct ssh_channels *channels, int session);
 static void reset_slot(struct ssh_channel *channel);
 static int slot_in_table(const struct ssh_channels *channels, const struct ssh_channel *channel);
 static int read_message_number(struct ssh_reader *reader, unsigned first, unsigned second, unsigned *message);
 static void put_open_failure(struct ssh_buf *out, uint32_t recipient, uint32_t reason, const char *text);
+static int read_open(struct ssh_reader *reader, const uint8_t **type, size_t *type_size, uint32_t *sender, uint32_t *window, uint32_t *packet);
+static int put_refusal(struct ssh_buf *out, uint32_t recipient, uint32_t reason, const char *text);
 static void record_error(struct ssh_buf *out, int error);
 static int name_is(const uint8_t *name, size_t size, const char *text);
 static enum ssh_channel_request_type find_request_type(const uint8_t *name, size_t size);
@@ -86,7 +87,7 @@ static int parse_request_exit_status(struct ssh_reader *reader, struct ssh_chann
 static int parse_request_exit_signal(struct ssh_reader *reader, struct ssh_channel_request *request);
 
 /*
- * Clears the table: every slot free, no_more_sessions 0.
+ * Clears the table: every slot free, no_more_sessions and keep_first 0.
  */
 void
 ssh_channels_init(
@@ -103,8 +104,9 @@ ssh_channels_init(
 		channels->channel[index].user = NULL;
 	}
 
-	/* Allows sessions until the peer says it will open no more. */
+	/* Allows sessions until the peer says it will open no more; any channel may take slot 0. */
 	channels->no_more_sessions = 0;
+	channels->keep_first = 0;
 }
 
 /*
@@ -118,33 +120,76 @@ ssh_channel_open_session(
 	struct ssh_buf *out,
 	struct ssh_channel **channel)
 {
+	int error;
+
+	/* Opens a session: the whole window, and no data of its own after the packet size. */
+	error = ssh_channel_open(channels, CHANNEL_TYPE_SESSION, SSH_CHANNEL_WINDOW, NULL, 0, out, channel);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the open request is queued and the channel waits for the answer. */
+	return 0;
+}
+
+/*
+ * Takes a free slot for a channel this side opens of type with a window
+ * of window_size and appends its CHANNEL_OPEN, with the type's data, to
+ * out.
+ */
+int
+ssh_channel_open(
+	struct ssh_channels *channels,
+	const char *type,
+	uint32_t window_size,
+	const uint8_t *data,
+	size_t data_size,
+	struct ssh_buf *out,
+	struct ssh_channel **channel)
+{
 	struct ssh_channel *slot;
+	int session;
+	int compare;
 	int error;
 
 	/* Starts with no channel found. */
 	*channel = NULL;
+
+	/* Refuses no type, a window this side cannot keep up, and data that is not there. */
+	if (type == NULL)
+		return EINVAL;
+	if (window_size < 1 || window_size > SSH_CHANNEL_WINDOW)
+		return EINVAL;
+	if (data_size > 0 && data == NULL)
+		return EINVAL;
 
 	/* Does nothing when the output has already failed. */
 	error = ssh_buf_error(out);
 	if (error != 0)
 		return error;
 
-	/* Reports that every slot is in use. */
-	slot = take_free_slot(channels);
+	/* Reports that every slot the type may take is in use (slot 0 is the session's when it is kept). */
+	compare = strcmp(type, CHANNEL_TYPE_SESSION);
+	session = 0;
+	if (compare == 0)
+		session = 1;
+	slot = take_free_slot(channels, session);
 	if (slot == NULL)
 		return EAGAIN;
 
 	/* Starts the channel: waiting for the peer's answer, with the whole window offered. */
 	slot->state = SSH_CHANNEL_OPENING;
-	slot->local_window = SSH_CHANNEL_WINDOW;
+	slot->local_window = window_size;
+	slot->window_size = window_size;
 	slot->user = NULL;
 
-	/* Writes the open request: type, our number, the window and the largest data packet we accept. */
+	/* Writes the open request: type, our number, the window, the largest data packet we accept, the type's data. */
 	ssh_buf_put_u8(out, SSH_MSG_CHANNEL_OPEN);
-	ssh_buf_put_cstring(out, CHANNEL_TYPE_SESSION);
+	ssh_buf_put_cstring(out, type);
 	ssh_buf_put_u32(out, slot->local_id);
-	ssh_buf_put_u32(out, SSH_CHANNEL_WINDOW);
+	ssh_buf_put_u32(out, window_size);
 	ssh_buf_put_u32(out, SSH_CHANNEL_PACKET);
+	if (data_size > 0)
+		ssh_buf_put_bytes(out, data, data_size);
 
 	/* Gives the slot back when the request could not be queued. */
 	error = ssh_buf_error(out);
@@ -177,7 +222,6 @@ ssh_channel_accept_open(
 	struct ssh_channel *slot;
 	const uint8_t *type;
 	size_t type_size;
-	unsigned message;
 	uint32_t sender;
 	uint32_t window;
 	uint32_t packet;
@@ -189,16 +233,9 @@ ssh_channel_accept_open(
 
 	/* Reads the framing: message number, type, sender, window, packet size. */
 	ssh_reader_init(&reader, payload, size);
-	error = read_message_number(&reader, SSH_MSG_CHANNEL_OPEN, 0, &message);
+	error = read_open(&reader, &type, &type_size, &sender, &window, &packet);
 	if (error != 0)
 		return error;
-	ssh_reader_get_string(&reader, &type, &type_size);
-	sender = ssh_reader_get_u32(&reader);
-	window = ssh_reader_get_u32(&reader);
-	packet = ssh_reader_get_u32(&reader);
-	error = ssh_reader_error(&reader);
-	if (error != 0)
-		return EINVAL;
 
 	/* Does nothing more when the output has already failed. */
 	error = ssh_buf_error(out);
@@ -229,7 +266,7 @@ ssh_channel_accept_open(
 	}
 
 	/* Refuses a session when every slot is in use. */
-	slot = take_free_slot(channels);
+	slot = take_free_slot(channels, 1);
 	if (slot == NULL) {
 		put_open_failure(out, sender, SSH_OPEN_RESOURCE_SHORTAGE, OPEN_FAILURE_SHORTAGE_TEXT);
 		error = ssh_buf_error(out);
@@ -245,6 +282,7 @@ ssh_channel_accept_open(
 	slot->state = SSH_CHANNEL_OPEN;
 	slot->remote_id = sender;
 	slot->local_window = SSH_CHANNEL_WINDOW;
+	slot->window_size = SSH_CHANNEL_WINDOW;
 	slot->remote_window = window;
 	slot->remote_packet = packet;
 	if (slot->remote_packet > SSH_CHANNEL_PACKET)
@@ -267,6 +305,201 @@ ssh_channel_accept_open(
 
 	/* Succeeded: the channel is open and the confirmation is queued. */
 	*channel = slot;
+	return 0;
+}
+
+/*
+ * Reads a CHANNEL_OPEN from the peer whose answer this side gives later.
+ *
+ * As in ssh_channel_accept_open, the framing is read before anything
+ * else, a refusal answers at once, and nothing of the table changes for a
+ * malformed message.
+ */
+int
+ssh_channel_take_open(
+	struct ssh_channels *channels,
+	const uint8_t *payload,
+	size_t size,
+	const char *type,
+	uint32_t window_size,
+	struct ssh_buf *out,
+	struct ssh_channel **channel,
+	const uint8_t **data,
+	size_t *data_size)
+{
+	struct ssh_reader reader;
+	struct ssh_channel *slot;
+	const uint8_t *name;
+	size_t name_size;
+	uint32_t sender;
+	uint32_t window;
+	uint32_t packet;
+	int is_type;
+	int error;
+
+	/* Starts with no channel and no data. */
+	*channel = NULL;
+	*data = NULL;
+	*data_size = 0;
+
+	/* Refuses a window this side cannot keep up, or no type at all. */
+	if (type == NULL || window_size < 1 || window_size > SSH_CHANNEL_WINDOW)
+		return EINVAL;
+
+	/* Reads the framing: message number, type, sender, window, packet size. */
+	ssh_reader_init(&reader, payload, size);
+	error = read_open(&reader, &name, &name_size, &sender, &window, &packet);
+	if (error != 0)
+		return error;
+
+	/* Does nothing more when the output has already failed. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Only the type asked for is taken; every other type gets the same refusal as on the server side. */
+	is_type = name_is(name, name_size, type);
+	if (is_type == 0) {
+		error = put_refusal(out, sender, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, OPEN_FAILURE_PROHIBITED_TEXT);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A peer that accepts no data at all cannot be sent anything: a protocol fault. */
+	if (packet < 1)
+		return EPROTO;
+
+	/* Refuses the open when every slot it may take is in use (slot 0 is the session's when it is kept). */
+	slot = take_free_slot(channels, 0);
+	if (slot == NULL) {
+		error = put_refusal(out, sender, SSH_OPEN_RESOURCE_SHORTAGE, OPEN_FAILURE_SHORTAGE_TEXT);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Keeps the peer's side; the channel waits for this side's answer, with the window it will offer. */
+	slot->state = SSH_CHANNEL_ANSWERING;
+	slot->remote_id = sender;
+	slot->local_window = window_size;
+	slot->window_size = window_size;
+	slot->remote_window = window;
+	slot->remote_packet = packet;
+	if (slot->remote_packet > SSH_CHANNEL_PACKET)
+		slot->remote_packet = SSH_CHANNEL_PACKET;
+	slot->user = NULL;
+
+	/* Succeeded: the slot waits, and the type's own data points into the payload. */
+	*channel = slot;
+	*data = reader.data + reader.offset;
+	*data_size = ssh_reader_left(&reader);
+	return 0;
+}
+
+/*
+ * Answers an open taken by ssh_channel_take_open.
+ */
+int
+ssh_channel_answer_open(
+	struct ssh_channels *channels,
+	struct ssh_channel *channel,
+	int accept,
+	struct ssh_buf *out)
+{
+	int in_table;
+	int error;
+
+	/* Only a slot of this table that waits for its answer is answered. */
+	if (channel == NULL)
+		return EINVAL;
+	in_table = slot_in_table(channels, channel);
+	if (in_table == 0 || channel->state != SSH_CHANNEL_ANSWERING)
+		return EINVAL;
+
+	/* Does nothing when the output has already failed. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* A refusal tells the peer the connection could not be made, and frees the slot. */
+	if (!accept) {
+		put_open_failure(out, channel->remote_id, SSH_OPEN_CONNECT_FAILED, OPEN_FAILURE_CONNECT_TEXT);
+		error = ssh_buf_error(out);
+		if (error != 0)
+			return error;
+		reset_slot(channel);
+		return 0;
+	}
+
+	/* Writes the confirmation: the peer's number, ours, our window and our packet size. */
+	ssh_buf_put_u8(out, SSH_MSG_CHANNEL_OPEN_CONFIRMATION);
+	ssh_buf_put_u32(out, channel->remote_id);
+	ssh_buf_put_u32(out, channel->local_id);
+	ssh_buf_put_u32(out, channel->window_size);
+	ssh_buf_put_u32(out, SSH_CHANNEL_PACKET);
+
+	/* Leaves the channel waiting when the confirmation could not be queued. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the channel is open both ways. */
+	channel->state = SSH_CHANNEL_OPEN;
+	return 0;
+}
+
+/*
+ * Refuses an open taken by ssh_channel_take_open with reason.
+ */
+int
+ssh_channel_refuse_open(
+	struct ssh_channels *channels,
+	struct ssh_channel *channel,
+	uint32_t reason,
+	struct ssh_buf *out)
+{
+	const char *text;
+	int in_table;
+	int error;
+
+	/* Only a slot of this table that waits for its answer is refused. */
+	if (channel == NULL)
+		return EINVAL;
+	in_table = slot_in_table(channels, channel);
+	if (in_table == 0 || channel->state != SSH_CHANNEL_ANSWERING)
+		return EINVAL;
+
+	/*
+	 * Words the reason.
+	 *
+	 * Values referenced: RFC 4254 5.1, the reason codes of
+	 * SSH_MSG_CHANNEL_OPEN_FAILURE.
+	 */
+	switch (reason) {
+	case SSH_OPEN_ADMINISTRATIVELY_PROHIBITED:
+		text = OPEN_FAILURE_PROHIBITED_TEXT;
+		break;
+	case SSH_OPEN_CONNECT_FAILED:
+		text = OPEN_FAILURE_CONNECT_TEXT;
+		break;
+	case SSH_OPEN_UNKNOWN_CHANNEL_TYPE:
+		text = OPEN_FAILURE_UNKNOWN_TEXT;
+		break;
+	case SSH_OPEN_RESOURCE_SHORTAGE:
+		text = OPEN_FAILURE_SHORTAGE_TEXT;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	/* Writes the refusal, keeping the channel waiting when it could not be queued. */
+	error = put_refusal(out, channel->remote_id, reason, text);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the refusal is queued and the slot is free. */
+	reset_slot(channel);
 	return 0;
 }
 
@@ -548,8 +781,7 @@ ssh_channel_send_room(
 /*
  * Tells the channel that the program has consumed size received bytes
  * (written them on), and, when the local window has fallen below half of
- * SSH_CHANNEL_WINDOW, appends WINDOW_ADJUST bringing it back to
- * SSH_CHANNEL_WINDOW.
+ * window_size, appends WINDOW_ADJUST bringing it back to window_size.
  *
  * Telling it that nothing was consumed (size 0) changes nothing, and a
  * channel that is not open needs no more room.
@@ -572,7 +804,7 @@ ssh_channel_consumed(
 		return;
 
 	/* The window is still more than half full: the peer has room. */
-	if (channel->local_window >= CHANNEL_WINDOW_HALF)
+	if (channel->local_window >= channel->window_size / 2U)
 		return;
 
 	/* Does nothing when the output has already failed. */
@@ -581,7 +813,7 @@ ssh_channel_consumed(
 		return;
 
 	/* Works out how much brings the window back to its full size. */
-	amount = SSH_CHANNEL_WINDOW - channel->local_window;
+	amount = channel->window_size - channel->local_window;
 
 	/* Writes the adjustment. */
 	ssh_buf_put_u8(out, SSH_MSG_CHANNEL_WINDOW_ADJUST);
@@ -594,7 +826,7 @@ ssh_channel_consumed(
 		return;
 
 	/* The peer now has the full window again. */
-	channel->local_window = SSH_CHANNEL_WINDOW;
+	channel->local_window = channel->window_size;
 }
 
 /*
@@ -1251,16 +1483,24 @@ ssh_channel_put_global_request(
 }
 
 /*
- * Returns the first free slot, or NULL when every slot is in use.
+ * Returns the first free slot, or NULL when every slot is in use; slot 0
+ * only for a session (session 1) when the table keeps it.
  */
 static struct ssh_channel *
 take_free_slot(
-	struct ssh_channels *channels)
+	struct ssh_channels *channels,
+	int session)
 {
+	unsigned first;
 	unsigned index;
 
+	/* Starts after the session's slot when it is kept and this is not a session. */
+	first = 0;
+	if (channels->keep_first && !session)
+		first = 1;
+
 	/* Looks for a slot nobody uses. */
-	for (index = 0;
+	for (index = first;
 	     index < SSH_CHANNEL_MAX;
 	     index++) {
 		if (channels->channel[index].state == SSH_CHANNEL_FREE) {
@@ -1287,6 +1527,7 @@ reset_slot(
 	channel->local_window = 0;
 	channel->remote_window = 0;
 	channel->remote_packet = 0;
+	channel->window_size = 0;
 	channel->eof_sent = 0;
 	channel->eof_received = 0;
 	channel->close_sent = 0;
@@ -1362,6 +1603,66 @@ put_open_failure(
 	ssh_buf_put_u32(out, reason);
 	ssh_buf_put_cstring(out, text);
 	ssh_buf_put_string(out, NULL, 0);
+}
+
+/*
+ * Reads the framing of a CHANNEL_OPEN up to the packet size (RFC 4254
+ * 5.1): the type, the sender's number, its window and its packet size.
+ * Returns 0 or EINVAL.
+ */
+static int
+read_open(
+	struct ssh_reader *reader,
+	const uint8_t **type,
+	size_t *type_size,
+	uint32_t *sender,
+	uint32_t *window,
+	uint32_t *packet)
+{
+	unsigned message;
+	int error;
+
+	/* Reads the number, then the fields every open has. */
+	error = read_message_number(reader, SSH_MSG_CHANNEL_OPEN, 0, &message);
+	if (error != 0)
+		return error;
+	ssh_reader_get_string(reader, type, type_size);
+	*sender = ssh_reader_get_u32(reader);
+	*window = ssh_reader_get_u32(reader);
+	*packet = ssh_reader_get_u32(reader);
+
+	/* Reports a message too short for them. */
+	error = ssh_reader_error(reader);
+	if (error != 0)
+		return EINVAL;
+
+	/* Succeeded: the fields are read. */
+	return 0;
+}
+
+/*
+ * Appends CHANNEL_OPEN_FAILURE for a refused open and returns 0, or the
+ * error recorded in out.
+ */
+static int
+put_refusal(
+	struct ssh_buf *out,
+	uint32_t recipient,
+	uint32_t reason,
+	const char *text)
+{
+	int error;
+
+	/* Writes the refusal. */
+	put_open_failure(out, recipient, reason, text);
+
+	/* Reports an output that could not take it. */
+	error = ssh_buf_error(out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the refusal is queued. */
+	return 0;
 }
 
 /*

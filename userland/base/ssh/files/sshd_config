@@ -16,4 +16,13 @@ PubkeyAuthentication yes
 # The system has no name service of its own to consult about its clients.
 UseDNS no
 
+# Port forwarding (ssh -L, -R) is allowed by default, as in OpenSSH; a
+# forwarded port of -R listens on the loopback address only.  To turn it
+# off or narrow it:
+#AllowTcpForwarding yes
+#GatewayPorts no
+#PermitOpen any
+#PermitListen any
+#DisableForwarding no
+
 Subsystem sftp /usr/libexec/sftp-server

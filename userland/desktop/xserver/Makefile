@@ -8,11 +8,26 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # The compositor's X11 server: rootless, each top-level X window a window of the desktop.
 
 KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
-	userland/desktop/xserver/server.c userland/desktop/xserver/protocol.c \
+	userland/desktop/xserver/client.c userland/desktop/xserver/protocol.c \
 	userland/desktop/xserver/window.c userland/desktop/xserver/rootless.c \
 	userland/desktop/xserver/wayland.c userland/desktop/xserver/keymap.c \
 	userland/desktop/xserver/glyphs.c userland/desktop/xserver/glx.c \
-	userland/desktop/xserver/vulkan.c userland/desktop/xserver/selection.c
+	userland/desktop/xserver/present-vulkan.c userland/desktop/xserver/selection.c \
+	userland/desktop/xserver/unix.c userland/desktop/xserver/resource.c \
+	userland/desktop/xserver/event.c userland/desktop/xserver/property.c \
+	userland/desktop/xserver/input.c userland/desktop/xserver/region.c \
+	userland/desktop/xserver/render-cpu.c userland/desktop/xserver/gc.c \
+	userland/desktop/xserver/draw.c userland/desktop/xserver/wm.c \
+	userland/desktop/xserver/shape.c userland/desktop/xserver/colormap.c \
+	userland/desktop/xserver/colornames.c userland/desktop/xserver/font.c \
+	userland/desktop/xserver/cursor.c \
+	userland/desktop/xserver/xkb.c userland/desktop/xserver/xinput.c \
+	userland/desktop/xserver/rooted.c userland/desktop/xserver/render-vulkan.c \
+	userland/desktop/xserver/extension.c userland/desktop/xserver/shape-ext.c \
+	userland/desktop/xserver/xfixes.c userland/desktop/xserver/sync.c \
+	userland/desktop/xserver/render-ext.c userland/desktop/xserver/render-composite.c \
+	userland/desktop/xserver/coverage.c userland/desktop/xserver/randr.c \
+	userland/desktop/xserver/xinerama.c
 
 # GLX: libGLX.so, one of the server's libraries, which X programs link
 # with libGL (-lGL -lGLX); a private libX11 is built in.  The image

@@ -18,7 +18,8 @@
  * The library functions each operation uses are named in its comment, so
  * that the set this file needs is known: RAND_bytes, OPENSSL_cleanse,
  * CRYPTO_memcmp; EVP_MD_CTX_new, EVP_MD_CTX_free, EVP_DigestInit_ex,
- * EVP_DigestUpdate, EVP_DigestFinal_ex, EVP_sha256; EVP_PKEY_new_raw_
+ * EVP_DigestUpdate, EVP_DigestFinal_ex, EVP_sha256, EVP_Digest,
+ * EVP_sha512; EVP_PKEY_new_raw_
  * private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_new_raw_public_key_ex,
  * EVP_PKEY_get_raw_public_key, EVP_PKEY_free, EVP_DigestSignInit,
  * EVP_DigestSign, EVP_DigestVerifyInit, EVP_DigestVerify;
@@ -27,7 +28,8 @@
  * EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer, EVP_PKEY_derive,
  * EVP_PKEY_encapsulate_init, EVP_PKEY_encapsulate,
  * EVP_PKEY_decapsulate_init, EVP_PKEY_decapsulate; EVP_CIPHER_CTX_new,
- * EVP_CIPHER_CTX_free, EVP_CipherInit_ex, EVP_CipherUpdate, EVP_chacha20;
+ * EVP_CIPHER_CTX_free, EVP_CipherInit_ex, EVP_CipherUpdate, EVP_chacha20,
+ * EVP_aes_256_ctr;
  * EVP_MAC_fetch, EVP_MAC_free, EVP_MAC_CTX_new, EVP_MAC_CTX_free,
  * EVP_MAC_init, EVP_MAC_update, EVP_MAC_final.
  *
@@ -44,6 +46,13 @@
 
 /* The SHA-256 digest size in bytes (FIPS 180-4). */
 #define SSH_SHA256_SIZE		32U
+
+/* The SHA-512 digest size in bytes (FIPS 180-4). */
+#define SSH_SHA512_SIZE		64U
+
+/* The AES-256 key and block sizes in bytes (FIPS 197). */
+#define SSH_AES256_KEY		32U
+#define SSH_AES_BLOCK		16U
 
 /* The Ed25519 sizes in bytes (RFC 8032 5.1.5, 5.1.6). */
 #define SSH_ED25519_SEED	32U
@@ -139,6 +148,24 @@ void ssh_sha256_free(struct ssh_sha256 *hash);
 int ssh_sha256(const void *data, size_t size, uint8_t *out);
 
 /*
+ * Hashes size bytes at data into out (64 bytes) with SHA-512 in one call
+ * (EVP_Digest with EVP_sha512); data may be NULL only when size is 0.
+ * Returns 0 or EIO (out wiped).
+ */
+int ssh_sha512(const void *data, size_t size, uint8_t *out);
+
+/*
+ * XORs size bytes of in with the AES-256-CTR keystream of a 32-byte key
+ * and the 16-byte first counter block iv into out (NIST SP 800-38A 6.5,
+ * the counter block incremented as one 128-bit big-endian integer):
+ * EVP_CIPHER_CTX_new, EVP_CipherInit_ex with EVP_aes_256_ctr,
+ * EVP_CipherUpdate, EVP_CIPHER_CTX_free.  in and out may be the same
+ * buffer.  Returns 0, EINVAL (size over INT_MAX), ENOMEM or EIO (out
+ * wiped).
+ */
+int ssh_aes256_ctr(const uint8_t *key, const uint8_t *iv, const uint8_t *in, uint8_t *out, size_t size);
+
+/*
  * Computes the Ed25519 public key (32 bytes) of a 32-byte seed (RFC 8032
  * 5.1.5): EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519) and
  * EVP_PKEY_get_raw_public_key.  Returns 0 or EIO.
@@ -165,6 +192,34 @@ int ssh_ed25519_sign(const uint8_t *seed, const uint8_t *message, size_t size, u
  * public key is refused at import; EIO for another failure.
  */
 int ssh_ed25519_verify(const uint8_t *public_key, const uint8_t *message, size_t size, const uint8_t *signature);
+
+/*
+ * Computes the X25519 public key (32 bytes) of a 32-byte private key
+ * (RFC 7748 6.1, the base point 9): EVP_PKEY_new_raw_private_key
+ * EVP_PKEY_X25519, EVP_PKEY_get_raw_public_key.  Returns 0 or EIO.
+ */
+int ssh_x25519_public(const uint8_t *private_key, uint8_t *public_key);
+
+/*
+ * Makes an X25519 key pair: a private key of 32 random bytes (ssh_random,
+ * secret) and its public key (ssh_x25519_public).  Returns 0 or EIO (both
+ * wiped).
+ */
+int ssh_x25519_pair(uint8_t *private_key, uint8_t *public_key);
+
+/*
+ * Computes the X25519 shared secret (32 bytes) of a private key and a
+ * peer's public value (RFC 7748 6.1): EVP_PKEY_new_raw_private_key,
+ * EVP_PKEY_new_raw_public_key, EVP_PKEY_CTX_new, EVP_PKEY_derive_init,
+ * EVP_PKEY_derive_set_peer, EVP_PKEY_derive.
+ *
+ * The peer's value is refused (EINVAL) when the library refuses it at
+ * import or at the derivation, and when the result is all zero (a point of
+ * small order; RFC 7748 6.1, RFC 8731 3), which this function checks
+ * itself with ssh_ct_equal.  Returns 0, EINVAL, ENOMEM or EIO; shared is
+ * wiped on an error.
+ */
+int ssh_x25519_shared(const uint8_t *private_key, const uint8_t *peer_public, uint8_t *shared);
 
 /*
  * Starts the client's half of mlkem768x25519-sha256 (draft-ietf-sshm-

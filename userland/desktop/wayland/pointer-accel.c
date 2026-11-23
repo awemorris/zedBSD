@@ -9,7 +9,8 @@
  * A mouse's pointer acceleration (ws089-p024).
  *
  * A report's motion is first scaled by the user's speed (a percentage of
- * the counts, 100 moving one pixel a count), then by a gain in 1/256 that
+ * the counts, 100 moving one unit of the plane a count: a pixel at 100 %,
+ * the same distance to the hand at every scale), then by a gain in 1/256 that
  * depends on how fast the mouse moved: 1 up to ACCEL_SLOW counts a second,
  * rising in proportion to the level's most at ACCEL_FAST and above.  The
  * mouse's speed is the motion over the time since its last moving report,
@@ -40,6 +41,7 @@
 static const int64_t accel_most[] = { 256, 384, 576, 768 };
 
 static int64_t accel_magnitude(int64_t value);
+static void accel_motion(struct kwl_pointer_accel *accel, int64_t dx, int64_t dy, uint64_t time_us, int32_t speed, int32_t level, int64_t step, int64_t *moved_x, int64_t *moved_y);
 
 /*
  * Starts a mouse's acceleration: nothing left over, no report yet.
@@ -84,9 +86,9 @@ kwl_pointer_accel_gain(
 }
 
 /*
- * Turns one report's motion (counts, at time_us) into whole pixels at a
- * speed (percent) and an acceleration level, keeping the fractions for the
- * next report.
+ * Turns one report's motion (counts, at time_us) into whole units of the
+ * plane at a speed (percent) and an acceleration level, keeping the
+ * fractions for the next report.
  */
 void
 kwl_pointer_accel_move(
@@ -99,6 +101,48 @@ kwl_pointer_accel_move(
 	int64_t *pixels_x,
 	int64_t *pixels_y)
 {
+	/* A unit is the whole of the speed times the gain. */
+	accel_motion(accel, dx, dy, time_us, speed, level, ACCEL_SCALE, pixels_x, pixels_y);
+}
+
+/*
+ * Turns one report's motion into 256ths of a unit of the plane (the
+ * pointer on an output at another scale than 100 %, which keeps its place
+ * between units), keeping what is less than a 256th for the next report.
+ * The same motion moves the pointer as far as kwl_pointer_accel_move's.
+ */
+void
+kwl_pointer_accel_move_fine(
+	struct kwl_pointer_accel *accel,
+	int64_t dx,
+	int64_t dy,
+	uint64_t time_us,
+	int32_t speed,
+	int32_t level,
+	int64_t *fine_x,
+	int64_t *fine_y)
+{
+	/* A 256th of a unit is a 256th of the speed times the gain. */
+	accel_motion(accel, dx, dy, time_us, speed, level, ACCEL_SCALE / 256, fine_x, fine_y);
+}
+
+/*
+ * Turns one report's motion into steps of step 1/25600 units at a speed
+ * and an acceleration level, keeping the fractions of a step for the next
+ * report.
+ */
+static void
+accel_motion(
+	struct kwl_pointer_accel *accel,
+	int64_t dx,
+	int64_t dy,
+	uint64_t time_us,
+	int32_t speed,
+	int32_t level,
+	int64_t step,
+	int64_t *moved_x,
+	int64_t *moved_y)
+{
 	uint64_t elapsed;
 	int64_t counts_per_second;
 	int64_t gain;
@@ -106,8 +150,8 @@ kwl_pointer_accel_move(
 	int64_t y;
 
 	/* No motion moves nothing and leaves the time alone. */
-	*pixels_x = 0;
-	*pixels_y = 0;
+	*moved_x = 0;
+	*moved_y = 0;
 	if (dx == 0 && dy == 0)
 		return;
 
@@ -126,15 +170,15 @@ kwl_pointer_accel_move(
 	counts_per_second = (accel_magnitude(dx) + accel_magnitude(dy)) * 1000000 / (int64_t)elapsed;
 	gain = kwl_pointer_accel_gain(counts_per_second, level);
 
-	/* The motion in 1/25600 pixels, with what the last reports left over. */
+	/* The motion in 1/25600 units, with what the last reports left over. */
 	x = dx * speed * gain + accel->remainder_x;
 	y = dy * speed * gain + accel->remainder_y;
 
-	/* Whole pixels move the pointer; the fractions wait. */
-	accel->remainder_x = x % ACCEL_SCALE;
-	accel->remainder_y = y % ACCEL_SCALE;
-	*pixels_x = x / ACCEL_SCALE;
-	*pixels_y = y / ACCEL_SCALE;
+	/* Whole steps move the pointer; the fractions wait. */
+	accel->remainder_x = x % step;
+	accel->remainder_y = y % step;
+	*moved_x = x / step;
+	*moved_y = y / step;
 }
 
 /* Gives a number's size without its sign. */

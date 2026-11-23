@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  zedBSD
+  Copyright (C) 2026 Awe Morris
+
+  SPDX-License-Identifier: Zlib
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	package="io.noctvm.mikuterm">
+
+	<!-- SSH connections are made over the network. -->
+	<uses-permission android:name="android.permission.INTERNET"/>
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+	<!-- The native library stays stored in the apk and is mapped from it (extractNativeLibs). -->
+	<application
+		android:label="@string/app_name"
+		android:icon="@mipmap/ic_launcher"
+		android:hasCode="true"
+		android:extractNativeLibs="false"
+		android:allowBackup="false"
+		android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+		<!-- The keyboard's height is told to the library by insets, so the window is not resized. -->
+		<activity
+			android:name=".MikutermActivity"
+			android:exported="true"
+			android:launchMode="singleTask"
+			android:windowSoftInputMode="adjustNothing|stateHidden"
+			android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
+			<meta-data android:name="android.app.lib_name" android:value="mikuterm"/>
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN"/>
+				<category android:name="android.intent.category.LAUNCHER"/>
+			</intent-filter>
+		</activity>
+	</application>
+</manifest>

@@ -106,14 +106,14 @@ glass_send(
 	int same;
 	int error;
 
-	/* The frame's card in the compositor's terms. */
+	/* The frame's card in the compositor's terms (the window's pixels, which libkeiland gives the compositor in its units). */
 	te_app_card(app, &card);
 	memset(&panel, 0, sizeof(panel));
 	panel.x = card.x;
 	panel.y = card.y;
 	panel.width = card.width;
 	panel.height = card.height;
-	panel.radius = TE_CARD_RADIUS;
+	panel.radius = te_app_px(app, TE_CARD_RADIUS);
 	panel.kind = KL_GLASS_CARD;
 
 	/* Sent with the frame. */

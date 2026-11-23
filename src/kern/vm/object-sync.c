@@ -706,7 +706,7 @@ vm_object_content_prepare_delayed(
 		irq = spin_lock_irqsave(&object->lock);
 
 		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0)
-			vm_object_page_dirty_mark(pages[index]);
+			vm_object_page_store_mark(pages[index]);
 
 		spin_unlock_irqrestore(&object->lock, irq);
 
@@ -1164,6 +1164,23 @@ vm_object_page_dirty_mark(
 	vm_object_page_dirty_link(page);
 }
 
+/*
+ * Records a store through a mapping into a page: the page is dirty, and its
+ * file's set-id bits are cleared when it is written back.
+ *
+ * The caller holds the owner's lock.
+ */
+void
+vm_object_page_store_mark(
+	struct vm_object_page *page)
+{
+	/* Leaves the new contents for the next write-back. */
+	vm_object_page_dirty_mark(page);
+
+	/* A store has no credential, so its write-back judges it as unprivileged. */
+	vfs_note_mapped_store(page->owner->inode);
+}
+
 /* Drains the captured range while using the supplied worker reserve when present. */
 static int
 vm_object_sync_range_buffer(
@@ -1511,7 +1528,7 @@ vm_object_sync_range_buffer(
 		irq = spin_lock_irqsave(&object->lock);
 
 		if ((observed & HAL_SPACE_PAGE_DIRTY) != 0) {
-			vm_object_page_dirty_mark(candidate);
+			vm_object_page_store_mark(candidate);
 		}
 
 		dirty = (candidate->flags & VM_OBJECT_PAGE_DIRTY) != 0;
@@ -2005,8 +2022,12 @@ write_page_run(
 		return error;
 	io.context.content_generation = dirty_generation;
 
-	/* Clears the set-id bits before the first byte changes, as a write through the file does. */
-	error = vfs_clear_setid_on_content_change(object->inode);
+	/*
+	 * Clears the set-id bits before the first byte changes when the run
+	 * carries stores through mappings, as a write-back through the file
+	 * does.  A write was judged when it was made.
+	 */
+	error = vfs_clear_setid_on_writeback(object->inode);
 	if (error != 0) {
 		file_io_end(&io);
 		return error;

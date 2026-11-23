@@ -31,6 +31,15 @@
 #define KEX_DERIVE_MAX		256U
 
 /*
+ * One key exchange method a client offers: its name and the method it
+ * stands for.
+ */
+struct kex_offer {
+	const char *name;
+	enum ssh_kex_method method;
+};
+
+/*
  * The kex_algorithms lists this side sends.
  *
  * Values referenced:
@@ -39,18 +48,32 @@
  *   draft-ietf-sshm-strict-kex-02 section 3.1: the markers "kex-strict-c"
  *   and "kex-strict-s" and their pre-standard spellings with the suffix
  *   "-v00@openssh.com".
- * The markers are sent only in the initial KEXINIT.
+ *   RFC 8731 3: the method name curve25519-sha256; its section 1 names
+ *   the older curve25519-sha256@libssh.org, which servers before the
+ *   RFC know.
+ * The markers are sent only in the initial KEXINIT.  The client's methods
+ * come in the order of its preference, which decides the choice.
  */
+static const char kex_list_client[] =
+	SSH_KEX_NAME "," SSH_KEX_CURVE25519_NAME "," SSH_KEX_CURVE25519_OLD_NAME;
 static const char kex_list_client_initial[] =
-	SSH_KEX_NAME "," SSH_KEX_STRICT_CLIENT "," SSH_KEX_STRICT_CLIENT_OLD;
+	SSH_KEX_NAME "," SSH_KEX_CURVE25519_NAME "," SSH_KEX_CURVE25519_OLD_NAME "," SSH_KEX_STRICT_CLIENT "," SSH_KEX_STRICT_CLIENT_OLD;
 static const char kex_list_server_initial[] =
 	SSH_KEX_NAME "," SSH_KEX_STRICT_SERVER "," SSH_KEX_STRICT_SERVER_OLD;
 
+/* The client's methods, most preferred first (the order of kex_list_client). */
+static const struct kex_offer kex_client_offers[] = {
+	{ SSH_KEX_NAME, SSH_KEX_MLKEM768X25519 },
+	{ SSH_KEX_CURVE25519_NAME, SSH_KEX_CURVE25519 },
+	{ SSH_KEX_CURVE25519_OLD_NAME, SSH_KEX_CURVE25519 }
+};
+
 static int kex_first_is(const char *list, size_t size, const char *name);
 static int kex_hash_string(struct ssh_sha256 *hash, const uint8_t *data, size_t size);
-static int kex_hash_fields(struct ssh_sha256 *hash, const struct ssh_kex_hash_input *input);
-static int kex_derive_feed(struct ssh_sha256 *hash, const uint8_t *k, const uint8_t *h, const uint8_t *session_id, char letter, const uint8_t *previous, size_t previous_size);
-static int kex_derive_block(const uint8_t *k, const uint8_t *h, const uint8_t *session_id, char letter, const uint8_t *previous, size_t previous_size, uint8_t *block);
+static int kex_hash_secret(struct ssh_sha256 *hash, const uint8_t *k, enum ssh_kex_secret_form form);
+static int kex_hash_fields(struct ssh_sha256 *hash, const struct ssh_kex_hash_input *input, enum ssh_kex_secret_form form);
+static int kex_derive_feed(struct ssh_sha256 *hash, const uint8_t *k, enum ssh_kex_secret_form form, const uint8_t *h, const uint8_t *session_id, char letter, const uint8_t *previous, size_t previous_size);
+static int kex_derive_block(const uint8_t *k, enum ssh_kex_secret_form form, const uint8_t *h, const uint8_t *session_id, char letter, const uint8_t *previous, size_t previous_size, uint8_t *block);
 static int kex_offered(const struct ssh_kexinit *peer, unsigned index, const char *name);
 
 /*
@@ -80,8 +103,10 @@ ssh_kexinit_put(
 		return EIO;
 
 	/* Picks the key exchange list: the markers of this side go in only with the initial exchange. */
-	if (initial == 0) {
+	if (initial == 0 && server != 0) {
 		kex_list = SSH_KEX_NAME;
+	} else if (initial == 0) {
+		kex_list = kex_list_client;
 	} else if (server != 0) {
 		kex_list = kex_list_server_initial;
 	} else {
@@ -190,6 +215,9 @@ ssh_kex_choose(
 {
 	const char *marker;
 	const char *marker_old;
+	const char *method_name;
+	enum ssh_kex_method method;
+	unsigned index;
 	int strict;
 	int ignore_next;
 	int found;
@@ -198,9 +226,29 @@ ssh_kex_choose(
 	if (kind != NULL)
 		*kind = NULL;
 
-	/* The peer must offer the key exchange method. */
-	found = kex_offered(peer, KEX_LIST_KEX, SSH_KEX_NAME);
-	if (found == 0) {
+	/* A server's only method must be on the client's list. */
+	method_name = NULL;
+	method = SSH_KEX_MLKEM768X25519;
+	if (server != 0) {
+		found = kex_offered(peer, KEX_LIST_KEX, SSH_KEX_NAME);
+		if (found != 0)
+			method_name = SSH_KEX_NAME;
+	}
+
+	/* A client takes its most preferred method that the server offers (RFC 4253 7.1). */
+	if (server == 0) {
+		for (index = 0; index < sizeof(kex_client_offers) / sizeof(kex_client_offers[0]); index++) {
+			found = kex_offered(peer, KEX_LIST_KEX, kex_client_offers[index].name);
+			if (found != 0) {
+				method_name = kex_client_offers[index].name;
+				method = kex_client_offers[index].method;
+				break;
+			}
+		}
+	}
+
+	/* The two sides must share a key exchange method. */
+	if (method_name == NULL) {
 		if (kind != NULL)
 			*kind = "kex_algorithms";
 		return ENOTSUP;
@@ -280,7 +328,7 @@ ssh_kex_choose(
 	ignore_next = 0;
 	if (peer->first_kex_packet_follows != 0) {
 		ignore_next = 1;
-		found = kex_first_is(peer->list[KEX_LIST_KEX], peer->list_size[KEX_LIST_KEX], SSH_KEX_NAME);
+		found = kex_first_is(peer->list[KEX_LIST_KEX], peer->list_size[KEX_LIST_KEX], method_name);
 		if (found != 0) {
 			found = kex_first_is(peer->list[KEX_LIST_HOSTKEY], peer->list_size[KEX_LIST_HOSTKEY], SSH_KEX_HOSTKEY_NAME);
 			if (found != 0)
@@ -291,6 +339,7 @@ ssh_kex_choose(
 	/* Succeeded: records the decision. */
 	choice->strict = strict;
 	choice->ignore_next = ignore_next;
+	choice->method = method;
 	return 0;
 }
 
@@ -429,6 +478,50 @@ ssh_kex_parse_hybrid_reply(
 }
 
 /*
+ * Appends SSH_MSG_KEX_ECDH_INIT with Q_C (SSH_X25519_SIZE bytes) as a
+ * string to out.
+ */
+void
+ssh_kex_put_ecdh_init(
+	const uint8_t *q_c,
+	struct ssh_buf *out)
+{
+	/* Writes the message number and the client's ephemeral public key. */
+	ssh_buf_put_u8(out, SSH_MSG_KEX_ECDH_INIT);
+	ssh_buf_put_string(out, q_c, SSH_X25519_SIZE);
+}
+
+/*
+ * Reads SSH_MSG_KEX_ECDH_REPLY: pointers into payload for K_S, Q_S and
+ * the signature blob.
+ *
+ * The message has the number and the layout of SSH_MSG_KEX_HYBRID_REPLY
+ * (RFC 5656 4: string K_S, string Q_S, string signature), so the reading
+ * is the same.
+ */
+int
+ssh_kex_parse_ecdh_reply(
+	const uint8_t *payload,
+	size_t size,
+	const uint8_t **host_key,
+	size_t *host_key_size,
+	const uint8_t **q_s,
+	size_t *q_s_size,
+	const uint8_t **signature,
+	size_t *signature_size)
+{
+	int error;
+
+	/* Reads the three strings as the hybrid reply's. */
+	error = ssh_kex_parse_hybrid_reply(payload, size, host_key, host_key_size, q_s, q_s_size, signature, signature_size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the three strings point into payload. */
+	return 0;
+}
+
+/*
  * Computes the exchange hash H = SHA-256(string V_C, string V_S, string
  * I_C, string I_S, string K_S, string C_INIT, string S_REPLY, string K)
  * (draft-ietf-sshm-mlkem-hybrid-kex-10 2.5) into h (32 bytes).
@@ -438,8 +531,34 @@ ssh_kex_hash(
 	const struct ssh_kex_hash_input *input,
 	uint8_t *h)
 {
+	int error;
+
+	/* Hashes with K as a string, the form of the hybrid method. */
+	error = ssh_kex_hash_form(input, SSH_KEX_SECRET_STRING, h);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: h holds the exchange hash. */
+	return 0;
+}
+
+/*
+ * Computes the exchange hash with K encoded in form.
+ */
+int
+ssh_kex_hash_form(
+	const struct ssh_kex_hash_input *input,
+	enum ssh_kex_secret_form form,
+	uint8_t *h)
+{
 	struct ssh_sha256 hash;
 	int error;
+
+	/* Refuses a form that names no encoding. */
+	if (form != SSH_KEX_SECRET_STRING && form != SSH_KEX_SECRET_MPINT) {
+		ssh_wipe(h, SSH_KEX_HASH_SIZE);
+		return EINVAL;
+	}
 
 	/* Starts the hash. */
 	error = ssh_sha256_init(&hash);
@@ -448,8 +567,8 @@ ssh_kex_hash(
 		return error;
 	}
 
-	/* Feeds the eight strings. */
-	error = kex_hash_fields(&hash, input);
+	/* Feeds the seven strings and K. */
+	error = kex_hash_fields(&hash, input, form);
 	if (error != 0) {
 		ssh_sha256_free(&hash);
 		ssh_wipe(h, SSH_KEX_HASH_SIZE);
@@ -483,11 +602,39 @@ ssh_kex_derive(
 	uint8_t *out,
 	size_t size)
 {
+	int error;
+
+	/* Derives with K as a string, the form of the hybrid method. */
+	error = ssh_kex_derive_form(k, SSH_KEX_SECRET_STRING, h, session_id, letter, out, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: out holds the key material. */
+	return 0;
+}
+
+/*
+ * Derives key material as ssh_kex_derive does, with K encoded in form.
+ */
+int
+ssh_kex_derive_form(
+	const uint8_t *k,
+	enum ssh_kex_secret_form form,
+	const uint8_t *h,
+	const uint8_t *session_id,
+	char letter,
+	uint8_t *out,
+	size_t size)
+{
 	uint8_t material[KEX_DERIVE_MAX];
 	size_t blocks;
 	size_t index;
 	size_t made;
 	int error;
+
+	/* Refuses a form that names no encoding. */
+	if (form != SSH_KEX_SECRET_STRING && form != SSH_KEX_SECRET_MPINT)
+		return EINVAL;
 
 	/* Refuses a letter outside the six of RFC 4253 7.2. */
 	if (letter < 'A' || letter > 'F')
@@ -503,7 +650,7 @@ ssh_kex_derive(
 	/* Makes each block from the blocks before it. */
 	for (index = 0; index < blocks; index++) {
 		made = index * SSH_KEX_HASH_SIZE;
-		error = kex_derive_block(k, h, session_id, letter, material, made, material + made);
+		error = kex_derive_block(k, form, h, session_id, letter, material, made, material + made);
 		if (error != 0) {
 			ssh_wipe(material, sizeof(material));
 			ssh_wipe(out, size);
@@ -602,11 +749,75 @@ kex_hash_string(
 	return 0;
 }
 
-/* Feeds the eight strings of the exchange hash, in the order the draft gives, into the hash. */
+/*
+ * Feeds the 32-byte shared secret k into the hash in form: as a string,
+ * or as an mpint (RFC 4251 5: the number in big-endian bytes without
+ * leading zero bytes, one zero byte in front when the highest bit of the
+ * first byte left is set, and nothing at all for the number 0).  On a
+ * failure the computation is not freed here.
+ */
+static int
+kex_hash_secret(
+	struct ssh_sha256 *hash,
+	const uint8_t *k,
+	enum ssh_kex_secret_form form)
+{
+	static const uint8_t zero_byte[1] = { 0 };
+	uint8_t length[4];
+	size_t skipped;
+	size_t size;
+	int sign;
+	int error;
+
+	/* The hybrid form is a plain string of the 32 bytes. */
+	if (form == SSH_KEX_SECRET_STRING) {
+		error = kex_hash_string(hash, k, SSH_KEX_HASH_SIZE);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: K is in the hash as a string. */
+		return 0;
+	}
+
+	/* Counts the leading zero bytes, which an mpint leaves out. */
+	skipped = 0;
+	while (skipped < SSH_KEX_HASH_SIZE && k[skipped] == 0)
+		skipped++;
+	size = SSH_KEX_HASH_SIZE - skipped;
+
+	/* A first byte with its highest bit set would read as negative, so a zero byte goes in front. */
+	sign = 0;
+	if (size > 0 && (k[skipped] & 0x80U) != 0)
+		sign = 1;
+
+	/* Feeds the length of the mpint's bytes. */
+	ssh_store_be32(length, (uint32_t)(size + (size_t)sign));
+	error = ssh_sha256_update(hash, length, sizeof(length));
+	if (error != 0)
+		return error;
+
+	/* Feeds the zero byte that keeps the number positive. */
+	if (sign != 0) {
+		error = ssh_sha256_update(hash, zero_byte, sizeof(zero_byte));
+		if (error != 0)
+			return error;
+	}
+
+	/* Feeds the bytes of the number from the first one that is not zero. */
+	error = ssh_sha256_update(hash, k + skipped, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: K is in the hash as an mpint. */
+	return 0;
+}
+
+/* Feeds the seven strings of the exchange hash and K, in the order the method gives, into the hash. */
 static int
 kex_hash_fields(
 	struct ssh_sha256 *hash,
-	const struct ssh_kex_hash_input *input)
+	const struct ssh_kex_hash_input *input,
+	enum ssh_kex_secret_form form)
 {
 	int error;
 
@@ -626,7 +837,7 @@ kex_hash_fields(
 	if (error != 0)
 		return error;
 
-	/* Feeds the host key and the two values of the hybrid exchange. */
+	/* Feeds the host key and the two values of the exchange (C_INIT and S_REPLY, or Q_C and Q_S). */
 	error = kex_hash_string(hash, input->host_key, input->host_key_size);
 	if (error != 0)
 		return error;
@@ -637,24 +848,25 @@ kex_hash_fields(
 	if (error != 0)
 		return error;
 
-	/* Feeds the shared secret as a string of 32 bytes, not as an mpint. */
-	error = kex_hash_string(hash, input->k, SSH_KEX_HASH_SIZE);
+	/* Feeds the shared secret in the form of the method. */
+	error = kex_hash_secret(hash, input->k, form);
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the eight strings are in the hash. */
+	/* Succeeded: the eight fields are in the hash. */
 	return 0;
 }
 
 /*
- * Feeds the input of one block of key material into the hash: K as a
- * string, then H, then the letter and the session identifier for the first
- * block (previous_size 0), or the blocks made so far for a later one.
+ * Feeds the input of one block of key material into the hash: K in form,
+ * then H, then the letter and the session identifier for the first block
+ * (previous_size 0), or the blocks made so far for a later one.
  */
 static int
 kex_derive_feed(
 	struct ssh_sha256 *hash,
 	const uint8_t *k,
+	enum ssh_kex_secret_form form,
 	const uint8_t *h,
 	const uint8_t *session_id,
 	char letter,
@@ -664,8 +876,8 @@ kex_derive_feed(
 	uint8_t letter_byte;
 	int error;
 
-	/* Feeds K as a string of 32 bytes, then H. */
-	error = kex_hash_string(hash, k, SSH_KEX_HASH_SIZE);
+	/* Feeds K in the form of the method, then H. */
+	error = kex_hash_secret(hash, k, form);
 	if (error != 0)
 		return error;
 	error = ssh_sha256_update(hash, h, SSH_KEX_HASH_SIZE);
@@ -699,6 +911,7 @@ kex_derive_feed(
 static int
 kex_derive_block(
 	const uint8_t *k,
+	enum ssh_kex_secret_form form,
 	const uint8_t *h,
 	const uint8_t *session_id,
 	char letter,
@@ -715,7 +928,7 @@ kex_derive_block(
 		return error;
 
 	/* Feeds the input of the block. */
-	error = kex_derive_feed(&hash, k, h, session_id, letter, previous, previous_size);
+	error = kex_derive_feed(&hash, k, form, h, session_id, letter, previous, previous_size);
 	if (error != 0) {
 		ssh_sha256_free(&hash);
 		return error;

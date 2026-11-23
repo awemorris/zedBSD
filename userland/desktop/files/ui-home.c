@@ -50,8 +50,11 @@
 #define HOME_ROW_HEIGHT		44
 #define HOME_PILL_HEIGHT	32
 
-/* The largest mark drawn, in pixels a side (its layers are kept rendered at the last size). */
-#define HOME_MARK_MAX		128U
+/*
+ * The largest mark drawn, in pixels a side (its layers are kept rendered at
+ * the last size): the empty folder's mark at the largest scale.
+ */
+#define HOME_MARK_MAX		256U
 
 /* The first card index of the removable devices (the folders' cards are 0.., the recent folders' 100..). */
 #define HOME_DEVICE_CARD	200
@@ -445,6 +448,8 @@ home_hero(
 	struct kl_image view;
 	struct kl_rect band;
 	int crop_height;
+	int hero_width;
+	int hero_height;
 	int error;
 
 	/*
@@ -461,13 +466,17 @@ home_hero(
 			home_hero_fallback(app);
 	}
 
+	/* The card's size in the canvas's pixels, which the picture is made at so that it is drawn pixel for pixel. */
+	hero_width = fm_ui_pixels(canvas, width);
+	hero_height = fm_ui_pixels(canvas, HOME_HERO_HEIGHT);
+
 	/* Scaled once for the card's size: the lower part of the picture, where the lake is, at the card's shape. */
-	if (app->hero_source.pixels != NULL && (app->hero.width != width || app->hero.height != HOME_HERO_HEIGHT)) {
+	if (app->hero_source.pixels != NULL && (app->hero.width != hero_width || app->hero.height != hero_height)) {
 		kl_image_release(&app->hero);
-		error = kl_image_create(&app->hero, width, HOME_HERO_HEIGHT);
+		error = kl_image_create(&app->hero, hero_width, hero_height);
 		if (error == 0) {
 			view = app->hero_source;
-			crop_height = (int)((long)view.width * HOME_HERO_HEIGHT / width);
+			crop_height = (int)((long)view.width * hero_height / hero_width);
 			if (crop_height > view.height)
 				crop_height = view.height;
 			view.pixels += (size_t)((view.height - crop_height) * 2 / 3) * view.stride;
@@ -570,16 +579,17 @@ home_hero_brand(
 }
 
 /*
- * Draws the mark in a square of a size in pixels at (x, y), as opaque as
+ * Draws the mark in a square of a size in units at (x, y), as opaque as
  * asked (0..1): its seven layers (userland/desktop/artwork/mark.c), each in
- * its colour.  The layers are rendered once for a size and kept.
+ * its colour.  The layers are rendered once for a size in the canvas's
+ * pixels and kept, and are drawn pixel for pixel.
  */
 void
 fm_mark_draw(
 	struct kl_canvas *canvas,
 	int x,
 	int y,
-	unsigned pixels,
+	unsigned units,
 	float opacity)
 {
 	/*
@@ -606,6 +616,15 @@ fm_mark_draw(
 	static unsigned layers_pixels;
 	uint32_t alpha;
 	unsigned layer;
+	unsigned pixels;
+	unsigned scale;
+	int pixel_x;
+	int pixel_y;
+
+	/* The square and its corner in the canvas's pixels. */
+	pixels = (unsigned)fm_ui_pixels(canvas, (int)units);
+	pixel_x = fm_ui_pixels(canvas, x);
+	pixel_y = fm_ui_pixels(canvas, y);
 
 	/* A mark larger than the kept layers is drawn at their largest. */
 	if (pixels > HOME_MARK_MAX)
@@ -620,11 +639,18 @@ fm_mark_draw(
 		layers_pixels = pixels;
 	}
 
-	/* Each layer in its colour, as opaque as asked. */
+	/*
+	 * Each layer in its colour, as opaque as asked, given in the canvas's
+	 * pixels: the canvas is at 100 % while they are drawn (its clip is in
+	 * pixels already), so that a layer is not enlarged.
+	 */
+	scale = canvas->scale;
+	kl_canvas_set_scale(canvas, KL_SCALE_BASE);
 	for (layer = 0; layer < KL_MARK_LAYERS; layer++) {
 		alpha = (uint32_t)((float)colours[layer][1] * opacity + 0.5f);
-		kl_canvas_mask(canvas, x, y, layers[layer], (int)pixels, (int)pixels, pixels, KL_RGBA(colours[layer][0], alpha));
+		kl_canvas_mask(canvas, pixel_x, pixel_y, layers[layer], (int)pixels, (int)pixels, pixels, KL_RGBA(colours[layer][0], alpha));
 	}
+	kl_canvas_set_scale(canvas, scale);
 }
 
 /* Draws a quiet landscape into a picture in the desktop's look: a bright sky, hills and a green-edged lake (when there is no wallpaper). */

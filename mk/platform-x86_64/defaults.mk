@@ -2,8 +2,8 @@ override ARCHITECTURE             := x86_64
 override BOARD                    := pcat
 
 CONFIG_ROOTFS_DEVELOPMENT         := y
-CONFIG_BOOT_SPLASH                := n
-CONFIG_QUIET_BOOT                 := n
+CONFIG_BOOT_SPLASH                := y
+CONFIG_QUIET_BOOT                 := y
 CONFIG_GRAPHICAL_LOGIN            := y
 
 CONFIG_DRIVER_PCI                 := y
@@ -173,7 +173,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	nice \
 	nl \
 	nm \
-	noct \
 	nohup \
 	nslookup \
 	ntpdate \
@@ -186,6 +185,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	pathchk \
 	pax \
 	ping \
+	pkill \
 	poweroff \
 	pr \
 	printf \
@@ -226,6 +226,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	terminfo-extra \
 	terminfo \
 	test \
+	thermal \
 	tic \
 	time \
 	timeout \
@@ -267,6 +268,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	ime \
 	dict \
 	skk-dict \
+	klsudo \
+	installer \
 	libGL \
 	libbrowser \
 	libcrypto-compat \

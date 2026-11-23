@@ -997,6 +997,12 @@ tablet_target(
 	uint32_t width;
 	uint32_t height;
 	int bound;
+	int held;
+
+	/* No client hears the pen while the admin dialog shows (admin-ask.c). */
+	held = kwl_admin_ask_holds(server);
+	if (held)
+		return NULL;
 
 	/* The surface the pointer belongs to now (seat.c). */
 	kwl_seat_pointer_update(server);

@@ -7,6 +7,10 @@
 # Userland Build Rules
 #
 
+include mk/config.mk
+include mk/platform-$(PLATFORM)/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
 ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
 CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
 endif
@@ -73,8 +77,8 @@ firmware-licenses:
 		$(MAKE) -C "$$d" $(SUBMAKE_CONFIG) "$$t" || exit 1; \
 	done
 
-# The configuration the packages were made with: its files and the
-# variables given on the command line.  A package reads the configuration
+# The configuration the packages were made with: the configuration file and
+# the variables given on the command line.  A package reads the configuration
 # itself (a value such as ZEDBSD_TEST_SCREEN_CAPTURE chooses its sources),
 # so a change of it runs every package's make again, which then makes
 # again only what the change touches.  The stamp is written every time and
@@ -86,7 +90,7 @@ FORCE_PACKAGE_CONFIG:
 $(PACKAGE_CONFIG_STAMP): FORCE_PACKAGE_CONFIG
 	@mkdir -p $(dir $@)
 	@printf '%s\n' '$(subst ','\'',$(MAKEOVERRIDES))' > $@.tmp
-	@for f in $(sort $(abspath $(CONFIGMK_FILES))); do cat "$$f"; done >> $@.tmp
+	@$(if $(ZEDBSD_CONFIGMK),cat "$(ZEDBSD_CONFIGMK)" >> $@.tmp)
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
 
 define PROGRAM_RULE
@@ -155,6 +159,7 @@ $(BUILD)/packages/libGLX/.stamp: $(BUILD)/packages/libGL/.stamp $(BUILD)/package
 KEILAND_COMMON_DEPS := $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/libtruetype/.stamp
 $(BUILD)/packages/settings/.stamp:    $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp
 $(BUILD)/packages/terminal/.stamp:    $(KEILAND_COMMON_DEPS)
+$(BUILD)/packages/displayctl/.stamp:  $(BUILD)/packages/libkeiland/.stamp
 $(BUILD)/packages/files/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp
 $(BUILD)/packages/browser/.stamp:     $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libbrowser/.stamp $(BUILD)/packages/libz-compat/.stamp
 $(BUILD)/packages/imageview/.stamp:   $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp

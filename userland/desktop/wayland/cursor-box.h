@@ -60,7 +60,8 @@ struct kwl_cursor_stats {
 /*
  * The pointer's place after one write of the box, as the writer reports it
  * to the main thread: whether the place changed, whether it crossed to
- * another output, the place, and the warp count it was computed under (a
+ * another output, the place (and its part between units, in 256ths, kept
+ * only on an output at another scale than 100 %), and the warp count it was computed under (a
  * motion computed before a later warp is not taken as the pointer's
  * place).  event_us is the evdev time of the report that moved it and
  * write_us when the box was written (kwl_microseconds), the two ends of
@@ -74,6 +75,8 @@ struct kwl_cursor_motion {
 	unsigned crossed;
 	int32_t x;
 	int32_t y;
+	int32_t fraction_x;
+	int32_t fraction_y;
 	unsigned output;
 	uint64_t warp;
 	uint64_t event_us;
@@ -97,8 +100,8 @@ struct kwl_cursor_physical {
 /*
  * What the pointer's place is computed over (WS217, plan/ws217/phase001
  * 6.6): the outputs' logical rectangles of the plane (no size: not shown),
- * each output's panel and angle, and the output an absolute pointer maps
- * onto.  The main thread makes it (kwl_output_geometry) and gives it to
+ * each output's panel and angle, the output an absolute pointer maps
+ * onto, and the anchor's scale (120ths, scale.h; 0 is 100 %).  The main thread makes it (kwl_output_geometry) and gives it to
  * the box whole, so that a place is never computed over the rectangles of
  * one moment and the angles of another.
  */
@@ -107,6 +110,7 @@ struct kwl_cursor_geometry {
 	unsigned output_count;
 	struct kwl_cursor_physical physical[KWL_PLANE_SLOTS];
 	unsigned absolute_slot;
+	unsigned scale120;
 };
 
 /* One axis of an absolute device's report: the value and the range it lies in. */
@@ -145,7 +149,14 @@ typedef void kwl_cursor_box_move_fn(const void *context, const struct kwl_plane_
  * every change the cursor thread waits for; answered signals the main
  * thread.
  *
- * The last four fields are the geometry the motions are computed over
+ * scale120 is the anchor's scale (120ths, scale.h), which the main thread
+ * gives with the geometry (the image's hotspot is in the image's pixels):
+ * the cursor thread places the plane at the pixel the pointer's place is
+ * snapped to, and the motions keep the place's part between units
+ * (fraction_x and fraction_y, in 256ths) while it is not 100 %; at 100 %
+ * they stay 0 and the place moves in whole units as before.
+ *
+ * The last five fields are the geometry the motions are computed over
  * (struct kwl_cursor_geometry, WS217), always written together.
  */
 struct kwl_cursor_box {
@@ -169,6 +180,8 @@ struct kwl_cursor_box {
 	struct kwl_cursor_stats stats;
 	int32_t x;
 	int32_t y;
+	int32_t fraction_x;
+	int32_t fraction_y;
 	unsigned output;
 	uint64_t event_us;
 	uint64_t write_us;
@@ -178,12 +191,17 @@ struct kwl_cursor_box {
 	unsigned output_count;
 	struct kwl_cursor_physical physical[KWL_PLANE_SLOTS];
 	unsigned absolute_slot;
+	unsigned scale120;
 };
 
 int kwl_cursor_box_init(struct kwl_cursor_box *box, int32_t x, int32_t y, uint32_t width, uint32_t height);
 void kwl_cursor_box_destroy(struct kwl_cursor_box *box);
 void kwl_cursor_box_move(struct kwl_cursor_box *box, int64_t dx, int64_t dy, uint64_t event_us, struct kwl_cursor_motion *motion);
+void kwl_cursor_box_move_fine(struct kwl_cursor_box *box, int64_t dx, int64_t dy, uint64_t event_us, struct kwl_cursor_motion *motion);
+unsigned kwl_cursor_box_fine(struct kwl_cursor_box *box);
 void kwl_cursor_box_place(struct kwl_cursor_box *box, int32_t value_x, int32_t minimum_x, int32_t maximum_x, int32_t value_y, int32_t minimum_y, int32_t maximum_y, int64_t dx, int64_t dy, uint64_t event_us, struct kwl_cursor_motion *motion);
+int32_t kwl_cursor_pixel(int32_t unit, int32_t fraction, unsigned scale120);
+void kwl_cursor_fine_split(int64_t fine, int32_t *whole, int32_t *fraction);
 void kwl_cursor_box_warp(struct kwl_cursor_box *box, const struct kwl_cursor_geometry *geometry, kwl_cursor_box_move_fn *move, const void *context, struct kwl_cursor_motion *motion);
 void kwl_cursor_box_outputs(struct kwl_cursor_box *box, const struct kwl_cursor_geometry *geometry, uint64_t *warp);
 void kwl_cursor_box_read(struct kwl_cursor_box *box, int32_t *x, int32_t *y, unsigned *output);

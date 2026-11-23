@@ -182,10 +182,11 @@ static int space_lock_handle(hal_space_t handle, struct riscv64_space **result, 
 static void space_unlock(struct riscv64_space *space, bool enabled);
 static int valid_user(uintptr_t address, size_t size);
 static int valid_attributes(uint32_t attr);
-static struct riscv64_table_page *allocate_table(struct riscv64_space *space, uint64_t *parent, unsigned index);
+static struct riscv64_table_page *allocate_table(struct riscv64_space *space, uint64_t *parent, unsigned index, uintptr_t base, uintptr_t span);
 static uint64_t *walk_leaf(struct riscv64_space *space, uintptr_t address, int create);
-static int table_empty(const uint64_t *table);
-static struct riscv64_table_page *detach_empty_tables(struct riscv64_space *space);
+static int table_empty(const uint64_t *table, unsigned start);
+static struct riscv64_table_page *detach_empty_tables(struct riscv64_space *space, uintptr_t address, size_t size, int parents);
+static unsigned detach_range_tables(struct riscv64_space *space, uintptr_t span, uintptr_t first, uintptr_t last, struct riscv64_table_page **detached);
 static void free_detached_tables(struct riscv64_table_page *page);
 static uint64_t user_leaf_flags(uint32_t attr);
 static void sync_executable(uint64_t physical, size_t size, uint32_t attr);
@@ -748,8 +749,11 @@ hal_space_map(
 					*leaf = 0;
 			}
 
-			/* Unlinks the tables left empty, drops their translations and fails. */
-			detached = detach_empty_tables(space);
+			/*
+			 * Unlinks the tables left empty, the failed page's own
+			 * among them, drops their translations and fails.
+			 */
+			detached = detach_empty_tables(space, address, offset + RISCV64_PAGE_SIZE, 1);
 			hal_wmb();
 			flush_space(handle);
 			free_detached_tables(detached);
@@ -814,7 +818,7 @@ hal_space_unmap(
 	}
 
 	/* Unlinks the tables that became empty. */
-	detached = detach_empty_tables(space);
+	detached = detach_empty_tables(space, address, size, 0);
 
 	/* Drops the stale translations before the tables are reused. */
 	hal_wmb();
@@ -2150,7 +2154,9 @@ static struct riscv64_table_page *
 allocate_table(
 	struct riscv64_space *space,
 	uint64_t *parent,
-	unsigned index)
+	unsigned index,
+	uintptr_t base,
+	uintptr_t span)
 {
 	struct riscv64_table_page *page;
 	uint64_t *table;
@@ -2172,9 +2178,11 @@ allocate_table(
 	table = hal_pmem_to_kernel(page->memory);
 	hal_memset(table, 0, RISCV64_PAGE_SIZE);
 
-	/* Remembers the entry that will point at the table. */
+	/* Remembers the entry that will point at the table and what it translates. */
 	page->parent = parent;
 	page->parent_index = index;
+	page->base = base;
+	page->span = span;
 
 	/* Lists the table with the space's and counts it. */
 	page->next = space->tables;
@@ -2200,6 +2208,7 @@ walk_leaf(
 	struct riscv64_table_page *page;
 	uint64_t *table;
 	uint64_t entry;
+	uintptr_t span;
 	unsigned level;
 	unsigned index;
 
@@ -2215,8 +2224,12 @@ walk_leaf(
 			if (!create)
 				return NULL;
 
-			/* Allocates the table; without memory the walk fails. */
-			page = allocate_table(space, table, index);
+			/*
+			 * Allocates the table, which translates the addresses
+			 * of the entry; without memory the walk fails.
+			 */
+			span = (uintptr_t)1 << shifts[level];
+			page = allocate_table(space, table, index, address & ~(span - 1U), span);
 			if (page == NULL)
 				return NULL;
 
@@ -2237,15 +2250,25 @@ walk_leaf(
 	return &table[(address >> RISCV64_PAGE_SHIFT) & (RISCV64_TABLE_ENTRIES - 1U)];
 }
 
-/* Reports whether a table has no valid entry. */
+/*
+ * Reports whether a table has no valid entry, looking from one index to the
+ * end of the table and then from its start.
+ */
 static int
 table_empty(
-	const uint64_t *table)
+	const uint64_t *table,
+	unsigned start)
 {
 	unsigned index;
 
-	/* Looks for any valid entry. */
-	for (index = 0; index < RISCV64_TABLE_ENTRIES; index++) {
+	/* Looks for a valid entry from the start index to the end. */
+	for (index = start; index < RISCV64_TABLE_ENTRIES; index++) {
+		if ((table[index] & RISCV64_PTE_V) != 0)
+			return 0;
+	}
+
+	/* Looks for a valid entry before the start index. */
+	for (index = 0; index < start; index++) {
 		if ((table[index] & RISCV64_PTE_V) != 0)
 			return 0;
 	}
@@ -2255,56 +2278,116 @@ table_empty(
 }
 
 /*
- * Unlinks every empty table of a space, repeating until none is left
- * whose children all went, and reports them for freeing after the flush.
+ * Unlinks the tables of a cleared range that hold no valid entry, and
+ * reports them for freeing after the flush.  Only the last-level tables
+ * covering the range can have become empty, since the entries of the others
+ * did not change, and a middle table only when one of its last-level tables
+ * went.  The rollback of a failed map asks for the middle tables of the
+ * range as well, since the failed walk may have left one with no child.
  */
 static struct riscv64_table_page *
 detach_empty_tables(
-	struct riscv64_space *space)
+	struct riscv64_space *space,
+	uintptr_t address,
+	size_t size,
+	int parents)
 {
 	struct riscv64_table_page *detached;
+	uintptr_t first;
+	uintptr_t last;
+	unsigned count;
+
+	/* An empty range cleared nothing. */
+	detached = NULL;
+	if (size == 0)
+		return NULL;
+
+	/* Names the first and the last address of the range. */
+	first = address;
+	last = address + size - 1U;
+
+	/* Unlinks the last-level tables of the range that became empty. */
+	count = detach_range_tables(space, (uintptr_t)1 << 21, first, last, &detached);
+
+	/* Without a detached child, the middle tables keep their entries. */
+	if (count == 0 && !parents)
+		return detached;
+
+	/* Unlinks the middle tables of the range that became empty. */
+	(void)detach_range_tables(space, (uintptr_t)1 << 30, first, last, &detached);
+
+	/* Succeeded: the tables to free once no walker can reach them. */
+	return detached;
+}
+
+/*
+ * Unlinks the empty tables of one size that translate part of a range,
+ * prepends them to a detached list and reports how many went.
+ */
+static unsigned
+detach_range_tables(
+	struct riscv64_space *space,
+	uintptr_t span,
+	uintptr_t first,
+	uintptr_t last,
+	struct riscv64_table_page **detached)
+{
 	struct riscv64_table_page **link;
 	struct riscv64_table_page *page;
 	const uint64_t *table;
 	uint64_t parent_entry;
 	uint64_t expected_entry;
-	int again;
+	unsigned count;
+	unsigned start;
 	int empty;
 
-	/* Passes over the tables until a pass detaches nothing. */
-	detached = NULL;
-	do {
-		again = 0;
-		link = &space->tables;
-		while (*link != NULL) {
-			page = *link;
+	/* Examines every table of the size that translates part of the range. */
+	count = 0;
+	link = &space->tables;
+	while (*link != NULL) {
+		page = *link;
 
-			/* A table that still maps something stays. */
-			table = hal_pmem_to_kernel(page->memory);
-			empty = table_empty(table);
-			if (!empty) {
-				link = &page->next;
-				continue;
-			}
-
-			/* The parent entry must point at this very table. */
-			parent_entry = page->parent[page->parent_index];
-			expected_entry = pointer_entry(page->memory);
-			if ((parent_entry & RISCV64_PTE_V) == 0 ||
-			    expected_entry != parent_entry)
-				HAL_FATAL("detaching an unlinked riscv64 page table");
-
-			/* Unlinks the table from its parent and from the space's list. */
-			page->parent[page->parent_index] = 0;
-			*link = page->next;
-			page->next = detached;
-			detached = page;
-			again = 1;
+		/* A table of another size or outside the range stays. */
+		if (page->span != span ||
+		    page->base > last ||
+		    page->base + (span - 1U) < first) {
+			link = &page->next;
+			continue;
 		}
-	} while (again);
 
-	/* Succeeded: the tables to free once no walker can reach them. */
-	return detached;
+		/*
+		 * Looks first at the cleared entries' neighbours, where a
+		 * table that is still in use most likely has its mappings.
+		 */
+		start = 0;
+		if (page->base < first)
+			start = (unsigned)((first - page->base) / (span / RISCV64_TABLE_ENTRIES));
+
+		/* A table that still maps something stays. */
+		table = hal_pmem_to_kernel(page->memory);
+		empty = table_empty(table, start);
+		if (!empty) {
+			link = &page->next;
+			continue;
+		}
+
+		/* The parent entry must point at this very table. */
+		parent_entry = page->parent[page->parent_index];
+		expected_entry = pointer_entry(page->memory);
+		if ((parent_entry & RISCV64_PTE_V) == 0 ||
+		    expected_entry != parent_entry)
+			HAL_FATAL("detaching an unlinked riscv64 page table");
+
+		/* Unlinks the table from its parent and from the space's list. */
+		page->parent[page->parent_index] = 0;
+		*link = page->next;
+		page->next = *detached;
+		*detached = page;
+		count++;
+	}
+
+	/* Succeeded: the number of tables unlinked. */
+	return count;
 }
 
 /* Frees tables detached by detach_empty_tables(). */

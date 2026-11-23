@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.noctvm.mikuterm</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Zlib</project_license>
+
+  <name>mikuterm</name>
+  <summary>Terminal whose tabs are SSH connections</summary>
+
+  <launchable type="desktop-id">io.noctvm.mikuterm.desktop</launchable>
+
+  <developer id="io.noctvm">
+    <name>Awe Morris</name>
+  </developer>
+
+  <description>
+    <p>
+      mikuterm (Micro Unicode Terminal) is the terminal of zedBSD with its own
+      SSH client built in: each tab is an SSH connection to a host of its
+      ssh_config, or one typed as user@host:port.
+    </p>
+    <ul>
+      <li>Tabs, each an SSH connection with its own thread</li>
+      <li>Ed25519 keys, known_hosts, port forwarding and RemoteCommand</li>
+      <li>A settings tab that makes keys and checks the hosts' settings</li>
+      <li>Colour emoji, wide and ambiguous-width characters, and a fallback font</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://github.com/awemorris/zedBSD</url>
+  <url type="bugtracker">https://github.com/awemorris/zedBSD/issues</url>
+  <url type="vcs-browser">https://github.com/awemorris/zedBSD</url>
+
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+
+  <provides>
+    <binary>mikuterm</binary>
+  </provides>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-11-24">
+      <description>
+        <p>The first Linux release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

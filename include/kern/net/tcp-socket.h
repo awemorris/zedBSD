@@ -24,7 +24,13 @@ enum tcp_state {
 	TCP_FIN_WAIT_2,
 	TCP_CLOSE_WAIT,
 	TCP_LAST_ACK,
-	TCP_TIME_WAIT
+	TCP_TIME_WAIT,
+	/*
+	 * Both ends closed at once (RFC 9293 section 3.6): the peer's FIN came
+	 * before it acknowledged this end's, which TIME_WAIT then waits for.
+	 * Last, so the values net.tcpstats reports for the others stay.
+	 */
+	TCP_CLOSING
 };
 
 /*
@@ -504,6 +510,17 @@ struct tcp_socket {
 	unsigned nodelay;
 	uint64_t keepalive_deadline;
 	unsigned keepalive_probes;
+	/*
+	 * The idle probing of this connection: the silence before the first
+	 * probe (TCP_KEEPIDLE) and the time between probes (TCP_KEEPINTVL),
+	 * in ticks and in the milliseconds they were set in, and the probes
+	 * that may go unanswered (TCP_KEEPCNT).  Written under the socket lock.
+	 */
+	uint64_t keepalive_idle;
+	unsigned keepalive_idle_ms;
+	uint64_t keepalive_interval;
+	unsigned keepalive_interval_ms;
+	unsigned keepalive_count;
 	unsigned listen_backlog;
 	unsigned half_open_count;
 	unsigned accept_count;

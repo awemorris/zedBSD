@@ -6,7 +6,7 @@
 #
 # Generates ambiguous.h, the table of the characters whose East Asian Width
 # is A (Ambiguous), for terminal's "Treat Ambiguous-Width Characters as
-# Wide" (ws128-p009).
+# Wide".
 #
 # The data are the Unicode Character Database's own files, fetched from
 # unicode.org and checked against the SHA-256 recorded below:

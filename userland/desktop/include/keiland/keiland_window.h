@@ -206,6 +206,35 @@ int kl_window_repeat(struct kl_window *window, uint64_t now_us);
 int kl_window_repeat_wait(const struct kl_window *window, uint64_t now_us);
 void kl_window_set_title(struct kl_window *window, const char *title);
 void kl_window_size(const struct kl_window *window, uint32_t *width, uint32_t *height);
+/*
+ * KL_VERSION 112: the scale the window is drawn at, in 96ths (KL_SCALE_BASE
+ * is 100 %): the content's size, the input's places and a frame are in
+ * pixels, and a program draws its text and widgets this much larger (a
+ * kl_canvas's kl_canvas_set_scale).  A window's options' width and height
+ * are at KL_SCALE_BASE.  KL_WINDOW_SCALE tells a change.
+ *
+ * KL_VERSION 114: on Wayland a window is drawn at 100 % and the compositor
+ * enlarges it, until the program calls kl_window_follow_scale (any time
+ * after the window is open): from then on kl_window_scale reports the
+ * compositor's scale for the window, kl_window_size,
+ * kl_window_present_resize and kl_window_configure_take report sizes in
+ * pixels, the input's places and the wheel's distances, the keyboard's
+ * inset and the desktop's place are in pixels, and kl_window_text_cursor,
+ * kl_window_popup_menu and kl_window_set_glass take pixels; the frames are
+ * shown pixel for pixel.  It returns 0, EINVAL, or ENOTSUP under a
+ * compositor that does not tell the scale (the window stays at 100 %).  A
+ * program that follows the scale draws its text and widgets at it (a
+ * kl_canvas's kl_canvas_set_scale, kl_ui_set_scale) and takes its scale
+ * again at each KL_WINDOW_SCALE.  A window's minimum size and its options'
+ * width and height stay at KL_SCALE_BASE.  A program that shows its own
+ * frames and does not defer its configures sends its first frame of a new
+ * size after kl_window_size reports it; one that defers them acknowledges
+ * with kl_window_configure_ack before that frame, which shows it at the
+ * new logical size.  On Windows a window follows its monitor's dpi from
+ * the start, and kl_window_follow_scale returns 0 and changes nothing.
+ */
+unsigned kl_window_scale(const struct kl_window *window);
+int kl_window_follow_scale(struct kl_window *window);
 int kl_window_present_resize(struct kl_window *window, uint32_t *width, uint32_t *height);
 int kl_window_present(struct kl_window *window, const uint32_t *pixels, size_t stride);
 int kl_window_present_part(struct kl_window *window, const uint32_t *pixels, size_t stride, const struct kl_rect *part);
@@ -602,6 +631,15 @@ int kl_window_set_glass_blur(struct kl_window *window, int enabled);
 
 /* The context menu (kl_window_popup_menu) closed, chosen from or not (KL_VERSION 46). */
 #define KL_WINDOW_POPUP_DONE	35U
+
+/*
+ * KL_VERSION 112: the scale the window is drawn at changed (moved to a
+ * screen of another scale, or the screen's scale changed); code is the new
+ * one, in 96ths (KL_SCALE_BASE is 100 %), which kl_window_scale reports
+ * from then.  The new size, if the system gave one with it, follows as a
+ * KL_WINDOW_RESIZE.
+ */
+#define KL_WINDOW_SCALE	36U
 
 /* The actions of drag and drop (bits, as wl_data_device_manager's). */
 #define KL_DND_COPY		1U

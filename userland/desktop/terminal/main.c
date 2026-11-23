@@ -8,37 +8,44 @@
 /*
  * terminal: a VT100 terminal in a Wayland window, drawn with Vulkan.
  *
- * It runs a shell (or a command) on a pseudo-terminal, shows what it writes
- * and sends it the keys typed.  The window follows the size the compositor
- * gives it, and the shell is told the grid's new size.  The terminal ends
- * when the shell exits or the window is closed.
+ * It runs a shell (or a command) on a pseudo-terminal for each tab
+ * (connection-process.c), shows what it writes and sends it the keys
+ * typed (run.c).  The window follows the size the compositor gives it, and
+ * the shell is told the grid's new size.  The terminal ends when the last
+ * shell exits or the window is closed.  New Window starts another
+ * terminal, the way this one was run.
  *
- * Each tab of the window (tabs.c, ws035-p086: the titlebar's tabs) is a
- * shell of its own with its own grid; the keys go to the active tab's
- * shell, and every shell is read so none of them waits.  A tab whose shell
- * exits closes; the last one ends the terminal.
- *
- * Its menus (menu.c) are drawn by the compositor; what they choose is carried out
- * here: a new window (another terminal), closing, the selection and the
- * clipboard (the compositor's, shared with other clients, clipboard.c), the
- * font's size, fullscreen, keys for the shell, clearing and
- * resetting the screen, and a line about the terminal.
+ * Its settings' tab (settings-page.c) edits the user's ~/.ssh/config,
+ * makes keys in ~/.ssh (the private key 0600) and lists ~/.ssh/known_hosts;
+ * the files are written here with POSIX calls (main_page_*).  A change of
+ * ~/.ssh/config is checked with the SSH library's reader before it is
+ * written, and the file opens in the text editor (textedit).  The tab also
+ * keeps the terminal's own settings of the next start (the fonts, the
+ * grid) and of the next tab (the shells' TERM) in the desktop's settings
+ * (terminal.*, main_item_*), which a command line's option wins over.
  *
  * Every outcome is one line on standard output: ZTERM DONE on a normal end
  * (with the reason), ZTERM FAILED naming what failed otherwise.
  */
 
-#include "terminal.h"
+#include "run.h"
+#include "connection.h"
+#include "settings-page.h"
+
+#include "userland/base/ssh/ssh-config.h"
 
 #include "userland/desktop/paths.h"
 
 #include "include/kern/os-name.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* The font the terminal uses unless told otherwise, and its size in pixels. */
@@ -48,25 +55,66 @@
 /* The font that draws what the monospaced font has no glyph for (CJK), unless told otherwise. */
 #define MAIN_FALLBACK_FONT	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
 
-/* The grid the window opens with. */
+/* The colour emoji font, which draws in colour what neither of them has (the desktop's text draws from it too). */
+#define MAIN_EMOJI_FONT		KEILAND_DATADIR "/fonts/keiland-emoji.ttf"
+
+/* The fonts the settings' tab draws its words with: the desktop's interface font and its fallback. */
+#define MAIN_PAGE_FONT		KEILAND_DATADIR "/fonts/keiland.ttf"
+#define MAIN_PAGE_FALLBACK	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
+
+/* The user's SSH files under the home directory, and the directory's mode when the settings make it. */
+#define MAIN_SSH_DIRECTORY	"/.ssh"
+#define MAIN_SSH_MODE		0700
+
+/* A file's modes: a secret one (a private key, the ssh_config made new), a public one. */
+#define MAIN_SECRET_MODE	0600
+#define MAIN_PUBLIC_MODE	0644
+
+/* The longest path of the user's SSH files, and the longest comment of a new key. */
+#define MAIN_PATH_MAX		1024U
+#define MAIN_COMMENT_MAX	320U
+
+/* The grid the window opens with (the desktop's settings' defaults of terminal.columns and terminal.rows). */
 #define MAIN_COLUMNS		90U
 #define MAIN_ROWS		28U
 
-/* The shell run when no command is given. */
-#define MAIN_SHELL		"/bin/sh"
+/* The shells' terminal type unless the user chose another (the process connector's). */
+#define MAIN_TERM		"xterm"
 
-/* How many redraws in a row may find the swapchain out of date before the terminal gives up. */
-#define MAIN_STALE_LIMIT	8U
+/* The application whose settings the terminal's are, and its keys of the next start and of the next tab. */
+#define MAIN_SETTINGS_APP	"terminal"
+#define MAIN_KEY_FONT		"terminal.font"
+#define MAIN_KEY_FALLBACK	"terminal.fallback-font"
+#define MAIN_KEY_COLUMNS	"terminal.columns"
+#define MAIN_KEY_ROWS		"terminal.rows"
+#define MAIN_KEY_TERM		"terminal.term"
+
+/* Where a font named without a directory is looked for. */
+#define MAIN_FONT_DIRECTORY	KEILAND_DATADIR "/fonts/"
 
 /* The program started for a new window when the terminal was not run by a path. */
 #define MAIN_PROGRAM		KEILAND_BINDIR "/terminal"
 
-/* The most text the clipboard holds: every cell as four UTF-8 bytes, and a line break per row. */
-#define MAIN_CLIPBOARD_MAX	(TERMINAL_MAX_COLUMNS * TERMINAL_MAX_ROWS * 4U + TERMINAL_MAX_ROWS)
+/* The text editor the settings' tab opens ~/.ssh/config in. */
+#define MAIN_EDITOR		KEILAND_BINDIR "/textedit"
+
+/* The most Host names ~/.ssh/config is checked for, besides a name no Host matches, and the longest one with its NUL. */
+#define MAIN_CHECK_HOSTS	32U
+#define MAIN_CHECK_NAME		128U
 
 /* What Help > About Terminal writes on the screen. */
 #define MAIN_ABOUT		"\r\n\033[1mTerminal\033[0m: a VT100 terminal for " ZEDBSD_OS_NAME ", drawn with Vulkan.\r\n" \
 				"Its menus are drawn by the System Menu (xdg_toplevel_menu_v1).\r\n"
+
+/* The terminal's own settings in the settings' tab. */
+enum main_item {
+	MAIN_ITEM_NONE,
+	MAIN_ITEM_FONT,
+	MAIN_ITEM_FALLBACK,
+	MAIN_ITEM_COLUMNS,
+	MAIN_ITEM_ROWS,
+	MAIN_ITEM_TERM
+};
 
 /*
  * What the command line asked for.
@@ -80,246 +128,94 @@ struct main_options {
 	const char *token;
 	unsigned pixels;
 	int pixels_given;
+	int font_given;
+	int font_kept;
+	int fallback_given;
 	unsigned columns;
 	unsigned rows;
+	int columns_given;
+	int rows_given;
 	unsigned timeout;
 };
 
 /*
- * How the run is going: the shell, and what the error line names when
- * something fails.
+ * The settings kept for the next start that the command line did not
+ * override: the font files' paths (empty: the terminal's own).  Read once
+ * before the run; the options point into it for the run's life.
  */
-struct main_run {
-	/* The active tab's shell (NULL when none runs). */
-	struct kl_process *shell;
-
-	/* The grid's size, as last told to the shell, and the font's size in pixels. */
-	unsigned columns;
-	unsigned rows;
-	unsigned pixels;
-
-	/*
-	 * Whether Ambiguous-width characters are wide (View > Treat
-	 * Ambiguous-Width Characters as Wide, ws128-p009): every tab's grid
-	 * follows it, and the settings file keeps it for the next run.
-	 */
-	int ambiguous_wide;
-
-	/*
-	 * The font's size the settings file keeps (0: none yet; View > Zoom and
-	 * Text Size keep theirs) and the colour theme (View > Theme), ws128-p006.
-	 */
-	unsigned kept_pixels;
-	unsigned theme;
-
-	/* What failed last, the Vulkan result of it, and why the run ended normally. */
-	const char *operation;
-	VkResult result;
-	const char *reason;
+struct main_kept {
+	char font[KL_SETTINGS_VALUE_MAX];
+	char fallback[KL_SETTINGS_VALUE_MAX];
 };
 
 /*
- * The terminal's parts, for the whole run.  They are file-scope because the
- * grid alone is too large for the stack.
+ * What the settings' tab is given: the user's SSH files' paths, the
+ * comment of a new key (user@host), the functions that read and write
+ * them, and the connector whose shells' TERM the tab changes.  Set once
+ * before the run, for its whole life.
  */
-static struct terminal_font main_font;
-static struct terminal_window main_window;
-static struct terminal_renderer main_renderer;
-
-/*
- * The touch screen (touch.c, ws081-p011): the fingers' gestures and
- * scroller, made with the window (without them fingers do nothing).
- */
-static struct terminal_touch main_touch;
-
-/* In how many milliseconds the fingers want the next round (-1: none). */
-static int main_touch_due = -1;
-
-/*
- * One tab: its grid (allocated, too large for the stack), its shell (a
- * process of the application on a terminal of its own), its ID in the
- * titlebar and its title.
- */
-struct main_tab {
-	struct terminal_screen *screen;
-	struct kl_process *shell;
-	uint32_t id;
-	char title[TERMINAL_TAB_TITLE];
+struct main_page {
+	char ssh[MAIN_PATH_MAX];
+	char config[MAIN_PATH_MAX];
+	char keys[MAIN_PATH_MAX];
+	char known_hosts[MAIN_PATH_MAX];
+	char comment[MAIN_COMMENT_MAX];
+	struct terminal_page_program program;
+	struct terminal_process_connector *connector;
 };
 
 /*
- * The tabs, in their order, how many there are, the active one (whose grid
- * is drawn and whose shell takes the keys) and the ID the next tab gets.
- * main_screen is the active tab's grid; run->shell is the active tab's
- * shell.  They live as long as the terminal.
+ * The Host names of an ssh_config a check reads it for: so many of them
+ * (the first MAIN_CHECK_HOSTS kept).  One for each check, on the heap for
+ * that check alone (it is too large for a small stack).
  */
-static struct main_tab main_tabs[TERMINAL_TABS];
-static unsigned main_tab_count;
-static unsigned main_active;
-static uint32_t main_tab_next = 1U;
-static struct terminal_screen *main_screen;
+struct main_check_names {
+	char names[MAIN_CHECK_HOSTS][MAIN_CHECK_NAME];
+	unsigned count;
+};
+
+/* The settings' tab's files (the main thread's). */
+static struct main_page main_page;
+
+/* The fonts kept for the next start, which the options point into (the main thread's, set before the run). */
+static struct main_kept main_kept;
 
 /*
- * The clipboard's text and its length: the terminal's copy (Edit > Copy),
- * which its data source sends to other clients while it is the selection,
- * or another client's selection received for a paste; and the text being
- * pasted into the shell (Edit > Paste) with how much of it was written.
- * They live as long as the terminal.
+ * The terminal's own settings in the tab, by their keys in the desktop's
+ * settings: the fonts and the grid (the next start), then the shells'
+ * TERM (the next tab).
  */
-static char main_clipboard[MAIN_CLIPBOARD_MAX];
-static size_t main_clipboard_length;
-static char main_paste[MAIN_CLIPBOARD_MAX];
-
-/*
- * The pointer's selection (ws035-p093): whether the left button is held
- * for a selection, or was pressed inside the range (a move then drags the
- * text out), where and with which serial, the press before (for double and
- * triple clicks: its time, its cell and how many clicks it made), and the
- * cell a drag of the range started at.  A cell is a column and a line
- * (screen.c numbers lines so they follow the text into the scrollback,
- * ws035-p114).
- */
-static int main_selecting;
-static int main_drag_armed;
-static int32_t main_press_x;
-static int32_t main_press_y;
-static uint32_t main_press_serial;
-static uint32_t main_click_time;
-static unsigned main_click_column;
-static unsigned long main_click_line;
-static unsigned main_clicks;
-static unsigned main_anchor_column;
-static unsigned long main_anchor_line;
-
-/*
- * Whether the last click was a touch pad's tap: the compositor gives a
- * tap's press and release at once, with the same time (a button pressed
- * by a hand is held for some milliseconds).  A press soon after a tap may
- * be a double tap or a tap-and-drag, which the compositor gives as the
- * tap's click and then a held press (BUG-276); main_tap_drag says the press
- * held now came that way, so that its first move off the cell makes it the
- * drag of characters the user meant, not a double click's drag by words.
- */
-static int main_last_tap;
-static int main_tap_drag;
-
-/*
- * A tap on the selected range (BUG-276, the user: "with a range selected,
- * the first tap of a double tap takes the selection away"): the click of a
- * touch pad's tap does not clear the range at once but at main_tap_clear_at
- * (0: nothing waits), so that the tap-and-drag that may follow drags the
- * range out as a pressed pad does.  main_tap_second says the press held
- * now came within that time on the range: moved, it drags the range out;
- * let go, it was a double tap and selects the word.
- */
-static uint64_t main_tap_clear_at;
-static int main_tap_second;
-
-/*
- * The unit a held selection grows by (ws035-p111): 1 a cell (a click), 2 a
- * word (a double click), 3 a line (a triple click); the word or line the
- * double or triple click chose, which a drag keeps selected while it adds
- * whole words or lines on the side the pointer goes; and whether the drag
- * changed the range since the press.
- */
-static unsigned main_unit;
-static unsigned long main_unit_from[2];
-static unsigned long main_unit_to[2];
-static int main_unit_moved;
-
-/*
- * The edge scrolling of a held selection (ws035-p114): where the pointer
- * last was while the button selects, which way the view scrolls because
- * the pointer is past the grid's top (1, back into the scrollback) or
- * bottom (-1, toward the live screen) or 0 while it is on the grid, and
- * when the next step is due, in milliseconds.
- */
-static int32_t main_pointer_x;
-static int32_t main_pointer_y;
-static int main_edge;
-static uint64_t main_edge_at;
-
-/* How close in time a click makes a double or triple click, and how far a press moves before it drags, in milliseconds and pixels. */
-#define MAIN_CLICK_MS		400U
-#define MAIN_DRAG_DISTANCE	6
-
-/* How long a tap's click on the range waits for a tap-and-drag before it clears the range: the compositor's tap-drag time (touchpad.c TAP_DRAG_MS) and a margin. */
-#define MAIN_TAP_DRAG_MS	350U
-
-/* How often a selection held past the grid's edge scrolls, in milliseconds, and the most lines one step scrolls (ws035-p114). */
-#define MAIN_EDGE_MS		60U
-#define MAIN_EDGE_LINES		8U
-
-/* How many lines one notch of the wheel scrolls the view (ws035-p114). */
-#define MAIN_WHEEL_LINES	3
-
-/* The window's title as last set: the active tab's (OSC 0 or 2), or "Terminal" (ws035-p091). */
-static char main_window_title[TERMINAL_TITLE];
-static size_t main_paste_length;
-
-/* The text selected with the pointer, which the primary selection sends (primary.c keeps a pointer to it). */
-static char main_primary[MAIN_CLIPBOARD_MAX];
-static size_t main_paste_written;
-
-/*
- * Whether the active shell reads a secret (ws095-p006): its echo off on a
- * whole line, as a password prompt has it.  The window's text input is off
- * meanwhile, so the input method composes nothing and the keys go as they are.
- */
-static int main_secret;
+static const struct terminal_page_item main_items[] = {
+	{ MAIN_KEY_FONT, "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_FALLBACK, "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_COLUMNS, "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_ROWS, "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_TERM, "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, NULL }
+};
 
 static int main_parse(int argc, char **argv, struct main_options *options);
+static void main_kept_read(struct main_options *options, struct terminal_process_connector *connector);
+static int main_page_init(struct terminal_process_connector *connector);
+static int main_item_get(void *data, const char *keyword, char *value, size_t size);
+static int main_item_set(void *data, const char *keyword, const char *value, char *why, size_t size);
+static int main_item_font(const char *value, char *path, size_t size, char *why, size_t why_size);
+static unsigned main_item_kind(const char *keyword);
+static int main_item_number(const char *value, unsigned maximum, unsigned *number, char *text, size_t size, char *why, size_t why_size);
+static int main_item_term(const char *value, char *why, size_t why_size);
+static int main_item_keep(const char *keyword, const char *value, const char *fallback, char *why, size_t why_size);
+static int main_page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
+static int main_page_replace(void *data, const char *path, const void *bytes, size_t size);
+static int main_page_create(void *data, const char *path, const void *bytes, size_t size, int secret);
+static int main_page_exists(void *data, const char *path);
+static int main_page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
+static int main_page_named(void *data, const char *name, size_t size);
+static int main_page_editor(void *data, struct terminal_window *window, const char *path);
+static int main_page_write(const char *path, int flags, mode_t mode, const void *bytes, size_t size);
+static void main_page_directory(void);
 static const char *main_value(const char *argument, const char *name);
 static int main_number(const char *text, unsigned maximum, unsigned *value);
-static int main_start(const struct main_options *options, struct main_run *run);
-static int main_loop(const struct main_options *options, struct main_run *run);
-static int main_resize(const struct main_options *options, struct main_run *run);
-static struct kl_process *main_spawn(const struct main_options *options, const struct main_run *run);
-static void main_grid(unsigned width, unsigned height, unsigned *columns, unsigned *rows);
-static void main_tell_size(struct kl_process *shell, unsigned columns, unsigned rows);
-static int main_read_shell(struct kl_process *shell, struct terminal_screen *screen, unsigned ready);
-static int main_write_shell(struct kl_process *shell);
-static int main_menu_actions(const struct main_options *options, struct main_run *run);
-static void main_menu_state(const struct main_run *run, struct terminal_menu_state *state);
-static void main_new_window(const struct main_options *options, const struct main_run *run);
-static int main_zoom(const struct main_options *options, struct main_run *run, unsigned pixels);
-static void main_ambiguous_wide(const struct main_options *options, struct main_run *run);
-static int main_save_settings(const struct main_run *run);
-static void main_theme(const struct main_options *options, struct main_run *run, unsigned theme);
-static void main_find(int step);
-static void main_search(const struct main_options *options);
-static void main_copy(void);
-static void main_start_paste(void);
-static void main_drop_paste(void);
-static int main_tab_new(const struct main_options *options, struct main_run *run);
-static void main_tab_switch(struct main_run *run, unsigned index);
-static int main_tab_close(const struct main_options *options, struct main_run *run, unsigned index);
-static int main_tab_find(uint32_t id);
-static int main_tab_requests(const struct main_options *options, struct main_run *run);
-static void main_tabs_show(void);
-static void main_title_copy(char *to, size_t size, const char *from);
-static void main_pointer(void);
-static void main_pointer_press(const struct terminal_pointer_event *event);
-static void main_primary_paste(void);
-static void main_pointer_motion(const struct terminal_pointer_event *event);
-static void main_pointer_release(const struct terminal_pointer_event *event);
-static void main_tap_expire(uint64_t now);
-static void main_range_clear(void);
-static void main_select_word(unsigned column, unsigned long line);
-static void main_cell(int32_t x, int32_t y, unsigned *column, unsigned long *line);
-static void main_range(unsigned from_column, unsigned long from_line, unsigned to_column, unsigned long to_line);
-static int main_word_character(unsigned column, unsigned long line);
-static void main_unit_bounds(unsigned unit, unsigned column, unsigned long line, unsigned *from, unsigned *to);
-static void main_unit_extend(unsigned column, unsigned long line);
-static void main_selected_log(const char *how);
-static void main_select_to_pointer(void);
-static void main_edge_scroll(uint64_t now);
-static void main_scroll(void);
-static void main_view_log(const char *how);
-static void main_touch_round(void);
-static void main_text_cursor(void);
-static void main_secret_follow(struct kl_process *shell);
-static void main_touch_queue(unsigned kind, const struct terminal_touch_pointer *made);
+static void main_new_window(void *data, struct kl_app *app, struct kl_window *from);
+static void main_ended(void *data, const struct terminal_run_result *result);
 
 /*
  * Runs the terminal.
@@ -330,9 +226,10 @@ main(
 	char **argv)
 {
 	struct main_options options;
-	struct main_run run;
+	struct terminal_process_connector connector;
+	struct terminal_run_options run;
+	struct terminal_run_result result;
 	int status;
-	int exit_status;
 
 	/* The command line. */
 	status = main_parse(argc, argv, &options);
@@ -343,41 +240,61 @@ main(
 
 	/* A write to a shell that has gone must not kill the terminal. */
 	(void)signal(SIGPIPE, SIG_IGN);
+
+	/* Each tab a shell on a pseudo-terminal, or the shell running the command. */
+	terminal_process_connector_init(&connector, options.command);
+
+	/* The settings kept for the next start and the next tab, where the command line chose nothing. */
+	main_kept_read(&options, &connector);
+
+	/* The terminal's window, fonts and grid, drawn with its own Vulkan. */
 	memset(&run, 0, sizeof(run));
-	run.shell = NULL;
-	run.operation = "none";
-	run.result = VK_SUCCESS;
-	run.reason = "closed";
+	run.application = "terminal";
+	run.display = options.display;
+	run.title = "Terminal";
+	run.present = KL_PRESENT_NONE;
+	run.font = options.font;
+	run.font_default = NULL;
+	run.companion = KEILAND_FONT_FALLBACK_MONO;
+	run.fallback = options.fallback;
+	run.emoji = MAIN_EMOJI_FONT;
+	run.pixels = options.pixels;
+	run.pixels_given = options.pixels_given;
+	run.scale = 96U;
+	run.columns = options.columns;
+	run.rows = options.rows;
+	run.timeout = options.timeout;
+	run.token = options.token;
+	run.about = MAIN_ABOUT;
+	run.connector = &connector.connector;
 
-	/* The font, the window, the drawing and the shell; then the terminal runs until it ends. */
-	status = main_start(&options, &run);
-	if (status == 0)
-		status = main_loop(&options, &run);
+	/* Alt+F11 switches the width of the ambiguous characters, as mikuterm's does. */
+	run.ambiguous_wide_key = 1;
 
-	/* One line says how the run ended. */
-	exit_status = 0;
+	/* A kept font that cannot be opened gives way to the terminal's own (one given on the command line does not). */
+	if (options.font_kept)
+		run.font_default = MAIN_FONT;
+
+	/* The settings' tab, with the user's SSH files (none without a home directory). */
+	status = main_page_init(&connector);
 	if (status == 0) {
-		printf("ZTERM DONE run=%s reason=%s\n", options.token, run.reason);
-	} else {
-		printf("ZTERM FAILED run=%s operation=%s result=%d errno=%d\n", options.token, run.operation, (int)run.result, errno);
-		exit_status = 1;
+		run.page = &main_page.program;
+		run.page_font = MAIN_PAGE_FONT;
+		run.page_fallback = MAIN_PAGE_FALLBACK;
 	}
 
-	/* The line reaches whoever reads the log before the terminal goes. */
-	fflush(stdout);
+	/* The program's own answers to the run. */
+	run.new_window = main_new_window;
+	run.ended = main_ended;
+	run.data = &options;
 
-	/* Each tab's shell, if it still runs, is hung up on and reaped. */
-	while (main_tab_count > 0U)
-		(void)main_tab_close(&options, &run, main_tab_count - 1U);
+	/* The terminal runs until it ends; main_ended says how. */
+	status = terminal_run(&run, &result);
+	if (status != 0)
+		return 1;
 
-	/* The drawing before the window it draws into, then the font. */
-	terminal_renderer_close(&main_renderer);
-	terminal_touch_close(&main_touch);
-	terminal_window_close(&main_window);
-	terminal_font_close(&main_font);
-
-	/* Reports how the terminal ended. */
-	return exit_status;
+	/* Succeeded: the terminal ended normally. */
+	return 0;
 }
 
 /* Reads the command line into the options; returns nonzero for a malformed one. */
@@ -427,6 +344,7 @@ main_parse(
 		value = main_value(argv[index], "--font=");
 		if (value != NULL) {
 			options->font = value;
+			options->font_given = 1;
 			continue;
 		}
 
@@ -434,6 +352,7 @@ main_parse(
 		value = main_value(argv[index], "--fallback-font=");
 		if (value != NULL) {
 			options->fallback = value;
+			options->fallback_given = 1;
 			continue;
 		}
 
@@ -453,6 +372,7 @@ main_parse(
 			status = main_number(value, TERMINAL_MAX_COLUMNS, &options->columns);
 			if (status != 0)
 				return -1;
+			options->columns_given = 1;
 			continue;
 		}
 
@@ -462,6 +382,7 @@ main_parse(
 			status = main_number(value, TERMINAL_MAX_ROWS, &options->rows);
 			if (status != 0)
 				return -1;
+			options->rows_given = 1;
 			continue;
 		}
 
@@ -519,338 +440,6 @@ main_value(
 	return argument + length;
 }
 
-/* Opens the font, the window and the drawing, sizes the grid and starts the shell; returns nonzero on failure. */
-static int
-main_start(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	struct terminal_menu_state state;
-	struct terminal_settings settings;
-	unsigned pixels;
-	int status;
-
-	/* The settings kept from the last run (the defaults when there are none). */
-	terminal_settings_load(&settings);
-	run->ambiguous_wide = settings.ambiguous_wide;
-	run->kept_pixels = settings.font_size;
-	run->theme = settings.theme;
-	printf("ZTERM SETTINGS run=%s ambiguous_wide=%d font_size=%u theme=%u\n", options->token, run->ambiguous_wide, settings.font_size, settings.theme);
-
-	/* The font's size: the one given on the command line, else the one kept, else the default (ws128-p006). */
-	pixels = options->pixels;
-	if (!options->pixels_given && settings.font_size != 0U)
-		pixels = settings.font_size;
-
-	/* The font, which sets the cell's size. */
-	run->operation = "terminal_font_open";
-	status = terminal_font_open(&main_font, options->font, pixels);
-	if (status != 0) {
-		errno = status;
-		return -1;
-	}
-
-	/* The fallback font for the characters the font has not got; without it they show the font's missing glyph. */
-	status = terminal_font_fallback(&main_font, options->fallback);
-	if (status != 0)
-		printf("ZTERM FONT fallback=none error=%d\n", status);
-
-	/* The window, sized for the grid asked for. */
-	run->operation = "terminal_window_open";
-	status = terminal_window_open(&main_window, options->display,
-				      options->columns * main_font.cell_width + 2U * TERMINAL_PADDING,
-				      options->rows * main_font.cell_height + 2U * TERMINAL_PADDING);
-	if (status != 0)
-		return -1;
-
-	/* The fingers; without memory for them they do nothing. */
-	status = terminal_touch_open(&main_touch);
-	if (status != 0)
-		printf("ZTERM TOUCH none error=%d\n", status);
-
-	/* The drawing, at the size the compositor gave. */
-	run->result = terminal_renderer_open(&main_renderer, &main_window, &main_font);
-	run->operation = main_renderer.operation;
-	if (run->result != VK_SUCCESS)
-		return -1;
-
-	/* The grid that fits the window, and the theme it is drawn in. */
-	run->pixels = pixels;
-	main_window.theme = run->theme;
-	main_grid(main_renderer.extent.width, main_renderer.extent.height, &run->columns, &run->rows);
-
-	/* The menus, which the compositor draws (none from a compositor without the System Menu). */
-	main_menu_state(run, &state);
-	run->operation = "terminal_menu_open";
-	status = terminal_menu_open(&main_window, &state);
-	if (status != 0)
-		return -1;
-
-	/* The first tab: a shell on a terminal of that size. */
-	run->operation = "kl_process_start";
-	status = main_tab_new(options, run);
-	if (status != 0)
-		return -1;
-
-	/* Succeeded: the terminal is up. */
-	printf("ZTERM START run=%s columns=%u rows=%u cell=%ux%u window=%ux%u\n",
-	       options->token, run->columns, run->rows, main_font.cell_width, main_font.cell_height,
-	       main_renderer.extent.width, main_renderer.extent.height);
-	fflush(stdout);
-	return 0;
-}
-
-/* Runs until the shell ends or the window is closed; returns nonzero on a failure. */
-static int
-main_loop(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	struct terminal_menu_state state;
-	uint64_t started;
-	uint64_t now;
-	unsigned stale;
-	unsigned index;
-	struct kl_process *shells[TERMINAL_TABS];
-	unsigned ready[TERMINAL_TABS];
-	int status;
-	int timeout;
-	int wait;
-	int asked;
-	int error;
-
-	/* One round per event: wait, read the shell, send the keys, redraw what changed. */
-	started = terminal_clock();
-	stale = 0U;
-	for (;;) {
-		/* Waits for the compositor or the shell (or less, until a held key repeats: the application's). */
-		timeout = 1000;
-		now = terminal_clock();
-
-		/* The fingers' next round, when it comes first (ws081-p011). */
-		if (main_touch_due >= 0 && main_touch_due < timeout)
-			timeout = main_touch_due;
-
-		/* A tap's click on the range clears it when no tap-and-drag came in time (BUG-276). */
-		if (main_tap_clear_at != 0U) {
-			if (main_tap_clear_at <= now)
-				timeout = 0;
-			else if ((uint64_t)timeout > main_tap_clear_at - now)
-				timeout = (int)(main_tap_clear_at - now);
-		}
-
-		/* A selection held past the grid's edge scrolls on its own time, even while the pointer rests (ws035-p114). */
-		if (main_selecting && main_edge != 0) {
-			if (main_edge_at <= now)
-				timeout = 0;
-			else if ((uint64_t)timeout > main_edge_at - now)
-				timeout = (int)(main_edge_at - now);
-		}
-
-		/*
-		 * A change waiting for the compositor to take the last frame is
-		 * drawn when it answers (which wakes the wait), or at the latest
-		 * when the pace gives up waiting (pace.h).
-		 */
-		if (main_screen->changed) {
-			wait = terminal_window_frame_wait(&main_window, now);
-			if (wait < timeout)
-				timeout = wait;
-		}
-
-		/* Runs the compositor's events and learns what the shells told. */
-		for (index = 0; index < main_tab_count; index++)
-			shells[index] = main_tabs[index].shell;
-		run->operation = "terminal_window_dispatch";
-		status = terminal_window_dispatch(&main_window, shells, main_tab_count, timeout, ready);
-		if (status != 0)
-			return -1;
-
-		/* The compositor closing the window ends the terminal. */
-		if (main_window.closed) {
-			run->reason = "closed";
-			return 0;
-		}
-
-		/* The menus' choices are carried out; Close Window (or closing the last tab) ends the terminal. */
-		status = main_menu_actions(options, run);
-		if (status < 0)
-			return -1;
-		if (status > 0) {
-			run->reason = "menu-close";
-			return 0;
-		}
-
-		/* What the titlebar asked of the tabs; closing the last one ends the terminal. */
-		status = main_tab_requests(options, run);
-		if (status < 0)
-			return -1;
-		if (status > 0) {
-			run->reason = "tabs-closed";
-			return 0;
-		}
-
-		/* What each shell wrote goes on its grid, from the last tab so a closed one leaves the others' places; a shell's end closes its tab. */
-		for (index = main_tab_count; index > 0U; index--) {
-			/* A shell that told nothing to read and has not ended. */
-			if (index - 1U >= TERMINAL_TABS || (ready[index - 1U] & (KL_PROCESS_READY_OUTPUT | KL_PROCESS_READY_EXIT)) == 0U)
-				continue;
-
-			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
-			status = main_read_shell(main_tabs[index - 1U].shell, main_tabs[index - 1U].screen, ready[index - 1U]);
-			if (status != 0) {
-				status = main_tab_close(options, run, index - 1U);
-				if (status != 0) {
-					run->reason = "shell-exited";
-					return 0;
-				}
-			}
-		}
-
-		/* A drop on the window is pasted into the active shell (clipboard.c). */
-		if (main_window.drop_pending)
-			main_drop_paste();
-
-		/* The fingers scroll the view, and their taps and long presses become the pointer's presses (ws081-p011). */
-		main_touch_round();
-
-		/* The pointer selects, or drags the selected text out (ws035-p093); a tap's wait on the range ends in time (BUG-276). */
-		main_pointer();
-		main_tap_expire(terminal_clock());
-
-		/* The search bar's text and steps find their matches (ws128-p006). */
-		main_search(options);
-
-		/* The wheel and Shift+Page Up or Down scroll the view, and a selection past the edge scrolls it (ws035-p114). */
-		main_scroll();
-		main_edge_scroll(terminal_clock());
-
-		/* A key typed ends the selection (Edit > Select All, or the pointer's range). */
-		if (main_window.input_length != 0U && (main_screen->selected || main_screen->range)) {
-			main_screen->selected = 0;
-			main_screen->range = 0;
-			main_screen->changed = 1;
-		}
-
-		/* A key typed shows the live screen again, where the shell answers it (ws035-p114), on whole lines. */
-		if (main_window.input_length != 0U &&
-		    (main_screen->view != 0U ||
-		     main_screen->view_offset != 0)) {
-			main_screen->view = 0U;
-			main_screen->view_offset = 0;
-			main_screen->changed = 1;
-			main_view_log("key");
-		}
-
-		/* The keys typed and the text pasted go to the shell. */
-		status = main_write_shell(run->shell);
-		if (status != 0) {
-			run->reason = "shell-exited";
-			return 0;
-		}
-
-		/* A password prompt in the active shell turns the input method off until it is answered. */
-		main_secret_follow(run->shell);
-
-		/* The deadline, when one was given, ends the terminal. */
-		now = terminal_clock();
-		if (options->timeout != 0U && now - started >= (uint64_t)options->timeout * 1000U) {
-			run->reason = "timeout";
-			return 0;
-		}
-
-		/* A new size remakes the swapchain and the grid, and tells the shell. */
-		if (main_window.resized) {
-			status = main_resize(options, run);
-			if (status != 0)
-				return -1;
-		}
-
-		/* The menus show the terminal's state, and the titlebar its tabs (only a change is sent). */
-		main_menu_state(run, &state);
-		terminal_menu_refresh(&main_window, &state);
-		main_tabs_show();
-
-		/* The input method's text being composed changed: drawn again at the cursor (BUG-155). */
-		if (main_window.preedit_changed) {
-			main_window.preedit_changed = 0;
-			main_screen->changed = 1;
-		}
-
-		/* Nothing changed: nothing to draw. */
-		if (!main_screen->changed)
-			continue;
-
-		/*
-		 * The compositor has not taken the last frame yet: the change
-		 * waits for it, and whatever else changes meanwhile (a selection
-		 * dragged on, the shell's output) is drawn in the same frame, as
-		 * it is then, instead of a frame for each (pace.h).
-		 */
-		wait = terminal_window_frame_wait(&main_window, terminal_clock());
-		if (wait != 0)
-			continue;
-
-		/* Draws the grid with the frame callback asked for it; a swapchain out of date is remade and drawn again next round. */
-		asked = terminal_window_frame_ask(&main_window, terminal_clock());
-		run->result = terminal_renderer_draw(&main_renderer, main_screen, &main_font, &main_window);
-		run->operation = main_renderer.operation;
-		error = 0;
-		if (run->result != VK_SUCCESS)
-			error = EIO;
-		terminal_window_frame_shown(&main_window, asked, error);
-		if (run->result == VK_ERROR_OUT_OF_DATE_KHR) {
-			stale++;
-			if (stale > MAIN_STALE_LIMIT)
-				return -1;
-			main_window.resized = 1;
-			continue;
-		}
-
-		/* Any other failure ends the terminal. */
-		if (run->result != VK_SUCCESS)
-			return -1;
-
-		/* The grid on the window is up to date. */
-		stale = 0U;
-		main_screen->changed = 0;
-
-		/* The input method's candidates stay next to the cursor as drawn (only a change is sent). */
-		main_text_cursor();
-	}
-}
-
-/* Remakes the swapchain at the window's new size, fits the grid to it and tells the shell; returns nonzero on failure. */
-static int
-main_resize(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	unsigned index;
-
-	/* The swapchain at the new size. */
-	main_window.resized = 0;
-	run->result = terminal_renderer_resize(&main_renderer, main_window.width, main_window.height);
-	run->operation = main_renderer.operation;
-	if (run->result != VK_SUCCESS)
-		return -1;
-
-	/* The grid that fits it, for every tab, told to each shell. */
-	main_grid(main_renderer.extent.width, main_renderer.extent.height, &run->columns, &run->rows);
-	for (index = 0; index < main_tab_count; index++) {
-		terminal_screen_resize(main_tabs[index].screen, run->columns, run->rows);
-		main_tell_size(main_tabs[index].shell, run->columns, run->rows);
-	}
-
-	/* The active grid is drawn again. */
-	main_screen->changed = 1;
-
-	/* Succeeded: the next frame is drawn at the new size. */
-	printf("ZTERM RESIZE run=%s columns=%u rows=%u window=%ux%u\n", options->token, run->columns, run->rows, main_renderer.extent.width, main_renderer.extent.height);
-	fflush(stdout);
-	return 0;
-}
-
 /* Reads a decimal number no larger than a maximum; returns nonzero when it is not one. */
 static int
 main_number(
@@ -877,382 +466,24 @@ main_number(
 }
 
 /*
- * Starts the shell (or the command) as a process of the application on a
- * terminal of its own, at the grid's size, with the terminal's type in its
- * environment.  Returns it, or NULL with errno set.
- */
-static struct kl_process *
-main_spawn(
-	const struct main_options *options,
-	const struct main_run *run)
-{
-	static const char *const environment[] = { "TERM=xterm", NULL };
-	struct kl_process_options process_options;
-	struct kl_process *shell;
-	const char *arguments[4];
-	int error;
-
-	/* The shell, or the shell running the command. */
-	arguments[0] = MAIN_SHELL;
-	arguments[1] = NULL;
-	if (options->command != NULL) {
-		arguments[1] = "-c";
-		arguments[2] = options->command;
-		arguments[3] = NULL;
-	}
-
-	/* On a terminal of the grid's size. */
-	memset(&process_options, 0, sizeof(process_options));
-	process_options.argv = arguments;
-	process_options.environment = environment;
-	process_options.streams = KL_PROCESS_TERMINAL;
-	process_options.columns = run->columns;
-	process_options.rows = run->rows;
-	error = kl_process_start(main_window.app, &process_options, &shell);
-	if (error != 0) {
-		errno = error;
-		return NULL;
-	}
-
-	/* Succeeded: the shell runs. */
-	return shell;
-}
-
-/* Works out how many cells fit in the window, inside the padding. */
-static void
-main_grid(
-	unsigned width,
-	unsigned height,
-	unsigned *columns,
-	unsigned *rows)
-{
-	/* The window less the padding on both sides, in whole cells, at least one of each. */
-	*columns = 1U;
-	*rows = 1U;
-	if (width > 2U * TERMINAL_PADDING + main_font.cell_width)
-		*columns = (width - 2U * TERMINAL_PADDING) / main_font.cell_width;
-	if (height > 2U * TERMINAL_PADDING + main_font.cell_height)
-		*rows = (height - 2U * TERMINAL_PADDING) / main_font.cell_height;
-	if (*columns > TERMINAL_MAX_COLUMNS)
-		*columns = TERMINAL_MAX_COLUMNS;
-	if (*rows > TERMINAL_MAX_ROWS)
-		*rows = TERMINAL_MAX_ROWS;
-}
-
-/* Tells the shell the grid's size (it gets SIGWINCH). */
-static void
-main_tell_size(
-	struct kl_process *shell,
-	unsigned columns,
-	unsigned rows)
-{
-	int error;
-
-	/* The size in cells. */
-	error = kl_process_resize(shell, columns, rows);
-	(void)error;
-}
-
-/*
- * Reads what a shell wrote and puts it on its grid; returns nonzero once
- * the shell has ended (what it wrote before its end is read first).
- */
-static int
-main_read_shell(
-	struct kl_process *shell,
-	struct terminal_screen *screen,
-	unsigned ready)
-{
-	unsigned char buffer[8192];
-	size_t count;
-	int rounds;
-
-	/* Reads bursts until nothing is left, at most a few before the grid is drawn again. */
-	for (rounds = 0; rounds < 16; rounds++) {
-		count = kl_process_read(shell, KL_PROCESS_OUTPUT, buffer, sizeof(buffer));
-		if (count == 0U)
-			break;
-		terminal_perf_step("read", (unsigned)count);
-		terminal_screen_write(screen, buffer, count);
-	}
-
-	/* The shell ended and all it wrote is on the grid: it is gone. */
-	if ((ready & KL_PROCESS_READY_EXIT) != 0U && count == 0U)
-		return 1;
-
-	/* More may follow (its end told again with what is left), read on the next round. */
-	return 0;
-}
-
-/*
- * Turns the window's text input off while the active shell reads a secret
- * (ws095-p006): sudo, su, ssh and passwd turn the echo off and keep the
- * whole line, so the keys then reach them as they are, with no text
- * composed.  A full-screen program that turns the echo off with the line
- * (an editor, ICANON off) keeps the input method.
- */
-static void
-main_secret_follow(
-	struct kl_process *shell)
-{
-	unsigned mode;
-	int secret;
-	int error;
-
-	/* The active shell's modes; a terminal that cannot tell them leaves the text input as it is. */
-	if (shell == NULL)
-		return;
-	error = kl_process_terminal_mode(shell, &mode);
-	if (error != 0)
-		return;
-
-	/* A secret: no echo, on a whole line. */
-	secret = 0;
-	if ((mode & KL_PROCESS_TERMINAL_ECHO) == 0U && (mode & KL_PROCESS_TERMINAL_LINES) != 0U)
-		secret = 1;
-	if (secret == main_secret)
-		return;
-
-	/* The text input off for the secret, on again after it. */
-	main_secret = secret;
-	if (secret)
-		kl_window_text_input(main_window.kui, 0);
-	else
-		kl_window_text_input(main_window.kui, 1);
-	printf("ZTERM IME secret=%d\n", secret);
-	fflush(stdout);
-}
-
-/*
- * Writes the keys typed to the shell; returns nonzero once the shell has
- * gone.  What its input has no room for stays for a later round (the
- * shell tells when there is room).
- */
-static int
-main_write_shell(
-	struct kl_process *shell)
-{
-	size_t count;
-	int error;
-
-	/* Text being pasted goes first, as much as the terminal takes. */
-	if (main_paste_written < main_paste_length) {
-		error = kl_process_write(shell, main_paste + main_paste_written, main_paste_length - main_paste_written, &count);
-		if (error != 0)
-			return 1;
-
-		/* What was written is not written again. */
-		main_paste_written += count;
-	}
-
-	/* Nothing typed. */
-	if (main_window.input_length == 0U)
-		return 0;
-
-	/* The bytes typed, as many as the input takes. */
-	error = kl_process_write(shell, main_window.input, main_window.input_length, &count);
-	if (error != 0)
-		return 1;
-
-	/* What was written leaves the buffer. */
-	terminal_perf_step("write", (unsigned)count);
-	memmove(main_window.input, main_window.input + count, main_window.input_length - count);
-	main_window.input_length -= count;
-
-	/* Succeeded: the keys went to the shell. */
-	return 0;
-}
-
-/*
- * Carries out the actions the menus chose.  Returns 1 when one closes the
- * terminal, -1 when one failed, 0 otherwise.
- */
-static int
-main_menu_actions(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	uint32_t action;
-	int status;
-
-	/* Each action in the order it was chosen. */
-	for (;;) {
-		action = terminal_menu_take(&main_window);
-		if (action == TERMINAL_ACTION_NONE)
-			break;
-
-		/* What the action does. */
-		status = 0;
-		switch (action) {
-		case TERMINAL_ACTION_NEW_WINDOW:
-			/* Another terminal, in a window of its own. */
-			main_new_window(options, run);
-			break;
-		case TERMINAL_ACTION_CLOSE:
-			/* The terminal ends. */
-			return 1;
-		case TERMINAL_ACTION_NEW_TAB:
-			/* Another shell, in a tab of its own. */
-			status = main_tab_new(options, run);
-			break;
-		case TERMINAL_ACTION_CLOSE_TAB:
-			/* The active tab closes; the last one's end ends the terminal. */
-			status = main_tab_close(options, run, main_active);
-			if (status != 0)
-				return 1;
-			break;
-		case TERMINAL_ACTION_COPY:
-			/* The selected text into the terminal's clipboard. */
-			main_copy();
-			break;
-		case TERMINAL_ACTION_PASTE:
-			/* The clipboard's text to the shell, as if typed. */
-			main_start_paste();
-			break;
-		case TERMINAL_ACTION_SELECT_ALL:
-			/* The whole screen is selected until a key is typed. */
-			main_screen->selected = 1;
-			main_screen->changed = 1;
-			break;
-		case TERMINAL_ACTION_ZOOM_IN:
-			/* The text a step larger, or one of the fixed sizes below. */
-			status = main_zoom(options, run, run->pixels + TERMINAL_PIXELS_STEP);
-			break;
-		case TERMINAL_ACTION_ZOOM_OUT:
-			status = main_zoom(options, run, run->pixels - TERMINAL_PIXELS_STEP);
-			break;
-		case TERMINAL_ACTION_ZOOM_NORMAL:
-			status = main_zoom(options, run, options->pixels);
-			break;
-		case TERMINAL_ACTION_SIZE_SMALL:
-			status = main_zoom(options, run, TERMINAL_PIXELS_SMALL);
-			break;
-		case TERMINAL_ACTION_SIZE_MEDIUM:
-			status = main_zoom(options, run, TERMINAL_PIXELS_MEDIUM);
-			break;
-		case TERMINAL_ACTION_SIZE_LARGE:
-			status = main_zoom(options, run, TERMINAL_PIXELS_LARGE);
-			break;
-		case TERMINAL_ACTION_SIZE_HUGE:
-			status = main_zoom(options, run, TERMINAL_PIXELS_HUGE);
-			break;
-		case TERMINAL_ACTION_FULLSCREEN:
-			/* The compositor's configure says whether it happened. */
-			if (main_window.fullscreen)
-				terminal_window_set_fullscreen(&main_window, 0);
-			else
-				terminal_window_set_fullscreen(&main_window, 1);
-			break;
-		case TERMINAL_ACTION_INTERRUPT:
-			/* ^C, as if typed. */
-			terminal_window_type(&main_window, "\003", 1U);
-			break;
-		case TERMINAL_ACTION_END_OF_FILE:
-			/* ^D, as if typed. */
-			terminal_window_type(&main_window, "\004", 1U);
-			break;
-		case TERMINAL_ACTION_CLEAR:
-			/* The cursor home and the screen erased. */
-			terminal_screen_write(main_screen, (const unsigned char *)"\033[H\033[2J", 7U);
-			break;
-		case TERMINAL_ACTION_RESET:
-			/* The screen as it started, at its size, with the width setting kept. */
-			terminal_screen_init(main_screen, run->columns, run->rows);
-			terminal_screen_set_ambiguous_wide(main_screen, run->ambiguous_wide);
-			break;
-		case TERMINAL_ACTION_AMBIGUOUS_WIDE:
-			/* Ambiguous-width characters written from now on take the other width. */
-			main_ambiguous_wide(options, run);
-			break;
-		case TERMINAL_ACTION_FIND:
-			/* The search bar opens with the text looked for last (ws128-p006). */
-			main_find(0);
-			break;
-		case TERMINAL_ACTION_FIND_NEXT:
-			/* The next older match. */
-			main_find(1);
-			break;
-		case TERMINAL_ACTION_FIND_PREVIOUS:
-			/* The next newer match. */
-			main_find(-1);
-			break;
-		case TERMINAL_ACTION_THEME_DARK:
-			main_theme(options, run, TERMINAL_THEME_DARK);
-			break;
-		case TERMINAL_ACTION_THEME_LIGHT:
-			main_theme(options, run, TERMINAL_THEME_LIGHT);
-			break;
-		case TERMINAL_ACTION_THEME_CONTRAST:
-			main_theme(options, run, TERMINAL_THEME_CONTRAST);
-			break;
-		case TERMINAL_ACTION_ABOUT:
-			/* A line about the terminal on the screen (there are no dialogs). */
-			terminal_screen_write(main_screen, (const unsigned char *)MAIN_ABOUT, sizeof(MAIN_ABOUT) - 1U);
-			break;
-		default:
-			/* An action this terminal does not have. */
-			break;
-		}
-
-		/* A failed action ends the terminal. */
-		if (status != 0)
-			return -1;
-
-		/* The log line the tests read. */
-		printf("ZTERM ACTION run=%s action=%u\n", options->token, action);
-		fflush(stdout);
-	}
-
-	/* Succeeded: every action was carried out. */
-	return 0;
-}
-
-/* Describes the terminal's state for the menus. */
-static void
-main_menu_state(
-	const struct main_run *run,
-	struct terminal_menu_state *state)
-{
-	/* Disables menu actions until their initial state is supplied. */
-	memset(state, 0, sizeof(*state));
-
-	/* The first menu exists before the first tab has a screen to select from. */
-	if (main_screen != NULL) {
-		/* A selected cell or range enables actions on the terminal's text. */
-		if (main_screen->selected || main_screen->range)
-			state->selection = 1;
-	}
-
-	/* Clipboard, type size, fullscreen and the width setting do not depend on a tab. */
-	state->clipboard = terminal_clipboard_has_text(&main_window);
-	state->pixels = run->pixels;
-	state->fullscreen = main_window.fullscreen;
-	state->ambiguous_wide = run->ambiguous_wide;
-	state->theme = run->theme;
-	state->can_find_again = 0;
-	if (main_window.search_length != 0U)
-		state->can_find_again = 1;
-}
-
-/*
  * Starts another terminal for a new window, the way this one was run,
  * apart from this one (it keeps nothing of this terminal's).
  */
 static void
 main_new_window(
-	const struct main_options *options,
-	const struct main_run *run)
+	void *data,
+	struct kl_app *app,
+	struct kl_window *from)
 {
+	const struct main_options *options;
 	struct kl_launch_options launch;
 	const char *arguments[4];
 	char token[64];
 	char display[128];
 	int error;
 
-	/* Nothing of the run is handed over. */
-	(void)run;
-
 	/* The same program, its log lines named after this run's. */
+	options = data;
 	(void)snprintf(token, sizeof(token), "--token=%s-new", options->token);
 	arguments[0] = options->program;
 	arguments[1] = token;
@@ -1268,8 +499,8 @@ main_new_window(
 	/* The terminal, on its way; a start that failed leaves this window as it was. */
 	memset(&launch, 0, sizeof(launch));
 	launch.argv = arguments;
-	launch.from = main_window.kui;
-	error = kl_launch(main_window.app, &launch);
+	launch.from = from;
+	error = kl_launch(app, &launch);
 	if (error != 0) {
 		printf("ZTERM NEW-WINDOW failed run=%s errno=%d\n", options->token, error);
 		fflush(stdout);
@@ -1277,1374 +508,892 @@ main_new_window(
 }
 
 /*
- * Draws the text at another size (within TERMINAL_PIXELS_MIN and _MAX):
- * the grid that fits the window is made again and told to the shell.
- * Returns 0, or -1 when the font cannot be drawn at all any more.
+ * Says how the run ended, in one line, before its tabs and window go:
+ * ZTERM DONE with the reason, or ZTERM FAILED with what failed.
+ */
+static void
+main_ended(
+	void *data,
+	const struct terminal_run_result *result)
+{
+	const struct main_options *options;
+
+	/* The run's line. */
+	options = data;
+	if (!result->failed) {
+		printf("ZTERM DONE run=%s reason=%s\n", options->token, result->reason);
+	} else {
+		printf("ZTERM FAILED run=%s operation=%s result=%d errno=%d\n", options->token, result->operation, result->result, result->error);
+	}
+
+	/* The line reaches whoever reads the log before the terminal goes. */
+	fflush(stdout);
+}
+
+/*
+ * Fills what the settings' tab is given: the paths of ~/.ssh/config,
+ * ~/.ssh/ and ~/.ssh/known_hosts, the comment user@host of a new key, the
+ * terminal's own settings and the connector whose TERM they change.
+ * Returns 0, or ENOENT without a home directory (the terminal then has no
+ * settings' tab).
  */
 static int
-main_zoom(
-	const struct main_options *options,
-	struct main_run *run,
-	unsigned pixels)
+main_page_init(
+	struct terminal_process_connector *connector)
 {
-	unsigned index;
+	const struct passwd *user;
+	const char *home;
+	const char *name;
+	char host[256];
+	int written;
 	int error;
 
-	/* The size stays within the bounds. */
-	if (pixels < TERMINAL_PIXELS_MIN)
-		pixels = TERMINAL_PIXELS_MIN;
-	if (pixels > TERMINAL_PIXELS_MAX)
-		pixels = TERMINAL_PIXELS_MAX;
+	/* The home directory: the environment's, else the user's entry. */
+	home = getenv("HOME");
+	user = getpwuid(getuid());
+	if ((home == NULL ||
+	     home[0] == '\0') &&
+	    user != NULL)
+		home = user->pw_dir;
+	if (home == NULL || home[0] == '\0')
+		return ENOENT;
 
-	/* An unchanged size does nothing. */
-	if (pixels == run->pixels)
-		return 0;
+	/* The SSH files' paths. */
+	written = snprintf(main_page.ssh, sizeof(main_page.ssh), "%s%s", home, MAIN_SSH_DIRECTORY);
+	if (written < 0 || (size_t)written + 16U >= sizeof(main_page.ssh))
+		return ENOENT;
+	(void)snprintf(main_page.config, sizeof(main_page.config), "%s/config", main_page.ssh);
+	(void)snprintf(main_page.keys, sizeof(main_page.keys), "%s/", main_page.ssh);
+	(void)snprintf(main_page.known_hosts, sizeof(main_page.known_hosts), "%s/known_hosts", main_page.ssh);
 
-	/* The font at the new size, once no frame reads the atlas; a size it cannot give keeps the old one. */
-	(void)terminal_renderer_idle(&main_renderer);
-	error = terminal_font_resize(&main_font, pixels);
-	if (error == ENOMEM) {
-		run->operation = "terminal_font_resize";
-		errno = error;
-		return -1;
-	}
-
-	/* A size the font cannot be measured at is not taken. */
+	/* A new key's comment, user@host as ssh-keygen writes it. */
+	name = "user";
+	if (user != NULL)
+		name = user->pw_name;
+	error = gethostname(host, sizeof(host));
 	if (error != 0)
-		return 0;
+		(void)snprintf(host, sizeof(host), "%s", "localhost");
+	host[sizeof(host) - 1U] = '\0';
+	(void)snprintf(main_page.comment, sizeof(main_page.comment), "%s@%s", name, host);
 
-	/* The size the menus show and Zoom In and Out step from, kept for the next run (ws128-p006). */
-	run->pixels = pixels;
-	run->kept_pixels = pixels;
-	error = main_save_settings(run);
-	if (error != 0)
-		printf("ZTERM SETTINGS save-failed error=%d\n", error);
+	/* The tab's program. */
+	memset(&main_page.program, 0, sizeof(main_page.program));
+	main_page.program.config_path = main_page.config;
+	main_page.program.config_shown = "~/.ssh/config";
+	main_page.program.key_directory = main_page.keys;
+	main_page.program.key_directory_shown = "~/.ssh/";
+	main_page.program.known_hosts_path = main_page.known_hosts;
+	main_page.program.known_hosts_shown = "~/.ssh/known_hosts";
+	main_page.program.read = main_page_read;
+	main_page.program.replace = main_page_replace;
+	main_page.program.create = main_page_create;
+	main_page.program.exists = main_page_exists;
+	main_page.program.check = main_page_check;
+	main_page.program.open_editor = main_page_editor;
+	main_page.program.items = main_items;
+	main_page.program.item_count = sizeof(main_items) / sizeof(main_items[0]);
+	main_page.program.item_get = main_item_get;
+	main_page.program.item_set = main_item_set;
+	main_page.program.comment = main_page.comment;
+	main_page.program.x11 = 0;
+	main_page.program.font = NULL;
+	main_page.program.connection = "tab";
+	main_page.program.data = &main_page;
+	main_page.connector = connector;
 
-	/* The grid that fits the window at the new size, for every tab, told to each shell. */
-	main_grid(main_renderer.extent.width, main_renderer.extent.height, &run->columns, &run->rows);
-	for (index = 0; index < main_tab_count; index++) {
-		terminal_screen_resize(main_tabs[index].screen, run->columns, run->rows);
-		main_tell_size(main_tabs[index].shell, run->columns, run->rows);
-	}
-
-	/* The active grid is drawn again. */
-	main_screen->changed = 1;
-
-	/* Succeeded: the next frame draws at the new size. */
-	printf("ZTERM ZOOM run=%s pixels=%u columns=%u rows=%u\n", options->token, pixels, run->columns, run->rows);
-	fflush(stdout);
+	/* Succeeded: the tab has the user's files. */
 	return 0;
 }
 
 /*
- * Turns View > Treat Ambiguous-Width Characters as Wide over: every tab's
- * grid gives the next Ambiguous characters the other width (what is on
- * the screens stays as it is), and the settings file keeps the choice for
- * the next run.
+ * Takes the settings kept for the next start (the fonts, the grid) where
+ * the command line chose nothing, and the shells' TERM kept for the
+ * tabs; without the desktop's settings the defaults stay.
  */
 static void
-main_ambiguous_wide(
-	const struct main_options *options,
-	struct main_run *run)
+main_kept_read(
+	struct main_options *options,
+	struct terminal_process_connector *connector)
 {
-	unsigned index;
+	struct kl_settings *settings;
+	const char *fallback_shown;
+	char term[TERMINAL_TERM_MAX];
+	int number;
 	int error;
 
-	/* The other setting; the menu shows it checked or not on the next refresh. */
-	if (run->ambiguous_wide) {
-		run->ambiguous_wide = 0;
-	} else {
-		run->ambiguous_wide = 1;
+	/* The terminal's settings; its own keys need no display. */
+	memset(&main_kept, 0, sizeof(main_kept));
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL)
+		return;
+
+	/* The font file, unless --font chose one. */
+	error = kl_settings_get(settings, MAIN_KEY_FONT, main_kept.font, sizeof(main_kept.font), NULL);
+	if (error == 0 &&
+	    main_kept.font[0] != '\0' &&
+	    !options->font_given) {
+		options->font = main_kept.font;
+		options->font_kept = 1;
 	}
 
-	/* Every tab's grid follows at once. */
-	for (index = 0U; index < main_tab_count; index++)
-		terminal_screen_set_ambiguous_wide(main_tabs[index].screen, run->ambiguous_wide);
+	/* The fallback font file, unless --fallback-font chose one. */
+	error = kl_settings_get(settings, MAIN_KEY_FALLBACK, main_kept.fallback, sizeof(main_kept.fallback), NULL);
+	if (error == 0 &&
+	    main_kept.fallback[0] != '\0' &&
+	    !options->fallback_given)
+		options->fallback = main_kept.fallback;
 
-	/* The settings file keeps it; a failed write leaves this run changed and is reported. */
-	error = main_save_settings(run);
+	/* The columns, unless --columns chose them (the table's default, 90, when none are kept). */
+	number = kl_settings_get_int(settings, MAIN_KEY_COLUMNS, (int)MAIN_COLUMNS);
+	if (number >= 1 &&
+	    number <= (int)TERMINAL_MAX_COLUMNS &&
+	    !options->columns_given)
+		options->columns = (unsigned)number;
 
-	/* The log line the tests read. */
-	printf("ZTERM AMBIGUOUS run=%s wide=%d saved=%d\n", options->token, run->ambiguous_wide, error);
+	/* The rows, unless --rows chose them. */
+	number = kl_settings_get_int(settings, MAIN_KEY_ROWS, (int)MAIN_ROWS);
+	if (number >= 1 &&
+	    number <= (int)TERMINAL_MAX_ROWS &&
+	    !options->rows_given)
+		options->rows = (unsigned)number;
+
+	/* The shells' TERM, when one well formed is kept. */
+	error = kl_settings_get(settings, MAIN_KEY_TERM, term, sizeof(term), NULL);
+	if (error == 0 && term[0] != '\0') {
+		error = main_item_term(term, NULL, 0U);
+		if (error == 0)
+			(void)snprintf(connector->term, sizeof(connector->term), "%s", term);
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* The fallback font as the log names it ("none" when there is none). */
+	fallback_shown = "none";
+	if (options->fallback != NULL)
+		fallback_shown = options->fallback;
+
+	/* What the run takes, in the log. */
+	printf("ZTERM SETTINGS run=%s font=%s fallback=%s columns=%u rows=%u term=%s\n",
+	       options->token,
+	       options->font,
+	       fallback_shown,
+	       options->columns,
+	       options->rows,
+	       connector->term);
 	fflush(stdout);
 }
 
-/* Keeps the run's settings for the next run (ws128-p009, ws128-p006); returns 0 or an errno value. */
+/*
+ * Gives a setting of the tab's own as it is kept now (the terminal's
+ * default when none is: its fonts' paths, the grid's 90 and 28, xterm).
+ * Returns 0, or an errno value of the desktop's settings.
+ */
 static int
-main_save_settings(
-	const struct main_run *run)
+main_item_get(
+	void *data,
+	const char *keyword,
+	char *value,
+	size_t size)
 {
-	struct terminal_settings settings;
+	struct kl_settings *settings;
+	const char *fallback;
+	unsigned kind;
 	int error;
 
-	/* The width setting, the font's size kept (0: none) and the theme. */
-	memset(&settings, 0, sizeof(settings));
-	settings.ambiguous_wide = run->ambiguous_wide;
-	settings.font_size = run->kept_pixels;
-	settings.theme = run->theme;
+	(void)data;
 
-	/* The settings file keeps them. */
-	error = terminal_settings_save(&settings);
+	/* The default shown for a text setting kept empty: the terminal's own fonts and TERM. */
+	kind = main_item_kind(keyword);
+	switch (kind) {
+	case MAIN_ITEM_FONT:
+		fallback = MAIN_FONT;
+		break;
+	case MAIN_ITEM_FALLBACK:
+		fallback = MAIN_FALLBACK_FONT;
+		break;
+	case MAIN_ITEM_TERM:
+		fallback = MAIN_TERM;
+		break;
+	default:
+		fallback = "";
+		break;
+	}
+
+	/* The terminal's settings. */
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL)
+		return errno;
+
+	/* The value kept (a number's default is the table's). */
+	error = kl_settings_get(settings, keyword, value, size, NULL);
+	if (error != 0) {
+		kl_settings_close(settings);
+		return error;
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* An empty text is the terminal's own. */
+	if (value[0] == '\0')
+		(void)snprintf(value, size, "%s", fallback);
+
+	/* Succeeded: the value. */
+	return 0;
+}
+
+/*
+ * Keeps a setting of the tab's own after checking it: a font that the
+ * terminal can open (a name alone is a file of the desktop's fonts), a
+ * grid within the terminal's, a TERM of a terminal type's characters
+ * (which the next tab's shell takes at once).  An empty value, or the
+ * default, takes the kept value away.  Returns 0, or EINVAL with why set,
+ * or an errno value of the desktop's settings with why set.
+ */
+static int
+main_item_set(
+	void *data,
+	const char *keyword,
+	const char *value,
+	char *why,
+	size_t size)
+{
+	struct main_page *page;
+	char kept[KL_SETTINGS_VALUE_MAX];
+	const char *fallback;
+	unsigned number;
+	unsigned kind;
+	int error;
+
+	/* Which setting it is; a keyword not the terminal's is refused. */
+	page = data;
+	kind = main_item_kind(keyword);
+	if (kind == MAIN_ITEM_NONE) {
+		(void)snprintf(why, size, "not a setting of the terminal");
+		return EINVAL;
+	}
+
+	/*
+	 * The value as it is kept, checked, and the default that takes no
+	 * line: a font's full path, the grid's number, the TERM as it is.
+	 */
+	error = 0;
+	kept[0] = '\0';
+	fallback = NULL;
+	switch (kind) {
+	case MAIN_ITEM_FONT:
+		fallback = MAIN_FONT;
+		if (value[0] != '\0')
+			error = main_item_font(value, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_FALLBACK:
+		fallback = MAIN_FALLBACK_FONT;
+		if (value[0] != '\0')
+			error = main_item_font(value, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_COLUMNS:
+		fallback = "90";
+		if (value[0] != '\0')
+			error = main_item_number(value, TERMINAL_MAX_COLUMNS, &number, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_ROWS:
+		fallback = "28";
+		if (value[0] != '\0')
+			error = main_item_number(value, TERMINAL_MAX_ROWS, &number, kept, sizeof(kept), why, size);
+		break;
+	case MAIN_ITEM_TERM:
+	default:
+		fallback = MAIN_TERM;
+		if (value[0] != '\0')
+			error = main_item_term(value, why, size);
+		if (value[0] != '\0' && error == 0)
+			(void)snprintf(kept, sizeof(kept), "%s", value);
+		break;
+	}
+
+	/* A value refused is not kept. */
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the next run reads them. */
+	/* Kept, or taken away (empty, or the default). */
+	error = main_item_keep(keyword, kept, fallback, why, size);
+	if (error != 0)
+		return error;
+
+	/* The next tab's shell takes the TERM at once (xterm when it was taken away). */
+	if (kind == MAIN_ITEM_TERM && kept[0] == '\0') {
+		(void)snprintf(page->connector->term, sizeof(page->connector->term), "%s", MAIN_TERM);
+	} else if (kind == MAIN_ITEM_TERM) {
+		(void)snprintf(page->connector->term, sizeof(page->connector->term), "%s", kept);
+	}
+
+	/* Succeeded: the next start, or the next tab, takes it. */
 	return 0;
 }
 
-/*
- * Draws the window in a colour theme (View > Theme, ws128-p006), kept for
- * the next run.
- */
-static void
-main_theme(
-	const struct main_options *options,
-	struct main_run *run,
-	unsigned theme)
+/* Tells which of the terminal's settings a keyword is (MAIN_ITEM_NONE for another). */
+static unsigned
+main_item_kind(
+	const char *keyword)
 {
+	int differs;
+
+	/* The font. */
+	differs = strcmp(keyword, MAIN_KEY_FONT);
+	if (differs == 0)
+		return MAIN_ITEM_FONT;
+
+	/* The fallback font. */
+	differs = strcmp(keyword, MAIN_KEY_FALLBACK);
+	if (differs == 0)
+		return MAIN_ITEM_FALLBACK;
+
+	/* The columns. */
+	differs = strcmp(keyword, MAIN_KEY_COLUMNS);
+	if (differs == 0)
+		return MAIN_ITEM_COLUMNS;
+
+	/* The rows. */
+	differs = strcmp(keyword, MAIN_KEY_ROWS);
+	if (differs == 0)
+		return MAIN_ITEM_ROWS;
+
+	/* The shells' TERM. */
+	differs = strcmp(keyword, MAIN_KEY_TERM);
+	if (differs == 0)
+		return MAIN_ITEM_TERM;
+
+	/* None of the terminal's. */
+	return MAIN_ITEM_NONE;
+}
+
+/*
+ * Writes a font's full path into path (a name alone is a file of the
+ * desktop's fonts) after opening it as the terminal would.  Returns 0, or
+ * EINVAL with why set.
+ */
+static int
+main_item_font(
+	const char *value,
+	char *path,
+	size_t size,
+	char *why,
+	size_t why_size)
+{
+	struct terminal_font *font;
+	const char *slash;
+	int written;
 	int error;
 
-	/* The theme the window is drawn in from the next frame. */
-	run->theme = theme;
-	main_window.theme = theme;
-	main_screen->changed = 1;
-
-	/* The settings file keeps it; a failed write leaves this run changed and is reported. */
-	error = main_save_settings(run);
-
-	/* The log line the tests read. */
-	printf("ZTERM THEME run=%s theme=%u saved=%d\n", options->token, theme, error);
-	fflush(stdout);
-}
-
-/*
- * Opens the search bar (Edit > Find, step 0), or takes a step to the
- * next older (1) or newer (-1) match of the text looked for last; a step
- * without a text opens the bar instead (ws128-p006).
- */
-static void
-main_find(
-	int step)
-{
-	/* The bar opens, showing the text looked for last; the main loop finds it again. */
-	if (step == 0 || main_window.search_length == 0U) {
-		main_window.search_open = 1;
-		main_window.search_edited = 1;
-		return;
+	/* A full path as it is, a name in the desktop's fonts, anything else refused. */
+	slash = strchr(value, '/');
+	if (value[0] == '/') {
+		written = snprintf(path, size, "%s", value);
+	} else if (slash == NULL) {
+		written = snprintf(path, size, "%s%s", MAIN_FONT_DIRECTORY, value);
+	} else {
+		(void)snprintf(why, why_size, "a font is a full path or a file name in %s", MAIN_FONT_DIRECTORY);
+		return EINVAL;
 	}
 
-	/* The step, taken with the bar open. */
-	main_window.search_open = 1;
-	main_window.search_step = step;
-}
-
-/*
- * Finds the search bar's text (ws128-p006): a text that changed is looked
- * for back from the bottom of the window, a step goes on from the match
- * shown; a match found is brought into the window and marked.
- */
-static void
-main_search(
-	const struct main_options *options)
-{
-	uint32_t query[TERMINAL_SEARCH_LENGTH];
-	unsigned long from_line;
-	unsigned long line;
-	unsigned from_column;
-	unsigned column;
-	unsigned cells;
-	size_t count;
-	int direction;
-	int edited;
-	int found;
-
-	/* Only a changed text or a step asks for a search. */
-	if (!main_window.search_edited && main_window.search_step == 0)
-		return;
-
-	/* A closed bar marks nothing; the window is drawn without it. */
-	if (!main_window.search_open) {
-		main_window.search_edited = 0;
-		main_window.search_step = 0;
-		main_window.search_found = 0;
-		main_screen->changed = 1;
-		printf("ZTERM SEARCH run=%s closed\n", options->token);
-		fflush(stdout);
-		return;
+	/* A path too long to keep is refused. */
+	if (written < 0 || (size_t)written >= size) {
+		(void)snprintf(why, why_size, "the path is too long");
+		return EINVAL;
 	}
 
-	/* The text's characters. */
-	count = terminal_search_decode(main_window.search_query, main_window.search_length, query, TERMINAL_SEARCH_LENGTH);
-
-	/* A changed text from below the window's last row back; a step from the match shown, its way. */
-	direction = 1;
-	from_line = main_screen->scrolled - main_screen->view + main_screen->rows;
-	from_column = 0U;
-	edited = main_window.search_edited;
-	if (!edited && main_window.search_found) {
-		direction = main_window.search_step;
-		from_line = main_window.search_line;
-		from_column = main_window.search_column;
+	/* The font, opened at the default size as the next start would. */
+	font = malloc(sizeof(*font));
+	if (font == NULL) {
+		(void)snprintf(why, why_size, "no memory to read the font");
+		return EINVAL;
 	}
 
-	/* The change and the step are taken. */
-	main_window.search_edited = 0;
-	main_window.search_step = 0;
-
-	/* The match; none keeps the view where it is. */
-	found = terminal_search_find(main_screen, query, count, from_line, from_column, direction, &line, &column, &cells);
-	if (found) {
-		main_window.search_found = 1;
-		main_window.search_line = line;
-		main_window.search_column = column;
-		main_window.search_cells = cells;
-		terminal_search_show(main_screen, line);
-	} else if (edited) {
-		/* A changed text that is nowhere has no match to show; a step past the last keeps the one shown. */
-		main_window.search_found = 0;
+	/* A file the terminal cannot draw with is refused. */
+	error = terminal_font_open(font, path, NULL, MAIN_FONT_PIXELS);
+	if (error != 0) {
+		free(font);
+		(void)snprintf(why, why_size, "%s is not a font the terminal can open (%s)", path, strerror(error));
+		return EINVAL;
 	}
 
-	/* The bar and the marks are drawn again. */
-	main_screen->changed = 1;
+	/* It opened; it is not needed any more. */
+	terminal_font_close(font);
+	free(font);
 
-	/* The log line the tests read. */
-	printf("ZTERM SEARCH run=%s query=%s found=%d line=%lu column=%u cells=%u view=%u\n",
-	       options->token,
-	       main_window.search_query,
-	       found,
-	       main_window.search_line,
-	       main_window.search_column,
-	       main_window.search_cells,
-	       main_screen->view);
-	fflush(stdout);
-}
-
-/* Copies the selected text to the clipboard (Edit > Copy: the pointer's range, or the whole screen selected). */
-static void
-main_copy(void)
-{
-	/* Nothing is copied without a selection. */
-	if (!main_screen->selected && !main_screen->range)
-		return;
-
-	/* The text, as it is on the screen now. */
-	main_clipboard_length = terminal_screen_text(main_screen, main_clipboard, sizeof(main_clipboard));
-	printf("ZTERM COPY bytes=%lu\n", (unsigned long)main_clipboard_length);
-	fflush(stdout);
-
-	/* It is the selection other clients paste (clipboard.c). */
-	terminal_clipboard_set(&main_window, main_clipboard, main_clipboard_length);
-}
-
-/*
- * Starts pasting the clipboard into the shell (Edit > Paste): line breaks
- * become carriage returns, as the Enter key sends them.
- */
-static void
-main_start_paste(void)
-{
-	size_t index;
-	int own;
-
-	/* Another client's selection is received first (the terminal's own copy is already here). */
-	own = terminal_clipboard_own(&main_window);
-	if (!own)
-		main_clipboard_length = terminal_clipboard_receive(&main_window, main_clipboard, sizeof(main_clipboard));
-
-	/* The clipboard's text, line breaks turned into what Enter sends. */
-	for (index = 0; index < main_clipboard_length; index++) {
-		/* A line break is what Enter sends; every other byte is itself. */
-		if (main_clipboard[index] == '\n')
-			main_paste[index] = '\r';
-		else
-			main_paste[index] = main_clipboard[index];
-	}
-
-	/* The main loop writes it as the shell takes it. */
-	main_paste_length = main_clipboard_length;
-	main_paste_written = 0;
-	printf("ZTERM PASTE bytes=%lu\n", (unsigned long)main_paste_length);
-	fflush(stdout);
-}
-
-/*
- * Pastes the primary selection into the shell (a middle click, ws035-p100):
- * line breaks become carriage returns, as the Enter key sends them.
- */
-static void
-main_primary_paste(void)
-{
-	size_t length;
-	size_t index;
-
-	/* A paste still being written is not interrupted. */
-	if (main_paste_written < main_paste_length)
-		return;
-
-	/* The primary selection's text (the terminal's own, or another client's). */
-	length = terminal_primary_receive(&main_window, main_paste, sizeof(main_paste));
-
-	/* Line breaks are what Enter sends. */
-	for (index = 0; index < length; index++) {
-		if (main_paste[index] == '\n')
-			main_paste[index] = '\r';
-	}
-
-	/* The main loop writes it as the shell takes it. */
-	main_paste_length = length;
-	main_paste_written = 0;
-	printf("ZTERM PASTE primary bytes=%lu\n", (unsigned long)length);
-	fflush(stdout);
-}
-
-/*
- * Opens a new tab with a shell of its own, at the grid's size, and makes it
- * the active one.  Returns 0, or -1 when the shell cannot be started (a
- * full window has no new tab and returns 0).
- */
-static int
-main_tab_new(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	struct main_tab *tab;
-	struct terminal_screen *screen;
-	struct kl_process *shell;
-
-	/* A full window has no new tab. */
-	if (main_tab_count == TERMINAL_TABS)
-		return 0;
-
-	/* The tab's grid. */
-	screen = malloc(sizeof(*screen));
-	if (screen == NULL) {
-		errno = ENOMEM;
-		return -1;
-	}
-
-	/* Empty, at the grid's size, with the window's width setting. */
-	terminal_screen_init(screen, run->columns, run->rows);
-	terminal_screen_set_ambiguous_wide(screen, run->ambiguous_wide);
-
-	/* Its shell, at the grid's size. */
-	shell = main_spawn(options, run);
-	if (shell == NULL) {
-		free(screen);
-		return -1;
-	}
-
-	/* The tab, at the end, with its ID and title. */
-	tab = &main_tabs[main_tab_count];
-	tab->screen = screen;
-	tab->shell = shell;
-	tab->id = main_tab_next;
-	main_tab_next++;
-	(void)snprintf(tab->title, sizeof(tab->title), "Shell %u", tab->id);
-	main_tab_count++;
-
-	/* Succeeded: it is the active one. */
-	main_tab_switch(run, main_tab_count - 1U);
-	printf("ZTERM TAB new run=%s id=%u count=%u\n", options->token, tab->id, main_tab_count);
-	fflush(stdout);
+	/* Succeeded: the font's full path. */
 	return 0;
 }
 
-/* Makes a tab the active one: its grid is drawn and its shell takes the keys. */
-static void
-main_tab_switch(
-	struct main_run *run,
-	unsigned index)
-{
-	/* Only a tab that is there. */
-	if (index >= main_tab_count)
-		return;
-
-	/* The active tab's grid and shell. */
-	main_active = index;
-	main_screen = main_tabs[index].screen;
-	run->shell = main_tabs[index].shell;
-
-	/* The keys not yet sent belonged to the tab before; its grid is drawn, without the other tab's search. */
-	main_window.input_length = 0;
-	main_window.search_open = 0;
-	main_window.search_found = 0;
-	main_screen->changed = 1;
-	printf("ZTERM TAB active id=%u\n", main_tabs[index].id);
-	fflush(stdout);
-}
-
-/*
- * Closes a tab: its shell is hung up on (the library reaps it), its grid freed, and a
- * neighbour becomes active when it was.  Returns 1 when it was the last
- * tab (the terminal ends), 0 otherwise.
- */
+/* Reads a grid's size, 1 to maximum, and writes it as kept into text; returns 0, or EINVAL with why set. */
 static int
-main_tab_close(
-	const struct main_options *options,
-	struct main_run *run,
-	unsigned index)
+main_item_number(
+	const char *value,
+	unsigned maximum,
+	unsigned *number,
+	char *text,
+	size_t size,
+	char *why,
+	size_t why_size)
 {
-	struct main_tab *tab;
-	uint32_t id;
-	int error;
-
-	/* Only a tab that is there. */
-	if (index >= main_tab_count)
-		return main_tab_count == 0U;
-
-	/* Its shell, hung up on and closed. */
-	tab = &main_tabs[index];
-	id = tab->id;
-	error = kl_process_kill(tab->shell, KL_PROCESS_HANGUP);
-	(void)error;
-	kl_process_close(tab->shell);
-	tab->shell = NULL;
-
-	/* Its grid. */
-	free(tab->screen);
-
-	/* The tabs after it move up. */
-	main_tab_count--;
-	memmove(&main_tabs[index], &main_tabs[index + 1U], (main_tab_count - index) * sizeof(main_tabs[0]));
-	printf("ZTERM TAB closed run=%s id=%u count=%u\n", options->token, id, main_tab_count);
-	fflush(stdout);
-
-	/* The last tab: the terminal ends (no shell is active). */
-	if (main_tab_count == 0U) {
-		main_screen = NULL;
-		run->shell = NULL;
-		return 1;
-	}
-
-	/* The tab now at its place (or the last one) is active when it was; otherwise the active one may have moved up. */
-	if (index == main_active) {
-		if (index >= main_tab_count)
-			index = main_tab_count - 1U;
-		main_tab_switch(run, index);
-	} else if (index < main_active) {
-		main_tab_switch(run, main_active - 1U);
-	}
-
-	/* Succeeded: tabs remain. */
-	return 0;
-}
-
-/* Finds a tab by its ID; -1 when there is none. */
-static int
-main_tab_find(
-	uint32_t id)
-{
-	unsigned index;
-
-	/* Each tab. */
-	for (index = 0; index < main_tab_count; index++) {
-		/* The tab with the ID. */
-		if (main_tabs[index].id == id)
-			return (int)index;
-	}
-
-	/* None. */
-	return -1;
-}
-
-/*
- * Carries out what the titlebar asked of the tabs: a new tab, one chosen,
- * one closed.  Returns 1 when the last tab closed, -1 when a shell could
- * not be started, 0 otherwise.
- */
-static int
-main_tab_requests(
-	const struct main_options *options,
-	struct main_run *run)
-{
-	struct terminal_tab_request request;
-	int taken;
-	int found;
 	int status;
 
-	/* Each request in the order it came. */
-	for (;;) {
-		taken = terminal_tabs_take(&main_window, &request);
-		if (taken == 0)
-			break;
-
-		/* A new tab. */
-		status = 0;
-		if (request.kind == TERMINAL_TAB_NEW)
-			status = main_tab_new(options, run);
-		if (status != 0)
-			return -1;
-
-		/* A tab chosen, or closed, that is still there. */
-		found = main_tab_find(request.id);
-		if (found < 0)
-			continue;
-		if (request.kind == TERMINAL_TAB_ACTIVATE)
-			main_tab_switch(run, (unsigned)found);
-		if (request.kind == TERMINAL_TAB_CLOSE) {
-			status = main_tab_close(options, run, (unsigned)found);
-			if (status != 0)
-				return 1;
-		}
+	/* A whole number within the grid's limit, not 0. */
+	status = main_number(value, maximum, number);
+	if (status != 0 || *number == 0U) {
+		(void)snprintf(why, why_size, "a number from 1 to %u", maximum);
+		return EINVAL;
 	}
 
-	/* Succeeded: the tabs are as asked. */
+	/* The number's text as it is kept. */
+	(void)snprintf(text, size, "%u", *number);
+
+	/* Succeeded: the number, and its text. */
 	return 0;
 }
 
 /*
- * Shows the tabs in the titlebar (tabs.c sends only a change): each tab's
- * title is the one its shell set (OSC 0 or 2), else "Shell N".  The
- * window's title follows the active tab's.
+ * Checks a terminal type's name: letters, digits, '.', '_', '+' and '-',
+ * not empty and short enough for the environment's TERM.  Returns 0, or
+ * EINVAL with why set (when why is given).
  */
-static void
-main_tabs_show(void)
-{
-	struct terminal_tab_view views[TERMINAL_TABS];
-	const char *title;
-	unsigned index;
-	int same;
-
-	/* Each tab's ID and title. */
-	for (index = 0; index < main_tab_count; index++) {
-		views[index].id = main_tabs[index].id;
-		title = main_tabs[index].title;
-		if (main_tabs[index].screen->title[0] != '\0')
-			title = main_tabs[index].screen->title;
-		main_title_copy(views[index].title, sizeof(views[index].title), title);
-	}
-
-	/* With the active one. */
-	if (main_tab_count == 0U)
-		return;
-	terminal_tabs_show(&main_window, views, main_tab_count, main_tabs[main_active].id);
-
-	/* The window's title: the active tab's, or the application's name; only a change is sent. */
-	title = "Terminal";
-	if (main_tabs[main_active].screen->title[0] != '\0')
-		title = main_tabs[main_active].screen->title;
-	same = strcmp(title, main_window_title);
-	if (same == 0)
-		return;
-	main_title_copy(main_window_title, sizeof(main_window_title), title);
-	kl_window_set_title(main_window.kui, main_window_title);
-	printf("ZTERM TITLE tab=%u title=%s\n", main_tabs[main_active].id, main_window_title);
-	fflush(stdout);
-}
-
-/* Copies a title as far as it fits, never cutting a UTF-8 character in two. */
-static void
-main_title_copy(
-	char *to,
-	size_t size,
-	const char *from)
-{
-	size_t length;
-
-	/* The bytes that fit, less a character's leading part the cut would leave. */
-	length = strlen(from);
-	if (length >= size) {
-		length = size - 1U;
-		while (length > 0U && ((unsigned char)from[length] & 0xc0U) == 0x80U)
-			length--;
-	}
-
-	/* Succeeded: the copy, ended. */
-	memcpy(to, from, length);
-	to[length] = '\0';
-}
-
-/* Pastes what was dropped on the window into the active shell, as a paste is. */
-static void
-main_drop_paste(void)
-{
-	size_t length;
-
-	/* The dropped text (file names as quoted words). */
-	length = terminal_clipboard_drop(&main_window, main_paste, sizeof(main_paste));
-
-	/* The main loop writes it as the shell takes it. */
-	main_paste_length = length;
-	main_paste_written = 0;
-}
-
-/* Takes the pointer's events: the left button selects, or drags the selected text out (ws035-p093). */
-static void
-main_pointer(void)
-{
-	const struct terminal_pointer_event *event;
-	unsigned index;
-
-	/* Each event, oldest first. */
-	for (index = 0U; index < main_window.pointer_event_count; index++) {
-		event = &main_window.pointer_events[index];
-		if (event->kind == TERMINAL_POINTER_MIDDLE)
-			main_primary_paste();
-		else if (event->kind == TERMINAL_POINTER_PRESS)
-			main_pointer_press(event);
-		else if (event->kind == TERMINAL_POINTER_MOTION)
-			main_pointer_motion(event);
-		else
-			main_pointer_release(event);
-	}
-
-	/* Succeeded: all taken. */
-	main_window.pointer_event_count = 0U;
-}
-
-/*
- * A press of the left button: inside the range it may start a drag; with
- * Shift it extends the selection to the cell; otherwise one click starts a
- * selection, two select a word, three a line, and a drag after two or
- * three clicks goes on by whole words or lines.
- */
-static void
-main_pointer_press(
-	const struct terminal_pointer_event *event)
-{
-	unsigned column;
-	unsigned long line;
-	unsigned from;
-	unsigned to;
-	int again;
-	int inside;
-	int extend;
-
-	/* The cell, and whether the press repeats the last click there. */
-	main_cell(event->x, event->y, &column, &line);
-	again = 0;
-	if (main_clicks > 0U &&
-	    event->time - main_click_time <= MAIN_CLICK_MS &&
-	    column == main_click_column &&
-	    line == main_click_line)
-		again = 1;
-	main_click_time = event->time;
-	main_click_column = column;
-	main_click_line = line;
-
-	/* The pointer is on the grid where it pressed: no edge scrolls yet (ws035-p114). */
-	main_pointer_x = event->x;
-	main_pointer_y = event->y;
-	main_edge = 0;
-
-	/*
-	 * Shift and a click extend the selection there from where the last
-	 * one started (any earlier press set that place; ws035-p111).
-	 */
-	extend = 0;
-	if ((event->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U && main_clicks > 0U)
-		extend = 1;
-	if (extend) {
-		main_clicks = 1U;
-		main_unit = 1U;
-		main_unit_moved = 1;
-		main_selecting = 1;
-		main_range(main_anchor_column, main_anchor_line, column, line);
-		return;
-	}
-
-	/*
-	 * A press while a tap's click on the range waits (BUG-276): on the
-	 * range it may drag it out (a tap-and-drag) or end a double tap;
-	 * elsewhere the wait ends and the range goes as the tap meant.
-	 */
-	inside = terminal_screen_in_range(main_screen, column, line);
-	if (main_tap_clear_at != 0U) {
-		main_tap_clear_at = 0U;
-		if (inside) {
-			main_drag_armed = 1;
-			main_tap_second = 1;
-			main_press_x = event->x;
-			main_press_y = event->y;
-			main_press_serial = event->serial;
-			main_clicks = 1U;
-			return;
-		}
-
-		/* Elsewhere: the range goes. */
-		main_range_clear();
-	}
-
-	/* A press inside the range, not a repeated click, may drag it out. */
-	if (inside && !again) {
-		main_drag_armed = 1;
-		main_press_x = event->x;
-		main_press_y = event->y;
-		main_press_serial = event->serial;
-		main_clicks = 1U;
-		return;
-	}
-
-	/* A second press soon after a tap may be a tap-and-drag: decided by its first move (BUG-276). */
-	main_tap_drag = 0;
-	if (again && main_clicks == 1U && main_last_tap)
-		main_tap_drag = 1;
-
-	/* How many clicks, up to three (a fourth starts again at one). */
-	if (again)
-		main_clicks = main_clicks % 3U + 1U;
-	else
-		main_clicks = 1U;
-	main_screen->selected = 0;
-	main_screen->changed = 1;
-
-	/* The held button selects by the clicks' unit until it is released. */
-	main_selecting = 1;
-	main_unit = main_clicks;
-	main_unit_moved = 0;
-
-	/* One: the selection starts here and follows the pointer. */
-	if (main_clicks == 1U) {
-		main_screen->range = 0;
-		main_anchor_column = column;
-		main_anchor_line = line;
-		return;
-	}
-
-	/* Two or three: the word or the line under the pointer is the range, and a drag grows from it. */
-	main_unit_bounds(main_unit, column, line, &from, &to);
-	main_unit_from[0] = from;
-	main_unit_from[1] = line;
-	main_unit_to[0] = to;
-	main_unit_to[1] = line;
-	main_anchor_column = from;
-	main_anchor_line = line;
-	main_range(from, line, to, line);
-
-	/* Said, and the primary selection. */
-	if (main_clicks == 2U)
-		main_selected_log("word");
-	else
-		main_selected_log("line");
-}
-
-/*
- * Gives the first and the last column of the unit a cell is in: the cell
- * itself (1), its word, or the one character that is not a word's (2), or
- * its whole line (3).
- */
-static void
-main_unit_bounds(
-	unsigned unit,
-	unsigned column,
-	unsigned long line,
-	unsigned *from,
-	unsigned *to)
-{
-	int word;
-
-	/* A cell is its own unit. */
-	*from = column;
-	*to = column;
-	if (unit <= 1U)
-		return;
-
-	/* A line runs across the grid. */
-	if (unit >= 3U) {
-		*from = 0U;
-		*to = main_screen->columns - 1U;
-		return;
-	}
-
-	/* A word: its letters to the left. */
-	word = main_word_character(column, line);
-	while (word && *from > 0U) {
-		word = main_word_character(*from - 1U, line);
-		if (word)
-			(*from)--;
-	}
-
-	/* And to its right. */
-	word = main_word_character(column, line);
-	while (word && *to + 1U < main_screen->columns) {
-		word = main_word_character(*to + 1U, line);
-		if (word)
-			(*to)++;
-	}
-}
-
-/*
- * Grows a word or line selection to the unit under the pointer: the range
- * keeps the word or line first chosen and runs to the far end of the
- * pointer's unit on whichever side it is.
- */
-static void
-main_unit_extend(
-	unsigned column,
-	unsigned long line)
-{
-	unsigned from;
-	unsigned to;
-	int before;
-
-	/* The unit under the pointer. */
-	main_unit_bounds(main_unit, column, line, &from, &to);
-
-	/* The pointer's unit before the first chosen one runs the range backward, otherwise forward. */
-	before = 0;
-	if (line < main_unit_from[1])
-		before = 1;
-	else if (line == main_unit_from[1] && from < main_unit_from[0])
-		before = 1;
-	if (before) {
-		main_range(from, line, main_unit_to[0], main_unit_to[1]);
-	} else {
-		main_range(main_unit_from[0], main_unit_from[1], to, line);
-	}
-
-	/* The range changed since the press. */
-	main_unit_moved = 1;
-}
-
-/* A motion: it drags the range out once it moves far enough from a press inside it, or extends a selection. */
-static void
-main_pointer_motion(
-	const struct terminal_pointer_event *event)
-{
-	char text[4096];
-	size_t length;
-	unsigned column;
-	unsigned long line;
-	int32_t dx;
-	int32_t dy;
-	int32_t top;
-	int32_t bottom;
-	int edge;
-
-	/* A press inside the range, moved far enough: the range's text is dragged out. */
-	if (main_drag_armed) {
-		dx = event->x - main_press_x;
-		dy = event->y - main_press_y;
-		if (dx > -MAIN_DRAG_DISTANCE && dx < MAIN_DRAG_DISTANCE && dy > -MAIN_DRAG_DISTANCE && dy < MAIN_DRAG_DISTANCE)
-			return;
-		main_drag_armed = 0;
-		length = terminal_screen_text(main_screen, text, sizeof(text));
-		terminal_clipboard_drag(&main_window, text, length, main_press_serial);
-		return;
-	}
-
-	/* A selection follows the pointer from where it started. */
-	if (!main_selecting)
-		return;
-	main_pointer_x = event->x;
-	main_pointer_y = event->y;
-
-	/*
-	 * A tap-and-drag that leaves its cell is a drag of characters from the
-	 * tapped cell, not a double click's drag by words (BUG-276: a touch
-	 * pad's tap then a finger moved, where a hand would press the pad).
-	 */
-	if (main_tap_drag) {
-		main_cell(event->x, event->y, &column, &line);
-		if (column != main_click_column || line != main_click_line) {
-			main_tap_drag = 0;
-			main_clicks = 1U;
-			main_unit = 1U;
-			main_anchor_column = main_click_column;
-			main_anchor_line = main_click_line;
-			main_screen->range = 0;
-			main_screen->changed = 1;
-		}
-	}
-
-	/*
-	 * Past the grid's top the view scrolls back into the scrollback, past
-	 * its bottom toward the live screen: a step at once, then one every
-	 * MAIN_EDGE_MS while the pointer stays there (ws035-p114).
-	 */
-	top = (int32_t)TERMINAL_PADDING;
-	bottom = top + (int32_t)(main_screen->rows * main_font.cell_height);
-	edge = 0;
-	if (event->y < top)
-		edge = 1;
-	else if (event->y >= bottom)
-		edge = -1;
-	if (edge != 0 && edge != main_edge)
-		main_edge_at = terminal_clock();
-	main_edge = edge;
-
-	/* The selection runs to the pointer's cell. */
-	main_select_to_pointer();
-}
-
-/*
- * Extends the held selection to the cell nearest the pointer's last place:
- * by words or lines after a double or triple click (ws035-p111), else a
- * cell at a time.
- */
-static void
-main_select_to_pointer(void)
-{
-	unsigned column;
-	unsigned long line;
-
-	/* The cell, on the lines the view shows now. */
-	main_cell(main_pointer_x, main_pointer_y, &column, &line);
-
-	/* After a double or triple click, by whole words or lines. */
-	if (main_unit > 1U) {
-		main_unit_extend(column, line);
-		return;
-	}
-
-	/* A cell at a time; the pressed cell alone selects nothing yet. */
-	if (column == main_anchor_column && line == main_anchor_line && !main_screen->range)
-		return;
-	main_range(main_anchor_column, main_anchor_line, column, line);
-}
-
-/*
- * Scrolls the view a step while a held selection's pointer is past the
- * grid's top or bottom, and runs the selection onto the line the edge
- * then shows (ws035-p114).  The farther past the edge, the more lines a
- * step scrolls.
- */
-static void
-main_edge_scroll(
-	uint64_t now)
-{
-	int32_t beyond;
-	unsigned lines;
-	int moved;
-
-	/* Only a held selection with the pointer past an edge, once its step is due. */
-	if (!main_selecting || main_edge == 0)
-		return;
-	if (now < main_edge_at)
-		return;
-
-	/* How far past the edge, in pixels (at least one). */
-	if (main_edge > 0) {
-		beyond = (int32_t)TERMINAL_PADDING - main_pointer_y;
-	} else {
-		beyond = main_pointer_y - (int32_t)TERMINAL_PADDING - (int32_t)(main_screen->rows * main_font.cell_height) + 1;
-	}
-
-	/* A pointer that has just come back counts as one pixel past. */
-	if (beyond < 1)
-		beyond = 1;
-
-	/* A line for each cell's height past the edge, up to a limit. */
-	lines = 1U + (unsigned)(beyond - 1) / main_font.cell_height;
-	if (lines > MAIN_EDGE_LINES)
-		lines = MAIN_EDGE_LINES;
-
-	/* The step, and when the next is due; at the scrollback's end or on the live screen nothing moves. */
-	main_edge_at = now + MAIN_EDGE_MS;
-	moved = terminal_screen_scroll_view(main_screen, main_edge * (int)lines);
-	if (!moved)
-		return;
-
-	/* The selection reaches the line now at the edge. */
-	main_select_to_pointer();
-	main_view_log("edge");
-}
-
-/* Scrolls the view as the wheel's notches and Shift+Page Up or Down asked (ws035-p114). */
-static void
-main_scroll(void)
-{
-	unsigned page;
-	int lines;
-	int moved;
-
-	/* Nothing asked, nothing to scroll. */
-	if (main_window.scroll_notches == 0 && main_window.scroll_pages == 0)
-		return;
-
-	/* A few lines a notch; a page is the grid's rows less one, which stays in sight. */
-	page = main_screen->rows - 1U;
-	if (page == 0U)
-		page = 1U;
-	lines = main_window.scroll_notches * MAIN_WHEEL_LINES + main_window.scroll_pages * (int)page;
-	main_window.scroll_notches = 0;
-	main_window.scroll_pages = 0;
-
-	/* The view moves within the scrollback. */
-	moved = terminal_screen_scroll_view(main_screen, lines);
-	if (!moved)
-		return;
-
-	/* A held selection runs onto the lines now under the pointer. */
-	if (main_selecting)
-		main_select_to_pointer();
-
-	/* Said, for the tests. */
-	main_view_log("scroll");
-}
-
-/* A release: a press inside the range that did not drag clears it (a click); a selection ends. */
-static void
-main_pointer_release(
-	const struct terminal_pointer_event *event)
-{
-	/* The edge stops scrolling with the button's release (ws035-p114). */
-	main_edge = 0;
-
-	/* A release at the press's own time ends a touch pad's tap (BUG-276); a held press is a hand's. */
-	main_last_tap = 0;
-	if (event->time == main_click_time)
-		main_last_tap = 1;
-	main_tap_drag = 0;
-
-	/*
-	 * A click inside the range clears it, and a Shift click later extends
-	 * from there.  A touch pad's tap waits first for the tap-and-drag that
-	 * may follow (BUG-276); the second tap of a double tap on the range
-	 * selects the word, as a double click does.
-	 */
-	if (main_drag_armed) {
-		main_drag_armed = 0;
-		if (main_tap_second) {
-			main_tap_second = 0;
-			main_select_word(main_click_column, main_click_line);
-			return;
-		}
-
-		/* A tap's click waits for its drag. */
-		if (main_last_tap) {
-			main_tap_clear_at = terminal_clock() + MAIN_TAP_DRAG_MS;
-			return;
-		}
-
-		/* A hand's click clears it now. */
-		main_range_clear();
-		return;
-	}
-
-	/* A selection made by the pointer's move. */
-	if (!main_selecting)
-		return;
-	main_selecting = 0;
-
-	/* A word or line selection says so only when the drag grew it (the press said the first one). */
-	if (main_unit == 2U) {
-		if (main_unit_moved)
-			main_selected_log("words");
-		return;
-	}
-
-	/* The same for lines. */
-	if (main_unit == 3U) {
-		if (main_unit_moved)
-			main_selected_log("lines");
-		return;
-	}
-
-	/* A cell selection, dragged or extended with Shift. */
-	if (main_screen->range)
-		main_selected_log("drag");
-}
-
-/* Clears the range a tap on it left waiting, once no tap-and-drag came in time (BUG-276). */
-static void
-main_tap_expire(
-	uint64_t now)
-{
-	/* Nothing waits, or not yet. */
-	if (main_tap_clear_at == 0U || now < main_tap_clear_at)
-		return;
-
-	/* Succeeded: the tap's click clears the range as a click does. */
-	main_tap_clear_at = 0U;
-	main_range_clear();
-}
-
-/* Clears the range as a click inside it does: a Shift click later extends from the clicked cell. */
-static void
-main_range_clear(void)
-{
-	/* No range; the anchor at the click. */
-	main_screen->range = 0;
-	main_screen->changed = 1;
-	main_anchor_column = main_click_column;
-	main_anchor_line = main_click_line;
-}
-
-/* Selects the word under a cell, as a double click does (the second tap of a double tap on the range, BUG-276). */
-static void
-main_select_word(
-	unsigned column,
-	unsigned long line)
-{
-	unsigned from;
-	unsigned to;
-
-	/* The word's bounds, the range on them, a drag after it by words. */
-	main_clicks = 2U;
-	main_unit = 2U;
-	main_unit_moved = 0;
-	main_unit_bounds(main_unit, column, line, &from, &to);
-	main_unit_from[0] = from;
-	main_unit_from[1] = line;
-	main_unit_to[0] = to;
-	main_unit_to[1] = line;
-	main_anchor_column = from;
-	main_anchor_line = line;
-	main_range(from, line, to, line);
-
-	/* Said, and the primary selection. */
-	main_selected_log("word");
-}
-
-/*
- * Gives the cell under a point of the surface, the nearest one for a point
- * outside the grid: its column, and the line the view shows on its row.
- */
-static void
-main_cell(
-	int32_t x,
-	int32_t y,
-	unsigned *column,
-	unsigned long *line)
-{
-	unsigned row;
-
-	/* From the grid's padded top left, with the text moved by the view's offset within a line (ws081-p011), a cell's size at a time. */
-	x -= (int32_t)TERMINAL_PADDING;
-	y -= (int32_t)TERMINAL_PADDING + main_screen->view_offset;
-	if (x < 0)
-		x = 0;
-	if (y < 0)
-		y = 0;
-	*column = (unsigned)x / main_font.cell_width;
-	row = (unsigned)y / main_font.cell_height;
-
-	/* The nearest cell inside the grid. */
-	if (*column >= main_screen->columns)
-		*column = main_screen->columns - 1U;
-	if (row >= main_screen->rows)
-		row = main_screen->rows - 1U;
-
-	/* Succeeded: the line on that row, in the scrollback when the view is back (ws035-p114). */
-	*line = terminal_screen_view_line(main_screen, row);
-}
-
-/* Selects the cells from one to another, in whichever order they come. */
-static void
-main_range(
-	unsigned from_column,
-	unsigned long from_line,
-	unsigned to_column,
-	unsigned long to_line)
-{
-	unsigned long first[2];
-	unsigned long last[2];
-	int later;
-
-	/* The first in reading order first. */
-	later = 0;
-	if (from_line > to_line)
-		later = 1;
-	else if (from_line == to_line && from_column > to_column)
-		later = 1;
-	if (later) {
-		first[0] = to_column;
-		first[1] = to_line;
-		last[0] = from_column;
-		last[1] = from_line;
-	} else {
-		first[0] = from_column;
-		first[1] = from_line;
-		last[0] = to_column;
-		last[1] = to_line;
-	}
-
-	/* The same range as shown (the pointer moved within a cell): nothing to draw anew. */
-	if (main_screen->range &&
-	    main_screen->range_from[0] == first[0] &&
-	    main_screen->range_from[1] == first[1] &&
-	    main_screen->range_to[0] == last[0] &&
-	    main_screen->range_to[1] == last[1])
-		return;
-
-	/* Succeeded: drawn anew. */
-	main_screen->range_from[0] = first[0];
-	main_screen->range_from[1] = first[1];
-	main_screen->range_to[0] = last[0];
-	main_screen->range_to[1] = last[1];
-	main_screen->range = 1;
-	main_screen->changed = 1;
-}
-
-/* Tells whether a cell's character belongs to a word (not a space nor one of the characters that part words in a shell). */
 static int
-main_word_character(
-	unsigned column,
-	unsigned long line)
-{
-	const struct terminal_cell *cell;
-	uint32_t codepoint;
-	const char *found;
-
-	/* A line no longer kept has no words (ws035-p114). */
-	cell = terminal_screen_line_cell(main_screen, column, line);
-	if (cell == NULL)
-		return 0;
-
-	/* A blank or a space parts words. */
-	codepoint = cell->codepoint;
-	if (codepoint == 0U || codepoint == ' ' || codepoint == '\t')
-		return 0;
-
-	/* Any other character but the shell's punctuation is a word's. */
-	if (codepoint >= 0x80U)
-		return 1;
-	found = strchr("\"'`()[]{}<>|;&,", (int)codepoint);
-	if (found != NULL)
-		return 0;
-
-	/* Succeeded: a word's. */
-	return 1;
-}
-
-/* Logs what the pointer selected: how, where (column, line) and how many bytes of text. */
-static void
-main_selected_log(
-	const char *how)
+main_item_term(
+	const char *value,
+	char *why,
+	size_t why_size)
 {
 	size_t length;
+	size_t index;
+	char character;
 
-	/* The range's text, whole (as long as the buffer holds), into what the primary selection sends. */
-	length = terminal_screen_text(main_screen, main_primary, sizeof(main_primary));
-	printf("ZTERM SELECT how=%s from=%lu,%lu to=%lu,%lu bytes=%lu\n", how, main_screen->range_from[0], main_screen->range_from[1], main_screen->range_to[0], main_screen->range_to[1], (unsigned long)length);
-	fflush(stdout);
-
-	/* The selected text is the primary selection (ws035-p100). */
-	terminal_primary_set(&main_window, main_primary, length);
-}
-
-/*
- * Logs where the view is: how it moved, how many lines back from the live
- * screen it is, how many lines the scrollback keeps and how many have
- * ever scrolled off (ws035-p114).
- */
-static void
-main_view_log(
-	const char *how)
-{
-	/* One line, for the tests. */
-	printf("ZTERM VIEW how=%s back=%u history=%u scrolled=%lu\n", how, main_screen->view, main_screen->history_count, main_screen->scrolled);
-	fflush(stdout);
-}
-
-/*
- * Runs the fingers for one round (ws081-p011): gives them the screen's
- * view, takes their events, sets the view they moved to, and queues the
- * pointer's presses, releases and motions they made for main_pointer.  A
- * long press's hold (ws081-p014) is a press held on the selection (which a
- * drag then takes out), elsewhere a double click held (the word under the
- * finger, grown by words).
- */
-static void
-main_touch_round(void)
-{
-	struct terminal_touch_pointer made;
-	unsigned kinds[3];
-	unsigned kind_count;
-	unsigned kind;
-	unsigned index;
-	unsigned column;
-	unsigned long line;
-	unsigned view;
-	int offset;
-	int moved;
-	int taken;
-	int inside;
-
-	/* The screen's view, and the fingers' events. */
-	terminal_touch_layout(&main_touch, main_screen, main_font.cell_height, main_screen->history_count,
-			      main_screen->rows * main_font.cell_height, main_screen->view, main_screen->view_offset);
-	for (index = 0U; index < main_window.touch_count; index++)
-		terminal_touch_event(&main_touch, &main_window.touches[index]);
-	main_window.touch_count = 0U;
-
-	/* Time moves on for them; a new view is shown. */
-	main_touch_due = terminal_touch_tick(&main_touch, terminal_touch_clock());
-	moved = terminal_touch_view(&main_touch, &view, &offset);
-	if (moved) {
-		main_screen->view = view;
-		main_screen->view_offset = offset;
-		main_screen->changed = 1;
+	/* A name of a sensible length. */
+	length = strlen(value);
+	if (length == 0U || length >= TERMINAL_TERM_MAX) {
+		if (why != NULL)
+			(void)snprintf(why, why_size, "a terminal type of 1 to %u characters", TERMINAL_TERM_MAX - 1U);
+		return EINVAL;
 	}
 
-	/* The pointer's events they made, after the pointer's own. */
-	for (;;) {
-		taken = terminal_touch_take_pointer(&main_touch, &made);
-		if (!taken)
+	/* Each character one a terminal type's name has. */
+	for (index = 0U; index < length; index++) {
+		/* A letter or a digit. */
+		character = value[index];
+		if ((character >= 'a' && character <= 'z') ||
+		    (character >= 'A' && character <= 'Z') ||
+		    (character >= '0' && character <= '9'))
+			continue;
+
+		/* Or one of the four signs. */
+		if (character == '.' ||
+		    character == '_' ||
+		    character == '+' ||
+		    character == '-')
+			continue;
+
+		/* Any other character refuses the name. */
+		if (why != NULL)
+			(void)snprintf(why, why_size, "a terminal type has letters, digits, '.', '_', '+' and '-'");
+		return EINVAL;
+	}
+
+	/* Succeeded: a terminal type's name. */
+	return 0;
+}
+
+/*
+ * Keeps a setting in the desktop's settings: value, or the default (no
+ * line) when value is empty or the same as fallback.  Returns 0, or an
+ * errno value with why set.
+ */
+static int
+main_item_keep(
+	const char *keyword,
+	const char *value,
+	const char *fallback,
+	char *why,
+	size_t why_size)
+{
+	struct kl_settings *settings;
+	int differs;
+	int error;
+
+	/* The terminal's settings. */
+	settings = kl_settings_open(NULL, MAIN_SETTINGS_APP);
+	if (settings == NULL) {
+		error = errno;
+		(void)snprintf(why, why_size, "the settings could not be opened (%s)", strerror(error));
+		return error;
+	}
+
+	/* Whether the value is the default: none given, or the same as it. */
+	differs = 0;
+	if (value[0] != '\0')
+		differs = strcmp(value, fallback);
+
+	/* The default takes the line away; another value is written. */
+	if (differs == 0) {
+		error = kl_settings_reset(settings, keyword, NULL);
+	} else {
+		error = kl_settings_set(settings, keyword, value, NULL);
+	}
+
+	/* A failure leaves the old setting. */
+	if (error != 0) {
+		kl_settings_close(settings);
+		(void)snprintf(why, why_size, "it could not be kept (%s)", strerror(error));
+		return error;
+	}
+
+	/* Closes the settings, which are not needed any more. */
+	kl_settings_close(settings);
+
+	/* Succeeded: the setting is kept. */
+	return 0;
+}
+
+/* Reads a file whole into a buffer the caller frees (with a NUL after it); 0, ENOENT, EFBIG or another errno value. */
+static int
+main_page_read(
+	void *data,
+	const char *path,
+	size_t limit,
+	char **text,
+	size_t *size)
+{
+	struct stat status;
+	char *bytes;
+	size_t got;
+	ssize_t count;
+	int descriptor;
+	int error;
+
+	(void)data;
+
+	/* The file. */
+	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return errno;
+
+	/* Its size, within the limit. */
+	error = fstat(descriptor, &status);
+	if (error != 0) {
+		error = errno;
+		close(descriptor);
+		return error;
+	}
+
+	/* A file larger than the caller takes is refused. */
+	if (status.st_size < 0 || (unsigned long long)status.st_size > (unsigned long long)limit) {
+		close(descriptor);
+		return EFBIG;
+	}
+
+	/* Its bytes, and a NUL after them. */
+	bytes = malloc((size_t)status.st_size + 1U);
+	if (bytes == NULL) {
+		close(descriptor);
+		return ENOMEM;
+	}
+
+	/* Its bytes, until the end or the size. */
+	got = 0U;
+	while (got < (size_t)status.st_size) {
+		count = read(descriptor, bytes + got, (size_t)status.st_size - got);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
 			break;
+		got += (size_t)count;
+	}
 
-		/* A hold is a press on the selection, or a double click held elsewhere; the rest are what they say. */
-		kinds[0] = made.kind;
-		kind_count = 1U;
-		if (made.kind == TERMINAL_TOUCH_HOLD) {
-			main_cell(made.x, made.y, &column, &line);
-			inside = terminal_screen_in_range(main_screen, column, line);
-			kinds[0] = TERMINAL_POINTER_PRESS;
-			if (!inside) {
-				kinds[1] = TERMINAL_POINTER_RELEASE;
-				kinds[2] = TERMINAL_POINTER_PRESS;
-				kind_count = 3U;
-			}
+	/* The file closes once it is read, and the text ends as a C string. */
+	close(descriptor);
+	bytes[got] = '\0';
 
-			/* Records which held selection supplied the pointer press. */
-			printf("ZTERM TOUCH hold on-selection=%d\n", inside);
-			fflush(stdout);
+	/* Succeeded: what the file holds. */
+	*text = bytes;
+	*size = got;
+	return 0;
+}
+
+/*
+ * Writes a file whole in place of the old one: the bytes go to path.new
+ * (the old file's mode, or a secret file's for a new one), which is then
+ * renamed over it, so a failure leaves the old file as it was.
+ */
+static int
+main_page_replace(
+	void *data,
+	const char *path,
+	const void *bytes,
+	size_t size)
+{
+	struct stat status;
+	char fresh[MAIN_PATH_MAX + 8U];
+	mode_t mode;
+	int written;
+	int error;
+
+	(void)data;
+
+	/* The new file's name and mode. */
+	written = snprintf(fresh, sizeof(fresh), "%s.new", path);
+	if (written < 0 || (size_t)written >= sizeof(fresh))
+		return ENAMETOOLONG;
+	mode = MAIN_SECRET_MODE;
+	error = stat(path, &status);
+	if (error == 0)
+		mode = status.st_mode & 07777U;
+
+	/* The bytes in it, in ~/.ssh made when it is not there. */
+	main_page_directory();
+	error = main_page_write(fresh, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* It takes the old file's name. */
+	error = rename(fresh, path);
+	if (error != 0) {
+		error = errno;
+		(void)unlink(fresh);
+		return error;
+	}
+
+	/* Succeeded: the file has the bytes. */
+	return 0;
+}
+
+/* Makes a new file (never over one there: EEXIST), 0600 for a secret and 0644 otherwise whatever the umask is. */
+static int
+main_page_create(
+	void *data,
+	const char *path,
+	const void *bytes,
+	size_t size,
+	int secret)
+{
+	mode_t mode;
+	int error;
+
+	(void)data;
+
+	/* The mode. */
+	mode = MAIN_PUBLIC_MODE;
+	if (secret)
+		mode = MAIN_SECRET_MODE;
+
+	/* The file, new, in ~/.ssh made when it is not there. */
+	main_page_directory();
+	error = main_page_write(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the file is made. */
+	return 0;
+}
+
+/* Tells whether anything is at a path (a link that leads nowhere counts). */
+static int
+main_page_exists(
+	void *data,
+	const char *path)
+{
+	struct stat status;
+	int error;
+
+	(void)data;
+
+	/* The path itself. */
+	error = lstat(path, &status);
+	if (error == 0)
+		return 1;
+
+	/* Nothing there. */
+	return 0;
+}
+
+/*
+ * Checks an ssh_config as ssh reads it: for a name no Host line matches
+ * and for each Host's name, the first problem found ("line N: what") is
+ * the report (empty when there is none).
+ */
+static int
+main_page_check(
+	void *data,
+	const char *text,
+	size_t size,
+	char *report,
+	size_t capacity)
+{
+	struct ssh_config config;
+	struct main_check_names *names;
+	char error[SSH_CONFIG_ERROR_MAX];
+	unsigned index;
+	int status;
+
+	(void)data;
+
+	/* No problem yet. */
+	report[0] = '\0';
+
+	/* The names to check it for. */
+	names = calloc(1U, sizeof(*names));
+	if (names == NULL)
+		return ENOMEM;
+	error[0] = '\0';
+	status = ssh_config_hosts(text, size, main_page_named, names, error);
+	if (status != 0) {
+		(void)snprintf(report, capacity, "%s", error);
+		free(names);
+		return 0;
+	}
+
+	/* A name no Host matches, then each Host's. */
+	for (index = 0U; index <= names->count; index++) {
+		ssh_config_init(&config);
+		error[0] = '\0';
+		if (index == 0U)
+			status = ssh_config_parse(&config, text, size, "terminal.invalid", error);
+		else
+			status = ssh_config_parse(&config, text, size, names->names[index - 1U], error);
+		if (status != 0) {
+			(void)snprintf(report, capacity, "%s", error);
+			break;
+		}
+	}
+
+	/* Succeeded: the report. */
+	free(names);
+	return 0;
+}
+
+/* Keeps one Host name of an ssh_config, while there is room; answers 0 to go on. */
+static int
+main_page_named(
+	void *data,
+	const char *name,
+	size_t size)
+{
+	struct main_check_names *names;
+
+	/* A full list, or a name too long, is passed over. */
+	names = data;
+	if (names->count == MAIN_CHECK_HOSTS || size >= MAIN_CHECK_NAME)
+		return 0;
+
+	/* The name. */
+	memcpy(names->names[names->count], name, size);
+	names->names[names->count][size] = '\0';
+	names->count++;
+	return 0;
+}
+
+/* Opens a file in the text editor, a program apart from the terminal; 0 or the error of its start. */
+static int
+main_page_editor(
+	void *data,
+	struct terminal_window *window,
+	const char *path)
+{
+	struct kl_launch_options launch;
+	const char *arguments[3];
+	int error;
+
+	(void)data;
+
+	/* textedit with the file. */
+	arguments[0] = MAIN_EDITOR;
+	arguments[1] = path;
+	arguments[2] = NULL;
+
+	/* On its way, beside this window. */
+	memset(&launch, 0, sizeof(launch));
+	launch.argv = arguments;
+	launch.from = window->kui;
+	error = kl_launch(window->app, &launch);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the editor is starting. */
+	printf("ZTERM SETTINGS editor-started %s\n", MAIN_EDITOR);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Opens a file with the flags, sets its mode exactly, writes the bytes and
+ * syncs them; a file this call made and could not fill is removed.
+ */
+static int
+main_page_write(
+	const char *path,
+	int flags,
+	mode_t mode,
+	const void *bytes,
+	size_t size)
+{
+	const unsigned char *at;
+	ssize_t count;
+	int descriptor;
+	int error;
+
+	/* The file. */
+	descriptor = open(path, flags, mode);
+	if (descriptor < 0)
+		return errno;
+
+	/* Its mode, whatever the umask took away. */
+	error = fchmod(descriptor, mode);
+	if (error != 0)
+		error = errno;
+
+	/* The bytes, all of them. */
+	at = bytes;
+	while (error == 0 && size > 0U) {
+		count = write(descriptor, at, size);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			error = EIO;
+			if (count < 0)
+				error = errno;
+			break;
 		}
 
-		/* Each, queued (a full queue drops it). */
-		for (kind = 0U; kind < kind_count; kind++)
-			main_touch_queue(kinds[kind], &made);
-	}
-}
-
-/* Queues a pointer event the fingers made, at their place and time (a full queue drops it). */
-static void
-main_touch_queue(
-	unsigned kind,
-	const struct terminal_touch_pointer *made)
-{
-	struct terminal_pointer_event *event;
-
-	/* Room for it. */
-	if (main_window.pointer_event_count >= TERMINAL_POINTER_EVENTS)
-		return;
-
-	/* The event, after the others. */
-	event = &main_window.pointer_events[main_window.pointer_event_count];
-	main_window.pointer_event_count++;
-	event->kind = kind;
-	event->x = made->x;
-	event->y = made->y;
-	event->time = made->time;
-	event->serial = made->serial;
-	event->modifiers = main_window.modifiers;
-}
-
-/*
- * Tells the input method where the cursor's cell is on the window (surface
- * pixels), or the search bar's caret while it is open, so that its
- * candidate list opens beside the text being composed (BUG-155,
- * ws090-p022); libkeiland sends only a change.
- */
-static void
-main_text_cursor(void)
-{
-	unsigned column;
-	int x;
-	int y;
-
-	/* The cursor's cell, on the rows the view shows (a view scrolled back moves it down). */
-	x = (int)TERMINAL_PADDING + (int)(main_screen->cursor_column * main_font.cell_width);
-	y = (int)TERMINAL_PADDING + (int)((main_screen->cursor_row + main_screen->view) * main_font.cell_height) + main_screen->view_offset;
-
-	/* While the search bar is open: its caret's cell on the last row, where the composed text shows (ws090-p022). */
-	if (main_window.search_open && main_screen->rows != 0U) {
-		column = terminal_search_bar_column(main_window.search_query, main_window.search_length, main_screen->ambiguous_wide);
-		x = (int)TERMINAL_PADDING + (int)(column * main_font.cell_width);
-		y = (int)TERMINAL_PADDING + (int)((main_screen->rows - 1U) * main_font.cell_height);
+		/* Moves past what was written. */
+		at += count;
+		size -= (size_t)count;
 	}
 
-	/* The cell's rectangle. */
-	kl_window_text_cursor(main_window.kui, x, y, (int)main_font.cell_width, (int)main_font.cell_height);
+	/* On the disk before it is used. */
+	if (error == 0) {
+		error = fsync(descriptor);
+		if (error != 0)
+			error = errno;
+	}
+
+	/* The file closes either way. */
+	close(descriptor);
+
+	/* A file left half written goes. */
+	if (error != 0) {
+		(void)unlink(path);
+		return error;
+	}
+
+	/* Succeeded: the file holds the bytes. */
+	return 0;
+}
+
+/* Makes ~/.ssh (0700) when it is not there, as ssh does; one that cannot be made shows in the write that follows. */
+static void
+main_page_directory(void)
+{
+	int error;
+
+	/* The directory, one level. */
+	error = mkdir(main_page.ssh, MAIN_SSH_MODE);
+	(void)error;
 }

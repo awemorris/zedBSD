@@ -6,21 +6,23 @@
  */
 
 /*
- * The scan-out side of a GHCI device's display: the display controller of
- * the DISP2 capability, a unit of the GPU that the ring drives.
+ * The scan-out side of a GHCI device's display: display 0 of a GPU with
+ * CAP_DISP, driven only by the display commands of the primary ring.
  *
- * While the command processor runs, only the ring changes what the
- * controller shows: CMD_DISP_SET writes its registers and CMD_FLIP makes
- * an image (a 32-bit physical address) a plane's pending one, taken at
- * the next vertical sync (plane 0) or once the cursor's image is read
- * (plane 1).  At the take the GPU writes the flip's 16-byte record,
- * {value, FRAME_COUNT, timestamp}, into the record page (64 bytes past
- * the fence word of the fence page, 16 bytes a plane), latches the value
- * in TAKEN0 or TAKEN1 and raises FLIP_DONE or CURSOR_FLIP_DONE in
- * DISP_IRQ_STATUS, which IRQ_STATUS[3] sums up.  The host writes the
- * scan-out registers itself only while the processor does not run: at
- * the attach, during a reset, at the detach of a device that no longer
- * runs, and for a panic once it has halted the processor.
+ * The command processor takes a display command off the ring and puts
+ * it into one of the display's three service queues (control, the
+ * primary plane, the cursor plane), which run it later: a fence after a
+ * display command says that it was queued, not that it ran.  What a
+ * command did is read from memory: a control command writes a 64-bit
+ * completion the driver names (the driver's value, the queue's status,
+ * and bit 63 when a reset cancelled it), a FLIP writes its 16-byte record
+ * {value, frame count, timestamp} once the image is taken or the flip
+ * cancelled (bit 31 of the value), and the display's events (a sink's
+ * connection, an underflow, a failed read) go to an event ring.  Each of
+ * them may raise IRQ_STATUS[3], which wakes the waiters and the service
+ * thread.  The control queue starts a command only after everything
+ * before it of the display has finished, so a control command's
+ * completion also says that every earlier flip's record was written.
  *
  * Every placement passes the gate of the ring with the display's lock
  * held and does not wait for a recovery: a run the gate refuses is not
@@ -28,29 +30,35 @@
  * thread's placements wait for nothing at all, as its hang check is what
  * ends every other wait: it only tries the locks, and enters the ring
  * only when it is free and has room for the run at once.  The driver
- * places a plane's next flip only once the last one's record has come,
- * so the controller's one pending flip per plane never makes the ring
- * wait; the presents in between wait in a queue of two.  A flip value is
- * 31 bits (bit 31 of a record says the flip was cancelled), and the
- * record slot is cleared before each flip, so a record names its flip
- * without any wrap.
+ * places a plane's next flip only once the last one's record has come;
+ * the presents in between wait in a queue of two.  A flip value is 31
+ * bits, and the record slot is cleared before each flip, so a record
+ * names its flip without any wrap.
  *
- * A lease ends by marking it ended; the controller is then turned dark by
- * the ring, and the memory it scanned is let go once the cancelled
- * records and the dark packet's fence have come.  Memory the host turned
- * away from without seeing the processor halt and the controller go idle
- * goes to the quarantine instead.  The service thread
- * reads the records, counts the scan-out errors, watches the connection
- * and finishes ended leases.  A reset of the command processor loses the
- * flips still in the ring; the driver counts them again from TAKEN0,
- * TAKEN1 and STATUS while the processor is idle, and places the lost
- * ones again.
+ * Lighting the display on an image is a run: DISP_SET with ENABLE off
+ * when it is lit, DISP_SET_MODE when the display holds another mode, the
+ * FLIP (taken at once while ENABLE is off) and DISP_SET with ENABLE.  An
+ * image of the mode lit is only a FLIP, also when its format or rows
+ * differ.  A lease ends by marking it ended; the display is then turned
+ * dark by the ring, and the memory it scanned is let go once the
+ * cancelled records and the dark command's completion have come.  The
+ * host has no register of the display: when the ring does not run, the
+ * display keeps scanning what it scanned, and that memory goes to the
+ * quarantine.
+ *
+ * A reset of the command processor cancels the display commands still
+ * queued (their completions and records say so) and loses the ones still
+ * in the ring (nothing is written for them); a flip already taken by the
+ * display is still shown.  After the reset the driver places a snapshot
+ * (DISP_QUERY_STATE): once it completes, every flip that ran has written
+ * its record, a flip still without one was lost and is placed again, and
+ * the snapshot says whether the display is lit.  The event ring, which
+ * the reset turned off, is set up again.
  *
  * A boot display the firmware left running keeps being scanned until the
- * driver's own first flip is taken; what it read of local memory then
- * goes back to the allocator, unless something of the kernel may still
- * draw to it.  While the boot image is kept, the detach and a panic show
- * it again.
+ * driver's own first command takes it over; its framebuffer then goes
+ * back to the allocator, unless something of the kernel may still draw to
+ * it.  While the boot image is kept, the detach shows it again.
  */
 
 #include <stddef.h>
@@ -67,82 +75,161 @@
 #include "ghci.h"
 #include "ghci-cmd.h"
 
-/* The record page: the 64 bytes past the fence word, 16 bytes a plane. */
-#define RECORD_OFFSET			64U
+/* The display the driver drives: display 0. */
+#define DISPLAY_INDEX			0U
 
 /*
- * How long the driver waits for the controller: to be idle after it went
- * dark, for a record still to be written after a reset, for the detach's
- * last flips, and for a halt of the processor before the host writes the
- * controller.  A panic counts register reads instead of sleeping.
+ * The display's page of host memory: the event ring (32 records), the
+ * mode descriptor of a lighting, the snapshot, the completions (one
+ * 8-byte word per kind of command), the two planes' flip records, the
+ * DDC buffer (its header and one EDID block) and the answer of the mode
+ * table (its header and GHCI_DISPLAY_MODES_MAX descriptors).
  */
-#define DC_IDLE_MS			100U
+#define PAGE_BYTES			4096U
+#define EVENTS_OFFSET			0x000U
+#define EVENTS_CAPACITY			32U
+#define MODE_OFFSET			0x400U
+#define STATE_OFFSET			0x440U
+#define COMP_OFFSET			0x4C0U
+#define RECORD_OFFSET			0x500U
+#define I2C_OFFSET			0x540U
+#define MODES_OFFSET			0x600U
+
+/* The kinds of command whose completion the driver waits for: each has its word in the page. */
+#define COMP_LIGHT			0U
+#define COMP_DARK			1U
+#define COMP_STATE			2U
+#define COMP_EVENTS			3U
+#define COMP_MODES			4U
+#define COMP_I2C			5U
+
+/* What a completion says: not yet written, written, or written as cancelled by a reset. */
+#define COMP_PENDING			0
+#define COMP_DONE			1
+#define COMP_CANCELLED			2
+
+/* What the event ring does: nothing, its setup placed, or running. */
+#define EVENTS_OFF			0
+#define EVENTS_PLACED			1
+#define EVENTS_RUNNING			2
+
+/*
+ * How long the driver waits: for a command at the start or the detach,
+ * for the records still due at the stop, for the detach's last flips.
+ */
+#define COMMAND_WAIT_MS			200U
 #define RECORD_WAIT_MS			100U
 #define DETACH_WAIT_MS			200U
-#define PANIC_READS			1000000U
 
-/* How often a waiter looks at the record page when no interrupt comes. */
+/* How often a waiter looks at the page when no interrupt comes. */
 #define FLIP_POLL_MS			10U
 
-/* How often the service thread asks the transmitter whether a sink is there. */
-#define HOTPLUG_PERIOD_MS		1000U
-
 /*
- * The scan-out errors: past ERROR_LIMIT error interrupts in a second the
- * interrupt is masked for the rest of that second, and READ_ERROR_RUNS
- * rounds in a row with a read error turn the controller dark.
+ * The scan-out errors: past ERROR_LIMIT error events in a second the
+ * error events are left out of the event ring for the rest of that
+ * second, and READ_ERROR_RUNS rounds in a row with a read error turn the
+ * display dark.
  */
 #define ERROR_PERIOD_MS			1000U
 #define ERROR_LIMIT			30U
 #define READ_ERROR_RUNS			3U
 
-/* The STATUS bits that count as scan-out errors (sticky, write 1 to clear). */
-#define DC_ERRORS			(GHCI_DC_ST_UNDERFLOW | GHCI_DC_ST_READ_ERROR | GHCI_DC_ST_RECORD_ERROR | GHCI_DC_ST_BAD_WRITE)
+/* The events the driver takes: the connection (when the display senses it) and the errors. */
+#define EVENTS_ERRORS			(GHCI_DISP_EVENT_MASK_UNDERFLOW | GHCI_DISP_EVENT_MASK_ERROR)
 
-/* The display events the driver takes: the flips' completions, the connection and the errors. */
-#define DC_EVENTS			(GHCI_DC_IRQ_FLIP_DONE | GHCI_DC_IRQ_CURSOR_DONE | GHCI_DC_IRQ_HOTPLUG | GHCI_DC_IRQ_ERROR)
+/* The dwords of the run that lights the display: two DISP_SETs, a mode, the image's flip and the cursor's. */
+#define LIGHT_DWORDS			(2U * GHCI_DW_DISP_SET + GHCI_DW_DISP_SET_MODE + 2U * GHCI_DW_FLIP)
 
-/* The largest flip value: 31 bits. */
-#define FLIP_VALUE_MAX			0x7fffffffU
+/*
+ * The EDID of a sink, read through the DDC bus: the base block at the
+ * 7-bit address 0x50, its 8-byte header, and its four 18-byte detailed
+ * timing descriptors from byte 54.
+ *
+ * Values referenced: VESA E-EDID standard release A2 (section 3.1, the
+ * 128-byte base block and its header; section 3.10, the detailed timing
+ * descriptors and their fields).
+ */
+#define EDID_ADDRESS			0x50U
+#define EDID_BYTES			128U
+#define EDID_TIMINGS			54U
+#define EDID_TIMING_BYTES		18U
+#define EDID_TIMING_COUNT		4U
 
-/* The 32-bit physical addresses the controller takes. */
-#define SCAN_LIMIT			0x100000000ULL
+/*
+ * The modes every sink takes, offered when the display takes arbitrary
+ * timings and no sink's EDID names one: VESA DMT 640x480, 800x600,
+ * 1024x768, 1280x720 and 1920x1080 at 60 Hz, each as its clock in kHz,
+ * the active, sync start, sync end and total of each axis, and the sync
+ * polarities.
+ *
+ * Values referenced: VESA DMT version 1.0 revision 13 (the 640x480,
+ * 800x600, 1024x768, 1280x720 and 1920x1080 timings at 60 Hz);
+ * lumiere-gpu 875e54b3 ghci.md (section 13.3, 640x480 at 60 Hz with a
+ * 25175 kHz clock as the boot display's fallback).
+ */
+#define STANDARD_MODES			5U
+static const uint32_t standard_modes[STANDARD_MODES][10] = {
+	{ 25175U, 640U, 656U, 752U, 800U, 480U, 490U, 492U, 525U, 0U },
+	{ 40000U, 800U, 840U, 968U, 1056U, 600U, 601U, 605U, 628U,
+	  GHCI_DISP_MODE_HSYNC_POSITIVE | GHCI_DISP_MODE_VSYNC_POSITIVE },
+	{ 65000U, 1024U, 1048U, 1184U, 1344U, 768U, 771U, 777U, 806U, 0U },
+	{ 74250U, 1280U, 1390U, 1430U, 1650U, 720U, 725U, 730U, 750U,
+	  GHCI_DISP_MODE_HSYNC_POSITIVE | GHCI_DISP_MODE_VSYNC_POSITIVE },
+	{ 148500U, 1920U, 2008U, 2052U, 2200U, 1080U, 1084U, 1089U, 1125U,
+	  GHCI_DISP_MODE_HSYNC_POSITIVE | GHCI_DISP_MODE_VSYNC_POSITIVE }
+};
 
-/* The MODE registers' fields: a count in the low half, another in the high half. */
-#define MODE_LOW(word)			((word) & 0xffffU)
-#define MODE_HIGH(word)			((word) >> 16)
-
-/* The register pairs of the run that lights the controller, and its dwords. */
-#define LIGHT_PAIRS			12U
-#define LIGHT_DWORDS			(3U + (1U + 2U * LIGHT_PAIRS) + GHCI_DW_FLIP + 3U + GHCI_DW_FLIP)
-
-/* The dwords of a dark packet: one register pair. */
-#define DARK_DWORDS			3U
-
+static uint8_t *page_view(struct ghci_device *device, uint32_t offset);
+static uint64_t page_bus(struct ghci_device *device, uint32_t offset);
+static uint64_t page_read64(struct ghci_device *device, uint32_t offset);
+static void comp_arm(struct ghci_device *device, unsigned slot, int irq, struct ghci_disp_comp *comp);
+static int comp_state(struct ghci_device *device, unsigned slot, uint32_t *status, uint64_t *value);
+static int command_wait(struct ghci_device *device, unsigned slot, uint32_t *status, uint64_t *value);
+static int command_run(struct ghci_device *device, const uint32_t *packets, uint32_t dwords, unsigned slot, uint32_t *status, uint64_t *value);
+static int page_take(struct ghci_device *device);
+static int events_start(struct ghci_device *device);
+static int state_read(struct ghci_device *device);
 static int modes_read(struct ghci_device *device);
+static int modes_fixed(struct ghci_device *device);
+static void modes_edid(struct ghci_device *device);
+static int edid_read(struct ghci_device *device, uint8_t *edid);
+static void edid_timing(struct ghci_device *device, const uint8_t *timing);
+static void modes_standard(struct ghci_device *device);
+static void mode_add(struct ghci_display *display, const struct ghci_display_mode *mode);
+static int mode_fits(const struct ghci_device *device, const struct ghci_display_mode *mode);
+static void mode_refresh(struct ghci_display_mode *mode);
+static void mode_read(const uint8_t *desc, struct ghci_display_mode *mode);
+static void mode_write(const struct ghci_display_mode *mode, uint8_t *desc);
+static int mode_same(const struct ghci_display_mode *first, const struct ghci_display_mode *second);
 static void boot_take(struct ghci_device *device);
+static void boot_mode_take(struct ghci_device *device, const uint8_t *state);
 static void image_clear(struct ghci_display_image *image);
-static uint32_t control_word(struct ghci_device *device, uint32_t format);
-static uint32_t record_address(struct ghci_device *device, unsigned plane);
+static uint64_t record_address(struct ghci_device *device, unsigned plane);
 static volatile uint32_t *record_slot(struct ghci_device *device, unsigned plane);
 static uint32_t value_take(struct ghci_display *display);
-static int ring_put(struct ghci_device *device, const uint32_t *packets, uint32_t dwords, struct ghci_ticket *ticket, int *placed);
+static int ring_put(struct ghci_device *device, const uint32_t *packets, uint32_t dwords, int *placed);
 static void records_take(struct ghci_device *device);
 static void taken(struct ghci_device *device, unsigned plane, int cancelled);
+static void light_check(struct ghci_device *device);
 static void queue_kick(struct ghci_device *device);
 static void queue_push_front(struct ghci_display *display, const struct ghci_display_image *image);
 static void queue_pop(struct ghci_display *display);
-static uint32_t timing_pairs(const struct ghci_display_mode *timing, const struct ghci_display_image *image, uint32_t *offsets, uint32_t *values);
+static uint32_t flip_packet(struct ghci_device *device, uint32_t *out, const struct ghci_display_image *image, int surface, uint32_t value);
 static int light(struct ghci_device *device, const struct ghci_display_image *image);
 static int flip_primary(struct ghci_device *device, const struct ghci_display_image *image);
 static int flip_cursor(struct ghci_device *device, int surface);
 static void cursor_kick(struct ghci_device *device);
+static void cursor_state_kick(struct ghci_device *device);
 static void dark(struct ghci_device *device);
-static int wait_idle(struct ghci_device *device, int spin);
-static void dark_by_host(struct ghci_device *device, int halted);
-static void light_by_host(struct ghci_device *device, const struct ghci_display_image *image, int spin);
-static int halt_for_host(struct ghci_device *device, int spin);
+static void host_cannot_turn(struct ghci_device *device);
 static void flips_forget(struct ghci_device *device);
+static void resync_serve(struct ghci_device *device);
+static void resync_end(struct ghci_device *device);
+static void events_serve(struct ghci_device *device);
+static void events_setup(struct ghci_device *device, uint32_t mask);
+static int events_take(struct ghci_device *device, int *changed);
+static void event_handle(struct ghci_device *device, uint32_t type, uint32_t payload, int *changed);
+static int events_stop(struct ghci_device *device);
 static void scan_release(struct ghci_device *device, struct ghci_allocation *memory);
 static void scan_flush(struct ghci_device *device, int service);
 static void boot_end(struct ghci_device *device);
@@ -150,117 +237,125 @@ static int boot_image(const struct ghci_display *display, const struct ghci_disp
 static int boot_in_use(const struct ghci_display *display);
 static void detach_begin(struct ghci_device *device);
 static int detach_step(struct ghci_device *device, int *turned);
-static void buffers_give_back(struct ghci_device *device);
+static void buffers_give_back(struct ghci_device *device, int unsure);
 static void errors_serve(struct ghci_device *device);
-static void irq_mask_set(struct ghci_device *device, int masked);
-static int connection_serve(struct ghci_device *device);
 static void topology_move(struct ghci_device *device);
 static unsigned idle_mode(const struct ghci_display *display);
 static void idle_serve(struct ghci_device *device);
 static int idle_frame_take(struct ghci_device *device);
-static void scan_give_back(struct ghci_device *device, struct ghci_allocation *memory);
+static void scan_give_back(struct ghci_device *device, struct ghci_allocation *memory, int unsure);
+static uint32_t load16(const uint8_t *bytes, uint32_t offset);
+static uint32_t load32(const uint8_t *bytes, uint32_t offset);
+static void store16(uint8_t *bytes, uint32_t offset, uint32_t value);
+static void store32(uint8_t *bytes, uint32_t offset, uint32_t value);
 
 /*
- * Finds the display controller of the DISP2 capability, before the
- * command processor runs: a boot display it finds running keeps running,
- * and a controller found dark is reset and left dark.
+ * Prepares the display's record before the command processor runs, and
+ * takes over a boot display the firmware left running (from the
+ * BOOT_DISP window read at the start, before any display command).  The
+ * display is started once the ring runs (ghci_display_start()).
  *
- * Returns 0, also for a device without a display (display.present stays
- * 0); a capability the driver cannot use is logged and leaves the device
- * without a display.
+ * Returns 0.
  */
 int
 ghci_display_attach(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	uint32_t registers;
-	uint32_t version;
-	uint32_t ctrl;
-	uint32_t connected_word;
-	int has_display;
-	int error;
 
 	/* The record starts empty, with its wait queue. */
 	display = &device->display;
 	kern_memset(display, 0, sizeof(*display));
 	waitq_init(&display->flip_wake, "ghci flip");
+	image_clear(&display->shown);
+	image_clear(&display->boot);
+	image_clear(&display->light_image);
+	display->mode_set = GHCI_DISPLAY_NO_MODE;
 
-	/* A GPU without DISP2 in its list has no display; DISP alone is not served. */
+	/* A boot display the firmware left running keeps showing its framebuffer. */
+	boot_take(device);
+
+	/* Succeeded: the display starts once the ring runs. */
+	return 0;
+}
+
+/*
+ * Starts the display of a device whose capability block says CAP_DISP,
+ * once the ring runs: its page, the event ring, a snapshot (the sink's
+ * connection and a boot display's mode), the modes (the fixed ones the
+ * display names, or the sink's EDID and the standard ones), the idle
+ * frame, and its interrupt.  A device without a display, or whose
+ * display does not answer, is left without one (display.present 0).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.1, word 23
+ * and DISPLAY_COUNT; section 13.2, the service queues and the event
+ * ring; section 9.2, IRQ_STATUS[3] for the completions, the records and
+ * the events).
+ *
+ * Returns 0.
+ */
+int
+ghci_display_start(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	unsigned long irq;
+	uint32_t count;
+	int has_display;
+	int error;
+
+	/* A device without CAP_DISP has no display. */
+	display = &device->display;
 	has_display = ghci_caps_has(&device->caps, GHCI_HAS_DISPLAY);
 	if (!has_display)
 		return 0;
 
-	/* The capability's window of 256 bytes, of the one version the driver knows. */
-	registers = device->caps.block_offset[GHCI_EXTCAP_ID_DISP2];
-	version = device->caps.block_version[GHCI_EXTCAP_ID_DISP2];
-	if (version != GHCI_DC_BLOCK_VERSION) {
-		kern_logf("ghci: %s: DISP2 version %u is not known; no display\n", device->name, (unsigned)version);
+	/* What the display can do, from word 23; it names at least one display. */
+	display->info = device->caps.disp_info;
+	count = (display->info >> GHCI_DISP_INFO_COUNT_SHIFT) & GHCI_DISP_INFO_COUNT_MASK;
+	if (count == 0U) {
+		kern_logf("ghci: %s: CAP_DISP without a display (word 23 %08x); no display\n", device->name, (unsigned)display->info);
 		return 0;
 	}
-
-	if (device->register_bytes < GHCI_DC_WINDOW || registers > device->register_bytes - GHCI_DC_WINDOW) {
-		kern_logf("ghci: %s: DISP2 block at %x is outside the window; no display\n", device->name, (unsigned)registers);
-		return 0;
-	}
-
-	/*
-	 * The controller's identity and what it can do.  The cursor needs the
-	 * plane here and HW_CURSOR, which the capability block tells once the
-	 * processor runs; the start drops the plane without it.
-	 */
-	display->registers = registers;
-	display->controller_id = ghci_read(device, registers + GHCI_DC_ID);
-	display->controller_version = ghci_read(device, registers + GHCI_DC_VERSION);
-	display->controller_caps = ghci_read(device, registers + GHCI_DC_CAPS);
-	if ((display->controller_caps & GHCI_DC_CAPS_CURSOR) != 0U)
+	if ((display->info & GHCI_DISP_INFO_HAS_CURSOR) != 0U)
 		display->cursor = 1;
+	if ((display->info & GHCI_DISP_INFO_HAS_SENSE) != 0U)
+		display->sense = 1;
+	if ((display->info & GHCI_DISP_INFO_HAS_I2C) != 0U)
+		display->i2c = 1;
 
-	/* The modes, from the controller's own table. */
+	/* The page the display's commands write to. */
+	error = page_take(device);
+	if (error != 0) {
+		kern_logf("ghci: %s: no memory for the display (%d); no display\n", device->name, error);
+		return 0;
+	}
+
+	/* The event ring, then the snapshot: the connection, and a boot display's mode. */
+	error = events_start(device);
+	if (error == 0)
+		error = state_read(device);
+	if (error != 0) {
+		kern_logf("ghci: %s: display does not answer (%d); no display\n", device->name, error);
+		scan_give_back(device, display->page, 1);
+		display->page = NULL;
+		return 0;
+	}
+
+	/* The modes. */
 	error = modes_read(device);
 	if (error != 0) {
-		kern_logf("ghci: %s: display controller names no usable mode; no display\n", device->name);
+		kern_logf("ghci: %s: display names no usable mode; no display\n", device->name);
+		(void)events_stop(device);
+		scan_give_back(device, display->page, 0);
+		display->page = NULL;
 		return 0;
 	}
 
-	/*
-	 * A controller the firmware left running keeps scanning its image
-	 * until the driver's first flip is taken.  One found dark is reset
-	 * and left dark: the host writes it directly here, before the
-	 * command processor runs; once it runs, the ring alone changes what
-	 * the controller shows.
-	 */
-	ctrl = ghci_read(device, registers + GHCI_DC_CTRL);
-	if ((ctrl & GHCI_DC_CTRL_ENABLE) != 0U) {
-		boot_take(device);
-	} else {
-		ghci_write(device, registers + GHCI_DC_CTRL, GHCI_DC_CTRL_RESET);
-		ghci_write(device, registers + GHCI_DC_CTRL, control_word(device, GHCI_DC_FMT_BGRA8));
-		error = wait_idle(device, 0);
-		if (error != 0)
-			kern_logf("ghci: %s: display controller not idle\n", device->name);
+	/* A boot display that kept running is in a mode of the table or the boot slot; a dark one has none. */
+	if (!display->boot_scanning) {
 		display->mode = ghci_scan_largest_mode(display);
-		display->format = GHCI_DC_FMT_BGRA8;
-		image_clear(&display->shown);
-		image_clear(&display->boot);
-	}
-
-	/* The sticky errors and the events before now are cleared; the driver takes its events. */
-	ghci_write(device, registers + GHCI_DC_STATUS, DC_ERRORS);
-	ghci_write(device, registers + GHCI_DC_IRQ_STATUS, GHCI_DC_IRQ_ALL);
-	display->irq_enable = DC_EVENTS;
-	ghci_write(device, registers + GHCI_DC_IRQ_ENABLE, display->irq_enable);
-
-	/* Whether a sink is connected, as the controller was last told (1 when nobody told it). */
-	connected_word = ghci_read(device, registers + GHCI_DC_CONNECTED);
-	if ((connected_word & 1U) != 0U)
-		display->connected = 1;
-
-	/* An external HDMI transmitter is set up now, unless a boot display already drives it. */
-	if ((display->controller_caps & GHCI_DC_CAPS_TRANSMITTER) != 0U && !display->boot_scanning) {
-		error = ghci_adv7511_start(device, registers);
-		if (error != 0)
-			kern_logf("ghci: %s: HDMI transmitter not set up (%d)\n", device->name, error);
+		display->format = GHCI_FORMAT_B8G8R8A8_UNORM;
 	}
 
 	/* The idle frame, without which the display only lights for a lease. */
@@ -271,7 +366,6 @@ ghci_display_attach(
 	/* The display exists, without a lease, at its first generation and topology. */
 	display->generation = GHCI_DISPLAY_FIRST_GENERATION;
 	display->topology = 1U;
-	display->hotplug_tick = clock_ticks();
 	display->next_lease = 1U;
 	display->next_value = 1U;
 	display->cursor_shown = -1;
@@ -280,22 +374,34 @@ ghci_display_attach(
 	display->error_tick = clock_ticks();
 	display->present = 1;
 
+	/* Its completions, records and events raise IRQ_STATUS[3] from now. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	device->irq_mask |= GHCI_IRQ_DISPLAY;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	ghci_cp_irq_enable(device);
+
 	/* Succeeded: the display is ready for a lease. */
-	kern_logf("ghci: %s: display %08x, %u modes%s%s\n",
+	kern_logf("ghci: %s: display %u of %u, %u modes%s%s%s\n",
 	    device->name,
-	    (unsigned)display->controller_id,
+	    DISPLAY_INDEX,
+	    (unsigned)count,
 	    display->mode_count,
 	    display->cursor ? ", cursor" : "",
+	    display->connected ? ", connected" : "",
 	    display->boot_scanning ? ", boot display kept" : "");
 	return 0;
 }
 
 /*
- * Turns the display for the detach: the lease's images go, and the
- * controller shows the boot image again while it is kept, or goes dark.
- * The ring does it while it runs; the host does it otherwise, once the
- * processor has halted.  The display's memory goes back.  The caller
- * holds no lock of the device; the detach waits a bounded time.
+ * Turns the display for the detach: the lease's images go, the display
+ * shows the boot image again while it is kept, or goes dark, and its
+ * event ring stops.  The ring does it; when it does not run, the display
+ * keeps scanning what it scanned, and that memory goes to the
+ * quarantine.  The display's memory goes back.  The caller holds no lock
+ * of the device; the detach waits a bounded time.
  */
 void
 ghci_display_detach(
@@ -306,8 +412,8 @@ ghci_display_detach(
 	uint64_t mark;
 	uint64_t now;
 	unsigned index;
-	int halted;
 	int turned;
+	int unsure;
 	int error;
 	int done;
 
@@ -325,7 +431,7 @@ ghci_display_detach(
 
 	/*
 	 * Waits a bounded time for the flips placed before, then turns the
-	 * controller (the boot image again, or dark) and waits for that.
+	 * display (the boot image again, or dark) and waits for that.
 	 */
 	turned = 0;
 	deadline = clock_ticks() + kern_ms_to_ticks(DETACH_WAIT_MS);
@@ -337,7 +443,7 @@ ghci_display_detach(
 
 		mutex_unlock(&device->display_lock);
 
-		/* Ends once the controller shows what it should, or at the deadline. */
+		/* Ends once the display shows what it should, or at the deadline. */
 		now = clock_ticks();
 		if (done || now >= deadline)
 			break;
@@ -345,33 +451,14 @@ ghci_display_detach(
 		ghci_scan_sleep(device, mark, deadline);
 	}
 
-	/* What the ring did not finish, the host does once the processor has halted. */
+	/* What the ring did not finish stays as it is: what the display may still read goes to the quarantine. */
 	mutex_lock(&device->display_lock);
 
 	if (!done) {
-		kern_logf("ghci: %s: display not turned by the ring; turned by the host\n", device->name);
-		error = halt_for_host(device, 0);
-		if (error != 0)
-			kern_logf("ghci: %s: processor did not halt for the display\n", device->name);
-		halted = 0;
-		if (error == 0)
-			halted = 1;
-
-		/* The boot image again, or dark; what was not seen to stop being read goes to the quarantine. */
-		if (display->boot_kept) {
-			light_by_host(device, &display->boot, 0);
-			if (!halted)
-				display->host_unsure = 1;
-			flips_forget(device);
-			scan_release(device, display->shown.memory);
-			display->shown = display->boot;
-			display->boot_scanning = 1;
-		} else {
-			dark_by_host(device, halted);
-			flips_forget(device);
-			scan_release(device, display->shown.memory);
-			image_clear(&display->shown);
-		}
+		kern_logf("ghci: %s: display not turned by the ring; its memory is quarantined\n", device->name);
+		host_cannot_turn(device);
+		scan_release(device, display->shown.memory);
+		image_clear(&display->shown);
 	}
 
 	/* Presents a recovery put back meanwhile are not shown. */
@@ -380,22 +467,31 @@ ghci_display_detach(
 	display->queue_count = 0U;
 	display->ending = 0;
 
-	/* No display event comes any more (the host writes them in every state). */
-	display->irq_enable = 0U;
-	ghci_write(device, display->registers + GHCI_DC_IRQ_ENABLE, 0U);
-	ghci_write(device, display->registers + GHCI_DC_IRQ_STATUS, GHCI_DC_IRQ_ALL);
+	mutex_unlock(&device->display_lock);
+
+	/* The event ring stops, so that nothing writes the page once it goes; a display not turned may still write it. */
+	unsure = 1;
+	if (done) {
+		error = events_stop(device);
+		if (error == 0)
+			unsure = 0;
+	}
+
+	/* No display interrupt is taken any more. */
+	mutex_lock(&device->display_lock);
+
 	display->present = 0;
 
 	mutex_unlock(&device->display_lock);
 
-	/* The memory the display held, and its own buffers. */
+	/* The memory the display held, and its own buffers (to the quarantine when the display may still read them). */
 	ghci_scan_flush(device);
-	buffers_give_back(device);
+	buffers_give_back(device, unsure);
 }
 
 /*
  * Ends a closing session's lease.  Only the mark is made here: the
- * service thread turns the controller dark.  The caller holds no lock of
+ * service thread turns the display dark.  The caller holds no lock of
  * the device.
  */
 void
@@ -425,15 +521,16 @@ ghci_display_session_close(
 
 	mutex_unlock(&device->display_lock);
 
-	/* The service thread turns the controller dark and lets the memory go. */
+	/* The service thread turns the display dark and lets the memory go. */
 	if (ended)
 		ghci_service_wake(device, GHCI_WORK_DISPLAY);
 }
 
 /*
  * Does the display's part of a round of the service thread: the records,
- * the end of a lease, the scan-out errors and the connection.  The
- * caller holds no lock of the device.
+ * the snapshot after a reset, the end of a lease, the events, the
+ * scan-out errors and the connection.  The caller holds no lock of the
+ * device.
  */
 void
 ghci_display_service(
@@ -444,7 +541,6 @@ ghci_display_service(
 	unsigned long irq;
 	uint64_t adopted;
 	uint64_t topology;
-	uint32_t events;
 	int changed;
 	int locked;
 
@@ -463,17 +559,12 @@ ghci_display_service(
 	if (!locked)
 		return;
 
-	/* The events the interrupt took since the last round. */
-	irq = spin_lock_irqsave(&device->irq_lock);
-
-	events = display->irq_events;
-	display->irq_events = 0U;
-
-	spin_unlock_irqrestore(&device->irq_lock, irq);
-
 	/* Everything places only into a free ring with room at once; nothing here waits for the ring or a record. */
 	display->service_placing = 1;
 	adopted = display->adopted;
+
+	/* The snapshot a reset asked for, and what it settles. */
+	resync_serve(device);
 
 	/* A lease a closed session ended goes dark now, and is finished once it let go. */
 	if (display->ending && display->dark_placed < 0)
@@ -481,13 +572,13 @@ ghci_display_service(
 	if (display->ending)
 		(void)ghci_scan_lease_done(device);
 
-	/* The scan-out errors, every round, so a masked second ends on time. */
+	/* The events (the connection, the errors), the event ring's setup, and the errors of this second. */
+	changed = 0;
+	events_serve(device);
+	(void)events_take(device, &changed);
 	errors_serve(device);
 
-	/* The connection (an event or the transmitter's line), the idle frame, and the records and what waits. */
-	changed = connection_serve(device);
-	if ((events & GHCI_DC_IRQ_HOTPLUG) != 0U)
-		changed = 1;
+	/* The idle frame, the records and what waits. */
 	idle_serve(device);
 	ghci_scan_update(device);
 	if (display->adopted != adopted)
@@ -515,216 +606,136 @@ ghci_display_service(
 }
 
 /*
- * Takes the display's events in the interrupt handler, under irq_lock:
- * DISP_IRQ_STATUS is read and cleared (write 1 to clear) before the
- * handler clears IRQ_STATUS[3], and the service thread is told.
+ * Takes the display's interrupt in the interrupt handler, under
+ * irq_lock: what it says is in the page (a completion, a record, an
+ * event), which the service thread reads; the handler clears
+ * IRQ_STATUS[3] and wakes the flip waiters.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 9.2, the display events acknowledged in DISP_IRQ_STATUS before
- * IRQ_STATUS[3]).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 9.2,
+ * IRQ_DISPLAY for a completion, a flip record or an event, cleared by
+ * writing 1 to IRQ_STATUS[3]).
  */
 void
 ghci_display_interrupt(
 	struct ghci_device *device)
 {
-	struct ghci_display *display;
-	uint32_t events;
-
-	/* A device without a display raises no display event. */
-	display = &device->display;
-	if (!display->present)
+	/* A device without a display raises no display interrupt. */
+	if (!device->display.present)
 		return;
 
-	/* The events, acknowledged, for the service thread's next round. */
-	events = ghci_read(device, display->registers + GHCI_DC_IRQ_STATUS);
-	if (events != 0U)
-		ghci_write(device, display->registers + GHCI_DC_IRQ_STATUS, events);
-	display->irq_events |= events;
+	/* The service thread reads the page at its next round. */
 	device->service_work |= GHCI_WORK_DISPLAY;
 }
 
 /*
- * Counts the display's flips again while the reset processor is idle and
- * the host may write the controller; cp_lock and the display's lock are
- * held.  A lighting lost with the ring lights again, whatever CTRL says,
- * and so does one cut after its flip was taken but before ENABLE.
+ * Settles the display after a reset of the command processor, while it
+ * is idle; cp_lock and the display's lock are held.  The records that
+ * came are taken; a command still queued was cancelled (its completion
+ * or record says so) and one still in the ring was lost (nothing comes
+ * of it), which only a snapshot placed once the ring runs again tells
+ * apart (resync_serve()).  The event ring the reset turned off is set up
+ * again, and the cursor's place placed again.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.2, the controller keeps scanning through a GPU reset, STATUS[31]
- * falls once the records are written in IDLE, and TAKEN0 and TAKEN1 say
- * which flips were taken).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, the
+ * lifecycle matrix: CTRL.RESET cancels the commands queued with their
+ * cancel writes and turns the event ring off, the flips the display
+ * already took stay; section 10, the scan-out continues through a
+ * reset).
  */
 void
 ghci_display_recover_count(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	struct ghci_display_flip *flip;
-	struct ghci_display_image lighting_image;
-	uint32_t status;
-	uint32_t ctrl;
-	uint32_t taken_value;
-	uint32_t pending;
-	unsigned plane;
-	int lighting;
-	int cancelled;
-	int error;
 
 	/* A device without a display has nothing to count. */
 	display = &device->display;
 	if (!display->present)
 		return;
 
-	/* Whether plane 0's flip still placed belongs to a lighting, and its image. */
-	lighting = 0;
-	image_clear(&lighting_image);
-	if (display->flips[0].placed && display->flips[0].light) {
-		lighting = 1;
-		lighting_image = display->flips[0].image;
-	}
-
-	/* A record still to be written goes out while the processor is idle. */
-	error = ghci_wait_register(device, display->registers + GHCI_DC_STATUS, GHCI_DC_ST_RECORD, 0U, RECORD_WAIT_MS);
-	if (error != 0)
-		kern_logf("ghci: %s: a flip's record was not written after the reset\n", device->name);
-
 	/* The records that came. */
 	records_take(device);
 
-	/* An ended lease's controller goes dark now, by the host (the reset halted the processor): the dark packet may have been lost. */
-	if (display->ending) {
-		dark_by_host(device, 1);
-		flips_forget(device);
+	/* A lighting still placed may have been cut: its image is remembered for the snapshot. */
+	display->light_lost = 0;
+	if (display->flips[0].placed && display->flips[0].light) {
+		display->light_lost = 1;
+		display->light_image = display->flips[0].image;
 	}
 
-	/* Whether the controller is lit is what CTRL says now: a run cut by the reset may have left either. */
-	ctrl = ghci_read(device, display->registers + GHCI_DC_CTRL);
-	display->enabled = 0;
-	if ((ctrl & GHCI_DC_CTRL_ENABLE) != 0U)
-		display->enabled = 1;
-
-	/* Each flip still placed is in the slot, was taken without its record, or was lost with the ring. */
-	status = ghci_read(device, display->registers + GHCI_DC_STATUS);
-	for (plane = 0U; plane < 2U; plane++) {
-		flip = &display->flips[plane];
-		if (!flip->placed)
-			continue;
-
-		/* A flip in the controller's slot is taken later; its record comes once the ring runs. */
-		pending = GHCI_DC_ST_PENDING0;
-		if (plane == 1U)
-			pending = GHCI_DC_ST_PENDING1;
-		if ((status & pending) != 0U)
-			continue;
-
-		/* A flip the controller took, whose record did not come, is known by TAKEN0 or TAKEN1. */
-		if (plane == 0U)
-			taken_value = ghci_read(device, display->registers + GHCI_DC_TAKEN0);
-		else
-			taken_value = ghci_read(device, display->registers + GHCI_DC_TAKEN1);
-		if ((taken_value & ~GHCI_DC_TAKEN_CANCELLED) == flip->value) {
-			cancelled = 0;
-			if ((taken_value & GHCI_DC_TAKEN_CANCELLED) != 0U)
-				cancelled = 1;
-			taken(device, plane, cancelled);
-			continue;
-		}
-
-		/* A flip lost with the ring is placed again: a lost lighting lights again. */
-		flip->placed = 0;
-		if (plane == 0U) {
-			if (flip->light)
-				display->enabled = 0;
-			queue_push_front(display, &flip->image);
-		} else {
-			display->cursor_pending = flip->surface;
-		}
-	}
-
-	/*
-	 * A lighting cut after its flip was taken but before ENABLE leaves
-	 * the image shown on a dark controller, which scans nothing: the
-	 * image goes back to the head of the queue, its hold with it, and
-	 * lights the controller again.
-	 */
-	if (lighting &&
-	    !display->enabled &&
-	    !display->ending &&
-	    !display->flips[0].placed &&
-	    display->shown.base == lighting_image.base &&
-	    display->shown.sequence == lighting_image.sequence &&
-	    display->shown.copy_frame == lighting_image.copy_frame) {
-		queue_push_front(display, &display->shown);
-		image_clear(&display->shown);
-	}
-
-	/* A fault hides the cursor (its image is kept); the connection is read again by the service thread. */
-	ghci_write(device, display->registers + GHCI_DC_CURSOR_CTRL, 0U);
-	ghci_write(device, display->registers + GHCI_DC_STATUS, DC_ERRORS);
+	/* The snapshot settles the rest once the ring runs; the event ring and the cursor's place are set again. */
+	display->resync = -1;
+	display->events_state = EVENTS_OFF;
+	display->cursor_due = 1;
+	display->comp_value[COMP_LIGHT] = 0U;
 }
 
 /*
- * Shows the boot image again for a panic, while the boot image is kept
- * (the console the kernel draws on): the host halts the processor, waits
- * for HALTED by counting reads, and writes the controller's registers.
- * It takes no lock and does not sleep, as the rest of the kernel has
- * stopped.  Returns 0, or ENOENT when there is no boot image to show.
+ * Reports whether a panic's console is on the display: the boot image
+ * the console draws to is still scanned.  The host has no register of
+ * the display and a panic may not place commands, so nothing is turned
+ * here.  Returns 0 when the console's image shows, or ENOENT.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.2, a panic console: CTRL.HALT, HALTED, then the host's writes).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, a
+ * panic draws to the image the display scans, in host memory or through
+ * the open local window).
  */
 int
 ghci_display_panic(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	int error;
 
 	/* Only a kept boot image shows what the console drew. */
 	display = &device->display;
 	if (!display->present || !display->boot_kept)
 		return ENOENT;
 
-	/* The processor halts (a faulted one takes the host's writes at once). */
-	error = halt_for_host(device, 1);
-	if (error != 0)
-		return error;
+	/* The display scans something else. */
+	if (!display->boot_scanning)
+		return ENOENT;
 
-	/* The boot image, lit by the host. */
-	light_by_host(device, &display->boot, 1);
-
-	/* Succeeded: the controller scans the console's image. */
+	/* Succeeded: the display scans the console's image. */
 	return 0;
 }
 
 /*
  * Waits a bounded time, once the stop's reset left the processor idle,
- * for the flip records the controller still owes (STATUS[31]) to be
- * written, so that the fence page they go to may be given back.  Returns
- * 0, also for a device without the controller, or ETIMEDOUT while a
+ * for the records of the flips the display took before it, which are
+ * written after the reset, so that the page they go to may be given back.
+ * Returns 0, also for a device without a display, or ETIMEDOUT while a
  * record may still come.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.2, STATUS[31] falls once the records held while HALTED or FAULTED
- * are written in IDLE).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, the
+ * records of the flips a CTRL.RESET leaves to be taken are written after
+ * the reset).
  */
 int
 ghci_display_records_settle(
 	struct ghci_device *device)
 {
-	int error;
+	struct ghci_display *display;
+	unsigned waited;
 
-	/* A device without the controller's block owes no record. */
-	if (device->display.registers == 0U)
+	/* A device without a display, or one that took nothing, owes no record. */
+	display = &device->display;
+	if (!display->present || display->page == NULL)
 		return 0;
 
-	/* The records go out while the processor is idle. */
-	error = ghci_wait_register(device, device->display.registers + GHCI_DC_STATUS, GHCI_DC_ST_RECORD, 0U, RECORD_WAIT_MS);
-	return error;
+	/* The records, looked at every poll until none is owed. */
+	for (waited = 0U; waited < RECORD_WAIT_MS; waited += FLIP_POLL_MS) {
+		records_take(device);
+		if (!display->flips[0].placed && !display->flips[1].placed)
+			return 0;
+		ghci_sleep_ms(FLIP_POLL_MS);
+	}
+
+	/* A record may still come. */
+	return ETIMEDOUT;
 }
 
 /*
- * Reports the index of the controller's largest mode, by its pixels.
+ * Reports the index of the display's largest mode, by its pixels.
  */
 unsigned
 ghci_scan_largest_mode(
@@ -783,7 +794,7 @@ ghci_scan_ring_usable(
 
 /*
  * Reports the bytes a frame of every mode fits in: the most, over the
- * modes, of the rows on the memory line times the lines.
+ * modes, of the rows on the line times the lines.
  */
 uint64_t
 ghci_scan_frame_bytes(
@@ -807,7 +818,7 @@ ghci_scan_frame_bytes(
 
 /*
  * Reports the bytes between the rows of a frame of a width: whole pixels,
- * rounded up to the memory line, as the controller scans them.
+ * rounded up to the line, as the display scans them.
  */
 uint32_t
 ghci_scan_stride(
@@ -842,22 +853,26 @@ ghci_scan_now_ns(void)
 }
 
 /*
- * Reads the records the controller wrote and places what waits for the
- * planes; the lock is held.
+ * Settles a reset, reads the records the display wrote and the
+ * lighting's completion, and places what waits for the planes; the lock
+ * is held.
  */
 void
 ghci_scan_update(
 	struct ghci_device *device)
 {
-	/* The records, then the next present and the cursor's flip. */
+	/* The snapshot a reset asked for, the records and the lighting, then the next present, the cursor's flip and its place. */
+	resync_serve(device);
 	records_take(device);
+	light_check(device);
 	queue_kick(device);
 	cursor_kick(device);
+	cursor_state_kick(device);
 }
 
 /*
- * Records an image of plane 0 for the controller, after every one
- * recorded before.
+ * Records an image of plane 0 for the display, after every one recorded
+ * before.
  */
 int
 ghci_scan_record(
@@ -885,7 +900,7 @@ ghci_scan_record(
 	if (display->queue_count >= GHCI_DISPLAY_QUEUE_DEPTH)
 		return EAGAIN;
 
-	/* The present waits behind the others, and goes to the ring when the plane's slot is free. */
+	/* The present waits behind the others, and goes to the ring when the plane's flip is free. */
 	display->queue[display->queue_count] = *image;
 	display->queue_count++;
 	queue_kick(device);
@@ -895,7 +910,7 @@ ghci_scan_record(
 }
 
 /*
- * Shows a cursor surface: flips it now when the controller is lit and
+ * Shows a cursor surface: flips it now when the display is lit and
  * plane 1 has no flip placed, after the next lighting or record otherwise.
  */
 void
@@ -909,9 +924,34 @@ ghci_scan_cursor(
 }
 
 /*
- * Marks the lease ended and has the controller go dark: the presents
+ * Places the cursor at a place and shows or hides it: DISP_SET_CURSOR in
+ * the cursor plane's queue, now when the ring takes it, at the next
+ * look otherwise.  The lock is held.
+ */
+void
+ghci_scan_cursor_state(
+	struct ghci_device *device,
+	int32_t x,
+	int32_t y,
+	int show)
+{
+	struct ghci_display *display;
+
+	/* The place and the visibility, still to be placed. */
+	display = &device->display;
+	display->cursor_x = x;
+	display->cursor_y = y;
+	display->cursor_show = show;
+	display->cursor_due = 1;
+
+	/* Placed now when the ring takes it. */
+	cursor_state_kick(device);
+}
+
+/*
+ * Marks the lease ended and has the display go dark: the presents
  * waiting are dropped, the cursor hidden and forgotten, and the dark
- * packet placed (by the host when the ring does not run).
+ * command placed (nothing is turned when the ring does not run).
  */
 void
 ghci_scan_lease_end(
@@ -932,43 +972,42 @@ ghci_scan_lease_end(
 		ghci_scan_drop(device, display->queue[index].memory);
 	display->queue_count = 0U;
 
-	/* The cursor is hidden at once (the host writes it in every state) and its image forgotten. */
-	ghci_write(device, display->registers + GHCI_DC_CURSOR_CTRL, 0U);
+	/* The cursor is hidden and its image forgotten. */
 	display->cursor_image = 0;
 	display->cursor_pending = -1;
+	ghci_scan_cursor_state(device, display->cursor_x, display->cursor_y, 0);
 
-	/* The controller goes dark, which cancels every pending flip. */
+	/* The display goes dark, which cancels every pending flip. */
 	dark(device);
 }
 
 /*
  * Reports whether an ended lease has let go of everything: the dark
- * packet ran and every placed flip's record came.
+ * command ran and every placed flip's record came.
  */
 int
 ghci_scan_lease_done(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	enum ghci_ticket_state state;
+	uint32_t status;
+	uint64_t value;
 	int usable;
-	int error;
+	int state;
 
 	/* A lease that did not end has nothing to finish. */
 	display = &device->display;
 	if (!display->ending)
 		return 1;
 
-	/* The dark packet has not been placed yet: the service thread places it. */
+	/* The dark command has not been placed yet: the service thread places it. */
 	if (display->dark_placed < 0)
 		return 0;
 
-	/* A ring that no longer runs answers nothing: the host turns the controller dark. */
+	/* A ring that no longer runs answers nothing: what the display scans goes to the quarantine. */
 	usable = ghci_scan_ring_usable(device);
 	if (!usable) {
-		error = halt_for_host(device, 0);
-		dark_by_host(device, error == 0);
-		flips_forget(device);
+		host_cannot_turn(device);
 		display->dark_placed = 0;
 	}
 
@@ -977,16 +1016,19 @@ ghci_scan_lease_done(
 	if (display->flips[0].placed || display->flips[1].placed)
 		return 0;
 
-	/* The dark packet, whose fence passes once the controller is idle (a failed one leaves it to the reset's count). */
+	/* The dark command's completion: the display no longer scans (a cancelled one is placed again). */
 	if (display->dark_placed > 0) {
-		state = ghci_cp_ticket(device, &display->dark_ticket);
-		if (state == GHCI_TICKET_PENDING)
+		state = comp_state(device, COMP_DARK, &status, &value);
+		if (state == COMP_PENDING)
 			return 0;
-		if (state == GHCI_TICKET_DONE)
-			display->host_unsure = 0;
+		if (state == COMP_CANCELLED) {
+			display->dark_placed = -1;
+			return 0;
+		}
+		display->host_unsure = 0;
 	}
 
-	/* The controller no longer scans the image it showed: its memory goes (to the quarantine when that was not seen). */
+	/* The display no longer scans the image it showed: its memory goes (to the quarantine when that was not seen). */
 	scan_release(device, display->shown.memory);
 	image_clear(&display->shown);
 	display->boot_scanning = 0;
@@ -1061,7 +1103,7 @@ ghci_scan_mark(
 }
 
 /*
- * Sleeps until a flip's interrupt, a short poll or the deadline.
+ * Sleeps until a display interrupt, a short poll or the deadline.
  */
 void
 ghci_scan_sleep(
@@ -1086,17 +1128,14 @@ ghci_scan_sleep(
 }
 
 /*
- * Takes memory the controller scans, the device's own, held by the
+ * Takes memory the display scans, the device's own, held by the
  * display: local memory on a discrete GPU when local is set (memory only
  * the GPU writes), host memory below the GPU's limit otherwise (memory
- * the processor writes, which the controller reads by DMA on a discrete
- * GPU as well).  Its address must fit the controller's 32 bits.  Returns
- * 0, or ENOMEM.
+ * the processor writes, which the display reads by DMA on a discrete GPU
+ * as well).  Returns 0, or ENOMEM.
  *
- * Values referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section 6.0,
- * the scan-out addresses in local memory or below HOST_LIMIT in host
- * memory; section 11.3, MEM's HOST_LIMIT: every address outside local
- * memory routes to host memory).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3, CMD_FLIP's
+ * base in local memory or below HOST_LIMIT).
  */
 int
 ghci_scan_alloc(
@@ -1124,19 +1163,40 @@ ghci_scan_alloc(
 
 	mutex_unlock(&device->lock);
 
-	/* An address past 32 bits cannot be scanned. */
-	if (memory->bus + memory->bytes > SCAN_LIMIT) {
-		scan_give_back(device, memory);
-		return ENOMEM;
-	}
-
 	/* Succeeded: the memory is the display's. */
 	*result = memory;
 	return 0;
 }
 
 /*
- * Writes bytes into host memory the controller scans, through the
+ * Reports whether the display can scan memory: local memory, or host
+ * memory wholly below the GPU's limit.  Returns 1 when it can.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3, CMD_FLIP's
+ * base in local VRAM or below HOST_LIMIT).
+ */
+int
+ghci_scan_reachable(
+	const struct ghci_device *device,
+	const struct ghci_allocation *memory)
+{
+	uint64_t limit;
+
+	/* Local memory is the display's own to read. */
+	if (memory->kind != GHCI_MEMORY_HOST)
+		return 1;
+
+	/* Host memory below the limit. */
+	limit = ghci_memory_limit(device);
+	if (memory->bus + memory->bytes > limit)
+		return 0;
+
+	/* Succeeded: the display reaches it. */
+	return 1;
+}
+
+/*
+ * Writes bytes into host memory the display scans, through the
  * processor's view.  Returns 0, EINVAL for a range outside the memory, or
  * ENOTSUP for local memory, which the processor never writes.
  */
@@ -1163,90 +1223,798 @@ ghci_scan_write(
 	return 0;
 }
 
+/* Reports the processor's view of a place in the display's page. */
+static uint8_t *
+page_view(
+	struct ghci_device *device,
+	uint32_t offset)
+{
+	return device->display.page->view + offset;
+}
+
+/* Reports the bus address of a place in the display's page. */
+static uint64_t
+page_bus(
+	struct ghci_device *device,
+	uint32_t offset)
+{
+	return device->display.page->bus + offset;
+}
+
+/* Reads a 64-bit word the GPU writes in the display's page. */
+static uint64_t
+page_read64(
+	struct ghci_device *device,
+	uint32_t offset)
+{
+	volatile const uint64_t *word;
+
+	/* One read of the aligned word, as the GPU writes it whole. */
+	word = (volatile const uint64_t *)(const void *)page_view(device, offset);
+	return *word;
+}
+
 /*
- * Reads the controller's mode table into the display.  Returns 0, or
- * ENOTSUP when the controller names no mode the driver can use.
+ * Arms the completion of one kind of command: its word in the page is
+ * cleared, and the next value (never 0) is the one it waits for; comp
+ * gets COMP_WRITE (and COMP_IRQ when irq is set), the word's address and
+ * the value.
+ */
+static void
+comp_arm(
+	struct ghci_device *device,
+	unsigned slot,
+	int irq,
+	struct ghci_disp_comp *comp)
+{
+	struct ghci_display *display;
+	volatile uint64_t *word;
+	uint64_t value;
+
+	/* The next value, within the 56 bits a completion carries, and never 0. */
+	display = &device->display;
+	display->comp_next = (display->comp_next + 1U) & GHCI_DISP_COMP_VALUE_MASK;
+	if (display->comp_next == 0U)
+		display->comp_next = 1U;
+	value = display->comp_next;
+
+	/* The word reads 0 until the queue writes it. */
+	word = (volatile uint64_t *)(void *)page_view(device, COMP_OFFSET + 8U * slot);
+	*word = 0U;
+	display->comp_value[slot] = value;
+
+	/* What the command asks for. */
+	comp->flags = GHCI_DISP_COMP_WRITE;
+	if (irq)
+		comp->flags |= GHCI_DISP_COMP_IRQ;
+	comp->pa = page_bus(device, COMP_OFFSET + 8U * slot);
+	comp->value = value;
+}
+
+/*
+ * Reports what the completion of one kind of command says: COMP_PENDING
+ * (not written yet), COMP_CANCELLED (a reset cancelled the command) or
+ * COMP_DONE, with the queue's status and the value written.  A kind with
+ * nothing armed reads as done.  The event ring's setup writes its first
+ * sequence number instead of the value, never 0.
+ */
+static int
+comp_state(
+	struct ghci_device *device,
+	unsigned slot,
+	uint32_t *status,
+	uint64_t *value)
+{
+	struct ghci_display *display;
+	uint64_t word;
+
+	/* Nothing armed. */
+	display = &device->display;
+	*status = GHCI_DISP_COMP_OK;
+	*value = 0U;
+	if (display->comp_value[slot] == 0U)
+		return COMP_DONE;
+
+	/* The word, as the queue wrote it (0 until then). */
+	word = page_read64(device, COMP_OFFSET + 8U * slot);
+	if (word == 0U)
+		return COMP_PENDING;
+
+	/* The event ring's setup carries no value of the driver's. */
+	if (slot != COMP_EVENTS && (word & GHCI_DISP_COMP_VALUE_MASK) != display->comp_value[slot])
+		return COMP_PENDING;
+
+	/* The command finished: cancelled by a reset, or run with its status. */
+	display->comp_value[slot] = 0U;
+	*value = word & GHCI_DISP_COMP_VALUE_MASK;
+	if ((word & GHCI_DISP_COMP_CANCELLED) != 0U)
+		return COMP_CANCELLED;
+	*status = (uint32_t)(word >> GHCI_DISP_COMP_STATUS_SHIFT) & GHCI_DISP_COMP_STATUS_MASK;
+
+	/* Succeeded: the command ran. */
+	return COMP_DONE;
+}
+
+/*
+ * Waits a bounded time for the completion of one kind of command.
+ * Returns 0 with the status and the value, ECANCELED for a command a
+ * reset cancelled, or ETIMEDOUT.
+ */
+static int
+command_wait(
+	struct ghci_device *device,
+	unsigned slot,
+	uint32_t *status,
+	uint64_t *value)
+{
+	unsigned waited;
+	int state;
+
+	/* The completion, looked at every poll. */
+	for (waited = 0U; waited < COMMAND_WAIT_MS; waited++) {
+		state = comp_state(device, slot, status, value);
+		if (state == COMP_DONE)
+			return 0;
+		if (state == COMP_CANCELLED)
+			return ECANCELED;
+		ghci_sleep_ms(1U);
+	}
+
+	/* The command did not finish in time. */
+	return ETIMEDOUT;
+}
+
+/*
+ * Places a run of display commands whose last one completes in slot,
+ * with the display's lock held only to place it, and waits a bounded
+ * time for that completion.  Used at the start and the detach, where
+ * nothing else drives the display.  Returns 0 with the status and the
+ * value, or the error of the placement or the wait.
+ */
+static int
+command_run(
+	struct ghci_device *device,
+	const uint32_t *packets,
+	uint32_t dwords,
+	unsigned slot,
+	uint32_t *status,
+	uint64_t *value)
+{
+	int placed;
+	int error;
+
+	/* The run, through the gate. */
+	mutex_lock(&device->display_lock);
+
+	error = ring_put(device, packets, dwords, &placed);
+
+	mutex_unlock(&device->display_lock);
+
+	/* A run not placed is not waited for. */
+	if (error != 0 && !placed)
+		return error;
+
+	/* The completion. */
+	error = command_wait(device, slot, status, value);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the command ran. */
+	return 0;
+}
+
+/*
+ * Takes the display's page: host memory below the GPU's limit, cleared,
+ * held by the display.  Returns 0, or ENOMEM.
+ */
+static int
+page_take(
+	struct ghci_device *device)
+{
+	struct ghci_allocation *page;
+	int error;
+
+	/* The page, which the processor reads and the GPU writes. */
+	error = ghci_scan_alloc(device, PAGE_BYTES, 0, &page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every word reads 0 until the GPU writes it. */
+	kern_memset(page->view, 0, PAGE_BYTES);
+	device->display.page = page;
+	return 0;
+}
+
+/*
+ * Sets the event ring up at the start and waits for it: the sink's
+ * connection when the display senses it, the underflows and the errors.
+ * Returns 0, or the error of the command.
+ */
+static int
+events_start(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	uint32_t packet[GHCI_DW_DISP_EVENT_SETUP];
+	struct ghci_disp_comp comp;
+	uint32_t status;
+	uint64_t first;
+	uint32_t mask;
+	uint32_t dwords;
+	int error;
+
+	/* The events the driver takes. */
+	display = &device->display;
+	mask = EVENTS_ERRORS;
+	if (display->sense)
+		mask |= GHCI_DISP_EVENT_MASK_HOTPLUG;
+
+	/* The setup, whose completion is the ring's first sequence number. */
+	comp_arm(device, COMP_EVENTS, 0, &comp);
+	dwords = ghci_cmd_disp_event_setup(packet, DISPLAY_INDEX, page_bus(device, EVENTS_OFFSET), EVENTS_CAPACITY, mask, &comp);
+	error = command_run(device, packet, dwords, COMP_EVENTS, &status, &first);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the ring runs from its first sequence number. */
+	display->events_state = EVENTS_RUNNING;
+	display->events_mask = mask;
+	display->events_first = first;
+	display->events_next = first;
+	return 0;
+}
+
+/*
+ * Reads a snapshot of the display at the start: whether a sink is
+ * connected (always, for a display that does not sense it), and the mode
+ * a running boot display holds.  Returns 0, or the error of the command.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2,
+ * GhciDisplayState: state_flags [0] ENABLE, [4] CONNECTED, active_mode
+ * at 0x40; section 13.3, the snapshot reflects a boot display before the
+ * takeover).
+ */
+static int
+state_read(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	uint32_t packet[GHCI_DW_DISP_QUERY_STATE];
+	struct ghci_disp_comp comp;
+	const uint8_t *state;
+	uint32_t status;
+	uint64_t value;
+	uint32_t flags;
+	uint32_t dwords;
+	int error;
+
+	/* The snapshot. */
+	display = &device->display;
+	comp_arm(device, COMP_STATE, 0, &comp);
+	dwords = ghci_cmd_disp_query_state(packet, DISPLAY_INDEX, page_bus(device, STATE_OFFSET), GHCI_DISP_STATE_BYTES, &comp);
+	error = command_run(device, packet, dwords, COMP_STATE, &status, &value);
+	if (error != 0)
+		return error;
+
+	/* The connection: what the display senses, or connected. */
+	state = page_view(device, STATE_OFFSET);
+	flags = (uint32_t)state[GHCI_DISP_STATE_FLAGS] | ((uint32_t)state[GHCI_DISP_STATE_FLAGS + 1U] << 8);
+	display->connected = 1;
+	if (display->sense && (flags & GHCI_DISP_STATE_CONNECTED) == 0U)
+		display->connected = 0;
+
+	/* A boot display that does not scan any more shows nothing; one that does holds its mode. */
+	if (display->boot_scanning && (flags & GHCI_DISP_STATE_ENABLE) == 0U) {
+		display->boot_scanning = 0;
+		display->enabled = 0;
+		display->mode_set = GHCI_DISPLAY_NO_MODE;
+		image_clear(&display->shown);
+	}
+
+	if (display->boot_scanning)
+		boot_mode_take(device, state);
+
+	/* Succeeded: the display is known. */
+	return 0;
+}
+
+/*
+ * Reads the display's modes: the fixed modes it names, or (for a display
+ * that takes arbitrary timings) the sink's EDID and the standard modes
+ * that fit its limits.  A running boot display's mode that is one of
+ * them stands for the boot slot.  Returns 0, or ENOTSUP when no mode is
+ * usable.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.1, word 23
+ * ARBITRARY_PCLK: 0 for the fixed mode table of CMD_DISP_QUERY_MODES).
  */
 static int
 modes_read(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	struct ghci_display_mode *mode;
-	uint32_t registers;
-	uint32_t count;
-	uint32_t word;
-	uint32_t flags;
-	uint64_t clock_khz;
-	uint64_t total;
-	uint32_t index;
+	unsigned index;
+	int error;
 
+	/* The fixed modes, or the sink's and the standard ones. */
 	display = &device->display;
-	registers = display->registers;
-
-	/* The number of modes the controller names, at most what the display keeps. */
-	count = (display->controller_caps >> GHCI_DC_CAPS_MODES_SHIFT) & GHCI_DC_CAPS_MODES_MASK;
-	if (count > GHCI_DISPLAY_MODES_MAX)
-		count = GHCI_DISPLAY_MODES_MAX;
-
-	/* Reads each mode through MODE_INDEX; a mode without a size or a clock is skipped. */
 	display->mode_count = 0U;
-	for (index = 0U; index < count; index++) {
-		mode = &display->modes[display->mode_count];
-		ghci_write(device, registers + GHCI_DC_MODE_INDEX, index);
-
-		/* The horizontal timing: active pixels and sync, then the porches. */
-		word = ghci_read(device, registers + GHCI_DC_MODE_H0);
-		mode->width = MODE_LOW(word);
-		mode->h_sync = MODE_HIGH(word);
-		word = ghci_read(device, registers + GHCI_DC_MODE_H1);
-		mode->h_front = MODE_LOW(word);
-		mode->h_back = MODE_HIGH(word);
-
-		/* The vertical timing, in lines. */
-		word = ghci_read(device, registers + GHCI_DC_MODE_V0);
-		mode->height = MODE_LOW(word);
-		mode->v_sync = MODE_HIGH(word);
-		word = ghci_read(device, registers + GHCI_DC_MODE_V1);
-		mode->v_front = MODE_LOW(word);
-		mode->v_back = MODE_HIGH(word);
-
-		/* The sync polarities (SYNC_POL's two bits) and the clock's PCLK_SEL value. */
-		flags = ghci_read(device, registers + GHCI_DC_MODE_FLAGS);
-		mode->sync_polarity = flags & GHCI_DC_MODE_SYNC_MASK;
-		mode->clock_select = (flags >> GHCI_DC_MODE_PCLK_SHIFT) & GHCI_DC_MODE_PCLK_MASK;
-
-		/* A mode without a size or a clock cannot be shown. */
-		clock_khz = ghci_read(device, registers + GHCI_DC_MODE_CLOCK);
-		if (mode->width == 0U || mode->height == 0U || clock_khz == 0U)
-			continue;
-
-		/* The pixel clocks of one whole frame, the blanking included. */
-		total = (uint64_t)(mode->width + mode->h_front + mode->h_sync + mode->h_back) *
-		    (mode->height + mode->v_front + mode->v_sync + mode->v_back);
-
-		/* The refresh the clock gives over the frame's totals, in millihertz, rounded. */
-		mode->refresh_millihz = (uint32_t)((clock_khz * 1000000U + total / 2U) / total);
-		display->mode_count++;
+	if ((display->info & GHCI_DISP_INFO_ARBITRARY) == 0U) {
+		error = modes_fixed(device);
+		if (error != 0)
+			return error;
+	} else {
+		modes_edid(device);
+		modes_standard(device);
 	}
 
-	/* A controller without a usable mode has no display. */
+	/* A display without a usable mode has none. */
 	if (display->mode_count == 0U)
 		return ENOTSUP;
+
+	/* A boot display's mode of the table is that mode; the display already holds it. */
+	for (index = 0U; index < display->mode_count && display->boot_scanning; index++) {
+		if (!mode_same(&display->modes[index], &display->modes[GHCI_DISPLAY_BOOT_MODE]))
+			continue;
+		display->modes[GHCI_DISPLAY_BOOT_MODE].refresh_millihz = display->modes[index].refresh_millihz;
+		display->boot.mode = index;
+		display->shown.mode = index;
+		display->mode = index;
+		display->mode_set = index;
+		break;
+	}
 
 	/* Succeeded: the modes are known. */
 	return 0;
 }
 
 /*
- * Takes over a boot display the firmware left running: the image it
- * scans, its rows and format, and its timing, which is one of the modes
- * of the table when every value matches (a first flip in that mode then
- * needs no new lighting) or the boot slot otherwise.  Nothing is written.
+ * Reads the fixed modes the display names (CMD_DISP_QUERY_MODES), up to
+ * the most the driver keeps.  Returns 0, or the error of the command.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.3, the boot framebuffer read from FB_BASE, FB_STRIDE, FB_SIZE and
- * CTRL.FORMAT and kept scanning).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_QUERY_MODES: the 16-byte GhciDisplayModesHeader with
+ * returned_modes at 0x04, then the 64-byte descriptors).
+ */
+static int
+modes_fixed(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	struct ghci_display_mode mode;
+	uint32_t packet[GHCI_DW_DISP_QUERY_MODES];
+	struct ghci_disp_comp comp;
+	const uint8_t *answer;
+	uint32_t returned;
+	uint32_t status;
+	uint64_t value;
+	uint32_t dwords;
+	uint32_t index;
+	int error;
+
+	/* The table, into the page. */
+	display = &device->display;
+	comp_arm(device, COMP_MODES, 0, &comp);
+	dwords = ghci_cmd_disp_query_modes(packet, DISPLAY_INDEX, page_bus(device, MODES_OFFSET), GHCI_DISPLAY_MODES_MAX, &comp);
+	error = command_run(device, packet, dwords, COMP_MODES, &status, &value);
+	if (error != 0)
+		return error;
+
+	/* The descriptors written, at most the ones asked for. */
+	answer = page_view(device, MODES_OFFSET);
+	returned = load32(answer, GHCI_DISP_MODES_RETURNED);
+	if (returned > GHCI_DISPLAY_MODES_MAX)
+		returned = GHCI_DISPLAY_MODES_MAX;
+
+	/* Each mode with a size and a clock. */
+	for (index = 0U; index < returned; index++) {
+		mode_read(answer + GHCI_DISP_MODES_HEADER_BYTES + GHCI_DISP_MODE_BYTES * index, &mode);
+		if (mode.width == 0U || mode.height == 0U || mode.clock_khz == 0U || mode.htotal == 0U || mode.vtotal == 0U)
+			continue;
+		mode_refresh(&mode);
+		mode_add(display, &mode);
+	}
+
+	/* Succeeded: the fixed modes are read. */
+	return 0;
+}
+
+/*
+ * Adds the detailed timings of the sink's EDID that fit the display, when
+ * the display has the DDC bus and a sink answers.
+ */
+static void
+modes_edid(
+	struct ghci_device *device)
+{
+	uint8_t edid[EDID_BYTES];
+	unsigned index;
+	int error;
+
+	/* Without the bus or a sink, no EDID. */
+	if (!device->display.i2c || !device->display.connected)
+		return;
+
+	/* The base block. */
+	error = edid_read(device, edid);
+	if (error != 0) {
+		kern_logf("ghci: %s: no EDID from the sink (%d)\n", device->name, error);
+		return;
+	}
+
+	/* Each detailed timing (a descriptor with no clock is something else). */
+	for (index = 0U; index < EDID_TIMING_COUNT; index++)
+		edid_timing(device, edid + EDID_TIMINGS + EDID_TIMING_BYTES * index);
+}
+
+/*
+ * Reads the sink's EDID base block through the DDC bus: a read of 128
+ * bytes from offset 0 at address 0x50, then its header and checksum.
+ * Returns 0, EIO for a transfer that did not finish, or EINVAL for a
+ * block that is not an EDID.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_I2C_XFER: a read with HAS_OFFSET writes the offset, then reads
+ * after a repeated START; the buffer's header status [15:0] and
+ * bytes_done [31:16]).  VESA E-EDID standard release A2 (section 3.1,
+ * the header 00 FF FF FF FF FF FF 00 and the checksum of the 128 bytes).
+ */
+static int
+edid_read(
+	struct ghci_device *device,
+	uint8_t *edid)
+{
+	static const uint8_t header[8] = { 0x00U, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0x00U };
+	uint32_t packet[GHCI_DW_DISP_I2C_XFER];
+	struct ghci_disp_comp comp;
+	struct ghci_i2c_args args;
+	const uint8_t *buffer;
+	uint32_t transfer;
+	uint32_t status;
+	uint64_t value;
+	uint32_t dwords;
+	uint32_t index;
+	uint8_t sum;
+	int error;
+
+	/* The read of the base block. */
+	kern_memset(&args, 0, sizeof(args));
+	args.display = DISPLAY_INDEX;
+	args.flags = GHCI_DISP_I2C_HAS_OFFSET;
+	args.slave = EDID_ADDRESS;
+	args.offset = 0U;
+	args.bytes = EDID_BYTES;
+	args.buffer = page_bus(device, I2C_OFFSET);
+	comp_arm(device, COMP_I2C, 0, &comp);
+	dwords = ghci_cmd_disp_i2c_xfer(packet, &args, &comp);
+	error = command_run(device, packet, dwords, COMP_I2C, &status, &value);
+	if (error != 0)
+		return error;
+
+	/* Every byte, transferred. */
+	buffer = page_view(device, I2C_OFFSET);
+	transfer = load32(buffer, 0U);
+	if ((transfer & 0xFFFFU) != GHCI_DISP_I2C_OK || (transfer >> 16) != EDID_BYTES)
+		return EIO;
+	kern_memcpy(edid, buffer + GHCI_DISP_I2C_HEADER_BYTES, EDID_BYTES);
+
+	/* The header. */
+	if (kern_memcmp(edid, header, sizeof(header)) != 0)
+		return EINVAL;
+
+	/* The bytes sum to 0. */
+	sum = 0U;
+	for (index = 0U; index < EDID_BYTES; index++)
+		sum = (uint8_t)(sum + edid[index]);
+	if (sum != 0U)
+		return EINVAL;
+
+	/* Succeeded: the block is the sink's EDID. */
+	return 0;
+}
+
+/*
+ * Adds one 18-byte detailed timing of an EDID as a mode, when it is a
+ * progressive timing the display's limits take.
+ *
+ * Values referenced: VESA E-EDID standard release A2 (section 3.10.2,
+ * the detailed timing: the clock in 10 kHz at bytes 0 and 1, the active
+ * and blanking sizes, the sync offsets and widths split across bytes 2
+ * to 11, and byte 17: [7] interlaced, [4:3] 11 digital separate sync,
+ * [2] vertical and [1] horizontal polarity).
+ */
+static void
+edid_timing(
+	struct ghci_device *device,
+	const uint8_t *timing)
+{
+	struct ghci_display_mode mode;
+	uint32_t clock;
+	uint32_t hblank;
+	uint32_t vblank;
+	uint32_t hfront;
+	uint32_t hsync;
+	uint32_t vfront;
+	uint32_t vsync;
+	int fits;
+
+	/* A descriptor without a clock is not a timing. */
+	clock = (uint32_t)timing[0] | ((uint32_t)timing[1] << 8);
+	if (clock == 0U)
+		return;
+
+	/* An interlaced timing is not taken: the display scans progressively. */
+	if ((timing[17] & 0x80U) != 0U)
+		return;
+
+	/* The active sizes and the blanking. */
+	kern_memset(&mode, 0, sizeof(mode));
+	mode.clock_khz = clock * 10U;
+	mode.width = (uint32_t)timing[2] | (((uint32_t)timing[4] >> 4) << 8);
+	hblank = (uint32_t)timing[3] | (((uint32_t)timing[4] & 0xFU) << 8);
+	mode.height = (uint32_t)timing[5] | (((uint32_t)timing[7] >> 4) << 8);
+	vblank = (uint32_t)timing[6] | (((uint32_t)timing[7] & 0xFU) << 8);
+
+	/* The porches and syncs. */
+	hfront = (uint32_t)timing[8] | ((((uint32_t)timing[11] >> 6) & 0x3U) << 8);
+	hsync = (uint32_t)timing[9] | ((((uint32_t)timing[11] >> 4) & 0x3U) << 8);
+	vfront = ((uint32_t)timing[10] >> 4) | ((((uint32_t)timing[11] >> 2) & 0x3U) << 4);
+	vsync = ((uint32_t)timing[10] & 0xFU) | (((uint32_t)timing[11] & 0x3U) << 4);
+
+	/* Where each sync starts and ends, and the totals. */
+	mode.hsync_start = mode.width + hfront;
+	mode.hsync_end = mode.hsync_start + hsync;
+	mode.htotal = mode.width + hblank;
+	mode.vsync_start = mode.height + vfront;
+	mode.vsync_end = mode.vsync_start + vsync;
+	mode.vtotal = mode.height + vblank;
+
+	/* The polarities of a digital separate sync; any other sync is negative. */
+	if ((timing[17] & 0x18U) == 0x18U) {
+		if ((timing[17] & 0x04U) != 0U)
+			mode.flags |= GHCI_DISP_MODE_VSYNC_POSITIVE;
+		if ((timing[17] & 0x02U) != 0U)
+			mode.flags |= GHCI_DISP_MODE_HSYNC_POSITIVE;
+	}
+	mode.mode_id = GHCI_DISP_MODE_ARBITRARY;
+
+	/* Taken when the display's limits take it. */
+	fits = mode_fits(device, &mode);
+	if (!fits)
+		return;
+	mode_refresh(&mode);
+	mode_add(&device->display, &mode);
+}
+
+/* Adds the standard modes that fit the display's limits. */
+static void
+modes_standard(
+	struct ghci_device *device)
+{
+	struct ghci_display_mode mode;
+	unsigned index;
+	int fits;
+
+	/* Each standard mode, as the display's limits take it. */
+	for (index = 0U; index < STANDARD_MODES; index++) {
+		kern_memset(&mode, 0, sizeof(mode));
+		mode.clock_khz = standard_modes[index][0];
+		mode.width = standard_modes[index][1];
+		mode.hsync_start = standard_modes[index][2];
+		mode.hsync_end = standard_modes[index][3];
+		mode.htotal = standard_modes[index][4];
+		mode.height = standard_modes[index][5];
+		mode.vsync_start = standard_modes[index][6];
+		mode.vsync_end = standard_modes[index][7];
+		mode.vtotal = standard_modes[index][8];
+		mode.flags = standard_modes[index][9];
+		mode.mode_id = GHCI_DISP_MODE_ARBITRARY;
+		fits = mode_fits(device, &mode);
+		if (!fits)
+			continue;
+		mode_refresh(&mode);
+		mode_add(&device->display, &mode);
+	}
+}
+
+/* Adds a mode to the table, unless the table has it or is full. */
+static void
+mode_add(
+	struct ghci_display *display,
+	const struct ghci_display_mode *mode)
+{
+	unsigned index;
+
+	/* A mode the table has already. */
+	for (index = 0U; index < display->mode_count; index++) {
+		if (mode_same(&display->modes[index], mode))
+			return;
+	}
+
+	/* A full table. */
+	if (display->mode_count >= GHCI_DISPLAY_MODES_MAX)
+		return;
+
+	/* The mode at the end. */
+	display->modes[display->mode_count] = *mode;
+	display->mode_count++;
+}
+
+/*
+ * Reports whether a timing passes the display's validation of an
+ * arbitrary timing, which it then must accept: ordered syncs within the
+ * totals, the active and total sizes within words 24 and 25, the porches
+ * and syncs at least words 28 and 29, and the clock within words 21 and
+ * 22.  Returns 1 when it does.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, the
+ * mode validation table and its acceptance guarantee).
+ */
+static int
+mode_fits(
+	const struct ghci_device *device,
+	const struct ghci_display_mode *mode)
+{
+	const struct ghci_caps *caps;
+	uint32_t least;
+
+	/* The syncs in order, within the totals, after a non-empty active part. */
+	if (mode->clock_khz == 0U || mode->width == 0U || mode->height == 0U)
+		return 0;
+	if (mode->width > mode->hsync_start || mode->hsync_start >= mode->hsync_end || mode->hsync_end > mode->htotal)
+		return 0;
+	if (mode->height > mode->vsync_start || mode->vsync_start >= mode->vsync_end || mode->vsync_end > mode->vtotal)
+		return 0;
+
+	/* The active and total sizes within the limits; a descriptor's fields are 16 bits. */
+	caps = &device->caps;
+	if (mode->htotal > 0xFFFFU || mode->vtotal > 0xFFFFU)
+		return 0;
+	if (mode->width > (caps->disp_limits_h & GHCI_DISP_LIMIT_ACTIVE_MASK))
+		return 0;
+	if (mode->htotal > (caps->disp_limits_h >> GHCI_DISP_LIMIT_TOTAL_SHIFT))
+		return 0;
+	if (mode->height > (caps->disp_limits_v & GHCI_DISP_LIMIT_ACTIVE_MASK))
+		return 0;
+	if (mode->vtotal > (caps->disp_limits_v >> GHCI_DISP_LIMIT_TOTAL_SHIFT))
+		return 0;
+
+	/* The horizontal porches and sync at least the least ones. */
+	least = (caps->disp_blank_h >> GHCI_DISP_BLANK_FRONT_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->hsync_start - mode->width < least)
+		return 0;
+	least = (caps->disp_blank_h >> GHCI_DISP_BLANK_SYNC_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->hsync_end - mode->hsync_start < least)
+		return 0;
+	least = (caps->disp_blank_h >> GHCI_DISP_BLANK_BACK_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->htotal - mode->hsync_end < least)
+		return 0;
+
+	/* The vertical ones. */
+	least = (caps->disp_blank_v >> GHCI_DISP_BLANK_FRONT_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->vsync_start - mode->height < least)
+		return 0;
+	least = (caps->disp_blank_v >> GHCI_DISP_BLANK_SYNC_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->vsync_end - mode->vsync_start < least)
+		return 0;
+	least = (caps->disp_blank_v >> GHCI_DISP_BLANK_BACK_SHIFT) & GHCI_DISP_BLANK_MASK;
+	if (mode->vtotal - mode->vsync_end < least)
+		return 0;
+
+	/* The clock within the range. */
+	if (mode->clock_khz < caps->disp_clock_min || mode->clock_khz > caps->disp_clock_max)
+		return 0;
+
+	/* Succeeded: the display takes the timing. */
+	return 1;
+}
+
+/* Fills a mode's refresh: its clock over its totals, in millihertz, rounded. */
+static void
+mode_refresh(
+	struct ghci_display_mode *mode)
+{
+	uint64_t total;
+
+	/* The pixel clocks of one whole frame, the blanking included. */
+	total = (uint64_t)mode->htotal * mode->vtotal;
+	mode->refresh_millihz = 0U;
+	if (total == 0U)
+		return;
+
+	/* The refresh. */
+	mode->refresh_millihz = (uint32_t)(((uint64_t)mode->clock_khz * 1000000U + total / 2U) / total);
+}
+
+/*
+ * Reads a 64-byte mode descriptor into a mode.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2,
+ * GhciDisplayModeDesc: pixel_clock_khz at 0x04, the 16-bit timing from
+ * 0x08 to 0x16, flags at 0x18, mode_id at 0x24).
+ */
+static void
+mode_read(
+	const uint8_t *desc,
+	struct ghci_display_mode *mode)
+{
+	/* The clock and the horizontal timing. */
+	kern_memset(mode, 0, sizeof(*mode));
+	mode->clock_khz = load32(desc, GHCI_DISP_MODE_PIXEL_CLOCK);
+	mode->width = load16(desc, GHCI_DISP_MODE_HACTIVE);
+	mode->hsync_start = load16(desc, GHCI_DISP_MODE_HSYNC_START);
+	mode->hsync_end = load16(desc, GHCI_DISP_MODE_HSYNC_END);
+	mode->htotal = load16(desc, GHCI_DISP_MODE_HTOTAL);
+
+	/* The vertical timing, the polarities and the fixed mode's number. */
+	mode->height = load16(desc, GHCI_DISP_MODE_VACTIVE);
+	mode->vsync_start = load16(desc, GHCI_DISP_MODE_VSYNC_START);
+	mode->vsync_end = load16(desc, GHCI_DISP_MODE_VSYNC_END);
+	mode->vtotal = load16(desc, GHCI_DISP_MODE_VTOTAL);
+	mode->flags = load32(desc, GHCI_DISP_MODE_FLAGS) & (GHCI_DISP_MODE_HSYNC_POSITIVE | GHCI_DISP_MODE_VSYNC_POSITIVE);
+	mode->mode_id = load32(desc, GHCI_DISP_MODE_ID);
+}
+
+/* Writes a mode as a 64-byte mode descriptor, its status and the rest 0. */
+static void
+mode_write(
+	const struct ghci_display_mode *mode,
+	uint8_t *desc)
+{
+	/* Everything 0, then the size, the clock and the horizontal timing. */
+	kern_memset(desc, 0, GHCI_DISP_MODE_BYTES);
+	store32(desc, GHCI_DISP_MODE_STRUCT_BYTES, GHCI_DISP_MODE_BYTES);
+	store32(desc, GHCI_DISP_MODE_PIXEL_CLOCK, mode->clock_khz);
+	store16(desc, GHCI_DISP_MODE_HACTIVE, mode->width);
+	store16(desc, GHCI_DISP_MODE_HSYNC_START, mode->hsync_start);
+	store16(desc, GHCI_DISP_MODE_HSYNC_END, mode->hsync_end);
+	store16(desc, GHCI_DISP_MODE_HTOTAL, mode->htotal);
+
+	/* The vertical timing, the polarities and the fixed mode's number. */
+	store16(desc, GHCI_DISP_MODE_VACTIVE, mode->height);
+	store16(desc, GHCI_DISP_MODE_VSYNC_START, mode->vsync_start);
+	store16(desc, GHCI_DISP_MODE_VSYNC_END, mode->vsync_end);
+	store16(desc, GHCI_DISP_MODE_VTOTAL, mode->vtotal);
+	store32(desc, GHCI_DISP_MODE_FLAGS, mode->flags);
+	store32(desc, GHCI_DISP_MODE_ID, mode->mode_id);
+}
+
+/* Reports whether two modes have the same timing: 1 when they do. */
+static int
+mode_same(
+	const struct ghci_display_mode *first,
+	const struct ghci_display_mode *second)
+{
+	/* The clock and the horizontal timing. */
+	if (first->clock_khz != second->clock_khz)
+		return 0;
+	if (first->width != second->width || first->hsync_start != second->hsync_start)
+		return 0;
+	if (first->hsync_end != second->hsync_end || first->htotal != second->htotal)
+		return 0;
+
+	/* The vertical timing and the polarities. */
+	if (first->height != second->height || first->vsync_start != second->vsync_start)
+		return 0;
+	if (first->vsync_end != second->vsync_end || first->vtotal != second->vtotal)
+		return 0;
+	if (first->flags != second->flags)
+		return 0;
+
+	/* Succeeded: the same timing. */
+	return 1;
+}
+
+/*
+ * Takes over a boot display the firmware left running, as the BOOT_DISP
+ * window said before any display command: the image it scans (in local
+ * memory at the framebuffer's offset), its rows and its format, in the
+ * boot slot of the modes, whose timing the start's snapshot gives.
+ * Nothing is placed.
+ *
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
+ * driver reads every BOOT_DISP register before a takeover command; the
+ * boot framebuffer at MEM_VRAM_BASE + BOOT_DISP_FB_OFFSET).
  */
 static void
 boot_take(
@@ -1254,71 +2022,59 @@ boot_take(
 {
 	struct ghci_display *display;
 	struct ghci_display_mode *boot;
-	const struct ghci_display_mode *mode;
-	uint32_t registers;
-	uint32_t ctrl;
-	uint32_t size;
-	unsigned index;
+	const struct ghci_caps *caps;
 
-	/* The image, its rows, its size and its format. */
+	/* A boot display that is running. */
 	display = &device->display;
-	registers = display->registers;
-	ctrl = ghci_read(device, registers + GHCI_DC_CTRL);
-	size = ghci_read(device, registers + GHCI_DC_FB_SIZE);
+	caps = &device->caps;
+	if ((caps->boot_disp_status & GHCI_BOOT_DISP_ACTIVE) == 0U)
+		return;
+
+	/* Its size, until the snapshot gives the whole timing. */
 	boot = &display->modes[GHCI_DISPLAY_BOOT_MODE];
 	kern_memset(boot, 0, sizeof(*boot));
-	boot->width = size & 0xffffU;
-	boot->height = size >> GHCI_DC_SIZE_HEIGHT_SHIFT;
-
-	/* The timing the firmware set. */
-	boot->h_front = ghci_read(device, registers + GHCI_DC_H_FP);
-	boot->h_sync = ghci_read(device, registers + GHCI_DC_H_SYNC);
-	boot->h_back = ghci_read(device, registers + GHCI_DC_H_BP);
-	boot->v_front = ghci_read(device, registers + GHCI_DC_V_FP);
-	boot->v_sync = ghci_read(device, registers + GHCI_DC_V_SYNC);
-	boot->v_back = ghci_read(device, registers + GHCI_DC_V_BP);
-	boot->sync_polarity = ghci_read(device, registers + GHCI_DC_SYNC_POL) & GHCI_DC_MODE_SYNC_MASK;
-	boot->clock_select = ghci_read(device, registers + GHCI_DC_PCLK_SEL);
+	boot->width = caps->boot_disp_width;
+	boot->height = caps->boot_disp_height;
 
 	/* The boot image, which nothing of the driver's holds. */
 	image_clear(&display->boot);
-	display->boot.base = ghci_read(device, registers + GHCI_DC_FB_BASE);
-	display->boot.stride = ghci_read(device, registers + GHCI_DC_FB_STRIDE);
-	display->boot.format = (ctrl >> GHCI_DC_CTRL_FORMAT_SHIFT) & GHCI_DC_CTRL_FORMAT_MASK;
+	display->boot.base = caps->local_base + caps->boot_disp_offset;
+	display->boot.stride = caps->boot_disp_stride;
+	display->boot.format = caps->boot_disp_format;
 	display->boot.mode = GHCI_DISPLAY_BOOT_MODE;
 
-	/* A mode of the table with the same timing stands for the boot slot. */
-	for (index = 0U; index < display->mode_count; index++) {
-		mode = &display->modes[index];
-		if (mode->width == boot->width &&
-		    mode->height == boot->height &&
-		    mode->h_front == boot->h_front &&
-		    mode->h_sync == boot->h_sync &&
-		    mode->h_back == boot->h_back &&
-		    mode->v_front == boot->v_front &&
-		    mode->v_sync == boot->v_sync &&
-		    mode->v_back == boot->v_back &&
-		    mode->sync_polarity == boot->sync_polarity &&
-		    mode->clock_select == boot->clock_select) {
-			boot->refresh_millihz = mode->refresh_millihz;
-			display->boot.mode = index;
-			break;
-		}
-	}
-
 	/*
-	 * The controller is lit on the boot image until the driver's first
-	 * flip is taken; until the kernel can say that nothing draws to the
-	 * image any more, it is kept for the console.
+	 * The display is lit on the boot image until the driver's first
+	 * command takes it over; until the kernel can say that nothing draws
+	 * to the image any more, it is kept for the console.
 	 */
 	display->enabled = 1;
-	display->mode = display->boot.mode;
+	display->mode = GHCI_DISPLAY_BOOT_MODE;
+	display->mode_set = GHCI_DISPLAY_BOOT_MODE;
 	display->format = display->boot.format;
 	display->stride = display->boot.stride;
 	display->shown = display->boot;
 	display->boot_scanning = 1;
 	display->boot_kept = 1;
 	display->boot_console = 1;
+}
+
+/* Takes the boot display's mode from the snapshot's active mode into the boot slot. */
+static void
+boot_mode_take(
+	struct ghci_device *device,
+	const uint8_t *state)
+{
+	struct ghci_display_mode mode;
+
+	/* The active mode, when the snapshot has one. */
+	mode_read(state + GHCI_DISP_STATE_MODE, &mode);
+	if (mode.width == 0U || mode.height == 0U)
+		return;
+
+	/* Succeeded: the boot slot holds the whole timing. */
+	mode_refresh(&mode);
+	device->display.modes[GHCI_DISPLAY_BOOT_MODE] = mode;
 }
 
 /* Empties an image record: no present, no memory, no frame. */
@@ -1330,39 +2086,22 @@ image_clear(
 	image->copy_frame = -1;
 }
 
-/* Reports CTRL's word for a format with ENABLE off: the format and the output (HDMI when there is one). */
-static uint32_t
-control_word(
-	struct ghci_device *device,
-	uint32_t format)
-{
-	uint32_t control;
-
-	/* The format, and HDMI when the controller drives a TMDS link or a transmitter. */
-	control = (format & GHCI_DC_CTRL_FORMAT_MASK) << GHCI_DC_CTRL_FORMAT_SHIFT;
-	if ((device->display.controller_caps & (GHCI_DC_CAPS_TMDS | GHCI_DC_CAPS_TRANSMITTER)) != 0U)
-		control |= GHCI_DC_CTRL_OUTPUT_HDMI;
-
-	/* Succeeded: the word. */
-	return control;
-}
-
-/* Reports the 32-bit physical address of a plane's record in the fence page. */
-static uint32_t
+/* Reports the bus address of a plane's flip record in the page. */
+static uint64_t
 record_address(
 	struct ghci_device *device,
 	unsigned plane)
 {
-	return (uint32_t)(device->fence_page->bus + RECORD_OFFSET + GHCI_DC_RECORD_BYTES * plane);
+	return page_bus(device, RECORD_OFFSET + GHCI_FLIP_RECORD_BYTES * plane);
 }
 
-/* Reports the processor's view of the value word of a plane's record. */
+/* Reports the processor's view of the value word of a plane's flip record. */
 static volatile uint32_t *
 record_slot(
 	struct ghci_device *device,
 	unsigned plane)
 {
-	return (volatile uint32_t *)(void *)(device->fence_page->view + RECORD_OFFSET + GHCI_DC_RECORD_BYTES * plane);
+	return (volatile uint32_t *)(void *)page_view(device, RECORD_OFFSET + GHCI_FLIP_RECORD_BYTES * plane);
 }
 
 /* Takes the next flip value: 1 to 2^31 - 1, never 0, so a cleared record names no flip. */
@@ -1375,7 +2114,7 @@ value_take(
 	/* The value, and the next one after it with the wrap past 31 bits. */
 	value = display->next_value;
 	display->next_value++;
-	if (display->next_value > FLIP_VALUE_MAX)
+	if (display->next_value > GHCI_FLIP_VALUE_MAX)
 		display->next_value = 1U;
 
 	/* Succeeded: the value. */
@@ -1383,32 +2122,36 @@ value_take(
 }
 
 /*
- * Places a run of the display's packets and a fence after them through
+ * Places a run of the display's commands and a fence after them through
  * the gate, without waiting for a recovery; the display's lock is held
  * throughout, so the state read before stays.  The service thread's
  * placement waits for nothing: it enters only a free ring with room for
  * the run and its fence now.
  *
- * Returns 0 with the fence's ticket; EAGAIN when a recovery runs (or,
- * for the service, the ring is in use or full), with nothing placed, or
- * with *placed set when the part placed before it began is lost to the
- * reset (the recovery counts its flips again); or EIO when the device
- * is lost.
+ * Returns 0; EAGAIN when a recovery runs (or, for the service, the ring
+ * is in use or full), with nothing placed, or with *placed set when the
+ * part placed before it began is lost to the reset (the snapshot after
+ * the recovery settles it); EIO when the device is lost; or EINVAL for a
+ * run an encoder refused (0 dwords).
  */
 static int
 ring_put(
 	struct ghci_device *device,
 	const uint32_t *packets,
 	uint32_t dwords,
-	struct ghci_ticket *ticket,
 	int *placed)
 {
+	struct ghci_ticket ticket;
 	enum ghci_gate gate;
 	uint32_t start;
 	int error;
 
-	/* The gate, which keeps the display's lock held when it does not open. */
+	/* A run an encoder refused is not placed. */
 	*placed = 0;
+	if (dwords == 0U)
+		return EINVAL;
+
+	/* The gate, which keeps the display's lock held when it does not open. */
 	if (device->display.service_placing)
 		gate = ghci_cp_try_enter(device, dwords + GHCI_DW_FENCE);
 	else
@@ -1418,11 +2161,11 @@ ring_put(
 	if (gate != GHCI_GATE_OPEN)
 		return EAGAIN;
 
-	/* The packets, the fence after them, and the doorbell for what was placed. */
+	/* The commands, the fence after them, and the doorbell for what was placed. */
 	start = device->ring.wptr;
 	error = ghci_cp_place(device, packets, dwords);
 	if (error == 0)
-		error = ghci_cp_place_fence(device, NULL, start, ticket);
+		error = ghci_cp_place_fence(device, NULL, start, &ticket);
 	if (device->ring.wptr != start)
 		*placed = 1;
 	ghci_cp_doorbell(device);
@@ -1436,7 +2179,7 @@ ring_put(
 	return 0;
 }
 
-/* Reads the record page for each placed flip and takes the flips whose records came. */
+/* Reads the page's record of each placed flip and takes the flips whose records came. */
 static void
 records_take(
 	struct ghci_device *device)
@@ -1447,9 +2190,9 @@ records_take(
 	unsigned plane;
 	int cancelled;
 
-	/* Records exist only once the ring and its fence page do. */
+	/* Records exist only once the page does. */
 	display = &device->display;
-	if (device->fence_page == NULL)
+	if (display->page == NULL)
 		return;
 
 	/* Each plane's record names its flip by the value, with bit 31 saying it was cancelled. */
@@ -1459,11 +2202,11 @@ records_take(
 			continue;
 
 		value = *record_slot(device, plane);
-		if ((value & ~GHCI_DC_TAKEN_CANCELLED) != flip->value)
+		if ((value & ~GHCI_FLIP_CANCELLED) != flip->value)
 			continue;
 
 		cancelled = 0;
-		if ((value & GHCI_DC_TAKEN_CANCELLED) != 0U)
+		if ((value & GHCI_FLIP_CANCELLED) != 0U)
 			cancelled = 1;
 		taken(device, plane, cancelled);
 	}
@@ -1476,8 +2219,8 @@ records_take(
  * goes, and its present (with every lower one) is adopted; the first
  * image of the driver's ends the boot display's scan-out.  A cancelled
  * image is let go of without being shown.  A cursor surface shown
- * becomes the controller's; a cancelled one is flipped again once the
- * controller is lit.
+ * becomes the display's; a cancelled one is flipped again once the
+ * display is lit.
  */
 static void
 taken(
@@ -1500,7 +2243,7 @@ taken(
 			if (display->cursor_image && display->cursor_pending < 0)
 				display->cursor_pending = flip->surface;
 		} else {
-			/* The controller has read the surface and shows it from now. */
+			/* The display has read the surface and shows it from now. */
 			display->cursor_shown = flip->surface;
 		}
 
@@ -1542,6 +2285,42 @@ taken(
 		display->adopted = flip->image.sequence;
 }
 
+/*
+ * Reads the completion of the last lighting: a display that did not take
+ * the mode (no valid mode, INVALID_STATE) stays dark, and holds no mode.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, DISP_SET
+ * with ENABLE and no valid mode leaves ENABLE 0 with INVALID_STATE; a
+ * mode descriptor's status at 0x1C).
+ */
+static void
+light_check(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	const uint8_t *desc;
+	uint32_t status;
+	uint64_t value;
+	int state;
+
+	/* Nothing armed, or not written yet; a cancelled one is the snapshot's after the reset. */
+	display = &device->display;
+	if (display->page == NULL)
+		return;
+	state = comp_state(device, COMP_LIGHT, &status, &value);
+	if (state != COMP_DONE || status == GHCI_DISP_COMP_OK)
+		return;
+
+	/* The display stays dark: the mode was refused. */
+	desc = page_view(device, MODE_OFFSET);
+	kern_logf("ghci: %s: display not lit (status %u, mode status %u)\n",
+	    device->name,
+	    (unsigned)status,
+	    (unsigned)load32(desc, GHCI_DISP_MODE_STATUS));
+	display->enabled = 0;
+	display->mode_set = GHCI_DISPLAY_NO_MODE;
+}
+
 /* Places the oldest present waiting, when plane 0 has no flip placed: a flip, or a new lighting. */
 static void
 queue_kick(
@@ -1553,25 +2332,23 @@ queue_kick(
 	int usable;
 	int error;
 
-	/* Nothing waits, the plane's slot is in use, the lease is ending, or the ring does not run. */
+	/* Nothing waits, the plane's flip is in use, the lease is ending, a reset is being settled, or the ring does not run. */
 	display = &device->display;
-	if (display->queue_count == 0U || display->flips[0].placed || display->ending)
+	if (display->queue_count == 0U || display->flips[0].placed || display->ending || display->resync != 0)
 		return;
 	usable = ghci_scan_ring_usable(device);
 	if (!usable)
 		return;
 
-	/* An image of another mode, format or stride than the one lit lights the controller again. */
+	/* An image of another mode than the one lit lights the display again; a format or rows of their own do not. */
 	head = &display->queue[0];
 	relight = 0;
 	if (!display->enabled)
 		relight = 1;
-	if (head->mode != display->mode ||
-	    head->format != display->format ||
-	    head->stride != display->stride)
+	if (head->mode != display->mode)
 		relight = 1;
 
-	/* The run that lights the controller on the image, or one flip; a refused one waits for the next look. */
+	/* The run that lights the display on the image, or one flip; a refused one waits for the next look. */
 	if (relight)
 		error = light(device, head);
 	else
@@ -1591,7 +2368,7 @@ queue_push_front(
 {
 	unsigned index;
 
-	/* The queue has room for one more than its depth: the flip the slot had. */
+	/* The queue has room for one more than its depth: the flip the plane had. */
 	if (display->queue_count >= GHCI_DISPLAY_QUEUE)
 		return;
 
@@ -1616,59 +2393,65 @@ queue_pop(
 }
 
 /*
- * Fills the register pairs of a mode's timing, the sync polarity, the
- * pixel clock and an image's rows and size.  Returns the pairs.
+ * Writes one FLIP: of plane 0 to an image (taken at the next vertical
+ * sync once the GPU's writes before it are in memory), or of plane 1 to a
+ * cursor surface (image NULL), with its record cleared first and its
+ * interrupt.  Returns the dwords, 0 for one the encoder refused.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_FLIP's flags; section 13.2, WAIT_GPU_IDLE: the display queue holds
+ * the flip until the writes of every earlier command are visible, as the
+ * processor only queues it).
  */
 static uint32_t
-timing_pairs(
-	const struct ghci_display_mode *timing,
+flip_packet(
+	struct ghci_device *device,
+	uint32_t *out,
 	const struct ghci_display_image *image,
-	uint32_t *offsets,
-	uint32_t *values)
+	int surface,
+	uint32_t value)
 {
-	/* The horizontal and vertical timing. */
-	offsets[0] = GHCI_DC_H_ACTIVE;
-	values[0] = timing->width;
-	offsets[1] = GHCI_DC_H_FP;
-	values[1] = timing->h_front;
-	offsets[2] = GHCI_DC_H_SYNC;
-	values[2] = timing->h_sync;
-	offsets[3] = GHCI_DC_H_BP;
-	values[3] = timing->h_back;
-	offsets[4] = GHCI_DC_V_ACTIVE;
-	values[4] = timing->height;
-	offsets[5] = GHCI_DC_V_FP;
-	values[5] = timing->v_front;
-	offsets[6] = GHCI_DC_V_SYNC;
-	values[6] = timing->v_sync;
-	offsets[7] = GHCI_DC_V_BP;
-	values[7] = timing->v_back;
+	struct ghci_flip_args args;
+	unsigned plane;
 
-	/* The sync polarity, the pixel clock, and the image's rows and size. */
-	offsets[8] = GHCI_DC_SYNC_POL;
-	values[8] = timing->sync_polarity;
-	offsets[9] = GHCI_DC_PCLK_SEL;
-	values[9] = timing->clock_select;
-	offsets[10] = GHCI_DC_FB_STRIDE;
-	values[10] = image->stride;
-	offsets[11] = GHCI_DC_FB_SIZE;
-	values[11] = timing->width | (timing->height << GHCI_DC_SIZE_HEIGHT_SHIFT);
+	/* The image of plane 0, or the cursor's surface. */
+	kern_memset(&args, 0, sizeof(args));
+	args.display = DISPLAY_INDEX;
+	args.value = value;
+	args.flags = GHCI_FLIP_VSYNC_WAIT | GHCI_FLIP_RECORD_ENABLE | GHCI_FLIP_RECORD_IRQ;
+	if (image != NULL) {
+		plane = 0U;
+		args.base = image->base;
+		args.stride = image->stride;
+		args.format = image->format;
+		args.flags |= GHCI_FLIP_WAIT_GPU_IDLE;
+	} else {
+		plane = 1U;
+		args.base = device->display.surfaces[surface]->bus;
+		args.flags |= GHCI_FLIP_PLANE_CURSOR;
+	}
 
-	/* Succeeded: the pairs. */
-	return LIGHT_PAIRS;
+	/* The record, cleared, so that only this flip's names it. */
+	*record_slot(device, plane) = 0U;
+	args.record = record_address(device, plane);
+
+	/* Succeeded: the packet. */
+	return ghci_cmd_flip(out, &args);
 }
 
 /*
- * Places the run that lights the controller on an image: CTRL off (the
- * processor waits until the controller is idle), the mode's timing, the
- * stride and size, the flip (taken at once while ENABLE is 0), CTRL with
- * ENABLE, and the cursor's flip when one waits; then the driver's fence.
- * Returns 0 once the run (or a part a recovery cut) is in the ring, or
- * the error of a run not placed.
+ * Places the run that lights the display on an image: DISP_SET with
+ * ENABLE off when it is lit (the scan-out stops at the frame's end),
+ * DISP_SET_MODE when the display holds another mode, the flip (taken at
+ * once while ENABLE is off), DISP_SET with ENABLE and its completion, and
+ * the cursor's flip when one waits; then the driver's fence.  Returns 0
+ * once the run (or a part a recovery cut) is in the ring, or the error of
+ * a run not placed.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.2, starting the controller; section 7.3, CMD_DISP_SET and CMD_FLIP
- * with its 16-byte record at a 32-bit physical address).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, the
+ * control queue starts after every earlier display command, SET_MODE
+ * only while ENABLE is 0, a plane 0 flip taken at once while ENABLE is 0,
+ * ENABLE 0 to 1 scans the plane's image from the next frame).
  */
 static int
 light(
@@ -1676,69 +2459,89 @@ light(
 	const struct ghci_display_image *image)
 {
 	struct ghci_display *display;
-	struct ghci_ticket ticket;
 	uint32_t packets[LIGHT_DWORDS];
-	uint32_t offsets[LIGHT_PAIRS];
-	uint32_t values[LIGHT_PAIRS];
-	uint32_t control;
+	struct ghci_disp_comp none;
+	struct ghci_disp_comp comp;
 	uint32_t value;
 	uint32_t cursor_value;
 	uint32_t dwords;
-	uint32_t pairs;
+	uint32_t written;
 	int cursor;
 	int placed;
 	int error;
 
+	/* No completion for the steps before the last. */
 	display = &device->display;
-	control = control_word(device, image->format);
+	kern_memset(&none, 0, sizeof(none));
+	dwords = 0U;
+	error = 0;
 
-	/* CTRL with ENABLE off, waiting for the controller's idle. */
-	offsets[0] = GHCI_DC_CTRL;
-	values[0] = control;
-	dwords = ghci_cmd_disp_set(&packets[0], 1U, 1U, offsets, values);
+	/* A lit display goes dark first. */
+	if (display->enabled) {
+		written = ghci_cmd_disp_set(&packets[dwords], DISPLAY_INDEX, 0U, &none);
+		if (written == 0U)
+			error = EINVAL;
+		dwords += written;
+	}
 
-	/* The timing, the sync polarity, the pixel clock and the image's rows and size. */
-	pairs = timing_pairs(&display->modes[image->mode], image, offsets, values);
-	dwords += ghci_cmd_disp_set(&packets[dwords], 0U, pairs, offsets, values);
+	/* The image's mode, when the display holds another. */
+	if (error == 0 && display->mode_set != image->mode) {
+		mode_write(&display->modes[image->mode], page_view(device, MODE_OFFSET));
+		written = ghci_cmd_disp_set_mode(&packets[dwords], DISPLAY_INDEX, 0U, page_bus(device, MODE_OFFSET), &none);
+		if (written == 0U)
+			error = EINVAL;
+		dwords += written;
+	}
 
-	/* The image's flip, taken at once while ENABLE is off; its record clears first. */
+	/* The image's flip, taken at once while ENABLE is off. */
 	value = value_take(display);
-	*record_slot(device, 0U) = 0U;
-	dwords += ghci_cmd_flip(&packets[dwords],
-	    0U,
-	    image->base,
-	    GHCI_FLIP_VSYNC_WAIT | GHCI_FLIP_RECORD_ENABLE,
-	    value,
-	    record_address(device, 0U));
+	if (error == 0) {
+		written = flip_packet(device, &packets[dwords], image, -1, value);
+		if (written == 0U)
+			error = EINVAL;
+		dwords += written;
+	}
 
-	/* CTRL with ENABLE: the first frame starts at the next vsync. */
-	offsets[0] = GHCI_DC_CTRL;
-	values[0] = control | GHCI_DC_CTRL_ENABLE;
-	dwords += ghci_cmd_disp_set(&packets[dwords], 0U, 1U, offsets, values);
+	/* ENABLE, whose completion says whether the display took the mode. */
+	if (error == 0) {
+		comp_arm(device, COMP_LIGHT, 1, &comp);
+		written = ghci_cmd_disp_set(&packets[dwords], DISPLAY_INDEX, GHCI_DISP_SET_ENABLE, &comp);
+		if (written == 0U)
+			error = EINVAL;
+		dwords += written;
+	}
 
 	/* The cursor's surface that waited for the lighting, when plane 1 has no flip placed. */
 	cursor = 0;
 	cursor_value = 0U;
-	if (display->cursor_pending >= 0 && !display->flips[1].placed) {
+	if (error == 0 && display->cursor_pending >= 0 && !display->flips[1].placed) {
 		cursor = 1;
 		cursor_value = value_take(display);
-		*record_slot(device, 1U) = 0U;
-		dwords += ghci_cmd_flip(&packets[dwords],
-		    0U,
-		    (uint32_t)display->surfaces[display->cursor_pending]->bus,
-		    GHCI_FLIP_PLANE_CURSOR | GHCI_FLIP_RECORD_ENABLE,
-		    cursor_value,
-		    record_address(device, 1U));
+		written = flip_packet(device, &packets[dwords], NULL, display->cursor_pending, cursor_value);
+		if (written == 0U)
+			error = EINVAL;
+		dwords += written;
+	}
+
+	/* An image the encoders refused is not placed. */
+	if (error != 0) {
+		kern_logf("ghci: %s: display image not placed (base %llx, stride %u, format %u)\n",
+		    device->name,
+		    (unsigned long long)image->base,
+		    (unsigned)image->stride,
+		    (unsigned)image->format);
+		return error;
 	}
 
 	/* The run, with the driver's fence after it; nothing is recorded unless some of it was placed. */
-	error = ring_put(device, packets, dwords, &ticket, &placed);
+	error = ring_put(device, packets, dwords, &placed);
 	if (error != 0 && !placed)
 		return error;
 
-	/* The controller is lit on the image's mode, format and stride once the run is parsed. */
+	/* The display is lit on the image's mode, format and stride once the run is queued. */
 	display->enabled = 1;
 	display->mode = image->mode;
+	display->mode_set = image->mode;
 	display->format = image->format;
 	display->stride = image->stride;
 	display->flips[0].placed = 1;
@@ -1759,34 +2562,30 @@ light(
 	return 0;
 }
 
-/* Places one flip of plane 0 to an image of the mode lit, with the driver's fence. */
+/* Places one flip of plane 0 to an image of the mode lit (its format and rows may differ), with the driver's fence. */
 static int
 flip_primary(
 	struct ghci_device *device,
 	const struct ghci_display_image *image)
 {
 	struct ghci_display *display;
-	struct ghci_ticket ticket;
 	uint32_t packet[GHCI_DW_FLIP];
+	uint32_t dwords;
 	uint32_t value;
 	int placed;
 	int error;
 
-	/* The flip at the next vsync, whose record clears first. */
+	/* The flip at the next vertical sync. */
 	display = &device->display;
 	value = value_take(display);
-	*record_slot(device, 0U) = 0U;
-	(void)ghci_cmd_flip(packet,
-	    0U,
-	    image->base,
-	    GHCI_FLIP_VSYNC_WAIT | GHCI_FLIP_RECORD_ENABLE,
-	    value,
-	    record_address(device, 0U));
-	error = ring_put(device, packet, GHCI_DW_FLIP, &ticket, &placed);
+	dwords = flip_packet(device, packet, image, -1, value);
+	error = ring_put(device, packet, dwords, &placed);
 	if (error != 0 && !placed)
 		return error;
 
-	/* The plane's slot is the image's until its record comes. */
+	/* The plane's flip is the image's until its record comes; the format and rows are its. */
+	display->format = image->format;
+	display->stride = image->stride;
 	display->flips[0].placed = 1;
 	display->flips[0].value = value;
 	display->flips[0].light = 0;
@@ -1803,27 +2602,21 @@ flip_cursor(
 	int surface)
 {
 	struct ghci_display *display;
-	struct ghci_ticket ticket;
 	uint32_t packet[GHCI_DW_FLIP];
+	uint32_t dwords;
 	uint32_t value;
 	int placed;
 	int error;
 
-	/* The flip, whose record clears first. */
+	/* The flip at the next frame. */
 	display = &device->display;
 	value = value_take(display);
-	*record_slot(device, 1U) = 0U;
-	(void)ghci_cmd_flip(packet,
-	    0U,
-	    (uint32_t)display->surfaces[surface]->bus,
-	    GHCI_FLIP_PLANE_CURSOR | GHCI_FLIP_RECORD_ENABLE,
-	    value,
-	    record_address(device, 1U));
-	error = ring_put(device, packet, GHCI_DW_FLIP, &ticket, &placed);
+	dwords = flip_packet(device, packet, NULL, surface, value);
+	error = ring_put(device, packet, dwords, &placed);
 	if (error != 0 && !placed)
 		return error;
 
-	/* The cursor's slot is the surface's until its record comes. */
+	/* The cursor's flip is the surface's until its record comes. */
 	display->flips[1].placed = 1;
 	display->flips[1].value = value;
 	display->flips[1].light = 0;
@@ -1833,7 +2626,7 @@ flip_cursor(
 	return 0;
 }
 
-/* Places the cursor surface that waits, when the controller is lit and plane 1 has no flip placed. */
+/* Places the cursor surface that waits, when the display is lit and plane 1 has no flip placed. */
 static void
 cursor_kick(
 	struct ghci_device *device)
@@ -1842,9 +2635,9 @@ cursor_kick(
 	int usable;
 	int error;
 
-	/* Nothing waits, the controller is dark, the slot is in use, the lease is ending, or the ring does not run. */
+	/* Nothing waits, the display is dark, the plane's flip is in use, the lease is ending, or a reset is being settled. */
 	display = &device->display;
-	if (display->cursor_pending < 0 || !display->enabled || display->flips[1].placed || display->ending)
+	if (display->cursor_pending < 0 || !display->enabled || display->flips[1].placed || display->ending || display->resync != 0)
 		return;
 	usable = ghci_scan_ring_usable(device);
 	if (!usable)
@@ -1860,205 +2653,104 @@ cursor_kick(
 }
 
 /*
- * Turns the controller dark through the ring: CTRL off, the processor
- * waiting for the controller's idle, then the driver's fence.  A placement
- * a recovery refused is placed again by the service thread; on a lost
- * device the host turns the controller dark.
+ * Places the cursor's place and visibility that wait (DISP_SET_CURSOR,
+ * which a display without the cursor plane does not take); a refused one
+ * waits for the next look.
+ */
+static void
+cursor_state_kick(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	uint32_t packet[GHCI_DW_DISP_SET_CURSOR];
+	uint32_t dwords;
+	int usable;
+	int placed;
+	int error;
+
+	/* Nothing waits, no cursor plane, a reset is being settled, or the ring does not run. */
+	display = &device->display;
+	if (!display->cursor_due || !display->cursor || display->resync != 0)
+		return;
+	usable = ghci_scan_ring_usable(device);
+	if (!usable)
+		return;
+
+	/* The place and the visibility. */
+	dwords = ghci_cmd_disp_set_cursor(packet, DISPLAY_INDEX, display->cursor_x, display->cursor_y, (uint32_t)display->cursor_show);
+	error = ring_put(device, packet, dwords, &placed);
+	if (error != 0 && !placed)
+		return;
+
+	/* Succeeded: nothing waits. */
+	display->cursor_due = 0;
+}
+
+/*
+ * Turns the display dark through the ring: DISP_SET with ENABLE off,
+ * whose completion says the scan-out stopped (every pending flip is
+ * cancelled with it).  A placement a recovery refused is placed again by
+ * the service thread; when the ring does not run, nothing is turned.
+ *
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2,
+ * ENABLE 1 to 0 stops the scan-out at the frame's end and cancels the
+ * pending flips).
  */
 static void
 dark(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	uint32_t packets[DARK_DWORDS];
-	uint32_t offsets[1];
-	uint32_t values[1];
+	uint32_t packet[GHCI_DW_DISP_SET];
+	struct ghci_disp_comp comp;
 	uint32_t dwords;
 	int placed;
 	int usable;
 	int error;
 
-	/* A ring that does not run leaves the controller to the host. */
+	/* A ring that does not run turns nothing. */
 	display = &device->display;
 	usable = ghci_scan_ring_usable(device);
 	if (!usable) {
-		error = halt_for_host(device, 0);
-		dark_by_host(device, error == 0);
-		flips_forget(device);
+		host_cannot_turn(device);
 		display->dark_placed = 0;
 		return;
 	}
 
-	/* CTRL with ENABLE off and the wait for the idle; every pending flip is taken as cancelled. */
-	offsets[0] = GHCI_DC_CTRL;
-	values[0] = control_word(device, display->format);
-	dwords = ghci_cmd_disp_set(packets, 1U, 1U, offsets, values);
-	error = ring_put(device, packets, dwords, &display->dark_ticket, &placed);
-	if (error == EAGAIN) {
+	/* ENABLE off, with its completion. */
+	comp_arm(device, COMP_DARK, 1, &comp);
+	dwords = ghci_cmd_disp_set(packet, DISPLAY_INDEX, 0U, &comp);
+	error = ring_put(device, packet, dwords, &placed);
+	if (error == EAGAIN && !placed) {
 		/* A recovery runs: the service thread places it again once the recovery ends. */
 		display->dark_placed = -1;
 		return;
 	}
 
-	if (error != 0) {
-		/* A lost device: the host turns the controller dark. */
-		error = halt_for_host(device, 0);
-		dark_by_host(device, error == 0);
-		flips_forget(device);
+	if (error != 0 && !placed) {
+		/* A lost device turns nothing. */
+		host_cannot_turn(device);
 		display->dark_placed = 0;
 		return;
 	}
 
-	/* The controller is dark once the packet runs; its fence says when. */
+	/* The display is dark once the command runs; its completion says when. */
 	display->enabled = 0;
 	display->dark_placed = 1;
 }
 
 /*
- * Waits for the controller to be idle (ENABLE 0 and no read outstanding):
- * sleeping a bounded time, or counting reads (for a panic).  Returns 0 or
- * ETIMEDOUT.
- */
-static int
-wait_idle(
-	struct ghci_device *device,
-	int spin)
-{
-	uint32_t status;
-	unsigned reads;
-	int error;
-
-	/* Sleeping between reads. */
-	if (!spin) {
-		error = ghci_wait_register(device, device->display.registers + GHCI_DC_STATUS, GHCI_DC_ST_IDLE, GHCI_DC_ST_IDLE, DC_IDLE_MS);
-		return error;
-	}
-
-	/* Counting reads. */
-	for (reads = 0U; reads < PANIC_READS; reads++) {
-		status = ghci_read(device, device->display.registers + GHCI_DC_STATUS);
-		if ((status & GHCI_DC_ST_IDLE) != 0U)
-			return 0;
-	}
-
-	/* The controller never went idle. */
-	return ETIMEDOUT;
-}
-
-/*
- * Turns the controller dark by the host, which may write it only while
- * the command processor does not run, and waits until it reads no memory.
- * halted says the processor was seen to halt (or was reset); without it,
- * or when the controller does not go idle, what it scanned may still be
- * read, and is let go of through the quarantine (host_unsure).
+ * Records that the ring cannot turn the display: what it scans now and
+ * what the placed flips would have shown may still be read, and goes to
+ * the quarantine (host_unsure).
  */
 static void
-dark_by_host(
-	struct ghci_device *device,
-	int halted)
+host_cannot_turn(
+	struct ghci_device *device)
 {
-	struct ghci_display *display;
-	int error;
-
-	/* ENABLE off; the controller then finishes its reads. */
-	display = &device->display;
-	ghci_write(device, display->registers + GHCI_DC_CTRL, control_word(device, display->format));
-	error = wait_idle(device, 0);
-	if (error != 0)
-		kern_logf("ghci: %s: display controller not idle\n", device->name);
-	display->enabled = 0;
-
-	/* Whether the host saw everything stop. */
-	display->host_unsure = 0;
-	if (!halted || error != 0)
-		display->host_unsure = 1;
-}
-
-/*
- * Lights the controller on an image by the host, as the ring's run does:
- * CTRL off and the wait for the idle, the timing, the rows and size,
- * FB_NEXT (taken at once while ENABLE is 0) and CTRL with ENABLE.  The
- * command processor does not run.  spin counts reads instead of sleeping.
- */
-static void
-light_by_host(
-	struct ghci_device *device,
-	const struct ghci_display_image *image,
-	int spin)
-{
-	struct ghci_display *display;
-	uint32_t offsets[LIGHT_PAIRS];
-	uint32_t values[LIGHT_PAIRS];
-	uint32_t registers;
-	uint32_t control;
-	uint32_t pairs;
-	uint32_t index;
-	int error;
-
-	/* CTRL off, and the controller idle; one that is not may still read what it scanned. */
-	display = &device->display;
-	registers = display->registers;
-	control = control_word(device, image->format);
-	ghci_write(device, registers + GHCI_DC_CTRL, control);
-	error = wait_idle(device, spin);
-	if (error != 0) {
-		display->host_unsure = 1;
-		return;
-	}
-
-	/* The timing, the rows and the size. */
-	pairs = timing_pairs(&display->modes[image->mode], image, offsets, values);
-	for (index = 0U; index < pairs; index++)
-		ghci_write(device, registers + offsets[index], values[index]);
-
-	/* The image at once, then the scan-out. */
-	ghci_write(device, registers + GHCI_DC_FB_NEXT, image->base);
-	ghci_write(device, registers + GHCI_DC_CTRL, control | GHCI_DC_CTRL_ENABLE);
-	display->host_unsure = 0;
-	display->enabled = 1;
-	display->mode = image->mode;
-	display->format = image->format;
-	display->stride = image->stride;
-}
-
-/*
- * Halts a running command processor so that the host may write the
- * controller's scan-out registers; an idle, halted or faulted one takes
- * them as it is.  spin counts reads instead of sleeping.  Returns 0, or
- * ETIMEDOUT when the processor did not halt.
- */
-static int
-halt_for_host(
-	struct ghci_device *device,
-	int spin)
-{
-	uint32_t status;
-	uint32_t ctrl;
-	unsigned reads;
-	int error;
-
-	/* Only a running processor needs the halt. */
-	status = ghci_read(device, GHCI_REG_STATUS);
-	if ((status & GHCI_STATUS_RUNNING) == 0U || (status & (GHCI_STATUS_HALTED | GHCI_STATUS_FAULTED)) != 0U)
-		return 0;
-
-	/* HALT, then HALTED (or FAULTED, when the packet in flight faulted: the host may write then too). */
-	ctrl = ghci_read(device, GHCI_REG_CTRL);
-	ghci_write(device, GHCI_REG_CTRL, ctrl | GHCI_CTRL_HALT);
-	if (!spin) {
-		error = ghci_wait_halted(device);
-		return error;
-	}
-
-	/* Counting reads, for a panic. */
-	for (reads = 0U; reads < PANIC_READS; reads++) {
-		status = ghci_read(device, GHCI_REG_STATUS);
-		if ((status & (GHCI_STATUS_HALTED | GHCI_STATUS_FAULTED)) != 0U)
-			return 0;
-	}
-
-	/* The processor did not halt. */
-	return ETIMEDOUT;
+	/* Nothing seen to stop. */
+	device->display.host_unsure = 1;
+	flips_forget(device);
 }
 
 /* Forgets the flips placed whose records will not come: their images are let go of, not shown. */
@@ -2068,7 +2760,7 @@ flips_forget(
 {
 	struct ghci_display *display;
 
-	/* Plane 0's image goes (to the quarantine when the host did not see the controller stop); the cursor's surface is free again. */
+	/* Plane 0's image goes (to the quarantine when the display was not seen to stop); the cursor's surface is free again. */
 	display = &device->display;
 	if (display->flips[0].placed)
 		scan_release(device, display->flips[0].image.memory);
@@ -2077,432 +2769,361 @@ flips_forget(
 }
 
 /*
- * Begins the detach's turn of the display: the lease and the presents
- * waiting go, and the cursor is hidden.  The lock is held.
+ * Places the snapshot a reset asked for, and settles the display once it
+ * completes (the service thread's round, the lock held).
  */
 static void
-detach_begin(
+resync_serve(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	unsigned index;
+	uint32_t packet[GHCI_DW_DISP_QUERY_STATE];
+	struct ghci_disp_comp comp;
+	uint32_t dwords;
+	uint32_t status;
+	uint64_t value;
+	int usable;
+	int placed;
+	int state;
+	int error;
 
-	/* No lease, and nothing more placed for it. */
+	/* Nothing to settle. */
 	display = &device->display;
-	display->owner = NULL;
-	display->lease = 0U;
-	display->ending = 1;
+	if (display->resync == 0)
+		return;
 
-	/* The presents that waited are not shown. */
-	for (index = 0U; index < display->queue_count; index++)
-		ghci_scan_drop(device, display->queue[index].memory);
-	display->queue_count = 0U;
+	/* The snapshot, once the ring takes it. */
+	if (display->resync < 0) {
+		usable = ghci_scan_ring_usable(device);
+		if (!usable)
+			return;
+		comp_arm(device, COMP_STATE, 1, &comp);
+		dwords = ghci_cmd_disp_query_state(packet, DISPLAY_INDEX, page_bus(device, STATE_OFFSET), GHCI_DISP_STATE_BYTES, &comp);
+		error = ring_put(device, packet, dwords, &placed);
+		if (error != 0 && !placed)
+			return;
+		display->resync = 1;
+		return;
+	}
 
-	/*
-	 * No cursor; the host writes it in every state.  A dark packet an
-	 * ended lease placed (or one a recovery refused) stays: its ticket
-	 * comes before the image it turned off is let go of.
-	 */
-	ghci_write(device, display->registers + GHCI_DC_CURSOR_CTRL, 0U);
-	display->cursor_image = 0;
-	display->cursor_pending = -1;
+	/* Its completion; a cancelled one (another reset) is placed again. */
+	state = comp_state(device, COMP_STATE, &status, &value);
+	if (state == COMP_PENDING)
+		return;
+	if (state == COMP_CANCELLED) {
+		display->resync = -1;
+		return;
+	}
+
+	/* Succeeded: what the reset left is known. */
+	resync_end(device);
 }
 
 /*
- * Does one step of the detach's turn of the display, the lock held: once
- * the records of every flip placed before came and the dark packet of an
- * ended lease ran, the controller is turned (turned set) to the boot
- * image again while it is kept, or dark; a boot display still scanned,
- * or a dark controller without a boot image, needs nothing.  The image a
- * dark controller showed is let go of.  Returns 1 once the turn is done,
- * 0 while it waits.
+ * Settles the display with the snapshot placed after a reset: every
+ * display command placed before it has finished, so a flip whose record
+ * did not come was lost with the ring and is placed again (plane 0's
+ * image back at the head of the queue, the cursor's surface waiting),
+ * a dark command whose completion did not come is placed again, and the
+ * snapshot says whether the display is lit and which mode it holds.  A
+ * lighting cut after its flip was taken but before ENABLE leaves the
+ * image shown on a dark display, which scans nothing: the image goes
+ * back to the head of the queue and lights the display again.
+ *
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.2, a
+ * control command starts after every earlier display command finished,
+ * the records written included; GhciDisplayState's ENABLE and
+ * active_mode, unset as size 0).
  */
-static int
-detach_step(
-	struct ghci_device *device,
-	int *turned)
+static void
+resync_end(
+	struct ghci_device *device)
 {
 	struct ghci_display *display;
-	enum ghci_ticket_state state;
-	int error;
+	struct ghci_display_mode active;
+	struct ghci_display_flip *flip;
+	const uint8_t *state;
+	uint32_t status;
+	uint64_t value;
+	uint32_t flags;
+	unsigned plane;
+	int dark_state;
 
-	/* The records of the flips placed. */
+	/* The records that came; the flips without one were lost. */
 	display = &device->display;
 	records_take(device);
-	if (display->flips[0].placed || display->flips[1].placed)
-		return 0;
-
-	/* A dark packet a recovery refused is placed again. */
-	if (display->dark_placed < 0) {
-		dark(device);
-		return 0;
+	for (plane = 0U; plane < 2U; plane++) {
+		flip = &display->flips[plane];
+		if (!flip->placed)
+			continue;
+		flip->placed = 0;
+		if (plane == 0U)
+			queue_push_front(display, &flip->image);
+		else
+			display->cursor_pending = flip->surface;
 	}
 
-	/* The dark packet, whose fence passes once the controller is idle; a failed one is the host's. */
+	/* A dark command that did not run is placed again. */
 	if (display->dark_placed > 0) {
-		state = ghci_cp_ticket(device, &display->dark_ticket);
-		if (state != GHCI_TICKET_DONE)
-			return 0;
-		display->host_unsure = 0;
-		display->dark_placed = 0;
+		dark_state = comp_state(device, COMP_DARK, &status, &value);
+		if (dark_state != COMP_DONE)
+			display->dark_placed = -1;
 	}
 
-	/* A dark controller scans nothing: the image it showed goes. */
-	if (!display->enabled && display->shown.memory != NULL) {
-		scan_release(device, display->shown.memory);
+	/* Whether the display is lit, and the mode it holds. */
+	state = page_view(device, STATE_OFFSET);
+	flags = (uint32_t)state[GHCI_DISP_STATE_FLAGS] | ((uint32_t)state[GHCI_DISP_STATE_FLAGS + 1U] << 8);
+	display->enabled = 0;
+	if ((flags & GHCI_DISP_STATE_ENABLE) != 0U)
+		display->enabled = 1;
+	mode_read(state + GHCI_DISP_STATE_MODE, &active);
+	if (active.width == 0U || active.height == 0U)
+		display->mode_set = GHCI_DISPLAY_NO_MODE;
+	else if (display->mode_set != GHCI_DISPLAY_NO_MODE && !mode_same(&display->modes[display->mode_set], &active))
+		display->mode_set = GHCI_DISPLAY_NO_MODE;
+
+	/* A lighting cut before ENABLE: the image shown on the dark display lights it again. */
+	if (display->light_lost &&
+	    !display->enabled &&
+	    !display->ending &&
+	    display->shown.base == display->light_image.base &&
+	    display->shown.sequence == display->light_image.sequence &&
+	    display->shown.copy_frame == display->light_image.copy_frame) {
+		queue_push_front(display, &display->shown);
 		image_clear(&display->shown);
 	}
 
-	/* The turn, once. */
-	if (*turned)
-		return 1;
-	*turned = 1;
-	if (display->boot_scanning && display->enabled)
-		return 1;
-
-	/* The boot image again, while it is kept; a lighting the gate refused is tried at the next step. */
-	if (display->boot_kept) {
-		error = light(device, &display->boot);
-		if (error != 0)
-			*turned = 0;
-		return 0;
-	}
-
-	/* Dark, unless it is. */
-	if (display->enabled) {
-		dark(device);
-		return 0;
-	}
-
-	/* Succeeded: the controller is dark. */
-	return 1;
+	/* Settled. */
+	display->light_lost = 0;
+	display->resync = 0;
 }
 
 /*
- * Gives back the display's own memory at the detach: the frames' mappings
- * into session 0 first (each holds its frame until its unmap's fence),
- * then the frames, the cursor's surfaces and the idle frame.  The caller
- * holds no lock of the device.
+ * Keeps the event ring set up as the driver wants it: the connection
+ * when the display senses it, and the errors unless too many came this
+ * second.  The setup's completion is the ring's first sequence number;
+ * the records of the ring before it are read first (the service thread's
+ * round, the lock held).
  */
 static void
-buffers_give_back(
-	struct ghci_device *device)
-{
-	struct ghci_display *display;
-	unsigned index;
-
-	/* The mappings the blitter or the copy program copied through. */
-	display = &device->display;
-	for (index = 0U; index < 2U; index++) {
-		if (display->frame_maps[index] != NULL)
-			ghci_vm_unmap(device, display->frame_maps[index]);
-		display->frame_maps[index] = NULL;
-	}
-
-	/* The frames, the surfaces and the idle frame. */
-	for (index = 0U; index < 2U; index++) {
-		scan_give_back(device, display->frames[index]);
-		display->frames[index] = NULL;
-		scan_give_back(device, display->surfaces[index]);
-		display->surfaces[index] = NULL;
-	}
-
-	scan_give_back(device, display->idle_frame);
-	display->idle_frame = NULL;
-}
-
-/*
- * Counts the scan-out errors the controller reports and clears them: too
- * many in a second mask the error interrupt for the rest of it, a read
- * error in round after round turns the controller dark (the image it
- * scans is bad), and a refused register write is the driver's own error.
- */
-static void
-errors_serve(
+events_serve(
 	struct ghci_device *device)
 {
 	struct ghci_display *display;
 	uint32_t status;
-	uint32_t errors;
-	uint64_t period;
-	uint64_t now;
+	uint64_t first;
+	uint32_t want;
+	int changed;
+	int state;
 
-	/* A new second unmasks the interrupt and starts the count again. */
+	/* The events wanted. */
 	display = &device->display;
-	now = clock_ticks();
-	period = kern_ms_to_ticks(ERROR_PERIOD_MS);
-	if (now - display->error_tick >= period) {
-		display->error_tick = now;
-		display->error_count = 0U;
-		if (display->error_masked)
-			irq_mask_set(device, 0);
-	}
+	want = EVENTS_ERRORS;
+	if (display->error_masked)
+		want = 0U;
+	if (display->sense)
+		want |= GHCI_DISP_EVENT_MASK_HOTPLUG;
 
-	/* The sticky errors, cleared once read (the host clears them in every state). */
-	status = ghci_read(device, display->registers + GHCI_DC_STATUS);
-	errors = status & DC_ERRORS;
-	if (errors == 0U) {
-		display->read_errors = 0U;
-		return;
-	}
-
-	ghci_write(device, display->registers + GHCI_DC_STATUS, errors);
-
-	/* Too many errors this second: the interrupt stays off until the next. */
-	display->error_count++;
-	display->errors_total++;
-	if (display->error_count > ERROR_LIMIT && !display->error_masked)
-		irq_mask_set(device, 1);
-
-	/* An underflow means the memory did not keep up; it is counted only. */
-	if ((errors & GHCI_DC_ST_UNDERFLOW) != 0U)
-		display->underflows++;
-
-	/* A register write the controller refused is a fault of the driver. */
-	if ((errors & GHCI_DC_ST_BAD_WRITE) != 0U)
-		kern_logf("ghci: %s: display controller refused a register write\n", device->name);
-
-	/* A record the GPU could not write. */
-	if ((errors & GHCI_DC_ST_RECORD_ERROR) != 0U)
-		kern_logf("ghci: %s: a flip's record was not written\n", device->name);
-
-	/* A read error round after round: the image is bad, and the controller goes dark until the next present. */
-	if ((errors & GHCI_DC_ST_READ_ERROR) == 0U) {
-		display->read_errors = 0U;
-		return;
-	}
-
-	display->read_errors++;
-	if (display->read_errors < READ_ERROR_RUNS)
-		return;
-	if (!display->enabled || display->flips[0].placed || display->ending)
-		return;
-	kern_logf("ghci: %s: display reads fail; turning it off\n", device->name);
-	display->read_errors = 0U;
-	dark(device);
-	display->dark_placed = 0;
-}
-
-/* Masks or unmasks the scan-out error event in DISP_IRQ_ENABLE, which the host writes in every state. */
-static void
-irq_mask_set(
-	struct ghci_device *device,
-	int masked)
-{
-	struct ghci_display *display;
-
-	/* The events taken, with or without the errors. */
-	display = &device->display;
-	if (masked)
-		display->irq_enable &= ~GHCI_DC_IRQ_ERROR;
-	else
-		display->irq_enable |= GHCI_DC_IRQ_ERROR;
-	ghci_write(device, display->registers + GHCI_DC_IRQ_ENABLE, display->irq_enable);
-
-	/* The display remembers which way it is. */
-	display->error_masked = masked;
-}
-
-/*
- * Watches the connection: the transmitter's hot-plug line is read once a
- * second and told to the controller (CONNECTED), whose change raises
- * HOTPLUG; a change of CONNECTED changes the output's connection, and a
- * new connection is a new generation with the transmitter set up again.
- * Returns 1 when the output changed.
- */
-static int
-connection_serve(
-	struct ghci_device *device)
-{
-	struct ghci_display *display;
-	uint64_t period;
-	uint64_t now;
-	uint32_t connected_word;
-	int sensed;
-	int connected;
-	int error;
-
-	/* The transmitter's line, once a second, when the controller does not sense the sink itself. */
-	display = &device->display;
-	now = clock_ticks();
-	period = kern_ms_to_ticks(HOTPLUG_PERIOD_MS);
-	if ((display->controller_caps & GHCI_DC_CAPS_TRANSMITTER) != 0U &&
-	    (display->controller_caps & GHCI_DC_CAPS_SENSE) == 0U &&
-	    now - display->hotplug_tick >= period) {
-		display->hotplug_tick = now;
-		error = ghci_adv7511_sensed(device, display->registers, &sensed);
-		connected_word = ghci_read(device, display->registers + GHCI_DC_CONNECTED) & 1U;
-		if (error == 0 && connected_word != (uint32_t)sensed)
-			ghci_write(device, display->registers + GHCI_DC_CONNECTED, (uint32_t)sensed);
-	}
-
-	/* What the controller says now. */
-	connected_word = ghci_read(device, display->registers + GHCI_DC_CONNECTED);
-	connected = 0;
-	if ((connected_word & 1U) != 0U)
-		connected = 1;
-	if (connected == display->connected)
-		return 0;
-
-	/* A new connection is a new generation of the output, whose transmitter is set up again. */
-	display->connected = connected;
-	if (connected) {
-		display->generation++;
-		if ((display->controller_caps & GHCI_DC_CAPS_TRANSMITTER) != 0U) {
-			error = ghci_adv7511_start(device, display->registers);
-			if (error != 0)
-				kern_logf("ghci: %s: HDMI transmitter not set up again (%d)\n", device->name, error);
+	/* A setup placed: its completion, after the records of the ring before it. */
+	if (display->events_state == EVENTS_PLACED) {
+		state = comp_state(device, COMP_EVENTS, &status, &first);
+		if (state == COMP_PENDING)
+			return;
+		if (state == COMP_CANCELLED) {
+			display->events_state = EVENTS_OFF;
+			return;
 		}
+		changed = 0;
+		(void)events_take(device, &changed);
+		if (changed)
+			topology_move(device);
+		display->events_state = EVENTS_RUNNING;
+		display->events_first = first;
+		display->events_next = first;
 	}
 
-	/* The output's topology changed. */
-	kern_logf("ghci: %s: display %s\n", device->name, connected ? "connected" : "disconnected");
-	topology_move(device);
+	/* A ring that runs as wanted. */
+	if (display->events_state == EVENTS_RUNNING && display->events_mask == want)
+		return;
 
-	/* Succeeded: the output changed. */
-	return 1;
+	/* A new setup. */
+	events_setup(device, want);
 }
 
-/* Moves the output's event sequence, which the events operation reads under the interrupt's lock. */
+/* Places a setup of the event ring taking the events of mask; a refused one is placed at the next round. */
 static void
-topology_move(
-	struct ghci_device *device)
-{
-	unsigned long irq;
-
-	/* The sequence only grows; a reader sees the change at its next look. */
-	irq = spin_lock_irqsave(&device->irq_lock);
-
-	device->display.topology++;
-
-	spin_unlock_irqrestore(&device->irq_lock, irq);
-}
-
-/* Reports the mode the idle frame is scanned out in: 1280 x 720 when the controller has it, else its largest. */
-static unsigned
-idle_mode(
-	const struct ghci_display *display)
-{
-	unsigned index;
-
-	/* The HDMI mode every monitor takes. */
-	for (index = 0U; index < display->mode_count; index++) {
-		if (display->modes[index].width == 1280U && display->modes[index].height == 720U)
-			return index;
-	}
-
-	/* Otherwise the largest. */
-	index = ghci_scan_largest_mode(display);
-	return index;
-}
-
-/*
- * Lights the controller on the driver's idle frame once a sink is
- * connected and no lease holds the display, once for each generation of
- * the output (a connection): a lease that ends leaves it dark, and a boot
- * display keeps its image.  The lock is held.
- */
-static void
-idle_serve(
-	struct ghci_device *device)
+events_setup(
+	struct ghci_device *device,
+	uint32_t mask)
 {
 	struct ghci_display *display;
-	struct ghci_display_image image;
-	unsigned mode;
+	uint32_t packet[GHCI_DW_DISP_EVENT_SETUP];
+	struct ghci_disp_comp comp;
+	uint32_t dwords;
 	int usable;
+	int placed;
 	int error;
 
-	/* A connected sink, no lease, nothing lit, an idle frame, not yet for this connection. */
+	/* The ring must take it. */
 	display = &device->display;
-	if (!display->connected || display->owner != NULL || display->ending || display->enabled)
-		return;
-	if (display->idle_frame == NULL || display->idle_generation == display->generation)
-		return;
-
-	/* The ring must take the controller's packets. */
 	usable = ghci_scan_ring_usable(device);
 	if (!usable)
 		return;
 
-	/* The idle frame in its mode, rows on the memory line, the controller's own format; the driver's frame is not held. */
-	mode = idle_mode(display);
-	image_clear(&image);
-	image.base = (uint32_t)display->idle_frame->bus;
-	image.stride = ghci_scan_stride(display->modes[mode].width);
-	image.format = GHCI_DC_FMT_BGRA8;
-	image.mode = mode;
-
-	/* Lit once for this connection; a lighting a recovery refused is tried at the next round. */
-	error = light(device, &image);
-	if (error != 0)
+	/* The setup, its completion with an interrupt. */
+	comp_arm(device, COMP_EVENTS, 1, &comp);
+	dwords = ghci_cmd_disp_event_setup(packet, DISPLAY_INDEX, page_bus(device, EVENTS_OFFSET), EVENTS_CAPACITY, mask, &comp);
+	error = ring_put(device, packet, dwords, &placed);
+	if (error != 0 && !placed)
 		return;
-	display->idle_generation = display->generation;
+
+	/* Succeeded: the setup waits for its completion. */
+	display->events_state = EVENTS_PLACED;
+	display->events_mask = mask;
 }
 
 /*
- * Takes the idle frame (one any mode fits in), black: host memory below the
- * GPU's limit, which comes cleared and which the controller scans on a
- * discrete GPU as well, so that it needs neither local memory nor the
- * window before the ring runs.  Returns 0, or ENOMEM.
+ * Reads the records of the event ring from the next sequence number on,
+ * until one is not written yet: a record further on than the next says
+ * that the ring went round and the events between were lost.  changed is
+ * set when the output's connection changed.  Returns the records read.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3, the
+ * record of sequence seq at slot (seq - setup_next_seq) % capacity;
+ * section 13.2, GhciDisplayEventRecord, a ring gone round seen by its
+ * sequence numbers).
  */
 static int
-idle_frame_take(
-	struct ghci_device *device)
+events_take(
+	struct ghci_device *device,
+	int *changed)
 {
 	struct ghci_display *display;
-	struct ghci_allocation *frame;
-	uint64_t bytes;
+	const uint8_t *record;
+	uint64_t slot;
+	uint64_t seq;
+	uint32_t type;
+	uint32_t payload;
+	int count;
+
+	/* A ring that runs, or whose new setup is placed. */
+	display = &device->display;
+	if (display->events_state == EVENTS_OFF)
+		return 0;
+
+	/* Each record written, in order, at most a ring of them. */
+	for (count = 0; count < (int)EVENTS_CAPACITY; count++) {
+		slot = (display->events_next - display->events_first) % EVENTS_CAPACITY;
+		record = page_view(device, EVENTS_OFFSET + GHCI_DISP_EVENT_RECORD_BYTES * (uint32_t)slot);
+		seq = page_read64(device, EVENTS_OFFSET + GHCI_DISP_EVENT_RECORD_BYTES * (uint32_t)slot);
+		if (seq == 0U || seq < display->events_next)
+			break;
+
+		/* The ring went round: the events between are lost. */
+		if (seq > display->events_next) {
+			kern_logf("ghci: %s: %llu display events lost\n", device->name, (unsigned long long)(seq - display->events_next));
+			display->events_next = seq;
+		}
+
+		/* The event. */
+		type = load32(record, GHCI_DISP_EVENT_TYPE);
+		payload = load32(record, GHCI_DISP_EVENT_PAYLOAD);
+		event_handle(device, type, payload, changed);
+		display->events_next++;
+	}
+
+	/* Succeeded: the records read. */
+	return count;
+}
+
+/*
+ * Takes one display event: a sink's connection or disconnection (a new
+ * connection is a new generation of the output), an underflow, or an
+ * error (a scan-out read that failed, a record or a completion that
+ * could not be written).
+ */
+static void
+event_handle(
+	struct ghci_device *device,
+	uint32_t type,
+	uint32_t payload,
+	int *changed)
+{
+	struct ghci_display *display;
+	int connected;
+
+	/* Picks the event's kind. */
+	display = &device->display;
+	switch (type) {
+	case GHCI_DISP_EVENT_HOTPLUG:
+		/* The connection, when it changed. */
+		connected = 0;
+		if ((payload & 1U) != 0U)
+			connected = 1;
+		if (connected == display->connected)
+			break;
+		display->connected = connected;
+		if (connected)
+			display->generation++;
+		kern_logf("ghci: %s: display %s\n", device->name, connected ? "connected" : "disconnected");
+		topology_move(device);
+		*changed = 1;
+		break;
+	case GHCI_DISP_EVENT_UNDERFLOW:
+		/* The memory did not keep up; it is counted only. */
+		display->underflows++;
+		display->error_count++;
+		display->errors_total++;
+		break;
+	case GHCI_DISP_EVENT_ERROR:
+		/* A read that failed counts toward turning the display dark; the others are logged. */
+		display->error_count++;
+		display->errors_total++;
+		if (payload == GHCI_DISP_ERROR_SCANOUT_READ)
+			display->read_errors++;
+		else if (payload == GHCI_DISP_ERROR_RECORD_WRITE)
+			kern_logf("ghci: %s: a flip's record was not written\n", device->name);
+		else if (payload == GHCI_DISP_ERROR_COMP_WRITE)
+			kern_logf("ghci: %s: a display command's completion was not written\n", device->name);
+		break;
+	default:
+		/* A vertical sync, or an event the driver does not know. */
+		break;
+	}
+}
+
+/*
+ * Stops the event ring and waits for it, so that nothing writes the page
+ * once it goes.  The caller holds no lock of the device.  Returns 0, or
+ * the error of the command (the page may then still be written).
+ */
+static int
+events_stop(
+	struct ghci_device *device)
+{
+	uint32_t packet[GHCI_DW_DISP_EVENT_SETUP];
+	struct ghci_disp_comp comp;
+	uint32_t status;
+	uint64_t value;
+	uint32_t dwords;
 	int error;
 
-	/* A frame any mode fits in, rows on the memory line. */
-	display = &device->display;
-	bytes = ghci_scan_frame_bytes(display);
-	error = ghci_memory_alloc(device, bytes, 0U, &frame);
+	/* The setup without a ring, its completion waited for. */
+	comp_arm(device, COMP_EVENTS, 0, &comp);
+	dwords = ghci_cmd_disp_event_setup(packet, DISPLAY_INDEX, 0U, 0U, 0U, &comp);
+	error = command_run(device, packet, dwords, COMP_EVENTS, &status, &value);
 	if (error != 0)
 		return error;
 
-	/* The display holds it, and the GPU will be given its address. */
-	mutex_lock(&device->lock);
-
-	ghci_memory_hold(frame);
-	frame->reached = 1;
-
-	mutex_unlock(&device->lock);
-
-	/* An address past 32 bits cannot be scanned. */
-	if (frame->bus + frame->bytes > SCAN_LIMIT) {
-		scan_give_back(device, frame);
-		return ENOMEM;
-	}
-
-	/* Succeeded: the idle frame is the display's. */
-	display->idle_frame = frame;
+	/* Succeeded: the ring is off. */
+	device->display.events_state = EVENTS_OFF;
 	return 0;
 }
 
-/* Lets go of the display's hold on memory of its own; NULL is nothing. */
-static void
-scan_give_back(
-	struct ghci_device *device,
-	struct ghci_allocation *memory)
-{
-	/* Nothing to give. */
-	if (memory == NULL)
-		return;
-
-	/* The hold goes under the device's lock; the memory goes back once nothing else holds it. */
-	mutex_lock(&device->lock);
-
-	ghci_memory_unhold(device, memory);
-
-	mutex_unlock(&device->lock);
-}
-
 /*
- * Lets go of memory the controller scanned: at the next flush when the
+ * Lets go of memory the display scanned: at the next flush when the
  * driver saw it stop reading it, through the quarantine otherwise (the
- * host turned the controller without seeing the processor halt or the
- * controller go idle).  The lock is held.
+ * ring could not turn the display).  The lock is held.
  */
 static void
 scan_release(
@@ -2540,8 +3161,9 @@ scan_release(
  * the ring's room, which only its hang check ends) and leaves the boot
  * image for a later flush; what it cannot take now waits.
  *
- * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
- * 13.3, the boot framebuffer released once the first flip is taken).
+ * Procedure referenced: lumiere-gpu 875e54b3 ghci.md (section 13.3, the
+ * boot framebuffer reclaimed after the takeover, once no console writes
+ * remain).
  */
 static void
 scan_flush(
@@ -2582,6 +3204,7 @@ scan_flush(
 	for (index = 0U; index < unsure_count; index++)
 		unsure[index] = display->unsure[index];
 	display->unsure_count = 0U;
+
 	/* The boot image goes back unless a flip of it was placed again meanwhile (its next own image retries). */
 	release = 0;
 	if (display->boot_release && !service) {
@@ -2607,7 +3230,7 @@ scan_flush(
 	for (index = 0U; index < count; index++)
 		ghci_memory_unhold(device, drops[index]);
 
-	/* Memory the controller may still read is marked first, so that its last owner puts it in the quarantine. */
+	/* Memory the display may still read is marked first, so that its last owner puts it in the quarantine. */
 	for (index = 0U; index < unsure_count; index++) {
 		unsure[index]->scan_unsure = 1;
 		ghci_memory_unhold(device, unsure[index]);
@@ -2695,7 +3318,7 @@ boot_image(
 	const struct ghci_display_image *image)
 {
 	/* Memory of the driver's own, not a copied frame, at the boot base. */
-	if (image->memory == NULL && image->copy_frame < 0 && image->base == display->boot.base)
+	if (image->memory == NULL && image->copy_frame < 0 && display->boot.base != 0U && image->base == display->boot.base)
 		return 1;
 
 	/* Any other image. */
@@ -2710,7 +3333,7 @@ static int
 boot_in_use(
 	const struct ghci_display *display)
 {
-	/* The controller still scans it. */
+	/* The display still scans it. */
 	if (display->boot_scanning)
 		return 1;
 
@@ -2720,4 +3343,374 @@ boot_in_use(
 
 	/* Nothing reads it. */
 	return 0;
+}
+
+/*
+ * Begins the detach's turn of the display: the lease and the presents
+ * waiting go, and the cursor is hidden.  The lock is held.
+ */
+static void
+detach_begin(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	unsigned index;
+
+	/* No lease, and nothing more placed for it. */
+	display = &device->display;
+	display->owner = NULL;
+	display->lease = 0U;
+	display->ending = 1;
+
+	/* The presents that waited are not shown. */
+	for (index = 0U; index < display->queue_count; index++)
+		ghci_scan_drop(device, display->queue[index].memory);
+	display->queue_count = 0U;
+
+	/*
+	 * No cursor.  A dark command an ended lease placed (or one a
+	 * recovery refused) stays: its completion comes before the image it
+	 * turned off is let go of.
+	 */
+	display->cursor_image = 0;
+	display->cursor_pending = -1;
+	ghci_scan_cursor_state(device, display->cursor_x, display->cursor_y, 0);
+}
+
+/*
+ * Does one step of the detach's turn of the display, the lock held: once
+ * the records of every flip placed before came and the dark command of an
+ * ended lease ran, the display is turned (turned set) to the boot image
+ * again while it is kept, or dark; a boot display still scanned, or a
+ * dark display without a boot image, needs nothing.  The image a dark
+ * display showed is let go of.  Returns 1 once the turn is done, 0 while
+ * it waits.
+ */
+static int
+detach_step(
+	struct ghci_device *device,
+	int *turned)
+{
+	struct ghci_display *display;
+	uint32_t status;
+	uint64_t value;
+	int state;
+	int error;
+
+	/* The records of the flips placed, and a lighting's completion. */
+	display = &device->display;
+	records_take(device);
+	light_check(device);
+	if (display->flips[0].placed || display->flips[1].placed)
+		return 0;
+
+	/* A dark command a recovery refused is placed again. */
+	if (display->dark_placed < 0) {
+		dark(device);
+		return 0;
+	}
+
+	/* The dark command's completion: the display no longer scans; a cancelled one is placed again. */
+	if (display->dark_placed > 0) {
+		state = comp_state(device, COMP_DARK, &status, &value);
+		if (state == COMP_PENDING)
+			return 0;
+		if (state == COMP_CANCELLED) {
+			display->dark_placed = -1;
+			return 0;
+		}
+		display->host_unsure = 0;
+		display->dark_placed = 0;
+	}
+
+	/* A dark display scans nothing: the image it showed goes. */
+	if (!display->enabled && display->shown.memory != NULL) {
+		scan_release(device, display->shown.memory);
+		image_clear(&display->shown);
+	}
+
+	/* The turn, once. */
+	if (*turned)
+		return 1;
+	*turned = 1;
+	if (display->boot_scanning && display->enabled)
+		return 1;
+
+	/* The boot image again, while it is kept; a lighting the gate refused is tried at the next step. */
+	if (display->boot_kept && display->boot.base != 0U) {
+		error = light(device, &display->boot);
+		if (error != 0)
+			*turned = 0;
+		return 0;
+	}
+
+	/* Dark, unless it is. */
+	if (display->enabled) {
+		dark(device);
+		return 0;
+	}
+
+	/* Succeeded: the display is dark. */
+	return 1;
+}
+
+/*
+ * Gives back the display's own memory at the detach: the frames' mappings
+ * into session 0 first (each holds its frame until its unmap's fence),
+ * then the frames, the cursor's surfaces, the idle frame and the page
+ * (to the quarantine when the display may still read or write them).  The
+ * caller holds no lock of the device.
+ */
+static void
+buffers_give_back(
+	struct ghci_device *device,
+	int unsure)
+{
+	struct ghci_display *display;
+	unsigned index;
+
+	/* The mappings the blitter or the copy program copied through. */
+	display = &device->display;
+	for (index = 0U; index < 2U; index++) {
+		if (display->frame_maps[index] != NULL)
+			ghci_vm_unmap(device, display->frame_maps[index]);
+		display->frame_maps[index] = NULL;
+	}
+
+	/* The frames, the surfaces, the idle frame and the page. */
+	for (index = 0U; index < 2U; index++) {
+		scan_give_back(device, display->frames[index], unsure);
+		display->frames[index] = NULL;
+		scan_give_back(device, display->surfaces[index], unsure);
+		display->surfaces[index] = NULL;
+	}
+
+	scan_give_back(device, display->idle_frame, unsure);
+	display->idle_frame = NULL;
+	scan_give_back(device, display->page, unsure);
+	display->page = NULL;
+}
+
+/*
+ * Counts the scan-out errors of this second: too many leave the error
+ * events out of the event ring until the next second (events_serve()
+ * sets it up), and a failed read in round after round turns the display
+ * dark (the image it scans is bad).
+ */
+static void
+errors_serve(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	uint64_t period;
+	uint64_t now;
+
+	/* A new second takes the errors again and starts the count again. */
+	display = &device->display;
+	now = clock_ticks();
+	period = kern_ms_to_ticks(ERROR_PERIOD_MS);
+	if (now - display->error_tick >= period) {
+		display->error_tick = now;
+		display->error_count = 0U;
+		display->error_masked = 0;
+	}
+
+	/* Too many errors this second: the ring leaves them out until the next. */
+	if (display->error_count > ERROR_LIMIT && !display->error_masked)
+		display->error_masked = 1;
+
+	/* A round without a failed read ends the run of them. */
+	if (display->read_errors == 0U) {
+		display->read_error_runs = 0U;
+		return;
+	}
+
+	/* A failed read round after round: the image is bad, and the display goes dark until the next present. */
+	display->read_errors = 0U;
+	display->read_error_runs++;
+	if (display->read_error_runs < READ_ERROR_RUNS)
+		return;
+	if (!display->enabled || display->flips[0].placed || display->ending)
+		return;
+	kern_logf("ghci: %s: display reads fail; turning it off\n", device->name);
+	display->read_error_runs = 0U;
+	dark(device);
+	display->dark_placed = 0;
+}
+
+/* Moves the output's event sequence, which the events operation reads under the interrupt's lock. */
+static void
+topology_move(
+	struct ghci_device *device)
+{
+	unsigned long irq;
+
+	/* The sequence only grows; a reader sees the change at its next look. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	device->display.topology++;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+}
+
+/* Reports the mode the idle frame is scanned out in: 1280 x 720 when the display has it, else its largest. */
+static unsigned
+idle_mode(
+	const struct ghci_display *display)
+{
+	unsigned index;
+
+	/* The HDMI mode every monitor takes. */
+	for (index = 0U; index < display->mode_count; index++) {
+		if (display->modes[index].width == 1280U && display->modes[index].height == 720U)
+			return index;
+	}
+
+	/* Otherwise the largest. */
+	index = ghci_scan_largest_mode(display);
+	return index;
+}
+
+/*
+ * Lights the display on the driver's idle frame once a sink is connected
+ * and no lease holds the display, once for each generation of the output
+ * (a connection): a lease that ends leaves it dark, and a boot display
+ * keeps its image.  The lock is held.
+ */
+static void
+idle_serve(
+	struct ghci_device *device)
+{
+	struct ghci_display *display;
+	struct ghci_display_image image;
+	unsigned mode;
+	int usable;
+	int error;
+
+	/* A connected sink, no lease, nothing lit, an idle frame, not yet for this connection, nothing to settle. */
+	display = &device->display;
+	if (!display->connected || display->owner != NULL || display->ending || display->enabled || display->resync != 0)
+		return;
+	if (display->idle_frame == NULL || display->idle_generation == display->generation)
+		return;
+
+	/* The ring must take the display's commands. */
+	usable = ghci_scan_ring_usable(device);
+	if (!usable)
+		return;
+
+	/* The idle frame in its mode, rows on the line, blue first; the driver's frame is not held. */
+	mode = idle_mode(display);
+	image_clear(&image);
+	image.base = display->idle_frame->bus;
+	image.stride = ghci_scan_stride(display->modes[mode].width);
+	image.format = GHCI_FORMAT_B8G8R8A8_UNORM;
+	image.mode = mode;
+
+	/* Lit once for this connection; a lighting a recovery refused is tried at the next round. */
+	error = light(device, &image);
+	if (error != 0)
+		return;
+	display->idle_generation = display->generation;
+}
+
+/*
+ * Takes the idle frame (one any mode fits in), black: host memory below the
+ * GPU's limit, which comes cleared and which the display scans on a
+ * discrete GPU as well, so that it needs neither local memory nor the
+ * window.  Returns 0, or ENOMEM.
+ */
+static int
+idle_frame_take(
+	struct ghci_device *device)
+{
+	struct ghci_allocation *frame;
+	uint64_t bytes;
+	int error;
+
+	/* A frame any mode fits in, rows on the line. */
+	bytes = ghci_scan_frame_bytes(&device->display);
+	error = ghci_scan_alloc(device, bytes, 0, &frame);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the idle frame is the display's. */
+	device->display.idle_frame = frame;
+	return 0;
+}
+
+/*
+ * Lets go of the display's hold on memory of its own; NULL is nothing.
+ * unsure marks it first so that it goes to the quarantine, as the
+ * display may still read or write it.
+ */
+static void
+scan_give_back(
+	struct ghci_device *device,
+	struct ghci_allocation *memory,
+	int unsure)
+{
+	/* Nothing to give. */
+	if (memory == NULL)
+		return;
+
+	/* The hold goes under the device's lock; the memory goes back once nothing else holds it. */
+	mutex_lock(&device->lock);
+
+	if (unsure)
+		memory->scan_unsure = 1;
+	ghci_memory_unhold(device, memory);
+
+	mutex_unlock(&device->lock);
+}
+
+/* Reads a little-endian 16-bit field of a record in memory. */
+static uint32_t
+load16(
+	const uint8_t *bytes,
+	uint32_t offset)
+{
+	return (uint32_t)bytes[offset] | ((uint32_t)bytes[offset + 1U] << 8);
+}
+
+/* Reads a little-endian 32-bit field of a record in memory. */
+static uint32_t
+load32(
+	const uint8_t *bytes,
+	uint32_t offset)
+{
+	uint32_t value;
+
+	/* The four bytes, the lowest first. */
+	value = (uint32_t)bytes[offset];
+	value |= (uint32_t)bytes[offset + 1U] << 8;
+	value |= (uint32_t)bytes[offset + 2U] << 16;
+	value |= (uint32_t)bytes[offset + 3U] << 24;
+
+	/* Succeeded: the field. */
+	return value;
+}
+
+/* Writes a little-endian 16-bit field of a record in memory. */
+static void
+store16(
+	uint8_t *bytes,
+	uint32_t offset,
+	uint32_t value)
+{
+	bytes[offset] = (uint8_t)value;
+	bytes[offset + 1U] = (uint8_t)(value >> 8);
+}
+
+/* Writes a little-endian 32-bit field of a record in memory. */
+static void
+store32(
+	uint8_t *bytes,
+	uint32_t offset,
+	uint32_t value)
+{
+	bytes[offset] = (uint8_t)value;
+	bytes[offset + 1U] = (uint8_t)(value >> 8);
+	bytes[offset + 2U] = (uint8_t)(value >> 16);
+	bytes[offset + 3U] = (uint8_t)(value >> 24);
 }

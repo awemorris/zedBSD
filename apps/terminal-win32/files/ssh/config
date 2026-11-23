@@ -1,0 +1,43 @@
+# The hosts mikuterm connects to, in OpenSSH's ssh_config form.
+# ~/.ssh/ is this folder's ssh/ (keys, known_hosts); a path without a folder
+# is in ssh/ too.  Match, Include and ProxyJump are not supported.
+#
+# A host:
+#
+#Host server
+#	HostName server.example.org
+#	User me
+#	IdentityFile ~/.ssh/id_ed25519
+#	# Remote X programs as windows here (the host's sshd needs
+#	# X11Forwarding yes and xauth):
+#	ForwardX11 yes
+#
+# A remote desktop: the host's X programs drawn in one window of a size,
+# the whole X screen (start a window manager or a desktop session there):
+#
+#Host desktop
+#	HostName desktop.example.org
+#	ForwardX11 yes
+#	X11RootWindow 1920x1080
+#
+# The host's X programs' main windows as tabs of mikuterm's window, beside
+# the tab of the connection (dialogs and menus stay windows of their own):
+#
+#Host tabs
+#	HostName server.example.org
+#	ForwardX11 yes
+#	X11WindowTabify yes
+#
+# X11RootWindow and X11WindowTabify are mikuterm's own; for a file OpenSSH
+# reads too, put "IgnoreUnknown X11RootWindow,X11WindowTabify" before the
+# first Host line.
+#
+# WSL: [w] on a new tab's screen connects to a distribution's own sshd
+# (port 22) without anything here.  A Host named wsl-<name> changes how one
+# distribution is reached, for example when its sshd listens on another
+# port (WSL's mirrored networking with Windows' own sshd on 22).  Without a
+# HostName, mikuterm finds the distribution's address each time:
+#
+#Host wsl-Ubuntu-24.04
+#	Port 2222
+#	User me

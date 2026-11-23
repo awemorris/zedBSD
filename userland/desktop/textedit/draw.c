@@ -46,12 +46,37 @@
 /* How long the cursor shows and hides, in milliseconds (as the editor's). */
 #define DRAW_BLINK_MS		530U
 
-/* The status chip's text size. */
-#define DRAW_SMALL_PIXELS	12U
+/* The status chip's text size (units). */
+#define DRAW_SMALL_PIXELS	12
 
-/* The scroll bar's width and shortest thumb. */
+/* The scroll bar's width, shortest thumb and distance from the card's edge (units). */
 #define DRAW_SCROLL_WIDTH	4
 #define DRAW_SCROLL_MIN		24
+#define DRAW_SCROLL_EDGE	6
+
+/* The status chip's height, the room around its words, and its distance from the card's corner (units). */
+#define DRAW_CHIP_HEIGHT	24
+#define DRAW_CHIP_ROOM		10
+#define DRAW_CHIP_RIGHT		14
+#define DRAW_CHIP_BOTTOM	12
+
+/* The width of the hairline around a chip (units). */
+#define DRAW_CHIP_LINE		1
+
+/* The cursor's width, the room it keeps from the row's top and bottom, and the room drawn past the text for it (units). */
+#define DRAW_CURSOR_WIDTH	2
+#define DRAW_CURSOR_ROOM	1
+#define DRAW_CURSOR_REACH	2
+
+/* The room drawn past the text for the drop's caret, and its glow on each side (units). */
+#define DRAW_DROP_REACH		4
+#define DRAW_DROP_GLOW		3
+
+/* The composed text's lines under it: the segment's (thick) and the rest's (thin), and how far above the row's bottom (units). */
+#define DRAW_PREEDIT_FOCUS_THICK	2
+#define DRAW_PREEDIT_FOCUS_ABOVE	3
+#define DRAW_PREEDIT_THICK		1
+#define DRAW_PREEDIT_ABOVE		2
 
 static void draw_rows(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text);
 static void draw_row(struct te_app *app, struct te_canvas *canvas, const struct te_rect *text, size_t row, int top, size_t start, size_t end);
@@ -92,7 +117,7 @@ te_draw(
 	fill = DRAW_CARD_OPAQUE;
 	if (app->glass)
 		fill = DRAW_CARD;
-	te_canvas_round(canvas, card.x, card.y, card.width, card.height, TE_CARD_RADIUS, fill);
+	te_canvas_round(canvas, card.x, card.y, card.width, card.height, te_app_px(app, TE_CARD_RADIUS), fill);
 
 	/* The text, its line numbers and its cursor, within the card's text area. */
 	te_app_text_rect(app, &text);
@@ -374,11 +399,11 @@ draw_preedit(
 		if (focused) {
 			/* The segment: the selection's tint and a line two pixels thick. */
 			te_canvas_fill(canvas, x, top, (int)cells * app->cell, app->row_height, DRAW_PREEDIT_FOCUS);
-			te_canvas_fill(canvas, x, top + app->row_height - 3, (int)cells * app->cell, 2, DRAW_PREEDIT_FOCUS_LINE);
+			te_canvas_fill(canvas, x, top + app->row_height - te_app_px(app, DRAW_PREEDIT_FOCUS_ABOVE), (int)cells * app->cell, te_app_px(app, DRAW_PREEDIT_FOCUS_THICK), DRAW_PREEDIT_FOCUS_LINE);
 		} else {
 			/* The rest: the row's ground and a thin line. */
 			te_canvas_fill(canvas, x, top, (int)cells * app->cell, app->row_height, DRAW_ROW_NOW);
-			te_canvas_fill(canvas, x, top + app->row_height - 2, (int)cells * app->cell, 1, DRAW_PREEDIT_LINE);
+			te_canvas_fill(canvas, x, top + app->row_height - te_app_px(app, DRAW_PREEDIT_ABOVE), (int)cells * app->cell, te_app_px(app, DRAW_PREEDIT_THICK), DRAW_PREEDIT_LINE);
 		}
 
 		/* The character over them, and the cells used. */
@@ -444,7 +469,7 @@ draw_numbers(
 		return;
 
 	/* The column left of the text, clipped to the text's height. */
-	right = text->x - TE_GUTTER_PAD;
+	right = text->x - te_app_px(app, TE_GUTTER_PAD);
 	te_canvas_clip(canvas, 0, text->y, text->x, text->height);
 	cursor_line = te_buffer_line_of(&app->buffer, app->cursor);
 
@@ -481,6 +506,9 @@ draw_cursor(
 	size_t offset;
 	uint64_t since;
 	unsigned cells;
+	int reach;
+	int width;
+	int room;
 	int top;
 	int x;
 
@@ -489,7 +517,8 @@ draw_cursor(
 		return;
 
 	/* Where the cursor is. */
-	te_canvas_clip(canvas, text->x - 2, text->y, text->width + 4, text->height);
+	reach = te_app_px(app, DRAW_CURSOR_REACH);
+	te_canvas_clip(canvas, text->x - reach, text->y, text->width + 2 * reach, text->height);
 	te_layout_place(&app->layout, &app->buffer, app->cursor, &row, &column);
 	top = text->y + (int)((double)row * (double)app->row_height - app->scroll_y);
 	x = text->x + (int)((double)column * (double)app->cell - app->scroll_x);
@@ -514,7 +543,9 @@ draw_cursor(
 	since = app->now - app->blink_start;
 	if ((since / DRAW_BLINK_MS) % 2U != 0U)
 		return;
-	te_canvas_fill(canvas, x - 1, top + 1, 2, app->row_height - 2, DRAW_CURSOR);
+	width = te_app_px(app, DRAW_CURSOR_WIDTH);
+	room = te_app_px(app, DRAW_CURSOR_ROOM);
+	te_canvas_fill(canvas, x - width / 2, top + room, width, app->row_height - 2 * room, DRAW_CURSOR);
 }
 
 /*
@@ -531,6 +562,9 @@ draw_drop(
 {
 	const struct kl_theme *theme;
 	struct te_rect caret;
+	int reach;
+	int width;
+	int glow;
 	int x;
 
 	/* Only while a drag of text is over the text. */
@@ -538,14 +572,17 @@ draw_drop(
 		return;
 
 	/* The caret's place, within the text. */
-	te_canvas_clip(canvas, text->x - 4, text->y, text->width + 8, text->height);
+	reach = te_app_px(app, DRAW_DROP_REACH);
+	te_canvas_clip(canvas, text->x - reach, text->y, text->width + 2 * reach, text->height);
 	te_app_drop_rect(app, &caret);
 	theme = kl_theme_default();
 
 	/* The glow on both sides, then the line. */
-	x = caret.x - KL_DROP_CARET / 2;
-	te_canvas_fill(canvas, x - 3, caret.y, KL_DROP_CARET + 6, caret.height, KL_RGBA(theme->accent, 64U));
-	te_canvas_fill(canvas, x, caret.y, KL_DROP_CARET, caret.height, KL_RGB(theme->accent));
+	width = te_app_px(app, KL_DROP_CARET);
+	glow = te_app_px(app, DRAW_DROP_GLOW);
+	x = caret.x - width / 2;
+	te_canvas_fill(canvas, x - glow, caret.y, width + 2 * glow, caret.height, KL_RGBA(theme->accent, 64U));
+	te_canvas_fill(canvas, x, caret.y, width, caret.height, KL_RGB(theme->accent));
 }
 
 /* Draws the scroll bar at the card's right edge when the text is taller than the view. */
@@ -558,7 +595,9 @@ draw_scroll(
 	struct te_rect card;
 	double largest;
 	double content;
+	int shortest;
 	int thumb;
+	int width;
 	int top;
 	int x;
 
@@ -570,14 +609,16 @@ draw_scroll(
 	/* The thumb's length for the share in view, and its place for the offset. */
 	content = (double)app->layout.total * (double)app->row_height;
 	thumb = (int)((double)text->height * (double)text->height / content);
-	if (thumb < DRAW_SCROLL_MIN)
-		thumb = DRAW_SCROLL_MIN;
+	shortest = te_app_px(app, DRAW_SCROLL_MIN);
+	if (thumb < shortest)
+		thumb = shortest;
 	top = text->y + (int)((double)(text->height - thumb) * app->scroll_y / largest);
 
 	/* The thumb near the card's edge. */
 	te_app_card(app, &card);
-	x = card.x + card.width - 6 - DRAW_SCROLL_WIDTH;
-	te_canvas_round(canvas, x, top, DRAW_SCROLL_WIDTH, thumb, DRAW_SCROLL_WIDTH / 2, DRAW_SCROLL);
+	width = te_app_px(app, DRAW_SCROLL_WIDTH);
+	x = card.x + card.width - te_app_px(app, DRAW_SCROLL_EDGE) - width;
+	te_canvas_round(canvas, x, top, width, thumb, width / 2, DRAW_SCROLL);
 }
 
 /* Draws the status chip at the card's bottom right: the cursor's line and column, the selection, CR LF. */
@@ -593,8 +634,11 @@ draw_status(
 	size_t column;
 	size_t position;
 	size_t selected;
+	unsigned pixels;
 	int width;
 	int length;
+	int x;
+	int y;
 
 	/* The cursor's line, and its column in characters. */
 	line = te_buffer_line_of(&app->buffer, app->cursor);
@@ -613,8 +657,11 @@ draw_status(
 
 	/* The chip at the bottom right of the card. */
 	te_app_card(app, &card);
-	width = te_text_width(app->ui, status, strlen(status), DRAW_SMALL_PIXELS, 0) + 20;
-	draw_chip(app, canvas, card.x + card.width - 14 - width, card.y + card.height - 12 - 24, status, DRAW_CHIP, DRAW_CHIP_TEXT);
+	pixels = (unsigned)te_app_px(app, DRAW_SMALL_PIXELS);
+	width = te_text_width(app->ui, status, strlen(status), pixels, 0) + 2 * te_app_px(app, DRAW_CHIP_ROOM);
+	x = card.x + card.width - te_app_px(app, DRAW_CHIP_RIGHT) - width;
+	y = card.y + card.height - te_app_px(app, DRAW_CHIP_BOTTOM) - te_app_px(app, DRAW_CHIP_HEIGHT);
+	draw_chip(app, canvas, x, y, status, DRAW_CHIP, DRAW_CHIP_TEXT);
 }
 
 /* Draws a chip: a rounded pill with a hairline edge and its words. */
@@ -630,17 +677,21 @@ draw_chip(
 {
 	int width;
 	int height;
+	int room;
+	int edge;
 	unsigned pixels;
 
-	/* The chip's size for its words. */
-	pixels = DRAW_SMALL_PIXELS;
-	width = te_text_width(app->ui, text, strlen(text), pixels, 0) + 20;
-	height = 24;
+	/* The chip's size for its words, in the window's pixels. */
+	pixels = (unsigned)te_app_px(app, DRAW_SMALL_PIXELS);
+	room = te_app_px(app, DRAW_CHIP_ROOM);
+	width = te_text_width(app->ui, text, strlen(text), pixels, 0) + 2 * room;
+	height = te_app_px(app, DRAW_CHIP_HEIGHT);
+	edge = te_app_px(app, DRAW_CHIP_LINE);
 
 	/* The edge, the pill and the words. */
-	te_canvas_round(canvas, x - 1, y - 1, width + 2, height + 2, height / 2 + 1, DRAW_CHIP_EDGE);
+	te_canvas_round(canvas, x - edge, y - edge, width + 2 * edge, height + 2 * edge, height / 2 + edge, DRAW_CHIP_EDGE);
 	te_canvas_round(canvas, x, y, width, height, height / 2, fill);
-	(void)te_text_draw(app->ui, canvas, x + 10, te_text_center(pixels, y, height), text, strlen(text), pixels, 0, color);
+	(void)te_text_draw(app->ui, canvas, x + room, te_text_center(pixels, y, height), text, strlen(text), pixels, 0, color);
 }
 
 /* Reports how many characters are selected, counted again only when the selection or the text changed. */

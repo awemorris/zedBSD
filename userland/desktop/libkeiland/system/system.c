@@ -24,6 +24,7 @@
 
 #include "system-private.h"
 #include "system-protocol.h"
+#include "userland/desktop/libkeiland/process.h"
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 
 #include <errno.h>
@@ -61,6 +62,16 @@ struct system_media_pending {
 };
 
 /*
+ * A system action whose answer is awaited (KL_VERSION 111): its request's
+ * number, its process, and the next one awaited.
+ */
+struct system_admin_pending {
+	uint32_t request;
+	struct kl_process *process;
+	struct system_admin_pending *next;
+};
+
+/*
  * One application's system: the display, the library's queue with the
  * manager (bound at manager_version) and its objects on it (an object is
  * NULL when the compositor does not offer it), the view, the number of the
@@ -87,6 +98,9 @@ struct kl_system {
 	/* The media library's object and its requests under way (ws157-p014), each owning its response until taken. */
 	struct wl_proxy *media;
 	struct system_media_pending media_pending[KL_SYSTEM_MEDIA_PENDING_MAX];
+	/* The admin actions' object, made the first time one is asked (KL_VERSION 111), and the answers it owes. */
+	struct wl_proxy *admin;
+	struct system_admin_pending *admin_pending;
 	struct system_view view;
 	uint32_t next_request;
 	unsigned lost;
@@ -103,6 +117,14 @@ struct system_media_listener {
 struct system_search {
 	uint32_t name;
 	uint32_t version;
+};
+
+/* The listener of kl_system_admin_v1's events, in their order (KL_VERSION 111). */
+struct system_admin_listener {
+	void (*asking)(void *data, struct wl_proxy *proxy, uint32_t request);
+	void (*stream)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t which, int descriptor);
+	void (*started)(void *data, struct wl_proxy *proxy, uint32_t request);
+	void (*refused)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t reason);
 };
 
 /* The listener of kl_system_manager_v1's event, as libwayland calls it. */
@@ -214,6 +236,7 @@ struct system_displays_listener {
 	void (*touch)(void *data, struct wl_proxy *proxy, const char *identity, const char *label, uint32_t kind, const char *key);
 	void (*mode)(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 	void (*resolution)(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
+	void (*scale)(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
 };
 
 /* The listener of kl_system_machine_v1's events (ws188-p002), in their order. */
@@ -255,6 +278,16 @@ static void system_media_free(struct system_media_pending *pending);
 static int system_media_paths(const char *const *paths, size_t count, char **list);
 static int system_media_ids(const char *const *ids, size_t count, char *list, size_t size);
 
+static void system_admin_asking(void *data, struct wl_proxy *proxy, uint32_t request);
+static void system_admin_stream(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t which, int descriptor);
+static void system_admin_started(void *data, struct wl_proxy *proxy, uint32_t request);
+static void system_admin_refused(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t reason);
+static struct kl_process *system_admin_take(struct kl_system *system, uint32_t request);
+static struct kl_process *system_admin_find(struct kl_system *system, uint32_t request);
+static void system_admin_lose(struct kl_system *system);
+static int system_admin_name_valid(const char *action);
+static int system_admin_words(const char *const *argv, char *words, size_t size);
+
 static void system_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void system_notify_posted(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t id);
 static void system_notify_activated(void *data, struct wl_proxy *proxy, uint32_t id);
@@ -289,6 +322,8 @@ static void system_display_rotations(void *data, struct wl_proxy *proxy, const c
 static void system_display_touch(void *data, struct wl_proxy *proxy, const char *identity, const char *label, uint32_t kind, const char *key);
 static void system_display_mode(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 static void system_display_resolution(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
+static void system_display_scale(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
+static unsigned system_scale_to_96(unsigned scale120);
 static void system_machine_parts(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what);
 static void system_machine_about(void *data, struct wl_proxy *proxy, const char *name, const char *kernel, const char *architecture, const char *processor, const char *host, uint32_t cpus);
 static void system_machine_filesystem(void *data, struct wl_proxy *proxy, const char *path, uint32_t total_high, uint32_t total_low, uint32_t available_high, uint32_t available_low, uint32_t used_high, uint32_t used_low);
@@ -457,7 +492,8 @@ static const struct system_displays_listener system_displays_listener = {
 	system_display_rotations,
 	system_display_touch,
 	system_display_mode,
-	system_display_resolution
+	system_display_resolution,
+	system_display_scale
 };
 
 /* The computer's object's callbacks (ws188-p002). */
@@ -484,6 +520,14 @@ static const struct system_media_listener system_media_listener = {
     system_media_snapshot,
     system_media_done,
     system_media_changed};
+
+/* The admin actions' object's callbacks (KL_VERSION 111). */
+static const struct system_admin_listener system_admin_listener = {
+	system_admin_asking,
+	system_admin_stream,
+	system_admin_started,
+	system_admin_refused
+};
 
 /* The devices object's callbacks. */
 static const struct system_devices_listener system_devices_listener = {
@@ -553,7 +597,11 @@ kl_system_close(
 	if (system == NULL)
 		return;
 
+	/* The system actions whose answers are awaited lose their way (the object's destroy takes them back). */
+	system_admin_lose(system);
+
 	/* Destroys the objects first, then the manager. */
+	system_destroy(system->admin, KL_SYSTEM_ADMIN_DESTROY);
 	system_destroy(system->network, KL_SYSTEM_NETWORK_DESTROY);
 	system_destroy(system->audio, KL_SYSTEM_AUDIO_DESTROY);
 	system_destroy(system->power, KL_SYSTEM_POWER_DESTROY);
@@ -608,9 +656,11 @@ kl_system_dispatch(
 	if (changed != NULL)
 		*changed = bits;
 
-	/* The compositor went. */
-	if (system->lost)
+	/* The compositor went: no answer comes to a system action. */
+	if (system->lost) {
+		system_admin_lose(system);
 		return EPIPE;
+	}
 
 	/* Succeeded: every change was taken. */
 	return 0;
@@ -2498,6 +2548,86 @@ kl_system_displays_resolution(
 	/* Succeeded: the trial and the reasons. */
 	*state = told->state;
 	*why = told->why;
+	return 0;
+}
+
+/*
+ * Gives what the last snapshot holds of a display's scale: the scale it is
+ * shown at, the user's choice, the default, the steps it offers, its
+ * logical size and why its scale cannot be chosen now, in 96ths.
+ */
+int
+kl_system_displays_scale(
+	const struct kl_system *system,
+	const char *key,
+	struct kl_display_scale *scale)
+{
+	const struct system_view_scale *told;
+	unsigned index;
+
+	/* A display's key, from a compositor that tells the scales. */
+	if (system == NULL || key == NULL || scale == NULL)
+		return EINVAL;
+	if (system->displays == NULL || system->manager_version < KL_SYSTEM_SINCE_SCALE)
+		return ENOTSUP;
+
+	/* What the snapshot holds of it. */
+	told = system_view_scale_of(&system->view, key);
+	if (told == NULL)
+		return ENODEV;
+
+	/* The scales in 96ths, and the rest as told. */
+	memset(scale, 0, sizeof(*scale));
+	scale->current = system_scale_to_96(told->current);
+	scale->chosen = system_scale_to_96(told->chosen);
+	scale->recommended = system_scale_to_96(told->recommended);
+	for (index = 0U; index < told->offered_count && index < KL_DISPLAY_SCALES_MAX; index++)
+		scale->offered[index] = system_scale_to_96(told->offered[index]);
+	scale->offered_count = index;
+	scale->width = told->width;
+	scale->height = told->height;
+	scale->why = told->why;
+
+	/* Succeeded: the display's scale. */
+	return 0;
+}
+
+/*
+ * Chooses a display's scale (96ths; 0: the default), shown at once and
+ * kept for its monitor.
+ */
+int
+kl_system_displays_set_scale(
+	struct kl_system *system,
+	const char *key,
+	unsigned scale,
+	uint32_t *request)
+{
+	size_t length;
+	uint32_t number;
+	uint32_t scale120;
+
+	/* A display's key, and a scale that is a whole number of the compositor's 120ths. */
+	if (system == NULL || key == NULL)
+		return EINVAL;
+	length = strlen(key);
+	if (length == 0U || length >= KL_DISPLAY_KEY_MAX)
+		return EINVAL;
+	if (scale > 4U * KL_SYSTEM_SCALE_ONE)
+		return EINVAL;
+	if ((scale * KL_SYSTEM_SCALE_ONE) % 96U != 0U)
+		return EINVAL;
+	scale120 = scale * KL_SYSTEM_SCALE_ONE / 96U;
+
+	/* The displays object, from a compositor that changes the scales. */
+	if (system->displays == NULL || system->lost || system->manager_version < KL_SYSTEM_SINCE_SCALE)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_SET_SCALE, number, key, scale120);
+
+	/* Succeeded: the snapshot and the answer come later. */
 	return 0;
 }
 
@@ -5478,6 +5608,143 @@ system_mail_cut(
 }
 
 /*
+ * Asks for a system action for a process (process.c): the admin object
+ * made the first time, the action's name and words checked, and the run
+ * sent with the window's surface.  Returns 0 with its request's number,
+ * EINVAL (a name, a word or the words not as the protocol takes them, or
+ * another connection's window), ENOTSUP (the compositor runs no actions,
+ * or went), or ENOMEM.
+ */
+int
+keiui_system_admin_run(
+	struct kl_system *system,
+	struct kl_process *process,
+	struct wl_display *display,
+	const char *action,
+	const char *const *argv,
+	unsigned streams,
+	struct wl_surface *surface,
+	uint32_t *request)
+{
+	struct system_admin_pending *pending;
+	char words[KL_SYSTEM_ADMIN_WORDS_MAX + 1U];
+	uint32_t bits;
+	int valid;
+	int error;
+
+	/* A window of the system's connection, an action's name and its words. */
+	if (display != system->display || surface == NULL)
+		return EINVAL;
+	valid = system_admin_name_valid(action);
+	if (!valid)
+		return EINVAL;
+	error = system_admin_words(argv, words, sizeof(words));
+	if (error != 0)
+		return error;
+
+	/* A compositor that runs actions, still there. */
+	if (system->lost)
+		return ENOTSUP;
+	if ((system->view.capabilities & KL_SYSTEM_CAPABILITY_ELEVATE) == 0U)
+		return ENOTSUP;
+	if (system->manager_version < KL_SYSTEM_SINCE_ADMIN)
+		return ENOTSUP;
+
+	/* The admin object, the first time, on the library's queue. */
+	if (system->admin == NULL) {
+		system->admin = wl_proxy_marshal_constructor(system->manager, KL_SYSTEM_MANAGER_GET_ADMIN, &kl_system_admin_v1_interface, NULL);
+		if (system->admin == NULL)
+			return ENOMEM;
+		(void)wl_proxy_add_listener(system->admin, (void (**)(void))&system_admin_listener, system);
+	}
+
+	/* The answer it owes, kept by the request's number. */
+	pending = malloc(sizeof(*pending));
+	if (pending == NULL)
+		return ENOMEM;
+	pending->request = system_number(system, NULL);
+	pending->process = process;
+	pending->next = system->admin_pending;
+	system->admin_pending = pending;
+
+	/* The streams as the protocol names them. */
+	bits = 0U;
+	if ((streams & KL_PROCESS_INPUT) != 0U)
+		bits |= KL_SYSTEM_ADMIN_INPUT;
+	if ((streams & KL_PROCESS_OUTPUT) != 0U)
+		bits |= KL_SYSTEM_ADMIN_OUTPUT;
+	if ((streams & KL_PROCESS_ERROR) != 0U)
+		bits |= KL_SYSTEM_ADMIN_ERROR;
+
+	/* The run, sent with what the application flushes. */
+	wl_proxy_marshal(system->admin, KL_SYSTEM_ADMIN_RUN, pending->request, action, words, bits, surface);
+
+	/* Succeeded: asked. */
+	*request = pending->request;
+	return 0;
+}
+
+/*
+ * Takes a system action's request back before its answer (its process
+ * closed).  The compositor sends nothing for it after the withdrawal; what
+ * it sent before (a started program's streams) is taken at once, by a
+ * roundtrip of the library's queue, and closed: nothing else would
+ * dispatch the queue for a request nobody awaits, and the program would
+ * not read its input's end.
+ */
+void
+keiui_system_admin_withdraw(
+	struct kl_system *system,
+	uint32_t request)
+{
+	struct kl_process *process;
+	int status;
+
+	/* Not awaited any more. */
+	process = system_admin_take(system, request);
+	if (process == NULL)
+		return;
+
+	/* Nothing to tell a compositor that went. */
+	if (system->admin == NULL || system->lost)
+		return;
+
+	/* The compositor is told, and what it sent before is taken (closed: no process awaits it). */
+	wl_proxy_marshal(system->admin, KL_SYSTEM_ADMIN_WITHDRAW, request);
+	status = wl_display_roundtrip_queue(system->display, system->queue);
+	if (status < 0) {
+		/* The compositor went: no answer comes to the others. */
+		system->lost = 1U;
+		system_admin_lose(system);
+	}
+}
+
+/*
+ * Takes the system's events while a system action's answer is awaited
+ * (the application's dispatch): only the queue, not what changed, which
+ * the program's own kl_system_dispatch still reports.
+ */
+void
+keiui_system_admin_dispatch(
+	struct kl_system *system)
+{
+	int status;
+	int error;
+
+	/* The events read so far; a failure, or an error the display holds, means the compositor went. */
+	if (!system->lost) {
+		status = wl_display_dispatch_queue_pending(system->display, system->queue);
+		error = wl_display_get_error(system->display);
+		if (status < 0 || error != 0)
+			system->lost = 1U;
+	}
+
+	/* The compositor went: no answer comes. */
+	if (system->lost)
+		system_admin_lose(system);
+}
+
+/*
  * Binds the compositor's system manager on the library's queue, makes the
  * objects it offers and waits once for their first state.  Returns 0,
  * ENOTSUP without the extension, EPIPE when the compositor went, or
@@ -5893,6 +6160,60 @@ system_display_resolution(
 	system = data;
 	now = system_milliseconds();
 	system_view_display_resolution(&system->view, key, state, remaining_ms, why, now);
+}
+
+/* Keeps a display's scale, the steps it offers and why its scale cannot be chosen now. */
+static void
+system_display_scale(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *key,
+	uint32_t current,
+	uint32_t chosen,
+	uint32_t recommended,
+	uint32_t width,
+	uint32_t height,
+	uint32_t why,
+	struct wl_array *offered)
+{
+	struct system_view_scale scale;
+	const uint32_t *steps;
+	struct kl_system *system;
+	size_t count;
+	size_t index;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The scale as told. */
+	memset(&scale, 0, sizeof(scale));
+	scale.current = current;
+	scale.chosen = chosen;
+	scale.recommended = recommended;
+	scale.width = width;
+	scale.height = height;
+	scale.why = why;
+
+	/* The steps offered, as many as there is room for. */
+	steps = offered->data;
+	count = offered->size / sizeof(steps[0]);
+	if (count > KL_DISPLAY_SCALES_MAX)
+		count = KL_DISPLAY_SCALES_MAX;
+	for (index = 0U; index < count; index++)
+		scale.offered[index] = steps[index];
+	scale.offered_count = (unsigned)count;
+
+	/* Kept with the display. */
+	system = data;
+	system_view_display_scale(&system->view, key, &scale);
+}
+
+/* Reports a scale in the compositor's 120ths in 96ths (KL_SCALE_BASE), rounded to the nearest. */
+static unsigned
+system_scale_to_96(
+	unsigned scale120)
+{
+	/* scale * 96 / 120, a half up. */
+	return (scale120 * 96U + KL_SYSTEM_SCALE_ONE / 2U) / KL_SYSTEM_SCALE_ONE;
 }
 
 /* Puts the printers and the jobs into effect (ws145-p003). */
@@ -6669,5 +6990,256 @@ system_media_wait(
 		return EPROTO;
 
 	/* Succeeded: the compositor finished this operation before the deadline. */
+	return 0;
+}
+
+/* The dialog shows for a system action: nothing to do, its answer follows. */
+static void
+system_admin_asking(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request)
+{
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(request);
+}
+
+/* A descriptor of a system action that started: to its process, or closed when none awaits it. */
+static void
+system_admin_stream(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t which,
+	int descriptor)
+{
+	struct kl_process *process;
+	struct kl_system *system;
+	unsigned kind;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The process awaiting it. */
+	system = data;
+	process = system_admin_find(system, request);
+	if (process == NULL) {
+		keiui_descriptor_close(descriptor);
+		return;
+	}
+
+	/* Its kind, one of the four. */
+	switch (which) {
+	case KL_SYSTEM_ADMIN_INPUT:
+		kind = KEIUI_ADMIN_INPUT;
+		break;
+	case KL_SYSTEM_ADMIN_OUTPUT:
+		kind = KEIUI_ADMIN_OUTPUT;
+		break;
+	case KL_SYSTEM_ADMIN_ERROR:
+		kind = KEIUI_ADMIN_ERROR;
+		break;
+	case KL_SYSTEM_ADMIN_STATUS:
+		kind = KEIUI_ADMIN_STATUS;
+		break;
+	default:
+		/* No such stream: closed. */
+		keiui_descriptor_close(descriptor);
+		return;
+	}
+
+	/* Kept by the process for its start. */
+	keiui_process_admin_stream(process, kind, descriptor);
+}
+
+/* A system action started: its process serves what it brought. */
+static void
+system_admin_started(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request)
+{
+	struct kl_process *process;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The process awaiting it, no longer awaiting. */
+	process = system_admin_take(data, request);
+	if (process == NULL)
+		return;
+
+	/* It runs. */
+	keiui_process_admin_started(process);
+}
+
+/* A system action was refused: its process ends without running. */
+static void
+system_admin_refused(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t reason)
+{
+	struct kl_process *process;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The process awaiting it, no longer awaiting. */
+	process = system_admin_take(data, request);
+	if (process == NULL)
+		return;
+
+	/* A reason not known here is a failure to start. */
+	if (reason < (uint32_t)KL_ADMIN_NO || reason > (uint32_t)KL_ADMIN_METHOD)
+		reason = (uint32_t)KL_ADMIN_FAILED;
+	keiui_process_admin_refused(process, reason);
+}
+
+/* Takes the answer a request is awaited by out of the list; its process, or NULL when none awaits. */
+static struct kl_process *
+system_admin_take(
+	struct kl_system *system,
+	uint32_t request)
+{
+	struct system_admin_pending **link;
+	struct system_admin_pending *pending;
+	struct kl_process *process;
+
+	/* Each answer awaited. */
+	for (link = &system->admin_pending; *link != NULL; link = &(*link)->next) {
+		if ((*link)->request != request)
+			continue;
+
+		/* Out of the list, and freed. */
+		pending = *link;
+		*link = pending->next;
+		process = pending->process;
+		free(pending);
+		return process;
+	}
+
+	/* None. */
+	return NULL;
+}
+
+/* Finds the process a request's answer is awaited by, NULL when none. */
+static struct kl_process *
+system_admin_find(
+	struct kl_system *system,
+	uint32_t request)
+{
+	struct system_admin_pending *pending;
+
+	/* Each answer awaited. */
+	for (pending = system->admin_pending; pending != NULL; pending = pending->next) {
+		if (pending->request == request)
+			return pending->process;
+	}
+
+	/* None. */
+	return NULL;
+}
+
+/* Ends every system action whose answer is awaited: none comes any more. */
+static void
+system_admin_lose(
+	struct kl_system *system)
+{
+	struct system_admin_pending *pending;
+	struct kl_process *process;
+
+	/* Each answer awaited, out of the list before its process hears. */
+	while (system->admin_pending != NULL) {
+		pending = system->admin_pending;
+		system->admin_pending = pending->next;
+		process = pending->process;
+		free(pending);
+		keiui_process_admin_lost(process);
+	}
+}
+
+/* Tells whether an action's name is as definitions are named: [a-z0-9][a-z0-9-]{0,31}. */
+static int
+system_admin_name_valid(
+	const char *action)
+{
+	size_t length;
+	size_t index;
+	char letter;
+
+	/* One to KL_SYSTEM_ADMIN_ACTION_MAX bytes, not starting with a hyphen. */
+	length = strlen(action);
+	if (length == 0U ||
+	    length > KL_SYSTEM_ADMIN_ACTION_MAX ||
+	    action[0] == '-')
+		return 0;
+
+	/* Each byte a small letter, a digit or a hyphen. */
+	for (index = 0; index < length; index++) {
+		letter = action[index];
+		if (letter >= 'a' && letter <= 'z')
+			continue;
+		if (letter >= '0' && letter <= '9')
+			continue;
+		if (letter == '-')
+			continue;
+		return 0;
+	}
+
+	/* Valid. */
+	return 1;
+}
+
+/*
+ * Joins an action's words with one space each (empty for none): at most
+ * KL_SYSTEM_ADMIN_WORD_COUNT words of 1 to KL_SYSTEM_ADMIN_WORD_MAX bytes
+ * of [A-Za-z0-9._/:=@+,-], KL_SYSTEM_ADMIN_WORDS_MAX bytes joined.  Returns
+ * 0 or EINVAL.
+ */
+static int
+system_admin_words(
+	const char *const *argv,
+	char *words,
+	size_t size)
+{
+	const char *word;
+	size_t length;
+	size_t used;
+	size_t count;
+	size_t clean;
+
+	/* None yet. */
+	words[0] = '\0';
+	if (argv == NULL)
+		return 0;
+
+	/* Each word, after a space but the first. */
+	used = 0;
+	for (count = 0; argv[count] != NULL; count++) {
+		word = argv[count];
+		if (count >= KL_SYSTEM_ADMIN_WORD_COUNT)
+			return EINVAL;
+
+		/* Its bytes, all of the allowed ones. */
+		length = strlen(word);
+		clean = strspn(word, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/:=@+,-");
+		if (length == 0U ||
+		    length > KL_SYSTEM_ADMIN_WORD_MAX ||
+		    clean != length)
+			return EINVAL;
+
+		/* Room for it (and its space) within the joined words' bound. */
+		if (count != 0U)
+			used++;
+		if (used + length > KL_SYSTEM_ADMIN_WORDS_MAX || used + length >= size)
+			return EINVAL;
+		if (count != 0U)
+			words[used - 1U] = ' ';
+		memcpy(words + used, word, length);
+		used += length;
+		words[used] = '\0';
+	}
+
+	/* Succeeded: the words joined. */
 	return 0;
 }

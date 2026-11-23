@@ -1,0 +1,22 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * mikuterm's version, written by the build from the project's version
+ * (CMakeLists.txt): its three numbers for the version resource and its
+ * text for the resource and Help > About.
+ */
+
+#ifndef MIKUTERM_VERSION_H
+#define MIKUTERM_VERSION_H
+
+#define MIKUTERM_VERSION_MAJOR	@PROJECT_VERSION_MAJOR@
+#define MIKUTERM_VERSION_MINOR	@PROJECT_VERSION_MINOR@
+#define MIKUTERM_VERSION_PATCH	@PROJECT_VERSION_PATCH@
+#define MIKUTERM_VERSION_TEXT	"@PROJECT_VERSION@"
+
+#endif

@@ -628,7 +628,8 @@ sh_builtin_exec(
 		sh_exit(127);
 	}
 
-	/* The command replaces the shell. */
+	/* The command replaces the shell, which writes its history first. */
+	sh_history_flush();
 	sh_exec_external(path, argv + 1, NULL, 0);
 }
 

@@ -20,6 +20,28 @@
 #include "userland/desktop/libkeiland/platform/platform.h"
 
 #include <stddef.h>
+#include <stdint.h>
+
+/*
+ * Where a system action is: its answer awaited (its streams' descriptors
+ * gather in its child), started (its threads serve the descriptors), or
+ * ended without running or without its end told (refused, or lost).
+ */
+#define KEIUI_ADMIN_ASKING	1U
+#define KEIUI_ADMIN_STARTED	2U
+#define KEIUI_ADMIN_ENDED	3U
+
+/*
+ * The descriptors a system action's start brings, in the order of the
+ * system's stream event's which (input, output, error, status).
+ */
+#define KEIUI_ADMIN_INPUT	0U
+#define KEIUI_ADMIN_OUTPUT	1U
+#define KEIUI_ADMIN_ERROR	2U
+#define KEIUI_ADMIN_STATUS	3U
+
+/* The longest status line of a system action kept, with its NUL ("SIGNAL n" and its end fit). */
+#define KEIUI_STATUS_LINE	32U
 
 /*
  * One stream's bytes: a ring of KL_PROCESS_BUFFER bytes (where the oldest
@@ -47,6 +69,15 @@ struct kl_process {
 	/* The program's pointer and the streams it uses (KL_PROCESS_*). */
 	void *data;
 	unsigned streams;
+
+	/*
+	 * A system action's (KL_VERSION 111): where it is (KEIUI_ADMIN_*; 0
+	 * for a process the application started itself), and while its answer
+	 * is awaited the system it was asked through and the request's number.
+	 */
+	unsigned admin;
+	struct kl_system *admin_system;
+	uint32_t admin_request;
 
 	struct keiui_lock lock;
 	struct kl_app *app;
@@ -101,5 +132,51 @@ void keiui_child_end(struct kl_process *process);
 
 /* A launch started apart from the application, with the environment's changes (platform-posix.c). */
 int keiui_launch_start(const struct kl_launch_options *options, const char *const *environment);
+
+/*
+ * A system action's child (platform-posix.c): its control pipe made before
+ * it is asked, a descriptor its start brings kept (KEIUI_ADMIN_*; a second
+ * of one kind is closed), the descriptors kept closed (a refusal), and the
+ * threads started on them (its start).
+ */
+int keiui_child_await(struct kl_process *process);
+void keiui_child_take(struct kl_process *process, unsigned which, int descriptor);
+void keiui_child_drop(struct kl_process *process);
+int keiui_child_adopt(struct kl_process *process);
+
+/* A descriptor that has nowhere to go, closed (platform-posix.c). */
+void keiui_descriptor_close(int descriptor);
+
+/*
+ * A system action's news, as the system's events bring them on the
+ * application's thread (process.c): a stream's descriptor, the start, a
+ * refusal (a KL_ADMIN_* reason), and the end of the answer's way (the
+ * system closed or the compositor went).  The application's dispatch has
+ * the system's events read while an answer is awaited.
+ */
+void keiui_process_admin_stream(struct kl_process *process, unsigned which, int descriptor);
+void keiui_process_admin_started(struct kl_process *process);
+void keiui_process_admin_refused(struct kl_process *process, unsigned reason);
+void keiui_process_admin_lost(struct kl_process *process);
+void keiui_processes_admin_dispatch(struct kl_app *app);
+
+/*
+ * Reads a system action's status line ("EXIT n" or "SIGNAL n", its end
+ * kept or not) as how it ended (KL_PROCESS_EXITED or KL_PROCESS_SIGNALED
+ * and the number), or KL_PROCESS_LOST with 0 for anything else (process.c).
+ */
+void keiui_process_status_parse(const char *line, unsigned *how, int *code);
+
+/*
+ * A system action asked through the system (system.c): the run on the
+ * application's connection with its window's surface, and its request's
+ * number (0, EINVAL, ENOMEM or ENOTSUP); a request taken back; and the
+ * system's events taken while an answer is awaited.
+ */
+struct wl_display;
+struct wl_surface;
+int keiui_system_admin_run(struct kl_system *system, struct kl_process *process, struct wl_display *display, const char *action, const char *const *argv, unsigned streams, struct wl_surface *surface, uint32_t *request);
+void keiui_system_admin_withdraw(struct kl_system *system, uint32_t request);
+void keiui_system_admin_dispatch(struct kl_system *system);
 
 #endif

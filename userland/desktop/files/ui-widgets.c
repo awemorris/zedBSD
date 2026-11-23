@@ -35,6 +35,14 @@ fm_widgets_begin(
 			return ENOMEM;
 	}
 
+	/*
+	 * The window's scale, for the caret the widgets tell the input method
+	 * in the window's pixels.  The pointer's places given to them below are
+	 * already in units (window.c), and they go to kl_ui_pointer_*, which
+	 * the scale does not turn again.
+	 */
+	kl_ui_set_scale(app->ui, app->scale);
+
 	/* Succeeded: the frame begins. */
 	kl_ui_begin(app->ui, app->now * 1000U);
 	return 0;

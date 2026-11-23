@@ -55,6 +55,40 @@ extern "C" {
 #define TCP_CONGESTION		64
 #define TCP_CA_NAME_MAX		16
 
+/*
+ * The idle probes SO_KEEPALIVE turns on (RFC 1122 section 4.2.3.6), each an
+ * int, with FreeBSD's names and numbers (Linux has the same names):
+ * TCP_KEEPIDLE is the seconds a connection is silent before the first
+ * probe, TCP_KEEPINTVL the seconds between probes, and TCP_KEEPCNT the
+ * probes that may go unanswered before the connection is dropped.  Each is
+ * at least 1 and at most TCP_KEEP_MAX; a new socket starts from the
+ * system's values, and one that accept() gives takes its listener's.
+ */
+#define TCP_KEEPIDLE		256
+#define TCP_KEEPINTVL		512
+#define TCP_KEEPCNT		1024
+#define TCP_KEEP_MAX		2147483
+
+/*
+ * Options at IPPROTO_IP, with FreeBSD's names and numbers.  Both are an
+ * int, and both are taken by AF_INET and AF_INET6 sockets (the latter for
+ * what they send and receive as IPv4).
+ *
+ * IP_TOS is the Type of Service byte of the IPv4 packets the socket sends:
+ * the DSCP (RFC 2474) and the ECN field (RFC 3168).  The low eight bits of
+ * the value are kept, as BSD and Linux keep them.  A TCP socket keeps the
+ * ECN field clear, since this TCP does not negotiate ECN and a sender that
+ * has not may not mark its packets ECN-capable (RFC 3168 section 6.1.1).
+ *
+ * IP_RECVTOS, set, has recvmsg give the Type of Service byte each IPv4
+ * datagram came with: a control message at IPPROTO_IP of type IP_TOS
+ * holding one unsigned char.  The type is the one Linux gives (FreeBSD
+ * gives IP_RECVTOS), which is the one software that reads both looks for
+ * outside Apple's systems.
+ */
+#define IP_TOS			3
+#define IP_RECVTOS		68
+
 #define INADDR_ANY		0x00000000U
 #define INADDR_BROADCAST	0xffffffffU
 #define INADDR_LOOPBACK		0x7f000001U
@@ -142,6 +176,17 @@ extern const struct in6_addr in6addr_loopback;
 #define IPV6_RECVHOPLIMIT	37
 #define IPV6_PKTINFO		46
 #define IPV6_HOPLIMIT		47
+
+/*
+ * The traffic class of an IPv6 socket (RFC 3542 section 6.5; FreeBSD's
+ * numbers), each an int.  IPV6_TCLASS is the class of the packets it
+ * sends, 0 to 255, or -1 for the default, 0.  A TCP socket keeps the ECN
+ * field clear, as with IP_TOS.  IPV6_RECVTCLASS, set, has recvmsg give the
+ * class each IPv6 datagram came with: a control message at IPPROTO_IPV6 of
+ * type IPV6_TCLASS holding an int.
+ */
+#define IPV6_RECVTCLASS		57
+#define IPV6_TCLASS		61
 
 /*
  * The destination address and the interface a datagram came in on: the

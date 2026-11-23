@@ -6,7 +6,7 @@
  */
 
 /*
- * The writing requests of install-admin's session (session.h).  The disk
+ * The writing requests of installer-helper's session (session.h).  The disk
  * is checked again before each write against what the screen showed: its
  * registration, name, size and the digest of its partition table, and
  * each partition by its disk, first sector, size and PARTUUID.  The
@@ -22,6 +22,7 @@
 
 #include "session.h"
 
+#include "payload.h"
 #include "probe.h"
 #include "target.h"
 #include "unpack.h"
@@ -62,13 +63,8 @@
 #define SESSION_EFIBOOT		"/sbin/efiboot"
 
 /* Where the new root and the ESP are mounted while they are written. */
-#define SESSION_TARGET		"/run/install-admin/target"
-#define SESSION_ESP		"/run/install-admin/esp"
-
-/* The payload of the installer's image. */
-#define SESSION_PAYLOAD		"/opt/installer"
-#define SESSION_UNITS		SESSION_PAYLOAD "/units"
-#define SESSION_BOOT		SESSION_PAYLOAD "/boot"
+#define SESSION_TARGET		PAYLOAD_DIRECTORY "/target"
+#define SESSION_ESP		PAYLOAD_DIRECTORY "/esp"
 
 /* The installed system's record of its units, from its root. */
 #define SESSION_RECORDS		"var/db/installer"
@@ -155,7 +151,6 @@ struct session_installation {
 	unsigned entries_since_look;
 	uint64_t swapfile_bytes;
 	int swapfile_made;
-	int graphical;
 	int root_mounted;
 	int root_fd;
 	int esp_mounted;
@@ -186,13 +181,11 @@ static int session_format(const struct plan_tuple *tuple, const char *program, c
 static int session_diskpart(const struct plan_disk *disk, char *const operation[], unsigned count, int *reload_failed);
 static int session_edit_delete(struct admin_session *session, const struct plan_request *request, struct session_disk *found);
 static int session_edit_create(struct admin_session *session, const struct plan_request *request, struct session_disk *found);
-static int session_payload_directory(const char *path);
-static int session_payload_open(const char *directory, const char *name, int *fd);
 static int session_memory_bytes(uint64_t *bytes);
 static int session_root_capacity(uint32_t sector_bytes, uint64_t bytes, uint64_t *inodes);
 static int session_open_directory(int base, const char *path, int create, int *fd);
 static int session_write_new(int directory, const char *leaf, const uint8_t *data, size_t length, mode_t mode);
-static int session_copy_boot(const struct index_boot *boot, int directory, const char *leaf);
+static int session_copy_boot(const struct payload *payload, const struct index_boot *boot, int directory, const char *leaf);
 static int session_esp_look(struct session_installation *installation, const struct kern_block_info *info);
 static int session_install_check(struct session_installation *installation);
 static int session_install_whole_layout(struct session_installation *installation);
@@ -1616,76 +1609,6 @@ session_edit_create(
 	return 0;
 }
 
-/*
- * Checks a directory of the payload: a directory of root's that no group
- * or other may write.  Returns 0 or EPERM.
- */
-static int
-session_payload_directory(
-	const char *path)
-{
-	struct stat status;
-	int is_directory;
-	int error;
-
-	/* The directory itself, not a link. */
-	error = lstat(path, &status);
-	if (error != 0)
-		return errno;
-	is_directory = S_ISDIR(status.st_mode);
-	if (!is_directory || status.st_uid != 0 || (status.st_mode & 022) != 0)
-		return EPERM;
-
-	/* Succeeded: only root changes it. */
-	return 0;
-}
-
-/*
- * Opens a file of the payload, never through a link, and checks it is a
- * regular file of root's that no group or other may write.
- */
-static int
-session_payload_open(
-	const char *directory,
-	const char *name,
-	int *fd)
-{
-	char path[SESSION_PATH_MAX];
-	struct stat status;
-	const char *slash;
-	int descriptor;
-	int regular;
-	int error;
-
-	/* The file, by a name with no directory in it. */
-	slash = strchr(name, '/');
-	if (slash != NULL || name[0] == '\0' || name[0] == '.')
-		return EINVAL;
-	snprintf(path, sizeof(path), "%s/%s", directory, name);
-	descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-	if (descriptor < 0)
-		return errno;
-
-	/* Root's alone. */
-	error = fstat(descriptor, &status);
-	if (error != 0) {
-		error = errno;
-		close(descriptor);
-		return error;
-	}
-
-	/* Refuses a file that is not a regular file of root's that others cannot write. */
-	regular = S_ISREG(status.st_mode);
-	if (!regular || status.st_uid != 0 || (status.st_mode & 022) != 0) {
-		close(descriptor);
-		return EPERM;
-	}
-
-	/* Succeeded: the caller reads and closes it. */
-	*fd = descriptor;
-	return 0;
-}
-
 /* Reads the memory the system manages, for the swap file's size. */
 static int
 session_memory_bytes(
@@ -1940,17 +1863,20 @@ session_write_new(
  */
 static int
 session_copy_boot(
+	const struct payload *payload,
 	const struct index_boot *boot,
 	int directory,
 	const char *leaf)
 {
+	char member[INDEX_NAME_MAX + 8U];
 	uint8_t *data;
 	size_t length;
 	int fd;
 	int error;
 
-	/* The file, read whole and checked. */
-	error = session_payload_open(SESSION_BOOT, boot->name, &fd);
+	/* The file, read whole from the tarball and checked. */
+	snprintf(member, sizeof(member), "boot/%s", boot->name);
+	error = payload_open(payload, member, boot->bytes, &fd);
 	if (error != 0)
 		return error;
 	error = unpack_read_whole(fd, boot->bytes, boot->sha256, &data, &length);
@@ -2062,22 +1988,15 @@ session_install_check(
 	int canceled;
 	int error;
 
-	/* The plan, as the helper reads it, and the session's disk. */
+	/* The plan, as the helper reads it, and the session's disk; nothing is installed before the system is downloaded. */
 	request = installation->request;
 	index = installation->session->index;
+	if (index == NULL || installation->session->payload == NULL)
+		return ENOENT;
 	error = plan_install_check(&request->disk, &request->install);
 	if (error != 0)
 		return error;
 	error = session_bind(installation->session, &request->disk);
-	if (error != 0)
-		return error;
-
-	/* The payload, root's alone. */
-	error = session_payload_directory(SESSION_PAYLOAD);
-	if (error == 0)
-		error = session_payload_directory(SESSION_UNITS);
-	if (error == 0)
-		error = session_payload_directory(SESSION_BOOT);
 	if (error != 0)
 		return error;
 
@@ -2100,19 +2019,12 @@ session_install_check(
 	if (error != 0)
 		return error;
 
-	/* What they hold, and whether the desktop is among them (a graphical login, an automatic one). */
+	/* What they hold. */
 	for (i = 0; i < installation->order_count; i++) {
 		slot = installation->order[i];
 		installation->total_bytes += index->unit[slot].bytes;
 		installation->total_entries += index->unit[slot].entries;
-		same = strcmp(index->unit[slot].name, "desktop");
-		if (same == 0)
-			installation->graphical = 1;
 	}
-
-	/* Drops the autologin of a system with no graphical session. */
-	if (!installation->graphical)
-		request->install.autologin = 0;
 
 	/* The disk as the final page showed it. */
 	error = session_disk_load(&request->disk, &found);
@@ -2669,8 +2581,8 @@ session_unpack_unit(
 	}
 
 	/* The tarball, read whole from one descriptor and checked. */
-	snprintf(tarball, sizeof(tarball), "%s.tar.gz", record->name);
-	error = session_payload_open(SESSION_UNITS, tarball, &fd);
+	snprintf(tarball, sizeof(tarball), "units/%s.tar.gz", record->name);
+	error = payload_open(installation->session->payload, tarball, record->tar_bytes, &fd);
 	if (error == 0) {
 		error = unpack_read_whole(fd, record->tar_bytes, record->sha256, &data, &length);
 		close(fd);
@@ -2783,7 +2695,7 @@ session_install_boot_files(
 		error = session_open_directory(installation->root_fd, directory_path, 1, &directory);
 		if (error != 0)
 			return error;
-		error = session_copy_boot(&index->boot[i], directory, leaf);
+		error = session_copy_boot(installation->session->payload, &index->boot[i], directory, leaf);
 		close(directory);
 		if (error != 0)
 			return error;
@@ -3057,7 +2969,7 @@ session_install_esp(
 	/* The loader. */
 	error = session_open_directory(esp, place, 1, &directory);
 	if (error == 0) {
-		error = session_copy_boot(loader, directory, leaf);
+		error = session_copy_boot(installation->session->payload, loader, directory, leaf);
 		close(directory);
 	}
 
@@ -3073,7 +2985,8 @@ session_install_esp(
 	cfg.swap_partuuid = NULL;
 	if (installation->has_swap_partition)
 		cfg.swap_partuuid = installation->swap.partuuid;
-	cfg.graphical = installation->graphical;
+	/* zedBSD is a client system: it always starts at the desktop's login. */
+	cfg.graphical = 1;
 	error = plan_cfg_text(&cfg, text, sizeof(text), &length);
 	if (error == 0)
 		error = session_write_new(esp, SESSION_CFG, (const uint8_t *)text, length, 0644);

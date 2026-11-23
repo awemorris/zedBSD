@@ -397,6 +397,78 @@ kl_backend_session_managed(
 }
 
 /*
+ * Runs no admin action: no manager runs them here.
+ */
+int
+kl_backend_session_admin_ask(
+	struct kl_backend *backend,
+	uint32_t id,
+	uint64_t client,
+	const char *locale,
+	unsigned streams,
+	const char *action,
+	const char *words)
+{
+	/* Nothing is asked. */
+	(void)id;
+	(void)client;
+	(void)locale;
+	(void)streams;
+	(void)action;
+	(void)words;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/*
+ * Has no dialog to allow.
+ */
+int
+kl_backend_session_admin_allow(
+	struct kl_backend *backend,
+	uint32_t id,
+	int connection)
+{
+	/* Nothing is sent; the connection stays the caller's. */
+	(void)id;
+	(void)connection;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/*
+ * Has no dialog to cancel.
+ */
+int
+kl_backend_session_admin_cancel(
+	struct kl_backend *backend,
+	uint32_t id)
+{
+	/* Nothing is sent. */
+	(void)id;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/*
+ * Keeps no permission to forget.
+ */
+int
+kl_backend_session_admin_forget(
+	struct kl_backend *backend,
+	uint64_t client)
+{
+	/* Nothing is sent. */
+	(void)client;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/*
  * Waits for nothing: no manager sends anything.
  */
 int

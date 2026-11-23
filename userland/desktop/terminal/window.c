@@ -6,47 +6,50 @@
  */
 
 /*
- * The Wayland window of terminal: a window of libkeiland's application
- * (WS131 p018, kl_app; ws090-p011 before), whose surface the terminal
- * draws on with its own Vulkan (KL_PRESENT_NONE).  The application waits
- * for the compositor and the shells together: each shell is a process of
- * the application on a terminal of its own (kl_process), whose output and
- * end come as the application's events.
+ * The window of terminal: a window of libkeiland's application
+ * (kl_app), whose frames the drawing shows
+ * (display.h).  The application waits for the window system and the tabs'
+ * connections together: each connection learns from the application's
+ * events what it has for the main loop (connection.h).
  *
  * The application queues the window's input; this file takes it into what
- * the main loop reads.  A key press is turned into bytes at once (keys.c)
+ * the main loop reads.  A key press is turned into bytes at once (the
+ * character the window system says it types, or keys.c's for the key)
  * and kept until the main loop writes them to the shell, and a held key's
  * repeats (which the application makes after the compositor's events are
- * in, BUG-111) are typed the same way.  The pointer's presses, releases
- * and motions are kept for the selection (ws035-p093), the wheel as
- * notches of the view's scroll (ws035-p114), and the fingers for touch.c
- * (ws081-p011).  The menus' choices (menu.c), the tabs' (tabs.c), a drop
+ * in) are typed the same way.  The pointer's presses, releases
+ * and motions are kept for the selection, the wheel as
+ * notches of the view's scroll, and the fingers for touch.c.
+ * The menus' choices (menu.c), the tabs' (tabs.c), a drop
  * waiting, the end of a drag and the selections' changes come as inputs
  * too (clipboard.c, primary.c: the window's own clipboard and primary
  * selection).
  *
- * The window asks for the input method's text (BUG-155): what it commits
+ * The window asks for the input method's text: what it commits
  * goes to the shell like typed keys, and what it composes is kept for the
  * renderer to show at the cursor.
  */
 
 #include "terminal.h"
-
-#include <wayland-client.h>
+#include "connection.h"
+#include "settings-page.h"
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
-/* The evdev codes of Page Up and Page Down, which with Shift scroll the view (ws035-p114). */
+/* The evdev codes of Page Up and Page Down, which with Shift scroll the view. */
 #define WINDOW_KEY_PAGEUP	104U
 #define WINDOW_KEY_PAGEDOWN	109U
 
-/* F11, which makes the window fullscreen or ends it when the compositor's menu did not take it (BUG-194). */
+/* F11, which makes the window fullscreen or ends it when the compositor's menu did not take it. */
 #define WINDOW_KEY_F11		87U
 
-/* The keys the search bar answers itself (ws128-p006): Escape, Backspace, Enter and the keypad's Enter. */
+/* F12, which opens the settings when the compositor's menu did not take it. */
+#define WINDOW_KEY_F12		88U
+
+/* The keys the search bar answers itself: Escape, Backspace, Enter and the keypad's Enter. */
 #define WINDOW_KEY_ESCAPE	1U
 #define WINDOW_KEY_BACKSPACE	14U
 #define WINDOW_KEY_ENTER	28U
@@ -63,20 +66,20 @@
  */
 #define WINDOW_WHEEL_NOTCH	60.0
 
-static void window_paced(void *data, struct wl_callback *callback, uint32_t time);
+/*
+ * Whether the ZTERM LAT and ZTERM PERF lines are written: -1 until the
+ * environment's TERMINAL_PERF is read (once, by the first ask), then 1
+ * when it is 1 and 0 otherwise.  The main thread's alone.
+ */
+static int window_perf = -1;
 
-/* The compositor's answer to the frame callback of a frame shown (the pacing, pace.h). */
-static const struct wl_callback_listener window_pace_listener = {
-	window_paced
-};
-
-static void window_pace_forget(struct terminal_window *window);
 static void window_event(struct terminal_window *window, const struct kl_window_event *event);
 static void window_selection(const struct kl_window_event *event);
 static void window_drop_enter(const struct kl_window_event *event);
-static void window_press(struct terminal_window *window, uint32_t key);
+static void window_press(struct terminal_window *window, const struct kl_window_event *event);
+static int window_key_text(const struct terminal_window *window, const struct kl_window_event *event);
 static void window_text_commit(struct terminal_window *window, const char *text);
-static void window_search_key(struct terminal_window *window, uint32_t key);
+static void window_search_key(struct terminal_window *window, const struct kl_window_event *event);
 static void window_search_append(struct terminal_window *window, const char *text, size_t length);
 static void window_text_preedit(struct terminal_window *window, const struct kl_window_event *event);
 static void window_text_delete(struct terminal_window *window, uint32_t before);
@@ -85,9 +88,16 @@ static void window_pointer_event(struct terminal_window *window, unsigned kind, 
 static void window_pad_push(struct terminal_window *window, unsigned type, const struct kl_window_event *event);
 static void window_touch_push(struct terminal_window *window, unsigned type, const struct kl_window_event *event);
 static uint32_t window_modifiers(unsigned modifiers);
+static int window_page_input(struct terminal_window *window, const struct kl_window_event *event);
+static int window_picture_input(struct terminal_window *window, const struct kl_window_event *event);
+static void window_picture_push(struct terminal_window *window, unsigned kind, const struct kl_window_event *event);
+static void window_action(struct terminal_window *window, uint32_t action);
 
 /*
- * Connects to the compositor and makes a toplevel window of a size.
+ * Connects to the window system and makes a toplevel window of a size:
+ * the application's name, the window's title and how its frames are shown
+ * (KL_PRESENT_NONE for the program's own Vulkan, KL_PRESENT_SHM for frames
+ * painted on the processor).
  *
  * Returns 0 once the first configure is acknowledged, or -1 with errno set.
  */
@@ -95,6 +105,9 @@ int
 terminal_window_open(
 	struct terminal_window *window,
 	const char *display,
+	const char *application,
+	const char *title,
+	unsigned present,
 	uint32_t width,
 	uint32_t height)
 {
@@ -102,6 +115,7 @@ terminal_window_open(
 	struct kl_app_options app_options;
 	struct kl_app_event event;
 	int taken;
+	int error;
 
 	/* Nothing held yet. */
 	memset(window, 0, sizeof(*window));
@@ -109,20 +123,29 @@ terminal_window_open(
 	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = display;
-	app_options.application = "terminal";
+	app_options.application = application;
 	window->app = kl_app_open(&app_options);
 	if (window->app == NULL)
 		return -1;
 
-	/* Its window, the size asked for until the compositor gives one; the terminal draws on it itself. */
+	/* Its window, the size asked for until the compositor gives one, shown as the drawing asks. */
 	memset(&options, 0, sizeof(options));
-	options.title = "Terminal";
+	options.title = title;
 	options.width = width;
 	options.height = height;
-	options.present = KL_PRESENT_NONE;
+	options.present = present;
 	window->kui = kl_app_window_create(window->app, &options);
 	if (window->kui == NULL)
 		return -1;
+
+	/*
+	 * The window follows the screen's scale: the grid, the padding and the
+	 * text are drawn in its pixels (KL_WINDOW_SCALE draws the font again).
+	 * A compositor without the fractional scale shows it at 100 %, scaled.
+	 */
+	error = kl_window_follow_scale(window->kui);
+	if (error != 0)
+		printf("ZTERM SCALE follow=refused error=%d\n", error);
 
 	/* The keyboard's editing buttons come as the compositor's keys for a terminal (Ctrl+Shift+C and V), not as Ctrl+C. */
 	kl_window_edit_by_keys(window->kui);
@@ -130,24 +153,28 @@ terminal_window_open(
 	/*
 	 * Every pixel the terminal draws is opaque (the pass clears to the
 	 * theme's background, and each cell's colour has alpha 1): the
-	 * compositor need not draw what is under the window (ws270-p007).
+	 * compositor need not draw what is under the window.
 	 */
 	(void)kl_window_set_opaque(window->kui, 1);
 
-	/* The window's size and full screen as the first configure left them. */
+	/* The window's size, scale and full screen as the first configure left them. */
 	kl_window_size(window->kui, &window->width, &window->height);
+	window->scale = kl_window_scale(window->kui);
 	window->fullscreen = kl_window_fullscreen(window->kui);
+
+	/* A window just opened has the keyboard (a focus's going tells otherwise). */
+	window->focused = 1;
 
 	/*
 	 * The input method's text, asked for for good: the whole window is
-	 * where the shell's text is typed (BUG-155).  Nothing is composed yet.
+	 * where the shell's text is typed.  Nothing is composed yet.
 	 */
 	window->preedit[0] = '\0';
 	window->preedit_begin = -1;
 	window->preedit_end = -1;
 	kl_window_text_input(window->kui, 1);
 
-	/* Text and file names dropped on the window are pasted into the shell (ws035-p088). */
+	/* Text and file names dropped on the window are pasted into the shell. */
 	(void)kl_window_accept_drops(window->kui, KL_DROP_TEXT | KL_DROP_URIS);
 
 	/* What the window's making left queued (its size is already known). */
@@ -159,43 +186,45 @@ terminal_window_open(
 			window_event(window, &event.input);
 	}
 	window->resized = 0;
+	window->rescaled = 0;
 
 	/* Succeeded: the window can be drawn into. */
 	return 0;
 }
 
 /*
- * Waits for the compositor or the shells and takes what happened: the
- * window's input, and what each shell told.
+ * Waits for the window system or the tabs' connections and takes what
+ * happened: the window's input, and what each connection told.
  *
  * `timeout` is in milliseconds (-1 waits for ever; a held key's repeat or
- * input already queued waits less); ready[i] has what shells[i] told
- * (KL_PROCESS_READY_*: output to read, room for the keys, its end).
- * Returns 0, or -1 when the connection is broken.
+ * input already queued waits less); ready[i] has what connections[i] told
+ * (TERMINAL_READY_*: output to read, room for the keys, its end).
+ * Returns 0, or -1 when the connection to the window system is broken.
  */
 int
 terminal_window_dispatch(
 	struct terminal_window *window,
-	struct kl_process *const *shells,
+	struct terminal_connection *const *connections,
 	unsigned count,
 	int timeout,
 	unsigned *ready)
 {
 	struct kl_app_event event;
 	unsigned index;
+	unsigned told;
 	int status;
 	int taken;
 
-	/* No shell told anything yet. */
+	/* No connection told anything yet. */
 	for (index = 0; index < count; index++)
 		ready[index] = 0U;
 
-	/* The compositor and the shells, together (a held key repeats within, after its release if that came). */
+	/* The window system and the connections, together (a held key repeats within, after its release if that came). */
 	status = kl_app_dispatch(window->app, timeout);
 	if (status != 0)
 		return -1;
 
-	/* What happened, in its order: the window's input, and what the shells told. */
+	/* What happened, in its order: the window's input, and what the connections told. */
 	for (;;) {
 		taken = kl_app_take(window->app, &event);
 		if (taken == 0)
@@ -208,12 +237,10 @@ terminal_window_dispatch(
 			continue;
 		}
 
-		/* A shell's news. */
-		if (event.kind != KL_APP_PROCESS)
-			continue;
+		/* A connection's news, which each connection tells its own. */
 		for (index = 0; index < count; index++) {
-			if (shells[index] == event.process)
-				ready[index] |= event.ready;
+			told = connections[index]->ops->event(connections[index], &event);
+			ready[index] |= told;
 		}
 	}
 
@@ -232,7 +259,7 @@ terminal_window_close(
 	struct terminal_window *window)
 {
 	/* The frame callback awaited, before the surface it was asked on. */
-	window_pace_forget(window);
+	terminal_window_frame_forget(window);
 
 	/* The menus, before the window they are shown on. */
 	if (window->kui != NULL)
@@ -279,134 +306,87 @@ terminal_window_set_fullscreen(
 }
 
 /*
- * Tells when the next frame may be drawn (pace.h), changing nothing: 0
- * now, or the milliseconds after which it is drawn without the
- * compositor's answer to the last frame (which wakes the wait sooner).
- */
-int
-terminal_window_frame_wait(
-	const struct terminal_window *window,
-	uint64_t now)
-{
-	int wait;
-
-	/* As the pace stands now. */
-	wait = terminal_pace_wait(&window->pace, now);
-
-	/* Reports when the frame may be drawn. */
-	return wait;
-}
-
-/*
- * Asks for the frame callback of the frame about to be shown, unless one
- * is still awaited (a callback unanswered past the watchdog is given up
- * first); returns 1 when it was asked for now.
- */
-int
-terminal_window_frame_ask(
-	struct terminal_window *window,
-	uint64_t now)
-{
-	struct wl_callback *callback;
-	struct wl_surface *surface;
-	int stale;
-	int status;
-
-	/* A callback unanswered for long rode on a commit that may never be shown: the new frame asks for its own. */
-	stale = terminal_pace_stale(&window->pace, now);
-	if (stale)
-		window_pace_forget(window);
-
-	/* A callback still awaited: the frame is shown ahead of it. */
-	if (window->pace_callback != NULL)
-		return 0;
-
-	/* The callback, on the surface's next commit (the window system commits the frame after this call). */
-	surface = kl_window_surface(window->kui);
-	if (surface == NULL)
-		return 0;
-	callback = wl_surface_frame(surface);
-	if (callback == NULL)
-		return 0;
-	status = wl_callback_add_listener(callback, &window_pace_listener, window);
-	if (status != 0) {
-		wl_callback_destroy(callback);
-		return 0;
-	}
-
-	/* Succeeded: the frame is awaited from now. */
-	window->pace_callback = callback;
-	terminal_pace_ask(&window->pace, now);
-	return 1;
-}
-
-/*
- * Follows a frame's showing: asked says whether its callback was asked for
- * with it (terminal_window_frame_ask), error whether it was shown (0).  A
- * frame not shown awaits no callback asked for with it.
- */
-void
-terminal_window_frame_shown(
-	struct terminal_window *window,
-	int asked,
-	int error)
-{
-	int forget;
-
-	/* The pace after the frame; a frame not shown forgets the callback asked for with it. */
-	forget = terminal_pace_shown(&window->pace, asked, error);
-	if (forget)
-		window_pace_forget(window);
-}
-
-/*
- * Returns a monotonic time in milliseconds (0 when the clock cannot be read).
+ * Returns a monotonic time in milliseconds.
  */
 uint64_t
 terminal_clock(void)
 {
-	struct timespec now;
-	int status;
+	uint64_t now;
 
-	/* The monotonic clock. */
-	status = clock_gettime(CLOCK_MONOTONIC, &now);
-	if (status != 0)
-		return 0U;
+	/* libkeiland's monotonic clock, in microseconds. */
+	now = kl_clock_us();
 
 	/* Reports it in milliseconds. */
-	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	return now / 1000U;
 }
 
-/* The compositor took the frame shown with the callback: the next may be drawn. */
-static void
-window_paced(
-	void *data,
-	struct wl_callback *callback,
-	uint32_t time)
+/*
+ * Tells whether the measurement's lines (ZTERM LAT, ZTERM PERF) are
+ * written: the environment's TERMINAL_PERF is 1, read the first time.
+ */
+int
+terminal_perf_on(void)
 {
-	struct terminal_window *window;
+	const char *perf;
+	int same;
 
-	(void)time;
+	/* Read once. */
+	if (window_perf >= 0)
+		return window_perf;
 
-	/* The callback is used up; nothing is awaited now. */
-	window = data;
-	wl_callback_destroy(callback);
-	window->pace_callback = NULL;
-	terminal_pace_clear(&window->pace);
+	/* The measurement is on only for "1". */
+	window_perf = 0;
+	perf = getenv("TERMINAL_PERF");
+	if (perf == NULL)
+		return window_perf;
+	same = strcmp(perf, "1");
+	if (same == 0)
+		window_perf = 1;
+
+	/* Reports whether it is on. */
+	return window_perf;
 }
 
-/* Stops awaiting the frame callback: the next frame may be drawn at once. */
-static void
-window_pace_forget(
-	struct terminal_window *window)
+/*
+ * Gives the monotonic clock in microseconds for the measurement's lines,
+ * or 0 when the measurement is off.
+ */
+uint64_t
+terminal_perf_now_us(void)
 {
-	/* The callback, when one is awaited. */
-	if (window->pace_callback != NULL)
-		wl_callback_destroy(window->pace_callback);
-	window->pace_callback = NULL;
+	uint64_t now;
+	int on;
 
-	/* Nothing awaited. */
-	terminal_pace_clear(&window->pace);
+	/* Only for a measurement. */
+	on = terminal_perf_on();
+	if (!on)
+		return 0U;
+
+	/* Succeeded: microseconds. */
+	now = kl_clock_us();
+	return now;
+}
+
+/*
+ * Writes a ZTERM LAT line, one step of a typed key's way to the screen
+ * (key, commit, write, read, present) with its bytes and the monotonic
+ * time in microseconds, when the measurement is on (TERMINAL_PERF=1).
+ */
+void
+terminal_perf_step(
+	const char *step,
+	unsigned bytes)
+{
+	uint64_t now;
+
+	/* Only for a measurement. */
+	now = terminal_perf_now_us();
+	if (now == 0U)
+		return;
+
+	/* The step's line. */
+	printf("ZTERM LAT %s bytes=%u at_us=%llu\n", step, bytes, (unsigned long long)now);
+	fflush(stdout);
 }
 
 /* Turns one input of the window into the terminal's. */
@@ -415,8 +395,28 @@ window_event(
 	struct terminal_window *window,
 	const struct kl_window_event *event)
 {
+	int taken;
+
 	/* Every input carries the modifiers held. */
 	window->modifiers = window_modifiers(event->modifiers);
+
+	/* The keyboard's focus is kept for a picture's tab made active later. */
+	if (event->kind == KL_WINDOW_FOCUS)
+		window->focused = event->pressed;
+
+	/* While the settings' tab is active its widgets take the pointer, the keys and the text. */
+	if (window->page_active) {
+		taken = window_page_input(window, event);
+		if (taken)
+			return;
+	}
+
+	/* While a picture's tab is active its other end takes the keys, the text and the pointer as they are. */
+	if (window->picture_active) {
+		taken = window_picture_input(window, event);
+		if (taken)
+			return;
+	}
 
 	/* What it is. */
 	switch (event->kind) {
@@ -427,7 +427,7 @@ window_event(
 		window_pointer_event(window, TERMINAL_POINTER_MOTION, event);
 		break;
 	case KL_WINDOW_BUTTON:
-		/* The middle button's press pastes the primary selection (ws035-p100). */
+		/* The middle button's press pastes the primary selection. */
 		if (event->code == WINDOW_BUTTON_MIDDLE) {
 			if (event->pressed)
 				window_pointer_event(window, TERMINAL_POINTER_MIDDLE, event);
@@ -445,7 +445,7 @@ window_event(
 
 		break;
 	case KL_WINDOW_AXIS:
-		/* A touch pad's fingers scroll as fingers do, with libkeiland's scroller (ws090-p019); a wheel by notches. */
+		/* A touch pad's fingers scroll as fingers do, with libkeiland's scroller; a wheel by notches. */
 		if (event->axis_source == KL_AXIS_SOURCE_FINGER) {
 			window_pad_push(window, TERMINAL_TOUCH_PAD, event);
 		} else {
@@ -458,7 +458,7 @@ window_event(
 	case KL_WINDOW_KEY:
 		/* A press (or a held key's repeat) types; a release does nothing. */
 		if (event->pressed)
-			window_press(window, event->code);
+			window_press(window, event);
 		break;
 	case KL_WINDOW_TEXT_COMMIT:
 		window_text_commit(window, event->text);
@@ -486,6 +486,11 @@ window_event(
 		/* The size the compositor gave, drawn at from the next frame. */
 		kl_window_size(window->kui, &window->width, &window->height);
 		window->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		/* Another screen's scale: the main loop draws the text at it (its new size follows as a resize). */
+		window->scale = event->code;
+		window->rescaled = 1;
 		break;
 	case KL_WINDOW_CLOSE:
 		/* The main loop ends the terminal. */
@@ -561,19 +566,24 @@ window_selection(
 static void
 window_press(
 	struct terminal_window *window,
-	uint32_t key)
+	const struct kl_window_event *event)
 {
+	uint32_t key;
 	size_t length;
+	size_t room;
 	int shift;
 	int on;
+	int text;
+	int keypad;
 
-	/* While the search bar is open the keys edit what it looks for (ws128-p006). */
+	/* While the search bar is open the keys edit what it looks for. */
+	key = event->code;
 	if (window->search_open) {
-		window_search_key(window, key);
+		window_search_key(window, event);
 		return;
 	}
 
-	/* Shift with Page Up scrolls the view a page back instead of typing (ws035-p114). */
+	/* Shift with Page Up scrolls the view a page back instead of typing. */
 	shift = 0;
 	if ((window->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U)
 		shift = 1;
@@ -589,12 +599,14 @@ window_press(
 	}
 
 	/*
-	 * F11 alone is the Fullscreen item's key (BUG-194): it reaches the
-	 * window only when the compositor's menus did not choose the item (a
-	 * desktop without them), and does the same here instead of reaching
-	 * the shell.
+	 * F11 alone is the Fullscreen item's key: it reaches the window only
+	 * when the compositor's menus did not choose the item (a desktop
+	 * without them), and does the same here instead of reaching the shell;
+	 * a program that moved Fullscreen to Alt+Enter leaves F11 to the shell.
 	 */
-	if (key == WINDOW_KEY_F11 && window->modifiers == 0U) {
+	if (key == WINDOW_KEY_F11 &&
+	    window->modifiers == 0U &&
+	    !window->fullscreen_alt_enter) {
 		on = 1;
 		if (window->fullscreen)
 			on = 0;
@@ -603,8 +615,45 @@ window_press(
 		return;
 	}
 
-	/* The bytes, if they fit in what is left of the buffer. */
-	length = terminal_key_bytes(key, window->modifiers, window->input + window->input_length, sizeof(window->input) - window->input_length);
+	/* Alt+F11 switches the ambiguous width likewise, for a program that gave the item that key. */
+	if (key == WINDOW_KEY_F11 &&
+	    window->modifiers == TERMINAL_MODIFIER_ALT &&
+	    window->ambiguous_wide_key) {
+		window_action(window, TERMINAL_ACTION_AMBIGUOUS_WIDE);
+		return;
+	}
+
+	/* F12 alone opens the settings when the compositor's menus did not choose Shell > Settings. */
+	if (key == WINDOW_KEY_F12 &&
+	    window->modifiers == 0U &&
+	    window->settings_item) {
+		window_action(window, TERMINAL_ACTION_SETTINGS);
+		return;
+	}
+
+	/*
+	 * The character the window system says the key types, in the
+	 * keyboard's own layout, unless the program asked the keypad for its
+	 * application sequences; otherwise the key's bytes (keys.c, the US
+	 * layout and the sequences of the keys that type no character).
+	 */
+	text = window_key_text(window, event);
+	keypad = terminal_key_keypad(key);
+	if ((window->key_modes & TERMINAL_KEYS_KEYPAD) != 0U && keypad)
+		text = 0;
+
+	/* The bytes, if they fit in what is left of the buffer (a text that does not fit whole is left out). */
+	room = sizeof(window->input) - window->input_length;
+	length = 0U;
+	if (text) {
+		/* The text's bytes, whole or none. */
+		length = strlen(event->text);
+		if (length > room)
+			length = 0U;
+		memcpy(window->input + window->input_length, event->text, length);
+	} else {
+		length = terminal_key_bytes(key, window->modifiers, window->key_modes, window->input + window->input_length, room);
+	}
 	window->input_length += length;
 	terminal_perf_step("key", (unsigned)length);
 
@@ -625,7 +674,7 @@ window_text_commit(
 {
 	size_t length;
 
-	/* The text's bytes; while the search bar is open it is what the bar looks for (ws128-p006). */
+	/* The text's bytes; while the search bar is open it is what the bar looks for. */
 	length = strlen(text);
 	if (window->search_open) {
 		window_search_append(window, text, length);
@@ -653,7 +702,37 @@ window_text_commit(
 }
 
 /*
- * Answers a key while the search bar is open (ws128-p006): Escape closes
+ * Tells whether a key press is typed as the character the window system
+ * says it types (its text): one that is there, without Control or Alt
+ * (which make the key's own bytes), and not a control character.  The
+ * Wayland window system leaves the text empty.
+ */
+static int
+window_key_text(
+	const struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	unsigned char first;
+
+	/* Control and Alt make the key's own bytes. */
+	if ((window->modifiers & TERMINAL_MODIFIER_CONTROL) != 0U)
+		return 0;
+	if ((window->modifiers & TERMINAL_MODIFIER_ALT) != 0U)
+		return 0;
+
+	/* No character, or a control character (Enter, Tab, Backspace, Escape). */
+	first = (unsigned char)event->text[0];
+	if (first < 0x20U)
+		return 0;
+	if (first == 0x7fU)
+		return 0;
+
+	/* Succeeded: the key types its text. */
+	return 1;
+}
+
+/*
+ * Answers a key while the search bar is open: Escape closes
  * it, Enter finds the next older match (Shift+Enter the next newer),
  * Backspace takes back the last character, and a key that types a
  * printable character adds it.  Nothing goes to the shell.
@@ -661,13 +740,16 @@ window_text_commit(
 static void
 window_search_key(
 	struct terminal_window *window,
-	uint32_t key)
+	const struct kl_window_event *event)
 {
 	unsigned char bytes[16];
+	uint32_t key;
 	size_t length;
 	int shift;
+	int text;
 
 	/* Whether Shift is held, which turns Enter the other way. */
+	key = event->code;
 	shift = 0;
 	if ((window->modifiers & TERMINAL_MODIFIER_SHIFT) != 0U)
 		shift = 1;
@@ -700,8 +782,15 @@ window_search_key(
 		break;
 	}
 
+	/* The character the window system says the key types joins the text. */
+	text = window_key_text(window, event);
+	if (text) {
+		window_search_append(window, event->text, strlen(event->text));
+		return;
+	}
+
 	/* A key that types one printable character of ASCII adds it; any other does nothing. */
-	length = terminal_key_bytes(key, window->modifiers & TERMINAL_MODIFIER_SHIFT, bytes, sizeof(bytes));
+	length = terminal_key_bytes(key, window->modifiers & TERMINAL_MODIFIER_SHIFT, 0U, bytes, sizeof(bytes));
 	if (length != 1U ||
 	    bytes[0] < 0x20U ||
 	    bytes[0] > 0x7eU)
@@ -800,8 +889,8 @@ window_text_preedit(
 
 /*
  * The wheel turns: each notch toward the user (down) goes forward toward
- * the live screen, away from the user back into the scrollback
- * (ws035-p114); a distance short of a notch waits for the rest.
+ * the live screen, away from the user back into the scrollback;
+ * a distance short of a notch waits for the rest.
  */
 static void
 window_wheel(
@@ -887,7 +976,7 @@ window_touch_push(
 }
 
 /*
- * Queues a touch pad's scrolling among the touch inputs (ws090-p019), in
+ * Queues a touch pad's scrolling among the touch inputs, in
  * their order: the move (as a wheel scrolls) at the compositor's time, or
  * the fingers' lift.
  */
@@ -912,6 +1001,148 @@ window_pad_push(
 	kept->y = (float)event->dy;
 	kept->time = (uint32_t)(event->time_us / 1000U);
 	kept->arrival = event->arrival_us;
+}
+
+/*
+ * Gives an input of the window to the settings' page while its tab is
+ * active (F12 alone still goes back, as Shell > Settings does); reports 1
+ * when the page took it, 0 for one the window keeps (its size, closing,
+ * the menus, the tabs, the selections).
+ */
+static int
+window_page_input(
+	struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	int taken;
+
+	/* F12 alone, when the compositor's menus did not take it. */
+	if (event->kind == KL_WINDOW_KEY &&
+	    event->pressed &&
+	    event->code == WINDOW_KEY_F12 &&
+	    window->modifiers == 0U) {
+		window_action(window, TERMINAL_ACTION_SETTINGS);
+		return 1;
+	}
+
+	/* The page's widgets. */
+	taken = terminal_page_input(window, event);
+
+	/* Reports whether the page took it. */
+	return taken;
+}
+
+/*
+ * Gives an input of the window to a picture's tab while it is active: a
+ * key pressed (a held key's repeats too) or released, the input method's
+ * committed text, the pointer's motions, buttons and leaving, the wheel,
+ * and the keyboard's focus.  The text being composed is not shown, and
+ * the fingers do nothing.  Reports 1 when the tab took it, 0 for one the
+ * window keeps (its size, closing, the menus, the tabs, the selections).
+ */
+static int
+window_picture_input(
+	struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	/* What it is. */
+	switch (event->kind) {
+	case KL_WINDOW_KEY:
+		window_picture_push(window, TERMINAL_PICTURE_KEY, event);
+		return 1;
+	case KL_WINDOW_TEXT_COMMIT:
+		window_picture_push(window, TERMINAL_PICTURE_TEXT, event);
+		return 1;
+	case KL_WINDOW_MOTION:
+		/* The pointer's place, kept as the grid's tab keeps it. */
+		window->pointer_x = (int32_t)event->x;
+		window->pointer_y = (int32_t)event->y;
+		window_picture_push(window, TERMINAL_PICTURE_MOTION, event);
+		return 1;
+	case KL_WINDOW_BUTTON:
+		window_picture_push(window, TERMINAL_PICTURE_BUTTON, event);
+		return 1;
+	case KL_WINDOW_AXIS:
+		window_picture_push(window, TERMINAL_PICTURE_AXIS, event);
+		return 1;
+	case KL_WINDOW_LEAVE:
+		window_picture_push(window, TERMINAL_PICTURE_LEAVE, event);
+		return 1;
+	case KL_WINDOW_FOCUS:
+		window_picture_push(window, TERMINAL_PICTURE_FOCUS, event);
+		return 1;
+	case KL_WINDOW_TEXT_PREEDIT:
+	case KL_WINDOW_TEXT_DELETE:
+	case KL_WINDOW_AXIS_STOP:
+	case KL_WINDOW_TOUCH_DOWN:
+	case KL_WINDOW_TOUCH_MOTION:
+	case KL_WINDOW_TOUCH_UP:
+	case KL_WINDOW_TOUCH_CANCEL:
+		/* Nothing of the picture's. */
+		return 1;
+	default:
+		break;
+	}
+
+	/* The window's own. */
+	return 0;
+}
+
+/*
+ * Queues one input for a picture's tab: a motion takes the place of a
+ * motion queued just before it, and a full queue drops the input.
+ */
+static void
+window_picture_push(
+	struct terminal_window *window,
+	unsigned kind,
+	const struct kl_window_event *event)
+{
+	struct terminal_picture_event *queued;
+	unsigned count;
+
+	/* A motion after a motion: only the newest place counts. */
+	count = window->picture_event_count;
+	if (kind == TERMINAL_PICTURE_MOTION &&
+	    count != 0U &&
+	    window->picture_events[count - 1U].kind == TERMINAL_PICTURE_MOTION) {
+		window->picture_events[count - 1U].x = (int32_t)event->x;
+		window->picture_events[count - 1U].y = (int32_t)event->y;
+		return;
+	}
+
+	/* Room for it. */
+	if (count >= TERMINAL_PICTURE_EVENTS)
+		return;
+
+	/* The input as the window had it: the pointer's place is the window's last for a button or the wheel. */
+	queued = &window->picture_events[count];
+	memset(queued, 0, sizeof(*queued));
+	queued->kind = kind;
+	queued->code = event->code;
+	queued->pressed = event->pressed;
+	queued->x = window->pointer_x;
+	queued->y = window->pointer_y;
+	queued->dx = event->dx;
+	queued->dy = event->dy;
+	if (kind == TERMINAL_PICTURE_TEXT)
+		(void)snprintf(queued->text, sizeof(queued->text), "%s", event->text);
+	window->picture_event_count = count + 1U;
+}
+
+/* Queues an action for the main loop, as a menu's choice is (a full queue drops it). */
+static void
+window_action(
+	struct terminal_window *window,
+	uint32_t action)
+{
+	/* Room for it. */
+	if (window->action_count >= TERMINAL_ACTIONS)
+		return;
+
+	/* After the ones before it. */
+	window->actions[window->action_count] = action;
+	window->action_count++;
 }
 
 /* Turns libkeiland's modifier bits into wl_keyboard's, which keys.c and the selection read. */

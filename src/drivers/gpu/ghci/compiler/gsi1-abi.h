@@ -33,8 +33,10 @@
 
 /*
  * The constant bank: 512 words.  c0-c23 hold push-constant bytes 0-95
- * (the c operands), c24-c31 the hardware's mirror of the four tables'
- * addresses (set s's low word at 24 + 2 s, its high word above), c32-c39
+ * (the c operands), c28-c31 the addresses of the two buffer tables the
+ * driver loads there with LOAD_CONST (set s's low word at 24 + 2 s, its
+ * high word above, for the resource table's set 2 and the driver
+ * table's set 3; c24-c27 are not used), c32-c39
  * push-constant bytes 96-127 (read with lwc), from c40 the dynamic
  * offsets of the pipeline layout, one word each in the layout's order
  * (32 at most), c72-c74 the first workgroup of a vkCmdDispatchBase (x, y,
@@ -44,9 +46,11 @@
  * workgroup and a render pass draws one layer, so the driver loads these
  * words itself.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.4
- * "Descriptor Tables, Push Constants & Shader Resource Binding", the
- * mirrors c[24..31]; section 12.8, the bank of 512 words read with lwc).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.4
+ * "Descriptor Tables, Push Constants & Shader Resource Binding": buffer
+ * table addresses are loaded into the bank with CMD_LOAD_CONST, and
+ * CMD_BIND_DESCRIPTOR_TABLE writes no bank word; section 12.8, the bank
+ * of 512 words read with lwc).
  */
 #define GSI1_ABI_BANK_WORDS		512U
 #define GSI1_ABI_BANK_PUSH_LOW		0U
@@ -67,9 +71,19 @@
  */
 #define GSI1_ABI_LDS_BYTES		16384U
 
-/* The four hardware descriptor sets as the driver uses them. */
+/*
+ * The tables as the driver uses them: the texture and the sampler tables
+ * are set 0's of each kind (BIND_DESCRIPTOR_TABLE; a texture
+ * instruction's immediate index reads set 0), and the resource and the
+ * driver tables are buffer tables whose addresses are in the bank words
+ * of sets 2 and 3 (GSI1_ABI_BANK_SET()).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.4 and
+ * section 12.9: the immediate tex_field and samp_field index set 0's
+ * texture and sampler tables).
+ */
 #define GSI1_ABI_SET_TEXTURES		0U
-#define GSI1_ABI_SET_SAMPLERS		1U
+#define GSI1_ABI_SET_SAMPLERS		0U
 #define GSI1_ABI_SET_RESOURCES		2U
 #define GSI1_ABI_SET_DRIVER		3U
 

@@ -264,6 +264,7 @@ kwl_seat_focus(
 {
 	struct kwl_object *target;
 	struct kwl_object *previous;
+	int showing;
 
 	/* A dying surface or a failed client cannot take focus. */
 	target = server->front_surface;
@@ -275,6 +276,11 @@ kwl_seat_focus(
 
 	/* A popup holding the grab has the keyboard of its client's window (popup.c). */
 	target = kwl_popup_focus(server, target);
+
+	/* No client has the keyboard while the admin dialog shows (admin-ask.c); it comes back when the dialog closes. */
+	showing = kwl_admin_ask_showing();
+	if (showing)
+		target = NULL;
 
 	/* A new focus: the old surface's keyboards hear leave before the new one's hear enter; the arrow comes back. */
 	if (target != server->focus) {
@@ -323,6 +329,7 @@ kwl_seat_pointer_update(
 	struct kwl_object *base;
 	struct kwl_object *target;
 	struct kwl_object *deeper;
+	int showing;
 
 	/* A drag and drop has the pointer; its end gives it back (data.c, ws189-p002: a window brought forward by the bar's spring-loading hears no enter during it). */
 	if (server->dnd_active)
@@ -334,6 +341,11 @@ kwl_seat_pointer_update(
 	} else {
 		base = server->focus;
 	}
+
+	/* No surface has the pointer while the admin dialog shows (admin-ask.c). */
+	showing = kwl_admin_ask_showing();
+	if (showing)
+		base = NULL;
 
 	/* Its sub-surface under the pointer, when there is one. */
 	target = base;
@@ -537,6 +549,13 @@ kwl_seat_motion_shell(
 		return 1;
 	}
 
+	/* The admin dialog takes every motion while it shows (admin-ask.c), and no frame shows its arrow. */
+	taken = kwl_admin_ask_motion(server);
+	if (taken) {
+		kwl_cursor_frame(server, 0U);
+		return 1;
+	}
+
 	/* A drag and drop has the pointer (data.c). */
 	if (server->dnd_active) {
 		kwl_data_drag_motion(server, time);
@@ -588,10 +607,10 @@ kwl_seat_motion_deliver(
 	if (target == NULL)
 		return;
 
-	/* Motion carries a timestamp and the surface-local position in 24.8 fixed point. */
+	/* Motion carries a timestamp and the surface-local position in 24.8 fixed point, with the pointer's part between units. */
 	words[0] = time;
-	words[1] = (uint32_t)((server->pointer_x - target->x) * 256);
-	words[2] = (uint32_t)((server->pointer_y - target->y) * 256);
+	words[1] = (uint32_t)((server->pointer_x - target->x) * 256 + server->pointer_fraction_x);
+	words[2] = (uint32_t)((server->pointer_y - target->y) * 256 + server->pointer_fraction_y);
 	for (object = target->client->objects; object != NULL; object = object->next) {
 		/* Only live pointer objects receive motion. */
 		if (object->kind != KWL_POINTER || object->dead)
@@ -680,6 +699,13 @@ kwl_seat_button_shell(
 		/* The lock owns this input; retire any client operation destination. */
 		interactive_clear(server);
 		(void)kwl_greeter_button(server, button, state);
+		return 1;
+	}
+
+	/* The admin dialog takes every button while it shows (admin-ask.c). */
+	taken = kwl_admin_ask_button(server, button, state);
+	if (taken) {
+		interactive_clear(server);
 		return 1;
 	}
 
@@ -773,6 +799,7 @@ kwl_seat_button_deliver(
 
 	/* A delivered press authorizes requests from this live client's actual button, which start where it was pressed. */
 	if (state != 0U) {
+		target->client->pressed_ms = kwl_milliseconds();
 		server->press_serial = serial;
 		server->press_surface = target;
 		server->press_button = button;
@@ -887,6 +914,7 @@ seat_axis(
 	uint32_t words[3];
 	uint32_t word;
 	int taken;
+	int held;
 
 	/* The wheel while the Windows key is down: no tap of its own (ws142-p002). */
 	kwl_super_tap_cancel(&server->super_tap);
@@ -899,6 +927,11 @@ seat_axis(
 			kwl_greeter_wheel(server, vertical);
 		return;
 	}
+
+	/* The wheel goes nowhere while the admin dialog shows (admin-ask.c). */
+	held = kwl_admin_ask_holds(server);
+	if (held)
+		return;
 
 	/* The wheel does nothing during a drag and drop. */
 	if (server->dnd_active)
@@ -1070,6 +1103,21 @@ kwl_seat_key(
 		kwl_titlebar_key_released(key);
 
 	/*
+	 * The admin dialog takes every key while it shows (admin-ask.c), before
+	 * the input method and the desktop's own keys; Super+L still locks the
+	 * screen, and the lock cancels the dialog.
+	 */
+	taken = kwl_admin_ask_key(server, key, state);
+	if (taken) {
+		/* Super+L: the lock screen comes, and closes the dialog. */
+		if (key == SEAT_KEY_L &&
+		    state != 0U &&
+		    (server->modifiers & SEAT_MODIFIER_SUPER) != 0U)
+			(void)kwl_lock(server, "key");
+		return;
+	}
+
+	/*
 	 * App Home, while it shows, takes every key (home.c), and so does an
 	 * open menu (menu-shell.c), then a titlebar's text field with the
 	 * keyboard (titlebar-shell.c); the compositor's shortcuts come next
@@ -1208,6 +1256,10 @@ kwl_seat_key_deliver(
 	/* A key without focus reaches nobody. */
 	if (server->focus == NULL)
 		return;
+
+	/* A key pressed in the client's window is the person's (admin-ask.c asks again after it). */
+	if (state != 0U)
+		server->focus->client->pressed_ms = kwl_milliseconds();
 
 	/* The key event carries a new serial, the time, the evdev key code and the state. */
 	words[0] = kwl_next_serial(server);
@@ -1415,12 +1467,12 @@ pointer_enter(
 	struct kwl_server *server;
 	uint32_t words[4];
 
-	/* Enter carries the serial, the surface and the surface-local position (the window's place taken off). */
+	/* Enter carries the serial, the surface and the surface-local position (the window's place taken off, the pointer's part between units added). */
 	server = pointer->client->server;
 	words[0] = serial;
 	words[1] = surface->id;
-	words[2] = (uint32_t)((server->pointer_x - surface->x) * 256);
-	words[3] = (uint32_t)((server->pointer_y - surface->y) * 256);
+	words[2] = (uint32_t)((server->pointer_x - surface->x) * 256 + server->pointer_fraction_x);
+	words[3] = (uint32_t)((server->pointer_y - surface->y) * 256 + server->pointer_fraction_y);
 	deliver(pointer->client, pointer->id, POINTER_ENTER, words, sizeof(words));
 
 	/* Version 5 pointers see enter as a group of its own. */

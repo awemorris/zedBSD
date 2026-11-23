@@ -48,6 +48,9 @@
 /* The size of the buffer an account's strings are kept in. */
 #define SESSIOND_ACCOUNT_BUFFER	2048U
 
+/* The most descriptors a session's request line may carry (SCM_RIGHTS). */
+#define SESSIOND_FDS_MAX	4U
+
 /*
  * How a greeter ended: a user logged in, it failed, it ended by itself, or
  * sessiond is being stopped.
@@ -111,6 +114,18 @@ struct sessiond {
 	int session_crashed;
 };
 
+/*
+ * The descriptors that came with one line of a session's requests, in
+ * the order they came (closed on exec), and whether some were lost (more
+ * than there is room for, or cut by the kernel).  Whoever reads the line
+ * owns them: the request that takes them, or sessiond_fds_close.
+ */
+struct sessiond_fds {
+	unsigned count;
+	int descriptors[SESSIOND_FDS_MAX];
+	int lost;
+};
+
 /* Set by SIGTERM and SIGINT: sessiond ends its greeter or session and stops. */
 extern volatile sig_atomic_t sessiond_stopping;
 
@@ -123,6 +138,11 @@ void sessiond_greeter_release(struct sessiond *daemon);
 int sessiond_greeter_prepare(struct sessiond *daemon);
 void sessiond_greeter_go(struct sessiond *daemon);
 int sessiond_read_line(int descriptor, char *line, size_t size, int timeout_ms);
+
+/* A session's request line with the descriptors that came with it, and their closing (admin.c). */
+int sessiond_read_request(int descriptor, char *line, size_t size, int timeout_ms, struct sessiond_fds *fds, int *cut);
+void sessiond_fds_close(struct sessiond_fds *fds);
+
 long long sessiond_milliseconds(void);
 int sessiond_session_run(struct sessiond *daemon, struct sessiond_account *account);
 void sessiond_seat_give(uid_t uid, gid_t gid, int keys);
@@ -158,5 +178,18 @@ void sessiond_sleep_forget(int control);
 
 /* A session's SERVICE request (service.c). */
 void sessiond_service(const struct sessiond_account *account, int control, const char *arguments);
+
+/*
+ * A session's ADMIN requests: the admin actions run as root once the
+ * person at the screen allows them (admin.c).  begin and end bracket a
+ * session; lock follows its lock screen; tick runs out what waits.
+ */
+void sessiond_admin_begin(int control, const struct sessiond_account *account, int locked);
+int sessiond_admin_secret(char *line);
+void sessiond_admin_request(const char *arguments, int cut, struct sessiond_fds *fds);
+void sessiond_admin_lock(int locked);
+void sessiond_admin_tick(void);
+void sessiond_admin_end(void);
+int sessiond_admin_greeter_reply(const char *arguments, char *reply, size_t size);
 
 #endif

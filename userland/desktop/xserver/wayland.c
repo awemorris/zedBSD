@@ -6,29 +6,38 @@
  */
 
 /*
- * The connection to the desktop: standard Wayland (xdg-shell windows,
- * wl_shm buffers, wl_seat input).
+ * zedBSD's backend of the core: the Wayland desktop, through standard
+ * Wayland (xdg-shell windows, wl_shm buffers, wl_seat input).
  *
- * Each top-level X window has an xdg toplevel, which the desktop places
- * and decorates.  Its pixels are copied into one of its two wl_shm
- * buffers, the one the desktop has released, and committed with the
- * changed rectangle as damage.  The pointer's events become pointer
+ * Each top-level X window has a surface, an xdg toplevel, which the
+ * desktop places and decorates.  The core shows its pixels through a
+ * Vulkan swapchain on it (the Vulkan surface made here), or hands them
+ * to this backend's present: they are then copied into one of its two
+ * wl_shm buffers, the one the desktop has released, and committed with
+ * the changed rectangles as damage.  The pointer's events become pointer
  * frames on the root window (the place in the window plus the window's
- * corner there), and the keyboard's evdev codes become X keycodes.
+ * corner there), and each key is the X keycode of its place on the
+ * keyboard (its evdev code plus 8); the core's map is US.
  *
- * The clipboard (ws035-p087): the seat's data device tells the server when
- * another client's text becomes the selection (selection.c then owns X's
- * CLIPBOARD for it and reads the text when an X client asks); while an X
- * client owns CLIPBOARD the server offers its text as a data source, and
- * the desktop's requests for it are handed to selection.c with their
- * descriptors.
+ * The clipboard: the seat's data device tells the core when another
+ * client's text becomes the selection (the core then owns X's CLIPBOARD
+ * for it and reads the text when an X client asks); the text the core
+ * copies from an X owner of CLIPBOARD is offered as a data source, and
+ * the backend keeps it, so it answers the desktop's requests itself and
+ * the text stays after the X client ends.
  *
- * The primary selection (ws035-p103) is bridged the same way with X's
+ * The primary selection is bridged the same way with X's
  * PRIMARY, through the desktop's zwp_primary_selection_device_manager_v1
  * when it has one.
+ *
+ * The cursor: the core tells the cursor of the X window under the
+ * pointer; it is drawn into a wl_shm buffer of a cursor surface of the
+ * backend's, which the pointer shows while it is over that window (set
+ * again at each entering, as Wayland asks).  A window whose X cursor is
+ * None, and a cursor without an image, shows the backend's own arrow.
  */
 
-#include "userland/desktop/xserver/internal.h"
+#include "userland/desktop/xserver/program.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -43,20 +52,22 @@
 #include <wayland-client.h>
 #include <xdg-shell-client-protocol.h>
 
-/* The evdev codes of the pointer's buttons, and the key that toggles caps lock. */
+#define VK_USE_PLATFORM_WAYLAND_KHR 1
+#include <vulkan/vulkan.h>
+
+/* The evdev codes of the pointer's buttons. */
 #define WAYLAND_BTN_LEFT	0x110U
 #define WAYLAND_BTN_RIGHT	0x111U
 #define WAYLAND_BTN_MIDDLE	0x112U
-#define WAYLAND_KEY_CAPSLOCK	58U
 
-/* How many evdev key codes are remembered for their releases. */
-#define WAYLAND_KEYS		256U
-
-/* The modifier bits of wl_keyboard.modifiers kept (the same bits as X's). */
-#define WAYLAND_MODIFIERS	(X11_SHIFT_MASK | X11_CONTROL_MASK | X11_ALT_MASK)
+/* The evdev key codes an X keycode can name (the keycode is the code plus 8, at most 255). */
+#define WAYLAND_KEYS		248U
 
 /* The application's identity on the desktop. */
 #define WAYLAND_APP_ID		"xserver"
+
+/* The largest side of a cursor image the backend shows (a larger one is the arrow). */
+#define WAYLAND_CURSOR_MAX	256
 
 /* The text types the clipboard offers and takes, the one read first, and how long a read may wait (milliseconds) and hold. */
 #define WAYLAND_TEXT_UTF8	"text/plain;charset=utf-8"
@@ -64,7 +75,7 @@
 #define WAYLAND_TEXT_X11	"UTF8_STRING"
 #define WAYLAND_TEXT_STRING	"STRING"
 #define WAYLAND_READ_MS		2000
-#define WAYLAND_READ_MAX	(1024U * 1024U)
+#define WAYLAND_READ_MAX	X11_CLIPBOARD_TEXT_MAX
 
 /*
  * One wl_shm buffer of a window, and whether the desktop holds it.
@@ -76,11 +87,12 @@ struct wayland_buffer {
 };
 
 /*
- * One desktop window: an X window's xdg toplevel, its two buffers in one
- * shared-memory mapping, and its corner on the root window (for the
- * pointer's places).
+ * One surface, a desktop window: an X window's xdg toplevel, its two
+ * buffers in one shared-memory mapping (made when the core's present
+ * first needs them), and its corner on the root window (for the pointer's
+ * places).
  */
-struct x11_wayland_window {
+struct x11_surface {
 	/* The connection it belongs to, and the X window it shows. */
 	struct x11_wayland *wayland;
 	uint32_t id;
@@ -99,10 +111,7 @@ struct x11_wayland_window {
 	 */
 	struct kl_titlebar *titlebar;
 
-	/* Its swapchain when Vulkan shows it (NULL: the wl_shm buffers below do). */
-	struct x11_vulkan_window *vulkan;
-
-	/* The buffers' size, their shared memory, and the buffers. */
+	/* The window's size, and the buffers' shared memory (NULL: none made yet) and the buffers. */
 	unsigned width;
 	unsigned height;
 	void *memory;
@@ -125,12 +134,20 @@ struct x11_wayland_window {
 	unsigned pending_width;
 	unsigned pending_height;
 
+	/*
+	 * Its state (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) as last asked
+	 * of the desktop or told the server.  The desktop does not say when
+	 * it brings a minimized window back; the window's activation (a
+	 * configure with the activated state, or the keyboard's focus) does.
+	 */
+	unsigned state;
+
 	/* The next window of the connection. */
-	struct x11_wayland_window *next;
+	struct x11_surface *next;
 };
 
 /*
- * The connection: the globals, the windows, the server's callbacks, and
+ * The connection: the globals, the windows, the core it tells, and
  * the input state that turns Wayland's events into the server's.
  */
 struct x11_wayland {
@@ -149,33 +166,25 @@ struct x11_wayland {
 	struct wl_keyboard_listener keyboard_listener;
 
 	/* The windows open. */
-	struct x11_wayland_window *windows;
+	struct x11_surface *windows;
 
-	/* The connection's Vulkan, made with the first window, and whether windows use wl_shm instead (Vulkan failed, or was turned off). */
-	struct x11_vulkan *vulkan;
-	int shm_only;
-
-	/* The server's callbacks. */
-	struct x11_wayland_callbacks callbacks;
-	void *context;
+	/* The core told what comes (NULL until it is attached: nothing is told). */
+	struct x11server *server;
 
 	/* The window the pointer is in, where it is on the root window, and the buttons held (X's bits). */
-	struct x11_wayland_window *pointer_window;
+	struct x11_surface *pointer_window;
 	int pointer_x;
 	int pointer_y;
 	uint16_t buttons;
 
-	/* The modifiers held and caps lock. */
-	uint32_t modifiers;
-	int caps_lock;
-
-	/* The X keycode each evdev key was pressed as, so its release says the same. */
-	uint8_t keycodes[WAYLAND_KEYS];
+	/* The keys held (by evdev code), whose releases the core hears when the focus leaves. */
+	uint8_t held[WAYLAND_KEYS];
 
 	/*
 	 * The clipboard (ws035-p087): the data device manager and the seat's
 	 * device (NULL without them), the server's own source while an X
-	 * client's text is the selection (NULL otherwise), the offer
+	 * client's text is the selection (NULL otherwise) and that text (a
+	 * copy, NULL with the source), the offer
 	 * introduced last and whether it has text, the selection's offer from
 	 * another client (NULL for none) and whether it has text, and the
 	 * serial of the last input (a selection is set with it).
@@ -183,6 +192,8 @@ struct x11_wayland {
 	struct wl_data_device_manager *data_manager;
 	struct wl_data_device *data_device;
 	struct wl_data_source *source;
+	uint8_t *source_text;
+	size_t source_length;
 	struct wl_data_offer *offer_new;
 	int offer_new_text;
 	struct wl_data_offer *selection;
@@ -192,21 +203,49 @@ struct x11_wayland {
 	/*
 	 * The primary selection (ws035-p103), the same as the clipboard's:
 	 * the manager and the seat's device (NULL without them), the server's
-	 * own source, the offer introduced last and whether it has text, and
+	 * own source and its text, the offer introduced last and whether it has text, and
 	 * another client's selection and whether it has text.
 	 */
 	struct zwp_primary_selection_device_manager_v1 *primary_manager;
 	struct zwp_primary_selection_device_v1 *primary_device;
 	struct zwp_primary_selection_source_v1 *primary_source;
+	uint8_t *primary_source_text;
+	size_t primary_source_length;
 	struct zwp_primary_selection_offer_v1 *primary_new;
 	int primary_new_text;
 	struct zwp_primary_selection_offer_v1 *primary;
 	int primary_text;
+
+	/*
+	 * The cursor: the serial of the pointer's last entering (a cursor is
+	 * set with it), the cursor surface and the buffer it shows (NULL: none
+	 * made yet), its hot spot, and the window whose cursor it is (NULL:
+	 * the arrow, of no window).
+	 */
+	uint32_t pointer_serial;
+	struct wl_surface *cursor_surface;
+	struct wl_buffer *cursor_buffer;
+	int cursor_hot_x;
+	int cursor_hot_y;
+	struct x11_surface *cursor_window;
 };
 
-static int wayland_buffers(struct x11_wayland_window *window);
-static void wayland_buffers_free(struct x11_wayland_window *window);
-static struct x11_wayland_window *wayland_window_of(struct x11_wayland *wayland, struct wl_surface *surface);
+static struct x11_surface *wayland_open(void *context, uint32_t id, const struct x11_surface_info *info);
+static void wayland_update(void *context, struct x11_surface *window, const struct x11_surface_info *info, unsigned changed);
+static void wayland_close(void *context, struct x11_surface *window);
+static int wayland_vulkan_surface(void *context, struct x11_surface *window, void *instance, void *result);
+static int wayland_present(void *context, struct x11_surface *window, const uint32_t *pixels, size_t stride, const struct x11_rect *parts, unsigned count);
+static int wayland_clipboard_offer(void *context, unsigned selection, const uint8_t *text, size_t size);
+static int wayland_clipboard_read(void *context, unsigned selection, uint8_t **text, size_t *size);
+static int wayland_selection_own(struct x11_wayland *wayland, uint8_t *text, size_t length);
+static int wayland_selection_has_text(const struct x11_wayland *wayland);
+static int wayland_selection_read(struct x11_wayland *wayland, char **text, size_t *length);
+static int wayland_primary_own(struct x11_wayland *wayland, uint8_t *text, size_t length);
+static int wayland_primary_has_text(const struct x11_wayland *wayland);
+static int wayland_primary_read(struct x11_wayland *wayland, char **text, size_t *length);
+static int wayland_buffers(struct x11_surface *window);
+static void wayland_buffers_free(struct x11_surface *window);
+static struct x11_surface *wayland_window_of(struct x11_wayland *wayland, struct wl_surface *surface);
 static void wayland_pointer_frame(struct x11_wayland *wayland, uint32_t time, uint8_t button, int pressed, uint16_t bit);
 static void wayland_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void wayland_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -216,7 +255,11 @@ static void wayland_toplevel_configure(void *data, struct xdg_toplevel *toplevel
 static void wayland_toplevel_close(void *data, struct xdg_toplevel *toplevel);
 static void wayland_toplevel_bounds(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height);
 static void wayland_pending_sizes(struct x11_wayland *wayland);
-static void wayland_bounded_size(struct x11_wayland_window *window);
+static void wayland_bounded_size(struct x11_surface *window);
+static void wayland_shape(struct x11_wayland *wayland, struct x11_surface *window, const struct x11_surface_info *info);
+static void wayland_limits(struct x11_surface *window, const struct x11_size_hints *hints);
+static void wayland_set_state(struct x11_surface *window, unsigned state);
+static void wayland_state_heard(struct x11_surface *window, unsigned state);
 static void wayland_buffer_release(void *data, struct wl_buffer *buffer);
 static void wayland_seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities);
 static void wayland_seat_name(void *data, struct wl_seat *seat, const char *name);
@@ -242,11 +285,29 @@ static void wayland_source_send(void *data, struct wl_data_source *source, const
 static void wayland_source_cancelled(void *data, struct wl_data_source *source);
 static int wayland_text_type(const char *mime_type);
 static int wayland_pipe_read(int fd, char **text, size_t *length);
+static size_t wayland_pipe_write(int fd, const uint8_t *text, size_t length);
 static void wayland_primary_offer(void *data, struct zwp_primary_selection_device_v1 *device, struct zwp_primary_selection_offer_v1 *offer);
 static void wayland_primary_selection(void *data, struct zwp_primary_selection_device_v1 *device, struct zwp_primary_selection_offer_v1 *offer);
 static void wayland_primary_type(void *data, struct zwp_primary_selection_offer_v1 *offer, const char *mime_type);
 static void wayland_primary_send(void *data, struct zwp_primary_selection_source_v1 *source, const char *mime_type, int32_t fd);
 static void wayland_primary_cancelled(void *data, struct zwp_primary_selection_source_v1 *source);
+static void wayland_cursor(void *context, struct x11_surface *window, const struct x11_cursor_image *image);
+static int wayland_cursor_draw(struct x11_wayland *wayland, const uint32_t *pixels, int width, int height, int hot_x, int hot_y);
+static void wayland_cursor_arrow(struct x11_wayland *wayland);
+static void wayland_cursor_show(struct x11_wayland *wayland);
+
+/*
+ * The backend's functions, which the core calls with the connection as
+ * their context.  Wayland gives no client the pointer's place on the
+ * screen, nor a way to move it or to keep it, nor a bell: those are NULL.
+ * The X cursor is shown.
+ * A shape is the surface's input region alone, the same whichever way the
+ * pixels are shown, so it asks nothing of the core's way (no flags).
+ */
+const struct x11_backend_ops x11_wayland_ops = {
+	wayland_open, wayland_update, wayland_close, wayland_vulkan_surface, wayland_present, wayland_clipboard_offer,
+	wayland_clipboard_read, NULL, NULL, NULL, NULL, wayland_cursor, 0U
+};
 
 /* The registry's callbacks. */
 static const struct wl_registry_listener wayland_registry_listener = {
@@ -310,30 +371,23 @@ static const struct zwp_primary_selection_source_v1_listener wayland_primary_sou
 };
 
 /*
- * Connects to the desktop and binds the globals windows need.  Returns 0,
- * or an errno value.
+ * Connects to the desktop and binds the globals windows need; what the
+ * desktop says is told to the core once it is attached.  Returns 0, or an
+ * errno value.
  */
 int
 x11_wayland_open(
 	struct x11_wayland **result,
-	const char *display,
-	int shm,
-	const struct x11_wayland_callbacks *callbacks,
-	void *context)
+	const char *display)
 {
 	struct x11_wayland *wayland;
 	int status;
 
-	/* The connection's state, with the server's callbacks. */
+	/* The connection's state. */
 	*result = NULL;
 	wayland = calloc(1U, sizeof(*wayland));
 	if (wayland == NULL)
 		return ENOMEM;
-	wayland->callbacks = *callbacks;
-	wayland->context = context;
-
-	/* --shm keeps every window on wl_shm (Vulkan is not tried). */
-	wayland->shm_only = shm;
 
 	/* The pointer's events of version 1 (the listener has later members, left empty). */
 	wayland->pointer_listener.enter = wayland_pointer_enter;
@@ -399,6 +453,25 @@ x11_wayland_open(
 }
 
 /*
+ * Gives the connection the core it tells what the desktop says (the core
+ * is made with this backend, so it comes after the connection).
+ */
+void
+x11_wayland_attach(
+	struct x11_wayland *wayland,
+	struct x11server *server)
+{
+	/* The core from now on. */
+	wayland->server = server;
+
+	/* It hears of another client's text already the desktop's clipboard or primary selection. */
+	if (wayland->selection != NULL && wayland->selection_text)
+		x11server_backend_clipboard(server, X11_SELECTION_CLIPBOARD, 1);
+	if (wayland->primary != NULL && wayland->primary_text)
+		x11server_backend_clipboard(server, X11_SELECTION_PRIMARY, 1);
+}
+
+/*
  * Returns the descriptor the server waits on for the desktop's events.
  */
 int
@@ -416,7 +489,7 @@ x11_wayland_fd(
 
 /*
  * Reads the desktop's events when its descriptor is readable, runs those
- * read (the server's callbacks among them), and sends the requests they
+ * read (what they tell the core among them), and sends the requests they
  * made.  Returns 0, or -1 when the connection is lost.
  */
 int
@@ -461,243 +534,6 @@ x11_wayland_dispatch(
 }
 
 /*
- * Makes an X client's text the desktop's selection: the server's source
- * offers the text types, and the desktop's requests for them go to
- * selection.c (x11_wayland_callbacks.selection_send).  Returns 0, or an
- * errno value (ENOTSUP without a data device).
- */
-int
-x11_wayland_selection_own(
-	struct x11_wayland *wayland)
-{
-	struct wl_data_source *source;
-
-	/* Only with a data device; an own source already there is kept. */
-	if (wayland->data_device == NULL)
-		return ENOTSUP;
-	if (wayland->source != NULL)
-		return 0;
-
-	/* The source and its types. */
-	source = wl_data_device_manager_create_data_source(wayland->data_manager);
-	if (source == NULL)
-		return ENOMEM;
-	(void)wl_data_source_add_listener(source, &wayland_source_listener, wayland);
-	wl_data_source_offer(source, WAYLAND_TEXT_UTF8);
-	wl_data_source_offer(source, WAYLAND_TEXT_PLAIN);
-	wl_data_source_offer(source, WAYLAND_TEXT_X11);
-	wl_data_source_offer(source, WAYLAND_TEXT_STRING);
-
-	/* The selection, with the last input's serial; another client's offer is not the selection any more. */
-	wayland->source = source;
-	wl_data_device_set_selection(wayland->data_device, source, wayland->serial);
-	if (wayland->selection != NULL)
-		wl_data_offer_destroy(wayland->selection);
-	wayland->selection = NULL;
-	wayland->selection_text = 0;
-
-	/* Succeeded: sent at once. */
-	(void)wl_display_flush(wayland->display);
-	printf("X11 CLIPBOARD own\n");
-	fflush(stdout);
-	return 0;
-}
-
-/*
- * Gives up the server's source (its X client gave up CLIPBOARD, or went):
- * the desktop's selection is emptied.
- */
-void
-x11_wayland_selection_drop(
-	struct x11_wayland *wayland)
-{
-	/* Only the server's own source. */
-	if (wayland->source == NULL)
-		return;
-
-	/* The source goes; the selection with it. */
-	wl_data_source_destroy(wayland->source);
-	wayland->source = NULL;
-	(void)wl_display_flush(wayland->display);
-	printf("X11 CLIPBOARD drop\n");
-	fflush(stdout);
-}
-
-/*
- * Tells whether another client's text is the desktop's selection.
- */
-int
-x11_wayland_selection_has_text(
-	const struct x11_wayland *wayland)
-{
-	/* A selection offer with text. */
-	if (wayland->selection != NULL && wayland->selection_text)
-		return 1;
-
-	/* None. */
-	return 0;
-}
-
-/*
- * Reads the text of another client's selection (waiting at most
- * WAYLAND_READ_MS for it).  Returns 0 with the text (the caller frees it;
- * it has a NUL after its length), or an errno value.
- */
-int
-x11_wayland_selection_read(
-	struct x11_wayland *wayland,
-	char **text,
-	size_t *length)
-{
-	int pipes[2];
-	int status;
-	int error;
-
-	/* Nothing yet, and nothing without text. */
-	*text = NULL;
-	*length = 0;
-	status = x11_wayland_selection_has_text(wayland);
-	if (!status)
-		return ENOENT;
-
-	/* The pipe the source writes into. */
-	status = pipe(pipes);
-	if (status != 0)
-		return errno;
-
-	/* The request with the write end, which the server closes (the reader sees the end once the source closes its copy). */
-	wl_data_offer_receive(wayland->selection, WAYLAND_TEXT_UTF8, pipes[1]);
-	close(pipes[1]);
-	(void)wl_display_flush(wayland->display);
-
-	/* The text from the read end. */
-	error = wayland_pipe_read(pipes[0], text, length);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the text, ended by a NUL. */
-	printf("X11 CLIPBOARD read bytes=%lu\n", (unsigned long)*length);
-	fflush(stdout);
-	return 0;
-}
-
-/*
- * Makes an X client's text the desktop's primary selection (ws035-p103),
- * as x11_wayland_selection_own does for the clipboard; the desktop's
- * requests go to selection.c (x11_wayland_callbacks.primary_send).
- * Returns 0, or an errno value (ENOTSUP without a primary device).
- */
-int
-x11_wayland_primary_own(
-	struct x11_wayland *wayland)
-{
-	struct zwp_primary_selection_source_v1 *source;
-
-	/* Only with a primary device; an own source already there is kept. */
-	if (wayland->primary_device == NULL)
-		return ENOTSUP;
-	if (wayland->primary_source != NULL)
-		return 0;
-
-	/* The source and its types. */
-	source = zwp_primary_selection_device_manager_v1_create_source(wayland->primary_manager);
-	if (source == NULL)
-		return ENOMEM;
-	(void)zwp_primary_selection_source_v1_add_listener(source, &wayland_primary_source_listener, wayland);
-	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_UTF8);
-	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_PLAIN);
-	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_X11);
-	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_STRING);
-
-	/* The selection; another client's offer is not the selection any more. */
-	wayland->primary_source = source;
-	zwp_primary_selection_device_v1_set_selection(wayland->primary_device, source, wayland->serial);
-	if (wayland->primary != NULL)
-		zwp_primary_selection_offer_v1_destroy(wayland->primary);
-	wayland->primary = NULL;
-	wayland->primary_text = 0;
-
-	/* Succeeded: sent at once. */
-	(void)wl_display_flush(wayland->display);
-	printf("X11 PRIMARY own\n");
-	fflush(stdout);
-	return 0;
-}
-
-/* Gives up the server's primary source (its X client gave up PRIMARY, or went). */
-void
-x11_wayland_primary_drop(
-	struct x11_wayland *wayland)
-{
-	/* Only the server's own source. */
-	if (wayland->primary_source == NULL)
-		return;
-
-	/* The source goes; the selection with it. */
-	zwp_primary_selection_source_v1_destroy(wayland->primary_source);
-	wayland->primary_source = NULL;
-	(void)wl_display_flush(wayland->display);
-	printf("X11 PRIMARY drop\n");
-	fflush(stdout);
-}
-
-/* Tells whether another client's text is the desktop's primary selection. */
-int
-x11_wayland_primary_has_text(
-	const struct x11_wayland *wayland)
-{
-	/* A selection offer with text. */
-	if (wayland->primary != NULL && wayland->primary_text)
-		return 1;
-
-	/* None. */
-	return 0;
-}
-
-/*
- * Reads the text of another client's primary selection (waiting at most
- * WAYLAND_READ_MS for it).  Returns 0 with the text (the caller frees it;
- * it has a NUL after its length), or an errno value.
- */
-int
-x11_wayland_primary_read(
-	struct x11_wayland *wayland,
-	char **text,
-	size_t *length)
-{
-	int pipes[2];
-	int status;
-	int error;
-
-	/* Nothing yet, and nothing without text. */
-	*text = NULL;
-	*length = 0;
-	status = x11_wayland_primary_has_text(wayland);
-	if (!status)
-		return ENOENT;
-
-	/* The pipe the source writes into. */
-	status = pipe(pipes);
-	if (status != 0)
-		return errno;
-
-	/* The request with the write end, which the server closes. */
-	zwp_primary_selection_offer_v1_receive(wayland->primary, WAYLAND_TEXT_UTF8, pipes[1]);
-	close(pipes[1]);
-	(void)wl_display_flush(wayland->display);
-
-	/* The text from the read end. */
-	error = wayland_pipe_read(pipes[0], text, length);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the text, ended by a NUL. */
-	printf("X11 PRIMARY read bytes=%lu\n", (unsigned long)*length);
-	fflush(stdout);
-	return 0;
-}
-
-/*
  * Closes every window and disconnects.
  */
 void
@@ -707,6 +543,7 @@ x11_wayland_close(
 	/* The primary selection's objects. */
 	if (wayland->primary_source != NULL)
 		zwp_primary_selection_source_v1_destroy(wayland->primary_source);
+	free(wayland->primary_source_text);
 	if (wayland->primary != NULL)
 		zwp_primary_selection_offer_v1_destroy(wayland->primary);
 	if (wayland->primary_device != NULL)
@@ -717,6 +554,7 @@ x11_wayland_close(
 	/* The clipboard's objects. */
 	if (wayland->source != NULL)
 		wl_data_source_destroy(wayland->source);
+	free(wayland->source_text);
 	if (wayland->selection != NULL)
 		wl_data_offer_destroy(wayland->selection);
 	if (wayland->data_device != NULL)
@@ -724,10 +562,15 @@ x11_wayland_close(
 	if (wayland->data_manager != NULL)
 		wl_data_device_manager_destroy(wayland->data_manager);
 
-	/* The windows, and then the Vulkan they used. */
+	/* The windows the core left open. */
 	while (wayland->windows != NULL)
-		x11_wayland_window_close(wayland->windows);
-	x11_vulkan_close(wayland->vulkan);
+		wayland_close(wayland, wayland->windows);
+
+	/* The cursor's buffer and surface. */
+	if (wayland->cursor_buffer != NULL)
+		wl_buffer_destroy(wayland->cursor_buffer);
+	if (wayland->cursor_surface != NULL)
+		wl_surface_destroy(wayland->cursor_surface);
 
 	/* The input devices. */
 	if (wayland->keyboard != NULL)
@@ -754,45 +597,47 @@ x11_wayland_close(
 }
 
 /*
- * Opens a desktop window for an X window: an xdg toplevel with a title and
- * an application ID (NULL for the server's own), configured, and two
- * buffers of a size.  Returns NULL when it cannot be
- * made.
+ * Opens a surface for an X window: an xdg toplevel with its title and an
+ * application ID (the X client's class, else the server's own), with the
+ * compositor's titlebar, configured.  Its buffers are made when the
+ * core's present first needs them.  Returns NULL when it cannot be made.
  */
-struct x11_wayland_window *
-x11_wayland_window_open(
-	struct x11_wayland *wayland,
+static struct x11_surface *
+wayland_open(
+	void *context,
 	uint32_t id,
-	const char *title,
-	const char *app_id,
-	unsigned width,
-	unsigned height)
+	const struct x11_surface_info *info)
 {
-	struct x11_wayland_window *window;
+	struct x11_wayland *wayland;
+	struct x11_surface *window;
+	const char *app_id;
 	int status;
 
-	/* The window, at the head of the connection's list. */
+	/* The window, at the head of the connection's list, at its X window's size and place. */
+	wayland = context;
 	window = calloc(1U, sizeof(*window));
 	if (window == NULL)
 		return NULL;
 	window->wayland = wayland;
 	window->id = id;
-	window->width = width;
-	window->height = height;
+	window->width = info->width;
+	window->height = info->height;
+	window->origin_x = info->x;
+	window->origin_y = info->y;
 	window->next = wayland->windows;
 	wayland->windows = window;
 
 	/* The surface. */
 	window->surface = wl_compositor_create_surface(wayland->compositor);
 	if (window->surface == NULL) {
-		x11_wayland_window_close(window);
+		wayland_close(wayland, window);
 		return NULL;
 	}
 
 	/* Its window role, whose configures are heard. */
 	window->role = xdg_wm_base_get_xdg_surface(wayland->shell, window->surface);
 	if (window->role == NULL) {
-		x11_wayland_window_close(window);
+		wayland_close(wayland, window);
 		return NULL;
 	}
 
@@ -802,7 +647,7 @@ x11_wayland_window_open(
 	/* The toplevel, whose sizes and close requests are heard. */
 	window->toplevel = xdg_surface_get_toplevel(window->role);
 	if (window->toplevel == NULL) {
-		x11_wayland_window_close(window);
+		wayland_close(wayland, window);
 		return NULL;
 	}
 
@@ -810,10 +655,16 @@ x11_wayland_window_open(
 	(void)xdg_toplevel_add_listener(window->toplevel, &wayland_toplevel_listener, window);
 
 	/* The title, the identity (the X client's class, else the server's), and the first configure waited for. */
-	xdg_toplevel_set_title(window->toplevel, title);
+	xdg_toplevel_set_title(window->toplevel, info->title);
+	app_id = info->class_name;
 	if (app_id == NULL)
 		app_id = WAYLAND_APP_ID;
 	xdg_toplevel_set_app_id(window->toplevel, app_id);
+
+	/* The limits on its size, its state and its shape, asked for before the first commit. */
+	wayland_limits(window, &info->hints);
+	wayland_set_state(window, info->flags);
+	wayland_shape(wayland, window, info);
 
 	/* The compositor's titlebar, asked for before the first commit so that the first configure carries it. */
 	window->titlebar = kl_titlebar_create(wayland->display, window->toplevel, &wayland_titlebar_listener, window);
@@ -824,26 +675,8 @@ x11_wayland_window_open(
 	wl_surface_commit(window->surface);
 	status = wl_display_roundtrip(wayland->display);
 	if (status < 0 || !window->configured) {
-		x11_wayland_window_close(window);
+		wayland_close(wayland, window);
 		return NULL;
-	}
-
-	/* A swapchain, unless Vulkan is off or has failed before. */
-	if (!wayland->shm_only) {
-		window->vulkan = x11_vulkan_window_open(&wayland->vulkan, wayland->display, window->surface, width, height);
-		if (window->vulkan == NULL) {
-			wayland->shm_only = 1;
-			fprintf(stderr, "X11SERVER PRESENT wl_shm (Vulkan cannot show windows)\n");
-		}
-	}
-
-	/* Without one, the two buffers. */
-	if (window->vulkan == NULL) {
-		status = wayland_buffers(window);
-		if (status != 0) {
-			x11_wayland_window_close(window);
-			return NULL;
-		}
 	}
 
 	/* Succeeded: the window can show the X window. */
@@ -851,147 +684,167 @@ x11_wayland_window_open(
 }
 
 /*
- * Shows a window's pixels (rows of the window's width): all of them are
- * copied into a buffer the desktop has released, and the changed
- * rectangle is the damage.  Returns 0 when it was committed, or 1 when the
- * desktop holds both buffers (the caller tries again later).
+ * Brings a surface in step with its X window: a new size drops the
+ * buffers (the next present makes them at the size), a new place moves
+ * the corner the pointer's places are counted from, a new title is shown.
  */
-int
-x11_wayland_window_present(
-	struct x11_wayland_window *window,
-	const uint32_t *pixels,
-	int x,
-	int y,
-	int width,
-	int height)
+static void
+wayland_update(
+	void *context,
+	struct x11_surface *window,
+	const struct x11_surface_info *info,
+	unsigned changed)
 {
-	struct wayland_buffer *buffer;
+	/* The size; buffers of the old one go. */
+	(void)context;
+	if ((changed & X11_SURFACE_CHANGED_SIZE) != 0U &&
+	    (info->width != window->width || info->height != window->height)) {
+		window->width = info->width;
+		window->height = info->height;
+		wayland_buffers_free(window);
+	}
+
+	/* The pointer's places add the corner. */
+	if ((changed & X11_SURFACE_CHANGED_POSITION) != 0U) {
+		window->origin_x = info->x;
+		window->origin_y = info->y;
+	}
+
+	/* The desktop shows the title on the title bar. */
+	if ((changed & X11_SURFACE_CHANGED_TITLE) != 0U)
+		xdg_toplevel_set_title(window->toplevel, info->title);
+
+	/* The limits on its size. */
+	if ((changed & X11_SURFACE_CHANGED_HINTS) != 0U)
+		wayland_limits(window, &info->hints);
+
+	/* Its state as the client asked (minimized, maximized, full-screen). */
+	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0U)
+		wayland_set_state(window, info->flags);
+
+	/*
+	 * Its shape, as the region the pointer is taken in (the buffer has no
+	 * alpha, so the desktop still shows all of it).  The icon, the
+	 * attention and the activation have no request the desktop takes.
+	 */
+	if ((changed & X11_SURFACE_CHANGED_SHAPE) != 0U)
+		wayland_shape(window->wayland, window, info);
+}
+
+/*
+ * Gives a window's shape to the desktop as the surface's input region
+ * (unshaped: the whole surface), applied at the next commit.
+ */
+static void
+wayland_shape(
+	struct x11_wayland *wayland,
+	struct x11_surface *window,
+	const struct x11_surface_info *info)
+{
+	struct wl_region *region;
 	unsigned index;
-	int status;
 
-	/* Through the swapchain: the whole image each frame. */
-	if (window->vulkan != NULL) {
-		status = x11_vulkan_window_present(window->vulkan, pixels);
-		if (status >= 0)
-			return status;
-
-		/* Vulkan failed: this window and later ones fall back to wl_shm. */
-		fprintf(stderr, "X11SERVER PRESENT wl_shm (Vulkan failed on window 0x%x)\n", (unsigned)window->id);
-		x11_vulkan_window_close(window->vulkan);
-		window->vulkan = NULL;
-		window->wayland->shm_only = 1;
-		status = wayland_buffers(window);
-		if (status != 0)
-			return -1;
-		x = 0;
-		y = 0;
-		width = (int)window->width;
-		height = (int)window->height;
+	/* Unshaped: the whole surface takes the pointer. */
+	if (!info->shaped) {
+		wl_surface_set_input_region(window->surface, NULL);
+		return;
 	}
 
-	/* The first buffer the desktop has given back. */
-	buffer = NULL;
-	for (index = 0U; index < 2U; index++) {
-		if (!window->buffers[index].busy) {
-			buffer = &window->buffers[index];
-			break;
-		}
-	}
+	/* The shape's rectangles as a region. */
+	region = wl_compositor_create_region(wayland->compositor);
+	if (region == NULL)
+		return;
+	for (index = 0U; index < info->shape_count; index++)
+		wl_region_add(region, info->shape[index].x, info->shape[index].y, (int32_t)info->shape[index].width, (int32_t)info->shape[index].height);
 
-	/* Both are still held: the frame waits. */
-	if (buffer == NULL)
-		return 1;
-
-	/* All the pixels, so the buffer is whole whatever it showed before. */
-	memcpy(buffer->pixels, pixels, (size_t)window->width * window->height * sizeof(uint32_t));
-	buffer->busy = 1;
-
-	/* Attached with the change as the damage, and committed. */
-	wl_surface_attach(window->surface, buffer->buffer, 0, 0);
-	wl_surface_damage(window->surface, x, y, width, height);
-	wl_surface_commit(window->surface);
-	(void)wl_display_flush(window->wayland->display);
-
-	/* Succeeded: the frame is the desktop's. */
-	return 0;
+	/* Succeeded: the surface's input region, the region no longer needed. */
+	wl_surface_set_input_region(window->surface, region);
+	wl_region_destroy(region);
 }
 
 /*
- * Makes a window's buffers again at a new size.  Returns 0, or -1.
+ * Asks the desktop to keep a window within the limits its X client put on
+ * its size (the smallest and largest size; the steps and the ratio are
+ * the server's to keep).
  */
-int
-x11_wayland_window_resize(
-	struct x11_wayland_window *window,
-	unsigned width,
-	unsigned height)
+static void
+wayland_limits(
+	struct x11_surface *window,
+	const struct x11_size_hints *hints)
 {
-	int status;
+	/* The smallest size (0: none). */
+	xdg_toplevel_set_min_size(window->toplevel, (int32_t)hints->min_width, (int32_t)hints->min_height);
 
-	/* The same size keeps the buffers. */
-	if (width == window->width && height == window->height)
-		return 0;
-
-	/* A swapchain is made again at the size; one that cannot be falls back to wl_shm. */
-	window->width = width;
-	window->height = height;
-	if (window->vulkan != NULL) {
-		status = x11_vulkan_window_resize(window->vulkan, width, height);
-		if (status == 0)
-			return 0;
-		fprintf(stderr, "X11SERVER PRESENT wl_shm (Vulkan cannot resize window 0x%x)\n", (unsigned)window->id);
-		x11_vulkan_window_close(window->vulkan);
-		window->vulkan = NULL;
-		window->wayland->shm_only = 1;
-	}
-
-	/* The old buffers go, and new ones of the size come. */
-	wayland_buffers_free(window);
-	status = wayland_buffers(window);
-	if (status != 0)
-		return -1;
-
-	/* Succeeded: the next frame is at the new size. */
-	return 0;
+	/* Succeeded: the largest size (0: none). */
+	xdg_toplevel_set_max_size(window->toplevel, (int32_t)hints->max_width, (int32_t)hints->max_height);
 }
 
 /*
- * Tells a window where its X window's corner is on the root window.
+ * Asks the desktop for the state the X client asked a window to have:
+ * minimized, maximized or not, full-screen or not.  The desktop has no way
+ * to bring a minimized window back; it comes back when the user does.
  */
-void
-x11_wayland_window_move(
-	struct x11_wayland_window *window,
-	int x,
-	int y)
+static void
+wayland_set_state(
+	struct x11_surface *window,
+	unsigned state)
 {
-	/* The pointer's places add it. */
-	window->origin_x = x;
-	window->origin_y = y;
+	unsigned old;
+
+	/* What changes. */
+	old = window->state;
+	window->state = state;
+
+	/* Full-screen. */
+	if ((state & X11_SURFACE_FULLSCREEN) != 0U && (old & X11_SURFACE_FULLSCREEN) == 0U)
+		xdg_toplevel_set_fullscreen(window->toplevel, NULL);
+	if ((state & X11_SURFACE_FULLSCREEN) == 0U && (old & X11_SURFACE_FULLSCREEN) != 0U)
+		xdg_toplevel_unset_fullscreen(window->toplevel);
+
+	/* Maximized. */
+	if ((state & X11_SURFACE_MAXIMIZED) != 0U && (old & X11_SURFACE_MAXIMIZED) == 0U)
+		xdg_toplevel_set_maximized(window->toplevel);
+	if ((state & X11_SURFACE_MAXIMIZED) == 0U && (old & X11_SURFACE_MAXIMIZED) != 0U)
+		xdg_toplevel_unset_maximized(window->toplevel);
+
+	/* Succeeded: minimized. */
+	if ((state & X11_SURFACE_ICONIC) != 0U && (old & X11_SURFACE_ICONIC) == 0U)
+		xdg_toplevel_set_minimized(window->toplevel);
 }
 
 /*
- * Gives a window a new title.
+ * Tells the server the state the desktop gave a window (maximized,
+ * full-screen, or back from minimized), when it changed.
  */
-void
-x11_wayland_window_title(
-	struct x11_wayland_window *window,
-	const char *title)
+static void
+wayland_state_heard(
+	struct x11_surface *window,
+	unsigned state)
 {
-	/* The desktop shows it on the title bar. */
-	xdg_toplevel_set_title(window->toplevel, title);
+	/* The same state. */
+	if (state == window->state)
+		return;
+
+	/* Succeeded: the server hears it. */
+	window->state = state;
+	if (window->wayland->server != NULL)
+		x11server_backend_state(window->wayland->server, window->id, (int)state);
 }
 
 /*
- * Closes a window.
+ * Closes a surface: its buffers, its roles and its wl_surface (the core
+ * has closed the swapchain on it first).
  */
-void
-x11_wayland_window_close(
-	struct x11_wayland_window *window)
+static void
+wayland_close(
+	void *context,
+	struct x11_surface *window)
 {
-	struct x11_wayland_window **link;
+	struct x11_surface **link;
 	struct x11_wayland *wayland;
 
 	/* It leaves the connection's list. */
-	wayland = window->wayland;
+	wayland = context;
 	for (link = &wayland->windows; *link != NULL; link = &(*link)->next) {
 		if (*link == window) {
 			*link = window->next;
@@ -999,13 +852,13 @@ x11_wayland_window_close(
 		}
 	}
 
-	/* The pointer is no longer in it. */
+	/* The pointer is no longer in it, and its cursor is no window's. */
 	if (wayland->pointer_window == window)
 		wayland->pointer_window = NULL;
+	if (wayland->cursor_window == window)
+		wayland->cursor_window = NULL;
 
-	/* Its swapchain or buffers (before the surface they are on), its roles and its surface. */
-	if (window->vulkan != NULL)
-		x11_vulkan_window_close(window->vulkan);
+	/* Its buffers (before the surface they are on), its roles and its surface. */
 	wayland_buffers_free(window);
 	if (window->titlebar != NULL)
 		kl_titlebar_destroy(window->titlebar);
@@ -1021,10 +874,391 @@ x11_wayland_window_close(
 	free(window);
 }
 
+/*
+ * Makes the Vulkan surface of a surface's wl_surface, on the core's
+ * instance, into *result (a VkSurfaceKHR).  Returns 0, or EIO.
+ */
+static int
+wayland_vulkan_surface(
+	void *context,
+	struct x11_surface *window,
+	void *instance,
+	void *result)
+{
+	VkWaylandSurfaceCreateInfoKHR create;
+	struct x11_wayland *wayland;
+	VkResult error;
+
+	/* The window's wl_surface on the connection. */
+	wayland = context;
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+	create.display = wayland->display;
+	create.surface = window->surface;
+	error = vkCreateWaylandSurfaceKHR((VkInstance)instance, &create, NULL, (VkSurfaceKHR *)result);
+	if (error != VK_SUCCESS)
+		return EIO;
+
+	/* Succeeded: the core makes a swapchain on it. */
+	return 0;
+}
+
+/*
+ * Shows a surface's pixels (rows of its width, stride pixels apart): all
+ * of them are copied into a buffer the desktop has released, and the
+ * parts that changed are the damage.  Returns 0 when it was committed,
+ * EBUSY when the desktop holds both buffers (the core tries again later),
+ * or ENOMEM when the buffers cannot be made.
+ */
+static int
+wayland_present(
+	void *context,
+	struct x11_surface *window,
+	const uint32_t *pixels,
+	size_t stride,
+	const struct x11_rect *parts,
+	unsigned count)
+{
+	struct wayland_buffer *buffer;
+	unsigned index;
+	unsigned row;
+	int status;
+
+	/* The buffers, made at the window's size the first time. */
+	(void)context;
+	if (window->memory == NULL) {
+		status = wayland_buffers(window);
+		if (status != 0) {
+			wayland_buffers_free(window);
+			return ENOMEM;
+		}
+	}
+
+	/* The first buffer the desktop has given back. */
+	buffer = NULL;
+	for (index = 0U; index < 2U; index++) {
+		if (!window->buffers[index].busy) {
+			buffer = &window->buffers[index];
+			break;
+		}
+	}
+
+	/* Both are still held: the frame waits. */
+	if (buffer == NULL)
+		return EBUSY;
+
+	/* All the pixels, so the buffer is whole whatever it showed before. */
+	for (row = 0U; row < window->height; row++)
+		memcpy(buffer->pixels + (size_t)row * window->width, pixels + (size_t)row * stride, (size_t)window->width * sizeof(uint32_t));
+	buffer->busy = 1;
+
+	/* Attached with the changed parts as the damage. */
+	wl_surface_attach(window->surface, buffer->buffer, 0, 0);
+	for (index = 0U; index < count; index++)
+		wl_surface_damage(window->surface, parts[index].x, parts[index].y, (int32_t)parts[index].width, (int32_t)parts[index].height);
+
+	/* Succeeded: committed, the frame is the desktop's. */
+	wl_surface_commit(window->surface);
+	(void)wl_display_flush(window->wayland->display);
+	return 0;
+}
+
+/*
+ * Makes the text the core copied from an X owner of CLIPBOARD or PRIMARY
+ * the desktop's clipboard or primary selection: the backend keeps a copy
+ * and answers the desktop's requests with it.  Returns 0, or an errno
+ * value (ENOTSUP without the device, E2BIG, ENOMEM).
+ */
+static int
+wayland_clipboard_offer(
+	void *context,
+	unsigned selection,
+	const uint8_t *text,
+	size_t size)
+{
+	struct x11_wayland *wayland;
+	uint8_t *copy;
+	int error;
+
+	/* A text too long to pass is refused. */
+	wayland = context;
+	if (size > X11_CLIPBOARD_TEXT_MAX)
+		return E2BIG;
+
+	/* The backend's copy (an empty text is still text). */
+	copy = malloc(size + 1U);
+	if (copy == NULL)
+		return ENOMEM;
+	if (size != 0U)
+		memcpy(copy, text, size);
+	copy[size] = '\0';
+
+	/* The primary selection, or the clipboard, with a new source. */
+	if (selection == X11_SELECTION_PRIMARY) {
+		error = wayland_primary_own(wayland, copy, size);
+	} else {
+		error = wayland_selection_own(wayland, copy, size);
+	}
+	if (error != 0) {
+		free(copy);
+		return error;
+	}
+
+	/* Succeeded: the source holds the copy. */
+	return 0;
+}
+
+/*
+ * Reads another client's text of the desktop's clipboard or primary
+ * selection.  Returns 0 with the text (the caller frees it), or an errno
+ * value.
+ */
+static int
+wayland_clipboard_read(
+	void *context,
+	unsigned selection,
+	uint8_t **text,
+	size_t *size)
+{
+	struct x11_wayland *wayland;
+	char *read_text;
+	int error;
+
+	/* The primary selection's, else the clipboard's. */
+	wayland = context;
+	if (selection == X11_SELECTION_PRIMARY) {
+		error = wayland_primary_read(wayland, &read_text, size);
+	} else {
+		error = wayland_selection_read(wayland, &read_text, size);
+	}
+
+	/* Nothing read. */
+	*text = NULL;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the text is the caller's. */
+	*text = (uint8_t *)read_text;
+	return 0;
+}
+
+/*
+ * Makes an X client's text the desktop's selection: a new source of the
+ * server's offers the text types and holds the text (which it takes),
+ * and the source before goes.  Returns 0, or an errno value (ENOTSUP
+ * without a data device, ENOMEM).
+ */
+static int
+wayland_selection_own(
+	struct x11_wayland *wayland,
+	uint8_t *text,
+	size_t length)
+{
+	struct wl_data_source *source;
+
+	/* Only with a data device. */
+	if (wayland->data_device == NULL)
+		return ENOTSUP;
+
+	/* The source and its types. */
+	source = wl_data_device_manager_create_data_source(wayland->data_manager);
+	if (source == NULL)
+		return ENOMEM;
+	(void)wl_data_source_add_listener(source, &wayland_source_listener, wayland);
+	wl_data_source_offer(source, WAYLAND_TEXT_UTF8);
+	wl_data_source_offer(source, WAYLAND_TEXT_PLAIN);
+	wl_data_source_offer(source, WAYLAND_TEXT_X11);
+	wl_data_source_offer(source, WAYLAND_TEXT_STRING);
+
+	/* The selection, with the last input's serial; the server's source before goes. */
+	wl_data_device_set_selection(wayland->data_device, source, wayland->serial);
+	if (wayland->source != NULL)
+		wl_data_source_destroy(wayland->source);
+	free(wayland->source_text);
+	wayland->source = source;
+	wayland->source_text = text;
+	wayland->source_length = length;
+
+	/* Another client's offer is not the selection any more. */
+	if (wayland->selection != NULL)
+		wl_data_offer_destroy(wayland->selection);
+	wayland->selection = NULL;
+	wayland->selection_text = 0;
+
+	/* Succeeded: sent at once. */
+	(void)wl_display_flush(wayland->display);
+	printf("X11 CLIPBOARD own bytes=%lu\n", (unsigned long)length);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Tells whether another client's text is the desktop's selection.
+ */
+static int
+wayland_selection_has_text(
+	const struct x11_wayland *wayland)
+{
+	/* A selection offer with text. */
+	if (wayland->selection != NULL && wayland->selection_text)
+		return 1;
+
+	/* None. */
+	return 0;
+}
+
+/*
+ * Reads the text of another client's selection (waiting at most
+ * WAYLAND_READ_MS for it).  Returns 0 with the text (the caller frees it;
+ * it has a NUL after its length), or an errno value.
+ */
+static int
+wayland_selection_read(
+	struct x11_wayland *wayland,
+	char **text,
+	size_t *length)
+{
+	int pipes[2];
+	int status;
+	int error;
+
+	/* Nothing yet, and nothing without text. */
+	*text = NULL;
+	*length = 0;
+	status = wayland_selection_has_text(wayland);
+	if (!status)
+		return ENOENT;
+
+	/* The pipe the source writes into. */
+	status = pipe(pipes);
+	if (status != 0)
+		return errno;
+
+	/* The request with the write end, which the server closes (the reader sees the end once the source closes its copy). */
+	wl_data_offer_receive(wayland->selection, WAYLAND_TEXT_UTF8, pipes[1]);
+	close(pipes[1]);
+	(void)wl_display_flush(wayland->display);
+
+	/* The text from the read end. */
+	error = wayland_pipe_read(pipes[0], text, length);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the text, ended by a NUL. */
+	printf("X11 CLIPBOARD read bytes=%lu\n", (unsigned long)*length);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Makes an X client's text the desktop's primary selection, as
+ * wayland_selection_own does for the clipboard.  Returns 0, or an errno
+ * value (ENOTSUP without a primary device, ENOMEM).
+ */
+static int
+wayland_primary_own(
+	struct x11_wayland *wayland,
+	uint8_t *text,
+	size_t length)
+{
+	struct zwp_primary_selection_source_v1 *source;
+
+	/* Only with a primary device. */
+	if (wayland->primary_device == NULL)
+		return ENOTSUP;
+
+	/* The source and its types. */
+	source = zwp_primary_selection_device_manager_v1_create_source(wayland->primary_manager);
+	if (source == NULL)
+		return ENOMEM;
+	(void)zwp_primary_selection_source_v1_add_listener(source, &wayland_primary_source_listener, wayland);
+	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_UTF8);
+	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_PLAIN);
+	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_X11);
+	zwp_primary_selection_source_v1_offer(source, WAYLAND_TEXT_STRING);
+
+	/* The selection; the server's source before goes. */
+	zwp_primary_selection_device_v1_set_selection(wayland->primary_device, source, wayland->serial);
+	if (wayland->primary_source != NULL)
+		zwp_primary_selection_source_v1_destroy(wayland->primary_source);
+	free(wayland->primary_source_text);
+	wayland->primary_source = source;
+	wayland->primary_source_text = text;
+	wayland->primary_source_length = length;
+
+	/* Another client's offer is not the selection any more. */
+	if (wayland->primary != NULL)
+		zwp_primary_selection_offer_v1_destroy(wayland->primary);
+	wayland->primary = NULL;
+	wayland->primary_text = 0;
+
+	/* Succeeded: sent at once. */
+	(void)wl_display_flush(wayland->display);
+	printf("X11 PRIMARY own bytes=%lu\n", (unsigned long)length);
+	fflush(stdout);
+	return 0;
+}
+
+/* Tells whether another client's text is the desktop's primary selection. */
+static int
+wayland_primary_has_text(
+	const struct x11_wayland *wayland)
+{
+	/* A selection offer with text. */
+	if (wayland->primary != NULL && wayland->primary_text)
+		return 1;
+
+	/* None. */
+	return 0;
+}
+
+/*
+ * Reads the text of another client's primary selection (waiting at most
+ * WAYLAND_READ_MS for it).  Returns 0 with the text (the caller frees it;
+ * it has a NUL after its length), or an errno value.
+ */
+static int
+wayland_primary_read(
+	struct x11_wayland *wayland,
+	char **text,
+	size_t *length)
+{
+	int pipes[2];
+	int status;
+	int error;
+
+	/* Nothing yet, and nothing without text. */
+	*text = NULL;
+	*length = 0;
+	status = wayland_primary_has_text(wayland);
+	if (!status)
+		return ENOENT;
+
+	/* The pipe the source writes into. */
+	status = pipe(pipes);
+	if (status != 0)
+		return errno;
+
+	/* The request with the write end, which the server closes. */
+	zwp_primary_selection_offer_v1_receive(wayland->primary, WAYLAND_TEXT_UTF8, pipes[1]);
+	close(pipes[1]);
+	(void)wl_display_flush(wayland->display);
+
+	/* The text from the read end. */
+	error = wayland_pipe_read(pipes[0], text, length);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the text, ended by a NUL. */
+	printf("X11 PRIMARY read bytes=%lu\n", (unsigned long)*length);
+	fflush(stdout);
+	return 0;
+}
+
 /* Makes a window's two XRGB8888 buffers in one shared-memory pool. */
 static int
 wayland_buffers(
-	struct x11_wayland_window *window)
+	struct x11_surface *window)
 {
 	struct wl_shm_pool *pool;
 	char name[64];
@@ -1086,7 +1320,7 @@ wayland_buffers(
 /* Releases a window's buffers and their memory. */
 static void
 wayland_buffers_free(
-	struct x11_wayland_window *window)
+	struct x11_surface *window)
 {
 	unsigned index;
 
@@ -1105,12 +1339,12 @@ wayland_buffers_free(
 }
 
 /* Returns the window of a surface, or NULL. */
-static struct x11_wayland_window *
+static struct x11_surface *
 wayland_window_of(
 	struct x11_wayland *wayland,
 	struct wl_surface *surface)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* The connection's window on the surface, if it is one of them. */
 	for (window = wayland->windows; window != NULL; window = window->next) {
@@ -1157,9 +1391,10 @@ wayland_pointer_frame(
 		frame.pressed = pressed;
 	}
 
-	/* The server hears it. */
+	/* The core hears it. */
 	frame.buttons_after = wayland->buttons;
-	wayland->callbacks.pointer(wayland->context, &frame);
+	if (wayland->server != NULL)
+		x11server_backend_pointer(wayland->server, &frame);
 }
 
 /* Binds the compositor, shared memory, the shell and the seat. */
@@ -1252,7 +1487,7 @@ wayland_configure(
 	struct xdg_surface *surface,
 	uint32_t serial)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* Acknowledged. */
 	window = data;
@@ -1269,12 +1504,40 @@ wayland_toplevel_configure(
 	int32_t height,
 	struct wl_array *states)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
+	const uint32_t *state;
+	size_t count;
+	size_t index;
+	unsigned heard;
+	int activated;
+
+	/* The states the desktop gives (32-bit values): maximized, full-screen, activated. */
+	(void)toplevel;
+	window = data;
+	heard = 0U;
+	activated = 0;
+	state = states->data;
+	count = states->size / sizeof(uint32_t);
+	for (index = 0U; index < count; index++) {
+		if (state[index] == XDG_TOPLEVEL_STATE_MAXIMIZED)
+			heard |= X11_SURFACE_MAXIMIZED;
+		if (state[index] == XDG_TOPLEVEL_STATE_FULLSCREEN)
+			heard |= X11_SURFACE_FULLSCREEN;
+		if (state[index] == XDG_TOPLEVEL_STATE_ACTIVATED)
+			activated = 1;
+	}
+
+	/*
+	 * After the first configure, the server hears them; a minimized window
+	 * stays so until the desktop activates it.
+	 */
+	if (window->configured) {
+		if ((window->state & X11_SURFACE_ICONIC) != 0U && !activated)
+			heard |= X11_SURFACE_ICONIC;
+		wayland_state_heard(window, heard);
+	}
 
 	/* A size left to the window keeps its own, within the desktop's bounds (the next dispatch asks for it). */
-	(void)toplevel;
-	(void)states;
-	window = data;
 	if (width <= 0 || height <= 0) {
 		wayland_bounded_size(window);
 		return;
@@ -1289,7 +1552,8 @@ wayland_toplevel_configure(
 		return;
 
 	/* The server resizes the X window, and then this one follows. */
-	window->wayland->callbacks.configure(window->wayland->context, window->id, width, height);
+	if (window->wayland->server != NULL)
+		x11server_backend_configure(window->wayland->server, window->id, X11_SURFACE_ANY, X11_SURFACE_ANY, width, height);
 }
 
 /* The desktop asks a window to close: the server decides what that means. */
@@ -1298,12 +1562,13 @@ wayland_toplevel_close(
 	void *data,
 	struct xdg_toplevel *toplevel)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* The server hears it. */
 	(void)toplevel;
 	window = data;
-	window->wayland->callbacks.close(window->wayland->context, window->id);
+	if (window->wayland->server != NULL)
+		x11server_backend_close(window->wayland->server, window->id);
 }
 
 /*
@@ -1318,7 +1583,7 @@ wayland_toplevel_bounds(
 	int32_t width,
 	int32_t height)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* The width, when known. */
 	(void)toplevel;
@@ -1340,7 +1605,7 @@ wayland_toplevel_bounds(
  */
 static void
 wayland_bounded_size(
-	struct x11_wayland_window *window)
+	struct x11_surface *window)
 {
 	unsigned width;
 	unsigned height;
@@ -1374,7 +1639,7 @@ static void
 wayland_pending_sizes(
 	struct x11_wayland *wayland)
 {
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 	unsigned width;
 	unsigned height;
 
@@ -1389,7 +1654,8 @@ wayland_pending_sizes(
 		window->pending_width = 0U;
 		window->pending_height = 0U;
 		fprintf(stderr, "X11SERVER BOUNDS window=0x%x width=%u height=%u was=%ux%u\n", (unsigned)window->id, width, height, window->width, window->height);
-		wayland->callbacks.configure(wayland->context, window->id, (int)width, (int)height);
+		if (wayland->server != NULL)
+			x11server_backend_configure(wayland->server, window->id, X11_SURFACE_ANY, X11_SURFACE_ANY, (int)width, (int)height);
 		return;
 	}
 }
@@ -1457,20 +1723,25 @@ wayland_pointer_enter(
 	wl_fixed_t y)
 {
 	struct x11_wayland *wayland;
-	struct x11_wayland_window *window;
-
-	/* The desktop draws its own pointer over the window. */
-	wayland = data;
-	wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);
+	struct x11_surface *window;
 
 	/* A surface that is not one of the windows is ignored. */
+	(void)pointer;
+	wayland = data;
 	window = wayland_window_of(wayland, surface);
 	wayland->pointer_window = window;
 	if (window == NULL)
 		return;
 
+	/* The window's cursor, else the arrow until the core tells it. */
+	wayland->pointer_serial = serial;
+	if (wayland->cursor_window != window)
+		wayland_cursor_arrow(wayland);
+	wayland_cursor_show(wayland);
+
 	/* The X window comes up, and the pointer is at its place on the root window. */
-	wayland->callbacks.enter(wayland->context, window->id, 0);
+	if (wayland->server != NULL)
+		x11server_backend_enter(wayland->server, window->id, 0);
 	wayland->pointer_x = window->origin_x + wl_fixed_to_int(x);
 	wayland->pointer_y = window->origin_y + wl_fixed_to_int(y);
 	wayland_pointer_frame(wayland, 0U, 0U, 0, 0U);
@@ -1485,13 +1756,18 @@ wayland_pointer_leave(
 	struct wl_surface *surface)
 {
 	struct x11_wayland *wayland;
+	struct x11_surface *window;
 
 	/* The pointer is in none of the windows. */
 	(void)pointer;
 	(void)serial;
-	(void)surface;
 	wayland = data;
+	window = wayland_window_of(wayland, surface);
 	wayland->pointer_window = NULL;
+
+	/* Succeeded: the core hears that it left the X windows. */
+	if (window != NULL && wayland->server != NULL)
+		x11server_backend_leave(wayland->server, window->id, 0);
 }
 
 /* The pointer moves within a window. */
@@ -1504,7 +1780,7 @@ wayland_pointer_motion(
 	wl_fixed_t y)
 {
 	struct x11_wayland *wayland;
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* Only within a window. */
 	(void)pointer;
@@ -1601,7 +1877,7 @@ wayland_keyboard_enter(
 	struct wl_array *keys)
 {
 	struct x11_wayland *wayland;
-	struct x11_wayland_window *window;
+	struct x11_surface *window;
 
 	/* Keys held when focus came are not typed. */
 	(void)keyboard;
@@ -1609,13 +1885,24 @@ wayland_keyboard_enter(
 	(void)keys;
 	wayland = data;
 
-	/* The X window of the surface gets the focus. */
+	/* The X window of the surface (one the core opened). */
 	window = wayland_window_of(wayland, surface);
-	if (window != NULL)
-		wayland->callbacks.enter(wayland->context, window->id, 1);
+	if (window == NULL)
+		return;
+
+	/* A minimized window the desktop brought back is no longer minimized. */
+	if ((window->state & X11_SURFACE_ICONIC) != 0U)
+		wayland_state_heard(window, window->state & ~X11_SURFACE_ICONIC);
+
+	/* Succeeded: it gets the focus. */
+	if (wayland->server != NULL)
+		x11server_backend_enter(wayland->server, window->id, 1);
 }
 
-/* Focus leaves: the modifiers are forgotten. */
+/*
+ * Focus leaves a window: the keys held are released for the core (their
+ * releases go elsewhere), and the X focus leaves the window.
+ */
 static void
 wayland_keyboard_leave(
 	void *data,
@@ -1624,16 +1911,31 @@ wayland_keyboard_leave(
 	struct wl_surface *surface)
 {
 	struct x11_wayland *wayland;
+	struct x11_surface *window;
+	uint32_t key;
 
-	/* No modifier is held any more. */
+	/* Before the core is attached nothing was told. */
 	(void)keyboard;
 	(void)serial;
-	(void)surface;
 	wayland = data;
-	wayland->modifiers = 0U;
+	if (wayland->server == NULL)
+		return;
+
+	/* Each key held, released. */
+	for (key = 0U; key < WAYLAND_KEYS; key++) {
+		if (!wayland->held[key])
+			continue;
+		wayland->held[key] = 0U;
+		x11server_backend_key(wayland->server, (uint8_t)(key + X11_KEYMAP_EVDEV_OFFSET), 0, 0U);
+	}
+
+	/* Succeeded: the X window of the surface (one the core opened) loses the focus. */
+	window = wayland_window_of(wayland, surface);
+	if (window != NULL)
+		x11server_backend_leave(wayland->server, window->id, 1);
 }
 
-/* A key is pressed or released: the server hears its X keycode with the modifiers. */
+/* A key is pressed or released: the server hears the X keycode of its place on the keyboard. */
 static void
 wayland_keyboard_key(
 	void *data,
@@ -1644,48 +1946,28 @@ wayland_keyboard_key(
 	uint32_t state)
 {
 	struct x11_wayland *wayland;
-	uint16_t modifiers;
-	uint8_t keycode;
-	int shifted;
+	int pressed;
 
-	/* The serial, which a selection is set with; a code past the table is ignored. */
+	/* The serial, which a selection is set with; a code past the keycodes, or one before the core is attached, is ignored. */
 	(void)keyboard;
 	wayland = data;
 	wayland->serial = serial;
-	if (key >= WAYLAND_KEYS)
-		return;
-	modifiers = (uint16_t)(wayland->modifiers & WAYLAND_MODIFIERS);
-
-	/* Caps lock toggles on its press and types nothing. */
-	if (key == WAYLAND_KEY_CAPSLOCK) {
-		if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-			wayland->caps_lock = !wayland->caps_lock;
-		return;
-	}
-
-	/* A release says the keycode its press had. */
-	if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
-		keycode = wayland->keycodes[key];
-		wayland->keycodes[key] = 0U;
-		if (keycode != 0U)
-			wayland->callbacks.key(wayland->context, keycode, 0, time, modifiers);
-		return;
-	}
-
-	/* A press: the keycode in the current shift and caps lock states. */
-	shifted = 0;
-	if ((wayland->modifiers & X11_SHIFT_MASK) != 0U)
-		shifted = 1;
-	keycode = x11_keymap_keycode((uint16_t)key, shifted, wayland->caps_lock);
-	if (keycode == 0U)
+	if (key >= WAYLAND_KEYS || wayland->server == NULL)
 		return;
 
-	/* Succeeded: the server hears the press. */
-	wayland->keycodes[key] = keycode;
-	wayland->callbacks.key(wayland->context, keycode, 1, time, modifiers);
+	/* A release of a key not held (its press went to another client of the desktop) says nothing. */
+	pressed = 0;
+	if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		pressed = 1;
+	if (!pressed && !wayland->held[key])
+		return;
+
+	/* Succeeded: the server hears it. */
+	wayland->held[key] = (uint8_t)pressed;
+	x11server_backend_key(wayland->server, (uint8_t)(key + X11_KEYMAP_EVDEV_OFFSET), pressed, time);
 }
 
-/* Keeps the modifiers held (the same bits as X's). */
+/* The modifiers the desktop reports are not used: the core makes them from the keys. */
 static void
 wayland_keyboard_modifiers(
 	void *data,
@@ -1696,16 +1978,14 @@ wayland_keyboard_modifiers(
 	uint32_t locked,
 	uint32_t group)
 {
-	struct x11_wayland *wayland;
-
-	/* Only the held ones count. */
+	/* The core makes the modifiers from the keys it hears. */
+	(void)data;
 	(void)keyboard;
 	(void)serial;
+	(void)depressed;
 	(void)latched;
 	(void)locked;
 	(void)group;
-	wayland = data;
-	wayland->modifiers = depressed;
 }
 
 /* Notes a new offer introduced by the desktop; its types follow. */
@@ -1793,7 +2073,7 @@ wayland_data_drop(
 /*
  * The desktop's selection changed: another client's offer (or none).  The
  * server's own source's offer is not taken; another's with text makes
- * selection.c own X's CLIPBOARD for it.
+ * the core own X's CLIPBOARD for it.
  */
 static void
 wayland_data_selection(
@@ -1828,9 +2108,9 @@ wayland_data_selection(
 	printf("X11 CLIPBOARD selection text=%d\n", text);
 	fflush(stdout);
 
-	/* Succeeded: the server hears whether there is text for X's CLIPBOARD. */
-	if (wayland->callbacks.selection != NULL)
-		wayland->callbacks.selection(wayland->context, text);
+	/* Succeeded: the core hears whether there is text for X's CLIPBOARD. */
+	if (wayland->server != NULL)
+		x11server_backend_clipboard(wayland->server, X11_SELECTION_CLIPBOARD, text);
 }
 
 /* Notes whether a type of the last introduced offer is text. */
@@ -1868,9 +2148,9 @@ wayland_source_target(
 }
 
 /*
- * A client asks for the X client's text: its descriptor goes to
- * selection.c, which asks the X owner and writes the text when it comes.
- * A type that is not text is closed at once.
+ * A client asks for the X client's text: the copy the source holds is
+ * written into its descriptor, which is then closed so the reader sees
+ * the end.  A type that is not text is closed at once.
  */
 static void
 wayland_source_send(
@@ -1880,21 +2160,22 @@ wayland_source_send(
 	int32_t fd)
 {
 	struct x11_wayland *wayland;
+	size_t done;
 	int text;
 
-	/* Only text, and only with a server to answer. */
-	(void)source;
+	/* Only text of the server's own source. */
 	wayland = data;
 	text = wayland_text_type(mime_type);
-	if (!text || wayland->callbacks.selection_send == NULL) {
+	if (!text || source != wayland->source || wayland->source_text == NULL) {
 		close(fd);
 		return;
 	}
 
-	/* Succeeded: selection.c owns the descriptor now. */
+	/* Succeeded: the copy is written and the descriptor closed. */
 	printf("X11 CLIPBOARD send mime=%s\n", mime_type);
+	done = wayland_pipe_write(fd, wayland->source_text, wayland->source_length);
+	printf("X11 CLIPBOARD sent bytes=%lu\n", (unsigned long)done);
 	fflush(stdout);
-	wayland->callbacks.selection_send(wayland->context, fd);
 }
 
 /* Another client took the selection: the server's source goes (the new selection follows). */
@@ -1905,11 +2186,15 @@ wayland_source_cancelled(
 {
 	struct x11_wayland *wayland;
 
-	/* The source. */
+	/* The source, and the copy it held. */
 	wayland = data;
 	wl_data_source_destroy(source);
-	if (wayland->source == source)
+	if (wayland->source == source) {
 		wayland->source = NULL;
+		free(wayland->source_text);
+		wayland->source_text = NULL;
+		wayland->source_length = 0U;
+	}
 	printf("X11 CLIPBOARD cancelled\n");
 	fflush(stdout);
 }
@@ -2026,6 +2311,54 @@ wayland_pipe_read(
 	return 0;
 }
 
+/*
+ * Writes a text into a descriptor a desktop client reads, waiting at most
+ * WAYLAND_READ_MS for room each time; closes it so the reader sees the
+ * end.  Returns how many bytes were written (fewer when the reader went
+ * or was too slow).
+ */
+static size_t
+wayland_pipe_write(
+	int fd,
+	const uint8_t *text,
+	size_t length)
+{
+	struct pollfd descriptor;
+	ssize_t wrote;
+	size_t done;
+	int flags;
+	int status;
+
+	/* The descriptor never blocks the server. */
+	flags = fcntl(fd, F_GETFL);
+	if (flags >= 0)
+		(void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+	/* All of it, while the reader takes it. */
+	done = 0U;
+	while (done < length) {
+		/* Waits for room. */
+		descriptor.fd = fd;
+		descriptor.events = POLLOUT;
+		descriptor.revents = 0;
+		status = poll(&descriptor, 1, WAYLAND_READ_MS);
+		if (status <= 0)
+			break;
+
+		/* As much as fits; a failure other than a full pipe ends it. */
+		wrote = write(fd, text + done, length - done);
+		if (wrote < 0 && errno == EAGAIN)
+			continue;
+		if (wrote <= 0)
+			break;
+		done += (size_t)wrote;
+	}
+
+	/* Succeeded: the reader sees the end. */
+	(void)close(fd);
+	return done;
+}
+
 /* Notes a new primary offer introduced by the desktop; its types follow. */
 static void
 wayland_primary_offer(
@@ -2046,7 +2379,7 @@ wayland_primary_offer(
 /*
  * The desktop's primary selection changed: another client's offer (or
  * none).  The server's own source's offer is not taken; another's with
- * text makes selection.c own X's PRIMARY for it.
+ * text makes the core own X's PRIMARY for it.
  */
 static void
 wayland_primary_selection(
@@ -2081,9 +2414,9 @@ wayland_primary_selection(
 	printf("X11 PRIMARY selection text=%d\n", text);
 	fflush(stdout);
 
-	/* Succeeded: the server hears whether there is text for X's PRIMARY. */
-	if (wayland->callbacks.primary != NULL)
-		wayland->callbacks.primary(wayland->context, text);
+	/* Succeeded: the core hears whether there is text for X's PRIMARY. */
+	if (wayland->server != NULL)
+		x11server_backend_clipboard(wayland->server, X11_SELECTION_PRIMARY, text);
 }
 
 /* Notes whether a type of the last introduced primary offer is text. */
@@ -2108,9 +2441,9 @@ wayland_primary_type(
 }
 
 /*
- * A client asks for the X client's PRIMARY text: its descriptor goes to
- * selection.c, which asks the X owner.  A type that is not text is closed
- * at once.
+ * A client asks for the X client's PRIMARY text: the copy the source
+ * holds is written into its descriptor, which is then closed.  A type
+ * that is not text is closed at once.
  */
 static void
 wayland_primary_send(
@@ -2120,21 +2453,22 @@ wayland_primary_send(
 	int32_t fd)
 {
 	struct x11_wayland *wayland;
+	size_t done;
 	int text;
 
-	/* Only text, and only with a server to answer. */
-	(void)source;
+	/* Only text of the server's own source. */
 	wayland = data;
 	text = wayland_text_type(mime_type);
-	if (!text || wayland->callbacks.primary_send == NULL) {
+	if (!text || source != wayland->primary_source || wayland->primary_source_text == NULL) {
 		close(fd);
 		return;
 	}
 
-	/* Succeeded: selection.c owns the descriptor now. */
+	/* Succeeded: the copy is written and the descriptor closed. */
 	printf("X11 PRIMARY send mime=%s\n", mime_type);
+	done = wayland_pipe_write(fd, wayland->primary_source_text, wayland->primary_source_length);
+	printf("X11 PRIMARY sent bytes=%lu\n", (unsigned long)done);
 	fflush(stdout);
-	wayland->callbacks.primary_send(wayland->context, fd);
 }
 
 /* Another client took the primary selection: the server's source goes. */
@@ -2145,11 +2479,196 @@ wayland_primary_cancelled(
 {
 	struct x11_wayland *wayland;
 
-	/* The source. */
+	/* The source, and the copy it held. */
 	wayland = data;
 	zwp_primary_selection_source_v1_destroy(source);
-	if (wayland->primary_source == source)
+	if (wayland->primary_source == source) {
 		wayland->primary_source = NULL;
+		free(wayland->primary_source_text);
+		wayland->primary_source_text = NULL;
+		wayland->primary_source_length = 0U;
+	}
 	printf("X11 PRIMARY cancelled\n");
 	fflush(stdout);
+}
+
+/*
+ * Shows the cursor of an X window (the core's cursor function): its
+ * image, or the arrow for None and for a cursor without one.  It is
+ * shown at once when the pointer is over the window, and again when the
+ * pointer enters it.
+ */
+static void
+wayland_cursor(
+	void *context,
+	struct x11_surface *window,
+	const struct x11_cursor_image *image)
+{
+	struct x11_wayland *wayland;
+	int error;
+
+	/* The image, else the arrow. */
+	wayland = context;
+	error = EINVAL;
+	if (image != NULL && image->pixels != NULL && image->width > 0 && image->height > 0 &&
+	    image->width <= WAYLAND_CURSOR_MAX && image->height <= WAYLAND_CURSOR_MAX)
+		error = wayland_cursor_draw(wayland, image->pixels, image->width, image->height, image->hot_x, image->hot_y);
+	if (error != 0)
+		wayland_cursor_arrow(wayland);
+	wayland->cursor_window = window;
+
+	/* Shown when the pointer is over the window. */
+	if (wayland->pointer_window == window)
+		wayland_cursor_show(wayland);
+}
+
+/*
+ * Draws a cursor into a new buffer of the cursor surface: pixels of
+ * 0xAARRGGBB, not premultiplied (Wayland's ARGB8888 is), width by height,
+ * with its hot spot (kept inside the image).  The buffer shown before is
+ * let go.  Returns 0, or an errno value.
+ */
+static int
+wayland_cursor_draw(
+	struct x11_wayland *wayland,
+	const uint32_t *pixels,
+	int width,
+	int height,
+	int hot_x,
+	int hot_y)
+{
+	struct wl_shm_pool *pool;
+	struct wl_buffer *buffer;
+	uint32_t *memory;
+	uint32_t pixel;
+	uint32_t alpha;
+	char name[64];
+	size_t bytes;
+	size_t index;
+	int descriptor;
+	int error;
+
+	/* The cursor surface, once. */
+	if (wayland->cursor_surface == NULL) {
+		wayland->cursor_surface = wl_compositor_create_surface(wayland->compositor);
+		if (wayland->cursor_surface == NULL)
+			return ENOMEM;
+	}
+
+	/* Anonymous shared memory for the image. */
+	bytes = (size_t)width * (size_t)height * sizeof(uint32_t);
+	(void)snprintf(name, sizeof(name), "/xserver-%ld-cursor", (long)getpid());
+	descriptor = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (descriptor < 0)
+		return errno;
+	(void)shm_unlink(name);
+	error = ftruncate(descriptor, (off_t)bytes);
+	if (error != 0) {
+		(void)close(descriptor);
+		return EIO;
+	}
+	memory = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+	if (memory == MAP_FAILED) {
+		(void)close(descriptor);
+		return EIO;
+	}
+
+	/* The pixels, premultiplied. */
+	for (index = 0U; index < (size_t)width * (size_t)height; index++) {
+		pixel = pixels[index];
+		alpha = pixel >> 24;
+		memory[index] = (alpha << 24) |
+				((((pixel >> 16) & 0xFFU) * alpha + 127U) / 255U) << 16 |
+				((((pixel >> 8) & 0xFFU) * alpha + 127U) / 255U) << 8 |
+				(((pixel & 0xFFU) * alpha + 127U) / 255U);
+	}
+	(void)munmap(memory, bytes);
+
+	/* The buffer (the desktop keeps its own reference to the memory). */
+	pool = wl_shm_create_pool(wayland->shm, descriptor, (int32_t)bytes);
+	(void)close(descriptor);
+	if (pool == NULL)
+		return ENOMEM;
+	buffer = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_shm_pool_destroy(pool);
+	if (buffer == NULL)
+		return ENOMEM;
+
+	/* On the surface, in place of the one before. */
+	wl_surface_attach(wayland->cursor_surface, buffer, 0, 0);
+	wl_surface_damage(wayland->cursor_surface, 0, 0, width, height);
+	wl_surface_commit(wayland->cursor_surface);
+	if (wayland->cursor_buffer != NULL)
+		wl_buffer_destroy(wayland->cursor_buffer);
+	wayland->cursor_buffer = buffer;
+
+	/* Succeeded: its hot spot, inside it. */
+	if (hot_x < 0 || hot_x >= width)
+		hot_x = 0;
+	if (hot_y < 0 || hot_y >= height)
+		hot_y = 0;
+	wayland->cursor_hot_x = hot_x;
+	wayland->cursor_hot_y = hot_y;
+	return 0;
+}
+
+/*
+ * Draws the backend's own arrow (the pointer of a window with no X cursor
+ * of its own), black with a white inside, its hot spot at its tip.
+ */
+static void
+wayland_cursor_arrow(
+	struct x11_wayland *wayland)
+{
+	static const char *const rows[] = {
+		"X           ",
+		"XX          ",
+		"X.X         ",
+		"X..X        ",
+		"X...X       ",
+		"X....X      ",
+		"X.....X     ",
+		"X......X    ",
+		"X.......X   ",
+		"X........X  ",
+		"X.........X ",
+		"X......XXXXX",
+		"X...X..X    ",
+		"X..XX..X    ",
+		"X.X  X..X   ",
+		"XX   X..X   ",
+		"X     X..X  ",
+		"      X..X  ",
+		"       XX   "
+	};
+	uint32_t pixels[sizeof(rows) / sizeof(rows[0])][12];
+	unsigned row;
+	unsigned column;
+
+	/* The rows: X black, . white, the rest clear. */
+	for (row = 0U; row < sizeof(rows) / sizeof(rows[0]); row++) {
+		for (column = 0U; column < 12U; column++) {
+			pixels[row][column] = 0U;
+			if (rows[row][column] == 'X')
+				pixels[row][column] = 0xFF000000U;
+			if (rows[row][column] == '.')
+				pixels[row][column] = 0xFFFFFFFFU;
+		}
+	}
+
+	/* Drawn (without memory for it, the cursor stays as it was). */
+	(void)wayland_cursor_draw(wayland, &pixels[0][0], 12, (int)(sizeof(rows) / sizeof(rows[0])), 0, 0);
+}
+
+/* Shows the cursor surface as the pointer, with the serial of the last entering. */
+static void
+wayland_cursor_show(
+	struct x11_wayland *wayland)
+{
+	/* Only with a pointer and a cursor drawn. */
+	if (wayland->pointer == NULL || wayland->cursor_buffer == NULL)
+		return;
+	wl_pointer_set_cursor(wayland->pointer, wayland->pointer_serial, wayland->cursor_surface,
+			      wayland->cursor_hot_x, wayland->cursor_hot_y);
+	(void)wl_display_flush(wayland->display);
 }

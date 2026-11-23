@@ -79,7 +79,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/uefi/BOOTRISCV64.EFI $(BUILD)/vmunix $(BUILD)/z
 .PHONY: disk-image check-disk-image image-platform image-vf2
 
 disk-image: $(DISK_IMAGE_ARTIFACT)
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 image-vf2: image-platform
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)

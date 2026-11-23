@@ -23,6 +23,9 @@
 		wp_content_type_*;
 		kl_game_v1_*;
 		kl_game_surface_v1_*;
+		wp_viewporter_*;
+		wp_viewport_*;
+		wp_fractional_scale_*;
 	local:
 		*;
 };

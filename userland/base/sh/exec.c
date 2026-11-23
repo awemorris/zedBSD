@@ -1153,7 +1153,6 @@ pipeline_spawn(
 	size_t mark;
 	size_t index;
 	pid_t child;
-	int job_control;
 	int pure;
 	int error;
 
@@ -1166,11 +1165,6 @@ pipeline_spawn(
 	if (sh_option[SH_OPT_NOUNSET] ||
 	    sh_option[SH_OPT_XTRACE] ||
 	    sh_option[SH_OPT_NOEXEC])
-		return -1;
-
-	/* Job control gives each job its own process group, which a fork sets up. */
-	job_control = sh_job_control_active();
-	if (job_control)
 		return -1;
 
 	/* Descriptors 0, 1 and 2 are where the command's own go. */
@@ -1203,8 +1197,11 @@ pipeline_spawn(
 		return -1;
 	}
 
-	/* Prepares its descriptors, as a forked child of the pipeline would set them. */
-	error = posix_spawn_file_actions_init(&actions);
+	/*
+	 * Prepares its descriptors, as a forked child of the pipeline would
+	 * set them, after it takes the terminal under job control.
+	 */
+	error = sh_spawn_actions_init(&actions);
 	if (error != 0) {
 		sh_temp_release(mark);
 		return -1;

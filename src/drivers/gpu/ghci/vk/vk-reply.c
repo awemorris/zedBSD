@@ -157,7 +157,7 @@ ghci_vk_reply_result(
 
 /*
  * Reports the VkResult an errno of the executor becomes in a create's
- * reply: the GPU's memory (a heap, a pool or CP_HEAP's room) used up
+ * reply: the GPU's memory (a heap, a pool or page-table memory) used up
  * (ENOSPC) is out of device memory; the kernel's own storage for an
  * object or its work (ENOMEM, ENOBUFS) is out of host memory; all of the
  * hardware's session numbers in use (EBUSY) is too many objects;

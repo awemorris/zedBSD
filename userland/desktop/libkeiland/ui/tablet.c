@@ -483,11 +483,11 @@ tool_motion(
 {
 	struct keiui_tablet_tool *state;
 
-	/* The new place, and a move for the frame. */
+	/* The new place in the window's pixels, and a move for the frame. */
 	(void)tool;
 	state = data;
-	state->x = wl_fixed_to_double(x);
-	state->y = wl_fixed_to_double(y);
+	state->x = keiui_window_pixels(state->window, wl_fixed_to_double(x));
+	state->y = keiui_window_pixels(state->window, wl_fixed_to_double(y));
 	state->moved = 1;
 }
 

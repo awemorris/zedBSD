@@ -1224,7 +1224,17 @@ send_key(
 		length = 4;
 		break;
 	case XK_Return:
+	case XK_KP_Enter:
 		byte = '\r';
+		sequence = &byte;
+		break;
+	case XK_Escape:
+		byte = 0x1b;
+		sequence = &byte;
+		break;
+	case XK_Tab:
+	case XK_ISO_Left_Tab:
+		byte = '\t';
 		sequence = &byte;
 		break;
 	case XK_BackSpace:

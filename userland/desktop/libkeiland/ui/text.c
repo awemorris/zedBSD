@@ -6,32 +6,33 @@
  */
 
 /*
- * The text of the library (Files' text.c, moved here unchanged by
- * ws090-p002): UTF-8 strings drawn from TrueType fonts
+ * The text of the library: UTF-8 strings drawn from TrueType fonts
  * (libtruetype) onto the canvas.
  *
- * A main font draws what it can, with its companions (ws090-p020,
- * truetype_open_companions: Mahora Bold for its bold glyphs, the
+ * A main font draws what it can, with its companions
+ * (truetype_open_companions: Mahora Bold for its bold glyphs, the
  * monospaced fallback for the signs and letters it lacks), and a fallback
  * font (optional) the characters they lack, such as Japanese in file
  * names.  Every glyph is drawn once per size into a cache of coverage
  * bitmaps.  A bold glyph without a bold face is the regular one's outline
- * widened as a vector by libtruetype (truetype_set_bold, BUG-205), drawn
+ * widened as a vector by libtruetype (truetype_set_bold), drawn
  * with the same anti-aliasing as a regular one.  There is no kerning and no shaping:
  * file names and labels are set one character after another.
  *
  * A character neither font has is looked for in the colour emoji font
- * (KL_TEXT_EMOJI, opened the first time one is drawn, ws102-p019) and
+ * (KL_TEXT_EMOJI, opened the first time one is drawn) and
  * drawn in its colours (userland/desktop/picture/color-glyph.c).
  */
 
 #include <keiland/keiland.h>
 
+#include "internal.h"
 #include "../../picture/color-glyph.h"
 #include "userland/desktop/paths.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -43,6 +44,9 @@
 
 /* The largest font file read, in bytes. */
 #define TEXT_FONT_MAX		(64U * 1024U * 1024U)
+
+/* The largest size in pixels a glyph is drawn at (the cache's key keeps eight bits of it). */
+#define TEXT_PIXELS_MAX		255U
 
 /*
  * A C runtime that tells text files from binary ones (Windows') opens a
@@ -68,6 +72,7 @@ static int text_set_size(struct kl_text_face *face, unsigned pixels);
 static const char *text_ellipsis(struct kl_text *text);
 static void text_clear(struct kl_text *text);
 static int text_render_color(struct kl_text *text, unsigned glyph_index, unsigned pixels, struct kl_glyph *glyph);
+static int text_draw_scaled(struct kl_text *text, struct kl_canvas *canvas, int x, int baseline, const char *string, size_t length, unsigned pixels, int bold, kl_color color);
 
 /*
  * The companions' files when a program names its own (kl_text_companions:
@@ -78,7 +83,7 @@ static const char *text_mono_path;
 
 /*
  * Names the companions' files the fonts opened from now on use (KL_VERSION
- * 48, ws090-p023): Mahora Bold and the monospaced fallback, for a program
+ * 48): Mahora Bold and the monospaced fallback, for a program
  * that runs without the installed fonts (a host test drawing with the
  * tree's userland/desktop/fonts).  NULL keeps the installed one.  The
  * strings must last while fonts are opened.
@@ -124,7 +129,7 @@ kl_text_open(
 		return error;
 	}
 
-	/* Its companions: Mahora Bold for its bold glyphs, the monospaced fallback for the signs it lacks (ws090-p020), installed or named. */
+	/* Its companions: Mahora Bold for its bold glyphs, the monospaced fallback for the signs it lacks, installed or named. */
 	bold = KEILAND_FONT_BOLD;
 	if (text_bold_path != NULL)
 		bold = text_bold_path;
@@ -258,7 +263,8 @@ kl_text_width(
 
 /*
  * Draws a string with its baseline at a height, and reports how far the
- * pen moved.
+ * pen moved.  On a canvas of another scale the text is drawn at the
+ * scale's size (KL_VERSION 112), and the distance is in the canvas's units.
  */
 int
 kl_text_draw(
@@ -278,8 +284,15 @@ kl_text_draw(
 	size_t index;
 	int clip_top;
 	int clip_bottom;
+	int drawn;
 	int top;
 	int pen;
+
+	/* A canvas of another scale has the text drawn at the scale's size. */
+	if (canvas->scale != 0U && canvas->scale != KL_SCALE_BASE) {
+		drawn = text_draw_scaled(text, canvas, x, baseline, string, length, pixels, bold, color);
+		return drawn;
+	}
 
 	/* The rows being drawn (the canvas's clip). */
 	clip_top = canvas->clip.y;
@@ -296,8 +309,8 @@ kl_text_draw(
 
 		/*
 		 * A glyph above or below the rows being drawn only moves the pen
-		 * (ws210-p014: a frame of a few lit rows lays out every line of
-		 * the window, and each glyph's drawing found nothing to draw).
+		 * (a frame of a few lit rows lays out every line of the window,
+		 * and each glyph's drawing would find nothing to draw).
 		 */
 		top = baseline - glyph->top;
 		if (top >= clip_bottom || top + glyph->height <= clip_top) {
@@ -676,8 +689,8 @@ text_glyph(
 	uint32_t key;
 	int error;
 
-	/* Sizes are kept within what the key holds. */
-	if (pixels == 0U || pixels > 127U)
+	/* Sizes are kept within what the key holds (eight bits: a size of 64 units at 300 % and more). */
+	if (pixels == 0U || pixels > TEXT_PIXELS_MAX)
 		return NULL;
 
 	/* The first face with a glyph for the character, or the main face's missing glyph. */
@@ -702,11 +715,11 @@ text_glyph(
 			face_index = 2;
 	}
 
-	/* The key: glyph, size, face (two bits) and weight (never zero, which marks an empty slot). */
+	/* The key: glyph (16 bits), size (8), face (2) and weight (1), with the top bit set (zero marks an empty slot). */
 	weight = 0U;
 	if (bold != 0)
 		weight = 1U;
-	key = (glyph_index & 0xffffU) | ((uint32_t)pixels << 16) | ((uint32_t)face_index << 23) | (weight << 25) | 0x80000000U;
+	key = (glyph_index & 0xffffU) | ((uint32_t)pixels << 16) | ((uint32_t)face_index << 24) | (weight << 26) | 0x80000000U;
 
 	/* A glyph drawn before is in its slot. */
 	glyph = text_slot(text, key);
@@ -745,7 +758,7 @@ text_slot(
 	 * only multiplied left a glyph's sizes, weights and faces, which differ
 	 * in the key's high bits, on one home slot, and the glyphs of a text,
 	 * whose indexes follow one another, in one long run of slots that each
-	 * lookup walked (ws210-p014, a third of a hover frame's time).
+	 * lookup walked (a third of a hover frame's time).
 	 */
 	hash = key;
 	hash ^= hash >> 16;
@@ -917,4 +930,94 @@ text_render_color(
 	glyph->top = image.top;
 	glyph->advance = image.advance;
 	return 0;
+}
+
+/*
+ * Draws a string on a canvas of another scale: the glyphs at the size the
+ * scale makes of the pixels asked for, from the pen and the baseline made
+ * pixels, each glyph's advance its own at that size (the text as sharp and
+ * as spaced as at the size).  Reports how far the pen moved, in the
+ * canvas's units.
+ */
+static int
+text_draw_scaled(
+	struct kl_text *text,
+	struct kl_canvas *canvas,
+	int x,
+	int baseline,
+	const char *string,
+	size_t length,
+	unsigned pixels,
+	int bold,
+	kl_color color)
+{
+	const struct kl_glyph *glyph;
+	struct kl_image image;
+	uint32_t codepoint;
+	size_t index;
+	unsigned size;
+	float factor;
+	int clip_top;
+	int clip_bottom;
+	int origin;
+	int line;
+	int top;
+	int pen;
+	int moved;
+
+	/* The size, the pen and the baseline in pixels, rounded to the nearest (the glyphs' cache keeps sizes to TEXT_PIXELS_MAX). */
+	size = (pixels * canvas->scale + KL_SCALE_BASE / 2U) / KL_SCALE_BASE;
+	if (size == 0U)
+		size = 1U;
+	if (size > TEXT_PIXELS_MAX)
+		size = TEXT_PIXELS_MAX;
+	factor = (float)canvas->scale / (float)KL_SCALE_BASE;
+	origin = (int)floorf((float)x * factor + 0.5f);
+	line = (int)floorf((float)baseline * factor + 0.5f);
+
+	/* The rows being drawn (the canvas's clip, in pixels). */
+	clip_top = canvas->clip.y;
+	clip_bottom = canvas->clip.y + canvas->clip.height;
+
+	/* Each character at the pen, which then moves by its advance. */
+	pen = origin;
+	index = 0;
+	while (index < length) {
+		codepoint = kl_utf8_next(string, length, &index);
+		glyph = text_glyph(text, codepoint, size, bold);
+		if (glyph == NULL)
+			continue;
+
+		/* A glyph above or below the rows being drawn only moves the pen. */
+		top = line - glyph->top;
+		if (top >= clip_bottom || top + glyph->height <= clip_top) {
+			pen += glyph->advance;
+			continue;
+		}
+
+		/* The glyph's coverage in the color, a colour glyph in its own colours, in the canvas's pixels. */
+		if (glyph->bitmap != NULL)
+			keiui_canvas_mask_pixels(canvas, pen + glyph->left, top, glyph->bitmap, glyph->width, glyph->height, (size_t)glyph->width, color);
+		if (glyph->pixels != NULL) {
+			image.pixels = glyph->pixels;
+			image.width = glyph->width;
+			image.height = glyph->height;
+			image.stride = (size_t)glyph->width;
+			keiui_canvas_image_pixels(canvas,
+						  &image,
+						  (float)(pen + glyph->left),
+						  (float)top,
+						  (float)glyph->width,
+						  (float)glyph->height,
+						  0.0f,
+						  (float)(color >> 24) / 255.0f);
+		}
+
+		/* The pen moves past it. */
+		pen += glyph->advance;
+	}
+
+	/* Reports how far the pen moved, in units (rounded to the nearest). */
+	moved = (int)floorf((float)(pen - origin) / factor + 0.5f);
+	return moved;
 }

@@ -114,6 +114,7 @@ static unsigned check_array_size(struct glsl_shader *shader, struct glsl_node *s
 static void check_declaration(struct glsl_shader *shader, struct glsl_node *node, int global);
 static void check_variable(struct glsl_shader *shader, struct glsl_node *type_node, const struct glsl_type *base_type, struct glsl_node *variable, int global);
 static unsigned check_where(struct glsl_shader *shader, struct glsl_node *type_node, const struct glsl_type *type, int global, unsigned line);
+static void check_struct_io(struct glsl_shader *shader, const struct glsl_node *type_node, const struct glsl_type *type, unsigned storage, unsigned line);
 static void check_float_precision(struct glsl_shader *shader, unsigned precision, const struct glsl_type *type, unsigned line);
 static void check_initializer(struct glsl_shader *shader, struct glsl_symbol *symbol, struct glsl_node *variable, int global);
 static void check_function(struct glsl_shader *shader, struct glsl_node *node, struct check_breakables *breakables);
@@ -2125,10 +2126,18 @@ check_where(
 	if (vertex && storage == GLSL_STORAGE_IN && element->base == GLSL_BASE_DOUBLE && shader->version < GLSL_VERSION_410)
 		glsl_error(shader, line, "double vertex shader inputs need GLSL 4.10");
 
-	/* Structs and bools do not cross stages; integers do, flat, into the fragment shader. */
-	if (type->kind == GLSL_KIND_STRUCT || (type->kind != GLSL_KIND_ARRAY && type->base == GLSL_BASE_BOOL))
-		glsl_error(shader, line, "inputs and outputs cannot be structs or bools");
-	if (fragment && storage == GLSL_STORAGE_IN && type->kind != GLSL_KIND_ARRAY) {
+	/* Bools do not cross stages. */
+	if (type->kind != GLSL_KIND_ARRAY && type->kind != GLSL_KIND_STRUCT && type->base == GLSL_BASE_BOOL)
+		glsl_error(shader, line, "inputs and outputs cannot be bools");
+
+	/* A struct crosses stages under its own rules, and an array of structs does not. */
+	if (type->kind == GLSL_KIND_STRUCT)
+		check_struct_io(shader, type_node, type, storage, line);
+	if (type->kind == GLSL_KIND_ARRAY && element->kind == GLSL_KIND_STRUCT)
+		glsl_error(shader, line, "inputs and outputs cannot be arrays of structs");
+
+	/* Integers cross into the fragment shader flat. */
+	if (fragment && storage == GLSL_STORAGE_IN && type->kind != GLSL_KIND_ARRAY && type->kind != GLSL_KIND_STRUCT) {
 		if (type->base != GLSL_BASE_FLOAT && type_node->interpolation != GLSL_INTERP_FLAT)
 			check_flat_error(shader, type, line);
 	}
@@ -2143,6 +2152,81 @@ check_where(
 	if (storage == GLSL_STORAGE_IN)
 		return GLSL_VAR_INPUT;
 	return GLSL_VAR_OUTPUT;
+}
+
+/*
+ * Checks a struct that is an input or an output (not an interface block):
+ * it crosses between stages from GLSL 1.50 and GLSL ES 3.00, out of a
+ * stage and into the next, never into a vertex shader or out of a
+ * fragment shader.  Its members are scalars, vectors and matrices of
+ * numbers (no bools, arrays or structs), and into a fragment shader it is
+ * flat when a member is an integer or a double.
+ *
+ * Reference: Khronos GLSL ES 3.00 specification, sections 4.3.4 and
+ * 4.3.6 (a vertex output or a fragment input cannot be or contain a bool,
+ * an opaque type, an array of structures, a structure containing an array
+ * or a structure containing a structure; one that contains an integer is
+ * flat); GLSL 1.50 specification, section 4.3.6 (outputs can be
+ * structures).  GLSL 4.x takes more (arrays in structs); this compiler
+ * keeps to GLSL ES 3.00's shapes for every version.
+ */
+static void
+check_struct_io(
+	struct glsl_shader *shader,
+	const struct glsl_node *type_node,
+	const struct glsl_type *type,
+	unsigned storage,
+	unsigned line)
+{
+	const struct glsl_type *member;
+	unsigned index;
+	int allowed;
+	int fragment_input;
+
+	/* Structs cross stages from GLSL 1.50 and GLSL ES 3.00. */
+	allowed = glsl_since(shader, GLSL_VERSION_150, GLSL_VERSION_ES300);
+	if (!allowed) {
+		glsl_error(shader, line, "inputs and outputs can be structs from GLSL 1.50 and GLSL ES 3.00");
+		return;
+	}
+
+	/* A vertex shader takes attributes and a fragment shader writes colours, neither as structs. */
+	if (shader->stage == GLSL_STAGE_VERTEX && storage == GLSL_STORAGE_IN) {
+		glsl_error(shader, line, "vertex shader inputs cannot be structs");
+		return;
+	}
+	if (shader->stage == GLSL_STAGE_FRAGMENT && storage == GLSL_STORAGE_OUT) {
+		glsl_error(shader, line, "fragment shader outputs cannot be structs");
+		return;
+	}
+
+	/* Each member a scalar, vector or matrix of numbers, flat into a fragment shader when not of floats. */
+	fragment_input = 0;
+	if (shader->stage == GLSL_STAGE_FRAGMENT && storage == GLSL_STORAGE_IN)
+		fragment_input = 1;
+	for (index = 0U; index < type->field_count; index++) {
+		member = type->fields[index].type;
+
+		/* The shapes GLSL ES 3.00 keeps out of a struct that crosses stages. */
+		if (member->kind == GLSL_KIND_ARRAY) {
+			glsl_error(shader, line, "an input or output struct cannot hold an array");
+			continue;
+		}
+		if (member->kind == GLSL_KIND_STRUCT) {
+			glsl_error(shader, line, "an input or output struct cannot hold a struct");
+			continue;
+		}
+		if (member->base == GLSL_BASE_BOOL) {
+			glsl_error(shader, line, "an input or output struct cannot hold a bool");
+			continue;
+		}
+
+		/* An integer or a double member makes a fragment shader's input of the struct flat. */
+		if (fragment_input &&
+		    member->base != GLSL_BASE_FLOAT &&
+		    type_node->interpolation != GLSL_INTERP_FLAT)
+			check_flat_error(shader, member, line);
+	}
 }
 
 /* Reports a float declaration of an OpenGL ES fragment shader without a precision where none is the default. */

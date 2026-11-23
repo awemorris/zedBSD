@@ -979,6 +979,57 @@ int kl_system_displays_revert_resolution(struct kl_system *system, const char *k
 int kl_system_displays_reset_resolution(struct kl_system *system, const char *key, uint32_t *request);
 
 /*
+ * A display's scale (KL_VERSION 113): how large the desktop is drawn on
+ * it.  Scales are in 96ths, as KL_SCALE_BASE (<keiland/keiland_canvas.h>):
+ * 96 is 100 %, 144 is 150 %.  kl_system_displays_scale gives what the last
+ * snapshot holds of a display (by its key): the scale it is shown at now
+ * (0 when it is shown nowhere), the user's choice (0: the default), the
+ * default its density asks for (recommended), the steps it offers now
+ * (the smallest first, 100 % always one), its size in the desktop's
+ * logical units at the scale it is or would be shown at, and why its scale
+ * cannot be chosen now (KL_DISPLAY_SCALE_WHY_*: it offers 100 % alone,
+ * another display is shown beside it, it is not the display the desktop
+ * is on, a change of its mode or a game is under way; 0 when it can).  It
+ * returns 0, ENODEV for a key not in the snapshot, or ENOTSUP from a
+ * compositor before scales.
+ *
+ * kl_system_displays_set_scale chooses one of the steps offered (0 leaves
+ * the display to the default), shown at once without a trial and kept for
+ * the monitor (its EDID's identity).  It is answered (kl_system_take_result)
+ * once the choice is written: 0, EINVAL (not a step, or a display the
+ * desktop's display mirrors), ENOTSUP (a step the display does not offer,
+ * or a display whose scale cannot be chosen), EBUSY (a change of the mode
+ * or a game), ENODEV (a key not connected), EPERM (outside an active
+ * session).  A display beside the desktop's display in the extended mode
+ * takes its scale too; the displays are then placed again around it (it
+ * keeps its left top corner, one it overlaps or one no longer joined goes
+ * right of the rightmost).  It returns 0 when
+ * asked, EINVAL (no key, or a scale that is not a whole number of the
+ * compositor's 120ths), or ENOTSUP from a compositor before scales.
+ *
+ * The positions of struct kl_display are in the desktop's logical units;
+ * its width and height are the display's own; the size the desktop has on
+ * it is the width and height here.
+ */
+#define KL_DISPLAY_SCALES_MAX			8U
+#define KL_DISPLAY_SCALE_WHY_FIXED		0x1U	/* the display offers 100 % alone */
+#define KL_DISPLAY_SCALE_WHY_ALONE		0x2U	/* the mirror shows the desktop's display on it, at that display's scale */
+#define KL_DISPLAY_SCALE_WHY_ANCHOR		0x4U	/* it shows nothing now */
+#define KL_DISPLAY_SCALE_WHY_BUSY		0x8U	/* a change of its mode or a game is under way */
+struct kl_display_scale {
+	unsigned current;
+	unsigned chosen;
+	unsigned recommended;
+	unsigned offered[KL_DISPLAY_SCALES_MAX];
+	unsigned offered_count;
+	uint32_t width;
+	uint32_t height;
+	unsigned why;
+};
+int kl_system_displays_scale(const struct kl_system *system, const char *key, struct kl_display_scale *scale);
+int kl_system_displays_set_scale(struct kl_system *system, const char *key, unsigned scale, uint32_t *request);
+
+/*
  * What Settings reads of the computer (KL_VERSION 69): the system's names
  * (About), the file systems' sizes (Storage), the people's accounts and the
  * program's own (Users), and the login screen's language (Languages).  The

@@ -396,6 +396,20 @@ struct kwl_head {
 	unsigned in_frame;
 	uint32_t image;
 	uint32_t global;
+	/*
+	 * The head's scale (scale.h), as the output's in the server: its size
+	 * in pixels, the scale its part of the plane is shown at and the one
+	 * its display asks for (120ths), and its display's physical size in
+	 * millimetres (0 when unknown), from which the default is chosen.
+	 * width and height above are the head's rectangle of the plane, in
+	 * logical units.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	unsigned scale_wanted;
+	uint32_t mm_width;
+	uint32_t mm_height;
 };
 
 struct kwl_cursor_thread;
@@ -737,6 +751,13 @@ struct kwl_compose {
 	 */
 	uint32_t mode_width;
 	uint32_t mode_height;
+	/*
+	 * The output's display's physical size in millimetres, as its driver
+	 * gives it (0 when unknown): the default scale's density comes from it
+	 * where the display's EDID does not give one.
+	 */
+	uint32_t mm_width;
+	uint32_t mm_height;
 	unsigned rotation_selected;
 	unsigned rotation;
 	unsigned scanout_rotation;
@@ -1152,6 +1173,10 @@ void kwl_glass_draw(struct kwl_server *server, struct kwl_list *command, struct 
 void kwl_glass_draw_drag_badge(struct kwl_server *server, struct kwl_list *command);
 void kwl_glass_draw_drag_mark(struct kwl_server *server, struct kwl_list *command, unsigned state);
 void kwl_glass_draw_head(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count);
+
+/* The admin action's dialog over everything on the output, and the darkening of a head of the extended desktop meanwhile (admin-ask.c). */
+void kwl_admin_ask_draw(struct kwl_server *server, struct kwl_list *command);
+void kwl_admin_ask_draw_head(struct kwl_server *server, struct kwl_list *command);
 void kwl_compose_cursor(struct kwl_server *server, struct kwl_list *command);
 void kwl_compose_count_draw(struct kwl_server *server, VkPipeline pipeline, VkDescriptorSet set, unsigned shape);
 
@@ -1162,6 +1187,12 @@ uint64_t kwl_compose_count_pixels(struct kwl_server *server, float x, float y, f
 void kwl_compose_count_kind(struct kwl_server *server, unsigned kind, uint64_t pixels);
 void kwl_compose_bind(struct kwl_server *server, struct kwl_list *command, VkPipeline pipeline, VkPipelineLayout layout, VkDescriptorSet set);
 void kwl_compose_bind_forget(struct kwl_compose *compose);
+unsigned kwl_compose_pass_scale(const struct kwl_server *server);
+void kwl_compose_pass_size(const struct kwl_server *server, float *width, float *height);
+void kwl_compose_pass_rect(const struct kwl_server *server, const float *plane, float *pixels);
+int32_t kwl_compose_pass_pixel(const struct kwl_server *server, int32_t plane);
+void kwl_compose_damage_pixels(const struct kwl_server *server, const int32_t *plane, int32_t *pixels);
+VkDescriptorSet kwl_compose_image_set(const struct kwl_server *server, const struct kwl_import *import, float width, float height, const float *uv);
 void kwl_compose_bounds_begin(struct kwl_compose *compose);
 int kwl_compose_bounds_end(struct kwl_compose *compose, float *bounds);
 int kwl_compose_clip_visible(struct kwl_compose *compose, float x, float y, float width, float height);
@@ -1303,6 +1334,30 @@ int kwl_output_resolution_keep(struct kwl_server *server, const char *key, int *
 int kwl_output_resolution_revert(struct kwl_server *server, const char *key);
 void kwl_output_resolution_presented(struct kwl_server *server, int shown);
 void kwl_output_resolution_object_gone(struct kwl_object *object);
+
+/*
+ * A display's scale as the displays objects are told it (output-scale.c):
+ * the scale it is shown at (0 for a display shown nowhere), the user's
+ * choice (0: the default), the default its density asks for, the steps it
+ * offers now, its logical size at the scale it would be shown at, and why
+ * the scale cannot be chosen now (KWL_SCALE_WHY_*).  Scales are 120ths.
+ */
+struct kwl_output_scale_state {
+	unsigned current;
+	unsigned chosen;
+	unsigned recommended;
+	unsigned offered[KWL_SCALE_STEPS];
+	unsigned offered_count;
+	uint32_t width;
+	uint32_t height;
+	unsigned why;
+};
+
+/* The choice of a display's scale (output-scale.c). */
+void kwl_output_scale_choose(struct kwl_server *server);
+void kwl_output_scale_head(struct kwl_server *server, struct kwl_head *head);
+void kwl_output_scale_report(struct kwl_server *server, VkDisplayKHR display, const char *key, struct kwl_output_scale_state *state);
+int kwl_output_scale_set(struct kwl_server *server, const char *key, unsigned scale120, int *saved);
 void kwl_output_resolution_report(struct kwl_server *server, const char *key, unsigned *state, uint32_t *remaining_ms);
 
 /* The capture's copy of a frame's swapchain image (shot.c, ws173-p002). */
@@ -1320,6 +1375,7 @@ int kwl_heads_config_save(struct kwl_server *server);
 uint64_t kwl_heads_config_ticket(void);
 int kwl_heads_config_settled(uint64_t ticket, int *error);
 void kwl_heads_sync(struct kwl_server *server);
+void kwl_heads_rearrange(struct kwl_server *server, unsigned slot, const struct kwl_plane_rect *before);
 void kwl_heads_close_display(struct kwl_server *server, VkDisplayKHR display);
 void kwl_heads_close_all(struct kwl_server *server, struct kwl_head_rest *rests, unsigned *count);
 void kwl_heads_rest_destroy(struct kwl_server *server, struct kwl_head_rest *rests, unsigned count);

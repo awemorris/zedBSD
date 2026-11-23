@@ -10,12 +10,20 @@
  *
  * The compositor draws them (in the window's title bar, or in the system bar
  * while the window is docked) from the table given to libkeiland's window
- * (kl_window_set_menu, WS131 p018).  A choice arrives among the window's
+ * (kl_window_set_menu).  A choice arrives among the window's
  * inputs as a KL_WINDOW_ACTION input (window.c), queued for the main loop,
  * which then tells the actions' states (Copy and Paste enabled, the font's
  * size checked, Fullscreen and Treat Ambiguous-Width Characters as Wide
  * checked); libkeiland sends only what changed.  Without the System Menu
- * the terminal simply has no menus.
+ * the terminal simply has no menus.  Session > Disable Input Method is
+ * there only for a program that asks for it (terminal_run_options), one
+ * whose connections cannot tell when the remote side reads a password;
+ * Shell > Settings (F12) only for a program that gave the settings' tab
+ * what it needs;
+ * Alt+F11 for Treat Ambiguous-Width Characters as Wide likewise for a
+ * program that asks for it (both terminal and mikuterm do), and Alt+Enter
+ * for Fullscreen for a program whose function keys belong to the remote
+ * side.
  */
 
 #include "terminal.h"
@@ -37,6 +45,7 @@
 #define MENU_CLOSE		12U
 #define MENU_NEW_TAB		13U
 #define MENU_CLOSE_TAB		14U
+#define MENU_SETTINGS		15U
 
 /* Edit. */
 #define MENU_COPY		20U
@@ -61,7 +70,7 @@
 #define MENU_SIZE_LARGE		42U
 #define MENU_SIZE_HUGE		43U
 
-/* View > Theme and its themes (ws128-p006). */
+/* View > Theme and its themes. */
 #define MENU_THEME		44U
 #define MENU_THEME_DARK		45U
 #define MENU_THEME_LIGHT	46U
@@ -73,6 +82,8 @@
 #define MENU_SESSION_LINE	52U
 #define MENU_CLEAR		53U
 #define MENU_RESET		54U
+#define MENU_INPUT_METHOD	55U
+#define MENU_FORGET		56U
 
 /* Help. */
 #define MENU_ABOUT		60U
@@ -82,12 +93,20 @@
 #define MENU_KEY_MINUS		0x2dU
 #define MENU_KEY_ZERO		0x30U
 #define MENU_KEY_F11		0xffc8U
+#define MENU_KEY_F12		0xffc9U
+#define MENU_KEY_RETURN		0xff0dU
 
-/* The menus, in the order they are shown. */
+/*
+ * The menus, in the order they are shown.  Zoom In and Zoom Out are
+ * Control with Alt and the plus or minus key, so that Control with minus
+ * and Control with Shift and minus (C-_) reach the shell; the plus key's
+ * unshifted = chooses Zoom In too (the menus' matching).
+ */
 static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SHELL, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Shell", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_NEW_WINDOW, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Window", TERMINAL_ACTION_NEW_WINDOW, KL_MENU_ROLE_NEW, KL_MENU_CTRL | KL_MENU_SHIFT, 'n' },
-	{ MENU_NEW_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Tab", TERMINAL_ACTION_NEW_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 't' },
+	{ MENU_NEW_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Tab", TERMINAL_ACTION_NEW_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_ALT, 't' },
+	{ MENU_SETTINGS, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Settings...", TERMINAL_ACTION_SETTINGS, KL_MENU_ROLE_NONE, 0U, MENU_KEY_F12 },
 	{ MENU_SHELL_LINE, MENU_SHELL, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLOSE_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Tab", TERMINAL_ACTION_CLOSE_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'w' },
 	{ MENU_CLOSE, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Window", TERMINAL_ACTION_CLOSE, KL_MENU_ROLE_CLOSE, KL_MENU_CTRL | KL_MENU_SHIFT, 'q' },
@@ -101,8 +120,8 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_FIND_NEXT, MENU_EDIT, KL_MENU_ITEM_NORMAL, "Find Next", TERMINAL_ACTION_FIND_NEXT, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'g' },
 	{ MENU_FIND_PREVIOUS, MENU_EDIT, KL_MENU_ITEM_NORMAL, "Find Previous", TERMINAL_ACTION_FIND_PREVIOUS, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'h' },
 	{ MENU_VIEW, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "View", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
-	{ MENU_ZOOM_IN, MENU_VIEW, KL_MENU_ITEM_NORMAL, "Zoom In", TERMINAL_ACTION_ZOOM_IN, KL_MENU_ROLE_ZOOM_IN, KL_MENU_CTRL, MENU_KEY_PLUS },
-	{ MENU_ZOOM_OUT, MENU_VIEW, KL_MENU_ITEM_NORMAL, "Zoom Out", TERMINAL_ACTION_ZOOM_OUT, KL_MENU_ROLE_ZOOM_OUT, KL_MENU_CTRL, MENU_KEY_MINUS },
+	{ MENU_ZOOM_IN, MENU_VIEW, KL_MENU_ITEM_NORMAL, "Zoom In", TERMINAL_ACTION_ZOOM_IN, KL_MENU_ROLE_ZOOM_IN, KL_MENU_CTRL | KL_MENU_ALT, MENU_KEY_PLUS },
+	{ MENU_ZOOM_OUT, MENU_VIEW, KL_MENU_ITEM_NORMAL, "Zoom Out", TERMINAL_ACTION_ZOOM_OUT, KL_MENU_ROLE_ZOOM_OUT, KL_MENU_CTRL | KL_MENU_ALT, MENU_KEY_MINUS },
 	{ MENU_ZOOM_NORMAL, MENU_VIEW, KL_MENU_ITEM_NORMAL, "Normal Size", TERMINAL_ACTION_ZOOM_NORMAL, KL_MENU_ROLE_NONE, KL_MENU_CTRL, MENU_KEY_ZERO },
 	{ MENU_TEXT_SIZE, MENU_VIEW, KL_MENU_ITEM_SUBMENU, "Text Size", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_SIZE_SMALL, MENU_TEXT_SIZE, KL_MENU_ITEM_RADIO, "Small", TERMINAL_ACTION_SIZE_SMALL, KL_MENU_ROLE_NONE, 0U, 0U },
@@ -119,12 +138,27 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SESSION, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Session", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_INTERRUPT, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send Interrupt", TERMINAL_ACTION_INTERRUPT, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_END_OF_FILE, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send End of File", TERMINAL_ACTION_END_OF_FILE, KL_MENU_ROLE_NONE, 0U, 0U },
+	{ MENU_INPUT_METHOD, MENU_SESSION, KL_MENU_ITEM_CHECKBOX, "Disable Input Method", TERMINAL_ACTION_INPUT_METHOD_OFF, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'i' },
+	{ MENU_FORGET, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Forget Remembered Passphrases", TERMINAL_ACTION_FORGET_PASSPHRASES, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_SESSION_LINE, MENU_SESSION, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLEAR, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Clear Screen", TERMINAL_ACTION_CLEAR, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_RESET, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Reset Terminal", TERMINAL_ACTION_RESET, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_HELP, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Help", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_ABOUT, MENU_HELP, KL_MENU_ITEM_NORMAL, "About Terminal", TERMINAL_ACTION_ABOUT, KL_MENU_ROLE_ABOUT, 0U, 0U }
 };
+
+/*
+ * The menus the window shows: menu_items without the items the program
+ * did not ask for (Session > Disable Input Method unless
+ * window->input_method_item, Session > Forget Remembered Passphrases
+ * unless window->forget_item) and with the shortcuts it asked for (Alt+F11
+ * for the ambiguous width when window->ambiguous_wide_key, Alt+Enter for
+ * Fullscreen when window->fullscreen_alt_enter), made when the
+ * menus open and kept while the compositor shows them.  menu_shown_count
+ * is how many it holds.
+ */
+static struct kl_menu_entry menu_shown_items[sizeof(menu_items) / sizeof(menu_items[0])];
+static size_t menu_shown_count;
 
 static int menu_state(struct terminal_window *window, const struct terminal_menu_state *state);
 static void menu_action_state(struct terminal_window *window, uint32_t action, int enabled, int checked);
@@ -141,10 +175,49 @@ terminal_menu_open(
 	struct terminal_window *window,
 	const struct terminal_menu_state *state)
 {
+	size_t index;
 	int error;
 
+	/* The items the window shows: every one, but the input method's only when the program asked for it. */
+	menu_shown_count = 0U;
+	for (index = 0U; index < sizeof(menu_items) / sizeof(menu_items[0]); index++) {
+		/* A program that keeps the input method to its connections has no such item. */
+		if (menu_items[index].id == MENU_INPUT_METHOD && !window->input_method_item)
+			continue;
+
+		/* A program that keeps no passphrases has nothing to forget. */
+		if (menu_items[index].id == MENU_FORGET && !window->forget_item)
+			continue;
+
+		/* A program that cannot open another window has no such item. */
+		if (menu_items[index].id == MENU_NEW_WINDOW && !window->new_window_item)
+			continue;
+
+		/* A program that gave the settings' tab nothing has no settings. */
+		if (menu_items[index].id == MENU_SETTINGS && !window->settings_item)
+			continue;
+
+		/* The item, after the ones before it. */
+		menu_shown_items[menu_shown_count] = menu_items[index];
+
+		/* Alt+F11 switches the ambiguous width for a program that asked for it. */
+		if (menu_items[index].id == MENU_AMBIGUOUS_WIDE && window->ambiguous_wide_key) {
+			menu_shown_items[menu_shown_count].modifiers = KL_MENU_ALT;
+			menu_shown_items[menu_shown_count].keysym = MENU_KEY_F11;
+		}
+
+		/* Alt+Enter is Fullscreen's key for a program that leaves F11 to the remote side. */
+		if (menu_items[index].id == MENU_FULLSCREEN && window->fullscreen_alt_enter) {
+			menu_shown_items[menu_shown_count].modifiers = KL_MENU_ALT;
+			menu_shown_items[menu_shown_count].keysym = MENU_KEY_RETURN;
+		}
+
+		/* One more item shown. */
+		menu_shown_count++;
+	}
+
 	/* The table; a compositor without the System Menu leaves the terminal without menus. */
-	error = kl_window_set_menu(window->kui, menu_items, sizeof(menu_items) / sizeof(menu_items[0]));
+	error = kl_window_set_menu(window->kui, menu_shown_items, menu_shown_count);
 	if (error == ENOTSUP) {
 		printf("ZTERM MENU none errno=%d\n", error);
 		return 0;
@@ -163,7 +236,7 @@ terminal_menu_open(
 	}
 
 	/* Succeeded: the menus are the compositor's to show. */
-	printf("ZTERM MENU ready items=%u\n", (unsigned)(sizeof(menu_items) / sizeof(menu_items[0])));
+	printf("ZTERM MENU ready items=%u\n", (unsigned)menu_shown_count);
 	return 0;
 }
 
@@ -255,7 +328,8 @@ terminal_menu_close(
  * Shows a state in the menus through the actions' states: Copy and Paste
  * enabled, Zoom In and Out within the sizes, the size's radio item,
  * Fullscreen and Treat Ambiguous-Width Characters as Wide checked, the
- * theme's radio item and Find Next and Find Previous enabled (ws128-p006).
+ * theme's radio item, Find Next and Find Previous enabled and
+ * Disable Input Method checked.
  */
 static int
 menu_state(
@@ -288,11 +362,11 @@ menu_state(
 	menu_action_state(window, TERMINAL_ACTION_SIZE_LARGE, 1, menu_same(state->pixels, TERMINAL_PIXELS_LARGE));
 	menu_action_state(window, TERMINAL_ACTION_SIZE_HUGE, 1, menu_same(state->pixels, TERMINAL_PIXELS_HUGE));
 
-	/* Fullscreen while the window is, and Treat Ambiguous-Width Characters as Wide while it is on (ws128-p009). */
+	/* Fullscreen while the window is, and Treat Ambiguous-Width Characters as Wide while it is on. */
 	menu_action_state(window, TERMINAL_ACTION_FULLSCREEN, 1, state->fullscreen);
 	menu_action_state(window, TERMINAL_ACTION_AMBIGUOUS_WIDE, 1, state->ambiguous_wide);
 
-	/* The theme's radio item: the light one, the contrast one, or the dark one for any other (ws128-p006). */
+	/* The theme's radio item: the light one, the contrast one, or the dark one for any other. */
 	dark = 0;
 	light = 0;
 	contrast = 0;
@@ -310,6 +384,10 @@ menu_state(
 	/* Finding again needs a text looked for. */
 	menu_action_state(window, TERMINAL_ACTION_FIND_NEXT, state->can_find_again, 0);
 	menu_action_state(window, TERMINAL_ACTION_FIND_PREVIOUS, state->can_find_again, 0);
+
+	/* Disable Input Method checked while the user keeps it off, for the window that has the item. */
+	if (window->input_method_item)
+		menu_action_state(window, TERMINAL_ACTION_INPUT_METHOD_OFF, 1, state->input_method_off);
 
 	/* Succeeded: the menus show the state. */
 	window->menu_state = *state;

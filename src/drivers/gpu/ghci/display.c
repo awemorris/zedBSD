@@ -6,10 +6,10 @@
  */
 
 /*
- * The display operations of a GHCI device: one output, the display
- * controller of the DISP2 capability, with its primary plane and, when
- * the controller has one and the GPU reports HW_CURSOR, a cursor plane
- * (display-scan.c drives the controller through the ring).
+ * The display operations of a GHCI device: one output, display 0 of a
+ * GPU with CAP_DISP, with its primary plane and, when the capability
+ * block says HAS_CURSOR, a cursor plane (display-scan.c drives the
+ * display controller through the display commands of the ring).
  *
  * A present records a frame and returns; the core then waits for its
  * adoption (DRV_GPU_DISPLAY_UNGATED), so presents, waits and the cursor
@@ -17,8 +17,9 @@
  * ways, chosen once for a swapchain by libvulkan from the constraints:
  *
  *  - shared (a blob the session presents): the controller scans the
- *    session's memory where it is, by its 32-bit physical address, which
- *    the display holds until the controller no longer scans it;
+ *    session's memory where it is, by its physical address (local memory,
+ *    or host memory below HOST_LIMIT), which the display holds until the
+ *    controller no longer scans it;
  *  - copied (ordinary storage): the storage is copied into the one of the
  *    driver's two frames that is not on the screen, and is not borrowed
  *    past the call.  The GPU copies through session 0's mappings of the
@@ -67,15 +68,12 @@
 #define COPY_WAIT_MS			1000U
 
 /* The cursor's image: 64 x 64 pixels of 4 bytes, rows 256 bytes apart. */
-#define CURSOR_STRIDE			(GHCI_DC_CURSOR_SIZE * GHCI_DISPLAY_PIXEL_BYTES)
-#define CURSOR_BYTES			(CURSOR_STRIDE * GHCI_DC_CURSOR_SIZE)
+#define CURSOR_STRIDE			(GHCI_CURSOR_SIZE * GHCI_DISPLAY_PIXEL_BYTES)
+#define CURSOR_BYTES			(CURSOR_STRIDE * GHCI_CURSOR_SIZE)
 
-/* The places CURSOR_POS takes: 16 bits a coordinate, signed. */
+/* The places DISP_SET_CURSOR takes: 16 bits a coordinate, signed. */
 #define CURSOR_POSITION_MIN		(-32768)
 #define CURSOR_POSITION_MAX		32767
-
-/* The 32-bit physical addresses the controller takes. */
-#define SCAN_LIMIT			0x100000000ULL
 
 /*
  * What copies a copied present into a frame: nothing (the GPU offers no
@@ -169,7 +167,7 @@ const struct drv_gpu_scanout_ops ghci_scanout_ops = {
 
 static int lease_check(struct ghci_display *display, void *opaque, uint64_t lease, uint64_t generation);
 static int find_mode(const struct ghci_display *display, uint32_t width, uint32_t height, unsigned *mode);
-static uint32_t display_formats(const struct ghci_display *display);
+static uint32_t display_formats(const struct ghci_device *device);
 static int copy_route(struct ghci_device *device, enum copy_engine *engine);
 static int buffer_take(struct ghci_device *device, struct ghci_allocation **slot, uint64_t bytes, int local);
 static int buffers_take(struct ghci_device *device);
@@ -181,7 +179,7 @@ static void memory_let_go(struct ghci_device *device, struct ghci_allocation *me
 static int cursor_surface_free(const struct ghci_display *display);
 static int cursor_rows(struct ghci_allocation *memory, const struct gpu_display_cursor_image *request, uint8_t *staging);
 static void cursor_convert(const uint8_t *staging, uint8_t *surface, uint32_t width, uint32_t height, int swap);
-static uint32_t cursor_coordinate(int32_t value);
+static int32_t cursor_coordinate(int32_t value);
 
 /* Describes the one output. */
 static int
@@ -225,7 +223,7 @@ display_query(
 	if (display->cursor)
 		request->flags |= GPU_DISPLAY_HAS_CURSOR;
 	request->plane_count = 1U;
-	request->formats = display_formats(display);
+	request->formats = display_formats(device);
 	request->max_frame_bytes = ghci_scan_frame_bytes(display);
 	request->current_width = current->width;
 	request->current_height = current->height;
@@ -237,7 +235,7 @@ display_query(
 
 	mutex_unlock(&device->display_lock);
 
-	/* The monitor's size is not read (no EDID through the controller). */
+	/* The monitor's size is not reported (the EDID is read for its timings only). */
 	request->physical_width_mm = 0U;
 	request->physical_height_mm = 0U;
 	kern_memset(request->name, 0, sizeof(request->name));
@@ -451,11 +449,11 @@ display_present(
 	storage = object;
 
 	/* The packed formats the controller scans. */
-	formats = display_formats(display);
+	formats = display_formats(device);
 	if (request->format == GPU_PIXEL_BGRA8888 && (formats & GPU_DISPLAY_FORMAT_BGRA8888) != 0U) {
-		format = GHCI_DC_FMT_BGRA8;
+		format = GHCI_FORMAT_B8G8R8A8_UNORM;
 	} else if (request->format == GPU_PIXEL_RGBA8888 && (formats & GPU_DISPLAY_FORMAT_RGBA8888) != 0U) {
-		format = GHCI_DC_FMT_RGBA8;
+		format = GHCI_FORMAT_R8G8B8A8_UNORM;
 	} else {
 		return EINVAL;
 	}
@@ -611,7 +609,7 @@ display_cursor_set(
 
 	/* An image that fits the plane. */
 	if (request->width == 0U || request->height == 0U ||
-	    request->width > GHCI_DC_CURSOR_SIZE || request->height > GHCI_DC_CURSOR_SIZE)
+	    request->width > GHCI_CURSOR_SIZE || request->height > GHCI_CURSOR_SIZE)
 		return EINVAL;
 
 	/* The staging of the rows and the converted image. */
@@ -665,10 +663,9 @@ display_cursor_move(
 {
 	struct ghci_device *device;
 	struct ghci_display *display;
-	uint32_t position;
 	int error;
 
-	/* The cursor's registers are the host's in every state of the processor. */
+	/* The place and the visibility go to the cursor plane's queue through the ring. */
 	device = private_data;
 	display = &device->display;
 	mutex_lock(&device->display_lock);
@@ -676,11 +673,8 @@ display_cursor_move(
 	error = lease_check(display, opaque, request->lease, request->generation);
 	if (error == 0 && !display->cursor_image)
 		error = EINVAL;
-	if (error == 0) {
-		position = cursor_coordinate(request->x) | (cursor_coordinate(request->y) << 16);
-		ghci_write(device, display->registers + GHCI_DC_CURSOR_POS, position);
-		ghci_write(device, display->registers + GHCI_DC_CURSOR_CTRL, 1U);
-	}
+	if (error == 0)
+		ghci_scan_cursor_state(device, cursor_coordinate(request->x), cursor_coordinate(request->y), 1);
 
 	mutex_unlock(&device->display_lock);
 
@@ -703,14 +697,14 @@ display_cursor_hide(
 	struct ghci_display *display;
 	int error;
 
-	/* The cursor's register is the host's in every state of the processor. */
+	/* The visibility goes to the cursor plane's queue through the ring, the place kept. */
 	device = private_data;
 	display = &device->display;
 	mutex_lock(&device->display_lock);
 
 	error = lease_check(display, opaque, request->lease, request->generation);
 	if (error == 0)
-		ghci_write(device, display->registers + GHCI_DC_CURSOR_CTRL, 0U);
+		ghci_scan_cursor_state(device, display->cursor_x, display->cursor_y, 0);
 
 	mutex_unlock(&device->display_lock);
 
@@ -828,8 +822,8 @@ scanout_query_device(
  * the copied route when the GPU copies frames (the blitter, or a copy
  * program the compiler takes, which the first query compiles), the
  * packed formats, rows and images on the memory line, no placement (host
- * and local memory are both scanned), and the 32-bit physical addresses
- * the controller takes.  Returns 0, ENOENT, ESTALE, or ENOMEM or EIO when
+ * and local memory are both scanned), and the host addresses the
+ * controller reaches (below HOST_LIMIT).  Returns 0, ENOENT, ESTALE, or ENOMEM or EIO when
  * the copy program could not be placed for now.
  */
 static int
@@ -868,11 +862,11 @@ scanout_constraints(
 	request->flags = GPU_SCANOUT_SHARED;
 	if (engine != COPY_NONE)
 		request->flags |= GPU_SCANOUT_COPY;
-	request->formats = display_formats(&device->display);
+	request->formats = display_formats(device);
 	request->stride_alignment = GHCI_DISPLAY_LINE_BYTES;
 	request->offset_alignment = GHCI_DISPLAY_LINE_BYTES;
 	request->placement = 0U;
-	request->max_dma_address = SCAN_LIMIT - 1U;
+	request->max_dma_address = ghci_memory_limit(device) - 1U;
 	return 0;
 }
 
@@ -925,18 +919,27 @@ find_mode(
 	return EINVAL;
 }
 
-/* Reports the packed formats the controller scans, from DC_CAPS. */
+/*
+ * Reports the packed formats the display scans: BGRA8 and RGBA8 where
+ * their words of the capability block's format table say FMT_SCANOUT.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.5, the
+ * format word's [22] FMT_SCANOUT; section 7.3, CMD_FLIP's scanout_format
+ * needs it).
+ */
 static uint32_t
 display_formats(
-	const struct ghci_display *display)
+	const struct ghci_device *device)
 {
+	const struct ghci_caps *caps;
 	uint32_t formats;
 
-	/* BGRA8 and RGBA8, as the controller names them. */
+	/* BGRA8 and RGBA8, as the format table names them. */
+	caps = &device->caps;
 	formats = 0U;
-	if ((display->controller_caps & GHCI_DC_CAPS_BGRA8) != 0U)
+	if (GHCI_FORMAT_B8G8R8A8_UNORM < caps->format_count && (caps->formats[GHCI_FORMAT_B8G8R8A8_UNORM] & GHCI_FMT_SCANOUT) != 0U)
 		formats |= GPU_DISPLAY_FORMAT_BGRA8888;
-	if ((display->controller_caps & GHCI_DC_CAPS_RGBA8) != 0U)
+	if (GHCI_FORMAT_R8G8B8A8_UNORM < caps->format_count && (caps->formats[GHCI_FORMAT_R8G8B8A8_UNORM] & GHCI_FMT_SCANOUT) != 0U)
 		formats |= GPU_DISPLAY_FORMAT_RGBA8888;
 
 	/* Succeeded: the formats. */
@@ -1119,8 +1122,8 @@ buffers_take(
 
 /*
  * Records a shared present: the blob's memory, held by the display, is
- * scanned where it is, by its 32-bit physical address, its first row and
- * its stride on the memory line.  A FIFO present waits for room in the
+ * scanned where it is, by its physical address, its first row and its
+ * stride on the memory line.  A FIFO present waits for room in the
  * queue.
  */
 static int
@@ -1138,21 +1141,23 @@ present_shared(
 	uint64_t deadline;
 	uint64_t mark;
 	uint64_t now;
+	int reachable;
 	int usable;
 	int fifo;
 	int error;
 
-	/* The image lies below 4 GiB, its first row and its stride on the memory line. */
+	/* The image lies where the display reaches, its first row and its stride on the line. */
 	display = &device->display;
 	base = memory->bus + request->offset;
-	if (memory->bus + memory->bytes > SCAN_LIMIT)
+	reachable = ghci_scan_reachable(device, memory);
+	if (!reachable)
 		return EINVAL;
 	if ((base % GHCI_DISPLAY_LINE_BYTES) != 0U || (request->stride % GHCI_DISPLAY_LINE_BYTES) != 0U)
 		return EINVAL;
 
-	/* The image the controller scans. */
+	/* The image the display scans. */
 	kern_memset(&image, 0, sizeof(image));
-	image.base = (uint32_t)base;
+	image.base = base;
 	image.stride = request->stride;
 	image.format = format;
 	image.mode = mode;
@@ -1313,7 +1318,7 @@ present_copied(
 	if (error == 0) {
 		kern_memset(&image, 0, sizeof(image));
 		image.sequence = display->sequence + 1U;
-		image.base = (uint32_t)display->frames[frame]->bus;
+		image.base = display->frames[frame]->bus;
 		image.stride = ghci_scan_stride(request->width);
 		image.format = format;
 		image.mode = mode;
@@ -1554,8 +1559,8 @@ cursor_convert(
 	uint32_t column;
 
 	/* Each pixel of the 64 x 64 surface. */
-	for (row = 0U; row < GHCI_DC_CURSOR_SIZE; row++) {
-		for (column = 0U; column < GHCI_DC_CURSOR_SIZE; column++) {
+	for (row = 0U; row < GHCI_CURSOR_SIZE; row++) {
+		for (column = 0U; column < GHCI_CURSOR_SIZE; column++) {
 			source = &staging[row * CURSOR_STRIDE + column * GHCI_DISPLAY_PIXEL_BYTES];
 			target = &surface[row * CURSOR_STRIDE + column * GHCI_DISPLAY_PIXEL_BYTES];
 
@@ -1583,11 +1588,11 @@ cursor_convert(
 }
 
 /*
- * Reports a coordinate of the cursor as CURSOR_POS takes it: 16 bits,
- * signed, a place past either end held at that end (the parts of the
- * image outside the screen are clipped).
+ * Reports a coordinate of the cursor as DISP_SET_CURSOR takes it: 16
+ * bits, signed, a place past either end held at that end (the parts of
+ * the image outside the screen are clipped).
  */
-static uint32_t
+static int32_t
 cursor_coordinate(
 	int32_t value)
 {
@@ -1597,6 +1602,6 @@ cursor_coordinate(
 	if (value > CURSOR_POSITION_MAX)
 		value = CURSOR_POSITION_MAX;
 
-	/* Succeeded: the two's complement in the low 16 bits. */
-	return (uint32_t)value & 0xffffU;
+	/* Succeeded: the coordinate. */
+	return value;
 }

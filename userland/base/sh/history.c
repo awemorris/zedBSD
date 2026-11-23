@@ -17,7 +17,16 @@
  * An interactive shell reading a terminal also keeps the lines in a file
  * (HISTFILE, or $HOME/.sh_history when it is unset; an empty HISTFILE keeps
  * none): it reads the file when it starts, so a new shell can recall what
- * earlier ones ran, and adds each line to the file as soon as it is read.
+ * earlier ones ran, and adds the lines it read to the file when it ends.
+ *
+ * Writing the file once at the end, not after each line, keeps a command
+ * from paying for a file-system commit of its own.  The shell ends by exit,
+ * by the end of its input, by replacing itself with exec, or by a hangup of
+ * its terminal, and writes the lines in each case; lines are also written
+ * once HISTSIZE of them wait, which bounds the memory they hold.  A shell
+ * killed by a signal it cannot catch, or a system that stops without the
+ * shell ending, loses the lines read since the file was last written.  The
+ * lines go to the file HISTFILE names when the last of them is read.
  */
 
 #include "userland/base/sh/shell.h"
@@ -77,7 +86,28 @@ static int history_next = 1;
  */
 static int history_file_enabled;
 
+/*
+ * The shell that loaded the history file.  A subshell forked from it has
+ * the same waiting lines in its memory and must not write them again.
+ */
+static pid_t history_owner;
+
+/*
+ * The lines read since the history file was last written, each with its
+ * newline, and the file they go to.  The hangup handler writes them, so a
+ * buffer is never changed in place: a longer one is made, then published
+ * before its length, and the handler always sees a whole buffer and a
+ * length it holds.  NULL and 0 when no line waits.
+ */
+static char *volatile pending_text;
+static volatile size_t pending_length;
+static char *volatile pending_path;
+
+/* How many lines wait in pending_text. */
+static int pending_lines;
+
 static int history_limit(void);
+static void history_file_append(const char *path, const char *text, size_t length);
 static char *history_file_path(void);
 static char *history_file_read(const char *path, size_t *length);
 static void history_file_rewrite(const char *path);
@@ -159,6 +189,10 @@ sh_history_load(
 	limit = history_limit();
 	stifle_history(limit);
 	history_file_enabled = 1;
+	history_owner = getpid();
+
+	/* A hangup of the terminal writes the waiting lines before the shell goes. */
+	sh_signals_for_history();
 
 	/* No HISTFILE and no home directory, or an empty HISTFILE, is no file. */
 	path = history_file_path();
@@ -218,18 +252,21 @@ sh_history_load(
 }
 
 /*
- * Adds a line read from the terminal to the end of the history file, when
- * the shell keeps one.  A file that cannot be written is left as it is.
+ * Keeps a line read from the terminal for the history file, which gets it
+ * when the shell ends, or at once when HISTSIZE lines are waiting.
  */
 void
 sh_history_save(
 	const char *line)
 {
 	char *path;
-	char *record;
+	char *old_path;
+	char *text;
+	char *old_text;
 	size_t length;
-	ssize_t written;
-	int descriptor;
+	size_t waiting;
+	int compare;
+	int limit;
 
 	/* Only a shell that loaded the file writes it. */
 	if (!history_file_enabled)
@@ -247,25 +284,103 @@ sh_history_save(
 	if (path == NULL)
 		return;
 
-	/* The line with its newline, so that one write adds all of it. */
-	record = sh_malloc(length + 1U);
-	memcpy(record, line, length);
-	record[length] = '\n';
-
-	/* Appends it, making the file readable by its owner only. */
-	descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
-	free(path);
-	if (descriptor < 0) {
-		free(record);
-		return;
+	/* The waiting lines go to the file named now; an unchanged name is kept. */
+	old_path = pending_path;
+	compare = 1;
+	if (old_path != NULL)
+		compare = strcmp(old_path, path);
+	if (compare == 0) {
+		free(path);
+	} else {
+		pending_path = path;
+		free(old_path);
 	}
 
-	/* One write, so that lines from shells running side by side do not mix. */
-	do
-		written = write(descriptor, record, length + 1U);
-	while (written < 0 && errno == EINTR);
-	(void)close(descriptor);
-	free(record);
+	/* A buffer with the waiting lines and this one, with its newline. */
+	waiting = pending_length;
+	text = sh_malloc(waiting + length + 1U);
+	if (waiting > 0)
+		memcpy(text, pending_text, waiting);
+	memcpy(text + waiting, line, length);
+	text[waiting + length] = '\n';
+
+	/* Publishes the buffer before its length, then lets the old one go. */
+	old_text = pending_text;
+	pending_text = text;
+	pending_length = waiting + length + 1U;
+	free(old_text);
+	pending_lines++;
+
+	/* HISTSIZE lines waiting are written now, so that they do not grow without end. */
+	limit = history_limit();
+	if (pending_lines >= limit)
+		sh_history_flush();
+}
+
+/*
+ * Adds the lines read since the history file was last written to its end,
+ * when the shell keeps one.  A file that cannot be written is left as it is.
+ */
+void
+sh_history_flush(
+	void)
+{
+	sigset_t hangup;
+	sigset_t saved;
+	char *text;
+
+	/* Only the shell that loaded the file writes it, and only lines that wait. */
+	if (!history_file_enabled)
+		return;
+	if (getpid() != history_owner)
+		return;
+	if (pending_length == 0)
+		return;
+
+	/* A hangup now would write the same lines again. */
+	sigemptyset(&hangup);
+	(void)sigaddset(&hangup, SIGHUP);
+	(void)sigprocmask(SIG_BLOCK, &hangup, &saved);
+
+	/* Appends the lines, then lets them go. */
+	history_file_append(pending_path, pending_text, pending_length);
+	text = pending_text;
+	pending_length = 0;
+	pending_text = NULL;
+	pending_lines = 0;
+	free(text);
+
+	/* A hangup that came meanwhile is taken now, with nothing left to write. */
+	(void)sigprocmask(SIG_SETMASK, &saved, NULL);
+}
+
+/*
+ * Adds the waiting lines to the history file from the hangup handler,
+ * using only calls a signal handler may make.  The shell ends right after.
+ */
+void
+sh_history_flush_hangup(
+	void)
+{
+	const char *text;
+	const char *path;
+	size_t length;
+
+	/* Only the shell that loaded the file writes it. */
+	if (!history_file_enabled)
+		return;
+	if (getpid() != history_owner)
+		return;
+
+	/* The length first: the buffer published with it holds at least as much. */
+	length = pending_length;
+	text = pending_text;
+	path = pending_path;
+	if (length == 0 || text == NULL || path == NULL)
+		return;
+
+	/* Appends them. */
+	history_file_append(path, text, length);
 }
 
 /*
@@ -415,6 +530,47 @@ history_limit(
 
 	/* Succeeded: the limit. */
 	return limit;
+}
+
+/*
+ * Appends text to the history file, making it readable by its owner only.
+ * Only calls a signal handler may make are used, and errno is kept.
+ */
+static void
+history_file_append(
+	const char *path,
+	const char *text,
+	size_t length)
+{
+	ssize_t written;
+	int descriptor;
+	int saved_errno;
+
+	/* Opens the file for appending, creating it. */
+	saved_errno = errno;
+	descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
+	if (descriptor < 0) {
+		errno = saved_errno;
+		return;
+	}
+
+	/*
+	 * One write when it can, so that lines from shells running side by
+	 * side do not mix; a short write goes on with the rest.
+	 */
+	while (length > 0) {
+		written = write(descriptor, text, length);
+		if (written < 0 && errno == EINTR)
+			continue;
+		if (written <= 0)
+			break;
+		text += written;
+		length -= (size_t)written;
+	}
+
+	/* Closes the file. */
+	(void)close(descriptor);
+	errno = saved_errno;
 }
 
 /*

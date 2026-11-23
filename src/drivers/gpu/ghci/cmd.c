@@ -26,9 +26,6 @@
 /* The largest client session number. */
 #define SESSION_MAX			15U
 
-/* The descriptor sets a table can be bound to. */
-#define DESCRIPTOR_SETS			4U
-
 /* The topologies the pipeline state accepts: POINT to TRIANGLE_STRIP, and PATCH_LIST with tessellation. */
 #define TOPOLOGY_MAX			4U
 
@@ -63,6 +60,7 @@ static int pso_ext_tess_check(const struct ghci_pso_ext *ext);
 static int pso_ext_gs_check(const struct ghci_pso_ext *ext);
 static void pso_ext_store(uint8_t *out, const struct ghci_pso_ext *ext);
 static void store_attachment(uint8_t *out, uint32_t offset, const struct ghci_rp_attachment *attachment);
+static int disp_comp_valid(const struct ghci_disp_comp *comp, int has_value);
 static uint32_t buffer_image(uint32_t *out, uint32_t opcode, uint64_t first_va, uint64_t second_va, uint32_t first_pitch, uint32_t second_pitch, const struct ghci_slice *image, const struct ghci_transfer *transfer);
 
 /*
@@ -112,52 +110,68 @@ ghci_cmd_nop(
 }
 
 /*
- * Writes a VM_MAP of host or local pages into a session's address space.
+ * Writes a VM_MAP of host or local pages into a session's address space,
+ * with the memory given for its intermediate page tables and the place
+ * of its completion record.
  */
 uint32_t
 ghci_cmd_vm_map(
 	uint32_t *out,
-	uint32_t session,
-	uint32_t flags,
-	uint64_t va,
-	uint64_t bus,
-	uint64_t bytes)
+	const struct ghci_map_args *args)
 {
 	/* Refuses a session number the GPU does not have. */
-	if (session > SESSION_MAX)
+	if (args->session > SESSION_MAX)
+		return 0U;
+
+	/* Refuses a flag past WC: bits 31 to 5 are reserved and fault the processor. */
+	if ((args->flags & ~GHCI_VM_FLAGS_MASK) != 0U)
 		return 0U;
 
 	/* Refuses an empty range and addresses not on a 4 KiB page. */
-	if (bytes == 0U)
+	if (args->bytes == 0U)
 		return 0U;
-	if (((va | bus | bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
+	if (((args->va | args->bus | args->bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
+		return 0U;
+
+	/* Refuses a record off 32 bytes. */
+	if ((args->comp % GHCI_MAP_COMP_BYTES) != 0U)
 		return 0U;
 
 	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 7.3, CMD_VM_MAP: session, flags, reserved, VA, phys, size).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_VM_MAP: session, flags, reserved, VA, phys, size, pt_mem_pa,
+	 * pt_mem_bytes, reserved, comp_pa).
 	 */
 	out[0] = ghci_cmd_header(GHCI_OP_VM_MAP, GHCI_DW_VM_MAP, 0U);
-	out[1] = session;
-	out[2] = flags;
+	out[1] = args->session;
+	out[2] = args->flags;
 	out[3] = 0U;
-	put64(&out[4], va);
-	put64(&out[6], bus);
-	put64(&out[8], bytes);
+	put64(&out[4], args->va);
+	put64(&out[6], args->bus);
+	put64(&out[8], args->bytes);
+	put64(&out[10], args->pt);
+	if (args->pt_bytes == 0U)
+		put64(&out[10], 0U);
+	out[12] = args->pt_bytes;
+	out[13] = 0U;
+	put64(&out[14], args->comp);
 
-	/* Succeeded: ten dwords. */
+	/* Succeeded: sixteen dwords. */
 	return GHCI_DW_VM_MAP;
 }
 
 /*
- * Writes a VM_UNMAP of a range of a session's address space.
+ * Writes a VM_UNMAP of a range of a session's address space, with the
+ * buffer its completion record and the freed tables are written to.
  */
 uint32_t
 ghci_cmd_vm_unmap(
 	uint32_t *out,
 	uint32_t session,
 	uint64_t va,
-	uint64_t bytes)
+	uint64_t bytes,
+	uint64_t comp,
+	uint32_t comp_bytes)
 {
 	/* Refuses a session number the GPU does not have. */
 	if (session > SESSION_MAX)
@@ -169,9 +183,14 @@ ghci_cmd_vm_unmap(
 	if (((va | bytes) & (GHCI_PAGE_BYTES - 1U)) != 0U)
 		return 0U;
 
+	/* Refuses a record buffer that is not whole 64-byte lines on a line. */
+	if (comp_bytes == 0U || (comp_bytes % GHCI_UNMAP_COMP_ALIGN) != 0U || (comp % GHCI_UNMAP_COMP_ALIGN) != 0U)
+		return 0U;
+
 	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 7.3, CMD_VM_UNMAP: session, flags, reserved, VA, size).
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_VM_UNMAP: session, flags, reserved, VA, size, comp_pa,
+	 * comp_bytes, reserved).
 	 */
 	out[0] = ghci_cmd_header(GHCI_OP_VM_UNMAP, GHCI_DW_VM_UNMAP, 0U);
 	out[1] = session;
@@ -179,32 +198,122 @@ ghci_cmd_vm_unmap(
 	out[3] = 0U;
 	put64(&out[4], va);
 	put64(&out[6], bytes);
+	put64(&out[8], comp);
+	out[10] = comp_bytes;
+	out[11] = 0U;
 
-	/* Succeeded: eight dwords. */
+	/* Succeeded: twelve dwords. */
 	return GHCI_DW_VM_UNMAP;
 }
 
 /*
- * Writes a SESSION_OPEN of a client session.
+ * Writes a SESSION_OPEN of a client session, with the memory of its
+ * initial page table.
  */
 uint32_t
 ghci_cmd_session_open(
 	uint32_t *out,
 	uint32_t session,
-	uint32_t flags)
+	uint32_t flags,
+	uint64_t root,
+	uint32_t root_bytes)
 {
 	/* Refuses session 0, which is always open, and numbers past 15. */
 	if (session == 0U || session > SESSION_MAX)
 		return 0U;
 
-	/* Writes the session and its flags (bit 0, a protected context). */
+	/*
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_SESSION_OPEN: session, flags, init_pt_pa, init_pt_bytes).
+	 */
 	out[0] = ghci_cmd_header(GHCI_OP_SESSION_OPEN, GHCI_DW_SESSION_OPEN, 0U);
 	out[1] = session;
 	out[2] = flags;
-	out[3] = 0U;
+	put64(&out[3], root);
+	out[5] = root_bytes;
 
-	/* Succeeded: four dwords. */
+	/* Succeeded: six dwords. */
 	return GHCI_DW_SESSION_OPEN;
+}
+
+/*
+ * Writes a FAULT_LOG_SETUP that turns the fault log ring on with entries
+ * records at ring, or off when entries is 0.  The next sequence is not
+ * written back (COMP_WRITE 0).
+ */
+uint32_t
+ghci_cmd_fault_log_setup(
+	uint32_t *out,
+	uint64_t ring,
+	uint32_t entries)
+{
+	uint32_t flags;
+
+	/* Refuses a ring off 32 bytes, and one of fewer than two records or not a power of two. */
+	flags = 0U;
+	if (entries != 0U) {
+		if ((ring % GHCI_FAULT_RECORD_BYTES) != 0U || entries < 2U || (entries & (entries - 1U)) != 0U)
+			return 0U;
+		flags = GHCI_FAULT_LOG_ENABLE;
+	}
+
+	/*
+	 * Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3,
+	 * CMD_FAULT_LOG_SETUP: ring_pa, capacity_entries, reserved, comp_pa).
+	 */
+	out[0] = ghci_cmd_header(GHCI_OP_FAULT_LOG_SETUP, GHCI_DW_FAULT_LOG_SETUP, flags);
+	put64(&out[1], entries != 0U ? ring : 0U);
+	out[3] = entries;
+	out[4] = 0U;
+	put64(&out[5], 0U);
+
+	/* Succeeded: seven dwords. */
+	return GHCI_DW_FAULT_LOG_SETUP;
+}
+
+/*
+ * Writes a VM_QUERY_PT_MEM, which has the processor write the sizes of
+ * the page-table memory it needs to a buffer of whole 64-byte lines.
+ */
+uint32_t
+ghci_cmd_vm_query_pt_mem(
+	uint32_t *out,
+	uint64_t bus,
+	uint32_t bytes)
+{
+	/* Refuses a buffer that is empty, not in whole lines or off a line. */
+	if (bytes == 0U || (bytes % GHCI_QUERY_CAPS_ALIGN) != 0U || (bus % GHCI_QUERY_CAPS_ALIGN) != 0U)
+		return 0U;
+
+	/* Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3, CMD_VM_QUERY_PT_MEM: dst_pa, dst_bytes, reserved). */
+	out[0] = ghci_cmd_header(GHCI_OP_VM_QUERY_PT_MEM, GHCI_DW_VM_QUERY_PT_MEM, 0U);
+	put64(&out[1], bus);
+	out[3] = bytes;
+	out[4] = 0U;
+
+	/* Succeeded: five dwords. */
+	return GHCI_DW_VM_QUERY_PT_MEM;
+}
+
+/*
+ * Writes an MMU_ENABLE, which takes session 0's initial page table and
+ * turns the MMU on.
+ */
+uint32_t
+ghci_cmd_mmu_enable(
+	uint32_t *out,
+	uint64_t root,
+	uint32_t root_bytes)
+{
+	/* Values referenced: lumiere-gpu 78d1b6b7 ghci.md (section 7.3, CMD_MMU_ENABLE: flags, init_pt_pa, init_pt_bytes, reserved). */
+	out[0] = ghci_cmd_header(GHCI_OP_MMU_ENABLE, GHCI_DW_MMU_ENABLE, 0U);
+	out[1] = 0U;
+	put64(&out[2], root);
+	out[4] = root_bytes;
+	out[5] = 0U;
+
+	/* Succeeded: six dwords. */
+	return GHCI_DW_MMU_ENABLE;
 }
 
 /*
@@ -355,23 +464,54 @@ ghci_cmd_bind_index_buffer(
 }
 
 /*
- * Writes a BIND_DESCRIPTOR_TABLE of one of the four sets.
+ * Writes a BIND_DESCRIPTOR_TABLE: a texture table (32-byte entries) or,
+ * with GHCI_BIND_TABLE_SAMPLER, a sampler table (16-byte entries) of a
+ * bind point's set 0 to 7, units 16-byte units long (0 with the address
+ * 0, which unbinds the set's table of that kind).  Returns the dwords
+ * (4), or 0 for flags of no such bit, a set past 7, a size the field
+ * does not hold, an address not on its entries' alignment, or a size
+ * with no table (or none with one).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_BIND_DESCRIPTOR_TABLE: table_va 32-byte aligned for textures and
+ * 16-byte aligned for samplers, 0 unbinds with table_size_16b 0; a set
+ * of 8 or more is an INVALID_OP fault).
  */
 uint32_t
 ghci_cmd_bind_descriptor_table(
 	uint32_t *out,
+	uint32_t flags,
 	uint32_t set,
 	uint64_t table_va,
-	uint32_t count)
+	uint32_t units)
 {
-	/* Refuses a set past 3 and a count the field does not hold. */
-	if (set >= DESCRIPTOR_SETS || count > 0xFFFFU)
+	uint64_t alignment;
+
+	/* Refuses a flag the header does not have, a set past 7 and a size the field does not hold. */
+	if ((flags & ~GHCI_BIND_TABLE_FLAGS) != 0U)
+		return 0U;
+	if (set >= GHCI_DESCRIPTOR_SETS)
+		return 0U;
+	if (units > 0xFFFFU)
 		return 0U;
 
-	/* Writes the table and its set and descriptor count. */
-	out[0] = ghci_cmd_header(GHCI_OP_BIND_DESCRIPTOR_TABLE, GHCI_DW_BIND_DESCRIPTOR_TABLE, 0U);
+	/* Refuses a table off its entries' alignment. */
+	alignment = GHCI_TEXTURE_DESC_BYTES;
+	if ((flags & GHCI_BIND_TABLE_SAMPLER) != 0U)
+		alignment = GHCI_SAMPLER_DESC_BYTES;
+	if ((table_va & (alignment - 1U)) != 0U)
+		return 0U;
+
+	/* Refuses an unbind with a size, and a table without one. */
+	if (table_va == 0U && units != 0U)
+		return 0U;
+	if (table_va != 0U && units == 0U)
+		return 0U;
+
+	/* Writes the table, its set and its size. */
+	out[0] = ghci_cmd_header(GHCI_OP_BIND_DESCRIPTOR_TABLE, GHCI_DW_BIND_DESCRIPTOR_TABLE, flags);
 	put64(&out[1], table_va);
-	out[3] = set | (count << 16);
+	out[3] = set | (units << 16);
 
 	/* Succeeded: four dwords. */
 	return GHCI_DW_BIND_DESCRIPTOR_TABLE;
@@ -818,6 +958,56 @@ ghci_cmd_write_timestamp(
 }
 
 /*
+ * Writes a WRITE_MEM: a 32-bit (or with GHCI_WRITE_MEM_64 a 64-bit)
+ * value to a session address, at the top of the pipe or, with
+ * GHCI_WRITE_MEM_BOTTOM, after all earlier work (and the caches' flush
+ * with GHCI_WRITE_MEM_FLUSH).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_WRITE_MEM: dst_va, value_lo, value_hi written 0 for a 32-bit write;
+ * a stage of 2 or 3, a reserved flag, TOP with FLUSH_CACHES and an
+ * unaligned dst_va fault the processor).
+ */
+uint32_t
+ghci_cmd_write_mem(
+	uint32_t *out,
+	uint32_t flags,
+	uint64_t va,
+	uint64_t value)
+{
+	uint32_t stage;
+
+	/* Refuses a stage past the bottom and a flag the command does not have. */
+	stage = flags & 3U;
+	if (stage > GHCI_WRITE_MEM_BOTTOM)
+		return 0U;
+	if ((flags & ~(3U | GHCI_WRITE_MEM_64 | GHCI_WRITE_MEM_FLUSH)) != 0U)
+		return 0U;
+
+	/* Refuses the flush at the top of the pipe, which has no earlier work to flush. */
+	if (stage == GHCI_WRITE_MEM_TOP && (flags & GHCI_WRITE_MEM_FLUSH) != 0U)
+		return 0U;
+
+	/* Refuses an address off 4 bytes, or off 8 bytes for a 64-bit write. */
+	if ((va & 3U) != 0U)
+		return 0U;
+	if ((flags & GHCI_WRITE_MEM_64) != 0U && (va & 7U) != 0U)
+		return 0U;
+
+	/* A 32-bit write leaves the high word 0, as the specification asks of software. */
+	if ((flags & GHCI_WRITE_MEM_64) == 0U)
+		value &= 0xFFFFFFFFULL;
+
+	/* Writes the address and the value. */
+	out[0] = ghci_cmd_header(GHCI_OP_WRITE_MEM, GHCI_DW_WRITE_MEM, flags);
+	put64(&out[1], va);
+	put64(&out[3], value);
+
+	/* Succeeded: five dwords. */
+	return GHCI_DW_WRITE_MEM;
+}
+
+/*
  * Writes a BEGIN_QUERY or an END_QUERY of an occlusion query.
  */
 uint32_t
@@ -1064,74 +1254,357 @@ ghci_cmd_copy_image_to_buffer(
 }
 
 /*
- * Writes a DISP_SET of display register writes in ring order.
+ * Writes a DISP_SET of a display: ENABLE, RESET and TEST_PATTERN in
+ * flags, and the completion comp asks for.  Returns its 6 dwords, or 0
+ * for a flag the command does not have or a completion it cannot write.
  *
- * The size is 1 + 2N dwords: the header and N offset and value pairs,
- * as the packet's dwords are laid out; the specification's 2 + 2N in
- * the same section counts a word the layout does not have.
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_SET: 6 dwords, flags [0] ENABLE, [1] RESET, [2] TEST_PATTERN,
+ * [8] COMP_WRITE, [9] COMP_IRQ, comp_pa on 8 bytes, comp_val[63:56] 0).
  */
 uint32_t
 ghci_cmd_disp_set(
 	uint32_t *out,
-	uint32_t wait_idle,
-	uint32_t pairs,
-	const uint32_t *offsets,
-	const uint32_t *values)
+	uint32_t display,
+	uint32_t flags,
+	const struct ghci_disp_comp *comp)
 {
-	uint32_t flags;
-	uint32_t index;
+	int usable;
 
-	/* Refuses no pairs and more than a packet holds. */
-	if (pairs == 0U || pairs > GHCI_DISP_SET_PAIRS_MAX)
+	/* Refuses a flag DISP_SET does not have, and a completion it cannot write. */
+	if ((flags & ~(GHCI_DISP_SET_ENABLE | GHCI_DISP_SET_RESET | GHCI_DISP_SET_TEST_PATTERN)) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 1);
+	if (!usable)
 		return 0U;
 
-	/* Asks the controller to be idle first when the caller wants it. */
-	flags = 0U;
-	if (wait_idle != 0U)
-		flags = GHCI_DISP_SET_WAIT_IDLE;
+	/* The header, the display and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_SET, GHCI_DW_DISP_SET, flags | comp->flags);
+	out[1] = display;
+	put64(&out[2], comp->pa);
+	put64(&out[4], comp->value);
 
-	/* Writes the header and each offset and value. */
-	out[0] = ghci_cmd_header(GHCI_OP_DISP_SET, 1U + 2U * pairs, flags);
-	for (index = 0U; index < pairs; index++) {
-		out[1U + 2U * index] = offsets[index];
-		out[2U + 2U * index] = values[index];
-	}
-
-	/* Succeeded: one dword and two per pair. */
-	return 1U + 2U * pairs;
+	/* Succeeded: six dwords. */
+	return GHCI_DW_DISP_SET;
 }
 
 /*
- * Writes a FLIP of a scanout plane to a 32-bit physical framebuffer.
+ * Writes a FLIP of a display's primary plane (an image with its rows and
+ * GhciFormat) or its cursor plane (stride and format 0), with its record.
+ * Returns its 10 dwords, or 0 for an image, a value or a record address
+ * the command does not take.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_FLIP: 10 dwords, header flags 0, base on 64 bytes, the primary
+ * plane's stride_bytes above 0 on 64 bytes and a format with
+ * FMT_SCANOUT, the cursor's both 0, value [31] 0, record_pa on 8 bytes,
+ * RECORD_IRQ only with RECORD_ENABLE).
  */
 uint32_t
 ghci_cmd_flip(
 	uint32_t *out,
-	uint32_t display,
-	uint32_t base_phys,
-	uint32_t flags,
-	uint32_t value,
-	uint32_t record_phys)
+	const struct ghci_flip_args *args)
 {
-	/* Refuses a display other than the primary one and a record not on 8 bytes. */
-	if (display != 0U || (record_phys & 7U) != 0U)
+	/* Refuses a flag FLIP does not have, a value past 31 bits and a record not on 8 bytes. */
+	if ((args->flags & ~GHCI_FLIP_FLAGS) != 0U)
+		return 0U;
+	if (args->value > GHCI_FLIP_VALUE_MAX)
+		return 0U;
+	if ((args->record & 7U) != 0U)
+		return 0U;
+	if ((args->flags & GHCI_FLIP_RECORD_IRQ) != 0U && (args->flags & GHCI_FLIP_RECORD_ENABLE) == 0U)
 		return 0U;
 
-	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 7.3, CMD_FLIP, 8 dwords; the high words must be 0).
-	 */
+	/* Refuses an image not on the scan-out line. */
+	if ((args->base & (GHCI_DISP_ALIGN - 1U)) != 0U)
+		return 0U;
+
+	/* The cursor plane has a fixed image: no stride, no format. */
+	if ((args->flags & GHCI_FLIP_PLANE_CURSOR) != 0U) {
+		if (args->stride != 0U || args->format != 0U)
+			return 0U;
+	} else {
+		/* The primary plane's rows on the scan-out line, and a format. */
+		if (args->stride == 0U || (args->stride & (GHCI_DISP_ALIGN - 1U)) != 0U)
+			return 0U;
+		if (args->format == GHCI_FORMAT_NONE || args->format >= GHCI_FORMAT_INVALID)
+			return 0U;
+	}
+
+	/* The header, the display, the image, the flags, the value and the record. */
 	out[0] = ghci_cmd_header(GHCI_OP_FLIP, GHCI_DW_FLIP, 0U);
+	out[1] = args->display;
+	put64(&out[2], args->base);
+	out[4] = args->stride;
+	out[5] = args->format;
+	out[6] = args->flags;
+	out[7] = args->value;
+	put64(&out[8], args->record);
+
+	/* Succeeded: ten dwords. */
+	return GHCI_DW_FLIP;
+}
+
+/*
+ * Writes a DISP_SET_MODE of a display: the 64-byte mode descriptor at
+ * mode (CHECK_ONLY in flags validates it without applying it), with the
+ * completion comp asks for.  Returns its 8 dwords, or 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_SET_MODE: 8 dwords, flags [0] CHECK_ONLY, mode_pa on 64
+ * bytes).
+ */
+uint32_t
+ghci_cmd_disp_set_mode(
+	uint32_t *out,
+	uint32_t display,
+	uint32_t flags,
+	uint64_t mode,
+	const struct ghci_disp_comp *comp)
+{
+	int usable;
+
+	/* Refuses a flag SET_MODE does not have, a descriptor off its line and a completion it cannot write. */
+	if ((flags & ~GHCI_DISP_SET_MODE_CHECK_ONLY) != 0U)
+		return 0U;
+	if ((mode & (GHCI_DISP_ALIGN - 1U)) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 1);
+	if (!usable)
+		return 0U;
+
+	/* The header, the display, the descriptor and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_SET_MODE, GHCI_DW_DISP_SET_MODE, flags | comp->flags);
 	out[1] = display;
-	out[2] = base_phys;
-	out[3] = 0U;
-	out[4] = flags;
-	out[5] = value;
-	out[6] = record_phys;
-	out[7] = 0U;
+	put64(&out[2], mode);
+	put64(&out[4], comp->pa);
+	put64(&out[6], comp->value);
 
 	/* Succeeded: eight dwords. */
-	return GHCI_DW_FLIP;
+	return GHCI_DW_DISP_SET_MODE;
+}
+
+/*
+ * Writes a DISP_QUERY_STATE of a display: the snapshot goes to dst
+ * (bytes of it, at least 128 in whole 64-byte lines).  Returns its 9
+ * dwords, or 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_QUERY_STATE: 9 dwords, dst_pa on 64 bytes, dst_bytes >= 128 and
+ * a multiple of 64).
+ */
+uint32_t
+ghci_cmd_disp_query_state(
+	uint32_t *out,
+	uint32_t display,
+	uint64_t dst,
+	uint32_t bytes,
+	const struct ghci_disp_comp *comp)
+{
+	int usable;
+
+	/* Refuses a snapshot off its line or too short, and a completion it cannot write. */
+	if ((dst & (GHCI_DISP_ALIGN - 1U)) != 0U)
+		return 0U;
+	if (bytes < GHCI_DISP_STATE_BYTES || (bytes & (GHCI_DISP_ALIGN - 1U)) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 1);
+	if (!usable)
+		return 0U;
+
+	/* The header, the display, the snapshot's place and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_QUERY_STATE, GHCI_DW_DISP_QUERY_STATE, comp->flags);
+	out[1] = display;
+	put64(&out[2], dst);
+	out[4] = bytes;
+	put64(&out[5], comp->pa);
+	put64(&out[7], comp->value);
+
+	/* Succeeded: nine dwords. */
+	return GHCI_DW_DISP_QUERY_STATE;
+}
+
+/*
+ * Writes a DISP_SET_CURSOR of a display: the cursor's place (16-bit
+ * signed coordinates) and whether it shows.  Returns its 4 dwords, or 0
+ * for a place outside 16 bits.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_SET_CURSOR: 4 dwords, pos_xy [15:0] x, [31:16] y as int16_t,
+ * ctrl [0] SHOW).
+ */
+uint32_t
+ghci_cmd_disp_set_cursor(
+	uint32_t *out,
+	uint32_t display,
+	int32_t x,
+	int32_t y,
+	uint32_t show)
+{
+	uint32_t place;
+
+	/* Refuses a place a 16-bit coordinate does not hold. */
+	if (x < -32768 || x > 32767)
+		return 0U;
+	if (y < -32768 || y > 32767)
+		return 0U;
+
+	/* The two coordinates, each in 16 bits. */
+	place = (uint32_t)x & 0xFFFFU;
+	place |= ((uint32_t)y & 0xFFFFU) << 16;
+
+	/* The header, the display, the place and SHOW. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_SET_CURSOR, GHCI_DW_DISP_SET_CURSOR, 0U);
+	out[1] = display;
+	out[2] = place;
+	out[3] = 0U;
+	if (show != 0U)
+		out[3] = GHCI_DISP_CURSOR_SHOW;
+
+	/* Succeeded: four dwords. */
+	return GHCI_DW_DISP_SET_CURSOR;
+}
+
+/*
+ * Writes a DISP_QUERY_MODES of a display: the 16-byte header and up to
+ * max_modes 64-byte descriptors go to dst.  Returns its 9 dwords, or 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_QUERY_MODES: 9 dwords, dst_pa on 64 bytes, 16 + 64 *
+ * max_modes bytes written).
+ */
+uint32_t
+ghci_cmd_disp_query_modes(
+	uint32_t *out,
+	uint32_t display,
+	uint64_t dst,
+	uint32_t max_modes,
+	const struct ghci_disp_comp *comp)
+{
+	int usable;
+
+	/* Refuses a table off its line and a completion it cannot write. */
+	if ((dst & (GHCI_DISP_ALIGN - 1U)) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 1);
+	if (!usable)
+		return 0U;
+
+	/* The header, the display, the table's place and size, and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_QUERY_MODES, GHCI_DW_DISP_QUERY_MODES, comp->flags);
+	out[1] = display;
+	put64(&out[2], dst);
+	out[4] = max_modes;
+	put64(&out[5], comp->pa);
+	put64(&out[7], comp->value);
+
+	/* Succeeded: nine dwords. */
+	return GHCI_DW_DISP_QUERY_MODES;
+}
+
+/*
+ * Writes a DISP_EVENT_SETUP of a display: a ring of capacity 32-byte
+ * records at ring taking the events of mask, or (capacity 0) no ring.
+ * The completion is the ring's first sequence number (comp's value is
+ * not used).  Returns its 7 dwords, or 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_EVENT_SETUP: 7 dwords, flags [0] ENABLE, the ring on 64
+ * bytes, ring_cfg [15:0] capacity (a power of two, at least 2, with
+ * ENABLE; 0 without), [19:16] the events, the completion setup_next_seq).
+ */
+uint32_t
+ghci_cmd_disp_event_setup(
+	uint32_t *out,
+	uint32_t display,
+	uint64_t ring,
+	uint32_t capacity,
+	uint32_t mask,
+	const struct ghci_disp_comp *comp)
+{
+	uint32_t flags;
+	int usable;
+
+	/* Refuses an event the ring does not take and a completion it cannot write. */
+	if ((mask & ~GHCI_DISP_EVENT_MASKS) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 0);
+	if (!usable)
+		return 0U;
+
+	/* A ring: a power of two of at least two records, on its line. */
+	flags = comp->flags;
+	if (capacity != 0U) {
+		if (capacity < 2U || capacity > GHCI_DISP_EVENT_CAPACITY_MAX || (capacity & (capacity - 1U)) != 0U)
+			return 0U;
+		if ((ring & (GHCI_DISP_ALIGN - 1U)) != 0U)
+			return 0U;
+		flags |= GHCI_DISP_EVENT_ENABLE;
+	} else {
+		/* No ring: nothing of it is named. */
+		ring = 0U;
+		mask = 0U;
+	}
+
+	/* The header, the display, the ring, its configuration and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_EVENT_SETUP, GHCI_DW_DISP_EVENT_SETUP, flags);
+	out[1] = display;
+	put64(&out[2], ring);
+	out[4] = capacity | (mask << GHCI_DISP_EVENT_MASK_SHIFT);
+	put64(&out[5], comp->pa);
+
+	/* Succeeded: seven dwords. */
+	return GHCI_DW_DISP_EVENT_SETUP;
+}
+
+/*
+ * Writes a DISP_I2C_XFER of a display: a DDC read or write of 1 to 256
+ * bytes through the buffer, after its 4-byte header.  Returns its 10
+ * dwords, or 0.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 7.3,
+ * CMD_DISP_I2C_XFER: 10 dwords, flags [0] WRITE, [1] HAS_OFFSET, [2]
+ * HAS_SEG, addr_cfg [6:0] slave, [15:8] offset, [23:16] segment,
+ * xfer_bytes 1..256, buf_pa on 4 bytes).
+ */
+uint32_t
+ghci_cmd_disp_i2c_xfer(
+	uint32_t *out,
+	const struct ghci_i2c_args *args,
+	const struct ghci_disp_comp *comp)
+{
+	uint32_t address;
+	int usable;
+
+	/* Refuses a flag, an address, an offset or a size the transfer does not take. */
+	if ((args->flags & ~GHCI_DISP_I2C_FLAGS) != 0U)
+		return 0U;
+	if (args->slave > 0x7FU || args->offset > 0xFFU || args->segment > 0xFFU)
+		return 0U;
+	if (args->bytes == 0U || args->bytes > GHCI_DISP_I2C_BYTES_MAX)
+		return 0U;
+	if ((args->buffer & 3U) != 0U)
+		return 0U;
+	usable = disp_comp_valid(comp, 1);
+	if (!usable)
+		return 0U;
+
+	/* The address, the register offset and the segment in one word. */
+	address = args->slave;
+	address |= args->offset << 8;
+	address |= args->segment << 16;
+
+	/* The header, the display, the transfer, the buffer and the completion. */
+	out[0] = ghci_cmd_header(GHCI_OP_DISP_I2C_XFER, GHCI_DW_DISP_I2C_XFER, args->flags | comp->flags);
+	out[1] = args->display;
+	out[2] = address;
+	out[3] = args->bytes;
+	put64(&out[4], args->buffer);
+	put64(&out[6], comp->pa);
+	put64(&out[8], comp->value);
+
+	/* Succeeded: ten dwords. */
+	return GHCI_DW_DISP_I2C_XFER;
 }
 
 /*
@@ -1968,4 +2441,34 @@ buffer_image(
 
 	/* Succeeded: ten dwords. */
 	return GHCI_DW_BUFFER_IMAGE;
+}
+
+/*
+ * Reports whether a display command can carry a completion: only the
+ * COMP_WRITE and COMP_IRQ flags, and with COMP_WRITE an address on 8
+ * bytes and (for a command with a value) a value whose top byte is 0.
+ */
+static int
+disp_comp_valid(
+	const struct ghci_disp_comp *comp,
+	int has_value)
+{
+	/* A flag a completion does not have. */
+	if ((comp->flags & ~GHCI_DISP_COMP_FLAGS) != 0U)
+		return 0;
+
+	/* Nothing is written without COMP_WRITE. */
+	if ((comp->flags & GHCI_DISP_COMP_WRITE) == 0U)
+		return 1;
+
+	/* The 8-byte place of the completion. */
+	if ((comp->pa & 7U) != 0U)
+		return 0;
+
+	/* A value the queue's status and the cancel bit would overwrite. */
+	if (has_value && (comp->value & ~GHCI_DISP_COMP_VALUE_MASK) != 0U)
+		return 0;
+
+	/* Succeeded: the completion can be written. */
+	return 1;
 }

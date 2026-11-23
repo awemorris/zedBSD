@@ -39,7 +39,7 @@
 /* The panel's corner radius. */
 #define GRID_RADIUS		16.0f
 
-/* The faint mark over an empty place's words, in pixels a side. */
+/* The faint mark over an empty place's words, in units a side. */
 #define GRID_MARK		72
 
 static void grid_panel(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *area);

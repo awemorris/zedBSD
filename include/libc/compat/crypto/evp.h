@@ -13,8 +13,9 @@
  * error, unless a comment says otherwise); the behaviour described is the
  * subset's, documented here.
  *
- * Algorithms: SHA-256 (EVP_sha256), ChaCha20 (EVP_chacha20), AES-256 in
- * CBC mode without padding (EVP_aes_256_cbc), Poly1305 (EVP_MAC
+ * Algorithms: SHA-256 (EVP_sha256), SHA-512 (EVP_sha512, plain digests
+ * only), ChaCha20 (EVP_chacha20), AES-256 in CBC mode without padding
+ * (EVP_aes_256_cbc) and in CTR mode (EVP_aes_256_ctr), Poly1305 (EVP_MAC
  * "POLY1305"), Ed25519 (EVP_PKEY_ED25519) for signatures, X25519
  * (EVP_PKEY_X25519) for key agreement, ML-KEM-768 ("ML-KEM-768") for key
  * encapsulation, and EC keys on P-256 ("EC" with the group "prime256v1")
@@ -79,7 +80,15 @@ extern "C" {
 /* Returns the SHA-256 digest algorithm (a constant object). */
 const EVP_MD *EVP_sha256(void);
 
-/* Returns a digest's output size in bytes (32 for SHA-256), or -1 for NULL (nothing queued). */
+/*
+ * Returns the SHA-512 digest algorithm (a constant object, FIPS 180-4
+ * 6.4).  It serves EVP_DigestInit_ex, EVP_DigestUpdate,
+ * EVP_DigestFinal_ex, EVP_MD_CTX_copy_ex and EVP_Digest only; a signature,
+ * a verification, HMAC and HKDF refuse it.
+ */
+const EVP_MD *EVP_sha512(void);
+
+/* Returns a digest's output size in bytes (32 for SHA-256, 64 for SHA-512), or -1 for NULL (nothing queued). */
 int EVP_MD_get_size(const EVP_MD *md);
 
 /* Makes an empty digest context; NULL without memory. */
@@ -313,6 +322,15 @@ const EVP_CIPHER *EVP_chacha20(void);
  */
 const EVP_CIPHER *EVP_aes_256_cbc(void);
 
+/*
+ * Returns the AES-256-CTR cipher (a constant object): 32-byte key, 16-byte
+ * IV that is the first counter block, a stream of bytes (NIST SP 800-38A
+ * 6.5).  The counter block is incremented as one 128-bit big-endian
+ * integer modulo 2^128, as OpenSSL's CTR mode does.  Padding does not
+ * apply.
+ */
+const EVP_CIPHER *EVP_aes_256_ctr(void);
+
 /* Makes an empty cipher context; NULL without memory. */
 EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void);
 
@@ -337,6 +355,12 @@ void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
  * key 32 bytes, iv 16 bytes (each NULL to keep it); enc 1 encrypts, 0
  * decrypts, -1 keeps the direction.  A key or an IV drops any buffered
  * partial block.
+ *
+ * Sets up AES-256-CTR: cipher EVP_aes_256_ctr starts afresh (no key, a
+ * zero counter block, no buffered keystream) and NULL keeps the AES set
+ * up; key 32 bytes, iv 16 bytes, the counter block (each NULL to keep
+ * it); enc is recorded but CTR is the same both ways.  A key or an IV
+ * drops the buffered keystream.
  */
 int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *impl, const unsigned char *key, const unsigned char *iv, int enc);
 
@@ -352,6 +376,10 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
  * bytes written.  out may be in only while no partial block is buffered
  * (whole-block calls); otherwise they must not overlap.  in_length must be
  * at most INT_MAX - 16.
+ *
+ * AES-256-CTR: XORs in_length bytes of in with the keystream into out (out
+ * may be in), continuing the keystream across calls; *out_length becomes
+ * in_length.
  */
 int EVP_CipherUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *out_length, const unsigned char *in, int in_length);
 
@@ -370,10 +398,10 @@ int EVP_CipherFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *out_length)
 int EVP_CIPHER_CTX_set_padding(EVP_CIPHER_CTX *ctx, int pad);
 
 /*
- * As EVP_CipherUpdate without the length output, for ChaCha20 only.
- * Returns length (as int) on success, and -1 on failure (a context not
- * set up or not ChaCha20, length over INT_MAX), as OpenSSL 3.5 does for
- * provider ciphers.
+ * As EVP_CipherUpdate without the length output, for ChaCha20 and
+ * AES-256-CTR.  Returns length (as int) on success, and -1 on failure (a
+ * context not set up or AES-256-CBC, length over INT_MAX), as OpenSSL 3.5
+ * does for provider ciphers.
  */
 int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in, unsigned int length);
 

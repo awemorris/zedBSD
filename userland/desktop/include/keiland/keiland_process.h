@@ -213,6 +213,75 @@ struct kl_launch_options {
  */
 int kl_launch(struct kl_app *app, const struct kl_launch_options *options);
 
+/*
+ * KL_VERSION 111: a system action, a program the system's definition names
+ * (/etc/keiland/admin.d on zedBSD), run as the system's administrator once
+ * the person at the screen has allowed it in the compositor's own dialog.
+ * It is a process as kl_process_start's are, but for these: its standard
+ * input is always a pipe (when it is not asked for, the application can
+ * only close it), the streams not asked for are the null device, it has no
+ * terminal, and it may not be signalled (kl_process_kill: EPERM).  The
+ * program stops when it reads its input's end: when the process is closed,
+ * its input closed, or the application ends.
+ */
+struct kl_system;
+
+/*
+ * How a process ended (kl_process_exit), besides the above: the action did
+ * not run (*code is a KL_ADMIN_* reason); or it ran, but how it ended was
+ * not told (*code is 0): what it changed is not known.
+ */
+#define KL_PROCESS_REFUSED	3U
+#define KL_PROCESS_LOST	4U
+
+/*
+ * What a KL_APP_PROCESS event tells besides (event.ready): a system
+ * action's dialog was answered and its program started; its streams'
+ * news follows.
+ */
+#define KL_PROCESS_READY_START		0x10U
+
+/* Why an action did not run. */
+#define KL_ADMIN_NO		1	/* the person said no, or closed the dialog */
+#define KL_ADMIN_TIMEOUT	2	/* nobody answered in time */
+#define KL_ADMIN_UNKNOWN	3	/* no such action, or words or streams it does not list */
+#define KL_ADMIN_NOT_ALLOWED	4	/* this user may not run it */
+#define KL_ADMIN_BUSY		5	/* another request or dialog is under way */
+#define KL_ADMIN_NOT_FRONT	6	/* the window is not the one the person works in */
+#define KL_ADMIN_LOCKED		7	/* the screen locked */
+#define KL_ADMIN_FAILED		8	/* the program could not be started */
+#define KL_ADMIN_UNSUPPORTED	9	/* no session manager runs actions here, or the dialog cannot show now */
+#define KL_ADMIN_METHOD		10	/* the action asks for a way of confirming not made yet */
+
+/*
+ * What an action is asked with: its name, the words after its program
+ * (NULL ends them; NULL for none), the streams the program uses
+ * (KL_PROCESS_INPUT, _OUTPUT, _ERROR; the definition must allow them), the
+ * window the person works in (it must have the keyboard, or get it within
+ * a few seconds), and the program's own pointer (kl_process_data).
+ */
+struct kl_admin_options {
+	const char *action;
+	const char *const *argv;
+	unsigned streams;
+	struct kl_window *window;
+	void *data;
+};
+
+/*
+ * Asks for an action through a system of the application's connection
+ * (kl_app_system).  Returns 0 with *process set at once: the dialog may
+ * still be showing.  Its answer comes as the process's events: a refusal as
+ * KL_PROCESS_READY_EXIT with kl_process_exit giving KL_PROCESS_REFUSED; a
+ * start as KL_PROCESS_READY_START, then the streams' events, and the end
+ * as KL_PROCESS_EXITED or KL_PROCESS_SIGNALED (or KL_PROCESS_LOST).  Input
+ * written before the start is kept (up to KL_PROCESS_BUFFER) and written
+ * once it starts; after a refusal a write is EPIPE.  While an answer is
+ * awaited the application's dispatch reads the system's events itself.
+ * Returns EINVAL, ENOMEM, or ENOTSUP where the system runs no actions.
+ */
+int kl_process_start_admin(struct kl_app *app, struct kl_system *system, const struct kl_admin_options *options, struct kl_process **process);
+
 #ifdef __cplusplus
 }
 #endif

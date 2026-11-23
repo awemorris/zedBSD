@@ -58,6 +58,7 @@
 #include "super-tap.h"
 #include "plane.h"
 #include "rotate.h"
+#include "scale.h"
 #include "title-tap.h"
 #include "cursor-box.h"
 #include "lane.h"
@@ -89,6 +90,20 @@
 
 /* How many cursor images the compositor draws for the shapes clients ask for (cursor.c). */
 #define KWL_CURSOR_IMAGES	10U
+
+/* How many sets of the cursor's images at other scales than the output's are kept, one for each head's scale at most. */
+#define KWL_CURSOR_SETS		3U
+
+/*
+ * The arrow and the shapes' images drawn at another scale than the
+ * output's (cursor.c), for a head shown at it: its scale (0: the set is
+ * empty) and the images, each made when first drawn (NULL until then).
+ */
+struct kwl_cursor_set {
+	unsigned scale120;
+	struct kwl_import *arrow;
+	struct kwl_import *images[KWL_CURSOR_IMAGES];
+};
 
 /* The most data devices of one client a drag is told to (data.c, ws189-p002: one a window of a program). */
 #define KWL_DND_DEVICES		16U
@@ -215,7 +230,8 @@ struct kwl_draw_counts {
  * How far a docked (maximized) window's body keeps from the screen's edges
  * and the system bar on every side (ws099-p038, the 2026-10-06 user
  * decision), and where its body starts: just under the system bar.  In
- * logical pixels at the default DPI; DPI scaling multiplies it here.
+ * logical units, as every measure of the plane; the output's scale maps
+ * them to its pixels where it is drawn (scale.h).
  */
 #define KWL_GLASS_DOCK_PAD	8
 #define KWL_GLASS_DOCK_TOP	(KWL_GLASS_BAR + KWL_GLASS_DOCK_PAD)
@@ -343,12 +359,20 @@ enum kwl_kind {
 	KWL_SYSTEM_BLUETOOTH,
 	/* The CLI-owned photo/video library and its watchers (media-library.c). */
 	KWL_SYSTEM_MEDIA,
+	/* The system extension's admin actions (admin-ask.c). */
+	KWL_SYSTEM_ADMIN,
 	/* The sound's playback streams, kl_audio_v1 and its streams (audio-stream.c, WS191). */
 	KWL_AUDIO,
 	KWL_AUDIO_STREAM,
 	/* The game mode's lent images, kl_game_v1 and a surface's kl_game_surface_v1 (game.c, scanout.c). */
 	KWL_GAME_MANAGER,
 	KWL_GAME_SURFACE,
+	/* wp_fractional_scale_manager_v1 and a surface's wp_fractional_scale_v1, the scale a surface is best drawn at (surface-outputs.c). */
+	KWL_FRACTIONAL_SCALE_MANAGER,
+	KWL_FRACTIONAL_SCALE,
+	/* zxdg_output_manager_v1 and a wl_output's zxdg_output_v1, the output's logical place and size (protocol.c). */
+	KWL_XDG_OUTPUT_MANAGER,
+	KWL_XDG_OUTPUT,
 };
 
 /*
@@ -517,6 +541,12 @@ struct kwl_object {
 	 * binding is told nothing more.
 	 */
 	uint32_t output_head;
+	/*
+	 * A zxdg_output_v1's wl_output, whose logical place and size it tells
+	 * with the wl_output's events (protocol.c); NULL once the wl_output is
+	 * released, after which it is told nothing.
+	 */
+	struct kwl_object *xdg_output_of;
 	unsigned busy;
 	struct kwl_object *surface;
 	struct kwl_object *role;
@@ -671,7 +701,15 @@ struct kwl_object {
 	/* A wl_shm buffer's place in its pool (NULL for a GPU buffer), and a pool object's memory. */
 	struct kwl_shm_buffer *shm;
 	struct kwl_pool *pool;
-	/* A surface's damage in buffer pixels, pending and committed (x0, y0, x1, y1), and whether any was given. */
+	/*
+	 * A surface's damage in buffer pixels, pending and committed (x0, y0,
+	 * x1, y1), and whether any was given.  The damage a client gave in
+	 * surface units (wl_surface.damage) waits apart until the commit, which
+	 * turns it to buffer pixels with the buffer scale and the viewport the
+	 * commit applies and joins it to the rest.
+	 */
+	int32_t surface_damage[4];
+	unsigned surface_damaged;
 	int32_t damage[4];
 	unsigned damaged;
 	int32_t committed_damage[4];
@@ -872,6 +910,23 @@ struct kwl_object {
 	int32_t destination[2];
 	unsigned viewport_changed;
 	/*
+	 * A surface's buffer scale (wl_surface.set_buffer_scale): how many
+	 * buffer pixels make one unit of the surface each way, pending until
+	 * the commit (viewport.c applies it with the viewport, so
+	 * viewport_changed says it changed too) and then current.  0, a
+	 * surface that never asked, is 1 (kwl_surface_buffer_scale).
+	 */
+	uint32_t pending_buffer_scale;
+	uint32_t buffer_scale;
+	/*
+	 * A surface's wp_fractional_scale_v1 (whose own surface field names it
+	 * back; each cleared from both ends when either goes,
+	 * surface-outputs.c), and on that object the scale it was last told
+	 * (120ths; 0 before the first preferred_scale).
+	 */
+	struct kwl_object *fractional;
+	unsigned fractional_told;
+	/*
 	 * ws122-p005b (content-type.c): a surface's wp_content_type_v1 (whose
 	 * own surface field names it back), and its type (0 none, 1 photo, 2
 	 * video, 3 game), pending and applied by the commit.
@@ -1022,6 +1077,22 @@ struct kwl_client {
 	 * another program's window (activation.c, ws089-p016).
 	 */
 	uint64_t connected_ms;
+	/*
+	 * The admin actions (admin-ask.c): admin_asked is set once the client
+	 * asked for one, so that its end tells the session manager to forget
+	 * what it was allowed; admin_lent is set for the connection the
+	 * compositor made and lent to a program run as root (its windows may
+	 * be marked as such).
+	 */
+	unsigned admin_asked;
+	unsigned admin_lent;
+	/*
+	 * When the person last pressed a button, a key or a finger in one of
+	 * the client's windows (0: never): an admin dialog the person said no
+	 * to is not shown again for a while unless they pressed there since
+	 * (admin-ask.c).
+	 */
+	uint64_t pressed_ms;
 };
 
 /* The drawings one KWL PERF window keeps the times of (five seconds at 60 frames and the quiet pictures, with room). */
@@ -1302,6 +1373,22 @@ struct kwl_server {
 	unsigned rotate_given;
 	unsigned rotate_option;
 	unsigned rotate_policy;
+	/*
+	 * The output's scale (scale.h): pixel_width and pixel_height are its
+	 * size in pixels, the mode turned by the rotation, and scale120 the
+	 * scale the plane is shown at (120ths), from which width and height
+	 * are made.  kwl_output_size_set writes the three with width and
+	 * height.  scale_wanted is the scale the user's choice or the default
+	 * asks for the output (output-scale.c), which kwl_output_size_set is
+	 * given; it is 120 until the display is known.  scale_given says a
+	 * test's --scale chose it, which wins over displays.conf and the
+	 * default.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	unsigned scale_wanted;
+	unsigned scale_given;
 	/* The display mode's refresh in millihertz (from Vulkan, compose.c), told to clients by wl_output. */
 	uint32_t refresh;
 	/*
@@ -1478,6 +1565,14 @@ struct kwl_server {
 	struct kwl_object *focus;
 	int32_t pointer_x;
 	int32_t pointer_y;
+	/*
+	 * The pointer's place between units, in 256ths (0 to 255, added to
+	 * pointer_x and pointer_y): a mouse's motion and an absolute pointer
+	 * keep it on an output shown at another scale than 100 %, where a unit
+	 * is more than a pixel; it is 0 at 100 %, and after a warp.
+	 */
+	int32_t pointer_fraction_x;
+	int32_t pointer_fraction_y;
 	/*
 	 * The output the pointer is on (plane.h's slot, 0 the anchor; the
 	 * pointer's place is in the plane, ws113-p007), and the output a pass
@@ -2189,6 +2284,18 @@ struct kwl_server {
 	uint32_t cursor_shape;
 	struct kwl_import *cursor_images[KWL_CURSOR_IMAGES];
 	/*
+	 * The scale (120ths, scale.h) the arrow and the shapes' images were
+	 * drawn at: their pixels are their logical size times it.  The arrow's
+	 * making sets it, and the shapes are made at it; an output whose scale
+	 * changed has them made again (kwl_cursor_images_rescale).
+	 */
+	unsigned cursor_scale120;
+	/*
+	 * The cursor's images at the scales of heads shown at another scale
+	 * than the output's (kwl_cursor_scaled), made when first drawn there.
+	 */
+	struct kwl_cursor_set cursor_sets[KWL_CURSOR_SETS];
+	/*
 	 * The edges of the window frame under the pointer, or of the resize it
 	 * started (the glass look's frames, shell.c; KWL_EDGE_* bits of
 	 * toplevel.h, 0 over no frame): while not 0 the cursor is that frame's
@@ -2380,6 +2487,7 @@ void kwl_lid_follow(struct kwl_server *server, unsigned open);
 void kwl_screen_off(struct kwl_server *server, const char *why);
 int kwl_output_lid_matters(struct kwl_server *server);
 void kwl_outputs_changed(struct kwl_server *server);
+void kwl_xdg_output_object_gone(struct kwl_object *object);
 int kwl_glass_resize(struct kwl_server *server);
 void kwl_glass_output_resized(struct kwl_server *server);
 void kwl_output_hotplug_start(struct kwl_server *server);
@@ -2388,7 +2496,7 @@ void kwl_output_hotplug_take(struct kwl_server *server);
 void kwl_output_follow(struct kwl_server *server);
 void kwl_output_follow_later(struct kwl_server *server);
 void kwl_output_follow_wake(struct kwl_server *server);
-void kwl_output_size_set(struct kwl_server *server, uint32_t mode_width, uint32_t mode_height, unsigned rotation);
+void kwl_output_size_set(struct kwl_server *server, uint32_t mode_width, uint32_t mode_height, unsigned rotation, unsigned scale120);
 int kwl_output_select_rotation(struct kwl_server *server, unsigned slot, unsigned rotation, unsigned *applied, int *saved);
 int kwl_output_apply_rotation(struct kwl_server *server, unsigned slot, unsigned rotation, unsigned mode);
 void kwl_output_policy_set(struct kwl_server *server, unsigned policy);
@@ -2417,10 +2525,22 @@ struct kwl_output_view {
 	uint32_t width;
 	uint32_t height;
 	uint32_t refresh;
-	/* The display's rotation and its physical mode (WS217): wl_output's mode is the logical size above, its transform normal. */
+	/* The display's rotation and its physical mode (WS217): wl_output's transform is normal. */
 	unsigned rotation;
 	uint32_t mode_width;
 	uint32_t mode_height;
+	/*
+	 * The display's pixels as the plane is shown on them (the mode turned by
+	 * the rotation), which wl_output's mode tells; the scale the plane is
+	 * shown at (120ths), whose whole number rounded up wl_output's scale
+	 * tells; and the display's physical size turned the same way (mm, 0
+	 * when not known or not believable), which its geometry tells.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	uint32_t mm_width;
+	uint32_t mm_height;
 };
 
 int kwl_output_view(struct kwl_server *server, uint32_t head, struct kwl_output_view *view);
@@ -2529,7 +2649,10 @@ int kwl_cursor_client_shown(struct kwl_server *server);
 int kwl_cursor_plane_takes(struct kwl_server *server);
 void kwl_cursor_plane_update(struct kwl_server *server);
 void kwl_cursor_plane_hold(struct kwl_server *server);
+void kwl_cursor_plane_forget(struct kwl_server *server);
 int kwl_arrow_create(struct kwl_server *server);
+int kwl_arrow_make(struct kwl_server *server, unsigned scale120, struct kwl_import **made);
+const struct kwl_import *kwl_cursor_scaled(struct kwl_server *server, const struct kwl_import *image, unsigned scale120);
 void kwl_arrow_destroy(struct kwl_server *server);
 struct kwl_object *kwl_top_window(struct kwl_server *server);
 struct kwl_object *kwl_output_top_window(struct kwl_server *server, unsigned slot);
@@ -2712,6 +2835,22 @@ int kwl_bluetooth_bar_request(unsigned request, const char *address, unsigned ty
 int kwl_bluetooth_bar_answer(int *error);
 int kwl_bluetooth_answer(uint32_t id, unsigned yes);
 int kwl_bluetooth_cancel(void);
+
+/* The admin actions: the objects, the relay to the session manager and the dialog (admin-ask.c). */
+int kwl_admin_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+int kwl_admin_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_admin_tick(struct kwl_server *server);
+void kwl_admin_gone(struct kwl_object *object);
+void kwl_admin_client_gone(struct kwl_client *client);
+void kwl_admin_answer(void *data, struct kl_backend_admin_answer *answer);
+void kwl_admin_decide(struct kwl_server *server, unsigned allow, const char *via);
+int kwl_admin_available(struct kwl_server *server);
+int kwl_admin_ask_showing(void);
+int kwl_admin_ask_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_admin_ask_key(struct kwl_server *server, uint32_t key, uint32_t state);
+int kwl_admin_ask_motion(struct kwl_server *server);
+int kwl_admin_ask_holds(struct kwl_server *server);
+void kwl_admin_ask_power(struct kwl_server *server);
 
 /* The pairing's window (bluetooth-ask.c, ws143-p006). */
 void kwl_bluetooth_ask_take(struct kwl_server *server, const struct kl_backend_bluetooth_question *question);

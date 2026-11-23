@@ -1,0 +1,120 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+// The app module.  The sources are the ones of apps/terminal-android (and the Java of libkeiland's
+// Android layer), read where they are; the C is built from native/CMakeLists.txt, the same file
+// the official build configures for each ABI.  The assets are made by the official build's own
+// script (cmake/make-assets.cmake), through a configure of the top CMakeLists.txt.
+
+plugins {
+	id "com.android.application"
+}
+
+def terminalDir = file("../..")                  // apps/terminal-android
+def rootDir_ = file("../../../..")               // the root of the tree
+def version_ = "0.1.0"                           // PROJECT_VERSION of ../../CMakeLists.txt
+def versionCode_ = 100                           // major * 10000 + minor * 100 + patch
+
+android {
+	namespace = "io.noctvm.mikuterm"
+	compileSdk = 35
+	ndkVersion = "28.2.13676358"
+
+	defaultConfig {
+		applicationId = "io.noctvm.mikuterm"
+		minSdk = 28
+		targetSdk = 35
+		versionCode = versionCode_
+		versionName = version_
+
+		ndk {
+			// When Android Studio injects a target device ABI, AGP only builds that ABI;
+			// skip abiFilters so packageDebug does not warn about the unbuilt ABIs.
+			if (!project.hasProperty("android.injected.build.abi")) {
+				abiFilters += ["arm64-v8a", "armeabi-v7a", "x86", "x86_64", "riscv64"]
+			}
+		}
+		externalNativeBuild {
+			cmake {
+				arguments "-DMIKUTERM_ROOT=${rootDir_.canonicalPath.replace('\\', '/')}",
+					"-DMIKUTERM_VERSION=${version_}"
+			}
+		}
+	}
+
+	compileOptions {
+		sourceCompatibility = JavaVersion.VERSION_11
+		targetCompatibility = JavaVersion.VERSION_11
+	}
+
+	// The native library stays stored in the apk and is mapped from it, as the manifest says.
+	packaging {
+		jniLibs {
+			useLegacyPackaging = false
+		}
+	}
+
+	externalNativeBuild {
+		cmake {
+			path = file("../../native/CMakeLists.txt")
+		}
+	}
+
+	sourceSets {
+		main {
+			manifest.srcFile "../../AndroidManifest.xml"
+			java.directories.add("../../java")
+			java.directories.add("../../../libkeiland/android/java")
+			res.directories.add("../../res")
+			assets.directories.add("${layout.buildDirectory.get().asFile}/share-assets/assets")
+		}
+	}
+}
+
+// The assets (the fonts and the licenses, share.list and share.version) are made by the official
+// build's script: the top CMakeLists.txt is configured in this module's build folder and its
+// `assets` target is built.  The file list and the version hash are thus the official build's own.
+def shareDir = layout.buildDirectory.dir("share-assets")
+
+def findCmake = {
+	def sdk = androidComponents.sdkComponents.sdkDirectory.get().asFile
+	def found = new File(sdk, "cmake").listFiles()?.findAll { new File(it, "bin/cmake").canExecute() }?.sort()
+	return found ? new File(found.last(), "bin") : null
+}
+
+def cmakeTool = { String name ->
+	def bin = findCmake()
+	return bin != null && new File(bin, name).canExecute() ? new File(bin, name).path : name
+}
+
+def configureShare = tasks.register("configureShareAssets", Exec) {
+	def sdk = androidComponents.sdkComponents.sdkDirectory
+	def ndk = androidComponents.sdkComponents.ndkDirectory
+	inputs.files(fileTree(terminalDir) {
+		include "CMakeLists.txt", "cmake/**"
+	})
+	outputs.dir(shareDir)
+	doFirst {
+		commandLine cmakeTool("cmake"), "-S", terminalDir.path, "-B", shareDir.get().asFile.path,
+			"-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=${cmakeTool("ninja")}",
+			"-DMIKUTERM_ASSETS_ONLY=ON",
+			"-DANDROID_SDK_ROOT=${sdk.get().asFile.path}", "-DANDROID_NDK_ROOT=${ndk.get().asFile.path}"
+	}
+}
+
+def makeShare = tasks.register("makeShareAssets", Exec) {
+	dependsOn configureShare
+	inputs.files(fileTree("${rootDir_}/userland/desktop/fonts"))
+	inputs.file("${rootDir_}/LICENSE")
+	inputs.file("${terminalDir}/cmake/make-assets.cmake")
+	outputs.dir(shareDir.map { it.dir("assets") })
+	doFirst {
+		commandLine cmakeTool("cmake"), "--build", shareDir.get().asFile.path, "--target", "assets"
+	}
+}
+
+tasks.named("preBuild") {
+	dependsOn makeShare
+}

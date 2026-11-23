@@ -139,8 +139,12 @@
 /* The pipelineCacheUUID the device reports and a pipeline cache's header carries. */
 #define GHCI_VK_CACHE_UUID		"zedBSD-ghci-pc10"
 
-/* The descriptor sets a pipeline layout binds (maxBoundDescriptorSets). */
-#define GHCI_VK_SETS			4U
+/*
+ * The descriptor sets a pipeline layout binds (maxBoundDescriptorSets):
+ * the driver lays every set out in the pipeline's texture, sampler and
+ * resource tables, so the count is the driver's own.
+ */
+#define GHCI_VK_SETS			8U
 
 /* The descriptor types of Vulkan 1.0 (VK_DESCRIPTOR_TYPE_SAMPLER to INPUT_ATTACHMENT). */
 #define GHCI_VK_DESCRIPTOR_TYPES	11U
@@ -296,8 +300,8 @@ enum ghci_vk_meta_kind {
 /* The most dwords one step of a transfer takes: its push constants (LOAD_CONST) and one DISPATCH. */
 #define GHCI_VK_META_STEP_DWORDS	(3U + GHCI_VK_META_PUSH_WORDS + GHCI_DW_DISPATCH)
 
-/* The dwords of a transfer's binds: its pipeline and its resource table. */
-#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + GHCI_DW_BIND_DESCRIPTOR_TABLE)
+/* The dwords of a transfer's binds: its pipeline, and its resource table's address (LOAD_CONST of two words). */
+#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + 3U + 2U)
 
 /*
  * One of the driver's transfer programs placed in a device's code heap:
@@ -459,7 +463,9 @@ struct ghci_vk_retired {
 
 /*
  * One VkDevice: its GHCI session, its executor heaps (code and data, the
- * bytes of each), the runs let go that wait for a ticket, the ticket of
+ * bytes of each, and the data heap bytes its executable command buffers'
+ * ends made ready, which each such end keeps free beside the runs in
+ * flight), the runs let go that wait for a ticket, the ticket of
  * the last work it placed in the ring, and the submissions it holds back
  * (holds, oldest first; hold_serial is the serial of the last one held
  * and hold_count how many are held; failed_timelines has a bit for each
@@ -479,6 +485,7 @@ struct ghci_vk_device {
 	struct ghci_vm *vm;
 	struct ghci_vk_heap_block *heap[GHCI_VK_HEAPS];
 	uint64_t heap_bytes[GHCI_VK_HEAPS];
+	uint64_t prepared;
 	struct ghci_vk_retired *retired;
 	struct ghci_ticket last;
 	int submitted;
@@ -577,17 +584,34 @@ struct ghci_vk_command_pool {
  * recorded commands as they came on the wire ([number][0][buffer] and
  * the arguments, one after another), which a submission executes.
  * failed says that a command could not be kept (the end of the
- * recording reports it).
+ * recording reports it), simultaneous that it was begun for
+ * simultaneous use (it may be in flight more than once), and demand is
+ * the data heap bytes its end made ready for its submissions, which
+ * count toward its device's prepared bytes until it is recorded again,
+ * reset or freed (0 for none).  A primary buffer whose packets do not
+ * depend on what runs before it (no event, no cut, nothing skipped) is
+ * converted once at its end and its submissions place those packets:
+ * baked_words are they, baked_temps the data heap runs they read (the
+ * buffer's own until it is recorded again, reset or freed, and only read
+ * by the GPU, so submissions in flight at once share them), and
+ * baked_charged what the packets take of the session's budget.
  */
 struct ghci_vk_command_buffer {
 	uint64_t pool;
 	uint32_t level;
 	enum ghci_vk_recording state;
 	int failed;
+	int simultaneous;
+	uint64_t demand;
 	uint8_t *bytes;
 	uint32_t used;
 	uint32_t capacity;
 	uint32_t commands;
+	uint32_t *baked_words;
+	uint32_t baked_used;
+	struct ghci_vk_temp *baked_temps;
+	uint32_t baked_temp_count;
+	uint64_t baked_charged;
 };
 
 /* A VkSampler: its sampler descriptor (section 8.3 of the specification). */
@@ -893,10 +917,11 @@ struct ghci_vk_tables {
 	uint32_t bank_count;
 };
 
-/* One run of the data heap a submission's temporary memory takes. */
+/* One run of the data heap a submission's temporary memory takes, and its bytes. */
 struct ghci_vk_temp {
 	struct ghci_vk_heap_block *block;
 	uint32_t offset;
+	uint32_t bytes;
 };
 
 /*
@@ -1126,6 +1151,7 @@ int ghci_vk_format_size(uint32_t format, uint32_t *bytes, uint32_t *block);
 void ghci_vk_formats_from_bits(const struct ghci_caps *caps, uint32_t format, uint32_t optimal, uint32_t linear, uint32_t buffer, struct ghci_vk_formats *formats);
 void ghci_vk_formats_make(const struct ghci_caps *caps, struct ghci_vk_formats *formats);
 uint32_t ghci_vk_formats_count(const struct ghci_vk_formats *formats);
+uint32_t ghci_vk_format_hw(uint32_t format);
 uint32_t ghci_vk_format_traits(uint32_t format, uint32_t *flags);
 
 /* The routes of the command groups. */
@@ -1161,6 +1187,8 @@ void ghci_vk_pass_release(struct ghci_vk_object *object);
 /* vk-execute.c: the recorded commands of a submission made into packets. */
 int ghci_vk_execute(struct ghci_vk_session *session, struct ghci_vk_device *device, const VkSubmitInfo *submits, uint64_t count, struct ghci_vk_submission *submission);
 int ghci_vk_execute_clear(struct ghci_vk_session *session, struct ghci_vk_device *device, uint64_t va, uint64_t bytes, struct ghci_vk_submission *submission);
+void ghci_vk_execute_prepare(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_vk_object *object);
+void ghci_vk_execute_unbake(struct ghci_vk_device *device, struct ghci_vk_command_buffer *commands);
 void ghci_vk_submission_end(struct ghci_vk_device *device, struct ghci_vk_submission *submission, const struct ghci_ticket *ticket, int placed);
 void ghci_vk_submission_written(struct ghci_vk_device *device, const struct ghci_vk_submission *submission, uint32_t end, const struct ghci_ticket *ticket);
 

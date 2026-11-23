@@ -20,6 +20,7 @@
 		ERR_error_string_n;
 		ERR_clear_error;
 		EVP_sha256;
+		EVP_sha512;
 		EVP_MD_get_size;
 		EVP_MD_CTX_new;
 		EVP_MD_CTX_free;
@@ -66,6 +67,7 @@
 		EVP_CipherUpdate;
 		EVP_Cipher;
 		EVP_aes_256_cbc;
+		EVP_aes_256_ctr;
 		EVP_CipherFinal_ex;
 		EVP_CIPHER_CTX_set_padding;
 		EVP_MAC_fetch;

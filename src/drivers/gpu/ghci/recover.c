@@ -17,9 +17,8 @@
  * reset threw away with an error, runs the ring again and checks that a
  * fence of the driver's comes back, and opens the gate once a last
  * fence finds no new fault.  The checks that fail three times in a row,
- * a reset that does not end, three faults no session caused within a
- * minute or two exhaustions of CP_HEAP within a minute make the device
- * lost.
+ * a reset that does not end, or three faults no session caused within a
+ * minute make the device lost.
  *
  * The GPU core has three recovery calls of its own: its fault makes the
  * device lost at once, and its reset (asked only once no older owner is
@@ -72,7 +71,7 @@ struct halt_reading {
 static enum recovery_outcome recover_once(struct ghci_device *device);
 static unsigned take_records(struct ghci_device *device, struct ghci_fault_record *records);
 static void halt_and_read(struct ghci_device *device, unsigned *fault_seen, struct halt_reading *reading);
-static int count_storm(struct ghci_device *device, const struct ghci_fault_record *records, unsigned count, uint32_t fault_info, int culprits);
+static int count_storm(struct ghci_device *device, unsigned count, int culprits);
 static int count_window(uint64_t *ticks, unsigned capacity, unsigned *count, uint64_t now);
 static int reset_and_check(struct ghci_device *device);
 static uint64_t end_tickets(struct ghci_device *device);
@@ -515,8 +514,8 @@ recover_once(
 	if (count != 0U)
 		culprits = ghci_vm_find_culprits(device, reading.fault_info, reading.active, reading.halted, reading.fence);
 
-	/* Faults no session caused, and exhaustions of CP_HEAP, that come too often lose the device. */
-	storm = count_storm(device, records, count, reading.fault_info, culprits);
+	/* Faults no session caused that come too often lose the device. */
+	storm = count_storm(device, count, culprits);
 	if (storm) {
 		lose(device, "faults too often");
 		mutex_unlock(&device->cp_lock);
@@ -563,6 +562,11 @@ recover_once(
 	error = ghci_vm_replay(device);
 	if (error != 0)
 		return check_failed(device, "the replay did not finish");
+
+	/* The replayed maps are read, and placed again with the page-table memory they ask for. */
+	error = ghci_vm_replay_tables(device);
+	if (error != 0)
+		return check_failed(device, "the replayed maps did not finish");
 
 	/* Step 8: a last fence must find no new fault; the gate opens in the same section as the count is compared. */
 	error = last_check(device, fault_seen);
@@ -633,7 +637,7 @@ halt_and_read(
 	uint32_t ctrl;
 	uint32_t fault_info;
 	uint32_t session_active;
-	uint32_t cp_pc;
+	uint64_t fault_address;
 	uint64_t fence;
 	int error;
 
@@ -666,17 +670,18 @@ halt_and_read(
 	status = ghci_read(device, GHCI_REG_STATUS);
 	fault_info = ghci_read(device, GHCI_REG_FAULT_INFO);
 	session_active = ghci_read(device, GHCI_REG_SESSION_ACTIVE);
-	cp_pc = ghci_read(device, GHCI_REG_DIAG_CP_PC);
+	fault_address = ghci_read(device, GHCI_REG_FAULT_ADDR_LO);
+	fault_address |= (uint64_t)ghci_read(device, GHCI_REG_FAULT_ADDR_HI) << 32;
 	fence = ghci_fence_read(device);
-	kern_logf("ghci: %s: recovering (status %08x, fault %08x kind %u unit %u session %u, active %04x, cp pc %08x, fence %llu)\n",
+	kern_logf("ghci: %s: recovering (status %08x, fault %08x kind %u unit %u session %u at %llx, active %04x, fence %llu)\n",
 	    device->name,
 	    (unsigned)status,
 	    (unsigned)fault_info,
 	    (unsigned)(fault_info & GHCI_FAULT_KIND_MASK),
 	    (unsigned)((fault_info >> GHCI_FAULT_UNIT_SHIFT) & GHCI_FAULT_UNIT_MASK),
 	    (unsigned)((fault_info >> GHCI_FAULT_SESSION_SHIFT) & GHCI_FAULT_SESSION_MASK),
+	    (unsigned long long)fault_address,
 	    (unsigned)session_active,
-	    (unsigned)cp_pc,
 	    (unsigned long long)fence);
 
 	/* Succeeded: what was read. */
@@ -686,54 +691,32 @@ halt_and_read(
 }
 
 /*
- * Counts this recovery's faults: an exhaustion of CP_HEAP (kind
- * MMU_OOM of the processor) in its own window, any other fault no
- * session caused in the storm's; a fault with a culprit is not counted
- * (the culprit is dead and submits no more).  A pass without records (a
- * check that failed) counts nothing.
- * Returns 1 when either window is full and the device is to be lost.
+ * Counts this recovery's faults: a fault no session caused joins the
+ * storm's window; a fault with a culprit is not counted (the culprit is
+ * dead and submits no more).  A pass without records (a check that
+ * failed) counts nothing.  Returns 1 when the window is full and the
+ * device is to be lost.
  */
 static int
 count_storm(
 	struct ghci_device *device,
-	const struct ghci_fault_record *records,
 	unsigned count,
-	uint32_t fault_info,
 	int culprits)
 {
-	uint32_t info;
 	uint64_t now;
-	unsigned index;
-	int oom;
 	int full;
 
 	/* A pass that only repeats a failed check is not a new fault. */
 	if (count == 0U)
 		return 0;
 
-	/* Whether the fault is the processor running out of CP_HEAP, from the register or any record. */
-	oom = 0;
-	for (index = 0U; index <= count; index++) {
-		info = fault_info;
-		if (index < count)
-			info = records[index].fault_info;
-		if ((info & GHCI_FAULT_KIND_MASK) == GHCI_FAULT_KIND_MMU_OOM &&
-		    ((info >> GHCI_FAULT_UNIT_SHIFT) & GHCI_FAULT_UNIT_MASK) == GHCI_UNIT_CP)
-			oom = 1;
-	}
-
 	/* A session's fault is the culprit's, not the device's. */
-	if (!oom && culprits != 0)
+	if (culprits != 0)
 		return 0;
 
-	/* The fault joins its window. */
+	/* Succeeded: the fault joins the window, which may be full. */
 	now = clock_ticks();
-	if (oom)
-		full = count_window(device->oom_ticks, GHCI_OOM_STORM, &device->oom_count, now);
-	else
-		full = count_window(device->storm_ticks, GHCI_FAULT_STORM, &device->storm_count, now);
-
-	/* Succeeded: whether the window is full. */
+	full = count_window(device->storm_ticks, GHCI_FAULT_STORM, &device->storm_count, now);
 	return full;
 }
 
@@ -782,8 +765,8 @@ reset_and_check(
 	struct ghci_device *device)
 {
 	uint32_t status;
-	uint32_t want[6];
-	uint32_t offsets[6];
+	uint32_t want[4];
+	uint32_t offsets[4];
 	uint32_t word;
 	unsigned index;
 	int error;
@@ -820,15 +803,11 @@ reset_and_check(
 	want[1] = (uint32_t)(device->ring.memory->bus >> 32);
 	offsets[2] = GHCI_REG_RING_SIZE;
 	want[2] = device->ring_bytes;
-	offsets[3] = GHCI_REG_CP_HEAP_BASE;
-	want[3] = (uint32_t)device->heap->bus;
-	offsets[4] = GHCI_REG_CP_HEAP_LIMIT;
-	want[4] = (uint32_t)(device->heap->bus + device->heap->bytes);
-	offsets[5] = GHCI_REG_WDT_CYCLES;
-	want[5] = device->wdt_cycles;
+	offsets[3] = GHCI_REG_WDT_CYCLES;
+	want[3] = device->wdt_cycles;
 
 	/* Each is read back, and written again (the processor is idle) when it changed. */
-	for (index = 0U; index < 6U; index++) {
+	for (index = 0U; index < 4U; index++) {
 		word = ghci_read(device, offsets[index]);
 		if (word == want[index])
 			continue;
@@ -1313,6 +1292,8 @@ core_reset(
 	error = fence_back(device);
 	if (error == 0)
 		error = ghci_vm_replay(device);
+	if (error == 0)
+		error = ghci_vm_replay_tables(device);
 	if (error == 0)
 		error = last_check(device, fault_seen);
 	placing(device, 0, fault_seen);

@@ -6,30 +6,30 @@
  */
 
 /*
- * install-admin: the installer's helper, set-user-ID root (mode 4550,
- * owner root, group wheel), only in the installer's image.  It asks for
- * no password: a start of the installer's image counts as a start as root.
- * What keeps it out of every other system is that only that image has it,
- * and that it does nothing unless /opt/installer/index is the index it
- * was built with.  Before anything it checks that its caller is in the
- * wheel group and is the user the image logs in automatically (or root),
- * then becomes root wholly -- so the caller can no longer stop it or its
- * children with a signal -- and takes /run/install-admin/lock.
+ * installer-helper: the installer's helper, which reads and writes the
+ * disks and downloads the system.  It is root's alone (mode 0500, not
+ * set-user-ID): the installer, which the desktop starts as root once the
+ * person has allowed it (klsudo, the admin action "installer"), starts it
+ * as its child, and root may start it by hand.  It refuses to run as
+ * anyone else.  It becomes root wholly in a session of its own -- so
+ * nothing the installer's process group is sent stops it or its children
+ * halfway -- and takes /run/installer-helper/lock.
  *
- *   install-admin probe     the disks, read (probe.h)
- *   install-admin session   requests read from the input (plan.h, session.h)
+ *   installer-helper probe          the disks, read (probe.h)
+ *   installer-helper releases       the published releases offered (payload.h)
+ *   installer-helper download TAG   the system of a release, downloaded and checked (payload.h)
+ *   installer-helper session        requests read from the input (plan.h, session.h)
  */
 
 #include "index.h"
+#include "payload.h"
 #include "plan.h"
 #include "probe.h"
+#include "release.h"
 #include "session.h"
-
-#include "index-sha256.h"
 
 #include <errno.h>
 #include <fcntl.h>
-#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,17 +41,10 @@
 #include <unistd.h>
 
 /* The helper's own directory, its lock and its mount points. */
-#define ADMIN_RUN_DIRECTORY	"/run/install-admin"
+#define ADMIN_RUN_DIRECTORY	PAYLOAD_DIRECTORY
 #define ADMIN_LOCK		ADMIN_RUN_DIRECTORY "/lock"
 #define ADMIN_TARGET		ADMIN_RUN_DIRECTORY "/target"
 #define ADMIN_ESP		ADMIN_RUN_DIRECTORY "/esp"
-
-/* The index the helper was built with, and the user the image logs in. */
-#define ADMIN_INDEX		"/opt/installer/index"
-#define ADMIN_AUTOLOGIN		"/etc/keiland/autologin"
-
-/* The longest name the automatic login file may give. */
-#define ADMIN_NAME_MAX		32U
 
 /* The exit statuses. */
 #define ADMIN_EXIT_OK		0
@@ -60,87 +53,66 @@
 #define ADMIN_EXIT_REFUSED	3
 #define ADMIN_EXIT_BUSY		4
 
+/* The helper's requests, by their word. */
+enum admin_verb {
+	ADMIN_PROBE,
+	ADMIN_RELEASES,
+	ADMIN_DOWNLOAD,
+	ADMIN_SESSION
+};
+
 /*
- * The index, read once and checked; the session's requests are checked
- * against it.  Set before the requests are read and never changed.
+ * The downloaded system: its members and its index, which the session
+ * checks requests against.  Read once at the session's start and never
+ * changed.
  */
 static char admin_index_text[INDEX_BYTES_MAX];
 static struct installer_index admin_index;
+static struct payload admin_payload;
 
 /* The bytes of the session's requests received and not yet taken. */
 static char admin_request_text[PLAN_REQUEST_MAX];
 
 static void admin_standard_descriptors(void);
-static int admin_caller_allowed(uid_t real);
-static int admin_in_wheel(void);
-static int admin_index_read(void);
+static int admin_verb(int argc, char **argv, enum admin_verb *verb);
 static int admin_become_root(void);
 static int admin_directory(const char *path);
 static int admin_lock(int *fd);
 static int admin_session(void);
 static void admin_log_request(const struct plan_request *request);
 
-/* Runs a probe or a session for the installer. */
+/* Runs a probe, a list of the releases, a download or a session for the installer. */
 int
 main(
 	int argc,
 	char **argv)
 {
-	uid_t real;
+	enum admin_verb verb;
 	uid_t effective;
+	uid_t real;
 	int lock;
-	int probe;
-	int probe_order;
-	int session_order;
 	int error;
 
 	/* Descriptors 0 to 2 open, whatever the caller left. */
 	admin_standard_descriptors();
 
-	/* One request, a probe or a session. */
-	if (argc != 2) {
-		fprintf(stderr, "usage: install-admin probe | session\n");
-		return ADMIN_EXIT_USAGE;
-	}
-
-	/* Compares the word with each request the helper knows. */
-	probe_order = strcmp(argv[1], "probe");
-	session_order = strcmp(argv[1], "session");
-
-	/* Selects a probe, or refuses a word that is neither request. */
-	probe = 0;
-	if (probe_order == 0) {
-		probe = 1;
-	} else if (session_order != 0) {
-		fprintf(stderr, "usage: install-admin probe | session\n");
+	/* One request. */
+	error = admin_verb(argc, argv, &verb);
+	if (error != 0) {
+		fprintf(stderr, "usage: installer-helper probe | releases | download TAG | session\n");
 		return ADMIN_EXIT_USAGE;
 	}
 
 	/* Nothing from the environment; the log. */
 	real = getuid();
-	(void)clearenv();
-	openlog("install-admin", LOG_PID, LOG_AUTH);
-
-	/* Installed set-user-ID root, or it can do nothing. */
 	effective = geteuid();
-	if (effective != 0) {
-		fprintf(stderr, "install-admin: not set-user-ID root\n");
-		return ADMIN_EXIT_FAILED;
-	}
+	(void)clearenv();
+	openlog("installer-helper", LOG_PID, LOG_AUTH);
 
-	/* The caller: the image's own user in the wheel group, or root. */
-	error = admin_caller_allowed(real);
-	if (error != 0) {
-		syslog(LOG_NOTICE, "refused uid %ld: not the installer's user", (long)real);
-		fprintf(stderr, "install-admin: refused\n");
-		return ADMIN_EXIT_REFUSED;
-	}
-
-	/* The installer's image, by its index. */
-	error = admin_index_read();
-	if (error != 0) {
-		syslog(LOG_NOTICE, "refused: %s is not the installer's index (%d)", ADMIN_INDEX, error);
-		fprintf(stderr, "install-admin: not the installer's image\n");
+	/* Root's alone: started by root, never set-user-ID. */
+	if (real != 0 || effective != 0) {
+		syslog(LOG_NOTICE, "refused uid %ld (effective %ld): not root", (long)real, (long)effective);
+		fprintf(stderr, "installer-helper: only root runs the installer's helper\n");
 		return ADMIN_EXIT_REFUSED;
 	}
 
@@ -154,7 +126,7 @@ main(
 	/* The helper's directory and its lock: one helper at a time. */
 	error = admin_lock(&lock);
 	if (error == EWOULDBLOCK || error == EAGAIN) {
-		fprintf(stdout, "FAIL lock %d another install-admin runs\n", EBUSY);
+		fprintf(stdout, "FAIL lock %d another installer-helper runs\n", EBUSY);
 		fflush(stdout);
 		return ADMIN_EXIT_BUSY;
 	}
@@ -166,24 +138,32 @@ main(
 		return ADMIN_EXIT_FAILED;
 	}
 
-	/* A probe answers and ends. */
-	if (probe) {
-		syslog(LOG_INFO, "probe by uid %ld", (long)real);
+	/* By the request. */
+	switch (verb) {
+	case ADMIN_PROBE:
+		syslog(LOG_INFO, "probe");
 		error = probe_report(stdout);
-		close(lock);
-		if (error != 0)
-			return ADMIN_EXIT_FAILED;
-		return ADMIN_EXIT_OK;
+		break;
+	case ADMIN_RELEASES:
+		syslog(LOG_INFO, "releases");
+		error = payload_releases(stdout, 0);
+		break;
+	case ADMIN_DOWNLOAD:
+		syslog(LOG_NOTICE, "download of %s", argv[2]);
+		error = payload_download(stdout, 0, argv[2]);
+		break;
+	default:
+		syslog(LOG_INFO, "session");
+		error = admin_session();
+		break;
 	}
 
-	/* A session runs until the installer ends it. */
-	syslog(LOG_INFO, "session by uid %ld", (long)real);
-	error = admin_session();
+	/* The lock goes with the request's end. */
 	close(lock);
 	if (error != 0)
 		return ADMIN_EXIT_FAILED;
 
-	/* Succeeded: the session ended as asked. */
+	/* Succeeded: the request is done. */
 	return ADMIN_EXIT_OK;
 }
 
@@ -206,132 +186,57 @@ admin_standard_descriptors(void)
 }
 
 /*
- * Reports whether the caller may use the helper (0, or EPERM): root, or
- * a member of wheel whose uid is that of the user /etc/keiland/autologin
- * names (the image's own user).
+ * Reads the request from the arguments: one word, or download and a tag.
+ * Returns 0, or EINVAL for anything else.
  */
 static int
-admin_caller_allowed(
-	uid_t real)
+admin_verb(
+	int argc,
+	char **argv,
+	enum admin_verb *verb)
 {
-	char name[ADMIN_NAME_MAX + 2U];
-	struct passwd *account;
-	FILE *file;
-	char *line;
-	size_t length;
-	int in_wheel;
-
-	/* Root may. */
-	if (real == 0)
-		return 0;
-
-	/* Anyone else is in wheel. */
-	in_wheel = admin_in_wheel();
-	if (!in_wheel)
-		return EPERM;
-
-	/* The image's own user, by the automatic login's first line. */
-	file = fopen(ADMIN_AUTOLOGIN, "r");
-	if (file == NULL)
-		return EPERM;
-	memset(name, 0, sizeof(name));
-	line = fgets(name, (int)sizeof(name), file);
-	if (line == NULL) {
-		fclose(file);
-		return EPERM;
-	}
-
-	/* Closes the file and takes the first word of the line as the name. */
-	fclose(file);
-	length = strcspn(name, "\r\n \t");
-	name[length] = '\0';
-	if (length == 0U || length > ADMIN_NAME_MAX)
-		return EPERM;
-
-	/* The caller is that user. */
-	account = getpwnam(name);
-	if (account == NULL || account->pw_uid != real)
-		return EPERM;
-
-	/* The caller may. */
-	return 0;
-}
-
-/* Reports whether the caller's group or one of its groups is wheel (gid 0). */
-static int
-admin_in_wheel(void)
-{
-	gid_t groups[64];
-	gid_t real_group;
-	gid_t effective_group;
-	int count;
-	int i;
-
-	/* The primary group. */
-	real_group = getgid();
-	effective_group = getegid();
-	if (real_group == 0 || effective_group == 0)
-		return 1;
-
-	/* The supplementary groups. */
-	count = getgroups((int)(sizeof(groups) / sizeof(groups[0])), groups);
-	for (i = 0; i < count; i++) {
-		if (groups[i] == 0)
-			return 1;
-	}
-
-	/* Not in wheel. */
-	return 0;
-}
-
-/*
- * Reads /opt/installer/index whole, checks it is the index the helper was
- * built with and reads its records.  Returns 0 or an errno value
- * (EBADMSG for another index).
- */
-static int
-admin_index_read(void)
-{
-	size_t length;
-	ssize_t count;
-	int fd;
+	int probe;
+	int releases;
+	int download;
+	int session;
 	int error;
 
-	/* The file, whole. */
-	fd = open(ADMIN_INDEX, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-	if (fd < 0)
-		return errno;
-	length = 0;
-	for (;;) {
-		count = read(fd, admin_index_text + length, sizeof(admin_index_text) - length);
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0)
-			break;
-		length += (size_t)count;
-		if (length == sizeof(admin_index_text))
-			break;
+	/* A word at least. */
+	if (argc < 2)
+		return EINVAL;
+
+	/* Compares the word with each request the helper knows. */
+	probe = strcmp(argv[1], "probe");
+	releases = strcmp(argv[1], "releases");
+	download = strcmp(argv[1], "download");
+	session = strcmp(argv[1], "session");
+
+	/* A download names a tag a release may have; the others take nothing more. */
+	if (download == 0) {
+		if (argc != 3)
+			return EINVAL;
+		error = release_tag_valid(argv[2]);
+		if (error != 0)
+			return error;
+		*verb = ADMIN_DOWNLOAD;
+		return 0;
+	}
+	if (argc != 2)
+		return EINVAL;
+
+	/* By the word. */
+	if (probe == 0) {
+		*verb = ADMIN_PROBE;
+	} else if (releases == 0) {
+		*verb = ADMIN_RELEASES;
+	} else if (session == 0) {
+		*verb = ADMIN_SESSION;
+	} else {
+		/* A word the helper does not know. */
+		return EINVAL;
 	}
 
-	/* Keeps the read's failure and closes the file. */
-	error = 0;
-	if (count < 0)
-		error = errno;
-	close(fd);
-	if (error != 0)
-		return error;
-	if (length == sizeof(admin_index_text))
-		return EFBIG;
-
-	/* The index the helper was built with, then its records. */
-	error = index_digest_matches(admin_index_text, length, INSTALL_ADMIN_INDEX_SHA256);
-	if (error != 0)
-		return error;
-	error = index_parse(admin_index_text, length, &admin_index);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the index is the helper's. */
+	/* Succeeded: the request is known. */
 	return 0;
 }
 
@@ -466,12 +371,20 @@ admin_session(void)
 	ssize_t count;
 	int error;
 
+	/* The downloaded system, when there is one: without it the disks may be edited, not installed. */
+	memset(&session, 0, sizeof(session));
+	error = payload_load(&admin_payload, &admin_index, admin_index_text, sizeof(admin_index_text));
+	if (error == 0) {
+		session.index = &admin_index;
+		session.payload = &admin_payload;
+	} else {
+		syslog(LOG_INFO, "session without a downloaded system (%d)", error);
+	}
+
 	/* The request, too large for the stack. */
 	request = malloc(sizeof(*request));
 	if (request == NULL)
 		return ENOMEM;
-	memset(&session, 0, sizeof(session));
-	session.index = &admin_index;
 	session.output = stdout;
 	session.input = 0;
 

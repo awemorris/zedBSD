@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include "ssh-bcrypt.h"
 #include "ssh-key.h"
 
 /* The length of the algorithm name "ssh-ed25519" in bytes. */
@@ -37,6 +38,29 @@
 /* The length of the fixed prefix "SHA256:" of a fingerprint. */
 #define KEY_FINGERPRINT_PREFIX_LENGTH	7U
 
+/* The cipher block size of aes256-ctr, which an encrypted private section is padded to (PROTOCOL.key 3). */
+#define KEY_ENCRYPTED_BLOCK	SSH_AES_BLOCK
+
+/* The bytes bcrypt_pbkdf derives for aes256-ctr: the 32-byte key, then the 16-byte first counter block (PROTOCOL.key 2). */
+#define KEY_DERIVED_SIZE	(SSH_AES256_KEY + SSH_AES_BLOCK)
+
+/*
+ * The outer part of an openssh-key-v1 file, read by private_read_file:
+ * the public key of its blob, whether the private section is encrypted
+ * (with the bcrypt KDF's salt and rounds when it is), and the private
+ * section as it is in the file.  The pointers are views into the decoded
+ * bytes, which the reader owns.
+ */
+struct key_private_file {
+	uint8_t public_key[SSH_ED25519_PUBLIC];
+	int encrypted;
+	const uint8_t *salt;
+	size_t salt_size;
+	uint32_t rounds;
+	const uint8_t *section;
+	size_t section_size;
+};
+
 /*
  * The magic that starts the decoded private key file, with its NUL byte.
  *
@@ -54,7 +78,15 @@ static size_t key_trim_end(const char *text, size_t size);
 static int key_text_is(const uint8_t *text, size_t size, const char *expected);
 static int private_join_lines(const char *text, size_t size, struct ssh_buf *joined);
 static int private_parse_decoded(const uint8_t *data, size_t size, struct ssh_key *key);
-static int private_put_inner(const struct ssh_key *key, size_t comment_size, uint32_t checkint, struct ssh_buf *inner);
+static int private_decode(const char *text, size_t size, struct ssh_buf *joined, struct ssh_buf *decoded);
+static int private_read_file(const uint8_t *data, size_t size, struct key_private_file *file);
+static int private_read_kdf_options(const uint8_t *options, size_t options_size, struct key_private_file *file);
+static int private_decrypt(const struct key_private_file *file, const uint8_t *passphrase, size_t passphrase_size, struct ssh_buf *plain);
+static int private_read_section(const uint8_t *section, size_t section_size, size_t block, int encrypted, const uint8_t *blob_public, struct ssh_key *key);
+static int private_put_file(const struct ssh_key *key, uint32_t checkint, const uint8_t *passphrase, size_t passphrase_size, const uint8_t *salt, size_t salt_size, unsigned rounds, struct ssh_buf *out);
+static int private_put_inner(const struct ssh_key *key, size_t comment_size, uint32_t checkint, size_t block, struct ssh_buf *inner);
+static int private_encrypt(const uint8_t *passphrase, size_t passphrase_size, const uint8_t *salt, size_t salt_size, unsigned rounds, struct ssh_buf *inner);
+static int private_put_armour(const struct ssh_buf *body, struct ssh_buf *out);
 static int private_comment_size(const struct ssh_key *key, size_t *comment_size);
 
 /*
@@ -462,8 +494,6 @@ ssh_key_parse_private(
 {
 	struct ssh_buf joined;
 	struct ssh_buf decoded;
-	size_t decoded_capacity;
-	size_t decoded_size;
 	int error;
 
 	/* Starts from an empty key, so any failure leaves nothing behind. */
@@ -473,47 +503,13 @@ ssh_key_parse_private(
 	ssh_buf_init(&joined, SSH_KEY_FILE_MAX, 1);
 	ssh_buf_init(&decoded, SSH_KEY_FILE_MAX, 1);
 
-	/* Refuses a file larger than the limit, and bytes that are missing. */
-	if (size > SSH_KEY_FILE_MAX) {
-		error = EMSGSIZE;
-		goto done;
-	}
-
-	/* Refuses a missing text. */
-	if (text == NULL) {
-		error = EINVAL;
-		goto done;
-	}
-
-	/* Takes the base64 lines between the BEGIN line and the END line and joins them. */
-	error = private_join_lines(text, size, &joined);
+	/* Decodes the armoured base64. */
+	error = private_decode(text, size, &joined, &decoded);
 	if (error != 0)
 		goto done;
-
-	/* An armour with no base64 inside holds no key. */
-	if (joined.size == 0) {
-		error = EINVAL;
-		goto done;
-	}
-
-	/* Makes room for the decoded bytes: three bytes for every four characters, with a group to spare. */
-	decoded_capacity = (joined.size / 4U + 1U) * 3U;
-	error = ssh_buf_reserve(&decoded, decoded_capacity);
-	if (error != 0)
-		goto done;
-
-	/* Decodes the joined base64 (RFC 4648 4). */
-	error = ssh_base64_decode((const char *)joined.data, joined.size, decoded.data, decoded_capacity, &decoded_size);
-	if (error != 0) {
-		error = EINVAL;
-		goto done;
-	}
-
-	/* Records the length that was decoded. */
-	decoded.size = decoded_size;
 
 	/* Parses the openssh-key-v1 structure and checks the key it holds. */
-	error = private_parse_decoded(decoded.data, decoded_size, key);
+	error = private_parse_decoded(decoded.data, decoded.size, key);
 
 done:
 	/* Wipes and frees both buffers on every path. */
@@ -521,6 +517,141 @@ done:
 	ssh_buf_free(&decoded);
 
 	/* A failed parse leaves no part of a key behind. */
+	if (error != 0) {
+		ssh_key_clear(key);
+		return error;
+	}
+
+	/* Succeeded: key holds the private key. */
+	return 0;
+}
+
+/*
+ * Reads the public half of an OpenSSH private key file, encrypted or not.
+ *
+ * The decoded bytes, which hold no secret in an encrypted file but the
+ * whole key in a plain one, are wiped on every path.
+ */
+int
+ssh_key_parse_private_public(
+	const char *text,
+	size_t size,
+	struct ssh_key *key,
+	int *encrypted)
+{
+	struct key_private_file file;
+	struct ssh_buf joined;
+	struct ssh_buf decoded;
+	int error;
+
+	/* Starts from an empty key. */
+	ssh_key_clear(key);
+	*encrypted = 0;
+
+	/* The bytes may hold a plain private key, so both buffers are secret. */
+	ssh_buf_init(&joined, SSH_KEY_FILE_MAX, 1);
+	ssh_buf_init(&decoded, SSH_KEY_FILE_MAX, 1);
+
+	/* Decodes the armoured base64. */
+	error = private_decode(text, size, &joined, &decoded);
+	if (error != 0)
+		goto done;
+
+	/* Reads the outer part: the cipher, the KDF and the public key blob. */
+	error = private_read_file(decoded.data, decoded.size, &file);
+	if (error != 0)
+		goto done;
+
+	/* Hands out the public key and whether a passphrase is needed. */
+	memcpy(key->public_key, file.public_key, SSH_ED25519_PUBLIC);
+	key->private = 0;
+	*encrypted = file.encrypted;
+
+done:
+	/* Wipes and frees both buffers on every path. */
+	ssh_buf_free(&joined);
+	ssh_buf_free(&decoded);
+
+	/* A failed read leaves no key. */
+	if (error != 0) {
+		ssh_key_clear(key);
+		*encrypted = 0;
+		return error;
+	}
+
+	/* Succeeded: key holds the public key. */
+	return 0;
+}
+
+/*
+ * Reads an OpenSSH private key file, decrypting it with passphrase when it
+ * is encrypted.
+ *
+ * The decoded bytes, the derived key and counter block and the decrypted
+ * section are wiped on every path; key is cleared first and again on an
+ * error.
+ */
+int
+ssh_key_parse_private_passphrase(
+	const char *text,
+	size_t size,
+	const uint8_t *passphrase,
+	size_t passphrase_size,
+	struct ssh_key *key)
+{
+	struct key_private_file file;
+	struct ssh_buf joined;
+	struct ssh_buf decoded;
+	struct ssh_buf plain;
+	int error;
+
+	/* Starts from an empty key, so any failure leaves nothing behind. */
+	ssh_key_clear(key);
+
+	/* The base64, the decoded bytes and the decrypted section all hold the secret. */
+	ssh_buf_init(&joined, SSH_KEY_FILE_MAX, 1);
+	ssh_buf_init(&decoded, SSH_KEY_FILE_MAX, 1);
+	ssh_buf_init(&plain, SSH_KEY_FILE_MAX, 1);
+
+	/* Decodes the armoured base64. */
+	error = private_decode(text, size, &joined, &decoded);
+	if (error != 0)
+		goto done;
+
+	/* Reads the outer part: the cipher, the KDF and its options, the public key blob. */
+	error = private_read_file(decoded.data, decoded.size, &file);
+	if (error != 0)
+		goto done;
+
+	/* A file in the clear is read as ssh_key_parse_private reads it; the passphrase is not used. */
+	if (!file.encrypted) {
+		error = private_parse_decoded(decoded.data, decoded.size, key);
+		goto done;
+	}
+
+	/* Refuses a passphrase that is empty, missing or past the limit. */
+	if (passphrase == NULL ||
+	    passphrase_size == 0U ||
+	    passphrase_size > SSH_KEY_PASSPHRASE_MAX) {
+		error = EINVAL;
+		goto done;
+	}
+
+	/* Decrypts the private section. */
+	error = private_decrypt(&file, passphrase, passphrase_size, &plain);
+	if (error != 0)
+		goto done;
+
+	/* Reads the key from the decrypted section, padded to the cipher's block. */
+	error = private_read_section(plain.data, plain.size, KEY_ENCRYPTED_BLOCK, 1, file.public_key, key);
+
+done:
+	/* Wipes and frees every buffer on every path. */
+	ssh_buf_free(&joined);
+	ssh_buf_free(&decoded);
+	ssh_buf_free(&plain);
+
+	/* A failed read leaves no part of a key behind. */
 	if (error != 0) {
 		ssh_key_clear(key);
 		return error;
@@ -545,108 +676,64 @@ ssh_key_put_private(
 	uint32_t checkint,
 	struct ssh_buf *out)
 {
-	struct ssh_buf inner;
-	struct ssh_buf body;
-	struct ssh_buf armoured;
-	uint8_t *space;
-	size_t comment_size;
-	size_t encoded_size;
-	size_t line_count;
-	size_t total;
-	size_t position;
-	size_t chunk;
 	int error;
 
-	/* Refuses a key that holds no seed. */
-	if (key->private != 1)
-		return EINVAL;
-
-	/* Measures the comment, which must end inside its array. */
-	error = private_comment_size(key, &comment_size);
-	if (error != 0)
-		return error;
-
-	/* The private section, the whole decoded file and its base64 all hold the seed. */
-	ssh_buf_init(&inner, SSH_KEY_FILE_MAX, 1);
-	ssh_buf_init(&body, SSH_KEY_FILE_MAX, 1);
-	ssh_buf_init(&armoured, SSH_KEY_FILE_MAX, 1);
-
-	/* Builds the padded private section (PROTOCOL.key 3). */
-	error = private_put_inner(key, comment_size, checkint, &inner);
-	if (error != 0)
-		goto done;
-
-	/* Writes the header: magic, cipher none, KDF none, empty options, one key (PROTOCOL.key 1, 5). */
-	ssh_buf_put_bytes(&body, private_magic, sizeof(private_magic));
-	ssh_buf_put_cstring(&body, "none");
-	ssh_buf_put_cstring(&body, "none");
-	ssh_buf_put_string(&body, NULL, 0);
-	ssh_buf_put_u32(&body, 1);
-
-	/* Writes the public key blob as a string, then the private section as a string. */
-	ssh_buf_put_u32(&body, SSH_KEY_BLOB_SIZE);
-	ssh_key_put_public_blob(key->public_key, &body);
-	ssh_buf_put_string(&body, inner.data, inner.size);
-	error = ssh_buf_error(&body);
-	if (error != 0)
-		goto done;
-
-	/* Encodes the whole file body as base64 with padding (RFC 4648 4), leaving the NUL out. */
-	encoded_size = ssh_base64_encoded_size(body.size);
-	space = ssh_buf_put_space(&armoured, encoded_size + 1U);
-	if (space == NULL) {
-		error = ssh_buf_error(&armoured);
-		goto done;
-	}
-
-	/* Encodes the body into the room that was reserved. */
-	error = ssh_base64_encode(body.data, body.size, (char *)space, encoded_size + 1U, 1);
-	if (error != 0) {
-		error = EIO;
-		goto done;
-	}
-
-	/* Drops the terminating zero from the armoured size. */
-	armoured.size = armoured.size - 1U;
-
-	/* Reserves the room for the BEGIN line, the wrapped base64 lines and the END line. */
-	line_count = (encoded_size + SSH_KEY_PRIVATE_WRAP - 1U) / SSH_KEY_PRIVATE_WRAP;
-	total = strlen(SSH_KEY_PRIVATE_BEGIN) + 1U + encoded_size + line_count + strlen(SSH_KEY_PRIVATE_END) + 1U;
-	error = ssh_buf_reserve(out, total);
-	if (error != 0)
-		goto done;
-
-	/* Writes the BEGIN line. */
-	ssh_buf_put_bytes(out, SSH_KEY_PRIVATE_BEGIN, strlen(SSH_KEY_PRIVATE_BEGIN));
-	ssh_buf_put_u8(out, '\n');
-
-	/* Writes the base64 in lines of SSH_KEY_PRIVATE_WRAP characters, the last one shorter. */
-	position = 0;
-	while (position < encoded_size) {
-		chunk = encoded_size - position;
-		if (chunk > SSH_KEY_PRIVATE_WRAP)
-			chunk = SSH_KEY_PRIVATE_WRAP;
-		ssh_buf_put_bytes(out, armoured.data + position, chunk);
-		ssh_buf_put_u8(out, '\n');
-		position += chunk;
-	}
-
-	/* Writes the END line. */
-	ssh_buf_put_bytes(out, SSH_KEY_PRIVATE_END, strlen(SSH_KEY_PRIVATE_END));
-	ssh_buf_put_u8(out, '\n');
-	error = ssh_buf_error(out);
-
-done:
-	/* Wipes and frees the working buffers on every path. */
-	ssh_buf_free(&inner);
-	ssh_buf_free(&body);
-	ssh_buf_free(&armoured);
-
-	/* Reports why the file could not be written. */
+	/* Writes the file with the private section in the clear. */
+	error = private_put_file(key, checkint, NULL, 0U, NULL, 0U, 0U, out);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the private key file is appended. */
+	return 0;
+}
+
+/*
+ * Appends key (private 1; EINVAL otherwise) to out as an OpenSSH private
+ * key file encrypted with a passphrase (aes256-ctr, the bcrypt KDF with
+ * the salt and rounds given; OpenSSH PROTOCOL.key 1, 2, 3), wrapped as
+ * ssh_key_put_private wraps it.
+ *
+ * The room for the whole file is reserved in out first, so a failure
+ * appends nothing.  The derived bytes and the section in the clear are
+ * wiped on every path.
+ */
+int
+ssh_key_put_private_passphrase(
+	const struct ssh_key *key,
+	uint32_t checkint,
+	const uint8_t *passphrase,
+	size_t passphrase_size,
+	const uint8_t *salt,
+	size_t salt_size,
+	unsigned rounds,
+	struct ssh_buf *out)
+{
+	int error;
+
+	/* Refuses a passphrase that is empty, missing or past the limit. */
+	if (passphrase == NULL ||
+	    passphrase_size == 0U ||
+	    passphrase_size > SSH_KEY_PASSPHRASE_MAX)
+		return EINVAL;
+
+	/* Refuses a salt bcrypt_pbkdf does not take. */
+	if (salt == NULL ||
+	    salt_size == 0U ||
+	    salt_size > SSH_BCRYPT_SALT_MAX)
+		return EINVAL;
+
+	/* Refuses no rounds, and more than a reader of the file takes. */
+	if (rounds == 0U)
+		return EINVAL;
+	if (rounds > SSH_KEY_ROUNDS_MAX)
+		return ENOTSUP;
+
+	/* Writes the file with the private section encrypted. */
+	error = private_put_file(key, checkint, passphrase, passphrase_size, salt, salt_size, rounds, out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the encrypted private key file is appended. */
 	return 0;
 }
 
@@ -947,33 +1034,18 @@ private_parse_decoded(
 	struct ssh_key *key)
 {
 	struct ssh_reader outer;
-	struct ssh_reader inner;
 	const uint8_t *cipher;
 	const uint8_t *kdf;
 	const uint8_t *options;
 	const uint8_t *section;
 	const uint8_t *blob;
-	const uint8_t *type;
-	const uint8_t *private_public;
-	const uint8_t *pair;
-	const uint8_t *comment;
-	const uint8_t *padding;
 	size_t cipher_size;
 	size_t kdf_size;
 	size_t options_size;
 	size_t section_size;
 	size_t blob_size;
-	size_t type_size;
-	size_t private_public_size;
-	size_t pair_size;
-	size_t comment_size;
-	size_t padding_size;
-	size_t index;
 	uint32_t key_count;
-	uint32_t checkint_first;
-	uint32_t checkint_second;
 	uint8_t blob_public[SSH_ED25519_PUBLIC];
-	uint8_t derived_public[SSH_ED25519_PUBLIC];
 	int same;
 	int different;
 	int error;
@@ -1023,8 +1095,337 @@ private_parse_decoded(
 	if (error != 0)
 		return error;
 
+	/* Reads the private section, padded to the block size of "none". */
+	error = private_read_section(section, section_size, KEY_PRIVATE_BLOCK, 0, blob_public, key);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: key holds the private key of the file. */
+	return 0;
+}
+
+/*
+ * Writes the whole private key file of key into out (PROTOCOL.key 1, 2,
+ * 3, 5): in the clear when passphrase is NULL, else encrypted with
+ * aes256-ctr under the bcrypt KDF with the salt and rounds given (the
+ * caller checked them).
+ */
+static int
+private_put_file(
+	const struct ssh_key *key,
+	uint32_t checkint,
+	const uint8_t *passphrase,
+	size_t passphrase_size,
+	const uint8_t *salt,
+	size_t salt_size,
+	unsigned rounds,
+	struct ssh_buf *out)
+{
+	struct ssh_buf inner;
+	struct ssh_buf options;
+	struct ssh_buf body;
+	size_t comment_size;
+	size_t block;
+	int error;
+
+	/* Refuses a key that holds no seed. */
+	if (key->private != 1)
+		return EINVAL;
+
+	/* Measures the comment, which must end inside its array. */
+	error = private_comment_size(key, &comment_size);
+	if (error != 0)
+		return error;
+
+	/* The private section and the whole decoded file hold the seed; the KDF's options do not. */
+	ssh_buf_init(&inner, SSH_KEY_FILE_MAX, 1);
+	ssh_buf_init(&options, SSH_KEY_FILE_MAX, 0);
+	ssh_buf_init(&body, SSH_KEY_FILE_MAX, 1);
+
+	/* The section is padded to the cipher's block: 8 for none, aes256-ctr's 16 (PROTOCOL.key 3). */
+	block = KEY_PRIVATE_BLOCK;
+	if (passphrase != NULL)
+		block = KEY_ENCRYPTED_BLOCK;
+
+	/* Builds the padded private section. */
+	error = private_put_inner(key, comment_size, checkint, block, &inner);
+	if (error != 0)
+		goto done;
+
+	/* An encrypted file's section is encrypted in place, and its KDF's options are the salt and the rounds (PROTOCOL.key 2). */
+	if (passphrase != NULL) {
+		error = private_encrypt(passphrase, passphrase_size, salt, salt_size, rounds, &inner);
+		if (error != 0)
+			goto done;
+		ssh_buf_put_string(&options, salt, salt_size);
+		ssh_buf_put_u32(&options, (uint32_t)rounds);
+		error = ssh_buf_error(&options);
+		if (error != 0)
+			goto done;
+	}
+
+	/* Writes the header: magic, the cipher, the KDF and its options, one key (PROTOCOL.key 1, 5). */
+	ssh_buf_put_bytes(&body, private_magic, sizeof(private_magic));
+	if (passphrase != NULL) {
+		ssh_buf_put_cstring(&body, SSH_KEY_CIPHER);
+		ssh_buf_put_cstring(&body, SSH_KEY_KDF);
+	} else {
+		ssh_buf_put_cstring(&body, "none");
+		ssh_buf_put_cstring(&body, "none");
+	}
+
+	/* The KDF's options (empty without a passphrase), and the count of keys, one. */
+	ssh_buf_put_string(&body, options.data, options.size);
+	ssh_buf_put_u32(&body, 1);
+
+	/* Writes the public key blob as a string, then the private section as a string. */
+	ssh_buf_put_u32(&body, SSH_KEY_BLOB_SIZE);
+	ssh_key_put_public_blob(key->public_key, &body);
+	ssh_buf_put_string(&body, inner.data, inner.size);
+	error = ssh_buf_error(&body);
+	if (error != 0)
+		goto done;
+
+	/* Writes the body as the armoured base64 the file holds. */
+	error = private_put_armour(&body, out);
+
+done:
+	/* Wipes and frees the working buffers on every path. */
+	ssh_buf_free(&inner);
+	ssh_buf_free(&options);
+	ssh_buf_free(&body);
+
+	/* Reports why the file could not be written. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the private key file is appended. */
+	return 0;
+}
+
+/*
+ * Builds the private section of a key file (PROTOCOL.key 3, the agent
+ * encoding of draft-ietf-sshm-ssh-agent 3.2.3) into inner, padded with
+ * 1, 2, 3, ... to a multiple of the block size.
+ */
+static int
+private_put_inner(
+	const struct ssh_key *key,
+	size_t comment_size,
+	uint32_t checkint,
+	size_t block,
+	struct ssh_buf *inner)
+{
+	uint8_t pair[KEY_PRIVATE_PAIR_SIZE];
+	size_t padding_size;
+	size_t index;
+	int error;
+
+	/* Writes the check integer twice. */
+	ssh_buf_put_u32(inner, checkint);
+	ssh_buf_put_u32(inner, checkint);
+
+	/* Writes the key type, the public key, and the seed followed by the public key. */
+	ssh_buf_put_string(inner, SSH_KEY_NAME, KEY_NAME_LENGTH);
+	ssh_buf_put_string(inner, key->public_key, SSH_ED25519_PUBLIC);
+	memcpy(pair, key->seed, SSH_ED25519_SEED);
+	memcpy(pair + SSH_ED25519_SEED, key->public_key, SSH_ED25519_PUBLIC);
+	ssh_buf_put_string(inner, pair, sizeof(pair));
+	ssh_wipe(pair, sizeof(pair));
+
+	/* Writes the comment. */
+	ssh_buf_put_string(inner, key->comment, comment_size);
+
+	/* Pads to a multiple of the block size with the bytes 1, 2, 3, ... */
+	padding_size = (block - inner->size % block) % block;
+	for (index = 1; index <= padding_size; index++)
+		ssh_buf_put_u8(inner, (uint8_t)index);
+
+	/* Reports a write that failed. */
+	error = ssh_buf_error(inner);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the private section is built. */
+	return 0;
+}
+
+/*
+ * Encrypts the padded private section in place (OpenSSH PROTOCOL.key 2,
+ * 3): bcrypt_pbkdf of the passphrase with the salt and rounds gives the
+ * AES-256 key and the first counter block, and aes256-ctr encrypts the
+ * section with them.  The derived bytes are wiped.  Returns 0 or EIO.
+ */
+static int
+private_encrypt(
+	const uint8_t *passphrase,
+	size_t passphrase_size,
+	const uint8_t *salt,
+	size_t salt_size,
+	unsigned rounds,
+	struct ssh_buf *inner)
+{
+	uint8_t derived[KEY_DERIVED_SIZE];
+	int error;
+
+	/* Derives the key and the first counter block from the passphrase. */
+	error = ssh_bcrypt_pbkdf(passphrase, passphrase_size, salt, salt_size, rounds, derived, sizeof(derived));
+	if (error != 0) {
+		ssh_wipe(derived, sizeof(derived));
+		return EIO;
+	}
+
+	/* Encrypts the section with the derived key. */
+	error = ssh_aes256_ctr(derived, derived + SSH_AES256_KEY, inner->data, inner->data, inner->size);
+	ssh_wipe(derived, sizeof(derived));
+	if (error != 0)
+		return EIO;
+
+	/* Succeeded: the section is encrypted. */
+	return 0;
+}
+
+/*
+ * Appends the decoded file body to out as the file's text: the BEGIN
+ * line, the body's base64 with padding (RFC 4648 4) in lines of
+ * SSH_KEY_PRIVATE_WRAP characters, and the END line, each ending with LF.
+ * The room for all of it is reserved first, so a failure appends nothing.
+ */
+static int
+private_put_armour(
+	const struct ssh_buf *body,
+	struct ssh_buf *out)
+{
+	struct ssh_buf armoured;
+	uint8_t *space;
+	size_t encoded_size;
+	size_t line_count;
+	size_t total;
+	size_t position;
+	size_t chunk;
+	int error;
+
+	/* The base64 holds the seed of a file in the clear. */
+	ssh_buf_init(&armoured, SSH_KEY_FILE_MAX, 1);
+
+	/* Encodes the whole body as base64 with padding, leaving the NUL out. */
+	encoded_size = ssh_base64_encoded_size(body->size);
+	space = ssh_buf_put_space(&armoured, encoded_size + 1U);
+	if (space == NULL) {
+		error = ssh_buf_error(&armoured);
+		goto done;
+	}
+
+	/* Encodes the body into the room that was reserved. */
+	error = ssh_base64_encode(body->data, body->size, (char *)space, encoded_size + 1U, 1);
+	if (error != 0) {
+		error = EIO;
+		goto done;
+	}
+
+	/* Drops the terminating zero from the armoured size. */
+	armoured.size = armoured.size - 1U;
+
+	/* Reserves the room for the BEGIN line, the wrapped base64 lines and the END line. */
+	line_count = (encoded_size + SSH_KEY_PRIVATE_WRAP - 1U) / SSH_KEY_PRIVATE_WRAP;
+	total = strlen(SSH_KEY_PRIVATE_BEGIN) + 1U + encoded_size + line_count + strlen(SSH_KEY_PRIVATE_END) + 1U;
+	error = ssh_buf_reserve(out, total);
+	if (error != 0)
+		goto done;
+
+	/* Writes the BEGIN line. */
+	ssh_buf_put_bytes(out, SSH_KEY_PRIVATE_BEGIN, strlen(SSH_KEY_PRIVATE_BEGIN));
+	ssh_buf_put_u8(out, '\n');
+
+	/* Writes the base64 in lines of SSH_KEY_PRIVATE_WRAP characters, the last one shorter. */
+	position = 0;
+	while (position < encoded_size) {
+		chunk = encoded_size - position;
+		if (chunk > SSH_KEY_PRIVATE_WRAP)
+			chunk = SSH_KEY_PRIVATE_WRAP;
+		ssh_buf_put_bytes(out, armoured.data + position, chunk);
+		ssh_buf_put_u8(out, '\n');
+		position += chunk;
+	}
+
+	/* Writes the END line. */
+	ssh_buf_put_bytes(out, SSH_KEY_PRIVATE_END, strlen(SSH_KEY_PRIVATE_END));
+	ssh_buf_put_u8(out, '\n');
+	error = ssh_buf_error(out);
+
+done:
+	/* Wipes and frees the base64 on every path. */
+	ssh_buf_free(&armoured);
+
+	/* Reports why the text could not be written. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the file's text is appended. */
+	return 0;
+}
+
+/*
+ * Measures the comment of key, which must end with a NUL inside its array.
+ */
+static int
+private_comment_size(
+	const struct ssh_key *key,
+	size_t *comment_size)
+{
+	size_t index;
+
+	/* Looks for the NUL that ends the comment. */
+	for (index = 0; index < SSH_KEY_COMMENT_MAX; index++) {
+		if (key->comment[index] == '\0') {
+			*comment_size = index;
+			return 0;
+		}
+	}
+
+	/* A comment with no end is not a valid string. */
+	return EINVAL;
+}
+
+/*
+ * Checks the private section of an openssh-key-v1 file (in the clear) and
+ * fills key from it.
+ *
+ * The section is padded to block bytes; the check integers must agree
+ * (EACCES when they do not in a decrypted section: the wrong passphrase),
+ * the padding must be 1, 2, 3, ..., and the three copies of the public
+ * key (blob_public, the one in the section and the second half of the
+ * pair) and the seed must agree.  Nothing is written to key until the end.
+ */
+static int
+private_read_section(
+	const uint8_t *section,
+	size_t section_size,
+	size_t block,
+	int encrypted,
+	const uint8_t *blob_public,
+	struct ssh_key *key)
+{
+	struct ssh_reader inner;
+	const uint8_t *type;
+	const uint8_t *private_public;
+	const uint8_t *pair;
+	const uint8_t *comment;
+	const uint8_t *padding;
+	size_t type_size;
+	size_t private_public_size;
+	size_t pair_size;
+	size_t comment_size;
+	size_t padding_size;
+	size_t index;
+	uint32_t checkint_first;
+	uint32_t checkint_second;
+	uint8_t derived_public[SSH_ED25519_PUBLIC];
+	int same;
+	int error;
+
 	/* The private section is padded to the cipher block size (PROTOCOL.key 3). */
-	if (section_size == 0 || section_size % KEY_PRIVATE_BLOCK != 0)
+	if (section_size == 0 || section_size % block != 0)
 		return EINVAL;
 
 	/* Reads the two check integers, which must be equal. */
@@ -1034,8 +1435,13 @@ private_parse_decoded(
 	error = ssh_reader_error(&inner);
 	if (error != 0)
 		return EINVAL;
-	if (checkint_first != checkint_second)
+
+	/* Unequal check integers after a decryption mean the passphrase was not the file's (PROTOCOL.key 3). */
+	if (checkint_first != checkint_second) {
+		if (encrypted)
+			return EACCES;
 		return EINVAL;
+	}
 
 	/* Reads the private key in the agent encoding (draft-ietf-sshm-ssh-agent 3.2.3) and the comment. */
 	ssh_reader_get_string(&inner, &type, &type_size);
@@ -1059,7 +1465,7 @@ private_parse_decoded(
 
 	/* The padding is what remains: fewer bytes than a block, counting 1, 2, 3, ... */
 	padding_size = ssh_reader_left(&inner);
-	if (padding_size >= KEY_PRIVATE_BLOCK)
+	if (padding_size >= block)
 		return EINVAL;
 	if (padding_size > 0) {
 		padding = ssh_reader_get_bytes(&inner, padding_size);
@@ -1107,69 +1513,230 @@ private_parse_decoded(
 }
 
 /*
- * Builds the private section of a key file (PROTOCOL.key 3, the agent
- * encoding of draft-ietf-sshm-ssh-agent 3.2.3) into inner, padded with
- * 1, 2, 3, ... to a multiple of the block size.
+ * Takes the base64 lines of a private key file's armour into joined and
+ * decodes them into decoded (both buffers the caller's, initialised).
+ * Returns 0, EINVAL, EMSGSIZE or ENOMEM.
  */
 static int
-private_put_inner(
-	const struct ssh_key *key,
-	size_t comment_size,
-	uint32_t checkint,
-	struct ssh_buf *inner)
+private_decode(
+	const char *text,
+	size_t size,
+	struct ssh_buf *joined,
+	struct ssh_buf *decoded)
 {
-	uint8_t pair[KEY_PRIVATE_PAIR_SIZE];
-	size_t padding_size;
-	size_t index;
+	size_t decoded_capacity;
+	size_t decoded_size;
 	int error;
 
-	/* Writes the check integer twice. */
-	ssh_buf_put_u32(inner, checkint);
-	ssh_buf_put_u32(inner, checkint);
+	/* Refuses a file larger than the limit. */
+	if (size > SSH_KEY_FILE_MAX)
+		return EMSGSIZE;
 
-	/* Writes the key type, the public key, and the seed followed by the public key. */
-	ssh_buf_put_string(inner, SSH_KEY_NAME, KEY_NAME_LENGTH);
-	ssh_buf_put_string(inner, key->public_key, SSH_ED25519_PUBLIC);
-	memcpy(pair, key->seed, SSH_ED25519_SEED);
-	memcpy(pair + SSH_ED25519_SEED, key->public_key, SSH_ED25519_PUBLIC);
-	ssh_buf_put_string(inner, pair, sizeof(pair));
-	ssh_wipe(pair, sizeof(pair));
+	/* Refuses a missing text. */
+	if (text == NULL)
+		return EINVAL;
 
-	/* Writes the comment. */
-	ssh_buf_put_string(inner, key->comment, comment_size);
-
-	/* Pads to a multiple of the block size with the bytes 1, 2, 3, ... */
-	padding_size = (KEY_PRIVATE_BLOCK - inner->size % KEY_PRIVATE_BLOCK) % KEY_PRIVATE_BLOCK;
-	for (index = 1; index <= padding_size; index++)
-		ssh_buf_put_u8(inner, (uint8_t)index);
-
-	/* Reports a write that failed. */
-	error = ssh_buf_error(inner);
+	/* Takes the base64 lines between the BEGIN line and the END line and joins them. */
+	error = private_join_lines(text, size, joined);
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the private section is built. */
+	/* An armour with no base64 inside holds no key. */
+	if (joined->size == 0)
+		return EINVAL;
+
+	/* Makes room for the decoded bytes: three bytes for every four characters, with a group to spare. */
+	decoded_capacity = (joined->size / 4U + 1U) * 3U;
+	error = ssh_buf_reserve(decoded, decoded_capacity);
+	if (error != 0)
+		return error;
+
+	/* Decodes the joined base64 (RFC 4648 4). */
+	error = ssh_base64_decode((const char *)joined->data, joined->size, decoded->data, decoded_capacity, &decoded_size);
+	if (error != 0)
+		return EINVAL;
+
+	/* Records the length that was decoded. */
+	decoded->size = decoded_size;
+
+	/* Succeeded: decoded holds the bytes of the file. */
 	return 0;
 }
 
 /*
- * Measures the comment of key, which must end with a NUL inside its array.
+ * Reads the outer part of an openssh-key-v1 file (PROTOCOL.key 1, 2):
+ * the magic, the cipher and the KDF ("none" and "none" with empty
+ * options, or SSH_KEY_CIPHER and SSH_KEY_KDF with the KDF's options;
+ * anything else is ENOTSUP), exactly one key (another count is ENOTSUP),
+ * its public key blob (ssh-ed25519; another type is ENOTSUP) and the
+ * private section, which must end the file.  Returns 0, EINVAL or ENOTSUP.
  */
 static int
-private_comment_size(
-	const struct ssh_key *key,
-	size_t *comment_size)
+private_read_file(
+	const uint8_t *data,
+	size_t size,
+	struct key_private_file *file)
 {
-	size_t index;
+	struct ssh_reader outer;
+	const uint8_t *cipher;
+	const uint8_t *kdf;
+	const uint8_t *options;
+	const uint8_t *blob;
+	size_t cipher_size;
+	size_t kdf_size;
+	size_t options_size;
+	size_t blob_size;
+	uint32_t key_count;
+	int cipher_none;
+	int kdf_none;
+	int cipher_known;
+	int kdf_known;
+	int different;
+	int error;
 
-	/* Looks for the NUL that ends the comment. */
-	for (index = 0; index < SSH_KEY_COMMENT_MAX; index++) {
-		if (key->comment[index] == '\0') {
-			*comment_size = index;
-			return 0;
-		}
+	/* Starts with nothing read. */
+	memset(file, 0, sizeof(*file));
+
+	/* Checks the magic and its NUL (PROTOCOL.key 1). */
+	if (size < sizeof(private_magic))
+		return EINVAL;
+	different = memcmp(data, private_magic, sizeof(private_magic));
+	if (different != 0)
+		return EINVAL;
+
+	/* Reads the cipher, the KDF, its options and the key count. */
+	ssh_reader_init(&outer, data + sizeof(private_magic), size - sizeof(private_magic));
+	ssh_reader_get_string(&outer, &cipher, &cipher_size);
+	ssh_reader_get_string(&outer, &kdf, &kdf_size);
+	ssh_reader_get_string(&outer, &options, &options_size);
+	key_count = ssh_reader_get_u32(&outer);
+	error = ssh_reader_error(&outer);
+	if (error != 0)
+		return EINVAL;
+
+	/* Names the cipher and the KDF. */
+	cipher_none = key_text_is(cipher, cipher_size, "none");
+	kdf_none = key_text_is(kdf, kdf_size, "none");
+	cipher_known = key_text_is(cipher, cipher_size, SSH_KEY_CIPHER);
+	kdf_known = key_text_is(kdf, kdf_size, SSH_KEY_KDF);
+
+	/* A file in the clear has empty options (PROTOCOL.key 5); an encrypted one the salt and rounds of bcrypt; others are not supported. */
+	if (cipher_none && kdf_none) {
+		/* In the clear: the options of the KDF "none" are empty. */
+		if (options_size != 0)
+			return EINVAL;
+		file->encrypted = 0;
+	} else if (cipher_known && kdf_known) {
+		/* Encrypted: the salt and the rounds of bcrypt. */
+		error = private_read_kdf_options(options, options_size, file);
+		if (error != 0)
+			return error;
+		file->encrypted = 1;
+	} else {
+		/* Another cipher or KDF (aes256-gcm@openssh.com among them) is not supported. */
+		return ENOTSUP;
 	}
 
-	/* A comment with no end is not a valid string. */
-	return EINVAL;
+	/* Only a file of one key is supported. */
+	if (key_count != 1U)
+		return ENOTSUP;
+
+	/* Reads the public key blob and the private section, which must end the file. */
+	ssh_reader_get_string(&outer, &blob, &blob_size);
+	ssh_reader_get_string(&outer, &file->section, &file->section_size);
+	error = ssh_reader_finish(&outer);
+	if (error != 0)
+		return EINVAL;
+
+	/* The public key blob must be an ssh-ed25519 key; another type is not this key. */
+	error = ssh_key_parse_public_blob(blob, blob_size, file->public_key);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: file describes the outer part. */
+	return 0;
+}
+
+/*
+ * Reads the options of the bcrypt KDF (PROTOCOL.key 2: string salt,
+ * uint32 rounds, and nothing after).  A salt of 1 to SSH_BCRYPT_SALT_MAX
+ * bytes and 1 to SSH_KEY_ROUNDS_MAX rounds are taken; another salt and no
+ * rounds are EINVAL, more rounds ENOTSUP.  Returns 0, EINVAL or ENOTSUP.
+ */
+static int
+private_read_kdf_options(
+	const uint8_t *options,
+	size_t options_size,
+	struct key_private_file *file)
+{
+	struct ssh_reader reader;
+	int error;
+
+	/* Reads the salt and the rounds, which must be all the options. */
+	ssh_reader_init(&reader, options, options_size);
+	ssh_reader_get_string(&reader, &file->salt, &file->salt_size);
+	file->rounds = ssh_reader_get_u32(&reader);
+	error = ssh_reader_finish(&reader);
+	if (error != 0)
+		return EINVAL;
+
+	/* Refuses a salt bcrypt_pbkdf does not take. */
+	if (file->salt_size == 0U || file->salt_size > SSH_BCRYPT_SALT_MAX)
+		return EINVAL;
+
+	/* Refuses no rounds. */
+	if (file->rounds == 0U)
+		return EINVAL;
+
+	/* Refuses more rounds than the limit, which keeps a file from holding the caller for hours. */
+	if (file->rounds > SSH_KEY_ROUNDS_MAX)
+		return ENOTSUP;
+
+	/* Succeeded: the salt and the rounds are known. */
+	return 0;
+}
+
+/*
+ * Decrypts the private section of an encrypted file into plain (a secret
+ * buffer the caller initialised): bcrypt_pbkdf of the passphrase with the
+ * file's salt and rounds gives 48 bytes, the AES-256 key and the first
+ * counter block (OpenSSH PROTOCOL.key 2, 3), and the section is
+ * decrypted with aes256-ctr.  The derived bytes are wiped.  Returns 0,
+ * EINVAL (the section is not whole blocks), ENOMEM or EIO.
+ */
+static int
+private_decrypt(
+	const struct key_private_file *file,
+	const uint8_t *passphrase,
+	size_t passphrase_size,
+	struct ssh_buf *plain)
+{
+	uint8_t derived[KEY_DERIVED_SIZE];
+	int error;
+
+	/* The encrypted section is whole blocks of the cipher (PROTOCOL.key 3). */
+	if (file->section_size == 0U || file->section_size % KEY_ENCRYPTED_BLOCK != 0U)
+		return EINVAL;
+
+	/* Copies the section into the secret buffer, where it is decrypted in place. */
+	ssh_buf_put_bytes(plain, file->section, file->section_size);
+	error = ssh_buf_error(plain);
+	if (error != 0)
+		return error;
+
+	/* Derives the key and the first counter block from the passphrase. */
+	error = ssh_bcrypt_pbkdf(passphrase, passphrase_size, file->salt, file->salt_size, (unsigned)file->rounds, derived, sizeof(derived));
+	if (error != 0) {
+		ssh_wipe(derived, sizeof(derived));
+		return EIO;
+	}
+
+	/* Decrypts the section with the derived key. */
+	error = ssh_aes256_ctr(derived, derived + SSH_AES256_KEY, plain->data, plain->data, plain->size);
+	ssh_wipe(derived, sizeof(derived));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: plain holds the section in the clear. */
+	return 0;
 }

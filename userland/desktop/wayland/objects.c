@@ -455,6 +455,12 @@ kwl_object_destroy(
 	if (object->kind == KWL_SURFACE || object->kind == KWL_VIEWPORT)
 		kwl_viewport_object_gone(object);
 
+	/* A surface and its fractional scale (surface-outputs.c); a wl_output and its xdg_outputs (protocol.c). */
+	if (object->kind == KWL_SURFACE || object->kind == KWL_FRACTIONAL_SCALE)
+		kwl_fractional_scale_object_gone(object);
+	if (object->kind == KWL_OUTPUT)
+		kwl_xdg_output_object_gone(object);
+
 	/* A surface and its content type (content-type.c), and the game mode that shows it (scanout.c). */
 	if (object->kind == KWL_SURFACE || object->kind == KWL_CONTENT_TYPE)
 		kwl_content_type_object_gone(object);
@@ -486,6 +492,10 @@ kwl_object_destroy(
 	/* A media object no longer owns queued CLI responses or watches. */
 	if (object->kind == KWL_SYSTEM_MEDIA)
 		kwl_media_library_gone(object);
+
+	/* An admin object's request under way is answered no more (admin-ask.c). */
+	if (object->kind == KWL_SYSTEM_ADMIN)
+		kwl_admin_gone(object);
 
 	/* A phone object's hearing, what it was owed and its sync waiting go (phone-shell.c, ws197-p004a). */
 	if (object->kind == KWL_SYSTEM_PHONE)
@@ -664,6 +674,9 @@ kwl_client_destroy(
 
 	/* Its notifications stay, with nobody to tell (notify-shell.c, ws177-p005). */
 	kwl_notify_client_gone(client);
+
+	/* What it was allowed of the admin actions goes (admin-ask.c). */
+	kwl_admin_client_gone(client);
 
 	/* The cursor this client chose goes back to the arrow (BUG-118). */
 	if (server->cursor_client == client)

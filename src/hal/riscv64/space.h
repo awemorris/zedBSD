@@ -21,13 +21,17 @@
  * One page-table page of a user space below its root.
  *
  * The record remembers the entry that points at the page, so that an empty
- * page can be unlinked.  It lives from the mapping that needed the page to
- * the unmapping that emptied it, or to the space's destruction.
+ * page can be unlinked, and the user addresses it translates, so that an
+ * unmapping looks only at the pages of the range it cleared.  It lives from
+ * the mapping that needed the page to the unmapping that emptied it, or to
+ * the space's destruction.
  */
 struct riscv64_table_page {
 	hal_physaddr_t memory;
 	uint64_t *parent;
 	unsigned parent_index;
+	uintptr_t base;
+	uintptr_t span;
 	struct riscv64_table_page *next;
 };
 

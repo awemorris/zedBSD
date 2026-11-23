@@ -172,6 +172,7 @@ int vm_object_sync_range_internal(struct vm_object *object, off_t offset, size_t
 void vm_object_page_dirty_link(struct vm_object_page *page);
 void vm_object_page_dirty_unlink(struct vm_object_page *page);
 void vm_object_page_dirty_mark(struct vm_object_page *page);
+void vm_object_page_store_mark(struct vm_object_page *page);
 
 /*
  * Defined in object-fault.c, part of faults on object pages, page pins and

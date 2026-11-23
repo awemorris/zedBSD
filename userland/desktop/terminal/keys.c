@@ -10,7 +10,10 @@
  *
  * The compositor forwards evdev codes with no keymap (userland/desktop/wayland/seat.c), so the
  * terminal carries its own layout: the US one, as the console's.  The keys
- * that are not characters send the xterm sequences.
+ * that are not characters send the xterm sequences: the cursor keys ESC [
+ * or, once the program asked for them (DECCKM), ESC O; the keypad its
+ * characters or, once the program asked (DECKPAM), its application
+ * sequences ESC O.
  */
 
 #include "terminal.h"
@@ -37,6 +40,24 @@
 #define KEY_F10		68U
 #define KEY_F11		87U
 #define KEY_F12		88U
+
+/* The evdev codes of the keypad. */
+#define KEY_KPASTERISK	55U
+#define KEY_KP7		71U
+#define KEY_KP8		72U
+#define KEY_KP9		73U
+#define KEY_KPMINUS	74U
+#define KEY_KP4		75U
+#define KEY_KP5		76U
+#define KEY_KP6		77U
+#define KEY_KPPLUS	78U
+#define KEY_KP1		79U
+#define KEY_KP2		80U
+#define KEY_KP3		81U
+#define KEY_KP0		82U
+#define KEY_KPDOT	83U
+#define KEY_KPSLASH	98U
+#define KEY_KPEQUAL	117U
 
 /* How many codes the character tables cover (up to the space bar). */
 #define KEYS_TABLE_SIZE	58U
@@ -68,10 +89,12 @@ static const char *const keys_function[12] = {
 	"\033[18~", "\033[19~", "\033[20~", "\033[21~", "\033[23~", "\033[24~"
 };
 
+static const char *keys_application(uint32_t key, unsigned modes);
 static size_t keys_copy(const char *sequence, unsigned char *bytes, size_t size);
 
 /*
- * Writes the bytes a key press sends to the shell and returns how many.
+ * Writes the bytes a key press sends to the shell and returns how many:
+ * modes are the program's keys' modes (TERMINAL_KEYS_*).
  *
  * Returns 0 for a key that sends nothing (a modifier, an unknown key) or
  * when the bytes do not fit.
@@ -80,11 +103,18 @@ size_t
 terminal_key_bytes(
 	uint32_t key,
 	uint32_t modifiers,
+	unsigned modes,
 	unsigned char *bytes,
 	size_t size)
 {
+	const char *application;
 	char character;
 	size_t length;
+
+	/* A cursor key or the keypad in the mode the program asked for sends its application sequence. */
+	application = keys_application(key, modes);
+	if (application != NULL)
+		return keys_copy(application, bytes, size);
 
 	/* The keys that send sequences or control characters of their own. */
 	switch (key) {
@@ -140,20 +170,23 @@ terminal_key_bytes(
 	if (character == 0)
 		return 0U;
 
-	/* Control turns a letter and a few symbols into the control character (Ctrl-C is 3). */
+	/*
+	 * Control turns a character into the control character as X11's
+	 * XLookupString (and so xterm) does: '@' to '~' and the space keep
+	 * their low five bits (Ctrl-C is 3, Ctrl-_ is 0x1f, Ctrl-^ is 0x1e),
+	 * '2' is 0, '3' to '7' are 0x1b to 0x1f, '8' is 0x7f and '/' is 0x1f.
+	 */
 	if ((modifiers & TERMINAL_MODIFIER_CONTROL) != 0U) {
-		if (character >= 'a' && character <= 'z') {
-			character = (char)(character - 'a' + 1);
-		} else if (character >= 'A' && character <= 'Z') {
-			character = (char)(character - 'A' + 1);
-		} else if (character == '[' || character == '{') {
-			character = 0x1b;
-		} else if (character == '\\' || character == '|') {
-			character = 0x1c;
-		} else if (character == ']' || character == '}') {
-			character = 0x1d;
-		} else if (character == ' ' || character == '@' || character == '2') {
+		if ((character >= '@' && character <= '~') || character == ' ') {
+			character = (char)(character & 0x1f);
+		} else if (character == '2') {
 			character = 0;
+		} else if (character >= '3' && character <= '7') {
+			character = (char)(character - '3' + 0x1b);
+		} else if (character == '8') {
+			character = 0x7f;
+		} else if (character == '/') {
+			character = 0x1f;
 		}
 	}
 
@@ -174,6 +207,122 @@ terminal_key_bytes(
 
 	/* Succeeded: the bytes of the key. */
 	return length;
+}
+
+/*
+ * Tells whether a key is on the keypad, whose application sequences
+ * (DECKPAM) come before the character the window system says it types.
+ */
+int
+terminal_key_keypad(
+	uint32_t key)
+{
+	/* The keypad's keys. */
+	switch (key) {
+	case KEY_KPASTERISK:
+	case KEY_KP7:
+	case KEY_KP8:
+	case KEY_KP9:
+	case KEY_KPMINUS:
+	case KEY_KP4:
+	case KEY_KP5:
+	case KEY_KP6:
+	case KEY_KPPLUS:
+	case KEY_KP1:
+	case KEY_KP2:
+	case KEY_KP3:
+	case KEY_KP0:
+	case KEY_KPDOT:
+	case KEY_KPENTER:
+	case KEY_KPSLASH:
+	case KEY_KPEQUAL:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Reports a key elsewhere. */
+	return 0;
+}
+
+/*
+ * Gives the application sequence (SS3, ESC O) a key sends in the mode the
+ * program asked for: the cursor keys, Home and End with DECCKM, the
+ * keypad with DECKPAM (as xterm's).  NULL for a key that sends its
+ * ordinary bytes.
+ */
+static const char *
+keys_application(
+	uint32_t key,
+	unsigned modes)
+{
+	/* The cursor keys, Home and End. */
+	if ((modes & TERMINAL_KEYS_CURSOR) != 0U) {
+		/* Which of them. */
+		switch (key) {
+		case KEY_UP:
+			return "\033OA";
+		case KEY_DOWN:
+			return "\033OB";
+		case KEY_RIGHT:
+			return "\033OC";
+		case KEY_LEFT:
+			return "\033OD";
+		case KEY_HOME:
+			return "\033OH";
+		case KEY_END:
+			return "\033OF";
+		default:
+			break;
+		}
+	}
+
+	/* The keypad's ordinary keys type their characters. */
+	if ((modes & TERMINAL_KEYS_KEYPAD) == 0U)
+		return NULL;
+
+	/* The keypad's keys. */
+	switch (key) {
+	case KEY_KP0:
+		return "\033Op";
+	case KEY_KP1:
+		return "\033Oq";
+	case KEY_KP2:
+		return "\033Or";
+	case KEY_KP3:
+		return "\033Os";
+	case KEY_KP4:
+		return "\033Ot";
+	case KEY_KP5:
+		return "\033Ou";
+	case KEY_KP6:
+		return "\033Ov";
+	case KEY_KP7:
+		return "\033Ow";
+	case KEY_KP8:
+		return "\033Ox";
+	case KEY_KP9:
+		return "\033Oy";
+	case KEY_KPDOT:
+		return "\033On";
+	case KEY_KPENTER:
+		return "\033OM";
+	case KEY_KPPLUS:
+		return "\033Ok";
+	case KEY_KPMINUS:
+		return "\033Om";
+	case KEY_KPASTERISK:
+		return "\033Oj";
+	case KEY_KPSLASH:
+		return "\033Oo";
+	case KEY_KPEQUAL:
+		return "\033OX";
+	default:
+		break;
+	}
+
+	/* Reports a key with no application sequence. */
+	return NULL;
 }
 
 /* Copies a sequence into the buffer and returns its length, or 0 when it does not fit. */

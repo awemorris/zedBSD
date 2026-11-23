@@ -15,20 +15,24 @@
  * character shows the replacement glyph's slot instead.
  *
  * A character the grid gives two cells (East Asian wide, or Ambiguous with
- * View > Treat Ambiguous-Width Characters as Wide, ws128-p009) is drawn
+ * View > Treat Ambiguous-Width Characters as Wide) is drawn
  * into two slots side by side, in a frame two cells wide: a glyph made for
  * two cells fills it, a narrower one is centred in it, and box drawing and
  * block elements are drawn twice as wide so their lines still meet the
  * next cell's.  A character the font has no glyph for is drawn from its
- * companion, the monospaced fallback (ws090-p020: the signs and the box
+ * companion, the monospaced fallback (the signs and the box
  * drawing Mahora Mono lacks), and one neither has (CJK) from the fallback
  * font when there is one.  The cell's line is fixed (FONT_LINE_*), not the
  * font's.
+ *
+ * A character none of them has is drawn from the colour emoji font when
+ * there is one (opened the first time it is needed): its colour image,
+ * scaled to fit the cell or the two cells and centred in them, goes into
+ * the slots as premultiplied colours, and the slots are marked as colour so
+ * that the drawing shows them in their own colours over the background.
  */
 
 #include "terminal.h"
-
-#include "userland/desktop/paths.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -39,10 +43,12 @@
 #include <truetype/truetype.h>
 #include <unistd.h>
 
+#include "../picture/color-glyph.h"
+
 /*
  * A cell's line, in thousandths of the size: how far it reaches above the
  * baseline and below it.  It is the line JetBrains Mono gave the terminal
- * before Mahora Mono (ws090-p020), kept whatever fonts are installed, so
+ * before Mahora Mono, kept whatever fonts are installed, so
  * that the grid keeps its spacing and the fallback's box drawing fills
  * its cells.
  */
@@ -66,15 +72,32 @@
 /* The replacement character, shown for what cannot be drawn. */
 #define FONT_REPLACEMENT	0xfffdU
 
+/*
+ * The flags of a font file's open.  The Windows C runtime has no
+ * close-on-exec and opens a file in text mode (turning CR LF into LF and
+ * stopping at a ^Z) unless told O_BINARY; a system without one of the
+ * flags gets 0 for it.
+ */
+#ifndef O_CLOEXEC
+#define O_CLOEXEC	0
+#endif
+#ifndef O_BINARY
+#define O_BINARY	0
+#endif
+
 static int font_read(const char *path, void **data, size_t *size);
 static int font_measure(struct terminal_font *font, unsigned pixels);
 static unsigned font_lookup(struct terminal_font *font, uint32_t key, unsigned *slot);
 static void font_draw(struct terminal_font *font, unsigned slot, uint32_t codepoint, unsigned cells);
+static unsigned font_emoji_index(struct terminal_font *font, uint32_t codepoint);
+static int font_draw_colour(struct terminal_font *font, unsigned slot, unsigned index, unsigned cells);
 static void font_mark(struct terminal_font *font, unsigned x, unsigned y, unsigned width, unsigned height);
 static void font_slot_origin(const struct terminal_font *font, unsigned slot, unsigned *x, unsigned *y);
 
 /*
- * Reads a font file and measures its cells at a size in pixels.
+ * Reads a font file and measures its cells at a size in pixels; its
+ * companion, the monospaced font that draws the signs and the box drawing
+ * it lacks, is another file (NULL for none).
  *
  * Returns 0, or an errno value when the file cannot be read or is not a
  * TrueType font.
@@ -83,12 +106,14 @@ int
 terminal_font_open(
 	struct terminal_font *font,
 	const char *path,
+	const char *companion,
 	unsigned pixels)
 {
 	int error;
 
-	/* Nothing is held until the file is read. */
+	/* Nothing is held until the file is read; the padding is the one at 100 % until the caller sets another. */
 	memset(font, 0, sizeof(*font));
+	font->padding = TERMINAL_PADDING;
 
 	/* The whole file, which the face reads from for as long as it is open. */
 	error = font_read(path, &font->data, &font->size);
@@ -102,8 +127,9 @@ terminal_font_open(
 		return error;
 	}
 
-	/* Its companion, the monospaced fallback, for the signs and the box drawing it lacks (ws090-p020; no bold is drawn). */
-	(void)truetype_open_companions(font->face, NULL, KEILAND_FONT_FALLBACK_MONO);
+	/* Its companion, the monospaced fallback, for the signs and the box drawing it lacks (no bold is drawn). */
+	if (companion != NULL)
+		(void)truetype_open_companions(font->face, NULL, companion);
 
 	/* The cell's size at the size every glyph is drawn at. */
 	error = font_measure(font, pixels);
@@ -139,11 +165,17 @@ terminal_font_resize(
 		return error;
 	}
 
+	/* A font with no atlas yet has only its cell; attaching the atlas draws at the new size. */
+	if (font->pixels == NULL)
+		return 0;
+
 	/* The table of drawn characters goes; every glyph is drawn again at the new size. */
 	free(font->keys);
 	free(font->values);
+	free(font->colours);
 	font->keys = NULL;
 	font->values = NULL;
+	font->colours = NULL;
 	error = terminal_font_attach(font, font->pixels, font->row_pitch, font->atlas_width, font->atlas_height);
 	if (error != 0)
 		return error;
@@ -196,6 +228,46 @@ terminal_font_fallback(
 }
 
 /*
+ * Names the colour emoji font, which draws in colour the characters
+ * neither the font nor the fallback has (NULL for none).  The path is the
+ * caller's and must last as long as the font; the file is read the first
+ * time such a character is drawn.
+ */
+void
+terminal_font_emoji(
+	struct terminal_font *font,
+	const char *path)
+{
+	/* The font is not tried until a character needs it. */
+	font->emoji_path = path;
+	font->emoji_tried = 0;
+}
+
+/*
+ * Tells whether a slot holds a colour glyph (its premultiplied colours)
+ * rather than a coverage; for a character two cells wide, the first of its
+ * two slots says.
+ */
+int
+terminal_font_colour(
+	const struct terminal_font *font,
+	unsigned slot)
+{
+	/* An atlas without its table of colour slots, or a slot past it, holds coverage. */
+	if (font->colours == NULL)
+		return 0;
+	if (slot >= font->slots)
+		return 0;
+
+	/* A slot marked when its glyph was drawn holds colours. */
+	if (font->colours[slot] != 0U)
+		return 1;
+
+	/* Any other slot holds coverage. */
+	return 0;
+}
+
+/*
  * Gives the atlas its pixels, draws the cursor's solid block into slot 0
  * and the replacement character two cells wide into slots 1 and 2, and
  * prepares the table of drawn characters.
@@ -233,6 +305,11 @@ terminal_font_attach(
 	/* And the slot each of those characters is in. */
 	font->values = malloc((size_t)font->table_size * sizeof(font->values[0]));
 	if (font->values == NULL)
+		return ENOMEM;
+
+	/* Which slots hold colour glyphs: none yet. */
+	font->colours = calloc((size_t)font->slots, sizeof(font->colours[0]));
+	if (font->colours == NULL)
 		return ENOMEM;
 
 	/* Every place of the table empty. */
@@ -361,11 +438,17 @@ terminal_font_close(
 	if (font->fallback_face != NULL)
 		truetype_close(font->fallback_face);
 
-	/* The files and the table. */
+	/* The colour emoji face, when one was opened. */
+	if (font->emoji_face != NULL)
+		truetype_close(font->emoji_face);
+
+	/* The files and the tables. */
 	free(font->data);
 	free(font->fallback_data);
+	free(font->emoji_data);
 	free(font->keys);
 	free(font->values);
+	free(font->colours);
 	memset(font, 0, sizeof(*font));
 }
 
@@ -383,7 +466,7 @@ font_read(
 	int error;
 
 	/* Opens the file. */
-	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	descriptor = open(path, O_RDONLY | O_CLOEXEC | O_BINARY);
 	if (descriptor < 0)
 		return errno;
 
@@ -531,6 +614,7 @@ font_draw(
 	unsigned origin_y;
 	unsigned index;
 	unsigned fallback_index;
+	unsigned emoji_index;
 	unsigned frame_width;
 	unsigned copies;
 	unsigned copy;
@@ -555,6 +639,16 @@ font_draw(
 		if (fallback_index != 0U) {
 			face = font->fallback_face;
 			index = fallback_index;
+		}
+	}
+
+	/* Neither has it: the colour emoji font's glyph, drawn in its colours when it has one. */
+	if (index == 0U) {
+		emoji_index = font_emoji_index(font, codepoint);
+		if (emoji_index != 0U) {
+			error = font_draw_colour(font, slot, emoji_index, cells);
+			if (error == 0)
+				return;
 		}
 	}
 
@@ -610,6 +704,147 @@ font_draw(
 			}
 		}
 	}
+}
+
+/*
+ * Finds a character's glyph in the colour emoji font, reading the font the
+ * first time one is asked for.  Returns the glyph, or 0 when there is no
+ * such font or it has no glyph for the character.
+ */
+static unsigned
+font_emoji_index(
+	struct terminal_font *font,
+	uint32_t codepoint)
+{
+	unsigned index;
+	int error;
+
+	/* The font is read once, the first time a character needs it; a font that cannot be read is not tried again. */
+	if (font->emoji_face == NULL &&
+	    font->emoji_path != NULL &&
+	    !font->emoji_tried) {
+		font->emoji_tried = 1;
+
+		/* The whole file, which the face reads from for as long as it is open. */
+		error = font_read(font->emoji_path, &font->emoji_data, &font->emoji_size);
+		if (error != 0) {
+			printf("ZTERM FONT emoji=none error=%d\n", error);
+			return 0U;
+		}
+
+		/* The face over it. */
+		error = truetype_open(font->emoji_data, font->emoji_size, 0U, &font->emoji_face);
+		if (error != 0) {
+			printf("ZTERM FONT emoji=none error=%d\n", error);
+			free(font->emoji_data);
+			font->emoji_data = NULL;
+			font->emoji_face = NULL;
+			return 0U;
+		}
+	}
+
+	/* Without the font, no character has a glyph there. */
+	if (font->emoji_face == NULL)
+		return 0U;
+
+	/* The character's glyph, 0 when the font has none. */
+	index = truetype_glyph_index(font->emoji_face, codepoint);
+
+	/* Succeeded: the glyph, or 0. */
+	return index;
+}
+
+/*
+ * Draws a colour glyph of the emoji font into a frame of one cell or of
+ * two: its image at the font's size, or smaller so that it fits the frame,
+ * centred in it as premultiplied 0xAARRGGBB words, and the frame's slots
+ * marked as colour.  Returns 0, or an errno value with the slots as they
+ * were (ENOENT when the glyph has no colour image).
+ */
+static int
+font_draw_colour(
+	struct terminal_font *font,
+	unsigned slot,
+	unsigned index,
+	unsigned cells)
+{
+	struct kl_color_image image;
+	uint32_t *row;
+	unsigned frame_width;
+	unsigned pixels;
+	unsigned scaled;
+	unsigned origin_x;
+	unsigned origin_y;
+	unsigned cell;
+	int left;
+	int top;
+	int x;
+	int y;
+	int target_x;
+	int target_y;
+	int error;
+
+	/* The image's box at the font's size, from its header alone. */
+	frame_width = cells * font->cell_width;
+	error = kl_color_glyph_metrics(font->emoji_face, index, font->pixels_size, &image);
+	if (error != 0)
+		return error;
+
+	/* A size at which the image fits the frame across. */
+	pixels = font->pixels_size;
+	if ((unsigned)image.width > frame_width) {
+		scaled = pixels * frame_width / (unsigned)image.width;
+		if (scaled < pixels)
+			pixels = scaled;
+	}
+
+	/* And a size at which it fits the frame down, whichever is smaller. */
+	if ((unsigned)image.height > font->cell_height) {
+		scaled = font->pixels_size * font->cell_height / (unsigned)image.height;
+		if (scaled < pixels)
+			pixels = scaled;
+	}
+
+	/* A size of at least one pixel. */
+	if (pixels == 0U)
+		pixels = 1U;
+
+	/* The image at that size, decoded. */
+	error = kl_color_glyph(font->emoji_face, index, pixels, &image);
+	if (error != 0)
+		return error;
+
+	/* Where it goes: in the middle of the frame (an image a pixel too large from rounding is clipped). */
+	left = ((int)frame_width - image.width) / 2;
+	top = ((int)font->cell_height - image.height) / 2;
+
+	/* Copies the colours into the slots, clipped to the frame. */
+	font_slot_origin(font, slot, &origin_x, &origin_y);
+	for (y = 0; y < image.height; y++) {
+		/* The row of the frame this image row lands on, if any. */
+		target_y = top + y;
+		if (target_y < 0 || target_y >= (int)font->cell_height)
+			continue;
+		row = (uint32_t *)(font->pixels + (size_t)(origin_y + (unsigned)target_y) * font->row_pitch);
+
+		/* Each pixel of the image row where it lands in the frame. */
+		for (x = 0; x < image.width; x++) {
+			target_x = left + x;
+			if (target_x < 0 || target_x >= (int)frame_width)
+				continue;
+			row[origin_x + (unsigned)target_x] = image.pixels[(size_t)y * (size_t)image.width + (size_t)x];
+		}
+	}
+
+	/* The glyph's picture is in the atlas now. */
+	free(image.pixels);
+
+	/* The frame's slots hold colours: the quads that show them say so. */
+	for (cell = 0U; cell < cells; cell++)
+		font->colours[slot + cell] = 1U;
+
+	/* Succeeded: the glyph is in the slots. */
+	return 0;
 }
 
 /* Adds a box of the atlas's pixels to the box the renderer copies to the GPU's image. */

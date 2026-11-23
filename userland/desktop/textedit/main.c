@@ -127,10 +127,21 @@ static uint32_t main_height;
 
 /*
  * The fingers' input (libkeiland): which part of the window a finger meant,
- * the text view's touch (one finger selects, two scroll) and the scroll.
+ * the text view's touch (one finger selects, two scroll) and the scroll,
+ * and the bar of editing buttons over the fingers' selection.  It works in
+ * the window's pixels, as the editor does (its scale stays KL_SCALE_BASE).
  * Made with the window, destroyed before it.
  */
 static struct kl_ui *main_input;
+
+/*
+ * The input of the dialogs and of the Find and Replace panels
+ * (libkeiland's widgets), which are laid out in units at the window's
+ * scale: kl_ui_window_input turns the window's pixels into its units.
+ * Made with the window, destroyed before it; without it no dialog takes
+ * input.
+ */
+static struct kl_ui *main_panel_input;
 
 /* Whether the fingers or the view's scroll still move (the loop draws the next frame soon). */
 static int main_moving;
@@ -177,7 +188,12 @@ static uint32_t *main_pixels;
 /* The canvas over main_pixels, which the editor draws each frame into. */
 static struct te_canvas main_canvas;
 
-/* libkeiland's canvas over the same pixels, which the text view's handles, a message's chip and a dialog are drawn with (made with main_canvas). */
+/*
+ * libkeiland's canvas over the same pixels, which the text view's handles,
+ * the bar of editing buttons, a message's chip and a dialog are drawn with
+ * (made with main_canvas).  It is drawn at the window's scale: what is
+ * given to it is in units, which it makes the window's pixels.
+ */
 static struct kl_canvas main_handles;
 static int main_handles_made;
 
@@ -213,6 +229,22 @@ static const char *main_ui_font;
 static const struct kl_file_filter main_filters[] = {
 	{ "Text Files", "txt text md markdown rst c h cc cpp hpp py sh mk conf cfg ini json xml html css js log csv tsv yaml yml toml" },
 	{ "All Files", NULL }
+};
+
+static size_t main_units_position(void *data, double x, double y);
+static void main_units_caret(void *data, size_t position, struct kl_rect *rect);
+static void main_units_word(void *data, size_t position, size_t *start, size_t *end);
+
+/*
+ * The text's answers to the fingers' selection in the canvas's units (the
+ * editor's own answers are in the window's pixels), for drawing the
+ * handles on the canvas at the window's scale.  The table is constant for
+ * the program's life.
+ */
+static const struct kl_text_view main_units_view = {
+	main_units_position,
+	main_units_caret,
+	main_units_word
 };
 
 static int main_parse(int argc, char **argv, struct main_options *options);
@@ -251,6 +283,12 @@ static int main_resize(void);
 static void main_chosen(void *data, struct kl_file_chooser *chooser, unsigned result, const char *path, size_t filter);
 static void main_appearance_changed(void);
 static void main_action(const struct kl_window_event *event);
+static void main_rescale(unsigned scale);
+static void main_touch(const struct kl_window_event *event);
+static void main_handles_draw(void);
+static void main_units_rect(const struct te_rect *pixels, struct kl_rect *units);
+static void main_pixels_rect(const struct kl_rect *units, struct kl_rect *pixels);
+static void main_bar_pixels(const struct kl_text_bar *units, struct kl_text_bar *pixels);
 
 /*
  * Runs Text Editor.
@@ -317,6 +355,16 @@ main(
 		return 1;
 	}
 
+	/*
+	 * The window follows the compositor's scale: its frames are drawn in
+	 * its pixels (KL_WINDOW_SCALE draws the text and the widgets again at a
+	 * new one).  A compositor without the fractional scale shows it at
+	 * 100 %, enlarged.
+	 */
+	error = kl_window_follow_scale(main_window.kui);
+	if (error != 0)
+		te_log("SCALE follow=refused error=%d", error);
+
 	/* The presenter's size, which the frames are drawn at. */
 	error = kl_window_present_resize(main_window.kui, &main_width, &main_height);
 	if (error != 0) {
@@ -333,8 +381,9 @@ main(
 	if (error != 0)
 		te_log("DND none errno=%d", error);
 
-	/* The editor at that size, with the file when one was given, and the window's services. */
+	/* The editor at that size and the window's scale, with the file when one was given, and the window's services. */
 	te_app_init(&main_app, &main_body, &main_ui, (int)main_width, (int)main_height);
+	te_app_set_scale(&main_app, kl_window_scale(main_window.kui));
 	main_host(&main_app);
 	main_app.glass = te_glass_open(&main_glass, &main_window, &main_app, kl_window_see_through(main_window.kui));
 
@@ -346,6 +395,13 @@ main(
 	main_input = kl_ui_create();
 	if (main_input == NULL)
 		te_log("TOUCH failed errno=%d", ENOMEM);
+
+	/* The dialogs' input, in units at the window's scale; without memory for it the dialogs take no input. */
+	main_panel_input = kl_ui_create();
+	if (main_panel_input == NULL)
+		te_log("DIALOG input failed errno=%d", ENOMEM);
+	else
+		kl_ui_set_scale(main_panel_input, main_app.scale);
 
 	/*
 	 * The menus, shown in the titlebar's menu bar (BUG-248: the window
@@ -369,6 +425,7 @@ main(
 	kl_file_chooser_destroy(main_chooser);
 	main_chooser = NULL;
 	te_menu_close(&main_menu);
+	kl_ui_destroy(main_panel_input);
 	kl_ui_destroy(main_input);
 	te_glass_close(&main_glass);
 	te_app_release(&main_app);
@@ -731,23 +788,14 @@ static int
 main_frame(void)
 {
 	struct kl_style style;
-	struct kl_rect clip;
-	struct te_rect text;
 	unsigned stale;
 	int status;
 
 	/* Tries until the frame is shown, remaking a stale swapchain a few times. */
 	for (stale = 0; stale < MAIN_STALE_LIMIT; stale++) {
-		/* The frame on the CPU, and the fingers' handles over the text (within it, and a knob's size around it). */
+		/* The frame on the CPU, and the fingers' handles over the text. */
 		te_draw(&main_app, &main_canvas);
-		te_app_text_rect(&main_app, &text);
-		clip.x = text.x - KL_TEXT_HANDLE;
-		clip.y = text.y;
-		clip.width = text.width + 2 * KL_TEXT_HANDLE;
-		clip.height = text.height + KL_TEXT_HANDLE;
-		kl_canvas_clip_push(&main_handles, &clip);
-		kl_text_touch_draw_handles(&main_app.touch, &main_handles, (double)text.x - main_app.scroll_x, (double)text.y - main_app.scroll_y, kl_theme_default());
-		kl_canvas_clip_pop(&main_handles);
+		main_handles_draw();
 
 		/* The bar of editing buttons over the selection, laid out by the fingers' input (ws190-p003). */
 		if (main_app.bar.count != 0U && main_widgets_text) {
@@ -812,17 +860,14 @@ main_overlay(
 	style.theme = kl_theme_default();
 	style.glass = main_app.glass;
 	te_app_card(&main_app, &card);
-	area.x = card.x;
-	area.y = card.y;
-	area.width = card.width;
-	area.height = card.height;
+	main_units_rect(&card, &area);
 
 	/* A message, at the bottom middle of the card. */
 	if (main_app.message[0] != '\0')
-		kl_chip(&style, card.x + card.width / 2, card.y + card.height - MAIN_CHIP_BOTTOM, main_app.message);
+		kl_chip(&style, area.x + area.width / 2, area.y + area.height - MAIN_CHIP_BOTTOM, main_app.message);
 
 	/* The dialog, a frame of the fingers' and the pointer's input of its own. */
-	if (main_app.dialog == TE_DIALOG_NONE || main_input == NULL)
+	if (main_app.dialog == TE_DIALOG_NONE || main_panel_input == NULL)
 		return;
 
 	/* Edit > Replace's panel is a dialog of fields (ws128-p003). */
@@ -839,13 +884,13 @@ main_overlay(
 
 	/* Any other dialog: its words and buttons (libkeiland's dialog). */
 	te_app_dialog_words(&main_app, title, sizeof(title), &words, &labels, &count);
-	kl_ui_begin(main_input, now_us);
-	answer = kl_dialog(main_input, &style, MAIN_DIALOG, &area, title, words, labels, count);
-	main_moving = kl_ui_end(main_input, now_us);
+	kl_ui_begin(main_panel_input, now_us);
+	answer = kl_dialog(main_panel_input, &style, MAIN_DIALOG, &area, title, words, labels, count);
+	main_moving = kl_ui_end(main_panel_input, now_us);
 
 	/* What no part took under a dialog is nothing. */
 	for (;;) {
-		taken = kl_ui_take(main_input, &event);
+		taken = kl_ui_take(main_panel_input, &event);
 		if (taken == 0)
 			break;
 	}
@@ -910,6 +955,9 @@ main_canvas_make(void)
 	if (status != 0)
 		return -1;
 	main_handles_made = 1;
+
+	/* The widgets are drawn at the window's scale. */
+	kl_canvas_set_scale(&main_handles, main_app.scale);
 
 	/* Succeeded: frames can be drawn. */
 	return 0;
@@ -1121,9 +1169,9 @@ main_replace_panel(
 		kl_field_set(&main_find_field, selected);
 		kl_field_set(&main_with_field, main_app.replace_with);
 		if (main_find_field.length == 0U) {
-			kl_ui_set_focus(main_input, MAIN_REPLACE_FIND, 0);
+			kl_ui_set_focus(main_panel_input, MAIN_REPLACE_FIND, 0);
 		} else {
-			kl_ui_set_focus(main_input, MAIN_REPLACE_WITH, 0);
+			kl_ui_set_focus(main_panel_input, MAIN_REPLACE_WITH, 0);
 		}
 
 		/* The log line the tests read. */
@@ -1140,33 +1188,33 @@ main_replace_panel(
 	panel.height = MAIN_REPLACE_HEIGHT;
 
 	/* The frame of input of its own: the panel, the two fields and the buttons. */
-	kl_ui_begin(main_input, now_us);
+	kl_ui_begin(main_panel_input, now_us);
 	kl_panel(style, &panel, 0);
 	top = kl_card(style, &panel, "Replace", "The next place found is selected; Replace All can be undone at once.");
 	rect.x = panel.x + 20;
 	rect.width = panel.width - 40;
 	rect.height = MAIN_REPLACE_ROW;
 	rect.y = top;
-	find_flags = kl_field(main_input, style, MAIN_REPLACE_FIND, &rect, &main_find_field, "Find");
+	find_flags = kl_field(main_panel_input, style, MAIN_REPLACE_FIND, &rect, &main_find_field, "Find");
 	rect.y = top + MAIN_REPLACE_ROW + MAIN_REPLACE_GAP;
-	with_flags = kl_field(main_input, style, MAIN_REPLACE_WITH, &rect, &main_with_field, "Replace with");
+	with_flags = kl_field(main_panel_input, style, MAIN_REPLACE_WITH, &rect, &main_with_field, "Replace with");
 
 	/* The buttons at the bottom right: Replace (the default), Replace All, Done. */
 	rect.y = top + 2 * (MAIN_REPLACE_ROW + MAIN_REPLACE_GAP) + 4;
 	rect.width = kl_button_width(style, "Replace");
 	rect.x = panel.x + panel.width - 20 - rect.width;
-	replace_one = kl_button(main_input, style, MAIN_REPLACE_ONE, &rect, "Replace", KL_BUTTON_PRIMARY);
+	replace_one = kl_button(main_panel_input, style, MAIN_REPLACE_ONE, &rect, "Replace", KL_BUTTON_PRIMARY);
 	rect.width = kl_button_width(style, "Replace All");
 	rect.x -= rect.width + 10;
-	replace_all = kl_button(main_input, style, MAIN_REPLACE_ALL, &rect, "Replace All", 0U);
+	replace_all = kl_button(main_panel_input, style, MAIN_REPLACE_ALL, &rect, "Replace All", 0U);
 	rect.width = kl_button_width(style, "Done");
 	rect.x -= rect.width + 10;
-	done = kl_button(main_input, style, MAIN_REPLACE_DONE, &rect, "Done", 0U);
-	main_moving = kl_ui_end(main_input, now_us);
+	done = kl_button(main_panel_input, style, MAIN_REPLACE_DONE, &rect, "Done", 0U);
+	main_moving = kl_ui_end(main_panel_input, now_us);
 
 	/* A key no widget took: Esc closes the panel, anything else is nothing. */
 	for (;;) {
-		taken = kl_ui_take(main_input, &event);
+		taken = kl_ui_take(main_panel_input, &event);
 		if (taken == 0)
 			break;
 
@@ -1230,7 +1278,7 @@ main_find_panel(
 		main_app.panel_fresh = 0;
 		main_panel_find_text(selected, sizeof(selected));
 		kl_field_set(&main_find_field, selected);
-		kl_ui_set_focus(main_input, MAIN_FIND_TEXT, 0);
+		kl_ui_set_focus(main_panel_input, MAIN_FIND_TEXT, 0);
 
 		/* The log line the tests read. */
 		te_log("FIND open find=%s", main_find_field.text);
@@ -1246,31 +1294,31 @@ main_find_panel(
 	panel.height = MAIN_FIND_HEIGHT;
 
 	/* The frame of input of its own: the panel, the field and the buttons. */
-	kl_ui_begin(main_input, now_us);
+	kl_ui_begin(main_panel_input, now_us);
 	kl_panel(style, &panel, 0);
 	top = kl_card(style, &panel, "Find", "The place found is selected as you type; Next and Previous go on.");
 	rect.x = panel.x + 20;
 	rect.width = panel.width - 40;
 	rect.height = MAIN_REPLACE_ROW;
 	rect.y = top;
-	find_flags = kl_field(main_input, style, MAIN_FIND_TEXT, &rect, &main_find_field, "Find");
+	find_flags = kl_field(main_panel_input, style, MAIN_FIND_TEXT, &rect, &main_find_field, "Find");
 
 	/* The buttons at the bottom right: Next (the default), Previous, Done. */
 	rect.y = top + MAIN_REPLACE_ROW + MAIN_REPLACE_GAP + 4;
 	rect.width = kl_button_width(style, "Next");
 	rect.x = panel.x + panel.width - 20 - rect.width;
-	next = kl_button(main_input, style, MAIN_FIND_NEXT, &rect, "Next", KL_BUTTON_PRIMARY);
+	next = kl_button(main_panel_input, style, MAIN_FIND_NEXT, &rect, "Next", KL_BUTTON_PRIMARY);
 	rect.width = kl_button_width(style, "Previous");
 	rect.x -= rect.width + 10;
-	previous = kl_button(main_input, style, MAIN_FIND_PREVIOUS, &rect, "Previous", 0U);
+	previous = kl_button(main_panel_input, style, MAIN_FIND_PREVIOUS, &rect, "Previous", 0U);
 	rect.width = kl_button_width(style, "Done");
 	rect.x -= rect.width + 10;
-	done = kl_button(main_input, style, MAIN_FIND_DONE, &rect, "Done", 0U);
-	main_moving = kl_ui_end(main_input, now_us);
+	done = kl_button(main_panel_input, style, MAIN_FIND_DONE, &rect, "Done", 0U);
+	main_moving = kl_ui_end(main_panel_input, now_us);
 
 	/* A key no widget took: Esc closes the panel, anything else is nothing. */
 	for (;;) {
-		taken = kl_ui_take(main_input, &event);
+		taken = kl_ui_take(main_panel_input, &event);
 		if (taken == 0)
 			break;
 
@@ -1635,7 +1683,7 @@ main_window_event(
 
 	/* A dialog takes the pointer and the keys (libkeiland's). */
 	main_dialog_input = 0;
-	if (main_app.dialog != TE_DIALOG_NONE && main_input != NULL)
+	if (main_app.dialog != TE_DIALOG_NONE && main_panel_input != NULL)
 		main_dialog_input = main_dialog_event(event);
 	if (main_dialog_input)
 		return;
@@ -1720,21 +1768,21 @@ main_window_event(
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
 		te_log("TOUCH down id=%d x=%.0f y=%.0f", (int)event->id, event->x, event->y);
-		if (main_input != NULL)
-			(void)kl_ui_touch_down(main_input, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		main_touch(event);
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		if (main_input != NULL)
-			(void)kl_ui_touch_motion(main_input, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		main_touch(event);
 		break;
 	case KL_WINDOW_TOUCH_UP:
 		te_log("TOUCH up id=%d", (int)event->id);
-		if (main_input != NULL)
-			(void)kl_ui_touch_up(main_input, event->id, event->time_us, event->arrival_us);
+		main_touch(event);
 		break;
 	case KL_WINDOW_TOUCH_CANCEL:
-		if (main_input != NULL)
-			(void)kl_ui_touch_cancel(main_input, event->arrival_us);
+		main_touch(event);
+		break;
+	case KL_WINDOW_SCALE:
+		/* Another scale: the text and the widgets are drawn at it (the new size follows as a resize). */
+		main_rescale(event->code);
 		break;
 	case KL_WINDOW_RESIZE:
 		main_resized = 1;
@@ -1762,9 +1810,9 @@ main_text_caret(
 {
 	struct te_rect caret;
 
-	/* A dialog's fields. */
-	if (main_app.dialog != TE_DIALOG_NONE && main_input != NULL) {
-		kl_ui_window_text(main_input, main_window.kui);
+	/* A dialog's fields (their caret in units, which the widgets' input makes the window's pixels). */
+	if (main_app.dialog != TE_DIALOG_NONE && main_panel_input != NULL) {
+		kl_ui_window_text(main_panel_input, main_window.kui);
 		return;
 	}
 
@@ -1778,28 +1826,19 @@ static int
 main_dialog_event(
 	const struct kl_window_event *event)
 {
-	/* What it is. */
+	/* What it is: the widgets' input turns the pointer's place in the window's pixels into their units. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
-		(void)kl_ui_pointer_motion(main_input, event->x, event->y);
-		break;
 	case KL_WINDOW_LEAVE:
-		(void)kl_ui_pointer_leave(main_input);
-		break;
 	case KL_WINDOW_BUTTON:
-		/* The main button only. */
-		(void)kl_ui_pointer_motion(main_input, event->x, event->y);
-		if (event->code == KL_BUTTON_LEFT)
-			(void)kl_ui_pointer_button(main_input, event->pressed, event->arrival_us);
-		break;
 	case KL_WINDOW_KEY:
-		(void)kl_ui_key(main_input, event->code, event->pressed, event->modifiers);
+		(void)kl_ui_window_input(main_panel_input, event);
 		break;
 	case KL_WINDOW_TEXT_COMMIT:
 	case KL_WINDOW_TEXT_PREEDIT:
 	case KL_WINDOW_TEXT_DELETE:
 		/* An input method's text, for the dialog's field with the keyboard (ws090-p022). */
-		(void)kl_ui_text(main_input, event);
+		(void)kl_ui_window_input(main_panel_input, event);
 		break;
 	case KL_WINDOW_AXIS:
 		break;
@@ -1908,8 +1947,8 @@ main_action(
 	/* Select All in the Find or Replace panel's field. */
 	if (event->code == TE_ACTION_SELECT_ALL &&
 	    (main_app.dialog == TE_DIALOG_REPLACE || main_app.dialog == TE_DIALOG_FIND) &&
-	    main_input != NULL) {
-		(void)kl_ui_key(main_input, MAIN_KEY_A, 1, KL_MOD_CTRL);
+	    main_panel_input != NULL) {
+		(void)kl_ui_key(main_panel_input, MAIN_KEY_A, 1, KL_MOD_CTRL);
 		main_app.dirty = 1;
 		return;
 	}
@@ -1928,9 +1967,12 @@ main_action(
 static unsigned
 main_bar(void)
 {
+	struct kl_text_bar hit;
 	struct kl_rect first;
 	struct kl_rect second;
-	struct kl_rect selection;
+	struct te_rect selection;
+	struct te_rect window;
+	struct kl_rect selection_units;
 	struct kl_rect visible;
 	struct kl_rect bounds;
 	struct te_rect text;
@@ -1992,21 +2034,23 @@ main_bar(void)
 	}
 
 	/* What shows of the text, and the window less the on-screen keyboard. */
-	visible.x = text.x;
-	visible.y = text.y;
-	visible.width = text.width;
-	visible.height = text.height;
 	kl_window_keyboard_inset(main_window.kui, &right, &bottom);
-	bounds.x = 0;
-	bounds.y = 0;
-	bounds.width = (int)main_width - right;
-	bounds.height = (int)main_height - bottom;
+	window.x = 0;
+	window.y = 0;
+	window.width = (int)main_width - right;
+	window.height = (int)main_height - bottom;
 
-	/* Laid out and recorded over the text. */
-	shown = kl_text_bar_layout(&main_app.bar, &main_widgets, buttons, &selection, &visible, &bounds);
+	/* The selection, the text and the window in the canvas's units, where the bar is laid out and drawn. */
+	main_units_rect(&selection, &selection_units);
+	main_units_rect(&text, &visible);
+	main_units_rect(&window, &bounds);
+
+	/* Laid out, and recorded over the text in the window's pixels, where the fingers' input works. */
+	shown = kl_text_bar_layout(&main_app.bar, &main_widgets, buttons, &selection_units, &visible, &bounds);
 	if (!shown)
 		return 0U;
-	pressed = kl_text_bar_hit(main_input, MAIN_TEXT_BAR, &main_app.bar, &main_app.bar_held);
+	main_bar_pixels(&main_app.bar, &hit);
+	pressed = kl_text_bar_hit(main_input, MAIN_TEXT_BAR, &hit, &main_app.bar_held);
 
 	/* Reports the button pressed. */
 	return pressed;
@@ -2073,4 +2117,220 @@ main_bar_log(void)
 		te_log("TOUCH bar hidden");
 		main_app.dirty = 1;
 	}
+}
+
+/*
+ * Takes the window's new scale (96ths): the fonts' glyphs of the old sizes
+ * go, the editor measures its text at the new size, and the widgets are
+ * drawn and take input in units at it.
+ */
+static void
+main_rescale(
+	unsigned scale)
+{
+	/* The glyphs drawn at the old sizes are not drawn again. */
+	te_text_flush(&main_body);
+	te_text_flush(&main_ui);
+
+	/* The editor's text at the new size (the frame's size follows as a resize). */
+	te_app_set_scale(&main_app, scale);
+
+	/* The widgets' canvas and input at the scale. */
+	if (main_handles_made)
+		kl_canvas_set_scale(&main_handles, main_app.scale);
+	if (main_panel_input != NULL)
+		kl_ui_set_scale(main_panel_input, main_app.scale);
+
+	/* The next frame shows it. */
+	main_app.dirty = 1;
+}
+
+/*
+ * Gives a finger to the dialog's widgets while one is shown, otherwise to
+ * the text view's fingers' input.  A lift and a cancel go to both, so that
+ * neither keeps a finger whose lift it would never see (a dialog that came
+ * or went while the finger was down).
+ */
+static void
+main_touch(
+	const struct kl_window_event *event)
+{
+	int dialog;
+
+	/* Whether a dialog takes the fingers. */
+	dialog = 0;
+	if (main_app.dialog != TE_DIALOG_NONE && main_panel_input != NULL)
+		dialog = 1;
+
+	/* A finger down or moving: the dialog's widgets (in their units) or the text view's (in the window's pixels). */
+	if (event->kind == KL_WINDOW_TOUCH_DOWN || event->kind == KL_WINDOW_TOUCH_MOTION) {
+		if (dialog) {
+			(void)kl_ui_window_input(main_panel_input, event);
+			return;
+		}
+
+		/* Without the fingers' input, the fingers do nothing. */
+		if (main_input == NULL)
+			return;
+
+		/* The text view's. */
+		if (event->kind == KL_WINDOW_TOUCH_DOWN) {
+			(void)kl_ui_touch_down(main_input, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		} else {
+			(void)kl_ui_touch_motion(main_input, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		}
+		return;
+	}
+
+	/* A lift or a cancel to the dialog's widgets. */
+	if (main_panel_input != NULL)
+		(void)kl_ui_window_input(main_panel_input, event);
+
+	/* And to the text view's. */
+	if (main_input == NULL)
+		return;
+	if (event->kind == KL_WINDOW_TOUCH_UP) {
+		(void)kl_ui_touch_up(main_input, event->id, event->time_us, event->arrival_us);
+	} else {
+		(void)kl_ui_touch_cancel(main_input, event->arrival_us);
+	}
+}
+
+/*
+ * Draws the fingers' handles over the text on the canvas at the window's
+ * scale, within the text and a knob's size around it: the editor's
+ * answers, which are in the window's pixels, are turned into the canvas's
+ * units.
+ */
+static void
+main_handles_draw(void)
+{
+	struct kl_text_touch drawn;
+	struct kl_rect clip;
+	struct te_rect text;
+	double factor;
+	double origin_x;
+	double origin_y;
+
+	/* The text in the canvas's units, and a knob's size around it. */
+	te_app_text_rect(&main_app, &text);
+	main_units_rect(&text, &clip);
+	clip.x -= KL_TEXT_HANDLE;
+	clip.width += 2 * KL_TEXT_HANDLE;
+	clip.height += KL_TEXT_HANDLE;
+
+	/* The text's scrolled origin in units. */
+	factor = (double)KL_SCALE_BASE / (double)main_app.scale;
+	origin_x = ((double)text.x - main_app.scroll_x) * factor;
+	origin_y = ((double)text.y - main_app.scroll_y) * factor;
+
+	/* The fingers' selection as it is, answered in units. */
+	drawn = main_app.touch;
+	drawn.view = &main_units_view;
+	drawn.data = &main_app;
+
+	/* The handles, within the clip. */
+	kl_canvas_clip_push(&main_handles, &clip);
+	kl_text_touch_draw_handles(&drawn, &main_handles, origin_x, origin_y, kl_theme_default());
+	kl_canvas_clip_pop(&main_handles);
+}
+
+/* The handles' answer: the text position nearest a point in the content's units. */
+static size_t
+main_units_position(
+	void *data,
+	double x,
+	double y)
+{
+	double factor;
+	size_t position;
+
+	/* The point in the window's pixels, where the editor answers. */
+	factor = (double)main_app.scale / (double)KL_SCALE_BASE;
+	position = main_app.touch.view->position_at(data, x * factor, y * factor);
+
+	/* Reports the position. */
+	return position;
+}
+
+/* The handles' answer: the caret's rectangle at a position, in the content's units (the smallest that covers its pixels). */
+static void
+main_units_caret(
+	void *data,
+	size_t position,
+	struct kl_rect *rect)
+{
+	struct kl_rect pixels;
+
+	/* The editor's caret in the window's pixels, then in units. */
+	main_app.touch.view->caret_rect(data, position, &pixels);
+	kl_canvas_logical(&main_handles, &pixels, rect);
+}
+
+/* The handles' answer: the word around a position (positions are the same in pixels and units). */
+static void
+main_units_word(
+	void *data,
+	size_t position,
+	size_t *start,
+	size_t *end)
+{
+	/* The editor's word. */
+	main_app.touch.view->word_at(data, position, start, end);
+}
+
+/* Gives a rectangle of the window's pixels in the canvas's units (the smallest that covers it). */
+static void
+main_units_rect(
+	const struct te_rect *pixels,
+	struct kl_rect *units)
+{
+	struct kl_rect rect;
+
+	/* The same rectangle as libkeiland's. */
+	rect.x = pixels->x;
+	rect.y = pixels->y;
+	rect.width = pixels->width;
+	rect.height = pixels->height;
+
+	/* Its units at the canvas's scale. */
+	kl_canvas_logical(&main_handles, &rect, units);
+}
+
+/* Gives a rectangle of the canvas's units in the window's pixels: each edge at the pixel nearest to it. */
+static void
+main_pixels_rect(
+	const struct kl_rect *units,
+	struct kl_rect *pixels)
+{
+	int right;
+	int bottom;
+
+	/* The edges at the scale. */
+	right = te_app_px(&main_app, units->x + units->width);
+	bottom = te_app_px(&main_app, units->y + units->height);
+	pixels->x = te_app_px(&main_app, units->x);
+	pixels->y = te_app_px(&main_app, units->y);
+	pixels->width = right - pixels->x;
+	pixels->height = bottom - pixels->y;
+}
+
+/*
+ * Gives the bar of editing buttons laid out in the canvas's units in the
+ * window's pixels, where the fingers' input finds its buttons.
+ */
+static void
+main_bar_pixels(
+	const struct kl_text_bar *units,
+	struct kl_text_bar *pixels)
+{
+	size_t index;
+
+	/* The same buttons, and the bar's rectangle. */
+	*pixels = *units;
+	main_pixels_rect(&units->rect, &pixels->rect);
+
+	/* Each button's rectangle. */
+	for (index = 0; index < units->count; index++)
+		main_pixels_rect(&units->cells[index], &pixels->cells[index]);
 }

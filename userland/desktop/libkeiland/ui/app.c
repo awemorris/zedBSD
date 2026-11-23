@@ -283,7 +283,8 @@ kl_app_dispatch(
 	if (app->settings != NULL)
 		(void)kl_settings_dispatch(app->settings);
 
-	/* The processes' and the copies' news so far, then no longer than until a repeat is due, and not at all while events wait. */
+	/* The system actions' answers read so far, the processes' and the copies' news, then no longer than until a repeat is due, and not at all while events wait. */
+	keiui_processes_admin_dispatch(app);
 	keiui_processes_queue(app);
 	keiui_instances_queue(app);
 	timeout_ms = app_wait(app, timeout_ms, kl_clock_us());
@@ -323,8 +324,9 @@ kl_app_dispatch(
 	if (app->settings != NULL)
 		(void)kl_settings_dispatch(app->settings);
 
-	/* The posts that wait, the processes' and the copies' news, then the repeats now due. */
+	/* The posts that wait, the system actions' answers, the processes' and the copies' news, then the repeats now due. */
 	app_posts_move(app);
+	keiui_processes_admin_dispatch(app);
 	keiui_processes_queue(app);
 	keiui_instances_queue(app);
 	app_repeat(app);

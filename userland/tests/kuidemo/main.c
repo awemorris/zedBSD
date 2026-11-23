@@ -27,8 +27,18 @@
  * widget's selection is logged as it changes ("KUIDEMO SELECT id=name|
  * password|notes anchor= caret="), for the fingers' selection's tests.
  *
+ * With --follow-scale the window follows the compositor's scale
+ * (kl_window_follow_scale): the widgets are laid out in units and drawn
+ * at the scale, each KL_WINDOW_SCALE and KL_WINDOW_RESIZE is logged
+ * ("KUIDEMO SCALE scale=", "KUIDEMO RESIZE width= height=" in pixels) and
+ * so is each press of the main button ("KUIDEMO PRESS x= y=" in the
+ * window's pixels), and a square of single pixels alternating black and
+ * white is drawn near the frame's bottom right corner, which shows
+ * whether the compositor puts the frame on the screen pixel for pixel.
+ *
  *   kuidemo [--display=NAME] [--font=PATH] [--fallback-font=PATH]
  *           [--width=N] [--height=N] [--timeout-s=N] [--shm]
+ *           [--follow-scale]
  */
 
 #include <keiland/keiland.h>
@@ -100,6 +110,9 @@
 #define DEMO_ID_DIALOG		15U
 #define DEMO_ID_NOTES		16U
 
+/* The square of single pixels drawn in the frame's corner when the window follows the scale, its side in pixels. */
+#define DEMO_CHECKER		64
+
 /* The notes' text area: its height, three lines (ws190-p002). */
 #define DEMO_NOTES_HEIGHT	76
 
@@ -112,6 +125,7 @@ struct demo_options {
 	unsigned height;
 	unsigned timeout;
 	unsigned present;
+	int follow;
 };
 
 /* The sampler's window, its frame, and what its widgets remember. */
@@ -121,10 +135,18 @@ struct demo {
 	struct kl_window *window;
 	struct kl_ui *ui;
 
-	/* The frame: its pixels, its size, the canvas over them, the text and the style. */
+	/*
+	 * The frame: its pixels and its size in pixels, the scale it is drawn
+	 * at (96ths) and whether it follows the compositor's, its size in the
+	 * canvas's units, the canvas over them, the text and the style.
+	 */
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
+	int follow;
+	int units_width;
+	int units_height;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;
@@ -218,6 +240,9 @@ static void demo_draw_controls(struct demo *demo);
 static void demo_draw_list(struct demo *demo);
 static void demo_draw_dialogs(struct demo *demo, uint64_t now_us);
 static void demo_glass_refresh(struct demo *demo);
+static int demo_pixels(const struct demo *demo, int units);
+static double demo_units(const struct demo *demo, double pixels);
+static void demo_draw_checker(struct demo *demo);
 static int demo_value_x(const struct kl_rect *card);
 static void demo_log_selection(struct demo *demo, unsigned slot, const char *name, size_t anchor, size_t caret);
 static void demo_log_notes(const struct demo *demo);
@@ -240,7 +265,7 @@ main(
 	/* The command line. */
 	status = demo_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: kuidemo [--display=NAME] [--font=PATH] [--fallback-font=PATH] [--width=N] [--height=N] [--timeout-s=N] [--shm]\n");
+		fprintf(stderr, "usage: kuidemo [--display=NAME] [--font=PATH] [--fallback-font=PATH] [--width=N] [--height=N] [--timeout-s=N] [--shm] [--follow-scale]\n");
 		return 2;
 	}
 
@@ -272,6 +297,15 @@ main(
 		kl_app_close(demo.app);
 		kl_text_close(&demo.text);
 		return 1;
+	}
+
+	/* The compositor's scale, when it is asked for (the window stays at 100 % when the compositor does not tell it). */
+	demo.scale = KL_SCALE_BASE;
+	if (options.follow) {
+		error = kl_window_follow_scale(demo.window);
+		demo_log("FOLLOW error=%d", error);
+		if (error == 0)
+			demo.follow = 1;
 	}
 
 	/* The input and the list's state. */
@@ -395,6 +429,13 @@ demo_parse(
 		status = strcmp(argv[index], "--shm");
 		if (status == 0) {
 			options->present = KL_PRESENT_SHM;
+			continue;
+		}
+
+		/* The window follows the compositor's scale. */
+		status = strcmp(argv[index], "--follow-scale");
+		if (status == 0) {
+			options->follow = 1;
 			continue;
 		}
 
@@ -563,27 +604,32 @@ demo_event(
 	struct demo *demo,
 	const struct kl_window_event *event)
 {
+	uint32_t width;
+	uint32_t height;
+
 	/* Any input may change the page. */
 	demo->dirty = 1;
 
 	/* What it is. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
-		(void)kl_ui_pointer_motion(demo->ui, event->x, event->y);
+		(void)kl_ui_pointer_motion(demo->ui, demo_units(demo, event->x), demo_units(demo, event->y));
 		break;
 	case KL_WINDOW_LEAVE:
 		(void)kl_ui_pointer_leave(demo->ui);
 		break;
 	case KL_WINDOW_BUTTON:
-		/* The main button goes to the widgets; a right press opens the context menu of the pages. */
-		(void)kl_ui_pointer_motion(demo->ui, event->x, event->y);
+		/* The main button goes to the widgets (a press logged for a window that follows the scale); a right press opens the context menu of the pages. */
+		if (demo->follow && event->code == KL_BUTTON_LEFT && event->pressed)
+			demo_log("PRESS x=%.2f y=%.2f", event->x, event->y);
+		(void)kl_ui_pointer_motion(demo->ui, demo_units(demo, event->x), demo_units(demo, event->y));
 		if (event->code == KL_BUTTON_LEFT)
 			(void)kl_ui_pointer_button(demo->ui, event->pressed, event->arrival_us);
 		if (event->code == KL_BUTTON_RIGHT && event->pressed)
 			demo_log("CONTEXT error=%d", kl_window_popup_menu(demo->window, demo_context, sizeof(demo_context) / sizeof(demo_context[0]), (int)event->x, (int)event->y));
 		break;
 	case KL_WINDOW_AXIS:
-		(void)kl_ui_wheel(demo->ui, event->dx, event->dy, event->arrival_us);
+		(void)kl_ui_wheel(demo->ui, demo_units(demo, event->dx), demo_units(demo, event->dy), event->arrival_us);
 		break;
 	case KL_WINDOW_KEY:
 		/* Ctrl+Q quits; the other keys go to the widgets. */
@@ -597,10 +643,10 @@ demo_event(
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
 		demo_log("TOUCH down id=%d x=%.0f y=%.0f", (int)event->id, event->x, event->y);
-		(void)kl_ui_touch_down(demo->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_down(demo->ui, event->id, event->time_us, event->arrival_us, demo_units(demo, event->x), demo_units(demo, event->y));
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		(void)kl_ui_touch_motion(demo->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_motion(demo->ui, event->id, event->time_us, event->arrival_us, demo_units(demo, event->x), demo_units(demo, event->y));
 		break;
 	case KL_WINDOW_TOUCH_UP:
 		demo_log("TOUCH up id=%d", (int)event->id);
@@ -610,6 +656,16 @@ demo_event(
 		(void)kl_ui_touch_cancel(demo->ui, event->arrival_us);
 		break;
 	case KL_WINDOW_RESIZE:
+		/* The size in pixels, logged for a window that follows the scale. */
+		if (demo->follow) {
+			kl_window_size(demo->window, &width, &height);
+			demo_log("RESIZE width=%u height=%u", (unsigned)width, (unsigned)height);
+		}
+		demo->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		/* The new scale, logged; the widgets are drawn at it from the frame of the new size. */
+		demo_log("SCALE scale=%u", (unsigned)event->code);
 		demo->resized = 1;
 		break;
 	case KL_WINDOW_CLOSE:
@@ -753,6 +809,8 @@ static int
 demo_canvas_make(
 	struct demo *demo)
 {
+	struct kl_rect whole;
+	struct kl_rect units;
 	uint32_t *pixels;
 	size_t count;
 	int status;
@@ -774,6 +832,21 @@ demo_canvas_make(
 		return -1;
 	demo->canvas_made = 1;
 	demo->style.canvas = &demo->canvas;
+
+	/* Drawn at the window's scale, the input taken at it, and the frame's size in the canvas's units. */
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = (int)demo->width;
+	whole.height = (int)demo->height;
+	units = whole;
+	if (demo->follow) {
+		demo->scale = kl_window_scale(demo->window);
+		kl_canvas_set_scale(&demo->canvas, demo->scale);
+		kl_ui_set_scale(demo->ui, demo->scale);
+		kl_canvas_logical(&demo->canvas, &whole, &units);
+	}
+	demo->units_width = units.width;
+	demo->units_height = units.height;
 
 	/* Succeeded. */
 	return 0;
@@ -800,8 +873,8 @@ demo_draw(
 	/* The ground: clear on glass (the desktop shows between the panels), else a quiet gradient. */
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = (int)demo->width;
-	whole.height = (int)demo->height;
+	whole.width = demo->units_width;
+	whole.height = demo->units_height;
 	if (demo->style.glass)
 		kl_canvas_clear(&demo->canvas);
 	else
@@ -821,6 +894,10 @@ demo_draw(
 		demo_draw_controls(demo);
 		break;
 	}
+
+	/* The square of single pixels, for a window that follows the scale. */
+	if (demo->follow)
+		demo_draw_checker(demo);
 
 	/* The frame is drawn; frames go on while the input or a widget moves. */
 	moving = kl_ui_end(demo->ui, now_us);
@@ -861,11 +938,11 @@ demo_layout(
 	demo->sidebar.x = margin;
 	demo->sidebar.y = margin;
 	demo->sidebar.width = DEMO_SIDEBAR;
-	demo->sidebar.height = (int)demo->height - 2 * margin;
+	demo->sidebar.height = demo->units_height - 2 * margin;
 	demo->content.x = margin + DEMO_SIDEBAR + gap;
 	demo->content.y = margin;
-	demo->content.width = (int)demo->width - demo->content.x - margin;
-	demo->content.height = (int)demo->height - 2 * margin;
+	demo->content.width = demo->units_width - demo->content.x - margin;
+	demo->content.height = demo->units_height - 2 * margin;
 }
 
 /* Draws the sidebar: the pages, the one shown lit. */
@@ -1198,17 +1275,17 @@ demo_glass_refresh(
 
 	/* The two panels. */
 	memset(panels, 0, sizeof(panels));
-	panels[0].x = demo->sidebar.x;
-	panels[0].y = demo->sidebar.y;
-	panels[0].width = demo->sidebar.width;
-	panels[0].height = demo->sidebar.height;
-	panels[0].radius = DEMO_RADIUS;
+	panels[0].x = demo_pixels(demo, demo->sidebar.x);
+	panels[0].y = demo_pixels(demo, demo->sidebar.y);
+	panels[0].width = demo_pixels(demo, demo->sidebar.width);
+	panels[0].height = demo_pixels(demo, demo->sidebar.height);
+	panels[0].radius = demo_pixels(demo, DEMO_RADIUS);
 	panels[0].kind = KL_GLASS_CARD;
-	panels[1].x = demo->content.x;
-	panels[1].y = demo->content.y;
-	panels[1].width = demo->content.width;
-	panels[1].height = demo->content.height;
-	panels[1].radius = DEMO_RADIUS;
+	panels[1].x = demo_pixels(demo, demo->content.x);
+	panels[1].y = demo_pixels(demo, demo->content.y);
+	panels[1].width = demo_pixels(demo, demo->content.width);
+	panels[1].height = demo_pixels(demo, demo->content.height);
+	panels[1].radius = demo_pixels(demo, DEMO_RADIUS);
 	panels[1].kind = KL_GLASS_CARD;
 
 	/* Refused (a compositor without glass): the next frames are opaque. */
@@ -1217,6 +1294,70 @@ demo_glass_refresh(
 		demo_log("GLASS off errno=%d", error);
 		demo->style.glass = 0;
 		demo->dirty = 1;
+	}
+}
+
+/* Turns a length in the canvas's units into the frame's pixels, rounded to the nearest (the same at 100 %). */
+static int
+demo_pixels(
+	const struct demo *demo,
+	int units)
+{
+	long scaled;
+
+	/* Times the scale, rounded half away from zero. */
+	scaled = (long)units * (long)demo->scale;
+	if (scaled >= 0)
+		return (int)((scaled + (long)(KL_SCALE_BASE / 2U)) / (long)KL_SCALE_BASE);
+	return (int)(-((-scaled + (long)(KL_SCALE_BASE / 2U)) / (long)KL_SCALE_BASE));
+}
+
+/*
+ * Turns a place or a distance of the window's input in pixels into the
+ * canvas's units (the same at 100 %); the other inputs go through
+ * kl_ui_window_input, which turns them at the widgets' scale.
+ */
+static double
+demo_units(
+	const struct demo *demo,
+	double pixels)
+{
+	/* Over the scale. */
+	return pixels * (double)KL_SCALE_BASE / (double)demo->scale;
+}
+
+/*
+ * Draws a square of single pixels alternating black and white, its own
+ * side away from the frame's right and bottom edges (clear of a rounded
+ * corner): shown pixel for pixel it stays that pattern, an enlarged or a
+ * blurred frame shows grey or wider stripes.
+ */
+static void
+demo_draw_checker(
+	struct demo *demo)
+{
+	uint32_t colour;
+	uint32_t *row;
+	int left;
+	int top;
+	int x;
+	int y;
+
+	/* A frame too small for the square and its margin has none. */
+	if (demo->width < 2U * (uint32_t)DEMO_CHECKER || demo->height < 2U * (uint32_t)DEMO_CHECKER)
+		return;
+
+	/* Each pixel of the square, opaque black where its column and row add to an even number, else opaque white. */
+	left = (int)demo->width - 2 * DEMO_CHECKER;
+	top = (int)demo->height - 2 * DEMO_CHECKER;
+	for (y = 0; y < DEMO_CHECKER; y++) {
+		row = demo->pixels + (size_t)(top + y) * (size_t)demo->width;
+		for (x = 0; x < DEMO_CHECKER; x++) {
+			colour = 0xffffffffU;
+			if (((x + y) & 1) == 0)
+				colour = 0xff000000U;
+			row[left + x] = colour;
+		}
 	}
 }
 

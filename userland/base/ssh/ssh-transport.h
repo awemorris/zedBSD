@@ -24,9 +24,11 @@
  * The order of one exchange (both sides send KEXINIT after receiving the
  * peer's identification line, or when re-keying):
  *
- *   client: KEXINIT out, KEXINIT in, KEX_HYBRID_INIT out,
- *           KEX_HYBRID_REPLY in (check the host key with ops->check_host_key,
- *           verify the signature over H), NEWKEYS out, NEWKEYS in
+ *   client: KEXINIT out, KEXINIT in, KEX_HYBRID_INIT (or, with
+ *           curve25519-sha256, KEX_ECDH_INIT) out,
+ *           KEX_HYBRID_REPLY (KEX_ECDH_REPLY) in (check the host key
+ *           with ops->check_host_key, verify the signature over H),
+ *           NEWKEYS out, NEWKEYS in
  *   server: KEXINIT out, KEXINIT in, KEX_HYBRID_INIT in, KEX_HYBRID_REPLY
  *           out (signature from ops->sign), NEWKEYS out, NEWKEYS in
  *
@@ -139,18 +141,24 @@ struct ssh_transport_ops {
  *
  * The owner allocates it, calls ssh_transport_init and, at the end,
  * ssh_transport_free.  Fields are the implementation's; the callers read
- * only state, session_id (once have_session_id is 1), reason and
- * reason_code.  kex_step is the position in the exchange in progress (0
- * for none; the values are the .c file's).  version_local and
- * version_peer are the identification lines without CR LF (kept for the
- * exchange hash of every re-exchange).  kexinit_local and kexinit_peer are
- * the KEXINIT payloads of the exchange in progress.  hybrid is the
- * client's half while it waits for the reply, and c_init the C_INIT it
- * sent, kept for the exchange hash until the reply comes (wiped with the
- * other values of the exchange).  k and h are kept between
- * computing them and the NEWKEYS that uses them (secret).  held keeps
- * upper-layer payloads sent during an exchange (each as uint32 length and
- * the bytes).  kex_time is the tick time of the last key.
+ * only state, session_id (once have_session_id is 1), reason,
+ * reason_code, local_reason and local_code.  kex_step is the position in
+ * the exchange in progress (0 for none; the values are the .c file's).
+ * version_local and version_peer are the identification lines without
+ * CR LF (kept for the exchange hash of every re-exchange).  kexinit_local
+ * and kexinit_peer are the KEXINIT payloads of the exchange in progress.
+ * hybrid is the client's half of mlkem768x25519-sha256 while it waits for
+ * the reply, and c_init the C_INIT it sent; x25519_private and q_c are the
+ * client's half of curve25519-sha256 and the Q_C it sent.  C_INIT and Q_C
+ * are kept for the exchange hash until the reply comes (wiped with the
+ * other values of the exchange).  k and h are kept between computing them
+ * and the NEWKEYS that uses them (secret); k is encoded into the hash and
+ * the derivation in the form of choice.method.  held keeps upper-layer
+ * payloads sent during an exchange (each as uint32 length and the bytes).
+ * kex_time is the tick time of the last key.  reason_code and reason are
+ * the peer's DISCONNECT; local_code and local_reason the DISCONNECT this
+ * side queued (by ssh_transport_disconnect or a failure; empty and 0 until
+ * then), so that the owner can tell its user why the connection ended.
  */
 struct ssh_transport {
 	enum ssh_role role;
@@ -168,6 +176,8 @@ struct ssh_transport {
 	struct ssh_buf kexinit_peer;
 	struct ssh_hybrid_client hybrid;
 	uint8_t c_init[SSH_HYBRID_INIT_SIZE];
+	uint8_t x25519_private[SSH_X25519_SIZE];
+	uint8_t q_c[SSH_X25519_SIZE];
 	uint8_t k[SSH_KEX_HASH_SIZE];
 	uint8_t h[SSH_KEX_HASH_SIZE];
 	uint8_t session_id[SSH_KEX_HASH_SIZE];
@@ -177,6 +187,8 @@ struct ssh_transport {
 	uint64_t now;
 	uint32_t reason_code;
 	char reason[SSH_TRANSPORT_REASON_MAX];
+	uint32_t local_code;
+	char local_reason[SSH_TRANSPORT_REASON_MAX];
 };
 
 /*
@@ -249,7 +261,9 @@ int ssh_transport_tick(struct ssh_transport *transport, uint64_t now);
 /*
  * Queues SSH_MSG_DISCONNECT with code and description (NUL-terminated,
  * cut to SSH_TRANSPORT_REASON_MAX) and sets the state CLOSED.  Further
- * sends fail with EPIPE.
+ * sends fail with EPIPE.  local_code and local_reason keep the code and
+ * the description (cut to SSH_TRANSPORT_REASON_MAX - 1 bytes); a closed
+ * transport keeps the ones of its first DISCONNECT.
  */
 void ssh_transport_disconnect(struct ssh_transport *transport, uint32_t code, const char *description);
 

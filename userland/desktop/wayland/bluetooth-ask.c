@@ -104,6 +104,7 @@ kwl_bluetooth_ask_take(
 	struct kwl_server *server,
 	const struct kl_backend_bluetooth_question *question)
 {
+	int admin;
 	int error;
 
 	/* An end: the window of that question goes. */
@@ -113,8 +114,13 @@ kwl_bluetooth_ask_take(
 		return;
 	}
 
-	/* Nobody at the desktop: no, at once (a number only shows; this desktop's own pairing is given up). */
-	if (server->greeter || server->locked) {
+	/*
+	 * Nobody at the desktop, or the admin dialog has the screen
+	 * (admin-ask.c): no, at once (a number only shows; this desktop's own
+	 * pairing is given up).
+	 */
+	admin = kwl_admin_ask_showing();
+	if (server->greeter || server->locked || admin) {
 		error = 0;
 		if (question->kind == KL_BACKEND_BT_ASK_PASSKEY && question->own)
 			error = kwl_bluetooth_cancel();

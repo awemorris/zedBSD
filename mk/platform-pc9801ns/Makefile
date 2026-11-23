@@ -3,12 +3,15 @@
 #
 # SPDX-License-Identifier: Zlib
 
+include mk/config.mk
+include mk/platform-pc9801ns/defaults.mk
+include $(ZEDBSD_CONFIGMK)
+
 include mk/toolchain-llvm/llvm.mk
 .PHONY: toolchain-platform toolchain-cached-platform
 toolchain-platform: toolchain-llvm
-toolchain-platform-cached: toolchain-llvm-cached
+toolchain-cached-platform: toolchain-llvm-cached
 
-include mk/platform-pc9801ns/defaults.mk
 include mk/platform-pc9801ns/libc.mk
 include mk/platform-pc9801ns/sysroot.mk
 include mk/platform-pc9801ns/vmunix.mk

@@ -8,10 +8,11 @@
 /*
  * A unit's tarball, unpacked (unpack.h).
  *
- * The tarball is read whole from the descriptor it will be unpacked from,
- * its SHA-256 taken while it is read, and compared with the index's before
- * anything of it is believed; it is never read a second time, so it cannot
- * be changed between the check and the use.  libz-compat's inflate takes a
+ * The tarball is read whole from the descriptor it will be unpacked from
+ * (where it lies in the downloaded system, payload.h), its SHA-256 taken
+ * while it is read, and compared with the index's before anything of it
+ * is believed; it is never read a second time, so it cannot be changed
+ * between the check and the use.  libz-compat's inflate takes a
  * stream whole and gives its output whole, so the unpacked archive is held
  * in memory too.
  *
@@ -82,9 +83,10 @@ static int unpack_make_directory(int parent, const char *leaf, unsigned mode);
 static uint32_t unpack_le32(const uint8_t *bytes);
 
 /*
- * Reads a whole file of an expected size from a descriptor and checks its
- * SHA-256.  Returns the bytes, which the caller frees, or EIO when the
- * size differs and EBADMSG when the digest does.
+ * Reads an expected number of bytes from a descriptor (a member of the
+ * downloaded tarball, whose size the caller checked) and checks their
+ * SHA-256.  Returns the bytes, which the caller frees, or EIO when fewer
+ * come and EBADMSG when the digest differs.
  */
 int
 unpack_read_whole(
@@ -96,7 +98,6 @@ unpack_read_whole(
 {
 	struct command_sha256_context context;
 	uint8_t digest[32];
-	uint8_t probe;
 	uint8_t *buffer;
 	size_t offset;
 	size_t want;
@@ -109,7 +110,7 @@ unpack_read_whole(
 	*data = NULL;
 	*length = 0;
 
-	/* A size the memory can hold, with the byte past it to see the end. */
+	/* A size the memory can hold. */
 	if (expected_bytes > (uint64_t)SIZE_MAX - 1U)
 		return EFBIG;
 	buffer_size = 1U;
@@ -143,13 +144,6 @@ unpack_read_whole(
 
 		/* Counts the bytes taken. */
 		offset += (size_t)got;
-	}
-
-	/* The file must end there. */
-	got = read(fd, &probe, 1U);
-	if (got != 0) {
-		free(buffer);
-		return EIO;
 	}
 
 	/* The digest must be the index's. */
@@ -431,6 +425,103 @@ unpack_tar(
 	return 0;
 }
 
+/*
+ * Finds a regular file of a ustar archive by its path, relative and
+ * plain, and gives where its bytes lie in the archive.  Every header up
+ * to it is checked as unpack_tar checks it.  Returns 0 with the bytes,
+ * EINVAL for a path that is not plain, an archive that is not one, or an
+ * entry of the path that is not a regular file (a link, a directory),
+ * or ENOENT when the archive has no entry of the path.
+ */
+int
+unpack_tar_member(
+	const uint8_t *archive,
+	size_t length,
+	const char *path,
+	const uint8_t **data,
+	uint64_t *bytes)
+{
+	char entry[UNPACK_PATH_MAX];
+	const uint8_t *header;
+	uint64_t size;
+	uint64_t mode;
+	size_t offset;
+	size_t padded;
+	int regular;
+	int zero;
+	int difference;
+	int error;
+
+	/* The path asked for, relative and plain. */
+	error = unpack_path_valid(path);
+	if (error != 0)
+		return error;
+
+	/* Walks the entries until the two zero blocks that end the archive. */
+	offset = 0;
+	for (;;) {
+		if (length - offset < UNPACK_BLOCK)
+			return EINVAL;
+		header = archive + offset;
+		zero = unpack_zero_block(header);
+		if (zero)
+			break;
+
+		/* The header's own checksum and the POSIX magic. */
+		error = unpack_header_checksum(header);
+		if (error != 0)
+			return error;
+		difference = memcmp(header + UNPACK_MAGIC, "ustar\0" "00", 8U);
+		if (difference != 0)
+			return EINVAL;
+
+		/* The kind: a regular file, a directory or a symbolic link, nothing else. */
+		regular = 0;
+		if (header[UNPACK_TYPE] == '0' || header[UNPACK_TYPE] == '\0')
+			regular = 1;
+		else if (header[UNPACK_TYPE] != '5' && header[UNPACK_TYPE] != '2')
+			return EINVAL;
+
+		/* The mode and the size, in octal. */
+		error = unpack_octal(header + UNPACK_MODE, UNPACK_MODE_SIZE, &mode);
+		if (error == 0)
+			error = unpack_octal(header + UNPACK_SIZE, UNPACK_SIZE_SIZE, &size);
+		if (error != 0 || mode > 07777U)
+			return EINVAL;
+		if (!regular && size != 0U)
+			return EINVAL;
+
+		/* The data has to be in the archive, padded to a whole block. */
+		offset += UNPACK_BLOCK;
+		if (size > length - offset)
+			return EINVAL;
+		padded = ((size_t)size + UNPACK_BLOCK - 1U) / UNPACK_BLOCK * UNPACK_BLOCK;
+		if (padded > length - offset)
+			return EINVAL;
+
+		/* The entry's path, which must be relative and plain. */
+		error = unpack_entry_path(header, entry, sizeof(entry));
+		if (error != 0)
+			return error;
+
+		/* The entry asked for: a regular file, or refused. */
+		difference = strcmp(entry, path);
+		if (difference == 0) {
+			if (!regular)
+				return EINVAL;
+			*data = archive + offset;
+			*bytes = size;
+			return 0;
+		}
+
+		/* The next entry. */
+		offset += padded;
+	}
+
+	/* The archive has no such entry. */
+	return ENOENT;
+}
+
 /* Reads an octal field: digits, then spaces or NULs. */
 static int
 unpack_octal(
@@ -669,6 +760,7 @@ unpack_make_file(
 	uint64_t written;
 	ssize_t result;
 	int fd;
+	int synced;
 	int changed;
 	int closed;
 	int error;
@@ -696,6 +788,17 @@ unpack_make_file(
 
 		/* Counts the bytes written. */
 		written += (uint64_t)result;
+	}
+
+	/*
+	 * A set-ID file's data goes to the disk first: the kernel clears the
+	 * set-ID bits when it writes a file's changed pages back, so bits
+	 * given before the write-back would be lost.
+	 */
+	if (error == 0 && (mode & 06000U) != 0U) {
+		synced = fsync(fd);
+		if (synced != 0)
+			error = errno;
 	}
 
 	/* The mode, set-ID bits included, once the data is in. */

@@ -6,19 +6,31 @@
  */
 
 /*
- * NEC PC-98 internal IDE driver (PIO, polled)
+ * NEC PC-98 internal IDE driver (PIO)
  *
  * - The PC-98 built-in IDE multiplexes two ATA channels.
  * - Each with a master/slave pair onto one register block.
  * - Port 0x432 bit 0 selects the active bank.
  * - The command block lives at 0x640-0x64e with a 2-byte stride
  *   (16-bit data at 0x640), and the control block at 0x74c/0x74e.
- * - Interrupts stay disabled (nIEN), everything is polled.
+ * - The reset and IDENTIFY of the probe are polled with interrupts off
+ *   (nIEN).  Afterwards a wait the drive does not end at once sleeps until
+ *   the drive interrupts: ATA devices hold an interrupt when a PIO sector
+ *   is ready to move and when a command ends, assert INTRQ for it while
+ *   nIEN is clear, and drop it when the status register is read.  Both
+ *   channels drive IRQ 9 on PC-98 boards.
+ * - A drive that finishes a command without an interrupt reaching this
+ *   driver (a board wired otherwise) is reported once, and every command
+ *   is polled from then on.
  */
 
 #include "drivers/platform/pc98/pc98-ide.h"
 #include "kern/boot.h"
+#include "kern/clock.h"
+#include "kern/irq.h"
 #include "kern/lock.h"
+#include "kern/sched.h"
+#include "kern/waitq.h"
 #include <uapi/errno.h>
 #include <uapi/sysctl.h>
 #include "kern/klog.h"
@@ -69,6 +81,36 @@
  */
 #define IDE_TIMEOUT_POLLS 500000U
 
+/*
+ * The interrupt both banks of the built-in IDE raise.
+ *
+ * Values referenced: Linux 2.6.7 PC-9800 include/asm-i386/ide.h
+ * (ide_default_irq() gives 9 for the 0x640 command block), linux-pc98
+ * drivers/ata/pata_pc9800.c (PC98_ATA_IRQ), and qemu-pc98
+ * hw/i386/pc98.c and hw/ide/pc98-ide.c (both channels on IRQ 9).
+ */
+#define IDE_IRQ 9
+
+/*
+ * How long a command waits asleep before it looks at the drive without an
+ * interrupt, and how long it may take in all, as long as the polled wait.
+ */
+#define IDE_IRQ_CHECK_MS 250U
+#define IDE_IRQ_LIMIT_MS 5000U
+
+/*
+ * How many times a wait looks at the drive, about 10 microseconds apart,
+ * before it sleeps for the interrupt: about the time a sector of a transfer
+ * under way takes to come, and less than a sleep and a wakeup cost a
+ * 386SX.
+ */
+#define IDE_SPIN_POLLS 16U
+
+/* What an interrupt-driven wait found. */
+#define IDE_WAIT_READY 0
+#define IDE_WAIT_FAILED 1
+#define IDE_WAIT_UNANSWERED 2
+
 struct ide_unit {
 	struct disk *disk;
 	uint8_t present;
@@ -91,6 +133,27 @@ static unsigned unit_count;
 static const char *failure_stage;
 /* Both ATA banks share one register window and must serialize commands. */
 static struct mutex controller_lock;
+
+/*
+ * The interrupts of the controller: interrupt_count counts the ones the
+ * handler took, and the command that waits sleeps on interrupt_wait until
+ * it changes.  Both are under interrupt_lock.
+ */
+static struct spinlock interrupt_lock;
+static struct wait_queue interrupt_wait;
+static uint32_t interrupt_count;
+
+/*
+ * The count a command has consumed.  Read and written by the command that
+ * holds controller_lock.
+ */
+static uint32_t interrupt_seen;
+
+/*
+ * Set while commands wait for the interrupt; cleared for good when one
+ * finished without it.  Read and written under controller_lock.
+ */
+static int interrupts_used;
 
 
 static const struct kern_boot_device * bios_device_for_slot(const struct kern_boot_device *devices, unsigned count, unsigned slot);
@@ -115,6 +178,13 @@ static int setup_transfer(const struct ide_unit *unit, uint64_t lba, uint32_t co
 static int pio_read(struct disk *dev, uint64_t lba, uint32_t count, void *buffer);
 static int pio_write(struct disk *dev, uint64_t lba, uint32_t count, const void *buffer);
 static int pio_flush(struct disk *dev);
+static void start_interrupts(void);
+static void ide_interrupt(int irq, kern_irq_ack_t acknowledge, void *argument);
+static int wait_command(int want_drq);
+static int wait_interrupt(int want_drq);
+static void allow_interrupt(int allowed);
+static int take_interrupts(uint64_t deadline);
+static void stop_interrupts(void);
 static int pc98_ide_submit(struct disk *dev, struct bio *bio);
 static int pc98_ide_ioctl(struct disk *dev, unsigned long request, void *argument);
 
@@ -142,6 +212,8 @@ drv_pc98_ide_init(
 	unsigned slot;
 
 	(void)mutex_init(&controller_lock, LOCK_RANK_DISK, "pc98-ide");
+	spin_init(&interrupt_lock, LOCK_RANK_DISK, "pc98-ide interrupt");
+	waitq_init(&interrupt_wait, "pc98-ide interrupt");
 	unit_count = 0;
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
@@ -262,6 +334,10 @@ drv_pc98_ide_init(
 			}
 		}
 	}
+
+	/* The units found wait for their interrupt from now on. */
+	if (unit_count != 0)
+		start_interrupts();
 
 	/* Returns the computed result. */
 	return unit_count;
@@ -722,13 +798,15 @@ pio_read(
 		chunk = count > 255U ? 255U : count;
 		if (!setup_transfer(unit, lba, chunk))
 			return EIO;
+
+		/* Issues the read; the drive interrupts as each sector is ready. */
 		outb(IDE_STATUS, IDE_CMD_READ);
 		/* Process each element required by the operation. */
 		for (sector = 0; sector < chunk; sector++) {
 			failure_stage = "wait read DRQ";
 
 			/* Checks the wait drq result. */
-			if (!wait_drq())
+			if (!wait_command(1))
 				return EIO;
 
 			/* Takes the sector the drive has ready. */
@@ -763,14 +841,24 @@ pio_write(
 		chunk = count > 255U ? 255U : count;
 		if (!setup_transfer(unit, lba, chunk))
 			return EIO;
+
+		/*
+		 * Issues the write.  The drive asks for the first sector
+		 * without an interrupt, and interrupts after each sector it
+		 * took: for the next one, or at the end of the command.
+		 */
 		outb(IDE_STATUS, IDE_CMD_WRITE);
 		/* Process each element required by the operation. */
 		for (sector = 0; sector < chunk; sector++) {
 			failure_stage = "wait write DRQ";
 
-			/* Checks the wait drq result. */
-			if (!wait_drq())
+			/* The first sector is polled for, the others are waited for. */
+			if (sector == 0) {
+				if (!wait_drq())
+					return EIO;
+			} else if (!wait_command(1)) {
 				return EIO;
+			}
 
 			/* Hands the drive the sector it asked for. */
 			write_sector_data(in);
@@ -780,7 +868,7 @@ pio_write(
 		failure_stage = "wait write completion";
 
 		/* Checks the wait clear result. */
-		if (!wait_clear(IDE_STATUS_BSY) ||
+		if (!wait_command(0) ||
 		    (inb(IDE_ALT_STATUS) & (IDE_STATUS_DF | IDE_STATUS_ERR))) {
 			/* Failed. */
 			return EIO;
@@ -818,13 +906,284 @@ pio_flush(
 	outb(IDE_STATUS, IDE_CMD_FLUSH_CACHE);
 	failure_stage = "wait FLUSH CACHE completion";
 
-	/* Checks the wait clear result. */
-	if (!wait_clear(IDE_STATUS_BSY))
+	/* The drive interrupts when the cache is written. */
+	if (!wait_command(0))
 		return EIO;
 	status = inb(IDE_ALT_STATUS);
 
 	/* Returns the computed result. */
 	return (status & (IDE_STATUS_DF | IDE_STATUS_ERR)) != 0 ? EIO : 0;
+}
+
+/*
+ * Installs the interrupt handler and lets the commands that follow wait
+ * for the drive's interrupt.  Without the handler they stay polled.
+ */
+static void
+start_interrupts(
+	void)
+{
+	int error;
+
+	/* Installs the handler while the line is still masked. */
+	kern_irq_mask(IDE_IRQ);
+	error = kern_irq_register(IDE_IRQ, ide_interrupt, NULL);
+	if (error != 0) {
+		kern_logf("ide: IRQ %d unavailable (%d); commands are polled\n",
+			  IDE_IRQ, error);
+		return;
+	}
+
+	/* Commands wait for the interrupt, which the line now delivers. */
+	mutex_lock(&controller_lock);
+	interrupts_used = 1;
+	mutex_unlock(&controller_lock);
+	kern_irq_unmask(IDE_IRQ);
+}
+
+/*
+ * Counts an interrupt of the controller and wakes the command waiting for
+ * it.  The command reads the status register itself, which releases the
+ * drive's INTRQ; the 8259 takes the line by its edge.
+ */
+static void
+ide_interrupt(
+	int irq,
+	kern_irq_ack_t acknowledge,
+	void *argument)
+{
+	(void)irq;
+	(void)argument;
+
+	/* One more interrupt for the waiting command. */
+	spin_lock(&interrupt_lock);
+	interrupt_count++;
+	waitq_wake_all(&interrupt_wait);
+	spin_unlock(&interrupt_lock);
+
+	/* Releases the line. */
+	kern_irq_send_eoi(acknowledge);
+}
+
+/*
+ * Waits for the drive to finish its part of a command: to ask for or offer
+ * a sector (want_drq), or to end it.  Fails on an error, a fault, or a
+ * drive that does not answer in time.
+ */
+static int
+wait_command(
+	int want_drq)
+{
+	int outcome;
+
+	/* Waits asleep for the interrupt while the controller delivers it. */
+	if (interrupts_used) {
+		outcome = wait_interrupt(want_drq);
+		if (outcome == IDE_WAIT_READY)
+			return 1;
+		if (outcome == IDE_WAIT_FAILED)
+			return 0;
+	}
+
+	/* A polled controller, or one whose interrupt did not come. */
+	if (want_drq) {
+		outcome = wait_drq();
+		return outcome;
+	}
+
+	/* Polls for the end of the command. */
+	outcome = wait_clear(IDE_STATUS_BSY);
+	return outcome;
+}
+
+/*
+ * Waits for the drive and judges the status it leaves.  A drive that is
+ * ready within IDE_SPIN_POLLS looks is taken at once, as a sector of a
+ * transfer under way usually is: on a slow CPU a sleep and a wakeup cost
+ * more than that wait.  Otherwise the drive's interrupt is allowed and the
+ * command sleeps until it comes.  Every IDE_IRQ_CHECK_MS without one the
+ * status is looked at anyway: a drive that became ready without an
+ * interrupt shows that its interrupt does not reach this driver, which
+ * then polls every command.  Reports IDE_WAIT_READY, IDE_WAIT_FAILED (an
+ * error, a fault, or no answer within IDE_IRQ_LIMIT_MS), or
+ * IDE_WAIT_UNANSWERED (the interrupt is missing; the caller polls).
+ */
+static int
+wait_interrupt(
+	int want_drq)
+{
+	uint64_t limit;
+	uint64_t check;
+	uint64_t now;
+	uint8_t status;
+	unsigned spin;
+	int arrived;
+	int ready;
+
+	/* The status is valid 400 ns after a command is issued. */
+	select_delay();
+
+	/* A drive ready soon is taken without sleeping. */
+	for (spin = 0; spin < IDE_SPIN_POLLS; spin++) {
+		status = inb(IDE_ALT_STATUS);
+		if ((status & IDE_STATUS_BSY) == 0) {
+			ready = 1;
+			if (want_drq && (status & IDE_STATUS_DRQ) == 0)
+				ready = 0;
+			if ((status & (IDE_STATUS_DF | IDE_STATUS_ERR)) != 0)
+				ready = 1;
+			if (ready)
+				break;
+		}
+		delay_10us();
+	}
+
+	/* Takes a ready drive, releasing the interrupt it holds. */
+	if (spin < IDE_SPIN_POLLS) {
+		status = inb(IDE_STATUS);
+		if ((status & (IDE_STATUS_DF | IDE_STATUS_ERR)) != 0)
+			return IDE_WAIT_FAILED;
+		return IDE_WAIT_READY;
+	}
+
+	/*
+	 * Allows the interrupt.  A drive that finished meanwhile raises it at
+	 * once, as an interrupt it holds is passed on when nIEN clears.
+	 */
+	allow_interrupt(1);
+
+	/* The command may take as long as a polled one. */
+	limit = sched_ticks() + kern_ms_to_ticks(IDE_IRQ_LIMIT_MS);
+	for (;;) {
+		/* Sleeps until an interrupt, or until the next look. */
+		check = sched_ticks() + kern_ms_to_ticks(IDE_IRQ_CHECK_MS);
+		if (check > limit)
+			check = limit;
+		arrived = take_interrupts(check);
+
+		/* Reading the status releases the drive's INTRQ. */
+		status = inb(IDE_STATUS);
+		now = sched_ticks();
+
+		/* A busy drive is not done yet, unless it is out of time. */
+		if ((status & IDE_STATUS_BSY) != 0) {
+			if (now < limit)
+				continue;
+			allow_interrupt(0);
+			return IDE_WAIT_FAILED;
+		}
+
+		/* An error or a fault ends the command. */
+		if ((status & (IDE_STATUS_DF | IDE_STATUS_ERR)) != 0) {
+			allow_interrupt(0);
+			return IDE_WAIT_FAILED;
+		}
+
+		/* A drive that should offer data and does not is waited for, like the polled wait. */
+		if (want_drq && (status & IDE_STATUS_DRQ) == 0) {
+			if (now < limit)
+				continue;
+			allow_interrupt(0);
+			return IDE_WAIT_FAILED;
+		}
+
+		/* The drive is done, and its interrupt came. */
+		if (arrived) {
+			allow_interrupt(0);
+			return IDE_WAIT_READY;
+		}
+
+		/* Gives an interrupt on its way a moment to arrive. */
+		for (spin = 0; spin < 10U; spin++)
+			delay_10us();
+		arrived = take_interrupts(0);
+		if (arrived) {
+			allow_interrupt(0);
+			return IDE_WAIT_READY;
+		}
+
+		/* The drive finished without an interrupt: polls from now on. */
+		stop_interrupts();
+		return IDE_WAIT_UNANSWERED;
+	}
+}
+
+/*
+ * Allows the selected bank's drives to raise their interrupt, forgetting
+ * the interrupts taken before, or stops them from raising it again.
+ */
+static void
+allow_interrupt(
+	int allowed)
+{
+	unsigned long irq;
+
+	/* Stops the drives from interrupting. */
+	if (!allowed) {
+		outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
+		return;
+	}
+
+	/* The interrupts so far belong to earlier waits. */
+	irq = spin_lock_irqsave(&interrupt_lock);
+	interrupt_seen = interrupt_count;
+	spin_unlock_irqrestore(&interrupt_lock, irq);
+
+	/* Lets the drives interrupt. */
+	outb(IDE_ALT_STATUS, 0);
+}
+
+/*
+ * Consumes the interrupts taken since the last look, sleeping until one
+ * comes or until the deadline (a tick count; 0 does not sleep).  Reports
+ * whether there was one.
+ */
+static int
+take_interrupts(
+	uint64_t deadline)
+{
+	unsigned long irq;
+	uint64_t observed;
+	uint64_t now;
+	int arrived;
+
+	/* Sleeps while no interrupt is new and the deadline is ahead. */
+	irq = spin_lock_irqsave(&interrupt_lock);
+	while (interrupt_count == interrupt_seen && deadline != 0) {
+		now = sched_ticks();
+		if (now >= deadline)
+			break;
+		observed = waitq_sequence(&interrupt_wait);
+		(void)waitq_sleep(&interrupt_wait, &interrupt_lock, observed, deadline, 0);
+	}
+
+	/* Takes every new interrupt at once. */
+	arrived = 0;
+	if (interrupt_count != interrupt_seen)
+		arrived = 1;
+	interrupt_seen = interrupt_count;
+	spin_unlock_irqrestore(&interrupt_lock, irq);
+
+	/* Succeeded: whether an interrupt came. */
+	return arrived;
+}
+
+/*
+ * Turns the interrupts off for good after a command finished without one,
+ * and says so once: the board does not deliver the drive's INTRQ on IRQ 9.
+ */
+static void
+stop_interrupts(
+	void)
+{
+	/* The line and the drive stay quiet from now on. */
+	interrupts_used = 0;
+	kern_irq_mask(IDE_IRQ);
+	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
+
+	/* Reports the change once; it is never undone. */
+	kern_logf("ide: no interrupt on IRQ %d from bank %u; commands are polled\n",
+		  IDE_IRQ, (unsigned)(inb(IDE_BANK_SELECT) & 1U));
 }
 
 /* Supports the pc98 ide submit operation. */

@@ -6,8 +6,8 @@
  */
 
 /*
- * The desktop's settings for applications (keiland.h's kl_settings_*;
- * WS135, plan/ws135/design.md section 3): the client of Keiland's system
+ * The desktop's settings for applications (keiland.h's kl_settings_*):
+ * the client of Keiland's system
  * extension (kl_system_manager_v1, kl_system_settings_v1;
  * libkeiland/system/kl-system-protocol.h) for the compositor's keys, and the
  * application's own file (settings-app.c) for its keys.
@@ -21,7 +21,7 @@
  * display's dispatch.
  *
  * The protocol's interfaces are system/system-protocol.c's, shared with
- * the system (WS131 p010).
+ * the system.
  */
 
 #include <keiland/keiland.h>
@@ -790,11 +790,13 @@ settings_app_change(
 	if (error != 0)
 		return error;
 
-	/* The value in effect: the one asked for, none for a prefix row's key, or the default of a row's. */
+	/* The value in effect: the one asked for, none for a prefix row's key, empty for a path's or a text's, or the default of a row's. */
 	if (value != NULL) {
 		settings_cache_set(&settings->cache, key, value, 0U, 1U);
 	} else if ((found->flags & KL_SETTINGS_KEY_PREFIX) != 0U) {
 		settings_cache_set(&settings->cache, key, "", 0U, 0U);
+	} else if (found->type == KL_SETTINGS_TYPE_PATH || found->type == KL_SETTINGS_TYPE_TEXT) {
+		settings_cache_set(&settings->cache, key, "", KL_SETTINGS_DEFAULT, 1U);
 	} else {
 		(void)snprintf(fallback, sizeof(fallback), "%d", found->fallback);
 		settings_cache_set(&settings->cache, key, fallback, KL_SETTINGS_DEFAULT, 1U);

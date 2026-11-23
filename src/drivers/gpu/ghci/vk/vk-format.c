@@ -10,7 +10,8 @@
  * their sizes, and their Vulkan format features.
  *
  * The features come from the format table of the capability block (one
- * word per VkFormat), which reports what the GPU implements; a format it
+ * word per GhciFormat, the GPU's own numbers, which the table here gives
+ * for each VkFormat), which reports what the GPU implements; a format it
  * reports nothing for has no feature, and no format is assumed.  The
  * driver then drops what it cannot do itself: an sRGB format without
  * EXT_CAP_FMT0's sRGB bit, a storage image the compiler cannot address,
@@ -33,28 +34,28 @@
 /*
  * The bits of a format word's OPTIMAL and LINEAR fields.
  *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 4.1,
- * FMT_OPTIMAL bits 0 to 8, which the format table's word keeps).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.5, the
+ * word 32 + id: [8:0] OPTIMAL with [5] STORAGE_IMAGE_ATOMIC and [8]
+ * STORAGE_IMAGE, [17:9] LINEAR the same).
  */
 #define HW_SAMPLE			(1U << 0)
 #define HW_FILTER_LINEAR		(1U << 1)
 #define HW_COLOR_ATTACHMENT		(1U << 2)
 #define HW_BLEND			(1U << 3)
 #define HW_DEPTH_STENCIL		(1U << 4)
-#define HW_VERTEX_BUFFER		(1U << 5)
+#define HW_STORAGE_IMAGE_ATOMIC		(1U << 5)
 #define HW_BLIT_SRC			(1U << 6)
 #define HW_BLIT_DST			(1U << 7)
 #define HW_STORAGE_IMAGE		(1U << 8)
 
 /*
  * The bits of the buffer features, once moved from the format word's
- * BUFFER field to their place: the buffer half of the hardware's
- * VkFormatFeatureFlags, at Vulkan's positions (not OPTIMAL's).
+ * BUFFER field ([21:18]: uniform texel, storage texel, its atomics,
+ * vertex) to bits 3 to 6, where the driver keeps them.
  *
- * Values referenced: amaterrace-gpu 203075d6 rtl/gpu/cp/atg_cp_fmt.v
- * (FMT_BUFFER is {19'd0, feat[25:13]}) and include/atg_fmt_info.vh
- * (atg_fmt_feat: {buffer[12:0], optimal[12:0]} as VkFormatFeatureFlags);
- * Vulkan 1.0 VkFormatFeatureFlagBits (bits 3 to 6).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.5, the
+ * word 32 + id: [18] UNIFORM_TEXEL_BUFFER, [19] STORAGE_TEXEL_BUFFER,
+ * [20] STORAGE_TEXEL_BUFFER_ATOMIC, [21] VERTEX_BUFFER, [22] FMT_SCANOUT).
  */
 #define HW_BUFFER_UNIFORM_TEXEL		(1U << 3)
 #define HW_BUFFER_STORAGE_TEXEL		(1U << 4)
@@ -85,101 +86,107 @@
  */
 #define ROW_FILTER_REQUIRED		(1U << 7)
 
-/* One format of the table: its VkFormat, its texel (or 4x4 block) bytes, and what kind of format it is. */
+/*
+ * One format of the table: its VkFormat, the GhciFormat the GPU knows it
+ * by, its texel (or 4x4 block) bytes, and what kind of format it is.
+ */
 struct format_row {
 	uint16_t format;
+	uint8_t hw;
 	uint8_t bytes;
 	uint16_t kind;
 };
 
 /*
  * The formats the hardware takes, which the driver can write into a
- * descriptor.  A8B8G8R8 (51, 52, 55, 56, 57) is taken as R8G8B8A8 (37,
- * 38, 41, 42, 43) is.  Storage comes from the specification's table
+ * descriptor, with the GhciFormat each is written as.  A8B8G8R8 (51, 52,
+ * 55, 56, 57) is the same memory as R8G8B8A8 (37, 38, 41, 42, 43), so it
+ * is written as R8G8B8A8.  Storage comes from the specification's table
  * alone: the shader core writes storage images of these formats.
  *
- * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 8.5.1,
- * the table of formats, and its notes on the packed 32-bit formats);
- * Vulkan 1.0 VkFormat (R5G6B5_UNORM_PACK16 is 4, A1R5G5B5_UNORM_PACK16
- * is 8, as section 8.5.1 has them, where section 8.3's example says 84).
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 8.5.1, the
+ * GhciFormat table 0x00 to 0x99: the packed formats 0x01 to 0x07 by
+ * their bit positions, the arrays in groups of 8 from 0x10, depth and
+ * stencil 0x70 to 0x75, BC 0x80 to 0x8F, ETC2 and EAC 0x90 to 0x99) and
+ * include/ghci_cmd.h (GHCI_FMT_*); Vulkan 1.0 VkFormat.
  */
 static const struct format_row format_rows[] = {
-	{ 3U, 2U, 0U },
-	{ 4U, 2U, ROW_FILTER_REQUIRED },
-	{ 8U, 2U, ROW_FILTER_REQUIRED },
-	{ 9U, 1U, ROW_FILTER_REQUIRED },
-	{ 10U, 1U, ROW_FILTER_REQUIRED },
-	{ 13U, 1U, ROW_INTEGER },
-	{ 14U, 1U, ROW_INTEGER },
-	{ 16U, 2U, ROW_FILTER_REQUIRED },
-	{ 17U, 2U, ROW_FILTER_REQUIRED },
-	{ 20U, 2U, ROW_INTEGER },
-	{ 21U, 2U, ROW_INTEGER },
-	{ 37U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
-	{ 38U, 4U, ROW_FILTER_REQUIRED },
-	{ 41U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 42U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 43U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
-	{ 44U, 4U, ROW_FILTER_REQUIRED },
-	{ 50U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
-	{ 51U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
-	{ 52U, 4U, ROW_FILTER_REQUIRED },
-	{ 55U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 56U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 57U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
-	{ 64U, 4U, ROW_FILTER_REQUIRED },
-	{ 68U, 4U, ROW_INTEGER },
-	{ 70U, 2U, 0U },
-	{ 71U, 2U, 0U },
-	{ 74U, 2U, ROW_INTEGER },
-	{ 75U, 2U, ROW_INTEGER },
-	{ 76U, 2U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
-	{ 77U, 4U, 0U },
-	{ 78U, 4U, 0U },
-	{ 81U, 4U, ROW_INTEGER },
-	{ 82U, 4U, ROW_INTEGER },
-	{ 83U, 4U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
-	{ 91U, 8U, 0U },
-	{ 92U, 8U, 0U },
-	{ 95U, 8U, ROW_INTEGER | ROW_STORAGE },
-	{ 96U, 8U, ROW_INTEGER | ROW_STORAGE },
-	{ 97U, 8U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
-	{ 98U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 99U, 4U, ROW_INTEGER | ROW_STORAGE },
-	{ 100U, 4U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
-	{ 101U, 8U, ROW_INTEGER | ROW_STORAGE },
-	{ 102U, 8U, ROW_INTEGER | ROW_STORAGE },
-	{ 103U, 8U, ROW_FLOAT | ROW_FLOAT32 },
-	{ 104U, 12U, ROW_INTEGER },
-	{ 105U, 12U, ROW_INTEGER },
-	{ 106U, 12U, ROW_FLOAT | ROW_FLOAT32 },
-	{ 107U, 16U, ROW_INTEGER | ROW_STORAGE },
-	{ 108U, 16U, ROW_INTEGER | ROW_STORAGE },
-	{ 109U, 16U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
-	{ 122U, 4U, ROW_FILTER_REQUIRED },
-	{ 123U, 4U, ROW_FILTER_REQUIRED },
-	{ 124U, 2U, ROW_DEPTH },
-	{ 125U, 4U, ROW_DEPTH },
-	{ 126U, 4U, ROW_DEPTH },
-	{ 129U, 4U, ROW_DEPTH },
-	{ 130U, 8U, ROW_DEPTH },
-	{ 131U, 8U, ROW_BLOCK },
-	{ 133U, 8U, ROW_BLOCK },
-	{ 135U, 16U, ROW_BLOCK },
-	{ 137U, 16U, ROW_BLOCK },
-	{ 139U, 8U, ROW_BLOCK },
-	{ 141U, 16U, ROW_BLOCK },
-	{ 145U, 16U, ROW_BLOCK },
-	{ 147U, 8U, ROW_BLOCK },
-	{ 148U, 8U, ROW_BLOCK | ROW_SRGB },
-	{ 149U, 8U, ROW_BLOCK },
-	{ 150U, 8U, ROW_BLOCK | ROW_SRGB },
-	{ 151U, 16U, ROW_BLOCK },
-	{ 152U, 16U, ROW_BLOCK | ROW_SRGB },
-	{ 153U, 8U, ROW_BLOCK },
-	{ 154U, 8U, ROW_BLOCK },
-	{ 155U, 16U, ROW_BLOCK },
-	{ 156U, 16U, ROW_BLOCK }
+	{ 3U, 0x01U, 2U, 0U },
+	{ 4U, 0x02U, 2U, ROW_FILTER_REQUIRED },
+	{ 8U, 0x03U, 2U, ROW_FILTER_REQUIRED },
+	{ 9U, 0x10U, 1U, ROW_FILTER_REQUIRED },
+	{ 10U, 0x11U, 1U, ROW_FILTER_REQUIRED },
+	{ 13U, 0x12U, 1U, ROW_INTEGER },
+	{ 14U, 0x13U, 1U, ROW_INTEGER },
+	{ 16U, 0x18U, 2U, ROW_FILTER_REQUIRED },
+	{ 17U, 0x19U, 2U, ROW_FILTER_REQUIRED },
+	{ 20U, 0x1AU, 2U, ROW_INTEGER },
+	{ 21U, 0x1BU, 2U, ROW_INTEGER },
+	{ 37U, 0x20U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 38U, 0x21U, 4U, ROW_FILTER_REQUIRED },
+	{ 41U, 0x22U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 42U, 0x23U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 43U, 0x24U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 44U, 0x28U, 4U, ROW_FILTER_REQUIRED },
+	{ 50U, 0x2CU, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 51U, 0x20U, 4U, ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 52U, 0x21U, 4U, ROW_FILTER_REQUIRED },
+	{ 55U, 0x22U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 56U, 0x23U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 57U, 0x24U, 4U, ROW_SRGB | ROW_FILTER_REQUIRED },
+	{ 64U, 0x04U, 4U, ROW_FILTER_REQUIRED },
+	{ 68U, 0x05U, 4U, ROW_INTEGER },
+	{ 70U, 0x30U, 2U, 0U },
+	{ 71U, 0x31U, 2U, 0U },
+	{ 74U, 0x32U, 2U, ROW_INTEGER },
+	{ 75U, 0x33U, 2U, ROW_INTEGER },
+	{ 76U, 0x34U, 2U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 77U, 0x38U, 4U, 0U },
+	{ 78U, 0x39U, 4U, 0U },
+	{ 81U, 0x3AU, 4U, ROW_INTEGER },
+	{ 82U, 0x3BU, 4U, ROW_INTEGER },
+	{ 83U, 0x3CU, 4U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 91U, 0x40U, 8U, 0U },
+	{ 92U, 0x41U, 8U, 0U },
+	{ 95U, 0x42U, 8U, ROW_INTEGER | ROW_STORAGE },
+	{ 96U, 0x43U, 8U, ROW_INTEGER | ROW_STORAGE },
+	{ 97U, 0x44U, 8U, ROW_FLOAT | ROW_STORAGE | ROW_FILTER_REQUIRED },
+	{ 98U, 0x52U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 99U, 0x53U, 4U, ROW_INTEGER | ROW_STORAGE },
+	{ 100U, 0x54U, 4U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
+	{ 101U, 0x5AU, 8U, ROW_INTEGER | ROW_STORAGE },
+	{ 102U, 0x5BU, 8U, ROW_INTEGER | ROW_STORAGE },
+	{ 103U, 0x5CU, 8U, ROW_FLOAT | ROW_FLOAT32 },
+	{ 104U, 0x62U, 12U, ROW_INTEGER },
+	{ 105U, 0x63U, 12U, ROW_INTEGER },
+	{ 106U, 0x64U, 12U, ROW_FLOAT | ROW_FLOAT32 },
+	{ 107U, 0x6AU, 16U, ROW_INTEGER | ROW_STORAGE },
+	{ 108U, 0x6BU, 16U, ROW_INTEGER | ROW_STORAGE },
+	{ 109U, 0x6CU, 16U, ROW_FLOAT | ROW_FLOAT32 | ROW_STORAGE },
+	{ 122U, 0x06U, 4U, ROW_FILTER_REQUIRED },
+	{ 123U, 0x07U, 4U, ROW_FILTER_REQUIRED },
+	{ 124U, 0x70U, 2U, ROW_DEPTH },
+	{ 125U, 0x71U, 4U, ROW_DEPTH },
+	{ 126U, 0x72U, 4U, ROW_DEPTH },
+	{ 129U, 0x74U, 4U, ROW_DEPTH },
+	{ 130U, 0x75U, 8U, ROW_DEPTH },
+	{ 131U, 0x80U, 8U, ROW_BLOCK },
+	{ 133U, 0x82U, 8U, ROW_BLOCK },
+	{ 135U, 0x84U, 16U, ROW_BLOCK },
+	{ 137U, 0x86U, 16U, ROW_BLOCK },
+	{ 139U, 0x88U, 8U, ROW_BLOCK },
+	{ 141U, 0x8AU, 16U, ROW_BLOCK },
+	{ 145U, 0x8EU, 16U, ROW_BLOCK },
+	{ 147U, 0x90U, 8U, ROW_BLOCK },
+	{ 148U, 0x91U, 8U, ROW_BLOCK | ROW_SRGB },
+	{ 149U, 0x92U, 8U, ROW_BLOCK },
+	{ 150U, 0x93U, 8U, ROW_BLOCK | ROW_SRGB },
+	{ 151U, 0x94U, 16U, ROW_BLOCK },
+	{ 152U, 0x95U, 16U, ROW_BLOCK | ROW_SRGB },
+	{ 153U, 0x96U, 8U, ROW_BLOCK },
+	{ 154U, 0x97U, 8U, ROW_BLOCK },
+	{ 155U, 0x98U, 16U, ROW_BLOCK },
+	{ 156U, 0x99U, 16U, ROW_BLOCK }
 };
 
 /*
@@ -255,6 +262,26 @@ ghci_vk_format_size(
 }
 
 /*
+ * Reports the GhciFormat a VkFormat the hardware takes is written as in
+ * the GPU's descriptors and packets, or GHCI_FORMAT_INVALID for another
+ * format.
+ */
+uint32_t
+ghci_vk_format_hw(
+	uint32_t format)
+{
+	const struct format_row *row;
+
+	/* A format of the table. */
+	row = row_of(format);
+	if (row == NULL)
+		return GHCI_FORMAT_INVALID;
+
+	/* Succeeded: its GhciFormat. */
+	return row->hw;
+}
+
+/*
  * Reports the components of a format the hardware takes (0 for another
  * format) and what it is besides (GHCI_VK_FORMAT_*).
  */
@@ -307,7 +334,13 @@ ghci_vk_format_traits(
  * requires to filter has it in any case (the nearest texel where the
  * texture unit has no filter).  The driver lays every image out in
  * linear rows, so an image made with optimal tiling is a linear one:
- * optimal tiling has only what both tilings have.
+ * optimal tiling has only what both tilings have, but its storage image
+ * is linear tiling's (OPTIMAL never reports one in GHCI 1.0, and the
+ * driver's optimal images are linear).
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.5, the
+ * word 32 + id: OPTIMAL [8] STORAGE_IMAGE is 0 in GHCI 1.0, LINEAR [17]
+ * STORAGE_IMAGE for the 4, 8 and 16-byte formats).
  */
 void
 ghci_vk_formats_from_bits(
@@ -343,7 +376,7 @@ ghci_vk_formats_from_bits(
 	if ((row->kind & ROW_STORAGE) != 0U)
 		driver = ~0U;
 	blitter = ghci_vk_caps_blitter(caps);
-	tilings[0] = optimal & linear & driver;
+	tilings[0] = (optimal | (linear & HW_STORAGE_IMAGE)) & linear & driver;
 	tilings[1] = linear & driver;
 
 	/*
@@ -428,21 +461,21 @@ ghci_vk_formats_make(
 	kern_memset(formats, 0, sizeof(*formats));
 
 	/*
-	 * Each format of the table from its word: OPTIMAL, LINEAR, and the
-	 * buffer features moved to their Vulkan positions (bits 3 to 6).
+	 * Each format of the table from the word of its GhciFormat: OPTIMAL,
+	 * LINEAR, and the buffer features moved to bits 3 to 6.
 	 *
-	 * Values referenced: amaterrace-gpu 93a7ac06 ghci.md (section 3.2.5,
-	 * the format word: [8:0] OPTIMAL, [17:9] LINEAR, [21:18] the buffer
-	 * features 3 to 6).
+	 * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.2.5, one
+	 * word per GhciFormat id from word 32: [8:0] OPTIMAL, [17:9] LINEAR,
+	 * [21:18] the buffer features).
 	 */
 	for (index = 0U; index < sizeof(format_rows) / sizeof(format_rows[0]); index++) {
-		/* A format past the block's table has no feature. */
+		/* A format whose GhciFormat is past the block's table has no feature. */
 		format = format_rows[index].format;
-		if (format >= caps->format_count)
+		if (format_rows[index].hw >= caps->format_count)
 			continue;
 
 		/* The word's three fields. */
-		word = caps->formats[format];
+		word = caps->formats[format_rows[index].hw];
 		optimal = word & GHCI_CAPS_FMT_OPTIMAL_MASK;
 		linear = (word >> GHCI_CAPS_FMT_LINEAR_SHIFT) & GHCI_CAPS_FMT_OPTIMAL_MASK;
 		buffer = ((word >> GHCI_CAPS_FMT_BUFFER_SHIFT) & GHCI_CAPS_FMT_BUFFER_MASK) << GHCI_CAPS_FMT_BUFFER_FIRST;

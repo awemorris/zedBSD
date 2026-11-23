@@ -56,6 +56,7 @@ static int udp_bind(struct socket *socket, const struct sockaddr *address, sockl
 static int udp_connect(struct socket *socket, const struct sockaddr *address, socklen_t length, unsigned io_flags);
 static ssize_t udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags, const struct sockaddr *address, socklen_t address_length);
 static ssize_t udp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length);
+static ssize_t udp_recvfrom_info(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length, struct socket_receive_info *info);
 static int udp_getsockname(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static int udp_getpeername(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static int udp_setsockopt(struct socket *socket, int level, int option, const void *value, socklen_t length);
@@ -73,6 +74,7 @@ static const struct socket_ops udp_ops = {
 	.connect = udp_connect,
 	.sendto = udp_sendto,
 	.recvfrom = udp_recvfrom,
+	.recvfrom_info = udp_recvfrom_info,
 	.getsockname = udp_getsockname,
 	.getpeername = udp_getpeername,
 	.setsockopt = udp_setsockopt,
@@ -710,6 +712,9 @@ udp_send_ipv4(
 		checksum = 0xffffU;
 	wire_put16(udp->checksum, checksum);
 
+	/* The Type of Service byte the socket's IPv4 packets go with (IP_TOS). */
+	packet->traffic_class = inet_socket_send_class(&endpoint->inet, 0);
+
 	/* Sends it: unconfigured sources broadcast, others may wait for ARP. */
 	if (source == 0)
 		error = ipv4_output_source(device, destination, IPPROTO_UDP, source, packet);
@@ -834,6 +839,9 @@ udp_send_ipv6(
 		checksum = 0xffffU;
 	wire_put16(udp->checksum, checksum);
 
+	/* The traffic class the socket's IPv6 packets go with (IPV6_TCLASS). */
+	packet->traffic_class = inet_socket_send_class(&endpoint->inet, 1);
+
 	/* Sends it (neighbor discovery holds it until the next hop is known). */
 	error = ipv6_output(device, &source, destination, IPPROTO_UDP, 0U, packet);
 	if (device != NULL)
@@ -862,12 +870,39 @@ udp_recvfrom(
 	struct sockaddr *address,
 	socklen_t *address_length)
 {
+	struct socket_receive_info info;
+	ssize_t received;
+
+	/* The datagram, what it came with not asked for. */
+	received = udp_recvfrom_info(socket, buffer, length, flags, address, address_length, &info);
+
+	/* Reports the received length, or why nothing was received. */
+	return received;
+}
+
+/*
+ * Receives one queued datagram, its source address, and what it kept of
+ * what it came with (its traffic class, the time it was queued).
+ */
+static ssize_t
+udp_recvfrom_info(
+	struct socket *socket,
+	void *buffer,
+	size_t length,
+	int flags,
+	struct sockaddr *address,
+	socklen_t *address_length,
+	struct socket_receive_info *info)
+{
 	struct packet_buf *packet;
 	size_t copied;
 	socklen_t actual;
 	socklen_t output;
 	ssize_t result;
 	int error;
+
+	/* Nothing is given unless the datagram kept it. */
+	socket_receive_info_clear(info);
 
 	/* Rejects unsupported flags. */
 	if ((flags & ~(MSG_DONTWAIT | MSG_TRUNC)) != 0)
@@ -896,6 +931,9 @@ udp_recvfrom(
 		kern_memcpy(address, packet->source_address, output);
 		*address_length = actual;
 	}
+
+	/* What it kept of what it came with. */
+	socket_receive_info_take(packet, info);
 
 	/* With MSG_TRUNC the full datagram length is reported instead. */
 	if ((flags & MSG_TRUNC) != 0)
@@ -1140,6 +1178,9 @@ udp_input(
 	/* Names the sender in the packet's source address, IPv4-mapped for an IPv6 socket. */
 	inet_socket_peer_name(&best->inet, source, NULL, 0, source_port, packet->source_address, &packet->source_length);
 
+	/* Keeps what the socket asked to be given of it (IP_RECVTOS, SO_TIMESTAMP). */
+	inet_socket_receive_note(&best->inet, packet, packet);
+
 	/* Queues the datagram on the socket. */
 	error = socket_enqueue_packet(&best->inet.socket, packet);
 	socket_release(&best->inet.socket);
@@ -1287,6 +1328,9 @@ udp6_input(
 
 	/* Names the sender, with the interface of a link-local one. */
 	inet_socket_peer_name(&best->inet, 0, source, arrived, source_port, packet->source_address, &packet->source_length);
+
+	/* Keeps what the socket asked to be given of it (IPV6_RECVTCLASS, SO_TIMESTAMP). */
+	inet_socket_receive_note(&best->inet, packet, packet);
 
 	/* Queues the datagram on the socket. */
 	error = socket_enqueue_packet(&best->inet.socket, packet);

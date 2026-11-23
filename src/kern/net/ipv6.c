@@ -133,7 +133,7 @@ static int ipv6_options(struct packet_buf *packet, size_t start, size_t length, 
 static int ipv6_deliver(struct packet_buf *packet, uint8_t next_header, size_t field, const struct in6_addr *source, const struct in6_addr *destination);
 static int ipv6_next_hop(struct net_device **device, const struct in6_addr *destination, struct in6_addr *next_hop);
 static int ipv6_header_push(struct net_device *device, const struct in6_addr *source, const struct in6_addr *destination, uint8_t next_header, unsigned hop_limit, struct packet_buf *packet);
-static void ipv6_header_fill(struct ipv6_wire *header, const struct in6_addr *source, const struct in6_addr *destination, uint8_t next_header, unsigned hop_limit, size_t payload);
+static void ipv6_header_fill(struct ipv6_wire *header, const struct in6_addr *source, const struct in6_addr *destination, uint8_t next_header, unsigned hop_limit, uint8_t traffic_class, size_t payload);
 static void ipv6_interfaces_ensure(void);
 static void ipv6_interface_ensure(struct net_device *device);
 static struct ipv6_interface *ipv6_interface_locked(const struct net_device *device);
@@ -362,7 +362,7 @@ ipv6_output_way(
 	}
 
 	/* Its fields. */
-	ipv6_header_fill(header, source, destination, next_header, way->hop_limit, payload);
+	ipv6_header_fill(header, source, destination, next_header, way->hop_limit, packet->traffic_class, payload);
 	packet->l3_offset = (uint16_t)(packet->data - packet->storage);
 
 	/* A neighbor: resolved (or the packet held) by neighbor discovery. */
@@ -1741,14 +1741,14 @@ ipv6_header_push(
 		return ENOBUFS;
 
 	/* Its fields. */
-	ipv6_header_fill(header, source, destination, next_header, hop_limit, payload);
+	ipv6_header_fill(header, source, destination, next_header, hop_limit, packet->traffic_class, payload);
 	packet->l3_offset = (uint16_t)(packet->data - packet->storage);
 
 	/* Succeeded: the header is in place. */
 	return 0;
 }
 
-/* Writes an IPv6 header's fields: no traffic class or flow label, the payload's length. */
+/* Writes an IPv6 header's fields: the traffic class given, no flow label, the payload's length. */
 static void
 ipv6_header_fill(
 	struct ipv6_wire *header,
@@ -1756,11 +1756,21 @@ ipv6_header_fill(
 	const struct in6_addr *destination,
 	uint8_t next_header,
 	unsigned hop_limit,
+	uint8_t traffic_class,
 	size_t payload)
 {
 	/* Version 6 and the rest of the fields. */
 	kern_memset(header, 0, sizeof(*header));
-	header->version_class_flow[0] = 0x60U;
+
+	/*
+	 * The traffic class sits between the version and the flow label: its
+	 * high four bits in the first byte, its low four in the second
+	 * (RFC 8200 section 3).
+	 */
+	header->version_class_flow[0] = (uint8_t)(0x60U | (traffic_class >> 4));
+	header->version_class_flow[1] = (uint8_t)((traffic_class & 0x0fU) << 4);
+
+	/* The payload, the next header, the hop limit and the addresses. */
 	wire_put16(header->payload_length, (uint16_t)payload);
 	header->next_header = next_header;
 	header->hop_limit = (uint8_t)hop_limit;

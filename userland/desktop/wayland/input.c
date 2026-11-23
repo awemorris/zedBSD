@@ -830,6 +830,8 @@ kwl_pointer_warp(
 		move(context, outputs, &x, &y, &output);
 		server->pointer_x = x;
 		server->pointer_y = y;
+		server->pointer_fraction_x = 0;
+		server->pointer_fraction_y = 0;
 		server->pointer_output = output;
 		return;
 	}
@@ -848,9 +850,11 @@ kwl_pointer_warp(
 		kwl_cursor_box_warp(&server->cursor_box, NULL, move, context, &motion);
 	}
 
-	/* The main thread's view of the place. */
+	/* The main thread's view of the place (a warp leaves no part between units). */
 	server->pointer_x = motion.x;
 	server->pointer_y = motion.y;
+	server->pointer_fraction_x = motion.fraction_x;
+	server->pointer_fraction_y = motion.fraction_y;
 	server->pointer_output = motion.output;
 	server->pointer_warp = motion.warp;
 }
@@ -1007,6 +1011,7 @@ apply_touchpad_actions(
 	unsigned index;
 	int moved;
 	int taken;
+	int held;
 
 	/* Each action in order. */
 	actions = &pad->actions;
@@ -1036,6 +1041,11 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_SCROLL:
+			/* Two fingers' scrolling goes nowhere while the admin dialog shows (admin-ask.c). */
+			held = kwl_admin_ask_holds(server);
+			if (held)
+				break;
+
 			/* On the lock screen two fingers up may open it: their own way, the scrolling's direction turned back (ws187-p002). */
 			if (server->locked) {
 				down_um = (int64_t)action->vertical * KWL_TOUCHPAD_NOTCH_UM;
@@ -1055,6 +1065,11 @@ apply_touchpad_actions(
 			activity = 1;
 			break;
 		case KWL_TOUCHPAD_GESTURE:
+			/* A gesture is nothing's while the admin dialog shows (admin-ask.c). */
+			held = kwl_admin_ask_holds(server);
+			if (held)
+				break;
+
 			/* On the lock screen a touch's end may be a gesture up far enough to open it (ws187-p002). */
 			if (server->locked)
 				lock_pad_gesture(server, action);
@@ -1697,9 +1712,11 @@ apply_motion(
 	if (motion->warp != server->pointer_warp)
 		return 0;
 
-	/* The view already has this place. */
+	/* The view already has this place, to its part between units. */
 	if (motion->x == server->pointer_x &&
 	    motion->y == server->pointer_y &&
+	    motion->fraction_x == server->pointer_fraction_x &&
+	    motion->fraction_y == server->pointer_fraction_y &&
 	    motion->output == server->pointer_output)
 		return 0;
 
@@ -1720,6 +1737,8 @@ apply_motion(
 	old_y = server->pointer_y;
 	server->pointer_x = motion->x;
 	server->pointer_y = motion->y;
+	server->pointer_fraction_x = motion->fraction_x;
+	server->pointer_fraction_y = motion->fraction_y;
 	server->pointer_output = motion->output;
 	kwl_seat_motion(server, time);
 	kwl_damage_pointer(server, old_x, old_y);

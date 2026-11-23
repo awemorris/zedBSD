@@ -6,7 +6,7 @@
  */
 
 /*
- * The GHCI device's command processor: CP_HEAP, the ring, the fence
+ * The GHCI device's command processor: the ring, the fence
  * page, the gate, the submissions and their tickets, and the interrupt.
  *
  * The ring is host memory the driver alone writes; RING_WPTR is the
@@ -40,26 +40,23 @@
 #define IRQ_RECOVER			(GHCI_IRQ_FAULT | GHCI_IRQ_WATCHDOG)
 #define IRQ_TAKEN			(GHCI_IRQ_FENCE | IRQ_RECOVER)
 
-/* The end of CP_HEAP at most: a page below 4 GiB. */
-#define HEAP_END			0xfffff000ULL
-
 /* Every bit of IRQ_STATUS, which the start clears. */
 #define IRQ_ALL				0xffffffffU
 
-static int alloc_heap(struct ghci_device *device);
 static int liveness(struct ghci_device *device, int want_interrupt);
 static void release_memory(struct ghci_device *device);
 static int ring_room(struct ghci_device *device, uint32_t need, int log_entry);
 static void ring_store(struct ghci_device *device, uint32_t index, uint32_t word);
 static void retire_log(struct ghci_device *device);
 static int packet_length(const uint32_t *packets, uint32_t left, uint32_t *length);
+static void fault_ring_take(struct ghci_device *device, struct ghci_fault_record *record);
 static void record_fault(struct ghci_device *device, uint32_t irq_status, uint64_t generation);
 static void take_fence(struct ghci_device *device, uint32_t irq_status, uint64_t generation);
 static enum ghci_ticket_state ticket_state(struct ghci_device *device, const struct ghci_ticket *ticket);
 static void log_registers(struct ghci_device *device, const char *what);
 
 /*
- * Starts the command processor: CP_HEAP, the ring, the fence page and
+ * Starts the command processor: the ring, the fence page and
  * the capability block's buffer, the interrupt, bus mastering, RUN and
  * the first fence.  The watchdog is set once the capability block is
  * read (ghci_cp_set_watchdog()).
@@ -73,11 +70,6 @@ ghci_cp_start(
 {
 	unsigned long irq;
 	int error;
-
-	/* CP_HEAP, which the processor's page-table walker takes its tables from. */
-	error = alloc_heap(device);
-	if (error != 0)
-		return error;
 
 	/* The ring's size: the glue's, or the default; a power of two between 4 KiB and 16 MiB. */
 	if (device->ring_bytes == 0U)
@@ -113,7 +105,7 @@ ghci_cp_start(
 	device->submit_count = 0U;
 	device->recovery_placing = 0;
 
-	/* Session 0's record and what CP_HEAP may hold. */
+	/* Session 0's record; its page table comes once the ring runs. */
 	ghci_vm_init(device);
 
 	/* The ring's place and size, written while the processor is idle. */
@@ -167,7 +159,7 @@ ghci_cp_start(
 		device->bus_master_set = 1;
 	}
 
-	/* The ring runs; the processor builds session 0's root in CP_HEAP. */
+	/* The ring runs, with the MMU off until the driver starts it. */
 	irq = spin_lock_irqsave(&device->irq_lock);
 
 	device->state = GHCI_STATE_RUNNING;
@@ -229,7 +221,7 @@ ghci_cp_stop(
 			kern_logf("ghci: %s: processor did not halt at the stop\n", device->name);
 	}
 
-	/* The reset stops every access to the ring and CP_HEAP. */
+	/* The reset stops every access to the ring and the page tables. */
 	ghci_write(device, GHCI_REG_CTRL, GHCI_CTRL_RESET);
 	error = ghci_wait_register(device, GHCI_REG_CTRL, GHCI_CTRL_RESET, 0U, device->reset_wait_ms);
 	reset_done = 1;
@@ -1093,53 +1085,6 @@ ghci_cp_interrupt(
 }
 
 /*
- * Takes CP_HEAP: the bound of every session's tables on a GPU with a
- * page-table walker, halved while it cannot be had, or session 0's root
- * alone on one without.  CP_HEAP is 32-bit physical memory.
- */
-static int
-alloc_heap(
-	struct ghci_device *device)
-{
-	uint64_t bytes;
-	int walker;
-	int error;
-
-	/* The size the walker may need at most, or the flat root. */
-	walker = ghci_caps_has(&device->caps, GHCI_HAS_HW_WALKER);
-	bytes = GHCI_FLAT_HEAP_BYTES;
-	if (walker)
-		bytes = ghci_heap_device_bytes(device->caps.va_bits);
-
-	/*
-	 * Halves the size while the memory cannot be had, down to the smallest
-	 * the driver settles for.  The heap ends a page below 4 GiB at most,
-	 * so that its exclusive CP_HEAP_LIMIT is a 32-bit address.
-	 */
-	for (;;) {
-		error = ghci_memory_alloc(device, bytes, HEAP_END, &device->heap);
-		if (error == 0)
-			break;
-		if (!walker || bytes / 2U < GHCI_HEAP_MIN_BYTES) {
-			kern_logf("ghci: %s: no CP_HEAP of %llu bytes\n", device->name, (unsigned long long)bytes);
-			return error;
-		}
-		bytes /= 2U;
-	}
-
-	/*
-	 * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-	 * 11.2, CP_HEAP_BASE and the exclusive CP_HEAP_LIMIT, 4 KiB aligned
-	 * 32-bit physical addresses, written while the processor is idle).
-	 */
-	ghci_write(device, GHCI_REG_CP_HEAP_BASE, (uint32_t)device->heap->bus);
-	ghci_write(device, GHCI_REG_CP_HEAP_LIMIT, (uint32_t)(device->heap->bus + device->heap->bytes));
-
-	/* Succeeded: CP_HEAP is set. */
-	return 0;
-}
-
-/*
  * Places one fence of the driver's and waits a bounded time for the
  * fence page to reach it, and with want_interrupt for its interrupt too.
  * Returns 0, or ETIMEDOUT.
@@ -1199,7 +1144,7 @@ liveness(
 }
 
 /*
- * Gives back the device's own memory: CP_HEAP, the ring, the fence page,
+ * Gives back the device's own memory: the ring, the fence page, the fault log ring,
  * the capability block's buffer and the quarantine.
  */
 static void
@@ -1209,10 +1154,10 @@ release_memory(
 	int error;
 
 	/* Each run, if it was taken; one that cannot be given back is kept in the quarantine. */
-	error = ghci_memory_free(device, device->heap);
+	error = ghci_memory_free(device, device->fault_ring);
 	if (error != 0)
-		ghci_memory_quarantine(device, device->heap);
-	device->heap = NULL;
+		ghci_memory_quarantine(device, device->fault_ring);
+	device->fault_ring = NULL;
 	error = ghci_memory_free(device, device->ring.memory);
 	if (error != 0)
 		ghci_memory_quarantine(device, device->ring.memory);
@@ -1416,6 +1361,85 @@ ticket_state(
 }
 
 /*
+ * Takes the records the processor wrote to the fault log ring since the
+ * last look, keeping the first in record when the registers latched no
+ * fault.  With the ring set up, a client session's fault is written there
+ * and not latched in FAULT_INFO and FAULT_ADDR; the session it names is
+ * the recovery's culprit.  A record whose sequence is not the next one
+ * expected is not written yet, or was overwritten; either ends the look,
+ * and the recovery's reset sets the ring up again from sequence 1.
+ *
+ * Values referenced: lumiere-gpu 875e54b3 ghci.md (section 3.3, a client
+ * session's fault with the ring enabled is written to the ring without
+ * FAULT_INFO and FAULT_ADDR; section 10, GhciFaultRecord of 32 bytes:
+ * seq, fault_addr, timestamp, session_id and fault_info_word, at slot
+ * (seq - setup_next_seq) % capacity_entries, the next seq 1 after
+ * CMD_FAULT_LOG_SETUP following a reset).
+ */
+static void
+fault_ring_take(
+	struct ghci_device *device,
+	struct ghci_fault_record *record)
+{
+	const volatile uint32_t *word;
+	unsigned long irq;
+	uint64_t expected;
+	uint64_t seq;
+	uint32_t slot;
+	uint32_t taken;
+	uint32_t base;
+
+	/* A GPU without the ring (no walker, or before the MMU starts) writes no record. */
+	if (device->fault_ring == NULL)
+		return;
+
+	/* The sequence the driver expects next. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	expected = device->fault_seq;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Each record written since, up to one ring's worth. */
+	for (taken = 0U; taken < GHCI_FAULT_RING_ENTRIES; taken++) {
+		/* The record's slot; the ring was set up with its first sequence 1. */
+		slot = (uint32_t)((expected - 1U) % GHCI_FAULT_RING_ENTRIES);
+		base = slot * GHCI_FAULT_RECORD_BYTES;
+		word = (const volatile uint32_t *)(const void *)(device->fault_ring->view + base);
+		seq = word[GHCI_FAULT_RECORD_SEQ / 4U];
+		seq |= (uint64_t)word[GHCI_FAULT_RECORD_SEQ / 4U + 1U] << 32;
+		kern_io_read_barrier();
+
+		/* A slot that does not hold the expected record is not written yet. */
+		if (seq != expected)
+			break;
+
+		/* The first record fills a fault the registers did not latch. */
+		if (record->fault_info == 0U) {
+			record->fault_info = word[GHCI_FAULT_RECORD_INFO / 4U];
+			record->fault_address = word[GHCI_FAULT_RECORD_ADDRESS / 4U];
+			record->fault_address |= (uint64_t)word[GHCI_FAULT_RECORD_ADDRESS / 4U + 1U] << 32;
+		}
+
+		/* The session the processor names, for the log. */
+		kern_logf("ghci: %s: fault record %llu: session %u, fault %08x at %llx\n",
+		    device->name,
+		    (unsigned long long)seq,
+		    (unsigned)word[GHCI_FAULT_RECORD_SESSION / 4U],
+		    (unsigned)word[GHCI_FAULT_RECORD_INFO / 4U],
+		    (unsigned long long)record->fault_address);
+		expected++;
+	}
+
+	/* The next sequence the driver looks for. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	device->fault_seq = expected;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+}
+
+/*
  * Records a fault or a watchdog expiry for the service thread and closes
  * the gate.  The registers are read before the interrupt's lock; the
  * record carries the recovery generation the interrupt saw it in, so that
@@ -1441,9 +1465,10 @@ record_fault(
 	record.fault_address |= (uint64_t)high << 32;
 	record.session_active = ghci_read(device, GHCI_REG_SESSION_ACTIVE);
 	record.rptr = ghci_read(device, GHCI_REG_RING_RPTR);
-	record.cp_pc = ghci_read(device, GHCI_REG_DIAG_CP_PC);
-	record.cp_status = ghci_read(device, GHCI_REG_DIAG_CP_STATUS);
 	record.fence = ghci_fence_read(device);
+
+	/* A client session's fault, which the fault log ring has instead of the registers. */
+	fault_ring_take(device, &record);
 
 	/*
 	 * Closes the gate, counts the fault (the recovery's last check sees a
@@ -1515,22 +1540,22 @@ log_registers(
 {
 	uint32_t status;
 	uint32_t fault_info;
-	uint32_t cp_pc;
-	uint32_t cp_status;
+	uint32_t address_low;
+	uint32_t address_high;
 	uint32_t rptr;
 
-	/* The state, the fault, and the processor's place. */
+	/* The state, the fault and its address, and where in the ring the processor is. */
 	status = ghci_read(device, GHCI_REG_STATUS);
 	fault_info = ghci_read(device, GHCI_REG_FAULT_INFO);
-	cp_pc = ghci_read(device, GHCI_REG_DIAG_CP_PC);
-	cp_status = ghci_read(device, GHCI_REG_DIAG_CP_STATUS);
+	address_low = ghci_read(device, GHCI_REG_FAULT_ADDR_LO);
+	address_high = ghci_read(device, GHCI_REG_FAULT_ADDR_HI);
 	rptr = ghci_read(device, GHCI_REG_RING_RPTR);
-	kern_logf("ghci: %s: %s (status %08x, fault %08x, cp pc %08x status %08x, rptr %u)\n",
+	kern_logf("ghci: %s: %s (status %08x, fault %08x at %08x%08x, rptr %u)\n",
 	    device->name,
 	    what,
 	    (unsigned)status,
 	    (unsigned)fault_info,
-	    (unsigned)cp_pc,
-	    (unsigned)cp_status,
+	    (unsigned)address_high,
+	    (unsigned)address_low,
 	    (unsigned)rptr);
 }

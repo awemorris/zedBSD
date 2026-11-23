@@ -1,0 +1,8 @@
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+plugins {
+	id "com.android.application" version "9.5.2" apply false
+}

@@ -164,6 +164,15 @@ extern "C" {
  * 108: a network link's IPv6 addresses and router, kl_network_link's inet6_count, inet6 and router6
  * 109: a new size shown by another thread, kl_window_set_configure_deferred, kl_window_configure_take
  *      and _ack (struct kl_window_configure), and the size during Windows' modal resize, kl_window_on_resize
+ * 110: a display's resolution and refresh, kl_system_displays_modes, _resolution and _set_, _keep_, _revert_
+ *      and _reset_resolution (struct kl_display_mode, KL_DISPLAY_MODE_* and KL_DISPLAY_RESOLUTION_*)
+ * 111: a system action run as the administrator once the person allowed it, kl_process_start_admin
+ *      (struct kl_admin_options), KL_PROCESS_REFUSED, KL_PROCESS_LOST, KL_PROCESS_READY_START and KL_ADMIN_*
+ * 112: the scale a window and a canvas are drawn at, KL_SCALE_BASE, kl_window_scale and KL_WINDOW_SCALE,
+ *      kl_canvas's scale, kl_canvas_set_scale and kl_canvas_logical
+ * 113: a display's scale, kl_system_displays_scale and kl_system_displays_set_scale (struct kl_display_scale,
+ *      KL_DISPLAY_SCALES_MAX and KL_DISPLAY_SCALE_WHY_*)
+ * 114: a window that follows the compositor's scale, kl_window_follow_scale, and the widgets' scale, kl_ui_set_scale
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -173,7 +182,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 110U
+#define KL_VERSION 114U
 
 /*
  * Reports the interface version of the library that was loaded.

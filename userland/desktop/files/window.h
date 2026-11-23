@@ -76,17 +76,30 @@ struct fm_window {
 	/* Whether this is the desktop's surface (files --desktop, ws094-p003) instead of a window. */
 	int desktop;
 
-	/* The size the compositor asked for, and whether it changed since it was last taken. */
+	/*
+	 * The size the compositor asked for, in pixels, and whether it changed
+	 * since it was last taken.
+	 */
 	uint32_t width;
 	uint32_t height;
 	int resized;
+
+	/*
+	 * The scale the window is drawn at, in 96ths (KL_SCALE_BASE until the
+	 * compositor tells another), and whether it changed since the main loop
+	 * last took it.  A window follows the compositor's scale; the desktop's
+	 * surface stays at KL_SCALE_BASE.  The inputs queued are in units, the
+	 * window's pixels over the scale.
+	 */
+	unsigned scale;
+	int rescaled;
 
 	/* Whether the compositor asked to close, the window has the focus, is maximized. */
 	int closed;
 	int activated;
 	int maximized;
 
-	/* The pointer's place, the serial of its last press, and the modifiers held (FM_MOD_*). */
+	/* The pointer's place (in units), the serial of its last press, and the modifiers held (FM_MOD_*). */
 	int pointer_x;
 	int pointer_y;
 	uint32_t button_serial;
@@ -159,6 +172,7 @@ void fm_window_close(struct fm_window *window);
 void fm_window_action(struct fm_window *window, uint32_t action);
 void fm_window_minimize(struct fm_window *window);
 void fm_window_zoom(struct fm_window *window);
+int fm_window_pixel(const struct fm_window *window, int units);
 struct fm_event *fm_window_push(struct fm_window *window, unsigned type);
 uint64_t fm_clock(void);
 
@@ -187,13 +201,14 @@ void fm_titlebar_close(struct fm_titlebar *titlebar);
 
 /*
  * The window's glass (glass.c): the window, whether it is glass, and the
- * panels it last sent.
+ * panels it last sent (in units) with the scale they were sent at.
  */
 struct fm_glass {
 	struct fm_window *window;
 	int on;
 	struct fm_panel shown[FM_PANELS];
 	size_t shown_count;
+	unsigned shown_scale;
 	int sent;
 };
 

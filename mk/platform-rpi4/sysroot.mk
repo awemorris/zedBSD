@@ -38,14 +38,17 @@ $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
 $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	@mkdir -p $(SYSROOT_LIB)/zedbsd/arm64 $(SYSROOT_LIB)/zedbsd/rpi4 $(SYSROOT_LIB)/zedbsd/aarch64 $(BUILD)/dynamic
 	cp -f $(LIBC_OUT_DIR)/libc.a $(LIBC_OUT_DIR)/libc.so $(SYSROOT_LIB)/
-	cp -f $(LIBC_OUT_DIR)/libm.a $(LIBC_OUT_DIR)/libm.so $(SYSROOT_LIB)/
+	cp -f $(LIBC_OUT_DIR)/libm.a $(SYSROOT_LIB)/
+	@# No libm.so is kept beside the libraries, so that -lm finds the
+	@# empty libm.a and a program needs only libc.so.
+	rm -f $(SYSROOT_LIB)/libm.so $(BUILD)/dynamic/libm.so
 	cp -f $(LIBC_OUT_DIR)/libutil.a $(LIBC_OUT_DIR)/libutil.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libc.o $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/crt0.o $(LIBC_OUT_DIR)/crt1.o $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libzedbsd-compiler-rt.a $(LIBC_OUT_DIR)/libzedbsd-compiler-rt.o $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libclang_rt.builtins.a $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/ld.so $(SYSROOT_LIB)/
-	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
+	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
 	cp -f mk/platform-rpi4/user.ld mk/platform-rpi4/vmunix.ld $(SYSROOT_LIB)/zedbsd/arm64/
 	cp -f mk/platform-rpi4/user.ld mk/platform-rpi4/vmunix.ld $(SYSROOT_LIB)/zedbsd/rpi4/
 	cp -f mk/platform-rpi4/user.ld mk/platform-rpi4/vmunix.ld $(SYSROOT_LIB)/zedbsd/aarch64/

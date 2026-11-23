@@ -3,4 +3,4 @@
 firmware-platform:
 
 firmware-licenses-platform:
-	$(MAKE) -f mk/userland.mk firmware-licenses
+	$(MAKE) -f mk/userland.mk firmware-licenses PLATFORM=$(PLATFORM) BUILD=$(BUILD) ZEDBSD_CONFIGMK=$(ZEDBSD_CONFIGMK) TOPLEVEL_BUILD=$(TOPLEVEL_BUILD)

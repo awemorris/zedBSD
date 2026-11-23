@@ -7,7 +7,7 @@
 
 /*
  * A unit's tarball, unpacked into the installed root: read whole from one
- * descriptor while its SHA-256 is taken, checked against the index, its
+ * descriptor (its place in the downloaded system) while its SHA-256 is taken, checked against the index, its
  * gzip wrapper undone, and its ustar entries made one path component at a
  * time under the root, never through a symbolic link.
  */
@@ -37,5 +37,6 @@ typedef int (*unpack_entry_done)(void *context, const char *path, enum unpack_ki
 int unpack_read_whole(int fd, uint64_t expected_bytes, const uint8_t expected[32], uint8_t **data, size_t *length);
 int unpack_gunzip(const uint8_t *data, size_t length, uint64_t limit, uint8_t **output, size_t *output_length);
 int unpack_tar(int root, const uint8_t *archive, size_t length, const struct installer_index *index, unsigned unit, unpack_entry_done done, void *context);
+int unpack_tar_member(const uint8_t *archive, size_t length, const char *path, const uint8_t **data, uint64_t *bytes);
 
 #endif

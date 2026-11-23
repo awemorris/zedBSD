@@ -204,12 +204,39 @@ kwl_shm_image_destroy(
 }
 
 /*
- * Makes the compositor's arrow cursor: white with a black edge, its tip the
- * hotspot at (0, 0).
+ * Makes the compositor's arrow cursor at the output's scale (kwl_arrow_make):
+ * the cursor shapes are made at the same scale (cursor.c).  Returns 0, or
+ * the errno value of the image.
  */
 int
 kwl_arrow_create(
 	struct kwl_server *server)
+{
+	unsigned scale;
+	int error;
+
+	/* The scale the cursor's images are drawn at. */
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+	server->cursor_scale120 = scale;
+
+	/* Succeeded or not: the arrow at it. */
+	error = kwl_arrow_make(server, scale, &server->arrow);
+	return error;
+}
+
+/*
+ * Makes the compositor's arrow cursor at a scale into *made: white with a
+ * black edge, its tip the hotspot at (0, 0), each pixel taking the logical
+ * unit its middle lies in (so the arrow keeps its square steps).  Returns
+ * 0, ENOMEM or EIO (*made untouched).
+ */
+int
+kwl_arrow_make(
+	struct kwl_server *server,
+	unsigned scale120,
+	struct kwl_import **made)
 {
 	static const char *const shape[ARROW_HEIGHT] = {
 		"X           ",
@@ -234,28 +261,40 @@ kwl_arrow_create(
 	};
 	struct kwl_import *arrow;
 	uint32_t *row;
+	uint32_t width;
+	uint32_t height;
 	uint32_t x;
 	uint32_t y;
+	uint32_t unit_x;
+	uint32_t unit_y;
+	char drawn;
 	VkResult result;
+
+	/* The arrow's pixels at the scale. */
+	width = (uint32_t)kwl_scale_snap((int32_t)ARROW_WIDTH, scale120);
+	height = (uint32_t)kwl_scale_snap((int32_t)ARROW_HEIGHT, scale120);
 
 	/* A linear, host-visible image the CPU writes once. */
 	arrow = calloc(1, sizeof(*arrow));
 	if (arrow == NULL)
 		return ENOMEM;
-	result = image_create(server->compose, ARROW_WIDTH, ARROW_HEIGHT, server->compose->sampler, arrow);
+	result = image_create(server->compose, width, height, server->compose->sampler, arrow);
 	if (result != VK_SUCCESS) {
 		kwl_host_image_release(server->compose, arrow);
 		free(arrow);
 		return EIO;
 	}
 
-	/* Black edge, white inside, transparent elsewhere (B, G, R, A in memory). */
-	for (y = 0; y < ARROW_HEIGHT; y++) {
+	/* Black edge, white inside, transparent elsewhere (B, G, R, A in memory), each pixel from its unit. */
+	for (y = 0; y < height; y++) {
 		row = (uint32_t *)((unsigned char *)arrow->map + y * arrow->row_pitch);
-		for (x = 0; x < ARROW_WIDTH; x++) {
-			if (shape[y][x] == 'X')
+		unit_y = ((2U * y + 1U) * ARROW_HEIGHT) / (2U * height);
+		for (x = 0; x < width; x++) {
+			unit_x = ((2U * x + 1U) * ARROW_WIDTH) / (2U * width);
+			drawn = shape[unit_y][unit_x];
+			if (drawn == 'X')
 				row[x] = 0xff000000U;
-			else if (shape[y][x] == '.')
+			else if (drawn == '.')
 				row[x] = 0xffffffffU;
 			else
 				row[x] = 0x00000000U;
@@ -264,7 +303,7 @@ kwl_arrow_create(
 
 	/* Succeeded: drawn with alpha (the other cursor shapes are made when first asked for, cursor.c). */
 	arrow->draw = KWL_DRAW_ALPHA;
-	server->arrow = arrow;
+	*made = arrow;
 	return 0;
 }
 

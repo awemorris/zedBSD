@@ -26,6 +26,14 @@
  * terminal: until it reports its end, at most PROCESS_DRAIN_MS) and then
  * tells the end, after the output.
  *
+ * A system action (kl_process_start_admin) is no child of the
+ * application's: the system hands its descriptors over (the input's write
+ * end, the output's and the error's read ends, and its status's read end).
+ * The same reading thread serves the first three; in place of the waiting
+ * thread, kl-process-status reads the one line its end is told in
+ * ("EXIT n" or "SIGNAL n") up to the status's end, and a status without it
+ * is a lost end.
+ *
  * A launch (kl_launch) is started through a child that makes a session of
  * its own, starts the program in a child of it and ends at once: the
  * application reaps that child, and the program, whose parent is gone, is
@@ -109,6 +117,8 @@ static int process_io_read(struct kl_process *process, int *descriptor, struct k
 static void process_io_write(struct kl_process *process, int *descriptor);
 static void process_io_finish(struct kl_process *process);
 static uint64_t process_now_ms(void);
+static void *process_status_run(void *argument);
+static int *process_admin_slot(struct kl_process *process, unsigned which);
 
 /*
  * Starts a process's child and its threads.  Returns 0, or an errno value:
@@ -341,9 +351,128 @@ void
 keiui_child_end(
 	struct kl_process *process)
 {
-	/* The control pipe. */
+	/* The control pipe, and what a system action that never started still holds. */
 	process_close(&process->child.control[0]);
 	process_close(&process->child.control[1]);
+	keiui_child_drop(process);
+}
+
+/*
+ * Makes a system action's control pipe before it is asked, so that what is
+ * written before its start wakes its reading thread once it runs.
+ * Returns 0 or an errno value.
+ */
+int
+keiui_child_await(
+	struct kl_process *process)
+{
+	int error;
+
+	/* The pipe. */
+	error = process_pipe(process->child.control);
+	if (error != 0)
+		return error;
+
+	/* Neither side blocks on it. */
+	(void)fcntl(process->child.control[0], F_SETFL, O_NONBLOCK);
+	(void)fcntl(process->child.control[1], F_SETFL, O_NONBLOCK);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Keeps a descriptor a system action's start brings: its input and its
+ * status always, its output and its error when the process uses them.
+ * One of a kind it does not use, or a second of one kind, is closed.
+ */
+void
+keiui_child_take(
+	struct kl_process *process,
+	unsigned which,
+	int descriptor)
+{
+	int *slot;
+
+	/* Where it goes. */
+	slot = process_admin_slot(process, which);
+	if (slot == NULL || *slot >= 0) {
+		keiui_descriptor_close(descriptor);
+		return;
+	}
+
+	/* Kept, not passed on. */
+	(void)fcntl(descriptor, F_SETFD, FD_CLOEXEC);
+	*slot = descriptor;
+}
+
+/*
+ * Closes the descriptors a system action's start brought (a refusal, a
+ * withdrawal, a start that cannot be served).
+ */
+void
+keiui_child_drop(
+	struct kl_process *process)
+{
+	/* Each of them. */
+	process_close(&process->child.input);
+	process_close(&process->child.output);
+	process_close(&process->child.error);
+	process_close(&process->child.status);
+}
+
+/*
+ * Serves a system action that started: the status's thread, then the
+ * reading thread on the descriptors it brought.  Returns 0, EPROTO when
+ * its input or its status did not come (its end cannot be known), or the
+ * thread's error (then nothing serves it).
+ */
+int
+keiui_child_adopt(
+	struct kl_process *process)
+{
+	int error;
+
+	/* The input is its life line, the status tells its end. */
+	if (process->child.input < 0 || process->child.status < 0)
+		return EPROTO;
+
+	/* The application's ends do not block; the status is read by a thread that waits. */
+	(void)fcntl(process->child.input, F_SETFL, O_NONBLOCK);
+	if (process->child.output >= 0)
+		(void)fcntl(process->child.output, F_SETFL, O_NONBLOCK);
+	if (process->child.error >= 0)
+		(void)fcntl(process->child.error, F_SETFL, O_NONBLOCK);
+
+	/* The thread that reads the end, with its reference. */
+	process->references++;
+	error = keiui_thread_start(process_status_run, process);
+	if (error != 0) {
+		process->references--;
+		return error;
+	}
+
+	/* The thread that moves the bytes; without it the streams close (the program stops) and the status tells the end. */
+	process->references++;
+	error = keiui_thread_start(process_io_run, process);
+	if (error != 0) {
+		process->references--;
+		process_io_finish(process);
+	}
+
+	/* Succeeded: it is served. */
+	return 0;
+}
+
+/* Closes a descriptor that has nowhere to go. */
+void
+keiui_descriptor_close(
+	int descriptor)
+{
+	/* Open ones only. */
+	if (descriptor < 0)
+		return;
+	(void)close(descriptor);
 }
 
 /*
@@ -1372,4 +1501,97 @@ process_now_ms(void)
 	/* The monotonic clock. */
 	(void)clock_gettime(CLOCK_MONOTONIC, &now);
 	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+/*
+ * The thread that waits for a system action's end: the status read up to
+ * its end, the end noted from its line (lost without one) as a reaped
+ * process's, then the reading thread (or, when it is done, the
+ * application) told.
+ */
+static void *
+process_status_run(
+	void *argument)
+{
+	struct kl_process *process;
+	char line[KEIUI_STATUS_LINE];
+	size_t length;
+	ssize_t got;
+	char rest[64];
+	unsigned how;
+	int code;
+
+	/* The process; only this thread reads its status. */
+	keiui_thread_name("kl-process-status");
+	process = argument;
+
+	/* The status up to its end: the first line kept, the rest read and dropped. */
+	length = 0;
+	for (;;) {
+		if (length < sizeof(line) - 1U)
+			got = read(process->child.status, line + length, sizeof(line) - 1U - length);
+		else
+			got = read(process->child.status, rest, sizeof(rest));
+		if (got < 0 && errno == EINTR)
+			continue;
+		if (got <= 0)
+			break;
+		if (length < sizeof(line) - 1U)
+			length += (size_t)got;
+	}
+	line[length] = '\0';
+
+	/* How it ended, as the line tells. */
+	keiui_process_status_parse(line, &how, &code);
+
+	/* Noted under the lock; the status closes. */
+	keiui_lock_take(&process->lock);
+
+	process_close(&process->child.status);
+	process->how = how;
+	process->code = code;
+	process->reaped = 1;
+
+	/* With its streams closed already (the reading thread is done) the end is told now. */
+	if (process->child.input < 0 && process->child.output < 0 && process->child.error < 0) {
+		process->ready |= KL_PROCESS_READY_EXIT;
+		keiui_process_tell(process);
+	}
+
+	keiui_lock_give(&process->lock);
+
+	/* The reading thread reads what is left, then tells the end. */
+	keiui_child_poke(process);
+	keiui_process_release(process);
+	return NULL;
+}
+
+/* Finds where a system action keeps a descriptor of a kind (KEIUI_ADMIN_*), NULL for one it does not use. */
+static int *
+process_admin_slot(
+	struct kl_process *process,
+	unsigned which)
+{
+	/* Each kind. */
+	switch (which) {
+	case KEIUI_ADMIN_INPUT:
+		return &process->child.input;
+	case KEIUI_ADMIN_OUTPUT:
+		/* Only when the process reads it. */
+		if ((process->streams & KL_PROCESS_OUTPUT) == 0U)
+			return NULL;
+		return &process->child.output;
+	case KEIUI_ADMIN_ERROR:
+		/* Only when the process reads it. */
+		if ((process->streams & KL_PROCESS_ERROR) == 0U)
+			return NULL;
+		return &process->child.error;
+	case KEIUI_ADMIN_STATUS:
+		return &process->child.status;
+	default:
+		break;
+	}
+
+	/* No such kind. */
+	return NULL;
 }

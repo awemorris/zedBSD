@@ -1,0 +1,54 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * mikuterm.exe's resources: its manifest (for a toolchain whose linker does
+ * not make one: MIKUTERM_MANIFEST_RESOURCE), its icon (id 1, the first
+ * icon, which Windows shows for the program and libkeiland gives its
+ * windows; made by make-icon.py) and its version.  The
+ * version's numbers come from the build (mikuterm-version.h, written from
+ * the project's version).
+ */
+
+#include <winver.h>
+
+#include "mikuterm-version.h"
+
+#ifdef MIKUTERM_MANIFEST_RESOURCE
+1 24 "mikuterm.manifest"
+#endif
+
+1 ICON "mikuterm.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION MIKUTERM_VERSION_MAJOR, MIKUTERM_VERSION_MINOR, MIKUTERM_VERSION_PATCH, 0
+PRODUCTVERSION MIKUTERM_VERSION_MAJOR, MIKUTERM_VERSION_MINOR, MIKUTERM_VERSION_PATCH, 0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName", "Awe Morris"
+			VALUE "FileDescription", "mikuterm (Micro Unicode Terminal)"
+			VALUE "FileVersion", MIKUTERM_VERSION_TEXT
+			VALUE "InternalName", "mikuterm"
+			VALUE "LegalCopyright", "(C) 2026 Awe Morris"
+			VALUE "OriginalFilename", "mikuterm.exe"
+			VALUE "ProductName", "mikuterm"
+			VALUE "ProductVersion", MIKUTERM_VERSION_TEXT
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x0409, 1200
+	END
+END

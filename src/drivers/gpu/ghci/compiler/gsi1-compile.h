@@ -34,9 +34,13 @@
 /* The input attachments a fragment program may read (maxPerStageDescriptorInputAttachments). */
 #define GHCI_GSI1_INPUT_ATTACHMENTS	8U
 
-/* The texture and sampler slots of a pipeline (sets 0 and 1), the resource table's entries, and the dynamic offsets. */
-#define GHCI_GSI1_TEXTURE_SLOTS		16U
-#define GHCI_GSI1_SAMPLER_SLOTS		16U
+/*
+ * The texture and sampler slots of a pipeline (the entries of set 0's
+ * texture and sampler tables a texture instruction's immediate index
+ * reaches), the resource table's entries, and the dynamic offsets.
+ */
+#define GHCI_GSI1_TEXTURE_SLOTS		64U
+#define GHCI_GSI1_SAMPLER_SLOTS		64U
 #define GHCI_GSI1_RESOURCES		128U
 #define GHCI_GSI1_DYNAMIC_OFFSETS	32U
 

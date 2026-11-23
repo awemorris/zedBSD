@@ -224,7 +224,8 @@ ghci_vk_meta_compile(
 /*
  * Finds one of the driver's transfer programs placed in a device's code
  * heap, compiling it once for the GPU and placing it once for the device
- * at its first use.  Returns 0 with the placed program, ENOMEM, EIO (no
+ * at its first use (the end of a command buffer places the programs it
+ * needs beforehand).  Returns 0 with the placed program, ENOMEM, EIO (no
  * room could be made in the heap), or ENOTSUP (the compiler refuses it,
  * or its pipeline state cannot hold it; the GPU remembers that, and the
  * kind is not compiled again).
@@ -426,8 +427,9 @@ ghci_vk_meta_table(
 }
 
 /*
- * Writes the binds of a transfer: its pipeline, and its resource table
- * at the GPU address table.  Returns the dwords written
+ * Writes the binds of a transfer: its pipeline, and the address of its
+ * resource table (at the GPU address table) in the bank words of set 2
+ * where the program reads it.  Returns the dwords written
  * (GHCI_VK_META_BIND_DWORDS).
  */
 uint32_t
@@ -436,11 +438,16 @@ ghci_vk_meta_bind(
 	uint64_t table,
 	uint32_t *words)
 {
+	uint32_t address[2];
 	uint32_t dwords;
 
-	/* The program, then its table of set 2. */
+	/* The program. */
 	dwords = ghci_cmd_bind_pipeline(words, pipeline->pso_va);
-	dwords += ghci_cmd_bind_descriptor_table(&words[dwords], GSI1_ABI_SET_RESOURCES, table, pipeline->resource_bytes / GSI1_ABI_RESOURCE_UNIT);
+
+	/* The table's address, its low word then its high word. */
+	address[0] = (uint32_t)table;
+	address[1] = (uint32_t)(table >> 32);
+	dwords += ghci_cmd_load_const(&words[dwords], GSI1_ABI_BANK_SET(GSI1_ABI_SET_RESOURCES), 2U, address);
 
 	/* Succeeded: the binds. */
 	return dwords;
@@ -1691,9 +1698,9 @@ ir_fence(
  * Places the compiled programs of a transfer in a device's code heap:
  * the pipeline state record (a compute pipeline, or a draw's), then the
  * compute or vertex program's code, then a draw's fragment program's.
- * Returns 0, ENOMEM, EIO, or ENOTSUP for a compute program whose two
- * buffers are not in its resource table, or a draw that does not read
- * texture and sampler slot 0.
+ * Returns 0, ENOMEM, EIO, or ENOTSUP for a
+ * compute program whose two buffers are not in its resource table, or a
+ * draw that does not read texture and sampler slot 0.
  */
 static int
 meta_place(

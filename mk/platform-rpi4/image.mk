@@ -42,7 +42,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
 .PHONY: disk-image check-disk-image image-rpi4
 
 disk-image: $(DISK_IMAGE_ARTIFACT)
-image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-platform: rootfs-platform $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
 	$(PYTHON) mk/tools/check-rpi4-hdd-image.py --kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) --config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt --board rpi4 $<

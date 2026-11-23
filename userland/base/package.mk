@@ -37,7 +37,7 @@
 # hands that variable to the packages' own makes as well, which run in the
 # packages' directories: there it does not hold.
 ifneq ($(CURDIR),$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..))
-TOPLEVEL_BUILD :=
+override TOPLEVEL_BUILD :=
 endif
 
 # The package's own make only: the top-level build reads none of this.
@@ -235,7 +235,7 @@ STANDALONE_PROGRAM_LDFLAGS = \
 	-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 	-Wl,--dynamic-linker=/lib/ld.so
 STANDALONE_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt1.o
-STANDALONE_PROGRAM_LIBS = -l:libm.so -l:libc.so
+STANDALONE_PROGRAM_LIBS = -l:libc.so
 endif
 
 # A shared library's objects.
@@ -448,7 +448,7 @@ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_DYNAMIC_DIR)/$(2).so
 $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,SHLIB,$(2).so)
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_LIB_DIR)"
-	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) $$(STANDALONE_OBJECTS_$(1)) -Wl,-soname,"$(2).so" $$(if $$(wildcard exports.map),-Wl$$(comma)--version-script=exports.map) -L"$$(STANDALONE_DYNAMIC_DIR)" -L"$$(STANDALONE_SYSROOT)/usr/lib" $(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -l:libm.so -o $$@
+	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) $$(STANDALONE_OBJECTS_$(1)) -Wl,-soname,"$(2).so" $$(if $$(wildcard exports.map),-Wl$$(comma)--version-script=exports.map) -L"$$(STANDALONE_DYNAMIC_DIR)" -L"$$(STANDALONE_SYSROOT)/usr/lib" $(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -o $$@
 	$$(Q)cp -f $$@ "$$(STANDALONE_LIB_DIR)/$(2).so"
 endif
 

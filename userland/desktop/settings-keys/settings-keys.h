@@ -6,9 +6,9 @@
  */
 
 /*
- * The table of the desktop's settings (WS135, plan/ws135/design.md section
- * 2.1): each key, who resolves it (the compositor, or libkeiland from the
- * application's own file), its type and its range.
+ * The table of the desktop's settings: each key, who resolves it (the
+ * compositor, or libkeiland from the application's own file), its type and
+ * its range.
  *
  * Neither a client nor a server: libkeiland and the compositor each build
  * settings-keys.c, so that both check a value the same way.  A new setting
@@ -33,6 +33,7 @@
 #define KL_SETTINGS_TYPE_BOOL		2U
 #define KL_SETTINGS_TYPE_PATH		3U
 #define KL_SETTINGS_TYPE_OPENER		4U
+#define KL_SETTINGS_TYPE_TEXT		5U
 
 /* A key a client reads but never sets (the compositor's report). */
 #define KL_SETTINGS_KEY_READ_ONLY	0x1U
@@ -42,15 +43,16 @@
 
 /*
  * A row whose name is a prefix: the keys are the prefix and a MIME type
- * (files.open-with.image/png), made as they are chosen (plan/ws135/
- * design.md section 2.4).
+ * (files.open-with.image/png), made as they are chosen.
  */
 #define KL_SETTINGS_KEY_PREFIX		0x4U
 
 /*
  * One setting: its name, its resolver, its type, the range of a number
  * (minimum to maximum; 0 and 1 for a Boolean), the default of a number its
- * resolver gives when nothing else does, and its flags.
+ * resolver gives when nothing else does, and its flags.  A path (absolute)
+ * and a text (any well-formed value) have no range and no default: an
+ * application's is empty until it is given one.
  *
  * The rows live in settings-keys.c's constant table for the program's life.
  */

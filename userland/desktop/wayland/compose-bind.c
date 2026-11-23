@@ -22,9 +22,23 @@
  * While a layer's picture is drawn, the draws' box is gathered
  * (kwl_compose_bounds_begin and _end), so that a frame draws only the part
  * of the picture that holds anything.
+ *
+ * The plane is measured in logical units and a pass draws pixels: the
+ * output's pass, its layers' pictures and its maps show the plane at the
+ * output's scale, a head's pass its part of the plane at the head's own
+ * scale (a mirror copies the output's picture, no pass of its own).  A
+ * quad's corners are snapped to the pixels each (scale.h), so quads that
+ * touch on the plane touch in the picture; a damage is taken outward to
+ * every pixel it touches.  An image is sampled a texel a pixel where it is
+ * shown one for one, and smoothly where a scale stretches it by a
+ * fraction.  At 100 % a unit is a pixel, nothing is rounded and, while
+ * every display is at 100 %, images are sampled as they always were.
  */
 
 #include "compose.h"
+
+#include <math.h>
+#include <string.h>
 
 static int clip_active(const struct kwl_compose *compose);
 static int clip_cut(const VkRect2D *clip, const VkRect2D *scissor, VkRect2D *cut);
@@ -32,6 +46,247 @@ static int clip_meets(const VkRect2D *rect, float x, float y, float width, float
 static int clip_same(const VkRect2D *first, const VkRect2D *second);
 static void clip_box(float *x, float *y, float *width, float *height);
 static void bounds_add(struct kwl_compose *compose, float left, float top, float right, float bottom);
+static const struct kwl_head *pass_head(const struct kwl_server *server);
+static int scales_mixed(const struct kwl_server *server);
+
+/*
+ * Gives the scale the pass being recorded shows the plane at, in 120ths:
+ * the output's in its own pass, its layers' pictures and its maps, and the
+ * head's in a head's pass.
+ */
+unsigned
+kwl_compose_pass_scale(
+	const struct kwl_server *server)
+{
+	const struct kwl_head *head;
+
+	/* A head's pass: its head, found by the view's output. */
+	if (server->view_width != 0U) {
+		head = pass_head(server);
+
+		/* A head whose scale is not set yet (or no head) is shown at 100 %. */
+		if (head == NULL || head->scale120 == 0U)
+			return KWL_SCALE_ONE;
+
+		/* The head's scale. */
+		return head->scale120;
+	}
+
+	/* An output whose scale is not set yet is shown at 100 %. */
+	if (server->scale120 == 0U)
+		return KWL_SCALE_ONE;
+
+	/* The output's scale. */
+	return server->scale120;
+}
+
+/*
+ * Gives the size in pixels of the picture the pass being recorded draws
+ * the plane into: the output's (the mode turned by its angle), or a
+ * head's.
+ */
+void
+kwl_compose_pass_size(
+	const struct kwl_server *server,
+	float *width,
+	float *height)
+{
+	const struct kwl_head *head;
+
+	/* A head's pass: its head, found by the view's output. */
+	if (server->view_width != 0U) {
+		head = pass_head(server);
+
+		/* Its pixels, or its part of the plane's size while it has none. */
+		*width = (float)server->view_width;
+		*height = (float)server->view_height;
+		if (head != NULL && head->output.width != 0U && head->output.height != 0U) {
+			*width = (float)head->output.width;
+			*height = (float)head->output.height;
+		}
+
+		/* The head's size. */
+		return;
+	}
+
+	/* The output's size in logical units while its pixels are not known yet. */
+	if (server->pixel_width == 0U || server->pixel_height == 0U) {
+		*width = (float)server->width;
+		*height = (float)server->height;
+		return;
+	}
+
+	/* The output's pixels. */
+	*width = (float)server->pixel_width;
+	*height = (float)server->pixel_height;
+}
+
+/*
+ * Maps a rectangle of the plane (left, top, width, height, measured from
+ * the pass's left top corner: a head's view taken off) to the pixels of
+ * the pass being recorded: each corner snapped to a pixel.  At 100 % it
+ * is given as it is.  plane and pixels may be the same array.
+ */
+void
+kwl_compose_pass_rect(
+	const struct kwl_server *server,
+	const float *plane,
+	float *pixels)
+{
+	unsigned scale;
+	float left;
+	float top;
+	float right;
+	float bottom;
+
+	/* At 100 % a unit is a pixel, unrounded (an animation's place keeps its fraction). */
+	scale = kwl_compose_pass_scale(server);
+	if (scale == KWL_SCALE_ONE) {
+		memmove(pixels, plane, 4U * sizeof(float));
+		return;
+	}
+
+	/* The left top and the right bottom corners, snapped each. */
+	left = kwl_scale_snap_float(plane[0], scale);
+	top = kwl_scale_snap_float(plane[1], scale);
+	right = kwl_scale_snap_float(plane[0] + plane[2], scale);
+	bottom = kwl_scale_snap_float(plane[1] + plane[3], scale);
+
+	/* The rectangle between them. */
+	pixels[0] = left;
+	pixels[1] = top;
+	pixels[2] = right - left;
+	pixels[3] = bottom - top;
+}
+
+/*
+ * Maps a place on the plane (a coordinate measured from the pass's left
+ * top corner) to the pixel of the pass being recorded it is snapped to.
+ */
+int32_t
+kwl_compose_pass_pixel(
+	const struct kwl_server *server,
+	int32_t plane)
+{
+	unsigned scale;
+	int32_t pixel;
+
+	/* The coordinate snapped at the pass's scale. */
+	scale = kwl_compose_pass_scale(server);
+	pixel = kwl_scale_snap(plane, scale);
+
+	/* The pixel. */
+	return pixel;
+}
+
+/*
+ * Maps a damage of the output's plane (left, top, right, bottom) to the
+ * output's pixels it touches: its left top corner rounded down, its right
+ * bottom corner up.
+ */
+void
+kwl_compose_damage_pixels(
+	const struct kwl_server *server,
+	const int32_t *plane,
+	int32_t *pixels)
+{
+	struct kwl_scale_rect logical;
+	struct kwl_scale_rect covered;
+	unsigned scale;
+
+	/* At 100 % the damage is in pixels already. */
+	scale = server->scale120;
+	if (scale == 0U || scale == KWL_SCALE_ONE) {
+		memcpy(pixels, plane, 4U * sizeof(int32_t));
+		return;
+	}
+
+	/* An empty damage touches no pixel: it stays as it is. */
+	if (plane[2] <= plane[0] || plane[3] <= plane[1]) {
+		memcpy(pixels, plane, 4U * sizeof(int32_t));
+		return;
+	}
+
+	/* The damage as a rectangle. */
+	logical.x = plane[0];
+	logical.y = plane[1];
+	logical.width = (uint32_t)((int64_t)plane[2] - plane[0]);
+	logical.height = (uint32_t)((int64_t)plane[3] - plane[1]);
+
+	/* Every pixel it touches. */
+	kwl_scale_cover_rect(&logical, scale, &covered);
+	pixels[0] = covered.x;
+	pixels[1] = covered.y;
+	pixels[2] = (int32_t)((int64_t)covered.x + covered.width);
+	pixels[3] = (int32_t)((int64_t)covered.y + covered.height);
+}
+
+/*
+ * Chooses how an image drawn as a quad of the plane (its size in logical
+ * units, the part of it shown in uv) is sampled in the pass being
+ * recorded: a texel a pixel (its nearest set) where it is shown one for
+ * one, or at a whole-number scale from a picture of its logical size (each
+ * texel a block of pixels); smoothly (its linear set) where the scale
+ * stretches it by a fraction or an animation scales it.  While every
+ * display shows the plane at 100 % it is sampled as it always was; a 100 %
+ * pass beside a display at another scale samples smoothly a buffer drawn
+ * for that scale (a window just moved over from it).
+ */
+VkDescriptorSet
+kwl_compose_image_set(
+	const struct kwl_server *server,
+	const struct kwl_import *import,
+	float width,
+	float height,
+	const float *uv)
+{
+	unsigned scale;
+	float shown_width;
+	float shown_height;
+	float pixel_width;
+	float pixel_height;
+	float off_width;
+	float off_height;
+	int mixed;
+
+	/* At 100 % on every display, or without a linear set, the image is sampled as before. */
+	scale = kwl_compose_pass_scale(server);
+	mixed = scales_mixed(server);
+	if (scale == KWL_SCALE_ONE && !mixed)
+		return import->set;
+	if (import->linear_set == VK_NULL_HANDLE)
+		return import->set;
+
+	/* A layer's animation scales whatever it shows. */
+	if (server->layer_on && server->layer_scale != 1.0f)
+		return import->linear_set;
+
+	/* The texels the quad shows, and the pixels it covers. */
+	shown_width = (uv[2] - uv[0]) * (float)import->width;
+	shown_height = (uv[3] - uv[1]) * (float)import->height;
+	pixel_width = width * (float)scale / (float)KWL_SCALE_ONE;
+	pixel_height = height * (float)scale / (float)KWL_SCALE_ONE;
+
+	/*
+	 * A buffer drawn at the output's scale, a texel a pixel: the size a
+	 * client rounds its buffer to may be a pixel off the quad's.
+	 */
+	off_width = fabsf(pixel_width - shown_width);
+	off_height = fabsf(pixel_height - shown_height);
+	if (off_width <= 1.0f && off_height <= 1.0f)
+		return import->set;
+
+	/* A buffer of the logical size at a whole-number scale: each texel a block of pixels, kept sharp. */
+	off_width = fabsf(width - shown_width);
+	off_height = fabsf(height - shown_height);
+	if (scale % KWL_SCALE_ONE == 0U &&
+	    off_width <= 0.5f &&
+	    off_height <= 0.5f)
+		return import->set;
+
+	/* Stretched by a fraction: sampled smoothly. */
+	return import->linear_set;
+}
 
 /*
  * Binds a pipeline and a descriptor set (set 0, with the pipeline layout it
@@ -492,4 +747,47 @@ bounds_add(
 		compose->bounds[2] = right;
 	if (bottom > compose->bounds[3])
 		compose->bounds[3] = bottom;
+}
+
+/* Finds the head whose pass is being recorded (the view's output), or NULL. */
+static const struct kwl_head *
+pass_head(
+	const struct kwl_server *server)
+{
+	const struct kwl_head *head;
+
+	/* Only a head's slot, of a compositor with its device. */
+	if (server->compose == NULL || server->view_output == 0U || server->view_output > KWL_HEADS)
+		return NULL;
+
+	/* Succeeded: its head. */
+	head = &server->compose->heads[server->view_output - 1U];
+	return head;
+}
+
+/* Tells whether a display shows the plane at another scale than 100 %: the output, or a head of the extended mode. */
+static int
+scales_mixed(
+	const struct kwl_server *server)
+{
+	const struct kwl_head *head;
+	unsigned index;
+
+	/* The output's scale. */
+	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
+		return 1;
+
+	/* No head draws a pass of its own without the device, nor in the mirror mode. */
+	if (server->compose == NULL || server->compose->display_mode != KWL_DISPLAYS_EXTENDED)
+		return 0;
+
+	/* Each open head's scale. */
+	for (index = 0U; index < KWL_HEADS; index++) {
+		head = &server->compose->heads[index];
+		if (head->open && head->scale120 != 0U && head->scale120 != KWL_SCALE_ONE)
+			return 1;
+	}
+
+	/* Succeeded: every display at 100 %. */
+	return 0;
 }

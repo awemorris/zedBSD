@@ -1131,6 +1131,7 @@ contact_begin(
 	int taken;
 	int inside;
 	int joined;
+	int held;
 
 	/* A touch while the Windows key is down: no tap of its own (ws142-p002). */
 	kwl_super_tap_cancel(&server->super_tap);
@@ -1147,6 +1148,26 @@ contact_begin(
 	contact->surface = NULL;
 	contact->offset_x = 0;
 	contact->offset_y = 0;
+
+	/*
+	 * While the admin dialog shows (admin-ask.c), a finger is its press
+	 * through the shell, as the pointer's left button; one more while
+	 * another has it goes nowhere.  No client, no keyboard's panel and no
+	 * title bar hears a finger meanwhile.
+	 */
+	held = kwl_admin_ask_holds(server);
+	if (held) {
+		busy = shell_busy();
+		if (busy) {
+			contact->route = ROUTE_IGNORED;
+			return;
+		}
+		(void)shell_press(server, x, y, report->time, 1U);
+		contact->route = ROUTE_SHELL;
+		follow_start(contact);
+		printf("KWL TOUCH admin contact=%u x=%d y=%d\n", contact_id(screen, slot), x, y);
+		return;
+	}
 
 	/*
 	 * A finger on the open keyboard's panel is the keyboard's own press,
@@ -2438,6 +2459,9 @@ touch_down(
 	words[5] = (uint32_t)(contact->place_y - surface->y * 256);
 	send_touch(surface->client, TOUCH_DOWN, words, sizeof(words));
 	report_heard(report, surface->client);
+
+	/* A finger in the client's window is the person's press (admin-ask.c asks again after it). */
+	surface->client->pressed_ms = kwl_milliseconds();
 
 	/* The finger is the surface's; down's serial is what a move or a menu the client asks for names. */
 	contact->route = ROUTE_CLIENT;

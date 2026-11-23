@@ -181,8 +181,8 @@ socket_create(
 /*
  * Sets a socket-level option every family shares.
  *
- * SO_REUSEADDR, the buffer sizes, and the timeouts are handled here;
- * anything else is reported as ENOPROTOOPT.
+ * SO_REUSEADDR, SO_TIMESTAMP, SO_KEEPALIVE, the buffer sizes, and the
+ * timeouts are handled here; anything else is reported as ENOPROTOOPT.
  */
 int
 socket_setsockopt_common(
@@ -212,6 +212,24 @@ socket_setsockopt_common(
 		irq = spin_lock_irqsave(&socket->lock);
 		socket->reuse_address = enabled != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
+		return 0;
+	}
+
+	/*
+	 * SO_TIMESTAMP is stored here: a datagram protocol stamps what it
+	 * queues while it is set, and a stream never reads it.
+	 */
+	if (option == SO_TIMESTAMP) {
+		if (value == NULL || length != sizeof(enabled))
+			return EINVAL;
+		kern_memcpy(&enabled, value, sizeof(enabled));
+		irq = spin_lock_irqsave(&socket->lock);
+
+		socket->timestamp = enabled != 0;
+
+		spin_unlock_irqrestore(&socket->lock, irq);
+
+		/* Succeeded: the datagrams queued from now on are stamped or not. */
 		return 0;
 	}
 
@@ -343,15 +361,19 @@ socket_getsockopt_common(
 		return 0;
 	}
 
-	/* SO_REUSEADDR and SO_KEEPALIVE report their stored flags. */
-	if (option == SO_REUSEADDR || option == SO_KEEPALIVE) {
+	/* SO_REUSEADDR, SO_KEEPALIVE and SO_TIMESTAMP report their stored flags. */
+	if (option == SO_REUSEADDR ||
+	    option == SO_KEEPALIVE ||
+	    option == SO_TIMESTAMP) {
 		if (value == NULL || length == NULL || *length < sizeof(enabled))
 			return EINVAL;
 		irq = spin_lock_irqsave(&socket->lock);
 		if (option == SO_REUSEADDR)
 			enabled = socket->reuse_address != 0;
-		else
+		else if (option == SO_KEEPALIVE)
 			enabled = socket->keepalive != 0;
+		else
+			enabled = socket->timestamp != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
 		kern_memcpy(value, &enabled, sizeof(enabled));
 		*length = sizeof(enabled);
@@ -427,6 +449,51 @@ socket_take_error(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Clears what a received datagram came with, to none of it kept.
+ */
+void
+socket_receive_info_clear(
+	struct socket_receive_info *info)
+{
+	/* Nothing is given until a datagram that kept it is taken. */
+	info->hop_limit = -1;
+	info->traffic_class = -1;
+	info->traffic_class_version = 0;
+	info->time_known = 0;
+	info->seconds = 0;
+	info->nanoseconds = 0;
+}
+
+/*
+ * Copies what a queued datagram kept of what it came with.
+ *
+ * Each part the packet kept is given; the parts it did not keep are left
+ * as they are.
+ */
+void
+socket_receive_info_take(
+	const struct packet_buf *packet,
+	struct socket_receive_info *info)
+{
+	/* The hop limit an IPv6 datagram came with. */
+	if (packet->hop_limit_known)
+		info->hop_limit = (int)packet->hop_limit;
+
+	/* The Type of Service byte or traffic class, and of which version. */
+	if (packet->receive_class_version != 0) {
+		info->traffic_class = (int)packet->receive_class;
+		info->traffic_class_version = (int)packet->receive_class_version;
+	}
+
+	/* When it was queued. */
+	if (packet->receive_time_known) {
+		info->time_known = 1;
+		info->seconds = packet->receive_seconds;
+		info->nanoseconds = packet->receive_nanoseconds;
+	}
 }
 
 /*

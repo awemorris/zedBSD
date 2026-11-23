@@ -43,6 +43,8 @@
 #include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/process.h"
+#include "kern/random.h"
+#include "kern/random-crypto.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
 #include "internal.h"
@@ -380,8 +382,32 @@ struct tcp_segment_addresses {
 
 /* The longest round-trip sample taken, so the sums in microseconds stay within 32 bits. */
 #define TCP_RTT_SAMPLE_MAX_US 60000000U
-/* How long closing a connection waits for what it sent to be taken. */
+/* How long closing a connection waits for room in its retransmission ring for the FIN. */
 #define TCP_CLOSE_DRAIN_MS 10000U
+
+/*
+ * The maximum segment lifetime (RFC 9293 section 3.4.2), and TIME_WAIT,
+ * which lasts twice that (section 3.6.1): a segment of the connection
+ * still on its way has died out before the four-tuple is used again.
+ * 30 seconds is Linux's and FreeBSD's MSL.
+ */
+#define TCP_MSL_MS 30000U
+#define TCP_TIME_WAIT_MS (2U * TCP_MSL_MS)
+
+/*
+ * How long a connection whose file is closed waits in FIN_WAIT_2 for the
+ * peer's FIN: no one can read the rest of the stream, and a peer that
+ * never closes would hold it for ever (Linux's tcp_fin_timeout).
+ */
+#define TCP_FIN_WAIT_2_MS 60000U
+
+/*
+ * The most connections whose files are closed that wait out TIME_WAIT at
+ * once; one more skips it and is freed at once (Linux's
+ * tcp_max_tw_buckets), so a host that closes many connections first does
+ * not run out of memory or of ports.
+ */
+#define TCP_TIME_WAIT_MAX 256U
 
 /* What a closing connection waits for. */
 enum tcp_drain {
@@ -389,8 +415,6 @@ enum tcp_drain {
 	TCP_DRAIN_ROOM,
 	/* Every byte of data acknowledged; a FIN may still be outstanding. */
 	TCP_DRAIN_DATA,
-	/* Everything acknowledged, the FIN included. */
-	TCP_DRAIN_ALL,
 };
 /*
  * The pause before sending again when buffers are short: a connect whose
@@ -441,6 +465,17 @@ enum tcp_drain {
 #define CONFIG_TCP_ISN_WRAP_BEFORE 0U
 #endif
 
+/*
+ * The initial sequence number is a clock plus a keyed hash of the
+ * connection's four-tuple (RFC 6528 section 3): the clock moves on once
+ * every TCP_ISN_CLOCK_US microseconds, so the numbers of successive
+ * connections of one four-tuple go up, and the hash, which takes a key of
+ * TCP_ISN_KEY_BYTES secret bytes, puts each four-tuple at a place in the
+ * sequence space that a third party cannot work out.
+ */
+#define TCP_ISN_CLOCK_US 4U
+#define TCP_ISN_KEY_BYTES 32U
+
 /* How a reset that came in is taken (RFC 5961 section 3.2). */
 enum tcp_reset_check {
 	/* Its sequence number is not within the window: it is ignored. */
@@ -474,10 +509,12 @@ enum tcp_refusal {
 };
 
 /*
- * Idle probing for SO_KEEPALIVE, in clock ticks.  The defaults are the
- * traditional ones: probe after two hours of silence, then every 75 seconds,
- * and give up after nine unanswered probes.  A build may shorten them so the
- * behaviour can be observed in a test that does not run for hours.
+ * The system's idle probing for SO_KEEPALIVE, which a new socket starts
+ * from (TCP_KEEPIDLE, TCP_KEEPINTVL and TCP_KEEPCNT change a socket's).
+ * The defaults are the traditional ones: probe after two hours of silence,
+ * then every 75 seconds, and give up after nine unanswered probes.  A build
+ * may shorten them so the behaviour can be observed in a test that does
+ * not run for hours.
  */
 #ifndef CONFIG_TCP_KEEPALIVE_IDLE_MS
 #define CONFIG_TCP_KEEPALIVE_IDLE_MS 7200000U
@@ -489,11 +526,6 @@ enum tcp_refusal {
 #define CONFIG_TCP_KEEPALIVE_COUNT 9U
 #endif
 
-#define TCP_KEEPALIVE_IDLE \
-	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS)
-#define TCP_KEEPALIVE_INTERVAL \
-	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS)
-#define TCP_KEEPALIVE_COUNT ((unsigned)CONFIG_TCP_KEEPALIVE_COUNT)
 #define TCP_LISTEN_BACKLOG_MAX 16U
 
 /*
@@ -503,9 +535,26 @@ enum tcp_refusal {
  */
 #define TCP_TIMER_STACK_SNAPSHOT 32U
 
+/*
+ * One TCP socket, as the registry links it.
+ *
+ * Once its file is closed, a connection still closing keeps a socket
+ * reference of its own (orphaned), so that its FIN and the data before it
+ * are sent again until taken, and the peer's FIN is acknowledged, after
+ * close() has returned (RFC 9293 section 3.6).  The reference is dropped
+ * when the connection reaches CLOSED: TIME_WAIT over, the last ACK taken,
+ * the attempt given up or a reset; the last reference frees the endpoint.
+ * close_deadline is when TIME_WAIT ends, or when an orphaned connection
+ * stops waiting in FIN_WAIT_2 for the peer's FIN (0: neither), and
+ * time_wait_slot says the connection holds one of tcp_time_wait_count's.
+ * All three are guarded by the socket lock.
+ */
 struct tcp_endpoint {
 	struct tcp_socket tcp;
 	struct tcp_endpoint *next;
+	unsigned orphaned;
+	uint64_t close_deadline;
+	unsigned time_wait_slot;
 };
 
 /*
@@ -547,11 +596,48 @@ static struct spinlock tcp_ack_lock;
  */
 static atomic_uint_t tcp_receive_extra_packets;
 
+/*
+ * How many orphaned connections wait out TIME_WAIT now (each one with
+ * time_wait_slot set), within TCP_TIME_WAIT_MAX.  A connection takes a
+ * slot only by compare and exchange and gives it back when it is freed.
+ * No lock guards it.
+ */
+static atomic_uint_t tcp_time_wait_count;
+
+/*
+ * The secret keys of the initial sequence numbers' hash: the first made
+ * when TCP starts, from what the random number generator has by then, and
+ * the second made once from a seeded generator when the first was made
+ * before the generator was seeded.  A key is written once, before its
+ * index is published in tcp_isn_key_index, and never changes after, so
+ * the hash reads it without a lock.
+ */
+static uint8_t tcp_isn_keys[2][TCP_ISN_KEY_BYTES];
+
+/*
+ * Which of tcp_isn_keys the hash uses now: 0, then 1 once the second key
+ * is written.  It is published with release ordering and read with
+ * acquire ordering, so a reader that sees 1 sees the key written.
+ */
+static atomic_uint_t tcp_isn_key_index;
+
+/*
+ * Whether the second key is still to be made: 0 while the first key was
+ * made before the generator was seeded and no one has started on the
+ * second, 1 once a caller has claimed the making of it by compare and
+ * exchange, or when the first key needs no successor.  It goes from 0 to
+ * 1 once and never back.
+ */
+static atomic_uint_t tcp_isn_rekey_claimed;
+
 static struct tcp_endpoint * tcp_endpoint(struct socket *socket);
 static void tcp_forget_peer(struct tcp_endpoint *endpoint);
 static void tcp_listener_remove(struct tcp_endpoint *child);
 static void tcp_listener_established(struct tcp_endpoint *child);
 static int tcp_port_in_use(const struct tcp_endpoint *candidate, int strict);
+static int tcp_endpoint_is_connection(const struct tcp_endpoint *endpoint);
+static int tcp_same_peer(const struct tcp_endpoint *left, const struct tcp_endpoint *right);
+static int tcp_connection_duplicate_locked(const struct tcp_endpoint *candidate);
 static int tcp_allocate_port_locked(struct tcp_endpoint *endpoint);
 static int tcp_route(struct tcp_endpoint *endpoint, struct net_device **device, uint32_t *source);
 static int tcp_route_cached(struct tcp_endpoint *endpoint, struct net_device **device, uint32_t *source, uint32_t *next_hop);
@@ -580,7 +666,13 @@ static int tcp_send_ack(struct tcp_endpoint *endpoint, int duplicate);
 static int tcp_send_ack_news(struct tcp_endpoint *endpoint, int duplicate, int news_only);
 static int tcp_sequence_before(uint32_t left, uint32_t right);
 static int tcp_sequence_at_or_before(uint32_t left, uint32_t right);
-static uint32_t tcp_initial_sequence(uint32_t chosen);
+static uint32_t tcp_initial_sequence(const struct tcp_endpoint *endpoint);
+static const uint8_t * tcp_isn_key(void);
+static void tcp_isn_key_init(void);
+static void tcp_connect_source(struct tcp_endpoint *endpoint);
+static int tcp_abort_resets(enum tcp_state state);
+static void tcp_abort_connection(struct tcp_endpoint *endpoint);
+static int tcp_syn_sent_acceptable_locked(const struct tcp_endpoint *endpoint, uint8_t flags, uint32_t acknowledgement);
 static uint64_t tcp_backoff_timeout(uint64_t rto, unsigned count);
 static uint64_t tcp_rto_locked(const struct tcp_endpoint *endpoint);
 static void tcp_rtt_sample_locked(struct tcp_endpoint *endpoint, uint64_t now);
@@ -671,11 +763,22 @@ static int tcp_getpeername(struct socket *socket, struct sockaddr *address, sock
 static void tcp_close(struct socket *socket);
 static void tcp_close_drain(struct tcp_endpoint *endpoint, enum tcp_drain until);
 static void tcp_endpoint_close(struct socket *socket);
+static void tcp_receive_discard(struct tcp_endpoint *endpoint);
+static int tcp_orphan_closing(enum tcp_state state);
+static int tcp_time_wait_slot_take(void);
+static void tcp_time_wait_slot_give(void);
+static void tcp_time_wait_enter_locked(struct tcp_endpoint *endpoint, uint64_t now);
+static void tcp_fin_wait_2_enter_locked(struct tcp_endpoint *endpoint, uint64_t now);
+static int tcp_close_deadline_expire_locked(struct tcp_endpoint *endpoint, uint64_t now);
+static int tcp_orphan_settle_locked(struct tcp_endpoint *endpoint);
+static void tcp_orphan_release(struct tcp_endpoint *endpoint);
 static int tcp_poll(struct socket *socket, short events, short *revents);
 static int tcp_setsockopt(struct socket *socket, int level, int option, const void *value, socklen_t length);
 static int tcp_getsockopt(struct socket *socket, int level, int option, void *value, socklen_t *length);
 static void tcp_keepalive_changed(struct socket *socket);
 static void tcp_keepalive_arm_locked(struct tcp_endpoint *endpoint);
+static int tcp_keepalive_set(struct tcp_endpoint *endpoint, int option, int requested);
+static int tcp_keepalive_get(struct tcp_endpoint *endpoint, int option);
 static struct tcp_endpoint * tcp_lookup(const struct tcp_segment_addresses *addresses, uint16_t source_port, uint16_t destination_port);
 static int tcp_connection_matches(const struct tcp_endpoint *endpoint, const struct tcp_segment_addresses *addresses, uint16_t source_port, uint16_t destination_port);
 static int tcp_listener_matches(const struct tcp_endpoint *endpoint, const struct tcp_segment_addresses *addresses, uint16_t destination_port);
@@ -749,6 +852,16 @@ tcp_socket_create(
 	/* The system's congestion control, net.tcp.congestion. */
 	endpoint->tcp.cc = tcp_cc_default();
 
+	/*
+	 * The system's idle probing, which TCP_KEEPIDLE, TCP_KEEPINTVL and
+	 * TCP_KEEPCNT change for the socket.
+	 */
+	endpoint->tcp.keepalive_idle = kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS);
+	endpoint->tcp.keepalive_idle_ms = CONFIG_TCP_KEEPALIVE_IDLE_MS;
+	endpoint->tcp.keepalive_interval = kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS);
+	endpoint->tcp.keepalive_interval_ms = CONFIG_TCP_KEEPALIVE_INTERVAL_MS;
+	endpoint->tcp.keepalive_count = CONFIG_TCP_KEEPALIVE_COUNT;
+
 	/* Puts the socket in the registry of sockets. */
 	irq = spin_lock_irqsave(&tcp_registry_lock);
 
@@ -778,6 +891,9 @@ tcp_init(
 	    "TCP socket registry");
 	spin_init(&tcp_ack_lock, LOCK_RANK_NETWORK, "TCP delayed acknowledgements");
 	tcp_ack_head = NULL;
+
+	/* Makes the secret key the initial sequence numbers are hashed with. */
+	tcp_isn_key_init();
 
 	/* Reports why the registration failed. */
 	error = ipv4_protocol_register(IPPROTO_TCP, tcp_input);
@@ -814,7 +930,7 @@ tcp_keepalive_expire_locked(
 	}
 
 	/* Declares the peer unreachable once every probe went unanswered. */
-	if (endpoint->tcp.keepalive_probes >= TCP_KEEPALIVE_COUNT) {
+	if (endpoint->tcp.keepalive_probes >= endpoint->tcp.keepalive_count) {
 		endpoint->tcp.keepalive_deadline = 0;
 		endpoint->tcp.keepalive_probes = 0;
 		endpoint->tcp.state = TCP_CLOSED;
@@ -825,7 +941,7 @@ tcp_keepalive_expire_locked(
 
 	/* Schedules the next probe and asks for this one. */
 	endpoint->tcp.keepalive_probes++;
-	endpoint->tcp.keepalive_deadline = now + TCP_KEEPALIVE_INTERVAL;
+	endpoint->tcp.keepalive_deadline = now + endpoint->tcp.keepalive_interval;
 	return 1;
 }
 
@@ -1052,6 +1168,8 @@ tcp_timer_run(
 	int reset_peer;
 	int before;
 	int repeated;
+	int expired;
+	int release;
 	uint32_t sent_end;
 	uint32_t reset_sequence;
 
@@ -1118,6 +1236,28 @@ tcp_timer_run(
 		discard.count = 0;
 		endpoint = snapshot[index];
 		socket = &endpoint->tcp.inet.socket;
+
+		/*
+		 * TIME_WAIT over, or an orphaned connection's wait in FIN_WAIT_2,
+		 * closes the connection; an orphaned one that has closed, by
+		 * this or anything else, drops its own reference.
+		 */
+		irq = spin_lock_irqsave(&socket->lock);
+
+		expired = tcp_close_deadline_expire_locked(endpoint, now);
+		release = tcp_orphan_settle_locked(endpoint);
+
+		spin_unlock_irqrestore(&socket->lock, irq);
+
+		/* Drops the orphaned connection's own reference once it has closed. */
+		if (release)
+			socket_release(socket);
+
+		/* A connection the deadline closed has nothing more for the timer. */
+		if (expired) {
+			socket_release(socket);
+			continue;
+		}
 
 		/* Sends the segments and acknowledgements refused before, when their retry is due. */
 		tcp_output_retry(endpoint, payload, now);
@@ -1221,6 +1361,7 @@ tcp_timer_run(
 			tcp_forget_peer(endpoint);
 			spin_unlock_irqrestore(&socket->lock, irq);
 			tcp_discard_free(&discard);
+			tcp_orphan_release(endpoint);
 			socket_set_error(socket, ETIMEDOUT);
 			if (endpoint->tcp.listener != NULL) {
 				tcp_listener_remove(endpoint);
@@ -1255,6 +1396,7 @@ tcp_timer_run(
 			tcp_forget_peer(endpoint);
 			spin_unlock_irqrestore(&socket->lock, irq);
 			tcp_discard_free(&discard);
+			tcp_orphan_release(endpoint);
 			socket_set_error(socket, EIO);
 			socket_release(socket);
 			continue;
@@ -1477,6 +1619,7 @@ tcp_timer_run(
 				continue;
 			}
 
+			tcp_orphan_release(endpoint);
 			socket_set_error(socket, error);
 			if (endpoint->tcp.listener != NULL) {
 				tcp_listener_remove(endpoint);
@@ -1518,6 +1661,7 @@ tcp_timer_next_deadline(
 	uint64_t candidate;
 	uint64_t retry;
 	uint64_t unacked;
+	uint64_t closing;
 	unsigned long socket_irq;
 	unsigned sent;
 
@@ -1553,6 +1697,11 @@ tcp_timer_next_deadline(
 			unacked = endpoint->tcp.unack_since + endpoint->tcp.maxunack;
 		if (unacked != 0 && (candidate == 0 || unacked < candidate))
 			candidate = unacked;
+
+		/* The end of TIME_WAIT, or of an orphaned connection's wait in FIN_WAIT_2, when it comes first. */
+		closing = endpoint->close_deadline;
+		if (closing != 0 && (candidate == 0 || closing < candidate))
+			candidate = closing;
 
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 
@@ -1781,7 +1930,7 @@ tcp_keepalive_arm_locked(
 	}
 
 	/* Restarts the idle period. */
-	endpoint->tcp.keepalive_deadline = sched_ticks() + TCP_KEEPALIVE_IDLE;
+	endpoint->tcp.keepalive_deadline = sched_ticks() + endpoint->tcp.keepalive_idle;
 }
 
 /*
@@ -1805,6 +1954,79 @@ tcp_keepalive_changed(
 }
 
 /*
+ * Sets one of the idle probing options of a connection.
+ *
+ * TCP_KEEPIDLE and TCP_KEEPINTVL take seconds, TCP_KEEPCNT a number of
+ * probes, each from 1 to TCP_KEEP_MAX (EINVAL outside).  A new idle time
+ * restarts the idle period of a connection that probes; a new interval or
+ * count is used from the next probe on.
+ */
+static int
+tcp_keepalive_set(
+	struct tcp_endpoint *endpoint,
+	int option,
+	int requested)
+{
+	unsigned milliseconds;
+	unsigned long irq;
+
+	/* A value of at least 1 and no more than the most taken. */
+	if (requested < 1 || requested > TCP_KEEP_MAX)
+		return EINVAL;
+	milliseconds = (unsigned)requested * 1000U;
+
+	/* Has the connection probe by it. */
+	irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+	if (option == TCP_KEEPIDLE) {
+		endpoint->tcp.keepalive_idle_ms = milliseconds;
+		endpoint->tcp.keepalive_idle = kern_ms_to_ticks((uint64_t)milliseconds);
+		tcp_keepalive_arm_locked(endpoint);
+	} else if (option == TCP_KEEPINTVL) {
+		endpoint->tcp.keepalive_interval_ms = milliseconds;
+		endpoint->tcp.keepalive_interval = kern_ms_to_ticks((uint64_t)milliseconds);
+	} else {
+		endpoint->tcp.keepalive_count = (unsigned)requested;
+	}
+
+	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
+
+	/* The worker learns of a deadline the new idle time moved. */
+	net_worker_wakeup();
+
+	/* Succeeded: the connection probes by the new value. */
+	return 0;
+}
+
+/*
+ * Reports one of the idle probing options of a connection: the seconds of
+ * TCP_KEEPIDLE or TCP_KEEPINTVL (rounded down), or the count of TCP_KEEPCNT.
+ */
+static int
+tcp_keepalive_get(
+	struct tcp_endpoint *endpoint,
+	int option)
+{
+	unsigned long irq;
+	unsigned current;
+
+	/* Samples the value under the lock that guards its changes. */
+	irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+	if (option == TCP_KEEPIDLE)
+		current = endpoint->tcp.keepalive_idle_ms / 1000U;
+	else if (option == TCP_KEEPINTVL)
+		current = endpoint->tcp.keepalive_interval_ms / 1000U;
+	else
+		current = endpoint->tcp.keepalive_count;
+
+	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, irq);
+
+	/* Reports the value. */
+	return (int)current;
+}
+
+/*
  * Sets one option at the TCP protocol level.
  */
 static int
@@ -1822,7 +2044,7 @@ tcp_setsockopt(
 	int error;
 	int wake;
 
-	/* IPv6's options (IPV6_V6ONLY) are the internet socket layer's (ws130-p003). */
+	/* IPv6's options (IPV6_V6ONLY, IPV6_TCLASS) are the internet socket layer's (ws130-p003). */
 	if (socket != NULL && level == IPPROTO_IPV6) {
 		endpoint = tcp_endpoint(socket);
 		error = inet_socket_setsockopt(&endpoint->tcp.inet, level, option, value, length);
@@ -1831,9 +2053,36 @@ tcp_setsockopt(
 		return 0;
 	}
 
+	/* IPv4's (IP_TOS) are too; one it does not know is no option of this socket's. */
+	if (socket != NULL && level == IPPROTO_IP) {
+		endpoint = tcp_endpoint(socket);
+		error = inet_socket_setsockopt(&endpoint->tcp.inet, level, option, value, length);
+		if (error == EOPNOTSUPP)
+			return ENOPROTOOPT;
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* Only this protocol's own level is handled here. */
 	if (socket == NULL || level != IPPROTO_TCP)
 		return ENOPROTOOPT;
+
+	/* The idle probing of the connection. */
+	if (option == TCP_KEEPIDLE ||
+	    option == TCP_KEEPINTVL ||
+	    option == TCP_KEEPCNT) {
+		if (value == NULL || length != sizeof(enabled))
+			return EINVAL;
+		kern_memcpy(&enabled, value, sizeof(enabled));
+		endpoint = tcp_endpoint(socket);
+		error = tcp_keepalive_set(endpoint, option, enabled);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the probing follows the new value. */
+		return 0;
+	}
 
 	/*
 	 * TCP_CONGESTION: a name, which takes effect at once in any state;
@@ -1942,7 +2191,7 @@ tcp_getsockopt(
 	int enabled;
 	int error;
 
-	/* IPv6's options (IPV6_V6ONLY) are the internet socket layer's (ws130-p003). */
+	/* IPv6's options (IPV6_V6ONLY, IPV6_TCLASS) are the internet socket layer's (ws130-p003). */
 	if (socket != NULL && level == IPPROTO_IPV6) {
 		endpoint = tcp_endpoint(socket);
 		error = inet_socket_getsockopt(&endpoint->tcp.inet, level, option, value, length);
@@ -1951,9 +2200,35 @@ tcp_getsockopt(
 		return 0;
 	}
 
+	/* IPv4's (IP_TOS) are too; one it does not know is no option of this socket's. */
+	if (socket != NULL && level == IPPROTO_IP) {
+		endpoint = tcp_endpoint(socket);
+		error = inet_socket_getsockopt(&endpoint->tcp.inet, level, option, value, length);
+		if (error == EOPNOTSUPP)
+			return ENOPROTOOPT;
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* Only this protocol's own level is handled here. */
 	if (socket == NULL || level != IPPROTO_TCP)
 		return ENOPROTOOPT;
+
+	/* The idle probing of the connection, each an int. */
+	if (option == TCP_KEEPIDLE ||
+	    option == TCP_KEEPINTVL ||
+	    option == TCP_KEEPCNT) {
+		if (value == NULL || length == NULL || *length < sizeof(enabled))
+			return EINVAL;
+		endpoint = tcp_endpoint(socket);
+		enabled = tcp_keepalive_get(endpoint, option);
+		kern_memcpy(value, &enabled, sizeof(enabled));
+		*length = sizeof(enabled);
+
+		/* Succeeded: the value is given. */
+		return 0;
+	}
 
 	/* TCP_CONGESTION: the name and its NUL, cut to the length given (as FreeBSD gives it). */
 	if (option == TCP_CONGESTION) {
@@ -2127,31 +2402,178 @@ tcp_listener_established(
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 }
 
-/* Tests whether another socket conflicts with a candidate's local address. */
+/*
+ * Tests whether another socket conflicts with a candidate's local address.
+ *
+ * A strict check, which picks an ephemeral port, counts every socket on
+ * the port.  Otherwise a candidate bound under SO_REUSEADDR passes over
+ * the connections that hold the port -- one accepted from an earlier
+ * listener, or one waiting out TIME_WAIT -- so that a server can listen
+ * there again while they finish.  A listener, or a socket that is only
+ * bound, still conflicts as before.
+ *
+ * Procedure referenced: FreeBSD 14.1 sys/netinet/in_pcb.c
+ * (in_pcbbind_setup and in_pcblookup_local: under SO_REUSEADDR the
+ * lookup is exact and passes over a pcb that has a foreign address).
+ */
 static int
 tcp_port_in_use(
 	const struct tcp_endpoint *candidate,
 	int strict)
 {
 	const struct tcp_endpoint *endpoint;
+	int connection;
 	int conflict;
 
-	/* A strict check ignores address reuse. */
+	/* Walks every other socket for one whose local endpoint overlaps the candidate's. */
 	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+		/* The candidate does not conflict with itself. */
 		if (endpoint == candidate)
 			continue;
-		if (strict)
-			conflict = inet_socket_local_conflict(&endpoint->tcp.inet, 0,
-			    &candidate->tcp.inet, 0);
-		else
+
+		/* A strict check ignores address reuse. */
+		if (strict) {
 			conflict = inet_socket_local_conflict(&endpoint->tcp.inet,
-			    endpoint->tcp.inet.bind_reuse_address,
+			    0,
 			    &candidate->tcp.inet,
-			    candidate->tcp.inet.bind_reuse_address);
+			    0);
+			if (conflict)
+				return 1;
+			continue;
+		}
+
+		/* A bind under SO_REUSEADDR leaves the connections on the port alone. */
+		connection = tcp_endpoint_is_connection(endpoint);
+		if (connection) {
+			if (candidate->tcp.inet.bind_reuse_address != 0)
+				continue;
+		}
+
+		/* Otherwise the addresses and the reuse options of both sides decide. */
+		conflict = inet_socket_local_conflict(&endpoint->tcp.inet,
+		    endpoint->tcp.inet.bind_reuse_address,
+		    &candidate->tcp.inet,
+		    candidate->tcp.inet.bind_reuse_address);
 		if (conflict)
 			return 1;
 	}
 
+	/* Succeeded: no other socket holds the candidate's local endpoint. */
+	return 0;
+}
+
+/*
+ * Tells whether an endpoint is a connection: one that has a peer, from a
+ * SYN sent or received until it is closed, or one closed that still
+ * records the peer it had.  A listener or a socket that is only bound is
+ * not.
+ */
+static int
+tcp_endpoint_is_connection(
+	const struct tcp_endpoint *endpoint)
+{
+	/* A listener waits for peers and has none of its own. */
+	if (endpoint->tcp.state == TCP_LISTEN)
+		return 0;
+
+	/* Any state but CLOSED is a connection on its way up or down. */
+	if (endpoint->tcp.state != TCP_CLOSED)
+		return 1;
+
+	/* A closed socket is one when it still records its peer. */
+	if (endpoint->tcp.inet.remote_port != 0)
+		return 1;
+
+	/* Succeeded: a closed socket without a peer is not a connection. */
+	return 0;
+}
+
+/*
+ * Tells whether two connections have the same peer: the same port, and
+ * the same address of the same family.
+ */
+static int
+tcp_same_peer(
+	const struct tcp_endpoint *left,
+	const struct tcp_endpoint *right)
+{
+	int left_ipv4;
+	int right_ipv4;
+	int same;
+
+	/* Peers on different ports are different peers. */
+	if (left->tcp.inet.remote_port != right->tcp.inet.remote_port)
+		return 0;
+
+	/* A connection to an IPv4 peer and one to an IPv6 peer are different. */
+	left_ipv4 = inet_socket_accepts_ipv4(&left->tcp.inet);
+	right_ipv4 = inet_socket_accepts_ipv4(&right->tcp.inet);
+	if (left_ipv4 != right_ipv4)
+		return 0;
+
+	/* Two IPv4 peers are the same when their addresses are. */
+	if (left_ipv4) {
+		if (left->tcp.inet.remote_address != right->tcp.inet.remote_address)
+			return 0;
+		return 1;
+	}
+
+	/* Two IPv6 peers likewise. */
+	same = in6_equal(&left->tcp.inet.remote6, &right->tcp.inet.remote6);
+	if (!same)
+		return 0;
+
+	/* Succeeded: the same peer. */
+	return 1;
+}
+
+/*
+ * Tells whether another connection already has the local endpoint and the
+ * peer a connecting socket asks for; the caller holds the registry lock.
+ *
+ * A socket bound under SO_REUSEADDR may share its port with connections,
+ * so connecting it to the peer of one of them would make two connections
+ * that an incoming segment cannot tell apart.
+ *
+ * Procedure referenced: FreeBSD 14.1 sys/netinet/in_pcb.c
+ * (in_pcbconnect_setup, the in_pcblookup_hash_locked check that refuses
+ * an existing four-tuple with EADDRINUSE).
+ */
+static int
+tcp_connection_duplicate_locked(
+	const struct tcp_endpoint *candidate)
+{
+	const struct tcp_endpoint *endpoint;
+	int connection;
+	int overlap;
+	int same;
+
+	/* Walks every other connection for one with the same four-tuple. */
+	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+		/* The candidate is not a duplicate of itself. */
+		if (endpoint == candidate)
+			continue;
+
+		/* Only a connection carries a four-tuple. */
+		connection = tcp_endpoint_is_connection(endpoint);
+		if (!connection)
+			continue;
+
+		/* The local port, and local addresses that are equal or a wildcard. */
+		overlap = inet_socket_local_conflict(&endpoint->tcp.inet,
+		    0,
+		    &candidate->tcp.inet,
+		    0);
+		if (!overlap)
+			continue;
+
+		/* And the same peer. */
+		same = tcp_same_peer(endpoint, candidate);
+		if (same)
+			return 1;
+	}
+
+	/* Succeeded: the four-tuple is free. */
 	return 0;
 }
 
@@ -3089,6 +3511,9 @@ tcp_output_segment(
 	/* A copy sent before may carry the marks of its last way out. */
 	packet->flags &= ~(PACKET_BUF_TX_CSUM_TCP | PACKET_BUF_TX_CSUM_IPV4);
 
+	/* The Type of Service byte or traffic class the socket's packets go with (IP_TOS, IPV6_TCLASS). */
+	packet->traffic_class = inet_socket_send_class(&endpoint->tcp.inet, ipv6);
+
 	/* Hands the segment to IPv6, with the checksum over its pseudo-header. */
 	if (ipv6) {
 		checksum = net_checksum_pseudo6(source6.s6_addr, endpoint->tcp.inet.remote6.s6_addr, IPPROTO_TCP,
@@ -3273,25 +3698,182 @@ tcp_sequence_at_or_before(
 }
 
 /*
- * Gives the initial sequence number of a new connection.
+ * Gives the initial sequence number of a new connection, once its local
+ * and remote addresses and ports are known.
  *
- * chosen is the number the caller picked; a build with
+ * It is a clock that moves on once every TCP_ISN_CLOCK_US microseconds
+ * plus a keyed hash of the four-tuple (RFC 6528 section 3).  A new
+ * connection of a four-tuple therefore starts past where the last one did,
+ * which a peer still in TIME_WAIT takes as a new connection (RFC 6191),
+ * while the number of a connection of another four-tuple tells nothing of
+ * where this one starts.  The hash is BLAKE2s-256 of the secret key
+ * followed by the four-tuple; BLAKE2s has no length extension, so the
+ * hash of a secret prefix serves as a keyed function.  A build with
  * CONFIG_TCP_ISN_WRAP_BEFORE puts the first data byte that many bytes
  * before the wrap instead, the SYN taking the number before it.
+ *
+ * Procedure referenced: RFC 6528 section 3 (ISN = M + F(localip,
+ * localport, remoteip, remoteport, secretkey), M a timer of 4
+ * microseconds, F a pseudorandom function of a secret key).
  */
 static uint32_t
 tcp_initial_sequence(
-	uint32_t chosen)
+	const struct tcp_endpoint *endpoint)
 {
+	struct blake2s_state hash;
+	uint8_t digest[BLAKE2S_DIGEST_BYTES];
+	uint8_t tuple[1U + 16U + 2U + 16U + 2U];
+	const uint8_t *key;
+	uint64_t microseconds;
 	uint32_t wrap_before;
+	uint32_t clock;
+	uint32_t offset;
+	size_t length;
+	int ipv6;
 
-	/* The ordinary build keeps the number the caller picked. */
+	/* A test build starts the sequence numbers just before they wrap. */
 	wrap_before = (uint32_t)CONFIG_TCP_ISN_WRAP_BEFORE;
-	if (wrap_before == 0U)
-		return chosen;
+	if (wrap_before != 0U)
+		return 0U - wrap_before - 1U;
 
-	/* Succeeded: the SYN's number, one before the first data byte. */
-	return 0U - wrap_before - 1U;
+	/*
+	 * Lays out the four-tuple: the family, then this end's address and
+	 * port, then the peer's, each in network byte order.
+	 */
+	ipv6 = inet_socket_speaks_ipv6(&endpoint->tcp.inet);
+	length = 0;
+	if (ipv6) {
+		tuple[length] = 6U;
+		length++;
+		kern_memcpy(&tuple[length], endpoint->tcp.inet.local6.s6_addr, 16U);
+		length += 16U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.local_port);
+		length += 2U;
+		kern_memcpy(&tuple[length], endpoint->tcp.inet.remote6.s6_addr, 16U);
+		length += 16U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.remote_port);
+		length += 2U;
+	} else {
+		tuple[length] = 4U;
+		length++;
+		wire_put32(&tuple[length], endpoint->tcp.inet.local_address);
+		length += 4U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.local_port);
+		length += 2U;
+		wire_put32(&tuple[length], endpoint->tcp.inet.remote_address);
+		length += 4U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.remote_port);
+		length += 2U;
+	}
+
+	/* Hashes the secret key and then the four-tuple: F of RFC 6528. */
+	key = tcp_isn_key();
+	blake2s_init(&hash);
+	blake2s_update(&hash, key, TCP_ISN_KEY_BYTES);
+	blake2s_update(&hash, tuple, length);
+	blake2s_final(&hash, digest);
+	offset = wire_get32(digest);
+
+	/* Clears what the key went through, so the stack does not keep it. */
+	kern_memset_explicit(&hash, 0, sizeof(hash));
+	kern_memset_explicit(digest, 0, sizeof(digest));
+
+	/* The clock M of RFC 6528, which wraps about every 4.8 hours. */
+	microseconds = kern_ticks_to_us(clock_ticks());
+	clock = (uint32_t)(microseconds / TCP_ISN_CLOCK_US);
+
+	/* Succeeded: the clock plus the four-tuple's place in the sequence space. */
+	return clock + offset;
+}
+
+/*
+ * Gives the secret key of the initial sequence numbers' hash.
+ *
+ * A first key made before the random number generator was seeded is
+ * replaced, once, by one made at the first call after the seeding.  The
+ * caller that claims the replacement writes the second key and then
+ * publishes it; any other caller meanwhile goes on with the first.  The
+ * numbers of a four-tuple jump once at the replacement, which only a
+ * connection reopened from TIME_WAIT across it, early in boot, can notice.
+ */
+static const uint8_t *
+tcp_isn_key(
+	void)
+{
+	unsigned index;
+	unsigned claimed;
+	unsigned expected;
+	int exchanged;
+	int seeded;
+	int error;
+
+	/* The second key, once it is published. */
+	index = atomic_load_acquire(&tcp_isn_key_index);
+	if (index != 0U)
+		return tcp_isn_keys[1];
+
+	/* The first key, while it needs no successor or another caller makes one. */
+	claimed = atomic_load_acquire(&tcp_isn_rekey_claimed);
+	if (claimed != 0U)
+		return tcp_isn_keys[0];
+
+	/* The first key, until the generator is seeded. */
+	seeded = kern_random_seeded();
+	if (!seeded)
+		return tcp_isn_keys[0];
+
+	/* Claims the making of the second key; a caller that lost the race goes on with the first. */
+	expected = 0U;
+	exchanged = atomic_compare_exchange(&tcp_isn_rekey_claimed, &expected, 1U);
+	if (!exchanged)
+		return tcp_isn_keys[0];
+
+	/* Makes the second key from the seeded generator; a failure keeps the first. */
+	error = kern_random_read(tcp_isn_keys[1], TCP_ISN_KEY_BYTES, 0);
+	if (error != 0)
+		return tcp_isn_keys[0];
+
+	/*
+	 * Publishing the index makes every later call take the second key,
+	 * whose bytes the release ordering makes visible first.
+	 */
+	atomic_store_release(&tcp_isn_key_index, 1U);
+
+	/* Succeeded: the second key. */
+	return tcp_isn_keys[1];
+}
+
+/*
+ * Makes the first secret key of the initial sequence numbers' hash, as
+ * TCP starts.
+ *
+ * The random number generator is up by then but may not be seeded: a
+ * platform without an entropy source of its own seeds it from the timing
+ * of the first timer ticks, and until then its output comes from the wall
+ * clock and the counter alone.  It is not waited for, since TCP starts
+ * during boot; tcp_isn_key() replaces such a key once the generator is
+ * seeded.  A generator not up at all leaves the first key zero, to be
+ * replaced the same way.
+ */
+static void
+tcp_isn_key_init(
+	void)
+{
+	int seeded;
+	int error;
+
+	/* Whether the generator was seeded before the key is drawn from it. */
+	seeded = kern_random_seeded();
+
+	/* Draws the first key without waiting for the seed. */
+	error = kern_random_read(tcp_isn_keys[0], TCP_ISN_KEY_BYTES, 0);
+
+	/*
+	 * A key drawn from a seeded generator is kept for good: marking the
+	 * replacement as claimed means no caller makes a second key.
+	 */
+	if (error == 0 && seeded)
+		atomic_store_release(&tcp_isn_rekey_claimed, 1U);
 }
 
 /*
@@ -3628,10 +4210,14 @@ tcp_persist_applies_locked(
 	unsigned sent;
 	int fits;
 
-	/* A state with data to send: before the handshake there is no window, after both FINs no data. */
+	/*
+	 * A state with data to send: before the handshake there is no window,
+	 * after this end's FIN is taken no data.
+	 */
 	if (endpoint->tcp.state != TCP_ESTABLISHED &&
 	    endpoint->tcp.state != TCP_CLOSE_WAIT &&
 	    endpoint->tcp.state != TCP_FIN_WAIT_1 &&
+	    endpoint->tcp.state != TCP_CLOSING &&
 	    endpoint->tcp.state != TCP_LAST_ACK)
 		return 0;
 
@@ -3707,8 +4293,10 @@ tcp_persist_given_up_locked(
 	if (endpoint->tcp.persist_shift >= TCP_PERSIST_SHIFT_MAX && idle >= limit)
 		return 1;
 
-	/* Closed by this end (FIN_WAIT_1, LAST_ACK), silent for a minute. */
-	if (endpoint->tcp.state == TCP_FIN_WAIT_1 || endpoint->tcp.state == TCP_LAST_ACK) {
+	/* Closed by this end (FIN_WAIT_1, CLOSING, LAST_ACK), silent for a minute. */
+	if (endpoint->tcp.state == TCP_FIN_WAIT_1 ||
+	    endpoint->tcp.state == TCP_CLOSING ||
+	    endpoint->tcp.state == TCP_LAST_ACK) {
 		if (idle >= TCP_PERSIST_CLOSED_IDLE)
 			return 1;
 	}
@@ -4473,6 +5061,37 @@ tcp_segment_window_locked(
 
 	/* Succeeded: the window in bytes. */
 	return window;
+}
+
+/*
+ * Settles the local address of a connection about to send its SYN, as
+ * the SYN's own route lookup would, so the initial sequence number is
+ * hashed from the address the connection then keeps.  A socket bound to
+ * an address keeps that one.  Without a route the address stays
+ * unspecified, and the SYN then fails the same way.  Called without the
+ * socket lock, which the route lookup must not be taken under.
+ */
+static void
+tcp_connect_source(
+	struct tcp_endpoint *endpoint)
+{
+	struct net_device *device;
+	struct in6_addr source6;
+	uint32_t source;
+	int ipv6;
+	int error;
+
+	/* Looks up the way to the peer, which records the source it takes. */
+	ipv6 = inet_socket_speaks_ipv6(&endpoint->tcp.inet);
+	if (ipv6) {
+		error = tcp6_route(endpoint, &device, &source6);
+		if (error == 0 && device != NULL)
+			net_device_release(device);
+	} else {
+		error = tcp_route(endpoint, &device, &source);
+		if (error == 0)
+			net_device_release(device);
+	}
 }
 
 /*
@@ -7117,6 +7736,7 @@ tcp_connect(
 	uint32_t generation;
 	unsigned long irq;
 	unsigned attempt;
+	int duplicate;
 	int error;
 	uint64_t sequence;
 
@@ -7188,11 +7808,27 @@ tcp_connect(
 			tcp_forget_peer(endpoint);
 			return error;
 		}
+	} else {
+		/* Refuses a bound socket the four-tuple of another connection. */
+		irq = spin_lock_irqsave(&tcp_registry_lock);
+
+		duplicate = tcp_connection_duplicate_locked(endpoint);
+
+		spin_unlock_irqrestore(&tcp_registry_lock, irq);
+
+		if (duplicate) {
+			tcp_forget_peer(endpoint);
+			return EADDRINUSE;
+		}
 	}
 
+	/*
+	 * Settles this end's address before the initial sequence number,
+	 * which is hashed from it, is chosen.
+	 */
+	tcp_connect_source(endpoint);
+
 	/* Starts a new attempt with a fresh generation and sequence space. */
-	endpoint->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
-	    endpoint->tcp.inet.local_port;
 	irq = spin_lock_irqsave(&socket->lock);
 
 	endpoint->tcp.connect_generation++;
@@ -7203,13 +7839,11 @@ tcp_connect(
 	endpoint->tcp.connect_wait_deadline = 0;
 
 	/*
-	 * Make distinct attempts use distinct wire sequence spaces even when
-	 * the scheduler tick did not advance between them.
+	 * The initial sequence number, from the clock and the four-tuple:
+	 * a later attempt, or a later connection of the same four-tuple,
+	 * starts past this one.
 	 */
-	endpoint->tcp.send_next ^= generation * 2654435761U;
-
-	/* A test build may start the sequence numbers just before they wrap. */
-	endpoint->tcp.send_next = tcp_initial_sequence(endpoint->tcp.send_next);
+	endpoint->tcp.send_next = tcp_initial_sequence(endpoint);
 	endpoint->tcp.send_unacknowledged = endpoint->tcp.send_next;
 	endpoint->tcp.state = TCP_SYN_SENT;
 
@@ -7542,7 +8176,7 @@ tcp_send_bytes(
 		if (endpoint->tcp.state == TCP_ESTABLISHED && socket->keepalive != 0) {
 			endpoint->tcp.keepalive_probes = 0;
 			endpoint->tcp.keepalive_deadline =
-			    sched_ticks() + TCP_KEEPALIVE_IDLE;
+			    sched_ticks() + endpoint->tcp.keepalive_idle;
 		}
 		spin_unlock_irqrestore(&socket->lock, irq);
 
@@ -7670,6 +8304,7 @@ tcp_recvfrom(
 	 * reaches TIME_WAIT, and its second read slept for ever).
 	 */
 	if ((endpoint->tcp.state == TCP_LAST_ACK ||
+	     endpoint->tcp.state == TCP_CLOSING ||
 	     endpoint->tcp.state == TCP_TIME_WAIT) &&
 	    socket->receive_head == NULL)
 		return 0;
@@ -8295,12 +8930,17 @@ tcp_close(
 	if (endpoint->tcp.listener != NULL)
 		tcp_listener_remove(endpoint);
 
-	/* A listener aborts every half-open and unaccepted child. */
+	/*
+	 * A listener aborts every half-open and unaccepted child, each with a
+	 * reset to its peer, which no one here will ever serve (as BSD's
+	 * soabort and Linux's inet_csk_listen_stop do).
+	 */
 	queued = endpoint->tcp.half_open_head;
 	while (queued != NULL) {
 		endpoint->tcp.half_open_head = queued->queue_next;
 		queued->queue_next = NULL;
 		queued->listener = NULL;
+		tcp_abort_connection((struct tcp_endpoint *)queued);
 		socket_set_error(&queued->inet.socket, ECONNABORTED);
 		socket_release(&queued->inet.socket);
 		queued = endpoint->tcp.half_open_head;
@@ -8311,6 +8951,7 @@ tcp_close(
 		endpoint->tcp.accept_head = queued->queue_next;
 		queued->queue_next = NULL;
 		queued->listener = NULL;
+		tcp_abort_connection((struct tcp_endpoint *)queued);
 		socket_set_error(&queued->inet.socket, ECONNABORTED);
 		socket_release(&queued->inet.socket);
 		queued = endpoint->tcp.accept_head;
@@ -8332,6 +8973,12 @@ tcp_close(
 	tcp_receive_extra_give(endpoint->tcp.receive_extra_packets);
 	endpoint->tcp.receive_extra_packets = 0;
 
+	/* Its slot of the TIME_WAIT limit goes back for another connection. */
+	if (endpoint->time_wait_slot != 0) {
+		endpoint->time_wait_slot = 0;
+		tcp_time_wait_slot_give();
+	}
+
 	tcp_retransmit_clear(endpoint);
 	tcp_reorder_free(endpoint);
 	kern_free(endpoint);
@@ -8345,11 +8992,9 @@ tcp_drain_done(
 {
 	unsigned index;
 
-	/* Room for one more segment, or nothing outstanding at all. */
+	/* Room for one more segment. */
 	if (until == TCP_DRAIN_ROOM)
 		return endpoint->tcp.send_count < TCP_SEND_QUEUE_MAX;
-	if (until == TCP_DRAIN_ALL)
-		return endpoint->tcp.send_count == 0;
 
 	/* No outstanding segment carries data; a FIN alone does not count. */
 	for (index = 0; index < endpoint->tcp.send_count; index++) {
@@ -8362,15 +9007,11 @@ tcp_drain_done(
 
 /*
  * Waits, for a bounded time, while a closing connection still needs the
- * peer to take what it sent.
+ * peer to take some of what it sent.
  *
- * The endpoint is freed when the last reference goes, and with it the copies
- * kept for retransmission, so the data sent must be taken before then.  The
- * wait happens while the closing file still holds its reference, so that
- * acknowledgements and the retransmission timer reach the endpoint.  It ends
- * when the condition holds, the connection has failed, or TCP_CLOSE_DRAIN_MS
- * has passed.  A kernel thread (the network
- * worker among them) does not wait: it is what would deliver the
+ * It ends when the condition holds, the connection has failed, or
+ * TCP_CLOSE_DRAIN_MS has passed.  A kernel thread (the network worker
+ * among them) does not wait: it is what would deliver the
  * acknowledgements.
  */
 static void
@@ -8404,13 +9045,22 @@ tcp_close_drain(
 }
 
 /*
- * Closes a connection when its last file goes away: sends the FIN and lets
- * what was sent reach the peer.
+ * Closes a connection when its last file goes away: sends the FIN, and
+ * leaves the connection to finish closing by itself.
  *
  * The socket layer has already marked both directions shut, so the FIN is
  * sent here rather than through tcp_shutdown(), which would take the mark to
  * mean it had been sent.  A full retransmission ring is first given time to
- * make room for it.
+ * make room for it.  close() does not wait for the peer to take what was
+ * sent, as on BSD and Linux without SO_LINGER: a connection still closing
+ * takes a reference of its own, so the retransmission timer sends the data
+ * and the FIN again until they are taken, and the peer's FIN is
+ * acknowledged through TIME_WAIT.  What it received and no one will read
+ * is freed now.
+ *
+ * Procedure referenced: RFC 9293 section 3.10.4 (CLOSE call) and FreeBSD
+ * 14.1 sys/netinet/tcp_usrreq.c (tcp_disconnect, the socket left to the
+ * protocol once its descriptor is gone).
  */
 static void
 tcp_endpoint_close(
@@ -8420,41 +9070,436 @@ tcp_endpoint_close(
 	enum tcp_state old_state;
 	enum tcp_state closing_state;
 	unsigned long irq;
+	uint64_t now;
+	int referenced;
+	int closing;
+	int unread;
+	int resets;
+	int slot;
 	int error;
 
-	/* Only a connection that has not sent its FIN owes one. */
+	/* A connection that has not sent its FIN owes one. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	old_state = endpoint->tcp.state;
+	unread = 0;
+	if (socket->receive_bytes != 0)
+		unread = 1;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
-	if (old_state != TCP_ESTABLISHED && old_state != TCP_CLOSE_WAIT)
-		return;
+
+	/*
+	 * Data received and never read is lost with the file, and the peer is
+	 * told so with a reset instead of a FIN (RFC 1122 section 4.2.2.13).
+	 * The connection is then closed, and goes with its last reference.
+	 */
+	if (unread) {
+		resets = tcp_abort_resets(old_state);
+		if (resets) {
+			tcp_abort_connection(endpoint);
+			return;
+		}
+	}
 
 	/* Makes room for the FIN, then sends it. */
-	tcp_close_drain(endpoint, TCP_DRAIN_ROOM);
-	closing_state = old_state == TCP_CLOSE_WAIT ? TCP_LAST_ACK :
-	    TCP_FIN_WAIT_1;
-	irq = spin_lock_irqsave(&socket->lock);
-	if (endpoint->tcp.state == old_state)
-		endpoint->tcp.state = closing_state;
-	spin_unlock_irqrestore(&socket->lock, irq);
-	error = tcp_send_reliable(endpoint, TCP_FIN | TCP_ACK, NULL, NULL, 0, 0);
-	if (error != 0) {
+	if (old_state == TCP_ESTABLISHED || old_state == TCP_CLOSE_WAIT) {
+		tcp_close_drain(endpoint, TCP_DRAIN_ROOM);
+		closing_state = old_state == TCP_CLOSE_WAIT ? TCP_LAST_ACK :
+		    TCP_FIN_WAIT_1;
 		irq = spin_lock_irqsave(&socket->lock);
-		if (endpoint->tcp.state == closing_state)
-			endpoint->tcp.state = old_state;
+		if (endpoint->tcp.state == old_state)
+			endpoint->tcp.state = closing_state;
 		spin_unlock_irqrestore(&socket->lock, irq);
-		return;
+		error = tcp_send_reliable(endpoint, TCP_FIN | TCP_ACK, NULL, NULL, 0, 0);
+		if (error != 0) {
+			irq = spin_lock_irqsave(&socket->lock);
+			if (endpoint->tcp.state == closing_state)
+				endpoint->tcp.state = old_state;
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return;
+		}
 	}
 
 	/*
-	 * Lets what was sent be taken, the FIN included, for at most the drain
-	 * time.  The FIN goes out through the retransmission ring, and a first
-	 * transmission can be lost (a USB adapter drops a frame while its one
-	 * transfer is busy); freeing the endpoint before the FIN is taken would
-	 * leave it never sent again.  Closing second, a peer that has gone
-	 * costs only that bounded wait.
+	 * Only a connection past its FIN goes on alone; any other socket goes
+	 * with its last reference, as before.
 	 */
-	tcp_close_drain(endpoint, TCP_DRAIN_ALL);
+	closing = tcp_orphan_closing(old_state);
+	if (!closing &&
+	    old_state != TCP_ESTABLISHED &&
+	    old_state != TCP_CLOSE_WAIT)
+		return;
+
+	/*
+	 * Nor does one whose last reference is already going (a listener's
+	 * unaccepted child dropped with it): that release frees it whatever
+	 * is taken here.
+	 */
+	referenced = socket_tryref(socket);
+	if (!referenced)
+		return;
+
+	/*
+	 * Keeps the reference while the connection is still closing.  One in
+	 * TIME_WAIT already needs a slot of the TIME_WAIT limit, without which
+	 * it is freed now; one in FIN_WAIT_2 waits for the peer's FIN for a
+	 * bounded time from now.
+	 */
+	now = sched_ticks();
+	irq = spin_lock_irqsave(&socket->lock);
+
+	closing = tcp_orphan_closing(endpoint->tcp.state);
+	if (closing && endpoint->tcp.state == TCP_TIME_WAIT) {
+		slot = tcp_time_wait_slot_take();
+		if (slot) {
+			endpoint->time_wait_slot = 1;
+		} else {
+			endpoint->tcp.state = TCP_CLOSED;
+			endpoint->close_deadline = 0;
+			tcp_forget_peer(endpoint);
+			closing = 0;
+		}
+	}
+
+	/*
+	 * orphaned tells the timer and the input that the connection holds
+	 * itself, and that its reference goes when it reaches CLOSED.
+	 */
+	if (closing) {
+		endpoint->orphaned = 1;
+		if (endpoint->tcp.state == TCP_FIN_WAIT_2)
+			endpoint->close_deadline = now + kern_ms_to_ticks(TCP_FIN_WAIT_2_MS);
+	}
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* A connection already closed goes with its last reference. */
+	if (!closing) {
+		socket_release(socket);
+		return;
+	}
+
+	/* What it received and no one will read goes now. */
+	tcp_receive_discard(endpoint);
+
+	/* The network worker learns of a FIN_WAIT_2 deadline it did not sleep for. */
+	net_worker_wakeup();
+}
+
+/*
+ * Tells whether a connection in a state is dropped with a reset to its
+ * peer rather than silently: one the peer has, or may have, taken as
+ * synchronized, from SYN_RECEIVED until neither end has a FIN to send
+ * (RFC 9293 section 3.10.4, ABORT).
+ */
+static int
+tcp_abort_resets(
+	enum tcp_state state)
+{
+	/* Each state in which the peer holds the connection open. */
+	switch (state) {
+	case TCP_SYN_RECEIVED:
+	case TCP_ESTABLISHED:
+	case TCP_FIN_WAIT_1:
+	case TCP_FIN_WAIT_2:
+	case TCP_CLOSE_WAIT:
+	case TCP_CLOSING:
+	case TCP_LAST_ACK:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Succeeded: the peer has no connection to be told of, or one in TIME_WAIT. */
+	return 0;
+}
+
+/*
+ * Drops a connection and tells its peer with a reset (RFC 9293 section
+ * 3.10.4, ABORT): what was queued or is in flight is given up, the state
+ * goes to CLOSED, and the reset follows everything this end sent, where
+ * a peer that has taken all of it expects the next segment (RFC 5961
+ * section 3.2).  A connection in any other state is left as it is.  The
+ * caller holds no socket lock.
+ *
+ * Procedure referenced: Linux 6.12 net/ipv4/tcp.c (tcp_close: a socket
+ * closed with data its user did not read is reset rather than closed
+ * with a FIN) and net/ipv4/inet_connection_sock.c (inet_csk_listen_stop:
+ * a listener's unaccepted children are disconnected, which resets them).
+ */
+static void
+tcp_abort_connection(
+	struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	struct tcp_discard discard;
+	unsigned long irq;
+	uint32_t reset_sequence;
+	int resets;
+
+	/* Ends the connection, keeping the peer's address for the reset. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	resets = tcp_abort_resets(endpoint->tcp.state);
+	if (!resets) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		return;
+	}
+	reset_sequence = tcp_sent_end_locked(endpoint);
+	tcp_retransmit_reset(endpoint, &discard);
+	endpoint->tcp.state = TCP_CLOSED;
+	endpoint->tcp.active_connect_generation = 0;
+	endpoint->tcp.connect_wait_deadline = 0;
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Frees what was queued to send, with the lock released. */
+	tcp_discard_free(&discard);
+
+	/* Tells the peer; a reset that is lost is answered later by the reset of a connection gone. */
+	(void)tcp_send_segment_at(endpoint, reset_sequence, TCP_RST | TCP_ACK, NULL, 0);
+
+	/* Forgets the peer, so the connection no longer matches its segments. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	tcp_forget_peer(endpoint);
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+}
+
+/*
+ * Frees what an orphaned connection received and no one will read: its
+ * receive queue and the segments it kept ahead of a gap.  The packets its
+ * queue took beyond the default go back to the other connections, and its
+ * buffer no longer grows.
+ */
+static void
+tcp_receive_discard(
+	struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	struct packet_buf *packets;
+	struct packet_buf *packet;
+	unsigned long irq;
+	unsigned index;
+
+	/* Takes the queue and the kept segments, chained together, and shrinks the buffer back. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	packets = socket->receive_head;
+	socket->receive_head = NULL;
+	socket->receive_tail = NULL;
+	socket->receive_packets = 0;
+	socket->receive_jumbo = 0;
+	socket->receive_bytes = 0;
+	for (index = 0; index < endpoint->tcp.reorder_count; index++) {
+		packet = endpoint->tcp.reorder[index];
+		endpoint->tcp.reorder[index] = NULL;
+		packet->next = packets;
+		packets = packet;
+	}
+	endpoint->tcp.reorder_count = 0;
+	endpoint->tcp.sack_recent_set = 0;
+	endpoint->tcp.receive_auto = 0;
+	endpoint->tcp.receive_tune_on = 0;
+	(void)tcp_receive_packets_set_locked(endpoint, TCP_RECEIVE_PACKETS);
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Frees them with the lock released. */
+	for (;;) {
+		packet = packets;
+		if (packet == NULL)
+			break;
+		packets = packet->next;
+		packet_buf_free(packet);
+	}
+}
+
+/*
+ * Tells whether a state is one a connection whose file is closed goes on
+ * closing in by itself: its FIN sent, CLOSED not yet reached.
+ */
+static int
+tcp_orphan_closing(
+	enum tcp_state state)
+{
+	/* Each state between this end's FIN and CLOSED. */
+	switch (state) {
+	case TCP_FIN_WAIT_1:
+	case TCP_FIN_WAIT_2:
+	case TCP_CLOSING:
+	case TCP_LAST_ACK:
+	case TCP_TIME_WAIT:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Succeeded: any other state has nothing left to finish. */
+	return 0;
+}
+
+/*
+ * Takes one of the TIME_WAIT limit's slots, and reports whether one was
+ * left.
+ */
+static int
+tcp_time_wait_slot_take(
+	void)
+{
+	unsigned count;
+	int exchanged;
+
+	/* Adds one to the count, unless the limit is reached or another moved it meanwhile. */
+	count = atomic_load_acquire(&tcp_time_wait_count);
+	for (;;) {
+		/* Every slot is taken. */
+		if (count >= TCP_TIME_WAIT_MAX)
+			return 0;
+
+		exchanged = atomic_compare_exchange(&tcp_time_wait_count, &count, count + 1U);
+		if (exchanged)
+			break;
+	}
+
+	/* Succeeded: the slot is the caller's. */
+	return 1;
+}
+
+/* Gives a slot of the TIME_WAIT limit back. */
+static void
+tcp_time_wait_slot_give(
+	void)
+{
+	/* Subtracts one (adding the two's complement). */
+	(void)atomic_fetch_add_relaxed(&tcp_time_wait_count, 0U - 1U);
+}
+
+/*
+ * Moves a connection to TIME_WAIT for 2MSL from now, under the socket
+ * lock.  An orphaned connection needs a slot of the TIME_WAIT limit; when
+ * none is left it skips TIME_WAIT and is closed at once.
+ */
+static void
+tcp_time_wait_enter_locked(
+	struct tcp_endpoint *endpoint,
+	uint64_t now)
+{
+	int slot;
+
+	/* An orphaned connection over the limit goes straight to CLOSED. */
+	if (endpoint->orphaned != 0 && endpoint->time_wait_slot == 0) {
+		slot = tcp_time_wait_slot_take();
+		if (!slot) {
+			endpoint->tcp.state = TCP_CLOSED;
+			endpoint->close_deadline = 0;
+			tcp_forget_peer(endpoint);
+			return;
+		}
+
+		endpoint->time_wait_slot = 1;
+	}
+
+	/* Waits out 2MSL. */
+	endpoint->tcp.state = TCP_TIME_WAIT;
+	endpoint->close_deadline = now + kern_ms_to_ticks(TCP_TIME_WAIT_MS);
+}
+
+/*
+ * Moves a connection to FIN_WAIT_2, under the socket lock: an orphaned
+ * one waits for the peer's FIN for TCP_FIN_WAIT_2_MS at most.
+ */
+static void
+tcp_fin_wait_2_enter_locked(
+	struct tcp_endpoint *endpoint,
+	uint64_t now)
+{
+	/* Waits for the peer's FIN. */
+	endpoint->tcp.state = TCP_FIN_WAIT_2;
+
+	/* No one can read what an orphaned connection receives, so it does not wait for ever. */
+	if (endpoint->orphaned != 0)
+		endpoint->close_deadline = now + kern_ms_to_ticks(TCP_FIN_WAIT_2_MS);
+}
+
+/*
+ * Ends TIME_WAIT, or an orphaned connection's wait in FIN_WAIT_2, once its
+ * deadline has passed, under the socket lock.  Reports whether the
+ * connection was closed.
+ *
+ * A connection whose file is still open keeps its peer, so its reader
+ * still sees the end of the stream; an orphaned one forgets it, which
+ * frees the four-tuple even before the endpoint goes.
+ */
+static int
+tcp_close_deadline_expire_locked(
+	struct tcp_endpoint *endpoint,
+	uint64_t now)
+{
+	/* Nothing is due yet. */
+	if (endpoint->close_deadline == 0 || endpoint->close_deadline > now)
+		return 0;
+
+	/* The deadline means nothing once the state has moved on. */
+	endpoint->close_deadline = 0;
+	if (endpoint->tcp.state != TCP_TIME_WAIT &&
+	    (endpoint->tcp.state != TCP_FIN_WAIT_2 || endpoint->orphaned == 0))
+		return 0;
+
+	/* The connection is over. */
+	endpoint->tcp.state = TCP_CLOSED;
+	if (endpoint->orphaned != 0)
+		tcp_forget_peer(endpoint);
+
+	/* Succeeded: closed. */
+	return 1;
+}
+
+/*
+ * Drops an orphaned connection's own reference once it has reached
+ * CLOSED, under the socket lock.  Reports whether the caller must release
+ * it, after the lock.
+ */
+static int
+tcp_orphan_settle_locked(
+	struct tcp_endpoint *endpoint)
+{
+	/* Only an orphaned connection that has closed. */
+	if (endpoint->orphaned == 0 || endpoint->tcp.state != TCP_CLOSED)
+		return 0;
+
+	/* It no longer holds itself. */
+	endpoint->orphaned = 0;
+	endpoint->close_deadline = 0;
+
+	/* Succeeded: the caller releases the reference. */
+	return 1;
+}
+
+/*
+ * Releases an orphaned connection's own reference once it has reached
+ * CLOSED.  The caller holds a reference of its own, so the endpoint
+ * outlives this call.
+ */
+static void
+tcp_orphan_release(
+	struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	unsigned long irq;
+	int release;
+
+	/* Settles the connection's reference. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	release = tcp_orphan_settle_locked(endpoint);
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Drops it. */
+	if (release)
+		socket_release(socket);
 }
 
 /* Reports the readiness of a socket. */
@@ -8489,6 +9534,7 @@ tcp_poll(
 		if (socket->receive_head != NULL ||
 		    socket->read_shutdown ||
 		    endpoint->tcp.state == TCP_CLOSE_WAIT ||
+		    endpoint->tcp.state == TCP_CLOSING ||
 		    endpoint->tcp.state == TCP_TIME_WAIT ||
 		    (endpoint->tcp.state == TCP_CLOSED &&
 		     (endpoint->tcp.inet.inet_flags & INET_SOCKET_CONNECTED) != 0))
@@ -8515,6 +9561,7 @@ tcp_poll(
 		 */
 		if (socket->read_shutdown ||
 		    endpoint->tcp.state == TCP_CLOSE_WAIT ||
+		    endpoint->tcp.state == TCP_CLOSING ||
 		    endpoint->tcp.state == TCP_TIME_WAIT ||
 		    socket->lifecycle != SOCKET_OPEN)
 			result |= POLLHUP;
@@ -8737,9 +9784,8 @@ tcp_passive_syn(
 	child->tcp.sack_offered = (uint8_t)(offered_sack != 0);
 	child->tcp.sack_on = (uint8_t)(offered_sack != 0);
 
-	child->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
-	    child->tcp.inet.local_port + source_port;
-	child->tcp.send_next = tcp_initial_sequence(child->tcp.send_next);
+	/* The initial sequence number, from the clock and the four-tuple just set. */
+	child->tcp.send_next = tcp_initial_sequence(child);
 	child->tcp.send_unacknowledged = child->tcp.send_next;
 	child->tcp.listener = &listener->tcp;
 	child->tcp.inet.socket.receive_timeout_ticks =
@@ -8749,6 +9795,13 @@ tcp_passive_syn(
 	child->tcp.maxunack = listener->tcp.maxunack;
 	child->tcp.maxunack_seconds = listener->tcp.maxunack_seconds;
 	child->tcp.cc = listener->tcp.cc;
+	child->tcp.keepalive_idle = listener->tcp.keepalive_idle;
+	child->tcp.keepalive_idle_ms = listener->tcp.keepalive_idle_ms;
+	child->tcp.keepalive_interval = listener->tcp.keepalive_interval;
+	child->tcp.keepalive_interval_ms = listener->tcp.keepalive_interval_ms;
+	child->tcp.keepalive_count = listener->tcp.keepalive_count;
+	child->tcp.inet.tos = listener->tcp.inet.tos;
+	child->tcp.inet.tclass = listener->tcp.inet.tclass;
 	child->tcp.inet.socket.reuse_address =
 	    listener->tcp.inet.socket.reuse_address;
 	child->tcp.inet.bind_reuse_address =
@@ -8829,6 +9882,42 @@ tcp_child_addresses(
 	linklocal = in6_is_linklocal(&addresses->source6);
 	if (linklocal)
 		child->tcp.inet.scope6 = addresses->ifindex;
+}
+
+/*
+ * Tells whether a segment's acknowledgement is acceptable to a connection
+ * in SYN_SENT, under the socket lock: the segment carries none, or it
+ * acknowledges the SYN this end sent, ISS < SEG.ACK =< SND.NXT (RFC 9293
+ * section 3.10.7.3).  send_unacknowledged is still the initial sequence
+ * number there.
+ */
+static int
+tcp_syn_sent_acceptable_locked(
+	const struct tcp_endpoint *endpoint,
+	uint8_t flags,
+	uint32_t acknowledgement)
+{
+	uint32_t sent_end;
+	int after_initial;
+	int beyond_sent;
+
+	/* A segment that acknowledges nothing is judged by its other bits. */
+	if ((flags & TCP_ACK) == 0)
+		return 1;
+
+	/* One at or before the initial sequence number acknowledges nothing this end sent. */
+	after_initial = tcp_sequence_before(endpoint->tcp.send_unacknowledged, acknowledgement);
+	if (!after_initial)
+		return 0;
+
+	/* One past what was handed to the device acknowledges what was never sent. */
+	sent_end = tcp_sent_end_locked(endpoint);
+	beyond_sent = tcp_sequence_before(sent_end, acknowledgement);
+	if (beyond_sent)
+		return 0;
+
+	/* Succeeded: it acknowledges the SYN. */
+	return 1;
 }
 
 /*
@@ -9010,6 +10099,14 @@ tcp_segment_input(
 	int wake;
 	int accept_fin;
 	int gap_filled;
+	int abort_payload;
+	int after_fin;
+	int reopen;
+	int release;
+	int acceptable;
+	int fin_acknowledged;
+	int error;
+	uint64_t now;
 	struct packet_buf *eof;
 	void *pulled;
 
@@ -9121,6 +10218,7 @@ tcp_segment_input(
 			endpoint->tcp.inet.socket.write_shutdown = 1;
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		tcp_discard_free(&retransmit);
+		tcp_orphan_release(endpoint);
 		socket_set_error(&endpoint->tcp.inet.socket, reset_error);
 		if (endpoint->tcp.listener != NULL) {
 			tcp_listener_remove(endpoint);
@@ -9208,6 +10306,26 @@ tcp_segment_input(
 		established = 0;
 
 		/*
+		 * A segment that acknowledges what this end did not send belongs
+		 * to another connection of the four-tuple, an old one the peer
+		 * still holds: a reset at the sequence number it acknowledged
+		 * tells the peer to drop that one, and this attempt goes on, its
+		 * SYN sent again by the timer (RFC 9293 section 3.10.7.3).
+		 */
+		socket_irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+		acceptable = tcp_syn_sent_acceptable_locked(endpoint, flags, acknowledgement);
+
+		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+		if (!acceptable) {
+			tcp_send_reset(addresses, tcp, payload_length);
+			packet_buf_free(packet);
+			socket_release(&endpoint->tcp.inet.socket);
+			return 0;
+		}
+
+		/*
 		 * The segment size and the congestion window, from the SYN-ACK's
 		 * offer and the route, are in place before the writers the
 		 * connection's establishment wakes below can send.
@@ -9259,6 +10377,49 @@ tcp_segment_input(
 	}
 
 	/*
+	 * A new connection's SYN to an orphaned connection in TIME_WAIT, its
+	 * sequence number past all the old one used, ends TIME_WAIT at once:
+	 * nothing of the old connection can be taken for the new one's, and
+	 * the SYN goes on to the listener, if there is one (RFC 6191 without
+	 * timestamps, RFC 9293 section 3.6.1).
+	 *
+	 * Procedure referenced: FreeBSD 14.1 sys/netinet/tcp_timewait.c
+	 * (tcp_twcheck: a bare SYN beyond rcv_nxt closes the TIME_WAIT
+	 * connection and the segment is looked up again).
+	 */
+	if ((flags & (TCP_SYN | TCP_ACK)) == TCP_SYN) {
+		reopen = 0;
+		release = 0;
+		socket_irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+		if (endpoint->orphaned != 0 && endpoint->tcp.state == TCP_TIME_WAIT)
+			reopen = tcp_sequence_before(endpoint->tcp.receive_next, sequence);
+		if (reopen) {
+			endpoint->tcp.state = TCP_CLOSED;
+			tcp_forget_peer(endpoint);
+			release = tcp_orphan_settle_locked(endpoint);
+		}
+
+		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+		/* The old connection goes, and the SYN is taken as if it had never been. */
+		if (reopen) {
+			/* Drops the orphaned connection's own reference, then the lookup's. */
+			if (release)
+				socket_release(&endpoint->tcp.inet.socket);
+			socket_release(&endpoint->tcp.inet.socket);
+
+			/* Looks the SYN up again, which finds the listener now. */
+			error = tcp_segment_input(packet, addresses);
+			if (error != 0)
+				return error;
+
+			/* Succeeded: the SYN went to the listener, or was answered with a reset. */
+			return 0;
+		}
+	}
+
+	/*
 	 * A SYN on a connection past its handshake (most often the peer's
 	 * SYN-ACK sent again because the handshake's last ACK was lost) is
 	 * answered by an acknowledgement and dropped (RFC 5961 section 4): the
@@ -9283,7 +10444,7 @@ tcp_segment_input(
 	    endpoint->tcp.inet.socket.keepalive != 0) {
 		endpoint->tcp.keepalive_probes = 0;
 		endpoint->tcp.keepalive_deadline =
-		    sched_ticks() + TCP_KEEPALIVE_IDLE;
+		    sched_ticks() + endpoint->tcp.keepalive_idle;
 	}
 
 	/* The segment of a connection past its handshake is counted for net.tcpstats. */
@@ -9544,13 +10705,59 @@ tcp_segment_input(
 		    endpoint->tcp.receive_next);
 
 		/*
+		 * New data for a connection whose file is closed, before the
+		 * peer's FIN, has no reader: the peer is told with a reset that
+		 * it was lost, and the connection is dropped (RFC 1122 section
+		 * 4.2.2.13, the half-duplex close).
+		 *
+		 * Procedure referenced: FreeBSD 14.1 sys/netinet/tcp_input.c
+		 * (tcp_do_segment: new data for a socket without a file
+		 * reference past CLOSE_WAIT closes the connection and drops the
+		 * segment with a reset).
+		 */
+		abort_payload = 0;
+		if (endpoint->orphaned != 0 && !old_payload) {
+			if (endpoint->tcp.state == TCP_FIN_WAIT_1 ||
+			    endpoint->tcp.state == TCP_FIN_WAIT_2)
+				abort_payload = 1;
+		}
+
+		/* The connection is dropped; the reset goes once the lock is released. */
+		if (abort_payload) {
+			retransmit.count = 0;
+			tcp_retransmit_reset(endpoint, &retransmit);
+			endpoint->tcp.state = TCP_CLOSED;
+			tcp_forget_peer(endpoint);
+			spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+			tcp_discard_free(&retransmit);
+			tcp_send_reset(addresses, tcp, payload_length);
+			tcp_orphan_release(endpoint);
+			packet_buf_free(packet);
+			socket_release(&endpoint->tcp.inet.socket);
+			return 0;
+		}
+
+		/*
+		 * Nothing follows the peer's FIN: data past it is ignored and
+		 * only acknowledged (RFC 9293 section 3.10.7.4, the seventh
+		 * step), which keeps receive_next at the FIN that TIME_WAIT
+		 * waits for again.
+		 */
+		after_fin = 0;
+		if (endpoint->tcp.state == TCP_CLOSE_WAIT ||
+		    endpoint->tcp.state == TCP_CLOSING ||
+		    endpoint->tcp.state == TCP_LAST_ACK ||
+		    endpoint->tcp.state == TCP_TIME_WAIT)
+			after_fin = 1;
+
+		/*
 		 * A segment that starts before receive_next and ends after it
 		 * (a resend the peer cut differently, or one that overlaps a
 		 * part already taken) has its part already taken cut off, and
 		 * the rest is taken in order (RFC 9293 section 3.10.7.4).
 		 */
 		overlap = 0;
-		if (!accept_payload && !old_payload) {
+		if (!after_fin && !accept_payload && !old_payload) {
 			starts_before = tcp_sequence_before(sequence, endpoint->tcp.receive_next);
 			if (starts_before)
 				overlap = endpoint->tcp.receive_next - sequence;
@@ -9562,6 +10769,7 @@ tcp_segment_input(
 		 * resend was not needed.
 		 */
 		if (endpoint->tcp.sack_on != 0 &&
+		    !after_fin &&
 		    (old_payload || overlap != 0)) {
 			endpoint->tcp.dsack_start = sequence;
 			endpoint->tcp.dsack_end = endpoint->tcp.receive_next;
@@ -9585,6 +10793,12 @@ tcp_segment_input(
 		else if (!accept_payload)
 			endpoint->tcp.counters.out_of_order_in++;
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+		/* Data past the peer's FIN is only acknowledged. */
+		if (after_fin) {
+			(void)tcp_send_ack(endpoint, 0);
+			goto payload_done;
+		}
 
 		/*
 		 * A segment wholly before receive_next was already taken; the
@@ -9691,14 +10905,36 @@ payload_done:
 		    &endpoint->tcp.inet.socket.lock);
 		accept_fin = sequence + (uint32_t)payload_length ==
 		    endpoint->tcp.receive_next;
+		now = sched_ticks();
+
+		/*
+		 * The peer's FIN moves the state on (RFC 9293 section 3.10.7.4,
+		 * the eighth step): to CLOSE_WAIT before this end's FIN, to
+		 * TIME_WAIT once this end's FIN is taken, and to CLOSING when
+		 * both FINs crossed and this end's is not taken yet.
+		 */
+		fin_acknowledged = 0;
+		if (endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
+			fin_acknowledged = 1;
 		if (accept_fin) {
 			endpoint->tcp.receive_next++;
-			if (endpoint->tcp.state == TCP_ESTABLISHED)
+			if (endpoint->tcp.state == TCP_ESTABLISHED) {
 				endpoint->tcp.state = TCP_CLOSE_WAIT;
-			else if (endpoint->tcp.state == TCP_FIN_WAIT_1 ||
-			    endpoint->tcp.state == TCP_FIN_WAIT_2)
-				endpoint->tcp.state = TCP_TIME_WAIT;
+			} else if (endpoint->tcp.state == TCP_FIN_WAIT_1 && !fin_acknowledged) {
+				endpoint->tcp.state = TCP_CLOSING;
+			} else if (endpoint->tcp.state == TCP_FIN_WAIT_1 ||
+			    endpoint->tcp.state == TCP_FIN_WAIT_2) {
+				tcp_time_wait_enter_locked(endpoint, now);
+			}
 		}
+
+		/*
+		 * The peer's FIN sent again in TIME_WAIT, its acknowledgement
+		 * lost, starts 2MSL over (RFC 9293 section 3.10.7.4): the
+		 * acknowledgement below may be lost too.
+		 */
+		if (!accept_fin && endpoint->tcp.state == TCP_TIME_WAIT)
+			endpoint->close_deadline = now + kern_ms_to_ticks(TCP_TIME_WAIT_MS);
 
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 
@@ -9723,18 +10959,31 @@ payload_done:
 	}
 
 fin_done:
-	/* A fully acknowledged FIN of ours advances the closing states. */
-	socket_irq = spin_lock_irqsave(
+	/*
+	 * A fully acknowledged FIN of ours advances the closing states, and an
+	 * orphaned connection that has closed drops its own reference.
+	 */
+	now = sched_ticks();
+	socket_irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
 
-	    &endpoint->tcp.inet.socket.lock);
-	if (endpoint->tcp.state == TCP_FIN_WAIT_1 &&
-	    endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
-		endpoint->tcp.state = TCP_FIN_WAIT_2;
-	if (endpoint->tcp.state == TCP_LAST_ACK &&
-	    endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
-		endpoint->tcp.state = TCP_CLOSED;
+	fin_acknowledged = 0;
+	if (endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
+		fin_acknowledged = 1;
+	if (fin_acknowledged) {
+		if (endpoint->tcp.state == TCP_FIN_WAIT_1)
+			tcp_fin_wait_2_enter_locked(endpoint, now);
+		else if (endpoint->tcp.state == TCP_CLOSING)
+			tcp_time_wait_enter_locked(endpoint, now);
+		else if (endpoint->tcp.state == TCP_LAST_ACK)
+			endpoint->tcp.state = TCP_CLOSED;
+	}
+	release = tcp_orphan_settle_locked(endpoint);
 
 	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+	/* Drops the orphaned connection's own reference once it has closed. */
+	if (release)
+		socket_release(&endpoint->tcp.inet.socket);
 
 	/* Frees a packet that was not queued and drops the lookup reference. */
 	if (packet != NULL)

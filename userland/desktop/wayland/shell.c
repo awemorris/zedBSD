@@ -4200,7 +4200,7 @@ draw_body_part(
 		shape.opacity = 1.0f;
 	shape.mode = MODE_IMAGE;
 	shape.radius = radius;
-	shape.set = image->set;
+	shape.set = kwl_compose_image_set(server, image, shape.quad[2], shape.quad[3], shape.uv);
 	if (image->draw == KWL_DRAW_OPAQUE)
 		shape.opaque = 1.0f;
 	glass_shape_draw(server, command, &shape);
@@ -4402,7 +4402,7 @@ draw_title(
 	int32_t limit,
 	const float *ink)
 {
-	char title[KWL_TITLE_MAX + 24];
+	char title[KWL_TITLE_MAX + 64];
 	int drawn;
 
 	/* The title as the title bar shows it. */
@@ -4577,7 +4577,7 @@ title_end(
 	struct kwl_object *surface,
 	int32_t limit)
 {
-	char title[KWL_TITLE_MAX + 24];
+	char title[KWL_TITLE_MAX + 64];
 	int32_t width;
 
 	/* The title as draw_title shows it. */
@@ -4594,7 +4594,11 @@ title_end(
 
 /*
  * Makes the title a title bar shows: the client's ("Window" without one),
- * saying so when the client is not responding to pings (toplevel.c).
+ * after the administrator's mark when the client runs as the system's
+ * administrator on a connection the compositor lent it (admin-ask.c: the
+ * client cannot set or hide the mark, which comes first so that a long
+ * title does not push it out), and saying so when the client is not
+ * responding to pings (toplevel.c).
  */
 static void
 shown_title(
@@ -4602,6 +4606,7 @@ shown_title(
 	char *title,
 	size_t size)
 {
+	char marked[KWL_TITLE_MAX + 64];
 	const char *name;
 
 	/* A window without a title is called "Window". */
@@ -4609,13 +4614,19 @@ shown_title(
 	if (name[0] == '\0')
 		name = kl_tr("Window");
 
+	/* A program that runs as the administrator. */
+	if (surface->client->admin_lent) {
+		(void)kl_tr_format(marked, sizeof(marked), kl_tr("Administrator: {1}"), name, (const char *)NULL);
+		name = marked;
+	}
+
 	/* A client that does not answer its pings. */
 	if (surface->client->unresponsive) {
 		(void)kl_tr_format(title, size, kl_tr("{1} (not responding)"), name, (const char *)NULL);
 		return;
 	}
 
-	/* Otherwise the name alone. */
+	/* Otherwise the name (and its mark) alone. */
 	(void)snprintf(title, size, "%s", name);
 }
 
@@ -6461,6 +6472,7 @@ draw_sheet(
 	cut_top = top;
 	if (server->view_width != 0U)
 		cut_top = top - server->view_y;
+	cut_top = kwl_compose_pass_pixel(server, cut_top);
 	if (cut.offset.y < cut_top)
 		cut.offset.y = cut_top;
 	if (bottom < cut.offset.y)

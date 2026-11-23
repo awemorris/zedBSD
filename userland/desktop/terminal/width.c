@@ -8,11 +8,12 @@
 /*
  * The width of a character in terminal's grid: one cell or two.
  *
- * East Asian wide and fullwidth characters always take two cells.  The
+ * East Asian wide and fullwidth characters, and the emoji the C library
+ * gives two columns, always take two cells.  The
  * characters whose East Asian Width is Ambiguous (Greek, Cyrillic, circles,
  * box drawing and the like, which CJK fonts and programs draw full width)
  * take two only while the View menu's "Treat Ambiguous-Width Characters as
- * Wide" is on (ws128-p009), and one otherwise, as before.  The Ambiguous
+ * Wide" is on, and one otherwise, as before.  The Ambiguous
  * characters come from the Unicode data (ambiguous.h, made by
  * ambiguous-gen.py) and are found by a binary search over their ranges, so
  * the width costs a few comparisons per character.
@@ -98,7 +99,7 @@ terminal_width_ambiguous(
 	return 0;
 }
 
-/* Tells whether a character is East Asian wide or fullwidth. */
+/* Tells whether a character is East Asian wide or fullwidth, or an emoji of two columns. */
 static int
 width_east_asian_wide(
 	uint32_t codepoint)
@@ -133,6 +134,15 @@ width_east_asian_wide(
 
 	/* Fullwidth signs. */
 	if (codepoint >= 0xffe0U && codepoint <= 0xffe6U)
+		return 1;
+
+	/*
+	 * The pictographs and emoji of the supplementary plane (Miscellaneous
+	 * Symbols and Pictographs to Symbols and Pictographs Extended-A), the
+	 * range the C library's wcwidth gives two columns, so that the grid
+	 * places them where the programs expect them.
+	 */
+	if (codepoint >= 0x1f300U && codepoint <= 0x1faffU)
 		return 1;
 
 	/* The ideographs of the supplementary planes. */

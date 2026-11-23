@@ -29,7 +29,11 @@
  * (pipeline state records and programs) is mapped executable, the data
  * heap (scratch, events, query pools, a submission's temporary memory)
  * is not.  A run that work in the ring may still read goes back once
- * that work's ticket has passed.
+ * that work's ticket has passed.  A heap grows when no block has room;
+ * the growth maps a block, and the map waits for its record, which
+ * comes after the work placed before it.  The end of a command buffer
+ * makes ready the room its submissions take, so a submission grows a
+ * heap only when more of them are in flight than were made ready.
  */
 
 #include <stddef.h>
@@ -172,10 +176,13 @@ ghci_vk_memory_blob(
 
 /*
  * Takes bytes of one of a device's executor heaps (code or data),
- * aligned to alignment (a power of two), growing that heap when no block
- * has room.  Runs let go whose tickets have passed go back first.
- * Returns 0 with the block and the offset in it, or the error of the
- * growth (ENOSPC, ENOMEM, EIO).
+ * aligned to alignment (a power of two).  Runs let go whose tickets have
+ * passed go back first.  When no block has room, the heap grows: a new
+ * block is mapped into the device's session, and the map waits for its
+ * record, which comes only once the work placed in the ring before it
+ * has run (a delay, never a stop: the ring holds nothing that waits for
+ * the host).  Returns 0 with the block and the offset in it, or the
+ * error of the growth (ENOSPC, ENOMEM, EIO).
  */
 int
 ghci_vk_heap_take(
@@ -1106,7 +1113,7 @@ round_up(
  * most GHCI_VK_HEAP_BLOCK_MAX, mapped into the device's session (the
  * code heap executable and read-only to the GPU, the data heap writable
  * and not executable).  Returns 0, ENOSPC when the GPU's memory, its
- * addresses or CP_HEAP's room is used up (or the block would pass
+ * addresses or its page-table memory is used up (or the block would pass
  * GHCI_VK_HEAP_BLOCK_MAX), ENOMEM when the kernel has no memory for the
  * block's record, or EIO for a session or a device the GPU lost.
  */

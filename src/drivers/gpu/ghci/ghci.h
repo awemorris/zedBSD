@@ -67,11 +67,8 @@
  */
 #define GHCI_RING_BYTES			(256U * 1024U)
 
-/* The CP_HEAP of a GPU without a page-table walker: session 0's 16 KiB root only. */
-#define GHCI_FLAT_HEAP_BYTES		GHCI_ROOT_BYTES_VA32
-
-/* The smallest CP_HEAP the start settles for when the full one cannot be had. */
-#define GHCI_HEAP_MIN_BYTES		(64U * 1024U)
+/* The records of the fault log ring: 32 bytes each, a page of them. */
+#define GHCI_FAULT_RING_ENTRIES		(GHCI_PAGE_BYTES / 32U)
 
 /* The bytes of the fence page; the device's fence is its first 64-bit word. */
 #define GHCI_FENCE_PAGE_BYTES		GHCI_PAGE_BYTES
@@ -108,13 +105,12 @@
 #define GHCI_POLL_MS			1U
 
 /*
- * The faults that make a device lost: three faults no session caused,
- * or two CP_HEAP exhaustions, within GHCI_FAULT_STORM_MS; and recoveries
- * whose checks fail GHCI_RECOVERY_TRIES times in a row.
+ * The faults that make a device lost: three faults no session caused
+ * within GHCI_FAULT_STORM_MS; and recoveries whose checks fail
+ * GHCI_RECOVERY_TRIES times in a row.
  */
 #define GHCI_FAULT_STORM_MS		60000U
 #define GHCI_FAULT_STORM		3U
-#define GHCI_OOM_STORM			2U
 #define GHCI_RECOVERY_TRIES		3U
 
 /* The submissions the driver remembers until their fences pass. */
@@ -134,15 +130,12 @@
 #define GHCI_RESET_HISTORY		16U
 
 /*
- * The ranges of local memory a boot display may still read, kept out of
- * the allocator until the release: the image being scanned out, the one
- * a pending flip will take, and the cursor's image.
+ * The ranges of local memory the firmware reserved, kept out of the
+ * allocator: the reservation before a boot framebuffer, the
+ * framebuffer's whole pages (given back after the takeover), and the
+ * reservation after it.
  */
 #define GHCI_BOOT_RANGES		3U
-
-/* The values the start writes to SCRATCH and reads back. */
-#define GHCI_SCRATCH_FIRST		0x5a5a5a5aU
-#define GHCI_SCRATCH_SECOND		0xa5a5a5a5U
 
 /* The work the service thread is woken for. */
 #define GHCI_WORK_RECLAIM		1U
@@ -158,12 +151,17 @@
 #define GHCI_CORE_RESET_WAIT_MS		30000U
 
 /*
- * The display: the most modes the driver keeps of a controller (DC_CAPS
- * names up to seven), and the slot after them that holds the timing a
- * boot display was found running with.
+ * The display: the most modes the driver keeps, and the slot after them
+ * that holds the timing a boot display was found running with.
  */
 #define GHCI_DISPLAY_MODES_MAX		8U
 #define GHCI_DISPLAY_BOOT_MODE		GHCI_DISPLAY_MODES_MAX
+
+/* The mode index that names no mode the display holds. */
+#define GHCI_DISPLAY_NO_MODE		0xFFFFFFFFU
+
+/* The kinds of display command whose completion the driver waits for. */
+#define GHCI_DISPLAY_COMPS		8U
 
 /*
  * The presents the display keeps waiting for the controller's one
@@ -346,8 +344,6 @@ struct ghci_fault_record {
 	uint64_t fault_address;
 	uint32_t session_active;
 	uint32_t rptr;
-	uint32_t cp_pc;
-	uint32_t cp_status;
 	uint64_t fence;
 	int hang;
 };
@@ -381,9 +377,14 @@ struct ghci_bus_ops {
  * va is the GPU address (the bus address on a GPU without a page-table
  * walker), arena the run of chunks it lies in (NULL without a walker),
  * flags its GHCI_VM_FLAG_* and replayed the recovery generation it was
- * last placed in.  An UNMAPPING mapping's ticket is the fence after its
- * CMD_VM_UNMAP; the mapping holds its allocation until that passes
- * (lock).
+ * last placed in.  record is a page of host memory the processor writes
+ * the mapping's CMD_VM_MAP and CMD_VM_UNMAP records to (NULL without a
+ * walker); pending says that a placed CMD_VM_MAP's record is still to
+ * be read, and offered is the page-table memory that CMD_VM_MAP was given
+ * (NULL when none), which goes back to the allocator as far as the record
+ * says the processor did not keep it.  An UNMAPPING mapping's ticket is the fence after its
+ * CMD_VM_UNMAP (unmap_placed) or its session's CMD_SESSION_CLOSE; the
+ * mapping holds its allocation until that passes (lock).
  */
 struct ghci_mapping {
 	struct ghci_mapping *next;
@@ -396,6 +397,28 @@ struct ghci_mapping {
 	enum ghci_mapping_state state;
 	struct ghci_ticket ticket;
 	uint64_t replayed;
+	struct ghci_allocation *record;
+	struct ghci_tables *offered;
+	int pending;
+	int unmap_placed;
+};
+
+/*
+ * One run of memory the driver gave the processor for page tables: a
+ * session's initial table, or the intermediate tables of its mappings.
+ * address is the aligned start the command named and bytes what it
+ * gave; used is what the processor kept of it (the rest came back at
+ * once) and returned what CMD_VM_UNMAP gave back since.  The run goes
+ * back to the allocator when used and returned meet, or when its session
+ * closes or a reset ends.
+ */
+struct ghci_tables {
+	struct ghci_tables *next;
+	struct ghci_allocation *memory;
+	uint64_t address;
+	uint32_t bytes;
+	uint32_t used;
+	uint32_t returned;
 };
 
 /*
@@ -407,9 +430,9 @@ struct ghci_mapping {
  * name (0 on a GPU without a page-table walker, where every session runs
  * as session 0).  state changes under the device's lock and cp_lock
  * together, so either one reads it.  The arenas are the runs of 2 MiB
- * chunks it owns, l0_marks the level 0 tables counted in its own page
- * table (with PROT), and counted whether its tables are in CP_HEAP's
- * count.  closed says that the owner of an isolated session gave it up:
+ * chunks it owns; root is the memory of its initial page table and
+ * tables the runs its mappings gave for intermediate tables (none
+ * without a walker).  closed says that the owner of an isolated session gave it up:
  * the record stays with the device until a reset retires it.
  */
 struct ghci_vm {
@@ -418,7 +441,6 @@ struct ghci_vm {
 	uint32_t session;
 	int flat;
 	enum ghci_vm_state state;
-	int counted;
 	int lost_work;
 	int reported;
 	int closed;
@@ -426,7 +448,8 @@ struct ghci_vm {
 	struct ghci_ticket close_ticket;
 	struct ghci_mapping *mappings;
 	struct ghci_arena *arenas;
-	uint8_t l0_marks[GHCI_CHUNKS / 8U];
+	struct ghci_tables *root;
+	struct ghci_tables *tables;
 };
 
 /*
@@ -506,38 +529,41 @@ struct ghci_executor_ops {
 };
 
 /*
- * One mode of the display controller, as its mode table (MODE_INDEX and
- * the MODE registers) names it: the size, the refresh the clock and the
- * totals give, the porches and syncs, the sync polarity (SYNC_POL) and the
- * PCLK_SEL value that picks its pixel clock.  Read once at the attach.
+ * One mode of the display: its size, the refresh its clock and totals
+ * give, its timing as a GHCI mode descriptor takes it (the pixel clock,
+ * where each sync starts and ends and the totals, the sync polarities)
+ * and the fixed mode's number (GHCI_DISP_MODE_ARBITRARY for a timing of
+ * the driver's own).  Read once at the start.
  */
 struct ghci_display_mode {
 	uint32_t width;
 	uint32_t height;
 	uint32_t refresh_millihz;
-	uint32_t h_front;
-	uint32_t h_sync;
-	uint32_t h_back;
-	uint32_t v_front;
-	uint32_t v_sync;
-	uint32_t v_back;
-	uint32_t sync_polarity;
-	uint32_t clock_select;
+	uint32_t clock_khz;
+	uint32_t hsync_start;
+	uint32_t hsync_end;
+	uint32_t htotal;
+	uint32_t vsync_start;
+	uint32_t vsync_end;
+	uint32_t vtotal;
+	uint32_t flags;
+	uint32_t mode_id;
 };
 
 /*
  * One image of plane 0 the display has recorded: a present's frame.
  *
  * sequence is the present's number in the lease (0 for none).  base is
- * the 32-bit physical address the controller scans, with the rows stride
- * bytes apart in the controller's format; mode is the mode the image
- * fills.  A shared image (a blob the session presents) is memory the
- * display holds until the controller no longer scans it; a copied one is
- * one of the driver's two frames (copy_frame 0 or 1, memory NULL).
+ * the physical address the display scans (local memory, or host memory
+ * below HOST_LIMIT), with the rows stride bytes apart in a GhciFormat;
+ * mode is the mode the image fills.  A shared image (a blob the session
+ * presents) is memory the display holds until it no longer scans it; a
+ * copied one is one of the driver's two frames (copy_frame 0 or 1,
+ * memory NULL).
  */
 struct ghci_display_image {
 	uint64_t sequence;
-	uint32_t base;
+	uint64_t base;
 	uint32_t stride;
 	uint32_t format;
 	unsigned mode;
@@ -548,12 +574,12 @@ struct ghci_display_image {
 /*
  * The one flip of a plane that the driver has placed in the ring and
  * whose record it has not seen yet.  The driver places a plane's next
- * flip only after this one's record, so the controller's one pending
- * flip per plane never makes the ring wait.
+ * flip only after this one's record, so the plane's queue never holds
+ * more than one flip of the driver's.
  *
  * value is the 31-bit value the record carries; light says the flip is
- * part of a run that lights the controller.  image is plane 0's,
- * surface the cursor surface of plane 1.
+ * part of a run that lights the display.  image is plane 0's, surface
+ * the cursor surface of plane 1.
  */
 struct ghci_display_flip {
 	int placed;
@@ -564,42 +590,60 @@ struct ghci_display_flip {
 };
 
 /*
- * The display controller of a device (display.c and display-scan.c, the
- * DISP2 capability): one output with a primary plane and, when the
- * controller has one, a cursor plane.  The ring changes what it shows
- * while the command processor runs: a present is a FLIP of a shared
- * image or of one of the driver's two frames into which it copied the
- * session's storage.
+ * The display of a device (display.c and display-scan.c): display 0 of
+ * a GPU with CAP_DISP, with a primary plane and, when word 23 says
+ * HAS_CURSOR, a cursor plane.  Only the ring changes what it shows: the
+ * display commands go to the display's service queues, a present is a
+ * FLIP of a shared image or of one of the driver's two frames into which
+ * it copied the session's storage.
  *
  * The device's display_lock serializes everything here but topology and
- * irq_events, which irq_lock protects.  The registers, the identity and
- * the mode table are read at the attach and never change.
+ * the wake queue, which irq_lock protects.  info (word 23), sense, i2c
+ * and the mode table are read at the start and never change.  page is
+ * the display's host memory the commands write to: the event ring, the
+ * mode descriptor, the snapshot, the completions, the flip records, the
+ * DDC buffer and the mode table's answer.
  *
  * The lease: owner and lease name the holder; ending says a lease ended
- * and the controller is still going dark (no claim until it is), and
- * dark_ticket is the fence of the packet that turns it off.  sequence is
- * the lease's last present number and adopted the highest one shown with
- * every lower one (replaced ones count); uncertain says an adoption did
- * not come in time, after which the lease's presents fail.
+ * and the display is still going dark (no claim until it is), and
+ * dark_placed whether the dark command is placed (1), still to be
+ * placed (-1) or not wanted (0).  sequence is the lease's last present
+ * number and adopted the highest one shown with every lower one
+ * (replaced ones count); uncertain says an adoption did not come in time,
+ * after which the lease's presents fail.
+ *
+ * The completions: comp_value[] is the value each kind of command's
+ * completion waits for (0 for none), comp_next the next one taken.
  *
  * What is lit: enabled, the mode, the format and the stride of plane 0;
- * shown is the image it scans.  flips[] are the planes' placed flips,
- * queue[] the presents still waiting for plane 0's flip, oldest first.
- * copy_frame_busy is the driver's frame a copied present is filling (-1
- * for none): no present is recorded until it is.  drops[] is held memory
- * let go of once the lock is let go (the device's lock frees it), and
- * unsure[] memory the controller may still read, which then goes to the
- * quarantine; host_unsure says the host turned the controller without
- * seeing the processor halt or the controller go idle.  The frames are
- * mapped into session 0 (frame_maps) where the blitter copies into them.
+ * mode_set the mode the display holds (GHCI_DISPLAY_NO_MODE for none or
+ * unknown); shown is the image it scans.  flips[] are the planes' placed
+ * flips, queue[] the presents still waiting for plane 0's flip, oldest
+ * first.  copy_frame_busy is the driver's frame a copied present is
+ * filling (-1 for none): no present is recorded until it is.  drops[] is
+ * held memory let go of once the lock is let go (the device's lock frees
+ * it), and unsure[] memory the display may still read, which then goes
+ * to the quarantine; host_unsure says the driver could not see the
+ * display stop reading what it turned away from.  The frames are mapped
+ * into session 0 (frame_maps) where the blitter copies into them.
  * service_placing says the service thread places: the ring is then only
- * entered when it is free and has room at once.
+ * entered when it is free and has room at once.  resync says that a
+ * reset may have lost display commands: -1 until the snapshot that
+ * settles them is placed, 1 while it runs; light_lost is the image a
+ * lighting placed before the reset showed.
  *
  * The cursor: surfaces[] are the driver's two images of plane 1;
- * cursor_shown is the surface the controller has (-1 for none) and
- * cursor_pending one to flip once the controller is lit (-1 for none).
+ * cursor_shown is the surface the display has (-1 for none) and
+ * cursor_pending one to flip once the display is lit (-1 for none).
+ * cursor_x, cursor_y and cursor_show are where the cursor is and whether
+ * it shows, which cursor_due says is still to be placed.
  *
- * The boot display: boot_scanning says the controller still scans what
+ * The events: events_state says whether the event ring runs (2), its
+ * setup is placed (1) or it does not run (0); events_mask is the events
+ * it takes, events_first the sequence its first record has, and
+ * events_next the next one the service thread reads.
+ *
+ * The boot display: boot_scanning says the display still scans what
  * the firmware left (boot, in the mode slot GHCI_DISPLAY_BOOT_MODE),
  * until the driver's own first flip is taken.  boot_kept says the boot
  * image is still kept out of the allocators, boot_console that the
@@ -612,21 +656,18 @@ struct ghci_display_flip {
 struct ghci_display {
 	int present;
 	int cursor;
-	uint32_t registers;
-	uint32_t controller_id;
-	uint32_t controller_version;
-	uint32_t controller_caps;
+	uint32_t info;
+	int sense;
+	int i2c;
+	struct ghci_allocation *page;
 	struct ghci_display_mode modes[GHCI_DISPLAY_MODES_MAX + 1U];
 	unsigned mode_count;
 	struct wait_queue flip_wake;
 	uint64_t topology;
-	uint32_t irq_events;
-	uint32_t irq_enable;
 
 	/* The connection and the output's generation. */
 	int connected;
 	uint64_t generation;
-	uint64_t hotplug_tick;
 
 	/* The lease. */
 	struct ghci_session *owner;
@@ -634,15 +675,19 @@ struct ghci_display {
 	uint64_t next_lease;
 	int ending;
 	int dark_placed;
-	struct ghci_ticket dark_ticket;
 	uint64_t sequence;
 	uint64_t adopted;
 	uint64_t shown_time_ns;
 	int uncertain;
 
-	/* What the controller shows and what waits for it. */
+	/* The completions the commands placed wait for. */
+	uint64_t comp_next;
+	uint64_t comp_value[GHCI_DISPLAY_COMPS];
+
+	/* What the display shows and what waits for it. */
 	int enabled;
 	unsigned mode;
+	unsigned mode_set;
 	uint32_t format;
 	uint32_t stride;
 	struct ghci_display_image shown;
@@ -659,12 +704,25 @@ struct ghci_display {
 	unsigned unsure_count;
 	int host_unsure;
 	int service_placing;
+	int resync;
+	int light_lost;
+	struct ghci_display_image light_image;
 
 	/* The cursor plane. */
 	struct ghci_allocation *surfaces[2];
 	int cursor_shown;
 	int cursor_pending;
 	int cursor_image;
+	int32_t cursor_x;
+	int32_t cursor_y;
+	int cursor_show;
+	int cursor_due;
+
+	/* The event ring. */
+	int events_state;
+	uint32_t events_mask;
+	uint64_t events_first;
+	uint64_t events_next;
 
 	/*
 	 * The driver's idle frame (the largest mode), which is scanned out
@@ -683,11 +741,12 @@ struct ghci_display {
 	int boot_end_tried;
 	struct ghci_display_image boot;
 
-	/* The scan-out errors: the count of this second, the mask, the reads that kept failing, and the totals. */
+	/* The scan-out errors: the count of this second, the masked events, the reads that kept failing, and the totals. */
 	unsigned error_count;
 	uint64_t error_tick;
 	int error_masked;
 	unsigned read_errors;
+	unsigned read_error_runs;
 	unsigned underflows;
 	unsigned errors_total;
 };
@@ -776,28 +835,31 @@ struct ghci_device {
 	 * The GHCI sessions and their GPU addresses (lock; a session's state
 	 * also under cp_lock): session 0's record, the record of each number
 	 * in use (vm[0] is vm0), the owner of each 2 MiB chunk of the 32-bit
-	 * GPU addresses, what CP_HEAP may hold and holds by the driver's
-	 * bound, and the level 0 tables counted in the page table every
-	 * session shares (without PROT; they stay until a reset).
+	 * GPU addresses, and the sizes of the page-table memory the processor
+	 * asked for (CMD_VM_QUERY_PT_MEM, read once at the start).
 	 */
 	struct ghci_vm vm0;
 	struct ghci_vm *vm[GHCI_SESSIONS];
 	struct ghci_vm *chunk_owner[GHCI_CHUNKS];
-	uint64_t heap_budget;
-	uint64_t heap_used;
-	uint8_t l0_marks[GHCI_CHUNKS / 8U];
+	uint32_t root_bytes;
+	uint32_t root_align;
+	uint32_t table_bytes;
+	uint32_t table_align;
 
 	/*
-	 * The device's own memory: the ring, the fence page and CP_HEAP,
-	 * from the start to the detach, and the buffer of the capability
-	 * block (caps_answer), from the start until the block is read.
+	 * The device's own memory: the ring, the fence page and the fault
+	 * log ring (fault_ring, with walker; fault_seq the sequence of the
+	 * next record the driver reads), from the start to the detach, and
+	 * the buffer of the capability block and of the page-table sizes
+	 * (caps_answer), from the start until both are read.
 	 * quarantined is memory the GPU may still reach on a lost device,
 	 * given back only once bus mastering is off.
 	 */
 	struct ghci_ring ring;
 	struct ghci_allocation *fence_page;
 	struct ghci_allocation *caps_answer;
-	struct ghci_allocation *heap;
+	struct ghci_allocation *fault_ring;
+	uint64_t fault_seq;
 	struct ghci_allocation *quarantined;
 
 	/*
@@ -808,7 +870,9 @@ struct ghci_device {
 	 * firmware left running may still read of local memory is kept out
 	 * of it (boot_reserved, boot_count page-rounded ranges in address
 	 * order, each at boot_offset for boot_bytes) until the release after
-	 * the driver's own first flip.
+	 * the driver's own first flip.  The boot framebuffer's whole pages
+	 * are one of them (boot_fb_offset for boot_fb_bytes, 0 for none),
+	 * which the release gives back to the allocator (boot_fb_freed).
 	 */
 	int local_ready;
 	struct ghci_range_map local_map;
@@ -817,6 +881,9 @@ struct ghci_device {
 	unsigned boot_count;
 	uint32_t boot_offset[GHCI_BOOT_RANGES];
 	uint32_t boot_bytes[GHCI_BOOT_RANGES];
+	uint32_t boot_fb_offset;
+	uint32_t boot_fb_bytes;
+	int boot_fb_freed;
 
 	/*
 	 * The local window (irq_lock): window_users counts what uses it (the
@@ -889,14 +956,12 @@ struct ghci_device {
 
 	/*
 	 * The service thread's own counts: the checks that failed in a row,
-	 * the ticks of the recent faults no session caused and of the recent
-	 * CP_HEAP exhaustions, and the resets done.
+	 * the ticks of the recent faults no session caused, and the resets
+	 * done.
 	 */
 	unsigned recovery_failures;
 	uint64_t storm_ticks[GHCI_FAULT_STORM];
 	unsigned storm_count;
-	uint64_t oom_ticks[GHCI_OOM_STORM];
-	unsigned oom_count;
 	unsigned resets;
 
 	/*
@@ -966,6 +1031,7 @@ void ghci_poll_stop(struct ghci_device *device);
 
 int ghci_memory_alloc(struct ghci_device *device, uint64_t bytes, uint64_t limit, struct ghci_allocation **result);
 int ghci_memory_alloc_local(struct ghci_device *device, uint64_t bytes, struct ghci_allocation **result);
+int ghci_memory_alloc_local_locked(struct ghci_device *device, uint64_t bytes, struct ghci_allocation **result);
 int ghci_memory_local_start(struct ghci_device *device);
 void ghci_memory_local_stop(struct ghci_device *device);
 uint64_t ghci_memory_local_bytes(const struct ghci_device *device);
@@ -980,6 +1046,7 @@ void ghci_memory_unhold(struct ghci_device *device, struct ghci_allocation *allo
 int ghci_resource_add(struct ghci_device *device, struct ghci_session *session, struct ghci_allocation *allocation, int blob, uint32_t flags, struct ghci_resource **result);
 
 void ghci_vm_init(struct ghci_device *device);
+int ghci_vm_mmu_start(struct ghci_device *device);
 void ghci_vm_fini(struct ghci_device *device);
 int ghci_vm_open(struct ghci_device *device, void *owner, struct ghci_vm **result);
 void ghci_vm_close(struct ghci_device *device, struct ghci_vm *vm);
@@ -990,6 +1057,7 @@ int ghci_vm_find_culprits(struct ghci_device *device, uint32_t fault_info, uint3
 void ghci_vm_mark_lost(struct ghci_device *device, uint64_t fence);
 void ghci_vm_after_reset(struct ghci_device *device);
 int ghci_vm_replay(struct ghci_device *device);
+int ghci_vm_replay_tables(struct ghci_device *device);
 uint32_t ghci_vm_active_mask(struct ghci_device *device);
 void ghci_vm_settle(struct ghci_device *device);
 unsigned ghci_vm_take_dead(struct ghci_device *device, void **owners, unsigned capacity);
@@ -1002,6 +1070,7 @@ extern const struct drv_gpu_display_ops ghci_display_cursor_ops;
 extern const struct drv_gpu_scanout_ops ghci_scanout_ops;
 
 int ghci_display_attach(struct ghci_device *device);
+int ghci_display_start(struct ghci_device *device);
 void ghci_display_detach(struct ghci_device *device);
 void ghci_display_session_close(struct ghci_device *device, struct ghci_session *session);
 void ghci_display_service(struct ghci_device *device, unsigned work);

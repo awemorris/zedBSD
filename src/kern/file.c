@@ -3165,11 +3165,14 @@ file_io_setid_prepare(
 	if (file->f_inode != file_vm_inode(file))
 		return 0;
 
-	/* Clears for the writer's credential, or for a change of content without one. */
+	/*
+	 * Clears for the writer's credential, or, for a write-back of the page
+	 * cache, for the stores through mappings no mode change accepted.
+	 */
 	if (io->credential != NULL) {
 		error = vfs_clear_setid_on_write(file->f_inode, io->credential);
 	} else if ((io->internal_flags & FILE_IO_CONTENT_CHANGE) != 0) {
-		error = vfs_clear_setid_on_content_change(file->f_inode);
+		error = vfs_clear_setid_on_writeback(file->f_inode);
 	} else {
 		/* A write on nobody's behalf without a change of content clears nothing. */
 		return 0;

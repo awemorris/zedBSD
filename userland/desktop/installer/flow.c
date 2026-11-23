@@ -37,11 +37,17 @@
 
 /* The words of the screens, for the log and the tests. */
 static const char *const flow_screen_words[INST_SCREENS] = {
-	"s1-welcome", "s2-disk", "s3-handling", "s4-edit", "s5-root", "s6-swap", "s7-items", "s7a-user",
+	"s1-welcome", "s1a-release", "s2-disk", "s3-handling", "s4-edit", "s5-root", "s6-swap", "s7-items", "s7a-user",
 	"s8-confirm", "s9-progress", "s10-failed", "s11-done"
 };
 
 static void flow_probe(struct inst_app *app);
+static void flow_releases(struct inst_app *app);
+static void flow_releases_line(struct inst_app *app, char *line);
+static void flow_download(struct inst_app *app);
+static void flow_download_line(struct inst_app *app, char *line);
+static void flow_download_ended(struct inst_app *app);
+static const char *flow_download_reason(int error);
 static void flow_probe_line(struct inst_app *app, char *line);
 static void flow_probe_read(struct inst_app *app);
 static void flow_edit_line(struct inst_app *app, char *line);
@@ -74,8 +80,8 @@ static char flow_pending_write[INST_MESSAGE_MAX];
 static int flow_pending_wrote;
 
 /*
- * Starts the wizard: the catalog, the system's name, the fields' first
- * values and the first probe, on S1.
+ * Starts the wizard: the system's name, the fields' first values and the
+ * first probe, on S1 (the releases are asked for once the disks are read).
  */
 void
 inst_flow_start(
@@ -86,13 +92,10 @@ inst_flow_start(
 	char *value;
 	char *text;
 	size_t length;
-	int error;
 	int same;
 
-	/* The catalog of what can be installed. */
-	error = inst_catalog_read(&app->catalog);
-	inst_log("CATALOG error=%d units=%u items=%u licenses=%u", error, app->catalog.unit_count, app->catalog.item_count,
-		 app->catalog.license_count);
+	/* No release yet: the catalog comes with the system's download. */
+	app->release_chosen = -1;
 
 	/* The system's name, from os-release's NAME (the build's when it has none). */
 	(void)snprintf(app->os_name, sizeof(app->os_name), "%s", ZEDBSD_OS_NAME);
@@ -158,6 +161,12 @@ inst_flow_line(
 	case INST_JOB_INSTALL:
 		flow_install_line(app, line);
 		break;
+	case INST_JOB_RELEASES:
+		flow_releases_line(app, line);
+		break;
+	case INST_JOB_DOWNLOAD:
+		flow_download_line(app, line);
+		break;
 	default:
 		break;
 	}
@@ -186,8 +195,29 @@ inst_flow_ended(
 				(void)snprintf(app->probe_message, sizeof(app->probe_message), "%s (%d)", kl_tr("The installer's helper did not answer."), status);
 		}
 
-		/* The probe is over. */
+		/* The probe is over; the releases are asked for after the first one. */
 		inst_log("PROBE state=%d disks=%u", app->probe_state, app->probe.disk_count);
+		if (app->releases_state == 0)
+			flow_releases(app);
+		return;
+	}
+
+	/* The list of the releases: one that never ended failed. */
+	if (job == INST_JOB_RELEASES) {
+		if (app->releases_state == 1) {
+			app->releases_state = 3;
+			if (app->releases_message[0] == '\0')
+				(void)snprintf(app->releases_message, sizeof(app->releases_message), "%s", kl_tr("The installer's helper did not answer."));
+		}
+
+		/* The list is over. */
+		inst_log("RELEASES state=%d count=%u", app->releases_state, app->release_count);
+		return;
+	}
+
+	/* The download: its catalog read, or its failure. */
+	if (job == INST_JOB_DOWNLOAD) {
+		flow_download_ended(app);
 		return;
 	}
 
@@ -226,14 +256,24 @@ inst_next_refusal(
 	disk = flow_disk(app);
 	switch (app->screen) {
 	case INST_S1:
-		if (!app->catalog.read)
-			return kl_tr("The installer's files could not be read.");
 		if (app->probe_state == 1 || app->probe_state == 0)
 			return kl_tr("Looking at the disks...");
 		if (app->probe_state == 3)
 			return kl_tr("The disks could not be read.");
 		if (!app->probe.uefi)
 			return kl_tr("The installer works only on a computer started with UEFI.");
+		return NULL;
+	case INST_S1A:
+		if (app->releases_state == 0 || app->releases_state == 1)
+			return kl_tr("Looking for the releases...");
+		if (app->releases_state == 3)
+			return kl_tr("The releases could not be read.");
+		if (app->release_count == 0U)
+			return kl_tr("No release can be installed.");
+		if (app->release_chosen < 0)
+			return kl_tr("Choose a release.");
+		if (app->download_state == 1)
+			return kl_tr("Downloading the system...");
 		return NULL;
 	case INST_S2:
 		if (disk == NULL)
@@ -328,6 +368,7 @@ inst_next(
 {
 	const struct inst_disk *disk;
 	const char *reason;
+	int same;
 
 	/* Only when the screen is ready. */
 	reason = inst_next_refusal(app);
@@ -338,7 +379,18 @@ inst_next(
 	disk = flow_disk(app);
 	switch (app->screen) {
 	case INST_S1:
-		inst_show(app, INST_S2);
+		inst_show(app, INST_S1A);
+		if (app->releases_state == 0 || app->releases_state == 3)
+			flow_releases(app);
+		break;
+	case INST_S1A:
+		/* The system of the release chosen, downloaded and read, or its download now. */
+		same = strcmp(app->download_tag, app->release[app->release_chosen].tag);
+		if (app->download_state == 2 && same == 0 && app->catalog.read) {
+			inst_show(app, INST_S2);
+			break;
+		}
+		flow_download(app);
 		break;
 	case INST_S2:
 		/* A session bound to another disk ends. */
@@ -400,8 +452,13 @@ inst_back(
 {
 	/* The screen that comes before. */
 	switch (app->screen) {
-	case INST_S2:
+	case INST_S1A:
+		/* A list or a download that runs stops. */
+		inst_helper_stop(app);
 		inst_show(app, INST_S1);
+		break;
+	case INST_S2:
+		inst_show(app, INST_S1A);
 		break;
 	case INST_S3:
 		inst_show(app, INST_S2);
@@ -823,6 +880,38 @@ inst_probe_again(
 	app->dirty = 1;
 }
 
+/* Asks for the releases again (S1a's Try again). */
+void
+inst_releases_again(
+	struct inst_app *app)
+{
+	/* A new list. */
+	flow_releases(app);
+	app->dirty = 1;
+}
+
+/*
+ * Chooses a release on S1a (not while its system downloads).  Another
+ * release than the one downloaded forgets the download and its catalog.
+ */
+void
+inst_release_choose(
+	struct inst_app *app,
+	unsigned release)
+{
+	/* Not a release of the list, or a download under way. */
+	if (release >= app->release_count || app->download_state == 1)
+		return;
+
+	/* The choice. */
+	app->release_chosen = (int)release;
+	app->download_message[0] = '\0';
+	if (app->download_state == 3)
+		app->download_state = 0;
+	inst_log("RELEASE chosen tag=%s", app->release[release].tag);
+	app->dirty = 1;
+}
+
 /* Restarts the computer (S11), through the desktop's power rules. */
 void
 inst_reboot(
@@ -956,6 +1045,229 @@ flow_probe(
 
 	/* The probe is under way. */
 	app->probe_state = 1;
+}
+
+/* Asks the helper for the releases offered. */
+static void
+flow_releases(
+	struct inst_app *app)
+{
+	int error;
+
+	/* A new list, asked. */
+	error = inst_helper_releases(app);
+	if (error == EBUSY)
+		return;
+	app->release_count = 0;
+	app->releases_message[0] = '\0';
+	if (error != 0) {
+		app->releases_state = 3;
+		(void)snprintf(app->releases_message, sizeof(app->releases_message), "%s (%s)", kl_tr("The installer's helper could not be started."), strerror(error));
+		inst_log("RELEASES start-failed errno=%d", error);
+		return;
+	}
+
+	/* The list is under way. */
+	app->releases_state = 1;
+}
+
+/*
+ * Takes a line of the list of the releases: a release, the end (which
+ * chooses the newest when none is chosen), or the helper's failure.
+ */
+static void
+flow_releases_line(
+	struct inst_app *app,
+	char *line)
+{
+	struct inst_release *release;
+	char tag[INST_TAG_MAX];
+	char date[INST_DATE_MAX];
+	unsigned long long bytes;
+	int fields;
+	int error;
+	int same;
+
+	/* A failure of the helper: why, in the language shown. */
+	same = strncmp(line, "FAIL ", 5U);
+	if (same == 0) {
+		app->releases_state = 3;
+		error = 0;
+		(void)sscanf(line + 5, "%*s %d", &error);
+		(void)snprintf(app->releases_message, sizeof(app->releases_message), "%s", kl_tr(flow_download_reason(error)));
+		inst_log("RELEASES failed line=%s", line);
+		return;
+	}
+
+	/* The end: the newest release is the choice at first. */
+	same = strcmp(line, "end");
+	if (same == 0) {
+		app->releases_state = 2;
+		if (app->release_count > 0U && (app->release_chosen < 0 || (unsigned)app->release_chosen >= app->release_count))
+			app->release_chosen = 0;
+		return;
+	}
+
+	/* A release: its tag, its date and its size. */
+	same = strncmp(line, "RELEASE ", 8U);
+	if (same != 0 || app->release_count == INST_RELEASES_MAX)
+		return;
+	fields = sscanf(line + 8, "%127s %31s %llu", tag, date, &bytes);
+	if (fields != 3)
+		return;
+	release = &app->release[app->release_count];
+	(void)snprintf(release->tag, sizeof(release->tag), "%s", tag);
+	(void)snprintf(release->date, sizeof(release->date), "%s", date);
+	release->bytes = (uint64_t)bytes;
+	app->release_count++;
+	inst_log("RELEASE offered tag=%s date=%s bytes=%llu", tag, date, bytes);
+}
+
+/* Asks the helper to download the system of the release chosen; the catalog read before goes. */
+static void
+flow_download(
+	struct inst_app *app)
+{
+	const char *tag;
+	int error;
+
+	/* The release chosen. */
+	if (app->release_chosen < 0 || (unsigned)app->release_chosen >= app->release_count)
+		return;
+	tag = app->release[app->release_chosen].tag;
+
+	/* The download, asked. */
+	error = inst_helper_download(app, tag);
+	if (error == EBUSY)
+		return;
+	memset(&app->catalog, 0, sizeof(app->catalog));
+	(void)snprintf(app->download_tag, sizeof(app->download_tag), "%s", tag);
+	app->download_message[0] = '\0';
+	app->download_step[0] = '\0';
+	app->download_done = 0;
+	app->download_total = app->release[app->release_chosen].bytes;
+	if (error != 0) {
+		app->download_state = 3;
+		(void)snprintf(app->download_message, sizeof(app->download_message), "%s (%s)", kl_tr("The installer's helper could not be started."), strerror(error));
+		inst_log("DOWNLOAD start-failed errno=%d", error);
+		return;
+	}
+
+	/* The download is under way. */
+	app->download_state = 1;
+	inst_log("DOWNLOAD start tag=%s", tag);
+}
+
+/* Takes a line of the download: a step, the bytes so far, its end, or its failure. */
+static void
+flow_download_line(
+	struct inst_app *app,
+	char *line)
+{
+	unsigned long long done;
+	unsigned long long total;
+	char step[16];
+	int fields;
+	int error;
+	int same;
+
+	/* A failure: why, in the language shown. */
+	same = strncmp(line, "FAIL ", 5U);
+	if (same == 0) {
+		app->download_state = 3;
+		error = 0;
+		(void)sscanf(line + 5, "%*s %d", &error);
+		(void)snprintf(app->download_message, sizeof(app->download_message), "%s", kl_tr(flow_download_reason(error)));
+		inst_log("DOWNLOAD failed line=%s", line);
+		return;
+	}
+
+	/* The end: the system is downloaded and checked. */
+	same = strcmp(line, "DONE");
+	if (same == 0) {
+		app->download_state = 2;
+		inst_log("DOWNLOAD done tag=%s", app->download_tag);
+		return;
+	}
+
+	/* A step. */
+	same = strncmp(line, "STEP ", 5U);
+	if (same == 0) {
+		fields = sscanf(line + 5, "%*u %*u %15s", step);
+		if (fields == 1)
+			(void)snprintf(app->download_step, sizeof(app->download_step), "%s", step);
+		return;
+	}
+
+	/* The bytes so far. */
+	same = strncmp(line, "BYTES ", 6U);
+	if (same == 0) {
+		fields = sscanf(line + 6, "%llu %llu", &done, &total);
+		if (fields == 2) {
+			app->download_done = (uint64_t)done;
+			app->download_total = (uint64_t)total;
+		}
+	}
+}
+
+/*
+ * Takes the end of the download: a system downloaded has its catalog read
+ * and S2 follows; one that never said DONE failed.
+ */
+static void
+flow_download_ended(
+	struct inst_app *app)
+{
+	int error;
+
+	/* A download that never ended failed. */
+	if (app->download_state == 1) {
+		app->download_state = 3;
+		if (app->download_message[0] == '\0')
+			(void)snprintf(app->download_message, sizeof(app->download_message), "%s", kl_tr("The installer's helper did not answer."));
+	}
+	if (app->download_state != 2)
+		return;
+
+	/* The catalog of the system downloaded. */
+	error = inst_catalog_read(&app->catalog);
+	inst_log("CATALOG error=%d units=%u items=%u licenses=%u", error, app->catalog.unit_count, app->catalog.item_count,
+		 app->catalog.license_count);
+	if (error != 0 || !app->catalog.read) {
+		app->download_state = 3;
+		(void)snprintf(app->download_message, sizeof(app->download_message), "%s", kl_tr("The downloaded system's list of what it holds cannot be read."));
+		return;
+	}
+
+	/* S2 follows, when S1a is still shown. */
+	if (app->screen == INST_S1A)
+		inst_show(app, INST_S2);
+}
+
+/* Gives the words of why the releases or the download failed, by the helper's error. */
+static const char *
+flow_download_reason(
+	int error)
+{
+	/* By the error the helper reported. */
+	switch (error) {
+	case EBADMSG:
+		return "The download does not match the SHA-256 GitHub gives for the release. It was not used.";
+	case ECANCELED:
+		return "Stopped.";
+	case ENOENT:
+		return "The release is no longer offered.";
+	case ENOSPC:
+	case EFBIG:
+		return "There is not enough memory to keep the downloaded system.";
+	case EINVAL:
+		return "The answer about the releases could not be understood.";
+	default:
+		break;
+	}
+
+	/* Anything else is the network's, or the server's. */
+	return "The releases could not be reached. Check the network connection, then try again.";
 }
 
 /* Takes a line of a probe: a record, its end, or the helper's failure. */
@@ -1380,7 +1692,6 @@ flow_install(
 	unsigned count;
 	unsigned i;
 	uint64_t swap_bytes;
-	int desktop;
 	int error;
 
 	/* The disk; the request is large. */
@@ -1437,8 +1748,7 @@ flow_install(
 			error = flow_append(request, INST_REQUEST_MAX, &used, " %s", app->catalog.unit[i].name);
 	}
 
-	/* The user, the passwords, the automatic login (only with the desktop) and the hostname. */
-	desktop = inst_catalog_has(&app->catalog, "desktop");
+	/* The user, the passwords, the automatic login and the hostname. */
 	if (error == 0)
 		error = flow_field(request, INST_REQUEST_MAX, &used, "user", app->user.text);
 	if (error == 0)
@@ -1448,7 +1758,7 @@ flow_install(
 	if (error == 0)
 		error = flow_field(request, INST_REQUEST_MAX, &used, "root-password", app->root_password.text);
 	if (error == 0) {
-		if (app->autologin && desktop)
+		if (app->autologin)
 			error = flow_append(request, INST_REQUEST_MAX, &used, " autologin yes");
 		else
 			error = flow_append(request, INST_REQUEST_MAX, &used, " autologin no");

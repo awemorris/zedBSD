@@ -398,6 +398,7 @@ kwl_system_bind(
 	int administer;
 	int printers;
 	int managed;
+	int elevate;
 	int error;
 
 	/* Every part version 1 has. */
@@ -457,6 +458,11 @@ kwl_system_bind(
 	managed = kl_backend_session_managed(manager->client->server->backend);
 	if (manager->version >= KL_SYSTEM_SINCE_PIN && managed)
 		bits |= KL_SYSTEM_CAPABILITY_PIN;
+
+	/* The admin actions, at version 37 in a session whose manager runs them (admin-ask.c). */
+	elevate = kwl_admin_available(manager->client->server);
+	if (manager->version >= KL_SYSTEM_SINCE_ADMIN && elevate)
+		bits |= KL_SYSTEM_CAPABILITY_ELEVATE;
 	error = kwl_emit(manager->client, manager->id, KL_SYSTEM_MANAGER_EVENT_CAPABILITIES, &bits, sizeof(bits));
 	if (error != 0)
 		return error;
@@ -525,6 +531,9 @@ kwl_system_request(
 	case KWL_SYSTEM_MEDIA:
 		error = kwl_media_library_request(object, opcode, bytes, size);
 		break;
+	case KWL_SYSTEM_ADMIN:
+		error = kwl_admin_request(object, opcode, bytes, size);
+		break;
 	default:
 		error = EPROTO;
 		break;
@@ -578,6 +587,9 @@ kwl_system_tick(
 	/* Bluetooth: the service's news, the answers and a pairing's questions (bluetooth-shell.c, ws143-p006). */
 	kwl_bluetooth_tick(server);
 	kwl_media_library_tick(server);
+
+	/* The admin actions: a window that came to the front, the lock, the end of a wait (admin-ask.c). */
+	kwl_admin_tick(server);
 
 	/* The phone: the paired phone's news, the answers and the messages (phone-shell.c, ws197-p004a). */
 	kwl_phone_tick(server);
@@ -887,6 +899,16 @@ system_manager_request(
 		if (manager->version < KL_SYSTEM_SINCE_MEDIA || manager->client->server->greeter)
 			return EPROTO;
 		error = kwl_media_library_create(manager, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* The admin actions are admin-ask.c's, since version 37, not on the login screen. */
+	if (opcode == KL_SYSTEM_MANAGER_GET_ADMIN) {
+		if (manager->version < KL_SYSTEM_SINCE_ADMIN || manager->client->server->greeter)
+			return EPROTO;
+		error = kwl_admin_create(manager, bytes, size);
 		if (error != 0)
 			return error;
 		return 0;

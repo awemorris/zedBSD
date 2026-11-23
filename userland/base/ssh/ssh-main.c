@@ -8,13 +8,17 @@
 /*
  * The ssh program: connects to a server, checks its host key against
  * known_hosts, logs in with a key or a password, and runs a shell or a
- * command on a terminal or on the standard streams.
+ * command on a terminal or on the standard streams, forwarding TCP ports
+ * both ways as asked (-L, -R).
  *
  * The options and the settings are those of ssh(1) and ssh_config(5)
  * that this program supports (ssh_client_parse_args, ssh-config.h).  The
- * exit value is the remote command's exit status, or 255 when the
- * connection failed or the command ended without a status (ssh(1) EXIT
- * STATUS).
+ * command is the one given after the destination, or else RemoteCommand
+ * with its %-tokens expanded; both at once is an error, as in OpenSSH.
+ * -N and SessionType none open no session.  The exit value is the remote
+ * command's exit status, or 255 when the connection failed, a forwarding
+ * failed under ExitOnForwardFailure, or the command ended without a
+ * status (ssh(1) EXIT STATUS).
  */
 
 #include <pwd.h>
@@ -42,9 +46,9 @@ static int client_run(struct ssh_client *client, const struct ssh_client_args *a
 /*
  * The one connection of the program.
  *
- * It is static because it holds the receive buffer and the transport's
- * keys, which are large for the stack; main starts it with
- * ssh_client_init and frees it before the program ends.
+ * It is static because it holds the receive buffer and the settings,
+ * which are large for the stack; main starts it with ssh_client_init and
+ * frees it before the program ends.
  */
 static struct ssh_client client_connection;
 
@@ -104,8 +108,10 @@ static void
 client_usage(void)
 {
 	/* Lists the options supported. */
-	fputs("usage: ssh [-NnqTtv] [-F configfile] [-i identity_file] [-l login_name]\n", stderr);
-	fputs("           [-o option] [-p port] destination [command [argument ...]]\n", stderr);
+	fputs("usage: ssh [-gNnqTtv] [-F configfile] [-i identity_file]\n", stderr);
+	fputs("           [-L [bind_address:]port:host:hostport] [-l login_name]\n", stderr);
+	fputs("           [-o option] [-p port] [-R [bind_address:]port:host:hostport]\n", stderr);
+	fputs("           destination [command [argument ...]]\n", stderr);
 }
 
 /*
@@ -156,6 +162,13 @@ client_read_config(
 		return error;
 	}
 
+	/* Refuses a setting of the file that the program does not act on, naming the file. */
+	error = ssh_client_check_settings(config, error_text);
+	if (error != 0) {
+		fprintf(stderr, "ssh: %s: %s\n", path, error_text);
+		return error;
+	}
+
 	/* Succeeded: the file's settings are applied. */
 	return 0;
 }
@@ -163,7 +176,8 @@ client_read_config(
 /*
  * Settles everything the connection needs before it starts: the
  * settings (command line, then the -F file or the user's and the
- * system's files, then the defaults), the name connected to, the user and
+ * system's files, then the defaults, which apply ClearAllForwardings),
+ * the settings the program refuses, the name connected to, the user and
  * the port.  Prints why on a failure.
  */
 static int
@@ -181,6 +195,13 @@ client_settle(
 	/* Applies the command line first: the first value of a keyword wins. */
 	ssh_config_init(&client->config);
 	error = ssh_client_apply_args(args, &client->config, error_text);
+	if (error != 0) {
+		fprintf(stderr, "ssh: %s\n", error_text);
+		return error;
+	}
+
+	/* Refuses a setting of the command line that the program does not act on. */
+	error = ssh_client_check_settings(&client->config, error_text);
 	if (error != 0) {
 		fprintf(stderr, "ssh: %s\n", error_text);
 		return error;
@@ -209,6 +230,19 @@ client_settle(
 		client->identities_named = 1;
 	ssh_config_defaults(&client->config);
 	client->log_level = client->config.log_level;
+
+	/* Checks the settings again once every default is in (ClearAllForwardings among them), as they are used. */
+	error = ssh_client_check_settings(&client->config, error_text);
+	if (error != 0) {
+		fprintf(stderr, "ssh: %s\n", error_text);
+		return error;
+	}
+
+	/* Refuses a command given both on the command line and by RemoteCommand, as OpenSSH's ssh does. */
+	if (args->command_count > 0 && client->config.remote_command[0] != '\0') {
+		fprintf(stderr, "Cannot execute command-line and remote command.\n");
+		return EINVAL;
+	}
 
 	/* Keeps the name given, and connects to HostName when a setting gave one. */
 	memcpy(client->host, args->host, sizeof(client->host));
@@ -255,9 +289,9 @@ client_settle(
 }
 
 /*
- * Connects, authenticates and runs the session or the connection without
- * one.  Returns 0 when the session ran (its exit value in *exit_status),
- * or an error after the reason was printed.
+ * Connects, then logs in and runs the session or the connection without
+ * one.  Returns 0 when the connection ran (its exit value in
+ * *exit_status), or an error after the reason was printed.
  */
 static int
 client_run(
@@ -266,7 +300,8 @@ client_run(
 	int *exit_status)
 {
 	struct ssh_buf command;
-	uint32_t code;
+	char error_text[SSH_CONFIG_ERROR_MAX];
+	int session;
 	int error;
 
 	/* Builds the command from the arguments after the destination. */
@@ -278,6 +313,24 @@ client_run(
 		return error;
 	}
 
+	/* A connection with a session runs RemoteCommand when no command was given; one without has no use for it. */
+	session = 1;
+	if (args->no_command || client->config.session_type_none)
+		session = 0;
+
+	/* Expands RemoteCommand into the command. */
+	if (session && client->config.remote_command[0] != '\0') {
+		error_text[0] = '\0';
+		error = ssh_client_remote_command(client, &command, error_text);
+		if (error != 0) {
+			if (error_text[0] == '\0')
+				snprintf(error_text, sizeof(error_text), "the command is too long");
+			fprintf(stderr, "ssh: %s\n", error_text);
+			ssh_buf_free(&command);
+			return error;
+		}
+	}
+
 	/* Connects to the server. */
 	error = ssh_client_connect(client);
 	if (error != 0) {
@@ -285,37 +338,17 @@ client_run(
 		return error;
 	}
 
-	/* Starts the transport and logs in. */
-	error = ssh_client_start(client);
-	if (error == 0)
-		error = ssh_client_authenticate(client);
-	if (error != 0) {
-		ssh_client_report(client, error);
-		ssh_client_close(client, SSH_DISCONNECT_PROTOCOL_ERROR, "protocol error");
-		ssh_buf_free(&command);
-		return error;
-	}
-
-	/* Runs the session, or keeps the connection without one (-N). */
-	if (args->no_command) {
-		error = ssh_client_run_without_session(client, exit_status);
-	} else {
-		error = ssh_client_run_session(client, args, command.data, command.size, exit_status);
-	}
-
-	/* Releases the command text. */
+	/* Logs in and runs the session, or keeps the connection without one (-N). */
+	error = ssh_client_run(client, args, command.data, command.size, exit_status);
 	ssh_buf_free(&command);
 
-	/* Ends the connection, telling the server why. */
-	code = SSH_DISCONNECT_BY_APPLICATION;
-	if (error != 0)
-		code = SSH_DISCONNECT_PROTOCOL_ERROR;
-	ssh_client_close(client, code, "disconnected by user");
+	/* Ends the connection, writing the DISCONNECT the engine queued. */
+	ssh_client_close(client);
 
-	/* Reports a connection that broke (the reason is already printed). */
+	/* Reports a connection that could not run (the reason is already printed). */
 	if (error != 0)
 		return error;
 
-	/* Succeeded: *exit_status holds the session's exit value. */
+	/* Succeeded: *exit_status holds the exit value. */
 	return 0;
 }

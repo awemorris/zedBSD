@@ -43,6 +43,12 @@ msg	Pair if the device shows the same number.	機器に同じ数字が出てい�
 msg	Type this number on the device, then press Enter.	機器でこの数字を打ち、Enter を押してください。
 # userland/desktop/wayland/bluetooth-ask.c:387
 msg	Asked by {1}	{1} が求めています
+# userland/desktop/wayland/admin-ask.c
+msg	Administrator permission	管理者の許可
+# userland/desktop/wayland/admin-ask.c
+msg	Allow	許可
+# userland/desktop/wayland/shell.c
+msg	Administrator: {1}	管理者: {1}
 # userland/desktop/wayland/bluetooth-ask.c:394
 msg	Closes in {1} s	あと {1} 秒で閉じます
 # userland/desktop/wayland/bluetooth-ask.c:597
