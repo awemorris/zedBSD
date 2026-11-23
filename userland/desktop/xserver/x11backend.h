@@ -20,7 +20,8 @@
  * made full-screen, the pointer's capture taken by another program, and
  * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server).  The core is the X windows' window manager (wm.c): it decides
+ * server), and the size of the system's frame around a surface.  The
+ * core is the X windows' window manager (wm.c): it decides
  * what a close means to the X client and keeps ICCCM's and EWMH's state
  * of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
  */
@@ -56,6 +57,13 @@
 #define X11_SURFACE_FULLSCREEN	(1U << 2)
 
 /*
+ * A surface whose window asks for the user's attention (ICCCM's
+ * UrgencyHint, EWMH's _NET_WM_STATE_DEMANDS_ATTENTION): the system marks
+ * it (Windows flashes its button) until it is activated.
+ */
+#define X11_SURFACE_URGENT	(1U << 3)
+
+/*
  * What an update of a surface changes: its size, its place on the root
  * window, its title, its owner, its state, and the limits on its size.
  */
@@ -65,6 +73,25 @@
 #define X11_SURFACE_CHANGED_OWNER	(1U << 3)
 #define X11_SURFACE_CHANGED_FLAGS	(1U << 4)
 #define X11_SURFACE_CHANGED_HINTS	(1U << 5)
+
+/*
+ * What else an update brings: the surface's shape (info's shape), its
+ * icon (info's icon), and a request that the system bring the surface to
+ * the front and activate it (a client's _NET_ACTIVE_WINDOW; the system
+ * may only mark it when it does not let a program take the front).
+ */
+#define X11_SURFACE_CHANGED_SHAPE	(1U << 6)
+#define X11_SURFACE_CHANGED_ICON	(1U << 7)
+#define X11_SURFACE_CHANGED_ACTIVATE	(1U << 8)
+
+/*
+ * The surface's info carries the window's shape (SHAPE's bounding
+ * region) and its icon (_NET_WM_ICON), its flags may ask for the user's
+ * attention, an update may ask for the surface to be activated, and the
+ * backend tells the core the size of the system's frame around a surface
+ * (x11server_backend_frame).
+ */
+#define X11_BACKEND_SHAPE	1
 
 /*
  * The core is the top-level windows' window manager: a surface's info
@@ -168,6 +195,26 @@ struct x11_surface_info {
 	struct x11_surface *owner;
 	unsigned flags;
 	struct x11_size_hints hints;
+
+	/*
+	 * The window's shape: the rectangles of its pixels the surface shows
+	 * and takes the pointer in (from the window's corner; they do not
+	 * overlap), shape_count of them.  shaped 0: the whole window (shape is
+	 * NULL).  The system clips the surface to them (Windows'
+	 * SetWindowRgn); Wayland takes them as the input region only.
+	 */
+	int shaped;
+	const struct x11_rect *shape;
+	unsigned shape_count;
+
+	/*
+	 * The window's icon (_NET_WM_ICON, the size nearest the system's):
+	 * icon_width by icon_height pixels of ARGB, unpremultiplied, rows top
+	 * to bottom.  NULL: none (the system's own icon).
+	 */
+	const uint32_t *icon;
+	unsigned icon_width;
+	unsigned icon_height;
 };
 
 /*
@@ -256,6 +303,7 @@ void x11server_backend_close(struct x11server *server, uint32_t window);
 void x11server_backend_state(struct x11server *server, uint32_t window, int state);
 void x11server_backend_capture_lost(struct x11server *server, uint32_t time);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
+void x11server_backend_frame(struct x11server *server, uint32_t window, unsigned left, unsigned right, unsigned top, unsigned bottom);
 
 /* What the core gives the backend: a size within a surface's limits. */
 void x11server_size_hints_apply(const struct x11_size_hints *hints, unsigned *width, unsigned *height);

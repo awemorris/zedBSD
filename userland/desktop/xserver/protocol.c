@@ -684,6 +684,11 @@ protocol_dispatch(
 	case X11_XCMISC_MAJOR:
 		code = x11_xcmisc_request(server, index, request, length);
 		break;
+	case X11_SHAPE_MAJOR:
+	case X11_SYNC_MAJOR:
+	case X11_XFIXES_MAJOR:
+		code = x11_extension_request(server, index, request, length);
+		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
 		if (length >= 4U)
@@ -932,6 +937,7 @@ protocol_query_extension(
 	size_t name_length;
 	uint8_t major;
 	int differs;
+	int found;
 
 	/* The name, filling the request to its last word. */
 	if (length < 8U)
@@ -953,8 +959,14 @@ protocol_query_extension(
 			major = X11_XCMISC_MAJOR;
 	}
 
-	/* Another name: GLX's answer. */
+	/* Another name: an extension of stage 2 (extension.c), else GLX's answer. */
 	if (major == 0U) {
+		memset(reply, 0, sizeof(reply));
+		found = x11_extension_query(request + 8, name_length, reply);
+		if (found) {
+			x11_reply(server, client, reply, sizeof(reply));
+			return 0U;
+		}
 		x11_glx_query_extension(server, client, request, length);
 		return 0U;
 	}
@@ -975,9 +987,10 @@ protocol_list_extensions(
 	size_t length)
 {
 	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX" };
-	uint8_t reply[32U + 32U];
+	uint8_t reply[32U + 64U];
 	size_t used;
 	size_t name_length;
+	unsigned count;
 	unsigned index;
 
 	/* The header alone. */
@@ -994,8 +1007,12 @@ protocol_list_extensions(
 		used += 1U + name_length;
 	}
 
+	/* The extensions of stage 2 after them (extension.c). */
+	count = EXTENSION_NAMES_MAX;
+	used += x11_extension_names(reply + used, sizeof(reply) - used, &count);
+
 	/* Succeeded: the count, and the list padded to words. */
-	reply[1] = (uint8_t)EXTENSION_NAMES_MAX;
+	reply[1] = (uint8_t)count;
 	used = (used + 3U) & ~(size_t)3U;
 	x11_reply(server, client, reply, used);
 	return 0U;

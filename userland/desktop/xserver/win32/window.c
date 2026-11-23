@@ -189,6 +189,9 @@ win32_surface_open(
 	if (surface->kind == X11_SURFACE_TOPLEVEL && (surface->flags & X11_SURFACE_FULLSCREEN) != 0)
 		window_fullscreen(surface, 1);
 
+	/* Its shape, icon and request for attention. */
+	win32_decor_update(surface, info, X11_SURFACE_CHANGED_SHAPE | X11_SURFACE_CHANGED_ICON | X11_SURFACE_CHANGED_FLAGS);
+
 	/* Succeeded: the core holds the surface. */
 	win32_log(backend, "X11 WIN32 open window=0x%lx kind=%u at %ld,%ld %ldx%ld", (unsigned long)window, surface->kind,
 	    (long)outer.left, (long)outer.top, (long)(outer.right - outer.left), (long)(outer.bottom - outer.top));
@@ -239,9 +242,14 @@ win32_surface_update(
 	if ((changed & X11_SURFACE_CHANGED_HINTS) != 0)
 		surface->hints = info->hints;
 
-	/* Maximizes it or makes it full-screen, or back, as the client asked (EWMH's _NET_WM_STATE). */
-	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0 && surface->kind == X11_SURFACE_TOPLEVEL)
+	/* Maximizes it or makes it full-screen, or back, as the client asked (EWMH's _NET_WM_STATE); its shape follows the frame. */
+	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0 && surface->kind == X11_SURFACE_TOPLEVEL) {
 		window_set_state(surface, info->flags & (X11_SURFACE_MAXIMIZED | X11_SURFACE_FULLSCREEN));
+		win32_decor_shape(surface);
+	}
+
+	/* Its shape, icon, request for attention and activation. */
+	win32_decor_update(surface, info, changed);
 
 	/* Minimizes or restores it as the client asked (ICCCM's WM_CHANGE_STATE). */
 	if ((changed & X11_SURFACE_CHANGED_FLAGS) != 0) {
@@ -304,8 +312,9 @@ win32_surface_close(
 	SetWindowLongPtrW(surface->hwnd, GWLP_USERDATA, 0);
 	DestroyWindow(surface->hwnd);
 
-	/* Frees the pixels and the surface. */
+	/* Frees the pixels, the decoration and the surface. */
 	window_dib_free(surface);
+	win32_decor_free(surface);
 	win32_log(backend, "X11 WIN32 close window=0x%lx", (unsigned long)surface->window);
 	free(surface);
 }
@@ -695,6 +704,10 @@ window_sized(
 			x11server_backend_state(backend->server, surface->window, (int)state);
 	}
 
+	/* A shape follows the frame (a maximized window's frame is placed otherwise). */
+	if (surface->shaped)
+		win32_decor_shape(surface);
+
 	/* The size the user gave is told from the loop (not from within a call of the core's). */
 	window_post_report(surface);
 }
@@ -740,6 +753,9 @@ window_report(
 	surface->report_posted = 0;
 	if (surface->iconic)
 		return;
+
+	/* The frame around it, when it changed (_NET_FRAME_EXTENTS). */
+	win32_decor_frame(surface);
 
 	/* The client area's place on the root window and its size, in X's pixels. */
 	GetClientRect(surface->hwnd, &client);
@@ -789,6 +805,9 @@ window_dpi_changed(
 	AdjustWindowRectExForDpi(&outer, style, FALSE, extended, HIWORD(wparam));
 	SetWindowPos(surface->hwnd, NULL, suggested->left, suggested->top, outer.right - outer.left,
 	    outer.bottom - outer.top, SWP_NOZORDER | SWP_NOACTIVATE);
+
+	/* The shape follows the new frame. */
+	win32_decor_shape(surface);
 }
 
 /* Tells whether the X client put any limit on its window's size. */

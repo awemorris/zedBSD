@@ -32,6 +32,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The events the window manager reads: UnmapNotify and ClientMessage. */
@@ -44,6 +45,9 @@
 /* WM_HINTS: the flag that its initial state is set, and the field's index (in 32-bit units). */
 #define WM_HINTS_STATE			(1U << 1)
 #define WM_HINTS_STATE_FIELD		2U
+
+/* WM_HINTS's flag that the window asks for the user's attention (ICCCM 4.1.2.4's UrgencyHint). */
+#define WM_HINTS_URGENCY		(1U << 8)
 
 /*
  * WM_NORMAL_HINTS (ICCCM 4.1.2.3): the flags of the fields set, the
@@ -87,11 +91,31 @@
 #define WM_HALF_HORZ			(1U << 9)
 #define WM_MAXIMIZED			(WM_HALF_VERT | WM_HALF_HORZ)
 
+/*
+ * The window manager's bit of a window that asks for the user's
+ * attention (_NET_WM_STATE_DEMANDS_ATTENTION), until it is activated.
+ */
+#define WM_ATTENTION			(1U << 10)
+
 /* The most atoms _NET_WM_STATE names here. */
-#define WM_NET_STATES_MAX		4U
+#define WM_NET_STATES_MAX		5U
 
 /* The most atoms the root window's _NET_SUPPORTED names. */
-#define WM_SUPPORTED_MAX		24U
+#define WM_SUPPORTED_MAX		32U
+
+/*
+ * _NET_WM_ICON: the size of icon the system is given (the smallest icon
+ * at least this wide, else the largest), and the largest side kept.
+ */
+#define WM_ICON_WANTED			32U
+#define WM_ICON_SIDE_MAX		256U
+
+/*
+ * _NET_WM_SYNC_REQUEST: how long the window manager waits for a client's
+ * counter before it gives the window the next size the system asks for
+ * anyway (milliseconds).
+ */
+#define WM_SYNC_TIMEOUT_MS		100U
 
 /* The name the window manager's own window gives (_NET_WM_NAME). */
 #define WM_NAME				"rootless"
@@ -133,7 +157,13 @@ static const struct wm_atom_name wm_atom_names[] = {
 	{ "_NET_WM_WINDOW_TYPE_DND", offsetof(struct x11_wm_atoms, net_wm_window_type_dnd) },
 	{ "_NET_WM_WINDOW_TYPE_NOTIFICATION", offsetof(struct x11_wm_atoms, net_wm_window_type_notification) },
 	{ "_NET_ACTIVE_WINDOW", offsetof(struct x11_wm_atoms, net_active_window) },
-	{ "_NET_CLOSE_WINDOW", offsetof(struct x11_wm_atoms, net_close_window) }
+	{ "_NET_CLOSE_WINDOW", offsetof(struct x11_wm_atoms, net_close_window) },
+	{ "_NET_WM_STATE_DEMANDS_ATTENTION", offsetof(struct x11_wm_atoms, net_wm_state_demands_attention) },
+	{ "_NET_WM_ICON", offsetof(struct x11_wm_atoms, net_wm_icon) },
+	{ "_NET_FRAME_EXTENTS", offsetof(struct x11_wm_atoms, net_frame_extents) },
+	{ "_NET_REQUEST_FRAME_EXTENTS", offsetof(struct x11_wm_atoms, net_request_frame_extents) },
+	{ "_NET_WM_SYNC_REQUEST", offsetof(struct x11_wm_atoms, net_wm_sync_request) },
+	{ "_NET_WM_SYNC_REQUEST_COUNTER", offsetof(struct x11_wm_atoms, net_wm_sync_request_counter) }
 };
 
 /* The index in wm_atom_names of the first EWMH atom, the first _NET_SUPPORTED names. */
@@ -148,7 +178,7 @@ static unsigned wm_initial_state(struct x11_window *window);
 static unsigned wm_net_state_read(struct x11server *server, struct x11_window *window);
 static unsigned wm_net_state_bit(struct x11server *server, uint32_t atom);
 static void wm_net_state_message(struct x11server *server, struct x11_window *window, uint32_t action, uint32_t first, uint32_t second);
-static unsigned wm_surface_flags(const struct x11_window *window);
+static unsigned wm_surface_flags(struct x11_window *window);
 static int wm_popup_type(struct x11server *server, struct x11_window *window);
 static struct x11_surface *wm_owner(struct x11server *server, struct x11_window *window);
 static void wm_hints_read(struct x11_window *window, struct x11_size_hints *hints);
@@ -160,6 +190,11 @@ static void wm_touch(struct x11server *server, struct x11_window *window, unsign
 static size_t wm_text(const struct x11_property *property, uint32_t utf8, char *title, size_t size);
 static size_t wm_utf8_length(const uint8_t *bytes, size_t left);
 static unsigned wm_steps(unsigned size, unsigned base, unsigned step);
+static int wm_sync_counter_of(struct x11server *server, struct x11_window *window, uint32_t *counter);
+static void wm_sync_request(struct x11server *server, struct x11_window *window);
+static void wm_sync_release(struct x11server *server, struct x11_window *window);
+static void wm_write_frame(struct x11server *server, struct x11_window *window, const uint32_t *extents);
+static int wm_icon_pick(const struct x11_property *icons, size_t *offset, unsigned *width, unsigned *height);
 
 /*
  * Starts the window manager: interns its atoms, makes its own window and
@@ -392,8 +427,8 @@ x11_wm_backend_state(
 	if (window->wm_state == X11_WM_WITHDRAWN)
 		return;
 
-	/* Maximized and full-screen as the system has them now. */
-	flags = window->wm_flags & X11_SURFACE_ICONIC;
+	/* Maximized and full-screen as the system has them now (a request for attention stays). */
+	flags = window->wm_flags & (X11_SURFACE_ICONIC | WM_ATTENTION);
 	if ((state & X11_SURFACE_MAXIMIZED) != 0U)
 		flags |= WM_MAXIMIZED;
 	if ((state & X11_SURFACE_FULLSCREEN) != 0U)
@@ -464,6 +499,12 @@ x11_wm_root_event(
 	second = x11_read32(event + 16, 0);
 	third = x11_read32(event + 20, 0);
 
+	/* _NET_REQUEST_FRAME_EXTENTS: the frame the window will have, before it is mapped (EWMH). */
+	if (type == server->wm.net_request_frame_extents) {
+		wm_write_frame(server, window, server->wm_frame);
+		return;
+	}
+
 	/* WM_CHANGE_STATE to IconicState: a Normal window is minimized, its surface with it. */
 	if (type == server->wm.change_state) {
 		if (first == X11_WM_ICONIC && window->wm_state == X11_WM_NORMAL)
@@ -486,6 +527,9 @@ x11_wm_root_event(
 			time = server->now;
 		x11_window_raise(server, window);
 		x11_input_focus_top_level(server, window, time);
+
+		/* The system is asked to bring the surface to the front (it may only mark it). */
+		wm_touch(server, window, X11_SURFACE_CHANGED_ACTIVATE);
 		return;
 	}
 
@@ -526,6 +570,18 @@ x11_wm_property(
 		return;
 	}
 
+	/* The icon. */
+	if (atom == server->wm.net_wm_icon) {
+		wm_touch(server, window, X11_SURFACE_CHANGED_ICON);
+		return;
+	}
+
+	/* The hints, whose urgency the surface shows. */
+	if (atom == X11_ATOM_WM_HINTS) {
+		wm_touch(server, window, X11_SURFACE_CHANGED_FLAGS);
+		return;
+	}
+
 	/* Succeeded: the limits on its size. */
 	if (atom == X11_ATOM_WM_NORMAL_HINTS)
 		wm_touch(server, window, X11_SURFACE_CHANGED_HINTS);
@@ -563,6 +619,16 @@ x11_wm_focus_changed(
 	/* The same window. */
 	if (active == server->wm_active)
 		return;
+
+	/* A window activated no longer asks for the user's attention (EWMH). */
+	if (active != 0U) {
+		top = x11_window_find(server, active);
+		if (top != NULL && (top->wm_flags & WM_ATTENTION) != 0U) {
+			top->wm_flags &= ~WM_ATTENTION;
+			(void)wm_write_state(server, top);
+			wm_touch(server, top, X11_SURFACE_CHANGED_FLAGS);
+		}
+	}
 
 	/* Succeeded: named. */
 	server->wm_active = active;
@@ -736,6 +802,224 @@ x11_wm_constrain(
 }
 
 /*
+ * Gives the icon a top-level window's _NET_WM_ICON names for its surface:
+ * the smallest icon at least WM_ICON_WANTED pixels wide (else the
+ * largest), as ARGB pixels in a malloc'd array the caller frees.  Returns
+ * 0, ENOENT when the window has no icon that can be read, or ENOMEM.
+ */
+int
+x11_wm_icon(
+	struct x11server *server,
+	struct x11_window *window,
+	uint32_t **pixels,
+	unsigned *width,
+	unsigned *height)
+{
+	struct x11_property *icons;
+	uint32_t *copy;
+	size_t offset;
+	size_t count;
+	size_t index;
+	int found;
+
+	/* _NET_WM_ICON: 32-bit units, each icon its width, its height and its pixels. */
+	*pixels = NULL;
+	*width = 0U;
+	*height = 0U;
+	if (server->wm.net_wm_icon == 0U)
+		return ENOENT;
+	icons = x11_property_find(window, server->wm.net_wm_icon);
+	if (icons == NULL || icons->format != 32U)
+		return ENOENT;
+
+	/* The icon of the size wanted. */
+	found = wm_icon_pick(icons, &offset, width, height);
+	if (!found)
+		return ENOENT;
+
+	/* Its pixels, copied out of the property (kept least significant byte first). */
+	count = (size_t)*width * (size_t)*height;
+	copy = malloc(count * sizeof(*copy));
+	if (copy == NULL)
+		return ENOMEM;
+	for (index = 0U; index < count; index++)
+		copy[index] = x11_read32(icons->data + offset + index * 4U, 0);
+
+	/* Succeeded: the icon. */
+	*pixels = copy;
+	return 0;
+}
+
+/*
+ * Takes the size of the system's frame around a top-level window (left,
+ * right, top, bottom, in X's pixels): the window's _NET_FRAME_EXTENTS
+ * says it, and a window that asks before it is mapped
+ * (_NET_REQUEST_FRAME_EXTENTS) is told the last frame given.
+ */
+void
+x11_wm_frame(
+	struct x11server *server,
+	struct x11_window *window,
+	const uint32_t *extents)
+{
+	unsigned index;
+
+	/* The frame the next window will likely have. */
+	for (index = 0U; index < 4U; index++)
+		server->wm_frame[index] = extents[index];
+
+	/* Succeeded: said on the window. */
+	wm_write_frame(server, window, extents);
+}
+
+/*
+ * Notes that a top-level window's shape (SHAPE's bounding region) changed,
+ * so that its surface is told.
+ */
+void
+x11_wm_shape_changed(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	/* Only a top-level window has a surface. */
+	if (window->parent != server->root)
+		return;
+
+	/* Succeeded: the surface is told at the next showing. */
+	wm_touch(server, window, X11_SURFACE_CHANGED_SHAPE);
+}
+
+/*
+ * Gives a top-level window a size the system asked for in step with its
+ * client's drawing (EWMH's _NET_WM_SYNC_REQUEST): a window whose client
+ * named _NET_WM_SYNC_REQUEST in its WM_PROTOCOLS and keeps a counter
+ * (_NET_WM_SYNC_REQUEST_COUNTER) is asked to set the counter to a new
+ * value once it has drawn the size, before it hears of the size; while
+ * the window manager waits for that value, a further size is held, and
+ * given when the counter reaches the value or the wait times out.
+ * Returns 1 when the size is held (the caller gives it nothing now), 0
+ * when the caller gives it at once.
+ */
+int
+x11_wm_sync_configure(
+	struct x11server *server,
+	struct x11_window *window,
+	int32_t x,
+	int32_t y,
+	int width,
+	int height)
+{
+	uint32_t counter;
+	int managed;
+	int asks;
+	int has;
+
+	/* Not a window the window manager keeps. */
+	managed = wm_managed(server, window);
+	if (!managed)
+		return 0;
+
+	/* A client that does not draw in step with the window manager. */
+	asks = x11_wm_protocol(server, window, server->wm.net_wm_sync_request);
+	if (!asks)
+		return 0;
+	has = wm_sync_counter_of(server, window, &counter);
+	if (!has)
+		return 0;
+
+	/* While the window manager waits for the client's last size, the newest size waits. */
+	if (window->sync_waiting) {
+		window->sync_held = 1;
+		window->sync_x = x;
+		window->sync_y = y;
+		window->sync_width = width;
+		window->sync_height = height;
+		return 1;
+	}
+
+	/* Succeeded: the client is asked, then given the size. */
+	wm_sync_request(server, window);
+	return 0;
+}
+
+/*
+ * Hears that a counter took a value (SYNC): a window whose sync request
+ * counter it is, and which waited for the value, is given the size held
+ * meanwhile.
+ */
+void
+x11_wm_sync_counter(
+	struct x11server *server,
+	uint32_t counter,
+	int64_t value)
+{
+	struct x11_window *window;
+	struct x11_window *next;
+	uint32_t window_counter;
+	int has;
+
+	/* Before the root window is there. */
+	if (server->root == NULL)
+		return;
+
+	/* Each top-level window waiting for this counter to reach its value. */
+	for (window = server->root->first_child; window != NULL; window = next) {
+		next = window->above;
+		if (!window->sync_waiting)
+			continue;
+		has = wm_sync_counter_of(server, window, &window_counter);
+		if (!has || window_counter != counter)
+			continue;
+		if (value < window->sync_value)
+			continue;
+
+		/* The wait is over: the size held, if any. */
+		window->sync_waiting = 0;
+		wm_sync_release(server, window);
+	}
+}
+
+/*
+ * Ends the waits for counters that took too long, giving each window the
+ * size held meanwhile.  Returns nonzero while a window still waits.
+ */
+int
+x11_wm_sync_tick(
+	struct x11server *server)
+{
+	struct x11_window *window;
+	struct x11_window *next;
+	int waiting;
+
+	/* Before the root window is there. */
+	waiting = 0;
+	if (server->root == NULL)
+		return 0;
+
+	/* Each top-level window waiting. */
+	for (window = server->root->first_child; window != NULL; window = next) {
+		next = window->above;
+		if (!window->sync_waiting)
+			continue;
+
+		/* Not yet too long. */
+		if ((int32_t)(server->now - window->sync_deadline) < 0) {
+			waiting = 1;
+			continue;
+		}
+
+		/* Too long: the size held is given anyway. */
+		window->sync_waiting = 0;
+		wm_sync_release(server, window);
+		if (window->sync_waiting)
+			waiting = 1;
+	}
+
+	/* Succeeded: whether a window still waits. */
+	return waiting;
+}
+
+/*
  * Brings a size within a surface's limits as ICCCM 4.1.2.3 has a window
  * manager do: no smaller than the smallest and no larger than the largest
  * size, the ratio of width to height (beyond the base size) within its
@@ -892,6 +1176,10 @@ wm_write_state(
 		states[count] = server->wm.net_wm_state_hidden;
 		count++;
 	}
+	if ((window->wm_flags & WM_ATTENTION) != 0U) {
+		states[count] = server->wm.net_wm_state_demands_attention;
+		count++;
+	}
 	for (index = 0U; index < count; index++)
 		x11_write32(data + index * 4U, states[index], 0);
 	code = x11_property_set(server, window, server->wm.net_wm_state, X11_ATOM_ATOM, 32U, WM_PROPERTY_REPLACE, data, (size_t)count * 4U, X11_NO_CLIENT);
@@ -1016,6 +1304,8 @@ wm_net_state_bit(
 		return WM_HALF_VERT;
 	if (atom == server->wm.net_wm_state_maximized_horz)
 		return WM_HALF_HORZ;
+	if (atom == server->wm.net_wm_state_demands_attention)
+		return WM_ATTENTION;
 
 	/* Not kept. */
 	return 0U;
@@ -1066,16 +1356,32 @@ wm_net_state_message(
 /* Returns the state a top-level window's surface is to have. */
 static unsigned
 wm_surface_flags(
-	const struct x11_window *window)
+	struct x11_window *window)
 {
+	struct x11_property *hints;
 	unsigned flags;
+	uint32_t hint_flags;
 
 	/* Minimized and full-screen as kept. */
 	flags = window->wm_flags & (X11_SURFACE_ICONIC | X11_SURFACE_FULLSCREEN);
 
-	/* Succeeded: maximized only when both ways are. */
+	/* Maximized only when both ways are. */
 	if ((window->wm_flags & WM_MAXIMIZED) == WM_MAXIMIZED)
 		flags |= X11_SURFACE_MAXIMIZED;
+
+	/* Asking for the user's attention by _NET_WM_STATE. */
+	if ((window->wm_flags & WM_ATTENTION) != 0U)
+		flags |= X11_SURFACE_URGENT;
+
+	/* Or by WM_HINTS's urgency. */
+	hints = x11_property_find(window, X11_ATOM_WM_HINTS);
+	if (hints != NULL && hints->format == 32U) {
+		hint_flags = wm_field(hints, 0U);
+		if ((hint_flags & WM_HINTS_URGENCY) != 0U)
+			flags |= X11_SURFACE_URGENT;
+	}
+
+	/* Succeeded: the state. */
 	return flags;
 }
 
@@ -1483,4 +1789,179 @@ wm_steps(
 
 	/* Succeeded: whole steps. */
 	return base + (size - base) / step * step;
+}
+
+/*
+ * Reads the counter a window's client keeps for the window manager's
+ * sync requests (the first of _NET_WM_SYNC_REQUEST_COUNTER).  Returns 1
+ * with it, 0 when the window has none.
+ */
+static int
+wm_sync_counter_of(
+	struct x11server *server,
+	struct x11_window *window,
+	uint32_t *counter)
+{
+	struct x11_property *property;
+
+	/* One or two counters; the first is the one the request sets. */
+	property = x11_property_find(window, server->wm.net_wm_sync_request_counter);
+	if (property == NULL || property->format != 32U || property->length < 4U)
+		return 0;
+	*counter = x11_read32(property->data, 0);
+	if (*counter == 0U)
+		return 0;
+
+	/* Succeeded: the counter. */
+	return 1;
+}
+
+/*
+ * Asks a window's client to set its counter to the next value once it
+ * has drawn the size it is about to hear of (a ClientMessage of
+ * WM_PROTOCOLS: _NET_WM_SYNC_REQUEST, the time, the value's low and high
+ * 32 bits), and waits for it.
+ */
+static void
+wm_sync_request(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	struct x11_client *client;
+	uint8_t event[32];
+	uint64_t value;
+
+	/* The window's client, when it is still there. */
+	client = x11_client_of(server, window->owner);
+	if (client == NULL)
+		return;
+
+	/* The next value, which only grows. */
+	window->sync_value++;
+	value = (uint64_t)window->sync_value;
+
+	/* The event, marked as sent, least significant byte first. */
+	memset(event, 0, sizeof(event));
+	event[0] = WM_EVENT_CLIENT_MESSAGE | X11_EVENT_SENT;
+	event[1] = 32U;
+	x11_write32(event + 4, window->id, 0);
+	x11_write32(event + 8, server->wm.protocols, 0);
+	x11_write32(event + 12, server->wm.net_wm_sync_request, 0);
+	x11_write32(event + 16, server->now, 0);
+	x11_write32(event + 20, (uint32_t)(value & 0xffffffffU), 0);
+	x11_write32(event + 24, (uint32_t)(value >> 32), 0);
+	x11_event_send(server, client, event);
+
+	/* Succeeded: the window manager waits for the value, not for ever. */
+	window->sync_waiting = 1;
+	window->sync_deadline = server->now + WM_SYNC_TIMEOUT_MS;
+}
+
+/*
+ * Gives a window the size the system asked for while the window manager
+ * waited for its counter, if any (asking the client again first).
+ */
+static void
+wm_sync_release(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	int32_t x;
+	int32_t y;
+	int width;
+	int height;
+	int held;
+
+	/* Nothing held. */
+	if (!window->sync_held)
+		return;
+	window->sync_held = 0;
+	x = window->sync_x;
+	y = window->sync_y;
+	width = window->sync_width;
+	height = window->sync_height;
+
+	/* Asked again, when the client still draws in step. */
+	held = x11_wm_sync_configure(server, window, x, y, width, height);
+	if (held)
+		return;
+
+	/* Succeeded: the window takes the size, and its clients are told. */
+	x11_window_backend_configure(server, window, (int)x, (int)y, (uint16_t)width, (uint16_t)height);
+}
+
+/* Writes a window's _NET_FRAME_EXTENTS: left, right, top and bottom. */
+static void
+wm_write_frame(
+	struct x11server *server,
+	struct x11_window *window,
+	const uint32_t *extents)
+{
+	uint8_t data[16];
+	unsigned index;
+
+	/* Before the window manager's atoms are known. */
+	if (server->wm.net_frame_extents == 0U)
+		return;
+
+	/* Succeeded: the four sizes as CARDINALs. */
+	for (index = 0U; index < 4U; index++)
+		x11_write32(data + index * 4U, extents[index], 0);
+	(void)x11_property_set(server, window, server->wm.net_frame_extents, X11_ATOM_CARDINAL, 32U, WM_PROPERTY_REPLACE, data, sizeof(data), X11_NO_CLIENT);
+}
+
+/*
+ * Finds the icon of _NET_WM_ICON to give the system: the smallest at
+ * least WM_ICON_WANTED wide, else the largest, no side over
+ * WM_ICON_SIDE_MAX.  Returns 1 with the offset of its pixels in the
+ * property and its size, 0 when there is none that can be read.
+ */
+static int
+wm_icon_pick(
+	const struct x11_property *icons,
+	size_t *offset,
+	unsigned *width,
+	unsigned *height)
+{
+	size_t position;
+	size_t pixels;
+	uint32_t icon_width;
+	uint32_t icon_height;
+	int found;
+	int better;
+
+	/* Each icon in turn, while its pixels are all there. */
+	found = 0;
+	position = 0U;
+	while (position + 8U <= icons->length) {
+		icon_width = x11_read32(icons->data + position, 0);
+		icon_height = x11_read32(icons->data + position + 4U, 0);
+		if (icon_width == 0U || icon_height == 0U)
+			break;
+		if (icon_width > WM_ICON_SIDE_MAX || icon_height > WM_ICON_SIDE_MAX)
+			break;
+		pixels = (size_t)icon_width * (size_t)icon_height * 4U;
+		if (pixels > icons->length - position - 8U)
+			break;
+
+		/* Better than the one found so far: large enough and smaller, or larger while none is large enough. */
+		better = 0;
+		if (!found) {
+			better = 1;
+		} else if (icon_width >= WM_ICON_WANTED && (*width < WM_ICON_WANTED || icon_width < *width)) {
+			better = 1;
+		} else if (*width < WM_ICON_WANTED && icon_width > *width) {
+			better = 1;
+		}
+		if (better) {
+			found = 1;
+			*offset = position + 8U;
+			*width = icon_width;
+			*height = icon_height;
+		}
+		position += 8U + pixels;
+	}
+
+	/* Succeeded: whether one was found. */
+	return found;
 }

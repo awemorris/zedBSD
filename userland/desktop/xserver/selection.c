@@ -178,6 +178,7 @@ x11_request_set_selection_owner(
 	entry->time = time;
 	entry->changed = 1;
 	selection_log_owner(server, atom, window, index);
+	x11_xfixes_selection(server, atom, window, X11_XFIXES_SET_OWNER, time);
 
 	/* Only CLIPBOARD and PRIMARY are bridged. */
 	bridge = selection_bridge_of(server, atom);
@@ -403,8 +404,11 @@ x11_selection_forget_window(
 		if (server->selections[index].window != window)
 			continue;
 
-		/* No owner now; the copy stays the root window's. */
+		/* No owner now (XFIXES's clients hear why); the copy stays the root window's. */
+		x11_xfixes_selection(server, server->selections[index].atom, 0U, X11_XFIXES_WINDOW_DESTROY, server->selections[index].time);
 		selection_bridge_release(server, &server->selections[index], 1);
+		if (server->selections[index].window != 0U)
+			x11_xfixes_selection(server, server->selections[index].atom, server->selections[index].window, X11_XFIXES_SET_OWNER, server->selections[index].time);
 	}
 
 	/* A bridge asking it, which waits no more. */
@@ -440,8 +444,11 @@ x11_selection_forget_client(
 		if (server->selections[index].window == 0U || server->selections[index].owner != client)
 			continue;
 
-		/* No owner now; the copy stays the root window's. */
+		/* No owner now (XFIXES's clients hear why); the copy stays the root window's. */
+		x11_xfixes_selection(server, server->selections[index].atom, 0U, X11_XFIXES_CLIENT_CLOSE, server->selections[index].time);
 		selection_bridge_release(server, &server->selections[index], 1);
+		if (server->selections[index].window != 0U)
+			x11_xfixes_selection(server, server->selections[index].atom, server->selections[index].window, X11_XFIXES_SET_OWNER, server->selections[index].time);
 	}
 
 	/* A bridge asking it, which waits no more. */
@@ -601,12 +608,15 @@ x11server_backend_clipboard(
 		entry->time = server->now;
 		entry->changed = 1;
 		x11_log(server, "X11 SELECTION owner selection=%s window=root client=desktop", selection_bridge_name(server, bridge));
+		x11_xfixes_selection(server, entry->atom, entry->window, X11_XFIXES_SET_OWNER, entry->time);
 		return;
 	}
 
-	/* Succeeded: no text, the root window's ownership ends. */
-	if (entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT)
+	/* Succeeded: no text, the root window's ownership ends (XFIXES's clients hear of it). */
+	if (entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT) {
 		entry->window = 0U;
+		x11_xfixes_selection(server, entry->atom, 0U, X11_XFIXES_SET_OWNER, entry->time);
+	}
 }
 
 /* Finds a selection's entry, made when asked and there is room; NULL otherwise. */

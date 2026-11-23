@@ -32,6 +32,7 @@
 static void rootless_track(struct x11server *server, struct x11_window *window);
 static void rootless_size(const struct x11_window *window, int *width, int *height);
 static void rootless_info(struct x11server *server, struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
+static void rootless_extras(struct x11server *server, struct x11_window *window, unsigned changed, struct x11_surface_info *info, struct x11_rect **shape, uint32_t **icon);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
 static int rootless_show(struct x11server *server, struct x11_window *window, int x, int y, int width, int height);
@@ -185,6 +186,8 @@ rootless_track(
 	struct x11_window *window)
 {
 	struct x11_surface_info info;
+	struct x11_rect *shape;
+	uint32_t *icon;
 	const char *title;
 	const char *class_name;
 	char class_buffer[64];
@@ -224,7 +227,10 @@ rootless_track(
 		if (server->surface_count >= X11_SURFACES_MAX)
 			return;
 		rootless_info(server, window, title, class_name, &info);
+		rootless_extras(server, window, X11_SURFACE_CHANGED_SHAPE | X11_SURFACE_CHANGED_ICON, &info, &shape, &icon);
 		window->surface = server->ops->open(server->backend, window->id, &info);
+		free(shape);
+		free(icon);
 		if (window->surface == NULL)
 			return;
 		server->surface_count++;
@@ -254,13 +260,20 @@ rootless_track(
 	if (differs != 0)
 		changed |= X11_SURFACE_CHANGED_TITLE;
 
+	/* A shape is cut to the window's size, so a shaped window's new size is a new shape. */
+	if ((changed & X11_SURFACE_CHANGED_SIZE) != 0U && window->shape != NULL)
+		changed |= X11_SURFACE_CHANGED_SHAPE;
+
 	/* Nothing else to bring in step. */
 	if (changed == 0U)
 		return;
 
 	/* The surface told; it counts the pointer's places from the window's corner on the root window. */
 	rootless_info(server, window, title, class_name, &info);
+	rootless_extras(server, window, changed, &info, &shape, &icon);
 	server->ops->update(server->backend, window->surface, &info, changed);
+	free(shape);
+	free(icon);
 	window->wm_changed = 0U;
 	window->surface_x = window->x;
 	window->surface_y = window->y;
@@ -331,6 +344,47 @@ rootless_info(
 
 	/* Succeeded: its kind, state, owner and limits, as its window manager has them. */
 	x11_wm_info(server, window, info);
+}
+
+/*
+ * Fills the parts of what a surface shows that are made only when they
+ * changed: the window's shape and its icon (each malloc'd into *shape and
+ * *icon, NULL when not made, freed by the caller once the backend has
+ * them).  Without memory for one, the surface is not told of it.
+ */
+static void
+rootless_extras(
+	struct x11server *server,
+	struct x11_window *window,
+	unsigned changed,
+	struct x11_surface_info *info,
+	struct x11_rect **shape,
+	uint32_t **icon)
+{
+	unsigned count;
+	int error;
+
+	/* Nothing made yet. */
+	*shape = NULL;
+	*icon = NULL;
+
+	/* The shape (SHAPE's bounding region on the window's pixels). */
+	if ((changed & X11_SURFACE_CHANGED_SHAPE) != 0U) {
+		count = 0U;
+		error = x11_shape_surface(window, shape, &count);
+		if (error == 0 && *shape != NULL) {
+			info->shaped = 1;
+			info->shape = *shape;
+			info->shape_count = count;
+		}
+	}
+
+	/* Succeeded: the icon (_NET_WM_ICON), when it has one. */
+	if ((changed & X11_SURFACE_CHANGED_ICON) != 0U) {
+		error = x11_wm_icon(server, window, icon, &info->icon_width, &info->icon_height);
+		if (error == 0)
+			info->icon = *icon;
+	}
 }
 
 /* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan off. */
@@ -553,6 +607,7 @@ x11server_backend_configure(
 	int height)
 {
 	struct x11_window *changed;
+	int held;
 
 	/* The X window, at a size it can have. */
 	changed = x11_window_find(server, window);
@@ -572,6 +627,11 @@ x11server_backend_configure(
 		x = X11_SURFACE_ANY;
 		y = X11_SURFACE_ANY;
 	}
+
+	/* A client that draws in step with the window manager is asked first; a size given while it draws waits. */
+	held = x11_wm_sync_configure(server, changed, x, y, width, height);
+	if (held)
+		return;
 
 	/* Succeeded: the window takes them, and its clients are told. */
 	x11_window_backend_configure(server, changed, (int)x, (int)y, (uint16_t)width, (uint16_t)height);
@@ -627,4 +687,33 @@ x11server_backend_capture_lost(
 {
 	/* Succeeded: the grab ends. */
 	x11_input_capture_lost(server, time);
+}
+
+/*
+ * Hears the size of the system's frame around a surface (left, right,
+ * top and bottom, in X's pixels): its window's _NET_FRAME_EXTENTS says it.
+ */
+void
+x11server_backend_frame(
+	struct x11server *server,
+	uint32_t window,
+	unsigned left,
+	unsigned right,
+	unsigned top,
+	unsigned bottom)
+{
+	struct x11_window *framed;
+	uint32_t extents[4];
+
+	/* The X window. */
+	framed = x11_window_find(server, window);
+	if (framed == NULL || framed == server->root)
+		return;
+
+	/* Succeeded: the window manager says it. */
+	extents[0] = left;
+	extents[1] = right;
+	extents[2] = top;
+	extents[3] = bottom;
+	x11_wm_frame(server, framed, extents);
 }

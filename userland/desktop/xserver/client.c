@@ -204,8 +204,12 @@ x11server_destroy(
 	/* The clipboard's copies and the texts being given in pieces. */
 	x11_selection_destroy(server);
 
-	/* The root window, with what is left of it (its properties). */
+	/* The extensions' state. */
+	x11_extension_fini(server);
+
+	/* The root window, with what is left of it (its properties, and the extensions' events on it). */
 	if (server->root != NULL) {
+		x11_extension_forget_window(server, server->root);
 		x11_property_forget_window(server, server->root);
 		free(server->root->selects);
 		free(server->root);
@@ -566,6 +570,7 @@ x11server_tick(
 	unsigned grabbed;
 	unsigned index;
 	int waiting;
+	int timed;
 	int more;
 	int left;
 
@@ -577,12 +582,14 @@ x11server_tick(
 	x11_rootless_closing(server);
 	x11_rootless_flush_motion(server);
 
+	/* The extensions' waits that time ended (SYNC's, the window manager's resizes): a client woken goes on now. */
+	more = x11_extension_tick(server, &timed);
+
 	/*
 	 * Each client's whole requests, up to a tick's share; while a client
 	 * holds the server, only its own.  A grab that ends in the pass lets
 	 * the others go on at once.
 	 */
-	more = 0;
 	grabbed = server->grabbed;
 	for (index = 0U; index < server->clients_max; index++) {
 		if (server->clients[index].id == 0U)
@@ -622,7 +629,7 @@ x11server_tick(
 	/* At once while requests wait, soon while something is to be shown or held back, else at the next report. */
 	if (more) {
 		*wake = server->now;
-	} else if (server->dirty || server->motion_pending || waiting) {
+	} else if (server->dirty || server->motion_pending || waiting || timed) {
 		*wake = server->now + SERVER_TICK_MS;
 	} else {
 		*wake = server->now + SERVER_REPORT_MS;
@@ -701,6 +708,9 @@ x11_client_close(
 	x11_input_forget_client(server, index);
 	x11_resources_release(server, index);
 	x11_selection_forget_client(server, index);
+
+	/* What it held in the extensions (regions, counters, alarms, waits, events it asked for). */
+	x11_extension_forget_client(server, index);
 
 	/* Its grab of the server goes. */
 	if (server->grabbed == index)
@@ -790,6 +800,10 @@ server_handle(
 		if (handled >= X11_TICK_BYTES)
 			break;
 		if (client->ending)
+			return 0;
+
+		/* A client waiting for counters or fences (SYNC's Await) sends nothing more until the wait ends. */
+		if (client->blocked)
 			return 0;
 
 		/* The bytes of a request refused for its length go as they come. */
