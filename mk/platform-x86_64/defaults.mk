@@ -2,8 +2,8 @@ override ARCHITECTURE             := x86_64
 override BOARD                    := pcat
 
 CONFIG_ROOTFS_DEVELOPMENT         := y
-CONFIG_BOOT_SPLASH                := n
-CONFIG_QUIET_BOOT                 := n
+CONFIG_BOOT_SPLASH                := y
+CONFIG_QUIET_BOOT                 := y
 CONFIG_GRAPHICAL_LOGIN            := y
 
 CONFIG_DRIVER_PCI                 := y
