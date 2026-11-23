@@ -118,11 +118,44 @@ void keiui_win32_frame_buttons(const struct keiui_win32_frame *frame, struct kei
  */
 unsigned keiui_win32_frame_hit(const struct keiui_win32_frame *frame, int32_t x, int32_t y);
 
+/* The title bar's lengths at 96 dpi, which the room of its controls and tabs is made of. */
+#define KEIUI_WIN32_TITLE_CONTROL	30U	/* a control, and the menu's button (a square) */
+#define KEIUI_WIN32_TITLE_GAP		4U	/* between two controls, and after the menu's button */
+#define KEIUI_WIN32_TITLE_SIDE		10U	/* from the window's left edge, and before the caption buttons */
+#define KEIUI_WIN32_TITLE_DRAG_LEAST	96U	/* the bare title bar left after the tabs to drag the window by */
+
+/*
+ * The parts of a title bar its controls and tabs are laid out in (physical
+ * pixels): the menu's button (empty without a menu), where the controls
+ * or the tabs start (left), where the controls end (right: before the
+ * margin before the caption buttons), and where the tab strip ends
+ * (strip_right: right less the bare title bar left to drag the window by,
+ * never left of left).
+ */
+struct keiui_win32_title_room {
+	struct keiui_win32_rect menu;
+	int32_t left;
+	int32_t right;
+	int32_t strip_right;
+};
+
+/*
+ * Lays out the parts of a title bar of a frame (its width, dpi and state)
+ * whose bar is height pixels tall: the menu's button, a
+ * KEIUI_WIN32_TITLE_CONTROL square in the middle of the height at
+ * KEIUI_WIN32_TITLE_SIDE from the left edge when has_menu is not 0, then
+ * the controls' room from after it (and KEIUI_WIN32_TITLE_GAP) to
+ * KEIUI_WIN32_TITLE_SIDE before the minimize button, and the tab strip's
+ * end KEIUI_WIN32_TITLE_DRAG_LEAST before that (all scaled).  frame or
+ * room NULL: nothing is written.
+ */
+void keiui_win32_title_room(const struct keiui_win32_frame *frame, uint32_t height, int has_menu, struct keiui_win32_title_room *room);
+
 /* The tabs' lengths at 96 dpi. */
-#define KEIUI_WIN32_TAB_HEIGHT		26U	/* a tab, and the new tab's button (a square) */
+#define KEIUI_WIN32_TAB_HEIGHT		26U	/* a tab, and the strip's buttons (squares): the new tab's, the arrows, the list's */
 #define KEIUI_WIN32_TAB_MOST		200U	/* the widest a tab grows */
-#define KEIUI_WIN32_TAB_LEAST		72U	/* the narrowest a tab shrinks; past it tabs are left out */
-#define KEIUI_WIN32_TAB_GAP		2U	/* between two tabs, and before the new tab's button */
+#define KEIUI_WIN32_TAB_LEAST		96U	/* the narrowest a tab shrinks; past it the strip scrolls */
+#define KEIUI_WIN32_TAB_GAP		2U	/* between two tabs, and between the strip's buttons */
 #define KEIUI_WIN32_TAB_CLOSE		18U	/* a tab's close button (a square) */
 #define KEIUI_WIN32_TAB_CLOSE_INSET	5U	/* from the close button to the tab's right edge */
 
@@ -131,12 +164,31 @@ unsigned keiui_win32_frame_hit(const struct keiui_win32_frame *frame, int32_t x,
 #define KEIUI_WIN32_TAB_PART_BODY	0U		/* a tab (to choose it) */
 #define KEIUI_WIN32_TAB_PART_CLOSE	1U		/* a tab's close button */
 #define KEIUI_WIN32_TAB_PART_NEW	2U		/* the new tab's button */
+#define KEIUI_WIN32_TAB_PART_BACK	3U		/* the arrow to the tabs before (while it can move) */
+#define KEIUI_WIN32_TAB_PART_FORWARD	4U		/* the arrow to the tabs after (while it can move) */
+#define KEIUI_WIN32_TAB_PART_LIST	5U		/* the list of the tabs out of sight */
+
+/*
+ * How a strip shows its tabs (keiui_win32_tabs_layout_scroll):
+ *  ALL:    every tab, side by side (narrowed down to the least when need be);
+ *          one tab that does not fit even at the least is left out;
+ *  SCROLL: two or more tabs that do not fit at the least: as many as fit
+ *          between an arrow at each end, the new tab's button and the
+ *          list's button after the arrow on the right;
+ *  LIST:   no room even for that: no tab, the new tab's button (when it is
+ *          asked for and fits) and the list's button (when it fits).
+ */
+#define KEIUI_WIN32_STRIP_ALL		0U
+#define KEIUI_WIN32_STRIP_SCROLL	1U
+#define KEIUI_WIN32_STRIP_LIST		2U
 
 /*
  * The room the tabs are laid out in: the title bar's part from left to
  * right (physical pixels, right not included) and its height, the dpi,
  * how many tabs there are, which is active (count or more: none), and
- * whether the new tab's button follows them.
+ * whether the new tab's button follows them.  A scrolling strip starts at
+ * the tab first (moved to keep within the tabs), and is moved first to
+ * show the active tab when reveal is not 0.
  */
 struct keiui_win32_tab_strip {
 	int32_t left;
@@ -146,6 +198,27 @@ struct keiui_win32_tab_strip {
 	unsigned count;
 	unsigned active;
 	int new_button;
+	unsigned first;
+	int reveal;
+};
+
+/*
+ * How a strip was laid out besides its tabs' places: its way
+ * (KEIUI_WIN32_STRIP_*), the first tab shown and how many are shown (in
+ * a row from first; 0 when none), the arrows of a scrolling strip (empty
+ * otherwise) and whether each can move the strip (0: drawn faint, no
+ * part), and the list's button (empty unless the strip scrolls or shows
+ * the list).
+ */
+struct keiui_win32_tab_scroll {
+	unsigned mode;
+	unsigned first;
+	unsigned shown;
+	struct keiui_win32_rect back;
+	struct keiui_win32_rect forward;
+	int back_live;
+	int forward_live;
+	struct keiui_win32_rect list;
 };
 
 /*
@@ -159,25 +232,49 @@ struct keiui_win32_tab_place {
 };
 
 /*
- * Lays out the tabs of a title bar.
+ * Lays out the tabs of a title bar, scrolling the strip when they do not
+ * fit.
  *
- * The tabs share the room less the new tab's button (KEIUI_WIN32_TAB_HEIGHT
- * square and a gap, when asked for): each is the room's share less a gap,
- * at most KEIUI_WIN32_TAB_MOST and at least KEIUI_WIN32_TAB_LEAST (scaled).
- * When even the least width is too much for all of them, as many as fit
- * are shown, from the first, or from the one that keeps the active tab the
- * last shown when it would not be among them; the others are not shown.
- * The tabs and the button are KEIUI_WIN32_TAB_HEIGHT (scaled) tall and in
- * the middle of the caption's height; the button follows the last tab
- * shown (or starts the strip when none is).  A tab whose closable[index]
- * is not 0 has a close button of KEIUI_WIN32_TAB_CLOSE (scaled) at its
- * right, KEIUI_WIN32_TAB_CLOSE_INSET (scaled) from its edge, in the middle
- * of its height.
- * strip, places (count of them) and new_place NULL, or closable NULL with
- * tabs: nothing is written and strip's left is returned.  new_place is
- * empty without the button.
- * Returns where the strip ends (the right edge of the button, or of the
- * last tab shown; left when nothing is shown).
+ * All lengths are at 96 dpi scaled to the strip's dpi, and the strip's
+ * parts never reach past its right.  The tabs, the button and the arrows
+ * are KEIUI_WIN32_TAB_HEIGHT tall, in the middle of the caption's height;
+ * the buttons and the arrows are squares of that side, KEIUI_WIN32_TAB_GAP
+ * apart.
+ *
+ * KEIUI_WIN32_STRIP_ALL: the tabs share the room less the new tab's button
+ * (and a gap, when asked for): each is the room's share less a gap, at
+ * most KEIUI_WIN32_TAB_MOST, and the button follows the last tab.  A
+ * single tab that does not fit at KEIUI_WIN32_TAB_LEAST is not shown; the
+ * button then starts the strip when it fits.
+ *
+ * KEIUI_WIN32_STRIP_SCROLL, for two or more tabs whose least width is too
+ * much for the room: the arrow back at the strip's left, the list's button
+ * ending at its right, the new tab's button (when asked for) and the arrow
+ * forward before it; between the arrows, as many tabs as fit at the least
+ * width, sharing that room equally (at most the most).  first is moved to
+ * show the active tab when reveal is not 0 and it is out of sight (by the
+ * least move), then kept so that no room is left after the last tab.  The
+ * arrow back can move while first is above 0, the one forward while tabs
+ * follow the last shown.
+ *
+ * KEIUI_WIN32_STRIP_LIST, when not even one tab fits between the arrows:
+ * the new tab's button (when asked for) and the list's button after it,
+ * or the list's button alone when both do not fit, or nothing.
+ *
+ * A tab whose closable[index] is not 0 has a close button of
+ * KEIUI_WIN32_TAB_CLOSE at its right, KEIUI_WIN32_TAB_CLOSE_INSET from its
+ * edge, in the middle of its height.  A tab not shown has empty places.
+ * strip or new_place NULL, or places or closable NULL with tabs: nothing is
+ * written and strip's left is returned (0 without strip).  new_place is
+ * empty without the button; scroll may be NULL.
+ * Returns where the strip ends (the right edge of the last part shown;
+ * left when nothing is shown).
+ */
+int32_t keiui_win32_tabs_layout_scroll(const struct keiui_win32_tab_strip *strip, const int *closable, struct keiui_win32_tab_place *places, struct keiui_win32_rect *new_place, struct keiui_win32_tab_scroll *scroll);
+
+/*
+ * Lays out the tabs of a title bar as keiui_win32_tabs_layout_scroll does,
+ * always showing the active tab (reveal taken as 1), without telling how.
  */
 int32_t keiui_win32_tabs_layout(const struct keiui_win32_tab_strip *strip, const int *closable, struct keiui_win32_tab_place *places, struct keiui_win32_rect *new_place);
 
@@ -190,5 +287,42 @@ int32_t keiui_win32_tabs_layout(const struct keiui_win32_tab_strip *strip, const
  * KEIUI_WIN32_TAB_NONE.
  */
 unsigned keiui_win32_tabs_at(const struct keiui_win32_tab_place *places, unsigned count, const struct keiui_win32_rect *new_place, int32_t x, int32_t y, unsigned *part);
+
+/*
+ * Tells what a point is on among the tabs laid out, as keiui_win32_tabs_at
+ * does, and also a live arrow (KEIUI_WIN32_TAB_PART_BACK or _FORWARD) or
+ * the list's button (KEIUI_WIN32_TAB_PART_LIST), for which count is
+ * returned.  An arrow that cannot move the strip is no part.  scroll NULL:
+ * as keiui_win32_tabs_at.
+ */
+unsigned keiui_win32_tabs_at_scroll(const struct keiui_win32_tab_place *places, unsigned count, const struct keiui_win32_rect *new_place, const struct keiui_win32_tab_scroll *scroll, int32_t x, int32_t y, unsigned *part);
+
+/* The wheel's notch (WHEEL_DELTA), which moves a scrolling strip by one tab. */
+#define KEIUI_WIN32_WHEEL_NOTCH		120
+
+/* Whose a wheel's turn is (keiui_win32_tab_wheel). */
+#define KEIUI_WIN32_WHEEL_CONTENT	0U	/* the content's: not over the title bar */
+#define KEIUI_WIN32_WHEEL_TITLE		1U	/* the title bar's: never the content's */
+
+/*
+ * Decides a wheel's turn (WM_MOUSEWHEEL, or WM_MOUSEHWHEEL when horizontal
+ * is not 0, its signed delta) at a point of a frame: on_frame not 0 when
+ * the window under the point is the frame itself (not its content nor
+ * another window), y the point's row in the frame's client and bar the
+ * title bar's height in pixels, on_strip not 0 when the point is on a
+ * part of the tab strip (a tab, an arrow, the new tab's or the list's
+ * button), scrolling not 0 when the strip scrolls.
+ *
+ * A point not on the frame or not above bar is the content's: pending is
+ * cleared.  Otherwise the turn is the title bar's, and it moves the strip
+ * only on a scrolling strip's part: the turn toward the tabs after (down,
+ * or right) or before (up, or left) is added to pending (cleared first
+ * when it turned the other way), and each KEIUI_WIN32_WHEEL_NOTCH of it
+ * is one tab, written to steps (after: positive) and taken from pending.
+ * Elsewhere on the title bar pending is cleared.  steps is 0 when the
+ * strip does not move.  pending or steps NULL: the content's, nothing
+ * written.
+ */
+unsigned keiui_win32_tab_wheel(int on_frame, int32_t y, uint32_t bar, int on_strip, int scrolling, int horizontal, int delta, int *pending, int *steps);
 
 #endif
