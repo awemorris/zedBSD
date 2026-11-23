@@ -328,5 +328,6 @@ int x11_render_vulkan_copy(struct x11_image *target, const struct x11_region *cl
 int x11_render_vulkan_copy_plane(struct x11_image *target, const struct x11_region *clip, int x, int y, const struct x11_image *source, int source_x, int source_y, uint32_t plane, const struct x11_paint *paint);
 void x11_render_vulkan_put(struct x11_image *target, const struct x11_region *clip, int x, int y, int width, int height, const uint32_t *pixels, size_t stride, unsigned function, uint32_t plane_mask);
 void x11_render_vulkan_read(const struct x11_image *source, int x, int y, int width, int height, uint32_t *pixels, size_t stride);
+int x11_render_vulkan_composite(struct x11_image *target, const struct x11_region *clip, unsigned op, const struct x11_source *source, int source_x, int source_y, const struct x11_source *mask, int mask_x, int mask_y, int x, int y, int width, int height);
 
 #endif

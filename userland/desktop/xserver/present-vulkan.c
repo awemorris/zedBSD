@@ -799,6 +799,7 @@ vulkan_device(
 		vulkan->logic_op = 1;
 	}
 	vulkan->image_side_max = properties.limits.maxImageDimension2D;
+	vulkan->storage_range_max = properties.limits.maxStorageBufferRange;
 
 	/* One queue of the family, and the swapchain extension when windows are shown. */
 	priority = 1.0f;

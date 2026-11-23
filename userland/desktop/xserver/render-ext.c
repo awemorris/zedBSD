@@ -2669,8 +2669,10 @@ render_operand_fini(
  * destination) inside the destination's clip (its drawable's and its
  * client clip), the source read at (source_x, source_y) and the mask at
  * (mask_x, mask_y) where the rectangle starts.  The source's and mask's
- * client clips do not narrow it (as X.Org's server does not).  A source or mask that reads the destination's own
- * image reads a copy taken first.
+ * client clips do not narrow it (as X.Org's server does not).  A
+ * destination with a copy on the GPU is drawn there when the GPU can
+ * (render-vulkan.c); otherwise in memory, where a source or mask that
+ * reads the destination's own image reads a copy taken first.
  */
 static void
 render_draw(
@@ -2696,7 +2698,9 @@ render_draw(
 	const struct x11_image *source_image;
 	const struct x11_image *mask_image;
 	struct x11_box image_box;
+	struct x11_box bounds;
 	struct x11_image *target_image;
+	int on_gpu;
 	int drawn;
 	unsigned code;
 	int error;
@@ -2733,9 +2737,27 @@ render_draw(
 		x11_region_fini(&clip);
 	}
 
+	/* The part of the image drawn (x11_box_intersect's result is not one of the boxes it reads second). */
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = destination.view.image->width;
+	bounds.y1 = destination.view.image->height;
+	drawn = x11_box_intersect(&box, &bounds, &image_box);
+
+	/* A destination with a copy on the GPU is drawn there when the GPU can, and shown again. */
+	on_gpu = 0;
+	if (error == 0 && drawn && destination.view.image->gpu != NULL)
+		on_gpu = x11_render_vulkan_composite(destination.view.image, &region, op, &source->source, source_x, source_y, mask != NULL ? &mask->source : NULL, mask_x, mask_y, box.x0, box.y0, width, height);
+	if (on_gpu) {
+		x11_draw_view_dirty(server, &destination.view, &box);
+		x11_region_fini(&region);
+		render_operand_fini(&destination);
+		return;
+	}
+
 	/*
-	 * Images with a copy on the GPU: what is read and the part drawn are
-	 * brought up to date in memory first (the composite is drawn in
+	 * Else images with a copy on the GPU: what is read and the part drawn
+	 * are brought up to date in memory first (the composite is drawn in
 	 * memory).
 	 */
 	source_image = source->source.image;
@@ -2746,11 +2768,6 @@ render_draw(
 		x11_render_image_memory(source_image);
 	if (mask_image != NULL)
 		x11_render_image_memory(mask_image);
-	image_box.x0 = 0;
-	image_box.y0 = 0;
-	image_box.x1 = destination.view.image->width;
-	image_box.y1 = destination.view.image->height;
-	drawn = x11_box_intersect(&box, &image_box, &image_box);
 	if (drawn)
 		x11_render_image_memory_box(destination.view.image, &image_box);
 
