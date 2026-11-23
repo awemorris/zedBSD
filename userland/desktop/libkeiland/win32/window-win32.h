@@ -71,13 +71,17 @@
 /*
  * What of the title bar is under the pointer or pressed, beside a control
  * (whose index is below KEIUI_WIN32_CONTROLS): the menu's button, a tab
- * (its index added), a tab's close button (its index added), and the new
- * tab's button.
+ * (its index added), a tab's close button (its index added), the new
+ * tab's button, the arrows of a scrolling tab strip, and the button of the
+ * list of the tabs out of sight.
  */
 #define KEIUI_WIN32_MENU_BUTTON		0x10000U
 #define KEIUI_WIN32_TAB_BODY		0x20000U
 #define KEIUI_WIN32_TAB_CLOSE_BUTTON	0x30000U
 #define KEIUI_WIN32_TAB_NEW_BUTTON	0x40000U
+#define KEIUI_WIN32_TAB_BACK_BUTTON	0x50000U
+#define KEIUI_WIN32_TAB_FORWARD_BUTTON	0x50001U
+#define KEIUI_WIN32_TAB_LIST_BUTTON	0x50002U
 
 /* The longest text of a control (a URL with its NUL), of a label, and of a placeholder. */
 #define KEIUI_WIN32_CONTROL_TEXT	2048U
@@ -219,7 +223,16 @@ struct kl_app {
  * its items, NULL when it has none) and its button's place; the tabs
  * (kl_window_set_tabs: NULL when there are none), their options, the
  * new tab's button's place and whether the program ever declared tabs (the
- * tabs' keys are then the window's even while it shows none); the key
+ * tabs' keys are then the window's even while it shows none); the tab
+ * strip's scroll: the first tab a scrolling strip shows (the arrows' and
+ * the wheel's, kept within the tabs by each layout), how the last layout
+ * laid the strip out, whether the next layout with room brings the active
+ * tab into sight (set when the active tab or the number of tabs changed,
+ * or when the active tab was chosen again; the strip is then moved by the
+ * least), the active tab's ID it was last brought to (0 for none), how
+ * many tabs the last layout with room showed (a change brings the active
+ * tab into sight), and the wheel's turn over the strip not yet a whole
+ * notch (frame.c, keiui_win32_tab_wheel); the key
  * whose press went to the menu's shortcut or to the tabs or was a dead
  * key, so that its release is not given either (0 for none); and the
  * frame's style and placement before full screen.
@@ -286,6 +299,12 @@ struct kl_window {
 	unsigned tab_options;
 	struct keiui_win32_rect tab_new_place;
 	int tabs_declared;
+	unsigned tab_first;
+	struct keiui_win32_tab_scroll tab_scroll;
+	int tab_reveal;
+	uint32_t tab_revealed;
+	unsigned tab_shown_last;
+	int tab_wheel;
 	uint32_t eaten_key;
 	LONG_PTR restore_style;
 	WINDOWPLACEMENT restore_place;
@@ -327,6 +346,7 @@ void keiui_win32_field_end(struct kl_window *window, unsigned how);
 void keiui_win32_titlebar_release_all(struct kl_window *window);
 int keiui_win32_menu_shortcut(struct kl_window *window, uint32_t keysym, unsigned menu);
 int keiui_win32_tab_key(struct kl_window *window, uint32_t code, unsigned held);
+int keiui_win32_titlebar_wheel(struct kl_window *window, WPARAM wparam, LPARAM lparam, int horizontal);
 void keiui_win32_titlebar_free(struct kl_window *window);
 
 /* ime.c */

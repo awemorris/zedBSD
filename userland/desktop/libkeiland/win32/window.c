@@ -1723,7 +1723,7 @@ window_pointer(
 	input->pressed = pressed;
 }
 
-/* The wheel: its distance in pixels at the pointer's place on the content. */
+/* The wheel: the title bar's own turn, or its distance in pixels at the pointer's place on the content. */
 static void
 window_wheel(
 	struct kl_window *window,
@@ -1734,6 +1734,12 @@ window_wheel(
 	struct kl_window_event *input;
 	POINT point;
 	int delta;
+	int taken;
+
+	/* A turn over the title bar is its own (its tab strip's), never the content's. */
+	taken = keiui_win32_titlebar_wheel(window, wparam, lparam, horizontal);
+	if (taken)
+		return;
 
 	/* The point, from the screen's to the content's. */
 	point.x = (LONG)(short)LOWORD(lparam);
