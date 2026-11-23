@@ -135,7 +135,9 @@ mikuterm_x11_child(void)
 	int timeout;
 	int ready;
 	int lost;
+	int readable;
 	int flags;
+	int result;
 	int error;
 	int status;
 
@@ -147,7 +149,10 @@ mikuterm_x11_child(void)
 	child.link = STDIN_FILENO;
 	(void)mikuterm_folder_init();
 	flags = fcntl(child.link, F_GETFL);
-	if (flags < 0 || fcntl(child.link, F_SETFL, flags | O_NONBLOCK) < 0)
+	if (flags < 0)
+		return 1;
+	result = fcntl(child.link, F_SETFL, flags | O_NONBLOCK);
+	if (result < 0)
 		return 1;
 	(void)fcntl(child.link, F_SETFD, FD_CLOEXEC);
 	system.receive = child_receive;
@@ -210,7 +215,10 @@ mikuterm_x11_child(void)
 
 		/* The desktop's events (those already read, too); a lost desktop ends the server. */
 		if (child.backend != NULL) {
-			lost = child.kind->dispatch(child.backend, ready > 0 && (waits[CHILD_BACKEND].revents & POLLIN) != 0);
+			readable = 0;
+			if (ready > 0 && (waits[CHILD_BACKEND].revents & POLLIN) != 0)
+				readable = 1;
+			lost = child.kind->dispatch(child.backend, readable);
 			if (lost != 0) {
 				child.serve.ending = X11_SERVE_BROKEN;
 				break;
@@ -252,6 +260,7 @@ child_wayland_attach(
 	void *backend,
 	struct x11server *server)
 {
+	/* The core hears the desktop from now on. */
 	x11_wayland_attach(backend, server);
 }
 
@@ -262,6 +271,7 @@ child_wayland_fd(
 {
 	int descriptor;
 
+	/* The connection's socket. */
 	descriptor = x11_wayland_fd(backend);
 	return descriptor;
 }
@@ -274,6 +284,7 @@ child_wayland_dispatch(
 {
 	int lost;
 
+	/* The events, and the requests flushed. */
 	lost = x11_wayland_dispatch(backend, readable);
 	return lost;
 }
@@ -283,6 +294,7 @@ static void
 child_wayland_close(
 	void *backend)
 {
+	/* The windows, the globals and the connection go. */
 	x11_wayland_close(backend);
 }
 

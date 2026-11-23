@@ -2546,6 +2546,7 @@ wayland_cursor_draw(
 	size_t bytes;
 	size_t index;
 	int descriptor;
+	int error;
 
 	/* The cursor surface, once. */
 	if (wayland->cursor_surface == NULL) {
@@ -2561,7 +2562,8 @@ wayland_cursor_draw(
 	if (descriptor < 0)
 		return errno;
 	(void)shm_unlink(name);
-	if (ftruncate(descriptor, (off_t)bytes) != 0) {
+	error = ftruncate(descriptor, (off_t)bytes);
+	if (error != 0) {
 		(void)close(descriptor);
 		return EIO;
 	}
