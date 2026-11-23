@@ -19,11 +19,80 @@ endif()
 # While the program is only a trial of the Activity's glue (MIKUTERM_ANDROID_HELLO), the native
 # thread paints the window one colour.
 option(MIKUTERM_ANDROID_HELLO "Build the trial body of the native thread" ON)
-set(MIKUTERM_ANDROID_SOURCES
-	${MIKUTERM_ROOT}/apps/terminal-android/jni/entry.c
-	${MIKUTERM_ROOT}/apps/libkeiland/android/activity.c
-	${MIKUTERM_ROOT}/apps/libkeiland/android/bridge.c
-	${MIKUTERM_ROOT}/apps/libkeiland/android/bridge-jni.c)
+
+# The lists mikuterm's builds share, and the reader of the tree's sources.mk lists.
+include(${MIKUTERM_ROOT}/apps/mikuterm-common/cmake/mikuterm-sources.cmake)
+include(${MIKUTERM_ROOT}/apps/libkeiland/cmake/keiland-sources.cmake)
+
+mikuterm_read_sources(MIKUTERM_TRUETYPE_SOURCES userland/desktop/libtruetype/sources.mk LIBTRUETYPE_SOURCES)
+mikuterm_read_sources(MIKUTERM_PNG_SOURCES userland/desktop/libpng-compat/sources.mk LIBPNG_COMPAT_SOURCES)
+mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LIBZ_COMPAT_SOURCES)
+mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
+mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_POSIX_SOURCES)
+
+# libkeiland: the files every system shares with the POSIX platform layer, and the Android layer
+# (only the files that exist yet are built).
+set(MIKUTERM_KEILAND_COMMON ${KEILAND_COMMON_SOURCES} ${KEILAND_POSIX_SOURCES})
+list(TRANSFORM MIKUTERM_KEILAND_COMMON PREPEND ${MIKUTERM_ROOT}/)
+set(KEILAND_ANDROID_BUILT "")
+foreach(file IN LISTS KEILAND_ANDROID_SOURCES)
+	if(EXISTS ${MIKUTERM_ROOT}/${file})
+		list(APPEND KEILAND_ANDROID_BUILT ${MIKUTERM_ROOT}/${file})
+	endif()
+endforeach()
+
+# The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so
+# that the rest of that side is not on the include path.
+set(MIKUTERM_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/include)
+file(GLOB_RECURSE MIKUTERM_COMPAT_HEADERS CONFIGURE_DEPENDS RELATIVE ${MIKUTERM_ROOT}/include/libc
+	${MIKUTERM_ROOT}/include/libc/compat/*.h)
+foreach(header IN LISTS MIKUTERM_COMPAT_HEADERS)
+	configure_file(${MIKUTERM_ROOT}/include/libc/${header} ${MIKUTERM_INCLUDE}/${header} COPYONLY)
+endforeach()
+
+# The version, for Help > About.
+set(MIKUTERM_VERSION 0.1.0 CACHE STRING "The program's version, given by the top of the build")
+string(REPLACE "." ";" version_parts ${MIKUTERM_VERSION})
+list(GET version_parts 0 PROJECT_VERSION_MAJOR)
+list(GET version_parts 1 PROJECT_VERSION_MINOR)
+list(GET version_parts 2 PROJECT_VERSION_PATCH)
+set(PROJECT_VERSION ${MIKUTERM_VERSION})
+configure_file(${MIKUTERM_VERSION_IN} ${MIKUTERM_INCLUDE}/mikuterm-version.h @ONLY)
+
+#
+# The flags every C file of the build is compiled with: GNU's and POSIX's interfaces, the tree's
+# paths from its top, the copied compat headers; C11 with GNU's extensions.
+#
+add_library(mikuterm_flags INTERFACE)
+target_include_directories(mikuterm_flags INTERFACE
+	${MIKUTERM_ROOT}
+	${MIKUTERM_ROOT}/userland/desktop/include
+	${MIKUTERM_INCLUDE})
+target_compile_definitions(mikuterm_flags INTERFACE _GNU_SOURCE)
+target_compile_options(mikuterm_flags INTERFACE
+	$<$<COMPILE_LANGUAGE:C>:-std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden>)
+
+# The libraries, each a static library of the tree's files.
+add_library(mikuterm_z STATIC ${MIKUTERM_Z_SOURCES})
+add_library(mikuterm_png STATIC ${MIKUTERM_PNG_SOURCES})
+add_library(mikuterm_truetype STATIC ${MIKUTERM_TRUETYPE_SOURCES})
+add_library(mikuterm_crypto STATIC ${MIKUTERM_CRYPTO_SOURCES} ${MIKUTERM_CRYPTO_OS_SOURCES})
+add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
+add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
+add_library(keiland_android STATIC ${KEILAND_ANDROID_BUILT})
+add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
+foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssh keiland_common keiland_android
+	mikuterm_terminal)
+	target_link_libraries(${library} PRIVATE mikuterm_flags)
+endforeach()
+target_include_directories(keiland_android PRIVATE ${MIKUTERM_ROOT}/apps/libkeiland/android)
+target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
+target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
+target_link_libraries(keiland_common PUBLIC mikuterm_truetype mikuterm_png)
+target_link_libraries(keiland_android PUBLIC keiland_common)
+target_link_libraries(mikuterm_terminal PUBLIC keiland_android mikuterm_ssh)
+
+set(MIKUTERM_ANDROID_SOURCES ${MIKUTERM_ROOT}/apps/terminal-android/jni/entry.c)
 if(MIKUTERM_ANDROID_HELLO)
 	list(APPEND MIKUTERM_ANDROID_SOURCES ${MIKUTERM_ROOT}/apps/terminal-android/jni/hello.c)
 endif()
@@ -31,12 +100,14 @@ endif()
 add_library(mikuterm SHARED ${MIKUTERM_ANDROID_SOURCES})
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_ROOT} ${MIKUTERM_ROOT}/apps/libkeiland/android)
 target_compile_options(mikuterm PRIVATE -Wall -Wextra -Werror -fvisibility=hidden)
+target_link_libraries(mikuterm PRIVATE keiland_android)
 
-# The system's native-activity loader looks the entry point up in the library, so it stays
-# in the library's symbols even though nothing in the library calls it.  Pages are 16 KB
-# aligned for devices with 16 KB pages.
+# The system's native-activity loader looks the entry point up in the library, and the runtime
+# looks JNI_OnLoad up, so both stay in the library's symbols even though nothing in the library
+# calls them.  Pages are 16 KB aligned for devices with 16 KB pages.
 target_link_libraries(mikuterm PRIVATE android log)
 target_link_options(mikuterm PRIVATE
 	-Wl,-u,ANativeActivity_onCreate
+	-Wl,-u,JNI_OnLoad
 	-Wl,-z,max-page-size=16384
 	-Wl,--gc-sections)
