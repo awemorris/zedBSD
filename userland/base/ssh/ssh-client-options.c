@@ -8,26 +8,31 @@
 /*
  * The command line of the ssh program: the options of ssh(1) this
  * program supports, the destination, the command, and how they become
- * settings of ssh_config(5).
+ * settings of ssh_config(5); the settings the program refuses; and the
+ * %-tokens of RemoteCommand.
  */
 
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "ssh-client-common.h"
 
 static int client_add_setting(struct ssh_client_args *args, enum ssh_client_setting_kind kind, const char *value, char *error, size_t capacity);
 static int client_split_destination(const char *destination, struct ssh_client_args *args, char *error, size_t capacity);
 static int client_apply_line(struct ssh_config *config, const char *keyword, const char *value, char *error);
+static int client_apply_forward(struct ssh_config *config, enum ssh_forward_kind kind, const char *spec, char *error);
+static int client_token_value(const struct ssh_client *client, char token, const struct passwd *account, const char *local_host, const char *short_host, char *number, size_t number_size, const char **value, char *error);
 
 /*
  * Reads the command line of the ssh program.
  *
- * The options are -t, -T, -n, -q, -v and -N without an argument, and -p,
- * -l, -i, -o and -F with one (in the same argument, "-p22", or in the
- * next, "-p 22"); options without an argument may be put together
- * ("-tt", "-vN").  "--" ends the options.  Options after the destination
- * belong to the command.
+ * The options are -t, -T, -n, -q, -v, -N and -g without an argument, and
+ * -p, -l, -i, -o, -L, -R and -F with one (in the same argument, "-p22",
+ * or in the next, "-p 22"); options without an argument may be put
+ * together ("-tt", "-vN").  "--" ends the options.  Options after the
+ * destination belong to the command.
  */
 int
 ssh_client_parse_args(
@@ -92,6 +97,9 @@ ssh_client_parse_args(
 			case 'N':
 				args->no_command = 1;
 				break;
+			case 'g':
+				args->gateway_ports = 1;
+				break;
 			case 'p':
 				takes_value = 1;
 				kind = SSH_CLIENT_SETTING_PORT;
@@ -107,6 +115,14 @@ ssh_client_parse_args(
 			case 'o':
 				takes_value = 1;
 				kind = SSH_CLIENT_SETTING_OPTION;
+				break;
+			case 'L':
+				takes_value = 1;
+				kind = SSH_CLIENT_SETTING_LOCAL_FORWARD;
+				break;
+			case 'R':
+				takes_value = 1;
+				kind = SSH_CLIENT_SETTING_REMOTE_FORWARD;
 				break;
 			case 'F':
 				takes_value = 1;
@@ -274,7 +290,14 @@ ssh_client_apply_args(
 			return status;
 	}
 
-	/* Applies -l, -p, -i and -o in the order given. */
+	/* -g lets the local forwardings listen on every address. */
+	if (args->gateway_ports) {
+		status = client_apply_line(config, "GatewayPorts", "yes", error);
+		if (status != 0)
+			return status;
+	}
+
+	/* Applies -l, -p, -i, -o, -L and -R in the order given. */
 	for (index = 0; index < args->setting_count; index++) {
 		/* Chooses the keyword the flag stands for, or takes the -o line as it is. */
 		switch (args->settings[index].kind) {
@@ -286,6 +309,12 @@ ssh_client_apply_args(
 			break;
 		case SSH_CLIENT_SETTING_IDENTITY:
 			status = client_apply_line(config, "IdentityFile", args->settings[index].value, error);
+			break;
+		case SSH_CLIENT_SETTING_LOCAL_FORWARD:
+			status = client_apply_forward(config, SSH_FORWARD_LOCAL, args->settings[index].value, error);
+			break;
+		case SSH_CLIENT_SETTING_REMOTE_FORWARD:
+			status = client_apply_forward(config, SSH_FORWARD_REMOTE, args->settings[index].value, error);
 			break;
 		default:
 			status = ssh_config_option(config, args->settings[index].value, error);
@@ -327,25 +356,75 @@ ssh_client_check_settings(
 		return EINVAL;
 	}
 
-	/* Port forwarding is not done yet. */
-	if (config->forward_count != 0) {
-		snprintf(error, SSH_CONFIG_ERROR_MAX, "LocalForward and RemoteForward are not supported");
-		return EINVAL;
-	}
-
-	/* A connection without a session is asked for with -N. */
-	if (config->session_type_none) {
-		snprintf(error, SSH_CONFIG_ERROR_MAX, "SessionType none is not supported");
-		return EINVAL;
-	}
-
-	/* A command of the file's is not run yet: refused rather than a shell started in its place. */
-	if (config->remote_command[0] != '\0') {
-		snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand is not supported");
-		return EINVAL;
-	}
-
 	/* Succeeded: every setting is one the program acts on or leaves off. */
+	return 0;
+}
+
+/*
+ * Expands the %-tokens of RemoteCommand.
+ */
+int
+ssh_client_remote_command(
+	const struct ssh_client *client,
+	struct ssh_buf *out,
+	char *error)
+{
+	char local_host[SSH_HOST_MAX + 1];
+	char short_host[SSH_HOST_MAX + 1];
+	char number[24];
+	struct passwd *account;
+	const char *text;
+	const char *value;
+	size_t length;
+	size_t total;
+	int status;
+
+	/* Takes the local account (%d, %u) and the local host name (%l, %L). */
+	account = getpwuid(getuid());
+	status = gethostname(local_host, sizeof(local_host));
+	if (status != 0)
+		local_host[0] = '\0';
+	local_host[sizeof(local_host) - 1U] = '\0';
+
+	/* The local host name up to its first dot (%L). */
+	length = strcspn(local_host, ".");
+	memcpy(short_host, local_host, length);
+	short_host[length] = '\0';
+
+	/* Copies the text, putting each token's value in its place. */
+	text = client->config.remote_command;
+	total = 0;
+	while (*text != '\0') {
+		/* A byte that starts no token is copied as it is. */
+		if (*text != '%') {
+			value = text;
+			length = 1;
+			text++;
+		} else {
+			/* Reads the token after the '%'. */
+			text++;
+			status = client_token_value(client, *text, account, local_host, short_host, number, sizeof(number), &value, error);
+			if (status != 0)
+				return status;
+			length = strlen(value);
+			text++;
+		}
+
+		/* Refuses a command longer than the server takes. */
+		if (length > SSH_CLIENT_COMMAND_MAX - total)
+			return EMSGSIZE;
+
+		/* Appends the byte or the value. */
+		ssh_buf_put_bytes(out, value, length);
+		total += length;
+	}
+
+	/* Reports a failure of the buffer. */
+	status = ssh_buf_error(out);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: out holds the command. */
 	return 0;
 }
 
@@ -477,4 +556,132 @@ client_apply_line(
 
 	/* Succeeded: the setting is applied. */
 	return 0;
+}
+
+/*
+ * Reads a -L or -R spec and adds it to the forwardings, with the words
+ * OpenSSH's ssh uses for a spec it cannot read.
+ */
+static int
+client_apply_forward(
+	struct ssh_config *config,
+	enum ssh_forward_kind kind,
+	const char *spec,
+	char *error)
+{
+	struct ssh_forward forward;
+	char reason[SSH_CONFIG_ERROR_MAX];
+	const char *kind_name;
+	int status;
+
+	/* Names the kind as the message does. */
+	kind_name = "local";
+	if (kind == SSH_FORWARD_REMOTE)
+		kind_name = "remote";
+
+	/* Reads the spec; a form these programs do not have adds why. */
+	status = ssh_config_parse_forward(kind, spec, &forward, reason);
+	if (status == ENOTSUP) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "Bad %s forwarding specification '%s': %s", kind_name, spec, reason);
+		return EINVAL;
+	}
+	if (status != 0) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "Bad %s forwarding specification '%s'", kind_name, spec);
+		return EINVAL;
+	}
+
+	/* Adds it, unless the same forwarding is there already. */
+	status = ssh_config_add_forward(config, &forward, error);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the forwarding is in the settings. */
+	return 0;
+}
+
+/*
+ * Finds the value of one %-token of RemoteCommand (ssh_config(5)
+ * TOKENS): *value points at the value, at number (number_size bytes) for
+ * a number.  Returns 0, or EINVAL with error set for a token that has no
+ * value here.
+ */
+static int
+client_token_value(
+	const struct ssh_client *client,
+	char token,
+	const struct passwd *account,
+	const char *local_host,
+	const char *short_host,
+	char *number,
+	size_t number_size,
+	const char **value,
+	char *error)
+{
+	/* Gives the token's value. */
+	switch (token) {
+	case '%':
+		/* A literal '%'. */
+		*value = "%";
+		return 0;
+	case 'h':
+		/* The remote host name, as connected to. */
+		*value = client->host_name;
+		return 0;
+	case 'n':
+	case 'k':
+		/* The host name as given (also the host key alias, which this program does not set). */
+		*value = client->host;
+		return 0;
+	case 'p':
+		/* The remote port. */
+		snprintf(number, number_size, "%u", (unsigned)client->port);
+		*value = number;
+		return 0;
+	case 'r':
+		/* The remote user. */
+		*value = client->user;
+		return 0;
+	case 'j':
+		/* The jump host, of which this program has none. */
+		*value = "";
+		return 0;
+	case 'i':
+		/* The local user id. */
+		snprintf(number, number_size, "%lu", (unsigned long)getuid());
+		*value = number;
+		return 0;
+	case 'l':
+		/* The local host name. */
+		*value = local_host;
+		return 0;
+	case 'L':
+		/* The local host name up to its first dot. */
+		*value = short_host;
+		return 0;
+	case 'u':
+	case 'd':
+		/* The local user and its home directory, which need the account. */
+		if (account == NULL || account->pw_name == NULL || account->pw_dir == NULL) {
+			snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand: no account for uid %lu", (unsigned long)getuid());
+			return EINVAL;
+		}
+
+		/* Chooses the name or the directory. */
+		*value = account->pw_name;
+		if (token == 'd')
+			*value = account->pw_dir;
+		return 0;
+	case 'C':
+		/* The connection hash is SHA-1, which this program does not compute. */
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand: %%C is not supported");
+		return EINVAL;
+	case '\0':
+		/* A '%' at the end has no token. */
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand: invalid format");
+		return EINVAL;
+	default:
+		/* Any other token is unknown, as in OpenSSH. */
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand: unknown key %%%c", token);
+		return EINVAL;
+	}
 }
