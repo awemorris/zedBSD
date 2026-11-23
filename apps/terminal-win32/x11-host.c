@@ -45,8 +45,9 @@
 /* How many times one connection starts an X server. */
 #define HOST_STARTS_MAX		3U
 
-/* The HELLO's settings: the version, the scale, the flags and the cookie, then the host's name. */
-#define HOST_HELLO_FIXED	(12U + X11_HOST_COOKIE)
+/* The HELLO's settings: the version, the scale, the flags, the cookie and the root window's size, then the host's name. */
+#define HOST_HELLO_ROOT		(12U + X11_HOST_COOKIE)
+#define HOST_HELLO_FIXED	(HOST_HELLO_ROOT + 8U)
 
 /* The command line's switch of the child. */
 #define HOST_SWITCH		L" --x11-server"
@@ -410,6 +411,8 @@ host_start(
 	x11_link_put32(hello + 4, host->settings.scale);
 	x11_link_put32(hello + 8, host->settings.flags);
 	memcpy(hello + 12, host->settings.cookie, X11_HOST_COOKIE);
+	x11_link_put32(hello + HOST_HELLO_ROOT, host->settings.root_width);
+	x11_link_put32(hello + HOST_HELLO_ROOT + 4U, host->settings.root_height);
 	memcpy(hello + HOST_HELLO_FIXED, host->settings.host, name);
 	(void)host_frame(host, X11_LINK_HELLO, 0, hello, (uint32_t)(HOST_HELLO_FIXED + name));
 
