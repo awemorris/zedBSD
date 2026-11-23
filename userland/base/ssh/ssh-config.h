@@ -39,11 +39,27 @@
 /* The longest path held. */
 #define SSH_CONFIG_PATH_MAX	1024U
 
+/* The longest RemoteCommand held, in bytes. */
+#define SSH_CONFIG_COMMAND_MAX	4096U
+
 /* The most HostKey and IdentityFile entries. */
 #define SSH_CONFIG_KEYS_MAX	8U
 
 /* The longest error text. */
 #define SSH_CONFIG_ERROR_MAX	256U
+
+/* The longest host name or address held in a forwarding or a permission (as a DNS name, RFC 1035 2.3.4). */
+#define SSH_CONFIG_HOST_MAX	255U
+
+/* The most forwardings of each kind (local, remote) one connection takes. */
+#define SSH_CONFIG_FORWARDS_MAX	16U
+
+/* The most entries of sshd's PermitOpen and of its PermitListen. */
+#define SSHD_PERMITS_MAX	16U
+
+/* The bits of sshd's AllowTcpForwarding: direct-tcpip (local) and tcpip-forward (remote) allowed. */
+#define SSHD_TCP_FORWARD_LOCAL	1U
+#define SSHD_TCP_FORWARD_REMOTE	2U
 
 /* The values of PermitRootLogin (sshd_config(5)). */
 enum sshd_permit_root {
@@ -58,6 +74,53 @@ enum ssh_strict_host {
 	SSH_STRICT_YES = 1,
 	SSH_STRICT_NO = 2,
 	SSH_STRICT_ACCEPT_NEW = 3
+};
+
+/* The values of sshd's GatewayPorts (sshd_config(5)). */
+enum sshd_gateway_ports {
+	SSHD_GATEWAY_NO = 0,
+	SSHD_GATEWAY_YES = 1,
+	SSHD_GATEWAY_CLIENT_SPECIFIED = 2
+};
+
+/* What sshd's PermitOpen or PermitListen allows: any (the default), none, or the entries listed. */
+enum sshd_permit_mode {
+	SSHD_PERMIT_ANY = 0,
+	SSHD_PERMIT_NONE = 1,
+	SSHD_PERMIT_LIST = 2
+};
+
+/*
+ * One entry of PermitOpen or PermitListen (sshd_config(5)): host as
+ * written without the brackets of an IPv6 address ("*" for any host;
+ * PermitListen's port alone is "*"), and port (0 for "*", any port).
+ */
+struct sshd_permit {
+	char host[SSH_CONFIG_HOST_MAX + 1];
+	uint16_t port;
+};
+
+/* The kinds of a forwarding (ssh(1) -L and -R). */
+enum ssh_forward_kind {
+	SSH_FORWARD_LOCAL = 0,
+	SSH_FORWARD_REMOTE = 1
+};
+
+/*
+ * One forwarding as written (ssh(1) -L, -R; ssh_config(5) LocalForward,
+ * RemoteForward).  have_listen_host is 0 when no bind address was given;
+ * listen_host is the bind address given ("" for "" or "*", which mean
+ * every address).  listen_port is the port listened on (0 only for
+ * REMOTE: the server's choice).  connect_host and connect_port are the
+ * destination.
+ */
+struct ssh_forward {
+	enum ssh_forward_kind kind;
+	int have_listen_host;
+	char listen_host[SSH_CONFIG_HOST_MAX + 1];
+	uint16_t listen_port;
+	char connect_host[SSH_CONFIG_HOST_MAX + 1];
+	uint16_t connect_port;
 };
 
 /* The values of RequestTTY (ssh_config(5)). */
@@ -81,7 +144,10 @@ enum ssh_request_tty {
  * authenticated), authorized_keys_file ".ssh/authorized_keys" (relative
  * to the home directory; %h and %u expand to the home and the user),
  * strict_modes 1, sftp_command "" (no sftp subsystem), client_alive
- * interval 0 (off) and count 3.
+ * interval 0 (off) and count 3, and OpenSSH's for the forwardings:
+ * tcp_forwarding both bits (AllowTcpForwarding yes), gateway_ports NO,
+ * permit_open_mode and permit_listen_mode ANY (with no entries),
+ * disable_forwarding 0.
  */
 struct sshd_config {
 	uint16_t port;
@@ -102,6 +168,15 @@ struct sshd_config {
 	char sftp_command[SSH_CONFIG_PATH_MAX];
 	unsigned client_alive_interval;
 	unsigned client_alive_count;
+	unsigned tcp_forwarding;
+	enum sshd_gateway_ports gateway_ports;
+	enum sshd_permit_mode permit_open_mode;
+	struct sshd_permit permit_open[SSHD_PERMITS_MAX];
+	unsigned permit_open_count;
+	enum sshd_permit_mode permit_listen_mode;
+	struct sshd_permit permit_listen[SSHD_PERMITS_MAX];
+	unsigned permit_listen_count;
+	int disable_forwarding;
 };
 
 /*
@@ -117,7 +192,13 @@ struct sshd_config {
  * password and pubkey 1, log_level 1 (INFO; 0 QUIET, 2 VERBOSE, 3 DEBUG),
  * host_name "" (the name given), forward_x11 0, forward_x11_trusted 0,
  * forward_x11_timeout 0 (seconds; 0 for none, where OpenSSH's default is
- * 20 minutes: the program that forwards X11 decides what the time means).
+ * 20 minutes: the program that forwards X11 decides what the time means),
+ * gateway_ports 0, exit_on_forward_failure 0, clear_all_forwardings 0,
+ * session_type_none 0, remote_command "" (none: the shell, or the
+ * command the user gave the program).  forward holds forward_count forwardings, from
+ * every source in order (each kind at most SSH_CONFIG_FORWARDS_MAX, the
+ * same one once); ssh_config_defaults empties it when
+ * clear_all_forwardings is 1.
  */
 struct ssh_config {
 	uint32_t set_mask;
@@ -140,6 +221,13 @@ struct ssh_config {
 	int forward_x11;
 	int forward_x11_trusted;
 	unsigned forward_x11_timeout;
+	int gateway_ports;
+	int exit_on_forward_failure;
+	int clear_all_forwardings;
+	int session_type_none;
+	unsigned forward_count;
+	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
+	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
 };
 
 /* Fills config with sshd's defaults (host_key_count 0: the default key is added by sshd_config_finish when no HostKey line gave one). */
@@ -155,9 +243,14 @@ void sshd_config_defaults(struct sshd_config *config);
  * LoginGraceTime, MaxSessions, MaxStartups (the first number of the
  * "start:rate:full" form), StrictModes, Subsystem (only "sftp <command>";
  * another subsystem name is an error), ClientAliveInterval,
- * ClientAliveCountMax.  The value forms are sshd_config(5)'s (yes/no;
- * numbers in decimal; LoginGraceTime and ClientAliveInterval in seconds
- * with an optional s, m or h suffix).
+ * ClientAliveCountMax, AllowTcpForwarding (yes, all, no, local, remote),
+ * GatewayPorts (no, yes, clientspecified), PermitOpen (any, none, or up to
+ * SSHD_PERMITS_MAX of host:port, [IPv6]:port, with "*" for any host or
+ * port), PermitListen (any, none, or up to SSHD_PERMITS_MAX of port or
+ * host:port, "*" for any port), DisableForwarding.  The value forms are
+ * sshd_config(5)'s (yes/no; numbers in decimal; LoginGraceTime and
+ * ClientAliveInterval in seconds with an optional s, m or h suffix).
+ * Which of them a program acts on is the program's.
  *
  * size above SSH_CONFIG_FILE_MAX is EMSGSIZE.  An unknown keyword, a bad
  * value or a Match line is EINVAL with error (capacity
@@ -183,9 +276,19 @@ void ssh_config_init(struct ssh_config *config);
  * ServerAliveCountMax, RequestTTY, PasswordAuthentication,
  * PubkeyAuthentication, LogLevel (QUIET, FATAL, ERROR as 0; INFO 1;
  * VERBOSE 2; DEBUG, DEBUG1 to DEBUG3 as 3), ForwardX11, ForwardX11Trusted
- * (yes/no), ForwardX11Timeout (a time as LoginGraceTime's).  Which of
- * them a program acts on is the program's: one that does not forward X11
- * refuses the settings that ask for it.  Errors as sshd_config_parse.  Returns 0, EINVAL or EMSGSIZE.
+ * (yes/no), ForwardX11Timeout (a time as LoginGraceTime's),
+ * LocalForward, RemoteForward ("[bind_address:]port host:hostport", as
+ * ssh_config_parse_forward reads them joined by a colon), GatewayPorts,
+ * ExitOnForwardFailure,
+ * ClearAllForwardings (yes/no), SessionType (default or none),
+ * RemoteCommand (the rest of the line as written, quotes and all, as
+ * OpenSSH keeps it; "none" is no command; its %-tokens are left for the
+ * program to expand).  The
+ * forwardings add up, from every line of every block that applies; the
+ * other keywords keep their first value.  Which of them a program acts on
+ * is the program's: one that does not forward X11 or ports refuses the
+ * settings that ask for it.  Errors as sshd_config_parse.  Returns 0,
+ * EINVAL or EMSGSIZE.
  */
 int ssh_config_parse(struct ssh_config *config, const char *text, size_t size, const char *host, char *error);
 
@@ -196,8 +299,35 @@ int ssh_config_parse(struct ssh_config *config, const char *text, size_t size, c
  */
 int ssh_config_option(struct ssh_config *config, const char *option, char *error);
 
-/* Fills every field not set with its default. */
+/* Fills every field not set with its default, and empties the forwardings when ClearAllForwardings is yes. */
 void ssh_config_defaults(struct ssh_config *config);
+
+/*
+ * Reads one forwarding of kind from spec (ssh(1)'s -L or -R argument, or
+ * a configuration line's values joined by a colon) into forward.
+ *
+ * The fields are separated by ':'; a field in square brackets is taken as
+ * it is (an IPv6 address); a backslash takes the next character as it is.
+ * Both kinds take "[bind_address:]port:host:hostport".  A port is a
+ * decimal number from 1 to 65535 (a REMOTE listen port may be 0); a host
+ * is 1 to SSH_CONFIG_HOST_MAX printable characters without blanks (a bind
+ * address may be empty).
+ *
+ * Returns 0; EINVAL for a malformed spec or another kind; or ENOTSUP for
+ * a form OpenSSH has but these programs do not: a Unix-domain socket (a
+ * field with '/') and a REMOTE spec without a destination (the client as
+ * a SOCKS proxy).  error (capacity SSH_CONFIG_ERROR_MAX, may be NULL)
+ * says which.
+ */
+int ssh_config_parse_forward(enum ssh_forward_kind kind, const char *spec, struct ssh_forward *forward, char *error);
+
+/*
+ * Adds forward to config's list unless the same forwarding is there
+ * already.  More than SSH_CONFIG_FORWARDS_MAX of its kind is EINVAL with
+ * error (capacity SSH_CONFIG_ERROR_MAX, may be NULL) "too many
+ * forwardings".  Returns 0 or EINVAL.
+ */
+int ssh_config_add_forward(struct ssh_config *config, const struct ssh_forward *forward, char *error);
 
 /*
  * The function ssh_config_hosts gives each host name to: data as given,

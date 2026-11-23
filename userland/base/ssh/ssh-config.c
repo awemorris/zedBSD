@@ -9,6 +9,7 @@
  * The configuration files of sshd and ssh.
  */
 
+#include <stddef.h>
 #include <string.h>
 
 #include "ssh-channel.h"
@@ -48,6 +49,30 @@
 /* sshd's MaxSessions default (sshd_config(5) of OpenSSH 10.5p1). */
 #define CONFIG_DEFAULT_MAX_SESSIONS	10U
 
+/* The most fields of a forwarding specification ("bind_address:port:host:hostport"). */
+#define CONFIG_FORWARD_FIELDS	4U
+
+/* The longest forwarding specification read, in bytes: four fields of a host's length and their separators. */
+#define CONFIG_FORWARD_SPEC_MAX	(CONFIG_FORWARD_FIELDS * (SSH_CONFIG_HOST_MAX + 3U))
+
+/* The largest port number. */
+#define CONFIG_PORT_MAX		65535U
+
+/* The most digits a port may be written with. */
+#define CONFIG_PORT_DIGITS_MAX	5U
+
+/*
+ * The part of struct ssh_config a value that is not kept is checked
+ * against: every field before forward_count.  The forwardings are added
+ * apart (ssh_value never reads or writes them) and RemoteCommand is only
+ * written, so a line that is not kept need not copy their 20 KiB each
+ * time (a long file read once for each of its hosts).
+ */
+#define CONFIG_SSH_SCRATCH_SIZE	offsetof(struct ssh_config, forward_count)
+
+/* The word that stands for any host or any port in PermitOpen and PermitListen. */
+#define CONFIG_PERMIT_WILDCARD	"*"
+
 /* What the value of a keyword is, for the readers of the keyword tables. */
 #define CONFIG_KIND_ACTED	0
 #define CONFIG_KIND_MATCH	1
@@ -83,10 +108,19 @@ enum sshd_keyword_id {
 	SSHD_KW_SUBSYSTEM = 14,
 	SSHD_KW_ALIVE_INTERVAL = 15,
 	SSHD_KW_ALIVE_COUNT = 16,
-	SSHD_KW_NONE = 17
+	SSHD_KW_TCP_FORWARDING = 17,
+	SSHD_KW_GATEWAY_PORTS = 18,
+	SSHD_KW_PERMIT_OPEN = 19,
+	SSHD_KW_PERMIT_LISTEN = 20,
+	SSHD_KW_DISABLE_FORWARDING = 21,
+	SSHD_KW_NONE = 22
 };
 
-/* The numbers of ssh_config keywords that are acted on; each below 18 is also the bit of ssh_config.set_mask. */
+/*
+ * The numbers of ssh_config keywords that are acted on; each below 23 is
+ * also the bit of ssh_config.set_mask (the forwardings, which add up, and
+ * Host have none).
+ */
 enum ssh_keyword_id {
 	SSH_KW_USER = 0,
 	SSH_KW_HOST_NAME = 1,
@@ -106,8 +140,15 @@ enum ssh_keyword_id {
 	SSH_KW_FORWARD_X11 = 15,
 	SSH_KW_FORWARD_X11_TRUSTED = 16,
 	SSH_KW_FORWARD_X11_TIMEOUT = 17,
-	SSH_KW_HOST = 18,
-	SSH_KW_NONE = 19
+	SSH_KW_GATEWAY_PORTS = 18,
+	SSH_KW_EXIT_ON_FORWARD_FAILURE = 19,
+	SSH_KW_CLEAR_ALL_FORWARDINGS = 20,
+	SSH_KW_SESSION_TYPE = 21,
+	SSH_KW_REMOTE_COMMAND = 22,
+	SSH_KW_LOCAL_FORWARD = 23,
+	SSH_KW_REMOTE_FORWARD = 24,
+	SSH_KW_HOST = 25,
+	SSH_KW_NONE = 26
 };
 
 /*
@@ -120,12 +161,16 @@ struct config_token {
 };
 
 /*
- * One configuration line split into its keyword and the words after it.
- * It lives for the handling of that one line and points into the text.
+ * One configuration line split into its keyword and the words after it,
+ * and rest, the text after the keyword's separator as written (rest_size
+ * bytes, without the trailing blanks).  It lives for the handling of that
+ * one line and points into the text.
  */
 struct config_line {
 	const char *keyword;
 	size_t keyword_size;
+	const char *rest;
+	size_t rest_size;
 	struct config_token tokens[CONFIG_TOKENS_MAX];
 	unsigned token_count;
 };
@@ -210,15 +255,18 @@ static const struct config_keyword sshd_keywords[] = {
 	{ "Subsystem", CONFIG_KIND_ACTED, SSHD_KW_SUBSYSTEM },
 	{ "ClientAliveInterval", CONFIG_KIND_ACTED, SSHD_KW_ALIVE_INTERVAL },
 	{ "ClientAliveCountMax", CONFIG_KIND_ACTED, SSHD_KW_ALIVE_COUNT },
+	{ "AllowTcpForwarding", CONFIG_KIND_ACTED, SSHD_KW_TCP_FORWARDING },
+	{ "GatewayPorts", CONFIG_KIND_ACTED, SSHD_KW_GATEWAY_PORTS },
+	{ "PermitOpen", CONFIG_KIND_ACTED, SSHD_KW_PERMIT_OPEN },
+	{ "PermitListen", CONFIG_KIND_ACTED, SSHD_KW_PERMIT_LISTEN },
+	{ "DisableForwarding", CONFIG_KIND_ACTED, SSHD_KW_DISABLE_FORWARDING },
 	{ "Match", CONFIG_KIND_MATCH, SSHD_KW_NONE },
 	{ "UseDNS", CONFIG_KIND_IGNORE_BOOL, SSHD_KW_NONE },
 	{ "PrintMotd", CONFIG_KIND_IGNORE_BOOL, SSHD_KW_NONE },
 	{ "PrintLastLog", CONFIG_KIND_IGNORE_BOOL, SSHD_KW_NONE },
 	{ "UsePAM", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
 	{ "X11Forwarding", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
-	{ "AllowTcpForwarding", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
 	{ "AllowAgentForwarding", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
-	{ "GatewayPorts", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
 	{ "PermitTunnel", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
 	{ "PermitUserEnvironment", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
 	{ "Compression", CONFIG_KIND_IGNORE_NO, SSHD_KW_NONE },
@@ -263,6 +311,13 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "ForwardX11", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11 },
 	{ "ForwardX11Trusted", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11_TRUSTED },
 	{ "ForwardX11Timeout", CONFIG_KIND_ACTED, SSH_KW_FORWARD_X11_TIMEOUT },
+	{ "GatewayPorts", CONFIG_KIND_ACTED, SSH_KW_GATEWAY_PORTS },
+	{ "ExitOnForwardFailure", CONFIG_KIND_ACTED, SSH_KW_EXIT_ON_FORWARD_FAILURE },
+	{ "ClearAllForwardings", CONFIG_KIND_ACTED, SSH_KW_CLEAR_ALL_FORWARDINGS },
+	{ "SessionType", CONFIG_KIND_ACTED, SSH_KW_SESSION_TYPE },
+	{ "RemoteCommand", CONFIG_KIND_ACTED, SSH_KW_REMOTE_COMMAND },
+	{ "LocalForward", CONFIG_KIND_ACTED, SSH_KW_LOCAL_FORWARD },
+	{ "RemoteForward", CONFIG_KIND_ACTED, SSH_KW_REMOTE_FORWARD },
 	{ "VerifyHostKeyDNS", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "HashKnownHosts", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
 	{ "ForwardAgent", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
@@ -355,6 +410,46 @@ static const struct config_name log_level_names[] = {
 	{ "DEBUG3", 3 }
 };
 
+/*
+ * The values of AllowTcpForwarding, as the bits of the tcp_forwarding
+ * field.
+ *
+ * Values referenced: sshd_config(5) of OpenSSH 10.5p1,
+ * AllowTcpForwarding: yes (the default) or all, no, local, remote.
+ */
+static const struct config_name tcp_forwarding_names[] = {
+	{ "yes", SSHD_TCP_FORWARD_LOCAL | SSHD_TCP_FORWARD_REMOTE },
+	{ "all", SSHD_TCP_FORWARD_LOCAL | SSHD_TCP_FORWARD_REMOTE },
+	{ "no", 0 },
+	{ "local", SSHD_TCP_FORWARD_LOCAL },
+	{ "remote", SSHD_TCP_FORWARD_REMOTE }
+};
+
+/*
+ * The values of sshd's GatewayPorts.
+ *
+ * Values referenced: sshd_config(5) of OpenSSH 10.5p1, GatewayPorts: no
+ * (the default), yes, clientspecified.
+ */
+static const struct config_name gateway_ports_names[] = {
+	{ "no", SSHD_GATEWAY_NO },
+	{ "yes", SSHD_GATEWAY_YES },
+	{ "clientspecified", SSHD_GATEWAY_CLIENT_SPECIFIED }
+};
+
+/*
+ * The values of SessionType, as the value of the session_type_none field.
+ *
+ * Values referenced: ssh_config(5) of OpenSSH 10.5p1, SessionType: none,
+ * subsystem, default.  subsystem is left out: these programs run a
+ * subsystem only for their own sftp, so a line that asks for it is an
+ * error and not silently a shell.
+ */
+static const struct config_name session_type_names[] = {
+	{ "default", 0 },
+	{ "none", 1 }
+};
+
 static int config_is_blank(char byte);
 static char config_lower(char byte);
 static size_t config_skip_blanks(const char *text, size_t size, size_t position);
@@ -384,10 +479,20 @@ static int config_add_path(char (*list)[SSH_CONFIG_PATH_MAX], unsigned *count, c
 static int sshd_value_listen_address(struct sshd_config *target, const struct config_line *parsed, const char **what);
 static int sshd_value_max_startups(struct sshd_config *target, const struct config_line *parsed, const char **what);
 static int sshd_value_subsystem(struct sshd_config *target, const struct config_line *parsed, const char **what);
+static int sshd_value_permits(enum sshd_permit_mode *mode, struct sshd_permit *list, unsigned *count, int listen, const struct config_line *parsed, const char **what);
+static int sshd_read_permit(const struct config_token *token, int listen, struct sshd_permit *permit);
 static int sshd_value(struct sshd_config *target, int id, const struct config_line *parsed, const char **what);
 static int sshd_config_apply(void *context, const struct config_line *parsed, const char **what);
 static int ssh_value_identity(struct ssh_config *target, const struct config_line *parsed, const char **what);
+static int ssh_value_command(struct ssh_config *target, const struct config_line *parsed, const char **what);
 static int ssh_value(struct ssh_config *target, int id, const struct config_line *parsed, const char **what);
+static int ssh_value_forward(struct ssh_state *state, int id, const struct config_line *parsed, const char **what);
+static int config_read_forward(enum ssh_forward_kind kind, const char *spec, struct ssh_forward *forward, const char **what);
+static int config_forward_field(const char **cursor, char *field, int *path);
+static int config_forward_port(const char *field, int zero, uint16_t *port);
+static int config_forward_host(const char *field, int empty);
+static int config_add_forward(struct ssh_config *config, const struct ssh_forward *forward, const char **what);
+static int config_same_forward(const struct ssh_forward *left, const struct ssh_forward *right);
 static int ssh_apply_host(struct ssh_state *state, const struct config_line *parsed, const char **what);
 static int ssh_config_apply(void *context, const struct config_line *parsed, const char **what);
 static int ssh_hosts_apply(void *context, const struct config_line *parsed, const char **what);
@@ -433,6 +538,15 @@ sshd_config_defaults(
 	config->sftp_command[0] = '\0';
 	config->client_alive_interval = 0;
 	config->client_alive_count = 3;
+
+	/* OpenSSH's forwarding: both ways allowed to any destination and port, listening on the loopback only. */
+	config->tcp_forwarding = SSHD_TCP_FORWARD_LOCAL | SSHD_TCP_FORWARD_REMOTE;
+	config->gateway_ports = SSHD_GATEWAY_NO;
+	config->permit_open_mode = SSHD_PERMIT_ANY;
+	config->permit_open_count = 0;
+	config->permit_listen_mode = SSHD_PERMIT_ANY;
+	config->permit_listen_count = 0;
+	config->disable_forwarding = 0;
 }
 
 /*
@@ -676,6 +790,24 @@ ssh_config_defaults(
 		config->forward_x11_trusted = 0;
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_FORWARD_X11_TIMEOUT)) == 0)
 		config->forward_x11_timeout = 0;
+
+	/* No command of the file's: the shell, or the user's command. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_REMOTE_COMMAND)) == 0)
+		config->remote_command[0] = '\0';
+
+	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
+		config->gateway_ports = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_EXIT_ON_FORWARD_FAILURE)) == 0)
+		config->exit_on_forward_failure = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_CLEAR_ALL_FORWARDINGS)) == 0)
+		config->clear_all_forwardings = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_SESSION_TYPE)) == 0)
+		config->session_type_none = 0;
+
+	/* ClearAllForwardings drops the forwardings of every source, the command line's too (as OpenSSH's ssh does here). */
+	if (config->clear_all_forwardings)
+		config->forward_count = 0;
 }
 
 /*
@@ -723,6 +855,76 @@ ssh_config_hosts(
 		return status;
 
 	/* Succeeded: every name was given. */
+	return 0;
+}
+
+/*
+ * Reads one forwarding of kind from spec into forward.
+ */
+int
+ssh_config_parse_forward(
+	enum ssh_forward_kind kind,
+	const char *spec,
+	struct ssh_forward *forward,
+	char *error)
+{
+	const char *what;
+	int status;
+
+	/* Clears the message of an earlier call. */
+	if (error != NULL)
+		error[0] = '\0';
+
+	/* A missing spec or structure cannot be read. */
+	if (spec == NULL || forward == NULL) {
+		config_error(error, 0, "no forwarding specification", NULL, 0);
+		return EINVAL;
+	}
+
+	/* Reads the spec. */
+	what = "bad forwarding specification";
+	status = config_read_forward(kind, spec, forward, &what);
+	if (status != 0) {
+		config_error(error, 0, what, NULL, 0);
+		return status;
+	}
+
+	/* Succeeded: the forwarding is read. */
+	return 0;
+}
+
+/*
+ * Adds forward to config's list unless the same forwarding is there
+ * already.
+ */
+int
+ssh_config_add_forward(
+	struct ssh_config *config,
+	const struct ssh_forward *forward,
+	char *error)
+{
+	const char *what;
+	int status;
+
+	/* Clears the message of an earlier call. */
+	if (error != NULL)
+		error[0] = '\0';
+
+	/* A missing structure or forwarding cannot be added. */
+	if (config == NULL || forward == NULL) {
+		config_error(error, 0, "no configuration or forwarding", NULL, 0);
+		return EINVAL;
+	}
+
+	/* Adds it. */
+	what = "too many forwardings";
+	status = config_add_forward(config, forward, &what);
+	if (status != 0) {
+		config_error(error, 0, what, NULL, 0);
+		return status;
+	}
+
+	/* Succeeded: the forwarding is in the list. */
 	return 0;
 }
 
@@ -1003,6 +1205,8 @@ config_split_line(
 	/* Starts with no keyword and no word. */
 	parsed->keyword = line;
 	parsed->keyword_size = 0;
+	parsed->rest = line + length;
+	parsed->rest_size = 0;
 	parsed->token_count = 0;
 	position = 0;
 
@@ -1033,6 +1237,10 @@ config_split_line(
 	if (position < length && line[position] == '=')
 		position++;
 	position = config_skip_blanks(line, length, position);
+
+	/* Records the text after the separator as it is written. */
+	parsed->rest = line + position;
+	parsed->rest_size = length - position;
 
 	/* Reads the words up to the end of the line or a comment. */
 	while (position < length && line[position] != '#') {
@@ -1981,6 +2189,22 @@ sshd_value(
 		return config_value_time(parsed, &target->client_alive_interval, what);
 	case SSHD_KW_ALIVE_COUNT:
 		return config_value_number(parsed, 0, CONFIG_COUNT_MAX, &target->client_alive_count, what);
+	case SSHD_KW_TCP_FORWARDING:
+		status = config_value_name(parsed, tcp_forwarding_names, sizeof(tcp_forwarding_names) / sizeof(tcp_forwarding_names[0]), &value, what);
+		if (status == 0)
+			target->tcp_forwarding = (unsigned)value;
+		return status;
+	case SSHD_KW_GATEWAY_PORTS:
+		status = config_value_name(parsed, gateway_ports_names, sizeof(gateway_ports_names) / sizeof(gateway_ports_names[0]), &value, what);
+		if (status == 0)
+			target->gateway_ports = (enum sshd_gateway_ports)value;
+		return status;
+	case SSHD_KW_PERMIT_OPEN:
+		return sshd_value_permits(&target->permit_open_mode, target->permit_open, &target->permit_open_count, 0, parsed, what);
+	case SSHD_KW_PERMIT_LISTEN:
+		return sshd_value_permits(&target->permit_listen_mode, target->permit_listen, &target->permit_listen_count, 1, parsed, what);
+	case SSHD_KW_DISABLE_FORWARDING:
+		return config_value_bool(parsed, &target->disable_forwarding, what);
 	default:
 		break;
 	}
@@ -2101,6 +2325,61 @@ ssh_value_identity(
 	return 0;
 }
 
+/*
+ * Reads RemoteCommand: the rest of the line as written (quotes, '#' and
+ * '%' as they are), 1 to SSH_CONFIG_COMMAND_MAX bytes without a control
+ * character but the tab; "none" is no command ("").  0 or EINVAL with
+ * *what set.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7d readconf.c
+ * (process_config_line, parse_command: the line after the keyword and its
+ * separator is kept as it is; fill_default_options and
+ * option_clear_or_none: "none", in any case, is no remote command).
+ */
+static int
+ssh_value_command(
+	struct ssh_config *target,
+	const struct config_line *parsed,
+	const char **what)
+{
+	size_t index;
+	unsigned char byte;
+	int none;
+
+	/* A keyword with no value is an error. */
+	if (parsed->token_count == 0 || parsed->rest_size == 0) {
+		*what = "missing value";
+		return EINVAL;
+	}
+
+	/* A command longer than the field holds is refused. */
+	if (parsed->rest_size > SSH_CONFIG_COMMAND_MAX) {
+		*what = "value has a bad length";
+		return EINVAL;
+	}
+
+	/* Refuses a control character (the line holds no line break or NUL). */
+	for (index = 0; index < parsed->rest_size; index++) {
+		byte = (unsigned char)parsed->rest[index];
+		if ((byte < 0x20U && byte != '\t') || byte == 0x7fU) {
+			*what = "bad character in value";
+			return EINVAL;
+		}
+	}
+
+	/* "none" is no command. */
+	none = config_text_equal(parsed->rest, parsed->rest_size, "none");
+	if (none) {
+		target->remote_command[0] = '\0';
+		return 0;
+	}
+
+	/* Succeeded: the command is kept as written. */
+	memcpy(target->remote_command, parsed->rest, parsed->rest_size);
+	target->remote_command[parsed->rest_size] = '\0';
+	return 0;
+}
+
 /* Reads the value of one acted-on ssh_config keyword (not Host) into target; 0 or EINVAL with *what set. */
 static int
 ssh_value(
@@ -2111,6 +2390,7 @@ ssh_value(
 {
 	unsigned number;
 	int value;
+	int subsystem;
 	int status;
 
 	/* Reads the value by keyword. */
@@ -2176,6 +2456,29 @@ ssh_value(
 		return config_value_bool(parsed, &target->forward_x11_trusted, what);
 	case SSH_KW_FORWARD_X11_TIMEOUT:
 		return config_value_time(parsed, &target->forward_x11_timeout, what);
+	case SSH_KW_GATEWAY_PORTS:
+		return config_value_bool(parsed, &target->gateway_ports, what);
+	case SSH_KW_EXIT_ON_FORWARD_FAILURE:
+		return config_value_bool(parsed, &target->exit_on_forward_failure, what);
+	case SSH_KW_CLEAR_ALL_FORWARDINGS:
+		return config_value_bool(parsed, &target->clear_all_forwardings, what);
+	case SSH_KW_SESSION_TYPE:
+		/* A subsystem as the session is not offered: said apart from a word that is no value at all. */
+		if (parsed->token_count == 1) {
+			subsystem = config_text_equal(parsed->tokens[0].text, parsed->tokens[0].size, "subsystem");
+			if (subsystem) {
+				*what = "SessionType subsystem is not supported";
+				return EINVAL;
+			}
+		}
+
+		/* Reads default or none. */
+		status = config_value_name(parsed, session_type_names, sizeof(session_type_names) / sizeof(session_type_names[0]), &value, what);
+		if (status == 0)
+			target->session_type_none = value;
+		return status;
+	case SSH_KW_REMOTE_COMMAND:
+		return ssh_value_command(target, parsed, what);
 	default:
 		break;
 	}
@@ -2299,6 +2602,14 @@ ssh_config_apply(
 		return 0;
 	}
 
+	/* A forwarding is read on every line and added up from every block that applies. */
+	if (entry->id == SSH_KW_LOCAL_FORWARD || entry->id == SSH_KW_REMOTE_FORWARD) {
+		status = ssh_value_forward(state, entry->id, parsed, what);
+		if (status != 0)
+			return status;
+		return 0;
+	}
+
 	/* The value is kept when the block applies and no source has set the field; IdentityFile always adds. */
 	bit = (uint32_t)1U << entry->id;
 	keep = 1;
@@ -2308,7 +2619,7 @@ ssh_config_apply(
 		keep = 0;
 	target = state->config;
 	if (!keep) {
-		memcpy(&scratch, state->config, sizeof(scratch));
+		memcpy(&scratch, state->config, CONFIG_SSH_SCRATCH_SIZE);
 		target = &scratch;
 	}
 
@@ -2398,5 +2709,595 @@ ssh_hosts_is_name(
 	}
 
 	/* The pattern is one name. */
+	return 1;
+}
+
+/*
+ * Reads PermitOpen (listen 0) or PermitListen (listen 1): "any" or "none"
+ * alone, or up to SSHD_PERMITS_MAX entries (sshd_read_permit), into
+ * *mode, list and *count.  0 or EINVAL with *what set.
+ *
+ * Procedure referenced: sshd_config(5) of OpenSSH 10.5p1, PermitOpen and
+ * PermitListen ("any" and "none" must appear alone; a PermitListen
+ * entry that is a port alone listens on any host).
+ */
+static int
+sshd_value_permits(
+	enum sshd_permit_mode *mode,
+	struct sshd_permit *list,
+	unsigned *count,
+	int listen,
+	const struct config_line *parsed,
+	const char **what)
+{
+	struct sshd_permit read[SSHD_PERMITS_MAX];
+	unsigned index;
+	int any;
+	int none;
+	int equal;
+	int status;
+
+	/* A keyword with no value is an error. */
+	if (parsed->token_count == 0) {
+		*what = "missing value";
+		return EINVAL;
+	}
+
+	/* Looks for the words that stand for every entry or none. */
+	any = 0;
+	none = 0;
+	for (index = 0; index < parsed->token_count; index++) {
+		equal = config_text_equal(parsed->tokens[index].text, parsed->tokens[index].size, "any");
+		if (equal)
+			any = 1;
+		equal = config_text_equal(parsed->tokens[index].text, parsed->tokens[index].size, "none");
+		if (equal)
+			none = 1;
+	}
+
+	/* "any" and "none" stand alone. */
+	if ((any || none) && parsed->token_count > 1) {
+		*what = "any and none must appear alone";
+		return EINVAL;
+	}
+
+	/* Every destination or listener is allowed. */
+	if (any) {
+		*mode = SSHD_PERMIT_ANY;
+		*count = 0;
+		return 0;
+	}
+
+	/* None is. */
+	if (none) {
+		*mode = SSHD_PERMIT_NONE;
+		*count = 0;
+		return 0;
+	}
+
+	/* A list longer than the field holds is refused. */
+	if (parsed->token_count > SSHD_PERMITS_MAX) {
+		*what = "too many entries";
+		return EINVAL;
+	}
+
+	/* Reads each entry. */
+	for (index = 0; index < parsed->token_count; index++) {
+		status = sshd_read_permit(&parsed->tokens[index], listen, &read[index]);
+		if (status != 0) {
+			*what = "bad host:port";
+			if (listen)
+				*what = "bad [host:]port";
+			return EINVAL;
+		}
+	}
+
+	/* Succeeded: the entries listed are the ones allowed. */
+	memcpy(list, read, parsed->token_count * sizeof(read[0]));
+	*count = parsed->token_count;
+	*mode = SSHD_PERMIT_LIST;
+	return 0;
+}
+
+/*
+ * Reads one entry of PermitOpen or PermitListen: "host:port" or
+ * "[IPv6]:port", with "*" for any host or port, or for PermitListen
+ * (listen 1) a port alone (any host, "*").  The host is 1 to
+ * SSH_CONFIG_HOST_MAX printable characters without blanks or double
+ * quotes.  0 or EINVAL.
+ */
+static int
+sshd_read_permit(
+	const struct config_token *token,
+	int listen,
+	struct sshd_permit *permit)
+{
+	char text[SSH_CONFIG_HOST_MAX + 3U + 1U + CONFIG_PORT_DIGITS_MAX + 1U];
+	const char *host;
+	const char *port;
+	const char *quote;
+	char *colon;
+	char *close;
+	int any_port;
+	int status;
+
+	/* Copies the word, which a valid entry always fits. */
+	if (token->size == 0 || token->size >= sizeof(text))
+		return EINVAL;
+	memcpy(text, token->text, token->size);
+	text[token->size] = '\0';
+
+	/* A PermitListen port alone listens on any host. */
+	colon = strchr(text, ':');
+	if (listen && colon == NULL) {
+		host = CONFIG_PERMIT_WILDCARD;
+		port = text;
+	} else if (text[0] == '[') {
+		/* An IPv6 address in brackets, then the port after a colon. */
+		close = strchr(text, ']');
+		if (close == NULL || close[1] != ':')
+			return EINVAL;
+		*close = '\0';
+		host = text + 1;
+		port = close + 2;
+	} else {
+		/* A host, then the port after the first colon. */
+		if (colon == NULL)
+			return EINVAL;
+		*colon = '\0';
+		host = text;
+		port = colon + 1;
+	}
+
+	/* Checks the host: not empty, printable, no double quote (it is written back as one word). */
+	status = config_forward_host(host, 0);
+	if (status != 0)
+		return status;
+	quote = strchr(host, '"');
+	if (quote != NULL)
+		return EINVAL;
+
+	/* Reads the port: "*" for any, else 1 to 65535. */
+	any_port = strcmp(port, CONFIG_PERMIT_WILDCARD);
+	permit->port = 0;
+	if (any_port != 0) {
+		status = config_forward_port(port, 0, &permit->port);
+		if (status != 0)
+			return status;
+	}
+
+	/* Succeeded: the entry is read. */
+	config_set_string(permit->host, sizeof(permit->host), host);
+	return 0;
+}
+
+/*
+ * Reads LocalForward or RemoteForward: its two words (one for a
+ * RemoteForward without a destination, which is refused) joined by a
+ * colon and read as ssh_config_parse_forward reads a spec; the
+ * forwarding is added when the line is in a block that applies.  0 or
+ * EINVAL (or ENOTSUP) with *what set.
+ *
+ * Procedure referenced: ssh_config(5) of OpenSSH 10.5p1, LocalForward and
+ * RemoteForward (the listen address and port, then the destination;
+ * RemoteForward without a destination makes the client a SOCKS proxy;
+ * several forwardings add up).
+ */
+static int
+ssh_value_forward(
+	struct ssh_state *state,
+	int id,
+	const struct config_line *parsed,
+	const char **what)
+{
+	char spec[CONFIG_FORWARD_SPEC_MAX + 1U];
+	struct ssh_forward forward;
+	enum ssh_forward_kind kind;
+	size_t length;
+	int status;
+
+	/* Takes the kind. */
+	kind = SSH_FORWARD_LOCAL;
+	if (id == SSH_KW_REMOTE_FORWARD)
+		kind = SSH_FORWARD_REMOTE;
+
+	/* A keyword with no value, or with more than its two words, is an error. */
+	if (parsed->token_count == 0) {
+		*what = "missing value";
+		return EINVAL;
+	}
+	if (parsed->token_count > 2) {
+		*what = "too many values";
+		return EINVAL;
+	}
+
+	/* A local forwarding needs its destination. */
+	if (kind == SSH_FORWARD_LOCAL && parsed->token_count < 2) {
+		*what = "missing destination";
+		return EINVAL;
+	}
+
+	/* Joins the words with a colon, refusing what no valid spec is as long as. */
+	length = parsed->tokens[0].size;
+	if (parsed->token_count == 2)
+		length += 1U + parsed->tokens[1].size;
+	if (length > CONFIG_FORWARD_SPEC_MAX) {
+		*what = "bad forwarding specification";
+		return EINVAL;
+	}
+	memcpy(spec, parsed->tokens[0].text, parsed->tokens[0].size);
+	length = parsed->tokens[0].size;
+	if (parsed->token_count == 2) {
+		spec[length] = ':';
+		memcpy(spec + length + 1U, parsed->tokens[1].text, parsed->tokens[1].size);
+		length += 1U + parsed->tokens[1].size;
+	}
+	spec[length] = '\0';
+
+	/* Reads the forwarding, whether or not the block applies, so a bad line is an error anywhere. */
+	status = config_read_forward(kind, spec, &forward, what);
+	if (status != 0)
+		return status;
+
+	/* A block that does not apply adds nothing. */
+	if (!state->active)
+		return 0;
+
+	/* Adds it. */
+	status = config_add_forward(state->config, &forward, what);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the forwarding is in the list. */
+	return 0;
+}
+
+/*
+ * Reads a forwarding spec of kind into forward (see
+ * ssh_config_parse_forward).  0, EINVAL or ENOTSUP with *what set.
+ *
+ * Procedure referenced: openssh-portable fa4b2a82be7d readconf.c
+ * (parse_forward and parse_fwd_field: up to four fields split at ':', a
+ * field in square brackets taken as it is, a backslash escaping the next
+ * character, a '/' making a field a Unix-domain socket path; the number
+ * of fields gives the form; a listen port of 0 only for a remote
+ * forwarding).  The ports are decimal only here (OpenSSH also takes a
+ * service name), and the spec is not expanded for ${VARIABLE}.
+ */
+static int
+config_read_forward(
+	enum ssh_forward_kind kind,
+	const char *spec,
+	struct ssh_forward *forward,
+	const char **what)
+{
+	char fields[CONFIG_FORWARD_FIELDS][SSH_CONFIG_HOST_MAX + 1U];
+	const char *listen_host;
+	const char *listen_port;
+	const char *connect_host;
+	const char *connect_port;
+	const char *cursor;
+	size_t length;
+	unsigned count;
+	int any_path;
+	int path;
+	int star;
+	int status;
+
+	/* Starts with nothing read. */
+	memset(forward, 0, sizeof(*forward));
+	forward->kind = kind;
+	*what = "bad forwarding specification";
+
+	/* Refuses a kind that is neither, and a spec longer than any valid one. */
+	if (kind != SSH_FORWARD_LOCAL && kind != SSH_FORWARD_REMOTE)
+		return EINVAL;
+	length = strlen(spec);
+	if (length > CONFIG_FORWARD_SPEC_MAX)
+		return EINVAL;
+
+	/* Steps over leading blanks. */
+	cursor = spec;
+	while (*cursor == ' ' || *cursor == '\t')
+		cursor++;
+
+	/* Reads up to four fields. */
+	count = 0;
+	any_path = 0;
+	while (count < CONFIG_FORWARD_FIELDS) {
+		status = config_forward_field(&cursor, fields[count], &path);
+		if (status == ENOENT)
+			break;
+		if (status != 0)
+			return EINVAL;
+		if (path)
+			any_path = 1;
+		count++;
+	}
+
+	/* Refuses what is left after four fields. */
+	if (*cursor != '\0')
+		return EINVAL;
+
+	/* A path is a Unix-domain socket, which these programs do not forward. */
+	if (any_path) {
+		*what = "Unix-domain socket forwarding is not supported";
+		return ENOTSUP;
+	}
+
+	/* Takes the fields by the form their number gives. */
+	listen_host = NULL;
+	listen_port = NULL;
+	connect_host = NULL;
+	connect_port = NULL;
+	if (kind == SSH_FORWARD_REMOTE && count < 3) {
+		/* "[bind_address:]port": a remote forwarding without a destination. */
+		if (count == 1) {
+			listen_port = fields[0];
+		} else if (count == 2) {
+			listen_host = fields[0];
+			listen_port = fields[1];
+		} else {
+			return EINVAL;
+		}
+	} else if (count == 3) {
+		/* "port:host:hostport". */
+		listen_port = fields[0];
+		connect_host = fields[1];
+		connect_port = fields[2];
+	} else if (count == 4) {
+		/* "bind_address:port:host:hostport". */
+		listen_host = fields[0];
+		listen_port = fields[1];
+		connect_host = fields[2];
+		connect_port = fields[3];
+	} else {
+		return EINVAL;
+	}
+
+	/* The bind address: any printable word, "" or "*" for every address. */
+	if (listen_host != NULL) {
+		status = config_forward_host(listen_host, 1);
+		if (status != 0)
+			return EINVAL;
+		forward->have_listen_host = 1;
+		star = strcmp(listen_host, CONFIG_PERMIT_WILDCARD);
+		if (star != 0)
+			config_set_string(forward->listen_host, sizeof(forward->listen_host), listen_host);
+	}
+
+	/* The listen port: 0 only for a remote forwarding (the server chooses). */
+	status = config_forward_port(listen_port, kind == SSH_FORWARD_REMOTE, &forward->listen_port);
+	if (status != 0)
+		return EINVAL;
+
+	/* A remote forwarding without a destination makes the client a SOCKS proxy, which is not offered. */
+	if (connect_host == NULL) {
+		*what = "remote forwarding without a destination is not supported";
+		return ENOTSUP;
+	}
+
+	/* The destination: a host and a port from 1 to 65535. */
+	status = config_forward_host(connect_host, 0);
+	if (status != 0)
+		return EINVAL;
+	status = config_forward_port(connect_port, 0, &forward->connect_port);
+	if (status != 0)
+		return EINVAL;
+	config_set_string(forward->connect_host, sizeof(forward->connect_host), connect_host);
+
+	/* Succeeded: the forwarding is read. */
+	return 0;
+}
+
+/*
+ * Reads one field of a forwarding spec at *cursor into field (capacity
+ * SSH_CONFIG_HOST_MAX + 1) and moves *cursor past it and its colon; *path
+ * is 1 when the field holds a '/' (outside an escape).  0, ENOENT at the
+ * end of the spec, or EINVAL (an unclosed bracket, a bracket not ending
+ * the field, a backslash at the end, a field too long).
+ */
+static int
+config_forward_field(
+	const char **cursor,
+	char *field,
+	int *path)
+{
+	const char *at;
+	size_t length;
+	char byte;
+
+	/* Starts with an empty field that is no path. */
+	at = *cursor;
+	*path = 0;
+	field[0] = '\0';
+	length = 0;
+
+	/* The end of the spec has no more fields. */
+	if (*at == '\0')
+		return ENOENT;
+
+	/* A field in square brackets is taken as it is, up to the bracket that must end it. */
+	if (*at == '[') {
+		at++;
+		while (*at != ']' && *at != '\0') {
+			if (*at == '/')
+				*path = 1;
+			if (length >= SSH_CONFIG_HOST_MAX)
+				return EINVAL;
+			field[length] = *at;
+			length++;
+			at++;
+		}
+
+		/* The bracket must be there, and followed by the separator or the end. */
+		if (*at != ']')
+			return EINVAL;
+		at++;
+		if (*at != ':' && *at != '\0')
+			return EINVAL;
+		if (*at == ':')
+			at++;
+
+		/* Succeeded: the field is read. */
+		field[length] = '\0';
+		*cursor = at;
+		return 0;
+	}
+
+	/* Copies up to the separator; a backslash takes the next character as it is. */
+	while (*at != '\0' && *at != ':') {
+		byte = *at;
+		if (byte == '\\') {
+			at++;
+			if (*at == '\0')
+				return EINVAL;
+			byte = *at;
+		} else if (byte == '/') {
+			*path = 1;
+		}
+
+		/* Appends the character while the field has room. */
+		if (length >= SSH_CONFIG_HOST_MAX)
+			return EINVAL;
+		field[length] = byte;
+		length++;
+		at++;
+	}
+
+	/* Steps over the separator. */
+	if (*at == ':')
+		at++;
+
+	/* Succeeded: the field is read. */
+	field[length] = '\0';
+	*cursor = at;
+	return 0;
+}
+
+/* Reads a port of a forwarding or a permission: 1 to 5 decimal digits, 1 to 65535 (0 too when zero is 1).  0 or EINVAL. */
+static int
+config_forward_port(
+	const char *field,
+	int zero,
+	uint16_t *port)
+{
+	size_t length;
+	size_t index;
+	unsigned number;
+
+	/* A port has digits only, not too many. */
+	length = strlen(field);
+	if (length == 0 || length > CONFIG_PORT_DIGITS_MAX)
+		return EINVAL;
+	number = 0;
+	for (index = 0; index < length; index++) {
+		if (field[index] < '0' || field[index] > '9')
+			return EINVAL;
+		number = number * 10U + (unsigned)(field[index] - '0');
+	}
+
+	/* Checks the range. */
+	if (number > CONFIG_PORT_MAX)
+		return EINVAL;
+	if (number == 0 && !zero)
+		return EINVAL;
+
+	/* Succeeded: the port. */
+	*port = (uint16_t)number;
+	return 0;
+}
+
+/* Checks a host of a forwarding or a permission: printable characters without blanks, empty only when empty is 1.  0 or EINVAL. */
+static int
+config_forward_host(
+	const char *field,
+	int empty)
+{
+	size_t length;
+	size_t index;
+	unsigned char byte;
+
+	/* Checks the length. */
+	length = strlen(field);
+	if (length == 0 && !empty)
+		return EINVAL;
+	if (length > SSH_CONFIG_HOST_MAX)
+		return EINVAL;
+
+	/* Checks each byte. */
+	for (index = 0; index < length; index++) {
+		byte = (unsigned char)field[index];
+		if (byte < 0x21U || byte > 0x7eU)
+			return EINVAL;
+	}
+
+	/* Succeeded: the host may be used. */
+	return 0;
+}
+
+/* Adds a forwarding to the list unless the same one is there; 0 or EINVAL with *what set when its kind has no room. */
+static int
+config_add_forward(
+	struct ssh_config *config,
+	const struct ssh_forward *forward,
+	const char **what)
+{
+	unsigned index;
+	unsigned of_kind;
+	int same;
+
+	/* A forwarding already in the list is not added again; the others of its kind are counted. */
+	of_kind = 0;
+	for (index = 0; index < config->forward_count; index++) {
+		same = config_same_forward(&config->forward[index], forward);
+		if (same)
+			return 0;
+		if (config->forward[index].kind == forward->kind)
+			of_kind++;
+	}
+
+	/* A kind takes no more than its limit (the list holds every kind's). */
+	if (of_kind >= SSH_CONFIG_FORWARDS_MAX ||
+	    config->forward_count >= sizeof(config->forward) / sizeof(config->forward[0])) {
+		*what = "too many forwardings";
+		return EINVAL;
+	}
+
+	/* Appends it. */
+	config->forward[config->forward_count] = *forward;
+	config->forward_count++;
+
+	/* Succeeded: the forwarding is in the list. */
+	return 0;
+}
+
+/* Reports whether two forwardings are the same in every field (1 or 0). */
+static int
+config_same_forward(
+	const struct ssh_forward *left,
+	const struct ssh_forward *right)
+{
+	int compare;
+
+	/* Compares the numbers. */
+	if (left->kind != right->kind)
+		return 0;
+	if (left->have_listen_host != right->have_listen_host)
+		return 0;
+	if (left->listen_port != right->listen_port)
+		return 0;
+	if (left->connect_port != right->connect_port)
+		return 0;
+
+	/* Compares the hosts. */
+	compare = strcmp(left->listen_host, right->listen_host);
+	if (compare != 0)
+		return 0;
+	compare = strcmp(left->connect_host, right->connect_host);
+	if (compare != 0)
+		return 0;
+
+	/* Every field is the same. */
 	return 1;
 }

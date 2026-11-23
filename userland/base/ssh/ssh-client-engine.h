@@ -61,6 +61,27 @@
  * when the server falls behind.  When the session channel closes while
  * X11 channels are open, the connection stays until the last of them
  * closed (as OpenSSH's client waits for forwarded connections to end).
+ *
+ * Port forwarding (RFC 4254 7): the engine owns no socket.  The caller
+ * listens, accepts and connects, and the engine carries each forwarded
+ * connection on a channel of its own.  For a local port (ssh -L, -D) the
+ * caller opens a "direct-tcpip" channel with ssh_engine_open_direct and
+ * hears whether it opened with SSH_ENGINE_OPEN_REPLY.  For a remote port
+ * (ssh -R) the caller asks the server to listen with
+ * ssh_engine_forward_listen and hears the answer with
+ * SSH_ENGINE_FORWARD_REPLY; each "forwarded-tcpip" channel the server then
+ * opens for a connection to that port is shown as SSH_ENGINE_FORWARD_OPEN
+ * (an open for an address and port not asked for is refused) and waits
+ * for ssh_engine_open_answer.  A forwarded channel carries its bytes with
+ * the same channel calls as an X11 channel, with a window of
+ * SSH_ENGINE_FORWARD_WINDOW given back only for what the caller reported
+ * used.  A connection keeps at most 32 X11 channels and
+ * SSH_ENGINE_FORWARD_CHANNELS_MAX forwarded ones (32 when it asks for X11),
+ * and its session keeps channel number 0 even when it has none (options
+ * session 0), so no forwarded channel takes the session's number.  The
+ * channels opened before the session closed keep the connection after
+ * it, as X11 channels do; a connection without a session lasts until the
+ * caller or the server ends it.
  */
 
 #ifndef SSH_SSH_CLIENT_ENGINE_H
@@ -96,8 +117,17 @@
 /* The length of the fake MIT-MAGIC-COOKIE-1 in hexadecimal digits (16 bytes). */
 #define SSH_ENGINE_X11_COOKIE_DIGITS	32U
 
-/* The longest originator address of an X11 channel kept for its event (a longer one is cut). */
+/* The longest originator address of an X11 or forwarded channel kept for its event (a longer one is cut). */
 #define SSH_ENGINE_ADDRESS_MAX		64U
+
+/* The window of a forwarded TCP channel (512 KiB): what the caller holds of one is at most one and a half of it. */
+#define SSH_ENGINE_FORWARD_WINDOW	(512U * 1024U)
+
+/* The most remote forwardings (tcpip-forward) one connection asks for. */
+#define SSH_ENGINE_REMOTE_FORWARDS_MAX	16U
+
+/* The most forwarded TCP channels open at once on a connection that does not ask for X11 (32 on one that does). */
+#define SSH_ENGINE_FORWARD_CHANNELS_MAX	64U
 
 /* What an event says. */
 enum ssh_engine_event_kind {
@@ -124,8 +154,8 @@ enum ssh_engine_event_kind {
 	SSH_ENGINE_STARTED = 5,
 
 	/*
-	 * Data of a channel (channel: SSH_ENGINE_SESSION_CHANNEL or an X11
-	 * channel; bytes, size; stream 0 for the output, 1 for the session's
+	 * Data of a channel (channel: SSH_ENGINE_SESSION_CHANNEL, an X11 or a
+	 * forwarded channel; bytes, size; stream 0 for the output, 1 for the session's
 	 * error output).  The bytes stay valid until the next ssh_engine_next
 	 * or ssh_engine_close; the caller reports them used with
 	 * ssh_engine_consumed (the session) or ssh_engine_channel_consumed.
@@ -137,7 +167,7 @@ enum ssh_engine_event_kind {
 	 * when the server sent none), exit_signal the signal that ended it
 	 * (empty when none), reason why the session failed (empty when it did
 	 * not).  The connection then ends with SSH_ENGINE_CLOSED, at once, or
-	 * when the last X11 channel closed while any is open.
+	 * when the last X11 or forwarded channel closed while any is open.
 	 */
 	SSH_ENGINE_EXIT = 7,
 
@@ -178,15 +208,42 @@ enum ssh_engine_event_kind {
 	 */
 	SSH_ENGINE_X11_OPEN = 11,
 
-	/* The server sends no more data on an X11 channel (channel). */
+	/* The server sends no more data on an X11 or forwarded channel (channel). */
 	SSH_ENGINE_CHANNEL_EOF = 12,
 
 	/*
-	 * An X11 channel (channel) closed both ways; its number may be given
-	 * to a later channel.  Bytes of it not yet reported used no longer
-	 * need reporting.
+	 * An X11 or forwarded channel (channel) closed both ways, or a
+	 * direct-tcpip channel the caller closed before its answer ended; its
+	 * number may be given to a later channel.  Bytes of it not yet
+	 * reported used no longer need reporting.
 	 */
-	SSH_ENGINE_CHANNEL_CLOSED = 13
+	SSH_ENGINE_CHANNEL_CLOSED = 13,
+
+	/*
+	 * The server answered ssh_engine_forward_listen for forward: accepted
+	 * 1 with port the port it listens on (the one asked for, or the one
+	 * it chose for 0), or accepted 0 with port the one asked for.
+	 */
+	SSH_ENGINE_FORWARD_REPLY = 14,
+
+	/*
+	 * The server opens a forwarded-tcpip channel (channel) for a
+	 * connection to the port of forward: listen_address and listen_port
+	 * are the address asked for and the port listened on, address and
+	 * port the originator (text made safe, cut to
+	 * SSH_ENGINE_ADDRESS_MAX).  The caller answers with
+	 * ssh_engine_open_answer; until then the channel carries nothing.
+	 */
+	SSH_ENGINE_FORWARD_OPEN = 15,
+
+	/*
+	 * The server answered ssh_engine_open_direct for channel: accepted 1
+	 * (the channel is open), or accepted 0 with code the reason (RFC 4254
+	 * 5.1) and reason its words and the server's description, as
+	 * OpenSSH's client shows them after "open failed: " (text made safe);
+	 * the number is then free.
+	 */
+	SSH_ENGINE_OPEN_REPLY = 16
 };
 
 /* What to do with a host key after looking it up (ssh_engine_host_decide). */
@@ -234,6 +291,9 @@ struct ssh_engine_event {
 	int accepted;
 	char address[SSH_ENGINE_ADDRESS_MAX + 1];
 	unsigned port;
+	unsigned forward;
+	char listen_address[SSH_CONFIG_HOST_MAX + 1];
+	unsigned listen_port;
 };
 
 /*
@@ -376,16 +436,50 @@ int ssh_engine_write(struct ssh_engine *engine, const uint8_t *bytes, size_t siz
 void ssh_engine_consumed(struct ssh_engine *engine, size_t size);
 
 /*
- * Answers SSH_ENGINE_X11_OPEN for channel: accept 1 opens it (its window
- * SSH_ENGINE_X11_WINDOW), 0 refuses it (connect failed) and frees its
- * number.  Returns 0, EINVAL when channel waits for no answer, or EPIPE
- * after the connection ended.
+ * Answers SSH_ENGINE_X11_OPEN for channel, as ssh_engine_open_answer
+ * does (the window of an X11 channel is SSH_ENGINE_X11_WINDOW).
  */
 int ssh_engine_x11_answer(struct ssh_engine *engine, uint32_t channel, int accept);
 
 /*
+ * Answers SSH_ENGINE_X11_OPEN or SSH_ENGINE_FORWARD_OPEN for channel:
+ * accept 1 opens it, 0 refuses it (connect failed) and frees its number.
+ * Returns 0, EINVAL when channel waits for no answer, or EPIPE after the
+ * connection ended.
+ */
+int ssh_engine_open_answer(struct ssh_engine *engine, uint32_t channel, int accept);
+
+/*
+ * Asks the server to listen on address and port for connections to
+ * forward here (tcpip-forward, RFC 4254 7.1; address as OpenSSH's ssh
+ * sends it: "localhost" for no bind address, "" for "" or "*"; port 0
+ * for the server's choice).  Allowed once the user is authenticated.
+ * *forward receives the number the reply (SSH_ENGINE_FORWARD_REPLY) and
+ * the channels (SSH_ENGINE_FORWARD_OPEN) name it by; channels for a port
+ * asked for are taken from the moment of asking (as OpenSSH's client
+ * does), for port 0 once the server told the port it chose.  Returns 0,
+ * EINVAL (before the login, an address longer than SSH_CONFIG_HOST_MAX
+ * or with an unprintable byte, a port above 65535), EAGAIN
+ * (SSH_ENGINE_REMOTE_FORWARDS_MAX asked already) or EPIPE.
+ */
+int ssh_engine_forward_listen(struct ssh_engine *engine, const char *address, unsigned port, unsigned *forward);
+
+/*
+ * Opens a direct-tcpip channel (RFC 4254 7.2) to host and port for a
+ * connection that came from origin and origin_port.  Allowed once the
+ * user is authenticated and until the session channel closed (on a
+ * connection without a session, until it ends).  *channel receives its
+ * number; SSH_ENGINE_OPEN_REPLY tells whether it opened, and nothing is
+ * sent on it before.  Returns 0, EINVAL (not allowed now; host empty or
+ * longer than SSH_CONFIG_HOST_MAX, origin longer, a port out of range or
+ * an unprintable byte), EAGAIN (SSH_ENGINE_FORWARD_CHANNELS_MAX open, or
+ * no free channel) or EPIPE.
+ */
+int ssh_engine_open_direct(struct ssh_engine *engine, const char *host, unsigned port, const char *origin, unsigned origin_port, uint32_t *channel);
+
+/*
  * Sends bytes on a channel: SSH_ENGINE_SESSION_CHANNEL as
- * ssh_engine_write, or an open X11 channel; *written receives how many of
+ * ssh_engine_write, or an open X11 or forwarded channel; *written receives how many of
  * size bytes went (0 while the server's window or the output is full, and
  * after this side's EOF or close or the server's close).  Returns 0,
  * EINVAL (no such channel), or EPIPE after the connection ended.
@@ -407,9 +501,14 @@ void ssh_engine_channel_consumed(struct ssh_engine *engine, uint32_t channel, si
 int ssh_engine_channel_eof(struct ssh_engine *engine, uint32_t channel);
 
 /*
- * Closes an X11 channel (not the session's): the server's close coming
- * back ends it with SSH_ENGINE_CHANNEL_CLOSED, and data arriving before
- * that is dropped.  Returns 0, EINVAL (not an open X11 channel) or EPIPE.
+ * Closes an X11 or forwarded channel (not the session's): the server's
+ * close coming back ends it with SSH_ENGINE_CHANNEL_CLOSED, and data
+ * arriving before that is dropped.  A direct-tcpip channel still waiting
+ * for its answer is closed as soon as the server confirms it (or ends at
+ * its refusal), with no SSH_ENGINE_OPEN_REPLY but the
+ * SSH_ENGINE_CHANNEL_CLOSED at the end.  A channel waiting for the
+ * caller's answer is refused with ssh_engine_open_answer instead.
+ * Returns 0, EINVAL (not such a channel) or EPIPE.
  */
 int ssh_engine_channel_close(struct ssh_engine *engine, uint32_t channel);
 
