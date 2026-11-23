@@ -165,6 +165,10 @@ terminal_font_resize(
 		return error;
 	}
 
+	/* A font with no atlas yet has only its cell; attaching the atlas draws at the new size. */
+	if (font->pixels == NULL)
+		return 0;
+
 	/* The table of drawn characters goes; every glyph is drawn again at the new size. */
 	free(font->keys);
 	free(font->values);
