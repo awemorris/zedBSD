@@ -60,10 +60,12 @@
 /*
  * The most bytes of input a client may have waiting (its transport holds
  * back more than that, so only a client that breaks the protocol reaches
- * it), and of replies and events not yet taken from it.
+ * it), and of replies and events not yet taken from it: as long as the
+ * longest request and a little more, so that one reply as large (a
+ * GetImage of a large window, a GetProperty) fits whole.
  */
 #define X11_INPUT_CAP		X11SERVER_REQUEST_MAX
-#define X11_OUTPUT_CAP		(4U * 1024U * 1024U)
+#define X11_OUTPUT_CAP		(X11SERVER_REQUEST_MAX + 65536U)
 
 /* The most bytes of one client's requests one tick handles before it lets the caller run again. */
 #define X11_TICK_BYTES		(256U * 1024U)
