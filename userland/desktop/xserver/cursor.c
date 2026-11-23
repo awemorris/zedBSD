@@ -286,10 +286,10 @@ cursor_create(
 			return X11_BAD_MATCH;
 	}
 
-	/* The hot spot, inside the bitmap. */
+	/* The hot spot, inside the bitmap or on its right or bottom edge (as X.Org takes it). */
 	hot_x = x11_read16(request + 28, msb);
 	hot_y = x11_read16(request + 30, msb);
-	if (hot_x >= source->width || hot_y >= source->height)
+	if (hot_x > source->width || hot_y > source->height)
 		return X11_BAD_MATCH;
 
 	/* The cursor, the largest a backend shows (a larger bitmap's top-left part). */

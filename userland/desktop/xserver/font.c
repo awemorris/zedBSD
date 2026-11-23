@@ -315,6 +315,7 @@ static unsigned font_query(struct x11server *server, unsigned index, const uint8
 static unsigned font_text_extents(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned font_list(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned font_list_with_info(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static int font_send_info(struct x11server *server, struct x11_client *client, const struct x11_font *font, const char *name, unsigned left);
 static unsigned font_set_path(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned font_get_path(struct x11server *server, unsigned index, size_t length);
 static unsigned font_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -331,7 +332,7 @@ static int font_parse(const char *name, struct font_spec *spec);
 static int font_number(const char *field, size_t length, unsigned *value);
 static int font_field_is(const char *field, size_t length, const char *word);
 static void font_name(const struct font_spec *spec, char *name, size_t size);
-static int font_scalable(struct x11server *server, const char *pattern, size_t length, unsigned owner, struct x11_font **result);
+static int font_scalable(struct x11server *server, const char *pattern, size_t length, unsigned owner, unsigned skip, struct x11_font **result);
 static int font_make(struct x11server *server, struct font_spec *spec, unsigned owner, struct x11_font **result);
 static int font_make_special(struct x11server *server, const char *name, unsigned owner, struct x11_font **result);
 static void font_make_mono(struct x11server *server, struct x11_font *font, struct font_spec *spec);
@@ -792,6 +793,7 @@ font_list(
 	size_t length)
 {
 	struct x11_client *client;
+	struct x11_font *font;
 	const char *name;
 	uint8_t *reply;
 	size_t pattern_length;
@@ -800,6 +802,7 @@ font_list(
 	size_t offset;
 	unsigned maximum;
 	unsigned count;
+	unsigned skip;
 	int matches;
 	int error;
 
@@ -817,8 +820,8 @@ font_list(
 	if (error != 0)
 		return X11_BAD_ALLOC;
 
-	/* Room for every name, in the worst case. */
-	reply = malloc(32U + server->font_names_size + 4U);
+	/* Room for every name and every scalable name at the pattern's size, in the worst case. */
+	reply = malloc(32U + server->font_names_size * 2U + 4U);
 	if (reply == NULL)
 		return X11_BAD_ALLOC;
 	memset(reply, 0, 32U);
@@ -838,6 +841,19 @@ font_list(
 		memcpy(reply + used + 1U, name, name_length);
 		used += 1U + name_length;
 		count++;
+	}
+
+	/* The scalable names at the size the pattern gives. */
+	for (skip = 0U; count < maximum; skip++) {
+		error = font_scalable(server, (const char *)request + 8, pattern_length, X11_NO_CLIENT, skip, &font);
+		if (error != 0)
+			break;
+		name_length = strlen(font->name);
+		reply[used] = (uint8_t)name_length;
+		memcpy(reply + used + 1U, font->name, name_length);
+		used += 1U + name_length;
+		count++;
+		x11_font_free(server, font);
 	}
 
 	/* Succeeded: the names, padded to a word. */
@@ -864,14 +880,13 @@ font_list_with_info(
 	struct x11_font *font;
 	const char *name;
 	uint8_t last[60];
-	uint8_t *reply;
 	size_t pattern_length;
 	size_t name_length;
-	size_t reply_length;
 	size_t offset;
 	unsigned maximum;
 	unsigned count;
 	unsigned left;
+	unsigned skip;
 	int matches;
 	int error;
 
@@ -884,7 +899,7 @@ font_list_with_info(
 	if (8U + ((pattern_length + 3U) & ~(size_t)3U) != length)
 		return X11_BAD_LENGTH;
 
-	/* The names the server answers to, and how many match (the hint each reply gives). */
+	/* The names the server answers to, and how many match with the scalable ones (the hint each reply gives). */
 	error = font_names(server);
 	if (error != 0)
 		return X11_BAD_ALLOC;
@@ -894,10 +909,17 @@ font_list_with_info(
 		if (matches)
 			left++;
 	}
+	for (skip = 0U; left < maximum; skip++) {
+		error = font_scalable(server, (const char *)request + 8, pattern_length, X11_NO_CLIENT, skip, &font);
+		if (error != 0)
+			break;
+		x11_font_free(server, font);
+		left++;
+	}
 	if (left > maximum)
 		left = maximum;
 
-	/* A reply for each name that matches, opened for its information. */
+	/* A reply for each listed name that matches, opened for its information. */
 	count = 0U;
 	for (offset = 0U;
 	     offset < server->font_names_size && count < maximum;
@@ -912,23 +934,59 @@ font_list_with_info(
 		error = font_resolve(server, name, name_length, X11_NO_CLIENT, &font);
 		if (error != 0)
 			continue;
-		reply_length = font_info(server, font, client, &reply, (name_length + 3U) & ~(size_t)3U);
-		if (reply_length == 0U) {
-			x11_font_free(server, font);
-			return X11_BAD_ALLOC;
-		}
-		reply[1] = (uint8_t)name_length;
-		x11_write32(reply + 56, left, client->order);
-		memcpy(reply + reply_length - ((name_length + 3U) & ~(size_t)3U), name, name_length);
-		x11_reply(server, client, reply, reply_length);
-		free(reply);
+		error = font_send_info(server, client, font, name, left);
 		x11_font_free(server, font);
+		if (error != 0)
+			return X11_BAD_ALLOC;
+	}
+
+	/* A reply for each scalable name at the pattern's size. */
+	for (skip = 0U; count < maximum; skip++) {
+		error = font_scalable(server, (const char *)request + 8, pattern_length, X11_NO_CLIENT, skip, &font);
+		if (error != 0)
+			break;
+		count++;
+		left--;
+		error = font_send_info(server, client, font, font->name, left);
+		x11_font_free(server, font);
+		if (error != 0)
+			return X11_BAD_ALLOC;
 	}
 
 	/* Succeeded: the last reply, which names no font. */
 	memset(last, 0, sizeof(last));
 	x11_reply(server, client, last, sizeof(last));
 	return 0U;
+}
+
+/* Sends one reply of ListFontsWithInfo: a font's information under a name, and how many replies are left.  Returns 0, or ENOMEM. */
+static int
+font_send_info(
+	struct x11server *server,
+	struct x11_client *client,
+	const struct x11_font *font,
+	const char *name,
+	unsigned left)
+{
+	uint8_t *reply;
+	size_t name_length;
+	size_t padded;
+	size_t reply_length;
+
+	/* The information, with room for the name. */
+	name_length = strlen(name);
+	padded = (name_length + 3U) & ~(size_t)3U;
+	reply_length = font_info(server, font, client, &reply, padded);
+	if (reply_length == 0U)
+		return ENOMEM;
+
+	/* Succeeded: the name's length, the replies left, and the name after the properties. */
+	reply[1] = (uint8_t)name_length;
+	x11_write32(reply + 56, left, client->order);
+	memcpy(reply + reply_length - padded, name, name_length);
+	x11_reply(server, client, reply, reply_length);
+	free(reply);
+	return 0;
 }
 
 /* SetFontPath: a list of directories, taken and not used (the fonts are the server's own). */
@@ -1353,7 +1411,7 @@ font_resolve(
 	}
 
 	/* A scalable name at the size the pattern gives. */
-	error = font_scalable(server, pattern, pattern_length, owner, result);
+	error = font_scalable(server, pattern, pattern_length, owner, 0U, result);
 	if (error != 0)
 		return error;
 
@@ -1740,28 +1798,30 @@ font_parse(
 	return 0;
 }
 
-/* Reads a field of decimal digits.  Returns 0, or -1 for another field or one too large. */
+/* Reads a field of decimal digits.  Returns 0, or -1 for another field or one too large (*value unchanged). */
 static int
 font_number(
 	const char *field,
 	size_t length,
 	unsigned *value)
 {
+	unsigned number;
 	size_t index;
 
 	/* At least one digit, and few enough to fit. */
 	if (length == 0U || length > 6U)
 		return -1;
 
-	/* Each digit. */
-	*value = 0U;
+	/* Each digit (the value is left as it was for a field that is not a number). */
+	number = 0U;
 	for (index = 0U; index < length; index++) {
 		if (field[index] < '0' || field[index] > '9')
 			return -1;
-		*value = *value * 10U + (unsigned)(field[index] - '0');
+		number = number * 10U + (unsigned)(field[index] - '0');
 	}
 
 	/* Succeeded: the number. */
+	*value = number;
 	return 0;
 }
 
@@ -1830,10 +1890,10 @@ font_name(
 }
 
 /*
- * Makes a font through a scalable name: the first family's scalable name
- * the pattern matches once the pattern's sizes, resolution, slant and
- * average width are put in it.  Returns 0, ENOENT when none matches (or
- * the pattern gives no size), or ENOMEM.
+ * Makes a font through a scalable name: the family's scalable name the
+ * pattern matches once the pattern's sizes, resolution, slant and average
+ * width are put in it, the first or (skip) a later one.  Returns 0,
+ * ENOENT when none matches (or the pattern gives no size), or ENOMEM.
  */
 static int
 font_scalable(
@@ -1841,6 +1901,7 @@ font_scalable(
 	const char *pattern,
 	size_t length,
 	unsigned owner,
+	unsigned skip,
 	struct x11_font **result)
 {
 	const char *fields[FONT_FIELDS];
@@ -1910,10 +1971,12 @@ font_scalable(
 		if (error != 0)
 			return error;
 		matches = font_glob(pattern, length, font->name);
-		if (matches) {
+		if (matches && skip == 0U) {
 			*result = font;
 			return 0;
 		}
+		if (matches)
+			skip--;
 		x11_font_free(server, font);
 	}
 
