@@ -27,6 +27,9 @@
 /* The user asked the connection for the settings: they open in a tab of their own beside it (it goes on). */
 #define TERMINAL_READY_SETTINGS	0x10U
 
+/* The connection has a new tab's connection for the run to open (take gives it). */
+#define TERMINAL_READY_TAB	0x20U
+
 /* A connection's input modes: the echo is on, the input is read by the line. */
 #define TERMINAL_MODE_ECHO	0x1U
 #define TERMINAL_MODE_LINES	0x2U
@@ -43,7 +46,18 @@
  * this connection's, by its TERMINAL_READY_* bits (0 when not); pending
  * tells what it still has now, whatever events came (the main loop then
  * does not wait); close hangs up and returns at once.
+ *
+ * take (NULL where a connection never has one) gives a new tab's
+ * connection the other end opened, with TERMINAL_READY_TAB (NULL when
+ * none is left); the run opens a tab for it and makes it active.  picture
+ * (NULL for a grid's connection) makes the tab a picture's: the run shows
+ * what it draws in the grid's place, gives it the window's inputs as they
+ * are, and tells its size in pixels (resize, with no cells); its output
+ * (TERMINAL_READY_OUTPUT) means a new picture or a new title.
  */
+/* What a picture's connection does besides (below). */
+struct terminal_picture_ops;
+
 struct terminal_connection_ops {
 	size_t (*read)(struct terminal_connection *connection, unsigned char *buffer, size_t size);
 	int (*write)(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
@@ -52,6 +66,20 @@ struct terminal_connection_ops {
 	unsigned (*event)(struct terminal_connection *connection, const struct kl_app_event *event);
 	unsigned (*pending)(const struct terminal_connection *connection);
 	void (*close)(struct terminal_connection *connection);
+	struct terminal_connection *(*take)(struct terminal_connection *connection);
+	const struct terminal_picture_ops *picture;
+};
+
+/*
+ * What a picture's connection does besides: draw paints the whole of
+ * what it shows into pixels (0xAARRGGBB, width by height, rows of the
+ * width), 0 or an errno value; title gives its title (UTF-8, cut to
+ * size); input takes one of the window's inputs (terminal.h).
+ */
+struct terminal_picture_ops {
+	int (*draw)(struct terminal_connection *connection, uint32_t *pixels, uint32_t width, uint32_t height);
+	void (*title)(struct terminal_connection *connection, char *title, size_t size);
+	void (*input)(struct terminal_connection *connection, const struct terminal_picture_event *event);
 };
 
 /*

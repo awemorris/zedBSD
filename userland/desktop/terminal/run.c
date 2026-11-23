@@ -297,7 +297,9 @@ static const struct terminal_connection_ops run_page_ops = {
 	run_page_mode,
 	run_page_event,
 	run_page_pending,
-	run_page_close
+	run_page_close,
+	NULL,
+	NULL
 };
 static struct terminal_connection run_page_connection = { &run_page_ops };
 

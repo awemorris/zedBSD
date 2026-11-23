@@ -46,10 +46,52 @@
 #define X11_LINK_PONG		8U
 #define X11_LINK_SHUTDOWN	9U
 
+/*
+ * The frames of the X windows shown in mikuterm's tabs (the settings'
+ * X11WindowTabify), each with the X window's id as its link id.  The
+ * child sends a tab's opening (its size in X's pixels, the X server's
+ * scale in percent and its title), a new title, a new size, a part of its
+ * pixels (the part's place and size, then its pixels of 0xAARRGGBB, rows
+ * of the part's width) and its end.  The parent sends the user's input
+ * in the tab (X11_LINK_INPUT_*), the size the tab gives the window (X's
+ * pixels) and the user's closing of the tab.
+ */
+#define X11_LINK_TAB_OPEN	10U
+#define X11_LINK_TAB_TITLE	11U
+#define X11_LINK_TAB_SIZE	12U
+#define X11_LINK_TAB_PIXELS	13U
+#define X11_LINK_TAB_GONE	14U
+#define X11_LINK_TAB_INPUT	15U
+#define X11_LINK_TAB_CONFIGURE	16U
+#define X11_LINK_TAB_CLOSE	17U
+
+/*
+ * The fixed parts of the tabs' frames: an opening's size and scale, a
+ * size, a part's place and size, an input's kind and its three numbers
+ * (an input of text has its UTF-8 after the kind instead), and the
+ * longest title.
+ */
+#define X11_LINK_TAB_OPEN_FIXED		12U
+#define X11_LINK_TAB_SIZE_BODY		8U
+#define X11_LINK_TAB_PIXELS_FIXED	16U
+#define X11_LINK_TAB_INPUT_BODY		16U
+#define X11_LINK_TAB_TITLE_MAX		1024U
+
+/*
+ * The inputs of a tab: a key (its evdev code, pressed or released), text
+ * an input method typed (UTF-8), the pointer (X's button 1 to 9, 0 for a
+ * move; pressed or released; its place on the window in X's pixels), and
+ * the keyboard's focus coming (1) or going (0).
+ */
+#define X11_LINK_INPUT_KEY	1U
+#define X11_LINK_INPUT_TEXT	2U
+#define X11_LINK_INPUT_POINTER	3U
+#define X11_LINK_INPUT_FOCUS	4U
+
 /* The header's size, the most bytes one frame carries, and the link's version. */
 #define X11_LINK_HEADER		9U
 #define X11_LINK_BODY_MAX	65536U
-#define X11_LINK_VERSION	2U
+#define X11_LINK_VERSION	3U
 
 /* The X clients one link carries at a time. */
 #define X11_LINK_CHANNELS	32U

@@ -107,6 +107,22 @@ struct terminal_connection;
 /* How many touch inputs wait for the main loop at most. */
 #define TERMINAL_TOUCH_EVENTS	256U
 
+/* How many inputs of a picture's tab wait for the main loop at most. */
+#define TERMINAL_PICTURE_EVENTS	64U
+
+/*
+ * The kinds of a picture's tab's inputs (connection.h): a key pressed or
+ * released, text an input method typed, the pointer moved, a button
+ * pressed or released, the wheel turned, and the keyboard's focus coming
+ * or going.
+ */
+#define TERMINAL_PICTURE_KEY	1U
+#define TERMINAL_PICTURE_TEXT	2U
+#define TERMINAL_PICTURE_MOTION	3U
+#define TERMINAL_PICTURE_BUTTON	4U
+#define TERMINAL_PICTURE_AXIS	5U
+#define TERMINAL_PICTURE_FOCUS	6U
+
 /* The kinds of pointer events the main loop takes: the left button pressed or released, a motion. */
 #define TERMINAL_POINTER_PRESS		1U
 #define TERMINAL_POINTER_RELEASE	2U
@@ -376,6 +392,23 @@ struct terminal_pointer_event {
 	uint32_t time;
 	uint32_t serial;
 	uint32_t modifiers;
+};
+
+/*
+ * One input of a picture's tab, as the window had it: its kind
+ * (TERMINAL_PICTURE_*), a key's or a button's evdev code (a focus: 1 when
+ * it came), whether it is pressed, where the pointer is (the window's
+ * pixels), the wheel's distance and the text typed (UTF-8).
+ */
+struct terminal_picture_event {
+	unsigned kind;
+	uint32_t code;
+	int pressed;
+	int32_t x;
+	int32_t y;
+	double dx;
+	double dy;
+	char text[KL_WINDOW_TEXT_MAX];
 };
 
 /*
@@ -719,6 +752,16 @@ struct terminal_window {
 	 */
 	int page_active;
 	int settings_item;
+
+	/*
+	 * A picture's tab (connection.h): whether it is the active tab (the
+	 * window's keys, text and pointer then go to it as they are), and its
+	 * inputs not yet taken by the main loop, oldest first (a full queue
+	 * drops the newest).
+	 */
+	int picture_active;
+	struct terminal_picture_event picture_events[TERMINAL_PICTURE_EVENTS];
+	unsigned picture_event_count;
 
 	/*
 	 * The pacing of the frames (pace.h): what the pacing's implementation
