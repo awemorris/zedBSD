@@ -38,9 +38,10 @@
 
 /*
  * The first title of a tab, before the remote side sets its own: the
- * program's name and the session's number (the order the tabs were
- * opened in, from 1), so that tabs still on the launch screen differ in
- * the tab strip and in its list of the tabs out of sight.
+ * session's number (the order the tabs were opened in, from 1) and the
+ * program's name, the number first so that a tab cut to a narrow width
+ * still shows it, and tabs still on the launch screen differ in the tab
+ * strip and in its list of the tabs out of sight.
  */
 #define CONNECTION_TITLE	"mikuterm"
 
@@ -497,7 +498,7 @@ connection_open(
 
 	/* The tab's first title, until the remote side sets one (the session may be gone already: its number was kept). */
 	if (size != 0U)
-		(void)snprintf(title, size, "%s %u", CONNECTION_TITLE, (unsigned)number);
+		(void)snprintf(title, size, "%u %s", (unsigned)number, CONNECTION_TITLE);
 
 	/* Succeeded: the tab has its connection. */
 	connector->first_opened = 1;

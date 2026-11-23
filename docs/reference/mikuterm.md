@@ -240,9 +240,10 @@ key is AltGr on the layouts that have one (Windows reports it as Ctrl+Alt),
 and AltGr with a digit types its character to the host as before. Ctrl with
 the left Alt types no AltGr character in mikuterm, as these keys take it.
 
-A tab's title is `mikuterm` and the number of its connection in the order
-the tabs were opened (`mikuterm 1`, `mikuterm 2`, the settings tab not
-counted), until the host sets one. When the tabs do not fit in the title
+A tab's title is the number of its connection in the order the tabs were
+opened and `mikuterm` (`1 mikuterm`, `2 mikuterm`, the settings tab not
+counted; the number first, so that a narrow tab still shows it), until the
+host sets one. When the tabs do not fit in the title
 bar at their least width (96 pixels at 100 %), the tab bar scrolls as the
 desktop's titlebar in zedBSD does: an arrow at each end moves it by one tab
 (faint at its end), the wheel over the tabs moves it too, and the button
