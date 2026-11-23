@@ -118,7 +118,7 @@ mikuterm_android_main(void)
 	run.emoji = NULL;
 	run.pixels = main_state.conf.font_size;
 	run.pixels_given = 0;
-	run.scale = 0U;
+	run.scale = keiland_android_scale();
 	run.columns = main_state.conf.columns;
 	run.rows = main_state.conf.rows;
 	run.timeout = 0U;
