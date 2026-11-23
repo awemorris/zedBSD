@@ -19,6 +19,12 @@
  * credit of the link and the SSH window let it.  A child that fails, stops
  * answering or breaks the link's rules is ended and its channels closed;
  * the next X client starts another, three times at most.
+ *
+ * With X11WindowTabify the child shows its top-level windows in mikuterm's
+ * tabs (x11-tab.h): it opens a tab for each, which the network thread
+ * takes with x11_host_new_tab and gives the session, and each round the
+ * host sends the child what the tabs have (their sizes, the user's input,
+ * their closing) and keeps what the child sends of them.
  */
 
 #ifndef MIKUTERM_X11_HOST_H
@@ -31,6 +37,7 @@
 
 struct kl_socket;
 struct ssh_engine;
+struct x11_tab;
 
 /* The fake MIT-MAGIC-COOKIE-1's bytes. */
 #define X11_HOST_COOKIE		16U
@@ -39,6 +46,7 @@ struct ssh_engine;
 #define X11_HOST_TRUSTED	(1U << 0)
 #define X11_HOST_PRIMARY	(1U << 1)
 #define X11_HOST_RENDER_CPU	(1U << 2)
+#define X11_HOST_TABIFY		(1U << 3)
 
 /* The longest host name given to the child (for its titles). */
 #define X11_HOST_NAME_MAX	256U
@@ -105,6 +113,15 @@ struct x11_host {
 	int ping_waiting;
 	unsigned starts;
 	char message[X11_HOST_MESSAGE_MAX];
+
+	/*
+	 * The X windows' tabs the host holds, by the child's windows (NULL:
+	 * a free place), and the new ones the network thread has not taken
+	 * yet, oldest first, each with the run's hold on it.
+	 */
+	struct x11_tab *tabs[X11_LINK_TABS];
+	struct x11_tab *fresh[X11_LINK_TABS];
+	unsigned fresh_count;
 };
 
 void x11_host_init(struct x11_host *host, const struct x11_host_settings *settings);
@@ -116,6 +133,7 @@ void x11_host_closed(struct x11_host *host, uint32_t channel);
 int x11_host_pump(struct x11_host *host, struct ssh_engine *engine, uint64_t now);
 struct kl_socket *x11_host_socket(const struct x11_host *host, int *writable);
 int x11_host_open_count(const struct x11_host *host);
+struct x11_tab *x11_host_new_tab(struct x11_host *host);
 void x11_host_foreground(const struct x11_host *host);
 int mikuterm_x11_child(void);
 

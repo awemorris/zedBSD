@@ -34,6 +34,9 @@
 #define TERMINAL_MODE_ECHO	0x1U
 #define TERMINAL_MODE_LINES	0x2U
 
+/* What a picture's connection does besides (below). */
+struct terminal_picture_ops;
+
 /*
  * What a connection does, the implementation's own functions:
  *
@@ -53,11 +56,9 @@
  * (NULL for a grid's connection) makes the tab a picture's: the run shows
  * what it draws in the grid's place, gives it the window's inputs as they
  * are, and tells its size in pixels (resize, with no cells); its output
- * (TERMINAL_READY_OUTPUT) means a new picture or a new title.
+ * (TERMINAL_READY_OUTPUT) means a new picture or a new title, and read
+ * takes no bytes but takes the news.
  */
-/* What a picture's connection does besides (below). */
-struct terminal_picture_ops;
-
 struct terminal_connection_ops {
 	size_t (*read)(struct terminal_connection *connection, unsigned char *buffer, size_t size);
 	int (*write)(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
@@ -74,12 +75,16 @@ struct terminal_connection_ops {
  * What a picture's connection does besides: draw paints the whole of
  * what it shows into pixels (0xAARRGGBB, width by height, rows of the
  * width), 0 or an errno value; title gives its title (UTF-8, cut to
- * size); input takes one of the window's inputs (terminal.h).
+ * size); input takes one of the window's inputs (terminal.h); refuse
+ * tells it that the run has no tab for it (a full window), before the
+ * run closes it, so that the other end shows the picture some other way
+ * instead of ending it.
  */
 struct terminal_picture_ops {
 	int (*draw)(struct terminal_connection *connection, uint32_t *pixels, uint32_t width, uint32_t height);
 	void (*title)(struct terminal_connection *connection, char *title, size_t size);
 	void (*input)(struct terminal_connection *connection, const struct terminal_picture_event *event);
+	void (*refuse)(struct terminal_connection *connection);
 };
 
 /*

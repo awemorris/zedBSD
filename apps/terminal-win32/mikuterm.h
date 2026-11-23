@@ -73,6 +73,7 @@ struct mikuterm_conf {
 	int x11_primary;
 	unsigned x11_root_width;
 	unsigned x11_root_height;
+	int x11_tabify;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
@@ -94,6 +95,7 @@ struct mikuterm_connect_options {
 	int x11_primary;
 	unsigned x11_root_width;
 	unsigned x11_root_height;
+	int x11_tabify;
 	const char *notice;
 };
 

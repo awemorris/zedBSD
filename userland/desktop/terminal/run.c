@@ -30,6 +30,12 @@
  * a connection (run_page_connection answers nothing) whose page of
  * widgets the drawing shows in the grid's place while it is active.
  *
+ * A connection may also open tabs of pictures (connection.h: a remote
+ * program's window): the run takes each new one's connection from the
+ * connection that has it, shows what it draws in the grid's place while
+ * its tab is active, gives it the window's keys, text and pointer as they
+ * are, and tells it its size in pixels.
+ *
  * Every outcome is one line on standard output (ZTERM ...), which the
  * tests read; the program says how the run ended before it is torn down.
  */
@@ -121,7 +127,9 @@ static int run_touch_due = -1;
 /*
  * One tab: its grid (allocated, too large for the stack), its connection
  * (the other end: a shell on a terminal of its own, or a remote one), its
- * ID in the titlebar and its title.
+ * ID in the titlebar and its title, whether it is the settings', and what
+ * its connection draws when it is a picture's (NULL for a grid's; the
+ * grid is then never shown, and its title is the picture's).
  */
 struct run_tab {
 	struct terminal_screen *screen;
@@ -129,6 +137,7 @@ struct run_tab {
 	uint32_t id;
 	char title[TERMINAL_TAB_TITLE];
 	int settings;
+	const struct terminal_picture_ops *picture;
 };
 
 /* The settings tab's title. */
@@ -277,6 +286,17 @@ static int run_copy_on_select;
 static uint32_t run_page_from;
 
 /*
+ * The pixels the active picture's tab is drawn into (the drawing's size,
+ * run_picture_count of them; NULL until the first is drawn), made larger
+ * when the drawing grows and freed at the run's end.
+ */
+static uint32_t *run_picture_pixels;
+static size_t run_picture_count;
+
+/* The ID of the picture's tab told it has the keyboard (0: none), which is told it lost it when another tab is chosen. */
+static uint32_t run_picture_focused;
+
+/*
  * The settings tab's connection: it has nothing to read, takes every key
  * without sending it anywhere and never ends (the tab closes when the
  * user closes it).  One for the run; it holds nothing.
@@ -362,6 +382,12 @@ static int run_page_frame(struct run_state *run);
 static void run_page_copy(void);
 static void run_page_paste(void);
 static void run_copy_on_select_switch(const struct terminal_run_options *options, struct run_state *run);
+static int run_tabs_take(const struct terminal_run_options *options, struct run_state *run, const unsigned *ready, const uint32_t *told);
+static int run_tab_picture_open(const struct terminal_run_options *options, struct run_state *run, struct terminal_connection *connection);
+static void run_picture_output(unsigned index, unsigned ready);
+static void run_picture_inputs(void);
+static void run_picture_focus(unsigned index, int focused);
+static int run_picture_frame(struct run_state *run);
 
 /*
  * Runs the terminal: opens the font, the window, the display and the first
@@ -415,7 +441,10 @@ terminal_run(
 	while (run_tab_count > 0U)
 		(void)run_tab_close(options, &run, run_tab_count - 1U);
 
-	/* The settings' page, the drawing before the window it draws into, then the font. */
+	/* The pictures' pixels, the settings' page, the drawing before the window it draws into, then the font. */
+	free(run_picture_pixels);
+	run_picture_pixels = NULL;
+	run_picture_count = 0U;
 	terminal_page_close();
 	terminal_display_close(run_display);
 	run_display = NULL;
@@ -707,6 +736,11 @@ run_loop(
 			break;
 		}
 
+		/* The tabs of pictures the connections opened, each made the active one. */
+		status = run_tabs_take(options, run, ready, told);
+		if (status < 0)
+			return -1;
+
 		/* What each connection wrote goes on its grid, from the last tab so a closed one leaves the others' places; a connection's end closes its tab. */
 		for (index = run_tab_count; index > 0U; index--) {
 			/* A connection that told nothing to read and has not ended. */
@@ -716,6 +750,10 @@ run_loop(
 			/* A tab made or moved since the round's wait was not told this: it is read on the next round. */
 			if (run_tabs[index - 1U].id != told[index - 1U])
 				continue;
+
+			/* A picture's news: its title, and its picture drawn again. */
+			if (run_tabs[index - 1U].picture != NULL)
+				run_picture_output(index - 1U, ready[index - 1U]);
 
 			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
 			status = run_read_shell(run_tabs[index - 1U].connection, run_tabs[index - 1U].screen, ready[index - 1U]);
@@ -765,6 +803,9 @@ run_loop(
 			run_view_log("key");
 		}
 
+		/* The window's input goes to the active picture's tab as it came. */
+		run_picture_inputs();
+
 		/* The keys typed and the text pasted go to the shell. */
 		status = run_write_shell(run->connection);
 		if (status != 0) {
@@ -810,6 +851,14 @@ run_loop(
 		/* The settings' page is drawn in the grid's place while its tab is active. */
 		if (run_window.page_active) {
 			status = run_page_frame(run);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
+		/* So is the picture of a picture's tab. */
+		if (run_window.picture_active) {
+			status = run_picture_frame(run);
 			if (status != 0)
 				return -1;
 			continue;
@@ -918,7 +967,10 @@ run_grid(
 		*rows = TERMINAL_MAX_ROWS;
 }
 
-/* Tells a connection the grid's size (a shell gets SIGWINCH), in cells and in pixels. */
+/*
+ * Tells a connection the grid's size (a shell gets SIGWINCH), in cells and
+ * in pixels; a picture's is told the drawing's pixels, with no cells.
+ */
 static void
 run_tell_size(
 	const struct run_state *run,
@@ -927,6 +979,13 @@ run_tell_size(
 	unsigned width;
 	unsigned height;
 	int error;
+
+	/* A picture fills the grid's place. */
+	if (connection->ops->picture != NULL) {
+		error = connection->ops->resize(connection, 0U, 0U, run->width, run->height);
+		(void)error;
+		return;
+	}
 
 	/* The grid's cells and the pixels they cover. */
 	width = run->columns * run_font.cell_width;
@@ -985,8 +1044,10 @@ run_secret_follow(
 	int text_off;
 	int error;
 
-	/* The settings' page asks for the text input itself while its tab is active. */
+	/* The settings' page asks for the text input itself while its tab is active, and a picture's tab has it as the user left it. */
 	if (run_window.page_active)
+		return;
+	if (run_window.picture_active)
 		return;
 
 	/* The active connection's modes; one that cannot tell them leaves the secret as it was. */
@@ -1106,22 +1167,22 @@ run_menu_actions(
 				return 1;
 			break;
 		case TERMINAL_ACTION_COPY:
-			/* The selected text into the terminal's clipboard (the settings' field's while their tab is active). */
+			/* The selected text into the terminal's clipboard (the settings' field's while their tab is active; a picture has none). */
 			if (run_window.page_active)
 				run_page_copy();
-			else
+			else if (!run_window.picture_active)
 				run_copy();
 			break;
 		case TERMINAL_ACTION_PASTE:
-			/* The clipboard's text to the shell, as if typed (into the settings' field while their tab is active). */
+			/* The clipboard's text to the shell, as if typed (into the settings' field while their tab is active; a picture's program pastes its own). */
 			if (run_window.page_active)
 				run_page_paste();
-			else
+			else if (!run_window.picture_active)
 				run_start_paste();
 			break;
 		case TERMINAL_ACTION_SELECT_ALL:
-			/* The whole screen is selected until a key is typed (not the settings' page). */
-			if (run_window.page_active)
+			/* The whole screen is selected until a key is typed (not the settings' page, nor a picture). */
+			if (run_window.page_active || run_window.picture_active)
 				break;
 			run_screen->selected = 1;
 			run_screen->changed = 1;
@@ -1177,18 +1238,18 @@ run_menu_actions(
 			run_ambiguous_wide(options, run);
 			break;
 		case TERMINAL_ACTION_FIND:
-			/* The search bar opens with the text looked for last; the settings' page has none. */
-			if (!run_window.page_active)
+			/* The search bar opens with the text looked for last; the settings' page and a picture have none. */
+			if (!run_window.page_active && !run_window.picture_active)
 				run_find(0);
 			break;
 		case TERMINAL_ACTION_FIND_NEXT:
 			/* The next older match. */
-			if (!run_window.page_active)
+			if (!run_window.page_active && !run_window.picture_active)
 				run_find(1);
 			break;
 		case TERMINAL_ACTION_FIND_PREVIOUS:
 			/* The next newer match. */
-			if (!run_window.page_active)
+			if (!run_window.page_active && !run_window.picture_active)
 				run_find(-1);
 			break;
 		case TERMINAL_ACTION_THEME_DARK:
@@ -1743,6 +1804,9 @@ run_tab_switch(
 	struct run_state *run,
 	unsigned index)
 {
+	int leaving_picture;
+	int found;
+
 	/* Only a tab that is there. */
 	if (index >= run_tab_count)
 		return;
@@ -1752,12 +1816,33 @@ run_tab_switch(
 	run_screen = run_tabs[index].screen;
 	run->connection = run_tabs[index].connection;
 
+	/* The picture's tab that had the keyboard loses it (one closed is told nothing); the inputs queued were the tab's before. */
+	if (run_picture_focused != 0U && run_picture_focused != run_tabs[index].id) {
+		found = run_tab_find(run_picture_focused);
+		if (found >= 0)
+			run_picture_focus((unsigned)found, 0);
+		run_picture_focused = 0U;
+	}
+	leaving_picture = run_window.picture_active;
+	run_window.picture_active = 0;
+	run_window.picture_event_count = 0U;
+
 	/* The settings' tab takes the window's input; a grid's tab gets the text input back as its connection left it. */
 	if (run_tabs[index].settings) {
 		run_window.page_active = 1;
 		terminal_page_shown(&run_window);
 	} else if (run_window.page_active) {
 		run_window.page_active = 0;
+		kl_window_text_input(run_window.kui, !run_text_off);
+	}
+
+	/* A picture's tab takes the window's input as it comes, and the keyboard when the window has it. */
+	if (run_tabs[index].picture != NULL) {
+		run_window.picture_active = 1;
+		kl_window_text_input(run_window.kui, !run_input_method_off);
+		if (run_window.focused)
+			run_picture_focus(index, 1);
+	} else if (leaving_picture && !run_tabs[index].settings) {
 		kl_window_text_input(run_window.kui, !run_text_off);
 	}
 
@@ -3198,4 +3283,259 @@ run_page_close(
 	struct terminal_connection *connection)
 {
 	(void)connection;
+}
+
+/*
+ * Opens a tab for each picture a connection told it has (its
+ * TERMINAL_READY_TAB of this round), each made the active one; a full
+ * window refuses the rest, which the other end then shows another way.
+ * Returns 0, or -1 with errno set when memory runs out.
+ */
+static int
+run_tabs_take(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	const unsigned *ready,
+	const uint32_t *told)
+{
+	struct terminal_connection *connection;
+	struct terminal_connection *opened;
+	unsigned count;
+	unsigned index;
+	int status;
+
+	/* The tabs there were at the round's wait (a tab opened here moves none of them). */
+	count = run_tab_count;
+	for (index = 0U; index < count && index < TERMINAL_TABS; index++) {
+		/* A connection told that it has new tabs, of the tab told. */
+		if ((ready[index] & TERMINAL_READY_TAB) == 0U || run_tabs[index].id != told[index])
+			continue;
+		connection = run_tabs[index].connection;
+		if (connection->ops->take == NULL)
+			continue;
+
+		/* Each new tab's connection it has. */
+		for (;;) {
+			opened = connection->ops->take(connection);
+			if (opened == NULL)
+				break;
+			status = run_tab_picture_open(options, run, opened);
+			if (status != 0)
+				return -1;
+		}
+	}
+
+	/* Succeeded: every new tab is open, or refused. */
+	return 0;
+}
+
+/*
+ * Opens a picture's tab for a connection at the end and makes it the
+ * active one; a full window, or a connection that is not a picture's,
+ * has no tab (it is refused and closed).  Returns 0, or -1 with errno
+ * set when memory runs out (the connection is then closed).
+ */
+static int
+run_tab_picture_open(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	struct terminal_connection *connection)
+{
+	const struct terminal_picture_ops *picture;
+	struct terminal_screen *screen;
+	struct run_tab *tab;
+
+	/* A full window, or a connection the run cannot show: the other end keeps it another way. */
+	picture = connection->ops->picture;
+	if (picture == NULL || run_tab_count == TERMINAL_TABS) {
+		if (picture != NULL)
+			picture->refuse(connection);
+		connection->ops->close(connection);
+		printf("ZTERM TAB refused run=%s count=%u\n", options->token, run_tab_count);
+		fflush(stdout);
+		return 0;
+	}
+
+	/* The tab's grid, which is never shown (every tab has one; its title is the picture's). */
+	screen = malloc(sizeof(*screen));
+	if (screen == NULL) {
+		connection->ops->close(connection);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	/* An empty grid of the window's size. */
+	terminal_screen_init(screen, run->columns, run->rows);
+
+	/* The tab, at the end, with its ID and the picture's title. */
+	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
+	tab->screen = screen;
+	tab->connection = connection;
+	tab->id = run_tab_next;
+	tab->picture = picture;
+	picture->title(connection, screen->title, sizeof(screen->title));
+	run_title_copy(tab->title, sizeof(tab->title), screen->title);
+	run_tab_next++;
+	run_tab_count++;
+
+	/* The picture fills the grid's place. */
+	run_tell_size(run, connection);
+
+	/* Succeeded: it is the active one. */
+	run_tab_switch(run, run_tab_count - 1U);
+	printf("ZTERM TAB new run=%s id=%u count=%u picture=1\n", options->token, tab->id, run_tab_count);
+	fflush(stdout);
+	return 0;
+}
+
+/* Takes a picture's news: its title, and its picture drawn again when its tab is shown. */
+static void
+run_picture_output(
+	unsigned index,
+	unsigned ready)
+{
+	struct run_tab *tab;
+
+	/* Only news. */
+	if ((ready & TERMINAL_READY_OUTPUT) == 0U)
+		return;
+
+	/* The title, which the tabs and the window show; the picture is drawn again. */
+	tab = &run_tabs[index];
+	tab->picture->title(tab->connection, tab->screen->title, sizeof(tab->screen->title));
+	tab->screen->changed = 1;
+}
+
+/* Gives the active picture's tab the window's inputs queued for it, oldest first. */
+static void
+run_picture_inputs(void)
+{
+	struct run_tab *tab;
+	const struct terminal_picture_event *event;
+	unsigned index;
+
+	/* Nothing queued, or no picture to take it. */
+	if (run_window.picture_event_count == 0U)
+		return;
+	if (!run_window.picture_active || run_tab_count == 0U) {
+		run_window.picture_event_count = 0U;
+		return;
+	}
+
+	/* Each input in turn; the window's focus tells which tab has the keyboard. */
+	tab = &run_tabs[run_active];
+	for (index = 0U; index < run_window.picture_event_count; index++) {
+		event = &run_window.picture_events[index];
+		tab->picture->input(tab->connection, event);
+		if (event->kind != TERMINAL_PICTURE_FOCUS)
+			continue;
+		run_picture_focused = 0U;
+		if (event->pressed)
+			run_picture_focused = tab->id;
+	}
+
+	/* All taken. */
+	run_window.picture_event_count = 0U;
+}
+
+/* Tells a picture's tab that it has the keyboard, or lost it. */
+static void
+run_picture_focus(
+	unsigned index,
+	int focused)
+{
+	struct terminal_picture_event event;
+	struct run_tab *tab;
+
+	/* Only a picture's tab. */
+	tab = &run_tabs[index];
+	if (tab->picture == NULL)
+		return;
+
+	/* The focus, as the window would give it. */
+	memset(&event, 0, sizeof(event));
+	event.kind = TERMINAL_PICTURE_FOCUS;
+	event.pressed = focused;
+	tab->picture->input(tab->connection, &event);
+
+	/* Which tab has it now. */
+	run_picture_focused = 0U;
+	if (focused)
+		run_picture_focused = tab->id;
+}
+
+/*
+ * Draws the active picture's tab and shows it in the grid's place, when
+ * it changed and the window can take a frame.  Returns 0, or -1 when the
+ * drawing failed or memory ran out.
+ */
+static int
+run_picture_frame(
+	struct run_state *run)
+{
+	struct run_tab *tab;
+	uint32_t *grown;
+	size_t count;
+	int asked;
+	int wait;
+	int status;
+	int error;
+
+	/* Nothing changed. */
+	if (!run_screen->changed)
+		return 0;
+
+	/* The window has not taken the last frame yet: the picture waits for it. */
+	wait = terminal_window_frame_wait(&run_window, terminal_clock());
+	if (wait != 0)
+		return 0;
+
+	/* Pixels for the drawing's size. */
+	count = (size_t)run->width * (size_t)run->height;
+	if (count == 0U)
+		return 0;
+	if (count > run_picture_count) {
+		grown = realloc(run_picture_pixels, count * sizeof(*grown));
+		if (grown == NULL) {
+			run->operation = "run_picture_frame";
+			errno = ENOMEM;
+			return -1;
+		}
+		run_picture_pixels = grown;
+		run_picture_count = count;
+	}
+
+	/* The picture, at the drawing's size. */
+	tab = &run_tabs[run_active];
+	asked = terminal_window_frame_ask(&run_window, terminal_clock());
+	status = tab->picture->draw(tab->connection, run_picture_pixels, run->width, run->height);
+	if (status != 0) {
+		run->operation = "terminal_picture_draw";
+		errno = status;
+		terminal_window_frame_shown(&run_window, asked, EIO);
+		return -1;
+	}
+
+	/* Shown in the grid's place. */
+	status = terminal_display_page(run_display, run_picture_pixels, run->width, run->height);
+	run->operation = terminal_display_operation(run_display, &run->result);
+	error = 0;
+	if (status != 0)
+		error = EIO;
+	terminal_window_frame_shown(&run_window, asked, error);
+
+	/* A drawing out of date is remade, and the picture drawn again. */
+	if (status == EAGAIN) {
+		run_window.resized = 1;
+		return 0;
+	}
+
+	/* Any other failure ends the terminal. */
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the picture is on the window. */
+	run_screen->changed = 0;
+	return 0;
 }

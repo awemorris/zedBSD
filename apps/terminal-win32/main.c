@@ -143,6 +143,7 @@ wWinMain(
 	connect.x11_primary = main_state.conf.x11_primary;
 	connect.x11_root_width = main_state.conf.x11_root_width;
 	connect.x11_root_height = main_state.conf.x11_root_height;
+	connect.x11_tabify = main_state.conf.x11_tabify;
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&main_state.connector, &connect);
 

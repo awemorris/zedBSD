@@ -85,6 +85,13 @@ struct x11_win32_options {
 	void *log_context;
 };
 
+/*
+ * What x11_win32_note is told of: a key (its evdev code) or one of the
+ * pointer's buttons (X's number, 1 to 9).
+ */
+#define X11_WIN32_NOTE_KEY	0U
+#define X11_WIN32_NOTE_BUTTON	1U
+
 /* The backend's functions, for x11server_options.backend (the context is the struct x11_win32). */
 extern const struct x11_backend_ops x11_win32_ops;
 
@@ -97,5 +104,6 @@ void x11_win32_root_size(const struct x11_win32 *backend, unsigned *width, unsig
 const struct x11_win32_keymap *x11_win32_keymap(const struct x11_win32 *backend);
 void *x11_win32_window_handle(const struct x11_surface *surface);
 int x11_win32_vulkan_loader(struct x11_win32 *backend, x11server_vulkan_function *loader);
+void x11_win32_note(struct x11_win32 *backend, unsigned kind, uint32_t code, int pressed, uint32_t time);
 
 #endif

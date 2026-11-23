@@ -356,6 +356,7 @@ static const char *thread_error_text(int error);
 static uint64_t thread_now(void);
 static int thread_x11_start(struct thread_link *link);
 static void thread_x11_open(struct thread_link *link, const struct ssh_engine_event *event);
+static void thread_x11_tabs(struct thread_link *link);
 static int thread_remote_command(struct thread_link *link);
 static void thread_local_names(struct remote_command_tokens *tokens, char *local_user, char *home, char *local_host, size_t size);
 #ifdef _WIN32
@@ -2515,6 +2516,7 @@ thread_converse(
 		if (link->x11) {
 			if (x11_host_pump(&link->x11_host, link->engine, thread_now()) != 0)
 				session_say(link->session, link->x11_host.message);
+			thread_x11_tabs(link);
 		}
 
 		/* The forwarded connections' bytes read go into their channels. */
@@ -3745,7 +3747,7 @@ thread_x11_start(
 	}
 	link->x11_cookie[X11_HOST_COOKIE * 2U] = '\0';
 
-	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy, the root window. */
+	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy, the root window, the tabs. */
 	(void)snprintf(settings.host, sizeof(settings.host), "%s", link->target->title);
 	settings.scale = link->session->x11_scale;
 	settings.root_width = link->session->x11_root_width;
@@ -3757,6 +3759,8 @@ thread_x11_start(
 		settings.flags |= X11_HOST_PRIMARY;
 	if (link->session->x11_render_cpu)
 		settings.flags |= X11_HOST_RENDER_CPU;
+	if (link->session->x11_tabify)
+		settings.flags |= X11_HOST_TABIFY;
 	x11_host_init(&link->x11_host, &settings);
 
 	/* Succeeded: x11-req goes with the session. */
@@ -3805,6 +3809,22 @@ thread_x11_open(
 		return;
 	}
 	(void)ssh_engine_x11_answer(link->engine, event->channel, 1);
+}
+
+/* Gives the tab's session each X window's tab the X server opened (X11WindowTabify), for the run to show. */
+static void
+thread_x11_tabs(
+	struct thread_link *link)
+{
+	struct x11_tab *tab;
+
+	/* Each new tab in turn. */
+	for (;;) {
+		tab = x11_host_new_tab(&link->x11_host);
+		if (tab == NULL)
+			break;
+		session_tab(link->session, tab);
+	}
 }
 
 /*

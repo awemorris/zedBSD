@@ -11,6 +11,9 @@
  * engine and the link.
  */
 
+/* The tabs' header first: libkeiland's names Windows' headers would take as their macros. */
+#include "x11-tab.h"
+
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
@@ -52,6 +55,10 @@
 /* The command line's switch of the child. */
 #define HOST_SWITCH		L" --x11-server"
 
+/* The scales the child's tabs may have, in percent (the X server's). */
+#define HOST_SCALE_MIN		100U
+#define HOST_SCALE_MAX		400U
+
 static int host_start(struct x11_host *host, uint64_t now);
 static int host_pair(struct x11_host *host, struct kl_socket **child_end);
 static int host_spawn(struct x11_host *host, struct kl_socket *child_end);
@@ -66,6 +73,14 @@ static struct x11_host_channel *host_by_channel(struct x11_host *host, uint32_t 
 static struct x11_host_channel *host_by_id(struct x11_host *host, uint32_t id);
 static void host_free(struct x11_host *host, struct x11_host_channel *slot);
 static void host_stop_child(struct x11_host *host);
+static int host_tab_take(struct x11_host *host, const struct x11_link_frame *frame, const char **why);
+static int host_tab_open(struct x11_host *host, const struct x11_link_frame *frame, const char **why);
+static int host_tab_pixels(struct x11_tab *tab, const struct x11_link_frame *frame, const char **why);
+static unsigned host_tab_find(const struct x11_host *host, uint32_t window);
+static void host_tab_drop(struct x11_host *host, unsigned place);
+static void host_tabs_move(struct x11_host *host);
+static void host_tab_input(struct x11_host *host, const struct x11_tab *tab, const struct x11_tab_input *input);
+static void host_tabs_end(struct x11_host *host);
 
 /*
  * Starts a connection's X server state: nothing runs until the first X
@@ -279,8 +294,9 @@ x11_host_pump(
 		return 1;
 	}
 
-	/* The bytes both ways. */
+	/* The bytes both ways, and what the tabs have for the child. */
 	host_move(host, engine);
+	host_tabs_move(host);
 
 	/* A child that never said HELLO, or stopped answering. */
 	if (!host->hello && now - host->started_ms > HOST_HELLO_MS) {
@@ -345,6 +361,29 @@ x11_host_open_count(
 
 	/* The count. */
 	return count;
+}
+
+/*
+ * Gives the network thread the oldest X window's tab the child opened that
+ * it has not taken yet, with the run's hold on it (NULL when none waits).
+ */
+struct x11_tab *
+x11_host_new_tab(
+	struct x11_host *host)
+{
+	struct x11_tab *tab;
+
+	/* None waits. */
+	if (host->fresh_count == 0U)
+		return NULL;
+
+	/* The oldest, out of the list. */
+	tab = host->fresh[0];
+	host->fresh_count--;
+	memmove(&host->fresh[0], &host->fresh[1], host->fresh_count * sizeof(host->fresh[0]));
+
+	/* Succeeded: the tab, for the session. */
+	return tab;
 }
 
 /*
@@ -828,6 +867,7 @@ host_take(
 {
 	struct x11_host_channel *slot;
 	int verdict;
+	int error;
 
 	/* The rules first. */
 	verdict = x11_link_check(&host->table, frame);
@@ -855,6 +895,13 @@ host_take(
 	case X11_LINK_PONG:
 		host->ping_waiting = 0;
 		return 0;
+	case X11_LINK_TAB_OPEN:
+	case X11_LINK_TAB_TITLE:
+	case X11_LINK_TAB_SIZE:
+	case X11_LINK_TAB_PIXELS:
+	case X11_LINK_TAB_GONE:
+		error = host_tab_take(host, frame, why);
+		return error;
 	default:
 		break;
 	}
@@ -1054,6 +1101,9 @@ host_stop_child(
 		host->socket = NULL;
 	}
 
+	/* The X windows' tabs close. */
+	host_tabs_end(host);
+
 	/* The process ends. */
 	if (host->process != NULL) {
 		waited = WaitForSingleObject(host->process, HOST_END_MS);
@@ -1066,4 +1116,327 @@ host_stop_child(
 	host->hello = 0;
 	host->in_size = 0;
 	host->out_size = 0;
+}
+
+/*
+ * Takes a frame of an X window's tab from the child: its opening (a new
+ * tab), a new title, a new size, a part of its pixels, its end.  A frame
+ * of a window the host no longer holds (it crossed a closing or a
+ * refusal) is dropped.  Returns 0, or EPIPE with *why for a frame
+ * against the rules.
+ */
+static int
+host_tab_take(
+	struct x11_host *host,
+	const struct x11_link_frame *frame,
+	const char **why)
+{
+	struct x11_tab *tab;
+	unsigned place;
+	uint32_t width;
+	uint32_t height;
+	int error;
+
+	/* An opening makes a tab. */
+	if (frame->type == X11_LINK_TAB_OPEN) {
+		error = host_tab_open(host, frame, why);
+		return error;
+	}
+
+	/* The tab of the window; one the host let go of drops it. */
+	place = host_tab_find(host, frame->id);
+	if (place >= X11_LINK_TABS)
+		return 0;
+	tab = host->tabs[place];
+
+	/* What it says. */
+	switch (frame->type) {
+	case X11_LINK_TAB_TITLE:
+		x11_tab_set_title(tab, frame->body, frame->size);
+		break;
+	case X11_LINK_TAB_SIZE:
+		/* A size a tab may have; without memory for it the tab ends. */
+		width = x11_link_get32(frame->body);
+		height = x11_link_get32(frame->body + 4);
+		if (width == 0U ||
+		    height == 0U ||
+		    width > X11_LINK_TAB_SIDE_MAX ||
+		    height > X11_LINK_TAB_SIDE_MAX ||
+		    (uint64_t)width * height > X11_LINK_TAB_AREA_MAX) {
+			*why = "it sent a tab's size past the limits";
+			return EPIPE;
+		}
+		error = x11_tab_set_size(tab, width, height);
+		if (error != 0) {
+			x11_tab_end(tab);
+			host_tab_drop(host, place);
+			return 0;
+		}
+		break;
+	case X11_LINK_TAB_PIXELS:
+		error = host_tab_pixels(tab, frame, why);
+		if (error != 0)
+			return error;
+		break;
+	default:
+		/* The window ended: its tab closes. */
+		x11_tab_end(tab);
+		host_tab_drop(host, place);
+		return 0;
+	}
+
+	/* Succeeded: the application's thread hears of the news. */
+	x11_tab_wake(tab);
+	return 0;
+}
+
+/*
+ * Takes the opening of an X window's tab: a window the host has no tab
+ * for, a free place, a size and a scale a tab may have, and its title.
+ * The tab waits for the network thread to take it.  Returns 0, or EPIPE
+ * with *why for an opening against the rules or without memory.
+ */
+static int
+host_tab_open(
+	struct x11_host *host,
+	const struct x11_link_frame *frame,
+	const char **why)
+{
+	struct x11_tab *tab;
+	uint32_t width;
+	uint32_t height;
+	uint32_t scale;
+	unsigned place;
+	unsigned found;
+	int error;
+
+	/* A window the host has no tab for, and a free place. */
+	found = host_tab_find(host, frame->id);
+	place = X11_LINK_TABS;
+	if (found >= X11_LINK_TABS)
+		place = host_tab_find(host, 0U);
+	if (place >= X11_LINK_TABS) {
+		*why = "it opened a tab twice or too many";
+		return EPIPE;
+	}
+
+	/* The size and the scale, within the limits. */
+	width = x11_link_get32(frame->body);
+	height = x11_link_get32(frame->body + 4);
+	scale = x11_link_get32(frame->body + 8);
+	if (width == 0U ||
+	    height == 0U ||
+	    width > X11_LINK_TAB_SIDE_MAX ||
+	    height > X11_LINK_TAB_SIDE_MAX ||
+	    (uint64_t)width * height > X11_LINK_TAB_AREA_MAX ||
+	    scale < HOST_SCALE_MIN ||
+	    scale > HOST_SCALE_MAX) {
+		*why = "it opened a tab past the limits";
+		return EPIPE;
+	}
+
+	/* The tab, with the title after the fixed part. */
+	error = x11_tab_create(frame->id,
+			       width,
+			       height,
+			       scale,
+			       host->settings.host,
+			       frame->body + X11_LINK_TAB_OPEN_FIXED,
+			       frame->size - X11_LINK_TAB_OPEN_FIXED,
+			       &tab);
+	if (error != 0) {
+		*why = "a tab could not be made";
+		return EPIPE;
+	}
+
+	/* Succeeded: the host holds it, and it waits for the network thread. */
+	host->tabs[place] = tab;
+	host->fresh[host->fresh_count] = tab;
+	host->fresh_count++;
+	return 0;
+}
+
+/*
+ * Takes a part of a tab's pixels: its place and size, then its pixels,
+ * exactly as many as the part has, inside the window.  Returns 0, or
+ * EPIPE with *why.
+ */
+static int
+host_tab_pixels(
+	struct x11_tab *tab,
+	const struct x11_link_frame *frame,
+	const char **why)
+{
+	uint32_t x;
+	uint32_t y;
+	uint32_t width;
+	uint32_t height;
+	uint64_t bytes;
+	int error;
+
+	/* The part's place and size, and the bytes its pixels take. */
+	x = x11_link_get32(frame->body);
+	y = x11_link_get32(frame->body + 4);
+	width = x11_link_get32(frame->body + 8);
+	height = x11_link_get32(frame->body + 12);
+	bytes = (uint64_t)width * height * 4U;
+	if (bytes != (uint64_t)frame->size - X11_LINK_TAB_PIXELS_FIXED) {
+		*why = "it sent a tab's pixels of another size";
+		return EPIPE;
+	}
+
+	/* The pixels, inside the window. */
+	error = x11_tab_put(tab, x, y, width, height, frame->body + X11_LINK_TAB_PIXELS_FIXED);
+	if (error != 0) {
+		*why = "it sent a tab's pixels outside the window";
+		return EPIPE;
+	}
+
+	/* Succeeded: the part is the tab's. */
+	return 0;
+}
+
+/* Gives the place of the tab of an X window (window 0: a free place), or X11_LINK_TABS for none. */
+static unsigned
+host_tab_find(
+	const struct x11_host *host,
+	uint32_t window)
+{
+	unsigned place;
+
+	/* Looks through the places. */
+	for (place = 0U; place < X11_LINK_TABS; place++) {
+		if (window == 0U && host->tabs[place] == NULL)
+			return place;
+		if (window != 0U && host->tabs[place] != NULL && host->tabs[place]->window == window)
+			return place;
+	}
+
+	/* None. */
+	return X11_LINK_TABS;
+}
+
+/* Lets go of the host's hold on the tab in a place, which is free from now on. */
+static void
+host_tab_drop(
+	struct x11_host *host,
+	unsigned place)
+{
+	struct x11_tab *tab;
+
+	/* The place is free; the tab goes when the run lets go too. */
+	tab = host->tabs[place];
+	host->tabs[place] = NULL;
+	x11_tab_release(tab);
+}
+
+/*
+ * Sends the child what each tab has: its closing or refusal (the host
+ * then lets go of it), the size the tab gives the window, and the user's
+ * input in it.
+ */
+static void
+host_tabs_move(
+	struct x11_host *host)
+{
+	struct x11_tab_input input;
+	struct x11_tab *tab;
+	uint8_t size[X11_LINK_TAB_SIZE_BODY];
+	unsigned place;
+	unsigned width;
+	unsigned height;
+	int leaving;
+	int refused;
+	int taken;
+
+	/* Each tab the host holds. */
+	for (place = 0U; place < X11_LINK_TABS; place++) {
+		tab = host->tabs[place];
+		if (tab == NULL)
+			continue;
+
+		/* A tab closed or refused: the child is told, and the host lets go. */
+		leaving = x11_tab_leaving(tab, &refused);
+		if (leaving) {
+			if (refused)
+				(void)host_frame(host, X11_LINK_TAB_REFUSE, tab->window, NULL, 0);
+			else
+				(void)host_frame(host, X11_LINK_TAB_CLOSE, tab->window, NULL, 0);
+			host_tab_drop(host, place);
+			continue;
+		}
+
+		/* The size the tab gives the window. */
+		taken = x11_tab_take_size(tab, &width, &height);
+		if (taken) {
+			x11_link_put32(size, width);
+			x11_link_put32(size + 4, height);
+			(void)host_frame(host, X11_LINK_TAB_CONFIGURE, tab->window, size, sizeof(size));
+		}
+
+		/* The user's input, oldest first. */
+		for (;;) {
+			taken = x11_tab_take_input(tab, &input);
+			if (!taken)
+				break;
+			host_tab_input(host, tab, &input);
+		}
+	}
+}
+
+/* Sends one of the user's inputs in a tab: its kind and three numbers, or the kind and a commit's text. */
+static void
+host_tab_input(
+	struct x11_host *host,
+	const struct x11_tab *tab,
+	const struct x11_tab_input *input)
+{
+	uint8_t body[4U + X11_TAB_TEXT_MAX];
+	size_t length;
+
+	/* The kind first. */
+	x11_link_put32(body, input->kind);
+
+	/* Text after the kind, when there is some. */
+	if (input->kind == X11_LINK_INPUT_TEXT) {
+		length = strlen(input->text);
+		if (length == 0U)
+			return;
+		memcpy(body + 4, input->text, length);
+		(void)host_frame(host, X11_LINK_TAB_INPUT, tab->window, body, (uint32_t)(4U + length));
+		return;
+	}
+
+	/* The three numbers otherwise. */
+	x11_link_put32(body + 4, input->numbers[0]);
+	x11_link_put32(body + 8, input->numbers[1]);
+	x11_link_put32(body + 12, input->numbers[2]);
+	(void)host_frame(host, X11_LINK_TAB_INPUT, tab->window, body, X11_LINK_TAB_INPUT_BODY);
+}
+
+/*
+ * Ends every tab, as the X server ends: each closes, the host lets go of
+ * it, and a new one the network thread has not taken goes too.
+ */
+static void
+host_tabs_end(
+	struct x11_host *host)
+{
+	unsigned place;
+	unsigned index;
+
+	/* The new tabs no one took: the run's hold goes. */
+	for (index = 0U; index < host->fresh_count; index++) {
+		x11_tab_end(host->fresh[index]);
+		x11_tab_release(host->fresh[index]);
+	}
+	host->fresh_count = 0U;
+
+	/* Each tab held. */
+	for (place = 0U; place < X11_LINK_TABS; place++) {
+		if (host->tabs[place] == NULL)
+			continue;
+		x11_tab_end(host->tabs[place]);
+		host_tab_drop(host, place);
+	}
 }

@@ -89,6 +89,8 @@ static void window_pad_push(struct terminal_window *window, unsigned type, const
 static void window_touch_push(struct terminal_window *window, unsigned type, const struct kl_window_event *event);
 static uint32_t window_modifiers(unsigned modifiers);
 static int window_page_input(struct terminal_window *window, const struct kl_window_event *event);
+static int window_picture_input(struct terminal_window *window, const struct kl_window_event *event);
+static void window_picture_push(struct terminal_window *window, unsigned kind, const struct kl_window_event *event);
 static void window_action(struct terminal_window *window, uint32_t action);
 
 /*
@@ -159,6 +161,9 @@ terminal_window_open(
 	kl_window_size(window->kui, &window->width, &window->height);
 	window->scale = kl_window_scale(window->kui);
 	window->fullscreen = kl_window_fullscreen(window->kui);
+
+	/* A window just opened has the keyboard (a focus's going tells otherwise). */
+	window->focused = 1;
 
 	/*
 	 * The input method's text, asked for for good: the whole window is
@@ -395,9 +400,20 @@ window_event(
 	/* Every input carries the modifiers held. */
 	window->modifiers = window_modifiers(event->modifiers);
 
+	/* The keyboard's focus is kept for a picture's tab made active later. */
+	if (event->kind == KL_WINDOW_FOCUS)
+		window->focused = event->pressed;
+
 	/* While the settings' tab is active its widgets take the pointer, the keys and the text. */
 	if (window->page_active) {
 		taken = window_page_input(window, event);
+		if (taken)
+			return;
+	}
+
+	/* While a picture's tab is active its other end takes the keys, the text and the pointer as they are. */
+	if (window->picture_active) {
+		taken = window_picture_input(window, event);
 		if (taken)
 			return;
 	}
@@ -1014,6 +1030,104 @@ window_page_input(
 
 	/* Reports whether the page took it. */
 	return taken;
+}
+
+/*
+ * Gives an input of the window to a picture's tab while it is active: a
+ * key pressed (a held key's repeats too) or released, the input method's
+ * committed text, the pointer's motions, buttons and leaving, the wheel,
+ * and the keyboard's focus.  The text being composed is not shown, and
+ * the fingers do nothing.  Reports 1 when the tab took it, 0 for one the
+ * window keeps (its size, closing, the menus, the tabs, the selections).
+ */
+static int
+window_picture_input(
+	struct terminal_window *window,
+	const struct kl_window_event *event)
+{
+	/* What it is. */
+	switch (event->kind) {
+	case KL_WINDOW_KEY:
+		window_picture_push(window, TERMINAL_PICTURE_KEY, event);
+		return 1;
+	case KL_WINDOW_TEXT_COMMIT:
+		window_picture_push(window, TERMINAL_PICTURE_TEXT, event);
+		return 1;
+	case KL_WINDOW_MOTION:
+		/* The pointer's place, kept as the grid's tab keeps it. */
+		window->pointer_x = (int32_t)event->x;
+		window->pointer_y = (int32_t)event->y;
+		window_picture_push(window, TERMINAL_PICTURE_MOTION, event);
+		return 1;
+	case KL_WINDOW_BUTTON:
+		window_picture_push(window, TERMINAL_PICTURE_BUTTON, event);
+		return 1;
+	case KL_WINDOW_AXIS:
+		window_picture_push(window, TERMINAL_PICTURE_AXIS, event);
+		return 1;
+	case KL_WINDOW_LEAVE:
+		window_picture_push(window, TERMINAL_PICTURE_LEAVE, event);
+		return 1;
+	case KL_WINDOW_FOCUS:
+		window_picture_push(window, TERMINAL_PICTURE_FOCUS, event);
+		return 1;
+	case KL_WINDOW_TEXT_PREEDIT:
+	case KL_WINDOW_TEXT_DELETE:
+	case KL_WINDOW_AXIS_STOP:
+	case KL_WINDOW_TOUCH_DOWN:
+	case KL_WINDOW_TOUCH_MOTION:
+	case KL_WINDOW_TOUCH_UP:
+	case KL_WINDOW_TOUCH_CANCEL:
+		/* Nothing of the picture's. */
+		return 1;
+	default:
+		break;
+	}
+
+	/* The window's own. */
+	return 0;
+}
+
+/*
+ * Queues one input for a picture's tab: a motion takes the place of a
+ * motion queued just before it, and a full queue drops the input.
+ */
+static void
+window_picture_push(
+	struct terminal_window *window,
+	unsigned kind,
+	const struct kl_window_event *event)
+{
+	struct terminal_picture_event *queued;
+	unsigned count;
+
+	/* A motion after a motion: only the newest place counts. */
+	count = window->picture_event_count;
+	if (kind == TERMINAL_PICTURE_MOTION &&
+	    count != 0U &&
+	    window->picture_events[count - 1U].kind == TERMINAL_PICTURE_MOTION) {
+		window->picture_events[count - 1U].x = (int32_t)event->x;
+		window->picture_events[count - 1U].y = (int32_t)event->y;
+		return;
+	}
+
+	/* Room for it. */
+	if (count >= TERMINAL_PICTURE_EVENTS)
+		return;
+
+	/* The input as the window had it: the pointer's place is the window's last for a button or the wheel. */
+	queued = &window->picture_events[count];
+	memset(queued, 0, sizeof(*queued));
+	queued->kind = kind;
+	queued->code = event->code;
+	queued->pressed = event->pressed;
+	queued->x = window->pointer_x;
+	queued->y = window->pointer_y;
+	queued->dx = event->dx;
+	queued->dy = event->dy;
+	if (kind == TERMINAL_PICTURE_TEXT)
+		(void)snprintf(queued->text, sizeof(queued->text), "%s", event->text);
+	window->picture_event_count = count + 1U;
 }
 
 /* Queues an action for the main loop, as a menu's choice is (a full queue drops it). */

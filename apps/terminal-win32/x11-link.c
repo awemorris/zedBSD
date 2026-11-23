@@ -218,6 +218,7 @@ x11_link_check(
 	case X11_LINK_TAB_INPUT:
 	case X11_LINK_TAB_CONFIGURE:
 	case X11_LINK_TAB_CLOSE:
+	case X11_LINK_TAB_REFUSE:
 		verdict = link_check_tab(table, frame);
 		return verdict;
 	case X11_LINK_DATA:
@@ -442,9 +443,9 @@ link_check_open(
 /*
  * Checks a frame of a tab's X window as a whole: an X window's id, the
  * side that sends it (the child its window's opening, title, size, pixels
- * and end; the parent the input, the size and the closing), and a body of
- * the frame's size.  The receiver checks the rest (a window it knows, a
- * part within the window).
+ * and end; the parent the input, the size, the closing and the refusal),
+ * and a body of the frame's size.  The receiver checks the rest (a window
+ * it knows, a part within the window, an input it knows).
  */
 static int
 link_check_tab(
@@ -494,7 +495,7 @@ link_check_tab(
 			return X11_LINK_VIOLATION;
 		break;
 	default:
-		/* The end of a window and the closing of a tab carry nothing. */
+		/* The end of a window, and the closing and the refusal of a tab, carry nothing. */
 		if (frame->size != 0)
 			return X11_LINK_VIOLATION;
 		break;

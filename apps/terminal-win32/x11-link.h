@@ -54,7 +54,10 @@
  * pixels (the part's place and size, then its pixels of 0xAARRGGBB, rows
  * of the part's width) and its end.  The parent sends the user's input
  * in the tab (X11_LINK_INPUT_*), the size the tab gives the window (X's
- * pixels) and the user's closing of the tab.
+ * pixels), the user's closing of the tab, and its refusal of a tab it has
+ * no room for (the child then shows the window as a window of its own).
+ * A frame of a window the receiver no longer has (it crossed the window's
+ * end, a closing or a refusal) is dropped.
  */
 #define X11_LINK_TAB_OPEN	10U
 #define X11_LINK_TAB_TITLE	11U
@@ -64,6 +67,7 @@
 #define X11_LINK_TAB_INPUT	15U
 #define X11_LINK_TAB_CONFIGURE	16U
 #define X11_LINK_TAB_CLOSE	17U
+#define X11_LINK_TAB_REFUSE	18U
 
 /*
  * The fixed parts of the tabs' frames: an opening's size and scale, a
@@ -78,15 +82,30 @@
 #define X11_LINK_TAB_TITLE_MAX		1024U
 
 /*
- * The inputs of a tab: a key (its evdev code, pressed or released), text
- * an input method typed (UTF-8), the pointer (X's button 1 to 9, 0 for a
- * move; pressed or released; its place on the window in X's pixels), and
- * the keyboard's focus coming (1) or going (0).
+ * The inputs of a tab, each its kind and three numbers: a key (its evdev
+ * code, and 1 pressed or 0 released), text an input method typed (its
+ * UTF-8 in place of the numbers), the pointer (X's button 1 to 9, 0 for
+ * a move, with 0x100 when pressed; its place on the window in X's pixels,
+ * as signed numbers), the keyboard's focus coming (1) or going (0), and
+ * the pointer leaving the window.
  */
 #define X11_LINK_INPUT_KEY	1U
 #define X11_LINK_INPUT_TEXT	2U
 #define X11_LINK_INPUT_POINTER	3U
 #define X11_LINK_INPUT_FOCUS	4U
+#define X11_LINK_INPUT_LEAVE	5U
+
+/* The bit of a pointer's input that says its button went down. */
+#define X11_LINK_INPUT_PRESSED	0x100U
+
+/*
+ * The most tabs of X windows one link has at a time, the longest side of
+ * one and its most pixels (16 M, 64 MiB at four bytes a pixel); a larger
+ * window stays a window of its own.
+ */
+#define X11_LINK_TABS		32U
+#define X11_LINK_TAB_SIDE_MAX	8192U
+#define X11_LINK_TAB_AREA_MAX	(4096U * 4096U)
 
 /* The header's size, the most bytes one frame carries, and the link's version. */
 #define X11_LINK_HEADER		9U

@@ -113,8 +113,8 @@ struct terminal_connection;
 /*
  * The kinds of a picture's tab's inputs (connection.h): a key pressed or
  * released, text an input method typed, the pointer moved, a button
- * pressed or released, the wheel turned, and the keyboard's focus coming
- * or going.
+ * pressed or released, the wheel turned, the keyboard's focus coming or
+ * going, and the pointer leaving the window.
  */
 #define TERMINAL_PICTURE_KEY	1U
 #define TERMINAL_PICTURE_TEXT	2U
@@ -122,6 +122,7 @@ struct terminal_connection;
 #define TERMINAL_PICTURE_BUTTON	4U
 #define TERMINAL_PICTURE_AXIS	5U
 #define TERMINAL_PICTURE_FOCUS	6U
+#define TERMINAL_PICTURE_LEAVE	7U
 
 /* The kinds of pointer events the main loop takes: the left button pressed or released, a motion. */
 #define TERMINAL_POINTER_PRESS		1U
@@ -396,8 +397,8 @@ struct terminal_pointer_event {
 
 /*
  * One input of a picture's tab, as the window had it: its kind
- * (TERMINAL_PICTURE_*), a key's or a button's evdev code (a focus: 1 when
- * it came), whether it is pressed, where the pointer is (the window's
+ * (TERMINAL_PICTURE_*), a key's or a button's evdev code, whether it is
+ * pressed (a focus: whether it came), where the pointer is (the window's
  * pixels), the wheel's distance and the text typed (UTF-8).
  */
 struct terminal_picture_event {
@@ -756,12 +757,16 @@ struct terminal_window {
 	/*
 	 * A picture's tab (connection.h): whether it is the active tab (the
 	 * window's keys, text and pointer then go to it as they are), and its
-	 * inputs not yet taken by the main loop, oldest first (a full queue
-	 * drops the newest).
+	 * inputs not yet taken by the main loop, oldest first (a motion takes
+	 * the place of a motion just before it; a full queue drops the
+	 * newest).
 	 */
 	int picture_active;
 	struct terminal_picture_event picture_events[TERMINAL_PICTURE_EVENTS];
 	unsigned picture_event_count;
+
+	/* Whether the window has the keyboard's focus (it has when it opens). */
+	int focused;
 
 	/*
 	 * The pacing of the frames (pace.h): what the pacing's implementation

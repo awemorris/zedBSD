@@ -132,6 +132,43 @@ win32_input_key(
 }
 
 /*
+ * Notes a key or a button of an X window the program shows some other
+ * way than as one of the backend's windows, whose input it gives the core
+ * itself: the backend keeps the key's Shift, Ctrl or Alt, and a paste or
+ * a copy made with it (Ctrl+V, Shift+Insert, the middle button; Ctrl+C,
+ * Ctrl+Insert, the end of a left drag) opens the clipboard's grace as one
+ * in the backend's windows does.  time is the system's tick count.
+ */
+void
+x11_win32_note(
+	struct x11_win32 *backend,
+	unsigned kind,
+	uint32_t code,
+	int pressed,
+	uint32_t time)
+{
+	/* A key: its modifier, and a paste or a copy it makes when pressed. */
+	if (kind == X11_WIN32_NOTE_KEY) {
+		if (code == 0 || code > X11_WIN32_EVDEV_MAX)
+			return;
+		input_modifier(backend, code, pressed);
+		if (pressed)
+			input_note_action(backend, code, (DWORD)time);
+		return;
+	}
+
+	/* A middle click pastes and the end of a left drag copies. */
+	if (code == WIN32_BUTTON_MIDDLE && pressed) {
+		backend->paste_time = (DWORD)time;
+		backend->pasted = 1;
+	}
+	if (code == WIN32_BUTTON_LEFT && !pressed) {
+		backend->copy_time = (DWORD)time;
+		backend->copied = 1;
+	}
+}
+
+/*
  * Lets go of every key held, as releases (the window lost the keyboard,
  * and the keys' releases will go to another window).
  */

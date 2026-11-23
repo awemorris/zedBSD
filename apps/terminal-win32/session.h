@@ -25,6 +25,7 @@
 #define MIKUTERM_SESSION_H
 
 #include "mikuterm.h"
+#include "x11-link.h"
 
 #include <keiland/keiland.h>
 
@@ -47,6 +48,12 @@
 
 /* The longest prompt of a question kept to be shown again (a key file's path and the words round it). */
 #define SESSION_PROMPT_MAX	(MIKUTERM_PATH_MAX + 64U)
+
+/* The tabs of X windows that wait for the run to take them, at most (as many as an X server has). */
+#define SESSION_TABS		X11_LINK_TABS
+
+/* An X window's tab (x11-tab.h). */
+struct x11_tab;
 
 /* How much the tab reads before it tells the thread, so the window is given back on time. */
 #define SESSION_TAKEN_STEP	65536U
@@ -80,7 +87,8 @@ struct mikuterm_session {
 	/*
 	 * The host to connect to without asking (empty: ask), the TERM, the
 	 * wait for a connection and WSL's sshd port, and the X server's scale,
-	 * drawing, PRIMARY and root window (a width of 0: rootless).
+	 * drawing, PRIMARY, root window (a width of 0: rootless) and whether
+	 * its windows open in tabs.
 	 */
 	char host[MIKUTERM_HOST_MAX];
 	char term[MIKUTERM_TERM_MAX];
@@ -91,6 +99,7 @@ struct mikuterm_session {
 	int x11_primary;
 	unsigned x11_root_width;
 	unsigned x11_root_height;
+	int x11_tabify;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];
@@ -141,6 +150,14 @@ struct mikuterm_session {
 	int closing;
 
 	/*
+	 * The X windows' tabs the thread opened that the run has not taken
+	 * yet (the tab's next post says they are there), oldest first; each
+	 * holds the run's hold on the X window's tab.
+	 */
+	struct x11_tab *tabs[SESSION_TABS];
+	unsigned tab_count;
+
+	/*
 	 * Whether the question offers to keep its answer for the Windows
 	 * session (a passphrase), and the user's choice (on by default, Tab
 	 * switches it; it stays for the tab's later questions), and the
@@ -169,6 +186,8 @@ void session_keep_line_locked(struct mikuterm_session *session);
 void session_ended(struct mikuterm_session *session);
 void session_settings(struct mikuterm_session *session);
 void session_thread_ended(void);
+int session_app_post(struct kl_app *app, uint32_t number);
+void session_tab(struct mikuterm_session *session, struct x11_tab *tab);
 
 /* The thread (ssh-thread.c). */
 void session_run(void *argument);
