@@ -1342,8 +1342,9 @@ wallpaper_create(
 	if (error != 0)
 		return error;
 
-	/* How long the two images took; the rest of the step is the picture's reading and drawing. */
+	/* How long the two images took (and their size); the rest of the step is the picture's reading and drawing. */
 	printf("KWL STARTUP step=wallpaper-images ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
+	printf("KWL GLASS wallpaper size width=%u height=%u block=%u\n", width, height, block);
 
 	/* The picture in both. */
 	error = wallpaper_fill(glass, server->wallpaper_path, width, height, block);
