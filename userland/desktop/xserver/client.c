@@ -216,12 +216,14 @@ x11server_destroy(
 	/* The extensions' state. */
 	x11_extension_fini(server);
 
-	/* The root window, with what is left of it (its properties, the extensions' events on it, its pixels and its surface). */
+	/* The root window, with what is left of it (its properties, the extensions' events on it, its pixels, its surface and the cursor a client gave it). */
 	if (server->root != NULL) {
 		x11_extension_forget_window(server, server->root);
 		x11_property_forget_window(server, server->root);
 		x11_rootless_forget(server, server->root);
 		x11_draw_forget(server, server->root);
+		x11_cursor_release(server, server->root->cursor_held);
+		server->root->cursor_held = NULL;
 		free(server->root->selects);
 		free(server->root);
 		server->root = NULL;
