@@ -1218,6 +1218,20 @@ thread_settings(
 	/* What the file did not say takes the defaults. */
 	ssh_config_defaults(&link->config);
 
+	/* Settings the connection cannot act on yet are refused rather than left without effect. */
+	if (link->config.forward_count != 0) {
+		(void)snprintf(link->reason, sizeof(link->reason), "%s: port forwarding (LocalForward, RemoteForward) is not supported yet", config);
+		return THREAD_FAILED;
+	}
+	if (link->config.session_type_none) {
+		(void)snprintf(link->reason, sizeof(link->reason), "%s: SessionType none is not supported", config);
+		return THREAD_FAILED;
+	}
+	if (link->config.remote_command[0] != '\0') {
+		(void)snprintf(link->reason, sizeof(link->reason), "%s: RemoteCommand is not supported yet", config);
+		return THREAD_FAILED;
+	}
+
 	/* What was typed wins over the file. */
 	if (link->target->user[0] != '\0')
 		(void)snprintf(link->config.user, sizeof(link->config.user), "%s", link->target->user);

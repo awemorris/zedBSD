@@ -986,8 +986,9 @@ kwl_output_view(
 {
 	struct kwl_compose *compose;
 	const struct kwl_head *shown;
+	unsigned density;
 
-	/* The output: the desktop's size at the output's place. */
+	/* The output: the desktop's size at the output's place, shown a pixel for a unit until its scale is known. */
 	compose = server->compose;
 	memset(view, 0, sizeof(*view));
 	view->index = head;
@@ -997,12 +998,29 @@ kwl_output_view(
 		view->refresh = server->refresh;
 		view->mode_width = server->width;
 		view->mode_height = server->height;
+		view->pixel_width = server->width;
+		view->pixel_height = server->height;
+		view->scale120 = KWL_SCALE_ONE;
+
+		/* The pixels it is shown on and the scale, once kwl_output_size_set has set them. */
+		if (server->pixel_width != 0U && server->scale120 != 0U) {
+			view->pixel_width = server->pixel_width;
+			view->pixel_height = server->pixel_height;
+			view->scale120 = server->scale120;
+		}
 
 		/* The display's angle and physical mode, once the device is open (WS217). */
 		if (compose != NULL) {
 			view->rotation = compose->rotation;
 			view->mode_width = compose->mode_width;
 			view->mode_height = compose->mode_height;
+		}
+
+		/* Its physical size turned as its pixels are, when its density is one a display has (scale.c). */
+		if (compose != NULL) {
+			density = kwl_scale_density(compose->mode_width, compose->mode_height, compose->mm_width, compose->mm_height);
+			if (density != 0U)
+				kwl_rotate_size(compose->rotation, compose->mm_width, compose->mm_height, &view->mm_width, &view->mm_height);
 		}
 
 		/* Its place in the extended plane. */
@@ -1028,6 +1046,31 @@ kwl_output_view(
 	view->refresh = shown->refresh;
 	view->mode_width = shown->width;
 	view->mode_height = shown->height;
+	view->pixel_width = shown->width;
+	view->pixel_height = shown->height;
+	view->scale120 = KWL_SCALE_ONE;
+
+	/* The pixels it is shown on, its mode, and its scale, once its opening has set them. */
+	if (shown->pixel_width != 0U && shown->scale120 != 0U) {
+		view->pixel_width = shown->pixel_width;
+		view->pixel_height = shown->pixel_height;
+		view->mode_width = shown->pixel_width;
+		view->mode_height = shown->pixel_height;
+		view->scale120 = shown->scale120;
+	}
+
+	/* The mirror shows the anchor's picture, drawn at the anchor's scale. */
+	if (compose->display_mode == KWL_DISPLAYS_MIRROR && server->scale120 != 0U)
+		view->scale120 = server->scale120;
+
+	/* Its physical size, when its density is one a display has. */
+	density = kwl_scale_density(shown->pixel_width, shown->pixel_height, shown->mm_width, shown->mm_height);
+	if (density != 0U) {
+		view->mm_width = shown->mm_width;
+		view->mm_height = shown->mm_height;
+	}
+
+	/* Its place in the extended plane; in the mirror mode the desktop at the origin. */
 	if (compose->display_mode == KWL_DISPLAYS_EXTENDED) {
 		view->x = shown->x;
 		view->y = shown->y;

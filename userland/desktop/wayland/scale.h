@@ -359,4 +359,39 @@ kwl_scale_buffer(
 	return (uint32_t)pixels;
 }
 
+/*
+ * Reports the logical rectangle (left, top, width and height in units, as
+ * floats) that a pass at a scale snaps to exactly a rectangle of its
+ * pixels: each corner is the pixel divided by the scale, which
+ * kwl_scale_snap_float multiplies back to within far less than half a
+ * pixel of the whole pixel it then rounds to.  An image of that many
+ * pixels drawn over it is shown one texel a pixel.  The rectangle is
+ * measured from the display's left top corner.
+ */
+static inline void
+kwl_scale_unsnap_rect(
+	const struct kwl_scale_rect *pixels,
+	unsigned scale120,
+	float *plane)
+{
+	float scale;
+	float right;
+	float bottom;
+
+	/* A scale of zero (none known yet) is taken for 100 %. */
+	if (scale120 == 0U)
+		scale120 = KWL_SCALE_ONE;
+
+	/* The corners in units: each pixel times 120 over the scale. */
+	scale = (float)scale120;
+	plane[0] = (float)pixels->x * (float)KWL_SCALE_ONE / scale;
+	plane[1] = (float)pixels->y * (float)KWL_SCALE_ONE / scale;
+	right = (float)((int64_t)pixels->x + pixels->width) * (float)KWL_SCALE_ONE / scale;
+	bottom = (float)((int64_t)pixels->y + pixels->height) * (float)KWL_SCALE_ONE / scale;
+
+	/* Publishes the size between them. */
+	plane[2] = right - plane[0];
+	plane[3] = bottom - plane[1];
+}
+
 #endif

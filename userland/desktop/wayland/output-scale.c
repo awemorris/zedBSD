@@ -314,11 +314,18 @@ kwl_output_scale_set(
 	printf("KWL SCALE set key=%s id=%s scale=%u wanted=%u shown=%u logical=%ux%u saved=%d\n", key, identity, scale120, server->scale_wanted,
 	    server->scale120, server->width, server->height, *saved);
 
-	/* The windows, the pointer and the look fitted to a new logical size or scale. */
+	/*
+	 * The windows, the pointer and the look fitted to a new logical size or
+	 * scale, and the clients told the output's new mode, scale and logical
+	 * size; each surface hears its new preferred scale on the next pass
+	 * (surface-outputs.c).
+	 */
 	if (server->width != before_width ||
 	    server->height != before_height ||
-	    server->scale120 != before_scale)
+	    server->scale120 != before_scale) {
 		kwl_output_fit(server, 1U);
+		kwl_outputs_changed(server);
+	}
 
 	/* Succeeded: every displays object hears the new snapshot. */
 	kwl_displays_tell(server);
