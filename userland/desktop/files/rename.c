@@ -150,7 +150,7 @@ fm_rename_draw(
 }
 
 /*
- * Tells whether a place (window pixels) is on the field as last drawn.
+ * Tells whether a place (window units) is on the field as last drawn.
  */
 int
 fm_rename_hit(

@@ -11,10 +11,16 @@
  * ws094-p003), whose input becomes fm_event values in a queue the main
  * loop hands to the interface.
  *
+ * A window follows the compositor's scale: its frames are drawn in its
+ * pixels, and every place and distance of its input is turned into units
+ * (the pixels over the scale) before it is queued, so that the interface
+ * lays out and hits its regions in units at any scale.  The desktop's
+ * surface stays at 100 %, where units and pixels are the same.
+ *
  * The application repeats a held key (its repeats come as presses).  The
  * pointer's buttons carry their serial, which a context menu is opened
- * with.  The wheel scrolls three pixels a unit (the compositor sends fifteen
- * units a notch); a touch pad's fingers scroll as fingers do (ws090-p019):
+ * with.  The wheel scrolls three units a step (the compositor sends fifteen
+ * a notch); a touch pad's fingers scroll as fingers do (ws090-p019):
  * their moves and their lift join the touch inputs, which queue for
  * touch.c with the touch screen's (ws081-p010).  The menus' choices join
  * the queue as FM_EVENT_ACTION; the titlebar's controls and fields go to
@@ -25,11 +31,12 @@
 #include "window.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-/* How many pixels one unit of scrolling moves, and how many libkeiland gives a unit. */
+/* How many units one step of scrolling moves, and how many libkeiland gives a step. */
 #define WINDOW_SCROLL_SCALE	3
 #define WINDOW_KL_SCROLL_SCALE	4.0
 
@@ -42,6 +49,7 @@ static void window_desktop_log(struct fm_window *window);
 static void window_pad_push(struct fm_window *window, unsigned type, uint32_t time, double distance);
 static void window_touch_push(struct fm_window *window, unsigned type, const struct kl_window_event *event);
 static uint32_t window_modifiers(unsigned modifiers);
+static double window_units(const struct fm_window *window, double pixels);
 
 /*
  * Connects to the compositor and makes a toplevel window of a size, its
@@ -60,6 +68,7 @@ fm_window_open(
 {
 	struct kl_window_options options;
 	int status;
+	int error;
 
 	/* A window, drawn on the CPU and shown with Vulkan. */
 	memset(&options, 0, sizeof(options));
@@ -69,7 +78,25 @@ fm_window_open(
 	options.height = height;
 	options.present = KL_PRESENT_VULKAN;
 	status = window_open(window, display, &options);
-	return status;
+	if (status != 0)
+		return status;
+
+	/*
+	 * The window follows the compositor's scale: its frames are drawn in
+	 * its pixels, its input is turned into units here.  A compositor
+	 * without the fractional scale shows it at 100 %, enlarged.
+	 */
+	error = kl_window_follow_scale(window->kui);
+	if (error != 0)
+		fm_log("SCALE follow=refused errno=%d", error);
+
+	/* The scale and the size in pixels the window has now (the change, if any, also comes as KL_WINDOW_SCALE and a resize). */
+	window->scale = kl_window_scale(window->kui);
+	kl_window_size(window->kui, &window->width, &window->height);
+	fm_log("SCALE follow scale=%u width=%u height=%u", window->scale, window->width, window->height);
+
+	/* Succeeded: the window can be drawn into. */
+	return 0;
 }
 
 /*
@@ -219,6 +246,26 @@ fm_window_zoom(
 }
 
 /*
+ * Turns a length or a place in units into the window's pixels, at the
+ * nearest pixel (as a kl_canvas of the window's scale puts an edge).
+ */
+int
+fm_window_pixel(
+	const struct fm_window *window,
+	int units)
+{
+	double pixels;
+
+	/* At 100 % the units are the pixels. */
+	if (window->scale == 0U || window->scale == KL_SCALE_BASE)
+		return units;
+
+	/* Reports the units times the scale, rounded to the nearest pixel. */
+	pixels = (double)units * (double)window->scale / (double)KL_SCALE_BASE;
+	return (int)floor(pixels + 0.5);
+}
+
+/*
  * Destroys the window, then the application and its connection.
  */
 void
@@ -294,8 +341,9 @@ window_open(
 	struct kl_app_options app_options;
 	int error;
 
-	/* Nothing held yet. */
+	/* Nothing held yet; drawn at 100 % until the window follows the compositor's scale. */
 	memset(window, 0, sizeof(*window));
+	window->scale = KL_SCALE_BASE;
 
 	/* The application: the connection, and the identity of its windows. */
 	memset(&app_options, 0, sizeof(app_options));
@@ -341,9 +389,9 @@ window_event(
 	/* What it is. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
-		/* The pointer's new place, as a motion. */
-		window->pointer_x = (int)event->x;
-		window->pointer_y = (int)event->y;
+		/* The pointer's new place in units, as a motion. */
+		window->pointer_x = (int)window_units(window, event->x);
+		window->pointer_y = (int)window_units(window, event->y);
 		(void)fm_window_push(window, FM_EVENT_MOTION);
 		break;
 	case KL_WINDOW_LEAVE:
@@ -398,8 +446,14 @@ window_event(
 	case KL_WINDOW_TOUCH_CANCEL:
 		window_touch_push(window, FM_TOUCH_CANCEL, event);
 		break;
+	case KL_WINDOW_SCALE:
+		/* Another scale: the main loop draws at it (its size in pixels follows as a resize). */
+		window->scale = event->code;
+		window->rescaled = 1;
+		fm_log("SCALE scale=%u", window->scale);
+		break;
 	case KL_WINDOW_RESIZE:
-		/* The size and the state the compositor gave, drawn at from the next frame. */
+		/* The size in pixels and the state the compositor gave, drawn at from the next frame. */
 		kl_window_size(window->kui, &window->width, &window->height);
 		window->maximized = kl_window_maximized(window->kui);
 		window->resized = 1;
@@ -449,7 +503,7 @@ window_event(
 }
 
 /*
- * Turns the wheel's scrolling into the window's pixels, and a touch pad's
+ * Turns the wheel's scrolling into the window's units, and a touch pad's
  * fingers' moves and lift into touch inputs (only the vertical axis
  * scrolls the window).
  */
@@ -471,10 +525,10 @@ window_axis(
 		return;
 	}
 
-	/* The vertical distance, in the compositor's units. */
+	/* The vertical distance in the window's units, then in the compositor's steps. */
 	if (event->dy == 0.0)
 		return;
-	units = event->dy / WINDOW_KL_SCROLL_SCALE;
+	units = window_units(window, event->dy) / WINDOW_KL_SCROLL_SCALE;
 
 	/* A touch pad's fingers scroll as fingers do, unrounded. */
 	if (event->axis_source == KL_AXIS_SOURCE_FINGER) {
@@ -482,7 +536,7 @@ window_axis(
 		return;
 	}
 
-	/* A wheel's whole units, scaled to the window's pixels. */
+	/* A wheel's whole steps, scaled to the window's units. */
 	input = fm_window_push(window, FM_EVENT_AXIS);
 	if (input == NULL)
 		return;
@@ -505,8 +559,8 @@ window_drop(
 		input = fm_window_push(window, FM_EVENT_DROP_ENTER);
 		if (input == NULL)
 			return;
-		input->x = (int)event->x;
-		input->y = (int)event->y;
+		input->x = (int)window_units(window, event->x);
+		input->y = (int)window_units(window, event->y);
 		input->pressed = event->pressed;
 
 		/* Whether it carries file names, and what it carries that the window takes (KL_DROP_*, ws189-p003). */
@@ -516,12 +570,12 @@ window_drop(
 		input->button = event->code;
 		break;
 	case KL_WINDOW_DROP_MOTION:
-		/* Where it is. */
+		/* Where it is, in units. */
 		input = fm_window_push(window, FM_EVENT_DROP_MOTION);
 		if (input == NULL)
 			return;
-		input->x = (int)event->x;
-		input->y = (int)event->y;
+		input->x = (int)window_units(window, event->x);
+		input->y = (int)window_units(window, event->y);
 		break;
 	case KL_WINDOW_DROP_LEAVE:
 		window->drop_over = 0;
@@ -621,7 +675,7 @@ window_touch_push(
 	if (window->touch_count >= FM_WINDOW_TOUCHES)
 		return;
 
-	/* The input, after the ones before it (what is under a finger is the main loop's to find); a down's serial, a cancel's every finger. */
+	/* The input in units, after the ones before it (what is under a finger is the main loop's to find); a down's serial, a cancel's every finger. */
 	kept = &window->touches[window->touch_count];
 	window->touch_count++;
 	memset(kept, 0, sizeof(*kept));
@@ -629,8 +683,8 @@ window_touch_push(
 	kept->id = event->id;
 	if (type == FM_TOUCH_CANCEL)
 		kept->id = -1;
-	kept->x = (float)event->x;
-	kept->y = (float)event->y;
+	kept->x = (float)window_units(window, event->x);
+	kept->y = (float)window_units(window, event->y);
 	kept->time = (uint32_t)(event->time_us / 1000U);
 	if (type == FM_TOUCH_DOWN)
 		kept->serial = event->serial;
@@ -682,4 +736,18 @@ window_text(
 		return;
 	(void)snprintf(input->text, sizeof(input->text), "%s", event->text);
 	input->before = event->before;
+}
+
+/* Turns a place or a distance in the window's pixels into units (the same at 100 %). */
+static double
+window_units(
+	const struct fm_window *window,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (window->scale == 0U || window->scale == KL_SCALE_BASE)
+		return pixels;
+
+	/* Reports the pixels over the scale. */
+	return pixels * (double)KL_SCALE_BASE / (double)window->scale;
 }

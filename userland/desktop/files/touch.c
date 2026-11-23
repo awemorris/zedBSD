@@ -684,7 +684,7 @@ touch_pointer(
 
 /*
  * A touch pad's two fingers move the area under the pointer by the
- * event's y (pixels, as a wheel scrolls) at the compositor's time
+ * event's y (units, as a wheel scrolls) at the compositor's time
  * (ws090-p019): libkeiland's scroller takes the area at their first move
  * (from where it is, unless it already owns it; a glide is caught) and
  * follows them.  Fingers on the screen keep it from them.
