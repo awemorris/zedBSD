@@ -352,6 +352,7 @@ static void run_touch_round(void);
 static void run_text_cursor(void);
 static void run_secret_follow(struct terminal_connection *connection);
 static unsigned run_font_pixels(const struct run_state *run, unsigned pixels);
+static unsigned run_padding(const struct run_state *run);
 static void run_touch_queue(unsigned kind, const struct terminal_touch_pointer *made);
 static int run_tab_settings(const struct terminal_run_options *options, struct run_state *run);
 static int run_tab_settings_open(const struct terminal_run_options *options, struct run_state *run, unsigned from);
@@ -479,6 +480,9 @@ run_start(
 	/* The colour emoji font for what neither has, read when a character first needs it. */
 	terminal_font_emoji(&run_font, options->emoji);
 
+	/* The grid's padding at the screen's scale. */
+	run_font.padding = run_padding(run);
+
 	/*
 	 * The window, sized for the grid asked for: the grid's pixels at the
 	 * scale, which the window's options take at 100 % (the window system
@@ -490,8 +494,8 @@ run_start(
 				      options->application,
 				      options->title,
 				      options->present,
-				      run_window_units(run, options->columns * run_font.cell_width + 2U * TERMINAL_PADDING),
-				      run_window_units(run, options->rows * run_font.cell_height + 2U * TERMINAL_PADDING));
+				      run_window_units(run, options->columns * run_font.cell_width + 2U * run_font.padding),
+				      run_window_units(run, options->rows * run_font.cell_height + 2U * run_font.padding));
 	if (status != 0)
 		return -1;
 
@@ -504,6 +508,9 @@ run_start(
 			errno = status;
 			return -1;
 		}
+
+		/* The padding at that scale too. */
+		run_font.padding = run_padding(run);
 	}
 
 	/* The fingers; without memory for them they do nothing. */
@@ -899,10 +906,10 @@ run_grid(
 	/* The window less the padding on both sides, in whole cells, at least one of each. */
 	*columns = 1U;
 	*rows = 1U;
-	if (width > 2U * TERMINAL_PADDING + run_font.cell_width)
-		*columns = (width - 2U * TERMINAL_PADDING) / run_font.cell_width;
-	if (height > 2U * TERMINAL_PADDING + run_font.cell_height)
-		*rows = (height - 2U * TERMINAL_PADDING) / run_font.cell_height;
+	if (width > 2U * run_font.padding + run_font.cell_width)
+		*columns = (width - 2U * run_font.padding) / run_font.cell_width;
+	if (height > 2U * run_font.padding + run_font.cell_height)
+		*rows = (height - 2U * run_font.padding) / run_font.cell_height;
 	if (*columns > TERMINAL_MAX_COLUMNS)
 		*columns = TERMINAL_MAX_COLUMNS;
 	if (*rows > TERMINAL_MAX_ROWS)
@@ -1388,6 +1395,9 @@ run_rescale(
 		run->scale = previous;
 		return 0;
 	}
+
+	/* The padding at the new scale. */
+	run_font.padding = run_padding(run);
 
 	/* The grid that fits the window at the new cell, for every tab, told to each shell. */
 	run_grid(run->width, run->height, &run->columns, &run->rows);
@@ -2299,7 +2309,7 @@ run_pointer_motion(
 	 * its bottom toward the live screen: a step at once, then one every
 	 * RUN_EDGE_MS while the pointer stays there.
 	 */
-	top = (int32_t)TERMINAL_PADDING;
+	top = (int32_t)run_font.padding;
 	bottom = top + (int32_t)(run_screen->rows * run_font.cell_height);
 	edge = 0;
 	if (event->y < top)
@@ -2364,9 +2374,9 @@ run_edge_scroll(
 
 	/* How far past the edge, in pixels (at least one). */
 	if (run_edge > 0) {
-		beyond = (int32_t)TERMINAL_PADDING - run_pointer_y;
+		beyond = (int32_t)run_font.padding - run_pointer_y;
 	} else {
-		beyond = run_pointer_y - (int32_t)TERMINAL_PADDING - (int32_t)(run_screen->rows * run_font.cell_height) + 1;
+		beyond = run_pointer_y - (int32_t)run_font.padding - (int32_t)(run_screen->rows * run_font.cell_height) + 1;
 	}
 
 	/* A pointer that has just come back counts as one pixel past. */
@@ -2550,8 +2560,8 @@ run_cell(
 	unsigned row;
 
 	/* From the grid's padded top left, with the text moved by the view's offset within a line, a cell's size at a time. */
-	x -= (int32_t)TERMINAL_PADDING;
-	y -= (int32_t)TERMINAL_PADDING + run_screen->view_offset;
+	x -= (int32_t)run_font.padding;
+	y -= (int32_t)run_font.padding + run_screen->view_offset;
 	if (x < 0)
 		x = 0;
 	if (y < 0)
@@ -2789,14 +2799,14 @@ run_text_cursor(void)
 	int y;
 
 	/* The cursor's cell, on the rows the view shows (a view scrolled back moves it down). */
-	x = (int)TERMINAL_PADDING + (int)(run_screen->cursor_column * run_font.cell_width);
-	y = (int)TERMINAL_PADDING + (int)((run_screen->cursor_row + run_screen->view) * run_font.cell_height) + run_screen->view_offset;
+	x = (int)run_font.padding + (int)(run_screen->cursor_column * run_font.cell_width);
+	y = (int)run_font.padding + (int)((run_screen->cursor_row + run_screen->view) * run_font.cell_height) + run_screen->view_offset;
 
 	/* While the search bar is open: its caret's cell on the last row, where the composed text shows. */
 	if (run_window.search_open && run_screen->rows != 0U) {
 		column = terminal_search_bar_column(run_window.search_query, run_window.search_length, run_screen->ambiguous_wide);
-		x = (int)TERMINAL_PADDING + (int)(column * run_font.cell_width);
-		y = (int)TERMINAL_PADDING + (int)((run_screen->rows - 1U) * run_font.cell_height);
+		x = (int)run_font.padding + (int)(column * run_font.cell_width);
+		y = (int)run_font.padding + (int)((run_screen->rows - 1U) * run_font.cell_height);
 	}
 
 	/* The cell's rectangle. */
@@ -2820,6 +2830,23 @@ run_font_pixels(
 
 	/* Reports the size drawn at. */
 	return drawn;
+}
+
+/*
+ * Gives the space between the window's edge and the grid in the screen's
+ * pixels: TERMINAL_PADDING at the screen's scale in 96ths, rounded.
+ */
+static unsigned
+run_padding(
+	const struct run_state *run)
+{
+	unsigned padding;
+
+	/* The padding at the scale, rounded to the nearest pixel. */
+	padding = (TERMINAL_PADDING * run->scale + 48U) / 96U;
+
+	/* Reports the padding. */
+	return padding;
 }
 
 /*

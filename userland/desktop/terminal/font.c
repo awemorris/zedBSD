@@ -111,8 +111,9 @@ terminal_font_open(
 {
 	int error;
 
-	/* Nothing is held until the file is read. */
+	/* Nothing is held until the file is read; the padding is the one at 100 % until the caller sets another. */
 	memset(font, 0, sizeof(*font));
+	font->padding = TERMINAL_PADDING;
 
 	/* The whole file, which the face reads from for as long as it is open. */
 	error = font_read(path, &font->data, &font->size);
