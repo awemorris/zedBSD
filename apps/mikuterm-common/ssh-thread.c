@@ -56,6 +56,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Whether the launch screen has a WSL row: each build says so. */
+#ifndef MIKUTERM_HAVE_WSL
+#error "MIKUTERM_HAVE_WSL must be defined (1 or 0) by the build"
+#endif
+
 /* GitHub Codespaces are reached through a ProxyCommand (the features are mikuterm.h's). */
 #if MIKUTERM_HAVE_CODESPACES && !MIKUTERM_HAVE_PROXY_COMMAND
 #error "MIKUTERM_HAVE_CODESPACES needs MIKUTERM_HAVE_PROXY_COMMAND"
@@ -513,11 +518,11 @@ thread_choose(
 		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
 	}
 
-	/* The login shell, WSL (not on Linux), GitHub Codespaces and the settings after the hosts; with no host, how to type one. */
+	/* The login shell, WSL (a system with WSL only), GitHub Codespaces and the settings after the hosts; with no host, how to type one. */
 #if MIKUTERM_HAVE_LOGIN_SHELL
 	(void)launch_add(&choice->screen, "l", LAUNCH_SHELL, "Login Shell", NULL);
 #endif
-#ifndef MIKUTERM_LINUX
+#if MIKUTERM_HAVE_WSL
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
 #endif
 #if MIKUTERM_HAVE_CODESPACES

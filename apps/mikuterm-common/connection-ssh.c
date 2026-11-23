@@ -41,13 +41,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The words of the line about keeping a passphrase, after its box (the Linux program keeps it while it runs). */
-#ifdef MIKUTERM_LINUX
-#define CONNECTION_KEEP_TEXT	"Remember the passphrase until mikuterm ends (Tab switches this)\r\n"
-#else
-#define CONNECTION_KEEP_TEXT	"Remember the passphrase until you sign out of Windows (Tab switches this)\r\n"
-#endif
-
 /*
  * The first title of a tab, before the remote side sets its own: the
  * session's number (the order the tabs were opened in, from 1) and the
@@ -324,7 +317,7 @@ session_say_line(
 }
 
 /*
- * Shows whether the passphrase asked for is kept for the Windows session
+ * Shows whether the passphrase asked for is kept for the user's session
  * (the caller holds the lock): one line with a box, checked when it is,
  * and the key that switches it.
  */
@@ -332,6 +325,8 @@ void
 session_keep_line_locked(
 	struct mikuterm_session *session)
 {
+	const char *keep_text;
+
 	/* The box as the choice stands. */
 	if (session->keep)
 		(void)session_put_locked(session, "[x] ", 4U);
@@ -339,7 +334,8 @@ session_keep_line_locked(
 		(void)session_put_locked(session, "[ ] ", 4U);
 
 	/* What it means. */
-	(void)session_put_locked(session, CONNECTION_KEEP_TEXT, strlen(CONNECTION_KEEP_TEXT));
+	keep_text = mikuterm_passphrase_keep_text();
+	(void)session_put_locked(session, keep_text, strlen(keep_text));
 }
 
 /* Says that the connection ended as the tab ends: the tab closes once it read everything. */

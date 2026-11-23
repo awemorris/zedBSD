@@ -173,6 +173,17 @@ mikuterm_passphrases_forget_all(void)
 	return forgotten;
 }
 
+/*
+ * Returns the words of the line that says how long a passphrase is kept,
+ * shown after the box that chooses whether to keep it.
+ */
+const char *
+mikuterm_passphrase_keep_text(void)
+{
+	/* How long this system keeps a passphrase. */
+	return "Remember the passphrase until mikuterm ends (Tab switches this)\r\n";
+}
+
 /* Finds the entry of a key file's path (NULL: none); called under credential_lock. */
 static struct credential_entry *
 credential_find(
