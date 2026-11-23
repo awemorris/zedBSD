@@ -462,7 +462,11 @@ x11_input_text(
 	uint32_t keysym;
 	uint8_t keycode;
 
-	/* The character's keysym; a control character, or a number that is no character, has none. */
+	/*
+	 * The character's keysym; a control character, or a number that is no
+	 * character, has none.  The log names only such a code point, never
+	 * the text typed.
+	 */
 	keysym = input_text_keysym(character);
 	if (keysym == 0U) {
 		x11_log(server, "X11 INPUT dropped character U+%04lX (no keysym)", (unsigned long)character);
@@ -471,15 +475,14 @@ x11_input_text(
 
 	/* The press and the release both need room among the events a frozen keyboard holds. */
 	if (server->device_count + 2U > X11_DEVICE_QUEUE) {
-		x11_log(server, "X11 INPUT dropped character U+%04lX (the frozen devices hold %u events)", (unsigned long)character,
-		    server->device_count);
+		x11_log(server, "X11 INPUT dropped a character (the frozen devices hold %u events)", server->device_count);
 		return;
 	}
 
 	/* A keycode that carries the keysym. */
 	keycode = input_text_keycode(server, keysym);
 	if (keycode == 0U) {
-		x11_log(server, "X11 INPUT dropped character U+%04lX (no keycode can be lent)", (unsigned long)character);
+		x11_log(server, "X11 INPUT dropped a character (no keycode can be lent)");
 		return;
 	}
 

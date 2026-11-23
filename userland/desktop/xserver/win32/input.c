@@ -17,7 +17,8 @@
  * buttons are X's 1 to 9 (the wheels 4 to 7), and a button held captures
  * the pointer, as X's implicit grab does; an X client's grab keeps it too.
  * A paste or a copy (by key or by button) is noted for the clipboard's
- * policy.
+ * policy.  The keys an input method took and the characters sent as keys
+ * are not X's keys: their text reaches X through ime.c.
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
