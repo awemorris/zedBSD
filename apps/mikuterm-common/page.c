@@ -149,7 +149,7 @@ mikuterm_page_init(
 	size_t length;
 	int error;
 
-	/* The files' paths: ssh\config, ssh\ with its separator, ssh\known_hosts. */
+	/* The files' paths: ssh/config, ssh/ with its separator, ssh/known_hosts (the system's separator). */
 	*program = NULL;
 	error = mikuterm_path(page_state.config, sizeof(page_state.config), PAGE_SSH_CONFIG);
 	if (error == 0)
@@ -159,7 +159,11 @@ mikuterm_page_init(
 	if (error != 0)
 		return error;
 	length = strlen(page_state.keys);
+#ifdef _WIN32
 	page_state.keys[length] = '\\';
+#else
+	page_state.keys[length] = '/';
+#endif
 	page_state.keys[length + 1U] = '\0';
 
 	/* A new key's comment, user@computer. */
