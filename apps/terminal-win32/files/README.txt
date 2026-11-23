@@ -429,7 +429,7 @@ The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
 xlogo), and GTK and Qt programs draw through its RENDER (anti-aliased text,
 images, gradients) and take input through XInput2.  Not every program has
 been tried yet; one that needs what the server does not have stops with an
-X error.  Animated cursors show their first picture only.
+X error.
 
 The X server does not offer OpenGL (GLX): remote programs that draw with
 OpenGL through the X server do not show here.
