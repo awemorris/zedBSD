@@ -20,9 +20,6 @@
  * the case of letters aside.  The first block that gives a keyword of one
  * value wins; a keyword of a list (IdentityFile, the forwards) takes the
  * lines of every block that applies.
- *
- * Procedure referenced: ssh_config(5) of OpenSSH (man.openbsd.org,
- * 2026-11-23): "the first obtained value will be used", Host, PATTERNS.
  */
 
 #include "settings-hosts.h"
@@ -445,6 +442,8 @@ terminal_hosts_match(
  * Tells whether a block applies to a host's name: the part before any Host
  * always does, a Host's when one of its patterns matches the name and no
  * negated one does, and a Match's is not known (0).  Returns 1 or 0.
+ *
+ * Procedure referenced: ssh_config(5) of OpenSSH, Host and PATTERNS.
  */
 int
 terminal_hosts_applies(

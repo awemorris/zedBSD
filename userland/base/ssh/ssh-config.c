@@ -2200,11 +2200,14 @@ sshd_value(
 			target->gateway_ports = (enum sshd_gateway_ports)value;
 		return status;
 	case SSHD_KW_PERMIT_OPEN:
-		return sshd_value_permits(&target->permit_open_mode, target->permit_open, &target->permit_open_count, 0, parsed, what);
+		status = sshd_value_permits(&target->permit_open_mode, target->permit_open, &target->permit_open_count, 0, parsed, what);
+		return status;
 	case SSHD_KW_PERMIT_LISTEN:
-		return sshd_value_permits(&target->permit_listen_mode, target->permit_listen, &target->permit_listen_count, 1, parsed, what);
+		status = sshd_value_permits(&target->permit_listen_mode, target->permit_listen, &target->permit_listen_count, 1, parsed, what);
+		return status;
 	case SSHD_KW_DISABLE_FORWARDING:
-		return config_value_bool(parsed, &target->disable_forwarding, what);
+		status = config_value_bool(parsed, &target->disable_forwarding, what);
+		return status;
 	default:
 		break;
 	}
@@ -2429,7 +2432,8 @@ ssh_value(
 		/* Copies the path into the settings. */
 		return config_copy_path(&parsed->tokens[0], target->global_known_hosts, sizeof(target->global_known_hosts), CONFIG_PATH_PLAIN, CONFIG_PATH_NONE_WORD, what);
 	case SSH_KW_BATCH:
-		return config_value_bool(parsed, &target->batch_mode, what);
+		status = config_value_bool(parsed, &target->batch_mode, what);
+		return status;
 	case SSH_KW_CONNECT_TIMEOUT:
 		return config_value_time(parsed, &target->connect_timeout, what);
 	case SSH_KW_ALIVE_INTERVAL:
@@ -2442,26 +2446,33 @@ ssh_value(
 			target->request_tty = (enum ssh_request_tty)value;
 		return status;
 	case SSH_KW_PASSWORD:
-		return config_value_bool(parsed, &target->password, what);
+		status = config_value_bool(parsed, &target->password, what);
+		return status;
 	case SSH_KW_PUBKEY:
-		return config_value_bool(parsed, &target->pubkey, what);
+		status = config_value_bool(parsed, &target->pubkey, what);
+		return status;
 	case SSH_KW_LOG_LEVEL:
 		status = config_value_name(parsed, log_level_names, sizeof(log_level_names) / sizeof(log_level_names[0]), &value, what);
 		if (status == 0)
 			target->log_level = value;
 		return status;
 	case SSH_KW_FORWARD_X11:
-		return config_value_bool(parsed, &target->forward_x11, what);
+		status = config_value_bool(parsed, &target->forward_x11, what);
+		return status;
 	case SSH_KW_FORWARD_X11_TRUSTED:
-		return config_value_bool(parsed, &target->forward_x11_trusted, what);
+		status = config_value_bool(parsed, &target->forward_x11_trusted, what);
+		return status;
 	case SSH_KW_FORWARD_X11_TIMEOUT:
 		return config_value_time(parsed, &target->forward_x11_timeout, what);
 	case SSH_KW_GATEWAY_PORTS:
-		return config_value_bool(parsed, &target->gateway_ports, what);
+		status = config_value_bool(parsed, &target->gateway_ports, what);
+		return status;
 	case SSH_KW_EXIT_ON_FORWARD_FAILURE:
-		return config_value_bool(parsed, &target->exit_on_forward_failure, what);
+		status = config_value_bool(parsed, &target->exit_on_forward_failure, what);
+		return status;
 	case SSH_KW_CLEAR_ALL_FORWARDINGS:
-		return config_value_bool(parsed, &target->clear_all_forwardings, what);
+		status = config_value_bool(parsed, &target->clear_all_forwardings, what);
+		return status;
 	case SSH_KW_SESSION_TYPE:
 		/* A subsystem as the session is not offered: said apart from a word that is no value at all. */
 		if (parsed->token_count == 1) {
@@ -2478,7 +2489,8 @@ ssh_value(
 			target->session_type_none = value;
 		return status;
 	case SSH_KW_REMOTE_COMMAND:
-		return ssh_value_command(target, parsed, what);
+		status = ssh_value_command(target, parsed, what);
+		return status;
 	default:
 		break;
 	}
@@ -2906,6 +2918,8 @@ ssh_value_forward(
 		*what = "missing value";
 		return EINVAL;
 	}
+
+	/* Refuses a keyword with more than its two words. */
 	if (parsed->token_count > 2) {
 		*what = "too many values";
 		return EINVAL;
@@ -2925,6 +2939,8 @@ ssh_value_forward(
 		*what = "bad forwarding specification";
 		return EINVAL;
 	}
+
+	/* Copies the first word of the specification. */
 	memcpy(spec, parsed->tokens[0].text, parsed->tokens[0].size);
 	length = parsed->tokens[0].size;
 	if (parsed->token_count == 2) {
@@ -2932,6 +2948,8 @@ ssh_value_forward(
 		memcpy(spec + length + 1U, parsed->tokens[1].text, parsed->tokens[1].size);
 		length += 1U + parsed->tokens[1].size;
 	}
+
+	/* Ends the specification as a string. */
 	spec[length] = '\0';
 
 	/* Reads the forwarding, whether or not the block applies, so a bad line is an error anywhere. */

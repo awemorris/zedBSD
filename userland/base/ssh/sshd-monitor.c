@@ -1690,6 +1690,8 @@ monitor_put_forwarding(
 	} else if (config->tcp_forwarding == 0) {
 		name = "no";
 	}
+
+	/* Refuses a mode that has no name. */
 	if (name == NULL)
 		return EINVAL;
 	status = monitor_put_line(out, "AllowTcpForwarding", name, NULL);
@@ -1705,6 +1707,8 @@ monitor_put_forwarding(
 	} else if (config->gateway_ports == SSHD_GATEWAY_CLIENT_SPECIFIED) {
 		name = "clientspecified";
 	}
+
+	/* Refuses a mode that has no name. */
 	if (name == NULL)
 		return EINVAL;
 	status = monitor_put_line(out, "GatewayPorts", name, NULL);
@@ -1750,12 +1754,19 @@ monitor_put_permits(
 	const char *colon;
 	unsigned index;
 	int written;
+	int status;
 
-	/* Every one, or none. */
-	if (mode == SSHD_PERMIT_ANY)
-		return monitor_put_line(out, keyword, "any", NULL);
-	if (mode == SSHD_PERMIT_NONE)
-		return monitor_put_line(out, keyword, "none", NULL);
+	/* Any: the line says so. */
+	if (mode == SSHD_PERMIT_ANY) {
+		status = monitor_put_line(out, keyword, "any", NULL);
+		return status;
+	}
+
+	/* None: the line says so. */
+	if (mode == SSHD_PERMIT_NONE) {
+		status = monitor_put_line(out, keyword, "none", NULL);
+		return status;
+	}
 
 	/* A list must have entries, no more than the field holds. */
 	if (mode != SSHD_PERMIT_LIST || count == 0 || count > SSHD_PERMITS_MAX)
@@ -1777,6 +1788,8 @@ monitor_put_permits(
 		} else {
 			(void)snprintf(texts[index], sizeof(texts[index]), "%s:%s", list[index].host, port);
 		}
+
+		/* Points the word at its text. */
 		words[index] = texts[index];
 	}
 
