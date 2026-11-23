@@ -110,7 +110,7 @@ more).
 
 | Action | Keys | |
 | --- | --- | --- |
-| New tab | Shell > New Tab, Ctrl+Shift+T, the titlebar's + | a shell, at the end |
+| New tab | Shell > New Tab, Ctrl+Alt+T, the titlebar's + | a shell, at the end |
 | Close tab | Shell > Close Tab, Ctrl+Shift+W, the tab's close button | the shell is hung up; closing the last tab ends the terminal |
 | Next, previous tab | Ctrl+Tab and Ctrl+Page Down, Ctrl+Shift+Tab and Ctrl+Page Up | the desktop's titlebar |
 | Settings | Shell > Settings..., F12 | section 3 |
@@ -125,7 +125,7 @@ tab's history. mikuterm has its own keys for the tabs on Windows
 | Item | Shortcut |
 | --- | --- |
 | Shell > New Window | Ctrl+Shift+N (another terminal, on the same display) |
-| Shell > New Tab, Close Tab, Close Window | Ctrl+Shift+T, Ctrl+Shift+W, Ctrl+Shift+Q |
+| Shell > New Tab, Close Tab, Close Window | Ctrl+Alt+T, Ctrl+Shift+W, Ctrl+Shift+Q |
 | Shell > Settings... | F12 |
 | Edit > Copy, Paste, Select All | Ctrl+Shift+C, Ctrl+Shift+V, Ctrl+Shift+A |
 | Edit > Find..., Find Next, Find Previous | Ctrl+Shift+F, Ctrl+Shift+G, Ctrl+Shift+H |
