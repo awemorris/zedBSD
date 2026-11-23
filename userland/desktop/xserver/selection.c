@@ -44,6 +44,9 @@
 #define PROPERTY_REPLACE	0U
 #define PROPERTY_APPEND		2U
 
+/* How long an owner answering INCR may take to listen to the root window's properties before its pieces start anyway (ms). */
+#define SELECTION_INCR_WAIT	1000U
+
 /* The longest selection name a log line shows. */
 #define SELECTION_NAME_LOG	64
 
@@ -493,11 +496,13 @@ x11_selection_property_event(
 	struct x11_bridge *bridge;
 	unsigned index;
 
-	/* A new piece for a bridge taking a text in pieces. */
+	/* A new piece for a bridge taking a text in pieces (once they started). */
 	if (!deleted && window == server->root) {
 		for (index = 0U; index < X11_BRIDGES; index++) {
 			bridge = &server->bridges[index];
-			if (bridge->incr && bridge->property == atom) {
+			if (bridge->incr &&
+			    bridge->incr_started &&
+			    bridge->property == atom) {
 				selection_bridge_piece(server, bridge);
 				return;
 			}
@@ -516,6 +521,45 @@ x11_selection_property_event(
 			return;
 		}
 	}
+}
+
+/*
+ * Starts the pieces of an X owner's text (INCR) once the owner listens to
+ * the root window's property changes, or once it took too long: the
+ * bridge's property is deleted, which asks for the first piece.  Returns
+ * nonzero while a bridge still waits (the next tick should come soon).
+ */
+int
+x11_selection_tick(
+	struct x11server *server)
+{
+	struct x11_bridge *bridge;
+	unsigned index;
+	uint32_t mask;
+	int waiting;
+
+	/* Each bridge waiting to start its pieces. */
+	waiting = 0;
+	for (index = 0U; index < X11_BRIDGES; index++) {
+		bridge = &server->bridges[index];
+		if (!bridge->incr || bridge->incr_started)
+			continue;
+
+		/* Not yet: the owner does not listen, and the time allowed is not over. */
+		mask = x11_event_mask_of(server->root, bridge->owner);
+		if ((mask & X11_MASK_PROPERTY_CHANGE) == 0U && server->now - bridge->incr_since < SELECTION_INCR_WAIT) {
+			waiting = 1;
+			continue;
+		}
+
+		/* The first deletion. */
+		bridge->incr_started = 1;
+		x11_log(server, "X11 SELECTION incr start selection=%s listening=%d", selection_bridge_name(server, bridge), (mask & X11_MASK_PROPERTY_CHANGE) != 0U);
+		x11_property_delete(server, server->root, bridge->property);
+	}
+
+	/* Succeeded: whether one still waits. */
+	return waiting;
 }
 
 /*
@@ -740,6 +784,7 @@ selection_bridge_stop(
 	/* Nothing waited for, nothing gathered. */
 	bridge->asking = 0U;
 	bridge->incr = 0;
+	bridge->incr_started = 0;
 	free(bridge->data);
 	bridge->data = NULL;
 	bridge->length = 0U;
@@ -760,12 +805,18 @@ selection_bridge_take(
 	uint8_t *text;
 	size_t length;
 
-	/* INCR: the pieces follow, each put after the server deletes the one before. */
+	/*
+	 * INCR: the pieces follow, each put after the server deletes the one
+	 * before.  The first deletion waits for the tick (x11_selection_tick):
+	 * an owner selects the root window's property changes after it sent
+	 * its answer, and would miss a deletion made at once.
+	 */
 	if (property->type == server->atom_incr) {
 		bridge->incr = 1;
+		bridge->incr_started = 0;
+		bridge->incr_since = server->now;
 		bridge->length = 0U;
 		x11_log(server, "X11 SELECTION incr selection=%s", selection_bridge_name(server, bridge));
-		x11_property_delete(server, server->root, bridge->property);
 		return;
 	}
 

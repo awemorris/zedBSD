@@ -441,8 +441,9 @@ struct x11_selection {
  * its index is the backend's X11_SELECTION_* number): the selection's
  * atom and the root window's property an X owner's text is asked into;
  * the target being asked for (0: nothing is; UTF8_STRING, then STRING) of
- * which owner window and client, whether the text comes in pieces (INCR)
- * and what came so far; and the copy of the last X owner's text (NULL for
+ * which owner window and client, whether the text comes in pieces (INCR),
+ * whether the owner was told to start them and since when it waits to
+ * be, and what came so far; and the copy of the last X owner's text (NULL for
  * none), which the root window answers with once that owner is gone.
  */
 struct x11_bridge {
@@ -452,6 +453,8 @@ struct x11_bridge {
 	uint32_t window;
 	unsigned owner;
 	int incr;
+	int incr_started;
+	uint32_t incr_since;
 	uint8_t *data;
 	size_t length;
 	uint8_t *kept;
@@ -760,6 +763,7 @@ void x11_selection_forget_window(struct x11server *server, uint32_t window);
 void x11_selection_forget_client(struct x11server *server, unsigned client);
 void x11_selection_property_event(struct x11server *server, struct x11_window *window, uint32_t atom, int deleted);
 void x11_selection_destroy(struct x11server *server);
+int x11_selection_tick(struct x11server *server);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);
