@@ -29,9 +29,9 @@
  */
 
 #define COBJMACROS
-#include "userland/desktop/libkeiland/win32/window-win32.h"
-#include "userland/desktop/libkeiland/win32/cf-html.h"
-#include "userland/desktop/libkeiland/win32/wide.h"
+#include "apps/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/cf-html.h"
+#include "apps/libkeiland/win32/wide.h"
 
 #include <ole2.h>
 #include <shlobj.h>

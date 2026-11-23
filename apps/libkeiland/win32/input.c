@@ -16,7 +16,7 @@
  * 31.
  */
 
-#include "userland/desktop/libkeiland/win32/input.h"
+#include "apps/libkeiland/win32/input.h"
 
 #include <keiland/keiland_key.h>
 #include <keiland/keiland_menu.h>

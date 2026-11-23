@@ -31,9 +31,9 @@
  */
 #include <keiland/keiland.h>
 #include "userland/desktop/libkeiland/platform/platform.h"
-#include "userland/desktop/libkeiland/win32/frame.h"
-#include "userland/desktop/libkeiland/win32/input.h"
-#include "userland/desktop/libkeiland/win32/wide.h"
+#include "apps/libkeiland/win32/frame.h"
+#include "apps/libkeiland/win32/input.h"
+#include "apps/libkeiland/win32/wide.h"
 
 #include <windows.h>
 

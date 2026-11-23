@@ -9,7 +9,7 @@
  * The geometry of the Windows backend's window frame.
  */
 
-#include "userland/desktop/libkeiland/win32/frame.h"
+#include "apps/libkeiland/win32/frame.h"
 
 #include <stddef.h>
 #include <string.h>

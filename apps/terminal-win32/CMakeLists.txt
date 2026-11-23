@@ -95,61 +95,10 @@ set(MIKUTERM_SSH_NAMES
 list(TRANSFORM MIKUTERM_SSH_NAMES PREPEND ${MIKUTERM_ROOT}/userland/base/ssh/ssh- OUTPUT_VARIABLE MIKUTERM_SSH_SOURCES)
 list(TRANSFORM MIKUTERM_SSH_SOURCES APPEND .c)
 
-# libkeiland on Windows: the files every system shares, the Windows ones, and the stubs of what Windows has not.
-set(MIKUTERM_KEILAND_SOURCES
-	userland/desktop/libkeiland/version.c
-	userland/desktop/libkeiland/motion.c
-	userland/desktop/libkeiland/scroll.c
-	userland/desktop/libkeiland/gesture.c
-	userland/desktop/libkeiland/settings-cache.c
-	userland/desktop/settings-keys/settings-keys.c
-	userland/desktop/libkeiland/translate-follow.c
-	userland/desktop/libkeiland/system/system-monitor-rate.c
-	userland/desktop/libkeiland/ui/canvas.c
-	userland/desktop/libkeiland/ui/drop-look.c
-	userland/desktop/libkeiland/ui/icons.c
-	userland/desktop/libkeiland/ui/icons-line.c
-	userland/desktop/libkeiland/ui/theme.c
-	userland/desktop/libkeiland/ui/input.c
-	userland/desktop/libkeiland/ui/scroll.c
-	userland/desktop/libkeiland/ui/scroll-bar.c
-	userland/desktop/libkeiland/ui/text-touch.c
-	userland/desktop/libkeiland/ui/text-bar.c
-	userland/desktop/libkeiland/ui/text-select.c
-	userland/desktop/libkeiland/ui/ui.c
-	userland/desktop/libkeiland/launch.c
-	userland/desktop/libkeiland/ui/declare.c
-	userland/desktop/libkeiland/ui/present-copy.c
-	userland/desktop/libkeiland/ui/present-damage.c
-	userland/desktop/libkeiland/ui/text-area.c
-	userland/desktop/libkeiland/ui/widgets.c
-	userland/desktop/libkeiland/ui/field.c
-	userland/desktop/libkeiland/ui/list.c
-	userland/desktop/libkeiland/ui/views.c
-	userland/desktop/libkeiland/ui/cards.c
-	userland/desktop/libkeiland/ui/chooser-view.c
-	userland/desktop/libkeiland/ui/picker-view.c
-	userland/desktop/libkeiland/ui/text.c
-	userland/desktop/picture/color-glyph.c
-	userland/desktop/libkeiland/platform/platform-win32.c
-	userland/desktop/libkeiland/platform/thread-win32.c
-	userland/desktop/libkeiland/platform/socket-win32.c
-	userland/desktop/libkeiland/win32/keys-table.c
-	userland/desktop/libkeiland/win32/frame.c
-	userland/desktop/libkeiland/win32/wide.c
-	userland/desktop/libkeiland/win32/input.c
-	userland/desktop/libkeiland/win32/cf-html.c
-	userland/desktop/libkeiland/win32/app.c
-	userland/desktop/libkeiland/win32/window.c
-	userland/desktop/libkeiland/win32/present.c
-	userland/desktop/libkeiland/win32/places.c
-	userland/desktop/libkeiland/win32/theme.c
-	userland/desktop/libkeiland/win32/titlebar.c
-	userland/desktop/libkeiland/win32/ime.c
-	userland/desktop/libkeiland/win32/clipboard.c
-	userland/desktop/libkeiland/win32/pointer.c
-	userland/desktop/libkeiland/win32/drag.c
-	userland/desktop/libkeiland/win32/unsupported.c)
+# libkeiland on Windows: the files every system shares, the Windows ones, and the stubs of what Windows has not
+# (the lists are in apps/libkeiland/cmake/keiland-sources.cmake, shared by the programs that use libkeiland).
+include(${MIKUTERM_ROOT}/apps/libkeiland/cmake/keiland-sources.cmake)
+set(MIKUTERM_KEILAND_SOURCES ${KEILAND_COMMON_SOURCES} ${KEILAND_WIN32_SOURCES})
 list(TRANSFORM MIKUTERM_KEILAND_SOURCES PREPEND ${MIKUTERM_ROOT}/)
 
 # mikuterm's own files.

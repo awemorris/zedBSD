@@ -9,7 +9,7 @@
  * The keys of the Windows backend: scan code set 1 to evdev codes.
  */
 
-#include "userland/desktop/libkeiland/win32/keys-table.h"
+#include "apps/libkeiland/win32/keys-table.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -51,10 +51,10 @@
  * the application (app.c), which redoes every frame.
  */
 
-#include "userland/desktop/libkeiland/win32/window-win32.h"
-#include "userland/desktop/libkeiland/win32/frame.h"
-#include "userland/desktop/libkeiland/win32/input.h"
-#include "userland/desktop/libkeiland/win32/keys-table.h"
+#include "apps/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/frame.h"
+#include "apps/libkeiland/win32/input.h"
+#include "apps/libkeiland/win32/keys-table.h"
 
 #include <dwmapi.h>
 #include <errno.h>

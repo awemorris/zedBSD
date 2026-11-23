@@ -72,11 +72,11 @@ BROWSER_WIN32_LAYER_SOURCES := \
 	userland/desktop/libkeiland/platform/platform-win32.c \
 	userland/desktop/libkeiland/platform/thread-win32.c \
 	userland/desktop/libkeiland/platform/socket-win32.c \
-	userland/desktop/libkeiland/win32/keys-table.c \
-	userland/desktop/libkeiland/win32/frame.c \
-	userland/desktop/libkeiland/win32/wide.c \
-	userland/desktop/libkeiland/win32/input.c \
-	userland/desktop/libkeiland/win32/cf-html.c
+	apps/libkeiland/win32/keys-table.c \
+	apps/libkeiland/win32/frame.c \
+	apps/libkeiland/win32/wide.c \
+	apps/libkeiland/win32/input.c \
+	apps/libkeiland/win32/cf-html.c
 
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
 
@@ -138,19 +138,19 @@ LIBKEILAND_WIN32_COMMON_SOURCES := \
 	userland/desktop/picture/color-glyph.c
 
 LIBKEILAND_WIN32_OWN_SOURCES := \
-	userland/desktop/libkeiland/win32/app.c \
-	userland/desktop/libkeiland/win32/window.c \
-	userland/desktop/libkeiland/win32/present.c \
-	userland/desktop/libkeiland/win32/places.c \
-	userland/desktop/libkeiland/win32/theme.c \
-	userland/desktop/libkeiland/win32/titlebar.c \
-	userland/desktop/libkeiland/win32/ime.c \
-	userland/desktop/libkeiland/win32/clipboard.c \
-	userland/desktop/libkeiland/win32/pointer.c \
-	userland/desktop/libkeiland/win32/drag.c
+	apps/libkeiland/win32/app.c \
+	apps/libkeiland/win32/window.c \
+	apps/libkeiland/win32/present.c \
+	apps/libkeiland/win32/places.c \
+	apps/libkeiland/win32/theme.c \
+	apps/libkeiland/win32/titlebar.c \
+	apps/libkeiland/win32/ime.c \
+	apps/libkeiland/win32/clipboard.c \
+	apps/libkeiland/win32/pointer.c \
+	apps/libkeiland/win32/drag.c
 
 LIBKEILAND_WIN32_CRT_SOURCES := userland/desktop/libkeiland/ui/text.c
-LIBKEILAND_WIN32_STUB_SOURCES := userland/desktop/libkeiland/win32/unsupported.c
+LIBKEILAND_WIN32_STUB_SOURCES := apps/libkeiland/win32/unsupported.c
 LIBKEILAND_WIN32_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_COMMON_SOURCES) \
 	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES))
 
@@ -278,7 +278,7 @@ vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
 tls: $(WIN32_TLS_ARCHIVES)
 headers: $(WIN32_VULKAN_HEADERS) $(WIN32_COMPAT_HEADER_COPIES)
 # libkeiland's objects but the stubs (what the stubs' generator reads).
-keiland-objects: $(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)))
+keiland-objects: $(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(filter userland/desktop/libkeiland/% apps/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 libbrowser-script: $(LIBBROWSER_SCRIPT_ARCHIVE)
 script-core: $(SCRIPT_CORE_PROGRAM)
 fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)

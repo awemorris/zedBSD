@@ -29,7 +29,7 @@
  */
 
 #include "userland/desktop/libkeiland/process.h"
-#include "userland/desktop/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/window-win32.h"
 
 #include <ole2.h>
 

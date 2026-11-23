@@ -24,8 +24,8 @@
 #include <vulkan/vulkan.h>
 #endif
 
-#include "userland/desktop/libkeiland/win32/window-win32.h"
-#include "userland/desktop/libkeiland/win32/frame.h"
+#include "apps/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/frame.h"
 
 /*
  * Vulkan's Win32 surface, which needs <windows.h>'s types.  A build

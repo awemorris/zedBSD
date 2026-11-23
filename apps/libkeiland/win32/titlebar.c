@@ -64,8 +64,8 @@
  * (keiui_win32_tab_request).
  */
 
-#include "userland/desktop/libkeiland/win32/window-win32.h"
-#include "userland/desktop/libkeiland/win32/frame.h"
+#include "apps/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/frame.h"
 
 #include <errno.h>
 #include <stdio.h>
