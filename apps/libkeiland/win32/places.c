@@ -13,7 +13,7 @@
  * paths are UTF-8 with the system's backslashes; nothing is created.
  */
 
-#include "userland/desktop/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/window-win32.h"
 
 #include <knownfolders.h>
 #include <shlobj.h>

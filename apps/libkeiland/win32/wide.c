@@ -14,7 +14,7 @@
  * subpart of an ill-formed UTF-8 sequence by one U+FFFD.
  */
 
-#include "userland/desktop/libkeiland/win32/wide.h"
+#include "apps/libkeiland/win32/wide.h"
 
 #include <errno.h>
 #include <stddef.h>

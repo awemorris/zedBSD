@@ -21,7 +21,7 @@
  */
 
 #include "userland/desktop/libkeiland/ui/internal.h"
-#include "userland/desktop/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/window-win32.h"
 
 #include <dwmapi.h>
 

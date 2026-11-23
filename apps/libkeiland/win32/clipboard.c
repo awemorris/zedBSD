@@ -17,7 +17,7 @@
  * set it.
  */
 
-#include "userland/desktop/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/window-win32.h"
 
 #include <errno.h>
 #include <stdlib.h>

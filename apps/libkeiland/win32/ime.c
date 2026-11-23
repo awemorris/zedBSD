@@ -42,7 +42,7 @@
  */
 
 #define COBJMACROS
-#include "userland/desktop/libkeiland/win32/window-win32.h"
+#include "apps/libkeiland/win32/window-win32.h"
 
 #include <imm.h>
 #include <msctf.h>
