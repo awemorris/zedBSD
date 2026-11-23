@@ -1258,25 +1258,26 @@ thread_codespace_target(
 	if (failed != 0)
 		return failed;
 
-	/* The Host they name. */
-	length = strlen(choice->decoded);
-	error = codespace_config_host(choice->decoded, length, host, sizeof(host));
+	/* The settings kept, the key's path in quotes, when they fit. */
+	memset(target, 0, sizeof(*target));
+	error = codespace_config_quote(choice->decoded, target->settings, sizeof(target->settings), &length);
 	if (error != 0) {
+		memset(target, 0, sizeof(*target));
+		launch_say(&choice->codespaces, "gh's ssh settings for that codespace are too long.");
+		return EAGAIN;
+	}
+	target->settings_size = length;
+
+	/* The Host they name. */
+	error = codespace_config_host(target->settings, length, host, sizeof(host));
+	if (error != 0) {
+		memset(target, 0, sizeof(*target));
 		launch_say(&choice->codespaces, "gh gave no ssh settings for that codespace.");
 		return EAGAIN;
 	}
 
-	/* The settings must fit to be kept. */
-	if (length >= sizeof(target->settings)) {
-		launch_say(&choice->codespaces, "gh's ssh settings for that codespace are too long.");
-		return EAGAIN;
-	}
-
-	/* The target: the Host, gh's settings, and the ProxyCommand through gh. */
-	memset(target, 0, sizeof(*target));
+	/* The target: the Host, and the ProxyCommand through gh. */
 	(void)snprintf(target->host, sizeof(target->host), "%s", host);
-	memcpy(target->settings, choice->decoded, length + 1U);
-	target->settings_size = length;
 	error = thread_codespace_proxy(target->settings, length, host, gh, space->name, target);
 	if (error != 0) {
 		memset(target, 0, sizeof(*target));

@@ -13,8 +13,9 @@
  * (cs.NAME.BRANCH) with the User, the key gh made (IdentityFile) and a
  * ProxyCommand that runs "gh cs ssh -c NAME --stdio -- -i KEY", which
  * carries the connection to the codespace's sshd through GitHub.  gh
- * writes the paths in that ProxyCommand without quotes, so here the same
- * command is made again with its paths in quotes (a path such as
+ * writes the paths without quotes, so here IdentityFile's path is put in
+ * quotes (a user's folder may have a space in its name) and the
+ * ProxyCommand is made again with its paths in quotes (a path such as
  * C:\Program Files\GitHub CLI\gh.exe has spaces).
  *
  * Procedure referenced: cli/cli pkg/cmd/codespace/ssh.go (printOpenSSHConfig:
@@ -38,6 +39,9 @@
 #define CODESPACE_FIELD_DISPLAY		3U
 #define CODESPACE_FIELDS		4U
 
+/* The keyword whose path is put in quotes. */
+#define CODESPACE_IDENTITY_KEYWORD	"IdentityFile"
+
 /* What codespace_host_named answers when it has the first Host. */
 #define CODESPACE_HOST_FOUND		1
 
@@ -51,6 +55,10 @@ static int codespace_name_valid(const char *name, size_t length);
 static void codespace_copy(char *field, size_t field_size, const char *start, size_t length);
 static int codespace_host_named(void *data, const char *name, size_t size);
 static int codespace_path_valid(const char *path);
+static int codespace_put(char *out, size_t size, size_t *used, const char *bytes, size_t length);
+static int codespace_identity_line(const char *line, size_t length, size_t *value);
+static int codespace_blank(char character);
+static size_t codespace_value_end(const char *line, size_t value, size_t length);
 
 /*
  * Reads gh's list (CODESPACE_LIST_ARGUMENTS) into entries, at most so
@@ -150,6 +158,85 @@ codespace_config_arguments(
 		return ENAMETOOLONG;
 
 	/* Succeeded: the arguments. */
+	return 0;
+}
+
+/*
+ * Copies gh's ssh settings (text) into out (size bytes with its NUL;
+ * *length without it), an IdentityFile path with a blank in it and not
+ * in quotes put in quotes, so it is read as one path.  Returns 0 or
+ * EMSGSIZE.
+ */
+int
+codespace_config_quote(
+	const char *text,
+	char *out,
+	size_t size,
+	size_t *length)
+{
+	const char *line;
+	const char *end;
+	const char *next;
+	const char *blank;
+	size_t line_length;
+	size_t value;
+	size_t value_end;
+	size_t used;
+	int identity;
+	int status;
+
+	/* Nothing yet. */
+	used = 0U;
+	*length = 0U;
+	if (size == 0U)
+		return EMSGSIZE;
+	out[0] = '\0';
+
+	/* Each line in turn, with its line break. */
+	line = text;
+	while (*line != '\0') {
+		/* The line's end and where the next starts. */
+		end = strchr(line, '\n');
+		if (end == NULL)
+			end = line + strlen(line);
+		next = end;
+		if (*next == '\n')
+			next++;
+		line_length = (size_t)(end - line);
+
+		/* An IdentityFile line whose path has a space and no quote: the path in quotes. */
+		identity = codespace_identity_line(line, line_length, &value);
+		blank = NULL;
+		value_end = value;
+		if (identity) {
+			value_end = codespace_value_end(line, value, line_length);
+			if (value_end > value && line[value] != '"')
+				blank = memchr(line + value, ' ', value_end - value);
+		}
+
+		/* The line, the path in quotes when it needs them. */
+		if (blank != NULL) {
+			status = codespace_put(out, size, &used, line, value);
+			if (status == 0)
+				status = codespace_put(out, size, &used, "\"", 1U);
+			if (status == 0)
+				status = codespace_put(out, size, &used, line + value, value_end - value);
+			if (status == 0)
+				status = codespace_put(out, size, &used, "\"", 1U);
+			if (status == 0)
+				status = codespace_put(out, size, &used, line + value_end, (size_t)(next - line) - value_end);
+		} else {
+			status = codespace_put(out, size, &used, line, (size_t)(next - line));
+		}
+		if (status != 0)
+			return status;
+
+		/* The next line. */
+		line = next;
+	}
+
+	/* Succeeded: the settings. */
+	*length = used;
 	return 0;
 }
 
@@ -339,4 +426,131 @@ codespace_path_valid(
 
 	/* It can. */
 	return 1;
+}
+
+/* Appends length bytes to out (size bytes with the NUL, *used of them used); returns 0 or EMSGSIZE. */
+static int
+codespace_put(
+	char *out,
+	size_t size,
+	size_t *used,
+	const char *bytes,
+	size_t length)
+{
+	/* The bytes must fit with the NUL. */
+	if (*used + length + 1U > size)
+		return EMSGSIZE;
+
+	/* Succeeded: the bytes are after what was there. */
+	memcpy(out + *used, bytes, length);
+	*used += length;
+	out[*used] = '\0';
+	return 0;
+}
+
+/*
+ * Tells whether a line (length bytes) is an IdentityFile line (1) or not
+ * (0): blanks, the keyword in any case, then blanks or one '=' with
+ * blanks round it.  *value is where its value starts.
+ */
+static int
+codespace_identity_line(
+	const char *line,
+	size_t length,
+	size_t *value)
+{
+	const char *keyword;
+	size_t keyword_length;
+	size_t index;
+	size_t at;
+	int blank;
+	char character;
+
+	/* The blanks before the keyword. */
+	index = 0U;
+	for (;;) {
+		/* A blank is passed over. */
+		if (index == length)
+			return 0;
+		blank = codespace_blank(line[index]);
+		if (!blank)
+			break;
+		index++;
+	}
+
+	/* The keyword, its ASCII letters in any case. */
+	keyword = CODESPACE_IDENTITY_KEYWORD;
+	keyword_length = sizeof(CODESPACE_IDENTITY_KEYWORD) - 1U;
+	if (length - index <= keyword_length)
+		return 0;
+	for (at = 0U; at < keyword_length; at++) {
+		/* The character, small. */
+		character = line[index + at];
+		if (character >= 'A' && character <= 'Z')
+			character = (char)(character - 'A' + 'a');
+		if (keyword[at] >= 'A' && keyword[at] <= 'Z') {
+			if (character != (char)(keyword[at] - 'A' + 'a'))
+				return 0;
+		} else if (character != keyword[at]) {
+			return 0;
+		}
+	}
+	index += keyword_length;
+
+	/* A blank or '=' must end the keyword. */
+	blank = codespace_blank(line[index]);
+	if (!blank && line[index] != '=')
+		return 0;
+
+	/* Blanks, an '=', and blanks again before the value. */
+	for (;;) {
+		/* A blank, or the one '=', is passed over. */
+		if (index == length)
+			break;
+		blank = codespace_blank(line[index]);
+		if (!blank && line[index] != '=')
+			break;
+		index++;
+	}
+
+	/* An IdentityFile line. */
+	*value = index;
+	return 1;
+}
+
+/* Tells whether a character is a blank of a settings line (1) or not (0). */
+static int
+codespace_blank(
+	char character)
+{
+	/* A space or a tab. */
+	if (character == ' ' || character == '\t')
+		return 1;
+
+	/* Any other. */
+	return 0;
+}
+
+/* Finds where a line's value ends (length bytes, the value from value): before the blanks and the CR at its end. */
+static size_t
+codespace_value_end(
+	const char *line,
+	size_t value,
+	size_t length)
+{
+	size_t end;
+	int blank;
+
+	/* Back over the CR and the blanks. */
+	end = length;
+	while (end > value) {
+		/* A CR or a blank at the end is not the value's. */
+		blank = codespace_blank(line[end - 1U]);
+		if (!blank && line[end - 1U] != '\r')
+			break;
+		end--;
+	}
+
+	/* The value's end. */
+	return end;
 }

@@ -8,8 +8,9 @@
 /*
  * GitHub Codespaces on the launch screen (codespace.c): the arguments
  * that ask GitHub's gh for the codespaces and for one's ssh settings, the
- * list gh writes read into its codespaces, the Host its settings name,
- * and the ProxyCommand that reaches a codespace through gh.
+ * list gh writes read into its codespaces, its settings with the key's
+ * path in quotes and the Host they name, and the ProxyCommand that
+ * reaches a codespace through gh.
  *
  * It does not include a header of Windows, so the tests run it on the
  * host; ssh-thread.c runs gh and shows the list.
@@ -47,6 +48,7 @@ struct codespace_entry {
 
 unsigned codespace_list_read(const char *text, struct codespace_entry *entries, unsigned most);
 int codespace_config_arguments(const char *name, char *arguments, size_t size);
+int codespace_config_quote(const char *text, char *out, size_t size, size_t *length);
 int codespace_config_host(const char *text, size_t size, char *host, size_t host_size);
 int codespace_proxy_command(const char *gh, const char *name, const char *identity, char *command, size_t size);
 
