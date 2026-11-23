@@ -1766,6 +1766,7 @@ run_tab_new(
 	/* Its connection, at the grid's size, which writes the tab's first title. */
 	connector = options->connector;
 	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
 	width = run->columns * run_font.cell_width;
 	height = run->rows * run_font.cell_height;
 	error = connector->open(connector->data,
