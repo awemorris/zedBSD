@@ -78,8 +78,9 @@ add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
 add_library(keiland_android STATIC ${MIKUTERM_KEILAND_ANDROID})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
+add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES} ${MIKUTERM_COMMON_NO_X11_SOURCES})
 foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssh keiland_common keiland_android
-	mikuterm_terminal)
+	mikuterm_terminal mikuterm_common)
 	target_link_libraries(${library} PRIVATE mikuterm_flags)
 endforeach()
 target_include_directories(keiland_android PRIVATE ${MIKUTERM_ROOT}/apps/libkeiland/android)
@@ -88,6 +89,13 @@ target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(keiland_common PUBLIC mikuterm_truetype mikuterm_png)
 target_link_libraries(keiland_android PUBLIC keiland_common)
 target_link_libraries(mikuterm_terminal PUBLIC keiland_android mikuterm_ssh)
+
+# The files every mikuterm shares (the settings, the connections, the launch screen and the settings' tab).  This
+# build has no WSL, no X11 forwarding and no local programs; Windows' _stricmp is the C library's strcasecmp.
+target_include_directories(mikuterm_common PRIVATE ${MIKUTERM_COMMON_DIR})
+target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=0
+	_stricmp=strcasecmp)
+target_link_libraries(mikuterm_common PUBLIC mikuterm_terminal)
 
 set(MIKUTERM_ANDROID_SOURCES ${MIKUTERM_ROOT}/apps/terminal-android/jni/entry.c)
 if(MIKUTERM_ANDROID_HELLO)
@@ -98,8 +106,7 @@ else()
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/mikuterm-jni.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/mikuterm-android.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/places-android.c
-		${MIKUTERM_COMMON_DIR}/conf.c
-		${MIKUTERM_COMMON_DIR}/settings-file.c)
+		${MIKUTERM_ROOT}/apps/terminal-android/jni/credential-android.c)
 	set(MIKUTERM_ANDROID_HELLO_VALUE 0)
 endif()
 if(MIKUTERM_ANDROID_ECHO)
@@ -125,7 +132,7 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_X11=0
 	_stricmp=strcasecmp)
 target_compile_options(mikuterm PRIVATE -std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden)
-target_link_libraries(mikuterm PRIVATE mikuterm_terminal keiland_android)
+target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal keiland_android)
 
 # The system's native-activity loader looks the entry point up in the library, and the runtime
 # looks JNI_OnLoad up, so both stay in the library's symbols even though nothing in the library
