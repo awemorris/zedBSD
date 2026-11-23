@@ -230,7 +230,8 @@ struct kwl_draw_counts {
  * How far a docked (maximized) window's body keeps from the screen's edges
  * and the system bar on every side (ws099-p038, the 2026-10-06 user
  * decision), and where its body starts: just under the system bar.  In
- * logical pixels at the default DPI; DPI scaling multiplies it here.
+ * logical units, as every measure of the plane; the output's scale maps
+ * them to its pixels where it is drawn (scale.h).
  */
 #define KWL_GLASS_DOCK_PAD	8
 #define KWL_GLASS_DOCK_TOP	(KWL_GLASS_BAR + KWL_GLASS_DOCK_PAD)

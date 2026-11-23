@@ -17,7 +17,9 @@
  *
  * Its settings' tab (settings-page.c) edits the user's ~/.ssh/config,
  * makes keys in ~/.ssh (the private key 0600) and lists ~/.ssh/known_hosts;
- * the files are written here with POSIX calls (main_page_*).  The tab also
+ * the files are written here with POSIX calls (main_page_*).  A change of
+ * ~/.ssh/config is checked with the SSH library's reader before it is
+ * written, and the file opens in the text editor (textedit).  The tab also
  * keeps the terminal's own settings of the next start (the fonts, the
  * grid) and of the next tab (the shells' TERM) in the desktop's settings
  * (terminal.*, main_item_*), which a command line's option wins over.
@@ -29,6 +31,8 @@
 #include "run.h"
 #include "connection.h"
 #include "settings-page.h"
+
+#include "userland/base/ssh/ssh-config.h"
 
 #include "userland/desktop/paths.h"
 
@@ -90,6 +94,13 @@
 
 /* The program started for a new window when the terminal was not run by a path. */
 #define MAIN_PROGRAM		KEILAND_BINDIR "/terminal"
+
+/* The text editor the settings' tab opens ~/.ssh/config in. */
+#define MAIN_EDITOR		KEILAND_BINDIR "/textedit"
+
+/* The most Host names ~/.ssh/config is checked for, besides a name no Host matches, and the longest one with its NUL. */
+#define MAIN_CHECK_HOSTS	32U
+#define MAIN_CHECK_NAME		128U
 
 /* What Help > About Terminal writes on the screen. */
 #define MAIN_ABOUT		"\r\n\033[1mTerminal\033[0m: a VT100 terminal for " ZEDBSD_OS_NAME ", drawn with Vulkan.\r\n" \
@@ -153,6 +164,16 @@ struct main_page {
 	struct terminal_process_connector *connector;
 };
 
+/*
+ * The Host names of an ssh_config a check reads it for: so many of them
+ * (the first MAIN_CHECK_HOSTS kept).  One for each check, on the heap for
+ * that check alone (it is too large for a small stack).
+ */
+struct main_check_names {
+	char names[MAIN_CHECK_HOSTS][MAIN_CHECK_NAME];
+	unsigned count;
+};
+
 /* The settings' tab's files (the main thread's). */
 static struct main_page main_page;
 
@@ -186,6 +207,9 @@ static int main_page_read(void *data, const char *path, size_t limit, char **tex
 static int main_page_replace(void *data, const char *path, const void *bytes, size_t size);
 static int main_page_create(void *data, const char *path, const void *bytes, size_t size, int secret);
 static int main_page_exists(void *data, const char *path);
+static int main_page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
+static int main_page_named(void *data, const char *name, size_t size);
+static int main_page_editor(void *data, struct terminal_window *window, const char *path);
 static int main_page_write(const char *path, int flags, mode_t mode, const void *bytes, size_t size);
 static void main_page_directory(void);
 static const char *main_value(const char *argument, const char *name);
@@ -564,7 +588,8 @@ main_page_init(
 	main_page.program.replace = main_page_replace;
 	main_page.program.create = main_page_create;
 	main_page.program.exists = main_page_exists;
-	main_page.program.check = NULL;
+	main_page.program.check = main_page_check;
+	main_page.program.open_editor = main_page_editor;
 	main_page.program.items = main_items;
 	main_page.program.item_count = sizeof(main_items) / sizeof(main_items[0]);
 	main_page.program.item_get = main_item_get;
@@ -1185,6 +1210,114 @@ main_page_exists(
 		return 1;
 
 	/* Nothing there. */
+	return 0;
+}
+
+/*
+ * Checks an ssh_config as ssh reads it: for a name no Host line matches
+ * and for each Host's name, the first problem found ("line N: what") is
+ * the report (empty when there is none).
+ */
+static int
+main_page_check(
+	void *data,
+	const char *text,
+	size_t size,
+	char *report,
+	size_t capacity)
+{
+	struct ssh_config config;
+	struct main_check_names *names;
+	char error[SSH_CONFIG_ERROR_MAX];
+	unsigned index;
+	int status;
+
+	(void)data;
+
+	/* No problem yet. */
+	report[0] = '\0';
+
+	/* The names to check it for. */
+	names = calloc(1U, sizeof(*names));
+	if (names == NULL)
+		return ENOMEM;
+	error[0] = '\0';
+	status = ssh_config_hosts(text, size, main_page_named, names, error);
+	if (status != 0) {
+		(void)snprintf(report, capacity, "%s", error);
+		free(names);
+		return 0;
+	}
+
+	/* A name no Host matches, then each Host's. */
+	for (index = 0U; index <= names->count; index++) {
+		ssh_config_init(&config);
+		error[0] = '\0';
+		if (index == 0U)
+			status = ssh_config_parse(&config, text, size, "terminal.invalid", error);
+		else
+			status = ssh_config_parse(&config, text, size, names->names[index - 1U], error);
+		if (status != 0) {
+			(void)snprintf(report, capacity, "%s", error);
+			break;
+		}
+	}
+
+	/* Succeeded: the report. */
+	free(names);
+	return 0;
+}
+
+/* Keeps one Host name of an ssh_config, while there is room; answers 0 to go on. */
+static int
+main_page_named(
+	void *data,
+	const char *name,
+	size_t size)
+{
+	struct main_check_names *names;
+
+	/* A full list, or a name too long, is passed over. */
+	names = data;
+	if (names->count == MAIN_CHECK_HOSTS || size >= MAIN_CHECK_NAME)
+		return 0;
+
+	/* The name. */
+	memcpy(names->names[names->count], name, size);
+	names->names[names->count][size] = '\0';
+	names->count++;
+	return 0;
+}
+
+/* Opens a file in the text editor, a program apart from the terminal; 0 or the error of its start. */
+static int
+main_page_editor(
+	void *data,
+	struct terminal_window *window,
+	const char *path)
+{
+	struct kl_launch_options launch;
+	const char *arguments[3];
+	int error;
+
+	(void)data;
+
+	/* textedit with the file. */
+	arguments[0] = MAIN_EDITOR;
+	arguments[1] = path;
+	arguments[2] = NULL;
+
+	/* On its way, beside this window. */
+	memset(&launch, 0, sizeof(launch));
+	launch.argv = arguments;
+	launch.from = window->kui;
+	error = kl_launch(window->app, &launch);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the editor is starting. */
+	printf("ZTERM SETTINGS editor-started %s\n", MAIN_EDITOR);
+	fflush(stdout);
 	return 0;
 }
 

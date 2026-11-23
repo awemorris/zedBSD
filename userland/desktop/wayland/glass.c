@@ -143,6 +143,9 @@
 #define GLASS_LARGE_PIXELS_MOST	240U
 #define GLASS_LARGE_SIDE	256U
 
+/* The largest large glyph's box at the largest scale (300 %), in pixels a side. */
+#define GLASS_LARGE_SHARP_SIDE	(GLASS_LARGE_SIDE * KWL_SCALE_MAX / KWL_SCALE_ONE)
+
 /* A cached glyph's cell in the atlas, in pixels a side, and the most cells there are. */
 #define GLASS_CELL		48U
 #define GLASS_CELLS		512U
@@ -183,11 +186,34 @@
 #define GLASS_JOB_FALLBACK	3U
 #define GLASS_JOB_EMOJI		4U
 
-/* A cell of the sharp atlas's cache: a glyph's coverage or a colour glyph's pixels. */
-#define GLASS_JOB_SHARP_CELL	5U
-#define GLASS_JOB_SHARP_COLOR	6U
+/*
+ * A cell of a sharp atlas's cache: a glyph's coverage or a colour glyph's
+ * pixels; the kind is the first plus the atlas's slot (below
+ * GLASS_SHARP_SCALES).
+ */
+#define GLASS_JOB_SHARP_CELL	8U
+#define GLASS_JOB_SHARP_COLOR	16U
 
-/* The blurred wallpaper is this many times smaller than the output. */
+/*
+ * How many scales the sharp atlases and tiles are kept at, one each: as
+ * many as the outputs shown at different scales (the anchor and the
+ * heads), so that their passes do not make them again in turn.
+ */
+#define GLASS_SHARP_SCALES	4U
+
+/*
+ * How many drawings (frames and layers' pictures) a sharp atlas is kept
+ * without being used: one of a scale no output shows any more is let go
+ * after them (its images once the drawings given before have completed).
+ */
+#define GLASS_SHARP_IDLE_LISTS	600U
+
+/*
+ * The blurred wallpaper is this many times smaller than the output's
+ * logical size: its blocks (blur_add) are this many logical units a side,
+ * as many pixels times the output's scale (glass_wallpaper_size), so that
+ * the frosted glass is as blurred at any scale.
+ */
 #define GLASS_BLUR_SCALE	4U
 
 /*
@@ -262,7 +288,8 @@ struct glass_loader {
  * A wallpaper's drawing at an output's size and its frosted glass's blur,
  * on the blur thread (glass_blur, the event loop does not draw or blur
  * pictures): the decoded picture (the job's; data NULL for the landscape),
- * the size, the rows of both packed at their widths (made by the thread),
+ * the size (the output's pixels) and the frosted glass's block in pixels
+ * (glass_wallpaper_size), the rows of both packed at their widths (made by the thread),
  * the error, and what the event loop does with it (answer, resize,
  * started_ms and path as in struct glass_loader).  The picture is kept,
  * so that a result of an output's old size is drawn again at the new one.
@@ -272,6 +299,7 @@ struct glass_blur_job {
 	struct wallpaper_picture picture;
 	uint32_t width;
 	uint32_t height;
+	uint32_t block;
 	uint32_t *rows;
 	uint32_t *blurred;
 	int error;
@@ -337,18 +365,17 @@ struct glass_cached {
  *
  * The look keeps one at 100 %, whose glyphs measure every text (the
  * compositor's places are logical units, the same at any scale) and draw
- * it where a pass shows the plane at 100 %, and the sharp one at the
- * output's scale, made when a pass first draws at a scale other than
- * 100 %, whose glyphs are drawn one to one with the output's pixels from
- * the pixel their logical pen is snapped to.  scale is 0 while none is
- * made; failed is a scale it could not be made at, not tried again.
+ * it where a pass shows the plane at 100 %, and the sharp ones, one at
+ * each scale other than 100 % a pass shows the plane at (made when such
+ * a pass first draws), whose glyphs are drawn one to one with the pass's
+ * pixels from the pixel their logical pen is snapped to.  scale is 0
+ * while none is made.
  */
 struct glass_atlas {
 	struct kwl_import image;
 	uint32_t width;
 	uint32_t height;
 	unsigned scale;
-	unsigned failed;
 	uint32_t cell;
 	uint32_t limit;
 	struct glass_glyph glyphs[GLASS_SIZES][GLASS_GLYPHS];
@@ -365,15 +392,14 @@ struct glass_atlas {
  * The applications' tiles in their own image at a scale (in 120ths), as
  * struct glass_atlas is: each of the GLASS_TILE_SIZES sizes (pixels, the
  * logical size times the scale) in rows of its own, the image's size, and
- * whether they are drawn (ready).  The look keeps one at 100 % and the
- * sharp one at the output's scale; scale and failed are as the atlas's.
+ * whether they are drawn (ready).  The look keeps one at 100 % and a
+ * sharp one with each sharp atlas, at its scale; scale is as the atlas's.
  */
 struct glass_tiles {
 	struct kwl_import image;
 	uint32_t width;
 	uint32_t height;
 	unsigned scale;
-	unsigned failed;
 	unsigned pixels[GLASS_TILE_SIZES];
 	struct glass_glyph tiles[GLASS_TILE_SIZES][GLASS_ICON_APPS];
 	unsigned ready;
@@ -381,32 +407,50 @@ struct glass_tiles {
 
 /*
  * The look's images and glyphs: the wallpaper and its blur, the atlas at
- * 100 % and the sharp one at the output's scale (struct glass_atlas), the
- * applications' tiles at both (struct glass_tiles), and the mark's large
+ * 100 % and the sharp ones at the scales the passes show the plane at
+ * (struct glass_atlas; sharp_used the clock of each one's last use,
+ * sharp_clock counting the uses, sharp_since the clock at the start of the
+ * drawing being recorded (a slot used since is not made again in it, as
+ * what it recorded draws from it), sharp_list counting the drawings and
+ * sharp_list_of the drawing each slot was last used in, and sharp_failed
+ * the last scales one could not be made at, not tried again), the
+ * applications' tiles at each (struct glass_tiles), and the mark's large
  * layers (in the atlas at 100 %, drawn at any size); the fonts stay open
  * (with their files' bytes) to render the caches' glyphs.  clock is the
  * count of cached glyphs drawn (the cells' use is ordered by it).  The
  * large digits of the
  * lock screen's clock have their image, made when the clock
  * first asks, and are drawn again only when it asks for another size
- * (large_pixels, 0 while none is drawn).
+ * (large_pixels, 0 while none is drawn) or the output's scale changes
+ * (large_scale: they are drawn at the size times the output's scale,
+ * their boxes in pixels, their advances in logical units in
+ * large_advances; a head at another scale shows them scaled).
  *
  * The glyph worker renders the caches' glyphs and the large
  * digits away from the event loop once it runs (worker_running): it opens
  * its own faces over the bytes kept here (font_size their lengths), a
- * cell's assignments (of either atlas) are numbered by cell_generation,
+ * cell's assignments (of any atlas) are numbered by cell_generation,
  * and the large
- * digits asked for are large_wanted at large_generation, of which
+ * digits asked for are large_wanted (at large_wanted_scale) at
+ * large_generation, of which
  * large_expected glyphs are being rendered and large_received are written
- * (large_failed is a size the worker could not draw, not asked again).
+ * (large_failed at large_failed_scale is a size the worker could not
+ * draw, not asked again).
  */
 struct kwl_glass {
 	struct kwl_import wallpaper;
 	struct kwl_import blurred;
 	struct glass_atlas atlas;
-	struct glass_atlas sharp;
+	struct glass_atlas sharp[GLASS_SHARP_SCALES];
+	uint64_t sharp_used[GLASS_SHARP_SCALES];
+	uint64_t sharp_clock;
+	uint64_t sharp_since;
+	uint64_t sharp_list;
+	uint64_t sharp_list_of[GLASS_SHARP_SCALES];
+	unsigned sharp_failed[GLASS_SHARP_SCALES];
+	unsigned sharp_failed_next;
 	struct glass_tiles tiles;
-	struct glass_tiles sharp_tiles;
+	struct glass_tiles sharp_tiles[GLASS_SHARP_SCALES];
 	struct glass_glyph mark[KL_MARK_LAYERS];
 	unsigned text;
 	struct truetype_face *faces[GLASS_FACES];
@@ -437,15 +481,19 @@ struct kwl_glass {
 	struct kwl_import large;
 	struct glass_glyph large_glyphs[GLASS_LARGE_GLYPHS];
 	unsigned large_pixels;
+	unsigned large_scale;
+	int32_t large_advances[GLASS_LARGE_GLYPHS];
 	size_t font_size[GLASS_FACES];
 	struct kwl_glyph_worker worker;
 	unsigned worker_running;
 	uint64_t cell_generation;
 	unsigned large_wanted;
+	unsigned large_wanted_scale;
 	uint64_t large_generation;
 	unsigned large_expected;
 	unsigned large_received;
 	unsigned large_failed;
+	unsigned large_failed_scale;
 };
 
 static const unsigned glass_pixels[GLASS_SIZES] = { 14U, 15U, 20U, 36U, 24U, 64U };
@@ -467,21 +515,22 @@ static void glass_shadow_trim(struct glass_shape *shape);
 static int glass_shadow_picture(struct kwl_server *server, const struct glass_shape *shadow, struct glass_shape *picture);
 static int glass_ring_hollow(struct kwl_server *server, struct kwl_list *command, const struct glass_shape *shape);
 static unsigned glass_count_kind_of(const float *constants);
-static int wallpaper_create(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height);
-static int wallpaper_target(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height, unsigned *renewed);
-static int wallpaper_renew(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height);
+static void glass_wallpaper_size(const struct kwl_server *server, uint32_t *width, uint32_t *height, uint32_t *block);
+static int wallpaper_create(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height, uint32_t block);
+static int wallpaper_target(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height, uint32_t block, unsigned *renewed);
+static int wallpaper_renew(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height, uint32_t block);
 static int glass_image_renew(struct kwl_server *server, struct kwl_import *place, uint32_t width, uint32_t height, VkSampler sampler);
-static int wallpaper_fill(struct kwl_glass *glass, const char *path, uint32_t width, uint32_t height);
-static int wallpaper_draw(struct kwl_glass *glass, struct wallpaper_picture *given, uint32_t width, uint32_t height);
+static int wallpaper_fill(struct kwl_glass *glass, const char *path, uint32_t width, uint32_t height, uint32_t block);
+static int wallpaper_draw(struct kwl_glass *glass, struct wallpaper_picture *given, uint32_t width, uint32_t height, uint32_t block);
 static void wallpaper_pixel(uint32_t x, uint32_t y, uint32_t width, uint32_t height, float *rgb);
 static float ridge(float x, float base, float amplitude, float phase);
-static int blur_create(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height);
+static int blur_create(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height, uint32_t block);
 static void wallpaper_row(const struct wallpaper_picture *picture, const uint32_t *columns, uint32_t source_y, uint32_t *line, uint32_t width);
 static void landscape_row(uint32_t y, uint32_t width, uint32_t height, uint32_t *line);
-static void blur_add(const uint32_t *line, uint32_t *sums, uint32_t small_width);
-static void blur_average(uint32_t *sums, float *small, uint32_t small_width);
+static void blur_add(const uint32_t *line, uint32_t *sums, uint32_t small_width, uint32_t block);
+static void blur_average(uint32_t *sums, float *small, uint32_t small_width, uint32_t block);
 static void blur_fill(float *small, float *scratch, uint32_t width, uint32_t height, unsigned char *blurred, size_t blurred_pitch);
-static int wallpaper_render(const struct wallpaper_picture *picture, uint32_t width, uint32_t height, unsigned char *rows, size_t pitch, unsigned char *blurred, size_t blurred_pitch);
+static int wallpaper_render(const struct wallpaper_picture *picture, uint32_t width, uint32_t height, uint32_t block, unsigned char *rows, size_t pitch, unsigned char *blurred, size_t blurred_pitch);
 static int loader_start(struct kwl_server *server, const char *path, unsigned answer, unsigned resize);
 static void blur_submit(struct kwl_server *server, struct wallpaper_picture *picture, const char *path, unsigned answer, unsigned resize, uint64_t started_ms);
 static void blur_run(struct kwl_lane_job *lane);
@@ -501,11 +550,13 @@ static int atlas_icons(struct glass_atlas *atlas, uint32_t *pen_y);
 static int atlas_mark(struct kwl_glass *glass, struct glass_atlas *atlas, uint32_t *pen_y);
 static int tiles_create(struct kwl_server *server, struct glass_tiles *tiles, unsigned scale);
 static struct glass_atlas *glass_sharp(struct kwl_server *server);
-static int sharp_create(struct kwl_server *server, struct kwl_glass *glass, unsigned scale);
+static int sharp_create(struct kwl_server *server, struct kwl_glass *glass, unsigned slot, unsigned scale);
 static struct glass_tiles *glass_tiles_for(struct kwl_server *server);
 static void glass_sharp_quad(unsigned scale, int32_t left, int32_t top, uint32_t width, uint32_t height, float *quad);
 static void glass_sharp_place(unsigned scale, float x, float y, uint32_t pixels, float *quad);
-static int large_fill(struct kwl_glass *glass, struct truetype_face *face, unsigned pixels);
+static int large_fill(struct kwl_glass *glass, struct truetype_face *face, unsigned pixels, unsigned scale);
+static int large_advances(struct kwl_glass *glass, struct truetype_face *face, unsigned pixels);
+static void large_image_size(unsigned scale, uint32_t *width, uint32_t *height);
 static void large_put(struct kwl_glass *glass, const uint8_t *bitmap, uint32_t pen_x, uint32_t width, uint32_t height);
 static const struct glass_glyph *large_glyph_of(struct kwl_glass *glass, uint32_t character);
 static void atlas_put(struct glass_atlas *atlas, const uint8_t *bitmap, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
@@ -518,14 +569,16 @@ static void glass_take_color(struct glass_atlas *atlas, const struct kwl_glyph_j
 static void glass_worker_start(struct kwl_server *server, struct kwl_glass *glass);
 static void glass_worker_font(struct kwl_glass *glass, unsigned slot);
 static void glass_take_cell(struct glass_atlas *atlas, const struct kwl_glyph_job *job);
+static unsigned glass_job_kind(const struct kwl_glass *glass, const struct glass_atlas *atlas, unsigned kind);
+static void glass_sharp_list_begin(struct kwl_compose *compose, struct kwl_glass *glass);
 static void glass_take_large(struct kwl_glass *glass, const struct kwl_glyph_job *job);
-static int large_ask(struct kwl_glass *glass, unsigned pixels);
+static int large_ask(struct kwl_glass *glass, unsigned pixels, unsigned scale);
 static int glass_ask_cell(struct kwl_glass *glass, struct glass_atlas *atlas, unsigned font, unsigned glyph, enum glass_size size, unsigned slot, const struct truetype_glyph *metrics);
 static const struct glass_glyph *glass_glyph_of(struct kwl_glass *glass, struct glass_atlas *atlas, enum glass_size size, uint32_t codepoint);
 static const struct glass_glyph *glass_cache_glyph(struct kwl_glass *glass, struct glass_atlas *atlas, enum glass_size size, uint32_t codepoint);
 static const struct glass_glyph *glass_cache_color(struct kwl_glass *glass, struct glass_atlas *atlas, enum glass_size size, uint32_t codepoint, unsigned id, unsigned slot);
 static uint32_t glass_utf8_next(const char **text);
-static void glass_draw_glyph_at(struct kwl_server *server, struct kwl_list *command, const struct glass_glyph *glyph, const struct glass_glyph *sharp, int32_t x, int32_t baseline, const float *color);
+static void glass_draw_glyph_at(struct kwl_server *server, struct kwl_list *command, const struct glass_glyph *glyph, const struct glass_atlas *atlas, const struct glass_glyph *sharp, int32_t x, int32_t baseline, const float *color);
 static void *file_read(const char *path, size_t *size);
 static int wallpaper_load(const char *path, struct wallpaper_picture *picture);
 static int wallpaper_read(const char *path, struct wallpaper_picture *picture);
@@ -617,6 +670,9 @@ kwl_glass_open(
 {
 	struct kwl_glass *glass;
 	uint64_t started;
+	uint32_t width;
+	uint32_t height;
+	uint32_t block;
 	int error;
 
 	/* The look's state lives as long as window mode's device. */
@@ -627,7 +683,8 @@ kwl_glass_open(
 
 	/* The wallpaper and the frosted glass made from it. */
 	started = kwl_milliseconds();
-	error = wallpaper_create(server, glass, server->width, server->height);
+	glass_wallpaper_size(server, &width, &height, &block);
+	error = wallpaper_create(server, glass, width, height, block);
 	if (error != 0)
 		return error;
 	printf("KWL STARTUP step=wallpaper ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
@@ -674,6 +731,7 @@ kwl_glass_close(
 {
 	struct kwl_glass *glass;
 	unsigned face;
+	unsigned slot;
 
 	/* A wallpaper still being read is waited for, and its picture let go; the blur thread ends, its jobs let go. */
 	loader_join();
@@ -717,9 +775,11 @@ kwl_glass_close(
 	kwl_host_image_release(server->compose, &glass->wallpaper);
 	kwl_host_image_release(server->compose, &glass->blurred);
 	kwl_host_image_release(server->compose, &glass->atlas.image);
-	kwl_host_image_release(server->compose, &glass->sharp.image);
 	kwl_host_image_release(server->compose, &glass->tiles.image);
-	kwl_host_image_release(server->compose, &glass->sharp_tiles.image);
+	for (slot = 0U; slot < GLASS_SHARP_SCALES; slot++) {
+		kwl_host_image_release(server->compose, &glass->sharp[slot].image);
+		kwl_host_image_release(server->compose, &glass->sharp_tiles[slot].image);
+	}
 	kwl_host_image_release(server->compose, &glass->large);
 	free(glass);
 	server->compose->glass = NULL;
@@ -742,6 +802,9 @@ kwl_glass_landscape(
 {
 	struct wallpaper_picture picture;
 	uint64_t started;
+	uint32_t width;
+	uint32_t height;
+	uint32_t block;
 	unsigned renewed;
 	int error;
 
@@ -771,12 +834,13 @@ kwl_glass_landscape(
 
 	/* The images to draw into: the same, or new ones while a frame in flight copies a staging. */
 	started = kwl_milliseconds();
-	error = wallpaper_target(server, server->compose->glass, server->width, server->height, &renewed);
+	glass_wallpaper_size(server, &width, &height, &block);
+	error = wallpaper_target(server, server->compose->glass, width, height, block, &renewed);
 	if (error != 0)
 		return error;
 
 	/* Draws it into the wallpaper's image and its blurred copy, at the output's size. */
-	error = wallpaper_draw(server->compose->glass, &picture, server->width, server->height);
+	error = wallpaper_draw(server->compose->glass, &picture, width, height, block);
 	if (error != 0)
 		return error;
 
@@ -803,6 +867,9 @@ kwl_glass_resize(
 {
 	struct kwl_glass *glass;
 	uint64_t started;
+	uint32_t width;
+	uint32_t height;
+	uint32_t block;
 	int error;
 
 	/* Without the look there is no wallpaper. */
@@ -830,7 +897,8 @@ kwl_glass_resize(
 	kwl_host_image_release(server->compose, &glass->blurred);
 
 	/* The images of the new size, with the picture in them. */
-	error = wallpaper_create(server, glass, server->width, server->height);
+	glass_wallpaper_size(server, &width, &height, &block);
+	error = wallpaper_create(server, glass, width, height, block);
 	if (error != 0) {
 		printf("KWL GLASS resize errno=%d\n", error);
 		return error;
@@ -1016,8 +1084,7 @@ blur_submit(
 	/* The job takes the picture, the size and the answer. */
 	job->picture = *picture;
 	memset(picture, 0, sizeof(*picture));
-	job->width = server->width;
-	job->height = server->height;
+	glass_wallpaper_size(server, &job->width, &job->height, &job->block);
 	job->answer = answer;
 	job->resize = resize;
 	job->started_ms = started_ms;
@@ -1049,8 +1116,8 @@ blur_run(
 
 	/* The rows of the wallpaper and of the frosted glass, packed at their widths. */
 	job = (struct glass_blur_job *)lane;
-	small_width = job->width / GLASS_BLUR_SCALE;
-	small_height = job->height / GLASS_BLUR_SCALE;
+	small_width = job->width / job->block;
+	small_height = job->height / job->block;
 	job->rows = malloc((size_t)job->width * job->height * sizeof(*job->rows) + 1U);
 	job->blurred = malloc((size_t)small_width * small_height * sizeof(*job->blurred) + 1U);
 	job->error = 0;
@@ -1064,6 +1131,7 @@ blur_run(
 	    &job->picture,
 	    job->width,
 	    job->height,
+	    job->block,
 	    (unsigned char *)job->rows,
 	    (size_t)job->width * sizeof(*job->rows),
 	    (unsigned char *)job->blurred,
@@ -1080,19 +1148,24 @@ blur_done(
 {
 	struct kwl_server *server;
 	struct glass_blur_job *job;
+	uint32_t width;
+	uint32_t height;
+	uint32_t block;
 	int hold;
 	int writable;
 
-	/* A drawing of an output's old size is made again at the new one, from the same picture. */
+	/* A drawing of an output's old size (or scale) is made again at the new one, from the same picture. */
 	server = context;
 	job = (struct glass_blur_job *)lane;
-	if (job->error == 0 && (job->width != server->width || job->height != server->height)) {
+	glass_wallpaper_size(server, &width, &height, &block);
+	if (job->error == 0 && (job->width != width || job->height != height || job->block != block)) {
 		free(job->rows);
 		free(job->blurred);
 		job->rows = NULL;
 		job->blurred = NULL;
-		job->width = server->width;
-		job->height = server->height;
+		job->width = width;
+		job->height = height;
+		job->block = block;
 		kwl_lane_submit(&glass_blur, &job->lane, &blur_ops, 0U);
 		return;
 	}
@@ -1106,7 +1179,8 @@ blur_done(
 	    server->compose != NULL &&
 	    server->compose->glass != NULL &&
 	    server->compose->glass->wallpaper.width == job->width &&
-	    server->compose->glass->wallpaper.height == job->height) {
+	    server->compose->glass->wallpaper.height == job->height &&
+	    server->compose->glass->blurred.width == job->width / job->block) {
 		writable = kwl_compose_host_writable(server);
 		if (!writable)
 			hold = 1;
@@ -1163,7 +1237,7 @@ blur_apply(
 	/* The images to write into, then the rows. */
 	renewed = 0U;
 	if (error == 0)
-		error = wallpaper_target(server, glass, job->width, job->height, &renewed);
+		error = wallpaper_target(server, glass, job->width, job->height, job->block, &renewed);
 	if (error == 0) {
 		blur_copy(glass, job);
 		server->dirty = 1;
@@ -1209,15 +1283,49 @@ blur_answer(
 }
 
 /*
+ * Gives the size the wallpaper is drawn at, the output's pixels (its
+ * logical size while they are not known), and the frosted glass's block:
+ * GLASS_BLUR_SCALE logical units in pixels at the output's scale, rounded,
+ * so that the frosted glass keeps its blur at any scale.  At 100 % they
+ * are the logical size and GLASS_BLUR_SCALE, as before scales.
+ */
+static void
+glass_wallpaper_size(
+	const struct kwl_server *server,
+	uint32_t *width,
+	uint32_t *height,
+	uint32_t *block)
+{
+	unsigned scale;
+
+	/* The output's logical size and block while its pixels are not known. */
+	*width = server->width;
+	*height = server->height;
+	*block = GLASS_BLUR_SCALE;
+	if (server->pixel_width == 0U || server->pixel_height == 0U)
+		return;
+
+	/* The output's pixels, and the block at its scale (100 % while none is set). */
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+	*width = server->pixel_width;
+	*height = server->pixel_height;
+	*block = (GLASS_BLUR_SCALE * scale + KWL_SCALE_ONE / 2U) / KWL_SCALE_ONE;
+}
+
+/*
  * Makes the wallpaper's image and its blurred copy at a size (the output's
- * logical one: the caller says which), and draws them.
+ * pixels, glass_wallpaper_size) and the frosted glass's block, and draws
+ * them.
  */
 static int
 wallpaper_create(
 	struct kwl_server *server,
 	struct kwl_glass *glass,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t block)
 {
 	uint64_t started;
 	VkResult result;
@@ -1230,15 +1338,16 @@ wallpaper_create(
 		return EIO;
 
 	/* The small image of the frosted glass. */
-	error = blur_create(server, glass, width, height);
+	error = blur_create(server, glass, width, height, block);
 	if (error != 0)
 		return error;
 
-	/* How long the two images took; the rest of the step is the picture's reading and drawing. */
+	/* How long the two images took (and their size); the rest of the step is the picture's reading and drawing. */
 	printf("KWL STARTUP step=wallpaper-images ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
+	printf("KWL GLASS wallpaper size width=%u height=%u block=%u\n", width, height, block);
 
 	/* The picture in both. */
-	error = wallpaper_fill(glass, server->wallpaper_path, width, height);
+	error = wallpaper_fill(glass, server->wallpaper_path, width, height, block);
 	if (error != 0)
 		return error;
 
@@ -1260,6 +1369,7 @@ wallpaper_target(
 	struct kwl_glass *glass,
 	uint32_t width,
 	uint32_t height,
+	uint32_t block,
 	unsigned *renewed)
 {
 	int writable;
@@ -1268,11 +1378,15 @@ wallpaper_target(
 	/* Their stagings may be written now. */
 	*renewed = 0U;
 	writable = kwl_compose_host_writable(server);
-	if (writable && glass->wallpaper.width == width && glass->wallpaper.height == height && glass->blurred.image != VK_NULL_HANDLE)
+	if (writable &&
+	    glass->wallpaper.width == width &&
+	    glass->wallpaper.height == height &&
+	    glass->blurred.image != VK_NULL_HANDLE &&
+	    glass->blurred.width == width / block)
 		return 0;
 
 	/* New ones, the old ones let go after the frames given before. */
-	error = wallpaper_renew(server, glass, width, height);
+	error = wallpaper_renew(server, glass, width, height, block);
 
 	/* Reports why the images could not be renewed. */
 	if (error != 0)
@@ -1294,7 +1408,8 @@ wallpaper_renew(
 	struct kwl_server *server,
 	struct kwl_glass *glass,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t block)
 {
 	struct kwl_import blurred;
 	VkResult result;
@@ -1302,7 +1417,7 @@ wallpaper_renew(
 
 	/* The frosted glass's first, aside, so that a failure of either keeps both old ones. */
 	memset(&blurred, 0, sizeof(blurred));
-	result = kwl_host_image_create(server->compose, width / GLASS_BLUR_SCALE, height / GLASS_BLUR_SCALE, server->compose->linear_sampler, &blurred);
+	result = kwl_host_image_create(server->compose, width / block, height / block, server->compose->linear_sampler, &blurred);
 	if (result != VK_SUCCESS) {
 		kwl_host_image_release(server->compose, &blurred);
 		return EIO;
@@ -1375,7 +1490,8 @@ wallpaper_fill(
 	struct kwl_glass *glass,
 	const char *path,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t block)
 {
 	struct wallpaper_picture picture;
 	int error;
@@ -1389,7 +1505,7 @@ wallpaper_fill(
 	}
 
 	/* The picture into both images. */
-	error = wallpaper_draw(glass, &picture, width, height);
+	error = wallpaper_draw(glass, &picture, width, height, block);
 	if (error != 0)
 		return error;
 
@@ -1407,7 +1523,8 @@ wallpaper_draw(
 	struct kwl_glass *glass,
 	struct wallpaper_picture *given,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t block)
 {
 	struct wallpaper_picture picture;
 	uint64_t started;
@@ -1419,7 +1536,7 @@ wallpaper_draw(
 
 	/* The picture into both images at their size; then its bytes go. */
 	started = kwl_milliseconds();
-	error = wallpaper_render(&picture, width, height, glass->wallpaper.map, glass->wallpaper.row_pitch, glass->blurred.map, glass->blurred.row_pitch);
+	error = wallpaper_render(&picture, width, height, block, glass->wallpaper.map, glass->wallpaper.row_pitch, glass->blurred.map, glass->blurred.row_pitch);
 	free(picture.data);
 	if (error != 0)
 		return error;
@@ -1436,7 +1553,7 @@ wallpaper_draw(
 /*
  * Draws a picture (data NULL: the landscape) at an output's size into the
  * wallpaper's rows and the frosted glass's (the output's size divided by
- * GLASS_BLUR_SCALE), each row at its pitch in bytes.  The picture is made
+ * the block, blocks of block pixels a side), each row at its pitch in bytes.  The picture is made
  * one output row at a time: each row is packed, copied out,
  * and added to the frosted glass's block averages, so no output-sized copy
  * of the picture is kept.  It touches nothing but what it is given, so the
@@ -1447,6 +1564,7 @@ wallpaper_render(
 	const struct wallpaper_picture *picture,
 	uint32_t width,
 	uint32_t height,
+	uint32_t block,
 	unsigned char *rows,
 	size_t pitch,
 	unsigned char *blurred,
@@ -1465,8 +1583,8 @@ wallpaper_render(
 	uint32_t made_y;
 
 	/* The frosted glass's size. */
-	small_width = width / GLASS_BLUR_SCALE;
-	small_height = height / GLASS_BLUR_SCALE;
+	small_width = width / block;
+	small_height = height / block;
 
 	/* One output row, each output column's source column, a block row's sums, the small image and its passes' copy. */
 	line = malloc((size_t)width * sizeof(*line));
@@ -1511,13 +1629,13 @@ wallpaper_render(
 		memcpy(rows + (size_t)y * pitch, line, (size_t)width * sizeof(*line));
 
 		/* Rows below the last whole block are not in the frosted glass. */
-		if (y >= small_height * GLASS_BLUR_SCALE)
+		if (y >= small_height * block)
 			continue;
 
 		/* Into its block; a block's last row makes that row of the small image. */
-		blur_add(line, sums, small_width);
-		if (y % GLASS_BLUR_SCALE == GLASS_BLUR_SCALE - 1U)
-			blur_average(sums, &small[(size_t)(y / GLASS_BLUR_SCALE) * small_width * 3U], small_width);
+		blur_add(line, sums, small_width, block);
+		if (y % block == block - 1U)
+			blur_average(sums, &small[(size_t)(y / block) * small_width * 3U], small_width, block);
 	}
 
 	/* The frosted glass from the block averages. */
@@ -1731,12 +1849,13 @@ blur_create(
 	struct kwl_server *server,
 	struct kwl_glass *glass,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t block)
 {
 	VkResult result;
 
-	/* The wallpaper's size divided by GLASS_BLUR_SCALE. */
-	result = kwl_host_image_create(server->compose, width / GLASS_BLUR_SCALE, height / GLASS_BLUR_SCALE, server->compose->linear_sampler, &glass->blurred);
+	/* The wallpaper's size divided by the block. */
+	result = kwl_host_image_create(server->compose, width / block, height / block, server->compose->linear_sampler, &glass->blurred);
 	if (result != VK_SUCCESS)
 		return EIO;
 
@@ -1746,7 +1865,7 @@ blur_create(
 
 /*
  * Draws the frosted glass from its small image (the wallpaper averaged down
- * by GLASS_BLUR_SCALE, blur_average): blurred by repeated box passes (close
+ * in blocks, blur_average): blurred by repeated box passes (close
  * to a Gaussian) in place, with scratch as the passes' copy, then packed
  * into its rows at their pitch.
  */
@@ -1778,21 +1897,22 @@ blur_fill(
 	}
 }
 
-/* Adds a packed output row to the sums of the blocks it crosses (three channels a block, red first). */
+/* Adds a packed output row to the sums of the blocks (block pixels a side) it crosses (three channels a block, red first). */
 static void
 blur_add(
 	const uint32_t *line,
 	uint32_t *sums,
-	uint32_t small_width)
+	uint32_t small_width,
+	uint32_t block)
 {
 	uint32_t pixel;
 	uint32_t x;
 	uint32_t dx;
 
-	/* Each block's GLASS_BLUR_SCALE pixels of this row. */
+	/* Each block's block pixels of this row. */
 	for (x = 0; x < small_width; x++) {
-		for (dx = 0; dx < GLASS_BLUR_SCALE; dx++) {
-			pixel = line[x * GLASS_BLUR_SCALE + dx];
+		for (dx = 0; dx < block; dx++) {
+			pixel = line[x * block + dx];
 			sums[x * 3U] += (pixel >> 16) & 0xffU;
 			sums[x * 3U + 1U] += (pixel >> 8) & 0xffU;
 			sums[x * 3U + 2U] += pixel & 0xffU;
@@ -1805,13 +1925,14 @@ static void
 blur_average(
 	uint32_t *sums,
 	float *small,
-	uint32_t small_width)
+	uint32_t small_width,
+	uint32_t block)
 {
 	uint32_t index;
 
-	/* Each channel of each block: the average of its GLASS_BLUR_SCALE squared pixels. */
+	/* Each channel of each block: the average of its block squared pixels. */
 	for (index = 0; index < small_width * 3U; index++) {
-		small[index] = (float)sums[index] / (255.0f * (float)(GLASS_BLUR_SCALE * GLASS_BLUR_SCALE));
+		small[index] = (float)sums[index] / (255.0f * (float)(block * block));
 		sums[index] = 0;
 	}
 }
@@ -2374,8 +2495,8 @@ blur_copy(
 	uint32_t y;
 
 	/* The frosted glass's size. */
-	small_width = job->width / GLASS_BLUR_SCALE;
-	small_height = job->height / GLASS_BLUR_SCALE;
+	small_width = job->width / job->block;
+	small_height = job->height / job->block;
 
 	/* The wallpaper's rows, at the image's pitch. */
 	for (y = 0; y < job->height; y++)
@@ -3178,7 +3299,7 @@ glass_draw_text(
 		sharp_glyph = NULL;
 		if (sharp != NULL)
 			sharp_glyph = glass_glyph_of(glass, sharp, size, codepoint);
-		glass_draw_glyph_at(server, command, glyph, sharp_glyph, x, baseline, color);
+		glass_draw_glyph_at(server, command, glyph, sharp, sharp_glyph, x, baseline, color);
 		x += glyph->advance;
 	}
 
@@ -3320,7 +3441,7 @@ glass_draw_text_middle(
 		sharp_glyph = NULL;
 		if (sharp != NULL)
 			sharp_glyph = glass_glyph_of(glass, sharp, size, codepoint);
-		glass_draw_glyph_at(server, command, glyph, sharp_glyph, x, baseline, color);
+		glass_draw_glyph_at(server, command, glyph, sharp, sharp_glyph, x, baseline, color);
 		x += glyph->advance;
 	}
 
@@ -3343,7 +3464,7 @@ glass_draw_text_middle(
 		sharp_glyph = NULL;
 		if (sharp != NULL)
 			sharp_glyph = glass_glyph_of(glass, sharp, size, codepoint);
-		glass_draw_glyph_at(server, command, glyph, sharp_glyph, x, baseline, color);
+		glass_draw_glyph_at(server, command, glyph, sharp, sharp_glyph, x, baseline, color);
 		x += glyph->advance;
 	}
 }
@@ -3371,7 +3492,7 @@ glass_draw_glyph(
 		sharp_glyph = &sharp->glyphs[size][index];
 
 	/* The atlas's glyph, drawn where it goes. */
-	glass_draw_glyph_at(server, command, &glass->atlas.glyphs[size][index], sharp_glyph, x, baseline, color);
+	glass_draw_glyph_at(server, command, &glass->atlas.glyphs[size][index], sharp, sharp_glyph, x, baseline, color);
 }
 
 /* The advance of one glyph of the atlas (0 without text). */
@@ -3394,10 +3515,13 @@ glass_glyph_advance(
 
 /*
  * Makes the large digits (the digits and the colon of the lock screen's
- * clock) at a size in pixels, unless they are at that size
- * already.  Returns 0, or an errno value: ENODEV without the look's text,
- * EINVAL for a size past GLASS_LARGE_PIXELS_MOST (the caller then draws an
- * atlas size instead).
+ * clock) at a size (logical units) and the output's scale, unless they
+ * are at both already: they are drawn at the size times the scale, so
+ * that they are one to one with the output's pixels (a head at another
+ * scale shows them scaled; one image serves every pass, so that passes
+ * at two scales do not draw them again in turn).  Returns 0, or an errno value: ENODEV without the
+ * look's text, EINVAL for a size past GLASS_LARGE_PIXELS_MOST (the caller
+ * then draws an atlas size instead).
  */
 int
 glass_large_prepare(
@@ -3406,6 +3530,9 @@ glass_large_prepare(
 {
 	struct kwl_glass *glass;
 	VkResult result;
+	uint32_t width;
+	uint32_t height;
+	unsigned scale;
 	int writable;
 	int error;
 
@@ -3418,31 +3545,40 @@ glass_large_prepare(
 	if (pixels == 0U || pixels > GLASS_LARGE_PIXELS_MOST)
 		return EINVAL;
 
-	/* The digits are at that size already (the usual frame). */
-	if (glass->large_pixels == pixels)
+	/* The digits are at that size and scale already (the usual frame). */
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+	if (glass->large_pixels == pixels && glass->large_scale == scale)
 		return 0;
 
 	/* A size the glyph worker is rendering, or could not render. */
-	if (glass->large_wanted == pixels)
+	if (glass->large_wanted == pixels && glass->large_wanted_scale == scale)
 		return EAGAIN;
-	if (glass->large_failed == pixels)
+	if (glass->large_failed == pixels && glass->large_failed_scale == scale)
 		return EINVAL;
 
 	/*
-	 * The image the first time; later the event loop draws into it again
+	 * The image the first time, or a new one of another scale's size; later
+	 * the event loop draws into it again
 	 * when no frame in flight copies a host image's staging, otherwise into
 	 * a new one, the frames in flight going on with the old one, let go
 	 * after them (the glyph worker's digits are written at the start of a
 	 * walk, when no frame in flight copies one either).
 	 */
+	large_image_size(scale, &width, &height);
 	if (glass->large.image == VK_NULL_HANDLE) {
-		result = kwl_host_image_create(server->compose, GLASS_LARGE_WIDTH, GLASS_LARGE_HEIGHT, server->compose->sampler, &glass->large);
+		result = kwl_host_image_create(server->compose, width, height, server->compose->sampler, &glass->large);
 		if (result != VK_SUCCESS)
 			return EIO;
+	} else if (glass->large.width != width || glass->large.height != height) {
+		error = glass_image_renew(server, &glass->large, width, height, server->compose->sampler);
+		if (error != 0)
+			return error;
 	} else if (!glass->worker_running) {
 		writable = kwl_compose_host_writable(server);
 		if (!writable) {
-			error = glass_image_renew(server, &glass->large, GLASS_LARGE_WIDTH, GLASS_LARGE_HEIGHT, server->compose->sampler);
+			error = glass_image_renew(server, &glass->large, width, height, server->compose->sampler);
 			if (error != 0)
 				return error;
 		}
@@ -3454,10 +3590,11 @@ glass_large_prepare(
 	 * size until then.
 	 */
 	if (glass->worker_running) {
-		error = large_ask(glass, pixels);
+		error = large_ask(glass, pixels, scale);
 		if (error != 0 && error != EAGAIN) {
-			printf("KWL GLASS large pixels=%u errno=%d\n", pixels, error);
+			printf("KWL GLASS large pixels=%u scale=%u errno=%d\n", pixels, scale, error);
 			glass->large_failed = pixels;
+			glass->large_failed_scale = scale;
 			glass->large_wanted = 0U;
 		}
 
@@ -3467,20 +3604,21 @@ glass_large_prepare(
 
 	/* The digits drawn at the size; none is usable until they all are. */
 	glass->large_pixels = 0U;
-	error = large_fill(glass, glass->faces[0], pixels);
+	error = large_fill(glass, glass->faces[0], pixels, scale);
 	if (error != 0) {
-		printf("KWL GLASS large pixels=%u errno=%d\n", pixels, error);
+		printf("KWL GLASS large pixels=%u scale=%u errno=%d\n", pixels, scale, error);
 		return error;
 	}
 
 	/* Succeeded: the digits are at the size. */
 	glass->large_pixels = pixels;
-	printf("KWL GLASS large pixels=%u\n", pixels);
+	glass->large_scale = scale;
+	printf("KWL GLASS large pixels=%u scale=%u\n", pixels, scale);
 	return 0;
 }
 
 /*
- * Measures a line of the large digits in pixels.
+ * Measures a line of the large digits in logical units.
  *
  * It is 0 while none are made, and other characters count nothing.
  */
@@ -3499,12 +3637,12 @@ glass_large_text_width(
 	if (glass == NULL || glass->large_pixels == 0U)
 		return 0;
 
-	/* The sum of the advances of the characters there are large glyphs for. */
+	/* The sum of the advances (logical units) of the characters there are large glyphs for. */
 	while (*text != '\0') {
 		glyph = large_glyph_of(glass, (uint32_t)(unsigned char)*text);
 		text++;
 		if (glyph != NULL)
-			width += glyph->advance;
+			width += glass->large_advances[glyph - glass->large_glyphs];
 	}
 
 	/* Succeeded. */
@@ -3512,7 +3650,10 @@ glass_large_text_width(
 }
 
 /*
- * Draws a line of the large digits from x on a baseline.
+ * Draws a line of the large digits from x on a baseline (logical units):
+ * each glyph's box (in the pixels of the scale it was drawn at) from the
+ * pixel its origin is snapped to, one to one where the pass is at that
+ * scale, and the pen moved by its logical advance.
  *
  * Other characters are passed over.
  */
@@ -3528,6 +3669,10 @@ glass_draw_large_text(
 	const struct glass_glyph *glyph;
 	struct glass_shape shape;
 	struct kwl_glass *glass;
+	float quad[4];
+	int32_t left;
+	int32_t top;
+	unsigned scale;
 
 	/* Nothing while the digits are not made. */
 	glass = server->compose->glass;
@@ -3535,27 +3680,31 @@ glass_draw_large_text(
 		return;
 
 	/* Each character there is a large glyph for, the pen moving past it. */
+	scale = glass->large_scale;
 	while (*text != '\0') {
 		glyph = large_glyph_of(glass, (uint32_t)(unsigned char)*text);
 		text++;
 		if (glyph == NULL)
 			continue;
 
-		/* Its coverage in the colour, one to one with the image. */
+		/* Its coverage in the colour, one to one with the image at its scale. */
 		if (glyph->width != 0U && glyph->height != 0U) {
-			glass_shape_init(&shape, (float)(x + glyph->left), (float)(baseline - glyph->top), (float)glyph->width, (float)glyph->height);
+			left = kwl_scale_snap(x, scale) + glyph->left;
+			top = kwl_scale_snap(baseline, scale) - glyph->top;
+			glass_sharp_quad(scale, left, top, glyph->width, glyph->height, quad);
+			glass_shape_init(&shape, quad[0], quad[1], quad[2], quad[3]);
 			shape.mode = MODE_TEXT;
-			shape.uv[0] = (float)glyph->x / (float)GLASS_LARGE_WIDTH;
-			shape.uv[1] = (float)glyph->y / (float)GLASS_LARGE_HEIGHT;
-			shape.uv[2] = (float)(glyph->x + glyph->width) / (float)GLASS_LARGE_WIDTH;
-			shape.uv[3] = (float)(glyph->y + glyph->height) / (float)GLASS_LARGE_HEIGHT;
+			shape.uv[0] = (float)glyph->x / (float)glass->large.width;
+			shape.uv[1] = (float)glyph->y / (float)glass->large.height;
+			shape.uv[2] = (float)(glyph->x + glyph->width) / (float)glass->large.width;
+			shape.uv[3] = (float)(glyph->y + glyph->height) / (float)glass->large.height;
 			memcpy(shape.color, color, sizeof(shape.color));
 			shape.set = glass->large.set;
 			glass_shape_draw(server, command, &shape);
 		}
 
 		/* The pen after it. */
-		x += glyph->advance;
+		x += glass->large_advances[glyph - glass->large_glyphs];
 	}
 }
 
@@ -4061,9 +4210,16 @@ kwl_glass_glyphs_take(
 	struct kwl_glyph_job *job;
 	struct kwl_glyph_job *next;
 
-	/* Without the look or its worker there is nothing to take. */
+	/* Without the look there is nothing to take. */
 	glass = compose->glass;
-	if (glass == NULL || !glass->worker_running)
+	if (glass == NULL)
+		return;
+
+	/* A new drawing for the sharp atlases. */
+	glass_sharp_list_begin(compose, glass);
+
+	/* Without its worker nothing was rendered elsewhere. */
+	if (!glass->worker_running)
 		return;
 
 	/* Each rendered glyph, oldest first, into what asked for it. */
@@ -4074,10 +4230,10 @@ kwl_glass_glyphs_take(
 			glass_take_cell(&glass->atlas, job);
 		} else if (job->kind == GLASS_JOB_COLOR) {
 			glass_take_color(&glass->atlas, job);
-		} else if (job->kind == GLASS_JOB_SHARP_CELL) {
-			glass_take_cell(&glass->sharp, job);
-		} else if (job->kind == GLASS_JOB_SHARP_COLOR) {
-			glass_take_color(&glass->sharp, job);
+		} else if (job->kind >= GLASS_JOB_SHARP_CELL && job->kind < GLASS_JOB_SHARP_CELL + GLASS_SHARP_SCALES) {
+			glass_take_cell(&glass->sharp[job->kind - GLASS_JOB_SHARP_CELL], job);
+		} else if (job->kind >= GLASS_JOB_SHARP_COLOR && job->kind < GLASS_JOB_SHARP_COLOR + GLASS_SHARP_SCALES) {
+			glass_take_color(&glass->sharp[job->kind - GLASS_JOB_SHARP_COLOR], job);
 		} else if (job->kind == GLASS_JOB_FALLBACK || job->kind == GLASS_JOB_EMOJI) {
 			glass_take_font(glass, job);
 		} else {
@@ -4247,32 +4403,41 @@ tiles_create(
 }
 
 /*
- * Draws the large digits and the colon at a size into their image, side by
- * side along its top, a column apart so that sampling keeps to one glyph;
- * returns 0, ENOSPC when a glyph does not fit, or the font's errno value.
+ * Draws the large digits and the colon at a size (logical units) times a
+ * scale into their image, side by side along its top, a column apart so
+ * that sampling keeps to one glyph, with their logical advances; returns
+ * 0, ENOSPC when a glyph does not fit, or the font's errno value.
  */
 static int
 large_fill(
 	struct kwl_glass *glass,
 	struct truetype_face *face,
-	unsigned pixels)
+	unsigned pixels,
+	unsigned scale)
 {
-	/* One glyph's coverage while it is rendered; static to keep its 64 KiB off the stack. */
-	static uint8_t bitmap[GLASS_LARGE_SIDE * GLASS_LARGE_SIDE];
+	/* One glyph's coverage while it is rendered; static to keep its 576 KiB off the stack. */
+	static uint8_t bitmap[GLASS_LARGE_SHARP_SIDE * GLASS_LARGE_SHARP_SIDE];
 	struct truetype_glyph metrics;
 	struct glass_glyph *glyph;
 	uint32_t codepoint;
 	uint32_t pen_x;
+	uint32_t side;
 	unsigned index;
 	unsigned id;
 	int error;
 
-	/* The image transparent, no glyph known, and the face at the size (the cache sets its own size again). */
-	memset(glass->large.map, 0, glass->large.row_pitch * GLASS_LARGE_HEIGHT);
+	/* The image transparent, no glyph known, and the logical advances at the size. */
+	memset(glass->large.map, 0, glass->large.row_pitch * glass->large.height);
 	memset(glass->large_glyphs, 0, sizeof(glass->large_glyphs));
-	error = truetype_set_pixel_size(face, pixels);
+	error = large_advances(glass, face, pixels);
+	if (error != 0)
+		return error;
+
+	/* The face at the size times the scale (the cache sets its own size again), and the largest box at it. */
+	error = truetype_set_pixel_size(face, atlas_pixels(scale, pixels));
 	if (error != 0)
 		return EINVAL;
+	side = atlas_pixels(scale, GLASS_LARGE_SIDE);
 
 	/* Each glyph from the left. */
 	pen_x = 0;
@@ -4289,14 +4454,14 @@ large_fill(
 			return error;
 
 		/* The bitmap must hold it. */
-		if (metrics.width > GLASS_LARGE_SIDE || metrics.height > GLASS_LARGE_SIDE)
+		if (metrics.width > side || metrics.height > side)
 			return ENOSPC;
 
 		/* The image must hold it. */
-		if (metrics.height > GLASS_LARGE_HEIGHT || pen_x + metrics.width > GLASS_LARGE_WIDTH)
+		if (metrics.height > glass->large.height || pen_x + metrics.width > glass->large.width)
 			return ENOSPC;
 
-		/* Its place and metrics. */
+		/* Its place and its box in pixels (its advance in pixels too; the pen takes the logical one). */
 		glyph = &glass->large_glyphs[index];
 		glyph->x = pen_x;
 		glyph->y = 0;
@@ -4322,6 +4487,69 @@ large_fill(
 
 	/* Succeeded: every glyph is drawn. */
 	return 0;
+}
+
+/*
+ * Keeps the large digits' advances at a size in logical units (the pen's,
+ * the same at any scale); returns 0, or the font's errno value.
+ */
+static int
+large_advances(
+	struct kwl_glass *glass,
+	struct truetype_face *face,
+	unsigned pixels)
+{
+	struct truetype_glyph metrics;
+	uint32_t codepoint;
+	unsigned index;
+	unsigned id;
+	int error;
+
+	/* The face at the logical size. */
+	error = truetype_set_pixel_size(face, pixels);
+	if (error != 0)
+		return EINVAL;
+
+	/* Each glyph's advance: the digits, then the colon. */
+	for (index = 0; index < GLASS_LARGE_GLYPHS; index++) {
+		codepoint = (uint32_t)'0' + index;
+		if (index == GLASS_LARGE_COLON)
+			codepoint = ':';
+		id = truetype_glyph_index(face, codepoint);
+		error = truetype_glyph_metrics(face, id, &metrics);
+		if (error != 0)
+			return error;
+		glass->large_advances[index] = metrics.advance;
+	}
+
+	/* Succeeded: the advances are kept. */
+	return 0;
+}
+
+/*
+ * Gives the size of the large digits' image at a scale:
+ * GLASS_LARGE_WIDTH by GLASS_LARGE_HEIGHT at 100 %, grown with the scale
+ * (to a whole number of GLASS_SHARP_ALIGN) at another.
+ */
+static void
+large_image_size(
+	unsigned scale,
+	uint32_t *width,
+	uint32_t *height)
+{
+	uint32_t side;
+
+	/* At 100 % the size it has always had. */
+	*width = GLASS_LARGE_WIDTH;
+	*height = GLASS_LARGE_HEIGHT;
+	if (scale == KWL_SCALE_ONE)
+		return;
+
+	/* Grown with the scale. */
+	side = atlas_pixels(scale, GLASS_LARGE_WIDTH);
+	*width = (side + GLASS_SHARP_ALIGN - 1U) / GLASS_SHARP_ALIGN * GLASS_SHARP_ALIGN;
+	side = atlas_pixels(scale, GLASS_LARGE_HEIGHT);
+	*height = (side + GLASS_SHARP_ALIGN - 1U) / GLASS_SHARP_ALIGN * GLASS_SHARP_ALIGN;
 }
 
 /* Stores a glyph's coverage as premultiplied white at a column of the large image. */
@@ -5040,9 +5268,7 @@ glass_ask_cell(
 	job->glyph = glyph;
 	job->width = metrics->width;
 	job->height = metrics->height;
-	job->kind = GLASS_JOB_CELL;
-	if (atlas == &glass->sharp)
-		job->kind = GLASS_JOB_SHARP_CELL;
+	job->kind = glass_job_kind(glass, atlas, GLASS_JOB_CELL);
 	job->slot = slot;
 	job->generation = atlas->cache[slot].generation;
 
@@ -5081,9 +5307,7 @@ glass_ask_color(
 	job->glyph = glyph;
 	job->width = (uint32_t)metrics->width;
 	job->height = (uint32_t)metrics->height;
-	job->kind = GLASS_JOB_COLOR;
-	if (atlas == &glass->sharp)
-		job->kind = GLASS_JOB_SHARP_COLOR;
+	job->kind = glass_job_kind(glass, atlas, GLASS_JOB_COLOR);
 	job->slot = slot;
 	job->generation = atlas->cache[slot].generation;
 
@@ -5176,7 +5400,8 @@ glass_take_cell(
 static int
 large_ask(
 	struct kwl_glass *glass,
-	unsigned pixels)
+	unsigned pixels,
+	unsigned scale)
 {
 	struct truetype_glyph metrics;
 	struct truetype_face *face;
@@ -5184,23 +5409,31 @@ large_ask(
 	struct kwl_glyph_job *job;
 	uint32_t codepoint;
 	uint32_t pen_x;
+	uint32_t side;
+	unsigned rendered;
 	unsigned index;
 	unsigned id;
 	int error;
 
-	/* None usable until all are written; a request of another size makes the earlier one's results stale. */
+	/* None usable until all are written; a request of another size or scale makes the earlier one's results stale. */
 	glass->large_pixels = 0U;
 	glass->large_generation++;
 	glass->large_wanted = pixels;
+	glass->large_wanted_scale = scale;
 	glass->large_expected = 0U;
 	glass->large_received = 0U;
 	memset(glass->large_glyphs, 0, sizeof(glass->large_glyphs));
 
-	/* The first font at the size (the cache sets its own size again). */
+	/* The logical advances, then the first font at the size times the scale (the cache sets its own size again). */
 	face = glass->faces[0];
-	error = truetype_set_pixel_size(face, pixels);
+	error = large_advances(glass, face, pixels);
+	if (error != 0)
+		return error;
+	rendered = atlas_pixels(scale, pixels);
+	error = truetype_set_pixel_size(face, rendered);
 	if (error != 0)
 		return EINVAL;
+	side = atlas_pixels(scale, GLASS_LARGE_SIDE);
 
 	/* Each glyph's box and place from the left, as large_fill makes them. */
 	pen_x = 0;
@@ -5215,9 +5448,9 @@ large_ask(
 		error = truetype_glyph_metrics(face, id, &metrics);
 		if (error != 0)
 			return error;
-		if (metrics.width > GLASS_LARGE_SIDE || metrics.height > GLASS_LARGE_SIDE)
+		if (metrics.width > side || metrics.height > side)
 			return ENOSPC;
-		if (metrics.height > GLASS_LARGE_HEIGHT || pen_x + metrics.width > GLASS_LARGE_WIDTH)
+		if (metrics.height > glass->large.height || pen_x + metrics.width > glass->large.width)
 			return ENOSPC;
 
 		/* Its place and metrics, drawn once all are written. */
@@ -5240,7 +5473,7 @@ large_ask(
 		if (job == NULL)
 			return ENOMEM;
 		job->font = 0U;
-		job->pixels = pixels;
+		job->pixels = rendered;
 		job->glyph = id;
 		job->width = metrics.width;
 		job->height = metrics.height;
@@ -5254,6 +5487,7 @@ large_ask(
 	/* Digits without a box are drawn at once (as nothing). */
 	if (glass->large_expected == 0U) {
 		glass->large_pixels = pixels;
+		glass->large_scale = scale;
 		glass->large_wanted = 0U;
 		return 0;
 	}
@@ -5281,15 +5515,16 @@ glass_take_large(
 
 	/* A digit that could not be rendered fails the size. */
 	if (job->error != 0) {
-		printf("KWL GLASS large pixels=%u errno=%d\n", glass->large_wanted, job->error);
+		printf("KWL GLASS large pixels=%u scale=%u errno=%d\n", glass->large_wanted, glass->large_wanted_scale, job->error);
 		glass->large_failed = glass->large_wanted;
+		glass->large_failed_scale = glass->large_wanted_scale;
 		glass->large_wanted = 0U;
 		return;
 	}
 
 	/* The first digit of the size starts from a transparent image. */
 	if (glass->large_received == 0U)
-		memset(glass->large.map, 0, glass->large.row_pitch * GLASS_LARGE_HEIGHT);
+		memset(glass->large.map, 0, glass->large.row_pitch * glass->large.height);
 
 	/* The digit at its place. */
 	glyph = &glass->large_glyphs[job->slot];
@@ -5300,8 +5535,9 @@ glass_take_large(
 	if (glass->large_received < glass->large_expected)
 		return;
 	glass->large_pixels = glass->large_wanted;
+	glass->large_scale = glass->large_wanted_scale;
 	glass->large_wanted = 0U;
-	printf("KWL GLASS large pixels=%u\n", glass->large_pixels);
+	printf("KWL GLASS large pixels=%u scale=%u\n", glass->large_pixels, glass->large_scale);
 }
 
 /* Reads one UTF-8 character and moves past it; a malformed byte reads as U+FFFD and is passed alone. */
@@ -5353,8 +5589,8 @@ glass_utf8_next(
 }
 
 /*
- * Draws one glyph with its origin at x on the baseline: the sharp atlas's
- * (sharp, at the pass's scale) one to one with the output's pixels from
+ * Draws one glyph with its origin at x on the baseline: a sharp atlas's
+ * (sharp, of atlas, at the pass's scale) one to one with the output's pixels from
  * the pixel the origin is snapped to, else the atlas's at 100 % one to
  * one with it (scaled by a pass at another scale).
  */
@@ -5363,13 +5599,13 @@ glass_draw_glyph_at(
 	struct kwl_server *server,
 	struct kwl_list *command,
 	const struct glass_glyph *glyph,
+	const struct glass_atlas *atlas,
 	const struct glass_glyph *sharp,
 	int32_t x,
 	int32_t baseline,
 	const float *color)
 {
 	struct glass_shape shape;
-	struct glass_atlas *atlas;
 	struct kwl_glass *glass;
 	float quad[4];
 	int32_t left;
@@ -5393,7 +5629,6 @@ glass_draw_glyph_at(
 	if (sharp != NULL) {
 		if (sharp->width == 0U || sharp->height == 0U)
 			return;
-		atlas = &glass->sharp;
 		left = kwl_scale_snap(x, atlas->scale) + sharp->left;
 		top = kwl_scale_snap(baseline, atlas->scale) - sharp->top;
 		glass_sharp_quad(atlas->scale, left, top, sharp->width, sharp->height, quad);
@@ -5434,17 +5669,25 @@ glass_draw_glyph_at(
 
 /*
  * Gives the sharp atlas at the scale the pass being recorded shows the
- * plane at, making it (and the sharp tiles) when the scale is another
- * than it was made at; NULL at 100 % (and on a head's pass), without
- * text, or when it could not be made at the scale (the atlas at 100 % is
- * then drawn scaled, as it was before).
+ * plane at, making it (and its sharp tiles) in a slot of its own when
+ * none is at the scale: in a free slot, else in place of the one used
+ * longest ago unless the drawing being recorded used it, so that passes
+ * at as many scales as there are slots (the anchor and heads at other
+ * scales) each keep theirs, and nothing a drawing recorded is let go
+ * under it.  NULL at 100 %,
+ * without text, or when it could not be made at the scale (the atlas at
+ * 100 % is then drawn scaled, as it was before).
  */
 static struct glass_atlas *
 glass_sharp(
 	struct kwl_server *server)
 {
+	unsigned scales[GLASS_SHARP_SCALES];
 	struct kwl_glass *glass;
 	unsigned scale;
+	unsigned slot;
+	unsigned index;
+	int made;
 	int error;
 
 	/* Nothing without the look's text. */
@@ -5457,50 +5700,69 @@ glass_sharp(
 	if (scale == KWL_SCALE_ONE)
 		return NULL;
 
-	/* Made at the scale already (every frame but the first at it). */
-	if (glass->sharp.scale == scale)
-		return &glass->sharp;
+	/* The slot of the scale (every pass but the first at it), or the one to make it in. */
+	for (slot = 0U; slot < GLASS_SHARP_SCALES; slot++)
+		scales[slot] = glass->sharp[slot].scale;
+	slot = kwl_scale_slot_choose(scales, glass->sharp_used, GLASS_SHARP_SCALES, scale, glass->sharp_since, &made);
+	glass->sharp_clock++;
+	if (made) {
+		glass->sharp_used[slot] = glass->sharp_clock;
+		glass->sharp_list_of[slot] = glass->sharp_list;
+		return &glass->sharp[slot];
+	}
 
-	/* A scale it could not be made at is not tried again. */
-	if (glass->sharp.failed == scale)
+	/* More scales in this drawing than slots: the atlas at 100 % scaled, none let go under what was recorded. */
+	if (slot == GLASS_SHARP_SCALES)
 		return NULL;
 
-	/* Made at the new scale. */
-	error = sharp_create(server, glass, scale);
+	/* A scale one could not be made at is not tried again. */
+	for (index = 0U; index < GLASS_SHARP_SCALES; index++) {
+		if (glass->sharp_failed[index] == scale)
+			return NULL;
+	}
+
+	/* Made at the scale in the slot. */
+	error = sharp_create(server, glass, slot, scale);
 	if (error != 0) {
 		printf("KWL GLASS sharp scale=%u errno=%d\n", scale, error);
-		glass->sharp.failed = scale;
+		glass->sharp_failed[glass->sharp_failed_next] = scale;
+		glass->sharp_failed_next = (glass->sharp_failed_next + 1U) % GLASS_SHARP_SCALES;
 		return NULL;
 	}
 
 	/* Succeeded: the atlas at the pass's scale. */
-	return &glass->sharp;
+	glass->sharp_used[slot] = glass->sharp_clock;
+	glass->sharp_list_of[slot] = glass->sharp_list;
+	return &glass->sharp[slot];
 }
 
 /*
- * Makes the sharp atlas and the sharp tiles at a scale, in new images (the
- * old scale's go once the frames given before have completed).  Returns
- * 0, or the errno value of the atlas (the tiles' failure leaves the tiles
- * at 100 % drawn scaled).
+ * Makes a slot's sharp atlas and sharp tiles at a scale, in new images
+ * (those the slot held at another scale go once the frames given before
+ * have completed).  Returns 0, or the errno value of the atlas (the
+ * tiles' failure leaves the tiles at 100 % drawn scaled).
  */
 static int
 sharp_create(
 	struct kwl_server *server,
 	struct kwl_glass *glass,
+	unsigned slot,
 	unsigned scale)
 {
 	struct glass_atlas *atlas;
+	struct glass_tiles *tiles;
 	uint64_t started;
 	VkResult result;
 	int error;
 
-	/* The old scale's images go; nothing is drawn from them from now on. */
+	/* The slot's images of another scale go; nothing is drawn from them from now on. */
 	started = kwl_milliseconds();
-	atlas = &glass->sharp;
+	atlas = &glass->sharp[slot];
+	tiles = &glass->sharp_tiles[slot];
 	kwl_host_image_release(server->compose, &atlas->image);
-	kwl_host_image_release(server->compose, &glass->sharp_tiles.image);
-	glass->sharp_tiles.ready = 0U;
-	glass->sharp_tiles.scale = 0U;
+	kwl_host_image_release(server->compose, &tiles->image);
+	tiles->ready = 0U;
+	tiles->scale = 0U;
 
 	/* The atlas's image at the scale, transparent where nothing is drawn. */
 	atlas_setup(atlas, scale);
@@ -5519,18 +5781,18 @@ sharp_create(
 	}
 
 	/* The tiles at the scale; without them the tiles at 100 % are drawn scaled. */
-	error = tiles_create(server, &glass->sharp_tiles, scale);
+	error = tiles_create(server, tiles, scale);
 	if (error != 0) {
 		printf("KWL GLASS sharp tiles scale=%u errno=%d\n", scale, error);
-		kwl_host_image_release(server->compose, &glass->sharp_tiles.image);
-		glass->sharp_tiles.ready = 0U;
-		glass->sharp_tiles.scale = 0U;
+		kwl_host_image_release(server->compose, &tiles->image);
+		tiles->ready = 0U;
+		tiles->scale = 0U;
 	}
 
-	/* The log says what was made and how long it took. */
-	printf("KWL GLASS sharp scale=%u atlas=%ux%u tiles=%ux%u ms=%llu\n", scale, atlas->width, atlas->height, glass->sharp_tiles.width, glass->sharp_tiles.height, (unsigned long long)(kwl_milliseconds() - started));
+	/* The log says what was made, where and how long it took. */
+	printf("KWL GLASS sharp scale=%u slot=%u atlas=%ux%u tiles=%ux%u ms=%llu\n", scale, slot, atlas->width, atlas->height, tiles->width, tiles->height, (unsigned long long)(kwl_milliseconds() - started));
 
-	/* Succeeded: the sharp atlas is at the scale. */
+	/* Succeeded: the slot's sharp atlas is at the scale. */
 	return 0;
 }
 
@@ -5544,15 +5806,17 @@ glass_tiles_for(
 	struct kwl_server *server)
 {
 	struct glass_atlas *sharp;
+	struct glass_tiles *tiles;
 	struct kwl_glass *glass;
 
-	/* The sharp tiles, made with the sharp atlas at the pass's scale. */
+	/* The sharp tiles, made with the sharp atlas at the pass's scale in the same slot. */
 	glass = server->compose->glass;
 	sharp = glass_sharp(server);
-	if (sharp != NULL &&
-	    glass->sharp_tiles.ready &&
-	    glass->sharp_tiles.scale == sharp->scale)
-		return &glass->sharp_tiles;
+	if (sharp != NULL) {
+		tiles = &glass->sharp_tiles[sharp - glass->sharp];
+		if (tiles->ready && tiles->scale == sharp->scale)
+			return tiles;
+	}
 
 	/* The tiles at 100 %, once drawn. */
 	if (!glass->tiles.ready)
@@ -5560,6 +5824,70 @@ glass_tiles_for(
 
 	/* Succeeded: the tiles at 100 %. */
 	return &glass->tiles;
+}
+
+/*
+ * Gives the kind of a glyph worker's job for a cell of an atlas: the kind
+ * given for the atlas at 100 %, its sharp kind plus the slot for a sharp
+ * atlas.
+ */
+static unsigned
+glass_job_kind(
+	const struct kwl_glass *glass,
+	const struct glass_atlas *atlas,
+	unsigned kind)
+{
+	unsigned slot;
+
+	/* The atlas at 100 %. */
+	if (atlas == &glass->atlas)
+		return kind;
+
+	/* A sharp atlas: its slot. */
+	slot = (unsigned)(atlas - glass->sharp);
+	if (kind == GLASS_JOB_COLOR)
+		return GLASS_JOB_SHARP_COLOR + slot;
+
+	/* A sharp cell. */
+	return GLASS_JOB_SHARP_CELL + slot;
+}
+
+/*
+ * Starts a drawing for the sharp atlases: the uses from now on are this
+ * drawing's (a slot used in it is not made again in it), and a slot not
+ * used in the last GLASS_SHARP_IDLE_LISTS drawings (its scale shown no
+ * more) is let go, its images once the drawings given before have
+ * completed.
+ */
+static void
+glass_sharp_list_begin(
+	struct kwl_compose *compose,
+	struct kwl_glass *glass)
+{
+	unsigned slot;
+
+	/* The drawing's number and the clock its uses start at. */
+	glass->sharp_list++;
+	glass->sharp_since = glass->sharp_clock + 1U;
+
+	/*
+	 * Each slot unused for long holds nothing from now on; its cells are
+	 * emptied, so that the glyph worker's results for them are not written.
+	 */
+	for (slot = 0U; slot < GLASS_SHARP_SCALES; slot++) {
+		if (glass->sharp[slot].scale == 0U)
+			continue;
+		if (glass->sharp_list - glass->sharp_list_of[slot] <= GLASS_SHARP_IDLE_LISTS)
+			continue;
+		printf("KWL GLASS sharp release scale=%u slot=%u\n", glass->sharp[slot].scale, slot);
+		kwl_host_image_release(compose, &glass->sharp[slot].image);
+		kwl_host_image_release(compose, &glass->sharp_tiles[slot].image);
+		glass->sharp[slot].scale = 0U;
+		memset(glass->sharp[slot].cache, 0, sizeof(glass->sharp[slot].cache));
+		glass->sharp_tiles[slot].ready = 0U;
+		glass->sharp_tiles[slot].scale = 0U;
+		glass->sharp_used[slot] = 0U;
+	}
 }
 
 /*

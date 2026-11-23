@@ -290,13 +290,46 @@ does not stretch it.
 
 | Pane | Setting | Takes effect | Kept in |
 | --- | --- | --- | --- |
-| Hosts | `ssh/config`, edited as text (tabs shown as four spaces; CR LF kept); Save writes it whole and names the first line the SSH client's parser refuses (`line N: ...`), the file kept all the same | the next connection | `ssh/config` |
+| Hosts | `ssh/config`, a host at a time (below); Open in Text Editor for the rest | the next connection | `ssh/config` |
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
 | Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
 | Behavior | copy-on-select | at once | `config/state.conf` |
 | Behavior | `Term`, `ConnectTimeout`, `WslPort` | the next connection | `config/mikuterm.conf` |
 | Behavior | `Connect` | the next start | `config/mikuterm.conf` |
 | Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
+
+Hosts pane:
+
+- The list: each `Host` (its names, and `user@address:port` from its own
+  lines), the lines before any `Host` when there are some, and each `Match`
+  (shown, changed only in a text editor). New host and Add Host put a `Host`
+  block where `ssh` reads it before a block that would win over it: before
+  the first `Host` whose patterns match the name, or the first `Match`, else
+  at the end.
+- The form of the host chosen: Name (`Host`), Host address (`HostName`),
+  Port, User, Command (`RemoteCommand`, as written), Identity files
+  (`IdentityFile`, in order), and Port forwarding (`LocalForward`,
+  `RemoteForward`: where it listens, `[address:]port`, and where it goes,
+  `host:port`, an IPv6 address in brackets). A value that another block
+  earlier in the file sets for the same host says `Overridden by line N`
+  (the first value `ssh` obtains is used); identity files and forwards that
+  other blocks add are shown with their lines. Other lines lists the block's
+  lines the form does not show (comments, other keywords, `Include`, a second
+  line of a keyword that `ssh` passes over).
+- Only the lines a change is about are rewritten: a value in place (the
+  keyword's spelling, `=`, indent and a comment after it kept), a line added
+  after the block's lines (indented as they are, ending CR LF or LF as the
+  line before it), a line taken out. Remove Host takes out the `Host` line and
+  its keywords' lines, and keeps the comments.
+- Save (Ctrl+S) checks the text as a connection reads it and writes nothing
+  when a line it changed cannot be read (`Not saved: line N: ...`); a problem
+  the file had already does not stop it. It does not write over a file
+  changed outside since it was read; Revert (Ctrl+R) reads the file again,
+  the changes not saved dropped.
+- Open in Text Editor opens `ssh/config` (made empty when it is not there) in
+  the editor Windows has for it (its `edit`, else its `open`, else Notepad).
+  The pane does not read the editor's changes until Revert or the next start;
+  connections read the file each time.
 
 Keys pane:
 
