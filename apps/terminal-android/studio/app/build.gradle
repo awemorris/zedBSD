@@ -30,7 +30,11 @@ android {
 		versionName = version_
 
 		ndk {
-			abiFilters += ["arm64-v8a", "armeabi-v7a", "x86", "x86_64", "riscv64"]
+			// When Android Studio injects a target device ABI, AGP only builds that ABI;
+			// skip abiFilters so packageDebug does not warn about the unbuilt ABIs.
+			if (!project.hasProperty("android.injected.build.abi")) {
+				abiFilters += ["arm64-v8a", "armeabi-v7a", "x86", "x86_64", "riscv64"]
+			}
 		}
 		externalNativeBuild {
 			cmake {
