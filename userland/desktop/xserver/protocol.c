@@ -298,6 +298,28 @@ x11_request(
 }
 
 /*
+ * Refuses a request the core does not dispatch (one too long to hold):
+ * its sequence number moves on, and it is answered with the error.
+ */
+void
+x11_request_refuse(
+	struct x11server *server,
+	unsigned index,
+	uint8_t opcode,
+	uint8_t minor,
+	unsigned code)
+{
+	struct x11_client *client;
+
+	/* The request is the client's next, answered with its error. */
+	client = &server->clients[index];
+	client->sequence++;
+	if (opcode < REQUEST_PUT_IMAGE_RGB24)
+		minor = 0U;
+	protocol_error(server, client, code, 0U, opcode, minor);
+}
+
+/*
  * Reads a 16-bit value in a client's byte order.
  */
 uint16_t

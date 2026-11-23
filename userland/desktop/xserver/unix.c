@@ -10,8 +10,8 @@
  * to (/tmp/.X11-unix/X0), and their connections.
  *
  * Every socket is non-blocking.  What a client sends is handed to the core
- * as it comes, but no more than X11_UNIX_WINDOW bytes the core has not yet
- * handled: past that the socket is not read, so a client that sends
+ * as it comes, but no more than the longest request's bytes
+ * (X11SERVER_REQUEST_MAX) that the core has not yet handled: past that the socket is not read, so a client that sends
  * faster than the core works waits in its own writes.  What the core has
  * for a client is sent as far as its socket takes it.  The caller must
  * ignore SIGPIPE: a client that goes away mid-write is found by the next
@@ -33,7 +33,7 @@
 
 /* The most bytes read from a client at once, and the most it may have handed in that the core has not handled. */
 #define UNIX_READ_CHUNK		4096U
-#define UNIX_WINDOW		(1024U * 1024U)
+#define UNIX_WINDOW		X11SERVER_REQUEST_MAX
 
 /*
  * One client's connection: its socket (-1 for a free slot), its number in
@@ -405,13 +405,17 @@ unix_read_one(
 {
 	uint8_t chunk[UNIX_READ_CHUNK];
 	ssize_t count;
+	size_t room;
 	int error;
 
 	/* Everything the socket has, while the core has room. */
 	count = -1;
 	errno = EAGAIN;
 	while (connection->pending < UNIX_WINDOW) {
-		count = recv(connection->fd, chunk, sizeof(chunk), MSG_DONTWAIT);
+		room = UNIX_WINDOW - connection->pending;
+		if (room > sizeof(chunk))
+			room = sizeof(chunk);
+		count = recv(connection->fd, chunk, room, MSG_DONTWAIT);
 		if (count <= 0)
 			break;
 

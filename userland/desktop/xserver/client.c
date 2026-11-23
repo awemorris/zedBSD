@@ -704,6 +704,7 @@ server_handle(
 	uint16_t units;
 	uint8_t opcode;
 	size_t handled;
+	size_t dropped;
 	size_t need;
 	size_t length;
 	int whole;
@@ -717,6 +718,21 @@ server_handle(
 			break;
 		if (client->ending)
 			return 0;
+
+		/* The bytes of a request refused for its length go as they come. */
+		if (client->discard > 0U) {
+			dropped = client->used;
+			if (dropped > client->discard)
+				dropped = client->discard;
+			memmove(client->input, client->input + dropped, client->used - dropped);
+			client->used -= dropped;
+			client->consumed += dropped;
+			client->discard -= dropped;
+			handled += dropped;
+			if (client->discard > 0U)
+				return 0;
+			continue;
+		}
 
 		/* The setup, answered whole or not at all. */
 		if (!client->setup) {
@@ -746,11 +762,18 @@ server_handle(
 				if (client->used < 8U)
 					return 0;
 				words = x11_read32(client->input + 4, client->order);
-				if (words < 2U || words > X11_INPUT_CAP / 4U) {
+				if (words < 2U) {
 					x11_client_close(server, index);
 					return 0;
 				}
 				need = (size_t)words * 4U;
+
+				/* Longer than the core holds: refused, and its bytes dropped as they come. */
+				if (words > X11_INPUT_CAP / 4U) {
+					x11_request_refuse(server, index, client->input[0], client->input[1], X11_BAD_LENGTH);
+					client->discard = need;
+					continue;
+				}
 			}
 
 			/* The whole request. */
