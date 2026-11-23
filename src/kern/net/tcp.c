@@ -10305,10 +10305,9 @@ tcp_segment_input(
 
 		/*
 		 * New data for a connection whose file is closed, before the
-		 * peer's FIN, has no reader: the peer is told so with a reset,
-		 * and the connection is dropped (RFC 9293 section 3.10.4, the
-		 * sender of a reset to data after CLOSE; RFC 1122 section
-		 * 4.2.2.13).
+		 * peer's FIN, has no reader: the peer is told with a reset that
+		 * it was lost, and the connection is dropped (RFC 1122 section
+		 * 4.2.2.13, the half-duplex close).
 		 *
 		 * Procedure referenced: FreeBSD 14.1 sys/netinet/tcp_input.c
 		 * (tcp_do_segment: new data for a socket without a file
