@@ -128,6 +128,7 @@ android_places_unpack(
 	char *list;
 	char *line;
 	char *next;
+	size_t line_length;
 	AAsset *asset;
 	off_t length;
 	FILE *file;
@@ -186,6 +187,9 @@ android_places_unpack(
 			*next++ = '\0';
 		else
 			next = line + strlen(line);
+		line_length = strlen(line);
+		while (line_length > 0U && line[line_length - 1U] == '\r')
+			line[--line_length] = '\0';
 		if (line[0] == '\0')
 			continue;
 		error = places_copy(activity->assetManager, line);

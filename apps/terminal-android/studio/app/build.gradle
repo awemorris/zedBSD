@@ -30,11 +30,15 @@ android {
 		versionName = version_
 
 		ndk {
-			abiFilters += ["arm64-v8a", "x86_64"]
+			// When Android Studio injects a target device ABI, AGP only builds that ABI;
+			// skip abiFilters so packageDebug does not warn about the unbuilt ABIs.
+			if (!project.hasProperty("android.injected.build.abi")) {
+				abiFilters += ["arm64-v8a", "armeabi-v7a", "x86", "x86_64", "riscv64"]
+			}
 		}
 		externalNativeBuild {
 			cmake {
-				arguments "-DMIKUTERM_ROOT=${rootDir_.canonicalPath}",
+				arguments "-DMIKUTERM_ROOT=${rootDir_.canonicalPath.replace('\\', '/')}",
 					"-DMIKUTERM_VERSION=${version_}"
 			}
 		}
@@ -95,6 +99,7 @@ def configureShare = tasks.register("configureShareAssets", Exec) {
 	doFirst {
 		commandLine cmakeTool("cmake"), "-S", terminalDir.path, "-B", shareDir.get().asFile.path,
 			"-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=${cmakeTool("ninja")}",
+			"-DMIKUTERM_ASSETS_ONLY=ON",
 			"-DANDROID_SDK_ROOT=${sdk.get().asFile.path}", "-DANDROID_NDK_ROOT=${ndk.get().asFile.path}"
 	}
 }

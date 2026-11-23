@@ -15,6 +15,7 @@ project(mikuterm-native LANGUAGES C)
 if(NOT MIKUTERM_ROOT)
 	get_filename_component(MIKUTERM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 endif()
+file(TO_CMAKE_PATH "${MIKUTERM_ROOT}" MIKUTERM_ROOT)
 
 # The trial body of the native thread, which paints the window one colour (MIKUTERM_ANDROID_HELLO),
 # and the connection that shows back what is typed (MIKUTERM_ANDROID_ECHO), for trying the terminal
