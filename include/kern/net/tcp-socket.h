@@ -24,7 +24,13 @@ enum tcp_state {
 	TCP_FIN_WAIT_2,
 	TCP_CLOSE_WAIT,
 	TCP_LAST_ACK,
-	TCP_TIME_WAIT
+	TCP_TIME_WAIT,
+	/*
+	 * Both ends closed at once (RFC 9293 section 3.6): the peer's FIN came
+	 * before it acknowledged this end's, which TIME_WAIT then waits for.
+	 * Last, so the values net.tcpstats reports for the others stay.
+	 */
+	TCP_CLOSING
 };
 
 /*
