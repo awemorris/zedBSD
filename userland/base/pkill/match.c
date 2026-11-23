@@ -199,11 +199,13 @@ pkill_run(
 	/* Starts from the defaults: TERM, one process ID to a line. */
 	memset(&request, 0, sizeof(request));
 	request.program = program;
+	request.signal_number = SIGTERM;
+	request.delimiter = "\n";
+
+	/* Names the program in its messages. */
 	request.name = "pgrep";
 	if (program == PKILL_PROGRAM_PKILL)
 		request.name = "pkill";
-	request.signal_number = SIGTERM;
-	request.delimiter = "\n";
 
 	/* Takes pkill's signal, which comes before the options. */
 	consumed = 0;
@@ -557,6 +559,8 @@ pkill_compile_patterns(
 	flags = REG_EXTENDED;
 	if (!request->exact)
 		flags |= REG_NOSUB;
+
+	/* -i compares without regard to case. */
 	if (request->ignore_case)
 		flags |= REG_ICASE;
 
@@ -785,11 +789,16 @@ pkill_exclude(
 	/* Follows the parents up from the caller's, at most once round the snapshot. */
 	pid = (long)getppid();
 	for (steps = 0; steps < count; steps++) {
+		/* The kernel is the parent of the first processes. */
 		if (pid <= 0)
 			break;
+
+		/* An ancestor that is not in the snapshot ends the line. */
 		position = pkill_find(processes, count, pid);
 		if (position < 0)
 			break;
+
+		/* Leaves the ancestor out and goes on to its parent. */
 		excluded[position] = 1;
 		pid = (long)processes[position].info.ppid;
 	}
