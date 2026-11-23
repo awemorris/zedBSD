@@ -500,8 +500,10 @@ thread_choose(
 		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
 	}
 
-	/* WSL, GitHub Codespaces (on Windows, where gh runs) and the settings after the hosts; with no host, how to type one. */
+	/* WSL (not on Linux), GitHub Codespaces (on Windows, where gh runs) and the settings after the hosts; with no host, how to type one. */
+#ifndef MIKUTERM_LINUX
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
+#endif
 #ifdef _WIN32
 	(void)launch_add(&choice->screen, "c", LAUNCH_CODESPACES, "GitHub Codespaces", NULL);
 #endif

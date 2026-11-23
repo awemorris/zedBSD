@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=mikuterm
+GenericName=SSH Terminal
+Comment=Terminal whose tabs are SSH connections
+Exec=mikuterm
+Icon=io.noctvm.mikuterm
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;RemoteAccess;
+Keywords=ssh;terminal;remote;shell;
+StartupWMClass=io.noctvm.mikuterm
+StartupNotify=true
