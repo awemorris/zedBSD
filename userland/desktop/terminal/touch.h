@@ -6,15 +6,14 @@
  */
 
 /*
- * The touch screen of the terminal (ws081-p011, plan/ws081/design.md
- * section 5): one finger (or two) scrolls the scrollback smoothly, a pixel
- * at a time, and a flick glides on (libkeiland's kl_scroll, ws090-p015;
+ * The touch screen of the terminal: one finger (or two) scrolls the
+ * scrollback smoothly, a pixel at a time, and a flick glides on (libkeiland's kl_scroll;
  * past the live screen or the oldest line kept it stretches and springs
  * back); a touch catches it.  A tap is a click of the left button, a
  * double tap selects a word, and a long press holds the button there
  * (TERMINAL_TOUCH_HOLD: the main loop selects the word under the finger,
- * or, on the selection, holds a press that drags the selected text out,
- * ws081-p014); the finger's drag after it moves the pointer (the pointer's
+ * or, on the selection, holds a press that drags the selected text out);
+ * the finger's drag after it moves the pointer (the pointer's
  * selection, fed with the presses and motions made here).
  *
  * Nothing here speaks Wayland or Vulkan: the window queues the wl_touch
@@ -36,7 +35,7 @@
 #define TERMINAL_TOUCH_CANCEL	3U
 
 /*
- * A touch pad's two fingers (ws090-p019): a move of the scroll (x, y as a
+ * A touch pad's two fingers: a move of the scroll (x, y as a
  * wheel scrolls, surface pixels) and their lift, which the scroll turns
  * into the same flight as a finger's on the screen.
  */

@@ -67,8 +67,12 @@
  * window), so each is told once; report_posted says a report waits in the
  * message queue.  The DIB holds the X pixels scaled to the screen
  * while the window is shown through GDI; vulkan says the core shows it
- * through a Vulkan surface instead.  Surfaces are linked from the
- * backend's list.
+ * through a Vulkan surface instead.  hints are the limits on the X
+ * window's size, which the window's frame keeps while the user sizes it.
+ * state is whether the window is maximized and full-screen
+ * (X11_SURFACE_MAXIMIZED, FULLSCREEN) as last shown or told the core;
+ * a full-screen window keeps its style and place from before to go back
+ * to.  Surfaces are linked from the backend's list.
  */
 struct x11_surface {
 	struct x11_win32 *backend;
@@ -89,6 +93,10 @@ struct x11_surface {
 	struct x11_surface *owner;
 	int iconic;
 	int vulkan;
+	struct x11_size_hints hints;
+	unsigned state;
+	LONG_PTR windowed_style;
+	RECT windowed_rect;
 
 	/* The cursor shown over it (NULL: the arrow), and whether the backend made it (and frees it). */
 	HCURSOR cursor;
@@ -179,6 +187,7 @@ void win32_input_release_keys(struct x11_win32 *backend);
 void win32_input_pointer(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
 void win32_input_leave(struct x11_surface *surface);
 void win32_input_capture(void *context, struct x11_surface *surface, int on);
+void win32_input_capture_changed(struct x11_surface *surface, HWND taker);
 int win32_input_place(void *context, int *x, int *y);
 int win32_input_warp(void *context, int x, int y);
 void win32_input_bell(void *context, int percent);

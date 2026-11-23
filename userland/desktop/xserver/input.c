@@ -417,9 +417,11 @@ x11_input_keymap(
 
 /*
  * Gives the focus to a top-level window the user chose (a click, or the
- * system's activation), as its window manager does: not to an
- * override-redirect window, nor to one whose WM_HINTS say it takes no
- * input.
+ * system's activation), as its window manager does by ICCCM's input
+ * models: the focus moves to a window whose WM_HINTS do not say it takes
+ * no input, and a window that names WM_TAKE_FOCUS in its WM_PROTOCOLS is
+ * asked to take it.  An override-redirect window, and a window that does
+ * neither, is left alone, and so is a window the focus is already in.
  */
 void
 x11_input_focus_top_level(
@@ -427,21 +429,38 @@ x11_input_focus_top_level(
 	struct x11_window *window,
 	uint32_t time)
 {
+	struct x11_window *focus;
 	uint32_t when;
 	int accepts;
+	int asks;
+	int inside;
 
-	/* A window that takes no focus. */
+	/* A menu or a tooltip never takes the focus. */
+	if (window->override_redirect)
+		return;
+
+	/* Whether the window takes the focus from its window manager, and whether it wants to be asked. */
 	accepts = input_accepts_focus(server, window);
-	if (!accepts)
+	asks = x11_wm_protocol(server, window, server->wm.take_focus);
+	if (!accepts && !asks)
 		return;
 
-	/* Nothing changes when it has it. */
-	if (server->focus == window->id)
-		return;
+	/* Nothing changes when the focus is already in it (a client may keep it on a child). */
+	focus = x11_window_find(server, server->focus);
+	if (focus != NULL) {
+		inside = x11_window_inferior(focus, window);
+		if (inside)
+			return;
+	}
 
-	/* Succeeded: the focus moves, back to the pointer's window should the window go. */
+	/* The focus moves, back to the pointer's window should the window go. */
 	when = input_time(server, time);
-	input_set_focus(server, window->id, REVERT_POINTER_ROOT, when);
+	if (accepts)
+		input_set_focus(server, window->id, REVERT_POINTER_ROOT, when);
+
+	/* Succeeded: a window that wants to be asked is. */
+	if (asks)
+		x11_wm_take_focus(server, window, when);
 }
 
 /*
@@ -469,6 +488,31 @@ x11_input_focus_lost(
 	/* Succeeded: None. */
 	when = input_time(server, time);
 	input_set_focus(server, X11_FOCUS_NONE, REVERT_NONE, when);
+}
+
+/*
+ * Hears that the system took the pointer's capture away (another program
+ * was activated): a client's active grab of the pointer ends, as if it
+ * let go, since its window no longer hears the pointer outside the X
+ * windows.  An implicit grab ends with the releases the backend reports.
+ */
+void
+x11_input_capture_lost(
+	struct x11server *server,
+	uint32_t time)
+{
+	uint32_t when;
+
+	/* No grab, or the one a button's press started. */
+	if (server->pointer_grab.client == X11_NO_CLIENT)
+		return;
+	if (server->pointer_grab.implicit)
+		return;
+
+	/* Succeeded: the grab ends, and the events its thaw let go are handled. */
+	when = input_time(server, time);
+	input_pointer_grab_end(server, when);
+	input_drain(server);
 }
 
 /*
@@ -1657,8 +1701,11 @@ input_set_focus(
 	server->focus_revert = revert;
 	server->focus_time = time;
 
-	/* Succeeded: the events of the change. */
+	/* The events of the change. */
 	input_focus_change(server, old, focus, mode);
+
+	/* Succeeded: the window manager names the active window. */
+	x11_wm_focus_changed(server);
 }
 
 /*

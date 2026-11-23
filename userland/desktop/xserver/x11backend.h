@@ -17,10 +17,13 @@
  * cursor shown over a surface.  The
  * backend calls the core with what its system reports: keys (by their
  * place on the keyboard), the keyboard's map, the pointer, a window
- * entered and left, given a size, asked to close or minimized, and
+ * entered and left, given a size, asked to close, minimized, maximized or
+ * made full-screen, the pointer's capture taken by another program, and
  * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server).  zedBSD's backend is the Wayland desktop (wayland.c).
+ * server).  The core is the X windows' window manager (wm.c): it decides
+ * what a close means to the X client and keeps ICCCM's and EWMH's state
+ * of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
  */
 
 #ifndef KEILAND_X11BACKEND_H
@@ -43,15 +46,34 @@
 /* No place: the system places the surface, or does not say where it is (x11server_backend_configure). */
 #define X11_SURFACE_ANY		INT32_MIN
 
-/* The state of a surface: minimized (ICCCM's Iconic). */
+/*
+ * The state of a surface: minimized (ICCCM's Iconic), maximized and
+ * full-screen (EWMH's _NET_WM_STATE).  The core gives it in an update's
+ * flags; the backend tells the core the state the system or the user gave
+ * the surface (x11server_backend_state).
+ */
 #define X11_SURFACE_ICONIC	(1U << 0)
+#define X11_SURFACE_MAXIMIZED	(1U << 1)
+#define X11_SURFACE_FULLSCREEN	(1U << 2)
 
-/* What an update of a surface changes: its size, its place on the root window, its title, its owner, its state. */
+/*
+ * What an update of a surface changes: its size, its place on the root
+ * window, its title, its owner, its state, and the limits on its size.
+ */
 #define X11_SURFACE_CHANGED_SIZE	(1U << 0)
 #define X11_SURFACE_CHANGED_POSITION	(1U << 1)
 #define X11_SURFACE_CHANGED_TITLE	(1U << 2)
 #define X11_SURFACE_CHANGED_OWNER	(1U << 3)
 #define X11_SURFACE_CHANGED_FLAGS	(1U << 4)
+#define X11_SURFACE_CHANGED_HINTS	(1U << 5)
+
+/*
+ * The core is the top-level windows' window manager: a surface's info
+ * carries the limits on its size (struct x11_size_hints), its state may
+ * be maximized or full-screen, and the backend tells the core when the
+ * system took the pointer's capture away (x11server_backend_capture_lost).
+ */
+#define X11_BACKEND_WM	1
 
 /* The selections the clipboard passes across: X's CLIPBOARD and PRIMARY. */
 #define X11_SELECTION_CLIPBOARD	0U
@@ -109,11 +131,35 @@ struct x11_keymap {
 };
 
 /*
+ * The limits a client puts on its top-level window's size (ICCCM's
+ * WM_NORMAL_HINTS), in X's pixels, which the system keeps while the user
+ * sizes the window: the smallest and largest size (0: no limit), the base
+ * size and the steps the size grows in from it (a terminal's character
+ * cells; 0 or 1: any size), and the smallest and largest ratio of width to
+ * height, each as two numbers (0: no limit).  The core fills it with the
+ * defaults ICCCM gives a field the client left out.
+ */
+struct x11_size_hints {
+	unsigned min_width;
+	unsigned min_height;
+	unsigned max_width;
+	unsigned max_height;
+	unsigned base_width;
+	unsigned base_height;
+	unsigned width_inc;
+	unsigned height_inc;
+	unsigned min_aspect_x;
+	unsigned min_aspect_y;
+	unsigned max_aspect_x;
+	unsigned max_aspect_y;
+};
+
+/*
  * What a surface shows: its kind, its X window's place on the root window
  * and size (X's pixels), its title (UTF-8), the X client's class (NULL:
  * none; the backend names it itself), the surface of the top-level window
- * it is transient for (WM_TRANSIENT_FOR; NULL: none) and its state
- * (X11_SURFACE_ICONIC).
+ * it is transient for (WM_TRANSIENT_FOR; NULL: none), its state
+ * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) and the limits on its size.
  */
 struct x11_surface_info {
 	unsigned kind;
@@ -125,6 +171,7 @@ struct x11_surface_info {
 	const char *class_name;
 	struct x11_surface *owner;
 	unsigned flags;
+	struct x11_size_hints hints;
 };
 
 /*
@@ -233,8 +280,12 @@ void x11server_backend_enter(struct x11server *server, uint32_t window, int keyb
 void x11server_backend_leave(struct x11server *server, uint32_t window, int keyboard);
 void x11server_backend_configure(struct x11server *server, uint32_t window, int32_t x, int32_t y, int width, int height);
 void x11server_backend_close(struct x11server *server, uint32_t window);
-void x11server_backend_state(struct x11server *server, uint32_t window, int iconic);
+void x11server_backend_state(struct x11server *server, uint32_t window, int state);
+void x11server_backend_capture_lost(struct x11server *server, uint32_t time);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
+
+/* What the core gives the backend: a size within a surface's limits. */
+void x11server_size_hints_apply(const struct x11_size_hints *hints, unsigned *width, unsigned *height);
 
 /* The keyboard's map of the US layout by evdev key codes (the core's own until a backend gives one). */
 void x11_keymap_us(struct x11_keymap *keymap);
