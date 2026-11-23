@@ -518,6 +518,40 @@ x11_render_picture_clip(
 }
 
 /*
+ * Copies a picture's client clip into a region (initialized by the
+ * caller), on its clip origin as the client gave it, for XFIXES's
+ * CreateRegionFromPicture.  Returns 0, BadPicture for an id that is no
+ * picture of a drawable, BadMatch for a picture without a client clip, or
+ * BadAlloc.
+ */
+unsigned
+x11_render_picture_region(
+	struct x11server *server,
+	uint32_t id,
+	struct x11_region *region)
+{
+	struct x11_picture *picture;
+	int error;
+
+	/* A picture of a drawable, with a client clip. */
+	picture = render_picture_find(server, id);
+	if (picture == NULL)
+		return RENDER_BAD_PICTURE;
+	if (picture->kind != X11_SOURCE_IMAGE)
+		return RENDER_BAD_PICTURE;
+	if (!picture->clip_set)
+		return X11_BAD_MATCH;
+
+	/* The clip's copy. */
+	error = x11_region_copy(region, &picture->clip);
+	if (error != 0)
+		return X11_BAD_ALLOC;
+
+	/* Succeeded: the region holds the clip. */
+	return 0U;
+}
+
+/*
  * Reads a picture of a drawable as a8r8g8b8 pixels (premultiplied), all
  * of its drawable, for RENDER's CreateCursor: the picture composited with
  * Src onto pixels of its size (a window's that cannot be seen are all
