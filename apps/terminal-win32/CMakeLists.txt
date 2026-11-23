@@ -189,6 +189,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/colornames.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/input.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/font.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/cursor.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xkb.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xinput.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
@@ -200,6 +202,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/keysyms.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/scale.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/text.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/cursor.c
 	${MIKUTERM_DIR}/resources/mikuterm.rc)
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side so

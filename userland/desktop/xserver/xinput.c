@@ -1219,8 +1219,10 @@ xinput_grab_device(
 	const struct xinput_device *device;
 	struct x11_client *client;
 	struct x11_window *window;
+	struct x11_cursor *cursor;
 	struct x11_grab grab;
 	uint8_t reply[32];
+	uint32_t cursor_id;
 	uint32_t time;
 	size_t words;
 	unsigned status;
@@ -1242,13 +1244,19 @@ xinput_grab_device(
 		return X11_XINPUT_ERROR;
 	if (request[18] > XI_GRAB_ASYNC || request[19] > XI_GRAB_ASYNC || request[20] > 1U)
 		return X11_BAD_VALUE;
+	cursor_id = x11_read32(request + 12, msb);
+	if (cursor_id != 0U) {
+		cursor = x11_cursor_find(server, cursor_id);
+		if (cursor == NULL)
+			return X11_BAD_CURSOR;
+	}
 	time = x11_read32(request + 8, msb);
 
 	/* The grab: its modes by the device grabbed and its pair, the extension's events. */
 	memset(&grab, 0, sizeof(grab));
 	grab.client = index;
 	grab.window = window->id;
-	grab.cursor = x11_read32(request + 12, msb);
+	grab.cursor = cursor_id;
 	grab.time = time;
 	if (time == 0U)
 		grab.time = server->now;

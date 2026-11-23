@@ -49,7 +49,14 @@
  * panel's ground, and the new tab's button after them when asked for
  * (frame.c lays them out).  A press on a tab chooses it; a release on a
  * close button or on the new tab's button asks for that
- * (KL_WINDOW_TAB).  The room left beside them stays the caption.  As the
+ * (KL_WINDOW_TAB).  The room left beside them stays the caption.  Tabs
+ * that do not fit at their least width scroll, as on the Keiland desktop:
+ * an arrow at each end moves the strip by a tab (faint and dead at its
+ * end), the wheel over the strip too, and a button after the new tab's
+ * lists the tabs out of sight in a popup.  The strip brings the active tab
+ * into sight when the program makes another tab active, when tabs come or
+ * go, when the room shows another number of tabs, or when the active tab
+ * is chosen again; a change of titles alone leaves it where it was.  As the
  * Keiland desktop's title bar takes its keys for the tabs, Control and the
  * left Alt with a digit of the top row choose the tab of that place (0 the
  * tenth), with Page Up and Page Down the one before and after (around the
@@ -65,10 +72,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The desktop title bar's sizes (96 dpi). */
-#define TITLEBAR_CONTROL	30U
-#define TITLEBAR_GAP		4U
-#define TITLEBAR_SIDE		10U
+/* The desktop title bar's sizes (96 dpi); the room's are frame.c's (keiui_win32_title_room). */
+#define TITLEBAR_CONTROL	KEIUI_WIN32_TITLE_CONTROL
+#define TITLEBAR_GAP		KEIUI_WIN32_TITLE_GAP
+#define TITLEBAR_SIDE		KEIUI_WIN32_TITLE_SIDE
 #define TITLEBAR_ICON		16U
 #define TITLEBAR_PADDING	12U
 #define TITLEBAR_CRUMB_LEAST	120U
@@ -78,7 +85,7 @@
 /* The box's height, its most width, and the least bare title bar it leaves beside it (96 dpi). */
 #define TITLEBAR_CRUMB_HEIGHT	24U
 #define TITLEBAR_CRUMB_MOST	800U
-#define TITLEBAR_DRAG_LEAST	96U
+#define TITLEBAR_DRAG_LEAST	KEIUI_WIN32_TITLE_DRAG_LEAST
 
 /* How deep the submenus of a menu go at most (a table whose parents loop stops there). */
 #define TITLEBAR_MENU_DEPTH	8U
@@ -120,13 +127,20 @@ static int titlebar_popup(struct kl_window *window, const struct keiui_win32_men
 static HMENU titlebar_menu_build(struct kl_window *window, const struct keiui_win32_menu_item *items, unsigned count, uint32_t parent, unsigned depth);
 static int titlebar_menu_item(struct kl_window *window, HMENU menu, const struct keiui_win32_menu_item *items, unsigned count, unsigned index, unsigned depth);
 static void titlebar_menu_open(struct kl_window *window);
-static void titlebar_tabs_layout(struct kl_window *window, int32_t left, int32_t right, uint32_t height);
+static void titlebar_tabs_layout(struct kl_window *window, const struct keiui_win32_title_room *parts, uint32_t width, uint32_t height);
+static unsigned titlebar_active(const struct kl_window *window);
+static unsigned titlebar_part_kept(const struct kl_window *window, const struct keiui_win32_tab *tabs, unsigned count, unsigned part);
+static void titlebar_tab_choose(struct kl_window *window, uint32_t id);
+static void titlebar_scroll_by(struct kl_window *window, int steps);
+static void titlebar_tab_list(struct kl_window *window);
+static void titlebar_tab_label(const struct keiui_win32_tab *tab, unsigned index, char *text, size_t size);
+static void titlebar_strip_draw(struct kl_window *window, struct kl_canvas *canvas);
 static unsigned titlebar_part_at(const struct kl_window *window, int32_t x, int32_t y);
 static void titlebar_tab_input(struct kl_window *window, unsigned code, uint32_t id);
 static void titlebar_menu_draw(struct kl_window *window, struct kl_canvas *canvas);
 static void titlebar_tab_draw(struct kl_window *window, struct kl_canvas *canvas, unsigned index);
 static void titlebar_new_draw(struct kl_window *window, struct kl_canvas *canvas);
-static void titlebar_icon_button(struct kl_window *window, struct kl_canvas *canvas, const struct keiui_win32_rect *place, unsigned part, enum kl_icon icon, uint32_t size);
+static void titlebar_icon_button(struct kl_window *window, struct kl_canvas *canvas, const struct keiui_win32_rect *place, unsigned part, enum kl_icon icon, uint32_t size, int live);
 static uint32_t titlebar_width(struct kl_window *window, const struct keiui_win32_control *control, uint32_t size);
 static unsigned titlebar_pixels(const struct kl_window *window);
 static unsigned titlebar_find(const struct kl_window *window, uint32_t id);
@@ -470,6 +484,9 @@ kl_window_set_tabs(
 	unsigned options)
 {
 	struct keiui_win32_tab *kept;
+	uint32_t active;
+	unsigned hover;
+	unsigned pressed;
 	size_t index;
 
 	/* A window, and tabs that fit, each with an ID. */
@@ -503,14 +520,35 @@ kl_window_set_tabs(
 	if (count != 0U && window->editing)
 		keiui_win32_field_end(window, KL_TEXT_CANCELLED);
 
+	/* The active tab's ID (the first marked; 0 when none is). */
+	active = 0U;
+	for (index = 0U; index < count; index++) {
+		if ((kept[index].flags & KL_TAB_ACTIVE) != 0U && active == 0U)
+			active = kept[index].id;
+	}
+
+	/* Tabs that came or went bring the active tab into sight, and forget the wheel's turn over the old strip. */
+	if ((unsigned)count != window->tab_count) {
+		window->tab_reveal = 1;
+		window->tab_wheel = 0;
+	}
+
+	/* Another active tab is brought into sight; a change of titles alone leaves the strip where it was. */
+	if (active != window->tab_revealed)
+		window->tab_reveal = 1;
+
+	/* What is under the pointer and held stays: the same button, or the tab of the same ID. */
+	hover = titlebar_part_kept(window, kept, (unsigned)count, window->control_hover);
+	pressed = titlebar_part_kept(window, kept, (unsigned)count, window->control_pressed);
+
 	/* They replace the tabs shown. */
 	free(window->tabs);
 	window->tabs = kept;
 	window->tab_count = (unsigned)count;
 	window->tab_options = options;
 	window->tabs_declared = 1;
-	window->control_hover = KEIUI_WIN32_NO_CONTROL;
-	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	window->control_hover = hover;
+	window->control_pressed = pressed;
 	titlebar_changed(window);
 
 	/* Succeeded. */
@@ -563,7 +601,6 @@ keiui_win32_tab_key(
 	unsigned request;
 	unsigned active;
 	unsigned target;
-	unsigned index;
 
 	/* Only for a program that has tabs. */
 	if (!window->tabs_declared)
@@ -575,21 +612,89 @@ keiui_win32_tab_key(
 		return 0;
 
 	/* The active tab (tab_count when none is marked). */
-	active = window->tab_count;
-	for (index = 0U; index < window->tab_count; index++) {
-		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U && active == window->tab_count)
-			active = index;
-	}
+	active = titlebar_active(window);
 
-	/* The tab it goes to; none, or the active one, leaves the tabs as they are. */
+	/* The tab it goes to; none leaves the tabs as they are. */
 	target = keiui_win32_tab_target(request, window->tab_count, active);
-	if (target >= window->tab_count || target == active)
+	if (target >= window->tab_count)
 		return 1;
+
+	/* The active tab chosen again is only brought into sight (the program hears nothing). */
+	if (target == active) {
+		titlebar_tab_choose(window, window->tabs[target].id);
+		return 1;
+	}
 
 	/* Chosen as its click would (the program's next tabs show it). */
 	titlebar_tab_input(window, KL_WINDOW_TAB_CHOSEN, window->tabs[target].id);
 
 	/* Succeeded: the key was the tabs'. */
+	return 1;
+}
+
+/*
+ * Takes a wheel's turn (WM_MOUSEWHEEL, or WM_MOUSEHWHEEL when horizontal is
+ * not 0) that is the title bar's: over a scrolling tab strip it moves the
+ * strip by a tab a notch; anywhere on the title bar it never reaches the
+ * content.  Returns 1 when the turn was the title bar's, 0 when it is the
+ * content's.
+ */
+int
+keiui_win32_titlebar_wheel(
+	struct kl_window *window,
+	WPARAM wparam,
+	LPARAM lparam,
+	int horizontal)
+{
+	POINT point;
+	HWND under;
+	unsigned part;
+	unsigned whose;
+	int on_frame;
+	int on_strip;
+	int scrolling;
+	int delta;
+	int steps;
+
+	/* The window under the point (the frame's own pixels, not its content's nor another window's). */
+	point.x = (LONG)(short)LOWORD(lparam);
+	point.y = (LONG)(short)HIWORD(lparam);
+	under = WindowFromPoint(point);
+	on_frame = 0;
+	if (under == window->frame)
+		on_frame = 1;
+
+	/* The point on the frame's client, and the part of the strip there. */
+	(void)ScreenToClient(window->frame, &point);
+	part = titlebar_part_at(window, (int32_t)point.x, (int32_t)point.y);
+	on_strip = 0;
+	if (part == KEIUI_WIN32_TAB_NEW_BUTTON ||
+	    part == KEIUI_WIN32_TAB_BACK_BUTTON ||
+	    part == KEIUI_WIN32_TAB_FORWARD_BUTTON ||
+	    part == KEIUI_WIN32_TAB_LIST_BUTTON)
+		on_strip = 1;
+	if (part >= KEIUI_WIN32_TAB_BODY && part < KEIUI_WIN32_TAB_BODY + window->tab_count)
+		on_strip = 1;
+	if (part >= KEIUI_WIN32_TAB_CLOSE_BUTTON && part < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count)
+		on_strip = 1;
+
+	/* Whether the strip scrolls at all. */
+	scrolling = 0;
+	if (window->tab_count != 0U && window->tab_scroll.mode == KEIUI_WIN32_STRIP_SCROLL)
+		scrolling = 1;
+
+	/* Whose the turn is, and the tabs it moves the strip by. */
+	delta = (int)(short)HIWORD(wparam);
+	whose = keiui_win32_tab_wheel(on_frame, (int32_t)point.y, keiui_win32_caption_pixels(window), on_strip, scrolling, horizontal, delta,
+	    &window->tab_wheel, &steps);
+	if (whose == KEIUI_WIN32_WHEEL_CONTENT)
+		return 0;
+
+	/* The strip moved by the whole notches. */
+	if (steps != 0)
+		titlebar_scroll_by(window, steps);
+
+	/* Succeeded: the turn was the title bar's. */
 	return 1;
 }
 
@@ -622,8 +727,9 @@ keiui_win32_titlebar_layout(
 	uint32_t height)
 {
 	struct keiui_win32_frame frame;
-	struct keiui_win32_rect buttons[3];
+	struct keiui_win32_title_room parts;
 	struct keiui_win32_control *control;
+	int has_menu;
 	uint32_t size;
 	uint32_t gap;
 	uint32_t room;
@@ -644,7 +750,7 @@ keiui_win32_titlebar_layout(
 	unsigned control_side;
 	unsigned control_state;
 
-	/* The room between the left edge and the caption buttons. */
+	/* The room between the left edge and the caption buttons, after the menu's button (a square like a control's) when there is a menu. */
 	memset(&frame, 0, sizeof(frame));
 	frame.width = width;
 	frame.height = height;
@@ -652,29 +758,23 @@ keiui_win32_titlebar_layout(
 	frame.maximized = window->maximized;
 	frame.fullscreen = window->fullscreen;
 	frame.caption_height = KEIUI_WIN32_CAPTION;
-	keiui_win32_frame_buttons(&frame, buttons);
+	has_menu = 0;
+	if (window->menu_count != 0U)
+		has_menu = 1;
+	keiui_win32_title_room(&frame, height, has_menu, &parts);
+	window->menu_place = parts.menu;
 	size = keiui_win32_scale(TITLEBAR_CONTROL, window->dpi);
 	gap = keiui_win32_scale(TITLEBAR_GAP, window->dpi);
 	margin = (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
-	left = margin;
-	right = buttons[KEIUI_WIN32_BUTTON_MINIMIZE_INDEX].x - margin;
+	left = parts.left;
+	right = parts.right;
 	y = ((int32_t)height - (int32_t)size) / 2;
-
-	/* The menu's button first at the left, a square like a control's. */
-	memset(&window->menu_place, 0, sizeof(window->menu_place));
-	if (window->menu_count != 0U) {
-		window->menu_place.x = left;
-		window->menu_place.y = y;
-		window->menu_place.width = size;
-		window->menu_place.height = size;
-		left += (int32_t)(size + gap);
-	}
 
 	/* Tabs take the controls' place, up to the bare title bar left to drag the window by. */
 	if (window->tab_count != 0U) {
 		for (index = 0U; index < window->control_count; index++)
 			window->controls[index].shown = 0;
-		titlebar_tabs_layout(window, left, right, height);
+		titlebar_tabs_layout(window, &parts, width, height);
 		return;
 	}
 
@@ -849,11 +949,12 @@ keiui_win32_titlebar_draw(
 	if (window->menu_count != 0U)
 		titlebar_menu_draw(window, canvas);
 
-	/* The tabs in place of the controls and the title. */
+	/* The tabs in place of the controls and the title, with the strip's buttons. */
 	if (window->tab_count != 0U) {
 		for (index = 0U; index < window->tab_count; index++)
 			titlebar_tab_draw(window, canvas, index);
 		titlebar_new_draw(window, canvas);
+		titlebar_strip_draw(window, canvas);
 		return;
 	}
 
@@ -925,9 +1026,12 @@ keiui_win32_titlebar_press(
 		return;
 	}
 
-	/* The menu's button and the tabs' buttons are held until their release. */
+	/* The menu's button and the tabs' buttons (the strip's arrows and its list's too) are held until their release. */
 	if (index == KEIUI_WIN32_MENU_BUTTON ||
 	    index == KEIUI_WIN32_TAB_NEW_BUTTON ||
+	    index == KEIUI_WIN32_TAB_BACK_BUTTON ||
+	    index == KEIUI_WIN32_TAB_FORWARD_BUTTON ||
+	    index == KEIUI_WIN32_TAB_LIST_BUTTON ||
 	    (index >= KEIUI_WIN32_TAB_CLOSE_BUTTON &&
 	     index < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count)) {
 		window->control_pressed = index;
@@ -981,6 +1085,22 @@ keiui_win32_titlebar_release(
 	/* The new tab's button asks for a tab. */
 	if (index == KEIUI_WIN32_TAB_NEW_BUTTON) {
 		titlebar_tab_input(window, KL_WINDOW_TAB_NEW, 0U);
+		return;
+	}
+
+	/* An arrow moves the scrolling strip by a tab its way. */
+	if (index == KEIUI_WIN32_TAB_BACK_BUTTON) {
+		titlebar_scroll_by(window, -1);
+		return;
+	}
+	if (index == KEIUI_WIN32_TAB_FORWARD_BUTTON) {
+		titlebar_scroll_by(window, 1);
+		return;
+	}
+
+	/* The list's button opens the list of the tabs out of sight below it. */
+	if (index == KEIUI_WIN32_TAB_LIST_BUTTON) {
+		titlebar_tab_list(window);
 		return;
 	}
 
@@ -1891,40 +2011,43 @@ titlebar_menu_open(
 }
 
 /*
- * Lays the tabs out from a left edge, leaving the bare title bar before a
- * right edge to drag the window by, and keeps the menu's button and the
- * tab strip as the hit test's client places.
+ * Lays the tabs out in the strip's room (from the left to the bare title
+ * bar left to drag the window by), from the first tab the arrows and the
+ * wheel left a scrolling strip at, and keeps the menu's button and the tab
+ * strip as the hit test's client places.  A frame of some width brings
+ * the active tab into sight when it is asked for or when the strip shows
+ * another number of tabs; a frame of none (minimized) leaves the scroll
+ * for the next.
  */
 static void
 titlebar_tabs_layout(
 	struct kl_window *window,
-	int32_t left,
-	int32_t right,
+	const struct keiui_win32_title_room *parts,
+	uint32_t width,
 	uint32_t height)
 {
 	struct keiui_win32_tab_place places[KEIUI_WIN32_TABS];
 	struct keiui_win32_tab_strip strip;
+	struct keiui_win32_tab_scroll scroll;
 	struct keiui_win32_rect *place;
 	int closable[KEIUI_WIN32_TABS];
 	int32_t end;
+	unsigned active;
 	unsigned index;
 
 	/* The strip's room, and which tab is active. */
 	memset(&strip, 0, sizeof(strip));
-	strip.left = left;
-	strip.right = right - (int32_t)keiui_win32_scale(TITLEBAR_DRAG_LEAST, window->dpi);
-	if (strip.right < left)
-		strip.right = left;
+	strip.left = parts->left;
+	strip.right = parts->strip_right;
 	strip.caption = height;
 	strip.dpi = window->dpi;
 	strip.count = window->tab_count;
-	strip.active = window->tab_count;
+	active = titlebar_active(window);
+	strip.active = active;
 	for (index = 0U; index < window->tab_count; index++) {
 		closable[index] = 0;
 		if ((window->tabs[index].flags & KL_TAB_CLOSABLE) != 0U)
 			closable[index] = 1;
-		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U)
-			strip.active = index;
 	}
 
 	/* The new-tab button when the window asked for one. */
@@ -1932,10 +2055,35 @@ titlebar_tabs_layout(
 	if ((window->tab_options & KL_TABS_NEW_BUTTON) != 0U)
 		strip.new_button = 1;
 
-	/* The tabs' places, kept with them. */
-	end = keiui_win32_tabs_layout(&strip, closable, places, &window->tab_new_place);
+	/* The tabs' places from the first tab the strip was left at. */
+	strip.first = window->tab_first;
+	strip.reveal = 0;
+	end = keiui_win32_tabs_layout_scroll(&strip, closable, places, &window->tab_new_place, &scroll);
+
+	/* A frame of some width moves the strip to the active tab when asked to, or when it shows another number of tabs. */
+	if (width != 0U) {
+		if (window->tab_reveal || scroll.shown != window->tab_shown_last) {
+			strip.reveal = 1;
+			end = keiui_win32_tabs_layout_scroll(&strip, closable, places, &window->tab_new_place, &scroll);
+		}
+
+		/* Another number of tabs shown is another strip: the wheel's turn over the old one is forgotten. */
+		if (scroll.shown != window->tab_shown_last)
+			window->tab_wheel = 0;
+
+		/* The strip as it is now is where the arrows start from, and the active tab is in sight. */
+		window->tab_first = scroll.first;
+		window->tab_shown_last = scroll.shown;
+		window->tab_reveal = 0;
+		window->tab_revealed = 0U;
+		if (active < window->tab_count)
+			window->tab_revealed = window->tabs[active].id;
+	}
+
+	/* The tabs' places and the strip's, kept for the hit test and the drawing. */
 	for (index = 0U; index < window->tab_count; index++)
 		window->tabs[index].place = places[index];
+	window->tab_scroll = scroll;
 
 	/* The hit test's client: the menu's button, and the strip from its left to its end. */
 	window->control_place_count = 0U;
@@ -1946,11 +2094,11 @@ titlebar_tabs_layout(
 
 	/* The window's controls, after the menu. */
 	place = &window->control_places[window->control_place_count];
-	place->x = left;
+	place->x = parts->left;
 	place->y = 0;
 	place->width = 0U;
-	if (end > left)
-		place->width = (uint32_t)(end - left);
+	if (end > parts->left)
+		place->width = (uint32_t)(end - parts->left);
 	place->height = height;
 	window->control_place_count++;
 }
@@ -1984,19 +2132,309 @@ titlebar_part_at(
 	if (window->tab_count == 0U)
 		return KEIUI_WIN32_NO_CONTROL;
 
-	/* The tab or the button there. */
+	/* The tab or the button there, the strip's arrows and its list's button included. */
 	for (index = 0U; index < window->tab_count; index++)
 		places[index] = window->tabs[index].place;
-	index = keiui_win32_tabs_at(places, window->tab_count, &window->tab_new_place, x, y, &part);
+	index = keiui_win32_tabs_at_scroll(places, window->tab_count, &window->tab_new_place, &window->tab_scroll, x, y, &part);
 	if (index == KEIUI_WIN32_TAB_NONE)
 		return KEIUI_WIN32_NO_CONTROL;
 
-	/* Which of a tab, or the new tab's button. */
-	if (part == KEIUI_WIN32_TAB_PART_NEW)
+	/* Which of a tab, its close button, or one of the strip's buttons. */
+	switch (part) {
+	case KEIUI_WIN32_TAB_PART_NEW:
 		return KEIUI_WIN32_TAB_NEW_BUTTON;
-	if (part == KEIUI_WIN32_TAB_PART_CLOSE)
+	case KEIUI_WIN32_TAB_PART_BACK:
+		return KEIUI_WIN32_TAB_BACK_BUTTON;
+	case KEIUI_WIN32_TAB_PART_FORWARD:
+		return KEIUI_WIN32_TAB_FORWARD_BUTTON;
+	case KEIUI_WIN32_TAB_PART_LIST:
+		return KEIUI_WIN32_TAB_LIST_BUTTON;
+	case KEIUI_WIN32_TAB_PART_CLOSE:
 		return KEIUI_WIN32_TAB_CLOSE_BUTTON + index;
+	default:
+		break;
+	}
+
+	/* The tab itself. */
 	return KEIUI_WIN32_TAB_BODY + index;
+}
+
+/* The active tab: the first marked so (the keys' and the strip's), or tab_count when none is. */
+static unsigned
+titlebar_active(
+	const struct kl_window *window)
+{
+	unsigned index;
+
+	/* The first tab marked active. */
+	for (index = 0U; index < window->tab_count; index++) {
+		if ((window->tabs[index].flags & KL_TAB_ACTIVE) != 0U)
+			return index;
+	}
+
+	/* None is. */
+	return window->tab_count;
+}
+
+/*
+ * Tells what a part of the title bar under the pointer or held is among
+ * new tabs: a button of the menu or the strip stays, a tab or its close
+ * button is the one of the same ID (none when it went), anything else is
+ * none (the controls the tabs replace, or everything when no tab is left).
+ */
+static unsigned
+titlebar_part_kept(
+	const struct kl_window *window,
+	const struct keiui_win32_tab *tabs,
+	unsigned count,
+	unsigned part)
+{
+	uint32_t id;
+	unsigned base;
+	unsigned index;
+
+	/* Nothing, or no tab left to be on. */
+	if (part == KEIUI_WIN32_NO_CONTROL || count == 0U)
+		return KEIUI_WIN32_NO_CONTROL;
+
+	/* The buttons, whose places do not depend on which tabs there are. */
+	if (part == KEIUI_WIN32_MENU_BUTTON ||
+	    part == KEIUI_WIN32_TAB_NEW_BUTTON ||
+	    part == KEIUI_WIN32_TAB_BACK_BUTTON ||
+	    part == KEIUI_WIN32_TAB_FORWARD_BUTTON ||
+	    part == KEIUI_WIN32_TAB_LIST_BUTTON)
+		return part;
+
+	/* A tab or its close button: the old tab's ID. */
+	if (part >= KEIUI_WIN32_TAB_BODY && part < KEIUI_WIN32_TAB_BODY + window->tab_count) {
+		base = KEIUI_WIN32_TAB_BODY;
+	} else if (part >= KEIUI_WIN32_TAB_CLOSE_BUTTON && part < KEIUI_WIN32_TAB_CLOSE_BUTTON + window->tab_count) {
+		base = KEIUI_WIN32_TAB_CLOSE_BUTTON;
+	} else {
+		return KEIUI_WIN32_NO_CONTROL;
+	}
+	id = window->tabs[part - base].id;
+
+	/* The same part of the new tab of that ID. */
+	for (index = 0U; index < count; index++) {
+		if (tabs[index].id == id)
+			return base + index;
+	}
+
+	/* The tab went. */
+	return KEIUI_WIN32_NO_CONTROL;
+}
+
+/*
+ * Chooses a tab by its ID as its click would (KL_WINDOW_TAB_CHOSEN); the
+ * active tab, which the program would not hear of, is brought into sight.
+ */
+static void
+titlebar_tab_choose(
+	struct kl_window *window,
+	uint32_t id)
+{
+	unsigned active;
+	unsigned index;
+
+	/* The tab of the ID; none when it went. */
+	for (index = 0U; index < window->tab_count; index++) {
+		if (window->tabs[index].id == id)
+			break;
+	}
+	if (index >= window->tab_count)
+		return;
+
+	/* The active tab chosen again is brought into sight from the next layout. */
+	active = titlebar_active(window);
+	if (index == active) {
+		window->tab_reveal = 1;
+		titlebar_changed(window);
+		return;
+	}
+
+	/* Another tab is the program's to make active (its next tabs show it, brought into sight). */
+	titlebar_tab_input(window, KL_WINDOW_TAB_CHOSEN, id);
+}
+
+/* Moves a scrolling strip by tabs (after: positive); the layout keeps it within the tabs. */
+static void
+titlebar_scroll_by(
+	struct kl_window *window,
+	int steps)
+{
+	unsigned back;
+
+	/* Toward the tabs before, down to the first. */
+	if (steps < 0) {
+		back = (unsigned)(-steps);
+		if (back > window->tab_first)
+			back = window->tab_first;
+		window->tab_first -= back;
+	}
+
+	/* Toward the tabs after (the layout stops at the last). */
+	if (steps > 0)
+		window->tab_first += (unsigned)steps;
+
+	/* The strip laid out and painted again from there. */
+	titlebar_changed(window);
+}
+
+/*
+ * Opens the list of the tabs out of sight below its button, its right edge
+ * at the button's, each tab by its title in the strip's order (the active
+ * one ticked), and chooses the tab picked.
+ */
+static void
+titlebar_tab_list(
+	struct kl_window *window)
+{
+	uint32_t ids[KEIUI_WIN32_TABS];
+	char text[TITLEBAR_MENU_TEXT];
+	uint16_t wide[TITLEBAR_MENU_TEXT];
+	size_t units;
+	HMENU menu;
+	POINT point;
+	BOOL turned;
+	BOOL added;
+	BOOL chosen;
+	UINT flags;
+	unsigned active;
+	unsigned count;
+	unsigned index;
+	int error;
+
+	/* The menu. */
+	menu = CreatePopupMenu();
+	if (menu == NULL)
+		return;
+
+	/* Each tab out of sight, its command its place in the list plus one. */
+	count = 0U;
+	active = titlebar_active(window);
+	for (index = 0U; index < window->tab_count; index++) {
+		if (window->tabs[index].place.shown)
+			continue;
+
+		/* Its title as an item's text, in UTF-16. */
+		titlebar_tab_label(&window->tabs[index], index, text, sizeof(text));
+		error = keiui_win32_utf16_from_utf8(text, strlen(text), wide, TITLEBAR_MENU_TEXT, &units);
+		if (error != 0)
+			continue;
+
+		/* The item, ticked when it is the active tab. */
+		flags = MF_STRING;
+		if (index == active)
+			flags |= MF_CHECKED;
+		added = AppendMenuW(menu, flags, (UINT_PTR)(count + 1U), (LPCWSTR)wide);
+		if (!added)
+			continue;
+		ids[count] = window->tabs[index].id;
+		count++;
+	}
+
+	/* Nothing out of sight: no list. */
+	if (count == 0U) {
+		(void)DestroyMenu(menu);
+		return;
+	}
+
+	/* The button's bottom-right corner on the screen. */
+	point.x = window->tab_scroll.list.x + (LONG)window->tab_scroll.list.width;
+	point.y = window->tab_scroll.list.y + (LONG)window->tab_scroll.list.height;
+	turned = ClientToScreen(window->frame, &point);
+	if (!turned) {
+		(void)DestroyMenu(menu);
+		return;
+	}
+
+	/* Shown until a choice or a dismissal. */
+	chosen = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTBUTTON | TPM_RIGHTALIGN | TPM_TOPALIGN,
+	    (int)point.x, (int)point.y, window->frame, NULL);
+	(void)DestroyMenu(menu);
+
+	/* The press that opened it is over, and the button is no longer held. */
+	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	window->control_hover = KEIUI_WIN32_NO_CONTROL;
+	(void)InvalidateRect(window->frame, NULL, FALSE);
+
+	/* Nothing chosen. */
+	if (chosen == 0)
+		return;
+	index = (unsigned)chosen - 1U;
+	if (index >= count)
+		return;
+
+	/* The tab picked, by its ID (the list's tabs are the ones of its opening). */
+	titlebar_tab_choose(window, ids[index]);
+}
+
+/*
+ * Writes a tab's title as a menu item's text: control characters (a tab
+ * would start the shortcut's column) as spaces, cut at a character so
+ * that every '&' doubled still fits, and the tab's number from 1 for an
+ * empty title (an item of no text cannot be picked).
+ */
+static void
+titlebar_tab_label(
+	const struct keiui_win32_tab *tab,
+	unsigned index,
+	char *text,
+	size_t size)
+{
+	char title[KEIUI_WIN32_TAB_TITLE];
+	size_t length;
+	size_t most;
+	size_t at;
+
+	/* At most half the text, less its NUL, so that the doubled marks fit; cut at a character's start. */
+	most = (size - 1U) / 2U;
+	if (most > sizeof(title) - 1U)
+		most = sizeof(title) - 1U;
+	length = strlen(tab->title);
+	if (length > most) {
+		length = most;
+		while (length > 0U && ((unsigned char)tab->title[length] & 0xc0U) == 0x80U)
+			length--;
+	}
+	memcpy(title, tab->title, length);
+	title[length] = '\0';
+
+	/* Control characters become spaces. */
+	for (at = 0U; at < length; at++) {
+		if ((unsigned char)title[at] < 0x20U || (unsigned char)title[at] == 0x7fU)
+			title[at] = ' ';
+	}
+
+	/* An empty title is the tab's number. */
+	if (length == 0U)
+		(void)snprintf(title, sizeof(title), "%u", index + 1U);
+
+	/* The item's text, each '&' doubled (no mnemonic), without a shortcut. */
+	keiui_win32_menu_text(title, NULL, text, size);
+}
+
+/* Draws the arrows of a scrolling strip (faint at its ends) and the list's button. */
+static void
+titlebar_strip_draw(
+	struct kl_window *window,
+	struct kl_canvas *canvas)
+{
+	const struct keiui_win32_tab_scroll *scroll;
+
+	/* The arrows, each live while tabs lie out of sight its way. */
+	scroll = &window->tab_scroll;
+	if (scroll->mode == KEIUI_WIN32_STRIP_SCROLL) {
+		titlebar_icon_button(window, canvas, &scroll->back, KEIUI_WIN32_TAB_BACK_BUTTON, KL_ICON_BACK, TITLEBAR_TAB_ICON,
+		    scroll->back_live);
+		titlebar_icon_button(window, canvas, &scroll->forward, KEIUI_WIN32_TAB_FORWARD_BUTTON, KL_ICON_FORWARD, TITLEBAR_TAB_ICON,
+		    scroll->forward_live);
+	}
+
+	/* The list's button, when there is one. */
+	if (scroll->list.width != 0U)
+		titlebar_icon_button(window, canvas, &scroll->list, KEIUI_WIN32_TAB_LIST_BUTTON, KL_ICON_DOWN, TITLEBAR_TAB_ICON, 1);
 }
 
 /* Queues a tab's input (KL_WINDOW_TAB_*, and the tab's ID; 0 for a new one). */
@@ -2023,7 +2461,7 @@ titlebar_menu_draw(
 	struct kl_canvas *canvas)
 {
 	/* A button of the list's icon, the control's size. */
-	titlebar_icon_button(window, canvas, &window->menu_place, KEIUI_WIN32_MENU_BUTTON, KL_ICON_LIST, TITLEBAR_ICON);
+	titlebar_icon_button(window, canvas, &window->menu_place, KEIUI_WIN32_MENU_BUTTON, KL_ICON_LIST, TITLEBAR_ICON, 1);
 }
 
 /* Draws a tab: its ground (the panel's when active, the hover's under the pointer), its title, its mark and its close button. */
@@ -2085,7 +2523,7 @@ titlebar_tab_draw(
 
 	/* The close button. */
 	if (tab->place.close.width != 0U)
-		titlebar_icon_button(window, canvas, &tab->place.close, KEIUI_WIN32_TAB_CLOSE_BUTTON + index, KL_ICON_CLOSE, TITLEBAR_TAB_ICON);
+		titlebar_icon_button(window, canvas, &tab->place.close, KEIUI_WIN32_TAB_CLOSE_BUTTON + index, KL_ICON_CLOSE, TITLEBAR_TAB_ICON, 1);
 }
 
 /* Draws the new tab's button, when there is one. */
@@ -2099,10 +2537,14 @@ titlebar_new_draw(
 		return;
 
 	/* A button of the plus. */
-	titlebar_icon_button(window, canvas, &window->tab_new_place, KEIUI_WIN32_TAB_NEW_BUTTON, KL_ICON_PLUS, TITLEBAR_TAB_ICON);
+	titlebar_icon_button(window, canvas, &window->tab_new_place, KEIUI_WIN32_TAB_NEW_BUTTON, KL_ICON_PLUS, TITLEBAR_TAB_ICON, 1);
 }
 
-/* Draws a button of an icon: its ground under the pointer or held, and the icon (size at 96 dpi) in its middle. */
+/*
+ * Draws a button of an icon: its ground under the pointer or held, and the
+ * icon (size at 96 dpi) in its middle; a button that is not live (an arrow
+ * at the strip's end) has no ground and a faint icon.
+ */
 static void
 titlebar_icon_button(
 	struct kl_window *window,
@@ -2110,15 +2552,24 @@ titlebar_icon_button(
 	const struct keiui_win32_rect *place,
 	unsigned part,
 	enum kl_icon icon,
-	uint32_t size)
+	uint32_t size,
+	int live)
 {
 	const struct kl_theme *theme;
 	kl_color fill;
+	kl_color ink;
 	float side;
 
-	/* Its ground under the pointer, or held. */
+	/* The icon's ink: the text's, or the faint one on a button that does nothing. */
 	theme = kl_theme_default();
-	if (window->control_pressed == part || window->control_hover == part) {
+	ink = theme->text;
+	if (!live)
+		ink = theme->text_faint;
+
+	/* Its ground under the pointer, or held, while it is live. */
+	if (live &&
+	    (window->control_pressed == part ||
+	     window->control_hover == part)) {
 		fill = theme->hover;
 		if (window->control_pressed == part)
 			fill = theme->selection;
@@ -2129,5 +2580,5 @@ titlebar_icon_button(
 	/* The icon in its middle. */
 	side = (float)keiui_win32_scale(size, window->dpi);
 	kl_icon_draw(canvas, icon, (float)place->x + ((float)place->width - side) / 2.0f, (float)place->y + ((float)place->height - side) / 2.0f,
-	    side, theme->text);
+	    side, ink);
 }
