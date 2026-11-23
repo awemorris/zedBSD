@@ -1334,6 +1334,29 @@ int kwl_output_resolution_keep(struct kwl_server *server, const char *key, int *
 int kwl_output_resolution_revert(struct kwl_server *server, const char *key);
 void kwl_output_resolution_presented(struct kwl_server *server, int shown);
 void kwl_output_resolution_object_gone(struct kwl_object *object);
+
+/*
+ * A display's scale as the displays objects are told it (output-scale.c):
+ * the scale it is shown at (0 for a display shown nowhere), the user's
+ * choice (0: the default), the default its density asks for, the steps it
+ * offers now, its logical size at the scale it would be shown at, and why
+ * the scale cannot be chosen now (KWL_SCALE_WHY_*).  Scales are 120ths.
+ */
+struct kwl_output_scale_state {
+	unsigned current;
+	unsigned chosen;
+	unsigned recommended;
+	unsigned offered[KWL_SCALE_STEPS];
+	unsigned offered_count;
+	uint32_t width;
+	uint32_t height;
+	unsigned why;
+};
+
+/* The choice of a display's scale (output-scale.c). */
+void kwl_output_scale_choose(struct kwl_server *server);
+void kwl_output_scale_report(struct kwl_server *server, VkDisplayKHR display, const char *key, struct kwl_output_scale_state *state);
+int kwl_output_scale_set(struct kwl_server *server, const char *key, unsigned scale120, int *saved);
 void kwl_output_resolution_report(struct kwl_server *server, const char *key, unsigned *state, uint32_t *remaining_ms);
 
 /* The capture's copy of a frame's swapchain image (shot.c, ws173-p002). */

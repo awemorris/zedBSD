@@ -82,6 +82,18 @@
 #define KWL_SCALE_ASPECT_SLACK		10U
 
 /*
+ * Why a display's scale cannot be chosen now (the same bits as
+ * libkeiland's KL_DISPLAY_SCALE_WHY_*): it offers 100 % alone, another
+ * display is shown beside it (or the same desktop on several), it is not
+ * the display the desktop is shown on, or a change of its mode or a game
+ * is under way.
+ */
+#define KWL_SCALE_WHY_FIXED		0x1U
+#define KWL_SCALE_WHY_ALONE		0x2U
+#define KWL_SCALE_WHY_ANCHOR		0x4U
+#define KWL_SCALE_WHY_BUSY		0x8U
+
+/*
  * A rectangle of the plane or of a display's pixels: its left top corner
  * and its size.  One instance is either in logical units or in pixels; the
  * caller knows which, as kwl_scale_snap_rect takes one and makes the

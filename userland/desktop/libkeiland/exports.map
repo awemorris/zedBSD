@@ -177,6 +177,8 @@
 		kl_system_displays_keep_resolution;
 		kl_system_displays_revert_resolution;
 		kl_system_displays_reset_resolution;
+		kl_system_displays_scale;
+		kl_system_displays_set_scale;
 		kl_system_machine_query;
 		kl_system_machine_known;
 		kl_system_machine_serial;

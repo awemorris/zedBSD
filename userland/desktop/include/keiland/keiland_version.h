@@ -170,6 +170,8 @@ extern "C" {
  *      (struct kl_admin_options), KL_PROCESS_REFUSED, KL_PROCESS_LOST, KL_PROCESS_READY_START and KL_ADMIN_*
  * 112: the scale a window and a canvas are drawn at, KL_SCALE_BASE, kl_window_scale and KL_WINDOW_SCALE,
  *      kl_canvas's scale, kl_canvas_set_scale and kl_canvas_logical
+ * 113: a display's scale, kl_system_displays_scale and kl_system_displays_set_scale (struct kl_display_scale,
+ *      KL_DISPLAY_SCALES_MAX and KL_DISPLAY_SCALE_WHY_*)
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -179,7 +181,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 112U
+#define KL_VERSION 113U
 
 /*
  * Reports the interface version of the library that was loaded.
