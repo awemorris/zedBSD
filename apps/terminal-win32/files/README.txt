@@ -192,8 +192,11 @@ ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
 PasswordAuthentication, PubkeyAuthentication, LogLevel, ForwardX11,
 ForwardX11Trusted and ForwardX11Timeout (see 10), LocalForward,
 RemoteForward, GatewayPorts, ExitOnForwardFailure, ClearAllForwardings,
-RemoteCommand (see 11) and ProxyCommand (see 12).  RequestTTY and LogLevel are checked but change
-nothing: a tab is always a terminal, and mikuterm shows no debug lines.
+RemoteCommand (see 11) and ProxyCommand (see 12).  RequestTTY is checked
+but changes nothing: a tab is always a terminal.  LogLevel QUIET, FATAL or
+ERROR hides the lines OpenSSH's ssh shows only from INFO on (such as
+"Warning: Permanently added ... to the list of known hosts."); mikuterm
+shows no debug lines.
 SessionType none is refused.  Match, Include, ProxyJump and the other
 keywords it does not know are errors that name their
 line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is

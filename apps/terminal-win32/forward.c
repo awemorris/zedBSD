@@ -46,6 +46,9 @@
 /* The address a remote forwarding without a bind address asks the server to listen on (OpenSSH's channel_rfwd_bind_host). */
 #define FORWARD_REMOTE_DEFAULT	"localhost"
 
+/* The LogLevel from which informational lines are said (ssh_config's INFO), as OpenSSH's ssh says its logit() lines. */
+#define FORWARD_LOG_INFO	1
+
 /* The most addresses a host name of a bind address gives. */
 #define FORWARD_RESOLVE_MAX	FORWARD_LISTEN_ADDRESSES
 
@@ -76,6 +79,7 @@ static const struct forward_remote *forward_find_remote(const struct forward_sta
 static void forward_address_text(const struct kl_address *address, char *text, size_t size);
 static const char *forward_error_text(int error);
 static void forward_say(struct forward_state *forwards, const char *line);
+static void forward_inform(struct forward_state *forwards, const char *line);
 
 /*
  * Starts the forwardings of a connection: nothing listens and nothing is
@@ -996,7 +1000,7 @@ forward_take_reply(
 	if (event->accepted) {
 		if (forward->listen_port == 0) {
 			(void)snprintf(line, sizeof(line), "Allocated port %u for remote forward to %s:%u", event->port, forward->connect_host, (unsigned)forward->connect_port);
-			forward_say(forwards, line);
+			forward_inform(forwards, line);
 		}
 
 		/* Succeeded: the reply was taken. */
@@ -1011,7 +1015,7 @@ forward_take_reply(
 
 	/* Without it, the refusal is told and the connection goes on. */
 	(void)snprintf(line, sizeof(line), "Warning: remote port forwarding failed for listen port %u", (unsigned)forward->listen_port);
-	forward_say(forwards, line);
+	forward_inform(forwards, line);
 	return 0;
 }
 
@@ -1577,4 +1581,18 @@ forward_say(
 {
 	/* Hands the line to the connection's thread, which shows it in the tab. */
 	forwards->say(forwards->data, line);
+}
+
+/* Says an informational line (OpenSSH's logit()): only from LogLevel INFO on. */
+static void
+forward_inform(
+	struct forward_state *forwards,
+	const char *line)
+{
+	/* QUIET, FATAL and ERROR keep it to themselves. */
+	if (forwards->config->log_level < FORWARD_LOG_INFO)
+		return;
+
+	/* Shown as any other line. */
+	forward_say(forwards, line);
 }
