@@ -36,7 +36,7 @@ settings.
 2. Connecting
 -------------
 
-Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Shift+T) shows the
+Start mikuterm.exe.  A new tab (Shell > New Tab, Ctrl+Alt+T) shows the
 hosts of ssh/config:
 
   MikμTerm 0.1.0
@@ -244,19 +244,6 @@ whoami answers with); when neither is known the tab asks "login as:".  The
 host's key is kept in ssh/known_hosts under the name wsl-<name>, as WSL gives
 the distribution another address each time it starts.
 
-The first time you log in to a distribution that has no Host in ssh/config,
-mikuterm adds one to ssh/config (the tab says so):
-
-  Host wsl-Ubuntu-24.04
-      User me
-
-with Port when WslPort is not 22, and IdentityFile when the server took a
-key other than ssh/id_ed25519.  It has no HostName, so the address is still
-found each time.  From then on the distribution is a host of the list too
-(user@wsl-<name>), and you can edit the Host as any other.  mikuterm does
-not put your key into the distribution: add id_ed25519.pub to its
-~/.ssh/authorized_keys as below, and the login asks for no password.
-
 In the distribution (Ubuntu here):
 
   sudo apt install openssh-server
@@ -346,11 +333,12 @@ Session > Disable Input Method (Ctrl+Shift+I), and on again after it.
 
 The function keys F1 to F11 go to the host (htop, mc).  mikuterm's own keys
 are F12 (the settings), Alt+F11 (Treat Ambiguous-Width Characters as Wide),
-Alt+Enter (Fullscreen), Ctrl+Alt with a digit, Page Up or Page Down (the
-tabs, section 2), and Ctrl+Alt+Plus (or =) and Ctrl+Alt+Minus (View > Zoom
-In and Zoom Out); Ctrl+Minus and Ctrl+Shift+Minus (C-_) go to the host.  On a
-layout whose AltGr types a character on the plus or minus key, Ctrl+Alt with
-that key types the character, and the keypad's + and - zoom.
+Alt+Enter (Fullscreen), Ctrl+Alt+T (Shell > New Tab), Ctrl+Alt with a digit,
+Page Up or Page Down (the tabs, section 2), and Ctrl+Alt+Plus (or =) and
+Ctrl+Alt+Minus (View > Zoom In and Zoom Out); Ctrl+Minus and
+Ctrl+Shift+Minus (C-_) go to the host.  On a layout whose AltGr types a
+character on T or on the plus or minus key, Ctrl+Alt with that key types the
+character, and the keypad's + and - zoom.
 
 
 8. Fonts

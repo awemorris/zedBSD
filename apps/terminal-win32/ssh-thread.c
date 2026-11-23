@@ -34,7 +34,6 @@
 #include "proxy.h"
 #include "proxy-command.h"
 #include "remote-command.h"
-#include "wsl-record.h"
 #include "x11-host.h"
 #include "mikuterm-version.h"
 
@@ -180,8 +179,7 @@
  * (empty: none).  For a codespace, settings holds the ssh settings gh
  * gave (settings_size bytes; 0: none), read after ssh\config's, and proxy
  * the ProxyCommand setting made for it (empty: none), which comes before
- * gh's own.  record is 1 for a distribution ssh\config has no Host for:
- * its first login adds one (wsl-record.c), and it goes back to 0.
+ * gh's own.
  */
 struct thread_target {
 	char host[MIKUTERM_HOST_MAX];
@@ -195,7 +193,6 @@ struct thread_target {
 	char settings[THREAD_CODESPACE_CONFIG_MAX];
 	size_t settings_size;
 	char proxy[sizeof(THREAD_PROXY_KEYWORD) + SSH_CONFIG_COMMAND_MAX];
-	int record;
 };
 
 /*
@@ -301,9 +298,6 @@ static int thread_wsl_host(const struct thread_choice *choice, const char *name,
 static int thread_wsl_target(struct thread_choice *choice, const char *name, struct thread_target *target);
 static int thread_wsl_address(struct thread_choice *choice, const char *name, uint16_t port, struct thread_target *target);
 static void thread_wsl_hint(const struct thread_link *link, char *hint, size_t size);
-#ifdef _WIN32
-static void thread_wsl_record(struct thread_link *link, unsigned identity);
-#endif
 #ifdef _WIN32
 static int thread_codespaces(struct thread_choice *choice, struct thread_target *target);
 static int thread_codespaces_list(struct thread_choice *choice, wchar_t *gh, size_t gh_size, unsigned *count);
@@ -1034,10 +1028,9 @@ thread_wsl_target(
 				port = 0U;
 		}
 	} else {
-		/* Without a Host: the name it would have, and WslPort; its first login adds the Host. */
+		/* Without a Host: the name it would have, and WslPort. */
 		(void)snprintf(target->host, sizeof(target->host), "%s%s", THREAD_WSL_PREFIX, name);
 		target->port = port;
-		target->record = 1;
 	}
 
 	/* Unless the Host names its HostName: its own address (or localhost), its key known by its name. */
@@ -1545,70 +1538,6 @@ thread_codespace_proxy(
 	/* Succeeded: the setting, as a line of its own. */
 	(void)snprintf(target->proxy, sizeof(target->proxy), "%s%s", THREAD_PROXY_KEYWORD, command);
 	return 0;
-}
-#endif
-
-#ifdef _WIN32
-/*
- * Adds a Host for a distribution to ssh\config after its first login
- * (wsl-record.c): the user logged in as, the port when it is not 22, and
- * the key the server took (identity, the engine's; none after a
- * password).  The tab says what was added, or why nothing could be; a
- * Host added meanwhile is left as it is.  It is tried once.
- */
-static void
-thread_wsl_record(
-	struct thread_link *link,
-	unsigned identity)
-{
-	char path[MIKUTERM_PATH_MAX];
-	char config[sizeof(THREAD_SSH_CONFIG)];
-	char line[THREAD_LINE_MAX];
-	const char *key;
-	char *text;
-	char *made;
-	size_t size;
-	size_t made_size;
-	int error;
-
-	/* Once, whatever comes of it. */
-	link->target->record = 0;
-	mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
-
-	/* The key as the settings name it, when a key was taken. */
-	key = NULL;
-	if (identity != SSH_ENGINE_IDENTITY_NONE && identity < SSH_ENGINE_IDENTITIES_MAX)
-		key = link->config.identity[link->identity_sources[identity]];
-
-	/* ssh\config as it is now (none is empty). */
-	text = NULL;
-	size = 0U;
-	error = mikuterm_path(path, sizeof(path), THREAD_SSH_CONFIG);
-	if (error == 0)
-		error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size);
-	if (error == ENOENT)
-		error = 0;
-
-	/* The text with the Host; one there already is left as it is. */
-	made = NULL;
-	made_size = 0U;
-	if (error == 0)
-		error = wsl_record_text(text, size, link->target->distribution, link->config.user, link->config.port, key, &made, &made_size);
-	free(text);
-	if (error == EEXIST)
-		return;
-
-	/* The file written whole. */
-	if (error == 0)
-		error = mikuterm_file_replace(path, made, made_size);
-	free(made);
-
-	/* What the tab is told. */
-	if (error != 0)
-		(void)snprintf(line, sizeof(line), "%s: Host %s%s could not be added (%s).\r\n", config, WSL_RECORD_PREFIX, link->target->distribution, thread_error_text(error));
-	else
-		(void)snprintf(line, sizeof(line), "Added Host %s%s (User %s) to %s.\r\n", WSL_RECORD_PREFIX, link->target->distribution, link->config.user, config);
-	session_say(link->session, line);
 }
 #endif
 
@@ -2676,12 +2605,8 @@ thread_events(
 			thread_passphrase(link, &event);
 			break;
 		case SSH_ENGINE_AUTHENTICATED:
-			/* The port forwardings start once the user is in; a distribution's first login gets its Host. */
+			/* The port forwardings start once the user is in. */
 			thread_forward_start(link);
-#ifdef _WIN32
-			if (link->target->record)
-				thread_wsl_record(link, event.identity);
-#endif
 			break;
 		case SSH_ENGINE_DATA:
 			/* An X client's bytes go to the X server. */

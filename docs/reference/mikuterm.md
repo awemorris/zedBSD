@@ -314,7 +314,7 @@ both.
 
 ## 5. Tabs and questions
 
-A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
+A new tab (Shell > New Tab, Ctrl+Alt+T) shows the launch screen; the first
 tab connects to `Connect` without it when that is set. A window has at most
 ten tabs, the settings tab among them.
 
@@ -413,19 +413,6 @@ Hosts:
   - The user is the Host's `User`, else the user `whoami` answered, else
     `login as:` asks. The distributions of WSL 2 share one network, so each
     needs its own port (and its own Host) when more than one runs an sshd.
-  - The first login (the server accepted the user) to a distribution
-    without a `Host wsl-NAME` adds one to `ssh/config`, as the settings
-    tab's Hosts pane adds a Host (before the first `Host` block that would
-    apply to the name, else at the end after a blank line; indented and
-    ending its lines as the file does; every other byte kept): `User` (the
-    user logged in as), `Port` when the port is not 22 (a Host without
-    `Port` is reached on 22), and `IdentityFile` (as the settings named it)
-    when the server took a key other than `~/.ssh/id_ed25519`. It has no
-    `HostName`. The tab says `Added Host wsl-NAME (User USER) to
-    ssh/config.`, or `ssh/config: Host wsl-NAME could not be added
-    (REASON).`; a `Host wsl-NAME` added meanwhile (in any case) is left as
-    it is. mikuterm does not add a key to the distribution's
-    `authorized_keys`.
   - A connection that fails adds why, by how it failed: `Nothing listens on
     port PORT of NAME (ADDRESS): its sshd is not installed, not started, or on
     another port ...` (refused), `NAME did not answer at ADDRESS port PORT:
@@ -620,11 +607,12 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 
 F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
 opens the settings, and Alt+F11 is View > Treat Ambiguous-Width Characters
-as Wide, as in zedBSD's terminal. View > Zoom In and Zoom Out are Ctrl+Alt++
-(Ctrl+Alt+= too) and Ctrl+Alt+-, as in zedBSD's terminal; Ctrl+- and
-Ctrl+Shift+- (C-_) reach the host. On a layout whose AltGr types a character
-on the plus or minus key (the German layout's ~ on +), Control and Alt with
-that key type the character, as AltGr does, and the keypad's + and - zoom. Ctrl+Alt with the top row's digits, Page Up and Page
+as Wide, as in zedBSD's terminal. Shell > New Tab is Ctrl+Alt+T, and View >
+Zoom In and Zoom Out are Ctrl+Alt++ (Ctrl+Alt+= too) and Ctrl+Alt+-, as in
+zedBSD's terminal; Ctrl+- and Ctrl+Shift+- (C-_) reach the host. On a layout
+whose AltGr types a character on T or on the plus or minus key (the German
+layout's ~ on +), Control and Alt with that key type the character, as AltGr
+does, and the keypad's + and - zoom. Ctrl+Alt with the top row's digits, Page Up and Page
 Down choose the tabs (section 5); zedBSD's terminal leaves the tabs' keys to
 its desktop's titlebar (Ctrl+Tab, Ctrl+Page Up and Ctrl+Page Down).
 
