@@ -102,7 +102,7 @@ CRT1_SRC := src/libc/crt/crt1-aarch64.S
 #
 # Static libc objects & library
 #
-LIBC_STATIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBC_SOURCES))
+LIBC_STATIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBC_SOURCES) $(LIBM_SOURCES))
 $(LIBC_STATIC_C_OBJS): $(LIBC_OBJ_DIR)/static/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(ARM64_LIBC_STATIC_CFLAGS) -c $< -o $@
@@ -126,8 +126,9 @@ $(LIBC_OUT_DIR)/libc.o: $(LIBC_OUT_DIR)/libc.a
 # Dynamic libc objects & shared library
 #
 # long double is IEEE binary128 here and its arithmetic is in software, so
-# libc.so also carries those routines for libm.so and the programs.
-LIBC_DYNAMIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES) \
+# libc.so also carries those routines for its mathematical functions and
+# the programs.
+LIBC_DYNAMIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES) $(LIBM_SOURCES) \
 	src/libc/softfloat128.c src/libc/compiler-runtime128.c)
 $(LIBC_DYNAMIC_C_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -150,26 +151,17 @@ $(LIBC_OUT_DIR)/libc.so: $(LIBC_DYNAMIC_OBJS) src/libc/interpose.list
 	$(LD) -m aarch64elf -shared -soname libc.so --hash-style=both -Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 $(LIBC_DYNAMIC_OBJS) -o $@
 
 #
-# Static & dynamic libm
+# libm
 #
-LIBM_STATIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBM_SOURCES))
-$(LIBM_STATIC_OBJS): $(LIBC_OBJ_DIR)/static/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(ARM64_LIBC_STATIC_CFLAGS) -c $< -o $@
-
-$(LIBC_OUT_DIR)/libm.a: $(LIBM_STATIC_OBJS)
+# The mathematical functions are part of the C library: libc.a and libc.so
+# carry them.  libm.a is an empty archive, so that a link that asks for -lm,
+# as programs and packages written for other systems do, is answered by the
+# C library and needs nothing more at run time.  It is made again whenever
+# libc.a is, so that a build directory never keeps an older libm.a.
+$(LIBC_OUT_DIR)/libm.a: $(LIBC_OUT_DIR)/libc.a
 	@mkdir -p $(dir $@)
 	@rm -f $@
-	$(AR) rcsD $@ $^
-
-LIBM_DYNAMIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBM_SOURCES))
-$(LIBM_DYNAMIC_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(ARM64_LIBC_DYNAMIC_CFLAGS) -c $< -o $@
-
-$(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
-	@mkdir -p $(dir $@)
-	$(LD) -m aarch64elf -shared -soname libm.so --hash-style=both -z now -z relro -z separate-code -z max-page-size=4096 $(LIBM_DYNAMIC_OBJS) -o $@
+	$(AR) rcsD $@
 
 #
 # Static & dynamic libutil
@@ -261,7 +253,6 @@ LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.a \
 	$(LIBC_OUT_DIR)/libc.so \
 	$(LIBC_OUT_DIR)/libm.a \
-	$(LIBC_OUT_DIR)/libm.so \
 	$(LIBC_OUT_DIR)/libutil.a \
 	$(LIBC_OUT_DIR)/libutil.so \
 	$(LIBC_OUT_DIR)/ld.so \

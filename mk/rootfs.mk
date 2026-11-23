@@ -60,17 +60,14 @@ ROOTFS_SERVICE_FILES := \
 
 ROOTFS_DYNAMIC_INPUTS := \
 	$(BUILD)/dynamic/libc.so \
-	$(BUILD)/dynamic/libm.so \
 	$(BUILD)/dynamic/libutil.so \
 	$(if $(wildcard $(BUILD)/dynamic/ld.so),$(BUILD)/dynamic/ld.so)
 
 ROOTFS_DYNAMIC_FILES := \
 	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
-	--file /lib/libm.so=$(BUILD)/dynamic/libm.so \
 	--file /lib/libutil.so=$(BUILD)/dynamic/libutil.so \
 	$(if $(wildcard $(BUILD)/dynamic/ld.so),--file /lib/ld.so=$(BUILD)/dynamic/ld.so --mode /lib/ld.so=0755) \
 	--mode /lib/libc.so=0755 \
-	--mode /lib/libm.so=0755 \
 	--mode /lib/libutil.so=0755
 
 ROOTFS_PACKAGE_LINKS ?= \

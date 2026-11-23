@@ -18,7 +18,7 @@ CLANG_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CLANG_DIR := $(patsubst %/,%,$(dir $(CLANG_MAKEFILE)))
 include $(CLANG_DIR)/../../../base/package.mk
 include $(CLANG_DIR)/../../external.mk
-include $(CLANG_DIR)/../../../../toolchain/llvm/version.mk
+include $(CLANG_DIR)/../../../../mk/toolchain-llvm/version.mk
 
 # The cross compiler's own source; the toolchain build extracts it.  This
 # package patches a copy of it (external.mk), never the toolchain's tree.
@@ -32,7 +32,7 @@ CLANG_PATCHES := $(sort $(wildcard \
 	$(abspath $(CLANG_DIR))/patches/*.patch))
 CLANG_PATCH_LEVEL := zedbsd1
 CLANG_SOURCE_STAMP := \
-	$(CLANG_SOURCE)/.zedbsd-clang-source-$(LLVM_VERSION)-$(LLVM_PATCH_LEVEL)-$(CLANG_PATCH_LEVEL)
+	$(CLANG_SOURCE)/.zedbsd-clang-source-$(ZEDBSD_LLVM_VERSION)-$(ZEDBSD_LLVM_PATCH_LEVEL)-$(CLANG_PATCH_LEVEL)
 
 CLANG_BUILD := $(EXTERNAL_WORKROOT)/clang/build
 CLANG_STAGE := $(EXTERNAL_WORKROOT)/clang/stage

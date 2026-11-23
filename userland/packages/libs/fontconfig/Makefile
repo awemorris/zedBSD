@@ -25,6 +25,16 @@ EXT_fontconfig_PATCHES :=
 
 $(eval $(call EXTERNAL_SOURCE,fontconfig))
 
+# The build machine's gperf is made by its own Makefile (devel/gperf), which
+# this make does not read, so where it is staged is named here and its make
+# is asked for it.
+FONTCONFIG_GPERF_BINDIR := $(EXTERNAL_WORKROOT)/gperf/stage/usr/bin
+FONTCONFIG_GPERF := $(FONTCONFIG_GPERF_BINDIR)/gperf
+EXTERNAL_HOST_BIN_DIRS += $(FONTCONFIG_GPERF_BINDIR)
+
+$(FONTCONFIG_GPERF):
+	$(MAKE) -C '$(FONTCONFIG_DIR)/../../devel/gperf' gperf-host
+
 # ---------------------------------------------------------------- build
 
 # Meson, through the common rule, with the build machine's gperf 3.3
@@ -42,7 +52,7 @@ $(eval $(call EXTERNAL_SOURCE,fontconfig))
 #   iconv, nls, doc, tests off, as for GLib
 EXT_fontconfig_MAKEFILE := $(FONTCONFIG_MAKEFILE)
 EXT_fontconfig_DEPENDS := freetype expat
-EXT_fontconfig_HOST_TOOLS := $(GPERF_HOST)
+EXT_fontconfig_HOST_TOOLS := $(FONTCONFIG_GPERF)
 EXT_fontconfig_MESON_OPTIONS := \
 	-Ddoc=disabled -Dnls=disabled -Dtests=disabled -Dtools=enabled \
 	-Dcache-build=disabled -Diconv=disabled -Dxml-backend=expat \
@@ -80,8 +90,9 @@ FONTCONFIG_CONF_AVAIL := $(EXT_fontconfig_STAGEDIR)/usr/share/fontconfig/conf.av
 FONTCONFIG_FONTS_CONF := $(EXT_fontconfig_STAGEDIR)/etc/fonts/fonts.conf
 
 # zedBSD's own preference for the generic families, which names the fonts the
-# desktop installs (files/55-zedbsd-families.conf says why).
-FONTCONFIG_FAMILIES := $(FONTCONFIG_DIR)/files/55-zedbsd-families.conf
+# desktop installs (files/55-zedbsd-families.conf says why).  The root is
+# made from the top of the tree, so its list names the file by its full path.
+FONTCONFIG_FAMILIES := $(abspath $(FONTCONFIG_DIR)/files/55-zedbsd-families.conf)
 
 # Checks the library and the tools against their contract, and that the
 # stage turned on exactly the configuration files listed above.
