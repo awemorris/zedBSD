@@ -7,8 +7,8 @@
 
 /*
  * The protocols toolkits use besides the core and xdg-shell (ws035-p080):
- * xdg-decoration (decoration.c), cursor-shape (cursor.c) and viewporter
- * (viewport.c).
+ * xdg-decoration (decoration.c), cursor-shape (cursor.c), viewporter with
+ * the buffer scale (viewport.c) and fractional-scale (surface-outputs.c).
  */
 
 #ifndef KWL_EXTRAS_H
@@ -39,6 +39,15 @@ void kwl_viewport_commit(struct kwl_object *surface);
 void kwl_viewport_object_gone(struct kwl_object *object);
 void kwl_surface_size(const struct kwl_object *surface, uint32_t *width, uint32_t *height);
 void kwl_viewport_source(const struct kwl_object *surface, float *uv);
+void kwl_viewport_buffer_scale(struct kwl_object *surface, uint32_t scale);
+uint32_t kwl_surface_buffer_scale(const struct kwl_object *surface);
+int kwl_viewport_damage_buffer(const struct kwl_object *surface, const struct kwl_object *buffer, const int32_t *units, int32_t *pixels);
+int kwl_viewport_damage_surface(const struct kwl_object *surface, const int32_t *pixels, int32_t *units);
+
+int kwl_fractional_scale_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_fractional_scale_object_gone(struct kwl_object *object);
+void kwl_fractional_scale_tell(struct kwl_object *surface);
+void kwl_fractional_scale_sync(struct kwl_server *server);
 
 int kwl_content_type_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_content_type_commit(struct kwl_object *surface);

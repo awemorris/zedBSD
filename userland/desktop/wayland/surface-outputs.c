@@ -7,7 +7,8 @@
 
 /*
  * The outputs a surface is shown on, as wl_surface.enter and leave tell
- * its client (ws177-p001).
+ * its client (ws177-p001), and the scale it is best drawn at, as
+ * wp_fractional_scale_v1's preferred_scale tells it.
  *
  * A window belongs to one output in the extended mode (ws113-p007's
  * D-ATOMIC: it is drawn by that output alone, also where it reaches past
@@ -26,13 +27,26 @@
  * this moment: a minimized window and one of another virtual desktop stay
  * on their output, as the scale and the refresh the client chose for it
  * stay right (the design is plan/ws177/phase001/phase.md).
+ *
+ * A surface's preferred scale is the scale of the output it is on (its
+ * window's; a cursor's and a drag icon's is the pointer's).  It is told
+ * when the client asks for the surface's wp_fractional_scale_v1, again
+ * before the first configure of the surface's window (whose output is
+ * known then), and after that only when it changes: every pass of the
+ * event loop compares it with the scale last told.  A client that draws
+ * at it gives a buffer of the surface's size times the scale and shows it
+ * at the surface's size with a viewport, which the compositor puts on the
+ * display a pixel for a pixel.
  */
 
 #include "kwl.h"
 #include "compose.h"
 #include "displays.h"
+#include "extras.h"
 
+#include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 /* The wl_surface events: an output entered and an output left. */
 #define SURFACE_EVENT_ENTER	0U
@@ -41,11 +55,26 @@
 /* The outputs a set can name: one bit for each slot of the plane. */
 #define SURFACE_OUTPUTS_SLOTS	KWL_PLANE_SLOTS
 
+/*
+ * wp_fractional_scale_manager_v1's requests and its error for a surface
+ * that has its object already; wp_fractional_scale_v1's request and its
+ * event, the scale in 120ths.
+ */
+#define FRACTIONAL_MANAGER_DESTROY	0U
+#define FRACTIONAL_MANAGER_GET		1U
+#define FRACTIONAL_ERROR_EXISTS		0U
+#define FRACTIONAL_DESTROY		0U
+#define FRACTIONAL_PREFERRED_SCALE	0U
+
 static void surface_outputs_bring(struct kwl_server *server, unsigned excluded);
 static unsigned surface_outputs_mirrored(struct kwl_server *server, unsigned excluded);
 static unsigned surface_outputs_wanted(struct kwl_object *surface, const struct kwl_plane_rect *outputs, unsigned count, unsigned mirrored);
 static int surface_outputs_shown(struct kwl_object *surface);
 static void surface_outputs_tell(struct kwl_object *surface, unsigned slot, uint32_t opcode);
+static int fractional_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+static unsigned fractional_wanted(struct kwl_object *surface);
+static unsigned fractional_output_scale(struct kwl_server *server, unsigned slot);
+static uint32_t fractional_word(const unsigned char *bytes, size_t offset);
 
 /*
  * Tells each client's surfaces the outputs they came onto and left since
@@ -116,6 +145,131 @@ kwl_surface_outputs_gone(
 
 	/* Every output but the closing one counts. */
 	surface_outputs_bring(server, head);
+}
+
+/*
+ * Carries out a request of wp_fractional_scale_manager_v1 or of a surface's
+ * wp_fractional_scale_v1.  Returns 0, or EPROTO for a malformed request.
+ */
+int
+kwl_fractional_scale_request(
+	struct kwl_object *object,
+	uint32_t opcode,
+	const unsigned char *bytes,
+	size_t size)
+{
+	int error;
+
+	/* The manager: it goes, or it makes a surface's object. */
+	if (object->kind == KWL_FRACTIONAL_SCALE_MANAGER) {
+		if (opcode == FRACTIONAL_MANAGER_DESTROY && size == 0U) {
+			kwl_object_destroy(object);
+			return 0;
+		}
+
+		/* Only get_fractional_scale is left. */
+		if (opcode != FRACTIONAL_MANAGER_GET)
+			return EPROTO;
+		error = fractional_create(object, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A surface's object has only its destroy; it is told nothing more (kwl_fractional_scale_object_gone). */
+	if (opcode != FRACTIONAL_DESTROY || size != 0U)
+		return EPROTO;
+	kwl_object_destroy(object);
+
+	/* Succeeded: the object is gone. */
+	return 0;
+}
+
+/*
+ * Unties an object that is going: a fractional scale object's surface
+ * has none (another may be made for it); a surface's object names
+ * nothing, and is told nothing more.
+ */
+void
+kwl_fractional_scale_object_gone(
+	struct kwl_object *object)
+{
+	struct kwl_object *surface;
+
+	/* A fractional scale object: its surface may have another. */
+	if (object->kind == KWL_FRACTIONAL_SCALE) {
+		surface = object->surface;
+		object->surface = NULL;
+		if (surface != NULL)
+			surface->fractional = NULL;
+		return;
+	}
+
+	/* A surface: its object names nothing. */
+	if (object->kind == KWL_SURFACE && object->fractional != NULL) {
+		object->fractional->surface = NULL;
+		object->fractional = NULL;
+	}
+}
+
+/*
+ * Tells a surface's client the scale the surface is best drawn at, when
+ * the surface has a fractional scale object and the scale is not the one
+ * last told.
+ */
+void
+kwl_fractional_scale_tell(
+	struct kwl_object *surface)
+{
+	struct kwl_object *fractional;
+	uint32_t scale;
+	int error;
+
+	/* Only a surface with a live object can be told. */
+	fractional = surface->fractional;
+	if (fractional == NULL || fractional->dead)
+		return;
+
+	/* Nothing to tell when the scale is the one told last. */
+	scale = fractional_wanted(surface);
+	if (scale == fractional->fractional_told)
+		return;
+
+	/* The scale in 120ths; a failure is the client's own, and the scale is told again on the next pass. */
+	error = kwl_emit(surface->client, fractional->id, FRACTIONAL_PREFERRED_SCALE, &scale, sizeof(scale));
+	if (error != 0) {
+		printf("KWL FRACTIONAL surface=%u errno=%d\n", surface->id, error);
+		return;
+	}
+
+	/* The client knows it now. */
+	fractional->fractional_told = scale;
+	printf("KWL FRACTIONAL surface=%u scale=%u client=%llu\n", surface->id, scale, (unsigned long long)surface->client->number);
+}
+
+/*
+ * Tells each client the scale its surfaces are best drawn at, where it
+ * changed since it was last told: a window moved to another output, an
+ * output's scale changed.
+ */
+void
+kwl_fractional_scale_sync(
+	struct kwl_server *server)
+{
+	struct kwl_client *client;
+	struct kwl_object *surface;
+
+	/* Each live surface with a fractional scale object, of every live client. */
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->fatal)
+			continue;
+		for (surface = client->objects; surface != NULL; surface = surface->next) {
+			if (surface->kind == KWL_SURFACE &&
+			    !surface->dead &&
+			    surface->fractional != NULL)
+				kwl_fractional_scale_tell(surface);
+		}
+	}
 }
 
 /*
@@ -354,4 +508,123 @@ surface_outputs_tell(
 			return;
 		}
 	}
+}
+
+/*
+ * Makes a surface's fractional scale object (one at a time for each
+ * surface) and tells it the scale at once, so a client that asks before
+ * its window's first configure draws its first buffer at it.
+ */
+static int
+fractional_create(
+	struct kwl_object *manager,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_object *surface;
+	struct kwl_object *created;
+	uint32_t id;
+	uint32_t surface_id;
+
+	/* The new ID and the client's surface. */
+	if (size != 8U)
+		return EPROTO;
+	id = fractional_word(bytes, 0U);
+	surface_id = fractional_word(bytes, 4U);
+	surface = kwl_find(manager->client, surface_id);
+	if (surface == NULL || surface->kind != KWL_SURFACE)
+		return EPROTO;
+
+	/* One object at a time for a surface. */
+	if (surface->fractional != NULL) {
+		(void)kwl_error_code(manager->client, manager->id, FRACTIONAL_ERROR_EXISTS, "the surface has a fractional scale object");
+		return EPROTO;
+	}
+
+	/* The object, tied to its surface both ways, told nothing yet. */
+	created = kwl_create(manager->client, id, KWL_FRACTIONAL_SCALE, manager->version);
+	if (created == NULL)
+		return EPROTO;
+	created->surface = surface;
+	created->fractional_told = 0U;
+	surface->fractional = created;
+
+	/* Succeeded: the scale the surface is on now, told at once. */
+	kwl_fractional_scale_tell(surface);
+	return 0;
+}
+
+/*
+ * Gives the scale a surface is best drawn at (120ths): its window's
+ * output's, or the pointer's output's for a cursor and a drag's icon.
+ */
+static unsigned
+fractional_wanted(
+	struct kwl_object *surface)
+{
+	struct kwl_server *server;
+	unsigned slot;
+
+	/* A cursor and a drag's icon go with the pointer. */
+	server = surface->client->server;
+	if (surface->cursor_role ||
+	    surface->drag_icon ||
+	    surface == server->dnd_icon) {
+		slot = server->pointer_output;
+	} else {
+		/* Anything else is on its window's output (the anchor for one not placed yet). */
+		slot = kwl_window_output(surface);
+	}
+
+	/* Succeeded: that output's scale. */
+	return fractional_output_scale(server, slot);
+}
+
+/*
+ * Gives the scale an output (plane.h's slot) shows the plane at (120ths):
+ * the anchor's, a head's that is open, else the anchor's.
+ */
+static unsigned
+fractional_output_scale(
+	struct kwl_server *server,
+	unsigned slot)
+{
+	const struct kwl_head *head;
+	unsigned scale;
+
+	/* The anchor's, which a slot not shown falls back to. */
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+
+	/* A head's own, while it is open. */
+	if (slot == KWL_PLANE_ANCHOR ||
+	    server->compose == NULL ||
+	    slot > KWL_HEADS)
+		return scale;
+
+	/* A head closed, lost or not scaled yet shows nothing of its own. */
+	head = &server->compose->heads[slot - 1U];
+	if (!head->open ||
+	    head->lost ||
+	    head->scale120 == 0U)
+		return scale;
+
+	/* Succeeded: the head's scale. */
+	return head->scale120;
+}
+
+/* Reads a word of a request. */
+static uint32_t
+fractional_word(
+	const unsigned char *bytes,
+	size_t offset)
+{
+	uint32_t word;
+
+	/* The payload need not be aligned. */
+	memcpy(&word, bytes + offset, sizeof(word));
+
+	/* Succeeded: the word. */
+	return word;
 }
