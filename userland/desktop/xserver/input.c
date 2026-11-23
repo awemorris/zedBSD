@@ -2553,7 +2553,8 @@ input_time(
 /*
  * Asks the backend to keep the system's pointer for a grab's windows (on
  * nonzero) or to let it go: the surface of the grab window's top-level
- * window, or of the one under the pointer for a grab of the root window.
+ * window, or of the one under the pointer for a grab of the root window;
+ * a rooted server's one surface.
  */
 static void
 input_capture(
@@ -2574,11 +2575,13 @@ input_capture(
 		return;
 	}
 
-	/* The grab window's top-level window, or the one under the pointer. */
+	/* The grab window's top-level window, or the one under the pointer; a rooted server's root window. */
 	window = x11_window_find(server, grab->window);
 	if (window == NULL || window == server->root)
 		window = x11_input_window_under(server);
 	top = x11_window_top_level(window);
+	if (server->mode == X11SERVER_ROOTED)
+		top = server->root;
 
 	/* Succeeded: its surface keeps the pointer (none: nothing to keep it on). */
 	if (top->surface != NULL)
@@ -3477,11 +3480,17 @@ input_warp_pointer(
 	if (y >= (int)server->height)
 		y = (int)server->height - 1;
 
-	/* Only into a top-level window of the client's own, and only through the backend. */
+	/*
+	 * Only into a top-level window of the client's own (anywhere on a
+	 * rooted server's root window, whose surface the backend moves the
+	 * pointer in only while it is active), and only through the backend.
+	 */
 	target = x11_window_at(server, x, y);
 	target = x11_window_top_level(target);
-	if (target == server->root || target->owner != index)
-		return 0U;
+	if (server->mode != X11SERVER_ROOTED) {
+		if (target == server->root || target->owner != index)
+			return 0U;
+	}
 	if (server->ops->warp == NULL)
 		return 0U;
 	error = server->ops->warp(server->backend, x, y);

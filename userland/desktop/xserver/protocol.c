@@ -119,6 +119,8 @@
 #define REQUEST_BELL			104U
 #define REQUEST_CHANGE_POINTER_CONTROL	105U
 #define REQUEST_GET_POINTER_CONTROL	106U
+#define REQUEST_SET_CLOSE_DOWN_MODE	112U
+#define REQUEST_KILL_CLIENT		113U
 #define REQUEST_ROTATE_PROPERTIES	114U
 #define REQUEST_SET_POINTER_MAPPING	116U
 #define REQUEST_GET_POINTER_MAPPING	117U
@@ -680,6 +682,12 @@ protocol_dispatch(
 		break;
 	case REQUEST_ROTATE_PROPERTIES:
 		code = x11_request_rotate_properties(server, index, request, length);
+		break;
+	case REQUEST_SET_CLOSE_DOWN_MODE:
+		code = x11_request_set_close_down_mode(server, index, request, length);
+		break;
+	case REQUEST_KILL_CLIENT:
+		code = x11_request_kill_client(server, index, request, length);
 		break;
 	case REQUEST_NO_OPERATION:
 		code = 0U;

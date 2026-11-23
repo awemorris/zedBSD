@@ -24,6 +24,8 @@
  * render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
+ * or, for a rooted server, the root window as one surface (rooted.c,
+ * which also keeps the save-sets and ends clients for KillClient),
  * wm.c is the top-level windows' window manager (ICCCM and EWMH), font.c
  * keeps the core fonts and answers their requests and the text ones,
  * glyphs.c draws their glyphs from the TrueType faces, cursor.c keeps the
@@ -730,6 +732,17 @@ struct x11_transfer {
 };
 
 /*
+ * One window of a client's save-set (rooted.c, ChangeSaveSet): a window of
+ * another client that is reparented out of the client's windows and
+ * mapped when the client ends, so that a window manager's end leaves the
+ * windows it framed on the screen.
+ */
+struct x11_save {
+	unsigned client;
+	uint32_t window;
+};
+
+/*
  * One graphics context (gc.c): the values drawing uses, and the depth of
  * the drawables it may draw on.  The tile, the stipple and the clip mask
  * are copied when they are set (the protocol leaves later changes to the
@@ -1033,9 +1046,10 @@ struct x11_wm_atoms {
  * changed and not been shown, and the pointer's and keyboard's state.
  */
 struct x11server {
-	/* The root window's size. */
+	/* The root window's size, and how the server shows itself (X11SERVER_ROOTLESS or X11SERVER_ROOTED). */
 	unsigned width;
 	unsigned height;
+	unsigned mode;
 
 	/* The backend's functions and their context. */
 	const struct x11_backend_ops *ops;
@@ -1272,6 +1286,14 @@ struct x11server {
 	 */
 	struct x11_xkb_state xkb_last;
 	uint32_t xkb_indicators;
+
+	/*
+	 * The save-sets (rooted.c): every client's windows in one list, an
+	 * entry going when its window is destroyed or its client ends.
+	 */
+	struct x11_save *saves;
+	unsigned save_count;
+	unsigned save_capacity;
 };
 
 /* client.c: the clients' connections, and the log. */
@@ -1326,6 +1348,8 @@ void x11_window_raise(struct x11server *server, struct x11_window *window);
 void x11_window_backend_configure(struct x11server *server, struct x11_window *window, int x, int y, uint16_t width, uint16_t height);
 int x11_window_server_child(struct x11server *server, uint32_t id);
 void x11_window_map(struct x11server *server, struct x11_window *window);
+void x11_window_map_by(struct x11server *server, unsigned requester, struct x11_window *window);
+unsigned x11_window_reparent(struct x11server *server, unsigned requester, struct x11_window *window, struct x11_window *parent, int x, int y);
 void x11_window_unmap(struct x11server *server, struct x11_window *window);
 int x11_window_viewable(const struct x11_window *window);
 struct x11_window *x11_window_next(struct x11_window *window, const struct x11_window *top);
@@ -1433,6 +1457,18 @@ void x11_rootless_present(struct x11server *server);
 void x11_rootless_closing(struct x11server *server);
 void x11_rootless_flush_motion(struct x11server *server);
 void x11_rootless_forget(struct x11server *server, struct x11_window *window);
+
+/* rooted.c: the root window as one surface, the save-sets, and the ends of clients. */
+void x11_rooted_start(struct x11server *server);
+struct x11_window *x11_rooted_shown(struct x11server *server);
+void x11_rooted_close(struct x11server *server);
+int x11_rooted_server_manages(const struct x11server *server, const struct x11_window *window);
+unsigned x11_save_set_change(struct x11server *server, unsigned client, struct x11_window *window, int remove);
+void x11_save_set_restore(struct x11server *server, unsigned client);
+void x11_save_set_forget_window(struct x11server *server, uint32_t window);
+void x11_save_set_fini(struct x11server *server);
+unsigned x11_request_set_close_down_mode(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_kill_client(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /* present-vulkan.c: a surface shown through a Vulkan swapchain. */
 struct x11_vulkan *x11_vulkan_open(const char *wsi);

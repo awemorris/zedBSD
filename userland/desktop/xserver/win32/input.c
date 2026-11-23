@@ -50,7 +50,7 @@ static void input_enter(struct x11_surface *surface);
  * Turns a key message of an X window into X's input: the key's evdev
  * code from its scan code, the left Ctrl Windows makes up before AltGr
  * dropped, a held key's repeat sent as X does (a release and a press),
- * Alt+F4 kept for closing the window.
+ * Alt+F4 kept for closing the window (the root window's goes to X).
  */
 void
 win32_input_key(
@@ -102,8 +102,11 @@ win32_input_key(
 			return;
 	}
 
-	/* Alt+F4 closes the window, as on every Windows window; X does not get the F4. */
-	if (pressed && code == WIN32_KEY_F4 && (backend->modifiers & X11_ALT_MASK) != 0) {
+	/* Alt+F4 closes the window, as on every Windows window; X does not get the F4 (but every key of the root window goes to X). */
+	if (pressed &&
+	    code == WIN32_KEY_F4 &&
+	    (backend->modifiers & X11_ALT_MASK) != 0 &&
+	    surface->kind != X11_SURFACE_ROOT) {
 		if (!repeat)
 			SendMessageW(surface->hwnd, WM_CLOSE, 0, 0);
 		return;
@@ -350,8 +353,9 @@ win32_input_capture_changed(
 
 /*
  * Tells where the system's pointer is on the root window (X's pixels from
- * the virtual screen's corner), inside an X window or not.  Returns 0, or
- * an errno value.
+ * the virtual screen's corner), inside an X window or not; with a root
+ * surface, from its corner, and only while the pointer is over it.
+ * Returns 0, or an errno value.
  */
 int
 win32_input_place(
@@ -360,14 +364,30 @@ win32_input_place(
 	int *y)
 {
 	struct x11_win32 *backend;
+	RECT client;
 	POINT point;
 	BOOL found;
+	BOOL turned;
 
 	/* The pointer on the screen. */
 	backend = context;
 	found = GetCursorPos(&point);
 	if (!found)
 		return EIO;
+
+	/* A root surface: the place in its client area, when the pointer is there. */
+	if (backend->root_surface != NULL) {
+		turned = ScreenToClient(backend->root_surface->hwnd, &point);
+		if (!turned)
+			return EIO;
+		GetClientRect(backend->root_surface->hwnd, &client);
+		found = PtInRect(&client, point);
+		if (!found)
+			return ENOENT;
+		*x = x11_win32_scale_to_x(point.x, backend->scale);
+		*y = x11_win32_scale_to_x(point.y, backend->scale);
+		return 0;
+	}
 
 	/* Succeeded: on the root window. */
 	*x = x11_win32_scale_to_x(point.x - backend->virtual_screen.left, backend->scale);
@@ -377,8 +397,10 @@ win32_input_place(
 
 /*
  * Moves the system's pointer to a place on the root window (the core asks
- * only for a place in the asking client's own window).  Returns 0, or an
- * errno value.
+ * only for a place in the asking client's own window); with a root
+ * surface, only while it is the active window, so that a remote client
+ * cannot take the pointer from another program.  Returns 0, or an errno
+ * value.
  */
 int
 win32_input_warp(
@@ -387,7 +409,10 @@ win32_input_warp(
 	int y)
 {
 	struct x11_win32 *backend;
+	POINT point;
+	HWND active;
 	BOOL moved;
+	BOOL turned;
 	int screen_x;
 	int screen_y;
 
@@ -395,6 +420,20 @@ win32_input_warp(
 	backend = context;
 	screen_x = backend->virtual_screen.left + x11_win32_scale_to_screen(x, backend->scale);
 	screen_y = backend->virtual_screen.top + x11_win32_scale_to_screen(y, backend->scale);
+
+	/* A root surface: from its client area's corner, while it is active. */
+	if (backend->root_surface != NULL) {
+		active = GetForegroundWindow();
+		if (active != backend->root_surface->hwnd)
+			return EPERM;
+		point.x = x11_win32_scale_to_screen(x, backend->scale);
+		point.y = x11_win32_scale_to_screen(y, backend->scale);
+		turned = ClientToScreen(backend->root_surface->hwnd, &point);
+		if (!turned)
+			return EIO;
+		screen_x = point.x;
+		screen_y = point.y;
+	}
 
 	/* Succeeded: moved there. */
 	moved = SetCursorPos(screen_x, screen_y);
