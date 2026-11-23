@@ -60,11 +60,15 @@ kwl_compose_pass_scale(
 {
 	const struct kwl_head *head;
 
-	/* A head's pass shows its part of the plane at the head's scale (100 % while none is set). */
+	/* A head's pass: its head, found by the view's output. */
 	if (server->view_width != 0U) {
 		head = pass_head(server);
+
+		/* A head whose scale is not set yet (or no head) is shown at 100 %. */
 		if (head == NULL || head->scale120 == 0U)
 			return KWL_SCALE_ONE;
+
+		/* The head's scale. */
 		return head->scale120;
 	}
 
@@ -89,15 +93,19 @@ kwl_compose_pass_size(
 {
 	const struct kwl_head *head;
 
-	/* A head's own pixels (its part of the plane's size while it has none). */
+	/* A head's pass: its head, found by the view's output. */
 	if (server->view_width != 0U) {
 		head = pass_head(server);
+
+		/* Its pixels, or its part of the plane's size while it has none. */
 		*width = (float)server->view_width;
 		*height = (float)server->view_height;
 		if (head != NULL && head->output.width != 0U && head->output.height != 0U) {
 			*width = (float)head->output.width;
 			*height = (float)head->output.height;
 		}
+
+		/* The head's size. */
 		return;
 	}
 
@@ -769,9 +777,11 @@ scales_mixed(
 	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
 		return 1;
 
-	/* Each open head's; a mirror draws no pass of its own. */
+	/* No head draws a pass of its own without the device, nor in the mirror mode. */
 	if (server->compose == NULL || server->compose->display_mode != KWL_DISPLAYS_EXTENDED)
 		return 0;
+
+	/* Each open head's scale. */
 	for (index = 0U; index < KWL_HEADS; index++) {
 		head = &server->compose->heads[index];
 		if (head->open && head->scale120 != 0U && head->scale120 != KWL_SCALE_ONE)
