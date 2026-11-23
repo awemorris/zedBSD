@@ -87,7 +87,7 @@ static VkResult vulkan_staging(struct x11_vulkan_window *window);
 static VkResult vulkan_frame_objects(struct x11_vulkan_window *window);
 static void vulkan_swapchain_free(struct x11_vulkan_window *window);
 static void vulkan_staging_free(struct x11_vulkan_window *window);
-static void vulkan_copy_pixels(struct x11_vulkan_window *window, const uint32_t *pixels);
+static void vulkan_copy_pixels(struct x11_vulkan_window *window, const uint32_t *pixels, size_t stride);
 static VkResult vulkan_record(struct x11_vulkan_window *window, uint32_t image);
 static void vulkan_barrier(VkCommandBuffer command, VkImage image, VkImageLayout from, VkImageLayout to, VkAccessFlags source, VkAccessFlags target);
 
@@ -222,7 +222,7 @@ x11_vulkan_open(
 }
 
 /*
- * Shows a window's pixels (rows of its width, 0x00RRGGBB): copied through
+ * Shows a window's pixels (rows of its width, stride pixels apart, 0x00RRGGBB): copied through
  * the staging buffer into a free swapchain image and presented.  Returns
  * 0 when presented, 1 when the frame must wait (the last copy runs, or no
  * image is free), or -1 when Vulkan failed.
@@ -230,7 +230,8 @@ x11_vulkan_open(
 int
 x11_vulkan_window_present(
 	struct x11_vulkan_window *window,
-	const uint32_t *pixels)
+	const uint32_t *pixels,
+	size_t stride)
 {
 	VkPresentInfoKHR present;
 	VkPipelineStageFlags stage;
@@ -269,7 +270,7 @@ x11_vulkan_window_present(
 		return -1;
 
 	/* The pixels into the staging buffer, and the copy into the image recorded. */
-	vulkan_copy_pixels(window, pixels);
+	vulkan_copy_pixels(window, pixels, stride);
 	error = vulkan_record(window, image);
 	if (error != VK_SUCCESS)
 		return -1;
@@ -753,30 +754,31 @@ vulkan_staging_free(
 	window->staging_pixels = NULL;
 }
 
-/* Writes the window's pixels into the staging buffer, opaque, in the chain's byte order. */
+/* Writes the window's pixels (rows stride pixels apart) into the staging buffer, opaque, in the chain's byte order. */
 static void
 vulkan_copy_pixels(
 	struct x11_vulkan_window *window,
-	const uint32_t *pixels)
+	const uint32_t *pixels,
+	size_t stride)
 {
+	const uint32_t *line;
 	uint32_t *target;
 	uint32_t pixel;
-	size_t count;
-	size_t index;
+	size_t width;
+	size_t row;
+	size_t column;
 
-	/* Each pixel, with its alpha made full. */
+	/* Each row, each pixel with its alpha made full; an RGBA chain takes red first (the red and blue bytes change places). */
 	target = window->staging_pixels;
-	count = (size_t)window->extent.width * window->extent.height;
-	if (window->format == VK_FORMAT_B8G8R8A8_UNORM) {
-		for (index = 0U; index < count; index++)
-			target[index] = pixels[index] | VULKAN_OPAQUE;
-		return;
-	}
-
-	/* An RGBA chain takes red first: the red and blue bytes change places. */
-	for (index = 0U; index < count; index++) {
-		pixel = pixels[index];
-		target[index] = VULKAN_OPAQUE | ((pixel & 0xffU) << 16) | (pixel & 0xff00U) | ((pixel >> 16) & 0xffU);
+	width = window->extent.width;
+	for (row = 0U; row < window->extent.height; row++) {
+		line = pixels + row * stride;
+		for (column = 0U; column < width; column++) {
+			pixel = line[column];
+			if (window->format != VK_FORMAT_B8G8R8A8_UNORM)
+				pixel = ((pixel & 0xffU) << 16) | (pixel & 0xff00U) | ((pixel >> 16) & 0xffU);
+			target[row * width + column] = pixel | VULKAN_OPAQUE;
+		}
 	}
 }
 

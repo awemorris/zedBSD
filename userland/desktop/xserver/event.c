@@ -273,27 +273,37 @@ x11_event_structure(
 }
 
 /*
- * Tells the clients that asked for exposures on a window that all of it
- * must be drawn again.
+ * Tells the clients that asked for exposures on a window that parts of
+ * it (boxes on the window, in the order given) must be drawn again: one
+ * Expose a box, each with how many follow.
  */
 void
 x11_event_expose(
 	struct x11server *server,
-	const struct x11_window *window)
+	const struct x11_window *window,
+	const struct x11_region *region)
 {
+	const struct x11_box *box;
 	uint8_t event[32];
+	size_t index;
 
 	/* An InputOnly window shows nothing. */
 	if (window->window_class == X11_INPUT_ONLY)
 		return;
 
-	/* The whole window, and no more exposures follow. */
-	memset(event, 0, sizeof(event));
-	event[0] = X11_EVENT_EXPOSE;
-	x11_write32(event + 4, window->id, 0);
-	x11_write16(event + 12, window->width, 0);
-	x11_write16(event + 14, window->height, 0);
-	(void)x11_event_deliver(server, window, X11_MASK_EXPOSURE, event);
+	/* Each box, and how many follow it. */
+	for (index = 0U; index < region->count; index++) {
+		box = &region->boxes[index];
+		memset(event, 0, sizeof(event));
+		event[0] = X11_EVENT_EXPOSE;
+		x11_write32(event + 4, window->id, 0);
+		x11_write16(event + 8, (uint16_t)box->x0, 0);
+		x11_write16(event + 10, (uint16_t)box->y0, 0);
+		x11_write16(event + 12, (uint16_t)(box->x1 - box->x0), 0);
+		x11_write16(event + 14, (uint16_t)(box->y1 - box->y0), 0);
+		x11_write16(event + 16, (uint16_t)(region->count - 1U - index), 0);
+		(void)x11_event_deliver(server, window, X11_MASK_EXPOSURE, event);
+	}
 }
 
 /*

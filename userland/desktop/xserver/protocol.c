@@ -65,9 +65,12 @@
 #define REQUEST_CREATE_GC		55U
 #define REQUEST_CHANGE_GC		56U
 #define REQUEST_FREE_GC			60U
+#define REQUEST_CLEAR_AREA		61U
 #define REQUEST_COPY_AREA		62U
 #define REQUEST_POLY_LINE		65U
 #define REQUEST_POLY_FILL_RECTANGLE	70U
+#define REQUEST_PUT_IMAGE		72U
+#define REQUEST_GET_IMAGE		73U
 #define REQUEST_IMAGE_TEXT8		76U
 #define REQUEST_IMAGE_TEXT16		77U
 #define REQUEST_QUERY_BEST_SIZE		97U
@@ -82,25 +85,13 @@
 /* zedBSD's own: an RGB image of a window's or a pixmap's rectangle, three bytes a pixel. */
 #define REQUEST_PUT_IMAGE_RGB24		128U
 
-/* The graphics context's value bits: the last of them, and those kept. */
-#define GC_COUNT			23U
-#define GC_FOREGROUND			2U
-#define GC_FONT				14U
-
-/* The default foreground. */
-#define GC_DEFAULT_FOREGROUND		0xffffffU
-
 /* QueryBestSize's classes, and the largest cursor (the backend's pointer is the system's). */
 #define BEST_SIZE_CURSOR		0U
 #define BEST_SIZE_STIPPLE		2U
 #define BEST_CURSOR_MAX			64U
 
-/* SetInputFocus's largest revert-to, and PolyLine's coordinate modes. */
+/* SetInputFocus's largest revert-to. */
 #define REVERT_TO_MAX			2U
-#define COORDINATES_PREVIOUS		1U
-
-/* The pixmap depths a client may make: bitmaps and the screen's. */
-#define DEPTH_BITMAP			1U
 
 /* The keycodes the keyboard has. */
 #define KEYCODE_MIN			8U
@@ -121,18 +112,6 @@
 /* The most keycodes one GetKeyboardMapping answers. */
 #define KEYBOARD_MAPPING_MAX		248U
 
-/*
- * What a drawing request draws into: the pixels and their size, and the
- * window when it is one (NULL for a pixmap).  The root window has no
- * pixels; drawing there draws nothing.
- */
-struct protocol_target {
-	uint32_t *pixels;
-	int width;
-	int height;
-	struct x11_window *window;
-};
-
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_grab_server(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_pointer(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -142,26 +121,13 @@ static unsigned protocol_open_font(struct x11server *server, unsigned index, con
 static unsigned protocol_close_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_list_fonts(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_create_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_free_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_create_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_change_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_free_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_copy_area(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_poly_line(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_poly_fill_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_get_keyboard_mapping(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_get_pointer_mapping(struct x11server *server, unsigned index, size_t length);
 static unsigned protocol_get_modifier_mapping(struct x11server *server, unsigned index, size_t length);
 static unsigned protocol_query_best_size(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned protocol_list_extensions(struct x11server *server, struct x11_client *client, size_t length);
 static unsigned protocol_big_requests(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
-static unsigned protocol_drawable(struct x11server *server, uint32_t id, struct protocol_target *target);
-static unsigned protocol_gc_values(struct x11server *server, struct x11_gc *gc, const struct x11_client *client, const uint8_t *values, uint32_t mask);
-static void protocol_line(struct protocol_target *target, int from_x, int from_y, int to_x, int to_y, uint32_t color);
 static void protocol_error(struct x11server *server, struct x11_client *client, unsigned code, uint32_t resource, uint8_t opcode, uint16_t minor);
 
 /*
@@ -570,32 +536,41 @@ protocol_dispatch(
 		code = protocol_list_fonts(server, index, request, length);
 		break;
 	case REQUEST_CREATE_PIXMAP:
-		code = protocol_create_pixmap(server, index, request, length);
+		code = x11_request_create_pixmap(server, index, request, length);
 		break;
 	case REQUEST_FREE_PIXMAP:
-		code = protocol_free_pixmap(server, index, request, length);
+		code = x11_request_free_pixmap(server, index, request, length);
 		break;
 	case REQUEST_CREATE_GC:
-		code = protocol_create_gc(server, index, request, length);
+		code = x11_request_create_gc(server, index, request, length);
 		break;
 	case REQUEST_CHANGE_GC:
-		code = protocol_change_gc(server, index, request, length);
+		code = x11_request_change_gc(server, index, request, length);
 		break;
 	case REQUEST_FREE_GC:
-		code = protocol_free_gc(server, index, request, length);
+		code = x11_request_free_gc(server, index, request, length);
+		break;
+	case REQUEST_CLEAR_AREA:
+		code = x11_request_clear_area(server, index, request, length);
 		break;
 	case REQUEST_COPY_AREA:
-		code = protocol_copy_area(server, index, request, length);
+		code = x11_request_copy_area(server, index, request, length);
 		break;
 	case REQUEST_POLY_LINE:
-		code = protocol_poly_line(server, index, request, length);
+		code = x11_request_poly_line(server, index, request, length);
 		break;
 	case REQUEST_POLY_FILL_RECTANGLE:
-		code = protocol_poly_fill_rectangle(server, index, request, length);
+		code = x11_request_poly_fill_rectangle(server, index, request, length);
+		break;
+	case REQUEST_PUT_IMAGE:
+		code = x11_request_put_image(server, index, request, length);
+		break;
+	case REQUEST_GET_IMAGE:
+		code = x11_request_get_image(server, index, request, length);
 		break;
 	case REQUEST_IMAGE_TEXT8:
 	case REQUEST_IMAGE_TEXT16:
-		code = protocol_image_text(server, index, request, length);
+		code = x11_request_image_text(server, index, request, length);
 		break;
 	case REQUEST_QUERY_BEST_SIZE:
 		code = protocol_query_best_size(server, index, request, length);
@@ -622,7 +597,7 @@ protocol_dispatch(
 		code = 0U;
 		break;
 	case REQUEST_PUT_IMAGE_RGB24:
-		code = protocol_put_image_rgb24(server, index, request, length);
+		code = x11_request_put_image_rgb24(server, index, request, length);
 		break;
 	case X11_BIGREQ_MAJOR:
 		code = protocol_big_requests(server, client, request, length);
@@ -916,471 +891,6 @@ protocol_list_fonts(
 	return 0U;
 }
 
-/* CreatePixmap: black pixels of a size, of depth 1 or the screen's, charged to the client. */
-static unsigned
-protocol_create_pixmap(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	struct x11_client *client;
-	struct x11_pixmap *pixmap;
-	uint16_t width;
-	uint16_t height;
-	uint32_t id;
-	size_t bytes;
-	unsigned code;
-	unsigned taken;
-	int chosen;
-	int error;
-	int msb;
-
-	/* An id of the client's range not in use, a drawable, a size and a depth. */
-	client = &server->clients[index];
-	msb = client->order;
-	if (length != 16U)
-		return X11_BAD_LENGTH;
-	id = x11_read32(request + 4, msb);
-	chosen = x11_id_chosen(client, id);
-	taken = x11_resource_type(server, id);
-	if (!chosen || taken != 0U)
-		return X11_BAD_ID_CHOICE;
-	code = protocol_drawable(server, x11_read32(request + 8, msb), &target);
-	if (code != 0U)
-		return code;
-	width = x11_read16(request + 12, msb);
-	height = x11_read16(request + 14, msb);
-	if (width == 0U || height == 0U)
-		return X11_BAD_VALUE;
-	if (request[1] != DEPTH_BITMAP && request[1] != X11_DEPTH)
-		return X11_BAD_VALUE;
-
-	/* The client holds the pixmap and its pixels. */
-	bytes = sizeof(*pixmap) + (size_t)width * (size_t)height * sizeof(uint32_t);
-	error = x11_memory_charge(server, index, bytes);
-	if (error != 0)
-		return X11_BAD_ALLOC;
-	pixmap = calloc(1U, sizeof(*pixmap));
-	if (pixmap == NULL) {
-		x11_memory_release(server, index, bytes);
-		return X11_BAD_ALLOC;
-	}
-	pixmap->id = id;
-	pixmap->owner = index;
-	pixmap->depth = request[1];
-	pixmap->width = width;
-	pixmap->height = height;
-	pixmap->pixels = x11_pixels_alloc(width, height, 0U);
-	if (pixmap->pixels == NULL) {
-		x11_memory_release(server, index, bytes);
-		free(pixmap);
-		return X11_BAD_ALLOC;
-	}
-
-	/* Found by its id. */
-	error = x11_resource_add(server, id, X11_RESOURCE_PIXMAP, pixmap);
-	if (error != 0) {
-		x11_memory_release(server, index, bytes);
-		free(pixmap->pixels);
-		free(pixmap);
-		return X11_BAD_ALLOC;
-	}
-
-	/* Succeeded: the pixmap is made. */
-	return 0U;
-}
-
-/* FreePixmap: the pixmap and its pixels go. */
-static unsigned
-protocol_free_pixmap(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_pixmap *pixmap;
-
-	/* The pixmap of the id. */
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	pixmap = x11_pixmap_find(server, x11_read32(request + 4, server->clients[index].order));
-	if (pixmap == NULL)
-		return X11_BAD_PIXMAP;
-
-	/* Succeeded: its id, its pixels and its charge go. */
-	x11_resource_remove(server, pixmap->id);
-	x11_memory_release(server, pixmap->owner, sizeof(*pixmap) + (size_t)pixmap->width * (size_t)pixmap->height * sizeof(uint32_t));
-	free(pixmap->pixels);
-	free(pixmap);
-	return 0U;
-}
-
-/* CreateGC: a graphics context with a white foreground unless its values say otherwise. */
-static unsigned
-protocol_create_gc(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	struct x11_client *client;
-	struct x11_gc *gc;
-	uint32_t mask;
-	uint32_t id;
-	unsigned code;
-	unsigned taken;
-	int chosen;
-	int fits;
-	int error;
-
-	/* An id of the client's range not in use, a drawable, and one value for each bit of the mask. */
-	client = &server->clients[index];
-	if (length < 16U)
-		return X11_BAD_LENGTH;
-	mask = x11_read32(request + 12, client->order);
-	if ((mask >> GC_COUNT) != 0U)
-		return X11_BAD_VALUE;
-	fits = x11_values_fit(mask, 16U, length);
-	if (!fits)
-		return X11_BAD_LENGTH;
-	id = x11_read32(request + 4, client->order);
-	chosen = x11_id_chosen(client, id);
-	taken = x11_resource_type(server, id);
-	if (!chosen || taken != 0U)
-		return X11_BAD_ID_CHOICE;
-	code = protocol_drawable(server, x11_read32(request + 8, client->order), &target);
-	if (code != 0U)
-		return code;
-
-	/* The context and its values. */
-	error = x11_memory_charge(server, index, sizeof(*gc));
-	if (error != 0)
-		return X11_BAD_ALLOC;
-	gc = calloc(1U, sizeof(*gc));
-	if (gc == NULL) {
-		x11_memory_release(server, index, sizeof(*gc));
-		return X11_BAD_ALLOC;
-	}
-	gc->id = id;
-	gc->owner = index;
-	gc->foreground = GC_DEFAULT_FOREGROUND;
-	code = protocol_gc_values(server, gc, client, request + 16, mask);
-	if (code != 0U) {
-		x11_memory_release(server, index, sizeof(*gc));
-		free(gc);
-		return code;
-	}
-
-	/* Found by its id. */
-	error = x11_resource_add(server, id, X11_RESOURCE_GC, gc);
-	if (error != 0) {
-		x11_memory_release(server, index, sizeof(*gc));
-		free(gc);
-		return X11_BAD_ALLOC;
-	}
-
-	/* Succeeded: the context is made. */
-	return 0U;
-}
-
-/* ChangeGC: new values of a graphics context. */
-static unsigned
-protocol_change_gc(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	struct x11_gc *gc;
-	struct x11_gc changed;
-	uint32_t mask;
-	unsigned code;
-	int fits;
-
-	/* The context, and one value for each bit of the mask. */
-	client = &server->clients[index];
-	if (length < 12U)
-		return X11_BAD_LENGTH;
-	mask = x11_read32(request + 8, client->order);
-	if ((mask >> GC_COUNT) != 0U)
-		return X11_BAD_VALUE;
-	fits = x11_values_fit(mask, 12U, length);
-	if (!fits)
-		return X11_BAD_LENGTH;
-	gc = x11_gc_find(server, x11_read32(request + 4, client->order));
-	if (gc == NULL)
-		return X11_BAD_GC;
-
-	/* The values, kept only when every one is right. */
-	changed = *gc;
-	code = protocol_gc_values(server, &changed, client, request + 12, mask);
-	if (code != 0U)
-		return code;
-
-	/* Succeeded: the context is changed. */
-	*gc = changed;
-	return 0U;
-}
-
-/* FreeGC: the context goes. */
-static unsigned
-protocol_free_gc(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_gc *gc;
-
-	/* The context of the id. */
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	gc = x11_gc_find(server, x11_read32(request + 4, server->clients[index].order));
-	if (gc == NULL)
-		return X11_BAD_GC;
-
-	/* Succeeded: its id and its charge go. */
-	x11_resource_remove(server, gc->id);
-	x11_memory_release(server, gc->owner, sizeof(*gc));
-	free(gc);
-	return 0U;
-}
-
-/* CopyArea: a rectangle of one drawable onto another. */
-static unsigned
-protocol_copy_area(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target source;
-	struct protocol_target target;
-	struct x11_gc *gc;
-	unsigned code;
-	int source_x;
-	int source_y;
-	int target_x;
-	int target_y;
-	int width;
-	int height;
-	int row;
-	int column;
-	int from_x;
-	int from_y;
-	int to_x;
-	int to_y;
-	int msb;
-
-	/* The two drawables and the context. */
-	msb = server->clients[index].order;
-	if (length != 28U)
-		return X11_BAD_LENGTH;
-	code = protocol_drawable(server, x11_read32(request + 4, msb), &source);
-	if (code != 0U)
-		return code;
-	code = protocol_drawable(server, x11_read32(request + 8, msb), &target);
-	if (code != 0U)
-		return code;
-	gc = x11_gc_find(server, x11_read32(request + 12, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-
-	/* The rectangle. */
-	source_x = (int16_t)x11_read16(request + 16, msb);
-	source_y = (int16_t)x11_read16(request + 18, msb);
-	target_x = (int16_t)x11_read16(request + 20, msb);
-	target_y = (int16_t)x11_read16(request + 22, msb);
-	width = x11_read16(request + 24, msb);
-	height = x11_read16(request + 26, msb);
-	if (source.pixels == NULL || target.pixels == NULL)
-		return 0U;
-
-	/* Each pixel inside both. */
-	for (row = 0; row < height; row++) {
-		for (column = 0; column < width; column++) {
-			from_x = source_x + column;
-			from_y = source_y + row;
-			to_x = target_x + column;
-			to_y = target_y + row;
-			if (from_x < 0 ||
-			    from_y < 0 ||
-			    from_x >= source.width ||
-			    from_y >= source.height)
-				continue;
-			if (to_x < 0 ||
-			    to_y < 0 ||
-			    to_x >= target.width ||
-			    to_y >= target.height)
-				continue;
-			target.pixels[(size_t)to_y * (size_t)target.width + (size_t)to_x] = source.pixels[(size_t)from_y * (size_t)source.width + (size_t)from_x];
-		}
-	}
-
-	/* Succeeded: a window's rectangle is shown again. */
-	if (target.window != NULL)
-		x11_mark_dirty(server, target.window->x + target_x, target.window->y + target_y, width, height);
-	return 0U;
-}
-
-/* PolyLine: connected one-pixel lines in the context's colour. */
-static unsigned
-protocol_poly_line(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	struct x11_gc *gc;
-	size_t offset;
-	unsigned code;
-	int last_x;
-	int last_y;
-	int x;
-	int y;
-	int msb;
-
-	/* The coordinate mode, the drawable, the context, and whole points. */
-	msb = server->clients[index].order;
-	if (length < 12U || (length - 12U) % 4U != 0U)
-		return X11_BAD_LENGTH;
-	if (request[1] > COORDINATES_PREVIOUS)
-		return X11_BAD_VALUE;
-	code = protocol_drawable(server, x11_read32(request + 4, msb), &target);
-	if (code != 0U)
-		return code;
-	gc = x11_gc_find(server, x11_read32(request + 8, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-	if (target.pixels == NULL)
-		return 0U;
-
-	/* Each point after the first ends a line from the one before (relative to it in the Previous mode). */
-	last_x = 0;
-	last_y = 0;
-	for (offset = 12U; offset + 4U <= length; offset += 4U) {
-		x = (int16_t)x11_read16(request + offset, msb);
-		y = (int16_t)x11_read16(request + offset + 2U, msb);
-		if (offset != 12U && request[1] == COORDINATES_PREVIOUS) {
-			x += last_x;
-			y += last_y;
-		}
-		if (offset != 12U)
-			protocol_line(&target, last_x, last_y, x, y, gc->foreground);
-		last_x = x;
-		last_y = y;
-	}
-
-	/* Succeeded: a window is shown again whole (lines are small and rare). */
-	if (target.window != NULL)
-		x11_mark_dirty(server, target.window->x, target.window->y, target.width, target.height);
-	return 0U;
-}
-
-/* PolyFillRectangle: rectangles of a drawable in the context's colour. */
-static unsigned
-protocol_poly_fill_rectangle(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	struct x11_pixmap pixmap;
-	struct x11_gc *gc;
-	size_t offset;
-	unsigned code;
-	int x;
-	int y;
-	int width;
-	int height;
-	int msb;
-
-	/* The drawable, the context, and whole rectangles. */
-	msb = server->clients[index].order;
-	if (length < 12U || (length - 12U) % 8U != 0U)
-		return X11_BAD_LENGTH;
-	code = protocol_drawable(server, x11_read32(request + 4, msb), &target);
-	if (code != 0U)
-		return code;
-	gc = x11_gc_find(server, x11_read32(request + 8, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-	if (target.pixels == NULL)
-		return 0U;
-
-	/* A pixmap's pixels as the fill sees them. */
-	memset(&pixmap, 0, sizeof(pixmap));
-	pixmap.width = (uint16_t)target.width;
-	pixmap.height = (uint16_t)target.height;
-	pixmap.pixels = target.pixels;
-
-	/* Each rectangle. */
-	for (offset = 12U; offset + 8U <= length; offset += 8U) {
-		x = (int16_t)x11_read16(request + offset, msb);
-		y = (int16_t)x11_read16(request + offset + 2U, msb);
-		width = x11_read16(request + offset + 4U, msb);
-		height = x11_read16(request + offset + 6U, msb);
-		if (target.window != NULL) {
-			x11_window_fill(server, target.window, x, y, width, height, gc->foreground);
-		} else {
-			x11_pixmap_fill(&pixmap, x, y, width, height, gc->foreground);
-		}
-	}
-
-	/* Succeeded: filled. */
-	return 0U;
-}
-
-/* ImageText8 and ImageText16: characters in the core font, from a baseline (into a window). */
-static unsigned
-protocol_image_text(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	struct x11_gc *gc;
-	size_t count;
-	size_t bytes;
-	unsigned code;
-	int wide;
-	int msb;
-
-	/* The drawable and the context. */
-	msb = server->clients[index].order;
-	if (length < 16U)
-		return X11_BAD_LENGTH;
-	code = protocol_drawable(server, x11_read32(request + 4, msb), &target);
-	if (code != 0U)
-		return code;
-	gc = x11_gc_find(server, x11_read32(request + 8, msb));
-	if (gc == NULL)
-		return X11_BAD_GC;
-
-	/* The characters fill the request to its last word (two bytes each for ImageText16). */
-	count = request[1];
-	wide = 0;
-	if (request[0] == REQUEST_IMAGE_TEXT16)
-		wide = 1;
-	bytes = count;
-	if (wide)
-		bytes = count * 2U;
-	if (16U + ((bytes + 3U) & ~(size_t)3U) != length)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: drawn into a window (text into a pixmap is not drawn yet). */
-	if (target.window != NULL && target.pixels != NULL)
-		x11_draw_text(server, target.window, gc, (int16_t)x11_read16(request + 12, msb), (int16_t)x11_read16(request + 14, msb), request + 16, count, wide);
-	return 0U;
-}
-
 /* GetKeyboardMapping: one keysym for each keycode asked for. */
 static unsigned
 protocol_get_keyboard_mapping(
@@ -1477,13 +987,12 @@ protocol_query_best_size(
 	const uint8_t *request,
 	size_t length)
 {
-	struct protocol_target target;
 	struct x11_client *client;
 	struct x11_window *window;
+	struct x11_pixmap *pixmap;
 	uint8_t reply[32];
 	uint16_t width;
 	uint16_t height;
-	unsigned code;
 
 	/* The class and a drawable (an InputOnly window only for a cursor). */
 	client = &server->clients[index];
@@ -1492,11 +1001,11 @@ protocol_query_best_size(
 	if (request[1] > BEST_SIZE_STIPPLE)
 		return X11_BAD_VALUE;
 	window = x11_window_find(server, x11_read32(request + 4, client->order));
-	if (window == NULL || window->window_class != X11_INPUT_ONLY || request[1] != BEST_SIZE_CURSOR) {
-		code = protocol_drawable(server, x11_read32(request + 4, client->order), &target);
-		if (code != 0U)
-			return code;
-	}
+	pixmap = x11_pixmap_find(server, x11_read32(request + 4, client->order));
+	if (window == NULL && pixmap == NULL)
+		return X11_BAD_DRAWABLE;
+	if (window != NULL && window->window_class == X11_INPUT_ONLY && request[1] != BEST_SIZE_CURSOR)
+		return X11_BAD_MATCH;
 
 	/* The size asked, a cursor's within the largest. */
 	width = x11_read16(request + 8, client->order);
@@ -1513,68 +1022,6 @@ protocol_query_best_size(
 	x11_write16(reply + 8, width, client->order);
 	x11_write16(reply + 10, height, client->order);
 	x11_reply(server, client, reply, sizeof(reply));
-	return 0U;
-}
-
-/* zedBSD's PutImageRGB24: three bytes a pixel into a window or a pixmap (what GLX shows its frames with). */
-static unsigned
-protocol_put_image_rgb24(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct protocol_target target;
-	const uint8_t *rgb;
-	size_t count;
-	unsigned code;
-	int x;
-	int y;
-	int width;
-	int height;
-	int row;
-	int column;
-	int to_x;
-	int to_y;
-	int msb;
-
-	/* The drawable. */
-	msb = server->clients[index].order;
-	if (length < 16U)
-		return X11_BAD_LENGTH;
-	code = protocol_drawable(server, x11_read32(request + 4, msb), &target);
-	if (code != 0U)
-		return code;
-
-	/* The rectangle, whose pixels must be in the request. */
-	x = (int16_t)x11_read16(request + 8, msb);
-	y = (int16_t)x11_read16(request + 10, msb);
-	width = x11_read16(request + 12, msb);
-	height = x11_read16(request + 14, msb);
-	count = (size_t)width * (size_t)height;
-	if (count == 0U || count > (length - 16U) / 3U)
-		return X11_BAD_LENGTH;
-	if (target.pixels == NULL)
-		return 0U;
-
-	/* Each pixel inside the target. */
-	for (row = 0; row < height; row++) {
-		for (column = 0; column < width; column++) {
-			to_x = x + column;
-			to_y = y + row;
-			if (to_x < 0 ||
-			    to_y < 0 ||
-			    to_x >= target.width ||
-			    to_y >= target.height)
-				continue;
-			rgb = request + 16U + ((size_t)row * (size_t)width + (size_t)column) * 3U;
-			target.pixels[(size_t)to_y * (size_t)target.width + (size_t)to_x] = ((uint32_t)rgb[0] << 16) | ((uint32_t)rgb[1] << 8) | (uint32_t)rgb[2];
-		}
-	}
-
-	/* Succeeded: a window's rectangle is shown again. */
-	if (target.window != NULL)
-		x11_mark_dirty(server, target.window->x + x, target.window->y + y, width, height);
 	return 0U;
 }
 
@@ -1688,138 +1135,6 @@ protocol_big_requests(
 	x11_reply(server, client, reply, sizeof(reply));
 	client->big_requests = 1;
 	return 0U;
-}
-
-/*
- * Finds what a drawing request draws into: a window (an InputOnly one is
- * BadMatch) or a pixmap.  Returns 0, or BadDrawable, BadMatch.
- */
-static unsigned
-protocol_drawable(
-	struct x11server *server,
-	uint32_t id,
-	struct protocol_target *target)
-{
-	struct x11_window *window;
-	struct x11_pixmap *pixmap;
-
-	/* A window with its pixels (none for the root window). */
-	memset(target, 0, sizeof(*target));
-	window = x11_window_find(server, id);
-	if (window != NULL) {
-		if (window->window_class == X11_INPUT_ONLY)
-			return X11_BAD_MATCH;
-		target->pixels = window->pixels;
-		target->width = window->width;
-		target->height = window->height;
-		target->window = window;
-		return 0U;
-	}
-
-	/* A pixmap. */
-	pixmap = x11_pixmap_find(server, id);
-	if (pixmap == NULL)
-		return X11_BAD_DRAWABLE;
-
-	/* Succeeded: the pixmap's pixels. */
-	target->pixels = pixmap->pixels;
-	target->width = pixmap->width;
-	target->height = pixmap->height;
-	return 0U;
-}
-
-/*
- * Reads the values of a graphics context its mask names (the foreground
- * and the font are kept).  Returns 0, or BadFont for a font that is not
- * open.
- */
-static unsigned
-protocol_gc_values(
-	struct x11server *server,
-	struct x11_gc *gc,
-	const struct x11_client *client,
-	const uint8_t *values,
-	uint32_t mask)
-{
-	uint32_t value;
-	unsigned bit;
-	unsigned type;
-
-	/* The values, in bit order. */
-	for (bit = 0U; bit < GC_COUNT; bit++) {
-		if ((mask & (1U << bit)) == 0U)
-			continue;
-		value = x11_read32(values, client->order);
-		values += 4;
-
-		/* The foreground, and an open font. */
-		if (bit == GC_FOREGROUND)
-			gc->foreground = value;
-		if (bit == GC_FONT) {
-			type = x11_resource_type(server, value);
-			if (type != X11_RESOURCE_FONT)
-				return X11_BAD_FONT;
-			gc->font = value;
-		}
-	}
-
-	/* Succeeded: kept. */
-	return 0U;
-}
-
-/* Draws a one-pixel line into a drawable's pixels (Bresenham), clipped to it. */
-static void
-protocol_line(
-	struct protocol_target *target,
-	int from_x,
-	int from_y,
-	int to_x,
-	int to_y,
-	uint32_t color)
-{
-	int dx;
-	int dy;
-	int step_x;
-	int step_y;
-	int error;
-	int twice;
-
-	/* The distances and directions. */
-	dx = abs(to_x - from_x);
-	dy = -abs(to_y - from_y);
-	step_x = 1;
-	if (from_x > to_x)
-		step_x = -1;
-	step_y = 1;
-	if (from_y > to_y)
-		step_y = -1;
-	error = dx + dy;
-
-	/* Each pixel from the start to the end. */
-	for (;;) {
-		if (from_x >= 0 &&
-		    from_y >= 0 &&
-		    from_x < target->width &&
-		    from_y < target->height)
-			target->pixels[(size_t)from_y * (size_t)target->width + (size_t)from_x] = color;
-
-		/* The end is drawn last. */
-		if (from_x == to_x && from_y == to_y)
-			break;
-
-		/* A step across, down, or both. */
-		twice = 2 * error;
-		if (twice >= dy) {
-			error += dy;
-			from_x += step_x;
-		}
-
-		/* And a step down. */
-		if (twice <= dx) {
-			error += dx;
-			from_y += step_y;
-		}
-	}
 }
 
 /* Sends an error: its code, the request's sequence number, the resource, and the major and minor opcodes. */

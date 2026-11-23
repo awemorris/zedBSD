@@ -69,11 +69,13 @@ x11_vulkan_window_open(
 int
 x11_vulkan_window_present(
 	struct x11_vulkan_window *window,
-	const uint32_t *pixels)
+	const uint32_t *pixels,
+	size_t stride)
 {
 	/* No swapchain. */
 	(void)window;
 	(void)pixels;
+	(void)stride;
 	return ENOTSUP;
 }
 
