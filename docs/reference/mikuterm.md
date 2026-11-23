@@ -70,6 +70,7 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh/config`'s wins) | 15 |
 | `WslPort` | the port of a WSL distribution's own sshd, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 22 |
+| `X11WindowTabify` | `yes`, `no`: a remote X program's main window opens as a tab of mikuterm's window (section 4.5) | `no` |
 
 A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
 server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
@@ -235,6 +236,17 @@ the connection lasts).
 an X server mikuterm runs for the connection (the folder's `README.txt`,
 section 10, has the steps). What the remote programs should know:
 
+- With `X11WindowTabify yes` in `config/mikuterm.conf`, each top-level
+  window that no other window owns and that has no shape opens as a tab of
+  mikuterm's window (titled `[host] title`), and the tab's size is the
+  window's. The X server, still a process of its own at a low integrity
+  level, sends the window's pixels to mikuterm, which draws them in the tab
+  and sends back the keys, the input method's text, the pointer, the wheel,
+  the size and the closing. Dialogs, menus, tooltips, shaped windows (xeyes)
+  and a window mikuterm has no room for stay windows of their own. Closing
+  the tab asks the program to close the window (`WM_DELETE_WINDOW`); a window
+  still there a moment later opens in a tab again. Cursor shapes and the
+  input method's composing text are not shown in a tab.
 - The X server does not offer GLX: a program that draws with OpenGL through
   the X server does not show.
 - GTK 4 draws with OpenGL on the host by default, even over ssh (in software
