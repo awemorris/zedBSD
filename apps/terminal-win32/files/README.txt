@@ -363,6 +363,28 @@ programs need RENDER and XInput2) stop with an X error for now.  A window
 whose program asks for no position may open at the top left of another
 display; Win+Shift+Left or Right moves it.
 
+The X server does not offer OpenGL (GLX): remote programs that draw with
+OpenGL through the X server do not show here.
+
+GTK 4 programs draw with OpenGL on the host by default, even over ssh (in
+software there), and send each window whole as an image every time it
+changes, which is slow over a network.  Set GSK_RENDERER=cairo on the host
+to make them draw with Cairo, which sends far less:
+
+  GSK_RENDERER=cairo gtk4-demo
+
+or, for every program of the login, add this line to ~/.profile on the
+host:
+
+  export GSK_RENDERER=cairo
+
+GTK programs use the host's D-Bus session.  When the login shares one with
+a desktop on the host, a program may wait about half a minute for the
+desktop's services before its window opens; started in a D-Bus session of
+its own, it does not wait:
+
+  dbus-run-session gtk3-demo
+
 
 11. Port forwarding and RemoteCommand
 -------------------------------------
