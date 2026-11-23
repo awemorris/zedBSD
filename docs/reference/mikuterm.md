@@ -262,6 +262,10 @@ shell:
   handles handed to it, in a job object that ends it and every program it
   starts when the connection ends, when the tab closes, or when mikuterm
   ends.
+- The key files (`IdentityFile`) are read once the server's first bytes
+  come through the command, not when it starts: a command may make the key
+  it hands the server (gh makes its codespaces key then), as OpenSSH's `ssh`
+  reads a key only when it signs with it.
 - The last 2 KiB of what it writes on its standard error are shown in the
   tab when the connection fails.
 - The tab says `Connecting to NAME through ProxyCommand ...`. The host key
@@ -426,7 +430,7 @@ OpenSSH's `ssh` where it has the same question:
 | No `User` for the host | `login as: ` | a name; an empty one is asked again |
 | A host's key is not known (`StrictHostKeyChecking ask`) | `The authenticity of host 'NAME (ADDRESS)' can't be established.`, `ED25519 key fingerprint is SHA256:...`, the other names the key is known by in known_hosts (or `This key is not known by any other names.`), `Are you sure you want to continue connecting (yes/no/[fingerprint])? ` | `yes` (any case) or the fingerprint: trust it and keep it; `no` or nothing: refuse; anything else: `Please type 'yes', 'no' or the fingerprint: ` |
 | The server would take an encrypted key | `[x] Remember the passphrase until you sign out of Windows (Tab switches this)` and `Enter passphrase for key 'FILE': `; the same again after a wrong one, three times at most | the passphrase, not shown; Tab switches the box; nothing, or Ctrl+C, passes the key over |
-| The server asks for the password | `USER@HOST's password: `, then `Permission denied, please try again.` after a refused one | the password, not shown |
+| The server asks for the password | `USER@HOST's password: `, then `Permission denied, please try again.` after a refused one; before the first, `No key was accepted (tried: FILES).` and `Key files not found: FILES.` for the settings' key files (also when the login is refused without a password) | the password, not shown |
 | The host showed another key than the one known | the `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!` frame, the fingerprint of the key shown, `Offending ED25519 key in FILE:LINE`, `Host key for NAME has changed and you have requested strict checking.` | none: the connection is refused |
 | The key is on an `@revoked` line | the `WARNING: REVOKED HOST KEY DETECTED!` frame and the file and line | none: refused |
 | An unknown key with `StrictHostKeyChecking yes` or `BatchMode yes` | `No ED25519 host key is known for NAME and you have requested strict checking.` | none: refused |
