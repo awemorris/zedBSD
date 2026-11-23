@@ -234,6 +234,9 @@ set(MIKUTERM_SYSTEM_LIBRARIES
 # The program, with its features (1 or 0): no login shell (WSL is Windows' own), ProxyCommand and GitHub Codespaces.
 add_executable(mikuterm WIN32 ${MIKUTERM_SOURCES})
 target_compile_definitions(mikuterm PRIVATE
+	MIKUTERM_HAVE_WSL=1
+	MIKUTERM_HAVE_OPENER=1
+	MIKUTERM_HAVE_X11=1
 	MIKUTERM_HAVE_LOGIN_SHELL=0
 	MIKUTERM_HAVE_PROXY_COMMAND=1
 	MIKUTERM_HAVE_CODESPACES=1)

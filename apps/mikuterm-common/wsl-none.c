@@ -6,11 +6,11 @@
  */
 
 /*
- * What the Windows program asks Windows of WSL (wsl.c), answered on
- * Linux, where there is no WSL: wsl.exe is never there, no address is
+ * What the Windows program asks Windows of WSL (wsl.c), answered for a
+ * system that has no WSL: wsl.exe is never there, no address is
  * Windows' own, and nothing of WSL listens on a port.  The launch screen
- * of the Linux program offers no WSL row (MIKUTERM_LINUX), so these are
- * reached only by a host of ssh/config named as a distribution.
+ * of a build without WSL (MIKUTERM_HAVE_WSL 0) offers no WSL row, so
+ * these are reached only by a host of ssh/config named as a distribution.
  */
 
 #include "mikuterm.h"

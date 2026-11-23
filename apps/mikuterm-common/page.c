@@ -25,14 +25,21 @@
 #include "userland/desktop/terminal/settings-page.h"
 #include "userland/base/ssh/ssh-config.h"
 
+/* Whether a file can be opened in another program (an editor, the desktop's opener): each build says so. */
+#ifndef MIKUTERM_HAVE_OPENER
+#error "MIKUTERM_HAVE_OPENER must be defined (1 or 0) by the build"
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
 #else
-#include <fcntl.h>
 #include <pwd.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#if MIKUTERM_HAVE_OPENER
+#include <fcntl.h>
+#include <sys/wait.h>
+#endif
 #endif
 
 #include <errno.h>
@@ -55,7 +62,7 @@
 #ifdef _WIN32
 /* The editor of a file no verb opens: Notepad, which every Windows has. */
 #define PAGE_NOTEPAD		L"notepad.exe"
-#else
+#elif MIKUTERM_HAVE_OPENER
 /* The program that opens a file in the desktop's own application for it (the user's text editor). */
 #define PAGE_OPENER		"xdg-open"
 #endif
@@ -109,7 +116,9 @@ static int page_create(void *data, const char *path, const void *bytes, size_t s
 static int page_exists(void *data, const char *path);
 static int page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
 static int page_host_named(void *data, const char *name, size_t size);
+#if MIKUTERM_HAVE_OPENER
 static int page_editor(void *data, struct terminal_window *window, const char *path);
+#endif
 #ifdef _WIN32
 static int page_shell(const wchar_t *verb, const wchar_t *file, const wchar_t *parameters);
 #endif
@@ -166,7 +175,11 @@ mikuterm_page_init(
 	page_state.program.create = page_create;
 	page_state.program.exists = page_exists;
 	page_state.program.check = page_check;
+
+	/* The editor of the hosts file: none where no other program can be started (the tab then says so). */
+#if MIKUTERM_HAVE_OPENER
 	page_state.program.open_editor = page_editor;
+#endif
 	page_state.program.items = page_items;
 	page_state.program.item_count = sizeof(page_items) / sizeof(page_items[0]);
 	page_state.program.item_get = page_item_get;
@@ -423,7 +436,7 @@ page_shell(
 	return 1;
 }
 
-#else
+#elif MIKUTERM_HAVE_OPENER
 /*
  * Opens a file of the folder in the desktop's application for it
  * (xdg-open), started apart from mikuterm so that nothing waits for it.

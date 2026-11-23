@@ -204,14 +204,15 @@ target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 
 #
 # The program, in bin/ of the build directory with its data in share/mikuterm/ beside it, as it is
-# installed.  MIKUTERM_LINUX: the launch screen has no WSL row, the words are Linux's.  The features
-# (1 or 0): the launch screen's Login Shell, ssh_config's ProxyCommand, and GitHub Codespaces.
+# installed.  The features (1 or 0): no WSL row on the launch screen, the settings' opener of files
+# and X11 forwarding, and the launch screen's Login Shell, ssh_config's ProxyCommand and GitHub
+# Codespaces.
 #
 add_executable(mikuterm ${MIKUTERM_SOURCES})
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_xserver)
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_COMMON_DIR})
 # Windows' _stricmp is the C library's strcasecmp (<strings.h>, which <string.h> brings with _GNU_SOURCE).
-target_compile_definitions(mikuterm PRIVATE MIKUTERM_LINUX MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp
+target_compile_definitions(mikuterm PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=1 MIKUTERM_HAVE_X11=1 MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp
 	MIKUTERM_HAVE_LOGIN_SHELL=${MIKUTERM_LOCAL_PROGRAMS}
 	MIKUTERM_HAVE_PROXY_COMMAND=${MIKUTERM_LOCAL_PROGRAMS}
 	MIKUTERM_HAVE_CODESPACES=${MIKUTERM_LOCAL_PROGRAMS})

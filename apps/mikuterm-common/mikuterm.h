@@ -176,11 +176,14 @@ int mikuterm_path_absolute(const char *path);
 size_t mikuterm_path_directory(const wchar_t *path);
 void mikuterm_path_shown(const char *path, char *shown, size_t size);
 
-/* The passphrases kept for the Windows session (credential.c). */
+/* The passphrases kept for the user's session (credential.c of each system). */
 int mikuterm_passphrase_recall(const char *path, char *passphrase, size_t size);
 int mikuterm_passphrase_keep(const char *path, const char *passphrase);
 void mikuterm_passphrase_forget(const char *path);
 unsigned mikuterm_passphrases_forget_all(void);
+
+/* The words of the line about keeping a passphrase, after the box that chooses it: how long it is kept here. */
+const char *mikuterm_passphrase_keep_text(void);
 
 /* The settings' tab's files and settings (page.c), and where a font named in the settings is (main.c). */
 struct terminal_page_program;

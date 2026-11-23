@@ -199,6 +199,17 @@ mikuterm_passphrases_forget_all(void)
 }
 
 /*
+ * Returns the words of the line that says how long a passphrase is kept,
+ * shown after the box that chooses whether to keep it.
+ */
+const char *
+mikuterm_passphrase_keep_text(void)
+{
+	/* How long this system keeps a passphrase. */
+	return "Remember the passphrase until you sign out of Windows (Tab switches this)\r\n";
+}
+
+/*
  * Makes the credential's name for the key file at path (UTF-8): the
  * prefix and the file's full path, in memory the caller frees.  Returns 0,
  * EINVAL, ENOMEM or EIO.
