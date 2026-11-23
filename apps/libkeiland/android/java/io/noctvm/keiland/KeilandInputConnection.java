@@ -7,7 +7,6 @@
 
 package io.noctvm.keiland;
 
-import android.view.View;
 import android.view.inputmethod.BaseInputConnection;
 
 /**
@@ -21,15 +20,37 @@ final class KeilandInputConnection extends BaseInputConnection {
 	/** The text being composed now, or the empty string. */
 	private String composing = "";
 
-	KeilandInputConnection(View view) {
+	/** The view, whose key bar holds Ctrl and Alt for the next character. */
+	private final InputView inputView;
+
+	KeilandInputConnection(InputView view) {
 		super(view, true);
+		inputView = view;
 	}
 
 	@Override
 	public boolean commitText(CharSequence text, int newCursorPosition) {
+		String committed;
+		int[] need;
+		int code;
+		int meta;
+
 		/* The committed text replaces whatever was being composed. */
 		composing = "";
-		KeilandBridge.nativeCommit(text.toString());
+		committed = text.toString();
+
+		/* A character typed while Ctrl or Alt is held is that key with them, not text. */
+		meta = inputView.takeLatched();
+		if (meta != 0 && committed.length() == 1) {
+			need = new int[1];
+			code = KeyBar.keycodeOf(committed.charAt(0), need);
+			if (code != 0) {
+				KeilandBridge.nativeKey(code, meta | need[0], true);
+				KeilandBridge.nativeKey(code, meta | need[0], false);
+				return true;
+			}
+		}
+		KeilandBridge.nativeCommit(committed);
 		return true;
 	}
 

@@ -20,17 +20,34 @@
 
 #include "apps/libkeiland/android/android.h"
 
+#include "apps/libkeiland/android/bridge-jni.h"
+
 #include <android/input.h>
 
+#include <math.h>
 #include <string.h>
+
+/* A touch that is short and stays in its place is a tap, which shows the keyboard: the time in milliseconds, the distance in pixels. */
+#define INPUT_TAP_MS		300
+#define INPUT_TAP_PIXELS	32.0
 
 /* The distance of one notch of a mouse's wheel, in pixels (as the Windows backend's). */
 #define INPUT_NOTCH_PIXELS	60.0
 
+/* The key whose press chose a menu item, until it is released (its release and repeats are not typed either). */
+static int32_t input_shortcut_down;
+
 /* The buttons of the mouse held as the last event told (only M reads and writes it). */
 static int32_t input_buttons;
 
+/* Where and when the touch that is going on began (the first finger). */
+static float input_down_x;
+static float input_down_y;
+static int64_t input_down_time;
+
 static struct kl_window *input_window(struct kl_app *app);
+static int input_shortcut(struct kl_window *window, int32_t keycode, int32_t meta, int pressed, int repeated);
+static void input_tap(const AInputEvent *event);
 static void input_fill(struct kl_app *app, struct kl_window_event *input, unsigned kind, const AInputEvent *event);
 static void input_place(const struct kl_app *app, const AInputEvent *event, size_t index, struct kl_window_event *input);
 static int input_touch(struct kl_app *app, struct kl_window *window, const AInputEvent *event);
@@ -96,6 +113,11 @@ android_input_key(
 	if (code == 0U)
 		return 0;
 
+	/* A key with Ctrl, Alt or Super that is a menu item's shortcut chooses the item (on its press), and is not typed. */
+	if (input_shortcut(window, AKeyEvent_getKeyCode(event), AKeyEvent_getMetaState(event), action != AKEY_EVENT_ACTION_UP,
+	    AKeyEvent_getRepeatCount(event) > 0))
+		return 1;
+
 	/* The input. */
 	input_fill(app, &input, KL_WINDOW_KEY, event);
 	input.code = code;
@@ -128,13 +150,44 @@ android_input_motion(
 
 	/* A finger, or a pointing device. */
 	tool = AMotionEvent_getToolType(event, 0);
-	if (tool == AMOTION_EVENT_TOOL_TYPE_FINGER || tool == AMOTION_EVENT_TOOL_TYPE_UNKNOWN)
+	if (tool == AMOTION_EVENT_TOOL_TYPE_FINGER || tool == AMOTION_EVENT_TOOL_TYPE_UNKNOWN) {
 		(void)input_touch(app, window, event);
-	else
+		input_tap(event);
+	} else
 		(void)input_pointer(app, window, event);
 
 	/* Succeeded. */
 	return 1;
+}
+
+/* Shows the keyboard when the finger that touched lifts in its place soon (a tap): the user may have put it away. */
+static void
+input_tap(
+	const AInputEvent *event)
+{
+	int32_t action;
+	float dx;
+	float dy;
+	int64_t time;
+
+	/* The first finger's down, and its up. */
+	action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+	if (action == AMOTION_EVENT_ACTION_DOWN) {
+		input_down_x = AMotionEvent_getX(event, 0);
+		input_down_y = AMotionEvent_getY(event, 0);
+		input_down_time = AMotionEvent_getEventTime(event);
+		return;
+	}
+	if (action != AMOTION_EVENT_ACTION_UP)
+		return;
+
+	/* Soon, and in the same place. */
+	time = AMotionEvent_getEventTime(event) - input_down_time;
+	dx = AMotionEvent_getX(event, 0) - input_down_x;
+	dy = AMotionEvent_getY(event, 0) - input_down_y;
+	if (time > (int64_t)INPUT_TAP_MS * 1000000 || sqrt((double)(dx * dx + dy * dy)) > INPUT_TAP_PIXELS)
+		return;
+	(void)keiland_java_show_keyboard(1);
 }
 
 /*
@@ -165,8 +218,36 @@ android_input_bridge_key(
 	input.pressed = (event->c != 0);
 	input.modifiers = android_key_modifiers(event->b);
 
+	/* A shortcut of the menu is not typed. */
+	if (input_shortcut(window, event->a, event->b, event->c != 0, 0))
+		return 0;
+
 	/* Queued. */
 	return android_window_queue(window, &input);
+}
+
+/* Tells whether a key's press, repeat or release belongs to a menu item's shortcut (the press chooses the item).  Returns 1 if it does. */
+static int
+input_shortcut(
+	struct kl_window *window,
+	int32_t keycode,
+	int32_t meta,
+	int pressed,
+	int repeated)
+{
+	/* The release of a key that chose an item, and its repeats. */
+	if (input_shortcut_down == keycode && input_shortcut_down != 0) {
+		if (!pressed)
+			input_shortcut_down = 0;
+		return 1;
+	}
+
+	/* A new press that is a shortcut. */
+	if (pressed && !repeated && android_titlebar_shortcut(window, keycode, meta)) {
+		input_shortcut_down = keycode;
+		return 1;
+	}
+	return 0;
 }
 
 /* Returns the window the input goes to, or NULL. */

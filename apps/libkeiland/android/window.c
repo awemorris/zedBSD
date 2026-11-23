@@ -153,6 +153,7 @@ kl_window_close(
 
 	/* The title, the frame kept and the state. */
 	android_present_release(window);
+	android_titlebar_release(window);
 	free(window->title);
 	free(window);
 }

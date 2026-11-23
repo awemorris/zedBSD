@@ -26,6 +26,9 @@ final class InputView extends View {
 	/** Letters only, with no suggestions or corrections (0), or a language's input (1). */
 	private int mode;
 
+	/** The key bar shown over the keyboard, whose Ctrl and Alt hold for the next character typed. */
+	private KeyBar keyBar;
+
 	/** Whether the keyboard was asked for before the window could show it (it has no focus yet). */
 	private boolean showPending;
 
@@ -52,6 +55,19 @@ final class InputView extends View {
 		}
 		info.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
 		return new KeilandInputConnection(this);
+	}
+
+	/** Takes the key bar whose held modifiers the typed characters get. */
+	void setKeyBar(KeyBar bar) {
+		keyBar = bar;
+	}
+
+	/** Returns the meta bits the key bar holds for the next character, and lets them go (0 when it holds none). */
+	int takeLatched() {
+		if (keyBar == null) {
+			return 0;
+		}
+		return keyBar.takeLatched();
 	}
 
 	/** Chooses the kind of input; a different one restarts the input method's session. */

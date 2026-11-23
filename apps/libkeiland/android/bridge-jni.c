@@ -55,6 +55,7 @@ static void bridge_jni_native_config(JNIEnv *env, jclass cls, jboolean dark, jin
 static void bridge_jni_native_focus(JNIEnv *env, jclass cls, jboolean focused);
 static void bridge_jni_native_clipboard(JNIEnv *env, jclass cls, jstring text);
 static void bridge_jni_native_menu(JNIEnv *env, jclass cls, jint request, jint item);
+static void bridge_jni_native_key(JNIEnv *env, jclass cls, jint keycode, jint meta, jboolean down);
 static int bridge_jni_push_string(JNIEnv *env, struct keiland_bridge_event *event, jstring text);
 static int bridge_jni_method(JNIEnv *env, jmethodID *method, const char *name, const char *signature);
 static jstring bridge_jni_new_string(JNIEnv *env, const char *text, size_t length);
@@ -69,7 +70,8 @@ static const JNINativeMethod bridge_jni_natives[] = {
 	{ "nativeConfig", "(ZIFLjava/lang/String;)V", (void *)bridge_jni_native_config },
 	{ "nativeFocus", "(Z)V", (void *)bridge_jni_native_focus },
 	{ "nativeClipboard", "(Ljava/lang/String;)V", (void *)bridge_jni_native_clipboard },
-	{ "nativeMenu", "(II)V", (void *)bridge_jni_native_menu }
+	{ "nativeMenu", "(II)V", (void *)bridge_jni_native_menu },
+	{ "nativeKey", "(IIZ)V", (void *)bridge_jni_native_key }
 };
 
 /*
@@ -771,4 +773,34 @@ bridge_jni_call_failed(
 
 	/* Succeeded: no exception. */
 	return 0;
+}
+
+/*
+ * Queues a key the key bar sent: its Android key code, the meta state and
+ * whether it is pressed.
+ */
+static void
+bridge_jni_native_key(
+	JNIEnv *env,
+	jclass cls,
+	jint keycode,
+	jint meta,
+	jboolean down)
+{
+	struct keiland_bridge_event event;
+	int error;
+
+	(void)env;
+	(void)cls;
+
+	/* Queues the event. */
+	memset(&event, 0, sizeof(event));
+	event.kind = KEILAND_BRIDGE_KEY;
+	event.a = keycode;
+	event.b = meta;
+	event.c = down ? 1 : 0;
+	error = keiland_bridge_push(&event, NULL, 0);
+	if (error != 0) {
+		/* The event was dropped and counted. */
+	}
 }
