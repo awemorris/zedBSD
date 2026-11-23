@@ -213,9 +213,10 @@ x11server_destroy(
 	/* The extensions' state. */
 	x11_extension_fini(server);
 
-	/* The root window, with what is left of it (its properties, the extensions' events on it, its pixels and its surface). */
+	/* The root window, with what is left of it (its properties, the extensions' and XInput2's events on it, its pixels and its surface). */
 	if (server->root != NULL) {
 		x11_extension_forget_window(server, server->root);
+		x11_xinput_window_destroyed(server->root);
 		x11_property_forget_window(server, server->root);
 		x11_rootless_forget(server, server->root);
 		x11_draw_forget(server, server->root);
