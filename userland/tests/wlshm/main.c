@@ -20,8 +20,11 @@
  *
  *   wlshm [--size=WxH] [--color=AARRGGBB] [--xrgb] [--band=AARRGGBB]
  *         [--frames=N] [--cursor=AARRGGBB] [--cursor-every=N]
- *         [--hide-cursor] [--hold]
+ *         [--hide-cursor] [--hold] [--log-motion]
  *         [--delay-ms=N] [--token=NAME] [--display=NAME] [--csd]
+ *
+ * The pointer's enter is logged (WLSHM ENTER, the place also in 24.8 as it
+ * came); with --log-motion every motion too (WLSHM MOTION).
  *
  * The window asks for the compositor's titlebar (kl_titlebar, an explicit
  * server-side decoration) before its first commit, as the native
@@ -81,6 +84,7 @@ struct window {
 	int band;
 	int cursor;
 	int hide_cursor;
+	int log_motion;
 	int hold;
 	uint32_t delay_ms;
 	int32_t shown_band;
@@ -152,7 +156,7 @@ main(
 	memset(&window, 0, sizeof(window));
 	error = options(count, arguments, &window, &frames);
 	if (error != 0) {
-		fprintf(stderr, "usage: wlshm [--size=WxH] [--color=AARRGGBB] [--xrgb] [--band=AARRGGBB] [--frames=N] [--cursor=AARRGGBB] [--cursor-every=N] [--hide-cursor] [--hold] [--delay-ms=N] [--token=NAME] [--display=NAME] [--csd]\n");
+		fprintf(stderr, "usage: wlshm [--size=WxH] [--color=AARRGGBB] [--xrgb] [--band=AARRGGBB] [--frames=N] [--cursor=AARRGGBB] [--cursor-every=N] [--hide-cursor] [--hold] [--log-motion] [--delay-ms=N] [--token=NAME] [--display=NAME] [--csd]\n");
 		return 2;
 	}
 
@@ -215,7 +219,7 @@ options(
 	static const char *const names[] = {
 		"--size=", "--color=", "--xrgb", "--band=", "--frames=", "--cursor=",
 		"--delay-ms=", "--hold", "--hide-cursor", "--token=", "--display=", "--csd",
-		"--cursor-every="
+		"--cursor-every=", "--log-motion"
 	};
 	const char *argument;
 	const char *value;
@@ -300,6 +304,10 @@ options(
 			error = option_number(value, 10, 1000UL, &window->cursor_every);
 			if (error == 0 && window->cursor_every == 0U)
 				error = -1;
+			break;
+		case 13:
+			window->log_motion = 1;
+			error = 0;
 			break;
 		default:
 			break;
@@ -854,12 +862,16 @@ pointer_motion(
 	wl_fixed_t x,
 	wl_fixed_t y)
 {
-	/* Not used. */
-	(void)data;
+	struct window *window;
+
+	/* The place the pointer moved to, as it came (24.8), with --log-motion. */
+	window = data;
 	(void)pointer;
 	(void)time;
-	(void)x;
-	(void)y;
+	if (!window->log_motion)
+		return;
+	printf("WLSHM MOTION run=%s fixed=%d,%d\n", window->token, x, y);
+	fflush(stdout);
 }
 
 static void
