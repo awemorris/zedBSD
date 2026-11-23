@@ -54,7 +54,13 @@
 /* The X clients one link carries at a time. */
 #define X11_LINK_CHANNELS	32U
 
-/* The credit each side starts a channel with: the parent may send 192 KiB, the child 256 KiB. */
+/*
+ * The credit each side starts a channel with: the parent may send 192 KiB,
+ * the child 256 KiB.  The child keeps the parent's credit and what its
+ * core holds of the client at 192 KiB, or at the whole of a longer
+ * request the core holds a part of (up to X11_LINK_CREDIT_MAX), since the
+ * core hands back nothing of a request until it is whole.
+ */
 #define X11_LINK_CREDIT_TO_CHILD	(192U * 1024U)
 #define X11_LINK_CREDIT_TO_PARENT	(256U * 1024U)
 

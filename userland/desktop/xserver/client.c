@@ -399,6 +399,69 @@ x11server_written(
 }
 
 /*
+ * Gives how many bytes of a client's input the core holds unhandled, and
+ * in *wanted how many more it waits for before the request at their
+ * front is whole.
+ *
+ * A transport that holds a client back by a window smaller than the
+ * longest request uses *wanted to let the rest of a long request in: the
+ * core handles nothing of a request until it is whole, so no input is
+ * reported handled while it waits.  *wanted is 0 when the front request
+ * is whole, when not even its length has come yet, or for a request too
+ * long to hold (its bytes are dropped as they come and reported handled).
+ * A client that is not connected holds nothing.
+ */
+size_t
+x11server_held(
+	struct x11server *server,
+	uint32_t client,
+	size_t *wanted)
+{
+	struct x11_client *connection;
+	unsigned index;
+	uint32_t words;
+	uint16_t units;
+	size_t need;
+
+	/* Nothing wanted until the front request says how long it is. */
+	*wanted = 0U;
+
+	/* Nothing held for a client that is not connected. */
+	connection = server_client(server, client, &index);
+	if (connection == NULL)
+		return 0U;
+
+	/* The setup, the bytes being dropped, and a request without its length leave nothing to wait for. */
+	if (!connection->setup)
+		return connection->used;
+	if (connection->discard > 0U)
+		return connection->used;
+	if (connection->used < 4U)
+		return connection->used;
+
+	/* The length the header gives, in words; zero means a 32-bit length follows for a BIG-REQUESTS client. */
+	units = x11_read16(connection->input + 2, connection->order);
+	need = (size_t)units * 4U;
+	if (units == 0U) {
+		if (!connection->big_requests)
+			return connection->used;
+		if (connection->used < 8U)
+			return connection->used;
+		words = x11_read32(connection->input + 4, connection->order);
+		if (words > X11_INPUT_CAP / 4U)
+			return connection->used;
+		need = (size_t)words * 4U;
+	}
+
+	/* The rest of the front request, when part of it is still to come. */
+	if (need > connection->used)
+		*wanted = need - connection->used;
+
+	/* Succeeded: the bytes held. */
+	return connection->used;
+}
+
+/*
  * Ends a client whose connection the transport lost or closed: its
  * resources go at once, and the transport needs no word back.
  */

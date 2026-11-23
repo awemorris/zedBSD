@@ -109,6 +109,7 @@ XOpenDisplay(
 	struct sockaddr_un a;
 	uint8_t q[12] = {0}, h[8], b[4096];
 	uint16_t z;
+	size_t screen;
 	Display *d;
 
 	(void)n;
@@ -142,7 +143,16 @@ XOpenDisplay(
 		goto bad;
 	d->base = r32(b + 4);
 	d->next = 1;
-	d->root = r32(b + 52);
+
+	/*
+	 * The first screen follows the fixed part, the vendor (padded to a
+	 * word) and the pixmap formats (8 bytes each); its first word is the
+	 * root window.
+	 */
+	screen = 32U + (((size_t)r16(b + 16) + 3U) & ~(size_t)3U) + 8U * (size_t)b[21];
+	if (screen + 4U > z * 4U)
+		goto bad;
+	d->root = r32(b + screen);
 	d->white = 0xffffff;
 
 	/* The keycodes the server has, and its keyboard's map. */

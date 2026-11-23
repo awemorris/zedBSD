@@ -8,17 +8,19 @@
 /*
  * The window tree and its requests, and drawing into windows and pixmaps.
  *
- * Each window keeps its children in stacking order, bottom first, and its
- * own pixels, so it can be shown again without its client; places are
- * kept on the root window (a window's origin, inside its border) and
+ * Each window keeps its children in stacking order, bottom first; places
+ * are kept on the root window (a window's origin, inside its border) and
  * given to clients relative to the parent, as the protocol does.  The
  * requests that would change a window another client manages (one that
  * selected SubstructureRedirect on its parent, or ResizeRedirect on it)
  * are passed to that client as MapRequest, ConfigureRequest,
  * CirculateRequest or ResizeRequest instead.  The rootless server is
  * itself the window manager of the root window's children, so no client
- * may redirect them.  What changes is gathered into one box
- * (x11_mark_dirty) that rootless.c shows at the end of a pass.
+ * may redirect them.  A change that moves, resizes, maps, unmaps or
+ * restacks a window is bracketed by x11_draw_begin and x11_draw_end
+ * (draw.c), which keep the pixels that are still seen and expose the
+ * rest.  What changes is gathered into one box (x11_mark_dirty) that
+ * rootless.c shows at the end of a pass.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -27,8 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The colour text is drawn in without a graphics context, and a new window's colour when its creator gives none. */
-#define WINDOW_TEXT_COLOR	0xffffffU
+/* A new window's colour when its creator gives none. */
 #define WINDOW_BACKGROUND	0x607080U
 
 /* The window attributes' value bits, the last of them, and those an InputOnly window may have. */
@@ -122,7 +123,8 @@ struct window_configure {
 
 static unsigned window_values_read(struct x11server *server, unsigned index, const struct x11_window *window, uint32_t mask, const uint8_t *values, struct window_values *read);
 static unsigned window_values_apply(struct x11server *server, unsigned index, struct x11_window *window, const struct window_values *values);
-static unsigned window_pixels(struct x11server *server, struct x11_window *window, uint16_t width, uint16_t height);
+static unsigned window_values_tiles(struct x11server *server, struct x11_window *window, const struct window_values *values);
+static void window_drop_tile(struct x11server *server, struct x11_window *window, struct x11_image **tile);
 static void window_link(struct x11_window *parent, struct x11_window *window, struct x11_window *under);
 static void window_unlink(struct x11_window *window);
 static struct x11_window *window_next_over(struct x11_window *window, const struct x11_window *top);
@@ -131,7 +133,6 @@ static int window_relative_x(const struct x11_window *window);
 static int window_relative_y(const struct x11_window *window);
 static void window_map(struct x11server *server, unsigned requester, struct x11_window *window);
 static void window_unmap(struct x11server *server, struct x11_window *window, int from_configure);
-static void window_expose_tree(struct x11server *server, struct x11_window *window);
 static void window_configure_notify(struct x11server *server, struct x11_window *window);
 static void window_configure_synthetic(struct x11server *server, struct x11_window *window, unsigned client);
 static unsigned window_configure_read(struct x11server *server, struct x11_window *window, uint32_t mask, const uint8_t *values, int msb, struct window_configure *configure);
@@ -358,17 +359,11 @@ x11_request_create_window(
 	if ((values.mask & (1U << ATTRIBUTE_BACKGROUND_PIXEL)) != 0U)
 		window->background = values.value[ATTRIBUTE_BACKGROUND_PIXEL];
 
-	/* The client holds the window and its pixels. */
+	/* The client holds the window. */
 	error = x11_memory_charge(server, index, sizeof(*window));
 	if (error != 0) {
 		free(window);
 		return X11_BAD_ALLOC;
-	}
-	code = window_pixels(server, window, window->width, window->height);
-	if (code != 0U) {
-		x11_memory_release(server, index, sizeof(*window));
-		free(window);
-		return code;
 	}
 
 	/* Found by its id. */
@@ -443,6 +438,10 @@ x11_request_change_attributes(
 	code = window_values_apply(server, index, window, &values);
 	if (code != 0U)
 		return code;
+
+	/* A new border is painted at once (a new background waits for an exposure or ClearArea). */
+	if ((mask & ((1U << ATTRIBUTE_BORDER_PIXMAP) | (1U << ATTRIBUTE_BORDER_PIXEL))) != 0U)
+		x11_draw_border(server, window);
 
 	/* Succeeded: the attributes are changed. */
 	return 0U;
@@ -607,13 +606,12 @@ x11_request_reparent_window(
 	if (was_mapped)
 		window_unmap(server, window, 0);
 
-	/* A top-level window that leaves the root window leaves its surface. */
+	/* A top-level window that leaves the root window leaves its surface (its pixels went with its unmapping). */
 	old_parent = window->parent;
 	if (old_parent == server->root)
 		x11_rootless_forget(server, window);
 
 	/* On top of the new parent's children, at its place there; the inferiors move with it. */
-	x11_mark_dirty(server, window->x, window->y, window->width, window->height);
 	window_unlink(window);
 	window_link(parent, window, NULL);
 	x = parent->x + (int16_t)x11_read16(request + 12, msb) + window->border;
@@ -798,19 +796,14 @@ x11_request_configure_window(
 		resized = 0;
 	}
 
-	/* Pixels of the new size, keeping what fits. */
+	/* What is seen of the tree is kept, with the window's pixels, which may move with it. */
 	old_x = window->x;
 	old_y = window->y;
 	old_width = window->width;
 	old_height = window->height;
-	if (resized) {
-		code = window_pixels(server, window, configure.width, configure.height);
-		if (code != 0U)
-			return code;
-	}
+	x11_draw_begin(server, window, window);
 
 	/* The new configuration; the inferiors move with the window. */
-	x11_mark_dirty(server, old_x - window->border, old_y - window->border, old_width + 2 * window->border, old_height + 2 * window->border);
 	new_x = window->parent->x + configure.x + configure.border;
 	new_y = window->parent->y + configure.y + configure.border;
 	window_move(window, new_x - old_x, new_y - old_y);
@@ -819,24 +812,23 @@ x11_request_configure_window(
 	window->border = configure.border;
 	if ((configure.mask & (1U << CONFIGURE_STACK_MODE)) != 0U)
 		(void)window_restack(server, window, configure.sibling, configure.stack_mode);
-	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
 
-	/* A refused border that left everything as it was: the synthetic ConfigureNotify alone. */
+	/* A refused border that left everything as it was: the synthetic ConfigureNotify alone (nothing newly seen). */
 	if (border_refused &&
 	    new_x == old_x &&
 	    new_y == old_y &&
 	    !resized &&
 	    (configure.mask & (1U << CONFIGURE_STACK_MODE)) == 0U) {
+		x11_draw_end(server);
 		window_configure_synthetic(server, window, index);
 		return 0U;
 	}
 
-	/* The window's clients are told, its children follow their gravity, and a new size is drawn again. */
+	/* The window's clients are told, its children follow their gravity, and what is newly seen is drawn again. */
 	window_configure_notify(server, window);
-	if (resized) {
+	if (resized)
 		window_gravity(server, window, old_width, old_height, new_x - old_x, new_y - old_y);
-		window_expose_tree(server, window);
-	}
+	x11_draw_end(server);
 
 	/* Succeeded: the window is configured. */
 	return 0U;
@@ -908,12 +900,14 @@ x11_request_circulate_window(
 		return 0U;
 	}
 
-	/* Succeeded: moved, and told to the child's and the window's clients. */
+	/* Succeeded: moved (what is newly seen drawn again), and told to the child's and the window's clients. */
+	x11_draw_begin(server, chosen, NULL);
 	if (place == PLACE_ON_TOP) {
 		(void)window_restack(server, chosen, NULL, STACK_ABOVE);
 	} else {
 		(void)window_restack(server, chosen, NULL, STACK_BELOW);
 	}
+	x11_draw_end(server);
 	event[0] = X11_EVENT_CIRCULATE_NOTIFY;
 	x11_event_structure(server, chosen, event);
 	return 0U;
@@ -1109,8 +1103,10 @@ x11_window_raise(
 	if (window == NULL || window->parent == NULL)
 		return;
 
-	/* Succeeded: on top. */
+	/* Succeeded: on top, what is newly seen drawn again. */
+	x11_draw_begin(server, window, NULL);
 	(void)window_restack(server, window, NULL, STACK_ABOVE);
+	x11_draw_end(server);
 }
 
 /*
@@ -1128,7 +1124,6 @@ x11_window_backend_configure(
 	uint16_t width,
 	uint16_t height)
 {
-	unsigned code;
 	int old_width;
 	int old_height;
 	int dx;
@@ -1148,30 +1143,23 @@ x11_window_backend_configure(
 	if (dx == 0 && dy == 0 && !resized)
 		return;
 
-	/* Pixels of the new size. */
+	/* What is seen of it is kept, with its pixels, which may move by its bit gravity. */
 	old_width = window->width;
 	old_height = window->height;
-	if (resized) {
-		code = window_pixels(server, window, width, height);
-		if (code != 0U)
-			return;
-	}
+	x11_draw_begin(server, window, window);
 
 	/* The new place (the surface is already there) and size. */
-	x11_mark_dirty(server, window->x, window->y, window->width, window->height);
 	window_move(window, dx, dy);
 	window->surface_x = window->x;
 	window->surface_y = window->y;
 	window->width = width;
 	window->height = height;
-	x11_mark_dirty(server, window->x, window->y, window->width, window->height);
 
-	/* Succeeded: told, and a new size drawn again. */
+	/* Succeeded: told, its children by their gravity, and what is newly seen drawn again. */
 	window_configure_notify(server, window);
-	if (resized) {
+	if (resized)
 		window_gravity(server, window, old_width, old_height, dx, dy);
-		window_expose_tree(server, window);
-	}
+	x11_draw_end(server);
 }
 
 /*
@@ -1300,193 +1288,6 @@ x11_window_child_at(
 }
 
 /*
- * Allocates pixels of a size, each of a colour.  Returns NULL for an empty
- * size or when there is no memory.
- */
-uint32_t *
-x11_pixels_alloc(
-	uint16_t width,
-	uint16_t height,
-	uint32_t color)
-{
-	uint32_t *pixels;
-	size_t count;
-	size_t index;
-
-	/* An empty size has no pixels. */
-	if (width == 0U || height == 0U)
-		return NULL;
-
-	/* The memory. */
-	count = (size_t)width * (size_t)height;
-	pixels = malloc(count * sizeof(*pixels));
-	if (pixels == NULL)
-		return NULL;
-
-	/* Each pixel of the colour. */
-	for (index = 0U; index < count; index++)
-		pixels[index] = color;
-
-	/* Succeeded: the pixels. */
-	return pixels;
-}
-
-/*
- * Fills a rectangle of a window (in its own coordinates) with a colour,
- * clipped to the window.
- */
-void
-x11_window_fill(
-	struct x11server *server,
-	struct x11_window *window,
-	int x,
-	int y,
-	int width,
-	int height,
-	uint32_t color)
-{
-	int row;
-	int column;
-
-	/* Clipped to the window. */
-	if (x < 0) {
-		width += x;
-		x = 0;
-	}
-
-	/* Clipped at the top. */
-	if (y < 0) {
-		height += y;
-		y = 0;
-	}
-
-	/* Clipped at the right and the bottom. */
-	if (x + width > window->width)
-		width = window->width - x;
-	if (y + height > window->height)
-		height = window->height - y;
-	if (width <= 0 || height <= 0)
-		return;
-
-	/* Each pixel. */
-	for (row = y; row < y + height; row++) {
-		for (column = x; column < x + width; column++)
-			window->pixels[(size_t)row * window->width + (size_t)column] = color;
-	}
-
-	/* Shown again. */
-	x11_mark_dirty(server, window->x + x, window->y + y, width, height);
-}
-
-/*
- * Fills a rectangle of a pixmap with a colour, clipped to the pixmap.
- */
-void
-x11_pixmap_fill(
-	struct x11_pixmap *pixmap,
-	int x,
-	int y,
-	int width,
-	int height,
-	uint32_t color)
-{
-	int row;
-	int column;
-
-	/* Clipped to the pixmap. */
-	if (x < 0) {
-		width += x;
-		x = 0;
-	}
-
-	/* Clipped at the top. */
-	if (y < 0) {
-		height += y;
-		y = 0;
-	}
-
-	/* Clipped at the right and the bottom. */
-	if (x + width > pixmap->width)
-		width = pixmap->width - x;
-	if (y + height > pixmap->height)
-		height = pixmap->height - y;
-	if (width <= 0 || height <= 0)
-		return;
-
-	/* Each pixel. */
-	for (row = y; row < y + height; row++) {
-		for (column = x; column < x + width; column++)
-			pixmap->pixels[(size_t)row * pixmap->width + (size_t)column] = color;
-	}
-}
-
-/*
- * Draws characters (bytes, or big-endian pairs when wide) in the core font
- * onto a window, the cells standing on a baseline at y.
- */
-void
-x11_draw_text(
-	struct x11server *server,
-	struct x11_window *window,
-	const struct x11_gc *gc,
-	int x,
-	int y,
-	const uint8_t *text,
-	size_t count,
-	int wide)
-{
-	struct x11_glyph glyph;
-	uint32_t codepoint;
-	uint32_t color;
-	size_t index;
-	unsigned bits;
-	int glyph_x;
-	int glyph_y;
-	int pixel_x;
-	int pixel_y;
-	int top;
-	int missing;
-
-	/* The context's colour. */
-	color = WINDOW_TEXT_COLOR;
-	if (gc != NULL)
-		color = gc->foreground;
-
-	/* Each character. */
-	for (index = 0U; index < count; index++) {
-		codepoint = text[index];
-		if (wide)
-			codepoint = ((uint32_t)text[index * 2U] << 8) | (uint32_t)text[index * 2U + 1U];
-
-		/* Its glyph; a character without one is skipped. */
-		missing = x11_glyph(&server->glyphs, codepoint, &glyph);
-		if (missing != 0)
-			continue;
-
-		/* Each set bit of the cell that lands in the window. */
-		top = y - (int)glyph.height;
-		for (glyph_y = 0; glyph_y < (int)glyph.height; glyph_y++) {
-			for (glyph_x = 0; glyph_x < (int)glyph.width; glyph_x++) {
-				pixel_x = x + glyph_x;
-				pixel_y = top + glyph_y;
-				if (pixel_x < 0 ||
-				    pixel_y < 0 ||
-				    pixel_x >= window->width ||
-				    pixel_y >= window->height)
-					continue;
-				bits = glyph.bitmap[(size_t)glyph_y * glyph.stride + (unsigned)glyph_x / 8U];
-				if ((bits & (0x80U >> ((unsigned)glyph_x & 7U))) != 0U)
-					window->pixels[(size_t)pixel_y * window->width + (size_t)pixel_x] = color;
-			}
-		}
-
-		/* The cell is shown again, and the pen moves on. */
-		x11_mark_dirty(server, window->x + x, window->y + top, (int)glyph.width, (int)glyph.height);
-		x += (int)glyph.advance;
-	}
-}
-
-/*
  * Adds a rectangle on the root window to what has changed.
  */
 void
@@ -1596,6 +1397,8 @@ window_values_read(
 			pixmap = x11_pixmap_find(server, value);
 			if (pixmap == NULL)
 				return X11_BAD_PIXMAP;
+			if (pixmap->depth != X11_DEPTH || window->window_class == X11_INPUT_ONLY)
+				return X11_BAD_MATCH;
 			break;
 		case ATTRIBUTE_BIT_GRAVITY:
 		case ATTRIBUTE_WIN_GRAVITY:
@@ -1659,17 +1462,33 @@ window_values_apply(
 {
 	unsigned code;
 
-	/* The background and the border. */
-	if ((values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXMAP)) != 0U)
+	/* The copies of the background and border pixmaps first, so that BadAlloc keeps nothing. */
+	code = window_values_tiles(server, window, values);
+	if (code != 0U)
+		return code;
+
+	/* The background: a pixmap (copied), None or ParentRelative, and a pixel, which wins over a pixmap. */
+	if ((values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXMAP)) != 0U) {
 		window->background_pixmap = values->value[ATTRIBUTE_BACKGROUND_PIXMAP];
+		window->background_kind = X11_BACKGROUND_PIXMAP;
+		if (window->background_pixmap == BACKGROUND_NONE)
+			window->background_kind = X11_BACKGROUND_NONE;
+		if (window->background_pixmap == BACKGROUND_PARENT_RELATIVE)
+			window->background_kind = X11_BACKGROUND_PARENT;
+	}
 	if ((values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXEL)) != 0U) {
 		window->background = values->value[ATTRIBUTE_BACKGROUND_PIXEL];
 		window->background_pixmap = BACKGROUND_NONE;
+		window->background_kind = X11_BACKGROUND_PIXEL;
 	}
+
+	/* The border: a pixmap (copied, or the parent's for CopyFromParent), and a pixel, which wins over a pixmap. */
 	if ((values->mask & (1U << ATTRIBUTE_BORDER_PIXMAP)) != 0U)
 		window->border_pixmap = values->value[ATTRIBUTE_BORDER_PIXMAP];
-	if ((values->mask & (1U << ATTRIBUTE_BORDER_PIXEL)) != 0U)
+	if ((values->mask & (1U << ATTRIBUTE_BORDER_PIXEL)) != 0U) {
 		window->border_pixel = values->value[ATTRIBUTE_BORDER_PIXEL];
+		window_drop_tile(server, window, &window->border_tile);
+	}
 
 	/* The gravities, backing store, override-redirect and save under. */
 	if ((values->mask & (1U << ATTRIBUTE_BIT_GRAVITY)) != 0U)
@@ -1707,63 +1526,101 @@ window_values_apply(
 }
 
 /*
- * Gives an InputOutput window pixels of a size, keeping the part that
- * fits and clearing the rest to its background, charged to its owner.
- * Returns 0, or BadAlloc.
+ * Makes the copies a window's new background and border pixmaps need
+ * (CopyFromParent takes the parent's border) before any value is kept,
+ * and drops the background copy a new background replaces.  Returns 0,
+ * or BadAlloc (nothing changed).
  */
 static unsigned
-window_pixels(
+window_values_tiles(
 	struct x11server *server,
 	struct x11_window *window,
-	uint16_t width,
-	uint16_t height)
+	const struct window_values *values)
 {
-	uint32_t *pixels;
-	size_t old_bytes;
-	size_t new_bytes;
-	unsigned copy_width;
-	unsigned copy_height;
-	unsigned row;
+	struct x11_image *background;
+	struct x11_image *border;
+	size_t charged;
+	size_t bytes;
+	unsigned code;
+	uint32_t value;
 	int error;
 
-	/* An InputOnly window shows nothing. */
-	if (window->window_class == X11_INPUT_ONLY)
-		return 0U;
-
-	/* The owner is charged for the new pixels instead of the old. */
-	old_bytes = 0U;
-	if (window->pixels != NULL)
-		old_bytes = (size_t)window->width * (size_t)window->height * sizeof(*pixels);
-	new_bytes = (size_t)width * (size_t)height * sizeof(*pixels);
-	x11_memory_release(server, window->owner, old_bytes);
-	error = x11_memory_charge(server, window->owner, new_bytes);
-	if (error != 0) {
-		(void)x11_memory_charge(server, window->owner, old_bytes);
-		return X11_BAD_ALLOC;
+	/* The new copies, apart from the window's, charged to its owner. */
+	background = NULL;
+	border = NULL;
+	charged = 0U;
+	value = values->value[ATTRIBUTE_BACKGROUND_PIXMAP];
+	if ((values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXMAP)) != 0U &&
+	    (values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXEL)) == 0U &&
+	    value != BACKGROUND_NONE &&
+	    value != BACKGROUND_PARENT_RELATIVE) {
+		code = x11_draw_set_tile(server, window->owner, value, &background, &charged);
+		if (code != 0U)
+			return code;
+	}
+	value = values->value[ATTRIBUTE_BORDER_PIXMAP];
+	if ((values->mask & (1U << ATTRIBUTE_BORDER_PIXMAP)) != 0U &&
+	    (values->mask & (1U << ATTRIBUTE_BORDER_PIXEL)) == 0U) {
+		code = 0U;
+		if (value != BACKGROUND_NONE) {
+			code = x11_draw_set_tile(server, window->owner, value, &border, &charged);
+		} else if (window->parent != NULL && window->parent->border_tile != NULL) {
+			code = X11_BAD_ALLOC;
+			bytes = x11_image_bytes(window->parent->border_tile->width, window->parent->border_tile->height);
+			error = x11_memory_charge(server, window->owner, bytes);
+			if (error == 0) {
+				charged += bytes;
+				error = x11_image_copy(window->parent->border_tile, &border);
+				if (error == 0)
+					code = 0U;
+			}
+		}
+		if (code != 0U) {
+			x11_image_free(background);
+			x11_image_free(border);
+			x11_memory_release(server, window->owner, charged);
+			return code;
+		}
 	}
 
-	/* The new pixels. */
-	pixels = x11_pixels_alloc(width, height, window->background);
-	if (pixels == NULL) {
-		x11_memory_release(server, window->owner, new_bytes);
-		(void)x11_memory_charge(server, window->owner, old_bytes);
-		return X11_BAD_ALLOC;
+	/* A new background replaces the old copy. */
+	if ((values->mask & ((1U << ATTRIBUTE_BACKGROUND_PIXMAP) | (1U << ATTRIBUTE_BACKGROUND_PIXEL))) != 0U) {
+		window_drop_tile(server, window, &window->background_tile);
+		window->background_tile = background;
 	}
 
-	/* The part of the old ones that fits, row by row. */
-	copy_width = width;
-	if (copy_width > window->width)
-		copy_width = window->width;
-	copy_height = height;
-	if (copy_height > window->height)
-		copy_height = window->height;
-	for (row = 0U; row < copy_height && window->pixels != NULL; row++)
-		memcpy(pixels + (size_t)row * width, window->pixels + (size_t)row * window->width, (size_t)copy_width * sizeof(*pixels));
+	/* A new border pixmap replaces the old copy; CopyFromParent of a parent without one takes its pixel. */
+	if ((values->mask & (1U << ATTRIBUTE_BORDER_PIXMAP)) != 0U && (values->mask & (1U << ATTRIBUTE_BORDER_PIXEL)) == 0U) {
+		window_drop_tile(server, window, &window->border_tile);
+		window->border_tile = border;
+		if (border == NULL && value == BACKGROUND_NONE && window->parent != NULL)
+			window->border_pixel = window->parent->border_pixel;
+	}
 
-	/* Succeeded: the old pixels go. */
-	free(window->pixels);
-	window->pixels = pixels;
+	/* Succeeded: the window holds the copies. */
+	window->tiles_bytes += charged;
 	return 0U;
+}
+
+/* Frees a background or border copy of a window, with its charge. */
+static void
+window_drop_tile(
+	struct x11server *server,
+	struct x11_window *window,
+	struct x11_image **tile)
+{
+	size_t bytes;
+
+	/* Nothing held. */
+	if (*tile == NULL)
+		return;
+
+	/* The copy and its charge go. */
+	bytes = x11_image_bytes((*tile)->width, (*tile)->height);
+	x11_memory_release(server, window->owner, bytes);
+	window->tiles_bytes -= bytes;
+	x11_image_free(*tile);
+	*tile = NULL;
 }
 
 /* Puts a window among a parent's children just below one of them (NULL: on top). */
@@ -1894,7 +1751,6 @@ window_map(
 	struct x11_client *client;
 	uint8_t event[32];
 	unsigned redirect;
-	int viewable;
 
 	/* Mapped already, or the root window. */
 	if (window->mapped || window->parent == NULL)
@@ -1925,7 +1781,8 @@ window_map(
 		window_configure_notify(server, window);
 	}
 
-	/* Mapped, and told. */
+	/* Mapped (what is seen of its tree kept first), and told. */
+	x11_draw_begin(server, window, NULL);
 	window->mapped = 1;
 	memset(event, 0, sizeof(event));
 	event[0] = X11_EVENT_MAP_NOTIFY;
@@ -1933,12 +1790,8 @@ window_map(
 	event[12] = window->override_redirect;
 	x11_event_structure(server, window, event);
 
-	/* Succeeded: shown, and drawn by its clients when it can be seen. */
-	viewable = x11_window_viewable(window);
-	if (!viewable)
-		return;
-	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
-	window_expose_tree(server, window);
+	/* Succeeded: what it shows painted and exposed, when it can be seen. */
+	x11_draw_end(server);
 }
 
 /* Unmaps a window: UnmapNotify to its and its parent's clients, and what was under it shown again. */
@@ -1954,7 +1807,8 @@ window_unmap(
 	if (!window->mapped)
 		return;
 
-	/* Hidden, and told. */
+	/* Hidden (what is seen of its tree kept first), and told. */
+	x11_draw_begin(server, window, NULL);
 	window->mapped = 0;
 	memset(event, 0, sizeof(event));
 	event[0] = X11_EVENT_UNMAP_NOTIFY;
@@ -1962,37 +1816,11 @@ window_unmap(
 	event[12] = (uint8_t)from_configure;
 	x11_event_structure(server, window, event);
 
-	/* What was under it is shown again. */
-	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
+	/* What was under it is painted and exposed (a top-level window's pixels go). */
+	x11_draw_end(server);
 
 	/* Succeeded: the focus in it reverts, and the grabs on it end. */
 	x11_input_window_hidden(server, window);
-}
-
-/* Tells the clients of a viewable window and of each of its viewable inferiors that all of it must be drawn, the window first. */
-static void
-window_expose_tree(
-	struct x11server *server,
-	struct x11_window *window)
-{
-	struct x11_window *exposed;
-	int viewable;
-
-	/* Not seen. */
-	viewable = x11_window_viewable(window);
-	if (!viewable)
-		return;
-
-	/* Each mapped window of the tree, not into an unmapped one. */
-	exposed = window;
-	while (exposed != NULL) {
-		if (!exposed->mapped) {
-			exposed = window_next_over(exposed, window);
-			continue;
-		}
-		x11_event_expose(server, exposed);
-		exposed = x11_window_next(exposed, window);
-	}
 }
 
 /* Tells a window's and its parent's clients the window's configuration. */
@@ -2321,6 +2149,8 @@ window_restack(
 	int covered;
 	int covering;
 
+	(void)server;
+
 	/* Where the mode puts it: just under a window (NULL: on top), or at the bottom. */
 	parent = window->parent;
 	under = NULL;
@@ -2364,10 +2194,9 @@ window_restack(
 	if (under == window || window->above == under)
 		return 0;
 
-	/* Succeeded: moved, and its place shown again. */
+	/* Succeeded: moved (the caller has what is newly seen drawn again). */
 	window_unlink(window);
 	window_link(parent, window, under);
-	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
 	return 1;
 }
 
@@ -2389,13 +2218,10 @@ window_free(
 	x11_selection_forget_window(server, window->id);
 	x11_property_forget_window(server, window);
 	x11_rootless_forget(server, window);
-	x11_mark_dirty(server, window->x - window->border, window->y - window->border, window->width + 2 * window->border, window->height + 2 * window->border);
 
-	/* Its pixels and its own charge. */
-	if (window->pixels != NULL)
-		x11_memory_release(server, window->owner, (size_t)window->width * (size_t)window->height * sizeof(uint32_t));
+	/* Its pixels, background and border, and its own charge. */
+	x11_draw_forget(server, window);
 	x11_memory_release(server, window->owner, sizeof(*window));
-	free(window->pixels);
 	free(window->selects);
 
 	/* Its place in the tree and its id. */
@@ -2501,7 +2327,6 @@ window_release_kind(
 	unsigned owner,
 	unsigned type)
 {
-	struct x11_pixmap *pixmap;
 	void *object;
 	uint32_t *ids;
 	size_t count;
@@ -2518,15 +2343,13 @@ window_release_kind(
 		object = x11_resource_find(server, ids[index], type);
 		x11_resource_remove(server, ids[index]);
 		if (type == X11_RESOURCE_PIXMAP) {
-			pixmap = object;
-			x11_memory_release(server, owner, sizeof(*pixmap) + (size_t)pixmap->width * (size_t)pixmap->height * sizeof(uint32_t));
-			free(pixmap->pixels);
+			x11_pixmap_free(server, object);
 		} else if (type == X11_RESOURCE_GC) {
-			x11_memory_release(server, owner, sizeof(struct x11_gc));
+			x11_gc_free(server, object);
 		} else {
 			x11_memory_release(server, owner, sizeof(struct x11_font));
+			free(object);
 		}
-		free(object);
 	}
 
 	/* Succeeded: none is left. */

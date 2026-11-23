@@ -109,8 +109,9 @@ struct x11server_auth {
 /*
  * The longest request (BIG-REQUESTS' longest, in bytes), and so the most
  * bytes of a client's input the core holds unhandled: a transport must
- * let the core have that many before it holds a client back, or a long
- * request is left half in.  A request longer than that is refused
+ * let the core have that many before it holds a client back, or let in
+ * the rest of the request the core holds a part of (x11server_held), or
+ * a long request is left half in.  A request longer than that is refused
  * (BadLength) and its bytes are dropped as they come.
  */
 #define X11SERVER_REQUEST_MAX	(16U * 1024U * 1024U)
@@ -140,6 +141,7 @@ int x11server_connect(struct x11server *server, const struct x11server_auth *aut
 int x11server_input(struct x11server *server, uint32_t client, const uint8_t *bytes, size_t size);
 const uint8_t *x11server_output(struct x11server *server, uint32_t client, size_t *size);
 void x11server_written(struct x11server *server, uint32_t client, size_t size);
+size_t x11server_held(struct x11server *server, uint32_t client, size_t *wanted);
 void x11server_hangup(struct x11server *server, uint32_t client);
 int x11server_next(struct x11server *server, struct x11server_event *event);
 int x11server_tick(struct x11server *server, uint32_t now, uint32_t *wake);
