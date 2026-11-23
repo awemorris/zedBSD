@@ -24,8 +24,9 @@
 /* The class of the X windows. */
 #define WINDOW_CLASS_NAME	L"zedBSD.X11Window"
 
-/* The styles of a framed top-level window, a borderless one and a menu or tooltip. */
+/* The styles of a framed top-level window, the root window (framed, not sized by the user), and a menu or tooltip. */
 #define WINDOW_STYLE_FRAMED	(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
+#define WINDOW_STYLE_ROOT	((WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)) | WS_CLIPCHILDREN)
 #define WINDOW_STYLE_POPUP	(WS_POPUP | WS_CLIPCHILDREN)
 #define WINDOW_EXSTYLE_POPUP	(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
 
@@ -36,6 +37,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wparam,
 static LRESULT window_message(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_styles(const struct x11_surface *surface, DWORD *style, DWORD *extended);
 static void window_outer(const struct x11_surface *surface, RECT *outer);
+static void window_root_outer(const struct x11_surface *surface, RECT *outer);
 static void window_set_title(struct x11_surface *surface, const char *title);
 static void window_set_owner(struct x11_surface *surface, struct x11_surface *owner);
 static void window_sized(struct x11_surface *surface, WPARAM kind);
@@ -100,7 +102,9 @@ win32_window_unregister(
  * A top-level window is framed and placed where X says, moved onto a
  * monitor's work area when its frame would leave it; an override-redirect
  * one is borderless, never activated and kept within the work area of
- * its monitor.  Returns the surface, or NULL (the core then shows the
+ * its monitor; the root window of a rooted server is framed, its size not
+ * the user's to change, and centred on the work area of the monitor the
+ * pointer is on.  Returns the surface, or NULL (the core then shows the
  * window nowhere).
  */
 struct x11_surface *
@@ -163,10 +167,12 @@ win32_surface_open(
 		return NULL;
 	}
 
-	/* Links the surface into the backend's list. */
+	/* Links the surface into the backend's list; the root surface is the pointer's whole root window. */
 	surface->next = backend->surfaces;
 	backend->surfaces = surface;
 	backend->surface_count++;
+	if (surface->kind == X11_SURFACE_ROOT)
+		backend->root_surface = surface;
 
 	/* Gives it its title. */
 	window_set_title(surface, info->title);
@@ -293,9 +299,11 @@ win32_surface_close(
 		backend->surface_count--;
 	}
 
-	/* The pointer is no longer in it. */
+	/* The pointer is no longer in it, and it is no longer the root surface. */
 	if (backend->pointer_surface == surface)
 		backend->pointer_surface = NULL;
+	if (backend->root_surface == surface)
+		backend->root_surface = NULL;
 
 	/* Frees the windows it owns from it. */
 	for (other = backend->surfaces; other != NULL; other = other->next) {
@@ -484,11 +492,25 @@ window_message(
 		win32_input_key(surface, message, wparam, lparam);
 		return 0;
 	case WM_CHAR:
+		/*
+		 * Only the keys an input method took and the characters sent as
+		 * keys are translated: this is their text, which X hears as typed.
+		 */
+		win32_ime_char(surface, wparam);
+		return 0;
 	case WM_SYSCHAR:
 	case WM_DEADCHAR:
 	case WM_SYSDEADCHAR:
-		/* X clients make characters from the keysyms; none of these is translated anyway. */
+		/* X clients make characters and dead keys from the keysyms. */
 		return 0;
+	case WM_IME_STARTCOMPOSITION:
+		/* The input method's windows go where the user is typing, as near as X tells. */
+		win32_ime_place(surface);
+		break;
+	case WM_IME_COMPOSITION:
+		/* The settled text is typed into X; the unsettled is the input method's window's. */
+		answer = win32_ime_composition(surface, wparam, lparam);
+		return answer;
 	case WM_SYSCOMMAND:
 		/* The keyboard's way into the window menu is X's key. */
 		if ((wparam & 0xFFF0U) == SC_KEYMENU)
@@ -566,7 +588,14 @@ window_styles(
 		return;
 	}
 
-	/* A top-level window or the root window: Windows' own frame. */
+	/* The root window: Windows' own frame, without the edges and the button that would size it. */
+	if (surface->kind == X11_SURFACE_ROOT) {
+		*style = WINDOW_STYLE_ROOT;
+		*extended = 0;
+		return;
+	}
+
+	/* A top-level window: Windows' own frame. */
 	*style = WINDOW_STYLE_FRAMED;
 	*extended = 0;
 }
@@ -592,6 +621,12 @@ window_outer(
 	LONG width;
 	LONG height;
 	BOOL found;
+
+	/* The root window has no place of its own on the screen. */
+	if (surface->kind == X11_SURFACE_ROOT) {
+		window_root_outer(surface, outer);
+		return;
+	}
 
 	/* The client area on the screen: the virtual screen's corner is the root window's. */
 	backend = surface->backend;
@@ -633,6 +668,71 @@ window_outer(
 		outer->left = information.rcWork.left;
 	if (outer->top < information.rcWork.top)
 		outer->top = information.rcWork.top;
+	outer->right = outer->left + width;
+	outer->bottom = outer->top + height;
+}
+
+/*
+ * Gives the outer rectangle of the root surface's window: the root
+ * window, scaled, with the frame around it, centred on the work area of
+ * the monitor the pointer is on (from the work area's corner when it does
+ * not fit).
+ */
+static void
+window_root_outer(
+	const struct x11_surface *surface,
+	RECT *outer)
+{
+	struct x11_win32 *backend;
+	DWORD style;
+	DWORD extended;
+	HMONITOR monitor;
+	MONITORINFO information;
+	POINT pointer;
+	UINT dpi_x;
+	UINT dpi_y;
+	HRESULT read;
+	LONG width;
+	LONG height;
+	BOOL found;
+
+	/* The monitor the pointer is on (the primary one when the pointer is not known). */
+	backend = surface->backend;
+	pointer.x = 0;
+	pointer.y = 0;
+	found = GetCursorPos(&pointer);
+	if (!found) {
+		pointer.x = 0;
+		pointer.y = 0;
+	}
+	monitor = MonitorFromPoint(pointer, MONITOR_DEFAULTTOPRIMARY);
+
+	/* The client area, scaled, with the frame of the monitor's DPI around it. */
+	outer->left = 0;
+	outer->top = 0;
+	outer->right = (LONG)x11_win32_scale_size(surface->width, backend->scale);
+	outer->bottom = (LONG)x11_win32_scale_size(surface->height, backend->scale);
+	window_styles(surface, &style, &extended);
+	read = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+	if (FAILED(read))
+		dpi_x = USER_DEFAULT_SCREEN_DPI;
+	AdjustWindowRectExForDpi(outer, style, FALSE, extended, dpi_x);
+	width = outer->right - outer->left;
+	height = outer->bottom - outer->top;
+
+	/* The monitor's work area; without it, the frame where it is. */
+	information.cbSize = sizeof(information);
+	found = GetMonitorInfoW(monitor, &information);
+	if (!found)
+		return;
+
+	/* Succeeded: centred on the work area, or from its corner when larger. */
+	outer->left = information.rcWork.left;
+	if (width < information.rcWork.right - information.rcWork.left)
+		outer->left += (information.rcWork.right - information.rcWork.left - width) / 2;
+	outer->top = information.rcWork.top;
+	if (height < information.rcWork.bottom - information.rcWork.top)
+		outer->top += (information.rcWork.bottom - information.rcWork.top - height) / 2;
 	outer->right = outer->left + width;
 	outer->bottom = outer->top + height;
 }
@@ -753,10 +853,12 @@ window_report(
 	int32_t x;
 	int32_t y;
 
-	/* Nothing to tell of a minimized window. */
+	/* Nothing to tell of a minimized window, nor of the root window, which is where it is whatever its place on the screen. */
 	backend = surface->backend;
 	surface->report_posted = 0;
 	if (surface->iconic)
+		return;
+	if (surface->kind == X11_SURFACE_ROOT)
 		return;
 
 	/* The frame around it, when it changed (_NET_FRAME_EXTENTS). */

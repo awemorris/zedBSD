@@ -134,6 +134,11 @@ x11server_create(
 		server->height = SERVER_HEIGHT;
 	}
 
+	/* Rootless, or the whole root window one surface. */
+	server->mode = X11SERVER_ROOTLESS;
+	if (options->mode == X11SERVER_ROOTED)
+		server->mode = X11SERVER_ROOTED;
+
 	/* The core fonts' faces over the caller's bytes; without any, text is not drawn. */
 	error = x11_faces_open(&server->faces, options->fonts, options->font_count, options->font_fallback_path);
 	if (error != 0)
@@ -165,6 +170,9 @@ x11server_create(
 		x11server_destroy(server);
 		return error;
 	}
+
+	/* A rooted server's root window gets its pixels, painted with its background. */
+	x11_rooted_start(server);
 
 	/* Succeeded: the server waits for clients. */
 	*result = server;
@@ -198,16 +206,19 @@ x11server_destroy(
 	/* The extensions' state. */
 	x11_extension_fini(server);
 
-	/* The root window, with what is left of it (its properties, and the extensions' events on it). */
+	/* The root window, with what is left of it (its properties, the extensions' events on it, its pixels and its surface). */
 	if (server->root != NULL) {
 		x11_extension_forget_window(server, server->root);
 		x11_property_forget_window(server, server->root);
+		x11_rootless_forget(server, server->root);
+		x11_draw_forget(server, server->root);
 		free(server->root->selects);
 		free(server->root);
 		server->root = NULL;
 	}
 
-	/* The resource ids, the atoms and the passive grabs. */
+	/* The resource ids, the atoms, the passive grabs and the save-sets. */
+	x11_save_set_fini(server);
 	x11_resource_fini(server);
 	x11_atoms_fini(server);
 	x11_input_fini(server);
@@ -692,6 +703,9 @@ x11_client_close(
 	client = &server->clients[index];
 	if (client->id == 0U)
 		return;
+
+	/* The windows of its save-set leave its windows and are mapped, while it is still there to map them. */
+	x11_save_set_restore(server, index);
 
 	/* The client is gone from now on. */
 	id = client->id;

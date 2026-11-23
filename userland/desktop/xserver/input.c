@@ -26,8 +26,17 @@
  * the grabs (GrabPointer to AllowEvents), QueryPointer, GetMotionEvents,
  * WarpPointer, SetInputFocus, GetInputFocus, QueryKeymap, and the
  * keyboard's and the pointer's maps and controls (ChangeKeyboardMapping
- * to GetModifierMapping).  XKEYBOARD is not offered: a client reads the
- * core protocol's map.
+ * to GetModifierMapping).  XKEYBOARD (xkb.c) shows the same map, and
+ * XInputExtension (xinput.c) hears the device, crossing and focus events
+ * and the grabs from here.
+ *
+ * A character the backend's input method typed (text no key of the map
+ * carries) is typed through a keycode lent to its keysym: the keycode's
+ * first two columns are given the keysym and every client hears of it by
+ * MappingNotify before the key is pressed and released, as a program that
+ * types text into X does with a spare keycode.  A few keycodes, the free
+ * ones from the top, are lent in turn, so that a client still reading the
+ * map for one character is not given the next one's keysym.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -135,6 +144,18 @@
 #define KEYSYM_CAPS_LOCK	0xffe5U
 #define KEYSYM_SHIFT_LOCK	0xffe6U
 
+/* A character past Latin-1 has the keysym of this number plus its code point (a Unicode keysym). */
+#define KEYSYM_UNICODE		0x01000000U
+
+/* The control characters, a surrogate (half of a UTF-16 pair) and the last code point, which a typed character is checked against. */
+#define CHARACTER_SPACE		0x20U
+#define CHARACTER_DELETE	0x7fU
+#define CHARACTER_C1_LAST	0x9fU
+#define CHARACTER_LATIN1_LAST	0xffU
+#define CHARACTER_SURROGATE_FIRST 0xd800U
+#define CHARACTER_SURROGATE_LAST 0xdfffU
+#define CHARACTER_LAST		0x10ffffU
+
 /* The keycodes the keyboard has. */
 #define KEYCODE_MIN		8U
 #define KEYCODE_MAX		255U
@@ -221,6 +242,9 @@ static unsigned input_change_active_grab(struct x11server *server, unsigned inde
 static unsigned input_grab_keyboard(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned input_ungrab_keyboard(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned input_allow_events(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static void input_allow(struct x11server *server, unsigned index, unsigned mode, uint32_t time);
+static unsigned input_pointer_grab_try(struct x11server *server, unsigned index, const struct x11_grab *grab, uint32_t time);
+static unsigned input_keyboard_grab_try(struct x11server *server, unsigned index, const struct x11_grab *grab, uint32_t time);
 static void input_replay_pointer(struct x11server *server);
 static void input_replay_keyboard(struct x11server *server);
 static unsigned input_query_pointer(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -243,6 +267,14 @@ static unsigned input_get_modifier_mapping(struct x11server *server, unsigned in
 static int input_modifiers_busy(const struct x11server *server, const uint8_t *keycodes, unsigned count);
 static void input_keymap_apply(struct x11server *server, const struct x11_keymap *keymap);
 static int input_accepts_focus(struct x11server *server, struct x11_window *window);
+static uint32_t input_text_keysym(uint32_t character);
+static uint8_t input_text_keycode(struct x11server *server, uint32_t keysym);
+static int input_text_lent(const struct x11server *server, unsigned keycode);
+static void input_text_forget(struct x11server *server);
+static void input_text_keep(struct x11server *server);
+static void input_text_remove(struct x11server *server, unsigned index);
+static int input_text_unmapped(const struct x11server *server, unsigned keycode);
+static int input_text_busy(const struct x11server *server, unsigned keycode);
 
 /*
  * Starts the server's input: the US keyboard map, the buttons each
@@ -406,6 +438,9 @@ x11_input_keymap(
 	/* The new map. */
 	input_keymap_apply(server, keymap);
 
+	/* The keycodes lent to typed characters stay lent where the new map leaves them free. */
+	input_text_keep(server);
+
 	/* The clients hear of each part that changed. */
 	keysyms_changed = memcmp(keysyms, server->keysyms, sizeof(keysyms));
 	modifiers_changed = memcmp(modifiers, server->modifier_keys, sizeof(modifiers));
@@ -413,6 +448,52 @@ x11_input_keymap(
 		input_mapping_notify(server, MAPPING_MODIFIER, 0U, 0U);
 	if (keysyms_changed != 0)
 		input_mapping_notify(server, MAPPING_KEYBOARD, KEYCODE_MIN, (uint8_t)(KEYCODE_MAX - KEYCODE_MIN + 1U));
+}
+
+/*
+ * Types a character the backend's input method gave (a Unicode code
+ * point): a keycode is lent to its keysym (every client hears of the
+ * change first, by MappingNotify), and its key is pressed and released in
+ * order with the keyboard's keys.  A character that has no keysym, or for
+ * which no keycode can be lent, is dropped.
+ */
+void
+x11_input_text(
+	struct x11server *server,
+	uint32_t character,
+	uint32_t time)
+{
+	uint32_t keysym;
+	uint8_t keycode;
+
+	/*
+	 * The character's keysym; a control character, or a number that is no
+	 * character, has none.  The log names only such a code point, never
+	 * the text typed.
+	 */
+	keysym = input_text_keysym(character);
+	if (keysym == 0U) {
+		x11_log(server, "X11 INPUT dropped character U+%04lX (no keysym)", (unsigned long)character);
+		return;
+	}
+
+	/* The press and the release both need room among the events a frozen keyboard holds. */
+	if (server->device_count + 2U > X11_DEVICE_QUEUE) {
+		x11_log(server, "X11 INPUT dropped a character (the frozen devices hold %u events)", server->device_count);
+		return;
+	}
+
+	/* A keycode that carries the keysym. */
+	keycode = input_text_keycode(server, keysym);
+	if (keycode == 0U) {
+		x11_log(server, "X11 INPUT dropped a character (no keycode can be lent)");
+		return;
+	}
+
+	/* Succeeded: the key is pressed and released, handled unless the keyboard is frozen. */
+	input_queue(server, X11_DEVICE_KEY, keycode, 1, time, 0, 0);
+	input_queue(server, X11_DEVICE_KEY, keycode, 0, time, 0, 0);
+	input_drain(server);
 }
 
 /*
@@ -657,6 +738,9 @@ x11_input_window_destroyed(
 			input_passive_remove(server, index);
 	}
 
+	/* The XInputExtension events clients asked for on it. */
+	x11_xinput_window_destroyed(window);
+
 	/* The pointer that was in it is in its parent; no crossing event reaches a window going away. */
 	if (server->pointer_window == window->id) {
 		server->pointer_window = X11_ROOT_XID;
@@ -691,6 +775,9 @@ x11_input_forget_client(
 		if (server->passive_grabs[index].client == client)
 			input_passive_remove(server, index);
 	}
+
+	/* What it asked for of XInputExtension's events. */
+	x11_xinput_forget_client(server, client);
 
 	/* Succeeded: the events a thaw let go are handled. */
 	input_drain(server);
@@ -798,6 +885,90 @@ x11_input_request(
 	return code;
 }
 
+/*
+ * Grabs the pointer (keyboard 0) or the keyboard for a client, as
+ * GrabPointer and GrabKeyboard do, and handles the events a change of the
+ * freezes lets go.  Returns the grab's status (Success, AlreadyGrabbed,
+ * InvalidTime, NotViewable or Frozen).
+ */
+unsigned
+x11_input_grab_device(
+	struct x11server *server,
+	unsigned index,
+	int keyboard,
+	const struct x11_grab *grab,
+	uint32_t time)
+{
+	unsigned status;
+
+	/* The device's grab. */
+	if (keyboard) {
+		status = input_keyboard_grab_try(server, index, grab, time);
+	} else {
+		status = input_pointer_grab_try(server, index, grab, time);
+	}
+
+	/* Succeeded: the events a thaw let go are handled, and the status. */
+	input_drain(server);
+	return status;
+}
+
+/*
+ * Ends a client's grab of the pointer (keyboard 0) or of the keyboard, as
+ * UngrabPointer and UngrabKeyboard do: another client's grab, and a time
+ * before the grab or after now, are left alone.
+ */
+void
+x11_input_ungrab_device(
+	struct x11server *server,
+	unsigned index,
+	int keyboard,
+	uint32_t time)
+{
+	uint32_t since;
+	int valid;
+
+	/* Only the client's own grab. */
+	if (keyboard && server->keyboard_grab.client != index)
+		return;
+	if (!keyboard && server->pointer_grab.client != index)
+		return;
+
+	/* At a time in order. */
+	since = server->pointer_grab_time;
+	if (keyboard)
+		since = server->keyboard_grab_time;
+	valid = input_time_valid(server, time, since);
+	if (!valid)
+		return;
+
+	/* The grab ends. */
+	if (keyboard) {
+		input_keyboard_grab_end(server);
+	} else {
+		time = input_time(server, time);
+		input_pointer_grab_end(server, time);
+	}
+
+	/* Succeeded: the events the thaw let go are handled. */
+	input_drain(server);
+}
+
+/*
+ * Lets the devices a client's grabs froze go on, by one of AllowEvents'
+ * modes (AsyncPointer to AsyncBoth).
+ */
+void
+x11_input_allow(
+	struct x11server *server,
+	unsigned index,
+	unsigned mode,
+	uint32_t time)
+{
+	/* Succeeded: as AllowEvents does. */
+	input_allow(server, index, mode, time);
+}
+
 /* Holds a device event at the end of the ring (a full ring drops it). */
 static void
 input_queue(
@@ -899,6 +1070,9 @@ input_handle(
 	default:
 		break;
 	}
+
+	/* XKEYBOARD's clients hear of the change the event made to the keyboard's state. */
+	x11_xkb_input_changed(server, event);
 }
 
 /*
@@ -920,6 +1094,7 @@ input_handle_key(
 	uint8_t type;
 	int down;
 	int locking;
+	int lent;
 
 	/* A keycode the keyboard has, and a release of a key that is down. */
 	keycode = event->detail;
@@ -935,6 +1110,11 @@ input_handle_key(
 	locking = input_locking(server, keycode);
 	if (event->pressed && !down && locking)
 		input_lock_toggle(server, keycode);
+
+	/* A character typed through a lent keycode is read as it was typed: no modifier is held for it. */
+	lent = input_text_lent(server, keycode);
+	if (lent)
+		state = (uint16_t)(state & ~MODIFIER_BITS);
 
 	/* The press or the release. */
 	type = X11_EVENT_KEY_RELEASE;
@@ -1090,6 +1270,7 @@ input_handle_button(
 	grab.passive = 1U;
 	grab.implicit = 1U;
 	grab.time = event->time;
+	x11_xinput_implicit_grab(reached, &grab);
 	input_pointer_grab_start(server, &grab);
 }
 
@@ -1241,6 +1422,12 @@ input_key_to_grab(
 			return;
 	}
 
+	/* A grab of XInputExtension's hears that extension's event, when its mask asks. */
+	if (server->keyboard_grab.xi2) {
+		(void)x11_xinput_to_grab(server, &server->keyboard_grab, type, keycode, time, state);
+		return;
+	}
+
 	/* The grab's window and client. */
 	window = x11_window_find(server, server->keyboard_grab.window);
 	client = x11_client_of(server, server->keyboard_grab.client);
@@ -1275,6 +1462,7 @@ input_pointer_to_grab(
 	struct x11_client *client;
 	uint8_t event[32];
 	uint32_t child;
+	int heard;
 
 	/* Its own windows first, when it asked. */
 	under = x11_input_window_under(server);
@@ -1282,6 +1470,14 @@ input_pointer_to_grab(
 		reached = x11_event_propagate(server, under, NULL, mask, type, detail, time, state, server->pointer_grab.client);
 		if (reached != NULL)
 			return 1;
+	}
+
+	/* A grab of XInputExtension's hears that extension's event, when its mask asks. */
+	if (server->pointer_grab.xi2) {
+		heard = x11_xinput_to_grab(server, &server->pointer_grab, type, detail, time, state);
+		if (!heard)
+			return 0;
+		return 1;
 	}
 
 	/* The grab must have asked for it. */
@@ -1941,6 +2137,9 @@ input_focus_event(
 	event[8] = mode;
 	(void)x11_event_deliver(server, window, X11_MASK_FOCUS_CHANGE, event);
 
+	/* XInputExtension's clients hear its focus event, apart from the core's. */
+	x11_xinput_focus(server, type, window, detail, mode);
+
 	/* Succeeded: KeymapNotify follows a FocusIn. */
 	if (type == X11_EVENT_FOCUS_IN)
 		input_keymap_notify_selectors(server, window, X11_MASK_FOCUS_CHANGE);
@@ -2047,6 +2246,9 @@ input_cross(
 			flags |= CROSSING_FOCUS;
 	}
 	event[31] = flags;
+
+	/* XInputExtension's clients hear its crossing event, apart from the core's. */
+	x11_xinput_crossing(server, type, window, detail, mode, time, child, flags);
 
 	/* EnterWindow or LeaveWindow. */
 	bit = X11_MASK_LEAVE_WINDOW;
@@ -2303,6 +2505,9 @@ input_mapping_notify(
 			continue;
 		x11_event_send(server, client, event);
 	}
+
+	/* XKEYBOARD's clients hear of a change of the keyboard's map. */
+	x11_xkb_mapping_changed(server, request);
 }
 
 /*
@@ -2348,7 +2553,8 @@ input_time(
 /*
  * Asks the backend to keep the system's pointer for a grab's windows (on
  * nonzero) or to let it go: the surface of the grab window's top-level
- * window, or of the one under the pointer for a grab of the root window.
+ * window, or of the one under the pointer for a grab of the root window;
+ * a rooted server's one surface.
  */
 static void
 input_capture(
@@ -2369,11 +2575,13 @@ input_capture(
 		return;
 	}
 
-	/* The grab window's top-level window, or the one under the pointer. */
+	/* The grab window's top-level window, or the one under the pointer; a rooted server's root window. */
 	window = x11_window_find(server, grab->window);
 	if (window == NULL || window == server->root)
 		window = x11_input_window_under(server);
 	top = x11_window_top_level(window);
+	if (server->mode == X11SERVER_ROOTED)
+		top = server->root;
 
 	/* Succeeded: its surface keeps the pointer (none: nothing to keep it on). */
 	if (top->surface != NULL)
@@ -2396,7 +2604,6 @@ input_grab_pointer(
 	struct x11_client *client;
 	struct x11_window *window;
 	struct x11_window *confine;
-	struct x11_window *old;
 	struct x11_cursor *cursor;
 	struct x11_grab grab;
 	uint8_t reply[32];
@@ -2405,9 +2612,6 @@ input_grab_pointer(
 	uint32_t mask;
 	uint32_t time;
 	unsigned status;
-	unsigned freezer;
-	int viewable;
-	int valid;
 	int msb;
 
 	/* The request: owner-events, the window, the events, the modes, the confining window, the cursor, the time. */
@@ -2451,6 +2655,44 @@ input_grab_pointer(
 	grab.pointer_mode = request[10];
 	grab.keyboard_mode = request[11];
 
+	/* The grab, unless something stands in its way. */
+	status = input_pointer_grab_try(server, index, &grab, time);
+
+	/* Succeeded: the status. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)status;
+	x11_reply(server, client, reply, sizeof(reply));
+	input_drain(server);
+	return 0U;
+}
+
+/*
+ * Grabs the pointer for a client unless another client has it, the
+ * windows are not viewable, another client's grab froze it, or the time
+ * is out of order.  A client that has it already changes its grab.
+ * Returns the grab's status.
+ */
+static unsigned
+input_pointer_grab_try(
+	struct x11server *server,
+	unsigned index,
+	const struct x11_grab *grab,
+	uint32_t time)
+{
+	struct x11_window *window;
+	struct x11_window *confine;
+	struct x11_window *old;
+	unsigned status;
+	unsigned freezer;
+	int viewable;
+	int valid;
+
+	/* The grab's window and the window it confines the pointer to. */
+	window = x11_window_find(server, grab->window);
+	confine = NULL;
+	if (grab->confine_to != 0U)
+		confine = x11_window_find(server, grab->confine_to);
+
 	/* Whose grab froze the pointer, if any. */
 	freezer = X11_NO_CLIENT;
 	if (server->pointer_freeze == X11_FREEZE_POINTER)
@@ -2460,7 +2702,9 @@ input_grab_pointer(
 
 	/* Another client's grab, windows not viewable, another client's freeze, a time out of order. */
 	status = GRAB_SUCCESS;
-	viewable = x11_window_viewable(window);
+	viewable = 0;
+	if (window != NULL)
+		viewable = x11_window_viewable(window);
 	if (viewable && confine != NULL)
 		viewable = x11_window_viewable(confine);
 	valid = input_time_valid(server, time, server->pointer_grab_time);
@@ -2474,28 +2718,28 @@ input_grab_pointer(
 		status = GRAB_INVALID_TIME;
 	}
 
-	/* The grab: a client's own grab changes in place (into another window with the crossing events). */
-	if (status == GRAB_SUCCESS && server->pointer_grab.client == index) {
-		old = x11_window_find(server, server->pointer_grab.window);
-		if (old != NULL && old != window)
-			input_crossing(server, old, window, NOTIFY_GRAB, grab.time);
-		server->pointer_grab = grab;
-		server->pointer_grab_time = grab.time;
-		input_capture(server, &grab, 1);
-		if (grab.pointer_mode == MODE_SYNC)
-			server->pointer_freeze = X11_FREEZE_POINTER;
-		if (grab.keyboard_mode == MODE_SYNC)
-			server->keyboard_freeze = X11_FREEZE_POINTER;
-	} else if (status == GRAB_SUCCESS) {
-		input_pointer_grab_start(server, &grab);
+	/* Refused: the status says why. */
+	if (status != GRAB_SUCCESS)
+		return status;
+
+	/* A grab of another client's, or none, starts. */
+	if (server->pointer_grab.client != index) {
+		input_pointer_grab_start(server, grab);
+		return GRAB_SUCCESS;
 	}
 
-	/* Succeeded: the status. */
-	memset(reply, 0, sizeof(reply));
-	reply[1] = (uint8_t)status;
-	x11_reply(server, client, reply, sizeof(reply));
-	input_drain(server);
-	return 0U;
+	/* Succeeded: the client's own grab changes in place (into another window with the crossing events). */
+	old = x11_window_find(server, server->pointer_grab.window);
+	if (old != NULL && old != window)
+		input_crossing(server, old, window, NOTIFY_GRAB, grab->time);
+	server->pointer_grab = *grab;
+	server->pointer_grab_time = grab->time;
+	input_capture(server, grab, 1);
+	if (grab->pointer_mode == MODE_SYNC)
+		server->pointer_freeze = X11_FREEZE_POINTER;
+	if (grab->keyboard_mode == MODE_SYNC)
+		server->keyboard_freeze = X11_FREEZE_POINTER;
+	return GRAB_SUCCESS;
 }
 
 /* UngrabPointer: the client's grab of the pointer ends, unless the time is out of order. */
@@ -2507,24 +2751,14 @@ input_ungrab_pointer(
 	size_t length)
 {
 	uint32_t time;
-	int valid;
 
 	/* The time. */
 	if (length != 8U)
 		return X11_BAD_LENGTH;
 	time = x11_read32(request + 4, server->clients[index].order);
 
-	/* Only the client's own grab, at a time in order. */
-	if (server->pointer_grab.client != index)
-		return 0U;
-	valid = input_time_valid(server, time, server->pointer_grab_time);
-	if (!valid)
-		return 0U;
-
-	/* Succeeded: ended, and the events the thaw let go handled. */
-	time = input_time(server, time);
-	input_pointer_grab_end(server, time);
-	input_drain(server);
+	/* Succeeded: the client's own grab ends. */
+	x11_input_ungrab_device(server, index, 0, time);
 	return 0U;
 }
 
@@ -2768,11 +3002,7 @@ input_grab_keyboard(
 	struct x11_grab grab;
 	uint8_t reply[32];
 	uint32_t time;
-	uint32_t old;
 	unsigned status;
-	unsigned freezer;
-	int viewable;
-	int valid;
 	int msb;
 
 	/* The request: owner-events, the window, the time, the modes. */
@@ -2796,6 +3026,40 @@ input_grab_keyboard(
 	grab.pointer_mode = request[12];
 	grab.keyboard_mode = request[13];
 
+	/* The grab, unless something stands in its way. */
+	status = input_keyboard_grab_try(server, index, &grab, time);
+
+	/* Succeeded: the status. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)status;
+	x11_reply(server, client, reply, sizeof(reply));
+	input_drain(server);
+	return 0U;
+}
+
+/*
+ * Grabs the keyboard for a client unless another client has it, the
+ * window is not viewable, another client's grab froze it, or the time is
+ * out of order.  A client that has it already changes its grab.  Returns
+ * the grab's status.
+ */
+static unsigned
+input_keyboard_grab_try(
+	struct x11server *server,
+	unsigned index,
+	const struct x11_grab *grab,
+	uint32_t time)
+{
+	struct x11_window *window;
+	uint32_t old;
+	unsigned status;
+	unsigned freezer;
+	int viewable;
+	int valid;
+
+	/* The grab's window. */
+	window = x11_window_find(server, grab->window);
+
 	/* Whose grab froze the keyboard, if any. */
 	freezer = X11_NO_CLIENT;
 	if (server->keyboard_freeze == X11_FREEZE_POINTER)
@@ -2805,7 +3069,9 @@ input_grab_keyboard(
 
 	/* Another client's grab, a window not viewable, another client's freeze, a time out of order. */
 	status = GRAB_SUCCESS;
-	viewable = x11_window_viewable(window);
+	viewable = 0;
+	if (window != NULL)
+		viewable = x11_window_viewable(window);
 	valid = input_time_valid(server, time, server->keyboard_grab_time);
 	if (server->keyboard_grab.client != X11_NO_CLIENT && server->keyboard_grab.client != index) {
 		status = GRAB_ALREADY;
@@ -2817,26 +3083,26 @@ input_grab_keyboard(
 		status = GRAB_INVALID_TIME;
 	}
 
-	/* The grab: a client's own grab changes in place (to another window with the focus events). */
-	if (status == GRAB_SUCCESS && server->keyboard_grab.client == index) {
-		old = server->keyboard_grab.window;
-		input_focus_change(server, old, window->id, NOTIFY_GRAB);
-		server->keyboard_grab = grab;
-		server->keyboard_grab_time = grab.time;
-		if (grab.keyboard_mode == MODE_SYNC)
-			server->keyboard_freeze = X11_FREEZE_KEYBOARD;
-		if (grab.pointer_mode == MODE_SYNC)
-			server->pointer_freeze = X11_FREEZE_KEYBOARD;
-	} else if (status == GRAB_SUCCESS) {
-		input_keyboard_grab_start(server, &grab);
+	/* Refused: the status says why. */
+	if (status != GRAB_SUCCESS)
+		return status;
+
+	/* A grab of another client's, or none, starts. */
+	if (server->keyboard_grab.client != index) {
+		input_keyboard_grab_start(server, grab);
+		return GRAB_SUCCESS;
 	}
 
-	/* Succeeded: the status. */
-	memset(reply, 0, sizeof(reply));
-	reply[1] = (uint8_t)status;
-	x11_reply(server, client, reply, sizeof(reply));
-	input_drain(server);
-	return 0U;
+	/* Succeeded: the client's own grab changes in place (to another window with the focus events). */
+	old = server->keyboard_grab.window;
+	input_focus_change(server, old, grab->window, NOTIFY_GRAB);
+	server->keyboard_grab = *grab;
+	server->keyboard_grab_time = grab->time;
+	if (grab->keyboard_mode == MODE_SYNC)
+		server->keyboard_freeze = X11_FREEZE_KEYBOARD;
+	if (grab->pointer_mode == MODE_SYNC)
+		server->pointer_freeze = X11_FREEZE_KEYBOARD;
+	return GRAB_SUCCESS;
 }
 
 /* UngrabKeyboard: the client's grab of the keyboard ends, unless the time is out of order. */
@@ -2848,23 +3114,14 @@ input_ungrab_keyboard(
 	size_t length)
 {
 	uint32_t time;
-	int valid;
 
 	/* The time. */
 	if (length != 8U)
 		return X11_BAD_LENGTH;
 	time = x11_read32(request + 4, server->clients[index].order);
 
-	/* Only the client's own grab, at a time in order. */
-	if (server->keyboard_grab.client != index)
-		return 0U;
-	valid = input_time_valid(server, time, server->keyboard_grab_time);
-	if (!valid)
-		return 0U;
-
-	/* Succeeded: ended, and the events the thaw let go handled. */
-	input_keyboard_grab_end(server);
-	input_drain(server);
+	/* Succeeded: the client's own grab ends. */
+	x11_input_ungrab_device(server, index, 1, time);
 	return 0U;
 }
 
@@ -2881,10 +3138,6 @@ input_allow_events(
 	size_t length)
 {
 	uint32_t time;
-	uint32_t since;
-	int pointer_held;
-	int keyboard_held;
-	int valid;
 
 	/* The mode and the time. */
 	if (length != 8U)
@@ -2893,13 +3146,35 @@ input_allow_events(
 		return X11_BAD_VALUE;
 	time = x11_read32(request + 4, server->clients[index].order);
 
+	/* Succeeded: the devices go on as the mode says. */
+	input_allow(server, index, request[1], time);
+	return 0U;
+}
+
+/*
+ * Lets the devices a client's grabs froze go on by an AllowEvents mode:
+ * at once (Async), until the next event reaches the client (Sync), or by
+ * replaying the event they froze on without the grab (Replay).
+ */
+static void
+input_allow(
+	struct x11server *server,
+	unsigned index,
+	unsigned mode,
+	uint32_t time)
+{
+	uint32_t since;
+	int pointer_held;
+	int keyboard_held;
+	int valid;
+
 	/* A time before the client's grab, or after now, does nothing. */
 	since = server->keyboard_grab_time;
 	if (server->pointer_grab.client == index)
 		since = server->pointer_grab_time;
 	valid = input_time_valid(server, time, since);
 	if (!valid)
-		return 0U;
+		return;
 
 	/* Which devices the client's grabs froze. */
 	pointer_held = 0;
@@ -2914,7 +3189,7 @@ input_allow_events(
 		keyboard_held = 1;
 
 	/* The mode. */
-	switch (request[1]) {
+	switch (mode) {
 	case ALLOW_ASYNC_POINTER:
 		if (pointer_held)
 			server->pointer_freeze = X11_FREEZE_NONE;
@@ -2961,7 +3236,6 @@ input_allow_events(
 
 	/* Succeeded: the events the thaw let go are handled. */
 	input_drain(server);
-	return 0U;
 }
 
 /*
@@ -3206,11 +3480,17 @@ input_warp_pointer(
 	if (y >= (int)server->height)
 		y = (int)server->height - 1;
 
-	/* Only into a top-level window of the client's own, and only through the backend. */
+	/*
+	 * Only into a top-level window of the client's own (anywhere on a
+	 * rooted server's root window, whose surface the backend moves the
+	 * pointer in only while it is active), and only through the backend.
+	 */
 	target = x11_window_at(server, x, y);
 	target = x11_window_top_level(target);
-	if (target == server->root || target->owner != index)
-		return 0U;
+	if (server->mode != X11SERVER_ROOTED) {
+		if (target == server->root || target->owner != index)
+			return 0U;
+	}
 	if (server->ops->warp == NULL)
 		return 0U;
 	error = server->ops->warp(server->backend, x, y);
@@ -3955,4 +4235,260 @@ input_accepts_focus(
 
 	/* Succeeded: it takes the focus. */
 	return 1;
+}
+
+/*
+ * Gives the keysym of a typed character: a Latin-1 character's own
+ * number, any other the Unicode keysym; 0 for a control character, a
+ * surrogate and a number past the last code point.
+ */
+static uint32_t
+input_text_keysym(
+	uint32_t character)
+{
+	/* A control character (C0, DEL and C1) types no text. */
+	if (character < CHARACTER_SPACE)
+		return 0U;
+	if (character >= CHARACTER_DELETE && character <= CHARACTER_C1_LAST)
+		return 0U;
+
+	/* Half of a UTF-16 pair, or a number past Unicode, is no character. */
+	if (character >= CHARACTER_SURROGATE_FIRST && character <= CHARACTER_SURROGATE_LAST)
+		return 0U;
+	if (character > CHARACTER_LAST)
+		return 0U;
+
+	/* A Latin-1 character's keysym is its own number. */
+	if (character <= CHARACTER_LATIN1_LAST)
+		return character;
+
+	/* Succeeded: the Unicode keysym. */
+	return KEYSYM_UNICODE + character;
+}
+
+/*
+ * Gives a keycode that carries a typed character's keysym: one already
+ * lent to it (the clients know it), else a free keycode from the top,
+ * else the one lent least recently whose key is up with no event waiting.
+ * A keycode lent anew carries the keysym alone and with Shift, and every
+ * client hears of it.  Returns 0 when no keycode can be lent.
+ */
+static uint8_t
+input_text_keycode(
+	struct x11server *server,
+	uint32_t keysym)
+{
+	struct x11_text_key *lent;
+	struct x11_text_key *candidate;
+	unsigned index;
+	unsigned keycode;
+	int unmapped;
+	int busy;
+
+	/* Keycodes a client or the backend gave other keysyms are no longer lent. */
+	input_text_forget(server);
+
+	/* A keycode already lent to the keysym is used again. */
+	for (index = 0U; index < server->text_key_count; index++) {
+		lent = &server->text_keys[index];
+		if (lent->keysym == keysym) {
+			server->text_stamp++;
+			lent->used = server->text_stamp;
+			return lent->keycode;
+		}
+	}
+
+	/* While fewer are lent than may be, a free keycode from the top (the keys a keyboard rarely has). */
+	lent = NULL;
+	if (server->text_key_count < X11_TEXT_KEYS) {
+		for (keycode = KEYCODE_MAX; keycode >= KEYCODE_MIN; keycode--) {
+			unmapped = input_text_unmapped(server, keycode);
+			if (!unmapped)
+				continue;
+			busy = input_text_busy(server, keycode);
+			if (busy)
+				continue;
+
+			lent = &server->text_keys[server->text_key_count];
+			lent->keycode = (uint8_t)keycode;
+			server->text_key_count++;
+			break;
+		}
+	}
+
+	/*
+	 * Otherwise the one lent least recently, if its key is up and no event
+	 * of it waits: a client may still read the map for an event of it.
+	 */
+	if (lent == NULL) {
+		for (index = 0U; index < server->text_key_count; index++) {
+			candidate = &server->text_keys[index];
+			busy = input_text_busy(server, candidate->keycode);
+			if (busy)
+				continue;
+			if (lent == NULL || candidate->used < lent->used)
+				lent = candidate;
+		}
+	}
+
+	/* Every keycode is taken or still in use. */
+	if (lent == NULL)
+		return 0U;
+
+	/* The keycode carries the keysym alone and with Shift; its use is stamped. */
+	memset(server->keysyms[lent->keycode], 0, sizeof(server->keysyms[0]));
+	server->keysyms[lent->keycode][0] = keysym;
+	server->keysyms[lent->keycode][1] = keysym;
+	lent->keysym = keysym;
+	server->text_stamp++;
+	lent->used = server->text_stamp;
+
+	/* Succeeded: every client hears of the keycode's keysyms before its key. */
+	input_mapping_notify(server, MAPPING_KEYBOARD, lent->keycode, 1U);
+	return lent->keycode;
+}
+
+/* Tells whether a keycode is lent to a typed character (and still carries its keysym). */
+static int
+input_text_lent(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	const struct x11_text_key *lent;
+	unsigned index;
+
+	/* Each keycode lent. */
+	for (index = 0U; index < server->text_key_count; index++) {
+		lent = &server->text_keys[index];
+		if (lent->keycode != keycode)
+			continue;
+		if (server->keysyms[keycode][0] != lent->keysym)
+			return 0;
+
+		/* Lent, with its keysym. */
+		return 1;
+	}
+
+	/* Not lent. */
+	return 0;
+}
+
+/*
+ * Forgets the lent keycodes whose keysyms are no longer the character's
+ * (a client's ChangeKeyboardMapping changed them).
+ */
+static void
+input_text_forget(
+	struct x11server *server)
+{
+	struct x11_text_key *lent;
+	unsigned index;
+
+	/* Each keycode lent, kept while it carries its keysym alone and with Shift. */
+	index = 0U;
+	while (index < server->text_key_count) {
+		lent = &server->text_keys[index];
+		if (server->keysyms[lent->keycode][0] != lent->keysym ||
+		    server->keysyms[lent->keycode][1] != lent->keysym) {
+			input_text_remove(server, index);
+			continue;
+		}
+		index++;
+	}
+}
+
+/*
+ * Keeps the lent keycodes across a map the backend gave: one the new map
+ * leaves free carries its character's keysym again, one the map gave a
+ * key is no longer lent.
+ */
+static void
+input_text_keep(
+	struct x11server *server)
+{
+	struct x11_text_key *lent;
+	unsigned index;
+	int unmapped;
+
+	/* Each keycode lent. */
+	index = 0U;
+	while (index < server->text_key_count) {
+		/* A keycode the map gave a key is the key's from now on. */
+		lent = &server->text_keys[index];
+		unmapped = input_text_unmapped(server, lent->keycode);
+		if (!unmapped) {
+			input_text_remove(server, index);
+			continue;
+		}
+
+		/* A free one carries the character's keysym again. */
+		server->keysyms[lent->keycode][0] = lent->keysym;
+		server->keysyms[lent->keycode][1] = lent->keysym;
+		index++;
+	}
+}
+
+/* Ends the lending of one keycode (the last one lent takes its place in the table). */
+static void
+input_text_remove(
+	struct x11server *server,
+	unsigned index)
+{
+	/* The last one moves into the gap. */
+	server->text_key_count--;
+	server->text_keys[index] = server->text_keys[server->text_key_count];
+}
+
+/* Tells whether a keycode carries no keysym and is no modifier's key. */
+static int
+input_text_unmapped(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	unsigned column;
+	unsigned modifier;
+	unsigned slot;
+
+	/* A keysym in any column. */
+	for (column = 0U; column < X11_KEYSYMS_MAX; column++) {
+		if (server->keysyms[keycode][column] != 0U)
+			return 0;
+	}
+
+	/* A modifier's key. */
+	for (modifier = 0U; modifier < X11_MODIFIERS; modifier++) {
+		for (slot = 0U; slot < X11_MODIFIER_KEYS_MAX; slot++) {
+			if (server->modifier_keys[modifier][slot] == keycode)
+				return 0;
+		}
+	}
+
+	/* Free. */
+	return 1;
+}
+
+/* Tells whether a keycode's key is down or has an event waiting among those a frozen keyboard holds. */
+static int
+input_text_busy(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	const struct x11_device_event *event;
+	unsigned held;
+	int down;
+
+	/* The key is down. */
+	down = input_key_down(server, keycode);
+	if (down)
+		return 1;
+
+	/* An event of the key waits. */
+	for (held = 0U; held < server->device_count; held++) {
+		event = &server->device_queue[(server->device_head + held) % X11_DEVICE_QUEUE];
+		if (event->kind == X11_DEVICE_KEY && event->detail == keycode)
+			return 1;
+	}
+
+	/* Neither. */
+	return 0;
 }

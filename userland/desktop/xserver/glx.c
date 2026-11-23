@@ -41,11 +41,14 @@
 /* The longest string answered, with its terminator and padding. */
 #define GLX_STRING_MAX			64U
 
+/* The extension's name, as QueryExtension asks for it and ListExtensions names it. */
+#define GLX_NAME			"GLX"
+
 static void glx_string_reply(struct x11server *server, struct x11_client *client, const char *text);
 
 /*
- * Answers QueryExtension: GLX is present at its major opcode, with no
- * events or errors of its own; any other name is absent.
+ * Answers QueryExtension: GLX is present at its major opcode, with its
+ * first event and first error; any other name is absent.
  */
 void
 x11_glx_query_extension(
@@ -62,17 +65,49 @@ x11_glx_query_extension(
 	memset(reply, 0, sizeof(reply));
 	name_length = x11_read16(request + 4, client->order);
 
-	/* The name must fit the request and be "GLX". */
+	/* The name must fit the request and be GLX's. */
 	differs = 1;
-	if (name_length == 3U && length >= 8U + name_length)
-		differs = memcmp(request + 8, "GLX", 3U);
+	if (name_length == sizeof(GLX_NAME) - 1U && length >= 8U + name_length)
+		differs = memcmp(request + 8, GLX_NAME, name_length);
+
+	/*
+	 * Present: the major opcode, and the first event and first error the
+	 * client's Xlib names GLX's events and errors from (none is sent, but
+	 * a core error must not be named as GLX's).
+	 */
 	if (differs == 0) {
 		reply[8] = 1U;
 		reply[9] = (uint8_t)X11_GLX_MAJOR;
+		reply[10] = (uint8_t)X11_GLX_FIRST_EVENT;
+		reply[11] = (uint8_t)X11_GLX_FIRST_ERROR;
 	}
 
 	/* The reply. */
 	x11_reply(server, client, reply, sizeof(reply));
+}
+
+/*
+ * Writes GLX's entry of a ListExtensions reply: the name as a counted
+ * string.  Returns the bytes written, or 0 when the list has no room.
+ */
+size_t
+x11_glx_list_name(
+	uint8_t *list,
+	size_t room)
+{
+	size_t name_length;
+
+	/* The count and the name must fit what is left of the list. */
+	name_length = sizeof(GLX_NAME) - 1U;
+	if (room < 1U + name_length)
+		return 0U;
+
+	/* The count, then the name's bytes. */
+	list[0] = (uint8_t)name_length;
+	memcpy(list + 1, GLX_NAME, name_length);
+
+	/* Succeeded: the entry's size. */
+	return 1U + name_length;
 }
 
 /*

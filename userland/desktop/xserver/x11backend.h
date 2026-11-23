@@ -21,8 +21,9 @@
  * made full-screen, the pointer's capture taken by another program, and
  * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server), and the size of the system's frame around a surface.  The
- * core is the X windows' window manager (wm.c): it decides
+ * server), the characters an input method typed
+ * (x11server_backend_text), and the size of the system's frame around a
+ * surface.  The core is the X windows' window manager (wm.c): it decides
  * what a close means to the X client and keeps ICCCM's and EWMH's state
  * of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
  */
@@ -38,7 +39,12 @@
 /*
  * The kind of a surface: a decorated top-level X window of the rootless
  * server, an override-redirect one (a menu or a tooltip: no decoration,
- * never activated), or the one window of the whole root window.
+ * never activated), or the one window of the whole root window of a
+ * rooted server.  A root surface has the root window's size, which does
+ * not change; the backend places it itself (its x and y are 0), keeps the
+ * user from sizing it, and gives the pointer's place on it as the place on
+ * the root window.  Every key it hears goes to X, and its close ends the
+ * server's clients.
  */
 #define X11_SURFACE_TOPLEVEL	0U
 #define X11_SURFACE_POPUP	1U
@@ -138,6 +144,13 @@
 
 /* The offset of an evdev key code in its X keycode. */
 #define X11_KEYMAP_EVDEV_OFFSET		8U
+
+/*
+ * The core takes characters the backend's input method typed
+ * (x11server_backend_text): each reaches the X clients as a key press and
+ * release of a keycode the core lends it, whose keysym is the character's.
+ */
+#define X11_BACKEND_TEXT	1
 
 /* A system window the backend keeps (its own type). */
 struct x11_surface;
@@ -322,6 +335,7 @@ struct x11_backend_ops {
 /* What the backend tells the core. */
 void x11server_backend_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time);
 void x11server_backend_keymap(struct x11server *server, const struct x11_keymap *keymap);
+void x11server_backend_text(struct x11server *server, uint32_t character, uint32_t time);
 void x11server_backend_pointer(struct x11server *server, const struct x11_pointer_frame *frame);
 void x11server_backend_enter(struct x11server *server, uint32_t window, int keyboard);
 void x11server_backend_leave(struct x11server *server, uint32_t window, int keyboard);

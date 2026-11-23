@@ -6,14 +6,18 @@
  */
 
 /*
- * The extensions of stage 2 the core answers beside the core protocol:
- * SHAPE (shape-ext.c), SYNC (sync.c) and XFIXES (xfixes.c).
+ * The extensions the core answers beside the core protocol: BIG-REQUESTS
+ * (here), XC-MISC (resource.c), XKEYBOARD (xkb.c), XInputExtension and
+ * the Generic Event Extension (xinput.c), SHAPE (shape-ext.c), SYNC
+ * (sync.c) and XFIXES (xfixes.c).  GLX is not in the table: glx.c names
+ * it where the server has it.
  *
- * QueryExtension and ListExtensions find them here by name, a request
- * whose major opcode is one of theirs is handed to its module, and an
- * error a module's request ends with is sent from here with the value
- * the module names (the id or the value that was wrong) and the request's
- * minor opcode.  What a client or a window held in them goes with it.
+ * QueryExtension and ListExtensions find them here by name, and a request
+ * whose major opcode is one of theirs is handed to its module.  A module
+ * of the core's form returns its error to protocol.c, which sends it
+ * naming the request's first resource; a module of stage 2 names the
+ * value that was wrong (the id or the value) and its error is sent from
+ * here.  What a client or a window held in them goes with it.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -22,24 +26,37 @@
 
 /*
  * One extension: its name, its major opcode, its first event and error
- * (0: it has none), and the module that answers its requests.
+ * (0: it has none), and the module that answers its requests, in the
+ * core's form (core_handler, its error sent by protocol.c) or in stage
+ * 2's (handler, its error sent here); the other is NULL.
  */
 struct extension_entry {
 	const char *name;
 	uint8_t major;
 	uint8_t first_event;
 	uint8_t first_error;
+	unsigned (*core_handler)(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 	unsigned (*handler)(struct x11_ext_request *request);
 };
+
+/* BIG-REQUESTS's one request, BigReqEnable. */
+#define EXTENSION_BIGREQ_ENABLE		0U
+
+static unsigned extension_big_requests(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /*
  * The extensions, in the order ListExtensions names them.  Read only,
  * shared by every server of the process.
  */
 static const struct extension_entry extension_table[] = {
-	{ "SHAPE", X11_SHAPE_MAJOR, X11_SHAPE_EVENT, 0U, x11_shape_request },
-	{ "SYNC", X11_SYNC_MAJOR, X11_SYNC_EVENT, X11_SYNC_ERROR, x11_sync_request },
-	{ "XFIXES", X11_XFIXES_MAJOR, X11_XFIXES_EVENT, X11_XFIXES_ERROR, x11_xfixes_request }
+	{ "BIG-REQUESTS", X11_BIGREQ_MAJOR, 0U, 0U, extension_big_requests, NULL },
+	{ "XC-MISC", X11_XCMISC_MAJOR, 0U, 0U, x11_xcmisc_request, NULL },
+	{ "XKEYBOARD", X11_XKB_MAJOR, X11_XKB_EVENT, X11_XKB_ERROR, x11_xkb_request, NULL },
+	{ "XInputExtension", X11_XINPUT_MAJOR, X11_XINPUT_EVENT, X11_XINPUT_ERROR, x11_xinput_request, NULL },
+	{ "Generic Event Extension", X11_GE_MAJOR, 0U, 0U, x11_ge_request, NULL },
+	{ "SHAPE", X11_SHAPE_MAJOR, X11_SHAPE_EVENT, 0U, NULL, x11_shape_request },
+	{ "SYNC", X11_SYNC_MAJOR, X11_SYNC_EVENT, X11_SYNC_ERROR, NULL, x11_sync_request },
+	{ "XFIXES", X11_XFIXES_MAJOR, X11_XFIXES_EVENT, X11_XFIXES_ERROR, NULL, x11_xfixes_request }
 };
 
 /* How many extensions the table has. */
@@ -118,9 +135,10 @@ x11_extension_names(
 
 /*
  * Answers a request of an extension of the table by its major opcode.
- * An error it ends with is sent here, naming the value the module gave.
- * Returns 0 (answered or refused here), or BadRequest for a major opcode
- * that is none of theirs.
+ * The error of a module of the core's form is returned; that of a module
+ * of stage 2 is sent here, naming the value the module gave.  Returns 0
+ * (answered or refused here), the error to send, or BadRequest for a
+ * major opcode that is none of theirs.
  */
 unsigned
 x11_extension_request(
@@ -137,6 +155,12 @@ x11_extension_request(
 	entry = extension_of_major(request[0]);
 	if (entry == NULL)
 		return X11_BAD_REQUEST;
+
+	/* A module of the core's form: its error goes back to protocol.c. */
+	if (entry->core_handler != NULL) {
+		code = entry->core_handler(server, index, request, length);
+		return code;
+	}
 
 	/* The request as the module reads it. */
 	memset(&context, 0, sizeof(context));
@@ -259,6 +283,36 @@ x11_extension_fini(
 
 	/* Succeeded: SYNC's state. */
 	x11_sync_fini(server);
+}
+
+/*
+ * BIG-REQUESTS: BigReqEnable answers the longest request in words (the
+ * input the core holds for a client) and lets the client send requests of
+ * length 0 with a 32-bit length.
+ */
+static unsigned
+extension_big_requests(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_client *client;
+	uint8_t reply[32];
+
+	/* BigReqEnable is the only request, the header alone. */
+	client = &server->clients[index];
+	if (request[1] != EXTENSION_BIGREQ_ENABLE)
+		return X11_BAD_REQUEST;
+	if (length != 4U)
+		return X11_BAD_LENGTH;
+
+	/* Succeeded: the longest request, and big requests from now on. */
+	memset(reply, 0, sizeof(reply));
+	x11_write32(reply + 8, X11_INPUT_CAP / 4U, client->order);
+	x11_reply(server, client, reply, sizeof(reply));
+	client->big_requests = 1;
+	return 0U;
 }
 
 /* Returns the extension of a major opcode, or NULL. */

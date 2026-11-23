@@ -2749,9 +2749,11 @@ thread_x11_start(
 	}
 	link->x11_cookie[X11_HOST_COOKIE * 2U] = '\0';
 
-	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy. */
+	/* The X server's settings: the host's name in the titles, the scale, the clipboard's policy, the root window. */
 	(void)snprintf(settings.host, sizeof(settings.host), "%s", link->target->title);
 	settings.scale = link->session->x11_scale;
+	settings.root_width = link->session->x11_root_width;
+	settings.root_height = link->session->x11_root_height;
 	settings.flags = 0;
 	if (link->config.forward_x11_trusted)
 		settings.flags |= X11_HOST_TRUSTED;

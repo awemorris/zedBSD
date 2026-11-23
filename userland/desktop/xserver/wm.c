@@ -35,6 +35,9 @@
  * size of the system's frame (_NET_FRAME_EXTENTS, also when a client asks
  * before it maps a window); and resizes a window in step with its
  * client's drawing (_NET_WM_SYNC_REQUEST and the client's SYNC counter).
+ *
+ * A rooted server has no window manager of its own: an X client manages
+ * the root window's children, and this file keeps nothing.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -207,7 +210,8 @@ static int wm_icon_pick(const struct x11_property *icons, size_t *offset, unsign
 
 /*
  * Starts the window manager: interns its atoms, makes its own window and
- * names it and the hints it keeps on the root window.  Returns 0, or an
+ * names it and the hints it keeps on the root window (a rooted server's
+ * window manager is a client's, which names its own).  Returns 0, or an
  * errno value.
  */
 int
@@ -232,6 +236,11 @@ x11_wm_init(
 		slot = (uint32_t *)((char *)&server->wm + wm_atom_names[index].offset);
 		*slot = atom;
 	}
+
+	/* A rooted server leaves the window manager's window and hints to its window manager. */
+	server->wm_active = 0U;
+	if (server->mode == X11SERVER_ROOTED)
+		return 0;
 
 	/* The window manager's own window. */
 	error = x11_window_server_child(server, X11_WM_CHECK_XID);
@@ -1111,18 +1120,20 @@ x11server_size_hints_apply(
 
 /*
  * Tells whether the window manager keeps a window: a top-level window
- * (the root window's child) that is not override-redirect and not the
- * window manager's own.
+ * (the root window's child) of a rootless server that is not
+ * override-redirect and not the window manager's own.
  */
 static int
 wm_managed(
 	struct x11server *server,
 	const struct x11_window *window)
 {
-	/* No window, or not a top-level one. */
+	/* No window, or not a top-level one, or one a client of a rooted server manages. */
 	if (window == NULL || server->root == NULL)
 		return 0;
 	if (window->parent != server->root)
+		return 0;
+	if (server->mode == X11SERVER_ROOTED)
 		return 0;
 
 	/* A menu or a tooltip, or the window manager's own window. */

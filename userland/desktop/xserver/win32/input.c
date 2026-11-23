@@ -17,13 +17,15 @@
  * buttons are X's 1 to 9 (the wheels 4 to 7), and a button held captures
  * the pointer, as X's implicit grab does; an X client's grab keeps it too.
  * A paste or a copy (by key or by button) is noted for the clipboard's
- * policy.
+ * policy.  The keys an input method took and the characters sent as keys
+ * are not X's keys: their text reaches X through ime.c.
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
 #include "userland/desktop/xserver/win32/scale.h"
 
 #include <errno.h>
+#include <imm.h>
 #include <windowsx.h>
 
 /* The wheel's notch (WHEEL_DELTA). */
@@ -35,6 +37,7 @@
 #define INPUT_EXTENDED_BIT	24U
 #define INPUT_REPEAT_BIT	30U
 
+static void input_method_key(struct x11_surface *surface, unsigned scan, int extended, int pressed, DWORD time);
 static int input_fake_control(struct x11_surface *surface, int pressed);
 static void input_note_action(struct x11_win32 *backend, uint32_t code, DWORD time);
 static void input_send_key(struct x11_win32 *backend, uint32_t code, int pressed, DWORD time);
@@ -47,7 +50,7 @@ static void input_enter(struct x11_surface *surface);
  * Turns a key message of an X window into X's input: the key's evdev
  * code from its scan code, the left Ctrl Windows makes up before AltGr
  * dropped, a held key's repeat sent as X does (a release and a press),
- * Alt+F4 kept for closing the window.
+ * Alt+F4 kept for closing the window (the root window's goes to X).
  */
 void
 win32_input_key(
@@ -77,6 +80,16 @@ win32_input_key(
 		repeat = 1;
 	time = (DWORD)GetMessageTime();
 
+	/* A character sent as a key is typed as text (its WM_CHAR); X hears no key. */
+	if (wparam == VK_PACKET)
+		return;
+
+	/* A key the input method took is the input method's (only a key X holds is let go). */
+	if (wparam == VK_PROCESSKEY) {
+		input_method_key(surface, scan, extended, pressed, time);
+		return;
+	}
+
 	/* The key's place on the keyboard; a key X cannot name is dropped. */
 	code = x11_win32_scan_to_evdev(scan, extended, (unsigned)wparam);
 	if (code == 0 || code > X11_WIN32_EVDEV_MAX)
@@ -89,8 +102,11 @@ win32_input_key(
 			return;
 	}
 
-	/* Alt+F4 closes the window, as on every Windows window; X does not get the F4. */
-	if (pressed && code == WIN32_KEY_F4 && (backend->modifiers & X11_ALT_MASK) != 0) {
+	/* Alt+F4 closes the window, as on every Windows window; X does not get the F4 (but every key of the root window goes to X). */
+	if (pressed &&
+	    code == WIN32_KEY_F4 &&
+	    (backend->modifiers & X11_ALT_MASK) != 0 &&
+	    surface->kind != X11_SURFACE_ROOT) {
 		if (!repeat)
 			SendMessageW(surface->hwnd, WM_CLOSE, 0, 0);
 		return;
@@ -337,8 +353,9 @@ win32_input_capture_changed(
 
 /*
  * Tells where the system's pointer is on the root window (X's pixels from
- * the virtual screen's corner), inside an X window or not.  Returns 0, or
- * an errno value.
+ * the virtual screen's corner), inside an X window or not; with a root
+ * surface, from its corner, and only while the pointer is over it.
+ * Returns 0, or an errno value.
  */
 int
 win32_input_place(
@@ -347,14 +364,30 @@ win32_input_place(
 	int *y)
 {
 	struct x11_win32 *backend;
+	RECT client;
 	POINT point;
 	BOOL found;
+	BOOL turned;
 
 	/* The pointer on the screen. */
 	backend = context;
 	found = GetCursorPos(&point);
 	if (!found)
 		return EIO;
+
+	/* A root surface: the place in its client area, when the pointer is there. */
+	if (backend->root_surface != NULL) {
+		turned = ScreenToClient(backend->root_surface->hwnd, &point);
+		if (!turned)
+			return EIO;
+		GetClientRect(backend->root_surface->hwnd, &client);
+		found = PtInRect(&client, point);
+		if (!found)
+			return ENOENT;
+		*x = x11_win32_scale_to_x(point.x, backend->scale);
+		*y = x11_win32_scale_to_x(point.y, backend->scale);
+		return 0;
+	}
 
 	/* Succeeded: on the root window. */
 	*x = x11_win32_scale_to_x(point.x - backend->virtual_screen.left, backend->scale);
@@ -364,8 +397,10 @@ win32_input_place(
 
 /*
  * Moves the system's pointer to a place on the root window (the core asks
- * only for a place in the asking client's own window).  Returns 0, or an
- * errno value.
+ * only for a place in the asking client's own window); with a root
+ * surface, only while it is the active window, so that a remote client
+ * cannot take the pointer from another program.  Returns 0, or an errno
+ * value.
  */
 int
 win32_input_warp(
@@ -374,7 +409,10 @@ win32_input_warp(
 	int y)
 {
 	struct x11_win32 *backend;
+	POINT point;
+	HWND active;
 	BOOL moved;
+	BOOL turned;
 	int screen_x;
 	int screen_y;
 
@@ -382,6 +420,20 @@ win32_input_warp(
 	backend = context;
 	screen_x = backend->virtual_screen.left + x11_win32_scale_to_screen(x, backend->scale);
 	screen_y = backend->virtual_screen.top + x11_win32_scale_to_screen(y, backend->scale);
+
+	/* A root surface: from its client area's corner, while it is active. */
+	if (backend->root_surface != NULL) {
+		active = GetForegroundWindow();
+		if (active != backend->root_surface->hwnd)
+			return EPERM;
+		point.x = x11_win32_scale_to_screen(x, backend->scale);
+		point.y = x11_win32_scale_to_screen(y, backend->scale);
+		turned = ClientToScreen(backend->root_surface->hwnd, &point);
+		if (!turned)
+			return EIO;
+		screen_x = point.x;
+		screen_y = point.y;
+	}
 
 	/* Succeeded: moved there. */
 	moved = SetCursorPos(screen_x, screen_y);
@@ -406,6 +458,40 @@ win32_input_bell(
 
 	/* Succeeded: the system's default sound. */
 	MessageBeep(MB_OK);
+}
+
+/*
+ * Follows a key an input method took (VK_PROCESSKEY): X hears nothing of
+ * its press, which composes text; its release lets go a key X holds (the
+ * input method turned on while it was down), so that no key stays down
+ * in X.
+ */
+static void
+input_method_key(
+	struct x11_surface *surface,
+	unsigned scan,
+	int extended,
+	int pressed,
+	DWORD time)
+{
+	struct x11_win32 *backend;
+	UINT virtual_key;
+	uint32_t code;
+
+	/* A press composes. */
+	backend = surface->backend;
+	if (pressed)
+		return;
+
+	/* The key's place, with the virtual key the input method was given. */
+	virtual_key = ImmGetVirtualKey(surface->hwnd);
+	code = x11_win32_scan_to_evdev(scan, extended, (unsigned)virtual_key);
+	if (code == 0 || code > X11_WIN32_EVDEV_MAX)
+		return;
+
+	/* Succeeded: a key X holds is let go. */
+	if (backend->held[code])
+		input_send_key(backend, code, 0, time);
 }
 
 /*
