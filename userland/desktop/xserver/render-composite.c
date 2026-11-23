@@ -308,14 +308,18 @@ composite_fetch_transformed(
 	size_t count,
 	uint32_t *pixels)
 {
+	int64_t centre_x;
+	int64_t centre_y;
 	int64_t place_x;
 	int64_t place_y;
 	size_t index;
 	int seen;
 
 	/* Each pixel's centre, in 16.16 fixed point. */
+	centre_y = (int64_t)y * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2;
 	for (index = 0U; index < count; index++) {
-		seen = composite_transform_fixed(source, ((int64_t)x + (int64_t)index) * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2, (int64_t)y * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2, &place_x, &place_y);
+		centre_x = ((int64_t)x + (int64_t)index) * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2;
+		seen = composite_transform_fixed(source, centre_x, centre_y, &place_x, &place_y);
 		if (!seen) {
 			/* A point the transform sends to infinity reads as nothing. */
 			pixels[index] = 0U;
@@ -676,8 +680,17 @@ static uint32_t
 composite_solid(
 	const struct x11_color *color)
 {
+	unsigned alpha;
+	unsigned red;
+	unsigned green;
+	unsigned blue;
+
 	/* The top byte of each. */
-	return composite_pack((unsigned)color->alpha >> 8U, (unsigned)color->red >> 8U, (unsigned)color->green >> 8U, (unsigned)color->blue >> 8U);
+	alpha = (unsigned)color->alpha >> 8U;
+	red = (unsigned)color->red >> 8U;
+	green = (unsigned)color->green >> 8U;
+	blue = (unsigned)color->blue >> 8U;
+	return composite_pack(alpha, red, green, blue);
 }
 
 /*
@@ -729,6 +742,8 @@ composite_place(
 	double *place_x,
 	double *place_y)
 {
+	int64_t centre_x;
+	int64_t centre_y;
 	int64_t fixed_x;
 	int64_t fixed_y;
 	int seen;
@@ -741,7 +756,9 @@ composite_place(
 	}
 
 	/* Through the transform. */
-	seen = composite_transform_fixed(source, (int64_t)x * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2, (int64_t)y * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2, &fixed_x, &fixed_y);
+	centre_x = (int64_t)x * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2;
+	centre_y = (int64_t)y * COMPOSITE_FIXED_ONE + COMPOSITE_FIXED_ONE / 2;
+	seen = composite_transform_fixed(source, centre_x, centre_y, &fixed_x, &fixed_y);
 	if (!seen)
 		return 0;
 
@@ -921,6 +938,7 @@ composite_gradient_color(
 	double red;
 	double green;
 	double blue;
+	unsigned channels[4];
 	size_t index;
 
 	/* No stop: nothing. */
@@ -955,7 +973,11 @@ composite_gradient_color(
 	blue = ((double)before->color.blue * (1.0 - share) + (double)after->color.blue * share) / 65535.0;
 
 	/* As a8r8g8b8. */
-	return composite_pack(composite_round(alpha * 255.0), composite_round(red * alpha * 255.0), composite_round(green * alpha * 255.0), composite_round(blue * alpha * 255.0));
+	channels[0] = composite_round(alpha * 255.0);
+	channels[1] = composite_round(red * alpha * 255.0);
+	channels[2] = composite_round(green * alpha * 255.0);
+	channels[3] = composite_round(blue * alpha * 255.0);
+	return composite_pack(channels[0], channels[1], channels[2], channels[3]);
 }
 
 /*
@@ -1716,6 +1738,9 @@ composite_mask_pixel(
 	uint32_t source,
 	unsigned alpha)
 {
+	uint32_t scaled;
+	unsigned shift;
+
 	/* All: the pixel as it is; none: nothing. */
 	if (alpha == 255U)
 		return source;
@@ -1723,7 +1748,10 @@ composite_mask_pixel(
 		return 0U;
 
 	/* Each channel. */
-	return composite_pack(composite_multiply(composite_channel(source, COMPOSITE_ALPHA_SHIFT), alpha), composite_multiply(composite_channel(source, COMPOSITE_RED_SHIFT), alpha), composite_multiply(composite_channel(source, COMPOSITE_GREEN_SHIFT), alpha), composite_multiply(composite_channel(source, COMPOSITE_BLUE_SHIFT), alpha));
+	scaled = 0U;
+	for (shift = 0U; shift < 32U; shift += 8U)
+		scaled |= (uint32_t)composite_multiply(composite_channel(source, shift), alpha) << shift;
+	return scaled;
 }
 
 /* Rounds a value to the nearest whole number from 0 to 255. */

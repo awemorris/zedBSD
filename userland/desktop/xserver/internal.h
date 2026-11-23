@@ -1298,6 +1298,7 @@ unsigned x11_render_request(struct x11server *server, unsigned index, const uint
 void x11_render_forget_window(struct x11server *server, const struct x11_window *window);
 void x11_render_release(struct x11server *server, unsigned owner);
 unsigned x11_render_picture_clip(struct x11server *server, uint32_t id, const struct x11_region *region, int x, int y);
+unsigned x11_render_picture_pixels(struct x11server *server, uint32_t id, uint32_t **pixels, int *width, int *height);
 
 /* glx.c: the GLX extension. */
 void x11_glx_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);

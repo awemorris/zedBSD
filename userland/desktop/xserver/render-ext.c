@@ -224,7 +224,7 @@ struct render_operand {
 
 static unsigned render_query_version(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned render_query_formats(struct x11server *server, struct x11_client *client, size_t length);
-static unsigned render_query_index_values(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned render_query_index_values(struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned render_create_picture(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_change_picture(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_set_clip_rectangles(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -245,7 +245,7 @@ static unsigned render_query_filters(struct x11server *server, struct x11_client
 static unsigned render_set_filter(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_create_source(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned render_new_picture(struct x11server *server, unsigned index, uint32_t id, struct x11_picture **made);
-static unsigned render_values_read(struct x11server *server, unsigned index, const struct x11_picture *picture, uint32_t mask, const uint8_t *values, struct render_values *read);
+static unsigned render_values_read(struct x11server *server, unsigned index, uint32_t mask, const uint8_t *values, struct render_values *read);
 static void render_values_apply(struct x11_picture *picture, struct render_values *values);
 static struct x11_picture *render_picture_find(struct x11server *server, uint32_t id);
 static void render_picture_free(struct x11server *server, struct x11_picture *picture);
@@ -299,7 +299,7 @@ x11_render_request(
 		code = render_query_formats(server, client, length);
 		break;
 	case RENDER_QUERY_PICT_INDEX_VALUES:
-		code = render_query_index_values(server, client, request, length);
+		code = render_query_index_values(client, request, length);
 		break;
 	case RENDER_CREATE_PICTURE:
 		code = render_create_picture(server, index, request, length);
@@ -506,6 +506,74 @@ x11_render_picture_clip(
 	return 0U;
 }
 
+/*
+ * Reads a picture of a drawable as a8r8g8b8 pixels (premultiplied), all
+ * of its drawable, for RENDER's CreateCursor: the picture composited with
+ * Src onto pixels of its size (a window's that cannot be seen are all
+ * clear).  Returns 0 with the pixels (malloc'd, width by height, rows of
+ * the width), BadPicture, BadMatch for a picture of its own (a colour or
+ * a gradient has no size), or BadAlloc.
+ */
+unsigned
+x11_render_picture_pixels(
+	struct x11server *server,
+	uint32_t id,
+	uint32_t **pixels,
+	int *width,
+	int *height)
+{
+	struct render_operand source;
+	struct x11_picture *picture;
+	struct x11_region all;
+	struct x11_image image;
+	struct x11_box box;
+	unsigned code;
+	int error;
+
+	/* A picture of a drawable. */
+	picture = render_picture_find(server, id);
+	if (picture == NULL)
+		return RENDER_BAD_PICTURE;
+	if (picture->kind != X11_SOURCE_IMAGE)
+		return X11_BAD_MATCH;
+
+	/* The drawable as the layer reads it. */
+	code = render_operand_of(server, picture, &source);
+	if (code != 0U) {
+		render_operand_fini(&source);
+		return code;
+	}
+
+	/* Pixels of its size, all clear. */
+	error = render_image_make(&image, source.view.width, source.view.height, X11_DEPTH_ARGB);
+	if (error != 0) {
+		render_operand_fini(&source);
+		return X11_BAD_ALLOC;
+	}
+
+	/* The picture copied onto them. */
+	box.x0 = 0;
+	box.y0 = 0;
+	box.x1 = image.width;
+	box.y1 = image.height;
+	x11_region_init(&all);
+	error = x11_region_set(&all, &box);
+	if (error == 0)
+		x11_render_composite(&image, &all, X11_OP_SRC, &source.source, 0, 0, NULL, 0, 0, 0, 0, image.width, image.height);
+	x11_region_fini(&all);
+	render_operand_fini(&source);
+	if (error != 0) {
+		free(image.pixels);
+		return X11_BAD_ALLOC;
+	}
+
+	/* Succeeded: the pixels are the caller's. */
+	*pixels = image.pixels;
+	*width = image.width;
+	*height = image.height;
+	return 0U;
+}
+
 /* QueryVersion: the version both the client and the server know (the lower of the two). */
 static unsigned
 render_query_version(
@@ -628,14 +696,11 @@ render_query_formats(
 /* QueryPictIndexValues: no format of the screen is indexed. */
 static unsigned
 render_query_index_values(
-	struct x11server *server,
 	struct x11_client *client,
 	const uint8_t *request,
 	size_t length)
 {
 	unsigned depth;
-
-	(void)server;
 
 	/* A format. */
 	if (length != 8U)
@@ -717,7 +782,7 @@ render_create_picture(
 	picture->format = format;
 
 	/* Its values, every one checked before any is kept (the pixmap is not held yet). */
-	code = render_values_read(server, index, picture, mask, request + 20, &values);
+	code = render_values_read(server, index, mask, request + 20, &values);
 	if (code != 0U) {
 		x11_region_fini(&values.clip);
 		picture->pixmap = NULL;
@@ -772,7 +837,7 @@ render_change_picture(
 		return X11_BAD_LENGTH;
 
 	/* Read and checked, then kept. */
-	code = render_values_read(server, index, picture, mask, request + 12, &values);
+	code = render_values_read(server, index, mask, request + 12, &values);
 	if (code != 0U) {
 		x11_region_fini(&values.clip);
 		return code;
@@ -876,12 +941,22 @@ render_composite(
 {
 	struct render_operand source;
 	struct render_operand mask;
+	struct render_operand *mask_operand;
 	struct x11_picture *source_picture;
 	struct x11_picture *mask_picture;
 	struct x11_picture *target;
 	uint32_t mask_id;
 	unsigned op;
 	unsigned code;
+	int source_x;
+	int source_y;
+	int mask_x;
+	int mask_y;
+	int x;
+	int y;
+	int width;
+	int height;
+	int valid;
 	int msb;
 
 	/* The operator and the three pictures (the mask may be None, the destination is a drawable's). */
@@ -889,7 +964,8 @@ render_composite(
 	if (length != 36U)
 		return X11_BAD_LENGTH;
 	op = request[4];
-	if (!render_op_valid(op))
+	valid = render_op_valid(op);
+	if (!valid)
 		return X11_BAD_VALUE;
 	source_picture = render_picture_find(server, x11_read32(request + 8, msb));
 	if (source_picture == NULL)
@@ -922,8 +998,21 @@ render_composite(
 		}
 	}
 
-	/* Drawn. */
-	render_draw(server, op, target, &source, (int16_t)x11_read16(request + 20, msb), (int16_t)x11_read16(request + 22, msb), mask_picture != NULL ? &mask : NULL, (int16_t)x11_read16(request + 24, msb), (int16_t)x11_read16(request + 26, msb), (int16_t)x11_read16(request + 28, msb), (int16_t)x11_read16(request + 30, msb), x11_read16(request + 32, msb), x11_read16(request + 34, msb));
+	/* The places of the source, the mask and the destination, and the size. */
+	source_x = (int16_t)x11_read16(request + 20, msb);
+	source_y = (int16_t)x11_read16(request + 22, msb);
+	mask_x = (int16_t)x11_read16(request + 24, msb);
+	mask_y = (int16_t)x11_read16(request + 26, msb);
+	x = (int16_t)x11_read16(request + 28, msb);
+	y = (int16_t)x11_read16(request + 30, msb);
+	width = x11_read16(request + 32, msb);
+	height = x11_read16(request + 34, msb);
+
+	/* Drawn, through the mask when there is one. */
+	mask_operand = NULL;
+	if (mask_picture != NULL)
+		mask_operand = &mask;
+	render_draw(server, op, target, &source, source_x, source_y, mask_operand, mask_x, mask_y, x, y, width, height);
 
 	/* Succeeded: what the operands held goes. */
 	if (mask_picture != NULL)
@@ -949,6 +1038,11 @@ render_fill_rectangles(
 	size_t count;
 	size_t at;
 	unsigned op;
+	int x;
+	int y;
+	int width;
+	int height;
+	int valid;
 	int msb;
 
 	/* The operator, the destination, the colour and whole rectangles. */
@@ -956,7 +1050,8 @@ render_fill_rectangles(
 	if (length < 20U || (length - 20U) % 8U != 0U)
 		return X11_BAD_LENGTH;
 	op = request[4];
-	if (!render_op_valid(op))
+	valid = render_op_valid(op);
+	if (!valid)
 		return X11_BAD_VALUE;
 	target = render_picture_find(server, x11_read32(request + 8, msb));
 	if (target == NULL)
@@ -977,7 +1072,11 @@ render_fill_rectangles(
 	count = (length - 20U) / 8U;
 	for (at = 0U; at < count; at++) {
 		rectangle = request + 20U + at * 8U;
-		render_draw(server, op, target, &source, 0, 0, NULL, 0, 0, (int16_t)x11_read16(rectangle, msb), (int16_t)x11_read16(rectangle + 2, msb), x11_read16(rectangle + 4, msb), x11_read16(rectangle + 6, msb));
+		x = (int16_t)x11_read16(rectangle, msb);
+		y = (int16_t)x11_read16(rectangle + 2, msb);
+		width = x11_read16(rectangle + 4, msb);
+		height = x11_read16(rectangle + 6, msb);
+		render_draw(server, op, target, &source, 0, 0, NULL, 0, 0, x, y, width, height);
 	}
 
 	/* Succeeded: filled. */
@@ -1006,6 +1105,10 @@ render_trapezoids(
 	size_t count;
 	size_t at;
 	unsigned op;
+	unsigned mask_depth;
+	int source_dx;
+	int source_dy;
+	int valid;
 	int msb;
 
 	/* The operator, the source and destination, the mask format, and whole trapezoids. */
@@ -1013,7 +1116,8 @@ render_trapezoids(
 	if (length < 24U || (length - 24U) % 40U != 0U)
 		return X11_BAD_LENGTH;
 	op = request[4];
-	if (!render_op_valid(op))
+	valid = render_op_valid(op);
+	if (!valid)
 		return X11_BAD_VALUE;
 	source = render_picture_find(server, x11_read32(request + 8, msb));
 	if (source == NULL)
@@ -1024,8 +1128,11 @@ render_trapezoids(
 	if (target->kind != X11_SOURCE_IMAGE)
 		return X11_BAD_DRAWABLE;
 	mask_format = x11_read32(request + 16, msb);
-	if (mask_format != 0U && render_format_depth(mask_format) == 0U)
-		return RENDER_BAD_PICT_FORMAT;
+	if (mask_format != 0U) {
+		mask_depth = render_format_depth(mask_format);
+		if (mask_depth == 0U)
+			return RENDER_BAD_PICT_FORMAT;
+	}
 	count = (length - 24U) / 40U;
 	if (count == 0U)
 		return 0U;
@@ -1038,7 +1145,11 @@ render_trapezoids(
 		render_trapezoid_read(request + 24U + at * 40U, msb, &trapezoids[at]);
 
 	/* Drawn, the source moved by the first trapezoid's first point (whole pixels, rounded down). */
-	render_shapes(server, op, source, target, mask_format, (int16_t)x11_read16(request + 20, msb) - render_fixed_int(trapezoids[0].left[0]), (int16_t)x11_read16(request + 22, msb) - render_fixed_int(trapezoids[0].left[1]), trapezoids, count, 1U);
+	source_dx = (int16_t)x11_read16(request + 20, msb);
+	source_dy = (int16_t)x11_read16(request + 22, msb);
+	source_dx -= render_fixed_int(trapezoids[0].left[0]);
+	source_dy -= render_fixed_int(trapezoids[0].left[1]);
+	render_shapes(server, op, source, target, mask_format, source_dx, source_dy, trapezoids, count, 1U);
 
 	/* Succeeded: drawn. */
 	free(trapezoids);
@@ -1071,6 +1182,10 @@ render_triangles(
 	size_t corner;
 	size_t first;
 	unsigned op;
+	unsigned mask_depth;
+	int source_dx;
+	int source_dy;
+	int valid;
 	int msb;
 
 	/* The operator, the source and destination, the mask format, and whole points. */
@@ -1080,7 +1195,8 @@ render_triangles(
 	if (request[1] == RENDER_TRIANGLES && (length - 24U) % 24U != 0U)
 		return X11_BAD_LENGTH;
 	op = request[4];
-	if (!render_op_valid(op))
+	valid = render_op_valid(op);
+	if (!valid)
 		return X11_BAD_VALUE;
 	source = render_picture_find(server, x11_read32(request + 8, msb));
 	if (source == NULL)
@@ -1091,8 +1207,11 @@ render_triangles(
 	if (target->kind != X11_SOURCE_IMAGE)
 		return X11_BAD_DRAWABLE;
 	mask_format = x11_read32(request + 16, msb);
-	if (mask_format != 0U && render_format_depth(mask_format) == 0U)
-		return RENDER_BAD_PICT_FORMAT;
+	if (mask_format != 0U) {
+		mask_depth = render_format_depth(mask_format);
+		if (mask_depth == 0U)
+			return RENDER_BAD_PICT_FORMAT;
+	}
 
 	/* The triangles the points make. */
 	point_count = (length - 24U) / 8U;
@@ -1136,7 +1255,11 @@ render_triangles(
 	}
 
 	/* Drawn, the source moved by the first point (whole pixels, rounded down). */
-	render_shapes(server, op, source, target, mask_format, (int16_t)x11_read16(request + 20, msb) - render_fixed_int(points[0]), (int16_t)x11_read16(request + 22, msb) - render_fixed_int(points[1]), trapezoids, triangles * 2U, 2U);
+	source_dx = (int16_t)x11_read16(request + 20, msb);
+	source_dy = (int16_t)x11_read16(request + 22, msb);
+	source_dx -= render_fixed_int(points[0]);
+	source_dy -= render_fixed_int(points[1]);
+	render_shapes(server, op, source, target, mask_format, source_dx, source_dy, trapezoids, triangles * 2U, 2U);
 
 	/* Succeeded: drawn. */
 	free(trapezoids);
@@ -1534,6 +1657,8 @@ render_composite_glyphs(
 	unsigned mask_depth;
 	unsigned pass;
 	unsigned code;
+	int source_x;
+	int source_y;
 	int pen_x;
 	int pen_y;
 	int start_x;
@@ -1541,6 +1666,7 @@ render_composite_glyphs(
 	int started;
 	int have_extents;
 	int error;
+	int valid;
 	int msb;
 
 	/* The operator, the source and destination, the mask format and the first glyph set. */
@@ -1548,7 +1674,8 @@ render_composite_glyphs(
 	if (length < 28U)
 		return X11_BAD_LENGTH;
 	op = request[4];
-	if (!render_op_valid(op))
+	valid = render_op_valid(op);
+	if (!valid)
 		return X11_BAD_VALUE;
 	source_picture = render_picture_find(server, x11_read32(request + 8, msb));
 	if (source_picture == NULL)
@@ -1568,6 +1695,8 @@ render_composite_glyphs(
 	first_set = render_glyphset_find(server, x11_read32(request + 20, msb));
 	if (first_set == NULL)
 		return RENDER_BAD_GLYPH_SET;
+	source_x = (int16_t)x11_read16(request + 24, msb);
+	source_y = (int16_t)x11_read16(request + 26, msb);
 	id_size = 1U;
 	if (request[1] == RENDER_COMPOSITE_GLYPHS16)
 		id_size = 2U;
@@ -1684,7 +1813,7 @@ render_composite_glyphs(
 						}
 						x11_region_fini(&all);
 					} else {
-						render_draw(server, op, target, &source, (int16_t)x11_read16(request + 24, msb) + box.x0 - start_x, (int16_t)x11_read16(request + 26, msb) + box.y0 - start_y, &glyph_operand, 0, 0, box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+						render_draw(server, op, target, &source, source_x + box.x0 - start_x, source_y + box.y0 - start_y, &glyph_operand, 0, 0, box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
 					}
 					render_operand_fini(&glyph_operand);
 				}
@@ -1715,7 +1844,7 @@ render_composite_glyphs(
 	/* With a mask: the source through it, over the extents. */
 	if (code == 0U && mask_format != 0U && mask.pixels != NULL) {
 		render_operand_image(&mask_operand, &mask, mask_depth == X11_DEPTH_ARGB);
-		render_draw(server, op, target, &source, (int16_t)x11_read16(request + 24, msb) + extents.x0 - start_x, (int16_t)x11_read16(request + 26, msb) + extents.y0 - start_y, &mask_operand, 0, 0, extents.x0, extents.y0, extents.x1 - extents.x0, extents.y1 - extents.y0);
+		render_draw(server, op, target, &source, source_x + extents.x0 - start_x, source_y + extents.y0 - start_y, &mask_operand, 0, 0, extents.x0, extents.y0, extents.x1 - extents.x0, extents.y1 - extents.y0);
 		render_operand_fini(&mask_operand);
 	}
 
@@ -1841,6 +1970,7 @@ render_set_filter(
 	int width;
 	int height;
 	int matches;
+	size_t known_length;
 	int msb;
 
 	/* The picture, the name and the values after it. */
@@ -1859,7 +1989,8 @@ render_set_filter(
 	/* The filter of the name (letters in either case). */
 	filter = RENDER_FILTER_NAMES;
 	for (at = 0U; at < RENDER_FILTER_NAMES && filter == RENDER_FILTER_NAMES; at++) {
-		if (strlen(names[at]) != name_length)
+		known_length = strlen(names[at]);
+		if (known_length != name_length)
 			continue;
 		matches = 1;
 		for (letter = 0U; letter < name_length; letter++) {
@@ -2088,7 +2219,6 @@ static unsigned
 render_values_read(
 	struct x11server *server,
 	unsigned index,
-	const struct x11_picture *picture,
 	uint32_t mask,
 	const uint8_t *values,
 	struct render_values *read)
@@ -2099,8 +2229,6 @@ render_values_read(
 	unsigned bit;
 	int error;
 	int msb;
-
-	(void)picture;
 
 	/* Each value in bit order. */
 	msb = server->clients[index].order;
@@ -2545,6 +2673,7 @@ render_shapes(
 	size_t first;
 	size_t at;
 	unsigned depth;
+	unsigned format_depth;
 	unsigned code;
 	int have_bounds;
 	int inside;
@@ -2561,7 +2690,10 @@ render_shapes(
 	depth = X11_DEPTH_ALPHA;
 	if (mask_format == 0U && target->poly_edge == POLY_EDGE_SHARP)
 		depth = 1U;
-	if (mask_format != 0U && render_format_depth(mask_format) == 1U)
+	format_depth = 0U;
+	if (mask_format != 0U)
+		format_depth = render_format_depth(mask_format);
+	if (format_depth == 1U)
 		depth = 1U;
 	group = per_shape;
 	if (mask_format != 0U)
