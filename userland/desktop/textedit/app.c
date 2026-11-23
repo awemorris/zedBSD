@@ -317,6 +317,8 @@ te_app_set_scale(
 	app->scroll_y = first_row * (double)app->row_height;
 	app->scroll_x = first_column * (double)app->cell;
 	te_app_relayout(app);
+
+	/* The log line the tests read (the cell and the row in the window's pixels). */
 	te_log("SCALE scale=%u pixels=%u cell=%d row=%d", app->scale, app->pixels, app->cell, app->row_height);
 }
 
