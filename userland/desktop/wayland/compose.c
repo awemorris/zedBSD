@@ -74,8 +74,9 @@ static void compose_turn_open(struct kwl_server *server);
 static unsigned compose_windows(struct kwl_server *server, struct kwl_object **windows, unsigned capacity);
 static unsigned compose_split(struct kwl_server *server, struct kwl_object **windows, unsigned count);
 static void compose_lists_log(struct kwl_server *server, struct kwl_object **windows, unsigned count);
-static void compose_quad(struct kwl_server *server, struct kwl_list *command, const struct kwl_import *import, int32_t x, int32_t y);
 static void compose_quad_part(struct kwl_server *server, struct kwl_list *command, const struct kwl_import *import, int32_t x, int32_t y, uint32_t quad_width, uint32_t quad_height, const float *uv);
+static void compose_quad_place(struct kwl_server *server, struct kwl_list *command, const struct kwl_import *import, const float *place, const float *uv);
+static void compose_cursor_quad(struct kwl_server *server, struct kwl_list *command, const struct kwl_import *image, int32_t x, int32_t y, unsigned own);
 static const struct kwl_import *surface_image(const struct kwl_object *surface);
 static void compose_cursor(struct kwl_server *server, struct kwl_list *command);
 static void compose_background(struct kwl_list *command, const VkRect2D *rects, unsigned count);
@@ -3434,21 +3435,6 @@ kwl_compose_image_quad(
 	compose_quad_part(server, command, import, x, y, width, height, uv);
 }
 
-/* Draws an image as a quad at a place on the output, its own size, all of it. */
-static void
-compose_quad(
-	struct kwl_server *server,
-	struct kwl_list *command,
-	const struct kwl_import *import,
-	int32_t x,
-	int32_t y)
-{
-	static const float whole[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
-
-	/* The image's size, all of it. */
-	compose_quad_part(server, command, import, x, y, import->width, import->height, whole);
-}
-
 /*
  * Counts one draw of the frame being recorded (KWL DRAWS): a
  * glass shape (shape nonzero) or a window's quad, in the section drawn now,
@@ -3569,6 +3555,29 @@ compose_quad_part(
 	uint32_t quad_height,
 	const float *uv)
 {
+	float place[4];
+
+	/* The quad's place and size on the plane. */
+	place[0] = (float)x;
+	place[1] = (float)y;
+	place[2] = (float)quad_width;
+	place[3] = (float)quad_height;
+	compose_quad_place(server, command, import, place, uv);
+}
+
+/*
+ * Draws a part of an image as a quad at a place and size of the plane
+ * (left, top, width, height, which may lie between units: the pointer's
+ * place).
+ */
+static void
+compose_quad_place(
+	struct kwl_server *server,
+	struct kwl_list *command,
+	const struct kwl_import *import,
+	const float *place,
+	const float *uv)
+{
 	VkDescriptorSet set;
 	float constants[8];
 	float plane[4];
@@ -3579,16 +3588,13 @@ compose_quad_part(
 	int visible;
 
 	/* The output drawn: the anchor, or a head's part of the plane. */
+	memcpy(plane, place, sizeof(plane));
 	if (server->view_width != 0U) {
-		x -= server->view_x;
-		y -= server->view_y;
+		plane[0] -= (float)server->view_x;
+		plane[1] -= (float)server->view_y;
 	}
 
 	/* The quad in the pass's pixels, and the size of the picture drawn. */
-	plane[0] = (float)x;
-	plane[1] = (float)y;
-	plane[2] = (float)quad_width;
-	plane[3] = (float)quad_height;
 	kwl_compose_pass_rect(server, plane, quad);
 	kwl_compose_pass_size(server, &width, &height);
 
@@ -4249,7 +4255,7 @@ compose_cursor(
 		if (server->pointer_unmoved || server->compose->cursor_plane.shown)
 			return;
 		if (server->arrow != NULL)
-			compose_quad(server, command, server->arrow, server->pointer_x, server->pointer_y);
+			compose_cursor_quad(server, command, server->arrow, server->pointer_x, server->pointer_y, 1U);
 		return;
 	}
 
@@ -4267,7 +4273,7 @@ compose_cursor(
 		if (image != NULL) {
 			alpha = *image;
 			alpha.draw = KWL_DRAW_ALPHA;
-			compose_quad(server, command, &alpha, server->pointer_x + surface->offset_x, server->pointer_y + surface->offset_y);
+			compose_cursor_quad(server, command, &alpha, server->pointer_x + surface->offset_x, server->pointer_y + surface->offset_y, 0U);
 		} else if (server->glass) {
 			kwl_glass_draw_drag_badge(server, command);
 		}
@@ -4296,14 +4302,14 @@ compose_cursor(
 		if (server->frame_edges != 0U) {
 			image = kwl_cursor_image(server, &hotspot_x, &hotspot_y);
 			if (image != NULL) {
-				compose_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y);
+				compose_cursor_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y, 1U);
 				return;
 			}
 		}
 
 		/* The arrow, its tip at the pointer. */
 		if (server->arrow != NULL)
-			compose_quad(server, command, server->arrow, server->pointer_x, server->pointer_y);
+			compose_cursor_quad(server, command, server->arrow, server->pointer_x, server->pointer_y, 1U);
 		return;
 	}
 
@@ -4315,7 +4321,7 @@ compose_cursor(
 	if (server->frame_edges != 0U) {
 		image = kwl_cursor_image(server, &hotspot_x, &hotspot_y);
 		if (image != NULL) {
-			compose_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y);
+			compose_cursor_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y, 1U);
 			return;
 		}
 	}
@@ -4328,20 +4334,55 @@ compose_cursor(
 			return;
 		alpha = *image;
 		alpha.draw = KWL_DRAW_ALPHA;
-		compose_quad(server, command, &alpha, server->pointer_x - server->cursor_hotspot_x, server->pointer_y - server->cursor_hotspot_y);
+		compose_cursor_quad(server, command, &alpha, server->pointer_x - server->cursor_hotspot_x, server->pointer_y - server->cursor_hotspot_y, 0U);
 		return;
 	}
 
 	/* A shape the client asked for, its hotspot at the pointer (cursor.c). */
 	image = kwl_cursor_image(server, &hotspot_x, &hotspot_y);
 	if (image != NULL) {
-		compose_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y);
+		compose_cursor_quad(server, command, image, server->pointer_x - hotspot_x, server->pointer_y - hotspot_y, 1U);
 		return;
 	}
 
 	/* Otherwise the arrow, its tip at the pointer. */
 	if (server->arrow != NULL)
-		compose_quad(server, command, server->arrow, server->pointer_x, server->pointer_y);
+		compose_cursor_quad(server, command, server->arrow, server->pointer_x, server->pointer_y, 1U);
+}
+
+/*
+ * Draws a cursor's image with its corner at a place of the plane and the
+ * pointer's place between units added: the compositor's own image (own:
+ * the arrow, a shape) at its logical size, its pixels drawn at the scale
+ * the cursor's images were made at; a client's image (its cursor surface,
+ * a drag's icon) at its own size.
+ */
+static void
+compose_cursor_quad(
+	struct kwl_server *server,
+	struct kwl_list *command,
+	const struct kwl_import *image,
+	int32_t x,
+	int32_t y,
+	unsigned own)
+{
+	static const float whole[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+	float place[4];
+
+	/* The corner, with the pointer's place between units. */
+	place[0] = (float)x + (float)server->pointer_fraction_x / 256.0f;
+	place[1] = (float)y + (float)server->pointer_fraction_y / 256.0f;
+
+	/* The image's size on the plane: its own, or the compositor's image's logical size. */
+	place[2] = (float)image->width;
+	place[3] = (float)image->height;
+	if (own) {
+		place[2] = (float)kwl_scale_logical(image->width, server->cursor_scale120);
+		place[3] = (float)kwl_scale_logical(image->height, server->cursor_scale120);
+	}
+
+	/* The quad, all of the image. */
+	compose_quad_place(server, command, image, place, whole);
 }
 
 /*

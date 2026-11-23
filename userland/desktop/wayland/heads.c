@@ -2275,8 +2275,8 @@ kwl_pointer_absolute(
 
 /*
  * Gives what the pointer's place is computed over (WS217): the outputs'
- * logical rectangles, each one's panel and the angle shown on it, and the
- * output the absolute pointer maps onto (the anchor until devices are
+ * logical rectangles, each one's panel and the angle shown on it, the
+ * anchor's scale, and the output the absolute pointer maps onto (the anchor until devices are
  * bound to displays, ws217-p006).  A head is not turned yet (ws217-p005):
  * its panel is its logical size.
  */
@@ -2287,10 +2287,11 @@ kwl_output_geometry(
 {
 	unsigned slot;
 
-	/* The rectangles; the absolute pointer on the anchor. */
+	/* The rectangles; the absolute pointer on the anchor; the anchor's scale. */
 	memset(geometry, 0, sizeof(*geometry));
 	geometry->output_count = kwl_outputs(server, geometry->outputs);
 	geometry->absolute_slot = KWL_PLANE_ANCHOR;
+	geometry->scale120 = server->scale120;
 
 	/* Each output's panel: its logical size turned back by its angle. */
 	for (slot = 0U; slot < KWL_PLANE_SLOTS; slot++) {

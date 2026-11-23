@@ -30,6 +30,7 @@ int kwl_cursor_shape_request(struct kwl_object *object, uint32_t opcode, const u
 void kwl_cursor_shape_object_gone(struct kwl_object *object);
 void kwl_cursor_images_destroy(struct kwl_server *server);
 int kwl_cursor_images_create(struct kwl_server *server);
+void kwl_cursor_images_rescale(struct kwl_server *server);
 const struct kwl_import *kwl_cursor_image(const struct kwl_server *server, int32_t *hotspot_x, int32_t *hotspot_y);
 void kwl_cursor_frame(struct kwl_server *server, uint32_t edges);
 

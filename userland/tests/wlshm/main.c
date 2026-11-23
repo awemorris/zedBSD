@@ -809,10 +809,10 @@ pointer_enter(
 {
 	struct window *window;
 
-	/* The window's own cursor, or none. */
+	/* The window's own cursor, or none; the place it entered at, also as it came (24.8). */
 	window = data;
 	(void)surface;
-	printf("WLSHM ENTER run=%s x=%d y=%d\n", window->token, x / 256, y / 256);
+	printf("WLSHM ENTER run=%s x=%d y=%d fixed=%d,%d\n", window->token, x / 256, y / 256, x, y);
 	fflush(stdout);
 	if (window->hide_cursor) {
 		wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);

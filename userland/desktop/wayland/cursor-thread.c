@@ -46,13 +46,18 @@ enum cursor_present_result {
 };
 
 /*
- * What a step read from the box: the place and output, the report's time,
- * the image, its generation, version and hotspot, whether the plane shows
- * the cursor, and the copy the step pinned (-1 none) while it reads it.
+ * What a step read from the box: the place (with its part between units)
+ * and output, the anchor's scale, the report's time, the image, its
+ * generation, version and hotspot (in the image's pixels), whether the
+ * plane shows the cursor, and the copy the step pinned (-1 none) while it
+ * reads it.
  */
 struct cursor_snapshot {
 	int32_t x;
 	int32_t y;
+	int32_t fraction_x;
+	int32_t fraction_y;
+	unsigned scale120;
 	unsigned output;
 	uint64_t event_us;
 	const struct kwl_import *image;
@@ -185,6 +190,9 @@ kwl_cursor_thread_step(
 	/* The place, the image and its hotspot, and whether the plane shows the cursor. */
 	snapshot.x = cursor->box->x;
 	snapshot.y = cursor->box->y;
+	snapshot.fraction_x = cursor->box->fraction_x;
+	snapshot.fraction_y = cursor->box->fraction_y;
+	snapshot.scale120 = cursor->box->scale120;
 	snapshot.output = cursor->box->output;
 	snapshot.event_us = cursor->box->event_us;
 	snapshot.image = cursor->box->image;
@@ -209,18 +217,18 @@ kwl_cursor_thread_step(
 	pthread_mutex_unlock(&cursor->box->lock);
 
 	/*
-	 * The plane shows the image with its hotspot at the place, on the
-	 * anchor only; otherwise it is empty where it was (the cursor is
-	 * composed: a drag, an image the plane cannot show, a pointer on
-	 * another display).
+	 * The plane shows the image with its hotspot at the pixel the place is
+	 * snapped to, on the anchor only; otherwise it is empty where it was
+	 * (the cursor is composed: a drag, an image the plane cannot show, a
+	 * pointer on another display).
 	 */
 	source = NULL;
 	x = cursor->x;
 	y = cursor->y;
 	if (snapshot.show && snapshot.output == KWL_PLANE_ANCHOR && snapshot.image != NULL) {
 		source = snapshot.image;
-		x = snapshot.x - snapshot.hotspot_x;
-		y = snapshot.y - snapshot.hotspot_y;
+		x = kwl_cursor_pixel(snapshot.x, snapshot.fraction_x, snapshot.scale120) - snapshot.hotspot_x;
+		y = kwl_cursor_pixel(snapshot.y, snapshot.fraction_y, snapshot.scale120) - snapshot.hotspot_y;
 	}
 
 	/* Nothing changed since the last present: the next change of the box, with no deadline. */

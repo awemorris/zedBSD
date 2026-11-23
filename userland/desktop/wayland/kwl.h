@@ -1514,6 +1514,14 @@ struct kwl_server {
 	int32_t pointer_x;
 	int32_t pointer_y;
 	/*
+	 * The pointer's place between units, in 256ths (0 to 255, added to
+	 * pointer_x and pointer_y): a mouse's motion and an absolute pointer
+	 * keep it on an output shown at another scale than 100 %, where a unit
+	 * is more than a pixel; it is 0 at 100 %, and after a warp.
+	 */
+	int32_t pointer_fraction_x;
+	int32_t pointer_fraction_y;
+	/*
 	 * The output the pointer is on (plane.h's slot, 0 the anchor; the
 	 * pointer's place is in the plane, ws113-p007), and the output a pass
 	 * draws now: its slot and its rectangle of the plane, which the quads
@@ -2224,6 +2232,13 @@ struct kwl_server {
 	uint32_t cursor_shape;
 	struct kwl_import *cursor_images[KWL_CURSOR_IMAGES];
 	/*
+	 * The scale (120ths, scale.h) the arrow and the shapes' images were
+	 * drawn at: their pixels are their logical size times it.  The arrow's
+	 * making sets it, and the shapes are made at it; an output whose scale
+	 * changed has them made again (kwl_cursor_images_rescale).
+	 */
+	unsigned cursor_scale120;
+	/*
 	 * The edges of the window frame under the pointer, or of the resize it
 	 * started (the glass look's frames, shell.c; KWL_EDGE_* bits of
 	 * toplevel.h, 0 over no frame): while not 0 the cursor is that frame's
@@ -2564,6 +2579,7 @@ int kwl_cursor_client_shown(struct kwl_server *server);
 int kwl_cursor_plane_takes(struct kwl_server *server);
 void kwl_cursor_plane_update(struct kwl_server *server);
 void kwl_cursor_plane_hold(struct kwl_server *server);
+void kwl_cursor_plane_forget(struct kwl_server *server);
 int kwl_arrow_create(struct kwl_server *server);
 void kwl_arrow_destroy(struct kwl_server *server);
 struct kwl_object *kwl_top_window(struct kwl_server *server);
