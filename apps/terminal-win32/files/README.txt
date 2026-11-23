@@ -357,9 +357,11 @@ unless you set it.
 When the shell ends while X programs still run, the connection stays open
 until the last of them ends; close the tab to end them all.
 
-The X server is new: it shows simple X programs, and programs that need what
-it does not have yet (images, cursors of the cursor font: xterm, xclock,
-xeyes, xlogo) stop with an X error for now.
+The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
+xlogo).  Programs that need what it does not have yet (GTK and many Qt
+programs need RENDER and XInput2) stop with an X error for now.  A window
+whose program asks for no position may open at the top left of another
+display; Win+Shift+Left or Right moves it.
 
 
 11. Port forwarding and RemoteCommand
