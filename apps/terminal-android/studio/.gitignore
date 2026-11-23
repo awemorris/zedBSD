@@ -1,0 +1,10 @@
+# Android Studio and Gradle's own files: what a build, a sync and the IDE make here.
+/.gradle/
+/.kotlin/
+/.idea/
+/build/
+/local.properties
+/captures/
+*.iml
+app/build/
+app/.cxx/
