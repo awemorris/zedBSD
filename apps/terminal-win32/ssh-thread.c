@@ -135,6 +135,13 @@
 #define THREAD_WSL_OUTPUT	16384U
 #define THREAD_SCREEN_MAX	65536U
 
+/*
+ * The LogLevel from which informational lines are shown (ssh_config's
+ * INFO; QUIET, FATAL and ERROR read as 0), as OpenSSH's ssh shows its
+ * logit() lines.
+ */
+#define THREAD_LOG_INFO		1
+
 /* The known_hosts file that stands for none: nothing is read from it and nothing kept in it. */
 #define THREAD_NO_FILE		"/dev/null"
 
@@ -3098,16 +3105,18 @@ thread_known_hosts_add(
 		}
 	}
 
-	/* A file that could not keep it. */
+	/* A file that could not keep it (an informational line, not shown below LogLevel INFO, as OpenSSH's). */
 	if (error != 0) {
 		(void)snprintf(text, sizeof(text), "Failed to add the host to the list of known hosts (%s).\r\n", shown);
-		session_say(link->session, text);
+		if (link->config.log_level >= THREAD_LOG_INFO)
+			session_say(link->session, text);
 		return error;
 	}
 
-	/* Succeeded: kept. */
+	/* Succeeded: kept (said only from LogLevel INFO on, as OpenSSH says it). */
 	(void)snprintf(text, sizeof(text), "Warning: Permanently added '%s' (ED25519) to the list of known hosts.\r\n", link->known_name);
-	session_say(link->session, text);
+	if (link->config.log_level >= THREAD_LOG_INFO)
+		session_say(link->session, text);
 	return 0;
 }
 

@@ -104,11 +104,16 @@ zedBSD's `ssh`:
   `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
   `ClearAllForwardings`, `RemoteCommand` (section 4.4), `ProxyCommand`
   (section 4.6).
+- `LogLevel`: `QUIET`, `FATAL` and `ERROR` keep the informational lines
+  OpenSSH's `ssh` shows only from `INFO` on out of the tab (`Warning:
+  Permanently added ... to the list of known hosts.`, `Failed to add the
+  host to the list of known hosts ...`, `Allocated port ...`, `Warning:
+  remote port forwarding failed ...`); `INFO` (the default) and above show
+  them. mikuterm shows no debug lines at any level.
 - Read and checked, but changing nothing in mikuterm: `RequestTTY` (a tab is
   a terminal, so mikuterm always asks the server for one, for a
-  `RemoteCommand` too) and `LogLevel` (mikuterm shows no debug lines). The
-  values are still checked, so a line zedBSD's `ssh` would refuse is an error
-  here too.
+  `RemoteCommand` too). The value is still checked, so a line zedBSD's `ssh`
+  would refuse is an error here too.
 - `SessionType none` (a connection that only forwards ports) is read but
   refused: the tab says `ssh/config: SessionType none is not supported` and
   does not connect.
