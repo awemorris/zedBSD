@@ -25,11 +25,18 @@
 #define KEILAND_ANDROID_H
 
 #include <stddef.h>
+#include <stdint.h>
+
+#include <jni.h>
 
 #include <android/input.h>
 #include <android/looper.h>
 #include <android/native_activity.h>
 #include <android/native_window.h>
+
+/* The idents of the two things M's looper waits on besides its timeout. */
+#define KEILAND_IDENT_WAKE	1
+#define KEILAND_IDENT_INPUT	2
 
 /*
  * What happened to the Activity, as M sees it.
@@ -88,6 +95,62 @@ void keiland_android_start(ANativeActivity *activity, void *saved_state, size_t 
  * program as not responding.
  */
 int keiland_android_next(int timeout_ms, struct keiland_android_event *event);
+
+/*
+ * Takes the oldest queued event without waiting.
+ *
+ * Called on M.  Returns 1 with the event stored, or 0 when none is queued.  An
+ * input queue is joined to M's looper (KEILAND_IDENT_INPUT) as it is handed
+ * out and let go as its destruction is handed out; the input events themselves
+ * are for the caller to read from the looper.
+ */
+int keiland_android_take(struct keiland_android_event *event);
+
+/*
+ * Wakes M's looper (KEILAND_IDENT_WAKE) so that it looks at what was queued.
+ *
+ * Called on any thread.  Does nothing while M has no wake-up descriptor yet; M
+ * looks at its queues before it sleeps, so nothing is lost.
+ */
+void keiland_android_wake(void);
+
+/*
+ * Returns a number for a request whose answer comes later, from any thread.
+ *
+ * The numbers rise from 1 and skip 0, so 0 can mean "no request".
+ */
+uint32_t keiland_android_request(void);
+
+/*
+ * Returns how many queued things were dropped for lack of room or memory.
+ *
+ * Called on any thread.
+ */
+unsigned keiland_android_dropped(void);
+
+/*
+ * Returns the Java virtual machine that JNI_OnLoad was given.
+ *
+ * Called on any thread; NULL before the library is loaded.
+ */
+JavaVM *keiland_android_vm(void);
+
+/*
+ * Returns M's JNI environment, or NULL on any other thread.
+ *
+ * M is attached to the virtual machine when it starts and detached when it ends.
+ */
+JNIEnv *keiland_android_env(void);
+
+/*
+ * Prepares the program's own Java classes for native calls.
+ *
+ * The program defines this function.  JNI_OnLoad calls it on U, after libkeiland's
+ * own registrations, to register the program's native methods and to cache its
+ * classes and method ids (a native thread's own search cannot find them).
+ * Returns JNI_OK, or JNI_ERR to make the load fail.
+ */
+jint keiland_android_app_jni_load(JNIEnv *env);
 
 /*
  * Tells U that M has let go of what a DESTROYED event named.

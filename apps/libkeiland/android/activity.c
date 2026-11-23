@@ -19,6 +19,8 @@
 
 #include "apps/libkeiland/android/keiland-android.h"
 
+#include "apps/libkeiland/android/bridge.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -27,10 +29,6 @@
 #include <unistd.h>
 
 #include <sys/eventfd.h>
-
-/* The idents of the two things M's looper waits on besides its timeout. */
-#define ACTIVITY_IDENT_WAKE	1
-#define ACTIVITY_IDENT_INPUT	2
 
 /* The number of events that can wait for M. */
 #define ACTIVITY_RING_SIZE	64
@@ -70,20 +68,26 @@ static void (*activity_main)(void);
  */
 static int activity_wake_fd = -1;
 
-/* How many events were dropped because the ring was full. */
+/* How many events were dropped because the ring was full; changed under the lock, read at any time. */
 static unsigned activity_dropped;
 
+/* The last number keiland_android_request gave out. */
+static uint32_t activity_request_last;
+
 /*
- * M's looper, and the input queue attached to it.  Only M touches them, so
- * they need no lock.
+ * M's looper, the input queue attached to it, and M's JNI environment with the
+ * identity of the thread it belongs to.  Only M changes them, and the other
+ * threads only compare the identity, so they need no lock.
  */
 static ALooper *activity_looper;
 static AInputQueue *activity_input;
+static JNIEnv *activity_env;
+static pthread_t activity_thread_id;
+static int activity_env_valid;
 
 static int activity_push(enum keiland_android_event_kind kind, ANativeWindow *window, AInputQueue *queue);
 static int activity_push_locked(enum keiland_android_event_kind kind, ANativeWindow *window, AInputQueue *queue);
 static void activity_push_and_wait(enum keiland_android_event_kind kind, ANativeWindow *window, AInputQueue *queue);
-static int activity_take(struct keiland_android_event *event);
 static void activity_make_room(void);
 static void activity_attach(const struct keiland_android_event *event);
 static void activity_input_drain(void);
@@ -198,10 +202,8 @@ keiland_android_next(
 	/* Hands out queued events, and waits for more until the time is up. */
 	for (;;) {
 		/* Takes the oldest queued event. */
-		taken = activity_take(event);
+		taken = keiland_android_take(event);
 		if (taken) {
-			activity_attach(event);
-
 			/* An event is stored. */
 			return 1;
 		}
@@ -217,9 +219,9 @@ keiland_android_next(
 
 		/* Waits for a wake-up, for input, or for the time to run out. */
 		ident = ALooper_pollOnce(wait, NULL, NULL, NULL);
-		if (ident == ACTIVITY_IDENT_WAKE) {
+		if (ident == KEILAND_IDENT_WAKE) {
 			activity_wake_drain();
-		} else if (ident == ACTIVITY_IDENT_INPUT) {
+		} else if (ident == KEILAND_IDENT_INPUT) {
 			activity_input_drain();
 		} else if (ident == ALOOPER_POLL_TIMEOUT) {
 			return 0;
@@ -227,6 +229,111 @@ keiland_android_next(
 			return 0;
 		}
 	}
+}
+
+/*
+ * Takes the oldest queued event without waiting.  Returns 1 with it stored,
+ * or 0 when none is queued.
+ */
+int
+keiland_android_take(
+	struct keiland_android_event *event)
+{
+	int taken;
+
+	/* Takes the event under the lock. */
+	pthread_mutex_lock(&activity_lock);
+
+	taken = 0;
+	if (activity_ring_count > 0) {
+		*event = activity_ring[activity_ring_head];
+		activity_ring_head = (activity_ring_head + 1) % ACTIVITY_RING_SIZE;
+		activity_ring_count--;
+		taken = 1;
+	}
+
+	pthread_mutex_unlock(&activity_lock);
+
+	/* Joins an input queue to the looper, or lets it go, before the caller sees the event. */
+	if (taken)
+		activity_attach(event);
+
+	/* Succeeded: whether there was an event. */
+	return taken;
+}
+
+/*
+ * Wakes M's looper so that it looks at what was queued.
+ */
+void
+keiland_android_wake(void)
+{
+	uint64_t one;
+	ssize_t written;
+	int fd;
+
+	/* Reads the descriptor M published, which is -1 before M made it. */
+	fd = __atomic_load_n(&activity_wake_fd, __ATOMIC_SEQ_CST);
+	if (fd < 0)
+		return;
+
+	/* Adds one to the counter, which makes the descriptor readable. */
+	one = 1;
+	written = write(fd, &one, sizeof(one));
+	if (written < 0) {
+		/* The counter is full, which means M is already awake. */
+	}
+}
+
+/*
+ * Returns a number for a request whose answer comes later.
+ */
+uint32_t
+keiland_android_request(void)
+{
+	uint32_t number;
+
+	/* Takes the next number; 0 is kept for "no request". */
+	number = __atomic_add_fetch(&activity_request_last, 1, __ATOMIC_SEQ_CST);
+	if (number == 0)
+		number = __atomic_add_fetch(&activity_request_last, 1, __ATOMIC_SEQ_CST);
+
+	/* Succeeded: a number that is not 0. */
+	return number;
+}
+
+/*
+ * Returns how many queued things were dropped.
+ */
+unsigned
+keiland_android_dropped(void)
+{
+	unsigned count;
+
+	/* Adds the events the ring could not hold to those the bridge could not allocate. */
+	count = __atomic_load_n(&activity_dropped, __ATOMIC_SEQ_CST);
+	count += keiland_bridge_dropped();
+
+	/* Succeeded: the number of things dropped. */
+	return count;
+}
+
+/*
+ * Returns M's JNI environment, or NULL on any other thread.
+ */
+JNIEnv *
+keiland_android_env(void)
+{
+	/* No environment before M is attached, or after it ended. */
+	if (!__atomic_load_n(&activity_env_valid, __ATOMIC_SEQ_CST))
+		return NULL;
+
+	/* Only M may use the environment. */
+	if (!pthread_equal(pthread_self(), activity_thread_id))
+		return NULL;
+
+	/* Succeeded: M's own environment. */
+	return activity_env;
 }
 
 /*
@@ -320,8 +427,6 @@ activity_push_locked(
 	AInputQueue *queue)
 {
 	struct keiland_android_event *slot;
-	uint64_t one;
-	ssize_t written;
 	unsigned index;
 
 	/* Makes room by dropping events that a newer one replaces. */
@@ -330,7 +435,7 @@ activity_push_locked(
 
 	/* Gives up when nothing could be dropped. */
 	if (activity_ring_count == ACTIVITY_RING_SIZE) {
-		activity_dropped++;
+		__atomic_add_fetch(&activity_dropped, 1, __ATOMIC_SEQ_CST);
 
 		return EAGAIN;
 	}
@@ -344,13 +449,7 @@ activity_push_locked(
 	activity_ring_count++;
 
 	/* Wakes M's looper, when M has made it; M looks at the ring before it sleeps again. */
-	if (activity_wake_fd >= 0) {
-		one = 1;
-		written = write(activity_wake_fd, &one, sizeof(one));
-		if (written < 0) {
-			/* The counter is full, which means M is already awake. */
-		}
-	}
+	keiland_android_wake();
 
 	/* Succeeded: the event is queued. */
 	return 0;
@@ -382,33 +481,6 @@ activity_push_and_wait(
 	}
 
 	pthread_mutex_unlock(&activity_lock);
-}
-
-/*
- * Takes the oldest event out of the ring.  Returns 1 with it stored, or 0
- * when the ring is empty.
- */
-static int
-activity_take(
-	struct keiland_android_event *event)
-{
-	int taken;
-
-	/* Takes the event under the lock. */
-	pthread_mutex_lock(&activity_lock);
-
-	taken = 0;
-	if (activity_ring_count > 0) {
-		*event = activity_ring[activity_ring_head];
-		activity_ring_head = (activity_ring_head + 1) % ACTIVITY_RING_SIZE;
-		activity_ring_count--;
-		taken = 1;
-	}
-
-	pthread_mutex_unlock(&activity_lock);
-
-	/* Succeeded: whether there was an event. */
-	return taken;
 }
 
 /*
@@ -463,7 +535,7 @@ activity_attach(
 	/* Starts to wait for the new input queue's events. */
 	if (event->kind == KEILAND_ANDROID_INPUT_CREATED) {
 		activity_input = event->queue;
-		AInputQueue_attachLooper(event->queue, activity_looper, ACTIVITY_IDENT_INPUT, NULL, NULL);
+		AInputQueue_attachLooper(event->queue, activity_looper, KEILAND_IDENT_INPUT, NULL, NULL);
 	}
 
 	/* Stops waiting for the input queue that is going away. */
@@ -544,6 +616,8 @@ activity_thread(
 	void *argument)
 {
 	void (*main)(void);
+	JavaVM *vm;
+	JNIEnv *env;
 	int fd;
 	int status;
 
@@ -555,17 +629,30 @@ activity_thread(
 	/* Makes the file descriptor that U writes to wake M. */
 	fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
 	if (fd >= 0) {
-		status = ALooper_addFd(activity_looper, fd, ACTIVITY_IDENT_WAKE, ALOOPER_EVENT_INPUT, NULL, NULL);
+		status = ALooper_addFd(activity_looper, fd, KEILAND_IDENT_WAKE, ALOOPER_EVENT_INPUT, NULL, NULL);
 		if (status < 0) {
 			close(fd);
 			fd = -1;
 		}
 	}
 
+	/* Attaches M to the Java machine, so that it can call Java; the bridge wakes M when Java queues something. */
+	env = NULL;
+	vm = keiland_android_vm();
+	if (vm != NULL) {
+		status = (*vm)->AttachCurrentThread(vm, &env, NULL);
+		if (status != JNI_OK)
+			env = NULL;
+	}
+	activity_thread_id = pthread_self();
+	activity_env = env;
+	__atomic_store_n(&activity_env_valid, env != NULL, __ATOMIC_SEQ_CST);
+	keiland_bridge_set_wake(keiland_android_wake);
+
 	/* Lets U wake M, and takes the function to run. */
 	pthread_mutex_lock(&activity_lock);
 
-	activity_wake_fd = fd;
+	__atomic_store_n(&activity_wake_fd, fd, __ATOMIC_SEQ_CST);
 	main = activity_main;
 
 	pthread_mutex_unlock(&activity_lock);
@@ -574,10 +661,15 @@ activity_thread(
 	if (fd >= 0)
 		main();
 
+	/* Detaches M from the Java machine. */
+	__atomic_store_n(&activity_env_valid, 0, __ATOMIC_SEQ_CST);
+	if (env != NULL)
+		(*vm)->DetachCurrentThread(vm);
+
 	/* Lets U go: nobody is left to answer, and U must not wait for ever. */
 	pthread_mutex_lock(&activity_lock);
 
-	activity_wake_fd = -1;
+	__atomic_store_n(&activity_wake_fd, -1, __ATOMIC_SEQ_CST);
 	activity_thread_running = 0;
 	activity_waiting_for = ACTIVITY_WAIT_NONE;
 	pthread_cond_broadcast(&activity_answered);

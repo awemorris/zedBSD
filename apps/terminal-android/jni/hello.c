@@ -15,8 +15,15 @@
 
 #include "apps/libkeiland/android/keiland-android.h"
 
+#include "apps/libkeiland/android/bridge.h"
+#include "apps/libkeiland/android/bridge-jni.h"
+
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <android/hardware_buffer.h>
 
@@ -29,7 +36,32 @@
 /* The window painted now, or NULL; it is the system's until its destruction is answered. */
 static ANativeWindow *hello_window;
 
+/*
+ * The file that records what the input method told the program, one line each:
+ * "C text" for a commit, "P cursor text" for text being composed, "D before
+ * after" for a deletion and "F 0" or "F 1" for the focus.  It is emptied when
+ * the program starts, and each line reaches the disk before the next event is
+ * taken, so a test can read it at any time.  -1 while it is not open.
+ */
+static int hello_log = -1;
+
 static void hello_paint(void);
+static void hello_log_open(void);
+static void hello_log_line(const char *line);
+static void hello_log_event(const struct keiland_bridge_event *event);
+
+/*
+ * The program has no Java classes of its own to prepare.
+ */
+jint
+keiland_android_app_jni_load(
+	JNIEnv *env)
+{
+	(void)env;
+
+	/* Succeeded: nothing to register. */
+	return JNI_OK;
+}
 
 /*
  * Runs the events of the Activity and paints each window; does not return.
@@ -38,12 +70,22 @@ void
 hello_main(void)
 {
 	struct keiland_android_event event;
+	struct keiland_bridge_event *list;
 	int32_t status;
 	int got;
 
+	/* Opens the record of the input method's events. */
+	hello_log_open();
+
 	/* Takes the events one at a time for as long as the process lives. */
 	for (;;) {
-		got = keiland_android_next(-1, &event);
+		/* Writes down what Java told the program since the last look. */
+		list = keiland_bridge_take_all();
+		hello_log_event(list);
+		keiland_bridge_free(list);
+
+		/* Waits a short while, so that what Java queues is looked at soon. */
+		got = keiland_android_next(100, &event);
 		if (!got)
 			continue;
 
@@ -59,6 +101,9 @@ hello_main(void)
 			}
 
 			hello_paint();
+
+			/* Asks for the keyboard; the Java side waits for the focus when it has to. */
+			keiland_java_show_keyboard(1);
 			break;
 
 		case KEILAND_ANDROID_WINDOW_RESIZED:
@@ -131,4 +176,100 @@ hello_paint(void)
 
 	/* Shows what was written. */
 	ANativeWindow_unlockAndPost(hello_window);
+}
+
+/*
+ * Opens the record of the input method's events, emptying it.
+ */
+static void
+hello_log_open(void)
+{
+	ANativeActivity *activity;
+	char path[512];
+	int length;
+
+	/* The record lives in the program's own data folder. */
+	activity = keiland_android_activity();
+	if (activity == NULL)
+		return;
+	length = snprintf(path, sizeof(path), "%s/ime.txt", activity->internalDataPath);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		return;
+
+	/* Opens it empty; every line is appended. */
+	hello_log = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
+}
+
+/*
+ * Appends one line to the record and makes sure it reached the disk.
+ */
+static void
+hello_log_line(
+	const char *line)
+{
+	ssize_t written;
+
+	/* Nothing is recorded when the file could not be opened. */
+	if (hello_log < 0)
+		return;
+
+	/* Writes the line and a newline in one piece, then syncs. */
+	written = write(hello_log, line, strlen(line));
+	if (written < 0)
+		return;
+	written = write(hello_log, "\n", 1);
+	if (written < 0)
+		return;
+	fsync(hello_log);
+}
+
+/*
+ * Records each event of a list that Java queued.  Backslashes and newlines in
+ * a text are written as \\ and \n so that each event stays on one line.
+ */
+static void
+hello_log_event(
+	const struct keiland_bridge_event *event)
+{
+	char line[1024];
+	char text[640];
+	size_t used;
+	const char *p;
+
+	/* Goes through the events oldest first. */
+	for (;
+	     event != NULL;
+	     event = event->next) {
+		/* Escapes the text, which is empty for the events that carry none. */
+		used = 0;
+		for (p = event->text;
+		     p != NULL && *p != '\0' && used + 3 < sizeof(text);
+		     p++) {
+			if (*p == '\n') {
+				text[used++] = '\\';
+				text[used++] = 'n';
+			} else if (*p == '\\') {
+				text[used++] = '\\';
+				text[used++] = '\\';
+			} else {
+				text[used++] = *p;
+			}
+		}
+		text[used] = '\0';
+
+		/* Writes the line for the kinds this test cares about. */
+		if (event->kind == KEILAND_BRIDGE_COMMIT) {
+			snprintf(line, sizeof(line), "C %s", text);
+			hello_log_line(line);
+		} else if (event->kind == KEILAND_BRIDGE_COMPOSE) {
+			snprintf(line, sizeof(line), "P %d %s", (int)event->a, text);
+			hello_log_line(line);
+		} else if (event->kind == KEILAND_BRIDGE_DELETE) {
+			snprintf(line, sizeof(line), "D %d %d", (int)event->a, (int)event->b);
+			hello_log_line(line);
+		} else if (event->kind == KEILAND_BRIDGE_FOCUS) {
+			snprintf(line, sizeof(line), "F %d", (int)event->a);
+			hello_log_line(line);
+		}
+	}
 }
