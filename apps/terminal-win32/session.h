@@ -87,8 +87,8 @@ struct mikuterm_session {
 	/*
 	 * The host to connect to without asking (empty: ask), the TERM, the
 	 * wait for a connection and WSL's sshd port, and the X server's scale,
-	 * drawing and PRIMARY (the root window is the Host's, ssh\config), and
-	 * whether its windows open in tabs.
+	 * drawing and PRIMARY (the root window and the tabs are the Host's,
+	 * ssh\config).
 	 */
 	char host[MIKUTERM_HOST_MAX];
 	char term[MIKUTERM_TERM_MAX];
@@ -97,7 +97,6 @@ struct mikuterm_session {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
-	int x11_tabify;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];

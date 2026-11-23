@@ -70,7 +70,9 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `CopyOnSelect` | `yes`, `no`: the text the pointer selects is also put on the clipboard | `yes` |
 | `ConnectTimeout` | seconds for the TCP connection, 0 for no limit (`ssh/config`'s wins) | 15 |
 | `WslPort` | the port of a WSL distribution's own sshd, for a distribution without a `Host wsl-NAME` in `ssh/config` (1 to 65535) | 22 |
-| `X11WindowTabify` | `yes`, `no`: a remote X program's main window opens as a tab of mikuterm's window (section 4.5) | `no` |
+| `X11Scale` | `auto` (the main monitor's scale) or a percent from 100 to 400 in steps of 25: the size of the remote X programs' pixels | `auto` |
+| `X11Render` | `auto`, `cpu`: how the X server draws (`auto`: Vulkan where the system has it, else the processor) | `auto` |
+| `X11PrimaryToClipboard` | `yes`, `no`: what an X program selects (X's PRIMARY) also goes to the Windows clipboard | `no` |
 
 A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
 server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
@@ -106,10 +108,13 @@ zedBSD's `ssh`:
   `ClearAllForwardings`, `RemoteCommand` (section 4.4), `ProxyCommand`
   (section 4.6), and mikuterm's own `X11RootWindow` (`off`, or a size from
   `320x200` to `7680x4320`: the host's X programs are drawn in one window of
-  that size, a remote desktop's X screen; OpenSSH does not know it).
+  that size, a remote desktop's X screen) and `X11WindowTabify` (`yes`, `no`:
+  the host's X programs' main windows open as tabs, section 4.5; `no` by
+  default), which OpenSSH does not know.
 - `IgnoreUnknown` (a pattern-list, as OpenSSH reads it): an unknown keyword a
   pattern matches, on a line after it, is skipped. A file that OpenSSH reads
-  too puts `IgnoreUnknown X11RootWindow` before the first `Host` line.
+  too puts `IgnoreUnknown X11RootWindow,X11WindowTabify` before the first
+  `Host` line.
 - `LogLevel`: `QUIET`, `FATAL` and `ERROR` keep the informational lines
   OpenSSH's `ssh` shows only from `INFO` on out of the tab (`Warning:
   Permanently added ... to the list of known hosts.`, `Failed to add the
@@ -236,8 +241,8 @@ the connection lasts).
 an X server mikuterm runs for the connection (the folder's `README.txt`,
 section 10, has the steps). What the remote programs should know:
 
-- With `X11WindowTabify yes` in `config/mikuterm.conf`, each top-level
-  window that no other window owns and that has no shape opens as a tab of
+- With `X11WindowTabify yes` in the host's block of `ssh/config`, each
+  top-level window that no other window owns and that has no shape opens as a tab of
   mikuterm's window (titled `[host] title`), and the tab's size is the
   window's. The X server, still a process of its own at a low integrity
   level, sends the window's pixels to mikuterm, which draws them in the tab
@@ -246,7 +251,8 @@ section 10, has the steps). What the remote programs should know:
   and a window mikuterm has no room for stay windows of their own. Closing
   the tab asks the program to close the window (`WM_DELETE_WINDOW`); a window
   still there a moment later opens in a tab again. Cursor shapes and the
-  input method's composing text are not shown in a tab.
+  input method's composing text are not shown in a tab. With `X11RootWindow`
+  as well, the whole X screen is one tab, of the size `X11RootWindow` gives.
 - The X server does not offer GLX: a program that draws with OpenGL through
   the X server does not show.
 - GTK 4 draws with OpenGL on the host by default, even over ssh (in software

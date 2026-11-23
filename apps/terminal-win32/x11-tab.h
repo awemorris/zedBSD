@@ -6,7 +6,7 @@
  */
 
 /*
- * An X window shown in a tab of mikuterm (the settings' X11WindowTabify):
+ * An X window shown in a tab of mikuterm (a Host's X11WindowTabify):
  * the picture's connection (connection.h) of one top-level X window of an
  * SSH connection's X server.
  *

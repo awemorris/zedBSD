@@ -192,7 +192,8 @@ ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
 PasswordAuthentication, PubkeyAuthentication, LogLevel, ForwardX11,
 ForwardX11Trusted and ForwardX11Timeout (see 10), LocalForward,
 RemoteForward, GatewayPorts, ExitOnForwardFailure, ClearAllForwardings,
-RemoteCommand (see 11) and ProxyCommand (see 12).  RequestTTY is checked
+RemoteCommand (see 11) and ProxyCommand (see 12), and mikuterm's own
+X11RootWindow and X11WindowTabify (see 10).  RequestTTY is checked
 but changes nothing: a tab is always a terminal.  LogLevel QUIET, FATAL or
 ERROR hides the lines OpenSSH's ssh shows only from INFO on (such as
 "Warning: Permanently added ... to the list of known hosts."); mikuterm
@@ -321,12 +322,9 @@ named in the first tab and skipped.
   X11Render       auto or cpu: how the X windows are drawn (auto)
   X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
                   xterm copies to) also goes to the Windows clipboard (no)
-  X11WindowTabify yes: a remote X program's main window opens as a tab of
-                  mikuterm's window instead of a window of its own (no;
-                  see 10)
 
-A remote desktop's window (X11RootWindow) is set for each host in
-ssh/config (section 10).
+A remote desktop's window (X11RootWindow) and X programs in tabs
+(X11WindowTabify) are set for each host in ssh/config (section 10).
 
 What the View menu and the settings choose at once (Text Size, Theme, Treat
 Ambiguous-Width Characters as Wide, Alt+F11, copy-on-select) is kept in
@@ -424,12 +422,17 @@ that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
 key.  Closing the window ends every X program of the connection.  The window
 opens at the size set and may be resized or maximized: the X screen takes
 the new size, and programs that follow the screen's size (xrandr, a desktop's
-panel) see it change.  X11RootWindow is mikuterm's: OpenSSH's ssh stops at
-a keyword it does not know, so a file both read needs "IgnoreUnknown
-X11RootWindow" before the first Host line.
+panel) see it change.
 
-X programs in tabs: with X11WindowTabify yes in config/mikuterm.conf, the
-main window of each remote X program opens as a tab of mikuterm's window,
+X programs in tabs: with X11WindowTabify yes in the host's block of
+ssh/config (no by default),
+
+  Host server
+      HostName server.example.org
+      ForwardX11 yes
+      X11WindowTabify yes
+
+the main window of each remote X program opens as a tab of mikuterm's window,
 beside the tab of its connection, and is made the active tab.  The tab's
 title is the window's, after the host's name in brackets.  The program is
 given the tab's size (a program that grows by steps, such as xterm by its
@@ -440,9 +443,13 @@ window's close button does; a program that asks you first (to save, say)
 and is told to stay comes back in a tab after a moment.  Dialogs, menus,
 tooltips and windows with a shape of their own (xeyes) still open as
 windows of their own, and so does a window when mikuterm's window has no
-room for another tab.  With X11RootWindow, the whole X screen is the one
-tab.  The program's cursor shapes and the text being composed by the input
-method are not shown in a tab.
+room for another tab.  With X11RootWindow as well, the whole X screen is
+one tab, of the size X11RootWindow gives.  The program's cursor shapes and
+the text being composed by the input method are not shown in a tab.
+
+X11RootWindow and X11WindowTabify are mikuterm's: OpenSSH's ssh stops at a
+keyword it does not know, so a file both read needs "IgnoreUnknown
+X11RootWindow,X11WindowTabify" before the first Host line.
 
 The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
 xlogo), and GTK and Qt programs draw through its RENDER (anti-aliased text,

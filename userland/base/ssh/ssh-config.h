@@ -196,7 +196,9 @@ struct sshd_config {
  * gateway_ports 0, exit_on_forward_failure 0, clear_all_forwardings 0,
  * session_type_none 0, x11_root_width and x11_root_height 0 (off: the
  * program that forwards X11 shows each remote window as one of the
- * system's), remote_command "" (none: the shell, or the command the user
+ * system's), x11_window_tabify 0 (the program that forwards X11 shows a
+ * remote window as a window of its own, not in a tab of its own window),
+ * remote_command "" (none: the shell, or the command the user
  * gave the program), proxy_command "" (none: the host is connected to
  * directly).  forward holds forward_count forwardings, from
  * every source in order (each kind at most SSH_CONFIG_FORWARDS_MAX, the
@@ -230,6 +232,7 @@ struct ssh_config {
 	int session_type_none;
 	unsigned x11_root_width;
 	unsigned x11_root_height;
+	int x11_window_tabify;
 	unsigned forward_count;
 	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
 	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
@@ -292,7 +295,9 @@ void ssh_config_init(struct ssh_config *config);
  * program to expand), ProxyCommand (the same way; "none" is no proxy),
  * X11RootWindow (off, or WIDTHxHEIGHT from 320x200 to 7680x4320: a
  * program that forwards X11 shows the remote X screen as one window of that
- * size; OpenSSH does not know it), IgnoreUnknown (a pattern-list as
+ * size; OpenSSH does not know it), X11WindowTabify (yes/no: a program
+ * that forwards X11 shows each remote top-level window in a tab of its
+ * own window; OpenSSH does not know it either), IgnoreUnknown (a pattern-list as
  * OpenSSH's: an unknown keyword a pattern of it matches, after the line
  * that gives it, is skipped; the first value of a block that applies
  * counts, within one call).  The
