@@ -175,8 +175,8 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: mikuterm-win64
-          path: build/mikuterm-x64/mikuterm-*-win64.zip
+          name: mikuterm-x64
+          path: build/mikuterm-x64/mikuterm-*-x64.zip
           if-no-files-found: error
 
   release:

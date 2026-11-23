@@ -144,6 +144,7 @@ static int window_occluding(const struct x11_window *window, const struct x11_wi
 static int window_restack(struct x11server *server, struct x11_window *window, struct x11_window *sibling, unsigned mode);
 static unsigned window_depth_check(unsigned depth, uint32_t visual);
 static void window_free(struct x11server *server, struct x11_window *window);
+static void window_set_cursor(struct x11server *server, struct x11_window *window, uint32_t id);
 static void window_destroy_tree(struct x11server *server, struct x11_window *top);
 static struct x11_window *window_first_leaf(struct x11_window *window);
 static void window_release_windows(struct x11server *server, unsigned owner);
@@ -1435,8 +1436,9 @@ x11_mark_dirty(
 
 /*
  * Releases what a closed client held: its windows (with their inferiors),
- * what it asked for on other windows, its pixmaps, graphics contexts and
- * fonts, and the charge of the properties it wrote that outlive it.
+ * what it asked for on other windows, its pixmaps, graphics contexts,
+ * fonts, colormaps and cursors, and the charge of the properties it wrote
+ * that outlive it.
  */
 void
 x11_resources_release(
@@ -1457,11 +1459,12 @@ x11_resources_release(
 	/* Its RENDER pictures and glyph sets (before its pixmaps, which pictures hold). */
 	x11_render_release(server, owner);
 
-	/* Its pixmaps, graphics contexts and fonts. */
+	/* Its pixmaps, graphics contexts, fonts and cursors. */
 	window_release_kind(server, owner, X11_RESOURCE_PIXMAP);
 	window_release_kind(server, owner, X11_RESOURCE_GC);
 	window_release_kind(server, owner, X11_RESOURCE_FONT);
 	window_release_kind(server, owner, X11_RESOURCE_COLORMAP);
+	window_release_kind(server, owner, X11_RESOURCE_CURSOR);
 
 	/* The properties it wrote on windows that stay. */
 	x11_property_forget_client(server, owner);
@@ -1484,6 +1487,7 @@ window_values_read(
 	const uint8_t *values,
 	struct window_values *read)
 {
+	struct x11_cursor *cursor;
 	struct x11_pixmap *pixmap;
 	uint32_t colormap_visual;
 	uint32_t value;
@@ -1581,8 +1585,11 @@ window_values_read(
 				return X11_BAD_MATCH;
 			break;
 		case ATTRIBUTE_CURSOR:
-			/* None (the server has no cursor a client could name). */
-			if (value != 0U)
+			/* None, or a cursor. */
+			if (value == 0U)
+				break;
+			cursor = x11_cursor_find(server, value);
+			if (cursor == NULL)
 				return X11_BAD_CURSOR;
 			break;
 		default:
@@ -1660,7 +1667,7 @@ window_values_apply(
 			window->colormap = X11_COLORMAP_XID;
 	}
 	if ((values->mask & (1U << ATTRIBUTE_CURSOR)) != 0U)
-		window->cursor = values->value[ATTRIBUTE_CURSOR];
+		window_set_cursor(server, window, values->value[ATTRIBUTE_CURSOR]);
 
 	/* The events the client asks for. */
 	if ((values->mask & (1U << ATTRIBUTE_EVENT_MASK)) != 0U) {
@@ -2401,8 +2408,10 @@ window_free(
 	/* The RENDER pictures of it go with it. */
 	x11_render_forget_window(server, window);
 
-	/* Its pixels, background and border, and its own charge. */
+	/* Its pixels, background and border, its cursor, and its own charge. */
 	x11_draw_forget(server, window);
+	x11_cursor_release(server, window->cursor_held);
+	window->cursor_held = NULL;
 	x11_memory_release(server, window->owner, sizeof(*window));
 	free(window->selects);
 
@@ -2415,6 +2424,28 @@ window_free(
 
 	/* Succeeded: gone. */
 	free(window);
+}
+
+/* Has a window name a cursor (0: None, its parent's is shown), holding it while it does. */
+static void
+window_set_cursor(
+	struct x11server *server,
+	struct x11_window *window,
+	uint32_t id)
+{
+	struct x11_cursor *cursor;
+
+	/* The cursor named (checked already), held. */
+	cursor = NULL;
+	if (id != 0U)
+		cursor = x11_cursor_find(server, id);
+	if (cursor != NULL)
+		x11_cursor_hold(cursor);
+
+	/* The one it named before is let go. */
+	x11_cursor_release(server, window->cursor_held);
+	window->cursor_held = cursor;
+	window->cursor = id;
 }
 
 /*
@@ -2502,7 +2533,7 @@ window_release_windows(
 	}
 }
 
-/* Frees every pixmap, graphics context or font a client created. */
+/* Frees every pixmap, graphics context, font or cursor a client created (a cursor a window holds lives on). */
 static void
 window_release_kind(
 	struct x11server *server,
@@ -2528,11 +2559,12 @@ window_release_kind(
 			x11_pixmap_free(server, object);
 		} else if (type == X11_RESOURCE_GC) {
 			x11_gc_free(server, object);
+		} else if (type == X11_RESOURCE_FONT) {
+			x11_font_free(server, object);
 		} else if (type == X11_RESOURCE_COLORMAP) {
 			x11_colormap_free(server, object);
 		} else {
-			x11_memory_release(server, owner, sizeof(struct x11_font));
-			free(object);
+			x11_cursor_free(server, object);
 		}
 	}
 

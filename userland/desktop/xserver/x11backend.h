@@ -13,16 +13,18 @@
  * system window (a surface) for each mapped top-level X window, keeps its
  * size, place and title in step, hands it pixels or asks it for a Vulkan
  * surface to show them through, passes the clipboard across, and asks
- * for the pointer's capture, place and warp and for the bell.  The
+ * for the pointer's capture, place and warp, for the bell and for the
+ * cursor shown over a surface.  The
  * backend calls the core with what its system reports: keys (by their
  * place on the keyboard), the keyboard's map, the pointer, a window
  * entered and left, given a size, asked to close, minimized, maximized or
  * made full-screen, the pointer's capture taken by another program, and
  * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server).  The core is the X windows' window manager (wm.c): it decides
- * what a close means to the X client and keeps ICCCM's and EWMH's state
- * of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
+ * server), and the characters an input method typed
+ * (x11server_backend_text).  The core is the X windows' window manager
+ * (wm.c): it decides what a close means to the X client and keeps ICCCM's
+ * and EWMH's state of each window.  zedBSD's backend is the Wayland desktop (wayland.c).
  */
 
 #ifndef KEILAND_X11BACKEND_H
@@ -95,6 +97,9 @@
  */
 #define X11_BACKEND_KEYMAP	1
 
+/* The backend may show X's cursors (the cursor function). */
+#define X11_BACKEND_CURSOR	1
+
 /*
  * The keyboard's map: the keycodes (an evdev key code plus 8, so 8 to
  * 255), the keysyms each carries, and the modifiers.
@@ -107,6 +112,13 @@
 
 /* The offset of an evdev key code in its X keycode. */
 #define X11_KEYMAP_EVDEV_OFFSET		8U
+
+/*
+ * The core takes characters the backend's input method typed
+ * (x11server_backend_text): each reaches the X clients as a key press and
+ * release of a keycode the core lends it, whose keysym is the character's.
+ */
+#define X11_BACKEND_TEXT	1
 
 /* A system window the backend keeps (its own type). */
 struct x11_surface;
@@ -181,6 +193,24 @@ struct x11_rect {
 };
 
 /*
+ * A cursor the backend shows over a surface: its shape when it is one of
+ * the standard cursors (the cursor font's glyph, an XC_* number of X's
+ * cursorfont.h; -1: none, the image is its shape), and its image: pixels
+ * of 0xAARRGGBB (alpha 0 or 255), width by height, with the hot spot, the
+ * pixel the pointer's place is on (pixels NULL: no image, the shape
+ * alone).  A backend shows its own cursor of a standard shape when it has
+ * one.
+ */
+struct x11_cursor_image {
+	int shape;
+	int width;
+	int height;
+	int hot_x;
+	int hot_y;
+	const uint32_t *pixels;
+};
+
+/*
  * One pointer event from the backend, in the root window's coordinates:
  * where the pointer is, and at most one button that changed.
  */
@@ -230,6 +260,10 @@ struct x11_pointer_frame {
  * or an errno value when it cannot tell).  warp moves it there (0, or an
  * errno value).  bell rings at a volume from -100 to 100 percent of the
  * base volume.
+ *
+ * cursor (which may be NULL: the system's pointer is shown) sets the
+ * cursor shown while the pointer is over a surface (image NULL: the
+ * system's own pointer); the backend copies what it needs.
  */
 struct x11_backend_ops {
 	struct x11_surface *(*open)(void *context, uint32_t window, const struct x11_surface_info *info);
@@ -243,11 +277,13 @@ struct x11_backend_ops {
 	int (*pointer)(void *context, int *x, int *y);
 	int (*warp)(void *context, int x, int y);
 	void (*bell)(void *context, int percent);
+	void (*cursor)(void *context, struct x11_surface *surface, const struct x11_cursor_image *image);
 };
 
 /* What the backend tells the core. */
 void x11server_backend_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time);
 void x11server_backend_keymap(struct x11server *server, const struct x11_keymap *keymap);
+void x11server_backend_text(struct x11server *server, uint32_t character, uint32_t time);
 void x11server_backend_pointer(struct x11server *server, const struct x11_pointer_frame *frame);
 void x11server_backend_enter(struct x11server *server, uint32_t window, int keyboard);
 void x11server_backend_leave(struct x11server *server, uint32_t window, int keyboard);

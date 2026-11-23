@@ -19,7 +19,8 @@ KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
 	userland/desktop/xserver/render-cpu.c userland/desktop/xserver/gc.c \
 	userland/desktop/xserver/draw.c userland/desktop/xserver/wm.c \
 	userland/desktop/xserver/shape.c userland/desktop/xserver/colormap.c \
-	userland/desktop/xserver/colornames.c
+	userland/desktop/xserver/colornames.c userland/desktop/xserver/font.c \
+	userland/desktop/xserver/cursor.c
 
 # GLX: libGLX.so, one of the server's libraries, which X programs link
 # with libGL (-lGL -lGLX); a private libX11 is built in.  The image

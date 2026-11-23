@@ -304,8 +304,9 @@ win32_surface_close(
 	SetWindowLongPtrW(surface->hwnd, GWLP_USERDATA, 0);
 	DestroyWindow(surface->hwnd);
 
-	/* Frees the pixels and the surface. */
+	/* Frees the pixels, the cursor and the surface. */
 	window_dib_free(surface);
+	win32_cursor_free(surface);
 	win32_log(backend, "X11 WIN32 close window=0x%lx", (unsigned long)surface->window);
 	free(surface);
 }
@@ -474,11 +475,25 @@ window_message(
 		win32_input_key(surface, message, wparam, lparam);
 		return 0;
 	case WM_CHAR:
+		/*
+		 * Only the keys an input method took and the characters sent as
+		 * keys are translated: this is their text, which X hears as typed.
+		 */
+		win32_ime_char(surface, wparam);
+		return 0;
 	case WM_SYSCHAR:
 	case WM_DEADCHAR:
 	case WM_SYSDEADCHAR:
-		/* X clients make characters from the keysyms; none of these is translated anyway. */
+		/* X clients make characters and dead keys from the keysyms. */
 		return 0;
+	case WM_IME_STARTCOMPOSITION:
+		/* The input method's windows go where the user is typing, as near as X tells. */
+		win32_ime_place(surface);
+		break;
+	case WM_IME_COMPOSITION:
+		/* The settled text is typed into X; the unsettled is the input method's window's. */
+		answer = win32_ime_composition(surface, wparam, lparam);
+		return answer;
 	case WM_SYSCOMMAND:
 		/* The keyboard's way into the window menu is X's key. */
 		if ((wparam & 0xFFF0U) == SC_KEYMENU)
@@ -523,9 +538,13 @@ window_message(
 			return MA_NOACTIVATE;
 		break;
 	case WM_SETCURSOR:
-		/* The arrow over the X pixels (X's cursors are not shown yet). */
+		/* Over the X pixels, the X window's cursor (the arrow until the core gives one). */
 		if (LOWORD(lparam) == HTCLIENT) {
-			SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+			if (surface->cursor != NULL) {
+				SetCursor(surface->cursor);
+			} else {
+				SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+			}
 			return TRUE;
 		}
 		break;
