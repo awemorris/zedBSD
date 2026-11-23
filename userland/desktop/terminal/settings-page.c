@@ -2408,6 +2408,12 @@ page_hosts_title(
 		return;
 	}
 
+	/* Without an address: the user and the port as words. */
+	if (address[0] == '\0') {
+		(void)snprintf(text, size, "%s   %s%s%s", names, user, port[0] != '\0' ? "  port " : "", port);
+		return;
+	}
+
 	/* The names and user@address:port, each part that is there. */
 	(void)snprintf(text, size, "%s   %s%s%s%s%s", names, user, user[0] != '\0' ? "@" : "", address, port[0] != '\0' ? ":" : "", port);
 }
