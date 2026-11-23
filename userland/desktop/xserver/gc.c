@@ -6,15 +6,16 @@
  */
 
 /*
- * Graphics contexts: CreateGC, ChangeGC and FreeGC, and the values a
- * context keeps.
+ * Graphics contexts: CreateGC, ChangeGC, CopyGC, SetDashes,
+ * SetClipRectangles and FreeGC, and the values a context keeps.
  *
  * A context belongs to the depth of the drawable it was made for.  Every
  * value is checked before any is kept, so a request that fails leaves the
  * context as it was.  The tile, the stipple and the clip mask are copied
  * when they are set (the protocol leaves the effect of later changes to
  * those pixmaps undefined), the clip mask as the region of its set
- * pixels; the copies are charged to the context's owner.
+ * pixels; the copies and a list of dashes are charged to the context's
+ * owner.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -60,6 +61,9 @@
 #define GC_DEFAULT_DASHES	4U
 #define GC_NONE			0U
 
+/* The largest ordering SetClipRectangles names (Unsorted, YSorted, YXSorted, YXBanded). */
+#define GC_ORDERING_MAX		3U
+
 /*
  * The values a request gives: which bits it names, each value, and the
  * pixmaps the tile, stipple and clip mask name (NULL: none named, or
@@ -78,6 +82,9 @@ static unsigned gc_apply(struct x11server *server, struct x11_gc *gc, const stru
 static int gc_clip_region(const struct x11_image *bitmap, struct x11_region *region);
 static void gc_defaults(struct x11_gc *gc);
 static size_t gc_region_bytes(const struct x11_region *region);
+static size_t gc_kept_bytes(const struct x11_gc *gc);
+static void gc_recharge(struct x11server *server, struct x11_gc *gc, size_t added);
+static unsigned gc_copy(struct x11server *server, struct x11_gc *target, const struct x11_gc *source, uint32_t mask);
 
 /*
  * CreateGC: a graphics context for a drawable's depth, with the
@@ -244,6 +251,188 @@ x11_request_free_gc(
 }
 
 /*
+ * CopyGC: values of one graphics context copied into another of the same
+ * depth, the tile, stipple, clip and dashes as copies of their own.
+ */
+unsigned
+x11_request_copy_gc(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_gc *source;
+	struct x11_gc *target;
+	uint32_t mask;
+	unsigned code;
+	int msb;
+
+	/* The two contexts and the values named. */
+	msb = server->clients[index].order;
+	if (length != 16U)
+		return X11_BAD_LENGTH;
+	source = x11_gc_find(server, x11_read32(request + 4, msb));
+	if (source == NULL)
+		return X11_BAD_GC;
+	target = x11_gc_find(server, x11_read32(request + 8, msb));
+	if (target == NULL)
+		return X11_BAD_GC;
+	mask = x11_read32(request + 12, msb);
+	if ((mask >> GC_COUNT) != 0U)
+		return X11_BAD_VALUE;
+
+	/* Contexts of different depths cannot share values. */
+	if (source->depth != target->depth)
+		return X11_BAD_MATCH;
+
+	/* The values copied (BadAlloc leaves the target as it was). */
+	code = gc_copy(server, target, source, mask);
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: copied. */
+	return 0U;
+}
+
+/*
+ * SetDashes: the dash offset and a list of dash lengths, none of them
+ * zero.
+ */
+unsigned
+x11_request_set_dashes(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_gc *gc;
+	uint8_t *list;
+	size_t count;
+	size_t at;
+	int error;
+	int msb;
+
+	/* The context, and the lengths filling the request to its last word. */
+	msb = server->clients[index].order;
+	if (length < 12U)
+		return X11_BAD_LENGTH;
+	count = x11_read16(request + 10, msb);
+	if (length != 12U + ((count + 3U) & ~(size_t)3U))
+		return X11_BAD_LENGTH;
+	gc = x11_gc_find(server, x11_read32(request + 4, msb));
+	if (gc == NULL)
+		return X11_BAD_GC;
+
+	/* At least one length, and no length of zero. */
+	if (count == 0U)
+		return X11_BAD_VALUE;
+	for (at = 0U; at < count; at++) {
+		if (request[12U + at] == 0U)
+			return X11_BAD_VALUE;
+	}
+
+	/* The list's copy, charged to the context's owner. */
+	error = x11_memory_charge(server, gc->owner, count);
+	if (error != 0)
+		return X11_BAD_ALLOC;
+	list = malloc(count);
+	if (list == NULL) {
+		x11_memory_release(server, gc->owner, count);
+		return X11_BAD_ALLOC;
+	}
+	memcpy(list, request + 12, count);
+
+	/* Succeeded: the offset and the list replace the dashes, and the charge follows them. */
+	free(gc->dash_list);
+	gc->dash_list = list;
+	gc->dash_count = count;
+	gc->dash_offset = x11_read16(request + 8, msb);
+	gc_recharge(server, gc, count);
+	return 0U;
+}
+
+/*
+ * SetClipRectangles: the clip is the rectangles (on the clip origin),
+ * and the clip origin; no rectangle clips everything away.
+ */
+unsigned
+x11_request_set_clip_rectangles(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_region clip;
+	struct x11_box box;
+	struct x11_gc *gc;
+	size_t offset;
+	size_t added;
+	int error;
+	int msb;
+
+	/* The ordering, the context and whole rectangles. */
+	msb = server->clients[index].order;
+	if (length < 12U || (length - 12U) % 8U != 0U)
+		return X11_BAD_LENGTH;
+	if (request[1] > GC_ORDERING_MAX)
+		return X11_BAD_VALUE;
+	gc = x11_gc_find(server, x11_read32(request + 4, msb));
+	if (gc == NULL)
+		return X11_BAD_GC;
+
+	/* The rectangles' region (the client says they do not overlap; overlapping ones are joined). */
+	x11_region_init(&clip);
+	error = 0;
+	for (offset = 12U; offset + 8U <= length && error == 0; offset += 8U) {
+		box.x0 = (int16_t)x11_read16(request + offset, msb);
+		box.y0 = (int16_t)x11_read16(request + offset + 2U, msb);
+		box.x1 = box.x0 + (int)x11_read16(request + offset + 4U, msb);
+		box.y1 = box.y0 + (int)x11_read16(request + offset + 6U, msb);
+		if (box.x0 >= box.x1 || box.y0 >= box.y1)
+			continue;
+		error = x11_region_union_box(&clip, &box);
+	}
+	if (error != 0) {
+		x11_region_fini(&clip);
+		return X11_BAD_ALLOC;
+	}
+
+	/* The region charged to the context's owner. */
+	added = gc_region_bytes(&clip);
+	error = x11_memory_charge(server, gc->owner, added);
+	if (error != 0) {
+		x11_region_fini(&clip);
+		return X11_BAD_ALLOC;
+	}
+
+	/* Succeeded: the region and the origin are the clip, and the charge follows them. */
+	x11_region_fini(&gc->clip);
+	gc->clip = clip;
+	gc->clip_set = 1;
+	gc->clip_x = (int16_t)x11_read16(request + 8, msb);
+	gc->clip_y = (int16_t)x11_read16(request + 10, msb);
+	gc_recharge(server, gc, added);
+	return 0U;
+}
+
+/*
+ * Gives a context's dash lengths and how many there are.
+ */
+const uint8_t *
+x11_gc_dashes(
+	const struct x11_gc *gc,
+	size_t *count)
+{
+	/* The list SetDashes gave. */
+	*count = gc->dash_count;
+	if (gc->dash_list != NULL)
+		return gc->dash_list;
+
+	/* The one length ChangeGC gave. */
+	return &gc->dash_one;
+}
+
+/*
  * Frees a graphics context that no id names: its tile, stipple and clip,
  * and what its owner is charged for it.
  */
@@ -252,10 +441,11 @@ x11_gc_free(
 	struct x11server *server,
 	struct x11_gc *gc)
 {
-	/* The copies, and the context, with their charge. */
+	/* The copies and the dashes, and the context, with their charge. */
 	x11_image_free(gc->tile);
 	x11_image_free(gc->stipple);
 	x11_region_fini(&gc->clip);
+	free(gc->dash_list);
 	x11_memory_release(server, gc->owner, gc->charged + sizeof(*gc));
 	free(gc);
 }
@@ -390,7 +580,6 @@ gc_apply(
 	struct x11_image *stipple;
 	struct x11_region clip;
 	size_t added;
-	size_t charged;
 	int error;
 
 	/* The new copies. */
@@ -449,8 +638,12 @@ gc_apply(
 		gc->arc_mode = (uint8_t)values->value[GC_ARC_MODE];
 	if ((values->mask & (1U << GC_DASH_OFFSET)) != 0U)
 		gc->dash_offset = (uint16_t)values->value[GC_DASH_OFFSET];
-	if ((values->mask & (1U << GC_DASHES)) != 0U)
-		gc->dashes = (uint8_t)values->value[GC_DASHES];
+	if ((values->mask & (1U << GC_DASHES)) != 0U) {
+		free(gc->dash_list);
+		gc->dash_list = NULL;
+		gc->dash_one = (uint8_t)values->value[GC_DASHES];
+		gc->dash_count = 1U;
+	}
 
 	/* The tile and the stipple, their copies replacing the old ones, and their origin. */
 	if (tile != NULL) {
@@ -489,14 +682,7 @@ gc_apply(
 	}
 
 	/* The charge of what the context keeps now; the copies replaced are no longer charged. */
-	charged = 0U;
-	if (gc->tile != NULL)
-		charged += x11_image_bytes(gc->tile->width, gc->tile->height);
-	if (gc->stipple != NULL)
-		charged += x11_image_bytes(gc->stipple->width, gc->stipple->height);
-	charged += gc_region_bytes(&gc->clip);
-	x11_memory_release(server, gc->owner, gc->charged + added - charged);
-	gc->charged = charged;
+	gc_recharge(server, gc, added);
 
 	/* Succeeded: the values are kept. */
 	x11_region_fini(&clip);
@@ -597,7 +783,9 @@ gc_defaults(
 	gc->clip_set = 0;
 	x11_region_init(&gc->clip);
 	gc->dash_offset = 0U;
-	gc->dashes = GC_DEFAULT_DASHES;
+	gc->dash_one = GC_DEFAULT_DASHES;
+	gc->dash_list = NULL;
+	gc->dash_count = 1U;
 	gc->charged = 0U;
 }
 
@@ -608,4 +796,186 @@ gc_region_bytes(
 {
 	/* The boxes it holds. */
 	return region->count * sizeof(struct x11_box);
+}
+
+/* Gives the bytes a context's copies and dash list are charged as. */
+static size_t
+gc_kept_bytes(
+	const struct x11_gc *gc)
+{
+	size_t bytes;
+
+	/* The tile, the stipple, the clip and the list of dashes. */
+	bytes = 0U;
+	if (gc->tile != NULL)
+		bytes += x11_image_bytes(gc->tile->width, gc->tile->height);
+	if (gc->stipple != NULL)
+		bytes += x11_image_bytes(gc->stipple->width, gc->stipple->height);
+	bytes += gc_region_bytes(&gc->clip);
+	if (gc->dash_list != NULL)
+		bytes += gc->dash_count;
+
+	/* The bytes. */
+	return bytes;
+}
+
+/*
+ * Charges a context's owner for what the context keeps now: the bytes
+ * just charged (added) and those charged before stand, less what is no
+ * longer kept.
+ */
+static void
+gc_recharge(
+	struct x11server *server,
+	struct x11_gc *gc,
+	size_t added)
+{
+	size_t kept;
+
+	/* What was charged and is not kept any more is released. */
+	kept = gc_kept_bytes(gc);
+	x11_memory_release(server, gc->owner, gc->charged + added - kept);
+	gc->charged = kept;
+}
+
+/*
+ * Copies the values a mask names from one context to another: new copies
+ * of the tile, stipple, clip and dash list are made first, so BadAlloc
+ * leaves the target as it was.  Returns 0, or BadAlloc.
+ */
+static unsigned
+gc_copy(
+	struct x11server *server,
+	struct x11_gc *target,
+	const struct x11_gc *source,
+	uint32_t mask)
+{
+	struct x11_image *tile;
+	struct x11_image *stipple;
+	struct x11_region clip;
+	uint8_t *dashes;
+	size_t added;
+	int error;
+
+	/* The new copies. */
+	tile = NULL;
+	stipple = NULL;
+	dashes = NULL;
+	x11_region_init(&clip);
+	added = 0U;
+	if ((mask & (1U << GC_TILE)) != 0U && source->tile != NULL) {
+		error = x11_image_copy(source->tile, &tile);
+		if (error != 0)
+			goto failed;
+		added += x11_image_bytes(tile->width, tile->height);
+	}
+	if ((mask & (1U << GC_STIPPLE)) != 0U && source->stipple != NULL) {
+		error = x11_image_copy(source->stipple, &stipple);
+		if (error != 0)
+			goto failed;
+		added += x11_image_bytes(stipple->width, stipple->height);
+	}
+	if ((mask & (1U << GC_CLIP_MASK)) != 0U) {
+		error = x11_region_copy(&clip, &source->clip);
+		if (error != 0)
+			goto failed;
+		added += gc_region_bytes(&clip);
+	}
+	if ((mask & (1U << GC_DASHES)) != 0U && source->dash_list != NULL) {
+		dashes = malloc(source->dash_count);
+		if (dashes == NULL)
+			goto failed;
+		memcpy(dashes, source->dash_list, source->dash_count);
+		added += source->dash_count;
+	}
+
+	/* The target's owner is charged for them. */
+	error = x11_memory_charge(server, target->owner, added);
+	if (error != 0)
+		goto failed;
+
+	/* The pixels, the function and the planes. */
+	if ((mask & (1U << GC_FUNCTION)) != 0U)
+		target->function = source->function;
+	if ((mask & (1U << GC_PLANE_MASK)) != 0U)
+		target->plane_mask = source->plane_mask;
+	if ((mask & (1U << GC_FOREGROUND)) != 0U)
+		target->foreground = source->foreground;
+	if ((mask & (1U << GC_BACKGROUND)) != 0U)
+		target->background = source->background;
+
+	/* The lines and the fills. */
+	if ((mask & (1U << GC_LINE_WIDTH)) != 0U)
+		target->line_width = source->line_width;
+	if ((mask & (1U << GC_LINE_STYLE)) != 0U)
+		target->line_style = source->line_style;
+	if ((mask & (1U << GC_CAP_STYLE)) != 0U)
+		target->cap_style = source->cap_style;
+	if ((mask & (1U << GC_JOIN_STYLE)) != 0U)
+		target->join_style = source->join_style;
+	if ((mask & (1U << GC_FILL_STYLE)) != 0U)
+		target->fill_style = source->fill_style;
+	if ((mask & (1U << GC_FILL_RULE)) != 0U)
+		target->fill_rule = source->fill_rule;
+	if ((mask & (1U << GC_ARC_MODE)) != 0U)
+		target->arc_mode = source->arc_mode;
+
+	/* The tile and the stipple (a missing one stays missing) and their origin. */
+	if ((mask & (1U << GC_TILE)) != 0U) {
+		x11_image_free(target->tile);
+		target->tile = tile;
+		tile = NULL;
+	}
+	if ((mask & (1U << GC_STIPPLE)) != 0U) {
+		x11_image_free(target->stipple);
+		target->stipple = stipple;
+		stipple = NULL;
+	}
+	if ((mask & (1U << GC_TILE_X)) != 0U)
+		target->tile_x = source->tile_x;
+	if ((mask & (1U << GC_TILE_Y)) != 0U)
+		target->tile_y = source->tile_y;
+
+	/* The font, the subwindow mode and the exposures. */
+	if ((mask & (1U << GC_FONT)) != 0U)
+		target->font = source->font;
+	if ((mask & (1U << GC_SUBWINDOW_MODE)) != 0U)
+		target->subwindow_mode = source->subwindow_mode;
+	if ((mask & (1U << GC_EXPOSURES)) != 0U)
+		target->graphics_exposures = source->graphics_exposures;
+
+	/* The clip's origin and the clip. */
+	if ((mask & (1U << GC_CLIP_X)) != 0U)
+		target->clip_x = source->clip_x;
+	if ((mask & (1U << GC_CLIP_Y)) != 0U)
+		target->clip_y = source->clip_y;
+	if ((mask & (1U << GC_CLIP_MASK)) != 0U) {
+		x11_region_fini(&target->clip);
+		target->clip = clip;
+		target->clip_set = source->clip_set;
+		x11_region_init(&clip);
+	}
+
+	/* The dashes. */
+	if ((mask & (1U << GC_DASH_OFFSET)) != 0U)
+		target->dash_offset = source->dash_offset;
+	if ((mask & (1U << GC_DASHES)) != 0U) {
+		free(target->dash_list);
+		target->dash_list = dashes;
+		target->dash_one = source->dash_one;
+		target->dash_count = source->dash_count;
+		dashes = NULL;
+	}
+
+	/* Succeeded: copied, and the charge follows what the target keeps. */
+	gc_recharge(server, target, added);
+	return 0U;
+
+failed:
+	/* No memory: the new copies go, and the target is as it was. */
+	x11_image_free(tile);
+	x11_image_free(stipple);
+	x11_region_fini(&clip);
+	free(dashes);
+	return X11_BAD_ALLOC;
 }
