@@ -37,6 +37,9 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wparam,
 static LRESULT window_message(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_styles(const struct x11_surface *surface, DWORD *style, DWORD *extended);
 static void window_outer(const struct x11_surface *surface, RECT *outer);
+static void window_keep_in(const RECT *work, RECT *outer);
+static void window_place_default(struct x11_surface *surface);
+static HMONITOR window_home_monitor(const struct x11_surface *surface);
 static void window_root_outer(const struct x11_surface *surface, RECT *outer);
 static void window_set_title(struct x11_surface *surface, const char *title);
 static void window_set_owner(struct x11_surface *surface, struct x11_surface *owner);
@@ -100,10 +103,12 @@ win32_window_unregister(
  * Opens the Windows window of an X top-level window (the backend's open).
  *
  * A top-level window is framed and placed where X says, moved onto a
- * monitor's work area when its frame would leave it; an override-redirect
- * one is borderless, never activated and kept within the work area of
- * its monitor; the root window of a rooted server is framed, its size not
- * the user's to change, and centred on the work area of the monitor the
+ * monitor's work area when its frame would leave it; one whose client
+ * named no place goes where Windows puts a new window, on the monitor the
+ * user works on, and the core hears that place.  An override-redirect one
+ * is borderless, never activated and kept within the work area of its
+ * monitor; the root window of a rooted server is framed, its size not the
+ * user's to change, and centred on the work area of the monitor the
  * pointer is on.  Returns the surface, or NULL (the core then shows the
  * window nowhere).
  */
@@ -119,6 +124,8 @@ win32_surface_open(
 	DWORD extended;
 	RECT outer;
 	HWND owner;
+	int left;
+	int top;
 	int show;
 
 	/* Refuses a window past the backend's limit. */
@@ -156,16 +163,28 @@ win32_surface_open(
 	if (surface->owner != NULL)
 		owner = surface->owner->hwnd;
 
-	/* Makes the window where X places it. */
+	/* The window's size, and its place: where X places it, or Windows' default for a new window. */
 	window_styles(surface, &style, &extended);
 	window_outer(surface, &outer);
-	surface->hwnd = CreateWindowExW(extended, WINDOW_CLASS_NAME, L"", style, outer.left, outer.top,
+	left = outer.left;
+	top = outer.top;
+	if (info->default_place && surface->kind == X11_SURFACE_TOPLEVEL) {
+		left = CW_USEDEFAULT;
+		top = CW_USEDEFAULT;
+	}
+
+	/* Makes the window there. */
+	surface->hwnd = CreateWindowExW(extended, WINDOW_CLASS_NAME, L"", style, left, top,
 	    outer.right - outer.left, outer.bottom - outer.top, owner, NULL, backend->instance, surface);
 	if (surface->hwnd == NULL) {
 		win32_log(backend, "X11 WIN32 CreateWindowExW failed: %lu", (unsigned long)GetLastError());
 		free(surface);
 		return NULL;
 	}
+
+	/* A window Windows placed goes onto the monitor the user works on before it is shown. */
+	if (left == CW_USEDEFAULT)
+		window_place_default(surface);
 
 	/* Links the surface into the backend's list; the root surface is the pointer's whole root window. */
 	surface->next = backend->surfaces;
@@ -199,6 +218,7 @@ win32_surface_open(
 	win32_decor_update(surface, info, X11_SURFACE_CHANGED_SHAPE | X11_SURFACE_CHANGED_ICON | X11_SURFACE_CHANGED_FLAGS);
 
 	/* Succeeded: the core holds the surface. */
+	GetWindowRect(surface->hwnd, &outer);
 	win32_log(backend, "X11 WIN32 open window=0x%lx kind=%u at %ld,%ld %ldx%ld", (unsigned long)window, surface->kind,
 	    (long)outer.left, (long)outer.top, (long)(outer.right - outer.left), (long)(outer.bottom - outer.top));
 	return surface;
@@ -659,17 +679,140 @@ window_outer(
 			height = information.rcWork.bottom - information.rcWork.top;
 	}
 
-	/* Moves the window in from the right and bottom edges, then from the left and top ones. */
-	if (outer->left + width > information.rcWork.right)
-		outer->left = information.rcWork.right - width;
-	if (outer->top + height > information.rcWork.bottom)
-		outer->top = information.rcWork.bottom - height;
-	if (outer->left < information.rcWork.left)
-		outer->left = information.rcWork.left;
-	if (outer->top < information.rcWork.top)
-		outer->top = information.rcWork.top;
+	/* Succeeded: within the work area. */
 	outer->right = outer->left + width;
 	outer->bottom = outer->top + height;
+	window_keep_in(&information.rcWork, outer);
+}
+
+/*
+ * Moves a window's outer rectangle onto a work area, its size kept: in
+ * from the right and bottom edges, then from the left and top ones, so a
+ * window larger than the work area shows its top-left corner.
+ */
+static void
+window_keep_in(
+	const RECT *work,
+	RECT *outer)
+{
+	LONG width;
+	LONG height;
+
+	/* The size, which stays. */
+	width = outer->right - outer->left;
+	height = outer->bottom - outer->top;
+
+	/* In from the right and bottom edges. */
+	if (outer->left + width > work->right)
+		outer->left = work->right - width;
+	if (outer->top + height > work->bottom)
+		outer->top = work->bottom - height;
+
+	/* In from the left and top edges. */
+	if (outer->left < work->left)
+		outer->left = work->left;
+	if (outer->top < work->top)
+		outer->top = work->top;
+
+	/* Succeeded: the rectangle at its new place. */
+	outer->right = outer->left + width;
+	outer->bottom = outer->top + height;
+}
+
+/*
+ * Moves a window Windows placed by its default (the cascade it gives a new
+ * window that names no place, on the main monitor) onto the monitor the
+ * user works on: the same step down the cascade from the corner of that
+ * monitor's work area, kept within it.  The core hears the place from the
+ * message loop, since the window was placed while the core was calling.
+ */
+static void
+window_place_default(
+	struct x11_surface *surface)
+{
+	struct x11_win32 *backend;
+	HMONITOR landed;
+	HMONITOR home;
+	MONITORINFO landed_information;
+	MONITORINFO home_information;
+	RECT outer;
+	LONG width;
+	LONG height;
+	BOOL found;
+
+	/* Whatever happens, the core hears where the window is. */
+	backend = surface->backend;
+	window_post_report(surface);
+
+	/* Where Windows put it, and the work area of the monitor it fell on. */
+	GetWindowRect(surface->hwnd, &outer);
+	landed = MonitorFromRect(&outer, MONITOR_DEFAULTTONEAREST);
+	landed_information.cbSize = sizeof(landed_information);
+	found = GetMonitorInfoW(landed, &landed_information);
+	if (!found)
+		return;
+
+	/* The work area of the monitor the user works on. */
+	home = window_home_monitor(surface);
+	home_information.cbSize = sizeof(home_information);
+	found = GetMonitorInfoW(home, &home_information);
+	if (!found)
+		return;
+
+	/* The same step from that work area's corner, within it. */
+	width = outer.right - outer.left;
+	height = outer.bottom - outer.top;
+	outer.left = home_information.rcWork.left + (outer.left - landed_information.rcWork.left);
+	outer.top = home_information.rcWork.top + (outer.top - landed_information.rcWork.top);
+	outer.right = outer.left + width;
+	outer.bottom = outer.top + height;
+	window_keep_in(&home_information.rcWork, &outer);
+
+	/* The window moves there. */
+	SetWindowPos(surface->hwnd, NULL, outer.left, outer.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+	/* Succeeded: the X window's size within the frame of the DPI of the monitor it is on now. */
+	window_frame(surface, &width, &height);
+	width += (LONG)x11_win32_scale_size(surface->width, backend->scale);
+	height += (LONG)x11_win32_scale_size(surface->height, backend->scale);
+	SetWindowPos(surface->hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+/*
+ * Gives the monitor the user works on: that of the foreground window (the
+ * terminal the X client was started from, or another of the server's
+ * windows), else the pointer's, else the main monitor.
+ */
+static HMONITOR
+window_home_monitor(
+	const struct x11_surface *surface)
+{
+	HWND foreground;
+	HMONITOR monitor;
+	POINT point;
+	BOOL found;
+
+	/* The foreground window's monitor. */
+	foreground = GetForegroundWindow();
+	if (foreground != NULL && foreground != surface->hwnd) {
+		monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONULL);
+		if (monitor != NULL)
+			return monitor;
+	}
+
+	/* The pointer's monitor. */
+	found = GetCursorPos(&point);
+	if (found) {
+		monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
+		if (monitor != NULL)
+			return monitor;
+	}
+
+	/* Succeeded: the main monitor, whose corner is the screen's origin. */
+	point.x = 0;
+	point.y = 0;
+	monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+	return monitor;
 }
 
 /*

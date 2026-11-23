@@ -108,6 +108,13 @@
  */
 #define X11_BACKEND_WM	1
 
+/*
+ * A surface's info says whether its X client asked for the place
+ * (default_place): a window it left to the window manager is placed by
+ * the system, which tells the core the place it chose.
+ */
+#define X11_BACKEND_PLACE	1
+
 /* The selections the clipboard passes across: X's CLIPBOARD and PRIMARY. */
 #define X11_SELECTION_CLIPBOARD	0U
 #define X11_SELECTION_PRIMARY	1U
@@ -200,11 +207,21 @@ struct x11_size_hints {
  * none; the backend names it itself), the surface of the top-level window
  * it is transient for (WM_TRANSIENT_FOR; NULL: none), its state
  * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) and the limits on its size.
+ *
+ * default_place is nonzero for a decorated window whose client asked for
+ * no place of its own (ICCCM's WM_NORMAL_HINTS has no USPosition, and no
+ * PPosition other than the root window's corner, which toolkits give when
+ * they mean none).  A backend that can place its windows then puts the
+ * surface where the system puts a new window that names no place, and
+ * tells the core that place (x11server_backend_configure); x and y still
+ * hold the X window's place until it does.  The backend reads it when it
+ * opens the surface.
  */
 struct x11_surface_info {
 	unsigned kind;
 	int32_t x;
 	int32_t y;
+	int default_place;
 	unsigned width;
 	unsigned height;
 	const char *title;

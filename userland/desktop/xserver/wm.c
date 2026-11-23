@@ -62,11 +62,14 @@
 #define WM_HINTS_URGENCY		(1U << 8)
 
 /*
- * WM_NORMAL_HINTS (ICCCM 4.1.2.3): the flags of the fields set, the
+ * WM_NORMAL_HINTS (ICCCM 4.1.2.3): the flags of the place the user or the
+ * program asked for and of the fields set, the
  * fields' indexes (in 32-bit units), how many fields a client of the
  * first version of ICCCM writes (without the base size and gravity), and
  * the largest size a field may give.
  */
+#define WM_SIZE_US_POSITION		(1U << 0)
+#define WM_SIZE_P_POSITION		(1U << 2)
 #define WM_SIZE_MIN			(1U << 4)
 #define WM_SIZE_MAX			(1U << 5)
 #define WM_SIZE_INC			(1U << 6)
@@ -194,6 +197,7 @@ static unsigned wm_surface_flags(struct x11_window *window);
 static int wm_popup_type(struct x11server *server, struct x11_window *window);
 static struct x11_surface *wm_owner(struct x11server *server, struct x11_window *window);
 static void wm_hints_read(struct x11_window *window, struct x11_size_hints *hints);
+static int wm_default_place(struct x11_window *window);
 static uint32_t wm_field(const struct x11_property *property, unsigned field);
 static unsigned wm_size_field(const struct x11_property *property, unsigned field);
 static void wm_client_message(struct x11server *server, struct x11_window *window, uint32_t type, uint32_t first, uint32_t second);
@@ -721,8 +725,9 @@ x11_wm_keeps_surface(
 /*
  * Fills the window manager's part of what a top-level window's surface
  * shows: a menu or tooltip (override-redirect, or a menu's
- * _NET_WM_WINDOW_TYPE) is a popup, else a decorated window with its state,
- * its owner's surface and the limits on its size.
+ * _NET_WM_WINDOW_TYPE) is a popup, else a decorated window with whether
+ * the system places it, its state, its owner's surface and the limits on
+ * its size.
  */
 void
 x11_wm_info(
@@ -743,6 +748,10 @@ x11_wm_info(
 	popup = wm_popup_type(server, window);
 	if (popup)
 		info->kind = X11_SURFACE_POPUP;
+
+	/* A decorated window whose client named no place is placed by the system. */
+	if (info->kind == X11_SURFACE_TOPLEVEL)
+		info->default_place = wm_default_place(window);
 
 	/* Succeeded: its state, owner and limits. */
 	info->flags = wm_surface_flags(window);
@@ -1549,6 +1558,48 @@ wm_hints_read(
 			hints->max_aspect_y = 0U;
 		}
 	}
+}
+
+/*
+ * Tells whether the system places a decorated window: its client named no
+ * place of its own.  A place the user gave (USPosition) is kept; one the
+ * program gave (PPosition) is kept unless it is the root window's corner,
+ * which toolkits give when they mean none (ICCCM 4.1.2.3 has the window
+ * manager take the place from the window's own geometry).
+ */
+static int
+wm_default_place(
+	struct x11_window *window)
+{
+	struct x11_property *normal;
+	uint32_t flags;
+
+	/* Without WM_NORMAL_HINTS, the client named no place. */
+	normal = x11_property_find(window, X11_ATOM_WM_NORMAL_HINTS);
+	if (normal == NULL)
+		return 1;
+
+	/* Hints too short to hold their flags name none either. */
+	if (normal->format != 32U || normal->length < 4U)
+		return 1;
+
+	/* The flags of the fields the client set. */
+	flags = wm_field(normal, WM_SIZE_FIELD_FLAGS);
+
+	/* The user's place is always kept. */
+	if ((flags & WM_SIZE_US_POSITION) != 0U)
+		return 0;
+
+	/* Neither the user nor the program named a place. */
+	if ((flags & WM_SIZE_P_POSITION) == 0U)
+		return 1;
+
+	/* The program's place at the root window's corner names none. */
+	if (window->x == 0 && window->y == 0)
+		return 1;
+
+	/* Succeeded: the program's place is kept. */
+	return 0;
 }
 
 /* Returns a 32-bit field of a property (0 past its end). */
