@@ -171,21 +171,22 @@ x11_unix_accept(
 		if (descriptor < 0)
 			return;
 
-		/* A free slot of the transport's. */
+		/* The core's client first: no room there refuses the connection (the core's log says so). */
+		error = x11server_connect(server, NULL, &client);
+		if (error != 0) {
+			(void)close(descriptor);
+			continue;
+		}
+
+		/* A free slot of the transport's (it has as many as the core takes). */
 		for (index = 0U; index < X11_UNIX_CLIENTS; index++) {
 			if (transport->connections[index].fd < 0)
 				break;
 		}
 
-		/* No room here: the connection is refused. */
+		/* No room here (a core given more clients than the socket serves): the core forgets the client. */
 		if (index == X11_UNIX_CLIENTS) {
-			(void)close(descriptor);
-			continue;
-		}
-
-		/* The core's client; no room there refuses the connection too. */
-		error = x11server_connect(server, NULL, &client);
-		if (error != 0) {
+			x11server_hangup(server, client);
 			(void)close(descriptor);
 			continue;
 		}
