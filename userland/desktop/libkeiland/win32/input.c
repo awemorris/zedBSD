@@ -90,6 +90,10 @@
 /* The Latin-1 division sign, which sits among the small letters and is not one. */
 #define LATIN1_DIVISION		0xf7U
 
+/* The keysyms of plus and of =, the plus key's character without Shift on the US layout. */
+#define SHORTCUT_KEYSYM_PLUS	0x2bU
+#define SHORTCUT_KEYSYM_EQUAL	0x3dU
+
 /* The longest name of a key a shortcut's text shows ("Backspace", a character's UTF-8), with its NUL. */
 #define SHORTCUT_NAME		16U
 
@@ -493,10 +497,12 @@ keiui_win32_shortcut_find(
 		if (items[index].keysym == 0U || items[index].modifiers != menu)
 			continue;
 
-		/* Its key in small letters, as the key's keysym is. */
+		/* Its key in small letters, as the key's keysym is; a plus is also the = of the US layout's plus key without Shift. */
 		wanted = items[index].keysym;
 		if (wanted >= 'A' && wanted <= 'Z')
 			wanted = wanted + LETTER_CASE_STEP;
+		if (wanted == SHORTCUT_KEYSYM_PLUS && keysym == SHORTCUT_KEYSYM_EQUAL)
+			wanted = SHORTCUT_KEYSYM_EQUAL;
 
 		/* An item of another key is passed. */
 		if (wanted != keysym)
