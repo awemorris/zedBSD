@@ -16,6 +16,9 @@
  * only inside the clip.  render-cpu.c draws into memory; an image with a
  * copy on the GPU (render-vulkan.c) is drawn there by the same operations,
  * which render-cpu.c hands to it.  region.c keeps the regions.
+ * render-composite.c composites (the RENDER extension's operations:
+ * pictures joined by the Porter-Duff operators and the blend modes) and
+ * coverage.c turns trapezoids into alpha masks for it.
  * shape.c turns the shapes of the requests (lines, arcs, polygons) into
  * spans, the same for every drawing layer.
  *
@@ -44,6 +47,34 @@
 #define X11_JOIN_MITER			0U
 #define X11_JOIN_ROUND			1U
 #define X11_JOIN_BEVEL			2U
+
+/*
+ * The compositing operators the layer names itself (the others are
+ * RENDER's numbers: Porter-Duff 0 to 13, the disjoint ones 0x10 to 0x1b,
+ * the conjoint ones 0x20 to 0x2b, the blend modes 0x30 to 0x3e).
+ */
+#define X11_OP_CLEAR			0U
+#define X11_OP_SRC			1U
+#define X11_OP_OVER			3U
+#define X11_OP_ADD			12U
+
+/* How a picture's image goes on outside it: nothing, tiled, its edge, mirrored. */
+#define X11_REPEAT_NONE			0U
+#define X11_REPEAT_NORMAL		1U
+#define X11_REPEAT_PAD			2U
+#define X11_REPEAT_REFLECT		3U
+
+/* How a transformed image is sampled. */
+#define X11_FILTER_NEAREST		0U
+#define X11_FILTER_BILINEAR		1U
+#define X11_FILTER_CONVOLUTION		2U
+
+/* What a picture read in a composite is: an image, one colour, or a gradient. */
+#define X11_SOURCE_IMAGE		0U
+#define X11_SOURCE_SOLID		1U
+#define X11_SOURCE_LINEAR		2U
+#define X11_SOURCE_RADIAL		3U
+#define X11_SOURCE_CONICAL		4U
 
 /* The graphics context's functions the layer names itself (the other fourteen are their numbers). */
 #define X11_FUNCTION_CLEAR		0U
@@ -88,7 +119,11 @@ struct x11_gpu_image;
 
 /*
  * The pixels of a drawable: rows of width pixels, stride pixels apart.
- * A pixel of depth 24 is 0x00RRGGBB, of depth 1 is 0 or 1.
+ * A pixel of depth 24 is 0x00RRGGBB, of depth 32 is 0xAARRGGBB with the
+ * colour premultiplied by the alpha, of depth 8 an alpha from 0 to 255,
+ * of depth 1 is 0 or 1.  Composited, the depth names the picture format:
+ * depth 1 is a1, 8 is a8, 24 is x8r8g8b8 (the alpha is always 1) and 32
+ * is a8r8g8b8.
  *
  * gpu is the image's copy on the GPU (NULL: the pixels are all there is).
  * With one, the drawing is done there and the pixels in memory may be
@@ -166,6 +201,73 @@ struct x11_arc {
 	int angle2;
 };
 
+/*
+ * A colour of 16 bits a channel.  A solid picture's colour is
+ * premultiplied by its alpha; a gradient's stops are not.
+ */
+struct x11_color {
+	uint16_t red;
+	uint16_t green;
+	uint16_t blue;
+	uint16_t alpha;
+};
+
+/* One stop of a gradient: where it is (16.16 fixed point, 0 to 1) and its colour. */
+struct x11_gradient_stop {
+	int32_t offset;
+	struct x11_color color;
+};
+
+/*
+ * A picture as a composite reads it (its source or its mask).
+ *
+ * An image is read from box, the drawable's pixels on the image, with
+ * the picture's (0, 0) at the box's top left; outside the box the
+ * picture repeats as repeat says.  A transform (transformed nonzero)
+ * maps the place of a pixel to the place it is read from (a 3 by 3
+ * matrix of 16.16 fixed point numbers, row by row), and filter says how
+ * the image is sampled there (a convolution by a kernel of kernel_width
+ * by kernel_height 16.16 numbers, row by row).  component_alpha makes a
+ * mask's colour channels the alphas of the source's channels.
+ *
+ * A solid picture is color everywhere.  A linear gradient goes from
+ * points[0..1] to points[2..3]; a radial one from the circle at
+ * points[0..1] of radius radii[0] to the one at points[2..3] of radius
+ * radii[1]; a conical one turns about points[0..1] from angle (degrees);
+ * all in 16.16 fixed point, with their stops in order of offset.
+ */
+struct x11_source {
+	unsigned kind;
+	const struct x11_image *image;
+	struct x11_box box;
+	unsigned repeat;
+	unsigned filter;
+	const int32_t *kernel;
+	int kernel_width;
+	int kernel_height;
+	int transformed;
+	int32_t transform[9];
+	int component_alpha;
+	struct x11_color color;
+	int32_t points[4];
+	int32_t radii[2];
+	int32_t angle;
+	const struct x11_gradient_stop *stops;
+	size_t stop_count;
+};
+
+/*
+ * A trapezoid of RENDER: between the horizontal lines top and bottom,
+ * and between the lines through left's two points and right's two
+ * points (x0, y0, x1, y1), all 16.16 fixed point.
+ */
+struct x11_trapezoid {
+	int32_t top;
+	int32_t bottom;
+	int32_t left[4];
+	int32_t right[4];
+};
+
 /* region.c: regions. */
 void x11_region_init(struct x11_region *region);
 void x11_region_fini(struct x11_region *region);
@@ -193,6 +295,12 @@ int x11_render_copy(struct x11_image *target, const struct x11_region *clip, int
 int x11_render_copy_plane(struct x11_image *target, const struct x11_region *clip, int x, int y, const struct x11_image *source, int source_x, int source_y, uint32_t plane, const struct x11_paint *paint);
 void x11_render_put(struct x11_image *target, const struct x11_region *clip, int x, int y, int width, int height, const uint32_t *pixels, size_t stride, unsigned function, uint32_t plane_mask);
 void x11_render_read(const struct x11_image *source, int x, int y, int width, int height, uint32_t *pixels, size_t stride);
+
+/* render-composite.c: compositing. */
+void x11_render_composite(struct x11_image *target, const struct x11_region *clip, unsigned op, const struct x11_source *source, int source_x, int source_y, const struct x11_source *mask, int mask_x, int mask_y, int x, int y, int width, int height);
+
+/* coverage.c: alpha masks of shapes. */
+void x11_coverage_trapezoid(struct x11_image *mask, int x, int y, const struct x11_trapezoid *trapezoid);
 
 /* shape.c: shapes as spans. */
 void x11_spans_init(struct x11_spans *list, const struct x11_box *bounds);

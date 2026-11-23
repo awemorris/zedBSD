@@ -8,9 +8,9 @@
 /*
  * The extensions the core answers beside the core protocol: BIG-REQUESTS
  * (here), XC-MISC (resource.c), XKEYBOARD (xkb.c), XInputExtension and
- * the Generic Event Extension (xinput.c), SHAPE (shape-ext.c), SYNC
- * (sync.c) and XFIXES (xfixes.c).  GLX is not in the table: glx.c names
- * it where the server has it.
+ * the Generic Event Extension (xinput.c), RENDER (render-ext.c), SHAPE
+ * (shape-ext.c), SYNC (sync.c) and XFIXES (xfixes.c).  GLX is not in the
+ * table: glx.c names it where the server has it.
  *
  * QueryExtension and ListExtensions find them here by name, and a request
  * whose major opcode is one of theirs is handed to its module.  A module
@@ -54,6 +54,7 @@ static const struct extension_entry extension_table[] = {
 	{ "XKEYBOARD", X11_XKB_MAJOR, X11_XKB_EVENT, X11_XKB_ERROR, x11_xkb_request, NULL },
 	{ "XInputExtension", X11_XINPUT_MAJOR, X11_XINPUT_EVENT, X11_XINPUT_ERROR, x11_xinput_request, NULL },
 	{ "Generic Event Extension", X11_GE_MAJOR, 0U, 0U, x11_ge_request, NULL },
+	{ "RENDER", X11_RENDER_MAJOR, 0U, X11_RENDER_ERROR, x11_render_request, NULL },
 	{ "SHAPE", X11_SHAPE_MAJOR, X11_SHAPE_EVENT, 0U, NULL, x11_shape_request },
 	{ "SYNC", X11_SYNC_MAJOR, X11_SYNC_EVENT, X11_SYNC_ERROR, NULL, x11_sync_request },
 	{ "XFIXES", X11_XFIXES_MAJOR, X11_XFIXES_EVENT, X11_XFIXES_ERROR, NULL, x11_xfixes_request }

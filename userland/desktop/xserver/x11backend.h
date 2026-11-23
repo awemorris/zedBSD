@@ -265,7 +265,8 @@ struct x11_rect {
  * A cursor the backend shows over a surface: its shape when it is one of
  * the standard cursors (the cursor font's glyph, an XC_* number of X's
  * cursorfont.h; -1: none, the image is its shape), and its image: pixels
- * of 0xAARRGGBB (alpha 0 or 255), width by height, with the hot spot, the
+ * of 0xAARRGGBB (the colour not premultiplied, alpha 0 to 255), width by
+ * height, with the hot spot, the
  * pixel the pointer's place is on (pixels NULL: no image, the shape
  * alone).  A backend shows its own cursor of a standard shape when it has
  * one.

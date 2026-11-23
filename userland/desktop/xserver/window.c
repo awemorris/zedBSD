@@ -143,6 +143,7 @@ static int window_occludes(const struct x11_window *upper, const struct x11_wind
 static int window_occluded(const struct x11_window *window, const struct x11_window *sibling);
 static int window_occluding(const struct x11_window *window, const struct x11_window *sibling);
 static int window_restack(struct x11server *server, struct x11_window *window, struct x11_window *sibling, unsigned mode);
+static unsigned window_depth_check(unsigned depth, uint32_t visual);
 static void window_free(struct x11server *server, struct x11_window *window);
 static void window_set_cursor(struct x11server *server, struct x11_window *window, uint32_t id);
 static void window_destroy_tree(struct x11server *server, struct x11_window *top);
@@ -169,6 +170,8 @@ x11_window_root(
 	root->id = X11_ROOT_XID;
 	root->owner = X11_NO_CLIENT;
 	root->window_class = X11_INPUT_OUTPUT;
+	root->depth = X11_DEPTH;
+	root->visual = X11_VISUAL_XID;
 	root->background = background;
 	root->win_gravity = GRAVITY_NORTH_WEST;
 	root->colormap = X11_COLORMAP_XID;
@@ -216,6 +219,7 @@ x11_window_server_child(
 	window->id = id;
 	window->owner = X11_NO_CLIENT;
 	window->window_class = X11_INPUT_ONLY;
+	window->visual = X11_VISUAL_XID;
 	window->win_gravity = GRAVITY_NORTH_WEST;
 	window->colormap = X11_COLORMAP_XID;
 	window->x = -100;
@@ -335,7 +339,8 @@ x11_gc_find(
 
 /*
  * CreateWindow: a window on top of its parent's children, of the class,
- * depth and visual asked (24 bits TrueColor, or InputOnly), with the
+ * depth and visual asked (TrueColor of depth 24, TrueColor with alpha of
+ * depth 32, or InputOnly), with the
  * attributes its values give.  The parent's SubstructureNotify clients
  * are told.
  */
@@ -358,6 +363,7 @@ x11_request_create_window(
 	uint16_t height;
 	uint16_t border;
 	unsigned window_class;
+	unsigned depth;
 	unsigned taken;
 	unsigned code;
 	int fits;
@@ -403,19 +409,43 @@ x11_request_create_window(
 	if (width == 0U || height == 0U)
 		return X11_BAD_VALUE;
 
-	/* The depth and visual the class allows: the screen's for InputOutput, none for InputOnly. */
+	/*
+	 * The depth and visual the class allows: for InputOutput the parent's
+	 * (CopyFromParent) or one of the screen's pairs, depth 24 with the
+	 * screen's visual or depth 32 with the ARGB visual; none for
+	 * InputOnly.
+	 */
 	visual = x11_read32(request + 24, msb);
-	if (visual != 0U && visual != X11_VISUAL_XID)
-		return X11_BAD_MATCH;
+	depth = request[1];
 	if (window_class == X11_INPUT_OUTPUT) {
 		if (parent->window_class == X11_INPUT_ONLY)
 			return X11_BAD_MATCH;
-		if (request[1] != 0U && request[1] != X11_DEPTH)
-			return X11_BAD_MATCH;
+		if (depth == 0U)
+			depth = parent->depth;
+		if (visual == 0U)
+			visual = parent->visual;
+		code = window_depth_check(depth, visual);
+		if (code != 0U)
+			return code;
 	} else {
-		if (request[1] != 0U || border != 0U)
+		if (depth != 0U || border != 0U)
+			return X11_BAD_MATCH;
+		if (visual != 0U && visual != parent->visual && visual != X11_VISUAL_XID && visual != X11_VISUAL_ARGB_XID)
 			return X11_BAD_MATCH;
 		if ((mask & ~ATTRIBUTE_INPUT_ONLY) != 0U)
+			return X11_BAD_MATCH;
+	}
+
+	/*
+	 * A window of a depth other than its parent's has no parent's border
+	 * to copy, and one of another visual no parent's colormap to take.
+	 */
+	if (window_class == X11_INPUT_OUTPUT && depth != parent->depth) {
+		if ((mask & ((1U << ATTRIBUTE_BORDER_PIXMAP) | (1U << ATTRIBUTE_BORDER_PIXEL))) == 0U)
+			return X11_BAD_MATCH;
+	}
+	if (window_class == X11_INPUT_OUTPUT && visual != parent->visual) {
+		if ((mask & (1U << ATTRIBUTE_COLORMAP)) == 0U)
 			return X11_BAD_MATCH;
 	}
 
@@ -432,6 +462,14 @@ x11_request_create_window(
 	window->colormap = X11_COLORMAP_XID;
 	if (window_class == X11_INPUT_ONLY)
 		window->colormap = 0U;
+	window->depth = 0U;
+	window->visual = visual;
+	if (window->visual == 0U)
+		window->visual = parent->visual;
+	if (window_class == X11_INPUT_OUTPUT) {
+		window->depth = depth;
+		window->colormap = parent->colormap;
+	}
 	window->width = width;
 	window->height = height;
 	window->border = border;
@@ -573,7 +611,7 @@ x11_request_get_attributes(
 	/* The reply. */
 	memset(reply, 0, sizeof(reply));
 	reply[1] = window->backing_store;
-	x11_write32(reply + 8, X11_VISUAL_XID, msb);
+	x11_write32(reply + 8, window->visual, msb);
 	x11_write16(reply + 12, (uint16_t)window->window_class, msb);
 	reply[14] = window->bit_gravity;
 	reply[15] = window->win_gravity;
@@ -1063,16 +1101,14 @@ x11_request_get_geometry(
 	memset(reply, 0, sizeof(reply));
 	x11_write32(reply + 8, X11_ROOT_XID, msb);
 	if (window != NULL) {
-		reply[1] = X11_DEPTH;
-		if (window->window_class == X11_INPUT_ONLY)
-			reply[1] = 0U;
+		reply[1] = (uint8_t)window->depth;
 		x11_write16(reply + 12, (uint16_t)window_relative_x(window), msb);
 		x11_write16(reply + 14, (uint16_t)window_relative_y(window), msb);
 		x11_write16(reply + 16, window->width, msb);
 		x11_write16(reply + 18, window->height, msb);
 		x11_write16(reply + 20, window->border, msb);
 	} else {
-		reply[1] = X11_DEPTH;
+		reply[1] = pixmap->depth;
 		x11_write16(reply + 16, pixmap->width, msb);
 		x11_write16(reply + 18, pixmap->height, msb);
 	}
@@ -1471,6 +1507,9 @@ x11_resources_release(
 	     window = x11_window_next(window, server->root))
 		x11_event_forget_client(window, owner);
 
+	/* Its RENDER pictures and glyph sets (before its pixmaps, which pictures hold). */
+	x11_render_release(server, owner);
+
 	/* Its pixmaps, graphics contexts, fonts and cursors. */
 	window_release_kind(server, owner, X11_RESOURCE_PIXMAP);
 	window_release_kind(server, owner, X11_RESOURCE_GC);
@@ -1501,10 +1540,12 @@ window_values_read(
 {
 	struct x11_cursor *cursor;
 	struct x11_pixmap *pixmap;
+	uint32_t colormap_visual;
 	uint32_t value;
 	unsigned holder;
 	unsigned kind;
 	unsigned bit;
+	int parents;
 	int msb;
 
 	/* Each value in bit order. */
@@ -1522,13 +1563,28 @@ window_values_read(
 		switch (bit) {
 		case ATTRIBUTE_BACKGROUND_PIXMAP:
 		case ATTRIBUTE_BORDER_PIXMAP:
-			/* None, ParentRelative (CopyFromParent for the border), or a pixmap of the window's depth. */
-			if (value == BACKGROUND_NONE || (bit == ATTRIBUTE_BACKGROUND_PIXMAP && value == BACKGROUND_PARENT_RELATIVE))
+			/*
+			 * None for the background, the parent's (ParentRelative
+			 * for the background, CopyFromParent for the border: the
+			 * parent must be of the window's depth), or a pixmap of the
+			 * window's depth.
+			 */
+			if (bit == ATTRIBUTE_BACKGROUND_PIXMAP && value == BACKGROUND_NONE)
 				break;
+			parents = 0;
+			if (bit == ATTRIBUTE_BACKGROUND_PIXMAP && value == BACKGROUND_PARENT_RELATIVE)
+				parents = 1;
+			if (bit == ATTRIBUTE_BORDER_PIXMAP && value == BACKGROUND_NONE)
+				parents = 1;
+			if (parents) {
+				if (window->parent != NULL && window->parent->depth != window->depth)
+					return X11_BAD_MATCH;
+				break;
+			}
 			pixmap = x11_pixmap_find(server, value);
 			if (pixmap == NULL)
 				return X11_BAD_PIXMAP;
-			if (pixmap->depth != X11_DEPTH || window->window_class == X11_INPUT_ONLY)
+			if (pixmap->depth != window->depth || window->window_class == X11_INPUT_ONLY)
 				return X11_BAD_MATCH;
 			break;
 		case ATTRIBUTE_BIT_GRAVITY:
@@ -1566,12 +1622,20 @@ window_values_read(
 				return X11_BAD_VALUE;
 			break;
 		case ATTRIBUTE_COLORMAP:
-			/* CopyFromParent, the screen's colormap, or one a client made. */
-			if (value == 0U || value == X11_COLORMAP_XID)
+			/* CopyFromParent (the parent's visual must be the window's), or a colormap of the window's visual. */
+			if (window->window_class == X11_INPUT_ONLY)
 				break;
+			if (value == 0U) {
+				if (window->parent != NULL && window->parent->visual != window->visual)
+					return X11_BAD_MATCH;
+				break;
+			}
 			kind = x11_resource_type(server, value);
-			if (kind != X11_RESOURCE_COLORMAP)
+			if (value != X11_COLORMAP_XID && kind != X11_RESOURCE_COLORMAP)
 				return X11_BAD_COLORMAP;
+			colormap_visual = x11_colormap_visual(server, value);
+			if (colormap_visual != window->visual)
+				return X11_BAD_MATCH;
 			break;
 		case ATTRIBUTE_CURSOR:
 			/* None, or a cursor. */
@@ -1698,7 +1762,7 @@ window_values_tiles(
 	    (values->mask & (1U << ATTRIBUTE_BACKGROUND_PIXEL)) == 0U &&
 	    value != BACKGROUND_NONE &&
 	    value != BACKGROUND_PARENT_RELATIVE) {
-		code = x11_draw_set_tile(server, window->owner, value, &background, &charged);
+		code = x11_draw_set_tile(server, window->owner, value, window->depth, &background, &charged);
 		if (code != 0U)
 			return code;
 	}
@@ -1707,7 +1771,7 @@ window_values_tiles(
 	    (values->mask & (1U << ATTRIBUTE_BORDER_PIXEL)) == 0U) {
 		code = 0U;
 		if (value != BACKGROUND_NONE) {
-			code = x11_draw_set_tile(server, window->owner, value, &border, &charged);
+			code = x11_draw_set_tile(server, window->owner, value, window->depth, &border, &charged);
 		} else if (window->parent != NULL && window->parent->border_tile != NULL) {
 			code = X11_BAD_ALLOC;
 			bytes = x11_image_bytes(window->parent->border_tile->width, window->parent->border_tile->height);
@@ -2356,6 +2420,28 @@ window_restack(
 }
 
 /*
+ * Tells whether an InputOutput window may have a depth and visual: depth
+ * 24 with the screen's visual, or depth 32 with the ARGB visual.  Returns
+ * 0, or BadMatch.
+ */
+static unsigned
+window_depth_check(
+	unsigned depth,
+	uint32_t visual)
+{
+	/* The screen's depth and visual. */
+	if (depth == X11_DEPTH && visual == X11_VISUAL_XID)
+		return 0U;
+
+	/* The depth with alpha and its visual. */
+	if (depth == X11_DEPTH_ARGB && visual == X11_VISUAL_ARGB_XID)
+		return 0U;
+
+	/* Another pair: the screen has no such visual of the depth. */
+	return X11_BAD_MATCH;
+}
+
+/*
  * Frees a window that has no children left: what it held, its place in
  * the tree and its id.  The focus and the grabs on it go.
  */
@@ -2375,6 +2461,9 @@ window_free(
 	x11_property_forget_window(server, window);
 	x11_save_set_forget_window(server, window->id);
 	x11_rootless_forget(server, window);
+
+	/* The RENDER pictures of it go with it. */
+	x11_render_forget_window(server, window);
 
 	/* Its pixels, background and border, its cursor, and its own charge. */
 	x11_draw_forget(server, window);

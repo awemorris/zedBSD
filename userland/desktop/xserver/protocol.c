@@ -163,7 +163,7 @@ x11_setup_reply(
 	struct x11server *server,
 	struct x11_client *client)
 {
-	uint8_t reply[8 + 32 + 12 + 8 + 8 + 40 + 8 + 24 + 8];
+	uint8_t reply[8 + 32 + 12 + 5 * 8 + 40 + 8 + 24 + 8 + 8 + 8 + 8 + 24];
 	uint8_t *field;
 	int msb;
 
@@ -175,7 +175,7 @@ x11_setup_reply(
 	x11_write16(reply + 4, 0U, msb);
 	x11_write16(reply + 6, (uint16_t)((sizeof(reply) - 8U) / 4U), msb);
 
-	/* The fixed part: release, the client's ids, motion buffer, vendor length, request length, one screen and one format. */
+	/* The fixed part: release, the client's ids, motion buffer, vendor length, request length, one screen and five formats. */
 	field = reply + 8;
 	x11_write32(field, 1U, msb);
 	x11_write32(field + 4, client->base, msb);
@@ -183,7 +183,7 @@ x11_setup_reply(
 	x11_write16(field + 16, (uint16_t)(sizeof(SERVER_VENDOR) - 1U), msb);
 	x11_write16(field + 18, 65535U, msb);
 	field[20] = 1U;
-	field[21] = 2U;
+	field[21] = 5U;
 	field[22] = (uint8_t)msb;
 	field[23] = (uint8_t)msb;
 	field[24] = 32U;
@@ -195,13 +195,28 @@ x11_setup_reply(
 	field += 32;
 	memcpy(field, SERVER_VENDOR, sizeof(SERVER_VENDOR) - 1U);
 
-	/* The pixmap formats: depth 1, a bit a pixel, and depth 24, 32 bits a pixel, rows padded to 32 bits. */
+	/*
+	 * The pixmap formats, rows padded to 32 bits: depth 1, a bit a pixel;
+	 * depth 4 and 8, a byte a pixel; depth 24 and 32, 32 bits a pixel.
+	 */
 	field += 12;
 	field[0] = 1U;
 	field[1] = 1U;
 	field[2] = 32U;
 	field += 8;
+	field[0] = X11_DEPTH_NIBBLE;
+	field[1] = 8U;
+	field[2] = 32U;
+	field += 8;
+	field[0] = X11_DEPTH_ALPHA;
+	field[1] = 8U;
+	field[2] = 32U;
+	field += 8;
 	field[0] = X11_DEPTH;
+	field[1] = 32U;
+	field[2] = 32U;
+	field += 8;
+	field[0] = X11_DEPTH_ARGB;
 	field[1] = 32U;
 	field[2] = 32U;
 
@@ -217,13 +232,13 @@ x11_setup_reply(
 	x11_write16(field + 24, (uint16_t)(server->width * 254U / 96U / 10U), msb);
 	x11_write16(field + 26, (uint16_t)(server->height * 254U / 96U / 10U), msb);
 
-	/* One colormap installed at most and at least, the root visual, no backing store, depth 24, two depths. */
+	/* One colormap installed at most and at least, the root visual, no backing store, depth 24, five depths. */
 	x11_write16(field + 28, 1U, msb);
 	x11_write16(field + 30, 1U, msb);
 	x11_write32(field + 32, X11_VISUAL_XID, msb);
 	field[36] = 0U;
 	field[38] = X11_DEPTH;
-	field[39] = 2U;
+	field[39] = 5U;
 
 	/* The depth 24 with its one visual. */
 	field += 40;
@@ -244,6 +259,31 @@ x11_setup_reply(
 	field += 24;
 	field[0] = 1U;
 	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 4, with no visual. */
+	field += 8;
+	field[0] = X11_DEPTH_NIBBLE;
+	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 8 of the alpha masks, with no visual. */
+	field += 8;
+	field[0] = X11_DEPTH_ALPHA;
+	x11_write16(field + 2, 0U, msb);
+
+	/* The depth 32 with its one visual. */
+	field += 8;
+	field[0] = X11_DEPTH_ARGB;
+	x11_write16(field + 2, 1U, msb);
+
+	/* The visual: TrueColor, 8 bits a channel, the same red, green and blue masks (alpha is the top byte). */
+	field += 8;
+	x11_write32(field, X11_VISUAL_ARGB_XID, msb);
+	field[4] = 4U;
+	field[5] = 8U;
+	x11_write16(field + 6, 256U, msb);
+	x11_write32(field + 8, 0x00ff0000U, msb);
+	x11_write32(field + 12, 0x0000ff00U, msb);
+	x11_write32(field + 16, 0x000000ffU, msb);
 
 	/* The reply, queued; a client that is already broken cannot take it. */
 	x11_client_send(server, client, reply, sizeof(reply));

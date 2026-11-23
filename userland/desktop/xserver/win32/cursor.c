@@ -133,7 +133,8 @@ win32_cursor_free(
 }
 
 /*
- * Makes a cursor of an image (alpha 0 or 255), scaled to the screen as
+ * Makes a cursor of an image (alpha 0 to 255, not premultiplied), scaled
+ * to the screen as
  * the windows' pixels are, with its hot spot.  Returns it, or NULL.
  */
 static HCURSOR
@@ -184,7 +185,7 @@ cursor_make(
 	if (color == NULL || pixels == NULL)
 		return NULL;
 
-	/* Each pixel, the nearest of the image's (an opaque one premultiplied is itself). */
+	/* Each pixel, the nearest of the image's. */
 	bits = pixels;
 	for (y = 0; y < height; y++) {
 		source_y = y * image->height / height;

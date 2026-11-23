@@ -79,7 +79,6 @@ struct gc_values {
 
 static unsigned gc_read(struct x11server *server, const struct x11_gc *gc, int msb, const uint8_t *values, uint32_t mask, struct gc_values *read);
 static unsigned gc_apply(struct x11server *server, struct x11_gc *gc, const struct gc_values *values);
-static int gc_clip_region(const struct x11_image *bitmap, struct x11_region *region);
 static void gc_defaults(struct x11_gc *gc);
 static size_t gc_region_bytes(const struct x11_region *region);
 static size_t gc_kept_bytes(const struct x11_gc *gc);
@@ -134,9 +133,11 @@ x11_request_create_gc(
 		pixmap = x11_pixmap_find(server, x11_read32(request + 8, client->order));
 	if (window == NULL && pixmap == NULL)
 		return X11_BAD_DRAWABLE;
-	depth = X11_DEPTH;
-	if (pixmap != NULL)
+	if (pixmap != NULL) {
 		depth = pixmap->depth;
+	} else {
+		depth = window->depth;
+	}
 	if (window != NULL && window->window_class == X11_INPUT_ONLY)
 		return X11_BAD_MATCH;
 
@@ -451,6 +452,56 @@ x11_gc_free(
 }
 
 /*
+ * Makes the region of a bitmap's set pixels, row by row: each run of set
+ * pixels in a row is one box.  Returns 0, or ENOMEM.
+ */
+int
+x11_gc_clip_region(
+	const struct x11_image *bitmap,
+	struct x11_region *region)
+{
+	struct x11_box box;
+	uint32_t bit;
+	int row;
+	int column;
+	int start;
+	int error;
+
+	/* Each row's runs. */
+	for (row = 0; row < bitmap->height; row++) {
+		start = -1;
+		for (column = 0; column <= bitmap->width; column++) {
+			/* Past the last column, a run ends. */
+			bit = 0U;
+			if (column < bitmap->width)
+				bit = bitmap->pixels[(size_t)row * bitmap->stride + (size_t)column] & 1U;
+
+			/* A run starts at a set pixel after a clear one. */
+			if (bit != 0U) {
+				if (start < 0)
+					start = column;
+				continue;
+			}
+
+			/* A run ends at a clear pixel: one box (the rows' runs never overlap). */
+			if (start < 0)
+				continue;
+			box.x0 = start;
+			box.y0 = row;
+			box.x1 = column;
+			box.y1 = row + 1;
+			error = x11_region_append_box(region, &box);
+			if (error != 0)
+				return error;
+			start = -1;
+		}
+	}
+
+	/* Succeeded: the region. */
+	return 0;
+}
+
+/*
  * Reads the values a mask names and checks each: BadValue for an
  * enumerated value out of range or zero dashes, BadPixmap for a tile,
  * stipple or clip mask that is no pixmap, BadMatch for one of the wrong
@@ -600,7 +651,7 @@ gc_apply(
 		added += x11_image_bytes(stipple->width, stipple->height);
 	}
 	if (values->clip != NULL) {
-		error = gc_clip_region(&values->clip->image, &clip);
+		error = x11_gc_clip_region(&values->clip->image, &clip);
 		if (error != 0)
 			goto failed;
 		added += gc_region_bytes(&clip);
@@ -694,56 +745,6 @@ failed:
 	x11_image_free(stipple);
 	x11_region_fini(&clip);
 	return X11_BAD_ALLOC;
-}
-
-/*
- * Makes the region of a bitmap's set pixels, row by row: each run of set
- * pixels in a row is one box.  Returns 0, or ENOMEM.
- */
-static int
-gc_clip_region(
-	const struct x11_image *bitmap,
-	struct x11_region *region)
-{
-	struct x11_box box;
-	uint32_t bit;
-	int row;
-	int column;
-	int start;
-	int error;
-
-	/* Each row's runs. */
-	for (row = 0; row < bitmap->height; row++) {
-		start = -1;
-		for (column = 0; column <= bitmap->width; column++) {
-			/* Past the last column, a run ends. */
-			bit = 0U;
-			if (column < bitmap->width)
-				bit = bitmap->pixels[(size_t)row * bitmap->stride + (size_t)column] & 1U;
-
-			/* A run starts at a set pixel after a clear one. */
-			if (bit != 0U) {
-				if (start < 0)
-					start = column;
-				continue;
-			}
-
-			/* A run ends at a clear pixel: one box (the rows' runs never overlap). */
-			if (start < 0)
-				continue;
-			box.x0 = start;
-			box.y0 = row;
-			box.x1 = column;
-			box.y1 = row + 1;
-			error = x11_region_append_box(region, &box);
-			if (error != 0)
-				return error;
-			start = -1;
-		}
-	}
-
-	/* Succeeded: the region. */
-	return 0;
 }
 
 /* Gives a new context the protocol's default values. */

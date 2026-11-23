@@ -99,12 +99,15 @@
 
 /*
  * The server's own resources, in the ids no client chooses: the root
- * window, its colormap and its one visual.  None of them is 0 or 1, which
+ * window, its colormap, the screen's visual (TrueColor of depth 24) and
+ * the visual of depth 32 (TrueColor with alpha in the top byte, the one
+ * RENDER's a8r8g8b8 format belongs to).  None of them is 0 or 1, which
  * some requests take for None, PointerRoot or InputFocus.
  */
 #define X11_ROOT_XID		0x00000100U
 #define X11_COLORMAP_XID	0x00000101U
 #define X11_VISUAL_XID		3U
+#define X11_VISUAL_ARGB_XID	4U
 
 /*
  * The window manager's own window (wm.c): the child of the root window
@@ -130,6 +133,8 @@
 #define X11_RESOURCE_FONT	4U
 #define X11_RESOURCE_CURSOR	5U
 #define X11_RESOURCE_COLORMAP	6U
+#define X11_RESOURCE_PICTURE	7U
+#define X11_RESOURCE_GLYPHSET	8U
 #define X11_RESOURCE_REGION	9U
 #define X11_RESOURCE_COUNTER	10U
 #define X11_RESOURCE_ALARM	11U
@@ -245,8 +250,17 @@
 #define X11_INPUT_OUTPUT	1U
 #define X11_INPUT_ONLY		2U
 
-/* The depth of the screen's windows and pixmaps. */
+/*
+ * The depth of the screen's windows and pixmaps, the depth of the windows
+ * and pixmaps with alpha (the ARGB visual), the depth of the pixmaps that
+ * hold alpha alone (RENDER's masks; no window has it), and depth 4, which
+ * has pixmaps (a byte a pixel) and nothing else: RENDER's library takes a
+ * server without pixmaps of depths 1, 4, 8, 24 and 32 for a broken one.
+ */
 #define X11_DEPTH		24U
+#define X11_DEPTH_ARGB		32U
+#define X11_DEPTH_ALPHA		8U
+#define X11_DEPTH_NIBBLE	4U
 
 /*
  * What a window's background is: a pixel, None (never painted), its
@@ -321,6 +335,9 @@
 /* The kinds of a core font: one drawn from a face, and the cursor font (the shapes of the standard cursors). */
 #define X11_FONT_TEXT		0U
 #define X11_FONT_CURSOR		1U
+
+/* RENDER's picture (render-ext.c), kept behind pointers. */
+struct x11_picture;
 
 /* The types other modules keep behind pointers: a face, and Vulkan's state and a window's swapchain. */
 struct truetype_face;
@@ -594,8 +611,10 @@ struct x11_window {
 	struct x11_window *below;
 	struct x11_window *above;
 
-	/* InputOutput or InputOnly. */
+	/* InputOutput or InputOnly, and the depth and visual of an InputOutput window (0 for InputOnly). */
 	unsigned window_class;
+	unsigned depth;
+	uint32_t visual;
 
 	/*
 	 * Its attributes: the colour it is cleared to and the background
@@ -903,8 +922,10 @@ struct x11_font {
 /*
  * One cursor (cursor.c): its shape, a mask of the pixels it shows and its
  * two colours, its hot spot, and, when it is one of the cursor font's,
- * which (shape -1: none).  It lives while its id does or a window or a
- * grab holds it (holders).
+ * which (shape -1: none).  A cursor of RENDER has an image instead
+ * (argb: a8r8g8b8 pixels, premultiplied, width by height; NULL for the
+ * others).  It lives while its id does or a window or a grab holds it
+ * (holders).
  */
 struct x11_cursor {
 	uint32_t id;
@@ -918,6 +939,7 @@ struct x11_cursor {
 	uint8_t *source;
 	uint8_t *mask;
 	size_t stride;
+	uint32_t *argb;
 	uint16_t foreground[3];
 	uint16_t background[3];
 	uint32_t version;
@@ -925,21 +947,27 @@ struct x11_cursor {
 };
 
 /*
- * One colormap a client made.  The screen's one visual is TrueColor, so a
+ * One colormap a client made.  The screen's visuals are TrueColor, so a
  * colormap holds no cells: every one gives each colour the pixel of its
- * own bits, and only its id and its owner are kept.
+ * own bits, and only its id, its owner and its visual are kept.
  */
 struct x11_colormap {
 	uint32_t id;
 	unsigned owner;
+	uint32_t visual;
 };
 
 /*
  * One pixmap: pixels a client draws into and copies onto its windows.
+ *
+ * A RENDER picture of the pixmap holds it (holds counts them): when its
+ * id goes while it is held, the pixmap stays without an id (id 0, its
+ * charge the server's) until the last picture lets it go.
  */
 struct x11_pixmap {
 	uint32_t id;
 	unsigned owner;
+	unsigned holds;
 	uint8_t depth;
 	uint16_t width;
 	uint16_t height;
@@ -1358,6 +1386,12 @@ struct x11server {
 	struct x11_save *saves;
 	unsigned save_count;
 	unsigned save_capacity;
+
+	/*
+	 * RENDER's pictures of drawables (render-ext.c), each with its next:
+	 * a window's go with it when it is destroyed.
+	 */
+	struct x11_picture *pictures;
 };
 
 /* client.c: the clients' connections, and the log. */
@@ -1478,7 +1512,7 @@ void x11_draw_begin(struct x11server *server, struct x11_window *window, struct 
 void x11_draw_end(struct x11server *server);
 void x11_draw_forget(struct x11server *server, struct x11_window *window);
 void x11_draw_border(struct x11server *server, struct x11_window *window);
-unsigned x11_draw_set_tile(struct x11server *server, unsigned owner, uint32_t pixmap_id, struct x11_image **tile, size_t *charged);
+unsigned x11_draw_set_tile(struct x11server *server, unsigned owner, uint32_t pixmap_id, unsigned depth, struct x11_image **tile, size_t *charged);
 int x11_image_copy(const struct x11_image *source, struct x11_image **copy);
 void x11_image_free(struct x11_image *image);
 size_t x11_image_bytes(int width, int height);
@@ -1510,10 +1544,12 @@ unsigned x11_request_set_dashes(struct x11server *server, unsigned index, const 
 unsigned x11_request_set_clip_rectangles(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 const uint8_t *x11_gc_dashes(const struct x11_gc *gc, size_t *count);
 void x11_gc_free(struct x11server *server, struct x11_gc *gc);
+int x11_gc_clip_region(const struct x11_image *bitmap, struct x11_region *region);
 
 /* colormap.c: colormaps and colours. */
 unsigned x11_colormap_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 void x11_colormap_free(struct x11server *server, struct x11_colormap *colormap);
+uint32_t x11_colormap_visual(struct x11server *server, uint32_t id);
 int x11_color_lookup(const char *name, size_t length, uint16_t *red, uint16_t *green, uint16_t *blue);
 
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
@@ -1611,6 +1647,50 @@ const struct x11_cursor *x11_cursor_current(struct x11server *server);
 uint32_t *x11_cursor_pixels(const struct x11_cursor *cursor);
 unsigned x11_cursor_change(struct x11server *server, struct x11_cursor *target, const struct x11_cursor *source);
 unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_cursor_create_argb(struct x11server *server, unsigned index, uint32_t id, uint32_t *pixels, int width, int height, int hot_x, int hot_y);
+unsigned x11_cursor_create_copy(struct x11server *server, unsigned index, uint32_t id, const struct x11_cursor *model);
+
+/*
+ * What a drawable gives a drawing that is not a core request's (RENDER's):
+ * the image (NULL: nothing is drawn), where the drawable's origin is on
+ * it, the drawable's clip on the image (its window's clip by a subwindow
+ * mode, or all of a pixmap), the window or pixmap, its size and depth,
+ * and the top-level window whose image it is.
+ */
+struct x11_draw_view {
+	struct x11_image *image;
+	int x;
+	int y;
+	struct x11_region clip;
+	struct x11_window *window;
+	struct x11_pixmap *pixmap;
+	int width;
+	int height;
+	unsigned depth;
+	struct x11_window *top;
+};
+
+/* draw.c: drawables for RENDER, and the pixmaps its pictures hold. */
+unsigned x11_draw_view_window(struct x11server *server, struct x11_window *window, unsigned subwindow_mode, struct x11_draw_view *view);
+int x11_draw_view_pixmap(struct x11_pixmap *pixmap, struct x11_draw_view *view);
+void x11_draw_view_fini(struct x11_draw_view *view);
+void x11_draw_view_dirty(struct x11server *server, const struct x11_draw_view *view, const struct x11_box *bounds);
+void x11_pixmap_hold(struct x11_pixmap *pixmap);
+void x11_pixmap_let_go(struct x11server *server, struct x11_pixmap *pixmap);
+
+/*
+ * The RENDER extension's major opcode and its first error (BadPictFormat,
+ * then BadPicture, BadPictOp, BadGlyphSet and BadGlyph).
+ */
+#define X11_RENDER_MAJOR	134U
+#define X11_RENDER_ERROR	134U
+
+/* render-ext.c: the RENDER extension. */
+unsigned x11_render_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_render_forget_window(struct x11server *server, const struct x11_window *window);
+void x11_render_release(struct x11server *server, unsigned owner);
+unsigned x11_render_picture_clip(struct x11server *server, uint32_t id, const struct x11_region *region, int x, int y);
+unsigned x11_render_picture_pixels(struct x11server *server, uint32_t id, uint32_t **pixels, int *width, int *height);
 
 /*
  * The extensions of stage 2 (extension.c): their major opcodes, their

@@ -201,6 +201,9 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/shape-ext.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/xfixes.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/sync.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/render-ext.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/render-composite.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/coverage.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/window.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/input.c

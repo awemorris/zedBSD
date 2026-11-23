@@ -9,7 +9,9 @@
  * Cursors: their requests, and the one the backend shows.
  *
  * A cursor is a shape of two colours with a mask and a hot spot, made from
- * two bitmaps (CreateCursor) or two glyphs (CreateGlyphCursor).  A glyph
+ * two bitmaps (CreateCursor) or two glyphs (CreateGlyphCursor), or an
+ * image with alpha (RENDER's CreateCursor and CreateAnimCursor, which
+ * render-ext.c answers).  A glyph
  * of the cursor font is one of the standard cursors: it is kept as that
  * shape's number and the backend shows its own cursor of the shape (the
  * server has no images of them).  A cursor lives while its id does or a
@@ -53,6 +55,7 @@ static struct x11_cursor *cursor_new(int width, int height);
 static void cursor_colors(struct x11server *server, struct x11_cursor *cursor, const uint8_t *bytes, int msb);
 static const struct x11_cursor *cursor_shown(struct x11server *server, struct x11_window *window);
 static uint32_t *cursor_image(const struct x11_cursor *cursor);
+static uint32_t *cursor_argb_image(const struct x11_cursor *cursor);
 static void cursor_set_bit(uint8_t *bits, size_t stride, int x, int y);
 static int cursor_bit(const uint8_t *bits, size_t stride, int x, int y);
 
@@ -134,12 +137,13 @@ x11_cursor_release(
 	if (cursor == NULL)
 		return;
 
-	/* One fewer holder; none left frees its bitmaps, its charge and it. */
+	/* One fewer holder; none left frees its bitmaps or image, its charge and it. */
 	cursor->holders--;
 	if (cursor->holders != 0U)
 		return;
 	free(cursor->source);
 	free(cursor->mask);
+	free(cursor->argb);
 	x11_memory_release(server, cursor->owner, cursor->charged);
 	free(cursor);
 }
@@ -246,6 +250,8 @@ x11_cursor_update(
 	pixels = NULL;
 	if (cursor->source != NULL)
 		pixels = cursor_image(cursor);
+	if (cursor->argb != NULL)
+		pixels = cursor_argb_image(cursor);
 	image.pixels = pixels;
 	if (pixels == NULL) {
 		image.width = 0;
@@ -255,6 +261,131 @@ x11_cursor_update(
 	/* Succeeded: the backend shows it. */
 	server->ops->cursor(server->backend, top->surface, &image);
 	free(pixels);
+}
+
+/*
+ * Makes a cursor of an image (RENDER's CreateCursor): a8r8g8b8 pixels,
+ * premultiplied, width by height, which the cursor takes (freed whatever
+ * is returned), with its hot spot (inside the image).  Returns 0,
+ * BadIDChoice, or BadAlloc.
+ */
+unsigned
+x11_cursor_create_argb(
+	struct x11server *server,
+	unsigned index,
+	uint32_t id,
+	uint32_t *pixels,
+	int width,
+	int height,
+	int hot_x,
+	int hot_y)
+{
+	struct x11_cursor *cursor;
+	unsigned code;
+
+	/* A new id of the client's. */
+	code = cursor_check_id(server, index, id);
+	if (code != 0U) {
+		free(pixels);
+		return code;
+	}
+
+	/* The cursor, with no bitmaps. */
+	cursor = cursor_new(0, 0);
+	if (cursor == NULL) {
+		free(pixels);
+		return X11_BAD_ALLOC;
+	}
+
+	/* Its image, size and hot spot, as a version of its own. */
+	cursor->argb = pixels;
+	cursor->width = width;
+	cursor->height = height;
+	cursor->hot_x = hot_x;
+	cursor->hot_y = hot_y;
+	server->cursor_serial++;
+	if (server->cursor_serial == 0U)
+		server->cursor_serial++;
+	cursor->version = server->cursor_serial;
+
+	/* Charged and found by its id (freed on failure). */
+	code = cursor_add(server, index, id, cursor);
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: made. */
+	return 0U;
+}
+
+/*
+ * Makes a cursor that looks as another does (RENDER's CreateAnimCursor
+ * shows its first frame): a copy of its shape, bitmaps or image, colours
+ * and hot spot.  Returns 0, BadIDChoice, or BadAlloc.
+ */
+unsigned
+x11_cursor_create_copy(
+	struct x11server *server,
+	unsigned index,
+	uint32_t id,
+	const struct x11_cursor *model)
+{
+	struct x11_cursor *cursor;
+	size_t pixels;
+	size_t bits;
+	unsigned code;
+
+	/* A new id of the client's. */
+	code = cursor_check_id(server, index, id);
+	if (code != 0U)
+		return code;
+
+	/* The cursor, with bitmaps of the model's size when it has them. */
+	if (model->source != NULL) {
+		cursor = cursor_new(model->width, model->height);
+	} else {
+		cursor = cursor_new(0, 0);
+	}
+	if (cursor == NULL)
+		return X11_BAD_ALLOC;
+	bits = cursor->stride * (size_t)model->height;
+	if (model->source != NULL) {
+		memcpy(cursor->source, model->source, bits);
+		memcpy(cursor->mask, model->mask, bits);
+	}
+
+	/* The model's image. */
+	pixels = (size_t)model->width * (size_t)model->height;
+	if (model->argb != NULL) {
+		cursor->argb = malloc(pixels * sizeof(*cursor->argb));
+		if (cursor->argb == NULL) {
+			free(cursor->source);
+			free(cursor->mask);
+			free(cursor);
+			return X11_BAD_ALLOC;
+		}
+		memcpy(cursor->argb, model->argb, pixels * sizeof(*cursor->argb));
+	}
+
+	/* Its shape, size, hot spot, colours and a version of its own. */
+	cursor->shape = model->shape;
+	cursor->width = model->width;
+	cursor->height = model->height;
+	cursor->hot_x = model->hot_x;
+	cursor->hot_y = model->hot_y;
+	memcpy(cursor->foreground, model->foreground, sizeof(cursor->foreground));
+	memcpy(cursor->background, model->background, sizeof(cursor->background));
+	server->cursor_serial++;
+	if (server->cursor_serial == 0U)
+		server->cursor_serial++;
+	cursor->version = server->cursor_serial;
+
+	/* Charged and found by its id (freed on failure). */
+	code = cursor_add(server, index, id, cursor);
+	if (code != 0U)
+		return code;
+
+	/* Succeeded: made. */
+	return 0U;
 }
 
 /*
@@ -291,6 +422,15 @@ x11_cursor_pixels(
 {
 	uint32_t *pixels;
 
+	/* A cursor of RENDER: its image as it is (premultiplied). */
+	if (cursor->argb != NULL) {
+		pixels = malloc((size_t)cursor->width * (size_t)cursor->height * sizeof(*pixels));
+		if (pixels == NULL)
+			return NULL;
+		memcpy(pixels, cursor->argb, (size_t)cursor->width * (size_t)cursor->height * sizeof(*pixels));
+		return pixels;
+	}
+
 	/* A shape of the system's has no image here. */
 	if (cursor->source == NULL)
 		return NULL;
@@ -312,9 +452,11 @@ x11_cursor_change(
 	struct x11_cursor *target,
 	const struct x11_cursor *source)
 {
+	uint32_t *argb;
 	uint8_t *bits;
 	uint8_t *mask;
 	size_t bytes;
+	size_t argb_bytes;
 	size_t charged;
 	int error;
 
@@ -339,12 +481,27 @@ x11_cursor_change(
 		memcpy(mask, source->mask, bytes);
 	}
 
+	/* A copy of the image of a cursor of RENDER. */
+	argb = NULL;
+	argb_bytes = 0U;
+	if (source->argb != NULL) {
+		argb_bytes = (size_t)source->width * (size_t)source->height * sizeof(*argb);
+		argb = malloc(argb_bytes);
+		if (argb == NULL) {
+			free(bits);
+			free(mask);
+			return X11_BAD_ALLOC;
+		}
+		memcpy(argb, source->argb, argb_bytes);
+	}
+
 	/* The new charge in place of the old. */
-	charged = sizeof(*target) + bytes * 2U;
+	charged = sizeof(*target) + bytes * 2U + argb_bytes;
 	error = x11_memory_charge(server, target->owner, charged);
 	if (error != 0) {
 		free(bits);
 		free(mask);
+		free(argb);
 		return X11_BAD_ALLOC;
 	}
 	x11_memory_release(server, target->owner, target->charged);
@@ -353,8 +510,10 @@ x11_cursor_change(
 	/* The look. */
 	free(target->source);
 	free(target->mask);
+	free(target->argb);
 	target->source = bits;
 	target->mask = mask;
+	target->argb = argb;
 	target->shape = source->shape;
 	target->width = source->width;
 	target->height = source->height;
@@ -705,8 +864,10 @@ cursor_add(
 {
 	int error;
 
-	/* The client holds the cursor and its bitmaps. */
+	/* The client holds the cursor and its bitmaps or its image. */
 	cursor->charged = sizeof(*cursor) + cursor->stride * (size_t)cursor->height * 2U;
+	if (cursor->argb != NULL)
+		cursor->charged = sizeof(*cursor) + (size_t)cursor->width * (size_t)cursor->height * sizeof(uint32_t);
 	error = x11_memory_charge(server, index, cursor->charged);
 	if (error != 0) {
 		cursor->charged = 0U;
@@ -866,6 +1027,49 @@ cursor_image(
 				pixels[(size_t)y * (size_t)cursor->width + (size_t)x] = background;
 			}
 		}
+	}
+
+	/* Succeeded: the image. */
+	return pixels;
+}
+
+/*
+ * Makes the image of a cursor of RENDER for the backend: each pixel's
+ * colour divided by its alpha (the backend takes colours not
+ * premultiplied).  Returns it (malloc'd), or NULL.
+ */
+static uint32_t *
+cursor_argb_image(
+	const struct x11_cursor *cursor)
+{
+	uint32_t *pixels;
+	uint32_t pixel;
+	uint32_t alpha;
+	uint32_t channel;
+	uint32_t straight;
+	size_t count;
+	size_t at;
+	unsigned shift;
+
+	/* The pixels. */
+	count = (size_t)cursor->width * (size_t)cursor->height;
+	pixels = malloc(count * sizeof(*pixels));
+	if (pixels == NULL)
+		return NULL;
+
+	/* Each one: its alpha, and each colour channel brought back to full (rounded, at most 255). */
+	for (at = 0U; at < count; at++) {
+		pixel = cursor->argb[at];
+		alpha = pixel >> 24U;
+		straight = alpha << 24U;
+		for (shift = 0U; shift < 24U && alpha != 0U; shift += 8U) {
+			channel = ((pixel >> shift) & 0xffU) * 255U + alpha / 2U;
+			channel /= alpha;
+			if (channel > 255U)
+				channel = 255U;
+			straight |= channel << shift;
+		}
+		pixels[at] = straight;
 	}
 
 	/* Succeeded: the image. */
