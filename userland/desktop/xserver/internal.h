@@ -272,6 +272,9 @@
 /* The device events held while a grab freezes their device. */
 #define X11_DEVICE_QUEUE	256U
 
+/* The keycodes lent at once to the characters a backend types (an input method's text). */
+#define X11_TEXT_KEYS		8U
+
 /* The device events held: a key, a button, a motion, and the pointer leaving every X window. */
 #define X11_DEVICE_KEY		1U
 #define X11_DEVICE_BUTTON	2U
@@ -368,6 +371,20 @@ struct x11_device_event {
 	uint32_t time;
 	int x;
 	int y;
+};
+
+/*
+ * A keycode lent to a character the backend typed (an input method's
+ * text, which no key of the keyboard's map carries): the keycode, the
+ * keysym its first two columns carry, and when it was last used (a count
+ * the server keeps, so the least recently used one is lent again first).
+ * It stays lent while the map keeps that keysym there; a client's
+ * ChangeKeyboardMapping or a backend's map that fills the keycode ends it.
+ */
+struct x11_text_key {
+	uint8_t keycode;
+	uint32_t keysym;
+	uint32_t used;
 };
 struct x11_vulkan;
 struct x11_vulkan_window;
@@ -1096,6 +1113,14 @@ struct x11server {
 	uint8_t keys_down[X11_KEY_BYTES];
 	uint16_t locks;
 
+	/*
+	 * The keycodes lent to the characters the backend typed (input.c):
+	 * how many are lent, and the count their use is stamped with.
+	 */
+	struct x11_text_key text_keys[X11_TEXT_KEYS];
+	unsigned text_key_count;
+	uint32_t text_stamp;
+
 	/* The keyboard's control, kept for GetKeyboardControl: the click and the bell, the LEDs and auto-repeat. */
 	int8_t key_click_percent;
 	int8_t bell_percent;
@@ -1369,6 +1394,7 @@ void x11_input_button(struct x11server *server, uint8_t button, int pressed, uin
 void x11_input_motion(struct x11server *server, uint32_t time, int x, int y);
 void x11_input_leave(struct x11server *server, uint32_t time);
 void x11_input_keymap(struct x11server *server, const struct x11_keymap *keymap);
+void x11_input_text(struct x11server *server, uint32_t character, uint32_t time);
 void x11_input_focus_top_level(struct x11server *server, struct x11_window *window, uint32_t time);
 void x11_input_focus_lost(struct x11server *server, struct x11_window *window, uint32_t time);
 struct x11_window *x11_input_window_under(struct x11server *server);

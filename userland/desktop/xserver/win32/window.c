@@ -475,11 +475,25 @@ window_message(
 		win32_input_key(surface, message, wparam, lparam);
 		return 0;
 	case WM_CHAR:
+		/*
+		 * Only the keys an input method took and the characters sent as
+		 * keys are translated: this is their text, which X hears as typed.
+		 */
+		win32_ime_char(surface, wparam);
+		return 0;
 	case WM_SYSCHAR:
 	case WM_DEADCHAR:
 	case WM_SYSDEADCHAR:
-		/* X clients make characters from the keysyms; none of these is translated anyway. */
+		/* X clients make characters and dead keys from the keysyms. */
 		return 0;
+	case WM_IME_STARTCOMPOSITION:
+		/* The input method's windows go where the user is typing, as near as X tells. */
+		win32_ime_place(surface);
+		break;
+	case WM_IME_COMPOSITION:
+		/* The settled text is typed into X; the unsettled is the input method's window's. */
+		answer = win32_ime_composition(surface, wparam, lparam);
+		return answer;
 	case WM_SYSCOMMAND:
 		/* The keyboard's way into the window menu is X's key. */
 		if ((wparam & 0xFFF0U) == SC_KEYMENU)

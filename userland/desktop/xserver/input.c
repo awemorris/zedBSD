@@ -28,6 +28,14 @@
  * keyboard's and the pointer's maps and controls (ChangeKeyboardMapping
  * to GetModifierMapping).  XKEYBOARD is not offered: a client reads the
  * core protocol's map.
+ *
+ * A character the backend's input method typed (text no key of the map
+ * carries) is typed through a keycode lent to its keysym: the keycode's
+ * first two columns are given the keysym and every client hears of it by
+ * MappingNotify before the key is pressed and released, as a program that
+ * types text into X does with a spare keycode.  A few keycodes, the free
+ * ones from the top, are lent in turn, so that a client still reading the
+ * map for one character is not given the next one's keysym.
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -134,6 +142,18 @@
 #define KEYSYM_NUM_LOCK		0xff7fU
 #define KEYSYM_CAPS_LOCK	0xffe5U
 #define KEYSYM_SHIFT_LOCK	0xffe6U
+
+/* A character past Latin-1 has the keysym of this number plus its code point (a Unicode keysym). */
+#define KEYSYM_UNICODE		0x01000000U
+
+/* The control characters, a surrogate (half of a UTF-16 pair) and the last code point, which a typed character is checked against. */
+#define CHARACTER_SPACE		0x20U
+#define CHARACTER_DELETE	0x7fU
+#define CHARACTER_C1_LAST	0x9fU
+#define CHARACTER_LATIN1_LAST	0xffU
+#define CHARACTER_SURROGATE_FIRST 0xd800U
+#define CHARACTER_SURROGATE_LAST 0xdfffU
+#define CHARACTER_LAST		0x10ffffU
 
 /* The keycodes the keyboard has. */
 #define KEYCODE_MIN		8U
@@ -243,6 +263,14 @@ static unsigned input_get_modifier_mapping(struct x11server *server, unsigned in
 static int input_modifiers_busy(const struct x11server *server, const uint8_t *keycodes, unsigned count);
 static void input_keymap_apply(struct x11server *server, const struct x11_keymap *keymap);
 static int input_accepts_focus(struct x11server *server, struct x11_window *window);
+static uint32_t input_text_keysym(uint32_t character);
+static uint8_t input_text_keycode(struct x11server *server, uint32_t keysym);
+static int input_text_lent(const struct x11server *server, unsigned keycode);
+static void input_text_forget(struct x11server *server);
+static void input_text_keep(struct x11server *server);
+static void input_text_remove(struct x11server *server, unsigned index);
+static int input_text_unmapped(const struct x11server *server, unsigned keycode);
+static int input_text_busy(const struct x11server *server, unsigned keycode);
 
 /*
  * Starts the server's input: the US keyboard map, the buttons each
@@ -406,6 +434,9 @@ x11_input_keymap(
 	/* The new map. */
 	input_keymap_apply(server, keymap);
 
+	/* The keycodes lent to typed characters stay lent where the new map leaves them free. */
+	input_text_keep(server);
+
 	/* The clients hear of each part that changed. */
 	keysyms_changed = memcmp(keysyms, server->keysyms, sizeof(keysyms));
 	modifiers_changed = memcmp(modifiers, server->modifier_keys, sizeof(modifiers));
@@ -413,6 +444,52 @@ x11_input_keymap(
 		input_mapping_notify(server, MAPPING_MODIFIER, 0U, 0U);
 	if (keysyms_changed != 0)
 		input_mapping_notify(server, MAPPING_KEYBOARD, KEYCODE_MIN, (uint8_t)(KEYCODE_MAX - KEYCODE_MIN + 1U));
+}
+
+/*
+ * Types a character the backend's input method gave (a Unicode code
+ * point): a keycode is lent to its keysym (every client hears of the
+ * change first, by MappingNotify), and its key is pressed and released in
+ * order with the keyboard's keys.  A character that has no keysym, or for
+ * which no keycode can be lent, is dropped.
+ */
+void
+x11_input_text(
+	struct x11server *server,
+	uint32_t character,
+	uint32_t time)
+{
+	uint32_t keysym;
+	uint8_t keycode;
+
+	/*
+	 * The character's keysym; a control character, or a number that is no
+	 * character, has none.  The log names only such a code point, never
+	 * the text typed.
+	 */
+	keysym = input_text_keysym(character);
+	if (keysym == 0U) {
+		x11_log(server, "X11 INPUT dropped character U+%04lX (no keysym)", (unsigned long)character);
+		return;
+	}
+
+	/* The press and the release both need room among the events a frozen keyboard holds. */
+	if (server->device_count + 2U > X11_DEVICE_QUEUE) {
+		x11_log(server, "X11 INPUT dropped a character (the frozen devices hold %u events)", server->device_count);
+		return;
+	}
+
+	/* A keycode that carries the keysym. */
+	keycode = input_text_keycode(server, keysym);
+	if (keycode == 0U) {
+		x11_log(server, "X11 INPUT dropped a character (no keycode can be lent)");
+		return;
+	}
+
+	/* Succeeded: the key is pressed and released, handled unless the keyboard is frozen. */
+	input_queue(server, X11_DEVICE_KEY, keycode, 1, time, 0, 0);
+	input_queue(server, X11_DEVICE_KEY, keycode, 0, time, 0, 0);
+	input_drain(server);
 }
 
 /*
@@ -920,6 +997,7 @@ input_handle_key(
 	uint8_t type;
 	int down;
 	int locking;
+	int lent;
 
 	/* A keycode the keyboard has, and a release of a key that is down. */
 	keycode = event->detail;
@@ -935,6 +1013,11 @@ input_handle_key(
 	locking = input_locking(server, keycode);
 	if (event->pressed && !down && locking)
 		input_lock_toggle(server, keycode);
+
+	/* A character typed through a lent keycode is read as it was typed: no modifier is held for it. */
+	lent = input_text_lent(server, keycode);
+	if (lent)
+		state = (uint16_t)(state & ~MODIFIER_BITS);
 
 	/* The press or the release. */
 	type = X11_EVENT_KEY_RELEASE;
@@ -3955,4 +4038,260 @@ input_accepts_focus(
 
 	/* Succeeded: it takes the focus. */
 	return 1;
+}
+
+/*
+ * Gives the keysym of a typed character: a Latin-1 character's own
+ * number, any other the Unicode keysym; 0 for a control character, a
+ * surrogate and a number past the last code point.
+ */
+static uint32_t
+input_text_keysym(
+	uint32_t character)
+{
+	/* A control character (C0, DEL and C1) types no text. */
+	if (character < CHARACTER_SPACE)
+		return 0U;
+	if (character >= CHARACTER_DELETE && character <= CHARACTER_C1_LAST)
+		return 0U;
+
+	/* Half of a UTF-16 pair, or a number past Unicode, is no character. */
+	if (character >= CHARACTER_SURROGATE_FIRST && character <= CHARACTER_SURROGATE_LAST)
+		return 0U;
+	if (character > CHARACTER_LAST)
+		return 0U;
+
+	/* A Latin-1 character's keysym is its own number. */
+	if (character <= CHARACTER_LATIN1_LAST)
+		return character;
+
+	/* Succeeded: the Unicode keysym. */
+	return KEYSYM_UNICODE + character;
+}
+
+/*
+ * Gives a keycode that carries a typed character's keysym: one already
+ * lent to it (the clients know it), else a free keycode from the top,
+ * else the one lent least recently whose key is up with no event waiting.
+ * A keycode lent anew carries the keysym alone and with Shift, and every
+ * client hears of it.  Returns 0 when no keycode can be lent.
+ */
+static uint8_t
+input_text_keycode(
+	struct x11server *server,
+	uint32_t keysym)
+{
+	struct x11_text_key *lent;
+	struct x11_text_key *candidate;
+	unsigned index;
+	unsigned keycode;
+	int unmapped;
+	int busy;
+
+	/* Keycodes a client or the backend gave other keysyms are no longer lent. */
+	input_text_forget(server);
+
+	/* A keycode already lent to the keysym is used again. */
+	for (index = 0U; index < server->text_key_count; index++) {
+		lent = &server->text_keys[index];
+		if (lent->keysym == keysym) {
+			server->text_stamp++;
+			lent->used = server->text_stamp;
+			return lent->keycode;
+		}
+	}
+
+	/* While fewer are lent than may be, a free keycode from the top (the keys a keyboard rarely has). */
+	lent = NULL;
+	if (server->text_key_count < X11_TEXT_KEYS) {
+		for (keycode = KEYCODE_MAX; keycode >= KEYCODE_MIN; keycode--) {
+			unmapped = input_text_unmapped(server, keycode);
+			if (!unmapped)
+				continue;
+			busy = input_text_busy(server, keycode);
+			if (busy)
+				continue;
+
+			lent = &server->text_keys[server->text_key_count];
+			lent->keycode = (uint8_t)keycode;
+			server->text_key_count++;
+			break;
+		}
+	}
+
+	/*
+	 * Otherwise the one lent least recently, if its key is up and no event
+	 * of it waits: a client may still read the map for an event of it.
+	 */
+	if (lent == NULL) {
+		for (index = 0U; index < server->text_key_count; index++) {
+			candidate = &server->text_keys[index];
+			busy = input_text_busy(server, candidate->keycode);
+			if (busy)
+				continue;
+			if (lent == NULL || candidate->used < lent->used)
+				lent = candidate;
+		}
+	}
+
+	/* Every keycode is taken or still in use. */
+	if (lent == NULL)
+		return 0U;
+
+	/* The keycode carries the keysym alone and with Shift; its use is stamped. */
+	memset(server->keysyms[lent->keycode], 0, sizeof(server->keysyms[0]));
+	server->keysyms[lent->keycode][0] = keysym;
+	server->keysyms[lent->keycode][1] = keysym;
+	lent->keysym = keysym;
+	server->text_stamp++;
+	lent->used = server->text_stamp;
+
+	/* Succeeded: every client hears of the keycode's keysyms before its key. */
+	input_mapping_notify(server, MAPPING_KEYBOARD, lent->keycode, 1U);
+	return lent->keycode;
+}
+
+/* Tells whether a keycode is lent to a typed character (and still carries its keysym). */
+static int
+input_text_lent(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	const struct x11_text_key *lent;
+	unsigned index;
+
+	/* Each keycode lent. */
+	for (index = 0U; index < server->text_key_count; index++) {
+		lent = &server->text_keys[index];
+		if (lent->keycode != keycode)
+			continue;
+		if (server->keysyms[keycode][0] != lent->keysym)
+			return 0;
+
+		/* Lent, with its keysym. */
+		return 1;
+	}
+
+	/* Not lent. */
+	return 0;
+}
+
+/*
+ * Forgets the lent keycodes whose keysyms are no longer the character's
+ * (a client's ChangeKeyboardMapping changed them).
+ */
+static void
+input_text_forget(
+	struct x11server *server)
+{
+	struct x11_text_key *lent;
+	unsigned index;
+
+	/* Each keycode lent, kept while it carries its keysym alone and with Shift. */
+	index = 0U;
+	while (index < server->text_key_count) {
+		lent = &server->text_keys[index];
+		if (server->keysyms[lent->keycode][0] != lent->keysym ||
+		    server->keysyms[lent->keycode][1] != lent->keysym) {
+			input_text_remove(server, index);
+			continue;
+		}
+		index++;
+	}
+}
+
+/*
+ * Keeps the lent keycodes across a map the backend gave: one the new map
+ * leaves free carries its character's keysym again, one the map gave a
+ * key is no longer lent.
+ */
+static void
+input_text_keep(
+	struct x11server *server)
+{
+	struct x11_text_key *lent;
+	unsigned index;
+	int unmapped;
+
+	/* Each keycode lent. */
+	index = 0U;
+	while (index < server->text_key_count) {
+		/* A keycode the map gave a key is the key's from now on. */
+		lent = &server->text_keys[index];
+		unmapped = input_text_unmapped(server, lent->keycode);
+		if (!unmapped) {
+			input_text_remove(server, index);
+			continue;
+		}
+
+		/* A free one carries the character's keysym again. */
+		server->keysyms[lent->keycode][0] = lent->keysym;
+		server->keysyms[lent->keycode][1] = lent->keysym;
+		index++;
+	}
+}
+
+/* Ends the lending of one keycode (the last one lent takes its place in the table). */
+static void
+input_text_remove(
+	struct x11server *server,
+	unsigned index)
+{
+	/* The last one moves into the gap. */
+	server->text_key_count--;
+	server->text_keys[index] = server->text_keys[server->text_key_count];
+}
+
+/* Tells whether a keycode carries no keysym and is no modifier's key. */
+static int
+input_text_unmapped(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	unsigned column;
+	unsigned modifier;
+	unsigned slot;
+
+	/* A keysym in any column. */
+	for (column = 0U; column < X11_KEYSYMS_MAX; column++) {
+		if (server->keysyms[keycode][column] != 0U)
+			return 0;
+	}
+
+	/* A modifier's key. */
+	for (modifier = 0U; modifier < X11_MODIFIERS; modifier++) {
+		for (slot = 0U; slot < X11_MODIFIER_KEYS_MAX; slot++) {
+			if (server->modifier_keys[modifier][slot] == keycode)
+				return 0;
+		}
+	}
+
+	/* Free. */
+	return 1;
+}
+
+/* Tells whether a keycode's key is down or has an event waiting among those a frozen keyboard holds. */
+static int
+input_text_busy(
+	const struct x11server *server,
+	unsigned keycode)
+{
+	const struct x11_device_event *event;
+	unsigned held;
+	int down;
+
+	/* The key is down. */
+	down = input_key_down(server, keycode);
+	if (down)
+		return 1;
+
+	/* An event of the key waits. */
+	for (held = 0U; held < server->device_count; held++) {
+		event = &server->device_queue[(server->device_head + held) % X11_DEVICE_QUEUE];
+		if (event->kind == X11_DEVICE_KEY && event->detail == keycode)
+			return 1;
+	}
+
+	/* Neither. */
+	return 0;
 }
