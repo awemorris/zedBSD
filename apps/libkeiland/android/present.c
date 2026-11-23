@@ -11,6 +11,7 @@
  * the order red, green, blue, alpha.  The parts that changed are written
  * into the window's buffer (a lock that tells what must be written, a
  * write, and a post), at the place the insets leave to the logical window.
+ * The title bar's strip (titlebar.c) is the rows above the frame.
  */
 
 #include "apps/libkeiland/android/android.h"
@@ -33,6 +34,7 @@ static int32_t present_laid_left;
 static int32_t present_laid_top;
 static uint32_t present_laid_width;
 static uint32_t present_laid_height;
+static uint32_t present_laid_strip;
 
 /* What copying a frame needs of the buffer and the frame. */
 struct present_view {
@@ -40,11 +42,15 @@ struct present_view {
 	int32_t stride;
 	const uint32_t *pixels;
 	size_t pixels_stride;
+	const uint32_t *strip;
+	uint32_t strip_height;
+	uint32_t width;
 	int32_t left;
 	int32_t top;
 };
 
 static int present_keep(struct kl_window *window, const uint32_t *pixels, size_t stride, const struct kl_rect *parts, unsigned count);
+static void present_gather(const struct kl_window *window, struct android_view *view, int strip_dirty);
 static void present_fill(uint8_t *bits, int32_t stride, const ARect *area, const ARect *keep);
 static void present_rows(const ARect *area, const struct present_view *view);
 
@@ -110,6 +116,7 @@ kl_window_present_parts(
 	const struct kl_rect *parts,
 	unsigned count)
 {
+	struct android_view view;
 	struct kl_app *app;
 	struct kl_rect whole;
 	int error;
@@ -139,7 +146,8 @@ kl_window_present_parts(
 		return 0;
 
 	/* Written and posted. */
-	error = android_present_copy(app->native, app->insets, window->shown, window->width, window->width, window->height, parts, count);
+	present_gather(window, &view, 0);
+	error = android_present_copy(app->native, app->insets, &view, parts, count);
 	if (error != 0)
 		return error;
 
@@ -155,22 +163,53 @@ void
 android_present_repaint(
 	struct kl_app *app)
 {
+	struct android_view view;
 	struct kl_rect whole;
 	struct kl_window *window;
+	unsigned count;
 
-	/* A window that can be drawn in, with a frame of its size. */
+	/* A window that can be drawn in. */
 	window = android_window_top(app);
-	if (window == NULL || app->native == NULL || !app->started || window->shown == NULL)
+	if (window == NULL || app->native == NULL || !app->started)
 		return;
-	if (window->shown_width != window->width || window->shown_height != window->height)
-		return;
+
+	/* A frame of its size to paint from, or the strip alone. */
+	present_gather(window, &view, 1);
+	count = 1U;
+	if (window->shown == NULL || window->shown_width != window->width || window->shown_height != window->height) {
+		view.pixels = NULL;
+		count = 0U;
+		if (view.strip == NULL)
+			return;
+	}
 
 	/* All of it. */
 	whole.x = 0;
 	whole.y = 0;
 	whole.width = (int)window->width;
 	whole.height = (int)window->height;
-	(void)android_present_copy(app->native, app->insets, window->shown, window->width, window->width, window->height, &whole, 1U);
+	(void)android_present_copy(app->native, app->insets, &view, &whole, count);
+}
+
+/*
+ * Shows the window's strip again: only the strip is written, when the
+ * window is the one shown and the native window can be drawn in.
+ */
+void
+android_present_strip(
+	struct kl_window *window)
+{
+	struct android_view view;
+	struct kl_app *app;
+
+	/* A strip, a window that is shown and can be drawn in. */
+	app = window->app;
+	if (window->bar.pixels == NULL || app->native == NULL || !app->started || android_window_top(app) != window)
+		return;
+
+	/* Only the strip is dirty; the frame is not rewritten. */
+	present_gather(window, &view, 1);
+	(void)android_present_copy(app->native, app->insets, &view, NULL, 0U);
 }
 
 /*
@@ -214,19 +253,17 @@ int
 android_present_copy(
 	ANativeWindow *native,
 	const int32_t insets[5],
-	const uint32_t *pixels,
-	size_t stride,
-	uint32_t width,
-	uint32_t height,
+	const struct android_view *view,
 	const struct kl_rect *parts,
 	unsigned count)
 {
 	ANativeWindow_Buffer buffer;
-	struct present_view view;
+	struct present_view source;
 	ARect asked;
 	ARect dirty;
 	ARect frame;
 	unsigned index;
+	uint32_t strip;
 	int32_t left;
 	int32_t top;
 	int32_t bottom;
@@ -243,20 +280,27 @@ android_present_copy(
 		present_native = native;
 	}
 
+	/* The strip above the frame, when there is one. */
+	strip = 0U;
+	if (view->strip != NULL)
+		strip = view->strip_height;
+
 	/*
-	 * Where the frame lies in the native window (its place, its size and the native window itself): when it
+	 * Where the frame lies in the native window (its place, its size, the strip over it and the native window itself): when it
 	 * is not where the last one was, the bands around it hold what the last one left, so the whole native
 	 * window is written, the frame in full and the bands black.
 	 */
 	moved = (present_laid != native || present_laid_left != insets[ANDROID_INSET_LEFT] ||
-	    present_laid_top != insets[ANDROID_INSET_TOP] || present_laid_width != width || present_laid_height != height);
+	    present_laid_top != insets[ANDROID_INSET_TOP] || present_laid_width != view->width || present_laid_height != view->height ||
+	    present_laid_strip != strip);
 	present_laid = native;
 	present_laid_left = insets[ANDROID_INSET_LEFT];
 	present_laid_top = insets[ANDROID_INSET_TOP];
-	present_laid_width = width;
-	present_laid_height = height;
+	present_laid_width = view->width;
+	present_laid_height = view->height;
+	present_laid_strip = strip;
 
-	/* The area the parts cover, at the place the insets leave. */
+	/* The area the parts cover (below the strip), and the strip when it is dirty. */
 	left = 0x7fffffff;
 	top = 0x7fffffff;
 	right = 0;
@@ -270,22 +314,31 @@ android_present_copy(
 			y = 0;
 		if (x < left)
 			left = x;
-		if (y < top)
-			top = y;
+		if ((int32_t)strip + y < top)
+			top = (int32_t)strip + y;
 		if (parts[index].x + parts[index].width > right)
 			right = parts[index].x + parts[index].width;
-		if (parts[index].y + parts[index].height > bottom)
-			bottom = parts[index].y + parts[index].height;
+		if ((int32_t)strip + parts[index].y + parts[index].height > bottom)
+			bottom = (int32_t)strip + parts[index].y + parts[index].height;
 	}
-	if (right > (int32_t)width)
-		right = (int32_t)width;
-	if (bottom > (int32_t)height)
-		bottom = (int32_t)height;
+	if (strip != 0U && (view->strip_dirty || moved)) {
+		if (left > 0)
+			left = 0;
+		if (right < (int32_t)view->width)
+			right = (int32_t)view->width;
+		top = 0;
+		if (bottom < (int32_t)strip)
+			bottom = (int32_t)strip;
+	}
+	if (right > (int32_t)view->width)
+		right = (int32_t)view->width;
+	if (bottom > (int32_t)(strip + view->height))
+		bottom = (int32_t)(strip + view->height);
 	if (moved) {
 		left = 0;
 		top = 0;
-		right = (int32_t)width;
-		bottom = (int32_t)height;
+		right = (int32_t)view->width;
+		bottom = (int32_t)(strip + view->height);
 	}
 	if (left >= right || top >= bottom)
 		return 0;
@@ -307,11 +360,11 @@ android_present_copy(
 	widened = (moved || dirty.left != asked.left || dirty.top != asked.top || dirty.right != asked.right ||
 	    dirty.bottom != asked.bottom);
 
-	/* The frame's place in the buffer. */
+	/* The strip and the frame's place in the buffer. */
 	frame.left = insets[ANDROID_INSET_LEFT];
 	frame.top = insets[ANDROID_INSET_TOP];
-	frame.right = frame.left + (int32_t)width;
-	frame.bottom = frame.top + (int32_t)height;
+	frame.right = frame.left + (int32_t)view->width;
+	frame.bottom = frame.top + (int32_t)strip + (int32_t)view->height;
 
 	/* Clipped to the buffer. */
 	if (dirty.left < 0)
@@ -331,13 +384,16 @@ android_present_copy(
 	if (widened)
 		present_fill(buffer.bits, buffer.stride, &dirty, &frame);
 
-	/* The frame's rows in the area. */
-	view.bits = buffer.bits;
-	view.stride = buffer.stride;
-	view.pixels = pixels;
-	view.pixels_stride = stride;
-	view.left = frame.left;
-	view.top = frame.top;
+	/* The rows in the area: the strip's, then the frame's. */
+	source.bits = buffer.bits;
+	source.stride = buffer.stride;
+	source.pixels = view->pixels;
+	source.pixels_stride = view->stride;
+	source.strip = view->strip;
+	source.strip_height = strip;
+	source.width = view->width;
+	source.left = frame.left;
+	source.top = frame.top;
 	if (dirty.left < frame.left)
 		dirty.left = frame.left;
 	if (dirty.top < frame.top)
@@ -346,7 +402,7 @@ android_present_copy(
 		dirty.right = frame.right;
 	if (dirty.bottom > frame.bottom)
 		dirty.bottom = frame.bottom;
-	present_rows(&dirty, &view);
+	present_rows(&dirty, &source);
 
 	/* Posted. */
 	if (ANativeWindow_unlockAndPost(native) != 0)
@@ -409,7 +465,7 @@ present_fill(
 	}
 }
 
-/* Writes the rows of an area of the buffer from the frame (the frame's place in the buffer is view->left, view->top). */
+/* Writes the rows of an area of the buffer: a row of the strip's height is the strip's, the rest the frame's (the frame's place in the buffer is view->left, view->top). */
 static void
 present_rows(
 	const ARect *area,
@@ -417,6 +473,7 @@ present_rows(
 {
 	int32_t y;
 	int32_t width;
+	int32_t row;
 	const uint32_t *source;
 	uint8_t *target;
 
@@ -427,10 +484,35 @@ present_rows(
 
 	/* Each row. */
 	for (y = area->top; y < area->bottom; y++) {
-		source = view->pixels + (size_t)(y - view->top) * view->pixels_stride + (size_t)(area->left - view->left);
+		row = y - view->top;
+		if ((uint32_t)row < view->strip_height)
+			source = view->strip + (size_t)row * view->width + (size_t)(area->left - view->left);
+		else if (view->pixels != NULL)
+			source = view->pixels + (size_t)((uint32_t)row - view->strip_height) * view->pixels_stride + (size_t)(area->left - view->left);
+		else
+			continue;
 		target = view->bits + ((size_t)y * (size_t)view->stride + (size_t)area->left) * 4U;
 		android_pixels_row(target, source, (uint32_t)width);
 	}
+}
+
+/* Gathers what is shown of a window: its strip (when it has one) and the frame kept. */
+static void
+present_gather(
+	const struct kl_window *window,
+	struct android_view *view,
+	int strip_dirty)
+{
+	/* The strip above the frame. */
+	view->strip = window->bar.pixels;
+	view->strip_height = window->bar.height;
+	view->strip_dirty = strip_dirty;
+
+	/* The frame kept, which is of the window's size once the program drew. */
+	view->pixels = window->shown;
+	view->stride = window->width;
+	view->width = window->width;
+	view->height = window->height;
 }
 
 /* Copies the parts of a frame into the frame kept (made again, black, when the window's size changed).  Returns 0 or ENOMEM. */

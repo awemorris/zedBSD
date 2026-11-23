@@ -94,7 +94,7 @@ target_link_libraries(mikuterm_terminal PUBLIC keiland_android mikuterm_ssh)
 # The files every mikuterm shares (the settings, the connections, the launch screen and the settings' tab).  This
 # build has no WSL, no X11 forwarding and no local programs; Windows' _stricmp is the C library's strcasecmp.
 target_include_directories(mikuterm_common PRIVATE ${MIKUTERM_COMMON_DIR})
-target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=0
+target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=0 MIKUTERM_HAVE_KEY_PASTE=1
 	_stricmp=strcasecmp)
 target_link_libraries(mikuterm_common PUBLIC mikuterm_terminal)
 
@@ -131,6 +131,7 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_WSL=0
 	MIKUTERM_HAVE_OPENER=0
 	MIKUTERM_HAVE_X11=0
+	MIKUTERM_HAVE_KEY_PASTE=1
 	_stricmp=strcasecmp)
 target_compile_options(mikuterm PRIVATE -std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden)
 target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal keiland_android)

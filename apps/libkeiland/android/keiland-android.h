@@ -176,6 +176,14 @@ void keiland_android_done(const struct keiland_android_event *event);
 int keiland_post_app(uint32_t code, void *data);
 
 /*
+ * Sets the hook that sees the posts made with keiland_post_app on the
+ * program's thread, before they become KL_APP_POST.  The hook returns 1
+ * when it took the post (the data is then the hook's), 0 to let it be queued
+ * as KL_APP_POST.  NULL removes it.  Called on M only.
+ */
+void keiland_android_set_post_hook(int (*hook)(uint32_t code, void *data));
+
+/*
  * Unpacks the program's read-only data (assets/share of the package) into the
  * folder kl_data_directory names, when the version the package holds is not the
  * one written there.

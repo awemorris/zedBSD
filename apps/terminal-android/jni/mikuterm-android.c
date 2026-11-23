@@ -103,6 +103,10 @@ mikuterm_android_main(void)
 		return;
 	}
 
+	/* The passphrases kept on the disk are asked of Java, and the answers of Java and of the connections' threads come to the hook. */
+	keiland_android_set_post_hook(mikuterm_android_post);
+	mikuterm_credential_start();
+
 	/* The user's settings, and the View menu's kept over them. */
 	main_read_conf(&main_state.conf);
 	mikuterm_settings_defaults(&main_state.conf);
@@ -180,6 +184,42 @@ mikuterm_android_main(void)
 
 	/* The Activity goes with the run. */
 	(void)keiland_java_quit();
+}
+
+/*
+ * M's hook for the posts of Java and of the connections' threads: a secret's
+ * answer, a passphrase to keep or forget on the disk, the network and the ask
+ * to close every connection.  Returns 1 when the post was one of these.
+ */
+int
+mikuterm_android_post(
+	uint32_t code,
+	void *data)
+{
+	/* By code. */
+	switch (code) {
+	case MIKUTERM_POST_SECRET:
+		mikuterm_credential_answer(data);
+		return 1;
+	case MIKUTERM_POST_KEEP_SECRET:
+		mikuterm_credential_keep(data);
+		return 1;
+	case MIKUTERM_POST_FORGET_SECRET:
+		mikuterm_credential_forget(data);
+		return 1;
+	case MIKUTERM_POST_NETWORK:
+		/* Nothing acts on the network's changes yet. */
+		free(data);
+		return 1;
+	case MIKUTERM_POST_STOP_ALL:
+		mikuterm_connections_stop();
+		return 1;
+	default:
+		break;
+	}
+
+	/* Not one of these. */
+	return 0;
 }
 
 /*

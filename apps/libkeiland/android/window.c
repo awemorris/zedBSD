@@ -33,7 +33,7 @@
 
 static void window_input(struct kl_window *window, unsigned kind, int pressed);
 static void window_purge(struct kl_app *app, struct kl_window *window);
-static void window_size_take(struct kl_app *app, uint32_t *width, uint32_t *height);
+static void window_size_take(struct kl_app *app, uint32_t strip, uint32_t *width, uint32_t *height);
 
 /*
  * Makes a window of the application and puts it on top: the one before it
@@ -64,6 +64,7 @@ kl_app_window_create(
 	}
 	window->app = app;
 	window->present = KL_PRESENT_NONE;
+	android_titlebar_init(window);
 
 	/* The size asked for is the size before the system's window is known. */
 	width = WINDOW_FIRST_WIDTH;
@@ -91,7 +92,7 @@ kl_app_window_create(
 
 	/* Takes the size of the native window when there is one. */
 	if (app->native != NULL)
-		window_size_take(app, &window->width, &window->height);
+		window_size_take(app, 0U, &window->width, &window->height);
 
 	/* On top: the one before it loses the focus. */
 	before = android_window_top(app);
@@ -151,7 +152,7 @@ kl_window_close(
 			(void)keiland_java_set_title(top->title);
 	}
 
-	/* The title, the frame kept and the state. */
+	/* The title, the frame kept and the state; a menu popup that was open for it is left to close itself. */
 	android_present_release(window);
 	android_titlebar_release(window);
 	free(window->title);
@@ -302,9 +303,10 @@ kl_window_set_title(
 	free(window->title);
 	window->title = copy;
 
-	/* Shown when the window is the one shown. */
+	/* Shown when the window is the one shown, in the task's name and in the strip. */
 	if (android_window_top(window->app) == window)
 		(void)keiland_java_set_title(title);
+	android_titlebar_changed(window);
 }
 
 /*
@@ -394,20 +396,21 @@ android_window_layout(
 	struct kl_window *window;
 	uint32_t width;
 	uint32_t height;
+	uint32_t strip;
 	int changed;
 
 	/* No window to draw in: the sizes stay. */
 	if (app->native == NULL)
 		return;
 
-	/* The size the windows take. */
-	window_size_take(app, &width, &height);
-
-	/* Each window. */
+	/* Each window: the size the native window leaves, less its strip (the strip comes or goes with the menu and the tabs). */
 	for (window = app->windows; window != NULL; window = window->next) {
+		strip = android_titlebar_wanted(window);
+		window_size_take(app, strip, &width, &height);
 		changed = (window->width != width || window->height != height);
 		window->width = width;
 		window->height = height;
+		android_titlebar_resize(window);
 		if (changed || window == app->windows)
 			window_input(window, KL_WINDOW_RESIZE, 0);
 	}
@@ -498,10 +501,11 @@ window_purge(
 	app->event_count = kept;
 }
 
-/* Gives the size the native window has less the insets (the keyboard's height if it is the larger bottom). */
+/* Gives the size the native window has less the insets (the keyboard's height if it is the larger bottom) and less the strip's height. */
 static void
 window_size_take(
 	struct kl_app *app,
+	uint32_t strip,
 	uint32_t *width,
 	uint32_t *height)
 {
@@ -518,7 +522,7 @@ window_size_take(
 	if (app->insets[ANDROID_INSET_IME] > bottom)
 		bottom = app->insets[ANDROID_INSET_IME];
 	taken_width = native_width - app->insets[ANDROID_INSET_LEFT] - app->insets[ANDROID_INSET_RIGHT];
-	taken_height = native_height - app->insets[ANDROID_INSET_TOP] - bottom;
+	taken_height = native_height - app->insets[ANDROID_INSET_TOP] - bottom - (int32_t)strip;
 
 	/* At least one pixel: a window of nothing cannot be drawn. */
 	if (taken_width < 1)

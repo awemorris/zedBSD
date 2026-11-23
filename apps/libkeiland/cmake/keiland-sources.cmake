@@ -88,6 +88,7 @@ set(KEILAND_ANDROID_SOURCES
 	apps/libkeiland/android/ime.c
 	apps/libkeiland/android/clipboard.c
 	apps/libkeiland/android/titlebar.c
+	apps/libkeiland/android/tabs.c
 	apps/libkeiland/android/places.c
 	apps/libkeiland/android/theme.c
 	apps/libkeiland/android/bridge.c

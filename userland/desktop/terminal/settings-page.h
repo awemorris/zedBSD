@@ -92,7 +92,9 @@ struct terminal_page_item {
  * terminal draws with, for a program without a Font setting (NULL: none
  * shown).  connection is the word for what a setting of the next
  * connection waits for ("tab" for a program whose tabs are shells; NULL:
- * "connection").  data is the program's own, given to every call.
+ * "connection").  key_paste says the Keys pane offers to paste a private
+ * key (a program that has no file to bring one by).  data is the program's
+ * own, given to every call.
  */
 struct terminal_page_program {
 	const char *config_path;
@@ -116,6 +118,7 @@ struct terminal_page_program {
 	const char *font;
 	const char *connection;
 	void *data;
+	int key_paste;
 };
 
 /*
@@ -159,6 +162,7 @@ void terminal_page_close(void);
 
 /* The keys and known_hosts (settings-key.c). */
 int terminal_key_make(const struct terminal_page_program *program, const char *name, const char *comment, const char *passphrase, char *line, size_t line_size, char *why, size_t why_size);
+int terminal_key_import(const struct terminal_page_program *program, const char *name, const char *text, size_t size, char *line, size_t line_size, char *why, size_t why_size);
 int terminal_key_public(const struct terminal_page_program *program, const char *name, char *line, size_t line_size, char *fingerprint, size_t fingerprint_size);
 int terminal_key_name_valid(const char *name);
 unsigned terminal_known_list(const char *text, size_t size, struct terminal_known_line *lines, unsigned capacity, unsigned *total);

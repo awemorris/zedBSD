@@ -88,6 +88,7 @@ android_theme_bridge(
 		theme_appearance = appearance;
 		theme_accent = accent;
 		keiui_theme_set(theme_appearance, theme_accent);
+		android_titlebar_restyle(app);
 		memset(&posted, 0, sizeof(posted));
 		posted.kind = KL_APP_THEME;
 		(void)android_app_queue(app, &posted);

@@ -168,12 +168,18 @@ public final class KeilandBridge {
 		});
 	}
 
-	/** Shows a menu at a place and answers it through nativeMenu (the menus themselves come later). */
+	/** Shows a menu at a place and answers it through nativeMenu (the item's position, or -1 when none was chosen). */
 	static void popupMenu(final int request, final int x, final int y, final String[] labels, final int[] parents, final int[] flags) {
 		post(new Runnable() {
 			@Override
 			public void run() {
-				nativeMenu(request, -1);
+				KeilandActivity activity = current.get();
+
+				if (activity == null) {
+					nativeMenu(request, -1);
+					return;
+				}
+				Menus.show(activity, request, x, y, labels, parents, flags);
 			}
 		});
 	}

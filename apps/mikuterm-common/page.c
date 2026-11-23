@@ -30,6 +30,11 @@
 #error "MIKUTERM_HAVE_OPENER must be defined (1 or 0) by the build"
 #endif
 
+/* Whether the Keys pane offers to paste a private key (a system with no file to bring one by): each build says so. */
+#ifndef MIKUTERM_HAVE_KEY_PASTE
+#error "MIKUTERM_HAVE_KEY_PASTE must be defined (1 or 0) by the build"
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
@@ -186,6 +191,7 @@ mikuterm_page_init(
 	page_state.program.item_set = page_item_set;
 	page_state.program.comment = page_state.comment;
 	page_state.program.x11 = 1;
+	page_state.program.key_paste = MIKUTERM_HAVE_KEY_PASTE;
 	page_state.program.font = NULL;
 	page_state.program.data = &page_state;
 

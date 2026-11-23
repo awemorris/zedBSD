@@ -40,6 +40,9 @@ static int32_t input_shortcut_down;
 /* The buttons of the mouse held as the last event told (only M reads and writes it). */
 static int32_t input_buttons;
 
+/* Whether the last touch event was taken by the title bar's strip (a tap on the strip does not show the keyboard). */
+static int input_last_strip;
+
 /* Where and when the touch that is going on began (the first finger). */
 static float input_down_x;
 static float input_down_y;
@@ -49,7 +52,8 @@ static struct kl_window *input_window(struct kl_app *app);
 static int input_shortcut(struct kl_window *window, int32_t keycode, int32_t meta, int pressed, int repeated);
 static void input_tap(const AInputEvent *event);
 static void input_fill(struct kl_app *app, struct kl_window_event *input, unsigned kind, const AInputEvent *event);
-static void input_place(const struct kl_app *app, const AInputEvent *event, size_t index, struct kl_window_event *input);
+static void input_place(const struct kl_window *window, const AInputEvent *event, size_t index, struct kl_window_event *input);
+static int input_strip(struct kl_window *window, const AInputEvent *event, size_t index, int32_t finger, int phase);
 static int input_touch(struct kl_app *app, struct kl_window *window, const AInputEvent *event);
 static int input_pointer(struct kl_app *app, struct kl_window *window, const AInputEvent *event);
 static void input_buttons_change(struct kl_app *app, struct kl_window *window, const AInputEvent *event);
@@ -152,7 +156,8 @@ android_input_motion(
 	tool = AMotionEvent_getToolType(event, 0);
 	if (tool == AMOTION_EVENT_TOOL_TYPE_FINGER || tool == AMOTION_EVENT_TOOL_TYPE_UNKNOWN) {
 		(void)input_touch(app, window, event);
-		input_tap(event);
+		if (!input_last_strip)
+			input_tap(event);
 	} else
 		(void)input_pointer(app, window, event);
 
@@ -279,17 +284,35 @@ input_fill(
 		input->time_us = (uint64_t)time / 1000U;
 }
 
-/* Gives a pointer's place in the logical window's pixels. */
+/* Gives a pointer's place in the program's window's pixels (below the strip). */
 static void
 input_place(
-	const struct kl_app *app,
+	const struct kl_window *window,
 	const AInputEvent *event,
 	size_t index,
 	struct kl_window_event *input)
 {
-	/* The event's place is the native window's; the logical window starts at the insets. */
-	input->x = (double)AMotionEvent_getX(event, index) - (double)app->insets[ANDROID_INSET_LEFT];
-	input->y = (double)AMotionEvent_getY(event, index) - (double)app->insets[ANDROID_INSET_TOP];
+	/* The event's place is the native window's; the logical window starts at the insets, and the program's below the strip. */
+	input->x = (double)AMotionEvent_getX(event, index) - (double)window->app->insets[ANDROID_INSET_LEFT];
+	input->y = (double)AMotionEvent_getY(event, index) - (double)window->app->insets[ANDROID_INSET_TOP] - (double)android_titlebar_height(window);
+}
+
+/* Gives the strip a touch at a pointer's place (the window's pixels, the strip at the top); returns 1 when the strip took it. */
+static int
+input_strip(
+	struct kl_window *window,
+	const AInputEvent *event,
+	size_t index,
+	int32_t finger,
+	int phase)
+{
+	double x;
+	double y;
+
+	/* The place in the window's pixels. */
+	x = (double)AMotionEvent_getX(event, index) - (double)window->app->insets[ANDROID_INSET_LEFT];
+	y = (double)AMotionEvent_getY(event, index) - (double)window->app->insets[ANDROID_INSET_TOP];
+	return android_titlebar_hit(window, x, y, finger, phase);
 }
 
 /* Turns a finger event into touches: one finger down or up, or all fingers moved or cancelled. */
@@ -305,7 +328,8 @@ input_touch(
 	size_t count;
 	unsigned kind;
 
-	/* What happened, and to which finger. */
+	/* What happened, and to which finger; the strip may take it. */
+	input_last_strip = 0;
 	action = AMotionEvent_getAction(event);
 	index = (size_t)((action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
 	count = AMotionEvent_getPointerCount(event);
@@ -321,9 +345,14 @@ input_touch(
 			index = 0U;
 		if (index >= count)
 			return 0;
+
+		/* A finger that touches the strip, and the rest of its touch, is the strip's. */
+		input_last_strip = input_strip(window, event, index, AMotionEvent_getPointerId(event, index), kind == KL_WINDOW_TOUCH_DOWN ? 1 : 0);
+		if (input_last_strip)
+			return 1;
 		input_fill(app, &input, kind, event);
 		input.id = AMotionEvent_getPointerId(event, index);
-		input_place(app, event, index, &input);
+		input_place(window, event, index, &input);
 		(void)android_window_queue(window, &input);
 		return 1;
 	}
@@ -331,9 +360,13 @@ input_touch(
 	/* Every finger moved. */
 	if (action == AMOTION_EVENT_ACTION_MOVE) {
 		for (index = 0U; index < count; index++) {
+			if (input_strip(window, event, index, AMotionEvent_getPointerId(event, index), 2)) {
+				input_last_strip = 1;
+				continue;
+			}
 			input_fill(app, &input, KL_WINDOW_TOUCH_MOTION, event);
 			input.id = AMotionEvent_getPointerId(event, index);
-			input_place(app, event, index, &input);
+			input_place(window, event, index, &input);
 			(void)android_window_queue(window, &input);
 		}
 		return 1;
@@ -342,6 +375,10 @@ input_touch(
 	/* The system took the touch away: every finger is cancelled. */
 	if (action == AMOTION_EVENT_ACTION_CANCEL) {
 		for (index = 0U; index < count; index++) {
+			if (input_strip(window, event, index, AMotionEvent_getPointerId(event, index), 3)) {
+				input_last_strip = 1;
+				continue;
+			}
 			input_fill(app, &input, KL_WINDOW_TOUCH_CANCEL, event);
 			input.id = AMotionEvent_getPointerId(event, index);
 			(void)android_window_queue(window, &input);
@@ -374,10 +411,12 @@ input_pointer(
 		return 1;
 	}
 
-	/* The wheel. */
+	/* The wheel; over the strip it is not the program's. */
 	if (action == AMOTION_EVENT_ACTION_SCROLL) {
+		if ((double)AMotionEvent_getY(event, 0) - (double)app->insets[ANDROID_INSET_TOP] < (double)android_titlebar_height(window))
+			return 1;
 		input_fill(app, &input, KL_WINDOW_AXIS, event);
-		input_place(app, event, 0U, &input);
+		input_place(window, event, 0U, &input);
 		input.axis_source = KL_AXIS_SOURCE_WHEEL;
 
 		/* A turn away from the user scrolls up, which is a negative distance; right is positive. */
@@ -394,8 +433,11 @@ input_pointer(
 	    action == AMOTION_EVENT_ACTION_DOWN || action == AMOTION_EVENT_ACTION_UP ||
 	    action == AMOTION_EVENT_ACTION_BUTTON_PRESS || action == AMOTION_EVENT_ACTION_BUTTON_RELEASE ||
 	    action == AMOTION_EVENT_ACTION_HOVER_ENTER) {
+		/* The strip holds the mouse while its button is down on it: the motion is the strip's. */
+		if (input_strip(window, event, 0U, ANDROID_FINGER_MOUSE, 2))
+			return 1;
 		input_fill(app, &input, KL_WINDOW_MOTION, event);
-		input_place(app, event, 0U, &input);
+		input_place(window, event, 0U, &input);
 		input.modifiers = android_key_modifiers(AMotionEvent_getMetaState(event));
 		(void)android_window_queue(window, &input);
 		input_buttons_change(app, window, event);
@@ -438,8 +480,13 @@ input_buttons_change(
 	for (index = 0U; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
 		if ((now & buttons[index].mask) == (input_buttons & buttons[index].mask))
 			continue;
+
+		/* The primary button pressed on the strip, and its release, are the strip's. */
+		if (buttons[index].code == KL_BUTTON_LEFT &&
+		    input_strip(window, event, 0U, ANDROID_FINGER_MOUSE, (now & buttons[index].mask) != 0 ? 1 : 0))
+			continue;
 		input_fill(app, &input, KL_WINDOW_BUTTON, event);
-		input_place(app, event, 0U, &input);
+		input_place(window, event, 0U, &input);
 		input.code = buttons[index].code;
 		input.pressed = ((now & buttons[index].mask) != 0);
 		input.modifiers = android_key_modifiers(AMotionEvent_getMetaState(event));

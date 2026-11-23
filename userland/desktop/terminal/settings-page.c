@@ -80,6 +80,10 @@
 #define PAGE_ID_HOST_REMOVE	83U
 #define PAGE_ID_HOST_REMOVE_YES	84U
 #define PAGE_ID_HOST_REMOVE_NO	85U
+#define PAGE_ID_KEY_PASTE_AREA	86U
+#define PAGE_ID_KEY_PASTE	87U
+#define PAGE_ID_KEY_SAVE	88U
+#define PAGE_ID_KEY_PUBLIC_AREA	89U
 #define PAGE_ID_HOST_FIELD	96U
 
 /* The layout: the margin round the panels, the sidebar's width, a pane's padding and the gap between cards, in pixels. */
@@ -124,6 +128,12 @@
 
 /* The most lines of a note. */
 #define PAGE_NOTE_LINES	4
+
+/* A text area's line and the room it keeps above and below its lines (the widget's own), and how many lines the key's areas show. */
+#define PAGE_AREA_LINE		20
+#define PAGE_AREA_PAD		18
+#define PAGE_AREA_PASTE_LINES	8
+#define PAGE_AREA_PUBLIC_LINES	4
 
 /* A removal's icon button, square, and its icon. */
 #define PAGE_ICON_BUTTON	28
@@ -289,6 +299,9 @@ struct page_state {
 	struct kl_field key_comment;
 	struct kl_field key_pass;
 	struct kl_field key_again;
+	struct kl_text_area key_paste_area;
+	struct kl_text_area key_public_area;
+	struct page_message key_paste_message;
 	char key_shown[TERMINAL_KEY_NAME_MAX];
 	int key_looked;
 	int key_found;
@@ -402,6 +415,9 @@ static void page_items_read(void);
 static void page_items_save(unsigned pane);
 static void page_key_look(void);
 static void page_key_make(void);
+static void page_key_save(struct terminal_window *window);
+static int page_focused_area(struct kl_text_area **area);
+static int page_paste_card(struct terminal_window *window, int top, int left, int width);
 static void page_known_read(void);
 static void page_known_remove(void);
 static int page_card(const struct kl_rect *rect, const char *title, const char *subtitle);
@@ -482,6 +498,8 @@ terminal_page_open(
 	page.key_again.secret = 1;
 	kl_field_set_limit(&page.key_pass, 1024U);
 	kl_field_set_limit(&page.key_again, 1024U);
+	kl_text_area_set(&page.key_paste_area, "");
+	kl_text_area_set(&page.key_public_area, "");
 
 	/* No host shown before the file is read. */
 	page.hosts_block = TERMINAL_HOSTS_NONE;
@@ -737,11 +755,14 @@ terminal_page_paste(
 	const char *text,
 	size_t length)
 {
+	struct kl_text_area *area;
 	struct kl_field *field;
 	int focused;
 
-	/* Only into a field that has the keyboard. */
+	/* Only into a field or an area that has the keyboard. */
 	focused = page_focused(&field);
+	if (!focused)
+		focused = page_focused_area(&area);
 	if (!focused)
 		return;
 
@@ -763,6 +784,7 @@ terminal_page_copy_text(
 	char *text,
 	size_t size)
 {
+	struct kl_text_area *area;
 	struct kl_field *field;
 	size_t from;
 	size_t to;
@@ -778,6 +800,17 @@ terminal_page_copy_text(
 		memcpy(text, page.copied, to);
 		text[to] = '\0';
 		return to;
+	}
+
+	/* A text area's selection, when it has the keyboard. */
+	focused = page_focused_area(&area);
+	if (focused) {
+		page_selection(area->text, area->caret, area->anchor, &from, &to);
+		if (to - from > size - 1U)
+			to = from + size - 1U;
+		memcpy(text, area->text + from, to - from);
+		text[to - from] = '\0';
+		return to - from;
 	}
 
 	/* Only from a field that has the keyboard, never a secret one. */
@@ -3086,11 +3119,14 @@ page_keys(
 	const struct kl_theme *theme;
 	struct kl_rect card;
 	struct kl_rect control;
+	struct kl_rect area;
 	char subtitle[PAGE_MESSAGE];
+	unsigned changed;
 	int pressed;
 	int rows;
 	int same;
 	int y;
+	int known_top;
 
 	/* The pane's label column. */
 	page_column(TERMINAL_PANE_KEYS, page_key_labels, sizeof(page_key_labels) / sizeof(page_key_labels[0]));
@@ -3106,8 +3142,8 @@ page_keys(
 	card.y = top;
 	card.width = width;
 	if (page.key_found) {
-		card.height = PAGE_CARD_SUBTITLED + PAGE_ROW + page_note_height(width - 40, page.key_line) + page_note_height(width - 40, page.key_fingerprint) + 8 +
-		    theme->control_height + 12;
+		card.height = PAGE_CARD_SUBTITLED + PAGE_ROW + PAGE_AREA_PUBLIC_LINES * PAGE_AREA_LINE + PAGE_AREA_PAD + 8 +
+		    page_note_height(width - 40, page.key_fingerprint) + 8 + theme->control_height + 12;
 	} else {
 		rows = 4;
 		card.height = PAGE_CARD_SUBTITLED + rows * PAGE_ROW + 8 + theme->control_height + 12 +
@@ -3126,7 +3162,15 @@ page_keys(
 	control.x = card.x + 20;
 	control.height = theme->control_height;
 	if (page.key_found) {
-		y = page_note(y + 4, card.x + 20, card.width - 40, page.key_line, theme->text);
+		/* The public key in an area to select from; a change is undone (the area is for reading and copying). */
+		area.x = card.x + 20;
+		area.y = y + 4;
+		area.width = card.width - 40;
+		area.height = PAGE_AREA_PUBLIC_LINES * PAGE_AREA_LINE + PAGE_AREA_PAD;
+		changed = kl_text_area(page.ui, &page.style, PAGE_ID_KEY_PUBLIC_AREA, &area, &page.key_public_area, NULL);
+		if ((changed & KL_FIELD_CHANGED) != 0U)
+			kl_text_area_set(&page.key_public_area, page.key_line);
+		y = area.y + area.height + 8;
 		y = page_note(y, card.x + 20, card.width - 40, page.key_fingerprint, theme->text_secondary);
 		control.y = y + 4;
 		control.width = kl_button_width(&page.style, "Copy Public Key");
@@ -3157,11 +3201,78 @@ page_keys(
 	/* The last word of the key's card. */
 	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.key_message);
 
-	/* known_hosts under it. */
-	y = page_known(card.y + card.height + PAGE_GAP, left, width);
+	/* Under the key's card, a card to paste a private key into (a program that offers it, while no key has the name), then known_hosts. */
+	known_top = card.y + card.height + PAGE_GAP;
+	if (!page.key_found && page.program->key_paste)
+		known_top = page_paste_card(window, known_top, left, width) + PAGE_GAP;
+	y = page_known(known_top, left, width);
 
 	/* Reports the pane's bottom. */
 	return y;
+}
+
+/* Draws the card that keeps a pasted private key under the key's name: an area for its text, Paste and Save Key; reports the card's bottom. */
+static int
+page_paste_card(
+	struct terminal_window *window,
+	int top,
+	int left,
+	int width)
+{
+	static const char note[] = "Paste the text of an OpenSSH private key (ssh-keygen -t ed25519). Only ssh-ed25519 keys are supported.";
+	const struct kl_theme *theme;
+	struct kl_rect card;
+	struct kl_rect control;
+	struct kl_rect area;
+	char subtitle[PAGE_MESSAGE];
+	int pressed;
+	int y;
+
+	/* The card: the area, the two buttons, the note and the last word. */
+	theme = page.style.theme;
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + PAGE_AREA_PASTE_LINES * PAGE_AREA_LINE + PAGE_AREA_PAD + 8 + theme->control_height + 4 +
+	    page_note_height(width - 40, note) + page_note_height(width - 40, page.key_paste_message.text) + PAGE_CARD_FOOT;
+	(void)snprintf(subtitle, sizeof(subtitle), "Kept in %s under the name above", page.program->key_directory_shown);
+	y = page_card(&card, "Paste a private key", subtitle);
+
+	/* The area the text is pasted or typed into. */
+	area.x = card.x + 20;
+	area.y = y;
+	area.width = card.width - 40;
+	area.height = PAGE_AREA_PASTE_LINES * PAGE_AREA_LINE + PAGE_AREA_PAD;
+	(void)kl_text_area(page.ui, &page.style, PAGE_ID_KEY_PASTE_AREA, &area, &page.key_paste_area, "-----BEGIN OPENSSH PRIVATE KEY-----");
+	y = area.y + area.height + 8;
+
+	/* Paste puts the clipboard's text in the area in place of what it holds (the run reads the clipboard). */
+	control.x = card.x + 20;
+	control.y = y;
+	control.width = kl_button_width(&page.style, "Paste");
+	control.height = theme->control_height;
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_KEY_PASTE, &control, "Paste", 0U);
+	if (pressed) {
+		kl_text_area_set(&page.key_paste_area, "");
+		kl_ui_set_focus(page.ui, PAGE_ID_KEY_PASTE_AREA, 0U);
+		page_action(window, TERMINAL_ACTION_PASTE);
+		page_log("key-paste", "");
+	}
+
+	/* Save Key keeps what the area holds. */
+	control.x += control.width + 12;
+	control.width = kl_button_width(&page.style, "Save Key");
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_KEY_SAVE, &control, "Save Key", KL_BUTTON_PRIMARY);
+	if (pressed)
+		page_key_save(window);
+	y = control.y + control.height + 4;
+
+	/* What the area takes, and the last word. */
+	y = page_note(y, card.x + 20, card.width - 40, note, theme->text_secondary);
+	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.key_paste_message);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
 }
 
 /* Draws the known_hosts card: each line's names, type and fingerprint with a button that removes it; reports its bottom. */
@@ -3391,8 +3502,10 @@ page_key_look(void)
 
 	/* Its public key. */
 	error = terminal_key_public(page.program, page.key_shown, page.key_line, sizeof(page.key_line), page.key_fingerprint, sizeof(page.key_fingerprint));
-	if (error == 0)
+	if (error == 0) {
 		page.key_found = 1;
+		kl_text_area_set(&page.key_public_area, page.key_line);
+	}
 }
 
 /* Makes the key named, when the passphrase was typed the same twice, and shows its public key. */
@@ -3431,6 +3544,43 @@ page_key_make(void)
 	page.key_looked = 0;
 	page_say(&page.key_message, 0, "The key was made. Copy its public key to the server's ~/.ssh/authorized_keys.");
 	page_log("key-made", page.key_name.text);
+}
+
+/*
+ * Keeps the private key the area holds under the name, wipes the area, and
+ * shows the key's public key.  The key's text is never logged, and the
+ * clipboard it was pasted from is overwritten (the run keeps the clipboard
+ * when it is told to copy nothing, so one space takes the key's place).
+ */
+static void
+page_key_save(
+	struct terminal_window *window)
+{
+	char line[TERMINAL_KEY_LINE_MAX];
+	char why[PAGE_MESSAGE];
+	int error;
+
+	/* The key, as the Keys pane keeps a key it made. */
+	error = terminal_key_import(page.program, page.key_name.text, page.key_paste_area.text, page.key_paste_area.length, line, sizeof(line), why,
+	    sizeof(why));
+	if (error != 0) {
+		page_say(&page.key_paste_message, 1, why);
+		page_log("key-import", "failed");
+		return;
+	}
+
+	/* The text goes from the area (a write the compiler keeps: the area is the page's own), and the key saved is shown. */
+	memset(&page.key_paste_area, 0, sizeof(page.key_paste_area));
+	kl_text_area_set(&page.key_paste_area, "");
+	kl_ui_clear_focus(page.ui);
+	page.key_looked = 0;
+	page_say(&page.key_paste_message, 0, "");
+	page_say(&page.key_message, 0, why);
+
+	/* The clipboard the key came from. */
+	page_set_aside(" ", 1U);
+	page_action(window, TERMINAL_ACTION_COPY);
+	page_log("key-imported", page.key_name.text);
 }
 
 /* Reads known_hosts and lists its lines. */
@@ -3887,6 +4037,30 @@ page_focused(
 	return 1;
 }
 
+/* Finds the text area with the keyboard's focus (the key's pasted text, or its public key); reports 1 with it, 0 for none. */
+static int
+page_focused_area(
+	struct kl_text_area **area)
+{
+	int has;
+
+	/* None yet. */
+	*area = NULL;
+
+	/* The Keys pane's two areas. */
+	has = kl_ui_has_focus(page.ui, PAGE_ID_KEY_PASTE_AREA, 0U);
+	if (has)
+		*area = &page.key_paste_area;
+	has = kl_ui_has_focus(page.ui, PAGE_ID_KEY_PUBLIC_AREA, 0U);
+	if (has)
+		*area = &page.key_public_area;
+
+	/* Reports whether one has it. */
+	if (*area == NULL)
+		return 0;
+	return 1;
+}
+
 /* Gives a selection's ends in order. */
 static void
 page_selection(
@@ -3953,6 +4127,7 @@ page_key(
 	struct terminal_window *window,
 	const struct kl_window_event *event)
 {
+	struct kl_text_area *area;
 	struct kl_field *field;
 	char text[KL_FIELD_MAX];
 	size_t length;
@@ -3982,10 +4157,21 @@ page_key(
 	    event->code != PAGE_KEY_V)
 		return 0;
 
-	/* Without a field with the keyboard the key is no one's. */
+	/* A text area with the keyboard: Copy and Paste are the run's as for a field, and a cut takes the selection out of the area that may change (the key's pasted text). */
 	focused = page_focused(&field);
-	if (!focused)
+	if (!focused) {
+		focused = page_focused_area(&area);
+		if (!focused)
+			return 1;
+		if (event->code == PAGE_KEY_V) {
+			page_action(window, TERMINAL_ACTION_PASTE);
+			return 1;
+		}
+		page_action(window, TERMINAL_ACTION_COPY);
+		if (event->code == PAGE_KEY_X && area == &page.key_paste_area)
+			page_commit("", 0U);
 		return 1;
+	}
 
 	/* Copy and paste are the run's (it keeps the terminal's clipboard). */
 	if (event->code == PAGE_KEY_C) {
@@ -4044,6 +4230,7 @@ page_key_text(
 	const struct kl_window_event *event)
 {
 	struct kl_window_event commit;
+	struct kl_text_area *area;
 	struct kl_field *field;
 	unsigned char first;
 	int focused;
@@ -4057,8 +4244,10 @@ page_key_text(
 	if (first < 0x20U || first == 0x7fU)
 		return 0;
 
-	/* Only a field takes text (Space presses a button). */
+	/* Only a field or a text area takes text (Space presses a button). */
 	focused = page_focused(&field);
+	if (!focused)
+		focused = page_focused_area(&area);
 	if (!focused)
 		return 0;
 

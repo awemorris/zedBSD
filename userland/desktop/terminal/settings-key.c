@@ -9,8 +9,9 @@
  * The SSH keys and the known hosts of the settings tab's Keys pane: an
  * ssh-ed25519 key made as ssh-keygen makes one (OpenSSH's private key
  * file, encrypted with aes256-ctr and the bcrypt KDF when a passphrase is
- * given, and the one-line public key beside it), the public key of a key
- * there already, and the lines of known_hosts listed and removed.
+ * given, and the one-line public key beside it), a private key brought as
+ * pasted text and kept as it came, the public key of a key there already,
+ * and the lines of known_hosts listed and removed.
  *
  * The files are the program's (struct terminal_page_program): it says
  * where they are and writes them, a new private key so that only the user
@@ -45,6 +46,8 @@
 
 static int key_paths(const struct terminal_page_program *program, const char *name, char *private_path, char *public_path, size_t size);
 static int key_write(const struct ssh_key *key, const char *passphrase, struct ssh_buf *file);
+static int key_normalize(const char *text, size_t size, struct ssh_buf *out);
+static size_t key_trim_end(const char *text, size_t start, size_t end);
 static int key_line_of(const uint8_t *public_key, const char *comment, char *line, size_t line_size);
 static size_t key_line_end(const char *text, size_t size, size_t start);
 static size_t key_line_next(const char *text, size_t size, size_t start);
@@ -215,6 +218,171 @@ terminal_key_make(
 	key_copy(line, line_size, (const char *)public_line.data, key_line_end((const char *)public_line.data, public_line.size, 0U));
 	ssh_buf_free(&public_line);
 	ssh_key_clear(&key);
+
+	/* Succeeded: the key's two files are made. */
+	return 0;
+}
+
+/*
+ * Keeps the OpenSSH private key at text (size bytes, as it was pasted)
+ * under name in the program's key directory, and its public key beside
+ * it (name.pub), as terminal_key_make leaves a key it makes.  The key
+ * must be an ssh-ed25519 key in OpenSSH's file format, encrypted or not;
+ * an encrypted one is checked by its public half, without its passphrase
+ * (the first connection asks for it).  The text is cleaned first: line
+ * breaks of any kind become LF, each line is trimmed, blank lines go.
+ * line receives the public key's line (without its line break); why says
+ * what went wrong, for the user, or on success one sentence about the key
+ * kept (whether its passphrase is asked at the first connection).
+ *
+ * Returns 0, EINVAL (not such a key, or a name that cannot be), ENOTSUP
+ * (another format, type or cipher), EEXIST (a key of the name is there),
+ * EMSGSIZE, ENOMEM, ENAMETOOLONG, EIO, or the program's error of writing
+ * a file.
+ */
+int
+terminal_key_import(
+	const struct terminal_page_program *program,
+	const char *name,
+	const char *text,
+	size_t size,
+	char *line,
+	size_t line_size,
+	char *why,
+	size_t why_size)
+{
+	char private_path[KEY_PATH_MAX];
+	char public_path[KEY_PATH_MAX];
+	char comment[SSH_KEY_COMMENT_MAX];
+	char message[TERMINAL_ITEM_VALUE];
+	struct ssh_key key;
+	struct ssh_key whole;
+	struct ssh_buf clean;
+	struct ssh_buf public_line;
+	int encrypted;
+	int exists;
+	int error;
+
+	/* Nothing kept yet. */
+	line[0] = '\0';
+	why[0] = '\0';
+
+	/* A name a file may have, and its two files' paths. */
+	error = terminal_key_name_valid(name);
+	if (error != 0) {
+		key_why(why, why_size, "A key's name is letters, digits, '.', '_' and '-' (not starting with '.' or ending with .pub).");
+		return error;
+	}
+	error = key_paths(program, name, private_path, public_path, sizeof(private_path));
+	if (error != 0) {
+		key_why(why, why_size, "The key's path is too long.");
+		return error;
+	}
+
+	/* The text as an OpenSSH private key file holds it. */
+	ssh_buf_init(&clean, SSH_KEY_FILE_MAX, 1);
+	error = key_normalize(text, size, &clean);
+	if (error == EMSGSIZE) {
+		ssh_buf_free(&clean);
+		key_why(why, why_size, "That is too long for a private key.");
+		return EMSGSIZE;
+	}
+	if (error != 0) {
+		ssh_buf_free(&clean);
+		key_why(why, why_size, "Not enough memory.");
+		return error;
+	}
+
+	/* Its first line says what kind of key file it is. */
+	if (clean.size < sizeof(SSH_KEY_PRIVATE_BEGIN) - 1U ||
+	    memcmp(clean.data, SSH_KEY_PRIVATE_BEGIN, sizeof(SSH_KEY_PRIVATE_BEGIN) - 1U) != 0) {
+		/* Another format is a format, not a mistake in the text. */
+		if ((clean.size >= 11U && memcmp(clean.data, "-----BEGIN ", 11U) == 0) ||
+		    (clean.size >= 19U && memcmp(clean.data, "PuTTY-User-Key-File", 19U) == 0)) {
+			ssh_buf_free(&clean);
+			key_why(why, why_size, "Only OpenSSH private keys are supported; ssh-keygen -p -f <file> converts one.");
+			return ENOTSUP;
+		}
+		ssh_buf_free(&clean);
+		key_why(why, why_size, "That is not a private key: it starts with -----BEGIN OPENSSH PRIVATE KEY-----.");
+		return EINVAL;
+	}
+
+	/* The public half, which an encrypted key keeps in the clear. */
+	error = ssh_key_parse_private_public((const char *)clean.data, clean.size, &key, &encrypted);
+	if (error == ENOTSUP) {
+		ssh_buf_free(&clean);
+		key_why(why, why_size, "Only ssh-ed25519 keys are supported.");
+		return ENOTSUP;
+	}
+	if (error != 0) {
+		ssh_buf_free(&clean);
+		key_why(why, why_size, "That is not a whole private key: check that it was copied entirely.");
+		return error == EMSGSIZE ? EMSGSIZE : EINVAL;
+	}
+
+	/* A key with no passphrase is read whole, for its seed's agreement with the public key and its comment. */
+	key_copy(comment, sizeof(comment), name, strlen(name));
+	if (!encrypted) {
+		error = ssh_key_parse_private((const char *)clean.data, clean.size, &whole);
+		if (error != 0) {
+			ssh_buf_free(&clean);
+			ssh_key_clear(&key);
+			key_why(why, why_size, "That is not a whole private key: check that it was copied entirely.");
+			return error == EMSGSIZE ? EMSGSIZE : EINVAL;
+		}
+		if (whole.comment[0] != '\0')
+			key_copy(comment, sizeof(comment), whole.comment, strlen(whole.comment));
+		ssh_key_clear(&whole);
+	}
+
+	/* A key of the name is never written over. */
+	exists = program->exists(program->data, private_path);
+	if (!exists)
+		exists = program->exists(program->data, public_path);
+	if (exists) {
+		ssh_buf_free(&clean);
+		ssh_key_clear(&key);
+		(void)snprintf(message, sizeof(message), "%s%s is there already: choose another name.", program->key_directory_shown, name);
+		key_why(why, why_size, message);
+		return EEXIST;
+	}
+
+	/* The private key file as it came (cleaned), made new and readable by the user alone. */
+	error = program->create(program->data, private_path, clean.data, clean.size, 1);
+	ssh_buf_free(&clean);
+	if (error != 0) {
+		ssh_key_clear(&key);
+		(void)snprintf(message, sizeof(message), "%s%s could not be made (%s).", program->key_directory_shown, name, strerror(error));
+		key_why(why, why_size, message);
+		return error;
+	}
+
+	/* The public key's line, for its file. */
+	ssh_buf_init(&public_line, KEY_PUBLIC_MAX, 0);
+	ssh_key_put_public_line(key.public_key, comment, &public_line);
+	error = ssh_buf_error(&public_line);
+	if (error == 0)
+		error = program->create(program->data, public_path, public_line.data, public_line.size, 0);
+	if (error != 0) {
+		ssh_buf_free(&public_line);
+		ssh_key_clear(&key);
+		(void)snprintf(message, sizeof(message), "%s%s was made, but %s%s%s could not be (%s).", program->key_directory_shown, name,
+		    program->key_directory_shown, name, KEY_PUBLIC_SUFFIX, strerror(error));
+		key_why(why, why_size, message);
+		return EIO;
+	}
+
+	/* The line for the user, without its line break. */
+	key_copy(line, line_size, (const char *)public_line.data, key_line_end((const char *)public_line.data, public_line.size, 0U));
+	ssh_buf_free(&public_line);
+	ssh_key_clear(&key);
+
+	/* What the user should know of the key kept. */
+	if (encrypted)
+		key_why(why, why_size, "The key was saved. Its passphrase is asked at the first connection.");
+	else
+		key_why(why, why_size, "The key was saved. It has no passphrase: anyone who can read the app's files can use it.");
 
 	/* Succeeded: the key's two files are made. */
 	return 0;
@@ -475,6 +643,70 @@ key_write(
 
 	/* Succeeded: the private key file. */
 	return 0;
+}
+
+/*
+ * Writes the lines of a pasted key into out as a key file holds them: each
+ * line trimmed of white space at both ends, a CRLF, a CR or an LF ending it,
+ * blank lines left out, an LF after every line kept.  Returns 0, EMSGSIZE
+ * when the key file would be longer than the buffer's limit, or ENOMEM.
+ */
+static int
+key_normalize(
+	const char *text,
+	size_t size,
+	struct ssh_buf *out)
+{
+	size_t start;
+	size_t end;
+	size_t at;
+	size_t from;
+
+	/* Each line, up to a CR or an LF. */
+	start = 0U;
+	while (start < size) {
+		end = start;
+		while (end < size && text[end] != '\n' && text[end] != '\r')
+			end++;
+		at = end;
+
+		/* The line without its white space. */
+		from = start;
+		while (from < end && (text[from] == ' ' || text[from] == '\t'))
+			from++;
+		end = key_trim_end(text, from, end);
+
+		/* A line with something in it is kept, with its LF. */
+		if (end > from) {
+			ssh_buf_put_bytes(out, text + from, end - from);
+			ssh_buf_put_u8(out, '\n');
+		}
+
+		/* Past the line break (CRLF is one). */
+		start = at;
+		if (start < size && text[start] == '\r')
+			start++;
+		if (start < size && text[start] == '\n')
+			start++;
+	}
+
+	/* The buffer's error, if a write did not fit. */
+	return ssh_buf_error(out);
+}
+
+/* Finds where a line's text ends once the spaces and tabs at its end are taken off (never before start). */
+static size_t
+key_trim_end(
+	const char *text,
+	size_t start,
+	size_t end)
+{
+	/* Back over the white space. */
+	while (end > start && (text[end - 1U] == ' ' || text[end - 1U] == '\t'))
+		end--;
+
+	/* Reports the line's end. */
+	return end;
 }
 
 /* Writes a public key's line (without its line break) into line; 0 or the buffer's error. */
