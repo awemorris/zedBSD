@@ -32,11 +32,12 @@
 
 static void rootless_track(struct x11server *server, struct x11_window *window);
 static void rootless_info(struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
+static int rootless_composite(struct x11server *server, struct x11_window *window, size_t bytes);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
 static int rootless_show(struct x11server *server, struct x11_window *window, int x, int y, int width, int height);
-static int rootless_has_children(struct x11server *server, const struct x11_window *top);
-static void rootless_compose(struct x11server *server, struct x11_window *top, int x, int y, int width, int height);
+static struct x11_window *rootless_visible_at(struct x11_window *top, int x, int y);
+static void rootless_compose(struct x11_window *top, int x, int y, int width, int height);
 
 /*
  * Shows what has changed: each top-level window the changed box touches
@@ -49,7 +50,6 @@ x11_rootless_present(
 	struct x11server *server)
 {
 	struct x11_window *window;
-	unsigned slot;
 	int box_x0;
 	int box_y0;
 	int box_x1;
@@ -72,11 +72,7 @@ x11_rootless_present(
 	server->dirty = 0;
 
 	/* Each top-level window. */
-	for (slot = 1U; slot < server->window_count; slot++) {
-		window = &server->windows[slot];
-		if (window->parent != X11_ROOT_XID)
-			continue;
-
+	for (window = server->root->first_child; window != NULL; window = window->above) {
 		/* Its surface, following it; an unmapped window has none. */
 		rootless_track(server, window);
 		if (window->surface == NULL)
@@ -107,7 +103,7 @@ x11_rootless_present(
 			continue;
 
 		/* The part drawn and shown, its place in the window as the damage. */
-		rootless_compose(server, window, left, top, right - left, bottom - top);
+		rootless_compose(window, left, top, right - left, bottom - top);
 		busy = rootless_show(server, window, left - window->x, top - window->y, right - left, bottom - top);
 		if (busy != 0) {
 			x11_mark_dirty(server, left, top, right - left, bottom - top);
@@ -128,12 +124,16 @@ x11_rootless_closing(
 	struct x11server *server)
 {
 	struct x11_window *window;
+	struct x11_client *client;
 	unsigned index;
 
 	/* Each window asked about, if it is still there and a client's. */
 	for (index = 0U; index < server->closing_count; index++) {
 		window = x11_window_find(server, server->closing[index]);
-		if (window == NULL || window->owner >= X11_MAX_CLIENTS)
+		if (window == NULL)
+			continue;
+		client = x11_client_of(server, window->owner);
+		if (client == NULL)
 			continue;
 
 		/* Its client goes, with all its windows. */
@@ -152,7 +152,6 @@ void
 x11_rootless_flush_motion(
 	struct x11server *server)
 {
-	struct x11_window *window;
 	int x;
 	int y;
 
@@ -161,17 +160,12 @@ x11_rootless_flush_motion(
 		return;
 	server->motion_pending = 0;
 
-	/* The window must still be there and want motion. */
-	window = x11_window_find(server, server->motion_window);
-	if (window == NULL || (window->event_mask & X11_MASK_POINTER_MOTION) == 0U)
-		return;
-
-	/* Sent from where the pointer was then. */
+	/* Sent from where the pointer was then, with the buttons held then. */
 	x = server->pointer_x;
 	y = server->pointer_y;
 	server->pointer_x = server->motion_x;
 	server->pointer_y = server->motion_y;
-	x11_input_event(server, server->motion_client, X11_EVENT_MOTION_NOTIFY, window->id, 0U, server->motion_time, server->motion_buttons);
+	x11_event_motion(server, server->motion_time, (uint16_t)(server->key_state | ((unsigned)server->motion_buttons << 8)));
 	server->pointer_x = x;
 	server->pointer_y = y;
 }
@@ -191,13 +185,17 @@ x11_rootless_forget(
 	window->swapchain = NULL;
 
 	/* The surface. */
-	if (window->surface != NULL)
+	if (window->surface != NULL) {
 		server->ops->close(server->backend, window->surface);
+		server->surface_count--;
+	}
 	window->surface = NULL;
 
-	/* The composite. */
+	/* The composite and its charge. */
 	free(window->composite);
 	window->composite = NULL;
+	x11_memory_release(server, window->owner, window->composite_bytes);
+	window->composite_bytes = 0U;
 }
 
 /* Brings a top-level window's surface in step with it: opened when mapped, closed when not, its size, title and place. */
@@ -210,14 +208,13 @@ rootless_track(
 	const char *title;
 	const char *class_name;
 	char class_buffer[64];
-	uint32_t *composite;
 	unsigned changed;
 	size_t bytes;
 	int differs;
 	int failed;
 
-	/* An unmapped window has no surface. */
-	if (!window->mapped) {
+	/* An unmapped window, and an InputOnly one, has no surface. */
+	if (!window->mapped || window->window_class == X11_INPUT_ONLY) {
 		x11_rootless_forget(server, window);
 		return;
 	}
@@ -233,17 +230,19 @@ rootless_track(
 	if (failed == 0)
 		class_name = class_buffer;
 
-	/* A window without a surface gets one, and a composite of its size. */
+	/* A window without a surface gets one (while there are not too many), and a composite of its size. */
 	bytes = (size_t)window->width * (size_t)window->height * sizeof(uint32_t);
 	if (window->surface == NULL) {
-		composite = realloc(window->composite, bytes);
-		if (composite == NULL)
+		if (server->surface_count >= X11_SURFACES_MAX)
 			return;
-		window->composite = composite;
+		failed = rootless_composite(server, window, bytes);
+		if (failed != 0)
+			return;
 		rootless_info(window, title, class_name, &info);
 		window->surface = server->ops->open(server->backend, window->id, &info);
 		if (window->surface == NULL)
 			return;
+		server->surface_count++;
 		window->surface_width = window->width;
 		window->surface_height = window->height;
 		window->surface_x = window->x;
@@ -267,12 +266,11 @@ rootless_track(
 
 	/* A resized window gets a composite of its new size. */
 	if ((changed & X11_SURFACE_CHANGED_SIZE) != 0U) {
-		composite = realloc(window->composite, bytes);
-		if (composite == NULL) {
+		failed = rootless_composite(server, window, bytes);
+		if (failed != 0) {
 			x11_rootless_forget(server, window);
 			return;
 		}
-		window->composite = composite;
 	}
 
 	/* Nothing else to bring in step. */
@@ -318,6 +316,39 @@ rootless_info(
 	info->height = window->height;
 	info->title = title;
 	info->class_name = class_name;
+}
+
+/*
+ * Gives a top-level window a composite of a size, charged to its owner.
+ * Returns 0, or nonzero when it cannot have one.
+ */
+static int
+rootless_composite(
+	struct x11server *server,
+	struct x11_window *window,
+	size_t bytes)
+{
+	uint32_t *composite;
+	int error;
+
+	/* The owner is charged for the new size instead of the old. */
+	x11_memory_release(server, window->owner, window->composite_bytes);
+	window->composite_bytes = 0U;
+	error = x11_memory_charge(server, window->owner, bytes);
+	if (error != 0)
+		return -1;
+
+	/* The memory. */
+	composite = realloc(window->composite, bytes);
+	if (composite == NULL) {
+		x11_memory_release(server, window->owner, bytes);
+		return -1;
+	}
+
+	/* Succeeded: the composite. */
+	window->composite = composite;
+	window->composite_bytes = bytes;
+	return 0;
 }
 
 /* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan off. */
@@ -400,28 +431,44 @@ rootless_show(
 	return 0;
 }
 
-/* Reports whether a top-level window has a mapped child drawn over it. */
-static int
-rootless_has_children(
-	struct x11server *server,
-	const struct x11_window *top)
+/*
+ * Returns the deepest window drawn at a place on the root window within a
+ * top-level window: the topmost mapped InputOutput child there, and its
+ * own in turn (the top-level window when none is).
+ */
+static struct x11_window *
+rootless_visible_at(
+	struct x11_window *top,
+	int x,
+	int y)
 {
-	unsigned slot;
+	struct x11_window *window;
+	struct x11_window *child;
 
-	/* Any mapped window whose parent it is. */
-	for (slot = 1U; slot < server->window_count; slot++) {
-		if (server->windows[slot].mapped && server->windows[slot].parent == top->id)
-			return 1;
+	/* Down the tree, into the topmost drawn child under the place each time. */
+	window = top;
+	child = window->last_child;
+	while (child != NULL) {
+		if (child->mapped &&
+		    child->window_class == X11_INPUT_OUTPUT &&
+		    x >= child->x &&
+		    y >= child->y &&
+		    x < child->x + child->width &&
+		    y < child->y + child->height) {
+			window = child;
+			child = window->last_child;
+			continue;
+		}
+		child = child->below;
 	}
 
-	/* None. */
-	return 0;
+	/* Succeeded: the window drawn there. */
+	return window;
 }
 
 /* Draws a part of a top-level window (on the root window's coordinates) into its composite, its children over it. */
 static void
 rootless_compose(
-	struct x11server *server,
 	struct x11_window *top,
 	int x,
 	int y,
@@ -434,7 +481,11 @@ rootless_compose(
 	int column;
 
 	/* A window alone is copied row by row. */
-	children = rootless_has_children(server, top);
+	children = 0;
+	for (window = top->first_child; window != NULL && !children; window = window->above) {
+		if (window->mapped && window->window_class == X11_INPUT_OUTPUT)
+			children = 1;
+	}
 	if (!children) {
 		for (row = y; row < y + height; row++) {
 			memcpy(top->composite + (size_t)(row - top->y) * top->width + (size_t)(x - top->x),
@@ -449,8 +500,8 @@ rootless_compose(
 	/* Otherwise each pixel comes from the topmost window there. */
 	for (row = y; row < y + height; row++) {
 		for (column = x; column < x + width; column++) {
-			window = x11_window_child_at(server, top->id, column, row);
-			if (window == NULL || window->pixels == NULL)
+			window = rootless_visible_at(top, column, row);
+			if (window->pixels == NULL)
 				window = top;
 			top->composite[(size_t)(row - top->y) * top->width + (size_t)(column - top->x)] =
 			    window->pixels[(size_t)(row - window->y) * window->width + (size_t)(column - window->x)];
@@ -459,8 +510,8 @@ rootless_compose(
 }
 
 /*
- * Takes a key from the backend: pressed or released in the focus window
- * (or the one under the pointer).
+ * Takes a key from the backend: pressed or released, sent from the focus
+ * window (or the window under the pointer inside it).
  */
 void
 x11server_backend_key(
@@ -470,41 +521,29 @@ x11server_backend_key(
 	uint32_t time,
 	uint16_t state)
 {
-	struct x11_window *window;
-	uint8_t type;
-
 	/* The modifiers held are the keyboard's state from now on. */
 	server->key_state = state;
 	if (keycode == 0U)
 		return;
 
-	/* The focus window, or the one under the pointer when the focus is gone. */
-	window = x11_window_find(server, server->focus);
-	if (window == NULL)
-		window = x11_window_at(server, server->pointer_x, server->pointer_y);
-
-	/* The press or the release. */
-	type = X11_EVENT_KEY_RELEASE;
-	if (pressed)
-		type = X11_EVENT_KEY_PRESS;
-	x11_input_event(server, window->owner, type, window->id, keycode, time, state);
+	/* The press or the release, with the buttons held. */
+	x11_event_key(server, keycode, pressed, time, (uint16_t)(state | ((unsigned)server->buttons << 8)));
 }
 
 /*
  * Takes the pointer from the backend: where it is, and a button that
- * changed.  A press grabs the pointer for its window until every button
- * is up, focuses and raises it; moves between buttons are held back so
- * only the last of a burst is sent.
+ * changed.  A press that reaches a client grabs the pointer for it until
+ * every button is up; it focuses and raises the top-level window under
+ * the pointer (the rootless server is its window manager).  Moves between
+ * buttons are held back so only the last of a burst is sent.
  */
 void
 x11server_backend_pointer(
 	struct x11server *server,
 	const struct x11_pointer_frame *frame)
 {
-	struct x11_window *window;
 	struct x11_window *top;
-	unsigned owner;
-	uint8_t type;
+	uint16_t state;
 
 	/* A button's change sends the move held back first, so the order holds. */
 	server->buttons = frame->buttons_before;
@@ -515,21 +554,9 @@ x11server_backend_pointer(
 	server->pointer_x = frame->x;
 	server->pointer_y = frame->y;
 
-	/* The window it speaks to: the grab's, or the one under it. */
-	window = NULL;
-	if (server->grab_owner >= 0)
-		window = x11_window_find(server, server->grab_window);
-	if (window == NULL)
-		window = x11_window_at(server, server->pointer_x, server->pointer_y);
-	owner = window->owner;
-	if (server->grab_owner >= 0)
-		owner = (unsigned)server->grab_owner;
-
 	/* A move alone is held back (the newest replaces an older one). */
 	if (frame->button == 0U) {
 		server->motion_pending = 1;
-		server->motion_client = owner;
-		server->motion_window = window->id;
 		server->motion_time = frame->time;
 		server->motion_x = server->pointer_x;
 		server->motion_y = server->pointer_y;
@@ -538,29 +565,22 @@ x11server_backend_pointer(
 	}
 
 	/* The button's press or release, with the buttons held before it. */
-	type = X11_EVENT_BUTTON_RELEASE;
-	if (frame->pressed)
-		type = X11_EVENT_BUTTON_PRESS;
-	x11_input_event(server, owner, type, window->id, frame->button, frame->time, server->buttons);
+	state = (uint16_t)(server->key_state | ((unsigned)server->buttons << 8));
+	x11_event_button(server, frame->button, frame->pressed, frame->time, state);
 	server->buttons = frame->buttons_after;
 
-	/* A press focuses and raises the window's top level, and grabs the pointer for it. */
+	/* A press focuses and raises the top-level window under the pointer. */
 	if (frame->pressed) {
-		server->focus = window->id;
-		top = x11_window_top_level(server, window);
-		x11_window_raise(server, top);
-		window = x11_window_find(server, server->focus);
-		if (server->grab_owner < 0 &&
-		    window != NULL &&
-		    window->owner < X11_MAX_CLIENTS) {
-			server->grab_owner = (int)window->owner;
-			server->grab_window = window->id;
+		top = x11_window_top_level(x11_window_at(server, server->pointer_x, server->pointer_y));
+		if (top != server->root) {
+			x11_window_raise(server, top);
+			server->focus = top->id;
 		}
 	}
 
 	/* With every button up, the grab ends. */
 	if (server->buttons == 0U) {
-		server->grab_owner = -1;
+		server->grab_owner = X11_NO_CLIENT;
 		server->grab_window = 0U;
 	}
 }
@@ -579,7 +599,7 @@ x11server_backend_enter(
 
 	/* The X window, raised so that the pointer's hits find it. */
 	entered = x11_window_find(server, window);
-	if (entered == NULL)
+	if (entered == NULL || entered == server->root)
 		return;
 	x11_window_raise(server, entered);
 
@@ -605,50 +625,25 @@ x11server_backend_configure(
 	int height)
 {
 	struct x11_window *changed;
-	int moved;
-	int failed;
 
 	/* The X window, at a size it can have. */
 	changed = x11_window_find(server, window);
 	if (changed == NULL ||
+	    changed == server->root ||
 	    width <= 0 ||
 	    height <= 0 ||
 	    width > ROOTLESS_SIZE_MAX ||
 	    height > ROOTLESS_SIZE_MAX)
 		return;
 
-	/* A known place within X's coordinates: the window and its descendants move there. */
-	moved = 0;
-	if (x != X11_SURFACE_ANY &&
-	    y != X11_SURFACE_ANY &&
-	    x >= -ROOTLESS_SIZE_MAX && x <= ROOTLESS_SIZE_MAX &&
-	    y >= -ROOTLESS_SIZE_MAX && y <= ROOTLESS_SIZE_MAX &&
-	    (x != changed->x || y != changed->y)) {
-		x11_move_descendants(server, changed->id, (int)x - changed->x, (int)y - changed->y);
-		changed->x = (int16_t)x;
-		changed->y = (int16_t)y;
-		changed->surface_x = changed->x;
-		changed->surface_y = changed->y;
-		moved = 1;
+	/* A place not known, or outside X's coordinates, stays as it is. */
+	if (x < -ROOTLESS_SIZE_MAX || x > ROOTLESS_SIZE_MAX || y < -ROOTLESS_SIZE_MAX || y > ROOTLESS_SIZE_MAX) {
+		x = X11_SURFACE_ANY;
+		y = X11_SURFACE_ANY;
 	}
 
-	/* The same size: only the move is told. */
-	if ((unsigned)width == changed->width && (unsigned)height == changed->height) {
-		if (moved)
-			x11_configure_notify(server, changed);
-		return;
-	}
-
-	/* Pixels of the new size. */
-	failed = x11_window_resize(changed, (uint16_t)width, (uint16_t)height);
-	if (failed != 0)
-		return;
-
-	/* The size, told to the client, which draws the window again. */
-	changed->width = (uint16_t)width;
-	changed->height = (uint16_t)height;
-	x11_expose(server, changed);
-	x11_mark_dirty(server, changed->x, changed->y, changed->width, changed->height);
+	/* Succeeded: the window takes them, and its clients are told. */
+	x11_window_backend_configure(server, changed, (int)x, (int)y, (uint16_t)width, (uint16_t)height);
 }
 
 /*
@@ -661,7 +656,7 @@ x11server_backend_close(
 	uint32_t window)
 {
 	/* Remembered, when there is room. */
-	if (server->closing_count < X11_MAX_WINDOWS) {
+	if (server->closing_count < X11_CLOSING_MAX) {
 		server->closing[server->closing_count] = window;
 		server->closing_count++;
 	}

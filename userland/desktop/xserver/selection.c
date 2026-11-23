@@ -6,18 +6,13 @@
  */
 
 /*
- * Atoms, window properties and selections, and the bridge between X's
- * CLIPBOARD and the clipboard of the system the backend shows the server
- * on.
+ * Selections, and the bridge between X's CLIPBOARD and the clipboard of
+ * the system the backend shows the server on.
  *
- * Atoms: the core predefined atoms the clients use keep their numbers;
- * any other name is given the next number.  Properties: any property a
- * client sets on a window is kept (WM_NAME and the icon path are also kept
- * as the window's strings, protocol.c).  Selections: a selection's owner is
- * a client's window, told SelectionClear when another takes it; a
- * ConvertSelection is passed to the owner as SelectionRequest, and the
- * owner answers the requestor through SendEvent (SelectionNotify), as the
- * ICCCM has it.
+ * Selections: a selection's owner is a client's window, told
+ * SelectionClear when another takes it; a ConvertSelection is passed to
+ * the owner as SelectionRequest, and the owner answers the requestor
+ * through SendEvent (SelectionNotify), as the ICCCM has it.
  *
  * The bridge: when another program's text becomes the system's
  * selection, the server owns CLIPBOARD for it (on the root window) and
@@ -35,61 +30,20 @@
 
 #include "userland/desktop/xserver/internal.h"
 
-#include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* The core predefined atoms kept by name. */
-#define ATOM_PRIMARY		1U
-#define ATOM_ATOM		4U
-#define ATOM_STRING		31U
 
 /* The events of selections. */
 #define EVENT_SELECTION_CLEAR	29U
 #define EVENT_SELECTION_REQUEST	30U
 #define EVENT_SELECTION_NOTIFY	31U
 
-/* The bit a SendEvent's event carries. */
-#define EVENT_SENT		0x80U
-
-/* ChangeProperty's modes, and GetProperty's "any type". */
+/* ChangeProperty's replace mode. */
 #define PROPERTY_REPLACE	0U
-#define PROPERTY_PREPEND	1U
-#define PROPERTY_APPEND		2U
-#define PROPERTY_ANY_TYPE	0U
 
-/* The errors of these requests. */
-#define BAD_VALUE		2U
-#define BAD_ATOM		5U
+/* The longest selection name a log line shows. */
+#define SELECTION_NAME_LOG	64
 
-/* The largest property kept, in bytes. */
-#define PROPERTY_MAX		(1024U * 1024U)
-
-/*
- * One predefined atom kept by name.
- */
-struct selection_atom {
-	uint32_t atom;
-	const char *name;
-};
-
-/* The predefined atoms known by name (the others keep their numbers but have no name here). */
-static const struct selection_atom selection_predefined[] = {
-	{ 1U, "PRIMARY" },
-	{ 2U, "SECONDARY" },
-	{ 4U, "ATOM" },
-	{ 6U, "CARDINAL" },
-	{ 19U, "INTEGER" },
-	{ 31U, "STRING" },
-	{ 33U, "WINDOW" },
-	{ 39U, "WM_NAME" },
-	{ 67U, "WM_CLASS" }
-};
-
-static struct x11_property *selection_property(struct x11server *server, uint32_t window, uint32_t atom);
-static int selection_property_set(struct x11server *server, uint32_t window, uint32_t atom, uint32_t type, uint8_t format, unsigned mode, const uint8_t *data, size_t length);
-static void selection_property_delete(struct x11server *server, struct x11_property *property);
 static struct x11_selection *selection_find(struct x11server *server, uint32_t atom, int create);
 static void selection_event(struct x11server *server, unsigned owner, const uint8_t *event);
 static void selection_notify(struct x11server *server, unsigned owner, uint32_t requestor, uint32_t selection, uint32_t target, uint32_t property);
@@ -98,8 +52,7 @@ static uint32_t selection_bridge_convert(struct x11server *server, uint32_t requ
 static void selection_desktop_owns(struct x11server *server, uint32_t atom, const char *name, int text);
 static void selection_bridge_ask(struct x11server *server, uint32_t atom, uint32_t request);
 static void selection_backend_own(struct x11server *server, uint32_t atom, int own);
-static void selection_bridge_done(struct x11server *server, uint32_t property);
-static const char *selection_name(struct x11server *server, uint32_t atom);
+static void selection_log_owner(struct x11server *server, uint32_t atom, uint32_t window, unsigned client);
 
 /*
  * Makes the atoms the server itself uses (CLIPBOARD, UTF8_STRING,
@@ -110,292 +63,11 @@ x11_selection_init(
 	struct x11server *server)
 {
 	/* Each name in turn gets its number. */
-	server->atom_clipboard = x11_atom_intern(server, "CLIPBOARD", 0);
-	server->atom_utf8 = x11_atom_intern(server, "UTF8_STRING", 0);
-	server->atom_targets = x11_atom_intern(server, "TARGETS", 0);
-	server->atom_text = x11_atom_intern(server, "TEXT", 0);
-	server->atom_bridge = x11_atom_intern(server, "ZED_SELECTION", 0);
-}
-
-/*
- * Finds a name's atom; a new name gets the next number unless only an
- * existing one is asked for.  Returns the atom, or 0 (None) for an unknown
- * name asked only if it exists, or when the table is full.
- */
-uint32_t
-x11_atom_intern(
-	struct x11server *server,
-	const char *name,
-	int only_if_exists)
-{
-	unsigned index;
-	size_t length;
-	int same;
-
-	/* A predefined name keeps its number. */
-	for (index = 0; index < sizeof(selection_predefined) / sizeof(selection_predefined[0]); index++) {
-		same = strcmp(name, selection_predefined[index].name);
-		if (same == 0)
-			return selection_predefined[index].atom;
-	}
-
-	/* A name given a number before. */
-	for (index = 0; index < server->atom_count; index++) {
-		same = strcmp(name, server->atom_names[index]);
-		if (same == 0)
-			return X11_ATOM_FIRST_DYNAMIC + index;
-	}
-
-	/* An unknown one asked only if it exists, a full table, or too long a name: None. */
-	length = strlen(name);
-	if (only_if_exists || server->atom_count == X11_MAX_ATOMS || length >= X11_ATOM_NAME)
-		return 0U;
-
-	/* Succeeded: the next number. */
-	(void)snprintf(server->atom_names[server->atom_count], X11_ATOM_NAME, "%s", name);
-	server->atom_count++;
-	return X11_ATOM_FIRST_DYNAMIC + server->atom_count - 1U;
-}
-
-/* InternAtom: a name's atom (only if it exists, when asked). */
-unsigned
-x11_request_intern_atom(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[32];
-	char name[X11_ATOM_NAME];
-	size_t count;
-	uint32_t atom;
-
-	/* The name's length and bytes. */
-	client = &server->clients[index];
-	if (length < 8U)
-		return X11_BAD_LENGTH;
-	count = x11_read16(request + 4, client->order);
-	if (count > length - 8U)
-		return X11_BAD_LENGTH;
-
-	/* A name too long for the table has no atom. */
-	atom = 0U;
-	if (count < sizeof(name)) {
-		memcpy(name, request + 8, count);
-		name[count] = '\0';
-		atom = x11_atom_intern(server, name, request[1] != 0U);
-	}
-
-	/* The reply. */
-	memset(reply, 0, sizeof(reply));
-	x11_write32(reply + 8, atom, client->order);
-	x11_reply(server, client, reply, sizeof(reply));
-
-	/* Succeeded: answered. */
-	return 0U;
-}
-
-/* GetAtomName: an atom's name (BadAtom for one without a name here). */
-unsigned
-x11_request_get_atom_name(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[32 + X11_ATOM_NAME + 4];
-	const char *name;
-	size_t count;
-	size_t padded;
-
-	/* The atom's name. */
-	client = &server->clients[index];
-	if (length < 8U)
-		return X11_BAD_LENGTH;
-	name = selection_name(server, x11_read32(request + 4, client->order));
-	if (name == NULL)
-		return BAD_ATOM;
-
-	/* The reply with the name, padded. */
-	memset(reply, 0, sizeof(reply));
-	count = strlen(name);
-	padded = (count + 3U) & ~(size_t)3U;
-	x11_write16(reply + 8, (uint16_t)count, client->order);
-	memcpy(reply + 32, name, count);
-	x11_reply(server, client, reply, 32U + padded);
-
-	/* Succeeded: answered. */
-	return 0U;
-}
-
-/*
- * ChangeProperty of any other property than WM_NAME and the icon path
- * (protocol.c keeps those): kept with the window, replaced, prepended to
- * or appended to.
- */
-unsigned
-x11_request_change_property(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_window *found;
-	struct x11_client *client;
-	uint32_t window;
-	uint32_t count;
-	size_t bytes;
-	uint8_t format;
-	int error;
-
-	/* The window, the property's type and format, and its data's length. */
-	client = &server->clients[index];
-	if (length < 24U)
-		return X11_BAD_LENGTH;
-	window = x11_read32(request + 4, client->order);
-	found = x11_window_find(server, window);
-	if (found == NULL)
-		return X11_BAD_WINDOW;
-	format = request[16];
-	count = x11_read32(request + 20, client->order);
-
-	/* Only 8, 16 or 32 bits a unit, and data within the request. */
-	if (format != 8U && format != 16U && format != 32U)
-		return BAD_VALUE;
-	bytes = (size_t)count * (size_t)(format / 8U);
-	if (bytes > length - 24U)
-		return X11_BAD_LENGTH;
-
-	/* Kept (a property too large is refused). */
-	error = selection_property_set(server, window, x11_read32(request + 8, client->order), x11_read32(request + 12, client->order), format, request[1], request + 24, bytes);
-	if (error != 0)
-		return X11_BAD_ALLOC;
-
-	/* Succeeded: changed. */
-	return 0U;
-}
-
-/*
- * GetProperty of a kept property: its type and format, the part asked
- * (from long-offset, at most long-length units of four bytes) and what is
- * left after it; deleted when asked and all was read.  A property that is
- * not kept answers None.  Returns 0 when it answered, or an error.
- */
-unsigned
-x11_request_get_property(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_property *property;
-	struct x11_window *found;
-	struct x11_client *client;
-	uint8_t *reply;
-	uint32_t window;
-	uint32_t type;
-	size_t offset;
-	size_t count;
-	size_t most;
-	size_t after;
-	size_t padded;
-	int msb;
-
-	/* The window must exist. */
-	client = &server->clients[index];
-	msb = client->order;
-	if (length < 24U)
-		return X11_BAD_LENGTH;
-	window = x11_read32(request + 4, msb);
-	found = x11_window_find(server, window);
-	if (found == NULL)
-		return X11_BAD_WINDOW;
-
-	/* The property; none is a reply of type None. */
-	property = selection_property(server, window, x11_read32(request + 8, msb));
-	type = x11_read32(request + 12, msb);
-	if (property == NULL) {
-		reply = calloc(1U, 32U);
-		if (reply == NULL)
-			return X11_BAD_ALLOC;
-		x11_reply(server, client, reply, 32U);
-		free(reply);
-		return 0U;
-	}
-
-	/* Another type than asked: its type and format and its whole length, no data. */
-	offset = (size_t)x11_read32(request + 16, msb) * 4U;
-	if (type != PROPERTY_ANY_TYPE && type != property->type) {
-		reply = calloc(1U, 32U);
-		if (reply == NULL)
-			return X11_BAD_ALLOC;
-		reply[1] = property->format;
-		x11_write32(reply + 8, property->type, msb);
-		x11_write32(reply + 12, (uint32_t)property->length, msb);
-		x11_reply(server, client, reply, 32U);
-		free(reply);
-		return 0U;
-	}
-
-	/* The part asked for, and what is left after it. */
-	if (offset > property->length)
-		return BAD_VALUE;
-	count = property->length - offset;
-	most = (size_t)x11_read32(request + 20, msb) * 4U;
-	if (count > most)
-		count = most;
-	after = property->length - offset - count;
-	padded = (count + 3U) & ~(size_t)3U;
-
-	/* The reply: the type, the format, what is after, the units given, and the data. */
-	reply = calloc(1U, 32U + padded);
-	if (reply == NULL)
-		return X11_BAD_ALLOC;
-	reply[1] = property->format;
-	x11_write32(reply + 8, property->type, msb);
-	x11_write32(reply + 12, (uint32_t)after, msb);
-	x11_write32(reply + 16, (uint32_t)(count / (size_t)(property->format / 8U)), msb);
-	memcpy(reply + 32, property->data + offset, count);
-	x11_reply(server, client, reply, 32U + padded);
-	free(reply);
-
-	/* Deleted when asked and all was read. */
-	if (request[1] != 0U && after == 0U)
-		selection_property_delete(server, property);
-
-	/* Succeeded: answered. */
-	return 0U;
-}
-
-/* DeleteProperty: the property goes (one that is not there is fine). */
-unsigned
-x11_request_delete_property(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_property *property;
-	struct x11_window *found;
-	struct x11_client *client;
-	uint32_t window;
-
-	/* The window and the property. */
-	client = &server->clients[index];
-	if (length < 12U)
-		return X11_BAD_LENGTH;
-	window = x11_read32(request + 4, client->order);
-	found = x11_window_find(server, window);
-	if (found == NULL)
-		return X11_BAD_WINDOW;
-	property = selection_property(server, window, x11_read32(request + 8, client->order));
-
-	/* Succeeded: it is gone. */
-	if (property != NULL)
-		selection_property_delete(server, property);
-	return 0U;
+	server->atom_clipboard = x11_atom_intern(server, "CLIPBOARD", 9U, 0);
+	server->atom_utf8 = x11_atom_intern(server, "UTF8_STRING", 11U, 0);
+	server->atom_targets = x11_atom_intern(server, "TARGETS", 7U, 0);
+	server->atom_text = x11_atom_intern(server, "TEXT", 4U, 0);
+	server->atom_bridge = x11_atom_intern(server, "ZED_SELECTION", 13U, 0);
 }
 
 /*
@@ -413,13 +85,13 @@ x11_request_set_selection_owner(
 	struct x11_selection *entry;
 	struct x11_window *found;
 	struct x11_client *client;
-	const char *name;
 	uint32_t window;
 	uint32_t atom;
+	int valid;
 
 	/* The owner window (None, or a window) and the selection. */
 	client = &server->clients[index];
-	if (length < 16U)
+	if (length != 16U)
 		return X11_BAD_LENGTH;
 	window = x11_read32(request + 4, client->order);
 	atom = x11_read32(request + 8, client->order);
@@ -428,6 +100,9 @@ x11_request_set_selection_owner(
 		found = x11_window_find(server, window);
 	if (window != 0U && found == NULL)
 		return X11_BAD_WINDOW;
+	valid = x11_atom_valid(server, atom);
+	if (!valid)
+		return X11_BAD_ATOM;
 	entry = selection_find(server, atom, 1);
 	if (entry == NULL)
 		return X11_BAD_ALLOC;
@@ -440,10 +115,7 @@ x11_request_set_selection_owner(
 	entry->window = window;
 	entry->owner = index;
 	entry->time = x11_read32(request + 12, client->order);
-	name = selection_name(server, atom);
-	if (name == NULL)
-		name = "?";
-	x11_log(server, "X11 SELECTION owner selection=%s window=0x%x client=%u", name, window, index);
+	selection_log_owner(server, atom, window, index);
 
 	/* CLIPBOARD or PRIMARY owned by an X client is the system's selection; given up, the system's is emptied. */
 	if (window != 0U) {
@@ -468,12 +140,18 @@ x11_request_get_selection_owner(
 	struct x11_client *client;
 	uint8_t reply[32];
 	uint32_t window;
+	uint32_t atom;
+	int valid;
 
 	/* The selection's owner. */
 	client = &server->clients[index];
-	if (length < 8U)
+	if (length != 8U)
 		return X11_BAD_LENGTH;
-	entry = selection_find(server, x11_read32(request + 4, client->order), 0);
+	atom = x11_read32(request + 4, client->order);
+	valid = x11_atom_valid(server, atom);
+	if (!valid)
+		return X11_BAD_ATOM;
+	entry = selection_find(server, atom, 0);
 	window = 0U;
 	if (entry != NULL)
 		window = entry->window;
@@ -514,10 +192,11 @@ x11_request_convert_selection(
 	int primary;
 	int bridge;
 	int text;
+	int valid;
 
 	/* The requestor, the selection, the target and the property (None: the target's name). */
 	client = &server->clients[index];
-	if (length < 24U)
+	if (length != 24U)
 		return X11_BAD_LENGTH;
 	requestor = x11_read32(request + 4, client->order);
 	selection = x11_read32(request + 8, client->order);
@@ -526,6 +205,17 @@ x11_request_convert_selection(
 	found = x11_window_find(server, requestor);
 	if (found == NULL)
 		return X11_BAD_WINDOW;
+	valid = x11_atom_valid(server, selection);
+	if (!valid)
+		return X11_BAD_ATOM;
+	valid = x11_atom_valid(server, target);
+	if (!valid)
+		return X11_BAD_ATOM;
+	if (property != 0U) {
+		valid = x11_atom_valid(server, property);
+		if (!valid)
+			return X11_BAD_ATOM;
+	}
 	if (property == 0U)
 		property = target;
 
@@ -539,11 +229,11 @@ x11_request_convert_selection(
 	if (entry != NULL && entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT)
 		bridge = 1;
 	primary = 0;
-	if (selection == ATOM_PRIMARY)
+	if (selection == X11_ATOM_PRIMARY)
 		primary = server->ops->clipboard_has_text(server->backend, X11_SELECTION_PRIMARY);
 	text = server->ops->clipboard_has_text(server->backend, X11_SELECTION_CLIPBOARD);
 	if ((entry == NULL || entry->window == 0U) && (text || primary) &&
-	    (selection == ATOM_PRIMARY || selection == server->atom_clipboard))
+	    (selection == X11_ATOM_PRIMARY || selection == server->atom_clipboard))
 		bridge = 1;
 	if (bridge) {
 		answered = selection_bridge_convert(server, requestor, target, property, primary);
@@ -576,56 +266,54 @@ x11_request_convert_selection(
 }
 
 /*
- * SendEvent: the event goes to the destination window's owner, marked as
- * sent.  A SelectionNotify to the root window answers the server's own
- * request for the X owner's text (the bridge).
+ * Ends the oldest request of the bridge: the X owner (the client of the
+ * slot) answered with a SelectionNotify to the root window (the event,
+ * least significant byte first), whose property holds its text (None:
+ * none); the backend answers the system's request with it.
  */
-unsigned
-x11_request_send_event(
+void
+x11_selection_bridge_done(
 	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
+	unsigned slot,
+	const uint8_t *event)
 {
-	struct x11_window *window;
-	struct x11_client *client;
-	struct x11_client *receiver;
-	uint32_t destination;
-	uint8_t event[32];
+	struct x11_property *kept;
+	uint32_t property;
+	uint32_t request;
+	size_t done;
 
-	/* The destination and the event. */
-	client = &server->clients[index];
-	if (length < 44U)
-		return X11_BAD_LENGTH;
-	destination = x11_read32(request + 4, client->order);
-	memcpy(event, request + 12, sizeof(event));
+	/* The property the answer names (the sender is not checked yet). */
+	(void)slot;
+	property = x11_read32(event + 20, 0);
 
-	/* A SelectionNotify to the root window ends a request of the bridge (its property names the answer, None for none). */
-	if (destination == X11_ROOT_XID && (event[0] & 0x7fU) == EVENT_SELECTION_NOTIFY) {
-		selection_bridge_done(server, x11_read32(event + 20, client->order));
-		return 0U;
+	/* The oldest waiting request. */
+	if (server->pending_count == 0U)
+		return;
+	request = server->pending_sends[0];
+	server->pending_count--;
+	memmove(&server->pending_sends[0], &server->pending_sends[1], server->pending_count * sizeof(server->pending_sends[0]));
+
+	/* The owner's text, when it gave some. */
+	kept = NULL;
+	if (property != 0U)
+		kept = x11_property_find(server->root, property);
+
+	/* The request is answered with all of it, or with none. */
+	if (kept != NULL) {
+		done = server->ops->clipboard_answer(server->backend, request, kept->data, kept->length);
+	} else {
+		done = server->ops->clipboard_answer(server->backend, request, NULL, 0U);
 	}
 
-	/* Another destination must be a window of a client. */
-	window = x11_window_find(server, destination);
-	if (window == NULL)
-		return X11_BAD_WINDOW;
-
-	/* An owner of the other byte order gets the event's fields turned to its own. */
-	receiver = x11_client_of(server, window->owner);
-	if (receiver != NULL && receiver->order != client->order)
-		x11_event_swap(event);
-
-	/* Succeeded: sent to the window's owner, marked as sent. */
-	event[0] |= EVENT_SENT;
-	selection_event(server, window->owner, event);
-	return 0U;
+	/* The property goes. */
+	if (kept != NULL)
+		x11_property_delete(server, server->root, property);
+	x11_log(server, "X11 SELECTION sent bytes=%lu", (unsigned long)done);
 }
 
 /*
- * Forgets what a window held: its properties, and the selections it owned
- * (a selection owned by it has no owner any more; CLIPBOARD's is taken
- * back from the system).
+ * Forgets the selections a window owned: such a selection has no owner
+ * any more (CLIPBOARD's and PRIMARY's are taken back from the system).
  */
 void
 x11_selection_forget_window(
@@ -633,13 +321,6 @@ x11_selection_forget_window(
 	uint32_t window)
 {
 	unsigned index;
-
-	/* Its properties. */
-	for (index = X11_MAX_PROPERTIES; index > 0U; index--) {
-		/* Only this window's. */
-		if (server->properties[index - 1U].window == window && server->properties[index - 1U].data != NULL)
-			selection_property_delete(server, &server->properties[index - 1U]);
-	}
 
 	/* The selections it owned. */
 	for (index = 0; index < server->selection_count; index++) {
@@ -654,20 +335,44 @@ x11_selection_forget_window(
 }
 
 /*
- * Frees every property still kept (the root window's outlive their
- * clients) when the server ends.
+ * Forgets the selections a closed client owned (through a window of
+ * another client): such a selection has no owner any more.
  */
 void
-x11_selection_destroy(
-	struct x11server *server)
+x11_selection_forget_client(
+	struct x11server *server,
+	unsigned client)
 {
 	unsigned index;
 
-	/* Each kept property. */
-	for (index = 0U; index < X11_MAX_PROPERTIES; index++) {
-		if (server->properties[index].data != NULL)
-			selection_property_delete(server, &server->properties[index]);
+	/* The selections it owned. */
+	for (index = 0; index < server->selection_count; index++) {
+		/* Only this client's. */
+		if (server->selections[index].window == 0U || server->selections[index].owner != client)
+			continue;
+
+		/* No owner now; the system's clipboard or primary selection is taken back. */
+		server->selections[index].window = 0U;
+		selection_backend_own(server, server->selections[index].atom, 0);
 	}
+}
+
+/*
+ * Hears that a window's property changed or was deleted.  The selections
+ * wait for no property yet.
+ */
+void
+x11_selection_property_event(
+	struct x11server *server,
+	struct x11_window *window,
+	uint32_t atom,
+	int deleted)
+{
+	/* Nothing waits for it. */
+	(void)server;
+	(void)window;
+	(void)atom;
+	(void)deleted;
 }
 
 /*
@@ -684,7 +389,7 @@ x11server_backend_clipboard(
 {
 	/* PRIMARY's owner. */
 	if (selection == X11_SELECTION_PRIMARY) {
-		selection_desktop_owns(server, ATOM_PRIMARY, "PRIMARY", text);
+		selection_desktop_owns(server, X11_ATOM_PRIMARY, "PRIMARY", text);
 		return;
 	}
 
@@ -707,238 +412,12 @@ x11server_backend_clipboard_request(
 {
 	/* PRIMARY's owner is asked. */
 	if (selection == X11_SELECTION_PRIMARY) {
-		selection_bridge_ask(server, ATOM_PRIMARY, request);
+		selection_bridge_ask(server, X11_ATOM_PRIMARY, request);
 		return;
 	}
 
 	/* CLIPBOARD's owner is asked. */
 	selection_bridge_ask(server, server->atom_clipboard, request);
-}
-
-/*
- * The system's text became (or stopped being) a selection's: with text
- * the server owns it on the root window (the X owner before is told
- * SelectionClear); without, the server's ownership ends.
- */
-static void
-selection_desktop_owns(
-	struct x11server *server,
-	uint32_t atom,
-	const char *name,
-	int text)
-{
-	struct x11_selection *entry;
-
-	/* The selection's entry. */
-	entry = selection_find(server, atom, 1);
-	if (entry == NULL)
-		return;
-
-	/* Text: the server owns it on the root window (the X owner before is told). */
-	if (text) {
-		if (entry->window != 0U && entry->window != X11_ROOT_XID)
-			selection_clear(server, entry);
-		entry->window = X11_ROOT_XID;
-		entry->owner = X11_NO_CLIENT;
-		x11_log(server, "X11 SELECTION owner selection=%s window=root client=desktop", name);
-		return;
-	}
-
-	/* No text: the server's ownership ends. */
-	if (entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT)
-		entry->window = 0U;
-}
-
-/*
- * Asks a selection's X owner for its text for a request of the system:
- * the request waits, and the owner is asked for UTF8_STRING in the root
- * window's bridge property.  Without an owner, or with too many waiting,
- * the request is answered at once with no text.
- */
-static void
-selection_bridge_ask(
-	struct x11server *server,
-	uint32_t atom,
-	uint32_t request)
-{
-	struct x11_selection *entry;
-	struct x11_client *owner;
-	uint8_t event[32];
-
-	/* The selection's X owner. */
-	entry = selection_find(server, atom, 0);
-	owner = NULL;
-	if (entry != NULL && entry->window != 0U && entry->window != X11_ROOT_XID)
-		owner = x11_client_of(server, entry->owner);
-
-	/* Nobody to ask, or too many waiting: no text. */
-	if (owner == NULL || server->pending_count == X11_PENDING_SENDS) {
-		(void)server->ops->clipboard_answer(server->backend, request, NULL, 0U);
-		return;
-	}
-
-	/* The request waits for the answer. */
-	server->pending_sends[server->pending_count] = request;
-	server->pending_count++;
-
-	/* Succeeded: the owner is asked, the root window as the requestor. */
-	memset(event, 0, sizeof(event));
-	event[0] = EVENT_SELECTION_REQUEST;
-	x11_write32(event + 8, entry->window, owner->order);
-	x11_write32(event + 12, X11_ROOT_XID, owner->order);
-	x11_write32(event + 16, atom, owner->order);
-	x11_write32(event + 20, server->atom_utf8, owner->order);
-	x11_write32(event + 24, server->atom_bridge, owner->order);
-	selection_event(server, entry->owner, event);
-}
-
-/*
- * Gives the class of a window from its WM_CLASS (two strings, the instance
- * and the class; the instance when there is no class).  Returns 0, or
- * ENOENT when the window has none.
- */
-int
-x11_window_class(
-	struct x11server *server,
-	uint32_t window,
-	char *name,
-	size_t size)
-{
-	struct x11_property *property;
-	const char *data;
-	size_t instance;
-	size_t used;
-
-	/* An 8-bit WM_CLASS with some text. */
-	property = selection_property(server, window, X11_ATOM_WM_CLASS);
-	if (property == NULL || property->format != 8U || property->length == 0U || size == 0U)
-		return ENOENT;
-	data = (const char *)property->data;
-
-	/* The class after the instance's NUL, else the instance. */
-	instance = strnlen(data, property->length);
-	if (instance + 1U < property->length && data[instance + 1U] != '\0') {
-		data += instance + 1U;
-		instance = strnlen(data, property->length - (size_t)(data - (const char *)property->data));
-	}
-
-	/* Succeeded: as much as fits. */
-	used = instance;
-	if (used > size - 1U)
-		used = size - 1U;
-	memcpy(name, data, used);
-	name[used] = '\0';
-	if (used == 0U)
-		return ENOENT;
-	return 0;
-}
-
-/* Finds a window's kept property; NULL when it has none of the name. */
-static struct x11_property *
-selection_property(
-	struct x11server *server,
-	uint32_t window,
-	uint32_t atom)
-{
-	unsigned index;
-
-	/* Each kept property. */
-	for (index = 0; index < X11_MAX_PROPERTIES; index++) {
-		/* The window's, of the name. */
-		if (server->properties[index].data != NULL && server->properties[index].window == window && server->properties[index].atom == atom)
-			return &server->properties[index];
-	}
-
-	/* None. */
-	return NULL;
-}
-
-/*
- * Keeps a property's data: replaced (the type and format with it), or
- * added before or after what is there.  Returns 0, or an errno value
- * (ENOMEM, E2BIG, EINVAL for a mode or a type that does not match).
- */
-static int
-selection_property_set(
-	struct x11server *server,
-	uint32_t window,
-	uint32_t atom,
-	uint32_t type,
-	uint8_t format,
-	unsigned mode,
-	const uint8_t *data,
-	size_t length)
-{
-	struct x11_property *property;
-	uint8_t *joined;
-	unsigned index;
-	size_t kept;
-
-	/* The property there, or a free slot for a new one. */
-	property = selection_property(server, window, atom);
-	if (property == NULL) {
-		for (index = 0; index < X11_MAX_PROPERTIES && property == NULL; index++) {
-			/* A free slot. */
-			if (server->properties[index].data == NULL)
-				property = &server->properties[index];
-		}
-
-		/* A full table keeps no more; a new property is always replaced. */
-		if (property == NULL)
-			return ENOMEM;
-		mode = PROPERTY_REPLACE;
-	}
-
-	/* A known mode; added data must be of the same type and format. */
-	if (mode > PROPERTY_APPEND)
-		return EINVAL;
-	if (mode != PROPERTY_REPLACE && (property->type != type || property->format != format))
-		return EINVAL;
-
-	/* The new data: what is added, and what was there on its side. */
-	if (mode != PROPERTY_REPLACE && property->length + length > PROPERTY_MAX)
-		return E2BIG;
-	if (mode == PROPERTY_REPLACE && length > PROPERTY_MAX)
-		return E2BIG;
-	kept = 0;
-	if (mode != PROPERTY_REPLACE)
-		kept = property->length;
-	joined = malloc(length + kept + 1U);
-	if (joined == NULL)
-		return ENOMEM;
-	if (mode == PROPERTY_PREPEND) {
-		memcpy(joined, data, length);
-		memcpy(joined + length, property->data, property->length);
-		length += property->length;
-	} else if (mode == PROPERTY_APPEND) {
-		memcpy(joined, property->data, property->length);
-		memcpy(joined + property->length, data, length);
-		length += property->length;
-	} else {
-		memcpy(joined, data, length);
-	}
-
-	/* Succeeded: the property holds it. */
-	free(property->data);
-	property->window = window;
-	property->atom = atom;
-	property->type = type;
-	property->format = format;
-	property->data = joined;
-	property->length = length;
-	return 0;
-}
-
-/* Lets a property go. */
-static void
-selection_property_delete(
-	struct x11server *server,
-	struct x11_property *property)
-{
-	/* The data, and the slot is free. */
-	(void)server;
-	free(property->data);
-	memset(property, 0, sizeof(*property));
 }
 
 /* Finds a selection's entry, made when asked and there is room; NULL otherwise. */
@@ -1062,27 +541,33 @@ selection_bridge_convert(
 	uint32_t property,
 	int primary)
 {
+	struct x11_window *window;
 	uint8_t targets[16];
 	uint32_t type;
 	size_t length;
 	uint8_t *text;
+	unsigned code;
 	int error;
 
-	/* TARGETS: the types given, as atoms. */
+	/* The requestor's window. */
+	window = x11_window_find(server, requestor);
+	if (window == NULL)
+		return 0U;
+
+	/* TARGETS: the types given, as atoms (least significant byte first, as properties are kept). */
 	if (target == server->atom_targets) {
-		memcpy(targets, &server->atom_targets, 4U);
-		memcpy(targets + 4, &server->atom_utf8, 4U);
-		type = ATOM_STRING;
-		memcpy(targets + 8, &type, 4U);
-		memcpy(targets + 12, &server->atom_text, 4U);
-		error = selection_property_set(server, requestor, property, ATOM_ATOM, 32U, PROPERTY_REPLACE, targets, sizeof(targets));
-		if (error != 0)
+		x11_write32(targets, server->atom_targets, 0);
+		x11_write32(targets + 4, server->atom_utf8, 0);
+		x11_write32(targets + 8, X11_ATOM_STRING, 0);
+		x11_write32(targets + 12, server->atom_text, 0);
+		code = x11_property_set(server, window, property, X11_ATOM_ATOM, 32U, PROPERTY_REPLACE, targets, sizeof(targets), X11_NO_CLIENT);
+		if (code != 0U)
 			return 0U;
 		return property;
 	}
 
 	/* Only the text types. */
-	if (target != server->atom_utf8 && target != ATOM_STRING && target != server->atom_text)
+	if (target != server->atom_utf8 && target != X11_ATOM_STRING && target != server->atom_text)
 		return 0U;
 
 	/* The system's text: its primary selection's for PRIMARY when it has one, else its clipboard's. */
@@ -1098,11 +583,11 @@ selection_bridge_convert(
 
 	/* In the requestor's property, of the type asked (TEXT is given as UTF8_STRING). */
 	type = server->atom_utf8;
-	if (target == ATOM_STRING)
-		type = ATOM_STRING;
-	error = selection_property_set(server, requestor, property, type, 8U, PROPERTY_REPLACE, text, length);
+	if (target == X11_ATOM_STRING)
+		type = X11_ATOM_STRING;
+	code = x11_property_set(server, window, property, type, 8U, PROPERTY_REPLACE, text, length, X11_NO_CLIENT);
 	free(text);
-	if (error != 0)
+	if (code != 0U)
 		return 0U;
 
 	/* Succeeded: the property holds it. */
@@ -1111,42 +596,80 @@ selection_bridge_convert(
 }
 
 /*
- * Ends the oldest request of the bridge: the X owner put its text in the
- * root window's property (or answered None); the backend answers the
- * system's request with it.
+ * The system's text became (or stopped being) a selection's: with text
+ * the server owns it on the root window (the X owner before is told
+ * SelectionClear); without, the server's ownership ends.
  */
 static void
-selection_bridge_done(
+selection_desktop_owns(
 	struct x11server *server,
-	uint32_t property)
+	uint32_t atom,
+	const char *name,
+	int text)
 {
-	struct x11_property *kept;
-	uint32_t request;
-	size_t done;
+	struct x11_selection *entry;
 
-	/* The oldest waiting request. */
-	if (server->pending_count == 0U)
+	/* The selection's entry. */
+	entry = selection_find(server, atom, 1);
+	if (entry == NULL)
 		return;
-	request = server->pending_sends[0];
-	server->pending_count--;
-	memmove(&server->pending_sends[0], &server->pending_sends[1], server->pending_count * sizeof(server->pending_sends[0]));
 
-	/* The owner's text, when it gave some. */
-	kept = NULL;
-	if (property != 0U)
-		kept = selection_property(server, X11_ROOT_XID, property);
-
-	/* The request is answered with all of it, or with none. */
-	if (kept != NULL) {
-		done = server->ops->clipboard_answer(server->backend, request, kept->data, kept->length);
-	} else {
-		done = server->ops->clipboard_answer(server->backend, request, NULL, 0U);
+	/* Text: the server owns it on the root window (the X owner before is told). */
+	if (text) {
+		if (entry->window != 0U && entry->window != X11_ROOT_XID)
+			selection_clear(server, entry);
+		entry->window = X11_ROOT_XID;
+		entry->owner = X11_NO_CLIENT;
+		x11_log(server, "X11 SELECTION owner selection=%s window=root client=desktop", name);
+		return;
 	}
 
-	/* The property goes. */
-	if (kept != NULL)
-		selection_property_delete(server, kept);
-	x11_log(server, "X11 SELECTION sent bytes=%lu", (unsigned long)done);
+	/* No text: the server's ownership ends. */
+	if (entry->window == X11_ROOT_XID && entry->owner == X11_NO_CLIENT)
+		entry->window = 0U;
+}
+
+/*
+ * Asks a selection's X owner for its text for a request of the system:
+ * the request waits, and the owner is asked for UTF8_STRING in the root
+ * window's bridge property.  Without an owner, or with too many waiting,
+ * the request is answered at once with no text.
+ */
+static void
+selection_bridge_ask(
+	struct x11server *server,
+	uint32_t atom,
+	uint32_t request)
+{
+	struct x11_selection *entry;
+	struct x11_client *owner;
+	uint8_t event[32];
+
+	/* The selection's X owner. */
+	entry = selection_find(server, atom, 0);
+	owner = NULL;
+	if (entry != NULL && entry->window != 0U && entry->window != X11_ROOT_XID)
+		owner = x11_client_of(server, entry->owner);
+
+	/* Nobody to ask, or too many waiting: no text. */
+	if (owner == NULL || server->pending_count == X11_PENDING_SENDS) {
+		(void)server->ops->clipboard_answer(server->backend, request, NULL, 0U);
+		return;
+	}
+
+	/* The request waits for the answer. */
+	server->pending_sends[server->pending_count] = request;
+	server->pending_count++;
+
+	/* Succeeded: the owner is asked, the root window as the requestor. */
+	memset(event, 0, sizeof(event));
+	event[0] = EVENT_SELECTION_REQUEST;
+	x11_write32(event + 8, entry->window, owner->order);
+	x11_write32(event + 12, X11_ROOT_XID, owner->order);
+	x11_write32(event + 16, atom, owner->order);
+	x11_write32(event + 20, server->atom_utf8, owner->order);
+	x11_write32(event + 24, server->atom_bridge, owner->order);
+	selection_event(server, entry->owner, event);
 }
 
 /* Makes an X owner's text the system's selection of CLIPBOARD or PRIMARY, or gives that up; other atoms are not bridged. */
@@ -1163,29 +686,30 @@ selection_backend_own(
 	}
 
 	/* PRIMARY. */
-	if (atom == ATOM_PRIMARY)
+	if (atom == X11_ATOM_PRIMARY)
 		(void)server->ops->clipboard_own(server->backend, X11_SELECTION_PRIMARY, own);
 }
 
-/* Returns an atom's name (the predefined ones kept by name, and those given numbers); NULL for another. */
-static const char *
-selection_name(
+/* Logs a selection's new owner (its name, cut for the line). */
+static void
+selection_log_owner(
 	struct x11server *server,
-	uint32_t atom)
+	uint32_t atom,
+	uint32_t window,
+	unsigned client)
 {
-	unsigned index;
+	const char *name;
+	size_t length;
 
-	/* A predefined one. */
-	for (index = 0; index < sizeof(selection_predefined) / sizeof(selection_predefined[0]); index++) {
-		/* The same number. */
-		if (selection_predefined[index].atom == atom)
-			return selection_predefined[index].name;
+	/* The selection's name. */
+	name = x11_atom_name(server, atom, &length);
+	if (name == NULL) {
+		name = "?";
+		length = 1U;
 	}
+	if (length > SELECTION_NAME_LOG)
+		length = SELECTION_NAME_LOG;
 
-	/* One given a number. */
-	if (atom >= X11_ATOM_FIRST_DYNAMIC && atom - X11_ATOM_FIRST_DYNAMIC < server->atom_count)
-		return server->atom_names[atom - X11_ATOM_FIRST_DYNAMIC];
-
-	/* None here. */
-	return NULL;
+	/* Said. */
+	x11_log(server, "X11 SELECTION owner selection=%.*s window=0x%x client=%u", (int)length, name, window, client);
 }
