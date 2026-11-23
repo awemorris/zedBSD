@@ -394,4 +394,59 @@ kwl_scale_unsnap_rect(
 	plane[3] = bottom - plane[1];
 }
 
+/*
+ * Chooses which of count things kept one a scale (scales[i], 0 for a slot
+ * that holds none; used[i] the clock of its last use) serves a pass at a
+ * scale: the one made at it (*made 1), else a slot that holds none, else
+ * the one used longest ago, to be made again at the scale (*made 0).  A
+ * slot used at the clock since or later (in the frame being recorded) is
+ * not made again, since what was recorded before still draws from it:
+ * when every slot is, count is given and nothing is made.  The passes of
+ * the outputs shown at as many scales as there are slots keep theirs, so
+ * none is made again while they are shown.
+ */
+static inline unsigned
+kwl_scale_slot_choose(
+	const unsigned *scales,
+	const uint64_t *used,
+	unsigned count,
+	unsigned scale,
+	uint64_t since,
+	int *made)
+{
+	unsigned slot;
+	unsigned free_slot;
+	unsigned oldest;
+
+	/* The slot made at the scale, a free one and the one used longest ago. */
+	free_slot = count;
+	oldest = 0U;
+	for (slot = 0U; slot < count; slot++) {
+		if (scales[slot] == scale) {
+			*made = 1;
+			return slot;
+		}
+
+		/* A slot that holds none is taken before any is made again. */
+		if (scales[slot] == 0U && free_slot == count)
+			free_slot = slot;
+
+		/* Otherwise the oldest so far. */
+		if (used[slot] < used[oldest])
+			oldest = slot;
+	}
+
+	/* A free slot, to be made at the scale. */
+	*made = 0;
+	if (free_slot != count)
+		return free_slot;
+
+	/* Every slot is in use in this frame: none is made again. */
+	if (used[oldest] >= since)
+		return count;
+
+	/* The one used longest ago, to be made again. */
+	return oldest;
+}
+
 #endif
