@@ -99,7 +99,13 @@ zedBSD's `ssh`:
   `StrictHostKeyChecking` (`yes`, `no`, `ask`, `accept-new`, `off`),
   `UserKnownHostsFile` (the first path), `GlobalKnownHostsFile`, `BatchMode`,
   `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`,
-  `RequestTTY`, `PasswordAuthentication`, `PubkeyAuthentication`, `LogLevel`.
+  `RequestTTY`, `PasswordAuthentication`, `PubkeyAuthentication`, `LogLevel`,
+  `ForwardX11`, `ForwardX11Trusted`, `ForwardX11Timeout`, `LocalForward`,
+  `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
+  `ClearAllForwardings`, `RemoteCommand` (section 4.4).
+- `SessionType none` (a connection that only forwards ports) is read but
+  refused: the tab says `ssh/config: SessionType none is not supported` and
+  does not connect.
 - Accepted only with a value that changes nothing (for example
   `HashKnownHosts no`, `ForwardAgent no`).
 - Anything else, `Match`, `Include` and `ProxyJump` among them, is an error:
@@ -135,6 +141,75 @@ The defaults are OpenSSH's: `IdentityFile ~/.ssh/id_ed25519`,
   exchange is required.
 - Authentication: the keys, then the password. keyboard-interactive and
   agents are not supported.
+
+### 4.4 Port forwarding and `RemoteCommand`
+
+A host's `LocalForward` and `RemoteForward` lines forward TCP ports as
+OpenSSH's `ssh -L` and `ssh -R` do, and as zedBSD's `ssh` does:
+
+```
+Host db
+    HostName server.example.org
+    LocalForward 8080 127.0.0.1:80
+    RemoteForward 9000 localhost:3000
+```
+
+- `LocalForward [address:]port host:hostport`: mikuterm listens on this PC
+  and each connection to it goes through the SSH connection to `host` and
+  `hostport` as the server reaches them. Without an address it listens on
+  the loopback addresses (`127.0.0.1` and `::1`) only; with `GatewayPorts
+  yes`, or the address `*` or empty, on every address of the PC (other
+  computers can then use the port); `localhost` is the loopback addresses;
+  another address (or a name, looked up) is that address only.
+- `RemoteForward [address:]port host:hostport`: the server listens on
+  `port` (on `localhost` unless an address is given; its sshd's
+  `GatewayPorts` decides what it allows) and each connection to it comes to
+  `host` and `hostport` as this PC reaches them. A connection that cannot be
+  made in 30 seconds is refused. `port` 0 lets the server choose.
+- `ExitOnForwardFailure yes` ends the connection when a forwarding cannot be
+  set up; `ClearAllForwardings yes` drops every forwarding of the host.
+- The forwardings start once the user is logged in and last as long as the
+  connection. When the shell ends while forwarded connections are open, the
+  connection stays until they end (the tab says so); close the tab to end
+  them. Each tab connecting to the host has its own forwardings: a second
+  tab with the same `LocalForward` cannot listen on the port.
+- A listening socket is exclusive (`SO_EXCLUSIVEADDRUSE`): no other program
+  can take the port while mikuterm listens on it. When the connection is
+  made again (Enter after a failure), a port that its last connections
+  still hold is tried once more after 2 seconds.
+- Listening on every address may make Windows Defender Firewall ask whether
+  mikuterm may accept connections from the network. On the loopback
+  addresses anyone using this PC can connect to the port, as with OpenSSH.
+
+The tab shows OpenSSH's short lines when a forwarding is not set up as
+asked, and nothing when it is:
+
+| When | The tab shows |
+| --- | --- |
+| A `LocalForward` cannot listen on an address | `bind [127.0.0.1]:8080: Address already in use` (the last address tried) |
+| No `LocalForward` can listen | `Could not request local forwarding.` |
+| The server refuses a `RemoteForward` | `Warning: remote port forwarding failed for listen port 9000` |
+| The server chose the port of `RemoteForward 0 ...` | `Allocated port 40123 for remote forward to localhost:3000` |
+| `ExitOnForwardFailure yes` and a forwarding failed | the connection ends with `Could not request local forwarding.` or `Error: remote port forwarding failed for listen port 9000`, and Enter connects again |
+
+A forwarded connection that the server or this PC cannot make (OpenSSH's
+`channel N: open failed:` and `connect_to ...` lines) is closed without a
+line in the tab. Dynamic forwarding (`DynamicForward`, SOCKS), forwarding
+Unix sockets, and a `RemoteForward` without a destination (a SOCKS proxy on
+the server) are not supported; `DynamicForward` is an error of
+`ssh/config`.
+
+`RemoteCommand` runs that command instead of the shell, on a terminal as the
+shell would be. Its tokens are OpenSSH's: `%%`, `%h` (the host's address),
+`%n` and `%k` (the name as given), `%p`, `%r` (the remote user), `%u` (the
+Windows user), `%d` (the user's profile folder), `%l` (this PC's name),
+`%L` (that name up to its first dot) and `%j` (empty). `%C` and `%i`
+(Windows has no user number) are errors, as are an unknown token and a `%`
+at the end; the tab then names the problem and does not connect.
+
+How a forwarded port differs from OpenSSH's: the server's connections to a
+`RemoteForward` are refused once the shell ended (OpenSSH takes them while
+the connection lasts).
 
 ## 5. Tabs and questions
 
