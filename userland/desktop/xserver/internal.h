@@ -1665,6 +1665,7 @@ void x11_input_capture_lost(struct x11server *server, uint32_t time);
 unsigned x11_input_grab_device(struct x11server *server, unsigned index, int keyboard, const struct x11_grab *grab, uint32_t time);
 void x11_input_ungrab_device(struct x11server *server, unsigned index, int keyboard, uint32_t time);
 void x11_input_allow(struct x11server *server, unsigned index, unsigned mode, uint32_t time);
+unsigned x11_input_button_map(struct x11server *server, const uint8_t *map);
 
 /* wm.c: the top-level windows' window manager (ICCCM and EWMH). */
 int x11_wm_init(struct x11server *server);

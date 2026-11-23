@@ -6,8 +6,9 @@
  */
 
 /*
- * XInputExtension (version 2.2, with the two requests of version 1 its
- * libraries ask first) and the Generic Event Extension its events need.
+ * XInputExtension (version 2.2, and version 1's requests and events for
+ * the programs that still use them) and the Generic Event Extension its
+ * events need.
  *
  * The server has one pointer and one keyboard, which the extension shows
  * as the two master devices (the virtual core pointer, 2, and keyboard,
@@ -25,8 +26,24 @@
  * that heard it in the extension's form) is one of input.c's, which hears
  * the extension's events its mask names.
  *
- * Requests: GetExtensionVersion and ListInputDevices (version 1),
- * XIQueryPointer, XIWarpPointer, XIChangeCursor, XISetClientPointer,
+ * Version 1 shows the physical devices to its clients: OpenDevice opens
+ * them (not the master devices, which are the core's), and a client that
+ * selected a version 1 event on a window (SelectExtensionEvent) hears it
+ * there from the physical device when no client selected version 2's,
+ * before the core's clients.  Their maps, feedbacks, focus and state are
+ * the core pointer's and keyboard's.
+ *
+ * Requests: GetExtensionVersion, ListInputDevices, OpenDevice,
+ * CloseDevice, SetDeviceMode (the valuators stay absolute),
+ * SelectExtensionEvent, GetSelectedExtensionEvents, the don't-propagate
+ * lists (none kept), GetDeviceMotionEvents (no history), GetDeviceFocus,
+ * SetDeviceFocus, GetFeedbackControl, ChangeFeedbackControl (the
+ * pointer's), GetDeviceKeyMapping, GetDeviceModifierMapping,
+ * GetDeviceButtonMapping, SetDeviceButtonMapping, QueryDeviceState,
+ * DeviceBell and the device properties (none) of version 1; the other
+ * requests of version 1 (the grabs, the maps' changes, SendExtensionEvent,
+ * the valuators' and the devices' controls) are refused with
+ * BadImplementation.  XIQueryPointer, XIWarpPointer, XIChangeCursor, XISetClientPointer,
  * XIGetClientPointer, XISelectEvents, XIQueryVersion, XIQueryDevice,
  * XISetFocus, XIGetFocus, XIGrabDevice, XIUngrabDevice, XIAllowEvents,
  * XIPassiveGrabDevice (whose grabs the server cannot make, and says so for
@@ -36,8 +53,8 @@
  * refused with BadImplementation.  The Generic Event Extension answers
  * GEQueryVersion.
  *
- * Wire layouts follow the public XInput protocol specification (version
- * 2.2) and the Generic Event Extension's (version 1.0).
+ * Wire layouts follow the public XInput protocol specifications (version
+ * 1.5 and version 2.2) and the Generic Event Extension's (version 1.0).
  */
 
 #include "userland/desktop/xserver/internal.h"
@@ -79,6 +96,84 @@
 #define XI_DELETE_PROPERTY		58U
 #define XI_GET_PROPERTY			59U
 #define XI_GET_SELECTED_EVENTS		60U
+
+/* Version 1's requests the server answers, and the range of version 1's requests. */
+#define XI1_OPEN_DEVICE			3U
+#define XI1_CLOSE_DEVICE		4U
+#define XI1_SET_DEVICE_MODE		5U
+#define XI1_SELECT_EXTENSION_EVENT	6U
+#define XI1_GET_SELECTED_EVENTS		7U
+#define XI1_CHANGE_DONT_PROPAGATE	8U
+#define XI1_GET_DONT_PROPAGATE		9U
+#define XI1_GET_MOTION_EVENTS		10U
+#define XI1_GET_FOCUS			20U
+#define XI1_SET_FOCUS			21U
+#define XI1_GET_FEEDBACK		22U
+#define XI1_CHANGE_FEEDBACK		23U
+#define XI1_GET_KEY_MAPPING		24U
+#define XI1_GET_MODIFIER_MAPPING	26U
+#define XI1_GET_BUTTON_MAPPING		28U
+#define XI1_SET_BUTTON_MAPPING		29U
+#define XI1_QUERY_STATE			30U
+#define XI1_DEVICE_BELL			32U
+#define XI1_LIST_PROPERTIES		36U
+#define XI1_DELETE_PROPERTY		38U
+#define XI1_GET_PROPERTY		39U
+#define XI1_FIRST			3U
+#define XI1_LAST			39U
+
+/*
+ * Version 1's events, by their codes after the extension's first event,
+ * and how many codes there are.
+ */
+#define XI1_EVENT_VALUATOR		0U
+#define XI1_EVENT_KEY_PRESS		1U
+#define XI1_EVENT_BUTTON_PRESS		3U
+#define XI1_EVENT_MOTION		5U
+#define XI1_EVENT_FOCUS_IN		6U
+#define XI1_EVENT_STATE_NOTIFY		10U
+#define XI1_EVENT_PRESENCE		15U
+#define XI1_EVENTS			17U
+
+/*
+ * The event classes below the first event (the motion's hint, motion with
+ * buttons held, the grab's): kept in a selection's mask from bit 17, the
+ * last one, and the one for motion with any button held.
+ */
+#define XI1_SPECIAL_FIRST_BIT		17U
+#define XI1_SPECIAL_LAST		8U
+#define XI1_SPECIAL_BUTTON_MOTION	6U
+
+/*
+ * A version 1 selection on a window: its device with this bit (apart from
+ * version 2's), and DevicePresence's device (bit 16 of its event class).
+ */
+#define XI1_SELECTION			0x8000U
+#define XI1_PRESENCE_DEVICE		0x0100U
+
+/* Version 1's classes beyond the key, button and valuator classes, and its feedbacks. */
+#define XI1_CLASS_FEEDBACK		3U
+#define XI1_CLASS_FOCUS			5U
+#define XI1_CLASS_OTHER			6U
+#define XI1_KBD_FEEDBACK		0U
+#define XI1_PTR_FEEDBACK		1U
+#define XI1_KBD_FEEDBACK_SIZE		52U
+#define XI1_PTR_FEEDBACK_SIZE		12U
+
+/* ChangeFeedbackControl's values of a pointer, and the core's defaults -1 restores. */
+#define XI1_ACCEL_NUM			(1U << 0)
+#define XI1_ACCEL_DENOM			(1U << 1)
+#define XI1_THRESHOLD			(1U << 2)
+#define XI1_DEFAULT_ACCELERATION	2
+#define XI1_DEFAULT_THRESHOLD		4
+
+/* Version 1's errors after the extension's first (BadDevice is the first), and the bit of a device event followed by more. */
+#define XI1_BAD_MODE			2U
+#define XI1_BAD_CLASS			4U
+#define XI1_MORE_EVENTS			0x80U
+
+/* The buttons 1 to 5 of a core state. */
+#define XI1_STATE_BUTTONS		0x1f00U
 #define GE_QUERY_VERSION		0U
 
 /* The core requests the extension's ones are answered through. */
@@ -231,6 +326,27 @@ static void xinput_send_crossing(struct x11server *server, struct x11_client *cl
 static void xinput_write_state(uint8_t *bytes, const struct x11server *server, uint16_t state, int msb);
 static void xinput_send(struct x11server *server, struct x11_client *client, uint8_t *event, size_t length);
 static int xinput_window_or_none(struct x11server *server, uint32_t id);
+static unsigned xinput1_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned xinput1_open_device(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_close_device(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned xinput1_set_device_mode(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_select_extension_event(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned xinput1_get_selected_events(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned xinput1_dont_propagate(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_get_motion_events(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_get_focus(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_set_focus(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+static unsigned xinput1_get_feedback(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_change_feedback(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_get_key_mapping(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_get_modifier_mapping(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_button_mapping(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_query_state(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_device_bell(struct x11server *server, const uint8_t *request, size_t length);
+static unsigned xinput1_properties(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+static unsigned xinput1_classes(const struct x11_xi_select *entry, uint32_t *classes, unsigned count, unsigned skip);
+static int xinput1_propagate(struct x11server *server, const struct x11_window *window, uint32_t child, uint8_t type, uint8_t detail, uint32_t time, uint16_t state, unsigned only);
+static void xinput1_send(struct x11server *server, struct x11_client *client, unsigned offset, uint8_t detail, uint32_t time, const struct x11_window *window, uint32_t child, uint16_t state, uint16_t device);
 
 /*
  * Answers QueryExtension's names XInputExtension and Generic Event
@@ -360,7 +476,10 @@ x11_xinput_request(
 		code = X11_BAD_IMPLEMENTATION;
 		break;
 	default:
+		/* Version 1's other requests, or none. */
 		code = X11_BAD_REQUEST;
+		if (request[1] >= XI1_FIRST && request[1] <= XI1_LAST)
+			code = xinput1_request(server, index, request, length);
 		break;
 	}
 
@@ -460,6 +579,12 @@ x11_xinput_propagate(
 	/* Selected by others than the client named. */
 	if (heard == 0 && selected)
 		return -1;
+
+	/* Version 1's form, when no client selected version 2's here. */
+	if (!selected) {
+		heard = xinput1_propagate(server, window, child, type, detail, time, state, only);
+		return heard;
+	}
 
 	/* Succeeded: how many heard it. */
 	return heard;
@@ -1528,6 +1653,8 @@ xinput_get_selected_events(
 	for (entry = 0U; entry < window->xi_select_count; entry++) {
 		if (window->xi_selects[entry].client != index)
 			continue;
+		if ((window->xi_selects[entry].device & XI1_SELECTION) != 0U)
+			continue;
 		x11_write16(reply + used, window->xi_selects[entry].device, msb);
 		x11_write16(reply + used + 2U, 1U, msb);
 		x11_write32(reply + used + 4U, window->xi_selects[entry].mask, 0);
@@ -1745,10 +1872,12 @@ xinput_press_taken(
 	unsigned index;
 	int overlaps;
 
-	/* Each other client's entry with ButtonPress. */
+	/* Each other client's entry of version 2 with ButtonPress. */
 	for (index = 0U; index < window->xi_select_count; index++) {
 		entry = &window->xi_selects[index];
 		if (entry->client == client)
+			continue;
+		if ((entry->device & XI1_SELECTION) != 0U)
 			continue;
 		if ((entry->mask & (1U << XI_EVENT_BUTTON_PRESS)) == 0U)
 			continue;
@@ -1966,4 +2095,1063 @@ xinput_window_or_none(
 
 	/* Succeeded: a window. */
 	return 1;
+}
+
+/*
+ * Answers a request of the extension's version 1 (OpenDevice to
+ * GetDeviceProperty), on the physical devices.  Returns 0, or the error
+ * to send.
+ */
+static unsigned
+xinput1_request(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_client *client;
+	unsigned code;
+
+	/* The request's own handler. */
+	client = &server->clients[index];
+	switch (request[1]) {
+	case XI1_OPEN_DEVICE:
+		code = xinput1_open_device(server, client, request, length);
+		break;
+	case XI1_CLOSE_DEVICE:
+		code = xinput1_close_device(server, index, request, length);
+		break;
+	case XI1_SET_DEVICE_MODE:
+		code = xinput1_set_device_mode(server, client, request, length);
+		break;
+	case XI1_SELECT_EXTENSION_EVENT:
+		code = xinput1_select_extension_event(server, index, request, length);
+		break;
+	case XI1_GET_SELECTED_EVENTS:
+		code = xinput1_get_selected_events(server, index, request, length);
+		break;
+	case XI1_CHANGE_DONT_PROPAGATE:
+	case XI1_GET_DONT_PROPAGATE:
+		code = xinput1_dont_propagate(server, client, request, length);
+		break;
+	case XI1_GET_MOTION_EVENTS:
+		code = xinput1_get_motion_events(server, client, request, length);
+		break;
+	case XI1_GET_FOCUS:
+		code = xinput1_get_focus(server, client, request, length);
+		break;
+	case XI1_SET_FOCUS:
+		code = xinput1_set_focus(server, index, request, length);
+		break;
+	case XI1_GET_FEEDBACK:
+		code = xinput1_get_feedback(server, client, request, length);
+		break;
+	case XI1_CHANGE_FEEDBACK:
+		code = xinput1_change_feedback(server, client, request, length);
+		break;
+	case XI1_GET_KEY_MAPPING:
+		code = xinput1_get_key_mapping(server, client, request, length);
+		break;
+	case XI1_GET_MODIFIER_MAPPING:
+		code = xinput1_get_modifier_mapping(server, client, request, length);
+		break;
+	case XI1_GET_BUTTON_MAPPING:
+	case XI1_SET_BUTTON_MAPPING:
+		code = xinput1_button_mapping(server, client, request, length);
+		break;
+	case XI1_QUERY_STATE:
+		code = xinput1_query_state(server, client, request, length);
+		break;
+	case XI1_DEVICE_BELL:
+		code = xinput1_device_bell(server, request, length);
+		break;
+	case XI1_LIST_PROPERTIES:
+	case XI1_DELETE_PROPERTY:
+	case XI1_GET_PROPERTY:
+		code = xinput1_properties(server, client, request, length);
+		break;
+	default:
+		/* The grabs, the key and modifier maps' changes, SendExtensionEvent, the valuators' and the devices' controls, and properties kept: not made. */
+		code = X11_BAD_IMPLEMENTATION;
+		break;
+	}
+
+	/* Succeeded: answered, or the error to send. */
+	return code;
+}
+
+/*
+ * OpenDevice: a physical device opens (the master devices are the core's
+ * and do not), and its classes are answered with the first event of each
+ * (the feedbacks' class has none).
+ */
+static unsigned
+xinput1_open_device(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[40];
+
+	/* A physical device. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL || device->use < XI_USE_SLAVE_POINTER)
+		return X11_XINPUT_ERROR;
+
+	/* Its classes: a pointer's buttons, valuators, feedbacks and others; a keyboard's keys, feedbacks, focus and others. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_OPEN_DEVICE;
+	reply[8] = 4U;
+	if (device->pointer) {
+		reply[32] = (uint8_t)XI_CLASS_BUTTON;
+		reply[33] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_BUTTON_PRESS);
+		reply[34] = (uint8_t)XI_CLASS_VALUATOR;
+		reply[35] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_MOTION);
+	} else {
+		reply[32] = (uint8_t)XI_CLASS_KEY;
+		reply[33] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_KEY_PRESS);
+		reply[34] = (uint8_t)XI1_CLASS_FEEDBACK;
+		reply[35] = 0U;
+	}
+	if (device->pointer) {
+		reply[36] = (uint8_t)XI1_CLASS_FEEDBACK;
+		reply[37] = 0U;
+	} else {
+		reply[36] = (uint8_t)XI1_CLASS_FOCUS;
+		reply[37] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_FOCUS_IN);
+	}
+	reply[38] = (uint8_t)XI1_CLASS_OTHER;
+	reply[39] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_STATE_NOTIFY);
+
+	/* Succeeded: the reply. */
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/* CloseDevice: what the client selected of a physical device's events goes, on every window. */
+static unsigned
+xinput1_close_device(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	struct x11_window *window;
+	unsigned entry;
+
+	/* A physical device. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL || device->use < XI_USE_SLAVE_POINTER)
+		return X11_XINPUT_ERROR;
+
+	/* Succeeded: the client's selections of it, from the end of each window's (the last taking the place). */
+	for (window = server->root;
+	     window != NULL;
+	     window = x11_window_next(window, server->root)) {
+		entry = window->xi_select_count;
+		while (entry > 0U) {
+			entry--;
+			if (window->xi_selects[entry].client != index)
+				continue;
+			if (window->xi_selects[entry].device != (XI1_SELECTION | device->id))
+				continue;
+			window->xi_selects[entry] = window->xi_selects[window->xi_select_count - 1U];
+			window->xi_select_count--;
+		}
+	}
+	return 0U;
+}
+
+/*
+ * SetDeviceMode: the pointer's valuators are absolute (the system's
+ * pointer is) and stay so; a keyboard has no valuators.
+ */
+static unsigned
+xinput1_set_device_mode(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32];
+
+	/* A device with valuators, asked for the mode they have. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (!device->pointer)
+		return X11_BAD_MATCH;
+	if (request[5] > XI_MODE_ABSOLUTE)
+		return X11_BAD_VALUE;
+	if (request[5] != XI_MODE_ABSOLUTE)
+		return X11_BAD_MATCH;
+
+	/* Succeeded: Success. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_SET_DEVICE_MODE;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/*
+ * SelectExtensionEvent: the events of version 1 the client hears on a
+ * window, in place of those it selected there before: each event class
+ * names a device (its id in the bits above 8; DevicePresence the bit 16)
+ * and an event (the extension's event code, or one of the motion's and
+ * the grab's classes below the first event).  An unknown event is
+ * ignored, as X.Org does.
+ */
+static unsigned
+xinput1_select_extension_event(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	struct x11_window *window;
+	uint32_t masks[XI_DEVICES + 1U];
+	uint32_t event_class;
+	uint32_t bit;
+	unsigned id;
+	unsigned type;
+	unsigned count;
+	unsigned entry;
+	unsigned slot;
+	int added;
+	int msb;
+
+	/* The window and the classes. */
+	msb = server->clients[index].order;
+	if (length < 12U)
+		return X11_BAD_LENGTH;
+	window = x11_window_find(server, x11_read32(request + 4, msb));
+	if (window == NULL)
+		return X11_BAD_WINDOW;
+	count = x11_read16(request + 8, msb);
+	if (length != 12U + (size_t)count * 4U)
+		return X11_BAD_LENGTH;
+
+	/* Each class's device and event, gathered by device (the last slot DevicePresence's). */
+	memset(masks, 0, sizeof(masks));
+	for (entry = 0U; entry < count; entry++) {
+		event_class = x11_read32(request + 12U + entry * 4U, msb);
+		id = (event_class >> 8) & 0xffffU;
+		type = event_class & 0xffU;
+		if (id == XI1_PRESENCE_DEVICE) {
+			masks[XI_DEVICES] |= 1U << XI1_EVENT_PRESENCE;
+			continue;
+		}
+		device = xinput_device_find((uint16_t)id);
+		if (device == NULL)
+			return X11_XINPUT_ERROR + XI1_BAD_CLASS;
+		slot = (unsigned)(device - xinput_devices);
+		bit = 0U;
+		if (type >= X11_XINPUT_EVENT && type < X11_XINPUT_EVENT + XI1_EVENTS)
+			bit = 1U << (type - X11_XINPUT_EVENT);
+		if (type <= XI1_SPECIAL_LAST)
+			bit = 1U << (XI1_SPECIAL_FIRST_BIT + type);
+		masks[slot] |= bit;
+	}
+
+	/* What the client selected there before goes. */
+	slot = window->xi_select_count;
+	while (slot > 0U) {
+		slot--;
+		if (window->xi_selects[slot].client != index)
+			continue;
+		if ((window->xi_selects[slot].device & XI1_SELECTION) == 0U)
+			continue;
+		window->xi_selects[slot] = window->xi_selects[window->xi_select_count - 1U];
+		window->xi_select_count--;
+	}
+
+	/* Succeeded: each device's events kept. */
+	for (slot = 0U; slot <= XI_DEVICES; slot++) {
+		if (masks[slot] == 0U)
+			continue;
+		id = XI1_PRESENCE_DEVICE;
+		if (slot < XI_DEVICES)
+			id = xinput_devices[slot].id;
+		added = xinput_select_set(window, index, (uint16_t)(XI1_SELECTION | id), masks[slot]);
+		if (!added)
+			return X11_BAD_ALLOC;
+	}
+	return 0U;
+}
+
+/*
+ * GetSelectedExtensionEvents: the event classes of version 1 the client
+ * selected on a window, then those any client did (DevicePresence's is
+ * answered as 0, as X.Org answers it).
+ */
+static unsigned
+xinput1_get_selected_events(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_client *client;
+	struct x11_window *window;
+	uint32_t *classes;
+	uint8_t *reply;
+	size_t capacity;
+	unsigned own;
+	unsigned all;
+	unsigned pass;
+	unsigned entry;
+	unsigned found;
+	int msb;
+
+	/* The window. */
+	client = &server->clients[index];
+	msb = client->order;
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	window = x11_window_find(server, x11_read32(request + 4, msb));
+	if (window == NULL)
+		return X11_BAD_WINDOW;
+
+	/* Room for every class twice. */
+	capacity = (size_t)window->xi_select_count * 32U * 2U;
+	reply = calloc(1U, 32U + capacity * 4U);
+	classes = calloc(1U, capacity * sizeof(*classes) + sizeof(*classes));
+	if (reply == NULL || classes == NULL) {
+		free(reply);
+		free(classes);
+		return X11_BAD_ALLOC;
+	}
+	reply[1] = (uint8_t)XI1_GET_SELECTED_EVENTS;
+
+	/* The client's classes, then every client's (each once). */
+	own = 0U;
+	all = 0U;
+	for (pass = 0U; pass < 2U; pass++) {
+		for (entry = 0U; entry < window->xi_select_count; entry++) {
+			if ((window->xi_selects[entry].device & XI1_SELECTION) == 0U)
+				continue;
+			if (pass == 0U && window->xi_selects[entry].client != index)
+				continue;
+			found = xinput1_classes(&window->xi_selects[entry], classes, own + all, pass == 1U ? own : 0U);
+			if (pass == 0U)
+				own += found;
+			else
+				all += found;
+		}
+	}
+
+	/* Succeeded: the counts and the classes. */
+	x11_write16(reply + 8, (uint16_t)own, msb);
+	x11_write16(reply + 10, (uint16_t)all, msb);
+	for (entry = 0U; entry < own + all; entry++)
+		x11_write32(reply + 32U + entry * 4U, classes[entry], msb);
+	x11_reply(server, client, reply, 32U + (own + all) * 4U);
+	free(reply);
+	free(classes);
+	return 0U;
+}
+
+/*
+ * ChangeDeviceDontPropagateList and GetDeviceDontPropagateList: the
+ * server keeps no device events from propagating, so a list is taken and
+ * none is answered.
+ */
+static unsigned
+xinput1_dont_propagate(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	struct x11_window *window;
+	uint8_t reply[32];
+	size_t count;
+
+	/* The window, and the classes of a change. */
+	if (length < 8U)
+		return X11_BAD_LENGTH;
+	window = x11_window_find(server, x11_read32(request + 4, client->order));
+	if (window == NULL)
+		return X11_BAD_WINDOW;
+	if (request[1] == XI1_CHANGE_DONT_PROPAGATE) {
+		if (length < 12U)
+			return X11_BAD_LENGTH;
+		count = x11_read16(request + 8, client->order);
+		if (length != 12U + count * 4U)
+			return X11_BAD_LENGTH;
+		if (request[10] > 1U)
+			return X11_XINPUT_ERROR + XI1_BAD_MODE;
+		return 0U;
+	}
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+
+	/* Succeeded: an empty list. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_GET_DONT_PROPAGATE;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/* GetDeviceMotionEvents: the server keeps no motion history; the pointer's two axes are absolute. */
+static unsigned
+xinput1_get_motion_events(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32];
+
+	/* A device with valuators. */
+	if (length != 16U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[12]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (!device->pointer)
+		return X11_BAD_MATCH;
+
+	/* Succeeded: no events, two axes, absolute. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_GET_MOTION_EVENTS;
+	reply[12] = (uint8_t)XI_AXES;
+	reply[13] = (uint8_t)XI_MODE_ABSOLUTE;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/* GetDeviceFocus: a keyboard's focus is the core keyboard's, with its time and revert-to. */
+static unsigned
+xinput1_get_focus(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32];
+
+	/* A keyboard. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (device->pointer)
+		return X11_BAD_MATCH;
+
+	/* Succeeded: the focus, when it changed, and where it reverts. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_GET_FOCUS;
+	x11_write32(reply + 8, server->focus, client->order);
+	x11_write32(reply + 12, server->focus_time, client->order);
+	reply[16] = server->focus_revert;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/* SetDeviceFocus: a keyboard's focus moves as the core's SetInputFocus moves it. */
+static unsigned
+xinput1_set_focus(
+	struct x11server *server,
+	unsigned index,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t core[12];
+	unsigned code;
+
+	/* A keyboard. */
+	if (length != 16U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[13]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (device->pointer)
+		return X11_BAD_MATCH;
+
+	/* The core request: the revert-to, the focus and the time. */
+	memset(core, 0, sizeof(core));
+	core[0] = (uint8_t)CORE_SET_INPUT_FOCUS;
+	core[1] = request[12];
+	x11_write16(core + 2, 3U, server->clients[index].order);
+	memcpy(core + 4, request + 4, 8U);
+
+	/* Succeeded: as the core request does, or its error. */
+	code = x11_input_request(server, index, core, sizeof(core));
+	return code;
+}
+
+/*
+ * GetFeedbackControl: a pointer's feedback is the core pointer's
+ * acceleration, a keyboard's the core keyboard's controls.
+ */
+static unsigned
+xinput1_get_feedback(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32U + XI1_KBD_FEEDBACK_SIZE];
+	size_t size;
+	int msb;
+
+	/* A device. */
+	msb = client->order;
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+
+	/* One feedback. */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_GET_FEEDBACK;
+	x11_write16(reply + 8, 1U, msb);
+
+	/* A pointer's: the acceleration and the threshold. */
+	if (device->pointer) {
+		reply[32] = (uint8_t)XI1_PTR_FEEDBACK;
+		x11_write16(reply + 34, (uint16_t)XI1_PTR_FEEDBACK_SIZE, msb);
+		x11_write16(reply + 38, (uint16_t)server->acceleration_numerator, msb);
+		x11_write16(reply + 40, (uint16_t)server->acceleration_denominator, msb);
+		x11_write16(reply + 42, (uint16_t)server->acceleration_threshold, msb);
+		size = 32U + XI1_PTR_FEEDBACK_SIZE;
+	} else {
+		/* A keyboard's: the bell, the LEDs, the repeat and the click. */
+		reply[32] = (uint8_t)XI1_KBD_FEEDBACK;
+		x11_write16(reply + 34, (uint16_t)XI1_KBD_FEEDBACK_SIZE, msb);
+		x11_write16(reply + 36, (uint16_t)server->bell_pitch, msb);
+		x11_write16(reply + 38, (uint16_t)server->bell_duration, msb);
+		x11_write32(reply + 44, server->leds, msb);
+		reply[48] = server->global_auto_repeat;
+		reply[49] = (uint8_t)server->key_click_percent;
+		reply[50] = (uint8_t)server->bell_percent;
+		memcpy(reply + 52, server->auto_repeats, 32U);
+		size = 32U + XI1_KBD_FEEDBACK_SIZE;
+	}
+
+	/* Succeeded: the reply. */
+	x11_reply(server, client, reply, size);
+	return 0U;
+}
+
+/*
+ * ChangeFeedbackControl: a pointer's acceleration and threshold change as
+ * the core's ChangePointerControl changes them (-1 the default, a
+ * denominator of 0 BadValue); a keyboard's feedback is changed through
+ * the core's ChangeKeyboardControl.
+ */
+static unsigned
+xinput1_change_feedback(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint32_t mask;
+	int16_t numerator;
+	int16_t denominator;
+	int16_t threshold;
+	int msb;
+
+	/* A pointer's feedback. */
+	msb = client->order;
+	if (length < 12U)
+		return X11_BAD_LENGTH;
+	mask = x11_read32(request + 4, msb);
+	device = xinput_device_find(request[8]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (!device->pointer || request[12] != XI1_PTR_FEEDBACK)
+		return X11_BAD_IMPLEMENTATION;
+	if (length != 24U)
+		return X11_BAD_LENGTH;
+	numerator = (int16_t)x11_read16(request + 18, msb);
+	denominator = (int16_t)x11_read16(request + 20, msb);
+	threshold = (int16_t)x11_read16(request + 22, msb);
+
+	/* The values: -1 the default, other negatives BadValue, a denominator of 0 BadValue. */
+	if ((mask & XI1_ACCEL_NUM) != 0U && numerator < -1)
+		return X11_BAD_VALUE;
+	if ((mask & XI1_ACCEL_DENOM) != 0U && (denominator < -1 || denominator == 0))
+		return X11_BAD_VALUE;
+	if ((mask & XI1_THRESHOLD) != 0U && threshold < -1)
+		return X11_BAD_VALUE;
+
+	/* Succeeded: each value asked for. */
+	if ((mask & XI1_ACCEL_NUM) != 0U) {
+		server->acceleration_numerator = numerator;
+		if (numerator == -1)
+			server->acceleration_numerator = XI1_DEFAULT_ACCELERATION;
+	}
+	if ((mask & XI1_ACCEL_DENOM) != 0U) {
+		server->acceleration_denominator = denominator;
+		if (denominator == -1)
+			server->acceleration_denominator = 1;
+	}
+	if ((mask & XI1_THRESHOLD) != 0U) {
+		server->acceleration_threshold = threshold;
+		if (threshold == -1)
+			server->acceleration_threshold = XI1_DEFAULT_THRESHOLD;
+	}
+	return 0U;
+}
+
+/* GetDeviceKeyMapping: a keyboard's keysyms are the core map's. */
+static unsigned
+xinput1_get_key_mapping(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t *reply;
+	size_t size;
+	unsigned first;
+	unsigned count;
+	unsigned per;
+	unsigned key;
+	unsigned column;
+
+	/* A keyboard and keycodes it has. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (device->pointer)
+		return X11_BAD_MATCH;
+	first = request[5];
+	count = request[6];
+	if (first < X11_KEYMAP_KEYCODE_FIRST || first + count > X11_KEYMAP_KEYCODES)
+		return X11_BAD_VALUE;
+
+	/* The reply: the keysyms of each keycode. */
+	per = server->keysyms_per_keycode;
+	size = 32U + (size_t)count * per * 4U;
+	reply = calloc(1U, size);
+	if (reply == NULL)
+		return X11_BAD_ALLOC;
+	reply[1] = (uint8_t)XI1_GET_KEY_MAPPING;
+	reply[8] = (uint8_t)per;
+	for (key = 0U; key < count; key++) {
+		for (column = 0U; column < per; column++)
+			x11_write32(reply + 32U + ((size_t)key * per + column) * 4U, server->keysyms[first + key][column], client->order);
+	}
+
+	/* Succeeded: sent. */
+	x11_reply(server, client, reply, size);
+	free(reply);
+	return 0U;
+}
+
+/* GetDeviceModifierMapping: a keyboard's modifiers' keys are the core map's. */
+static unsigned
+xinput1_get_modifier_mapping(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32U + X11_MODIFIERS * X11_MODIFIER_KEYS_MAX];
+	unsigned per;
+	unsigned modifier;
+
+	/* A keyboard. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (device->pointer)
+		return X11_BAD_MATCH;
+
+	/* Succeeded: each modifier's keys. */
+	per = server->keys_per_modifier;
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_GET_MODIFIER_MAPPING;
+	reply[8] = (uint8_t)per;
+	for (modifier = 0U; modifier < X11_MODIFIERS; modifier++)
+		memcpy(reply + 32U + modifier * per, server->modifier_keys[modifier], per);
+	x11_reply(server, client, reply, 32U + X11_MODIFIERS * per);
+	return 0U;
+}
+
+/*
+ * GetDeviceButtonMapping and SetDeviceButtonMapping: a pointer's map is
+ * the core pointer's (changed as SetPointerMapping changes it: Busy while
+ * a button whose map changes is down, MappingNotify to every client).
+ */
+static unsigned
+xinput1_button_mapping(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32U + 12U];
+	unsigned count;
+	unsigned button;
+	unsigned other;
+
+	/* A pointer. */
+	if (length < 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	if (!device->pointer)
+		return X11_BAD_MATCH;
+	memset(reply, 0, sizeof(reply));
+	reply[1] = request[1];
+
+	/* GetDeviceButtonMapping: each button's logical button. */
+	if (request[1] == XI1_GET_BUTTON_MAPPING) {
+		if (length != 8U)
+			return X11_BAD_LENGTH;
+		reply[8] = (uint8_t)X11_BUTTONS;
+		memcpy(reply + 32, server->button_map, X11_BUTTONS);
+		x11_reply(server, client, reply, sizeof(reply));
+		return 0U;
+	}
+
+	/* SetDeviceButtonMapping: a map of every button, no logical button twice. */
+	count = request[5];
+	if (length != 8U + (((size_t)count + 3U) & ~(size_t)3U))
+		return X11_BAD_LENGTH;
+	if (count != X11_BUTTONS)
+		return X11_BAD_VALUE;
+	for (button = 0U; button < count; button++) {
+		if (request[8 + button] == 0U)
+			continue;
+		for (other = button + 1U; other < count; other++) {
+			if (request[8 + other] == request[8 + button])
+				return X11_BAD_VALUE;
+		}
+	}
+
+	/* Succeeded: the status. */
+	reply[8] = (uint8_t)x11_input_button_map(server, request + 8);
+	x11_reply(server, client, reply, 32U);
+	return 0U;
+}
+
+/*
+ * QueryDeviceState: a pointer's buttons down and its two valuators (where
+ * the pointer is, absolute); a keyboard's keys down.
+ */
+static unsigned
+xinput1_query_state(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32U + 36U + 12U];
+	unsigned button;
+	size_t size;
+	int msb;
+
+	/* A device. */
+	msb = client->order;
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	memset(reply, 0, sizeof(reply));
+	reply[1] = (uint8_t)XI1_QUERY_STATE;
+
+	/* A keyboard: its keys (a bit each keycode). */
+	if (!device->pointer) {
+		reply[8] = 1U;
+		reply[32] = (uint8_t)XI_CLASS_KEY;
+		reply[33] = 36U;
+		reply[34] = (uint8_t)(X11_KEYMAP_KEYCODES - X11_KEYMAP_KEYCODE_FIRST);
+		memcpy(reply + 36, server->keys_down, X11_KEY_BYTES);
+		size = 32U + 36U;
+		x11_reply(server, client, reply, size);
+		return 0U;
+	}
+
+	/* A pointer: its buttons (a bit each button, button 1 bit 1), then its valuators. */
+	reply[8] = 2U;
+	reply[32] = (uint8_t)XI_CLASS_BUTTON;
+	reply[33] = 36U;
+	reply[34] = (uint8_t)X11_BUTTONS;
+	for (button = 0U; button < X11_BUTTONS; button++) {
+		if ((server->physical_buttons & (1U << button)) != 0U)
+			reply[36U + (button + 1U) / 8U] |= (uint8_t)(1U << ((button + 1U) % 8U));
+	}
+	reply[68] = (uint8_t)XI_CLASS_VALUATOR;
+	reply[69] = 12U;
+	reply[70] = (uint8_t)XI_AXES;
+	reply[71] = (uint8_t)XI_MODE_ABSOLUTE;
+	x11_write32(reply + 72, (uint32_t)server->pointer_x, msb);
+	x11_write32(reply + 76, (uint32_t)server->pointer_y, msb);
+
+	/* Succeeded: sent. */
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/* DeviceBell: the keyboard's bell rings, by a backend that can. */
+static unsigned
+xinput1_device_bell(
+	struct x11server *server,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	int percent;
+
+	/* A device and a volume. */
+	if (length != 8U)
+		return X11_BAD_LENGTH;
+	device = xinput_device_find(request[4]);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+	percent = (int8_t)request[7];
+	if (percent < -100 || percent > 100)
+		return X11_BAD_VALUE;
+
+	/* Succeeded: rung. */
+	if (server->ops->bell != NULL)
+		server->ops->bell(server->backend, percent);
+	return 0U;
+}
+
+/*
+ * ListDeviceProperties, DeleteDeviceProperty and GetDeviceProperty: the
+ * devices have no properties (none listed, none to delete, each None).
+ */
+static unsigned
+xinput1_properties(
+	struct x11server *server,
+	struct x11_client *client,
+	const uint8_t *request,
+	size_t length)
+{
+	const struct xinput_device *device;
+	uint8_t reply[32];
+	uint8_t id;
+
+	/* The device, where each request has it. */
+	if (request[1] == XI1_LIST_PROPERTIES && length != 8U)
+		return X11_BAD_LENGTH;
+	if (request[1] == XI1_DELETE_PROPERTY && length != 12U)
+		return X11_BAD_LENGTH;
+	if (request[1] == XI1_GET_PROPERTY && length != 24U)
+		return X11_BAD_LENGTH;
+	id = request[4];
+	if (request[1] == XI1_DELETE_PROPERTY)
+		id = request[8];
+	if (request[1] == XI1_GET_PROPERTY)
+		id = request[20];
+	device = xinput_device_find(id);
+	if (device == NULL)
+		return X11_XINPUT_ERROR;
+
+	/* None to delete. */
+	if (request[1] == XI1_DELETE_PROPERTY)
+		return 0U;
+
+	/* Succeeded: no atoms, or a property of type None (of the device asked). */
+	memset(reply, 0, sizeof(reply));
+	reply[1] = request[1];
+	if (request[1] == XI1_GET_PROPERTY)
+		reply[21] = id;
+	x11_reply(server, client, reply, sizeof(reply));
+	return 0U;
+}
+
+/*
+ * Writes the event classes of a selection of version 1 after those
+ * written (at count), each not among those from skip on already; returns
+ * how many it wrote.
+ */
+static unsigned
+xinput1_classes(
+	const struct x11_xi_select *entry,
+	uint32_t *classes,
+	unsigned count,
+	unsigned skip)
+{
+	uint32_t event_class;
+	unsigned id;
+	unsigned bit;
+	unsigned written;
+	unsigned earlier;
+	int repeated;
+
+	/* Each bit of the mask, as the class it was selected by. */
+	id = entry->device & ~XI1_SELECTION;
+	written = 0U;
+	for (bit = 0U; bit < 32U; bit++) {
+		if ((entry->mask & (1U << bit)) == 0U)
+			continue;
+		event_class = (id << 8) | (X11_XINPUT_EVENT + bit);
+		if (bit >= XI1_SPECIAL_FIRST_BIT)
+			event_class = (id << 8) | (bit - XI1_SPECIAL_FIRST_BIT);
+		if (id == XI1_PRESENCE_DEVICE)
+			event_class = 0U;
+
+		/* Once in the list from skip on. */
+		repeated = 0;
+		for (earlier = skip; earlier < count + written; earlier++) {
+			if (classes[earlier] == event_class)
+				repeated = 1;
+		}
+		if (repeated)
+			continue;
+		classes[count + written] = event_class;
+		written++;
+	}
+
+	/* Succeeded: how many. */
+	return written;
+}
+
+/*
+ * Sends a key, button or motion event on one window to the clients that
+ * selected its version 1 form there from the physical device (the
+ * motion, too, for a client that selected motion with a button held
+ * while one is).  With a client named, only that client may hear it.
+ * Returns how many heard it, 0 when none selected it, or -1 when others
+ * did but not the named client.
+ */
+static int
+xinput1_propagate(
+	struct x11server *server,
+	const struct x11_window *window,
+	uint32_t child,
+	uint8_t type,
+	uint8_t detail,
+	uint32_t time,
+	uint16_t state,
+	unsigned only)
+{
+	const struct x11_xi_select *entry;
+	struct x11_client *client;
+	uint32_t wanted;
+	uint16_t device;
+	unsigned offset;
+	unsigned index;
+	int heard;
+	int selected;
+
+	/* The event's code from its core type, its physical device, and the bits that select it. */
+	offset = (unsigned)type - XI_EVENT_KEY_PRESS + XI1_EVENT_KEY_PRESS;
+	device = XI_SLAVE_POINTER;
+	if (type == XI_EVENT_KEY_PRESS || type == XI_EVENT_KEY_RELEASE)
+		device = XI_SLAVE_KEYBOARD;
+	wanted = 1U << offset;
+	if (type == XI_EVENT_MOTION && (state & XI1_STATE_BUTTONS) != 0U)
+		wanted |= 1U << (XI1_SPECIAL_FIRST_BIT + XI1_SPECIAL_BUTTON_MOTION);
+
+	/* Each client that selected it (a client has one entry a device). */
+	heard = 0;
+	selected = 0;
+	for (index = 0U; index < window->xi_select_count; index++) {
+		entry = &window->xi_selects[index];
+		if (entry->device != (XI1_SELECTION | device))
+			continue;
+		if ((entry->mask & wanted) == 0U)
+			continue;
+		selected = 1;
+		if (only != X11_NO_CLIENT && entry->client != only)
+			continue;
+		client = x11_client_of(server, entry->client);
+		if (client == NULL)
+			continue;
+		xinput1_send(server, client, offset, detail, time, window, child, state, device);
+		heard++;
+	}
+
+	/* Selected by others than the client named. */
+	if (heard == 0 && selected)
+		return -1;
+
+	/* Succeeded: how many heard it. */
+	return heard;
+}
+
+/*
+ * Sends one version 1 device event as seen from a window (the pointer's
+ * places, the state, the device), a pointer's followed by DeviceValuator
+ * with its two axes.
+ */
+static void
+xinput1_send(
+	struct x11server *server,
+	struct x11_client *client,
+	unsigned offset,
+	uint8_t detail,
+	uint32_t time,
+	const struct x11_window *window,
+	uint32_t child,
+	uint16_t state,
+	uint16_t device)
+{
+	uint8_t event[64];
+	size_t length;
+	int msb;
+
+	/* The event: its code, detail, sequence number, time, windows, places, state, screen and device. */
+	msb = client->order;
+	memset(event, 0, sizeof(event));
+	event[0] = (uint8_t)(X11_XINPUT_EVENT + offset);
+	event[1] = detail;
+	x11_write16(event + 2, client->sequence, msb);
+	x11_write32(event + 4, time, msb);
+	x11_write32(event + 8, X11_ROOT_XID, msb);
+	x11_write32(event + 12, window->id, msb);
+	x11_write32(event + 16, child, msb);
+	x11_write16(event + 20, (uint16_t)server->pointer_x, msb);
+	x11_write16(event + 22, (uint16_t)server->pointer_y, msb);
+	x11_write16(event + 24, (uint16_t)(server->pointer_x - window->x), msb);
+	x11_write16(event + 26, (uint16_t)(server->pointer_y - window->y), msb);
+	x11_write16(event + 28, state, msb);
+	event[30] = 1U;
+	event[31] = (uint8_t)device;
+	length = 32U;
+
+	/* A pointer's two axes follow (more events said in the device's byte). */
+	if (device == XI_SLAVE_POINTER) {
+		event[31] = (uint8_t)(device | XI1_MORE_EVENTS);
+		event[32] = (uint8_t)(X11_XINPUT_EVENT + XI1_EVENT_VALUATOR);
+		event[33] = (uint8_t)device;
+		x11_write16(event + 34, client->sequence, msb);
+		x11_write16(event + 36, state, msb);
+		event[38] = (uint8_t)XI_AXES;
+		event[39] = 0U;
+		x11_write32(event + 40, (uint32_t)server->pointer_x, msb);
+		x11_write32(event + 44, (uint32_t)server->pointer_y, msb);
+		length = 64U;
+	}
+
+	/* Succeeded: queued. */
+	x11_client_send(server, client, event, length);
 }
