@@ -28,6 +28,8 @@
 static int region_reserve(struct x11_region *region, size_t count);
 static size_t region_cut(const struct x11_box *box, const struct x11_box *hole, struct x11_box *pieces);
 static int region_box_before(const struct x11_box *a, const struct x11_box *b);
+static int region_compare_int(const void *a, const void *b);
+static int region_compare_x(const void *a, const void *b);
 
 /*
  * Makes an empty region that holds no memory.
@@ -401,6 +403,132 @@ x11_region_sort(
 }
 
 /*
+ * Puts a region in the form X's regions take: bands from top to bottom,
+ * each band's boxes from left to right with no two touching, and two
+ * bands that touch merged when their boxes span the same columns.  Two
+ * regions of the same pixels are then the same boxes in the same order
+ * (what Expose and GraphicsExpose events give).  Returns 0, or ENOMEM
+ * (the region is then only sorted).
+ */
+int
+x11_region_canonical(
+	struct x11_region *region)
+{
+	struct x11_box *result;
+	struct x11_box *band;
+	int *edges;
+	size_t edge_count;
+	size_t count;
+	size_t index;
+	size_t edge;
+	size_t band_start;
+	size_t previous_start;
+	size_t previous_count;
+	size_t made;
+	int same;
+	int top;
+	int bottom;
+
+	/* Nothing to do for fewer than two boxes. */
+	if (region->count < 2U)
+		return 0;
+
+	/* Every box's top and bottom, in order, each once. */
+	edges = malloc(region->count * 2U * sizeof(*edges));
+	if (edges == NULL) {
+		x11_region_sort(region);
+		return ENOMEM;
+	}
+	for (index = 0U; index < region->count; index++) {
+		edges[index * 2U] = region->boxes[index].y0;
+		edges[index * 2U + 1U] = region->boxes[index].y1;
+	}
+	qsort(edges, region->count * 2U, sizeof(*edges), region_compare_int);
+	edge_count = 0U;
+	for (index = 0U; index < region->count * 2U; index++) {
+		if (edge_count != 0U && edges[edge_count - 1U] == edges[index])
+			continue;
+		edges[edge_count] = edges[index];
+		edge_count++;
+	}
+
+	/* Room for the result: a band holds at most every box, and there are fewer bands than edges (too many is only sorted). */
+	if (edge_count > REGION_MAX / region->count) {
+		free(edges);
+		x11_region_sort(region);
+		return ENOMEM;
+	}
+	result = malloc(region->count * edge_count * sizeof(*result));
+	if (result == NULL) {
+		free(edges);
+		x11_region_sort(region);
+		return ENOMEM;
+	}
+
+	/* Each band between two edges: the boxes across it, left to right, touching ones merged. */
+	made = 0U;
+	previous_start = 0U;
+	previous_count = 0U;
+	for (edge = 0U; edge + 1U < edge_count; edge++) {
+		top = edges[edge];
+		bottom = edges[edge + 1U];
+		band_start = made;
+		for (index = 0U; index < region->count; index++) {
+			if (region->boxes[index].y0 > top || region->boxes[index].y1 < bottom)
+				continue;
+			result[made].x0 = region->boxes[index].x0;
+			result[made].x1 = region->boxes[index].x1;
+			result[made].y0 = top;
+			result[made].y1 = bottom;
+			made++;
+		}
+		band = result + band_start;
+		count = made - band_start;
+		qsort(band, count, sizeof(*band), region_compare_x);
+		made = band_start;
+		for (index = 0U; index < count; index++) {
+			if (made > band_start && result[made - 1U].x1 >= band[index].x0) {
+				if (band[index].x1 > result[made - 1U].x1)
+					result[made - 1U].x1 = band[index].x1;
+				continue;
+			}
+			result[made] = band[index];
+			made++;
+		}
+		count = made - band_start;
+		if (count == 0U)
+			continue;
+
+		/* A band that touches the one before and spans the same columns lengthens it. */
+		same = 0;
+		if (previous_count == count && result[previous_start].y1 == top) {
+			same = 1;
+			for (index = 0U; index < count; index++) {
+				if (result[previous_start + index].x0 != result[band_start + index].x0 ||
+				    result[previous_start + index].x1 != result[band_start + index].x1)
+					same = 0;
+			}
+		}
+		if (same) {
+			for (index = 0U; index < count; index++)
+				result[previous_start + index].y1 = bottom;
+			made = band_start;
+			continue;
+		}
+		previous_start = band_start;
+		previous_count = count;
+	}
+
+	/* Succeeded: the region in its form. */
+	free(edges);
+	free(region->boxes);
+	region->boxes = result;
+	region->count = made;
+	region->capacity = region->count * edge_count;
+	return 0;
+}
+
+/*
  * Gives the smallest box around a region (an empty box for an empty
  * region).
  */
@@ -571,6 +699,46 @@ region_box_before(
 
 	/* As high: the box further left. */
 	if (a->x0 < b->x0)
+		return 1;
+
+	return 0;
+}
+
+/* Orders two ints for qsort. */
+static int
+region_compare_int(
+	const void *a,
+	const void *b)
+{
+	int left;
+	int right;
+
+	/* The values. */
+	left = *(const int *)a;
+	right = *(const int *)b;
+	if (left < right)
+		return -1;
+	if (left > right)
+		return 1;
+
+	return 0;
+}
+
+/* Orders two boxes of one band by their left edges for qsort. */
+static int
+region_compare_x(
+	const void *a,
+	const void *b)
+{
+	int left;
+	int right;
+
+	/* The left edges. */
+	left = ((const struct x11_box *)a)->x0;
+	right = ((const struct x11_box *)b)->x0;
+	if (left < right)
+		return -1;
+	if (left > right)
 		return 1;
 
 	return 0;

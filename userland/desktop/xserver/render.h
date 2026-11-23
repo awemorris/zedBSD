@@ -114,6 +114,7 @@ void x11_region_intersect_box(struct x11_region *region, const struct x11_box *b
 int x11_region_intersect(struct x11_region *region, const struct x11_region *other);
 void x11_region_translate(struct x11_region *region, int dx, int dy);
 void x11_region_sort(struct x11_region *region);
+int x11_region_canonical(struct x11_region *region);
 void x11_region_extents(const struct x11_region *region, struct x11_box *extents);
 int x11_box_intersect(const struct x11_box *a, const struct x11_box *b, struct x11_box *result);
 

@@ -883,9 +883,8 @@ x11_request_poly_line(
  * foreground where a bit is set and the background where it is clear;
  * XYPixmap gives each plane as a bitmap, the most significant first;
  * ZPixmap gives whole pixels (32 bits for depth 24, one bit for depth 1).
- * Bitmaps are rows padded to 32 bits, the leftmost pixel the most
- * significant bit, in the client's byte order (the setup's image byte
- * order), after left-pad bits.
+ * Bitmaps are rows padded to 32 bits after left-pad bits, in the bit
+ * order the setup gave the client (its own byte order).
  */
 unsigned
 x11_request_put_image(
@@ -1898,7 +1897,7 @@ draw_expose(
 	/* On the window, top to bottom. */
 	top = x11_window_top_level(window);
 	x11_region_translate(region, top->x - window->x, top->y - window->y);
-	x11_region_sort(region);
+	(void)x11_region_canonical(region);
 
 	/* Told, and the region put back on the pixels. */
 	x11_event_expose(server, window, region);
@@ -2144,7 +2143,7 @@ draw_graphics_expose(
 	}
 
 	/* Each box, top to bottom, with how many follow. */
-	x11_region_sort(region);
+	(void)x11_region_canonical(region);
 	for (index = 0U; index < region->count; index++) {
 		memset(event, 0, sizeof(event));
 		event[0] = EVENT_GRAPHICS_EXPOSE;
@@ -2266,9 +2265,11 @@ draw_put_rows(
 }
 
 /*
- * Reads the bit of a pixel of a bitmap row: rows are 32-bit units in the
- * client's byte order, the leftmost pixel the unit's most significant
- * bit.
+ * Reads the bit of a pixel of a bitmap row.  The setup gives the client
+ * its own byte order as both the image byte order and the bitmap bit
+ * order, so the bytes run left to right and the leftmost pixel of a byte
+ * is its most significant bit for a most-significant-first client, its
+ * least significant bit for the other.
  */
 static uint32_t
 draw_bit(
@@ -2277,16 +2278,14 @@ draw_bit(
 	int msb)
 {
 	unsigned bit;
-	unsigned byte;
 
-	/* The bit within its unit, from the most significant, and the byte that holds it. */
-	bit = 31U - index % 32U;
-	byte = bit / 8U;
+	/* The bit within its byte. */
+	bit = index % 8U;
 	if (msb)
-		byte = 3U - byte;
+		bit = 7U - bit;
 
 	/* Its value. */
-	return ((uint32_t)row[(index / 32U) * 4U + byte] >> (bit % 8U)) & 1U;
+	return ((uint32_t)row[index / 8U] >> bit) & 1U;
 }
 
 /* Sets the bit of a pixel of a bitmap row (the layout draw_bit reads). */
@@ -2297,16 +2296,14 @@ draw_set_bit(
 	int msb)
 {
 	unsigned bit;
-	unsigned byte;
 
-	/* The bit within its unit, and the byte that holds it. */
-	bit = 31U - index % 32U;
-	byte = bit / 8U;
+	/* The bit within its byte. */
+	bit = index % 8U;
 	if (msb)
-		byte = 3U - byte;
+		bit = 7U - bit;
 
 	/* Set. */
-	row[(index / 32U) * 4U + byte] |= (uint8_t)(1U << (bit % 8U));
+	row[index / 8U] |= (uint8_t)(1U << bit);
 }
 
 /* Gives the bytes of a bitmap row of a count of bits, padded to 32 bits. */
