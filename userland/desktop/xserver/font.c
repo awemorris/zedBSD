@@ -22,7 +22,7 @@
  * zed-unicode is the 8x16 font of the tree's own clients.
  *
  * Glyphs are drawn from the face at the font's size into one bit a pixel
- * (half covered or more) and kept, a few hundred a font.  A monospaced
+ * (a third covered or more) and kept, a few hundred a font.  A monospaced
  * font draws the line-drawing characters itself across its whole cell, at
  * their Unicode places and at 1 to 31, where X's fixed fonts keep the DEC
  * special graphics.
@@ -99,8 +99,11 @@
 /* The most properties a font answers with. */
 #define FONT_PROPERTIES_MAX		20U
 
-/* How much coverage sets a pixel of a glyph. */
-#define FONT_COVERED			128U
+/*
+ * How much coverage (of 255) sets a pixel of a glyph: about a third, so
+ * that a stem a small size puts across two pixels keeps one of them.
+ */
+#define FONT_COVERED			80U
 
 /* The shapes the line-drawing characters are made of: half lines from the cell's middle, and the scan lines. */
 #define LINE_UP				0x01U
