@@ -1355,6 +1355,7 @@ struct kwl_output_scale_state {
 
 /* The choice of a display's scale (output-scale.c). */
 void kwl_output_scale_choose(struct kwl_server *server);
+void kwl_output_scale_head(struct kwl_server *server, struct kwl_head *head);
 void kwl_output_scale_report(struct kwl_server *server, VkDisplayKHR display, const char *key, struct kwl_output_scale_state *state);
 int kwl_output_scale_set(struct kwl_server *server, const char *key, unsigned scale120, int *saved);
 void kwl_output_resolution_report(struct kwl_server *server, const char *key, unsigned *state, uint32_t *remaining_ms);

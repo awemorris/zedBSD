@@ -24,6 +24,13 @@
  * scale of a display beside it is refused (no room), as its resolution
  * and its angle are.  The login screen keeps 100 % (or the default) and
  * reads no user's choice.
+ *
+ * A display shown beside the output (a head) takes its own scale the same
+ * way when it opens (kwl_output_scale_head): its rectangle of the plane is
+ * its pixels over that scale, and an extended head draws its part of the
+ * plane at it.  A mirror shows the output's picture, drawn at the output's
+ * scale, fitted to the head's pixels; the head keeps its own scale for the
+ * extended mode.
  */
 
 #include "kwl.h"
@@ -90,6 +97,48 @@ kwl_output_scale_choose(
 }
 
 /*
+ * Chooses the scale of a head that opens, for the display and the mode it
+ * opens at, as kwl_output_scale_choose does for the output: the user's
+ * choice for the monitor, or the default, shown at a step the mode
+ * offers.  Sets the head's physical size, its scale and its rectangle's
+ * size in logical units (its pixels over the scale).  Called before the
+ * head is placed.
+ */
+void
+kwl_output_scale_head(
+	struct kwl_server *server,
+	struct kwl_head *head)
+{
+	char identity[KWL_RESOLUTION_IDENTITY];
+	uint32_t mm_width;
+	uint32_t mm_height;
+	unsigned recommended;
+	unsigned chosen;
+	unsigned shown;
+	unsigned dpi;
+
+	/* The display's physical size, its density and the default it asks for. */
+	output_scale_physical(server, head->display, head->name, &mm_width, &mm_height);
+	head->mm_width = mm_width;
+	head->mm_height = mm_height;
+	dpi = kwl_scale_density(head->pixel_width, head->pixel_height, mm_width, mm_height);
+	recommended = kwl_scale_recommended(head->pixel_width, head->pixel_height, mm_width, mm_height);
+
+	/* The user's choice for the monitor, shown at a step the mode offers. */
+	chosen = output_scale_chosen(server, head->display, head->name);
+	shown = kwl_scale_shown(chosen, recommended, head->pixel_width, head->pixel_height);
+
+	/* Succeeded: the head's scale and its logical size. */
+	head->scale_wanted = shown;
+	head->scale120 = shown;
+	head->width = kwl_scale_logical(head->pixel_width, shown);
+	head->height = kwl_scale_logical(head->pixel_height, shown);
+	kwl_output_resolution_identity(server, head->display, head->name, identity, sizeof(identity));
+	printf("KWL SCALE head key=%s id=%s mode=%ux%u mm=%ux%u dpi=%u recommended=%u chosen=%u scale=%u logical=%ux%u\n", head->name, identity,
+	    head->pixel_width, head->pixel_height, mm_width, mm_height, dpi, recommended, chosen, shown, head->width, head->height);
+}
+
+/*
  * Tells a display's scale (its connector's key) as the displays objects
  * hear it: the scale it is shown at, the user's choice, the default, the
  * steps it offers now, its logical size, and why its scale cannot be
@@ -151,6 +200,11 @@ kwl_output_scale_report(
 
 	/* The scale it is shown at and its logical size: the anchor's and a head's as they are, another's as it would be. */
 	if (display == compose->display && compose->output_open) {
+		state->current = server->scale120;
+		state->width = server->width;
+		state->height = server->height;
+	} else if (head != NULL && compose->display_mode == KWL_DISPLAYS_MIRROR) {
+		/* A mirror shows the output's picture: the output's desktop, drawn at the output's scale. */
 		state->current = server->scale120;
 		state->width = server->width;
 		state->height = server->height;
