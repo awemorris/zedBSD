@@ -192,6 +192,9 @@ x11server_destroy(
 	for (index = 0U; index < server->clients_max; index++)
 		x11_client_close(server, index);
 
+	/* The clipboard's copies and the texts being given in pieces. */
+	x11_selection_destroy(server);
+
 	/* The root window, with what is left of it (its properties). */
 	if (server->root != NULL) {
 		x11_property_forget_window(server, server->root);
