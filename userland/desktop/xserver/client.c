@@ -574,9 +574,11 @@ x11server_next(
 
 /*
  * Does the work due: the windows the backend asked to close, a motion
- * held back, each client's whole requests, the windows' new pixels shown,
- * the clients that stopped taking their output closed, and the report of
- * stuck clients.  *wake is when the caller is to call again.  Returns 0.
+ * held back, each client's whole requests, the windows' new pixels and
+ * the cursor shown (an animated one moved on), the clients that stopped
+ * taking their output closed, and the report of stuck clients.  *wake is
+ * when the caller is to call again (by an animated cursor's next frame).
+ * Returns 0.
  */
 int
 x11server_tick(
@@ -587,6 +589,8 @@ x11server_tick(
 	struct x11_client *client;
 	unsigned grabbed;
 	unsigned index;
+	uint32_t due;
+	int animated;
 	int waiting;
 	int timed;
 	int more;
@@ -659,6 +663,11 @@ x11server_tick(
 	} else {
 		*wake = server->now + SERVER_REPORT_MS;
 	}
+
+	/* Sooner when the animated cursor shown moves on before then. */
+	animated = x11_cursor_due(server, &due);
+	if (animated && (int32_t)(due - *wake) < 0)
+		*wake = due;
 
 	/* Succeeded: the work due is done. */
 	return 0;
