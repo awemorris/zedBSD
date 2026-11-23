@@ -304,8 +304,9 @@ win32_surface_close(
 	SetWindowLongPtrW(surface->hwnd, GWLP_USERDATA, 0);
 	DestroyWindow(surface->hwnd);
 
-	/* Frees the pixels and the surface. */
+	/* Frees the pixels, the cursor and the surface. */
 	window_dib_free(surface);
+	win32_cursor_free(surface);
 	win32_log(backend, "X11 WIN32 close window=0x%lx", (unsigned long)surface->window);
 	free(surface);
 }
@@ -523,9 +524,13 @@ window_message(
 			return MA_NOACTIVATE;
 		break;
 	case WM_SETCURSOR:
-		/* The arrow over the X pixels (X's cursors are not shown yet). */
+		/* Over the X pixels, the X window's cursor (the arrow until the core gives one). */
 		if (LOWORD(lparam) == HTCLIENT) {
-			SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+			if (surface->cursor != NULL) {
+				SetCursor(surface->cursor);
+			} else {
+				SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+			}
 			return TRUE;
 		}
 		break;

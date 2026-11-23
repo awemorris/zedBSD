@@ -70,7 +70,7 @@ static void server_report_history(struct x11server *server, const struct x11_cli
 static void server_vulkan_lost(struct x11server *server);
 
 /*
- * Starts a server: the core font and the root window, with the backend
+ * Starts a server: the core fonts' faces and the root window, with the backend
  * the options name.  Returns 0, or an errno value.
  */
 int
@@ -80,7 +80,6 @@ x11server_create(
 	struct x11server **result)
 {
 	struct x11server *server;
-	unsigned index;
 	int shows;
 	int error;
 
@@ -142,18 +141,10 @@ x11server_create(
 		server->height = SERVER_HEIGHT;
 	}
 
-	/* The first monospaced font file. */
-	for (index = 0U; index < options->font_count; index++) {
-		if (options->fonts[index].role == X11SERVER_FONT_MONO)
-			break;
-	}
-
-	/* The core font's face over the caller's bytes; without one, text is not drawn. */
-	if (index < options->font_count) {
-		error = x11_glyphs_open(&server->glyphs, options->fonts[index].bytes, options->fonts[index].size, options->font_fallback_path);
-		if (error != 0)
-			x11_log(server, "xserver: font: %s (no text)", strerror(error));
-	}
+	/* The core fonts' faces over the caller's bytes; without any, text is not drawn. */
+	error = x11_faces_open(&server->faces, options->fonts, options->font_count, options->font_fallback_path);
+	if (error != 0)
+		x11_log(server, "xserver: font: %s", strerror(error));
 
 	/* The core's atoms, and those the server uses itself (selection.c). */
 	error = x11_atoms_init(server);
@@ -226,7 +217,8 @@ x11server_destroy(
 
 	/* Vulkan's state, after every swapchain on it, and the font. */
 	x11_vulkan_close(server->vulkan);
-	x11_glyphs_close(&server->glyphs);
+	x11_fonts_fini(server);
+	x11_faces_close(&server->faces);
 
 	/* The server itself. */
 	free(server->clients);
@@ -615,7 +607,8 @@ x11server_tick(
 	/* An X owner's text in pieces starts once the owner listens. */
 	waiting = x11_selection_tick(server);
 
-	/* What changed is shown. */
+	/* The cursor under the pointer, and what changed, shown. */
+	x11_cursor_update(server);
 	x11_rootless_present(server);
 
 	/* A client that stopped taking its output is closed, and one refused once its refusal is taken. */

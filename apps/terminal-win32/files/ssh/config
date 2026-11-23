@@ -8,6 +8,9 @@
 #	HostName server.example.org
 #	User me
 #	IdentityFile ~/.ssh/id_ed25519
+#	# Remote X programs as windows here (the host's sshd needs
+#	# X11Forwarding yes and xauth):
+#	ForwardX11 yes
 #
 # WSL: run sshd inside WSL on a port of its own (for example 2222) and
 # connect to it through WSL's localhost forwarding:

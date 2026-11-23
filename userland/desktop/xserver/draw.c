@@ -35,7 +35,6 @@
 
 /* The requests named in GraphicsExpose and NoExpose, and those that share a handler. */
 #define REQUEST_COPY_AREA		62U
-#define REQUEST_IMAGE_TEXT16		77U
 
 /* The events of a copy whose source could or could not be read. */
 #define EVENT_GRAPHICS_EXPOSE		13U
@@ -1001,92 +1000,71 @@ x11_request_get_image(
 }
 
 /*
- * ImageText8 and ImageText16: characters in the core font from a
- * baseline, in the context's foreground.
+ * Draws the glyphs of a text request (font.c) on a drawable with a
+ * graphics context: ImageText's on a box filled first with the context's
+ * background, in its foreground whatever its function and fill style;
+ * PolyText's as the context fills.  Returns 0, or BadDrawable, BadGC or
+ * BadMatch (nothing is then drawn).
  */
 unsigned
-x11_request_image_text(
+x11_draw_text(
 	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
+	const struct x11_text *text)
 {
 	struct draw_target target;
 	struct x11_paint paint;
-	struct x11_glyph glyph;
 	struct x11_box bounds;
+	struct x11_box box;
+	const struct x11_text_glyph *glyph;
 	struct x11_gc *gc;
-	uint32_t codepoint;
-	size_t count;
-	size_t bytes;
-	size_t character;
+	size_t item;
 	unsigned code;
-	int missing;
-	int wide;
-	int x;
-	int y;
-	int top;
-	int msb;
 
-	/* The context and the drawable. */
-	msb = server->clients[index].order;
-	if (length < 16U)
-		return X11_BAD_LENGTH;
-	code = draw_exists(server, x11_read32(request + 4, msb));
+	/* The drawable and the context, of its depth. */
+	code = draw_exists(server, text->drawable);
 	if (code != 0U)
 		return code;
-	gc = x11_gc_find(server, x11_read32(request + 8, msb));
+	gc = x11_gc_find(server, text->gc);
 	if (gc == NULL)
 		return X11_BAD_GC;
-	code = draw_target_gc(server, x11_read32(request + 4, msb), gc, &target);
+	code = draw_target_gc(server, text->drawable, gc, &target);
 	if (code != 0U) {
 		draw_target_fini(&target);
 		return code;
 	}
 
-	/* The characters fill the request to its last word (two bytes each for ImageText16). */
-	count = request[1];
-	wide = 0;
-	if (request[0] == REQUEST_IMAGE_TEXT16)
-		wide = 1;
-	bytes = count;
-	if (wide)
-		bytes = count * 2U;
-	if (16U + ((bytes + 3U) & ~(size_t)3U) != length) {
-		draw_target_fini(&target);
-		return X11_BAD_LENGTH;
-	}
-	if (target.image == NULL) {
+	/* Nothing to draw, or nowhere to draw it. */
+	if (target.image == NULL || (text->count == 0U && !text->image)) {
 		draw_target_fini(&target);
 		return 0U;
 	}
 
-	/* The glyphs in the foreground, copied into the planes of the mask. */
+	/* The context's paint, and the box all of the text covers. */
 	draw_paint_of(gc, &target, &paint);
-	paint.function = X11_FUNCTION_COPY;
-	paint.fill_style = X11_FILL_SOLID;
-	x = target.x + (int16_t)x11_read16(request + 12, msb);
-	y = target.y + (int16_t)x11_read16(request + 14, msb);
-	bounds.x0 = x;
-	bounds.y0 = y;
-	bounds.x1 = x;
-	bounds.y1 = y;
-	for (character = 0U; character < count; character++) {
-		codepoint = request[16U + character];
-		if (wide)
-			codepoint = ((uint32_t)request[16U + character * 2U] << 8) | (uint32_t)request[16U + character * 2U + 1U];
+	bounds.x0 = target.x + text->extent.x0;
+	bounds.y0 = target.y + text->extent.y0;
+	bounds.x1 = target.x + text->extent.x1;
+	bounds.y1 = target.y + text->extent.y1;
 
-		/* Its glyph, standing on the baseline; a character without one is skipped. */
-		missing = x11_glyph(&server->glyphs, codepoint, &glyph);
-		if (missing != 0)
-			continue;
-		top = y - (int)glyph.height;
-		x11_render_mask(target.image, &target.clip, &paint, x, top, (int)glyph.width, (int)glyph.height, glyph.bitmap, glyph.stride);
-		if (top < bounds.y0)
-			bounds.y0 = top;
-		x += (int)glyph.advance;
-		if (x > bounds.x1)
-			bounds.x1 = x;
+	/* ImageText's box, in the background whatever the function and fill style; its glyphs in the foreground. */
+	if (text->image) {
+		paint.function = X11_FUNCTION_COPY;
+		paint.fill_style = X11_FILL_SOLID;
+		paint.foreground = gc->background;
+		box.x0 = target.x + text->background.x0;
+		box.y0 = target.y + text->background.y0;
+		box.x1 = target.x + text->background.x1;
+		box.y1 = target.y + text->background.y1;
+		x11_render_boxes(target.image, &target.clip, &paint, &box, 1U);
+		paint.foreground = gc->foreground;
+	}
+
+	/* Each glyph's bits. */
+	for (item = 0U; item < text->count; item++) {
+		glyph = &text->glyphs[item];
+		box.x0 = target.x + glyph->x;
+		box.y0 = target.y + glyph->y;
+		x11_render_mask(target.image, &target.clip, &paint, box.x0, box.y0, glyph->width, glyph->height, text->bits + glyph->offset, glyph->stride);
 	}
 
 	/* Succeeded: drawn, and shown again. */

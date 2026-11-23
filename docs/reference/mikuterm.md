@@ -18,7 +18,7 @@ How to connect to WSL is a [how-to](../howto/mikuterm-wsl.md).
 | Windows | Windows 10 version 1903 or later (the manifest's UTF-8 code page needs it), x64 and ARM64 |
 | Drawing | On the processor, shown through GDI; no GPU driver is needed |
 | Installation | None: the ZIP is unpacked anywhere the user can write. No registry entry, no `%APPDATA%`, no administrator rights |
-| Build | CMake in `apps/terminal-win32` with llvm-mingw (`cmake/llvm-mingw-x86_64.cmake`, `-aarch64.cmake`); the `zip` target makes `mikuterm-<version>-win64.zip` and `-winarm64.zip` |
+| Build | CMake in `apps/terminal-win32` with llvm-mingw (`cmake/llvm-mingw-x86_64.cmake`, `-aarch64.cmake`); the `zip` target makes `mikuterm-<version>-x64.zip`, `-arm64.zip` and `-x86.zip` |
 
 ## 2. The folder
 
@@ -239,6 +239,18 @@ reach the host. They are taken with the left Alt key only: the right Alt
 key is AltGr on the layouts that have one (Windows reports it as Ctrl+Alt),
 and AltGr with a digit types its character to the host as before. Ctrl with
 the left Alt types no AltGr character in mikuterm, as these keys take it.
+
+A tab's title is the number of its connection in the order the tabs were
+opened and `mikuterm` (`1 mikuterm`, `2 mikuterm`, the settings tab not
+counted; the number first, so that a narrow tab still shows it), until the
+host sets one. When the tabs do not fit in the title
+bar at their least width (96 pixels at 100 %), the tab bar scrolls as the
+desktop's titlebar in zedBSD does: an arrow at each end moves it by one tab
+(faint at its end), the wheel over the tabs moves it too, and the button
+after the new tab's (˅) lists the tabs out of sight. A tab chosen with the
+keys or from the list, a new or closed tab, and a change of the window's
+size that shows another number of tabs bring the active tab into sight; a
+change of a title alone leaves the tab bar where it was.
 
 ```
 MikμTerm 0.1.0
