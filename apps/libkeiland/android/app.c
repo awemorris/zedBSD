@@ -156,6 +156,17 @@ kl_app_dispatch(
 	if (app->event_count != 0U)
 		wait = 0;
 
+	/*
+	 * What was queued before the wake-up descriptor was there (or while no
+	 * application was open) is looked at first, without a wake-up to tell.
+	 */
+	keiland_android_wake_clear();
+	app_activity_drain(app);
+	app_bridge_drain(app);
+	app_posts_drain(app);
+	if (app->event_count != 0U)
+		wait = 0;
+
 	/* The first wait has the time asked, the rest none: they only empty what is ready. */
 	for (;;) {
 		ident = ALooper_pollOnce(wait, NULL, NULL, NULL);

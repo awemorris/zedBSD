@@ -162,11 +162,6 @@ void android_ime_bridge(struct kl_app *app, const struct keiland_bridge_event *e
 /* Keeps the clipboard's text the system told. */
 void android_clipboard_bridge(struct kl_app *app, const struct keiland_bridge_event *event);
 
-/* places.c */
-
-/* Unpacks the program's read-only data from the package when its version changed.  Returns 0 or an error number. */
-int android_places_unpack(ANativeActivity *activity);
-
 /* theme.c */
 
 /* Takes the system's appearance, accent and language; tells the program of what changed. */

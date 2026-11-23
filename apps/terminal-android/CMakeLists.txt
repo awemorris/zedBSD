@@ -27,6 +27,11 @@ include(${MIKUTERM_DIR}/cmake/android-sdk.cmake)
 
 set(MIKUTERM_ANDROID_ABIS "arm64-v8a;x86_64" CACHE STRING "The ABIs the apk carries")
 
+# For trying the program in parts (each is passed on to the native build): the trial body that
+# paints the window one colour, and the connection that shows back what is typed.
+option(MIKUTERM_ANDROID_HELLO "Build the trial body of the native thread" OFF)
+option(MIKUTERM_ANDROID_ECHO "Open tabs with a connection that shows back what is typed" OFF)
+
 # The version code grows with the version: major * 10000 + minor * 100 + patch.
 math(EXPR MIKUTERM_VERSION_CODE
 	"${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
@@ -49,6 +54,8 @@ foreach(abi ${MIKUTERM_ANDROID_ABIS})
 			-DCMAKE_BUILD_TYPE=Release
 			-DMIKUTERM_ROOT=${MIKUTERM_ROOT}
 			-DMIKUTERM_VERSION=${PROJECT_VERSION}
+			-DMIKUTERM_ANDROID_HELLO=${MIKUTERM_ANDROID_HELLO}
+			-DMIKUTERM_ANDROID_ECHO=${MIKUTERM_ANDROID_ECHO}
 		BUILD_ALWAYS ON
 		INSTALL_COMMAND
 			${CMAKE_COMMAND} -E make_directory ${MIKUTERM_APK_DIR}/lib/${abi}

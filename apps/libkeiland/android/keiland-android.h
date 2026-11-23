@@ -176,6 +176,16 @@ void keiland_android_done(const struct keiland_android_event *event);
 int keiland_post_app(uint32_t code, void *data);
 
 /*
+ * Unpacks the program's read-only data (assets/share of the package) into the
+ * folder kl_data_directory names, when the version the package holds is not the
+ * one written there.
+ *
+ * Called on M, once at the start, with keiland_android_activity().  Returns 0,
+ * ENOENT (the package holds none) or the error of a file.
+ */
+int android_places_unpack(ANativeActivity *activity);
+
+/*
  * Returns the looper of M, for a program that waits for more than the events.
  *
  * Called on M.
