@@ -117,8 +117,10 @@ Tab moves between a pane's fields and buttons):
 
   Hosts       the hosts of ssh/config, one at a time: its name, address
               (HostName), port, user, command (RemoteCommand), identity
-              files and port forwards (LocalForward, RemoteForward), and Add
-              Host.  Only the lines you change are rewritten; your comments
+              files, port forwards (LocalForward, RemoteForward) and X11
+              (ForwardX11, ForwardX11Trusted, ForwardX11Timeout,
+              X11RootWindow, X11WindowTabify; section 10), and Add Host.
+              Only the lines you change are rewritten; your comments
               and the lines the form does not show stay as they are.  Save
               (Ctrl+S) checks the file as a connection reads it and refuses
               a line you changed that it cannot use (a problem the file had
@@ -132,7 +134,9 @@ Tab moves between a pane's fields and buttons):
               at once, as the View menu's do; the fonts and the grid when
               mikuterm starts again.
   Behavior    copy-on-select takes effect at once; TERM, the connect
-              timeout and the port of WSL's sshd from the next connection;
+              timeout, the port of WSL's sshd and the X11 windows' scale,
+              drawing and selection (X11Scale, X11Render,
+              X11PrimaryToClipboard; section 6) from the next connection;
               the host of the first tab when mikuterm starts again.
   Keys        makes an ed25519 key, shows a key's public key (Copy Public
               Key), and lists ssh/known_hosts, each line with a button that

@@ -66,7 +66,6 @@
 #define PAGE_ID_SIZES		48U
 #define PAGE_ID_THEMES		56U
 #define PAGE_ID_HOST_ROWS	64U
-#define PAGE_ID_HOST_FIELD	65U
 #define PAGE_ID_HOST_NEW	72U
 #define PAGE_ID_HOST_ADD	73U
 #define PAGE_ID_HOST_EDITOR	74U
@@ -81,6 +80,7 @@
 #define PAGE_ID_HOST_REMOVE	83U
 #define PAGE_ID_HOST_REMOVE_YES	84U
 #define PAGE_ID_HOST_REMOVE_NO	85U
+#define PAGE_ID_HOST_FIELD	96U
 
 /* The layout: the margin round the panels, the sidebar's width, a pane's padding and the gap between cards, in pixels. */
 #define PAGE_MARGIN		12
@@ -129,11 +129,18 @@
 #define PAGE_ICON_BUTTON	28
 #define PAGE_ICON_PIXELS	16
 
-/* The fields of a host's form (Host, HostName, Port, User, RemoteCommand), and the most of a block's other lines shown. */
-#define PAGE_HOST_FIELDS	5U
+/*
+ * The fields of a host's form: Host, HostName, Port, User and
+ * RemoteCommand, then the X11 lines from PAGE_HOST_X11 (ForwardX11,
+ * ForwardX11Trusted, ForwardX11Timeout, X11RootWindow, X11WindowTabify;
+ * only for a program that forwards X11).  Then the most of a block's
+ * other lines shown.
+ */
+#define PAGE_HOST_FIELDS	10U
 #define PAGE_HOST_NAME		0U
 #define PAGE_HOST_PORT		2U
 #define PAGE_HOST_COMMAND	4U
+#define PAGE_HOST_X11		5U
 #define PAGE_OTHER_LINES	40U
 
 /* The longest line of the Hosts pane's words (a host's title, a line shown), with its NUL. */
@@ -323,12 +330,28 @@ static const uint32_t page_size_actions[PAGE_SIZES] = { TERMINAL_ACTION_SIZE_SMA
 static const char *const page_appearance_labels[] = { "Text size", "Size", "Theme", "Ambiguous width", "Font file" };
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
-static const char *const page_host_labels[] = { "Name", "Host address", "Port", "User", "Command", "Identity file", "Forward", "Listen", "Destination", "New host" };
+static const char *const page_host_labels[] = {
+	"Name", "Host address", "Port", "User", "Command", "Identity file", "Forward", "Listen", "Destination", "New host",
+	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
+};
+
+/* How many of the Hosts pane's labels a program that does not forward X11 has (the X11 ones are last). */
+#define PAGE_HOST_LABELS	10U
 
 /* The keywords of a host's form, its labels and what each field shows empty, in the fields' order. */
-static const char *const page_host_keywords[PAGE_HOST_FIELDS] = { "Host", "HostName", "Port", "User", "RemoteCommand" };
-static const char *const page_host_field_labels[PAGE_HOST_FIELDS] = { "Name", "Host address", "Port", "User", "Command" };
-static const char *const page_host_placeholders[PAGE_HOST_FIELDS] = { "myserver (Host)", "myserver.example.com (HostName)", "22 (Port)", "The login name (User)", "Run instead of a shell (RemoteCommand)" };
+static const char *const page_host_keywords[PAGE_HOST_FIELDS] = {
+	"Host", "HostName", "Port", "User", "RemoteCommand",
+	"ForwardX11", "ForwardX11Trusted", "ForwardX11Timeout", "X11RootWindow", "X11WindowTabify"
+};
+static const char *const page_host_field_labels[PAGE_HOST_FIELDS] = {
+	"Name", "Host address", "Port", "User", "Command",
+	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
+};
+static const char *const page_host_placeholders[PAGE_HOST_FIELDS] = {
+	"myserver (Host)", "myserver.example.com (HostName)", "22 (Port)", "The login name (User)", "Run instead of a shell (RemoteCommand)",
+	"yes or no (ForwardX11)", "yes or no (ForwardX11Trusted)", "A time, as 20m (ForwardX11Timeout)",
+	"off, or a size: 1280x800 (X11RootWindow)", "yes or no (X11WindowTabify)"
+};
 
 static int page_frame(uint32_t width, uint32_t height, unsigned scale);
 static double page_units(double pixels);
@@ -340,6 +363,8 @@ static int page_hosts_list(int top, int left, int width);
 static int page_hosts_form(int top, int left, int width);
 static int page_hosts_identities(int top, int left, int width);
 static int page_hosts_forwards(int top, int left, int width);
+static int page_hosts_x11(int top, int left, int width);
+static unsigned page_hosts_fields(void);
 static int page_hosts_other(int top, int left, int width);
 static int page_hosts_actions(int top, int left, int width);
 static void page_hosts_read(void);
@@ -985,11 +1010,15 @@ page_hosts(
 	int width)
 {
 	const struct kl_theme *theme;
+	unsigned labels;
 	int y;
 
-	/* The pane's label column, and the file the first time. */
+	/* The pane's label column (with the X11 lines' for a program that forwards X11), and the file the first time. */
 	theme = page.style.theme;
-	page_column(TERMINAL_PANE_HOSTS, page_host_labels, sizeof(page_host_labels) / sizeof(page_host_labels[0]));
+	labels = PAGE_HOST_LABELS;
+	if (page.program->x11)
+		labels = sizeof(page_host_labels) / sizeof(page_host_labels[0]);
+	page_column(TERMINAL_PANE_HOSTS, page_host_labels, labels);
 	if (!page.hosts_read)
 		page_hosts_read();
 
@@ -1003,11 +1032,13 @@ page_hosts(
 		return y;
 	}
 
-	/* The host chosen: its form and identity files, its forwards and its other lines. */
+	/* The host chosen: its form and identity files, its forwards, its X11 lines and its other lines. */
 	if (page.hosts_block != TERMINAL_HOSTS_NONE) {
 		y = page_hosts_form(y + PAGE_GAP, left, width);
 		if (page.hosts.blocks[page.hosts_block].kind != TERMINAL_HOSTS_BLOCK_MATCH)
 			y = page_hosts_forwards(y + PAGE_GAP, left, width);
+		if (page.hosts.blocks[page.hosts_block].kind != TERMINAL_HOSTS_BLOCK_MATCH && page.program->x11)
+			y = page_hosts_x11(y + PAGE_GAP, left, width);
 		y = page_hosts_other(y + PAGE_GAP, left, width);
 	} else {
 		y += PAGE_GAP;
@@ -1161,8 +1192,8 @@ page_hosts_form(
 	first = PAGE_HOST_NAME;
 	if (block->kind != TERMINAL_HOSTS_BLOCK_HOST)
 		first = PAGE_HOST_NAME + 1U;
-	card.height = PAGE_CARD_SUBTITLED + (int)(PAGE_HOST_FIELDS - first) * PAGE_ROW + PAGE_CARD_FOOT;
-	for (index = first; index < PAGE_HOST_FIELDS; index++) {
+	card.height = PAGE_CARD_SUBTITLED + (int)(PAGE_HOST_X11 - first) * PAGE_ROW + PAGE_CARD_FOOT;
+	for (index = first; index < PAGE_HOST_X11; index++) {
 		overriding[index] = TERMINAL_HOSTS_NONE;
 		if (index != PAGE_HOST_NAME)
 			overriding[index] = terminal_hosts_overrides(&page.hosts, page.hosts_block, page_host_keywords[index]);
@@ -1186,7 +1217,7 @@ page_hosts_form(
 	y = page_card(&card, title, note);
 
 	/* Each field, and the line of another block that wins over it. */
-	for (index = first; index < PAGE_HOST_FIELDS; index++) {
+	for (index = first; index < PAGE_HOST_X11; index++) {
 		y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
 		if (overriding[index] == TERMINAL_HOSTS_NONE)
 			continue;
@@ -1405,6 +1436,70 @@ page_hosts_forwards(
 
 	/* Reports the card's bottom. */
 	return card.y + card.height;
+}
+
+/*
+ * Draws the card of the host's X11 lines (a program that forwards X11):
+ * a field each, with the line of another block that wins over it, and a
+ * note of what the root window and the tabs do; reports its bottom.
+ */
+static int
+page_hosts_x11(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
+	struct kl_rect card;
+	char where[PAGE_HOST_TEXT];
+	char note[PAGE_MESSAGE];
+	const char *explained;
+	unsigned overriding[PAGE_HOST_FIELDS];
+	unsigned index;
+	int y;
+
+	/* The rows, and the line that wins over each. */
+	theme = page.style.theme;
+	explained = "Root window shows the remote X screen as one window of that size; Window tabs shows each remote window in a tab. "
+	    "Off and no, each remote window is a window of its own.";
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + (int)(PAGE_HOST_FIELDS - PAGE_HOST_X11) * PAGE_ROW + page_note_height(width - 40, explained) + PAGE_CARD_FOOT;
+	for (index = PAGE_HOST_X11; index < PAGE_HOST_FIELDS; index++) {
+		overriding[index] = terminal_hosts_overrides(&page.hosts, page.hosts_block, page_host_keywords[index]);
+		if (overriding[index] != TERMINAL_HOSTS_NONE)
+			card.height += PAGE_NOTE_LINE;
+	}
+	y = page_card(&card, "X11", "The remote programs' windows on this computer");
+
+	/* Each field, and the line of another block that wins over it. */
+	for (index = PAGE_HOST_X11; index < PAGE_HOST_FIELDS; index++) {
+		y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		if (overriding[index] == TERMINAL_HOSTS_NONE)
+			continue;
+		page_hosts_where(overriding[index], where, sizeof(where));
+		(void)snprintf(note, sizeof(note), "Overridden by %s", where);
+		y = page_note(y, page_value_x(card.x, card.width), card.width - 40, note, theme->bad);
+	}
+
+	/* What the root window and the tabs do. */
+	(void)page_note(y, card.x + 20, card.width - 40, explained, theme->text_secondary);
+
+	/* Reports the card's bottom. */
+	return card.y + card.height;
+}
+
+/* Reports how many fields a host's form has: the X11 lines' too for a program that forwards X11. */
+static unsigned
+page_hosts_fields(void)
+{
+	/* A program that forwards X11. */
+	if (page.program->x11)
+		return PAGE_HOST_FIELDS;
+
+	/* One that does not. */
+	return PAGE_HOST_X11;
 }
 
 /*
@@ -1837,12 +1932,19 @@ page_hosts_fill(void)
 {
 	const struct terminal_hosts_block *block;
 	char value[KL_FIELD_MAX];
+	unsigned fields;
 	unsigned index;
 	unsigned line;
 
-	/* Each field. */
+	/* Each field the form has. */
+	fields = page_hosts_fields();
 	for (index = 0U; index < PAGE_HOST_FIELDS; index++) {
 		value[0] = '\0';
+		if (index >= fields) {
+			kl_field_set(&page.host_fields[index], value);
+			page.host_filled[index][0] = '\0';
+			continue;
+		}
 		if (page.hosts_block != TERMINAL_HOSTS_NONE) {
 			block = &page.hosts.blocks[page.hosts_block];
 			line = TERMINAL_HOSTS_NONE;
@@ -1880,8 +1982,10 @@ page_hosts_apply(void)
 	char written[TERMINAL_HOSTS_VALUE_MAX];
 	char text[PAGE_MESSAGE];
 	const char *field;
+	const char *why;
 	unsigned long port;
 	unsigned changed;
+	unsigned fields;
 	unsigned index;
 	char *out;
 	char *end;
@@ -1895,9 +1999,10 @@ page_hosts_apply(void)
 	if (page.hosts.blocks[page.hosts_block].kind == TERMINAL_HOSTS_BLOCK_MATCH)
 		return 0;
 
-	/* Each field that changed. */
+	/* Each field of the form that changed. */
 	changed = 0U;
-	for (index = 0U; index < PAGE_HOST_FIELDS; index++) {
+	fields = page_hosts_fields();
+	for (index = 0U; index < fields; index++) {
 		field = page.host_fields[index].text;
 		same = strcmp(field, page.host_filled[index]);
 		if (same == 0)
@@ -1906,12 +2011,15 @@ page_hosts_apply(void)
 		/* The value as the file holds it (empty: the lines go). */
 		written[0] = '\0';
 		error = 0;
+		why = NULL;
 		if (index == PAGE_HOST_NAME) {
 			error = terminal_hosts_put_names(field, written, sizeof(written));
 		} else if (field[0] == '\0') {
 			error = 0;
 		} else if (index == PAGE_HOST_COMMAND) {
 			error = terminal_hosts_put_command(field, written, sizeof(written));
+		} else if (index >= PAGE_HOST_X11) {
+			error = terminal_hosts_put_x11(page_host_keywords[index], field, written, sizeof(written), &why);
 		} else {
 			error = terminal_hosts_put_word(field, written, sizeof(written));
 		}
@@ -1925,7 +2033,9 @@ page_hosts_apply(void)
 
 		/* A value the file cannot hold is told, and the form stays. */
 		if (error != 0) {
-			(void)snprintf(text, sizeof(text), "%s: %s", page_host_field_labels[index], page_hosts_why(index, error));
+			if (why == NULL)
+				why = page_hosts_why(index, error);
+			(void)snprintf(text, sizeof(text), "%s: %s", page_host_field_labels[index], why);
 			page_say(&page.hosts_message, 1, text);
 			kl_ui_set_focus(page.ui, PAGE_ID_HOST_FIELD + index, 0U);
 			return EINVAL;
@@ -2551,6 +2661,7 @@ page_hosts_other_line(
 	static const char *const listed[] = { "IdentityFile", "LocalForward", "RemoteForward" };
 	const struct terminal_hosts_line *read;
 	unsigned index;
+	unsigned fields;
 	int same;
 	int second;
 
@@ -2575,7 +2686,8 @@ page_hosts_other_line(
 	}
 
 	/* A field's keyword: its first line is in the form, a second one is not. */
-	for (index = PAGE_HOST_NAME + 1U; index < PAGE_HOST_FIELDS; index++) {
+	fields = page_hosts_fields();
+	for (index = PAGE_HOST_NAME + 1U; index < fields; index++) {
 		same = terminal_hosts_keyword_is(&page.hosts, line, page_host_keywords[index]);
 		if (!same)
 			continue;
@@ -2885,6 +2997,7 @@ page_items(
 	struct kl_rect card;
 	struct kl_rect control;
 	char title[64];
+	const char *hint;
 	unsigned effect;
 	unsigned index;
 	unsigned rows;
@@ -2932,7 +3045,10 @@ page_items(
 			item = &page.program->items[index];
 			if (item->pane != pane || item->effect != effect)
 				continue;
-			y = page_field_row(y, card.x, card.width, item->label, PAGE_ID_ITEM + index, &page.items[index], item->keyword);
+			hint = item->keyword;
+			if (item->hint != NULL)
+				hint = item->hint;
+			y = page_field_row(y, card.x, card.width, item->label, PAGE_ID_ITEM + index, &page.items[index], hint);
 		}
 
 		/* The next card goes under this one. */

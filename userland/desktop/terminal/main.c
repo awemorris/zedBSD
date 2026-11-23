@@ -186,11 +186,11 @@ static struct main_kept main_kept;
  * TERM (the next tab).
  */
 static const struct terminal_page_item main_items[] = {
-	{ MAIN_KEY_FONT, "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
-	{ MAIN_KEY_FALLBACK, "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
-	{ MAIN_KEY_COLUMNS, "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
-	{ MAIN_KEY_ROWS, "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
-	{ MAIN_KEY_TERM, "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION }
+	{ MAIN_KEY_FONT, "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_FALLBACK, "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_COLUMNS, "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_ROWS, "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ MAIN_KEY_TERM, "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, NULL }
 };
 
 static int main_parse(int argc, char **argv, struct main_options *options);
@@ -595,6 +595,7 @@ main_page_init(
 	main_page.program.item_get = main_item_get;
 	main_page.program.item_set = main_item_set;
 	main_page.program.comment = main_page.comment;
+	main_page.program.x11 = 0;
 	main_page.program.font = NULL;
 	main_page.program.connection = "tab";
 	main_page.program.data = &main_page;

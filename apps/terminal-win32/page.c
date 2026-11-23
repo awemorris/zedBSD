@@ -11,12 +11,13 @@
  * the user may read it) and ssh\known_hosts, the check of an ssh\config
  * with the SSH library's own reader, the system's text editor the
  * ssh\config opens in (the file's own "edit" verb, else "open", else
- * Notepad), and mikuterm's own settings of
- * config\mikuterm.conf: the fonts and the grid (from the next start), the
- * TERM, the wait for a connection and the port of WSL's sshd (from the
+ * Notepad), a host's X11 lines in its form (mikuterm forwards X11), and
+ * mikuterm's own settings of config\mikuterm.conf: the fonts and the grid
+ * (from the next start), the TERM, the wait for a connection, the port of
+ * WSL's sshd and the X11 windows' scale, drawing and selection (from the
  * next connection: the connector takes them at once) and the host of the
- * first tab (from the next start).  A setting is written in place of its line in
- * mikuterm.conf, every other line kept.
+ * first tab (from the next start).  A setting is written in place of its
+ * line in mikuterm.conf, every other line kept.
  */
 
 #include "mikuterm.h"
@@ -75,16 +76,19 @@ struct page_state {
 /* The settings' tab's part (one for the run). */
 static struct page_state page_state;
 
-/* mikuterm's own settings in the tab: the look and the grid, then the connections. */
+/* mikuterm's own settings in the tab: the look and the grid, then the connections and their X11. */
 static const struct terminal_page_item page_items[] = {
-	{ "Font", "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
-	{ "FontFallback", "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START },
-	{ "Columns", "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
-	{ "Rows", "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START },
-	{ "Term", "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION },
-	{ "ConnectTimeout", "Connect timeout (s)", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION },
-	{ "WslPort", "WSL sshd port", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION },
-	{ "Connect", "Host at start", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START }
+	{ "Font", "Font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ "FontFallback", "Fallback font", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL },
+	{ "Columns", "Columns", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ "Rows", "Rows", TERMINAL_PANE_APPEARANCE, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_START, NULL },
+	{ "Term", "TERM", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, NULL },
+	{ "ConnectTimeout", "Connect timeout (s)", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION, NULL },
+	{ "WslPort", "WSL sshd port", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_NUMBER, TERMINAL_EFFECT_CONNECTION, NULL },
+	{ "X11Scale", "X11 scale (%)", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "auto, or 100 to 400 by 25 (X11Scale)" },
+	{ "X11Render", "X11 drawing", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "auto or cpu (X11Render)" },
+	{ "X11PrimaryToClipboard", "X11 selection to clipboard", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "yes or no (X11PrimaryToClipboard)" },
+	{ "Connect", "Host at start", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL }
 };
 
 static int page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
@@ -152,6 +156,7 @@ mikuterm_page_init(
 	page_state.program.item_get = page_item_get;
 	page_state.program.item_set = page_item_set;
 	page_state.program.comment = page_state.comment;
+	page_state.program.x11 = 1;
 	page_state.program.font = NULL;
 	page_state.program.data = &page_state;
 
@@ -429,9 +434,9 @@ page_item_get(
 /*
  * Keeps a setting in config\mikuterm.conf, in place of its line (an empty
  * value removes the line: its default holds), after checking the value
- * (a font must be in fonts\ or share\fonts\, or a path to one); the TERM
- * and the wait for a connection take effect for the next connection at
- * once.  Returns 0, or EINVAL with why set, or the error of the file.
+ * (a font must be in fonts\ or share\fonts\, or a path to one); the TERM,
+ * the wait for a connection, the WSL port and the X11 settings take effect
+ * for the next connection at once.  Returns 0, or EINVAL with why set, or the error of the file.
  */
 static int
 page_item_set(
@@ -510,7 +515,7 @@ page_item_set(
 		return error;
 	}
 
-	/* The next connection's TERM, wait and WSL port, from the file as it is now. */
+	/* The next connection's TERM, wait, WSL port and X11 settings, from the file as it is now. */
 	page_conf_now(&conf);
 	(void)snprintf(state->conf->term, sizeof(state->conf->term), "%s", conf.term);
 	state->conf->connect_timeout = conf.connect_timeout;

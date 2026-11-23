@@ -47,6 +47,17 @@
 /* The highest port number. */
 #define HOSTS_PORT_MAX		65535UL
 
+/* A time's digits of one term and its most seconds, as the SSH library reads a time. */
+#define HOSTS_TIME_DIGITS	10U
+#define HOSTS_TIME_MAX		2147483647ULL
+
+/* The smallest and largest X11RootWindow (X's pixels), and the most a side may be before another digit (five figures). */
+#define HOSTS_ROOT_WIDTH_MIN	320UL
+#define HOSTS_ROOT_HEIGHT_MIN	200UL
+#define HOSTS_ROOT_WIDTH_MAX	7680UL
+#define HOSTS_ROOT_HEIGHT_MAX	4320UL
+#define HOSTS_ROOT_SIDE_MAX	9999UL
+
 /*
  * One change of a text: the bytes from from to one before to give way to
  * insert (insert_size bytes; none for a removal).  A change never starts
@@ -72,6 +83,8 @@ static int hosts_applies_to_block(const struct terminal_hosts *hosts, unsigned o
 static int hosts_word_bad(const char *value, size_t length);
 static int hosts_port(const char *text, size_t length, int zero);
 static int hosts_endpoint(const char *text, int need_host, int zero, const char **why);
+static int hosts_time(const char *text, size_t length);
+static int hosts_root(const char *text, size_t length);
 static unsigned hosts_anchor(const struct terminal_hosts *hosts, unsigned block, const char *keyword);
 static void hosts_break(const struct terminal_hosts *hosts, unsigned line, char *text);
 static void hosts_indent(const struct terminal_hosts *hosts, unsigned block, char *indent);
@@ -773,6 +786,92 @@ terminal_hosts_put_forward(
 	}
 
 	/* Succeeded: the forward's value. */
+	return 0;
+}
+
+/*
+ * Writes the value of a host's X11 line as the file holds it, one word
+ * without the blanks round it, read as the SSH library reads it:
+ * ForwardX11, ForwardX11Trusted and X11WindowTabify yes or no;
+ * ForwardX11Timeout a time (seconds, or numbers each with s, m, h, d or
+ * w, up to 2147483647 seconds in all); X11RootWindow off or a size from
+ * 320x200 to 7680x4320.  Returns 0, or EINVAL with *why saying what the
+ * keyword takes (or for a keyword that is none of them), or ENAMETOOLONG.
+ */
+int
+terminal_hosts_put_x11(
+	const char *keyword,
+	const char *value,
+	char *written,
+	size_t size,
+	const char **why)
+{
+	const char *word;
+	size_t keyword_length;
+	size_t length;
+	size_t index;
+	int time;
+	int root;
+	int flag;
+	int good;
+
+	/* Which value the keyword takes. */
+	keyword_length = strlen(keyword);
+	time = hosts_equal(keyword, keyword_length, "ForwardX11Timeout");
+	root = hosts_equal(keyword, keyword_length, "X11RootWindow");
+	flag = hosts_equal(keyword, keyword_length, "ForwardX11");
+	if (!flag)
+		flag = hosts_equal(keyword, keyword_length, "ForwardX11Trusted");
+	if (!flag)
+		flag = hosts_equal(keyword, keyword_length, "X11WindowTabify");
+
+	/* The word without the blanks round it. */
+	word = value;
+	length = strlen(value);
+	while (length > 0U && (word[0] == ' ' || word[0] == '\t')) {
+		word++;
+		length--;
+	}
+	while (length > 0U && (word[length - 1U] == ' ' || word[length - 1U] == '\t'))
+		length--;
+
+	/* Whether the word is one the keyword takes. */
+	good = 0;
+	if (time) {
+		*why = "a time: seconds, or numbers each with s, m, h, d or w (20m, 1h30m)";
+		good = hosts_time(word, length);
+	} else if (root) {
+		*why = "off, or a size from 320x200 to 7680x4320";
+		good = hosts_equal(word, length, "off");
+		if (!good)
+			good = hosts_root(word, length);
+	} else if (flag) {
+		*why = "yes or no";
+		good = hosts_equal(word, length, "yes");
+		if (!good)
+			good = hosts_equal(word, length, "no");
+	} else {
+		*why = "not an X11 setting";
+		return EINVAL;
+	}
+
+	/* One word (a blank inside makes two). */
+	for (index = 0U; index < length; index++) {
+		if (word[index] == ' ' || word[index] == '\t')
+			good = 0;
+	}
+	if (!good)
+		return EINVAL;
+
+	/* A word longer than the room is refused. */
+	if (length + 1U > size) {
+		*why = "too long";
+		return ENAMETOOLONG;
+	}
+
+	/* Succeeded: the word. */
+	memcpy(written, word, length);
+	written[length] = '\0';
 	return 0;
 }
 
@@ -1620,6 +1719,127 @@ hosts_word_bad(
 
 	/* Every byte may be in a word. */
 	return 0;
+}
+
+/*
+ * Reports whether length bytes are a time as the SSH library reads one:
+ * terms of 1 to 10 digits, each followed by s, m, h, d or w (either
+ * case), the last of which may have none (seconds); at most
+ * HOSTS_TIME_MAX seconds in all.
+ */
+static int
+hosts_time(
+	const char *text,
+	size_t length)
+{
+	unsigned long long total;
+	unsigned long long term;
+	unsigned long long unit;
+	size_t at;
+	unsigned digits;
+	char qualifier;
+
+	/* Something. */
+	if (length == 0U)
+		return 0;
+
+	/* Each term. */
+	total = 0ULL;
+	at = 0U;
+	while (at < length) {
+		/* Its digits. */
+		term = 0ULL;
+		digits = 0U;
+		while (at < length && text[at] >= '0' && text[at] <= '9') {
+			if (digits >= HOSTS_TIME_DIGITS)
+				return 0;
+			term = term * 10ULL + (unsigned long long)(text[at] - '0');
+			digits++;
+			at++;
+		}
+		if (digits == 0U)
+			return 0;
+
+		/* Its unit: seconds without one (the text's end). */
+		unit = 1ULL;
+		if (at < length) {
+			qualifier = hosts_lower(text[at]);
+			switch (qualifier) {
+			case 's':
+				unit = 1ULL;
+				break;
+			case 'm':
+				unit = 60ULL;
+				break;
+			case 'h':
+				unit = 3600ULL;
+				break;
+			case 'd':
+				unit = 86400ULL;
+				break;
+			case 'w':
+				unit = 604800ULL;
+				break;
+			default:
+				return 0;
+			}
+			at++;
+		}
+
+		/* The sum within the most. */
+		total += term * unit;
+		if (total > HOSTS_TIME_MAX)
+			return 0;
+	}
+
+	/* Succeeded: a time. */
+	return 1;
+}
+
+/*
+ * Reports whether length bytes are a root window's size as the SSH
+ * library reads one: WIDTHxHEIGHT (an x of either case), each side at
+ * least one digit, from 320x200 to 7680x4320.
+ */
+static int
+hosts_root(
+	const char *text,
+	size_t length)
+{
+	unsigned long sides[2];
+	unsigned digits;
+	unsigned side;
+	size_t at;
+	char letter;
+
+	/* The width, an x, the height. */
+	sides[0] = 0UL;
+	sides[1] = 0UL;
+	side = 0U;
+	digits = 0U;
+	for (at = 0U; at < length; at++) {
+		letter = hosts_lower(text[at]);
+		if (letter == 'x' && side == 0U && digits > 0U) {
+			side = 1U;
+			digits = 0U;
+			continue;
+		}
+		if (text[at] < '0' || text[at] > '9' || sides[side] > HOSTS_ROOT_SIDE_MAX)
+			return 0;
+		sides[side] = sides[side] * 10UL + (unsigned long)(text[at] - '0');
+		digits++;
+	}
+
+	/* Both sides, within the limits. */
+	if (side != 1U || digits == 0U)
+		return 0;
+	if (sides[0] < HOSTS_ROOT_WIDTH_MIN || sides[0] > HOSTS_ROOT_WIDTH_MAX)
+		return 0;
+	if (sides[1] < HOSTS_ROOT_HEIGHT_MIN || sides[1] > HOSTS_ROOT_HEIGHT_MAX)
+		return 0;
+
+	/* Succeeded: a size. */
+	return 1;
 }
 
 /* Reports whether length bytes are a port: digits, 1 to 65535 (0 too when zero is set). */
