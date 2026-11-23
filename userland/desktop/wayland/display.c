@@ -173,6 +173,9 @@ kwl_schedule(
 
 	/* Each client hears which outputs its surfaces came onto and left (surface-outputs.c, ws177-p001). */
 	kwl_surface_outputs_sync(server);
+
+	/* And the scale each surface is best drawn at, when it changed (surface-outputs.c). */
+	kwl_fractional_scale_sync(server);
 	server->perf.adopt_cycles += kwl_cycles() - part;
 
 	/*

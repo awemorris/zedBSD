@@ -352,6 +352,12 @@ enum kwl_kind {
 	/* The game mode's lent images, kl_game_v1 and a surface's kl_game_surface_v1 (game.c, scanout.c). */
 	KWL_GAME_MANAGER,
 	KWL_GAME_SURFACE,
+	/* wp_fractional_scale_manager_v1 and a surface's wp_fractional_scale_v1, the scale a surface is best drawn at (surface-outputs.c). */
+	KWL_FRACTIONAL_SCALE_MANAGER,
+	KWL_FRACTIONAL_SCALE,
+	/* zxdg_output_manager_v1 and a wl_output's zxdg_output_v1, the output's logical place and size (protocol.c). */
+	KWL_XDG_OUTPUT_MANAGER,
+	KWL_XDG_OUTPUT,
 };
 
 /*
@@ -520,6 +526,12 @@ struct kwl_object {
 	 * binding is told nothing more.
 	 */
 	uint32_t output_head;
+	/*
+	 * A zxdg_output_v1's wl_output, whose logical place and size it tells
+	 * with the wl_output's events (protocol.c); NULL once the wl_output is
+	 * released, after which it is told nothing.
+	 */
+	struct kwl_object *xdg_output_of;
 	unsigned busy;
 	struct kwl_object *surface;
 	struct kwl_object *role;
@@ -674,7 +686,15 @@ struct kwl_object {
 	/* A wl_shm buffer's place in its pool (NULL for a GPU buffer), and a pool object's memory. */
 	struct kwl_shm_buffer *shm;
 	struct kwl_pool *pool;
-	/* A surface's damage in buffer pixels, pending and committed (x0, y0, x1, y1), and whether any was given. */
+	/*
+	 * A surface's damage in buffer pixels, pending and committed (x0, y0,
+	 * x1, y1), and whether any was given.  The damage a client gave in
+	 * surface units (wl_surface.damage) waits apart until the commit, which
+	 * turns it to buffer pixels with the buffer scale and the viewport the
+	 * commit applies and joins it to the rest.
+	 */
+	int32_t surface_damage[4];
+	unsigned surface_damaged;
 	int32_t damage[4];
 	unsigned damaged;
 	int32_t committed_damage[4];
@@ -874,6 +894,23 @@ struct kwl_object {
 	int32_t pending_destination[2];
 	int32_t destination[2];
 	unsigned viewport_changed;
+	/*
+	 * A surface's buffer scale (wl_surface.set_buffer_scale): how many
+	 * buffer pixels make one unit of the surface each way, pending until
+	 * the commit (viewport.c applies it with the viewport, so
+	 * viewport_changed says it changed too) and then current.  0, a
+	 * surface that never asked, is 1 (kwl_surface_buffer_scale).
+	 */
+	uint32_t pending_buffer_scale;
+	uint32_t buffer_scale;
+	/*
+	 * A surface's wp_fractional_scale_v1 (whose own surface field names it
+	 * back; each cleared from both ends when either goes,
+	 * surface-outputs.c), and on that object the scale it was last told
+	 * (120ths; 0 before the first preferred_scale).
+	 */
+	struct kwl_object *fractional;
+	unsigned fractional_told;
 	/*
 	 * ws122-p005b (content-type.c): a surface's wp_content_type_v1 (whose
 	 * own surface field names it back), and its type (0 none, 1 photo, 2
@@ -2415,6 +2452,7 @@ void kwl_lid_follow(struct kwl_server *server, unsigned open);
 void kwl_screen_off(struct kwl_server *server, const char *why);
 int kwl_output_lid_matters(struct kwl_server *server);
 void kwl_outputs_changed(struct kwl_server *server);
+void kwl_xdg_output_object_gone(struct kwl_object *object);
 int kwl_glass_resize(struct kwl_server *server);
 void kwl_glass_output_resized(struct kwl_server *server);
 void kwl_output_hotplug_start(struct kwl_server *server);
@@ -2452,10 +2490,22 @@ struct kwl_output_view {
 	uint32_t width;
 	uint32_t height;
 	uint32_t refresh;
-	/* The display's rotation and its physical mode (WS217): wl_output's mode is the logical size above, its transform normal. */
+	/* The display's rotation and its physical mode (WS217): wl_output's transform is normal. */
 	unsigned rotation;
 	uint32_t mode_width;
 	uint32_t mode_height;
+	/*
+	 * The display's pixels as the plane is shown on them (the mode turned by
+	 * the rotation), which wl_output's mode tells; the scale the plane is
+	 * shown at (120ths), whose whole number rounded up wl_output's scale
+	 * tells; and the display's physical size turned the same way (mm, 0
+	 * when not known or not believable), which its geometry tells.
+	 */
+	uint32_t pixel_width;
+	uint32_t pixel_height;
+	unsigned scale120;
+	uint32_t mm_width;
+	uint32_t mm_height;
 };
 
 int kwl_output_view(struct kwl_server *server, uint32_t head, struct kwl_output_view *view);

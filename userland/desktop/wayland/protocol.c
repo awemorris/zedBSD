@@ -40,6 +40,31 @@
 #define OUTPUT_HEAD_VERSION		4U
 #define OUTPUT_HEADS_TOLD		16U
 
+/*
+ * wl_surface's error for a buffer scale below one, and the largest buffer
+ * scale taken: a display's largest scale (300 %) rounded up, with room for
+ * a client that draws at twice that for its own reasons.
+ */
+#define SURFACE_ERROR_INVALID_SCALE	0U
+#define SURFACE_SCALE_MAX		8U
+
+/*
+ * zxdg_output_manager_v1's requests and zxdg_output_v1's events: its
+ * logical place and size, the done that versions 1 and 2 end them with
+ * (version 3 ends them with wl_output's done), and from version 2 its
+ * name and description.  wl_output's done event.
+ */
+#define XDG_OUTPUT_MANAGER_DESTROY	0U
+#define XDG_OUTPUT_MANAGER_GET		1U
+#define XDG_OUTPUT_DESTROY		0U
+#define XDG_OUTPUT_POSITION		0U
+#define XDG_OUTPUT_SIZE			1U
+#define XDG_OUTPUT_DONE			2U
+#define XDG_OUTPUT_NAME			3U
+#define XDG_OUTPUT_DESCRIPTION		4U
+#define XDG_OUTPUT_DONE_IN_OUTPUT	3U
+#define OUTPUT_DONE			2U
+
 /* xdg_wm_base's error for a binding destroyed under its own live xdg_surfaces. */
 #define WM_ERROR_DEFUNCT_SURFACES	1U
 
@@ -83,6 +108,8 @@ static const struct kwl_global globals[] = {
 	{ 28, "wp_content_type_manager_v1", 1, KWL_CONTENT_TYPE_MANAGER },
 	{ 29, KL_AUDIO_NAME, KL_AUDIO_VERSION, KWL_AUDIO },
 	{ 30, "kl_game_v1", 1, KWL_GAME_MANAGER },
+	{ 31, "wp_fractional_scale_manager_v1", 1, KWL_FRACTIONAL_SCALE_MANAGER },
+	{ 32, "zxdg_output_manager_v1", 3, KWL_XDG_OUTPUT_MANAGER },
 };
 
 static void global_identity(const struct kwl_global *global, const char **interface, uint32_t *version);
@@ -91,6 +118,10 @@ static int string_at(const unsigned char *bytes, size_t size, size_t offset, con
 static int registry_events(struct kwl_object *registry);
 static int output_events(struct kwl_object *output);
 static int output_names(struct kwl_object *output, const struct kwl_output_view *view);
+static int xdg_output_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+static int xdg_output_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+static int xdg_output_events(struct kwl_object *xdg_output, const struct kwl_output_view *view, int first);
+static int emit_string(struct kwl_client *client, uint32_t id, uint32_t opcode, const char *text);
 static int bind_global(struct kwl_object *registry, const unsigned char *bytes, size_t size);
 static int bind_head_output(struct kwl_object *registry, uint32_t name, const char *interface, uint32_t version, uint32_t id);
 static int registry_global(struct kwl_object *registry, uint32_t name, const char *interface, uint32_t version);
@@ -98,7 +129,8 @@ static int surface_request(struct kwl_object *surface, uint32_t opcode, const un
 static int surface_commit(struct kwl_object *surface);
 static int shell_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void append_callbacks(struct kwl_object **list, struct kwl_object *callbacks);
-static void add_damage(struct kwl_object *surface, int32_t x, int32_t y, int32_t width, int32_t height);
+static void add_damage(int32_t *box, unsigned *damaged, int32_t x, int32_t y, int32_t width, int32_t height);
+static void join_damage(int32_t *box, unsigned *damaged, const int32_t *rect);
 static void commit_fence(struct kwl_object *surface, unsigned attached);
 static void commit_damage(struct kwl_object *surface);
 static void region_add(struct kwl_object *region, const unsigned char *bytes);
@@ -290,6 +322,16 @@ kwl_dispatch(
 	case KWL_CONTENT_TYPE:
 		/* content-type (content-type.c). */
 		error = kwl_content_type_request(object, opcode, bytes, size);
+		break;
+	case KWL_FRACTIONAL_SCALE_MANAGER:
+	case KWL_FRACTIONAL_SCALE:
+		/* fractional-scale (surface-outputs.c). */
+		error = kwl_fractional_scale_request(object, opcode, bytes, size);
+		break;
+	case KWL_XDG_OUTPUT_MANAGER:
+	case KWL_XDG_OUTPUT:
+		/* xdg-output, the outputs' logical places and sizes. */
+		error = xdg_output_request(object, opcode, bytes, size);
 		break;
 	case KWL_GAME_MANAGER:
 	case KWL_GAME_SURFACE:
@@ -666,6 +708,7 @@ output_events(
 	struct kwl_object *output)
 {
 	struct kwl_output_view view;
+	struct kwl_object *other;
 	unsigned char geometry[60];
 	uint32_t words[4];
 	uint32_t word;
@@ -680,16 +723,20 @@ output_events(
 		return 0;
 
 	/*
-	 * Geometry places the display in the logical plane, includes unknown
-	 * physical dimensions, and the make and the model say that the display
-	 * is not known (ws035-p121): the compositor draws to the GPU's scanout
-	 * and never learns the monitor's EDID.
+	 * Geometry places the display in the logical plane and gives its
+	 * physical size (0 when it is not known or not believable, heads.c),
+	 * turned as the mode is; the make and the model say that the display
+	 * is not named (ws035-p121).
 	 */
 	memset(geometry, 0, sizeof(geometry));
 	place = view.x;
 	memcpy(geometry, &place, 4);
 	place = view.y;
 	memcpy(geometry + 4, &place, 4);
+	place = (int32_t)view.mm_width;
+	memcpy(geometry + 8, &place, 4);
+	place = (int32_t)view.mm_height;
+	memcpy(geometry + 12, &place, 4);
 	word = 8;
 	memcpy(geometry + 20, &word, 4);
 	memcpy(geometry + 24, "Unknown", 8);
@@ -700,19 +747,36 @@ output_events(
 	if (error != 0)
 		return error;
 
-	/* This single mode is current and preferred in the selected fullscreen policy. */
+	/* This single mode, the display's pixels the plane is shown on, is current and preferred in the selected fullscreen policy. */
 	words[0] = 3;
-	words[1] = view.width;
-	words[2] = view.height;
+	words[1] = view.pixel_width;
+	words[2] = view.pixel_height;
 	words[3] = view.refresh;
 	error = kwl_emit(output->client, output->id, 1, words, sizeof(words));
 	if (error != 0)
 		return error;
 
+	/* Its xdg_outputs' logical place and size, which the done below ends too. */
+	for (other = output->client->objects; other != NULL; other = other->next) {
+		/* Only a live xdg_output of this binding. */
+		if (other->kind != KWL_XDG_OUTPUT || other->dead || other->xdg_output_of != output)
+			continue;
+
+		/* The place and the size again. */
+		error = xdg_output_events(other, &view, 0);
+		if (error != 0)
+			return error;
+	}
+
 	/* Scale and done were introduced in output version 2. */
 	if (output->version >= 2U) {
-		/* This output uses one buffer pixel per surface coordinate. */
-		word = 1;
+		/*
+		 * The whole buffer scale a client without fractional-scale draws
+		 * at: the output's scale rounded up, so its buffers are never
+		 * enlarged (a 150 % display takes buffers of scale 2 and shows
+		 * them smaller).
+		 */
+		word = (view.scale120 + KWL_SCALE_ONE - 1U) / KWL_SCALE_ONE;
 		error = kwl_emit(output->client, output->id, 3, &word, sizeof(word));
 		if (error != 0)
 			return error;
@@ -725,7 +789,7 @@ output_events(
 		}
 
 		/* The done event commits all preceding output properties. */
-		error = kwl_emit(output->client, output->id, 2, NULL, 0);
+		error = kwl_emit(output->client, output->id, OUTPUT_DONE, NULL, 0);
 		if (error != 0)
 			return error;
 	}
@@ -773,6 +837,197 @@ output_names(
 		return error;
 
 	/* Succeeded: the output is named. */
+	return 0;
+}
+
+/* Carries out a request of zxdg_output_manager_v1 or of a zxdg_output_v1. */
+static int
+xdg_output_request(
+	struct kwl_object *object,
+	uint32_t opcode,
+	const unsigned char *bytes,
+	size_t size)
+{
+	int error;
+
+	/* Either goes with its destroy, which takes no arguments. */
+	if (opcode == XDG_OUTPUT_DESTROY && size == 0U) {
+		kwl_object_destroy(object);
+		return 0;
+	}
+
+	/* An xdg_output has no other request. */
+	if (object->kind != KWL_XDG_OUTPUT_MANAGER || opcode != XDG_OUTPUT_MANAGER_GET)
+		return EPROTO;
+
+	/* The manager makes a wl_output's xdg_output. */
+	error = xdg_output_create(object, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the xdg_output was made and told its output. */
+	return 0;
+}
+
+/*
+ * Makes a wl_output's xdg_output and tells it the output's logical place,
+ * size, name and description, ended by the wl_output's done (version 3)
+ * or the xdg_output's own (versions 1 and 2).  An output released or of a
+ * display that closed leaves it told nothing.
+ */
+static int
+xdg_output_create(
+	struct kwl_object *manager,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_output_view view;
+	struct kwl_object *created;
+	struct kwl_object *output;
+	uint32_t id;
+	int error;
+
+	/* The new ID and the client's own wl_output. */
+	if (size != 8U)
+		return EPROTO;
+	id = word_at(bytes, 0);
+	output = kwl_find(manager->client, word_at(bytes, 4));
+	if (output == NULL || output->kind != KWL_OUTPUT)
+		return EPROTO;
+
+	/* The xdg_output, tied to its wl_output. */
+	created = kwl_create(manager->client, id, KWL_XDG_OUTPUT, manager->version);
+	if (created == NULL)
+		return EPROTO;
+	created->xdg_output_of = output;
+
+	/* A display that closed is told nothing more. */
+	if (output->output_head == KWL_OUTPUT_GONE)
+		return 0;
+	error = kwl_output_view(manager->client->server, output->output_head, &view);
+	if (error != 0)
+		return 0;
+
+	/* Its place, size, name and description. */
+	error = xdg_output_events(created, &view, 1);
+	if (error != 0)
+		return error;
+
+	/* Version 3 ends them with the wl_output's done, which a version 1 wl_output does not have. */
+	if (created->version >= XDG_OUTPUT_DONE_IN_OUTPUT) {
+		if (output->version < 2U)
+			return 0;
+		error = kwl_emit(output->client, output->id, OUTPUT_DONE, NULL, 0);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Versions 1 and 2 end them with their own done. */
+	error = kwl_emit(created->client, created->id, XDG_OUTPUT_DONE, NULL, 0);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the xdg_output knows its output. */
+	return 0;
+}
+
+/*
+ * Tells an xdg_output its output's logical place and size (the plane's
+ * units), and when it is new (first) from version 2 its name and
+ * description, which do not change while the display is shown.  A version
+ * 1 or 2 xdg_output told again is ended by its own done.
+ */
+static int
+xdg_output_events(
+	struct kwl_object *xdg_output,
+	const struct kwl_output_view *view,
+	int first)
+{
+	char text[64];
+	int32_t words[2];
+	int error;
+
+	/* The place in the plane. */
+	words[0] = view->x;
+	words[1] = view->y;
+	error = kwl_emit(xdg_output->client, xdg_output->id, XDG_OUTPUT_POSITION, words, sizeof(words));
+	if (error != 0)
+		return error;
+
+	/* The logical size: the display's pixels divided by its scale. */
+	words[0] = (int32_t)view->width;
+	words[1] = (int32_t)view->height;
+	error = kwl_emit(xdg_output->client, xdg_output->id, XDG_OUTPUT_SIZE, words, sizeof(words));
+	if (error != 0)
+		return error;
+
+	/* The name and the description, once, from version 2 (the same as wl_output's). */
+	if (first && xdg_output->version >= 2U) {
+		(void)snprintf(text, sizeof(text), "DISPLAY-%u", (unsigned)view->index + 1U);
+		error = emit_string(xdg_output->client, xdg_output->id, XDG_OUTPUT_NAME, text);
+		if (error != 0)
+			return error;
+		(void)snprintf(text, sizeof(text), "Display %ux%u", view->width, view->height);
+		error = emit_string(xdg_output->client, xdg_output->id, XDG_OUTPUT_DESCRIPTION, text);
+		if (error != 0)
+			return error;
+	}
+
+	/* A version 1 or 2 xdg_output told again ends with its own done (a new one's is sent by xdg_output_create). */
+	if (!first && xdg_output->version < XDG_OUTPUT_DONE_IN_OUTPUT) {
+		error = kwl_emit(xdg_output->client, xdg_output->id, XDG_OUTPUT_DONE, NULL, 0);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the xdg_output was told. */
+	return 0;
+}
+
+/*
+ * Unties a wl_output that is going from its xdg_outputs, which are told
+ * nothing more.
+ */
+void
+kwl_xdg_output_object_gone(
+	struct kwl_object *object)
+{
+	struct kwl_object *other;
+
+	/* Only a wl_output has xdg_outputs. */
+	if (object->kind != KWL_OUTPUT)
+		return;
+
+	/* Each xdg_output of the client that names it. */
+	for (other = object->client->objects; other != NULL; other = other->next) {
+		if (other->kind == KWL_XDG_OUTPUT && other->xdg_output_of == object)
+			other->xdg_output_of = NULL;
+	}
+}
+
+/* Sends an event of one string, in the wire's padded form (at most 63 bytes). */
+static int
+emit_string(
+	struct kwl_client *client,
+	uint32_t id,
+	uint32_t opcode,
+	const char *text)
+{
+	unsigned char payload[72];
+	uint32_t length;
+	int error;
+
+	/* The length with its terminator, then the bytes padded to a word. */
+	memset(payload, 0, sizeof(payload));
+	length = (uint32_t)strnlen(text, 63U) + 1U;
+	memcpy(payload, &length, sizeof(length));
+	memcpy(payload + 4, text, length - 1U);
+	error = kwl_emit(client, id, opcode, payload, 4U + ((length + 3U) & ~3U));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the string was queued. */
 	return 0;
 }
 
@@ -995,13 +1250,22 @@ surface_request(
 		kwl_buffer_put(previous);
 		break;
 	case 2:
+		/* Damage is a rectangle (x, y, width, height) of the surface's units. */
+		if (size != 16U)
+			return EPROTO;
+
+		/* It waits apart until the commit turns it to the buffer's pixels with the scale and viewport it applies. */
+		add_damage(surface->surface_damage, &surface->surface_damaged, (int32_t)word_at(bytes, 0), (int32_t)word_at(bytes, 4),
+		    (int32_t)word_at(bytes, 8), (int32_t)word_at(bytes, 12));
+		break;
 	case 9:
-		/* Damage is a rectangle (x, y, width, height), in buffer pixels at scale one without transform. */
+		/* Damage of the buffer is a rectangle (x, y, width, height) of its pixels. */
 		if (size != 16U)
 			return EPROTO;
 
 		/* It joins the pending damage (a wl_shm image copies only those rows). */
-		add_damage(surface, (int32_t)word_at(bytes, 0), (int32_t)word_at(bytes, 4), (int32_t)word_at(bytes, 8), (int32_t)word_at(bytes, 12));
+		add_damage(surface->damage, &surface->damaged, (int32_t)word_at(bytes, 0), (int32_t)word_at(bytes, 4), (int32_t)word_at(bytes, 8),
+		    (int32_t)word_at(bytes, 12));
 		break;
 	case 3:
 		/* One frame request allocates one callback in pending state. */
@@ -1051,17 +1315,31 @@ surface_request(
 		/* Succeeded: the event loop may present this surface's completed commit. */
 		break;
 	case 7:
-	case 8:
-		/* The selected unscaled linear scanout cannot interpret transformed image storage. */
+		/* The selected linear scanout cannot interpret transformed image storage. */
 		if (size != 4U)
 			return EPROTO;
 
-		/* Transform zero and buffer scale one preserve the exported immutable image geometry. */
+		/* Transform zero preserves the exported immutable image geometry. */
 		scalar = word_at(bytes, 0);
-		if ((opcode == 7U && scalar != 0U) || (opcode == 8U && scalar != 1U))
+		if (scalar != 0U)
 			return EPROTO;
 
 		/* Succeeded: the requested transform is the supported identity transform. */
+		break;
+	case 8:
+		/* The buffer scale: the buffer's pixels for a unit of the surface each way. */
+		if (size != 4U)
+			return EPROTO;
+
+		/* A scale below one is the protocol's invalid_scale; one past the largest display's is refused the same way. */
+		scalar = word_at(bytes, 0);
+		if ((int32_t)scalar < 1 || scalar > SURFACE_SCALE_MAX) {
+			error = kwl_error_code(surface->client, surface->id, SURFACE_ERROR_INVALID_SCALE, "not a buffer scale");
+			return error;
+		}
+
+		/* Succeeded: the next commit applies it with the viewport (viewport.c). */
+		kwl_viewport_buffer_scale(surface, scalar);
 		break;
 	default:
 		/* No other surface version was advertised. */
@@ -1160,6 +1438,9 @@ surface_commit(
 		/* Initial configure must precede every buffer-bearing map or remap. */
 		if (surface->pending != NULL)
 			return EPROTO;
+
+		/* The scale of the output the window opens on, before the configure, so the first buffer is drawn at it (surface-outputs.c). */
+		kwl_fractional_scale_tell(surface);
 
 		/* A popup gets its place and size (popup.c); a window chooses its size, a fullscreen one gets the output's. */
 		if (role->top->kind == KWL_POPUP) {
@@ -1875,38 +2156,67 @@ send_bounds(
 	return 0;
 }
 
-/* Adds a rectangle to a surface's pending damage (their bounding box). */
+/*
+ * Adds a rectangle (x, y, width, height) to a pending damage box (x0, y0,
+ * x1, y1): the box grows to hold it.  The far edges are kept in 32 bits,
+ * so a client's "everything" (a size of INT32_MAX) does not overflow.
+ */
 static void
 add_damage(
-	struct kwl_object *surface,
+	int32_t *box,
+	unsigned *damaged,
 	int32_t x,
 	int32_t y,
 	int32_t width,
 	int32_t height)
 {
+	int32_t rect[4];
+	int64_t right;
+	int64_t bottom;
+
 	/* An empty rectangle adds nothing. */
 	if (width <= 0 || height <= 0)
 		return;
 
-	/* The first rectangle, or the box around both. */
-	if (!surface->damaged) {
-		surface->damage[0] = x;
-		surface->damage[1] = y;
-		surface->damage[2] = x + width;
-		surface->damage[3] = y + height;
-		surface->damaged = 1;
+	/* The far edges, kept at the largest coordinate. */
+	right = (int64_t)x + width;
+	bottom = (int64_t)y + height;
+	if (right > INT32_MAX)
+		right = INT32_MAX;
+	if (bottom > INT32_MAX)
+		bottom = INT32_MAX;
+
+	/* The rectangle joins the box. */
+	rect[0] = x;
+	rect[1] = y;
+	rect[2] = (int32_t)right;
+	rect[3] = (int32_t)bottom;
+	join_damage(box, damaged, rect);
+}
+
+/* Grows a damage box (x0, y0, x1, y1) to hold a rectangle given the same way; the first rectangle is the box. */
+static void
+join_damage(
+	int32_t *box,
+	unsigned *damaged,
+	const int32_t *rect)
+{
+	/* The first rectangle. */
+	if (!*damaged) {
+		memcpy(box, rect, 4U * sizeof(box[0]));
+		*damaged = 1;
 		return;
 	}
 
 	/* The box grows to hold the rectangle. */
-	if (x < surface->damage[0])
-		surface->damage[0] = x;
-	if (y < surface->damage[1])
-		surface->damage[1] = y;
-	if (x + width > surface->damage[2])
-		surface->damage[2] = x + width;
-	if (y + height > surface->damage[3])
-		surface->damage[3] = y + height;
+	if (rect[0] < box[0])
+		box[0] = rect[0];
+	if (rect[1] < box[1])
+		box[1] = rect[1];
+	if (rect[2] > box[2])
+		box[2] = rect[2];
+	if (rect[3] > box[3])
+		box[3] = rect[3];
 }
 
 /*
@@ -1953,6 +2263,21 @@ static void
 commit_damage(
 	struct kwl_object *surface)
 {
+	int32_t pixels[4];
+	int shown;
+
+	/*
+	 * The damage given in the surface's units, turned to the pixels of the
+	 * buffer the commit shows with the buffer scale and the viewport it
+	 * applied; damage that shows no pixel is dropped.
+	 */
+	if (surface->surface_damaged) {
+		shown = kwl_viewport_damage_buffer(surface, surface->queued, surface->surface_damage, pixels);
+		if (shown)
+			join_damage(surface->damage, &surface->damaged, pixels);
+		surface->surface_damaged = 0;
+	}
+
 	/* No damage leaves the committed damage as it is. */
 	if (!surface->damaged)
 		return;
