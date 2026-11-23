@@ -1948,6 +1948,8 @@ font_scalable(
 		return ENOENT;
 
 	/* The sizes it gives: the pixel size, else the point size at the resolution. */
+	pixel = 0U;
+	point = 0U;
 	resolution_x = FONT_RESOLUTION;
 	resolution_y = FONT_RESOLUTION;
 	(void)font_number(fields[FIELD_RESOLUTION_X], lengths[FIELD_RESOLUTION_X], &resolution_x);

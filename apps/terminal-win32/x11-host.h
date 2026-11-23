@@ -12,11 +12,10 @@
  * (x11-link.h).
  *
  * The connection's network thread owns it.  The first X client the
- * remote sshd forwards starts the child (mikuterm.exe --x11-server, in a
- * Job object that ends it with mikuterm, at a lower integrity level where
- * Windows allows); the engine's events of the X11 channels are handed in,
- * and x11_host_pump moves the bytes both ways each round, as fast as the
- * credit of the link and the SSH window let it.  A child that fails, stops
+ * remote sshd forwards starts the child (mikuterm --x11-server, which the
+ * system's part starts and ends: x11-spawn.h); the engine's events of the
+ * X11 channels are handed in, and x11_host_pump moves the bytes both ways
+ * each round, as fast as the credit of the link and the SSH window let it.  A child that fails, stops
  * answering or breaks the link's rules is ended and its channels closed;
  * the next X client starts another, three times at most.
  *
@@ -94,9 +93,12 @@ struct x11_host_channel {
  */
 struct x11_host {
 	struct x11_host_settings settings;
+
+	/* The child as the system's part keeps it (Windows: its process and Job objects; POSIX: its pid). */
 	void *process;
 	void *job;
 	unsigned long pid;
+
 	struct kl_socket *socket;
 	struct kl_socket *child_end;
 	struct x11_link_table table;

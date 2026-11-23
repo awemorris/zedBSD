@@ -14,10 +14,13 @@
  * drawn on the processor and shown by libkeiland, each tab connecting on
  * a thread of its own (connection-ssh.c, ssh-thread.c).  New Window
  * starts the program again.  A run that fails says what failed on the
- * standard error.
+ * standard error.  Started with --x11-server, it is instead the X server
+ * process of one connection's X11 forwarding (x11-child.c).
  */
 
 #include "mikuterm.h"
+#include "x11-host.h"
+#include "x11-spawn.h"
 
 #include "userland/desktop/terminal/run.h"
 
@@ -94,11 +97,18 @@ main(
 	int status;
 	int error;
 
-	(void)argc;
-	(void)argv;
-
 	/* A write to a connection that has gone must not end the program. */
 	(void)signal(SIGPIPE, SIG_IGN);
+
+	/*
+	 * The X server process of an SSH connection (started by mikuterm
+	 * itself): it shows no window of mikuterm's and reads no settings of
+	 * its own.
+	 */
+	if (argc == 2 && strcmp(argv[1], X11_SPAWN_SWITCH) == 0) {
+		status = mikuterm_x11_child();
+		return status;
+	}
 
 	/* The folder everything is in. */
 	error = mikuterm_folder_init();

@@ -6,19 +6,15 @@
  */
 
 /*
- * mikuterm's side of the X server of one SSH connection: the child
- * process, its start and end, and the X clients' channels between the
- * engine and the link.
+ * mikuterm's side of the X server of one SSH connection: the link to the
+ * child process, its start and end, and the X clients' channels between
+ * the engine and the link.  The same on every system: the system's own
+ * part, which starts and ends the process, is x11-spawn.h's.
  */
 
-/* The tabs' header first: libkeiland's names Windows' headers would take as their macros. */
 #include "x11-tab.h"
-
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <windows.h>
-
 #include "x11-host.h"
+#include "x11-spawn.h"
 
 #include "userland/base/ssh/ssh-client-engine.h"
 #include <keiland/keiland_socket.h>
@@ -39,11 +35,10 @@
 #define HOST_READ		65536U
 #define HOST_IN_MAX		(X11_LINK_HEADER + X11_LINK_BODY_MAX + HOST_READ)
 
-/* How long the child has to say HELLO, how often it is pinged, how long its PONG may take, how long its end may take (ms). */
+/* How long the child has to say HELLO, how often it is pinged, how long its PONG may take (ms). */
 #define HOST_HELLO_MS		10000U
 #define HOST_PING_MS		5000U
 #define HOST_PONG_MS		10000U
-#define HOST_END_MS		3000U
 
 /* How many times one connection starts an X server. */
 #define HOST_STARTS_MAX		3U
@@ -52,17 +47,12 @@
 #define HOST_HELLO_ROOT		(12U + X11_HOST_COOKIE)
 #define HOST_HELLO_FIXED	(HOST_HELLO_ROOT + 8U)
 
-/* The command line's switch of the child. */
-#define HOST_SWITCH		L" --x11-server"
-
 /* The scales the child's tabs may have, in percent (the X server's). */
 #define HOST_SCALE_MIN		100U
 #define HOST_SCALE_MAX		400U
 
 static int host_start(struct x11_host *host, uint64_t now);
 static int host_pair(struct x11_host *host, struct kl_socket **child_end);
-static int host_spawn(struct x11_host *host, struct kl_socket *child_end);
-static HANDLE host_low_token(void);
 static void host_fail(struct x11_host *host, struct ssh_engine *engine, const char *why);
 static int host_frame(struct x11_host *host, unsigned type, uint32_t id, const void *body, uint32_t size);
 static int host_receive(struct x11_host *host, struct ssh_engine *engine, uint64_t now, const char **why);
@@ -387,21 +377,6 @@ x11_host_new_tab(
 }
 
 /*
- * Lets the child bring its windows to the front (the user just used the
- * tab of the connection, which is mikuterm's foreground right).
- */
-void
-x11_host_foreground(
-	const struct x11_host *host)
-{
-	/* Only a running child. */
-	if (host->process == NULL)
-		return;
-
-	(void)AllowSetForegroundWindow((DWORD)host->pid);
-}
-
-/*
  * Starts the child: the socket pair, the process, and the HELLO with the
  * settings.  Returns 0, or an errno value.
  */
@@ -433,10 +408,11 @@ host_start(
 	/*
 	 * The process, given its end; mikuterm keeps its own descriptor of
 	 * that end until the child says HELLO (where the system makes the
-	 * child's copy only when the child opens it, it must still exist).
+	 * child's copy only when the child opens it, it must still exist),
+	 * unless the system's part closed it once the child held its copy.
 	 */
 	host->child_end = child_end;
-	error = host_spawn(host, child_end);
+	error = x11_spawn_start(host, child_end);
 	if (error != 0) {
 		host_stop_child(host);
 		return error;
@@ -481,7 +457,6 @@ host_pair(
 	struct kl_address address;
 	struct kl_address peer;
 	struct kl_address local;
-	BOOL exclusive;
 	int nodelay;
 	int error;
 
@@ -490,8 +465,7 @@ host_pair(
 	error = kl_socket_open(KL_ADDRESS_IPV4, KL_SOCKET_STREAM, 0, &listener);
 	if (error != 0)
 		return error;
-	exclusive = TRUE;
-	(void)setsockopt((SOCKET)kl_socket_native(listener), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof(exclusive));
+	x11_spawn_guard(listener);
 	kl_address_loopback(KL_ADDRESS_IPV4, 0, &address);
 	error = kl_socket_bind(listener, &address);
 	if (error == 0)
@@ -547,184 +521,6 @@ host_pair(
 	host->socket = accepted;
 	*child_end = connecting;
 	return 0;
-}
-
-/*
- * Starts mikuterm.exe --x11-server: suspended, at a low integrity level
- * where Windows allows it, inheriting only the reading end of a pipe
- * (its standard input), put in a Job object that ends it with mikuterm,
- * then resumed; the socket's end is duplicated into it and written to the
- * pipe.  Returns 0, or an errno value.
- */
-static int
-host_spawn(
-	struct x11_host *host,
-	struct kl_socket *child_end)
-{
-	WCHAR program[MAX_PATH];
-	WCHAR command[MAX_PATH + 64];
-	SECURITY_ATTRIBUTES inherit;
-	HANDLE pipe_read;
-	HANDLE pipe_write;
-	SIZE_T list_size;
-	LPPROC_THREAD_ATTRIBUTE_LIST list;
-	STARTUPINFOEXW start;
-	PROCESS_INFORMATION process;
-	JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
-	WSAPROTOCOL_INFOW information;
-	HANDLE token;
-	DWORD length;
-	DWORD written;
-	BOOL done;
-	int low;
-
-	/* The program and its command line. */
-	length = GetModuleFileNameW(NULL, program, MAX_PATH);
-	if (length == 0 || length >= MAX_PATH)
-		return ENOENT;
-	(void)_snwprintf(command, sizeof(command) / sizeof(command[0]), L"\"%ls\"%ls", program, HOST_SWITCH);
-	command[sizeof(command) / sizeof(command[0]) - 1] = L'\0';
-
-	/* The pipe of the socket's description: only its reading end is inherited. */
-	inherit.nLength = sizeof(inherit);
-	inherit.lpSecurityDescriptor = NULL;
-	inherit.bInheritHandle = TRUE;
-	done = CreatePipe(&pipe_read, &pipe_write, &inherit, 0);
-	if (!done)
-		return EIO;
-	(void)SetHandleInformation(pipe_write, HANDLE_FLAG_INHERIT, 0);
-
-	/* The attribute that limits the inherited handles to the pipe's end. */
-	list_size = 0;
-	(void)InitializeProcThreadAttributeList(NULL, 1, 0, &list_size);
-	list = malloc(list_size);
-	if (list == NULL) {
-		CloseHandle(pipe_read);
-		CloseHandle(pipe_write);
-		return ENOMEM;
-	}
-	done = InitializeProcThreadAttributeList(list, 1, 0, &list_size);
-	if (done)
-		done = UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &pipe_read, sizeof(pipe_read), NULL, NULL);
-	if (!done) {
-		free(list);
-		CloseHandle(pipe_read);
-		CloseHandle(pipe_write);
-		return EIO;
-	}
-
-	/* The start: the pipe's end as standard input, nothing else. */
-	memset(&start, 0, sizeof(start));
-	start.StartupInfo.cb = sizeof(start);
-	start.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-	start.StartupInfo.hStdInput = pipe_read;
-	start.StartupInfo.hStdOutput = NULL;
-	start.StartupInfo.hStdError = NULL;
-	start.lpAttributeList = list;
-
-	/* Suspended, at a low integrity level where the token can be made, else as mikuterm runs. */
-	low = 0;
-	token = host_low_token();
-	done = FALSE;
-	if (token != NULL) {
-		done = CreateProcessAsUserW(token, program, command, NULL, NULL, TRUE,
-		    CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, NULL, NULL, &start.StartupInfo, &process);
-		CloseHandle(token);
-		if (done)
-			low = 1;
-	}
-	if (!done)
-		done = CreateProcessW(program, command, NULL, NULL, TRUE, CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
-		    NULL, NULL, &start.StartupInfo, &process);
-	DeleteProcThreadAttributeList(list);
-	free(list);
-	CloseHandle(pipe_read);
-	if (!done) {
-		CloseHandle(pipe_write);
-		return EIO;
-	}
-
-	/* The Job that ends the child with mikuterm, made once per connection. */
-	if (host->job == NULL) {
-		host->job = CreateJobObjectW(NULL, NULL);
-		if (host->job != NULL) {
-			memset(&limits, 0, sizeof(limits));
-			limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-			(void)SetInformationJobObject(host->job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
-		}
-	}
-	if (host->job == NULL || !AssignProcessToJobObject(host->job, process.hProcess)) {
-		TerminateProcess(process.hProcess, 1);
-		CloseHandle(process.hThread);
-		CloseHandle(process.hProcess);
-		CloseHandle(pipe_write);
-		return EIO;
-	}
-	ResumeThread(process.hThread);
-	CloseHandle(process.hThread);
-	host->process = process.hProcess;
-	host->pid = process.dwProcessId;
-
-	/* The socket's end, duplicated into the child, written to its pipe. */
-	if (WSADuplicateSocketW((SOCKET)kl_socket_native(child_end), process.dwProcessId, &information) != 0) {
-		CloseHandle(pipe_write);
-		host_stop_child(host);
-		return EIO;
-	}
-	done = WriteFile(pipe_write, &information, sizeof(information), &written, NULL);
-	CloseHandle(pipe_write);
-	if (!done || written != sizeof(information)) {
-		host_stop_child(host);
-		return EIO;
-	}
-
-	/* Succeeded: the child runs. */
-	(void)low;
-	return 0;
-}
-
-/*
- * Makes a primary token of mikuterm's at the low integrity level (NULL
- * when Windows does not allow it), so the child, which reads the remote
- * host's bytes, cannot write to the user's files or reach mikuterm's
- * memory.
- */
-static HANDLE
-host_low_token(void)
-{
-	HANDLE own;
-	HANDLE token;
-	SID_IDENTIFIER_AUTHORITY authority = { SECURITY_MANDATORY_LABEL_AUTHORITY };
-	PSID low;
-	TOKEN_MANDATORY_LABEL label;
-	BOOL done;
-
-	/* mikuterm's token, duplicated as a primary token. */
-	done = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT | TOKEN_ASSIGN_PRIMARY, &own);
-	if (!done)
-		return NULL;
-	done = DuplicateTokenEx(own, 0, NULL, SecurityImpersonation, TokenPrimary, &token);
-	CloseHandle(own);
-	if (!done)
-		return NULL;
-
-	/* Its integrity level lowered. */
-	done = AllocateAndInitializeSid(&authority, 1, SECURITY_MANDATORY_LOW_RID, 0, 0, 0, 0, 0, 0, 0, &low);
-	if (!done) {
-		CloseHandle(token);
-		return NULL;
-	}
-	label.Label.Attributes = SE_GROUP_INTEGRITY;
-	label.Label.Sid = low;
-	done = SetTokenInformation(token, TokenIntegrityLevel, &label, sizeof(label) + GetLengthSid(low));
-	FreeSid(low);
-	if (!done) {
-		CloseHandle(token);
-		return NULL;
-	}
-
-	/* Succeeded: the token. */
-	return token;
 }
 
 /*
@@ -1082,15 +878,13 @@ host_free(
 }
 
 /*
- * Ends the child: it has HOST_END_MS to end by itself after its link
- * closes, then it is ended.
+ * Ends the child: the link closes, the tabs close, and the process ends
+ * (x11_spawn_stop gives it a moment to end by itself first).
  */
 static void
 host_stop_child(
 	struct x11_host *host)
 {
-	DWORD waited;
-
 	/* The link closes, with the child's end if mikuterm still holds it. */
 	if (host->child_end != NULL) {
 		kl_socket_close(host->child_end);
@@ -1105,14 +899,7 @@ host_stop_child(
 	host_tabs_end(host);
 
 	/* The process ends. */
-	if (host->process != NULL) {
-		waited = WaitForSingleObject(host->process, HOST_END_MS);
-		if (waited != WAIT_OBJECT_0)
-			TerminateProcess(host->process, 1);
-		CloseHandle(host->process);
-		host->process = NULL;
-		host->pid = 0;
-	}
+	x11_spawn_stop(host);
 	host->hello = 0;
 	host->in_size = 0;
 	host->out_size = 0;
