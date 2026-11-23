@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  zedBSD
+  Copyright (C) 2026 Awe Morris
+
+  SPDX-License-Identifier: Zlib
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+	android:width="108dp"
+	android:height="108dp"
+	android:viewportWidth="108"
+	android:viewportHeight="108">
+	<!-- The prompt's ">" in white, inside the safe zone. -->
+	<path
+		android:strokeColor="#F2F4F8"
+		android:strokeWidth="7"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:pathData="M32,38 L52,54 L32,70"/>
+	<!-- The green leek beside it: a stem and two leaves. -->
+	<path
+		android:strokeColor="#5FD08A"
+		android:strokeWidth="6"
+		android:strokeLineCap="round"
+		android:pathData="M68,72 L68,48"/>
+	<path
+		android:strokeColor="#5FD08A"
+		android:strokeWidth="5"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:pathData="M68,48 L60,36 M68,48 L76,36"/>
+</vector>

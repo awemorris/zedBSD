@@ -189,6 +189,10 @@ terminal_menu_open(
 		if (menu_items[index].id == MENU_FORGET && !window->forget_item)
 			continue;
 
+		/* A program that cannot open another window has no such item. */
+		if (menu_items[index].id == MENU_NEW_WINDOW && !window->new_window_item)
+			continue;
+
 		/* A program that gave the settings' tab nothing has no settings. */
 		if (menu_items[index].id == MENU_SETTINGS && !window->settings_item)
 			continue;

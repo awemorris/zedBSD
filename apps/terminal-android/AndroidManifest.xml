@@ -15,6 +15,7 @@
 	<!-- The native library stays stored in the apk and is mapped from it (extractNativeLibs). -->
 	<application
 		android:label="@string/app_name"
+		android:icon="@mipmap/ic_launcher"
 		android:hasCode="true"
 		android:extractNativeLibs="false"
 		android:allowBackup="false"

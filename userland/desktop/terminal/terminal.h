@@ -753,6 +753,7 @@ struct terminal_window {
 	 */
 	int page_active;
 	int settings_item;
+	int new_window_item;
 
 	/*
 	 * A picture's tab (connection.h): whether it is the active tab (the

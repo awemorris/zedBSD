@@ -313,6 +313,7 @@ struct page_state {
 	char copied[KL_FIELD_MAX + TERMINAL_KEY_LINE_MAX];
 	size_t copied_length;
 	int copied_set;
+	int copied_empty;
 
 	/* Known hosts: the lines listed (known_count of known_total), whether read, the line asked to be removed (0: none) and the last word. */
 	struct terminal_known_line known[TERMINAL_KNOWN_MAX];
@@ -793,6 +794,7 @@ terminal_page_copy_text(
 	/* What the page set aside, taken once. */
 	if (page.copied_set) {
 		page.copied_set = 0;
+		page.copied_empty = (page.copied_length == 0U);
 		from = 0U;
 		to = page.copied_length;
 		if (to > size - 1U)
@@ -829,6 +831,23 @@ terminal_page_copy_text(
 
 	/* Succeeded: the selection's text. */
 	return to - from;
+}
+
+/*
+ * Tells whether the Copy just answered with no text was asked to leave the
+ * clipboard empty (the page set aside an empty text, as after a private key
+ * was kept), not a Copy with nothing selected, which leaves the clipboard
+ * as it is.  Reports it once.
+ */
+int
+terminal_page_copy_emptied(void)
+{
+	int emptied;
+
+	/* Once. */
+	emptied = page.copied_empty;
+	page.copied_empty = 0;
+	return emptied;
 }
 
 /*
@@ -3549,8 +3568,7 @@ page_key_make(void)
 /*
  * Keeps the private key the area holds under the name, wipes the area, and
  * shows the key's public key.  The key's text is never logged, and the
- * clipboard it was pasted from is overwritten (the run keeps the clipboard
- * when it is told to copy nothing, so one space takes the key's place).
+ * clipboard it was pasted from is emptied.
  */
 static void
 page_key_save(
@@ -3577,8 +3595,8 @@ page_key_save(
 	page_say(&page.key_paste_message, 0, "");
 	page_say(&page.key_message, 0, why);
 
-	/* The clipboard the key came from. */
-	page_set_aside(" ", 1U);
+	/* The clipboard the key came from is emptied (an empty text set aside for the next Copy). */
+	page_set_aside("", 0U);
 	page_action(window, TERMINAL_ACTION_COPY);
 	page_log("key-imported", page.key_name.text);
 }

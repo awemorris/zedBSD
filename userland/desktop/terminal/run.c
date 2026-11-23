@@ -571,6 +571,9 @@ run_start(
 	run_window.settings_item = 0;
 	if (options->page != NULL)
 		run_window.settings_item = 1;
+	run_window.new_window_item = 0;
+	if (options->new_window != NULL)
+		run_window.new_window_item = 1;
 	run_menu_state(run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
@@ -646,7 +649,7 @@ run_loop(
 		 * drawn when it answers (which wakes the wait), or at the latest
 		 * when the pace gives up waiting (pace.h).
 		 */
-		if (run_screen->changed) {
+		if (run_screen->changed && !run_window.page_active && !run_window.picture_active) {
 			wait = terminal_window_frame_wait(&run_window, now);
 			if (wait < timeout)
 				timeout = wait;
@@ -1766,6 +1769,7 @@ run_tab_new(
 	/* Its connection, at the grid's size, which writes the tab's first title. */
 	connector = options->connector;
 	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
 	width = run->columns * run_font.cell_width;
 	height = run->rows * run_font.cell_height;
 	error = connector->open(connector->data,
@@ -3135,9 +3139,9 @@ run_page_copy(void)
 {
 	size_t length;
 
-	/* The page's text, the terminal's clipboard from now on. */
+	/* The page's text, the terminal's clipboard from now on; no text leaves the clipboard as it is, but an empty text the page set aside empties it. */
 	length = terminal_page_copy_text(run_clipboard, sizeof(run_clipboard));
-	if (length == 0U)
+	if (length == 0U && !terminal_page_copy_emptied())
 		return;
 	run_clipboard_length = length;
 	printf("ZTERM COPY bytes=%lu\n", (unsigned long)run_clipboard_length);
