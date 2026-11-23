@@ -9,7 +9,7 @@ override BOARD                    := pc98
 CONFIG_ROOTFS_DEVELOPMENT         := y
 CONFIG_BOOT_SPLASH                := n
 CONFIG_QUIET_BOOT                 := n
-CONFIG_GRAPHICAL_LOGIN            := y
+CONFIG_GRAPHICAL_LOGIN            := n
 
 CONFIG_DRIVER_LOOP                := y
 CONFIG_DRIVER_FS_UFS              := y
@@ -223,4 +223,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	xargs \
 	zcat \
 	rtl8822b-firmware \
-	ca-certificates
+	ca-certificates \
+	xzed \
+	zshell \
+	zwm \
+	zterm
