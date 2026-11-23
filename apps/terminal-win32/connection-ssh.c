@@ -34,8 +34,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The words of the line about keeping a passphrase, after its box. */
+/* The words of the line about keeping a passphrase, after its box (the Linux program keeps it while it runs). */
+#ifdef MIKUTERM_LINUX
+#define CONNECTION_KEEP_TEXT	"Remember the passphrase until mikuterm ends (Tab switches this)\r\n"
+#else
 #define CONNECTION_KEEP_TEXT	"Remember the passphrase until you sign out of Windows (Tab switches this)\r\n"
+#endif
 
 /*
  * The first title of a tab, before the remote side sets its own: the

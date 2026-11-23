@@ -11,7 +11,7 @@
  * the user may read it) and ssh\known_hosts, the check of an ssh\config
  * with the SSH library's own reader, the system's text editor the
  * ssh\config opens in (the file's own "edit" verb, else "open", else
- * Notepad), a host's X11 lines in its form (mikuterm forwards X11), and
+ * Notepad; on Linux, xdg-open), a host's X11 lines in its form (mikuterm forwards X11), and
  * mikuterm's own settings of config\mikuterm.conf: the fonts and the grid
  * (from the next start), the TERM, the wait for a connection, the port of
  * WSL's sshd and the X11 windows' scale, drawing and selection (from the
@@ -25,8 +25,15 @@
 #include "userland/desktop/terminal/settings-page.h"
 #include "userland/base/ssh/ssh-config.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -45,8 +52,13 @@
 /* The longest name of a host checked, with its NUL. */
 #define PAGE_HOST_MAX		128U
 
+#ifdef _WIN32
 /* The editor of a file no verb opens: Notepad, which every Windows has. */
 #define PAGE_NOTEPAD		L"notepad.exe"
+#else
+/* The program that opens a file in the desktop's own application for it (the user's text editor). */
+#define PAGE_OPENER		"xdg-open"
+#endif
 
 /*
  * The names of an ssh\config's Host lines, which it is checked for: so
@@ -98,12 +110,16 @@ static int page_exists(void *data, const char *path);
 static int page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
 static int page_host_named(void *data, const char *name, size_t size);
 static int page_editor(void *data, struct terminal_window *window, const char *path);
+#ifdef _WIN32
 static int page_shell(const wchar_t *verb, const wchar_t *file, const wchar_t *parameters);
+#endif
 static int page_item_get(void *data, const char *keyword, char *value, size_t size);
 static int page_item_set(void *data, const char *keyword, const char *value, char *why, size_t size);
 static void page_conf_now(struct mikuterm_conf *conf);
 static void page_comment(char *comment, size_t size);
+#ifdef _WIN32
 static void page_utf8(const wchar_t *wide, char *text, size_t size);
+#endif
 
 /*
  * Makes what the settings' tab is given, for the settings mikuterm runs
@@ -321,6 +337,7 @@ page_host_named(
 	return 0;
 }
 
+#ifdef _WIN32
 /*
  * Opens a file of the folder in the system's text editor: the editor the
  * file's type names for "edit", else the program that opens it, else
@@ -405,6 +422,74 @@ page_shell(
 	/* Succeeded: it started. */
 	return 1;
 }
+
+#else
+/*
+ * Opens a file of the folder in the desktop's application for it
+ * (xdg-open), started apart from mikuterm so that nothing waits for it.
+ * Returns 0, or ENOENT when xdg-open could not start.
+ */
+static int
+page_editor(
+	void *data,
+	struct terminal_window *window,
+	const char *path)
+{
+	char *arguments[3];
+	int pipe_ends[2];
+	int status;
+	int failure;
+	ssize_t got;
+	pid_t child;
+	pid_t opener;
+
+	(void)data;
+	(void)window;
+
+	/* The program and the file. */
+	arguments[0] = (char *)PAGE_OPENER;
+	arguments[1] = (char *)path;
+	arguments[2] = NULL;
+
+	/* A pipe the opener's start writes its failure on (closed by a start that succeeded). */
+	status = pipe2(pipe_ends, O_CLOEXEC);
+	if (status != 0)
+		return ENOENT;
+
+	/* A child that starts the opener and ends at once, so that the opener is no child of mikuterm's. */
+	child = fork();
+	if (child < 0) {
+		(void)close(pipe_ends[0]);
+		(void)close(pipe_ends[1]);
+		return ENOENT;
+	}
+	if (child == 0) {
+		/* The opener, in a process of its own; a start that failed says why on the pipe. */
+		(void)close(pipe_ends[0]);
+		opener = fork();
+		if (opener == 0) {
+			(void)execvp(PAGE_OPENER, arguments);
+			failure = errno;
+			(void)write(pipe_ends[1], &failure, sizeof(failure));
+			_exit(127);
+		}
+		_exit(0);
+	}
+
+	/* The child ends at once; the pipe says whether the opener started. */
+	(void)close(pipe_ends[1]);
+	(void)waitpid(child, &status, 0);
+	got = read(pipe_ends[0], &failure, sizeof(failure));
+	(void)close(pipe_ends[0]);
+	if (got != 0)
+		return ENOENT;
+
+	/* Succeeded: the opener is starting. */
+	printf("MIKUTERM SETTINGS editor xdg-open\n");
+	fflush(stdout);
+	return 0;
+}
+#endif
 
 /* Gives a setting's value as config\mikuterm.conf gives it now (its default when the file does not). */
 static int
@@ -559,6 +644,7 @@ page_conf_now(
 	free(text);
 }
 
+#ifdef _WIN32
 /* Writes a new key's comment: the Windows user's name and the computer's, as user@computer. */
 static void
 page_comment(
@@ -610,3 +696,36 @@ page_utf8(
 	if (written <= 0)
 		text[0] = '\0';
 }
+#else
+/* Writes a new key's comment: the user's name and the computer's, as user@computer. */
+static void
+page_comment(
+	char *comment,
+	size_t size)
+{
+	const struct passwd *entry;
+	char computer[MIKUTERM_HOST_MAX];
+	int status;
+
+	/* The user's name. */
+	entry = getpwuid(getuid());
+
+	/* The computer's. */
+	status = gethostname(computer, sizeof(computer));
+	if (status != 0)
+		computer[0] = '\0';
+	computer[sizeof(computer) - 1U] = '\0';
+
+	/* Together; without either, mikuterm's name. */
+	if (entry == NULL ||
+	    entry->pw_name == NULL ||
+	    entry->pw_name[0] == '\0' ||
+	    computer[0] == '\0') {
+		(void)snprintf(comment, size, "mikuterm");
+		return;
+	}
+
+	/* The user at the computer, as ssh-keygen's comment. */
+	(void)snprintf(comment, size, "%s@%s", entry->pw_name, computer);
+}
+#endif
