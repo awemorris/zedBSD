@@ -185,7 +185,7 @@ x11_window_resize(
 /*
  * Destroys a window and its descendants: their owners (and the parent's,
  * when it watches its children) are told, and a top-level window's
- * desktop window closes.  The root window is never destroyed.
+ * surface closes.  The root window is never destroyed.
  */
 void
 x11_window_destroy(
@@ -246,7 +246,7 @@ x11_window_destroy(
 	/* Its properties and the selections it owned (selection.c). */
 	x11_selection_forget_window(server, window->id);
 
-	/* Its pixels, its desktop window, and its slot. */
+	/* Its pixels, its surface, and its slot. */
 	window_remove(server, window);
 }
 
@@ -633,7 +633,7 @@ x11_resources_release(
 	}
 }
 
-/* Frees a window's pixels and desktop window and takes it out of the table. */
+/* Frees a window's pixels and surface and takes it out of the table. */
 static void
 window_remove(
 	struct x11server *server,
@@ -641,10 +641,10 @@ window_remove(
 {
 	size_t slot;
 
-	/* Its pixels, its desktop window and its composite. */
+	/* Its pixels, its surface and its composite. */
 	free(window->pixels);
 	window->pixels = NULL;
-	x11_rootless_forget(window);
+	x11_rootless_forget(server, window);
 
 	/* The later windows move down over it. */
 	slot = (size_t)(window - server->windows);

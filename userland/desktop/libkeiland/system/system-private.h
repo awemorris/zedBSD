@@ -93,6 +93,25 @@ struct system_view_resolution {
 	unsigned why;
 };
 
+/*
+ * What the compositor told of one display's scale, kept at the display's
+ * index in the snapshot, in the compositor's 120ths: the scale it is
+ * shown at, the user's choice, the default, the steps offered, its
+ * logical size and why its scale cannot be chosen now.  told is 0 until
+ * its scale event came.
+ */
+struct system_view_scale {
+	unsigned told;
+	unsigned current;
+	unsigned chosen;
+	unsigned recommended;
+	unsigned offered[KL_DISPLAY_SCALES_MAX];
+	unsigned offered_count;
+	uint32_t width;
+	uint32_t height;
+	unsigned why;
+};
+
 /* One phone item waiting to be taken, with the text it owns (ws197-p004a). */
 struct system_view_phone_item {
 	struct kl_phone_item item;
@@ -280,6 +299,12 @@ struct system_view {
 	struct system_view_resolution display_resolutions[KL_DISPLAYS_MAX];
 	struct system_view_resolution display_resolutions_pending[KL_DISPLAYS_MAX];
 	/*
+	 * The displays' scales, at the same indices as the displays of the
+	 * snapshot in effect and of the one being sent.
+	 */
+	struct system_view_scale display_scales[KL_DISPLAYS_MAX];
+	struct system_view_scale display_scales_pending[KL_DISPLAYS_MAX];
+	/*
 	 * What Settings reads of the computer (ws188-p002): the parts in
 	 * effect, which of them were ever answered (machine_known, the
 	 * KL_MACHINE_* bits) and how often each was put into effect
@@ -453,6 +478,8 @@ int system_view_rotation_of(const struct system_view *view, const char *key, str
 void system_view_display_mode(struct system_view *view, const char *key, const struct kl_display_mode *mode);
 void system_view_display_resolution(struct system_view *view, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why, uint64_t now_ms);
 const struct system_view_resolution *system_view_resolution_of(const struct system_view *view, const char *key);
+void system_view_display_scale(struct system_view *view, const char *key, const struct system_view_scale *scale);
+const struct system_view_scale *system_view_scale_of(const struct system_view *view, const char *key);
 void system_view_machine_parts(struct system_view *view, uint32_t request, uint32_t what);
 void system_view_machine_about(struct system_view *view, const struct kl_machine_about *about);
 void system_view_machine_filesystem(struct system_view *view, const struct kl_machine_filesystem *filesystem);

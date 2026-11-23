@@ -1225,6 +1225,7 @@ system_view_display(
 	view->displays_pending[view->displays_pending_count] = *display;
 	memset(&view->display_rotations_pending[view->displays_pending_count], 0, sizeof(view->display_rotations_pending[0]));
 	memset(&view->display_resolutions_pending[view->displays_pending_count], 0, sizeof(view->display_resolutions_pending[0]));
+	memset(&view->display_scales_pending[view->displays_pending_count], 0, sizeof(view->display_scales_pending[0]));
 	view->displays_pending_count++;
 }
 
@@ -1360,6 +1361,61 @@ system_view_display_resolution(
 }
 
 /*
+ * Keeps a display's scale, told after its resolution; a key the snapshot
+ * being sent does not hold is dropped.
+ */
+void
+system_view_display_scale(
+	struct system_view *view,
+	const char *key,
+	const struct system_view_scale *scale)
+{
+	size_t index;
+	int differs;
+
+	/* The display of the snapshot being sent with that key. */
+	if (!view->displays_open)
+		return;
+	for (index = 0U; index < view->displays_pending_count; index++) {
+		differs = strcmp(view->displays_pending[index].key, key);
+		if (differs != 0)
+			continue;
+
+		/* Its scale, told now. */
+		view->display_scales_pending[index] = *scale;
+		view->display_scales_pending[index].told = 1U;
+		return;
+	}
+}
+
+/*
+ * Finds what the compositor told of the scale of a display of the snapshot
+ * in effect, or NULL for a key the snapshot does not hold or a display
+ * whose scale was not told.
+ */
+const struct system_view_scale *
+system_view_scale_of(
+	const struct system_view *view,
+	const char *key)
+{
+	size_t index;
+	int differs;
+
+	/* The display with that key. */
+	for (index = 0U; index < view->display_count; index++) {
+		differs = strcmp(view->displays[index].key, key);
+		if (differs != 0)
+			continue;
+		if (!view->display_scales[index].told)
+			return NULL;
+		return &view->display_scales[index];
+	}
+
+	/* Succeeded: not a display of the snapshot. */
+	return NULL;
+}
+
+/*
  * Finds what the compositor told of the modes of a display of the snapshot
  * in effect, or NULL for a key the snapshot does not hold or a display
  * whose modes were not told.
@@ -1439,6 +1495,7 @@ system_view_displays_done(
 	memcpy(view->displays, view->displays_pending, view->displays_pending_count * sizeof(view->displays[0]));
 	memcpy(view->display_rotations, view->display_rotations_pending, view->displays_pending_count * sizeof(view->display_rotations[0]));
 	memcpy(view->display_resolutions, view->display_resolutions_pending, view->displays_pending_count * sizeof(view->display_resolutions[0]));
+	memcpy(view->display_scales, view->display_scales_pending, view->displays_pending_count * sizeof(view->display_scales[0]));
 	view->display_count = view->displays_pending_count;
 	view->displays_serial = serial;
 	view->displays_mode = mode;

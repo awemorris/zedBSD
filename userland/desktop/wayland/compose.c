@@ -1973,6 +1973,9 @@ compose_rotation_choose(
 		turn = KWL_ROTATE_0;
 	}
 
+	/* The scale the display and its mode ask for (the user's choice for the monitor, or the default). */
+	kwl_output_scale_choose(server);
+
 	/* The choice, how it is shown, and the desktop's size at it. */
 	compose->rotation_selected = wanted;
 	compose->scanout_rotation = scanout;
