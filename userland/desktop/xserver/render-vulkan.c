@@ -2334,6 +2334,10 @@ render_fill_gpu(
 		pattern_image = paint->stipple;
 	}
 
+	/* A tile or stipple fill without its pattern is left to the processor's rules. */
+	if (push.mode != RENDER_MODE_SOLID && pattern_image == NULL)
+		return 0;
+
 	/* The pattern on the GPU, its origin given less its size so the shader's place is never negative. */
 	pattern = vulkan->render->blank;
 	if (pattern_image != NULL) {

@@ -228,6 +228,7 @@ x11_vulkan_open(
 	struct x11_vulkan *vulkan;
 	VkResult error;
 	int found;
+	int drawing;
 
 	/* The state, and the loader's lookup. */
 	vulkan = calloc(1U, sizeof(*vulkan));
@@ -276,11 +277,9 @@ x11_vulkan_open(
 	}
 
 	/* The drawing layer; without it, windows and pixmaps are drawn in memory (and may still be shown through Vulkan). */
-	error = (VkResult)x11_render_vulkan_open(vulkan);
-	if (error != 0) {
+	drawing = x11_render_vulkan_open(vulkan);
+	if (drawing != 0)
 		x11_log(server, "X11SERVER RENDER memory (the device cannot draw)");
-		x11_render_vulkan_close(vulkan);
-	}
 
 	/* Succeeded: drawing and showing through Vulkan. */
 	x11_log(server, "X11SERVER VULKAN device ready family=%u wsi=%d", (unsigned)vulkan->family, vulkan->wsi);
@@ -903,6 +902,7 @@ vulkan_device_swapchain(
 	uint32_t index;
 	VkResult error;
 	int found;
+	int differs;
 
 	/* How many extensions it has. */
 	count = 0U;
@@ -923,7 +923,8 @@ vulkan_device_swapchain(
 	/* The swapchain's among them. */
 	found = 0;
 	for (index = 0U; index < count && !found; index++) {
-		if (strcmp(extensions[index].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)
+		differs = strcmp(extensions[index].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+		if (differs == 0)
 			found = 1;
 	}
 	free(extensions);
