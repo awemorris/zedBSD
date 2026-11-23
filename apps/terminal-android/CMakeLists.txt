@@ -117,26 +117,21 @@ add_custom_target(base-apk DEPENDS ${MIKUTERM_BASE_APK})
 
 # The apk before signing: the base apk with classes.dex (compressed) and the native libraries
 # (stored, so they are mapped from the apk), then aligned so that the libraries start on 16 KB
-# boundaries.
+# boundaries.  These steps always run (they take a moment): the libraries are made by other
+# builds that this build cannot see the files of, so the files' times say nothing.
 set(MIKUTERM_UNALIGNED_APK ${CMAKE_BINARY_DIR}/unaligned.apk)
 set(MIKUTERM_ALIGNED_APK ${CMAKE_BINARY_DIR}/aligned.apk)
-add_custom_command(
-	OUTPUT ${MIKUTERM_UNALIGNED_APK}
+add_custom_target(aligned-apk
 	COMMAND ${CMAKE_COMMAND} -E copy ${MIKUTERM_BASE_APK} ${MIKUTERM_UNALIGNED_APK}
 	COMMAND ${CMAKE_COMMAND} -E copy ${MIKUTERM_DEX_DIR}/classes.dex ${MIKUTERM_APK_DIR}/classes.dex
 	COMMAND ${ZIP} -X ${MIKUTERM_UNALIGNED_APK} classes.dex
 	COMMAND ${ZIP} -X -0 -r ${MIKUTERM_UNALIGNED_APK} lib
-	WORKING_DIRECTORY ${MIKUTERM_APK_DIR}
-	DEPENDS ${MIKUTERM_BASE_APK} ${MIKUTERM_DEX_DIR}/classes.dex native
-	COMMENT "Adding the dex and the native libraries"
-	VERBATIM)
-add_custom_command(
-	OUTPUT ${MIKUTERM_ALIGNED_APK}
 	COMMAND ${ZIPALIGN} -P 16 -f 4 ${MIKUTERM_UNALIGNED_APK} ${MIKUTERM_ALIGNED_APK}
-	DEPENDS ${MIKUTERM_UNALIGNED_APK}
-	COMMENT "Aligning the apk"
+	WORKING_DIRECTORY ${MIKUTERM_APK_DIR}
+	DEPENDS ${MIKUTERM_BASE_APK} ${MIKUTERM_DEX_DIR}/classes.dex
+	COMMENT "Adding the dex and the native libraries, and aligning"
 	VERBATIM)
-add_custom_target(aligned-apk DEPENDS ${MIKUTERM_ALIGNED_APK})
+add_dependencies(aligned-apk native)
 
 include(${MIKUTERM_DIR}/cmake/sign.cmake)
 

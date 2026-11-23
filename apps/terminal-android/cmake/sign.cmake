@@ -32,14 +32,13 @@ else()
 endif()
 
 set(MIKUTERM_APK ${CMAKE_BINARY_DIR}/mikuterm-${PROJECT_VERSION}.apk)
-add_custom_command(
-	OUTPUT ${MIKUTERM_APK}
+add_custom_target(apk ALL
 	COMMAND ${APKSIGNER} sign --ks ${MIKUTERM_SIGN_KEYSTORE} --ks-key-alias ${MIKUTERM_KEY_ALIAS}
 		--ks-pass ${MIKUTERM_SIGN_PASS} --v2-signing-enabled true --v3-signing-enabled true
 		--out ${MIKUTERM_APK} ${MIKUTERM_ALIGNED_APK}
 	COMMAND ${APKSIGNER} verify ${MIKUTERM_APK}
 	COMMAND ${CMAKE_COMMAND} -DAPK=${MIKUTERM_APK} -P ${CMAKE_CURRENT_LIST_DIR}/write-sha256.cmake
-	DEPENDS ${MIKUTERM_ALIGNED_APK} ${MIKUTERM_KEYSTORE_OUTPUT}
+	DEPENDS ${MIKUTERM_KEYSTORE_OUTPUT}
 	COMMENT "Signing the apk"
 	VERBATIM)
-add_custom_target(apk ALL DEPENDS ${MIKUTERM_APK})
+add_dependencies(apk aligned-apk)
