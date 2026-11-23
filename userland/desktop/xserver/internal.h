@@ -11,12 +11,15 @@
  * These are the core's modules, none of which does input or output of its
  * own.  client.c keeps the server's life and its clients' connections
  * (their bytes come and go through the transport), protocol.c dispatches
- * their requests and answers the font, pixmap and drawing ones, input.c
+ * their requests and answers the font ones, input.c
  * keeps the keyboard, the pointer, the focus and the grabs and answers
  * their requests, resource.c keeps the resource ids and the memory each client holds,
  * window.c keeps the window tree and answers its requests, event.c
  * chooses who hears an event and sends it, property.c keeps atoms and
  * properties, selection.c keeps selections and the clipboard's bridge,
+ * draw.c keeps the pixels of the top-level windows, the clips, the
+ * exposures and the pixmap and drawing requests, gc.c the graphics
+ * contexts, render-cpu.c draws (render.h) and region.c keeps regions,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
  * wm.c is the top-level windows' window manager (ICCCM and EWMH),
@@ -27,6 +30,7 @@
 #ifndef KEILAND_X11SERVER_INTERNAL_H
 #define KEILAND_X11SERVER_INTERNAL_H
 
+#include "userland/desktop/xserver/render.h"
 #include "userland/desktop/xserver/x11backend.h"
 
 #include <stddef.h>
@@ -58,10 +62,12 @@
 /*
  * The most bytes of input a client may have waiting (its transport holds
  * back more than that, so only a client that breaks the protocol reaches
- * it), and of replies and events not yet taken from it.
+ * it), and of replies and events not yet taken from it: as long as the
+ * longest request and a little more, so that one reply as large (a
+ * GetImage of a large window, a GetProperty) fits whole.
  */
 #define X11_INPUT_CAP		X11SERVER_REQUEST_MAX
-#define X11_OUTPUT_CAP		(4U * 1024U * 1024U)
+#define X11_OUTPUT_CAP		(X11SERVER_REQUEST_MAX + 65536U)
 
 /* The most bytes of one client's requests one tick handles before it lets the caller run again. */
 #define X11_TICK_BYTES		(256U * 1024U)
@@ -223,6 +229,26 @@
 
 /* The depth of the screen's windows and pixmaps. */
 #define X11_DEPTH		24U
+
+/*
+ * What a window's background is: a pixel, None (never painted), its
+ * parent's (ParentRelative), or a copy of a pixmap tiled from the
+ * window's origin.  A border is a pixel or a pixmap.
+ */
+#define X11_BACKGROUND_PIXEL		0U
+#define X11_BACKGROUND_NONE		1U
+#define X11_BACKGROUND_PARENT		2U
+#define X11_BACKGROUND_PIXMAP		3U
+
+/* A graphics context's subwindow modes. */
+#define X11_CLIP_BY_CHILDREN		0U
+#define X11_INCLUDE_INFERIORS		1U
+
+/* The longest side of a top-level window's pixels: a larger window shows its top-left part. */
+#define X11_IMAGE_SIDE_MAX		16384
+
+/* How many changes to window trees may be under way at once (one inside another). */
+#define X11_DRAW_FRAMES			4U
 
 /*
  * The keyboard (input.c): the most keysyms one keycode and keycodes one
@@ -496,8 +522,25 @@ struct x11_window {
 	uint16_t border;
 	int mapped;
 
-	/* Its pixels (0x00RRGGBB, rows of its width; none for InputOnly), kept so it can be shown without its client. */
-	uint32_t *pixels;
+	/*
+	 * How its background and border are drawn: the background's kind and
+	 * the copies of the background and border pixmaps (NULL: none, the
+	 * pixels are used), with the bytes the owner is charged for them.
+	 */
+	uint8_t background_kind;
+	struct x11_image *background_tile;
+	struct x11_image *border_tile;
+	size_t tiles_bytes;
+
+	/*
+	 * A viewable top-level InputOutput window's pixels (draw.c): its own
+	 * and its inferiors', which its surface shows (none otherwise, and
+	 * none for the root window); the rows they have room for, and the
+	 * bytes the owner is charged for them.
+	 */
+	struct x11_image image;
+	int image_rows;
+	size_t image_bytes;
 
 	/* Its properties. */
 	struct x11_property *properties;
@@ -522,9 +565,8 @@ struct x11_window {
 	/*
 	 * A mapped top-level window's surface, the swapchain its pixels are
 	 * shown through (NULL: the backend's present shows them), the size,
-	 * place and title the surface was last given, whether it must be
-	 * drawn whole next time, and the window with its children drawn over
-	 * it (with the bytes its owner is charged for it).
+	 * place and title the surface was last given, and whether it must be
+	 * drawn whole next time.
 	 */
 	struct x11_surface *surface;
 	struct x11_vulkan_window *swapchain;
@@ -534,8 +576,6 @@ struct x11_window {
 	int32_t surface_y;
 	int surface_fresh;
 	char surface_title[X11_TITLE_MAX];
-	uint32_t *composite;
-	size_t composite_bytes;
 };
 
 /*
@@ -595,13 +635,41 @@ struct x11_transfer {
 };
 
 /*
- * One graphics context: the colour and font drawing uses.
+ * One graphics context (gc.c): the values drawing uses, and the depth of
+ * the drawables it may draw on.  The tile, the stipple and the clip mask
+ * are copied when they are set (the protocol leaves later changes to the
+ * pixmaps undefined), so a pixmap may be freed while a context uses it;
+ * the clip is a region on the clip origin (clip_set 0: none).
  */
 struct x11_gc {
 	uint32_t id;
-	uint32_t foreground;
-	uint32_t font;
 	unsigned owner;
+	unsigned depth;
+	unsigned function;
+	uint32_t plane_mask;
+	uint32_t foreground;
+	uint32_t background;
+	uint16_t line_width;
+	uint8_t line_style;
+	uint8_t cap_style;
+	uint8_t join_style;
+	uint8_t fill_style;
+	uint8_t fill_rule;
+	uint8_t arc_mode;
+	uint8_t subwindow_mode;
+	uint8_t graphics_exposures;
+	struct x11_image *tile;
+	struct x11_image *stipple;
+	int16_t tile_x;
+	int16_t tile_y;
+	uint32_t font;
+	int16_t clip_x;
+	int16_t clip_y;
+	int clip_set;
+	struct x11_region clip;
+	uint16_t dash_offset;
+	uint8_t dashes;
+	size_t charged;
 };
 
 /*
@@ -621,7 +689,47 @@ struct x11_pixmap {
 	uint8_t depth;
 	uint16_t width;
 	uint16_t height;
-	uint32_t *pixels;
+	struct x11_image image;
+};
+
+/*
+ * One window's state before a change to its tree (draw.c): its place on
+ * the top-level window's pixels and its size, and the parts of it that
+ * could be seen (inside its border, without its children, and its
+ * border).
+ */
+struct x11_draw_record {
+	struct x11_window *window;
+	int x;
+	int y;
+	uint16_t width;
+	uint16_t height;
+	uint16_t border;
+	struct x11_region inner;
+	struct x11_region outline;
+};
+
+/*
+ * A change to a top-level window's tree under way (draw.c): the top-level
+ * window, the window that moves or changes size (NULL: none), how many
+ * changes nested inside one another it holds, where the top-level was,
+ * whether it had pixels and whether they were made anew at the end (what
+ * they showed then gone), each viewable window as it was, and the pixels
+ * of the changing window as they were (with where they were taken).
+ */
+struct x11_draw_frame {
+	struct x11_window *top;
+	struct x11_window *changing;
+	unsigned depth;
+	int top_x;
+	int top_y;
+	int top_had_image;
+	int fresh;
+	struct x11_draw_record *records;
+	size_t count;
+	struct x11_image saved;
+	int saved_x;
+	int saved_y;
 };
 
 /*
@@ -750,6 +858,10 @@ struct x11server {
 	/* The root window, and how many surfaces are open. */
 	struct x11_window *root;
 	unsigned surface_count;
+
+	/* The changes to window trees under way (draw.c), innermost last. */
+	struct x11_draw_frame frames[X11_DRAW_FRAMES];
+	unsigned frame_count;
 
 	/* What has changed since it was last shown: one box on the root window, half-open. */
 	int dirty;
@@ -948,10 +1060,6 @@ int x11_window_inferior(const struct x11_window *window, const struct x11_window
 struct x11_window *x11_window_top_level(struct x11_window *window);
 struct x11_window *x11_window_at(struct x11server *server, int x, int y);
 struct x11_window *x11_window_child_at(struct x11_window *parent, int x, int y);
-uint32_t *x11_pixels_alloc(uint16_t width, uint16_t height, uint32_t color);
-void x11_window_fill(struct x11server *server, struct x11_window *window, int x, int y, int width, int height, uint32_t color);
-void x11_pixmap_fill(struct x11_pixmap *pixmap, int x, int y, int width, int height, uint32_t color);
-void x11_draw_text(struct x11server *server, struct x11_window *window, const struct x11_gc *gc, int x, int y, const uint8_t *text, size_t count, int wide);
 void x11_mark_dirty(struct x11server *server, int x, int y, int width, int height);
 void x11_resources_release(struct x11server *server, unsigned owner);
 
@@ -964,7 +1072,7 @@ void x11_event_forget_client(struct x11_window *window, unsigned client);
 void x11_event_send(struct x11server *server, struct x11_client *client, const uint8_t *event);
 unsigned x11_event_deliver(struct x11server *server, const struct x11_window *window, uint32_t mask, const uint8_t *event);
 void x11_event_structure(struct x11server *server, const struct x11_window *window, uint8_t *event);
-void x11_event_expose(struct x11server *server, const struct x11_window *window);
+void x11_event_expose(struct x11server *server, const struct x11_window *window, const struct x11_region *region);
 void x11_event_property(struct x11server *server, struct x11_window *window, uint32_t atom, int deleted);
 void x11_event_device(uint8_t *event, struct x11server *server, uint8_t type, uint8_t detail, uint32_t time, const struct x11_window *window, uint32_t child, uint16_t state);
 struct x11_window *x11_event_propagate(struct x11server *server, struct x11_window *source, const struct x11_window *stop, uint32_t mask, uint8_t type, uint8_t detail, uint32_t time, uint16_t state, unsigned only);
@@ -1004,6 +1112,33 @@ void x11_selection_property_event(struct x11server *server, struct x11_window *w
 void x11_selection_destroy(struct x11server *server);
 int x11_selection_tick(struct x11server *server);
 
+/* draw.c: the top-level windows' pixels, clips, exposures, and the drawing requests. */
+void x11_draw_begin(struct x11server *server, struct x11_window *window, struct x11_window *changing);
+void x11_draw_end(struct x11server *server);
+void x11_draw_forget(struct x11server *server, struct x11_window *window);
+void x11_draw_border(struct x11server *server, struct x11_window *window);
+unsigned x11_draw_set_tile(struct x11server *server, unsigned owner, uint32_t pixmap_id, struct x11_image **tile, size_t *charged);
+int x11_image_copy(const struct x11_image *source, struct x11_image **copy);
+void x11_image_free(struct x11_image *image);
+size_t x11_image_bytes(int width, int height);
+unsigned x11_request_clear_area(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_copy_area(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_line(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_poly_fill_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_put_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_get_image(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_create_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_free_pixmap(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_pixmap_free(struct x11server *server, struct x11_pixmap *pixmap);
+
+/* gc.c: graphics contexts. */
+unsigned x11_request_create_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_change_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+unsigned x11_request_free_gc(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_gc_free(struct x11server *server, struct x11_gc *gc);
+
 /* rootless.c: the top-level windows as the backend's surfaces, and the backend's input. */
 void x11_rootless_present(struct x11server *server);
 void x11_rootless_closing(struct x11server *server);
@@ -1014,7 +1149,7 @@ void x11_rootless_forget(struct x11server *server, struct x11_window *window);
 struct x11_vulkan *x11_vulkan_open(const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
 struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);
-int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *pixels);
+int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *pixels, size_t stride);
 int x11_vulkan_window_resize(struct x11_vulkan_window *window, unsigned width, unsigned height);
 void x11_vulkan_window_close(struct x11_vulkan_window *window);
 

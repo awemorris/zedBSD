@@ -84,7 +84,13 @@
 /* The shell of an account that names none. */
 #define SESSION_SHELL		"/bin/sh"
 
-/* The output above which the children's output is not read until the client takes more. */
+/*
+ * The backlog of the connection above which the children's output is not
+ * read until the client takes more: the output not yet written and the
+ * messages held during a key re-exchange together.  It is far below the
+ * transport's own limits (SSH_PACKET_OUTPUT_MAX, SSH_TRANSPORT_HELD_MAX),
+ * so a child's bytes, once read, can always be queued.
+ */
 #define SESSION_OUTPUT_SOFT	(1024U * 1024U)
 
 /* The longest a poll waits when nothing is due, in milliseconds. */
@@ -93,9 +99,14 @@
 /* The room for a pseudo-terminal's name as openpty writes it. */
 #define SESSION_TTY_NAME_MAX	64U
 
-/* What a read of a child's stream found. */
+/*
+ * What a read of a child's stream found: bytes that were sent, nothing
+ * from the child now, no room on the channel or the connection now, or
+ * the end of the stream.
+ */
 #define SESSION_READ_MORE	1
 #define SESSION_READ_NONE	0
+#define SESSION_READ_FULL	2
 #define SESSION_READ_END	(-1)
 
 /* The room for "address port address port". */
@@ -240,8 +251,9 @@ static int session_signal_number(const char *name);
 static const char *session_signal_name(int number);
 static int session_send(struct session *session);
 static void session_reap(struct session *session);
-static void session_pump(struct session *session, struct session_link *link);
-static int session_read_child(struct session *session, struct session_link *link, int extended);
+static size_t session_backlog(const struct session *session);
+static int session_pump(struct session *session, struct session_link *link);
+static int session_read_child(struct session *session, struct session_link *link, int extended, int *found);
 static int session_finish(struct session *session, struct session_link *link);
 static void session_release(struct session_link *link);
 static void session_hang_up(struct session *session);
@@ -559,6 +571,7 @@ session_serve(
 	int timeout;
 	int ready;
 	int status;
+	int found;
 	char drain[64];
 
 	/* Received messages may hold anything the user types: the buffer is secret. */
@@ -594,13 +607,15 @@ session_serve(
 			link = &session->links[index];
 			if (link->channel == NULL)
 				continue;
-			session_pump(session, link);
+			status = session_pump(session, link);
+			if (status != 0)
+				break;
 			status = session_finish(session, link);
 			if (status != 0)
 				break;
 		}
 
-		/* Stops when finishing a link failed. */
+		/* Stops when moving data or finishing a link failed. */
 		if (status != 0)
 			break;
 
@@ -625,7 +640,14 @@ session_serve(
 			break;
 		}
 
-		/* Waits for the client, the monitor's end, the wake pipe, and every child stream that can move. */
+		/*
+		 * Waits for the client, the monitor's end, the wake pipe, and every
+		 * child stream that can move.  A child's output is waited for only
+		 * while the backlog (the output not yet written and the messages
+		 * held during a key re-exchange) is below the gate, the same gate
+		 * the forwardings' sockets have.
+		 */
+		backlog = size + session->transport.held.size;
 		count = 0;
 		waiting[count].fd = SSHD_FD_CLIENT;
 		waiting[count].events = POLLIN;
@@ -644,7 +666,7 @@ session_serve(
 			if (link->channel == NULL || !link->started)
 				continue;
 			room = ssh_channel_send_room(link->channel);
-			if (size < SESSION_OUTPUT_SOFT && room > 0) {
+			if (backlog < SESSION_OUTPUT_SOFT && room > 0) {
 				if (link->from_child >= 0 && !link->out_done) {
 					waiting[count].fd = link->from_child;
 					waiting[count].events = POLLIN;
@@ -683,13 +705,11 @@ session_serve(
 
 		/*
 		 * Waits for the forwardings' sockets too, waking for their times.
-		 * Their gate counts the messages held during a key re-exchange
-		 * with the pending output, so a forwarded byte is never read that
-		 * the transport could not take.
+		 * Their gate is the same backlog, so a forwarded byte is never read
+		 * that the transport could not take.
 		 */
 		now_ms = sshd_forward_now_ms();
 		forward_base = count;
-		backlog = size + session->transport.held.size;
 		forward_count = sshd_forward_poll(&session->forwards, waiting + count, SSHD_FORWARD_SLOTS, backlog, now_ms, &timeout);
 		for (index = 0; index < forward_count; index++) {
 			kinds[count] = 5;
@@ -728,11 +748,20 @@ session_serve(
 					got = read(wake, drain, sizeof(drain));
 				} while (got > 0);
 			} else if (kinds[index] == 2) {
-				session_read_child(session, owners[index], 0);
+				/* The child's output: bytes that cannot be queued end the connection. */
+				status = session_read_child(session, owners[index], 0, &found);
+				if (status != 0)
+					break;
 			} else if (kinds[index] == 3) {
-				session_read_child(session, owners[index], SSH_EXTENDED_DATA_STDERR);
+				/* The child's error output, the same way. */
+				status = session_read_child(session, owners[index], SSH_EXTENDED_DATA_STDERR, &found);
+				if (status != 0)
+					break;
 			} else if (kinds[index] == 4) {
-				session_pump(session, owners[index]);
+				/* The child's input: a window adjustment that cannot be queued ends the connection. */
+				status = session_pump(session, owners[index]);
+				if (status != 0)
+					break;
 			}
 		}
 
@@ -1665,17 +1694,38 @@ session_reap(
 }
 
 /*
+ * Returns the backlog of the connection: the output not yet written and
+ * the messages held during a key re-exchange, which the transport sends
+ * after this side's NEWKEYS.
+ */
+static size_t
+session_backlog(
+	const struct session *session)
+{
+	size_t pending_size;
+
+	/* Measures the output the client has not taken yet. */
+	(void)ssh_transport_pending(&session->transport, &pending_size);
+
+	/* Reports both together: the held messages are written after the pending output. */
+	return pending_size + session->transport.held.size;
+}
+
+/*
  * Writes the client's kept data to the child (as much as it takes now),
  * gives the written bytes back to the window, and closes the child's
  * input after the client's EOF once everything is written (a terminal is
- * left open: it is the child's output too).
+ * left open: it is the child's output too).  Returns 0, or the error of
+ * queueing a window adjustment: the connection then ends, since a window
+ * the client never gets back stops its data for good.
  */
-static void
+static int
 session_pump(
 	struct session *session,
 	struct session_link *link)
 {
 	ssize_t written;
+	int status;
 
 	/* Writes what the child takes. */
 	while (link->to_child >= 0 && link->input.size > 0) {
@@ -1683,26 +1733,30 @@ session_pump(
 		if (written < 0 && errno == EINTR)
 			continue;
 		if (written <= 0) {
-			/* A child that closed its input takes nothing more; the data is dropped. */
+			/* A child that closed its input takes nothing more; the data is dropped and its window given back. */
 			if (written < 0 &&
 			    errno != EAGAIN &&
 			    errno != EWOULDBLOCK) {
 				ssh_buf_reset(&session->message);
 				ssh_channel_consumed(link->channel, link->input.size, &session->message);
-				(void)session_send(session);
 				ssh_buf_reset(&link->input);
 				if (!link->have_pty)
 					session_close_descriptor(&link->to_child);
+				status = session_send(session);
+				if (status != 0)
+					return status;
 			}
 
 			break;
 		}
 
-		/* Drops the bytes that were written from the input. */
+		/* Drops the bytes that were written from the input and gives their window back. */
 		ssh_buf_consume(&link->input, (size_t)written);
 		ssh_buf_reset(&session->message);
 		ssh_channel_consumed(link->channel, (size_t)written, &session->message);
-		(void)session_send(session);
+		status = session_send(session);
+		if (status != 0)
+			return status;
 	}
 
 	/* The client's EOF closes the input once it is all written. */
@@ -1710,42 +1764,72 @@ session_pump(
 	    link->input.size == 0 &&
 	    !link->have_pty)
 		session_close_descriptor(&link->to_child);
+
+	/* Succeeded: the child has what it takes now. */
+	return 0;
 }
 
 /*
  * Reads the child's output (extended 0) or error output (the stderr
- * type) and sends it as data, no more than the channel's room.  The end
+ * type) and sends it as data, no more than the channel's room, and only
+ * while the connection's backlog is below SESSION_OUTPUT_SOFT.  The end
  * of a stream (an end of file, or EIO from a terminal whose last holder
- * closed it) marks it done.  Returns SESSION_READ_MORE (bytes were sent),
- * SESSION_READ_NONE (nothing now, or no room) or SESSION_READ_END.
+ * closed it) marks it done.  *found receives SESSION_READ_MORE (bytes
+ * were sent), SESSION_READ_NONE (the child has nothing now),
+ * SESSION_READ_FULL (no room on the channel or the connection now) or
+ * SESSION_READ_END.  Returns 0, or the error of queueing the bytes: the
+ * connection then ends, since a byte that was read is never dropped
+ * silently.
  */
 static int
 session_read_child(
 	struct session *session,
 	struct session_link *link,
-	int extended)
+	int extended,
+	int *found)
 {
 	uint8_t chunk[SESSION_READ_CHUNK];
 	size_t room;
+	size_t backlog;
 	ssize_t got;
 	int descriptor;
 	int status;
 
-	/* Reads at most what the channel may send now. */
+	/* Chooses the stream; one that is closed has nothing. */
+	*found = SESSION_READ_NONE;
 	descriptor = link->from_child;
 	if (extended != 0)
 		descriptor = link->err_child;
+	if (descriptor < 0)
+		return 0;
+
+	/* Reads at most what the channel may send now. */
 	room = ssh_channel_send_room(link->channel);
 	if (room > sizeof(chunk))
 		room = sizeof(chunk);
-	if (descriptor < 0 || room == 0)
-		return SESSION_READ_NONE;
+	if (room == 0) {
+		*found = SESSION_READ_FULL;
+		return 0;
+	}
+
+	/*
+	 * Leaves the child's bytes where they are while the connection is
+	 * behind: the transport refuses a message once its output or its held
+	 * messages are full, and a byte read here must always be queued.
+	 */
+	backlog = session_backlog(session);
+	if (backlog >= SESSION_OUTPUT_SOFT) {
+		*found = SESSION_READ_FULL;
+		return 0;
+	}
+
+	/* Takes what the child has written. */
 	got = read(descriptor, chunk, room);
 	if (got < 0 &&
 	    (errno == EINTR ||
 	     errno == EAGAIN ||
 	     errno == EWOULDBLOCK))
-		return SESSION_READ_NONE;
+		return 0;
 	if (got <= 0) {
 		/* The stream ended. */
 		if (extended != 0) {
@@ -1756,18 +1840,34 @@ session_read_child(
 		}
 
 		/* Reports the end of the stream. */
-		return SESSION_READ_END;
+		*found = SESSION_READ_END;
+		return 0;
 	}
 
-	/* Sends the bytes on the channel. */
+	/* Builds the data message, which takes the bytes from the client's window. */
 	ssh_buf_reset(&session->message);
 	status = ssh_channel_put_data(link->channel, (uint32_t)extended, chunk, (size_t)got, &session->message);
-	if (status == 0)
-		(void)session_send(session);
 	ssh_wipe(chunk, sizeof(chunk));
+	if (status != 0) {
+		ssh_buf_reset(&session->message);
+		return status;
+	}
+
+	/*
+	 * Queues the message.  Bytes the transport did not take were not
+	 * sent, so they go back to the client's window before the connection
+	 * ends: the window counts only what was sent.
+	 */
+	status = session_send(session);
+	if (status != 0) {
+		link->channel->remote_window += (uint32_t)got;
+		syslog(LOG_NOTICE, "session: the output of a child could not be queued (%d)", status);
+		return status;
+	}
 
 	/* Succeeded: bytes went out. */
-	return SESSION_READ_MORE;
+	*found = SESSION_READ_MORE;
+	return 0;
 }
 
 /*
@@ -1783,7 +1883,6 @@ session_finish(
 	struct session_link *link)
 {
 	const char *name;
-	size_t room;
 	int signal_number;
 	int status;
 	int found;
@@ -1794,13 +1893,18 @@ session_finish(
 	    link->finished)
 		return 0;
 
-	/* Takes what the terminal still holds; once it holds nothing, its output is done. */
+	/*
+	 * Takes what the terminal still holds; once it holds nothing, its
+	 * output is done.  When the channel or the connection has no room,
+	 * the rest waits for a later round.
+	 */
 	if (link->have_pty && !link->out_done) {
 		do {
-			found = session_read_child(session, link, 0);
+			status = session_read_child(session, link, 0, &found);
+			if (status != 0)
+				return status;
 		} while (found == SESSION_READ_MORE);
-		room = ssh_channel_send_room(link->channel);
-		if (found == SESSION_READ_NONE && room > 0)
+		if (found == SESSION_READ_NONE)
 			link->out_done = 1;
 	}
 

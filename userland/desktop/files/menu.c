@@ -236,8 +236,8 @@ fm_menu_open(
 }
 
 /*
- * Opens a context menu at a point of the window (a right press's, or a
- * drop's), for the press or the drop the window had last.  A compositor
+ * Opens a context menu at a point of the window in units (a right
+ * press's, or a drop's), for the press or the drop the window had last.  A compositor
  * without context menus shows none, which the log says.
  */
 void
@@ -259,6 +259,8 @@ fm_menu_context(
 	const struct fm_context_row *row;
 	uint32_t action;
 	unsigned index;
+	int pixel_x;
+	int pixel_y;
 	int error;
 
 	/* With nothing to show, nothing opens. */
@@ -282,9 +284,13 @@ fm_menu_context(
 		entries[index].action = action;
 	}
 
+	/* The point, given in units, in the window's pixels the compositor takes. */
+	pixel_x = fm_window_pixel(menu->window, x);
+	pixel_y = fm_window_pixel(menu->window, y);
+
 	/* The compositor shows it at the press (or, for a drop's choice, at the drop). */
 	menu->context_done = 0;
-	error = kl_window_popup_menu(menu->window->kui, entries, index, x, y);
+	error = kl_window_popup_menu(menu->window->kui, entries, index, pixel_x, pixel_y);
 	if (error != 0) {
 		fm_log("CONTEXT-MENU none errno=%d", error);
 		return;

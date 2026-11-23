@@ -9,10 +9,9 @@
  * Rootless: each mapped top-level X window is a surface of the backend, a
  * window of the system the server is shown on.
  *
- * At the end of a tick, the part of each top-level window that changed is
- * drawn with its children over it (its composite) and shown on its
- * surface, which is opened, resized, retitled and moved to follow the X
- * window: through a Vulkan swapchain on the surface while Vulkan can show
+ * At the end of a tick, the part of each top-level window's pixels (it
+ * and its inferiors, draw.c) that changed is shown on its surface, which
+ * is opened, resized, retitled and moved to follow the X window: through a Vulkan swapchain on the surface while Vulkan can show
  * it, else through the backend's present.  The backend's pointer,
  * keyboard, focus, sizes and close requests come back as X events.  The
  * system draws the pointer; X cursors are not shown.
@@ -31,13 +30,11 @@
 #define ROOTLESS_SIZE_MAX	16384
 
 static void rootless_track(struct x11server *server, struct x11_window *window);
+static void rootless_size(const struct x11_window *window, int *width, int *height);
 static void rootless_info(struct x11server *server, struct x11_window *window, const char *title, const char *class_name, struct x11_surface_info *info);
-static int rootless_composite(struct x11server *server, struct x11_window *window, size_t bytes);
 static void rootless_swapchain(struct x11server *server, struct x11_window *window);
 static void rootless_cpu(struct x11server *server, struct x11_window *window, const char *why);
 static int rootless_show(struct x11server *server, struct x11_window *window, int x, int y, int width, int height);
-static struct x11_window *rootless_visible_at(struct x11_window *top, int x, int y);
-static void rootless_compose(struct x11_window *top, int x, int y, int width, int height);
 
 /*
  * Shows what has changed: each top-level window the changed box touches
@@ -73,11 +70,11 @@ x11_rootless_present(
 
 	/* Each top-level window. */
 	for (window = server->root->first_child; window != NULL; window = window->above) {
-		/* Its surface, following it; an unmapped window has none, and a minimized one shows nothing. */
+		/* Its surface, following it; an unmapped window has none, and a minimized one (without pixels) shows nothing. */
 		rootless_track(server, window);
 		if (window->surface == NULL)
 			continue;
-		if (!window->mapped)
+		if (!window->mapped || window->image.pixels == NULL)
 			continue;
 
 		/* The part of the box inside it, or all of it when it must be drawn whole. */
@@ -88,24 +85,23 @@ x11_rootless_present(
 		if (window->surface_fresh) {
 			left = window->x;
 			top = window->y;
-			right = window->x + window->width;
-			bottom = window->y + window->height;
+			right = window->x + window->image.width;
+			bottom = window->y + window->image.height;
 		}
 
-		/* Clipped to the window. */
+		/* Clipped to its pixels. */
 		if (left < window->x)
 			left = window->x;
 		if (top < window->y)
 			top = window->y;
-		if (right > window->x + window->width)
-			right = window->x + window->width;
-		if (bottom > window->y + window->height)
-			bottom = window->y + window->height;
+		if (right > window->x + window->image.width)
+			right = window->x + window->image.width;
+		if (bottom > window->y + window->image.height)
+			bottom = window->y + window->image.height;
 		if (left >= right || top >= bottom)
 			continue;
 
-		/* The part drawn and shown, its place in the window as the damage. */
-		rootless_compose(window, left, top, right - left, bottom - top);
+		/* The part shown, its place in the window as the damage. */
 		busy = rootless_show(server, window, left - window->x, top - window->y, right - left, bottom - top);
 		if (busy != 0) {
 			x11_mark_dirty(server, left, top, right - left, bottom - top);
@@ -161,8 +157,8 @@ x11_rootless_flush_motion(
 }
 
 /*
- * Closes a window's surface (and the swapchain on it) and frees its
- * composite (the window is unmapped or destroyed).
+ * Closes a window's surface (and the swapchain on it): the window is
+ * unmapped, destroyed or no longer a top-level window.
  */
 void
 x11_rootless_forget(
@@ -180,12 +176,6 @@ x11_rootless_forget(
 		server->surface_count--;
 	}
 	window->surface = NULL;
-
-	/* The composite and its charge. */
-	free(window->composite);
-	window->composite = NULL;
-	x11_memory_release(server, window->owner, window->composite_bytes);
-	window->composite_bytes = 0U;
 }
 
 /* Brings a top-level window's surface in step with it: opened when mapped, closed when not, its size, title and place. */
@@ -200,14 +190,19 @@ rootless_track(
 	char class_buffer[64];
 	char title_buffer[X11_TITLE_MAX];
 	unsigned changed;
-	size_t bytes;
+	int width;
+	int height;
 	int differs;
 	int failed;
 	int kept;
 
-	/* An unmapped window has no surface, unless the window manager keeps it minimized; an InputOnly one has none. */
+	/*
+	 * An unmapped window has no surface, unless the window manager keeps
+	 * it minimized (without pixels); an InputOnly one and a mapped one
+	 * without pixels have none.
+	 */
 	kept = x11_wm_keeps_surface(window);
-	if ((!window->mapped && !kept) || window->window_class == X11_INPUT_ONLY) {
+	if ((!window->mapped && !kept) || window->window_class == X11_INPUT_ONLY || (window->mapped && window->image.pixels == NULL)) {
 		x11_rootless_forget(server, window);
 		return;
 	}
@@ -224,21 +219,17 @@ rootless_track(
 	if (failed == 0)
 		class_name = class_buffer;
 
-	/* A window without a surface gets one (while there are not too many), and a composite of its size. */
-	bytes = (size_t)window->width * (size_t)window->height * sizeof(uint32_t);
+	/* A window without a surface gets one, while there are not too many. */
 	if (window->surface == NULL) {
 		if (server->surface_count >= X11_SURFACES_MAX)
-			return;
-		failed = rootless_composite(server, window, bytes);
-		if (failed != 0)
 			return;
 		rootless_info(server, window, title, class_name, &info);
 		window->surface = server->ops->open(server->backend, window->id, &info);
 		if (window->surface == NULL)
 			return;
 		server->surface_count++;
-		window->surface_width = window->width;
-		window->surface_height = window->height;
+		window->surface_width = (uint16_t)info.width;
+		window->surface_height = (uint16_t)info.height;
 		window->surface_x = window->x;
 		window->surface_y = window->y;
 		window->surface_fresh = 1;
@@ -246,29 +237,22 @@ rootless_track(
 
 		/* The surface has all of the window manager's state. */
 		window->wm_changed = 0U;
-
-		/* A swapchain on it, unless windows are shown through the backend. */
-		rootless_swapchain(server, window);
 	}
 
+	/* A swapchain on it once it has pixels, unless windows are shown through the backend. */
+	if (window->swapchain == NULL && window->image.pixels != NULL)
+		rootless_swapchain(server, window);
+
 	/* What changed since the surface was last told: the window manager's part first. */
+	rootless_size(window, &width, &height);
 	changed = window->wm_changed;
-	if (window->surface_width != window->width || window->surface_height != window->height)
+	if (window->surface_width != width || window->surface_height != height)
 		changed |= X11_SURFACE_CHANGED_SIZE;
 	if (window->surface_x != window->x || window->surface_y != window->y)
 		changed |= X11_SURFACE_CHANGED_POSITION;
 	differs = strcmp(title, window->surface_title);
 	if (differs != 0)
 		changed |= X11_SURFACE_CHANGED_TITLE;
-
-	/* A resized window gets a composite of its new size. */
-	if ((changed & X11_SURFACE_CHANGED_SIZE) != 0U) {
-		failed = rootless_composite(server, window, bytes);
-		if (failed != 0) {
-			x11_rootless_forget(server, window);
-			return;
-		}
-	}
 
 	/* Nothing else to bring in step. */
 	if (changed == 0U)
@@ -286,15 +270,41 @@ rootless_track(
 
 	/* A resized swapchain; one that cannot be leaves the window to the backend's present. */
 	if (window->swapchain != NULL) {
-		failed = x11_vulkan_window_resize(window->swapchain, window->width, window->height);
+		failed = x11_vulkan_window_resize(window->swapchain, (unsigned)width, (unsigned)height);
 		if (failed != 0)
 			rootless_cpu(server, window, "cannot resize");
 	}
 
 	/* The size it has now, drawn whole. */
-	window->surface_width = window->width;
-	window->surface_height = window->height;
+	window->surface_width = (uint16_t)width;
+	window->surface_height = (uint16_t)height;
 	window->surface_fresh = 1;
+}
+
+/*
+ * Works out the size of a top-level window's surface: that of its pixels,
+ * or, for a minimized window (which has none), the size they will have.
+ */
+static void
+rootless_size(
+	const struct x11_window *window,
+	int *width,
+	int *height)
+{
+	/* The pixels' size. */
+	if (window->image.pixels != NULL) {
+		*width = window->image.width;
+		*height = window->image.height;
+		return;
+	}
+
+	/* Succeeded: the window's size, as far as pixels may be. */
+	*width = window->width;
+	if (*width > X11_IMAGE_SIDE_MAX)
+		*width = X11_IMAGE_SIDE_MAX;
+	*height = window->height;
+	if (*height > X11_IMAGE_SIDE_MAX)
+		*height = X11_IMAGE_SIDE_MAX;
 }
 
 /* Fills what a top-level window's surface shows. */
@@ -306,50 +316,21 @@ rootless_info(
 	const char *class_name,
 	struct x11_surface_info *info)
 {
+	int width;
+	int height;
+
 	/* Where its X window is, with its title and class. */
 	memset(info, 0, sizeof(*info));
 	info->x = window->x;
 	info->y = window->y;
-	info->width = window->width;
-	info->height = window->height;
+	rootless_size(window, &width, &height);
+	info->width = (unsigned)width;
+	info->height = (unsigned)height;
 	info->title = title;
 	info->class_name = class_name;
 
 	/* Succeeded: its kind, state, owner and limits, as its window manager has them. */
 	x11_wm_info(server, window, info);
-}
-
-/*
- * Gives a top-level window a composite of a size, charged to its owner.
- * Returns 0, or nonzero when it cannot have one.
- */
-static int
-rootless_composite(
-	struct x11server *server,
-	struct x11_window *window,
-	size_t bytes)
-{
-	uint32_t *composite;
-	int error;
-
-	/* The owner is charged for the new size instead of the old. */
-	x11_memory_release(server, window->owner, window->composite_bytes);
-	window->composite_bytes = 0U;
-	error = x11_memory_charge(server, window->owner, bytes);
-	if (error != 0)
-		return -1;
-
-	/* The memory. */
-	composite = realloc(window->composite, bytes);
-	if (composite == NULL) {
-		x11_memory_release(server, window->owner, bytes);
-		return -1;
-	}
-
-	/* Succeeded: the composite. */
-	window->composite = composite;
-	window->composite_bytes = bytes;
-	return 0;
 }
 
 /* Opens the swapchain of a new surface, unless windows are shown through the backend; one that cannot be opened turns Vulkan off. */
@@ -363,7 +344,7 @@ rootless_swapchain(
 		return;
 
 	/* The swapchain at the window's size. */
-	window->swapchain = x11_vulkan_window_open(server, window->surface, window->width, window->height);
+	window->swapchain = x11_vulkan_window_open(server, window->surface, (unsigned)window->image.width, (unsigned)window->image.height);
 	if (window->swapchain != NULL)
 		return;
 
@@ -388,7 +369,7 @@ rootless_cpu(
 }
 
 /*
- * Shows a part of a top-level window's composite (from its corner) on its
+ * Shows a part of a top-level window's pixels (from its corner) on its
  * surface.  Returns 0 when it was shown, or nonzero when the system still
  * holds the last frame or it could not be shown (the part waits for a
  * later tick).
@@ -407,7 +388,7 @@ rootless_show(
 
 	/* Through the swapchain: the whole image each frame. */
 	if (window->swapchain != NULL) {
-		status = x11_vulkan_window_present(window->swapchain, window->composite);
+		status = x11_vulkan_window_present(window->swapchain, window->image.pixels, window->image.stride);
 		if (status >= 0)
 			return status;
 
@@ -415,8 +396,8 @@ rootless_show(
 		rootless_cpu(server, window, "failed on");
 		x = 0;
 		y = 0;
-		width = (int)window->width;
-		height = (int)window->height;
+		width = window->image.width;
+		height = window->image.height;
 	}
 
 	/* Through the backend, the part as the damage. */
@@ -424,90 +405,12 @@ rootless_show(
 	part.y = y;
 	part.width = (unsigned)width;
 	part.height = (unsigned)height;
-	status = server->ops->present(server->backend, window->surface, window->composite, window->width, &part, 1U);
+	status = server->ops->present(server->backend, window->surface, window->image.pixels, window->image.stride, &part, 1U);
 	if (status != 0)
 		return 1;
 
 	/* Succeeded: the frame is the system's. */
 	return 0;
-}
-
-/*
- * Returns the deepest window drawn at a place on the root window within a
- * top-level window: the topmost mapped InputOutput child there, and its
- * own in turn (the top-level window when none is).
- */
-static struct x11_window *
-rootless_visible_at(
-	struct x11_window *top,
-	int x,
-	int y)
-{
-	struct x11_window *window;
-	struct x11_window *child;
-
-	/* Down the tree, into the topmost drawn child under the place each time. */
-	window = top;
-	child = window->last_child;
-	while (child != NULL) {
-		if (child->mapped &&
-		    child->window_class == X11_INPUT_OUTPUT &&
-		    x >= child->x &&
-		    y >= child->y &&
-		    x < child->x + child->width &&
-		    y < child->y + child->height) {
-			window = child;
-			child = window->last_child;
-			continue;
-		}
-		child = child->below;
-	}
-
-	/* Succeeded: the window drawn there. */
-	return window;
-}
-
-/* Draws a part of a top-level window (on the root window's coordinates) into its composite, its children over it. */
-static void
-rootless_compose(
-	struct x11_window *top,
-	int x,
-	int y,
-	int width,
-	int height)
-{
-	struct x11_window *window;
-	int children;
-	int row;
-	int column;
-
-	/* A window alone is copied row by row. */
-	children = 0;
-	for (window = top->first_child; window != NULL && !children; window = window->above) {
-		if (window->mapped && window->window_class == X11_INPUT_OUTPUT)
-			children = 1;
-	}
-	if (!children) {
-		for (row = y; row < y + height; row++) {
-			memcpy(top->composite + (size_t)(row - top->y) * top->width + (size_t)(x - top->x),
-			       top->pixels + (size_t)(row - top->y) * top->width + (size_t)(x - top->x),
-			       (size_t)width * sizeof(uint32_t));
-		}
-
-		/* The window is drawn. */
-		return;
-	}
-
-	/* Otherwise each pixel comes from the topmost window there. */
-	for (row = y; row < y + height; row++) {
-		for (column = x; column < x + width; column++) {
-			window = rootless_visible_at(top, column, row);
-			if (window->pixels == NULL)
-				window = top;
-			top->composite[(size_t)(row - top->y) * top->width + (size_t)(column - top->x)] =
-			    window->pixels[(size_t)(row - window->y) * window->width + (size_t)(column - window->x)];
-		}
-	}
 }
 
 /*

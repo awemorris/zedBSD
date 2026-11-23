@@ -420,9 +420,16 @@ struct te_app {
 	size_t goal;
 	int goal_valid;
 
-	/* The frame's size, and the text's size and cell. */
+	/*
+	 * The frame's size (pixels), the window's scale (96ths, KL_SCALE_BASE
+	 * at 100 %), the body's text size the view asks for (units, View >
+	 * Bigger and Smaller) and the size it is drawn at (pixels, the units
+	 * times the scale), and the text's cell, row and baseline (pixels).
+	 */
 	int width;
 	int height;
+	unsigned scale;
+	unsigned size;
 	unsigned pixels;
 	int cell;
 	int row_height;
@@ -576,6 +583,7 @@ int te_text_draw_fit(struct te_text *text, struct te_canvas *canvas, int x, int 
 size_t te_text_fit(struct te_text *text, const char *string, unsigned pixels, int bold, int width, char *out, size_t size);
 int te_text_advance(struct te_text *text, uint32_t codepoint, unsigned pixels);
 void te_text_draw_char(struct te_text *text, struct te_canvas *canvas, int x, int baseline, uint32_t codepoint, unsigned pixels, uint32_t color);
+void te_text_flush(struct te_text *text);
 uint32_t te_utf8_next(const char *string, size_t length, size_t *index);
 
 /* The document (buffer.c). */
@@ -656,6 +664,8 @@ int te_app_open(struct te_app *app, const char *path);
 void te_app_new(struct te_app *app);
 int te_app_save(struct te_app *app, const char *path);
 void te_app_resize(struct te_app *app, int width, int height);
+void te_app_set_scale(struct te_app *app, unsigned scale);
+int te_app_px(const struct te_app *app, int units);
 void te_app_event(struct te_app *app, const struct te_event *event);
 void te_app_action(struct te_app *app, enum te_action action);
 int te_app_tick(struct te_app *app, uint64_t now);
@@ -694,8 +704,9 @@ void te_log(const char *format, ...);
 uint64_t te_clock(void);
 
 /*
- * The layout of the frame, in pixels: the card reaches the window's edges
- * (no inset), so that it lines up with the floating titlebar and the gap
+ * The layout of the frame, in units (pixels at 100 %, te_app_px makes
+ * them the window's pixels): the card reaches the window's edges (no
+ * inset), so that it lines up with the floating titlebar and the gap
  * above it is the compositor's alone (ws090-p021).
  */
 #define TE_CARD_INSET		0
@@ -704,7 +715,7 @@ uint64_t te_clock(void);
 #define TE_TEXT_TOP		12
 #define TE_GUTTER_PAD		12
 
-/* The text's sizes: the body's default, smallest and largest, and the interface's. */
+/* The text's sizes in units: the body's default, smallest and largest, and the interface's. */
 #define TE_PIXELS_DEFAULT	15U
 #define TE_PIXELS_MIN		10U
 #define TE_PIXELS_MAX		32U

@@ -39,7 +39,7 @@
 
 /*
  * A touch pad's two fingers (ws090-p019): a move of the scroll (y as a
- * wheel scrolls, surface pixels; the area under the pointer) and their
+ * wheel scrolls, window units; the area under the pointer) and their
  * lift, which libkeiland's scroller turns into the same flight as a
  * finger's on the screen.
  */
@@ -66,7 +66,7 @@
 
 /*
  * One touch input: its kind (FM_TOUCH_*), the finger (wl_touch's id),
- * where in the window (surface pixels; not for UP and CANCEL), the
+ * where in the window (units; not for UP and CANCEL), the
  * compositor's time (milliseconds of CLOCK_MONOTONIC, the low 32 bits; not
  * for CANCEL), a down's serial, what is under a down (FM_TOUCH_OTHER,
  * _CONTENT or _SIDEBAR, which the main loop finds), and when the window
@@ -85,7 +85,7 @@ struct fm_touch_event {
 
 /*
  * One pointer event the fingers make: its kind (FM_TOUCH_POINTER_*), the
- * button (FM_TOUCH_LEFT or _RIGHT), where (surface pixels), its time
+ * button (FM_TOUCH_LEFT or _RIGHT), where (window units), its time
  * (milliseconds) and the serial of the touch that made it.
  */
 struct fm_touch_pointer {
@@ -99,7 +99,7 @@ struct fm_touch_pointer {
 
 /*
  * One scrolled area as the main loop has it: a token that changes with
- * what it shows (another tab or folder), its scroll (pixels from the top,
+ * what it shows (another tab or folder), its scroll (units from the top,
  * positive down), how far it scrolls at most, and its height.
  */
 struct fm_touch_area {

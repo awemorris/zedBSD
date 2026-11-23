@@ -112,8 +112,10 @@ Tab moves between a pane's fields and buttons):
               Host.  Only the lines you change are rewritten; your comments
               and the lines the form does not show stay as they are.  Save
               (Ctrl+S) checks the file as a connection reads it and refuses
-              a line it cannot use; it does not write over a file changed
-              outside since it was read (Revert, Ctrl+R, reads it again).
+              a line you changed that it cannot use (a problem the file had
+              already does not stop it); it does not write over a file
+              changed outside since it was read (Revert, Ctrl+R, reads it
+              again).
               Open in Text Editor opens ssh/config in Windows' editor for
               it (Notepad when none is set).  Both take effect from the
               next connection.
@@ -181,8 +183,10 @@ ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
 PasswordAuthentication, PubkeyAuthentication, LogLevel, ForwardX11,
 ForwardX11Trusted and ForwardX11Timeout (see 10), LocalForward,
 RemoteForward, GatewayPorts, ExitOnForwardFailure, ClearAllForwardings and
-RemoteCommand (see 11).  SessionType none is refused.  Match, Include,
-ProxyJump and the other keywords it does not know are errors that name their
+RemoteCommand (see 11).  RequestTTY and LogLevel are checked but change
+nothing: a tab is always a terminal, and mikuterm shows no debug lines.
+SessionType none is refused.  Match, Include, ProxyJump and the other
+keywords it does not know are errors that name their
 line, so that a setting that would not work is noticed.  Paths: ~/.ssh/ is
 this folder's ssh/, ~/ is this folder, a name without a folder is in ssh/,
 and a full path (C:/... or //server/share/...) is taken as it is.
@@ -373,12 +377,15 @@ connection.  A port mikuterm listens on is its own: no other program can
 take it meanwhile.  Listening on every address may make Windows Defender
 Firewall ask about mikuterm.
 
-The tab shows a line only when something is wrong: "bind [127.0.0.1]:8080:
-Address already in use" (the port is taken, by another tab of the same host
-too), "Warning: remote port forwarding failed for listen port 9000" (the
-server refused it).  When the shell ends while forwarded connections are
-open, the connection stays until they end; close the tab to end them.
-DynamicForward (SOCKS) is not supported.
+The tab shows a line only when something is wrong, or for the port the
+server chose for a RemoteForward 0: "bind [127.0.0.1]:8080: Address already
+in use" (the port is taken, by another tab of the same host too), "Warning:
+remote port forwarding failed for listen port 9000" (the server refused it),
+"Allocated port 40123 for remote forward to localhost:3000".  When the
+shell ends while forwarded connections are open, the connection stays until
+they end; close the tab to end them.  DynamicForward (SOCKS) is not
+supported.
 
-RemoteCommand runs a command instead of the shell, with OpenSSH's tokens
-(%h, %n, %p, %r, %u, %d, %l, %L, %j, %%); %C and %i are errors.
+RemoteCommand runs a command instead of the shell, on a terminal as the
+shell would be, with OpenSSH's tokens (%h, %n, %k, %p, %r, %u, %d, %l, %L,
+%j, %%); %C and %i are errors.

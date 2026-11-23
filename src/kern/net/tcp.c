@@ -549,6 +549,9 @@ static void tcp_forget_peer(struct tcp_endpoint *endpoint);
 static void tcp_listener_remove(struct tcp_endpoint *child);
 static void tcp_listener_established(struct tcp_endpoint *child);
 static int tcp_port_in_use(const struct tcp_endpoint *candidate, int strict);
+static int tcp_endpoint_is_connection(const struct tcp_endpoint *endpoint);
+static int tcp_same_peer(const struct tcp_endpoint *left, const struct tcp_endpoint *right);
+static int tcp_connection_duplicate_locked(const struct tcp_endpoint *candidate);
 static int tcp_allocate_port_locked(struct tcp_endpoint *endpoint);
 static int tcp_route(struct tcp_endpoint *endpoint, struct net_device **device, uint32_t *source);
 static int tcp_route_cached(struct tcp_endpoint *endpoint, struct net_device **device, uint32_t *source, uint32_t *next_hop);
@@ -2262,31 +2265,178 @@ tcp_listener_established(
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 }
 
-/* Tests whether another socket conflicts with a candidate's local address. */
+/*
+ * Tests whether another socket conflicts with a candidate's local address.
+ *
+ * A strict check, which picks an ephemeral port, counts every socket on
+ * the port.  Otherwise a candidate bound under SO_REUSEADDR passes over
+ * the connections that hold the port -- one accepted from an earlier
+ * listener, or one waiting out TIME_WAIT -- so that a server can listen
+ * there again while they finish.  A listener, or a socket that is only
+ * bound, still conflicts as before.
+ *
+ * Procedure referenced: FreeBSD 14.1 sys/netinet/in_pcb.c
+ * (in_pcbbind_setup and in_pcblookup_local: under SO_REUSEADDR the
+ * lookup is exact and passes over a pcb that has a foreign address).
+ */
 static int
 tcp_port_in_use(
 	const struct tcp_endpoint *candidate,
 	int strict)
 {
 	const struct tcp_endpoint *endpoint;
+	int connection;
 	int conflict;
 
-	/* A strict check ignores address reuse. */
+	/* Walks every other socket for one whose local endpoint overlaps the candidate's. */
 	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+		/* The candidate does not conflict with itself. */
 		if (endpoint == candidate)
 			continue;
-		if (strict)
-			conflict = inet_socket_local_conflict(&endpoint->tcp.inet, 0,
-			    &candidate->tcp.inet, 0);
-		else
+
+		/* A strict check ignores address reuse. */
+		if (strict) {
 			conflict = inet_socket_local_conflict(&endpoint->tcp.inet,
-			    endpoint->tcp.inet.bind_reuse_address,
+			    0,
 			    &candidate->tcp.inet,
-			    candidate->tcp.inet.bind_reuse_address);
+			    0);
+			if (conflict)
+				return 1;
+			continue;
+		}
+
+		/* A bind under SO_REUSEADDR leaves the connections on the port alone. */
+		connection = tcp_endpoint_is_connection(endpoint);
+		if (connection) {
+			if (candidate->tcp.inet.bind_reuse_address != 0)
+				continue;
+		}
+
+		/* Otherwise the addresses and the reuse options of both sides decide. */
+		conflict = inet_socket_local_conflict(&endpoint->tcp.inet,
+		    endpoint->tcp.inet.bind_reuse_address,
+		    &candidate->tcp.inet,
+		    candidate->tcp.inet.bind_reuse_address);
 		if (conflict)
 			return 1;
 	}
 
+	/* Succeeded: no other socket holds the candidate's local endpoint. */
+	return 0;
+}
+
+/*
+ * Tells whether an endpoint is a connection: one that has a peer, from a
+ * SYN sent or received until it is closed, or one closed that still
+ * records the peer it had.  A listener or a socket that is only bound is
+ * not.
+ */
+static int
+tcp_endpoint_is_connection(
+	const struct tcp_endpoint *endpoint)
+{
+	/* A listener waits for peers and has none of its own. */
+	if (endpoint->tcp.state == TCP_LISTEN)
+		return 0;
+
+	/* Any state but CLOSED is a connection on its way up or down. */
+	if (endpoint->tcp.state != TCP_CLOSED)
+		return 1;
+
+	/* A closed socket is one when it still records its peer. */
+	if (endpoint->tcp.inet.remote_port != 0)
+		return 1;
+
+	/* Succeeded: a closed socket without a peer is not a connection. */
+	return 0;
+}
+
+/*
+ * Tells whether two connections have the same peer: the same port, and
+ * the same address of the same family.
+ */
+static int
+tcp_same_peer(
+	const struct tcp_endpoint *left,
+	const struct tcp_endpoint *right)
+{
+	int left_ipv4;
+	int right_ipv4;
+	int same;
+
+	/* Peers on different ports are different peers. */
+	if (left->tcp.inet.remote_port != right->tcp.inet.remote_port)
+		return 0;
+
+	/* A connection to an IPv4 peer and one to an IPv6 peer are different. */
+	left_ipv4 = inet_socket_accepts_ipv4(&left->tcp.inet);
+	right_ipv4 = inet_socket_accepts_ipv4(&right->tcp.inet);
+	if (left_ipv4 != right_ipv4)
+		return 0;
+
+	/* Two IPv4 peers are the same when their addresses are. */
+	if (left_ipv4) {
+		if (left->tcp.inet.remote_address != right->tcp.inet.remote_address)
+			return 0;
+		return 1;
+	}
+
+	/* Two IPv6 peers likewise. */
+	same = in6_equal(&left->tcp.inet.remote6, &right->tcp.inet.remote6);
+	if (!same)
+		return 0;
+
+	/* Succeeded: the same peer. */
+	return 1;
+}
+
+/*
+ * Tells whether another connection already has the local endpoint and the
+ * peer a connecting socket asks for; the caller holds the registry lock.
+ *
+ * A socket bound under SO_REUSEADDR may share its port with connections,
+ * so connecting it to the peer of one of them would make two connections
+ * that an incoming segment cannot tell apart.
+ *
+ * Procedure referenced: FreeBSD 14.1 sys/netinet/in_pcb.c
+ * (in_pcbconnect_setup, the in_pcblookup_hash_locked check that refuses
+ * an existing four-tuple with EADDRINUSE).
+ */
+static int
+tcp_connection_duplicate_locked(
+	const struct tcp_endpoint *candidate)
+{
+	const struct tcp_endpoint *endpoint;
+	int connection;
+	int overlap;
+	int same;
+
+	/* Walks every other connection for one with the same four-tuple. */
+	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+		/* The candidate is not a duplicate of itself. */
+		if (endpoint == candidate)
+			continue;
+
+		/* Only a connection carries a four-tuple. */
+		connection = tcp_endpoint_is_connection(endpoint);
+		if (!connection)
+			continue;
+
+		/* The local port, and local addresses that are equal or a wildcard. */
+		overlap = inet_socket_local_conflict(&endpoint->tcp.inet,
+		    0,
+		    &candidate->tcp.inet,
+		    0);
+		if (!overlap)
+			continue;
+
+		/* And the same peer. */
+		same = tcp_same_peer(endpoint, candidate);
+		if (same)
+			return 1;
+	}
+
+	/* Succeeded: the four-tuple is free. */
 	return 0;
 }
 
@@ -7255,6 +7405,7 @@ tcp_connect(
 	uint32_t generation;
 	unsigned long irq;
 	unsigned attempt;
+	int duplicate;
 	int error;
 	uint64_t sequence;
 
@@ -7325,6 +7476,18 @@ tcp_connect(
 		if (error != 0) {
 			tcp_forget_peer(endpoint);
 			return error;
+		}
+	} else {
+		/* Refuses a bound socket the four-tuple of another connection. */
+		irq = spin_lock_irqsave(&tcp_registry_lock);
+
+		duplicate = tcp_connection_duplicate_locked(endpoint);
+
+		spin_unlock_irqrestore(&tcp_registry_lock, irq);
+
+		if (duplicate) {
+			tcp_forget_peer(endpoint);
+			return EADDRINUSE;
 		}
 	}
 

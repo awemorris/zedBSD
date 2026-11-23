@@ -25,6 +25,7 @@
 #include <keiland/keiland.h>
 
 #include <errno.h>
+#include <math.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,6 +220,8 @@ static int main_loop(const struct main_options *options);
 static int main_frame(void);
 static void main_band_frame(uint64_t started, uint64_t drawn, uint64_t shown);
 static int main_canvas_make(void);
+static void main_rescale(void);
+static void main_part_pixels(const struct kl_rect *units, struct kl_rect *pixels);
 static int main_timeout(uint64_t now, uint64_t deadline);
 static int main_shorter(int limit, int wait);
 static void main_request(const struct main_options *options);
@@ -663,7 +666,7 @@ main_loop(
 	token = "-";
 	if (options->token != NULL)
 		token = options->token;
-	fm_log("READY width=%u height=%u token=%s", main_present.extent.width, main_present.extent.height, token);
+	fm_log("READY width=%u height=%u scale=%u token=%s", main_present.extent.width, main_present.extent.height, main_window.scale, token);
 
 	/* Each round: input, time, and a frame when something changed. */
 	started = fm_clock();
@@ -760,6 +763,12 @@ main_loop(
 			return 0;
 		}
 
+		/* A new scale: the interface drawn at it (a new size in pixels comes with it as a resize). */
+		if (main_window.rescaled != 0) {
+			main_window.rescaled = 0;
+			main_rescale();
+		}
+
 		/* A new size: a new swapchain and canvas, and a frame. */
 		if (main_window.resized != 0) {
 			main_window.resized = 0;
@@ -809,7 +818,9 @@ main_frame(void)
 {
 	const struct kl_rect *parts;
 	struct kl_rect shown_part;
+	struct kl_rect shown_parts[FM_DAMAGE_PARTS];
 	unsigned part_count;
+	unsigned index;
 	VkResult result;
 	uint64_t started;
 	uint64_t drawn;
@@ -842,15 +853,20 @@ main_frame(void)
 		/*
 		 * Shown in the window, by what it changed when it was drawn by
 		 * parts (BUG-221): a window's parts themselves, or the desktop's
-		 * box (nothing changed: one pixel).
+		 * box (nothing changed: one pixel).  The parts were drawn in
+		 * units; they are shown by the pixels that hold them.
 		 */
 		parts = NULL;
 		part_count = 0;
 		if (main_app.frame_partial && main_app.frame_part_count > 0U) {
-			parts = main_app.frame_parts;
 			part_count = main_app.frame_part_count;
+			if (part_count > FM_DAMAGE_PARTS)
+				part_count = FM_DAMAGE_PARTS;
+			for (index = 0; index < part_count; index++)
+				main_part_pixels(&main_app.frame_parts[index], &shown_parts[index]);
+			parts = shown_parts;
 		} else if (main_app.frame_partial) {
-			shown_part = main_app.frame_part;
+			main_part_pixels(&main_app.frame_part, &shown_part);
 			if (shown_part.width <= 0 || shown_part.height <= 0) {
 				shown_part.x = 0;
 				shown_part.y = 0;
@@ -981,8 +997,58 @@ main_canvas_make(void)
 	if (error != 0)
 		return -1;
 
+	/* The interface laid out in units and drawn at the window's scale, its widgets' input with it. */
+	kl_canvas_set_scale(&main_canvas, main_window.scale);
+	main_app.scale = main_window.scale;
+
 	/* Succeeded: frames can be drawn. */
 	return 0;
+}
+
+/*
+ * Draws the interface at the window's new scale: the canvas and the
+ * widgets take it, and the whole frame is drawn again (the pictures made
+ * for the old scale are made again as they are drawn).
+ */
+static void
+main_rescale(void)
+{
+	/* The canvas and the widgets at the new scale. */
+	kl_canvas_set_scale(&main_canvas, main_window.scale);
+	main_app.scale = main_window.scale;
+
+	/* A whole frame at it. */
+	main_app.dirty = 1;
+	fm_log("RESCALE scale=%u width=%u height=%u", main_window.scale, main_window.width, main_window.height);
+}
+
+/*
+ * Turns a part of the frame drawn in units into the pixels that hold it:
+ * each edge outwards to a whole pixel (the same rectangle at 100 %).
+ */
+static void
+main_part_pixels(
+	const struct kl_rect *units,
+	struct kl_rect *pixels)
+{
+	double factor;
+	double right;
+	double bottom;
+
+	/* At 100 % the units are the pixels. */
+	if (main_canvas.scale == 0U || main_canvas.scale == KL_SCALE_BASE) {
+		*pixels = *units;
+		return;
+	}
+
+	/* The edges times the scale, the left and top down, the right and bottom up. */
+	factor = (double)main_canvas.scale / (double)KL_SCALE_BASE;
+	right = ceil((double)(units->x + units->width) * factor);
+	bottom = ceil((double)(units->y + units->height) * factor);
+	pixels->x = (int)floor((double)units->x * factor);
+	pixels->y = (int)floor((double)units->y * factor);
+	pixels->width = (int)right - pixels->x;
+	pixels->height = (int)bottom - pixels->y;
 }
 
 /*

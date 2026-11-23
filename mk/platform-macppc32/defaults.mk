@@ -159,6 +159,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	pathchk \
 	pax \
 	ping \
+	pkill \
 	poweroff \
 	pr \
 	printf \

@@ -178,6 +178,10 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/resource.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/event.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/property.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/region.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/render-cpu.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/gc.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/draw.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/input.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/backend.c

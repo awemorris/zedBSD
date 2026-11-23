@@ -82,6 +82,7 @@ BASE_PROGS := \
 	od \
 	passwd \
 	ping \
+	pkill \
 	poweroff \
 	printf \
 	ps \

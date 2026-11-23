@@ -1147,7 +1147,10 @@ enum fm_help {
  * history) and freed with the app.
  */
 struct fm_app {
-	/* The fonts, the window's size, the time of the input being handled, and whether a new frame is due. */
+	/*
+	 * The fonts, the window's size in units, the time of the input being
+	 * handled, and whether a new frame is due.
+	 */
 	struct kl_text *text;
 	int width;
 	int height;
@@ -1402,10 +1405,18 @@ struct fm_app {
 	struct fm_undo undo;
 
 	/*
+	 * The scale the window is drawn at, in 96ths (0 is KL_SCALE_BASE):
+	 * the widgets' input takes it, so that the caret they tell the input
+	 * method is in the window's pixels.  The main loop sets it with the
+	 * canvas.
+	 */
+	unsigned scale;
+
+	/*
 	 * libkeiland's widgets' input (ui-widgets.c, ws090-p023), and the name
 	 * being changed: libkeiland's field in it (rename.c, ws090-p010), what
 	 * its last frame did
-	 * (KL_FIELD_*), where it was drawn (window pixels; shown 0 until it
+	 * (KL_FIELD_*), where it was drawn (window units; shown 0 until it
 	 * is), and the item's path.
 	 */
 	struct kl_field rename;
@@ -1578,6 +1589,7 @@ void fm_ui_tick(struct fm_app *app, uint64_t now);
 void fm_ui_draw(struct fm_app *app, struct kl_canvas *canvas);
 void fm_ui_damage(struct fm_app *app, const struct kl_rect *rect);
 void fm_ui_frame_part(struct fm_app *app, const struct kl_rect *rect, int margin);
+int fm_ui_pixels(const struct kl_canvas *canvas, int units);
 int fm_ui_hit_rect(const struct fm_app *app, unsigned kind, int index, struct kl_rect *rect);
 
 /* The desktop's icons and their input (ui-desktop.c, ws094-p003, p004). */
@@ -1712,7 +1724,7 @@ void fm_home_summary(struct fm_app *app);
 void fm_home_folder_opened(const char *folder);
 void fm_home_draw(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner);
 int fm_home_tick(struct fm_app *app);
-void fm_mark_draw(struct kl_canvas *canvas, int x, int y, unsigned pixels, float opacity);
+void fm_mark_draw(struct kl_canvas *canvas, int x, int y, unsigned units, float opacity);
 void fm_home_click(struct fm_app *app, unsigned kind, int index, int double_click);
 
 /* The places that are not one folder and the search field (ui-search.c). */

@@ -92,6 +92,7 @@ static int child_start_server(struct child *child);
 static void child_open(struct child *child, uint32_t id);
 static void child_end_client(struct child *child, uint32_t id, int tell);
 static void child_events(struct child *child);
+static void child_credit(struct child *child, unsigned slot);
 static void child_output(struct child *child);
 static int child_frame(struct child *child, unsigned type, uint32_t id, const void *body, uint32_t size);
 static int child_send(struct child *child);
@@ -538,15 +539,14 @@ child_end_client(
 }
 
 /*
- * Takes the core's events: a client it closed (the parent is told), and
- * the bytes of a client it handled (the parent is given that much credit).
+ * Takes the core's events: a client it closed (the parent is told).  Then
+ * gives each open client's parent more credit as the core takes its bytes.
  */
 static void
 child_events(
 	struct child *child)
 {
 	struct x11server_event event;
-	uint8_t credit[4];
 	unsigned slot;
 	uint32_t id;
 	int found;
@@ -566,16 +566,62 @@ child_events(
 			child->clients[slot] = 0;
 			x11_link_close(&child->table, id);
 			(void)child_frame(child, X11_LINK_CLOSE, id, NULL, 0);
-			continue;
-		}
-
-		/* Bytes the core handled: the parent may send that much more. */
-		if (event.type == X11SERVER_EVENT_CONSUMED && event.bytes != 0) {
-			x11_link_put32(credit, (uint32_t)event.bytes);
-			x11_link_gave(&child->table, id, (uint32_t)event.bytes);
-			(void)child_frame(child, X11_LINK_CREDIT, id, credit, 4);
 		}
 	}
+
+	/* Each open client's credit, topped up to what the core may now take of it. */
+	for (slot = 0; slot < X11_LINK_CHANNELS; slot++) {
+		if (!child->table.channels[slot].used || child->clients[slot] == 0)
+			continue;
+		child_credit(child, slot);
+	}
+}
+
+/*
+ * Gives the parent credit on one client's channel, so that what the core
+ * holds of the client and what the parent may still send come to the
+ * channel's starting credit, or to the rest of a long request the core
+ * holds a part of (the core handles none of it, and reports nothing
+ * handled, until it is whole).  Never past X11SERVER_REQUEST_MAX, the
+ * most the core holds.
+ */
+static void
+child_credit(
+	struct child *child,
+	unsigned slot)
+{
+	struct x11_link_channel *channel;
+	uint8_t credit[4];
+	size_t held;
+	size_t wanted;
+	size_t target;
+	size_t allowed;
+	uint32_t given;
+	int error;
+
+	/* What the core holds of the client, and how much more its front request needs. */
+	channel = &child->table.channels[slot];
+	held = x11server_held(child->server, child->clients[slot], &wanted);
+
+	/* The bytes the core may have: the starting credit, or the whole of a longer request. */
+	target = X11_LINK_CREDIT_TO_CHILD;
+	if (held + wanted > target)
+		target = held + wanted;
+	if (target > X11SERVER_REQUEST_MAX)
+		target = X11SERVER_REQUEST_MAX;
+
+	/* What the parent may already send counts; nothing to give when it reaches the target. */
+	allowed = held + channel->credit_in;
+	if (allowed >= target)
+		return;
+	given = (uint32_t)(target - allowed);
+
+	/* The parent may send that much more, counted once the frame is queued (the next round tries again). */
+	x11_link_put32(credit, given);
+	error = child_frame(child, X11_LINK_CREDIT, channel->id, credit, 4);
+	if (error != 0)
+		return;
+	x11_link_gave(&child->table, channel->id, given);
 }
 
 /*
