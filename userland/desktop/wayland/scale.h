@@ -55,11 +55,21 @@
 #define KWL_SCALE_LEAST_LONG		1024U
 
 /*
- * The default: the density (dots per inch) shown at 100 %, and the largest
- * step the default may choose.  Larger steps are only the user's choice.
+ * The default, as Windows chooses its default scale factor (Microsoft,
+ * "Guidance for Rounded Display Bezels", Windows hardware design
+ * guidelines, section "Calculating the Windows Default Scale Factor and
+ * Effective Resolution"): the display's zoom is its density times its
+ * viewing distance over 96 dots per inch at 28 inches, the density and
+ * the distance a desktop monitor is shown at 100 %.  A built-in panel is
+ * a laptop's, seen from 24.5 inches; any other display a desktop's.  The
+ * distances are in tenths of an inch.
  */
-#define KWL_SCALE_AUTO_DPI		110U
-#define KWL_SCALE_AUTO_MAX		240U
+#define KWL_SCALE_ZOOM_DPI		96U
+#define KWL_SCALE_VIEW_DESKTOP		280U
+#define KWL_SCALE_VIEW_LAPTOP		245U
+
+/* The largest step the default may choose (250 %); larger steps are only the user's choice. */
+#define KWL_SCALE_AUTO_MAX		300U
 
 /*
  * Whether a display the user left to the default takes the scale its
@@ -112,7 +122,7 @@ unsigned kwl_scale_offered(uint32_t width, uint32_t height, unsigned *offered, u
 int kwl_scale_offers(uint32_t width, uint32_t height, unsigned scale120);
 unsigned kwl_scale_largest(uint32_t width, uint32_t height);
 unsigned kwl_scale_density(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height);
-unsigned kwl_scale_recommended(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height);
+unsigned kwl_scale_recommended(uint32_t width, uint32_t height, uint32_t mm_width, uint32_t mm_height, unsigned viewing);
 unsigned kwl_scale_shown(unsigned chosen, unsigned recommended, uint32_t width, uint32_t height);
 unsigned kwl_scale_from_percent(unsigned percent);
 unsigned kwl_scale_percent(unsigned scale120);
