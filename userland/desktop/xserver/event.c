@@ -199,8 +199,9 @@ x11_event_send(
 {
 	uint8_t copy[32];
 
-	/* The event in the client's order. */
+	/* The event, its state as XKEYBOARD tells it to a client that uses it, in the client's order. */
 	memcpy(copy, event, sizeof(copy));
+	x11_xkb_event_state(server, client, copy);
 	if (client->order)
 		x11_event_swap(copy);
 
@@ -654,12 +655,20 @@ x11_event_propagate(
 	uint32_t child;
 	uint32_t selected;
 	unsigned delivered;
+	int heard;
 
 	/* From the source up, the child on the way named in each event. */
 	window = source;
 	child = 0U;
 	while (window != NULL) {
 		x11_event_device(event, server, type, detail, time, window, child, state);
+
+		/* A client that asked for XInputExtension's event on the window hears it instead, and the way ends there. */
+		heard = x11_xinput_propagate(server, window, child, type, detail, time, state, only);
+		if (heard > 0)
+			return window;
+		if (heard < 0)
+			return NULL;
 
 		/* Every client that asked hears it. */
 		if (only == X11_NO_CLIENT) {
