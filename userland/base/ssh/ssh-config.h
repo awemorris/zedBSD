@@ -39,7 +39,7 @@
 /* The longest path held. */
 #define SSH_CONFIG_PATH_MAX	1024U
 
-/* The longest RemoteCommand held, in bytes. */
+/* The longest RemoteCommand and ProxyCommand held, in bytes. */
 #define SSH_CONFIG_COMMAND_MAX	4096U
 
 /* The most HostKey and IdentityFile entries. */
@@ -195,7 +195,8 @@ struct sshd_config {
  * 20 minutes: the program that forwards X11 decides what the time means),
  * gateway_ports 0, exit_on_forward_failure 0, clear_all_forwardings 0,
  * session_type_none 0, remote_command "" (none: the shell, or the
- * command the user gave the program).  forward holds forward_count forwardings, from
+ * command the user gave the program), proxy_command "" (none: the host is
+ * connected to directly).  forward holds forward_count forwardings, from
  * every source in order (each kind at most SSH_CONFIG_FORWARDS_MAX, the
  * same one once); ssh_config_defaults empties it when
  * clear_all_forwardings is 1.
@@ -228,6 +229,7 @@ struct ssh_config {
 	unsigned forward_count;
 	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
 	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
+	char proxy_command[SSH_CONFIG_COMMAND_MAX + 1];
 };
 
 /* Fills config with sshd's defaults (host_key_count 0: the default key is added by sshd_config_finish when no HostKey line gave one). */
@@ -283,7 +285,7 @@ void ssh_config_init(struct ssh_config *config);
  * ClearAllForwardings (yes/no), SessionType (default or none),
  * RemoteCommand (the rest of the line as written, quotes and all, as
  * OpenSSH keeps it; "none" is no command; its %-tokens are left for the
- * program to expand).  The
+ * program to expand), ProxyCommand (the same way; "none" is no proxy).  The
  * forwardings add up, from every line of every block that applies; the
  * other keywords keep their first value.  Which of them a program acts on
  * is the program's: one that does not forward X11 or ports refuses the

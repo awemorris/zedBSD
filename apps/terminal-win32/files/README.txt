@@ -45,19 +45,22 @@ hosts of ssh/config:
    [1] me@server
    [2] backup
    [w] WSL
+   [c] GitHub Codespaces
    [x] Settings
 
   >>> me@server
 
-Up and Down choose a row, and Enter opens it.  A row's number (or w, or x)
-chooses that row too.  The ">>>" line holds the chosen row; to connect to a
+Up and Down choose a row, and Enter opens it.  A row's number (or w, c or
+x) chooses that row too.  The ">>>" line holds the chosen row; to connect to a
 host that is not in the list, type it there instead (user@host:port, or a
 name): the first character you type takes the row's place.  Backspace and
 Ctrl+U edit the line, and Escape puts the chosen row back.  A name that
-starts with a digit, w or x is typed after Ctrl+U (those keys choose rows).
+starts with a digit, w, c or x is typed after Ctrl+U (those keys choose
+rows).
 A row shows user@host when ssh/config gives the host a User.
 
-[w] WSL lists WSL's distributions (section 5).  [x] Settings opens the
+[w] WSL lists WSL's distributions (section 5), and [c] GitHub Codespaces
+your codespaces (section 12).  [x] Settings opens the
 settings in a tab of their own beside this one (section 3): the tab stays,
 and you come back to it with the tab bar or F12.  Ctrl+C closes the tab.
 
@@ -188,8 +191,8 @@ StrictHostKeyChecking, UserKnownHostsFile, GlobalKnownHostsFile, BatchMode,
 ConnectTimeout, ServerAliveInterval, ServerAliveCountMax, RequestTTY,
 PasswordAuthentication, PubkeyAuthentication, LogLevel, ForwardX11,
 ForwardX11Trusted and ForwardX11Timeout (see 10), LocalForward,
-RemoteForward, GatewayPorts, ExitOnForwardFailure, ClearAllForwardings and
-RemoteCommand (see 11).  RequestTTY and LogLevel are checked but change
+RemoteForward, GatewayPorts, ExitOnForwardFailure, ClearAllForwardings,
+RemoteCommand (see 11) and ProxyCommand (see 12).  RequestTTY and LogLevel are checked but change
 nothing: a tab is always a terminal, and mikuterm shows no debug lines.
 SessionType none is refused.  Match, Include, ProxyJump and the other
 keywords it does not know are errors that name their
@@ -458,3 +461,54 @@ supported.
 RemoteCommand runs a command instead of the shell, on a terminal as the
 shell would be, with OpenSSH's tokens (%h, %n, %k, %p, %r, %u, %d, %l, %L,
 %j, %%); %C and %i are errors.
+
+
+12. ProxyCommand and GitHub Codespaces
+--------------------------------------
+
+ProxyCommand connects to a host through a program instead of over the
+network: what the program reads is what mikuterm sends to the server, and
+what it writes is the server's answer, as with OpenSSH's ssh.
+
+  Host inside
+      HostName 10.0.0.5
+      User me
+      ProxyCommand C:/Tools/relay.exe %h %p
+
+Its tokens are OpenSSH's: %h (HostName, else the name), %n (the name as
+given), %p (the port), %r (the remote user) and %%.  ProxyCommand none means
+none.
+
+Unlike OpenSSH's, the command does not run in a shell (neither cmd.exe nor
+PowerShell): its first word is the program and the rest of the line is the
+program's command line as written, split into arguments by the program in
+Windows' way (double quotes keep spaces in an argument).  So pipes (|),
+redirections, && and environment variables (%NAME%) do not work, and the
+program must be one that talks on its standard input and output, as
+OpenSSH's netcat-style relays do.  The program is a full path (in double
+quotes when it has spaces; without them, the shortest run of words that
+names a program is taken, as Windows does) or a name looked for in the
+folders of PATH (with .exe added when it has no extension).  mikuterm does
+not look for it in the current folder or beside mikuterm.exe.  The program
+runs without a window, and it and every program it starts end when the
+connection does.  What it writes on its errors is shown in the tab when the
+connection fails.
+
+[c] GitHub Codespaces on a new tab's screen lists your codespaces, as
+GitHub CLI's "gh codespace list" does, and connects to the one you choose
+through gh, as "gh codespace ssh" does.  It needs GitHub CLI (gh, from
+https://cli.github.com, in PATH or in its usual folder C:\Program
+Files\GitHub CLI) and its login with the codespace scope:
+
+  gh auth login -s codespace
+
+(run once in a Windows terminal).  A stopped codespace starts when you
+choose it, which can take a few minutes.  mikuterm asks gh for the
+codespace's ssh settings ("gh codespace ssh -c NAME --config") and connects
+with them: the user gh gives, the key gh made for codespaces (in your
+profile's .ssh folder, codespaces.auto) and a ProxyCommand that runs gh,
+which carries the connection through GitHub.  As in gh's settings, the
+codespace's host key is not checked or kept in known_hosts: gh's connection
+to GitHub is what is trusted.  ssh/config can still add settings for the
+codespaces, under a Host line such as "Host cs.*" (gh names them
+cs.NAME.BRANCH); what ssh/config gives wins over gh's settings.

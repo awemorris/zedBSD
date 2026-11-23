@@ -102,7 +102,8 @@ zedBSD's `ssh`:
   `PasswordAuthentication`, `PubkeyAuthentication`,
   `ForwardX11`, `ForwardX11Trusted`, `ForwardX11Timeout`, `LocalForward`,
   `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
-  `ClearAllForwardings`, `RemoteCommand` (section 4.4).
+  `ClearAllForwardings`, `RemoteCommand` (section 4.4), `ProxyCommand`
+  (section 4.6).
 - Read and checked, but changing nothing in mikuterm: `RequestTTY` (a tab is
   a terminal, so mikuterm always asks the server for one, for a
   `RemoteCommand` too) and `LogLevel` (mikuterm shows no debug lines). The
@@ -237,6 +238,48 @@ section 10, has the steps). What the remote programs should know:
   desktop's services before its window opens; started in a D-Bus session of
   its own (`dbus-run-session gtk3-demo`), it does not wait.
 
+### 4.6 `ProxyCommand` and GitHub Codespaces
+
+`ProxyCommand COMMAND` reaches the host through a program: mikuterm writes
+the connection to the program's standard input and reads the server from
+its standard output, as OpenSSH's `ssh` does; `ProxyCommand none` is none.
+The tokens are OpenSSH's for it: `%h` (the `HostName`, else the name),
+`%n` (the name as given), `%p`, `%r` and `%%`; any other token, and a `%` at
+the end, are errors of the connection.
+
+How the command runs differs from OpenSSH's, which hands it to the user's
+shell:
+
+- No shell runs it. Its first word is the program: a path in double
+  quotes; a Windows path from a drive or a server (without quotes, the
+  shortest run of its words that names a program, as Windows'
+  `CreateProcess` takes one); or a name without a folder, looked for in the
+  folders of `PATH` only (not the current folder, not mikuterm's). A name
+  without an extension is its `.exe`. The rest of the line is the program's
+  command line as written, which the program splits into its arguments by
+  Windows' rules. Pipes, redirections, `&&` and `%NAME%` are not read.
+- The program runs without a console window, with only its three standard
+  handles handed to it, in a job object that ends it and every program it
+  starts when the connection ends, when the tab closes, or when mikuterm
+  ends.
+- The last 2 KiB of what it writes on its standard error are shown in the
+  tab when the connection fails.
+- The tab says `Connecting to NAME through ProxyCommand ...`. The host key
+  question shows `<no hostip for proxy command>` for the address, as
+  OpenSSH's does.
+
+A GitHub codespace (section 5) is reached with the settings
+`gh codespace ssh -c NAME --config` writes: its `User`, its `IdentityFile`
+(the key gh made, `codespaces.auto` in the profile's `.ssh` folder),
+`StrictHostKeyChecking no` and `UserKnownHostsFile=/dev/null` (the host key
+is neither asked about nor kept), and its `ProxyCommand`, which runs
+`gh codespace ssh -c NAME --stdio -- -i KEY`. gh writes its own path and the
+key's without quotes, so mikuterm puts the `IdentityFile` path in quotes
+and makes the `ProxyCommand` again with gh's path (as mikuterm found it)
+and the key's in quotes; it is given before gh's settings, and
+`ssh/config`'s settings for the Host (`Host cs.*`, for example) come before
+both.
+
 ## 5. Tabs and questions
 
 A new tab (Shell > New Tab, Ctrl+Shift+T) shows the launch screen; the first
@@ -278,6 +321,7 @@ Hosts:
  [1] me@server
  [2] backup
  [w] WSL
+ [c] GitHub Codespaces
  [x] Settings
 
 >>> me@server
@@ -287,21 +331,21 @@ Hosts:
   `mikuterm.conf`'s problems (the first tab's) comes under it.
 - `Hosts:` lists the names of `ssh/config`'s `Host` lines (the ones without
   `*`, `?` or `!`, each once, at most 32), numbered from 1, shown as
-  `USER@NAME` when the host's settings give a `User`; then `[w] WSL` and
-  `[x] Settings`.
+  `USER@NAME` when the host's settings give a `User`; then `[w] WSL`,
+  `[c] GitHub Codespaces` and `[x] Settings`.
 - The chosen row is drawn with the background `#39C5BB` and dark text, in
   every theme. When the rows do not fit the grid, the ones round the chosen
   row are shown.
 - The `>>> ` line holds the chosen row's text. Up and Down choose a row;
   while the line holds a row's text, the row's key (its number, a second digit
-  making 10 and above, `w`, `x`) chooses that row, and any other character
+  making 10 and above, `w`, `c`, `x`) chooses that row, and any other character
   starts a line typed by hand in its place. Backspace and Ctrl+U edit the
   line; a paste (bracketed) is always text and takes the row's place. Escape
   puts the chosen row's text back.
 - Enter opens the chosen row, or the row whose text the line is; any other
   line is a host typed by hand, `[user@]host[:port]` (an IPv6 address in
   brackets), or a `Host` of `ssh/config` by name. An empty line does
-  nothing. A name that starts with a digit, `w` or `x` is typed after
+  nothing. A name that starts with a digit, `w`, `c` or `x` is typed after
   Ctrl+U.
 - `[x] Settings` opens the settings tab beside this one (section 7); this
   tab stays on the screen. Ctrl+C or Ctrl+D closes the tab.
@@ -343,6 +387,22 @@ Hosts:
     WSL's network or a firewall keeps Windows from it ...` (no answer), or
     `For NAME, see README.txt, WSL.` (a failure after connecting, whose lines
     come before).
+- `[c] GitHub Codespaces` runs GitHub CLI's `gh codespace list` (gh in a
+  folder of `PATH`, else `C:\Program Files\GitHub CLI\gh.exe`; without a
+  console window, at most 60 seconds) and lists the codespaces under
+  `GitHub Codespaces:`, each by its display name (else its name) with its
+  repository, and, when it is not running, its state and `starts when
+  chosen`; `[b] Back` (or Escape) returns to the hosts. A codespace's name
+  or display name can be typed. When there is no gh, gh fails (its first
+  line is shown: for a user not logged in, gh's line naming
+  `gh auth login`) or does not answer in time, or there is no codespace,
+  the hosts' screen says so.
+- A codespace chosen is asked for with `gh codespace ssh -c NAME --config`
+  (at most 5 minutes, as gh starts a stopped codespace first); when gh
+  fails, the codespaces' screen says why and stays. The target is the
+  `Host` gh names (`cs.NAME.BRANCH`), with `ssh/config`'s settings for it
+  first, then a `ProxyCommand` mikuterm makes, then gh's settings
+  (section 4.6).
 
 The questions are answered on a line of the tab: Backspace and Ctrl+U edit
 it, Enter answers, Ctrl+C or Ctrl+D gives the question up. They follow

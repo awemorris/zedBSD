@@ -64,7 +64,7 @@
 /*
  * The part of struct ssh_config a value that is not kept is checked
  * against: every field before forward_count.  The forwardings are added
- * apart (ssh_value never reads or writes them) and RemoteCommand is only
+ * apart (ssh_value never reads or writes them) and RemoteCommand and ProxyCommand are only
  * written, so a line that is not kept need not copy their 20 KiB each
  * time (a long file read once for each of its hosts).
  */
@@ -117,7 +117,7 @@ enum sshd_keyword_id {
 };
 
 /*
- * The numbers of ssh_config keywords that are acted on; each below 23 is
+ * The numbers of ssh_config keywords that are acted on; each below 24 is
  * also the bit of ssh_config.set_mask (the forwardings, which add up, and
  * Host have none).
  */
@@ -145,10 +145,11 @@ enum ssh_keyword_id {
 	SSH_KW_CLEAR_ALL_FORWARDINGS = 20,
 	SSH_KW_SESSION_TYPE = 21,
 	SSH_KW_REMOTE_COMMAND = 22,
-	SSH_KW_LOCAL_FORWARD = 23,
-	SSH_KW_REMOTE_FORWARD = 24,
-	SSH_KW_HOST = 25,
-	SSH_KW_NONE = 26
+	SSH_KW_PROXY_COMMAND = 23,
+	SSH_KW_LOCAL_FORWARD = 24,
+	SSH_KW_REMOTE_FORWARD = 25,
+	SSH_KW_HOST = 26,
+	SSH_KW_NONE = 27
 };
 
 /*
@@ -316,6 +317,7 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "ClearAllForwardings", CONFIG_KIND_ACTED, SSH_KW_CLEAR_ALL_FORWARDINGS },
 	{ "SessionType", CONFIG_KIND_ACTED, SSH_KW_SESSION_TYPE },
 	{ "RemoteCommand", CONFIG_KIND_ACTED, SSH_KW_REMOTE_COMMAND },
+	{ "ProxyCommand", CONFIG_KIND_ACTED, SSH_KW_PROXY_COMMAND },
 	{ "LocalForward", CONFIG_KIND_ACTED, SSH_KW_LOCAL_FORWARD },
 	{ "RemoteForward", CONFIG_KIND_ACTED, SSH_KW_REMOTE_FORWARD },
 	{ "VerifyHostKeyDNS", CONFIG_KIND_IGNORE_NO, SSH_KW_NONE },
@@ -484,7 +486,7 @@ static int sshd_read_permit(const struct config_token *token, int listen, struct
 static int sshd_value(struct sshd_config *target, int id, const struct config_line *parsed, const char **what);
 static int sshd_config_apply(void *context, const struct config_line *parsed, const char **what);
 static int ssh_value_identity(struct ssh_config *target, const struct config_line *parsed, const char **what);
-static int ssh_value_command(struct ssh_config *target, const struct config_line *parsed, const char **what);
+static int ssh_value_command(char *command, const struct config_line *parsed, const char **what);
 static int ssh_value(struct ssh_config *target, int id, const struct config_line *parsed, const char **what);
 static int ssh_value_forward(struct ssh_state *state, int id, const struct config_line *parsed, const char **what);
 static int config_read_forward(enum ssh_forward_kind kind, const char *spec, struct ssh_forward *forward, const char **what);
@@ -794,6 +796,10 @@ ssh_config_defaults(
 	/* No command of the file's: the shell, or the user's command. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_REMOTE_COMMAND)) == 0)
 		config->remote_command[0] = '\0';
+
+	/* No proxy: the host is reached directly. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_PROXY_COMMAND)) == 0)
+		config->proxy_command[0] = '\0';
 
 	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
@@ -2329,7 +2335,8 @@ ssh_value_identity(
 }
 
 /*
- * Reads RemoteCommand: the rest of the line as written (quotes, '#' and
+ * Reads RemoteCommand or ProxyCommand into command (SSH_CONFIG_COMMAND_MAX
+ * bytes and a NUL): the rest of the line as written (quotes, '#' and
  * '%' as they are), 1 to SSH_CONFIG_COMMAND_MAX bytes without a control
  * character but the tab; "none" is no command ("").  0 or EINVAL with
  * *what set.
@@ -2337,11 +2344,11 @@ ssh_value_identity(
  * Procedure referenced: openssh-portable fa4b2a82be7d readconf.c
  * (process_config_line, parse_command: the line after the keyword and its
  * separator is kept as it is; fill_default_options and
- * option_clear_or_none: "none", in any case, is no remote command).
+ * option_clear_or_none: "none", in any case, is no command).
  */
 static int
 ssh_value_command(
-	struct ssh_config *target,
+	char *command,
 	const struct config_line *parsed,
 	const char **what)
 {
@@ -2373,13 +2380,13 @@ ssh_value_command(
 	/* "none" is no command. */
 	none = config_text_equal(parsed->rest, parsed->rest_size, "none");
 	if (none) {
-		target->remote_command[0] = '\0';
+		command[0] = '\0';
 		return 0;
 	}
 
 	/* Succeeded: the command is kept as written. */
-	memcpy(target->remote_command, parsed->rest, parsed->rest_size);
-	target->remote_command[parsed->rest_size] = '\0';
+	memcpy(command, parsed->rest, parsed->rest_size);
+	command[parsed->rest_size] = '\0';
 	return 0;
 }
 
@@ -2489,7 +2496,10 @@ ssh_value(
 			target->session_type_none = value;
 		return status;
 	case SSH_KW_REMOTE_COMMAND:
-		status = ssh_value_command(target, parsed, what);
+		status = ssh_value_command(target->remote_command, parsed, what);
+		return status;
+	case SSH_KW_PROXY_COMMAND:
+		status = ssh_value_command(target->proxy_command, parsed, what);
 		return status;
 	default:
 		break;

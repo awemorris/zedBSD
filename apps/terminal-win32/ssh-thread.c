@@ -8,10 +8,12 @@
 /*
  * A tab's SSH connection on a thread of its own (session.h): it chooses
  * the host (the Connect host, or the one the user takes on the launch
- * screen of launch.c: a host of ssh\config, one typed, or a distribution
- * of WSL, whose sshd it reaches like any host), reads ssh\config for it,
- * asks for the user when none is set ("login as:"), connects, and runs
- * zedBSD's SSH client engine on the socket until the connection ends.
+ * screen of launch.c: a host of ssh\config, one typed, a distribution of
+ * WSL, whose sshd it reaches like any host, or a GitHub codespace, which
+ * GitHub's gh lists and reaches), reads ssh\config for it, asks for the
+ * user when none is set ("login as:"), connects (or starts the host's
+ * ProxyCommand, proxy.c), and runs zedBSD's SSH client engine on the
+ * socket until the connection ends.
  *
  * The socket is always read, so the transport's own messages (a
  * re-exchange, a keepalive, a DISCONNECT) are never held up; the server's
@@ -26,8 +28,11 @@
  */
 
 #include "session.h"
+#include "codespace.h"
 #include "forward.h"
 #include "launch.h"
+#include "proxy.h"
+#include "proxy-command.h"
 #include "remote-command.h"
 #include "x11-host.h"
 #include "mikuterm-version.h"
@@ -39,6 +44,8 @@
 #include <compat/crypto/crypto.h>
 
 #ifdef _WIN32
+#include "program.h"
+
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -101,6 +108,28 @@
 /* The longest warning about a distribution's port shown before its connection. */
 #define THREAD_WARNING_MAX	256U
 
+/*
+ * GitHub Codespaces: how long gh may take to list the codespaces and to
+ * give one's ssh settings (which starts a stopped codespace first), in
+ * milliseconds; the largest settings kept; and where GitHub CLI's
+ * installer puts gh, under the Program Files folder, when PATH does not
+ * name it.
+ */
+#define THREAD_CODESPACE_LIST_MS	60000U
+#define THREAD_CODESPACE_START_MS	300000U
+#define THREAD_CODESPACE_CONFIG_MAX	4096U
+#define THREAD_GH_NAME			"gh"
+#define THREAD_GH_INSTALLED		L"\\GitHub CLI\\gh.exe"
+
+/*
+ * What the host key question shows for the address of a host reached
+ * through a ProxyCommand, which has none (OpenSSH's words).
+ */
+#define THREAD_PROXY_ADDRESS		"<no hostip for proxy command>"
+
+/* The keyword the ProxyCommand made for a codespace is given with, as a setting of its own. */
+#define THREAD_PROXY_KEYWORD		"ProxyCommand "
+
 /* The largest text wsl.exe writes that is read, and the screen's text at its largest. */
 #define THREAD_WSL_OUTPUT	16384U
 #define THREAD_SCREEN_MAX	65536U
@@ -140,7 +169,10 @@
  * host key is known by in known_hosts when not its host's (a distribution
  * reached at an address that changes with each start of WSL is known as
  * wsl-<name>; empty: the host's), and a warning to show before connecting
- * (empty: none).
+ * (empty: none).  For a codespace, settings holds the ssh settings gh
+ * gave (settings_size bytes; 0: none), read after ssh\config's, and proxy
+ * the ProxyCommand setting made for it (empty: none), which comes before
+ * gh's own.
  */
 struct thread_target {
 	char host[MIKUTERM_HOST_MAX];
@@ -151,6 +183,9 @@ struct thread_target {
 	char address[MIKUTERM_HOST_MAX];
 	char key_name[MIKUTERM_HOST_MAX];
 	char warning[THREAD_WARNING_MAX];
+	char settings[THREAD_CODESPACE_CONFIG_MAX];
+	size_t settings_size;
+	char proxy[sizeof(THREAD_PROXY_KEYWORD) + SSH_CONFIG_COMMAND_MAX];
 };
 
 /*
@@ -168,16 +203,18 @@ struct thread_hosts {
 
 /*
  * The launch screen's state while the user chooses: the session, the
- * hosts, the screens of the hosts and of WSL's distributions, the
- * distributions' names, what wsl.exe wrote and its text, and the
- * screen's text as it is drawn.
+ * hosts, the screens of the hosts, of WSL's distributions and of the
+ * codespaces, the distributions' names and the codespaces, what wsl.exe
+ * or gh wrote and its text, and the screen's text as it is drawn.
  */
 struct thread_choice {
 	struct mikuterm_session *session;
 	struct thread_hosts hosts;
 	struct launch_screen screen;
 	struct launch_screen wsl;
+	struct launch_screen codespaces;
 	char names[LAUNCH_NAMES_MAX][LAUNCH_NAME_MAX];
+	struct codespace_entry spaces[LAUNCH_NAMES_MAX];
 	unsigned char output[THREAD_WSL_OUTPUT];
 	char decoded[THREAD_WSL_OUTPUT * 2U];
 	char text[THREAD_SCREEN_MAX];
@@ -195,7 +232,8 @@ struct thread_choice {
  * RemoteCommand with its tokens put in (empty: the shell).  forwards
  * holds the port forwardings (NULL when the host has none), and
  * forward_failed is 1 when ExitOnForwardFailure ended the connection
- * (reason says why).
+ * (reason says why).  proxy is the ProxyCommand's run whose connection
+ * the socket is (NULL when the socket is the host's own).
  */
 struct thread_link {
 	struct mikuterm_session *session;
@@ -232,6 +270,7 @@ struct thread_link {
 	struct ssh_buf command;
 	struct forward_state *forwards;
 	int forward_failed;
+	struct proxy *proxy;
 };
 
 static int thread_choose(struct mikuterm_session *session, struct thread_target *target);
@@ -244,6 +283,14 @@ static int thread_wsl_host(const struct thread_choice *choice, const char *name,
 static int thread_wsl_target(struct thread_choice *choice, const char *name, struct thread_target *target);
 static int thread_wsl_address(struct thread_choice *choice, const char *name, uint16_t port, struct thread_target *target);
 static void thread_wsl_hint(const struct thread_link *link, char *hint, size_t size);
+#ifdef _WIN32
+static int thread_codespaces(struct thread_choice *choice, struct thread_target *target);
+static int thread_codespaces_list(struct thread_choice *choice, wchar_t *gh, size_t gh_size, unsigned *count);
+static int thread_gh_find(wchar_t *gh, size_t size);
+static int thread_gh_failed(struct thread_choice *choice, struct launch_screen *screen, int error, unsigned long code, size_t size);
+static int thread_codespace_target(struct thread_choice *choice, const wchar_t *gh, const struct codespace_entry *space, struct thread_target *target);
+static int thread_codespace_proxy(const char *settings, size_t size, const char *host, const wchar_t *gh, const char *name, struct thread_target *target);
+#endif
 static int thread_same_name(const char *first, const char *second);
 static int thread_user_name(const char *name);
 static int thread_stop(void *data);
@@ -252,6 +299,9 @@ static int thread_parse_target(const char *text, struct thread_target *target);
 static int thread_attempt(struct thread_link *link);
 static int thread_settings(struct thread_link *link);
 static int thread_dial(struct thread_link *link);
+static int thread_dial_proxy(struct thread_link *link);
+static void thread_proxy_said(struct thread_link *link);
+static void thread_hang_up(struct thread_link *link);
 static int thread_wait_connected(struct thread_link *link, struct kl_socket *socket, unsigned timeout);
 static int thread_identities(struct thread_link *link, struct ssh_engine_identity *identities, unsigned *count);
 static void thread_identities_free(struct ssh_engine_identity *identities, unsigned count);
@@ -378,8 +428,8 @@ session_run(
 /*
  * Chooses what to connect to: the session's host when it has one, else
  * what the user takes on the launch screen: a host of ssh\config, a host
- * typed on the ">>> " line (a name, or user@host:port), or a
- * distribution of WSL.  Settings opens the settings' tab beside this one
+ * typed on the ">>> " line (a name, or user@host:port), a distribution
+ * of WSL, or a codespace.  Settings opens the settings' tab beside this one
  * and the screen stays.  Returns 0, ECANCELED when the user gave up, or
  * EPIPE when the tab closed.
  */
@@ -432,8 +482,11 @@ thread_choose(
 		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
 	}
 
-	/* WSL and the settings after the hosts; with no host, how to type one. */
+	/* WSL, GitHub Codespaces (on Windows, where gh runs) and the settings after the hosts; with no host, how to type one. */
 	(void)launch_add(&choice->screen, "w", LAUNCH_WSL, "WSL", NULL);
+#ifdef _WIN32
+	(void)launch_add(&choice->screen, "c", LAUNCH_CODESPACES, "GitHub Codespaces", NULL);
+#endif
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
 	if (choice->hosts.count == 0U) {
 		mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
@@ -494,8 +547,15 @@ thread_choose(
 			continue;
 		}
 
-		/* WSL: a distribution, or back to the hosts with why not. */
+		/* WSL or GitHub Codespaces: a distribution or a codespace, or back to the hosts with why not. */
+#ifdef _WIN32
+		if (choice->screen.rows[index].kind == LAUNCH_CODESPACES)
+			error = thread_codespaces(choice, target);
+		else
+			error = thread_wsl(choice, target);
+#else
 		error = thread_wsl(choice, target);
+#endif
 		if (error == EAGAIN) {
 			error = 0;
 			continue;
@@ -1080,6 +1140,389 @@ thread_wsl_hint(
 	}
 }
 
+#ifdef _WIN32
+/*
+ * Asks gh for the codespaces and lets the user take one: the target is
+ * then the Host gh's ssh settings name, reached through gh.  Returns 0
+ * with the target, EAGAIN to go back to the hosts (the screen's message
+ * says why when gh could not list them), ECANCELED when the user gave
+ * up, or EPIPE when the tab closed.
+ */
+static int
+thread_codespaces(
+	struct thread_choice *choice,
+	struct thread_target *target)
+{
+	struct launch_screen *screen;
+	const struct codespace_entry *space;
+	wchar_t gh[MIKUTERM_PATH_MAX];
+	char key[LAUNCH_KEY_MAX];
+	char note[LAUNCH_NOTE_MAX];
+	const char *label;
+	unsigned event;
+	unsigned count;
+	unsigned index;
+	int taken;
+	int same;
+	int running;
+	int error;
+
+	/* The list, while the screen says it is being asked for. */
+	launch_say(&choice->screen, "Asking GitHub for your codespaces ...");
+	thread_draw(choice, &choice->screen);
+	count = 0U;
+	error = thread_codespaces_list(choice, gh, sizeof(gh) / sizeof(gh[0]), &count);
+	if (error != 0)
+		return error;
+
+	/* The list is read: the message goes. */
+	launch_say(&choice->screen, NULL);
+
+	/* The screen: the codespaces by number, each with its repository and, when it is not running, its state; and the way back. */
+	screen = &choice->codespaces;
+	launch_init(screen, "GitHub Codespaces:");
+	for (index = 0U; index < count; index++) {
+		/* Its display name, or its name when it has none. */
+		space = &choice->spaces[index];
+		(void)snprintf(key, sizeof(key), "%u", index + 1U);
+		label = space->display;
+		if (label[0] == '\0')
+			label = space->name;
+
+		/* A codespace that is not running starts when it is chosen. */
+		running = strcmp(space->state, CODESPACE_AVAILABLE);
+		if (running == 0)
+			(void)snprintf(note, sizeof(note), "(%s)", space->repository);
+		else
+			(void)snprintf(note, sizeof(note), "(%s, %s: starts when chosen)", space->repository, space->state);
+		(void)launch_add(screen, key, LAUNCH_CODESPACE, label, note);
+	}
+
+	/* The way back. */
+	(void)launch_add(screen, "b", LAUNCH_BACK, "Back", NULL);
+
+	/* The user's choice, until it is a codespace that answered, or back. */
+	for (;;) {
+		/* The keys until Enter, Escape, or the user giving up. */
+		error = thread_launch(choice, screen, &event);
+		if (error != 0)
+			return error;
+		if (event == LAUNCH_EVENT_CANCEL)
+			return ECANCELED;
+		if (event == LAUNCH_EVENT_ESCAPE)
+			return EAGAIN;
+
+		/* What Enter took: nothing, a name typed, or a row. */
+		launch_say(screen, NULL);
+		taken = launch_row_taken(screen);
+		if (taken == -2)
+			continue;
+		if (taken == -1) {
+			/* A codespace's name or display name typed, in any case. */
+			for (index = 0U; index < count; index++) {
+				/* The same name, or the same display name. */
+				same = thread_same_name(choice->spaces[index].name, screen->line);
+				if (!same)
+					same = thread_same_name(choice->spaces[index].display, screen->line);
+				if (same)
+					break;
+			}
+
+			/* A name gh did not list is said; one it did is its row. */
+			if (index == count) {
+				launch_say(screen, "You have no such codespace.");
+				continue;
+			}
+
+			/* The row of the name. */
+			taken = (int)index;
+		}
+
+		/* Back to the hosts. */
+		if (screen->rows[taken].kind == LAUNCH_BACK)
+			return EAGAIN;
+
+		/* The codespace's settings; when gh cannot give them, the screen says why and stays. */
+		error = thread_codespace_target(choice, gh, &choice->spaces[taken], target);
+		if (error == EAGAIN)
+			continue;
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the codespace is the target. */
+		return 0;
+	}
+}
+
+/*
+ * Finds gh and runs "gh codespace list", reading the codespaces into
+ * choice->spaces (*count of them) and gh's path into gh.  Returns 0,
+ * EAGAIN with the screen's message saying why there are none (no gh,
+ * not logged in, gh's own error, no codespace), or EPIPE when the tab
+ * closed meanwhile.
+ */
+static int
+thread_codespaces_list(
+	struct thread_choice *choice,
+	wchar_t *gh,
+	size_t gh_size,
+	unsigned *count)
+{
+	size_t size;
+	unsigned long code;
+	int failed;
+	int error;
+
+	/* gh, in PATH or where its installer puts it. */
+	*count = 0U;
+	error = thread_gh_find(gh, gh_size);
+	if (error != 0) {
+		launch_say(&choice->screen, "GitHub CLI (gh) is not installed: see https://cli.github.com.");
+		return EAGAIN;
+	}
+
+	/* What gh says; its failure is said on the screen. */
+	error = mikuterm_program_run(gh, CODESPACE_LIST_ARGUMENTS, THREAD_CODESPACE_LIST_MS, thread_stop, choice->session, choice->output, sizeof(choice->output), &size, &code);
+	failed = thread_gh_failed(choice, &choice->screen, error, code, size);
+	if (failed != 0)
+		return failed;
+
+	/* The codespaces, one a line; none is said. */
+	*count = codespace_list_read(choice->decoded, choice->spaces, LAUNCH_NAMES_MAX);
+	if (*count == 0U) {
+		launch_say(&choice->screen, "You have no codespaces: create one at https://github.com/codespaces.");
+		return EAGAIN;
+	}
+
+	/* Succeeded: the codespaces. */
+	return 0;
+}
+
+/*
+ * Finds gh: in the folders of PATH, else in the folder GitHub CLI's
+ * installer puts it in (under the Program Files folder).  Writes its path
+ * into gh (size units).  Returns 0 or ENOENT.
+ */
+static int
+thread_gh_find(
+	wchar_t *gh,
+	size_t size)
+{
+	DWORD length;
+	DWORD attributes;
+	size_t added;
+	int error;
+
+	/* In PATH. */
+	error = mikuterm_program_find(THREAD_GH_NAME, gh, size);
+	if (error == 0)
+		return 0;
+
+	/* The Program Files folder, and gh where the installer puts it. */
+	added = wcslen(THREAD_GH_INSTALLED);
+	length = GetEnvironmentVariableW(L"ProgramFiles", gh, (DWORD)size);
+	if (length == 0U || (size_t)length + added + 1U > size)
+		return ENOENT;
+	wcscat(gh, THREAD_GH_INSTALLED);
+
+	/* It must be a file there. */
+	attributes = GetFileAttributesW(gh);
+	if (attributes == INVALID_FILE_ATTRIBUTES)
+		return ENOENT;
+	if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U)
+		return ENOENT;
+
+	/* Succeeded: gh's path. */
+	return 0;
+}
+
+/*
+ * Reads how a run of gh went: when it answered (exit code 0), its text is
+ * in choice->decoded; when not, the screen says why (its first line, when
+ * it wrote one).  Returns 0, EAGAIN, or EPIPE when the tab closed.
+ */
+static int
+thread_gh_failed(
+	struct thread_choice *choice,
+	struct launch_screen *screen,
+	int error,
+	unsigned long code,
+	size_t size)
+{
+	char line[LAUNCH_STATUS_MAX - 32U];
+	int found;
+
+	/* A tab that closed wants nothing more. */
+	if (error == ECANCELED)
+		return EPIPE;
+
+	/* A gh that went away, did not end in time (it was ended), or could not be started. */
+	if (error == ENOENT) {
+		launch_say(screen, "GitHub CLI (gh) could not be found.");
+		return EAGAIN;
+	}
+	if (error == ETIMEDOUT) {
+		launch_say(screen, "gh did not answer in time.");
+		return EAGAIN;
+	}
+	if (error != 0) {
+		launch_say(screen, "gh could not be run.");
+		return EAGAIN;
+	}
+
+	/* Its text; a failure says why in its first line (for one not logged in, gh auth login). */
+	launch_output_text(choice->output, size, choice->decoded, sizeof(choice->decoded));
+	if (code != 0UL) {
+		found = launch_first_line(choice->decoded, line, sizeof(line));
+		if (found == 0)
+			(void)snprintf(screen->status, sizeof(screen->status), "gh: %s", line);
+		else
+			(void)snprintf(screen->status, sizeof(screen->status), "gh failed (exit code %lu).", code);
+		return EAGAIN;
+	}
+
+	/* Succeeded: gh answered. */
+	return 0;
+}
+
+/*
+ * Makes the target of a codespace: gh gives its ssh settings (starting
+ * it first when it is not running), whose Host is the target, with the
+ * settings kept to be read after ssh\config's and a ProxyCommand that
+ * reaches it through gh.  Returns 0, EAGAIN with the screen saying why
+ * gh gave none, or EPIPE when the tab closed.
+ */
+static int
+thread_codespace_target(
+	struct thread_choice *choice,
+	const wchar_t *gh,
+	const struct codespace_entry *space,
+	struct thread_target *target)
+{
+	char arguments[CODESPACE_ARGUMENTS_MAX];
+	char host[MIKUTERM_HOST_MAX];
+	char status[LAUNCH_STATUS_MAX];
+	size_t size;
+	size_t length;
+	unsigned long code;
+	int running;
+	int failed;
+	int error;
+
+	/* What gh is doing, said while it does it. */
+	running = strcmp(space->state, CODESPACE_AVAILABLE);
+	if (running == 0)
+		(void)snprintf(status, sizeof(status), "Asking gh for the ssh settings of %s ...", space->name);
+	else
+		(void)snprintf(status, sizeof(status), "Starting %s (this can take a few minutes) ...", space->name);
+	launch_say(&choice->codespaces, status);
+	thread_draw(choice, &choice->codespaces);
+
+	/* gh's arguments for the codespace. */
+	error = codespace_config_arguments(space->name, arguments, sizeof(arguments));
+	if (error != 0) {
+		launch_say(&choice->codespaces, "That codespace's name cannot be given to gh.");
+		return EAGAIN;
+	}
+
+	/* The settings gh gives; its failure is said on the screen. */
+	error = mikuterm_program_run(gh, arguments, THREAD_CODESPACE_START_MS, thread_stop, choice->session, choice->output, sizeof(choice->output), &size, &code);
+	failed = thread_gh_failed(choice, &choice->codespaces, error, code, size);
+	if (failed != 0)
+		return failed;
+
+	/* The settings kept, the key's path in quotes, when they fit. */
+	memset(target, 0, sizeof(*target));
+	error = codespace_config_quote(choice->decoded, target->settings, sizeof(target->settings), &length);
+	if (error != 0) {
+		memset(target, 0, sizeof(*target));
+		launch_say(&choice->codespaces, "gh's ssh settings for that codespace are too long.");
+		return EAGAIN;
+	}
+	target->settings_size = length;
+
+	/* The Host they name. */
+	error = codespace_config_host(target->settings, length, host, sizeof(host));
+	if (error != 0) {
+		memset(target, 0, sizeof(*target));
+		launch_say(&choice->codespaces, "gh gave no ssh settings for that codespace.");
+		return EAGAIN;
+	}
+
+	/* The target: the Host, and the ProxyCommand through gh. */
+	(void)snprintf(target->host, sizeof(target->host), "%s", host);
+	error = thread_codespace_proxy(target->settings, length, host, gh, space->name, target);
+	if (error != 0) {
+		memset(target, 0, sizeof(*target));
+		launch_say(&choice->codespaces, "gh's ssh settings for that codespace could not be read.");
+		return EAGAIN;
+	}
+
+	/* The tab's title: the codespace's display name, or its name. */
+	if (space->display[0] != '\0')
+		(void)snprintf(target->title, sizeof(target->title), "%s", space->display);
+	else
+		(void)snprintf(target->title, sizeof(target->title), "%s", space->name);
+
+	/* Succeeded: the codespace is the target. */
+	launch_say(&choice->codespaces, NULL);
+	return 0;
+}
+
+/*
+ * Makes the ProxyCommand setting of a codespace (target->proxy): gh's
+ * own command, "gh codespace ssh -c NAME --stdio -- -i KEY", with the
+ * key gh's settings name and the paths in quotes.  Returns 0, EINVAL
+ * when the settings cannot be read or the paths cannot be quoted, or
+ * ENOMEM.
+ */
+static int
+thread_codespace_proxy(
+	const char *settings,
+	size_t size,
+	const char *host,
+	const wchar_t *gh,
+	const char *name,
+	struct thread_target *target)
+{
+	struct ssh_config *config;
+	char error_text[SSH_CONFIG_ERROR_MAX];
+	char gh_path[MIKUTERM_PATH_MAX];
+	char command[SSH_CONFIG_COMMAND_MAX];
+	const char *identity;
+	int error;
+
+	/* gh's path in UTF-8. */
+	error = thread_local_name(gh, gh_path, sizeof(gh_path));
+	if (error != 0)
+		return EINVAL;
+
+	/* The settings for the Host, for the key they name. */
+	config = malloc(sizeof(*config));
+	if (config == NULL)
+		return ENOMEM;
+	ssh_config_init(config);
+	error = ssh_config_parse(config, settings, size, host, error_text);
+	if (error != 0) {
+		free(config);
+		return EINVAL;
+	}
+
+	/* The command, with the first key named (none: gh chooses). */
+	identity = NULL;
+	if (config->identity_count != 0U)
+		identity = config->identity[0];
+	error = codespace_proxy_command(gh_path, name, identity, command, sizeof(command));
+	free(config);
+	if (error != 0)
+		return EINVAL;
+
+	/* Succeeded: the setting, as a line of its own. */
+	(void)snprintf(target->proxy, sizeof(target->proxy), "%s%s", THREAD_PROXY_KEYWORD, command);
+	return 0;
+}
+#endif
+
 /* Tells whether two names are the same in any case of the ASCII letters (1) or not (0). */
 static int
 thread_same_name(
@@ -1314,12 +1757,18 @@ thread_attempt(
 		return THREAD_FAILED;
 	}
 
-	/* The tab's title is the host, and where it goes is said. */
-	(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s port %u ...\r\n", link->target->title, link->host_name, (unsigned)link->config.port);
+	/* The tab's title is the host, and where it goes is said (through the ProxyCommand when the host has one). */
+	if (link->config.proxy_command[0] != '\0')
+		(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s through ProxyCommand ...\r\n", link->target->title, link->host_name);
+	else
+		(void)snprintf(line, sizeof(line), "\033]2;%s\007Connecting to %s port %u ...\r\n", link->target->title, link->host_name, (unsigned)link->config.port);
 	session_say(session, line);
 
-	/* The connection. */
-	status = thread_dial(link);
+	/* The connection: the host's socket, or the ProxyCommand's. */
+	if (link->config.proxy_command[0] != '\0')
+		status = thread_dial_proxy(link);
+	else
+		status = thread_dial(link);
 	if (status != THREAD_DONE) {
 		ssh_buf_free(&link->command);
 		return status;
@@ -1329,7 +1778,7 @@ thread_attempt(
 	count = 0U;
 	error = thread_identities(link, identities, &count);
 	if (error != 0) {
-		kl_socket_close(link->socket);
+		thread_hang_up(link);
 		ssh_buf_free(&link->command);
 		(void)snprintf(link->reason, sizeof(link->reason), "The keys could not be read (%s).", thread_error_text(error));
 		return THREAD_FAILED;
@@ -1377,7 +1826,7 @@ thread_attempt(
 	thread_identities_free(identities, count);
 	ssh_buf_free(&link->command);
 	if (error != 0) {
-		kl_socket_close(link->socket);
+		thread_hang_up(link);
 		(void)snprintf(link->reason, sizeof(link->reason), "The connection could not start (%s).", thread_error_text(error));
 		return THREAD_FAILED;
 	}
@@ -1387,8 +1836,7 @@ thread_attempt(
 	if (error != 0) {
 		ssh_engine_close(link->engine);
 		link->engine = NULL;
-		kl_socket_close(link->socket);
-		link->socket = NULL;
+		thread_hang_up(link);
 		(void)snprintf(link->reason, sizeof(link->reason), "The connection could not start (%s).", thread_error_text(error));
 		return THREAD_FAILED;
 	}
@@ -1400,8 +1848,11 @@ thread_attempt(
 	thread_forwards_close(link);
 	ssh_engine_close(link->engine);
 	link->engine = NULL;
-	kl_socket_close(link->socket);
-	link->socket = NULL;
+
+	/* A failure through a ProxyCommand says what the command said; then the connection goes. */
+	if (status == THREAD_FAILED)
+		thread_proxy_said(link);
+	thread_hang_up(link);
 
 	/* Reports how it ended. */
 	return status;
@@ -1446,6 +1897,16 @@ thread_settings(
 	/* A file that cannot be read gives the reason. */
 	if (error != 0) {
 		(void)snprintf(link->reason, sizeof(link->reason), "%s: %s", config, error_text);
+		return THREAD_FAILED;
+	}
+
+	/* A codespace's ProxyCommand, then the settings gh gave for it (what ssh\config said wins). */
+	if (link->target->proxy[0] != '\0')
+		error = ssh_config_option(&link->config, link->target->proxy, error_text);
+	if (error == 0 && link->target->settings_size != 0U)
+		error = ssh_config_parse(&link->config, link->target->settings, link->target->settings_size, link->target->host, error_text);
+	if (error != 0) {
+		(void)snprintf(link->reason, sizeof(link->reason), "GitHub Codespaces: %s", error_text);
 		return THREAD_FAILED;
 	}
 
@@ -1607,6 +2068,132 @@ thread_wait_connected(
 
 	/* Succeeded: connected. */
 	return 0;
+}
+
+/*
+ * Connects through the host's ProxyCommand: its %-tokens put in, the
+ * command started without a shell (proxy.c), and the socket its relays
+ * give is the connection.  Returns THREAD_DONE with link->socket and
+ * link->proxy, or THREAD_FAILED with the reason.
+ */
+static int
+thread_dial_proxy(
+	struct thread_link *link)
+{
+#ifdef _WIN32
+	struct proxy_command_tokens tokens;
+	char error_text[PROXY_ERROR_MAX];
+	char *command;
+	int error;
+
+	/* The values of the tokens: the name connected to, the name given, the port and the user. */
+	tokens.host_name = link->host_name;
+	tokens.host = link->target->host;
+	tokens.port = link->config.port;
+	tokens.user = link->config.user;
+
+	/* The command with its tokens put in. */
+	command = malloc(SSH_CONFIG_COMMAND_MAX * 2U);
+	if (command == NULL) {
+		(void)snprintf(link->reason, sizeof(link->reason), "ProxyCommand: %s", thread_error_text(ENOMEM));
+		return THREAD_FAILED;
+	}
+	error = proxy_command_expand(link->config.proxy_command, &tokens, command, SSH_CONFIG_COMMAND_MAX * 2U, error_text, sizeof(error_text));
+	if (error != 0) {
+		free(command);
+		if (error_text[0] == '\0')
+			(void)snprintf(error_text, sizeof(error_text), "ProxyCommand: the command is too long");
+		(void)snprintf(link->reason, sizeof(link->reason), "%s", error_text);
+		return THREAD_FAILED;
+	}
+
+	/* The command started, and its connection. */
+	error = proxy_start(command, &link->proxy, &link->socket, error_text, sizeof(error_text));
+	free(command);
+	if (error != 0) {
+		(void)snprintf(link->reason, sizeof(link->reason), "%s", error_text);
+		return THREAD_FAILED;
+	}
+
+	/* Succeeded: the ProxyCommand's connection. */
+	return THREAD_DONE;
+#else
+	/* Only the Windows program starts a ProxyCommand. */
+	(void)snprintf(link->reason, sizeof(link->reason), "ProxyCommand is not supported here");
+	return THREAD_FAILED;
+#endif
+}
+
+/*
+ * Says in the tab what the ProxyCommand wrote on its errors (the last of
+ * it), each line ending as the tab's do, when the connection went
+ * through one and it wrote something.
+ */
+static void
+thread_proxy_said(
+	struct thread_link *link)
+{
+#ifdef _WIN32
+	char text[PROXY_ERRORS_MAX + 1U];
+	const char *start;
+	const char *end;
+	char line[PROXY_ERRORS_MAX + 3U];
+	size_t length;
+
+	/* A connection through no command, or a command that said nothing. */
+	if (link->proxy == NULL)
+		return;
+	proxy_errors(link->proxy, text, sizeof(text));
+	if (text[0] == '\0')
+		return;
+
+	/* Each line, without its CR, on a line of the tab. */
+	start = text;
+	while (*start != '\0') {
+		/* The line's end. */
+		end = strchr(start, '\n');
+		if (end == NULL)
+			end = start + strlen(start);
+		length = (size_t)(end - start);
+		if (length != 0U && start[length - 1U] == '\r')
+			length--;
+
+		/* The line, a CR and an LF after it. */
+		memcpy(line, start, length);
+		line[length] = '\r';
+		line[length + 1U] = '\n';
+		line[length + 2U] = '\0';
+		session_say(link->session, line);
+
+		/* The next line. */
+		start = end;
+		if (*start == '\n')
+			start++;
+	}
+#else
+	/* Only the Windows program starts a ProxyCommand: there is nothing it said. */
+	(void)link;
+#endif
+}
+
+/*
+ * Lets the connection go: the socket closes, then the ProxyCommand (when
+ * it went through one) and every program it started end.
+ */
+static void
+thread_hang_up(
+	struct thread_link *link)
+{
+	/* The socket first: its end is what ends the command's input. */
+	if (link->socket != NULL)
+		kl_socket_close(link->socket);
+	link->socket = NULL;
+
+	/* The command and its relays (only the Windows program starts one). */
+#ifdef _WIN32
+	proxy_stop(link->proxy);
+#endif
+	link->proxy = NULL;
 }
 
 /*
@@ -2053,10 +2640,14 @@ thread_host_ask(
 	int other_types;
 	int error;
 
-	/* The host as known_hosts names it, and the address reached as OpenSSH shows it. */
-	error = mikuterm_address_name(&link->address, link->config.port, address, sizeof(address));
-	if (error != 0)
-		(void)snprintf(address, sizeof(address), "%s", link->known_name);
+	/* The host as known_hosts names it, and the address reached as OpenSSH shows it (none through a ProxyCommand). */
+	if (link->proxy != NULL) {
+		(void)snprintf(address, sizeof(address), "%s", THREAD_PROXY_ADDRESS);
+	} else {
+		error = mikuterm_address_name(&link->address, link->config.port, address, sizeof(address));
+		if (error != 0)
+			(void)snprintf(address, sizeof(address), "%s", link->known_name);
+	}
 
 	/* Whether the host is known only by keys of other types. */
 	other_types = 0;
