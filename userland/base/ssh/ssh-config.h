@@ -225,9 +225,9 @@ struct ssh_config {
 	int exit_on_forward_failure;
 	int clear_all_forwardings;
 	int session_type_none;
-	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
-	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
 	unsigned forward_count;
+	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
+	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
 };
 
 /* Fills config with sshd's defaults (host_key_count 0: the default key is added by sshd_config_finish when no HostKey line gave one). */

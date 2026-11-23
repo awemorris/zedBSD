@@ -9,6 +9,7 @@
  * The configuration files of sshd and ssh.
  */
 
+#include <stddef.h>
 #include <string.h>
 
 #include "ssh-channel.h"
@@ -59,6 +60,15 @@
 
 /* The most digits a port may be written with. */
 #define CONFIG_PORT_DIGITS_MAX	5U
+
+/*
+ * The part of struct ssh_config a value that is not kept is checked
+ * against: every field before forward_count.  The forwardings are added
+ * apart (ssh_value never reads or writes them) and RemoteCommand is only
+ * written, so a line that is not kept need not copy their 20 KiB each
+ * time (a long file read once for each of its hosts).
+ */
+#define CONFIG_SSH_SCRATCH_SIZE	offsetof(struct ssh_config, forward_count)
 
 /* The word that stands for any host or any port in PermitOpen and PermitListen. */
 #define CONFIG_PERMIT_WILDCARD	"*"
@@ -2609,7 +2619,7 @@ ssh_config_apply(
 		keep = 0;
 	target = state->config;
 	if (!keep) {
-		memcpy(&scratch, state->config, sizeof(scratch));
+		memcpy(&scratch, state->config, CONFIG_SSH_SCRATCH_SIZE);
 		target = &scratch;
 	}
 
