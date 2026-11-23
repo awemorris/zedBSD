@@ -42,7 +42,7 @@ permissions are checked by the compositor/GPU layers. Revision two adds
 `set_acquire_fence(surface, fd, generation_hi, generation_lo)`: a kernel fence
 and its payload generation that the surface's next commit waits for.
 
-[API-PROVENANCE.md](../keiland/wayland/API-PROVENANCE.md) records pinned
+[API-PROVENANCE.md](API-PROVENANCE.md) records pinned
 upstream interface facts, hashes, selected scope, limitations and notices.
 Selected core descriptions are wl_display/registry/callback/region/buffer v1,
 wl_compositor/surface/output v4 and wl_seat/pointer/keyboard/touch v5 (wl_touch
