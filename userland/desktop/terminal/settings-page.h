@@ -157,6 +157,7 @@ int terminal_page_draw(struct terminal_window *window, const struct terminal_pag
 int terminal_page_moving(void);
 void terminal_page_paste(const char *text, size_t length);
 size_t terminal_page_copy_text(char *text, size_t size);
+int terminal_page_copy_emptied(void);
 void terminal_page_shown(struct terminal_window *window);
 void terminal_page_close(void);
 
