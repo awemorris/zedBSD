@@ -221,6 +221,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	terminfo-extra \
 	terminfo \
 	test \
+	thermal \
 	tic \
 	time \
 	timeout \
