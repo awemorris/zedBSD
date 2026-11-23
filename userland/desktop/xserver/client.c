@@ -87,11 +87,10 @@ x11server_create(
 	if (options->backend == NULL)
 		return EINVAL;
 
-	/* The server, with no grab of the pointer or of the server. */
+	/* The server, with no grab of the server. */
 	server = calloc(1U, sizeof(*server));
 	if (server == NULL)
 		return ENOMEM;
-	server->grab_owner = X11_NO_CLIENT;
 	server->grabbed = X11_NO_CLIENT;
 	server->now = now;
 	server->report_ms = now;
@@ -164,10 +163,10 @@ x11server_create(
 		return error;
 	}
 
-	/* The focus follows the pointer, which is in the root window's middle. */
-	server->focus = X11_FOCUS_POINTER_ROOT;
+	/* The pointer in the root window's middle, the keyboard's map, the focus following the pointer, no grab. */
 	server->pointer_x = (int)server->width / 2;
 	server->pointer_y = (int)server->height / 2;
+	x11_input_init(server);
 
 	/* Succeeded: the server waits for clients. */
 	*result = server;
@@ -203,9 +202,10 @@ x11server_destroy(
 		server->root = NULL;
 	}
 
-	/* The resource ids and the atoms. */
+	/* The resource ids, the atoms and the passive grabs. */
 	x11_resource_fini(server);
 	x11_atoms_fini(server);
+	x11_input_fini(server);
 
 	/* Vulkan's state, after every swapchain on it, and the font. */
 	x11_vulkan_close(server->vulkan);
@@ -523,6 +523,9 @@ x11server_tick(
 	if (grabbed != X11_NO_CLIENT && server->grabbed == X11_NO_CLIENT)
 		more = 1;
 
+	/* The pointer's crossing events of the windows that changed under it. */
+	x11_input_tick(server);
+
 	/* An X owner's text in pieces starts once the owner listens. */
 	waiting = x11_selection_tick(server);
 
@@ -621,15 +624,12 @@ x11_client_close(
 	id = client->id;
 	client->id = 0U;
 
-	/* Its windows (with their surfaces), pixmaps, graphics contexts and fonts, and the selections it owned. */
+	/* Its grabs of the devices, its windows (with their surfaces), pixmaps, graphics contexts and fonts, and the selections it owned. */
+	x11_input_forget_client(server, index);
 	x11_resources_release(server, index);
 	x11_selection_forget_client(server, index);
 
-	/* Its grab of the pointer and of the server goes. */
-	if (server->grab_owner == index) {
-		server->grab_owner = X11_NO_CLIENT;
-		server->grab_window = 0U;
-	}
+	/* Its grab of the server goes. */
 	if (server->grabbed == index)
 		server->grabbed = X11_NO_CLIENT;
 

@@ -10,16 +10,20 @@
  * windows as X's input.
  *
  * A key is named by its place on the keyboard (the scan code, as an evdev
- * code) whatever the layout; the core is given the X keycode of the key.
- * The pointer's place on the root window is counted from the X window's
- * place the core gave, the buttons are X's 1 to 9 (the wheels 4 to 7), and
- * a button held captures the pointer, as X's implicit grab does.  A paste
- * or a copy (by key or by button) is noted for the clipboard's policy.
+ * code) whatever the layout; the core is given the X keycode of the key
+ * (the evdev code plus 8) and makes the characters' keysyms and the
+ * modifiers from the layout's map (layout.c).  The pointer's place on the
+ * root window is counted from the X window's place the core gave, the
+ * buttons are X's 1 to 9 (the wheels 4 to 7), and a button held captures
+ * the pointer, as X's implicit grab does; an X client's grab keeps it too.
+ * A paste or a copy (by key or by button) is noted for the clipboard's
+ * policy.
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
 #include "userland/desktop/xserver/win32/scale.h"
 
+#include <errno.h>
 #include <windowsx.h>
 
 /* The wheel's notch (WHEEL_DELTA). */
@@ -220,14 +224,14 @@ win32_input_pointer(
 		backend->copied = 1;
 	}
 
-	/* The first button down captures the pointer, the last one up lets it go (X's implicit grab). */
+	/* The first button down captures the pointer, the last one up lets it go (X's implicit grab) unless a grab keeps it. */
 	if (button != 0 && pressed) {
-		if (backend->buttons_held == 0)
+		if (backend->buttons_held == 0 && !backend->grab_capture)
 			SetCapture(surface->hwnd);
 		backend->buttons_held++;
 	} else if (button != 0 && backend->buttons_held != 0) {
 		backend->buttons_held--;
-		if (backend->buttons_held == 0)
+		if (backend->buttons_held == 0 && !backend->grab_capture)
 			ReleaseCapture();
 	}
 
@@ -236,15 +240,126 @@ win32_input_pointer(
 }
 
 /*
- * Follows the pointer out of a window.
+ * Follows the pointer out of a window: when it went to no other X window,
+ * the core hears that it left the X windows.
  */
 void
 win32_input_leave(
 	struct x11_surface *surface)
 {
-	/* The pointer is in no X window now. */
-	if (surface->backend->pointer_surface == surface)
-		surface->backend->pointer_surface = NULL;
+	struct x11_win32 *backend;
+
+	/* The pointer went into another X window first. */
+	backend = surface->backend;
+	if (backend->pointer_surface != surface)
+		return;
+
+	/* Succeeded: in no X window now. */
+	backend->pointer_surface = NULL;
+	if (backend->server != NULL)
+		x11server_backend_leave(backend->server, surface->window, 0);
+}
+
+/*
+ * Keeps the pointer's events on a surface while an X client grabs the
+ * pointer (on nonzero), or lets them go (on 0), so that a click outside
+ * the X windows reaches the grabbing client (it closes a menu).
+ */
+void
+win32_input_capture(
+	void *context,
+	struct x11_surface *surface,
+	int on)
+{
+	struct x11_win32 *backend;
+
+	/* Let go, unless a button held keeps it for its own release. */
+	backend = context;
+	if (!on) {
+		backend->grab_capture = 0;
+		if (backend->buttons_held == 0)
+			ReleaseCapture();
+		return;
+	}
+
+	/* Succeeded: captured on the surface. */
+	if (surface == NULL)
+		return;
+	backend->grab_capture = 1;
+	SetCapture(surface->hwnd);
+}
+
+/*
+ * Tells where the system's pointer is on the root window (X's pixels from
+ * the virtual screen's corner), inside an X window or not.  Returns 0, or
+ * an errno value.
+ */
+int
+win32_input_place(
+	void *context,
+	int *x,
+	int *y)
+{
+	struct x11_win32 *backend;
+	POINT point;
+	BOOL found;
+
+	/* The pointer on the screen. */
+	backend = context;
+	found = GetCursorPos(&point);
+	if (!found)
+		return EIO;
+
+	/* Succeeded: on the root window. */
+	*x = x11_win32_scale_to_x(point.x - backend->virtual_screen.left, backend->scale);
+	*y = x11_win32_scale_to_x(point.y - backend->virtual_screen.top, backend->scale);
+	return 0;
+}
+
+/*
+ * Moves the system's pointer to a place on the root window (the core asks
+ * only for a place in the asking client's own window).  Returns 0, or an
+ * errno value.
+ */
+int
+win32_input_warp(
+	void *context,
+	int x,
+	int y)
+{
+	struct x11_win32 *backend;
+	BOOL moved;
+	int screen_x;
+	int screen_y;
+
+	/* The place on the screen. */
+	backend = context;
+	screen_x = backend->virtual_screen.left + x11_win32_scale_to_screen(x, backend->scale);
+	screen_y = backend->virtual_screen.top + x11_win32_scale_to_screen(y, backend->scale);
+
+	/* Succeeded: moved there. */
+	moved = SetCursorPos(screen_x, screen_y);
+	if (!moved)
+		return EIO;
+	return 0;
+}
+
+/*
+ * Rings the system's bell (the volume is the system's own; a silent bell
+ * at -100 percent is not rung).
+ */
+void
+win32_input_bell(
+	void *context,
+	int percent)
+{
+	/* A bell at no volume. */
+	(void)context;
+	if (percent <= -100)
+		return;
+
+	/* Succeeded: the system's default sound. */
+	MessageBeep(MB_OK);
 }
 
 /*
@@ -314,12 +429,10 @@ input_note_action(
 }
 
 /*
- * Sends a key to the core.
- *
- * The core's keyboard model takes the keycode of the character the key
- * types (US) in the Shift and Caps Lock states; the release sends the
- * keycode its press sent.  The modifier bits held go with each event, and
- * Caps Lock toggles on its press.
+ * Sends a key to the core by its place on the keyboard: the keycode is
+ * the evdev code plus 8, and the core makes the state and the keysyms.
+ * The backend keeps which keys are held, and its own Shift, Ctrl and Alt
+ * bits.
  */
 static void
 input_send_key(
@@ -328,44 +441,13 @@ input_send_key(
 	int pressed,
 	DWORD time)
 {
-	uint8_t keycode;
-	uint16_t state;
-	int shifted;
-
-	/* The key is held or not from now on; the state sent is the one before it. */
+	/* The key is held or not from now on. */
 	backend->held[code] = (uint8_t)pressed;
-	state = backend->modifiers;
-	if (backend->caps_lock)
-		state |= WIN32_LOCK_MASK;
 	input_modifier(backend, code, pressed);
 
-	/* Caps Lock toggles on its press and types nothing. */
-	if (code == WIN32_KEY_CAPSLOCK) {
-		if (pressed)
-			backend->caps_lock = !backend->caps_lock;
-		return;
-	}
-
-	/* A release sends the keycode its press sent. */
-	if (!pressed) {
-		keycode = backend->sent[code];
-		backend->sent[code] = 0;
-		if (keycode != 0 && backend->server != NULL)
-			x11server_backend_key(backend->server, keycode, 0, (uint32_t)time, state);
-		return;
-	}
-
-	/* A press: the keycode in the current Shift and Caps Lock states (0: the key types nothing). */
-	shifted = 0;
-	if ((state & X11_SHIFT_MASK) != 0)
-		shifted = 1;
-	keycode = x11_keymap_keycode((uint16_t)code, shifted, backend->caps_lock);
-	backend->sent[code] = keycode;
-	if (keycode == 0 || backend->server == NULL)
-		return;
-
-	/* Succeeded: the core hears the press. */
-	x11server_backend_key(backend->server, keycode, 1, (uint32_t)time, state);
+	/* Succeeded: the core hears it. */
+	if (backend->server != NULL)
+		x11server_backend_key(backend->server, (uint8_t)(code + X11_WIN32_KEYCODE_FIRST), pressed, (uint32_t)time);
 }
 
 /* Keeps X's modifier bits as the Shift, Ctrl and Alt keys go down and up (AltGr is not Alt). */

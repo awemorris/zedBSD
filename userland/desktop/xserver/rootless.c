@@ -146,28 +146,19 @@ x11_rootless_closing(
 
 /*
  * Sends the pointer motion held back, if any: only the last of a burst of
- * moves reaches the client.
+ * moves reaches the clients.
  */
 void
 x11_rootless_flush_motion(
 	struct x11server *server)
 {
-	int x;
-	int y;
-
 	/* Nothing is held. */
 	if (!server->motion_pending)
 		return;
 	server->motion_pending = 0;
 
-	/* Sent from where the pointer was then, with the buttons held then. */
-	x = server->pointer_x;
-	y = server->pointer_y;
-	server->pointer_x = server->motion_x;
-	server->pointer_y = server->motion_y;
-	x11_event_motion(server, server->motion_time, (uint16_t)(server->key_state | ((unsigned)server->motion_buttons << 8)));
-	server->pointer_x = x;
-	server->pointer_y = y;
+	/* Succeeded: the input hears the move. */
+	x11_input_motion(server, server->motion_time, server->motion_x, server->motion_y);
 }
 
 /*
@@ -510,79 +501,74 @@ rootless_compose(
 }
 
 /*
- * Takes a key from the backend: pressed or released, sent from the focus
- * window (or the window under the pointer inside it).
+ * Takes a key from the backend: its keycode (its evdev code plus 8),
+ * pressed or released.
  */
 void
 x11server_backend_key(
 	struct x11server *server,
 	uint8_t keycode,
 	int pressed,
-	uint32_t time,
-	uint16_t state)
+	uint32_t time)
 {
-	/* The modifiers held are the keyboard's state from now on. */
-	server->key_state = state;
-	if (keycode == 0U)
-		return;
+	/* The move held back goes first, so the key is seen where the pointer is. */
+	x11_rootless_flush_motion(server);
 
-	/* The press or the release, with the buttons held. */
-	x11_event_key(server, keycode, pressed, time, (uint16_t)(state | ((unsigned)server->buttons << 8)));
+	/* Succeeded: the input handles it. */
+	x11_input_key(server, keycode, pressed, time);
 }
 
 /*
- * Takes the pointer from the backend: where it is, and a button that
- * changed.  A press that reaches a client grabs the pointer for it until
- * every button is up; it focuses and raises the top-level window under
- * the pointer (the rootless server is its window manager).  Moves between
- * buttons are held back so only the last of a burst is sent.
+ * Takes the keyboard's map from the backend (the user's layout): the
+ * clients hear of it when it changed.
+ */
+void
+x11server_backend_keymap(
+	struct x11server *server,
+	const struct x11_keymap *keymap)
+{
+	/* Succeeded: the input's map. */
+	x11_input_keymap(server, keymap);
+}
+
+/*
+ * Takes the pointer from the backend: where it is, and a physical button
+ * that changed.  A press focuses and raises the top-level window under
+ * the pointer first (the rootless server is its window manager).  Moves
+ * between buttons are held back so only the last of a burst is sent.
  */
 void
 x11server_backend_pointer(
 	struct x11server *server,
 	const struct x11_pointer_frame *frame)
 {
+	struct x11_window *under;
 	struct x11_window *top;
-	uint16_t state;
-
-	/* A button's change sends the move held back first, so the order holds. */
-	server->buttons = frame->buttons_before;
-	if (frame->button != 0U)
-		x11_rootless_flush_motion(server);
-
-	/* Where the pointer is. */
-	server->pointer_x = frame->x;
-	server->pointer_y = frame->y;
 
 	/* A move alone is held back (the newest replaces an older one). */
 	if (frame->button == 0U) {
 		server->motion_pending = 1;
 		server->motion_time = frame->time;
-		server->motion_x = server->pointer_x;
-		server->motion_y = server->pointer_y;
-		server->motion_buttons = server->buttons;
+		server->motion_x = frame->x;
+		server->motion_y = frame->y;
 		return;
 	}
 
-	/* The button's press or release, with the buttons held before it. */
-	state = (uint16_t)(server->key_state | ((unsigned)server->buttons << 8));
-	x11_event_button(server, frame->button, frame->pressed, frame->time, state);
-	server->buttons = frame->buttons_after;
+	/* A button's change sends the move held back first, so the order holds. */
+	x11_rootless_flush_motion(server);
 
-	/* A press focuses and raises the top-level window under the pointer. */
+	/* A press raises the top-level window under the pointer and gives it the focus. */
 	if (frame->pressed) {
-		top = x11_window_top_level(x11_window_at(server, server->pointer_x, server->pointer_y));
+		under = x11_window_at(server, frame->x, frame->y);
+		top = x11_window_top_level(under);
 		if (top != server->root) {
 			x11_window_raise(server, top);
-			server->focus = top->id;
+			x11_input_focus_top_level(server, top, frame->time);
 		}
 	}
 
-	/* With every button up, the grab ends. */
-	if (server->buttons == 0U) {
-		server->grab_owner = X11_NO_CLIENT;
-		server->grab_window = 0U;
-	}
+	/* Succeeded: the input hears the button. */
+	x11_input_button(server, frame->button, frame->pressed, frame->time, frame->x, frame->y);
 }
 
 /*
@@ -603,9 +589,38 @@ x11server_backend_enter(
 		return;
 	x11_window_raise(server, entered);
 
-	/* The keyboard's focus. */
+	/* Succeeded: the keyboard's focus. */
 	if (keyboard)
-		server->focus = window;
+		x11_input_focus_top_level(server, entered, server->now);
+}
+
+/*
+ * Hears that the pointer or the keyboard left a surface for the system's
+ * own windows: the pointer is outside the X windows, or no X window has
+ * the focus when it was in that surface's window.
+ */
+void
+x11server_backend_leave(
+	struct x11server *server,
+	uint32_t window,
+	int keyboard)
+{
+	struct x11_window *left;
+
+	/* The X window. */
+	left = x11_window_find(server, window);
+	if (left == NULL || left == server->root)
+		return;
+
+	/* The keyboard: the focus leaves the X windows when it was in this one. */
+	if (keyboard) {
+		x11_input_focus_lost(server, left, server->now);
+		return;
+	}
+
+	/* Succeeded: the pointer is outside the X windows (after the move held back). */
+	x11_rootless_flush_motion(server);
+	x11_input_leave(server, server->now);
 }
 
 /*

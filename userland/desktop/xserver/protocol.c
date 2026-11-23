@@ -7,12 +7,12 @@
 
 /*
  * The X11 core protocol's dispatch, the replies and errors it sends, and
- * the requests of fonts, pixmaps, graphics contexts, drawing, the
- * keyboard and pointer, the server grab and the core's extensions.
+ * the requests of fonts, pixmaps, graphics contexts, drawing, the server
+ * grab and the core's extensions.
  *
  * Wire layouts follow the public X11 core protocol.  The window, atom,
- * property, selection and event requests are answered by window.c,
- * property.c, selection.c and event.c.  Requests the server does not know
+ * property, selection, event and input requests are answered by
+ * window.c, property.c, selection.c, event.c and input.c.  Requests the server does not know
  * are refused with BadRequest, and each request is checked for its length
  * and its values, answering the protocol's error when one is wrong.
  */
@@ -50,12 +50,25 @@
 #define REQUEST_GET_SELECTION_OWNER	23U
 #define REQUEST_CONVERT_SELECTION	24U
 #define REQUEST_SEND_EVENT		25U
+#define REQUEST_GRAB_POINTER		26U
+#define REQUEST_UNGRAB_POINTER		27U
+#define REQUEST_GRAB_BUTTON		28U
+#define REQUEST_UNGRAB_BUTTON		29U
+#define REQUEST_CHANGE_ACTIVE_POINTER_GRAB 30U
+#define REQUEST_GRAB_KEYBOARD		31U
+#define REQUEST_UNGRAB_KEYBOARD		32U
+#define REQUEST_GRAB_KEY		33U
+#define REQUEST_UNGRAB_KEY		34U
+#define REQUEST_ALLOW_EVENTS		35U
 #define REQUEST_GRAB_SERVER		36U
 #define REQUEST_UNGRAB_SERVER		37U
 #define REQUEST_QUERY_POINTER		38U
+#define REQUEST_GET_MOTION_EVENTS	39U
 #define REQUEST_TRANSLATE_COORDINATES	40U
+#define REQUEST_WARP_POINTER		41U
 #define REQUEST_SET_INPUT_FOCUS		42U
 #define REQUEST_GET_INPUT_FOCUS		43U
+#define REQUEST_QUERY_KEYMAP		44U
 #define REQUEST_OPEN_FONT		45U
 #define REQUEST_CLOSE_FONT		46U
 #define REQUEST_QUERY_FONT		47U
@@ -73,9 +86,17 @@
 #define REQUEST_QUERY_BEST_SIZE		97U
 #define REQUEST_QUERY_EXTENSION		98U
 #define REQUEST_LIST_EXTENSIONS		99U
+#define REQUEST_CHANGE_KEYBOARD_MAPPING	100U
 #define REQUEST_GET_KEYBOARD_MAPPING	101U
+#define REQUEST_CHANGE_KEYBOARD_CONTROL	102U
+#define REQUEST_GET_KEYBOARD_CONTROL	103U
+#define REQUEST_BELL			104U
+#define REQUEST_CHANGE_POINTER_CONTROL	105U
+#define REQUEST_GET_POINTER_CONTROL	106U
 #define REQUEST_ROTATE_PROPERTIES	114U
+#define REQUEST_SET_POINTER_MAPPING	116U
 #define REQUEST_GET_POINTER_MAPPING	117U
+#define REQUEST_SET_MODIFIER_MAPPING	118U
 #define REQUEST_GET_MODIFIER_MAPPING	119U
 #define REQUEST_NO_OPERATION		127U
 
@@ -95,8 +116,7 @@
 #define BEST_SIZE_STIPPLE		2U
 #define BEST_CURSOR_MAX			64U
 
-/* SetInputFocus's largest revert-to, and PolyLine's coordinate modes. */
-#define REVERT_TO_MAX			2U
+/* PolyLine's coordinate modes. */
 #define COORDINATES_PREVIOUS		1U
 
 /* The pixmap depths a client may make: bitmaps and the screen's. */
@@ -118,9 +138,6 @@
 /* The extensions ListExtensions names. */
 #define EXTENSION_NAMES_MAX		3U
 
-/* The most keycodes one GetKeyboardMapping answers. */
-#define KEYBOARD_MAPPING_MAX		248U
-
 /*
  * What a drawing request draws into: the pixels and their size, and the
  * window when it is one (NULL for a pixmap).  The root window has no
@@ -135,9 +152,6 @@ struct protocol_target {
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_grab_server(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_query_pointer(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_set_input_focus(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_get_input_focus(struct x11server *server, unsigned index, size_t length);
 static unsigned protocol_open_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_close_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_font(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -151,9 +165,6 @@ static unsigned protocol_copy_area(struct x11server *server, unsigned index, con
 static unsigned protocol_poly_line(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_poly_fill_rectangle(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_image_text(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_get_keyboard_mapping(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
-static unsigned protocol_get_pointer_mapping(struct x11server *server, unsigned index, size_t length);
-static unsigned protocol_get_modifier_mapping(struct x11server *server, unsigned index, size_t length);
 static unsigned protocol_query_best_size(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_put_image_rgb24(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
@@ -541,21 +552,41 @@ protocol_dispatch(
 	case REQUEST_SEND_EVENT:
 		code = x11_request_send_event(server, index, request, length);
 		break;
+	case REQUEST_GRAB_POINTER:
+	case REQUEST_UNGRAB_POINTER:
+	case REQUEST_GRAB_BUTTON:
+	case REQUEST_UNGRAB_BUTTON:
+	case REQUEST_CHANGE_ACTIVE_POINTER_GRAB:
+	case REQUEST_GRAB_KEYBOARD:
+	case REQUEST_UNGRAB_KEYBOARD:
+	case REQUEST_GRAB_KEY:
+	case REQUEST_UNGRAB_KEY:
+	case REQUEST_ALLOW_EVENTS:
+	case REQUEST_QUERY_POINTER:
+	case REQUEST_GET_MOTION_EVENTS:
+	case REQUEST_WARP_POINTER:
+	case REQUEST_SET_INPUT_FOCUS:
+	case REQUEST_GET_INPUT_FOCUS:
+	case REQUEST_QUERY_KEYMAP:
+	case REQUEST_CHANGE_KEYBOARD_MAPPING:
+	case REQUEST_GET_KEYBOARD_MAPPING:
+	case REQUEST_CHANGE_KEYBOARD_CONTROL:
+	case REQUEST_GET_KEYBOARD_CONTROL:
+	case REQUEST_BELL:
+	case REQUEST_CHANGE_POINTER_CONTROL:
+	case REQUEST_GET_POINTER_CONTROL:
+	case REQUEST_SET_POINTER_MAPPING:
+	case REQUEST_GET_POINTER_MAPPING:
+	case REQUEST_SET_MODIFIER_MAPPING:
+	case REQUEST_GET_MODIFIER_MAPPING:
+		code = x11_input_request(server, index, request, length);
+		break;
 	case REQUEST_GRAB_SERVER:
 	case REQUEST_UNGRAB_SERVER:
 		code = protocol_grab_server(server, index, request, length);
 		break;
-	case REQUEST_QUERY_POINTER:
-		code = protocol_query_pointer(server, index, request, length);
-		break;
 	case REQUEST_TRANSLATE_COORDINATES:
 		code = x11_request_translate_coordinates(server, index, request, length);
-		break;
-	case REQUEST_SET_INPUT_FOCUS:
-		code = protocol_set_input_focus(server, index, request, length);
-		break;
-	case REQUEST_GET_INPUT_FOCUS:
-		code = protocol_get_input_focus(server, index, length);
 		break;
 	case REQUEST_OPEN_FONT:
 		code = protocol_open_font(server, index, request, length);
@@ -606,17 +637,8 @@ protocol_dispatch(
 	case REQUEST_LIST_EXTENSIONS:
 		code = protocol_list_extensions(server, client, length);
 		break;
-	case REQUEST_GET_KEYBOARD_MAPPING:
-		code = protocol_get_keyboard_mapping(server, index, request, length);
-		break;
 	case REQUEST_ROTATE_PROPERTIES:
 		code = x11_request_rotate_properties(server, index, request, length);
-		break;
-	case REQUEST_GET_POINTER_MAPPING:
-		code = protocol_get_pointer_mapping(server, index, length);
-		break;
-	case REQUEST_GET_MODIFIER_MAPPING:
-		code = protocol_get_modifier_mapping(server, index, length);
 		break;
 	case REQUEST_NO_OPERATION:
 		code = 0U;
@@ -668,108 +690,6 @@ protocol_grab_server(
 	/* Succeeded: UngrabServer lets the others go on (another client's grab is not its to end). */
 	if (server->grabbed == index)
 		server->grabbed = X11_NO_CLIENT;
-	return 0U;
-}
-
-/* QueryPointer: the pointer on the root window and in a window, the window's child it is in, and the modifiers and buttons. */
-static unsigned
-protocol_query_pointer(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_client *client;
-	struct x11_window *window;
-	struct x11_window *under;
-	uint8_t reply[32];
-	uint32_t child;
-	int msb;
-
-	/* The window. */
-	client = &server->clients[index];
-	msb = client->order;
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	window = x11_window_find(server, x11_read32(request + 4, msb));
-	if (window == NULL)
-		return X11_BAD_WINDOW;
-
-	/* The window's child the pointer is in (None when it is in none). */
-	under = x11_window_at(server, server->pointer_x, server->pointer_y);
-	while (under != NULL && under->parent != window)
-		under = under->parent;
-	child = 0U;
-	if (under != NULL)
-		child = under->id;
-
-	/* Succeeded: on this screen, the places, and the state. */
-	memset(reply, 0, sizeof(reply));
-	reply[1] = 1U;
-	x11_write32(reply + 8, X11_ROOT_XID, msb);
-	x11_write32(reply + 12, child, msb);
-	x11_write16(reply + 16, (uint16_t)server->pointer_x, msb);
-	x11_write16(reply + 18, (uint16_t)server->pointer_y, msb);
-	x11_write16(reply + 20, (uint16_t)(server->pointer_x - window->x), msb);
-	x11_write16(reply + 22, (uint16_t)(server->pointer_y - window->y), msb);
-	x11_write16(reply + 24, (uint16_t)(server->key_state | ((unsigned)server->buttons << 8)), msb);
-	x11_reply(server, client, reply, sizeof(reply));
-	return 0U;
-}
-
-/* SetInputFocus: the keyboard's focus to a viewable window, PointerRoot or None. */
-static unsigned
-protocol_set_input_focus(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	struct x11_window *window;
-	uint32_t focus;
-	int viewable;
-
-	/* The revert-to and the focus. */
-	if (length != 12U)
-		return X11_BAD_LENGTH;
-	if (request[1] > REVERT_TO_MAX)
-		return X11_BAD_VALUE;
-	focus = x11_read32(request + 4, server->clients[index].order);
-
-	/* A window must be there and be seen. */
-	if (focus != X11_FOCUS_NONE && focus != X11_FOCUS_POINTER_ROOT) {
-		window = x11_window_find(server, focus);
-		if (window == NULL)
-			return X11_BAD_WINDOW;
-		viewable = x11_window_viewable(window);
-		if (!viewable)
-			return X11_BAD_MATCH;
-	}
-
-	/* Succeeded: the focus. */
-	server->focus = focus;
-	return 0U;
-}
-
-/* GetInputFocus: the focus (a window, PointerRoot or None), no revert. */
-static unsigned
-protocol_get_input_focus(
-	struct x11server *server,
-	unsigned index,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[32];
-
-	/* The header alone. */
-	client = &server->clients[index];
-	if (length != 4U)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: the reply. */
-	memset(reply, 0, sizeof(reply));
-	x11_write32(reply + 8, server->focus, client->order);
-	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }
 
@@ -1378,91 +1298,6 @@ protocol_image_text(
 	/* Succeeded: drawn into a window (text into a pixmap is not drawn yet). */
 	if (target.window != NULL && target.pixels != NULL)
 		x11_draw_text(server, target.window, gc, (int16_t)x11_read16(request + 12, msb), (int16_t)x11_read16(request + 14, msb), request + 16, count, wide);
-	return 0U;
-}
-
-/* GetKeyboardMapping: one keysym for each keycode asked for. */
-static unsigned
-protocol_get_keyboard_mapping(
-	struct x11server *server,
-	unsigned index,
-	const uint8_t *request,
-	size_t length)
-{
-	uint8_t reply[32 + 4 * KEYBOARD_MAPPING_MAX];
-	struct x11_client *client;
-	uint32_t keycode;
-	unsigned count;
-	unsigned slot;
-
-	/* The first keycode and the count, within the keyboard's keycodes. */
-	client = &server->clients[index];
-	if (length != 8U)
-		return X11_BAD_LENGTH;
-	count = request[5];
-	if (request[4] < KEYCODE_MIN || (unsigned)request[4] + count - 1U > KEYCODE_MAX || count == 0U)
-		return X11_BAD_VALUE;
-
-	/* One keysym a keycode. */
-	memset(reply, 0, sizeof(reply));
-	reply[1] = 1U;
-	for (slot = 0U; slot < count; slot++) {
-		keycode = (uint32_t)request[4] + slot;
-		x11_write32(reply + 32 + slot * 4U, x11_keymap_keysym(keycode), client->order);
-	}
-
-	/* Succeeded: the reply. */
-	x11_reply(server, client, reply, 32U + (size_t)count * 4U);
-	return 0U;
-}
-
-/* GetPointerMapping: three buttons, each itself. */
-static unsigned
-protocol_get_pointer_mapping(
-	struct x11server *server,
-	unsigned index,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[36];
-
-	/* The header alone. */
-	client = &server->clients[index];
-	if (length != 4U)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: the reply with the map 1, 2, 3. */
-	memset(reply, 0, sizeof(reply));
-	reply[1] = 3U;
-	reply[32] = 1U;
-	reply[33] = 2U;
-	reply[34] = 3U;
-	x11_reply(server, client, reply, sizeof(reply));
-	return 0U;
-}
-
-/*
- * GetModifierMapping: no key is a modifier's (the backend gives the
- * modifiers held in each event's state; the keyboard's own modifier keys
- * have no keycodes yet).
- */
-static unsigned
-protocol_get_modifier_mapping(
-	struct x11server *server,
-	unsigned index,
-	size_t length)
-{
-	struct x11_client *client;
-	uint8_t reply[32];
-
-	/* The header alone. */
-	client = &server->clients[index];
-	if (length != 4U)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: no keycode a modifier. */
-	memset(reply, 0, sizeof(reply));
-	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
 }
 

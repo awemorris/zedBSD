@@ -65,6 +65,42 @@ win32_layout_read(
 	win32_log(backend, "X11 WIN32 layout %p altgr=%d", (void *)layout, altgr);
 }
 
+/*
+ * Gives the core the layout's map (the keysyms of each keycode, and the
+ * modifiers' keys, AltGr's Mode_switch among them): its clients hear of
+ * it when it changed.  Nothing is given before the core is attached.
+ */
+void
+win32_layout_give(
+	struct x11_win32 *backend)
+{
+	struct x11_keymap keymap;
+	unsigned keycode;
+	unsigned column;
+	unsigned modifier;
+	unsigned slot;
+
+	/* No core yet. */
+	if (backend->server == NULL)
+		return;
+
+	/* The keysyms, keycode by keycode. */
+	memset(&keymap, 0, sizeof(keymap));
+	for (keycode = 0; keycode < X11_WIN32_KEYCODE_COUNT && keycode < X11_KEYMAP_KEYCODES; keycode++) {
+		for (column = 0; column < X11_WIN32_COLUMNS && column < X11_KEYMAP_COLUMNS; column++)
+			keymap.keysyms[keycode][column] = backend->keymap.keysyms[keycode][column];
+	}
+
+	/* The modifiers' keys. */
+	for (modifier = 0; modifier < X11_WIN32_MODIFIERS && modifier < X11_KEYMAP_MODIFIERS; modifier++) {
+		for (slot = 0; slot < X11_WIN32_MODIFIER_KEYCODES && slot < X11_KEYMAP_MODIFIER_KEYS; slot++)
+			keymap.modifiers[modifier][slot] = backend->keymap.modifiers[modifier][slot];
+	}
+
+	/* Succeeded: the core's map. */
+	x11server_backend_keymap(backend->server, &keymap);
+}
+
 /* Reads what the layout types with one key (an evdev code) in the four states. */
 static void
 layout_key(
