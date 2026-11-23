@@ -365,7 +365,8 @@ x11_input_key(
 	int pressed,
 	uint32_t time)
 {
-	/* Held in order, and handled unless the keyboard is frozen. */
+	/* The raw form first, then held in order and handled unless the keyboard is frozen. */
+	x11_xinput_raw(server, X11_DEVICE_KEY, keycode, pressed, time, 0, 0);
 	input_queue(server, X11_DEVICE_KEY, keycode, pressed, time, 0, 0);
 	input_drain(server);
 }
@@ -383,7 +384,8 @@ x11_input_button(
 	int x,
 	int y)
 {
-	/* Held in order, and handled unless the pointer is frozen. */
+	/* The raw form first, then held in order and handled unless the pointer is frozen. */
+	x11_xinput_raw(server, X11_DEVICE_BUTTON, button, pressed, time, x, y);
 	input_queue(server, X11_DEVICE_BUTTON, button, pressed, time, x, y);
 	input_drain(server);
 }
@@ -398,7 +400,8 @@ x11_input_motion(
 	int x,
 	int y)
 {
-	/* Held in order, and handled unless the pointer is frozen. */
+	/* The raw form first, then held in order and handled unless the pointer is frozen. */
+	x11_xinput_raw(server, X11_DEVICE_MOTION, 0U, 0, time, x, y);
 	input_queue(server, X11_DEVICE_MOTION, 0U, 0, time, x, y);
 	input_drain(server);
 }

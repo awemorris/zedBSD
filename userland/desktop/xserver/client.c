@@ -592,6 +592,7 @@ x11server_tick(
 	uint32_t due;
 	int animated;
 	int waiting;
+	int polled;
 	int timed;
 	int more;
 	int left;
@@ -631,8 +632,9 @@ x11server_tick(
 	if (grabbed != X11_NO_CLIENT && server->grabbed == X11_NO_CLIENT)
 		more = 1;
 
-	/* The pointer's crossing events of the windows that changed under it. */
+	/* The pointer's crossing events of the windows that changed under it, and its raw moves outside them. */
 	x11_input_tick(server);
+	polled = x11_xinput_raw_poll(server);
 
 	/* An X owner's text in pieces starts once the owner listens. */
 	waiting = x11_selection_tick(server);
@@ -658,7 +660,7 @@ x11server_tick(
 	/* At once while requests wait, soon while something is to be shown or held back, else at the next report. */
 	if (more) {
 		*wake = server->now;
-	} else if (server->dirty || server->motion_pending || waiting || timed) {
+	} else if (server->dirty || server->motion_pending || waiting || timed || polled) {
 		*wake = server->now + SERVER_TICK_MS;
 	} else {
 		*wake = server->now + SERVER_REPORT_MS;
