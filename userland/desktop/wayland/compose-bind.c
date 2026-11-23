@@ -25,12 +25,14 @@
  *
  * The plane is measured in logical units and a pass draws pixels: the
  * output's pass, its layers' pictures and its maps show the plane at the
- * output's scale, a head's pass at 100 %.  A quad's corners are snapped
- * to the pixels each (scale.h), so quads that touch on the plane touch in
- * the picture; a damage is taken outward to every pixel it touches.  An
- * image is sampled a texel a pixel where it is shown one for one, and
- * smoothly where a scale stretches it by a fraction.  At 100 % a unit is a
- * pixel, nothing is rounded and images are sampled as they always were.
+ * output's scale, a head's pass its part of the plane at the head's own
+ * scale (a mirror copies the output's picture, no pass of its own).  A
+ * quad's corners are snapped to the pixels each (scale.h), so quads that
+ * touch on the plane touch in the picture; a damage is taken outward to
+ * every pixel it touches.  An image is sampled a texel a pixel where it is
+ * shown one for one, and smoothly where a scale stretches it by a
+ * fraction.  At 100 % a unit is a pixel, nothing is rounded and, while
+ * every display is at 100 %, images are sampled as they always were.
  */
 
 #include "compose.h"
@@ -44,20 +46,31 @@ static int clip_meets(const VkRect2D *rect, float x, float y, float width, float
 static int clip_same(const VkRect2D *first, const VkRect2D *second);
 static void clip_box(float *x, float *y, float *width, float *height);
 static void bounds_add(struct kwl_compose *compose, float left, float top, float right, float bottom);
+static const struct kwl_head *pass_head(const struct kwl_server *server);
+static int scales_mixed(const struct kwl_server *server);
 
 /*
  * Gives the scale the pass being recorded shows the plane at, in 120ths:
- * the output's in its own pass, its layers' pictures and its maps, and
- * 100 % in a head's pass, which shows its part of the plane a pixel for a
- * unit.
+ * the output's in its own pass, its layers' pictures and its maps, and the
+ * head's in a head's pass.
  */
 unsigned
 kwl_compose_pass_scale(
 	const struct kwl_server *server)
 {
-	/* A head's pass shows its part of the plane unscaled. */
-	if (server->view_width != 0U)
-		return KWL_SCALE_ONE;
+	const struct kwl_head *head;
+
+	/* A head's pass: its head, found by the view's output. */
+	if (server->view_width != 0U) {
+		head = pass_head(server);
+
+		/* A head whose scale is not set yet (or no head) is shown at 100 %. */
+		if (head == NULL || head->scale120 == 0U)
+			return KWL_SCALE_ONE;
+
+		/* The head's scale. */
+		return head->scale120;
+	}
 
 	/* An output whose scale is not set yet is shown at 100 %. */
 	if (server->scale120 == 0U)
@@ -78,10 +91,21 @@ kwl_compose_pass_size(
 	float *width,
 	float *height)
 {
-	/* A head's own size. */
+	const struct kwl_head *head;
+
+	/* A head's pass: its head, found by the view's output. */
 	if (server->view_width != 0U) {
+		head = pass_head(server);
+
+		/* Its pixels, or its part of the plane's size while it has none. */
 		*width = (float)server->view_width;
 		*height = (float)server->view_height;
+		if (head != NULL && head->output.width != 0U && head->output.height != 0U) {
+			*width = (float)head->output.width;
+			*height = (float)head->output.height;
+		}
+
+		/* The head's size. */
 		return;
 	}
 
@@ -203,8 +227,10 @@ kwl_compose_damage_pixels(
  * recorded: a texel a pixel (its nearest set) where it is shown one for
  * one, or at a whole-number scale from a picture of its logical size (each
  * texel a block of pixels); smoothly (its linear set) where the scale
- * stretches it by a fraction or an animation scales it.  At 100 % it is
- * sampled as it always was.
+ * stretches it by a fraction or an animation scales it.  While every
+ * display shows the plane at 100 % it is sampled as it always was; a 100 %
+ * pass beside a display at another scale samples smoothly a buffer drawn
+ * for that scale (a window just moved over from it).
  */
 VkDescriptorSet
 kwl_compose_image_set(
@@ -221,10 +247,12 @@ kwl_compose_image_set(
 	float pixel_height;
 	float off_width;
 	float off_height;
+	int mixed;
 
-	/* At 100 %, or without a linear set, the image is sampled as before. */
+	/* At 100 % on every display, or without a linear set, the image is sampled as before. */
 	scale = kwl_compose_pass_scale(server);
-	if (scale == KWL_SCALE_ONE)
+	mixed = scales_mixed(server);
+	if (scale == KWL_SCALE_ONE && !mixed)
 		return import->set;
 	if (import->linear_set == VK_NULL_HANDLE)
 		return import->set;
@@ -719,4 +747,47 @@ bounds_add(
 		compose->bounds[2] = right;
 	if (bottom > compose->bounds[3])
 		compose->bounds[3] = bottom;
+}
+
+/* Finds the head whose pass is being recorded (the view's output), or NULL. */
+static const struct kwl_head *
+pass_head(
+	const struct kwl_server *server)
+{
+	const struct kwl_head *head;
+
+	/* Only a head's slot, of a compositor with its device. */
+	if (server->compose == NULL || server->view_output == 0U || server->view_output > KWL_HEADS)
+		return NULL;
+
+	/* Succeeded: its head. */
+	head = &server->compose->heads[server->view_output - 1U];
+	return head;
+}
+
+/* Tells whether a display shows the plane at another scale than 100 %: the output, or a head of the extended mode. */
+static int
+scales_mixed(
+	const struct kwl_server *server)
+{
+	const struct kwl_head *head;
+	unsigned index;
+
+	/* The output's scale. */
+	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
+		return 1;
+
+	/* No head draws a pass of its own without the device, nor in the mirror mode. */
+	if (server->compose == NULL || server->compose->display_mode != KWL_DISPLAYS_EXTENDED)
+		return 0;
+
+	/* Each open head's scale. */
+	for (index = 0U; index < KWL_HEADS; index++) {
+		head = &server->compose->heads[index];
+		if (head->open && head->scale120 != 0U && head->scale120 != KWL_SCALE_ONE)
+			return 1;
+	}
+
+	/* Succeeded: every display at 100 %. */
+	return 0;
 }

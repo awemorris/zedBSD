@@ -1220,15 +1220,14 @@ heads_take(
 	compose = server->compose;
 	memset(head, 0, sizeof(*head));
 	head->display = opening->display;
-	head->width = opening->width;
-	head->height = opening->height;
 	head->refresh = opening->refresh;
 	head->output = opening->output;
 	head->pixel_width = opening->width;
 	head->pixel_height = opening->height;
-	head->scale120 = KWL_SCALE_ONE;
-	head->scale_wanted = KWL_SCALE_ONE;
 	(void)snprintf(head->name, sizeof(head->name), "%s", opening->name);
+
+	/* Its scale, and its rectangle of the plane: its pixels over the scale. */
+	kwl_output_scale_head(server, head);
 
 	/* A view, a framebuffer and a present semaphore for each image, and the acquire's semaphore. */
 	result = heads_targets(compose, head);
@@ -1259,8 +1258,9 @@ heads_take(
 	server->dirty = 1;
 
 	/* Succeeded: the head shows the display. */
-	printf("KWL OUTPUT head open name=%s width=%u height=%u refresh_mhz=%u x=%ld y=%ld images=%u\n", head->name, head->width, head->height,
-	       head->refresh, (long)head->x, (long)head->y, head->output.image_count);
+	printf("KWL OUTPUT head open name=%s width=%u height=%u refresh_mhz=%u x=%ld y=%ld images=%u pixels=%ux%u scale=%u\n", head->name,
+	       head->width, head->height, head->refresh, (long)head->x, (long)head->y, head->output.image_count, head->pixel_width,
+	       head->pixel_height, head->scale120);
 	return 0;
 }
 
@@ -1710,13 +1710,17 @@ heads_record_extended(
 		head->wallpaper = wallpaper->image;
 	}
 
-	/* From here the pass draws the head's part of the plane: its windows and the cursor over them (ws113-p007). */
+	/*
+	 * From here the pass draws the head's part of the plane: its windows
+	 * and the cursor over them (ws113-p007), in logical units, which the
+	 * pass shows at the head's scale on its pixels (compose-bind.c).
+	 */
 	slot = (unsigned)(head - compose->heads) + 1U;
 	server->view_output = slot;
 	server->view_x = head->x - compose->output_x;
 	server->view_y = head->y - compose->output_y;
-	server->view_width = head->output.width;
-	server->view_height = head->output.height;
+	server->view_width = head->width;
+	server->view_height = head->height;
 	compose->scissor_now = scissor;
 	compose->backdrop_set = VK_NULL_HANDLE;
 	count = heads_windows(server, slot, windows, KWL_FRAME_WINDOWS);
