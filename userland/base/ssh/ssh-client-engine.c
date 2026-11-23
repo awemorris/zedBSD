@@ -8,7 +8,8 @@
 /*
  * The client side of one SSH connection as a state machine without I/O:
  * the service request, the user authentication, the session channel with
- * its terminal, the X11 channels the server forwards, and the keepalives.  The order of the login and of the
+ * its terminal, the X11 channels the server forwards, the forwarded TCP
+ * channels both ways, and the keepalives.  The order of the login and of the
  * session is the one the ssh program follows; the difference is that
  * every wait is a state the engine returns from.
  */
@@ -66,6 +67,35 @@
 
 /* The words of a refused x11-req, followed by the channel's number (OpenSSH's client's). */
 #define ENGINE_X11_FAILED	"X11 forwarding request failed on channel "
+
+/* The most X11 channels open at once. */
+#define ENGINE_X11_CHANNELS_MAX		32U
+
+/* The most forwarded TCP channels open at once on a connection that asks for X11 (the X11 channels keep their room). */
+#define ENGINE_FORWARD_CHANNELS_X11	32U
+
+/*
+ * The global request and the channel types of TCP forwarding (RFC 4254
+ * 7.1 "tcpip-forward", 7.2 "forwarded-tcpip" and "direct-tcpip").
+ */
+#define ENGINE_TCPIP_FORWARD	"tcpip-forward"
+#define ENGINE_FORWARDED_TCPIP	"forwarded-tcpip"
+#define ENGINE_DIRECT_TCPIP	"direct-tcpip"
+
+/* The longest data of a direct-tcpip open: two strings of a host's length and two ports. */
+#define ENGINE_DIRECT_DATA_MAX	(2U * (4U + SSH_CONFIG_HOST_MAX + 4U))
+
+/*
+ * The most global requests waiting for their answer (RFC 4254 4: answered
+ * in order).  Keepalives leave room for every remote forwarding.
+ */
+#define ENGINE_GLOBALS_MAX	64U
+
+/* What a global request waiting in the list is when it is no remote forwarding (whose number it holds otherwise). */
+#define ENGINE_GLOBAL_KEEPALIVE	0xffffffffU
+
+/* The words of the session's open failure, before the reason (OpenSSH's client's). */
+#define ENGINE_OPEN_FAILED	"channel open failed: "
 
 /*
  * The opcodes of the terminal modes a terminal without settings sends,
@@ -160,6 +190,45 @@ enum engine_reply_kind {
 	ENGINE_REPLY_X11 = 2
 };
 
+/* What a channel other than the session carries. */
+enum engine_kind {
+	/* The slot is free, or the session's. */
+	ENGINE_KIND_NONE = 0,
+
+	/* An X11 connection the server forwards. */
+	ENGINE_KIND_X11 = 1,
+
+	/* A direct-tcpip channel this side opened. */
+	ENGINE_KIND_DIRECT = 2,
+
+	/* A forwarded-tcpip channel the server opened. */
+	ENGINE_KIND_FORWARDED = 3
+};
+
+/* Where a remote forwarding (tcpip-forward) is. */
+enum engine_forward_state {
+	/* Asked for; the answer is awaited. */
+	ENGINE_FORWARD_ASKED = 0,
+
+	/* The server listens. */
+	ENGINE_FORWARD_ACCEPTED = 1,
+
+	/* The server refused it. */
+	ENGINE_FORWARD_REFUSED = 2
+};
+
+/*
+ * One remote forwarding asked for: address and port as sent, and bound,
+ * the port the server listens on once it accepted (port, or its choice
+ * for 0).
+ */
+struct engine_forward {
+	enum engine_forward_state state;
+	char address[SSH_CONFIG_HOST_MAX + 1];
+	unsigned port;
+	unsigned bound;
+};
+
 /* Where X11 forwarding is. */
 enum engine_x11 {
 	/* Not asked for (or not yet: the session has not opened). */
@@ -209,8 +278,14 @@ struct engine_identity {
  * handed out that the caller has not reported used.  x11 is 1 when
  * X11 forwarding is wanted, x11_cookie its fake cookie, x11_single 1 for
  * one X client only, x11_state where the request is, x11_taken how many
- * X11 channels the server opened, and held the bytes of each X11 channel
- * (by its number) handed out and not reported used.  session_over is 1
+ * X11 channels the server opened, and held the bytes of each X11 or
+ * forwarded channel (by its number) handed out and not reported used;
+ * kinds says what each channel but the session's carries, and
+ * close_wanted marks a direct-tcpip channel the caller closed before its
+ * answer.  forwards (forward_count of them) are the remote forwardings
+ * asked for, and globals (global_count from global_first) the global
+ * requests whose answers are awaited, in order: a remote forwarding's
+ * number, or ENGINE_GLOBAL_KEEPALIVE.  session_over is 1
  * once the session channel closed both ways.  pty_refused,
  * started, eof_wanted, have_exit, exit_status, exit_signal and
  * session_reason are what the session came to.  events (event_count of them from event_first) wait to
@@ -265,6 +340,13 @@ struct ssh_engine {
 	enum engine_x11 x11_state;
 	unsigned x11_taken;
 	size_t held[SSH_CHANNEL_MAX];
+	enum engine_kind kinds[SSH_CHANNEL_MAX];
+	int close_wanted[SSH_CHANNEL_MAX];
+	struct engine_forward forwards[SSH_ENGINE_REMOTE_FORWARDS_MAX];
+	unsigned forward_count;
+	uint32_t globals[ENGINE_GLOBALS_MAX];
+	unsigned global_first;
+	unsigned global_count;
 	int session_over;
 	int pty_refused;
 	int started;
@@ -313,21 +395,33 @@ static int engine_take_data(struct ssh_engine *engine);
 static int engine_take_end(struct ssh_engine *engine);
 static int engine_take_request(struct ssh_engine *engine);
 static int engine_take_reply(struct ssh_engine *engine);
-static int engine_refuse_open(struct ssh_engine *engine);
+static int engine_refuse_open(struct ssh_engine *engine, uint32_t reason, const char *text);
 static int engine_take_open(struct ssh_engine *engine);
+static int engine_take_x11(struct ssh_engine *engine);
+static int engine_take_forwarded(struct ssh_engine *engine);
+static int engine_take_open_reply(struct ssh_engine *engine);
+static int engine_take_direct_reply(struct ssh_engine *engine, struct ssh_channel *channel, int refused, uint32_t reason);
+static int engine_take_global_reply(struct ssh_engine *engine);
+static int engine_find_forward(const struct ssh_engine *engine, const uint8_t *address, size_t size, uint32_t port, unsigned *forward);
+static unsigned engine_count_kind(const struct ssh_engine *engine, enum engine_kind kind);
+static unsigned engine_forward_channels_max(const struct ssh_engine *engine);
+static void engine_global_push(struct ssh_engine *engine, uint32_t entry);
+static int engine_text_ok(const char *text, size_t most, int empty);
+static int engine_type_is(const uint8_t *type, size_t size, const char *name);
 static int engine_send_x11_request(struct ssh_engine *engine);
-static struct ssh_channel *engine_x11_channel(struct ssh_engine *engine, uint32_t number);
+static struct ssh_channel *engine_other_channel(struct ssh_engine *engine, uint32_t number);
 static int engine_send_data(struct ssh_engine *engine, struct ssh_channel *channel, const uint8_t *bytes, size_t size, size_t *written);
 static void engine_give_window(struct ssh_engine *engine, struct ssh_channel *channel, size_t *held, size_t size);
 static int engine_channels_left(const struct ssh_engine *engine);
 static void engine_finish(struct ssh_engine *engine);
 static void engine_copy_address(char *destination, const uint8_t *source, size_t size);
 static void engine_append_number(char *text, size_t capacity, unsigned number);
+static void engine_append_safe(char *text, size_t capacity, const uint8_t *source, size_t size);
 static int engine_send_eof(struct ssh_engine *engine);
 static int engine_keep_alive(struct ssh_engine *engine);
 static int engine_put_mode(struct ssh_buf *out, unsigned opcode, uint32_t value);
 static int engine_method_offered(const struct ssh_engine *engine, const char *method);
-static const char *engine_open_reason(uint32_t reason);
+static const char *engine_open_words(uint32_t reason);
 
 /*
  * Makes an engine for one connection and queues this side's
@@ -365,7 +459,10 @@ ssh_engine_open(
 	ssh_buf_init(&made->command, SSH_CHANNEL_COMMAND_MAX, 0);
 	for (index = 0; index < SSH_ENGINE_IDENTITIES_MAX; index++)
 		ssh_buf_init(&made->identities[index].file, SSH_KEY_FILE_MAX, 1);
+
+	/* The session keeps channel number 0, also on a connection that never opens it. */
 	ssh_channels_init(&made->channels);
+	made->channels.keep_first = 1;
 
 	/* Copies what the connection is to do. */
 	error = engine_copy_options(made, options);
@@ -856,6 +953,26 @@ ssh_engine_x11_answer(
 	uint32_t channel,
 	int accept)
 {
+	int error;
+
+	/* Answers as for any channel the server opens. */
+	error = ssh_engine_open_answer(engine, channel, accept);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer is on its way. */
+	return 0;
+}
+
+/*
+ * Answers SSH_ENGINE_X11_OPEN or SSH_ENGINE_FORWARD_OPEN.
+ */
+int
+ssh_engine_open_answer(
+	struct ssh_engine *engine,
+	uint32_t channel,
+	int accept)
+{
 	struct ssh_channel *slot;
 	int error;
 
@@ -883,11 +1000,168 @@ ssh_engine_x11_answer(
 	/* The caller holds nothing of the channel yet. */
 	engine->held[channel] = 0;
 
-	/* A refused channel may have been the last one after the session. */
-	if (!accept)
+	/* A refused channel carries nothing, and may have been the last one after the session. */
+	if (!accept) {
+		engine->kinds[channel] = ENGINE_KIND_NONE;
 		engine_finish(engine);
+	}
 
 	/* Succeeded: the answer is on its way. */
+	return 0;
+}
+
+/*
+ * Asks the server to listen for connections to forward here.
+ */
+int
+ssh_engine_forward_listen(
+	struct ssh_engine *engine,
+	const char *address,
+	unsigned port,
+	unsigned *forward)
+{
+	struct engine_forward *asked;
+	int text_ok;
+	int error;
+
+	/* Starts with no number given. */
+	*forward = 0;
+
+	/* Nothing goes after the end, and nothing before the login. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+	if (engine->phase != ENGINE_PHASE_CONNECTED)
+		return EINVAL;
+
+	/* Refuses an address the server could not be told, or a port out of range. */
+	if (address == NULL || port > 65535U)
+		return EINVAL;
+	text_ok = engine_text_ok(address, SSH_CONFIG_HOST_MAX, 1);
+	if (!text_ok)
+		return EINVAL;
+
+	/* Refuses a forwarding beyond the limit, or one whose answer could not be waited for. */
+	if (engine->forward_count >= SSH_ENGINE_REMOTE_FORWARDS_MAX)
+		return EAGAIN;
+	if (engine->global_count >= ENGINE_GLOBALS_MAX)
+		return EAGAIN;
+
+	/*
+	 * Asks for it: the address to bind and the port, with a reply wanted
+	 * (which carries the port the server chose for 0).
+	 *
+	 * Values referenced: RFC 4254 7.1, the "tcpip-forward" global request
+	 * (string address to bind, uint32 port number to bind).
+	 */
+	ssh_buf_reset(&engine->out);
+	ssh_buf_put_u8(&engine->out, SSH_MSG_GLOBAL_REQUEST);
+	ssh_buf_put_cstring(&engine->out, ENGINE_TCPIP_FORWARD);
+	ssh_buf_put_bool(&engine->out, 1);
+	ssh_buf_put_cstring(&engine->out, address);
+	ssh_buf_put_u32(&engine->out, (uint32_t)port);
+	error = engine_send_out(engine);
+	if (error != 0) {
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return EPIPE;
+	}
+
+	/* Keeps it, and waits for its answer behind the global requests sent before. */
+	asked = &engine->forwards[engine->forward_count];
+	memset(asked, 0, sizeof(*asked));
+	asked->state = ENGINE_FORWARD_ASKED;
+	engine_copy_text(asked->address, sizeof(asked->address), address);
+	asked->port = port;
+	engine_global_push(engine, engine->forward_count);
+
+	/* Succeeded: the caller names the forwarding by its number. */
+	*forward = engine->forward_count;
+	engine->forward_count++;
+	return 0;
+}
+
+/*
+ * Opens a direct-tcpip channel to host and port.
+ */
+int
+ssh_engine_open_direct(
+	struct ssh_engine *engine,
+	const char *host,
+	unsigned port,
+	const char *origin,
+	unsigned origin_port,
+	uint32_t *channel)
+{
+	struct ssh_channel *slot;
+	struct ssh_buf data;
+	unsigned open_count;
+	unsigned most;
+	int text_ok;
+	int error;
+
+	/* Starts with no number given. */
+	*channel = 0;
+
+	/* Nothing goes after the end, nor before the login or after the session. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+	if (engine->phase != ENGINE_PHASE_CONNECTED || engine->session_over)
+		return EINVAL;
+
+	/* Refuses a destination or an originator the server could not be told. */
+	if (host == NULL || origin == NULL)
+		return EINVAL;
+	if (port < 1U || port > 65535U || origin_port > 65535U)
+		return EINVAL;
+	text_ok = engine_text_ok(host, SSH_CONFIG_HOST_MAX, 0);
+	if (!text_ok)
+		return EINVAL;
+	text_ok = engine_text_ok(origin, SSH_CONFIG_HOST_MAX, 1);
+	if (!text_ok)
+		return EINVAL;
+
+	/* Refuses a channel beyond the forwarded channels' share of the table. */
+	open_count = engine_count_kind(engine, ENGINE_KIND_DIRECT) + engine_count_kind(engine, ENGINE_KIND_FORWARDED);
+	most = engine_forward_channels_max(engine);
+	if (open_count >= most)
+		return EAGAIN;
+
+	/*
+	 * Builds the type's data: where to connect and where the connection
+	 * came from.
+	 *
+	 * Values referenced: RFC 4254 7.2, the "direct-tcpip" channel open
+	 * (string host to connect, uint32 port to connect, string originator
+	 * IP address, uint32 originator port).
+	 */
+	ssh_buf_init(&data, ENGINE_DIRECT_DATA_MAX, 0);
+	ssh_buf_put_cstring(&data, host);
+	ssh_buf_put_u32(&data, (uint32_t)port);
+	ssh_buf_put_cstring(&data, origin);
+	ssh_buf_put_u32(&data, (uint32_t)origin_port);
+	error = ssh_buf_error(&data);
+
+	/* Opens the channel with the forwarded channels' window. */
+	ssh_buf_reset(&engine->out);
+	slot = NULL;
+	if (error == 0)
+		error = ssh_channel_open(&engine->channels, ENGINE_DIRECT_TCPIP, SSH_ENGINE_FORWARD_WINDOW, data.data, data.size, &engine->out, &slot);
+	ssh_buf_free(&data);
+	if (error == EAGAIN)
+		return EAGAIN;
+	if (error == 0)
+		error = engine_send_out(engine);
+	if (error != 0) {
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return EPIPE;
+	}
+
+	/* The channel carries a forwarded connection; the caller holds nothing of it. */
+	engine->kinds[slot->local_id] = ENGINE_KIND_DIRECT;
+	engine->close_wanted[slot->local_id] = 0;
+	engine->held[slot->local_id] = 0;
+
+	/* Succeeded: the open is on its way. */
+	*channel = slot->local_id;
 	return 0;
 }
 
@@ -920,8 +1194,8 @@ ssh_engine_channel_write(
 	if (engine->phase == ENGINE_PHASE_CLOSED)
 		return EPIPE;
 
-	/* Refuses a number that is no X11 channel. */
-	slot = engine_x11_channel(engine, channel);
+	/* Refuses a number that is no open channel but the session's. */
+	slot = engine_other_channel(engine, channel);
 	if (slot == NULL)
 		return EINVAL;
 
@@ -952,7 +1226,7 @@ ssh_engine_channel_consumed(
 	}
 
 	/* A channel that is no longer there takes nothing back. */
-	slot = engine_x11_channel(engine, channel);
+	slot = engine_other_channel(engine, channel);
 	if (slot == NULL)
 		return;
 
@@ -983,8 +1257,8 @@ ssh_engine_channel_eof(
 	if (engine->phase == ENGINE_PHASE_CLOSED)
 		return EPIPE;
 
-	/* Refuses a number that is no X11 channel. */
-	slot = engine_x11_channel(engine, channel);
+	/* Refuses a number that is no open channel but the session's. */
+	slot = engine_other_channel(engine, channel);
 	if (slot == NULL)
 		return EINVAL;
 
@@ -1006,7 +1280,7 @@ ssh_engine_channel_eof(
 }
 
 /*
- * Closes an X11 channel.
+ * Closes an X11 or forwarded channel.
  */
 int
 ssh_engine_channel_close(
@@ -1020,8 +1294,16 @@ ssh_engine_channel_close(
 	if (engine->phase == ENGINE_PHASE_CLOSED)
 		return EPIPE;
 
-	/* Refuses a number that is no X11 channel (the session's included). */
-	slot = engine_x11_channel(engine, channel);
+	/* A direct-tcpip channel waiting for its answer is closed once it opens (CLOSE needs the server's number, RFC 4254 5.3). */
+	if (channel < SSH_CHANNEL_MAX &&
+	    engine->channels.channel[channel].state == SSH_CHANNEL_OPENING &&
+	    engine->kinds[channel] == ENGINE_KIND_DIRECT) {
+		engine->close_wanted[channel] = 1;
+		return 0;
+	}
+
+	/* Refuses a number that is no open channel (the session's included). */
+	slot = engine_other_channel(engine, channel);
 	if (slot == NULL)
 		return EINVAL;
 
@@ -2020,7 +2302,6 @@ engine_take_session(
 {
 	char name[SSH_NAME_MAX + 1];
 	struct ssh_channel *channel;
-	uint32_t reason;
 	int want_reply;
 	int error;
 
@@ -2042,31 +2323,16 @@ engine_take_session(
 		break;
 	case SSH_MSG_REQUEST_SUCCESS:
 	case SSH_MSG_REQUEST_FAILURE:
-		/* The answer to a keepalive: the server is alive, which receiving it already noted. */
+		/* The answer to the oldest global request: a keepalive (the server is alive, which receiving it noted) or a remote forwarding. */
+		error = engine_take_global_reply(engine);
 		break;
 	case SSH_MSG_CHANNEL_OPEN:
 		error = engine_take_open(engine);
 		break;
 	case SSH_MSG_CHANNEL_OPEN_CONFIRMATION:
 	case SSH_MSG_CHANNEL_OPEN_FAILURE:
-		/* A refused session ends the connection; an accepted one starts. */
-		error = ssh_channel_open_reply(&engine->channels, engine->payload.data, engine->payload.size, &channel, &reason);
-		if (error == EACCES) {
-			engine->channel = NULL;
-			engine_copy_text(engine->session_reason, sizeof(engine->session_reason), engine_open_reason(reason));
-			engine_end(engine, ECONNREFUSED, SSH_DISCONNECT_BY_APPLICATION, engine->session_reason);
-			error = 0;
-			break;
-		}
-
-		/* Fails when the message could not be read. */
-		if (error != 0) {
-			error = EPROTO;
-			break;
-		}
-
-		/* Starts the session on the open channel. */
-		error = engine_opened(engine);
+		/* The answer to the session's open, or to a direct-tcpip one. */
+		error = engine_take_open_reply(engine);
 		break;
 	case SSH_MSG_CHANNEL_WINDOW_ADJUST:
 		error = ssh_channel_parse_window_adjust(&engine->channels, engine->payload.data, engine->payload.size, &channel);
@@ -2248,7 +2514,7 @@ engine_take_end(
 	if (error != 0)
 		return EPROTO;
 
-	/* An EOF only says the server sends no more data: the caller hears it of an X11 channel. */
+	/* An EOF only says the server sends no more data: the caller hears it of a channel but the session's. */
 	if (!channel->close_received) {
 		if (channel == engine->channel)
 			return 0;
@@ -2273,9 +2539,11 @@ engine_take_end(
 	if (!freed)
 		return 0;
 
-	/* An X11 channel ends alone; the connection ends with it when it was the last after the session. */
+	/* An X11 or forwarded channel ends alone; the connection ends with it when it was the last after the session. */
 	if (channel != engine->channel) {
 		engine->held[number] = 0;
+		engine->kinds[number] = ENGINE_KIND_NONE;
+		engine->close_wanted[number] = 0;
 		event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
 		if (event != NULL)
 			event->channel = number;
@@ -2444,12 +2712,15 @@ engine_take_reply(
 
 /*
  * Refuses a channel the server opens (RFC 4254 5.1: OPEN_FAILURE with the
- * server's channel number): a client offers no channel but the X11 ones
- * it asked for.
+ * server's channel number, reason and text): a client offers no channel
+ * but the X11 and forwarded ones it asked for, and those only within
+ * their limits.
  */
 static int
 engine_refuse_open(
-	struct ssh_engine *engine)
+	struct ssh_engine *engine,
+	uint32_t reason,
+	const char *text)
 {
 	struct ssh_reader reader;
 	const uint8_t *type;
@@ -2466,12 +2737,12 @@ engine_refuse_open(
 	if (error != 0)
 		return EPROTO;
 
-	/* Answers OPEN_FAILURE, administratively prohibited. */
+	/* Answers OPEN_FAILURE with the reason. */
 	ssh_buf_reset(&engine->out);
 	ssh_buf_put_u8(&engine->out, SSH_MSG_CHANNEL_OPEN_FAILURE);
 	ssh_buf_put_u32(&engine->out, sender);
-	ssh_buf_put_u32(&engine->out, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED);
-	ssh_buf_put_cstring(&engine->out, "open refused");
+	ssh_buf_put_u32(&engine->out, reason);
+	ssh_buf_put_cstring(&engine->out, text);
 	ssh_buf_put_cstring(&engine->out, "");
 	error = engine_send_out(engine);
 	if (error != 0)
@@ -2530,12 +2801,20 @@ engine_keep_alive(
 		return 0;
 	}
 
-	/* Sends one that wants a reply. */
-	ssh_buf_reset(&engine->out);
-	ssh_channel_put_global_request(ENGINE_KEEPALIVE, 1, &engine->out);
-	error = engine_send_out(engine);
-	if (error != 0)
-		return error;
+	/*
+	 * Sends one that wants a reply, and waits for its answer behind the
+	 * global requests sent before.  While the list of answers awaited has
+	 * no room beside every remote forwarding's, none is sent but it counts
+	 * as sent, so a server that answers nothing still runs out of them.
+	 */
+	if (engine->global_count < ENGINE_GLOBALS_MAX - SSH_ENGINE_REMOTE_FORWARDS_MAX) {
+		ssh_buf_reset(&engine->out);
+		ssh_channel_put_global_request(ENGINE_KEEPALIVE, 1, &engine->out);
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+		engine_global_push(engine, ENGINE_GLOBAL_KEEPALIVE);
+	}
 
 	/* Counts it until any message answers, and times the next. */
 	engine->alive_sent++;
@@ -2590,7 +2869,7 @@ engine_method_offered(
  * Words a channel open failure reason.
  */
 static const char *
-engine_open_reason(
+engine_open_words(
 	uint32_t reason)
 {
 	/*
@@ -2599,15 +2878,15 @@ engine_open_reason(
 	 */
 	switch (reason) {
 	case SSH_OPEN_ADMINISTRATIVELY_PROHIBITED:
-		return "channel open failed: administratively prohibited";
+		return "administratively prohibited";
 	case SSH_OPEN_CONNECT_FAILED:
-		return "channel open failed: connect failed";
+		return "connect failed";
 	case SSH_OPEN_UNKNOWN_CHANNEL_TYPE:
-		return "channel open failed: unknown channel type";
+		return "unknown channel type";
 	case SSH_OPEN_RESOURCE_SHORTAGE:
-		return "channel open failed: resource shortage";
+		return "resource shortage";
 	default:
-		return "channel open failed: unknown reason";
+		return "unknown reason";
 	}
 }
 
@@ -2660,13 +2939,64 @@ engine_give_up_key(
 }
 
 /*
- * Takes a CHANNEL_OPEN from the server: an "x11" channel once X11
- * forwarding was accepted and while the session is open (one only when
- * asked for one), shown to the caller as SSH_ENGINE_X11_OPEN; any other
- * open is refused.
+ * Takes a CHANNEL_OPEN from the server by its type: "x11" and
+ * "forwarded-tcpip" as asked for; any other open is refused
+ * (administratively prohibited; a client refuses "direct-tcpip", RFC
+ * 4254 7.2).
  */
 static int
 engine_take_open(
+	struct ssh_engine *engine)
+{
+	struct ssh_reader reader;
+	const uint8_t *type;
+	size_t type_size;
+	int error;
+	int x11;
+	int forwarded;
+
+	/* Reads the type. */
+	ssh_reader_init(&reader, engine->payload.data, engine->payload.size);
+	(void)ssh_reader_get_u8(&reader);
+	ssh_reader_get_string(&reader, &type, &type_size);
+	error = ssh_reader_error(&reader);
+	if (error != 0)
+		return EPROTO;
+
+	/* An X11 connection. */
+	x11 = engine_type_is(type, type_size, ENGINE_X11_CHANNEL);
+	if (x11) {
+		error = engine_take_x11(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A connection to a port the server listens on for this side. */
+	forwarded = engine_type_is(type, type_size, ENGINE_FORWARDED_TCPIP);
+	if (forwarded) {
+		error = engine_take_forwarded(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Any other type. */
+	error = engine_refuse_open(engine, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, "open refused");
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the open is refused. */
+	return 0;
+}
+
+/*
+ * Takes an "x11" open: once X11 forwarding was accepted and while the
+ * session is open (one only when asked for one), within
+ * ENGINE_X11_CHANNELS_MAX, shown to the caller as SSH_ENGINE_X11_OPEN.
+ */
+static int
+engine_take_x11(
 	struct ssh_engine *engine)
 {
 	struct ssh_engine_event *event;
@@ -2677,11 +3007,12 @@ engine_take_open(
 	size_t data_size;
 	size_t address_size;
 	uint32_t port;
+	unsigned open_count;
 	int error;
 
 	/* Refuses every open while no X11 channel may come: before the answer, without the request, after the session. */
 	if (engine->x11_state != ENGINE_X11_ACCEPTED || engine->channel == NULL) {
-		error = engine_refuse_open(engine);
+		error = engine_refuse_open(engine, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, "open refused");
 		if (error != 0)
 			return error;
 		return 0;
@@ -2689,13 +3020,22 @@ engine_take_open(
 
 	/* Refuses a second X11 channel when one X client only was asked for. */
 	if (engine->x11_single && engine->x11_taken > 0) {
-		error = engine_refuse_open(engine);
+		error = engine_refuse_open(engine, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, "open refused");
 		if (error != 0)
 			return error;
 		return 0;
 	}
 
-	/* Takes an "x11" open into a slot that waits for the caller's answer; another type, or a full table, is refused. */
+	/* Refuses an X11 channel beyond their share of the table. */
+	open_count = engine_count_kind(engine, ENGINE_KIND_X11);
+	if (open_count >= ENGINE_X11_CHANNELS_MAX) {
+		error = engine_refuse_open(engine, SSH_OPEN_RESOURCE_SHORTAGE, "resource shortage");
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Takes the open into a slot that waits for the caller's answer; a full table is refused. */
 	ssh_buf_reset(&engine->out);
 	error = ssh_channel_take_open(&engine->channels, engine->payload.data, engine->payload.size, ENGINE_X11_CHANNEL, SSH_ENGINE_X11_WINDOW, &engine->out, &channel, &data, &data_size);
 	if (error == EINVAL || error == EPROTO)
@@ -2724,6 +3064,7 @@ engine_take_open(
 	/* Counts the X client; the caller holds nothing of it yet. */
 	engine->x11_taken++;
 	engine->held[channel->local_id] = 0;
+	engine->kinds[channel->local_id] = ENGINE_KIND_X11;
 
 	/* Asks the caller. */
 	event = engine_event(engine, SSH_ENGINE_X11_OPEN);
@@ -2735,6 +3076,500 @@ engine_take_open(
 
 	/* Succeeded: the open waits for the caller's answer. */
 	return 0;
+}
+
+/*
+ * Takes a "forwarded-tcpip" open: before the session closed (on a
+ * connection without one, at any time), for an address and port a remote
+ * forwarding asked for, within the forwarded channels' share of the
+ * table; shown to the caller as SSH_ENGINE_FORWARD_OPEN.
+ *
+ * Procedure referenced: RFC 4254 7.2 (the client must refuse a
+ * forwarded-tcpip open for a port it did not ask for) and
+ * openssh-portable fa4b2a82be7d channels.c (open_listen_match_tcpip:
+ * the address and port connected must be the ones asked for, the port
+ * the server chose for 0; a forwarding is taken from the moment it is
+ * asked for).
+ */
+static int
+engine_take_forwarded(
+	struct ssh_engine *engine)
+{
+	struct ssh_engine_event *event;
+	struct ssh_channel *channel;
+	struct ssh_reader reader;
+	const uint8_t *data;
+	const uint8_t *text;
+	const uint8_t *address;
+	const uint8_t *origin;
+	size_t data_size;
+	size_t text_size;
+	size_t address_size;
+	size_t origin_size;
+	uint32_t port;
+	uint32_t origin_port;
+	unsigned forward;
+	unsigned open_count;
+	unsigned most;
+	int found;
+	int error;
+
+	/*
+	 * Reads the open whole: the type, the server's number, window and
+	 * packet size, then the address and port connected and the
+	 * originator's.
+	 *
+	 * Values referenced: RFC 4254 7.2, the "forwarded-tcpip" channel open
+	 * (string address that was connected, uint32 port that was connected,
+	 * string originator IP address, uint32 originator port).
+	 */
+	ssh_reader_init(&reader, engine->payload.data, engine->payload.size);
+	(void)ssh_reader_get_u8(&reader);
+	ssh_reader_get_string(&reader, &text, &text_size);
+	(void)ssh_reader_get_u32(&reader);
+	(void)ssh_reader_get_u32(&reader);
+	(void)ssh_reader_get_u32(&reader);
+	ssh_reader_get_string(&reader, &address, &address_size);
+	port = ssh_reader_get_u32(&reader);
+	ssh_reader_get_string(&reader, &origin, &origin_size);
+	origin_port = ssh_reader_get_u32(&reader);
+	error = ssh_reader_error(&reader);
+	if (error != 0)
+		return EPROTO;
+
+	/* Refuses every open after the session, which ends the connection once its channels are gone. */
+	if (engine->session_over) {
+		error = engine_refuse_open(engine, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, "open refused");
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Refuses a connection to an address and port not asked for. */
+	found = engine_find_forward(engine, address, address_size, port, &forward);
+	if (!found) {
+		error = engine_refuse_open(engine, SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, "open refused");
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Refuses a channel beyond the forwarded channels' share of the table. */
+	open_count = engine_count_kind(engine, ENGINE_KIND_DIRECT) + engine_count_kind(engine, ENGINE_KIND_FORWARDED);
+	most = engine_forward_channels_max(engine);
+	if (open_count >= most) {
+		error = engine_refuse_open(engine, SSH_OPEN_RESOURCE_SHORTAGE, "resource shortage");
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Takes the open into a slot that waits for the caller's answer; a full table is refused. */
+	ssh_buf_reset(&engine->out);
+	error = ssh_channel_take_open(&engine->channels, engine->payload.data, engine->payload.size, ENGINE_FORWARDED_TCPIP, SSH_ENGINE_FORWARD_WINDOW, &engine->out, &channel, &data, &data_size);
+	if (error == EINVAL || error == EPROTO)
+		return EPROTO;
+	if (error != 0)
+		return error;
+
+	/* Sends the refusal of an open that was not taken. */
+	if (channel == NULL) {
+		if (engine->out.size == 0)
+			return 0;
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* The channel carries a forwarded connection; the caller holds nothing of it yet. */
+	engine->held[channel->local_id] = 0;
+	engine->kinds[channel->local_id] = ENGINE_KIND_FORWARDED;
+	engine->close_wanted[channel->local_id] = 0;
+
+	/* Asks the caller. */
+	event = engine_event(engine, SSH_ENGINE_FORWARD_OPEN);
+	if (event != NULL) {
+		event->channel = channel->local_id;
+		event->forward = forward;
+		engine_copy_text(event->listen_address, sizeof(event->listen_address), engine->forwards[forward].address);
+		event->listen_port = port;
+		engine_copy_address(event->address, origin, origin_size);
+		event->port = origin_port;
+	}
+
+	/* Succeeded: the open waits for the caller's answer. */
+	return 0;
+}
+
+/*
+ * Takes OPEN_CONFIRMATION or OPEN_FAILURE: for the session, a refusal
+ * ends the connection and a confirmation starts the session; for a
+ * direct-tcpip channel, the caller hears it.
+ */
+static int
+engine_take_open_reply(
+	struct ssh_engine *engine)
+{
+	struct ssh_channel *channel;
+	const char *words;
+	uint32_t reason;
+	int refused;
+	int error;
+
+	/* Reads the answer. */
+	error = ssh_channel_open_reply(&engine->channels, engine->payload.data, engine->payload.size, &channel, &reason);
+	if (error != 0 && error != EACCES)
+		return EPROTO;
+	refused = 0;
+	if (error == EACCES)
+		refused = 1;
+
+	/* The answer for a direct-tcpip channel. */
+	if (channel != engine->channel) {
+		error = engine_take_direct_reply(engine, channel, refused, reason);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A refused session ends the connection. */
+	if (refused) {
+		engine->channel = NULL;
+		words = engine_open_words(reason);
+		engine_copy_text(engine->session_reason, sizeof(engine->session_reason), ENGINE_OPEN_FAILED);
+		engine_append_safe(engine->session_reason, sizeof(engine->session_reason), (const uint8_t *)words, strlen(words));
+		engine_end(engine, ECONNREFUSED, SSH_DISCONNECT_BY_APPLICATION, engine->session_reason);
+		return 0;
+	}
+
+	/* Starts the session on the open channel. */
+	error = engine_opened(engine);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the session starts. */
+	return 0;
+}
+
+/*
+ * Takes the answer for a direct-tcpip channel (refused 1 with reason, or
+ * confirmed): the caller hears SSH_ENGINE_OPEN_REPLY, or, when it closed
+ * the channel before the answer, the confirmed channel is closed at once
+ * and a refused one ends with SSH_ENGINE_CHANNEL_CLOSED.
+ */
+static int
+engine_take_direct_reply(
+	struct ssh_engine *engine,
+	struct ssh_channel *channel,
+	int refused,
+	uint32_t reason)
+{
+	struct ssh_engine_event *event;
+	struct ssh_reader reader;
+	const uint8_t *description;
+	size_t description_size;
+	uint32_t number;
+	int error;
+
+	/* Only a channel this side opened for a forwarded connection has an answer here. */
+	number = channel->local_id;
+	if (engine->kinds[number] != ENGINE_KIND_DIRECT)
+		return EPROTO;
+
+	/* A refusal frees the number. */
+	if (refused) {
+		engine->kinds[number] = ENGINE_KIND_NONE;
+		engine->held[number] = 0;
+
+		/* A channel the caller closed ends without an answer of its own. */
+		if (engine->close_wanted[number]) {
+			engine->close_wanted[number] = 0;
+			event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
+			if (event != NULL)
+				event->channel = number;
+			engine_finish(engine);
+			return 0;
+		}
+
+		/* Reads the server's description (RFC 4254 5.1), read whole before. */
+		ssh_reader_init(&reader, engine->payload.data, engine->payload.size);
+		(void)ssh_reader_get_u8(&reader);
+		(void)ssh_reader_get_u32(&reader);
+		(void)ssh_reader_get_u32(&reader);
+		ssh_reader_get_string(&reader, &description, &description_size);
+
+		/* Tells the caller why, as OpenSSH's client words it: the reason, then the description. */
+		event = engine_event(engine, SSH_ENGINE_OPEN_REPLY);
+		if (event != NULL) {
+			event->channel = number;
+			event->accepted = 0;
+			event->code = reason;
+			engine_copy_text(event->reason, sizeof(event->reason), engine_open_words(reason));
+			if (description_size > 0) {
+				engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)": ", 2);
+				engine_append_safe(event->reason, sizeof(event->reason), description, description_size);
+			}
+		}
+
+		/* A refused channel may have been the last one after the session. */
+		engine_finish(engine);
+		return 0;
+	}
+
+	/* A channel the caller closed before the answer is closed now; its close coming back ends it. */
+	engine->held[number] = 0;
+	if (engine->close_wanted[number]) {
+		ssh_buf_reset(&engine->out);
+		ssh_channel_put_close(channel, &engine->out);
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Tells the caller the channel is open. */
+	event = engine_event(engine, SSH_ENGINE_OPEN_REPLY);
+	if (event != NULL) {
+		event->channel = number;
+		event->accepted = 1;
+	}
+
+	/* Succeeded: the answer is handled. */
+	return 0;
+}
+
+/*
+ * Takes REQUEST_SUCCESS or REQUEST_FAILURE, the answer to the oldest
+ * global request waiting (RFC 4254 4): nothing more for a keepalive; for
+ * a remote forwarding, the caller hears it as SSH_ENGINE_FORWARD_REPLY.
+ * An answer nothing waits for is dropped.
+ *
+ * Procedure referenced: RFC 4254 7.1 (REQUEST_SUCCESS carries the port
+ * the server chose when 0 was asked for) and openssh-portable
+ * fa4b2a82be7d ssh.c (ssh_confirm_remote_forward: a chosen port above
+ * 65535 is a refusal).
+ */
+static int
+engine_take_global_reply(
+	struct ssh_engine *engine)
+{
+	struct ssh_engine_event *event;
+	struct engine_forward *forward;
+	struct ssh_reader reader;
+	uint32_t entry;
+	uint32_t chosen;
+	int accepted;
+	int error;
+
+	/* Drops an answer nothing waits for. */
+	if (engine->global_count == 0)
+		return 0;
+
+	/* Takes the oldest request off the list. */
+	entry = engine->globals[engine->global_first];
+	engine->global_first = (engine->global_first + 1U) % ENGINE_GLOBALS_MAX;
+	engine->global_count--;
+
+	/* A keepalive's answer only shows the server is alive. */
+	if (entry == ENGINE_GLOBAL_KEEPALIVE)
+		return 0;
+
+	/* A remote forwarding: accepted or refused. */
+	forward = &engine->forwards[entry];
+	accepted = 0;
+	if (engine->payload.data[0] == SSH_MSG_REQUEST_SUCCESS)
+		accepted = 1;
+	forward->bound = forward->port;
+
+	/* The port the server chose for 0; one out of range is a refusal. */
+	if (accepted && forward->port == 0) {
+		ssh_reader_init(&reader, engine->payload.data, engine->payload.size);
+		(void)ssh_reader_get_u8(&reader);
+		chosen = ssh_reader_get_u32(&reader);
+		error = ssh_reader_error(&reader);
+		if (error != 0)
+			return EPROTO;
+		forward->bound = chosen;
+		if (chosen == 0 || chosen > 65535U)
+			accepted = 0;
+	}
+
+	/* Keeps where the forwarding is. */
+	forward->state = ENGINE_FORWARD_REFUSED;
+	if (accepted)
+		forward->state = ENGINE_FORWARD_ACCEPTED;
+
+	/* Tells the caller. */
+	event = engine_event(engine, SSH_ENGINE_FORWARD_REPLY);
+	if (event != NULL) {
+		event->forward = entry;
+		event->accepted = accepted;
+		event->port = forward->port;
+		if (accepted)
+			event->port = forward->bound;
+	}
+
+	/* Succeeded: the answer is handled. */
+	return 0;
+}
+
+/*
+ * Finds the remote forwarding a forwarded-tcpip channel is for: the
+ * address (size bytes) as asked for and the port listened on (the one
+ * asked for, from the moment of asking, or once accepted the one the
+ * server chose for 0).  Returns 1 with *forward its number, or 0.
+ */
+static int
+engine_find_forward(
+	const struct ssh_engine *engine,
+	const uint8_t *address,
+	size_t size,
+	uint32_t port,
+	unsigned *forward)
+{
+	const struct engine_forward *asked;
+	unsigned listened;
+	unsigned index;
+	int compare;
+
+	/* Looks at each forwarding asked for. */
+	for (index = 0; index < engine->forward_count; index++) {
+		asked = &engine->forwards[index];
+
+		/* A refused forwarding listens nowhere; one for port 0 not yet answered has no port yet. */
+		if (asked->state == ENGINE_FORWARD_REFUSED)
+			continue;
+		if (asked->state == ENGINE_FORWARD_ASKED && asked->port == 0)
+			continue;
+
+		/* The port listened on must be the one connected. */
+		listened = asked->port;
+		if (asked->state == ENGINE_FORWARD_ACCEPTED)
+			listened = asked->bound;
+		if (listened != port)
+			continue;
+
+		/* The address must be the one asked for, byte for byte. */
+		if (strlen(asked->address) != size)
+			continue;
+		compare = memcmp(asked->address, address, size);
+		if (compare != 0)
+			continue;
+
+		/* Found. */
+		*forward = index;
+		return 1;
+	}
+
+	/* No forwarding was asked for it. */
+	return 0;
+}
+
+/* Counts the channels in use that carry kind. */
+static unsigned
+engine_count_kind(
+	const struct ssh_engine *engine,
+	enum engine_kind kind)
+{
+	unsigned index;
+	unsigned count;
+
+	/* Looks at each slot in use. */
+	count = 0;
+	for (index = 0; index < SSH_CHANNEL_MAX; index++) {
+		if (engine->channels.channel[index].state == SSH_CHANNEL_FREE)
+			continue;
+		if (engine->kinds[index] == kind)
+			count++;
+	}
+
+	/* Reports the count. */
+	return count;
+}
+
+/* Returns the most forwarded channels open at once: fewer on a connection that asks for X11, whose channels keep their room. */
+static unsigned
+engine_forward_channels_max(
+	const struct ssh_engine *engine)
+{
+	/* X11 keeps its share of the table. */
+	if (engine->x11)
+		return ENGINE_FORWARD_CHANNELS_X11;
+
+	/* Every slot but the session's. */
+	return SSH_ENGINE_FORWARD_CHANNELS_MAX;
+}
+
+/* Appends a global request whose answer is awaited to the list (which the callers keep from overflowing). */
+static void
+engine_global_push(
+	struct ssh_engine *engine,
+	uint32_t entry)
+{
+	unsigned last;
+
+	/* Refuses to overflow (the callers check the room first). */
+	if (engine->global_count >= ENGINE_GLOBALS_MAX)
+		return;
+
+	/* Appends it after the last. */
+	last = (engine->global_first + engine->global_count) % ENGINE_GLOBALS_MAX;
+	engine->globals[last] = entry;
+	engine->global_count++;
+}
+
+/* Reports whether the size bytes of a channel type are the type name (1 or 0). */
+static int
+engine_type_is(
+	const uint8_t *type,
+	size_t size,
+	const char *name)
+{
+	size_t length;
+	int compare;
+
+	/* The lengths must be the same. */
+	length = strlen(name);
+	if (size != length)
+		return 0;
+
+	/* And the bytes. */
+	compare = memcmp(type, name, size);
+	if (compare != 0)
+		return 0;
+
+	/* The type is the name. */
+	return 1;
+}
+
+/* Reports whether text is 0 (only when empty is 1) to most printable characters without blanks (1 or 0). */
+static int
+engine_text_ok(
+	const char *text,
+	size_t most,
+	int empty)
+{
+	size_t length;
+	size_t index;
+	unsigned char byte;
+
+	/* Checks the length. */
+	length = strlen(text);
+	if (length == 0 && !empty)
+		return 0;
+	if (length > most)
+		return 0;
+
+	/* Checks each byte. */
+	for (index = 0; index < length; index++) {
+		byte = (unsigned char)text[index];
+		if (byte < 0x21U || byte > 0x7eU)
+			return 0;
+	}
+
+	/* The text may be sent. */
+	return 1;
 }
 
 /*
@@ -2770,11 +3605,12 @@ engine_send_x11_request(
 }
 
 /*
- * Returns the X11 channel numbered number while it is open or closing,
- * or NULL (the session's, one waiting for its answer, a free number).
+ * Returns the X11 or forwarded channel numbered number while it is open
+ * or closing, or NULL (the session's, one waiting for its answer, a free
+ * number).
  */
 static struct ssh_channel *
-engine_x11_channel(
+engine_other_channel(
 	struct ssh_engine *engine,
 	uint32_t number)
 {
@@ -2785,11 +3621,11 @@ engine_x11_channel(
 	if (channel == NULL)
 		return NULL;
 
-	/* The session's channel is not an X11 one. */
+	/* The session's channel is not one of them. */
 	if (channel == engine->channel)
 		return NULL;
 
-	/* Reports the X11 channel. */
+	/* Reports the channel. */
 	return channel;
 }
 
@@ -2979,6 +3815,30 @@ engine_append_number(
 	while (count > 0 && used + 1U < capacity) {
 		count--;
 		text[used] = digits[count];
+		used++;
+	}
+
+	/* Ends the text. */
+	text[used] = '\0';
+}
+
+/* Appends size bytes to the NUL-terminated text (capacity bytes) made safe: every byte that is not a printable ASCII character as '?', cut to the room. */
+static void
+engine_append_safe(
+	char *text,
+	size_t capacity,
+	const uint8_t *source,
+	size_t size)
+{
+	size_t used;
+	size_t index;
+
+	/* Appends each byte while there is room. */
+	used = strlen(text);
+	for (index = 0; index < size && used + 1U < capacity; index++) {
+		text[used] = '?';
+		if (source[index] >= 0x20U && source[index] < 0x7fU)
+			text[used] = (char)source[index];
 		used++;
 	}
 

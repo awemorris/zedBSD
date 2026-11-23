@@ -327,6 +327,24 @@ ssh_client_check_settings(
 		return EINVAL;
 	}
 
+	/* Port forwarding is not done yet. */
+	if (config->forward_count != 0) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "LocalForward and RemoteForward are not supported");
+		return EINVAL;
+	}
+
+	/* A connection without a session is asked for with -N. */
+	if (config->session_type_none) {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "SessionType none is not supported");
+		return EINVAL;
+	}
+
+	/* A command of the file's is not run yet: refused rather than a shell started in its place. */
+	if (config->remote_command[0] != '\0') {
+		snprintf(error, SSH_CONFIG_ERROR_MAX, "RemoteCommand is not supported");
+		return EINVAL;
+	}
+
 	/* Succeeded: every setting is one the program acts on or leaves off. */
 	return 0;
 }

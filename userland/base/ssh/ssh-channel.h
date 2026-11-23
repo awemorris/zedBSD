@@ -12,16 +12,30 @@
  * What a channel is connected to (a shell, a command, a terminal, the
  * user's standard streams) belongs to the programs.
  *
- * Channel types: "session" (RFC 4254 6) is the only type opened, and the
- * only type ssh_channel_accept_open (the server side) accepts.  An open
- * of another type ("direct-tcpip", "x11", "auth-agent@openssh.com", ...)
- * is answered with SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, unless the
- * program reads it with ssh_channel_take_open for a type it asked the
- * peer to open (a client takes "x11", RFC 4254 6.3.2, after its x11-req)
- * and answers it later with ssh_channel_answer_open.  Global requests are all refused
+ * Channel types: "session" (RFC 4254 6) is the type
+ * ssh_channel_open_session opens and the only type
+ * ssh_channel_accept_open (the server side) accepts.  A program opens
+ * another type with ssh_channel_open, giving the type's own data (a
+ * client opens "direct-tcpip", RFC 4254 7.2, for a local port it
+ * forwards).  An open of another type ("direct-tcpip", "x11",
+ * "auth-agent@openssh.com", ...) that the peer sends is answered with
+ * SSH_OPEN_ADMINISTRATIVELY_PROHIBITED, unless the program reads it with
+ * ssh_channel_take_open for a type it asked the peer to open (a client
+ * takes "x11", RFC 4254 6.3.2, after its x11-req, and "forwarded-tcpip",
+ * 7.2, after its tcpip-forward; a server takes "direct-tcpip") and
+ * answers it later with ssh_channel_answer_open, or refuses it with a
+ * reason of its own with ssh_channel_refuse_open.  Each channel keeps the
+ * window its type was given.  Global requests are all refused
  * (REQUEST_FAILURE when a reply is wanted), except
  * "no-more-sessions@openssh.com" (OpenSSH PROTOCOL 2.2), which the server
- * honours (REQUEST_SUCCESS when a reply is wanted).
+ * honours (REQUEST_SUCCESS when a reply is wanted); a program that sends
+ * global requests of its own (tcpip-forward, RFC 4254 7.1) or answers
+ * them builds and reads them itself.
+ *
+ * Slot 0: a client whose program numbers its session channel 0 sets
+ * keep_first, and then only a "session" channel takes slot 0, so a
+ * connection without a session (ssh -N) never gives the session's number
+ * to a forwarded channel.
  *
  * Channel requests read (RFC 4254 6.2 to 6.10, OpenSSH PROTOCOL 2.1):
  * pty-req, env, shell, exec, subsystem, window-change, signal,
@@ -48,8 +62,8 @@
  * Windows (RFC 4254 5.2): local_window is what the peer may still send
  * here, remote_window what this side may still send; window_size is the
  * window this side keeps up for the channel (SSH_CHANNEL_WINDOW, or the
- * size given to ssh_channel_take_open).  Data beyond the
- * local window or longer than the announced maximum packet is a protocol
+ * size given to ssh_channel_open or ssh_channel_take_open).  Data beyond
+ * the local window or longer than the announced maximum packet is a protocol
  * error (EPROTO).  A window adjustment that would take the window past
  * 2^32 - 1 is EPROTO (5.2 says the window must not be increased above
  * that).
@@ -86,11 +100,12 @@
 #define SSH_EXTENDED_DATA_STDERR		1
 
 /*
- * The most channels of one connection: a session and 32 forwarded X11
- * connections.  sshd limits the sessions with MaxSessions (default 10,
+ * The most channels of one connection: a session, 32 forwarded X11
+ * connections and 32 forwarded TCP connections (or 64 of them without
+ * X11).  sshd limits the sessions with MaxSessions (default 10,
  * OpenSSH's).
  */
-#define SSH_CHANNEL_MAX			33U
+#define SSH_CHANNEL_MAX			65U
 
 /* The window announced and kept up (2 MiB), and the largest data packet announced. */
 #define SSH_CHANNEL_WINDOW		(2U * 1024U * 1024U)
@@ -150,11 +165,13 @@ struct ssh_channel {
  * The channels of one connection.
  *
  * no_more_sessions is 1 after the client's no-more-sessions@openssh.com
- * (a further session open is refused).
+ * (a further session open is refused).  keep_first 1 keeps slot 0 for a
+ * "session" channel (see the top); ssh_channels_init sets it to 0.
  */
 struct ssh_channels {
 	struct ssh_channel channel[SSH_CHANNEL_MAX];
 	int no_more_sessions;
+	int keep_first;
 };
 
 /* The channel requests read. */
@@ -205,7 +222,7 @@ struct ssh_channel_request {
 	size_t message_size;
 };
 
-/* Clears the table: every slot free, no_more_sessions 0. */
+/* Clears the table: every slot free, no_more_sessions and keep_first 0. */
 void ssh_channels_init(struct ssh_channels *channels);
 
 /*
@@ -215,6 +232,18 @@ void ssh_channels_init(struct ssh_channels *channels);
  * (no free slot) or the error recorded in out.
  */
 int ssh_channel_open_session(struct ssh_channels *channels, struct ssh_buf *out, struct ssh_channel **channel);
+
+/*
+ * Takes a free slot for a channel this side opens of type (a
+ * NUL-terminated name) with a window of window_size (1 to
+ * SSH_CHANNEL_WINDOW; state OPENING), and appends its CHANNEL_OPEN, with
+ * data_size bytes of data after the maximum packet size (what belongs to
+ * the type: for "direct-tcpip", RFC 4254 7.2's host, port, originator
+ * address and port), to out.  *channel receives the slot.  Returns 0,
+ * EAGAIN (no free slot), EINVAL (no type, a bad window_size, data_size
+ * without data) or the error recorded in out.
+ */
+int ssh_channel_open(struct ssh_channels *channels, const char *type, uint32_t window_size, const uint8_t *data, size_t data_size, struct ssh_buf *out, struct ssh_channel **channel);
 
 /*
  * Reads a CHANNEL_OPEN from the peer (the server side) and answers it.
@@ -259,6 +288,16 @@ int ssh_channel_take_open(struct ssh_channels *channels, const uint8_t *payload,
  * or the error recorded in out (the channel is then left as it was).
  */
 int ssh_channel_answer_open(struct ssh_channels *channels, struct ssh_channel *channel, int accept, struct ssh_buf *out);
+
+/*
+ * Refuses an open taken by ssh_channel_take_open with reason (one of
+ * SSH_OPEN_*, RFC 4254 5.1: ADMINISTRATIVELY_PROHIBITED for a refusal of
+ * policy, RESOURCE_SHORTAGE for a limit of the program's): appends
+ * OPEN_FAILURE with the reason's text and frees the slot.  A channel not
+ * ANSWERING, or a reason out of 1 to 4, is EINVAL.  Returns 0, EINVAL, or
+ * the error recorded in out (the channel is then left as it was).
+ */
+int ssh_channel_refuse_open(struct ssh_channels *channels, struct ssh_channel *channel, uint32_t reason, struct ssh_buf *out);
 
 /*
  * Reads OPEN_CONFIRMATION or OPEN_FAILURE for a channel this side opened
