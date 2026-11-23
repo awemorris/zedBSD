@@ -98,6 +98,7 @@ static const struct {
 
 static int child_connect(struct child *child);
 static void child_round(struct child *child);
+static void child_flush(struct child *child);
 static void child_service(void *context);
 static int child_receive(struct child *child);
 static int child_take(struct child *child, const struct x11_link_frame *frame);
@@ -160,6 +161,11 @@ mikuterm_x11_child(void)
 			(void)x11server_tick(child.server, (uint32_t)now, &wake);
 			if (wake - (uint32_t)now < timeout)
 				timeout = wake - (uint32_t)now;
+
+			/* The replies and events the tick made go to the parent before the wait, not after it. */
+			child_flush(&child);
+			if (child.ending)
+				break;
 		}
 		handles[0] = child.event;
 		if (child.backend != NULL) {
@@ -257,14 +263,29 @@ child_round(
 	if (error != 0)
 		return;
 
-	/* The core's work. */
+	/* The core's events and the clients' replies, and the frames. */
+	child_flush(child);
+}
+
+/*
+ * Sends what the core has: its events (a client closed, more credit for
+ * the parent), the clients' replies within the parent's credit, and the
+ * frames queued.
+ */
+static void
+child_flush(
+	struct child *child)
+{
+	int error;
+
+	/* The core's events and replies. */
 	if (child->server != NULL) {
 		child_events(child);
 		child_output(child);
 		child_events(child);
 	}
 
-	/* The frames. */
+	/* The frames; a link that cannot take them ends the child. */
 	error = child_send(child);
 	if (error != 0)
 		child->ending = 1;

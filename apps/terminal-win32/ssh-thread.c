@@ -1321,6 +1321,7 @@ thread_dial(
 	size_t count;
 	size_t index;
 	unsigned timeout;
+	int nodelay;
 	int error;
 
 	/* The host's addresses (the thread waits for the system's answer). */
@@ -1354,8 +1355,16 @@ thread_dial(
 			return THREAD_CLOSING;
 		}
 
-		/* Connected. */
+		/*
+		 * Connected: small packets go at once (TCP_NODELAY, as OpenSSH
+		 * sets on an interactive connection), so that typing and the X
+		 * clients' round trips do not wait on Nagle and delayed ACKs.
+		 * Without it the connection still works, slower; that is logged.
+		 */
 		if (error == 0) {
+			nodelay = kl_socket_set_option(socket, KL_SOCKET_NO_DELAY, 1);
+			if (nodelay != 0)
+				printf("MIKUTERM SOCKET no-delay failed errno=%d\n", nodelay);
 			link->socket = socket;
 			link->address = addresses[index];
 			return THREAD_DONE;
