@@ -99,10 +99,15 @@ zedBSD's `ssh`:
   `StrictHostKeyChecking` (`yes`, `no`, `ask`, `accept-new`, `off`),
   `UserKnownHostsFile` (the first path), `GlobalKnownHostsFile`, `BatchMode`,
   `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`,
-  `RequestTTY`, `PasswordAuthentication`, `PubkeyAuthentication`, `LogLevel`,
+  `PasswordAuthentication`, `PubkeyAuthentication`,
   `ForwardX11`, `ForwardX11Trusted`, `ForwardX11Timeout`, `LocalForward`,
   `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
   `ClearAllForwardings`, `RemoteCommand` (section 4.4).
+- Read and checked, but changing nothing in mikuterm: `RequestTTY` (a tab is
+  a terminal, so mikuterm always asks the server for one, for a
+  `RemoteCommand` too) and `LogLevel` (mikuterm shows no debug lines). The
+  values are still checked, so a line zedBSD's `ssh` would refuse is an error
+  here too.
 - `SessionType none` (a connection that only forwards ports) is read but
   refused: the tab says `ssh/config: SessionType none is not supported` and
   does not connect.
@@ -200,12 +205,14 @@ the server) are not supported; `DynamicForward` is an error of
 `ssh/config`.
 
 `RemoteCommand` runs that command instead of the shell, on a terminal as the
-shell would be. Its tokens are OpenSSH's: `%%`, `%h` (the host's address),
-`%n` and `%k` (the name as given), `%p`, `%r` (the remote user), `%u` (the
-Windows user), `%d` (the user's profile folder), `%l` (this PC's name),
-`%L` (that name up to its first dot) and `%j` (empty). `%C` and `%i`
-(Windows has no user number) are errors, as are an unknown token and a `%`
-at the end; the tab then names the problem and does not connect.
+shell would be (OpenSSH's and zedBSD's `ssh` ask for a terminal for a command
+only with `-t` or `RequestTTY`; mikuterm always does). Its tokens are
+OpenSSH's: `%%`, `%h` (the host's address), `%n` and `%k` (the name as
+given), `%p`, `%r` (the remote user), `%u` (the Windows user), `%d` (the
+user's profile folder), `%l` (this PC's name), `%L` (that name up to its
+first dot) and `%j` (empty). `%C` and `%i` (Windows has no user number) are
+errors, as are an unknown token and a `%` at the end; the tab then names the
+problem and does not connect.
 
 How a forwarded port differs from OpenSSH's: the server's connections to a
 `RemoteForward` are refused once the shell ended (OpenSSH takes them while
