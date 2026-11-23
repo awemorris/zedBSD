@@ -22,8 +22,13 @@
 /* The Vulkan WSI extension of the Wayland backend's surfaces. */
 #define X11_WAYLAND_WSI		"VK_KHR_wayland_surface"
 
-/* The most clients the socket serves at once, and the most descriptors the transport waits on (the listening socket and the clients). */
-#define X11_UNIX_CLIENTS	8U
+/*
+ * The most clients the socket serves at once (as many as the core takes
+ * when its options leave clients_max 0, so that the core is the one that
+ * refuses a connection, and says so in its log), and the most descriptors
+ * the transport waits on (the listening socket and the clients).
+ */
+#define X11_UNIX_CLIENTS	64U
 #define X11_UNIX_POLLFDS	(1U + X11_UNIX_CLIENTS)
 
 /* The connection to the desktop (wayland.c), and the socket and its clients (unix.c). */

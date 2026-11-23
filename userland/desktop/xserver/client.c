@@ -282,9 +282,11 @@ x11server_connect(
 			break;
 	}
 
-	/* No room: the connection is refused. */
-	if (index == server->clients_max)
+	/* No room: the connection is refused, and the log says so. */
+	if (index == server->clients_max) {
+		x11_log(server, "X11 CONNECT refused: all %u client slots are in use", server->clients_max);
 		return EAGAIN;
+	}
 
 	/*
 	 * The client's number: its slot below a generation that is never 0,

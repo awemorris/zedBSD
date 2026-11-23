@@ -167,7 +167,10 @@ struct sync_wait {
 /*
  * SYNC's state of a server: SERVERTIME's value and the server's time it
  * was last brought up to, the waits under way, whether a wait ended since
- * the last tick (its client goes on), and each client's priority.
+ * the last tick (its client goes on), each client's priority, and every
+ * alarm, oldest first (an alarm is in the list from its creation until it
+ * is freed, so that a counter's change looks at the alarms and not at
+ * every client's resources).
  */
 struct x11_sync {
 	int64_t servertime;
@@ -177,6 +180,9 @@ struct x11_sync {
 	unsigned wait_capacity;
 	int woke;
 	int32_t *priorities;
+	struct sync_alarm **alarms;
+	unsigned alarm_count;
+	unsigned alarm_capacity;
 };
 
 static struct x11_sync *sync_state(struct x11server *server);
@@ -207,11 +213,11 @@ static int64_t sync_read64(const uint8_t *bytes, int msb);
 static void sync_write64(uint8_t *bytes, int64_t value, int msb);
 static void sync_counter_changed(struct x11server *server, uint32_t counter, int64_t old_value, int64_t new_value);
 static void sync_counter_destroyed(struct x11server *server, uint32_t counter, int64_t value);
-static int sync_compare_down(const void *a, const void *b);
 static void sync_alarm_check(struct x11server *server, struct sync_alarm *alarm, int64_t old_value);
 static void sync_alarm_fire(struct x11server *server, struct sync_alarm *alarm);
 static void sync_alarm_notify(struct x11server *server, struct sync_alarm *alarm, int64_t alarm_value, int64_t counter_value);
 static void sync_alarm_free(struct x11server *server, struct sync_alarm *alarm);
+static int sync_alarm_list_add(struct x11_sync *state, struct sync_alarm *alarm);
 static int sync_wait_add(struct x11_sync *state, struct sync_wait *wait);
 static void sync_wait_check(struct x11server *server, struct sync_wait *wait, uint32_t counter, int64_t old_value, int64_t new_value);
 static void sync_wait_end(struct x11server *server, struct sync_wait *wait, int notify);
@@ -313,12 +319,8 @@ x11_sync_forget_client(
 {
 	struct x11_sync *state;
 	struct sync_alarm *alarm;
-	uint32_t *ids;
-	size_t count;
-	size_t id_index;
 	unsigned slot;
 	unsigned listed;
-	int error;
 
 	/* Its waits, without events. */
 	state = server->sync;
@@ -341,24 +343,21 @@ x11_sync_forget_client(
 	sync_release(server, index, X11_RESOURCE_ALARM);
 	sync_release(server, index, X11_RESOURCE_FENCE);
 
-	/* The other clients' alarms no longer tell it. */
-	for (slot = 0U; slot < server->clients_max; slot++) {
-		error = x11_resource_owned(server, slot, X11_RESOURCE_ALARM, &ids, &count);
-		if (error != 0)
-			continue;
-		for (id_index = 0U; id_index < count; id_index++) {
-			alarm = x11_resource_find(server, ids[id_index], X11_RESOURCE_ALARM);
-			if (alarm == NULL)
+	/* No state, no alarms. */
+	state = server->sync;
+	if (state == NULL)
+		return;
+
+	/* Succeeded: the other clients' alarms no longer tell it. */
+	for (slot = 0U; slot < state->alarm_count; slot++) {
+		alarm = state->alarms[slot];
+		for (listed = 0U; listed < alarm->client_count; listed++) {
+			if (alarm->clients[listed] != index)
 				continue;
-			for (listed = 0U; listed < alarm->client_count; listed++) {
-				if (alarm->clients[listed] != index)
-					continue;
-				alarm->clients[listed] = alarm->clients[alarm->client_count - 1U];
-				alarm->client_count--;
-				break;
-			}
+			alarm->clients[listed] = alarm->clients[alarm->client_count - 1U];
+			alarm->client_count--;
+			break;
 		}
-		free(ids);
 	}
 }
 
@@ -375,13 +374,9 @@ x11_sync_tick(
 {
 	struct x11_sync *state;
 	struct sync_alarm *alarm;
-	uint32_t *ids;
-	size_t count;
-	size_t id_index;
 	unsigned slot;
 	unsigned condition;
 	int woke;
-	int error;
 
 	/* Nothing made. */
 	*timed = 0;
@@ -401,16 +396,10 @@ x11_sync_tick(
 	}
 
 	/* So does an active alarm on it. */
-	for (slot = 0U; slot < server->clients_max && !*timed; slot++) {
-		error = x11_resource_owned(server, slot, X11_RESOURCE_ALARM, &ids, &count);
-		if (error != 0)
-			continue;
-		for (id_index = 0U; id_index < count; id_index++) {
-			alarm = x11_resource_find(server, ids[id_index], X11_RESOURCE_ALARM);
-			if (alarm != NULL && alarm->counter == SYNC_SERVERTIME_XID && alarm->state == SYNC_ALARM_ACTIVE)
-				*timed = 1;
-		}
-		free(ids);
+	for (slot = 0U; slot < state->alarm_count; slot++) {
+		alarm = state->alarms[slot];
+		if (alarm->counter == SYNC_SERVERTIME_XID && alarm->state == SYNC_ALARM_ACTIVE)
+			*timed = 1;
 	}
 
 	/* Succeeded: whether a wait ended since the last tick. */
@@ -438,6 +427,7 @@ x11_sync_fini(
 	for (slot = 0U; slot < state->wait_count; slot++)
 		sync_wait_free(state->waits[slot]);
 	free(state->waits);
+	free(state->alarms);
 	free(state->priorities);
 	free(state);
 	server->sync = NULL;
@@ -839,9 +829,16 @@ sync_create_alarm(
 		return code;
 	}
 
-	/* Known by its id. */
+	/* Known by its id, and among the alarms a counter's change looks at. */
 	error = x11_resource_add(request->server, id, X11_RESOURCE_ALARM, alarm);
 	if (error != 0) {
+		x11_memory_release(request->server, request->index, sizeof(*alarm));
+		free(alarm);
+		return X11_BAD_ALLOC;
+	}
+	error = sync_alarm_list_add(request->server->sync, alarm);
+	if (error != 0) {
+		x11_resource_remove(request->server, id);
 		x11_memory_release(request->server, request->index, sizeof(*alarm));
 		free(alarm);
 		return X11_BAD_ALLOC;
@@ -1510,12 +1507,8 @@ sync_counter_changed(
 	struct x11_sync *state;
 	struct sync_alarm *alarm;
 	struct sync_wait *wait;
-	uint32_t *ids;
-	size_t count;
-	size_t id_index;
 	unsigned slot;
 	unsigned total;
-	int error;
 
 	/* Each wait (one that ends leaves the list, the last taking its place). */
 	state = server->sync;
@@ -1529,18 +1522,12 @@ sync_counter_changed(
 		slot++;
 	}
 
-	/* Each active alarm on it. */
-	for (slot = 0U; slot < server->clients_max; slot++) {
-		error = x11_resource_owned(server, slot, X11_RESOURCE_ALARM, &ids, &count);
-		if (error != 0)
+	/* Each alarm on it, oldest first (firing one changes no list). */
+	for (slot = 0U; slot < state->alarm_count; slot++) {
+		alarm = state->alarms[slot];
+		if (alarm->counter != counter)
 			continue;
-		for (id_index = 0U; id_index < count; id_index++) {
-			alarm = x11_resource_find(server, ids[id_index], X11_RESOURCE_ALARM);
-			if (alarm == NULL || alarm->counter != counter)
-				continue;
-			sync_alarm_check(server, alarm, old_value);
-		}
-		free(ids);
+		sync_alarm_check(server, alarm, old_value);
 	}
 
 	/* Succeeded: the window manager hears of it. */
@@ -1561,12 +1548,9 @@ sync_counter_destroyed(
 	struct x11_sync *state;
 	struct sync_alarm *alarm;
 	struct sync_wait *wait;
-	uint32_t *ids;
-	size_t count;
 	size_t index;
 	unsigned slot;
 	int ended;
-	int error;
 
 	/* Each wait with a condition on it ends. */
 	state = server->sync;
@@ -1589,22 +1573,20 @@ sync_counter_destroyed(
 		sync_wait_end(server, wait, 1);
 	}
 
+	/* No alarms. */
+	if (state == NULL)
+		return;
+
 	/* Succeeded: each alarm on it is inactive and told, the newest first (as the X.Org server tells them). */
-	for (slot = 0U; slot < server->clients_max; slot++) {
-		error = x11_resource_owned(server, slot, X11_RESOURCE_ALARM, &ids, &count);
-		if (error != 0)
+	slot = state->alarm_count;
+	while (slot > 0U) {
+		slot--;
+		alarm = state->alarms[slot];
+		if (alarm->counter != counter)
 			continue;
-		if (count > 1U)
-			qsort(ids, count, sizeof(*ids), sync_compare_down);
-		for (index = 0U; index < count; index++) {
-			alarm = x11_resource_find(server, ids[index], X11_RESOURCE_ALARM);
-			if (alarm == NULL || alarm->counter != counter)
-				continue;
-			alarm->state = SYNC_ALARM_INACTIVE;
-			alarm->counter = 0U;
-			sync_alarm_notify(server, alarm, alarm->test_value, value);
-		}
-		free(ids);
+		alarm->state = SYNC_ALARM_INACTIVE;
+		alarm->counter = 0U;
+		sync_alarm_notify(server, alarm, alarm->test_value, value);
 	}
 }
 
@@ -1725,9 +1707,21 @@ sync_alarm_free(
 	struct x11server *server,
 	struct sync_alarm *alarm)
 {
+	struct x11_sync *state;
 	struct sync_counter *counter;
 	int64_t value;
+	unsigned slot;
 	int found;
+
+	/* Out of the alarms' list, the later ones moving up (the list keeps its order). */
+	state = server->sync;
+	for (slot = 0U; state != NULL && slot < state->alarm_count; slot++) {
+		if (state->alarms[slot] != alarm)
+			continue;
+		memmove(&state->alarms[slot], &state->alarms[slot + 1U], (state->alarm_count - slot - 1U) * sizeof(*state->alarms));
+		state->alarm_count--;
+		break;
+	}
 
 	/* Its clients told, with its counter's value (0 without one). */
 	alarm->state = SYNC_ALARM_DESTROYED;
@@ -1742,6 +1736,33 @@ sync_alarm_free(
 	/* Succeeded: its charge and itself. */
 	x11_memory_release(server, alarm->owner, sizeof(*alarm));
 	free(alarm);
+}
+
+/* Puts a new alarm at the end of the alarms' list.  Returns 0, or ENOMEM. */
+static int
+sync_alarm_list_add(
+	struct x11_sync *state,
+	struct sync_alarm *alarm)
+{
+	struct sync_alarm **grown;
+	unsigned capacity;
+
+	/* More room, doubling. */
+	if (state->alarm_count == state->alarm_capacity) {
+		capacity = state->alarm_capacity * 2U;
+		if (capacity == 0U)
+			capacity = 8U;
+		grown = realloc(state->alarms, capacity * sizeof(*grown));
+		if (grown == NULL)
+			return ENOMEM;
+		state->alarms = grown;
+		state->alarm_capacity = capacity;
+	}
+
+	/* Succeeded: kept. */
+	state->alarms[state->alarm_count] = alarm;
+	state->alarm_count++;
+	return 0;
 }
 
 /* Keeps a wait.  Returns 0, or ENOMEM. */
@@ -1991,25 +2012,4 @@ sync_release(
 
 	/* Succeeded: none is left. */
 	free(ids);
-}
-
-/* Orders ids from the largest down (the newest a client made first). */
-static int
-sync_compare_down(
-	const void *a,
-	const void *b)
-{
-	uint32_t first;
-	uint32_t second;
-
-	/* The two ids. */
-	first = *(const uint32_t *)a;
-	second = *(const uint32_t *)b;
-
-	/* Succeeded: the larger first. */
-	if (first > second)
-		return -1;
-	if (first < second)
-		return 1;
-	return 0;
 }

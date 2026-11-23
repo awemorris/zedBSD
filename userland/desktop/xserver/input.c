@@ -969,6 +969,40 @@ x11_input_allow(
 	input_allow(server, index, mode, time);
 }
 
+/*
+ * Changes the pointer's map (the logical button of each physical button,
+ * X11_BUTTONS of them, checked by the caller) as SetPointerMapping does:
+ * Busy while a button whose map changes is down, else the map, which
+ * every client hears of with MappingNotify.  Returns the status (Success
+ * or Busy).
+ */
+unsigned
+x11_input_button_map(
+	struct x11server *server,
+	const uint8_t *map)
+{
+	unsigned button;
+	int changing;
+	int down;
+
+	/* Busy while a button whose map changes is down. */
+	for (button = 0U; button < X11_BUTTONS; button++) {
+		changing = 0;
+		if (map[button] != server->button_map[button])
+			changing = 1;
+		down = 0;
+		if ((server->physical_buttons & (1U << button)) != 0U)
+			down = 1;
+		if (changing && down)
+			return MAPPING_BUSY;
+	}
+
+	/* Succeeded: the map, which every client hears of. */
+	memcpy(server->button_map, map, X11_BUTTONS);
+	input_mapping_notify(server, MAPPING_POINTER, 0U, 0U);
+	return MAPPING_SUCCESS;
+}
+
 /* Holds a device event at the end of the ring (a full ring drops it). */
 static void
 input_queue(
@@ -3969,7 +4003,7 @@ input_set_pointer_mapping(
 	unsigned other;
 	unsigned status;
 
-	/* A map of every button. */
+	/* A map of every button (each one's logical button, distinct but for 0). */
 	client = &server->clients[index];
 	if (length < 4U)
 		return X11_BAD_LENGTH;
@@ -3989,16 +4023,8 @@ input_set_pointer_mapping(
 		}
 	}
 
-	/* Busy while a button whose map changes is down; else the map, which every client hears of. */
-	status = MAPPING_SUCCESS;
-	for (button = 0U; button < count; button++) {
-		if (request[4 + button] != server->button_map[button] && (server->physical_buttons & (1U << button)) != 0U)
-			status = MAPPING_BUSY;
-	}
-	if (status == MAPPING_SUCCESS) {
-		memcpy(server->button_map, request + 4, X11_BUTTONS);
-		input_mapping_notify(server, MAPPING_POINTER, 0U, 0U);
-	}
+	/* The map, unless a button whose map changes is down. */
+	status = x11_input_button_map(server, request + 4);
 
 	/* Succeeded: the status. */
 	memset(reply, 0, sizeof(reply));
