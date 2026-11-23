@@ -43,6 +43,8 @@
 #include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/process.h"
+#include "kern/random.h"
+#include "kern/random-crypto.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
 #include "internal.h"
@@ -463,6 +465,17 @@ enum tcp_drain {
 #define CONFIG_TCP_ISN_WRAP_BEFORE 0U
 #endif
 
+/*
+ * The initial sequence number is a clock plus a keyed hash of the
+ * connection's four-tuple (RFC 6528 section 3): the clock moves on once
+ * every TCP_ISN_CLOCK_US microseconds, so the numbers of successive
+ * connections of one four-tuple go up, and the hash, which takes a key of
+ * TCP_ISN_KEY_BYTES secret bytes, puts each four-tuple at a place in the
+ * sequence space that a third party cannot work out.
+ */
+#define TCP_ISN_CLOCK_US 4U
+#define TCP_ISN_KEY_BYTES 32U
+
 /* How a reset that came in is taken (RFC 5961 section 3.2). */
 enum tcp_reset_check {
 	/* Its sequence number is not within the window: it is ignored. */
@@ -591,6 +604,32 @@ static atomic_uint_t tcp_receive_extra_packets;
  */
 static atomic_uint_t tcp_time_wait_count;
 
+/*
+ * The secret keys of the initial sequence numbers' hash: the first made
+ * when TCP starts, from what the random number generator has by then, and
+ * the second made once from a seeded generator when the first was made
+ * before the generator was seeded.  A key is written once, before its
+ * index is published in tcp_isn_key_index, and never changes after, so
+ * the hash reads it without a lock.
+ */
+static uint8_t tcp_isn_keys[2][TCP_ISN_KEY_BYTES];
+
+/*
+ * Which of tcp_isn_keys the hash uses now: 0, then 1 once the second key
+ * is written.  It is published with release ordering and read with
+ * acquire ordering, so a reader that sees 1 sees the key written.
+ */
+static atomic_uint_t tcp_isn_key_index;
+
+/*
+ * Whether the second key is still to be made: 0 while the first key was
+ * made before the generator was seeded and no one has started on the
+ * second, 1 once a caller has claimed the making of it by compare and
+ * exchange, or when the first key needs no successor.  It goes from 0 to
+ * 1 once and never back.
+ */
+static atomic_uint_t tcp_isn_rekey_claimed;
+
 static struct tcp_endpoint * tcp_endpoint(struct socket *socket);
 static void tcp_forget_peer(struct tcp_endpoint *endpoint);
 static void tcp_listener_remove(struct tcp_endpoint *child);
@@ -627,7 +666,13 @@ static int tcp_send_ack(struct tcp_endpoint *endpoint, int duplicate);
 static int tcp_send_ack_news(struct tcp_endpoint *endpoint, int duplicate, int news_only);
 static int tcp_sequence_before(uint32_t left, uint32_t right);
 static int tcp_sequence_at_or_before(uint32_t left, uint32_t right);
-static uint32_t tcp_initial_sequence(uint32_t chosen);
+static uint32_t tcp_initial_sequence(const struct tcp_endpoint *endpoint);
+static const uint8_t * tcp_isn_key(void);
+static void tcp_isn_key_init(void);
+static void tcp_connect_source(struct tcp_endpoint *endpoint);
+static int tcp_abort_resets(enum tcp_state state);
+static void tcp_abort_connection(struct tcp_endpoint *endpoint);
+static int tcp_syn_sent_acceptable_locked(const struct tcp_endpoint *endpoint, uint8_t flags, uint32_t acknowledgement);
 static uint64_t tcp_backoff_timeout(uint64_t rto, unsigned count);
 static uint64_t tcp_rto_locked(const struct tcp_endpoint *endpoint);
 static void tcp_rtt_sample_locked(struct tcp_endpoint *endpoint, uint64_t now);
@@ -846,6 +891,9 @@ tcp_init(
 	    "TCP socket registry");
 	spin_init(&tcp_ack_lock, LOCK_RANK_NETWORK, "TCP delayed acknowledgements");
 	tcp_ack_head = NULL;
+
+	/* Makes the secret key the initial sequence numbers are hashed with. */
+	tcp_isn_key_init();
 
 	/* Reports why the registration failed. */
 	error = ipv4_protocol_register(IPPROTO_TCP, tcp_input);
@@ -3650,25 +3698,182 @@ tcp_sequence_at_or_before(
 }
 
 /*
- * Gives the initial sequence number of a new connection.
+ * Gives the initial sequence number of a new connection, once its local
+ * and remote addresses and ports are known.
  *
- * chosen is the number the caller picked; a build with
+ * It is a clock that moves on once every TCP_ISN_CLOCK_US microseconds
+ * plus a keyed hash of the four-tuple (RFC 6528 section 3).  A new
+ * connection of a four-tuple therefore starts past where the last one did,
+ * which a peer still in TIME_WAIT takes as a new connection (RFC 6191),
+ * while the number of a connection of another four-tuple tells nothing of
+ * where this one starts.  The hash is BLAKE2s-256 of the secret key
+ * followed by the four-tuple; BLAKE2s has no length extension, so the
+ * hash of a secret prefix serves as a keyed function.  A build with
  * CONFIG_TCP_ISN_WRAP_BEFORE puts the first data byte that many bytes
  * before the wrap instead, the SYN taking the number before it.
+ *
+ * Procedure referenced: RFC 6528 section 3 (ISN = M + F(localip,
+ * localport, remoteip, remoteport, secretkey), M a timer of 4
+ * microseconds, F a pseudorandom function of a secret key).
  */
 static uint32_t
 tcp_initial_sequence(
-	uint32_t chosen)
+	const struct tcp_endpoint *endpoint)
 {
+	struct blake2s_state hash;
+	uint8_t digest[BLAKE2S_DIGEST_BYTES];
+	uint8_t tuple[1U + 16U + 2U + 16U + 2U];
+	const uint8_t *key;
+	uint64_t microseconds;
 	uint32_t wrap_before;
+	uint32_t clock;
+	uint32_t offset;
+	size_t length;
+	int ipv6;
 
-	/* The ordinary build keeps the number the caller picked. */
+	/* A test build starts the sequence numbers just before they wrap. */
 	wrap_before = (uint32_t)CONFIG_TCP_ISN_WRAP_BEFORE;
-	if (wrap_before == 0U)
-		return chosen;
+	if (wrap_before != 0U)
+		return 0U - wrap_before - 1U;
 
-	/* Succeeded: the SYN's number, one before the first data byte. */
-	return 0U - wrap_before - 1U;
+	/*
+	 * Lays out the four-tuple: the family, then this end's address and
+	 * port, then the peer's, each in network byte order.
+	 */
+	ipv6 = inet_socket_speaks_ipv6(&endpoint->tcp.inet);
+	length = 0;
+	if (ipv6) {
+		tuple[length] = 6U;
+		length++;
+		kern_memcpy(&tuple[length], endpoint->tcp.inet.local6.s6_addr, 16U);
+		length += 16U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.local_port);
+		length += 2U;
+		kern_memcpy(&tuple[length], endpoint->tcp.inet.remote6.s6_addr, 16U);
+		length += 16U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.remote_port);
+		length += 2U;
+	} else {
+		tuple[length] = 4U;
+		length++;
+		wire_put32(&tuple[length], endpoint->tcp.inet.local_address);
+		length += 4U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.local_port);
+		length += 2U;
+		wire_put32(&tuple[length], endpoint->tcp.inet.remote_address);
+		length += 4U;
+		wire_put16(&tuple[length], endpoint->tcp.inet.remote_port);
+		length += 2U;
+	}
+
+	/* Hashes the secret key and then the four-tuple: F of RFC 6528. */
+	key = tcp_isn_key();
+	blake2s_init(&hash);
+	blake2s_update(&hash, key, TCP_ISN_KEY_BYTES);
+	blake2s_update(&hash, tuple, length);
+	blake2s_final(&hash, digest);
+	offset = wire_get32(digest);
+
+	/* Clears what the key went through, so the stack does not keep it. */
+	kern_memset_explicit(&hash, 0, sizeof(hash));
+	kern_memset_explicit(digest, 0, sizeof(digest));
+
+	/* The clock M of RFC 6528, which wraps about every 4.8 hours. */
+	microseconds = kern_ticks_to_us(clock_ticks());
+	clock = (uint32_t)(microseconds / TCP_ISN_CLOCK_US);
+
+	/* Succeeded: the clock plus the four-tuple's place in the sequence space. */
+	return clock + offset;
+}
+
+/*
+ * Gives the secret key of the initial sequence numbers' hash.
+ *
+ * A first key made before the random number generator was seeded is
+ * replaced, once, by one made at the first call after the seeding.  The
+ * caller that claims the replacement writes the second key and then
+ * publishes it; any other caller meanwhile goes on with the first.  The
+ * numbers of a four-tuple jump once at the replacement, which only a
+ * connection reopened from TIME_WAIT across it, early in boot, can notice.
+ */
+static const uint8_t *
+tcp_isn_key(
+	void)
+{
+	unsigned index;
+	unsigned claimed;
+	unsigned expected;
+	int exchanged;
+	int seeded;
+	int error;
+
+	/* The second key, once it is published. */
+	index = atomic_load_acquire(&tcp_isn_key_index);
+	if (index != 0U)
+		return tcp_isn_keys[1];
+
+	/* The first key, while it needs no successor or another caller makes one. */
+	claimed = atomic_load_acquire(&tcp_isn_rekey_claimed);
+	if (claimed != 0U)
+		return tcp_isn_keys[0];
+
+	/* The first key, until the generator is seeded. */
+	seeded = kern_random_seeded();
+	if (!seeded)
+		return tcp_isn_keys[0];
+
+	/* Claims the making of the second key; a caller that lost the race goes on with the first. */
+	expected = 0U;
+	exchanged = atomic_compare_exchange(&tcp_isn_rekey_claimed, &expected, 1U);
+	if (!exchanged)
+		return tcp_isn_keys[0];
+
+	/* Makes the second key from the seeded generator; a failure keeps the first. */
+	error = kern_random_read(tcp_isn_keys[1], TCP_ISN_KEY_BYTES, 0);
+	if (error != 0)
+		return tcp_isn_keys[0];
+
+	/*
+	 * Publishing the index makes every later call take the second key,
+	 * whose bytes the release ordering makes visible first.
+	 */
+	atomic_store_release(&tcp_isn_key_index, 1U);
+
+	/* Succeeded: the second key. */
+	return tcp_isn_keys[1];
+}
+
+/*
+ * Makes the first secret key of the initial sequence numbers' hash, as
+ * TCP starts.
+ *
+ * The random number generator is up by then but may not be seeded: a
+ * platform without an entropy source of its own seeds it from the timing
+ * of the first timer ticks, and until then its output comes from the wall
+ * clock and the counter alone.  It is not waited for, since TCP starts
+ * during boot; tcp_isn_key() replaces such a key once the generator is
+ * seeded.  A generator not up at all leaves the first key zero, to be
+ * replaced the same way.
+ */
+static void
+tcp_isn_key_init(
+	void)
+{
+	int seeded;
+	int error;
+
+	/* Whether the generator was seeded before the key is drawn from it. */
+	seeded = kern_random_seeded();
+
+	/* Draws the first key without waiting for the seed. */
+	error = kern_random_read(tcp_isn_keys[0], TCP_ISN_KEY_BYTES, 0);
+
+	/*
+	 * A key drawn from a seeded generator is kept for good: marking the
+	 * replacement as claimed means no caller makes a second key.
+	 */
+	if (error == 0 && seeded)
+		atomic_store_release(&tcp_isn_rekey_claimed, 1U);
 }
 
 /*
@@ -4856,6 +5061,37 @@ tcp_segment_window_locked(
 
 	/* Succeeded: the window in bytes. */
 	return window;
+}
+
+/*
+ * Settles the local address of a connection about to send its SYN, as
+ * the SYN's own route lookup would, so the initial sequence number is
+ * hashed from the address the connection then keeps.  A socket bound to
+ * an address keeps that one.  Without a route the address stays
+ * unspecified, and the SYN then fails the same way.  Called without the
+ * socket lock, which the route lookup must not be taken under.
+ */
+static void
+tcp_connect_source(
+	struct tcp_endpoint *endpoint)
+{
+	struct net_device *device;
+	struct in6_addr source6;
+	uint32_t source;
+	int ipv6;
+	int error;
+
+	/* Looks up the way to the peer, which records the source it takes. */
+	ipv6 = inet_socket_speaks_ipv6(&endpoint->tcp.inet);
+	if (ipv6) {
+		error = tcp6_route(endpoint, &device, &source6);
+		if (error == 0 && device != NULL)
+			net_device_release(device);
+	} else {
+		error = tcp_route(endpoint, &device, &source);
+		if (error == 0)
+			net_device_release(device);
+	}
 }
 
 /*
@@ -7586,9 +7822,13 @@ tcp_connect(
 		}
 	}
 
+	/*
+	 * Settles this end's address before the initial sequence number,
+	 * which is hashed from it, is chosen.
+	 */
+	tcp_connect_source(endpoint);
+
 	/* Starts a new attempt with a fresh generation and sequence space. */
-	endpoint->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
-	    endpoint->tcp.inet.local_port;
 	irq = spin_lock_irqsave(&socket->lock);
 
 	endpoint->tcp.connect_generation++;
@@ -7599,13 +7839,11 @@ tcp_connect(
 	endpoint->tcp.connect_wait_deadline = 0;
 
 	/*
-	 * Make distinct attempts use distinct wire sequence spaces even when
-	 * the scheduler tick did not advance between them.
+	 * The initial sequence number, from the clock and the four-tuple:
+	 * a later attempt, or a later connection of the same four-tuple,
+	 * starts past this one.
 	 */
-	endpoint->tcp.send_next ^= generation * 2654435761U;
-
-	/* A test build may start the sequence numbers just before they wrap. */
-	endpoint->tcp.send_next = tcp_initial_sequence(endpoint->tcp.send_next);
+	endpoint->tcp.send_next = tcp_initial_sequence(endpoint);
 	endpoint->tcp.send_unacknowledged = endpoint->tcp.send_next;
 	endpoint->tcp.state = TCP_SYN_SENT;
 
@@ -8692,12 +8930,17 @@ tcp_close(
 	if (endpoint->tcp.listener != NULL)
 		tcp_listener_remove(endpoint);
 
-	/* A listener aborts every half-open and unaccepted child. */
+	/*
+	 * A listener aborts every half-open and unaccepted child, each with a
+	 * reset to its peer, which no one here will ever serve (as BSD's
+	 * soabort and Linux's inet_csk_listen_stop do).
+	 */
 	queued = endpoint->tcp.half_open_head;
 	while (queued != NULL) {
 		endpoint->tcp.half_open_head = queued->queue_next;
 		queued->queue_next = NULL;
 		queued->listener = NULL;
+		tcp_abort_connection((struct tcp_endpoint *)queued);
 		socket_set_error(&queued->inet.socket, ECONNABORTED);
 		socket_release(&queued->inet.socket);
 		queued = endpoint->tcp.half_open_head;
@@ -8708,6 +8951,7 @@ tcp_close(
 		endpoint->tcp.accept_head = queued->queue_next;
 		queued->queue_next = NULL;
 		queued->listener = NULL;
+		tcp_abort_connection((struct tcp_endpoint *)queued);
 		socket_set_error(&queued->inet.socket, ECONNABORTED);
 		socket_release(&queued->inet.socket);
 		queued = endpoint->tcp.accept_head;
@@ -8829,13 +9073,33 @@ tcp_endpoint_close(
 	uint64_t now;
 	int referenced;
 	int closing;
+	int unread;
+	int resets;
 	int slot;
 	int error;
 
 	/* A connection that has not sent its FIN owes one. */
 	irq = spin_lock_irqsave(&socket->lock);
+
 	old_state = endpoint->tcp.state;
+	unread = 0;
+	if (socket->receive_bytes != 0)
+		unread = 1;
+
 	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/*
+	 * Data received and never read is lost with the file, and the peer is
+	 * told so with a reset instead of a FIN (RFC 1122 section 4.2.2.13).
+	 * The connection is then closed, and goes with its last reference.
+	 */
+	if (unread) {
+		resets = tcp_abort_resets(old_state);
+		if (resets) {
+			tcp_abort_connection(endpoint);
+			return;
+		}
+	}
 
 	/* Makes room for the FIN, then sends it. */
 	if (old_state == TCP_ESTABLISHED || old_state == TCP_CLOSE_WAIT) {
@@ -8920,6 +9184,87 @@ tcp_endpoint_close(
 
 	/* The network worker learns of a FIN_WAIT_2 deadline it did not sleep for. */
 	net_worker_wakeup();
+}
+
+/*
+ * Tells whether a connection in a state is dropped with a reset to its
+ * peer rather than silently: one the peer has, or may have, taken as
+ * synchronized, from SYN_RECEIVED until neither end has a FIN to send
+ * (RFC 9293 section 3.10.4, ABORT).
+ */
+static int
+tcp_abort_resets(
+	enum tcp_state state)
+{
+	/* Each state in which the peer holds the connection open. */
+	switch (state) {
+	case TCP_SYN_RECEIVED:
+	case TCP_ESTABLISHED:
+	case TCP_FIN_WAIT_1:
+	case TCP_FIN_WAIT_2:
+	case TCP_CLOSE_WAIT:
+	case TCP_CLOSING:
+	case TCP_LAST_ACK:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Succeeded: the peer has no connection to be told of, or one in TIME_WAIT. */
+	return 0;
+}
+
+/*
+ * Drops a connection and tells its peer with a reset (RFC 9293 section
+ * 3.10.4, ABORT): what was queued or is in flight is given up, the state
+ * goes to CLOSED, and the reset follows everything this end sent, where
+ * a peer that has taken all of it expects the next segment (RFC 5961
+ * section 3.2).  A connection in any other state is left as it is.  The
+ * caller holds no socket lock.
+ *
+ * Procedure referenced: Linux 6.12 net/ipv4/tcp.c (tcp_close: a socket
+ * closed with data its user did not read is reset rather than closed
+ * with a FIN) and net/ipv4/inet_connection_sock.c (inet_csk_listen_stop:
+ * a listener's unaccepted children are disconnected, which resets them).
+ */
+static void
+tcp_abort_connection(
+	struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	struct tcp_discard discard;
+	unsigned long irq;
+	uint32_t reset_sequence;
+	int resets;
+
+	/* Ends the connection, keeping the peer's address for the reset. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	resets = tcp_abort_resets(endpoint->tcp.state);
+	if (!resets) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		return;
+	}
+	reset_sequence = tcp_sent_end_locked(endpoint);
+	tcp_retransmit_reset(endpoint, &discard);
+	endpoint->tcp.state = TCP_CLOSED;
+	endpoint->tcp.active_connect_generation = 0;
+	endpoint->tcp.connect_wait_deadline = 0;
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	/* Frees what was queued to send, with the lock released. */
+	tcp_discard_free(&discard);
+
+	/* Tells the peer; a reset that is lost is answered later by the reset of a connection gone. */
+	(void)tcp_send_segment_at(endpoint, reset_sequence, TCP_RST | TCP_ACK, NULL, 0);
+
+	/* Forgets the peer, so the connection no longer matches its segments. */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	tcp_forget_peer(endpoint);
+
+	spin_unlock_irqrestore(&socket->lock, irq);
 }
 
 /*
@@ -9439,9 +9784,8 @@ tcp_passive_syn(
 	child->tcp.sack_offered = (uint8_t)(offered_sack != 0);
 	child->tcp.sack_on = (uint8_t)(offered_sack != 0);
 
-	child->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
-	    child->tcp.inet.local_port + source_port;
-	child->tcp.send_next = tcp_initial_sequence(child->tcp.send_next);
+	/* The initial sequence number, from the clock and the four-tuple just set. */
+	child->tcp.send_next = tcp_initial_sequence(child);
 	child->tcp.send_unacknowledged = child->tcp.send_next;
 	child->tcp.listener = &listener->tcp;
 	child->tcp.inet.socket.receive_timeout_ticks =
@@ -9538,6 +9882,42 @@ tcp_child_addresses(
 	linklocal = in6_is_linklocal(&addresses->source6);
 	if (linklocal)
 		child->tcp.inet.scope6 = addresses->ifindex;
+}
+
+/*
+ * Tells whether a segment's acknowledgement is acceptable to a connection
+ * in SYN_SENT, under the socket lock: the segment carries none, or it
+ * acknowledges the SYN this end sent, ISS < SEG.ACK =< SND.NXT (RFC 9293
+ * section 3.10.7.3).  send_unacknowledged is still the initial sequence
+ * number there.
+ */
+static int
+tcp_syn_sent_acceptable_locked(
+	const struct tcp_endpoint *endpoint,
+	uint8_t flags,
+	uint32_t acknowledgement)
+{
+	uint32_t sent_end;
+	int after_initial;
+	int beyond_sent;
+
+	/* A segment that acknowledges nothing is judged by its other bits. */
+	if ((flags & TCP_ACK) == 0)
+		return 1;
+
+	/* One at or before the initial sequence number acknowledges nothing this end sent. */
+	after_initial = tcp_sequence_before(endpoint->tcp.send_unacknowledged, acknowledgement);
+	if (!after_initial)
+		return 0;
+
+	/* One past what was handed to the device acknowledges what was never sent. */
+	sent_end = tcp_sent_end_locked(endpoint);
+	beyond_sent = tcp_sequence_before(sent_end, acknowledgement);
+	if (beyond_sent)
+		return 0;
+
+	/* Succeeded: it acknowledges the SYN. */
+	return 1;
 }
 
 /*
@@ -9723,6 +10103,7 @@ tcp_segment_input(
 	int after_fin;
 	int reopen;
 	int release;
+	int acceptable;
 	int fin_acknowledged;
 	int error;
 	uint64_t now;
@@ -9923,6 +10304,26 @@ tcp_segment_input(
 	if (state == TCP_SYN_SENT) {
 		retransmit.count = 0;
 		established = 0;
+
+		/*
+		 * A segment that acknowledges what this end did not send belongs
+		 * to another connection of the four-tuple, an old one the peer
+		 * still holds: a reset at the sequence number it acknowledged
+		 * tells the peer to drop that one, and this attempt goes on, its
+		 * SYN sent again by the timer (RFC 9293 section 3.10.7.3).
+		 */
+		socket_irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
+
+		acceptable = tcp_syn_sent_acceptable_locked(endpoint, flags, acknowledgement);
+
+		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+
+		if (!acceptable) {
+			tcp_send_reset(addresses, tcp, payload_length);
+			packet_buf_free(packet);
+			socket_release(&endpoint->tcp.inet.socket);
+			return 0;
+		}
 
 		/*
 		 * The segment size and the congestion window, from the SYN-ACK's
