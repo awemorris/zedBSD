@@ -3429,6 +3429,7 @@ engine_find_forward(
 	unsigned *forward)
 {
 	const struct engine_forward *asked;
+	size_t length;
 	unsigned listened;
 	unsigned index;
 	int compare;
@@ -3451,7 +3452,8 @@ engine_find_forward(
 			continue;
 
 		/* The address must be the one asked for, byte for byte. */
-		if (strlen(asked->address) != size)
+		length = strlen(asked->address);
+		if (length != size)
 			continue;
 		compare = memcmp(asked->address, address, size);
 		if (compare != 0)
