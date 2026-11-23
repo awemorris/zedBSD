@@ -147,6 +147,7 @@ void kwl_displays_fit(uint32_t source_width, uint32_t source_height, uint32_t wi
 void kwl_displays_cover(uint32_t source_width, uint32_t source_height, uint32_t width, uint32_t height, float *uv);
 int kwl_displays_validate(const struct kwl_display_rect *rects, unsigned count);
 void kwl_displays_place_right(const struct kwl_display_rect *rects, unsigned count, int32_t *x, int32_t *y);
+unsigned kwl_displays_rearrange(struct kwl_display_rect *rects, unsigned count, unsigned changed);
 void kwl_displays_config_init(struct kwl_display_config *config);
 int kwl_displays_parse(const char *text, size_t length, struct kwl_display_config *config);
 size_t kwl_displays_format(const struct kwl_display_config *config, char *text, size_t size);

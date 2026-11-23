@@ -207,9 +207,12 @@
  *   of a scale that is not a step, or of a display the anchor mirrors,
  *   invalid; of a display not connected unavailable; of a step the
  *   display does not offer, or a display whose scale cannot be chosen
- *   (the login screen, one shown nowhere), unsupported; beside another
- *   display no room; during a change of the mode or a game busy; outside
- *   an active session denied.
+ *   (the login screen, one shown nowhere), unsupported; during a change
+ *   of the mode or a game busy; outside an active session denied.  A
+ *   display beside the anchor in the extended mode takes its scale too,
+ *   and the displays are placed again around the changed one (it keeps
+ *   its left top corner; one it overlaps or one no longer joined goes
+ *   right of the rightmost).
  *
  * kl_system_machine_v1 (ws188-p002, plan/ws188/phase001/phase.md section D1: what Settings reads of the computer)
  *   request 0 destroy
@@ -725,9 +728,9 @@
 /*
  * The displays' scales (since 38): the scale's denominator (a scale of
  * 120 is 100 %), the most steps a display offers, and why its scale
- * cannot be chosen now (it offers 100 % alone, it is shown beside
- * another, it is not the display the desktop is on, a change of its mode
- * or a game is under way).  libkeiland's KL_DISPLAY_SCALE_WHY_* and the
+ * cannot be chosen now (it offers 100 % alone, the mirror shows the
+ * anchor's desktop on it at the anchor's scale, it is shown nowhere, a
+ * change of its mode or a game is under way).  libkeiland's KL_DISPLAY_SCALE_WHY_* and the
  * compositor's scale.h carry the same bits.
  */
 #define KL_SYSTEM_SCALE_ONE			120U

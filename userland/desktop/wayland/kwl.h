@@ -91,6 +91,20 @@
 /* How many cursor images the compositor draws for the shapes clients ask for (cursor.c). */
 #define KWL_CURSOR_IMAGES	10U
 
+/* How many sets of the cursor's images at other scales than the output's are kept, one for each head's scale at most. */
+#define KWL_CURSOR_SETS		3U
+
+/*
+ * The arrow and the shapes' images drawn at another scale than the
+ * output's (cursor.c), for a head shown at it: its scale (0: the set is
+ * empty) and the images, each made when first drawn (NULL until then).
+ */
+struct kwl_cursor_set {
+	unsigned scale120;
+	struct kwl_import *arrow;
+	struct kwl_import *images[KWL_CURSOR_IMAGES];
+};
+
 /* The most data devices of one client a drag is told to (data.c, ws189-p002: one a window of a program). */
 #define KWL_DND_DEVICES		16U
 
@@ -2277,6 +2291,11 @@ struct kwl_server {
 	 */
 	unsigned cursor_scale120;
 	/*
+	 * The cursor's images at the scales of heads shown at another scale
+	 * than the output's (kwl_cursor_scaled), made when first drawn there.
+	 */
+	struct kwl_cursor_set cursor_sets[KWL_CURSOR_SETS];
+	/*
 	 * The edges of the window frame under the pointer, or of the resize it
 	 * started (the glass look's frames, shell.c; KWL_EDGE_* bits of
 	 * toplevel.h, 0 over no frame): while not 0 the cursor is that frame's
@@ -2632,6 +2651,8 @@ void kwl_cursor_plane_update(struct kwl_server *server);
 void kwl_cursor_plane_hold(struct kwl_server *server);
 void kwl_cursor_plane_forget(struct kwl_server *server);
 int kwl_arrow_create(struct kwl_server *server);
+int kwl_arrow_make(struct kwl_server *server, unsigned scale120, struct kwl_import **made);
+const struct kwl_import *kwl_cursor_scaled(struct kwl_server *server, const struct kwl_import *image, unsigned scale120);
 void kwl_arrow_destroy(struct kwl_server *server);
 struct kwl_object *kwl_top_window(struct kwl_server *server);
 struct kwl_object *kwl_output_top_window(struct kwl_server *server, unsigned slot);

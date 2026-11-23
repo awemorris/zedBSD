@@ -4370,25 +4370,37 @@ compose_cursor_quad(
 	int32_t x,
 	int32_t y)
 {
+	const struct kwl_import *scaled;
 	float place[4];
 	float uv[4];
 	uint32_t width;
 	uint32_t height;
 	unsigned scale;
+	unsigned pass;
 
 	/* The corner, with the pointer's place between units. */
 	place[0] = (float)x + (float)server->pointer_fraction_x / 256.0f;
 	place[1] = (float)y + (float)server->pointer_fraction_y / 256.0f;
 
 	/*
-	 * The compositor's image: its pixels over the scale it was drawn at,
-	 * unrounded, so that at that scale its quad snaps to its very pixels
-	 * whatever the place's fraction; all of it.
+	 * The compositor's image: on a pass shown at another scale than the
+	 * output's (a head's), the same cursor drawn at that scale; its pixels
+	 * over the scale it was drawn at, unrounded, so that at that scale its
+	 * quad snaps to its very pixels whatever the place's fraction; all of
+	 * it.
 	 */
 	if (surface == NULL) {
 		scale = server->cursor_scale120;
 		if (scale == 0U)
 			scale = KWL_SCALE_ONE;
+		pass = kwl_compose_pass_scale(server);
+		scaled = kwl_cursor_scaled(server, image, pass);
+		if (scaled != image) {
+			image = scaled;
+			scale = pass;
+		}
+
+		/* Its size on the plane, and all of it. */
 		place[2] = (float)image->width * (float)KWL_SCALE_ONE / (float)scale;
 		place[3] = (float)image->height * (float)KWL_SCALE_ONE / (float)scale;
 		uv[0] = 0.0f;

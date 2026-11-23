@@ -93,10 +93,9 @@
 
 /*
  * Why a display's scale cannot be chosen now (the same bits as
- * libkeiland's KL_DISPLAY_SCALE_WHY_*): it offers 100 % alone, another
- * display is shown beside it (or the same desktop on several), it is not
- * the display the desktop is shown on, or a change of its mode or a game
- * is under way.
+ * libkeiland's KL_DISPLAY_SCALE_WHY_*): it offers 100 % alone, the mirror
+ * shows the anchor's desktop on it (at the anchor's scale), it is shown
+ * nowhere, or a change of its mode or a game is under way.
  */
 #define KWL_SCALE_WHY_FIXED		0x1U
 #define KWL_SCALE_WHY_ALONE		0x2U
