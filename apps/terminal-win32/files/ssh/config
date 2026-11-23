@@ -12,6 +12,17 @@
 #	# X11Forwarding yes and xauth):
 #	ForwardX11 yes
 #
+# A remote desktop: the host's X programs drawn in one window of a size,
+# the whole X screen (start a window manager or a desktop session there):
+#
+#Host desktop
+#	HostName desktop.example.org
+#	ForwardX11 yes
+#	X11RootWindow 1920x1080
+#
+# X11RootWindow is mikuterm's own; for a file OpenSSH reads too, put
+# "IgnoreUnknown X11RootWindow" before the first Host line.
+#
 # WSL: [w] on a new tab's screen connects to a distribution's own sshd
 # (port 22) without anything here.  A Host named wsl-<name> changes how one
 # distribution is reached, for example when its sshd listens on another

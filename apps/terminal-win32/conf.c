@@ -13,9 +13,10 @@
  *
  * config\mikuterm.conf is the user's: Font, FontFallback, FontSize,
  * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect,
- * ConnectTimeout, WslPort, X11Scale, X11Render, X11PrimaryToClipboard and
- * X11RootWindow.  A line mikuterm cannot use is skipped, the default
- * kept, and named in the problems the first tab shows ("line N: why").
+ * ConnectTimeout, WslPort, X11Scale, X11Render and X11PrimaryToClipboard
+ * (the root window of a host's X server is its Host's X11RootWindow in
+ * ssh\config).  A line mikuterm cannot use is skipped, the default kept,
+ * and named in the problems the first tab shows ("line N: why").
  * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme,
  * AmbiguousWide and CopyOnSelect as the View menu and the settings' tab
  * chose them; it reads nothing else.
@@ -52,18 +53,6 @@
 /* The longest wait for a connection the settings may ask, in seconds. */
 #define CONF_CONNECT_TIMEOUT_MAX	3600U
 
-/*
- * The smallest and largest root window X11RootWindow may ask (X's pixels):
- * a desktop's least, and an 8K screen's.
- */
-#define CONF_ROOT_WIDTH_MIN	320U
-#define CONF_ROOT_HEIGHT_MIN	200U
-#define CONF_ROOT_WIDTH_MAX	7680U
-#define CONF_ROOT_HEIGHT_MAX	4320U
-
-/* The longest side's digits of X11RootWindow, with room for its NUL. */
-#define CONF_ROOT_DIGITS	8U
-
 /* The keywords, each a bit of the mask of those already given. */
 enum conf_keyword {
 	CONF_FONT = 0,
@@ -81,8 +70,7 @@ enum conf_keyword {
 	CONF_X11_SCALE = 12,
 	CONF_X11_RENDER = 13,
 	CONF_X11_PRIMARY = 14,
-	CONF_X11_ROOT = 15,
-	CONF_KEYWORDS = 16
+	CONF_KEYWORDS = 15
 };
 
 /*
@@ -110,8 +98,7 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "WslPort", 0 },
 	{ "X11Scale", 0 },
 	{ "X11Render", 0 },
-	{ "X11PrimaryToClipboard", 0 },
-	{ "X11RootWindow", 0 }
+	{ "X11PrimaryToClipboard", 0 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -127,7 +114,6 @@ static int conf_keyword(const char *keyword, unsigned *found);
 static int conf_value(struct mikuterm_conf *conf, unsigned keyword, const char *value, const char **why);
 static int conf_number(const char *text, unsigned minimum, unsigned maximum, unsigned *number);
 static int conf_yes(const char *text, int *yes);
-static int conf_root(const char *text, unsigned *width, unsigned *height);
 static int conf_copy(char *to, size_t size, const char *text);
 static void conf_problem(struct mikuterm_conf *conf, unsigned line, const char *why);
 
@@ -159,8 +145,6 @@ mikuterm_conf_defaults(
 	conf->x11_scale = 0;
 	conf->x11_render_cpu = 0;
 	conf->x11_primary = 0;
-	conf->x11_root_width = 0;
-	conf->x11_root_height = 0;
 }
 
 /*
@@ -323,13 +307,6 @@ mikuterm_conf_text(
 		break;
 	case CONF_X11_PRIMARY:
 		written = snprintf(value, size, "%s", conf->x11_primary ? "yes" : "no");
-		break;
-	case CONF_X11_ROOT:
-		if (conf->x11_root_width == 0) {
-			written = snprintf(value, size, "off");
-		} else {
-			written = snprintf(value, size, "%ux%u", conf->x11_root_width, conf->x11_root_height);
-		}
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -788,11 +765,6 @@ conf_value(
 		if (status == 0)
 			conf->x11_primary = yes;
 		break;
-	case CONF_X11_ROOT:
-		/* off, or the root window's size, from 320x200 to 7680x4320. */
-		*why = "X11RootWindow is off or a size from 320x200 to 7680x4320";
-		status = conf_root(value, &conf->x11_root_width, &conf->x11_root_height);
-		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);
 		*why = "ConnectTimeout is a number of seconds from 0 to 3600";
@@ -838,59 +810,6 @@ conf_number(
 
 	/* Succeeded: the number. */
 	*number = (unsigned)value;
-	return 0;
-}
-
-/*
- * Reads X11RootWindow's value: off (in any case; both sizes 0), or a
- * width, an x (or X) and a height within the limits.  Returns 0 or
- * EINVAL, the sizes left as they were.
- */
-static int
-conf_root(
-	const char *text,
-	unsigned *width,
-	unsigned *height)
-{
-	char digits[CONF_ROOT_DIGITS];
-	const char *cross;
-	unsigned wide;
-	unsigned high;
-	size_t length;
-	int differs;
-	int status;
-
-	/* off: each X window a window of its own. */
-	differs = _stricmp(text, "off");
-	if (differs == 0) {
-		*width = 0;
-		*height = 0;
-		return 0;
-	}
-
-	/* The width, before the x. */
-	cross = strchr(text, 'x');
-	if (cross == NULL)
-		cross = strchr(text, 'X');
-	if (cross == NULL)
-		return EINVAL;
-	length = (size_t)(cross - text);
-	if (length == 0U || length >= sizeof(digits))
-		return EINVAL;
-	memcpy(digits, text, length);
-	digits[length] = '\0';
-	status = conf_number(digits, CONF_ROOT_WIDTH_MIN, CONF_ROOT_WIDTH_MAX, &wide);
-	if (status != 0)
-		return EINVAL;
-
-	/* The height, after it. */
-	status = conf_number(cross + 1, CONF_ROOT_HEIGHT_MIN, CONF_ROOT_HEIGHT_MAX, &high);
-	if (status != 0)
-		return EINVAL;
-
-	/* Succeeded: the root window's size. */
-	*width = wide;
-	*height = high;
 	return 0;
 }
 

@@ -103,7 +103,12 @@ zedBSD's `ssh`:
   `ForwardX11`, `ForwardX11Trusted`, `ForwardX11Timeout`, `LocalForward`,
   `RemoteForward`, `GatewayPorts`, `ExitOnForwardFailure`,
   `ClearAllForwardings`, `RemoteCommand` (section 4.4), `ProxyCommand`
-  (section 4.6).
+  (section 4.6), and mikuterm's own `X11RootWindow` (`off`, or a size from
+  `320x200` to `7680x4320`: the host's X programs are drawn in one window of
+  that size, a remote desktop's X screen; OpenSSH does not know it).
+- `IgnoreUnknown` (a pattern-list, as OpenSSH reads it): an unknown keyword a
+  pattern matches, on a line after it, is skipped. A file that OpenSSH reads
+  too puts `IgnoreUnknown X11RootWindow` before the first `Host` line.
 - `LogLevel`: `QUIET`, `FATAL` and `ERROR` keep the informational lines
   OpenSSH's `ssh` shows only from `INFO` on out of the tab (`Warning:
   Permanently added ... to the list of known hosts.`, `Failed to add the

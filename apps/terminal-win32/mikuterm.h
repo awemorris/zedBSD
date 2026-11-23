@@ -71,8 +71,6 @@ struct mikuterm_conf {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
-	unsigned x11_root_width;
-	unsigned x11_root_height;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
@@ -92,8 +90,6 @@ struct mikuterm_connect_options {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
-	unsigned x11_root_width;
-	unsigned x11_root_height;
 	const char *notice;
 };
 
