@@ -854,6 +854,8 @@ window_frame_message(
 			if (input != NULL)
 				input->code = dpi;
 		}
+
+		/* The size the system suggests for the new dpi, told as a resize even when the content's size stays. */
 		window->resize_waiting = 1;
 		suggested = (const RECT *)lparam;
 		(void)SetWindowPos(handle, NULL, suggested->left, suggested->top, suggested->right - suggested->left,

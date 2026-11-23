@@ -503,8 +503,10 @@ launch_output_text(
 		    bytes[1] == 0xbbU &&
 		    bytes[2] == 0xbfU)
 			index = 3U;
+
+		/* The bytes after the mark, each but a NUL. */
 		for (; index < size; index++) {
-			/* Each byte but a NUL. */
+			/* A NUL is left out. */
 			if (bytes[index] != 0U)
 				launch_text_add(text, text_size, &length, (const char *)&bytes[index], 1U);
 		}
@@ -616,9 +618,12 @@ launch_first_line(
 	const char *start;
 	const char *end;
 	size_t length;
+	int found;
 
 	/* Each line until one is not blank. */
+	found = 0;
 	start = text;
+	end = text;
 	while (*start != '\0') {
 		/* The line without the spaces and CR round it. */
 		end = strchr(start, '\n');
@@ -626,14 +631,10 @@ launch_first_line(
 			end = start + strlen(start);
 		launch_trim(&start, &end);
 
-		/* A line with text: it, cut to fit. */
+		/* A line with text ends the search. */
 		if (end > start) {
-			length = (size_t)(end - start);
-			if (length >= size)
-				length = size - 1U;
-			memcpy(line, start, length);
-			line[length] = '\0';
-			return 0;
+			found = 1;
+			break;
 		}
 
 		/* The next line. */
@@ -644,8 +645,20 @@ launch_first_line(
 	}
 
 	/* No line has text. */
-	line[0] = '\0';
-	return ENOENT;
+	if (!found) {
+		line[0] = '\0';
+		return ENOENT;
+	}
+
+	/* The line, cut to fit. */
+	length = (size_t)(end - start);
+	if (length >= size)
+		length = size - 1U;
+	memcpy(line, start, length);
+	line[length] = '\0';
+
+	/* Succeeded: the first line with text. */
+	return 0;
 }
 
 /* Carries out a CSI or SS3 sequence the keys sent: Up and Down choose a row, a paste's brackets mark its text. */
@@ -803,11 +816,13 @@ launch_append(
 	struct launch_screen *screen,
 	unsigned char byte)
 {
-	/* The byte and the NUL after it. */
+	/* Edited, even when the line has no room left. */
 	screen->edited = 1;
 	screen->number = 0U;
 	if (screen->line_length + 1U >= sizeof(screen->line))
 		return;
+
+	/* The byte and the NUL after it. */
 	screen->line[screen->line_length] = (char)byte;
 	screen->line_length++;
 	screen->line[screen->line_length] = '\0';

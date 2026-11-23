@@ -6,8 +6,7 @@
  */
 
 /*
- * The window of the library (ws090-p004, Text Editor's window.c moved
- * here, itself PDF Viewer's): an xdg-shell toplevel of its own connection,
+ * The window of the library: an xdg-shell toplevel of its own connection,
  * and its seat's pointer, keyboard and touch screen, whose input becomes
  * kl_window_event values in a queue the application takes.  The last
  * input's serial is kept for the clipboard and the primary selection
@@ -17,7 +16,7 @@
  * The compositor does not repeat keys, so a key held past the repeat delay is
  * pressed again on each interval -- only by kl_window_repeat, which the
  * application calls after a dispatch, so that a release read in the same
- * dispatch stops it first (BUG-111).
+ * dispatch stops it first.
  */
 
 #include "window.h"
@@ -47,7 +46,7 @@
 #define WINDOW_REPEAT_INTERVAL	40U
 
 /*
- * How far behind a held key's repeats are caught up (BUG-191): a loop that
+ * How far behind a held key's repeats are caught up: a loop that
  * wakes less often than the rate (a slow redraw) types every repeat that
  * came due since, so the rate the user set holds; a loop stalled longer
  * than this starts again from now instead of typing a burst.
@@ -608,8 +607,7 @@ kl_window_repeat(
 
 	/*
 	 * The key once more for every repeat due by now, each one interval after
-	 * the one before, so a loop that wakes late or seldom keeps the rate
-	 * (BUG-172, BUG-191).
+	 * the one before, so a loop that wakes late or seldom keeps the rate.
 	 */
 	while (window->repeat_at <= now) {
 		event = window_push(window, KL_WINDOW_KEY);
@@ -630,7 +628,7 @@ kl_window_repeat(
  * Reports in how many milliseconds the held key's repeat is due (0: now,
  * -1 when no key is held), without pressing it: the loop waits that long
  * and reads the compositor's events (a release among them) before the
- * repeat is pressed (BUG-111).
+ * repeat is pressed.
  */
 int
 kl_window_repeat_wait(
@@ -791,9 +789,9 @@ kl_window_present(
 }
 
 /*
- * Asks for how a window's input and frames are paced (KL_VERSION 91,
- * ws210-p014 F2.1): KL_PACING_MOTION merges a pointer's motions queued one
- * after another into the last; KL_PACING_FRAME (KL_VERSION 92) has each
+ * Asks for how a window's input and frames are paced (KL_VERSION 91):
+ * KL_PACING_MOTION merges a pointer's motions queued one after another
+ * into the last; KL_PACING_FRAME (KL_VERSION 92) has each
  * frame wait for the compositor to take the last one (kl_window_frame_wait).
  * max_fps is for a later version and must be 0.  Returns 0, EINVAL for a
  * flag or a rate not known, or ENOTSUP for KL_PACING_FRAME on a window
@@ -827,8 +825,8 @@ kl_window_set_pacing(
 }
 
 /*
- * Tells when the next frame of a window may be drawn (KL_VERSION 92,
- * ws210-p014 F2.4), changing nothing: 0 now, a number of milliseconds to
+ * Tells when the next frame of a window may be drawn (KL_VERSION 92),
+ * changing nothing: 0 now, a number of milliseconds to
  * wait at most, or -1 to wait until the compositor takes the last frame
  * (its answer wakes the wait).  Always 0 without KL_PACING_FRAME.
  */
@@ -987,7 +985,7 @@ kl_window_on_resize(
 
 /*
  * Shows a frame of which only a part changed since the last one
- * (KL_VERSION 63, BUG-221): as kl_window_present, but only the part's
+ * (KL_VERSION 63): as kl_window_present, but only the part's
  * rows are copied and the compositor is told that part alone, so it
  * draws that much again.  The pixels outside the part must be the last
  * frame's.  A NULL part, a new swapchain or shared memory take the whole
@@ -1017,7 +1015,7 @@ kl_window_present_part(
 
 /*
  * Shows a frame of which only some parts changed since the last one
- * (KL_VERSION 90, ws210-p014): at most KL_FRAME_PARTS_MAX of them, the
+ * (KL_VERSION 90): at most KL_FRAME_PARTS_MAX of them, the
  * whole frame when count is 0.  Returns 0, EAGAIN when the window's size
  * changed (a resize and another frame), or EIO.
  */
@@ -1052,7 +1050,7 @@ kl_window_present_parts(
 		return 0;
 	}
 
-	/* The desktop's surface tells which parts of it the frame draws anything in, with the frame (ws270-p007). */
+	/* The desktop's surface tells which parts of it the frame draws anything in, with the frame. */
 	if (window->desktop != NULL)
 		keiui_desktop_frame(window->desktop, pixels, stride, window->vulkan.extent.width, window->vulkan.extent.height, parts, count);
 
@@ -1183,7 +1181,7 @@ kl_window_set_content_type(
 
 /*
  * Tells the compositor that the window's content is opaque everywhere, or
- * no longer (KL_VERSION 95, ws270-p007): its opaque region, the whole
+ * no longer (KL_VERSION 95): its opaque region, the whole
  * surface or none, applied with the surface's next commit.  The region
  * reaches past any size the window takes, which the compositor cuts to
  * the surface.  Returns 0, EINVAL without a window, or ENOMEM.
@@ -1879,7 +1877,7 @@ window_setup_shared(
 	if (status == 0)
 		(void)wl_display_roundtrip_queue(window->display, queue);
 
-	/* The compositor, shared memory and a shell of the window's own (the compositor lets it go alone, BUG-112). */
+	/* The compositor, shared memory and a shell of the window's own (the compositor lets it go alone). */
 	if (found.compositor != 0U && found.shm != 0U && found.shell != 0U) {
 		window->compositor = wl_registry_bind(registry, found.compositor, &wl_compositor_interface, found.compositor_version);
 		window->shm = wl_registry_bind(registry, found.shm, &wl_shm_interface, 1U);
@@ -2152,7 +2150,7 @@ window_search(
 		return;
 	}
 
-	/* The text input's manager (a file chooser's fields take an input method's text, ws090-p022). */
+	/* The text input's manager (a file chooser's fields take an input method's text). */
 	match = strcmp(interface, "zwp_text_input_manager_v3");
 	if (match == 0 && found->text_manager == 0U) {
 		found->text_manager = name;
@@ -2334,7 +2332,7 @@ window_global(
 		return;
 	}
 
-	/* The content type manager (ws122-p005b), bound for a window that tells what it shows. */
+	/* The content type manager, bound for a window that tells what it shows. */
 	match = strcmp(interface, "wp_content_type_manager_v1");
 	if (match == 0 && window->content_manager == NULL) {
 		window->content_manager = wl_registry_bind(registry, name, &wp_content_type_manager_v1_interface, 1U);
@@ -2366,7 +2364,7 @@ window_global(
 		return;
 	}
 
-	/* The tablet manager (WS131 p018), bound for a window that takes a pen tablet's tools (tablet.c). */
+	/* The tablet manager, bound for a window that takes a pen tablet's tools (tablet.c). */
 	match = strcmp(interface, "zwp_tablet_manager_v2");
 	if (match == 0 && window->tablet_manager == NULL) {
 		keiui_tablet_bind(window, registry, name);
@@ -2622,7 +2620,7 @@ window_seat_capabilities(
 			(void)wl_keyboard_add_listener(window->keyboard, &keyboard_listener, window);
 	}
 
-	/* A touch screen, once (ws081-p012). */
+	/* A touch screen, once. */
 	if ((capabilities & WL_SEAT_CAPABILITY_TOUCH) != 0U && window->touch == NULL) {
 		window->touch = wl_seat_get_touch(seat);
 		if (window->touch != NULL)
@@ -2802,7 +2800,7 @@ window_pointer_axis(
 
 	/*
 	 * The distance, scaled to the window's pixels, on its axis, with its
-	 * fraction (a touch pad's fingers move a unit at a time, BUG-218), its
+	 * fraction (a touch pad's fingers move a unit at a time), its
 	 * source and the compositor's time.
 	 */
 	event = window_push(window, KL_WINDOW_AXIS);
@@ -2831,7 +2829,7 @@ window_pointer_frame(
 	window->axis_stopped = 0;
 }
 
-/* What the frame's scrolling comes from: a wheel, a touch pad's fingers, or something continuous (BUG-211). */
+/* What the frame's scrolling comes from: a wheel, a touch pad's fingers, or something continuous. */
 static void
 window_pointer_axis_source(
 	void *data,
@@ -2850,7 +2848,7 @@ window_pointer_axis_source(
 		window->axis_source = KL_AXIS_SOURCE_CONTINUOUS;
 }
 
-/* The fingers' scrolling ends: one KL_WINDOW_AXIS_STOP for the frame, however many axes stop in it (BUG-211). */
+/* The fingers' scrolling ends: one KL_WINDOW_AXIS_STOP for the frame, however many axes stop in it. */
 static void
 window_pointer_axis_stop(
 	void *data,
@@ -3456,8 +3454,8 @@ window_desktop_configure(
 }
 
 /*
- * Tells stderr, once a window, which Vulkan call of the presenter failed
- * (BUG-290): the library's call, the Vulkan call inside it and its result,
+ * Tells stderr, once a window, which Vulkan call of the presenter failed:
+ * the library's call, the Vulkan call inside it and its result,
  * errno as that call left it, the window's size and the presenter's
  * extent, and the connection's error with the compositor's protocol error
  * when it sent one (a connection the compositor ended fails the next

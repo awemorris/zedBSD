@@ -6,22 +6,21 @@
  */
 
 /*
- * The text of the library (Files' text.c, moved here unchanged by
- * ws090-p002): UTF-8 strings drawn from TrueType fonts
+ * The text of the library: UTF-8 strings drawn from TrueType fonts
  * (libtruetype) onto the canvas.
  *
- * A main font draws what it can, with its companions (ws090-p020,
- * truetype_open_companions: Mahora Bold for its bold glyphs, the
+ * A main font draws what it can, with its companions
+ * (truetype_open_companions: Mahora Bold for its bold glyphs, the
  * monospaced fallback for the signs and letters it lacks), and a fallback
  * font (optional) the characters they lack, such as Japanese in file
  * names.  Every glyph is drawn once per size into a cache of coverage
  * bitmaps.  A bold glyph without a bold face is the regular one's outline
- * widened as a vector by libtruetype (truetype_set_bold, BUG-205), drawn
+ * widened as a vector by libtruetype (truetype_set_bold), drawn
  * with the same anti-aliasing as a regular one.  There is no kerning and no shaping:
  * file names and labels are set one character after another.
  *
  * A character neither font has is looked for in the colour emoji font
- * (KL_TEXT_EMOJI, opened the first time one is drawn, ws102-p019) and
+ * (KL_TEXT_EMOJI, opened the first time one is drawn) and
  * drawn in its colours (userland/desktop/picture/color-glyph.c).
  */
 
@@ -84,7 +83,7 @@ static const char *text_mono_path;
 
 /*
  * Names the companions' files the fonts opened from now on use (KL_VERSION
- * 48, ws090-p023): Mahora Bold and the monospaced fallback, for a program
+ * 48): Mahora Bold and the monospaced fallback, for a program
  * that runs without the installed fonts (a host test drawing with the
  * tree's userland/desktop/fonts).  NULL keeps the installed one.  The
  * strings must last while fonts are opened.
@@ -130,7 +129,7 @@ kl_text_open(
 		return error;
 	}
 
-	/* Its companions: Mahora Bold for its bold glyphs, the monospaced fallback for the signs it lacks (ws090-p020), installed or named. */
+	/* Its companions: Mahora Bold for its bold glyphs, the monospaced fallback for the signs it lacks, installed or named. */
 	bold = KEILAND_FONT_BOLD;
 	if (text_bold_path != NULL)
 		bold = text_bold_path;
@@ -310,8 +309,8 @@ kl_text_draw(
 
 		/*
 		 * A glyph above or below the rows being drawn only moves the pen
-		 * (ws210-p014: a frame of a few lit rows lays out every line of
-		 * the window, and each glyph's drawing found nothing to draw).
+		 * (a frame of a few lit rows lays out every line of the window,
+		 * and each glyph's drawing would find nothing to draw).
 		 */
 		top = baseline - glyph->top;
 		if (top >= clip_bottom || top + glyph->height <= clip_top) {
@@ -759,7 +758,7 @@ text_slot(
 	 * only multiplied left a glyph's sizes, weights and faces, which differ
 	 * in the key's high bits, on one home slot, and the glyphs of a text,
 	 * whose indexes follow one another, in one long run of slots that each
-	 * lookup walked (ws210-p014, a third of a hover frame's time).
+	 * lookup walked (a third of a hover frame's time).
 	 */
 	hash = key;
 	hash ^= hash >> 16;
@@ -1004,7 +1003,13 @@ text_draw_scaled(
 			image.width = glyph->width;
 			image.height = glyph->height;
 			image.stride = (size_t)glyph->width;
-			keiui_canvas_image_pixels(canvas, &image, (float)(pen + glyph->left), (float)top, (float)glyph->width, (float)glyph->height, 0.0f,
+			keiui_canvas_image_pixels(canvas,
+						  &image,
+						  (float)(pen + glyph->left),
+						  (float)top,
+						  (float)glyph->width,
+						  (float)glyph->height,
+						  0.0f,
 						  (float)(color >> 24) / 255.0f);
 		}
 

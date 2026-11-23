@@ -645,6 +645,8 @@ folder_parent_make(
 	directory = mikuterm_path_directory(path);
 	if (directory == 0U)
 		return ENOENT;
+
+	/* A copy of the path to cut. */
 	length = wcslen(path);
 	parent = malloc((length + 1U) * sizeof(*parent));
 	if (parent == NULL)
