@@ -14,7 +14,8 @@
  * standard input (a pipe the parent closes), says HELLO, and takes the
  * parent's HELLO with the settings (the host's name, the fake cookie, the
  * scale, the clipboard's policy, the root window shown as one window or
- * not).  Then one thread runs the X server's
+ * not, the windows shown in mikuterm's tabs or not: x11-tab-child.h).
+ * Then one thread runs the X server's
  * core and the Windows backend and the link: each OPEN is an X client
  * checked against the cookie, its DATA the client's bytes, and the
  * client's replies go back as DATA within the parent's credit.  The
@@ -25,6 +26,7 @@
 #include "mikuterm.h"
 #include "x11-host.h"
 #include "x11-link.h"
+#include "x11-tab-child.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -65,7 +67,8 @@
 /*
  * The X server process's state: the link's socket and its event, the
  * frames read and those waiting, the link's table and the X client of
- * each slot of it, the settings, the backend, the core and its fonts.
+ * each slot of it, the settings, the backend (and the tabs around it,
+ * NULL when the windows are not shown in tabs), the core and its fonts.
  */
 struct child {
 	SOCKET socket;
@@ -86,6 +89,7 @@ struct child {
 	unsigned root_width;
 	unsigned root_height;
 	struct x11_win32 *backend;
+	struct x11_tab_child *tabs;
 	struct x11server *server;
 	char *fonts[CHILD_FONTS];
 	size_t font_sizes[CHILD_FONTS];
@@ -123,6 +127,8 @@ static int child_frame(struct child *child, unsigned type, uint32_t id, const vo
 static int child_send(struct child *child);
 static unsigned child_slot(struct child *child, uint32_t id);
 static unsigned child_slot_of_client(struct child *child, uint32_t client);
+static int child_link_frame(void *context, unsigned type, uint32_t id, const void *body, uint32_t size);
+static size_t child_link_waiting(void *context);
 
 /*
  * Runs mikuterm's X server process until its link ends.  Returns the
@@ -189,9 +195,11 @@ mikuterm_x11_child(void)
 	if (child.ending == 2)
 		status = 2;
 
-	/* The end: the core, the backend, the link, the fonts' bytes. */
+	/* The end: the core, the tabs, the backend, the link, the fonts' bytes. */
 	if (child.server != NULL)
 		x11server_destroy(child.server);
+	if (child.tabs != NULL)
+		x11_tab_child_destroy(child.tabs);
 	if (child.backend != NULL)
 		x11_win32_destroy(child.backend);
 	closesocket(child.socket);
@@ -288,12 +296,14 @@ child_flush(
 {
 	int error;
 
-	/* The core's events and replies. */
+	/* The core's events and replies, and the tabs' pixels after them. */
 	if (child->server != NULL) {
 		child_events(child);
 		child_output(child);
 		child_events(child);
 	}
+	if (child->tabs != NULL)
+		x11_tab_child_send(child->tabs, (uint32_t)GetTickCount());
 
 	/* The frames; a link that cannot take them ends the child. */
 	error = child_send(child);
@@ -410,6 +420,15 @@ child_take(
 		return 0;
 	case X11_LINK_CREDIT:
 		return 0;
+	case X11_LINK_TAB_INPUT:
+	case X11_LINK_TAB_CONFIGURE:
+	case X11_LINK_TAB_CLOSE:
+	case X11_LINK_TAB_REFUSE:
+		/* A tab's: the tabs take it (an X server without tabs has none to take). */
+		if (child->tabs == NULL)
+			return 0;
+		error = x11_tab_child_take(child->tabs, frame, (uint32_t)GetTickCount());
+		return error;
 	case X11_LINK_EOF:
 	case X11_LINK_CLOSE:
 		/* The remote client went: the core lets it go (an EOF is answered with CLOSE). */
@@ -475,13 +494,16 @@ child_hello(
  * settings give), the core fonts from mikuterm's folder, the windows
  * drawn and shown through the system's Vulkan when it has one (and
  * X11Render is not cpu), else drawn in memory and shown through GDI.
- * Returns 0, or an errno value.
+ * With the windows in mikuterm's tabs, the tabs wrap the backend and
+ * every window is shown through the backend's present (drawn by Vulkan
+ * or not), whose pixels a tab sends.  Returns 0, or an errno value.
  */
 static int
 child_start_server(
 	struct child *child)
 {
 	struct x11_win32_options backend_options;
+	struct x11_tab_child_link link;
 	struct x11server_options options;
 	struct x11server_font_file fonts[CHILD_FONTS];
 	char path[MIKUTERM_PATH_MAX];
@@ -548,6 +570,19 @@ child_start_server(
 		if (error == 0)
 			options.vulkan_wsi = CHILD_VULKAN_WSI;
 	}
+
+	/* The windows in mikuterm's tabs: the tabs around the backend, and no swapchain (a tab's pixels are presented). */
+	if ((child->flags & X11_HOST_TABIFY) != 0U) {
+		link.frame = child_link_frame;
+		link.waiting = child_link_waiting;
+		link.context = child;
+		error = x11_tab_child_create(child->backend, &link, &child->tabs);
+		if (error != 0)
+			return error;
+		options.backend = &x11_tab_child_ops;
+		options.backend_context = child->tabs;
+		options.vulkan_wsi = NULL;
+	}
 	if (count != 0U) {
 		options.fonts = fonts;
 		options.font_count = count;
@@ -558,8 +593,10 @@ child_start_server(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the backend hears the core. */
+	/* Succeeded: the backend and the tabs hear the core. */
 	x11_win32_attach(child->backend, child->server);
+	if (child->tabs != NULL)
+		x11_tab_child_attach(child->tabs, child->server);
 	return 0;
 }
 
@@ -831,4 +868,36 @@ child_slot_of_client(
 			return slot;
 	}
 	return X11_LINK_CHANNELS;
+}
+
+/* Queues one frame of a tab for the parent (the tabs' link).  Returns 0, or ENOMEM. */
+static int
+child_link_frame(
+	void *context,
+	unsigned type,
+	uint32_t id,
+	const void *body,
+	uint32_t size)
+{
+	int error;
+
+	/* The frame after the others. */
+	error = child_frame(context, type, id, body, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: queued. */
+	return 0;
+}
+
+/* Tells the tabs how many bytes wait for the socket. */
+static size_t
+child_link_waiting(
+	void *context)
+{
+	struct child *child;
+
+	/* The frames queued. */
+	child = context;
+	return child->out_size;
 }

@@ -26,6 +26,7 @@
 
 static int link_check_control(const struct x11_link_table *table, const struct x11_link_frame *frame);
 static int link_check_open(struct x11_link_table *table, const struct x11_link_frame *frame);
+static int link_check_tab(const struct x11_link_table *table, const struct x11_link_frame *frame);
 
 /*
  * Reads one frame from the front of bytes (size of them).  Returns 0 with
@@ -208,6 +209,17 @@ x11_link_check(
 		return verdict;
 	case X11_LINK_OPEN:
 		verdict = link_check_open(table, frame);
+		return verdict;
+	case X11_LINK_TAB_OPEN:
+	case X11_LINK_TAB_TITLE:
+	case X11_LINK_TAB_SIZE:
+	case X11_LINK_TAB_PIXELS:
+	case X11_LINK_TAB_GONE:
+	case X11_LINK_TAB_INPUT:
+	case X11_LINK_TAB_CONFIGURE:
+	case X11_LINK_TAB_CLOSE:
+	case X11_LINK_TAB_REFUSE:
+		verdict = link_check_tab(table, frame);
 		return verdict;
 	case X11_LINK_DATA:
 	case X11_LINK_EOF:
@@ -425,5 +437,70 @@ link_check_open(
 	table->next_id = frame->id + 1;
 
 	/* Succeeded: the channel is open. */
+	return X11_LINK_TAKE;
+}
+
+/*
+ * Checks a frame of a tab's X window as a whole: an X window's id, the
+ * side that sends it (the child its window's opening, title, size, pixels
+ * and end; the parent the input, the size, the closing and the refusal),
+ * and a body of the frame's size.  The receiver checks the rest (a window
+ * it knows, a part within the window, an input it knows).
+ */
+static int
+link_check_tab(
+	const struct x11_link_table *table,
+	const struct x11_link_frame *frame)
+{
+	int from_child;
+
+	/* An X window is never id 0. */
+	if (frame->id == 0)
+		return X11_LINK_VIOLATION;
+
+	/* Which side sends it. */
+	from_child = 0;
+	if (frame->type <= X11_LINK_TAB_GONE)
+		from_child = 1;
+	if (from_child && table->side != X11_LINK_PARENT)
+		return X11_LINK_VIOLATION;
+	if (!from_child && table->side != X11_LINK_CHILD)
+		return X11_LINK_VIOLATION;
+
+	/* The body each one has. */
+	switch (frame->type) {
+	case X11_LINK_TAB_OPEN:
+		if (frame->size < X11_LINK_TAB_OPEN_FIXED)
+			return X11_LINK_VIOLATION;
+		if (frame->size > X11_LINK_TAB_OPEN_FIXED + X11_LINK_TAB_TITLE_MAX)
+			return X11_LINK_VIOLATION;
+		break;
+	case X11_LINK_TAB_TITLE:
+		if (frame->size > X11_LINK_TAB_TITLE_MAX)
+			return X11_LINK_VIOLATION;
+		break;
+	case X11_LINK_TAB_SIZE:
+	case X11_LINK_TAB_CONFIGURE:
+		if (frame->size != X11_LINK_TAB_SIZE_BODY)
+			return X11_LINK_VIOLATION;
+		break;
+	case X11_LINK_TAB_PIXELS:
+		if (frame->size < X11_LINK_TAB_PIXELS_FIXED)
+			return X11_LINK_VIOLATION;
+		break;
+	case X11_LINK_TAB_INPUT:
+		if (frame->size < 4U)
+			return X11_LINK_VIOLATION;
+		if (frame->size > X11_LINK_TAB_TITLE_MAX)
+			return X11_LINK_VIOLATION;
+		break;
+	default:
+		/* The end of a window, and the closing and the refusal of a tab, carry nothing. */
+		if (frame->size != 0)
+			return X11_LINK_VIOLATION;
+		break;
+	}
+
+	/* Succeeded: the frame is taken. */
 	return X11_LINK_TAKE;
 }

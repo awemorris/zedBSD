@@ -13,10 +13,11 @@
  *
  * config\mikuterm.conf is the user's: Font, FontFallback, FontSize,
  * Columns, Rows, Theme, AmbiguousWide, Term, Connect, CopyOnSelect,
- * ConnectTimeout, WslPort, X11Scale, X11Render and X11PrimaryToClipboard
- * (the root window of a host's X server is its Host's X11RootWindow in
- * ssh\config).  A line mikuterm cannot use is skipped, the default kept,
- * and named in the problems the first tab shows ("line N: why").
+ * ConnectTimeout, WslPort, X11Scale, X11Render, X11PrimaryToClipboard and
+ * X11WindowTabify (the root window of a host's X server is its Host's
+ * X11RootWindow in ssh\config).  A line mikuterm cannot use is skipped,
+ * the default kept, and named in the problems the first tab shows ("line
+ * N: why").
  * config\state.conf is mikuterm's own (settings-file.c): FontSize, Theme,
  * AmbiguousWide and CopyOnSelect as the View menu and the settings' tab
  * chose them; it reads nothing else.
@@ -70,7 +71,8 @@ enum conf_keyword {
 	CONF_X11_SCALE = 12,
 	CONF_X11_RENDER = 13,
 	CONF_X11_PRIMARY = 14,
-	CONF_KEYWORDS = 15
+	CONF_X11_TABIFY = 15,
+	CONF_KEYWORDS = 16
 };
 
 /*
@@ -98,7 +100,8 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "WslPort", 0 },
 	{ "X11Scale", 0 },
 	{ "X11Render", 0 },
-	{ "X11PrimaryToClipboard", 0 }
+	{ "X11PrimaryToClipboard", 0 },
+	{ "X11WindowTabify", 0 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -145,6 +148,7 @@ mikuterm_conf_defaults(
 	conf->x11_scale = 0;
 	conf->x11_render_cpu = 0;
 	conf->x11_primary = 0;
+	conf->x11_tabify = 0;
 }
 
 /*
@@ -307,6 +311,9 @@ mikuterm_conf_text(
 		break;
 	case CONF_X11_PRIMARY:
 		written = snprintf(value, size, "%s", conf->x11_primary ? "yes" : "no");
+		break;
+	case CONF_X11_TABIFY:
+		written = snprintf(value, size, "%s", conf->x11_tabify ? "yes" : "no");
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -764,6 +771,12 @@ conf_value(
 		*why = "X11PrimaryToClipboard is yes or no";
 		if (status == 0)
 			conf->x11_primary = yes;
+		break;
+	case CONF_X11_TABIFY:
+		status = conf_yes(value, &yes);
+		*why = "X11WindowTabify is yes or no";
+		if (status == 0)
+			conf->x11_tabify = yes;
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

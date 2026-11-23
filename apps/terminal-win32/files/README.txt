@@ -321,6 +321,9 @@ named in the first tab and skipped.
   X11Render       auto or cpu: how the X windows are drawn (auto)
   X11PrimaryToClipboard  yes: what an X program selects (X's PRIMARY, which
                   xterm copies to) also goes to the Windows clipboard (no)
+  X11WindowTabify yes: a remote X program's main window opens as a tab of
+                  mikuterm's window instead of a window of its own (no;
+                  see 10)
 
 A remote desktop's window (X11RootWindow) is set for each host in
 ssh/config (section 10).
@@ -424,6 +427,22 @@ the new size, and programs that follow the screen's size (xrandr, a desktop's
 panel) see it change.  X11RootWindow is mikuterm's: OpenSSH's ssh stops at
 a keyword it does not know, so a file both read needs "IgnoreUnknown
 X11RootWindow" before the first Host line.
+
+X programs in tabs: with X11WindowTabify yes in config/mikuterm.conf, the
+main window of each remote X program opens as a tab of mikuterm's window,
+beside the tab of its connection, and is made the active tab.  The tab's
+title is the window's, after the host's name in brackets.  The program is
+given the tab's size (a program that grows by steps, such as xterm by its
+character cells, may leave a strip at the right and the bottom).  Keys,
+the input method's text, the pointer and the wheel in the tab go to the
+program.  Closing the tab asks the program to close its window, as a
+window's close button does; a program that asks you first (to save, say)
+and is told to stay comes back in a tab after a moment.  Dialogs, menus,
+tooltips and windows with a shape of their own (xeyes) still open as
+windows of their own, and so does a window when mikuterm's window has no
+room for another tab.  With X11RootWindow, the whole X screen is the one
+tab.  The program's cursor shapes and the text being composed by the input
+method are not shown in a tab.
 
 The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
 xlogo), and GTK and Qt programs draw through its RENDER (anti-aliased text,

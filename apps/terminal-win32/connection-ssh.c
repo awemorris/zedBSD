@@ -25,6 +25,7 @@
  */
 
 #include "session.h"
+#include "x11-tab.h"
 
 #include <compat/crypto/crypto.h>
 
@@ -66,6 +67,7 @@ static int connection_mode(const struct terminal_connection *connection, unsigne
 static unsigned connection_event(struct terminal_connection *connection, const struct kl_app_event *event);
 static unsigned connection_pending(const struct terminal_connection *connection);
 static void connection_close(struct terminal_connection *connection);
+static struct terminal_connection *connection_take(struct terminal_connection *connection);
 static void connection_edit(struct mikuterm_session *session, const unsigned char *bytes, size_t size);
 static void connection_erase(struct mikuterm_session *session);
 static void connection_free(struct mikuterm_session *session);
@@ -79,7 +81,9 @@ static const struct terminal_connection_ops connection_ops = {
 	connection_mode,
 	connection_event,
 	connection_pending,
-	connection_close
+	connection_close,
+	connection_take,
+	NULL
 };
 
 /*
@@ -215,14 +219,8 @@ session_post(
 
 	kl_mutex_unlock(&session->lock);
 
-	/* The post, while the application is open; a post that failed lets the next one try. */
-	kl_mutex_lock(&connection_registry);
-
-	error = 0;
-	if (connection_posting)
-		error = kl_app_post(session->app, SESSION_POST, (void *)(uintptr_t)session->number);
-
-	kl_mutex_unlock(&connection_registry);
+	/* The post; a post that failed lets the next one try. */
+	error = session_app_post(session->app, session->number);
 
 	/* A failed post is not on its way. */
 	if (error != 0) {
@@ -365,6 +363,86 @@ session_settings(
 	session_post(session);
 }
 
+/*
+ * Posts to the application that the session or the X window's tab of a
+ * number has something for it, while the application is open.  Returns
+ * 0, or an errno value (ECANCELED once it is closing).
+ */
+int
+session_app_post(
+	struct kl_app *app,
+	uint32_t number)
+{
+	int error;
+
+	/* The post, only while the application is open. */
+	kl_mutex_lock(&connection_registry);
+
+	error = ECANCELED;
+	if (connection_posting)
+		error = kl_app_post(app, SESSION_POST, (void *)(uintptr_t)number);
+
+	kl_mutex_unlock(&connection_registry);
+
+	/* Reports whether the post is on its way. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: posted. */
+	return 0;
+}
+
+/*
+ * Gives the session's tab an X window's tab the thread opened, with the
+ * run's hold on it: the tab gets a number for its posts and the session,
+ * and waits for the run to take it (the session's next post says it is
+ * there).  A session that already has as many waiting refuses it.
+ */
+void
+session_tab(
+	struct mikuterm_session *session,
+	struct x11_tab *tab)
+{
+	uint32_t number;
+	int closing;
+	int queued;
+
+	/* A number of its own, among the sessions'. */
+	kl_mutex_lock(&connection_registry);
+
+	number = connection_next;
+	connection_next++;
+
+	kl_mutex_unlock(&connection_registry);
+
+	/* The session and the number, before the tab is anywhere the application's thread looks. */
+	x11_tab_attach(tab, session, number);
+
+	/* The tab waits for the run, when the session's tab is still open and there is room. */
+	kl_mutex_lock(&session->lock);
+
+	closing = session->closing;
+	queued = 0;
+	if (!closing && session->tab_count < SESSION_TABS) {
+		session->tabs[session->tab_count] = tab;
+		session->tab_count++;
+		queued = 1;
+	}
+
+	kl_mutex_unlock(&session->lock);
+
+	/* A tab with no room is refused (the X window becomes a window of its own); a connection ending closes it. */
+	if (!queued) {
+		if (!closing)
+			tab->connection.ops->picture->refuse(&tab->connection);
+		tab->connection.ops->close(&tab->connection);
+		return;
+	}
+
+	/* The run learns of it. */
+	session_post(session);
+}
+
 /* Says that a session's thread ended (its very last step), for the program's wait. */
 void
 session_thread_ended(void)
@@ -449,6 +527,7 @@ connection_open(
 	session->x11_scale = connector->options.x11_scale;
 	session->x11_render_cpu = connector->options.x11_render_cpu;
 	session->x11_primary = connector->options.x11_primary;
+	session->x11_tabify = connector->options.x11_tabify;
 	if (!connector->first_opened) {
 		connection_copy(session->host, sizeof(session->host), connector->options.connect);
 		connection_copy(session->notice, sizeof(session->notice), connector->options.notice);
@@ -713,6 +792,8 @@ connection_event(
 	if (session->settings)
 		ready |= TERMINAL_READY_SETTINGS;
 	session->settings = 0;
+	if (session->tab_count != 0U)
+		ready |= TERMINAL_READY_TAB;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -731,7 +812,7 @@ connection_pending(
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
-	/* Output, and the end (a request for the settings comes with the post alone). */
+	/* Output, the end and X windows' tabs waiting (a request for the settings comes with the post alone). */
 	kl_mutex_lock(&session->lock);
 
 	ready = 0U;
@@ -739,6 +820,8 @@ connection_pending(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (session->ended)
 		ready |= TERMINAL_READY_EXIT;
+	if (session->tab_count != 0U)
+		ready |= TERMINAL_READY_TAB;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -748,19 +831,23 @@ connection_pending(
 
 /*
  * Closes the tab's side: the thread is told to end the connection (a
- * question asked is given up) and the tab lets go.  It returns at once;
- * the thread lets go when it ends.
+ * question asked is given up), the X windows' tabs the run did not take
+ * are closed, and the tab lets go.  It returns at once; the thread lets
+ * go when it ends.
  */
 static void
 connection_close(
 	struct terminal_connection *connection)
 {
 	struct mikuterm_session *session;
+	struct x11_tab *tabs[SESSION_TABS];
+	unsigned count;
+	unsigned index;
 
 	/* The session the connection is. */
 	session = (struct mikuterm_session *)connection;
 
-	/* The thread ends the connection; a question waits no more. */
+	/* The thread ends the connection; a question waits no more; the tabs waiting are taken out. */
 	kl_mutex_lock(&session->lock);
 
 	session->closing = 1;
@@ -768,12 +855,64 @@ connection_close(
 		session->cancelled = 1;
 		session->answered = 1;
 	}
+	count = session->tab_count;
+	memcpy(tabs, session->tabs, count * sizeof(tabs[0]));
+	session->tab_count = 0U;
 
 	kl_mutex_unlock(&session->lock);
+
+	/* The X windows' tabs no run will show close, as the user's closing would. */
+	for (index = 0U; index < count; index++)
+		tabs[index]->connection.ops->close(&tabs[index]->connection);
 
 	/* The thread wakes to it, then the tab lets go. */
 	kl_socket_waker_ring(session->waker);
 	session_release(session);
+}
+
+/*
+ * Gives the run the oldest X window's tab the thread opened (NULL when
+ * none waits); from now on the run holds it, and the tab's own posts
+ * tell what it has.
+ */
+static struct terminal_connection *
+connection_take(
+	struct terminal_connection *connection)
+{
+	struct mikuterm_session *session;
+	struct x11_tab *tab;
+
+	/* The session the connection is. */
+	session = (struct mikuterm_session *)connection;
+
+	/* The oldest tab waiting, out of the session. */
+	kl_mutex_lock(&session->lock);
+
+	tab = NULL;
+	if (session->tab_count != 0U) {
+		tab = session->tabs[0];
+		session->tab_count--;
+		memmove(&session->tabs[0], &session->tabs[1], session->tab_count * sizeof(session->tabs[0]));
+	}
+
+	kl_mutex_unlock(&session->lock);
+
+	/* None waits. */
+	if (tab == NULL)
+		return NULL;
+
+	/*
+	 * A post the tab made before the run had it went to no one: the
+	 * next may go, and the run looks at what the tab has meanwhile.
+	 */
+	kl_mutex_lock(&tab->lock);
+
+	tab->posted = 0;
+
+	kl_mutex_unlock(&tab->lock);
+
+	/* Succeeded: the run's tab. */
+	return &tab->connection;
 }
 
 /*
