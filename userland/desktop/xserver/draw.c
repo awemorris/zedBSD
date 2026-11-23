@@ -263,8 +263,7 @@ x11_draw_end(
 	changed = 0;
 	if (top != NULL && top->parent == server->root) {
 		fresh = draw_top_sync(server, top);
-		if (fresh)
-			frame->top_had_image = 0;
+		frame->fresh = fresh;
 
 		/* Each viewable window of it that shows something, before its children. */
 		window = top;
@@ -321,6 +320,30 @@ x11_draw_forget(
 		if (server->frames[index].changing == window)
 			server->frames[index].changing = NULL;
 	}
+}
+
+/*
+ * Paints the part of a window's border that can be seen (its border
+ * changed), and has it shown again.
+ */
+void
+x11_draw_border(
+	struct x11server *server,
+	struct x11_window *window)
+{
+	struct x11_region outline;
+	int error;
+
+	/* The border that can be seen. */
+	x11_region_init(&outline);
+	error = draw_outline(server, window, &outline);
+
+	/* Painted and shown, when there is any. */
+	if (error == 0 && outline.count != 0U) {
+		draw_paint_border(server, window, &outline);
+		draw_dirty_window(server, x11_window_top_level(window));
+	}
+	x11_region_fini(&outline);
 }
 
 /*
@@ -1695,10 +1718,14 @@ draw_window_after(
 		moving = x11_window_inferior(window, frame->changing);
 	changed = 0;
 
-	/* The inside that is still there: in place for a window the change did not move, else from the kept pixels. */
+	/*
+	 * The inside that is still there: in place where what the window
+	 * shows did not move on the pixels (nothing else is written there),
+	 * else from the kept pixels.
+	 */
 	if (error == 0 && record != NULL) {
 		draw_content_offset(frame, record, window, &dx, &dy, &retain);
-		if (!moving && dx == 0 && dy == 0) {
+		if (retain && dx == 0 && dy == 0 && !frame->fresh) {
 			error = x11_region_copy(&kept, &record->inner);
 			if (error == 0)
 				error = x11_region_intersect(&kept, &inner);
@@ -1720,7 +1747,7 @@ draw_window_after(
 	}
 
 	/* The border, painted again unless it is just as it was. */
-	if (error == 0 && record != NULL && !moving && record->border == window->border) {
+	if (error == 0 && record != NULL && !moving && !frame->fresh && record->border == window->border) {
 		if (record->width == window->width && record->height == window->height)
 			error = x11_region_subtract(&outline, &record->outline);
 	}

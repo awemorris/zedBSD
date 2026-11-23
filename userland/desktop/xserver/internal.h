@@ -600,8 +600,9 @@ struct x11_draw_record {
  * A change to a top-level window's tree under way (draw.c): the top-level
  * window, the window that moves or changes size (NULL: none), how many
  * changes nested inside one another it holds, where the top-level was,
- * each viewable window as it was, and the pixels of the changing window
- * as they were (with where they were taken).
+ * whether it had pixels and whether they were made anew at the end (what
+ * they showed then gone), each viewable window as it was, and the pixels
+ * of the changing window as they were (with where they were taken).
  */
 struct x11_draw_frame {
 	struct x11_window *top;
@@ -610,6 +611,7 @@ struct x11_draw_frame {
 	int top_x;
 	int top_y;
 	int top_had_image;
+	int fresh;
 	struct x11_draw_record *records;
 	size_t count;
 	struct x11_image saved;
@@ -879,6 +881,7 @@ int x11_selection_tick(struct x11server *server);
 void x11_draw_begin(struct x11server *server, struct x11_window *window, struct x11_window *changing);
 void x11_draw_end(struct x11server *server);
 void x11_draw_forget(struct x11server *server, struct x11_window *window);
+void x11_draw_border(struct x11server *server, struct x11_window *window);
 unsigned x11_draw_set_tile(struct x11server *server, unsigned owner, uint32_t pixmap_id, struct x11_image **tile, size_t *charged);
 int x11_image_copy(const struct x11_image *source, struct x11_image **copy);
 void x11_image_free(struct x11_image *image);

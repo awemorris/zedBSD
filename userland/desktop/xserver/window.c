@@ -438,6 +438,10 @@ x11_request_change_attributes(
 	if (code != 0U)
 		return code;
 
+	/* A new border is painted at once (a new background waits for an exposure or ClearArea). */
+	if ((mask & ((1U << ATTRIBUTE_BORDER_PIXMAP) | (1U << ATTRIBUTE_BORDER_PIXEL))) != 0U)
+		x11_draw_border(server, window);
+
 	/* Succeeded: the attributes are changed. */
 	return 0U;
 }
