@@ -5,8 +5,9 @@
 
 #
 # The terminal, and the parts of zedBSD's SSH library its settings' tab
-# makes keys with, on libcrypto-compat compiled in (its sources.mk; the
-# build copies its <compat/crypto/...> headers).
+# makes keys with and checks an ssh_config with, on libcrypto-compat
+# compiled in (its sources.mk; the build copies its <compat/crypto/...>
+# headers).
 #
 include userland/base/libcrypto-compat/sources.mk
 
@@ -31,12 +32,15 @@ KEILAND_LINUX_TERMINAL_SOURCES := \
 	userland/desktop/terminal/settings.c \
 	userland/desktop/terminal/settings-page.c \
 	userland/desktop/terminal/settings-key.c \
+	userland/desktop/terminal/settings-hosts.c \
 	userland/desktop/terminal/search.c \
 	userland/desktop/picture/color-glyph.c \
 	userland/base/ssh/ssh-key.c \
 	userland/base/ssh/ssh-crypto.c \
 	userland/base/ssh/ssh-bcrypt.c \
 	userland/base/ssh/ssh-buf.c \
+	userland/base/ssh/ssh-config.c \
+	userland/base/ssh/ssh-hostfile.c \
 	userland/base/ssh/ssh-common.c \
 	$(LIBCRYPTO_COMPAT_SOURCES) \
 	$(LIBCRYPTO_COMPAT_POSIX_SOURCES)
