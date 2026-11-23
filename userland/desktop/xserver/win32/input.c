@@ -17,13 +17,15 @@
  * buttons are X's 1 to 9 (the wheels 4 to 7), and a button held captures
  * the pointer, as X's implicit grab does; an X client's grab keeps it too.
  * A paste or a copy (by key or by button) is noted for the clipboard's
- * policy.
+ * policy.  The keys an input method took and the characters sent as keys
+ * are not X's keys: their text reaches X through ime.c.
  */
 
 #include "userland/desktop/xserver/win32/internal.h"
 #include "userland/desktop/xserver/win32/scale.h"
 
 #include <errno.h>
+#include <imm.h>
 #include <windowsx.h>
 
 /* The wheel's notch (WHEEL_DELTA). */
@@ -35,6 +37,7 @@
 #define INPUT_EXTENDED_BIT	24U
 #define INPUT_REPEAT_BIT	30U
 
+static void input_method_key(struct x11_surface *surface, unsigned scan, int extended, int pressed, DWORD time);
 static int input_fake_control(struct x11_surface *surface, int pressed);
 static void input_note_action(struct x11_win32 *backend, uint32_t code, DWORD time);
 static void input_send_key(struct x11_win32 *backend, uint32_t code, int pressed, DWORD time);
@@ -76,6 +79,16 @@ win32_input_key(
 	if (pressed && (((uint32_t)lparam >> INPUT_REPEAT_BIT) & 1U) != 0)
 		repeat = 1;
 	time = (DWORD)GetMessageTime();
+
+	/* A character sent as a key is typed as text (its WM_CHAR); X hears no key. */
+	if (wparam == VK_PACKET)
+		return;
+
+	/* A key the input method took is the input method's (only a key X holds is let go). */
+	if (wparam == VK_PROCESSKEY) {
+		input_method_key(surface, scan, extended, pressed, time);
+		return;
+	}
 
 	/* The key's place on the keyboard; a key X cannot name is dropped. */
 	code = x11_win32_scan_to_evdev(scan, extended, (unsigned)wparam);
@@ -445,6 +458,40 @@ win32_input_bell(
 
 	/* Succeeded: the system's default sound. */
 	MessageBeep(MB_OK);
+}
+
+/*
+ * Follows a key an input method took (VK_PROCESSKEY): X hears nothing of
+ * its press, which composes text; its release lets go a key X holds (the
+ * input method turned on while it was down), so that no key stays down
+ * in X.
+ */
+static void
+input_method_key(
+	struct x11_surface *surface,
+	unsigned scan,
+	int extended,
+	int pressed,
+	DWORD time)
+{
+	struct x11_win32 *backend;
+	UINT virtual_key;
+	uint32_t code;
+
+	/* A press composes. */
+	backend = surface->backend;
+	if (pressed)
+		return;
+
+	/* The key's place, with the virtual key the input method was given. */
+	virtual_key = ImmGetVirtualKey(surface->hwnd);
+	code = x11_win32_scan_to_evdev(scan, extended, (unsigned)virtual_key);
+	if (code == 0 || code > X11_WIN32_EVDEV_MAX)
+		return;
+
+	/* Succeeded: a key X holds is let go. */
+	if (backend->held[code])
+		input_send_key(backend, code, 0, time);
 }
 
 /*

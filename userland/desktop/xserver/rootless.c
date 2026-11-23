@@ -468,6 +468,23 @@ x11server_backend_keymap(
 }
 
 /*
+ * Takes a character the backend's input method typed (a Unicode code
+ * point): the X clients hear it as a key whose keysym is the character.
+ */
+void
+x11server_backend_text(
+	struct x11server *server,
+	uint32_t character,
+	uint32_t time)
+{
+	/* The move held back goes first, so the character is seen where the pointer is. */
+	x11_rootless_flush_motion(server);
+
+	/* Succeeded: the input types it. */
+	x11_input_text(server, character, time);
+}
+
+/*
  * Takes the pointer from the backend: where it is, and a physical button
  * that changed.  A press focuses and raises the top-level window under
  * the pointer first (the rootless server is its window manager; a rooted

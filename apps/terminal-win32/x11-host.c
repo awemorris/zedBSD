@@ -443,6 +443,7 @@ host_pair(
 	struct kl_address peer;
 	struct kl_address local;
 	BOOL exclusive;
+	int nodelay;
 	int error;
 
 	/* The listener, on a free port of 127.0.0.1, its address not to be shared. */
@@ -490,6 +491,18 @@ host_pair(
 		kl_socket_close(connecting);
 		return EACCES;
 	}
+
+	/*
+	 * Small frames go at once both ways (each X request and reply would
+	 * otherwise wait on Nagle and delayed ACKs); without it the link
+	 * still works, slower, and that is logged.
+	 */
+	nodelay = kl_socket_set_option(accepted, KL_SOCKET_NO_DELAY, 1);
+	if (nodelay != 0)
+		printf("MIKUTERM X11 link no-delay failed end=parent errno=%d\n", nodelay);
+	nodelay = kl_socket_set_option(connecting, KL_SOCKET_NO_DELAY, 1);
+	if (nodelay != 0)
+		printf("MIKUTERM X11 link no-delay failed end=child errno=%d\n", nodelay);
 
 	/* Succeeded: the two ends. */
 	host->socket = accepted;

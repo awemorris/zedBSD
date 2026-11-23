@@ -71,6 +71,12 @@ A window has up to ten tabs.  These keys go between them:
 Use the left Alt key for them.  The right Alt key is AltGr on the keyboards
 that have one, and AltGr with a digit still types its character.
 
+A tab is named "1 mikuterm", "2 mikuterm" and so on in the order the tabs
+were opened, until the host gives it a title of its own.  When the tabs do
+not fit in the title bar, it shows as many as fit between two arrows (< and
+>, or the mouse wheel over the tabs) and a button (v) that lists the tabs
+out of sight; a tab chosen by its keys is always brought into sight.
+
 When ssh/config gives no User for the host, the tab asks "login as:".
 
 The first time you connect to a host, mikuterm shows the host's key and asks
@@ -363,9 +369,11 @@ that window goes to X (Alt+F4 too); Windows keeps Alt+Tab and the Windows
 key.  Closing the window ends every X program of the connection.  The size
 stays as set (the window cannot be resized yet).
 
-The X server is new: it shows simple X programs, and programs that need what
-it does not have yet (images, cursors of the cursor font: xterm, xclock,
-xeyes, xlogo) stop with an X error for now.
+The X server is new: it shows the classic X programs (xterm, xclock, xeyes,
+xlogo).  Programs that need what it does not have yet (GTK and many Qt
+programs need RENDER and XInput2) stop with an X error for now.  A window
+whose program asks for no position may open at the top left of another
+display; Win+Shift+Left or Right moves it.
 
 
 11. Port forwarding and RemoteCommand

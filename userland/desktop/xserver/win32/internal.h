@@ -98,6 +98,10 @@ struct x11_surface {
 	LONG_PTR windowed_style;
 	RECT windowed_rect;
 
+	/* The cursor shown over it (NULL: the arrow), and whether the backend made it (and frees it). */
+	HCURSOR cursor;
+	int cursor_owned;
+
 	/* The window's pixels for GDI: a top-down 32-bit DIB of the scaled size. */
 	HDC dib_dc;
 	HBITMAP dib;
@@ -139,6 +143,9 @@ struct x11_win32 {
 	uint8_t held[X11_WIN32_EVDEV_MAX + 1];
 	uint16_t modifiers;
 	int altgr_control;
+
+	/* The text typed through WM_CHAR: a high surrogate waiting for its low one (0: none). */
+	uint16_t text_high;
 
 	/*
 	 * The pointer: the surface under it, its last place on the root window,
@@ -191,9 +198,19 @@ int win32_input_place(void *context, int *x, int *y);
 int win32_input_warp(void *context, int x, int y);
 void win32_input_bell(void *context, int percent);
 
+/* cursor.c */
+void win32_surface_cursor(void *context, struct x11_surface *surface, const struct x11_cursor_image *image);
+void win32_cursor_free(struct x11_surface *surface);
+
 /* layout.c */
 void win32_layout_read(struct x11_win32 *backend);
 void win32_layout_give(struct x11_win32 *backend);
+
+/* ime.c */
+int win32_ime_translates(const MSG *message);
+void win32_ime_place(struct x11_surface *surface);
+LRESULT win32_ime_composition(struct x11_surface *surface, WPARAM wparam, LPARAM lparam);
+void win32_ime_char(struct x11_surface *surface, WPARAM wparam);
 
 /* clipboard.c */
 int win32_clipboard_start(struct x11_win32 *backend);

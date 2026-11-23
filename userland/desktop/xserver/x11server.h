@@ -38,8 +38,17 @@ struct x11server;
 /* The backend's table of functions (x11backend.h). */
 struct x11_backend_ops;
 
-/* The role of a font file: the monospaced face the core font is drawn with. */
-#define X11SERVER_FONT_MONO	0U
+/*
+ * The role of a font file: the monospaced face the core fonts of fixed
+ * width (fixed, courier, the tree's zed-unicode) are drawn with and its
+ * bold, and the proportional face of the others (helvetica, times) and its
+ * bold.  Only the monospaced one is needed: a role without a file is drawn
+ * with another's face, made bold for a bold role.
+ */
+#define X11SERVER_FONT_MONO		0U
+#define X11SERVER_FONT_MONO_BOLD	1U
+#define X11SERVER_FONT_SANS		2U
+#define X11SERVER_FONT_SANS_BOLD	3U
 
 /*
  * How the server shows itself: rootless, each top-level X window a window
@@ -92,7 +101,7 @@ struct x11server_options {
 	unsigned font_count;
 
 	/*
-	 * A file with the characters the monospaced face lacks, which the font
+	 * A file with the characters the monospaced faces lack, which the font
 	 * library reads by its path (NULL: none).
 	 */
 	const char *font_fallback_path;

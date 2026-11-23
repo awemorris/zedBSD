@@ -29,13 +29,20 @@
 #include <compat/crypto/crypto.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* The words of the line about keeping a passphrase, after its box. */
 #define CONNECTION_KEEP_TEXT	"Remember the passphrase until you sign out of Windows (Tab switches this)\r\n"
 
-/* The first title of a tab, before the remote side sets its own. */
+/*
+ * The first title of a tab, before the remote side sets its own: the
+ * session's number (the order the tabs were opened in, from 1) and the
+ * program's name, the number first so that a tab cut to a narrow width
+ * still shows it, and tabs still on the launch screen differ in the tab
+ * strip and in its list of the tabs out of sight.
+ */
 #define CONNECTION_TITLE	"mikuterm"
 
 /*
@@ -394,6 +401,7 @@ connection_open(
 	struct mikuterm_session *session;
 	struct kl_thread_options thread_options;
 	struct kl_thread *thread;
+	uint32_t number;
 	size_t length;
 	int error;
 
@@ -461,6 +469,7 @@ connection_open(
 	kl_mutex_lock(&connection_registry);
 
 	session->number = connection_next;
+	number = session->number;
 	connection_next++;
 	connection_threads++;
 
@@ -489,12 +498,9 @@ connection_open(
 	/* The thread runs on its own. */
 	(void)kl_thread_detach(thread);
 
-	/* The tab's first title, until the remote side sets one. */
-	length = strlen(CONNECTION_TITLE);
-	if (length >= size)
-		length = size - 1U;
-	memcpy(title, CONNECTION_TITLE, length);
-	title[length] = '\0';
+	/* The tab's first title, until the remote side sets one (the session may be gone already: its number was kept). */
+	if (size != 0U)
+		(void)snprintf(title, size, "%u %s", (unsigned)number, CONNECTION_TITLE);
 
 	/* Succeeded: the tab has its connection. */
 	connector->first_opened = 1;

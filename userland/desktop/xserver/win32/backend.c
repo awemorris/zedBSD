@@ -42,6 +42,7 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_input_place,
 	win32_input_warp,
 	win32_input_bell,
+	win32_surface_cursor,
 };
 
 static unsigned backend_main_scale(void);
@@ -168,9 +169,10 @@ x11_win32_destroy(
  *
  * Returns the index of a handle that was signaled, X11_WIN32_WAIT_TIMEOUT
  * when none was (messages or the time), or X11_WIN32_WAIT_QUIT when the
- * thread got WM_QUIT.  The messages are not translated: X clients make
- * characters from the keysyms themselves, and the dead keys' state of
- * Windows must stay untouched.
+ * thread got WM_QUIT.  Only the keys an input method took and the
+ * characters sent as keys are translated (ime.c): X clients make the
+ * other keys' characters from the keysyms themselves, and the dead keys'
+ * state of Windows must stay untouched.
  */
 unsigned
 x11_win32_wait(
@@ -183,6 +185,7 @@ x11_win32_wait(
 	MSG message;
 	unsigned signaled;
 	BOOL found;
+	int translates;
 
 	/* Refuses more handles than the wait takes. */
 	(void)backend;
@@ -204,6 +207,10 @@ x11_win32_wait(
 		if (message.message == WM_QUIT)
 			return X11_WIN32_WAIT_QUIT;
 
+		/* The input method's keys and the characters sent as keys are translated into its text. */
+		translates = win32_ime_translates(&message);
+		if (translates)
+			TranslateMessage(&message);
 		DispatchMessageW(&message);
 	}
 
