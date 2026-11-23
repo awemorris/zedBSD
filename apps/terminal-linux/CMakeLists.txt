@@ -62,22 +62,8 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "The kind of build" FORCE)
 endif()
 
-#
-# Reads one source list of a sources.mk ("NAME := file file \" and its continuation lines) into
-# a CMake list of absolute paths.  The file is read again when it changes.
-#
-function(mikuterm_read_sources variable file name)
-	file(READ ${MIKUTERM_ROOT}/${file} text)
-	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MIKUTERM_ROOT}/${file})
-	string(REGEX REPLACE "\\\\\n" " " text "${text}")
-	string(REGEX MATCH "(^|\n)${name}[ \t]*:=([^\n]*)" found "${text}")
-	if(NOT found)
-		message(FATAL_ERROR "${file} has no ${name}")
-	endif()
-	string(REGEX MATCHALL "[^ \t]+\\.c" files "${CMAKE_MATCH_2}")
-	list(TRANSFORM files PREPEND ${MIKUTERM_ROOT}/)
-	set(${variable} ${files} PARENT_SCOPE)
-endfunction()
+# The lists mikuterm's builds share, and the reader of the tree's sources.mk lists.
+include(${MIKUTERM_ROOT}/apps/mikuterm-common/cmake/mikuterm-sources.cmake)
 
 mikuterm_read_sources(MIKUTERM_TRUETYPE_SOURCES userland/desktop/libtruetype/sources.mk LIBTRUETYPE_SOURCES)
 mikuterm_read_sources(MIKUTERM_PNG_SOURCES userland/desktop/libpng-compat/sources.mk LIBPNG_COMPAT_SOURCES)
@@ -85,19 +71,6 @@ mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LI
 mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_POSIX_SOURCES)
 mikuterm_read_sources(MIKUTERM_KEILAND_SOURCES userland/desktop/libkeiland/sources.mk LIBKEILAND_SOURCES)
-
-# The terminal's core, its settings' tab, the drawing on the processor and the pacing by the clock.
-set(MIKUTERM_TERMINAL_NAMES
-	run screen width search keys font render-build render-cpu display-cpu frame-timer
-	window menu tabs clipboard primary touch settings-page settings-key settings-hosts)
-list(TRANSFORM MIKUTERM_TERMINAL_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/terminal/ OUTPUT_VARIABLE MIKUTERM_TERMINAL_SOURCES)
-list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
-
-# The SSH library's modules the client engine needs, and the engine (not the programs' files).
-set(MIKUTERM_SSH_NAMES
-	buf packet cipher crypto bcrypt kex transport auth channel key hostfile config common client-engine)
-list(TRANSFORM MIKUTERM_SSH_NAMES PREPEND ${MIKUTERM_ROOT}/userland/base/ssh/ssh- OUTPUT_VARIABLE MIKUTERM_SSH_SOURCES)
-list(TRANSFORM MIKUTERM_SSH_SOURCES APPEND .c)
 
 # The tree's Wayland client library and the protocols libkeiland speaks.
 set(MIKUTERM_WAYLAND_NAMES
@@ -109,28 +82,17 @@ set(MIKUTERM_WAYLAND_NAMES
 list(TRANSFORM MIKUTERM_WAYLAND_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/libwayland/ OUTPUT_VARIABLE MIKUTERM_WAYLAND_SOURCES)
 list(TRANSFORM MIKUTERM_WAYLAND_SOURCES APPEND .c)
 
-# mikuterm's own files: the Windows program's that do not speak to the system, and this directory's that do.
+# mikuterm's own files: this directory's that speak to the system, and the ones every build shares
+# (apps/mikuterm-common: this build has X11 forwarding and no WSL).
 set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/main.c
 	${MIKUTERM_DIR}/folder.c
 	${MIKUTERM_DIR}/credential.c
-	${MIKUTERM_DIR}/system.c
 	${MIKUTERM_DIR}/x11-spawn-posix.c
 	${MIKUTERM_DIR}/x11-child.c
-	${MIKUTERM_WIN32_DIR}/conf.c
-	${MIKUTERM_WIN32_DIR}/settings-file.c
-	${MIKUTERM_WIN32_DIR}/connection-ssh.c
-	${MIKUTERM_WIN32_DIR}/known-hosts.c
-	${MIKUTERM_WIN32_DIR}/ssh-thread.c
-	${MIKUTERM_WIN32_DIR}/forward.c
-	${MIKUTERM_WIN32_DIR}/remote-command.c
-	${MIKUTERM_WIN32_DIR}/launch.c
-	${MIKUTERM_WIN32_DIR}/page.c
-	${MIKUTERM_WIN32_DIR}/x11-link.c
-	${MIKUTERM_WIN32_DIR}/x11-host.c
-	${MIKUTERM_WIN32_DIR}/x11-serve.c
-	${MIKUTERM_WIN32_DIR}/x11-tab.c
-	${MIKUTERM_WIN32_DIR}/x11-noglx.c)
+	${MIKUTERM_COMMON_SOURCES}
+	${MIKUTERM_COMMON_X11_SOURCES}
+	${MIKUTERM_COMMON_NO_WSL_SOURCES})
 
 # The login shell, ProxyCommand and GitHub Codespaces (gh): the files that run the computer's programs.
 if(MIKUTERM_LOCAL_PROGRAMS)
@@ -138,8 +100,7 @@ if(MIKUTERM_LOCAL_PROGRAMS)
 		${MIKUTERM_DIR}/login-shell-posix.c
 		${MIKUTERM_DIR}/program-posix.c
 		${MIKUTERM_DIR}/proxy-posix.c
-		${MIKUTERM_WIN32_DIR}/proxy-command.c
-		${MIKUTERM_WIN32_DIR}/codespace.c)
+		${MIKUTERM_COMMON_PROGRAM_SOURCES})
 endif()
 
 #
@@ -165,7 +126,7 @@ foreach(header IN LISTS MIKUTERM_COMPAT_HEADERS)
 endforeach()
 
 # The version, for Help > About.
-configure_file(${MIKUTERM_WIN32_DIR}/resources/mikuterm-version.h.in ${MIKUTERM_INCLUDE}/mikuterm-version.h @ONLY)
+configure_file(${MIKUTERM_VERSION_IN} ${MIKUTERM_INCLUDE}/mikuterm-version.h @ONLY)
 
 # Vulkan's headers: the given directory, or the release's tarball (MIKUTERM_DISTFILES' copy first).
 set(MIKUTERM_VULKAN_SDK_TAG vulkan-sdk-1.4.309.0)
@@ -248,7 +209,7 @@ target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 #
 add_executable(mikuterm ${MIKUTERM_SOURCES})
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_xserver)
-target_include_directories(mikuterm PRIVATE ${MIKUTERM_WIN32_DIR})
+target_include_directories(mikuterm PRIVATE ${MIKUTERM_COMMON_DIR})
 # Windows' _stricmp is the C library's strcasecmp (<strings.h>, which <string.h> brings with _GNU_SOURCE).
 target_compile_definitions(mikuterm PRIVATE MIKUTERM_LINUX MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp
 	MIKUTERM_HAVE_LOGIN_SHELL=${MIKUTERM_LOCAL_PROGRAMS}
