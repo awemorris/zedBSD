@@ -57,6 +57,10 @@ structures, constants, errors and permissions that programs and people use
 - [useradd, usermod and userdel](user-administration.md): root's commands
   that add, change and remove the people's accounts through account-admin.
 
+- [pgrep and pkill](pgrep.md): the commands that find processes by name,
+  command line, user, group, parent, process group or session, and write
+  their IDs or signal them.
+
 - [gpu](gpu-command.md): root's command that lists the GPU nodes and shows
   their capabilities, displays, Vulkan, GL and video, changes a display's mode
   through the desktop session, and resets a GPU and reads its reports.
