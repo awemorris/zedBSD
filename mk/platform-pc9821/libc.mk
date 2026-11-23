@@ -88,7 +88,7 @@ CRT1_SRC := src/libc/crt/crt1-i386.S
 #
 # Static libc objects & library
 #
-LIBC_STATIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBC_SOURCES))
+LIBC_STATIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBC_SOURCES) $(LIBM_SOURCES))
 $(LIBC_STATIC_OBJS): $(LIBC_OBJ_DIR)/static/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(I386_LIBC_STATIC_CFLAGS) -c $< -o $@
@@ -105,7 +105,7 @@ $(LIBC_OUT_DIR)/libc.o: $(LIBC_OUT_DIR)/libc.a
 #
 # Dynamic libc objects & shared library
 #
-LIBC_DYNAMIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES)) $(LIBC_OBJ_DIR)/dynamic/syscall.o
+LIBC_DYNAMIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES) $(LIBM_SOURCES)) $(LIBC_OBJ_DIR)/dynamic/syscall.o
 
 $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -120,26 +120,17 @@ $(LIBC_OUT_DIR)/libc.so: $(LIBC_DYNAMIC_OBJS) src/libc/interpose.list
 	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both -Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list -z now -z relro -z separate-code -z stack-size=0x100000 $(LIBC_DYNAMIC_OBJS) -o $@
 
 #
-# Static & dynamic libm
+# libm
 #
-LIBM_STATIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/static/%.o,$(LIBM_SOURCES))
-$(LIBM_STATIC_OBJS): $(LIBC_OBJ_DIR)/static/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(I386_LIBC_STATIC_CFLAGS) -c $< -o $@
-
-$(LIBC_OUT_DIR)/libm.a: $(LIBM_STATIC_OBJS)
+# The mathematical functions are part of the C library: libc.a and libc.so
+# carry them.  libm.a is an empty archive, so that a link that asks for -lm,
+# as programs and packages written for other systems do, is answered by the
+# C library and needs nothing more at run time.  It is made again whenever
+# libc.a is, so that a build directory never keeps an older libm.a.
+$(LIBC_OUT_DIR)/libm.a: $(LIBC_OUT_DIR)/libc.a
 	@mkdir -p $(dir $@)
 	@rm -f $@
-	$(AR) rcsD $@ $^
-
-LIBM_DYNAMIC_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBM_SOURCES))
-$(LIBM_DYNAMIC_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(I386_LIBC_DYNAMIC_CFLAGS) -c $< -o $@
-
-$(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
-	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 -shared -soname libm.so --hash-style=both -z now -z relro -z separate-code $(LIBM_DYNAMIC_OBJS) -o $@
+	$(AR) rcsD $@
 
 #
 # Static & dynamic libutil
@@ -226,7 +217,6 @@ LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.a \
 	$(LIBC_OUT_DIR)/libc.so \
 	$(LIBC_OUT_DIR)/libm.a \
-	$(LIBC_OUT_DIR)/libm.so \
 	$(LIBC_OUT_DIR)/libutil.a \
 	$(LIBC_OUT_DIR)/libutil.so \
 	$(LIBC_OUT_DIR)/ld.so \

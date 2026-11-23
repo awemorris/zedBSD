@@ -168,9 +168,15 @@ packages-meson-cross: $(EXTERNAL_MESON_STAMP)
 # The packages a package builds against, with the packages they build
 # against in turn, each once.  $(1) = package names.  Every external package
 # names its own in EXT_<name>_DEPENDS (none means none), so a package
-# declares what it uses directly and the rest follows.
+# declares what it uses directly and the rest follows.  A package is made by
+# a make that reads its own Makefile only, so the declaration of a package
+# it depends on is read from that package's Makefile, where it is one line.
+EXTERNAL_DEPENDS_OF = $(if $(filter undefined,$(origin EXT_$(1)_DEPENDS)),\
+	$(shell sed -n 's/^EXT_$(1)_DEPENDS :=//p' \
+		$(wildcard $(EXTERNAL_ROOT)/userland/packages/*/$(1)/Makefile)),\
+	$(EXT_$(1)_DEPENDS))
 EXTERNAL_CLOSURE = $(if $(strip $(1)),$(sort $(1) $(call \
-	EXTERNAL_CLOSURE,$(foreach dependency,$(1),$(EXT_$(dependency)_DEPENDS)))))
+	EXTERNAL_CLOSURE,$(foreach dependency,$(1),$(call EXTERNAL_DEPENDS_OF,$(dependency))))))
 
 # Builds the view a package sees its dependencies through: one directory
 # whose usr/ holds a symbolic link to every file the dependencies staged.
@@ -271,7 +277,7 @@ EXT_$(1)_DEPENDS_STAGED := $$(foreach dependency,$$(EXT_$(1)_DEPENDS),\
 # What every Meson command of this package runs with: its view for
 # pkg-config, and the host tools ahead of the build machine's own programs.
 EXT_$(1)_MESON_ENV = env \
-	PKG_CONFIG_VIEW='$$(EXT_$(1)_VIEW)' \
+	ZEDBSD_PKG_CONFIG_VIEW='$$(EXT_$(1)_VIEW)' \
 	PATH="$$(subst $$(EXTERNAL_SPACE),,$$(foreach directory,$$(EXTERNAL_HOST_BIN_DIRS),$$(directory):))$$$$PATH"
 
 # A changed option, dependency or cross file configures the tree again from
@@ -307,6 +313,10 @@ $$(EXT_$(1)_STAGED): $$(EXT_$(1)_CONFIGURED)
 
 endef
 
+# The stage of a package this make does not read is made by that package's
+# own make, which is asked for the stage itself: its default goal is what it
+# puts in the root, which for a package only built against (wayland-client,
+# wayland-protocols) is nothing.
 $(EXTERNAL_WORKROOT)/%/stage/.zedbsd-staged:
 	@target_dir=$$(find $(EXTERNAL_ROOT)/userland/packages $(EXTERNAL_ROOT)/userland/desktop -maxdepth 3 -type d -name "$*" | head -n 1); \
 	if [ -z "$$target_dir" ] && [ "$*" = "wayland-client" ]; then \
@@ -314,7 +324,7 @@ $(EXTERNAL_WORKROOT)/%/stage/.zedbsd-staged:
 	fi; \
 	if [ -n "$$target_dir" ] && [ -d "$$target_dir" ]; then \
 		echo "Building dependency $* in $$target_dir..."; \
-		$(MAKE) -C "$$target_dir"; \
+		$(MAKE) -C "$$target_dir" '$@'; \
 	else \
 		echo "Error: cannot find Makefile for dependency $*" >&2; \
 		exit 1; \
@@ -332,8 +342,9 @@ $(EXTERNAL_WORKROOT)/%/stage/.zedbsd-staged:
 # (`/.`): build/llvm-source may be a link to another checkout's tree, and a
 # copy of the link would let patch write into that tree (BUG-089).
 EXTERNAL_LLVM_SOURCE := $(abspath $(EXTERNAL_ROOT)/build/llvm-source)
-EXTERNAL_LLVM_VERIFIED = \
-	$(EXTERNAL_LLVM_SOURCE)/.zedbsd-source-verified-$(LLVM_VERSION)-$(LLVM_PATCH_LEVEL)
+# The tree's record of the archive and the patches it was made from, which
+# the toolchain writes once the tree is complete (mk/toolchain-llvm/llvm.mk).
+EXTERNAL_LLVM_VERIFIED := $(EXTERNAL_LLVM_SOURCE)/.patched
 
 # The toolchain's directories are kept read-only (plan/tools/toolchain-lock.sh)
 # and cp -a copies their modes, so the copy's directories are made writable
