@@ -1044,6 +1044,7 @@ page_hosts_list(
 	unsigned index;
 	unsigned listed;
 	unsigned flags;
+	int shown;
 	int pressed;
 	int y;
 
@@ -1051,7 +1052,8 @@ page_hosts_list(
 	theme = page.style.theme;
 	listed = 0U;
 	for (index = 0U; index < page.hosts.block_count; index++) {
-		if (page_hosts_listed(index))
+		shown = page_hosts_listed(index);
+		if (shown)
 			listed++;
 	}
 
@@ -1075,7 +1077,8 @@ page_hosts_list(
 
 	/* Each block listed; a click shows its form (the changes of the one shown kept in the text). */
 	for (index = 0U; index < page.hosts.block_count; index++) {
-		if (!page_hosts_listed(index))
+		shown = page_hosts_listed(index);
+		if (!shown)
 			continue;
 		page_hosts_title(index, title, sizeof(title));
 		row.x = card.x + 12;
@@ -1994,6 +1997,7 @@ page_hosts_remove_host(void)
 	unsigned block;
 	char *out;
 	size_t size;
+	int listed;
 	int error;
 
 	/* The Host shown. */
@@ -2016,7 +2020,10 @@ page_hosts_remove_host(void)
 	page.hosts_block = TERMINAL_HOSTS_NONE;
 	while (block > 0U) {
 		block--;
-		if (block < page.hosts.block_count && page_hosts_listed(block)) {
+		if (block >= page.hosts.block_count)
+			continue;
+		listed = page_hosts_listed(block);
+		if (listed) {
 			page.hosts_block = block;
 			break;
 		}
