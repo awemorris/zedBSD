@@ -7,7 +7,9 @@
 
 /*
  * The X11 core protocol's dispatch, the replies and errors it sends, and
- * the requests of the server grab and the core's extensions.
+ * the requests of the server grab; QueryExtension and ListExtensions name
+ * the extensions of extension.c's table (and GLX), whose requests it
+ * hands on by their major opcodes.
  *
  * Wire layouts follow the public X11 core protocol.  The window, atom,
  * property, selection, event, input, drawing, graphics context, font,
@@ -143,24 +145,12 @@
 /* The vendor the setup names. */
 #define SERVER_VENDOR			ZEDBSD_OS_NAME " X11"
 
-/* The core's extensions: BIG-REQUESTS (its one request, BigReqEnable) and XC-MISC. */
-#define BIGREQ_NAME			"BIG-REQUESTS"
-#define BIGREQ_ENABLE			0U
-#define XCMISC_NAME			"XC-MISC"
-
-/* RENDER's name. */
-#define RENDER_NAME			"RENDER"
-
-/* The extensions ListExtensions names (GLX's name comes from glx.c, where the server has GLX). */
-#define EXTENSION_NAMES_MAX		6U
-
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_grab_server(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_best_size(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 static unsigned protocol_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static unsigned protocol_list_extensions(struct x11server *server, struct x11_client *client, size_t length);
-static unsigned protocol_big_requests(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 static void protocol_error(struct x11server *server, struct x11_client *client, unsigned code, uint32_t resource, uint8_t opcode, uint16_t minor);
 
 /*
@@ -738,31 +728,14 @@ protocol_dispatch(
 	case REQUEST_PUT_IMAGE_RGB24:
 		code = x11_request_put_image_rgb24(server, index, request, length);
 		break;
-	case X11_BIGREQ_MAJOR:
-		code = protocol_big_requests(server, client, request, length);
-		break;
-	case X11_XCMISC_MAJOR:
-		code = x11_xcmisc_request(server, index, request, length);
-		break;
-	case X11_RENDER_MAJOR:
-		code = x11_render_request(server, index, request, length);
-		break;
-	case X11_XKB_MAJOR:
-		code = x11_xkb_request(server, index, request, length);
-		break;
-	case X11_XINPUT_MAJOR:
-		code = x11_xinput_request(server, index, request, length);
-		break;
-	case X11_GE_MAJOR:
-		code = x11_ge_request(server, index, request, length);
-		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
 		if (length >= 4U)
 			code = x11_glx_request(server, client, request, length);
 		break;
 	default:
-		code = X11_BAD_REQUEST;
+		/* The extensions' major opcodes (extension.c): BadRequest for one that is none of theirs. */
+		code = x11_extension_request(server, index, request, length);
 		break;
 	}
 
@@ -847,9 +820,9 @@ protocol_query_best_size(
 }
 
 /*
- * QueryExtension: BIG-REQUESTS, XC-MISC and RENDER are the core's own
- * (RENDER with its first error); any other name is answered by GLX's
- * table (present only for GLX).
+ * QueryExtension: the extensions of extension.c's table, with their major
+ * opcodes and first events and errors; any other name is answered by GLX
+ * (present only for GLX, where the server has it).
  */
 static unsigned
 protocol_query_extension(
@@ -860,10 +833,7 @@ protocol_query_extension(
 {
 	uint8_t reply[32];
 	size_t name_length;
-	uint8_t major;
-	uint8_t first_event;
-	uint8_t first_error;
-	int differs;
+	int found;
 
 	/* The name, filling the request to its last word. */
 	if (length < 8U)
@@ -872,43 +842,16 @@ protocol_query_extension(
 	if (8U + ((name_length + 3U) & ~(size_t)3U) != length)
 		return X11_BAD_LENGTH;
 
-	/* The core's own extensions by name; the input extensions name their events and errors. */
-	major = 0U;
-	first_event = 0U;
-	first_error = 0U;
-	(void)x11_xkb_query(request + 8, name_length, &major, &first_event, &first_error);
-	(void)x11_xinput_query(request + 8, name_length, &major, &first_event, &first_error);
-	if (name_length == sizeof(BIGREQ_NAME) - 1U) {
-		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
-		if (differs == 0)
-			major = X11_BIGREQ_MAJOR;
-	}
-	if (name_length == sizeof(XCMISC_NAME) - 1U) {
-		differs = memcmp(request + 8, XCMISC_NAME, name_length);
-		if (differs == 0)
-			major = X11_XCMISC_MAJOR;
-	}
-	if (name_length == sizeof(RENDER_NAME) - 1U) {
-		differs = memcmp(request + 8, RENDER_NAME, name_length);
-		if (differs == 0) {
-			major = X11_RENDER_MAJOR;
-			first_error = X11_RENDER_ERROR;
-		}
-	}
-
-	/* Another name: GLX's answer. */
-	if (major == 0U) {
-		x11_glx_query_extension(server, client, request, length);
+	/* An extension of the table (extension.c), with its numbers. */
+	memset(reply, 0, sizeof(reply));
+	found = x11_extension_query(request + 8, name_length, reply);
+	if (found) {
+		x11_reply(server, client, reply, sizeof(reply));
 		return 0U;
 	}
 
-	/* Succeeded: present, with its major opcode, its first event and its first error. */
-	memset(reply, 0, sizeof(reply));
-	reply[8] = 1U;
-	reply[9] = major;
-	reply[10] = first_event;
-	reply[11] = first_error;
-	x11_reply(server, client, reply, sizeof(reply));
+	/* Succeeded: another name is GLX's to answer (present where the server has GLX). */
+	x11_glx_query_extension(server, client, request, length);
 	return 0U;
 }
 
@@ -919,30 +862,22 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "XKEYBOARD", "XInputExtension", "Generic Event Extension", RENDER_NAME };
-	uint8_t reply[32U + 128U];
+	uint8_t reply[32U + 256U];
 	size_t used;
-	size_t name_length;
 	size_t written;
 	unsigned count;
-	unsigned index;
 
 	/* The header alone. */
 	if (length != 4U)
 		return X11_BAD_LENGTH;
 
-	/* The names after the header, each its length and its bytes. */
+	/* The table's names after the header (extension.c), each its length and its bytes. */
 	memset(reply, 0, sizeof(reply));
+	count = 0U;
 	used = 32U;
-	for (index = 0U; index < EXTENSION_NAMES_MAX; index++) {
-		name_length = strlen(names[index]);
-		reply[used] = (uint8_t)name_length;
-		memcpy(reply + used + 1U, names[index], name_length);
-		used += 1U + name_length;
-	}
+	used += x11_extension_names(reply + used, sizeof(reply) - used, &count);
 
 	/* GLX's name after them, where the server has GLX. */
-	count = EXTENSION_NAMES_MAX;
 	written = x11_glx_list_name(reply + used, sizeof(reply) - used);
 	if (written != 0U) {
 		used += written;
@@ -953,34 +888,6 @@ protocol_list_extensions(
 	reply[1] = (uint8_t)count;
 	used = (used + 3U) & ~(size_t)3U;
 	x11_reply(server, client, reply, used);
-	return 0U;
-}
-
-/*
- * BIG-REQUESTS: BigReqEnable answers the longest request in words (the
- * input the core holds for a client) and lets the client send requests of
- * length 0 with a 32-bit length.
- */
-static unsigned
-protocol_big_requests(
-	struct x11server *server,
-	struct x11_client *client,
-	const uint8_t *request,
-	size_t length)
-{
-	uint8_t reply[32];
-
-	/* BigReqEnable is the only request, the header alone. */
-	if (request[1] != BIGREQ_ENABLE)
-		return X11_BAD_REQUEST;
-	if (length != 4U)
-		return X11_BAD_LENGTH;
-
-	/* Succeeded: the longest request, and big requests from now on. */
-	memset(reply, 0, sizeof(reply));
-	x11_write32(reply + 8, X11_INPUT_CAP / 4U, client->order);
-	x11_reply(server, client, reply, sizeof(reply));
-	client->big_requests = 1;
 	return 0U;
 }
 

@@ -22,7 +22,9 @@ KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
 	userland/desktop/xserver/colornames.c userland/desktop/xserver/font.c \
 	userland/desktop/xserver/cursor.c \
 	userland/desktop/xserver/xkb.c userland/desktop/xserver/xinput.c \
-	userland/desktop/xserver/rooted.c
+	userland/desktop/xserver/rooted.c userland/desktop/xserver/render-vulkan.c \
+	userland/desktop/xserver/extension.c userland/desktop/xserver/shape-ext.c \
+	userland/desktop/xserver/xfixes.c userland/desktop/xserver/sync.c
 
 # GLX: libGLX.so, one of the server's libraries, which X programs link
 # with libGL (-lGL -lGLX); a private libX11 is built in.  The image

@@ -29,8 +29,10 @@
  * wm.c is the top-level windows' window manager (ICCCM and EWMH), font.c
  * keeps the core fonts and answers their requests and the text ones,
  * glyphs.c draws their glyphs from the TrueType faces, cursor.c keeps the
- * cursors and tells the backend which one to show, and keymap.c and glx.c
- * are the US keyboard map and the GLX extension.
+ * cursors and tells the backend which one to show, keymap.c and glx.c
+ * are the US keyboard map and the GLX extension, and extension.c hands
+ * the requests of SHAPE (shape-ext.c), SYNC (sync.c) and XFIXES
+ * (xfixes.c) to their modules.
  */
 
 #ifndef KEILAND_X11SERVER_INTERNAL_H
@@ -133,6 +135,11 @@
 #define X11_RESOURCE_COLORMAP	6U
 #define X11_RESOURCE_PICTURE	7U
 #define X11_RESOURCE_GLYPHSET	8U
+#define X11_RESOURCE_REGION	9U
+#define X11_RESOURCE_COUNTER	10U
+#define X11_RESOURCE_ALARM	11U
+#define X11_RESOURCE_FENCE	12U
+#define X11_RESOURCE_BARRIER	13U
 #define X11_RESOURCE_GONE	0xffU
 
 /*
@@ -414,6 +421,11 @@ struct x11_text_key {
 struct x11_vulkan;
 struct x11_vulkan_window;
 
+/* The extensions' state, each kept by its own module: a window's shapes (shape-ext.c), XFIXES's (xfixes.c) and SYNC's (sync.c). */
+struct x11_shape;
+struct x11_xfixes;
+struct x11_sync;
+
 /*
  * One client's connection.
  *
@@ -485,6 +497,13 @@ struct x11_client {
 	 * after its pass, not in the middle of a request.
 	 */
 	int broken;
+
+	/*
+	 * Nonzero while the client waits for counters or fences (SYNC's Await
+	 * and AwaitFence, sync.c): none of its requests is handled until the
+	 * wait ends.
+	 */
+	int blocked;
 
 	/* The last request handled and when (the server's milliseconds), for the stuck-client report. */
 	uint8_t last_opcode;
@@ -692,6 +711,28 @@ struct x11_window {
 	int32_t surface_y;
 	int surface_fresh;
 	char surface_title[X11_TITLE_MAX];
+
+	/*
+	 * The window's shapes and the clients that asked to hear of them
+	 * (SHAPE, shape-ext.c; NULL: unshaped, and nobody asked).
+	 */
+	struct x11_shape *shape;
+
+	/*
+	 * The window manager's resize in step with the client's drawing
+	 * (EWMH's _NET_WM_SYNC_REQUEST, wm.c): the value last asked of the
+	 * window's counter, whether the window manager waits for the counter
+	 * to reach it and until when (the server's milliseconds), and a size
+	 * the system gave meanwhile, held until then (sync_held 0: none).
+	 */
+	int64_t sync_value;
+	int sync_waiting;
+	uint32_t sync_deadline;
+	int sync_held;
+	int32_t sync_x;
+	int32_t sync_y;
+	int sync_width;
+	int sync_height;
 };
 
 /*
@@ -1067,6 +1108,12 @@ struct x11_wm_atoms {
 	uint32_t net_wm_window_type_notification;
 	uint32_t net_active_window;
 	uint32_t net_close_window;
+	uint32_t net_wm_state_demands_attention;
+	uint32_t net_wm_icon;
+	uint32_t net_frame_extents;
+	uint32_t net_request_frame_extents;
+	uint32_t net_wm_sync_request;
+	uint32_t net_wm_sync_request_counter;
 };
 
 /*
@@ -1084,10 +1131,11 @@ struct x11server {
 	void *backend;
 
 	/*
-	 * Vulkan's state, made with the first swapchain (NULL until then), the
-	 * WSI extension the backend's surfaces need, and whether windows are
-	 * shown through the backend's present instead (Vulkan was not asked
-	 * for, or failed once).
+	 * Vulkan's state, made when the server starts with the program's
+	 * loader (NULL: none, everything drawn in memory), the WSI extension
+	 * the backend's surfaces need, and whether windows are shown through
+	 * the backend's present instead (Vulkan cannot show them, or failed
+	 * once).
 	 */
 	struct x11_vulkan *vulkan;
 	const char *vulkan_wsi;
@@ -1308,6 +1356,22 @@ struct x11server {
 	uint32_t wm_active;
 
 	/*
+	 * The window manager's frame (wm.c): the size of the system's frame
+	 * around a top-level window the backend last told (X's pixels, left,
+	 * right, top, bottom), which _NET_REQUEST_FRAME_EXTENTS is answered
+	 * with before a window has a frame of its own.
+	 */
+	uint32_t wm_frame[4];
+
+	/*
+	 * The extensions' state, made when a client first needs it (NULL
+	 * until then): XFIXES's selections and cursor events (xfixes.c), and
+	 * SYNC's waits and alarms (sync.c).
+	 */
+	struct x11_xfixes *xfixes;
+	struct x11_sync *sync;
+
+	/*
 	 * XKEYBOARD (xkb.c): the keyboard's state and the indicators the
 	 * clients last heard of, so that a change sends StateNotify and
 	 * IndicatorStateNotify once.
@@ -1507,10 +1571,13 @@ unsigned x11_request_set_close_down_mode(struct x11server *server, unsigned inde
 unsigned x11_request_kill_client(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /* present-vulkan.c: a surface shown through a Vulkan swapchain. */
-struct x11_vulkan *x11_vulkan_open(const char *wsi);
+struct x11_vulkan *x11_vulkan_open(struct x11server *server, x11server_vulkan_function loader, const char *wsi);
 void x11_vulkan_close(struct x11_vulkan *vulkan);
+int x11_vulkan_shows(const struct x11_vulkan *vulkan);
+int x11_vulkan_lost(const struct x11_vulkan *vulkan);
 struct x11_vulkan_window *x11_vulkan_window_open(struct x11server *server, struct x11_surface *surface, unsigned width, unsigned height);
 int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *pixels, size_t stride);
+int x11_vulkan_window_present_image(struct x11_vulkan_window *window, const struct x11_image *pixels);
 int x11_vulkan_window_resize(struct x11_vulkan_window *window, unsigned width, unsigned height);
 void x11_vulkan_window_close(struct x11_vulkan_window *window);
 
@@ -1576,6 +1643,9 @@ void x11_cursor_hold(struct x11_cursor *cursor);
 void x11_cursor_release(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_free(struct x11server *server, struct x11_cursor *cursor);
 void x11_cursor_update(struct x11server *server);
+const struct x11_cursor *x11_cursor_current(struct x11server *server);
+uint32_t *x11_cursor_pixels(const struct x11_cursor *cursor);
+unsigned x11_cursor_change(struct x11server *server, struct x11_cursor *target, const struct x11_cursor *source);
 unsigned x11_cursor_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 unsigned x11_cursor_create_argb(struct x11server *server, unsigned index, uint32_t id, uint32_t *pixels, int width, int height, int hot_x, int hot_y);
 unsigned x11_cursor_create_copy(struct x11server *server, unsigned index, uint32_t id, const struct x11_cursor *model);
@@ -1621,6 +1691,99 @@ void x11_render_forget_window(struct x11server *server, const struct x11_window 
 void x11_render_release(struct x11server *server, unsigned owner);
 unsigned x11_render_picture_clip(struct x11server *server, uint32_t id, const struct x11_region *region, int x, int y);
 unsigned x11_render_picture_pixels(struct x11server *server, uint32_t id, uint32_t **pixels, int *width, int *height);
+
+/*
+ * The extensions of stage 2 (extension.c): their major opcodes, their
+ * first events and errors, and how many of each they have.
+ */
+#define X11_SHAPE_MAJOR		135U
+#define X11_SHAPE_EVENT		64U
+#define X11_SYNC_MAJOR		136U
+#define X11_SYNC_EVENT		65U
+#define X11_SYNC_ERROR		139U
+#define X11_XFIXES_MAJOR	137U
+#define X11_XFIXES_EVENT	67U
+#define X11_XFIXES_ERROR	142U
+
+/* The errors of the extensions: SYNC's Counter, Alarm and Fence, and XFIXES's Region and Barrier. */
+#define X11_BAD_COUNTER		(X11_SYNC_ERROR + 0U)
+#define X11_BAD_ALARM		(X11_SYNC_ERROR + 1U)
+#define X11_BAD_FENCE		(X11_SYNC_ERROR + 2U)
+#define X11_BAD_REGION		(X11_XFIXES_ERROR + 0U)
+#define X11_BAD_BARRIER		(X11_XFIXES_ERROR + 1U)
+
+/* SHAPE's kinds of region: the bounding, the clip and the input. */
+#define X11_SHAPE_BOUNDING	0U
+#define X11_SHAPE_CLIP		1U
+#define X11_SHAPE_INPUT		2U
+
+/*
+ * One request of an extension being answered: the server, the client and
+ * its slot, the request's bytes and length, and the value an error names
+ * (the id or the value that was wrong; the dispatcher sends the error).
+ */
+struct x11_ext_request {
+	struct x11server *server;
+	unsigned index;
+	struct x11_client *client;
+	const uint8_t *bytes;
+	size_t length;
+	int msb;
+	uint32_t bad;
+};
+
+/* extension.c: the extensions of stage 2 by name and major opcode, their events, and what goes with a client or a window. */
+int x11_extension_query(const uint8_t *name, size_t length, uint8_t *reply);
+size_t x11_extension_names(uint8_t *list, size_t room, unsigned *count);
+unsigned x11_extension_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
+void x11_extension_event(struct x11server *server, struct x11_client *client, uint8_t *event);
+void x11_extension_forget_client(struct x11server *server, unsigned index);
+void x11_extension_forget_window(struct x11server *server, struct x11_window *window);
+int x11_extension_tick(struct x11server *server, int *timed);
+void x11_extension_fini(struct x11server *server);
+
+/* shape-ext.c: SHAPE, the windows' shapes in drawing and in the pointer's hits. */
+unsigned x11_shape_request(struct x11_ext_request *request);
+void x11_shape_forget_client(struct x11server *server, unsigned index);
+void x11_shape_forget_window(struct x11server *server, struct x11_window *window);
+int x11_shape_has(const struct x11_window *window);
+int x11_shape_contains(const struct x11_window *window, int x, int y);
+int x11_shape_clip_window(const struct x11_window *window, int border, struct x11_region *clip);
+int x11_shape_clip_inside(const struct x11_window *window, struct x11_region *clip);
+int x11_shape_subtract_outside(const struct x11_window *window, struct x11_region *clip);
+int x11_shape_region(const struct x11_window *window, unsigned kind, struct x11_region *region);
+unsigned x11_shape_set(struct x11server *server, struct x11_window *window, unsigned kind, struct x11_region *region);
+int x11_shape_surface(const struct x11_window *window, struct x11_rect **rects, unsigned *count);
+
+/* xfixes.c: XFIXES, its regions, the selections' and the cursor's events. */
+unsigned x11_xfixes_request(struct x11_ext_request *request);
+void x11_xfixes_selection(struct x11server *server, uint32_t selection, uint32_t owner, unsigned subtype, uint32_t selection_time);
+void x11_xfixes_forget_client(struct x11server *server, unsigned index);
+void x11_xfixes_forget_window(struct x11server *server, struct x11_window *window);
+void x11_xfixes_fini(struct x11server *server);
+struct x11_region *x11_xfixes_region(struct x11server *server, uint32_t id);
+int x11_xfixes_cursor_hidden(struct x11server *server);
+void x11_xfixes_cursor_tick(struct x11server *server);
+
+/* The subtypes of XFIXES's selection event: a new owner, the owner's window destroyed, the owner's client closed. */
+#define X11_XFIXES_SET_OWNER		0U
+#define X11_XFIXES_WINDOW_DESTROY	1U
+#define X11_XFIXES_CLIENT_CLOSE		2U
+
+/* sync.c: SYNC, its counters, alarms and fences, and the clients that wait for them. */
+unsigned x11_sync_request(struct x11_ext_request *request);
+void x11_sync_forget_client(struct x11server *server, unsigned index);
+int x11_sync_tick(struct x11server *server, int *timed);
+void x11_sync_fini(struct x11server *server);
+int x11_sync_counter_value(struct x11server *server, uint32_t id, int64_t *value);
+
+/* wm.c: the window manager's resize in step with a client's drawing, and the system's frame. */
+int x11_wm_sync_configure(struct x11server *server, struct x11_window *window, int32_t x, int32_t y, int width, int height);
+void x11_wm_sync_counter(struct x11server *server, uint32_t counter, int64_t value);
+int x11_wm_sync_tick(struct x11server *server);
+void x11_wm_frame(struct x11server *server, struct x11_window *window, const uint32_t *extents);
+void x11_wm_shape_changed(struct x11server *server, struct x11_window *window);
+int x11_wm_icon(struct x11server *server, struct x11_window *window, uint32_t **pixels, unsigned *width, unsigned *height);
 
 /* xkb.c: XKEYBOARD. */
 int x11_xkb_query(const uint8_t *name, size_t length, uint8_t *major, uint8_t *event, uint8_t *error);
