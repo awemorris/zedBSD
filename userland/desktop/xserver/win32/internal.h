@@ -37,9 +37,6 @@
 #define WIN32_BUTTON_BACK		8U
 #define WIN32_BUTTON_FORWARD		9U
 
-/* X's Lock modifier bit (Caps Lock). */
-#define WIN32_LOCK_MASK		(1U << 1)
-
 /* The timer of the loops Windows runs while a window is moved or sized, and its period (ms). */
 #define WIN32_SERVICE_TIMER	1U
 #define WIN32_SERVICE_PERIOD	10U
@@ -120,28 +117,30 @@ struct x11_win32 {
 	unsigned surface_count;
 
 	/*
-	 * The keyboard: the layout's map; by evdev code, the keys held and the
-	 * keycode each press sent the core (its release sends the same); X's
-	 * modifier bits held; Caps Lock; and whether a left Ctrl press was
-	 * dropped as the one Windows makes up before AltGr.
+	 * The keyboard: the layout's map; by evdev code, the keys held (the
+	 * core hears each by its keycode, the code plus 8); the Shift, Ctrl
+	 * and Alt bits held, which the backend keeps for Alt+F4 and for
+	 * noting a paste or a copy (the core makes X's state itself); and
+	 * whether a left Ctrl press was dropped as the one Windows makes up
+	 * before AltGr.
 	 */
 	struct x11_win32_keymap keymap;
 	uint8_t held[X11_WIN32_EVDEV_MAX + 1];
-	uint8_t sent[X11_WIN32_EVDEV_MAX + 1];
 	uint16_t modifiers;
-	int caps_lock;
 	int altgr_control;
 
 	/*
 	 * The pointer: the surface under it, its last place on the root window,
 	 * the buttons 1 to 3 held (X's bits), every button held (for the
-	 * capture), and the wheels' turns not yet a whole notch.
+	 * capture), whether an X client's grab keeps the capture (a button's
+	 * release then leaves it), and the wheels' turns not yet a whole notch.
 	 */
 	struct x11_surface *pointer_surface;
 	int pointer_x;
 	int pointer_y;
 	uint16_t buttons;
 	unsigned buttons_held;
+	int grab_capture;
 	int wheel;
 	int hwheel;
 
@@ -175,9 +174,14 @@ void win32_input_key(struct x11_surface *surface, UINT message, WPARAM wparam, L
 void win32_input_release_keys(struct x11_win32 *backend);
 void win32_input_pointer(struct x11_surface *surface, UINT message, WPARAM wparam, LPARAM lparam);
 void win32_input_leave(struct x11_surface *surface);
+void win32_input_capture(void *context, struct x11_surface *surface, int on);
+int win32_input_place(void *context, int *x, int *y);
+int win32_input_warp(void *context, int x, int y);
+void win32_input_bell(void *context, int percent);
 
 /* layout.c */
 void win32_layout_read(struct x11_win32 *backend);
+void win32_layout_give(struct x11_win32 *backend);
 
 /* clipboard.c */
 int win32_clipboard_start(struct x11_win32 *backend);

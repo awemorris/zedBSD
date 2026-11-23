@@ -12,13 +12,14 @@
  * The core calls the backend through a table of functions: it opens a
  * system window (a surface) for each mapped top-level X window, keeps its
  * size, place and title in step, hands it pixels or asks it for a Vulkan
- * surface to show them through, and passes the clipboard across.  The
- * backend calls the core with what its system reports: keys, the
- * pointer, a window entered, given a size, asked to close or minimized,
- * and whether another program's text is the system's clipboard
+ * surface to show them through, passes the clipboard across, and asks
+ * for the pointer's capture, place and warp and for the bell.  The
+ * backend calls the core with what its system reports: keys (by their
+ * place on the keyboard), the keyboard's map, the pointer, a window
+ * entered and left, given a size, asked to close or minimized, and
+ * whether another program's text is the system's clipboard
  * (x11server_backend_clipboard, also once when the backend is given the
- * server).  zedBSD's backend is the Wayland desktop
- * (wayland.c).
+ * server).  zedBSD's backend is the Wayland desktop (wayland.c).
  */
 
 #ifndef KEILAND_X11BACKEND_H
@@ -66,8 +67,42 @@
 #define X11_CONTROL_MASK	(1U << 2)
 #define X11_ALT_MASK		(1U << 3)
 
+/*
+ * The core takes the keyboard's map from the backend (x11server_backend_keymap)
+ * and keys by their place on the keyboard (x11server_backend_key).
+ */
+#define X11_BACKEND_KEYMAP	1
+
+/*
+ * The keyboard's map: the keycodes (an evdev key code plus 8, so 8 to
+ * 255), the keysyms each carries, and the modifiers.
+ */
+#define X11_KEYMAP_KEYCODES		256U
+#define X11_KEYMAP_KEYCODE_FIRST	8U
+#define X11_KEYMAP_COLUMNS		4U
+#define X11_KEYMAP_MODIFIERS		8U
+#define X11_KEYMAP_MODIFIER_KEYS	4U
+
+/* The offset of an evdev key code in its X keycode. */
+#define X11_KEYMAP_EVDEV_OFFSET		8U
+
 /* A system window the backend keeps (its own type). */
 struct x11_surface;
+
+/*
+ * The keyboard's map a backend gives the core, as the core protocol's
+ * clients read it (GetKeyboardMapping, GetModifierMapping).
+ *
+ * keysyms holds for each keycode its keysyms: alone, with Shift, and the
+ * same two in the second group, which a core client chooses while the
+ * Mode_switch keysym's modifier is held (0 is NoSymbol; keycodes 0 to 7
+ * are never used).  modifiers holds for Shift, Lock, Control and Mod1 to
+ * Mod5 their keycodes, 0 filling the rest.
+ */
+struct x11_keymap {
+	uint32_t keysyms[X11_KEYMAP_KEYCODES][X11_KEYMAP_COLUMNS];
+	uint8_t modifiers[X11_KEYMAP_MODIFIERS][X11_KEYMAP_MODIFIER_KEYS];
+};
 
 /*
  * What a surface shows: its kind, its X window's place on the root window
@@ -107,10 +142,14 @@ struct x11_pointer_frame {
 	int y;
 	uint32_t time;
 
-	/* The buttons held before the frame (X's bits: 1 left, 2 middle, 4 right). */
+	/*
+	 * The buttons held before the frame (X's bits: 1 left, 2 middle, 4
+	 * right), which the backend keeps for itself: the core counts the
+	 * buttons from the presses and releases it hears.
+	 */
 	uint16_t buttons_before;
 
-	/* The button that changed (1, 2 or 3; 0 for a move), whether it went down, and the buttons after. */
+	/* The physical button that changed (1 to 9; 0 for a move), whether it went down, and the buttons after. */
 	uint8_t button;
 	int pressed;
 	uint16_t buttons_after;
@@ -135,6 +174,15 @@ struct x11_pointer_frame {
  * errno value.  clipboard_read reads another program's text of the
  * system's selection for an X client (malloc'd text the core frees, a NUL
  * after its length; 0 or an errno value).
+ *
+ * The pointer and the bell, each of which may be NULL: capture keeps the
+ * system's pointer events on a surface while an X client grabs the
+ * pointer (on nonzero) and lets them go (on 0), so that a click outside
+ * the X windows reaches the grabbing client.  pointer tells where the
+ * system's pointer is on the root window, inside an X window or not (0,
+ * or an errno value when it cannot tell).  warp moves it there (0, or an
+ * errno value).  bell rings at a volume from -100 to 100 percent of the
+ * base volume.
  */
 struct x11_backend_ops {
 	struct x11_surface *(*open)(void *context, uint32_t window, const struct x11_surface_info *info);
@@ -144,22 +192,24 @@ struct x11_backend_ops {
 	int (*present)(void *context, struct x11_surface *surface, const uint32_t *pixels, size_t stride, const struct x11_rect *parts, unsigned count);
 	int (*clipboard_offer)(void *context, unsigned selection, const uint8_t *text, size_t size);
 	int (*clipboard_read)(void *context, unsigned selection, uint8_t **text, size_t *size);
+	void (*capture)(void *context, struct x11_surface *surface, int on);
+	int (*pointer)(void *context, int *x, int *y);
+	int (*warp)(void *context, int x, int y);
+	void (*bell)(void *context, int percent);
 };
 
 /* What the backend tells the core. */
-void x11server_backend_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time, uint16_t state);
+void x11server_backend_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time);
+void x11server_backend_keymap(struct x11server *server, const struct x11_keymap *keymap);
 void x11server_backend_pointer(struct x11server *server, const struct x11_pointer_frame *frame);
 void x11server_backend_enter(struct x11server *server, uint32_t window, int keyboard);
+void x11server_backend_leave(struct x11server *server, uint32_t window, int keyboard);
 void x11server_backend_configure(struct x11server *server, uint32_t window, int32_t x, int32_t y, int width, int height);
 void x11server_backend_close(struct x11server *server, uint32_t window);
 void x11server_backend_state(struct x11server *server, uint32_t window, int iconic);
 void x11server_backend_clipboard(struct x11server *server, unsigned selection, int text);
 
-/*
- * The X keycode an evdev key types in the shift and caps lock states given
- * (0 for none): the core's keyboard model gives each character the keycode
- * of the character plus 8, US layout.
- */
-uint8_t x11_keymap_keycode(uint16_t code, int shifted, int caps_lock);
+/* The keyboard's map of the US layout by evdev key codes (the core's own until a backend gives one). */
+void x11_keymap_us(struct x11_keymap *keymap);
 
 #endif

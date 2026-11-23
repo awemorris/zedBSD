@@ -11,14 +11,15 @@
  * These are the core's modules, none of which does input or output of its
  * own.  client.c keeps the server's life and its clients' connections
  * (their bytes come and go through the transport), protocol.c dispatches
- * their requests and answers the font, pixmap, drawing and keyboard ones,
- * resource.c keeps the resource ids and the memory each client holds,
+ * their requests and answers the font, pixmap and drawing ones, input.c
+ * keeps the keyboard, the pointer, the focus and the grabs and answers
+ * their requests, resource.c keeps the resource ids and the memory each client holds,
  * window.c keeps the window tree and answers its requests, event.c
  * chooses who hears an event and sends it, property.c keeps atoms and
  * properties, selection.c keeps selections and the clipboard's bridge,
  * rootless.c shows each top-level window as a surface of the backend
  * (whose pixels present-vulkan.c shows through a swapchain when it can),
- * and keymap.c, glyphs.c and glx.c are the keyboard's table, the core font
+ * and keymap.c, glyphs.c and glx.c are the US keyboard map, the core font
  * and the GLX extension.
  */
 
@@ -129,15 +130,20 @@
 #define X11_MASK_KEY_RELEASE		(1U << 1)
 #define X11_MASK_BUTTON_PRESS		(1U << 2)
 #define X11_MASK_BUTTON_RELEASE		(1U << 3)
+#define X11_MASK_ENTER_WINDOW		(1U << 4)
+#define X11_MASK_LEAVE_WINDOW		(1U << 5)
 #define X11_MASK_POINTER_MOTION		(1U << 6)
 #define X11_MASK_BUTTON1_MOTION		(1U << 8)
 #define X11_MASK_BUTTON_MOTION		(1U << 13)
+#define X11_MASK_KEYMAP_STATE		(1U << 14)
 #define X11_MASK_EXPOSURE		(1U << 15)
 #define X11_MASK_STRUCTURE_NOTIFY	(1U << 17)
 #define X11_MASK_RESIZE_REDIRECT	(1U << 18)
 #define X11_MASK_SUBSTRUCTURE_NOTIFY	(1U << 19)
 #define X11_MASK_SUBSTRUCTURE_REDIRECT	(1U << 20)
+#define X11_MASK_FOCUS_CHANGE		(1U << 21)
 #define X11_MASK_PROPERTY_CHANGE	(1U << 22)
+#define X11_MASK_OWNER_GRAB_BUTTON	(1U << 24)
 
 /* Every bit an event mask may have, and those a window may keep from propagating (the device events'). */
 #define X11_MASK_ALL			0x01ffffffU
@@ -152,6 +158,11 @@
 #define X11_EVENT_BUTTON_PRESS		4U
 #define X11_EVENT_BUTTON_RELEASE	5U
 #define X11_EVENT_MOTION_NOTIFY		6U
+#define X11_EVENT_ENTER_NOTIFY		7U
+#define X11_EVENT_LEAVE_NOTIFY		8U
+#define X11_EVENT_FOCUS_IN		9U
+#define X11_EVENT_FOCUS_OUT		10U
+#define X11_EVENT_KEYMAP_NOTIFY		11U
 #define X11_EVENT_EXPOSE		12U
 #define X11_EVENT_CREATE_NOTIFY		16U
 #define X11_EVENT_DESTROY_NOTIFY	17U
@@ -166,6 +177,7 @@
 #define X11_EVENT_CIRCULATE_NOTIFY	26U
 #define X11_EVENT_CIRCULATE_REQUEST	27U
 #define X11_EVENT_PROPERTY_NOTIFY	28U
+#define X11_EVENT_MAPPING_NOTIFY	34U
 #define X11_EVENT_LAST			34U
 
 /* The bit an event sent with SendEvent carries. */
@@ -197,17 +209,32 @@
 /* The depth of the screen's windows and pixmaps. */
 #define X11_DEPTH		24U
 
-/* The keycodes of the keys that have no character (the ASCII keys are their character plus 8). */
-#define X11_KEYCODE_UP		0xe0U
-#define X11_KEYCODE_DOWN	0xe1U
-#define X11_KEYCODE_LEFT	0xe2U
-#define X11_KEYCODE_RIGHT	0xe3U
-#define X11_KEYCODE_HOME	0xe4U
-#define X11_KEYCODE_END		0xe5U
-#define X11_KEYCODE_PAGE_UP	0xe6U
-#define X11_KEYCODE_PAGE_DOWN	0xe7U
-#define X11_KEYCODE_INSERT	0xe8U
-#define X11_KEYCODE_DELETE	0xe9U
+/*
+ * The keyboard (input.c): the most keysyms one keycode and keycodes one
+ * modifier keep (ChangeKeyboardMapping and SetModifierMapping ask for no
+ * more), the modifiers, and the bytes of the keys' down bits.
+ */
+#define X11_KEYSYMS_MAX		8U
+#define X11_MODIFIER_KEYS_MAX	8U
+#define X11_MODIFIERS		8U
+#define X11_KEY_BYTES		32U
+
+/* The pointer's buttons (1 to 9: three, the wheels' four and two on the side). */
+#define X11_BUTTONS		9U
+
+/* The device events held while a grab freezes their device. */
+#define X11_DEVICE_QUEUE	256U
+
+/* The device events held: a key, a button, a motion, and the pointer leaving every X window. */
+#define X11_DEVICE_KEY		1U
+#define X11_DEVICE_BUTTON	2U
+#define X11_DEVICE_MOTION	3U
+#define X11_DEVICE_LEAVE	4U
+
+/* What froze a device: nothing, the pointer's grab, the keyboard's grab. */
+#define X11_FREEZE_NONE		0U
+#define X11_FREEZE_POINTER	1U
+#define X11_FREEZE_KEYBOARD	2U
 
 /* The glyph cell of the core font, the printable ASCII glyphs kept once drawn, and the largest glyph drawn from the font. */
 #define X11_GLYPH_BITMAP	32U
@@ -216,6 +243,65 @@
 
 /* The types other modules keep behind pointers: the font's face, and Vulkan's state and a window's swapchain. */
 struct truetype_face;
+
+/*
+ * An active grab of the pointer or of the keyboard: the client that holds
+ * it (X11_NO_CLIENT: none) and its window, the pointer events it asked
+ * for, the window the pointer is confined to and the cursor (pointer
+ * grabs), whether the client's own windows hear their events as usual,
+ * the modes each device runs in while it lasts (0 frozen until
+ * AllowEvents, 1 as usual), and when it started.  A grab a button press
+ * or a key press started (passive) ends with that button's or key's
+ * release; an implicit grab is the one every button press starts for the
+ * client it reached.
+ */
+struct x11_grab {
+	unsigned client;
+	uint32_t window;
+	uint32_t mask;
+	uint32_t confine_to;
+	uint32_t cursor;
+	uint32_t time;
+	uint8_t owner_events;
+	uint8_t pointer_mode;
+	uint8_t keyboard_mode;
+	uint8_t passive;
+	uint8_t implicit;
+	uint8_t key;
+};
+
+/*
+ * A passive grab (GrabButton, GrabKey): the client and window, whether it
+ * is a key's, the button or keycode (0: any) and the modifiers
+ * (0x8000: any) that start it, and the active grab it starts.
+ */
+struct x11_passive_grab {
+	unsigned client;
+	uint32_t window;
+	uint8_t keyboard;
+	uint8_t detail;
+	uint16_t modifiers;
+	uint32_t mask;
+	uint32_t confine_to;
+	uint32_t cursor;
+	uint8_t owner_events;
+	uint8_t pointer_mode;
+	uint8_t keyboard_mode;
+};
+
+/*
+ * A device event as the backend reported it, held until its device is
+ * not frozen: its kind, the key or physical button and whether it went
+ * down, when, and where the pointer was.
+ */
+struct x11_device_event {
+	unsigned kind;
+	uint8_t detail;
+	uint8_t pressed;
+	uint32_t time;
+	int x;
+	int y;
+};
 struct x11_vulkan;
 struct x11_vulkan_window;
 
@@ -609,14 +695,59 @@ struct x11server {
 	int dirty_x1;
 	int dirty_y1;
 
-	/* Where the pointer is on the root window, the buttons held, and the modifiers held. */
+	/*
+	 * The pointer (input.c): its place on the root window, the window it
+	 * was last found in (kept for the crossing events; the parent takes
+	 * the place of a window destroyed), whether it is outside every X
+	 * window (on the system's own windows), the logical buttons held (bit
+	 * n - 1 for button n), the physical buttons held and the logical
+	 * button each press was taken as, and the buttons' map.
+	 */
 	int pointer_x;
 	int pointer_y;
+	uint32_t pointer_window;
+	int pointer_outside;
 	uint16_t buttons;
-	uint16_t key_state;
+	uint16_t physical_buttons;
+	uint8_t pressed_as[X11_BUTTONS];
+	uint8_t button_map[X11_BUTTONS];
 
-	/* The window with the keyboard's focus (or X11_FOCUS_NONE, X11_FOCUS_POINTER_ROOT). */
+	/* The pointer's control: the acceleration and its threshold (kept for the answer; the system moves the pointer). */
+	int16_t acceleration_numerator;
+	int16_t acceleration_denominator;
+	int16_t acceleration_threshold;
+
+	/*
+	 * The keyboard (input.c): the keysyms of each keycode and how many a
+	 * keycode has, the modifiers' keycodes and how many a modifier has,
+	 * the keys down (bit k of the array for keycode k), and the modifiers
+	 * a locking key (Caps Lock, Num Lock) holds on.
+	 */
+	uint32_t keysyms[X11_KEYMAP_KEYCODES][X11_KEYSYMS_MAX];
+	unsigned keysyms_per_keycode;
+	uint8_t modifier_keys[X11_MODIFIERS][X11_MODIFIER_KEYS_MAX];
+	unsigned keys_per_modifier;
+	uint8_t keys_down[X11_KEY_BYTES];
+	uint16_t locks;
+
+	/* The keyboard's control, kept for GetKeyboardControl: the click and the bell, the LEDs and auto-repeat. */
+	int8_t key_click_percent;
+	int8_t bell_percent;
+	int16_t bell_pitch;
+	int16_t bell_duration;
+	uint32_t leds;
+	uint8_t global_auto_repeat;
+	uint8_t auto_repeats[X11_KEY_BYTES];
+
+	/*
+	 * The window with the keyboard's focus (or X11_FOCUS_NONE,
+	 * X11_FOCUS_POINTER_ROOT), where it goes when that window is no
+	 * longer viewable (None, PointerRoot or Parent), and when it last
+	 * changed.
+	 */
 	uint32_t focus;
+	uint8_t focus_revert;
+	uint32_t focus_time;
 
 	/*
 	 * Atoms (property.c): the names (atom n is entry n - 1, the first
@@ -645,16 +776,46 @@ struct x11server {
 	uint32_t atom_text;
 	uint32_t atom_incr;
 
-	/* The implicit grab of a button press: the client it is for (X11_NO_CLIENT: none) and its window. */
-	unsigned grab_owner;
-	uint32_t grab_window;
+	/*
+	 * The grabs (input.c): the pointer's and the keyboard's active grabs
+	 * and when each device was last grabbed, and the passive grabs.
+	 */
+	struct x11_grab pointer_grab;
+	struct x11_grab keyboard_grab;
+	uint32_t pointer_grab_time;
+	uint32_t keyboard_grab_time;
+	struct x11_passive_grab *passive_grabs;
+	unsigned passive_count;
+	unsigned passive_capacity;
 
-	/* A pointer motion held back so that only the last of a burst is sent: when, where, and the buttons held. */
+	/*
+	 * The devices' freezes (X11_FREEZE_*: which grab froze each), whether
+	 * AllowEvents let a device go until its next event reaches the
+	 * grabbing client (Sync modes; both: either device's event freezes
+	 * both again), the event each device froze on (for the Replay modes)
+	 * and the window of the grab it started, and the device events held
+	 * meanwhile (a ring; draining says they are being handled, so that a
+	 * device event that arrives then joins the ring).
+	 */
+	unsigned pointer_freeze;
+	unsigned keyboard_freeze;
+	int pointer_sync;
+	int keyboard_sync;
+	int both_sync;
+	struct x11_device_event pointer_replay;
+	struct x11_device_event keyboard_replay;
+	int pointer_replay_valid;
+	int keyboard_replay_valid;
+	struct x11_device_event device_queue[X11_DEVICE_QUEUE];
+	unsigned device_head;
+	unsigned device_count;
+	int draining;
+
+	/* A pointer motion held back so that only the last of a burst is sent: when and where. */
 	int motion_pending;
 	uint32_t motion_time;
 	int motion_x;
 	int motion_y;
-	uint16_t motion_buttons;
 };
 
 /* client.c: the clients' connections, and the log. */
@@ -731,9 +892,9 @@ unsigned x11_event_deliver(struct x11server *server, const struct x11_window *wi
 void x11_event_structure(struct x11server *server, const struct x11_window *window, uint8_t *event);
 void x11_event_expose(struct x11server *server, const struct x11_window *window);
 void x11_event_property(struct x11server *server, struct x11_window *window, uint32_t atom, int deleted);
-void x11_event_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time, uint16_t state);
-void x11_event_button(struct x11server *server, uint8_t button, int pressed, uint32_t time, uint16_t state);
-void x11_event_motion(struct x11server *server, uint32_t time, uint16_t state);
+void x11_event_device(uint8_t *event, struct x11server *server, uint8_t type, uint8_t detail, uint32_t time, const struct x11_window *window, uint32_t child, uint16_t state);
+struct x11_window *x11_event_propagate(struct x11server *server, struct x11_window *source, const struct x11_window *stop, uint32_t mask, uint8_t type, uint8_t detail, uint32_t time, uint16_t state, unsigned only);
+uint32_t x11_event_child_toward(const struct x11_window *window, const struct x11_window *inferior);
 void x11_event_swap(uint8_t *event);
 unsigned x11_request_send_event(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
@@ -783,8 +944,23 @@ int x11_vulkan_window_present(struct x11_vulkan_window *window, const uint32_t *
 int x11_vulkan_window_resize(struct x11_vulkan_window *window, unsigned width, unsigned height);
 void x11_vulkan_window_close(struct x11_vulkan_window *window);
 
-/* keymap.c: the keyboard's table (the evdev side, x11_keymap_keycode, is in x11backend.h). */
-uint32_t x11_keymap_keysym(uint32_t keycode);
+/* input.c: the keyboard, the pointer, the focus and the grabs. */
+void x11_input_init(struct x11server *server);
+void x11_input_fini(struct x11server *server);
+void x11_input_tick(struct x11server *server);
+void x11_input_key(struct x11server *server, uint8_t keycode, int pressed, uint32_t time);
+void x11_input_button(struct x11server *server, uint8_t button, int pressed, uint32_t time, int x, int y);
+void x11_input_motion(struct x11server *server, uint32_t time, int x, int y);
+void x11_input_leave(struct x11server *server, uint32_t time);
+void x11_input_keymap(struct x11server *server, const struct x11_keymap *keymap);
+void x11_input_focus_top_level(struct x11server *server, struct x11_window *window, uint32_t time);
+void x11_input_focus_lost(struct x11server *server, struct x11_window *window, uint32_t time);
+struct x11_window *x11_input_window_under(struct x11server *server);
+uint16_t x11_input_state(const struct x11server *server);
+void x11_input_window_hidden(struct x11server *server, struct x11_window *window);
+void x11_input_window_destroyed(struct x11server *server, struct x11_window *window);
+void x11_input_forget_client(struct x11server *server, unsigned client);
+unsigned x11_input_request(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
 
 /* glyphs.c: the core font. */
 int x11_glyphs_open(struct x11_glyphs *glyphs, const uint8_t *bytes, size_t size, const char *fallback_path);

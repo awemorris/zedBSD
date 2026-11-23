@@ -6,11 +6,10 @@
  */
 
 /*
- * The key codes the X server reads from the Wayland keyboard (WS131 p009,
- * D14): wl_keyboard sends the Linux evdev codes on every system, so their
- * values belong to the protocol, not to an operating system's header.  The
- * X server keeps the ones its keymap uses here instead of including
- * <uapi/input.h>.
+ * The key codes the X server's US keyboard map names: wl_keyboard sends
+ * the Linux evdev codes on every system, so their values belong to the
+ * protocol, not to an operating system's header.  The X server keeps the
+ * ones its keymap uses here instead of including <uapi/input.h>.
  */
 
 #ifndef KEILAND_XSERVER_KEYCODES_H
@@ -45,6 +44,7 @@
 #define KEY_LEFTBRACE	26
 #define KEY_RIGHTBRACE	27
 #define KEY_ENTER	28
+#define KEY_LEFTCTRL	29
 #define KEY_A		30
 #define KEY_S		31
 #define KEY_D		32
@@ -57,6 +57,7 @@
 #define KEY_SEMICOLON	39
 #define KEY_APOSTROPHE	40
 #define KEY_GRAVE	41
+#define KEY_LEFTSHIFT	42
 #define KEY_BACKSLASH	43
 #define KEY_Z		44
 #define KEY_X		45
@@ -68,7 +69,44 @@
 #define KEY_COMMA	51
 #define KEY_DOT		52
 #define KEY_SLASH	53
+#define KEY_RIGHTSHIFT	54
+#define KEY_KPASTERISK	55
+#define KEY_LEFTALT	56
 #define KEY_SPACE	57
+#define KEY_CAPSLOCK	58
+#define KEY_F1		59
+#define KEY_F2		60
+#define KEY_F3		61
+#define KEY_F4		62
+#define KEY_F5		63
+#define KEY_F6		64
+#define KEY_F7		65
+#define KEY_F8		66
+#define KEY_F9		67
+#define KEY_F10		68
+#define KEY_NUMLOCK	69
+#define KEY_SCROLLLOCK	70
+#define KEY_KP7		71
+#define KEY_KP8		72
+#define KEY_KP9		73
+#define KEY_KPMINUS	74
+#define KEY_KP4		75
+#define KEY_KP5		76
+#define KEY_KP6		77
+#define KEY_KPPLUS	78
+#define KEY_KP1		79
+#define KEY_KP2		80
+#define KEY_KP3		81
+#define KEY_KP0		82
+#define KEY_KPDOT	83
+#define KEY_102ND	86
+#define KEY_F11		87
+#define KEY_F12		88
+#define KEY_KPENTER	96
+#define KEY_RIGHTCTRL	97
+#define KEY_KPSLASH	98
+#define KEY_SYSRQ	99
+#define KEY_RIGHTALT	100
 #define KEY_HOME	102
 #define KEY_UP		103
 #define KEY_PAGEUP	104
@@ -79,5 +117,9 @@
 #define KEY_PAGEDOWN	109
 #define KEY_INSERT	110
 #define KEY_DELETE	111
+#define KEY_PAUSE	119
+#define KEY_LEFTMETA	125
+#define KEY_RIGHTMETA	126
+#define KEY_COMPOSE	127
 
 #endif

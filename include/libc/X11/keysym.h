@@ -9,8 +9,11 @@
 #define LIBC_X11_KEYSYM_H_
 
 #define XK_BackSpace 0xff08
+#define XK_Tab 0xff09
 #define XK_Return 0xff0d
 #define XK_Escape 0xff1b
+#define XK_KP_Enter 0xff8d
+#define XK_ISO_Left_Tab 0xfe20
 #define XK_Left 0xff51
 #define XK_Up 0xff52
 #define XK_Right 0xff53
