@@ -77,7 +77,11 @@ struct mikuterm_session {
 	/* What the thread waits on besides its socket: rung when the tab has something for it. */
 	struct kl_socket_waker *waker;
 
-	/* The host to connect to without asking (empty: ask), the TERM, the wait for a connection and WSL's sshd port. */
+	/*
+	 * The host to connect to without asking (empty: ask), the TERM, the
+	 * wait for a connection and WSL's sshd port, and the X server's scale,
+	 * drawing, PRIMARY and root window (a width of 0: rootless).
+	 */
 	char host[MIKUTERM_HOST_MAX];
 	char term[MIKUTERM_TERM_MAX];
 	unsigned connect_timeout;
@@ -85,6 +89,8 @@ struct mikuterm_session {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
+	unsigned x11_root_width;
+	unsigned x11_root_height;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];

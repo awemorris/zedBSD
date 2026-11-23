@@ -128,6 +128,9 @@ struct x11_win32 {
 	struct x11_surface *surfaces;
 	unsigned surface_count;
 
+	/* The root surface of a rooted server (NULL: none open), on which the pointer's place is the root window's. */
+	struct x11_surface *root_surface;
+
 	/*
 	 * The keyboard: the layout's map; by evdev code, the keys held (the
 	 * core hears each by its keycode, the code plus 8); the Shift, Ctrl

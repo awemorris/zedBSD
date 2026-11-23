@@ -141,6 +141,8 @@ wWinMain(
 	connect.x11_scale = main_state.conf.x11_scale;
 	connect.x11_render_cpu = main_state.conf.x11_render_cpu;
 	connect.x11_primary = main_state.conf.x11_primary;
+	connect.x11_root_width = main_state.conf.x11_root_width;
+	connect.x11_root_height = main_state.conf.x11_root_height;
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&main_state.connector, &connect);
 

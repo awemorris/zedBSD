@@ -49,13 +49,17 @@ struct ssh_engine;
 /*
  * What the X server of a connection is started with: the remote host's
  * name (the windows' titles), the fake cookie its clients must present,
- * the scale (0: the monitor's) and the flags.
+ * the scale (0: the monitor's), the flags, and the size of the root
+ * window shown as one window (a width of 0: each X window a window of its
+ * own).
  */
 struct x11_host_settings {
 	char host[X11_HOST_NAME_MAX];
 	uint8_t cookie[X11_HOST_COOKIE];
 	unsigned scale;
 	unsigned flags;
+	unsigned root_width;
+	unsigned root_height;
 };
 
 /*

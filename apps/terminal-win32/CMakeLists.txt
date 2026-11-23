@@ -169,8 +169,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/x11-host.c
 	${MIKUTERM_DIR}/x11-child.c
 	${MIKUTERM_DIR}/x11-novulkan.c
+	${MIKUTERM_DIR}/x11-noglx.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/client.c
-	${MIKUTERM_ROOT}/userland/desktop/xserver/glx.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/glyphs.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/keymap.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/protocol.c
@@ -191,6 +191,9 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_ROOT}/userland/desktop/xserver/wm.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/font.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/cursor.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xkb.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/xinput.c
+	${MIKUTERM_ROOT}/userland/desktop/xserver/rooted.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-ext.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-composite.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/coverage.c

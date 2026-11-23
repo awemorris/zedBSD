@@ -119,6 +119,8 @@
 #define REQUEST_BELL			104U
 #define REQUEST_CHANGE_POINTER_CONTROL	105U
 #define REQUEST_GET_POINTER_CONTROL	106U
+#define REQUEST_SET_CLOSE_DOWN_MODE	112U
+#define REQUEST_KILL_CLIENT		113U
 #define REQUEST_ROTATE_PROPERTIES	114U
 #define REQUEST_SET_POINTER_MAPPING	116U
 #define REQUEST_GET_POINTER_MAPPING	117U
@@ -149,8 +151,8 @@
 /* RENDER's name. */
 #define RENDER_NAME			"RENDER"
 
-/* The extensions ListExtensions names. */
-#define EXTENSION_NAMES_MAX		4U
+/* The extensions ListExtensions names (GLX's name comes from glx.c, where the server has GLX). */
+#define EXTENSION_NAMES_MAX		6U
 
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -724,6 +726,12 @@ protocol_dispatch(
 	case REQUEST_ROTATE_PROPERTIES:
 		code = x11_request_rotate_properties(server, index, request, length);
 		break;
+	case REQUEST_SET_CLOSE_DOWN_MODE:
+		code = x11_request_set_close_down_mode(server, index, request, length);
+		break;
+	case REQUEST_KILL_CLIENT:
+		code = x11_request_kill_client(server, index, request, length);
+		break;
 	case REQUEST_NO_OPERATION:
 		code = 0U;
 		break;
@@ -738,6 +746,15 @@ protocol_dispatch(
 		break;
 	case X11_RENDER_MAJOR:
 		code = x11_render_request(server, index, request, length);
+		break;
+	case X11_XKB_MAJOR:
+		code = x11_xkb_request(server, index, request, length);
+		break;
+	case X11_XINPUT_MAJOR:
+		code = x11_xinput_request(server, index, request, length);
+		break;
+	case X11_GE_MAJOR:
+		code = x11_ge_request(server, index, request, length);
 		break;
 	case X11_GLX_MAJOR:
 		code = X11_BAD_LENGTH;
@@ -844,6 +861,7 @@ protocol_query_extension(
 	uint8_t reply[32];
 	size_t name_length;
 	uint8_t major;
+	uint8_t first_event;
 	uint8_t first_error;
 	int differs;
 
@@ -854,9 +872,12 @@ protocol_query_extension(
 	if (8U + ((name_length + 3U) & ~(size_t)3U) != length)
 		return X11_BAD_LENGTH;
 
-	/* The core's own extensions by name. */
+	/* The core's own extensions by name; the input extensions name their events and errors. */
 	major = 0U;
+	first_event = 0U;
 	first_error = 0U;
+	(void)x11_xkb_query(request + 8, name_length, &major, &first_event, &first_error);
+	(void)x11_xinput_query(request + 8, name_length, &major, &first_event, &first_error);
 	if (name_length == sizeof(BIGREQ_NAME) - 1U) {
 		differs = memcmp(request + 8, BIGREQ_NAME, name_length);
 		if (differs == 0)
@@ -881,10 +902,11 @@ protocol_query_extension(
 		return 0U;
 	}
 
-	/* Succeeded: present, with its major opcode, no events, and its errors (if it has any). */
+	/* Succeeded: present, with its major opcode, its first event and its first error. */
 	memset(reply, 0, sizeof(reply));
 	reply[8] = 1U;
 	reply[9] = major;
+	reply[10] = first_event;
 	reply[11] = first_error;
 	x11_reply(server, client, reply, sizeof(reply));
 	return 0U;
@@ -897,10 +919,12 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", RENDER_NAME };
-	uint8_t reply[32U + 96U];
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "XKEYBOARD", "XInputExtension", "Generic Event Extension", RENDER_NAME };
+	uint8_t reply[32U + 128U];
 	size_t used;
 	size_t name_length;
+	size_t written;
+	unsigned count;
 	unsigned index;
 
 	/* The header alone. */
@@ -917,8 +941,16 @@ protocol_list_extensions(
 		used += 1U + name_length;
 	}
 
+	/* GLX's name after them, where the server has GLX. */
+	count = EXTENSION_NAMES_MAX;
+	written = x11_glx_list_name(reply + used, sizeof(reply) - used);
+	if (written != 0U) {
+		used += written;
+		count++;
+	}
+
 	/* Succeeded: the count, and the list padded to words. */
-	reply[1] = (uint8_t)EXTENSION_NAMES_MAX;
+	reply[1] = (uint8_t)count;
 	used = (used + 3U) & ~(size_t)3U;
 	x11_reply(server, client, reply, used);
 	return 0U;
