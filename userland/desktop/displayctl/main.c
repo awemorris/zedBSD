@@ -1027,9 +1027,9 @@ displayctl_scale_show(
 	if ((scale.why & KL_DISPLAY_SCALE_WHY_FIXED) != 0U)
 		printf("   This display offers 100 %% alone.\n");
 	if ((scale.why & KL_DISPLAY_SCALE_WHY_ALONE) != 0U)
-		printf("   The scale can be chosen only while one display is shown.\n");
+		printf("   The mirror shows the desktop's display here, at that display's scale.\n");
 	if ((scale.why & KL_DISPLAY_SCALE_WHY_ANCHOR) != 0U)
-		printf("   The scale can be chosen only on the display the desktop is on.\n");
+		printf("   The display shows nothing now.\n");
 	if ((scale.why & KL_DISPLAY_SCALE_WHY_BUSY) != 0U)
 		printf("   The scale cannot be chosen while the mode changes or a game is shown.\n");
 }

@@ -19,11 +19,14 @@
  * offers below it, the file's line kept.
  *
  * A choice is applied at once, without a trial: every step offered leaves
- * the desktop large enough to go on.  Only the display the desktop is
- * shown on, while it is shown alone, can be changed in this version; the
- * scale of a display beside it is refused (no room), as its resolution
- * and its angle are.  The login screen keeps 100 % (or the default) and
- * reads no user's choice.
+ * the desktop large enough to go on.  The display the desktop is shown on
+ * and, in the extended mode, each display beside it can be changed; the
+ * displays are then placed again around the changed one
+ * (kwl_heads_rearrange: it keeps its left top corner, a display it
+ * overlaps or one no longer joined goes right of the rightmost).  In the
+ * mirror mode every display shows the anchor's desktop at the anchor's
+ * scale, and only the anchor's can be chosen.  The login screen keeps
+ * 100 % (or the default) and reads no user's choice.
  *
  * A display shown beside the output (a head) takes its own scale the same
  * way when it opens (kwl_output_scale_head): its rectangle of the plane is
@@ -48,6 +51,8 @@ static unsigned output_scale_chosen(struct kwl_server *server, VkDisplayKHR disp
 static unsigned output_scale_why(struct kwl_server *server, VkDisplayKHR display);
 static VkDisplayKHR output_scale_display(struct kwl_server *server, const char *key);
 static unsigned output_scale_viewing(const char *key);
+static int output_scale_set_head(struct kwl_server *server, struct kwl_head *head, const char *key, unsigned scale120, int *saved);
+static struct kwl_head *output_scale_head_of(struct kwl_server *server, VkDisplayKHR display);
 
 /*
  * Chooses the scale the output asks for (server->scale_wanted), for the
@@ -234,13 +239,14 @@ kwl_output_scale_report(
 /*
  * Chooses a display's scale (its connector's key) for a displays object's
  * set_scale: a step in 120ths, or 0 to leave it to the default.  The
- * choice is written for the monitor and shown at once.  Returns 0 (saved
- * says whether the writing was given to the file), or EINVAL for a scale
- * that is not a step or a display mirrored by the anchor, ENODEV for a
- * display not connected, ENOTSUP for a step the display does not offer or
- * a display whose scale cannot be chosen (the login screen, one shown
- * nowhere), ENOSPC beside another display, EBUSY during a change of the
- * mode or a game.
+ * choice is written for the monitor and shown at once, the anchor's or a
+ * head's of the extended mode, the displays placed again around it.
+ * Returns 0 (saved says whether the writing was given to the file), or
+ * EINVAL for a scale that is not a step or a display mirrored by the
+ * anchor, ENODEV for a display not connected, ENOTSUP for a step the
+ * display does not offer or a display whose scale cannot be chosen (the
+ * login screen, one shown nowhere), EBUSY during a change of the mode or
+ * a game.
  */
 int
 kwl_output_scale_set(
@@ -250,7 +256,9 @@ kwl_output_scale_set(
 	int *saved)
 {
 	char identity[KWL_RESOLUTION_IDENTITY];
+	struct kwl_plane_rect before[KWL_PLANE_SLOTS];
 	struct kwl_compose *compose;
+	struct kwl_head *head;
 	VkDisplayKHR display;
 	uint32_t before_width;
 	uint32_t before_height;
@@ -277,21 +285,20 @@ kwl_output_scale_set(
 	if (server->greeter)
 		return ENOTSUP;
 
-	/* Another display than the anchor: mirrored by it, beside it, or shown nowhere. */
+	/* Another display than the anchor: mirrored by it, a head beside it, or shown nowhere. */
 	differs = strcmp(compose->display_name, key);
 	if (differs != 0 || display != compose->display || !compose->output_open) {
 		if (compose->display_mode == KWL_DISPLAYS_MIRROR && compose->display_count > 1U)
 			return EINVAL;
-		why = output_scale_why(server, display);
-		if ((why & KWL_SCALE_WHY_ALONE) != 0U)
-			return ENOSPC;
-		return ENOTSUP;
+		head = output_scale_head_of(server, display);
+		if (head == NULL)
+			return ENOTSUP;
+		error = output_scale_set_head(server, head, key, scale120, saved);
+		return error;
 	}
 
-	/* The anchor: alone, and not during a change of its mode or a game. */
+	/* The anchor: not during a change of its mode or a game. */
 	why = output_scale_why(server, display);
-	if ((why & KWL_SCALE_WHY_ALONE) != 0U)
-		return ENOSPC;
 	if ((why & KWL_SCALE_WHY_BUSY) != 0U)
 		return EBUSY;
 
@@ -312,10 +319,11 @@ kwl_output_scale_set(
 	/* A choice made now replaces a test's --scale. */
 	server->scale_given = 0U;
 
-	/* The scale asked for, and the desktop at it once the drawing takes it. */
+	/* The scale asked for, and the desktop at it once the drawing takes it; the outputs as they were. */
 	before_width = server->width;
 	before_height = server->height;
 	before_scale = server->scale120;
+	(void)kwl_outputs(server, before);
 	kwl_output_scale_choose(server);
 	kwl_output_size_set(server, compose->mode_width, compose->mode_height, compose->rotation, server->scale_wanted);
 	printf("KWL SCALE set key=%s id=%s scale=%u wanted=%u shown=%u logical=%ux%u saved=%d\n", key, identity, scale120, server->scale_wanted,
@@ -323,20 +331,113 @@ kwl_output_scale_set(
 
 	/*
 	 * The windows, the pointer and the look fitted to a new logical size or
-	 * scale, and the clients told the output's new mode, scale and logical
-	 * size; each surface hears its new preferred scale on the next pass
-	 * (surface-outputs.c).
+	 * scale, the heads beside it placed again, and the clients told the
+	 * outputs' new modes, scales and logical sizes (with every displays
+	 * object's snapshot); each surface hears its new preferred scale on the
+	 * next pass (surface-outputs.c).
 	 */
 	if (server->width != before_width ||
 	    server->height != before_height ||
 	    server->scale120 != before_scale) {
 		kwl_output_fit(server, 1U);
-		kwl_outputs_changed(server);
+		kwl_heads_rearrange(server, KWL_PLANE_ANCHOR, before);
+		return 0;
 	}
 
-	/* Succeeded: every displays object hears the new snapshot. */
+	/* Succeeded: nothing changed but the choice; every displays object hears the new snapshot. */
 	kwl_displays_tell(server);
 	return 0;
+}
+
+/*
+ * Chooses the scale of a head (kwl_output_scale_set for a display beside
+ * the anchor in the extended mode): written for its monitor and shown at
+ * once, the head's part of the plane at its new logical size, the
+ * displays placed again around it.  Returns 0, ENOTSUP for a step its
+ * mode does not offer, EBUSY during a change of a mode or a game, or the
+ * choice's error.
+ */
+static int
+output_scale_set_head(
+	struct kwl_server *server,
+	struct kwl_head *head,
+	const char *key,
+	unsigned scale120,
+	int *saved)
+{
+	char identity[KWL_RESOLUTION_IDENTITY];
+	struct kwl_plane_rect before[KWL_PLANE_SLOTS];
+	struct kwl_compose *compose;
+	uint32_t before_width;
+	uint32_t before_height;
+	unsigned before_scale;
+	unsigned why;
+	unsigned slot;
+	int offers;
+	int error;
+
+	/* Not during a change of a mode or a game. */
+	compose = server->compose;
+	why = output_scale_why(server, head->display);
+	if ((why & KWL_SCALE_WHY_BUSY) != 0U)
+		return EBUSY;
+
+	/* A step its mode offers. */
+	if (scale120 != 0U) {
+		offers = kwl_scale_offers(head->pixel_width, head->pixel_height, scale120);
+		if (!offers)
+			return ENOTSUP;
+	}
+
+	/* The choice kept for the monitor, and given to the file. */
+	kwl_output_resolution_identity(server, head->display, key, identity, sizeof(identity));
+	error = kwl_displays_set_scale(&compose->config, identity, scale120);
+	if (error != 0)
+		return error;
+	*saved = kwl_heads_config_save(server);
+
+	/* The head at the scale its choice gives now; the outputs as they were. */
+	before_width = head->width;
+	before_height = head->height;
+	before_scale = head->scale120;
+	(void)kwl_outputs(server, before);
+	kwl_output_scale_head(server, head);
+	head->dirty = 1U;
+	slot = (unsigned)(head - compose->heads) + 1U;
+	printf("KWL SCALE set key=%s id=%s scale=%u shown=%u logical=%ux%u head=%u saved=%d\n", key, identity, scale120, head->scale120, head->width,
+	    head->height, slot, *saved);
+
+	/* The displays placed again around its new size, the windows and the pointer with them, the clients told. */
+	if (head->width != before_width ||
+	    head->height != before_height ||
+	    head->scale120 != before_scale) {
+		kwl_heads_rearrange(server, slot, before);
+		return 0;
+	}
+
+	/* Succeeded: nothing changed but the choice; every displays object hears the new snapshot. */
+	kwl_displays_tell(server);
+	return 0;
+}
+
+/* Finds the open head of a display, or NULL. */
+static struct kwl_head *
+output_scale_head_of(
+	struct kwl_server *server,
+	VkDisplayKHR display)
+{
+	struct kwl_compose *compose;
+	unsigned slot;
+
+	/* Each open head (handles compare only for equality). */
+	compose = server->compose;
+	for (slot = 0U; slot < KWL_HEADS; slot++) {
+		if (compose->heads[slot].open && !compose->heads[slot].lost && compose->heads[slot].display == display)
+			return &compose->heads[slot];
+	}
+
+	/* Succeeded: none. */
+	return NULL;
 }
 
 /*
@@ -415,21 +516,22 @@ output_scale_why(
 	VkDisplayKHR display)
 {
 	struct kwl_compose *compose;
-	unsigned slot;
+	struct kwl_head *head;
+	unsigned anchor;
 	unsigned why;
 
-	/* Only the display the desktop is shown on. */
+	/* Shown: the display the desktop is shown on, or a head beside it. */
 	compose = server->compose;
 	why = 0U;
-	if (display != compose->display || !compose->output_open || compose->output_lost)
+	anchor = 0U;
+	if (display == compose->display && compose->output_open && !compose->output_lost)
+		anchor = 1U;
+	head = output_scale_head_of(server, display);
+	if (!anchor && head == NULL)
 		why |= KWL_SCALE_WHY_ANCHOR;
 
-	/* Shown alone: no head beside it, no mirror of it. */
-	for (slot = 0U; slot < KWL_HEADS; slot++) {
-		if (compose->heads[slot].open)
-			why |= KWL_SCALE_WHY_ALONE;
-	}
-	if (compose->display_mode == KWL_DISPLAYS_MIRROR && compose->display_count > 1U)
+	/* A display the mirror shows the anchor's desktop on takes the anchor's scale. */
+	if (!anchor && compose->display_mode == KWL_DISPLAYS_MIRROR && compose->display_count > 1U)
 		why |= KWL_SCALE_WHY_ALONE;
 
 	/* Not during a change of the mode, nor under a game's own frames. */

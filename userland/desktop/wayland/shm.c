@@ -204,14 +204,39 @@ kwl_shm_image_destroy(
 }
 
 /*
- * Makes the compositor's arrow cursor: white with a black edge, its tip the
- * hotspot at (0, 0), drawn at the output's scale (each pixel takes the
- * logical unit its middle lies in, so the arrow keeps its square steps).
- * The cursor shapes are made at the same scale (cursor.c).
+ * Makes the compositor's arrow cursor at the output's scale (kwl_arrow_make):
+ * the cursor shapes are made at the same scale (cursor.c).  Returns 0, or
+ * the errno value of the image.
  */
 int
 kwl_arrow_create(
 	struct kwl_server *server)
+{
+	unsigned scale;
+	int error;
+
+	/* The scale the cursor's images are drawn at. */
+	scale = server->scale120;
+	if (scale == 0U)
+		scale = KWL_SCALE_ONE;
+	server->cursor_scale120 = scale;
+
+	/* Succeeded or not: the arrow at it. */
+	error = kwl_arrow_make(server, scale, &server->arrow);
+	return error;
+}
+
+/*
+ * Makes the compositor's arrow cursor at a scale into *made: white with a
+ * black edge, its tip the hotspot at (0, 0), each pixel taking the logical
+ * unit its middle lies in (so the arrow keeps its square steps).  Returns
+ * 0, ENOMEM or EIO (*made untouched).
+ */
+int
+kwl_arrow_make(
+	struct kwl_server *server,
+	unsigned scale120,
+	struct kwl_import **made)
 {
 	static const char *const shape[ARROW_HEIGHT] = {
 		"X           ",
@@ -242,17 +267,12 @@ kwl_arrow_create(
 	uint32_t y;
 	uint32_t unit_x;
 	uint32_t unit_y;
-	unsigned scale;
 	char drawn;
 	VkResult result;
 
-	/* The scale the cursor's images are drawn at, and the arrow's pixels. */
-	scale = server->scale120;
-	if (scale == 0U)
-		scale = KWL_SCALE_ONE;
-	server->cursor_scale120 = scale;
-	width = (uint32_t)kwl_scale_snap((int32_t)ARROW_WIDTH, scale);
-	height = (uint32_t)kwl_scale_snap((int32_t)ARROW_HEIGHT, scale);
+	/* The arrow's pixels at the scale. */
+	width = (uint32_t)kwl_scale_snap((int32_t)ARROW_WIDTH, scale120);
+	height = (uint32_t)kwl_scale_snap((int32_t)ARROW_HEIGHT, scale120);
 
 	/* A linear, host-visible image the CPU writes once. */
 	arrow = calloc(1, sizeof(*arrow));
@@ -283,7 +303,7 @@ kwl_arrow_create(
 
 	/* Succeeded: drawn with alpha (the other cursor shapes are made when first asked for, cursor.c). */
 	arrow->draw = KWL_DRAW_ALPHA;
-	server->arrow = arrow;
+	*made = arrow;
 	return 0;
 }
 
