@@ -42,6 +42,7 @@ const struct x11_backend_ops x11_win32_ops = {
 	win32_input_place,
 	win32_input_warp,
 	win32_input_bell,
+	win32_surface_cursor,
 };
 
 static unsigned backend_main_scale(void);
