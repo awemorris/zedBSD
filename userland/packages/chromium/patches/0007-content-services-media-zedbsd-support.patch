@@ -69,7 +69,25 @@
    # cover library's OCR functionality on ChromeOS.
 --- a/v8/BUILD.gn
 +++ b/v8/BUILD.gn
-@@ -2537,6 +2537,13 @@
+@@ -1150,6 +1150,7 @@
+   "V8_TARGET_OS_LINUX",
+   "V8_TARGET_OS_MACOS",
+   "V8_TARGET_OS_WIN",
++  "V8_TARGET_OS_ZEDBSD",
+   "V8_TARGET_OS_CHROMEOS",
+   "V8_TARGET_ARCH_ARM64",
+   "V8_TARGET_ARCH_PPC64",
+@@ -1244,6 +1245,9 @@
+ } else if (target_os == "chromeos") {
+   enabled_external_v8_defines += [ "V8_HAVE_TARGET_OS" ]
+   enabled_external_v8_defines += [ "V8_TARGET_OS_CHROMEOS" ]
++} else if (target_os == "zedbsd") {
++  enabled_external_v8_defines += [ "V8_HAVE_TARGET_OS" ]
++  enabled_external_v8_defines += [ "V8_TARGET_OS_ZEDBSD" ]
+ }
+ 
+ # Some V8_TARGET_ARCH_ defines that affect Api constants (see usages of
+@@ -2537,6 +2541,13 @@
    # The clang toolchain's resource dir contains builting headers
    # include/{stddef.h,stdarg.h,...}.
    _metagen_clang_resource_dir = "$clang_base_path/lib/clang/$clang_version"
@@ -83,7 +101,7 @@
  
    # The headers are parsed with v8_base_without_compiler's flags.
    _metagen_flags_target = ":v8_base_without_compiler"
-@@ -2690,6 +2697,15 @@
+@@ -2690,6 +2701,15 @@
          args += [ "--extra-flag=$flag" ]
        }
      }
@@ -99,3 +117,197 @@
    }
  }
  
+@@ -7974,6 +7994,11 @@
+       "src/base/debug/stack_trace_zos.cc",
+       "src/base/platform/platform-zos.cc",
+     ]
++  } else if (is_zedbsd) {
++    sources += [
++      "src/base/debug/stack_trace_posix.cc",
++      "src/base/platform/platform-zedbsd.cc",
++    ]
+   }
+ 
+   if (v8_current_cpu == "mips64") {
+--- a/v8/include/v8config.h
++++ b/v8/include/v8config.h
+@@ -94,6 +94,7 @@
+ //  V8_OS_STARBOARD     - Starboard (platform abstraction for Cobalt)
+ //  V8_OS_AIX           - AIX
+ //  V8_OS_WIN           - Microsoft Windows
++//  V8_OS_ZEDBSD        - zedBSD
+ //  V8_OS_ZOS           - z/OS
+ 
+ #if defined(__ANDROID__)
+@@ -183,6 +184,11 @@
+ # define V8_OS_POSIX 1
+ # define V8_OS_ZOS 1
+ # define V8_OS_STRING "zos"
++
++#elif defined(__ZEDBSD__)
++# define V8_OS_POSIX 1
++# define V8_OS_ZEDBSD 1
++# define V8_OS_STRING "zedbsd"
+ #endif
+ 
+ // -----------------------------------------------------------------------------
+@@ -195,6 +201,7 @@
+ //  V8_TARGET_OS_LINUX
+ //  V8_TARGET_OS_MACOS
+ //  V8_TARGET_OS_WIN
++//  V8_TARGET_OS_ZEDBSD
+ //  V8_TARGET_OS_CHROMEOS
+ //
+ // If not set explicitly, these fall back to corresponding V8_OS_ values.
+@@ -209,6 +216,7 @@
+   && !defined(V8_TARGET_OS_LINUX) \
+   && !defined(V8_TARGET_OS_MACOS) \
+   && !defined(V8_TARGET_OS_WIN) \
++  && !defined(V8_TARGET_OS_ZEDBSD) \
+   && !defined(V8_TARGET_OS_CHROMEOS)
+ #  error No known target OS defined.
+ # endif
+@@ -222,6 +230,7 @@
+   || defined(V8_TARGET_OS_LINUX) \
+   || defined(V8_TARGET_OS_MACOS) \
+   || defined(V8_TARGET_OS_WIN) \
++  || defined(V8_TARGET_OS_ZEDBSD) \
+   || defined(V8_TARGET_OS_CHROMEOS)
+ #  error A target OS is defined but V8_HAVE_TARGET_OS is unset.
+ # endif
+@@ -255,6 +264,10 @@
+ # define V8_TARGET_OS_WIN
+ #endif
+ 
++#ifdef V8_OS_ZEDBSD
++# define V8_TARGET_OS_ZEDBSD
++#endif
++
+ #endif  // V8_HAVE_TARGET_OS
+ 
+ #if defined(V8_TARGET_OS_ANDROID)
+@@ -269,6 +282,8 @@
+ # define V8_TARGET_OS_STRING "macos"
+ #elif defined(V8_TARGET_OS_WINDOWS)
+ # define V8_TARGET_OS_STRING "windows"
++#elif defined(V8_TARGET_OS_ZEDBSD)
++# define V8_TARGET_OS_STRING "zedbsd"
+ #else
+ # define V8_TARGET_OS_STRING "unknown"
+ #endif
+--- a/v8/src/base/platform/platform-posix.cc
++++ b/v8/src/base/platform/platform-posix.cc
+@@ -73,7 +73,7 @@
+ #include <sys/resource.h>
+ #endif
+ 
+-#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS
++#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS && !V8_OS_ZEDBSD
+ #include <sys/syscall.h>
+ #endif
+ 
+@@ -938,7 +938,7 @@
+   return static_cast<int>(thread_self());
+ #elif V8_OS_FUCHSIA
+   return static_cast<int>(zx_thread_self());
+-#elif V8_OS_SOLARIS
++#elif V8_OS_SOLARIS || V8_OS_ZEDBSD
+   return static_cast<int>(pthread_self());
+ #elif V8_OS_ZOS
+   return __tcbtid();
+--- /dev/null
++++ b/v8/src/base/platform/platform-zedbsd.cc
+@@ -0,0 +1,64 @@
++// Copyright 2026 The V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <elf.h>
++#include <link.h>
++#include <string.h>
++
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "src/base/platform/platform-posix-time.h"
++#include "src/base/platform/platform-posix.h"
++#include "src/base/platform/platform.h"
++
++namespace v8 {
++namespace base {
++
++TimezoneCache* OS::CreateTimezoneCache() {
++  return new PosixDefaultTimezoneCache();
++}
++
++namespace {
++
++int CollectSharedLibraryPhdr(struct dl_phdr_info* info, size_t size,
++                             void* data) {
++  auto* result = static_cast<std::vector<OS::SharedLibraryAddress>*>(data);
++  if (info->dlpi_name == nullptr || info->dlpi_name[0] == '\0') {
++    return 0;
++  }
++  const char* sep = strrchr(info->dlpi_name, '/');
++  std::string lib_name(sep != nullptr ? sep + 1 : info->dlpi_name);
++  for (ElfW_Half i = 0; i < info->dlpi_phnum; ++i) {
++    const ElfW_Phdr& phdr = info->dlpi_phdr[i];
++    if (phdr.p_type == PT_LOAD && (phdr.p_flags & PF_X) != 0) {
++      uintptr_t start = static_cast<uintptr_t>(info->dlpi_addr + phdr.p_vaddr);
++      uintptr_t end = start + static_cast<uintptr_t>(phdr.p_memsz);
++      result->emplace_back(lib_name, start, end);
++    }
++  }
++  return 0;
++}
++
++}  // namespace
++
++std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
++  std::vector<SharedLibraryAddress> result;
++  dl_iterate_phdr(CollectSharedLibraryPhdr, &result);
++  return result;
++}
++
++void OS::SignalCodeMovingGC() {}
++
++void OS::AdjustSchedulingParams() {}
++
++std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
++    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
++    size_t alignment) {
++  return std::nullopt;
++}
++
++}  // namespace base
++}  // namespace v8
+--- a/v8/src/base/sys-info.cc
++++ b/v8/src/base/sys-info.cc
+@@ -18,6 +18,11 @@
+ #include <sys/sysctl.h>
+ #endif
+ 
++#if V8_OS_ZEDBSD
++#include <sys/sysctl.h>
++#include <uapi/system.h>
++#endif
++
+ #include <limits>
+ 
+ #include "src/base/logging.h"
+@@ -103,6 +108,14 @@
+   int pages = __get_num_frames();
+   long page_size = sysconf(_SC_PAGESIZE);
+   return static_cast<uint64_t>(pages) * page_size;
++#elif V8_OS_ZEDBSD
++  int mib[2] = {CTL_HW, HW_MEMORY_STATS};
++  struct vm_statistics stats;
++  size_t len = sizeof(stats);
++  if (sysctl(mib, 2, &stats, &len, nullptr, 0) != 0) {
++    return 0;
++  }
++  return static_cast<int64_t>(stats.physical_total);
+ #elif V8_OS_POSIX
+   long pages = sysconf(_SC_PHYS_PAGES);    // NOLINT(runtime/int)
+   long page_size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)

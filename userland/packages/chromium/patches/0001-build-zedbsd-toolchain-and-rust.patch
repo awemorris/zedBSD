@@ -250,6 +250,17 @@
  
    use_glib = is_linux && !is_castos &&
               # Avoid the need for glib when Android is building things via
+--- a/build/modules/BUILD.gn
++++ b/build/modules/BUILD.gn
+@@ -101,7 +101,7 @@
+     extra_headers += [ ":ios_sysroot(${default_toolchain})" ]
+   } else if (is_mac && use_system_xcode) {
+     extra_headers += [ ":mac_sysroot(${default_toolchain})" ]
+-  } else if (is_linux || is_mac || is_android || is_chromeos) {
++  } else if (is_linux || is_mac || is_android || is_chromeos || is_zedbsd) {
+     root_include_dir = "usr/include"
+   } else if (is_fuchsia) {
+     root_include_dir = "include"
 --- a/build/rust/gni_impl/libclang_args.gni
 +++ b/build/rust/gni_impl/libclang_args.gni
 @@ -36,10 +36,30 @@
