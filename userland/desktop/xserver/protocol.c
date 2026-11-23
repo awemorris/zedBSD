@@ -148,8 +148,8 @@
 #define BIGREQ_ENABLE			0U
 #define XCMISC_NAME			"XC-MISC"
 
-/* The extensions ListExtensions names. */
-#define EXTENSION_NAMES_MAX		8U
+/* The extensions ListExtensions names (GLX's name comes from glx.c, where the server has GLX). */
+#define EXTENSION_NAMES_MAX		7U
 
 
 static unsigned protocol_dispatch(struct x11server *server, unsigned index, const uint8_t *request, size_t length);
@@ -873,10 +873,12 @@ protocol_list_extensions(
 	struct x11_client *client,
 	size_t length)
 {
-	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "GLX", "XKEYBOARD", "XInputExtension", "Generic Event Extension", "RANDR", "XINERAMA" };
+	static const char *const names[EXTENSION_NAMES_MAX] = { BIGREQ_NAME, XCMISC_NAME, "XKEYBOARD", "XInputExtension", "Generic Event Extension", "RANDR", "XINERAMA" };
 	uint8_t reply[32U + 128U];
 	size_t used;
 	size_t name_length;
+	size_t written;
+	unsigned count;
 	unsigned index;
 
 	/* The header alone. */
@@ -893,8 +895,16 @@ protocol_list_extensions(
 		used += 1U + name_length;
 	}
 
+	/* GLX's name after them, where the server has GLX. */
+	count = EXTENSION_NAMES_MAX;
+	written = x11_glx_list_name(reply + used, sizeof(reply) - used);
+	if (written != 0U) {
+		used += written;
+		count++;
+	}
+
 	/* Succeeded: the count, and the list padded to words. */
-	reply[1] = (uint8_t)EXTENSION_NAMES_MAX;
+	reply[1] = (uint8_t)count;
 	used = (used + 3U) & ~(size_t)3U;
 	x11_reply(server, client, reply, used);
 	return 0U;

@@ -1616,12 +1616,25 @@ void x11_xinput_focus(struct x11server *server, uint8_t type, const struct x11_w
 void x11_xinput_window_destroyed(struct x11_window *window);
 void x11_xinput_forget_client(struct x11server *server, unsigned client);
 
-/* glx.c: the GLX extension. */
+/*
+ * glx.c: the GLX extension.  A program whose server does not name GLX links
+ * an implementation of these that answers GLX absent instead.
+ */
 void x11_glx_query_extension(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
+size_t x11_glx_list_name(uint8_t *list, size_t room);
 unsigned x11_glx_request(struct x11server *server, struct x11_client *client, const uint8_t *request, size_t length);
 
 /* The GLX extension's major opcode. */
 #define X11_GLX_MAJOR		144U
+
+/*
+ * GLX's first event and first error.  A client's Xlib names the 17 events
+ * and the 14 errors from them as GLX's (glxproto.h's __GLX_NUMBER_EVENTS and
+ * __GLX_NUMBER_ERRORS), so they follow those of the other extensions and
+ * overlap none of them.
+ */
+#define X11_GLX_FIRST_EVENT	89U
+#define X11_GLX_FIRST_ERROR	149U
 
 /*
  * The input extensions' major opcodes, first events and first errors:
