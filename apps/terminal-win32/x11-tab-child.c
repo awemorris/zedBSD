@@ -16,6 +16,8 @@
 
 #include "userland/desktop/xserver/win32/scale.h"
 
+#include <windows.h>
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +75,15 @@ struct tab_surface {
 	uint32_t closed_at;
 	int entered;
 
+	/*
+	 * The window's shape (rectangles of its pixels from its corner;
+	 * shaped 0: the whole window): a tab shows the window's background
+	 * outside it, as a framed window does.
+	 */
+	int shaped;
+	struct x11_rect *shape;
+	unsigned shape_count;
+
 	/* What a window shown on its own after its tab was refused opens with. */
 	char class_name[TAB_CHILD_CLASS_MAX];
 	int has_class;
@@ -113,6 +124,9 @@ static int tab_child_wanted(const struct x11_surface_info *info);
 static int tab_child_free_place(const struct x11_tab_child *tabs);
 static struct tab_surface *tab_child_find(const struct x11_tab_child *tabs, uint32_t window);
 static void tab_child_keep(struct tab_surface *surface, const struct x11_surface_info *info);
+static void tab_child_keep_shape(struct tab_surface *surface, const struct x11_surface_info *info);
+static void tab_child_outside(struct tab_surface *surface, int32_t row, int32_t x0, int32_t x1, uint32_t background);
+static uint32_t tab_child_background(void);
 static int tab_child_shown(struct tab_surface *surface);
 static void tab_child_damage(struct tab_surface *surface, int32_t x0, int32_t y0, int32_t x1, int32_t y1);
 static void tab_child_send_open(struct x11_tab_child *tabs, struct tab_surface *surface);
@@ -308,8 +322,8 @@ x11_tab_child_send(
 
 /*
  * Opens a surface for an X window: a tab for a top-level window no other
- * window owns and without a shape (or the root window), while the link
- * has a tab free; a window of the Windows backend otherwise.
+ * window owns and that is not cut to a shape (or the root window), while
+ * the link has a tab free; a window of the Windows backend otherwise.
  */
 static struct x11_surface *
 tab_child_open(
@@ -347,9 +361,11 @@ tab_child_open(
 		return (struct x11_surface *)surface;
 	}
 
-	/* A tab: its pixels, black until the core presents them. */
+	/* A tab: its shape, and its pixels, black until the core presents them. */
+	tab_child_keep_shape(surface, info);
 	error = tab_child_shown(surface);
 	if (error != 0) {
+		free(surface->shape);
 		free(surface);
 		return NULL;
 	}
@@ -375,6 +391,8 @@ tab_child_update(
 	struct tab_surface *shown;
 	struct x11_surface_info inner_info;
 	uint8_t size[X11_LINK_TAB_SIZE_BODY];
+	uint32_t background;
+	int32_t row;
 	int error;
 
 	/* The Windows backend's window, its owner as the backend knows it. */
@@ -389,6 +407,31 @@ tab_child_update(
 
 	/* What a window shown on its own later would open with. */
 	tab_child_keep(shown, info);
+
+	/* A new shape: kept, and the window's background outside it. */
+	if ((changed & X11_SURFACE_CHANGED_SHAPE) != 0U) {
+		tab_child_keep_shape(shown, info);
+		background = tab_child_background();
+		for (row = 0; row < (int32_t)shown->shown_height; row++)
+			tab_child_outside(shown, row, 0, (int32_t)shown->shown_width, background);
+		tab_child_damage(shown, 0, 0, (int32_t)shown->shown_width, (int32_t)shown->shown_height);
+	}
+
+	/*
+	 * A window now cut to its shape (shaped, and its client asked for no
+	 * decoration) leaves its tab for a window of its own.
+	 */
+	if (shown->kind == X11_SURFACE_TOPLEVEL &&
+	    !shown->closing &&
+	    shown->shaped &&
+	    (shown->flags & X11_SURFACE_UNDECORATED) != 0U) {
+		if (shown->opened) {
+			shown->opened = 0;
+			(void)tabs->link.frame(tabs->link.context, X11_LINK_TAB_GONE, shown->window, NULL, 0);
+		}
+		tab_child_refuse(tabs, shown);
+		return;
+	}
 
 	/* A new title. */
 	if ((changed & X11_SURFACE_CHANGED_TITLE) != 0U && shown->opened && !shown->closing)
@@ -421,6 +464,7 @@ tab_child_close(
 	shown = (struct tab_surface *)surface;
 	if (shown->inner != NULL) {
 		x11_win32_ops.close(tabs->inner, shown->inner);
+		free(shown->shape);
 		free(shown);
 		return;
 	}
@@ -432,6 +476,7 @@ tab_child_close(
 	/* The tab's place and memory. */
 	tab_child_forget(tabs, shown);
 	free(shown->pixels);
+	free(shown->shape);
 	free(shown);
 }
 
@@ -485,6 +530,7 @@ tab_child_present(
 	int32_t x1;
 	int32_t y1;
 	int32_t row;
+	uint32_t background;
 	int status;
 
 	/* The Windows backend's window. */
@@ -497,7 +543,10 @@ tab_child_present(
 		return 0;
 	}
 
-	/* Each part, cut to what the tab shows, copied and marked to be sent. */
+	/* Each part, cut to what the tab shows, copied (the window's background outside its shape) and marked to be sent. */
+	background = 0U;
+	if (shown->shaped)
+		background = tab_child_background();
 	for (index = 0U; index < count; index++) {
 		part = &parts[index];
 		x0 = part->x;
@@ -520,6 +569,8 @@ tab_child_present(
 			memcpy(shown->pixels + (size_t)row * shown->shown_width + (size_t)x0,
 			       pixels + (size_t)row * stride + (size_t)x0,
 			       (size_t)(x1 - x0) * sizeof(*pixels));
+			if (shown->shaped)
+				tab_child_outside(shown, row, x0, x1, background);
 		}
 		tab_child_damage(shown, x0, y0, x1, y1);
 	}
@@ -664,8 +715,9 @@ tab_child_cursor(
 
 /*
  * Tells whether a window is shown in a tab: the root window, or a
- * decorated top-level window that no other window owns (not a dialog)
- * and that has no shape.
+ * top-level window that no other window owns (not a dialog) and that is
+ * not cut to a shape (one whose client asked for no decoration).  A
+ * decorated shaped window is a tab, its background outside its shape.
  */
 static int
 tab_child_wanted(
@@ -675,12 +727,12 @@ tab_child_wanted(
 	if (info->kind == X11_SURFACE_ROOT)
 		return 1;
 
-	/* Not a menu, a tooltip, a dialog or a shaped window. */
+	/* Not a menu, a tooltip, a dialog or a window cut to its shape. */
 	if (info->kind != X11_SURFACE_TOPLEVEL)
 		return 0;
 	if (info->owner != NULL)
 		return 0;
-	if (info->shaped)
+	if (info->shaped && (info->flags & X11_SURFACE_UNDECORATED) != 0U)
 		return 0;
 
 	/* A plain top-level window. */
@@ -761,6 +813,105 @@ tab_child_keep(
 	surface->flags = info->flags;
 	surface->hints = info->hints;
 	surface->default_place = info->default_place;
+}
+
+/* Keeps a copy of a tab's shape as the core gave it (none: the whole window). */
+static void
+tab_child_keep_shape(
+	struct tab_surface *surface,
+	const struct x11_surface_info *info)
+{
+	struct x11_rect *copy;
+
+	/* The old shape goes. */
+	free(surface->shape);
+	surface->shape = NULL;
+	surface->shape_count = 0U;
+	surface->shaped = 0;
+
+	/* Unshaped. */
+	if (!info->shaped)
+		return;
+
+	/* Succeeded: the new one copied (a shape not kept shows the whole window). */
+	copy = malloc(((size_t)info->shape_count + 1U) * sizeof(*copy));
+	if (copy == NULL)
+		return;
+	if (info->shape_count != 0U)
+		memcpy(copy, info->shape, (size_t)info->shape_count * sizeof(*copy));
+	surface->shape = copy;
+	surface->shape_count = info->shape_count;
+	surface->shaped = 1;
+}
+
+/*
+ * Paints the background into the pixels of one row of a tab, from x0 to
+ * x1, that lie outside its shape: X leaves them undefined.
+ */
+static void
+tab_child_outside(
+	struct tab_surface *surface,
+	int32_t row,
+	int32_t x0,
+	int32_t x1,
+	uint32_t background)
+{
+	const struct x11_rect *rect;
+	uint32_t *line;
+	int32_t x;
+	int32_t next;
+	unsigned index;
+	int covered;
+
+	/* Run by run: one in a rectangle of the shape is skipped to its end, one outside them painted up to the next. */
+	line = surface->pixels + (size_t)row * surface->shown_width;
+	x = x0;
+	while (x < x1) {
+		/* The rectangle the run starts in, or the nearest one after it on the row. */
+		covered = 0;
+		next = x1;
+		for (index = 0U; index < surface->shape_count && !covered; index++) {
+			rect = &surface->shape[index];
+			if (row < rect->y || row >= rect->y + (int32_t)rect->height) {
+				/* Not on the row. */
+			} else if (x >= rect->x && x < rect->x + (int32_t)rect->width) {
+				/* The run is inside it. */
+				covered = 1;
+				next = rect->x + (int32_t)rect->width;
+			} else if (rect->x > x && rect->x < next) {
+				/* The run ends where it starts. */
+				next = rect->x;
+			}
+		}
+
+		/* A run outside the shape: the background. */
+		if (!covered) {
+			while (x < next) {
+				line[x] = background;
+				x++;
+			}
+		}
+
+		x = next;
+	}
+}
+
+/*
+ * Gives the colour of a window's background as an X pixel: the system's,
+ * as a framed window of the Windows backend shows outside its shape.
+ */
+static uint32_t
+tab_child_background(void)
+{
+	COLORREF colour;
+	uint32_t pixel;
+
+	/* The system's colour (0x00BBGGRR). */
+	colour = GetSysColor(COLOR_WINDOW);
+
+	/* Succeeded: as X's 0x00RRGGBB. */
+	pixel = ((uint32_t)GetRValue(colour) << 16) | ((uint32_t)GetGValue(colour) << 8) | (uint32_t)GetBValue(colour);
+	return pixel;
 }
 
 /*
@@ -1222,7 +1373,7 @@ tab_child_refuse(
 	struct x11_surface_info info;
 	struct x11_rect part;
 
-	/* The window as the core last described it, without an owner, a shape or an icon. */
+	/* The window as the core last described it, with its shape, without an owner or an icon. */
 	memset(&info, 0, sizeof(info));
 	info.kind = surface->kind;
 	info.x = surface->x;
@@ -1237,6 +1388,9 @@ tab_child_refuse(
 	info.owner = NULL;
 	info.flags = surface->flags;
 	info.hints = surface->hints;
+	info.shaped = surface->shaped;
+	info.shape = surface->shape;
+	info.shape_count = surface->shape_count;
 
 	/* The tab's place is free; the window is the backend's from now on. */
 	tab_child_forget(tabs, surface);

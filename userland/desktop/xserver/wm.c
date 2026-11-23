@@ -61,6 +61,9 @@
 /* WM_HINTS's flag that the window asks for the user's attention (ICCCM 4.1.2.4's UrgencyHint). */
 #define WM_HINTS_URGENCY		(1U << 8)
 
+/* The bit of _MOTIF_WM_HINTS' flags that says its decorations field counts (MWM_HINTS_DECORATIONS). */
+#define WM_MOTIF_DECORATIONS		(1U << 1)
+
 /*
  * WM_NORMAL_HINTS (ICCCM 4.1.2.3): the flags of the place the user or the
  * program asked for and of the fields set, the
@@ -155,6 +158,7 @@ static const struct wm_atom_name wm_atom_names[] = {
 	{ "WM_TAKE_FOCUS", offsetof(struct x11_wm_atoms, take_focus) },
 	{ "WM_STATE", offsetof(struct x11_wm_atoms, state) },
 	{ "WM_CHANGE_STATE", offsetof(struct x11_wm_atoms, change_state) },
+	{ "_MOTIF_WM_HINTS", offsetof(struct x11_wm_atoms, motif_wm_hints) },
 	{ "_NET_SUPPORTED", offsetof(struct x11_wm_atoms, net_supported) },
 	{ "_NET_SUPPORTING_WM_CHECK", offsetof(struct x11_wm_atoms, net_supporting_wm_check) },
 	{ "_NET_WM_NAME", offsetof(struct x11_wm_atoms, net_wm_name) },
@@ -182,7 +186,7 @@ static const struct wm_atom_name wm_atom_names[] = {
 };
 
 /* The index in wm_atom_names of the first EWMH atom, the first _NET_SUPPORTED names. */
-#define WM_FIRST_NET_ATOM		5U
+#define WM_FIRST_NET_ATOM		6U
 
 static int wm_managed(struct x11server *server, const struct x11_window *window);
 static uint32_t wm_atom_at(const struct x11server *server, unsigned index);
@@ -193,7 +197,7 @@ static unsigned wm_initial_state(struct x11_window *window);
 static unsigned wm_net_state_read(struct x11server *server, struct x11_window *window);
 static unsigned wm_net_state_bit(struct x11server *server, uint32_t atom);
 static void wm_net_state_message(struct x11server *server, struct x11_window *window, uint32_t action, uint32_t first, uint32_t second);
-static unsigned wm_surface_flags(struct x11_window *window);
+static unsigned wm_surface_flags(struct x11server *server, struct x11_window *window);
 static int wm_popup_type(struct x11server *server, struct x11_window *window);
 static struct x11_surface *wm_owner(struct x11server *server, struct x11_window *window);
 static void wm_hints_read(struct x11_window *window, struct x11_size_hints *hints);
@@ -598,8 +602,8 @@ x11_wm_property(
 		return;
 	}
 
-	/* The hints, whose urgency the surface shows. */
-	if (atom == X11_ATOM_WM_HINTS) {
+	/* The hints, whose urgency the surface shows, and Motif's, whose decoration it shows. */
+	if (atom == X11_ATOM_WM_HINTS || atom == server->wm.motif_wm_hints) {
 		wm_touch(server, window, X11_SURFACE_CHANGED_FLAGS);
 		return;
 	}
@@ -754,7 +758,7 @@ x11_wm_info(
 		info->default_place = wm_default_place(window);
 
 	/* Succeeded: its state, owner and limits. */
-	info->flags = wm_surface_flags(window);
+	info->flags = wm_surface_flags(server, window);
 	info->owner = wm_owner(server, window);
 	wm_hints_read(window, &info->hints);
 }
@@ -1389,11 +1393,15 @@ wm_net_state_message(
 /* Returns the state a top-level window's surface is to have. */
 static unsigned
 wm_surface_flags(
+	struct x11server *server,
 	struct x11_window *window)
 {
 	struct x11_property *hints;
+	struct x11_property *motif;
 	unsigned flags;
 	uint32_t hint_flags;
+	uint32_t motif_flags;
+	uint32_t decorations;
 
 	/* Minimized and full-screen as kept. */
 	flags = window->wm_flags & (X11_SURFACE_ICONIC | X11_SURFACE_FULLSCREEN);
@@ -1412,6 +1420,21 @@ wm_surface_flags(
 		hint_flags = wm_field(hints, 0U);
 		if ((hint_flags & WM_HINTS_URGENCY) != 0U)
 			flags |= X11_SURFACE_URGENT;
+	}
+
+	/*
+	 * No decoration, as Motif's hints ask (flags, functions, decorations,
+	 * ...: the decorations field counts when the flags have
+	 * MWM_HINTS_DECORATIONS, and 0 there is none at all).
+	 */
+	motif = NULL;
+	if (server->wm.motif_wm_hints != 0U)
+		motif = x11_property_find(window, server->wm.motif_wm_hints);
+	if (motif != NULL && motif->format == 32U && motif->length >= 3U * 4U) {
+		motif_flags = wm_field(motif, 0U);
+		decorations = wm_field(motif, 2U);
+		if ((motif_flags & WM_MOTIF_DECORATIONS) != 0U && decorations == 0U)
+			flags |= X11_SURFACE_UNDECORATED;
 	}
 
 	/* Succeeded: the state. */

@@ -29,9 +29,11 @@
  *
  * The table is constant for the life of the program; every function takes
  * the struct x11_win32 as its context.  A shaped window is shown through
- * GDI: its window region (SetWindowRgn) is a property of what GDI and the
- * window manager draw, and neither the Vulkan WSI nor DXGI's flip model
- * says that it cuts a swapchain's pixels (under Wine it does not).
+ * GDI: one without a frame is cut by its window region (SetWindowRgn),
+ * which is a property of what GDI and the window manager draw, and
+ * neither the Vulkan WSI nor DXGI's flip model says that it cuts a
+ * swapchain's pixels (under Wine it does not); a framed one shows the
+ * window's background outside its shape, painted into its DIB.
  */
 const struct x11_backend_ops x11_win32_ops = {
 	win32_surface_open,

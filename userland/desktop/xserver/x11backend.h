@@ -74,6 +74,15 @@
 #define X11_SURFACE_URGENT	(1U << 3)
 
 /*
+ * A top-level window whose client asked for no decoration at all
+ * (_MOTIF_WM_HINTS with its decorations 0): the system shows it without a
+ * frame, and cut to its shape when it has one.  A decorated window keeps
+ * the system's frame whole and is never cut: what lies outside its shape
+ * shows the frame's background, as under an X window manager's frame.
+ */
+#define X11_SURFACE_UNDECORATED	(1U << 4)
+
+/*
  * What an update of a surface changes: its size, its place on the root
  * window, its title, its owner, its state, and the limits on its size.
  */
@@ -217,7 +226,8 @@ struct x11_size_hints {
  * and size (X's pixels), its title (UTF-8), the X client's class (NULL:
  * none; the backend names it itself), the surface of the top-level window
  * it is transient for (WM_TRANSIENT_FOR; NULL: none), its state
- * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN) and the limits on its size.
+ * (X11_SURFACE_ICONIC, MAXIMIZED, FULLSCREEN, URGENT, UNDECORATED) and the
+ * limits on its size.
  *
  * default_place is nonzero for a decorated window whose client asked for
  * no place of its own (ICCCM's WM_NORMAL_HINTS has no USPosition, and no
@@ -245,8 +255,10 @@ struct x11_surface_info {
 	 * The window's shape: the rectangles of its pixels the surface shows
 	 * and takes the pointer in (from the window's corner; they do not
 	 * overlap), shape_count of them.  shaped 0: the whole window (shape is
-	 * NULL).  The system clips the surface to them (Windows'
-	 * SetWindowRgn); Wayland takes them as the input region only.
+	 * NULL).  A surface without the system's frame is cut to them
+	 * (Windows' SetWindowRgn); a framed one stays whole, the window's
+	 * background outside them; Wayland takes them as the input region
+	 * only.
 	 */
 	int shaped;
 	const struct x11_rect *shape;

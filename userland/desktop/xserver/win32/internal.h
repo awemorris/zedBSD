@@ -112,14 +112,18 @@ struct x11_surface {
 
 	/*
 	 * What decor.c keeps: the X window's shape (rectangles of its pixels;
-	 * shaped 0: the whole window), applied to the window as a region
-	 * again when its frame or scale changes; its icon (NULL: the
-	 * program's); whether it asks for the user's attention; and the frame
-	 * last told the core (frame_told 0: none yet).
+	 * shaped 0: the whole window), applied again when its frame, its
+	 * decoration or its scale changes: as the window's region when it
+	 * has no frame, else as outside, the part of the client area beyond
+	 * the shape that the DIB shows the window's background in (NULL:
+	 * none); its icon (NULL: the program's); whether it asks for the
+	 * user's attention; and the frame last told the core (frame_told 0:
+	 * none yet).
 	 */
 	int shaped;
 	struct x11_rect *shape;
 	unsigned shape_count;
+	HRGN outside;
 	HICON icon;
 	int urgent;
 	int frame_told;
@@ -204,6 +208,7 @@ int win32_surface_present(void *context, struct x11_surface *surface, const uint
 void win32_decor_update(struct x11_surface *surface, const struct x11_surface_info *info, unsigned changed);
 void win32_decor_shape(struct x11_surface *surface);
 void win32_decor_frame(struct x11_surface *surface);
+void win32_decor_fill(struct x11_surface *surface);
 void win32_decor_free(struct x11_surface *surface);
 
 /* vulkan.c */
