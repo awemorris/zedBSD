@@ -27,12 +27,12 @@
  * output's pass, its layers' pictures and its maps show the plane at the
  * output's scale, a head's pass its part of the plane at the head's own
  * scale (a mirror copies the output's picture, no pass of its own).  A
- * quad's corners are snapped
- * to the pixels each (scale.h), so quads that touch on the plane touch in
- * the picture; a damage is taken outward to every pixel it touches.  An
- * image is sampled a texel a pixel where it is shown one for one, and
- * smoothly where a scale stretches it by a fraction.  At 100 % a unit is a
- * pixel, nothing is rounded and images are sampled as they always were.
+ * quad's corners are snapped to the pixels each (scale.h), so quads that
+ * touch on the plane touch in the picture; a damage is taken outward to
+ * every pixel it touches.  An image is sampled a texel a pixel where it is
+ * shown one for one, and smoothly where a scale stretches it by a
+ * fraction.  At 100 % a unit is a pixel, nothing is rounded and, while
+ * every display is at 100 %, images are sampled as they always were.
  */
 
 #include "compose.h"
@@ -757,7 +757,7 @@ pass_head(
 	return head;
 }
 
-/* Tells whether a display shows the plane at another scale than 100 %: the output, or an open head. */
+/* Tells whether a display shows the plane at another scale than 100 %: the output, or a head of the extended mode. */
 static int
 scales_mixed(
 	const struct kwl_server *server)
@@ -769,8 +769,8 @@ scales_mixed(
 	if (server->scale120 != 0U && server->scale120 != KWL_SCALE_ONE)
 		return 1;
 
-	/* Each open head's. */
-	if (server->compose == NULL)
+	/* Each open head's; a mirror draws no pass of its own. */
+	if (server->compose == NULL || server->compose->display_mode != KWL_DISPLAYS_EXTENDED)
 		return 0;
 	for (index = 0U; index < KWL_HEADS; index++) {
 		head = &server->compose->heads[index];
