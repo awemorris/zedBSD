@@ -46,6 +46,9 @@
 /* The largest font file read, in bytes. */
 #define TEXT_FONT_MAX		(64U * 1024U * 1024U)
 
+/* The largest size in pixels a glyph is drawn at (the cache's key keeps eight bits of it). */
+#define TEXT_PIXELS_MAX		255U
+
 /*
  * A C runtime that tells text files from binary ones (Windows') opens a
  * font with O_BINARY, so that its bytes are read as they are; elsewhere
@@ -687,8 +690,8 @@ text_glyph(
 	uint32_t key;
 	int error;
 
-	/* Sizes are kept within what the key holds. */
-	if (pixels == 0U || pixels > 127U)
+	/* Sizes are kept within what the key holds (eight bits: a size of 64 units at 300 % and more). */
+	if (pixels == 0U || pixels > TEXT_PIXELS_MAX)
 		return NULL;
 
 	/* The first face with a glyph for the character, or the main face's missing glyph. */
@@ -713,11 +716,11 @@ text_glyph(
 			face_index = 2;
 	}
 
-	/* The key: glyph, size, face (two bits) and weight (never zero, which marks an empty slot). */
+	/* The key: glyph (16 bits), size (8), face (2) and weight (1), with the top bit set (zero marks an empty slot). */
 	weight = 0U;
 	if (bold != 0)
 		weight = 1U;
-	key = (glyph_index & 0xffffU) | ((uint32_t)pixels << 16) | ((uint32_t)face_index << 23) | (weight << 25) | 0x80000000U;
+	key = (glyph_index & 0xffffU) | ((uint32_t)pixels << 16) | ((uint32_t)face_index << 24) | (weight << 26) | 0x80000000U;
 
 	/* A glyph drawn before is in its slot. */
 	glyph = text_slot(text, key);
@@ -963,12 +966,12 @@ text_draw_scaled(
 	int pen;
 	int moved;
 
-	/* The size, the pen and the baseline in pixels, rounded to the nearest (the glyphs' cache keeps sizes to 127). */
+	/* The size, the pen and the baseline in pixels, rounded to the nearest (the glyphs' cache keeps sizes to TEXT_PIXELS_MAX). */
 	size = (pixels * canvas->scale + KL_SCALE_BASE / 2U) / KL_SCALE_BASE;
 	if (size == 0U)
 		size = 1U;
-	if (size > 127U)
-		size = 127U;
+	if (size > TEXT_PIXELS_MAX)
+		size = TEXT_PIXELS_MAX;
 	factor = (float)canvas->scale / (float)KL_SCALE_BASE;
 	origin = (int)floorf((float)x * factor + 0.5f);
 	line = (int)floorf((float)baseline * factor + 0.5f);

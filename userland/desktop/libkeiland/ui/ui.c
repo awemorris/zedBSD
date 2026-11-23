@@ -236,6 +236,13 @@ struct kl_ui {
 	uint64_t now_us;
 
 	/*
+	 * The scale of the window the widgets are on (KL_VERSION 114,
+	 * kl_ui_set_scale), in 96ths: kl_ui_window_input turns the window's
+	 * pixels into units by it.  KL_SCALE_BASE from kl_ui_create.
+	 */
+	unsigned scale;
+
+	/*
 	 * The scroll a touch pad's two fingers hold (KL_VERSION 40, BUG-211):
 	 * the one under the pointer when they began, until they lift.  It is
 	 * the application's; it is looked for among the frame's scrolls before
@@ -415,8 +422,38 @@ kl_ui_create(void)
 	/* The scroll is released with the input. */
 	ui->select_made = 1;
 
+	/* At 100 % until the program tells the window's scale. */
+	ui->scale = KL_SCALE_BASE;
+
 	/* Succeeded: no frame yet, so input meets no part. */
 	return ui;
+}
+
+/*
+ * Sets the scale of the window the widgets are on (KL_VERSION 114), in
+ * 96ths: kl_ui_window_input turns the window's pixels into units by it.
+ * 0 is taken for KL_SCALE_BASE.
+ */
+void
+kl_ui_set_scale(
+	struct kl_ui *ui,
+	unsigned scale)
+{
+	/* None is 100 %. */
+	if (scale == 0U)
+		scale = KL_SCALE_BASE;
+
+	/* The scale, for the inputs from now on. */
+	ui->scale = scale;
+}
+
+/* Reports the scale of the window the widgets are on, in 96ths. */
+unsigned
+keiui_ui_scale(
+	const struct kl_ui *ui)
+{
+	/* The scale kl_ui_set_scale set. */
+	return ui->scale;
 }
 
 /*
