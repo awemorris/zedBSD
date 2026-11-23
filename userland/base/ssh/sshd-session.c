@@ -550,6 +550,7 @@ session_serve(
 	size_t size;
 	ssize_t got;
 	size_t room;
+	size_t backlog;
 	uint64_t now_ms;
 	unsigned count;
 	unsigned forward_base;
@@ -680,10 +681,16 @@ session_serve(
 		    session->child.config.client_alive_interval < (unsigned)(SESSION_POLL_MS / 1000))
 			timeout = (int)session->child.config.client_alive_interval * 1000;
 
-		/* Waits for the forwardings' sockets too, waking for their times. */
+		/*
+		 * Waits for the forwardings' sockets too, waking for their times.
+		 * Their gate counts the messages held during a key re-exchange
+		 * with the pending output, so a forwarded byte is never read that
+		 * the transport could not take.
+		 */
 		now_ms = sshd_forward_now_ms();
 		forward_base = count;
-		forward_count = sshd_forward_poll(&session->forwards, waiting + count, SSHD_FORWARD_SLOTS, size, now_ms, &timeout);
+		backlog = size + session->transport.held.size;
+		forward_count = sshd_forward_poll(&session->forwards, waiting + count, SSHD_FORWARD_SLOTS, backlog, now_ms, &timeout);
 		for (index = 0; index < forward_count; index++) {
 			kinds[count] = 5;
 			owners[count] = NULL;

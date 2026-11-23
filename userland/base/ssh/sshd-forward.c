@@ -1186,10 +1186,16 @@ forward_listen(
 		if (addresses[position].family == AF_INET6)
 			(void)setsockopt(descriptor, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on));
 
-		/* Binds and listens; the socket is kept from children and does not block. */
+		/* Binds the address. */
 		status = bind(descriptor, (const struct sockaddr *)&addresses[position].address, addresses[position].length);
-		if (status == 0)
-			status = listen(descriptor, SSHD_FORWARD_BACKLOG);
+		if (status != 0) {
+			error = errno;
+			close(descriptor);
+			continue;
+		}
+
+		/* Listens. */
+		status = listen(descriptor, SSHD_FORWARD_BACKLOG);
 		if (status != 0) {
 			error = errno;
 			close(descriptor);
@@ -1847,10 +1853,19 @@ forward_send(
 {
 	int status;
 
-	/* Refuses a message that was not built, then queues it. */
+	/* Refuses a message that was not built. */
 	status = ssh_buf_error(&forwards->message);
-	if (status == 0 && forwards->message.size > 0)
-		status = ssh_transport_send(forwards->transport, forwards->message.data, forwards->message.size);
+	if (status != 0) {
+		ssh_buf_reset(&forwards->message);
+		return status;
+	}
+
+	/* Nothing was built: nothing goes. */
+	if (forwards->message.size == 0)
+		return 0;
+
+	/* Queues the message for the client. */
+	status = ssh_transport_send(forwards->transport, forwards->message.data, forwards->message.size);
 	ssh_buf_reset(&forwards->message);
 	if (status != 0)
 		return status;

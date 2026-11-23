@@ -64,8 +64,8 @@
 /* How long a listening socket rests after an accept failed for the lack of descriptors, in milliseconds. */
 #define SSHD_FORWARD_PAUSE_MS		1000U
 
-/* The backlog of a forwarding's listening socket (OpenSSH's sshd uses 5 for remote forwardings). */
-#define SSHD_FORWARD_BACKLOG		5
+/* The backlog of a forwarding's listening socket (OpenSSH's SSH_LISTEN_BACKLOG, for local and remote forwardings alike). */
+#define SSHD_FORWARD_BACKLOG		128
 
 /* The poll slots the forwardings take at most: every listening socket and one socket per channel. */
 #define SSHD_FORWARD_SLOTS		(SSHD_FORWARD_LISTEN_MAX * SSHD_FORWARD_ADDRESSES + SSH_CHANNEL_MAX)
@@ -216,8 +216,11 @@ int sshd_forward_pump(struct sshd_forwards *forwards, uint64_t now_ms);
 /*
  * Puts the sockets the forwardings wait on into slots (at most capacity
  * of them) and returns how many.  pending is the connection's output not
- * yet written; *timeout_ms is lowered to the time a paused listener or a
- * connection's deadline wants the loop back.
+ * yet written with the messages held during a key re-exchange (a socket
+ * is read only while it is below SSHD_FORWARD_OUTPUT_SOFT, far from the
+ * transport's limits, so the data a read sends is always taken);
+ * *timeout_ms is lowered to the time a paused listener or a connection's
+ * deadline wants the loop back.
  */
 unsigned sshd_forward_poll(struct sshd_forwards *forwards, struct pollfd *slots, unsigned capacity, size_t pending, uint64_t now_ms, int *timeout_ms);
 
