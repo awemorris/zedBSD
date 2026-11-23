@@ -11,19 +11,22 @@
  * thread, when the Activity is created.
  */
 
-#include <stddef.h>
+#include "apps/libkeiland/android/keiland-android.h"
 
-#include <android/native_activity.h>
+#include "apps/terminal-android/jni/hello.h"
+
 #include <jni.h>
 
 /*
- * Called by the system when the Activity is created.  Nothing is set up yet, so
- * the Activity starts and shows nothing.
+ * Hands the new Activity to libkeiland, with the function the program's native
+ * thread runs.
  */
-JNIEXPORT void ANativeActivity_onCreate(ANativeActivity *activity, void *saved_state, size_t saved_state_size)
+JNIEXPORT void
+ANativeActivity_onCreate(
+	ANativeActivity *activity,
+	void *saved_state,
+	size_t saved_state_size)
 {
-	/* No state is kept yet, so none is restored. */
-	(void)activity;
-	(void)saved_state;
-	(void)saved_state_size;
+	/* Starts the native thread (the first time) and hooks the Activity to it. */
+	keiland_android_start(activity, saved_state, saved_state_size, hello_main);
 }
