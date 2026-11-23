@@ -64,8 +64,9 @@ x11_event_select(
 	unsigned capacity;
 	unsigned index;
 
-	/* Only the core's bits. */
 	(void)server;
+
+	/* Only the core's bits. */
 	if ((mask & ~X11_MASK_ALL) != 0U)
 		return X11_BAD_VALUE;
 
@@ -812,6 +813,7 @@ event_to_grab(
 	struct x11_window *pointer;
 	struct x11_client *client;
 	uint8_t event[32];
+	uint32_t selected;
 	uint32_t child;
 
 	/* No grab, or one whose window or client is gone. */
@@ -826,7 +828,8 @@ event_to_grab(
 	}
 
 	/* The grab's client hears it when it asked for it on the grab's window. */
-	if ((x11_event_mask_of(window, server->grab_owner) & mask) == 0U)
+	selected = x11_event_mask_of(window, server->grab_owner);
+	if ((selected & mask) == 0U)
 		return 1;
 
 	/* As seen from the grab's window, the child toward the window under the pointer. */

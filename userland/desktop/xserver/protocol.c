@@ -763,6 +763,7 @@ protocol_open_font(
 	struct x11_font *font;
 	uint16_t name_length;
 	uint32_t id;
+	unsigned taken;
 	int chosen;
 	int error;
 
@@ -777,7 +778,8 @@ protocol_open_font(
 	/* An id of the client's range not in use. */
 	id = x11_read32(request + 4, client->order);
 	chosen = x11_id_chosen(client, id);
-	if (!chosen || x11_resource_type(server, id) != 0U)
+	taken = x11_resource_type(server, id);
+	if (!chosen || taken != 0U)
 		return X11_BAD_ID_CHOICE;
 
 	/* The font, charged to the client. */
@@ -908,6 +910,7 @@ protocol_create_pixmap(
 	uint32_t id;
 	size_t bytes;
 	unsigned code;
+	unsigned taken;
 	int chosen;
 	int error;
 	int msb;
@@ -919,7 +922,8 @@ protocol_create_pixmap(
 		return X11_BAD_LENGTH;
 	id = x11_read32(request + 4, msb);
 	chosen = x11_id_chosen(client, id);
-	if (!chosen || x11_resource_type(server, id) != 0U)
+	taken = x11_resource_type(server, id);
+	if (!chosen || taken != 0U)
 		return X11_BAD_ID_CHOICE;
 	code = protocol_drawable(server, x11_read32(request + 8, msb), &target);
 	if (code != 0U)
@@ -1005,6 +1009,7 @@ protocol_create_gc(
 	uint32_t mask;
 	uint32_t id;
 	unsigned code;
+	unsigned taken;
 	int chosen;
 	int fits;
 	int error;
@@ -1021,7 +1026,8 @@ protocol_create_gc(
 		return X11_BAD_LENGTH;
 	id = x11_read32(request + 4, client->order);
 	chosen = x11_id_chosen(client, id);
-	if (!chosen || x11_resource_type(server, id) != 0U)
+	taken = x11_resource_type(server, id);
+	if (!chosen || taken != 0U)
 		return X11_BAD_ID_CHOICE;
 	code = protocol_drawable(server, x11_read32(request + 8, client->order), &target);
 	if (code != 0U)
