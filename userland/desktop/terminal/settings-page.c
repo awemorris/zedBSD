@@ -1235,6 +1235,8 @@ page_hosts_identities(
 		rows++;
 		line = terminal_hosts_find(&page.hosts, page.hosts_block, "IdentityFile", line);
 	}
+
+	/* And those other blocks add. */
 	line = terminal_hosts_other(&page.hosts, page.hosts_block, "IdentityFile", TERMINAL_HOSTS_NONE);
 	while (line != TERMINAL_HOSTS_NONE) {
 		rows++;
@@ -1294,6 +1296,10 @@ page_hosts_forwards(
 	char where[PAGE_HOST_TEXT];
 	char shown[PAGE_HOST_TEXT];
 	const char *explained;
+	const char *listen_hint;
+	const char *to_hint;
+	unsigned local_flags;
+	unsigned remote_flags;
 	unsigned kind;
 	unsigned line;
 	unsigned rows;
@@ -1310,6 +1316,8 @@ page_hosts_forwards(
 			rows++;
 			line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], line);
 		}
+
+		/* Those other blocks add. */
 		line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
 		while (line != TERMINAL_HOSTS_NONE) {
 			rows++;
@@ -1337,6 +1345,8 @@ page_hosts_forwards(
 			y = page_line_row(y, card.x, card.width, "", shown, theme->text, line, 1);
 			line = terminal_hosts_find(&page.hosts, page.hosts_block, keywords[kind], line);
 		}
+
+		/* Those other blocks add. */
 		line = terminal_hosts_other(&page.hosts, page.hosts_block, keywords[kind], TERMINAL_HOSTS_NONE);
 		while (line != TERMINAL_HOSTS_NONE) {
 			page_hosts_forward_text(line, shown, sizeof(shown));
@@ -1353,23 +1363,39 @@ page_hosts_forwards(
 	control.y = y + (PAGE_ROW - theme->control_height) / 2;
 	control.height = theme->control_height;
 	control.width = kl_button_width(&page.style, "Local");
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_LOCAL, &control, "Local", page.forward_remote ? 0U : KL_BUTTON_PRIMARY);
+	local_flags = KL_BUTTON_PRIMARY;
+	remote_flags = 0U;
+	listen_hint = "8080, or 127.0.0.1:8080";
+	to_hint = "db.internal:5432";
+	if (page.forward_remote) {
+		local_flags = 0U;
+		remote_flags = KL_BUTTON_PRIMARY;
+		listen_hint = "8080, or 0";
+		to_hint = "localhost:3000";
+	}
+
+	/* Local. */
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_LOCAL, &control, "Local", local_flags);
 	if (pressed) {
 		page.forward_remote = 0;
 		page.dirty = 1;
 	}
+
+	/* Remote beside it. */
 	control.x += control.width + 6;
 	control.width = kl_button_width(&page.style, "Remote");
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_REMOTE, &control, "Remote", page.forward_remote ? KL_BUTTON_PRIMARY : 0U);
+	pressed = kl_button(page.ui, &page.style, PAGE_ID_FORWARD_REMOTE, &control, "Remote", remote_flags);
 	if (pressed) {
 		page.forward_remote = 1;
 		page.dirty = 1;
 	}
+
+	/* The ends' rows under the kind. */
 	y += PAGE_ROW;
 
 	/* Where it listens, and where it goes with Add. */
-	y = page_field_row(y, card.x, card.width, "Listen", PAGE_ID_FORWARD_LISTEN, &page.forward_listen, page.forward_remote ? "8080, or 0" : "8080, or 127.0.0.1:8080");
-	pressed = page_field_button(y, card.x, card.width, "Destination", PAGE_ID_FORWARD_TO, &page.forward_to, page.forward_remote ? "localhost:3000" : "db.internal:5432", PAGE_ID_FORWARD_ADD, "Add");
+	y = page_field_row(y, card.x, card.width, "Listen", PAGE_ID_FORWARD_LISTEN, &page.forward_listen, listen_hint);
+	pressed = page_field_button(y, card.x, card.width, "Destination", PAGE_ID_FORWARD_TO, &page.forward_to, to_hint, PAGE_ID_FORWARD_ADD, "Add");
 	if (pressed)
 		page_hosts_later(PAGE_HOSTS_ADD_FORWARD, 0U);
 	y += PAGE_ROW;
@@ -1530,6 +1556,8 @@ page_hosts_actions(
 		if (pressed)
 			page_hosts_later(PAGE_HOSTS_REMOVE_ASK, 0U);
 	}
+
+	/* Under the buttons. */
 	y = top + control.height + 8;
 
 	/* The removal asked: Remove or Keep. */
@@ -1683,6 +1711,8 @@ page_hosts_read(void)
 		} else {
 			(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
 		}
+
+		/* Told, and nothing to edit. */
 		page_say(&page.hosts_message, 1, text);
 		size = 0U;
 	}
@@ -1712,6 +1742,8 @@ page_hosts_read(void)
 		memcpy(page.hosts_original, bytes, size);
 		memcpy(copy, bytes, size);
 	}
+
+	/* Both end as C strings; the bytes read go. */
 	page.hosts_original[size] = '\0';
 	copy[size] = '\0';
 	page.hosts_original_size = size;
@@ -1907,6 +1939,8 @@ page_hosts_apply(void)
 			page_say(&page.hosts_message, 1, "There is no memory to change the text.");
 			return error;
 		}
+
+		/* The field holds what the text has now. */
 		(void)snprintf(page.host_filled[index], sizeof(page.host_filled[index]), "%s", field);
 		changed++;
 	}
@@ -1979,6 +2013,8 @@ page_hosts_add_host(void)
 		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
 		return;
 	}
+
+	/* The new block shown, its address next to be typed. */
 	page.hosts_block = block;
 	page_hosts_fill();
 	kl_field_set(&page.host_new, "");
@@ -2028,6 +2064,8 @@ page_hosts_remove_host(void)
 			break;
 		}
 	}
+
+	/* Else the first listed; its form, and the word. */
 	if (page.hosts_block == TERMINAL_HOSTS_NONE)
 		page.hosts_block = page_hosts_first();
 	page_hosts_fill();
@@ -2067,6 +2105,8 @@ page_hosts_add_identity(void)
 		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
 		return;
 	}
+
+	/* The field emptied for the next. */
 	kl_field_set(&page.identity_new, "");
 	page_say(&page.hosts_message, 0, "The identity file was added. Save writes the file.");
 }
@@ -2107,6 +2147,8 @@ page_hosts_add_forward(void)
 		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
 		return;
 	}
+
+	/* The fields emptied for the next. */
 	kl_field_set(&page.forward_listen, "");
 	kl_field_set(&page.forward_to, "");
 	(void)snprintf(text, sizeof(text), "%s %s was added. Save writes the file.", keyword, written);
@@ -2137,6 +2179,8 @@ page_hosts_remove_line(
 		page_say(&page.hosts_message, 1, "There is no memory to change the text.");
 		return;
 	}
+
+	/* Succeeded: the word. */
 	(void)snprintf(text, sizeof(text), "Line %u was taken out. Save writes the file.", number);
 	page_say(&page.hosts_message, 0, text);
 }
@@ -2190,11 +2234,15 @@ page_hosts_save(void)
 		now_size = 0U;
 		error = 0;
 	}
+
+	/* A file that cannot be read is not written over. */
 	if (error != 0 && error != EFBIG) {
 		(void)snprintf(text, sizeof(text), "%s could not be read (%s).", page.program->config_shown, strerror(error));
 		page_say(&page.hosts_message, 1, text);
 		return;
 	}
+
+	/* The same bytes as read (a file grown too large is not). */
 	same = 0;
 	if (error == 0 && now_size == page.hosts_original_size) {
 		differs = 0;
@@ -2203,6 +2251,8 @@ page_hosts_save(void)
 		if (differs == 0)
 			same = 1;
 	}
+
+	/* A file changed outside is not written over. */
 	free(now);
 	if (!same) {
 		page_say(&page.hosts_message, 1, "The file was changed outside since it was read. Revert to read it again.");
@@ -2378,6 +2428,8 @@ page_hosts_title(
 	char user[PAGE_HOST_TEXT];
 	char address[PAGE_HOST_TEXT];
 	char port[16];
+	const char *at;
+	const char *colon;
 	unsigned line;
 
 	/* The part before any Host. */
@@ -2408,14 +2460,25 @@ page_hosts_title(
 		return;
 	}
 
+	/* The words between the parts that are there. */
+	at = "";
+	if (user[0] != '\0')
+		at = "@";
+	colon = "";
+	if (port[0] != '\0')
+		colon = ":";
+
 	/* Without an address: the user and the port as words. */
 	if (address[0] == '\0') {
-		(void)snprintf(text, size, "%s   %s%s%s", names, user, port[0] != '\0' ? "  port " : "", port);
+		colon = "";
+		if (port[0] != '\0')
+			colon = "  port ";
+		(void)snprintf(text, size, "%s   %s%s%s", names, user, colon, port);
 		return;
 	}
 
 	/* The names and user@address:port, each part that is there. */
-	(void)snprintf(text, size, "%s   %s%s%s%s%s", names, user, user[0] != '\0' ? "@" : "", address, port[0] != '\0' ? ":" : "", port);
+	(void)snprintf(text, size, "%s   %s%s%s%s%s", names, user, at, address, colon, port);
 }
 
 /* Writes where a line is: its number and its block ("line 3 (Host *)"). */
@@ -3790,6 +3853,8 @@ page_key(
 		page_hosts_later(PAGE_HOSTS_SAVE, 0U);
 		return 1;
 	}
+
+	/* R reverts. */
 	if (page.pane == TERMINAL_PANE_HOSTS && event->code == PAGE_KEY_R) {
 		page_hosts_later(PAGE_HOSTS_REVERT, 0U);
 		return 1;

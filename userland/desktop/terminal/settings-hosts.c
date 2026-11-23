@@ -389,7 +389,10 @@ terminal_hosts_match(
 	size_t star;
 	size_t marked;
 	size_t place;
+	char left;
+	char right;
 	int starred;
+	int same;
 
 	/* The pattern and the name side by side, back to the last '*' on a mismatch. */
 	at = 0U;
@@ -411,11 +414,17 @@ terminal_hosts_match(
 			continue;
 		}
 
-		/* A '?' or the same character goes on with both. */
-		if (at < length &&
-		    name[place] != '\0' &&
-		    (pattern[at] == '?' ||
-		     hosts_lower(pattern[at]) == hosts_lower(name[place]))) {
+		/* A '?' or the same character (a capital as its small letter) goes on with both. */
+		same = 0;
+		if (at < length && name[place] != '\0') {
+			left = hosts_lower(pattern[at]);
+			right = hosts_lower(name[place]);
+			if (pattern[at] == '?' || left == right)
+				same = 1;
+		}
+
+		/* Both go on to their next character. */
+		if (same) {
 			at++;
 			place++;
 			continue;
@@ -839,11 +848,15 @@ terminal_hosts_set(
 				free(spans);
 				return ENOMEM;
 			}
+
+			/* The blank, then the value. */
 			spaced[0] = ' ';
 			memcpy(spaced + 1, value, length + 1U);
 			spans[0].insert = spaced;
 			spans[0].insert_size = length + 1U;
 		}
+
+		/* One change. */
 		count = 1U;
 	}
 
@@ -886,6 +899,7 @@ terminal_hosts_add(
 	struct hosts_span span;
 	char indent[HOSTS_INDENT_MAX];
 	char line_break[HOSTS_BREAK_MAX];
+	const char *before_break;
 	char *added;
 	size_t length;
 	unsigned anchor;
@@ -912,6 +926,8 @@ terminal_hosts_add(
 	} else if (hosts->blocks[block].first < hosts->line_count) {
 		span.from = hosts->lines[hosts->blocks[block].first].start;
 	}
+
+	/* An insertion: nothing of the text is covered. */
 	span.to = span.from;
 
 	/* The line. */
@@ -919,11 +935,16 @@ terminal_hosts_add(
 	added = malloc(length);
 	if (added == NULL)
 		return ENOMEM;
-	made = snprintf(added, length, "%s%s%s %s%s", lacks_break ? line_break : "", indent, keyword, value, line_break);
+	before_break = "";
+	if (lacks_break)
+		before_break = line_break;
+	made = snprintf(added, length, "%s%s%s %s%s", before_break, indent, keyword, value, line_break);
 	if (made < 0 || (size_t)made >= length) {
 		free(added);
 		return ENOMEM;
 	}
+
+	/* The line as the change. */
 	span.insert = added;
 	span.insert_size = (size_t)made;
 
@@ -1052,6 +1073,8 @@ terminal_hosts_add_host(
 		free(added);
 		return ENOMEM;
 	}
+
+	/* What it inserts. */
 	span.insert = added;
 	span.insert_size = (size_t)made;
 
@@ -1156,6 +1179,8 @@ terminal_hosts_new_problem(
 		(void)snprintf(report, capacity, "there is no memory to check the file");
 		return 1;
 	}
+
+	/* The text's bytes in it. */
 	memcpy(copy, text, size);
 	copy[size] = '\0';
 
@@ -1183,6 +1208,8 @@ terminal_hosts_new_problem(
 				free(copy);
 				return 1;
 			}
+
+			/* The text before's report beside this one. */
 			error = check(data, before, before_size, earlier, capacity);
 			same = strcmp(earlier, report);
 			free(earlier);
@@ -1200,11 +1227,15 @@ terminal_hosts_new_problem(
 			free(copy);
 			return 1;
 		}
+
+		/* A line the text does not have is told as new. */
 		if (number == 0U || number > copy_hosts.line_count) {
 			terminal_hosts_release(&copy_hosts);
 			free(copy);
 			return 1;
 		}
+
+		/* The problem's line. */
 		line = &copy_hosts.lines[number - 1U];
 
 		/* A line the change made is a new problem. */
@@ -1252,6 +1283,8 @@ hosts_line_read(
 		end = (size_t)(found - text);
 		line->next = end + 1U;
 	}
+
+	/* A CR before the LF is the break's. */
 	if (end > start && text[end - 1U] == '\r')
 		end--;
 	line->end = end;
@@ -1268,6 +1301,8 @@ hosts_line_read(
 		line->kind = TERMINAL_HOSTS_LINE_EMPTY;
 		return;
 	}
+
+	/* A comment. */
 	if (text[at] == '#') {
 		line->kind = TERMINAL_HOSTS_LINE_COMMENT;
 		return;
@@ -1287,6 +1322,8 @@ hosts_line_read(
 			break;
 		at++;
 	}
+
+	/* Where the keyword ends. */
 	line->keyword_end = at;
 
 	/* The separator: blanks, at most one '=', blanks. */
@@ -1315,6 +1352,8 @@ hosts_line_read(
 				break;
 			at--;
 		}
+
+		/* The command ends there. */
 		line->value_end = at;
 		return;
 	}
@@ -1638,10 +1677,18 @@ hosts_endpoint(
 
 	/* Something, as a bare word. */
 	length = strlen(text);
-	if (length == 0U) {
-		*why = need_host ? "the destination is missing" : "the listening port is missing";
+	if (length == 0U && need_host) {
+		*why = "the destination is missing";
 		return 1;
 	}
+
+	/* Nor where it listens. */
+	if (length == 0U) {
+		*why = "the listening port is missing";
+		return 1;
+	}
+
+	/* A bare word. */
 	bad = hosts_word_bad(text, length);
 	blank = strchr(text, ' ');
 	if (bad || blank != NULL || text[0] == '#' || text[0] == '=') {
@@ -1681,10 +1728,14 @@ hosts_endpoint(
 		*why = "the address before the ':' is missing";
 		return 1;
 	}
+
+	/* An address in brackets closes them before the port. */
 	if (colon != NULL && text[0] == '[' && text[host - 1U] != ']') {
 		*why = "an IPv6 address is written in brackets";
 		return 1;
 	}
+
+	/* An address with a ':' (IPv6) must be in brackets. */
 	inner = NULL;
 	if (colon != NULL && text[0] != '[')
 		inner = memchr(text, ':', host);
@@ -1764,6 +1815,8 @@ hosts_break(
 				text[1] = '\n';
 				text[2] = '\0';
 			}
+
+			/* The line's own. */
 			return;
 		}
 	}
@@ -1778,6 +1831,8 @@ hosts_break(
 			text[1] = '\n';
 			text[2] = '\0';
 		}
+
+		/* The file's first. */
 		return;
 	}
 }
@@ -1807,6 +1862,8 @@ hosts_indent(
 			break;
 		}
 	}
+
+	/* A Host's block without one: the first keyword's line of any Host block. */
 	if (!found && hosts->blocks[block].kind == TERMINAL_HOSTS_BLOCK_HOST) {
 		for (index = 0U; index < hosts->line_count; index++) {
 			read = &hosts->lines[index];
@@ -1930,6 +1987,8 @@ hosts_line_was(
 			end = (size_t)(found - before);
 			next = end + 1U;
 		}
+
+		/* A CR before the LF is the break's. */
 		if (end > start && before[end - 1U] == '\r')
 			end--;
 
@@ -1939,6 +1998,8 @@ hosts_line_was(
 			if (differs == 0)
 				return 1;
 		}
+
+		/* The next line. */
 		start = next;
 	}
 
