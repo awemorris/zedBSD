@@ -991,15 +991,18 @@ kwl_heads_rearrange(
 		count++;
 	}
 
-	/* The places again, written back. */
+	/* The places again, written back and logged. */
 	moved = kwl_displays_rearrange(rects, count, changed);
 	compose->output_x = rects[0].x;
 	compose->output_y = rects[0].y;
+	printf("KWL DISPLAYS place slot=0 x=%ld y=%ld width=%u height=%u\n", (long)rects[0].x, (long)rects[0].y, rects[0].width, rects[0].height);
 	for (index = 1U; index < count; index++) {
 		head = &compose->heads[slots[index] - 1U];
 		head->x = rects[index].x;
 		head->y = rects[index].y;
 		head->dirty = 1U;
+		printf("KWL DISPLAYS place slot=%u x=%ld y=%ld width=%u height=%u\n", slots[index], (long)rects[index].x, (long)rects[index].y,
+		       rects[index].width, rects[index].height);
 	}
 
 	/* Each head's window: to the same share of the changed head, or along with its head. */
@@ -1027,6 +1030,7 @@ kwl_heads_rearrange(
 			object->y += dy;
 			object->restore_x += dx;
 			object->restore_y += dy;
+			printf("KWL WINDOW follow surface=%u output=%u x=%d y=%d\n", object->id, at, object->x, object->y);
 		}
 	}
 
