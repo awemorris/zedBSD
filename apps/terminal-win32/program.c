@@ -83,6 +83,7 @@ mikuterm_program_find(
 	const wchar_t *folder;
 	const wchar_t *end;
 	const wchar_t *dot;
+	const wchar_t *after;
 	const wchar_t *separator;
 	size_t length;
 	size_t folder_length;
@@ -102,8 +103,10 @@ mikuterm_program_find(
 	separator = wcspbrk(wide, L"\\/:");
 	dot = wcsrchr(wide, L'.');
 	if (dot != NULL) {
+		/* A dot before a separator is a folder's, not the name's. */
 		extension = 1;
-		if (wcspbrk(dot, L"\\/") != NULL)
+		after = wcspbrk(dot, L"\\/");
+		if (after != NULL)
 			extension = 0;
 	}
 

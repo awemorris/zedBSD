@@ -106,6 +106,12 @@
 #define THREAD_GH_NAME			"gh"
 #define THREAD_GH_INSTALLED		L"\\GitHub CLI\\gh.exe"
 
+/*
+ * What the host key question shows for the address of a host reached
+ * through a ProxyCommand, which has none (OpenSSH's words).
+ */
+#define THREAD_PROXY_ADDRESS		"<no hostip for proxy command>"
+
 /* The keyword the ProxyCommand made for a codespace is given with, as a setting of its own. */
 #define THREAD_PROXY_KEYWORD		"ProxyCommand "
 
@@ -2461,10 +2467,14 @@ thread_host_ask(
 	int other_types;
 	int error;
 
-	/* The host as known_hosts names it, and the address reached as OpenSSH shows it. */
-	error = mikuterm_address_name(&link->address, link->config.port, address, sizeof(address));
-	if (error != 0)
-		(void)snprintf(address, sizeof(address), "%s", link->known_name);
+	/* The host as known_hosts names it, and the address reached as OpenSSH shows it (none through a ProxyCommand). */
+	if (link->proxy != NULL) {
+		(void)snprintf(address, sizeof(address), "%s", THREAD_PROXY_ADDRESS);
+	} else {
+		error = mikuterm_address_name(&link->address, link->config.port, address, sizeof(address));
+		if (error != 0)
+			(void)snprintf(address, sizeof(address), "%s", link->known_name);
+	}
 
 	/* Whether the host is known only by keys of other types. */
 	other_types = 0;
