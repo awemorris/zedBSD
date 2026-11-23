@@ -41,6 +41,9 @@
 /* How far (doubled pixels) a point on a ray or a chord is moved to see which side the inside is on. */
 #define SHAPE_NUDGE		1e-3
 
+/* How near half the width a distance is taken to be on the edge of a wide arc. */
+#define SHAPE_ON_EDGE		1e-9
+
 /* The largest doubled radius an ellipse is tested exactly with 64-bit integers for. */
 #define SHAPE_EXACT_SIZE	8192
 
@@ -108,7 +111,10 @@ static void shape_dashed_path(struct x11_spans *even, struct x11_spans *odd, str
 static void shape_ellipse_of(const struct x11_arc *arc, struct shape_ellipse *ellipse);
 static int shape_inside(long long x, long long y, long long width, long long height);
 static int shape_ellipse_row(long long centre_x, long long centre_y, long long width, long long height, int row, int *left, int *right);
-static int shape_kept(const struct shape_ellipse *ellipse, long long x, long long y, int pie);
+static int shape_kept(const struct shape_ellipse *ellipse, double point_x, double point_y, int pie);
+static void shape_wide_ellipse(struct x11_spans *list, const struct shape_ellipse *ellipse, const struct x11_arc *arc, unsigned width);
+static double shape_foot(double x, double y, double radius_x, double radius_y, double *foot_x, double *foot_y);
+static double shape_foot_root(double ratio, double along, double across, double inside);
 static double shape_side(double from_x, double from_y, double to_x, double to_y, double x, double y);
 static double shape_turn(const struct shape_ellipse *ellipse, double end_x, double end_y, double x, double y);
 static int shape_on_line(double cross, const struct shape_ellipse *ellipse);
@@ -709,9 +715,11 @@ x11_shape_arc_fill(
 /*
  * Adds an arc drawn as a line: a thin one (width 0) is the pixels nearest
  * the ellipse, one in each column where it is flatter than a diagonal and
- * one in each row where it is steeper; a wide one is the pixels between
- * the ellipses half the width outside and inside it, inside the angles
- * of its ends.  The caller merges the spans.
+ * one in each row where it is steeper; a wide one is the pixels no
+ * further than half the width from the ellipse whose nearest point on it
+ * is inside the angles of its ends (for a circle, the ring between the
+ * circles half the width outside and inside it).  The caller merges the
+ * spans.
  */
 void
 x11_shape_arc_line(
@@ -760,7 +768,13 @@ x11_shape_arc_line(
 	    arc->y - (int)width >= list->bounds.y1)
 		return;
 
-	/* A wide arc: the ring between the outer and inner ellipses, row by row. */
+	/* A wide arc of an ellipse that is not a circle: the pixels near enough to it. */
+	if (width > 0U && arc->width != arc->height) {
+		shape_wide_ellipse(list, &ellipse, arc, width);
+		return;
+	}
+
+	/* A wide arc of a circle: the ring between the outer and inner circles, row by row. */
 	if (width > 0U) {
 		outer_width = ellipse.width + (long long)width;
 		outer_height = ellipse.height + (long long)width;
@@ -1469,12 +1483,10 @@ shape_ellipse_row(
 static int
 shape_kept(
 	const struct shape_ellipse *ellipse,
-	long long x,
-	long long y,
+	double point_x,
+	double point_y,
 	int pie)
 {
-	double point_x;
-	double point_y;
 	double side;
 	double middle_side;
 	double after_start;
@@ -1485,8 +1497,6 @@ shape_kept(
 		return 1;
 
 	/* A chord: the same side of the line between the ends as the middle. */
-	point_x = (double)x;
-	point_y = (double)y;
 	if (!pie) {
 		middle_side = shape_side(ellipse->start_x, ellipse->start_y, ellipse->end_x, ellipse->end_y, ellipse->middle_x, ellipse->middle_y);
 		side = shape_side(ellipse->start_x, ellipse->start_y, ellipse->end_x, ellipse->end_y, point_x, point_y);
@@ -1624,7 +1634,7 @@ shape_add_kept(
 	for (column = left; column <= right; column++) {
 		kept = 0;
 		if (column < right)
-			kept = shape_kept(ellipse, 2 * (long long)column - ellipse->centre_x, offset_y, pie);
+			kept = shape_kept(ellipse, (double)(2 * (long long)column - ellipse->centre_x), (double)offset_y, pie);
 		if (kept) {
 			if (start < 0)
 				start = column;
@@ -1647,10 +1657,234 @@ shape_arc_point(
 	int kept;
 
 	/* Inside the angles of its ends. */
-	kept = shape_kept(ellipse, 2 * (long long)x - ellipse->centre_x, 2 * (long long)y - ellipse->centre_y, 1);
+	kept = shape_kept(ellipse, (double)(2 * (long long)x - ellipse->centre_x), (double)(2 * (long long)y - ellipse->centre_y), 1);
 	if (!kept)
 		return;
 
 	/* The pixel. */
 	x11_spans_add(list, y, x, x + 1);
+}
+
+/*
+ * Adds a wide arc of an ellipse that is not a circle, pixel by pixel in
+ * the box around it: a pixel is drawn when its distance from the ellipse
+ * is under half the width and its nearest point on the ellipse is inside
+ * the angles of the arc's ends (the ends are cut square to the ellipse).
+ * A pixel at just half the width is drawn when the line is immediately to
+ * its right, or below it.
+ */
+static void
+shape_wide_ellipse(
+	struct x11_spans *list,
+	const struct shape_ellipse *ellipse,
+	const struct x11_arc *arc,
+	unsigned width)
+{
+	double centre_x;
+	double centre_y;
+	double radius_x;
+	double radius_y;
+	double half;
+	double distance;
+	double foot_x;
+	double foot_y;
+	int first_row;
+	int last_row;
+	int first_column;
+	int last_column;
+	int row;
+	int column;
+	int start;
+	int drawn;
+
+	/* The ellipse in pixels, and the box half the width around it, inside the list's box. */
+	centre_x = (double)ellipse->centre_x / 2.0;
+	centre_y = (double)ellipse->centre_y / 2.0;
+	radius_x = (double)arc->width / 2.0;
+	radius_y = (double)arc->height / 2.0;
+	half = (double)width / 2.0;
+	first_row = shape_ceil(centre_y - radius_y - half) - 1;
+	last_row = shape_ceil(centre_y + radius_y + half) + 1;
+	first_column = shape_ceil(centre_x - radius_x - half) - 1;
+	last_column = shape_ceil(centre_x + radius_x + half) + 1;
+	if (first_row < list->bounds.y0)
+		first_row = list->bounds.y0;
+	if (last_row > list->bounds.y1)
+		last_row = list->bounds.y1;
+	if (first_column < list->bounds.x0)
+		first_column = list->bounds.x0;
+	if (last_column > list->bounds.x1)
+		last_column = list->bounds.x1;
+
+	/* Each row's runs of pixels near enough. */
+	for (row = first_row; row < last_row; row++) {
+		start = -1;
+		for (column = first_column; column <= last_column; column++) {
+			drawn = 0;
+			if (column < last_column) {
+				distance = shape_foot((double)column - centre_x, (double)row - centre_y, radius_x, radius_y, &foot_x, &foot_y);
+				if (fabs(distance - half) <= SHAPE_ON_EDGE)
+					distance = shape_foot((double)column - centre_x + SHAPE_NUDGE, (double)row - centre_y + SHAPE_NUDGE * SHAPE_NUDGE, radius_x, radius_y, &foot_x, &foot_y);
+				if (distance < half)
+					drawn = shape_kept(ellipse, 2.0 * foot_x, 2.0 * foot_y, 1);
+			}
+			if (drawn) {
+				if (start < 0)
+					start = column;
+				continue;
+			}
+			if (start >= 0)
+				x11_spans_add(list, row, start, column);
+			start = -1;
+		}
+	}
+}
+
+/*
+ * Returns the distance from a point (its offset from an ellipse's centre)
+ * to the ellipse, and gives the nearest point on it.
+ *
+ * Procedure referenced: David Eberly, "Distance from a Point to an
+ * Ellipse, an Ellipsoid, or a Hyperellipsoid" (Geometric Tools, 2013):
+ * in the first quadrant, with the longer axis first, the nearest point is
+ * found by bisection on the root of the function of the Lagrange
+ * multiplier; a point on the shorter axis is handled apart.
+ */
+static double
+shape_foot(
+	double x,
+	double y,
+	double radius_x,
+	double radius_y,
+	double *foot_x,
+	double *foot_y)
+{
+	double longer;
+	double shorter;
+	double along;
+	double across;
+	double near_along;
+	double near_across;
+	double ratio;
+	double root;
+	double inside;
+	double numerator;
+	double denominator;
+	double share;
+	double distance;
+	int swapped;
+
+	/* The first quadrant, the longer axis along x. */
+	swapped = 0;
+	longer = radius_x;
+	shorter = radius_y;
+	along = fabs(x);
+	across = fabs(y);
+	if (radius_y > radius_x) {
+		swapped = 1;
+		longer = radius_y;
+		shorter = radius_x;
+		along = fabs(y);
+		across = fabs(x);
+	}
+
+	/* Off the longer axis: the root of the multiplier's function, unless the point is on the ellipse. */
+	if (across > 0.0) {
+		if (along > 0.0) {
+			inside = (along / longer) * (along / longer) + (across / shorter) * (across / shorter) - 1.0;
+			if (inside != 0.0) {
+				ratio = (longer / shorter) * (longer / shorter);
+				root = shape_foot_root(ratio, along / longer, across / shorter, inside);
+				near_along = ratio * along / (root + ratio);
+				near_across = across / (root + 1.0);
+			} else {
+				near_along = along;
+				near_across = across;
+			}
+		} else {
+			near_along = 0.0;
+			near_across = shorter;
+		}
+	} else {
+		/* On the longer axis: inside the evolute's reach the nearest point is off the axis. */
+		numerator = longer * along;
+		denominator = longer * longer - shorter * shorter;
+		if (numerator < denominator) {
+			share = numerator / denominator;
+			near_along = longer * share;
+			near_across = shorter * sqrt(1.0 - share * share);
+		} else {
+			near_along = longer;
+			near_across = 0.0;
+		}
+	}
+	distance = sqrt((near_along - along) * (near_along - along) + (near_across - across) * (near_across - across));
+
+	/* The nearest point back in the point's quadrant and axes. */
+	if (x < 0.0 && !swapped)
+		near_along = -near_along;
+	if (y < 0.0 && !swapped)
+		near_across = -near_across;
+	if (y < 0.0 && swapped)
+		near_along = -near_along;
+	if (x < 0.0 && swapped)
+		near_across = -near_across;
+	*foot_x = near_along;
+	*foot_y = near_across;
+	if (swapped) {
+		*foot_x = near_across;
+		*foot_y = near_along;
+	}
+
+	/* The distance. */
+	return distance;
+}
+
+/*
+ * Finds by bisection the root of the multiplier's function for a point
+ * scaled by the ellipse's axes (along, across), the axes' squared ratio,
+ * and where the point is (inside: below zero inside the ellipse).
+ */
+static double
+shape_foot_root(
+	double ratio,
+	double along,
+	double across,
+	double inside)
+{
+	double scaled;
+	double low;
+	double high;
+	double middle;
+	double first;
+	double second;
+	int step;
+
+	/* The root is between these. */
+	scaled = ratio * along;
+	low = across - 1.0;
+	high = 0.0;
+	if (inside > 0.0)
+		high = sqrt(scaled * scaled + across * across) - 1.0;
+
+	/* Halved until the doubles cannot be halved further. */
+	middle = low;
+	for (step = 0; step < 200; step++) {
+		middle = (low + high) / 2.0;
+		if (middle == low || middle == high)
+			break;
+		first = scaled / (middle + ratio);
+		second = across / (middle + 1.0);
+		inside = first * first + second * second - 1.0;
+		if (inside > 0.0) {
+			low = middle;
+		} else if (inside < 0.0) {
+			high = middle;
+		} else {
+			break;
+		}
+	}
+
+	/* The root. */
+	return middle;
 }
