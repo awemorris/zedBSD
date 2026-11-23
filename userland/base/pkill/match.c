@@ -276,9 +276,15 @@ pkill_run(
 	for (index = 0; index < count; index++) {
 		if (excluded[index])
 			continue;
+
+		/* Tests the process against the criteria. */
 		matched = pkill_matches(&request, &processes[index]);
+
+		/* -v selects the processes that do not meet them. */
 		if (request.inverse)
 			matched = !matched;
+
+		/* Records the choice. */
 		selected[index] = (unsigned char)matched;
 	}
 
