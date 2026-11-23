@@ -1187,6 +1187,8 @@ terminal_hosts_new_problem(
 			same = strcmp(earlier, report);
 			free(earlier);
 			free(copy);
+
+			/* The same problem before is not new; another is. */
 			if (error == 0 && same == 0)
 				return 0;
 			return 1;
