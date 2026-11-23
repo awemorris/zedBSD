@@ -1,0 +1,35 @@
+id: io.noctvm.mikuterm
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: mikuterm
+
+# A Wayland program (libkeiland has no X11 backend) that draws in shared
+# memory (no GPU device) and connects to SSH servers (the network).  Its
+# settings, hosts and keys are in its own XDG configuration directory
+# (~/.var/app/io.noctvm.mikuterm/config/mikuterm), so no host directory
+# is shared.
+finish-args:
+  - --socket=wayland
+  - --share=network
+
+modules:
+  - name: mikuterm
+    buildsystem: cmake-ninja
+    subdir: apps/terminal-linux
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DMIKUTERM_VULKAN_INCLUDE=/usr/include
+      - -DMIKUTERM_DISTFILES=/run/build/mikuterm/distfiles
+    sources:
+      - type: dir
+        path: ../../../..
+        skip:
+          - .git
+          - build
+          - plan
+      - type: file
+        url: https://github.com/googlefonts/noto-emoji/raw/v2.047/fonts/NotoColorEmoji.ttf
+        sha256: 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6b5a1c5200591817
+        dest: distfiles
+        dest-filename: NotoColorEmoji-2.047.ttf
