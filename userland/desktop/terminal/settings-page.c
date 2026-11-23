@@ -158,8 +158,11 @@
 
 /*
  * The evdev codes of the keys the page answers itself: C, V and X with
- * Control, and Up, Down, Page Up and Page Down with Control (the panes).
+ * Control, R and S with Control in the Hosts pane (Revert and Save), and
+ * Up, Down, Page Up and Page Down with Control (the panes).
  */
+#define PAGE_KEY_R		19U
+#define PAGE_KEY_S		31U
 #define PAGE_KEY_X		45U
 #define PAGE_KEY_C		46U
 #define PAGE_KEY_V		47U
@@ -2044,6 +2047,11 @@ page_hosts_add_identity(void)
 		return;
 	}
 
+	/* The form's changes first, so the lines follow in the order they were made. */
+	error = page_hosts_apply();
+	if (error != 0)
+		return;
+
 	/* The line in the text. */
 	error = terminal_hosts_add(&page.hosts, page.hosts_block, "IdentityFile", written, &out, &size);
 	if (error == 0)
@@ -2075,6 +2083,11 @@ page_hosts_add_forward(void)
 		page_say(&page.hosts_message, 1, text);
 		return;
 	}
+
+	/* The form's changes first, so the lines follow in the order they were made. */
+	error = page_hosts_apply();
+	if (error != 0)
+		return;
 
 	/* The line in the text. */
 	keyword = "LocalForward";
@@ -3739,8 +3752,9 @@ page_commit(
 
 /*
  * Answers Control with C, X or V as the run's Copy and Paste (a cut sets
- * the selection aside for the Copy, then takes it out); reports 1 when it
- * took the key.
+ * the selection aside for the Copy, then takes it out), and Control with S
+ * or R in the Hosts pane as Save or Revert; reports 1 when it took the
+ * key.
  */
 static int
 page_key(
@@ -3753,10 +3767,22 @@ page_key(
 	unsigned held;
 	int focused;
 
-	/* Only a press with Control alone, of C, X or V. */
+	/* Only a press with Control alone. */
 	held = event->modifiers & (KL_MOD_CTRL | KL_MOD_ALT | KL_MOD_SHIFT | KL_MOD_SUPER);
 	if (!event->pressed || held != KL_MOD_CTRL)
 		return 0;
+
+	/* In the Hosts pane, S saves and R reverts (wherever the keyboard is). */
+	if (page.pane == TERMINAL_PANE_HOSTS && event->code == PAGE_KEY_S) {
+		page_hosts_later(PAGE_HOSTS_SAVE, 0U);
+		return 1;
+	}
+	if (page.pane == TERMINAL_PANE_HOSTS && event->code == PAGE_KEY_R) {
+		page_hosts_later(PAGE_HOSTS_REVERT, 0U);
+		return 1;
+	}
+
+	/* Otherwise C, X or V. */
 	if (event->code != PAGE_KEY_C &&
 	    event->code != PAGE_KEY_X &&
 	    event->code != PAGE_KEY_V)
