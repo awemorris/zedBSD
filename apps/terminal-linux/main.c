@@ -21,6 +21,8 @@
 
 #include "userland/desktop/terminal/run.h"
 
+#include <keiland/keiland.h>
+
 #include "mikuterm-version.h"
 
 #include <errno.h>
@@ -35,6 +37,9 @@
 /* The fonts the program brings (share/fonts): the signs' and box drawing's, and the colour emoji's. */
 #define MAIN_COMPANION		"keiland-fallback-mono.ttf"
 #define MAIN_EMOJI		"keiland-emoji.ttf"
+
+/* Mahora Bold, the companion of the fonts libkeiland opens (share/fonts). */
+#define MAIN_BOLD		"keiland-bold.ttf"
 
 /* The fonts the settings' tab draws its words with (share/fonts): the interface's and its fallback. */
 #define MAIN_PAGE_FONT		"keiland.ttf"
@@ -60,6 +65,7 @@ struct main_state {
 	char font[MIKUTERM_PATH_MAX];
 	char fallback[MIKUTERM_PATH_MAX];
 	char companion[MIKUTERM_PATH_MAX];
+	char bold[MIKUTERM_PATH_MAX];
 	char emoji[MIKUTERM_PATH_MAX];
 	char page_font[MIKUTERM_PATH_MAX];
 	char page_fallback[MIKUTERM_PATH_MAX];
@@ -112,11 +118,16 @@ main(
 	if (error == 0)
 		error = mikuterm_font(main_state.companion, sizeof(main_state.companion), MAIN_COMPANION);
 	if (error == 0)
+		error = mikuterm_font(main_state.bold, sizeof(main_state.bold), MAIN_BOLD);
+	if (error == 0)
 		error = mikuterm_font(main_state.emoji, sizeof(main_state.emoji), MAIN_EMOJI);
 	if (error != 0) {
 		fprintf(stderr, "mikuterm: the folder's path is too long for its fonts.\n");
 		return 1;
 	}
+
+	/* Every font libkeiland opens takes its companions from beside the program, wherever it is installed. */
+	kl_text_companions(main_state.bold, main_state.companion);
 
 	/* The tabs' connections. */
 	memset(&connect, 0, sizeof(connect));
