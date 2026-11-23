@@ -31,12 +31,20 @@
 #define APP_BLINK_MS		530U
 #define APP_MESSAGE_MS		2500U
 
-/* How long a click may follow the one before and still count with it, and how far it may be from it. */
+/* How long a click may follow the one before and still count with it, and how far it may be from it (units). */
 #define APP_CLICK_MS		400U
 #define APP_CLICK_DISTANCE	4
 
-/* How far a press in the selection moves before its text is dragged out (pixels, ws189-p003). */
+/* How far a press in the selection moves before its text is dragged out (units, ws189-p003). */
 #define APP_DRAG_DISTANCE	6
+
+/* The room the body's rows keep above the baseline and between them, and the caret's width (units). */
+#define APP_ROW_ABOVE		2
+#define APP_ROW_ROOM		5
+#define APP_CARET_WIDTH		2
+
+/* The least room a row keeps beyond the text's size (units). */
+#define APP_ROW_LEAST		2
 
 /* How often the view moves while it glides or a selection is dragged past the edge, in milliseconds. */
 #define APP_FRAME_MS		16
@@ -116,6 +124,8 @@ te_app_init(
 	app->ui = ui;
 	app->width = width;
 	app->height = height;
+	app->scale = KL_SCALE_BASE;
+	app->size = TE_PIXELS_DEFAULT;
 	app->pixels = TE_PIXELS_DEFAULT;
 	app->line_numbers = 1;
 	app->wrap = 1;
@@ -271,6 +281,70 @@ te_app_resize(
 	app->height = height;
 	te_app_relayout(app);
 	app->dirty = 1;
+}
+
+/*
+ * Takes the window's scale (96ths, 0 for KL_SCALE_BASE): the text is
+ * measured at the size it is drawn at now, and the view keeps the row and
+ * the column it shows at its top left.
+ */
+void
+te_app_set_scale(
+	struct te_app *app,
+	unsigned scale)
+{
+	double first_row;
+	double first_column;
+
+	/* 0 is 100 %. */
+	if (scale == 0U)
+		scale = KL_SCALE_BASE;
+
+	/* The same scale changes nothing. */
+	if (scale == app->scale)
+		return;
+
+	/* The row and the column at the view's top left, at the old size. */
+	first_row = app->scroll_y / (double)app->row_height;
+	first_column = app->scroll_x / (double)app->cell;
+
+	/* The text's size in the new pixels, and its cell and rows. */
+	app->scale = scale;
+	app->pixels = (unsigned)te_app_px(app, (int)app->size);
+	app_measure(app);
+
+	/* The same place in the view, at the new size; the rows are laid out for it. */
+	app->scroll_y = first_row * (double)app->row_height;
+	app->scroll_x = first_column * (double)app->cell;
+	te_app_relayout(app);
+	te_log("SCALE scale=%u pixels=%u cell=%d row=%d", app->scale, app->pixels, app->cell, app->row_height);
+}
+
+/*
+ * Reports a length in units (pixels at 100 %) in the window's pixels: the
+ * units times the scale, rounded to the nearest pixel (half away from
+ * zero), so that 100 % gives the units themselves.
+ */
+int
+te_app_px(
+	const struct te_app *app,
+	int units)
+{
+	long scaled;
+
+	/* At 100 % the units are the pixels. */
+	if (app->scale == KL_SCALE_BASE)
+		return units;
+
+	/* A negative length is the positive one turned round. */
+	if (units < 0) {
+		scaled = ((long)-units * (long)app->scale + (long)(KL_SCALE_BASE / 2U)) / (long)KL_SCALE_BASE;
+		return (int)-scaled;
+	}
+
+	/* Succeeded: the pixels nearest to the units at the scale. */
+	scaled = ((long)units * (long)app->scale + (long)(KL_SCALE_BASE / 2U)) / (long)KL_SCALE_BASE;
+	return (int)scaled;
 }
 
 /*
@@ -649,10 +723,10 @@ te_app_text_rect(
 	/* Inside the card, past the line numbers. */
 	te_app_card(app, &card);
 	gutter = app_gutter(app);
-	rect->x = card.x + TE_TEXT_SIDE + gutter;
-	rect->y = card.y + TE_TEXT_TOP;
-	rect->width = card.x + card.width - TE_TEXT_SIDE - rect->x;
-	rect->height = card.y + card.height - TE_TEXT_TOP - rect->y;
+	rect->x = card.x + te_app_px(app, TE_TEXT_SIDE) + gutter;
+	rect->y = card.y + te_app_px(app, TE_TEXT_TOP);
+	rect->width = card.x + card.width - te_app_px(app, TE_TEXT_SIDE) - rect->x;
+	rect->height = card.y + card.height - te_app_px(app, TE_TEXT_TOP) - rect->y;
 
 	/* Never less than a cell and a row. */
 	if (rect->width < app->cell)
@@ -669,11 +743,14 @@ te_app_card(
 	const struct te_app *app,
 	struct te_rect *rect)
 {
+	int inset;
+
 	/* The window, less the inset (none, see TE_CARD_INSET) on every side. */
-	rect->x = TE_CARD_INSET;
-	rect->y = TE_CARD_INSET;
-	rect->width = app->width - 2 * TE_CARD_INSET;
-	rect->height = app->height - 2 * TE_CARD_INSET;
+	inset = te_app_px(app, TE_CARD_INSET);
+	rect->x = inset;
+	rect->y = inset;
+	rect->width = app->width - 2 * inset;
+	rect->height = app->height - 2 * inset;
 }
 
 /*
@@ -957,12 +1034,12 @@ app_measure(
 	struct te_text_line line;
 	int advance;
 
-	/* The font's line at the size, with some room between rows. */
+	/* The font's line at the size, with some room between rows (in the window's pixels). */
 	te_text_metrics(app->body, app->pixels, &line);
-	app->ascent = line.ascent + 2;
-	app->row_height = line.ascent + line.descent + 5;
-	if (app->row_height < (int)app->pixels + 2)
-		app->row_height = (int)app->pixels + 2;
+	app->ascent = line.ascent + te_app_px(app, APP_ROW_ABOVE);
+	app->row_height = line.ascent + line.descent + te_app_px(app, APP_ROW_ROOM);
+	if (app->row_height < (int)app->pixels + te_app_px(app, APP_ROW_LEAST))
+		app->row_height = (int)app->pixels + te_app_px(app, APP_ROW_LEAST);
 
 	/* A cell is the monospaced font's advance (a guess from the size without a font). */
 	advance = te_text_advance(app->body, '0', app->pixels);
@@ -993,7 +1070,7 @@ app_gutter(
 		digits = APP_DIGITS_MIN;
 
 	/* Succeeded: the digits and a margin. */
-	return digits * app->cell + TE_GUTTER_PAD;
+	return digits * app->cell + te_app_px(app, TE_GUTTER_PAD);
 }
 
 /* Reports how many columns the text's width holds. */
@@ -1138,6 +1215,7 @@ app_press(
 	size_t end;
 	int distance_x;
 	int distance_y;
+	int reach;
 	int near;
 	int inside;
 
@@ -1169,11 +1247,12 @@ app_press(
 	if (event->button != TE_BUTTON_LEFT)
 		return;
 
-	/* A click soon after one near it counts with it (up to three). */
+	/* A click soon after one near it (the distance in the window's pixels) counts with it (up to three). */
 	distance_x = abs(event->x - app->click_x);
 	distance_y = abs(event->y - app->click_y);
+	reach = te_app_px(app, APP_CLICK_DISTANCE);
 	near = 0;
-	if (distance_x <= APP_CLICK_DISTANCE && distance_y <= APP_CLICK_DISTANCE)
+	if (distance_x <= reach && distance_y <= reach)
 		near = 1;
 	if (near && app->now - app->click_time <= APP_CLICK_MS && app->click_count < 3)
 		app->click_count++;
@@ -1235,12 +1314,14 @@ app_drag_out(
 	char *text;
 	int distance_x;
 	int distance_y;
+	int reach;
 	int error;
 
-	/* Not far enough yet. */
+	/* Not far enough yet (the distance in the window's pixels). */
 	distance_x = abs(app->pointer_x - app->drag_press_x);
 	distance_y = abs(app->pointer_y - app->drag_press_y);
-	if (distance_x <= APP_DRAG_DISTANCE && distance_y <= APP_DRAG_DISTANCE)
+	reach = te_app_px(app, APP_DRAG_DISTANCE);
+	if (distance_x <= reach && distance_y <= reach)
 		return;
 
 	/* The press is spent, whatever comes of the drag. */
@@ -1523,21 +1604,22 @@ app_size(
 	struct te_app *app,
 	int step)
 {
-	unsigned pixels;
+	unsigned size;
 
-	/* The new size, within its bounds. */
-	pixels = TE_PIXELS_DEFAULT;
+	/* The new size in units, within its bounds. */
+	size = TE_PIXELS_DEFAULT;
 	if (step > 0)
-		pixels = app->pixels + 1U;
+		size = app->size + 1U;
 	if (step < 0)
-		pixels = app->pixels - 1U;
-	if (pixels < TE_PIXELS_MIN)
-		pixels = TE_PIXELS_MIN;
-	if (pixels > TE_PIXELS_MAX)
-		pixels = TE_PIXELS_MAX;
+		size = app->size - 1U;
+	if (size < TE_PIXELS_MIN)
+		size = TE_PIXELS_MIN;
+	if (size > TE_PIXELS_MAX)
+		size = TE_PIXELS_MAX;
 
-	/* The rows at the new size. */
-	app->pixels = pixels;
+	/* The rows at the new size, drawn at the window's scale. */
+	app->size = size;
+	app->pixels = (unsigned)te_app_px(app, (int)size);
 	app_measure(app);
 	te_app_relayout(app);
 	te_edit_reveal(app);
@@ -1976,7 +2058,7 @@ app_view_caret(
 	/* The cursor's bar there, a row tall. */
 	rect->x = (int)column * app->cell;
 	rect->y = (int)row * app->row_height;
-	rect->width = 2;
+	rect->width = te_app_px(app, APP_CARET_WIDTH);
 	rect->height = app->row_height;
 }
 

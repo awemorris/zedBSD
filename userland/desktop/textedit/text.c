@@ -473,6 +473,24 @@ te_utf8_next(
 	return value;
 }
 
+/*
+ * Empties the glyph cache.
+ *
+ * The window's scale changed: the glyphs of the sizes drawn until now are
+ * not drawn again, and those of the new sizes are made as they are needed.
+ */
+void
+te_text_flush(
+	struct te_text *text)
+{
+	/* A text that never opened has no cache. */
+	if (text->cache == NULL)
+		return;
+
+	/* Every glyph goes. */
+	text_clear(text);
+}
+
 /* Reads a font file into memory and opens its face. */
 static int
 text_face_open(
