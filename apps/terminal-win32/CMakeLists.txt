@@ -165,6 +165,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/remote-command.c
 	${MIKUTERM_DIR}/launch.c
 	${MIKUTERM_DIR}/wsl.c
+	${MIKUTERM_DIR}/wsl-record.c
 	${MIKUTERM_DIR}/program.c
 	${MIKUTERM_DIR}/proxy.c
 	${MIKUTERM_DIR}/proxy-command.c

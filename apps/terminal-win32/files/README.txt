@@ -236,6 +236,19 @@ whoami answers with); when neither is known the tab asks "login as:".  The
 host's key is kept in ssh/known_hosts under the name wsl-<name>, as WSL gives
 the distribution another address each time it starts.
 
+The first time you log in to a distribution that has no Host in ssh/config,
+mikuterm adds one to ssh/config (the tab says so):
+
+  Host wsl-Ubuntu-24.04
+      User me
+
+with Port when WslPort is not 22, and IdentityFile when the server took a
+key other than ssh/id_ed25519.  It has no HostName, so the address is still
+found each time.  From then on the distribution is a host of the list too
+(user@wsl-<name>), and you can edit the Host as any other.  mikuterm does
+not put your key into the distribution: add id_ed25519.pub to its
+~/.ssh/authorized_keys as below, and the login asks for no password.
+
 In the distribution (Ubuntu here):
 
   sudo apt install openssh-server
