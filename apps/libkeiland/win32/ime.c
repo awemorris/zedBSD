@@ -223,6 +223,18 @@ kl_window_text_input(
 }
 
 /*
+ * Suppresses automatic soft-keyboard display (no-op on Windows).
+ */
+void
+kl_window_suppress_keyboard(
+	struct kl_window *window,
+	int suppress)
+{
+	(void)window;
+	(void)suppress;
+}
+
+/*
  * Tells where the caret is (the content's pixels), for the input method's
  * windows.
  */

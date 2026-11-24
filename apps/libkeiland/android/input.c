@@ -61,7 +61,7 @@ static int input_shortcut(struct kl_window *window, int32_t keycode, int32_t met
 static int input_is_modifier(uint32_t code);
 static int input_queue_key(struct kl_window *window, uint32_t code, int pressed, unsigned modifiers);
 static void input_queue_touch(struct kl_window *window, unsigned kind, int32_t id, double x, double y);
-static void input_tap(const AInputEvent *event);
+static void input_tap(const struct kl_window *window, const AInputEvent *event);
 static void input_fill(struct kl_app *app, struct kl_window_event *input, unsigned kind, const AInputEvent *event);
 static void input_place(const struct kl_window *window, const AInputEvent *event, size_t index, struct kl_window_event *input);
 static int input_strip(struct kl_window *window, const AInputEvent *event, size_t index, int32_t finger, int phase);
@@ -181,7 +181,7 @@ android_input_motion(
 	if (tool == AMOTION_EVENT_TOOL_TYPE_FINGER || tool == AMOTION_EVENT_TOOL_TYPE_UNKNOWN) {
 		(void)input_touch(app, window, event);
 		if (!input_last_strip)
-			input_tap(event);
+			input_tap(window, event);
 	} else {
 		(void)input_pointer(app, window, event);
 	}
@@ -298,6 +298,7 @@ android_input_debug_touch(
 /* Shows the keyboard when the finger that touched lifts in its place soon (a tap): the user may have put it away. */
 static void
 input_tap(
+	const struct kl_window *window,
 	const AInputEvent *event)
 {
 	int32_t action;
@@ -324,6 +325,8 @@ input_tap(
 	dy = AMotionEvent_getY(event, 0) - input_down_y;
 	distance = sqrt((double)(dx * dx + dy * dy));
 	if (time > (int64_t)INPUT_TAP_MS * 1000000 || distance > INPUT_TAP_PIXELS)
+		return;
+	if (window->keyboard_suppressed)
 		return;
 	(void)keiland_java_show_keyboard(1);
 }

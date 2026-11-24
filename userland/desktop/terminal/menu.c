@@ -67,6 +67,7 @@
 #define MENU_VIEW_LINE		34U
 #define MENU_FULLSCREEN		35U
 #define MENU_AMBIGUOUS_WIDE	36U
+#define MENU_HIDE_X11_KEYBOARD	37U
 #define MENU_SIZE_SMALL		40U
 #define MENU_SIZE_MEDIUM	41U
 #define MENU_SIZE_LARGE		42U
@@ -139,6 +140,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_VIEW_LINE, MENU_VIEW, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_FULLSCREEN, MENU_VIEW, KL_MENU_ITEM_CHECKBOX, "Fullscreen", TERMINAL_ACTION_FULLSCREEN, KL_MENU_ROLE_FULLSCREEN, 0U, MENU_KEY_F11 },
 	{ MENU_AMBIGUOUS_WIDE, MENU_VIEW, KL_MENU_ITEM_CHECKBOX, "Treat Ambiguous-Width Characters as Wide", TERMINAL_ACTION_AMBIGUOUS_WIDE, KL_MENU_ROLE_NONE, 0U, 0U },
+	{ MENU_HIDE_X11_KEYBOARD, MENU_VIEW, KL_MENU_ITEM_CHECKBOX, "Hide keyboard for X11 tabs", TERMINAL_ACTION_HIDE_X11_KEYBOARD, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_SESSION, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Session", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_INTERRUPT, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send Interrupt", TERMINAL_ACTION_INTERRUPT, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_END_OF_FILE, MENU_SESSION, KL_MENU_ITEM_NORMAL, "Send End of File", TERMINAL_ACTION_END_OF_FILE, KL_MENU_ROLE_NONE, 0U, 0U },
@@ -207,6 +209,10 @@ terminal_menu_open(
 
 		/* A program without an embedded vi editor has no Open File in vi item. */
 		if (menu_items[index].id == MENU_OPEN_VI && !window->open_vi_item)
+			continue;
+
+		/* Non-Android programs do not have the Hide keyboard for X11 tabs item. */
+		if (menu_items[index].id == MENU_HIDE_X11_KEYBOARD && !window->hide_x11_keyboard_item)
 			continue;
 
 		/* The item, after the ones before it. */
@@ -404,6 +410,10 @@ menu_state(
 	/* Open SFTP enabled when the active tab's connection allows it, for the window that has the item. */
 	if (window->open_sftp_item)
 		menu_action_state(window, TERMINAL_ACTION_OPEN_SFTP, state->can_open_sftp, 0);
+
+	/* Hide keyboard for X11 tabs checked while enabled, for the window that has the item. */
+	if (window->hide_x11_keyboard_item)
+		menu_action_state(window, TERMINAL_ACTION_HIDE_X11_KEYBOARD, 1, state->hide_x11_keyboard);
 
 	/* Succeeded: the menus show the state. */
 	window->menu_state = *state;

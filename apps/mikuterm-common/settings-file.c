@@ -63,6 +63,7 @@ terminal_settings_load(
 	settings->ambiguous_wide = settings_conf.ambiguous_wide;
 	settings->theme = settings_conf.theme;
 	settings->copy_on_select = settings_conf.copy_on_select;
+	settings->hide_x11_keyboard = settings_conf.hide_x11_keyboard;
 	settings->font_size = 0U;
 
 	/* The kept settings, when there are some. */
@@ -85,6 +86,8 @@ terminal_settings_load(
 		settings->ambiguous_wide = state.ambiguous_wide;
 	if (state.copy_given)
 		settings->copy_on_select = state.copy_on_select;
+	if (state.hide_x11_keyboard_given)
+		settings->hide_x11_keyboard = state.hide_x11_keyboard;
 }
 
 /*
@@ -96,38 +99,44 @@ terminal_settings_save(
 	const struct terminal_settings *settings)
 {
 	char path[MIKUTERM_PATH_MAX];
-	char text[320];
+	char text[384];
 	const char *wide;
 	const char *copy;
+	const char *hide_x11;
 	int written;
 	int error;
 
-	/* Ambiguous-width characters' setting and copy-on-select as the file writes them. */
+	/* Ambiguous-width characters' setting, copy-on-select and X11 keyboard suppression as the file writes them. */
 	wide = "no";
 	if (settings->ambiguous_wide)
 		wide = "yes";
 	copy = "no";
 	if (settings->copy_on_select)
 		copy = "yes";
+	hide_x11 = "no";
+	if (settings->hide_x11_keyboard)
+		hide_x11 = "yes";
 
 	/* The file's text; a size of 0 is none chosen and leaves the line out. */
 	if (settings->font_size != 0U) {
 		written = snprintf(text,
 				   sizeof(text),
 				   "# What the View menu and the settings chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
-				   "FontSize %u\r\nTheme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\n",
+				   "FontSize %u\r\nTheme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\nHideX11Keyboard %s\r\n",
 				   settings->font_size,
 				   mikuterm_theme_text(settings->theme),
 				   wide,
-				   copy);
+				   copy,
+				   hide_x11);
 	} else {
 		written = snprintf(text,
 				   sizeof(text),
 				   "# What the View menu and the settings chose; mikuterm writes this file.  Remove it to go back to mikuterm.conf.\r\n"
-				   "Theme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\n",
+				   "Theme %s\r\nAmbiguousWide %s\r\nCopyOnSelect %s\r\nHideX11Keyboard %s\r\n",
 				   mikuterm_theme_text(settings->theme),
 				   wide,
-				   copy);
+				   copy,
+				   hide_x11);
 	}
 
 	/* A text that did not fit is refused. */

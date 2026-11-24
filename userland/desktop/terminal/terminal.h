@@ -187,7 +187,8 @@ enum terminal_action {
 	TERMINAL_ACTION_SETTINGS,
 	TERMINAL_ACTION_COPY_ON_SELECT,
 	TERMINAL_ACTION_OPEN_SFTP,
-	TERMINAL_ACTION_OPEN_VI
+	TERMINAL_ACTION_OPEN_VI,
+	TERMINAL_ACTION_HIDE_X11_KEYBOARD
 };
 
 /*
@@ -238,6 +239,7 @@ struct terminal_menu_state {
 	int can_find_again;
 	int input_method_off;
 	int can_open_sftp;
+	int hide_x11_keyboard;
 };
 
 /*
@@ -253,6 +255,7 @@ struct terminal_settings {
 	unsigned font_size;
 	unsigned theme;
 	int copy_on_select;
+	int hide_x11_keyboard;
 };
 
 /* The keys' modes (terminal_window.key_modes): DECCKM's cursor keys and DECKPAM's keypad. */
@@ -798,6 +801,7 @@ struct terminal_window {
 	int new_window_item;
 	int open_sftp_item;
 	int open_vi_item;
+	int hide_x11_keyboard_item;
 	int open_vi_requested;
 	char open_vi_path[1024];
 	int refuse_terminal_drop;

@@ -88,7 +88,8 @@ static const struct terminal_picture_ops tab_picture_ops = {
 	tab_draw,
 	tab_title,
 	tab_input,
-	tab_refuse
+	tab_refuse,
+	1
 };
 
 /* The functions of a tab of an X window. */

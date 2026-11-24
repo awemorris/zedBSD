@@ -89,6 +89,7 @@ struct terminal_run_options {
 	const char *token;
 	const char *about;
 	int input_method_menu;
+	int hide_x11_keyboard_menu;
 	int ambiguous_wide_key;
 	int fullscreen_alt_enter;
 	void (*forget_passphrases)(void *data);
