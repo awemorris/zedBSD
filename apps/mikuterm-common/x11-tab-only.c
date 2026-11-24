@@ -281,6 +281,7 @@ x11_tab_only_take(
 			tab_only_root_configure(tabs, surface, width, height);
 			break;
 		}
+
 		x11server_backend_configure(tabs->server, surface->window, 0, 0, (int)width, (int)height);
 		break;
 	case X11_LINK_TAB_CLOSE:
@@ -349,6 +350,7 @@ tab_only_open(
 	struct x11_tab_only *tabs;
 	struct tab_surface *surface;
 	int place;
+	int is_tab;
 	int error;
 
 	tabs = context;
@@ -361,7 +363,8 @@ tab_only_open(
 	tab_only_keep(surface, info);
 
 	/* Opens top-level ownerless windows and the root window as tabs. */
-	if (tab_only_is_tab(info)) {
+	is_tab = tab_only_is_tab(info);
+	if (is_tab) {
 		place = tab_only_free_place(tabs);
 		if (place < 0) {
 			free(surface);
@@ -406,6 +409,7 @@ tab_only_open(
 		if (tabs->server != NULL)
 			x11server_backend_configure(tabs->server, window, surface->x, surface->y, (int)surface->width, (int)surface->height);
 	}
+
 	tab_only_keep_shape(surface, info);
 	error = tab_only_shown(surface);
 	if (error != 0) {
@@ -701,6 +705,7 @@ tab_only_free_place(
 		if (tabs->tabs[place] == NULL)
 			return (int)place;
 	}
+
 	return -1;
 }
 
@@ -716,6 +721,7 @@ tab_only_find(
 		if (tabs->tabs[place] != NULL && tabs->tabs[place]->window == window)
 			return tabs->tabs[place];
 	}
+
 	return NULL;
 }
 
@@ -734,6 +740,7 @@ tab_only_resolve_home(
 		if (parent->home != NULL)
 			return parent->home;
 	}
+
 	return tabs->front;
 }
 
@@ -759,6 +766,7 @@ tab_only_keep(
 		while (length > 0U && ((unsigned char)info->title[length] & 0xC0U) == 0x80U)
 			length--;
 	}
+
 	if (length != 0U)
 		memcpy(surface->title, info->title, length);
 	surface->title[length] = '\0';
@@ -1056,12 +1064,14 @@ tab_only_input(
 			tab_only_release_keys(tabs, now);
 			x11server_backend_leave(tabs->server, surface->window, 1);
 		}
+
 		break;
 	case X11_LINK_INPUT_LEAVE:
 		if (surface->entered) {
 			surface->entered = 0;
 			x11server_backend_leave(tabs->server, surface->window, 0);
 		}
+
 		break;
 	case X11_LINK_INPUT_PAN:
 		if (surface->kind == X11_SURFACE_ROOT && surface->root_configured)
@@ -1143,6 +1153,7 @@ tab_only_text(
 				break;
 			character = (character << 6) | (text[offset + index] & 0x3FU);
 		}
+
 		if (index != length) {
 			offset++;
 			continue;
@@ -1209,6 +1220,7 @@ tab_only_button(
 	} else if (button != 0U) {
 		tabs->buttons &= (uint16_t)~bit;
 	}
+
 	frame.buttons_after = tabs->buttons;
 
 	x11server_backend_pointer(tabs->server, &frame);
@@ -1480,6 +1492,8 @@ tab_only_root_pinch(
 	double target;
 	double root_cx;
 	double root_cy;
+	double delta;
+	double delta_fit;
 
 	fit = surface->root_fit_scale;
 	min_scale = fit * 0.5;
@@ -1497,7 +1511,8 @@ tab_only_root_pinch(
 
 	if (surface->root_detent != TAB_ONLY_DETENT_NONE) {
 		target = (surface->root_detent == TAB_ONLY_DETENT_FIT) ? fit : 1.0;
-		if (fabs(raw - target) / target >= TAB_ONLY_DETENT_ESCAPE) {
+		delta = fabs(raw - target);
+		if (delta / target >= TAB_ONLY_DETENT_ESCAPE) {
 			surface->root_detent = TAB_ONLY_DETENT_NONE;
 		} else {
 			new_scale = target;
@@ -1505,10 +1520,12 @@ tab_only_root_pinch(
 	}
 
 	if (surface->root_detent == TAB_ONLY_DETENT_NONE) {
-		if (fabs(raw - 1.0) <= TAB_ONLY_DETENT_SNAP) {
+		delta = fabs(raw - 1.0);
+		delta_fit = fabs(raw - fit);
+		if (delta <= TAB_ONLY_DETENT_SNAP) {
 			surface->root_detent = TAB_ONLY_DETENT_ONE;
 			new_scale = 1.0;
-		} else if (fabs(raw - fit) / fit <= TAB_ONLY_DETENT_SNAP) {
+		} else if (delta_fit / fit <= TAB_ONLY_DETENT_SNAP) {
 			surface->root_detent = TAB_ONLY_DETENT_FIT;
 			new_scale = fit;
 		}
@@ -1572,6 +1589,7 @@ tab_only_forget_overlay(
 				        &tabs->overlays[index + 1U],
 				        (size_t)(tabs->overlay_count - index - 1U) * sizeof(tabs->overlays[0]));
 			}
+
 			tabs->overlay_count -= 1U;
 			break;
 		}

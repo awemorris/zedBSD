@@ -336,12 +336,19 @@ keiland_android_dropped(void)
 JNIEnv *
 keiland_android_env(void)
 {
+	pthread_t self;
+	int valid;
+	int same;
+
 	/* No environment before M is attached, or after it ended. */
-	if (!__atomic_load_n(&activity_env_valid, __ATOMIC_SEQ_CST))
+	valid = __atomic_load_n(&activity_env_valid, __ATOMIC_SEQ_CST);
+	if (!valid)
 		return NULL;
 
 	/* Only M may use the environment. */
-	if (!pthread_equal(pthread_self(), activity_thread_id))
+	self = pthread_self();
+	same = pthread_equal(self, activity_thread_id);
+	if (!same)
 		return NULL;
 
 	/* Succeeded: M's own environment. */
@@ -533,6 +540,7 @@ activity_make_room(void)
 		activity_ring[to] = activity_ring[index];
 		kept++;
 	}
+
 	activity_ring_count--;
 }
 
@@ -656,6 +664,7 @@ activity_thread(
 		if (status != JNI_OK)
 			env = NULL;
 	}
+
 	activity_thread_id = pthread_self();
 	activity_env = env;
 	__atomic_store_n(&activity_env_valid, env != NULL, __ATOMIC_SEQ_CST);
@@ -698,6 +707,7 @@ activity_thread(
 	return NULL;
 }
 
+/* Queues the Activity's start event. */
 static void
 activity_on_start(
 	ANativeActivity *activity)
@@ -708,6 +718,7 @@ activity_on_start(
 	activity_push(KEILAND_ANDROID_START, NULL, NULL);
 }
 
+/* Queues the Activity's resume event. */
 static void
 activity_on_resume(
 	ANativeActivity *activity)
@@ -718,6 +729,7 @@ activity_on_resume(
 	activity_push(KEILAND_ANDROID_RESUME, NULL, NULL);
 }
 
+/* Queues the Activity's pause event. */
 static void
 activity_on_pause(
 	ANativeActivity *activity)
@@ -728,6 +740,7 @@ activity_on_pause(
 	activity_push(KEILAND_ANDROID_PAUSE, NULL, NULL);
 }
 
+/* Queues the Activity's stop event. */
 static void
 activity_on_stop(
 	ANativeActivity *activity)
@@ -757,6 +770,7 @@ activity_on_destroy(
 	pthread_mutex_unlock(&activity_lock);
 }
 
+/* Queues the Activity's focus change event. */
 static void
 activity_on_focus(
 	ANativeActivity *activity,
@@ -771,6 +785,7 @@ activity_on_focus(
 		activity_push(KEILAND_ANDROID_FOCUS_LOST, NULL, NULL);
 }
 
+/* Queues the Activity's configuration change event. */
 static void
 activity_on_config(
 	ANativeActivity *activity)
@@ -781,6 +796,7 @@ activity_on_config(
 	activity_push(KEILAND_ANDROID_CONFIG, NULL, NULL);
 }
 
+/* Queues the Activity's low-memory event. */
 static void
 activity_on_low_memory(
 	ANativeActivity *activity)
@@ -808,6 +824,7 @@ activity_on_save(
 	return NULL;
 }
 
+/* Queues the native window creation event. */
 static void
 activity_on_window_created(
 	ANativeActivity *activity,
@@ -819,6 +836,7 @@ activity_on_window_created(
 	activity_push(KEILAND_ANDROID_WINDOW_CREATED, window, NULL);
 }
 
+/* Queues the native window resize event. */
 static void
 activity_on_window_resized(
 	ANativeActivity *activity,
@@ -830,6 +848,7 @@ activity_on_window_resized(
 	activity_push(KEILAND_ANDROID_WINDOW_RESIZED, window, NULL);
 }
 
+/* Queues the native window redraw event. */
 static void
 activity_on_window_redraw(
 	ANativeActivity *activity,
@@ -855,6 +874,7 @@ activity_on_window_destroyed(
 	activity_push_and_wait(KEILAND_ANDROID_WINDOW_DESTROYED, window, NULL);
 }
 
+/* Queues the input queue creation event. */
 static void
 activity_on_input_created(
 	ANativeActivity *activity,

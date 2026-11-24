@@ -50,9 +50,14 @@ kl_window_text_input(
 	struct kl_window *window,
 	int enabled)
 {
+	struct kl_window *top;
+
 	/* What the window wants, even when it is not the one shown. */
 	window->text_input = (enabled != 0);
-	if (window->app == NULL || android_window_top(window->app) != window)
+	if (window->app == NULL)
+		return;
+	top = android_window_top(window->app);
+	if (top != window)
 		return;
 
 	/* The keyboard's kind, and shown when the window wants text. */
@@ -74,8 +79,13 @@ kl_window_text_cursor(
 	int width,
 	int height)
 {
+	struct kl_window *top;
+
 	/* Only the window on top has the input method. */
-	if (window->app == NULL || android_window_top(window->app) != window)
+	if (window->app == NULL)
+		return;
+	top = android_window_top(window->app);
+	if (top != window)
 		return;
 
 	/* The window is the native window less the insets. */
@@ -134,12 +144,14 @@ android_ime_bridge(
 				if (take == 0U)
 					break;
 			}
+
 			memcpy(part, text, take);
 			part[take] = '\0';
 			ime_commit(window, part);
 			text += take;
 			length -= take;
 		}
+
 		break;
 	case KEILAND_BRIDGE_COMPOSE:
 		/* A window that wants no text has nothing composed (letters only). */
@@ -153,10 +165,12 @@ android_ime_bridge(
 			ime_key(window, KL_KEY_BACKSPACE, 1);
 			ime_key(window, KL_KEY_BACKSPACE, 0);
 		}
+
 		for (index = 0; index < event->b && index < 64; index++) {
 			ime_key(window, KL_KEY_DELETE, 1);
 			ime_key(window, KL_KEY_DELETE, 0);
 		}
+
 		break;
 	default:
 		break;
@@ -208,6 +222,7 @@ ime_compose(
 		while (length > 0U && ((unsigned char)text[length] & 0xc0U) == 0x80U)
 			length--;
 	}
+
 	memcpy(input.text, text, length);
 	input.text[length] = '\0';
 
@@ -221,9 +236,11 @@ ime_compose(
 			while (at < length && ((unsigned char)input.text[at] & 0xc0U) == 0x80U)
 				at++;
 		}
+
 		input.begin = (int32_t)at;
 		input.end = (int32_t)at;
 	}
+
 	ime_composing = (length > 0U);
 	(void)android_window_queue(window, &input);
 }

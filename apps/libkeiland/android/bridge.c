@@ -275,6 +275,7 @@ keiland_utf8_to_utf16(
 			out[used] = (uint16_t)(0xD800U + (code_point >> 10));
 			out[used + 1] = (uint16_t)(0xDC00U + (code_point & 0x3FFU));
 		}
+
 		used += units;
 	}
 
@@ -351,6 +352,7 @@ bridge_utf8_decode(
 
 			return i;
 		}
+
 		value = (value << 6) | (bytes[i] & 0x3FU);
 	}
 

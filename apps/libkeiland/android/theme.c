@@ -76,6 +76,7 @@ android_theme_bridge(
 	unsigned accent;
 	char language[KL_TR_NAME_MAX + 1U];
 	size_t length;
+	int same;
 
 	/* The mode and the accent; none given is blue. */
 	appearance = event->a != 0 ? KL_APPEARANCE_DARK : KL_APPEARANCE_LIGHT;
@@ -102,7 +103,8 @@ android_theme_bridge(
 		return;
 	memcpy(language, event->text, length);
 	language[length] = '\0';
-	if (strcmp(language, app->language) == 0)
+	same = strcmp(language, app->language);
+	if (same == 0)
 		return;
 	memcpy(app->language, language, length + 1U);
 	memset(&posted, 0, sizeof(posted));

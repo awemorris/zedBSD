@@ -127,13 +127,17 @@ android_tabs_layout(
 		room = 0;
 
 	/* No tab or one: the tabs side by side, which leave out a single tab that does not fit. */
-	if (strip->count < 2U)
-		return tabs_all(strip, closable, places, new_place, scroll, &lengths);
+	if (strip->count < 2U) {
+		end = tabs_all(strip, closable, places, new_place, scroll, &lengths);
+		return end;
+	}
 
 	/* Every tab at its share, when the share is not below the least. */
 	share = room / (int64_t)strip->count - (int64_t)lengths.gap;
-	if (share >= (int64_t)lengths.least)
-		return tabs_all(strip, closable, places, new_place, scroll, &lengths);
+	if (share >= (int64_t)lengths.least) {
+		end = tabs_all(strip, closable, places, new_place, scroll, &lengths);
+		return end;
+	}
 
 	/* The strip scrolls when one tab fits before the buttons. */
 	fits = tabs_scroll(strip, closable, places, new_place, scroll, &lengths, &end);
@@ -141,7 +145,8 @@ android_tabs_layout(
 		return end;
 
 	/* Succeeded: only the list's button (and the new tab's) on a strip too narrow for a tab. */
-	return tabs_list(strip, new_place, scroll, &lengths);
+	end = tabs_list(strip, new_place, scroll, &lengths);
+	return end;
 }
 
 /*
@@ -161,6 +166,7 @@ android_tabs_at(
 {
 	struct android_rect reach;
 	unsigned index;
+	int hit;
 
 	/* Somewhere to answer, and the places. */
 	if (part == NULL || (count != 0U && places == NULL))
@@ -175,21 +181,27 @@ android_tabs_at(
 			reach.y = places[index].tab.y;
 			reach.width = (uint32_t)(places[index].tab.x + (int32_t)places[index].tab.width - reach.x);
 			reach.height = places[index].tab.height;
-			if (android_rect_contains(&reach, x, y)) {
+			hit = android_rect_contains(&reach, x, y);
+			if (hit) {
 				*part = ANDROID_TAB_PART_CLOSE;
 				return index;
 			}
 		}
-		if (android_rect_contains(&places[index].tab, x, y)) {
+
+		hit = android_rect_contains(&places[index].tab, x, y);
+		if (hit) {
 			*part = ANDROID_TAB_PART_BODY;
 			return index;
 		}
 	}
 
 	/* The new tab's button. */
-	if (new_place != NULL && android_rect_contains(new_place, x, y)) {
-		*part = ANDROID_TAB_PART_NEW;
-		return count;
+	if (new_place != NULL) {
+		hit = android_rect_contains(new_place, x, y);
+		if (hit) {
+			*part = ANDROID_TAB_PART_NEW;
+			return count;
+		}
 	}
 
 	/* No list without the strip's scroll. */
@@ -197,7 +209,8 @@ android_tabs_at(
 		return ANDROID_TAB_NONE;
 
 	/* The list's button. */
-	if (android_rect_contains(&scroll->list, x, y)) {
+	hit = android_rect_contains(&scroll->list, x, y);
+	if (hit) {
 		*part = ANDROID_TAB_PART_LIST;
 		return count;
 	}
@@ -285,6 +298,7 @@ tabs_all(
 	int64_t room;
 	int64_t share;
 	int64_t x;
+	int32_t end;
 	unsigned shown;
 	unsigned index;
 
@@ -323,7 +337,8 @@ tabs_all(
 	/* The new tab's button after the tabs, when asked for and when it fits before the strip's right. */
 	if (strip->new_button && x + (int64_t)lengths->button <= (int64_t)strip->right) {
 		tabs_square(new_place, x, lengths);
-		return tabs_clamp(x + (int64_t)lengths->button);
+		end = tabs_clamp(x + (int64_t)lengths->button);
+		return end;
 	}
 
 	/* Without the button: nothing shown ends at the left. */
@@ -331,7 +346,8 @@ tabs_all(
 		return strip->left;
 
 	/* Succeeded: the strip ends at the last tab's right edge. */
-	return tabs_clamp(x - (int64_t)lengths->gap);
+	end = tabs_clamp(x - (int64_t)lengths->gap);
+	return end;
 }
 
 /* Lays out a scrolling strip (ANDROID_STRIP_SCROLL) and writes where it ends.  Returns 0, with nothing written, when not even one tab fits before the buttons. */
@@ -418,6 +434,7 @@ tabs_list(
 {
 	int64_t both;
 	int64_t x;
+	int32_t end;
 
 	/* No tab is shown; the list holds them all. */
 	scroll->mode = ANDROID_STRIP_LIST;
@@ -438,7 +455,8 @@ tabs_list(
 
 	/* Succeeded: the list's button, where the strip ends. */
 	tabs_square(&scroll->list, x, lengths);
-	return tabs_clamp(x + (int64_t)lengths->button);
+	end = tabs_clamp(x + (int64_t)lengths->button);
+	return end;
 }
 
 /* Places one tab at x of a width, with its close button when it is closable. */

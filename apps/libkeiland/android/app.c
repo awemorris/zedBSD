@@ -62,6 +62,7 @@ kl_app_open(
 {
 	struct kl_app *app;
 	const char *application;
+	int error;
 
 	/* One application for the process. */
 	if (app_open != NULL) {
@@ -77,7 +78,8 @@ kl_app_open(
 	}
 
 	/* The posts' lock. */
-	if (pthread_mutex_init(&app->lock, NULL) != 0) {
+	error = pthread_mutex_init(&app->lock, NULL);
+	if (error != 0) {
 		free(app);
 		errno = ENOMEM;
 		return NULL;
@@ -329,6 +331,7 @@ keiland_post_app(
 	void *data)
 {
 	struct keiland_bridge_event event;
+	int error;
 
 	/* The bridge's event. */
 	memset(&event, 0, sizeof(event));
@@ -337,7 +340,12 @@ keiland_post_app(
 	event.data = data;
 
 	/* Queued for M. */
-	return keiland_bridge_push(&event, NULL, 0U);
+	error = keiland_bridge_push(&event, NULL, 0U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the post is queued. */
+	return 0;
 }
 
 /*
@@ -448,6 +456,7 @@ android_window_queue(
 	struct kl_app *app;
 	struct kl_app_event event;
 	uint64_t now;
+	int error;
 
 	/* The application the window belongs to. */
 	app = android_app();
@@ -465,7 +474,12 @@ android_window_queue(
 	event.input.arrival_us = now;
 
 	/* Queued. */
-	return android_app_queue(app, &event);
+	error = android_app_queue(app, &event);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the input is queued. */
+	return 0;
 }
 
 /* Handles what the Activity queued: the windows, the input queue and the life cycle. */
@@ -474,10 +488,16 @@ app_activity_drain(
 	struct kl_app *app)
 {
 	struct keiland_android_event event;
+	int taken;
 
 	/* Each event, oldest first. */
-	while (keiland_android_take(&event))
+	for (;;) {
+		taken = keiland_android_take(&event);
+		if (!taken)
+			break;
+
 		app_activity_event(app, &event);
+	}
 }
 
 /* Handles one thing that happened to the Activity. */
@@ -563,6 +583,7 @@ app_bridge_event(
 {
 	struct kl_app_event posted;
 	int32_t insets[5];
+	int handled;
 
 	/* By kind. */
 	switch (event->kind) {
@@ -590,8 +611,11 @@ app_bridge_event(
 		break;
 	case KEILAND_BRIDGE_APP_POST:
 		/* The program's hook may take it (the data is then the hook's). */
-		if (app_post_hook != NULL && app_post_hook(event->code, event->data) == 1)
-			break;
+		if (app_post_hook != NULL) {
+			handled = app_post_hook(event->code, event->data);
+			if (handled == 1)
+				break;
+		}
 
 		/* The program's own event (the data is the program's). */
 		memset(&posted, 0, sizeof(posted));
@@ -623,6 +647,7 @@ app_posts_drain(
 	struct android_post *post;
 	struct kl_app_event event;
 	struct kl_window_event input;
+	int exists;
 
 	/* The list, taken whole. */
 	(void)pthread_mutex_lock(&app->lock);
@@ -639,7 +664,10 @@ app_posts_drain(
 		list = post->next;
 
 		/* A window's input while the window is open. */
-		if (post->window != NULL && android_window_exists(app, post->window)) {
+		exists = 0;
+		if (post->window != NULL)
+			exists = android_window_exists(app, post->window);
+		if (exists) {
 			memset(&input, 0, sizeof(input));
 			input.kind = KL_WINDOW_POST;
 			input.code = post->code;
@@ -653,6 +681,7 @@ app_posts_drain(
 			event.data = post->data;
 			(void)android_app_queue(app, &event);
 		}
+
 		free(post);
 	}
 }

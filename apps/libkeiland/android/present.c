@@ -84,8 +84,15 @@ kl_window_present(
 	const uint32_t *pixels,
 	size_t stride)
 {
+	int error;
+
 	/* The parts' way with none named: all of it. */
-	return kl_window_present_parts(window, pixels, stride, NULL, 0U);
+	error = kl_window_present_parts(window, pixels, stride, NULL, 0U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the frame is shown. */
+	return 0;
 }
 
 /*
@@ -98,8 +105,15 @@ kl_window_present_part(
 	size_t stride,
 	const struct kl_rect *part)
 {
+	int error;
+
 	/* One part, or none. */
-	return kl_window_present_parts(window, pixels, stride, part, part == NULL ? 0U : 1U);
+	error = kl_window_present_parts(window, pixels, stride, part, part == NULL ? 0U : 1U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the part is shown. */
+	return 0;
 }
 
 /*
@@ -272,10 +286,12 @@ android_present_copy(
 	int32_t y;
 	int widened;
 	int moved;
+	int status;
 
 	/* The format, set again only for another window. */
 	if (present_native != native) {
-		if (ANativeWindow_setBuffersGeometry(native, 0, 0, PRESENT_FORMAT) != 0)
+		status = ANativeWindow_setBuffersGeometry(native, 0, 0, PRESENT_FORMAT);
+		if (status != 0)
 			return EIO;
 		present_native = native;
 	}
@@ -355,7 +371,8 @@ android_present_copy(
 
 	/* The buffer, and the area to write (the one asked for, or wider). */
 	dirty = asked;
-	if (ANativeWindow_lock(native, &buffer, &dirty) != 0)
+	status = ANativeWindow_lock(native, &buffer, &dirty);
+	if (status != 0)
 		return EIO;
 	widened = (moved || dirty.left != asked.left || dirty.top != asked.top || dirty.right != asked.right ||
 	    dirty.bottom != asked.bottom);
@@ -405,7 +422,8 @@ android_present_copy(
 	present_rows(&dirty, &source);
 
 	/* Posted. */
-	if (ANativeWindow_unlockAndPost(native) != 0)
+	status = ANativeWindow_unlockAndPost(native);
+	if (status != 0)
 		return EIO;
 
 	/* Succeeded: the parts are shown. */
@@ -551,9 +569,12 @@ present_keep(
 			right = (int32_t)window->width;
 		if (bottom > (int32_t)window->height)
 			bottom = (int32_t)window->height;
-		for (y = top; y < bottom && left < right; y++)
-			memcpy(window->shown + (size_t)y * window->width + (size_t)left, pixels + (size_t)y * stride + (size_t)left,
-			    (size_t)(right - left) * sizeof(uint32_t));
+		for (y = top; y < bottom && left < right; y++) {
+			memcpy(
+				window->shown + (size_t)y * window->width + (size_t)left,
+				pixels + (size_t)y * stride + (size_t)left,
+				(size_t)(right - left) * sizeof(uint32_t));
+		}
 	}
 
 	/* Succeeded. */

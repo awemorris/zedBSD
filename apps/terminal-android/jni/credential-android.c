@@ -216,6 +216,7 @@ mikuterm_passphrases_forget_all(void)
 	unsigned files;
 	unsigned index;
 	int written;
+	int unlinked;
 	int error;
 
 	forgotten = 0U;
@@ -225,15 +226,23 @@ mikuterm_passphrases_forget_all(void)
 	error = mikuterm_path(directory, sizeof(directory), "secrets");
 	if (error == 0) {
 		folder = opendir(directory);
-		while (folder != NULL && (entry = readdir(folder)) != NULL) {
-			if (entry->d_name[0] == '.')
-				continue;
-			written = snprintf(file, sizeof(file), "%s/%s", directory, entry->d_name);
-			if (written > 0 && (size_t)written < sizeof(file) && unlink(file) == 0)
-				files++;
-		}
-		if (folder != NULL)
+		if (folder != NULL) {
+			for (;;) {
+				entry = readdir(folder);
+				if (entry == NULL)
+					break;
+				if (entry->d_name[0] == '.')
+					continue;
+				written = snprintf(file, sizeof(file), "%s/%s", directory, entry->d_name);
+				if (written > 0 && (size_t)written < sizeof(file)) {
+					unlinked = unlink(file);
+					if (unlinked == 0)
+						files++;
+				}
+			}
+
 			(void)closedir(folder);
+		}
 	}
 
 	pthread_mutex_lock(&credential_lock);
@@ -322,13 +331,17 @@ mikuterm_credential_start(void)
 		return;
 
 	/* Each file. */
-	while ((entry = readdir(folder)) != NULL) {
+	for (;;) {
+		entry = readdir(folder);
+		if (entry == NULL)
+			break;
 		if (entry->d_name[0] == '.')
 			continue;
 		written = snprintf(file, sizeof(file), "%s/%s", directory, entry->d_name);
 		if (written > 0 && (size_t)written < sizeof(file))
 			credential_unwrap_file(file);
 	}
+
 	(void)closedir(folder);
 }
 
@@ -368,6 +381,7 @@ mikuterm_credential_answer(
 			result->bytes[result->size] = '\0';
 			(void)credential_put(waiting->path, (const char *)result->bytes, result->size);
 		}
+
 		waiting->request = 0U;
 		goto done;
 	}
@@ -390,6 +404,7 @@ mikuterm_credential_answer(
 			(void)chmod(file, 0600);
 		free(bytes);
 	}
+
 	waiting->request = 0U;
 
 done:
@@ -398,6 +413,7 @@ done:
 		(void)credential_memset(result->bytes, 0, result->size);
 		free(result->bytes);
 	}
+
 	free(result);
 }
 
@@ -427,6 +443,7 @@ mikuterm_credential_keep(
 		if (error != 0)
 			waiting->request = 0U;
 	}
+
 	credential_free_post(post);
 }
 
@@ -508,6 +525,7 @@ credential_file(
 	struct cryc_sha256 hash;
 	uint8_t sum[CRYC_SHA256_SIZE];
 	unsigned index;
+	int error;
 
 	/* The hash of the path, as the file's name. */
 	cryc_sha256_init(&hash);
@@ -517,11 +535,17 @@ credential_file(
 		name[index * 2U] = digits[sum[index] >> 4];
 		name[index * 2U + 1U] = digits[sum[index] & 0x0fU];
 	}
+
 	name[CRYC_SHA256_SIZE * 2U] = '\0';
 
 	/* Inside the folder. */
 	(void)snprintf(inside, sizeof(inside), "secrets/%s", name);
-	return mikuterm_path(file, size, inside);
+	error = mikuterm_path(file, size, inside);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the secret file's path. */
+	return 0;
 }
 
 /* Finds the request's place that waits with a number (request non-zero), or a free place (request 0); NULL when there is none. */
@@ -536,6 +560,7 @@ credential_request(
 		if (credential_waiting[index].request == request)
 			return &credential_waiting[index];
 	}
+
 	return NULL;
 }
 
@@ -561,6 +586,7 @@ credential_unwrap_file(
 		free(text);
 		return;
 	}
+
 	path_length = (size_t)(unsigned char)text[0] | ((size_t)(unsigned char)text[1] << 8) | ((size_t)(unsigned char)text[2] << 16) |
 	    ((size_t)(unsigned char)text[3] << 24);
 	if (path_length == 0U || path_length + 1U > MIKUTERM_PATH_MAX || 4U + path_length >= size) {
@@ -574,6 +600,7 @@ credential_unwrap_file(
 		free(text);
 		return;
 	}
+
 	request = keiland_android_request();
 	waiting->request = request;
 	waiting->kind = CREDENTIAL_UNWRAP;
@@ -597,6 +624,7 @@ credential_free_post(
 		(void)credential_memset(post->passphrase, 0, strlen(post->passphrase));
 		free(post->passphrase);
 	}
+
 	free(post->path);
 	free(post);
 }

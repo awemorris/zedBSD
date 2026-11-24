@@ -54,6 +54,8 @@ x11_touch_take(
 	int32_t dy;
 	int32_t delta_y;
 	double dist;
+	double delta;
+	int moved;
 
 	count = 0U;
 
@@ -119,7 +121,8 @@ x11_touch_take(
 
 		/* Two-finger movement drives pan/pinch in ROOT mode or wheel in WINDOW mode. */
 		if (touch->two_finger) {
-			if (moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_TWO_TAP_PX))
+			moved = moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_TWO_TAP_PX);
+			if (moved)
 				touch->moved_far = 1;
 
 			if (touch->active[0] && touch->active[1]) {
@@ -137,14 +140,15 @@ x11_touch_take(
 
 					dist = finger_distance(touch);
 					if (touch->two_pinch_dist > 1.0) {
+						delta = fabs(dist - touch->two_pinch_dist);
 						if (!touch->two_pinch_active) {
-							if (fabs(dist - touch->two_pinch_dist) / touch->two_pinch_dist >= TOUCH_PINCH_THRESHOLD) {
+							if (delta / touch->two_pinch_dist >= TOUCH_PINCH_THRESHOLD) {
 								touch->two_pinch_active = 1;
 								push_action(out, room, &count, X11_TOUCH_PINCH, 0U, 0, avg_x, avg_y, 0, 0, 0, dist / touch->two_pinch_dist);
 								touch->two_pinch_dist = dist;
 								touch->two_done = 1;
 							}
-						} else if (fabs(dist - touch->two_pinch_dist) > 0.5) {
+						} else if (delta > 0.5) {
 							push_action(out, room, &count, X11_TOUCH_PINCH, 0U, 0, avg_x, avg_y, 0, 0, 0, dist / touch->two_pinch_dist);
 							touch->two_pinch_dist = dist;
 							touch->two_done = 1;
@@ -174,9 +178,12 @@ x11_touch_take(
 		}
 
 		/* Single-finger movement presses left once it passes the drag threshold. */
-		if (!touch->pressed_left && moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_DRAG_PX)) {
-			push_action(out, room, &count, X11_TOUCH_BUTTON, 1U, 1, touch->start_x[slot], touch->start_y[slot], 0, 0, 0, 0.0);
-			touch->pressed_left = 1;
+		if (!touch->pressed_left) {
+			moved = moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_DRAG_PX);
+			if (moved) {
+				push_action(out, room, &count, X11_TOUCH_BUTTON, 1U, 1, touch->start_x[slot], touch->start_y[slot], 0, 0, 0, 0.0);
+				touch->pressed_left = 1;
+			}
 		}
 
 		touch->last_x = x;
@@ -192,7 +199,8 @@ x11_touch_take(
 
 		/* Lifting a finger in two-finger mode may complete a two-finger right tap. */
 		if (touch->two_finger) {
-			if (moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_TWO_TAP_PX))
+			moved = moved_beyond(touch->start_x[slot], touch->start_y[slot], x, y, TOUCH_TWO_TAP_PX);
+			if (moved)
 				touch->moved_far = 1;
 
 			if (!touch->two_done && !touch->moved_far && (time_us - touch->two_start_time_us) < TOUCH_TWO_TAP_US) {
@@ -343,8 +351,13 @@ finger_distance(
 {
 	double dx;
 	double dy;
+	double dist;
 
+	/* Euclidean distance between the two contacts. */
 	dx = (double)touch->x[1] - (double)touch->x[0];
 	dy = (double)touch->y[1] - (double)touch->y[0];
-	return sqrt(dx * dx + dy * dy);
+	dist = sqrt(dx * dx + dy * dy);
+
+	/* Succeeded. */
+	return dist;
 }

@@ -174,6 +174,7 @@ keiland_java_show_keyboard(
 	int show)
 {
 	JNIEnv *env;
+	int error;
 
 	/* Needs M's environment. */
 	env = keiland_android_env();
@@ -182,9 +183,12 @@ keiland_java_show_keyboard(
 
 	/* Asks Java, which does it on the main thread. */
 	(*env)->CallStaticVoidMethod(env, bridge_jni_class, bridge_jni_show_keyboard, (jboolean)(show != 0));
+	error = bridge_jni_call_failed(env);
+	if (error != 0)
+		return error;
 
-	/* Succeeded unless Java raised an exception. */
-	return bridge_jni_call_failed(env);
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /*
@@ -195,6 +199,7 @@ keiland_java_set_input_mode(
 	int mode)
 {
 	JNIEnv *env;
+	int error;
 
 	/* Needs M's environment. */
 	env = keiland_android_env();
@@ -203,9 +208,12 @@ keiland_java_set_input_mode(
 
 	/* Asks Java, which does it on the main thread. */
 	(*env)->CallStaticVoidMethod(env, bridge_jni_class, bridge_jni_set_input_mode, (jint)mode);
+	error = bridge_jni_call_failed(env);
+	if (error != 0)
+		return error;
 
-	/* Succeeded unless Java raised an exception. */
-	return bridge_jni_call_failed(env);
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /*
@@ -219,6 +227,7 @@ keiland_java_set_cursor_anchor(
 	float height)
 {
 	JNIEnv *env;
+	int error;
 
 	/* Needs M's environment. */
 	env = keiland_android_env();
@@ -227,9 +236,12 @@ keiland_java_set_cursor_anchor(
 
 	/* Asks Java, which does it on the main thread. */
 	(*env)->CallStaticVoidMethod(env, bridge_jni_class, bridge_jni_set_cursor_anchor, (jfloat)x, (jfloat)y, (jfloat)width, (jfloat)height);
+	error = bridge_jni_call_failed(env);
+	if (error != 0)
+		return error;
 
-	/* Succeeded unless Java raised an exception. */
-	return bridge_jni_call_failed(env);
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /*
@@ -351,6 +363,7 @@ keiland_java_popup_menu(
 			error = ENOMEM;
 			break;
 		}
+
 		(*env)->SetObjectArrayElement(env, label_array, (jsize)i, string);
 		(*env)->DeleteLocalRef(env, string);
 	}
@@ -417,6 +430,7 @@ int
 keiland_java_quit(void)
 {
 	JNIEnv *env;
+	int error;
 
 	/* Needs M's environment. */
 	env = keiland_android_env();
@@ -425,9 +439,12 @@ keiland_java_quit(void)
 
 	/* Asks Java, which does it on the main thread. */
 	(*env)->CallStaticVoidMethod(env, bridge_jni_class, bridge_jni_quit);
+	error = bridge_jni_call_failed(env);
+	if (error != 0)
+		return error;
 
-	/* Succeeded unless Java raised an exception. */
-	return bridge_jni_call_failed(env);
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /*
@@ -693,6 +710,7 @@ bridge_jni_push_string(
 
 		return ENOMEM;
 	}
+
 	keiland_utf16_to_utf8((const uint16_t *)units, (size_t)count, utf8, needed + 1);
 	(*env)->ReleaseStringChars(env, text, units);
 
@@ -835,6 +853,7 @@ bridge_jni_native_debug_touch(
 	(void)env;
 	(void)cls;
 
+	/* Queues the synthetic touch event. */
 	memset(&event, 0, sizeof(event));
 	event.kind = KEILAND_BRIDGE_DEBUG_TOUCH;
 	event.a = kind;

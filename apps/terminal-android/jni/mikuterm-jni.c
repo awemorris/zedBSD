@@ -85,8 +85,15 @@ mikuterm_java_secret_wrap(
 	const uint8_t *bytes,
 	size_t size)
 {
+	int error;
+
 	/* The same call as opening. */
-	return jni_bytes_call(jni_secret_wrap, request, bytes, size);
+	error = jni_bytes_call(jni_secret_wrap, request, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /* Asks Java to open a wrapped passphrase.  Returns 0, ENOMEM or EIO. */
@@ -96,8 +103,15 @@ mikuterm_java_secret_unwrap(
 	const uint8_t *bytes,
 	size_t size)
 {
+	int error;
+
 	/* The same call as wrapping. */
-	return jni_bytes_call(jni_secret_unwrap, request, bytes, size);
+	error = jni_bytes_call(jni_secret_unwrap, request, bytes, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request was sent. */
+	return 0;
 }
 
 /* Tells Java how many connections there are.  Returns 0 or EIO. */
@@ -106,6 +120,7 @@ mikuterm_java_service_update(
 	unsigned connections)
 {
 	JNIEnv *env;
+	jboolean raised;
 
 	/* Only M may call. */
 	env = keiland_android_env();
@@ -114,10 +129,13 @@ mikuterm_java_service_update(
 
 	/* The call, which returns at once. */
 	(*env)->CallStaticVoidMethod(env, jni_class, jni_service_update, (jint)connections);
-	if ((*env)->ExceptionCheck(env)) {
+	raised = (*env)->ExceptionCheck(env);
+	if (raised) {
 		(*env)->ExceptionClear(env);
 		return EIO;
 	}
+
+	/* Succeeded: the service state was sent. */
 	return 0;
 }
 
@@ -147,6 +165,7 @@ jni_native_secret(
 			free(result);
 			return;
 		}
+
 		(*env)->GetByteArrayRegion(env, data, 0, length, (jbyte *)result->bytes);
 		result->size = (size_t)length;
 		result->ok = 1;
@@ -159,6 +178,7 @@ jni_native_secret(
 			memset(result->bytes, 0, result->size);
 			free(result->bytes);
 		}
+
 		free(result);
 	}
 }
@@ -213,6 +233,7 @@ jni_bytes_call(
 {
 	JNIEnv *env;
 	jbyteArray array;
+	jboolean raised;
 	int error;
 
 	/* Only M may call. */
@@ -226,15 +247,22 @@ jni_bytes_call(
 		(*env)->ExceptionClear(env);
 		return ENOMEM;
 	}
+
 	(*env)->SetByteArrayRegion(env, array, 0, (jsize)size, (const jbyte *)bytes);
 
 	/* The call, which returns at once; Java wipes what it was given when it is done. */
 	error = 0;
 	(*env)->CallStaticVoidMethod(env, jni_class, method, (jint)request, array);
-	if ((*env)->ExceptionCheck(env)) {
+	raised = (*env)->ExceptionCheck(env);
+	if (raised) {
 		(*env)->ExceptionClear(env);
 		error = EIO;
 	}
+
 	(*env)->DeleteLocalRef(env, array);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request was sent. */
+	return 0;
 }
