@@ -318,7 +318,10 @@ handle_client(
 		pfds[0].events = POLLIN;
 		pfds[0].revents = 0;
 		nfds = 1U;
-		if (ctx.session_started && ctx.sess.rdp_fd >= 0) {
+		conn = rdp_server_is_connected(ctx.srv);
+		unacked = rdp_server_unacked_frames(ctx.srv);
+		if (ctx.session_started && ctx.sess.rdp_fd >= 0 &&
+		    (conn == 0 || unacked < 6U)) {
 			pfds[1].fd = ctx.sess.rdp_fd;
 			pfds[1].events = POLLIN;
 			pfds[1].revents = 0;
@@ -367,8 +370,7 @@ handle_client(
 			if (rc != 0)
 				break;
 			conn = rdp_server_is_connected(ctx.srv);
-			unacked = rdp_server_unacked_frames(ctx.srv);
-			if (conn != 0 && unacked < 8U) {
+			if (conn != 0) {
 				rect.left = 0U;
 				rect.top = 0U;
 				rect.right = ctx.width;
@@ -384,8 +386,6 @@ handle_client(
 				(void)rdp_server_send_avc_frame(
 					ctx.srv, RDP_GFX_CODEC_AVC420, &avc,
 					(uint32_t)(pts_us / 1000U), NULL);
-			} else if (conn != 0) {
-				rdpd_session_force_key(&ctx.sess);
 			}
 		}
 	}

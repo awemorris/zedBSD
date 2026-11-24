@@ -1126,7 +1126,7 @@ encode_frame(
 						sad += (uint32_t)(dv < 0 ? -dv : dv);
 					}
 				}
-				if (sad < 32U) {
+				if (sad < 128U) {
 					skip_run++;
 					memset(&enc->nz_y[mb_idx * 16U], 0, 16U);
 					memset(&enc->nz_u[mb_idx * 4U], 0, 4U);
