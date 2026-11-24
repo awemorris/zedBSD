@@ -33,6 +33,7 @@
 
 /* The defaults of the socket's path and the monospaced font's, and the proportional fonts' paths. */
 #define MAIN_SOCKET_PATH	"/tmp/.X11-unix/X0"
+#define MAIN_FIXED_PATH		KEILAND_DATADIR "/fonts/unifont.ttf"
 #define MAIN_FONT_PATH		KEILAND_DATADIR "/fonts/keiland-mono.ttf"
 #define MAIN_SANS_PATH		KEILAND_DATADIR "/fonts/keiland.ttf"
 #define MAIN_SANS_BOLD_PATH	KEILAND_DATADIR "/fonts/keiland-bold.ttf"
@@ -122,9 +123,16 @@ main(
 	memset(font_bytes, 0, sizeof(font_bytes));
 	font_count = 0U;
 	path = options.font_path;
-	if (path == NULL)
-		path = MAIN_FONT_PATH;
-	error = main_font(path, &font_bytes[0], &font_size);
+	if (path != NULL) {
+		error = main_font(path, &font_bytes[0], &font_size);
+	} else {
+		path = MAIN_FIXED_PATH;
+		error = main_font(path, &font_bytes[0], &font_size);
+		if (error != 0) {
+			path = MAIN_FONT_PATH;
+			error = main_font(path, &font_bytes[0], &font_size);
+		}
+	}
 	if (error != 0) {
 		fprintf(stderr, "xserver: %s: %s (no text)\n", path, strerror(error));
 	} else {
