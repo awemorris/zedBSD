@@ -306,16 +306,21 @@ standalone_makeable_so = $(strip $(foreach req,$(1),$(if $(call standalone_requi
 # A required shared library missing from the build is made by its package,
 # once per make: (1) library, (2) package directory.  The top-level build
 # normally made it first (mk/userland.mk orders the packages); this rule
-# covers a package made on its own.  A requirement whose library is still
-# missing at the link is left out of it, as before.
+# covers a package made on its own.  The libraries are made one after
+# another (each waits for the one before, order-only): a library's own
+# make also makes the libraries it requires, so two at once would make
+# the same library in the same BUILD at the same time.  A requirement
+# whose library is still missing at the link is left out of it, as before.
 #
+STANDALONE_REQUIRED_LAST :=
 define STANDALONE_REQUIRED_RULE
 # The first program that requires the library defines its rule.
 ifndef STANDALONE_REQUIRED_RULE_$(1)
 STANDALONE_REQUIRED_RULE_$(1) := 1
-$$(STANDALONE_DYNAMIC_DIR)/$(1):
+$$(STANDALONE_DYNAMIC_DIR)/$(1): | $$(STANDALONE_REQUIRED_LAST)
 	$$(call standalone_log,MAKE,userland/$(2))
 	$$(Q)$$(MAKE) -C "$$(REPO_ROOT)/userland/$(2)"
+STANDALONE_REQUIRED_LAST := $$(STANDALONE_DYNAMIC_DIR)/$(1)
 endif
 
 endef
