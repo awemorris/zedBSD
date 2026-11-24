@@ -29,9 +29,9 @@
 #include <math.h>
 #include <string.h>
 
-static int touch_near_handle(const struct kl_text_touch *touch, size_t position, double x, double y);
+static int touch_near_handle(const struct kl_text_touch *touch, size_t position, double x, double y, unsigned scale);
 static void touch_grip(struct kl_text_touch *touch, double x, double y);
-static double touch_edge_speed(double place, double size);
+static double touch_edge_speed(double place, double size, unsigned scale);
 static void touch_set_bar(struct kl_text_touch *touch, int bar);
 
 /*
@@ -139,6 +139,22 @@ kl_text_touch_drag_begin(
 	double x,
 	double y)
 {
+	/* Default scale (100 % / logical units). */
+	keiui_text_touch_drag_begin(touch, x, y, KL_SCALE_BASE);
+}
+
+/*
+ * One finger's drag begins at a point: on a handle it moves that end,
+ * anywhere else it selects from the point, with handle reach and knob
+ * geometry scaled by scale (in 96ths).
+ */
+void
+keiui_text_touch_drag_begin(
+	struct kl_text_touch *touch,
+	double x,
+	double y,
+	unsigned scale)
+{
 	size_t other;
 	int near;
 
@@ -155,7 +171,7 @@ kl_text_touch_drag_begin(
 
 	/* A handle under the finger: the caret is always the end that moves, so the anchor is the other one. */
 	if (touch->handles) {
-		near = touch_near_handle(touch, touch->caret, x, y);
+		near = touch_near_handle(touch, touch->caret, x, y, scale);
 		if (near) {
 			touch->handle = KL_TEXT_HANDLE_CARET;
 			touch_grip(touch, x, y);
@@ -163,7 +179,7 @@ kl_text_touch_drag_begin(
 		}
 
 		/* The anchor's handle: the ends change places. */
-		near = touch_near_handle(touch, touch->anchor, x, y);
+		near = touch_near_handle(touch, touch->anchor, x, y, scale);
 		if (near) {
 			other = touch->caret;
 			touch->caret = touch->anchor;
@@ -327,6 +343,22 @@ kl_text_touch_edge(
 	double *vx,
 	double *vy)
 {
+	/* Default scale (100 % / logical units). */
+	return keiui_text_touch_edge(touch, scroll, vx, vy, KL_SCALE_BASE);
+}
+
+/*
+ * Reports how fast the content should scroll by itself while a selecting
+ * finger is near the viewport's edge at the given scale (in 96ths).
+ */
+int
+keiui_text_touch_edge(
+	const struct kl_text_touch *touch,
+	const struct kl_scroll *scroll,
+	double *vx,
+	double *vy,
+	unsigned scale)
+{
 	/* Nothing while no finger selects. */
 	*vx = 0.0;
 	*vy = 0.0;
@@ -335,9 +367,9 @@ kl_text_touch_edge(
 
 	/* Each axis the scroll moves along, by how near the finger is to its edges in the viewport. */
 	if ((scroll->axes & KL_SCROLL_X) != 0U)
-		*vx = touch_edge_speed(touch->finger_x - scroll->x, scroll->viewport_width);
+		*vx = touch_edge_speed(touch->finger_x - scroll->x, scroll->viewport_width, scale);
 	if ((scroll->axes & KL_SCROLL_Y) != 0U)
-		*vy = touch_edge_speed(touch->finger_y - scroll->y, scroll->viewport_height);
+		*vy = touch_edge_speed(touch->finger_y - scroll->y, scroll->viewport_height, scale);
 
 	/* Away from the edges. */
 	if (*vx == 0.0 && *vy == 0.0)
@@ -423,21 +455,26 @@ touch_near_handle(
 	const struct kl_text_touch *touch,
 	size_t position,
 	double x,
-	double y)
+	double y,
+	unsigned scale)
 {
 	struct kl_rect rect;
+	double factor;
 	double centre_x;
 	double centre_y;
 	double distance;
 
+	/* Scale factor from logical units to the touch view's coordinates. */
+	factor = (scale != 0U) ? (double)scale / (double)KL_SCALE_BASE : 1.0;
+
 	/* The knob's centre under the end's caret. */
 	touch->view->caret_rect(touch->data, position, &rect);
 	centre_x = (double)rect.x;
-	centre_y = (double)(rect.y + rect.height) + (double)KL_TEXT_HANDLE / 2.0;
+	centre_y = (double)(rect.y + rect.height) + ((double)KL_TEXT_HANDLE / 2.0) * factor;
 
 	/* Within the reach. */
 	distance = hypot(x - centre_x, y - centre_y);
-	if (distance > (double)KL_TEXT_HANDLE_REACH / 2.0)
+	if (distance > ((double)KL_TEXT_HANDLE_REACH / 2.0) * factor)
 		return 0;
 
 	/* Succeeded: the finger is on the handle. */
@@ -452,24 +489,33 @@ touch_near_handle(
 static double
 touch_edge_speed(
 	double place,
-	double size)
+	double size,
+	unsigned scale)
 {
+	double factor;
+	double edge;
+	double speed;
 	double depth;
 
+	/* Scale factor from logical units to the touch view's coordinates. */
+	factor = (scale != 0U) ? (double)scale / (double)KL_SCALE_BASE : 1.0;
+	edge = (double)KL_TEXT_EDGE * factor;
+	speed = KL_TEXT_EDGE_SPEED * factor;
+
 	/* Near the start: toward the start. */
-	if (place < (double)KL_TEXT_EDGE) {
-		depth = ((double)KL_TEXT_EDGE - place) / (double)KL_TEXT_EDGE;
+	if (place < edge) {
+		depth = (edge - place) / edge;
 		if (depth > 1.0)
 			depth = 1.0;
-		return -KL_TEXT_EDGE_SPEED * depth;
+		return -speed * depth;
 	}
 
 	/* Near the end: toward the end. */
-	if (place > size - (double)KL_TEXT_EDGE) {
-		depth = (place - (size - (double)KL_TEXT_EDGE)) / (double)KL_TEXT_EDGE;
+	if (place > size - edge) {
+		depth = (place - (size - edge)) / edge;
 		if (depth > 1.0)
 			depth = 1.0;
-		return KL_TEXT_EDGE_SPEED * depth;
+		return speed * depth;
 	}
 
 	/* Away from both. */

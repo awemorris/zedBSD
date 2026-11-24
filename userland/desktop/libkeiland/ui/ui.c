@@ -27,6 +27,7 @@
 #include <keiland/keiland.h>
 
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -239,8 +240,12 @@ struct kl_ui {
 	 * The scale of the window the widgets are on (KL_VERSION 114,
 	 * kl_ui_set_scale), in 96ths: kl_ui_window_input turns the window's
 	 * pixels into units by it.  KL_SCALE_BASE from kl_ui_create.
+	 * window_input_used is 1 once kl_ui_window_input has fed logical
+	 * units to this state (distinguishing it from callers that feed
+	 * window pixels directly).
 	 */
 	unsigned scale;
+	int window_input_used;
 
 	/*
 	 * The scroll a touch pad's two fingers hold (KL_VERSION 40):
@@ -454,6 +459,15 @@ keiui_ui_scale(
 {
 	/* The scale kl_ui_set_scale set. */
 	return ui->scale;
+}
+
+/* Marks that kl_ui_window_input scaled input into logical units on this UI state. */
+void
+keiui_ui_mark_window_input(
+	struct kl_ui *ui)
+{
+	/* Logical units are now in use for this UI state. */
+	ui->window_input_used = 1;
 }
 
 /*
@@ -2988,7 +3002,7 @@ ui_gesture(
 		} else if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_TEXT && gesture->fingers == 1U) {
 			ui->drag = UI_DRAG_SELECT;
 			ui_content(ui, gesture->x, gesture->y, &x, &y);
-			kl_text_touch_drag_begin(ui->touch_region.touch, x, y);
+			keiui_text_touch_drag_begin(ui->touch_region.touch, x, y, ui->window_input_used ? KL_SCALE_BASE : ui->scale);
 		} else if (ui->touch_has_region) {
 			ui->drag = UI_DRAG_SCROLL;
 		} else {
@@ -3100,7 +3114,7 @@ ui_drag_step(
 	kl_text_touch_drag(ui->touch_region.touch, x, y);
 
 	/* Near an edge the content scrolls by itself, at a speed for the time since the last frame. */
-	edge = kl_text_touch_edge(ui->touch_region.touch, scroll, &vx, &vy);
+	edge = keiui_text_touch_edge(ui->touch_region.touch, scroll, &vx, &vy, ui->window_input_used ? KL_SCALE_BASE : ui->scale);
 	seconds = 0.0;
 	if (now_us > ui->edge_us)
 		seconds = (double)(now_us - ui->edge_us) / 1000000.0;
@@ -3326,8 +3340,10 @@ ui_inset_center(
 	double largest;
 	double middle;
 	double target;
+	double caret_middle;
 	int visible;
 	int bottom;
+	int inset_bottom;
 
 	/* The text view: the one with the focus, else the last recorded. */
 	record = NULL;
@@ -3354,8 +3370,13 @@ ui_inset_center(
 
 	/* The part of the view the keyboard leaves: from its top down to the keyboard's top edge. */
 	bottom = record->rect.y + record->rect.height;
-	if (ui_inset.bottom > 0 && (int)ui_inset.height - ui_inset.bottom < bottom)
-		bottom = (int)ui_inset.height - ui_inset.bottom;
+	if (ui_inset.bottom > 0) {
+		inset_bottom = (int)ui_inset.height - ui_inset.bottom;
+		if (ui->window_input_used && ui->scale != KL_SCALE_BASE)
+			inset_bottom = (int)floor((double)inset_bottom * (double)KL_SCALE_BASE / (double)ui->scale);
+		if (inset_bottom < bottom)
+			bottom = inset_bottom;
+	}
 	visible = bottom - record->rect.y;
 	if (visible <= 0)
 		return 0;
@@ -3367,7 +3388,10 @@ ui_inset_center(
 	 * coordinates).
 	 */
 	if (ui_inset.caret[3] > 0) {
-		middle = (double)ui_inset.caret[1] + (double)ui_inset.caret[3] / 2.0 - (double)record->rect.y + scroll->y;
+		caret_middle = (double)ui_inset.caret[1] + (double)ui_inset.caret[3] / 2.0;
+		if (ui->window_input_used && ui->scale != KL_SCALE_BASE)
+			caret_middle *= (double)KL_SCALE_BASE / (double)ui->scale;
+		middle = caret_middle - (double)record->rect.y + scroll->y;
 	} else {
 		memset(&caret, 0, sizeof(caret));
 		touch->view->caret_rect(touch->data, touch->caret, &caret);
@@ -3797,6 +3821,7 @@ ui_select_bounds(
 	const struct kl_canvas *canvas;
 	struct kl_rect pixels;
 	struct kl_rect whole;
+	struct kl_rect uncovered;
 	int right;
 	int bottom;
 	int meet;
@@ -3825,15 +3850,17 @@ ui_select_bounds(
 		bottom = ui_inset.bottom;
 	}
 
-	/* The covered widths taken off the canvas's right and bottom. */
-	if (right > 0 && bounds->x + bounds->width > whole.width - right)
-		bounds->width = whole.width - right - bounds->x;
-	if (bottom > 0 && bounds->y + bounds->height > whole.height - bottom)
-		bounds->height = whole.height - bottom - bounds->y;
-	if (bounds->width < 0)
-		bounds->width = 0;
-	if (bounds->height < 0)
-		bounds->height = 0;
+	/* The covered widths (in pixels) taken off the canvas's right and bottom in its units. */
+	if (right > 0 || bottom > 0) {
+		pixels.x = 0;
+		pixels.y = 0;
+		pixels.width = (right < canvas->width) ? (canvas->width - right) : 0;
+		pixels.height = (bottom < canvas->height) ? (canvas->height - bottom) : 0;
+		kl_canvas_logical(canvas, &pixels, &uncovered);
+		meet = keiui_rect_intersect(bounds, &uncovered, bounds);
+		if (!meet)
+			memset(bounds, 0, sizeof(*bounds));
+	}
 }
 
 /*
