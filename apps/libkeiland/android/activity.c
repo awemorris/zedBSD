@@ -152,6 +152,8 @@ keiland_android_start(
 	activity_current = activity;
 	start_thread = 0;
 	if (!activity_thread_running) {
+		activity_ring_head = 0;
+		activity_ring_count = 0;
 		activity_thread_running = 1;
 		activity_main = main;
 		start_thread = 1;

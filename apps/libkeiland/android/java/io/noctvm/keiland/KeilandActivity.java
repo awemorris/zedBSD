@@ -16,9 +16,11 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Insets;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -191,7 +193,8 @@ public class KeilandActivity extends NativeActivity {
 		keyboard = insets.getInsets(WindowInsets.Type.ime());
 		covered = 0;
 		/* A keyboard that covers most of the window (a full-screen input method) leaves the program nothing to be shown in, so it is not made room for. */
-		if (insets.isVisible(WindowInsets.Type.ime()) && keyboard.bottom <= inputView.getHeight() * KEYBOARD_MAX_PERCENT / 100) {
+		if (insets.isVisible(WindowInsets.Type.ime()) &&
+		    (inputView.getHeight() == 0 || keyboard.bottom <= inputView.getHeight() * KEYBOARD_MAX_PERCENT / 100)) {
 			covered = keyboard.bottom + keyBar.heightPixels();
 			if (keyBarWindow.isShowing()) {
 				keyBarWindow.update(0, keyboard.bottom, ViewGroup.LayoutParams.MATCH_PARENT, keyBar.heightPixels());
@@ -207,11 +210,40 @@ public class KeilandActivity extends NativeActivity {
 	/** Passes the look of the system to the native code. */
 	private void sendConfig(Configuration configuration) {
 		boolean dark;
+		int accent;
 		String locale;
 
 		dark = (configuration.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+		accent = readAccent();
 		locale = configuration.getLocales().get(0).toLanguageTag();
-		KeilandBridge.nativeConfig(dark, -1, configuration.fontScale, locale);
+		KeilandBridge.nativeConfig(dark, accent, configuration.fontScale, locale);
+	}
+
+	/** Reads the system accent colour (0xAARRGGBB), or -1 when none is available. */
+	private int readAccent() {
+		TypedValue value;
+
+		if (Build.VERSION.SDK_INT >= 31) {
+			try {
+				return getColor(android.R.color.system_accent1_500);
+			} catch (Resources.NotFoundException e) {
+				/* Fall through to the theme's accent attribute. */
+			}
+		}
+		value = new TypedValue();
+		if (getTheme() != null && getTheme().resolveAttribute(android.R.attr.colorAccent, value, true)) {
+			if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+				return value.data;
+			}
+			if (value.resourceId != 0) {
+				try {
+					return getColor(value.resourceId);
+				} catch (Resources.NotFoundException e) {
+					return -1;
+				}
+			}
+		}
+		return -1;
 	}
 
 	/** Passes the clipboard's text, or null for none, to the native code. */

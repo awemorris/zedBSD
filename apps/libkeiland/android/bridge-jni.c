@@ -431,6 +431,16 @@ keiland_java_quit(void)
 }
 
 /*
+ * Closes the current Activity and removes its task from the recent apps list.
+ */
+void
+keiland_android_quit(void)
+{
+	/* Asks Java to finish the Activity. */
+	(void)keiland_java_quit();
+}
+
+/*
  * Queues the text that the input method committed.
  */
 static void

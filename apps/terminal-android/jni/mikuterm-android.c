@@ -17,7 +17,6 @@
  * a network.
  */
 
-#include "apps/libkeiland/android/bridge-jni.h"
 #include "apps/libkeiland/android/keiland-android.h"
 #include "apps/terminal-android/jni/mikuterm-android.h"
 
@@ -52,9 +51,27 @@
 /* How long the program waits at its end for the connections' threads to say goodbye, in milliseconds. */
 #define MAIN_FAREWELL_MS	3000U
 
+/* The capacity of a tab's local notice buffer (network changes). */
+#define MAIN_NOTICE_MAX		256U
+
 /* What Help > About writes on the screen. */
 #define MAIN_ABOUT		"\r\n\033[1mmikuterm\033[0m " MIKUTERM_VERSION_TEXT \
 				" (Micro Unicode Terminal): zedBSD's terminal and SSH client for Android.\r\n"
+
+/*
+ * Wraps an opened tab connection on M so that the program tracks how many
+ * sessions are active (for the foreground service), can close all tabs on a
+ * stop-all request, and can inject local notices on network changes.
+ */
+struct main_session {
+	struct terminal_connection base;
+	struct terminal_connection *inner;
+	struct main_session *next;
+	int stop_requested;
+	char notice[MAIN_NOTICE_MAX];
+	size_t notice_offset;
+	size_t notice_length;
+};
 
 /*
  * The run's settings and paths, for the whole program: they are given to the
@@ -63,6 +80,8 @@
 struct main_state {
 	struct mikuterm_conf conf;
 	struct mikuterm_connector connector;
+	struct terminal_connector wrapped_connector;
+	struct terminal_connector *inner_connector;
 	char font[MIKUTERM_PATH_MAX];
 	char fallback[MIKUTERM_PATH_MAX];
 	char companion[MIKUTERM_PATH_MAX];
@@ -73,12 +92,41 @@ struct main_state {
 /* The program's state (large, and needed for the whole run). */
 static struct main_state main_state;
 
+/* Active wrapped sessions on M, their count, the open kl_app, and whether the default network was lost. */
+static struct main_session *main_sessions;
+static unsigned main_session_count;
+static struct kl_app *main_app;
+static int main_network_lost;
+
 static void main_read_conf(struct mikuterm_conf *conf);
 #if !MIKUTERM_ANDROID_ECHO
 static void main_connector_init(struct mikuterm_connector *connector, const struct mikuterm_conf *conf);
 #endif
 static void main_forget_passphrases(void *data);
 static void main_ended(void *data, const struct terminal_run_result *result);
+static int main_connector_open(void *data, struct kl_app *app, uint32_t id, unsigned columns, unsigned rows, unsigned width, unsigned height, char *title, size_t size, struct terminal_connection **connection);
+static size_t main_session_read(struct terminal_connection *connection, unsigned char *buffer, size_t size);
+static int main_session_write(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
+static int main_session_resize(struct terminal_connection *connection, unsigned columns, unsigned rows, unsigned width, unsigned height);
+static int main_session_mode(const struct terminal_connection *connection, unsigned *mode);
+static unsigned main_session_event(struct terminal_connection *connection, const struct kl_app_event *event);
+static unsigned main_session_pending(const struct terminal_connection *connection);
+static void main_session_close(struct terminal_connection *connection);
+static struct terminal_connection *main_session_take(struct terminal_connection *connection);
+static void main_session_notice(struct main_session *session, const char *text);
+
+/* The wrapped connection operations (picture is NULL; X11 picture tabs come from take). */
+static const struct terminal_connection_ops main_session_ops = {
+	main_session_read,
+	main_session_write,
+	main_session_resize,
+	main_session_mode,
+	main_session_event,
+	main_session_pending,
+	main_session_close,
+	main_session_take,
+	NULL
+};
 
 /*
  * Runs mikuterm until its last tab or its window closes.
@@ -123,7 +171,7 @@ mikuterm_android_main(void)
 		return;
 	}
 
-	/* The tabs' connections. */
+	/* The tabs' connections, wrapped to track active sessions for the foreground service. */
 #if MIKUTERM_ANDROID_ECHO
 	memset(&main_state.connector, 0, sizeof(main_state.connector));
 	main_state.connector.connector.open = echo_connector_open;
@@ -132,6 +180,14 @@ mikuterm_android_main(void)
 #else
 	main_connector_init(&main_state.connector, &main_state.conf);
 #endif
+	main_state.inner_connector = &main_state.connector.connector;
+	main_state.wrapped_connector.open = main_connector_open;
+	main_state.wrapped_connector.operation = main_state.inner_connector->operation;
+	main_state.wrapped_connector.data = &main_state;
+	main_sessions = NULL;
+	main_session_count = 0U;
+	main_app = NULL;
+	main_network_lost = 0;
 
 	/* The settings' tab: the folder's ssh/ files and mikuterm.conf (none when the folder's path is too long for them). */
 	error = mikuterm_page_init(&main_state.conf, &main_state.connector, &page);
@@ -172,7 +228,7 @@ mikuterm_android_main(void)
 	run.page = page;
 	run.page_font = main_state.page_font;
 	run.page_fallback = main_state.page_fallback;
-	run.connector = &main_state.connector.connector;
+	run.connector = &main_state.wrapped_connector;
 	run.new_window = NULL;
 	run.ended = main_ended;
 	run.data = &main_state;
@@ -183,8 +239,13 @@ mikuterm_android_main(void)
 	if (status != 0)
 		__android_log_print(ANDROID_LOG_ERROR, "mikuterm", "the run failed: %s (result %d, errno %d)", result.operation, result.result, result.error);
 
-	/* The Activity goes with the run. */
-	(void)keiland_java_quit();
+	/* Stops the foreground service and closes the Activity. */
+	main_app = NULL;
+	main_sessions = NULL;
+	main_session_count = 0U;
+	main_network_lost = 0;
+	(void)mikuterm_java_service_update(0U);
+	keiland_android_quit();
 }
 
 /*
@@ -209,12 +270,42 @@ mikuterm_android_post(
 		mikuterm_credential_forget(data);
 		return 1;
 	case MIKUTERM_POST_NETWORK:
-		/* Nothing acts on the network's changes yet. */
-		free(data);
-		return 1;
+		{
+			struct mikuterm_post_result *net;
+			struct main_session *session;
+
+			/* Tells open tabs when the default network drops or returns after a drop. */
+			net = data;
+			if (net != NULL) {
+				if (!net->ok) {
+					main_network_lost = 1;
+					for (session = main_sessions; session != NULL; session = session->next)
+						main_session_notice(session, "\r\nThe network connection was lost.\r\n");
+					if (main_app != NULL)
+						(void)kl_app_post(main_app, 0U, NULL);
+				} else if (main_network_lost) {
+					main_network_lost = 0;
+					for (session = main_sessions; session != NULL; session = session->next)
+						main_session_notice(session, "\r\nThe network is available again.\r\n");
+					if (main_app != NULL)
+						(void)kl_app_post(main_app, 0U, NULL);
+				}
+				free(net);
+			}
+			return 1;
+		}
 	case MIKUTERM_POST_STOP_ALL:
-		mikuterm_connections_stop();
-		return 1;
+		{
+			struct main_session *session;
+
+			/* Stops every connection thread and asks every open tab to close. */
+			mikuterm_connections_stop();
+			for (session = main_sessions; session != NULL; session = session->next)
+				session->stop_requested = 1;
+			if (main_app != NULL)
+				(void)kl_app_post(main_app, 0U, NULL);
+			return 1;
+		}
 	default:
 		break;
 	}
@@ -368,4 +459,223 @@ mikuterm_x11_screen(
 	keiland_android_screen(width, height, &scale);
 	if (percent != NULL)
 		*percent = (scale != 0U) ? (scale * 100U / KL_SCALE_BASE) : 0U;
+}
+
+/* Opens a tab's connection through the inner connector and tracks it for the foreground service. */
+static int
+main_connector_open(
+	void *data,
+	struct kl_app *app,
+	uint32_t id,
+	unsigned columns,
+	unsigned rows,
+	unsigned width,
+	unsigned height,
+	char *title,
+	size_t size,
+	struct terminal_connection **connection)
+{
+	struct main_state *state;
+	struct terminal_connection *inner;
+	struct main_session *session;
+	int error;
+
+	/* Opens the underlying connection. */
+	state = data;
+	inner = NULL;
+	error = state->inner_connector->open(
+		state->inner_connector->data,
+		app,
+		id,
+		columns,
+		rows,
+		width,
+		height,
+		title,
+		size,
+		&inner);
+	if (error != 0)
+		return error;
+
+	/* Wraps it so the program can count active sessions, close all on request, and inject notices. */
+	session = calloc(1U, sizeof(*session));
+	if (session == NULL) {
+		inner->ops->close(inner);
+		return ENOMEM;
+	}
+	session->base.ops = &main_session_ops;
+	session->inner = inner;
+	session->next = main_sessions;
+	main_sessions = session;
+	main_app = app;
+	main_session_count++;
+	(void)mikuterm_java_service_update(main_session_count);
+
+	/* Succeeded. */
+	*connection = &session->base;
+	return 0;
+}
+
+/* Reads any pending local notice first, then delegates to the underlying connection. */
+static size_t
+main_session_read(
+	struct terminal_connection *connection,
+	unsigned char *buffer,
+	size_t size)
+{
+	struct main_session *session;
+	size_t avail;
+	size_t take;
+
+	/* Emits a queued network notice before reading from the connection. */
+	session = (struct main_session *)connection;
+	if (session->notice_offset < session->notice_length) {
+		avail = session->notice_length - session->notice_offset;
+		take = avail < size ? avail : size;
+		memcpy(buffer, session->notice + session->notice_offset, take);
+		session->notice_offset += take;
+		if (session->notice_offset == session->notice_length) {
+			session->notice_offset = 0U;
+			session->notice_length = 0U;
+		}
+		return take;
+	}
+
+	/* Stops reading once a global disconnect was requested. */
+	if (session->stop_requested)
+		return 0U;
+
+	/* Reads from the underlying connection. */
+	return session->inner->ops->read(session->inner, buffer, size);
+}
+
+/* Forwards typed bytes to the underlying connection. */
+static int
+main_session_write(
+	struct terminal_connection *connection,
+	const unsigned char *bytes,
+	size_t size,
+	size_t *written)
+{
+	struct main_session *session;
+
+	session = (struct main_session *)connection;
+	return session->inner->ops->write(session->inner, bytes, size, written);
+}
+
+/* Forwards grid size changes to the underlying connection. */
+static int
+main_session_resize(
+	struct terminal_connection *connection,
+	unsigned columns,
+	unsigned rows,
+	unsigned width,
+	unsigned height)
+{
+	struct main_session *session;
+
+	session = (struct main_session *)connection;
+	return session->inner->ops->resize(session->inner, columns, rows, width, height);
+}
+
+/* Forwards mode queries to the underlying connection. */
+static int
+main_session_mode(
+	const struct terminal_connection *connection,
+	unsigned *mode)
+{
+	const struct main_session *session;
+
+	session = (const struct main_session *)connection;
+	return session->inner->ops->mode(session->inner, mode);
+}
+
+/* Forwards application events and adds local output/exit readiness when needed. */
+static unsigned
+main_session_event(
+	struct terminal_connection *connection,
+	const struct kl_app_event *event)
+{
+	struct main_session *session;
+	unsigned ready;
+
+	session = (struct main_session *)connection;
+	ready = session->inner->ops->event(session->inner, event);
+	if (session->notice_offset < session->notice_length)
+		ready |= TERMINAL_READY_OUTPUT;
+	if (session->stop_requested)
+		ready |= TERMINAL_READY_EXIT;
+	return ready;
+}
+
+/* Reports pending readiness from the underlying connection plus any local notice or stop request. */
+static unsigned
+main_session_pending(
+	const struct terminal_connection *connection)
+{
+	const struct main_session *session;
+	unsigned ready;
+
+	session = (const struct main_session *)connection;
+	ready = session->inner->ops->pending(session->inner);
+	if (session->notice_offset < session->notice_length)
+		ready |= TERMINAL_READY_OUTPUT;
+	if (session->stop_requested)
+		ready |= TERMINAL_READY_EXIT;
+	return ready;
+}
+
+/* Closes the underlying connection and updates the foreground service session count. */
+static void
+main_session_close(
+	struct terminal_connection *connection)
+{
+	struct main_session *session;
+	struct main_session **link;
+
+	/* Unlinks from the active list and updates the foreground service. */
+	session = (struct main_session *)connection;
+	for (link = &main_sessions; *link != NULL; link = &(*link)->next) {
+		if (*link == session) {
+			*link = session->next;
+			break;
+		}
+	}
+	if (main_session_count > 0U)
+		main_session_count--;
+	(void)mikuterm_java_service_update(main_session_count);
+
+	/* Closes the underlying connection and frees the wrapper. */
+	session->inner->ops->close(session->inner);
+	free(session);
+}
+
+/* Forwards X11 picture tab requests to the underlying connection. */
+static struct terminal_connection *
+main_session_take(
+	struct terminal_connection *connection)
+{
+	struct main_session *session;
+
+	session = (struct main_session *)connection;
+	if (session->inner->ops->take == NULL)
+		return NULL;
+	return session->inner->ops->take(session->inner);
+}
+
+/* Queues a local notice line into a session's notice buffer. */
+static void
+main_session_notice(
+	struct main_session *session,
+	const char *text)
+{
+	size_t length;
+
+	length = strlen(text);
+	if (length >= sizeof(session->notice))
+		length = sizeof(session->notice) - 1U;
+	memcpy(session->notice, text, length);
+	session->notice[length] = '\0';
+	session->notice_offset = 0U;
+	session->notice_length = length;
 }
