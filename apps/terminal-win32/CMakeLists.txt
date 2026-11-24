@@ -91,6 +91,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/sftp-view.c
 	${MIKUTERM_DIR}/sftp-view-draw.c
 	${MIKUTERM_DIR}/sftp-view-input.c
+	${MIKUTERM_DIR}/vi-connection-win32.c
 	${MIKUTERM_DIR}/x11-spawn-win32.c
 	${MIKUTERM_DIR}/x11-child.c
 	${MIKUTERM_DIR}/x11-tab-child.c
