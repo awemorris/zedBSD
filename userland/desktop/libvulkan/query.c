@@ -49,6 +49,8 @@ vkCreateQueryPool(
 	struct vulkan_reader reader;
 	VkResult status;
 	VkQueryPipelineStatisticFlags statistics;
+	const VkQueryPoolVideoEncodeFeedbackCreateInfoKHR *feedback;
+	uint32_t fb_flags;
 	uint64_t present;
 	uint64_t returned;
 	uint64_t handle;
@@ -64,10 +66,32 @@ vkCreateQueryPool(
 	pool->query_count = pCreateInfo->queryCount;
 	pool->result_count = 1;
 	pool->status_only = VK_FALSE;
+	feedback = NULL;
 
-	/* A result status pool's one result is the status (ws083-p008). */
+	/* A result status pool's one result is the status. */
 	if (pCreateInfo->queryType == VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR)
 		pool->status_only = VK_TRUE;
+
+	/* A video encode feedback pool returns one result per selected feedback flag. */
+	if (pCreateInfo->queryType == VK_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK_KHR) {
+		feedback = (const VkQueryPoolVideoEncodeFeedbackCreateInfoKHR *)pCreateInfo->pNext;
+		while (feedback != NULL &&
+		       feedback->sType != VK_STRUCTURE_TYPE_QUERY_POOL_VIDEO_ENCODE_FEEDBACK_CREATE_INFO_KHR)
+			feedback = (const VkQueryPoolVideoEncodeFeedbackCreateInfoKHR *)feedback->pNext;
+		if (feedback == NULL || feedback->encodeFeedbackFlags == 0) {
+			vulkan_object_free(object);
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		/* Count the selected feedback bits in the mask. */
+		pool->result_count = 0;
+		fb_flags = feedback->encodeFeedbackFlags;
+		while (fb_flags != 0) {
+			if ((fb_flags & 1U) != 0)
+				pool->result_count++;
+			fb_flags >>= 1;
+		}
+	}
 
 	/* Pipeline statistics produce one result for each selected standard flag. */
 	if (pCreateInfo->queryType == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
@@ -96,7 +120,14 @@ vkCreateQueryPool(
 	vulkan_write_u64(&writer, owner->object.wire_id);
 	vulkan_write_u64(&writer, 1);
 	vulkan_write_u32(&writer, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
-	vulkan_write_u64(&writer, 0);
+	if (feedback != NULL) {
+		vulkan_write_u64(&writer, 1);
+		vulkan_write_u32(&writer, VK_STRUCTURE_TYPE_QUERY_POOL_VIDEO_ENCODE_FEEDBACK_CREATE_INFO_KHR);
+		vulkan_write_u64(&writer, 0);
+		vulkan_write_u32(&writer, feedback->encodeFeedbackFlags);
+	} else {
+		vulkan_write_u64(&writer, 0);
+	}
 	vulkan_write_u32(&writer, pCreateInfo->flags);
 	vulkan_write_u32(&writer, pCreateInfo->queryType);
 	vulkan_write_u32(&writer, pCreateInfo->queryCount);

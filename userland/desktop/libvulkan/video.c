@@ -153,6 +153,21 @@ static VkResult video_h265_keys_add(struct vulkan_video_keys *keys, const VkVide
 static VkResult video_key_take(uint32_t *words, uint32_t index, VkBool32 replace);
 static VkBool32 video_key_test(const uint32_t *words, uint32_t index);
 static void video_key_set(uint32_t *words, uint32_t index);
+static VkResult video_keys_add_h264(struct vulkan_video_keys *keys, uint32_t sps_count, const StdVideoH264SequenceParameterSet *spss, uint32_t pps_count, const StdVideoH264PictureParameterSet *ppss, VkBool32 replace);
+static void video_encode_encode(struct vulkan_writer *writer, const VkVideoEncodeInfoKHR *record);
+static void video_encode_h264_encode_parameters_add(struct vulkan_writer *writer, const VkVideoEncodeH264SessionParametersAddInfoKHR *record);
+static void video_encode_h264_encode_picture(struct vulkan_writer *writer, const VkVideoEncodeH264PictureInfoKHR *record);
+static void video_encode_h264_encode_slice(struct vulkan_writer *writer, const VkVideoEncodeH264NaluSliceInfoKHR *record);
+static void video_encode_h264_encode_std_picture(struct vulkan_writer *writer, const StdVideoEncodeH264PictureInfo *record);
+static void video_encode_h264_encode_std_reference(struct vulkan_writer *writer, const StdVideoEncodeH264ReferenceInfo *record);
+static void video_encode_h264_encode_std_slice(struct vulkan_writer *writer, const StdVideoEncodeH264SliceHeader *record);
+static void video_encode_h264_encode_ref_lists(struct vulkan_writer *writer, const StdVideoEncodeH264ReferenceListsInfo *record);
+static void video_encode_h264_encode_weight_table(struct vulkan_writer *writer, const StdVideoEncodeH264WeightTable *record);
+static void video_encode_rate_control(struct vulkan_writer *writer, const VkVideoEncodeRateControlInfoKHR *record);
+static uint32_t video_h264_encode_picture_flags(const StdVideoEncodeH264PictureInfoFlags *flags);
+static uint32_t video_h264_encode_reference_flags(const StdVideoEncodeH264ReferenceInfoFlags *flags);
+static uint32_t video_h264_encode_slice_flags(const StdVideoEncodeH264SliceHeaderFlags *flags);
+static uint32_t video_h264_encode_ref_lists_flags(const StdVideoEncodeH264ReferenceListsInfoFlags *flags);
 static void video_destroy(VkDevice device, uint64_t handle, uint32_t opcode, const VkAllocationCallbacks *allocator);
 
 /*
@@ -221,6 +236,7 @@ vkGetPhysicalDeviceVideoCapabilitiesKHR(
 	}
 
 	/* Fills the caller's records in place, keeping every header and chain link. */
+	/* Reads the optional filled output chain if present. */
 	present = vulkan_reply_pointer(&reader);
 	if (present)
 		video_decode_output(&reader, (VkBaseOutStructure *)pCapabilities);
@@ -523,6 +539,7 @@ vkCreateVideoSessionParametersKHR(
 	struct vulkan_video_parameters *parameters;
 	struct vulkan_video_parameters *source;
 	const VkVideoDecodeH264SessionParametersCreateInfoKHR *h264;
+	const VkVideoEncodeH264SessionParametersCreateInfoKHR *h264_enc;
 	const VkVideoDecodeH265SessionParametersCreateInfoKHR *h265;
 	struct vulkan_writer writer;
 	VkResult status;
@@ -544,6 +561,21 @@ vkCreateVideoSessionParametersKHR(
 	h264 = (const VkVideoDecodeH264SessionParametersCreateInfoKHR *)video_find_input(pCreateInfo->pNext, VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR);
 	if (h264 != NULL && h264->pParametersAddInfo != NULL) {
 		status = video_keys_add(&parameters->keys, h264->pParametersAddInfo, VK_TRUE);
+		if (status != VK_SUCCESS) {
+			vulkan_object_free(object);
+			return status;
+		}
+	}
+
+	/* Takes the keys of the H.264 encode sets the create call adds, refusing an id outside H.264. */
+	h264_enc = (const VkVideoEncodeH264SessionParametersCreateInfoKHR *)video_find_input(pCreateInfo->pNext, VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR);
+	if (h264_enc != NULL && h264_enc->pParametersAddInfo != NULL) {
+		status = video_keys_add_h264(&parameters->keys,
+					     h264_enc->pParametersAddInfo->stdSPSCount,
+					     h264_enc->pParametersAddInfo->pStdSPSs,
+					     h264_enc->pParametersAddInfo->stdPPSCount,
+					     h264_enc->pParametersAddInfo->pStdPPSs,
+					     VK_TRUE);
 		if (status != VK_SUCCESS) {
 			vulkan_object_free(object);
 			return status;
@@ -600,6 +632,7 @@ vkUpdateVideoSessionParametersKHR(
 	struct VkDevice_T *owner;
 	struct vulkan_video_parameters *parameters;
 	const VkVideoDecodeH264SessionParametersAddInfoKHR *add;
+	const VkVideoEncodeH264SessionParametersAddInfoKHR *enc_add;
 	const VkVideoDecodeH265SessionParametersAddInfoKHR *h265_add;
 	struct vulkan_writer writer;
 	struct vulkan_reader reader;
@@ -616,6 +649,14 @@ vkUpdateVideoSessionParametersKHR(
 	add = (const VkVideoDecodeH264SessionParametersAddInfoKHR *)video_find_input(pUpdateInfo->pNext, VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR);
 	if (add != NULL) {
 		status = video_keys_add(&keys, add, VK_FALSE);
+		if (status != VK_SUCCESS)
+			return status;
+	}
+
+	/* The same for H.264 encode sets. */
+	enc_add = (const VkVideoEncodeH264SessionParametersAddInfoKHR *)video_find_input(pUpdateInfo->pNext, VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR);
+	if (enc_add != NULL) {
+		status = video_keys_add_h264(&keys, enc_add->stdSPSCount, enc_add->pStdSPSs, enc_add->stdPPSCount, enc_add->pStdPPSs, VK_FALSE);
 		if (status != VK_SUCCESS)
 			return status;
 	}
@@ -689,6 +730,7 @@ vkCmdBeginVideoCodingKHR(
 	return;
 }
 
+
 /*
  * Records the end of a video coding scope.
  */
@@ -714,6 +756,7 @@ vkCmdEndVideoCodingKHR(
 	return;
 }
 
+
 /*
  * Records a video coding control operation, such as resetting the session.
  */
@@ -738,6 +781,7 @@ vkCmdControlVideoCodingKHR(
 	/* Succeeded: the command is recorded or its failure is kept by the command buffer. */
 	return;
 }
+
 
 /*
  * Records the decode of one H.264 picture.
@@ -767,6 +811,191 @@ vkCmdDecodeVideoKHR(
 	return;
 }
 
+/*
+ * Queries the video encode quality level properties for one video profile.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR(
+	VkPhysicalDevice physicalDevice,
+	const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR *pQualityLevelInfo,
+	VkVideoEncodeQualityLevelPropertiesKHR *pQualityLevelProperties)
+{
+	struct VkPhysicalDevice_T *physical;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkResult status;
+	VkResult result;
+	VkBool32 present;
+
+	/* Only a device whose native word promised video encode answers this query. */
+	physical = vulkan_physical_device(physicalDevice);
+	if ((physical->supported_extensions & VULKAN_DEVICE_VIDEO_ENCODE_QUEUE) == 0)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* Refuses profiles this device does not encode before asking the renderer. */
+	status = video_profile_check(physical, pQualityLevelInfo->pVideoProfile);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Sends the quality level query and the shape of the output chain to fill. */
+	vulkan_writer_init_for_object(&writer, &physical->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES);
+	vulkan_write_u64(&writer, physical->object.wire_id);
+	vulkan_write_u64(&writer, 1);
+	video_encode_struct(&writer, (const VkBaseInStructure *)pQualityLevelInfo);
+	vulkan_write_u64(&writer, 1);
+	video_encode_output_request(&writer, (VkBaseOutStructure *)pQualityLevelProperties);
+	status = vulkan_command_execute(physical->object.context, &writer, 128, &reader, VK_TRUE);
+	vulkan_writer_finish(&writer);
+	if (status != VK_SUCCESS) {
+		status = vulkan_reply_finish(physical->object.context, &reader, status);
+		return status;
+	}
+
+	/* Reads the Vulkan result and, on success, fills the caller's output chain. */
+	result = (VkResult)(int32_t)vulkan_read_u32(&reader);
+	if (result != VK_SUCCESS) {
+		status = vulkan_reply_finish(physical->object.context, &reader, VK_SUCCESS);
+		if (status != VK_SUCCESS)
+			return status;
+		return result;
+	}
+
+	/* Reads the optional filled output chain if present. */
+	present = vulkan_reply_pointer(&reader);
+	if (present)
+		video_decode_output(&reader, (VkBaseOutStructure *)pQualityLevelProperties);
+	else
+		reader.error = VK_ERROR_DEVICE_LOST;
+	status = vulkan_reply_finish(physical->object.context, &reader, VK_SUCCESS);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the quality level properties are filled. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Reads the encoded parameter sets (such as Annex-B SPS and PPS) of a parameters object.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkGetEncodedVideoSessionParametersKHR(
+	VkDevice device,
+	const VkVideoEncodeSessionParametersGetInfoKHR *pVideoSessionParametersInfo,
+	VkVideoEncodeSessionParametersFeedbackInfoKHR *pFeedbackInfo,
+	size_t *pDataSize,
+	void *pData)
+{
+	struct VkDevice_T *owner;
+	struct vulkan_video_parameters *parameters;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkResult status;
+	VkResult result;
+	VkBool32 present;
+	uint64_t written;
+	size_t copy_size;
+	size_t reply_max;
+
+	uint64_t capacity;
+	uint32_t has_data;
+
+	/* Resolves the owning device and parameters object. */
+	owner = vulkan_device(device);
+	parameters = video_parameters_object(pVideoSessionParametersInfo->videoSessionParameters);
+	reply_max = 128;
+	capacity = 0;
+	has_data = 0;
+	if (pData != NULL) {
+		capacity = (uint64_t)*pDataSize;
+		has_data = 1U;
+		if (*pDataSize != 0)
+			reply_max += *pDataSize;
+	}
+
+	/* Sends the get-info, optional feedback chain shape, and output capacity. */
+	vulkan_writer_init_for_object(&writer, &parameters->object);
+	vulkan_command_begin(&writer, GPU_OP_GET_ENCODED_VIDEO_SESSION_PARAMETERS);
+	vulkan_write_u64(&writer, owner->object.wire_id);
+	vulkan_write_u64(&writer, 1);
+	video_encode_struct(&writer, (const VkBaseInStructure *)pVideoSessionParametersInfo);
+	if (pFeedbackInfo != NULL) {
+		vulkan_write_u64(&writer, 1);
+		video_encode_output_request(&writer, (VkBaseOutStructure *)pFeedbackInfo);
+	} else {
+		vulkan_write_u64(&writer, 0);
+	}
+
+	/* Sends the caller's buffer capacity and whether a buffer was provided. */
+	vulkan_write_u64(&writer, capacity);
+	vulkan_write_u32(&writer, has_data);
+	status = vulkan_command_execute(owner->object.context, &writer, reply_max, &reader, VK_TRUE);
+	vulkan_writer_finish(&writer);
+	if (status != VK_SUCCESS) {
+		status = vulkan_reply_finish(owner->object.context, &reader, status);
+		return status;
+	}
+
+	/* Reads the Vulkan result, optional feedback, and encoded parameter bytes. */
+	result = (VkResult)(int32_t)vulkan_read_u32(&reader);
+	if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+		status = vulkan_reply_finish(owner->object.context, &reader, VK_SUCCESS);
+		if (status != VK_SUCCESS)
+			return status;
+		return result;
+	}
+
+	if (pFeedbackInfo != NULL) {
+		/* Reads the optional filled output chain if present. */
+	present = vulkan_reply_pointer(&reader);
+		if (present)
+			video_decode_output(&reader, (VkBaseOutStructure *)pFeedbackInfo);
+		else
+			reader.error = VK_ERROR_DEVICE_LOST;
+	}
+
+	written = vulkan_read_u64(&reader);
+	if (pData != NULL && written != 0) {
+		copy_size = (size_t)written;
+		if (copy_size > *pDataSize) {
+			reader.error = VK_ERROR_DEVICE_LOST;
+		} else {
+			vulkan_read_bytes(&reader, pData, copy_size);
+		}
+	}
+	status = vulkan_reply_finish(owner->object.context, &reader, VK_SUCCESS);
+	if (status != VK_SUCCESS)
+		return status;
+
+	*pDataSize = (size_t)written;
+	return result;
+}
+
+/*
+ * Records the encode of one picture.
+ */
+VKAPI_ATTR void VKAPI_CALL
+vkCmdEncodeVideoKHR(
+	VkCommandBuffer commandBuffer,
+	const VkVideoEncodeInfoKHR *pEncodeInfo)
+{
+	struct vulkan_writer writer;
+	VkBool32 active;
+
+	/* Keeps the first recording failure for vkEndCommandBuffer to report. */
+	active = vulkan_command_record_begin(commandBuffer, &writer, GPU_OP_CMD_ENCODE_VIDEO);
+	if (!active)
+		return;
+
+	/* Copies the bitstream destination, source picture, references, and codec info. */
+	vulkan_write_u64(&writer, 1);
+	video_encode_struct(&writer, (const VkBaseInStructure *)pEncodeInfo);
+	vulkan_command_record_finish(commandBuffer, &writer);
+
+	/* Succeeded: the command is recorded or its failure is kept by the command buffer. */
+	return;
+}
+
 /* Checks that a profile is an H.264 or H.265 decode profile this library implements. */
 static VkResult
 video_profile_check(
@@ -774,9 +1003,10 @@ video_profile_check(
 	const VkVideoProfileInfoKHR *profile)
 {
 	const VkVideoDecodeH264ProfileInfoKHR *h264;
+	const VkVideoEncodeH264ProfileInfoKHR *h264_enc;
 	const VkVideoDecodeH265ProfileInfoKHR *h265;
 
-	/* H.264 and H.265 decode are the codec operations, each where a family of the device performs it. */
+	/* H.264 and H.265 decode and H.264 encode are the codec operations. */
 	switch (profile->videoCodecOperation) {
 	case VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR:
 		if ((physical->supported_extensions & VULKAN_DEVICE_VIDEO_DECODE_H264) == 0)
@@ -786,17 +1016,33 @@ video_profile_check(
 		if ((physical->supported_extensions & VULKAN_DEVICE_VIDEO_DECODE_H265) == 0)
 			return VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR;
 		break;
+	case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:
+		if ((physical->supported_extensions & VULKAN_DEVICE_VIDEO_ENCODE_H264) == 0)
+			return VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR;
+		break;
 	default:
 		return VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR;
 	}
 
-	/* The decoder writes 8-bit 4:2:0 pictures only. */
+	/* The codec takes 8-bit 4:2:0 pictures only. */
 	if (profile->chromaSubsampling != VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR)
 		return VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR;
 	if (profile->lumaBitDepth != VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR)
 		return VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR;
 	if (profile->chromaBitDepth != VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR)
 		return VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR;
+
+	/* An H.264 encode profile names its H.264 profile in a chained record. */
+	if (profile->videoCodecOperation == VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR) {
+		h264_enc = (const VkVideoEncodeH264ProfileInfoKHR *)video_find_input(profile->pNext, VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR);
+		if (h264_enc == NULL)
+			return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+		if (h264_enc->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_BASELINE &&
+		    h264_enc->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_MAIN &&
+		    h264_enc->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_HIGH)
+			return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+		return VK_SUCCESS;
+	}
 
 	/* An H.265 profile names its H.265 profile in a chained record. */
 	if (profile->videoCodecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) {
@@ -856,7 +1102,7 @@ video_known_input(
 	VkStructureType type)
 {
 	/* Lists every video input record the renderer decodes. */
-	switch (type) {
+	switch ((uint32_t)type) {
 	case VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR:
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR:
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_USAGE_INFO_KHR:
@@ -881,6 +1127,24 @@ video_known_input(
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_ADD_INFO_KHR:
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR:
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_USAGE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_CREATE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_GET_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_LAYER_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_LAYER_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_GOP_REMAINING_FRAME_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PICTURE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_NALU_SLICE_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_DPB_SLOT_INFO_KHR:
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR:
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_GET_INFO_KHR:
 		return VK_TRUE;
 	default:
 		break;
@@ -965,10 +1229,23 @@ video_encode_fields(
 	const VkVideoDecodeH265DpbSlotInfoKHR *h265_dpb;
 	const VkVideoEndCodingInfoKHR *end;
 	const VkVideoCodingControlInfoKHR *control;
+	const VkVideoEncodeUsageInfoKHR *encode_usage;
+	const VkVideoEncodeH264ProfileInfoKHR *h264_encode_profile;
+	const VkVideoEncodeH264SessionCreateInfoKHR *h264_encode_session;
+	const VkVideoEncodeH264SessionParametersCreateInfoKHR *h264_encode_parameters;
+	const VkVideoEncodeH264SessionParametersGetInfoKHR *h264_encode_get;
+	const VkVideoEncodeQualityLevelInfoKHR *quality_level;
+	const VkVideoEncodeRateControlLayerInfoKHR *rate_layer;
+	const VkVideoEncodeH264RateControlInfoKHR *h264_rate_control;
+	const VkVideoEncodeH264RateControlLayerInfoKHR *h264_rate_layer;
+	const VkVideoEncodeH264GopRemainingFrameInfoKHR *h264_gop;
+	const VkVideoEncodeH264DpbSlotInfoKHR *h264_encode_dpb;
+	const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR *phys_quality;
+	const VkVideoEncodeSessionParametersGetInfoKHR *params_get;
 	uint32_t index;
 
 	/* Encodes each record type with the fields it declares. */
-	switch (record->sType) {
+	switch ((uint32_t)record->sType) {
 	case VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR:
 		/* The codec operation, chroma subsampling and component depths. */
 		profile = (const VkVideoProfileInfoKHR *)record;
@@ -1104,6 +1381,127 @@ video_encode_fields(
 	case VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR:
 		/* The H.265 picture information and the slice segment offsets. */
 		video_encode_h265_picture(writer, (const VkVideoDecodeH265PictureInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_USAGE_INFO_KHR:
+		/* The application's hints about how encoded streams are used. */
+		encode_usage = (const VkVideoEncodeUsageInfoKHR *)record;
+		vulkan_write_u32(writer, encode_usage->videoUsageHints);
+		vulkan_write_u32(writer, encode_usage->videoContentHints);
+		vulkan_write_u32(writer, (uint32_t)encode_usage->tuningMode);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR:
+		/* The H.264 encode profile. */
+		h264_encode_profile = (const VkVideoEncodeH264ProfileInfoKHR *)record;
+		vulkan_write_u32(writer, (uint32_t)h264_encode_profile->stdProfileIdc);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_CREATE_INFO_KHR:
+		/* Whether an upper H.264 level bound is named, and that level. */
+		h264_encode_session = (const VkVideoEncodeH264SessionCreateInfoKHR *)record;
+		vulkan_write_u32(writer, h264_encode_session->useMaxLevelIdc);
+		vulkan_write_u32(writer, (uint32_t)h264_encode_session->maxLevelIdc);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR:
+		/* The capacity of the object, then the sets added at creation, if any. */
+		h264_encode_parameters = (const VkVideoEncodeH264SessionParametersCreateInfoKHR *)record;
+		vulkan_write_u32(writer, h264_encode_parameters->maxStdSPSCount);
+		vulkan_write_u32(writer, h264_encode_parameters->maxStdPPSCount);
+		vulkan_write_pointer(writer, h264_encode_parameters->pParametersAddInfo);
+		if (h264_encode_parameters->pParametersAddInfo != NULL)
+			video_encode_struct(writer, (const VkBaseInStructure *)h264_encode_parameters->pParametersAddInfo);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR:
+		/* The sequence and picture parameter sets added. */
+		video_encode_h264_encode_parameters_add(writer, (const VkVideoEncodeH264SessionParametersAddInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_GET_INFO_KHR:
+		/* Which H.264 parameter sets are requested. */
+		h264_encode_get = (const VkVideoEncodeH264SessionParametersGetInfoKHR *)record;
+		vulkan_write_u32(writer, h264_encode_get->writeStdSPS);
+		vulkan_write_u32(writer, h264_encode_get->writeStdPPS);
+		vulkan_write_u32(writer, h264_encode_get->stdSPSId);
+		vulkan_write_u32(writer, h264_encode_get->stdPPSId);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR:
+		/* The selected encode quality level. */
+		quality_level = (const VkVideoEncodeQualityLevelInfoKHR *)record;
+		vulkan_write_u32(writer, quality_level->qualityLevel);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_INFO_KHR:
+		/* The rate control mode, layers and VBV parameters. */
+		video_encode_rate_control(writer, (const VkVideoEncodeRateControlInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_LAYER_INFO_KHR:
+		/* The bitrate and frame rate of one rate control layer. */
+		rate_layer = (const VkVideoEncodeRateControlLayerInfoKHR *)record;
+		vulkan_write_u64(writer, rate_layer->averageBitrate);
+		vulkan_write_u64(writer, rate_layer->maxBitrate);
+		vulkan_write_u32(writer, rate_layer->frameRateNumerator);
+		vulkan_write_u32(writer, rate_layer->frameRateDenominator);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_INFO_KHR:
+		/* The H.264 GOP and rate control flags. */
+		h264_rate_control = (const VkVideoEncodeH264RateControlInfoKHR *)record;
+		vulkan_write_u32(writer, h264_rate_control->flags);
+		vulkan_write_u32(writer, h264_rate_control->gopFrameCount);
+		vulkan_write_u32(writer, h264_rate_control->idrPeriod);
+		vulkan_write_u32(writer, h264_rate_control->consecutiveBFrameCount);
+		vulkan_write_u32(writer, h264_rate_control->temporalLayerCount);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_LAYER_INFO_KHR:
+		/* The H.264 QP bounds and frame size limits of one layer. */
+		h264_rate_layer = (const VkVideoEncodeH264RateControlLayerInfoKHR *)record;
+		vulkan_write_u32(writer, h264_rate_layer->useMinQp);
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->minQp.qpI));
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->minQp.qpP));
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->minQp.qpB));
+		vulkan_write_u32(writer, h264_rate_layer->useMaxQp);
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->maxQp.qpI));
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->maxQp.qpP));
+		vulkan_write_u32(writer, (uint32_t)(h264_rate_layer->maxQp.qpB));
+		vulkan_write_u32(writer, h264_rate_layer->useMaxFrameSize);
+		vulkan_write_u32(writer, h264_rate_layer->maxFrameSize.frameISize);
+		vulkan_write_u32(writer, h264_rate_layer->maxFrameSize.framePSize);
+		vulkan_write_u32(writer, h264_rate_layer->maxFrameSize.frameBSize);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_GOP_REMAINING_FRAME_INFO_KHR:
+		/* The remaining frames in the current GOP. */
+		h264_gop = (const VkVideoEncodeH264GopRemainingFrameInfoKHR *)record;
+		vulkan_write_u32(writer, h264_gop->useGopRemainingFrames);
+		vulkan_write_u32(writer, h264_gop->gopRemainingI);
+		vulkan_write_u32(writer, h264_gop->gopRemainingP);
+		vulkan_write_u32(writer, h264_gop->gopRemainingB);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR:
+		/* The destination bitstream buffer, source picture and reference pictures. */
+		video_encode_encode(writer, (const VkVideoEncodeInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PICTURE_INFO_KHR:
+		/* The H.264 encode picture information and slices. */
+		video_encode_h264_encode_picture(writer, (const VkVideoEncodeH264PictureInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_NALU_SLICE_INFO_KHR:
+		/* One H.264 encode slice entry. */
+		video_encode_h264_encode_slice(writer, (const VkVideoEncodeH264NaluSliceInfoKHR *)record);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_DPB_SLOT_INFO_KHR:
+		/* The H.264 encode reference information of the slot's picture. */
+		h264_encode_dpb = (const VkVideoEncodeH264DpbSlotInfoKHR *)record;
+		vulkan_write_pointer(writer, h264_encode_dpb->pStdReferenceInfo);
+		if (h264_encode_dpb->pStdReferenceInfo != NULL)
+			video_encode_h264_encode_std_reference(writer, h264_encode_dpb->pStdReferenceInfo);
+		break;
+	case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR:
+		/* The profile and quality level queried. */
+		phys_quality = (const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR *)record;
+		vulkan_write_pointer(writer, phys_quality->pVideoProfile);
+		if (phys_quality->pVideoProfile != NULL)
+			video_encode_struct(writer, (const VkBaseInStructure *)phys_quality->pVideoProfile);
+		vulkan_write_u32(writer, phys_quality->qualityLevel);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_GET_INFO_KHR:
+		/* The parameters object whose encoded parameter sets are read. */
+		params_get = (const VkVideoEncodeSessionParametersGetInfoKHR *)record;
+		vulkan_encode_handle(writer, (uint64_t)(uintptr_t)params_get->videoSessionParameters);
 		break;
 	default:
 		/* Only known records reach here; another would have no defined fields. */
@@ -2352,7 +2750,13 @@ video_encode_output_request(
 	while (next != NULL &&
 	       next->sType != VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR &&
 	       next->sType != VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR &&
-	       next->sType != VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR)
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_CAPABILITIES_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_CAPABILITIES_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_QUALITY_LEVEL_PROPERTIES_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_FEEDBACK_INFO_KHR &&
+	       next->sType != VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_FEEDBACK_INFO_KHR)
 		next = next->pNext;
 
 	/* The end of the chain is an absent link. */
@@ -2437,13 +2841,19 @@ video_decode_fields(
 	VkVideoDecodeH265CapabilitiesKHR *h265;
 	VkVideoFormatPropertiesKHR *format;
 	VkVideoSessionMemoryRequirementsKHR *binding;
+	VkVideoEncodeCapabilitiesKHR *encode_caps;
+	VkVideoEncodeH264CapabilitiesKHR *h264_encode_caps;
+	VkVideoEncodeQualityLevelPropertiesKHR *quality_props;
+	VkVideoEncodeH264QualityLevelPropertiesKHR *h264_quality_props;
+	VkVideoEncodeSessionParametersFeedbackInfoKHR *params_fb;
+	VkVideoEncodeH264SessionParametersFeedbackInfoKHR *h264_params_fb;
 
 	/* A reply that already failed is not read further. */
 	if (reader->error != VK_SUCCESS)
 		return;
 
 	/* Decodes each record type with the fields it declares. */
-	switch (record->sType) {
+	switch ((uint32_t)record->sType) {
 	case VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR:
 		/* The general limits of a video profile. */
 		capabilities = (VkVideoCapabilitiesKHR *)record;
@@ -2488,6 +2898,66 @@ video_decode_fields(
 		binding = (VkVideoSessionMemoryRequirementsKHR *)record;
 		binding->memoryBindIndex = vulkan_read_u32(reader);
 		vulkan_decode_VkMemoryRequirements(reader, &binding->memoryRequirements);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_CAPABILITIES_KHR:
+		/* The general capabilities of a video encode profile. */
+		encode_caps = (VkVideoEncodeCapabilitiesKHR *)record;
+		encode_caps->flags = vulkan_read_u32(reader);
+		encode_caps->rateControlModes = vulkan_read_u32(reader);
+		encode_caps->maxRateControlLayers = vulkan_read_u32(reader);
+		encode_caps->maxBitrate = vulkan_read_u64(reader);
+		encode_caps->maxQualityLevels = vulkan_read_u32(reader);
+		vulkan_decode_VkExtent2D(reader, &encode_caps->encodeInputPictureGranularity);
+		encode_caps->supportedEncodeFeedbackFlags = vulkan_read_u32(reader);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_CAPABILITIES_KHR:
+		/* The H.264 capabilities of a video encode profile. */
+		h264_encode_caps = (VkVideoEncodeH264CapabilitiesKHR *)record;
+		h264_encode_caps->flags = vulkan_read_u32(reader);
+		h264_encode_caps->maxLevelIdc = (StdVideoH264LevelIdc)vulkan_read_u32(reader);
+		h264_encode_caps->maxSliceCount = vulkan_read_u32(reader);
+		h264_encode_caps->maxPPictureL0ReferenceCount = vulkan_read_u32(reader);
+		h264_encode_caps->maxBPictureL0ReferenceCount = vulkan_read_u32(reader);
+		h264_encode_caps->maxL1ReferenceCount = vulkan_read_u32(reader);
+		h264_encode_caps->maxTemporalLayerCount = vulkan_read_u32(reader);
+		h264_encode_caps->expectDyadicTemporalLayerPattern = (VkBool32)vulkan_read_u32(reader);
+		h264_encode_caps->minQp = (int32_t)vulkan_read_u32(reader);
+		h264_encode_caps->maxQp = (int32_t)vulkan_read_u32(reader);
+		h264_encode_caps->prefersGopRemainingFrames = (VkBool32)vulkan_read_u32(reader);
+		h264_encode_caps->requiresGopRemainingFrames = (VkBool32)vulkan_read_u32(reader);
+		h264_encode_caps->stdSyntaxFlags = vulkan_read_u32(reader);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES_KHR:
+		/* The preferred rate control mode and layer count of one quality level. */
+		quality_props = (VkVideoEncodeQualityLevelPropertiesKHR *)record;
+		quality_props->preferredRateControlMode = (VkVideoEncodeRateControlModeFlagBitsKHR)vulkan_read_u32(reader);
+		quality_props->preferredRateControlLayerCount = vulkan_read_u32(reader);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_QUALITY_LEVEL_PROPERTIES_KHR:
+		/* The preferred H.264 encode settings of one quality level. */
+		h264_quality_props = (VkVideoEncodeH264QualityLevelPropertiesKHR *)record;
+		h264_quality_props->preferredRateControlFlags = vulkan_read_u32(reader);
+		h264_quality_props->preferredGopFrameCount = vulkan_read_u32(reader);
+		h264_quality_props->preferredIdrPeriod = vulkan_read_u32(reader);
+		h264_quality_props->preferredConsecutiveBFrameCount = vulkan_read_u32(reader);
+		h264_quality_props->preferredTemporalLayerCount = vulkan_read_u32(reader);
+		h264_quality_props->preferredConstantQp.qpI = (int32_t)vulkan_read_u32(reader);
+		h264_quality_props->preferredConstantQp.qpP = (int32_t)vulkan_read_u32(reader);
+		h264_quality_props->preferredConstantQp.qpB = (int32_t)vulkan_read_u32(reader);
+		h264_quality_props->preferredMaxL0ReferenceCount = vulkan_read_u32(reader);
+		h264_quality_props->preferredMaxL1ReferenceCount = vulkan_read_u32(reader);
+		h264_quality_props->preferredStdEntropyCodingModeFlag = (VkBool32)vulkan_read_u32(reader);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_FEEDBACK_INFO_KHR:
+		/* Whether parameter sets had renderer overrides. */
+		params_fb = (VkVideoEncodeSessionParametersFeedbackInfoKHR *)record;
+		params_fb->hasOverrides = (VkBool32)vulkan_read_u32(reader);
+		break;
+	case VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_FEEDBACK_INFO_KHR:
+		/* Whether H.264 SPS or PPS had renderer overrides. */
+		h264_params_fb = (VkVideoEncodeH264SessionParametersFeedbackInfoKHR *)record;
+		h264_params_fb->hasStdSPSOverrides = (VkBool32)vulkan_read_u32(reader);
+		h264_params_fb->hasStdPPSOverrides = (VkBool32)vulkan_read_u32(reader);
 		break;
 	default:
 		/* The renderer answered a record that was never asked for. */
@@ -2557,14 +3027,26 @@ video_keys_add(
 	const VkVideoDecodeH264SessionParametersAddInfoKHR *add,
 	VkBool32 replace)
 {
+	return video_keys_add_h264(keys, add->stdSPSCount, add->pStdSPSs, add->stdPPSCount, add->pStdPPSs, replace);
+}
+
+static VkResult
+video_keys_add_h264(
+	struct vulkan_video_keys *keys,
+	uint32_t sps_count,
+	const StdVideoH264SequenceParameterSet *spss,
+	uint32_t pps_count,
+	const StdVideoH264PictureParameterSet *ppss,
+	VkBool32 replace)
+{
 	uint32_t index;
 	uint32_t sps;
 	uint32_t pps;
 	VkResult status;
 
 	/* Takes the key of every sequence parameter set, its seq_parameter_set_id. */
-	for (index = 0; index < add->stdSPSCount; index++) {
-		sps = add->pStdSPSs[index].seq_parameter_set_id;
+	for (index = 0; index < sps_count; index++) {
+		sps = spss[index].seq_parameter_set_id;
 		if (sps >= VIDEO_H264_SPS_IDS)
 			return VK_ERROR_INITIALIZATION_FAILED;
 
@@ -2575,9 +3057,9 @@ video_keys_add(
 	}
 
 	/* Takes the key of every picture parameter set, the pair of its two ids. */
-	for (index = 0; index < add->stdPPSCount; index++) {
-		sps = add->pStdPPSs[index].seq_parameter_set_id;
-		pps = add->pStdPPSs[index].pic_parameter_set_id;
+	for (index = 0; index < pps_count; index++) {
+		sps = ppss[index].seq_parameter_set_id;
+		pps = ppss[index].pic_parameter_set_id;
 		if (sps >= VIDEO_H264_SPS_IDS)
 			return VK_ERROR_INITIALIZATION_FAILED;
 
@@ -2746,4 +3228,343 @@ video_destroy(
 
 	/* Succeeded: no public handle refers to the released record. */
 	return;
+}
+
+/* Encodes the fields of one video encode record. */
+static void
+video_encode_encode(
+	struct vulkan_writer *writer,
+	const VkVideoEncodeInfoKHR *record)
+{
+	uint32_t index;
+
+	/* The flags and destination bitstream range. */
+	vulkan_write_u32(writer, record->flags);
+	vulkan_encode_handle(writer, (uint64_t)(uintptr_t)record->dstBuffer);
+	vulkan_write_u64(writer, record->dstBufferOffset);
+	vulkan_write_u64(writer, record->dstBufferRange);
+
+	/* The source picture resource, held by value. */
+	video_encode_struct(writer, (const VkBaseInStructure *)&record->srcPictureResource);
+
+	/* The setup reference slot for the reconstructed picture, if any. */
+	vulkan_write_pointer(writer, record->pSetupReferenceSlot);
+	if (record->pSetupReferenceSlot != NULL)
+		video_encode_struct(writer, (const VkBaseInStructure *)record->pSetupReferenceSlot);
+
+	/* The active reference slots read by the encode. */
+	vulkan_write_u32(writer, record->referenceSlotCount);
+	vulkan_write_u64(writer, record->referenceSlotCount);
+	for (index = 0; index < record->referenceSlotCount; index++)
+		video_encode_struct(writer, (const VkBaseInStructure *)&record->pReferenceSlots[index]);
+
+	/* Preceding externally encoded bytes for rate control accounting. */
+	vulkan_write_u32(writer, record->precedingExternallyEncodedBytes);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the H.264 parameter sets added at creation or update. */
+static void
+video_encode_h264_encode_parameters_add(
+	struct vulkan_writer *writer,
+	const VkVideoEncodeH264SessionParametersAddInfoKHR *record)
+{
+	uint32_t index;
+
+	/* The sequence parameter sets. */
+	vulkan_write_u32(writer, record->stdSPSCount);
+	vulkan_write_u64(writer, record->stdSPSCount);
+	for (index = 0; index < record->stdSPSCount; index++)
+		video_encode_sps(writer, &record->pStdSPSs[index]);
+
+	/* The picture parameter sets. */
+	vulkan_write_u32(writer, record->stdPPSCount);
+	vulkan_write_u64(writer, record->stdPPSCount);
+	for (index = 0; index < record->stdPPSCount; index++)
+		video_encode_pps(writer, &record->pStdPPSs[index]);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the fields of an H.264 encode picture record. */
+static void
+video_encode_h264_encode_picture(
+	struct vulkan_writer *writer,
+	const VkVideoEncodeH264PictureInfoKHR *record)
+{
+	uint32_t index;
+
+	/* The slice entries of the picture. */
+	vulkan_write_u32(writer, record->naluSliceEntryCount);
+	vulkan_write_u64(writer, record->naluSliceEntryCount);
+	for (index = 0; index < record->naluSliceEntryCount; index++)
+		video_encode_struct(writer, (const VkBaseInStructure *)&record->pNaluSliceEntries[index]);
+
+	/* The standard H.264 picture information. */
+	vulkan_write_pointer(writer, record->pStdPictureInfo);
+	if (record->pStdPictureInfo != NULL)
+		video_encode_h264_encode_std_picture(writer, record->pStdPictureInfo);
+
+	/* Whether to generate prefix NAL units. */
+	vulkan_write_u32(writer, record->generatePrefixNalu);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes one H.264 encode slice entry. */
+static void
+video_encode_h264_encode_slice(
+	struct vulkan_writer *writer,
+	const VkVideoEncodeH264NaluSliceInfoKHR *record)
+{
+	/* The constant QP for CQP mode and the standard slice header. */
+	vulkan_write_u32(writer, (uint32_t)(record->constantQp));
+	vulkan_write_pointer(writer, record->pStdSliceHeader);
+	if (record->pStdSliceHeader != NULL)
+		video_encode_h264_encode_std_slice(writer, record->pStdSliceHeader);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the standard H.264 encode picture information. */
+static void
+video_encode_h264_encode_std_picture(
+	struct vulkan_writer *writer,
+	const StdVideoEncodeH264PictureInfo *record)
+{
+	/* The picture flags and parameter set ids. */
+	vulkan_write_u32(writer, video_h264_encode_picture_flags(&record->flags));
+	vulkan_write_u32(writer, record->seq_parameter_set_id);
+	vulkan_write_u32(writer, record->pic_parameter_set_id);
+	vulkan_write_u32(writer, record->idr_pic_id);
+	vulkan_write_u32(writer, (uint32_t)record->primary_pic_type);
+	vulkan_write_u32(writer, record->frame_num);
+	vulkan_write_u32(writer, (uint32_t)(record->PicOrderCnt));
+	vulkan_write_u32(writer, record->temporal_id);
+
+	/* Reference list modifications and DPB marking operations, if present. */
+	vulkan_write_pointer(writer, record->pRefLists);
+	if (record->pRefLists != NULL)
+		video_encode_h264_encode_ref_lists(writer, record->pRefLists);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the standard H.264 encode reference information of one DPB slot. */
+static void
+video_encode_h264_encode_std_reference(
+	struct vulkan_writer *writer,
+	const StdVideoEncodeH264ReferenceInfo *record)
+{
+	vulkan_write_u32(writer, video_h264_encode_reference_flags(&record->flags));
+	vulkan_write_u32(writer, (uint32_t)record->primary_pic_type);
+	vulkan_write_u32(writer, record->FrameNum);
+	vulkan_write_u32(writer, (uint32_t)(record->PicOrderCnt));
+	vulkan_write_u32(writer, record->long_term_pic_num);
+	vulkan_write_u32(writer, record->long_term_frame_idx);
+	vulkan_write_u32(writer, record->temporal_id);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the standard H.264 encode slice header. */
+static void
+video_encode_h264_encode_std_slice(
+	struct vulkan_writer *writer,
+	const StdVideoEncodeH264SliceHeader *record)
+{
+	/* The slice header flags, type, QP delta, and deblocking parameters. */
+	vulkan_write_u32(writer, video_h264_encode_slice_flags(&record->flags));
+	vulkan_write_u32(writer, record->first_mb_in_slice);
+	vulkan_write_u32(writer, (uint32_t)record->slice_type);
+	vulkan_write_u32(writer, (uint32_t)(record->slice_alpha_c0_offset_div2));
+	vulkan_write_u32(writer, (uint32_t)(record->slice_beta_offset_div2));
+	vulkan_write_u32(writer, (uint32_t)(record->slice_qp_delta));
+	vulkan_write_u32(writer, (uint32_t)record->cabac_init_idc);
+	vulkan_write_u32(writer, (uint32_t)record->disable_deblocking_filter_idc);
+	vulkan_write_pointer(writer, record->pWeightTable);
+	if (record->pWeightTable != NULL)
+		video_encode_h264_encode_weight_table(writer, record->pWeightTable);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the standard H.264 encode reference lists and DPB marking operations. */
+static void
+video_encode_h264_encode_ref_lists(
+	struct vulkan_writer *writer,
+	const StdVideoEncodeH264ReferenceListsInfo *record)
+{
+	uint32_t index;
+
+	/* Reference list flags, active counts, and initial lists. */
+	vulkan_write_u32(writer, video_h264_encode_ref_lists_flags(&record->flags));
+	vulkan_write_u32(writer, record->num_ref_idx_l0_active_minus1);
+	vulkan_write_u32(writer, record->num_ref_idx_l1_active_minus1);
+	vulkan_write_bytes(writer, record->RefPicList0, STD_VIDEO_H264_MAX_NUM_LIST_REF);
+	vulkan_write_bytes(writer, record->RefPicList1, STD_VIDEO_H264_MAX_NUM_LIST_REF);
+
+	/* L0 reference list modification operations. */
+	vulkan_write_u32(writer, record->refList0ModOpCount);
+	vulkan_write_u64(writer, record->refList0ModOpCount);
+	for (index = 0; index < record->refList0ModOpCount; index++) {
+		vulkan_write_u32(writer, (uint32_t)record->pRefList0ModOperations[index].modification_of_pic_nums_idc);
+		vulkan_write_u32(writer, record->pRefList0ModOperations[index].abs_diff_pic_num_minus1);
+		vulkan_write_u32(writer, record->pRefList0ModOperations[index].long_term_pic_num);
+	}
+
+	/* L1 reference list modification operations. */
+	vulkan_write_u32(writer, record->refList1ModOpCount);
+	vulkan_write_u64(writer, record->refList1ModOpCount);
+	for (index = 0; index < record->refList1ModOpCount; index++) {
+		vulkan_write_u32(writer, (uint32_t)record->pRefList1ModOperations[index].modification_of_pic_nums_idc);
+		vulkan_write_u32(writer, record->pRefList1ModOperations[index].abs_diff_pic_num_minus1);
+		vulkan_write_u32(writer, record->pRefList1ModOperations[index].long_term_pic_num);
+	}
+
+	/* Decoded reference picture marking operations. */
+	vulkan_write_u32(writer, record->refPicMarkingOpCount);
+	vulkan_write_u64(writer, record->refPicMarkingOpCount);
+	for (index = 0; index < record->refPicMarkingOpCount; index++) {
+		vulkan_write_u32(writer, (uint32_t)record->pRefPicMarkingOperations[index].memory_management_control_operation);
+		vulkan_write_u32(writer, record->pRefPicMarkingOperations[index].difference_of_pic_nums_minus1);
+		vulkan_write_u32(writer, record->pRefPicMarkingOperations[index].long_term_pic_num);
+		vulkan_write_u32(writer, record->pRefPicMarkingOperations[index].long_term_frame_idx);
+		vulkan_write_u32(writer, record->pRefPicMarkingOperations[index].max_long_term_frame_idx_plus1);
+	}
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the standard H.264 weighted prediction table. */
+static void
+video_encode_h264_encode_weight_table(
+	struct vulkan_writer *writer,
+	const StdVideoEncodeH264WeightTable *record)
+{
+	uint32_t index;
+
+	/* Luma and chroma weight flags, denominators, and per-reference entries. */
+	vulkan_write_u32(writer, record->flags.luma_weight_l0_flag);
+	vulkan_write_u32(writer, record->flags.chroma_weight_l0_flag);
+	vulkan_write_u32(writer, record->flags.luma_weight_l1_flag);
+	vulkan_write_u32(writer, record->flags.chroma_weight_l1_flag);
+	vulkan_write_u32(writer, record->luma_log2_weight_denom);
+	vulkan_write_u32(writer, record->chroma_log2_weight_denom);
+	for (index = 0; index < STD_VIDEO_H264_MAX_NUM_LIST_REF; index++) {
+		vulkan_write_u32(writer, (uint32_t)(record->luma_weight_l0[index]));
+		vulkan_write_u32(writer, (uint32_t)(record->luma_offset_l0[index]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_weight_l0[index][0]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_weight_l0[index][1]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_offset_l0[index][0]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_offset_l0[index][1]));
+		vulkan_write_u32(writer, (uint32_t)(record->luma_weight_l1[index]));
+		vulkan_write_u32(writer, (uint32_t)(record->luma_offset_l1[index]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_weight_l1[index][0]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_weight_l1[index][1]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_offset_l1[index][0]));
+		vulkan_write_u32(writer, (uint32_t)(record->chroma_offset_l1[index][1]));
+	}
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Encodes the generic video encode rate control info and its layers. */
+static void
+video_encode_rate_control(
+	struct vulkan_writer *writer,
+	const VkVideoEncodeRateControlInfoKHR *record)
+{
+	uint32_t index;
+
+	/* Rate control mode, layer array, and VBV buffer parameters. */
+	vulkan_write_u32(writer, record->flags);
+	vulkan_write_u32(writer, (uint32_t)record->rateControlMode);
+	vulkan_write_u32(writer, record->layerCount);
+	vulkan_write_u64(writer, record->layerCount);
+	for (index = 0; index < record->layerCount; index++)
+		video_encode_struct(writer, (const VkBaseInStructure *)&record->pLayers[index]);
+	vulkan_write_u32(writer, record->virtualBufferSizeInMs);
+	vulkan_write_u32(writer, record->initialVirtualBufferSizeInMs);
+
+	/* Succeeded: the fields are encoded or the writer keeps its first error. */
+	return;
+}
+
+/* Packs StdVideoEncodeH264PictureInfoFlags into one 32-bit word. */
+static uint32_t
+video_h264_encode_picture_flags(
+	const StdVideoEncodeH264PictureInfoFlags *flags)
+{
+	uint32_t word;
+
+	/* Pack each 1-bit flag in declared order. */
+	word = 0;
+	if (flags->IdrPicFlag)
+		word |= 1U << 0;
+	if (flags->is_reference)
+		word |= 1U << 1;
+	if (flags->no_output_of_prior_pics_flag)
+		word |= 1U << 2;
+	if (flags->long_term_reference_flag)
+		word |= 1U << 3;
+	if (flags->adaptive_ref_pic_marking_mode_flag)
+		word |= 1U << 4;
+	return word;
+}
+
+/* Packs StdVideoEncodeH264ReferenceInfoFlags into one 32-bit word. */
+static uint32_t
+video_h264_encode_reference_flags(
+	const StdVideoEncodeH264ReferenceInfoFlags *flags)
+{
+	uint32_t word;
+
+	/* Pack each 1-bit flag in declared order. */
+	word = 0;
+	if (flags->used_for_long_term_reference)
+		word |= 1U << 0;
+	return word;
+}
+
+/* Packs StdVideoEncodeH264SliceHeaderFlags into one 32-bit word. */
+static uint32_t
+video_h264_encode_slice_flags(
+	const StdVideoEncodeH264SliceHeaderFlags *flags)
+{
+	uint32_t word;
+
+	/* Pack each 1-bit flag in declared order. */
+	word = 0;
+	if (flags->direct_spatial_mv_pred_flag)
+		word |= 1U << 0;
+	if (flags->num_ref_idx_active_override_flag)
+		word |= 1U << 1;
+	return word;
+}
+
+/* Packs StdVideoEncodeH264ReferenceListsInfoFlags into one 32-bit word. */
+static uint32_t
+video_h264_encode_ref_lists_flags(
+	const StdVideoEncodeH264ReferenceListsInfoFlags *flags)
+{
+	uint32_t word;
+
+	/* Pack each 1-bit flag in declared order. */
+	word = 0;
+	if (flags->ref_pic_list_modification_flag_l0)
+		word |= 1U << 0;
+	if (flags->ref_pic_list_modification_flag_l1)
+		word |= 1U << 1;
+	return word;
 }
