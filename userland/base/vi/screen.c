@@ -16,6 +16,8 @@
  */
 
 #include "userland/base/vi/vi.h"
+#include "userland/desktop/terminal/width.h"
+#include "userland/desktop/terminal/ambiguous.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,6 +84,8 @@ struct row_text {
 
 static size_t decode(const char *text, size_t length, size_t offset, unsigned long *code);
 static void read_unit(const char *text, size_t length, size_t offset, size_t logical, struct unit *unit);
+static int ambiguous_wide_enabled(void);
+static int is_ambiguous(unsigned long code);
 static int code_width(unsigned long code);
 static int place(struct layout *layout, int width, int *row, int *column);
 static void layout_start(struct layout *layout, const struct vi_line *line, int columns);
@@ -562,6 +566,51 @@ read_unit(
 	unit->width = width;
 }
 
+/* Tells whether the terminal treats East Asian Ambiguous characters as two columns. */
+static int
+ambiguous_wide_enabled(
+	void)
+{
+	const char *value;
+
+	/* Follows the terminal's setting when passed in the environment. */
+	value = getenv("ZEDBSD_AMBIGUOUS_WIDE");
+	if (value != NULL && value[0] == '1' && value[1] == '\0')
+		return 1;
+	return 0;
+}
+
+/* Tells whether a code point is East Asian Ambiguous. */
+static int
+is_ambiguous(
+	unsigned long code)
+{
+	size_t low;
+	size_t high;
+	size_t middle;
+
+	/* ASCII and the low range are never Ambiguous. */
+	if (code < 0x00a1UL)
+		return 0;
+
+	/* Halves the sorted Ambiguous ranges until one holds the code point. */
+	low = 0U;
+	high = AMBIGUOUS_RANGES;
+	while (low < high) {
+		middle = low + (high - low) / 2U;
+		if (code < ambiguous_ranges[middle].first) {
+			high = middle;
+		} else if (code > ambiguous_ranges[middle].last) {
+			low = middle + 1U;
+		} else {
+			return 1;
+		}
+	}
+
+	/* No range holds the code point. */
+	return 0;
+}
+
 /* Gives the columns a code point takes on the terminal, or -1 if it cannot be shown. */
 static int
 code_width(
@@ -571,6 +620,8 @@ code_width(
 
 	/* The C library knows the widths, CJK being two columns. */
 	width = wcwidth((wchar_t)code);
+	if (width == 1 && ambiguous_wide_enabled() && is_ambiguous(code))
+		width = 2;
 
 	/* Succeeded: the width. */
 	return width;

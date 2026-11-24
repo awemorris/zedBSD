@@ -1332,6 +1332,10 @@ screen_put(
 	uint32_t background;
 	int wide;
 
+	/* Combining marks take no cell of their own and do not advance the cursor. */
+	if (terminal_width_combining(codepoint))
+		return;
+
 	/*
 	 * A wide character takes two cells, and so does an Ambiguous one while
 	 * the setting is on.  The width is decided here, once, and

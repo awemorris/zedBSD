@@ -150,6 +150,7 @@ struct terminal_process_connector {
 	struct terminal_connector connector;
 	const char *command;
 	char term[TERMINAL_TERM_MAX];
+	int ambiguous_wide;
 };
 
 void terminal_process_connector_init(struct terminal_process_connector *process, const char *command);

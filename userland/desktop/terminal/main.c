@@ -88,6 +88,7 @@
 #define MAIN_KEY_COLUMNS	"terminal.columns"
 #define MAIN_KEY_ROWS		"terminal.rows"
 #define MAIN_KEY_TERM		"terminal.term"
+#define MAIN_KEY_AMBIGUOUS_WIDE	"terminal.ambiguous-wide"
 
 /* Where a font named without a directory is looked for. */
 #define MAIN_FONT_DIRECTORY	KEILAND_DATADIR "/fonts/"
@@ -664,6 +665,9 @@ main_kept_read(
 		if (error == 0)
 			(void)snprintf(connector->term, sizeof(connector->term), "%s", term);
 	}
+
+	/* Whether Ambiguous-width characters take two cells. */
+	connector->ambiguous_wide = kl_settings_get_int(settings, MAIN_KEY_AMBIGUOUS_WIDE, 0) != 0;
 
 	/* Closes the settings, which are not needed any more. */
 	kl_settings_close(settings);
