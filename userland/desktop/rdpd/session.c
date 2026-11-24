@@ -26,7 +26,7 @@
 #include <unistd.h>
 
 static int write_str_fd(int fd, const char *s, size_t len);
-static void drop_privileges(uid_t uid, gid_t gid, const char *user, const char *home, const char *shell);
+static void drop_privileges(uid_t uid, gid_t gid, const char *user, const char *home, const char *shell, const char *runtime_dir);
 
 /* Writes len bytes to fd, retrying on EINTR. */
 static int
@@ -168,11 +168,9 @@ drop_privileges(
 	gid_t gid,
 	const char *user,
 	const char *home,
-	const char *shell)
+	const char *shell,
+	const char *runtime_dir)
 {
-	char runtime_dir[64];
-	(void)snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%lu",
-		       (unsigned long)uid);
 	(void)setgid(gid);
 	(void)setuid(uid);
 	(void)setenv("HOME", home, 1);
@@ -195,7 +193,8 @@ rdpd_session_start(
 	uint32_t height)
 {
 	int sv[2];
-	char runtime_dir[64];
+	char user_run[64];
+	char runtime_dir[96];
 	char opt_width[32];
 	char opt_height[32];
 	char opt_fd[32];
@@ -214,15 +213,19 @@ rdpd_session_start(
 	if (height != 0U)
 		sess->height = height;
 	(void)mkdir("/run/user", 0755);
-	(void)snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%lu",
+	(void)snprintf(user_run, sizeof(user_run), "/run/user/%lu",
 		       (unsigned long)uid);
+	(void)mkdir(user_run, 0700);
+	(void)chown(user_run, uid, gid);
+	(void)snprintf(runtime_dir, sizeof(runtime_dir), "%s/rdp-%ld",
+		       user_run, (long)getpid());
 	(void)mkdir(runtime_dir, 0700);
 	(void)chown(runtime_dir, uid, gid);
 	rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 	if (rc != 0)
 		return errno;
 	(void)snprintf(sess->wayland_socket, sizeof(sess->wayland_socket),
-		       "%s/wayland-rdp-%ld", runtime_dir, (long)getpid());
+		       "%s/wayland-0", runtime_dir);
 	(void)snprintf(opt_width, sizeof(opt_width), "--width=%u", sess->width);
 	(void)snprintf(opt_height, sizeof(opt_height), "--height=%u", sess->height);
 	(void)snprintf(opt_fd, sizeof(opt_fd), "--rdp-fd=%d", sv[1]);
@@ -240,7 +243,7 @@ rdpd_session_start(
 	if (comp_pid == 0) {
 		close(sv[0]);
 		(void)fcntl(sv[1], F_SETFD, 0);
-		drop_privileges(uid, gid, user, home, shell);
+		drop_privileges(uid, gid, user, home, shell, runtime_dir);
 		argc = 0;
 		comp_argv[argc++] = (char *)RDPD_WAYLAND_PATH;
 		comp_argv[argc++] = (char *)"--headless";

@@ -362,7 +362,7 @@ handle_client(
 				break;
 			conn = rdp_server_is_connected(ctx.srv);
 			unacked = rdp_server_unacked_frames(ctx.srv);
-			if (conn != 0 && unacked < 4U) {
+			if (conn != 0 && unacked < 8U) {
 				rect.left = 0U;
 				rect.top = 0U;
 				rect.right = ctx.width;
@@ -378,6 +378,8 @@ handle_client(
 				(void)rdp_server_send_avc_frame(
 					ctx.srv, RDP_GFX_CODEC_AVC420, &avc,
 					(uint32_t)(pts_us / 1000U), NULL);
+			} else if (conn != 0) {
+				rdpd_session_force_key(&ctx.sess);
 			}
 		}
 	}

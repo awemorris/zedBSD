@@ -1090,7 +1090,7 @@ encode_frame(
 		for (mbx = 0U; mbx < enc->mb_w; mbx++) {
 			mb_idx = mby * enc->mb_w + mbx;
 
-			/* Checks P_Skip eligibility against reference frame. */
+			/* Checks P_Skip eligibility against reference frame (luma + chroma). */
 			if (is_idr == 0) {
 				sad = 0U;
 				for (y = 0U; y < 16U; y++) {
@@ -1104,7 +1104,22 @@ encode_frame(
 						sad += (uint32_t)(d < 0 ? -d : d);
 					}
 				}
-				if (sad < 256U) {
+				for (y = 0U; y < 8U; y++) {
+					size_t off;
+					off = (size_t)(mby * 8U + y) * enc->stride_c +
+					      mbx * 8U;
+					for (x = 0U; x < 8U; x++) {
+						int32_t du;
+						int32_t dv;
+						du = (int32_t)enc->cur_u[off + x] -
+						     (int32_t)enc->ref_u[off + x];
+						dv = (int32_t)enc->cur_v[off + x] -
+						     (int32_t)enc->ref_v[off + x];
+						sad += (uint32_t)(du < 0 ? -du : du);
+						sad += (uint32_t)(dv < 0 ? -dv : dv);
+					}
+				}
+				if (sad < 32U) {
 					skip_run++;
 					memset(&enc->nz_y[mb_idx * 16U], 0, 16U);
 					memset(&enc->nz_u[mb_idx * 4U], 0, 4U);
