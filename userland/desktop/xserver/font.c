@@ -1052,9 +1052,7 @@ font_get_path(
 /*
  * ImageText8 and ImageText16: characters in the graphics context's font,
  * on a box of its background as tall as the font and as wide as the
- * characters' widths.  The zed-unicode font draws no box: the tree's
- * libX11 sends XDrawString as ImageText, over a background its clients
- * have painted already.
+ * characters' widths.
  */
 static unsigned
 font_image_text(
@@ -1130,7 +1128,7 @@ font_image_text(
 
 	/* The background's box: as wide as the characters, as tall as the font. */
 	text.image = 1;
-	if (font == NULL || font->keeps_background)
+	if (font == NULL)
 		text.image = 0;
 	text.background.x0 = x;
 	text.background.x1 = x + width;
@@ -2099,10 +2097,7 @@ font_make_special(
 	} else {
 		/*
 		 * zed-unicode: the tree's 8x16 cells over the whole of Unicode's
-		 * first plane.  ImageText with it leaves the background as it is:
-		 * the tree's libX11 sends XDrawString as ImageText (not as
-		 * PolyText, as Xlib does), and its clients paint each cell's
-		 * background before they draw the characters over it.
+		 * first plane.
 		 */
 		font->kind = X11_FONT_TEXT;
 		font->role = X11_FACE_MONO;
@@ -2113,7 +2108,6 @@ font_make_special(
 		font->cell_width = FONT_ZED_WIDTH;
 		font->ascent = FONT_ZED_HEIGHT;
 		font->descent = 0;
-		font->keeps_background = 1;
 	}
 
 	/* Every character's metrics: the cell. */

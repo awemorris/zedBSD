@@ -919,9 +919,8 @@ struct x11_font_glyph {
  * second bytes, the default character, and either one width every
  * character shares (monospaced: cell_width, metrics NULL) or each one's
  * metrics, with the bounds of them all.  A monospaced font draws the
- * line-drawing characters itself, across the whole cell (line_drawing),
- * and the tree's zed-unicode keeps the background under ImageText (the
- * tree's libX11 sends its XDrawString as ImageText).  The glyphs drawn so far are kept, the bytes the owner is
+ * line-drawing characters itself, across the whole cell (line_drawing).
+ * The glyphs drawn so far are kept, the bytes the owner is
  * charged with the worst they could take.  The server's own default font
  * has the owner X11_NO_CLIENT and no id.
  */
@@ -944,7 +943,6 @@ struct x11_font {
 	int cell_width;
 	int box_width;
 	int line_drawing;
-	int keeps_background;
 	struct x11_char_metrics min_bounds;
 	struct x11_char_metrics max_bounds;
 	struct x11_char_metrics *metrics;
