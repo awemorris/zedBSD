@@ -65,6 +65,7 @@ void *bsearch(const void *, const void *, size_t, size_t,
 	      int (*)(const void *, const void *));
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int rand(void);
+int rand_r(unsigned int *seed);
 void srand(unsigned int seed);
 void abort(void) __attribute__((__noreturn__));
 void exit(int status) __attribute__((__noreturn__));

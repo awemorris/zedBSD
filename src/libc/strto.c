@@ -167,3 +167,22 @@ rand(void)
 	random_state = random_state * 1103515245U + 12345U;
 	return (int)((random_state >> 1) & RAND_MAX);
 }
+
+/*
+ * Computes a pseudo-random integer in [0, RAND_MAX] from caller-owned state.
+ *
+ * Uses the same linear congruential step as rand(), updating *seed so each
+ * caller maintains an independent sequence without shared state.
+ */
+int
+rand_r(
+	unsigned int *seed)
+{
+	unsigned int next;
+
+	/* Advances the caller's state and masks to the non-negative range. */
+	next = *seed * 1103515245U + 12345U;
+	*seed = next;
+
+	return (int)((next >> 1) & RAND_MAX);
+}
