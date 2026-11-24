@@ -478,6 +478,7 @@
 		kl_window_fullscreen;
 		kl_window_set_content_type;
 		kl_window_set_opaque;
+		kl_window_set_cursor_hidden;
 		kl_window_dispatch_fds;
 		kl_clock_us;
 		kl_window_set_menu;

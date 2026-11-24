@@ -20,6 +20,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#endif
 
 #define UNUSED_PARAMETER(x)	((void)(x))
 
@@ -132,6 +139,12 @@ rdp_worker_main(
 			 w.target.host_name, (unsigned)w.target.port);
 		rdp_tab_end(w.tab, msg);
 		goto cleanup;
+	}
+	{
+		int nodelay = 1;
+		(void)setsockopt((int)kl_socket_native(w.sock), IPPROTO_TCP,
+				 TCP_NODELAY, (const char *)&nodelay,
+				 sizeof(nodelay));
 	}
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = worker_send_bytes;

@@ -474,7 +474,126 @@ rdp_conn_close(
 	rdp_tab_release(tab);
 }
 
-/* Draws the latest decoded RDP frame into pixels (0xAARRGGBB). */
+static void
+rdp_fit_rect(
+	uint32_t fb_w,
+	uint32_t fb_h,
+	uint32_t view_w,
+	uint32_t view_h,
+	uint32_t *out_x,
+	uint32_t *out_y,
+	uint32_t *out_w,
+	uint32_t *out_h)
+{
+	uint32_t dw;
+	uint32_t dh;
+	if (fb_w == 0U || fb_h == 0U || view_w == 0U || view_h == 0U) {
+		*out_x = 0U;
+		*out_y = 0U;
+		*out_w = view_w;
+		*out_h = view_h;
+		return;
+	}
+	if ((uint64_t)view_w * fb_h <= (uint64_t)view_h * fb_w) {
+		dw = view_w;
+		dh = (uint32_t)(((uint64_t)view_w * fb_h) / fb_w);
+	} else {
+		dh = view_h;
+		dw = (uint32_t)(((uint64_t)view_h * fb_w) / fb_h);
+	}
+	if (dw == 0U)
+		dw = 1U;
+	if (dh == 0U)
+		dh = 1U;
+	*out_x = (view_w - dw) / 2U;
+	*out_y = (view_h - dh) / 2U;
+	*out_w = dw;
+	*out_h = dh;
+}
+
+static void
+rdp_bilinear_scale(
+	const uint32_t *src,
+	uint32_t src_w,
+	uint32_t src_h,
+	uint32_t *dst,
+	uint32_t dst_stride,
+	uint32_t dst_w,
+	uint32_t dst_h)
+{
+	uint32_t y;
+	uint32_t x;
+	uint32_t step_x;
+	uint32_t step_y;
+	if (dst_w == src_w && dst_h == src_h) {
+		for (y = 0U; y < dst_h; y++) {
+			memcpy(dst + (size_t)y * dst_stride,
+			       src + (size_t)y * src_w,
+			       (size_t)dst_w * sizeof(*dst));
+		}
+		return;
+	}
+	step_x = dst_w > 1U ? (uint32_t)((((uint64_t)(src_w - 1U)) << 16) / (dst_w - 1U)) : 0U;
+	step_y = dst_h > 1U ? (uint32_t)((((uint64_t)(src_h - 1U)) << 16) / (dst_h - 1U)) : 0U;
+	for (y = 0U; y < dst_h; y++) {
+		uint32_t sy_fp;
+		uint32_t y0;
+		uint32_t y1;
+		uint32_t fy;
+		uint32_t inv_fy;
+		const uint32_t *row0;
+		const uint32_t *row1;
+		uint32_t *out;
+		sy_fp = y * step_y;
+		y0 = sy_fp >> 16;
+		y1 = y0 + 1U < src_h ? y0 + 1U : y0;
+		fy = (sy_fp >> 8) & 0xFFU;
+		inv_fy = 256U - fy;
+		row0 = src + (size_t)y0 * src_w;
+		row1 = src + (size_t)y1 * src_w;
+		out = dst + (size_t)y * dst_stride;
+		for (x = 0U; x < dst_w; x++) {
+			uint32_t sx_fp;
+			uint32_t x0;
+			uint32_t x1;
+			uint32_t fx;
+			uint32_t inv_fx;
+			uint32_t p00;
+			uint32_t p10;
+			uint32_t p01;
+			uint32_t p11;
+			uint32_t w00;
+			uint32_t w10;
+			uint32_t w01;
+			uint32_t w11;
+			uint32_t r;
+			uint32_t g;
+			uint32_t b;
+			sx_fp = x * step_x;
+			x0 = sx_fp >> 16;
+			x1 = x0 + 1U < src_w ? x0 + 1U : x0;
+			fx = (sx_fp >> 8) & 0xFFU;
+			inv_fx = 256U - fx;
+			p00 = row0[x0];
+			p10 = row0[x1];
+			p01 = row1[x0];
+			p11 = row1[x1];
+			w00 = inv_fx * inv_fy;
+			w10 = fx * inv_fy;
+			w01 = inv_fx * fy;
+			w11 = fx * fy;
+			r = (((p00 >> 16) & 0xFFU) * w00 + ((p10 >> 16) & 0xFFU) * w10 +
+			     ((p01 >> 16) & 0xFFU) * w01 + ((p11 >> 16) & 0xFFU) * w11) >> 16;
+			g = (((p00 >> 8) & 0xFFU) * w00 + ((p10 >> 8) & 0xFFU) * w10 +
+			     ((p01 >> 8) & 0xFFU) * w01 + ((p11 >> 8) & 0xFFU) * w11) >> 16;
+			b = ((p00 & 0xFFU) * w00 + (p10 & 0xFFU) * w10 +
+			     (p01 & 0xFFU) * w01 + (p11 & 0xFFU) * w11) >> 16;
+			out[x] = 0xFF000000U | (r << 16) | (g << 8) | b;
+		}
+	}
+}
+
+/* Draws the latest decoded RDP frame into pixels (0xAARRGGBB), smoothly scaled to fit. */
 static int
 rdp_view_draw(
 	struct terminal_connection *conn,
@@ -484,9 +603,10 @@ rdp_view_draw(
 	uint32_t height)
 {
 	struct rdp_tab *tab;
-	uint32_t y;
-	uint32_t copy_w;
-	uint32_t copy_h;
+	uint32_t dst_x;
+	uint32_t dst_y;
+	uint32_t dst_w;
+	uint32_t dst_h;
 	size_t total;
 	size_t i;
 
@@ -496,14 +616,15 @@ rdp_view_draw(
 	for (i = 0U; i < total; i++)
 		pixels[i] = RDP_TAB_BG;
 	kl_mutex_lock(&tab->lock);
-	if (tab->has_frame != 0 && tab->pixels != NULL) {
-		copy_w = tab->fb_width < width ? tab->fb_width : width;
-		copy_h = tab->fb_height < height ? tab->fb_height : height;
-		for (y = 0U; y < copy_h; y++) {
-			memcpy(pixels + (size_t)y * width,
-			       tab->pixels + (size_t)y * tab->fb_width,
-			       (size_t)copy_w * sizeof(*pixels));
-		}
+	tab->view_width = width;
+	tab->view_height = height;
+	if (tab->has_frame != 0 && tab->pixels != NULL &&
+	    tab->fb_width > 0U && tab->fb_height > 0U) {
+		rdp_fit_rect(tab->fb_width, tab->fb_height, width, height,
+			     &dst_x, &dst_y, &dst_w, &dst_h);
+		rdp_bilinear_scale(tab->pixels, tab->fb_width, tab->fb_height,
+				   pixels + (size_t)dst_y * width + dst_x,
+				   width, dst_w, dst_h);
 	}
 
 	kl_mutex_unlock(&tab->lock);
@@ -567,8 +688,43 @@ rdp_view_input(
 		}
 		return;
 	}
-	px = event->x > 0 ? (uint16_t)event->x : 0U;
-	py = event->y > 0 ? (uint16_t)event->y : 0U;
+	{
+		uint32_t fb_w;
+		uint32_t fb_h;
+		uint32_t vw;
+		uint32_t vh;
+		uint32_t dst_x;
+		uint32_t dst_y;
+		uint32_t dst_w;
+		uint32_t dst_h;
+		int32_t rx;
+		int32_t ry;
+		kl_mutex_lock(&tab->lock);
+		fb_w = tab->fb_width;
+		fb_h = tab->fb_height;
+		vw = tab->view_width;
+		vh = tab->view_height;
+		kl_mutex_unlock(&tab->lock);
+		if (fb_w > 0U && fb_h > 0U && vw > 0U && vh > 0U) {
+			rdp_fit_rect(fb_w, fb_h, vw, vh,
+				     &dst_x, &dst_y, &dst_w, &dst_h);
+			rx = (int32_t)event->x - (int32_t)dst_x;
+			ry = (int32_t)event->y - (int32_t)dst_y;
+			if (rx < 0)
+				rx = 0;
+			if (ry < 0)
+				ry = 0;
+			if ((uint32_t)rx >= dst_w)
+				rx = (int32_t)(dst_w - 1U);
+			if ((uint32_t)ry >= dst_h)
+				ry = (int32_t)(dst_h - 1U);
+			px = (uint16_t)(((uint32_t)rx * fb_w) / dst_w);
+			py = (uint16_t)(((uint32_t)ry * fb_h) / dst_h);
+		} else {
+			px = event->x > 0 ? (uint16_t)event->x : 0U;
+			py = event->y > 0 ? (uint16_t)event->y : 0U;
+		}
+	}
 	if (event->kind == TERMINAL_PICTURE_MOTION) {
 		tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, RDP_PTR_FLAG_MOVE,
 				px, py);
@@ -615,7 +771,7 @@ rdp_view_drop(
 	return 0U;
 }
 
-/* Handles tab visibility changes. */
+/* Handles tab visibility changes, hiding the host cursor over the RDP tab. */
 static void
 rdp_view_shown(
 	struct terminal_connection *conn,
@@ -623,8 +779,7 @@ rdp_view_shown(
 	int visible)
 {
 	UNUSED_PARAMETER(conn);
-	UNUSED_PARAMETER(window);
-	UNUSED_PARAMETER(visible);
+	terminal_window_set_cursor_hidden(window, visible != 0 ? 1 : 0);
 }
 
 /* Allows closing the RDP tab immediately. */

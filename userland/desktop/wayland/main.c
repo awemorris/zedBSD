@@ -1855,6 +1855,11 @@ loop_timeout(
 		if (timeout < 0 || timeout > (int)KWL_SOON_MS)
 			timeout = (int)KWL_SOON_MS;
 	}
+	if (server->headless) {
+		int rdp_timeout = kwl_rdp_idle_timeout(server);
+		if (rdp_timeout >= 0 && (timeout < 0 || rdp_timeout < timeout))
+			timeout = rdp_timeout;
+	}
 
 	/* Succeeded: the wait's end, -1 for an event only. */
 	return timeout;

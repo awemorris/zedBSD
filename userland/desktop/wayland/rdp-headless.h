@@ -70,6 +70,9 @@ int kwl_rdp_encode_and_send(struct kwl_rdp *rdp, void *image, uint32_t width, ui
 /* Polls rdp_fd for RESIZE / FORCE_KEY control messages from rdpd. */
 void kwl_rdp_poll(struct kwl_server *server);
 
+/* Returns ms until the idle high-quality refinement frame, or -1 if none pending. */
+int kwl_rdp_idle_timeout(const struct kwl_server *server);
+
 /* Releases all headless Vulkan and encoder resources. */
 void kwl_rdp_close(struct kwl_server *server);
 

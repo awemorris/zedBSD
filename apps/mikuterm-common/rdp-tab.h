@@ -60,6 +60,8 @@ struct rdp_tab {
 	uint32_t *pixels;
 	uint32_t fb_width;
 	uint32_t fb_height;
+	uint32_t view_width;
+	uint32_t view_height;
 	int has_frame;
 	int news;
 	int closed;

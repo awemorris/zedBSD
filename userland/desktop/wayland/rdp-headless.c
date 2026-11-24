@@ -43,6 +43,9 @@ struct kwl_rdp {
 	uint8_t *u_plane;
 	uint8_t *v_plane;
 	unsigned force_key;
+	unsigned refine_key;
+	unsigned need_refine;
+	uint64_t last_send_ms;
 	int closed;
 	uint8_t ctrl_buf[KWL_RDP_CTRL_HDR_SIZE];
 	size_t ctrl_used;
@@ -512,6 +515,13 @@ kwl_rdp_encode_and_send(
 	if (rdp->force_key != 0U)
 		send_flags = MEDIA_ENCODE_FORCE_KEY;
 	rdp->force_key = 0U;
+	if (__atomic_exchange_n(&rdp->refine_key, 0U, __ATOMIC_ACQ_REL) != 0U) {
+		send_flags |= MEDIA_ENCODE_FORCE_KEY | MEDIA_ENCODE_HIGH_QUALITY;
+		__atomic_store_n(&rdp->need_refine, 0U, __ATOMIC_RELEASE);
+	} else {
+		__atomic_store_n(&rdp->last_send_ms, kwl_milliseconds(), __ATOMIC_RELEASE);
+		__atomic_store_n(&rdp->need_refine, 1U, __ATOMIC_RELEASE);
+	}
 	err = media_encoder_send(rdp->encoder, &pic, (int64_t)pts_us, send_flags);
 	if (err != 0)
 		return err;
@@ -575,6 +585,41 @@ kwl_rdp_poll(
 				rdp->force_key = 1U;
 		}
 	}
+	if (__atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE) != 0U) {
+		uint64_t now_ms;
+		uint64_t last_ms;
+		now_ms = kwl_milliseconds();
+		last_ms = __atomic_load_n(&rdp->last_send_ms, __ATOMIC_ACQUIRE);
+		if (now_ms >= last_ms && (now_ms - last_ms) >= 500U) {
+			__atomic_store_n(&rdp->need_refine, 0U, __ATOMIC_RELEASE);
+			__atomic_store_n(&rdp->refine_key, 1U, __ATOMIC_RELEASE);
+			server->dirty = 1U;
+		}
+	}
+}
+
+/* Returns ms until the idle high-quality refinement frame, or -1 if none pending. */
+int
+kwl_rdp_idle_timeout(
+	const struct kwl_server *server)
+{
+	const struct kwl_rdp *rdp;
+	uint64_t now_ms;
+	uint64_t last_ms;
+	uint64_t elapsed;
+	if (server == NULL || !server->headless || server->rdp == NULL)
+		return -1;
+	rdp = server->rdp;
+	if (rdp->closed || __atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE) == 0U)
+		return -1;
+	now_ms = kwl_milliseconds();
+	last_ms = __atomic_load_n(&rdp->last_send_ms, __ATOMIC_ACQUIRE);
+	if (now_ms <= last_ms)
+		return 500;
+	elapsed = now_ms - last_ms;
+	if (elapsed >= 500U)
+		return 0;
+	return (int)(500U - elapsed);
 }
 
 /* Releases all headless Vulkan and encoder resources. */

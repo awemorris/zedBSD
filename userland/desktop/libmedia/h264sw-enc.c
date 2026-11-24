@@ -296,7 +296,14 @@ enc_send(
 	} else {
 		enc->frames_since_idr++;
 	}
-	error = encode_frame(enc, is_idr);
+	{
+		uint32_t saved_qp;
+		saved_qp = enc->qp;
+		if ((flags & MEDIA_ENCODE_HIGH_QUALITY) != 0U && enc->qp > 14U)
+			enc->qp = 14U;
+		error = encode_frame(enc, is_idr);
+		enc->qp = saved_qp;
+	}
 	if (error != 0)
 		return error;
 	enc->pkt_time = time_us;

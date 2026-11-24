@@ -846,6 +846,15 @@ kl_window_follow_scale(
  * Makes the presenter fit the window's size and reports the size a frame
  * is drawn at.  Returns 0, or EIO when Vulkan refused.
  */
+void
+kl_window_set_cursor_hidden(
+	struct kl_window *window,
+	int hidden)
+{
+	(void)window;
+	(void)hidden;
+}
+
 int
 kl_window_present_resize(
 	struct kl_window *window,

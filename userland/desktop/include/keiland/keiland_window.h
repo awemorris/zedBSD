@@ -417,6 +417,7 @@ int kl_window_set_content_type(struct kl_window *window, unsigned type);
  * not say so.  Returns 0, or EINVAL without a window.
  */
 int kl_window_set_opaque(struct kl_window *window, int opaque);
+void kl_window_set_cursor_hidden(struct kl_window *window, int hidden);
 
 /*
  * An application that waits for other descriptors too (a terminal's shells)

@@ -1078,6 +1078,12 @@ window_content_message(
 		if (hit >= KEIUI_WIN32_HIT_LEFT && hit <= KEIUI_WIN32_HIT_BOTTOM_RIGHT)
 			return HTTRANSPARENT;
 		return HTCLIENT;
+	case WM_SETCURSOR:
+		if (window->cursor_hidden != 0 && LOWORD(lparam) == HTCLIENT) {
+			(void)SetCursor(NULL);
+			return TRUE;
+		}
+		break;
 	case WM_MOUSEMOVE:
 		/* The pointer's move; its leaving is asked for once. */
 		if (!window->tracking) {
@@ -1174,6 +1180,20 @@ window_content_message(
 	/* The system's handling of the rest. */
 	result = DefWindowProcW(handle, message, wparam, lparam);
 	return result;
+}
+
+void
+kl_window_set_cursor_hidden(
+	struct kl_window *window,
+	int hidden)
+{
+	if (window == NULL)
+		return;
+	window->cursor_hidden = hidden != 0 ? 1 : 0;
+	if (window->cursor_hidden != 0)
+		(void)SetCursor(NULL);
+	else
+		(void)SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
 }
 
 /* The frame's geometry for frame.c: its client, its dpi and its states. */

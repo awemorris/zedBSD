@@ -903,6 +903,7 @@ int terminal_window_dispatch(struct terminal_window *window, struct terminal_con
 void terminal_window_close(struct terminal_window *window);
 void terminal_window_type(struct terminal_window *window, const char *bytes, size_t length);
 void terminal_window_set_fullscreen(struct terminal_window *window, int fullscreen);
+void terminal_window_set_cursor_hidden(struct terminal_window *window, int hidden);
 uint64_t terminal_clock(void);
 int terminal_perf_on(void);
 uint64_t terminal_perf_now_us(void);

@@ -255,6 +255,7 @@ struct kl_window {
 	struct keiui_win32_surrogate surrogate;
 	int tracking;
 	int frame_tracking;
+	int cursor_hidden;
 	unsigned buttons;
 	unsigned hover;
 	unsigned pressed;

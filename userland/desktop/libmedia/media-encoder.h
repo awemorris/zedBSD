@@ -282,8 +282,9 @@ struct media_encoded {
 #define MEDIA_ENCODED_KEY	0x1U
 
 /* The flags of media_encoder_send and _send_slot: make the picture a key frame; give the slot back without encoding it. */
-#define MEDIA_ENCODE_FORCE_KEY	0x1U
-#define MEDIA_ENCODE_DISCARD	0x2U
+#define MEDIA_ENCODE_FORCE_KEY		0x1U
+#define MEDIA_ENCODE_DISCARD		0x2U
+#define MEDIA_ENCODE_HIGH_QUALITY	0x4U
 
 /* The flags of media_encoder_receive: do not wait for the device. */
 #define MEDIA_RECEIVE_NOWAIT	0x1U

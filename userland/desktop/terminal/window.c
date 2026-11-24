@@ -306,6 +306,15 @@ terminal_window_set_fullscreen(
 	kl_window_set_fullscreen(window->kui, fullscreen);
 }
 
+void
+terminal_window_set_cursor_hidden(
+	struct terminal_window *window,
+	int hidden)
+{
+	if (window != NULL && window->kui != NULL)
+		kl_window_set_cursor_hidden(window->kui, hidden);
+}
+
 /*
  * Returns a monotonic time in milliseconds.
  */

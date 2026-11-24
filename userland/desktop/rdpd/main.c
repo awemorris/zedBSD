@@ -17,6 +17,7 @@
 #include <compat/ssl/ssl.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -259,6 +260,11 @@ handle_client(
 	struct rdp_avc_stream avc;
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.sock = client_sock;
+	{
+		int nodelay = 1;
+		(void)setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY,
+				 &nodelay, sizeof(nodelay));
+	}
 	ctx.hid.fd = -1;
 	ctx.sess.rdp_fd = -1;
 	ctx.running = 1;
