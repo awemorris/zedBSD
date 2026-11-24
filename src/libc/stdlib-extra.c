@@ -563,3 +563,36 @@ getsubopt(
 	/* Succeeded: the index of the token. */
 	return found;
 }
+
+/*
+ * Stack canary value checked by compiler-emitted stack protector epilogues.
+ *
+ * Contains a NUL byte, newline, and 0xff to stop common string-overrun
+ * payloads while remaining non-zero.
+ */
+extern uintptr_t __stack_chk_guard;
+#if UINTPTR_MAX > 0xffffffffUL
+uintptr_t __stack_chk_guard = (uintptr_t)0x5a4253440a0dff00ULL;
+#else
+uintptr_t __stack_chk_guard = (uintptr_t)0x0a0dff00UL;
+#endif
+
+void __stack_chk_fail(void) __attribute__((__noreturn__));
+
+/*
+ * Aborts the process when a stack protector check detects corruption.
+ */
+void __attribute__((__noreturn__))
+__stack_chk_fail(
+	void)
+{
+	static const char message[] = "stack smashing detected\n";
+	ssize_t ignored;
+
+	/* Writes directly to stderr without touching stdio or the heap. */
+	ignored = write(STDERR_FILENO, message, sizeof(message) - 1U);
+	(void)ignored;
+
+	/* Terminates immediately. */
+	abort();
+}
