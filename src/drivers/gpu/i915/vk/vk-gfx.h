@@ -133,6 +133,7 @@ enum i915_gfx_op_kind {
 	I915_GFX_OP_VIDEO_BEGIN,
 	I915_GFX_OP_VIDEO_CONTROL,
 	I915_GFX_OP_VIDEO_DECODE,
+	I915_GFX_OP_VIDEO_ENCODE,
 	I915_GFX_OP_VIDEO_END,
 	I915_GFX_OP_SET_DEPTH_BIAS,
 	I915_GFX_OP_CLEAR_DEPTH_IMAGE,
@@ -256,6 +257,7 @@ struct i915_gfx_image {
 	 * R8G8 texels.  drv_i915_gfx_image_slice() refuses generic image uses.
 	 */
 	uint32_t planar;
+	uint32_t linear;
 	uint64_t chroma_offset;
 	uint32_t chroma_rows;
 
@@ -1231,5 +1233,8 @@ int drv_i915_gfx_rect_prepare(struct i915_render_session *session);
 int drv_i915_gfx_rect(struct i915_render_session *session, const struct i915_gfx_surface *dst, const struct i915_gfx_rect *dst_rect, const struct i915_gfx_surface *src, const struct i915_gfx_rect *src_rect, const uint32_t clear[4], int linear);
 int drv_i915_gfx_rect_build(struct i915_render_session *session, const struct i915_gfx_surface *dst, const struct i915_gfx_rect *dst_rect, const struct i915_gfx_surface *src, const struct i915_gfx_rect *src_rect, const uint32_t clear[4], int linear, uint64_t *batch_va);
 int drv_i915_gfx_resolve(struct i915_render_session *session, const struct i915_gfx_surface *dst, const struct i915_gfx_rect *dst_rect, const struct i915_gfx_surface *samples, const struct i915_gfx_rect *src_rect);
+
+int drv_i915_gfx_query_feedback_pool(const struct i915_gfx_query_pool *pool, uint32_t query);
+void drv_i915_gfx_query_feedback_end(struct i915_gfx_query_pool *pool, uint32_t query, uint64_t offset, uint64_t bytes_written, uint64_t has_overrides);
 
 #endif

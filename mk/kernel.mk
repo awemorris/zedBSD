@@ -554,6 +554,7 @@ KERN_SOURCES += \
 	src/drivers/gpu/i915/vk/vk-video.c \
 	src/drivers/gpu/i915/vk/vk-video-h264-tables.c \
 	src/drivers/gpu/i915/vk/vk-video-mfx.c \
+	src/drivers/gpu/i915/vk/vk-video-vdenc.c \
 	src/drivers/gpu/i915/vk/vk-video-h265.c \
 	src/drivers/gpu/i915/vk/vk-video-hcp.c \
 	src/drivers/gpu/i915/vk/vk.c

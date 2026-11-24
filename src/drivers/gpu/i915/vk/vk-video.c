@@ -33,6 +33,7 @@
 
 #include "vk-video.h"
 #include "vk-video-mfx.h"
+#include "vk-video-vdenc.h"
 #include "vk-video-h265.h"
 #include "vk-video-hcp.h"
 #include "vk-batch.h"
@@ -155,6 +156,11 @@
 /* The codec of a profile, a session or a parameters object. */
 #define I915_VIDEO_CODEC_H264		1U
 #define I915_VIDEO_CODEC_H265		2U
+#define I915_VIDEO_CODEC_H264_ENCODE	3U
+
+/* The H.264 encode std header name and version: VK_STD_vulkan_video_codec_h264_encode 1.0.0. */
+#define I915_VIDEO_ENCODE_STD_NAME	"VK_STD_vulkan_video_codec_h264_encode"
+#define I915_VIDEO_ENCODE_STD_VERSION	((1U << 22) | (0U << 12) | 0U)
 
 /* The structure types the video wire carries (Vulkan 1.3 registry values). */
 #define I915_VIDEO_TYPE_PROFILE			1000023000U
@@ -187,10 +193,35 @@
 #define I915_VIDEO_TYPE_H265_PROFILE		1000187003U
 #define I915_VIDEO_TYPE_H265_PICTURE		1000187004U
 #define I915_VIDEO_TYPE_H265_DPB_SLOT		1000187005U
+#define I915_VIDEO_TYPE_H264_ENCODE_CAPABILITIES	1000038000U
+#define I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_CREATE	1000038001U
+#define I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_ADD	1000038002U
+#define I915_VIDEO_TYPE_H264_ENCODE_PICTURE		1000038003U
+#define I915_VIDEO_TYPE_H264_ENCODE_DPB_SLOT		1000038004U
+#define I915_VIDEO_TYPE_H264_ENCODE_NALU_SLICE		1000038005U
+#define I915_VIDEO_TYPE_H264_ENCODE_GOP_REMAINING	1000038006U
+#define I915_VIDEO_TYPE_H264_ENCODE_PROFILE		1000038007U
+#define I915_VIDEO_TYPE_H264_ENCODE_RATE_CONTROL	1000038008U
+#define I915_VIDEO_TYPE_H264_ENCODE_RATE_LAYER		1000038009U
+#define I915_VIDEO_TYPE_H264_ENCODE_SESSION_CREATE	1000038010U
+#define I915_VIDEO_TYPE_H264_ENCODE_QUALITY_PROPS	1000038011U
+#define I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_GET	1000038012U
+#define I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_FB	1000038013U
+#define I915_VIDEO_TYPE_ENCODE				1000299000U
+#define I915_VIDEO_TYPE_ENCODE_RATE_CONTROL		1000299001U
+#define I915_VIDEO_TYPE_ENCODE_RATE_LAYER		1000299002U
+#define I915_VIDEO_TYPE_ENCODE_CAPABILITIES		1000299003U
+#define I915_VIDEO_TYPE_ENCODE_USAGE			1000299004U
+#define I915_VIDEO_TYPE_ENCODE_QUALITY_INFO		1000299006U
+#define I915_VIDEO_TYPE_ENCODE_QUALITY_PROPS		1000299007U
+#define I915_VIDEO_TYPE_ENCODE_QUALITY_LEVEL		1000299008U
+#define I915_VIDEO_TYPE_ENCODE_PARAMETERS_GET		1000299009U
+#define I915_VIDEO_TYPE_ENCODE_PARAMETERS_FB		1000299010U
 
 /* The flag and enumerant values of the video API the executor answers with or checks. */
 #define I915_VIDEO_OP_DECODE_H264		0x1U
 #define I915_VIDEO_OP_DECODE_H265		0x2U
+#define I915_VIDEO_OP_ENCODE_H264		0x10000U
 #define I915_VIDEO_CHROMA_420			0x2U
 #define I915_VIDEO_DEPTH_8			0x1U
 #define I915_VIDEO_LAYOUT_PROGRESSIVE		0U
@@ -198,6 +229,9 @@
 #define I915_VIDEO_DPB_AND_OUTPUT_COINCIDE	0x1U
 #define I915_VIDEO_USAGE_DECODE_DST		0x400U
 #define I915_VIDEO_USAGE_DECODE_DPB		0x1000U
+#define I915_VIDEO_USAGE_ENCODE_DST		0x2000U
+#define I915_VIDEO_USAGE_ENCODE_SRC		0x4000U
+#define I915_VIDEO_USAGE_ENCODE_DPB		0x8000U
 #define I915_VIDEO_CONTROL_RESET		0x1U
 
 /* VkQueryResultStatusKHR: a decode that ran, and one that was skipped. */
@@ -308,6 +342,9 @@ struct i915_video_session {
 	/* An H.265 session's scratch: the slice segments read and the decode resolved (too large for the stack). */
 	struct i915_video_h265_slice *h265_slices;
 	struct i915_video_hcp_decode *hcp;
+
+	/* Encode session feedback buffer (stores MFC_BITSTREAM_BYTECOUNT_FRAME). */
+	struct i915_gem_object *feedback_obj;
 };
 
 /* The picture resource of a decode or a slot, as recorded. */
@@ -374,6 +411,16 @@ struct i915_video_command {
 	/* A decode's H.265 picture (its slice offsets are slices[] above). */
 	int has_h265_picture;
 	struct i915_video_h265_picture h265_picture;
+
+	/* An encode's H.264 picture and slice parameters. */
+	int has_encode_picture;
+	uint32_t enc_slice_type;
+	int32_t enc_qp;
+	uint32_t enc_cabac_init_idc;
+	uint32_t enc_deblock_idc;
+	int32_t enc_alpha_div2;
+	int32_t enc_beta_div2;
+	uint32_t enc_preceding_bytes;
 };
 
 /*
@@ -438,6 +485,21 @@ struct i915_video_chain {
 	/* An H.265 picture record. */
 	int has_h265_picture;
 	struct i915_video_h265_picture h265_picture;
+
+	/* H.264 encode chain fields. */
+	int has_h264_encode_profile;
+	int has_h264_encode_get;
+	uint32_t write_std_sps;
+	uint32_t write_std_pps;
+	uint32_t get_sps_id;
+	uint32_t get_pps_id;
+	int has_encode_picture;
+	uint32_t enc_slice_type;
+	int32_t enc_qp;
+	uint32_t enc_cabac_init_idc;
+	uint32_t enc_deblock_idc;
+	int32_t enc_alpha_div2;
+	int32_t enc_beta_div2;
 };
 
 /* The state of one session while a submission is simulated: a copy of its slots and reset. */
@@ -461,6 +523,9 @@ static atomic_uint_t i915_video_test_runs;
 #endif
 
 static int i915_video_capabilities(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int i915_video_encode_quality(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int i915_video_encoded_parameters(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int i915_video_encode_run(struct i915_render_session *session, const struct i915_video_command *command, const struct i915_video_command *begin, struct i915_video_session *video, uint64_t *bytes_written);
 static int i915_video_format_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_video_family_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_video_session_create(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -574,6 +639,12 @@ drv_i915_video_dispatch(
 	case GPU_OP_DESTROY_VIDEO_SESSION_PARAMETERS:
 		error = i915_video_parameters_destroy(session, reader);
 		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES:
+		error = i915_video_encode_quality(session, reader, reply);
+		break;
+	case GPU_OP_GET_ENCODED_VIDEO_SESSION_PARAMETERS:
+		error = i915_video_encoded_parameters(session, reader, reply);
+		break;
 	default:
 		/* A recording opcode is the command buffer part's; anything else is unknown. */
 		reader->error = 1;
@@ -658,6 +729,38 @@ drv_i915_video_record(
 		if (type != I915_VIDEO_TYPE_CONTROL)
 			reader->error = 1;
 		command->flags = drv_i915_wire_read_u32(reader);
+		break;
+	case GPU_OP_CMD_ENCODE_VIDEO:
+		/* vkCmdEncodeVideoKHR: [flags][dstBuffer][offset][range][srcResource][present]{setup}[count]{refSlots}[precedingBytes]. */
+		if (type != I915_VIDEO_TYPE_ENCODE)
+			reader->error = 1;
+		command->flags = drv_i915_wire_read_u32(reader);
+		command->buffer = drv_i915_wire_read_u64(reader);
+		command->offset = drv_i915_wire_read_u64(reader);
+		command->range = drv_i915_wire_read_u64(reader);
+		i915_video_read_resource(reader, &command->destination);
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			command->has_setup = 1;
+			i915_video_read_slot(reader, &command->setup);
+		}
+		i915_video_record_slots(reader, command, command->references, I915_VIDEO_MAX_REFERENCES, &command->reference_count);
+		command->enc_preceding_bytes = drv_i915_wire_read_u32(reader);
+
+		/* Keeps the H.264 encode picture and slice parameters from the chain. */
+		command->has_encode_picture = chain.has_encode_picture;
+		command->picture_flags = chain.picture_flags;
+		command->sps_id = chain.sps_id;
+		command->pps_id = chain.pps_id;
+		command->frame_num = chain.picture_frame_num;
+		command->idr_pic_id = chain.idr_pic_id;
+		command->poc[0] = chain.picture_poc[0];
+		command->enc_slice_type = chain.enc_slice_type;
+		command->enc_qp = chain.enc_qp;
+		command->enc_cabac_init_idc = chain.enc_cabac_init_idc;
+		command->enc_deblock_idc = chain.enc_deblock_idc;
+		command->enc_alpha_div2 = chain.enc_alpha_div2;
+		command->enc_beta_div2 = chain.enc_beta_div2;
 		break;
 	default:
 		/* vkCmdDecodeVideoKHR: [flags][buffer][offset][range][resource][present]{setup}[count][array]{slot}. */
@@ -913,6 +1016,8 @@ i915_video_reply_capabilities(
 		kern_memset(name, 0, sizeof(name));
 		if (codec == I915_VIDEO_CODEC_H265) {
 			kern_memcpy(name, I915_VIDEO_H265_STD_NAME, sizeof(I915_VIDEO_H265_STD_NAME));
+		} else if (codec == I915_VIDEO_CODEC_H264_ENCODE) {
+			kern_memcpy(name, I915_VIDEO_ENCODE_STD_NAME, sizeof(I915_VIDEO_ENCODE_STD_NAME));
 		} else {
 			kern_memcpy(name, I915_VIDEO_STD_NAME, sizeof(I915_VIDEO_STD_NAME));
 		}
@@ -920,6 +1025,8 @@ i915_video_reply_capabilities(
 		drv_i915_wire_reply_bytes(reply, name, sizeof(name));
 		if (codec == I915_VIDEO_CODEC_H265) {
 			drv_i915_wire_reply_u32(reply, I915_VIDEO_H265_STD_VERSION);
+		} else if (codec == I915_VIDEO_CODEC_H264_ENCODE) {
+			drv_i915_wire_reply_u32(reply, I915_VIDEO_ENCODE_STD_VERSION);
 		} else {
 			drv_i915_wire_reply_u32(reply, I915_VIDEO_STD_VERSION);
 		}
@@ -937,6 +1044,33 @@ i915_video_reply_capabilities(
 	case I915_VIDEO_TYPE_H265_CAPABILITIES:
 		/* Level 5.1. */
 		drv_i915_wire_reply_u32(reply, I915_VIDEO_H265_LEVEL_5_1);
+		break;
+	case I915_VIDEO_TYPE_ENCODE_CAPABILITIES:
+		/* VDEnc CQP initial mode: rateControlModes = DEFAULT | DISABLED (1), maxQualityLevels = 1, 16x16 granularity, offset+bytes feedback. */
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u64(reply, 100000000ULL);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u32(reply, I915_VIDEO_MB);
+		drv_i915_wire_reply_u32(reply, I915_VIDEO_MB);
+		drv_i915_wire_reply_u32(reply, 0x3U);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_CAPABILITIES:
+		/* H.264 encode capabilities: Level 5.1, 1 slice, 1 L0 P-ref, QP 0..51. */
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, I915_VIDEO_LEVEL_5_1);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 1U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 51U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 0U);
+		drv_i915_wire_reply_u32(reply, 0x001fffbfU);
 		break;
 	default:
 		/* A record the executor does not know cannot be answered. */
@@ -983,9 +1117,11 @@ i915_video_format_properties(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The profiles must all be ones the decoder takes; usages include picture readback and sampling. */
+	/* The profiles must all be ones the codec takes; usages include readback, encode input, and sampling. */
 	result = 0;
-	video_usage = I915_VIDEO_USAGE_DECODE_DST | I915_VIDEO_USAGE_DECODE_DPB | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	video_usage = I915_VIDEO_USAGE_DECODE_DST | I915_VIDEO_USAGE_DECODE_DPB |
+		      I915_VIDEO_USAGE_ENCODE_SRC | I915_VIDEO_USAGE_ENCODE_DPB |
+		      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	if (!chain.has_profile_list || chain.profile_count == 0U) {
 		result = I915_VIDEO_ERROR_OPERATION;
 	} else if (!chain.profiles_supported) {
@@ -1050,9 +1186,9 @@ i915_video_family_properties(
 	drv_i915_wire_reply_u64(reply, 1U);
 	drv_i915_wire_reply_u32(reply, count);
 	for (index = 0U; index < count; index++) {
-		/* Only the video family decodes. */
+		/* Only the video family decodes and encodes. */
 		if (index == 1U)
-			drv_i915_wire_reply_u32(reply, I915_VIDEO_OP_DECODE_H264 | I915_VIDEO_OP_DECODE_H265);
+			drv_i915_wire_reply_u32(reply, I915_VIDEO_OP_DECODE_H264 | I915_VIDEO_OP_DECODE_H265 | I915_VIDEO_OP_ENCODE_H264);
 		else
 			drv_i915_wire_reply_u32(reply, 0U);
 	}
@@ -1135,10 +1271,12 @@ i915_video_session_create(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Checks the session against what the decoder takes; the first reason is the result. */
+	/* Checks the session against what the codec takes; the first reason is the result. */
 	result = profile;
 	if (codec == I915_VIDEO_CODEC_H265)
 		different = kern_strcmp(name, I915_VIDEO_H265_STD_NAME);
+	else if (codec == I915_VIDEO_CODEC_H264_ENCODE)
+		different = kern_strcmp(name, I915_VIDEO_ENCODE_STD_NAME);
 	else
 		different = kern_strcmp(name, I915_VIDEO_STD_NAME);
 	if (result != 0) {
@@ -1519,7 +1657,8 @@ i915_video_parameters_create(
 	video = drv_i915_object_lookup(session, I915_VK_OBJ_VIDEO_SESSION, session_identity);
 	if (video == NULL) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
-	} else if (video->codec == I915_VIDEO_CODEC_H264 && (!chain.has_h264_create || chain.add_error != 0)) {
+	} else if ((video->codec == I915_VIDEO_CODEC_H264 || video->codec == I915_VIDEO_CODEC_H264_ENCODE) &&
+		   (!chain.has_h264_create || chain.add_error != 0)) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
 	} else if (video->codec == I915_VIDEO_CODEC_H265 && (!chain.has_h265_create || chain.add_error != 0)) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
@@ -1869,6 +2008,173 @@ i915_video_read_fields(
 				chain->slices[item] = value;
 		}
 		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_PROFILE:
+		chain->has_h264_encode_profile = 1;
+		chain->profile_idc = drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_ENCODE_USAGE:
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_SESSION_CREATE:
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_CREATE:
+		chain->has_h264_create = 1;
+		chain->max_sps = drv_i915_wire_read_u32(reader);
+		chain->max_pps = drv_i915_wire_read_u32(reader);
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			value = drv_i915_wire_read_u32(reader);
+			if (value != I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_ADD)
+				reader->error = 1;
+			kern_memset(&nested, 0, sizeof(nested));
+			i915_video_read_chain(reader, &nested, depth + 1U);
+			i915_video_chain_free(&nested);
+			i915_video_read_add(reader, chain);
+		}
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_ADD:
+		i915_video_read_add(reader, chain);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_GET:
+		chain->has_h264_encode_get = 1;
+		chain->write_std_sps = drv_i915_wire_read_u32(reader);
+		chain->write_std_pps = drv_i915_wire_read_u32(reader);
+		chain->get_sps_id = drv_i915_wire_read_u32(reader);
+		chain->get_pps_id = drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_ENCODE_QUALITY_LEVEL:
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_ENCODE_RATE_CONTROL:
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; item < count && reader->error == 0; item++) {
+			value = drv_i915_wire_read_u32(reader);
+			if (value != I915_VIDEO_TYPE_ENCODE_RATE_LAYER)
+				reader->error = 1;
+			kern_memset(&nested, 0, sizeof(nested));
+			i915_video_read_chain(reader, &nested, depth + 1U);
+			i915_video_chain_free(&nested);
+			(void)drv_i915_wire_read_u64(reader);
+			(void)drv_i915_wire_read_u64(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+		}
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_ENCODE_RATE_LAYER:
+		(void)drv_i915_wire_read_u64(reader);
+		(void)drv_i915_wire_read_u64(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_RATE_CONTROL:
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_RATE_LAYER:
+		for (item = 0U; item < 12U; item++)
+			(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_GOP_REMAINING:
+		for (item = 0U; item < 4U; item++)
+			(void)drv_i915_wire_read_u32(reader);
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_DPB_SLOT:
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			chain->has_reference = 1;
+			chain->reference_flags = drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			chain->frame_num = drv_i915_wire_read_u32(reader);
+			chain->poc[0] = (int32_t)drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+		}
+		break;
+	case I915_VIDEO_TYPE_H264_ENCODE_PICTURE:
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		for (item = 0U; item < count && reader->error == 0; item++) {
+			int32_t slice_qp;
+			uint32_t stype;
+
+			value = drv_i915_wire_read_u32(reader);
+			if (value != I915_VIDEO_TYPE_H264_ENCODE_NALU_SLICE)
+				reader->error = 1;
+			kern_memset(&nested, 0, sizeof(nested));
+			i915_video_read_chain(reader, &nested, depth + 1U);
+			i915_video_chain_free(&nested);
+			slice_qp = (int32_t)drv_i915_wire_read_u32(reader);
+			present = drv_i915_wire_read_u64(reader);
+			if (present != 0U) {
+				(void)drv_i915_wire_read_u32(reader);
+				(void)drv_i915_wire_read_u32(reader);
+				stype = drv_i915_wire_read_u32(reader);
+				if (item == 0U) {
+					chain->enc_qp = slice_qp;
+					chain->enc_slice_type = stype;
+					chain->enc_alpha_div2 = (int32_t)drv_i915_wire_read_u32(reader);
+					chain->enc_beta_div2 = (int32_t)drv_i915_wire_read_u32(reader);
+					(void)drv_i915_wire_read_u32(reader);
+					chain->enc_cabac_init_idc = drv_i915_wire_read_u32(reader);
+					chain->enc_deblock_idc = drv_i915_wire_read_u32(reader);
+				} else {
+					for (uint32_t k = 0U; k < 5U; k++)
+						(void)drv_i915_wire_read_u32(reader);
+				}
+				present = drv_i915_wire_read_u64(reader);
+				if (present != 0U)
+					reader->error = 1;
+			}
+		}
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			uint64_t ref_lists;
+
+			chain->has_encode_picture = 1;
+			chain->picture_flags = drv_i915_wire_read_u32(reader);
+			chain->sps_id = drv_i915_wire_read_u32(reader);
+			chain->pps_id = drv_i915_wire_read_u32(reader);
+			chain->idr_pic_id = drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			chain->picture_frame_num = drv_i915_wire_read_u32(reader);
+			chain->picture_poc[0] = (int32_t)drv_i915_wire_read_u32(reader);
+			(void)drv_i915_wire_read_u32(reader);
+			ref_lists = drv_i915_wire_read_u64(reader);
+			if (ref_lists != 0U) {
+				uint64_t m0;
+				uint64_t m1;
+				uint64_t mk;
+
+				(void)drv_i915_wire_read_u32(reader);
+				(void)drv_i915_wire_read_u32(reader);
+				(void)drv_i915_wire_read_u32(reader);
+				reader->offset += 64U;
+				(void)drv_i915_wire_read_u32(reader);
+				m0 = drv_i915_wire_read_u64(reader);
+				reader->offset += (size_t)m0 * 12U;
+				(void)drv_i915_wire_read_u32(reader);
+				m1 = drv_i915_wire_read_u64(reader);
+				reader->offset += (size_t)m1 * 12U;
+				(void)drv_i915_wire_read_u32(reader);
+				mk = drv_i915_wire_read_u64(reader);
+				reader->offset += (size_t)mk * 20U;
+			}
+		}
+		(void)drv_i915_wire_read_u32(reader);
+		break;
 	default:
 		/* A structure the library does not write here. */
 		reader->error = 1;
@@ -1913,6 +2219,8 @@ i915_video_read_profile(
 	*codec = I915_VIDEO_CODEC_H264;
 	if (operation == I915_VIDEO_OP_DECODE_H265)
 		*codec = I915_VIDEO_CODEC_H265;
+	else if (operation == I915_VIDEO_OP_ENCODE_H264)
+		*codec = I915_VIDEO_CODEC_H264_ENCODE;
 
 	/* Succeeded: reports the profile's result. */
 	return result;
@@ -1927,8 +2235,10 @@ i915_video_profile_result(
 	uint32_t chroma_depth,
 	const struct i915_video_chain *chain)
 {
-	/* H.264 and H.265 decode are the operations. */
-	if (operation != I915_VIDEO_OP_DECODE_H264 && operation != I915_VIDEO_OP_DECODE_H265)
+	/* H.264/H.265 decode and H.264 encode are the operations. */
+	if (operation != I915_VIDEO_OP_DECODE_H264 &&
+	    operation != I915_VIDEO_OP_DECODE_H265 &&
+	    operation != I915_VIDEO_OP_ENCODE_H264)
 		return I915_VIDEO_ERROR_OPERATION;
 
 	/* 8-bit 4:2:0 is the one format. */
@@ -1938,6 +2248,17 @@ i915_video_profile_result(
 	/* The H.265 record must be there and name Main. */
 	if (operation == I915_VIDEO_OP_DECODE_H265) {
 		if (!chain->has_h265_profile || chain->profile_idc != I915_VIDEO_H265_PROFILE_MAIN)
+			return I915_VIDEO_ERROR_CODEC;
+		return 0;
+	}
+
+	/* The H.264 encode record must be there and name Baseline, Main, or High. */
+	if (operation == I915_VIDEO_OP_ENCODE_H264) {
+		if (!chain->has_h264_encode_profile)
+			return I915_VIDEO_ERROR_CODEC;
+		if (chain->profile_idc != I915_VIDEO_PROFILE_BASELINE &&
+		    chain->profile_idc != I915_VIDEO_PROFILE_MAIN &&
+		    chain->profile_idc != I915_VIDEO_PROFILE_HIGH)
 			return I915_VIDEO_ERROR_CODEC;
 		return 0;
 	}
@@ -2794,6 +3115,8 @@ i915_video_session_free(
 	}
 
 	/* The scratch and the session. */
+	if (video->feedback_obj != NULL)
+		drv_i915_gfx_object_destroy(session, video->feedback_obj);
 	kern_free(video->h265_slices);
 	kern_free(video->hcp);
 	kern_free(video);
@@ -2868,6 +3191,8 @@ i915_video_simulate(
 	uint32_t query_decodes;
 	int32_t query_status;
 	int query_active;
+	int query_is_feedback;
+	uint64_t query_bytes_written;
 	int status_pool;
 	int in_range;
 	int error;
@@ -2885,6 +3210,8 @@ i915_video_simulate(
 		query_status = I915_VIDEO_STATUS_COMPLETE;
 		query_decodes = 0U;
 		query_active = 0;
+		query_is_feedback = 0;
+		query_bytes_written = 0U;
 		for (index = 0U; index < counts[list]; index++) {
 			op = &lists[list][index];
 
@@ -2910,21 +3237,26 @@ i915_video_simulate(
 				continue;
 			}
 			if (op->kind == I915_GFX_OP_QUERY_BEGIN) {
-				/* A result status query of its pool, begun in a scope, while no other is. */
+				int feedback_pool;
+
+				/* A result status or encode feedback query, begun in a scope, while no other is. */
 				status_pool = drv_i915_gfx_query_status_pool(op->u.query.pool, op->u.query.first);
+				feedback_pool = drv_i915_gfx_query_feedback_pool(op->u.query.pool, op->u.query.first);
 				if (begin == NULL ||
-				    !status_pool ||
+				    (!status_pool && !feedback_pool) ||
 				    query_active) {
 					kern_logf("i915: video: submission refused: a query begun outside a coding scope, of another type, or within another\n");
 					return EBADMSG;
 				}
 
-				/* The query takes what the decode within it does, COMPLETE unless it is skipped. */
+				/* The query takes what the decode/encode within it does. */
 				query_pool = op->u.query.pool;
 				query_index = op->u.query.first;
 				query_status = I915_VIDEO_STATUS_COMPLETE;
 				query_decodes = 0U;
 				query_active = 1;
+				query_is_feedback = feedback_pool;
+				query_bytes_written = 0U;
 				continue;
 			}
 			if (op->kind == I915_GFX_OP_QUERY_END) {
@@ -2937,23 +3269,20 @@ i915_video_simulate(
 					return EBADMSG;
 				}
 
-				/*
-				 * Running, the decode within it has run on VCS0 by now (each
-				 * decode's batch runs and is waited for before the next
-				 * operation, i915_video_run), and its status is written on the
-				 * CPU.  A walk that batched several decodes into one run would
-				 * have to run the batch here first.
-				 */
-				if (apply)
+				if (apply && query_is_feedback)
+					drv_i915_gfx_query_feedback_end(query_pool, query_index, 0U, query_bytes_written, 0U);
+				else if (apply)
 					drv_i915_gfx_query_status_end(query_pool, query_index, query_status);
 
 				/* No query is active in the scope from here. */
 				query_active = 0;
+				query_is_feedback = 0;
 				continue;
 			}
 			if (op->kind != I915_GFX_OP_VIDEO_BEGIN &&
 			    op->kind != I915_GFX_OP_VIDEO_CONTROL &&
 			    op->kind != I915_GFX_OP_VIDEO_DECODE &&
+			    op->kind != I915_GFX_OP_VIDEO_ENCODE &&
 			    op->kind != I915_GFX_OP_VIDEO_END) {
 				kern_logf("i915: video: submission refused: operation kind %u on the video family\n", (unsigned)op->kind);
 				return EBADMSG;
@@ -3050,6 +3379,25 @@ i915_video_simulate(
 					error = i915_video_run(session, state->session);
 					if (error != 0)
 						return error;
+				}
+				break;
+			case I915_GFX_OP_VIDEO_ENCODE:
+				if (begin == NULL)
+					return EBADMSG;
+				if (query_active && query_decodes != 0U)
+					return EBADMSG;
+				if (query_active)
+					query_decodes++;
+				if (state->session->codec != I915_VIDEO_CODEC_H264_ENCODE)
+					return EBADMSG;
+				error = i915_video_simulate_decode(command, begin, state);
+				if (error != 0)
+					return error;
+				if (apply) {
+					error = i915_video_encode_run(session, command, begin, state->session, &query_bytes_written);
+					if (error != 0)
+						return error;
+					kern_memcpy(state->session->slots, state->slots, sizeof(state->slots));
 				}
 				break;
 			default:
@@ -4095,3 +4443,316 @@ i915_video_test_hang(
 	kern_logf("i915: video: I915_TEST_VIDEO_HANG_AT: run %u ends in a loop that does not finish\n", run);
 }
 #endif
+
+/*
+ * vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR.
+ */
+static int
+i915_video_encode_quality(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct i915_video_chain chain;
+	uint32_t types[I915_VIDEO_MAX_CHAIN];
+	uint32_t count;
+	uint32_t idc;
+	uint32_t codec;
+	uint64_t present;
+	int32_t result;
+	uint32_t i;
+
+	UNUSED_PARAMETER(session);
+
+	(void)drv_i915_wire_read_u64(reader);
+	present = drv_i915_wire_read_u64(reader);
+	result = I915_VIDEO_ERROR_OPERATION;
+	codec = I915_VIDEO_CODEC_H264_ENCODE;
+	if (present != 0U) {
+		uint32_t type = drv_i915_wire_read_u32(reader);
+
+		if (type != I915_VIDEO_TYPE_ENCODE_QUALITY_INFO)
+			reader->error = 1;
+		kern_memset(&chain, 0, sizeof(chain));
+		i915_video_read_chain(reader, &chain, 0U);
+		i915_video_chain_free(&chain);
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U)
+			result = i915_video_read_profile(reader, &idc, &codec);
+		(void)drv_i915_wire_read_u32(reader);
+	}
+
+	count = 0U;
+	present = drv_i915_wire_read_u64(reader);
+	while (present != 0U && reader->error == 0) {
+		if (count >= I915_VIDEO_MAX_CHAIN) {
+			reader->error = 1;
+			break;
+		}
+		types[count++] = drv_i915_wire_read_u32(reader);
+		present = drv_i915_wire_read_u64(reader);
+	}
+	if (reader->error != 0 || count == 0U || types[0] != I915_VIDEO_TYPE_ENCODE_QUALITY_PROPS)
+		return EINVAL;
+
+	if (result != 0) {
+		drv_i915_wire_reply_u32(reply, (uint32_t)result);
+		return 0;
+	}
+
+	drv_i915_wire_reply_u32(reply, 0U);
+	drv_i915_wire_reply_u64(reply, 1U);
+	for (i = 0U; i < count; i++) {
+		drv_i915_wire_reply_u32(reply, types[i]);
+		drv_i915_wire_reply_u64(reply, (i + 1U < count) ? 1U : 0U);
+	}
+	for (i = count; i > 0U; i--) {
+		uint32_t t = types[i - 1U];
+
+		if (t == I915_VIDEO_TYPE_ENCODE_QUALITY_PROPS) {
+			/* preferredRateControlMode = DISABLED (1), preferredRateControlLayerCount = 1. */
+			drv_i915_wire_reply_u32(reply, 1U);
+			drv_i915_wire_reply_u32(reply, 1U);
+		} else if (t == I915_VIDEO_TYPE_H264_ENCODE_QUALITY_PROPS) {
+			drv_i915_wire_reply_u32(reply, 0U);
+			drv_i915_wire_reply_u32(reply, 60U);
+			drv_i915_wire_reply_u32(reply, 60U);
+			drv_i915_wire_reply_u32(reply, 0U);
+			drv_i915_wire_reply_u32(reply, 1U);
+			drv_i915_wire_reply_u32(reply, 24U);
+			drv_i915_wire_reply_u32(reply, 26U);
+			drv_i915_wire_reply_u32(reply, 28U);
+			drv_i915_wire_reply_u32(reply, 1U);
+			drv_i915_wire_reply_u32(reply, 0U);
+			drv_i915_wire_reply_u32(reply, 1U);
+		}
+	}
+	return 0;
+}
+
+/*
+ * vkGetEncodedVideoSessionParametersKHR: packs Annex-B SPS/PPS from parameters.
+ */
+static int
+i915_video_encoded_parameters(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct i915_video_chain chain;
+	struct i915_video_parameters *parameters;
+	uint8_t buf[I915_VIDEO_VDENC_PS_MAX_BYTES * 2U];
+	uint32_t fb_types[I915_VIDEO_MAX_CHAIN];
+	uint32_t fb_count;
+	uint64_t present;
+	uint64_t param_id;
+	uint64_t cap;
+	uint32_t has_data;
+	size_t total;
+	size_t part;
+	int32_t result;
+	uint32_t i;
+
+	(void)drv_i915_wire_read_u64(reader);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 1U || drv_i915_wire_read_u32(reader) != I915_VIDEO_TYPE_ENCODE_PARAMETERS_GET)
+		return EINVAL;
+	kern_memset(&chain, 0, sizeof(chain));
+	i915_video_read_chain(reader, &chain, 0U);
+	param_id = drv_i915_wire_read_u64(reader);
+
+	fb_count = 0U;
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		present = 1U;
+		while (present != 0U && reader->error == 0) {
+			if (fb_count >= I915_VIDEO_MAX_CHAIN) {
+				reader->error = 1;
+				break;
+			}
+			fb_types[fb_count++] = drv_i915_wire_read_u32(reader);
+			present = drv_i915_wire_read_u64(reader);
+		}
+	}
+	cap = drv_i915_wire_read_u64(reader);
+	has_data = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0) {
+		i915_video_chain_free(&chain);
+		return EINVAL;
+	}
+
+	parameters = drv_i915_object_lookup(session, I915_VK_OBJ_VIDEO_SESSION_PARAMETERS, param_id);
+	if (parameters == NULL || !chain.has_h264_encode_get) {
+		i915_video_chain_free(&chain);
+		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
+		return 0;
+	}
+
+	total = 0U;
+	if (chain.write_std_sps != 0U && chain.get_sps_id < I915_VIDEO_SPS_IDS &&
+	    parameters->sps[chain.get_sps_id] != NULL) {
+		if (drv_i915_video_vdenc_pack_sps(parameters->sps[chain.get_sps_id], buf, sizeof(buf), &part) == 0)
+			total += part;
+	}
+	if (chain.write_std_pps != 0U && chain.get_pps_id < I915_VIDEO_PPS_IDS &&
+	    parameters->pps[chain.get_pps_id] != NULL) {
+		if (drv_i915_video_vdenc_pack_pps(parameters->pps[chain.get_pps_id], buf + total, sizeof(buf) - total, &part) == 0)
+			total += part;
+	}
+	i915_video_chain_free(&chain);
+
+	result = 0;
+	if (has_data != 0U && cap < total)
+		result = VK_INCOMPLETE;
+	drv_i915_wire_reply_u32(reply, (uint32_t)result);
+
+	if (fb_count > 0U) {
+		drv_i915_wire_reply_u64(reply, 1U);
+		for (i = 0U; i < fb_count; i++) {
+			drv_i915_wire_reply_u32(reply, fb_types[i]);
+			drv_i915_wire_reply_u64(reply, (i + 1U < fb_count) ? 1U : 0U);
+		}
+		for (i = fb_count; i > 0U; i--) {
+			if (fb_types[i - 1U] == I915_VIDEO_TYPE_ENCODE_PARAMETERS_FB) {
+				drv_i915_wire_reply_u32(reply, 0U);
+			} else if (fb_types[i - 1U] == I915_VIDEO_TYPE_H264_ENCODE_PARAMETERS_FB) {
+				drv_i915_wire_reply_u32(reply, 0U);
+				drv_i915_wire_reply_u32(reply, 0U);
+			}
+		}
+	}
+
+	drv_i915_wire_reply_u64(reply, (uint64_t)total);
+	if (has_data != 0U && total != 0U) {
+		size_t emit = (total <= cap) ? total : (size_t)cap;
+
+		drv_i915_wire_reply_bytes(reply, buf, emit);
+	}
+	return 0;
+}
+
+/*
+ * Resolves, builds, and executes one H.264 VDEnc + MFX frame encode on VCS0.
+ */
+static int
+i915_video_encode_run(
+	struct i915_render_session *session,
+	const struct i915_video_command *command,
+	const struct i915_video_command *begin,
+	struct i915_video_session *video,
+	uint64_t *bytes_written)
+{
+	struct i915_video_parameters *parameters;
+	struct i915_video_vdenc_encode enc;
+	struct i915_gfx_buffer *dst_buf;
+	struct i915_gfx_view *src_view;
+	struct i915_gfx_image *src_img;
+	struct i915_gfx_view *setup_view;
+	struct i915_gfx_image *setup_img;
+	uint64_t dst_va;
+	uint32_t i;
+	int error;
+
+	*bytes_written = 0U;
+	if (!command->has_encode_picture || !command->has_setup)
+		return EBADMSG;
+
+	parameters = drv_i915_object_lookup(session, I915_VK_OBJ_VIDEO_SESSION_PARAMETERS, begin->parameters);
+	dst_buf = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, command->buffer);
+	src_view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, command->destination.view);
+	setup_view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, command->setup.picture.view);
+	if (parameters == NULL || dst_buf == NULL || src_view == NULL || setup_view == NULL)
+		return EBADMSG;
+
+	src_img = src_view->image;
+	setup_img = setup_view->image;
+	if (src_img == NULL || setup_img == NULL || src_img->planar == 0U || setup_img->planar == 0U ||
+	    src_img->linear != 0U || setup_img->linear != 0U)
+		return EBADMSG;
+	if (command->sps_id >= I915_VIDEO_SPS_IDS || command->pps_id >= I915_VIDEO_PPS_IDS ||
+	    parameters->sps[command->sps_id] == NULL || parameters->pps[command->pps_id] == NULL)
+		return EBADMSG;
+	if (drv_i915_video_vdenc_check_sets(parameters->sps[command->sps_id], parameters->pps[command->pps_id]) != NULL)
+		return EBADMSG;
+
+	if (video->batch == NULL) {
+		error = drv_i915_gfx_object_create(session, I915_VIDEO_BATCH_BYTES, &video->batch);
+		if (error != 0)
+			return error;
+	}
+	if (video->feedback_obj == NULL) {
+		error = drv_i915_gfx_object_create(session, 4096U, &video->feedback_obj);
+		if (error != 0)
+			return error;
+	}
+
+	dst_va = drv_i915_gfx_memory_va(dst_buf->memory, dst_buf->offset + command->offset);
+	if (dst_va == 0U)
+		return EBADMSG;
+
+	kern_memset(&enc, 0, sizeof(enc));
+	enc.sps = parameters->sps[command->sps_id];
+	enc.pps = parameters->pps[command->pps_id];
+	enc.is_idr = (command->picture_flags & 1U) != 0U ? 1 : 0;
+	enc.is_reference = (command->picture_flags & 2U) != 0U ? 1 : 0;
+	enc.frame_num = command->frame_num;
+	enc.idr_pic_id = command->idr_pic_id;
+	enc.poc = command->poc[0];
+	enc.width = src_img->width;
+	enc.height = src_img->height;
+	enc.pitch = src_img->pitch;
+	enc.chroma_rows = src_img->chroma_rows;
+	enc.source = drv_i915_gfx_memory_va(src_img->memory, src_img->offset);
+	enc.reconstructed = drv_i915_gfx_memory_va(setup_img->memory, setup_img->offset);
+	for (i = 0U; i < I915_VIDEO_MFX_ROW_STORES; i++) {
+		struct i915_gfx_memory *m = drv_i915_object_lookup(session, I915_VK_OBJ_MEMORY, video->binds[i].memory);
+
+		if (m == NULL)
+			return EBADMSG;
+		enc.row_stores[i] = drv_i915_gfx_memory_va(m, video->binds[i].offset);
+	}
+	enc.vdenc_row_store = enc.row_stores[0];
+	enc.streamin_buffer = enc.row_stores[1];
+	enc.streamout_buffer = enc.row_stores[2];
+	enc.mb_status_buffer = enc.row_stores[3];
+	enc.bitstream_base = dst_va;
+	enc.bitstream_end = dst_va + command->range;
+	enc.feedback_addr = video->feedback_obj->va;
+	enc.mocs = GEN12_MOCS(I915_MOCS_UNCACHED_INDEX);
+	enc.slice.slice_type = command->enc_slice_type;
+	enc.slice.qp = command->enc_qp;
+	enc.slice.cabac_init_idc = command->enc_cabac_init_idc;
+	enc.slice.disable_deblocking_filter_idc = command->enc_deblock_idc;
+	enc.slice.slice_alpha_c0_offset_div2 = command->enc_alpha_div2;
+	enc.slice.slice_beta_offset_div2 = command->enc_beta_div2;
+
+	for (i = 0U; i < command->reference_count && i < I915_VIDEO_MFX_REFERENCES; i++) {
+		struct i915_gfx_view *rv = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, command->references[i].picture.view);
+
+		if (rv == NULL || rv->image == NULL)
+			return EBADMSG;
+		enc.references[i].slot_index = command->references[i].index;
+		enc.references[i].frame_num = command->references[i].frame_num;
+		enc.references[i].poc = command->references[i].poc[0];
+		enc.references[i].picture = drv_i915_gfx_memory_va(rv->image->memory, rv->image->offset);
+		enc.reference_count++;
+	}
+
+	kern_memset(video->feedback_obj->address, 0, 64U);
+	drv_i915_gt_clflush(video->feedback_obj->address, 64U);
+
+	video->cursor.cmds = video->batch->address;
+	video->cursor.capacity = I915_VIDEO_BATCH_BYTES / 4U;
+	video->cursor.count = 0U;
+	video->cursor.overflow = 0;
+	video->cursor.graphics_ver = 12U;
+	drv_i915_video_vdenc_build(&video->cursor, &enc);
+
+	error = i915_video_run(session, video);
+	if (error != 0)
+		return error;
+
+	drv_i915_gt_clflush(video->feedback_obj->address, 64U);
+	*bytes_written = (uint64_t)(*(const volatile uint32_t *)video->feedback_obj->address);
+	return 0;
+}

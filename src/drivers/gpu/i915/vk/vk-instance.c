@@ -28,6 +28,7 @@
 
 #include <uapi/errno.h>
 #include <stdint.h>
+#include <libc/vulkan/vulkan_video.h>
 
 #include "vk-codec.inc"
 
@@ -921,11 +922,11 @@ i915_instance_queue_families(
 		family.timestampValidBits = 36U;
 
 	/*
-	 * Describes the video family: one queue of video decode only, on VCS0,
+	 * Describes the video family: one queue of video decode and encode on VCS0,
 	 * with no timestamps and no image transfer.
 	 */
 	kern_memset(&video, 0, sizeof(video));
-	video.queueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR;
+	video.queueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_VIDEO_ENCODE_BIT_KHR;
 	video.queueCount = 1U;
 
 	/* Replies the present word, the count and as many families as the array holds. */
@@ -969,11 +970,17 @@ i915_instance_format_features(
 	 */
 	switch (format) {
 	case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
-		/* Decode pictures in Y tiles, copied to linear buffers by the transfer path. */
+		/* Decode/encode pictures in Y tiles, plus linear images for GPU NV12 input. */
 		if (video) {
 			properties->optimalTilingFeatures = VK_FORMAT_FEATURE_VIDEO_DECODE_OUTPUT_BIT_KHR |
 				VK_FORMAT_FEATURE_VIDEO_DECODE_DPB_BIT_KHR |
-				VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+				VK_FORMAT_FEATURE_VIDEO_ENCODE_INPUT_BIT_KHR |
+				VK_FORMAT_FEATURE_VIDEO_ENCODE_DPB_BIT_KHR |
+				VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+				VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+			properties->linearTilingFeatures = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+				VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+				VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
 		}
 		break;
 	case VK_FORMAT_R8G8B8A8_UNORM:
@@ -1370,12 +1377,25 @@ i915_instance_video_image_properties(
 	VkImageFormatProperties image;
 	uint32_t video_usage;
 
-	/* Refuses a device without video decode, another type or tiling, and another usage. */
+	/* Refuses a device without video, another type or tiling, and another usage. */
 	kern_memset(&image, 0, sizeof(image));
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	if (tiling == VK_IMAGE_TILING_LINEAR) {
+		video_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+			      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+			      VK_IMAGE_USAGE_STORAGE_BIT |
+			      VK_IMAGE_USAGE_SAMPLED_BIT;
+	} else {
+		video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR |
+			      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+			      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+			      VK_IMAGE_USAGE_SAMPLED_BIT;
+	}
 	if (features == 0U ||
 	    type != VK_IMAGE_TYPE_2D ||
-	    tiling != VK_IMAGE_TILING_OPTIMAL ||
+	    (tiling != VK_IMAGE_TILING_OPTIMAL && tiling != VK_IMAGE_TILING_LINEAR) ||
 	    usage == 0U ||
 	    (usage & ~video_usage) != 0U) {
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_FORMAT_NOT_SUPPORTED);

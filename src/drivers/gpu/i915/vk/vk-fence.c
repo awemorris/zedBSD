@@ -371,6 +371,7 @@ i915_fence_status(
 #define I915_QUERY_TYPE_OCCLUSION	0U
 #define I915_QUERY_TYPE_TIMESTAMP	2U
 #define I915_QUERY_TYPE_RESULT_STATUS	1000023000U
+#define I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK 1000299000U
 #define I915_QUERY_RESULT_64		1U
 #define I915_QUERY_RESULT_AVAILABILITY	4U
 #define I915_QUERY_RESULT_PARTIAL	8U
@@ -393,6 +394,8 @@ struct i915_gfx_query_pool {
 	struct i915_gem_object *object;
 	uint32_t count;
 	uint32_t type;
+	uint32_t feedback_flags;
+	uint32_t result_count;
 };
 
 /*
@@ -411,6 +414,10 @@ i915_query_pool_create(
 	uint32_t type;
 	uint32_t count;
 	uint64_t bytes;
+	uint64_t next_present;
+	uint32_t feedback_flags;
+	uint32_t result_count;
+	uint32_t fb;
 	int supported;
 	int error;
 
@@ -418,7 +425,14 @@ i915_query_pool_create(
 	(void)drv_i915_wire_read_handle(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u32(reader);
-	(void)drv_i915_wire_read_u64(reader);
+	next_present = drv_i915_wire_read_u64(reader);
+	feedback_flags = 0U;
+	result_count = 1U;
+	if (next_present != 0U) {
+		(void)drv_i915_wire_read_u32(reader);
+		(void)drv_i915_wire_read_u64(reader);
+		feedback_flags = drv_i915_wire_read_u32(reader);
+	}
 	(void)drv_i915_wire_read_u32(reader);
 	type = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
@@ -429,7 +443,7 @@ i915_query_pool_create(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Only an occlusion pool, or a result status pool on a video device, of a bounded number of queries. */
+	/* Only an occlusion pool, or a result status / encode feedback pool on a video device. */
 	error = 0;
 	pool = NULL;
 	supported = 0;
@@ -437,8 +451,18 @@ i915_query_pool_create(
 		supported = 1;
 	if (type == I915_QUERY_TYPE_RESULT_STATUS && session->vk->video)
 		supported = 1;
+	if (type == I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK && session->vk->video && feedback_flags != 0U) {
+		supported = 1;
+		result_count = 0U;
+		fb = feedback_flags;
+		while (fb != 0U) {
+			if ((fb & 1U) != 0U)
+				result_count++;
+			fb >>= 1;
+		}
+	}
 	if (!supported || count == 0U || count > I915_QUERY_MAX) {
-		kern_logf("i915: vk: XXX vkCreateQueryPool refused: type %u, %u queries (occlusion, timestamp, or result status on a video device)\n", type, count);
+		kern_logf("i915: vk: XXX vkCreateQueryPool refused: type %u, %u queries\n", type, count);
 		error = ENOTSUP;
 	} else {
 		pool = kern_calloc(1U, sizeof(*pool));
@@ -450,7 +474,12 @@ i915_query_pool_create(
 	if (pool != NULL) {
 		pool->count = count;
 		pool->type = type;
-		bytes = ((uint64_t)count * 24U + 4095U) & ~(uint64_t)4095U;
+		pool->feedback_flags = feedback_flags;
+		pool->result_count = result_count;
+		if (type == I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK)
+			bytes = ((uint64_t)count * 32U + 4095U) & ~(uint64_t)4095U;
+		else
+			bytes = ((uint64_t)count * 24U + 4095U) & ~(uint64_t)4095U;
 		error = drv_i915_gfx_object_create(session, bytes, &pool->object);
 		if (error == 0) {
 			kern_memset(pool->object->address, 0, (size_t)bytes);
@@ -553,18 +582,18 @@ i915_query_pool_results(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* A record is one or two words of four or eight bytes. */
+	/* A record is result_count words (plus 1 for availability) of four or eight bytes. */
 	width = 4U;
 	if ((flags & I915_QUERY_RESULT_64) != 0U)
 		width = 8U;
-	record = width;
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_QUERY_POOL, handle);
+	record = width * ((pool != NULL && pool->result_count > 0U) ? pool->result_count : 1U);
 	if ((flags & I915_QUERY_RESULT_AVAILABILITY) != 0U)
 		record += width;
 
 	/* Refuses an unknown pool, a range past it, and records that do not fit the reply. */
-	pool = drv_i915_object_lookup(session, I915_VK_OBJ_QUERY_POOL, handle);
 	if (pool == NULL || first > pool->count || count > pool->count - first ||
-	    bytes > I915_QUERY_REPLY_MAX || stride < record ||
+	    bytes > I915_QUERY_REPLY_MAX || stride < record || record > 32U ||
 	    (count != 0U && (uint64_t)(count - 1U) * stride + record > bytes)) {
 		drv_i915_wire_reply_u32(reply, I915_FENCE_VK_FAILED);
 		drv_i915_wire_reply_u64(reply, 0U);
@@ -573,6 +602,45 @@ i915_query_pool_results(
 
 	/* Reads what the GPU wrote. */
 	counters = pool->object->address;
+	if (pool->type == I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK) {
+		drv_i915_gt_clflush(counters, (size_t)pool->count * 32U);
+		result = I915_FENCE_VK_SUCCESS;
+		for (query = first; query < first + count; query++) {
+			if (counters[4U * query + 3U] == 0U)
+				result = I915_FENCE_VK_NOT_READY;
+		}
+		drv_i915_wire_reply_u32(reply, result);
+		drv_i915_wire_reply_u64(reply, bytes);
+
+		written = 0U;
+		kern_memset(zeros, 0, sizeof(zeros));
+		for (query = 0U; query < count; query++) {
+			uint8_t fb_data[32];
+			uint32_t fb_off = 0U;
+			uint32_t bit;
+
+			kern_memset(fb_data, 0, sizeof(fb_data));
+			for (bit = 0U; bit < 3U; bit++) {
+				if ((pool->feedback_flags & (1U << bit)) != 0U) {
+					uint64_t v = counters[4U * (first + query) + bit];
+
+					kern_memcpy(fb_data + fb_off, &v, width);
+					fb_off += width;
+				}
+			}
+			available = counters[4U * (first + query) + 3U];
+			kern_memcpy(fb_data + fb_off, &available, width);
+			drv_i915_wire_reply_bytes(reply, fb_data, (size_t)record);
+			written += record;
+			end = written - record + stride;
+			if (end > bytes)
+				end = bytes;
+			i915_query_reply_zeros(reply, zeros, end - written);
+			written = end;
+		}
+		i915_query_reply_zeros(reply, zeros, bytes - written);
+		return 0;
+	}
 	drv_i915_gt_clflush(counters, (size_t)pool->count * 24U);
 
 	/* The result: NOT_READY when any query of the range is unavailable. */
@@ -663,10 +731,25 @@ drv_i915_gfx_query_execute(
 	 * scope, and outside one they break the API's rules (the submission is
 	 * lost, as a video command on the graphics family).
 	 */
-	if (pool->type == I915_QUERY_TYPE_RESULT_STATUS) {
+	if (pool->type == I915_QUERY_TYPE_RESULT_STATUS ||
+	    pool->type == I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK) {
 		if (op->kind != I915_GFX_OP_QUERY_RESET) {
-			kern_logf("i915: vk: result status query begun or ended outside a video coding scope\n");
+			kern_logf("i915: vk: video query begun or ended outside a video coding scope\n");
 			return EIO;
+		}
+		if (pool->type == I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK) {
+			uint64_t *fb_counters = pool->object->address;
+			uint32_t q;
+
+			for (q = op->u.query.first; q < op->u.query.first + op->u.query.count; q++) {
+				fb_counters[4U * q + 0U] = 0U;
+				fb_counters[4U * q + 1U] = 0U;
+				fb_counters[4U * q + 2U] = 0U;
+				fb_counters[4U * q + 3U] = 0U;
+			}
+			drv_i915_gt_clflush(fb_counters + 4U * op->u.query.first,
+					    (size_t)op->u.query.count * 32U);
+			return 0;
 		}
 		i915_query_status_reset(pool, op->u.query.first, op->u.query.count);
 		return 0;
@@ -852,6 +935,36 @@ drv_i915_gfx_query_status_pool(
 
 	/* The query of a result status pool. */
 	return 1;
+}
+
+int
+drv_i915_gfx_query_feedback_pool(
+	const struct i915_gfx_query_pool *pool,
+	uint32_t query)
+{
+	if (pool == NULL || pool->type != I915_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK)
+		return 0;
+	if (query >= pool->count)
+		return 0;
+	return 1;
+}
+
+void
+drv_i915_gfx_query_feedback_end(
+	struct i915_gfx_query_pool *pool,
+	uint32_t query,
+	uint64_t offset,
+	uint64_t bytes_written,
+	uint64_t has_overrides)
+{
+	uint64_t *counters;
+
+	counters = pool->object->address;
+	counters[4U * query + 0U] = offset;
+	counters[4U * query + 1U] = bytes_written;
+	counters[4U * query + 2U] = has_overrides;
+	counters[4U * query + 3U] = 1U;
+	drv_i915_gt_clflush(counters + 4U * query, 32U);
 }
 
 /*

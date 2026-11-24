@@ -65,6 +65,7 @@
  * (VULKAN_NATIVE_CAPSET_CORE12_QUERIES).
  */
 #define I915_CAPSET_NATIVE_CORE12	16U
+#define I915_CAPSET_NATIVE_VIDEO_ENCODE_H264 32U
 
 /*
  * Whether Vulkan video decode is offered.
@@ -365,7 +366,9 @@ i915_render_capset_fill(
 	vk->capset[172U / 4U] = I915_CAPSET_NATIVE_CORE11 | I915_CAPSET_NATIVE_CORE12;
 	vk->capset_bytes = 176U;
 	if (vk->video) {
-		vk->capset[172U / 4U] |= I915_CAPSET_NATIVE_VIDEO_H264 | I915_CAPSET_NATIVE_VIDEO_H265;
-		kern_logf("i915: vk: capset declares H.264 and H.265 video decode\n");
+		vk->capset[172U / 4U] |= I915_CAPSET_NATIVE_VIDEO_H264 |
+					 I915_CAPSET_NATIVE_VIDEO_H265 |
+					 I915_CAPSET_NATIVE_VIDEO_ENCODE_H264;
+		kern_logf("i915: vk: capset declares H.264 and H.265 video decode and H.264 encode\n");
 	}
 }

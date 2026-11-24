@@ -171,7 +171,9 @@ i915_dispatch_route(
 		return I915_VK_OBJ_COMMAND_BUFFER;
 
 	/* zedBSD's video queries, sessions and parameters belong to video (the video recordings to cmdbuf). */
-	if (opcode >= GPU_OP_OWN_FIRST && opcode <= I915_VK_VIDEO_OP_LAST_ROUTED)
+	if ((opcode >= GPU_OP_OWN_FIRST && opcode <= I915_VK_VIDEO_OP_LAST_ROUTED) ||
+	    opcode == GPU_OP_GET_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES ||
+	    opcode == GPU_OP_GET_ENCODED_VIDEO_SESSION_PARAMETERS)
 		return I915_VK_OBJ_VIDEO_SESSION;
 
 	/* Everything else (instance, device, queue, version, transport) is the router's own. */
