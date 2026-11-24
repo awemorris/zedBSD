@@ -862,12 +862,11 @@ timed_create_context(
 
 	/*
 	 * A version that no context here implements is refused, not made as an
-	 * earlier one: OpenGL ES 2.0, 3.0 and 3.1 are made, 2.1 and 3.2 on are
-	 * not.  An application that tries the versions from the latest down
-	 * learns its version from the first context made.  A context of 3 is
-	 * 3.1 only when libGLESv2 finds the device runs OpenGL ES 3.1's compute
-	 * (at the context's first call); on a device without it a request for
-	 * 3.1 still gets a context, of 3.0, which GL_VERSION names.
+	 * earlier one: OpenGL ES 2.0 and 3.0 are made on capable devices, 3.1
+	 * is made only when the device offers OpenGL ES 3.1 (compute, storage
+	 * images, and its minimums), and 2.1 and 3.2 on are not.  An
+	 * application that tries the versions from the latest down learns its
+	 * version from the first context made.
 	 *
 	 * Reference: Khronos EGL 1.5 specification, section 3.7.1.1 (a context
 	 * of an OpenGL ES version the implementation cannot support is not
@@ -882,6 +881,10 @@ timed_create_context(
 		return EGL_NO_CONTEXT;
 	}
 	if (version == 3 && minor > 1) {
+		(void)egl_fail(EGL_BAD_MATCH);
+		return EGL_NO_CONTEXT;
+	}
+	if (version == 3 && minor == 1 && !display->es31) {
 		(void)egl_fail(EGL_BAD_MATCH);
 		return EGL_NO_CONTEXT;
 	}

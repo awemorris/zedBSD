@@ -110,6 +110,13 @@ struct zegl_display {
 	 */
 	int volume_and_array;
 
+	/*
+	 * Nonzero when the device offers OpenGL ES 3.1: compute queues and
+	 * limits, storage images, and multisample framebuffers without
+	 * attachments.
+	 */
+	int es31;
+
 	/* The configs offered. */
 	struct zegl_config configs[ZEGL_CONFIGS];
 	unsigned config_count;
