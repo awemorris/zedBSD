@@ -335,6 +335,7 @@ set(MIKUTERM_SHARE
 	"licenses/JetBrainsMono-OFL.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/JetBrainsMono-OFL.txt"
 	"licenses/DroidSansFallback-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallback-LICENSE.txt"
 	"licenses/NotoColorEmoji-OFL-1.1.txt=${MIKUTERM_ROOT}/userland/packages/fonts/noto-color-emoji/OFL-1.1.txt"
+	"licenses/Unifont-OFL-1.1.txt=${MIKUTERM_ROOT}/userland/packages/fonts/unifont/OFL-1.1.txt"
 	"licenses/Unicode-License-V3.txt=${MIKUTERM_ROOT}/userland/base/licenses/browser/Unicode-License-V3"
 	"licenses/TRE-LICENSE.txt=${MIKUTERM_ROOT}/src/libc/regex/LICENSE")
 
@@ -364,6 +365,27 @@ add_custom_command(OUTPUT ${MIKUTERM_NOTO_FILE}
 		-P ${MIKUTERM_DIR}/cmake/fetch.cmake
 	DEPENDS ${MIKUTERM_NOTO_PACKAGE} ${MIKUTERM_DIR}/cmake/fetch.cmake
 	COMMENT "Noto Color Emoji, checked against its SHA-256"
+	VERBATIM)
+
+# GNU Unifont, as its package records it (version, address, SHA-256).
+set(MIKUTERM_UNIFONT_PACKAGE ${MIKUTERM_ROOT}/userland/packages/fonts/unifont/Makefile)
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_archive REGEX "^EXT_unifont_ARCHIVE := ")
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_url REGEX "^EXT_unifont_URL := ")
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_sha256 REGEX "^EXT_unifont_SHA256 := ")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_ARCHIVE "${unifont_archive}")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_URL "${unifont_url}")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_SHA256 "${unifont_sha256}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MIKUTERM_UNIFONT_PACKAGE})
+set(MIKUTERM_UNIFONT_FILE ${CMAKE_CURRENT_BINARY_DIR}/sources/${MIKUTERM_UNIFONT_ARCHIVE})
+add_custom_command(OUTPUT ${MIKUTERM_UNIFONT_FILE}
+	COMMAND ${CMAKE_COMMAND}
+		-DURL=${MIKUTERM_UNIFONT_URL}
+		-DSHA256=${MIKUTERM_UNIFONT_SHA256}
+		-DLOCAL=${MIKUTERM_DISTFILES}/${MIKUTERM_UNIFONT_ARCHIVE}
+		-DOUTPUT=${MIKUTERM_UNIFONT_FILE}
+		-P ${MIKUTERM_DIR}/cmake/fetch.cmake
+	DEPENDS ${MIKUTERM_UNIFONT_PACKAGE} ${MIKUTERM_DIR}/cmake/fetch.cmake
+	COMMENT "GNU Unifont, checked against its SHA-256"
 	VERBATIM)
 
 #
@@ -418,6 +440,11 @@ add_custom_command(OUTPUT ${MIKUTERM_DIST}/share/fonts/keiland-emoji.ttf
 	DEPENDS ${MIKUTERM_NOTO_FILE}
 	VERBATIM)
 list(APPEND MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/share/fonts/keiland-emoji.ttf)
+add_custom_command(OUTPUT ${MIKUTERM_DIST}/share/fonts/unifont.ttf
+	COMMAND ${CMAKE_COMMAND} -E copy ${MIKUTERM_UNIFONT_FILE} ${MIKUTERM_DIST}/share/fonts/unifont.ttf
+	DEPENDS ${MIKUTERM_UNIFONT_FILE}
+	VERBATIM)
+list(APPEND MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/share/fonts/unifont.ttf)
 add_custom_target(dist DEPENDS ${MIKUTERM_DIST_OUTPUTS})
 
 # The zip of the folder, its entries in a fixed order and time (the same files make the same zip).

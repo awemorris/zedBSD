@@ -20,3 +20,8 @@ The fonts in share/fonts:
   keiland-emoji.ttf
       Noto Color Emoji 2.047, Copyright 2022 Google Inc.
       (NotoColorEmoji-OFL-1.1.txt, SIL Open Font License 1.1)
+  unifont.ttf
+      GNU Unifont 15.0.06 (unifont_jp-15.0.06.ttf), Copyright (C)
+      1998-2023 Roman Czyborra, Paul Hardy, Qianqian Fang, et al.
+      (Unifont-OFL-1.1.txt, SIL Open Font License 1.1; dual-licensed
+      with GNU GPLv2+ with the GNU Font Embedding Exception)
