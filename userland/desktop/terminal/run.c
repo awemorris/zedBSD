@@ -672,7 +672,7 @@ run_loop(
 		 * drawn when it answers (which wakes the wait), or at the latest
 		 * when the pace gives up waiting (pace.h).
 		 */
-		if (run_screen->changed && !run_window.page_active && !run_window.picture_active) {
+		if (run_screen->changed && !run_window.page_active) {
 			wait = terminal_window_frame_wait(&run_window, now);
 			if (run->present_busy && wait == 0)
 				wait = 16;
@@ -3648,6 +3648,7 @@ run_picture_inputs(void)
 	struct run_tab *tab;
 	const struct terminal_picture_event *event;
 	unsigned index;
+	unsigned pending_flags;
 
 	/* Nothing queued, or no picture to take it. */
 	if (run_window.picture_event_count == 0U)
@@ -3670,8 +3671,11 @@ run_picture_inputs(void)
 			run_picture_focused = tab->id;
 	}
 
-	/* All taken. */
+	/* All taken; if the picture marked itself dirty, draw in this round. */
 	run_window.picture_event_count = 0U;
+	pending_flags = tab->connection->ops->pending(tab->connection);
+	if ((pending_flags & TERMINAL_READY_OUTPUT) != 0U)
+		tab->screen->changed = 1;
 }
 
 /* Tells a picture's tab that it has the keyboard, or lost it. */

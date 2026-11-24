@@ -114,6 +114,17 @@ struct x11_tab {
 	double wheel_x;
 	double wheel_y;
 	struct x11_touch touch;
+
+	/* Root viewport pan/zoom state (under tab->lock). */
+	unsigned view_width;
+	unsigned view_height;
+	int root_configured;
+	int root_detent;
+	double root_scale;
+	double root_raw_scale;
+	double root_fit_scale;
+	double root_offset_x;
+	double root_offset_y;
 };
 
 int x11_tab_create(uint32_t window, unsigned width, unsigned height, unsigned scale, const char *host, const uint8_t *title, size_t title_size, struct x11_tab **result);
