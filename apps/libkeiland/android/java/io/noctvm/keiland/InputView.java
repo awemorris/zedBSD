@@ -9,6 +9,7 @@ package io.noctvm.keiland;
 
 import android.content.Context;
 import android.graphics.Matrix;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.CursorAnchorInfo;
 import android.view.inputmethod.EditorInfo;
@@ -66,6 +67,22 @@ final class InputView extends View {
 		if (connection != null) {
 			connection.forgetContext();
 		}
+	}
+
+	@Override
+	public boolean onKeyDown(int keyCode, KeyEvent event) {
+		if (connection != null && connection.consumeEnterKey(event)) {
+			return true;
+		}
+		return super.onKeyDown(keyCode, event);
+	}
+
+	@Override
+	public boolean onKeyUp(int keyCode, KeyEvent event) {
+		if (connection != null && connection.consumeEnterKey(event)) {
+			return true;
+		}
+		return super.onKeyUp(keyCode, event);
 	}
 
 	/** Takes the key bar whose held modifiers the typed characters get. */
