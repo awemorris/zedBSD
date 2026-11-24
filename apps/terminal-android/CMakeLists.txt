@@ -106,7 +106,31 @@ set(MIKUTERM_SHARE
 	"licenses/zedBSD-LICENSE.txt=${MIKUTERM_ROOT}/LICENSE"
 	"licenses/Mahora-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-LICENSE.txt"
 	"licenses/JetBrainsMono-OFL.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/JetBrainsMono-OFL.txt"
-	"licenses/DroidSansFallback-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallback-LICENSE.txt")
+	"licenses/DroidSansFallback-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallback-LICENSE.txt"
+	"licenses/Unifont-OFL-1.1.txt=${MIKUTERM_ROOT}/userland/packages/fonts/unifont/OFL-1.1.txt")
+
+# GNU Unifont, as its package records it (version, address, SHA-256).
+set(MIKUTERM_DISTFILES "${MIKUTERM_ROOT}/distfiles" CACHE PATH "Where archives already fetched are kept")
+set(MIKUTERM_UNIFONT_PACKAGE ${MIKUTERM_ROOT}/userland/packages/fonts/unifont/Makefile)
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_archive REGEX "^EXT_unifont_ARCHIVE := ")
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_url REGEX "^EXT_unifont_URL := ")
+file(STRINGS ${MIKUTERM_UNIFONT_PACKAGE} unifont_sha256 REGEX "^EXT_unifont_SHA256 := ")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_ARCHIVE "${unifont_archive}")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_URL "${unifont_url}")
+string(REGEX REPLACE "^[^=]*= " "" MIKUTERM_UNIFONT_SHA256 "${unifont_sha256}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MIKUTERM_UNIFONT_PACKAGE})
+set(MIKUTERM_UNIFONT_FILE ${CMAKE_CURRENT_BINARY_DIR}/sources/${MIKUTERM_UNIFONT_ARCHIVE})
+add_custom_command(OUTPUT ${MIKUTERM_UNIFONT_FILE}
+	COMMAND ${CMAKE_COMMAND}
+		-DURL=${MIKUTERM_UNIFONT_URL}
+		-DSHA256=${MIKUTERM_UNIFONT_SHA256}
+		-DLOCAL=${MIKUTERM_DISTFILES}/${MIKUTERM_UNIFONT_ARCHIVE}
+		-DOUTPUT=${MIKUTERM_UNIFONT_FILE}
+		-P ${MIKUTERM_ROOT}/apps/terminal-win32/cmake/fetch.cmake
+	DEPENDS ${MIKUTERM_UNIFONT_PACKAGE} ${MIKUTERM_ROOT}/apps/terminal-win32/cmake/fetch.cmake
+	COMMENT "GNU Unifont, checked against its SHA-256"
+	VERBATIM)
+list(APPEND MIKUTERM_SHARE "fonts/unifont.ttf=${MIKUTERM_UNIFONT_FILE}")
 set(MIKUTERM_ASSETS_DIR ${CMAKE_BINARY_DIR}/assets)
 set(MIKUTERM_SHARE_SOURCES "")
 foreach(pair IN LISTS MIKUTERM_SHARE)
