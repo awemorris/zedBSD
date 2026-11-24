@@ -77,6 +77,12 @@ struct xfer_retry_range {
 	uint32_t length;
 };
 
+/*
+ * Pipelined SFTP transfer queue.
+ *
+ * Tracks queued, waiting-overwrite, active, and completed file/folder
+ * transfers and drives one active item at a time over sftp_client.
+ */
 struct sftp_transfer_queue {
 	int preserve_times;
 	enum sftp_overwrite_policy policy;
@@ -136,6 +142,7 @@ sftp_transfer_queue_create(
 {
 	struct sftp_transfer_queue *q;
 
+	/* Allocates and initializes the transfer queue. */
 	*queue_out = NULL;
 	q = calloc(1U, sizeof(*q));
 	if (q == NULL)
@@ -143,25 +150,36 @@ sftp_transfer_queue_create(
 	q->preserve_times = preserve_times;
 	q->next_id = 1U;
 	*queue_out = q;
+
+	/* Succeeded: returns the new transfer queue. */
 	return 0;
 }
 
-/* Destroys a transfer queue and closes any open local file. */
+/*
+ * Destroys a transfer queue and closes any open local file.
+ */
 void
 sftp_transfer_queue_destroy(
 	struct sftp_transfer_queue *q)
 {
+	/* Ignores a NULL queue pointer. */
 	if (q == NULL)
 		return;
+
+	/* Closes any open local file before freeing the item array. */
 	if (q->local_file != NULL) {
 		sftp_local_close(q->local_file);
 		q->local_file = NULL;
 	}
+
+	/* Frees the items array and queue structure. */
 	free(q->items);
 	free(q);
 }
 
-/* Enqueues a file or folder transfer item. */
+/*
+ * Enqueues a file or folder transfer item.
+ */
 int
 sftp_transfer_enqueue(
 	struct sftp_transfer_queue *q,
@@ -175,8 +193,12 @@ sftp_transfer_enqueue(
 	struct xfer_item *item;
 	size_t new_cap;
 
+	/* Grows the item array when at capacity. */
 	if (q->count == q->capacity) {
-		new_cap = q->capacity == 0U ? 16U : q->capacity * 2U;
+		if (q->capacity == 0U)
+			new_cap = 16U;
+		else
+			new_cap = q->capacity * 2U;
 		grown = realloc(q->items, new_cap * sizeof(*q->items));
 		if (grown == NULL)
 			return ENOMEM;
@@ -184,6 +206,7 @@ sftp_transfer_enqueue(
 		q->capacity = new_cap;
 	}
 
+	/* Initializes the new queued transfer item. */
 	item = &q->items[q->count++];
 	memset(item, 0, sizeof(*item));
 	item->id = q->next_id++;
@@ -195,12 +218,15 @@ sftp_transfer_enqueue(
 	(void)snprintf(item->remote_path, sizeof(item->remote_path), "%s", remote_path);
 	path_parent(remote_path, item->remote_dir, sizeof(item->remote_dir));
 
+	/* Succeeded: reports the assigned transfer id if requested. */
 	if (id_out != NULL)
 		*id_out = item->id;
 	return 0;
 }
 
-/* Applies the user's overwrite decision to a waiting transfer item. */
+/*
+ * Applies the user's overwrite decision to a waiting transfer item.
+ */
 void
 sftp_transfer_resolve_conflict(
 	struct sftp_transfer_queue *q,
@@ -209,12 +235,14 @@ sftp_transfer_resolve_conflict(
 {
 	struct xfer_item *item;
 
+	/* Ignores the decision if no matching item is waiting for overwrite input. */
 	if (!q->has_active)
 		return;
 	item = &q->items[q->active_index];
 	if (item->id != id || item->state != SFTP_TRANSFER_WAITING_OVERWRITE)
 		return;
 
+	/* Applies the chosen conflict action and updates batch policy if requested. */
 	switch (action) {
 	case SFTP_CONFLICT_OVERWRITE_ALL:
 		q->policy = SFTP_OVERWRITE_ALL;
@@ -230,6 +258,8 @@ sftp_transfer_resolve_conflict(
 			sftp_local_close(q->local_file);
 			q->local_file = NULL;
 		}
+
+		/* Marks the item skipped and clears active state. */
 		item->state = SFTP_TRANSFER_SKIPPED;
 		q->has_active = 0;
 		q->phase = XFER_NONE;
@@ -240,7 +270,9 @@ sftp_transfer_resolve_conflict(
 	}
 }
 
-/* Cancels a queued or active transfer item. */
+/*
+ * Cancels a queued or active transfer item.
+ */
 void
 sftp_transfer_cancel(
 	struct sftp_transfer_queue *q,
@@ -248,6 +280,7 @@ sftp_transfer_cancel(
 {
 	size_t i;
 
+	/* Finds the matching item and cancels it immediately if not in flight. */
 	for (i = 0U; i < q->count; i++) {
 		if (q->items[i].id != id)
 			continue;
@@ -258,6 +291,8 @@ sftp_transfer_cancel(
 					sftp_local_close(q->local_file);
 					q->local_file = NULL;
 				}
+
+				/* Marks the waiting item cancelled and clears active state. */
 				q->items[i].state = SFTP_TRANSFER_CANCELLED;
 				q->has_active = 0;
 				q->phase = XFER_NONE;
@@ -265,17 +300,22 @@ sftp_transfer_cancel(
 		} else if (q->items[i].state == SFTP_TRANSFER_QUEUED) {
 			q->items[i].state = SFTP_TRANSFER_CANCELLED;
 		}
+
+		/* Stops after handling the target id. */
 		break;
 	}
 }
 
-/* Cancels all queued and active transfer items. */
+/*
+ * Cancels all queued and active transfer items.
+ */
 void
 sftp_transfer_cancel_all(
 	struct sftp_transfer_queue *q)
 {
 	size_t i;
 
+	/* Cancels every queued item and marks any active item for cancellation. */
 	for (i = 0U; i < q->count; i++) {
 		if (q->has_active && q->active_index == i) {
 			q->cancel_requested = 1;
@@ -284,6 +324,8 @@ sftp_transfer_cancel_all(
 					sftp_local_close(q->local_file);
 					q->local_file = NULL;
 				}
+
+				/* Marks the waiting item cancelled and clears active state. */
 				q->items[i].state = SFTP_TRANSFER_CANCELLED;
 				q->has_active = 0;
 				q->phase = XFER_NONE;
@@ -294,7 +336,9 @@ sftp_transfer_cancel_all(
 	}
 }
 
-/* Copies a snapshot of all transfer items for the UI. */
+/*
+ * Copies a snapshot of all transfer items for the UI.
+ */
 int
 sftp_transfer_snapshot_all(
 	const struct sftp_transfer_queue *q,
@@ -306,6 +350,7 @@ sftp_transfer_snapshot_all(
 	size_t i;
 	size_t active_count;
 
+	/* Clears output pointers and returns early if the queue is empty. */
 	*items_out = NULL;
 	*count_out = 0U;
 	if (active_or_queued_out != NULL)
@@ -313,10 +358,12 @@ sftp_transfer_snapshot_all(
 	if (q->count == 0U)
 		return 0;
 
+	/* Allocates the snapshot array. */
 	snap = calloc(q->count, sizeof(*snap));
 	if (snap == NULL)
 		return ENOMEM;
 
+	/* Copies each transfer item and counts active or queued entries. */
 	active_count = 0U;
 	for (i = 0U; i < q->count; i++) {
 		snap[i].id = q->items[i].id;
@@ -337,6 +384,7 @@ sftp_transfer_snapshot_all(
 			active_count++;
 	}
 
+	/* Succeeded: publishes the snapshot array and counts. */
 	*items_out = snap;
 	*count_out = q->count;
 	if (active_or_queued_out != NULL)
@@ -344,23 +392,30 @@ sftp_transfer_snapshot_all(
 	return 0;
 }
 
-/* Returns 1 if any transfer is active or queued. */
+/*
+ * Returns 1 if any transfer is active or queued.
+ */
 int
 sftp_transfer_has_work(
 	const struct sftp_transfer_queue *q)
 {
 	size_t i;
 
+	/* Checks the active item and scans for any queued item. */
 	if (q->has_active)
 		return 1;
 	for (i = 0U; i < q->count; i++) {
 		if (q->items[i].state == SFTP_TRANSFER_QUEUED)
 			return 1;
 	}
+
+	/* No active or queued transfers remain. */
 	return 0;
 }
 
-/* Advances the active transfer or starts the next queued item. */
+/*
+ * Advances the active transfer or starts the next queued item.
+ */
 void
 sftp_transfer_step(
 	struct sftp_transfer_queue *q,
@@ -368,25 +423,33 @@ sftp_transfer_step(
 	unsigned max_requests,
 	int *dirty)
 {
+	/* Starts the next queued item when idle. */
 	if (!q->has_active) {
 		start_next_item(q, client, dirty);
 		return;
 	}
 
+	/* Resumes download after overwrite resolution. */
 	if (q->phase == XFER_DL_WAIT_CONFLICT) {
 		if (q->items[q->active_index].state == SFTP_TRANSFER_ACTIVE)
 			begin_dl_open(q, client, dirty);
 		return;
 	}
+
+	/* Resumes upload after overwrite resolution. */
 	if (q->phase == XFER_UL_WAIT_CONFLICT) {
 		if (q->items[q->active_index].state == SFTP_TRANSFER_ACTIVE)
 			begin_ul_open(q, client, dirty);
 		return;
 	}
+
+	/* Pumps pipelined download READ requests. */
 	if (q->phase == XFER_DL_DATA) {
 		pump_dl_data(q, client, max_requests, dirty);
 		return;
 	}
+
+	/* Pumps pipelined upload WRITE requests. */
 	if (q->phase == XFER_UL_DATA) {
 		pump_ul_data(q, client, max_requests, dirty);
 		return;
@@ -412,21 +475,33 @@ sftp_transfer_handle_reply(
 	size_t long_size;
 	struct ssh_sftp_attrs attrs;
 	char entry_name[SSH_SFTP_PATH_MAX];
-	char child_local[MIKUTERM_PATH_MAX];
+	char local_child[MIKUTERM_PATH_MAX];
 	char child_remote[SSH_SFTP_PATH_MAX];
 	const char *why;
+	const char *msg;
+	enum sftp_transfer_state final_state;
+	uint64_t skip_id;
+	int entry_is_dir;
+	int entry_is_link;
+	int cmp_dot;
+	int cmp_dotdot;
+	int valid_name;
 	int error;
 
+	/* Ignores replies when no transfer is active. */
 	*taken = 0;
 	if (!q->has_active)
 		return 0;
 	item = &q->items[q->active_index];
 
+	/* Handles pipelined READ/WRITE replies during data transfer phases. */
 	if (q->phase == XFER_DL_DATA || q->phase == XFER_UL_DATA) {
-		if (take_inflight(q, reply->id, &offset, &length) != 0)
+		error = take_inflight(q, reply->id, &offset, &length);
+		if (error != 0)
 			return 0;
 		*taken = 1;
 
+		/* Processes a download READ reply. */
 		if (q->phase == XFER_DL_DATA) {
 			if (reply->error != 0) {
 				q->failed = 1;
@@ -442,6 +517,8 @@ sftp_transfer_handle_reply(
 						*dirty = 1;
 					}
 				}
+
+				/* Re-queues a short read or marks EOF on a zero-byte read. */
 				if (!q->failed && !q->cancel_requested && !q->eof_seen && reply->data_size < length) {
 					if (reply->data_size == 0U) {
 						q->eof_seen = 1;
@@ -460,10 +537,12 @@ sftp_transfer_handle_reply(
 					(void)snprintf(item->error_text, sizeof(item->error_text), "Remote read failed (status %u).", reply->code);
 				}
 			}
+
+			/* Download DATA reply handled. */
 			return 0;
 		}
 
-		/* XFER_UL_DATA */
+		/* Processes an upload WRITE reply (XFER_UL_DATA). */
 		if (reply->error != 0 || reply->type != SSH_FXP_STATUS || reply->code != SSH_FX_OK) {
 			q->failed = 1;
 			(void)snprintf(item->error_text, sizeof(item->error_text), "Remote write failed (status %u).", reply->code);
@@ -471,20 +550,26 @@ sftp_transfer_handle_reply(
 			item->bytes_done += length;
 			*dirty = 1;
 		}
+
+		/* Upload WRITE reply handled. */
 		return 0;
 	}
 
+	/* Matches single-request control phases by pending_req_id. */
 	if (!q->has_pending_req || reply->id != q->pending_req_id)
 		return 0;
 	*taken = 1;
 	q->has_pending_req = 0;
 
+	/* Advances the active transfer state machine for the completed request. */
 	switch (q->phase) {
 	case XFER_DL_STAT:
 		if (reply->error != 0 || reply->type != SSH_FXP_ATTRS) {
 			finish_active(q, SFTP_TRANSFER_FAILED, "Remote file could not be inspected.", dirty);
 			return 0;
 		}
+
+		/* Creates the local folder and opens the remote directory if downloading a folder. */
 		if ((reply->attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
 		    (reply->attrs.permissions & 0170000U) == 0040000U) {
 			item->is_dir = 1;
@@ -493,29 +578,41 @@ sftp_transfer_handle_reply(
 				finish_active(q, SFTP_TRANSFER_FAILED, "Local directory could not be created.", dirty);
 				return 0;
 			}
+
+			/* Opens the remote directory to enumerate its children. */
 			error = sftp_client_opendir(client, (const uint8_t *)item->remote_path, strlen(item->remote_path), &q->pending_req_id);
 			if (error != 0) {
 				finish_active(q, SFTP_TRANSFER_FAILED, "Could not open remote directory.", dirty);
 				return 0;
 			}
+
+			/* Waits for OPENDIR completion. */
 			q->has_pending_req = 1;
 			q->phase = XFER_DL_OPENDIR;
 			return 0;
 		}
+
+		/* Records remote file size and modification time. */
 		if ((reply->attrs.flags & SSH_FILEXFER_ATTR_SIZE) != 0U)
 			item->bytes_total = reply->attrs.size;
 		if ((reply->attrs.flags & SSH_FILEXFER_ATTR_ACMODTIME) != 0U)
 			q->remote_mtime = reply->attrs.mtime;
 
-		if (sftp_local_stat(item->local_path, &lentry) == 0) {
+		/* Checks whether the local destination already exists. */
+		error = sftp_local_stat(item->local_path, &lentry);
+		if (error == 0) {
 			if (lentry.is_dir) {
 				finish_active(q, SFTP_TRANSFER_FAILED, "Destination is a directory.", dirty);
 				return 0;
 			}
+
+			/* Skips existing files under SKIP_ALL policy. */
 			if (q->policy == SFTP_SKIP_ALL) {
 				finish_active(q, SFTP_TRANSFER_SKIPPED, "Skipped existing file.", dirty);
 				return 0;
 			}
+
+			/* Pauses for user overwrite confirmation under OVERWRITE_ASK policy. */
 			if (q->policy == SFTP_OVERWRITE_ASK) {
 				item->conflict_remote_size = item->bytes_total;
 				item->conflict_remote_mtime = q->remote_mtime;
@@ -527,6 +624,8 @@ sftp_transfer_handle_reply(
 				return 0;
 			}
 		}
+
+		/* Opens the local temporary file and remote file for reading. */
 		begin_dl_open(q, client, dirty);
 		return 0;
 
@@ -537,9 +636,13 @@ sftp_transfer_handle_reply(
 				q->local_file = NULL;
 				(void)sftp_local_remove(q->temp_path);
 			}
+
+			/* Fails the transfer when the remote file could not be opened. */
 			finish_active(q, SFTP_TRANSFER_FAILED, "Remote file could not be opened.", dirty);
 			return 0;
 		}
+
+		/* Saves the handle and starts pipelined download reads. */
 		memcpy(q->handle, reply->handle, reply->handle_size);
 		q->handle_size = reply->handle_size;
 		q->phase = XFER_DL_DATA;
@@ -552,6 +655,8 @@ sftp_transfer_handle_reply(
 			sftp_local_close(q->local_file);
 			q->local_file = NULL;
 		}
+
+		/* Commits the temporary file on success, or removes it on cancel/failure. */
 		if (q->cancel_requested) {
 			(void)sftp_local_remove(q->temp_path);
 			finish_active(q, SFTP_TRANSFER_CANCELLED, "Cancelled.", dirty);
@@ -567,6 +672,8 @@ sftp_transfer_handle_reply(
 				finish_active(q, SFTP_TRANSFER_DONE, "", dirty);
 			}
 		}
+
+		/* Download CLOSE complete. */
 		return 0;
 
 	case XFER_DL_OPENDIR:
@@ -574,6 +681,8 @@ sftp_transfer_handle_reply(
 			finish_active(q, SFTP_TRANSFER_FAILED, "Could not open remote directory.", dirty);
 			return 0;
 		}
+
+		/* Saves the directory handle and requests the first READDIR batch. */
 		memcpy(q->handle, reply->handle, reply->handle_size);
 		q->handle_size = reply->handle_size;
 		error = sftp_client_readdir(client, q->handle, q->handle_size, &q->pending_req_id);
@@ -581,6 +690,8 @@ sftp_transfer_handle_reply(
 			begin_close_handle(q, client, XFER_DL_CLOSEDIR, dirty);
 			return 0;
 		}
+
+		/* Waits for READDIR completion. */
 		q->has_pending_req = 1;
 		q->phase = XFER_DL_READDIR;
 		return 0;
@@ -590,54 +701,76 @@ sftp_transfer_handle_reply(
 			begin_close_handle(q, client, XFER_DL_CLOSEDIR, dirty);
 			return 0;
 		}
+
+		/* Closes the handle with failure on malformed directory replies. */
 		if (reply->error != 0 || reply->type != SSH_FXP_NAME) {
 			q->failed = 1;
 			begin_close_handle(q, client, XFER_DL_CLOSEDIR, dirty);
 			return 0;
 		}
-		while (sftp_client_name_next(client, &name, &name_size, &long_name, &long_size, &attrs) == 0) {
-			int entry_is_dir;
-			int entry_is_link;
 
+		/* Enqueues each valid non-symlink child entry for download. */
+		for (;;) {
+			error = sftp_client_name_next(client, &name, &name_size, &long_name, &long_size, &attrs);
+			if (error != 0)
+				break;
 			if (name_size == 0U || name_size >= sizeof(entry_name))
 				continue;
 			memcpy(entry_name, name, name_size);
 			entry_name[name_size] = '\0';
-			if (strcmp(entry_name, ".") == 0 || strcmp(entry_name, "..") == 0)
+			cmp_dot = strcmp(entry_name, ".");
+			cmp_dotdot = strcmp(entry_name, "..");
+			if (cmp_dot == 0 || cmp_dotdot == 0)
 				continue;
 
+			/* Never traverse symlinked entries during recursive folder download. */
 			entry_is_dir = (attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
 			    (attrs.permissions & 0170000U) == 0040000U;
 			entry_is_link = (attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
 			    (attrs.permissions & 0170000U) == 0120000U;
-			/* Never traverse symlinked directories during recursive folder download. */
 			if (entry_is_link)
 				continue;
 
-			if (!sftp_transfer_valid_download_name(entry_name, name_size, &why)) {
-				uint64_t skip_id;
-				if (sftp_transfer_join_remote(child_remote, sizeof(child_remote), item->remote_path, entry_name) == 0 &&
-				    sftp_local_join_path(child_local, sizeof(child_local), item->local_path, entry_name) == 0 &&
-				    sftp_transfer_enqueue(q, SFTP_TRANSFER_DOWNLOAD, child_local, child_remote, entry_is_dir, &skip_id) == 0) {
+			/* Validates the child filename for Windows and records skipped items. */
+			valid_name = sftp_transfer_valid_download_name(entry_name, name_size, &why);
+			if (!valid_name) {
+				error = sftp_transfer_join_remote(child_remote, sizeof(child_remote), item->remote_path, entry_name);
+				if (error == 0)
+					error = sftp_local_join_path(local_child, sizeof(local_child), item->local_path, entry_name);
+				if (error == 0)
+					error = sftp_transfer_enqueue(q, SFTP_TRANSFER_DOWNLOAD, local_child, child_remote, entry_is_dir, &skip_id);
+				if (error == 0) {
 					q->items[q->count - 1U].state = SFTP_TRANSFER_SKIPPED;
 					(void)snprintf(q->items[q->count - 1U].error_text, sizeof(q->items[q->count - 1U].error_text), "%s", why);
 				}
+
+				/* Continues scanning remaining entries. */
 				continue;
 			}
-			if (sftp_transfer_join_remote(child_remote, sizeof(child_remote), item->remote_path, entry_name) == 0 &&
-			    sftp_local_join_path(child_local, sizeof(child_local), item->local_path, entry_name) == 0)
-				(void)sftp_transfer_enqueue(q, SFTP_TRANSFER_DOWNLOAD, child_local, child_remote, entry_is_dir, NULL);
+
+			/* Enqueues valid child items for download. */
+			error = sftp_transfer_join_remote(child_remote, sizeof(child_remote), item->remote_path, entry_name);
+			if (error == 0)
+				error = sftp_local_join_path(local_child, sizeof(local_child), item->local_path, entry_name);
+			if (error == 0)
+				(void)sftp_transfer_enqueue(q, SFTP_TRANSFER_DOWNLOAD, local_child, child_remote, entry_is_dir, NULL);
 		}
+
+		/* Closes the directory handle if cancelled, otherwise requests the next batch. */
 		if (q->cancel_requested) {
 			begin_close_handle(q, client, XFER_DL_CLOSEDIR, dirty);
 			return 0;
 		}
+
+		/* Issues the next READDIR request. */
 		error = sftp_client_readdir(client, q->handle, q->handle_size, &q->pending_req_id);
 		if (error != 0) {
 			q->failed = 1;
 			begin_close_handle(q, client, XFER_DL_CLOSEDIR, dirty);
 			return 0;
 		}
+
+		/* Waits for the next READDIR reply. */
 		q->has_pending_req = 1;
 		return 0;
 
@@ -656,6 +789,8 @@ sftp_transfer_handle_reply(
 			finish_active(q, SFTP_TRANSFER_CANCELLED, "Cancelled.", dirty);
 			return 0;
 		}
+
+		/* Expands local children and completes the directory upload item. */
 		expand_local_dir(q, item);
 		finish_active(q, SFTP_TRANSFER_DONE, "", dirty);
 		return 0;
@@ -670,6 +805,8 @@ sftp_transfer_handle_reply(
 				finish_active(q, SFTP_TRANSFER_FAILED, "Destination is a directory.", dirty);
 				return 0;
 			}
+
+			/* Records that the remote file existed and applies overwrite policy. */
 			q->existed = 1;
 			if (q->policy == SFTP_SKIP_ALL) {
 				sftp_local_close(q->local_file);
@@ -677,6 +814,8 @@ sftp_transfer_handle_reply(
 				finish_active(q, SFTP_TRANSFER_SKIPPED, "Skipped existing file.", dirty);
 				return 0;
 			}
+
+			/* Pauses for user overwrite confirmation under OVERWRITE_ASK policy. */
 			if (q->policy == SFTP_OVERWRITE_ASK) {
 				if ((reply->attrs.flags & SSH_FILEXFER_ATTR_SIZE) != 0U)
 					item->conflict_remote_size = reply->attrs.size;
@@ -690,6 +829,8 @@ sftp_transfer_handle_reply(
 				return 0;
 			}
 		}
+
+		/* Opens the remote file for writing. */
 		begin_ul_open(q, client, dirty);
 		return 0;
 
@@ -700,6 +841,8 @@ sftp_transfer_handle_reply(
 			finish_active(q, SFTP_TRANSFER_FAILED, "Remote file could not be opened for writing.", dirty);
 			return 0;
 		}
+
+		/* Saves the handle and starts pipelined upload writes. */
 		memcpy(q->handle, reply->handle, reply->handle_size);
 		q->handle_size = reply->handle_size;
 		q->phase = XFER_UL_DATA;
@@ -714,6 +857,8 @@ sftp_transfer_handle_reply(
 			sftp_local_close(q->local_file);
 			q->local_file = NULL;
 		}
+
+		/* Removes newly created files on cancellation or failure. */
 		if (q->cancel_requested || q->failed) {
 			if (!q->existed) {
 				error = sftp_client_remove(client, (const uint8_t *)item->remote_path, strlen(item->remote_path), &q->pending_req_id);
@@ -723,18 +868,34 @@ sftp_transfer_handle_reply(
 					return 0;
 				}
 			}
-			if (q->existed)
-				finish_active(q, q->cancel_requested ? SFTP_TRANSFER_CANCELLED : SFTP_TRANSFER_FAILED, "partially written", dirty);
+
+			/* Reports the final cancelled or failed state. */
+			if (q->cancel_requested)
+				final_state = SFTP_TRANSFER_CANCELLED;
 			else
-				finish_active(q, q->cancel_requested ? SFTP_TRANSFER_CANCELLED : SFTP_TRANSFER_FAILED, item->error_text, dirty);
+				final_state = SFTP_TRANSFER_FAILED;
+			if (q->existed)
+				finish_active(q, final_state, "partially written", dirty);
+			else
+				finish_active(q, final_state, item->error_text, dirty);
 		} else {
 			finish_active(q, SFTP_TRANSFER_DONE, "", dirty);
 		}
+
+		/* Upload CLOSE complete. */
 		return 0;
 
 	case XFER_UL_CLEANUP:
-		finish_active(q, q->cancel_requested ? SFTP_TRANSFER_CANCELLED : SFTP_TRANSFER_FAILED,
-		    q->cancel_requested ? "Cancelled." : item->error_text, dirty);
+		if (q->cancel_requested) {
+			final_state = SFTP_TRANSFER_CANCELLED;
+			msg = "Cancelled.";
+		} else {
+			final_state = SFTP_TRANSFER_FAILED;
+			msg = item->error_text;
+		}
+
+		/* Completes the upload after cleanup. */
+		finish_active(q, final_state, msg, dirty);
 		return 0;
 
 	default:
@@ -742,7 +903,10 @@ sftp_transfer_handle_reply(
 	}
 }
 
-/* Aborts the active transfer and marks all remaining items failed when the channel closes. */
+/*
+ * Aborts the active transfer and marks all remaining items failed when the
+ * channel closes.
+ */
 void
 sftp_transfer_abort_active(
 	struct sftp_transfer_queue *q,
@@ -751,6 +915,7 @@ sftp_transfer_abort_active(
 {
 	size_t i;
 
+	/* Closes any open local file and removes incomplete download temps. */
 	if (q->local_file != NULL) {
 		sftp_local_close(q->local_file);
 		q->local_file = NULL;
@@ -758,8 +923,12 @@ sftp_transfer_abort_active(
 		    q->temp_path[0] != '\0')
 			(void)sftp_local_remove(q->temp_path);
 	}
+
+	/* Fails the active item if one was running. */
 	if (q->has_active)
 		finish_active(q, SFTP_TRANSFER_FAILED, reason, dirty);
+
+	/* Marks all remaining queued or waiting items as failed. */
 	for (i = 0U; i < q->count; i++) {
 		if (q->items[i].state == SFTP_TRANSFER_QUEUED ||
 		    q->items[i].state == SFTP_TRANSFER_WAITING_OVERWRITE) {
@@ -783,16 +952,23 @@ sftp_transfer_valid_download_name(
 {
 	size_t i;
 	unsigned char c;
+	int ok;
 
+	/* Rejects empty names and dot entries. */
 	if (size == 0U || (size == 1U && name[0] == '.') ||
 	    (size == 2U && name[0] == '.' && name[1] == '.')) {
 		*why = "invalid filename";
 		return 0;
 	}
-	if (!valid_utf8(name, size)) {
+
+	/* Rejects invalid UTF-8 sequences. */
+	ok = valid_utf8(name, size);
+	if (!ok) {
 		*why = "invalid UTF-8 filename";
 		return 0;
 	}
+
+	/* Rejects control characters and Windows-forbidden path characters. */
 	for (i = 0U; i < size; i++) {
 		c = (unsigned char)name[i];
 		if (c < 0x20U || c == 0x7fU || c == '/' || c == '\\' ||
@@ -802,23 +978,35 @@ sftp_transfer_valid_download_name(
 			return 0;
 		}
 	}
+
+	/* Rejects trailing dots or spaces. */
 	if (name[size - 1U] == '.' || name[size - 1U] == ' ') {
 		*why = "filename ends with a dot or space";
 		return 0;
 	}
-	if (is_reserved_win32_name(name, size)) {
+
+	/* Rejects reserved DOS device names. */
+	ok = is_reserved_win32_name(name, size);
+	if (ok) {
 		*why = "filename is a reserved Windows name";
 		return 0;
 	}
-	if (is_8_3_tilde_name(name, size)) {
+
+	/* Rejects Windows 8.3 tilde short names. */
+	ok = is_8_3_tilde_name(name, size);
+	if (ok) {
 		*why = "filename resembles a Windows 8.3 short name";
 		return 0;
 	}
+
+	/* Succeeded: filename is safe on Windows. */
 	*why = NULL;
 	return 1;
 }
 
-/* Joins dir and name with a single '/' for remote SFTP paths. */
+/*
+ * Joins dir and name with a single '/' for remote SFTP paths.
+ */
 int
 sftp_transfer_join_remote(
 	char *out,
@@ -829,6 +1017,7 @@ sftp_transfer_join_remote(
 	size_t len;
 	int written;
 
+	/* Formats the joined remote path without duplicating a trailing slash. */
 	len = strlen(dir);
 	if (len != 0U && dir[len - 1U] == '/')
 		written = snprintf(out, out_cap, "%s%s", dir, name);
@@ -837,8 +1026,11 @@ sftp_transfer_join_remote(
 	else
 		written = snprintf(out, out_cap, "%s/%s", dir, name);
 
+	/* Reports ENAMETOOLONG if the joined path did not fit. */
 	if (written < 0 || (size_t)written >= out_cap)
 		return ENAMETOOLONG;
+
+	/* Succeeded: out holds the joined remote path. */
 	return 0;
 }
 
@@ -851,12 +1043,15 @@ path_base(
 	const char *bslash;
 	const char *last;
 
+	/* Finds the rightmost forward or backward slash. */
 	slash = strrchr(path, '/');
 	bslash = strrchr(path, '\\');
 	last = slash;
 	if (bslash != NULL && (last == NULL || bslash > last))
 		last = bslash;
-	return last != NULL ? last + 1 : path;
+	if (last != NULL)
+		return last + 1;
+	return path;
 }
 
 /* Copies the parent directory of path into out. */
@@ -869,11 +1064,14 @@ path_parent(
 	const char *base;
 	size_t len;
 
+	/* Returns empty string when path has no directory separator. */
 	base = path_base(path);
 	if (base == path) {
 		out[0] = '\0';
 		return;
 	}
+
+	/* Strips the trailing separator and copies the parent prefix. */
 	len = (size_t)(base - path);
 	if (len > 1U && (path[len - 1U] == '/' || path[len - 1U] == '\\'))
 		len--;
@@ -890,20 +1088,22 @@ valid_utf8(
 	size_t len)
 {
 	size_t i;
+	unsigned char b0;
+	unsigned char b1;
+	unsigned char b2;
+	unsigned char b3;
+	uint32_t cp;
 
+	/* Validates each UTF-8 code point sequence and rejects overlongs and surrogates. */
 	i = 0U;
 	while (i < len) {
-		unsigned char b0;
-		unsigned char b1;
-		unsigned char b2;
-		unsigned char b3;
-		uint32_t cp;
-
 		b0 = (unsigned char)s[i];
 		if (b0 < 0x80U) {
 			i++;
 			continue;
 		}
+
+		/* Two-byte UTF-8 sequence. */
 		if (b0 >= 0xc2U && b0 <= 0xdfU) {
 			if (i + 1U >= len)
 				return 0;
@@ -913,6 +1113,8 @@ valid_utf8(
 			i += 2U;
 			continue;
 		}
+
+		/* Three-byte UTF-8 sequence. */
 		if (b0 >= 0xe0U && b0 <= 0xefU) {
 			if (i + 2U >= len)
 				return 0;
@@ -926,6 +1128,8 @@ valid_utf8(
 			i += 3U;
 			continue;
 		}
+
+		/* Four-byte UTF-8 sequence. */
 		if (b0 >= 0xf0U && b0 <= 0xf4U) {
 			if (i + 3U >= len)
 				return 0;
@@ -941,8 +1145,12 @@ valid_utf8(
 			i += 4U;
 			continue;
 		}
+
+		/* Invalid leading UTF-8 byte. */
 		return 0;
 	}
+
+	/* Valid UTF-8 string. */
 	return 1;
 }
 
@@ -954,11 +1162,13 @@ ascii_icmp_n(
 	size_t n)
 {
 	size_t i;
+	unsigned char ca;
+	unsigned char cb;
 
+	/* Compares each byte after folding ASCII uppercase to lowercase. */
 	for (i = 0U; i < n; i++) {
-		unsigned char ca = (unsigned char)a[i];
-		unsigned char cb = (unsigned char)b[i];
-
+		ca = (unsigned char)a[i];
+		cb = (unsigned char)b[i];
 		if (ca >= 'A' && ca <= 'Z')
 			ca = (unsigned char)(ca + ('a' - 'A'));
 		if (cb >= 'A' && cb <= 'Z')
@@ -966,6 +1176,8 @@ ascii_icmp_n(
 		if (ca != cb)
 			return (int)ca - (int)cb;
 	}
+
+	/* Equal up to n bytes. */
 	return 0;
 }
 
@@ -980,27 +1192,43 @@ is_reserved_win32_name(
 	};
 	size_t stem_len;
 	size_t i;
+	size_t fixed_len;
+	int cmp1;
+	int cmp2;
 
+	/* Measures the filename stem before the first dot. */
 	stem_len = 0U;
 	while (stem_len < len && name[stem_len] != '.')
 		stem_len++;
 
+	/* Matches fixed DOS device names. */
 	for (i = 0U; i < sizeof(fixed) / sizeof(fixed[0]); i++) {
-		if (stem_len == strlen(fixed[i]) && ascii_icmp_n(name, fixed[i], stem_len) == 0)
-			return 1;
+		fixed_len = strlen(fixed[i]);
+		if (stem_len == fixed_len) {
+			cmp1 = ascii_icmp_n(name, fixed[i], stem_len);
+			if (cmp1 == 0)
+				return 1;
+		}
 	}
 
-	if (stem_len == 4U && (ascii_icmp_n(name, "com", 3U) == 0 || ascii_icmp_n(name, "lpt", 3U) == 0)) {
-		if (name[3] >= '0' && name[3] <= '9')
+	/* Matches COM0..COM9 and LPT0..LPT9. */
+	if (stem_len == 4U) {
+		cmp1 = ascii_icmp_n(name, "com", 3U);
+		cmp2 = ascii_icmp_n(name, "lpt", 3U);
+		if ((cmp1 == 0 || cmp2 == 0) && name[3] >= '0' && name[3] <= '9')
 			return 1;
 	}
 
 	/* Superscript digits 1, 2, 3 in UTF-8: U+00B9 (C2 B9), U+00B2 (C2 B2), U+00B3 (C2 B3). */
-	if (stem_len == 5U && (ascii_icmp_n(name, "com", 3U) == 0 || ascii_icmp_n(name, "lpt", 3U) == 0)) {
-		if ((unsigned char)name[3] == 0xc2U &&
+	if (stem_len == 5U) {
+		cmp1 = ascii_icmp_n(name, "com", 3U);
+		cmp2 = ascii_icmp_n(name, "lpt", 3U);
+		if ((cmp1 == 0 || cmp2 == 0) && (unsigned char)name[3] == 0xc2U &&
 		    ((unsigned char)name[4] == 0xb9U || (unsigned char)name[4] == 0xb2U || (unsigned char)name[4] == 0xb3U))
 			return 1;
 	}
+
+	/* Not a reserved device name. */
 	return 0;
 }
 
@@ -1015,18 +1243,25 @@ is_8_3_tilde_name(
 	size_t ext_len;
 	size_t i;
 
+	/* Splits stem and extension lengths around the first dot. */
 	dot = 0U;
 	while (dot < len && name[dot] != '.')
 		dot++;
 	stem_len = dot;
-	ext_len = dot < len ? len - dot - 1U : 0U;
+	if (dot < len)
+		ext_len = len - dot - 1U;
+	else
+		ext_len = 0U;
 
+	/* Checks 8.3 length bounds and scans the stem for '~<digit>'. */
 	if (stem_len == 0U || stem_len > 8U || ext_len > 3U)
 		return 0;
 	for (i = 0U; i + 1U < stem_len; i++) {
 		if (name[i] == '~' && name[i + 1U] >= '0' && name[i + 1U] <= '9')
 			return 1;
 	}
+
+	/* Does not match an 8.3 tilde pattern. */
 	return 0;
 }
 
@@ -1043,18 +1278,26 @@ start_next_item(
 	const char *why;
 	uint64_t size;
 	uint32_t mtime;
+	unsigned room;
+	int valid_name;
 	int error;
 
+	/* Finds the next queued item. */
 	for (i = 0U; i < q->count; i++) {
 		if (q->items[i].state == SFTP_TRANSFER_QUEUED)
 			break;
 	}
+
+	/* Returns when no queued items remain. */
 	if (i == q->count)
 		return;
 
-	if (sftp_client_room(client) == 0U)
+	/* Waits if the SFTP client pipeline is full. */
+	room = sftp_client_room(client);
+	if (room == 0U)
 		return;
 
+	/* Resets per-item transfer state. */
 	q->active_index = i;
 	q->has_active = 1;
 	q->cancel_requested = 0;
@@ -1071,46 +1314,57 @@ start_next_item(
 	memset(q->inflight, 0, sizeof(q->inflight));
 	memset(q->retries, 0, sizeof(q->retries));
 
+	/* Activates the selected item and marks the UI dirty. */
 	item = &q->items[i];
 	item->state = SFTP_TRANSFER_ACTIVE;
 	*dirty = 1;
 
+	/* Starts a download by validating the filename and statting the remote path. */
 	if (item->direction == SFTP_TRANSFER_DOWNLOAD) {
 		base = path_base(item->remote_path);
-		if (!sftp_transfer_valid_download_name(base, strlen(base), &why)) {
+		valid_name = sftp_transfer_valid_download_name(base, strlen(base), &why);
+		if (!valid_name) {
 			finish_active(q, SFTP_TRANSFER_SKIPPED, why, dirty);
 			return;
 		}
+
+		/* Queries the remote path attributes. */
 		error = sftp_client_stat(client, (const uint8_t *)item->remote_path, strlen(item->remote_path), &q->pending_req_id);
 		if (error != 0) {
 			finish_active(q, SFTP_TRANSFER_FAILED, "Could not inspect remote path.", dirty);
 			return;
 		}
+
+		/* Waits for STAT completion. */
 		q->has_pending_req = 1;
 		q->phase = XFER_DL_STAT;
 		return;
 	}
 
-	/* Upload */
+	/* Starts a folder upload by creating the remote directory. */
 	if (item->is_dir) {
 		error = sftp_client_mkdir(client, (const uint8_t *)item->remote_path, strlen(item->remote_path), NULL, &q->pending_req_id);
 		if (error != 0) {
 			finish_active(q, SFTP_TRANSFER_FAILED, "Could not create remote directory.", dirty);
 			return;
 		}
+
+		/* Waits for MKDIR completion. */
 		q->has_pending_req = 1;
 		q->phase = XFER_UL_MKDIR;
 		return;
 	}
 
+	/* Opens the local file for reading before checking the remote destination. */
 	error = sftp_local_open_read(item->local_path, &q->local_file, &size, &mtime);
 	if (error != 0) {
 		finish_active(q, SFTP_TRANSFER_FAILED, "Local file could not be opened.", dirty);
 		return;
 	}
+
+	/* Records local file size and mtime, then stats the remote destination. */
 	item->bytes_total = size;
 	q->local_mtime = mtime;
-
 	error = sftp_client_lstat(client, (const uint8_t *)item->remote_path, strlen(item->remote_path), &q->pending_req_id);
 	if (error != 0) {
 		sftp_local_close(q->local_file);
@@ -1118,6 +1372,8 @@ start_next_item(
 		finish_active(q, SFTP_TRANSFER_FAILED, "Could not inspect remote destination.", dirty);
 		return;
 	}
+
+	/* Waits for LSTAT completion. */
 	q->has_pending_req = 1;
 	q->phase = XFER_UL_STAT;
 }
@@ -1132,6 +1388,7 @@ finish_active(
 {
 	struct xfer_item *item;
 
+	/* Records final state and error message on the active item. */
 	item = &q->items[q->active_index];
 	item->state = state;
 	if (err != NULL)
@@ -1152,13 +1409,21 @@ pump_dl_data(
 {
 	struct xfer_item *item;
 	uint64_t offset;
+	uint64_t rem;
 	uint32_t length;
 	uint32_t req_id;
+	unsigned room;
+	int is_retry;
 	int error;
 
+	/* Pipelines READ requests up to max_requests and available client room. */
 	item = &q->items[q->active_index];
-	while (!q->failed && !q->cancel_requested && q->inflight_count < max_requests && sftp_client_room(client) > 0U) {
-		if (take_retry_range(q, &offset, &length)) {
+	while (!q->failed && !q->cancel_requested && q->inflight_count < max_requests) {
+		room = sftp_client_room(client);
+		if (room == 0U)
+			break;
+		is_retry = take_retry_range(q, &offset, &length);
+		if (is_retry) {
 			if (q->eof_seen && offset >= q->eof_offset)
 				continue;
 		} else {
@@ -1172,18 +1437,23 @@ pump_dl_data(
 				/* One probe read for 0-byte files; EOF stops further reads. */
 				q->next_offset = SFTP_CLIENT_CHUNK;
 			} else {
-				uint64_t rem = item->bytes_total - offset;
-				length = rem > SFTP_CLIENT_CHUNK ? SFTP_CLIENT_CHUNK : (uint32_t)rem;
+				rem = item->bytes_total - offset;
+				if (rem > SFTP_CLIENT_CHUNK)
+					length = SFTP_CLIENT_CHUNK;
+				else
+					length = (uint32_t)rem;
 				q->next_offset += length;
 			}
 		}
 
+		/* Sends the READ request and tracks it in flight. */
 		error = sftp_client_read(client, q->handle, q->handle_size, offset, length, &req_id);
 		if (error != 0)
 			break;
 		(void)add_inflight(q, req_id, offset, length);
 	}
 
+	/* Closes the remote handle once all in-flight reads drain at EOF or error. */
 	if (q->inflight_count == 0U && (q->failed || q->cancel_requested || q->eof_seen ||
 	    (item->bytes_total != 0U && q->next_offset >= item->bytes_total)))
 		begin_close_handle(q, client, XFER_DL_CLOSE, dirty);
@@ -1198,24 +1468,37 @@ pump_ul_data(
 	int *dirty)
 {
 	struct xfer_item *item;
+	struct ssh_sftp_attrs attrs;
 	uint8_t buf[SFTP_CLIENT_CHUNK];
+	uint64_t rem;
 	size_t want;
 	size_t got;
 	uint32_t req_id;
+	unsigned room;
 	int error;
 
+	/* Pipelines WRITE requests up to max_requests and available client room. */
 	item = &q->items[q->active_index];
 	while (!q->failed && !q->cancel_requested && q->inflight_count < max_requests &&
-	    sftp_client_room(client) > 0U && q->next_offset < item->bytes_total) {
-		uint64_t rem = item->bytes_total - q->next_offset;
+	    q->next_offset < item->bytes_total) {
+		room = sftp_client_room(client);
+		if (room == 0U)
+			break;
 
-		want = rem > sizeof(buf) ? sizeof(buf) : (size_t)rem;
+		/* Reads the next chunk from the local file. */
+		rem = item->bytes_total - q->next_offset;
+		if (rem > sizeof(buf))
+			want = sizeof(buf);
+		else
+			want = (size_t)rem;
 		error = sftp_local_read_at(q->local_file, q->next_offset, buf, want, &got);
 		if (error != 0 || got == 0U) {
 			q->failed = 1;
 			(void)snprintf(item->error_text, sizeof(item->error_text), "Local read failed.");
 			break;
 		}
+
+		/* Sends the WRITE request and advances next_offset. */
 		error = sftp_client_write(client, q->handle, q->handle_size, q->next_offset, buf, got, &req_id);
 		if (error != 0)
 			break;
@@ -1223,10 +1506,9 @@ pump_ul_data(
 		q->next_offset += got;
 	}
 
+	/* Preserves timestamps via FSETSTAT or closes the remote handle once writes drain. */
 	if (q->inflight_count == 0U && (q->failed || q->cancel_requested || q->next_offset >= item->bytes_total)) {
 		if (!q->failed && !q->cancel_requested && q->preserve_times && q->local_mtime != 0U) {
-			struct ssh_sftp_attrs attrs;
-
 			memset(&attrs, 0, sizeof(attrs));
 			attrs.flags = SSH_FILEXFER_ATTR_ACMODTIME;
 			attrs.atime = q->local_mtime;
@@ -1238,6 +1520,8 @@ pump_ul_data(
 				return;
 			}
 		}
+
+		/* Closes the remote handle. */
 		begin_close_handle(q, client, XFER_UL_CLOSE, dirty);
 	}
 }
@@ -1252,6 +1536,7 @@ add_inflight(
 {
 	size_t i;
 
+	/* Finds a free slot in the in-flight table. */
 	for (i = 0U; i < SFTP_CLIENT_REQUESTS; i++) {
 		if (!q->inflight[i].used) {
 			q->inflight[i].used = 1;
@@ -1262,6 +1547,8 @@ add_inflight(
 			return 0;
 		}
 	}
+
+	/* No free slot available. */
 	return ENOSPC;
 }
 
@@ -1275,6 +1562,7 @@ take_inflight(
 {
 	size_t i;
 
+	/* Searches for the matching in-flight request id. */
 	for (i = 0U; i < SFTP_CLIENT_REQUESTS; i++) {
 		if (q->inflight[i].used && q->inflight[i].id == id) {
 			*offset = q->inflight[i].offset;
@@ -1284,6 +1572,8 @@ take_inflight(
 			return 0;
 		}
 	}
+
+	/* Request id not found. */
 	return ENOENT;
 }
 
@@ -1296,6 +1586,7 @@ add_retry_range(
 {
 	size_t i;
 
+	/* Stores the remainder range in the first unused retry slot. */
 	for (i = 0U; i < SFTP_CLIENT_REQUESTS; i++) {
 		if (!q->retries[i].used) {
 			q->retries[i].used = 1;
@@ -1315,6 +1606,7 @@ take_retry_range(
 {
 	size_t i;
 
+	/* Returns the first pending retry range. */
 	for (i = 0U; i < SFTP_CLIENT_REQUESTS; i++) {
 		if (q->retries[i].used) {
 			*offset = q->retries[i].offset;
@@ -1323,6 +1615,8 @@ take_retry_range(
 			return 1;
 		}
 	}
+
+	/* No retry range queued. */
 	return 0;
 }
 
@@ -1337,6 +1631,7 @@ begin_dl_open(
 	const char *base;
 	int error;
 
+	/* Creates the local temporary file first. */
 	item = &q->items[q->active_index];
 	base = path_base(item->local_path);
 	error = sftp_local_open_temp_write(item->local_dir, base, q->temp_path, sizeof(q->temp_path), &q->local_file);
@@ -1344,8 +1639,15 @@ begin_dl_open(
 		finish_active(q, SFTP_TRANSFER_FAILED, "Could not create local temporary file.", dirty);
 		return;
 	}
-	error = sftp_client_open_file(client, (const uint8_t *)item->remote_path, strlen(item->remote_path),
-	    SSH_FXF_READ, NULL, &q->pending_req_id);
+
+	/* Opens the remote file for reading. */
+	error = sftp_client_open_file(
+		client,
+		(const uint8_t *)item->remote_path,
+		strlen(item->remote_path),
+		SSH_FXF_READ,
+		NULL,
+		&q->pending_req_id);
 	if (error != 0) {
 		sftp_local_close(q->local_file);
 		q->local_file = NULL;
@@ -1353,6 +1655,8 @@ begin_dl_open(
 		finish_active(q, SFTP_TRANSFER_FAILED, "Could not open remote file.", dirty);
 		return;
 	}
+
+	/* Waits for OPEN completion. */
 	q->has_pending_req = 1;
 	q->phase = XFER_DL_OPEN;
 }
@@ -1367,15 +1671,23 @@ begin_ul_open(
 	struct xfer_item *item;
 	int error;
 
+	/* Opens and truncates the remote destination file. */
 	item = &q->items[q->active_index];
-	error = sftp_client_open_file(client, (const uint8_t *)item->remote_path, strlen(item->remote_path),
-	    SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC, NULL, &q->pending_req_id);
+	error = sftp_client_open_file(
+		client,
+		(const uint8_t *)item->remote_path,
+		strlen(item->remote_path),
+		SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC,
+		NULL,
+		&q->pending_req_id);
 	if (error != 0) {
 		sftp_local_close(q->local_file);
 		q->local_file = NULL;
 		finish_active(q, SFTP_TRANSFER_FAILED, "Could not open remote file for writing.", dirty);
 		return;
 	}
+
+	/* Waits for OPEN completion. */
 	q->has_pending_req = 1;
 	q->phase = XFER_UL_OPEN;
 }
@@ -1390,15 +1702,20 @@ begin_close_handle(
 {
 	int error;
 
+	/* Sends CLOSE for the active remote file or directory handle. */
 	error = sftp_client_close_handle(client, q->handle, q->handle_size, &q->pending_req_id);
 	if (error != 0) {
 		if (q->local_file != NULL) {
 			sftp_local_close(q->local_file);
 			q->local_file = NULL;
 		}
+
+		/* Fails the transfer if CLOSE could not be queued. */
 		finish_active(q, SFTP_TRANSFER_FAILED, "Could not close remote handle.", dirty);
 		return;
 	}
+
+	/* Waits for CLOSE completion in next_phase. */
 	q->has_pending_req = 1;
 	q->phase = next_phase;
 }
@@ -1412,20 +1729,28 @@ expand_local_dir(
 	struct sftp_local_entry *entries;
 	size_t count;
 	size_t i;
-	char child_local[MIKUTERM_PATH_MAX];
+	char local_child[MIKUTERM_PATH_MAX];
 	char child_remote[SSH_SFTP_PATH_MAX];
+	int error;
 
-	if (sftp_local_list(parent->local_path, &entries, &count) != 0)
+	/* Lists the local directory; ignores errors silently if unreadable. */
+	error = sftp_local_list(parent->local_path, &entries, &count);
+	if (error != 0)
 		return;
 
+	/* Enqueues each non-reparse child for upload. */
 	for (i = 0U; i < count; i++) {
 		if (entries[i].is_reparse)
 			continue;
-		if (sftp_local_join_path(child_local, sizeof(child_local), parent->local_path, entries[i].name) != 0)
+		error = sftp_local_join_path(local_child, sizeof(local_child), parent->local_path, entries[i].name);
+		if (error != 0)
 			continue;
-		if (sftp_transfer_join_remote(child_remote, sizeof(child_remote), parent->remote_path, entries[i].name) != 0)
+		error = sftp_transfer_join_remote(child_remote, sizeof(child_remote), parent->remote_path, entries[i].name);
+		if (error != 0)
 			continue;
-		(void)sftp_transfer_enqueue(q, SFTP_TRANSFER_UPLOAD, child_local, child_remote, entries[i].is_dir, NULL);
+		(void)sftp_transfer_enqueue(q, SFTP_TRANSFER_UPLOAD, local_child, child_remote, entries[i].is_dir, NULL);
 	}
+
+	/* Frees the local directory listing. */
 	sftp_local_list_free(entries, count);
 }

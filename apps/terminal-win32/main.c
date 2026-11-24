@@ -381,8 +381,12 @@ main_can_open_sftp(
 	void *data,
 	const struct terminal_connection *connection)
 {
+	int allowed;
+
+	/* Forwards the query to the SSH session. */
 	(void)data;
-	return mikuterm_session_can_open_sftp(connection);
+	allowed = mikuterm_session_can_open_sftp(connection);
+	return allowed;
 }
 
 /* Opens an SFTP browser tab on the active SSH connection. */
@@ -396,33 +400,48 @@ main_open_sftp(
 	struct sftp_link *link;
 	struct terminal_connection *view_conn;
 	char host[MIKUTERM_HOST_MAX];
+	int allowed;
 	int error;
 
+	/* Verifies that the connection is an eligible SSH session. */
 	st = data;
-	if (!mikuterm_session_can_open_sftp(connection))
+	allowed = mikuterm_session_can_open_sftp(connection);
+	if (!allowed)
 		return 0;
 	session = (struct mikuterm_session *)connection;
 
+	/* Creates the channel relay between the network and SFTP worker threads. */
 	error = sftp_link_create(session->waker, &link);
 	if (error != 0)
 		return 0;
 
+	/* Creates the SFTP browser view tab for the target host. */
 	mikuterm_session_host(connection, host, sizeof(host));
 	view_conn = NULL;
-	error = sftp_view_create(session->app, session, link, host,
-		st->conf.sftp_preserve_times, st->conf.sftp_show_hidden,
-		st->page_font, st->page_fallback, &view_conn);
+	error = sftp_view_create(
+		session->app,
+		session,
+		link,
+		host,
+		st->conf.sftp_preserve_times,
+		st->conf.sftp_show_hidden,
+		st->page_font,
+		st->page_fallback,
+		&view_conn);
 	if (error != 0) {
 		sftp_link_release(link);
 		return 0;
 	}
 
+	/* Attaches the SFTP tab and requests the subsystem channel. */
 	error = mikuterm_session_open_sftp(connection, view_conn, link);
 	sftp_link_release(link);
 	if (error != 0) {
 		view_conn->ops->close(view_conn);
 		return 0;
 	}
+
+	/* Succeeded: the SFTP tab is opening. */
 	return 0;
 }
 
@@ -434,12 +453,17 @@ main_confirm_close(
 	struct terminal_connection *connection)
 {
 	struct terminal_connection *view_conn;
+	int confirmed;
 
+	/* Checks whether an SFTP tab is attached to the closing terminal. */
 	(void)data;
 	if (connection == NULL)
 		return 1;
 	view_conn = mikuterm_session_sftp_view(connection);
 	if (view_conn == NULL)
 		return 1;
-	return sftp_view_confirm_close(view_conn, window);
+
+	/* Prompts the user if the attached SFTP tab has active transfers. */
+	confirmed = sftp_view_confirm_close(view_conn, window);
+	return confirmed;
 }

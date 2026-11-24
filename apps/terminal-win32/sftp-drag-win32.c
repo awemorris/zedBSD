@@ -306,10 +306,10 @@ sftp_drag_context_create(
 {
 	struct sftp_drag_context *ctx;
 
+	/* Allocates the context and initializes its lock and callback fields. */
 	ctx = calloc(1U, sizeof(*ctx));
 	if (ctx == NULL)
 		return NULL;
-
 	InitializeCriticalSection(&ctx->lock);
 	ctx->references = 1;
 	ctx->worker = worker;
@@ -326,9 +326,9 @@ void
 sftp_drag_context_detach(
 	struct sftp_drag_context *ctx)
 {
+	/* Clears callbacks and marks the context detached under its lock. */
 	if (ctx == NULL)
 		return;
-
 	EnterCriticalSection(&ctx->lock);
 	ctx->detached = 1;
 	ctx->cancelled = 1;
@@ -337,6 +337,7 @@ sftp_drag_context_detach(
 	ctx->notify_data = NULL;
 	LeaveCriticalSection(&ctx->lock);
 
+	/* Drops the view's reference to the context. */
 	drag_ctx_release(ctx);
 }
 
@@ -350,9 +351,9 @@ sftp_drag_context_active_count(
 {
 	size_t count;
 
+	/* Reads the active async count under the context lock. */
 	if (ctx == NULL)
 		return 0U;
-
 	EnterCriticalSection(&ctx->lock);
 	count = ctx->active_async;
 	LeaveCriticalSection(&ctx->lock);
@@ -366,9 +367,9 @@ void
 sftp_drag_context_cancel_all(
 	struct sftp_drag_context *ctx)
 {
+	/* Sets the cancellation flag under the context lock. */
 	if (ctx == NULL)
 		return;
-
 	EnterCriticalSection(&ctx->lock);
 	ctx->cancelled = 1;
 	LeaveCriticalSection(&ctx->lock);
@@ -388,34 +389,43 @@ sftp_drag_create_object(
 	IStream *marshal_stream;
 	IDataObject *proxy;
 	HRESULT hr;
+	BOOL once_ok;
+	LPVOID tls_val;
 
+	/* Validates arguments and ensures the MTA COM thread is ready. */
 	if (ctx == NULL || items == NULL || count == 0U || object_out == NULL)
 		return EINVAL;
-
 	*object_out = NULL;
-	if (!InitOnceExecuteOnce(&drag_com_once, drag_com_init_cb, NULL, NULL) || !drag_com_ready)
+	once_ok = InitOnceExecuteOnce(&drag_com_once, drag_com_init_cb, NULL, NULL);
+	if (!once_ok || !drag_com_ready)
 		return EIO;
 
-	if (drag_ole_tls != TLS_OUT_OF_INDEXES && TlsGetValue(drag_ole_tls) == NULL) {
-		hr = OleInitialize(NULL);
-		if (SUCCEEDED(hr))
-			(void)TlsSetValue(drag_ole_tls, (LPVOID)(uintptr_t)1);
+	/* Initializes OLE once per caller thread. */
+	if (drag_ole_tls != TLS_OUT_OF_INDEXES) {
+		tls_val = TlsGetValue(drag_ole_tls);
+		if (tls_val == NULL) {
+			hr = OleInitialize(NULL);
+			if (hr >= 0)
+				(void)TlsSetValue(drag_ole_tls, (LPVOID)(uintptr_t)1);
+		}
 	}
 
+	/* Resets cancellation state before creating the data object. */
 	EnterCriticalSection(&ctx->lock);
 	ctx->cancelled = 0;
 	LeaveCriticalSection(&ctx->lock);
 
+	/* Creates the data object on the MTA thread and marshals it here. */
 	marshal_stream = NULL;
 	hr = drag_com_create_marshaled(ctx, items, count, &marshal_stream);
-	if (FAILED(hr) || marshal_stream == NULL)
+	if (hr < 0 || marshal_stream == NULL)
 		return EIO;
 
+	/* Unmarshals the IDataObject proxy for the caller's apartment. */
 	proxy = NULL;
 	hr = CoGetInterfaceAndReleaseStream(marshal_stream, &IID_IDataObject, (void **)&proxy);
-	if (FAILED(hr) || proxy == NULL)
+	if (hr < 0 || proxy == NULL)
 		return EIO;
-
 	*object_out = proxy;
 	return 0;
 }
@@ -435,37 +445,42 @@ sftp_drag_run(
 	struct drag_drop_source *source;
 	DWORD effect;
 	HRESULT hr;
+	HRESULT qhr;
 	BOOL in_op;
 	int error;
 
+	/* Creates the marshaled data object and local drop source. */
 	proxy = NULL;
 	error = sftp_drag_create_object(ctx, items, count, &proxy);
 	if (error != 0)
 		return error;
-
 	source = calloc(1U, sizeof(*source));
 	if (source == NULL) {
 		IDataObject_Release(proxy);
 		return ENOMEM;
 	}
+
+	/* Initializes the drop source and runs the modal OLE drag loop. */
 	source->iface.lpVtbl = &drag_source_vtbl;
 	source->references = 1;
 
+	/* Runs the modal OLE drag loop. */
 	effect = DROPEFFECT_NONE;
 	hr = DoDragDrop(proxy, &source->iface, DROPEFFECT_COPY, &effect);
 
+	/* Checks whether the drop target took over asynchronously. */
 	in_op = FALSE;
 	async_cap = NULL;
-	if (SUCCEEDED(IDataObject_QueryInterface(proxy, &IID_IDataObjectAsyncCapability, (void **)&async_cap)) &&
-	    async_cap != NULL) {
+	qhr = IDataObject_QueryInterface(proxy, &IID_IDataObjectAsyncCapability, (void **)&async_cap);
+	if (qhr >= 0 && async_cap != NULL) {
 		(void)IDataObjectAsyncCapability_InOperation(async_cap, &in_op);
 		IDataObjectAsyncCapability_Release(async_cap);
 	}
-	(void)in_op;
 
+	/* Releases local COM references and translates the drag result. */
+	(void)in_op;
 	IDataObject_Release(proxy);
 	IDropSource_Release(&source->iface);
-
 	if (hr == DRAGDROP_S_DROP || hr == DRAGDROP_S_CANCEL)
 		return 0;
 	return EIO;
@@ -480,22 +495,23 @@ drag_com_init_cb(
 {
 	DWORD tid;
 
+	/* Creates synchronization primitives and spawns the MTA worker thread. */
 	(void)once;
 	(void)param;
 	(void)context;
-
 	InitializeCriticalSection(&drag_com_lock);
 	drag_ole_tls = TlsAlloc();
 	drag_com_wake = CreateEventW(NULL, FALSE, FALSE, NULL);
 	if (drag_com_wake == NULL)
 		return FALSE;
-
 	drag_com_thread_handle = CreateThread(NULL, 0U, drag_com_thread_proc, NULL, 0U, &tid);
 	if (drag_com_thread_handle == NULL) {
 		CloseHandle(drag_com_wake);
 		drag_com_wake = NULL;
 		return FALSE;
 	}
+
+	/* Marks the MTA thread ready. */
 	drag_com_ready = 1;
 	return TRUE;
 }
@@ -509,15 +525,17 @@ drag_com_thread_proc(
 	struct drag_data_object *obj;
 	HRESULT hr;
 
+	/* Initializes COM in the multithreaded apartment. */
 	(void)param;
-
 	hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-	if (FAILED(hr))
+	if (hr < 0)
 		return 1U;
 
+	/* Services queued data-object creation and marshaling requests. */
 	for (;;) {
 		WaitForSingleObject(drag_com_wake, INFINITE);
 
+		/* Drains all pending requests before sleeping again. */
 		for (;;) {
 			EnterCriticalSection(&drag_com_lock);
 			req = drag_com_head;
@@ -526,11 +544,13 @@ drag_com_thread_proc(
 				if (drag_com_head == NULL)
 					drag_com_tail = NULL;
 			}
-			LeaveCriticalSection(&drag_com_lock);
 
+			/* Releases the queue lock before processing the request. */
+			LeaveCriticalSection(&drag_com_lock);
 			if (req == NULL)
 				break;
 
+			/* Creates and marshals the requested IDataObject. */
 			obj = drag_object_create(req->ctx, req->items, req->count);
 			if (obj == NULL) {
 				req->hr = E_OUTOFMEMORY;
@@ -541,6 +561,8 @@ drag_com_thread_proc(
 				    (IUnknown *)&obj->iface, &req->marshal_stream);
 				IDataObject_Release(&obj->iface);
 			}
+
+			/* Wakes the requesting thread. */
 			SetEvent(req->done_event);
 		}
 	}
@@ -555,11 +577,13 @@ drag_com_create_marshaled(
 	IStream **stream_out)
 {
 	struct drag_com_request req;
+	BOOL once_ok;
 
+	/* Ensures the MTA thread is running and initializes the request. */
 	*stream_out = NULL;
-	if (!InitOnceExecuteOnce(&drag_com_once, drag_com_init_cb, NULL, NULL) || !drag_com_ready)
+	once_ok = InitOnceExecuteOnce(&drag_com_once, drag_com_init_cb, NULL, NULL);
+	if (!once_ok || !drag_com_ready)
 		return E_FAIL;
-
 	memset(&req, 0, sizeof(req));
 	req.ctx = ctx;
 	req.items = items;
@@ -569,6 +593,7 @@ drag_com_create_marshaled(
 	if (req.done_event == NULL)
 		return E_OUTOFMEMORY;
 
+	/* Enqueues the request on the MTA thread's list. */
 	EnterCriticalSection(&drag_com_lock);
 	if (drag_com_tail != NULL)
 		drag_com_tail->next = &req;
@@ -577,10 +602,10 @@ drag_com_create_marshaled(
 	drag_com_tail = &req;
 	LeaveCriticalSection(&drag_com_lock);
 
+	/* Signals the MTA thread and waits for completion. */
 	SetEvent(drag_com_wake);
 	WaitForSingleObject(req.done_event, INFINITE);
 	CloseHandle(req.done_event);
-
 	*stream_out = req.marshal_stream;
 	return req.hr;
 }
@@ -599,10 +624,13 @@ static void
 drag_ctx_release(
 	struct sftp_drag_context *ctx)
 {
+	LONG refs;
+
+	/* Frees the context once its final reference is released. */
 	if (ctx == NULL)
 		return;
-
-	if (InterlockedDecrement(&ctx->references) == 0) {
+	refs = InterlockedDecrement(&ctx->references);
+	if (refs == 0) {
 		DeleteCriticalSection(&ctx->lock);
 		free(ctx);
 	}
@@ -617,14 +645,16 @@ drag_ctx_notify(
 	void (*cb)(void *data, const char *error_text);
 	void *cb_data;
 
+	/* Snapshots the callback under the lock before invoking it. */
 	if (ctx == NULL)
 		return;
-
 	EnterCriticalSection(&ctx->lock);
-	cb = ctx->detached ? NULL : ctx->notify;
+	if (ctx->detached)
+		cb = NULL;
+	else
+		cb = ctx->notify;
 	cb_data = ctx->notify_data;
 	LeaveCriticalSection(&ctx->lock);
-
 	if (cb != NULL)
 		cb(cb_data, message);
 }
@@ -636,9 +666,9 @@ drag_ctx_acquire_worker(
 {
 	struct sftp_worker *worker;
 
+	/* Reads the worker pointer under the context lock. */
 	if (ctx == NULL)
 		return NULL;
-
 	EnterCriticalSection(&ctx->lock);
 	if (ctx->detached || ctx->cancelled)
 		worker = NULL;
@@ -656,6 +686,7 @@ drag_unix_to_filetime(
 	ULARGE_INTEGER uli;
 	FILETIME ft;
 
+	/* Shifts Unix epoch seconds to Windows 100-ns FILETIME units. */
 	uli.QuadPart = DRAG_UNIX_EPOCH_100NS + (uint64_t)sec * DRAG_100NS_PER_SEC;
 	ft.dwLowDateTime = uli.LowPart;
 	ft.dwHighDateTime = uli.HighPart;
@@ -671,9 +702,9 @@ drag_utf8_to_wide(
 {
 	int needed;
 
+	/* Rejects invalid buffers and converts with strict UTF-8 validation. */
 	if (utf8 == NULL || wide == NULL || wide_cap == 0U)
 		return EINVAL;
-
 	needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, wide, (int)wide_cap);
 	if (needed <= 0)
 		return ENAMETOOLONG;
@@ -690,6 +721,7 @@ drag_join_rel_utf8(
 {
 	int written;
 
+	/* Formats the relative path with or without a parent prefix. */
 	if (parent == NULL || parent[0] == '\0')
 		written = snprintf(out, out_cap, "%s", name);
 	else
@@ -712,15 +744,21 @@ drag_append_desc_item(
 	wchar_t rel_wide[MAX_PATH];
 	struct drag_desc_item *grown;
 	size_t new_cap;
+	int conv_err;
 
+	/* Enforces the descriptor item limit and converts the relative path to UTF-16. */
 	if (obj->desc_count >= SFTP_DRAG_ITEMS_MAX)
 		return E2BIG;
-
-	if (drag_utf8_to_wide(rel_utf8, rel_wide, MAX_PATH) != 0)
+	conv_err = drag_utf8_to_wide(rel_utf8, rel_wide, MAX_PATH);
+	if (conv_err != 0)
 		return ENAMETOOLONG;
 
+	/* Grows the descriptor array if full. */
 	if (obj->desc_count == obj->desc_cap) {
-		new_cap = obj->desc_cap == 0U ? 32U : obj->desc_cap * 2U;
+		if (obj->desc_cap == 0U)
+			new_cap = 32U;
+		else
+			new_cap = obj->desc_cap * 2U;
 		if (new_cap > SFTP_DRAG_ITEMS_MAX)
 			new_cap = SFTP_DRAG_ITEMS_MAX;
 		grown = realloc(obj->desc_items, new_cap * sizeof(*grown));
@@ -730,12 +768,20 @@ drag_append_desc_item(
 		obj->desc_cap = new_cap;
 	}
 
+	/* Appends the descriptor item and updates total byte size. */
 	(void)snprintf(obj->desc_items[obj->desc_count].remote_path,
 	    sizeof(obj->desc_items[obj->desc_count].remote_path), "%s", remote_path);
 	wcscpy(obj->desc_items[obj->desc_count].rel_wide, rel_wide);
-	obj->desc_items[obj->desc_count].size = is_dir ? 0ULL : size;
+	if (is_dir) {
+		obj->desc_items[obj->desc_count].size = 0ULL;
+		obj->desc_items[obj->desc_count].is_dir = 1;
+	} else {
+		obj->desc_items[obj->desc_count].size = size;
+		obj->desc_items[obj->desc_count].is_dir = 0;
+	}
+
+	/* Records modification time and updates total file byte count. */
 	obj->desc_items[obj->desc_count].mtime = mtime;
-	obj->desc_items[obj->desc_count].is_dir = is_dir ? 1 : 0;
 	obj->desc_count++;
 	if (!is_dir)
 		obj->total_bytes += size;
@@ -749,18 +795,39 @@ drag_ensure_expanded(
 {
 	struct sftp_worker *worker;
 	struct drag_dir_node *stack;
+	struct drag_dir_node *grown;
+	struct drag_dir_node cur;
+	struct sftp_dir_listing *listing;
+	const struct sftp_drag_item *top;
+	const struct sftp_dir_entry *ent;
+	char child_remote[SSH_SFTP_PATH_MAX];
+	char child_rel[SSH_SFTP_PATH_MAX];
+	const char *why;
 	size_t stack_count;
 	size_t stack_cap;
+	size_t nc;
 	size_t i;
+	size_t j;
+	size_t name_len;
+	HRESULT hr;
 	int err;
+	int valid;
+	int is_dir;
+	int cmp_dot;
+	int cmp_dotdot;
 
+	/* Returns cached expansion status if already expanded. */
 	EnterCriticalSection(&obj->lock);
 	if (obj->expanded) {
-		HRESULT hr = obj->expand_failed ? E_FAIL : S_OK;
+		if (obj->expand_failed)
+			hr = E_FAIL;
+		else
+			hr = S_OK;
 		LeaveCriticalSection(&obj->lock);
 		return hr;
 	}
 
+	/* Acquires the active worker before traversing directories. */
 	worker = drag_ctx_acquire_worker(obj->ctx);
 	if (worker == NULL) {
 		obj->expanded = 1;
@@ -769,17 +836,17 @@ drag_ensure_expanded(
 		return E_FAIL;
 	}
 
+	/* Seeds the descriptor list and directory stack with top-level items. */
 	stack = NULL;
 	stack_count = 0U;
 	stack_cap = 0U;
-
 	for (i = 0U; i < obj->top_count; i++) {
-		const struct sftp_drag_item *top = &obj->top_items[i];
-		const char *why = NULL;
-
-		if (!sftp_transfer_valid_download_name(top->name, strlen(top->name), &why))
+		top = &obj->top_items[i];
+		why = NULL;
+		name_len = strlen(top->name);
+		valid = sftp_transfer_valid_download_name(top->name, name_len, &why);
+		if (!valid)
 			continue;
-
 		err = drag_append_desc_item(obj, top->remote_path, top->name, top->size, top->mtime, top->is_dir);
 		if (err == E2BIG) {
 			drag_ctx_notify(obj->ctx, "Too many items to drag (limit 10,000); use Download instead.");
@@ -789,6 +856,8 @@ drag_ensure_expanded(
 			LeaveCriticalSection(&obj->lock);
 			return E_FAIL;
 		}
+
+		/* Skips items whose path exceeds MAX_PATH and aborts on allocation failure. */
 		if (err == ENAMETOOLONG)
 			continue;
 		if (err != 0) {
@@ -799,11 +868,13 @@ drag_ensure_expanded(
 			return E_OUTOFMEMORY;
 		}
 
+		/* Pushes top-level directories onto the traversal stack. */
 		if (top->is_dir) {
 			if (stack_count == stack_cap) {
-				struct drag_dir_node *grown;
-				size_t nc = stack_cap == 0U ? 16U : stack_cap * 2U;
-
+				if (stack_cap == 0U)
+					nc = 16U;
+				else
+					nc = stack_cap * 2U;
 				grown = realloc(stack, nc * sizeof(*grown));
 				if (grown == NULL) {
 					free(stack);
@@ -812,9 +883,13 @@ drag_ensure_expanded(
 					LeaveCriticalSection(&obj->lock);
 					return E_OUTOFMEMORY;
 				}
+
+				/* Adopts the resized directory stack. */
 				stack = grown;
 				stack_cap = nc;
 			}
+
+			/* Records the directory's remote and relative paths. */
 			(void)snprintf(stack[stack_count].remote_path, sizeof(stack[stack_count].remote_path),
 			    "%s", top->remote_path);
 			(void)snprintf(stack[stack_count].rel_utf8, sizeof(stack[stack_count].rel_utf8),
@@ -823,14 +898,10 @@ drag_ensure_expanded(
 		}
 	}
 
+	/* Iteratively expands all queued directories. */
 	while (stack_count > 0U) {
-		struct drag_dir_node cur;
-		struct sftp_dir_listing *listing;
-		size_t j;
-
 		stack_count--;
 		cur = stack[stack_count];
-
 		worker = drag_ctx_acquire_worker(obj->ctx);
 		if (worker == NULL) {
 			free(stack);
@@ -840,6 +911,7 @@ drag_ensure_expanded(
 			return E_FAIL;
 		}
 
+		/* Lists the directory on the remote server. */
 		listing = NULL;
 		err = sftp_worker_list_dir(worker, cur.remote_path, 0, &listing);
 		if (err != 0 || listing == NULL || listing->error != 0) {
@@ -852,26 +924,30 @@ drag_ensure_expanded(
 			return E_FAIL;
 		}
 
+		/* Appends each valid child entry and queues subdirectories. */
 		for (j = 0U; j < listing->count; j++) {
-			const struct sftp_dir_entry *ent = &listing->entries[j];
-			char child_remote[SSH_SFTP_PATH_MAX];
-			char child_rel[SSH_SFTP_PATH_MAX];
-			const char *why = NULL;
-			int is_dir;
-
-			if (strcmp(ent->name, ".") == 0 || strcmp(ent->name, "..") == 0)
+			ent = &listing->entries[j];
+			why = NULL;
+			cmp_dot = strcmp(ent->name, ".");
+			cmp_dotdot = strcmp(ent->name, "..");
+			if (cmp_dot == 0 || cmp_dotdot == 0)
 				continue;
-			if (!sftp_transfer_valid_download_name(ent->name, strlen(ent->name), &why))
+			name_len = strlen(ent->name);
+			valid = sftp_transfer_valid_download_name(ent->name, name_len, &why);
+			if (!valid)
 				continue;
 			if (ent->is_link && ent->link_is_dir)
 				continue;
-
-			if (sftp_transfer_join_remote(child_remote, sizeof(child_remote), cur.remote_path, ent->name) != 0)
+			err = sftp_transfer_join_remote(child_remote, sizeof(child_remote), cur.remote_path, ent->name);
+			if (err != 0)
 				continue;
-			if (drag_join_rel_utf8(child_rel, sizeof(child_rel), cur.rel_utf8, ent->name) != 0)
+			err = drag_join_rel_utf8(child_rel, sizeof(child_rel), cur.rel_utf8, ent->name);
+			if (err != 0)
 				continue;
-
-			is_dir = ent->is_dir ? 1 : 0;
+			if (ent->is_dir)
+				is_dir = 1;
+			else
+				is_dir = 0;
 			err = drag_append_desc_item(obj, child_remote, child_rel, ent->size, ent->mtime, is_dir);
 			if (err == E2BIG) {
 				sftp_dir_listing_free(listing);
@@ -882,6 +958,8 @@ drag_ensure_expanded(
 				LeaveCriticalSection(&obj->lock);
 				return E_FAIL;
 			}
+
+			/* Skips entries exceeding MAX_PATH and aborts on allocation failure. */
 			if (err == ENAMETOOLONG)
 				continue;
 			if (err != 0) {
@@ -893,11 +971,13 @@ drag_ensure_expanded(
 				return E_OUTOFMEMORY;
 			}
 
+			/* Pushes child directories onto the traversal stack. */
 			if (is_dir) {
 				if (stack_count == stack_cap) {
-					struct drag_dir_node *grown;
-					size_t nc = stack_cap == 0U ? 16U : stack_cap * 2U;
-
+					if (stack_cap == 0U)
+						nc = 16U;
+					else
+						nc = stack_cap * 2U;
 					grown = realloc(stack, nc * sizeof(*grown));
 					if (grown == NULL) {
 						sftp_dir_listing_free(listing);
@@ -907,9 +987,13 @@ drag_ensure_expanded(
 						LeaveCriticalSection(&obj->lock);
 						return E_OUTOFMEMORY;
 					}
+
+					/* Adopts the resized directory stack. */
 					stack = grown;
 					stack_cap = nc;
 				}
+
+				/* Records the child directory's remote and relative paths. */
 				(void)snprintf(stack[stack_count].remote_path, sizeof(stack[stack_count].remote_path),
 				    "%s", child_remote);
 				(void)snprintf(stack[stack_count].rel_utf8, sizeof(stack[stack_count].rel_utf8),
@@ -917,9 +1001,12 @@ drag_ensure_expanded(
 				stack_count++;
 			}
 		}
+
+		/* Releases the listing for this directory. */
 		sftp_dir_listing_free(listing);
 	}
 
+	/* Marks expansion complete and releases the traversal stack. */
 	free(stack);
 	obj->expanded = 1;
 	obj->expand_failed = 0;
@@ -933,18 +1020,17 @@ drag_fill_formats(
 	const struct drag_data_object *obj,
 	FORMATETC formats[DRAG_FORMAT_COUNT])
 {
+	/* Fills descriptor, contents, and preferred drop-effect formats. */
 	formats[0].cfFormat = obj->fmt_descriptor;
 	formats[0].ptd = NULL;
 	formats[0].dwAspect = DVASPECT_CONTENT;
 	formats[0].lindex = -1;
 	formats[0].tymed = TYMED_HGLOBAL;
-
 	formats[1].cfFormat = obj->fmt_contents;
 	formats[1].ptd = NULL;
 	formats[1].dwAspect = DVASPECT_CONTENT;
 	formats[1].lindex = -1;
 	formats[1].tymed = TYMED_ISTREAM;
-
 	formats[2].cfFormat = obj->fmt_effect;
 	formats[2].ptd = NULL;
 	formats[2].dwAspect = DVASPECT_CONTENT;
@@ -958,20 +1044,17 @@ drag_match_format(
 	const struct drag_data_object *obj,
 	const FORMATETC *fmt)
 {
+	/* Validates content aspect and matches each supported clipboard format. */
 	if (fmt == NULL || fmt->dwAspect != DVASPECT_CONTENT)
 		return -1;
-
 	if (fmt->cfFormat == obj->fmt_descriptor && (fmt->tymed & TYMED_HGLOBAL) != 0U &&
 	    (fmt->lindex == -1 || fmt->lindex == 0))
 		return 0;
-
 	if (fmt->cfFormat == obj->fmt_contents && (fmt->tymed & TYMED_ISTREAM) != 0U)
 		return 1;
-
 	if (fmt->cfFormat == obj->fmt_effect && (fmt->tymed & TYMED_HGLOBAL) != 0U &&
 	    (fmt->lindex == -1 || fmt->lindex == 0))
 		return 2;
-
 	return -1;
 }
 
@@ -984,18 +1067,19 @@ drag_object_create(
 {
 	struct drag_data_object *obj;
 
+	/* Allocates the object and copies top-level drag items. */
 	obj = calloc(1U, sizeof(*obj));
 	if (obj == NULL)
 		return NULL;
-
 	obj->top_items = calloc(count, sizeof(*obj->top_items));
 	if (obj->top_items == NULL) {
 		free(obj);
 		return NULL;
 	}
+
+	/* Initializes COM vtables, synchronization, and clipboard formats. */
 	memcpy(obj->top_items, items, count * sizeof(*obj->top_items));
 	obj->top_count = count;
-
 	obj->iface.lpVtbl = &drag_object_vtbl;
 	obj->async_iface.lpVtbl = &drag_async_vtbl;
 	obj->references = 1;
@@ -1025,21 +1109,30 @@ dobj_query(
 	void **out)
 {
 	struct drag_data_object *obj = (struct drag_data_object *)iface;
+	int eq_unk;
+	int eq_dobj;
+	int eq_async;
 
+	/* Exposes IUnknown, IDataObject, and IDataObjectAsyncCapability. */
 	if (out == NULL)
 		return E_POINTER;
-
-	if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDataObject)) {
+	eq_unk = IsEqualIID(riid, &IID_IUnknown);
+	eq_dobj = IsEqualIID(riid, &IID_IDataObject);
+	if (eq_unk || eq_dobj) {
 		*out = &obj->iface;
 		dobj_add(&obj->iface);
 		return S_OK;
 	}
-	if (IsEqualIID(riid, &IID_IDataObjectAsyncCapability)) {
+
+	/* Checks for the async capability interface. */
+	eq_async = IsEqualIID(riid, &IID_IDataObjectAsyncCapability);
+	if (eq_async) {
 		*out = &obj->async_iface;
 		dobj_add(&obj->iface);
 		return S_OK;
 	}
 
+	/* Unsupported interface. */
 	*out = NULL;
 	return E_NOINTERFACE;
 }
@@ -1051,6 +1144,7 @@ dobj_add(
 {
 	struct drag_data_object *obj = (struct drag_data_object *)iface;
 
+	/* Increments the COM reference count atomically. */
 	return (ULONG)InterlockedIncrement(&obj->references);
 }
 
@@ -1062,6 +1156,7 @@ dobj_release(
 	struct drag_data_object *obj = (struct drag_data_object *)iface;
 	LONG count;
 
+	/* Decrements the reference count and frees the object at zero. */
 	count = InterlockedDecrement(&obj->references);
 	if (count == 0) {
 		if (obj->counted_active && obj->ctx != NULL) {
@@ -1070,12 +1165,16 @@ dobj_release(
 				obj->ctx->active_async--;
 			LeaveCriticalSection(&obj->ctx->lock);
 		}
+
+		/* Releases the context reference and heap buffers. */
 		drag_ctx_release(obj->ctx);
 		DeleteCriticalSection(&obj->lock);
 		free(obj->top_items);
 		free(obj->desc_items);
 		free(obj);
 	}
+
+	/* Returns the updated reference count. */
 	return (ULONG)count;
 }
 
@@ -1087,21 +1186,28 @@ dobj_get_data(
 	STGMEDIUM *medium)
 {
 	struct drag_data_object *obj = (struct drag_data_object *)iface;
+	const struct drag_desc_item *item;
+	struct drag_stream *stream;
+	FILEGROUPDESCRIPTORW *fgd;
+	FILEDESCRIPTORW *fd;
+	HGLOBAL mem;
+	DWORD *effect;
+	size_t bytes;
+	size_t i;
 	int kind;
+	int should_notify;
 	HRESULT hr;
 
+	/* Validates outputs and matches the requested clipboard format. */
 	if (fmt == NULL || medium == NULL)
 		return E_INVALIDARG;
 	memset(medium, 0, sizeof(*medium));
-
 	kind = drag_match_format(obj, fmt);
 	if (kind < 0)
 		return DV_E_FORMATETC;
 
+	/* Handles CFSTR_PREFERREDDROPEFFECT before expanding remote directories. */
 	if (kind == 2) {
-		HGLOBAL mem;
-		DWORD *effect;
-
 		mem = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
 		if (mem == NULL)
 			return E_OUTOFMEMORY;
@@ -1110,6 +1216,8 @@ dobj_get_data(
 			GlobalFree(mem);
 			return E_OUTOFMEMORY;
 		}
+
+		/* Advertises copy-only drop semantics. */
 		*effect = DROPEFFECT_COPY;
 		GlobalUnlock(mem);
 		medium->tymed = TYMED_HGLOBAL;
@@ -1118,34 +1226,30 @@ dobj_get_data(
 		return S_OK;
 	}
 
+	/* Expands the selected remote tree on first descriptor or content request. */
 	hr = drag_ensure_expanded(obj);
-	if (FAILED(hr))
+	if (hr < 0)
 		return hr;
 
+	/* Builds CFSTR_FILEDESCRIPTORW from the expanded item list. */
 	if (kind == 0) {
-		size_t bytes;
-		HGLOBAL mem;
-		FILEGROUPDESCRIPTORW *fgd;
-		size_t i;
-
 		if (obj->desc_count == 0U)
 			return E_FAIL;
-
 		bytes = offsetof(FILEGROUPDESCRIPTORW, fgd) + obj->desc_count * sizeof(FILEDESCRIPTORW);
 		mem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
 		if (mem == NULL)
 			return E_OUTOFMEMORY;
-
 		fgd = GlobalLock(mem);
 		if (fgd == NULL) {
 			GlobalFree(mem);
 			return E_OUTOFMEMORY;
 		}
+
+		/* Populates each FILEDESCRIPTORW entry. */
 		fgd->cItems = (UINT)obj->desc_count;
 		for (i = 0U; i < obj->desc_count; i++) {
-			const struct drag_desc_item *item = &obj->desc_items[i];
-			FILEDESCRIPTORW *fd = &fgd->fgd[i];
-
+			item = &obj->desc_items[i];
+			fd = &fgd->fgd[i];
 			fd->dwFlags = FD_ATTRIBUTES | FD_PROGRESSUI | FD_UNICODE;
 			if (item->is_dir) {
 				fd->dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
@@ -1155,50 +1259,54 @@ dobj_get_data(
 				fd->nFileSizeHigh = (DWORD)(item->size >> 32);
 				fd->nFileSizeLow = (DWORD)(item->size & 0xffffffffU);
 			}
+
+			/* Sets modification timestamp when available. */
 			if (item->mtime != 0U) {
 				fd->dwFlags |= FD_WRITESTIME;
 				fd->ftLastWriteTime = drag_unix_to_filetime(item->mtime);
 			}
+
+			/* Copies the UTF-16 relative path. */
 			wcsncpy(fd->cFileName, item->rel_wide, MAX_PATH - 1U);
 			fd->cFileName[MAX_PATH - 1U] = L'\0';
 		}
-		GlobalUnlock(mem);
 
+		/* Unlocks and returns the global descriptor handle. */
+		GlobalUnlock(mem);
 		medium->tymed = TYMED_HGLOBAL;
 		medium->hGlobal = mem;
 		medium->pUnkForRelease = NULL;
 		return S_OK;
 	}
 
-	/* CFSTR_FILECONTENTS (TYMED_ISTREAM). */
+	/* Validates lindex for CFSTR_FILECONTENTS (TYMED_ISTREAM). */
 	if (fmt->lindex < 0 || (size_t)fmt->lindex >= obj->desc_count)
 		return DV_E_LINDEX;
 	if (obj->desc_items[fmt->lindex].is_dir)
 		return DV_E_LINDEX;
 
+	/* Rejects large synchronous drops to avoid blocking the UI thread. */
 	EnterCriticalSection(&obj->lock);
 	if (!obj->in_operation && obj->total_bytes > SFTP_DRAG_SYNC_LIMIT_BYTES) {
-		int should_notify = !obj->sync_limit_reported;
-
+		should_notify = !obj->sync_limit_reported;
 		obj->sync_limit_reported = 1;
 		LeaveCriticalSection(&obj->lock);
 		if (should_notify)
 			drag_ctx_notify(obj->ctx, "This application cannot take a large drag; use Download instead.");
 		return E_FAIL;
 	}
+
+	/* Releases the object lock before creating the stream. */
 	LeaveCriticalSection(&obj->lock);
 
-	{
-		struct drag_stream *stream;
-
-		stream = drag_stream_create(obj, &obj->desc_items[fmt->lindex]);
-		if (stream == NULL)
-			return E_OUTOFMEMORY;
-		medium->tymed = TYMED_ISTREAM;
-		medium->pstm = &stream->iface;
-		medium->pUnkForRelease = NULL;
-		return S_OK;
-	}
+	/* Creates an IStream backed by the remote file. */
+	stream = drag_stream_create(obj, &obj->desc_items[fmt->lindex]);
+	if (stream == NULL)
+		return E_OUTOFMEMORY;
+	medium->tymed = TYMED_ISTREAM;
+	medium->pstm = &stream->iface;
+	medium->pUnkForRelease = NULL;
+	return S_OK;
 }
 
 /* IDataObject::GetDataHere (not implemented). */
@@ -1221,8 +1329,13 @@ dobj_query_get_data(
 	FORMATETC *fmt)
 {
 	struct drag_data_object *obj = (struct drag_data_object *)iface;
+	int kind;
 
-	return drag_match_format(obj, fmt) >= 0 ? S_OK : DV_E_FORMATETC;
+	/* Returns S_OK when fmt matches one of our supported formats. */
+	kind = drag_match_format(obj, fmt);
+	if (kind >= 0)
+		return S_OK;
+	return DV_E_FORMATETC;
 }
 
 /* IDataObject::GetCanonicalFormatEtc. */
@@ -1266,12 +1379,14 @@ dobj_enum_formats(
 	FORMATETC formats[DRAG_FORMAT_COUNT];
 	struct drag_enum_formats *enm;
 
+	/* Validates arguments and direction. */
 	if (out == NULL)
 		return E_POINTER;
 	*out = NULL;
 	if (dir != DATADIR_GET)
 		return E_NOTIMPL;
 
+	/* Creates an enumerator over the supported formats. */
 	drag_fill_formats(obj, formats);
 	enm = drag_enum_create(formats, 0U);
 	if (enm == NULL)
@@ -1329,6 +1444,7 @@ async_query(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Delegates QueryInterface to the enclosing data object. */
 	return dobj_query(&obj->iface, riid, out);
 }
 
@@ -1339,6 +1455,7 @@ async_add(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Delegates AddRef to the enclosing data object. */
 	return dobj_add(&obj->iface);
 }
 
@@ -1349,6 +1466,7 @@ async_release(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Delegates Release to the enclosing data object. */
 	return dobj_release(&obj->iface);
 }
 
@@ -1360,8 +1478,12 @@ async_set_mode(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Records whether the drop target supports asynchronous transfers. */
 	EnterCriticalSection(&obj->lock);
-	obj->async_mode = do_async ? TRUE : FALSE;
+	if (do_async)
+		obj->async_mode = TRUE;
+	else
+		obj->async_mode = FALSE;
 	LeaveCriticalSection(&obj->lock);
 	return S_OK;
 }
@@ -1374,9 +1496,9 @@ async_get_mode(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Returns the current async mode flag under the object lock. */
 	if (is_async == NULL)
 		return E_INVALIDARG;
-
 	EnterCriticalSection(&obj->lock);
 	*is_async = obj->async_mode;
 	LeaveCriticalSection(&obj->lock);
@@ -1391,6 +1513,7 @@ async_start_op(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Marks the operation active and increments the context's async counter. */
 	(void)reserved;
 	EnterCriticalSection(&obj->lock);
 	obj->in_operation = TRUE;
@@ -1400,6 +1523,8 @@ async_start_op(
 		obj->ctx->active_async++;
 		LeaveCriticalSection(&obj->ctx->lock);
 	}
+
+	/* Releases the object lock. */
 	LeaveCriticalSection(&obj->lock);
 	return S_OK;
 }
@@ -1412,9 +1537,9 @@ async_in_op(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Reads whether an async drag operation is currently running. */
 	if (in_op == NULL)
 		return E_INVALIDARG;
-
 	EnterCriticalSection(&obj->lock);
 	*in_op = obj->in_operation;
 	LeaveCriticalSection(&obj->lock);
@@ -1431,10 +1556,10 @@ async_end_op(
 {
 	struct drag_data_object *obj = drag_object_from_async(iface);
 
+	/* Clears the operation flag and decrements the context's async counter. */
 	(void)result;
 	(void)reserved;
 	(void)effects;
-
 	EnterCriticalSection(&obj->lock);
 	obj->in_operation = FALSE;
 	if (obj->counted_active && obj->ctx != NULL) {
@@ -1444,6 +1569,8 @@ async_end_op(
 			obj->ctx->active_async--;
 		LeaveCriticalSection(&obj->ctx->lock);
 	}
+
+	/* Releases the object lock. */
 	LeaveCriticalSection(&obj->lock);
 	return S_OK;
 }
@@ -1456,10 +1583,10 @@ drag_stream_create(
 {
 	struct drag_stream *s;
 
+	/* Allocates the stream and retains the owning data object and context. */
 	s = calloc(1U, sizeof(*s));
 	if (s == NULL)
 		return NULL;
-
 	s->iface.lpVtbl = &drag_stream_vtbl;
 	s->references = 1;
 	s->owner = owner;
@@ -1478,16 +1605,18 @@ drag_stream_fill_buffer(
 	uint64_t offset)
 {
 	struct sftp_worker *worker;
+	unsigned char *nbuf;
 	uint64_t remaining;
 	size_t target;
 	size_t filled;
+	size_t chunk;
 	size_t got;
 	int err;
 
+	/* Opens the remote stream lazily on the first read. */
 	worker = drag_ctx_acquire_worker(s->ctx);
 	if (worker == NULL)
 		return E_FAIL;
-
 	if (!s->opened) {
 		err = sftp_worker_stream_open(worker, s->remote_path, &s->stream_id);
 		if (err != 0)
@@ -1495,17 +1624,21 @@ drag_stream_fill_buffer(
 		s->opened = 1;
 	}
 
+	/* Computes how many bytes to read ahead from offset. */
 	remaining = s->expected_size - offset;
-	target = remaining > (uint64_t)DRAG_STREAM_READAHEAD ? DRAG_STREAM_READAHEAD : (size_t)remaining;
+	if (remaining > (uint64_t)DRAG_STREAM_READAHEAD)
+		target = DRAG_STREAM_READAHEAD;
+	else
+		target = (size_t)remaining;
 	if (target == 0U) {
 		s->buf_offset = offset;
 		s->buf_len = 0U;
 		return S_OK;
 	}
 
+	/* Grows the readahead buffer if needed. */
 	if (s->buf_cap < target) {
-		unsigned char *nbuf = malloc(target);
-
+		nbuf = malloc(target);
 		if (nbuf == NULL)
 			return E_OUTOFMEMORY;
 		free(s->buf);
@@ -1513,10 +1646,10 @@ drag_stream_fill_buffer(
 		s->buf_cap = target;
 	}
 
+	/* Fills the readahead buffer in SFTP_CLIENT_CHUNK-sized pieces. */
 	filled = 0U;
 	while (filled < target) {
-		size_t chunk = target - filled;
-
+		chunk = target - filled;
 		if (chunk > SFTP_CLIENT_CHUNK)
 			chunk = SFTP_CLIENT_CHUNK;
 		worker = drag_ctx_acquire_worker(s->ctx);
@@ -1530,6 +1663,7 @@ drag_stream_fill_buffer(
 		filled += got;
 	}
 
+	/* Updates buffer window metadata. */
 	s->buf_offset = offset;
 	s->buf_len = filled;
 	return S_OK;
@@ -1542,15 +1676,23 @@ stream_query(
 	REFIID riid,
 	void **out)
 {
+	int eq_unk;
+	int eq_seq;
+	int eq_stm;
+
+	/* Exposes IUnknown, ISequentialStream, and IStream. */
 	if (out == NULL)
 		return E_POINTER;
-
-	if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ISequentialStream) ||
-	    IsEqualIID(riid, &IID_IStream)) {
+	eq_unk = IsEqualIID(riid, &IID_IUnknown);
+	eq_seq = IsEqualIID(riid, &IID_ISequentialStream);
+	eq_stm = IsEqualIID(riid, &IID_IStream);
+	if (eq_unk || eq_seq || eq_stm) {
 		*out = iface;
 		stream_add(iface);
 		return S_OK;
 	}
+
+	/* Unsupported interface. */
 	*out = NULL;
 	return E_NOINTERFACE;
 }
@@ -1562,6 +1704,7 @@ stream_add(
 {
 	struct drag_stream *s = (struct drag_stream *)iface;
 
+	/* Increments the COM reference count atomically. */
 	return (ULONG)InterlockedIncrement(&s->references);
 }
 
@@ -1571,21 +1714,26 @@ stream_release(
 	IStream *iface)
 {
 	struct drag_stream *s = (struct drag_stream *)iface;
+	struct sftp_worker *worker;
 	LONG count;
 
+	/* Closes the remote stream and frees resources when the last reference drops. */
 	count = InterlockedDecrement(&s->references);
 	if (count == 0) {
 		if (s->opened) {
-			struct sftp_worker *worker = drag_ctx_acquire_worker(s->ctx);
-
+			worker = drag_ctx_acquire_worker(s->ctx);
 			if (worker != NULL)
 				sftp_worker_stream_close(worker, s->stream_id);
 		}
+
+		/* Releases buffers and parent references. */
 		free(s->buf);
 		dobj_release(&s->owner->iface);
 		drag_ctx_release(s->ctx);
 		free(s);
 	}
+
+	/* Returns the updated reference count. */
 	return (ULONG)count;
 }
 
@@ -1602,7 +1750,11 @@ stream_read(
 	ULONG total_read;
 	uint64_t avail;
 	ULONG want;
+	size_t in_buf;
+	size_t take;
+	HRESULT hr;
 
+	/* Validates arguments and handles zero-byte or EOF reads. */
 	if (pcb_read != NULL)
 		*pcb_read = 0U;
 	if (pv == NULL && cb > 0U)
@@ -1612,24 +1764,26 @@ stream_read(
 	if (s->pos >= s->expected_size)
 		return S_FALSE;
 
+	/* Clamps the requested byte count to remaining file length. */
 	avail = s->expected_size - s->pos;
-	want = (uint64_t)cb > avail ? (ULONG)avail : cb;
+	if ((uint64_t)cb > avail)
+		want = (ULONG)avail;
+	else
+		want = cb;
 	total_read = 0U;
 
+	/* Copies from the readahead buffer, refilling it whenever pos leaves the window. */
 	while (total_read < want) {
-		size_t in_buf;
-		size_t take;
-		HRESULT hr;
-
 		if (s->buf == NULL || s->pos < s->buf_offset || s->pos >= s->buf_offset + s->buf_len) {
 			hr = drag_stream_fill_buffer(s, s->pos);
-			if (FAILED(hr)) {
+			if (hr < 0) {
 				if (pcb_read != NULL)
 					*pcb_read = total_read;
 				return hr;
 			}
 		}
 
+		/* Copies the available slice from the current buffer window. */
 		in_buf = (size_t)(s->pos - s->buf_offset);
 		take = s->buf_len - in_buf;
 		if (take > (size_t)(want - total_read))
@@ -1639,9 +1793,12 @@ stream_read(
 		total_read += (ULONG)take;
 	}
 
+	/* Reports bytes read and returns S_FALSE if truncated at EOF. */
 	if (pcb_read != NULL)
 		*pcb_read = total_read;
-	return total_read < cb ? S_FALSE : S_OK;
+	if (total_read < cb)
+		return S_FALSE;
+	return S_OK;
 }
 
 /* IStream::Write (read-only). */
@@ -1671,6 +1828,7 @@ stream_seek(
 	struct drag_stream *s = (struct drag_stream *)iface;
 	int64_t target;
 
+	/* Computes the target offset from the requested origin. */
 	switch (origin) {
 	case STREAM_SEEK_SET:
 		target = move.QuadPart;
@@ -1685,12 +1843,15 @@ stream_seek(
 		return STG_E_INVALIDFUNCTION;
 	}
 
+	/* Allows seeking to 0 or querying the current position. */
 	if (target == 0 || (uint64_t)target == s->pos) {
 		s->pos = (uint64_t)target;
 		if (new_pos != NULL)
 			new_pos->QuadPart = s->pos;
 		return S_OK;
 	}
+
+	/* Arbitrary random seeks are not supported. */
 	return STG_E_INVALIDFUNCTION;
 }
 
@@ -1781,10 +1942,10 @@ stream_stat(
 {
 	struct drag_stream *s = (struct drag_stream *)iface;
 
+	/* Populates stream type and expected byte size. */
 	(void)flag;
 	if (statstg == NULL)
 		return STG_E_INVALIDPOINTER;
-
 	memset(statstg, 0, sizeof(*statstg));
 	statstg->type = STGTY_STREAM;
 	statstg->cbSize.QuadPart = s->expected_size;
@@ -1811,6 +1972,7 @@ drag_enum_create(
 {
 	struct drag_enum_formats *enm;
 
+	/* Allocates and initializes the format enumerator. */
 	enm = calloc(1U, sizeof(*enm));
 	if (enm == NULL)
 		return NULL;
@@ -1828,13 +1990,21 @@ enum_query(
 	REFIID riid,
 	void **out)
 {
+	int eq_unk;
+	int eq_enum;
+
+	/* Exposes IUnknown and IEnumFORMATETC. */
 	if (out == NULL)
 		return E_POINTER;
-	if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IEnumFORMATETC)) {
+	eq_unk = IsEqualIID(riid, &IID_IUnknown);
+	eq_enum = IsEqualIID(riid, &IID_IEnumFORMATETC);
+	if (eq_unk || eq_enum) {
 		*out = iface;
 		enum_add(iface);
 		return S_OK;
 	}
+
+	/* Unsupported interface. */
 	*out = NULL;
 	return E_NOINTERFACE;
 }
@@ -1846,6 +2016,7 @@ enum_add(
 {
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 
+	/* Increments the COM reference count atomically. */
 	return (ULONG)InterlockedIncrement(&enm->references);
 }
 
@@ -1857,6 +2028,7 @@ enum_release(
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 	LONG count;
 
+	/* Frees the enumerator once its reference count reaches zero. */
 	count = InterlockedDecrement(&enm->references);
 	if (count == 0)
 		free(enm);
@@ -1874,20 +2046,26 @@ enum_next(
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 	ULONG copied;
 
+	/* Validates outputs before copying formats. */
 	if (elts == NULL)
 		return E_INVALIDARG;
 	if (celt > 1U && fetched == NULL)
 		return E_INVALIDARG;
 
+	/* Copies up to celt remaining FORMATETC entries. */
 	copied = 0U;
 	while (copied < celt && enm->index < DRAG_FORMAT_COUNT) {
 		elts[copied] = enm->formats[enm->index];
 		enm->index++;
 		copied++;
 	}
+
+	/* Reports copied count and whether all requested items were returned. */
 	if (fetched != NULL)
 		*fetched = copied;
-	return copied == celt ? S_OK : S_FALSE;
+	if (copied == celt)
+		return S_OK;
+	return S_FALSE;
 }
 
 /* IEnumFORMATETC::Skip. */
@@ -1899,10 +2077,13 @@ enum_skip(
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 	ULONG avail = DRAG_FORMAT_COUNT - enm->index;
 
+	/* Advances up to the end of the format array. */
 	if (celt > avail) {
 		enm->index = DRAG_FORMAT_COUNT;
 		return S_FALSE;
 	}
+
+	/* Advances by celt entries. */
 	enm->index += celt;
 	return S_OK;
 }
@@ -1914,6 +2095,7 @@ enum_reset(
 {
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 
+	/* Resets the enumeration cursor to the start. */
 	enm->index = 0U;
 	return S_OK;
 }
@@ -1927,6 +2109,7 @@ enum_clone(
 	struct drag_enum_formats *enm = (struct drag_enum_formats *)iface;
 	struct drag_enum_formats *copy;
 
+	/* Creates an independent enumerator at the same position. */
 	if (out == NULL)
 		return E_POINTER;
 	copy = drag_enum_create(enm->formats, enm->index);
@@ -1934,6 +2117,8 @@ enum_clone(
 		*out = NULL;
 		return E_OUTOFMEMORY;
 	}
+
+	/* Returns the cloned interface. */
 	*out = &copy->iface;
 	return S_OK;
 }
@@ -1945,13 +2130,21 @@ dsrc_query(
 	REFIID riid,
 	void **out)
 {
+	int eq_unk;
+	int eq_dsrc;
+
+	/* Exposes IUnknown and IDropSource. */
 	if (out == NULL)
 		return E_POINTER;
-	if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropSource)) {
+	eq_unk = IsEqualIID(riid, &IID_IUnknown);
+	eq_dsrc = IsEqualIID(riid, &IID_IDropSource);
+	if (eq_unk || eq_dsrc) {
 		*out = iface;
 		dsrc_add(iface);
 		return S_OK;
 	}
+
+	/* Unsupported interface. */
 	*out = NULL;
 	return E_NOINTERFACE;
 }
@@ -1963,6 +2156,7 @@ dsrc_add(
 {
 	struct drag_drop_source *src = (struct drag_drop_source *)iface;
 
+	/* Increments the COM reference count atomically. */
 	return (ULONG)InterlockedIncrement(&src->references);
 }
 
@@ -1974,6 +2168,7 @@ dsrc_release(
 	struct drag_drop_source *src = (struct drag_drop_source *)iface;
 	LONG count;
 
+	/* Frees the drop source when its reference count reaches zero. */
 	count = InterlockedDecrement(&src->references);
 	if (count == 0)
 		free(src);

@@ -95,6 +95,7 @@ kl_window_accept_drops(
 {
 	struct drop_target *target;
 	HRESULT result;
+	int failed;
 
 	/* A window, and only the types known. */
 	if (window == NULL || (types & ~(KL_DROP_TEXT | KL_DROP_URIS | KL_DROP_IMAGE)) != 0U)
@@ -113,6 +114,8 @@ kl_window_accept_drops(
 			IDropTarget_Release(&target->iface);
 			window->drop_target = NULL;
 		}
+
+		/* Succeeded: drops are now disabled. */
 		return 0;
 	}
 
@@ -123,7 +126,8 @@ kl_window_accept_drops(
 	/* OLE on the application's thread, once. */
 	if (!window->app->ole) {
 		result = OleInitialize(NULL);
-		if (FAILED(result))
+		failed = FAILED(result);
+		if (failed)
 			return ENOTSUP;
 		window->app->ole = 1;
 	}
@@ -138,10 +142,13 @@ kl_window_accept_drops(
 	target->references = 1;
 	target->window = window;
 	result = RegisterDragDrop(window->content, &target->iface);
-	if (FAILED(result)) {
+	failed = FAILED(result);
+	if (failed) {
 		IDropTarget_Release(&target->iface);
 		return ENOTSUP;
 	}
+
+	/* Succeeded: records the registered drop target. */
 	window->drop_target = target;
 	return 0;
 }
@@ -319,18 +326,34 @@ drop_offered_types(
 {
 	unsigned offered;
 	CLIPFORMAT png;
+	int has_format;
 
-	/* Checks each supported format that the window accepts. */
+	/* Checks whether CF_HDROP (file URIs) is offered. */
 	offered = 0U;
-	if ((window->drop_types & KL_DROP_URIS) != 0U && drop_has_format(data_object, CF_HDROP))
-		offered |= KL_DROP_URIS;
+	if ((window->drop_types & KL_DROP_URIS) != 0U) {
+		has_format = drop_has_format(data_object, CF_HDROP);
+		if (has_format)
+			offered |= KL_DROP_URIS;
+	}
+
+	/* Checks whether PNG image data is offered. */
 	if ((window->drop_types & KL_DROP_IMAGE) != 0U) {
 		png = drop_png_format();
-		if (png != 0U && drop_has_format(data_object, png))
-			offered |= KL_DROP_IMAGE;
+		if (png != 0U) {
+			has_format = drop_has_format(data_object, png);
+			if (has_format)
+				offered |= KL_DROP_IMAGE;
+		}
 	}
-	if ((window->drop_types & KL_DROP_TEXT) != 0U && drop_has_format(data_object, CF_UNICODETEXT))
-		offered |= KL_DROP_TEXT;
+
+	/* Checks whether CF_UNICODETEXT is offered. */
+	if ((window->drop_types & KL_DROP_TEXT) != 0U) {
+		has_format = drop_has_format(data_object, CF_UNICODETEXT);
+		if (has_format)
+			offered |= KL_DROP_TEXT;
+	}
+
+	/* Returns the offered drop types bitmask. */
 	return offered;
 }
 
@@ -445,6 +468,8 @@ drop_read_object(
 	FORMATETC etc;
 	STGMEDIUM medium;
 	HRESULT result;
+	int failed;
+	int succeeded;
 
 	/* Prepares the format request for the chosen type. */
 	drop_clear_data(window);
@@ -453,13 +478,13 @@ drop_read_object(
 	etc.dwAspect = DVASPECT_CONTENT;
 	etc.lindex = -1;
 	etc.tymed = TYMED_HGLOBAL;
-	if (type == KL_DROP_URIS)
+	if (type == KL_DROP_URIS) {
 		etc.cfFormat = CF_HDROP;
-	else if (type == KL_DROP_IMAGE)
+	} else if (type == KL_DROP_IMAGE) {
 		etc.cfFormat = drop_png_format();
-	else if (type == KL_DROP_TEXT)
+	} else if (type == KL_DROP_TEXT) {
 		etc.cfFormat = CF_UNICODETEXT;
-	else {
+	} else {
 		window->drop_error = ENOENT;
 		return;
 	}
@@ -467,8 +492,10 @@ drop_read_object(
 	/* Requests the storage medium from the source. */
 	memset(&medium, 0, sizeof(medium));
 	result = IDataObject_GetData(data_object, &etc, &medium);
-	if (FAILED(result) || medium.tymed != TYMED_HGLOBAL || medium.hGlobal == NULL) {
-		if (SUCCEEDED(result))
+	failed = FAILED(result);
+	if (failed || medium.tymed != TYMED_HGLOBAL || medium.hGlobal == NULL) {
+		succeeded = SUCCEEDED(result);
+		if (succeeded)
 			ReleaseStgMedium(&medium);
 		window->drop_error = ENOENT;
 		return;
@@ -494,6 +521,7 @@ drop_read_hdrop(
 	UINT count;
 	UINT index;
 	UINT chars;
+	UINT copied;
 	WCHAR *wide;
 	char *utf8;
 	char *uris;
@@ -518,10 +546,15 @@ drop_read_hdrop(
 			error = ENOMEM;
 			break;
 		}
-		if (DragQueryFileW(hdrop, index, wide, chars + 1U) == 0U) {
+
+		/* Queries the wide path string for this dropped file. */
+		copied = DragQueryFileW(hdrop, index, wide, chars + 1U);
+		if (copied == 0U) {
 			free(wide);
 			continue;
 		}
+
+		/* Allocates a UTF-8 buffer for the converted path. */
 		utf8_cap = (size_t)chars * 4U + 1U;
 		utf8 = malloc(utf8_cap);
 		if (utf8 == NULL) {
@@ -529,12 +562,16 @@ drop_read_hdrop(
 			error = ENOMEM;
 			break;
 		}
+
+		/* Converts the wide path to UTF-8 and appends it as a URI. */
 		error = keiui_win32_utf8_from_utf16((const uint16_t *)wide, (size_t)chars, utf8, utf8_cap, NULL);
 		free(wide);
 		if (error != 0) {
 			free(utf8);
 			break;
 		}
+
+		/* Appends the encoded file:// URI line to the list. */
 		error = drop_append_uri(&uris, &uri_len, &uri_cap, utf8);
 		free(utf8);
 		if (error != 0)
@@ -547,6 +584,8 @@ drop_read_hdrop(
 		window->drop_error = error;
 		return;
 	}
+
+	/* Publishes the completed URI list buffer. */
 	window->drop_data = uris;
 	window->drop_length = uri_len;
 }
@@ -567,6 +606,8 @@ drop_read_png(
 		window->drop_error = E2BIG;
 		return;
 	}
+
+	/* Locks the global memory handle to read the PNG bytes. */
 	locked = GlobalLock(memory);
 	if (locked == NULL) {
 		window->drop_error = ENOENT;
@@ -580,6 +621,8 @@ drop_read_png(
 		window->drop_error = ENOMEM;
 		return;
 	}
+
+	/* Transfers the PNG bytes and unlocks the global handle. */
 	if (raw_size != 0U)
 		memcpy(copy, locked, (size_t)raw_size);
 	copy[raw_size] = '\0';
@@ -635,17 +678,23 @@ drop_read_text(
 		window->drop_error = E2BIG;
 		return;
 	}
+
+	/* Checks for conversion errors. */
 	if (error != 0) {
 		free(utf8);
 		window->drop_error = error;
 		return;
 	}
+
+	/* Measures the UTF-8 byte length and enforces DROP_MAX_TEXT. */
 	actual = strlen(utf8);
 	if (actual > DROP_MAX_TEXT) {
 		free(utf8);
 		window->drop_error = E2BIG;
 		return;
 	}
+
+	/* Publishes the converted UTF-8 text. */
 	window->drop_data = utf8;
 	window->drop_length = actual;
 }
@@ -663,6 +712,7 @@ drop_append_uri(
 	size_t index;
 	unsigned char byte;
 	char encoded[3];
+	int unreserved;
 	int error;
 
 	/* UNC paths (\\server\share) become file://server/share; drive paths become file:///C:/... */
@@ -671,6 +721,8 @@ drop_append_uri(
 	} else {
 		prefix = "file:///";
 	}
+
+	/* Prepends the file:// URI scheme prefix. */
 	error = drop_append_bytes(buffer, length, capacity, prefix, strlen(prefix));
 	if (error != 0)
 		return error;
@@ -680,7 +732,8 @@ drop_append_uri(
 		byte = (unsigned char)utf8[index];
 		if (byte == '\\')
 			byte = '/';
-		if (drop_uri_unreserved(byte) || byte == '/' || byte == ':') {
+		unreserved = drop_uri_unreserved(byte);
+		if (unreserved || byte == '/' || byte == ':') {
 			encoded[0] = (char)byte;
 			error = drop_append_bytes(buffer, length, capacity, encoded, 1U);
 		} else {
@@ -689,12 +742,19 @@ drop_append_uri(
 			encoded[2] = hex[byte & 0x0FU];
 			error = drop_append_bytes(buffer, length, capacity, encoded, 3U);
 		}
+
+		/* Stops if appending the encoded byte failed. */
 		if (error != 0)
 			return error;
 	}
 
 	/* Ends the text/uri-list line with CRLF. */
-	return drop_append_bytes(buffer, length, capacity, "\r\n", 2U);
+	error = drop_append_bytes(buffer, length, capacity, "\r\n", 2U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the URI line is appended. */
+	return 0;
 }
 
 /* Appends bytes to a growing buffer, enforcing DROP_MAX_URIS. */
@@ -715,7 +775,10 @@ drop_append_bytes(
 		return E2BIG;
 	needed = *length + count + 1U;
 	if (needed > *capacity) {
-		next = *capacity == 0U ? DROP_URI_INITIAL : *capacity;
+		if (*capacity == 0U)
+			next = DROP_URI_INITIAL;
+		else
+			next = *capacity;
 		while (next < needed)
 			next *= 2U;
 		grown = realloc(*buffer, next);
@@ -756,15 +819,24 @@ target_query(
 	REFIID id,
 	void **out)
 {
+	int is_unknown;
+	int is_target;
+
 	/* Nothing yet. */
 	if (out == NULL)
 		return E_POINTER;
 	*out = NULL;
-	if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_IDropTarget)) {
+
+	/* Accepts IUnknown and IDropTarget interfaces. */
+	is_unknown = IsEqualIID(id, &IID_IUnknown);
+	is_target = IsEqualIID(id, &IID_IDropTarget);
+	if (is_unknown || is_target) {
 		*out = iface;
 		IDropTarget_AddRef(iface);
 		return S_OK;
 	}
+
+	/* Unsupported interface. */
 	return E_NOINTERFACE;
 }
 
@@ -810,9 +882,8 @@ target_enter(
 	struct kl_window_event *input;
 	unsigned offered;
 
-	(void)key_state;
-
 	/* Refuses if the window is gone or offers nothing accepted. */
+	(void)key_state;
 	target = (struct drop_target *)iface;
 	window = target->window;
 	if (effect == NULL)
@@ -821,6 +892,8 @@ target_enter(
 		*effect = DROPEFFECT_NONE;
 		return S_OK;
 	}
+
+	/* Determines which accepted drop types the dragged object provides. */
 	offered = drop_offered_types(window, data_object);
 	if (offered == 0U) {
 		window->drop_offered = 0U;
@@ -862,9 +935,8 @@ target_over(
 	struct kl_window *window;
 	struct kl_window_event *input;
 
-	(void)key_state;
-
 	/* Ignores motion when no accepted drag is over the window. */
+	(void)key_state;
 	target = (struct drop_target *)iface;
 	window = target->window;
 	if (effect == NULL)
@@ -911,6 +983,8 @@ target_leave(
 		input->x = window->drop_x;
 		input->y = window->drop_y;
 	}
+
+	/* Succeeded: leave notification queued. */
 	return S_OK;
 }
 
@@ -929,9 +1003,8 @@ target_drop(
 	unsigned type;
 	DWORD chosen;
 
-	(void)key_state;
-
 	/* Ignores drop when no accepted drag was over the window. */
+	(void)key_state;
 	target = (struct drop_target *)iface;
 	window = target->window;
 	if (effect == NULL)

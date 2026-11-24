@@ -54,16 +54,18 @@ sftp_view_handle_input(
 	struct sftp_view *view,
 	const struct terminal_picture_event *event)
 {
+	struct kl_window_event wev;
 	int ux;
 	int uy;
 
+	/* Validates arguments and converts coordinates to logical units. */
 	if (view == NULL || event == NULL)
 		return;
-
 	ux = input_to_logical(view, event->x);
 	uy = input_to_logical(view, event->y);
 	view->modifiers = event->modifiers;
 
+	/* Forwards the event to the immediate-mode UI layer first. */
 	if (view->ui != NULL) {
 		switch (event->kind) {
 		case TERMINAL_PICTURE_MOTION:
@@ -84,20 +86,17 @@ sftp_view_handle_input(
 			(void)kl_ui_key(view->ui, event->code, event->pressed, event->modifiers);
 			break;
 		case TERMINAL_PICTURE_TEXT:
-		{
-			struct kl_window_event wev;
-
 			memset(&wev, 0, sizeof(wev));
 			wev.kind = KL_WINDOW_TEXT_COMMIT;
 			(void)snprintf(wev.text, sizeof(wev.text), "%s", event->text);
 			(void)kl_ui_text(view->ui, &wev);
 			break;
-		}
 		default:
 			break;
 		}
 	}
 
+	/* Dispatches view-level input handling. */
 	switch (event->kind) {
 	case TERMINAL_PICTURE_MOTION:
 		view->pointer_x = ux;
@@ -111,6 +110,8 @@ sftp_view_handle_input(
 			view->drop_target_path[0] = '\0';
 			sftp_view_request_external_drag(view);
 		}
+
+		/* Ends leave handling. */
 		break;
 	case TERMINAL_PICTURE_BUTTON:
 		view->pointer_x = ux;
@@ -123,6 +124,8 @@ sftp_view_handle_input(
 		} else if (event->code == INPUT_BTN_RIGHT && event->pressed) {
 			input_handle_right_down(view, ux, uy);
 		}
+
+		/* Ends button handling. */
 		break;
 	case TERMINAL_PICTURE_KEY:
 		if (event->pressed)
@@ -134,6 +137,8 @@ sftp_view_handle_input(
 	default:
 		break;
 	}
+
+	/* Marks the view dirty for redraw. */
 	view->dirty = 1;
 }
 
@@ -152,14 +157,16 @@ sftp_view_handle_drop(
 	char *data;
 	size_t length;
 	unsigned type;
+	int hit;
 	int error;
 
+	/* Validates arguments and converts coordinates to logical units. */
 	if (view == NULL || event == NULL)
 		return 0U;
-
 	ux = input_to_logical(view, event->x);
 	uy = input_to_logical(view, event->y);
 
+	/* Handles drag enter, motion, leave, and drop events. */
 	switch (event->kind) {
 	case TERMINAL_DROP_ENTER:
 	case TERMINAL_DROP_MOTION:
@@ -169,8 +176,11 @@ sftp_view_handle_drop(
 			view->dirty = 1;
 			return 0U;
 		}
+
+		/* Highlights the hovered folder or falls back to the current directory. */
 		view->ext_drop_active = 1;
-		if (!sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target)))
+		hit = sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target));
+		if (!hit)
 			(void)snprintf(target, sizeof(target), "%s", view->current_path);
 		(void)snprintf(view->drop_target_path, sizeof(view->drop_target_path), "%s", target);
 		view->dirty = 1;
@@ -184,7 +194,8 @@ sftp_view_handle_drop(
 
 	case TERMINAL_DROP_DROP:
 		view->ext_drop_active = 0;
-		if (!sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target)))
+		hit = sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target));
+		if (!hit)
 			(void)snprintf(target, sizeof(target), "%s", view->current_path);
 		view->drop_target_path[0] = '\0';
 		if (window == NULL || window->kui == NULL || (event->types & KL_DROP_URIS) == 0U) {
@@ -192,6 +203,8 @@ sftp_view_handle_drop(
 				kl_window_finish_drop(window->kui, 0U);
 			return 0U;
 		}
+
+		/* Receives the dropped URI list from the window. */
 		data = NULL;
 		length = 0U;
 		type = 0U;
@@ -201,11 +214,15 @@ sftp_view_handle_drop(
 			sftp_view_show_error(view, "Drop failed", "too many files; drop fewer at once");
 			return 0U;
 		}
+
+		/* Rejects invalid or non-URI drops. */
 		if (error != 0 || data == NULL || (type & KL_DROP_URIS) == 0U) {
 			free(data);
 			kl_window_finish_drop(window->kui, 0U);
 			return 0U;
 		}
+
+		/* Enqueues the dropped files for upload and finishes the drop. */
 		input_enqueue_uri_list(view, data, length, target);
 		free(data);
 		kl_window_finish_drop(window->kui, KL_DND_COPY);
@@ -230,29 +247,41 @@ sftp_view_hit_folder_at(
 	size_t path_cap)
 {
 	int idx;
-
 	int rh;
+	int in_rect;
+	int joined;
 
+	/* Validates arguments and resolves the row height. */
 	if (view == NULL || path_out == NULL || path_cap == 0U)
 		return 0;
 	rh = kl_theme_default()->row_height;
 	if (rh <= 0)
 		rh = SFTP_ROW_HEIGHT;
 
-	if (input_point_in_rect(&view->rect_tree, ux, uy)) {
+	/* Checks the left directory tree. */
+	in_rect = input_point_in_rect(&view->rect_tree, ux, uy);
+	if (in_rect) {
 		idx = (uy - view->rect_tree.y + (int)view->tree_list.scroll.y) / rh;
 		if (idx >= 0 && (size_t)idx < view->tree_flat_count) {
 			(void)snprintf(path_out, path_cap, "%s", view->tree_flat[idx]->path);
 			return 1;
 		}
 	}
-	if (input_point_in_rect(&view->rect_list, ux, uy)) {
+
+	/* Checks folder rows in the right file list. */
+	in_rect = input_point_in_rect(&view->rect_list, ux, uy);
+	if (in_rect) {
 		idx = (uy - view->rect_list.y + (int)view->file_list.scroll.y) / rh;
 		if (idx >= 0 && (size_t)idx < view->row_count &&
 		    (view->rows[idx].entry.is_dir || view->rows[idx].entry.link_is_dir)) {
-			return sftp_transfer_join_remote(path_out, path_cap, view->current_path, view->rows[idx].entry.name) == 0;
+			joined = sftp_transfer_join_remote(path_out, path_cap, view->current_path, view->rows[idx].entry.name);
+			if (joined == 0)
+				return 1;
+			return 0;
 		}
 	}
+
+	/* No folder under (ux, uy). */
 	return 0;
 }
 
@@ -264,7 +293,11 @@ input_to_logical(
 {
 	unsigned sc;
 
-	sc = view->scale != 0U ? view->scale : KL_SCALE_BASE;
+	/* Uses the active DPI scale or falls back to 100%. */
+	if (view->scale != 0U)
+		sc = view->scale;
+	else
+		sc = KL_SCALE_BASE;
 	return (int)(((int64_t)px * (int64_t)KL_SCALE_BASE) / (int64_t)sc);
 }
 
@@ -275,7 +308,9 @@ input_point_in_rect(
 	int x,
 	int y)
 {
-	return x >= r->x && x < r->x + r->width && y >= r->y && y < r->y + r->height;
+	if (x >= r->x && x < r->x + r->width && y >= r->y && y < r->y + r->height)
+		return 1;
+	return 0;
 }
 
 /* Handles keyboard shortcuts when no text field owns the key. */
@@ -286,43 +321,62 @@ input_handle_key(
 	unsigned mods)
 {
 	size_t i;
+	long next;
 
+	/* Closes the context menu on Escape and ignores shortcuts during modal input. */
 	if (view->ctx_open) {
 		if (key == KL_KEY_ESC)
 			view->ctx_open = 0;
 		return;
 	}
+
+	/* Ignores shortcuts while a modal dialog or inline editor is active. */
 	if (view->dialog != SFTP_DIALOG_NONE || view->renaming || view->editing_path)
 		return;
 
+	/* Dispatches navigation and editing shortcuts. */
 	if (key == INPUT_KEY_F5) {
 		sftp_view_refresh_all(view);
 		return;
 	}
+
+	/* Starts inline rename on F2. */
 	if (key == INPUT_KEY_F2) {
 		sftp_view_begin_rename(view);
 		return;
 	}
+
+	/* Starts delete confirmation on Delete. */
 	if (key == KL_KEY_DELETE) {
 		sftp_view_begin_delete(view);
 		return;
 	}
+
+	/* Navigates to parent directory on Backspace or Alt+Up. */
 	if (key == KL_KEY_BACKSPACE || (key == KL_KEY_UP && (mods & KL_MOD_ALT) != 0U)) {
 		sftp_view_navigate_up(view);
 		return;
 	}
+
+	/* Navigates back in history on Alt+Left. */
 	if (key == KL_KEY_LEFT && (mods & KL_MOD_ALT) != 0U) {
 		sftp_view_navigate_back(view);
 		return;
 	}
+
+	/* Navigates forward in history on Alt+Right. */
 	if (key == KL_KEY_RIGHT && (mods & KL_MOD_ALT) != 0U) {
 		sftp_view_navigate_forward(view);
 		return;
 	}
+
+	/* Selects all rows on Ctrl+A. */
 	if (key == INPUT_KEY_A && (mods & KL_MOD_CTRL) != 0U) {
 		sftp_view_select_all(view);
 		return;
 	}
+
+	/* Focuses the path editor on Ctrl+L. */
 	if (key == INPUT_KEY_L && (mods & KL_MOD_CTRL) != 0U) {
 		view->editing_path = 1;
 		memset(&view->path_field, 0, sizeof(view->path_field));
@@ -331,15 +385,20 @@ input_handle_key(
 			kl_ui_set_focus(view->ui, SFTP_UI_PATH_FIELD, 0U);
 		return;
 	}
+
+	/* Activates the focused row on Enter. */
 	if (key == KL_KEY_ENTER || key == KL_KEY_KPENTER) {
 		if (view->focus_row >= 0 && (size_t)view->focus_row < view->row_count)
 			input_activate_row(view, (size_t)view->focus_row);
 		return;
 	}
-	if (key == KL_KEY_UP && view->row_count > 0U) {
-		long next;
 
-		next = view->focus_row > 0 ? view->focus_row - 1 : 0;
+	/* Moves the focused selection up or down by one row. */
+	if (key == KL_KEY_UP && view->row_count > 0U) {
+		if (view->focus_row > 0)
+			next = view->focus_row - 1;
+		else
+			next = 0;
 		for (i = 0U; i < view->row_count; i++)
 			view->rows[i].selected = 0;
 		view->rows[next].selected = 1;
@@ -347,10 +406,13 @@ input_handle_key(
 		view->anchor_row = next;
 		return;
 	}
-	if (key == KL_KEY_DOWN && view->row_count > 0U) {
-		long next;
 
-		next = view->focus_row + 1 < (long)view->row_count ? view->focus_row + 1 : (long)view->row_count - 1;
+	/* Moves the focused selection down by one row. */
+	if (key == KL_KEY_DOWN && view->row_count > 0U) {
+		if (view->focus_row + 1 < (long)view->row_count)
+			next = view->focus_row + 1;
+		else
+			next = (long)view->row_count - 1;
 		for (i = 0U; i < view->row_count; i++)
 			view->rows[i].selected = 0;
 		view->rows[next].selected = 1;
@@ -370,23 +432,41 @@ input_handle_left_down(
 	static uint64_t last_click_us;
 	static long last_click_row = -1;
 	uint64_t now_us;
+	struct sftp_tree_node *node;
+	enum sftp_sort_column col;
+	size_t i;
 	int idx;
+	int in_rect;
+	int rel_x;
+	int perm_w;
+	int mtime_w;
+	int size_w;
+	int name_w;
+	int rh;
+	int chev_x;
 
+	/* Handles clicks on an open context menu or ignores clicks behind a dialog. */
 	if (view->ctx_open) {
-		if (input_point_in_rect(&view->rect_ctx, ux, uy) &&
-		    view->ctx_hover >= 0 && (size_t)view->ctx_hover < view->ctx_count &&
+		in_rect = input_point_in_rect(&view->rect_ctx, ux, uy);
+		if (in_rect && view->ctx_hover >= 0 &&
+		    (size_t)view->ctx_hover < view->ctx_count &&
 		    view->ctx_items[view->ctx_hover].enabled) {
 			sftp_view_execute_ctx(view, view->ctx_items[view->ctx_hover].id);
 		} else {
 			view->ctx_open = 0;
 		}
+
+		/* Consumes clicks while the context menu is open. */
 		return;
 	}
+
+	/* Ignores clicks while a modal dialog is open. */
 	if (view->dialog != SFTP_DIALOG_NONE)
 		return;
 
 	/* Breadcrumb click enters path editing mode. */
-	if (!view->editing_path && input_point_in_rect(&view->rect_breadcrumb, ux, uy)) {
+	in_rect = input_point_in_rect(&view->rect_breadcrumb, ux, uy);
+	if (!view->editing_path && in_rect) {
 		view->editing_path = 1;
 		memset(&view->path_field, 0, sizeof(view->path_field));
 		kl_field_set(&view->path_field, view->current_path);
@@ -394,11 +474,14 @@ input_handle_left_down(
 			kl_ui_set_focus(view->ui, SFTP_UI_PATH_FIELD, 0U);
 		return;
 	}
-	if (view->editing_path && !input_point_in_rect(&view->rect_breadcrumb, ux, uy))
+
+	/* Exits path editing mode on clicks outside the breadcrumb bar. */
+	if (view->editing_path && !in_rect)
 		view->editing_path = 0;
 
 	/* Splitter drag. */
-	if (input_point_in_rect(&view->rect_splitter, ux, uy)) {
+	in_rect = input_point_in_rect(&view->rect_splitter, ux, uy);
+	if (in_rect) {
 		view->dragging_splitter = 1;
 		view->split_drag_start_x = ux;
 		view->split_drag_start_w = view->split_width;
@@ -406,14 +489,8 @@ input_handle_left_down(
 	}
 
 	/* Column header click for sorting. */
-	if (input_point_in_rect(&view->rect_header, ux, uy)) {
-		int rel_x;
-		int perm_w;
-		int mtime_w;
-		int size_w;
-		int name_w;
-		enum sftp_sort_column col;
-
+	in_rect = input_point_in_rect(&view->rect_header, ux, uy);
+	if (in_rect) {
 		rel_x = ux - view->rect_header.x - 8;
 		perm_w = 96;
 		mtime_w = 136;
@@ -429,28 +506,26 @@ input_handle_left_down(
 			col = SFTP_SORT_MTIME;
 		else
 			return;
-		if (view->sort_column == col)
+		if (view->sort_column == col) {
 			view->sort_reverse = !view->sort_reverse;
-		else {
+		} else {
 			view->sort_column = col;
 			view->sort_reverse = 0;
 		}
+
+		/* Re-sorts rows according to the new column or order. */
 		sftp_view_sort_rows(view);
 		return;
 	}
 
 	/* Left tree click. */
-	if (input_point_in_rect(&view->rect_tree, ux, uy)) {
-		int rh;
-
+	in_rect = input_point_in_rect(&view->rect_tree, ux, uy);
+	if (in_rect) {
 		rh = kl_theme_default()->row_height;
 		if (rh <= 0)
 			rh = SFTP_TREE_ROW_HEIGHT;
 		idx = (uy - view->rect_tree.y + (int)view->tree_list.scroll.y) / rh;
 		if (idx >= 0 && (size_t)idx < view->tree_flat_count) {
-			struct sftp_tree_node *node;
-			int chev_x;
-
 			node = view->tree_flat[idx];
 			chev_x = view->rect_tree.x + 8 + node->depth * 14;
 			if (ux >= chev_x - 4 && ux <= chev_x + 14)
@@ -458,13 +533,14 @@ input_handle_left_down(
 			else
 				sftp_view_navigate(view, node->path, 1, 0);
 		}
+
+		/* Finishes tree click handling. */
 		return;
 	}
 
 	/* Right file list click. */
-	if (input_point_in_rect(&view->rect_list, ux, uy)) {
-		int rh;
-
+	in_rect = input_point_in_rect(&view->rect_list, ux, uy);
+	if (in_rect) {
 		rh = kl_theme_default()->row_height;
 		if (rh <= 0)
 			rh = SFTP_ROW_HEIGHT;
@@ -477,6 +553,8 @@ input_handle_left_down(
 				input_activate_row(view, (size_t)idx);
 				return;
 			}
+
+			/* Updates selection and arms drag detection. */
 			last_click_row = idx;
 			last_click_us = now_us;
 			if (!view->rows[idx].selected || (view->modifiers & (KL_MOD_CTRL | KL_MOD_SHIFT)) != 0U)
@@ -485,8 +563,6 @@ input_handle_left_down(
 			view->drag_start_x = ux;
 			view->drag_start_y = uy;
 		} else {
-			size_t i;
-
 			for (i = 0U; i < view->row_count; i++)
 				view->rows[i].selected = 0;
 			view->band_active = 1;
@@ -505,25 +581,34 @@ input_handle_left_up(
 	int ux,
 	int uy)
 {
+	char target[SSH_SFTP_PATH_MAX];
+	int hit;
+
+	/* Finishes splitter drag, rubber band, or internal drag-move. */
 	if (view->dragging_splitter) {
 		view->dragging_splitter = 0;
 		sftp_view_save_split(view);
 		return;
 	}
+
+	/* Ends rubber-band selection. */
 	if (view->band_active) {
 		view->band_active = 0;
 		return;
 	}
-	if (view->drag_active) {
-		char target[SSH_SFTP_PATH_MAX];
 
+	/* Completes internal drag-move onto the hovered folder. */
+	if (view->drag_active) {
 		view->drag_active = 0;
 		view->drag_pending = 0;
-		if (sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target)))
+		hit = sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target));
+		if (hit)
 			sftp_view_move_selected_to(view, target);
 		view->drop_target_path[0] = '\0';
 		return;
 	}
+
+	/* Clears pending drag state. */
 	view->drag_pending = 0;
 }
 
@@ -535,12 +620,14 @@ input_handle_right_down(
 	int uy)
 {
 	int idx;
+	int rh;
+	int in_rect;
 
+	/* Selects an unselected row under the cursor before opening the menu. */
 	if (view->dialog != SFTP_DIALOG_NONE)
 		return;
-	if (input_point_in_rect(&view->rect_list, ux, uy)) {
-		int rh;
-
+	in_rect = input_point_in_rect(&view->rect_list, ux, uy);
+	if (in_rect) {
 		rh = kl_theme_default()->row_height;
 		if (rh <= 0)
 			rh = SFTP_ROW_HEIGHT;
@@ -548,6 +635,8 @@ input_handle_right_down(
 		if (idx >= 0 && (size_t)idx < view->row_count && !view->rows[idx].selected)
 			input_select_row(view, (size_t)idx, 0U);
 	}
+
+	/* Opens the context menu at the click position. */
 	input_open_ctx_menu(view, ux, uy);
 }
 
@@ -558,9 +647,16 @@ input_handle_motion(
 	int ux,
 	int uy)
 {
-	if (view->dragging_splitter) {
-		int nw;
+	char target[SSH_SFTP_PATH_MAX];
+	int nw;
+	int hit;
+	int in_rect;
+	int idx;
+	int dx;
+	int dy;
 
+	/* Updates splitter width while dragging the divider. */
+	if (view->dragging_splitter) {
 		nw = view->split_drag_start_w + (ux - view->split_drag_start_x);
 		if (nw < SFTP_SPLIT_MIN)
 			nw = SFTP_SPLIT_MIN;
@@ -569,31 +665,42 @@ input_handle_motion(
 		view->split_width = nw;
 		return;
 	}
+
+	/* Updates rubber-band selection. */
 	if (view->band_active) {
 		view->band_x1 = ux;
 		view->band_y1 = uy;
 		input_update_band_selection(view);
 		return;
 	}
+
+	/* Starts an internal drag once the pointer moves past threshold. */
 	if (view->drag_pending && !view->drag_active) {
-		if (abs(ux - view->drag_start_x) > 5 || abs(uy - view->drag_start_y) > 5)
+		dx = abs(ux - view->drag_start_x);
+		dy = abs(uy - view->drag_start_y);
+		if (dx > 5 || dy > 5)
 			view->drag_active = 1;
 	}
-	if (view->drag_active) {
-		char target[SSH_SFTP_PATH_MAX];
 
-		if (sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target)))
+	/* Highlights the drop target folder during an internal drag. */
+	if (view->drag_active) {
+		hit = sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target));
+		if (hit)
 			(void)snprintf(view->drop_target_path, sizeof(view->drop_target_path), "%s", target);
 		else
 			view->drop_target_path[0] = '\0';
 		return;
 	}
-	if (view->ctx_open) {
-		if (input_point_in_rect(&view->rect_ctx, ux, uy)) {
-			int idx;
 
+	/* Tracks hovered item in the open context menu. */
+	if (view->ctx_open) {
+		in_rect = input_point_in_rect(&view->rect_ctx, ux, uy);
+		if (in_rect) {
 			idx = (uy - view->rect_ctx.y - 4) / 26;
-			view->ctx_hover = (idx >= 0 && (size_t)idx < view->ctx_count) ? idx : -1;
+			if (idx >= 0 && (size_t)idx < view->ctx_count)
+				view->ctx_hover = idx;
+			else
+				view->ctx_hover = -1;
 		} else {
 			view->ctx_hover = -1;
 		}
@@ -611,49 +718,51 @@ input_open_ctx_menu(
 	size_t i;
 	int ready;
 
+	/* Counts selected rows and checks worker readiness. */
 	sel = 0U;
 	for (i = 0U; i < view->row_count; i++) {
 		if (view->rows[i].selected)
 			sel++;
 	}
+
+	/* Checks worker readiness before building menu items. */
 	ready = view->worker_state == SFTP_WORKER_READY;
 
+	/* Populates context menu items. */
 	view->ctx_count = 0U;
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_DOWNLOAD;
 	view->ctx_items[view->ctx_count].label = "Download";
 	view->ctx_items[view->ctx_count].enabled = ready && sel > 0U;
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_NEW_FOLDER;
 	view->ctx_items[view->ctx_count].label = "New folder";
 	view->ctx_items[view->ctx_count].enabled = ready;
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_RENAME;
 	view->ctx_items[view->ctx_count].label = "Rename";
 	view->ctx_items[view->ctx_count].enabled = ready && sel == 1U;
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_DELETE;
 	view->ctx_items[view->ctx_count].label = "Delete";
 	view->ctx_items[view->ctx_count].enabled = ready && sel > 0U;
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_COPY_PATH;
 	view->ctx_items[view->ctx_count].label = "Copy path";
 	view->ctx_items[view->ctx_count].enabled = view->current_path[0] != '\0';
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_REFRESH;
 	view->ctx_items[view->ctx_count].label = "Refresh";
 	view->ctx_items[view->ctx_count].enabled = ready;
 	view->ctx_count++;
-
 	view->ctx_items[view->ctx_count].id = SFTP_CTX_TOGGLE_HIDDEN;
-	view->ctx_items[view->ctx_count].label = view->show_hidden ? "Hide dot-files" : "Show dot-files";
+	if (view->show_hidden)
+		view->ctx_items[view->ctx_count].label = "Hide dot-files";
+	else
+		view->ctx_items[view->ctx_count].label = "Show dot-files";
 	view->ctx_items[view->ctx_count].enabled = ready;
 	view->ctx_count++;
 
+	/* Positions and opens the popup menu. */
 	view->ctx_x = ux;
 	view->ctx_y = uy;
 	view->ctx_hover = -1;
@@ -668,12 +777,15 @@ input_activate_row(
 {
 	const struct sftp_list_row *r;
 	char next[SSH_SFTP_PATH_MAX];
+	int joined;
 
+	/* Navigates into directory rows on activation. */
 	if (row_idx >= view->row_count)
 		return;
 	r = &view->rows[row_idx];
 	if (r->entry.is_dir || r->entry.link_is_dir) {
-		if (sftp_transfer_join_remote(next, sizeof(next), view->current_path, r->entry.name) == 0)
+		joined = sftp_transfer_join_remote(next, sizeof(next), view->current_path, r->entry.name);
+		if (joined == 0)
 			sftp_view_navigate(view, next, 1, 0);
 	}
 }
@@ -686,28 +798,51 @@ input_select_row(
 	unsigned mods)
 {
 	size_t i;
+	size_t lo;
+	size_t hi;
 
+	/* Validates row index and handles Shift range selection. */
 	if (row_idx >= view->row_count)
 		return;
 	if ((mods & KL_MOD_SHIFT) != 0U && view->anchor_row >= 0 && (size_t)view->anchor_row < view->row_count) {
-		size_t lo;
-		size_t hi;
+		if ((size_t)view->anchor_row < row_idx) {
+			lo = (size_t)view->anchor_row;
+			hi = row_idx;
+		} else {
+			lo = row_idx;
+			hi = (size_t)view->anchor_row;
+		}
 
-		lo = (size_t)view->anchor_row < row_idx ? (size_t)view->anchor_row : row_idx;
-		hi = (size_t)view->anchor_row > row_idx ? (size_t)view->anchor_row : row_idx;
-		for (i = 0U; i < view->row_count; i++)
-			view->rows[i].selected = (i >= lo && i <= hi);
+		/* Selects all rows in the [lo, hi] range. */
+		for (i = 0U; i < view->row_count; i++) {
+			if (i >= lo && i <= hi)
+				view->rows[i].selected = 1;
+			else
+				view->rows[i].selected = 0;
+		}
+
+		/* Moves focus without changing the anchor. */
 		view->focus_row = (long)row_idx;
 		return;
 	}
+
+	/* Toggles a single row on Ctrl-click. */
 	if ((mods & KL_MOD_CTRL) != 0U) {
 		view->rows[row_idx].selected = !view->rows[row_idx].selected;
 		view->focus_row = (long)row_idx;
 		view->anchor_row = (long)row_idx;
 		return;
 	}
-	for (i = 0U; i < view->row_count; i++)
-		view->rows[i].selected = (i == row_idx);
+
+	/* Replaces selection with the clicked row. */
+	for (i = 0U; i < view->row_count; i++) {
+		if (i == row_idx)
+			view->rows[i].selected = 1;
+		else
+			view->rows[i].selected = 0;
+	}
+
+	/* Updates focus and anchor to the clicked row. */
 	view->focus_row = (long)row_idx;
 	view->anchor_row = (long)row_idx;
 }
@@ -720,18 +855,28 @@ input_update_band_selection(
 	int top;
 	int bottom;
 	int rh;
+	int ry;
 	size_t i;
 
+	/* Resolves row height and vertical band bounds. */
 	rh = kl_theme_default()->row_height;
 	if (rh <= 0)
 		rh = SFTP_ROW_HEIGHT;
-	top = view->band_y0 < view->band_y1 ? view->band_y0 : view->band_y1;
-	bottom = view->band_y0 > view->band_y1 ? view->band_y0 : view->band_y1;
-	for (i = 0U; i < view->row_count; i++) {
-		int ry;
+	if (view->band_y0 < view->band_y1) {
+		top = view->band_y0;
+		bottom = view->band_y1;
+	} else {
+		top = view->band_y1;
+		bottom = view->band_y0;
+	}
 
+	/* Selects every row intersecting the rubber-band range. */
+	for (i = 0U; i < view->row_count; i++) {
 		ry = view->rect_list.y + (int)i * rh - (int)view->file_list.scroll.y;
-		view->rows[i].selected = (ry + rh > top && ry < bottom);
+		if (ry + rh > top && ry < bottom)
+			view->rows[i].selected = 1;
+		else
+			view->rows[i].selected = 0;
 	}
 }
 
@@ -744,24 +889,29 @@ input_enqueue_uri_list(
 	const char *target_dir)
 {
 	size_t pos;
+	size_t end;
+	size_t line_len;
 	char local_path[MIKUTERM_PATH_MAX];
 	struct sftp_local_entry st;
+	int err;
 
+	/* Iterates over non-comment URI lines and enqueues valid local paths. */
 	pos = 0U;
 	while (pos < length) {
-		size_t end;
-		size_t line_len;
-
 		end = pos;
 		while (end < length && data[end] != '\n' && data[end] != '\r')
 			end++;
 		line_len = end - pos;
 		if (line_len > 0U && data[pos] != '#') {
-			if (input_uri_to_local_path(data + pos, line_len, local_path, sizeof(local_path)) == 0) {
-				if (sftp_local_stat(local_path, &st) == 0)
+			err = input_uri_to_local_path(data + pos, line_len, local_path, sizeof(local_path));
+			if (err == 0) {
+				err = sftp_local_stat(local_path, &st);
+				if (err == 0)
 					(void)sftp_worker_enqueue_upload(view->worker, local_path, target_dir, st.is_dir, NULL);
 			}
 		}
+
+		/* Advances past line endings to the next URI. */
 		pos = end;
 		while (pos < length && (data[pos] == '\n' || data[pos] == '\r'))
 			pos++;
@@ -780,35 +930,39 @@ input_uri_to_local_path(
 	size_t pos;
 	const char *p;
 	size_t rem;
+	unsigned char ch;
+	unsigned hi;
+	unsigned lo;
+	int ok;
+	int cmp;
 
-	if (len < 7U || strncmp(uri, "file://", 7U) != 0)
+	/* Verifies the file:// prefix and strips the host/leading slash. */
+	if (len < 7U)
+		return EINVAL;
+	cmp = strncmp(uri, "file://", 7U);
+	if (cmp != 0)
 		return EINVAL;
 	p = uri + 7U;
 	rem = len - 7U;
-	/* file:///C:/... -> skip leading '/' before drive letter. */
+
+	/* Handles drive-letter URIs and UNC paths. */
 	if (rem >= 3U && p[0] == '/' && p[2] == ':') {
 		p++;
 		rem--;
+		pos = 0U;
 	} else if (rem > 0U && p[0] != '/') {
-		/* UNC path file://server/share -> \\server\share */
 		if (out_cap < 3U)
 			return ENAMETOOLONG;
 		out[0] = '\\';
 		out[1] = '\\';
 		pos = 2U;
-		goto decode;
+	} else {
+		pos = 0U;
 	}
-	pos = 0U;
 
-decode:
+	/* Percent-decodes the remainder and converts '/' to '\\'. */
 	for (i = 0U; i < rem && pos + 1U < out_cap; i++) {
-		unsigned char ch;
-
 		if (p[i] == '%' && i + 2U < rem) {
-			unsigned hi;
-			unsigned lo;
-			int ok;
-
 			ok = 1;
 			if (p[i + 1U] >= '0' && p[i + 1U] <= '9')
 				hi = (unsigned)(p[i + 1U] - '0');
@@ -835,10 +989,14 @@ decode:
 		} else {
 			ch = (unsigned char)p[i];
 		}
+
+		/* Normalizes path separators for Windows. */
 		if (ch == '/')
 			ch = '\\';
 		out[pos++] = (char)ch;
 	}
+
+	/* Null-terminates the decoded path. */
 	out[pos] = '\0';
 	return 0;
 }

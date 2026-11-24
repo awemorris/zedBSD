@@ -2722,9 +2722,13 @@ engine_take_reply(
 		if (engine->kinds[channel->local_id] != ENGINE_KIND_SUBSYSTEM ||
 		    !engine->subsystem_reply[channel->local_id])
 			return EPROTO;
+
+		/* Clears the pending reply flag and ignores replies after close. */
 		engine->subsystem_reply[channel->local_id] = 0;
 		if (channel->close_sent)
 			return 0;
+
+		/* Publishes the subsystem request outcome to the caller. */
 		event = engine_event(engine, SSH_ENGINE_SUBSYSTEM_REPLY);
 		if (event != NULL) {
 			event->channel = channel->local_id;
@@ -2735,6 +2739,8 @@ engine_take_reply(
 				engine_append_number(event->reason, sizeof(event->reason), channel->local_id);
 			}
 		}
+
+		/* Closes the channel if the subsystem request was rejected. */
 		if (!success && !channel->close_sent) {
 			ssh_buf_reset(&engine->out);
 			ssh_channel_put_close(channel, &engine->out);
@@ -2742,6 +2748,8 @@ engine_take_reply(
 			if (error != 0)
 				return error;
 		}
+
+		/* Succeeded: the subsystem reply was processed. */
 		return 0;
 	}
 
@@ -3465,6 +3473,7 @@ engine_take_subsystem_open(
 	struct ssh_reader reader;
 	const uint8_t *description;
 	size_t description_size;
+	const char *words;
 	uint32_t number;
 	int error;
 
@@ -3483,6 +3492,8 @@ engine_take_subsystem_open(
 			event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
 			if (event != NULL)
 				event->channel = number;
+
+			/* A closed channel may have been the last one after the session. */
 			engine_finish(engine);
 			return 0;
 		}
@@ -3495,6 +3506,7 @@ engine_take_subsystem_open(
 		ssh_reader_get_string(&reader, &description, &description_size);
 
 		/* Tells the caller why, as OpenSSH's client words it. */
+		words = engine_open_words(reason);
 		event = engine_event(engine, SSH_ENGINE_SUBSYSTEM_REPLY);
 		if (event != NULL) {
 			event->channel = number;
@@ -3503,7 +3515,7 @@ engine_take_subsystem_open(
 			engine_copy_text(event->reason, sizeof(event->reason), "channel ");
 			engine_append_number(event->reason, sizeof(event->reason), number);
 			engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)": open failed: ", 15);
-			engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)engine_open_words(reason), strlen(engine_open_words(reason)));
+			engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)words, strlen(words));
 			if (description_size > 0) {
 				engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)": ", 2);
 				engine_append_safe(event->reason, sizeof(event->reason), description, description_size);
@@ -3523,6 +3535,8 @@ engine_take_subsystem_open(
 		error = engine_send_out(engine);
 		if (error != 0)
 			return error;
+
+		/* Succeeded: the close is on its way. */
 		return 0;
 	}
 
@@ -3532,6 +3546,8 @@ engine_take_subsystem_open(
 	error = engine_send_out(engine);
 	if (error != 0)
 		return error;
+
+	/* Marks the channel as awaiting the subsystem request reply. */
 	engine->subsystem_reply[number] = 1;
 
 	/* Succeeded: the subsystem request is on its way. */

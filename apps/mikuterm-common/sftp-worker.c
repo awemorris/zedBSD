@@ -97,6 +97,13 @@ struct del_frame {
 	size_t child_index;
 };
 
+/*
+ * Per-tab SFTP worker state.
+ *
+ * Owns the background thread, the non-blocking sftp_client state machine,
+ * the bounded directory listing cache, the urgent UI request queue, and
+ * the pipelined transfer queue.
+ */
 struct sftp_worker {
 	struct sftp_link *link;
 	struct sftp_client *client;
@@ -154,6 +161,7 @@ static void worker_pump_io(struct sftp_worker *w);
 static void worker_handle_reply(struct sftp_worker *w, const struct sftp_client_reply *reply);
 static void worker_start_urgent(struct sftp_worker *w);
 static void worker_urgent_reply(struct sftp_worker *w, const struct sftp_client_reply *reply);
+static void worker_advance_delete(struct sftp_worker *w, struct urgent_req *req);
 static void worker_finish_urgent(struct sftp_worker *w, int error, const char *err_text);
 static int worker_submit_urgent(struct sftp_worker *w, struct urgent_req *req);
 static struct cache_slot *cache_find(struct sftp_worker *w, const char *path);
@@ -186,22 +194,28 @@ sftp_worker_start(
 	struct kl_thread_options opts;
 	int error;
 
+	/* Allocates the worker state. */
 	*worker_out = NULL;
 	w = calloc(1U, sizeof(*w));
 	if (w == NULL)
 		return ENOMEM;
 
+	/* Creates the transfer queue owned by the worker. */
 	error = sftp_transfer_queue_create(preserve_times, &w->transfers);
 	if (error != 0) {
 		free(w);
 		return error;
 	}
+
+	/* Initializes the worker mutex. */
 	error = kl_mutex_init(&w->lock);
 	if (error != 0) {
 		sftp_transfer_queue_destroy(w->transfers);
 		free(w);
 		return error;
 	}
+
+	/* Initializes the urgent-request completion condition variable. */
 	error = kl_cond_init(&w->done_cond);
 	if (error != 0) {
 		kl_mutex_destroy(&w->lock);
@@ -210,6 +224,7 @@ sftp_worker_start(
 		return error;
 	}
 
+	/* Retains the relay and requests opening the SFTP subsystem channel. */
 	sftp_link_retain(link);
 	w->link = link;
 	w->notify = notify;
@@ -218,6 +233,7 @@ sftp_worker_start(
 	w->state = SFTP_WORKER_OPENING;
 	sftp_link_request_open(link);
 
+	/* Starts the background worker thread. */
 	memset(&opts, 0, sizeof(opts));
 	opts.run = worker_thread_main;
 	opts.argument = w;
@@ -232,34 +248,45 @@ sftp_worker_start(
 		return error;
 	}
 
+	/* Succeeded: publishes the started worker. */
 	*worker_out = w;
 	return 0;
 }
 
-/* Stops the worker thread, joins it, and frees all resources. */
+/*
+ * Stops the worker thread, joins it, and frees all resources.
+ */
 void
 sftp_worker_stop(
 	struct sftp_worker *w)
 {
 	struct urgent_req *req;
 
+	/* Ignores a NULL worker pointer. */
 	if (w == NULL)
 		return;
 
+	/* Signals the worker thread to exit and wakes it. */
 	kl_mutex_lock(&w->lock);
+
 	w->stop = 1;
+
 	kl_mutex_unlock(&w->lock);
 	sftp_link_request_close(w->link);
 	sftp_link_wake_worker(w->link);
 
+	/* Waits for the worker thread to finish. */
 	(void)kl_thread_join(w->thread);
 
+	/* Fails any remaining queued urgent requests as cancelled. */
 	while (w->urgent_head != NULL) {
 		req = w->urgent_head;
 		w->urgent_head = req->next;
 		req->done = 1;
 		req->error = ECANCELED;
 	}
+
+	/* Frees all worker-owned state and synchronization primitives. */
 	del_stack_clear(w);
 	cache_clear(w);
 	worker_reset_client(w);
@@ -270,22 +297,34 @@ sftp_worker_stop(
 	free(w);
 }
 
-/* Retries opening the SFTP subsystem channel after a failure. */
+/*
+ * Retries opening the SFTP subsystem channel after a failure.
+ */
 void
 sftp_worker_retry(
 	struct sftp_worker *w)
 {
+	int ended;
+
+	/* Schedules a channel reopen if the underlying SSH connection is still alive. */
+	ended = sftp_link_is_ended(w->link);
 	kl_mutex_lock(&w->lock);
-	if (w->state == SFTP_WORKER_FAILED && !sftp_link_is_ended(w->link)) {
+
+	if (w->state == SFTP_WORKER_FAILED && !ended) {
 		w->retry_wanted = 1;
 		w->state = SFTP_WORKER_OPENING;
 		w->error_text[0] = '\0';
 	}
+
 	kl_mutex_unlock(&w->lock);
+
+	/* Wakes the worker thread to perform the retry. */
 	sftp_link_wake_worker(w->link);
 }
 
-/* Reads the current worker state, home directory, and error message. */
+/*
+ * Reads the current worker state, home directory, and error message.
+ */
 void
 sftp_worker_status(
 	struct sftp_worker *w,
@@ -295,16 +334,21 @@ sftp_worker_status(
 	char *error_text,
 	size_t err_cap)
 {
+	/* Copies worker status fields under the worker lock. */
 	kl_mutex_lock(&w->lock);
+
 	*state = w->state;
 	if (home != NULL && home_cap != 0U)
 		(void)snprintf(home, home_cap, "%s", w->home);
 	if (error_text != NULL && err_cap != 0U)
 		(void)snprintf(error_text, err_cap, "%s", w->error_text);
+
 	kl_mutex_unlock(&w->lock);
 }
 
-/* Lists a remote directory, using the cache unless force_refresh is set. */
+/*
+ * Lists a remote directory, using the cache unless force_refresh is set.
+ */
 int
 sftp_worker_list_dir(
 	struct sftp_worker *w,
@@ -316,18 +360,26 @@ sftp_worker_list_dir(
 	struct urgent_req req;
 	int error;
 
+	/* Checks the directory cache first unless a refresh was requested. */
 	*listing_out = NULL;
 	if (!force_refresh) {
 		kl_mutex_lock(&w->lock);
+
 		slot = cache_find(w, path);
 		if (slot != NULL) {
 			*listing_out = listing_clone(slot);
 			kl_mutex_unlock(&w->lock);
-			return *listing_out != NULL ? 0 : ENOMEM;
+			if (*listing_out == NULL)
+				return ENOMEM;
+
+			/* Succeeded: returned a cached directory listing. */
+			return 0;
 		}
+
 		kl_mutex_unlock(&w->lock);
 	}
 
+	/* Submits an urgent directory-listing request to the worker thread. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_LIST_DIR;
 	req.flag = force_refresh;
@@ -337,22 +389,31 @@ sftp_worker_list_dir(
 		sftp_dir_listing_free(req.listing);
 		return error;
 	}
+
+	/* Succeeded: returns the freshly fetched directory listing. */
 	*listing_out = req.listing;
 	return 0;
 }
 
-/* Frees a directory listing returned by sftp_worker_list_dir. */
+/*
+ * Frees a directory listing returned by sftp_worker_list_dir.
+ */
 void
 sftp_dir_listing_free(
 	struct sftp_dir_listing *listing)
 {
+	/* Ignores a NULL listing pointer. */
 	if (listing == NULL)
 		return;
+
+	/* Frees the entries array and listing header. */
 	free(listing->entries);
 	free(listing);
 }
 
-/* Creates a remote directory. */
+/*
+ * Creates a remote directory.
+ */
 int
 sftp_worker_mkdir(
 	struct sftp_worker *w,
@@ -363,16 +424,23 @@ sftp_worker_mkdir(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent mkdir request and copies any error text. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_MKDIR;
 	(void)snprintf(req.path, sizeof(req.path), "%s", path);
 	error = worker_submit_urgent(w, &req);
 	if (err != NULL && err_cap != 0U)
 		(void)snprintf(err, err_cap, "%s", req.error_text);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the remote directory was created. */
+	return 0;
 }
 
-/* Renames a remote file or directory. */
+/*
+ * Renames a remote file or directory.
+ */
 int
 sftp_worker_rename(
 	struct sftp_worker *w,
@@ -384,6 +452,7 @@ sftp_worker_rename(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent rename request and copies any error text. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_RENAME;
 	(void)snprintf(req.path, sizeof(req.path), "%s", old_path);
@@ -391,10 +460,17 @@ sftp_worker_rename(
 	error = worker_submit_urgent(w, &req);
 	if (err != NULL && err_cap != 0U)
 		(void)snprintf(err, err_cap, "%s", req.error_text);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the remote path was renamed. */
+	return 0;
 }
 
-/* Counts items and folders under path before recursive deletion (does not follow symlinks). */
+/*
+ * Counts items and folders under path before recursive deletion (does not
+ * follow symlinks).
+ */
 int
 sftp_worker_delete_count(
 	struct sftp_worker *w,
@@ -406,19 +482,25 @@ sftp_worker_delete_count(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent delete-count traversal request. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_DELETE_COUNT;
 	(void)snprintf(req.path, sizeof(req.path), "%s", path);
 	error = worker_submit_urgent(w, &req);
-	if (error == 0) {
-		*items = req.items;
-		*folders = req.folders;
-		*is_symlink = req.is_symlink;
-	}
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: reports counted items, folders, and symlink status. */
+	*items = req.items;
+	*folders = req.folders;
+	*is_symlink = req.is_symlink;
+	return 0;
 }
 
-/* Recursively deletes path (symlinks are removed without following their target). */
+/*
+ * Recursively deletes path (symlinks are removed without following their
+ * target).
+ */
 int
 sftp_worker_delete(
 	struct sftp_worker *w,
@@ -429,16 +511,23 @@ sftp_worker_delete(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent recursive delete request and copies any error text. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_DELETE;
 	(void)snprintf(req.path, sizeof(req.path), "%s", path);
 	error = worker_submit_urgent(w, &req);
 	if (err != NULL && err_cap != 0U)
 		(void)snprintf(err, err_cap, "%s", req.error_text);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the remote path was deleted. */
+	return 0;
 }
 
-/* Queries attributes of path (follow_links=1 uses STAT, 0 uses LSTAT). */
+/*
+ * Queries attributes of path (follow_links=1 uses STAT, 0 uses LSTAT).
+ */
 int
 sftp_worker_stat(
 	struct sftp_worker *w,
@@ -449,17 +538,23 @@ sftp_worker_stat(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent stat/lstat request. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_STAT;
 	req.flag = follow_links;
 	(void)snprintf(req.path, sizeof(req.path), "%s", path);
 	error = worker_submit_urgent(w, &req);
-	if (error == 0)
-		*entry = req.entry;
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: returns the queried attributes. */
+	*entry = req.entry;
+	return 0;
 }
 
-/* Enqueues a download into local_dir. */
+/*
+ * Enqueues a download into local_dir.
+ */
 int
 sftp_worker_enqueue_download(
 	struct sftp_worker *w,
@@ -473,20 +568,35 @@ sftp_worker_enqueue_download(
 	const char *base;
 	int error;
 
+	/* Builds the destination local path from the remote basename. */
 	slash = strrchr(remote_path, '/');
-	base = slash != NULL ? slash + 1 : remote_path;
+	if (slash != NULL)
+		base = slash + 1;
+	else
+		base = remote_path;
 	error = sftp_local_join_path(local_path, sizeof(local_path), local_dir, base);
 	if (error != 0)
 		return error;
 
+	/* Enqueues the download item under the worker lock. */
 	kl_mutex_lock(&w->lock);
+
 	error = sftp_transfer_enqueue(w->transfers, SFTP_TRANSFER_DOWNLOAD, local_path, remote_path, is_dir, id_out);
+
 	kl_mutex_unlock(&w->lock);
+
+	/* Wakes the worker thread to start the transfer. */
 	sftp_link_wake_worker(w->link);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the download is queued. */
+	return 0;
 }
 
-/* Enqueues an upload into remote_dir. */
+/*
+ * Enqueues an upload into remote_dir.
+ */
 int
 sftp_worker_enqueue_upload(
 	struct sftp_worker *w,
@@ -501,61 +611,92 @@ sftp_worker_enqueue_upload(
 	const char *base;
 	int error;
 
+	/* Extracts the local basename across both slash styles. */
 	slash = strrchr(local_path, '/');
 	bslash = strrchr(local_path, '\\');
 	base = slash;
 	if (bslash != NULL && (base == NULL || bslash > base))
 		base = bslash;
-	base = base != NULL ? base + 1 : local_path;
+	if (base != NULL)
+		base = base + 1;
+	else
+		base = local_path;
 
+	/* Builds the destination remote path. */
 	error = sftp_transfer_join_remote(remote_path, sizeof(remote_path), remote_dir, base);
 	if (error != 0)
 		return error;
 
+	/* Enqueues the upload item under the worker lock. */
 	kl_mutex_lock(&w->lock);
+
 	error = sftp_transfer_enqueue(w->transfers, SFTP_TRANSFER_UPLOAD, local_path, remote_path, is_dir, id_out);
+
 	kl_mutex_unlock(&w->lock);
+
+	/* Wakes the worker thread to start the transfer. */
 	sftp_link_wake_worker(w->link);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the upload is queued. */
+	return 0;
 }
 
-/* Resolves an overwrite conflict for transfer id. */
+/*
+ * Resolves an overwrite conflict for transfer id.
+ */
 void
 sftp_worker_resolve_conflict(
 	struct sftp_worker *w,
 	uint64_t id,
 	enum sftp_conflict_action action)
 {
+	/* Forwards the overwrite decision under the worker lock and wakes the worker. */
 	kl_mutex_lock(&w->lock);
+
 	sftp_transfer_resolve_conflict(w->transfers, id, action);
+
 	kl_mutex_unlock(&w->lock);
 	sftp_link_wake_worker(w->link);
 }
 
-/* Cancels one transfer item. */
+/*
+ * Cancels one transfer item.
+ */
 void
 sftp_worker_cancel_transfer(
 	struct sftp_worker *w,
 	uint64_t id)
 {
+	/* Marks the transfer item cancelled under the worker lock and wakes the worker. */
 	kl_mutex_lock(&w->lock);
+
 	sftp_transfer_cancel(w->transfers, id);
+
 	kl_mutex_unlock(&w->lock);
 	sftp_link_wake_worker(w->link);
 }
 
-/* Cancels all queued and active transfers. */
+/*
+ * Cancels all queued and active transfers.
+ */
 void
 sftp_worker_cancel_all(
 	struct sftp_worker *w)
 {
+	/* Cancels all transfers under the worker lock and wakes the worker. */
 	kl_mutex_lock(&w->lock);
+
 	sftp_transfer_cancel_all(w->transfers);
+
 	kl_mutex_unlock(&w->lock);
 	sftp_link_wake_worker(w->link);
 }
 
-/* Copies a snapshot of the transfer queue. */
+/*
+ * Copies a snapshot of the transfer queue.
+ */
 int
 sftp_worker_transfers(
 	struct sftp_worker *w,
@@ -565,21 +706,33 @@ sftp_worker_transfers(
 {
 	int error;
 
+	/* Takes a snapshot of the transfer queue under the worker lock. */
 	kl_mutex_lock(&w->lock);
+
 	error = sftp_transfer_snapshot_all(w->transfers, items, count, active_or_queued);
+
 	kl_mutex_unlock(&w->lock);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: returns the snapshot array. */
+	return 0;
 }
 
-/* Frees a transfer snapshot array. */
+/*
+ * Frees a transfer snapshot array.
+ */
 void
 sftp_worker_transfers_free(
 	struct sftp_transfer_snapshot *items)
 {
+	/* Frees the snapshot buffer. */
 	free(items);
 }
 
-/* Opens a remote file for urgent Explorer stream reads. */
+/*
+ * Opens a remote file for urgent Explorer stream reads.
+ */
 int
 sftp_worker_stream_open(
 	struct sftp_worker *w,
@@ -589,16 +742,23 @@ sftp_worker_stream_open(
 	struct urgent_req req;
 	int error;
 
+	/* Submits an urgent stream-open request. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_STREAM_OPEN;
 	(void)snprintf(req.path, sizeof(req.path), "%s", remote_path);
 	error = worker_submit_urgent(w, &req);
-	if (error == 0)
-		*stream_id = req.stream_id;
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: returns the assigned stream identifier. */
+	*stream_id = req.stream_id;
+	return 0;
 }
 
-/* Reads bytes at offset from an open Explorer stream (prioritized ahead of transfers). */
+/*
+ * Reads bytes at offset from an open Explorer stream (prioritized ahead
+ * of transfers).
+ */
 int
 sftp_worker_stream_read(
 	struct sftp_worker *w,
@@ -611,11 +771,15 @@ sftp_worker_stream_read(
 	struct urgent_req req;
 	int error;
 
+	/* Marks an active stream read so transfers yield pipeline slots. */
 	*got = 0U;
 	kl_mutex_lock(&w->lock);
+
 	w->active_stream_reads++;
+
 	kl_mutex_unlock(&w->lock);
 
+	/* Submits the urgent stream-read request. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_STREAM_READ;
 	req.stream_id = stream_id;
@@ -626,13 +790,22 @@ sftp_worker_stream_read(
 	if (error == 0)
 		*got = req.got;
 
+	/* Decrements the active stream read counter under the worker lock. */
 	kl_mutex_lock(&w->lock);
+
 	w->active_stream_reads--;
+
 	kl_mutex_unlock(&w->lock);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: *got holds the number of bytes read. */
+	return 0;
 }
 
-/* Closes an open Explorer stream handle. */
+/*
+ * Closes an open Explorer stream handle.
+ */
 void
 sftp_worker_stream_close(
 	struct sftp_worker *w,
@@ -640,6 +813,7 @@ sftp_worker_stream_close(
 {
 	struct urgent_req req;
 
+	/* Submits an urgent stream-close request. */
 	memset(&req, 0, sizeof(req));
 	req.kind = URGENT_STREAM_CLOSE;
 	req.stream_id = stream_id;
@@ -651,14 +825,19 @@ static void
 worker_thread_main(
 	void *arg)
 {
-	struct sftp_worker *w = arg;
+	struct sftp_worker *w;
 
+	/* Polls for stop/retry signals and drives the SFTP state machine until stopped. */
+	w = arg;
 	for (;;) {
 		kl_mutex_lock(&w->lock);
+
 		if (w->stop) {
 			kl_mutex_unlock(&w->lock);
 			break;
 		}
+
+		/* Resets the client and requests a fresh channel if retry was asked. */
 		if (w->retry_wanted) {
 			w->retry_wanted = 0;
 			w->state = SFTP_WORKER_OPENING;
@@ -668,8 +847,10 @@ worker_thread_main(
 			w->home_pending = 0;
 			sftp_link_request_open(w->link);
 		}
+
 		kl_mutex_unlock(&w->lock);
 
+		/* Advances I/O, urgent requests, and transfers, then waits briefly. */
 		worker_step(w);
 		sftp_link_wait(w->link, 50U);
 	}
@@ -684,10 +865,17 @@ worker_step(
 	int accepted;
 	uint32_t code;
 	char reason[SFTP_LINK_REASON_MAX];
+	unsigned max_reqs;
+	unsigned room;
+	int has_work;
+	int ended;
 	int error;
 
-	if (sftp_link_is_ended(w->link)) {
+	/* Marks the worker ended if the underlying SSH connection closed. */
+	ended = sftp_link_is_ended(w->link);
+	if (ended) {
 		kl_mutex_lock(&w->lock);
+
 		if (w->state != SFTP_WORKER_ENDED) {
 			w->state = SFTP_WORKER_ENDED;
 			(void)snprintf(w->error_text, sizeof(w->error_text), "The connection ended.");
@@ -696,11 +884,15 @@ worker_step(
 				worker_finish_urgent(w, ECONNRESET, "The connection ended.");
 			w->notify_dirty = 1;
 		}
+
 		kl_mutex_unlock(&w->lock);
+
+		/* Notifies the UI that the connection ended. */
 		worker_maybe_notify(w, 1);
 		return;
 	}
 
+	/* Waits for the subsystem channel open reply and opens sftp_client on acceptance. */
 	if (w->state == SFTP_WORKER_OPENING) {
 		ready = 0;
 		accepted = 0;
@@ -711,49 +903,73 @@ worker_step(
 			return;
 		if (!accepted) {
 			kl_mutex_lock(&w->lock);
+
 			w->state = SFTP_WORKER_FAILED;
-			if (code != 0U)
+			if (code != 0U) {
 				(void)snprintf(w->error_text, sizeof(w->error_text),
 				    "The server refused another session (MaxSessions on the server may be 1).");
-			else if (reason[0] != '\0')
+			} else if (reason[0] != '\0') {
 				(void)snprintf(w->error_text, sizeof(w->error_text), "%s", reason);
-			else
+			} else {
 				(void)snprintf(w->error_text, sizeof(w->error_text),
 				    "The server has no SFTP subsystem.");
+			}
+
+			/* Marks the UI dirty so the failure is shown. */
 			w->notify_dirty = 1;
+
 			kl_mutex_unlock(&w->lock);
+
+			/* Notifies the UI of the subsystem open failure. */
 			worker_maybe_notify(w, 1);
 			return;
 		}
+
+		/* Creates the sftp_client protocol state machine if not yet allocated. */
 		if (w->client == NULL) {
 			error = sftp_client_open(&w->client);
 			if (error != 0) {
 				kl_mutex_lock(&w->lock);
+
 				w->state = SFTP_WORKER_FAILED;
 				(void)snprintf(w->error_text, sizeof(w->error_text), "Out of memory.");
 				w->notify_dirty = 1;
+
 				kl_mutex_unlock(&w->lock);
+
+				/* Notifies the UI of the allocation failure. */
 				worker_maybe_notify(w, 1);
 				return;
 			}
 		}
 	}
 
+	/* Waits until the SFTP client is initialized. */
 	if (w->client == NULL)
 		return;
 
+	/* Pumps outgoing and incoming SFTP bytes. */
 	worker_pump_io(w);
 
+	/* Starts urgent requests ahead of pipelined transfers when ready. */
 	if (w->state == SFTP_WORKER_READY) {
 		kl_mutex_lock(&w->lock);
-		if (w->active_urgent == NULL && w->urgent_head != NULL && sftp_client_room(w->client) > 0U)
+
+		room = sftp_client_room(w->client);
+		if (w->active_urgent == NULL && w->urgent_head != NULL && room > 0U)
 			worker_start_urgent(w);
-		if (sftp_transfer_has_work(w->transfers)) {
-			unsigned max_reqs = w->active_stream_reads > 0U ?
-			    SFTP_TRANSFER_SHARED_REQUESTS : SFTP_CLIENT_REQUESTS;
+		has_work = sftp_transfer_has_work(w->transfers);
+		if (has_work) {
+			if (w->active_stream_reads > 0U)
+				max_reqs = SFTP_TRANSFER_SHARED_REQUESTS;
+			else
+				max_reqs = SFTP_CLIENT_REQUESTS;
 			sftp_transfer_step(w->transfers, w->client, max_reqs, &w->notify_dirty);
 		}
+
 		kl_mutex_unlock(&w->lock);
+
+		/* Flushes any newly queued requests and updates the UI if needed. */
 		worker_pump_io(w);
 		worker_maybe_notify(w, 0);
 	}
@@ -766,12 +982,14 @@ worker_pump_io(
 {
 	uint8_t buf[32768];
 	size_t got;
+	size_t offset;
 	size_t taken;
 	size_t out_size;
 	size_t written;
 	const uint8_t *out_bytes;
 	int eof;
 	int closed;
+	int ended;
 	struct sftp_client_reply reply;
 	int error;
 
@@ -795,7 +1013,7 @@ worker_pump_io(
 		closed = 0;
 		(void)sftp_link_read(w->link, buf, sizeof(buf), &got, &eof, &closed);
 		if (got != 0U) {
-			size_t offset = 0U;
+			offset = 0U;
 			while (offset < got) {
 				taken = 0U;
 				error = sftp_client_input(w->client, buf + offset, got - offset, &taken);
@@ -808,43 +1026,68 @@ worker_pump_io(
 						break;
 					if (error != 0) {
 						kl_mutex_lock(&w->lock);
+
 						w->state = SFTP_WORKER_FAILED;
-						if (!w->version_seen)
+						if (!w->version_seen) {
 							(void)snprintf(w->error_text, sizeof(w->error_text),
 							    "The server did not answer as an SFTP server (a shell startup file may print text).");
-						else
+						} else {
 							(void)snprintf(w->error_text, sizeof(w->error_text),
 							    "The SFTP protocol stream failed.");
+						}
+
+						/* Aborts any active transfer and urgent request. */
 						sftp_transfer_abort_active(w->transfers, w->error_text, &w->notify_dirty);
 						if (w->active_urgent != NULL)
 							worker_finish_urgent(w, EPROTO, w->error_text);
 						w->notify_dirty = 1;
+
 						kl_mutex_unlock(&w->lock);
+
+						/* Closes the broken channel and notifies the UI. */
 						sftp_link_request_close(w->link);
 						worker_maybe_notify(w, 1);
 						return;
 					}
+
+					/* Dispatches the parsed SFTP reply. */
 					worker_handle_reply(w, &reply);
 				}
+
+				/* Stops if the client input buffer could not accept more bytes. */
 				if (taken == 0U)
 					break;
 			}
 		}
+
+		/* Transitions to FAILED or ENDED if the channel closed after draining input. */
 		if ((eof || closed) && got == 0U) {
 			if (w->state != SFTP_WORKER_FAILED && w->state != SFTP_WORKER_ENDED) {
+				ended = sftp_link_is_ended(w->link);
 				kl_mutex_lock(&w->lock);
-				w->state = sftp_link_is_ended(w->link) ? SFTP_WORKER_ENDED : SFTP_WORKER_FAILED;
+
+				if (ended)
+					w->state = SFTP_WORKER_ENDED;
+				else
+					w->state = SFTP_WORKER_FAILED;
 				if (w->error_text[0] == '\0')
 					(void)snprintf(w->error_text, sizeof(w->error_text), "The SFTP channel closed.");
 				sftp_transfer_abort_active(w->transfers, w->error_text, &w->notify_dirty);
 				if (w->active_urgent != NULL)
 					worker_finish_urgent(w, ECONNRESET, w->error_text);
 				w->notify_dirty = 1;
+
 				kl_mutex_unlock(&w->lock);
+
+				/* Notifies the UI that the SFTP channel closed. */
 				worker_maybe_notify(w, 1);
 			}
+
+			/* Nothing more can arrive on a closed channel. */
 			break;
 		}
+
+		/* Stops reading when the relay returned less than a full buffer. */
 		if (got < sizeof(buf))
 			break;
 	}
@@ -862,48 +1105,68 @@ worker_handle_reply(
 	size_t long_size;
 	struct ssh_sftp_attrs attrs;
 	int taken;
+	int error;
 
+	/* Queries the remote home directory once SSH_FXP_VERSION arrives. */
 	if (reply->type == SSH_FXP_VERSION) {
 		w->version_seen = 1;
-		if (sftp_client_realpath(w->client, (const uint8_t *)".", 1U, &w->home_req_id) == 0) {
+		error = sftp_client_realpath(w->client, (const uint8_t *)".", 1U, &w->home_req_id);
+		if (error == 0) {
 			w->home_pending = 1;
 		} else {
 			kl_mutex_lock(&w->lock);
+
 			w->state = SFTP_WORKER_READY;
 			(void)snprintf(w->home, sizeof(w->home), "/");
 			w->notify_dirty = 1;
+
 			kl_mutex_unlock(&w->lock);
 			worker_maybe_notify(w, 1);
 		}
+
+		/* Version handshake reply handled. */
 		return;
 	}
 
+	/* Records the initial home directory from the REALPATH reply. */
 	if (w->home_pending && reply->id == w->home_req_id) {
 		w->home_pending = 0;
 		kl_mutex_lock(&w->lock);
-		if (reply->error == 0 && reply->type == SSH_FXP_NAME &&
-		    sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs) == 0 &&
-		    name_size < sizeof(w->home)) {
-			memcpy(w->home, name, name_size);
-			w->home[name_size] = '\0';
+
+		if (reply->error == 0 && reply->type == SSH_FXP_NAME) {
+			error = sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs);
+			if (error == 0 && name_size < sizeof(w->home)) {
+				memcpy(w->home, name, name_size);
+				w->home[name_size] = '\0';
+			} else {
+				(void)snprintf(w->home, sizeof(w->home), "/");
+			}
 		} else {
 			(void)snprintf(w->home, sizeof(w->home), "/");
 		}
+
+		/* Marks the worker ready for UI requests and transfers. */
 		w->state = SFTP_WORKER_READY;
 		w->notify_dirty = 1;
+
 		kl_mutex_unlock(&w->lock);
 		worker_maybe_notify(w, 1);
 		return;
 	}
 
+	/* Routes the reply to the active urgent request or to the transfer queue. */
 	kl_mutex_lock(&w->lock);
+
 	if (w->active_urgent != NULL && reply->id == w->urgent_req_id) {
 		worker_urgent_reply(w, reply);
 		kl_mutex_unlock(&w->lock);
 		return;
 	}
+
+	/* Passes non-urgent replies to the transfer state machine. */
 	taken = 0;
 	(void)sftp_transfer_handle_reply(w->transfers, w->client, reply, &taken, &w->notify_dirty);
+
 	kl_mutex_unlock(&w->lock);
 }
 
@@ -914,8 +1177,10 @@ worker_start_urgent(
 {
 	struct urgent_req *req;
 	size_t i;
+	uint32_t read_len;
 	int error;
 
+	/* Dequeues the head urgent request and marks it active. */
 	req = w->urgent_head;
 	w->urgent_head = req->next;
 	if (w->urgent_head == NULL)
@@ -924,6 +1189,7 @@ worker_start_urgent(
 	w->active_urgent = req;
 	w->urgent_phase = 0;
 
+	/* Dispatches the initial SFTP request for this urgent operation. */
 	switch (req->kind) {
 	case URGENT_LIST_DIR:
 		w->building_listing = calloc(1U, sizeof(*w->building_listing));
@@ -931,6 +1197,8 @@ worker_start_urgent(
 			worker_finish_urgent(w, ENOMEM, "Out of memory.");
 			return;
 		}
+
+		/* Records the target path and opens the remote directory. */
 		(void)snprintf(w->building_listing->path, sizeof(w->building_listing->path), "%s", req->path);
 		w->building_cap = 0U;
 		error = sftp_client_opendir(w->client, (const uint8_t *)req->path, strlen(req->path), &w->urgent_req_id);
@@ -940,6 +1208,8 @@ worker_start_urgent(
 			worker_finish_urgent(w, error, "Could not open directory.");
 			return;
 		}
+
+		/* Waits for the OPENDIR handle reply. */
 		w->urgent_phase = 1;
 		break;
 
@@ -953,8 +1223,13 @@ worker_start_urgent(
 	case URGENT_RENAME:
 		cache_invalidate(w, req->path);
 		cache_invalidate(w, req->path2);
-		error = sftp_client_rename(w->client, (const uint8_t *)req->path, strlen(req->path),
-		    (const uint8_t *)req->path2, strlen(req->path2), &w->urgent_req_id);
+		error = sftp_client_rename(
+			w->client,
+			(const uint8_t *)req->path,
+			strlen(req->path),
+			(const uint8_t *)req->path2,
+			strlen(req->path2),
+			&w->urgent_req_id);
 		if (error != 0)
 			worker_finish_urgent(w, error, "Could not rename.");
 		break;
@@ -963,16 +1238,21 @@ worker_start_urgent(
 	case URGENT_DELETE:
 		del_stack_clear(w);
 		cache_invalidate(w, req->path);
-		if (del_stack_push(w, req->path) != 0) {
+		error = del_stack_push(w, req->path);
+		if (error != 0) {
 			worker_finish_urgent(w, ENOMEM, "Out of memory.");
 			return;
 		}
+
+		/* Stats the root path with LSTAT so symlinks are not followed. */
 		error = sftp_client_lstat(w->client, (const uint8_t *)req->path, strlen(req->path), &w->urgent_req_id);
 		if (error != 0) {
 			del_stack_clear(w);
 			worker_finish_urgent(w, error, "Could not inspect path.");
 			return;
 		}
+
+		/* Waits for the initial LSTAT reply. */
 		w->urgent_phase = 1;
 		break;
 
@@ -986,8 +1266,13 @@ worker_start_urgent(
 		break;
 
 	case URGENT_STREAM_OPEN:
-		error = sftp_client_open_file(w->client, (const uint8_t *)req->path, strlen(req->path),
-		    SSH_FXF_READ, NULL, &w->urgent_req_id);
+		error = sftp_client_open_file(
+			w->client,
+			(const uint8_t *)req->path,
+			strlen(req->path),
+			SSH_FXF_READ,
+			NULL,
+			&w->urgent_req_id);
 		if (error != 0)
 			worker_finish_urgent(w, error, "Could not open stream.");
 		break;
@@ -997,13 +1282,25 @@ worker_start_urgent(
 			if (w->streams[i].used && w->streams[i].id == req->stream_id)
 				break;
 		}
+
+		/* Reports EBADF if the stream handle was closed or invalid. */
 		if (i == WORKER_STREAMS_MAX) {
 			worker_finish_urgent(w, EBADF, "Invalid stream.");
 			return;
 		}
-		error = sftp_client_read(w->client, w->streams[i].handle, w->streams[i].handle_size,
-		    req->offset, (uint32_t)(req->size > SFTP_CLIENT_CHUNK ? SFTP_CLIENT_CHUNK : req->size),
-		    &w->urgent_req_id);
+
+		/* Clamps the read length to SFTP_CLIENT_CHUNK and issues READ. */
+		if (req->size > SFTP_CLIENT_CHUNK)
+			read_len = SFTP_CLIENT_CHUNK;
+		else
+			read_len = (uint32_t)req->size;
+		error = sftp_client_read(
+			w->client,
+			w->streams[i].handle,
+			w->streams[i].handle_size,
+			req->offset,
+			read_len,
+			&w->urgent_req_id);
 		if (error != 0)
 			worker_finish_urgent(w, error, "Could not read stream.");
 		break;
@@ -1013,10 +1310,14 @@ worker_start_urgent(
 			if (w->streams[i].used && w->streams[i].id == req->stream_id)
 				break;
 		}
+
+		/* Finishes immediately if the stream was already closed. */
 		if (i == WORKER_STREAMS_MAX) {
 			worker_finish_urgent(w, 0, "");
 			return;
 		}
+
+		/* Closes the remote handle and frees the stream slot. */
 		error = sftp_client_close_handle(w->client, w->streams[i].handle, w->streams[i].handle_size, &w->urgent_req_id);
 		w->streams[i].used = 0;
 		if (error != 0)
@@ -1031,15 +1332,30 @@ worker_urgent_reply(
 	struct sftp_worker *w,
 	const struct sftp_client_reply *reply)
 {
-	struct urgent_req *req = w->active_urgent;
+	struct urgent_req *req;
 	const uint8_t *name;
 	size_t name_size;
 	const uint8_t *long_name;
 	size_t long_size;
 	struct ssh_sftp_attrs attrs;
 	struct del_frame *f;
+	struct sftp_dir_entry *e;
+	struct sftp_dir_entry *grown;
+	char nbuf[SSH_SFTP_PATH_MAX];
+	char child[SSH_SFTP_PATH_MAX];
+	size_t new_cap;
+	size_t copy;
 	size_t i;
+	int is_dir;
+	int is_link;
+	int cdir;
+	int clink;
+	int cmp_dot;
+	int cmp_dotdot;
+	int error;
 
+	/* Dispatches the reply according to the active urgent request kind. */
+	req = w->active_urgent;
 	switch (req->kind) {
 	case URGENT_LIST_DIR:
 		if (w->urgent_phase == 1) {
@@ -1049,67 +1365,100 @@ worker_urgent_reply(
 				worker_finish_urgent(w, EIO, "Could not open directory.");
 				return;
 			}
+
+			/* Saves the directory handle and requests the first READDIR batch. */
 			memcpy(w->urgent_handle, reply->handle, reply->handle_size);
 			w->urgent_handle_size = reply->handle_size;
 			w->urgent_phase = 2;
-			if (sftp_client_readdir(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id) != 0) {
+			error = sftp_client_readdir(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
+			if (error != 0) {
 				(void)sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
 				w->urgent_phase = 3;
 			}
+
+			/* Waits for READDIR or CLOSEDIR. */
 			return;
 		}
+
+		/* Processes a READDIR reply batch. */
 		if (w->urgent_phase == 2) {
 			if (reply->type == SSH_FXP_STATUS) {
 				w->urgent_phase = 3;
-				if (sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id) != 0) {
+				error = sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
+				if (error != 0) {
 					req->listing = w->building_listing;
 					w->building_listing = NULL;
 					worker_finish_urgent(w, 0, "");
 				}
+
+				/* Directory listing finished at EOF. */
 				return;
 			}
+
+			/* Aborts on malformed directory listing replies. */
 			if (reply->error != 0 || reply->type != SSH_FXP_NAME) {
 				w->building_listing->error = EPROTO;
 				w->urgent_phase = 3;
-				if (sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id) != 0) {
+				error = sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
+				if (error != 0) {
 					req->listing = w->building_listing;
 					w->building_listing = NULL;
 					worker_finish_urgent(w, EPROTO, "Malformed directory listing.");
 				}
+
+				/* Waiting for CLOSEDIR or finished with error. */
 				return;
 			}
-			while (sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs) == 0) {
-				struct sftp_dir_entry *e;
-				char nbuf[SSH_SFTP_PATH_MAX];
 
+			/* Appends each entry in the NAME reply to the building listing. */
+			for (;;) {
+				error = sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs);
+				if (error != 0)
+					break;
 				if (name_size == 0U || name_size >= sizeof(nbuf))
 					continue;
 				memcpy(nbuf, name, name_size);
 				nbuf[name_size] = '\0';
-				if (strcmp(nbuf, ".") == 0 || strcmp(nbuf, "..") == 0)
+				cmp_dot = strcmp(nbuf, ".");
+				cmp_dotdot = strcmp(nbuf, "..");
+				if (cmp_dot == 0 || cmp_dotdot == 0)
 					continue;
 				if (w->building_listing->count >= SFTP_CACHE_ENTRIES_MAX) {
 					w->building_listing->truncated = 1;
 					continue;
 				}
+
+				/* Grows the entries array if at capacity. */
 				if (w->building_listing->count == w->building_cap) {
-					size_t new_cap = w->building_cap == 0U ? 64U : w->building_cap * 2U;
-					struct sftp_dir_entry *grown = realloc(w->building_listing->entries, new_cap * sizeof(*grown));
+					if (w->building_cap == 0U)
+						new_cap = 64U;
+					else
+						new_cap = w->building_cap * 2U;
+					grown = realloc(w->building_listing->entries, new_cap * sizeof(*grown));
 					if (grown == NULL) {
 						w->building_listing->truncated = 1;
 						continue;
 					}
+
+					/* Commits the grown entries array. */
 					w->building_listing->entries = grown;
 					w->building_cap = new_cap;
 				}
+
+				/* Populates the new directory entry. */
 				e = &w->building_listing->entries[w->building_listing->count++];
 				memset(e, 0, sizeof(*e));
 				(void)snprintf(e->name, sizeof(e->name), "%s", nbuf);
 				if (long_name != NULL && long_size != 0U) {
-					size_t copy = long_size < sizeof(e->long_name) - 1U ? long_size : sizeof(e->long_name) - 1U;
+					if (long_size < sizeof(e->long_name) - 1U)
+						copy = long_size;
+					else
+						copy = sizeof(e->long_name) - 1U;
 					memcpy(e->long_name, long_name, copy);
 					e->long_name[copy] = '\0';
 				}
+
+				/* Copies size, modification time, and permissions when present. */
 				if ((attrs.flags & SSH_FILEXFER_ATTR_SIZE) != 0U)
 					e->size = attrs.size;
 				if ((attrs.flags & SSH_FILEXFER_ATTR_ACMODTIME) != 0U)
@@ -1120,19 +1469,26 @@ worker_urgent_reply(
 					e->is_link = (attrs.permissions & 0170000U) == 0120000U;
 				}
 			}
-			if (w->building_listing->truncated ||
-			    sftp_client_readdir(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id) != 0) {
+
+			/* Requests the next READDIR batch or closes the handle if truncated. */
+			if (!w->building_listing->truncated)
+				error = sftp_client_readdir(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
+			if (w->building_listing->truncated || error != 0) {
 				w->urgent_phase = 3;
-				if (sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id) != 0) {
+				error = sftp_client_close_handle(w->client, w->urgent_handle, w->urgent_handle_size, &w->urgent_req_id);
+				if (error != 0) {
 					cache_store(w, w->building_listing);
 					req->listing = w->building_listing;
 					w->building_listing = NULL;
 					worker_finish_urgent(w, 0, "");
 				}
 			}
+
+			/* Waits for the next READDIR or CLOSEDIR reply. */
 			return;
 		}
-		/* urgent_phase == 3: CLOSEDIR complete */
+
+		/* Completes the listing after CLOSEDIR (urgent_phase == 3). */
 		cache_store(w, w->building_listing);
 		req->listing = w->building_listing;
 		w->building_listing = NULL;
@@ -1146,6 +1502,8 @@ worker_urgent_reply(
 		} else {
 			worker_finish_urgent(w, EIO, "Operation failed.");
 		}
+
+		/* MKDIR or RENAME complete. */
 		return;
 
 	case URGENT_STAT:
@@ -1160,25 +1518,27 @@ worker_urgent_reply(
 				req->entry.is_dir = (reply->attrs.permissions & 0170000U) == 0040000U;
 				req->entry.is_link = (reply->attrs.permissions & 0170000U) == 0120000U;
 			}
+
+			/* Reports the populated entry to the caller. */
 			worker_finish_urgent(w, 0, "");
 		} else {
 			worker_finish_urgent(w, ENOENT, "Stat failed.");
 		}
+
+		/* STAT complete. */
 		return;
 
 	case URGENT_DELETE_COUNT:
 	case URGENT_DELETE:
 		f = &w->del_stack[w->del_depth - 1U];
 		if (w->urgent_phase == 1) {
-			/* LSTAT result for top of del_stack */
-			int is_dir;
-			int is_link;
-
 			if (reply->error != 0 || reply->type != SSH_FXP_ATTRS) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, ENOENT, "Could not inspect path.");
 				return;
 			}
+
+			/* Classifies the root item from its LSTAT attributes. */
 			is_dir = (reply->attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
 			    (reply->attrs.permissions & 0170000U) == 0040000U;
 			is_link = (reply->attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
@@ -1188,78 +1548,104 @@ worker_urgent_reply(
 				req->is_symlink = is_link;
 			if (is_dir && !is_link) {
 				req->folders++;
-				if (sftp_client_opendir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id) != 0) {
+				error = sftp_client_opendir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id);
+				if (error != 0) {
 					del_stack_clear(w);
 					worker_finish_urgent(w, EIO, "Could not open directory.");
 					return;
 				}
+
+				/* Waits for OPENDIR on the directory. */
 				w->urgent_phase = 2;
 				return;
 			}
-			/* File or symlink: if deleting, REMOVE it; otherwise pop. */
+
+			/* Removes a non-directory or symlink directly when deleting. */
 			if (req->kind == URGENT_DELETE) {
-				if (sftp_client_remove(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id) != 0) {
+				error = sftp_client_remove(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id);
+				if (error != 0) {
 					del_stack_clear(w);
 					worker_finish_urgent(w, EIO, "Could not remove item.");
 					return;
 				}
+
+				/* Waits for REMOVE completion. */
 				w->urgent_phase = 5;
 				return;
 			}
+
+			/* Pops the counted non-directory item and advances any parent. */
 			del_stack_pop(w);
 			if (w->del_depth == 0U) {
 				worker_finish_urgent(w, 0, "");
 				return;
 			}
-			/* Advance parent's child_index */
-			goto advance_del_parent;
+
+			/* Continues traversing remaining children on the stack. */
+			worker_advance_delete(w, req);
+			return;
 		}
+
+		/* Processes OPENDIR reply for a directory frame. */
 		if (w->urgent_phase == 2) {
-			/* OPENDIR result */
 			if (reply->error != 0 || reply->type != SSH_FXP_HANDLE || reply->handle_size > sizeof(f->handle)) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, EIO, "Could not open directory.");
 				return;
 			}
+
+			/* Saves the handle and starts reading directory entries. */
 			memcpy(f->handle, reply->handle, reply->handle_size);
 			f->handle_size = reply->handle_size;
 			f->handle_open = 1;
 			w->urgent_phase = 3;
-			if (sftp_client_readdir(w->client, f->handle, f->handle_size, &w->urgent_req_id) != 0) {
+			error = sftp_client_readdir(w->client, f->handle, f->handle_size, &w->urgent_req_id);
+			if (error != 0) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, EIO, "Could not read directory.");
 			}
+
+			/* Waits for READDIR. */
 			return;
 		}
+
+		/* Processes READDIR reply for a directory frame. */
 		if (w->urgent_phase == 3) {
-			/* READDIR result */
 			if (reply->type == SSH_FXP_STATUS) {
 				f->handle_open = 0;
 				w->urgent_phase = 4;
-				if (sftp_client_close_handle(w->client, f->handle, f->handle_size, &w->urgent_req_id) != 0) {
+				error = sftp_client_close_handle(w->client, f->handle, f->handle_size, &w->urgent_req_id);
+				if (error != 0) {
 					del_stack_clear(w);
 					worker_finish_urgent(w, EIO, "Could not close directory.");
 				}
+
+				/* Waits for CLOSEDIR before descending into children. */
 				return;
 			}
+
+			/* Aborts on malformed directory listing replies. */
 			if (reply->error != 0 || reply->type != SSH_FXP_NAME) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, EPROTO, "Malformed directory listing.");
 				return;
 			}
-			while (sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs) == 0) {
-				char nbuf[SSH_SFTP_PATH_MAX];
-				char child[SSH_SFTP_PATH_MAX];
-				int cdir;
-				int clink;
 
+			/* Collects child paths in the current directory frame. */
+			for (;;) {
+				error = sftp_client_name_next(w->client, &name, &name_size, &long_name, &long_size, &attrs);
+				if (error != 0)
+					break;
 				if (name_size == 0U || name_size >= sizeof(nbuf))
 					continue;
 				memcpy(nbuf, name, name_size);
 				nbuf[name_size] = '\0';
-				if (strcmp(nbuf, ".") == 0 || strcmp(nbuf, "..") == 0)
+				cmp_dot = strcmp(nbuf, ".");
+				cmp_dotdot = strcmp(nbuf, "..");
+				if (cmp_dot == 0 || cmp_dotdot == 0)
 					continue;
-				if (sftp_transfer_join_remote(child, sizeof(child), f->path, nbuf) != 0)
+				error = sftp_transfer_join_remote(child, sizeof(child), f->path, nbuf);
+				if (error != 0)
 					continue;
 				cdir = (attrs.flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0U &&
 				    (attrs.permissions & 0170000U) == 0040000U;
@@ -1267,23 +1653,27 @@ worker_urgent_reply(
 				    (attrs.permissions & 0170000U) == 0120000U;
 				(void)del_frame_add_child(f, child, cdir, clink);
 			}
-			if (sftp_client_readdir(w->client, f->handle, f->handle_size, &w->urgent_req_id) != 0) {
+
+			/* Requests the next READDIR batch. */
+			error = sftp_client_readdir(w->client, f->handle, f->handle_size, &w->urgent_req_id);
+			if (error != 0) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, EIO, "Could not read directory.");
 			}
+
+			/* Waits for the next READDIR reply. */
 			return;
 		}
-		if (w->urgent_phase == 4) {
-			/* CLOSEDIR complete: process children of top frame. */
-			goto process_del_children;
-		}
+
+		/* Advances into children after CLOSEDIR (phase 4) or after REMOVE/RMDIR (phase 5). */
 		if (w->urgent_phase == 5) {
-			/* REMOVE or RMDIR complete */
 			if (reply->error != 0 || reply->type != SSH_FXP_STATUS || reply->code != SSH_FX_OK) {
 				del_stack_clear(w);
 				worker_finish_urgent(w, EIO, "Delete failed.");
 				return;
 			}
+
+			/* Pops the removed child or directory frame. */
 			del_stack_pop(w);
 			if (w->del_depth == 0U) {
 				worker_finish_urgent(w, 0, "");
@@ -1291,58 +1681,8 @@ worker_urgent_reply(
 			}
 		}
 
-advance_del_parent:
-process_del_children:
-		while (w->del_depth > 0U) {
-			f = &w->del_stack[w->del_depth - 1U];
-			if (f->child_index < f->child_count) {
-				size_t idx = f->child_index++;
-				int cdir = f->child_is_dir[idx];
-				int clink = f->child_is_link[idx];
-				const char *cpath = f->children[idx];
-
-				if (cdir && !clink) {
-					req->items++;
-					req->folders++;
-					if (del_stack_push(w, cpath) != 0) {
-						del_stack_clear(w);
-						worker_finish_urgent(w, ENOMEM, "Out of memory.");
-						return;
-					}
-					f = &w->del_stack[w->del_depth - 1U];
-					if (sftp_client_opendir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id) != 0) {
-						del_stack_clear(w);
-						worker_finish_urgent(w, EIO, "Could not open directory.");
-						return;
-					}
-					w->urgent_phase = 2;
-					return;
-				}
-				req->items++;
-				if (req->kind == URGENT_DELETE) {
-					if (del_stack_push(w, cpath) != 0 ||
-					    sftp_client_remove(w->client, (const uint8_t *)cpath, strlen(cpath), &w->urgent_req_id) != 0) {
-						del_stack_clear(w);
-						worker_finish_urgent(w, EIO, "Could not remove item.");
-						return;
-					}
-					w->urgent_phase = 5;
-					return;
-				}
-			} else {
-				if (req->kind == URGENT_DELETE) {
-					if (sftp_client_rmdir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id) != 0) {
-						del_stack_clear(w);
-						worker_finish_urgent(w, EIO, "Could not remove directory.");
-						return;
-					}
-					w->urgent_phase = 5;
-					return;
-				}
-				del_stack_pop(w);
-			}
-		}
-		worker_finish_urgent(w, 0, "");
+		/* Continues processing remaining delete traversal frames. */
+		worker_advance_delete(w, req);
 		return;
 
 	case URGENT_STREAM_OPEN:
@@ -1350,6 +1690,8 @@ process_del_children:
 			worker_finish_urgent(w, EIO, "Could not open stream.");
 			return;
 		}
+
+		/* Allocates a free stream slot and records the open handle. */
 		for (i = 0U; i < WORKER_STREAMS_MAX; i++) {
 			if (!w->streams[i].used) {
 				w->streams[i].used = 1;
@@ -1361,12 +1703,17 @@ process_del_children:
 				return;
 			}
 		}
+
+		/* Reports ENOSPC when all stream slots are occupied. */
 		worker_finish_urgent(w, ENOSPC, "Too many open streams.");
 		return;
 
 	case URGENT_STREAM_READ:
 		if (reply->error == 0 && reply->type == SSH_FXP_DATA) {
-			size_t copy = reply->data_size < req->size ? reply->data_size : req->size;
+			if (reply->data_size < req->size)
+				copy = reply->data_size;
+			else
+				copy = req->size;
 			if (copy != 0U)
 				memcpy(req->buf, reply->data, copy);
 			req->got = copy;
@@ -1377,12 +1724,100 @@ process_del_children:
 		} else {
 			worker_finish_urgent(w, EIO, "Stream read failed.");
 		}
+
+		/* STREAM_READ complete. */
 		return;
 
 	case URGENT_STREAM_CLOSE:
 		worker_finish_urgent(w, 0, "");
 		return;
 	}
+}
+
+/* Advances the iterative delete/count traversal stack (caller holds w->lock). */
+static void
+worker_advance_delete(
+	struct sftp_worker *w,
+	struct urgent_req *req)
+{
+	struct del_frame *f;
+	size_t idx;
+	int cdir;
+	int clink;
+	const char *cpath;
+	int error;
+
+	/* Walks the delete stack until an async SFTP request is issued or the stack empties. */
+	while (w->del_depth > 0U) {
+		f = &w->del_stack[w->del_depth - 1U];
+		if (f->child_index < f->child_count) {
+			idx = f->child_index++;
+			cdir = f->child_is_dir[idx];
+			clink = f->child_is_link[idx];
+			cpath = f->children[idx];
+
+			/* Descends into non-symlink subdirectories. */
+			if (cdir && !clink) {
+				req->items++;
+				req->folders++;
+				error = del_stack_push(w, cpath);
+				if (error != 0) {
+					del_stack_clear(w);
+					worker_finish_urgent(w, ENOMEM, "Out of memory.");
+					return;
+				}
+
+				/* Opens the subdirectory for listing. */
+				f = &w->del_stack[w->del_depth - 1U];
+				error = sftp_client_opendir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id);
+				if (error != 0) {
+					del_stack_clear(w);
+					worker_finish_urgent(w, EIO, "Could not open directory.");
+					return;
+				}
+
+				/* Waits for OPENDIR on the subdirectory. */
+				w->urgent_phase = 2;
+				return;
+			}
+
+			/* Counts and optionally removes a file or symlink child. */
+			req->items++;
+			if (req->kind == URGENT_DELETE) {
+				error = del_stack_push(w, cpath);
+				if (error == 0)
+					error = sftp_client_remove(w->client, (const uint8_t *)cpath, strlen(cpath), &w->urgent_req_id);
+				if (error != 0) {
+					del_stack_clear(w);
+					worker_finish_urgent(w, EIO, "Could not remove item.");
+					return;
+				}
+
+				/* Waits for REMOVE on the child. */
+				w->urgent_phase = 5;
+				return;
+			}
+		} else {
+			if (req->kind == URGENT_DELETE) {
+				error = sftp_client_rmdir(w->client, (const uint8_t *)f->path, strlen(f->path), &w->urgent_req_id);
+				if (error != 0) {
+					del_stack_clear(w);
+					worker_finish_urgent(w, EIO, "Could not remove directory.");
+					return;
+				}
+
+				/* Waits for RMDIR on the emptied directory. */
+				w->urgent_phase = 5;
+				return;
+			}
+
+			/* Pops the counted directory frame. */
+			del_stack_pop(w);
+		}
+	}
+
+	/* All frames processed: finishes the delete or count request. */
+	worker_finish_urgent(w, 0, "");
 }
 
 /* Marks the active urgent request complete and wakes its caller. */
@@ -1392,8 +1827,10 @@ worker_finish_urgent(
 	int error,
 	const char *err_text)
 {
-	struct urgent_req *req = w->active_urgent;
+	struct urgent_req *req;
 
+	/* Records the outcome on the active urgent request and wakes waiters. */
+	req = w->active_urgent;
 	if (req == NULL)
 		return;
 	req->error = error;
@@ -1410,11 +1847,15 @@ worker_submit_urgent(
 	struct sftp_worker *w,
 	struct urgent_req *req)
 {
+	/* Queues the request under the lock and waits for completion. */
 	kl_mutex_lock(&w->lock);
+
 	if (w->stop || w->state != SFTP_WORKER_READY) {
 		kl_mutex_unlock(&w->lock);
 		return ECONNRESET;
 	}
+
+	/* Appends the request to the tail of the urgent queue. */
 	req->next = NULL;
 	if (w->urgent_tail != NULL)
 		w->urgent_tail->next = req;
@@ -1423,10 +1864,18 @@ worker_submit_urgent(
 	w->urgent_tail = req;
 	sftp_link_wake_worker(w->link);
 
+	/* Waits until the worker marks the request done or stops. */
 	while (!req->done && !w->stop)
 		kl_cond_wait(&w->done_cond, &w->lock);
+
 	kl_mutex_unlock(&w->lock);
-	return req->done ? req->error : ECANCELED;
+	if (!req->done)
+		return ECANCELED;
+	if (req->error != 0)
+		return req->error;
+
+	/* Succeeded: the urgent request completed without error. */
+	return 0;
 }
 
 /* Finds a cached directory listing by path and bumps its LRU stamp. */
@@ -1436,13 +1885,20 @@ cache_find(
 	const char *path)
 {
 	size_t i;
+	int match;
 
+	/* Scans cache slots for an active matching path. */
 	for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
-		if (w->cache[i].used && strcmp(w->cache[i].path, path) == 0) {
+		if (!w->cache[i].used)
+			continue;
+		match = strcmp(w->cache[i].path, path);
+		if (match == 0) {
 			w->cache[i].stamp = ++w->cache_clock;
 			return &w->cache[i];
 		}
 	}
+
+	/* Not cached. */
 	return NULL;
 }
 
@@ -1457,19 +1913,23 @@ cache_store(
 	struct sftp_dir_entry *copy;
 	struct cache_slot *slot;
 
+	/* Ignores failed listings and invalidates any previous entry for the path. */
 	if (listing == NULL || listing->error != 0)
 		return;
 	cache_invalidate(w, listing->path);
 
+	/* Skips caching listings that exceed the global cache budget. */
 	bytes = listing->count * sizeof(*listing->entries);
 	if (listing->count > SFTP_CACHE_ENTRIES_MAX || bytes > SFTP_CACHE_BYTES_MAX)
 		return;
 
+	/* Evicts oldest slots until the new listing fits within budget. */
 	while (w->cache_entries_total + listing->count > SFTP_CACHE_ENTRIES_MAX ||
 	    w->cache_bytes_total + bytes > SFTP_CACHE_BYTES_MAX) {
 		cache_evict_oldest(w);
 	}
 
+	/* Finds an unused cache slot, evicting one if all slots are full. */
 	slot = NULL;
 	for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
 		if (!w->cache[i].used) {
@@ -1477,6 +1937,8 @@ cache_store(
 			break;
 		}
 	}
+
+	/* Evicts the oldest slot if no free slot was found. */
 	if (slot == NULL) {
 		cache_evict_oldest(w);
 		for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
@@ -1486,9 +1948,12 @@ cache_store(
 			}
 		}
 	}
+
+	/* Gives up if no slot is available. */
 	if (slot == NULL)
 		return;
 
+	/* Copies the directory entries into cache-owned memory. */
 	copy = NULL;
 	if (listing->count != 0U) {
 		copy = malloc(bytes);
@@ -1497,6 +1962,7 @@ cache_store(
 		memcpy(copy, listing->entries, bytes);
 	}
 
+	/* Populates the cache slot and updates cache totals. */
 	slot->used = 1;
 	(void)snprintf(slot->path, sizeof(slot->path), "%s", listing->path);
 	slot->entries = copy;
@@ -1514,12 +1980,16 @@ cache_invalidate(
 	const char *path)
 {
 	size_t i;
+	int exact;
+	int prefix;
 
+	/* Clears any slot whose path equals or prefixes the modified path. */
 	for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
 		if (!w->cache[i].used)
 			continue;
-		if (strcmp(w->cache[i].path, path) == 0 ||
-		    strncmp(w->cache[i].path, path, strlen(w->cache[i].path)) == 0) {
+		exact = strcmp(w->cache[i].path, path);
+		prefix = strncmp(w->cache[i].path, path, strlen(w->cache[i].path));
+		if (exact == 0 || prefix == 0) {
 			w->cache_entries_total -= w->cache[i].count;
 			w->cache_bytes_total -= w->cache[i].count * sizeof(*w->cache[i].entries);
 			free(w->cache[i].entries);
@@ -1535,12 +2005,15 @@ cache_clear(
 {
 	size_t i;
 
+	/* Releases every active cache slot. */
 	for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
 		if (w->cache[i].used) {
 			free(w->cache[i].entries);
 			memset(&w->cache[i], 0, sizeof(w->cache[i]));
 		}
 	}
+
+	/* Resets the global cache counters. */
 	w->cache_entries_total = 0U;
 	w->cache_bytes_total = 0U;
 }
@@ -1551,12 +2024,16 @@ cache_evict_oldest(
 	struct sftp_worker *w)
 {
 	size_t i;
-	size_t oldest = WORKER_CACHE_SLOTS;
+	size_t oldest;
 
+	/* Finds the used slot with the smallest LRU stamp. */
+	oldest = WORKER_CACHE_SLOTS;
 	for (i = 0U; i < WORKER_CACHE_SLOTS; i++) {
 		if (w->cache[i].used && (oldest == WORKER_CACHE_SLOTS || w->cache[i].stamp < w->cache[oldest].stamp))
 			oldest = i;
 	}
+
+	/* Frees the oldest slot if one was found. */
 	if (oldest < WORKER_CACHE_SLOTS) {
 		w->cache_entries_total -= w->cache[oldest].count;
 		w->cache_bytes_total -= w->cache[oldest].count * sizeof(*w->cache[oldest].entries);
@@ -1572,20 +2049,27 @@ listing_clone(
 {
 	struct sftp_dir_listing *out;
 
+	/* Allocates the listing header and copies metadata. */
 	out = calloc(1U, sizeof(*out));
 	if (out == NULL)
 		return NULL;
 	(void)snprintf(out->path, sizeof(out->path), "%s", slot->path);
 	out->count = slot->count;
 	out->truncated = slot->truncated;
+
+	/* Allocates and copies the entries array when non-empty. */
 	if (slot->count != 0U) {
 		out->entries = malloc(slot->count * sizeof(*out->entries));
 		if (out->entries == NULL) {
 			free(out);
 			return NULL;
 		}
+
+		/* Copies the cached entry array into the caller's listing. */
 		memcpy(out->entries, slot->entries, slot->count * sizeof(*out->entries));
 	}
+
+	/* Returns the cloned listing. */
 	return out;
 }
 
@@ -1597,6 +2081,7 @@ del_stack_clear(
 	size_t i;
 	size_t j;
 
+	/* Frees every frame's child lists. */
 	for (i = 0U; i < w->del_cap; i++) {
 		for (j = 0U; j < w->del_stack[i].child_count; j++)
 			free(w->del_stack[i].children[j]);
@@ -1604,6 +2089,8 @@ del_stack_clear(
 		free(w->del_stack[i].child_is_dir);
 		free(w->del_stack[i].child_is_link);
 	}
+
+	/* Frees the stack array and resets stack counters. */
 	free(w->del_stack);
 	w->del_stack = NULL;
 	w->del_depth = 0U;
@@ -1620,8 +2107,12 @@ del_stack_push(
 	struct del_frame *f;
 	size_t new_cap;
 
+	/* Grows the delete stack if full. */
 	if (w->del_depth == w->del_cap) {
-		new_cap = w->del_cap == 0U ? 8U : w->del_cap * 2U;
+		if (w->del_cap == 0U)
+			new_cap = 8U;
+		else
+			new_cap = w->del_cap * 2U;
 		grown = realloc(w->del_stack, new_cap * sizeof(*w->del_stack));
 		if (grown == NULL)
 			return ENOMEM;
@@ -1629,6 +2120,8 @@ del_stack_push(
 		w->del_stack = grown;
 		w->del_cap = new_cap;
 	}
+
+	/* Initializes the new top frame with path. */
 	f = &w->del_stack[w->del_depth++];
 	memset(f, 0, sizeof(*f));
 	(void)snprintf(f->path, sizeof(f->path), "%s", path);
@@ -1643,8 +2136,11 @@ del_stack_pop(
 	struct del_frame *f;
 	size_t j;
 
+	/* Ignores an empty stack. */
 	if (w->del_depth == 0U)
 		return;
+
+	/* Frees the top frame's child arrays and clears the frame. */
 	f = &w->del_stack[--w->del_depth];
 	for (j = 0U; j < f->child_count; j++)
 		free(f->children[j]);
@@ -1668,8 +2164,12 @@ del_frame_add_child(
 	size_t new_cap;
 	char *dup;
 
+	/* Grows the child arrays if full. */
 	if (f->child_count == f->child_cap) {
-		new_cap = f->child_cap == 0U ? 16U : f->child_cap * 2U;
+		if (f->child_cap == 0U)
+			new_cap = 16U;
+		else
+			new_cap = f->child_cap * 2U;
 		names = realloc(f->children, new_cap * sizeof(*names));
 		dirs = realloc(f->child_is_dir, new_cap * sizeof(*dirs));
 		links = realloc(f->child_is_link, new_cap * sizeof(*links));
@@ -1680,6 +2180,8 @@ del_frame_add_child(
 		f->child_is_link = links;
 		f->child_cap = new_cap;
 	}
+
+	/* Duplicates the child path and appends the metadata. */
 	dup = malloc(strlen(path) + 1U);
 	if (dup == NULL)
 		return ENOMEM;
@@ -1696,6 +2198,7 @@ static void
 worker_reset_client(
 	struct sftp_worker *w)
 {
+	/* Closes the SFTP protocol client if allocated. */
 	if (w->client != NULL) {
 		sftp_client_close(w->client);
 		w->client = NULL;
@@ -1710,8 +2213,11 @@ worker_maybe_notify(
 {
 	uint64_t now;
 
+	/* Skips notification if no callback is registered or nothing changed. */
 	if (w->notify == NULL || !w->notify_dirty)
 		return;
+
+	/* Throttles non-forced notifications to WORKER_NOTIFY_MS. */
 	now = worker_now_ms();
 	if (!force && now - w->last_notify_ms < WORKER_NOTIFY_MS)
 		return;
