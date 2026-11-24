@@ -286,6 +286,20 @@ struct kl_window {
 	RECT text_caret;
 	int tablet;
 	struct keiui_win32_drag *drag;
+	int dragging;
+	unsigned drop_types;
+	unsigned drop_offered;
+	int drop_answered;
+	unsigned drop_answer_actions;
+	unsigned drop_answer_preferred;
+	int32_t drop_x;
+	int32_t drop_y;
+	int drop_pending;
+	int drop_error;
+	unsigned drop_data_type;
+	char *drop_data;
+	size_t drop_length;
+	void *drop_target;
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
 	struct keiui_win32_tsf *tsf;
@@ -358,6 +372,9 @@ void keiui_win32_tsf_close(struct kl_window *window);
 /* drag.c */
 void keiui_win32_drag_run(struct kl_window *window);
 void keiui_win32_drag_drop(struct kl_window *window);
+
+/* drop.c */
+void keiui_win32_drop_close(struct kl_window *window);
 
 /* pointer.c */
 int keiui_win32_pointer_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);

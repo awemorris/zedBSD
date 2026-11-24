@@ -325,7 +325,9 @@ keiui_win32_drag_run(
 	if (allowed == 0U)
 		allowed = DROPEFFECT_COPY;
 	effect = DROPEFFECT_NONE;
+	window->dragging = 1;
 	result = DoDragDrop(&object->iface, &source->iface, allowed, &effect);
+	window->dragging = 0;
 	IDropSource_Release(&source->iface);
 	IDataObject_Release(&object->iface);
 
