@@ -569,7 +569,24 @@ build_parameter_sets(
 	} else {
 		bw_put_bit(&bw, 0U);
 	}
+	/* Emits VUI with max_num_reorder_frames=0 for zero-reorder low-latency DPB. */
+	bw_put_bit(&bw, 1U);
 	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 0U);
+	bw_put_bit(&bw, 1U);
+	bw_put_bit(&bw, 1U);
+	bw_put_ue(&bw, 0U);
+	bw_put_ue(&bw, 0U);
+	bw_put_ue(&bw, 10U);
+	bw_put_ue(&bw, 10U);
+	bw_put_ue(&bw, 0U);
+	bw_put_ue(&bw, 1U);
 	bw_trailing_bits(&bw);
 	if (bw.overflow != 0)
 		return EINVAL;

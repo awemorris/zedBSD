@@ -119,6 +119,7 @@ media_decode(
 	rc = media_decoder_send(m->dec, &pkt);
 	if (rc != 0)
 		return rc;
+	/* Drains any ready picture; if none yet, send an AUD to close the AU. */
 	last = NULL;
 	for (;;) {
 		rc = media_decoder_receive(m->dec, &pts);
@@ -127,8 +128,6 @@ media_decode(
 				media_frame_free(&last);
 			return -rc;
 		}
-
-		/* Stops draining when no more frames are ready yet. */
 		if (rc == 0)
 			break;
 		frame = media_decoder_picture(m->dec);
@@ -136,6 +135,30 @@ media_decode(
 			if (last != NULL)
 				media_frame_free(&last);
 			last = frame;
+		}
+	}
+	if (last == NULL) {
+		static const uint8_t aud_nal[6] = {
+			0x00U, 0x00U, 0x00U, 0x01U, 0x09U, 0xf0U
+		};
+		struct media_packet aud_pkt;
+		memset(&aud_pkt, 0, sizeof(aud_pkt));
+		aud_pkt.data = aud_nal;
+		aud_pkt.size = sizeof(aud_nal);
+		aud_pkt.pts_us = 0;
+		aud_pkt.keyframe = 0;
+		if (media_decoder_send(m->dec, &aud_pkt) == 0) {
+			for (;;) {
+				rc = media_decoder_receive(m->dec, &pts);
+				if (rc <= 0)
+					break;
+				frame = media_decoder_picture(m->dec);
+				if (frame != NULL) {
+					if (last != NULL)
+						media_frame_free(&last);
+					last = frame;
+				}
+			}
 		}
 	}
 
