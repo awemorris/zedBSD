@@ -4728,10 +4728,18 @@ i915_video_encode_run(
 			return EBADMSG;
 		enc.row_stores[i] = drv_i915_gfx_memory_va(m, video->binds[i].offset);
 	}
-	enc.vdenc_row_store = enc.row_stores[0];
-	enc.streamin_buffer = enc.row_stores[1];
-	enc.streamout_buffer = enc.row_stores[2];
-	enc.mb_status_buffer = enc.row_stores[3];
+	{
+		struct i915_gfx_memory *sm = drv_i915_object_lookup(session, I915_VK_OBJ_MEMORY,
+		    video->binds[video->row_stores + video->max_dpb_slots].memory);
+
+		if (sm == NULL)
+			return EBADMSG;
+		enc.streamout_buffer = drv_i915_gfx_memory_va(sm,
+		    video->binds[video->row_stores + video->max_dpb_slots].offset);
+	}
+	enc.vdenc_row_store = enc.streamout_buffer + 8192U;
+	enc.streamin_buffer = 0U;
+	enc.mb_status_buffer = enc.streamout_buffer;
 	enc.bitstream_base = dst_va;
 	enc.bitstream_end = dst_va + command->range;
 	enc.feedback_addr = video->feedback_obj->va;
