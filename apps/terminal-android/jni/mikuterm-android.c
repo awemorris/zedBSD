@@ -351,6 +351,7 @@ mikuterm_android_post(
 			}
 			view = main_find_sftp_view(dir->view_number);
 			if (view != NULL) {
+				sftp_view_set_download_dir(view, dir->virtual_dir);
 				view->dirty = 1;
 				if (main_app != NULL)
 					(void)kl_app_post(main_app, 0U, NULL);

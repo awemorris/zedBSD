@@ -476,18 +476,21 @@ jni_native_sftp_download_dir_picked(
 	int error;
 
 	(void)cls;
-	if (tree_uri == NULL)
-		return;
-
 	post = calloc(1U, sizeof(*post));
 	if (post == NULL)
 		return;
 	post->view_number = (uint32_t)view_number;
 
-	utf = (*env)->GetStringUTFChars(env, tree_uri, NULL);
-	if (utf != NULL) {
-		post->tree_uri = strdup(utf);
-		(*env)->ReleaseStringUTFChars(env, tree_uri, utf);
+	if (tree_uri != NULL) {
+		utf = (*env)->GetStringUTFChars(env, tree_uri, NULL);
+		if (utf != NULL) {
+			post->tree_uri = strdup(utf);
+			(*env)->ReleaseStringUTFChars(env, tree_uri, utf);
+		}
+		if (post->tree_uri == NULL) {
+			free(post);
+			return;
+		}
 	}
 	if (virtual_dir != NULL) {
 		utf = (*env)->GetStringUTFChars(env, virtual_dir, NULL);
@@ -495,12 +498,6 @@ jni_native_sftp_download_dir_picked(
 			post->virtual_dir = strdup(utf);
 			(*env)->ReleaseStringUTFChars(env, virtual_dir, utf);
 		}
-	}
-
-	if (post->tree_uri == NULL) {
-		free(post->virtual_dir);
-		free(post);
-		return;
 	}
 
 	error = keiland_post_app(MIKUTERM_POST_SFTP_DOWNLOAD_DIR, post);

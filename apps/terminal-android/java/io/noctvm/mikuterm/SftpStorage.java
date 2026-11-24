@@ -88,6 +88,9 @@ final class SftpStorage {
 			viewNumber = pendingViewNumber;
 		}
 		if (resultCode != Activity.RESULT_OK || data == null) {
+			if (requestCode == REQ_SFTP_DOWNLOAD_TREE) {
+				MikutermBridge.nativeSftpDownloadDirPicked(viewNumber, null, null);
+			}
 			return true;
 		}
 
