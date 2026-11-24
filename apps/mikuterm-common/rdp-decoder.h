@@ -33,4 +33,7 @@ struct rdp_decoder_ops {
 /* Software H.264 decoder backend backed by libmedia's h264sw. */
 extern const struct rdp_decoder_ops rdp_h264sw_decoder_ops;
 
+/* H.264 decoder backend backed by libmedia (Vulkan Video with h264sw fallback). */
+extern const struct rdp_decoder_ops rdp_media_decoder_ops;
+
 #endif

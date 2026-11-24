@@ -69,13 +69,6 @@ mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sou
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_WIN32_SOURCES)
 mikuterm_read_sources(MIKUTERM_SSL_SOURCES userland/base/libssl-compat/sources.mk LIBSSL_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_RDP_SOURCES userland/desktop/librdp/sources.mk LIBRDP_SOURCES)
-mikuterm_read_sources(MIKUTERM_MEDIA_ALL_SOURCES userland/desktop/libmedia/sources.mk LIBMEDIA_SOURCES)
-set(MIKUTERM_H264SW_SOURCES ${MIKUTERM_ROOT}/userland/desktop/libmedia/media-os-win32.c)
-foreach(src IN LISTS MIKUTERM_MEDIA_ALL_SOURCES)
-	if(src MATCHES "/(h264sw-|vcodec-bitreader|vcodec-nal|vcodec-cabac|bits\\.c)" AND NOT src MATCHES "/h264sw-backend\\.c$")
-		list(APPEND MIKUTERM_H264SW_SOURCES ${src})
-	endif()
-endforeach()
 
 # libkeiland on Windows: the files every system shares, the Windows ones, and the stubs of what Windows has not
 # (the lists are in apps/libkeiland/cmake/keiland-sources.cmake, shared by the programs that use libkeiland).
@@ -88,6 +81,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_COMMON_SOURCES}
 	${MIKUTERM_COMMON_SFTP_SOURCES}
 	${MIKUTERM_COMMON_RDP_SOURCES}
+	${MIKUTERM_COMMON_MEDIA_SOURCES}
 	${MIKUTERM_COMMON_X11_SOURCES}
 	${MIKUTERM_COMMON_PROGRAM_SOURCES}
 	${MIKUTERM_DIR}/main.c
@@ -234,6 +228,11 @@ else()
 	endif()
 endif()
 
+# Static libmedia (Vulkan Video H.264 with h264sw fallback), reusing the fetched Vulkan headers.
+set(LIBMEDIA_VULKAN_INCLUDE "${MIKUTERM_VULKAN_INCLUDE}" CACHE PATH "" FORCE)
+set(LIBMEDIA_DISTFILES "${MIKUTERM_DISTFILES}" CACHE PATH "" FORCE)
+add_subdirectory(${MIKUTERM_ROOT}/apps/libmedia ${CMAKE_CURRENT_BINARY_DIR}/libmedia)
+
 # The libraries, each a static library of the tree's files.
 add_library(mikuterm_z STATIC ${MIKUTERM_Z_SOURCES})
 add_library(mikuterm_png STATIC ${MIKUTERM_PNG_SOURCES})
@@ -241,14 +240,12 @@ add_library(mikuterm_truetype STATIC ${MIKUTERM_TRUETYPE_SOURCES})
 add_library(mikuterm_crypto STATIC ${MIKUTERM_CRYPTO_SOURCES} ${MIKUTERM_CRYPTO_OS_SOURCES})
 add_library(mikuterm_ssl STATIC ${MIKUTERM_SSL_SOURCES})
 add_library(mikuterm_rdp STATIC ${MIKUTERM_RDP_SOURCES})
-add_library(mikuterm_h264sw STATIC ${MIKUTERM_H264SW_SOURCES})
 add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(mikuterm_keiland STATIC ${MIKUTERM_KEILAND_SOURCES})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
-foreach(library z png truetype crypto ssl rdp h264sw ssh keiland terminal)
+foreach(library z png truetype crypto ssl rdp ssh keiland terminal)
 	target_link_libraries(mikuterm_${library} PRIVATE mikuterm_flags)
 endforeach()
-target_include_directories(mikuterm_h264sw PRIVATE ${MIKUTERM_ROOT}/userland/desktop/libmedia)
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
 target_link_libraries(mikuterm_ssl PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
@@ -268,8 +265,9 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_KEY_PASTE=0
 	MIKUTERM_HAVE_LOGIN_SHELL=0
 	MIKUTERM_HAVE_PROXY_COMMAND=1
-	MIKUTERM_HAVE_CODESPACES=1)
-target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_rdp mikuterm_ssl mikuterm_h264sw ${MIKUTERM_SYSTEM_LIBRARIES})
+	MIKUTERM_HAVE_CODESPACES=1
+	MIKUTERM_HAVE_LIBMEDIA=1)
+target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_rdp mikuterm_ssl libmedia ${MIKUTERM_SYSTEM_LIBRARIES})
 set_source_files_properties(${MIKUTERM_DIR}/resources/mikuterm.rc PROPERTIES
 	OBJECT_DEPENDS "${MIKUTERM_DIR}/resources/mikuterm.manifest;${MIKUTERM_DIR}/resources/mikuterm.ico")
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_DIR}/resources ${MIKUTERM_COMMON_DIR})
