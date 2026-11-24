@@ -53,6 +53,7 @@ static void vulkan_slot_use(struct zegl_surface *surface, unsigned slot);
 static uint32_t vulkan_memory_type(struct zegl_display *display, uint32_t bits, VkMemoryPropertyFlags flags);
 static VkResult vulkan_report(const char *what, VkResult result);
 static int vulkan_volume_and_array(VkPhysicalDevice physical);
+static int vulkan_es31(VkPhysicalDevice physical, const VkQueueFamilyProperties *family, const VkPhysicalDeviceFeatures *features, int volume_and_array);
 
 /* The Vulkan calls whose failure was reported (each once). */
 static const char *vulkan_reported[16];
@@ -165,6 +166,9 @@ zegl_vulkan_open(
 	display->features.shaderUniformBufferArrayDynamicIndexing = available.shaderUniformBufferArrayDynamicIndexing;
 	display->features.pipelineStatisticsQuery = available.pipelineStatisticsQuery;
 
+	/* Whether it offers OpenGL ES 3.1 (compute, storage images, and its minimums). */
+	display->es31 = vulkan_es31(display->physical, &families[family], &display->features, display->volume_and_array);
+
 	/* The device with one queue of that family, the swapchain extension and those features. */
 	priority = 1.0f;
 	memset(&queue, 0, sizeof(queue));
@@ -235,6 +239,83 @@ vulkan_volume_and_array(
 }
 
 /*
+ * Tells whether a physical device and its graphics queue family offer
+ * OpenGL ES 3.1: OpenGL ES 3.0, compute on the queue, compute and
+ * storage buffer limits, at least four storage image units with a
+ * storable format, and at least four samples on a framebuffer with no
+ * attachments.
+ *
+ * Reference: Khronos OpenGL ES 3.1 specification, chapter 20 (minimums
+ * of compute workgroups, shared memory, storage buffers, image units
+ * and MAX_FRAMEBUFFER_SAMPLES).
+ */
+static int
+vulkan_es31(
+	VkPhysicalDevice physical,
+	const VkQueueFamilyProperties *family,
+	const VkPhysicalDeviceFeatures *features,
+	int volume_and_array)
+{
+	static const VkFormat image_formats[] = {
+		VK_FORMAT_R32G32B32A32_SFLOAT,
+		VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_FORMAT_R32_SFLOAT,
+		VK_FORMAT_R8G8B8A8_UNORM,
+		VK_FORMAT_R8G8B8A8_SNORM,
+		VK_FORMAT_R32G32B32A32_SINT,
+		VK_FORMAT_R16G16B16A16_SINT,
+		VK_FORMAT_R8G8B8A8_SINT,
+		VK_FORMAT_R32_SINT,
+		VK_FORMAT_R32G32B32A32_UINT,
+		VK_FORMAT_R16G16B16A16_UINT,
+		VK_FORMAT_R8G8B8A8_UINT,
+		VK_FORMAT_R32_UINT
+	};
+	VkPhysicalDeviceProperties properties;
+	VkFormatProperties format_properties;
+	unsigned index;
+
+	/* OpenGL ES 3.0 and compute on the display's queue family. */
+	if (!features->vertexPipelineStoresAndAtomics || !volume_and_array)
+		return 0;
+	if ((family->queueFlags & VK_QUEUE_COMPUTE_BIT) == 0U)
+		return 0;
+
+	/* Compute workgroup, shared memory and storage buffer minimums. */
+	vkGetPhysicalDeviceProperties(physical, &properties);
+	if (properties.limits.maxComputeWorkGroupInvocations < 128U ||
+	    properties.limits.maxComputeWorkGroupSize[0] < 128U ||
+	    properties.limits.maxComputeWorkGroupSize[1] < 128U ||
+	    properties.limits.maxComputeWorkGroupSize[2] < 64U ||
+	    properties.limits.maxComputeWorkGroupCount[0] < 65535U ||
+	    properties.limits.maxComputeWorkGroupCount[1] < 65535U ||
+	    properties.limits.maxComputeWorkGroupCount[2] < 65535U ||
+	    properties.limits.maxComputeSharedMemorySize < 16384U)
+		return 0;
+	if (properties.limits.maxPerStageDescriptorStorageBuffers < 4U ||
+	    properties.limits.maxDescriptorSetStorageBuffers < 4U ||
+	    properties.limits.maxStorageBufferRange < (1U << 27))
+		return 0;
+
+	/* Image units and attachmentless multisample framebuffers. */
+	if (properties.limits.maxPerStageDescriptorStorageImages < 4U ||
+	    properties.limits.maxDescriptorSetStorageImages < 4U)
+		return 0;
+	if ((properties.limits.framebufferNoAttachmentsSampleCounts & (4U | 8U | 16U | 32U | 64U)) == 0U)
+		return 0;
+
+	/* At least one image unit format stored in optimal tiling. */
+	for (index = 0U; index < sizeof(image_formats) / sizeof(image_formats[0]); index++) {
+		vkGetPhysicalDeviceFormatProperties(physical, image_formats[index], &format_properties);
+		if ((format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0U)
+			return 1;
+	}
+
+	/* None of the formats can be stored. */
+	return 0;
+}
+
+/*
  * Releases a display's device and instance.
  */
 void
@@ -256,6 +337,7 @@ zegl_vulkan_close(
 	display->instance = VK_NULL_HANDLE;
 	display->physical = VK_NULL_HANDLE;
 	display->queue = VK_NULL_HANDLE;
+	display->es31 = 0;
 }
 
 /*
