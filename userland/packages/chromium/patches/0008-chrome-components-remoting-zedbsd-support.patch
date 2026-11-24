@@ -1466,6 +1466,42 @@
  
    # Indicates support for Enterprise Proxy policy and service.
    enterprise_proxy =
+--- a/components/feature_engagement/public/feature_constants.cc
++++ b/components/feature_engagement/public/feature_constants.cc
+@@ -1045,7 +1045,8 @@
+ #endif  // BUILDFLAG(IS_IOS)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kIPHAutofillAtMemoryFeature,
+              "IPH_AutofillAtMemory",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+--- a/components/feature_engagement/public/feature_constants.h
++++ b/components/feature_engagement/public/feature_constants.h
+@@ -472,7 +472,8 @@
+ #endif  // BUILDFLAG(IS_IOS)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHAutofillAtMemoryFeature);
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHAutofillBnplAffirmOrZipSuggestionFeature);
+ FEATURE_CONSTANTS_DECLARE_FEATURE(
+--- a/components/feature_engagement/public/feature_list.cc
++++ b/components/feature_engagement/public/feature_list.cc
+@@ -363,7 +363,8 @@
+         // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+     // keep-sorted start case=no
+     &kIPH_AutofillAmbientAutofillSpiiDisclaimer,
+     &kIPHAutofillAccountNameEmailSuggestionFeature,
 --- a/components/on_device_translation/buildflags/features.gni
 +++ b/components/on_device_translation/buildflags/features.gni
 @@ -5,5 +5,6 @@

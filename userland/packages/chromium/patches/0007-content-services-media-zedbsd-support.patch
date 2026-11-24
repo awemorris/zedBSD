@@ -1,3 +1,39 @@
+--- a/content/browser/service_host/utility_sandbox_delegate.cc
++++ b/content/browser/service_host/utility_sandbox_delegate.cc
+@@ -24,10 +24,10 @@
+ #include "sandbox/policy/sandbox_type.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "media/gpu/buildflags.h"
+ #include "media/media_buildflags.h"
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_MAC)
+ #include "base/mac/process_requirement.h"
+--- a/content/common/BUILD.gn
++++ b/content/common/BUILD.gn
+@@ -395,7 +395,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_win || is_android || is_fuchsia || is_ios) {
++  if (is_mac || is_win || is_android || is_fuchsia || is_ios || is_zedbsd) {
+     sources -= [ "font_list_fontconfig.cc" ]
+   }
+ 
+@@ -407,6 +407,9 @@
+     sources += [ "font_list_fuchsia.cc" ]
+     deps += [ "//third_party/fuchsia-sdk/sdk/pkg/fdio" ]
+   }
++  if (is_zedbsd) {
++    sources += [ "font_list_fuchsia.cc" ]
++  }
+ 
+   if (use_clang_profiling_inside_sandbox) {
+     sources += [ "profiling_utils.cc" ]
 --- a/content/gpu/BUILD.gn
 +++ b/content/gpu/BUILD.gn
 @@ -126,7 +126,7 @@
@@ -9,6 +45,25 @@
        !is_castos) {
      configs += [ "//build/config/linux/dri" ]
    }
+--- a/content/public/common/features.gni
++++ b/content/public/common/features.gni
+@@ -23,7 +23,7 @@
+ # is only enabled for desktop Android, but should be enabled on all Android
+ # at some point once the feature is stable. See crbug.com/40418135.
+ enable_screen_capture = is_linux || is_chromeos || (is_apple && use_blink) ||
+-                        is_win || is_android || is_fuchsia
++                        is_win || is_android || is_fuchsia || is_zedbsd
+ 
+ assert(
+     !enable_separate_renderer_binary || is_win || is_mac || is_linux,
+--- a/content/public/common/zygote/features.gni
++++ b/content/public/common/zygote/features.gni
+@@ -2,4 +2,4 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-use_zygote = is_posix && !is_android && !is_apple
++use_zygote = is_posix && !is_android && !is_apple && !is_zedbsd
 --- a/content/shell/BUILD.gn
 +++ b/content/shell/BUILD.gn
 @@ -58,8 +58,9 @@
@@ -50,6 +105,82 @@
      data_deps += [
        "//third_party/breakpad:dump_syms",
        "//third_party/breakpad:minidump_stackwalk",
+--- a/content/shell/app/shell_main_delegate.cc
++++ b/content/shell/app/shell_main_delegate.cc
+@@ -43,7 +43,7 @@
+ #include "net/cookies/cookie_monster.h"
+ #include "ui/base/resource/resource_bundle.h"
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ #include "content/web_test/browser/web_test_browser_main_runner.h"  // nogncheck
+ #include "content/web_test/browser/web_test_content_browser_client.h"  // nogncheck
+ #include "content/web_test/renderer/web_test_content_renderer_client.h"  // nogncheck
+@@ -243,7 +243,7 @@
+ 
+   InitLogging(command_line);
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     // Instantiating `ui::OsSettingsProvider` will both provide sane default
+     // behavior and prevent `ui::OsSettingsProvider::Get()` from instantiating a
+@@ -328,7 +328,7 @@
+   base::CurrentProcess::GetInstance().SetProcessType(
+       base::CurrentProcessType::PROCESS_BROWSER);
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     // Web tests implement their own BrowserMain() replacement.
+     web_test_runner_->RunBrowserMain(std::move(main_function_params));
+@@ -476,7 +476,7 @@
+ }
+ 
+ ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     browser_client_ = std::make_unique<WebTestContentBrowserClient>();
+     return browser_client_.get();
+@@ -492,7 +492,7 @@
+ }
+ 
+ ContentRendererClient* ShellMainDelegate::CreateContentRendererClient() {
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     renderer_client_ = std::make_unique<WebTestContentRendererClient>();
+     return renderer_client_.get();
+--- a/content/shell/app/shell_main_delegate.h
++++ b/content/shell/app/shell_main_delegate.h
+@@ -13,7 +13,7 @@
+ #include "components/memory_system/memory_system.h"
+ #include "content/public/app/content_main_delegate.h"
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ namespace ui {
+ class OsSettingsProvider;
+ }
+@@ -26,7 +26,7 @@
+ class ShellContentRendererClient;
+ class ShellContentUtilityClient;
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ class WebTestBrowserMainRunner;
+ #endif
+ 
+@@ -68,7 +68,7 @@
+   // |is_content_browsertests_| and |web_test_runner_| are mutually exclusive.
+   bool is_content_browsertests_;
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   // Only present when running web tests, which run inside Content Shell.
+ 
+   // Web tests should not use the current machine settings for theming, but
 --- a/content/test/BUILD.gn
 +++ b/content/test/BUILD.gn
 @@ -3256,7 +3256,8 @@
@@ -106,6 +237,18 @@
  } else {
    assert(false, "unsupported_platform")
  }
+--- a/media/media_options.gni
++++ b/media/media_options.gni
+@@ -131,7 +131,8 @@
+   # Determines if a GpuChannel is needed between media capture utility process
+   # and gpu process for a given platform.
+   enable_gpu_channel_media_capture =
+-      is_linux || is_win || is_chromeos || is_apple || is_android || is_fuchsia
++      is_linux || is_win || is_chromeos || is_apple || is_android ||
++      is_fuchsia || is_zedbsd
+ }
+ 
+ # Use another declare_args() to allow dependence on args defined above.
 --- a/media/webrtc/helpers.cc
 +++ b/media/webrtc/helpers.cc
 @@ -68,12 +68,12 @@
