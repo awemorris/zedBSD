@@ -372,7 +372,8 @@ drv_i915_gfx_rec_dispatch(
 	 */
 	if ((opcode < GPU_OP_RESET_COMMAND_BUFFER || opcode > GPU_OP_CMD_EXECUTE_COMMANDS) &&
 	    opcode != GPU_OP_CMD_DISPATCH_BASE &&
-	    (opcode < GPU_OP_CMD_BEGIN_VIDEO_CODING || opcode > GPU_OP_CMD_DECODE_VIDEO)) {
+	    (opcode < GPU_OP_CMD_BEGIN_VIDEO_CODING || opcode > GPU_OP_CMD_DECODE_VIDEO) &&
+	    opcode != GPU_OP_CMD_ENCODE_VIDEO) {
 		*handled = 0;
 		return 0;
 	}
@@ -2386,6 +2387,7 @@ i915_record_command(
 	case GPU_OP_CMD_END_VIDEO_CODING:
 	case GPU_OP_CMD_CONTROL_VIDEO_CODING:
 	case GPU_OP_CMD_DECODE_VIDEO:
+	case GPU_OP_CMD_ENCODE_VIDEO:
 		/* The video coding commands (vk-video.c). */
 		error = i915_record_video(session, cmdbuf, opcode, reader);
 		return error;
@@ -3114,17 +3116,22 @@ i915_nv12_copy_surface(
 	uint32_t x;
 	uint32_t y;
 
-	/* Only readback was admitted by the NV12 image usage queries. */
+	/* Admits both NV12 readback and NV12 upload for video encode. */
 	image = op->u.copy.image;
 	region = &op->u.copy.region;
-	if (op->kind != I915_GFX_OP_COPY_IMAGE_TO_BUFFER)
+	if (op->kind == I915_GFX_OP_COPY_IMAGE_TO_BUFFER) {
+		if ((image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0U)
+			return EINVAL;
+		if ((op->u.copy.buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0U)
+			return EINVAL;
+	} else if (op->kind == I915_GFX_OP_COPY_BUFFER_TO_IMAGE) {
+		if ((image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0U)
+			return EINVAL;
+		if ((op->u.copy.buffer->usage & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) == 0U)
+			return EINVAL;
+	} else {
 		return EINVAL;
-
-	/* The resources must have been created for this transfer direction. */
-	if ((image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0U)
-		return EINVAL;
-	if ((op->u.copy.buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0U)
-		return EINVAL;
+	}
 
 	/* NV12 has one level, one layer and one depth sample per plane. */
 	if (region->imageSubresource.mipLevel != 0U || region->imageSubresource.baseArrayLayer != 0U)

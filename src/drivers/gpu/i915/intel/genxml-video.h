@@ -636,6 +636,7 @@
 /* MFX_PIPE_MODE_SELECT encode bits. */
 #define GEN12_VIDEO_MODE_CODEC_ENCODE		(1U << 4)
 #define GEN12_VIDEO_MODE_STREAM_OUT		(1U << 10)
+#define GEN12_VIDEO_MODE_VDENC			(1U << 13)
 
 /* MFX_PAK_INSERT_OBJECT dword 1 control bits. */
 #define GEN12_VIDEO_PAK_INSERT_STARTCODE	(1U << 0)

@@ -931,19 +931,13 @@ vkGetEncodedVideoSessionParametersKHR(
 	vulkan_write_u32(&writer, has_data);
 	status = vulkan_command_execute(owner->object.context, &writer, reply_max, &reader, VK_TRUE);
 	vulkan_writer_finish(&writer);
-	if (status != VK_SUCCESS) {
+	if (status != VK_SUCCESS && status != VK_INCOMPLETE) {
 		status = vulkan_reply_finish(owner->object.context, &reader, status);
 		return status;
 	}
 
-	/* Reads the Vulkan result, optional feedback, and encoded parameter bytes. */
-	result = (VkResult)(int32_t)vulkan_read_u32(&reader);
-	if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
-		status = vulkan_reply_finish(owner->object.context, &reader, VK_SUCCESS);
-		if (status != VK_SUCCESS)
-			return status;
-		return result;
-	}
+	/* Reads the optional feedback and encoded parameter bytes. */
+	result = status;
 
 	if (pFeedbackInfo != NULL) {
 		/* Reads the optional filled output chain if present. */

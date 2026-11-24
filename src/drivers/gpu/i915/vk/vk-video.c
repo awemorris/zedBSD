@@ -3548,12 +3548,15 @@ i915_video_simulate_decode(
 	if (!command->has_setup)
 		return 0;
 
-	/* The setup slot is a slot of the session whose picture is the output and was bound in the begin. */
+	/* The setup slot is a slot of the session whose picture was bound in the begin. */
 	if (command->setup.index < 0 || command->setup.index >= (int32_t)state->session->max_dpb_slots)
 		return EBADMSG;
-	if (!command->setup.has_picture || !i915_video_same_picture(&command->setup.picture, &command->destination))
+	if (!command->setup.has_picture)
 		return EBADMSG;
-	found = i915_video_begin_picture(begin, &command->destination);
+	if (!command->has_encode_picture &&
+	    !i915_video_same_picture(&command->setup.picture, &command->destination))
+		return EBADMSG;
+	found = i915_video_begin_picture(begin, &command->setup.picture);
 	if (!found)
 		return EBADMSG;
 
@@ -3561,8 +3564,8 @@ i915_video_simulate_decode(
 	state->slots[command->setup.index].active = 0;
 	if (i915_video_is_reference(command)) {
 		state->slots[command->setup.index].active = 1;
-		state->slots[command->setup.index].view = command->destination.view;
-		state->slots[command->setup.index].layer = command->destination.layer;
+		state->slots[command->setup.index].view = command->setup.picture.view;
+		state->slots[command->setup.index].layer = command->setup.picture.layer;
 	}
 
 	/* Succeeded: the decode follows the rules. */
@@ -3907,6 +3910,8 @@ i915_video_is_reference(
 		return (command->h265_picture.flags & I915_VIDEO_H265_PICTURE_REFERENCE) != 0U;
 	if (command->has_picture)
 		return (command->picture_flags & I915_VIDEO_PICTURE_IS_REFERENCE) != 0U;
+	if (command->has_encode_picture)
+		return (command->picture_flags & 2U) != 0U;
 
 	/* No picture information: not a reference. */
 	return 0;
@@ -4654,26 +4659,38 @@ i915_video_encode_run(
 	int error;
 
 	*bytes_written = 0U;
-	if (!command->has_encode_picture || !command->has_setup)
+	if (!command->has_encode_picture || !command->has_setup) {
+		kern_logf("i915: video encode: missing picture (%d) or setup (%d)\n",
+		    command->has_encode_picture, command->has_setup);
 		return EBADMSG;
+	}
 
 	parameters = drv_i915_object_lookup(session, I915_VK_OBJ_VIDEO_SESSION_PARAMETERS, begin->parameters);
 	dst_buf = drv_i915_object_lookup(session, I915_VK_OBJ_BUFFER, command->buffer);
 	src_view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, command->destination.view);
 	setup_view = drv_i915_object_lookup(session, I915_VK_OBJ_IMAGE_VIEW, command->setup.picture.view);
-	if (parameters == NULL || dst_buf == NULL || src_view == NULL || setup_view == NULL)
+	if (parameters == NULL || dst_buf == NULL || src_view == NULL || setup_view == NULL) {
+		kern_logf("i915: video encode: lookup null param=%p dst=%p src=%p setup=%p\n",
+		    (void *)parameters, (void *)dst_buf, (void *)src_view, (void *)setup_view);
 		return EBADMSG;
+	}
 
 	src_img = src_view->image;
 	setup_img = setup_view->image;
 	if (src_img == NULL || setup_img == NULL || src_img->planar == 0U || setup_img->planar == 0U ||
-	    src_img->linear != 0U || setup_img->linear != 0U)
+	    src_img->linear != 0U || setup_img->linear != 0U) {
+		kern_logf("i915: video encode: bad image src=%p setup=%p\n", (void *)src_img, (void *)setup_img);
 		return EBADMSG;
+	}
 	if (command->sps_id >= I915_VIDEO_SPS_IDS || command->pps_id >= I915_VIDEO_PPS_IDS ||
-	    parameters->sps[command->sps_id] == NULL || parameters->pps[command->pps_id] == NULL)
+	    parameters->sps[command->sps_id] == NULL || parameters->pps[command->pps_id] == NULL) {
+		kern_logf("i915: video encode: bad sps/pps id %u/%u\n", command->sps_id, command->pps_id);
 		return EBADMSG;
-	if (drv_i915_video_vdenc_check_sets(parameters->sps[command->sps_id], parameters->pps[command->pps_id]) != NULL)
+	}
+	if (drv_i915_video_vdenc_check_sets(parameters->sps[command->sps_id], parameters->pps[command->pps_id]) != NULL) {
+		kern_logf("i915: video encode: vdenc_check_sets failed\n");
 		return EBADMSG;
+	}
 
 	if (video->batch == NULL) {
 		error = drv_i915_gfx_object_create(session, I915_VIDEO_BATCH_BYTES, &video->batch);
