@@ -672,7 +672,7 @@ run_loop(
 		 * drawn when it answers (which wakes the wait), or at the latest
 		 * when the pace gives up waiting (pace.h).
 		 */
-		if (run_screen->changed && !run_window.page_active && !run_window.picture_active && !run_window.view_active) {
+		if (run_screen->changed && !run_window.page_active && !run_window.picture_active) {
 			wait = terminal_window_frame_wait(&run_window, now);
 			if (run->present_busy && wait == 0)
 				wait = 16;
