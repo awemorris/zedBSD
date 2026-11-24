@@ -99,6 +99,42 @@ terminal_width_ambiguous(
 	return 0;
 }
 
+/*
+ * Tells whether a character is a combining mark or variation selector
+ * that takes no cell of its own.
+ */
+int
+terminal_width_combining(
+	uint32_t codepoint)
+{
+	/* Combining Diacritical Marks. */
+	if (codepoint >= 0x0300U && codepoint <= 0x036fU)
+		return 1;
+
+	/* Combining Diacritical Marks Extended. */
+	if (codepoint >= 0x1ab0U && codepoint <= 0x1affU)
+		return 1;
+
+	/* Combining Diacritical Marks Supplement. */
+	if (codepoint >= 0x1dc0U && codepoint <= 0x1dffU)
+		return 1;
+
+	/* Combining Diacritical Marks for Symbols. */
+	if (codepoint >= 0x20d0U && codepoint <= 0x20ffU)
+		return 1;
+
+	/* Variation Selectors. */
+	if (codepoint >= 0xfe00U && codepoint <= 0xfe0fU)
+		return 1;
+
+	/* Combining Half Marks. */
+	if (codepoint >= 0xfe20U && codepoint <= 0xfe2fU)
+		return 1;
+
+	/* Everything else takes at least one cell. */
+	return 0;
+}
+
 /* Tells whether a character is East Asian wide or fullwidth, or an emoji of two columns. */
 static int
 width_east_asian_wide(

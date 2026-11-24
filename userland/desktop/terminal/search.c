@@ -59,6 +59,8 @@ terminal_search_bar_column(
 	count = terminal_search_decode(text, length, query, TERMINAL_SEARCH_LENGTH);
 	column = 6U;
 	for (i = 0; i < count; i++) {
+		if (terminal_width_combining(query[i]))
+			continue;
 		wide = terminal_width_wide(query[i], ambiguous_wide);
 		column++;
 		if (wide)

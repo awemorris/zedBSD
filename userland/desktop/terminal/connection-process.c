@@ -96,7 +96,7 @@ process_open(
 	struct terminal_connection **connection)
 {
 	struct terminal_process_connector *connector;
-	const char *environment[2];
+	const char *environment[3];
 	char term[TERMINAL_TERM_MAX + 5U];
 	struct process_connection *made;
 	struct kl_process_options process_options;
@@ -116,10 +116,14 @@ process_open(
 		arguments[3] = NULL;
 	}
 
-	/* The terminal's type in the shell's environment, as the connector has it now. */
+	/* The terminal's type and ambiguous-width setting in the shell's environment. */
 	(void)snprintf(term, sizeof(term), "TERM=%s", connector->term);
 	environment[0] = term;
 	environment[1] = NULL;
+	if (connector->ambiguous_wide) {
+		environment[1] = "ZEDBSD_AMBIGUOUS_WIDE=1";
+		environment[2] = NULL;
+	}
 
 	/* The connection's memory. */
 	made = malloc(sizeof(*made));

@@ -10,12 +10,16 @@
  */
 
 #include "src/libc/stdio-internal.h"
+#include "userland/desktop/terminal/width.h"
+#include "userland/desktop/terminal/ambiguous.h"
 #include <errno.h>
 #include <locale.h>
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
 #include <wctype.h>
+
+extern char *getenv(const char *) __attribute__((weak));
 
 size_t
 wcslen(const wchar_t *string)
@@ -151,10 +155,36 @@ combining(wint_t value)
 	    (value >= 0xfe20U && value <= 0xfe2fU);
 }
 
+static int
+ambiguous(wint_t value)
+{
+	size_t low;
+	size_t high;
+	size_t middle;
+
+	if (value < 0x00a1U)
+		return 0;
+
+	low = 0U;
+	high = AMBIGUOUS_RANGES;
+	while (low < high) {
+		middle = low + (high - low) / 2U;
+		if (value < ambiguous_ranges[middle].first)
+			high = middle;
+		else if (value > ambiguous_ranges[middle].last)
+			low = middle + 1U;
+		else
+			return 1;
+	}
+	return 0;
+}
+
 int
 wcwidth(wchar_t character)
 {
 	wint_t value = (wint_t)character;
+	const char *ambiguous_env;
+
 	if (value == 0)
 		return 0;
 	if (!unicode_scalar(value) || value < 0x20U ||
@@ -163,6 +193,7 @@ wcwidth(wchar_t character)
 	if (combining(value))
 		return 0;
 	if ((value >= 0x1100U && value <= 0x115fU) ||
+	    value == 0x2329U || value == 0x232aU ||
 	    (value >= 0x2e80U && value <= 0xa4cfU) ||
 	    (value >= 0xac00U && value <= 0xd7a3U) ||
 	    (value >= 0xf900U && value <= 0xfaffU) ||
@@ -172,6 +203,12 @@ wcwidth(wchar_t character)
 	    (value >= 0x1f300U && value <= 0x1faffU) ||
 	    (value >= 0x20000U && value <= 0x3fffdU))
 		return 2;
+	if (getenv != NULL) {
+		ambiguous_env = getenv("ZEDBSD_AMBIGUOUS_WIDE");
+		if (ambiguous_env != NULL && ambiguous_env[0] == '1' &&
+		    ambiguous_env[1] == '\0' && ambiguous(value))
+			return 2;
+	}
 	return 1;
 }
 

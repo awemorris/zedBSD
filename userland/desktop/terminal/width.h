@@ -28,5 +28,6 @@ struct terminal_width_range {
 
 int terminal_width_wide(uint32_t codepoint, int ambiguous_wide);
 int terminal_width_ambiguous(uint32_t codepoint);
+int terminal_width_combining(uint32_t codepoint);
 
 #endif
