@@ -3653,7 +3653,8 @@ run_picture_inputs(void)
 	if (run_window.picture_event_count == 0U)
 		return;
 	if (!run_window.picture_active || run_tab_count == 0U) {
-		run_window.picture_event_count = 0U;
+		if (!run_window.view_active || run_tab_count == 0U)
+			run_window.picture_event_count = 0U;
 		return;
 	}
 
@@ -3869,12 +3870,16 @@ run_view_inputs(void)
 	struct run_tab *tab;
 	const struct terminal_picture_event *event;
 	unsigned index;
+	unsigned pending_flags;
 
 	/* Nothing queued, or no view to take it. */
-	if (!run_window.view_active || run_tab_count == 0U)
-		return;
 	if (run_window.picture_event_count == 0U)
 		return;
+	if (!run_window.view_active || run_tab_count == 0U) {
+		if (!run_window.picture_active || run_tab_count == 0U)
+			run_window.picture_event_count = 0U;
+		return;
+	}
 
 	/* Each input in turn; the window's focus tells which tab has the keyboard. */
 	tab = &run_tabs[run_active];
@@ -3889,8 +3894,11 @@ run_view_inputs(void)
 			run_picture_focused = tab->id;
 	}
 
-	/* All taken. */
+	/* All taken; if the view marked itself dirty, draw in this round. */
 	run_window.picture_event_count = 0U;
+	pending_flags = tab->connection->ops->pending(tab->connection);
+	if ((pending_flags & TERMINAL_READY_OUTPUT) != 0U)
+		tab->screen->changed = 1;
 }
 
 /* Gives the active view tab the drag-and-drop events queued for it, answering enter and motion. */
