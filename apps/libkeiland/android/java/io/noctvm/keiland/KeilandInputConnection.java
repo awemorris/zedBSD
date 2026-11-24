@@ -7,8 +7,10 @@
 
 package io.noctvm.keiland;
 
+import android.content.Context;
 import android.view.KeyEvent;
 import android.view.inputmethod.BaseInputConnection;
+import android.view.inputmethod.InputMethodManager;
 
 /**
  * The input method's connection to the program: what it commits, composes and deletes is passed on
@@ -36,6 +38,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 	/** The view, whose key bar holds Ctrl and Alt for the next character. */
 	private final InputView inputView;
 
+	/** Whether an Enter press was consumed to finish composing text, so its release is consumed too. */
+	private boolean swallowNextEnterUp;
+
 	KeilandInputConnection(InputView view) {
 		super(view, true);
 		inputView = view;
@@ -45,6 +50,8 @@ final class KeilandInputConnection extends BaseInputConnection {
 	void forgetContext() {
 		context.setLength(0);
 		composing = "";
+		swallowNextEnterUp = false;
+		updateSelection();
 	}
 
 	@Override
@@ -91,12 +98,15 @@ final class KeilandInputConnection extends BaseInputConnection {
 			need = new int[1];
 			code = KeyBar.keycodeOf(committed.charAt(0), need);
 			if (code != 0) {
+				context.setLength(0);
+				updateSelection();
 				KeilandBridge.nativeKey(code, meta | need[0], true);
 				KeilandBridge.nativeKey(code, meta | need[0], false);
 				return true;
 			}
 		}
-		keep(committed);
+		keepOrClear(committed);
+		updateSelection();
 		KeilandBridge.nativeCommit(committed);
 		return true;
 	}
@@ -124,6 +134,7 @@ final class KeilandInputConnection extends BaseInputConnection {
 			cursor = length;
 		}
 
+		updateSelection();
 		KeilandBridge.nativeCompose(composed, cursor);
 		return true;
 	}
@@ -157,6 +168,7 @@ final class KeilandInputConnection extends BaseInputConnection {
 			composing = all.substring(from);
 		}
 		mark = composing.codePointCount(0, composing.length());
+		updateSelection();
 		KeilandBridge.nativeCompose(composing, mark);
 		return true;
 	}
@@ -169,8 +181,11 @@ final class KeilandInputConnection extends BaseInputConnection {
 		pending = composing;
 		composing = "";
 		if (!pending.isEmpty()) {
-			keep(pending);
+			keepOrClear(pending);
+			updateSelection();
 			KeilandBridge.nativeCommit(pending);
+		} else {
+			updateSelection();
 		}
 		return true;
 	}
@@ -195,6 +210,7 @@ final class KeilandInputConnection extends BaseInputConnection {
 			context.setLength(context.length() - left);
 			KeilandBridge.nativeDelete(taken.codePointCount(0, taken.length()), 0);
 		}
+		updateSelection();
 		return true;
 	}
 
@@ -219,18 +235,74 @@ final class KeilandInputConnection extends BaseInputConnection {
 	}
 
 	@Override
+	public boolean performEditorAction(int editorAction) {
+		if (!composing.isEmpty()) {
+			finishComposingText();
+			return true;
+		}
+		return super.performEditorAction(editorAction);
+	}
+
+	@Override
 	public boolean sendKeyEvent(KeyEvent event) {
+		int code = event.getKeyCode();
+
+		/* Pressing Enter while composing only confirms the composition and must not send Return to the program. */
+		if (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+			if (event.getAction() == KeyEvent.ACTION_DOWN) {
+				if (!composing.isEmpty()) {
+					finishComposingText();
+					swallowNextEnterUp = true;
+					return true;
+				}
+				swallowNextEnterUp = false;
+			} else if (event.getAction() == KeyEvent.ACTION_UP && swallowNextEnterUp) {
+				swallowNextEnterUp = false;
+				return true;
+			}
+		}
+
 		/* A Backspace takes the last character of the context; Enter and the keys that move the cursor end it. */
 		if (event.getAction() == KeyEvent.ACTION_DOWN) {
-			if (event.getKeyCode() == KeyEvent.KEYCODE_DEL && context.length() > 0 && composing.isEmpty()) {
+			if (code == KeyEvent.KEYCODE_DEL && context.length() > 0 && composing.isEmpty()) {
 				context.setLength(context.length() - 1);
-			} else if (event.getKeyCode() != KeyEvent.KEYCODE_SHIFT_LEFT && event.getKeyCode() != KeyEvent.KEYCODE_SHIFT_RIGHT) {
-				if (event.getKeyCode() != KeyEvent.KEYCODE_DEL) {
+				updateSelection();
+			} else if (code != KeyEvent.KEYCODE_SHIFT_LEFT && code != KeyEvent.KEYCODE_SHIFT_RIGHT) {
+				if (code != KeyEvent.KEYCODE_DEL) {
 					forgetContext();
 				}
 			}
 		}
 		return super.sendKeyEvent(event);
+	}
+
+	/**
+	 * Keeps committed word characters in the context for auto-correction, or clears the context
+	 * when a commit ends with punctuation/whitespace so the IME does not re-open across separators.
+	 */
+	private void keepOrClear(String committed) {
+		if (!committed.isEmpty() && !Character.isLetterOrDigit(committed.codePointBefore(committed.length()))) {
+			context.setLength(0);
+			return;
+		}
+		keep(committed);
+	}
+
+	/** Tells InputMethodManager the current cursor and composing span so the IME stays in sync. */
+	private void updateSelection() {
+		InputMethodManager manager;
+		int sel;
+		int compStart;
+		int compEnd;
+
+		manager = (InputMethodManager) inputView.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+		if (manager == null) {
+			return;
+		}
+		sel = context.length() + composing.length();
+		compStart = composing.isEmpty() ? -1 : context.length();
+		compEnd = composing.isEmpty() ? -1 : sel;
+		manager.updateSelection(inputView, sel, sel, compStart, compEnd);
 	}
 
 	/** Adds committed text to the context, which keeps its last characters. */

@@ -89,6 +89,7 @@ final class InputView extends View {
 			return;
 		}
 		mode = newMode;
+		forgetContext();
 		manager = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
 		if (manager != null) {
 			manager.restartInput(this);
