@@ -127,8 +127,12 @@ typedef int (*SSL_verify_cb)(int preverify_ok, X509_STORE_CTX *store);
 #define SSL_CTX_set_max_proto_version(ctx, version) \
 	SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MAX_PROTO_VERSION, (version), NULL)
 
-/* Returns the client method (a constant object). */
+/* Returns the client or server method (constant objects). */
 const SSL_METHOD *TLS_client_method(void);
+const SSL_METHOD *TLS_server_method(void);
+
+#define SSL_FILETYPE_PEM	1
+#define SSL_FILETYPE_ASN1	2
 
 /*
  * Makes a context: the client method only (another is NULL with an
@@ -214,6 +218,12 @@ X509_VERIFY_PARAM *SSL_get0_param(SSL *ssl);
  * same SSL after the socket is ready.
  */
 int SSL_connect(SSL *ssl);
+int SSL_accept(SSL *ssl);
+int SSL_CTX_use_certificate_ASN1(SSL_CTX *ctx, int len, const unsigned char *d);
+int SSL_CTX_use_PrivateKey_ASN1(int pk, SSL_CTX *ctx, const unsigned char *d, long len);
+int SSL_CTX_use_certificate_file(SSL_CTX *ctx, const char *file, int type);
+int SSL_CTX_use_PrivateKey_file(SSL_CTX *ctx, const char *file, int type);
+int SSL_CTX_generate_self_signed(SSL_CTX *ctx, const char *common_name);
 
 /*
  * Reads up to length bytes of application data (running the handshake

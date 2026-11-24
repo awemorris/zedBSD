@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "sslc-api.h"
+#include "../libcrypto-compat/cryc-pem.h"
 
 /* The kinds of call whose failure SSL_get_error classifies, which decide how an end of the stream and a closed connection read. */
 enum ssl_operation {
@@ -183,6 +184,7 @@ const size_t sslc_reason_count = sizeof(sslc_reason_numbers) / sizeof(sslc_reaso
  * object, so a pointer that is not it is never read.
  */
 static const struct ssl_method_st ssl_client_method = { 1 };
+static const struct ssl_method_st ssl_server_method = { 0 };
 
 /* Calls a user's verify callback for the handshake: records the verdict, then asks the callback. */
 static int ssl_verify_adapter(void *context, int preverified, enum cryc_verify_code code);
@@ -240,6 +242,16 @@ TLS_client_method(void)
 }
 
 /*
+ * Returns the server method (a constant object).
+ */
+const SSL_METHOD *
+TLS_server_method(void)
+{
+	/* Succeeded: the server method. */
+	return &ssl_server_method;
+}
+
+/*
  * Makes a context: the client method only (another is NULL with an error);
  * versions TLS 1.2 to 1.3; SSL_VERIFY_NONE; an empty store.
  */
@@ -259,8 +271,8 @@ SSL_CTX_new(
 		return NULL;
 	}
 
-	/* Refuses any method but the client method; the pointer is only compared. */
-	if (method != &ssl_client_method) {
+	/* Refuses any method other than the client or server method. */
+	if (method != &ssl_client_method && method != &ssl_server_method) {
 		ssl_queue(CRYC_R_UNSUPPORTED);
 		return NULL;
 	}
@@ -291,6 +303,7 @@ SSL_CTX_new(
 	/* The creator holds the first reference; versions and options are unset, and no peer is verified. */
 	ctx->references = 1L;
 	ctx->verify_mode = SSL_VERIFY_NONE;
+	ctx->server = (method == &ssl_server_method) ? 1 : 0;
 
 	/* Succeeded: a context with one reference, owned by the caller. */
 	return ctx;
@@ -314,9 +327,15 @@ SSL_CTX_free(
 	if (count != 0L)
 		return;
 
-	/* Frees the lock, the store reference and the object. */
+	/* Frees the lock, the store reference, any server cert/key, and the object. */
 	cryc_os_mutex_destroy(&ctx->lock);
 	cryc_x509_store_free(ctx->store);
+	free(ctx->cert_der);
+	if (ctx->ec_priv != NULL) {
+		cryc_wipe(ctx->ec_priv, ctx->ec_priv_len);
+		free(ctx->ec_priv);
+	}
+
 	free(ctx);
 }
 
@@ -767,6 +786,208 @@ SSL_connect(
 		return result;
 
 	/* Succeeded: the handshake is complete. */
+	return 1;
+}
+
+/*
+ * Runs the server TLS handshake.  Returns 1 when done, or 0/-1 on error/wait.
+ */
+int
+SSL_accept(
+	SSL *ssl)
+{
+	int error;
+	int result;
+
+	error = ssl_enter(ssl);
+	if (error != 0)
+		return -1;
+
+	error = ssl_start(ssl);
+	if (error != 0)
+		return -1;
+
+	result = 0;
+	error = ssl_handshake(ssl, SSL_OPERATION_HANDSHAKE, &result);
+	if (error != 0)
+		return result;
+
+	return 1;
+}
+
+/*
+ * Loads a DER-encoded X.509 certificate into ctx for server TLS.
+ */
+int
+SSL_CTX_use_certificate_ASN1(
+	SSL_CTX *ctx,
+	int len,
+	const unsigned char *d)
+{
+	uint8_t *copy;
+
+	if (ctx == NULL || d == NULL || len <= 0)
+		return 0;
+
+	copy = (uint8_t *)malloc((size_t)len);
+	if (copy == NULL)
+		return 0;
+
+	memcpy(copy, d, (size_t)len);
+	cryc_os_mutex_lock(&ctx->lock);
+	free(ctx->cert_der);
+	ctx->cert_der = copy;
+	ctx->cert_der_len = (size_t)len;
+	cryc_os_mutex_unlock(&ctx->lock);
+	return 1;
+}
+
+/*
+ * Loads a raw 32-byte ECDSA P-256 private key into ctx for server TLS.
+ */
+int
+SSL_CTX_use_PrivateKey_ASN1(
+	int pk,
+	SSL_CTX *ctx,
+	const unsigned char *d,
+	long len)
+{
+	uint8_t *copy;
+
+	(void)pk;
+	if (ctx == NULL || d == NULL || len <= 0)
+		return 0;
+
+	copy = (uint8_t *)malloc((size_t)len);
+	if (copy == NULL)
+		return 0;
+
+	memcpy(copy, d, (size_t)len);
+	cryc_os_mutex_lock(&ctx->lock);
+	if (ctx->ec_priv != NULL) {
+		cryc_wipe(ctx->ec_priv, ctx->ec_priv_len);
+		free(ctx->ec_priv);
+	}
+
+	ctx->ec_priv = copy;
+	ctx->ec_priv_len = (size_t)len;
+	cryc_os_mutex_unlock(&ctx->lock);
+	return 1;
+}
+
+/*
+ * Loads a PEM or DER certificate file into ctx.
+ */
+int
+SSL_CTX_use_certificate_file(
+	SSL_CTX *ctx,
+	const char *file,
+	int type)
+{
+	uint8_t *buf;
+	size_t size;
+	uint8_t *der;
+	size_t der_len;
+	size_t pos;
+	int ok;
+
+	if (ctx == NULL || file == NULL)
+		return 0;
+
+	buf = NULL;
+	size = 0U;
+	if (cryc_os_read_file(file, 262144U, &buf, &size) != 0)
+		return 0;
+
+	if (type == SSL_FILETYPE_ASN1) {
+		ok = SSL_CTX_use_certificate_ASN1(ctx, (int)size, buf);
+		free(buf);
+		return ok;
+	}
+
+	pos = 0U;
+	der = NULL;
+	der_len = 0U;
+	if (cryc_pem_next_certificate((const char *)buf, size, &pos, &der,
+				      &der_len) != 0 ||
+	    der == NULL) {
+		free(buf);
+		return 0;
+	}
+
+	ok = SSL_CTX_use_certificate_ASN1(ctx, (int)der_len, der);
+	free(der);
+	free(buf);
+	return ok;
+}
+
+/*
+ * Loads a private key file into ctx.
+ */
+int
+SSL_CTX_use_PrivateKey_file(
+	SSL_CTX *ctx,
+	const char *file,
+	int type)
+{
+	uint8_t *buf;
+	size_t size;
+	int ok;
+
+	(void)type;
+	if (ctx == NULL || file == NULL)
+		return 0;
+
+	buf = NULL;
+	size = 0U;
+	if (cryc_os_read_file(file, 65536U, &buf, &size) != 0)
+		return 0;
+
+	ok = 0;
+	if (size == 32U) {
+		ok = SSL_CTX_use_PrivateKey_ASN1(0, ctx, buf, (long)size);
+	}
+
+	cryc_wipe(buf, size);
+	free(buf);
+	return ok;
+}
+
+/*
+ * Generates an ECDSA P-256 keypair and self-signed X.509 v3 certificate
+ * directly on ctx.
+ */
+int
+SSL_CTX_generate_self_signed(
+	SSL_CTX *ctx,
+	const char *common_name)
+{
+	uint8_t *cert_der;
+	size_t cert_len;
+	uint8_t *priv32;
+
+	if (ctx == NULL)
+		return 0;
+
+	cert_der = NULL;
+	cert_len = 0U;
+	priv32 = NULL;
+	if (sslc_srv_generate_self_signed(common_name, cryc_os_random, NULL,
+					  &cert_der, &cert_len, &priv32) != 0)
+		return 0;
+
+	cryc_os_mutex_lock(&ctx->lock);
+	free(ctx->cert_der);
+	if (ctx->ec_priv != NULL) {
+		cryc_wipe(ctx->ec_priv, ctx->ec_priv_len);
+		free(ctx->ec_priv);
+	}
+
+	ctx->cert_der = cert_der;
+	ctx->cert_der_len = cert_len;
+	ctx->ec_priv = priv32;
+	ctx->ec_priv_len = 32U;
+	cryc_os_mutex_unlock(&ctx->lock);
 	return 1;
 }
 
@@ -1307,6 +1528,11 @@ ssl_start(
 	config.callback_context = ssl;
 	config.random = cryc_os_random;
 	config.random_context = NULL;
+	config.server = ssl->ctx->server;
+	config.cert_der = ssl->ctx->cert_der;
+	config.cert_der_len = ssl->ctx->cert_der_len;
+	config.ec_priv = ssl->ctx->ec_priv;
+	config.ec_priv_len = ssl->ctx->ec_priv_len;
 
 	/* The transport reads and writes the SSL's socket. */
 	transport.read = ssl_transport_read;

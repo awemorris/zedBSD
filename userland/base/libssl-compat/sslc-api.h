@@ -51,6 +51,11 @@ struct ssl_ctx_st {
 	int verify_mode;
 	SSL_verify_cb verify_callback;
 	X509_STORE *store;
+	int server;
+	uint8_t *cert_der;
+	size_t cert_der_len;
+	uint8_t *ec_priv;
+	size_t ec_priv_len;
 };
 
 /*

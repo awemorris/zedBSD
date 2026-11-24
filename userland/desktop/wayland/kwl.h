@@ -1499,6 +1499,9 @@ struct kwl_server {
 	int auth_fd;
 	int control_fd;
 	int seat_fd;
+	int rdp_fd;
+	unsigned headless;
+	struct kwl_rdp *rdp;
 	unsigned handed_over;
 	uint64_t logout_ms;
 	/*

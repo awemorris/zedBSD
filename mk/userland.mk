@@ -178,7 +178,8 @@ $(BUILD)/packages/ime/.stamp:         $(BUILD)/packages/libwayland/.stamp $(BUIL
 $(BUILD)/packages/sessiond/.stamp:    $(BUILD)/packages/passkey/.stamp
 $(BUILD)/packages/xserver/.stamp:     $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libGL/.stamp
 $(BUILD)/packages/zgears/.stamp $(BUILD)/packages/glxtest/.stamp: $(BUILD)/packages/libGL/.stamp $(BUILD)/packages/libGLX/.stamp
-$(BUILD)/packages/wayland/.stamp:     $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/sessiond/.stamp $(BUILD)/packages/mediastorage/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp
+$(BUILD)/packages/wayland/.stamp:     $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/sessiond/.stamp $(BUILD)/packages/mediastorage/.stamp $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp
+$(BUILD)/packages/rdpd/.stamp:        $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp $(BUILD)/packages/passkey/.stamp $(BUILD)/packages/wayland/.stamp
 
 # Test dependencies
 $(BUILD)/packages/kuidemo/.stamp:       $(KEILAND_COMMON_DEPS)

@@ -7,6 +7,7 @@ LIBMEDIA_SOURCES := $(LIBMEDIA_OS_SOURCES) userland/desktop/libmedia/engine.c us
 	userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \
 	userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c \
 	userland/desktop/libmedia/encoder.c \
+	userland/desktop/libmedia/h264sw-enc.c \
 	userland/desktop/libmedia/vkvideo-h265.c userland/desktop/libmedia/h265-stream.c \
 	userland/desktop/libmedia/h265-dpb.c userland/desktop/libmedia/h265-std.c \
 	userland/desktop/libmedia/h265sw-nal.c userland/desktop/libmedia/h265sw-poc.c \

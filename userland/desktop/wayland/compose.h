@@ -1148,6 +1148,8 @@ struct kwl_compose {
 	unsigned heads_stale;
 	uint32_t next_global;
 	unsigned mirror_unsupported_logged;
+	unsigned headless;
+	struct kwl_rdp *rdp;
 	/* The heads' windows of the frame being recorded (bottom to top; ws113-p007), and how many. */
 	struct kwl_object **frame_heads;
 	unsigned frame_head_count;

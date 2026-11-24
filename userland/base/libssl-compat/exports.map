@@ -13,6 +13,7 @@
 {
 	global:
 		TLS_client_method;
+		TLS_server_method;
 		SSL_CTX_new;
 		SSL_CTX_free;
 		SSL_CTX_set_verify;
@@ -21,6 +22,11 @@
 		SSL_CTX_set_options;
 		SSL_CTX_ctrl;
 		SSL_CTX_get_cert_store;
+		SSL_CTX_use_certificate_ASN1;
+		SSL_CTX_use_PrivateKey_ASN1;
+		SSL_CTX_use_certificate_file;
+		SSL_CTX_use_PrivateKey_file;
+		SSL_CTX_generate_self_signed;
 		SSL_new;
 		SSL_free;
 		SSL_set_fd;
@@ -28,6 +34,7 @@
 		SSL_set1_host;
 		SSL_get0_param;
 		SSL_connect;
+		SSL_accept;
 		SSL_read;
 		SSL_write;
 		SSL_get_error;

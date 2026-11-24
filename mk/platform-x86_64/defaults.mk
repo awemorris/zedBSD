@@ -302,6 +302,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	textedit \
 	videoplayer \
 	wayland \
+	rdpd \
 	wallpapers\
 	xserver \
 	i915-firmware \
