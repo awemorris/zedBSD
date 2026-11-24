@@ -422,6 +422,11 @@ kwl_compose_output_prepare(
 		compose->output.height = compose->mode_height;
 		compose->output.image_count = 1U;
 		compose->output.format = VK_FORMAT_B8G8R8A8_UNORM;
+		if (compose->output.images == NULL) {
+			compose->output.images = (VkImage *)calloc(1U, sizeof(VkImage));
+			if (compose->output.images == NULL)
+				return ENOMEM;
+		}
 		if (compose->pass == VK_NULL_HANDLE) {
 			compose->format = compose->output.format;
 			result = compose_pass(compose);

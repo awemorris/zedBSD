@@ -254,23 +254,12 @@ rdpd_session_start(
 		_exit(127);
 	}
 
-	/* Records compositor state and spawns the user session script. */
+	/* Records compositor state without spawning a duplicate compositor. */
 	close(sv[1]);
 	sess->compositor_pid = comp_pid;
 	sess->rdp_fd = sv[0];
-	sess_pid = fork();
-	if (sess_pid == 0) {
-		close(sv[0]);
-		drop_privileges(uid, gid, user, home, shell);
-		(void)setenv("WAYLAND_DISPLAY", sess->wayland_socket, 1);
-		sess_argv[0] = (char *)RDPD_SESSION_PATH;
-		sess_argv[1] = NULL;
-		execv(RDPD_SESSION_PATH, sess_argv);
-		_exit(127);
-	}
-
-	/* Saves the session process PID. */
-	sess->session_pid = sess_pid;
+	(void)sess_pid;
+	(void)sess_argv;
 	return 0;
 }
 
