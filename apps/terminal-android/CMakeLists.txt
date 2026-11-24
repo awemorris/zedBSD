@@ -50,7 +50,7 @@ foreach(abi ${MIKUTERM_ANDROID_ABIS})
 		CMAKE_ARGS
 			-DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_TOOLCHAIN_FILE}
 			-DANDROID_ABI=${abi}
-			-DANDROID_PLATFORM=android-28
+			-DANDROID_PLATFORM=android-29
 			-DCMAKE_BUILD_TYPE=Release
 			-DMIKUTERM_ROOT=${MIKUTERM_ROOT}
 			-DMIKUTERM_VERSION=${PROJECT_VERSION}
@@ -142,7 +142,7 @@ endif()
 add_custom_command(
 	OUTPUT ${MIKUTERM_BASE_APK}
 	COMMAND ${AAPT2} link -I ${ANDROID_JAR} --manifest ${MIKUTERM_DIR}/AndroidManifest.xml
-		--min-sdk-version 28 --target-sdk-version 35
+		--min-sdk-version 29 --target-sdk-version 35
 		--version-code ${MIKUTERM_VERSION_CODE} --version-name ${PROJECT_VERSION}
 		${MIKUTERM_AAPT2_DEBUG} -A ${MIKUTERM_ASSETS_DIR} -o ${MIKUTERM_BASE_APK} ${CMAKE_BINARY_DIR}/res.zip
 	DEPENDS ${CMAKE_BINARY_DIR}/res.zip ${MIKUTERM_DIR}/AndroidManifest.xml ${MIKUTERM_ASSETS_DIR}/share.version

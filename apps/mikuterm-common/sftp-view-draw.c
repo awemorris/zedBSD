@@ -81,6 +81,9 @@ sftp_view_draw_frame(
 	view->width = (int)width;
 	view->height = (int)height;
 
+	now_us = kl_clock_us();
+	sftp_view_poll_touch(view, now_us);
+
 	/* Computes logical view dimensions from the pixel frame. */
 	frame.x = 0;
 	frame.y = 0;
@@ -243,9 +246,15 @@ draw_top_bar(
 	int right_x;
 	int btn_w_refresh;
 	int btn_w_new;
+	int btn_w_upload;
+	int btn_w_download;
+	int btn_w_more;
+	size_t i;
+	size_t sel_count;
 	int cy;
 	int clicked;
 	int at_root;
+	int show_refresh;
 	unsigned f_res;
 	unsigned flags;
 
@@ -300,36 +309,82 @@ draw_top_bar(
 		sftp_view_navigate_up(view);
 	x += 36;
 
-	/* Right-aligned Refresh and New folder buttons. */
-	if (style->text != NULL) {
-		btn_w_new = kl_button_width(style, "New folder");
-		btn_w_refresh = kl_button_width(style, "Refresh");
-	} else {
-		btn_w_new = 96;
-		btn_w_refresh = 74;
+	/* Counts selected rows for Download button enablement. */
+	sel_count = 0U;
+	for (i = 0U; i < view->row_count; i++) {
+		if (view->rows[i].selected)
+			sel_count++;
 	}
 
-	/* Draws the New folder button. */
-	right_x = width - 8 - btn_w_new;
+	/* Right-aligned action buttons: Upload, Download, New folder, Refresh (wide), and overflow menu. */
+	show_refresh = (width >= 760);
+	if (style->text != NULL) {
+		btn_w_upload = kl_button_width(style, "Upload");
+		btn_w_download = kl_button_width(style, "Download");
+		btn_w_new = kl_button_width(style, "New folder");
+		btn_w_refresh = show_refresh ? kl_button_width(style, "Refresh") : 0;
+	} else {
+		btn_w_upload = 68;
+		btn_w_download = 82;
+		btn_w_new = 96;
+		btn_w_refresh = show_refresh ? 74 : 0;
+	}
+	btn_w_more = 28;
+
+	/* Overflow menu button (always includes Change Download Folder). */
+	right_x = width - 8 - btn_w_more;
 	btn.x = right_x;
 	btn.y = cy;
-	btn.width = btn_w_new;
+	btn.width = btn_w_more;
 	btn.height = 28;
+	clicked = kl_button(view->ui, style, SFTP_UI_MORE, &btn, "...", 0U);
+	if (clicked)
+		sftp_view_open_more_menu(view, btn.x - 160, btn.y + btn.height + 2);
+
 	if (view->worker_state == SFTP_WORKER_READY)
 		flags = 0U;
 	else
 		flags = KL_BUTTON_DISABLED;
+
+	/* Draws the New folder button. */
+	right_x -= 6 + btn_w_new;
+	btn.x = right_x;
+	btn.width = btn_w_new;
 	clicked = kl_button(view->ui, style, SFTP_UI_NEW_FOLDER, &btn, "New folder", flags);
 	if (clicked)
 		sftp_view_begin_new_folder(view);
 
-	/* Draws the Refresh button. */
-	right_x -= 6 + btn_w_refresh;
+	/* Draws the Refresh button when the bar is wide enough. */
+	if (show_refresh) {
+		right_x -= 6 + btn_w_refresh;
+		btn.x = right_x;
+		btn.width = btn_w_refresh;
+		clicked = kl_button(view->ui, style, SFTP_UI_REFRESH, &btn, "Refresh", flags);
+		if (clicked)
+			sftp_view_refresh_all(view);
+	}
+
+	/* Draws the Download button (enabled when rows are selected). */
+	right_x -= 6 + btn_w_download;
 	btn.x = right_x;
-	btn.width = btn_w_refresh;
-	clicked = kl_button(view->ui, style, SFTP_UI_REFRESH, &btn, "Refresh", flags);
+	btn.width = btn_w_download;
+	clicked = kl_button(
+		view->ui,
+		style,
+		SFTP_UI_DOWNLOAD,
+		&btn,
+		"Download",
+		(view->worker_state == SFTP_WORKER_READY && sel_count > 0U) ? 0U : KL_BUTTON_DISABLED);
 	if (clicked)
-		sftp_view_refresh_all(view);
+		sftp_view_download_selected(view);
+
+	/* Draws the Upload button. */
+	right_x -= 6 + btn_w_upload;
+	btn.x = right_x;
+	btn.width = btn_w_upload;
+	clicked = kl_button(view->ui, style, SFTP_UI_UPLOAD, &btn, "Upload", flags);
+	if (clicked && view->on_upload != NULL)
+		view->on_upload(view->platform_data, view);
 
 	/* Computes the breadcrumb / path-edit area between the button groups. */
 	crumb_area.x = x;

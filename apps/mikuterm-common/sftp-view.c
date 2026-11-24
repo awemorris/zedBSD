@@ -12,13 +12,13 @@
  */
 
 #include "sftp-view.h"
-#include "sftp-drag-win32.h"
+#if MIKUTERM_HAVE_SFTP_DRAG
+#include "apps/terminal-win32/sftp-drag-win32.h"
+#endif
 #include "sftp-local.h"
 #include "sftp-transfer.h"
 
 #include "userland/desktop/terminal/terminal.h"
-
-#include <windows.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -47,8 +47,10 @@ static size_t view_op_copy(struct terminal_connection *connection, char *text, s
 static int view_op_can_paste(const struct terminal_connection *connection);
 static void view_op_paste(struct terminal_connection *connection, const char *text, size_t length);
 static void view_op_refuse(struct terminal_connection *connection);
+#if MIKUTERM_HAVE_SFTP_DRAG
 static void view_drag_notify(void *data, const char *error_text);
 static void view_run_external_drag(struct sftp_view *view);
+#endif
 static void view_worker_notify(void *data);
 static void view_poll_worker(struct sftp_view *view);
 static void view_free_tree(struct sftp_tree_node *node);
@@ -188,8 +190,10 @@ sftp_view_create(
 		return error;
 	}
 
-	/* Creates the outbound virtual-file drag context and publishes the view. */
+	/* Creates the outbound virtual-file drag context when supported and publishes the view. */
+#if MIKUTERM_HAVE_SFTP_DRAG
 	view->drag_ctx = sftp_drag_context_create(view->worker, view_drag_notify, view);
+#endif
 	view->dirty = 1;
 	*connection_out = &view->connection;
 	return 0;
@@ -208,8 +212,6 @@ sftp_view_confirm_close(
 	struct sftp_transfer_snapshot *items;
 	size_t count;
 	size_t active;
-	wchar_t msg[256];
-	const wchar_t *verb;
 	int answer;
 	int error;
 
@@ -228,25 +230,19 @@ sftp_view_confirm_close(
 	error = sftp_worker_transfers(view->worker, &items, &count, &active);
 	if (error == 0)
 		sftp_worker_transfers_free(items);
+#if MIKUTERM_HAVE_SFTP_DRAG
 	active += sftp_drag_context_active_count(view->drag_ctx);
+#endif
 	if (active == 0U)
 		return 1;
 
 	/* Prompts the user to confirm cancelling active transfers. */
-	if (active == 1U)
-		verb = L" is";
-	else
-		verb = L"s are";
-	(void)swprintf(
-		msg,
-		sizeof(msg) / sizeof(msg[0]),
-		L"%zu transfer%s in progress. Close and cancel them?",
-		active,
-		verb);
-	answer = MessageBoxW(NULL, msg, L"mikuterm SFTP", MB_YESNO | MB_ICONWARNING);
-	if (answer == IDYES) {
+	answer = sftp_view_platform_confirm_close(active);
+	if (answer) {
 		sftp_worker_cancel_all(view->worker);
+#if MIKUTERM_HAVE_SFTP_DRAG
 		sftp_drag_context_cancel_all(view->drag_ctx);
+#endif
 		return 1;
 	}
 
@@ -1019,9 +1015,59 @@ sftp_view_execute_ctx(
 	case SFTP_CTX_TOGGLE_HIDDEN:
 		sftp_view_toggle_hidden(view);
 		break;
+	case SFTP_CTX_CHANGE_DOWNLOAD_DIR:
+		if (view->on_change_download_dir != NULL)
+			view->on_change_download_dir(view->platform_data, view);
+		break;
+	case SFTP_CTX_SELECT_ALL:
+		sftp_view_select_all(view);
+		break;
 	default:
 		break;
 	}
+}
+
+/*
+ * Opens the toolbar overflow menu at (ux, uy).
+ */
+void
+sftp_view_open_more_menu(
+	struct sftp_view *view,
+	int ux,
+	int uy)
+{
+	int ready;
+
+	if (view == NULL)
+		return;
+	ready = view->worker_state == SFTP_WORKER_READY;
+	view->ctx_count = 0U;
+	view->ctx_items[view->ctx_count].id = SFTP_CTX_CHANGE_DOWNLOAD_DIR;
+	view->ctx_items[view->ctx_count].label = "Change Download Folder";
+	view->ctx_items[view->ctx_count].enabled = 1;
+	view->ctx_count++;
+	view->ctx_items[view->ctx_count].id = SFTP_CTX_SELECT_ALL;
+	view->ctx_items[view->ctx_count].label = "Select all";
+	view->ctx_items[view->ctx_count].enabled = ready && view->row_count > 0U;
+	view->ctx_count++;
+	view->ctx_items[view->ctx_count].id = SFTP_CTX_REFRESH;
+	view->ctx_items[view->ctx_count].label = "Refresh";
+	view->ctx_items[view->ctx_count].enabled = ready;
+	view->ctx_count++;
+	view->ctx_items[view->ctx_count].id = SFTP_CTX_TOGGLE_HIDDEN;
+	view->ctx_items[view->ctx_count].label = view->show_hidden ? "Hide dot-files" : "Show dot-files";
+	view->ctx_items[view->ctx_count].enabled = ready;
+	view->ctx_count++;
+	view->ctx_items[view->ctx_count].id = SFTP_CTX_COPY_PATH;
+	view->ctx_items[view->ctx_count].label = "Copy path";
+	view->ctx_items[view->ctx_count].enabled = view->current_path[0] != '\0';
+	view->ctx_count++;
+
+	view->ctx_x = ux;
+	view->ctx_y = uy;
+	view->ctx_hover = -1;
+	view->ctx_open = 1;
+	view->dirty = 1;
 }
 
 /*
@@ -1324,11 +1370,13 @@ view_conn_event(
 		return 0U;
 
 	/* Launches an outbound OLE virtual-file drag when posted. */
+#if MIKUTERM_HAVE_SFTP_DRAG
 	if (event->code == SFTP_VIEW_DRAG_POST) {
 		view->drag_start_pending = 0;
 		view_run_external_drag(view);
 		return TERMINAL_READY_OUTPUT;
 	}
+#endif
 
 	/* Ignores unknown post codes. */
 	if (event->code != SFTP_VIEW_POST)
@@ -1349,16 +1397,24 @@ static unsigned
 view_conn_pending(
 	const struct terminal_connection *connection)
 {
-	const struct sftp_view *view;
+	struct sftp_view *view;
+	uint64_t now_us;
 	int dirty;
 
-	/* Reads the dirty flag under the view lock. */
-	view = (const struct sftp_view *)connection;
-	kl_mutex_lock((struct kl_mutex *)&view->lock);
+	/* Reads the dirty flag under the view lock and checks pending long-press. */
+	view = (struct sftp_view *)(uintptr_t)connection;
+	if (view->touch_active && !view->touch_moved && !view->touch_long_pressed) {
+		now_us = kl_clock_us();
+		if (now_us >= view->touch_start_us &&
+		    (now_us - view->touch_start_us) >= SFTP_TOUCH_LONG_PRESS_US) {
+			sftp_view_poll_touch(view, now_us);
+		}
+	}
+	kl_mutex_lock(&view->lock);
 
 	dirty = view->dirty;
 
-	kl_mutex_unlock((struct kl_mutex *)&view->lock);
+	kl_mutex_unlock(&view->lock);
 	if (dirty)
 		return TERMINAL_READY_OUTPUT;
 	return 0U;
@@ -1381,10 +1437,12 @@ view_conn_close(
 	}
 
 	/* Detaches the drag context. */
+#if MIKUTERM_HAVE_SFTP_DRAG
 	if (view->drag_ctx != NULL) {
 		sftp_drag_context_detach(view->drag_ctx);
 		view->drag_ctx = NULL;
 	}
+#endif
 
 	/* Stops the worker thread. */
 	if (view->worker != NULL) {
@@ -1658,6 +1716,7 @@ void
 sftp_view_request_external_drag(
 	struct sftp_view *view)
 {
+#if MIKUTERM_HAVE_SFTP_DRAG
 	/* Posts SFTP_VIEW_DRAG_POST when the worker is ready and no drag is pending. */
 	if (view == NULL || view->closed || view->app == NULL)
 		return;
@@ -1667,8 +1726,12 @@ sftp_view_request_external_drag(
 		return;
 	view->drag_start_pending = 1;
 	(void)kl_app_post(view->app, SFTP_VIEW_DRAG_POST, (void *)(uintptr_t)view->number);
+#else
+	(void)view;
+#endif
 }
 
+#if MIKUTERM_HAVE_SFTP_DRAG
 /* Receives error notifications from outbound virtual-file drag operations. */
 static void
 view_drag_notify(
@@ -1744,6 +1807,7 @@ view_run_external_drag(
 		(void)sftp_drag_run(view->drag_ctx, items, count);
 	free(items);
 }
+#endif
 
 /* Worker thread notification callback. */
 static void

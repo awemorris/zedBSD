@@ -509,3 +509,26 @@ main_confirm_close(
 	confirmed = sftp_view_confirm_close(view_conn, window);
 	return confirmed;
 }
+
+/* Prompts the user on Windows before closing an SFTP tab with active transfers. */
+int
+sftp_view_platform_confirm_close(
+	size_t active_transfers)
+{
+	wchar_t msg[256];
+	const wchar_t *verb;
+	int answer;
+
+	if (active_transfers == 1U)
+		verb = L" is";
+	else
+		verb = L"s are";
+	(void)swprintf(
+		msg,
+		sizeof(msg) / sizeof(msg[0]),
+		L"%zu transfer%s in progress. Close and cancel them?",
+		active_transfers,
+		verb);
+	answer = MessageBoxW(NULL, msg, L"mikuterm SFTP", MB_YESNO | MB_ICONWARNING);
+	return answer == IDYES ? 1 : 0;
+}

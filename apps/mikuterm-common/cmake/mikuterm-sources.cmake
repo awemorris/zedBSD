@@ -51,7 +51,10 @@ list(TRANSFORM MIKUTERM_COMMON_SOURCES APPEND .c)
 
 set(MIKUTERM_COMMON_SFTP_SOURCES
 	${MIKUTERM_COMMON_DIR}/sftp-worker.c
-	${MIKUTERM_COMMON_DIR}/sftp-transfer.c)
+	${MIKUTERM_COMMON_DIR}/sftp-transfer.c
+	${MIKUTERM_COMMON_DIR}/sftp-view.c
+	${MIKUTERM_COMMON_DIR}/sftp-view-draw.c
+	${MIKUTERM_COMMON_DIR}/sftp-view-input.c)
 
 set(MIKUTERM_COMMON_RDP_SOURCES
 	${MIKUTERM_COMMON_DIR}/rdp-hosts.c

@@ -96,6 +96,8 @@ struct sftp_context_item {
 #define SFTP_CTX_COPY_PATH	5
 #define SFTP_CTX_REFRESH	6
 #define SFTP_CTX_TOGGLE_HIDDEN	7
+#define SFTP_CTX_CHANGE_DOWNLOAD_DIR	8
+#define SFTP_CTX_SELECT_ALL	9
 
 /* Widget IDs for kl_ui. */
 #define SFTP_UI_BACK		1U
@@ -112,9 +114,16 @@ struct sftp_context_item {
 #define SFTP_UI_TRANSFER_CANCEL_ALL	12U
 #define SFTP_UI_TRANSFER_LIST	13U
 #define SFTP_UI_RETRY		14U
+#define SFTP_UI_UPLOAD		15U
+#define SFTP_UI_DOWNLOAD	16U
+#define SFTP_UI_MORE		17U
 #define SFTP_UI_DIALOG_BASE	100U
 #define SFTP_UI_DIALOG_FIELD	110U
 #define SFTP_UI_TRANSFER_ITEM_BASE	200U
+
+/* Touch gesture thresholds (long-press in microseconds, slop in logical pixels). */
+#define SFTP_TOUCH_LONG_PRESS_US	500000ULL
+#define SFTP_TOUCH_SLOP			12
 
 /* Layout constants (logical units at 96 dpi). */
 #define SFTP_BAR_HEIGHT		42
@@ -248,9 +257,24 @@ struct sftp_view {
 	int ctx_open;
 	int ctx_x;
 	int ctx_y;
-	struct sftp_context_item ctx_items[8];
+	struct sftp_context_item ctx_items[12];
 	size_t ctx_count;
 	int ctx_hover;
+
+	/* Touch gesture state. */
+	int touch_active;
+	uint32_t touch_id;
+	int touch_start_x;
+	int touch_start_y;
+	int touch_last_y;
+	uint64_t touch_start_us;
+	int touch_moved;
+	int touch_long_pressed;
+
+	/* Platform action callbacks (optional; used for upload / download-folder pickers). */
+	void (*on_upload)(void *data, struct sftp_view *view);
+	void (*on_change_download_dir)(void *data, struct sftp_view *view);
+	void *platform_data;
 
 	/* Cached hit rectangles (logical units) for input and drop hit-testing. */
 	struct kl_rect rect_tree;
@@ -299,5 +323,8 @@ int sftp_view_hit_folder_at(struct sftp_view *view, int ux, int uy, char *path_o
 int sftp_view_draw_frame(struct sftp_view *view, const struct terminal_view_state *state, uint32_t *pixels, uint32_t width, uint32_t height);
 void sftp_view_handle_input(struct sftp_view *view, const struct terminal_picture_event *event);
 unsigned sftp_view_handle_drop(struct sftp_view *view, struct terminal_window *window, const struct terminal_drop_event *event);
+void sftp_view_poll_touch(struct sftp_view *view, uint64_t now_us);
+void sftp_view_open_more_menu(struct sftp_view *view, int ux, int uy);
+int sftp_view_platform_confirm_close(size_t active_transfers);
 
 #endif
