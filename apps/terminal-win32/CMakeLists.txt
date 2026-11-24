@@ -87,6 +87,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/proxy.c
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/sftp-local-win32.c
+	${MIKUTERM_DIR}/sftp-drag-win32.c
 	${MIKUTERM_DIR}/sftp-view.c
 	${MIKUTERM_DIR}/sftp-view-draw.c
 	${MIKUTERM_DIR}/sftp-view-input.c
