@@ -894,7 +894,7 @@ thread_rdp(
 			if (screen->rows[index].kind == LAUNCH_RDP_CONNECT) {
 				/* Prompts for user@host:port when Connect is chosen. */
 				error = thread_ask(choice->session,
-						   "Host (user@host:port): ",
+						   "\r\nHost (user@host:port): ",
 						   SESSION_ASK_LINE,
 						   spec, sizeof(spec));
 				if (error == EPIPE)
