@@ -909,8 +909,13 @@ thread_rdp(
 	if (error != 0)
 		return EAGAIN;
 
+#ifdef MIKUTERM_HAVE_LIBMEDIA
+	error = rdp_thread_start(tab, &target, &rdp_media_decoder_ops,
+				 choice->session->connect_timeout);
+#else
 	error = rdp_thread_start(tab, &target, &rdp_h264sw_decoder_ops,
 				 choice->session->connect_timeout);
+#endif
 	if (error != 0) {
 		rdp_tab_release(tab);
 		return EAGAIN;
