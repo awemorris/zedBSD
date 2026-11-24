@@ -167,10 +167,11 @@ struct mikuterm_session {
 	/* The SFTP channel relay shared with the SFTP worker and tab (NULL until opened). */
 	struct sftp_link *sftp_link;
 
-	/* Whether the SSH session is authenticated and its main channel is open, and the active/pending SFTP view tab. */
+	/* Whether the SSH session is authenticated and its main channel is open, and the active/pending SFTP/RDP view tabs. */
 	int sftp_ready;
 	struct terminal_connection *sftp_view;
 	struct terminal_connection *sftp_pending_tab;
+	struct terminal_connection *rdp_pending_tab;
 
 	/*
 	 * The X windows' tabs the thread opened that the run has not taken
@@ -212,6 +213,7 @@ void session_shell(struct mikuterm_session *session, const char *path);
 void session_thread_ended(void);
 int session_app_post(struct kl_app *app, uint32_t number);
 void session_tab(struct mikuterm_session *session, struct x11_tab *tab);
+void session_rdp_tab(struct mikuterm_session *session, struct terminal_connection *tab);
 
 /* The thread (ssh-thread.c). */
 void session_run(void *argument);

@@ -74,7 +74,9 @@ enum conf_keyword {
 	CONF_SFTP = 15,
 	CONF_SFTP_PRESERVE_TIMES = 16,
 	CONF_SFTP_SHOW_HIDDEN = 17,
-	CONF_KEYWORDS = 18
+	CONF_RDP_PORT = 18,
+	CONF_RDP_RESIZE = 19,
+	CONF_KEYWORDS = 20
 };
 
 /*
@@ -105,7 +107,9 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "X11PrimaryToClipboard", 0 },
 	{ "Sftp", 0 },
 	{ "SftpPreserveTimes", 0 },
-	{ "SftpShowHidden", 1 }
+	{ "SftpShowHidden", 1 },
+	{ "RdpPort", 0 },
+	{ "RdpResize", 0 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -157,6 +161,8 @@ mikuterm_conf_defaults(
 	conf->sftp = 1;
 	conf->sftp_preserve_times = 1;
 	conf->sftp_show_hidden = 1;
+	conf->rdp_port = 3389U;
+	conf->rdp_resize = 1;
 }
 
 /*
@@ -328,6 +334,12 @@ mikuterm_conf_text(
 		break;
 	case CONF_SFTP_SHOW_HIDDEN:
 		written = snprintf(value, size, "%s", conf->sftp_show_hidden ? "yes" : "no");
+		break;
+	case CONF_RDP_PORT:
+		written = snprintf(value, size, "%u", conf->rdp_port);
+		break;
+	case CONF_RDP_RESIZE:
+		written = snprintf(value, size, "%s", conf->rdp_resize ? "yes" : "no");
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -805,6 +817,18 @@ conf_value(
 			conf->sftp_show_hidden = yes;
 			conf->sftp_show_hidden_given = 1;
 		}
+		break;
+	case CONF_RDP_PORT:
+		status = conf_number(value, 1U, 65535U, &number);
+		*why = "RdpPort is a port number from 1 to 65535";
+		if (status == 0)
+			conf->rdp_port = number;
+		break;
+	case CONF_RDP_RESIZE:
+		status = conf_yes(value, &yes);
+		*why = "RdpResize is yes or no";
+		if (status == 0)
+			conf->rdp_resize = yes;
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);
