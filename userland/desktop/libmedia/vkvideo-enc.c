@@ -22,7 +22,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
+#ifdef __ZEDBSD__
 #include <vulkan/vulkan_video.h>
+#else
+#include <vk_video/vulkan_video_codec_h264std.h>
+#include <vk_video/vulkan_video_codec_h264std_encode.h>
+#endif
 
 #define VKENC_BUFFER_USAGE_VIDEO_ENCODE_DST	((VkBufferUsageFlags)0x00008000U)
 #define VKENC_IMAGE_LAYOUT_VIDEO_ENCODE_SRC	((VkImageLayout)1000299001)
