@@ -1,0 +1,626 @@
+--- a/content/browser/service_host/utility_sandbox_delegate.cc
++++ b/content/browser/service_host/utility_sandbox_delegate.cc
+@@ -24,10 +24,10 @@
+ #include "sandbox/policy/sandbox_type.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "media/gpu/buildflags.h"
+ #include "media/media_buildflags.h"
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_MAC)
+ #include "base/mac/process_requirement.h"
+--- a/content/common/BUILD.gn
++++ b/content/common/BUILD.gn
+@@ -395,7 +395,7 @@
+     ]
+   }
+ 
+-  if (is_mac || is_win || is_android || is_fuchsia || is_ios) {
++  if (is_mac || is_win || is_android || is_fuchsia || is_ios || is_zedbsd) {
+     sources -= [ "font_list_fontconfig.cc" ]
+   }
+ 
+@@ -407,6 +407,9 @@
+     sources += [ "font_list_fuchsia.cc" ]
+     deps += [ "//third_party/fuchsia-sdk/sdk/pkg/fdio" ]
+   }
++  if (is_zedbsd) {
++    sources += [ "font_list_fuchsia.cc" ]
++  }
+ 
+   if (use_clang_profiling_inside_sandbox) {
+     sources += [ "profiling_utils.cc" ]
+--- a/content/gpu/BUILD.gn
++++ b/content/gpu/BUILD.gn
+@@ -126,7 +126,7 @@
+   }
+ 
+   # Use DRI on desktop Linux builds.
+-  if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
++  if (false && current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
+       !is_castos) {
+     configs += [ "//build/config/linux/dri" ]
+   }
+--- a/content/public/common/features.gni
++++ b/content/public/common/features.gni
+@@ -23,7 +23,7 @@
+ # is only enabled for desktop Android, but should be enabled on all Android
+ # at some point once the feature is stable. See crbug.com/40418135.
+ enable_screen_capture = is_linux || is_chromeos || (is_apple && use_blink) ||
+-                        is_win || is_android || is_fuchsia
++                        is_win || is_android || is_fuchsia || is_zedbsd
+ 
+ assert(
+     !enable_separate_renderer_binary || is_win || is_mac || is_linux,
+--- a/content/public/common/zygote/features.gni
++++ b/content/public/common/zygote/features.gni
+@@ -2,4 +2,4 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-use_zygote = is_posix && !is_android && !is_apple
++use_zygote = is_posix && !is_android && !is_apple && !is_zedbsd
+--- a/content/shell/BUILD.gn
++++ b/content/shell/BUILD.gn
+@@ -58,8 +58,9 @@
+   }
+ }
+ 
+-# Web test support not built on android, but is everywhere else.
+-support_web_tests = !is_android
++# Web test support not built on android, but is everywhere else.  Nor on
++# zedBSD: its test fonts are not in the release archive the build starts from.
++support_web_tests = !is_android && !is_zedbsd
+ 
+ source_set("android_shell_descriptors") {
+   testonly = true
+@@ -105,7 +106,7 @@
+       "//ui/native_theme",
+     ]
+   }
+-  if (!is_fuchsia) {
++  if (!is_fuchsia && !is_zedbsd) {
+     deps += [
+       "//components/crash/core/app",
+       "//components/crash/core/app:test_support",
+@@ -389,7 +390,7 @@
+       "browser/fuchsia_view_presenter.h",
+     ]
+     deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.element:fuchsia.element_hlcpp" ]
+-  } else {
++  } else if (!is_zedbsd) {
+     deps += [
+       "//components/crash/content/browser",
+       "//components/crash/core/app",
+@@ -1163,7 +1164,7 @@
+   if (is_win) {
+     data_deps += [ "//build/win:copy_cdb_to_output" ]
+   }
+-  if (is_posix) {
++  if (is_posix && !is_zedbsd) {
+     data_deps += [
+       "//third_party/breakpad:dump_syms",
+       "//third_party/breakpad:minidump_stackwalk",
+--- a/content/shell/app/shell_main_delegate.cc
++++ b/content/shell/app/shell_main_delegate.cc
+@@ -43,7 +43,7 @@
+ #include "net/cookies/cookie_monster.h"
+ #include "ui/base/resource/resource_bundle.h"
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ #include "content/web_test/browser/web_test_browser_main_runner.h"  // nogncheck
+ #include "content/web_test/browser/web_test_content_browser_client.h"  // nogncheck
+ #include "content/web_test/renderer/web_test_content_renderer_client.h"  // nogncheck
+@@ -243,7 +243,7 @@
+ 
+   InitLogging(command_line);
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     // Instantiating `ui::OsSettingsProvider` will both provide sane default
+     // behavior and prevent `ui::OsSettingsProvider::Get()` from instantiating a
+@@ -328,7 +328,7 @@
+   base::CurrentProcess::GetInstance().SetProcessType(
+       base::CurrentProcessType::PROCESS_BROWSER);
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     // Web tests implement their own BrowserMain() replacement.
+     web_test_runner_->RunBrowserMain(std::move(main_function_params));
+@@ -476,7 +476,7 @@
+ }
+ 
+ ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     browser_client_ = std::make_unique<WebTestContentBrowserClient>();
+     return browser_client_.get();
+@@ -492,7 +492,7 @@
+ }
+ 
+ ContentRendererClient* ShellMainDelegate::CreateContentRendererClient() {
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   if (switches::IsRunWebTestsSwitchPresent()) {
+     renderer_client_ = std::make_unique<WebTestContentRendererClient>();
+     return renderer_client_.get();
+--- a/content/shell/app/shell_main_delegate.h
++++ b/content/shell/app/shell_main_delegate.h
+@@ -13,7 +13,7 @@
+ #include "components/memory_system/memory_system.h"
+ #include "content/public/app/content_main_delegate.h"
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ namespace ui {
+ class OsSettingsProvider;
+ }
+@@ -26,7 +26,7 @@
+ class ShellContentRendererClient;
+ class ShellContentUtilityClient;
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ class WebTestBrowserMainRunner;
+ #endif
+ 
+@@ -68,7 +68,7 @@
+   // |is_content_browsertests_| and |web_test_runner_| are mutually exclusive.
+   bool is_content_browsertests_;
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   // Only present when running web tests, which run inside Content Shell.
+ 
+   // Web tests should not use the current machine settings for theming, but
+--- a/content/test/BUILD.gn
++++ b/content/test/BUILD.gn
+@@ -3256,7 +3256,8 @@
+         [ "../services/isolated_xr_device/xr_sandbox_hook_linux_unittest.cc" ]
+   }
+ 
+-  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia) {
++  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia ||
++      is_zedbsd) {
+     data = [
+       "$root_out_dir/content_shell.pak",
+       "data/",
+--- a/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
++++ b/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
+@@ -137,7 +137,7 @@
+ gfx::GpuMemoryBufferHandle
+ OzoneImageBacking::GetSinglePlaneGpuMemoryBufferHandle(uint32_t index) {
+   gfx::NativePixmapHandle native_pixmap_handle = pixmap_->ExportHandle();
+-#if BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   NOTREACHED() << "Cannot get single plane from GPU memory buffer";
+ #else
+   DCHECK(native_pixmap_handle.modifier == 0);
+--- a/gpu/config/gpu_test_config.cc
++++ b/gpu/config/gpu_test_config.cc
+@@ -27,7 +27,7 @@
+ GPUTestConfig::OS GetCurrentOS() {
+ #if BUILDFLAG(IS_CHROMEOS)
+   return GPUTestConfig::kOsChromeOS;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ZEDBSD)
+   return GPUTestConfig::kOsLinux;
+ #elif BUILDFLAG(IS_WIN)
+   int32_t major_version = 0;
+--- a/media/capture/video/fake_video_capture_device_factory.cc
++++ b/media/capture/video/fake_video_capture_device_factory.cc
+@@ -232,7 +232,7 @@
+     VideoCaptureApi api =
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+         VideoCaptureApi::LINUX_V4L2_SINGLE_PLANE;
+-#elif BUILDFLAG(IS_IOS)
++#elif BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ZEDBSD)
+         VideoCaptureApi::UNKNOWN;
+ #elif BUILDFLAG(IS_MAC)
+         VideoCaptureApi::MACOSX_AVFOUNDATION;
+--- a/media/cdm/library_cdm/cdm_paths.gni
++++ b/media/cdm/library_cdm/cdm_paths.gni
+@@ -22,6 +22,8 @@
+   component_os = "mac"
+ } else if (is_fuchsia) {
+   component_os = "fuchsia"
++} else if (is_zedbsd) {
++  component_os = "zedbsd"
+ } else {
+   assert(false, "unsupported_platform")
+ }
+--- a/media/media_options.gni
++++ b/media/media_options.gni
+@@ -131,7 +131,8 @@
+   # Determines if a GpuChannel is needed between media capture utility process
+   # and gpu process for a given platform.
+   enable_gpu_channel_media_capture =
+-      is_linux || is_win || is_chromeos || is_apple || is_android || is_fuchsia
++      is_linux || is_win || is_chromeos || is_apple || is_android ||
++      is_fuchsia || is_zedbsd
+ }
+ 
+ # Use another declare_args() to allow dependence on args defined above.
+--- a/media/webrtc/helpers.cc
++++ b/media/webrtc/helpers.cc
+@@ -68,12 +68,12 @@
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+   const bool kInputVolumeAdjustmentOverrideAllowed = true;
+-#elif BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++#elif BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   const bool kInputVolumeAdjustmentOverrideAllowed = false;
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   // Use AGC2 digital and input volume controller.
+   // TODO(crbug.com/40872787): Remove `kWebRtcAllowInputVolumeAdjustment` safely
+   // and set `input_volume_controller.enabled` true.
+--- a/services/cert_verifier/cert_verifier_creation.cc
++++ b/services/cert_verifier/cert_verifier_creation.cc
+@@ -129,7 +129,7 @@
+                                                 root_store_mtc_metadata);
+ 
+     std::unique_ptr<net::SystemTrustStore> trust_store;
+-#if BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+     trust_store = net::CreateChromeOnlySystemTrustStore(std::move(chrome_root));
+ #else
+     if (instance_params.include_system_trust_store) {
+--- a/services/cert_verifier/cert_verifier_service_factory.cc
++++ b/services/cert_verifier/cert_verifier_service_factory.cc
+@@ -175,8 +175,13 @@
+   mojom::PlatformRootStoreInfoPtr info_ptr =
+       mojom::PlatformRootStoreInfo::New();
+   std::unique_ptr<net::SystemTrustStore> system_trust_store =
++#if BUILDFLAG(IS_ZEDBSD)
++      net::CreateChromeOnlySystemTrustStore(
++          std::make_unique<net::TrustStoreChrome>());
++#else
+       net::CreateSslSystemTrustStoreChromeRoot(
+           std::make_unique<net::TrustStoreChrome>());
++#endif
+ 
+   net::PlatformTrustStore* platform_trust_store =
+       system_trust_store->GetPlatformTrustStore();
+--- a/services/screen_ai/buildflags/features.gni
++++ b/services/screen_ai/buildflags/features.gni
+@@ -6,7 +6,8 @@
+ 
+ declare_args() {
+   # Screen AI service is only supported on desktop platforms.
+-  enable_screen_ai_service = is_linux || is_mac || is_chromeos || is_win
++  enable_screen_ai_service =
++      is_linux || is_mac || is_chromeos || is_win || is_zedbsd
+ 
+   # Screen AI library is not available for browser tests on ChromeOS. Tast tests
+   # cover library's OCR functionality on ChromeOS.
+--- a/v8/BUILD.gn
++++ b/v8/BUILD.gn
+@@ -1150,6 +1150,7 @@
+   "V8_TARGET_OS_LINUX",
+   "V8_TARGET_OS_MACOS",
+   "V8_TARGET_OS_WIN",
++  "V8_TARGET_OS_ZEDBSD",
+   "V8_TARGET_OS_CHROMEOS",
+   "V8_TARGET_ARCH_ARM64",
+   "V8_TARGET_ARCH_PPC64",
+@@ -1244,6 +1245,9 @@
+ } else if (target_os == "chromeos") {
+   enabled_external_v8_defines += [ "V8_HAVE_TARGET_OS" ]
+   enabled_external_v8_defines += [ "V8_TARGET_OS_CHROMEOS" ]
++} else if (target_os == "zedbsd") {
++  enabled_external_v8_defines += [ "V8_HAVE_TARGET_OS" ]
++  enabled_external_v8_defines += [ "V8_TARGET_OS_ZEDBSD" ]
+ }
+ 
+ # Some V8_TARGET_ARCH_ defines that affect Api constants (see usages of
+@@ -2537,6 +2541,13 @@
+   # The clang toolchain's resource dir contains builting headers
+   # include/{stddef.h,stdarg.h,...}.
+   _metagen_clang_resource_dir = "$clang_base_path/lib/clang/$clang_version"
++  if (target_os == "zedbsd") {
++    # Every toolchain of a zedBSD build compiles with zedBSD's clang, which is
++    # not the one libclang comes from: the resource dir is that of Chromium's
++    # own clang.
++    _metagen_clang_resource_dir =
++        "$default_clang_base_path/lib/clang/$clang_version"
++  }
+ 
+   # The headers are parsed with v8_base_without_compiler's flags.
+   _metagen_flags_target = ":v8_base_without_compiler"
+@@ -2690,6 +2701,15 @@
+         args += [ "--extra-flag=$flag" ]
+       }
+     }
++
++    if (is_zedbsd) {
++      # libclang does not know zedBSD: it is told the macros that zedBSD's
++      # clang defines for the target.
++      args += [
++        "--extra-flag=-D__ZEDBSD__=1",
++        "--extra-flag=-D__unix__=1",
++      ]
++    }
+   }
+ }
+ 
+@@ -7974,6 +7994,11 @@
+       "src/base/debug/stack_trace_zos.cc",
+       "src/base/platform/platform-zos.cc",
+     ]
++  } else if (is_zedbsd) {
++    sources += [
++      "src/base/debug/stack_trace_posix.cc",
++      "src/base/platform/platform-zedbsd.cc",
++    ]
+   }
+ 
+   if (v8_current_cpu == "mips64") {
+--- a/v8/include/v8config.h
++++ b/v8/include/v8config.h
+@@ -94,6 +94,7 @@
+ //  V8_OS_STARBOARD     - Starboard (platform abstraction for Cobalt)
+ //  V8_OS_AIX           - AIX
+ //  V8_OS_WIN           - Microsoft Windows
++//  V8_OS_ZEDBSD        - zedBSD
+ //  V8_OS_ZOS           - z/OS
+ 
+ #if defined(__ANDROID__)
+@@ -183,6 +184,11 @@
+ # define V8_OS_POSIX 1
+ # define V8_OS_ZOS 1
+ # define V8_OS_STRING "zos"
++
++#elif defined(__ZEDBSD__)
++# define V8_OS_POSIX 1
++# define V8_OS_ZEDBSD 1
++# define V8_OS_STRING "zedbsd"
+ #endif
+ 
+ // -----------------------------------------------------------------------------
+@@ -195,6 +201,7 @@
+ //  V8_TARGET_OS_LINUX
+ //  V8_TARGET_OS_MACOS
+ //  V8_TARGET_OS_WIN
++//  V8_TARGET_OS_ZEDBSD
+ //  V8_TARGET_OS_CHROMEOS
+ //
+ // If not set explicitly, these fall back to corresponding V8_OS_ values.
+@@ -209,6 +216,7 @@
+   && !defined(V8_TARGET_OS_LINUX) \
+   && !defined(V8_TARGET_OS_MACOS) \
+   && !defined(V8_TARGET_OS_WIN) \
++  && !defined(V8_TARGET_OS_ZEDBSD) \
+   && !defined(V8_TARGET_OS_CHROMEOS)
+ #  error No known target OS defined.
+ # endif
+@@ -222,6 +230,7 @@
+   || defined(V8_TARGET_OS_LINUX) \
+   || defined(V8_TARGET_OS_MACOS) \
+   || defined(V8_TARGET_OS_WIN) \
++  || defined(V8_TARGET_OS_ZEDBSD) \
+   || defined(V8_TARGET_OS_CHROMEOS)
+ #  error A target OS is defined but V8_HAVE_TARGET_OS is unset.
+ # endif
+@@ -255,6 +264,10 @@
+ # define V8_TARGET_OS_WIN
+ #endif
+ 
++#ifdef V8_OS_ZEDBSD
++# define V8_TARGET_OS_ZEDBSD
++#endif
++
+ #endif  // V8_HAVE_TARGET_OS
+ 
+ #if defined(V8_TARGET_OS_ANDROID)
+@@ -269,6 +282,8 @@
+ # define V8_TARGET_OS_STRING "macos"
+ #elif defined(V8_TARGET_OS_WINDOWS)
+ # define V8_TARGET_OS_STRING "windows"
++#elif defined(V8_TARGET_OS_ZEDBSD)
++# define V8_TARGET_OS_STRING "zedbsd"
+ #else
+ # define V8_TARGET_OS_STRING "unknown"
+ #endif
+--- a/v8/src/base/debug/stack_trace_posix.cc
++++ b/v8/src/base/debug/stack_trace_posix.cc
+@@ -273,8 +273,13 @@
+   }
+   if (signal == SIGBUS || signal == SIGFPE || signal == SIGILL ||
+       signal == SIGSEGV) {
++#if V8_OS_ZEDBSD
++    internal::itoa_r(static_cast<intptr_t>(info->si_addr), buf, sizeof(buf),
++                     16, 12);
++#else
+     internal::itoa_r(reinterpret_cast<intptr_t>(info->si_addr), buf,
+                      sizeof(buf), 16, 12);
++#endif
+     PrintToStderr(buf);
+   }
+   PrintToStderr("\n");
+--- a/v8/src/base/platform/platform-posix.cc
++++ b/v8/src/base/platform/platform-posix.cc
+@@ -73,7 +73,7 @@
+ #include <sys/resource.h>
+ #endif
+ 
+-#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS
++#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS && !V8_OS_ZEDBSD
+ #include <sys/syscall.h>
+ #endif
+ 
+@@ -938,7 +938,7 @@
+   return static_cast<int>(thread_self());
+ #elif V8_OS_FUCHSIA
+   return static_cast<int>(zx_thread_self());
+-#elif V8_OS_SOLARIS
++#elif V8_OS_SOLARIS || V8_OS_ZEDBSD
+   return static_cast<int>(pthread_self());
+ #elif V8_OS_ZOS
+   return __tcbtid();
+--- /dev/null
++++ b/v8/src/base/platform/platform-zedbsd.cc
+@@ -0,0 +1,64 @@
++// Copyright 2026 The V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <elf.h>
++#include <link.h>
++#include <string.h>
++
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "src/base/platform/platform-posix-time.h"
++#include "src/base/platform/platform-posix.h"
++#include "src/base/platform/platform.h"
++
++namespace v8 {
++namespace base {
++
++TimezoneCache* OS::CreateTimezoneCache() {
++  return new PosixDefaultTimezoneCache();
++}
++
++namespace {
++
++int CollectSharedLibraryPhdr(struct dl_phdr_info* info, size_t size,
++                             void* data) {
++  auto* result = static_cast<std::vector<OS::SharedLibraryAddress>*>(data);
++  if (info->dlpi_name == nullptr || info->dlpi_name[0] == '\0') {
++    return 0;
++  }
++  const char* sep = strrchr(info->dlpi_name, '/');
++  std::string lib_name(sep != nullptr ? sep + 1 : info->dlpi_name);
++  for (ElfW_Half i = 0; i < info->dlpi_phnum; ++i) {
++    const ElfW_Phdr& phdr = info->dlpi_phdr[i];
++    if (phdr.p_type == PT_LOAD && (phdr.p_flags & PF_X) != 0) {
++      uintptr_t start = static_cast<uintptr_t>(info->dlpi_addr + phdr.p_vaddr);
++      uintptr_t end = start + static_cast<uintptr_t>(phdr.p_memsz);
++      result->emplace_back(lib_name, start, end);
++    }
++  }
++  return 0;
++}
++
++}  // namespace
++
++std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
++  std::vector<SharedLibraryAddress> result;
++  dl_iterate_phdr(CollectSharedLibraryPhdr, &result);
++  return result;
++}
++
++void OS::SignalCodeMovingGC() {}
++
++void OS::AdjustSchedulingParams() {}
++
++std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
++    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
++    size_t alignment) {
++  return std::nullopt;
++}
++
++}  // namespace base
++}  // namespace v8
+--- a/v8/src/base/sys-info.cc
++++ b/v8/src/base/sys-info.cc
+@@ -18,6 +18,11 @@
+ #include <sys/sysctl.h>
+ #endif
+ 
++#if V8_OS_ZEDBSD
++#include <sys/sysctl.h>
++#include <uapi/system.h>
++#endif
++
+ #include <limits>
+ 
+ #include "src/base/logging.h"
+@@ -103,6 +108,14 @@
+   int pages = __get_num_frames();
+   long page_size = sysconf(_SC_PAGESIZE);
+   return static_cast<uint64_t>(pages) * page_size;
++#elif V8_OS_ZEDBSD
++  int mib[2] = {CTL_HW, HW_MEMORY_STATS};
++  struct vm_statistics stats;
++  size_t len = sizeof(stats);
++  if (sysctl(mib, 2, &stats, &len, nullptr, 0) != 0) {
++    return 0;
++  }
++  return static_cast<int64_t>(stats.physical_total);
+ #elif V8_OS_POSIX
+   long pages = sysconf(_SC_PHYS_PAGES);    // NOLINT(runtime/int)
+   long page_size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)
+--- a/v8/src/libsampler/sampler.cc
++++ b/v8/src/libsampler/sampler.cc
+@@ -19,7 +19,7 @@
+ 
+ #include "src/base/platform/memory-protection-key.h"
+ 
+-#if !V8_OS_QNX && !V8_OS_AIX && !V8_OS_ZOS
++#if !V8_OS_QNX && !V8_OS_AIX && !V8_OS_ZOS && !V8_OS_ZEDBSD
+ #include <sys/syscall.h>
+ #endif
+ 
+@@ -318,6 +318,10 @@
+   zx_handle_t profiled_thread_ = ZX_HANDLE_INVALID;
+ };
+ 
++#elif V8_OS_ZEDBSD
++
++class Sampler::PlatformData {};
++
+ #endif  // USE_SIGNALS
+ 
+ #if defined(USE_SIGNALS)
+--- a/v8/src/libsampler/sampler.h
++++ b/v8/src/libsampler/sampler.h
+@@ -13,7 +13,7 @@
+ #include "src/base/lazy-instance.h"
+ #include "src/base/macros.h"
+ 
+-#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA
++#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_ZEDBSD
+ #define USE_SIGNALS
+ #endif
+ 
+--- a/v8/tools/metagen/compile_flags.py
++++ b/v8/tools/metagen/compile_flags.py
+@@ -199,9 +199,11 @@
+       # Without it gn prepends any build-file warning to the document -- an
+       # arm_float_abi that no declare_args() claims on the arm64 bots, say --
+       # and the parse below fails. A gn that actually fails still reports.
++      root_target = target_label.split("(", 1)[0]
+       proc = subprocess.run(
+           [
+-              gn, "desc", "-q", "--root=" + source_root, tmp_dir, target_label,
++              gn, "desc", "-q", "--root=" + source_root,
++              "--root-target=" + root_target, tmp_dir, target_label,
+               "--format=json"
+           ],
+           cwd=source_root,
+--- a/v8/tools/metagen/metagen.py
++++ b/v8/tools/metagen/metagen.py
+@@ -357,6 +357,8 @@
+   # The driver places builtin headers after libc++ and before the SDK.
+   # In cl-mode, libc++ must arrive as -I to precede the resource dir.
+   flags.append(f"-resource-dir={resource_dir}")
++  if any("zedbsd" in f for f in raw_flags):
++    flags.extend(["-isystem", os.path.join(resource_dir, "include")])
+ 
+   verbose_print(f"Harvesting class hierarchy from "
+                 f"{os.path.relpath(driver_path, v8_root)} ({flags_source})...")

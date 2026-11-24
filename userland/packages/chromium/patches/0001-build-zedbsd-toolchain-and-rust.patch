@@ -31,44 +31,79 @@
  #if defined(OS_QNX)
  #define BUILDFLAG_INTERNAL_IS_QNX() (1)
  #else
---- a/build/config/BUILDCONFIG.gn
-+++ b/build/config/BUILDCONFIG.gn
-@@ -123,6 +123,8 @@
- #   even if the value is overridden, which is wasteful. See first bullet.
- 
- declare_args() {
-+  is_zedbsd = false
-+  zedbsd_dynamic_dir = ""
-   # Set to enable the official build level of optimization. This has nothing
-   # to do with branding, but enables an additional level of optimization above
-   # release (!is_debug). This might be better expressed as a tri-state
 --- a/build/config/BUILD.gn
 +++ b/build/config/BUILD.gn
 @@ -208,6 +208,8 @@
      # Targets should choose to explicitly link frameworks they require. Since
      # linking can have run-time side effects, nothing should be listed here.
      libs = []
-+  } else if (is_zedbsd && current_toolchain == default_toolchain) {
++  } else if (is_zedbsd) {
 +    libs = [ "m" ]
    } else if (is_linux || is_chromeos) {
      libs = [
        "dl",
+--- a/build/config/BUILDCONFIG.gn
++++ b/build/config/BUILDCONFIG.gn
+@@ -123,6 +123,9 @@
+ #   even if the value is overridden, which is wasteful. See first bullet.
+ 
+ declare_args() {
++  # The directory of zedBSD's shared libraries the target links against.
++  zedbsd_dynamic_dir = ""
++
+   # Set to enable the official build level of optimization. This has nothing
+   # to do with branding, but enables an additional level of optimization above
+   # release (!is_debug). This might be better expressed as a tri-state
+@@ -295,6 +298,8 @@
+   _default_toolchain = "//build/toolchain/aix:$target_cpu"
+ } else if (target_os == "zos") {
+   _default_toolchain = "//build/toolchain/zos:$target_cpu"
++} else if (target_os == "zedbsd") {
++  _default_toolchain = "//build/toolchain/zedbsd:clang_$target_cpu"
+ } else if (target_os == "emscripten") {
+   # Because it's too hard to remove all targets from //BUILD.gn that do not work
+   # with it.
+@@ -340,6 +345,7 @@
+ is_wasm = current_os == "emscripten"
+ is_watchos = current_os == "watchos"
+ is_win = current_os == "win" || current_os == "winuwp"
++is_zedbsd = current_os == "zedbsd"
+ 
+ is_apple = is_ios || is_mac || is_watchos
+ is_posix = !is_win && !is_fuchsia
 --- a/build/config/clang/BUILD.gn
 +++ b/build/config/clang/BUILD.gn
-@@ -256,9 +256,16 @@
+@@ -252,13 +252,33 @@
+       } else if (current_os == "aix") {
+         _dir = "aix"
+         _suffix = "-powerpc64"
++      } else if (is_zedbsd) {
++        _dir = ""
+       } else {
          assert(false)  # Unhandled target platform
        }
  
 -      _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
 -      _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
 -      libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
-+      not_needed([ "_ext", "_prefix", "_dir", "_suffix", "_libname" ])
-+      if (is_zedbsd && current_toolchain == default_toolchain) {
-+        libs = [ "/home/awe/zedBSD/build/x86_64/sysroot/usr/lib/libclang_rt.builtins.a" ]
-+      } else if (is_zedbsd) {
-+        libs = [ "//third_party/llvm-build/Release+Asserts/lib/clang/24/lib/x86_64-unknown-linux-gnu/libclang_rt.builtins.a" ]
++      if (is_zedbsd) {
++        # zedBSD's compiler runtime is the sysroot's.
++        not_needed([
++                     "_ext",
++                     "_prefix",
++                     "_dir",
++                     "_suffix",
++                     "_libname",
++                   ])
++        libs = [ "$target_sysroot/usr/lib/${_prefix}clang_rt.${_libname}.a" ]
 +      } else {
 +        _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
++        if (target_os == "zedbsd") {
++          # The build machine's programs of a zedBSD build are compiled by
++          # zedBSD's clang, which carries no runtime for the build machine:
++          # they take the runtime of Chromium's own clang.
++          _clang_lib_dir = "//third_party/llvm-build/Release+Asserts/lib/clang/$clang_version/lib"
++        }
 +        _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
 +        libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
 +      }
@@ -83,7 +118,7 @@
  config("no_unresolved_symbols") {
 -  if ((!using_sanitizer || is_android) &&
 -      (is_linux || is_chromeos || is_android || is_fuchsia)) {
-+  if (is_zedbsd && current_toolchain == default_toolchain) {
++  if (is_zedbsd) {
 +    ldflags = [
 +      "-Wl,--allow-shlib-undefined",
 +      "-Wl,--as-needed",
@@ -93,19 +128,27 @@
      ldflags = [
        "-Wl,-z,defs",
        "-Wl,--as-needed",
-@@ -469,8 +474,9 @@
+@@ -469,8 +474,8 @@
        } else if (is_chromeos) {
          cflags += [ "-fstack-protector-strong" ]
        } else if (is_posix || is_fuchsia) {
 -        if (current_os != "aix") {
 -          # Not available on aix.
-+        if (current_os != "aix" &&
-+            !(is_zedbsd && current_toolchain == default_toolchain)) {
++        if (current_os != "aix" && !is_zedbsd) {
 +          # Not available on aix or zedbsd.
            cflags += [ "-fstack-protector" ]
          }
        }
-@@ -1012,6 +1018,9 @@
+@@ -544,7 +549,7 @@
+ 
+   # Linux/Android/Fuchsia common flags setup.
+   # ---------------------------------
+-  if (is_linux || is_chromeos || is_android || is_fuchsia) {
++  if (is_linux || is_chromeos || is_android || is_fuchsia || is_zedbsd) {
+     asmflags += [ "-fPIC" ]
+     cflags += [ "-fPIC" ]
+     ldflags += [ "-fPIC" ]
+@@ -1012,6 +1017,9 @@
    }
    if (rust_abi_target != "") {
      rustflags += [ "--target=$rust_abi_target" ]
@@ -115,11 +158,20 @@
    }
    if (!use_thin_lto || !toolchain_supports_rust_thin_lto) {
      # Don't include bitcode if it won't be used.
-@@ -1795,6 +1804,9 @@
+@@ -1105,7 +1113,7 @@
+     }
+   }
+ 
+-  if (is_linux || is_chromeos || is_android || is_fuchsia) {
++  if (is_linux || is_chromeos || is_android || is_fuchsia || is_zedbsd) {
+     ldflags += [
+       "-Wl,-z,noexecstack",
+       "-Wl,-z,relro",
+@@ -1795,6 +1803,9 @@
  
    if (use_safe_libcxx) {
      defines += [ "_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE" ]
-+    if (is_zedbsd && current_toolchain == default_toolchain) {
++    if (is_zedbsd) {
 +      defines += [ "_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE" ]
 +    }
    } else {
@@ -132,7 +184,7 @@
    # simplicity we always explicitly set the architecture.
    if (current_cpu == "x64") {
 -    if (is_clang && !is_android && !is_fuchsia && !is_chromeos_device) {
-+    if (is_zedbsd && current_toolchain == default_toolchain) {
++    if (is_zedbsd) {
 +      cpu_abi_cflags += [
 +        "--target=x86_64-unknown-zedbsd",
 +        "-DKERN_USER_ABI_LP64",
@@ -149,19 +201,18 @@
      } else {
 --- a/build/config/linux/BUILD.gn
 +++ b/build/config/linux/BUILD.gn
-@@ -40,7 +40,8 @@
+@@ -40,7 +40,7 @@
    }
  
    if ((!is_chromeos || default_toolchain != "//build/toolchain/cros:target") &&
 -      (!use_custom_libcxx || current_cpu == "mipsel")) {
-+      (!use_custom_libcxx || current_cpu == "mipsel") &&
-+      !(is_zedbsd && current_toolchain == default_toolchain)) {
++      (!use_custom_libcxx || current_cpu == "mipsel") && !is_zedbsd) {
      libs = [ "atomic" ]
    }
  }
 --- a/build/config/linux/dri/BUILD.gn
 +++ b/build/config/linux/dri/BUILD.gn
-@@ -1,18 +1 @@
+@@ -1,18 +1,2 @@
 -# Copyright 2017 The Chromium Authors
 -# Use of this source code is governed by a BSD-style license that can be
 -# found in the LICENSE file.
@@ -179,34 +230,115 @@
 -                                   ],
 -                               "string")
 -  defines = [ "DRI_DRIVER_DIR=\"$dri_driver_dir\"" ]
--}
-+config("dri") {}
++config("dri") {
+ }
 --- a/build/config/rust.gni
 +++ b/build/config/rust.gni
-@@ -234,7 +234,11 @@
+@@ -228,7 +228,14 @@
+ # (see '*_toolchain_supports_platform above') to enable experimentation with
+ # other toolchains.
+ rust_abi_target = ""
+-if (is_linux || is_chromeos) {
++if (is_zedbsd) {
++  # A target of its own (build/rust/x86_64-unknown-zedbsd.json).
++  if (current_cpu == "x64") {
++    rust_abi_target = "x86_64-unknown-zedbsd"
++  } else {
++    assert(false, "Architecture not supported")
++  }
++} else if (is_linux || is_chromeos) {
+   if (current_cpu == "arm64") {
+     rust_abi_target = "aarch64-unknown-linux-gnu"
    } else if (current_cpu == "x86") {
-     rust_abi_target = "i686-unknown-linux-gnu"
-   } else if (current_cpu == "x64") {
--    rust_abi_target = "x86_64-unknown-linux-gnu"
-+    if (is_zedbsd && current_toolchain == default_toolchain) {
-+      rust_abi_target = "x86_64-unknown-zedbsd"
-+    } else {
-+      rust_abi_target = "x86_64-unknown-linux-gnu"
-+    }
-   } else if (current_cpu == "arm") {
-     if (arm_float_abi == "hard") {
-       float_suffix = "hf"
---- a/build/config/sysroot.gni
-+++ b/build/config/sysroot.gni
-@@ -21,7 +21,7 @@
+--- a/build/config/ui.gni
++++ b/build/config/ui.gni
+@@ -24,12 +24,13 @@
+ declare_args() {
+   # Indicates if Aura is enabled. Aura is a low-level windowing library, sort
+   # of a replacement for GDI or GTK.
+-  use_aura = is_win || is_linux || is_chromeos || is_fuchsia
++  use_aura = is_win || is_linux || is_chromeos || is_fuchsia || is_zedbsd
  }
  
- if (sysroot == "") {
--  if (current_os == target_os && current_cpu == target_cpu &&
-+  if (current_toolchain == default_toolchain && current_os == target_os && current_cpu == target_cpu &&
-       target_sysroot != "") {
-     sysroot = target_sysroot
-   } else if (is_android) {
+ declare_args() {
+   # True means the UI is built using the "views" framework.
+-  toolkit_views = is_mac || is_win || is_linux || is_chromeos || is_fuchsia
++  toolkit_views =
++      is_mac || is_win || is_linux || is_chromeos || is_fuchsia || is_zedbsd
+ 
+   use_glib = is_linux && !is_castos &&
+              # Avoid the need for glib when Android is building things via
+--- a/build/modules/BUILD.gn
++++ b/build/modules/BUILD.gn
+@@ -101,7 +101,7 @@
+     extra_headers += [ ":ios_sysroot(${default_toolchain})" ]
+   } else if (is_mac && use_system_xcode) {
+     extra_headers += [ ":mac_sysroot(${default_toolchain})" ]
+-  } else if (is_linux || is_mac || is_android || is_chromeos) {
++  } else if (is_linux || is_mac || is_android || is_chromeos || is_zedbsd) {
+     root_include_dir = "usr/include"
+   } else if (is_fuchsia) {
+     root_include_dir = "include"
+--- a/build/rust/gni_impl/cpp_api_from_rust_wrapper.py
++++ b/build/rust/gni_impl/cpp_api_from_rust_wrapper.py
+@@ -5,6 +5,7 @@
+ # found in the LICENSE file.
+ 
+ import argparse
++import os
+ import subprocess
+ import pathlib
+ import sys
+@@ -33,6 +34,12 @@
+     if args.rustc_env_and_flags:
+         (rustenv, rustflags) = LoadRustEnvAndFlags(args.rustc_env_and_flags)
+         PrepareRustEnvForExecution(rustenv)
++    if rustenv is None:
++        rustenv = os.environ.copy()
++    rustenv.setdefault(
++        'RUST_TARGET_PATH',
++        os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
++    )
+ 
+     expanded_rustflags = ExpandNestedRustStyleRspFiles(rustflags)
+     flag_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+--- a/build/rust/gni_impl/libclang_args.gni
++++ b/build/rust/gni_impl/libclang_args.gni
+@@ -36,10 +36,30 @@
+ # says the wrong thing. We point it to our clang's resource dir which will
+ # make it behave consistently with our other command line flags and allows
+ # system headers to be found.
+-_libclang_extra_args += [
+-  "-resource-dir",
+-  rebase_path(clang_base_path + "/lib/clang/" + clang_version, root_build_dir),
+-]
++#
++# libclang is that of Chromium's own clang.  Every toolchain of a zedBSD build
++# compiles with zedBSD's clang, so libclang takes the resource dir of its own
++# clang there; and as it does not know zedBSD, it is told the macros that
++# zedBSD's clang defines for the target.
++if (target_os == "zedbsd") {
++  _libclang_extra_args += [
++    "-resource-dir",
++    rebase_path(default_clang_base_path + "/lib/clang/" + clang_version,
++                root_build_dir),
++  ]
++} else {
++  _libclang_extra_args += [
++    "-resource-dir",
++    rebase_path(clang_base_path + "/lib/clang/" + clang_version,
++                root_build_dir),
++  ]
++}
++if (is_zedbsd) {
++  _libclang_extra_args += [
++    "-D__ZEDBSD__=1",
++    "-D__unix__=1",
++  ]
++}
+ 
+ if (is_win) {
+   # On Windows we fall back to using system headers from a sysroot from
 --- a/build/rust/gni_impl/rustc_print_cfg.py
 +++ b/build/rust/gni_impl/rustc_print_cfg.py
 @@ -34,10 +34,18 @@
@@ -253,7 +385,7 @@
  s390x-unknown-linux-gnu
 --- /dev/null
 +++ b/build/rust/x86_64-unknown-zedbsd.json
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,42 @@
 +{
 +  "abi-return-struct-as-int": true,
 +  "arch": "x86_64",
@@ -294,41 +426,62 @@
 +    "unix"
 +  ],
 +  "target-pointer-width": 64,
-+  "linker": "/home/awe/zedBSD/build/x86_64/packages/toolchain/bin/zedbsd-clang",
 +  "tls-model": "global-dynamic"
 +}
 \ No newline at end of file
 --- /dev/null
 +++ b/build/toolchain/zedbsd/BUILD.gn
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,10 @@
 +import("//build/toolchain/gcc_toolchain.gni")
 +
++# zedBSD's x86-64 programs, compiled by zedBSD's clang (clang_base_path)
++# against zedBSD's sysroot (target_sysroot).
 +clang_toolchain("clang_x64") {
 +  toolchain_args = {
 +    current_cpu = "x64"
-+    current_os = "linux"
++    current_os = "zedbsd"
 +  }
 +}
---- a/buildtools/third_party/libc++abi/BUILD.gn
-+++ b/buildtools/third_party/libc++abi/BUILD.gn
-@@ -59,7 +59,8 @@
+--- a/tools/grit/grit_args.gni
++++ b/tools/grit/grit_args.gni
+@@ -14,7 +14,7 @@
+ # Prefer using this (and excluding specific platforms) when a resource applies
+ # to (most) desktop platforms.
+ assert(toolkit_views ==
+-       (is_chromeos || is_fuchsia || is_linux || is_mac || is_win))
++       (is_chromeos || is_fuchsia || is_linux || is_mac || is_win || is_zedbsd))
  
-   defines = [ "LIBCXXABI_SILENT_TERMINATE" ]
+ # Variables that are passed to grit with the -D flag.
  
--  if (is_linux || is_android) {
-+  if ((is_linux && !(is_zedbsd && current_toolchain == default_toolchain)) ||
-+      is_android) {
-     defines += [ "_LIBCXXABI_USE_FUTEX" ]
-   }
+--- a/tools/perf/chrome_telemetry_build/BUILD.gn
++++ b/tools/perf/chrome_telemetry_build/BUILD.gn
+@@ -192,7 +192,7 @@
+   ]
  
---- a/content/gpu/BUILD.gn
-+++ b/content/gpu/BUILD.gn
-@@ -126,7 +126,7 @@
-   }
+   # Cr-Fuchsia doesn't support breakpad.
+-  if (!is_win && !is_fuchsia) {
++  if (!is_win && !is_fuchsia && !is_zedbsd) {
+     data_deps += [
+       # This is defined for Windows, but is unused by Telemetry on
+       # Windows, and including it can have issues when cross-compiling
+--- a/tools/v8_context_snapshot/v8_context_snapshot.gni
++++ b/tools/v8_context_snapshot/v8_context_snapshot.gni
+@@ -31,14 +31,15 @@
  
-   # Use DRI on desktop Linux builds.
--  if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
-+  if (false && current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
-       !is_castos) {
-     configs += [ "//build/config/linux/dri" ]
-   }
+ declare_args() {
+   # TODO(crbug.com/40539769): Enable the feature on more environments.
+-  # Disable in mac, win and linux cross builds from a different host OS since
+-  # building Blink twice is slow (and the host toolchain targets the host OS).
++  # Disable in mac, win, linux and zedbsd cross builds from a different host OS
++  # since building Blink twice is slow (and the host toolchain targets the host
++  # OS).
+   use_v8_context_snapshot =
+       include_both_v8_snapshots ||
+       (!is_chromeos && !is_android && !is_castos && !is_fuchsia &&
+        !(host_toolchain == default_toolchain && is_msan) &&
+        !(is_win && host_os != "win") && !(is_mac && host_os != "mac") &&
+-       !(is_linux && host_os != "linux"))
++       !(is_linux && host_os != "linux") && !(is_zedbsd && host_os != "zedbsd"))
+ }
+ 
+ # Apply the secondary abi overrides. Must occur outside of declare_args in

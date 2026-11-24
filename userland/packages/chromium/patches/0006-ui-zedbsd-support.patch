@@ -1,0 +1,191 @@
+--- a/ui/base/BUILD.gn
++++ b/ui/base/BUILD.gn
+@@ -710,7 +710,7 @@
+   ]
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+   static_library("pixel_diff_test_support") {
+     testonly = true
+     sources = [
+--- a/ui/base/clipboard/clipboard_constants.h
++++ b/ui/base/clipboard/clipboard_constants.h
+@@ -46,7 +46,8 @@
+ 
+ // ----- LINUX & CHROMEOS & FUCHSIA MIME TYPES -----
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kMimeTypeLinuxUtf8String[] = "UTF8_STRING";
+ inline constexpr char kMimeTypeLinuxString[] = "STRING";
+ inline constexpr char kMimeTypeLinuxText[] = "TEXT";
+@@ -56,10 +57,10 @@
+     "application/vnd.portal.filetransfer";
+ inline constexpr char kMimeTypePortalFiles[] = "application/vnd.portal.files";
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+-        // BUILDFLAG(IS_FUCHSIA)
++        // BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || \
+-    BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kMimeTypeSourceUrl[] = "chromium/x-source-url";
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+         // BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
+--- a/ui/base/dragdrop/os_exchange_data_provider_factory.cc
++++ b/ui/base/dragdrop/os_exchange_data_provider_factory.cc
+@@ -7,7 +7,8 @@
+ #include "base/notreached.h"
+ #include "build/build_config.h"
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "ui/base/dragdrop/os_exchange_data_provider_factory_ozone.h"
+ #include "ui/base/dragdrop/os_exchange_data_provider_non_backed.h"
+ #elif BUILDFLAG(IS_APPLE)
+@@ -21,7 +22,7 @@
+ // static
+ std::unique_ptr<OSExchangeDataProvider>
+ OSExchangeDataProviderFactory::CreateProvider() {
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   // The instance can be nullptr in tests that do not instantiate the platform,
+   // or on platforms that do not implement specific drag'n'drop.  For them,
+   // falling back to the Aura provider should be fine.
+--- a/ui/base/unowned_user_data/BUILD.gn
++++ b/ui/base/unowned_user_data/BUILD.gn
+@@ -5,8 +5,8 @@
+ # Technically, this could be supported on more platforms, but these are the only
+ # ones where it's needed today.
+ 
+-assert(
+-    is_win || is_apple || is_linux || is_chromeos || is_android || is_fuchsia)
++assert(is_win || is_apple || is_linux || is_chromeos || is_android ||
++       is_fuchsia || is_zedbsd)
+ 
+ component("unowned_user_data") {
+   defines = [ "IS_UNOWNED_USER_DATA_IMPL" ]
+--- a/ui/events/keycodes/dom/keycode_converter.cc
++++ b/ui/events/keycodes/dom/keycode_converter.cc
+@@ -17,6 +17,13 @@
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+ #include <linux/input.h>
++#elif BUILDFLAG(IS_ZEDBSD)
++// The key codes of the Keiland desktop are the evdev codes; these are the ones
++// of <linux/input.h> that this file names.
++#define KEY_RESERVED 0
++#define KEY_PLAYCD 200
++#define KEY_PLAY 207
++#define KEY_MAX 0x2ff
+ #endif
+ 
+ namespace ui {
+@@ -28,7 +35,7 @@
+ #if BUILDFLAG(IS_WIN)
+ #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
+   { usb, win, code }
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
+   { usb, xkb, code }
+ #elif BUILDFLAG(IS_APPLE)
+@@ -67,7 +74,7 @@
+ #undef DOM_KEY_UNI
+ #undef DOM_KEY_MAP_DECLARATION_END
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ // The offset between XKB Keycode and evdev code.
+ constexpr int kXkbKeycodeOffset = 8;
+@@ -105,7 +112,7 @@
+   return static_cast<uint32_t>(evdev_code + kXkbKeycodeOffset);
+ }
+ 
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ 
+@@ -188,7 +195,7 @@
+   return UsbKeycodeToNativeKeycode(static_cast<uint32_t>(code));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // static
+ DomCode KeycodeConverter::XkbKeycodeToDomCode(uint32_t xkb_keycode) {
+   // Currently XKB keycode is the native keycode.
+--- a/ui/events/keycodes/dom/keycode_converter.h
++++ b/ui/events/keycodes/dom/keycode_converter.h
+@@ -65,7 +65,7 @@
+   // Convert a DomCode into a native keycode.
+   static int DomCodeToNativeKeycode(DomCode code);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   // Convert a XKB keycode into a DomCode.
+   static DomCode XkbKeycodeToDomCode(uint32_t xkb_keycode);
+ 
+--- a/ui/gfx/native_pixmap_handle.cc
++++ b/ui/gfx/native_pixmap_handle.cc
+@@ -112,6 +112,10 @@
+     cloned_plane.size = plane.size;
+     cloned_plane.vmo = std::move(vmo_dup);
+     clone.planes.push_back(std::move(cloned_plane));
++#elif BUILDFLAG(IS_ZEDBSD)
++    // zedBSD shares no buffers between processes as native pixmaps: a plane
++    // carries its layout only.
++    clone.planes.emplace_back(plane.stride, plane.offset, plane.size);
+ #else
+ #error Unsupported OS
+ #endif
+--- a/ui/menus/BUILD.gn
++++ b/ui/menus/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//testing/test.gni")
+ assert(is_win || is_mac || is_linux || is_chromeos || is_android ||
+-       is_fuchsia || is_ios)
++       is_fuchsia || is_ios || is_zedbsd)
+ 
+ component("menus") {
+   sources = [
+--- a/ui/views/BUILD.gn
++++ b/ui/views/BUILD.gn
+@@ -1052,7 +1052,7 @@
+   }
+ }
+ 
+-if (is_win || is_mac || is_linux || is_chromeos) {
++if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+   static_library("view_pixel_diff_test_support") {
+     testonly = true
+     sources = [
+--- a/ui/webui/webui_features.gni
++++ b/ui/webui/webui_features.gni
+@@ -50,17 +50,17 @@
+     # Enable the WebUI version of the Bookmarks page.
+     enable_webui_bookmarks =
+         target_os == "win" || target_os == "mac" || target_os == "linux" ||
+-        target_os == "chromeos" || is_desktop_android
++        target_os == "chromeos" || target_os == "zedbsd" || is_desktop_android
+ 
+     # Enable the WebUI version of the History page.
+     enable_webui_history =
+         target_os == "win" || target_os == "mac" || target_os == "linux" ||
+-        target_os == "chromeos" || is_desktop_android
++        target_os == "chromeos" || target_os == "zedbsd" || is_desktop_android
+ 
+     # Enable the WebUI version of the New Tab Page.
+     enable_webui_ntp =
+         target_os == "win" || target_os == "mac" || target_os == "linux" ||
+-        target_os == "chromeos" || is_desktop_android
++        target_os == "chromeos" || target_os == "zedbsd" || is_desktop_android
+   }
+ 
+   declare_args() {

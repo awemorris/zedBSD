@@ -1,0 +1,67 @@
+# GN arguments of the zedBSD build of Chromium.  The Makefile writes
+# args.gn from this file, with the @...@ names replaced by the paths of the
+# build tree that the package is made in.
+
+target_os = "zedbsd"
+target_cpu = "x64"
+is_debug = false
+is_clang = true
+clang_use_chrome_plugins = false
+use_lld = true
+use_sysroot = false
+treat_warnings_as_errors = false
+
+# zedBSD's compiler, C library and shared libraries.
+clang_base_path = "@LLVM@"
+target_sysroot = "@SYSROOT@"
+zedbsd_dynamic_dir = "@DYNAMIC@"
+
+# Windows and input: the Keiland desktop (libkeiland), drawn with Vulkan.
+use_ozone = true
+ozone_auto_platforms = false
+ozone_platform = "keiland"
+ozone_platform_keiland = true
+ozone_platform_headless = true
+enable_vulkan = true
+use_xkbcommon = false
+
+# zedBSD has a Vulkan driver of its own: no software Vulkan.
+enable_swiftshader = false
+enable_swiftshader_vulkan = false
+angle_enable_swiftshader = false
+dawn_use_swiftshader = false
+
+# The Vulkan loader is the system's libvulkan.so: Chromium's own loader, a
+# library of the same name, is not built.
+angle_shared_libvulkan = false
+
+# ANGLE (WebGL) has no backend for zedBSD yet but its null one: neither
+# the native GL nor WebGPU underneath it.
+angle_enable_gl = false
+angle_enable_wgpu = false
+
+# Services that zedBSD does not have.
+use_dbus = false
+use_udev = false
+use_pulseaudio = false
+use_alsa = false
+use_cups = false
+use_kerberos = false
+use_gtk = false
+use_glib = false
+use_gio = false
+use_pangocairo = false
+use_nss_certs = false
+use_nss_server_certs = false
+use_vaapi = false
+use_libpci = false
+enable_vr = false
+enable_openxr = false
+enable_remoting = false
+
+# The C++ runtime and the allocator.
+use_custom_libunwind = true
+use_allocator_shim = false
+use_partition_alloc_as_malloc = false
+enable_backup_ref_ptr_support = false
+use_mold = false
