@@ -87,10 +87,14 @@ struct mikuterm_conf {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
+	int sftp;
+	int sftp_preserve_times;
+	int sftp_show_hidden;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
 	int copy_given;
+	int sftp_show_hidden_given;
 	char problems[MIKUTERM_PROBLEMS_MAX];
 };
 
@@ -106,6 +110,7 @@ struct mikuterm_connect_options {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
+	int sftp;
 	const char *notice;
 };
 

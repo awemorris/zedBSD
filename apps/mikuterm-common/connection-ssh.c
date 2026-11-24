@@ -31,6 +31,7 @@
  */
 
 #include "session.h"
+#include "sftp-link.h"
 #include "login-shell.h"
 #include "x11-tab.h"
 
@@ -559,6 +560,7 @@ connection_open(
 	session->x11_scale = connector->options.x11_scale;
 	session->x11_render_cpu = connector->options.x11_render_cpu;
 	session->x11_primary = connector->options.x11_primary;
+	session->sftp = connector->options.sftp;
 	if (!connector->first_opened) {
 		connection_copy(session->host, sizeof(session->host), connector->options.connect);
 		connection_copy(session->notice, sizeof(session->notice), connector->options.notice);
@@ -1146,6 +1148,8 @@ connection_free(
 	struct mikuterm_session *session)
 {
 	/* What it owns. */
+	sftp_link_release(session->sftp_link);
+	session->sftp_link = NULL;
 	kl_socket_waker_close(session->waker);
 	kl_mutex_destroy(&session->lock);
 	free(session->output);

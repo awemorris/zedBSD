@@ -55,6 +55,9 @@
 /* An X window's tab (x11-tab.h). */
 struct x11_tab;
 
+/* An SFTP channel relay (sftp-link.h). */
+struct sftp_link;
+
 /* How much the tab reads before it tells the thread, so the window is given back on time. */
 #define SESSION_TAKEN_STEP	65536U
 
@@ -97,6 +100,7 @@ struct mikuterm_session {
 	unsigned x11_scale;
 	int x11_render_cpu;
 	int x11_primary;
+	int sftp;
 
 	/* Problems of the settings to show before anything else (empty: none). */
 	char notice[MIKUTERM_PROBLEMS_MAX];
@@ -159,6 +163,9 @@ struct mikuterm_session {
 
 	/* The tab closed: the thread ends the connection and lets go. */
 	int closing;
+
+	/* The SFTP channel relay shared with the SFTP worker and tab (NULL until opened). */
+	struct sftp_link *sftp_link;
 
 	/*
 	 * The X windows' tabs the thread opened that the run has not taken
