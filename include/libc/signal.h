@@ -21,6 +21,25 @@ extern "C" {
 #define SIG_HOLD ((sighandler_t)2)
 #define SIG2STR_MAX 32
 
+/* Additional si_code values for SIGILL, SIGFPE, and SIGBUS. */
+#define ILL_ILLOPN 2
+#define ILL_ILLADR 3
+#define ILL_ILLTRP 4
+#define ILL_PRVOPC 5
+#define ILL_PRVREG 6
+#define ILL_COPROC 7
+#define ILL_BADSTK 8
+
+#define FPE_INTOVF 2
+#define FPE_FLTDIV 3
+#define FPE_FLTOVF 4
+#define FPE_FLTUND 5
+#define FPE_FLTRES 6
+#define FPE_FLTINV 7
+#define FPE_FLTSUB 8
+
+#define BUS_OBJERR 3
+
 typedef void (*sighandler_t)(int);
 typedef int sig_atomic_t;
 typedef void (*siginfo_handler_t)(int, siginfo_t *, void *);
