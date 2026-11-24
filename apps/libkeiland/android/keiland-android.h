@@ -224,4 +224,11 @@ ALooper *keiland_android_looper(void);
  */
 ANativeActivity *keiland_android_activity(void);
 
+/*
+ * Closes the current Activity and removes its task from the recent apps list.
+ *
+ * Called on M when the program ends.
+ */
+void keiland_android_quit(void);
+
 #endif /* KEILAND_ANDROID_H */

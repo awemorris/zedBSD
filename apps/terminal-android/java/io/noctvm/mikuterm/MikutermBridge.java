@@ -7,6 +7,12 @@
 
 package io.noctvm.mikuterm;
 
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+
+import java.lang.ref.WeakReference;
+
 /**
  * What passes between mikuterm's Java side and its native code, besides what the keyboard, the
  * clipboard and the menus need (those are libkeiland's).
@@ -16,7 +22,24 @@ package io.noctvm.mikuterm;
  * thread through JNI and return at once too: the work they start runs on other threads.
  */
 final class MikutermBridge {
+	private static final Handler MAIN = new Handler(Looper.getMainLooper());
+	private static WeakReference<MikutermActivity> current = new WeakReference<MikutermActivity>(null);
+	private static Context applicationContext;
+
 	private MikutermBridge() {
+	}
+
+	/** Remembers the current Activity and the application context for service updates. */
+	static void attach(MikutermActivity activity) {
+		current = new WeakReference<MikutermActivity>(activity);
+		applicationContext = activity.getApplicationContext();
+	}
+
+	/** Forgets the Activity if it is still the one remembered. */
+	static void detach(MikutermActivity activity) {
+		if (current.get() == activity) {
+			current = new WeakReference<MikutermActivity>(null);
+		}
 	}
 
 	/** The answer to a secretWrap or secretUnwrap: the request's number and the bytes (null when it failed). */
@@ -38,7 +61,17 @@ final class MikutermBridge {
 		Secrets.unwrap(request, wrapped);
 	}
 
-	/** Tells how many connections there are now (the service that keeps the process comes later). */
-	static void serviceUpdate(int sessions) {
+	/** Starts, updates or stops the foreground service for the current number of active connections. */
+	static void serviceUpdate(final int sessions) {
+		MAIN.post(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					SessionService.update(applicationContext, sessions);
+				} catch (RuntimeException e) {
+					/* The service could not be updated; the native side does not wait. */
+				}
+			}
+		});
 	}
 }

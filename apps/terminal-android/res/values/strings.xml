@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 	<string name="app_name">mikuterm</string>
+	<string name="service_channel_name">Active sessions</string>
+	<string name="service_title">mikuterm</string>
+	<string name="service_one_session">1 active SSH session</string>
+	<string name="service_many_sessions">%d active SSH sessions</string>
+	<string name="service_disconnect_all">Disconnect all</string>
 </resources>

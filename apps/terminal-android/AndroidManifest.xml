@@ -8,9 +8,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
 	package="io.noctvm.mikuterm">
 
-	<!-- SSH connections are made over the network. -->
+	<!-- SSH connections are made over the network, and a foreground service keeps them alive in the background. -->
 	<uses-permission android:name="android.permission.INTERNET"/>
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
 	<!-- The native library stays stored in the apk and is mapped from it (extractNativeLibs). -->
 	<application
@@ -34,5 +37,14 @@
 				<category android:name="android.intent.category.LAUNCHER"/>
 			</intent-filter>
 		</activity>
+
+		<service
+			android:name=".SessionService"
+			android:foregroundServiceType="specialUse"
+			android:exported="false">
+			<property
+				android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+				android:value="Keeps active SSH terminal sessions alive while the application is in the background."/>
+		</service>
 	</application>
 </manifest>
