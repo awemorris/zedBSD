@@ -161,6 +161,7 @@ KEILAND_SOURCES := \
 	userland/desktop/wayland/edit.c \
 	userland/desktop/wayland/clipboard.c \
 	userland/desktop/wayland/rdp-headless.c \
+	userland/desktop/wayland/rdp-headless-proto.c \
 	userland/tests/vkdemo/display.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/picture/color-glyph.c \
