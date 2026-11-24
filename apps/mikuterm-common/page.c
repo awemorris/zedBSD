@@ -190,6 +190,9 @@ mikuterm_page_init(
 	/* The editor of the hosts file: none where no other program can be started (the tab then says so). */
 #if MIKUTERM_HAVE_OPENER
 	page_state.program.open_editor = page_editor;
+#ifdef _WIN32
+	page_state.program.has_vi = 1;
+#endif
 #endif
 	page_state.program.items = page_items;
 	page_state.program.item_count = sizeof(page_items) / sizeof(page_items[0]);

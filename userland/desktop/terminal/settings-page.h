@@ -119,6 +119,7 @@ struct terminal_page_program {
 	const char *connection;
 	void *data;
 	int key_paste;
+	int has_vi;
 };
 
 /*

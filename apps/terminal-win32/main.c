@@ -21,6 +21,7 @@
 #include "mikuterm.h"
 #include "session.h"
 #include "sftp-view.h"
+#include "vi-connection-win32.h"
 #include "x11-host.h"
 
 #include "userland/desktop/terminal/run.h"
@@ -78,6 +79,7 @@ static void main_new_window(void *data, struct kl_app *app, struct kl_window *fr
 static void main_forget_passphrases(void *data);
 static int main_can_open_sftp(void *data, const struct terminal_connection *connection);
 static int main_open_sftp(void *data, struct terminal_connection *connection);
+static int main_open_vi(void *data, struct terminal_window *window, unsigned columns, unsigned rows, const char *path, char *title, size_t size, struct terminal_connection **connection);
 static int main_confirm_close(void *data, struct terminal_window *window, struct terminal_connection *connection);
 static void main_ended(void *data, const struct terminal_run_result *result);
 static void main_say(const char *text);
@@ -199,6 +201,8 @@ wWinMain(
 	run.open_sftp_menu = 1;
 	run.can_open_sftp = main_can_open_sftp;
 	run.open_sftp = main_open_sftp;
+	run.open_vi_menu = 1;
+	run.open_vi = main_open_vi;
 	run.confirm_close = main_confirm_close;
 	run.data = &main_state;
 
@@ -443,6 +447,35 @@ main_open_sftp(
 
 	/* Succeeded: the SFTP tab is opening. */
 	return 0;
+}
+
+/* Opens a file in an embedded vi.exe child-process tab. */
+static int
+main_open_vi(
+	void *data,
+	struct terminal_window *window,
+	unsigned columns,
+	unsigned rows,
+	const char *path,
+	char *title,
+	size_t size,
+	struct terminal_connection **connection)
+{
+	struct main_state *st;
+	int ambiguous_wide;
+
+	st = data;
+	ambiguous_wide = (window != NULL) ? window->menu_state.ambiguous_wide : st->conf.ambiguous_wide;
+	return mikuterm_vi_open(
+		(window != NULL) ? window->app : NULL,
+		window,
+		columns,
+		rows,
+		ambiguous_wide,
+		path,
+		title,
+		size,
+		connection);
 }
 
 /* Confirms closing a terminal tab if its attached SFTP tab has active transfers. */

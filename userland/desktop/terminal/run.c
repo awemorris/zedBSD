@@ -355,6 +355,7 @@ static void run_drop_paste(void);
 static void run_paste_begin(const char *text, size_t length, int lines);
 static int run_tab_new(const struct terminal_run_options *options, struct run_state *run);
 static int run_tab_connection_open(const struct terminal_run_options *options, struct run_state *run, struct terminal_connection *connection, const char *title);
+static int run_open_vi_tab(const struct terminal_run_options *options, struct run_state *run, const char *path);
 static void run_tab_switch(struct run_state *run, unsigned index);
 static int run_tab_close(const struct terminal_run_options *options, struct run_state *run, unsigned index);
 static int run_tab_find(uint32_t id);
@@ -899,6 +900,12 @@ run_loop(
 			status = run_page_frame(run);
 			if (status != 0)
 				return -1;
+			if (options->open_vi != NULL && run_window.open_vi_requested) {
+				run_window.open_vi_requested = 0;
+				status = run_open_vi_tab(options, run, run_window.open_vi_path);
+				if (status != 0)
+					return -1;
+			}
 			continue;
 		}
 
@@ -1364,19 +1371,8 @@ run_menu_actions(
 			break;
 		case TERMINAL_ACTION_OPEN_VI:
 			/* Opens a file in an embedded vi tab. */
-			if (options->open_vi != NULL) {
-				struct terminal_connection *vi_conn;
-				char vi_title[TERMINAL_TITLE];
-				int vi_err;
-
-				vi_conn = NULL;
-				vi_title[0] = '\0';
-				vi_err = options->open_vi(options->data, &run_window, run->columns, run->rows, NULL, vi_title, sizeof(vi_title), &vi_conn);
-				if (vi_err == 0 && vi_conn != NULL)
-					status = run_tab_connection_open(options, run, vi_conn, vi_title);
-				else if (vi_err != 0 && vi_err != ECANCELED)
-					status = -1;
-			}
+			if (options->open_vi != NULL)
+				status = run_open_vi_tab(options, run, NULL);
 			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
@@ -1960,6 +1956,31 @@ run_tab_connection_open(
 	printf("ZTERM TAB new run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
 	fflush(stdout);
 	return 0;
+}
+
+/*
+ * Asks options->open_vi to open path (or prompt when path is NULL) and opens
+ * a terminal grid tab for it.  Cancellation (ECANCELED) is not an error.
+ */
+static int
+run_open_vi_tab(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	const char *path)
+{
+	struct terminal_connection *vi_conn;
+	char vi_title[TERMINAL_TITLE];
+	int vi_err;
+
+	vi_conn = NULL;
+	vi_title[0] = '\0';
+	vi_err = options->open_vi(options->data, &run_window, run->columns, run->rows,
+	    path, vi_title, sizeof(vi_title), &vi_conn);
+	if (vi_err == 0 && vi_conn != NULL)
+		return run_tab_connection_open(options, run, vi_conn, vi_title);
+	if (vi_err == ECANCELED)
+		return 0;
+	return -1;
 }
 
 /* Makes a tab the active one: its grid is drawn and its shell takes the keys. */

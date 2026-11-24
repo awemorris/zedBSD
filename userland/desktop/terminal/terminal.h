@@ -798,6 +798,8 @@ struct terminal_window {
 	int new_window_item;
 	int open_sftp_item;
 	int open_vi_item;
+	int open_vi_requested;
+	char open_vi_path[1024];
 	int refuse_terminal_drop;
 
 	/*

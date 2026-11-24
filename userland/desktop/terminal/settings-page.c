@@ -69,6 +69,7 @@
 #define PAGE_ID_HOST_NEW	72U
 #define PAGE_ID_HOST_ADD	73U
 #define PAGE_ID_HOST_EDITOR	74U
+#define PAGE_ID_HOST_VI		75U
 #define PAGE_ID_IDENTITY_NEW	75U
 #define PAGE_ID_IDENTITY_ADD	76U
 #define PAGE_ID_LINE_REMOVE	77U
@@ -172,6 +173,7 @@
 #define PAGE_HOSTS_SAVE		9U
 #define PAGE_HOSTS_REVERT	10U
 #define PAGE_HOSTS_EDITOR	11U
+#define PAGE_HOSTS_VI		12U
 
 /*
  * The evdev codes of the keys the page answers itself: C, V and X with
@@ -393,6 +395,7 @@ static void page_hosts_add_forward(void);
 static void page_hosts_remove_line(unsigned line);
 static void page_hosts_save(void);
 static void page_hosts_editor(struct terminal_window *window);
+static void page_hosts_vi(struct terminal_window *window);
 static int page_hosts_listed(unsigned block);
 static unsigned page_hosts_lines(unsigned block);
 static void page_hosts_title(unsigned block, char *text, size_t size);
@@ -1186,14 +1189,26 @@ page_hosts_list(
 		y += PAGE_ROW + 8;
 	}
 
-	/* The file in the system's text editor, and when its changes take effect. */
+	/* The file in the embedded vi or the system's text editor, and when its changes take effect. */
 	control.x = card.x + 20;
 	control.y = y;
 	control.height = theme->control_height;
-	control.width = kl_button_width(&page.style, "Open in Text Editor");
-	pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_EDITOR, &control, "Open in Text Editor", 0U);
-	if (pressed)
-		page_hosts_later(PAGE_HOSTS_EDITOR, 0U);
+	if (page.program->has_vi) {
+		control.width = kl_button_width(&page.style, "Open in vi");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_VI, &control, "Open in vi", 0U);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_VI, 0U);
+		control.x += control.width + 12;
+		control.width = kl_button_width(&page.style, "Open in External Editor");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_EDITOR, &control, "Open in External Editor", 0U);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_EDITOR, 0U);
+	} else {
+		control.width = kl_button_width(&page.style, "Open in Text Editor");
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_HOST_EDITOR, &control, "Open in Text Editor", 0U);
+		if (pressed)
+			page_hosts_later(PAGE_HOSTS_EDITOR, 0U);
+	}
 	y += control.height + 6;
 	(void)page_note(y, card.x + 20, card.width - 40, editor_note, theme->text_secondary);
 
@@ -1805,6 +1820,9 @@ page_hosts_carry_out(
 		break;
 	case PAGE_HOSTS_EDITOR:
 		page_hosts_editor(window);
+		break;
+	case PAGE_HOSTS_VI:
+		page_hosts_vi(window);
 		break;
 	default:
 		/* Nothing asked. */
@@ -2483,6 +2501,34 @@ page_hosts_editor(
 	/* Succeeded: its changes take effect from the next connection. */
 	page_say(&page.hosts_message, 0, "The file is open in the text editor. Its changes take effect from the next connection; Revert shows them here.");
 	page_log("hosts", "editor");
+}
+
+/* Requests opening ssh_config in an embedded vi tab (creating an empty file if missing). */
+static void
+page_hosts_vi(
+	struct terminal_window *window)
+{
+	char text[PAGE_MESSAGE];
+	int exists;
+	int error;
+
+	exists = page.program->exists(page.program->data, page.program->config_path);
+	if (!exists) {
+		error = page.program->create(page.program->data, page.program->config_path, "", 0U, 1);
+		if (error != 0 && error != EEXIST) {
+			(void)snprintf(text, sizeof(text), "%s could not be made (%s).", page.program->config_shown, strerror(error));
+			page_say(&page.hosts_message, 1, text);
+			return;
+		}
+	}
+
+	if (snprintf(window->open_vi_path, sizeof(window->open_vi_path), "%s", page.program->config_path) >= (int)sizeof(window->open_vi_path)) {
+		page_say(&page.hosts_message, 1, "The file path is too long.");
+		return;
+	}
+	window->open_vi_requested = 1;
+	page_say(&page.hosts_message, 0, "Opened in vi tab. Its changes take effect from the next connection; Revert shows them here.");
+	page_log("hosts", "vi");
 }
 
 /* Reports whether the pane's text is the file as last read or saved. */
