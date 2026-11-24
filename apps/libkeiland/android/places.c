@@ -60,6 +60,7 @@ kl_app_storage_directory(
 {
 	const char *files;
 	int error;
+	int status;
 
 	/* The places for the answer. */
 	if (app == NULL || buffer == NULL || size == 0U || app->application[0] == '\0')
@@ -75,7 +76,8 @@ kl_app_storage_directory(
 		return error;
 
 	/* Made when it is not there. */
-	if (mkdir(buffer, 0700) != 0 && errno != EEXIST) {
+	status = mkdir(buffer, 0700);
+	if (status != 0 && errno != EEXIST) {
 		error = errno;
 		buffer[0] = '\0';
 		return error;
@@ -132,12 +134,17 @@ android_places_unpack(
 	AAsset *asset;
 	off_t length;
 	FILE *file;
+	const char *files;
+	int got;
+	int status;
+	int same;
 	int error;
 
 	/* An Activity with its assets. */
 	if (activity == NULL || activity->assetManager == NULL || activity->internalDataPath == NULL)
 		return EINVAL;
-	if (places_files() == NULL)
+	files = places_files();
+	if (files == NULL)
 		return ENOENT;
 
 	/* The version the apk holds, and the one written. */
@@ -149,17 +156,24 @@ android_places_unpack(
 		AAsset_close(asset);
 		return EINVAL;
 	}
-	if (AAsset_read(asset, version, (size_t)length) != length) {
+
+	got = AAsset_read(asset, version, (size_t)length);
+	if (got != length) {
 		AAsset_close(asset);
 		return EIO;
 	}
+
 	version[length] = '\0';
 	AAsset_close(asset);
 	error = places_join(path, sizeof(path), places_base, "share", ".version");
 	if (error != 0)
 		return error;
-	if (places_text(path, written, sizeof(written)) == 0 && strcmp(written, version) == 0)
-		return 0;
+	error = places_text(path, written, sizeof(written));
+	if (error == 0) {
+		same = strcmp(written, version);
+		if (same == 0)
+			return 0;
+	}
 
 	/* The list of what the apk holds. */
 	asset = AAssetManager_open(activity->assetManager, "share.list", AASSET_MODE_BUFFER);
@@ -171,11 +185,14 @@ android_places_unpack(
 		AAsset_close(asset);
 		return ENOMEM;
 	}
-	if (AAsset_read(asset, list, (size_t)length) != length) {
+
+	got = AAsset_read(asset, list, (size_t)length);
+	if (got != length) {
 		free(list);
 		AAsset_close(asset);
 		return EIO;
 	}
+
 	list[length] = '\0';
 	AAsset_close(asset);
 
@@ -194,6 +211,7 @@ android_places_unpack(
 			continue;
 		error = places_copy(activity->assetManager, line);
 	}
+
 	free(list);
 	if (error != 0)
 		return error;
@@ -202,11 +220,14 @@ android_places_unpack(
 	file = fopen(path, "w");
 	if (file == NULL)
 		return errno;
-	if (fputs(version, file) == EOF) {
+	status = fputs(version, file);
+	if (status == EOF) {
 		(void)fclose(file);
 		return EIO;
 	}
-	if (fclose(file) != 0)
+
+	status = fclose(file);
+	if (status != 0)
 		return EIO;
 
 	/* Succeeded: the data is as the apk's. */
@@ -263,14 +284,17 @@ places_make_directories(
 	char *path)
 {
 	char *slash;
+	int status;
 
 	/* Each folder after the first character. */
 	for (slash = strchr(path + 1, '/'); slash != NULL; slash = strchr(slash + 1, '/')) {
 		*slash = '\0';
-		if (mkdir(path, 0700) != 0 && errno != EEXIST) {
+		status = mkdir(path, 0700);
+		if (status != 0 && errno != EEXIST) {
 			*slash = '/';
 			return errno;
 		}
+
 		*slash = '/';
 	}
 
@@ -290,6 +314,8 @@ places_copy(
 	AAsset *asset;
 	FILE *file;
 	int got;
+	size_t wrote;
+	int closed;
 	int error;
 
 	/* Where it is and where it goes. */
@@ -313,6 +339,7 @@ places_copy(
 		AAsset_close(asset);
 		return error;
 	}
+
 	piece = malloc(PLACES_PIECE);
 	if (piece == NULL) {
 		(void)fclose(file);
@@ -328,20 +355,28 @@ places_copy(
 			error = EIO;
 			break;
 		}
+
 		if (got == 0)
 			break;
-		if (fwrite(piece, 1U, (size_t)got, file) != (size_t)got) {
+		wrote = fwrite(piece, 1U, (size_t)got, file);
+		if (wrote != (size_t)got) {
 			error = EIO;
 			break;
 		}
 	}
+
 	free(piece);
 	AAsset_close(asset);
-	if (fclose(file) != 0 && error == 0)
+	closed = fclose(file);
+	if (closed != 0 && error == 0)
 		error = EIO;
 
-	/* Succeeded or not. */
-	return error;
+	/* Reports any read or write failure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the asset is copied. */
+	return 0;
 }
 
 /* Joins base, middle (NULL for none) and name with slashes into a buffer.  Returns 0, or ERANGE. */

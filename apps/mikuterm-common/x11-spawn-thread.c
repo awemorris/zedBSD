@@ -131,18 +131,23 @@ x11_spawn_stop(
 {
 	struct x11_thread *state;
 	unsigned waited;
+	int done;
 
 	state = host->process;
 	if (state == NULL)
 		return;
 
+	/* Polls briefly for the server thread to finish. */
 	for (waited = 0U; waited < X11_SPAWN_END_MS; waited += THREAD_STOP_POLL_MS) {
-		if (atomic_load(&state->done) != 0)
+		done = atomic_load(&state->done);
+		if (done != 0)
 			break;
 		kl_thread_sleep(THREAD_STOP_POLL_MS);
 	}
 
-	if (atomic_load(&state->done) != 0)
+	/* Joins if finished, otherwise detaches to avoid blocking shutdown. */
+	done = atomic_load(&state->done);
+	if (done != 0)
 		(void)kl_thread_join(state->thread);
 	else
 		(void)kl_thread_detach(state->thread);
@@ -167,7 +172,11 @@ static void
 thread_release(
 	struct x11_thread *state)
 {
-	if (atomic_fetch_sub(&state->references, 1U) == 1U)
+	unsigned previous;
+
+	/* Frees the shared state when the last reference drops. */
+	previous = atomic_fetch_sub(&state->references, 1U);
+	if (previous == 1U)
 		free(state);
 }
 
@@ -182,6 +191,7 @@ thread_run(
 	uint32_t wake;
 	int timeout;
 	size_t ready;
+	size_t waiting;
 	int error;
 
 	state = argument;
@@ -219,7 +229,8 @@ thread_run(
 		wait.socket = state->end;
 		wait.waker = NULL;
 		wait.events = KL_SOCKET_READABLE;
-		if (x11_serve_waiting(&state->serve) != 0U)
+		waiting = x11_serve_waiting(&state->serve);
+		if (waiting != 0U)
 			wait.events |= KL_SOCKET_WRITABLE;
 		wait.ready = 0U;
 
@@ -250,9 +261,16 @@ thread_receive(
 	size_t *received)
 {
 	struct x11_thread *state;
+	int error;
 
+	/* Receives bytes from the link socket. */
 	state = context;
-	return kl_socket_receive(state->end, buffer, size, received);
+	error = kl_socket_receive(state->end, buffer, size, received);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Sends bytes on the non-blocking link socket. */
@@ -264,9 +282,16 @@ thread_send(
 	size_t *sent)
 {
 	struct x11_thread *state;
+	int error;
 
+	/* Sends bytes on the link socket. */
 	state = context;
-	return kl_socket_send(state->end, bytes, size, sent);
+	error = kl_socket_send(state->end, bytes, size, sent);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Starts the tab-only backend and X server core once HELLO arrives. */
@@ -308,6 +333,7 @@ thread_start(
 		} else {
 			scale = screen_pct;
 		}
+
 		scale = thread_clamp_scale(scale);
 	}
 
@@ -360,11 +386,18 @@ thread_tab_take(
 	const struct x11_link_frame *frame)
 {
 	struct x11_thread *state;
+	int error;
 
+	/* Delivers the tab frame to the backend. */
 	state = context;
 	if (state->tabs == NULL)
 		return 0;
-	return x11_tab_only_take(state->tabs, frame, thread_now());
+	error = x11_tab_only_take(state->tabs, frame, thread_now());
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Flushes pending tab open and pixel frames onto the link. */
@@ -389,9 +422,16 @@ thread_link_frame(
 	uint32_t size)
 {
 	struct x11_thread *state;
+	int error;
 
+	/* Queues the frame on the serve link. */
 	state = context;
-	return x11_serve_frame(&state->serve, type, id, body, size);
+	error = x11_serve_frame(&state->serve, type, id, body, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Returns bytes currently queued for writing on the serve link. */
@@ -400,9 +440,14 @@ thread_link_waiting(
 	void *context)
 {
 	struct x11_thread *state;
+	size_t waiting;
 
+	/* Reads the queued byte count. */
 	state = context;
-	return x11_serve_waiting(&state->serve);
+	waiting = x11_serve_waiting(&state->serve);
+
+	/* Succeeded. */
+	return waiting;
 }
 
 /* Returns monotonic milliseconds for X server core timestamps. */

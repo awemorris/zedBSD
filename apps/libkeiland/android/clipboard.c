@@ -72,12 +72,17 @@ kl_window_paste(
 	char *text,
 	size_t size)
 {
+	size_t copied;
+
 	/* A window and room. */
 	if (window == NULL || text == NULL || size == 0U)
 		return 0U;
 
 	/* The text last told. */
-	return clipboard_copy_out(clipboard_text, clipboard_length, text, size - 1U);
+	copied = clipboard_copy_out(clipboard_text, clipboard_length, text, size - 1U);
+
+	/* Succeeded: reports the byte length copied. */
+	return copied;
 }
 
 /* Says whether the clipboard has text. */
@@ -207,6 +212,7 @@ clipboard_keep(
 		(void)clipboard_memset(*kept, 0, *kept_length);
 		free(*kept);
 	}
+
 	*kept = copy;
 	*kept_length = length;
 	return 0;
@@ -229,6 +235,7 @@ clipboard_copy_out(
 		while (length > 0U && ((unsigned char)kept[length] & 0xc0U) == 0x80U)
 			length--;
 	}
+
 	if (length != 0U)
 		memcpy(text, kept, length);
 	text[length] = '\0';

@@ -258,6 +258,9 @@ mikuterm_android_post(
 	uint32_t code,
 	void *data)
 {
+	struct mikuterm_post_result *net;
+	struct main_session *session;
+
 	/* By code. */
 	switch (code) {
 	case MIKUTERM_POST_SECRET:
@@ -270,42 +273,35 @@ mikuterm_android_post(
 		mikuterm_credential_forget(data);
 		return 1;
 	case MIKUTERM_POST_NETWORK:
-		{
-			struct mikuterm_post_result *net;
-			struct main_session *session;
-
-			/* Tells open tabs when the default network drops or returns after a drop. */
-			net = data;
-			if (net != NULL) {
-				if (!net->ok) {
-					main_network_lost = 1;
-					for (session = main_sessions; session != NULL; session = session->next)
-						main_session_notice(session, "\r\nThe network connection was lost.\r\n");
-					if (main_app != NULL)
-						(void)kl_app_post(main_app, 0U, NULL);
-				} else if (main_network_lost) {
-					main_network_lost = 0;
-					for (session = main_sessions; session != NULL; session = session->next)
-						main_session_notice(session, "\r\nThe network is available again.\r\n");
-					if (main_app != NULL)
-						(void)kl_app_post(main_app, 0U, NULL);
-				}
-				free(net);
+		/* Tells open tabs when the default network drops or returns after a drop. */
+		net = data;
+		if (net != NULL) {
+			if (!net->ok) {
+				main_network_lost = 1;
+				for (session = main_sessions; session != NULL; session = session->next)
+					main_session_notice(session, "\r\nThe network connection was lost.\r\n");
+				if (main_app != NULL)
+					(void)kl_app_post(main_app, 0U, NULL);
+			} else if (main_network_lost) {
+				main_network_lost = 0;
+				for (session = main_sessions; session != NULL; session = session->next)
+					main_session_notice(session, "\r\nThe network is available again.\r\n");
+				if (main_app != NULL)
+					(void)kl_app_post(main_app, 0U, NULL);
 			}
-			return 1;
-		}
-	case MIKUTERM_POST_STOP_ALL:
-		{
-			struct main_session *session;
 
-			/* Stops every connection thread and asks every open tab to close. */
-			mikuterm_connections_stop();
-			for (session = main_sessions; session != NULL; session = session->next)
-				session->stop_requested = 1;
-			if (main_app != NULL)
-				(void)kl_app_post(main_app, 0U, NULL);
-			return 1;
+			free(net);
 		}
+
+		return 1;
+	case MIKUTERM_POST_STOP_ALL:
+		/* Stops every connection thread and asks every open tab to close. */
+		mikuterm_connections_stop();
+		for (session = main_sessions; session != NULL; session = session->next)
+			session->stop_requested = 1;
+		if (main_app != NULL)
+			(void)kl_app_post(main_app, 0U, NULL);
+		return 1;
 	default:
 		break;
 	}
@@ -329,6 +325,7 @@ mikuterm_font(
 	char directory[MIKUTERM_PATH_MAX];
 	size_t length;
 	int written;
+	int exists;
 	int error;
 
 	/* A path from the root. */
@@ -347,7 +344,8 @@ mikuterm_font(
 	error = mikuterm_path(path, size, inside);
 	if (error != 0)
 		return error;
-	if (mikuterm_file_exists(path))
+	exists = mikuterm_file_exists(path);
+	if (exists)
 		return 0;
 
 	/* The program's own. */
@@ -503,6 +501,7 @@ main_connector_open(
 		inner->ops->close(inner);
 		return ENOMEM;
 	}
+
 	session->base.ops = &main_session_ops;
 	session->inner = inner;
 	session->next = main_sessions;
@@ -538,6 +537,7 @@ main_session_read(
 			session->notice_offset = 0U;
 			session->notice_length = 0U;
 		}
+
 		return take;
 	}
 
@@ -546,7 +546,8 @@ main_session_read(
 		return 0U;
 
 	/* Reads from the underlying connection. */
-	return session->inner->ops->read(session->inner, buffer, size);
+	take = session->inner->ops->read(session->inner, buffer, size);
+	return take;
 }
 
 /* Forwards typed bytes to the underlying connection. */
@@ -558,9 +559,16 @@ main_session_write(
 	size_t *written)
 {
 	struct main_session *session;
+	int error;
 
+	/* Writes through the wrapped connection. */
 	session = (struct main_session *)connection;
-	return session->inner->ops->write(session->inner, bytes, size, written);
+	error = session->inner->ops->write(session->inner, bytes, size, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Forwards grid size changes to the underlying connection. */
@@ -573,9 +581,16 @@ main_session_resize(
 	unsigned height)
 {
 	struct main_session *session;
+	int error;
 
+	/* Resizes the wrapped connection. */
 	session = (struct main_session *)connection;
-	return session->inner->ops->resize(session->inner, columns, rows, width, height);
+	error = session->inner->ops->resize(session->inner, columns, rows, width, height);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Forwards mode queries to the underlying connection. */
@@ -585,9 +600,16 @@ main_session_mode(
 	unsigned *mode)
 {
 	const struct main_session *session;
+	int error;
 
+	/* Queries the wrapped connection's mode. */
 	session = (const struct main_session *)connection;
-	return session->inner->ops->mode(session->inner, mode);
+	error = session->inner->ops->mode(session->inner, mode);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Forwards application events and adds local output/exit readiness when needed. */
@@ -641,6 +663,7 @@ main_session_close(
 			break;
 		}
 	}
+
 	if (main_session_count > 0U)
 		main_session_count--;
 	(void)mikuterm_java_service_update(main_session_count);
@@ -656,11 +679,16 @@ main_session_take(
 	struct terminal_connection *connection)
 {
 	struct main_session *session;
+	struct terminal_connection *taken;
 
+	/* Takes an X11 picture connection when available. */
 	session = (struct main_session *)connection;
 	if (session->inner->ops->take == NULL)
 		return NULL;
-	return session->inner->ops->take(session->inner);
+	taken = session->inner->ops->take(session->inner);
+
+	/* Succeeded: returns the taken connection or NULL. */
+	return taken;
 }
 
 /* Queues a local notice line into a session's notice buffer. */

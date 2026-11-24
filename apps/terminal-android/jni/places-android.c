@@ -72,6 +72,7 @@ mikuterm_folder_init(void)
 		folder_path[0] = '\0';
 		return ENAMETOOLONG;
 	}
+
 	written = snprintf(folder_share, sizeof(folder_share), "%s%s", activity->internalDataPath, FOLDER_SHARE);
 	if (written < 0 || (size_t)written >= sizeof(folder_share)) {
 		folder_path[0] = '\0';
@@ -434,6 +435,7 @@ folder_write(
 			(void)close(descriptor);
 			return EIO;
 		}
+
 		next += wrote;
 		size -= (size_t)wrote;
 	}
@@ -486,6 +488,7 @@ folder_parent_make(
 		} else {
 			error = mkdir(directory, FOLDER_DIRECTORY_MODE);
 		}
+
 		if (error != 0 && errno != EEXIST) {
 			if (errno == EACCES || errno == EPERM || errno == EROFS)
 				return EACCES;

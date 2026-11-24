@@ -131,12 +131,14 @@ kl_window_set_action_state(
 		if (window->bar.actions[index].action == action)
 			break;
 	}
+
 	if (index == window->bar.action_count) {
 		if (index >= ANDROID_ACTIONS)
 			return E2BIG;
 		window->bar.actions[index].action = action;
 		window->bar.action_count++;
 	}
+
 	window->bar.actions[index].state = state;
 
 	/* Succeeded: the next popup shows it. */
@@ -292,6 +294,7 @@ kl_window_set_tabs(
 		if (kept == NULL)
 			return ENOMEM;
 	}
+
 	for (index = 0U; index < count; index++) {
 		kept[index].id = tabs[index].id;
 		titlebar_copy_text(kept[index].title, sizeof(kept[index].title), tabs[index].title);
@@ -370,7 +373,11 @@ kl_window_popup_menu(
 	for (index = 0U; index < count; index++)
 		free(items[index].label);
 	free(items);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the popup was shown. */
+	return 0;
 }
 
 /* Gives the height of the strip the window shows in pixels: 0 when it has neither a menu nor tabs. */
@@ -418,6 +425,7 @@ android_titlebar_resize(
 		bar->height = 0U;
 		return;
 	}
+
 	bar->pixels = pixels;
 	bar->width = window->width;
 
@@ -615,6 +623,7 @@ android_titlebar_hit(
 			titlebar_paint(window);
 			android_present_strip(window);
 		}
+
 		step = (int32_t)android_scale(ANDROID_TAB_LEAST, window->app->scale) / 2;
 		if (bar->scroll.mode == ANDROID_STRIP_SCROLL && step > 0 && bar->pressed == ANDROID_PART_NONE) {
 			steps = (px - bar->swipe_x) / step;
@@ -623,7 +632,17 @@ android_titlebar_hit(
 				titlebar_scroll_by(window, -steps);
 			}
 		}
+
 		return 1;
+	}
+
+	/* Another finger's: the program's. */
+	if (bar->finger != finger)
+		return 0;
+
+	/* A move far from the press is not a press any more, and along a scrolling strip it moves the tabs (a step for each half of a tab's least width). */
+	if (phase == 2) {
+		/* handled above */
 	}
 
 	/* The release: a press that stayed where it began, and was not a long press, chooses its part. */
@@ -636,6 +655,7 @@ android_titlebar_hit(
 		if (part == held)
 			titlebar_activate(window, held);
 	}
+
 	return 1;
 }
 
@@ -672,9 +692,11 @@ android_titlebar_tick(
 {
 	struct kl_window *window;
 	unsigned index;
+	int wait;
 
 	/* A long press that is due. */
-	if (android_titlebar_wait(app) != 0)
+	wait = android_titlebar_wait(app);
+	if (wait != 0)
 		return;
 	window = android_window_top(app);
 	window->bar.long_done = 1;
@@ -707,6 +729,7 @@ android_titlebar_menu_answer(
 		if (window->bar.popup != ANDROID_POPUP_NONE && window->bar.popup_request == request)
 			break;
 	}
+
 	if (window == NULL)
 		return;
 
@@ -782,10 +805,15 @@ uint32_t
 android_titlebar_wanted(
 	const struct kl_window *window)
 {
+	uint32_t height;
+
 	/* A menu or tabs make a strip. */
 	if (window->bar.menu_count == 0U && window->bar.tab_count == 0U)
 		return 0U;
-	return android_scale(ANDROID_STRIP_HEIGHT, window->app->scale);
+	height = android_scale(ANDROID_STRIP_HEIGHT, window->app->scale);
+
+	/* Succeeded: the scaled strip height. */
+	return height;
 }
 
 /* The strip's text size in pixels. */
@@ -794,10 +822,14 @@ titlebar_pixels(
 	const struct kl_window *window)
 {
 	const struct kl_theme *theme;
+	unsigned pixels;
 
 	/* The body's size, scaled. */
 	theme = kl_theme_default();
-	return android_scale(theme->text_body, window->app->scale);
+	pixels = android_scale(theme->text_body, window->app->scale);
+
+	/* Succeeded: the scaled text size. */
+	return pixels;
 }
 
 /* Opens the strip's font, once (the bundled data's fonts; none: the strip draws no text). */
@@ -853,8 +885,11 @@ static void
 titlebar_refresh(
 	struct kl_window *window)
 {
+	uint32_t wanted;
+
 	/* A strip that comes or goes moves the program's window. */
-	if (android_titlebar_wanted(window) != window->bar.height) {
+	wanted = android_titlebar_wanted(window);
+	if (wanted != window->bar.height) {
 		android_window_layout(window->app);
 		return;
 	}
@@ -1004,6 +1039,7 @@ titlebar_paint(
 		baseline = kl_text_center(pixels, 0, (int)bar->height);
 		(void)kl_text_draw_fit(&bar->text, &canvas, start, baseline, window->title, pixels, 0, (int)bar->width - start, theme->text);
 	}
+
 	kl_canvas_release(&canvas);
 }
 
@@ -1115,11 +1151,15 @@ titlebar_part_at(
 	const struct android_titlebar *bar;
 	unsigned index;
 	unsigned part;
+	int hit;
 
 	/* The menu's button, when the window has a menu. */
 	bar = &window->bar;
-	if (bar->menu_count != 0U && android_rect_contains(&bar->menu_place, x, y))
-		return ANDROID_PART_MENU;
+	if (bar->menu_count != 0U) {
+		hit = android_rect_contains(&bar->menu_place, x, y);
+		if (hit)
+			return ANDROID_PART_MENU;
+	}
 
 	/* No tabs. */
 	if (bar->tab_count == 0U)
@@ -1197,6 +1237,7 @@ titlebar_part_kept(
 	} else {
 		return ANDROID_PART_NONE;
 	}
+
 	id = window->bar.tabs[part - base].id;
 
 	/* The same part of the new tab of that ID. */
@@ -1272,17 +1313,20 @@ titlebar_tab_choose(
 	uint32_t id)
 {
 	unsigned index;
+	unsigned active;
 
 	/* The tab of the ID; none when it went. */
 	for (index = 0U; index < window->bar.tab_count; index++) {
 		if (window->bar.tabs[index].id == id)
 			break;
 	}
+
 	if (index >= window->bar.tab_count)
 		return;
 
 	/* The active tab chosen again is brought into sight. */
-	if (index == titlebar_active(window)) {
+	active = titlebar_active(window);
+	if (index == active) {
 		window->bar.reveal = 1;
 		titlebar_layout(window);
 		titlebar_paint(window);
@@ -1406,6 +1450,7 @@ titlebar_open_list(
 		(void)titlebar_popup(window, ANDROID_POPUP_LIST, entries, count, window->bar.scroll.list.x,
 		    window->bar.scroll.list.y + (int)window->bar.scroll.list.height);
 	}
+
 	free(entries);
 }
 
@@ -1447,6 +1492,7 @@ titlebar_popup(
 		free(items);
 		return ENOMEM;
 	}
+
 	for (index = 0U; index < count; index++) {
 		labels[index] = entries[index].label;
 		parents[index] = entries[index].parent;
@@ -1474,10 +1520,15 @@ titlebar_popup(
 		window->bar.popup = ANDROID_POPUP_NONE;
 		window->bar.popup_request = 0U;
 	}
+
 	free(labels);
 	free(parents);
 	free(flags);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the popup was requested. */
+	return 0;
 }
 
 /*
@@ -1533,6 +1584,7 @@ titlebar_menu_entries(
 					break;
 				}
 			}
+
 			if (!found)
 				continue;
 		}
@@ -1558,6 +1610,7 @@ titlebar_menu_entries(
 		table[kept] = index;
 		kept++;
 	}
+
 	free(table);
 
 	/* Succeeded. */
@@ -1595,6 +1648,7 @@ titlebar_menu_copy(
 			free(copy);
 			return ENOMEM;
 		}
+
 		copy[index].id = entries[index].id;
 		copy[index].parent = entries[index].parent;
 		copy[index].type = entries[index].type;
@@ -1640,6 +1694,7 @@ titlebar_copy_text(
 		while (length > 0U && ((unsigned char)from[length] & 0xc0U) == 0x80U)
 			length--;
 	}
+
 	memcpy(to, from, length);
 	to[length] = '\0';
 }

@@ -473,6 +473,7 @@ keiland_android_screen(
 	unsigned *height,
 	unsigned *scale)
 {
+	/* Reads the latest published dimensions without locking. */
 	if (width != NULL)
 		*width = atomic_load(&screen_width_atomic);
 	if (height != NULL)

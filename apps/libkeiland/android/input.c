@@ -34,6 +34,14 @@
 /* The distance of one notch of a mouse's wheel, in pixels (as the Windows backend's). */
 #define INPUT_NOTCH_PIXELS	60.0
 
+/* Modifier keycodes in evdev numbering (matching keys-table.c). */
+#define INPUT_EVDEV_LEFTCTRL	29U
+#define INPUT_EVDEV_LEFTSHIFT	42U
+#define INPUT_EVDEV_RIGHTSHIFT	54U
+#define INPUT_EVDEV_LEFTALT	56U
+#define INPUT_EVDEV_RIGHTCTRL	97U
+#define INPUT_EVDEV_RIGHTALT	100U
+
 /* The key whose press chose a menu item, until it is released (its release and repeats are not typed either). */
 static int32_t input_shortcut_down;
 
@@ -50,6 +58,9 @@ static int64_t input_down_time;
 
 static struct kl_window *input_window(struct kl_app *app);
 static int input_shortcut(struct kl_window *window, int32_t keycode, int32_t meta, int pressed, int repeated);
+static int input_is_modifier(uint32_t code);
+static int input_queue_key(struct kl_window *window, uint32_t code, int pressed, unsigned modifiers);
+static void input_queue_touch(struct kl_window *window, unsigned kind, int32_t id, double x, double y);
 static void input_tap(const AInputEvent *event);
 static void input_fill(struct kl_app *app, struct kl_window_event *input, unsigned kind, const AInputEvent *event);
 static void input_place(const struct kl_window *window, const AInputEvent *event, size_t index, struct kl_window_event *input);
@@ -70,11 +81,18 @@ android_input_drain(
 	AInputEvent *event;
 	int handled;
 	int type;
+	int pre;
+	int status;
 
 	/* Each event the queue has. */
-	while (AInputQueue_getEvent(queue, &event) >= 0) {
+	for (;;) {
+		status = AInputQueue_getEvent(queue, &event);
+		if (status < 0)
+			break;
+
 		/* The input method took it first. */
-		if (AInputQueue_preDispatchEvent(queue, event) != 0)
+		pre = AInputQueue_preDispatchEvent(queue, event);
+		if (pre != 0)
 			continue;
 
 		/* Ours or not. */
@@ -101,6 +119,7 @@ android_input_key(
 	struct kl_window_event input;
 	int32_t action;
 	uint32_t code;
+	int is_shortcut;
 
 	/* A window to give it to. */
 	window = input_window(app);
@@ -118,8 +137,13 @@ android_input_key(
 		return 0;
 
 	/* A key with Ctrl, Alt or Super that is a menu item's shortcut chooses the item (on its press), and is not typed. */
-	if (input_shortcut(window, AKeyEvent_getKeyCode(event), AKeyEvent_getMetaState(event), action != AKEY_EVENT_ACTION_UP,
-	    AKeyEvent_getRepeatCount(event) > 0))
+	is_shortcut = input_shortcut(
+		window,
+		AKeyEvent_getKeyCode(event),
+		AKeyEvent_getMetaState(event),
+		action != AKEY_EVENT_ACTION_UP,
+		AKeyEvent_getRepeatCount(event) > 0);
+	if (is_shortcut)
 		return 1;
 
 	/* The input. */
@@ -158,93 +182,12 @@ android_input_motion(
 		(void)input_touch(app, window, event);
 		if (!input_last_strip)
 			input_tap(event);
-	} else
+	} else {
 		(void)input_pointer(app, window, event);
+	}
 
 	/* Succeeded. */
 	return 1;
-}
-
-/* Shows the keyboard when the finger that touched lifts in its place soon (a tap): the user may have put it away. */
-static void
-input_tap(
-	const AInputEvent *event)
-{
-	int32_t action;
-	float dx;
-	float dy;
-	int64_t time;
-
-	/* The first finger's down, and its up. */
-	action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-	if (action == AMOTION_EVENT_ACTION_DOWN) {
-		input_down_x = AMotionEvent_getX(event, 0);
-		input_down_y = AMotionEvent_getY(event, 0);
-		input_down_time = AMotionEvent_getEventTime(event);
-		return;
-	}
-	if (action != AMOTION_EVENT_ACTION_UP)
-		return;
-
-	/* Soon, and in the same place. */
-	time = AMotionEvent_getEventTime(event) - input_down_time;
-	dx = AMotionEvent_getX(event, 0) - input_down_x;
-	dy = AMotionEvent_getY(event, 0) - input_down_y;
-	if (time > (int64_t)INPUT_TAP_MS * 1000000 || sqrt((double)(dx * dx + dy * dy)) > INPUT_TAP_PIXELS)
-		return;
-	(void)keiland_java_show_keyboard(1);
-}
-
-/* Modifier keycodes in evdev numbering (matching keys-table.c). */
-#define INPUT_EVDEV_LEFTCTRL	29U
-#define INPUT_EVDEV_LEFTSHIFT	42U
-#define INPUT_EVDEV_RIGHTSHIFT	54U
-#define INPUT_EVDEV_LEFTALT	56U
-#define INPUT_EVDEV_RIGHTCTRL	97U
-#define INPUT_EVDEV_RIGHTALT	100U
-
-static int
-input_is_modifier(
-	uint32_t code)
-{
-	return code == INPUT_EVDEV_LEFTCTRL || code == INPUT_EVDEV_RIGHTCTRL ||
-	       code == INPUT_EVDEV_LEFTALT || code == INPUT_EVDEV_RIGHTALT ||
-	       code == INPUT_EVDEV_LEFTSHIFT || code == INPUT_EVDEV_RIGHTSHIFT;
-}
-
-static int
-input_queue_key(
-	struct kl_window *window,
-	uint32_t code,
-	int pressed,
-	unsigned modifiers)
-{
-	struct kl_window_event input;
-
-	memset(&input, 0, sizeof(input));
-	input.kind = KL_WINDOW_KEY;
-	input.code = code;
-	input.pressed = pressed;
-	input.modifiers = modifiers;
-	return android_window_queue(window, &input);
-}
-
-static void
-input_queue_touch(
-	struct kl_window *window,
-	unsigned kind,
-	int32_t id,
-	double x,
-	double y)
-{
-	struct kl_window_event input;
-
-	memset(&input, 0, sizeof(input));
-	input.kind = kind;
-	input.id = id;
-	input.x = x;
-	input.y = y;
-	(void)android_window_queue(window, &input);
 }
 
 /*
@@ -262,6 +205,7 @@ android_input_bridge_key(
 	unsigned modifiers;
 	int pressed;
 	int wrap;
+	int is_shortcut;
 	int error;
 
 	/* A window and a key. */
@@ -273,9 +217,11 @@ android_input_bridge_key(
 		return 0;
 
 	/* A shortcut of the menu is not typed. */
-	if (input_shortcut(window, event->a, event->b, event->c != 0, 0))
+	is_shortcut = input_shortcut(window, event->a, event->b, event->c != 0, 0);
+	if (is_shortcut)
 		return 0;
 
+	/* Sends synthetic modifier presses when needed, then the key, then releases. */
 	modifiers = android_key_modifiers(event->b);
 	pressed = (event->c != 0);
 	wrap = !input_is_modifier(code) && (modifiers & (KL_MOD_CTRL | KL_MOD_ALT)) != 0U;
@@ -296,7 +242,12 @@ android_input_bridge_key(
 			(void)input_queue_key(window, INPUT_EVDEV_LEFTCTRL, 0, modifiers);
 	}
 
-	return error;
+	/* Reports whether the key could not be queued. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the key is queued. */
+	return 0;
 }
 
 /*
@@ -308,11 +259,16 @@ android_input_debug_touch(
 	const struct keiland_bridge_event *event)
 {
 	struct kl_window *window;
+	double cx;
+	double cy;
+	double half;
 
+	/* A window to give the synthetic touches to. */
 	window = input_window(app);
 	if (window == NULL)
 		return 0;
 
+	/* Synthesizes either a pan or a pinch gesture. */
 	if (event->a == 0) {
 		/* Pan by (b, c). */
 		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 100, 400.0, 400.0);
@@ -323,9 +279,9 @@ android_input_debug_touch(
 		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 101, 500.0 + (double)event->b, 400.0 + (double)event->c);
 	} else if (event->a == 1 && event->f > 0.0f) {
 		/* Pinch centered at (b, c) with scale factor f. */
-		double cx = (double)event->b;
-		double cy = (double)event->c;
-		double half = 100.0 * (double)event->f;
+		cx = (double)event->b;
+		cy = (double)event->c;
+		half = 100.0 * (double)event->f;
 
 		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 100, cx - 100.0, cy);
 		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 101, cx + 100.0, cy);
@@ -335,7 +291,109 @@ android_input_debug_touch(
 		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 101, cx + half, cy);
 	}
 
+	/* Succeeded. */
 	return 0;
+}
+
+/* Shows the keyboard when the finger that touched lifts in its place soon (a tap): the user may have put it away. */
+static void
+input_tap(
+	const AInputEvent *event)
+{
+	int32_t action;
+	float dx;
+	float dy;
+	int64_t time;
+	double distance;
+
+	/* The first finger's down, and its up. */
+	action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+	if (action == AMOTION_EVENT_ACTION_DOWN) {
+		input_down_x = AMotionEvent_getX(event, 0);
+		input_down_y = AMotionEvent_getY(event, 0);
+		input_down_time = AMotionEvent_getEventTime(event);
+		return;
+	}
+
+	if (action != AMOTION_EVENT_ACTION_UP)
+		return;
+
+	/* Soon, and in the same place. */
+	time = AMotionEvent_getEventTime(event) - input_down_time;
+	dx = AMotionEvent_getX(event, 0) - input_down_x;
+	dy = AMotionEvent_getY(event, 0) - input_down_y;
+	distance = sqrt((double)(dx * dx + dy * dy));
+	if (time > (int64_t)INPUT_TAP_MS * 1000000 || distance > INPUT_TAP_PIXELS)
+		return;
+	(void)keiland_java_show_keyboard(1);
+}
+
+/* Returns 1 when code is a Ctrl, Alt, or Shift key, or 0 otherwise. */
+static int
+input_is_modifier(
+	uint32_t code)
+{
+	/* Checks each modifier evdev key code individually. */
+	if (code == INPUT_EVDEV_LEFTCTRL)
+		return 1;
+	if (code == INPUT_EVDEV_RIGHTCTRL)
+		return 1;
+	if (code == INPUT_EVDEV_LEFTALT)
+		return 1;
+	if (code == INPUT_EVDEV_RIGHTALT)
+		return 1;
+	if (code == INPUT_EVDEV_LEFTSHIFT)
+		return 1;
+	if (code == INPUT_EVDEV_RIGHTSHIFT)
+		return 1;
+
+	/* Not a modifier key. */
+	return 0;
+}
+
+/* Queues a single KL_WINDOW_KEY event on window. */
+static int
+input_queue_key(
+	struct kl_window *window,
+	uint32_t code,
+	int pressed,
+	unsigned modifiers)
+{
+	struct kl_window_event input;
+	int error;
+
+	/* Builds and queues the key event. */
+	memset(&input, 0, sizeof(input));
+	input.kind = KL_WINDOW_KEY;
+	input.code = code;
+	input.pressed = pressed;
+	input.modifiers = modifiers;
+	error = android_window_queue(window, &input);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Queues a single touch event of kind on window. */
+static void
+input_queue_touch(
+	struct kl_window *window,
+	unsigned kind,
+	int32_t id,
+	double x,
+	double y)
+{
+	struct kl_window_event input;
+
+	/* Builds and queues the touch event. */
+	memset(&input, 0, sizeof(input));
+	input.kind = kind;
+	input.id = id;
+	input.x = x;
+	input.y = y;
+	(void)android_window_queue(window, &input);
 }
 
 /* Tells whether a key's press, repeat or release belongs to a menu item's shortcut (the press chooses the item).  Returns 1 if it does. */
