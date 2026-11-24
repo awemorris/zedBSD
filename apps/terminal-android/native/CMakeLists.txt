@@ -102,7 +102,7 @@ add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
 add_library(keiland_android STATIC ${MIKUTERM_KEILAND_ANDROID})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
 add_library(mikuterm_xserver STATIC ${MIKUTERM_XSERVER_SOURCES})
-add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES}
+add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_SFTP_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES}
 	${MIKUTERM_COMMON_RDP_SOURCES} ${MIKUTERM_COMMON_X11_SOURCES} ${MIKUTERM_COMMON_X11_THREAD_SOURCES})
 foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssl mikuterm_rdp mikuterm_h264sw
 	mikuterm_ssh keiland_common keiland_android mikuterm_terminal mikuterm_xserver mikuterm_common)
@@ -121,7 +121,7 @@ target_link_libraries(mikuterm_xserver PUBLIC keiland_common)
 # The files every mikuterm shares (the settings, the connections, the launch screen and the settings' tab).  This
 # build has no WSL, X11 forwarding in a thread and no local programs; Windows' _stricmp is the C library's strcasecmp.
 target_include_directories(mikuterm_common PRIVATE ${MIKUTERM_COMMON_DIR})
-target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=1 MIKUTERM_HAVE_KEY_PASTE=1
+target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=1 MIKUTERM_HAVE_KEY_PASTE=1 MIKUTERM_HAVE_SFTP_DRAG=0
 	_stricmp=strcasecmp)
 target_link_libraries(mikuterm_common PUBLIC mikuterm_terminal mikuterm_xserver)
 
@@ -134,7 +134,8 @@ else()
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/mikuterm-jni.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/mikuterm-android.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/places-android.c
-		${MIKUTERM_ROOT}/apps/terminal-android/jni/credential-android.c)
+		${MIKUTERM_ROOT}/apps/terminal-android/jni/credential-android.c
+		${MIKUTERM_ROOT}/apps/terminal-android/jni/sftp-local-android.c)
 	set(MIKUTERM_ANDROID_HELLO_VALUE 0)
 endif()
 if(MIKUTERM_ANDROID_ECHO)
@@ -159,6 +160,7 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_OPENER=0
 	MIKUTERM_HAVE_X11=1
 	MIKUTERM_HAVE_KEY_PASTE=1
+	MIKUTERM_HAVE_SFTP_DRAG=0
 	_stricmp=strcasecmp)
 target_compile_options(mikuterm PRIVATE -std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden)
 target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal mikuterm_rdp mikuterm_ssl mikuterm_h264sw keiland_android mikuterm_xserver)
