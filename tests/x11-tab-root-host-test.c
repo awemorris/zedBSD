@@ -114,6 +114,11 @@ main(void)
 	unsigned y;
 	unsigned w;
 	unsigned h;
+	uint32_t px;
+	uint32_t c;
+	uint32_t c0;
+	uint32_t c1;
+	int has_blended;
 
 	memset(&session, 0, sizeof(session));
 	assert(x11_tab_create(1U, 800U, 600U, 100U, "host", (const uint8_t *)"root", 4U, &tab) == 0);
@@ -176,6 +181,63 @@ main(void)
 	assert(in.kind == X11_LINK_INPUT_POINTER);
 	assert((int32_t)in.numbers[1] >= 350 && (int32_t)in.numbers[1] <= 450);
 	assert((int32_t)in.numbers[2] >= 298 && (int32_t)in.numbers[2] <= 302);
+
+	/* Test bilinear interpolation across a sharp black/white edge when scaled. */
+	for (y = 0U; y < 600U; y++) {
+		for (x = 0U; x < 800U; x++) {
+			px = 0xFFFFFFFFU;
+			if (x < 400U)
+				px = 0xFF000000U;
+			x11_link_put32(src + ((size_t)y * 800U + x) * 4U, px);
+		}
+	}
+
+	assert(x11_tab_put(tab, 0U, 0U, 800U, 600U, src) == 0);
+	/* Zoom in to ~2.0x around (200, 200) -> root (400, 300) is near screen x=250. */
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_DOWN, 4, 150, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_DOWN, 5, 250, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_MOVE, 4, 100, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_MOVE, 5, 300, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_UP, 4, 100, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_UP, 5, 300, 200);
+	assert(tab->connection.ops->picture->draw(&tab->connection, dst, 400U, 400U) == 0);
+	has_blended = 0;
+	for (x = 0U; x < 400U; x++) {
+		c = dst[200U * 400U + x] & 0x00FFFFFFU;
+		if (c != 0x00000000U && c != 0x00FFFFFFU)
+			has_blended = 1;
+	}
+
+	assert(has_blended);
+	assert(dst[200U * 400U + 10U] == 0xFF000000U);
+	assert(dst[200U * 400U + 390U] == 0xFFFFFFFFU);
+
+	/* Test 1:1 unscaled exact copy on a 1px checkerboard pattern. */
+	for (y = 0U; y < 600U; y++) {
+		for (x = 0U; x < 800U; x++) {
+			px = 0xFF000000U;
+			if (((x ^ y) & 1U) != 0U)
+				px = 0xFFFFFFFFU;
+			x11_link_put32(src + ((size_t)y * 800U + x) * 4U, px);
+		}
+	}
+
+	assert(x11_tab_put(tab, 0U, 0U, 800U, 600U, src) == 0);
+	/* Pinch out by 0.5x back to 1.0x detent. */
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_DOWN, 6, 100, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_DOWN, 7, 300, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_MOVE, 6, 150, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_MOVE, 7, 250, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_UP, 6, 150, 200);
+	send_touch(tab, TERMINAL_PICTURE_TOUCH_UP, 7, 250, 200);
+	assert(tab->connection.ops->picture->draw(&tab->connection, dst, 400U, 400U) == 0);
+	for (x = 10U; x < 20U; x++) {
+		c0 = dst[10U * 400U + x];
+		c1 = dst[10U * 400U + x + 1U];
+		assert(c0 == 0xFF000000U || c0 == 0xFFFFFFFFU);
+		assert(c1 == 0xFF000000U || c1 == 0xFFFFFFFFU);
+		assert(c0 != c1);
+	}
 
 	free(src);
 	free(dst);
