@@ -1664,8 +1664,8 @@ XDrawString(
 {
 	int function_result;
 
-	/* Obtains the text req result. */
-	function_result = text_req(d, 76, w, g, x, y, s, n, 0);
+	/* Sends the string as PolyText8 so glyphs are drawn without filling a background box. */
+	function_result = text_req(d, 74, w, g, x, y, s, n, 0);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -1686,8 +1686,8 @@ XDrawString16(
 {
 	int function_result;
 
-	/* Obtains the text req result. */
-	function_result = text_req(d, 77, w, g, x, y, s, n, 1);
+	/* Sends the 16-bit string as PolyText16 so glyphs are drawn without filling a background box. */
+	function_result = text_req(d, 75, w, g, x, y, s, n, 1);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -2656,7 +2656,7 @@ fetch_string(
 	return 1;
 }
 
-/* Supports the text req operation. */
+/* Encodes and sends a PolyText8 or PolyText16 request for a single string. */
 static int
 text_req(
 	Display *d,
@@ -2669,32 +2669,64 @@ text_req(
 	int n,
 	int wide)
 {
-	size_t bytes, z;
+	size_t char_size;
+	size_t chunks;
+	size_t item_bytes;
+	size_t rem;
+	size_t chunk;
+	size_t chunk_bytes;
+	size_t z;
+	const uint8_t *src;
+	uint8_t *dst;
 	uint8_t *q;
+	int status;
 
-	bytes = (size_t)n * (wide ? 2U : 1U);
-	z = (16 + bytes + 3) & ~3U;
-
-	/* Checks the current item count. */
-	if (n < 0 || n > 255)
+	/* Rejects negative counts and empty string pointers when characters are requested. */
+	if (n < 0 || (n > 0 && s == NULL))
 		return -1;
-	q = calloc(1, z);
 
-	/* Handles the q condition. */
+	/* Computes the total PolyText item payload, splitting at 254 chars (255 is font-shift). */
+	char_size = wide ? 2U : 1U;
+	chunks = n == 0 ? 0U : ((size_t)n + 253U) / 254U;
+	item_bytes = chunks * 2U + (size_t)n * char_size;
+	z = (16U + item_bytes + 3U) & ~(size_t)3U;
+	if (z > 262140U)
+		return -1;
+
+	/* Allocates the zero-padded request buffer. */
+	q = calloc(1, z);
 	if (!q)
 		return -1;
+
+	/* Writes the fixed PolyText header. */
 	q[0] = op;
-	q[1] = (uint8_t)n;
+	q[1] = 0;
 	w32(q + 4, w);
 	w32(q + 8, g->xid);
 	w16(q + 12, (uint16_t)x);
 	w16(q + 14, (uint16_t)y);
-	memcpy(q + 16, s, bytes);
-	n = req(d, q, z);
+
+	/* Packs the string into 254-character TEXTITEM chunks with zero delta. */
+	src = (const uint8_t *)s;
+	dst = q + 16;
+	rem = (size_t)n;
+	while (rem > 0U) {
+		chunk = rem > 254U ? 254U : rem;
+		chunk_bytes = chunk * char_size;
+		dst[0] = (uint8_t)chunk;
+		dst[1] = 0;
+		memcpy(dst + 2, src, chunk_bytes);
+		dst += 2U + chunk_bytes;
+		src += chunk_bytes;
+		rem -= chunk;
+	}
+
+	/* Sends the request and releases the temporary buffer. */
+	status = req(d, q, z);
 	free(q);
 
-	/* Returns the computed result. */
-	return n;
+	/* Returns the write status. */
+	return status;
 }
 
 /* Supports the event operation. */

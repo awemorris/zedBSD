@@ -225,7 +225,8 @@ static struct pixmap *find_pixmap(struct server *s, uint32_t id);
 static struct graphics_context *find_gc(struct server *s, uint32_t id);
 static void window_fill(struct server *s, struct window *w, int x, int y, int width, int height, uint32_t color);
 static void pixmap_fill(struct pixmap *p, int x, int y, int width, int height, uint32_t color);
-static int draw_text(struct server *s, struct window *w, struct graphics_context *g, int x, int y, const uint8_t *text, size_t count, int wide);
+static int draw_text(struct server *s, struct window *w, struct graphics_context *g, int *x_io, int y, const uint8_t *text, size_t count, int wide);
+static int handle_poly_text(struct server *s, struct client *c, const uint8_t *q, size_t n, int wide);
 static int window_pixels_resize_buffered(struct window *w, uint16_t width, uint16_t height, int x_offset, int y_offset);
 static void on_signal(int sig);
 static void input_key(void *context, uint8_t keycode, int value, uint32_t time, uint16_t state);
@@ -2510,6 +2511,13 @@ request(
 			return 0;
 		}
 		break;
+	case 74:
+	case 75: /* PolyText8 / PolyText16 */
+		if (handle_poly_text(s, c, q, n, op == 75) == 0) {
+			/* Reports successful completion. */
+			return 0;
+		}
+		break;
 	case 76:
 	case 77: /* ImageText8 / ImageText16 */
 		if (n >= 16 &&
@@ -2519,8 +2527,9 @@ request(
 
 			/* Handles the chars condition. */
 			if (16 + chars * (op == 77 ? 2U : 1U) <= n) {
+				x_local35 = (int16_t)rd16(q + 12, c->order);
 				(void)draw_text(s, w, g_local45,
-						(int16_t)rd16(q + 12, c->order),
+						&x_local35,
 						(int16_t)rd16(q + 14, c->order),
 						q + 16, chars, op == 77);
 			}
@@ -3129,7 +3138,7 @@ draw_text(
 	struct server *s,
 	struct window *w,
 	struct graphics_context *g,
-	int x,
+	int *x_io,
 	int y,
 	const uint8_t *text,
 	size_t count,
@@ -3137,12 +3146,13 @@ draw_text(
 {
 	struct graphics_glyph q;
 	uint32_t cp;
-	int gx, gy, top;
+	int x, gx, gy, top;
 	uint8_t bitmap[32];
 	size_t i;
 	uint32_t color;
 
 	/* Process each remaining element. */
+	x = *x_io;
 	color = g ? g->foreground : 0xffffff;
 	for (i = 0; i < count; i++) {
 		cp = wide ? ((uint32_t)text[i * 2] << 8) | text[i * 2 + 1]
@@ -3178,8 +3188,67 @@ draw_text(
 			   (int)q.height);
 		x += (int)(q.advance ? q.advance : q.width);
 	}
+	*x_io = x;
 
 	/* Reports successful completion. */
+	return 0;
+}
+
+/* Handles a PolyText8 or PolyText16 request. */
+static int
+handle_poly_text(
+	struct server *s,
+	struct client *c,
+	const uint8_t *q,
+	size_t n,
+	int wide)
+{
+	struct window *w;
+	struct graphics_context *g;
+	size_t off;
+	size_t count;
+	size_t item_bytes;
+	uint32_t font_id;
+	int tx;
+	int ty;
+
+	/* Validates the fixed PolyText header and target window. */
+	if (n < 16U)
+		return -1;
+	w = find_window(s, rd32(q + 4, c->order));
+	if (w == NULL)
+		return -1;
+	g = find_gc(s, rd32(q + 8, c->order));
+	tx = (int16_t)rd16(q + 12, c->order);
+	ty = (int16_t)rd16(q + 14, c->order);
+
+	/* Processes each TEXTITEM or font-shift item until only padding remains. */
+	off = 16U;
+	while (n - off > 2U) {
+		if (q[off] == 255U) {
+			/* Font-shift items carry a 32-bit MSB-first font ID. */
+			if (n - off < 5U)
+				return -1;
+			font_id = ((uint32_t)q[off + 1U] << 24) |
+				  ((uint32_t)q[off + 2U] << 16) |
+				  ((uint32_t)q[off + 3U] << 8) |
+				  (uint32_t)q[off + 4U];
+			if (g != NULL)
+				g->font = font_id;
+			off += 5U;
+			continue;
+		}
+
+		count = q[off];
+		item_bytes = count * (wide ? 2U : 1U);
+		if (n - off - 2U < item_bytes)
+			return -1;
+		tx += (int8_t)q[off + 1U];
+		(void)draw_text(s, w, g, &tx, ty, q + off + 2U, count, wide);
+		off += 2U + item_bytes;
+	}
+
+	/* Succeeded: all text items drawn. */
 	return 0;
 }
 
