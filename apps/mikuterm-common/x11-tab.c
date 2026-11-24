@@ -20,6 +20,7 @@
 #include "userland/desktop/xserver/win32/scale.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,15 @@
 #define TAB_X_BACK		8U
 #define TAB_X_FORWARD		9U
 
+/* Root viewport zoom limits and detent capture/release thresholds. */
+#define TAB_ROOT_MIN_SCALE	0.25
+#define TAB_ROOT_MAX_SCALE	4.0
+#define TAB_DETENT_SNAP		0.06
+#define TAB_DETENT_ESCAPE	0.12
+#define TAB_DETENT_NONE		0
+#define TAB_DETENT_FIT		1
+#define TAB_DETENT_ONE		2
+
 static size_t tab_read(struct terminal_connection *connection, unsigned char *buffer, size_t size);
 static int tab_write(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
 static int tab_resize(struct terminal_connection *connection, unsigned columns, unsigned rows, unsigned width, unsigned height);
@@ -65,6 +75,12 @@ static void tab_wheel(struct x11_tab *tab, double *rest, double distance, unsign
 static unsigned tab_button(uint32_t code);
 static void tab_clean_title(char *title, const uint8_t *bytes, size_t size);
 static void tab_ring(struct x11_tab *tab);
+static void tab_root_clamp(struct x11_tab *tab);
+static void tab_root_configure(struct x11_tab *tab, unsigned vw, unsigned vh);
+static void tab_root_pan(struct x11_tab *tab, int32_t dx, int32_t dy);
+static void tab_root_pinch(struct x11_tab *tab, int32_t cx, int32_t cy, double ratio);
+static void tab_root_point(struct x11_tab *tab, int32_t sx, int32_t sy, int32_t *rx, int32_t *ry);
+static void tab_root_draw(struct x11_tab *tab, uint32_t *pixels, uint32_t width, uint32_t height);
 
 /* What a tab of an X window draws, and how it takes the window's input. */
 static const struct terminal_picture_ops tab_picture_ops = {
@@ -505,6 +521,14 @@ tab_resize(
 
 	/* The size in X's pixels, at least one and at most a tab's longest side. */
 	tab = (struct x11_tab *)connection;
+	if (tab->touch.mode == X11_TOUCH_MODE_ROOT) {
+		kl_mutex_lock(&tab->lock);
+		tab_root_configure(tab, width, height);
+		tab->news = 1;
+		kl_mutex_unlock(&tab->lock);
+		return 0;
+	}
+
 	x_width = x11_win32_scale_to_x((int32_t)width, tab->scale);
 	x_height = x11_win32_scale_to_x((int32_t)height, tab->scale);
 	if (x_width < 1)
@@ -666,6 +690,14 @@ tab_draw(
 	for (index = 0U; index < count; index++)
 		pixels[index] = TAB_BACKGROUND;
 
+	/* A root tab scales and pans its buffered pixels locally. */
+	if (tab->touch.mode == X11_TOUCH_MODE_ROOT) {
+		kl_mutex_lock(&tab->lock);
+		tab_root_draw(tab, pixels, width, height);
+		kl_mutex_unlock(&tab->lock);
+		return 0;
+	}
+
 	/* The window at the scale, as far as the tab reaches. */
 	whole = x11_win32_scale_is_whole(tab->scale);
 
@@ -730,14 +762,20 @@ tab_input(
 	int32_t y;
 	unsigned button;
 	uint32_t pressed;
+	int send;
 
 	/* The pointer's place on the window in X's pixels. */
 	tab = (struct x11_tab *)connection;
-	x = x11_win32_scale_to_x(event->x, tab->scale);
-	y = x11_win32_scale_to_x(event->y, tab->scale);
+	if (tab->touch.mode == X11_TOUCH_MODE_ROOT) {
+		tab_root_point(tab, event->x, event->y, &x, &y);
+	} else {
+		x = x11_win32_scale_to_x(event->x, tab->scale);
+		y = x11_win32_scale_to_x(event->y, tab->scale);
+	}
 	pressed = 0U;
 	if (event->pressed)
 		pressed = 1U;
+	send = 1;
 
 	/* What it is. */
 	switch (event->kind) {
@@ -755,6 +793,8 @@ tab_input(
 		button = tab_button(event->code);
 		if (button != 0U)
 			tab_pointer(tab, button, event->pressed, x, y);
+		else
+			send = 0;
 		break;
 	case TERMINAL_PICTURE_AXIS:
 		/* Each wheel by whole notches; a positive distance goes down or right. */
@@ -778,25 +818,34 @@ tab_input(
 		int32_t ax;
 		int32_t ay;
 
+		send = 0;
 		touch_kind = X11_TOUCH_DOWN + (event->kind - TERMINAL_PICTURE_TOUCH_DOWN);
 		count = x11_touch_take(&tab->touch, touch_kind, event->id, event->x, event->y, kl_clock_us(), actions, 8U);
 		for (i = 0U; i < count; i++) {
-			ax = x11_win32_scale_to_x(actions[i].x, tab->scale);
-			ay = x11_win32_scale_to_x(actions[i].y, tab->scale);
+			if (tab->touch.mode == X11_TOUCH_MODE_ROOT) {
+				tab_root_point(tab, actions[i].x, actions[i].y, &ax, &ay);
+			} else {
+				ax = x11_win32_scale_to_x(actions[i].x, tab->scale);
+				ay = x11_win32_scale_to_x(actions[i].y, tab->scale);
+			}
 			if (actions[i].kind == X11_TOUCH_MOTION) {
 				tab_pointer(tab, 0U, 0, ax, ay);
+				send = 1;
 			} else if (actions[i].kind == X11_TOUCH_BUTTON) {
 				tab_pointer(tab, actions[i].button, actions[i].pressed, ax, ay);
+				send = 1;
 			} else if (actions[i].kind == X11_TOUCH_WHEEL) {
 				tab_wheel(tab, &tab->wheel_y, (double)actions[i].notches * TAB_WHEEL_NOTCH,
 					  TAB_X_WHEEL_UP, TAB_X_WHEEL_DOWN, ax, ay);
+				send = 1;
 			} else if (actions[i].kind == X11_TOUCH_PAN) {
-				tab_queue(tab, X11_LINK_INPUT_PAN, 0U, (uint32_t)actions[i].dx, (uint32_t)actions[i].dy, NULL);
+				kl_mutex_lock(&tab->lock);
+				tab_root_pan(tab, actions[i].dx, actions[i].dy);
+				kl_mutex_unlock(&tab->lock);
 			} else if (actions[i].kind == X11_TOUCH_PINCH) {
-				uint32_t ratio_q16;
-
-				ratio_q16 = (uint32_t)(actions[i].scale_ratio * 65536.0 + 0.5);
-				tab_queue(tab, X11_LINK_INPUT_PINCH, ratio_q16, (uint32_t)actions[i].x, (uint32_t)actions[i].y, NULL);
+				kl_mutex_lock(&tab->lock);
+				tab_root_pinch(tab, actions[i].x, actions[i].y, actions[i].scale_ratio);
+				kl_mutex_unlock(&tab->lock);
 			}
 		}
 		break;
@@ -806,8 +855,9 @@ tab_input(
 		return;
 	}
 
-	/* The network thread sends it. */
-	tab_ring(tab);
+	/* The network thread sends it when anything was queued for X. */
+	if (send)
+		tab_ring(tab);
 }
 
 /* Says that the run had no room for the tab: the child shows the window as a window of its own (the close follows). */
@@ -1036,4 +1086,232 @@ tab_ring(
 {
 	/* The session is the tab's from before the application's thread had the tab. */
 	kl_socket_waker_ring(tab->session->waker);
+}
+
+/* Clamps root_offset_x/y so the root image stays centered when smaller or within bounds when larger (called under tab->lock). */
+static void
+tab_root_clamp(
+	struct x11_tab *tab)
+{
+	double scaled_w;
+	double scaled_h;
+	double max_ox;
+	double max_oy;
+
+	if (tab->root_scale <= 0.0)
+		return;
+
+	scaled_w = (double)tab->width * tab->root_scale;
+	if (scaled_w <= (double)tab->view_width) {
+		tab->root_offset_x = -((double)tab->view_width / tab->root_scale - (double)tab->width) * 0.5;
+	} else {
+		max_ox = (double)tab->width - (double)tab->view_width / tab->root_scale;
+		if (tab->root_offset_x < 0.0)
+			tab->root_offset_x = 0.0;
+		if (tab->root_offset_x > max_ox)
+			tab->root_offset_x = max_ox;
+	}
+
+	scaled_h = (double)tab->height * tab->root_scale;
+	if (scaled_h <= (double)tab->view_height) {
+		tab->root_offset_y = -((double)tab->view_height / tab->root_scale - (double)tab->height) * 0.5;
+	} else {
+		max_oy = (double)tab->height - (double)tab->view_height / tab->root_scale;
+		if (tab->root_offset_y < 0.0)
+			tab->root_offset_y = 0.0;
+		if (tab->root_offset_y > max_oy)
+			tab->root_offset_y = max_oy;
+	}
+}
+
+/* Updates the root tab viewport size, keeping fit detent if active (called under tab->lock). */
+static void
+tab_root_configure(
+	struct x11_tab *tab,
+	unsigned vw,
+	unsigned vh)
+{
+	double fit_w;
+	double fit_h;
+
+	if (vw == 0U || vh == 0U || tab->width == 0U || tab->height == 0U)
+		return;
+
+	tab->view_width = vw;
+	tab->view_height = vh;
+	fit_w = (double)vw / (double)tab->width;
+	fit_h = (double)vh / (double)tab->height;
+	tab->root_fit_scale = (fit_w < fit_h) ? fit_w : fit_h;
+
+	if (!tab->root_configured || tab->root_detent == TAB_DETENT_FIT) {
+		tab->root_configured = 1;
+		tab->root_detent = TAB_DETENT_FIT;
+		tab->root_scale = tab->root_fit_scale;
+		tab->root_raw_scale = tab->root_fit_scale;
+		tab->root_offset_x = 0.0;
+		tab->root_offset_y = 0.0;
+	}
+
+	tab_root_clamp(tab);
+}
+
+/* Pans the root viewport by (dx, dy) screen pixels and marks the tab dirty (called under tab->lock). */
+static void
+tab_root_pan(
+	struct x11_tab *tab,
+	int32_t dx,
+	int32_t dy)
+{
+	if (!tab->root_configured || tab->root_scale <= 0.0)
+		return;
+	tab->root_offset_x -= (double)dx / tab->root_scale;
+	tab->root_offset_y -= (double)dy / tab->root_scale;
+	tab_root_clamp(tab);
+	tab->news = 1;
+}
+
+/* Zooms the root viewport around screen point (cx, cy) with fit and 1.0 detents (called under tab->lock). */
+static void
+tab_root_pinch(
+	struct x11_tab *tab,
+	int32_t cx,
+	int32_t cy,
+	double ratio)
+{
+	double min_scale;
+	double raw;
+	double fit;
+	double old_scale;
+	double new_scale;
+	double target;
+	double root_cx;
+	double root_cy;
+	double delta;
+	double delta_fit;
+
+	if (!tab->root_configured || ratio <= 0.0 || tab->root_scale <= 0.0)
+		return;
+
+	fit = tab->root_fit_scale;
+	min_scale = fit * 0.5;
+	if (min_scale < TAB_ROOT_MIN_SCALE)
+		min_scale = TAB_ROOT_MIN_SCALE;
+
+	raw = tab->root_raw_scale * ratio;
+	if (raw < min_scale)
+		raw = min_scale;
+	if (raw > TAB_ROOT_MAX_SCALE)
+		raw = TAB_ROOT_MAX_SCALE;
+
+	old_scale = tab->root_scale;
+	new_scale = raw;
+
+	if (tab->root_detent != TAB_DETENT_NONE) {
+		target = (tab->root_detent == TAB_DETENT_FIT) ? fit : 1.0;
+		delta = fabs(raw - target);
+		if (delta / target >= TAB_DETENT_ESCAPE) {
+			tab->root_detent = TAB_DETENT_NONE;
+		} else {
+			new_scale = target;
+		}
+	}
+
+	if (tab->root_detent == TAB_DETENT_NONE) {
+		delta = fabs(raw - 1.0);
+		delta_fit = fabs(raw - fit);
+		if (delta <= TAB_DETENT_SNAP) {
+			tab->root_detent = TAB_DETENT_ONE;
+			new_scale = 1.0;
+		} else if (delta_fit / fit <= TAB_DETENT_SNAP) {
+			tab->root_detent = TAB_DETENT_FIT;
+			new_scale = fit;
+		}
+	}
+
+	tab->root_raw_scale = raw;
+	root_cx = tab->root_offset_x + (double)cx / old_scale;
+	root_cy = tab->root_offset_y + (double)cy / old_scale;
+	tab->root_scale = new_scale;
+	tab->root_offset_x = root_cx - (double)cx / new_scale;
+	tab->root_offset_y = root_cy - (double)cy / new_scale;
+	tab_root_clamp(tab);
+	tab->news = 1;
+}
+
+/* Maps screen coordinates (sx, sy) to root X11 coordinates (rx, ry). */
+static void
+tab_root_point(
+	struct x11_tab *tab,
+	int32_t sx,
+	int32_t sy,
+	int32_t *rx,
+	int32_t *ry)
+{
+	kl_mutex_lock(&tab->lock);
+
+	if (tab->root_configured && tab->root_scale > 0.0) {
+		*rx = (int32_t)floor(tab->root_offset_x + (double)sx / tab->root_scale);
+		*ry = (int32_t)floor(tab->root_offset_y + (double)sy / tab->root_scale);
+	} else {
+		*rx = x11_win32_scale_to_x(sx, tab->scale);
+		*ry = x11_win32_scale_to_x(sy, tab->scale);
+	}
+
+	kl_mutex_unlock(&tab->lock);
+}
+
+/* Draws the buffered root pixels scaled and panned into the tab viewport (called under tab->lock). */
+static void
+tab_root_draw(
+	struct x11_tab *tab,
+	uint32_t *pixels,
+	uint32_t width,
+	uint32_t height)
+{
+	double inv_scale;
+	int64_t step_fp;
+	int64_t row_x0_fp;
+	int32_t sx_start;
+	int32_t sx_end;
+	int32_t sx;
+	int32_t sy;
+	int32_t ry;
+	int64_t rx_fp;
+	const uint32_t *src;
+	uint32_t *dst;
+
+	if (!tab->root_configured || tab->view_width != width || tab->view_height != height)
+		tab_root_configure(tab, width, height);
+	if (!tab->root_configured || tab->root_scale <= 0.0 || tab->width == 0U || tab->height == 0U)
+		return;
+
+	inv_scale = 1.0 / tab->root_scale;
+	step_fp = (int64_t)llround(inv_scale * 4294967296.0);
+	row_x0_fp = (int64_t)floor((tab->root_offset_x + 0.5 * inv_scale) * 4294967296.0);
+
+	sx_start = (int32_t)ceil((0.0 - tab->root_offset_x) * tab->root_scale - 0.5);
+	if (sx_start < 0)
+		sx_start = 0;
+	sx_end = (int32_t)floor(((double)tab->width - tab->root_offset_x) * tab->root_scale - 0.5) + 1;
+	if (sx_end > (int32_t)width)
+		sx_end = (int32_t)width;
+	while (sx_start < sx_end && ((row_x0_fp + (int64_t)sx_start * step_fp) >> 32) < 0)
+		sx_start++;
+	while (sx_end > sx_start && ((row_x0_fp + (int64_t)(sx_end - 1) * step_fp) >> 32) >= (int64_t)tab->width)
+		sx_end--;
+	if (sx_start >= sx_end)
+		return;
+
+	for (sy = 0; sy < (int32_t)height; sy++) {
+		ry = (int32_t)floor(tab->root_offset_y + ((double)sy + 0.5) * inv_scale);
+		if (ry < 0 || ry >= (int32_t)tab->height)
+			continue;
+		src = tab->pixels + (size_t)ry * tab->width;
+		dst = pixels + (size_t)sy * width;
+		rx_fp = row_x0_fp + (int64_t)sx_start * step_fp;
+		for (sx = sx_start; sx < sx_end; sx++) {
+			dst[sx] = src[(size_t)(rx_fp >> 32)] | TAB_OPAQUE;
+			rx_fp += step_fp;
+		}
+	}
 }
