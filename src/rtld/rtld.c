@@ -6389,22 +6389,30 @@ rtld_dlsym_common(
 		return NULL;
 	}
 	loader_lock();
-	handle = validate_handle(value);
 
-	/* Handles the handle availability. */
-	if (handle == NULL) {
-		set_loader_error("invalid dynamic-loader handle");
-	} else if (handle->main_scope) {
+	/* Searches the global symbol scope when RTLD_DEFAULT is given. */
+	if (value == RTLD_DEFAULT) {
 		result = lookup_global_optional(name, version, &found);
+		if (!found)
+			set_loader_error("symbol not found");
 	} else {
-		lookup_generation_next();
-		result = lookup_handle_graph(handle->object, name, version,
-					     &found);
-	}
+		handle = validate_handle(value);
 
-	/* Handles the handle availability. */
-	if (handle != NULL && !found)
-		set_loader_error("symbol not found");
+		/* Handles the handle availability. */
+		if (handle == NULL) {
+			set_loader_error("invalid dynamic-loader handle");
+		} else if (handle->main_scope) {
+			result = lookup_global_optional(name, version, &found);
+		} else {
+			lookup_generation_next();
+			result = lookup_handle_graph(handle->object, name, version,
+						     &found);
+		}
+
+		/* Handles the handle availability. */
+		if (handle != NULL && !found)
+			set_loader_error("symbol not found");
+	}
 	loader_unlock();
 
 	/* Returns the computed result. */

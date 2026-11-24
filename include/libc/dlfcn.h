@@ -30,6 +30,12 @@ extern "C" {
  */
 #define RTLD_NOLOAD 0x2000
 
+/*
+ * Searches the global symbol scope in dlsym(), using FreeBSD's sentinel
+ * value so it does not collide with NULL or a valid dlopen() handle.
+ */
+#define RTLD_DEFAULT ((void *)-2)
+
 typedef struct dl_info {
 	const char *dli_fname;
 	void *dli_fbase;
