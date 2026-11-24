@@ -1074,11 +1074,19 @@ window_picture_input(
 	case KL_WINDOW_TEXT_PREEDIT:
 	case KL_WINDOW_TEXT_DELETE:
 	case KL_WINDOW_AXIS_STOP:
-	case KL_WINDOW_TOUCH_DOWN:
-	case KL_WINDOW_TOUCH_MOTION:
-	case KL_WINDOW_TOUCH_UP:
-	case KL_WINDOW_TOUCH_CANCEL:
 		/* Nothing of the picture's. */
+		return 1;
+	case KL_WINDOW_TOUCH_DOWN:
+		window_picture_push(window, TERMINAL_PICTURE_TOUCH_DOWN, event);
+		return 1;
+	case KL_WINDOW_TOUCH_MOTION:
+		window_picture_push(window, TERMINAL_PICTURE_TOUCH_MOVE, event);
+		return 1;
+	case KL_WINDOW_TOUCH_UP:
+		window_picture_push(window, TERMINAL_PICTURE_TOUCH_UP, event);
+		return 1;
+	case KL_WINDOW_TOUCH_CANCEL:
+		window_picture_push(window, TERMINAL_PICTURE_TOUCH_CANCEL, event);
 		return 1;
 	default:
 		break;
@@ -1121,8 +1129,14 @@ window_picture_push(
 	queued->kind = kind;
 	queued->code = event->code;
 	queued->pressed = event->pressed;
-	queued->x = window->pointer_x;
-	queued->y = window->pointer_y;
+	queued->id = event->id;
+	if (kind >= TERMINAL_PICTURE_TOUCH_DOWN && kind <= TERMINAL_PICTURE_TOUCH_CANCEL) {
+		queued->x = (int32_t)event->x;
+		queued->y = (int32_t)event->y;
+	} else {
+		queued->x = window->pointer_x;
+		queued->y = window->pointer_y;
+	}
 	queued->dx = event->dx;
 	queued->dy = event->dy;
 	if (kind == TERMINAL_PICTURE_TEXT)

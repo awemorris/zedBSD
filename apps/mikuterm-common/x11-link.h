@@ -94,6 +94,8 @@
 #define X11_LINK_INPUT_POINTER	3U
 #define X11_LINK_INPUT_FOCUS	4U
 #define X11_LINK_INPUT_LEAVE	5U
+#define X11_LINK_INPUT_PAN	6U
+#define X11_LINK_INPUT_PINCH	7U
 
 /* The bit of a pointer's input that says its button went down. */
 #define X11_LINK_INPUT_PRESSED	0x100U

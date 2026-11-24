@@ -11,8 +11,10 @@ passphrases, the start of the X server's process) is in that system's own direct
 
 - `conf.c`, `settings-file.c`, `connection-ssh.c`, `known-hosts.c`, `ssh-thread.c`, `forward.c`,
   `remote-command.c`, `launch.c`, `page.c`: used by every program.
-- `x11-link.c`, `x11-host.c`, `x11-serve.c`, `x11-tab.c`, `x11-noglx.c`: X11 forwarding, for a
-  program that has it.  `x11-none.c` answers the same calls for a program that has none.
+- `x11-link.c`, `x11-host.c`, `x11-serve.c`, `x11-tab.c`, `x11-noglx.c`, `x11-touch.c`: X11
+  forwarding, for a program that has it.  `x11-spawn-thread.c` and `x11-tab-only.c` run the X
+  server on an in-process thread without native OS windows (Android).  `x11-none.c` answers the
+  same calls for a program that has none.
 - `proxy-command.c`, `codespace.c`: starting programs of the computer's for ssh_config's
   ProxyCommand and for GitHub Codespaces, for a program that can start them.
 - `wsl-none.c`: answers what the program asks of WSL, for a system that has none.
@@ -23,13 +25,14 @@ passphrases, the start of the X server's process) is in that system's own direct
 
 ## What each program reads
 
-| list | Windows | Linux | no WSL, no X11 |
-| --- | --- | --- | --- |
-| `MIKUTERM_COMMON_SOURCES` | yes | yes | yes |
-| `MIKUTERM_COMMON_X11_SOURCES` | yes | yes | |
-| `MIKUTERM_COMMON_PROGRAM_SOURCES` | yes | unless Flatpak | |
-| `MIKUTERM_COMMON_NO_WSL_SOURCES` | | yes | yes |
-| `MIKUTERM_COMMON_NO_X11_SOURCES` | | | yes |
+| list | Windows | Linux | Android | no WSL, no X11 |
+| --- | --- | --- | --- | --- |
+| `MIKUTERM_COMMON_SOURCES` | yes | yes | yes | yes |
+| `MIKUTERM_COMMON_X11_SOURCES` | yes | yes | yes | |
+| `MIKUTERM_COMMON_X11_THREAD_SOURCES` | | | yes | |
+| `MIKUTERM_COMMON_PROGRAM_SOURCES` | yes | unless Flatpak | | |
+| `MIKUTERM_COMMON_NO_WSL_SOURCES` | | yes | yes | yes |
+| `MIKUTERM_COMMON_NO_X11_SOURCES` | | | | yes |
 
 `MIKUTERM_TERMINAL_SOURCES` and `MIKUTERM_SSH_SOURCES` are the terminal's and the SSH library's
 modules that every program uses.  Every program adds this directory to its include path.

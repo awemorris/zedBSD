@@ -603,6 +603,9 @@ app_bridge_event(
 	case KEILAND_BRIDGE_KEY:
 		(void)android_input_bridge_key(app, event);
 		break;
+	case KEILAND_BRIDGE_DEBUG_TOUCH:
+		(void)android_input_debug_touch(app, event);
+		break;
 	case KEILAND_BRIDGE_MENU:
 		android_titlebar_menu_answer(app, (uint32_t)event->a, event->b);
 		break;

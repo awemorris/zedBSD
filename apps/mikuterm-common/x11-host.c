@@ -1037,6 +1037,8 @@ host_tab_open(
 	}
 
 	/* Succeeded: the host holds it, and it waits for the network thread. */
+	if (host->settings.root_width != 0U)
+		tab->touch.mode = X11_TOUCH_MODE_ROOT;
 	host->tabs[place] = tab;
 	host->fresh[host->fresh_count] = tab;
 	host->fresh_count++;

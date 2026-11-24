@@ -31,6 +31,7 @@
 #define MIKUTERM_X11_TAB_H
 
 #include "x11-link.h"
+#include "x11-touch.h"
 
 #include "userland/desktop/terminal/connection.h"
 
@@ -109,9 +110,10 @@ struct x11_tab {
 	struct x11_tab_input inputs[X11_TAB_INPUTS];
 	unsigned input_count;
 
-	/* The wheels' distance not yet a whole notch (the application's thread alone). */
+	/* The wheels' distance not yet a whole notch, and touch gesture state (the application's thread alone). */
 	double wheel_x;
 	double wheel_y;
+	struct x11_touch touch;
 };
 
 int x11_tab_create(uint32_t window, unsigned width, unsigned height, unsigned scale, const char *host, const uint8_t *title, size_t title_size, struct x11_tab **result);

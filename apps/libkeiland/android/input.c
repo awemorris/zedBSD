@@ -195,9 +195,62 @@ input_tap(
 	(void)keiland_java_show_keyboard(1);
 }
 
+/* Modifier keycodes in evdev numbering (matching keys-table.c). */
+#define INPUT_EVDEV_LEFTCTRL	29U
+#define INPUT_EVDEV_LEFTSHIFT	42U
+#define INPUT_EVDEV_RIGHTSHIFT	54U
+#define INPUT_EVDEV_LEFTALT	56U
+#define INPUT_EVDEV_RIGHTCTRL	97U
+#define INPUT_EVDEV_RIGHTALT	100U
+
+static int
+input_is_modifier(
+	uint32_t code)
+{
+	return code == INPUT_EVDEV_LEFTCTRL || code == INPUT_EVDEV_RIGHTCTRL ||
+	       code == INPUT_EVDEV_LEFTALT || code == INPUT_EVDEV_RIGHTALT ||
+	       code == INPUT_EVDEV_LEFTSHIFT || code == INPUT_EVDEV_RIGHTSHIFT;
+}
+
+static int
+input_queue_key(
+	struct kl_window *window,
+	uint32_t code,
+	int pressed,
+	unsigned modifiers)
+{
+	struct kl_window_event input;
+
+	memset(&input, 0, sizeof(input));
+	input.kind = KL_WINDOW_KEY;
+	input.code = code;
+	input.pressed = pressed;
+	input.modifiers = modifiers;
+	return android_window_queue(window, &input);
+}
+
+static void
+input_queue_touch(
+	struct kl_window *window,
+	unsigned kind,
+	int32_t id,
+	double x,
+	double y)
+{
+	struct kl_window_event input;
+
+	memset(&input, 0, sizeof(input));
+	input.kind = kind;
+	input.id = id;
+	input.x = x;
+	input.y = y;
+	(void)android_window_queue(window, &input);
+}
+
 /*
- * Turns a key of the key bar (told through the bridge) into a KL_WINDOW_KEY.
- * Returns 0, or ENOMEM.
+ * Turns a key of the key bar (told through the bridge) into a KL_WINDOW_KEY,
+ * wrapping non-modifier keys with Ctrl/Alt key events when those modifier bits
+ * are active.  Returns 0, or ENOMEM.
  */
 int
 android_input_bridge_key(
@@ -205,8 +258,11 @@ android_input_bridge_key(
 	const struct keiland_bridge_event *event)
 {
 	struct kl_window *window;
-	struct kl_window_event input;
 	uint32_t code;
+	unsigned modifiers;
+	int pressed;
+	int wrap;
+	int error;
 
 	/* A window and a key. */
 	window = input_window(app);
@@ -216,19 +272,70 @@ android_input_bridge_key(
 	if (code == 0U)
 		return 0;
 
-	/* The input. */
-	memset(&input, 0, sizeof(input));
-	input.kind = KL_WINDOW_KEY;
-	input.code = code;
-	input.pressed = (event->c != 0);
-	input.modifiers = android_key_modifiers(event->b);
-
 	/* A shortcut of the menu is not typed. */
 	if (input_shortcut(window, event->a, event->b, event->c != 0, 0))
 		return 0;
 
-	/* Queued. */
-	return android_window_queue(window, &input);
+	modifiers = android_key_modifiers(event->b);
+	pressed = (event->c != 0);
+	wrap = !input_is_modifier(code) && (modifiers & (KL_MOD_CTRL | KL_MOD_ALT)) != 0U;
+
+	if (pressed && wrap) {
+		if ((modifiers & KL_MOD_CTRL) != 0U)
+			(void)input_queue_key(window, INPUT_EVDEV_LEFTCTRL, 1, modifiers);
+		if ((modifiers & KL_MOD_ALT) != 0U)
+			(void)input_queue_key(window, INPUT_EVDEV_LEFTALT, 1, modifiers);
+	}
+
+	error = input_queue_key(window, code, pressed, modifiers);
+
+	if (!pressed && wrap) {
+		if ((modifiers & KL_MOD_ALT) != 0U)
+			(void)input_queue_key(window, INPUT_EVDEV_LEFTALT, 0, modifiers);
+		if ((modifiers & KL_MOD_CTRL) != 0U)
+			(void)input_queue_key(window, INPUT_EVDEV_LEFTCTRL, 0, modifiers);
+	}
+
+	return error;
+}
+
+/*
+ * Synthesizes a two-finger pan or pinch touch sequence from a debug intent.
+ */
+int
+android_input_debug_touch(
+	struct kl_app *app,
+	const struct keiland_bridge_event *event)
+{
+	struct kl_window *window;
+
+	window = input_window(app);
+	if (window == NULL)
+		return 0;
+
+	if (event->a == 0) {
+		/* Pan by (b, c). */
+		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 100, 400.0, 400.0);
+		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 101, 500.0, 400.0);
+		input_queue_touch(window, KL_WINDOW_TOUCH_MOTION, 100, 400.0 + (double)event->b, 400.0 + (double)event->c);
+		input_queue_touch(window, KL_WINDOW_TOUCH_MOTION, 101, 500.0 + (double)event->b, 400.0 + (double)event->c);
+		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 100, 400.0 + (double)event->b, 400.0 + (double)event->c);
+		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 101, 500.0 + (double)event->b, 400.0 + (double)event->c);
+	} else if (event->a == 1 && event->f > 0.0f) {
+		/* Pinch centered at (b, c) with scale factor f. */
+		double cx = (double)event->b;
+		double cy = (double)event->c;
+		double half = 100.0 * (double)event->f;
+
+		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 100, cx - 100.0, cy);
+		input_queue_touch(window, KL_WINDOW_TOUCH_DOWN, 101, cx + 100.0, cy);
+		input_queue_touch(window, KL_WINDOW_TOUCH_MOTION, 100, cx - half, cy);
+		input_queue_touch(window, KL_WINDOW_TOUCH_MOTION, 101, cx + half, cy);
+		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 100, cx - half, cy);
+		input_queue_touch(window, KL_WINDOW_TOUCH_UP, 101, cx + half, cy);
+	}
+
+	return 0;
 }
 
 /* Tells whether a key's press, repeat or release belongs to a menu item's shortcut (the press chooses the item).  Returns 1 if it does. */

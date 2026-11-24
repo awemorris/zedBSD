@@ -52,6 +52,9 @@
 /* a: the Android key code; b: the meta state; c: whether it is pressed */
 #define KEILAND_BRIDGE_KEY		10U
 
+/* a: 0 = pan (b=dx, c=dy), 1 = pinch (b=cx, c=cy, f=ratio) */
+#define KEILAND_BRIDGE_DEBUG_TOUCH	11U
+
 /*
  * One thing Java told M.
  *

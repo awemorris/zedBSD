@@ -121,8 +121,12 @@ struct terminal_connection;
 #define TERMINAL_PICTURE_MOTION	3U
 #define TERMINAL_PICTURE_BUTTON	4U
 #define TERMINAL_PICTURE_AXIS	5U
-#define TERMINAL_PICTURE_FOCUS	6U
-#define TERMINAL_PICTURE_LEAVE	7U
+#define TERMINAL_PICTURE_FOCUS		6U
+#define TERMINAL_PICTURE_LEAVE		7U
+#define TERMINAL_PICTURE_TOUCH_DOWN	8U
+#define TERMINAL_PICTURE_TOUCH_MOVE	9U
+#define TERMINAL_PICTURE_TOUCH_UP	10U
+#define TERMINAL_PICTURE_TOUCH_CANCEL	11U
 
 /* The kinds of pointer events the main loop takes: the left button pressed or released, a motion. */
 #define TERMINAL_POINTER_PRESS		1U
@@ -405,6 +409,7 @@ struct terminal_picture_event {
 	unsigned kind;
 	uint32_t code;
 	int pressed;
+	int32_t id;
 	int32_t x;
 	int32_t y;
 	double dx;

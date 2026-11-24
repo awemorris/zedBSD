@@ -56,6 +56,7 @@ static void bridge_jni_native_focus(JNIEnv *env, jclass cls, jboolean focused);
 static void bridge_jni_native_clipboard(JNIEnv *env, jclass cls, jstring text);
 static void bridge_jni_native_menu(JNIEnv *env, jclass cls, jint request, jint item);
 static void bridge_jni_native_key(JNIEnv *env, jclass cls, jint keycode, jint meta, jboolean down);
+static void bridge_jni_native_debug_touch(JNIEnv *env, jclass cls, jint kind, jint a, jint b, jfloat ratio);
 static int bridge_jni_push_string(JNIEnv *env, struct keiland_bridge_event *event, jstring text);
 static int bridge_jni_method(JNIEnv *env, jmethodID *method, const char *name, const char *signature);
 static jstring bridge_jni_new_string(JNIEnv *env, const char *text, size_t length);
@@ -71,7 +72,8 @@ static const JNINativeMethod bridge_jni_natives[] = {
 	{ "nativeFocus", "(Z)V", (void *)bridge_jni_native_focus },
 	{ "nativeClipboard", "(Ljava/lang/String;)V", (void *)bridge_jni_native_clipboard },
 	{ "nativeMenu", "(II)V", (void *)bridge_jni_native_menu },
-	{ "nativeKey", "(IIZ)V", (void *)bridge_jni_native_key }
+	{ "nativeKey", "(IIZ)V", (void *)bridge_jni_native_key },
+	{ "nativeDebugTouch", "(IIIF)V", (void *)bridge_jni_native_debug_touch }
 };
 
 /*
@@ -799,6 +801,36 @@ bridge_jni_native_key(
 	event.a = keycode;
 	event.b = meta;
 	event.c = down ? 1 : 0;
+	error = keiland_bridge_push(&event, NULL, 0);
+	if (error != 0) {
+		/* The event was dropped and counted. */
+	}
+}
+
+/*
+ * Queues a debug-only synthetic two-finger pan or pinch gesture.
+ */
+static void
+bridge_jni_native_debug_touch(
+	JNIEnv *env,
+	jclass cls,
+	jint kind,
+	jint a,
+	jint b,
+	jfloat ratio)
+{
+	struct keiland_bridge_event event;
+	int error;
+
+	(void)env;
+	(void)cls;
+
+	memset(&event, 0, sizeof(event));
+	event.kind = KEILAND_BRIDGE_DEBUG_TOUCH;
+	event.a = kind;
+	event.b = a;
+	event.c = b;
+	event.f = ratio;
 	error = keiland_bridge_push(&event, NULL, 0);
 	if (error != 0) {
 		/* The event was dropped and counted. */

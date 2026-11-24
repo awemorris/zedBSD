@@ -176,6 +176,7 @@ int android_input_motion(struct kl_app *app, const AInputEvent *event);
 
 /* Turns a key the key bar sent into a KL_WINDOW_KEY.  Returns 0 or ENOMEM. */
 int android_input_bridge_key(struct kl_app *app, const struct keiland_bridge_event *event);
+int android_input_debug_touch(struct kl_app *app, const struct keiland_bridge_event *event);
 
 /* keys-table.c */
 

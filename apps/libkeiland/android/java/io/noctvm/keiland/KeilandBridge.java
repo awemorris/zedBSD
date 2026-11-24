@@ -79,6 +79,9 @@ public final class KeilandBridge {
 	/** A key of the key bar: the Android key code, the meta state (KeyEvent's META_*_ON bits) and whether it is pressed. */
 	static native void nativeKey(int keycode, int meta, boolean down);
 
+	/** Debug-only synthetic two-finger gesture (kind 0 = pan, 1 = pinch). */
+	static native void nativeDebugTouch(int kind, int a, int b, float ratio);
+
 	/** Runs the work on the main thread, where an exception is the work's own and never reaches the native thread. */
 	private static void post(final Runnable work) {
 		MAIN.post(new Runnable() {
