@@ -105,6 +105,8 @@ struct fdt_node {
 	uint32_t timebase_length;
 	const uint8_t *bootargs;
 	uint32_t bootargs_length;
+	const uint8_t *rng_seed;
+	uint32_t rng_seed_length;
 	const uint8_t *initrd_start;
 	uint32_t initrd_start_length;
 	const uint8_t *initrd_end;
@@ -155,6 +157,7 @@ enum fdt_property {
 	FDT_PROPERTY_INTERRUPTS,
 	FDT_PROPERTY_TIMEBASE,
 	FDT_PROPERTY_BOOTARGS,
+	FDT_PROPERTY_RNG_SEED,
 	FDT_PROPERTY_INITRD_START,
 	FDT_PROPERTY_INITRD_END,
 	FDT_PROPERTY_PHANDLE,
@@ -179,7 +182,8 @@ enum fdt_role {
 	FDT_ROLE_UART_DW_APB,
 	FDT_ROLE_UART_NS16550A,
 	FDT_ROLE_FWCFG,
-	FDT_ROLE_CCACHE
+	FDT_ROLE_CCACHE,
+	FDT_ROLE_TRNG
 };
 
 /*
@@ -218,6 +222,7 @@ static const struct fdt_property_name property_names[] = {
 	{"interrupts", FDT_PROPERTY_INTERRUPTS},
 	{"timebase-frequency", FDT_PROPERTY_TIMEBASE},
 	{"bootargs", FDT_PROPERTY_BOOTARGS},
+	{"rng-seed", FDT_PROPERTY_RNG_SEED},
 	{"linux,initrd-start", FDT_PROPERTY_INITRD_START},
 	{"linux,initrd-end", FDT_PROPERTY_INITRD_END},
 	{"phandle", FDT_PROPERTY_PHANDLE},
@@ -942,6 +947,10 @@ take_property(
 		node->bootargs = value;
 		node->bootargs_length = length;
 		break;
+	case FDT_PROPERTY_RNG_SEED:
+		node->rng_seed = value;
+		node->rng_seed_length = length;
+		break;
 	case FDT_PROPERTY_INITRD_START:
 		node->initrd_start = value;
 		node->initrd_start_length = length;
@@ -1023,6 +1032,12 @@ end_node(
 			info->bootargs_length = node->bootargs_length;
 		}
 
+		/* The boot entropy seed the firmware or QEMU passes, as a place in the tree. */
+		if (node->rng_seed != NULL && node->rng_seed_length > 0) {
+			info->rng_seed_offset = (uint32_t)(node->rng_seed - walk->blob);
+			info->rng_seed_length = node->rng_seed_length;
+		}
+
 		/* The initial ramdisk the firmware loaded, when there is one. */
 		if (node->initrd_start != NULL && node->initrd_end != NULL) {
 			info->initrd_start = read_number(node->initrd_start, node->initrd_start_length);
@@ -1068,6 +1083,10 @@ end_node(
 	case FDT_ROLE_CCACHE:
 		/* The cache controller's registers, when the tree gives them. */
 		(void)read_first_reg(node, &info->ccache_base, &info->ccache_size);
+		break;
+	case FDT_ROLE_TRNG:
+		/* The hardware true random-number generator, when the tree gives it. */
+		(void)read_first_reg(node, &info->trng_base, &info->trng_size);
 		break;
 	default:
 		break;
@@ -1160,6 +1179,11 @@ node_role(
 	matched = list_has(node->compatible, node->compatible_length, "sifive,ccache0");
 	if (matched)
 		return FDT_ROLE_CCACHE;
+
+	/* The StarFive JH7110 true random-number generator. */
+	matched = list_has(node->compatible, node->compatible_length, "starfive,jh7110-trng");
+	if (matched)
+		return FDT_ROLE_TRNG;
 
 	/* Nothing the HAL reads. */
 	return FDT_ROLE_NONE;

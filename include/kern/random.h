@@ -18,6 +18,9 @@
 /* kern_random_read(): wait until the generator is seeded. */
 #define KERN_RANDOM_WAIT	0x0001U
 
+/* kern_random_read(): return EAGAIN if the generator is not yet seeded. */
+#define KERN_RANDOM_NONBLOCK	0x0002U
+
 /* Seeds the generator from the platform; call once, early in boot. */
 void
 kern_random_init(void);

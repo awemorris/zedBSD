@@ -85,6 +85,10 @@ arm64_bsp_map_devices(
 	if (info->sdhci_base != 0)
 		map_one(info->sdhci_base, "SD controller");
 
+	/* The hardware random-number generator, when the tree names one. */
+	if (info->rng_base != 0)
+		map_one(info->rng_base, "RNG");
+
 	/* The UART the tree names, in case it is not the fixed debug UART. */
 	if (info->uart_base != 0)
 		map_one(info->uart_base, "UART");

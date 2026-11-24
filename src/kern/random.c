@@ -180,6 +180,14 @@ kern_random_read(
 	out = buffer;
 	irq = spin_lock_irqsave(&random_lock);
 
+	/* Non-blocking callers fail immediately until the first seed arrives. */
+	if ((flags & KERN_RANDOM_NONBLOCK) != 0U && !random_is_seeded) {
+		spin_unlock_irqrestore(&random_lock, irq);
+
+		/* Failed: not seeded yet. */
+		return EAGAIN;
+	}
+
 	/* Waits for the first seed when the caller asked to. */
 	while ((flags & KERN_RANDOM_WAIT) != 0 && !random_is_seeded) {
 		observed = waitq_sequence(&random_waitq);

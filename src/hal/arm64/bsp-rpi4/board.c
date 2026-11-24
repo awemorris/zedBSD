@@ -45,12 +45,14 @@ arm64_bsp_map_devices(
 	/* The device tree names where each peripheral is. */
 	info = arm64_boot_info();
 
-	/* The UART, the mailbox, the GIC's two parts and the SD controller. */
+	/* The UART, the mailbox, the GIC's two parts, the SD controller and the RNG. */
 	arm64_space_map_device_block(info->uart_base);
 	arm64_space_map_device_block(info->mailbox_base);
 	arm64_space_map_device_block(info->gic_dist_base);
 	arm64_space_map_device_block(info->gic_cpu_base);
 	arm64_space_map_device_block(info->sdhci_base);
+	if (info->rng_base != 0)
+		arm64_space_map_device_block(info->rng_base);
 }
 
 /*

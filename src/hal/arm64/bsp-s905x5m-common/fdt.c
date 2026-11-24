@@ -1031,11 +1031,15 @@ read_property(
 		return error;
 	node = &parse->stack[parse->depth];
 
-	/* Notes where the firmware's command line is. */
+	/* Notes where the firmware's command line or boot entropy seed is. */
 	bootargs = string_equal(name, name_length, "bootargs");
 	if (node->is_chosen && bootargs) {
 		parse->info->bootargs_offset = (uint32_t)(value - parse->data);
 		parse->info->bootargs_length = length;
+	}
+	if (node->is_chosen && string_equal(name, name_length, "rng-seed")) {
+		parse->info->rng_seed_offset = (uint32_t)(value - parse->data);
+		parse->info->rng_seed_length = length;
 	}
 
 	/* Records what the node's other properties say about it. */

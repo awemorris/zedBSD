@@ -91,6 +91,7 @@ struct arm64_fdt_info {
 	uint64_t gic_cpu_base;
 	uint64_t sdhci_base;
 	uint32_t sdhci_irq;
+	uint64_t rng_base;
 
 	/*
 	 * A framebuffer the bootloader left the display scanning out (a
@@ -113,6 +114,13 @@ struct arm64_fdt_info {
 	 */
 	uint32_t bootargs_offset;
 	uint32_t bootargs_length;
+
+	/*
+	 * Where /chosen/rng-seed is in the blob (a boot entropy seed passed by
+	 * firmware or QEMU), and its byte length.  Zero when absent.
+	 */
+	uint32_t rng_seed_offset;
+	uint32_t rng_seed_length;
 
 	/* The CPUs of /cpus in the order the tree lists them. */
 	unsigned cpu_count;
