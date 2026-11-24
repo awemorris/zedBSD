@@ -82,6 +82,16 @@
  * channels opened before the session closed keep the connection after
  * it, as X11 channels do; a connection without a session lasts until the
  * caller or the server ends it.
+ *
+ * Subsystem channels (RFC 4254 6.5): when options more_sessions is 1, the
+ * engine omits no-more-sessions@openssh.com and allows up to
+ * SSH_ENGINE_SUBSYSTEMS_MAX additional "session" channels (opened with
+ * ssh_engine_open_subsystem and answered by SSH_ENGINE_SUBSYSTEM_REPLY)
+ * while the main session channel is open (reducing the forwarded TCP
+ * channel limit by SSH_ENGINE_SUBSYSTEMS_MAX).  Each subsystem channel
+ * carries its bytes with the channel calls below and a window of
+ * SSH_ENGINE_SUBSYSTEM_WINDOW; extended data is discarded and its window
+ * returned.
  */
 
 #ifndef SSH_SSH_CLIENT_ENGINE_H
@@ -126,7 +136,7 @@
 /* The most remote forwardings (tcpip-forward) one connection asks for. */
 #define SSH_ENGINE_REMOTE_FORWARDS_MAX	16U
 
-/* The most forwarded TCP channels open at once on a connection that does not ask for X11 (32 on one that does). */
+/* The most forwarded TCP channels open at once on a connection that does not ask for X11 (32 on one that does; each reduced by SSH_ENGINE_SUBSYSTEMS_MAX when more_sessions is 1). */
 #define SSH_ENGINE_FORWARD_CHANNELS_MAX	64U
 
 /* The most subsystem channels open at once. */
@@ -160,11 +170,12 @@ enum ssh_engine_event_kind {
 	SSH_ENGINE_STARTED = 5,
 
 	/*
-	 * Data of a channel (channel: SSH_ENGINE_SESSION_CHANNEL, an X11 or a
-	 * forwarded channel; bytes, size; stream 0 for the output, 1 for the session's
-	 * error output).  The bytes stay valid until the next ssh_engine_next
-	 * or ssh_engine_close; the caller reports them used with
-	 * ssh_engine_consumed (the session) or ssh_engine_channel_consumed.
+	 * Data of a channel (channel: SSH_ENGINE_SESSION_CHANNEL, an X11,
+	 * forwarded or subsystem channel; bytes, size; stream 0 for the output,
+	 * 1 for the session's error output).  The bytes stay valid until the
+	 * next ssh_engine_next or ssh_engine_close; the caller reports them
+	 * used with ssh_engine_consumed (the session) or
+	 * ssh_engine_channel_consumed.
 	 */
 	SSH_ENGINE_DATA = 6,
 
@@ -214,14 +225,14 @@ enum ssh_engine_event_kind {
 	 */
 	SSH_ENGINE_X11_OPEN = 11,
 
-	/* The server sends no more data on an X11 or forwarded channel (channel). */
+	/* The server sends no more data on an X11, forwarded or subsystem channel (channel). */
 	SSH_ENGINE_CHANNEL_EOF = 12,
 
 	/*
-	 * An X11 or forwarded channel (channel) closed both ways, or a
-	 * direct-tcpip channel the caller closed before its answer ended; its
-	 * number may be given to a later channel.  Bytes of it not yet
-	 * reported used no longer need reporting.
+	 * An X11, forwarded or subsystem channel (channel) closed both ways,
+	 * or a direct-tcpip or subsystem channel the caller closed before its
+	 * answer ended; its number may be given to a later channel.  Bytes of
+	 * it not yet reported used no longer need reporting.
 	 */
 	SSH_ENGINE_CHANNEL_CLOSED = 13,
 
@@ -343,7 +354,10 @@ struct ssh_engine_identity {
  * SSH_ENGINE_X11_COOKIE_DIGITS hexadecimal digits; x11_single 1 asks the
  * server to forward one X client only (RFC 4254 6.3.1 "single
  * connection"; OpenSSH's client asks for any number, 0) and refuses a
- * second X11 channel.
+ * second X11 channel.  more_sessions 1 omits no-more-sessions@openssh.com
+ * and allows ssh_engine_open_subsystem (reducing the forwarded channel
+ * limit by SSH_ENGINE_SUBSYSTEMS_MAX); 0 sends it after the session
+ * starts and refuses subsystem opens with EPERM.
  */
 struct ssh_engine_options {
 	const char *user;
@@ -512,10 +526,11 @@ int ssh_engine_open_subsystem(struct ssh_engine *engine, const char *name, uint3
 
 /*
  * Sends bytes on a channel: SSH_ENGINE_SESSION_CHANNEL as
- * ssh_engine_write, or an open X11 or forwarded channel; *written receives how many of
- * size bytes went (0 while the server's window or the output is full, and
- * after this side's EOF or close or the server's close).  Returns 0,
- * EINVAL (no such channel), or EPIPE after the connection ended.
+ * ssh_engine_write, or an open X11, forwarded or subsystem channel;
+ * *written receives how many of size bytes went (0 while the server's
+ * window or the output is full, and after this side's EOF or close or the
+ * server's close).  Returns 0, EINVAL (no such channel), or EPIPE after
+ * the connection ended.
  */
 int ssh_engine_channel_write(struct ssh_engine *engine, uint32_t channel, const uint8_t *bytes, size_t size, size_t *written);
 
@@ -534,14 +549,15 @@ void ssh_engine_channel_consumed(struct ssh_engine *engine, uint32_t channel, si
 int ssh_engine_channel_eof(struct ssh_engine *engine, uint32_t channel);
 
 /*
- * Closes an X11 or forwarded channel (not the session's): the server's
- * close coming back ends it with SSH_ENGINE_CHANNEL_CLOSED, and data
- * arriving before that is dropped.  A direct-tcpip channel still waiting
- * for its answer is closed as soon as the server confirms it (or ends at
- * its refusal), with no SSH_ENGINE_OPEN_REPLY but the
- * SSH_ENGINE_CHANNEL_CLOSED at the end.  A channel waiting for the
- * caller's answer is refused with ssh_engine_open_answer instead.
- * Returns 0, EINVAL (not such a channel) or EPIPE.
+ * Closes an X11, forwarded or subsystem channel (not the session's): the
+ * server's close coming back ends it with SSH_ENGINE_CHANNEL_CLOSED, and
+ * data arriving before that is dropped.  A direct-tcpip or subsystem
+ * channel still waiting for its answer is closed as soon as the server
+ * confirms it (or ends at its refusal), with no SSH_ENGINE_OPEN_REPLY or
+ * SSH_ENGINE_SUBSYSTEM_REPLY but the SSH_ENGINE_CHANNEL_CLOSED at the end.
+ * A channel waiting for the caller's answer is refused with
+ * ssh_engine_open_answer instead.  Returns 0, EINVAL (no such channel) or
+ * EPIPE.
  */
 int ssh_engine_channel_close(struct ssh_engine *engine, uint32_t channel);
 

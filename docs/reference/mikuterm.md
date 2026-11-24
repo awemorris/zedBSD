@@ -31,7 +31,7 @@ own path, never from the current directory).
 | `mikuterm.exe` | the ZIP | the program |
 | `README.txt` | the ZIP | the user's guide |
 | `config/mikuterm.conf` | the user, and the settings tab in place of a keyword's line | the settings (section 3); the ZIP has a commented sample |
-| `config/state.conf` | mikuterm | what the View menu and the settings tab chose at once: `FontSize`, `Theme`, `AmbiguousWide`, `CopyOnSelect` |
+| `config/state.conf` | mikuterm | what the View menu, the settings tab and the SFTP tab chose at once: `FontSize`, `Theme`, `AmbiguousWide`, `CopyOnSelect`, `SftpShowHidden`, `SftpSplit` |
 | `ssh/config` | the user (also from the settings tab) | the hosts, in `ssh_config(5)` form (section 4) |
 | `ssh/id_ed25519` | the user, or the settings tab's Make Key | the private key (section 4.3) |
 | `ssh/known_hosts` | mikuterm | the hosts' keys the user accepted (section 6) |
@@ -74,6 +74,9 @@ of a keyword counts. A line that cannot be used is named in the first tab
 | `X11Scale` | `auto` (the main monitor's scale) or a percent from 100 to 400 in steps of 25: the size of the remote X programs' pixels | `auto` |
 | `X11Render` | `auto`, `cpu`: how the X server draws (`auto`: Vulkan where the system has it, else the processor) | `auto` |
 | `X11PrimaryToClipboard` | `yes`, `no`: what an X program selects (X's PRIMARY) also goes to the Windows clipboard | `no` |
+| `Sftp` | `yes`, `no`: allow opening an SFTP browser tab on an SSH connection (`no` sends `no-more-sessions@openssh.com`; `yes` omits it and reduces the forwarded TCP channel limit from 64 to 62, or 32 to 30 with `ForwardX11 yes`) | `yes` |
+| `SftpPreserveTimes` | `yes`, `no`: preserve modification times on SFTP uploads and downloads | `yes` |
+| `SftpShowHidden` | `yes`, `no`: show dot-files in SFTP directory listings | `yes` |
 
 A full path for `Font` and `FontFallback` starts at a drive (`C:/...`) or a
 server (`//server/share/...`), with `/` or `\`. Anything else, a path from the
@@ -81,9 +84,10 @@ root of the current drive (`/Windows/...`, `\Windows\...`) or a drive without
 a separator after it (`C:x.ttf`) among them, is a name in `fonts/` or
 `share/fonts/`.
 
-`config/state.conf` has the same form and only `FontSize`, `Theme`,
-`AmbiguousWide` and `CopyOnSelect`; its values win over `mikuterm.conf`'s.
-Deleting it returns to `mikuterm.conf`.
+`config/state.conf` has the same form and keeps `FontSize`, `Theme`,
+`AmbiguousWide`, `CopyOnSelect`, `SftpShowHidden` and `SftpSplit` (the width
+of the SFTP folder tree pane in pixels at 96 dpi, 240 by default); its values
+win over `mikuterm.conf`'s.  Deleting it returns to `mikuterm.conf`.
 
 The settings tab (section 7) writes the other keywords into
 `mikuterm.conf` itself: the first line of the keyword is replaced by
@@ -551,7 +555,7 @@ does not stretch it.
 | Appearance | text size (Smaller, Larger, Small to Huge), theme, ambiguous width | at once, as the View menu | `config/state.conf` |
 | Appearance | `Font`, `FontFallback` (a file in `fonts/` or `share/fonts/`, or a full path; checked to be there), `Columns`, `Rows` | the next start | `config/mikuterm.conf` |
 | Behavior | copy-on-select | at once | `config/state.conf` |
-| Behavior | `Term`, `ConnectTimeout`, `WslPort`, `X11Scale`, `X11Render`, `X11PrimaryToClipboard` | the next connection | `config/mikuterm.conf` |
+| Behavior | `Term`, `ConnectTimeout`, `WslPort`, `X11Scale`, `X11Render`, `X11PrimaryToClipboard`, `Sftp`, `SftpPreserveTimes` | the next connection | `config/mikuterm.conf` |
 | Behavior | `Connect` | the next start | `config/mikuterm.conf` |
 | Keys | a new key, a key's public key, `ssh/known_hosts` | at once | `ssh/` |
 
@@ -632,6 +636,7 @@ mikuterm has the menus of zedBSD's terminal, with these differences:
 | Session > Forget Remembered Passphrases | none | mikuterm only; forgets the passphrases kept in Credential Manager |
 | View > Fullscreen | Alt+Enter | in the place of F11 (zedBSD's terminal keeps F11) |
 | Shell > Settings... | F12 | the settings tab (section 7), as in zedBSD's terminal |
+| Shell > Open SFTP | Ctrl+Shift+O | mikuterm only; opens an SFTP browser tab for the active SSH connection (section 9) |
 | Shell > New Window | Ctrl+Shift+N | starts another `mikuterm.exe` |
 
 F1 to F11 alone reach the host as keys (htop and mc use F10 and F11); F12
@@ -645,7 +650,83 @@ does, and the keypad's + and - zoom. Ctrl+Alt with the top row's digits, Page Up
 Down choose the tabs (section 5); zedBSD's terminal leaves the tabs' keys to
 its desktop's titlebar (Ctrl+Tab, Ctrl+Page Up and Ctrl+Page Down).
 
-## 9. Licenses
+## 9. SFTP
+
+When `Sftp` is `yes` (the default), an SFTP browser tab can be opened on any
+logged-in SSH connection (including WSL distributions that run an SFTP
+server) without re-authenticating.  mikuterm opens a second `"session"`
+channel on the existing SSH connection and requests the `sftp` subsystem
+(SFTP version 3, without extensions).
+
+- **Opening and closing**: Choose Shell > Open SFTP (`Ctrl+Shift+O`) or
+  Open SFTP from a terminal tab's context menu.  At most one SFTP tab opens
+  per connection.  When `Sftp` is `no`, the menu item is disabled because
+  the connection sent `no-more-sessions@openssh.com`.  Accounts restricted
+  to `ForceCommand internal-sftp` without a shell cannot open an SFTP tab.
+  If the shell exits while an SFTP tab is open, the SSH connection stays
+  alive until the SFTP tab closes; closing the terminal tab ends the
+  connection and closes its SFTP tab.  Closing a tab or window while
+  transfers (including asynchronous Explorer drops) are in progress asks
+  for confirmation.
+- **Layout and navigation**:
+  - The left pane shows a folder tree (`/` and the home directory expanded
+    at start, loaded on demand, with `[L]` for symlinked folders); drag
+    the splitter to resize it (`SftpSplit` in `config/state.conf`).
+  - The right pane shows a detailed list (`Name`, `Size`, `Modified` in
+    local time `YYYY-MM-DD HH:MM`, and `Perm.` as 10-character `ls -l`
+    mode; click column headers to sort; `[D]`, `[F]`, `[L]` with
+    `-> target`).  Cached directory listings hold up to 100,000 entries
+    and 64 MiB.  Control characters and bidirectional override characters
+    in remote names and messages are rendered visibly.
+  - The top bar has Back, Forward, Up, a clickable/editable path bar
+    (`Ctrl+L` to edit), Refresh (`F5`), and New folder.
+  - Keys: `Enter` or double-click opens a folder, `Backspace` or `Alt+Up`
+    goes up, `F5` refreshes, `F2` renames in place, `Delete` deletes
+    recursively after showing the item and folder count (symlinked folders
+    remove only the link), `Ctrl+A` selects all.  Right-click opens a
+    menu with Download, New folder, Rename, Delete, Copy path, Refresh, and
+    Show hidden files (`SftpShowHidden`).
+- **Transfers and drag-and-drop**:
+  - Requests are pipelined (up to 64 in flight, 32 KiB per read/write),
+    binary only (no newline conversion).  Outbound SFTP writes pause while
+    the SSH engine's unsent output is 256 KiB or more so terminal
+    keystrokes stay responsive; inbound terminal output shares the TCP
+    connection with SFTP downloads.
+  - **Download** (context menu Download): saves into Windows' Downloads
+    folder (`FOLDERID_Downloads`).  Writes to a hidden temporary file
+    (`.<name>.mikuterm-part`) and replaces the target atomically on
+    completion, keeping the original if cancelled; prompts when a target
+    already exists (`Overwrite`, `Skip`, `Overwrite all`, `Skip all`,
+    `Cancel`).  Symlinks download their target file.  Windows downloads
+    keep default ACLs (Unix execute bits are not preserved).
+  - **Drag to Explorer or Desktop**: dragging selected items outside the
+    window provides virtual files (`CFSTR_FILEDESCRIPTORW` and
+    `CFSTR_FILECONTENTS` via `IStream` and `IDataObjectAsyncCapability`).
+    Non-asynchronous drop targets (targets that read synchronously inside
+    `Drop` without calling `StartOperation`) are refused when the total
+    drag size exceeds **16 MiB**, advising Download instead.  Folder drags
+    expand up to 10,000 items (excluding symlinked folders).  Entries
+    whose relative path exceeds 260 characters or whose name is invalid on
+    Windows (reserved device names such as `CON`/`NUL`, characters
+    `: * ? " < > |`, trailing `.` or space, or 8.3 short-name forms) are
+    skipped and reported.
+  - **Upload** (drag from Explorer onto the file list or a folder in the
+    tree/list): writes directly (`CREAT | TRUNC`, letting the server's
+    `umask` set permissions; cancelling an overwrite leaves a partial
+    file) and prompts when a remote file already exists.  Local reparse
+    points (symlinks/junctions) are not followed during upload, and
+    download destinations are checked against reparse points.  Dropping
+    files onto a terminal tab is not accepted.
+  - **Internal move**: dragging items within the SFTP tab onto a folder in
+    the tree or list issues SFTP `RENAME` (refusing if the target name
+    already exists).
+  - **Timestamps**: when `SftpPreserveTimes` is `yes` (default),
+    modification times are copied on upload and download.
+  - **Transfer bar**: shows the active transfer, progress, speed,
+    estimated time remaining, queued count, an expandable per-item list,
+    and Cancel / Cancel all buttons.
+
+## 10. Licenses
 
 `mikuterm.exe` is Awe Morris's work under the zlib license. The fonts in
 `share/fonts/` are their authors' works under their own licenses (SIL Open
