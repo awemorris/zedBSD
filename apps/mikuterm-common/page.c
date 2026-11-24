@@ -117,6 +117,8 @@ static const struct terminal_page_item page_items[] = {
 	{ "Connect", "Host at start", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL }
 };
 
+typedef char page_items_fit[1 - 2 * !(sizeof(page_items) / sizeof(page_items[0]) <= TERMINAL_ITEMS_MAX)];
+
 static int page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
 static int page_replace(void *data, const char *path, const void *bytes, size_t size);
 static int page_create(void *data, const char *path, const void *bytes, size_t size, int secret);

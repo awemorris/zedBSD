@@ -10,6 +10,7 @@
  * and librdp + h264sw decoder integration.
  */
 
+#include "apps/mikuterm-common/launch.h"
 #include "apps/mikuterm-common/mikuterm.h"
 #include "apps/mikuterm-common/rdp-decoder.h"
 #include "apps/mikuterm-common/rdp-hosts.h"
@@ -24,6 +25,7 @@
 static void test_rdp_hosts_and_conf(void);
 static void test_rdp_tab_view(void);
 static void test_rdp_h264sw_decoder(void);
+static void test_rdp_launch_screen(void);
 
 /* Stub for kl_app_post in host unit test without full display loop. */
 int
@@ -48,6 +50,7 @@ main(
 	test_rdp_hosts_and_conf();
 	test_rdp_tab_view();
 	test_rdp_h264sw_decoder();
+	test_rdp_launch_screen();
 	printf("mikuterm-rdp-host-test: all tests passed\n");
 	return 0;
 }
@@ -187,4 +190,47 @@ test_rdp_h264sw_decoder(
 					   pixels, 64U, 64U, &dw, &dh);
 	assert(rc == 0 || rc == 11);
 	rdp_h264sw_decoder_ops.destroy(ctx);
+}
+
+/* Tests RDP Hosts launch screen when rdp/hosts is empty: Connect row is default. */
+static void
+test_rdp_launch_screen(
+	void)
+{
+	struct launch_screen screen;
+	struct rdp_host_entry target;
+	size_t used;
+	unsigned event;
+	int taken;
+
+	launch_init(&screen, "RDP Hosts:");
+	assert(launch_add(&screen, "c", LAUNCH_RDP_CONNECT,
+			  "Connect to host (user@host:port)...", NULL) == 0);
+	assert(launch_add(&screen, "b", LAUNCH_BACK, "Back", NULL) == 0);
+	assert(screen.chosen == 0U);
+	assert(strcmp(screen.line, "Connect to host (user@host:port)...") == 0);
+
+	/* Pressing Enter immediately selects LAUNCH_RDP_CONNECT, not Back. */
+	event = launch_keys(&screen, (const unsigned char *)"\r", 1U, &used);
+	assert(event == LAUNCH_EVENT_ENTER && used == 1U);
+	taken = launch_row_taken(&screen);
+	assert(taken == 0 && screen.rows[taken].kind == LAUNCH_RDP_CONNECT);
+
+	/* Pressing 'b' + Enter selects LAUNCH_BACK. */
+	event = launch_keys(&screen, (const unsigned char *)"b\r", 2U, &used);
+	assert(event == LAUNCH_EVENT_ENTER && used == 2U);
+	taken = launch_row_taken(&screen);
+	assert(taken == 1 && screen.rows[taken].kind == LAUNCH_BACK);
+
+	/* Direct typing of user@host:port still parses as a typed target. */
+	launch_choose(&screen, 0U);
+	event = launch_keys(&screen,
+			    (const unsigned char *)"alice@10.0.2.2:3390\r",
+			    20U, &used);
+	assert(event == LAUNCH_EVENT_ENTER && used == 20U);
+	assert(launch_row_taken(&screen) == -1);
+	assert(rdp_hosts_parse_target(screen.line, 3389U, &target) == 0);
+	assert(strcmp(target.user, "alice") == 0);
+	assert(strcmp(target.host_name, "10.0.2.2") == 0);
+	assert(target.port == 3390U);
 }

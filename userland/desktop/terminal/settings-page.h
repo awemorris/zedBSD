@@ -40,7 +40,7 @@
 #define TERMINAL_EFFECT_START		1U
 
 /* The most settings of a program, and the longest value of one with its NUL. */
-#define TERMINAL_ITEMS_MAX		12U
+#define TERMINAL_ITEMS_MAX		24U
 #define TERMINAL_ITEM_VALUE		512U
 
 /* The longest file name of a key made, with its NUL, and the longest one-line public key. */
