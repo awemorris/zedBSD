@@ -39,6 +39,10 @@ static void input_handle_left_down(struct sftp_view *view, int ux, int uy);
 static void input_handle_left_up(struct sftp_view *view, int ux, int uy);
 static void input_handle_right_down(struct sftp_view *view, int ux, int uy);
 static void input_handle_motion(struct sftp_view *view, int ux, int uy);
+static void input_handle_touch_down(struct sftp_view *view, uint32_t id, int ux, int uy);
+static void input_handle_touch_move(struct sftp_view *view, uint32_t id, int ux, int uy);
+static void input_handle_touch_up(struct sftp_view *view, uint32_t id, int ux, int uy);
+static void input_handle_touch_cancel(struct sftp_view *view, uint32_t id);
 static void input_open_ctx_menu(struct sftp_view *view, int ux, int uy);
 static void input_activate_row(struct sftp_view *view, size_t row_idx);
 static void input_select_row(struct sftp_view *view, size_t row_idx, unsigned mods);
@@ -91,6 +95,19 @@ sftp_view_handle_input(
 			(void)snprintf(wev.text, sizeof(wev.text), "%s", event->text);
 			(void)kl_ui_text(view->ui, &wev);
 			break;
+		case TERMINAL_PICTURE_TOUCH_DOWN:
+			(void)kl_ui_pointer_motion(view->ui, (double)ux, (double)uy);
+			(void)kl_ui_pointer_button(view->ui, 1, kl_clock_us());
+			break;
+		case TERMINAL_PICTURE_TOUCH_MOVE:
+			(void)kl_ui_pointer_motion(view->ui, (double)ux, (double)uy);
+			break;
+		case TERMINAL_PICTURE_TOUCH_UP:
+		case TERMINAL_PICTURE_TOUCH_CANCEL:
+			(void)kl_ui_pointer_motion(view->ui, (double)ux, (double)uy);
+			(void)kl_ui_pointer_button(view->ui, 0, kl_clock_us());
+			(void)kl_ui_pointer_leave(view->ui);
+			break;
 		default:
 			break;
 		}
@@ -133,6 +150,24 @@ sftp_view_handle_input(
 		break;
 	case TERMINAL_PICTURE_AXIS:
 		view->dirty = 1;
+		break;
+	case TERMINAL_PICTURE_TOUCH_DOWN:
+		view->pointer_x = ux;
+		view->pointer_y = uy;
+		input_handle_touch_down(view, event->code, ux, uy);
+		break;
+	case TERMINAL_PICTURE_TOUCH_MOVE:
+		view->pointer_x = ux;
+		view->pointer_y = uy;
+		input_handle_touch_move(view, event->code, ux, uy);
+		break;
+	case TERMINAL_PICTURE_TOUCH_UP:
+		view->pointer_x = ux;
+		view->pointer_y = uy;
+		input_handle_touch_up(view, event->code, ux, uy);
+		break;
+	case TERMINAL_PICTURE_TOUCH_CANCEL:
+		input_handle_touch_cancel(view, event->code);
 		break;
 	default:
 		break;
@@ -719,6 +754,173 @@ input_handle_motion(
 			view->ctx_hover = -1;
 		}
 	}
+}
+
+/* Handles touch down: context menu tap or arms single-tap / long-press tracking. */
+static void
+input_handle_touch_down(
+	struct sftp_view *view,
+	uint32_t id,
+	int ux,
+	int uy)
+{
+	int idx;
+	int in_rect;
+
+	if (view->ctx_open) {
+		in_rect = input_point_in_rect(&view->rect_ctx, ux, uy);
+		if (in_rect) {
+			idx = (uy - view->rect_ctx.y - 4) / 26;
+			if (idx >= 0 && (size_t)idx < view->ctx_count &&
+			    view->ctx_items[idx].enabled) {
+				sftp_view_execute_ctx(view, view->ctx_items[idx].id);
+				return;
+			}
+		}
+		view->ctx_open = 0;
+		return;
+	}
+
+	if (view->dialog != SFTP_DIALOG_NONE)
+		return;
+	if (view->touch_active)
+		return;
+
+	view->touch_active = 1;
+	view->touch_id = id;
+	view->touch_start_x = ux;
+	view->touch_start_y = uy;
+	view->touch_last_y = uy;
+	view->touch_start_us = kl_clock_us();
+	view->touch_moved = 0;
+	view->touch_long_pressed = 0;
+}
+
+/* Handles touch move: cancels long-press past slop and scrolls lists. */
+static void
+input_handle_touch_move(
+	struct sftp_view *view,
+	uint32_t id,
+	int ux,
+	int uy)
+{
+	int dx;
+	int dy;
+
+	if (!view->touch_active || view->touch_id != id)
+		return;
+	if (!view->touch_moved) {
+		dx = abs(ux - view->touch_start_x);
+		dy = abs(uy - view->touch_start_y);
+		if (dx > SFTP_TOUCH_SLOP || dy > SFTP_TOUCH_SLOP)
+			view->touch_moved = 1;
+	}
+	if (view->touch_moved && !view->touch_long_pressed && view->ui != NULL)
+		(void)kl_ui_wheel(view->ui, 0.0, (double)(uy - view->touch_last_y), kl_clock_us());
+	view->touch_last_y = uy;
+}
+
+/* Handles touch up: single-tap navigates folders or toggles file selection. */
+static void
+input_handle_touch_up(
+	struct sftp_view *view,
+	uint32_t id,
+	int ux,
+	int uy)
+{
+	struct sftp_tree_node *node;
+	int idx;
+	int rh;
+	int chev_x;
+
+	if (!view->touch_active || view->touch_id != id)
+		return;
+
+	if (!view->touch_moved && !view->touch_long_pressed &&
+	    view->dialog == SFTP_DIALOG_NONE && !view->ctx_open) {
+		if (input_point_in_rect(&view->rect_breadcrumb, ux, uy) && !view->editing_path) {
+			view->editing_path = 1;
+			memset(&view->path_field, 0, sizeof(view->path_field));
+			kl_field_set(&view->path_field, view->current_path);
+			if (view->ui != NULL)
+				kl_ui_set_focus(view->ui, SFTP_UI_PATH_FIELD, 0U);
+		} else if (input_point_in_rect(&view->rect_tree, ux, uy)) {
+			rh = kl_theme_default()->row_height;
+			if (rh <= 0)
+				rh = SFTP_TREE_ROW_HEIGHT;
+			idx = (uy - view->rect_tree.y + (int)view->tree_list.scroll.y) / rh;
+			if (idx >= 0 && (size_t)idx < view->tree_flat_count) {
+				node = view->tree_flat[idx];
+				chev_x = view->rect_tree.x + 8 + node->depth * 14;
+				if (ux >= chev_x - 4 && ux <= chev_x + 14)
+					sftp_view_toggle_tree_node(view, node);
+				else
+					sftp_view_navigate(view, node->path, 1, 0);
+			}
+		} else if (input_point_in_rect(&view->rect_list, ux, uy)) {
+			rh = kl_theme_default()->row_height;
+			if (rh <= 0)
+				rh = SFTP_ROW_HEIGHT;
+			idx = (uy - view->rect_list.y + (int)view->file_list.scroll.y) / rh;
+			if (idx >= 0 && (size_t)idx < view->row_count) {
+				if (view->rows[idx].entry.is_dir || view->rows[idx].entry.link_is_dir) {
+					input_activate_row(view, (size_t)idx);
+				} else {
+					view->rows[idx].selected = !view->rows[idx].selected;
+					view->focus_row = (long)idx;
+					view->anchor_row = (long)idx;
+				}
+			}
+		}
+	}
+
+	view->touch_active = 0;
+}
+
+/* Cancels active touch tracking. */
+static void
+input_handle_touch_cancel(
+	struct sftp_view *view,
+	uint32_t id)
+{
+	if (!view->touch_active || view->touch_id != id)
+		return;
+	view->touch_active = 0;
+	view->touch_moved = 0;
+	view->touch_long_pressed = 0;
+}
+
+/*
+ * Checks whether an active touch has exceeded the long-press threshold and
+ * opens the context menu if so.
+ */
+void
+sftp_view_poll_touch(
+	struct sftp_view *view,
+	uint64_t now_us)
+{
+	int idx;
+	int rh;
+
+	if (view == NULL || !view->touch_active || view->touch_moved || view->touch_long_pressed)
+		return;
+	if (view->dialog != SFTP_DIALOG_NONE || view->ctx_open)
+		return;
+	if (now_us < view->touch_start_us ||
+	    (now_us - view->touch_start_us) < SFTP_TOUCH_LONG_PRESS_US)
+		return;
+
+	view->touch_long_pressed = 1;
+	if (input_point_in_rect(&view->rect_list, view->touch_start_x, view->touch_start_y)) {
+		rh = kl_theme_default()->row_height;
+		if (rh <= 0)
+			rh = SFTP_ROW_HEIGHT;
+		idx = (view->touch_start_y - view->rect_list.y + (int)view->file_list.scroll.y) / rh;
+		if (idx >= 0 && (size_t)idx < view->row_count && !view->rows[idx].selected)
+			input_select_row(view, (size_t)idx, 0U);
+		input_open_ctx_menu(view, view->touch_start_x, view->touch_start_y);
+	}
+	view->dirty = 1;
 }
 
 /* Populates and opens the context menu at (ux, uy). */

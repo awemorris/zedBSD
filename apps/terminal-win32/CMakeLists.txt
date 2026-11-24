@@ -92,9 +92,6 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/sftp-local-win32.c
 	${MIKUTERM_DIR}/sftp-drag-win32.c
-	${MIKUTERM_DIR}/sftp-view.c
-	${MIKUTERM_DIR}/sftp-view-draw.c
-	${MIKUTERM_DIR}/sftp-view-input.c
 	${MIKUTERM_DIR}/vi-connection-win32.c
 	${MIKUTERM_DIR}/x11-spawn-win32.c
 	${MIKUTERM_DIR}/x11-child.c
@@ -266,7 +263,8 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_LOGIN_SHELL=0
 	MIKUTERM_HAVE_PROXY_COMMAND=1
 	MIKUTERM_HAVE_CODESPACES=1
-	MIKUTERM_HAVE_LIBMEDIA=1)
+	MIKUTERM_HAVE_LIBMEDIA=1
+	MIKUTERM_HAVE_SFTP_DRAG=1)
 target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_rdp mikuterm_ssl libmedia ${MIKUTERM_SYSTEM_LIBRARIES})
 set_source_files_properties(${MIKUTERM_DIR}/resources/mikuterm.rc PROPERTIES
 	OBJECT_DEPENDS "${MIKUTERM_DIR}/resources/mikuterm.manifest;${MIKUTERM_DIR}/resources/mikuterm.ico")

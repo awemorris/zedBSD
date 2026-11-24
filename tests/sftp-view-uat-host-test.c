@@ -26,6 +26,10 @@ static int checks;
 static int failures;
 static uint64_t g_now_us = 1000000ULL;
 static int g_external_drag_calls;
+static char g_navigated_path[256];
+static unsigned g_download_btn_flags;
+static int g_upload_clicked;
+static int g_more_opened;
 static char g_captured_texts[32][512];
 static size_t g_captured_count;
 static int g_dummy_gesture;
@@ -207,7 +211,7 @@ void kl_icon_draw(struct kl_canvas *c, enum kl_icon i, float x, float y, float s
 void kl_icon_folder(struct kl_canvas *c, float x, float y, float sz, kl_color t) { (void)c; (void)x; (void)y; (void)sz; (void)t; }
 void kl_icon_file(struct kl_canvas *c, struct kl_text *t, float x, float y, float sz, kl_color b, const char *l) { (void)c; (void)t; (void)x; (void)y; (void)sz; (void)b; (void)l; }
 void kl_progress(const struct kl_style *s, const struct kl_rect *r, double f, uint64_t n) { (void)s; (void)r; (void)f; (void)n; }
-int kl_button(struct kl_ui *u, const struct kl_style *s, uint32_t id, const struct kl_rect *r, const char *l, unsigned f) { (void)u; (void)s; (void)id; (void)r; (void)l; (void)f; return 0; }
+int kl_button(struct kl_ui *u, const struct kl_style *s, uint32_t id, const struct kl_rect *r, const char *l, unsigned f) { (void)u; (void)s; (void)r; (void)l; if (id == SFTP_UI_DOWNLOAD) g_download_btn_flags = f; return 0; }
 unsigned kl_field(struct kl_ui *u, const struct kl_style *s, uint32_t id, const struct kl_rect *r, struct kl_field *f, const char *p) { (void)u; (void)s; (void)id; (void)r; (void)f; (void)p; return 0U; }
 void kl_field_set(struct kl_field *f, const char *t) { (void)f; (void)t; }
 void kl_breadcrumb(struct kl_ui *u, const struct kl_style *s, uint32_t id, const struct kl_rect *r, const char *p, void *cb, void *d) { (void)u; (void)s; (void)id; (void)r; (void)p; (void)cb; (void)d; }
@@ -223,7 +227,9 @@ void sftp_view_select_all(struct sftp_view *v) { (void)v; }
 void sftp_view_save_split(const struct sftp_view *v) { (void)v; }
 void sftp_view_sort_rows(struct sftp_view *v) { (void)v; }
 void sftp_view_toggle_tree_node(struct sftp_view *v, struct sftp_tree_node *n) { (void)v; (void)n; }
-void sftp_view_navigate(struct sftp_view *v, const char *p, int h, int f) { (void)v; (void)p; (void)h; (void)f; }
+void sftp_view_navigate(struct sftp_view *v, const char *p, int h, int f) { (void)v; (void)h; (void)f; if (p != NULL) (void)snprintf(g_navigated_path, sizeof(g_navigated_path), "%s", p); }
+void sftp_view_open_more_menu(struct sftp_view *v, int ux, int uy) { (void)v; (void)ux; (void)uy; g_more_opened++; }
+void sftp_view_download_selected(struct sftp_view *v) { (void)v; }
 void sftp_view_move_selected_to(struct sftp_view *v, const char *p) { (void)v; (void)p; }
 void sftp_view_execute_ctx(struct sftp_view *v, int id) { (void)v; (void)id; }
 void sftp_view_commit_rename(struct sftp_view *v) { (void)v; }
@@ -433,6 +439,79 @@ main(void)
 	g_captured_count = 0U;
 	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
 	CHECK(has_captured_substring("Saved to C:\\Users\\test\\Downloads\\alpha.txt"));
+
+	/* 5. Touch UX: single-tap file toggles selection, folder navigates, long-press opens menu. */
+	view.worker_state = SFTP_WORKER_READY;
+	view.row_count = 2U;
+	rows[0].entry.is_dir = 0;
+	(void)snprintf(rows[0].entry.name, sizeof(rows[0].entry.name), "file.txt");
+	rows[0].selected = 0;
+	rows[1].entry.is_dir = 1;
+	(void)snprintf(rows[1].entry.name, sizeof(rows[1].entry.name), "docs");
+	rows[1].selected = 0;
+	view.file_list.scroll.y = 0.0;
+	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
+	CHECK((g_download_btn_flags & KL_BUTTON_DISABLED) != 0U);
+
+	/* Single-tap file row 0: toggles selection on and enables Download button. */
+	memset(&pev, 0, sizeof(pev));
+	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	pev.code = 1U;
+	pev.x = view.rect_list.x + 20;
+	pev.y = view.rect_list.y + 8;
+	sftp_view_handle_input(&view, &pev);
+	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+	sftp_view_handle_input(&view, &pev);
+	CHECK(rows[0].selected == 1);
+	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
+	CHECK((g_download_btn_flags & KL_BUTTON_DISABLED) == 0U);
+
+	/* Second single-tap on file row 0: toggles selection off. */
+	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	sftp_view_handle_input(&view, &pev);
+	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+	sftp_view_handle_input(&view, &pev);
+	CHECK(rows[0].selected == 0);
+
+	/* Single-tap on folder row 1: navigates into folder. */
+	g_navigated_path[0] = '\0';
+	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	pev.x = view.rect_list.x + 20;
+	pev.y = view.rect_list.y + SFTP_ROW_HEIGHT + 8;
+	sftp_view_handle_input(&view, &pev);
+	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+	sftp_view_handle_input(&view, &pev);
+	CHECK(strcmp(g_navigated_path, "/home/user/docs") == 0);
+
+	/* Touch move past slop cancels long-press. */
+	view.ctx_open = 0;
+	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	pev.x = view.rect_list.x + 20;
+	pev.y = view.rect_list.y + 8;
+	sftp_view_handle_input(&view, &pev);
+	pev.kind = TERMINAL_PICTURE_TOUCH_MOVE;
+	pev.y = view.rect_list.y + 8 + SFTP_TOUCH_SLOP + 4;
+	sftp_view_handle_input(&view, &pev);
+	g_now_us += SFTP_TOUCH_LONG_PRESS_US + 10000ULL;
+	sftp_view_poll_touch(&view, g_now_us);
+	CHECK(view.ctx_open == 0);
+	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+	sftp_view_handle_input(&view, &pev);
+
+	/* Long-press within slop opens 7-item context menu. */
+	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	pev.x = view.rect_list.x + 20;
+	pev.y = view.rect_list.y + 8;
+	sftp_view_handle_input(&view, &pev);
+	g_now_us += SFTP_TOUCH_LONG_PRESS_US + 10000ULL;
+	sftp_view_poll_touch(&view, g_now_us);
+	CHECK(view.ctx_open == 1);
+	CHECK(view.ctx_count == 7U);
+	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+	sftp_view_handle_input(&view, &pev);
+	view.ctx_open = 0;
+	(void)g_upload_clicked;
+	(void)g_more_opened;
 
 	/* Releases resources. */
 	if (view.canvas_ready)
