@@ -81,6 +81,7 @@ static void tab_root_pan(struct x11_tab *tab, int32_t dx, int32_t dy);
 static void tab_root_pinch(struct x11_tab *tab, int32_t cx, int32_t cy, double ratio);
 static void tab_root_point(struct x11_tab *tab, int32_t sx, int32_t sy, int32_t *rx, int32_t *ry);
 static void tab_root_draw(struct x11_tab *tab, uint32_t *pixels, uint32_t width, uint32_t height);
+static uint32_t tab_lerp_rgb(uint32_t first, uint32_t second, uint32_t weight);
 
 /* What a tab of an X window draws, and how it takes the window's input. */
 static const struct terminal_picture_ops tab_picture_ops = {
@@ -1269,15 +1270,33 @@ tab_root_draw(
 	uint32_t height)
 {
 	double inv_scale;
+	double ry_cont;
 	int64_t step_fp;
-	int64_t row_x0_fp;
+	int64_t row_rx0_fp;
+	int64_t row_u0_fp;
+	int64_t max_u_fp;
+	int64_t max_v_fp;
+	int64_t u_fp;
+	int64_t u_clamped;
+	int64_t v_fp;
 	int32_t sx_start;
 	int32_t sx_end;
 	int32_t sx;
 	int32_t sy;
 	int32_t ry;
-	int64_t rx_fp;
+	int32_t ox;
+	int32_t oy;
+	uint32_t x0;
+	uint32_t x1;
+	uint32_t y0;
+	uint32_t y1;
+	uint32_t wx;
+	uint32_t wy;
+	uint32_t top;
+	uint32_t bot;
 	const uint32_t *src;
+	const uint32_t *src0;
+	const uint32_t *src1;
 	uint32_t *dst;
 
 	if (!tab->root_configured || tab->view_width != width || tab->view_height != height)
@@ -1285,33 +1304,117 @@ tab_root_draw(
 	if (!tab->root_configured || tab->root_scale <= 0.0 || tab->width == 0U || tab->height == 0U)
 		return;
 
+	/* Fast direct copy when 1:1 unscaled. */
+	if (tab->root_scale == 1.0) {
+		ox = (int32_t)floor(tab->root_offset_x + 0.5);
+		oy = (int32_t)floor(tab->root_offset_y + 0.5);
+		sx_start = -ox;
+		if (sx_start < 0)
+			sx_start = 0;
+		sx_end = (int32_t)tab->width - ox;
+		if (sx_end > (int32_t)width)
+			sx_end = (int32_t)width;
+		if (sx_start >= sx_end)
+			return;
+		/* Copies each visible row directly when 1:1 unscaled. */
+		for (sy = 0; sy < (int32_t)height; sy++) {
+			ry = oy + sy;
+			if (ry < 0 || ry >= (int32_t)tab->height)
+				continue;
+			src = tab->pixels + (size_t)ry * tab->width;
+			dst = pixels + (size_t)sy * width;
+			for (sx = sx_start; sx < sx_end; sx++)
+				dst[sx] = src[(size_t)(ox + sx)] | TAB_OPAQUE;
+		}
+
+		return;
+	}
+
+	/* Computes fixed-point horizontal step and visible screen column bounds. */
 	inv_scale = 1.0 / tab->root_scale;
 	step_fp = (int64_t)llround(inv_scale * 4294967296.0);
-	row_x0_fp = (int64_t)floor((tab->root_offset_x + 0.5 * inv_scale) * 4294967296.0);
+	row_rx0_fp = (int64_t)floor((tab->root_offset_x + 0.5 * inv_scale) * 4294967296.0);
 
+	/* Clamps the horizontal screen span to the source image width. */
 	sx_start = (int32_t)ceil((0.0 - tab->root_offset_x) * tab->root_scale - 0.5);
 	if (sx_start < 0)
 		sx_start = 0;
 	sx_end = (int32_t)floor(((double)tab->width - tab->root_offset_x) * tab->root_scale - 0.5) + 1;
 	if (sx_end > (int32_t)width)
 		sx_end = (int32_t)width;
-	while (sx_start < sx_end && ((row_x0_fp + (int64_t)sx_start * step_fp) >> 32) < 0)
+	while (sx_start < sx_end && ((row_rx0_fp + (int64_t)sx_start * step_fp) >> 32) < 0)
 		sx_start++;
-	while (sx_end > sx_start && ((row_x0_fp + (int64_t)(sx_end - 1) * step_fp) >> 32) >= (int64_t)tab->width)
+	while (sx_end > sx_start && ((row_rx0_fp + (int64_t)(sx_end - 1) * step_fp) >> 32) >= (int64_t)tab->width)
 		sx_end--;
 	if (sx_start >= sx_end)
 		return;
 
+	/* Shifts to pixel-center bilinear coordinates and sets clamp limits. */
+	row_u0_fp = row_rx0_fp - ((int64_t)1 << 31);
+	max_u_fp = (int64_t)(tab->width - 1U) << 32;
+	max_v_fp = (int64_t)(tab->height - 1U) << 32;
+
+	/* Samples each visible row with 2x2 bilinear filtering. */
 	for (sy = 0; sy < (int32_t)height; sy++) {
-		ry = (int32_t)floor(tab->root_offset_y + ((double)sy + 0.5) * inv_scale);
+		ry_cont = tab->root_offset_y + ((double)sy + 0.5) * inv_scale;
+		ry = (int32_t)floor(ry_cont);
 		if (ry < 0 || ry >= (int32_t)tab->height)
 			continue;
-		src = tab->pixels + (size_t)ry * tab->width;
+
+		/* Clamps vertical sample coordinate and computes row pair and weight. */
+		v_fp = (int64_t)floor((ry_cont - 0.5) * 4294967296.0);
+		if (v_fp < 0)
+			v_fp = 0;
+		else if (v_fp > max_v_fp)
+			v_fp = max_v_fp;
+		y0 = (uint32_t)(v_fp >> 32);
+		y1 = y0;
+		if (y0 + 1U < tab->height)
+			y1 = y0 + 1U;
+		wy = (uint32_t)((v_fp >> 24) & 0xFFU);
+
+		/* Prepares row pointers and starting horizontal coordinate. */
+		src0 = tab->pixels + (size_t)y0 * tab->width;
+		src1 = tab->pixels + (size_t)y1 * tab->width;
 		dst = pixels + (size_t)sy * width;
-		rx_fp = row_x0_fp + (int64_t)sx_start * step_fp;
+		u_fp = row_u0_fp + (int64_t)sx_start * step_fp;
+
+		/* Blends each pixel horizontally then vertically. */
 		for (sx = sx_start; sx < sx_end; sx++) {
-			dst[sx] = src[(size_t)(rx_fp >> 32)] | TAB_OPAQUE;
-			rx_fp += step_fp;
+			u_clamped = u_fp;
+			if (u_clamped < 0)
+				u_clamped = 0;
+			else if (u_clamped > max_u_fp)
+				u_clamped = max_u_fp;
+			x0 = (uint32_t)(u_clamped >> 32);
+			x1 = x0;
+			if (x0 + 1U < tab->width)
+				x1 = x0 + 1U;
+			wx = (uint32_t)((u_clamped >> 24) & 0xFFU);
+
+			/* Interpolates top row, bottom row, and final vertical blend. */
+			top = tab_lerp_rgb(src0[x0], src0[x1], wx);
+			bot = tab_lerp_rgb(src1[x0], src1[x1], wx);
+			dst[sx] = tab_lerp_rgb(top, bot, wy) | TAB_OPAQUE;
+			u_fp += step_fp;
 		}
 	}
+}
+
+/* Blends the RGB channels of two pixels with fixed-point weight in [0, 255] (0=first, 256=second). */
+static uint32_t
+tab_lerp_rgb(
+	uint32_t first,
+	uint32_t second,
+	uint32_t weight)
+{
+	uint32_t inv_weight;
+	uint32_t rb;
+	uint32_t g;
+
+	/* Blends red/blue together and green separately without channel overflow. */
+	inv_weight = 256U - weight;
+	rb = (((first & 0x00FF00FFU) * inv_weight + (second & 0x00FF00FFU) * weight) >> 8) & 0x00FF00FFU;
+	g = (((first & 0x0000FF00U) * inv_weight + (second & 0x0000FF00U) * weight) >> 8) & 0x0000FF00U;
+	return rb | g;
 }
