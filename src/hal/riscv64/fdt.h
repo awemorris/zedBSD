@@ -113,8 +113,14 @@ struct riscv64_fdt_info {
 	uint64_t ccache_base;
 	uint64_t ccache_size;
 
+	uint64_t trng_base;
+	uint64_t trng_size;
+
 	uint32_t bootargs_offset;
 	uint32_t bootargs_length;
+
+	uint32_t rng_seed_offset;
+	uint32_t rng_seed_length;
 
 	uint64_t initrd_start;
 	uint64_t initrd_end;

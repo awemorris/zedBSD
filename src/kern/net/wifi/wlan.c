@@ -24,6 +24,7 @@
 
 #include "kern/clock.h"
 #include "kern/lock.h"
+#include "kern/random.h"
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/wifi/wlan-fullmac.h"
@@ -3323,7 +3324,7 @@ station_sync_wpa_locked(
 	}
 }
 
-/* Fills a buffer with platform entropy for the WPA2 engine. */
+/* Fills a buffer with platform entropy or seeded kernel randomness. */
 static int
 station_wpa_entropy_fill(
 	void *context,
@@ -3331,11 +3332,9 @@ station_wpa_entropy_fill(
 	size_t length)
 {
 	(void)context;
-	if (hal_entropy_fill == NULL)
-		return EIO;
-	if (!hal_entropy_fill(buffer, length))
-		return EIO;
-	return 0;
+	if (hal_entropy_fill != NULL && hal_entropy_fill(buffer, length))
+		return 0;
+	return kern_random_read(buffer, length, KERN_RANDOM_WAIT);
 }
 
 /* Starts the radio on the selected BSS for the WPA2 engine. */

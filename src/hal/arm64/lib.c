@@ -7,7 +7,42 @@
 
 #include <hal/hal.h>
 #include "asm.h"
+#include "bsp.h"
+#include "defs.h"
 #include "watch.h"
+
+/*
+ * ARMv8.5-RNG system register encoding and ID_AA64ISAR0_EL1 field position.
+ *
+ * Values referenced: Arm Architecture Reference Manual for A-profile
+ * architecture (DDI 0487), ID_AA64ISAR0_EL1 (RNDR field at bits 60-63)
+ * and RNDR (S3_3_C2_C4_0, NZCV.Z clear on success).
+ */
+#define ARM64_ISAR0_RNDR_SHIFT		60U
+#define ARM64_RNDR_RETRIES		10U
+
+/*
+ * Broadcom RNG200 register offsets and control/status bits.
+ *
+ * Values referenced: Linux v6.12 drivers/char/hw_random/iproc-rng200.c
+ * (register offsets 0x00, 0x04, 0x08, 0x18, 0x20, 0x24 and bit masks).
+ */
+#define RNG200_CTRL_OFFSET		0x00U
+#define RNG200_CTRL_RBGEN_MASK		0x00001fffU
+#define RNG200_CTRL_RBGEN_ENABLE	0x00000001U
+#define RNG200_SOFT_RESET_OFFSET	0x04U
+#define RNG200_SOFT_RESET_BIT		0x00000001U
+#define RNG200_RBG_SOFT_RESET_OFFSET	0x08U
+#define RNG200_RBG_SOFT_RESET_BIT	0x00000001U
+#define RNG200_INT_STATUS_OFFSET	0x18U
+#define RNG200_INT_MASTER_FAIL		0x80000000U
+#define RNG200_INT_NIST_FAIL		0x00000020U
+#define RNG200_FIFO_DATA_OFFSET		0x20U
+#define RNG200_FIFO_COUNT_OFFSET	0x24U
+#define RNG200_FIFO_COUNT_MASK		0x000000ffU
+#define RNG200_POLL_LIMIT		100000U
+
+static int fdt_seed_consumed;
 
 static void *(*alloc_fn)(size_t);
 static void (*free_fn)(void *);
@@ -261,12 +296,219 @@ hal_fatal(
 		arm64_wfe();
 }
 
+/*
+ * Fills a buffer using the ARMv8.5 RNDR instruction when implemented.
+ *
+ * Procedure referenced: Arm Architecture Reference Manual for A-profile
+ * architecture (DDI 0487), ID_AA64ISAR0_EL1.RNDR feature check and RNDR
+ * NZCV.Z retry loop.
+ */
+static bool
+fill_from_rndr(
+	uint8_t *bytes,
+	size_t size)
+{
+	uint64_t isar0;
+	uint64_t value;
+	uint32_t ready;
+	unsigned attempt;
+	size_t chunk;
+
+	/* Checks ID_AA64ISAR0_EL1.RNDR (bits 60-63) for hardware support. */
+	__asm__ volatile("mrs %0, id_aa64isar0_el1" : "=r"(isar0));
+	if (((isar0 >> ARM64_ISAR0_RNDR_SHIFT) & 0xfU) == 0U)
+		return false;
+
+	/* Reads 64-bit words from RNDR (S3_3_C2_C4_0) with bounded retries. */
+	while (size != 0U) {
+		value = 0;
+		ready = 0;
+		for (attempt = 0; attempt < ARM64_RNDR_RETRIES && ready == 0U; attempt++) {
+			__asm__ volatile(
+			    "mrs %0, S3_3_C2_C4_0\n\t"
+			    "cset %w1, ne"
+			    : "=r"(value), "=r"(ready)
+			    :
+			    : "cc");
+		}
+		if (ready == 0U)
+			return false;
+
+		chunk = size < sizeof(value) ? size : sizeof(value);
+		hal_memcpy(bytes, &value, chunk);
+		bytes += chunk;
+		size -= chunk;
+	}
+
+	/* Succeeded. */
+	return true;
+}
+
+/*
+ * Restarts the Broadcom RNG200 block after a health or NIST failure.
+ *
+ * Procedure referenced: Linux v6.12 drivers/char/hw_random/iproc-rng200.c
+ * (iproc_rng200_enable_set and iproc_rng200_restart).
+ */
+static void
+rng200_restart(
+	volatile uint8_t *base)
+{
+	uint32_t value;
+
+	/* Disables the generator and clears all pending status bits. */
+	value = hal_mmio_read32(base + RNG200_CTRL_OFFSET);
+	value &= ~RNG200_CTRL_RBGEN_MASK;
+	hal_mmio_write32(base + RNG200_CTRL_OFFSET, value);
+	hal_mmio_write32(base + RNG200_INT_STATUS_OFFSET, 0xffffffffU);
+
+	/* Pulses both RBG and RNG soft resets, then re-enables RBGEN. */
+	value = hal_mmio_read32(base + RNG200_RBG_SOFT_RESET_OFFSET);
+	hal_mmio_write32(base + RNG200_RBG_SOFT_RESET_OFFSET, value | RNG200_RBG_SOFT_RESET_BIT);
+	value = hal_mmio_read32(base + RNG200_SOFT_RESET_OFFSET);
+	hal_mmio_write32(base + RNG200_SOFT_RESET_OFFSET, value | RNG200_SOFT_RESET_BIT);
+
+	value = hal_mmio_read32(base + RNG200_SOFT_RESET_OFFSET);
+	hal_mmio_write32(base + RNG200_SOFT_RESET_OFFSET, value & ~RNG200_SOFT_RESET_BIT);
+	value = hal_mmio_read32(base + RNG200_RBG_SOFT_RESET_OFFSET);
+	hal_mmio_write32(base + RNG200_RBG_SOFT_RESET_OFFSET, value & ~RNG200_RBG_SOFT_RESET_BIT);
+
+	value = hal_mmio_read32(base + RNG200_CTRL_OFFSET);
+	value &= ~RNG200_CTRL_RBGEN_MASK;
+	value |= RNG200_CTRL_RBGEN_ENABLE;
+	hal_mmio_write32(base + RNG200_CTRL_OFFSET, value);
+}
+
+/*
+ * Fills a buffer from the Broadcom RNG200 peripheral when mapped.
+ *
+ * Procedure referenced: Linux v6.12 drivers/char/hw_random/iproc-rng200.c
+ * (iproc_rng200_init and iproc_rng200_read).
+ */
+static bool
+fill_from_rng200(
+	uint8_t *bytes,
+	size_t size)
+{
+	const struct arm64_fdt_info *info;
+	volatile uint8_t *base;
+	uint64_t irq_state;
+	uint32_t ctrl;
+	uint32_t status;
+	uint32_t word;
+	unsigned resets;
+	unsigned polls;
+	size_t chunk;
+
+	info = arm64_boot_info();
+	if (info == NULL || info->rng_base == 0ULL)
+		return false;
+
+	base = (volatile uint8_t *)(ARM64_DIRECT_BASE + info->rng_base);
+	irq_state = arm64_irq_save();
+
+	/* Ensures the random bit generator is enabled. */
+	ctrl = hal_mmio_read32(base + RNG200_CTRL_OFFSET);
+	if ((ctrl & RNG200_CTRL_RBGEN_MASK) == 0U) {
+		ctrl |= RNG200_CTRL_RBGEN_ENABLE;
+		hal_mmio_write32(base + RNG200_CTRL_OFFSET, ctrl);
+	}
+
+	resets = 0U;
+	polls = 0U;
+	while (size != 0U) {
+		status = hal_mmio_read32(base + RNG200_INT_STATUS_OFFSET);
+		if ((status & (RNG200_INT_MASTER_FAIL | RNG200_INT_NIST_FAIL)) != 0U) {
+			if (resets >= 1U) {
+				arm64_irq_restore(irq_state);
+				return false;
+			}
+			rng200_restart(base);
+			resets++;
+			continue;
+		}
+
+		if ((hal_mmio_read32(base + RNG200_FIFO_COUNT_OFFSET) & RNG200_FIFO_COUNT_MASK) == 0U) {
+			polls++;
+			if (polls >= RNG200_POLL_LIMIT) {
+				arm64_irq_restore(irq_state);
+				return false;
+			}
+			continue;
+		}
+
+		word = hal_mmio_read32(base + RNG200_FIFO_DATA_OFFSET);
+		chunk = size < sizeof(word) ? size : sizeof(word);
+		hal_memcpy(bytes, &word, chunk);
+		bytes += chunk;
+		size -= chunk;
+		polls = 0U;
+	}
+
+	arm64_irq_restore(irq_state);
+
+	/* Succeeded. */
+	return true;
+}
+
+/*
+ * Consumes a one-time boot seed from /chosen/rng-seed when large enough.
+ */
+static bool
+fill_from_fdt_seed(
+	uint8_t *bytes,
+	size_t size)
+{
+	const struct arm64_fdt_info *info;
+	uintptr_t fdt_phys;
+	const uint8_t *seed;
+	uint64_t irq_state;
+
+	info = arm64_boot_info();
+	fdt_phys = arm64_boot_fdt_phys();
+	if (info == NULL || fdt_phys == 0U)
+		return false;
+	if (info->rng_seed_offset == 0U || info->rng_seed_length < size)
+		return false;
+
+	irq_state = arm64_irq_save();
+	if (fdt_seed_consumed != 0) {
+		arm64_irq_restore(irq_state);
+		return false;
+	}
+	fdt_seed_consumed = 1;
+	arm64_irq_restore(irq_state);
+
+	seed = (const uint8_t *)(ARM64_DIRECT_BASE + fdt_phys + info->rng_seed_offset);
+	hal_memcpy(bytes, seed, size);
+
+	/* Succeeded. */
+	return true;
+}
+
+/*
+ * Fills a buffer from an architectural, board, or boot entropy source.
+ */
 bool
 hal_entropy_fill(
 	void *buffer,
 	size_t size)
 {
-	(void)buffer;
-	(void)size;
+	uint8_t *bytes;
+
+	if (size == 0U)
+		return true;
+	if (buffer == NULL)
+		return false;
+
+	bytes = buffer;
+	if (fill_from_rndr(bytes, size))
+		return true;
+	if (fill_from_rng200(bytes, size))
+		return true;
+	if (fill_from_fdt_seed(bytes, size))
+		return true;
+
+	/* No entropy source is available on this platform. */
 	return false;
 }

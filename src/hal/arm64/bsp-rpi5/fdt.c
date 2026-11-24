@@ -64,6 +64,7 @@ struct fdt_node {
 	uint8_t is_mailbox;
 	uint8_t is_gic;
 	uint8_t is_sdhci;
+	uint8_t is_rng;
 	uint8_t is_chosen;
 	uint8_t is_cpu;
 	uint8_t spin_table;
@@ -632,6 +633,8 @@ commit_device(
 		wanted = 1;
 	} else if (node->is_sdhci) {
 		wanted = 1;
+	} else if (node->is_rng) {
+		wanted = 1;
 	}
 	if (!wanted)
 		return FDT_OK;
@@ -673,6 +676,10 @@ commit_device(
 		info->sdhci_base = base;
 		info->sdhci_irq = decode_irq(node->interrupts, node->interrupt_count);
 	}
+
+	/* The first hardware random-number generator. */
+	if (node->is_rng && info->rng_base == 0)
+		info->rng_base = base;
 
 	/* The first GIC: the distributor, then the CPU interface from the second range. */
 	if (node->is_gic && info->gic_dist_base == 0) {
@@ -908,11 +915,15 @@ read_property(
 		return error;
 	node = &parse->stack[parse->depth];
 
-	/* Notes where the firmware's command line is. */
+	/* Notes where the firmware's command line or boot entropy seed is. */
 	bootargs = string_equal(name, name_length, "bootargs");
 	if (node->is_chosen && bootargs) {
 		parse->info->bootargs_offset = (uint32_t)(value - parse->data);
 		parse->info->bootargs_length = length;
+	}
+	if (node->is_chosen && string_equal(name, name_length, "rng-seed")) {
+		parse->info->rng_seed_offset = (uint32_t)(value - parse->data);
+		parse->info->rng_seed_length = length;
 	}
 
 	/* Records what the node's other properties say about it. */
@@ -1015,6 +1026,8 @@ record_property(
 		node->is_mailbox |= compatible_has(value, length, "brcm,bcm2835-mbox");
 		node->is_gic |= compatible_has(value, length, "arm,gic-400");
 		node->is_sdhci |= compatible_has(value, length, "brcm,sdhci-brcmstb");
+		node->is_rng |= compatible_has(value, length, "brcm,bcm2711-rng200");
+		node->is_rng |= compatible_has(value, length, "brcm,iproc-rng200");
 	}
 }
 
