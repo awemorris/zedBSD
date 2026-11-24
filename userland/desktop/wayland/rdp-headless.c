@@ -45,6 +45,7 @@ struct kwl_rdp {
 	unsigned force_key;
 	unsigned refine_key;
 	unsigned need_refine;
+	unsigned pending_frame;
 	uint64_t last_send_ms;
 	int closed;
 	uint8_t ctrl_buf[KWL_RDP_CTRL_HDR_SIZE];
@@ -464,9 +465,11 @@ kwl_rdp_encode_and_send(
 		pfd.revents = 0;
 		if (poll(&pfd, 1, 0) == 0) {
 			rdp->force_key = 1U;
+			__atomic_store_n(&rdp->pending_frame, 1U, __ATOMIC_RELEASE);
 			return 0;
 		}
 	}
+	__atomic_store_n(&rdp->pending_frame, 0U, __ATOMIC_RELEASE);
 	vkResetFences(rdp->device, 1U, &rdp->copy_fence);
 	vkResetCommandBuffer(rdp->cmd_buf, 0U);
 	memset(&begin, 0, sizeof(begin));
@@ -595,6 +598,16 @@ kwl_rdp_poll(
 				rdp->force_key = 1U;
 		}
 	}
+	if (__atomic_load_n(&rdp->pending_frame, __ATOMIC_ACQUIRE) != 0U) {
+		struct pollfd pfd;
+		pfd.fd = rdp->fd;
+		pfd.events = POLLOUT;
+		pfd.revents = 0;
+		if (poll(&pfd, 1, 0) > 0) {
+			__atomic_store_n(&rdp->pending_frame, 0U, __ATOMIC_RELEASE);
+			server->dirty = 1U;
+		}
+	}
 	if (__atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE) != 0U) {
 		uint64_t now_ms;
 		uint64_t last_ms;
@@ -620,7 +633,11 @@ kwl_rdp_idle_timeout(
 	if (server == NULL || !server->headless || server->rdp == NULL)
 		return -1;
 	rdp = server->rdp;
-	if (rdp->closed || __atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE) == 0U)
+	if (rdp->closed)
+		return -1;
+	if (__atomic_load_n(&rdp->pending_frame, __ATOMIC_ACQUIRE) != 0U)
+		return 10;
+	if (__atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE) == 0U)
 		return -1;
 	now_ms = kwl_milliseconds();
 	last_ms = __atomic_load_n(&rdp->last_send_ms, __ATOMIC_ACQUIRE);
