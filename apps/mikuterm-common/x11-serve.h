@@ -35,7 +35,7 @@
 #include <stdint.h>
 
 /* The fonts of the core fonts, inside mikuterm's folder. */
-#define X11_SERVE_FONTS		3U
+#define X11_SERVE_FONTS		4U
 
 /* How the process ends (serve->ending): not yet, as the parent asked or the link ended, or for a parent that broke the rules. */
 #define X11_SERVE_RUNNING	0

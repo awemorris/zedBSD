@@ -39,8 +39,8 @@
 
 /*
  * The font files the core fonts are drawn from, by their roles: the
- * monospaced face, and the proportional face and its bold (the
- * monospaced bold is the core's own, made bold).
+ * monospaced face, the proportional face and its bold (the monospaced
+ * bold is the core's own, made bold), and the fixed bitmap-style face.
  */
 static const struct {
 	const char *path;
@@ -48,7 +48,8 @@ static const struct {
 } serve_fonts[X11_SERVE_FONTS] = {
 	{ "share/fonts/keiland-mono.ttf", X11SERVER_FONT_MONO },
 	{ "share/fonts/keiland.ttf", X11SERVER_FONT_SANS },
-	{ "share/fonts/keiland-bold.ttf", X11SERVER_FONT_SANS_BOLD }
+	{ "share/fonts/keiland-bold.ttf", X11SERVER_FONT_SANS_BOLD },
+	{ "share/fonts/unifont.ttf", X11SERVER_FONT_FIXED }
 };
 
 static int serve_receive(struct x11_serve *serve);
